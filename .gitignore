@@ -1,0 +1,9 @@
+/build/
+/build-*/
+/.toolchain/
+/out/
+*.spv
+/.vs/
+/.vscode/
+screenshots/
+build.log
