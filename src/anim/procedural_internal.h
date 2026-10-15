@@ -8,6 +8,9 @@ DG_INLINE quat euler_deg(vec3 e) { return quat_euler(e.y * DG_DEG2RAD, e.x * DG_
 
 // Rotates bone b in model space about its own pivot by q (premultiplied), updating children.
 void proc_rotate_bone(const Skeleton *s, Pose *p, Xform *model, int b, quat q);
+// Pitch weight of spine bone i (0 spine .. 4 head) for a pitch: looking up uses weights_up (neck
+// and head) blended towards the full-body weights by the ADS lean (arms reach the raised gun).
+float proc_spine_pitch_weight(const ProcParams *p, int i, float pitch, float ads_lean);
 // Shoulder reach: rotate the clavicle so the arm root gets within reach of target (<= max_deg).
 float proc_clavicle_reach(const Skeleton *s, Pose *p, Xform *model, int clav, int arm, vec3 target, float reach, float margin, float max_deg);
 

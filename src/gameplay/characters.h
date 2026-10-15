@@ -145,6 +145,8 @@ int chars_skin_count(void);
 const char *chars_skin_id(int i);
 const char *chars_skin_name(int i);
 float chars_fp_hold_weight(void);
+vec3 chars_fp_sight_cam(void);    // rendered sight socket in camera space (ADS: (0, 0, -eye_relief))
+float chars_fp_reach_pull(void);  // first-person reach pull this frame (m)
 bool chars_fp_item_cam(Xform *item_off, int *state, float *blend);   // rendered item relative to its hold point (false: no hold)                 // 1 = the first-person hold IK owns both hands this frame   // this frame's first-person pose (tests)
 bool chars_fp_camera(World *w, float alpha, int local_slot, float yaw, float pitch, Xform *socket_world);
 // Events (reliable, compact): host queues + applies, clients apply what arrives.

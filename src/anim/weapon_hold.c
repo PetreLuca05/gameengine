@@ -187,7 +187,7 @@ void proc_hold(ProcState *st, const ProcInput *in, Pose *pose, Xform *model) {
         float margin = 0.004f;
         // The shoulder reaches first (clavicle protraction, up to 45 deg): the item stays on its
         // hold point; only what the shoulder can't cover moves the item.
-        proc_clavicle_reach(s, pose, model, lsh, la, hand_l.t, reach, margin * 1.5f, 45.0f * w);
+        proc_clavicle_reach(s, pose, model, lsh, la, hand_l.t, reach, margin * 1.5f, 75.0f * w);
         float need = v3_dist(model[la].t, hand_l.t);
         if (need > reach - margin * 0.5f && iter < 15 && shift >= max_shift - 1e-5f) {
             // The barrel-axis pull is exhausted: move the hold point towards the shoulder by the

@@ -93,7 +93,7 @@ static void fp_cam_test_frame(vec3 cam_pos, vec3 fwd) {
     vec3 fh = v3_norm(v3(fwd.x, 0, fwd.z));
     float dhead = v3_dot(fh, v3_sub(cam_pos, head.t));
     float dpel = v3_dot(fh, v3_sub(cam_pos, pelvis.t));
-    float df = fwd.y > 0.35f ? dhead : fminf(dhead, dpel);
+    float df = fwd.y > 0.0f ? dhead : fminf(dhead, dpel);   // the pelvis rule applies looking level or down
     FT.max_head = fmaxf(FT.max_head, dh);
     FT.min_front = fminf(FT.min_front, df);
     if (dh > 0.15f) FT.bad_head++;
@@ -114,6 +114,32 @@ static void cmd_fp_pose(int argc, const char **argv) {
     vec3 f = dir_from_angles(G->view.yaw, 0);
     vec3 d = v3_sub(head.t, pelvis.t);
     log_info("fp_pose: pitch %.0f head-pelvis fwd %.0f mm up %.0f mm", G->view.pitch * DG_RAD2DEG, v3_dot(d, f) * 1000, d.y * 1000);
+}
+
+// ads_sweep start | report: while ADS, the sight socket's camera-space position per frame
+// (distance along the view axis and angle off it) against the pitch.
+static struct { bool on; int n; float min_d, max_d, max_ang, d_at_min, d_at_max, p_at_min, p_at_max; } AS;
+static void cmd_ads_sweep(int argc, const char **argv) {
+    if (argc > 1 && !strcmp(argv[1], "start")) { memset(&AS, 0, sizeof(AS)); AS.on = true; AS.min_d = 1e9f; return; }
+    AS.on = false;
+    log_info("ads_sweep: %d ADS frames | sight distance %.1f .. %.1f mm (spread %.2f mm; min at pitch %.0f, max at pitch %.0f) | off axis max %.3f deg -> %s",
+             AS.n, AS.min_d * 1000, AS.max_d * 1000, (AS.max_d - AS.min_d) * 1000, AS.p_at_min, AS.p_at_max, AS.max_ang,
+             AS.n > 0 && AS.max_d - AS.min_d < 0.001f && AS.max_ang < 0.1f ? "PASS" : "FAIL");
+}
+static void ads_sweep_frame(void) {
+    if (!AS.on) return;
+    Xform ic;
+    int st;
+    float bl;
+    if (!chars_fp_item_cam(&ic, &st, &bl) || st != HP_ADS || bl < 0.999f) return;
+    vec3 s = chars_fp_sight_cam();
+    float d = -s.z, ang = atan2f(sqrtf(s.x * s.x + s.y * s.y), fmaxf(-s.z, 1e-4f)) * DG_RAD2DEG;
+    float pitch = G->view.pitch * DG_RAD2DEG;
+    AS.n++;
+    if (d < AS.min_d) { AS.min_d = d; AS.p_at_min = pitch; }
+    if (d > AS.max_d) { AS.max_d = d; AS.p_at_max = pitch; }
+    AS.max_ang = fmaxf(AS.max_ang, ang);
+    if ((AS.n % 10) == 0 || d < 0.2395f) log_info("ads_sweep: pitch %5.1f sight distance %.1f mm off axis %.3f deg reach pull %.1f mm", pitch, d * 1000, ang, chars_fp_reach_pull() * 1000);
 }
 
 static void fp_cam_test_hands(void) {
@@ -172,6 +198,7 @@ static void fp_cam_test_hands(void) {
     }
 }
 void game_render_init(void) {
+    cmd_register("ads_sweep", cmd_ads_sweep, "ads_sweep start | report: sight socket distance / angle against the view axis while ADS");
     cmd_register("fp_pose", cmd_fp_pose, "print the first-person head position relative to the pelvis");
     cmd_register("fp_cam_test", cmd_fp_cam_test, "fp_cam_test start | report: first-person camera / body / hands invariants");
     GR = ARENA_PUSH(&g_engine.perm_arena, GameRender);
@@ -676,6 +703,7 @@ void game_render(void) {
         if (!cvar_find("cl_thirdperson")->i) {
             chars_render_local_fp(w, G->alpha, G->local_slot);
             fp_cam_test_hands();
+            ads_sweep_frame();
         }
         if (!cvar_find("cl_thirdperson")->i) hands_render();
     }

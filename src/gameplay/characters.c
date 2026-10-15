@@ -66,6 +66,8 @@ typedef struct CharGlobals {
     float fp_hp_blend;
     float fp_hold_w;                 // hand IK weight of this frame's first-person hold (1 = the hold owns the hands)
     float fp_ads_pos, fp_ads_ang;
+    vec3 fp_sight_cam;               // the rendered item's sight socket in camera space (ADS checks)
+    float fp_reach_pull;             // this frame's first-person reach pull (m)
     Xform fp_cam;
     bool fp_cam_valid;
 } CharGlobals;
@@ -1375,8 +1377,7 @@ vec3 chars_eye_offset(float yaw, float pitch) {
     vec3 eye0 = v3_add(s->bind_model[head].t, v3(0, 0.08f, -0.09f));
     vec3 pivots[5];
     for (int i = 0; i < 5; i++) pivots[i] = bones[i] >= 0 ? s->bind_model[bones[i]].t : eye0;
-    float lim = p->pitch_limit * DG_DEG2RAD;
-    float pt = clampf(pitch, -lim, lim);
+    float pt = clampf(pitch, -p->pitch_limit * DG_DEG2RAD, p->pitch_limit_up * DG_DEG2RAD);
     vec3 eye = eye0;
     for (int i = 0; i < 5; i++) {
         if (bones[i] < 0) continue;
@@ -1421,8 +1422,8 @@ static void fp_prepare(World *w, CharacterInst *c, float alpha, float yaw, float
     // socket on it - follows the mouse without a tick of lag.
     if (s->role[BR_SPINE2] >= 0) FP.spine2_before = FP.world[s->role[BR_SPINE2]];
     if (cv(CG->spine)) {
-        float lim_p = pp->pitch_limit * DG_DEG2RAD, lim_y = pp->yaw_limit * DG_DEG2RAD;
-        float posed_pitch = clampf(lerpf(c->fp_pitch[0], c->fp_pitch[1], it), -lim_p, lim_p);
+        float lim_p = pp->pitch_limit * DG_DEG2RAD, lim_u = pp->pitch_limit_up * DG_DEG2RAD, lim_y = pp->yaw_limit * DG_DEG2RAD;
+        float posed_pitch = clampf(lerpf(c->fp_pitch[0], c->fp_pitch[1], it), -lim_p, lim_u);
         float posed_aim = lerp_angle_fp(c->fp_yaw[0], c->fp_yaw[1], it);
         float posed_rel = clampf(wrap_angle(posed_aim - body_yaw), -lim_y, lim_y);
         float want_rel = clampf(wrap_angle(yaw - body_yaw), -lim_y, lim_y);
@@ -1436,8 +1437,9 @@ static void fp_prepare(World *w, CharacterInst *c, float alpha, float yaw, float
             vec3 lateral = quat_rotate(quat_yaw(acc), v3(1, 0, 0));
             // Pitch: the difference of the up / down distributions between the tick's pose and
             // this frame's view (same split as proc_spine).
-            float want_p = clampf(pitch, -lim_p, lim_p);
-            float pw = want_p * (want_p > 0 ? pp->spine_weights_up[i] : wgt) - posed_pitch * (posed_pitch > 0 ? pp->spine_weights_up[i] : wgt);
+            float want_p = clampf(pitch, -lim_p, lim_u);
+            float al = c->rt.proc.ads_lean;
+            float pw = want_p * proc_spine_pitch_weight(pp, i, want_p, al) - posed_pitch * proc_spine_pitch_weight(pp, i, posed_pitch, al);
             proc_rotate_bone(s, &FP.pose, FP.model, bones[i], quat_mul(quat_axis_angle(lateral, pw), quat_yaw(dy * wgt)));
         }
     }
@@ -1576,7 +1578,7 @@ void chars_render_local_fp(World *w, float alpha, int local_slot) {
             float reach = v3_dist(model[la].t, model[lf].t) + v3_dist(model[lf].t, model[lh].t);
             float pulled = 0;
             // Shoulder first (clavicle), then the hold point.
-            proc_clavicle_reach(s, posep, model, s->role[BR_L_SHOULDER], la, proc_hand_for_socket(xf_mul(want, k->grip_l), LIB->hands.palm[0]).t, reach, 0.004f, 45.0f);
+            proc_clavicle_reach(s, posep, model, s->role[BR_L_SHOULDER], la, proc_hand_for_socket(xf_mul(want, k->grip_l), LIB->hands.palm[0]).t, reach, 0.004f, 75.0f);
             for (int iter = 0; iter < 6; iter++) {
                 Xform hand_l = proc_hand_for_socket(xf_mul(want, k->grip_l), LIB->hands.palm[0]);
                 float need = v3_dist(model[la].t, hand_l.t);
@@ -1591,6 +1593,7 @@ void chars_render_local_fp(World *w, float alpha, int local_slot) {
                 want.t = v3_madd(want.t, dir, d);
                 pulled += d;
             }
+            CG->fp_reach_pull = pulled;
             static u32 warned_item;
             u32 key = (u32)(uintptr_t)k;
             if (pulled > 0.03f && warned_item != key) {
@@ -1626,6 +1629,7 @@ void chars_render_local_fp(World *w, float alpha, int local_slot) {
         // ADS check: the sight on the view axis (lateral error + barrel angle to the view).
         vec3 sight_c = xf_point(xf_mul(xf_inverse(cam_m), item), k->sight);
         CG->fp_ads_pos = sqrtf(sight_c.x * sight_c.x + sight_c.y * sight_c.y);
+        CG->fp_sight_cam = sight_c;
         CG->fp_ads_ang = quat_angle_between(xf_mul(xf_inverse(cam_m), item).r, quat_identity()) * DG_RAD2DEG;
         CG->fp_item_cam = xf_mul(xf_inverse(cam_m), item);
         CG->fp_item_target = c->rt.proc.hp_out.item;   // the hold point's item (before any reach pull)
@@ -1723,6 +1727,9 @@ bool chars_fp_item_cam(Xform *item_cam, int *state, float *blend) {
     *blend = CG->fp_hp_blend;
     return true;
 }
+
+vec3 chars_fp_sight_cam(void) { ensure_globals(); return CG->fp_sight_cam; }
+float chars_fp_reach_pull(void) { ensure_globals(); return CG->fp_reach_pull; }
 
 void chars_fp_diag(float *glue_pos, float *glue_ang, float *ads_pos, float *ads_ang) {
     ensure_globals();

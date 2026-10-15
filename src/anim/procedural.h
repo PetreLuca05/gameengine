@@ -67,9 +67,11 @@ typedef struct DamagePreset {
 typedef struct ProcParams {
     // spine / look
     float spine_weights[5];    // spine, spine1, spine2, neck, head (sum ~1)
+    float spine_weights_ads_up[5]; // looking up in ADS: mostly the lower spine, the upper body rotates with the gun
     float spine_weights_up[5]; // pitch weights when looking up: mostly neck / head, so the torso
                                // doesn't lean back (the head stays over the body)
-    float yaw_limit, pitch_limit;  // degrees
+    float yaw_limit, pitch_limit;  // degrees (pitch_limit: looking down)
+    float pitch_limit_up;          // degrees, looking up (ADS: the body follows the raised gun)
     // turn in place
     float turn_threshold;      // degrees of aim vs body before the body turns (sim)
     float turn_speed;          // body turn rate (deg/s, sim)
@@ -125,6 +127,7 @@ typedef struct ProcState {
     FootState foot[2];
     vec3 prev_vel;
     vec3 lean;                 // smoothed lean angles
+    float ads_lean;            // 0..1: looking up in ADS leans the upper body back with the gun (smoothed ads_t)
     // hold style blend
     int style, prev_style;
     float style_t;             // 0..1 blend from prev to style
