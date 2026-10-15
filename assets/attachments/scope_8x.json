@@ -33,7 +33,7 @@
     "fresnel": 0.03,
     "chromatic": 2.2
   },
-  "ads_dof_near_blur": 5.0,
+  "ads_dof_near_blur": 2.5,
   "modifiers": {
     "ads_time": 1.4,
     "sway_scale": 1.0

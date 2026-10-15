@@ -25,7 +25,7 @@
     "dust": 0.3,
     "fresnel": 0.05
   },
-  "ads_dof_near_blur": 2.0,
+  "ads_dof_near_blur": 1.2,
   "modifiers": {
     "ads_time": 1.0,
     "sway_scale": 1.0

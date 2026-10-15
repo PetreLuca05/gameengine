@@ -30,7 +30,7 @@ void weapons_register_cvars(void) {
     WC.visual_scale = cvar_reg_float("wpn_visual_scale", 1.0f, 0.0f, 3.0f, CVAR_ARCHIVE, "camera + viewmodel kick multiplier (cosmetic)");
     WC.sway_scale = cvar_reg_float("wpn_sway_scale", 1.0f, 0.0f, 3.0f, CVAR_SERVER, "weapon sway: aim sway (moves the view + bullets), the item's look lag / idle sway / breathing / sprint bob");
     WC.kick_scale = cvar_reg_float("wpn_kick_scale", 1.0f, 0.0f, 3.0f, CVAR_ARCHIVE, "visual recoil kick of the held item on its hold point (aim recoil is separate)");
-    WC.ads_sway = cvar_reg_float("wpn_ads_sway", 2.5f, 0.0f, 6.0f, CVAR_SERVER, "aim sway of the sight while aimed (x the weapon's idle sway; bullets follow the sight)");
+    WC.ads_sway = cvar_reg_float("wpn_ads_sway", 0.8f, 0.0f, 6.0f, CVAR_SERVER, "aim sway of the sight while aimed (x the weapon's idle sway; bullets follow the sight)");
     WC.ads_bob = cvar_reg_float("wpn_ads_bob", 1.0f, 0.0f, 3.0f, CVAR_SERVER, "sight bob while walking aimed (bullets follow the sight)");
     WC.bob_scale = cvar_reg_float("wpn_bob_scale", 0.0f, 0.0f, 3.0f, CVAR_ARCHIVE, "item bob while walking (0 = the item stays still; sprinting always bobs)");
     WC.recoil_debug = cvar_reg_int("wpn_recoil_debug", 0, 0, 2, 0, "recoil overlay: 1 = panel + cone, 2 = also log every shot");
@@ -116,8 +116,8 @@ vec2 weapon_aim_offset_deg(const WeaponDef *d, const WeaponState *ws, const Play
         float speed = sqrtf(m->vel.x * m->vel.x + m->vel.z * m->vel.z);
         float k = saturate(speed / 4.5f) * saturate(ws->ads_t) * cv_f(WC.ads_bob, 1.0f) * (m->on_ground ? 1.0f : 0.3f);
         float ph = t * (5.0f + fminf(speed, 6.0f) * 1.15f);
-        o.x += cosf(ph) * 0.32f * k;
-        o.y += (fabsf(sinf(ph)) - 0.5f) * 0.42f * k;
+        o.x += cosf(ph) * 0.14f * k;
+        o.y += (fabsf(sinf(ph)) - 0.5f) * 0.2f * k;
     }
     return o;
 }

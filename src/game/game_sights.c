@@ -522,10 +522,10 @@ void sights_register(void) {
     S.sight_debug = cvar_reg_int("sight_debug", 0, 0, 6, 0, "sight shader views: 1 lens mask, 2 PiP raw, 3 eye box, 4 reticle only, 5 glass only");
     S.sens_mode = cvar_reg_string("ads_sens_mode", "monitor_distance", CVAR_ARCHIVE, "ADS sensitivity scaling: monitor_distance | fov_ratio | off");
     S.sens_coef = cvar_reg_float("ads_sens_coef", 1.0f, 0.0f, 3.0f, CVAR_ARCHIVE, "ADS sensitivity coefficient (monitor distance: fraction of the half screen height; fov_ratio: multiplier)");
-    S.ads_dof = cvar_reg_bool("ads_dof", true, CVAR_ARCHIVE, "ADS depth of field once fully aimed (far focus, near-field weapon blur)");
+    S.ads_dof = cvar_reg_bool("ads_dof", true, CVAR_ARCHIVE, "ADS depth of field once fully aimed: the world stays sharp, the weapon gets a slight blur");
     S.dof_focus = cvar_reg_float("ads_dof_focus", 80.0f, 5.0f, 1000.0f, CVAR_ARCHIVE, "ADS depth of field: fixed focus distance (m)");
     S.dof_fstop = cvar_reg_float("ads_dof_fstop", 4.0f, 0.5f, 32.0f, CVAR_ARCHIVE, "ADS depth of field: f-stop");
-    S.iron_blur = cvar_reg_float("ads_dof_near_blur", 3.0f, 0.0f, 16.0f, CVAR_ARCHIVE, "ADS near-field (weapon) blur with iron sights, CoC pixels (optics: their own value)");
+    S.iron_blur = cvar_reg_float("ads_dof_near_blur", 1.5f, 0.0f, 16.0f, CVAR_ARCHIVE, "ADS near-field (weapon) blur with iron sights, CoC pixels (optics: their own value)");
     cmd_register("sight_test", cmd_sight_test, "sight_test align [weapon|all] [quit] | sweep | fov | parallax | aspect | net | dump: attachment / sight tests");
     cmd_register("sight_test_report", cmd_sight_test_report, "end sight_test fov and print the result");
 }
