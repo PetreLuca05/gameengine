@@ -661,6 +661,7 @@ static void cmd_inv(int argc, const char **argv) {
         InvSlot *s = &p->inv.slots[i];
         if (s->item) log_info("  slot %2d: %-14s x%d ammo %d", i, item_def(&G->items, s->item)->id, s->count, s->ammo);
     }
+    log_info("  equipped mag (predicted) %d", p->sim.wpn.mag);
     Health *h = &G->world->health[ENT_INDEX(p->ent)];
     log_info("  hp %.0f armor %.0f, hotbar %d, focus %u", h->hp, h->armor, G->hotbar_slot + 1, G->focus);
 }

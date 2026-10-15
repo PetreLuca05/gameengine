@@ -108,13 +108,14 @@ static void draw_ammo(Game *g, World *w, float s) {
     ui_textf(x, y, FONT_UI, COL_DIM, UI_ALIGN_RIGHT, "%s", it->name);
     if (wd && wd->kind != WPN_MELEE) {
         int reserve = inv_count(&p->inv, wd->ammo_item);
-        ui_textf(x - 70 * s, y + 18 * s, FONT_HUGE, slot->ammo > 0 ? COL_WHITE : UI_RGBA(230, 70, 50, 255), UI_ALIGN_RIGHT, "%d", slot->ammo);
+        int mag = p->sim.wpn.mag;
+        ui_textf(x - 70 * s, y + 18 * s, FONT_HUGE, mag > 0 ? COL_WHITE : UI_RGBA(230, 70, 50, 255), UI_ALIGN_RIGHT, "%d", mag);
         ui_textf(x, y + 34 * s, FONT_LARGE, COL_DIM, UI_ALIGN_RIGHT, "/ %d", reserve);
         if (p->sim.wpn.reloading) {
             float frac = 1.0f - p->sim.wpn.reload_t / fmaxf(0.01f, wd->reload_time);
             bar(ui_width() * 0.5f - 80 * s, ui_height() * 0.5f + 40 * s, 160 * s, 8 * s, frac, COL_ACCENT, UI_RGBA(20, 20, 20, 180));
             ui_text_shadow(ui_width() * 0.5f, ui_height() * 0.5f + 52 * s, FONT_SMALL, COL_WHITE, UI_ALIGN_CENTER, "RELOADING");
-        } else if (slot->ammo == 0) {
+        } else if (mag == 0) {
             char key[32];
             binding_name(input_get_binding(ACT_RELOAD, 0), key, sizeof(key));
             ui_textf(ui_width() * 0.5f, ui_height() * 0.5f + 40 * s, FONT_UI, UI_RGBA(230, 90, 60, 255), UI_ALIGN_CENTER, reserve > 0 ? "[%s] Reload" : "No ammo", key);
@@ -154,7 +155,8 @@ static void draw_hotbar(Game *g, World *w, float s) {
         ui_text_shadow(x + slot_w * 0.5f, y + slot_w - 18 * s, FONT_SMALL, COL_WHITE, UI_ALIGN_CENTER, name);
         if (is->count > 1) ui_textf(x + slot_w - 4 * s, y + 2 * s, FONT_SMALL, COL_WHITE, UI_ALIGN_RIGHT, "%d", is->count);
         const WeaponDef *wd = item_weapon(w->items, is->item);
-        if (wd && wd->mag_size > 0) ui_textf(x + slot_w - 4 * s, y + 2 * s, FONT_SMALL, UI_RGBA(230, 200, 120, 255), UI_ALIGN_RIGHT, "%d", is->ammo);
+        int shown = (i == p->sim.wpn.slot) ? p->sim.wpn.mag : is->ammo;
+        if (wd && wd->mag_size > 0) ui_textf(x + slot_w - 4 * s, y + 2 * s, FONT_SMALL, UI_RGBA(230, 200, 120, 255), UI_ALIGN_RIGHT, "%d", shown);
     }
 }
 
@@ -233,7 +235,11 @@ static void draw_dev(Game *g, World *w, float s) {
         ui_rect(8 * s, y, 330 * s, 100 * s, COL_PANEL);
         y += 4 * s;
         ui_textf(14 * s, y, FONT_SMALL, COL_WHITE, UI_ALIGN_LEFT, "net: %s via %s, %d peer(s)", net_role() == NET_HOST ? "host" : "client", st.transport, st.peers); y += 16 * s;
-        ui_textf(14 * s, y, FONT_SMALL, COL_WHITE, UI_ALIGN_LEFT, "ping %.0f ms   loss %.1f%%", st.ping_ms, st.loss_pct); y += 16 * s;
+        if (net_role() == NET_CLIENT)
+            ui_textf(14 * s, y, FONT_SMALL, COL_WHITE, UI_ALIGN_LEFT, "ping %.0f ms (cmd rtt %.0f ms)   loss %.1f%%", st.ping_ms, st.app_rtt_ms, st.loss_pct);
+        else
+            ui_textf(14 * s, y, FONT_SMALL, COL_WHITE, UI_ALIGN_LEFT, "ping %.0f ms   loss %.1f%%", st.ping_ms, st.loss_pct);
+        y += 16 * s;
         ui_textf(14 * s, y, FONT_SMALL, COL_WHITE, UI_ALIGN_LEFT, "in %.1f kB/s   out %.1f kB/s", st.in_kbps, st.out_kbps); y += 16 * s;
         ui_textf(14 * s, y, FONT_SMALL, COL_WHITE, UI_ALIGN_LEFT, "snapshot %.0f B @ %d Hz  interp %.0f ms", st.snapshot_bytes, st.snapshot_rate, st.interp_ms); y += 16 * s;
         ui_textf(14 * s, y, FONT_SMALL, COL_WHITE, UI_ALIGN_LEFT, "prediction error %.3f m", st.prediction_error); y += 16 * s;

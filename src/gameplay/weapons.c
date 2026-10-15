@@ -291,6 +291,10 @@ void weapons_tick(World *w, int slot, PlayerSim *sim, const UserCmd *cmd, u16 pr
     InvSlot *s = &p->inv.slots[ws->slot];
     const ItemDef *idef = item_def(w->items, s->item);
     const WeaponDef *d = item_weapon(w->items, s->item);
+    // The host owns inventory; clients predict the magazine in WeaponState only, so replays
+    // of unacknowledged commands never double-spend inventory.
+    if (w->authority || ws->equip_t <= dt) ws->mag = s->ammo;
+    i16 *mag = w->authority ? &s->ammo : &ws->mag;
     bool attack = (cmd->buttons & BTN_ATTACK) != 0;
     bool busy = sim->move.mode != MOVE_WALK;
 
@@ -348,15 +352,16 @@ void weapons_tick(World *w, int slot, PlayerSim *sim, const UserCmd *cmd, u16 pr
     if (ws->reloading) {
         ws->reload_t -= dt;
         if (ws->reload_t <= 0) {
-            int need = d->mag_size - s->ammo;
-            int got = inv_remove(&p->inv, d->ammo_item, need);
-            s->ammo = (i16)(s->ammo + got);
+            int need = d->mag_size - *mag;
+            int got = w->authority ? inv_remove(&p->inv, d->ammo_item, need) : DG_MIN(need, reserve);
+            *mag = (i16)(*mag + got);
             ws->reloading = 0;
         }
+        if (w->authority) ws->mag = s->ammo;
         return;
     }
-    bool wants_reload = (pressed & BTN_RELOAD) || ((pressed & BTN_ATTACK) && s->ammo <= 0);
-    if (wants_reload && s->ammo < d->mag_size && reserve > 0 && !busy) {
+    bool wants_reload = (pressed & BTN_RELOAD) || ((pressed & BTN_ATTACK) && *mag <= 0);
+    if (wants_reload && *mag < d->mag_size && reserve > 0 && !busy) {
         ws->reloading = 1;
         ws->reload_t = d->reload_time;
         if (local_view && first) fx_sound(d->sound_reload, sim->move.pos, 0.7f);
@@ -365,11 +370,12 @@ void weapons_tick(World *w, int slot, PlayerSim *sim, const UserCmd *cmd, u16 pr
     bool trigger = d->automatic ? attack : (pressed & BTN_ATTACK) != 0;
     bool can_fire = ws->cooldown <= 0 && ws->equip_t > 0.3f && !busy && !sim->move.sprinting;
     if (trigger && can_fire) {
-        if (s->ammo <= 0) {
+        if (*mag <= 0) {
             if ((pressed & BTN_ATTACK) && local_view && first) fx_sound("dry_fire", sim->move.pos, 0.6f);
             return;
         }
-        s->ammo--;
+        (*mag)--;
+        if (w->authority) ws->mag = s->ammo;
         ws->cooldown = 1.0f / fmaxf(0.1f, d->fire_rate);
         fire(w, slot, sim, d, cmd, first, local_view);
         ws->shots++;

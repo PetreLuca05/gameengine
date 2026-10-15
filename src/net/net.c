@@ -59,6 +59,10 @@ typedef struct NetSystem {
     double render_tick;
 
     // stats
+    double cmd_send_time[128];   // client: send time per command seq (app-level RTT)
+    float app_rtt_ms;
+    u32 snaps_received, snaps_expected;
+    float snap_loss_pct, last_snap_bytes;
     u64 bytes_in, bytes_out, win_in, win_out;
     double stats_time;
     float in_kbps, out_kbps, snap_bytes;
@@ -307,6 +311,25 @@ static void client_handle_snapshot(Reader *r) {
     float hold = r_f32(r);
     u32 open_container = r_u32(r);
     if (tick <= N->latest_snap) return; // old / duplicate (unreliable reordering)
+    // Application-level stats: RTT via acked command, loss via snapshot tick gaps.
+    {
+        double sent = N->cmd_send_time[ack_seq % 128];
+        if (ack_seq && sent > 0) {
+            float rtt = (float)((platform_time() - sent) * 1000.0);
+            N->app_rtt_ms = N->app_rtt_ms > 0 ? N->app_rtt_ms * 0.9f + rtt * 0.1f : rtt;
+        }
+        u32 interval = (u32)DG_MAX(1, SIM_HZ / DG_CLAMP(N->snaprate->i, 5, SIM_HZ));
+        if (N->latest_snap) {
+            N->snaps_expected += (tick - N->latest_snap) / interval;
+            N->snaps_received++;
+            if (N->snaps_expected >= 60) {
+                N->snap_loss_pct = 100.0f * (1.0f - (float)N->snaps_received / (float)N->snaps_expected);
+                if (N->snap_loss_pct < 0) N->snap_loss_pct = 0;
+                N->snaps_expected = N->snaps_received = 0;
+            }
+        }
+        N->last_snap_bytes = (float)r->len;
+    }
     SnapFrame *base = base_tick ? snap_history_find(&N->cl_history, base_tick) : NULL;
     if (base_tick && !base) return; // can't decode without the baseline; host will resend from an older ack
     SnapFrame *out = snap_history_slot(&N->cl_history, tick);
@@ -422,6 +445,7 @@ void net_client_send_cmds(const UserCmd *history, int size, u32 latest) {
     int count = (int)DG_MIN((u32)CMDS_PER_PACKET, latest);
     w_u8(&w, (u8)count);
     for (u32 s = latest - (u32)count + 1; s <= latest; s++) w_bytes(&w, &history[s % (u32)size], sizeof(UserCmd));
+    N->cmd_send_time[latest % 128] = platform_time();
     send_msg(N->server_peer, CH_UNRELIABLE, &w);
     N->t->flush(N->t);
 }
@@ -691,7 +715,12 @@ NetStats net_stats(void) {
     }
     s.peers = count;
     if (count) { s.ping_ms = rtt_sum / (float)count; s.loss_pct = loss_sum / (float)count; }
-    if (N->role == NET_CLIENT) s.snapshot_bytes = 0;
+    if (N->role == NET_CLIENT) {
+        // Application-level numbers include simulated lag/loss and host processing.
+        s.app_rtt_ms = N->app_rtt_ms;
+        s.loss_pct = fmaxf(s.loss_pct, N->snap_loss_pct);
+        s.snapshot_bytes = N->last_snap_bytes;
+    }
     return s;
 }
 

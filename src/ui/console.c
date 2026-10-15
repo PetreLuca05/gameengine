@@ -25,7 +25,12 @@ typedef struct Console {
 
 #define C (g_engine.console)
 
-void console_init(void) { C = (Console *)calloc(1, sizeof(Console)); }
+static void cmd_toggleconsole(int argc, const char **argv) { console_toggle(); }
+
+void console_init(void) {
+    C = (Console *)calloc(1, sizeof(Console));
+    cmd_register("toggleconsole", cmd_toggleconsole, "toggle the console overlay");
+}
 
 void console_shutdown(void) {
     free(C);

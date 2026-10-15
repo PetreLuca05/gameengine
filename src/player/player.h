@@ -70,6 +70,8 @@ typedef struct WeaponState {
     float equip_t;      // time since equip (raise animation)
     u32 shots;          // total shots fired (seeds spread RNG)
     float recoil_kick;  // visual: decays, drives viewmodel kick
+    i16 mag;            // rounds in the equipped weapon (predicted on clients, mirrored by the host)
+    i16 pad;
 } WeaponState;
 
 typedef struct PlayerSim {

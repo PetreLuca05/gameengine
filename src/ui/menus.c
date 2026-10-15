@@ -95,8 +95,27 @@ static void write_graphics(const GraphicsSettings *g) {
     video_apply();
 }
 
+static void update_mouse_mode(void);
+
+static void cmd_menu(int argc, const char **argv) {
+    const char *page = argc > 1 ? argv[1] : "pause";
+    Game *g = game();
+    if (!strcmp(page, "close")) { menus_close_all(); return; }
+    M->page = PAGE_PAUSE;
+    if (!strcmp(page, "settings")) { M->page = PAGE_SETTINGS; M->pending = read_graphics(); collect_resolutions(); }
+    if (!strcmp(page, "controls")) { M->page = PAGE_SETTINGS; M->tab = TAB_CONTROLS; }
+    if (!strcmp(page, "audio")) { M->page = PAGE_SETTINGS; M->tab = TAB_AUDIO; }
+    if (!strcmp(page, "multiplayer")) { M->page = PAGE_MULTIPLAYER; net_lan_refresh(); }
+    if (g) g->menu_open = true;
+    update_mouse_mode();
+}
+
+static void cmd_inventory(int argc, const char **argv) { menus_toggle_inventory(); }
+
 void menus_init(void) {
     M = (Menus *)calloc(1, sizeof(Menus));
+    cmd_register("menu", cmd_menu, "open a menu: pause | settings | controls | audio | multiplayer | close");
+    cmd_register("inventory", cmd_inventory, "toggle the inventory screen");
     dg_strcpy(M->connect_addr, sizeof(M->connect_addr), "127.0.0.1:27015");
     M->connect_len = (int)strlen(M->connect_addr);
 }

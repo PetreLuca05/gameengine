@@ -13,7 +13,8 @@ typedef enum TransportKind { TRANSPORT_LAN, TRANSPORT_STEAM } TransportKind;
 typedef enum NetRole { NET_OFF, NET_HOST, NET_CLIENT } NetRole;
 
 typedef struct NetStats {
-    float ping_ms;
+    float ping_ms;       // transport RTT
+    float app_rtt_ms;    // client: command -> acked snapshot round trip
     float loss_pct;
     float in_kbps, out_kbps;
     float snapshot_bytes;
@@ -29,7 +30,8 @@ typedef struct LanServer {
     char map[32];
     char address[64];
     int players, max_players;
-    float ping_ms;
+    float ping_ms;       // transport RTT
+    float app_rtt_ms;    // client: command -> acked snapshot round trip
     double last_seen;
 } LanServer;
 
