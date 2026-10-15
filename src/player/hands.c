@@ -79,6 +79,7 @@ typedef struct HandsSystem {
 
     // first-person targets for the body model
     HandsFpTargets fp;
+    vec3 kick_pos, kick_rot;
     bool fp_valid, body_arms;
 
     MeshId cube;
@@ -393,6 +394,8 @@ void hands_update(const HandsInput *in) {
     }
     // Recoil (viewmodel spring layer): weapon hand pushed back, muzzle up / sideways, rolled.
     // The support hand follows through the weapon's support grip.
+    H->kick_pos = in->vm_kick_pos;
+    H->kick_rot = in->vm_kick_rot;
     pose.pos[HAND_RIGHT] = v3_add(pose.pos[HAND_RIGHT], in->vm_kick_pos);
     quat kick_rot = quat_mul(quat_axis_angle(v3(0, 1, 0), -in->vm_kick_rot.y * DG_DEG2RAD),
                              quat_mul(quat_axis_angle(v3(1, 0, 0), in->vm_kick_rot.x * DG_DEG2RAD),
@@ -669,6 +672,11 @@ bool hands_fp_targets(HandsFpTargets *out) {
 }
 
 void hands_set_body_arms(bool on) { if (H) H->body_arms = on; }
+
+void hands_vm_kick(vec3 *pos, vec3 *rot) {
+    *pos = H ? H->kick_pos : v3(0, 0, 0);
+    *rot = H ? H->kick_rot : v3(0, 0, 0);
+}
 
 void hands_fp_set_item(vec3 pos, quat rot) {
     if (!H) return;

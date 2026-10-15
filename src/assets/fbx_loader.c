@@ -484,7 +484,6 @@ int fbx_bake_clips(const char *path, const Skeleton *canon, const FbxBakeOptions
             yaw[f] = unwrap;
         }
         float yend = yaw[frames - 1];
-        (void)y0;
         for (int f = 0; f < frames; f++) {
             float u = (float)f / (float)(frames - 1);
             vec3 p = c->data[(size_t)f * canon->count].t;
@@ -497,7 +496,9 @@ int fbx_bake_clips(const char *path, const Skeleton *canon, const FbxBakeOptions
         vec3 mean = v3(0, 0, 0);
         for (int f = 0; f < frames; f++) {
             Xform *r = &c->data[(size_t)f * canon->count];
-            quat unyaw = quat_yaw(-c->root_yaw[f]);
+            // Also align the start facing to the canonical bind (rigs exported with a rotated
+            // armature / root face another way; y0 = 0 for clips authored on the canonical rig).
+            quat unyaw = quat_yaw(-c->root_yaw[f] - y0);
             vec3 rel = v3_sub(v3_sub(r->t, p0), c->root_t[f]);
             rel = quat_rotate(unyaw, rel);
             r->t = v3_add(p0, rel);

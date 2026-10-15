@@ -51,6 +51,22 @@ Foot-plant markers are detected from foot heights unless `clips.json` provides t
 adds per-clip metadata: `loop`, `speed`, `root_motion`, `markers`, `events`, `blend_in`,
 `blend_out`, `additive` and `reference`.
 
+### Clips in use
+
+Locomotion and idles come from the takes in `assets/human/Animations.fbx`. `clips.json` gives them
+short names (`idle`, `idle_rifle`, `jog_forward`, `jog_backward`, `jog_strafe_left`, `sprint`, ...)
+and a `root_speed` for these in-place clips, so playback rate follows the move speed. Strafe right
+is `jog_strafe_left@mirror`. `jump` and `Hanging Idle` stay separate files.
+
+**Diagonals.** There are no diagonal clips. On a forward or backward diagonal, the legs (Hips and
+below) turn toward the move direction, up to 60°, while the spine counter-rotates so the upper body
+keeps facing the aim. The blend tree gets the remaining direction (pure forward or backward). The
+leg yaw is smoothed per tick, so moving between forward, diagonal and strafe blends instead of
+popping (`CharRuntime.leg_yaw`, `character_rt.c`).
+
+**Facing.** At bake, each clip's start facing is aligned with the canonical bind, and `test_anim`
+checks every clip's chest faces forward. Bake version 4.
+
 ## Canonical skeleton and rig validation
 
 `skel_finalize` derives bind model transforms, bone lengths, the left/right mirror table, the height,

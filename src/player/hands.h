@@ -75,6 +75,8 @@ typedef struct HandsFpTargets {
     quat cam_rot;
 } HandsFpTargets;
 bool hands_fp_targets(HandsFpTargets *out);
+// Last viewmodel recoil kick (camera space position m, +z back; rotation deg pitch / yaw / roll).
+void hands_vm_kick(vec3 *pos, vec3 *rot);
 // When the body model draws the first-person arms, hands_render skips the placeholder cubes
 // (call every frame before hands_render; resets after rendering).
 void hands_set_body_arms(bool on);

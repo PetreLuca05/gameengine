@@ -18,12 +18,30 @@ void charrt_init(CharRuntime *r, const AnimLibrary *lib, const CharacterDef *def
     r->in.health = def ? def->hp : 100;
 }
 
+// Lower-body yaw for a move direction (x right, y forward): forward sector -> forward clip turned
+// by the angle, backward sector -> backward clip turned, sideways -> strafe clips straight.
+static float leg_yaw_for(vec2 m, float speed) {
+    if (speed < 0.3f) return 0.0f;
+    float a = atan2f(m.x, m.y);                       // 0 forward, +90 right, 180 back
+    const float lim = 60.0f * DG_DEG2RAD;
+    if (fabsf(a) <= lim) return a;                    // forward diagonals
+    if (fabsf(a) >= DG_PI - lim) return wrap_angle(a - DG_PI);   // backward diagonals
+    return 0.0f;                                      // strafe
+}
+
 void charrt_set_inputs(CharRuntime *r, const CharInputs *in) {
     r->in = *in;
     ControllerInst *c = &r->ctrl;
     ctrl_set(c, AP_SPEED, in->speed);
-    ctrl_set(c, AP_MOVE_X, in->move_local.x);
-    ctrl_set(c, AP_MOVE_Y, in->move_local.y);
+    r->leg_yaw_target = leg_yaw_for(in->move_local, in->speed);
+    // The blend tree gets the direction left after the legs turned (pure forward on diagonals);
+    // the smoothed leg yaw makes sector changes blend instead of pop.
+    float cs = cosf(-r->leg_yaw), sn = sinf(-r->leg_yaw);
+    vec2 m = v2(in->move_local.x * cs - in->move_local.y * sn, in->move_local.x * sn + in->move_local.y * cs);
+    float ml = v2_len(m);
+    if (ml > 1e-4f) m = v2_scale(m, 1.0f / ml);
+    ctrl_set(c, AP_MOVE_X, m.x);
+    ctrl_set(c, AP_MOVE_Y, m.y);
     ctrl_set(c, AP_GROUNDED, in->grounded ? 1.0f : 0.0f);
     ctrl_set(c, AP_CROUCH, in->crouch ? 1.0f : 0.0f);
     ctrl_set(c, AP_PRONE, in->prone ? 1.0f : 0.0f);
@@ -51,7 +69,32 @@ void charrt_set_inputs(CharRuntime *r, const CharInputs *in) {
 
 void charrt_trigger(CharRuntime *r, int p) { ctrl_trigger(&r->ctrl, p); }
 
-void charrt_tick(CharRuntime *r, float dt) { ctrl_tick(&r->ctrl, &r->lib->lookup, dt); }
+void charrt_tick(CharRuntime *r, float dt) {
+    ctrl_tick(&r->ctrl, &r->lib->lookup, dt);
+    // Legs turn towards the move direction at up to 360 deg/s with an exponential ease.
+    float d = wrap_angle(r->leg_yaw_target - r->leg_yaw);
+    float step = d * (1.0f - expf(-dt * 10.0f));
+    float maxs = 6.2832f * dt;
+    r->leg_yaw = wrap_angle(r->leg_yaw + clampf(step, -maxs, maxs));
+}
+
+// Hips (and everything below) yawed by leg_yaw about the hips; Spine counter-rotated so the
+// upper body is unchanged.
+static void apply_leg_yaw(CharRuntime *r) {
+    if (fabsf(r->leg_yaw) < 1e-4f) return;
+    const Skeleton *s = &r->lib->skel;
+    int hips = s->role[BR_HIPS], spine = s->role[BR_SPINE];
+    if (hips < 0 || spine < 0 || s->parent[spine] != hips) return;
+    // Character faces -Z: a positive (rightward) leg yaw is a negative rotation about +Y.
+    quat q = quat_axis_angle(v3(0, 1, 0), -r->leg_yaw);
+    Xform *H = &r->base.local[hips], *S = &r->base.local[spine];
+    quat hr = H->r;
+    Xform spine_model = xf_mul(*H, *S);
+    H->r = quat_norm(quat_mul(q, hr));
+    Xform inv_h = xf_inverse(*H);
+    *S = xf_mul(inv_h, spine_model);
+    S->s = v3(1, 1, 1);
+}
 
 void charrt_eval_base(CharRuntime *r) {
     if (r->override_clip >= 0 && r->override_clip < r->lib->clip_count) {
@@ -60,6 +103,7 @@ void charrt_eval_base(CharRuntime *r) {
         if (r->override_mirror) pose_mirror(&r->lib->skel, &tmp, &r->base);
     } else {
         ctrl_evaluate(&r->ctrl, &r->lib->skel, &r->lib->lookup, &r->base);
+        apply_leg_yaw(r);
         // Holding an item: the arms (clavicles down) don't play the locomotion clip - they take a
         // fixed relaxed pose (first frame of idle) and the procedural hold places the hands.
         float hw = 0;

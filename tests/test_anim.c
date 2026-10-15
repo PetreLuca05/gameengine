@@ -39,6 +39,28 @@ static bool xf_near(Xform a, Xform b, float ep, float eq) {
 
 // ------------------------------------------------------------------ assets
 
+// Every clip must face the canonical forward (-Z): the hips' and chest's forward at the first
+// frame, compared with the bind pose (a rotated armature in the source file would turn the body
+// against the hold / aim frame).
+static float bone_facing_deg(const Skeleton *s, const Xform *model, int b) {
+    quat d = quat_mul(model[b].r, quat_conj(s->bind_model[b].r));
+    vec3 f = quat_rotate(d, v3(0, 0, -1));
+    return atan2f(-f.x, -f.z) * DG_RAD2DEG;
+}
+
+static void test_clip_facing(void) {
+    const Skeleton *s = &L->skel;
+    for (int i = 0; i < L->clip_count; i++) {
+        Pose p;
+        Xform m[ANIM_MAX_BONES];
+        clip_sample(&L->clips[i], 0, &p);
+        pose_to_model(s, &p, m);
+        float hips = bone_facing_deg(s, m, s->role[BR_HIPS]), chest = bone_facing_deg(s, m, s->role[BR_SPINE2]);
+        printf("  facing %-24s hips %+7.1f chest %+7.1f deg\n", L->clips[i].name, hips, chest);
+        CHECK(fabsf(chest) < 35.0f, "clip %s: chest faces %.0f deg off forward", L->clips[i].name, chest);
+    }
+}
+
 static void test_load(void) {
     CHECK(L->loaded, "library failed to load");
     CHECK(L->skel.count == 65, "skeleton bones %d", L->skel.count);
@@ -48,7 +70,7 @@ static void test_load(void) {
     // Forward is -Z: the toes are in front of the feet.
     vec3 toe = L->skel.bind_model[L->skel.role[BR_L_TOE]].t, foot = L->skel.bind_model[L->skel.role[BR_L_FOOT]].t;
     CHECK(toe.z < foot.z, "character does not face -Z (toe z %.3f foot z %.3f)", toe.z, foot.z);
-    CHECK(L->clip_count >= 13, "clips %d", L->clip_count);
+    CHECK(L->clip_count >= 10, "clips %d", L->clip_count);
     for (int i = 0; i < L->clip_count; i++) {
         const Clip *c = &L->clips[i];
         CHECK(c->frames > 2 && c->bones == L->skel.count, "clip %s frames %d bones %d", c->name, c->frames, c->bones);
@@ -56,7 +78,7 @@ static void test_load(void) {
         for (int k = 0; k < c->frames * c->bones && finite; k++) finite = isfinite(c->data[k].t.x) && isfinite(c->data[k].r.w);
         CHECK(finite, "clip %s has non-finite data", c->name);
     }
-    CHECK(anim_lib_find_clip(L, "walking") >= 0 && anim_lib_find_clip(L, "Hanging Idle") >= 0, "expected clips missing");
+    CHECK(anim_lib_find_clip(L, "jog_forward") >= 0 && anim_lib_find_clip(L, "Hanging Idle") >= 0, "expected clips missing");
     CHECK(L->ctrl.layer_count == 3, "controller layers %d", L->ctrl.layer_count);
     CHECK(L->set_count >= 2, "anim sets %d", L->set_count);
     CHECK(L->char_count >= 5, "characters %d", L->char_count);
@@ -127,10 +149,10 @@ static void test_rig_validation(void) {
 static void test_pose_math(void) {
     const Skeleton *s = &L->skel;
     Pose a, b, out;
-    clip_sample(&L->clips[anim_lib_find_clip(L, "walking")], 0.37f, &a);
+    clip_sample(&L->clips[anim_lib_find_clip(L, "jog_forward")], 0.37f, &a);
     pose_blend(&a, &a, 0.37f, &out);
     CHECK(!memcmp(&a.local, &out.local, sizeof(Xform) * (size_t)s->count), "blend(a, a, t) != a");
-    clip_sample(&L->clips[anim_lib_find_clip(L, "running")], 0.2f, &b);
+    clip_sample(&L->clips[anim_lib_find_clip(L, "sprint")], 0.2f, &b);
     pose_additive(&a, &b, &a, 0.0f, NULL, &out);
     CHECK(!memcmp(&a.local, &out.local, sizeof(Xform) * (size_t)s->count), "zero-weight additive is not identity");
     // add == ref gives the base back (within float noise).
@@ -540,7 +562,7 @@ static void test_lagcomp(void) {
     HitboxHistory *h = (HitboxHistory *)calloc(1, sizeof(HitboxHistory));
     Pose p;
     Xform world[ANIM_MAX_BONES];
-    const Clip *walk = &L->clips[anim_lib_find_clip(L, "walking")];
+    const Clip *walk = &L->clips[anim_lib_find_clip(L, "jog_forward")];
     HitboxSet sets[40];
     for (int t = 0; t < 40; t++) {
         clip_sample(walk, (float)t / 60.0f, &p);
@@ -599,6 +621,7 @@ int main(int argc, char **argv) {
     test_hold_and_glue(db);
     test_body_parts(db);
     test_damage_reaction();
+    test_clip_facing();
     test_upper_oneshots();
     test_determinism();
     test_quantization();

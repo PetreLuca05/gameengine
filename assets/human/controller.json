@@ -162,7 +162,7 @@
     "smg": { "hip_offset": [0.12, -0.08, -0.24], "ads_distance": 0.24 },
     "lmg": { "hip_offset": [0.16, -0.2, -0.16], "ads_distance": 0.26, "aim_pitch_scale": 0.85 },
     "melee_1h": { "left_hand": false, "hip_offset": [0.24, -0.28, -0.28], "hip_rot": [65, 0, 0] },
-    "melee_2h": { "hip_offset": [0.10, -0.22, -0.22], "hip_rot": [70, 0, 0] },
+    "melee_2h": { "hip_offset": [0.16, -0.10, -0.20], "hip_rot": [22, 0, -12], "fp_hip": [0.17, -0.24, -0.46] },
     "item_small": { "left_hand": false, "hip_offset": [0.22, -0.22, -0.32], "hip_rot": [-20, 0, 0] },
     "item_large": { "hip_offset": [0.05, -0.2, -0.35] }
   },

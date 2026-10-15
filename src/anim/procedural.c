@@ -20,7 +20,7 @@ static HoldStyle default_style(int id) {
     h.crouch_offset = v3(0, 0.02f, 0);
     h.elbow_r = v3(0.7f, -1.0f, 0.3f);
     h.elbow_l = v3(-0.6f, -1.0f, 0.0f);
-    h.max_shift = 0.38f;
+    h.max_shift = 0.45f;
     h.fp_hip = v3(0.13f, -0.17f, -0.36f);   // raised into view for the owner's first-person camera
     h.fp_weight = 1.0f;
     float cr[5] = { 20, 25, 70, 75, 80 }, cl[5] = { 40, 50, 55, 60, 65 };
@@ -38,7 +38,7 @@ static HoldStyle default_style(int id) {
     case HOLD_LMG: h.hip_offset = v3(0.16f, -0.2f, -0.16f); h.ads_distance = 0.26f; h.aim_pitch_scale = 0.85f; break;
     case HOLD_MELEE_1H: h.fp_hip = v3(0.22f, -0.24f, -0.34f); h.ads_weight = 0; h.aim_pitch_scale = 0.6f; h.left_hand = false; h.hip_offset = v3(0.24f, -0.28f, -0.28f); h.hip_rot = v3(65, 0, 0); h.sprint_rot = v3(40, 10, 0);
         { float c[5] = { 60, 85, 90, 90, 90 }; memcpy(h.curl_r, c, sizeof(c)); } break;
-    case HOLD_MELEE_2H: h.fp_hip = v3(0.12f, -0.26f, -0.32f); h.ads_weight = 0; h.aim_pitch_scale = 0.6f; h.hip_offset = v3(0.10f, -0.22f, -0.22f); h.hip_rot = v3(70, 0, 0); h.sprint_rot = v3(40, 20, 0);
+    case HOLD_MELEE_2H: h.fp_hip = v3(0.20f, -0.24f, -0.36f); h.ads_weight = 0; h.aim_pitch_scale = 0.6f; h.hip_offset = v3(0.16f, -0.10f, -0.20f); h.hip_rot = v3(22, 0, -12); h.sprint_rot = v3(40, 20, 0);
         { float c[5] = { 60, 85, 90, 90, 90 }; memcpy(h.curl_r, c, sizeof(c)); memcpy(h.curl_l, c, sizeof(c)); } break;
     case HOLD_ITEM_SMALL: h.fp_hip = v3(0.18f, -0.20f, -0.34f); h.left_hand = false; h.hip_offset = v3(0.22f, -0.22f, -0.32f); h.hip_rot = v3(-20, 0, 0);
         { float c[5] = { 30, 45, 50, 55, 60 }; memcpy(h.curl_r, c, sizeof(c)); } break;

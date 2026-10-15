@@ -66,9 +66,14 @@ static void apply_clip_meta(AnimLibrary *lib) {
         const cJSON *e;
         cJSON_ArrayForEach(e, clips) {
             int ci = anim_lib_find_clip(lib, e->string);
+            const cJSON *v = cJSON_GetObjectItemCaseSensitive(e, "name");
+            if (ci < 0 && cJSON_IsString(v)) ci = anim_lib_find_clip(lib, v->valuestring);   // already renamed (reload)
             if (ci < 0) { log_warn("clips.json: unknown clip '%s'", e->string); continue; }
             Clip *c = &lib->clips[ci];
-            const cJSON *v;
+            // "name": short alias used by anim sets ("Animations:Armature|Jog Forward" -> "jog_forward").
+            if (cJSON_IsString(v)) dg_strcpy(c->name, sizeof(c->name), v->valuestring);
+            // "root_speed": travel speed of an in-place clip (m/s), for speed matching / foot sliding.
+            if (cJSON_IsNumber(v = cJSON_GetObjectItemCaseSensitive(e, "root_speed"))) c->avg_speed = (float)v->valuedouble;
             if (cJSON_IsBool(v = cJSON_GetObjectItemCaseSensitive(e, "loop"))) c->loop = cJSON_IsTrue(v);
             if (cJSON_IsBool(v = cJSON_GetObjectItemCaseSensitive(e, "root_motion"))) c->root_motion = cJSON_IsTrue(v);
             if (cJSON_IsBool(v = cJSON_GetObjectItemCaseSensitive(e, "additive"))) c->additive = cJSON_IsTrue(v);

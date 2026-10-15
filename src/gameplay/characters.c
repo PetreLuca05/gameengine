@@ -470,8 +470,7 @@ void chars_notify_attack(World *w, int slot, bool melee, bool first) {
     } else if (first && p->local) {
         charrt_trigger(&c->rt, melee ? AP_T_MELEE : AP_T_FIRE);
     }
-    // Own shots kick the held item (first person shows the body's weapon).
-    if (p->local && !melee && first) c->kick_v = v3_add(c->kick_v, v3(0, 0.6f, 1.4f));
+
 }
 
 static void update_limbs(CharacterInst *c, float dt) {
@@ -952,6 +951,13 @@ static void post_one(World *w, CharacterInst *c, int i, float dt, vec3 cam_pos, 
     pi.item = item;
     pi.item_kick_pos = v3(0, c->kick_x.y * 0.01f, c->kick_x.z * 0.02f);
     pi.item_kick_rot = v3(c->kick_x.y * 3.0f, 0, 0);
+    if (c->local) {
+        // The owner's first-person weapon is the body's: the viewmodel recoil springs drive it.
+        vec3 kp, kr;
+        hands_vm_kick(&kp, &kr);
+        pi.item_kick_pos = kp;
+        pi.item_kick_rot = kr;
+    }
     if (c->rt.in.crouch) pi.crouch_drop = 0.38f;
     pi.first_person = c->local && cv(CG->fp_body);
     if (c->is_player && c->slot >= 0) {

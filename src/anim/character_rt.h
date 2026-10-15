@@ -30,6 +30,10 @@ typedef struct CharRuntime {
     Xform final_model[ANIM_MAX_BONES];
     bool base_valid;
     u32 evals;
+    // Diagonal movement: the legs (Hips down) turn towards the move direction and the spine
+    // counter-rotates so the upper body keeps facing the aim; the blend tree sees the remaining
+    // (cardinal) direction. Smoothed per tick (deterministic).
+    float leg_yaw, leg_yaw_target;
     // Tools (test stand): replaces the controller output with one clip at a fixed time.
     i16 override_clip;                // -1 = off
     float override_time;

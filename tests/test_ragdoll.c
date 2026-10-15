@@ -215,9 +215,9 @@ int main(void) {
     static const DropCase cases[] = {
         { "bind T-pose 1m", 1.0f, 0, 0, { 0, 0, 0 }, NULL },
         { "idle fall back", 0.05f, 0, 0, { 0, 0, 90 }, "idle" },
-        { "walk push side", 0.05f, 0, 0, { 160, 0, 0 }, "walking" },
+        { "walk push side", 0.05f, 0, 0, { 160, 0, 0 }, "jog_forward" },
         { "head first 3m", 3.0f, 170, 0, { 0, 0, 0 }, NULL },
-        { "rolled 2m spin", 2.0f, 40, 70, { 60, 40, -60 }, "running" },
+        { "rolled 2m spin", 2.0f, 40, 70, { 60, 40, -60 }, "sprint" },
     };
     for (int c = 0; c < (int)(sizeof(cases) / sizeof(cases[0])); c++) run_drop(pw, &cases[c]);
 
