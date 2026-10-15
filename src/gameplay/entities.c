@@ -549,6 +549,9 @@ void entities_client_sync(World *w) {
     ENT_FOREACH(w, i) {
         BodyId b = w->body[i].body;
         if (b == PHYS_INVALID_BODY || w->body[i].motion == PM_STATIC) continue;
-        phys_set_transform(w->phys, b, w->xf[i].pos, w->xf[i].rot, false);
+        // Player proxies are capsules centered at half height; entity positions are the feet.
+        vec3 pos = w->type[i] == ET_PLAYER ? v3_add(w->xf[i].pos, v3(0, PLAYER_HEIGHT * 0.5f, 0)) : w->xf[i].pos;
+        quat rot = w->type[i] == ET_PLAYER ? quat_identity() : w->xf[i].rot;
+        phys_set_transform(w->phys, b, pos, rot, false);
     }
 }

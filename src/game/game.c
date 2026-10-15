@@ -653,6 +653,25 @@ static void cmd_slot(int argc, const char **argv) {
     if (argc > 1) G->hotbar_slot = (u8)DG_CLAMP(atoi(argv[1]) - 1, 0, 8);
 }
 
+static void cmd_inv(int argc, const char **argv) {
+    Player *p = game_local_player();
+    if (!p) return;
+    for (int i = 0; i < INV_SLOTS; i++) {
+        InvSlot *s = &p->inv.slots[i];
+        if (s->item) log_info("  slot %2d: %-14s x%d ammo %d", i, item_def(&G->items, s->item)->id, s->count, s->ammo);
+    }
+    Health *h = &G->world->health[ENT_INDEX(p->ent)];
+    log_info("  hp %.0f armor %.0f, hotbar %d, focus %u", h->hp, h->armor, G->hotbar_slot + 1, G->focus);
+}
+
+static void cmd_lookat(int argc, const char **argv) {
+    if (argc < 4) return;
+    vec3 target = v3((float)atof(argv[1]), (float)atof(argv[2]), (float)atof(argv[3]));
+    vec3 d = v3_sub(target, G->view.eye);
+    G->view.yaw = atan2f(-d.x, -d.z);
+    G->view.pitch = atan2f(d.y, sqrtf(d.x * d.x + d.z * d.z));
+}
+
 static void cmd_status(int argc, const char **argv) {
     World *w = G->world;
     if (!w) return;
@@ -686,6 +705,8 @@ void game_init(void) {
     cmd_register("setang", cmd_setang, "set view angles: setang yaw pitch");
     cmd_register("slot", cmd_slot, "select hotbar slot 1-9");
     cmd_register("status", cmd_status, "print game status");
+    cmd_register("inv", cmd_inv, "print local inventory");
+    cmd_register("lookat", cmd_lookat, "aim the view at a world point: lookat x y z");
     camera_register_cvars();
     player_register_cvars();
     if (!items_load(&G->items, "data/items.json", "data/weapons.json")) log_error("game: item data failed to load");

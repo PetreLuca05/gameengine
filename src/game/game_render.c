@@ -237,7 +237,13 @@ static void draw_debug(World *w, vec3 cam) {
 
 void game_render(void) {
     World *w = G->world;
-    if (!w) return;
+    if (!w) {
+        ui_text_shadow(ui_width() * 0.5f, ui_height() * 0.45f, FONT_LARGE, UI_RGBA(230, 230, 230, 255), UI_ALIGN_CENTER,
+                       net_role() == NET_CLIENT ? "Connecting..." : "No world loaded");
+        menus_draw();
+        console_draw();
+        return;
+    }
     Player *p = game_local_player();
     PlayerMove interp;
     if (p) {

@@ -35,7 +35,7 @@ bool audio_init(void) {
     A->sfx = cvar_reg_float("snd_sfx", 0.9f, 0, 1, CVAR_ARCHIVE, "effects volume");
     A->voice = cvar_reg_float("snd_voice", 1.0f, 0, 1, CVAR_ARCHIVE, "voice chat volume (reserved)");
     for (int i = 1; i < g_engine.argc; i++)
-        if (!strcmp(g_engine.argv[i], "--nosound")) { log_info("audio: disabled by --nosound"); return false; }
+        if (!strcmp(g_engine.argv[i], "--nosound") || !strcmp(g_engine.argv[i], "--test")) { log_info("audio: disabled by --nosound"); return false; }
     ma_engine_config cfg = ma_engine_config_init();
     if (ma_engine_init(&cfg, &A->engine) != MA_SUCCESS) {
         log_warn("audio: no output device, running silent");

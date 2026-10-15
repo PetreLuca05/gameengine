@@ -82,7 +82,9 @@ static bool cap_free(PhysicsWorld *pw, vec3 feet, float height, BodyId ignore) {
     return !phys_capsule_overlap(pw, v3_add(feet, v3(0, 0.03f, 0)), PLAYER_RADIUS - 0.02f, height - 0.04f, PL_MASK_WORLD | PL_MASK(PL_CHARACTER), ignore);
 }
 
-static LedgeResult detect_ledge(PhysicsWorld *pw, vec3 feet, float yaw, BodyId ignore, bool allow_vault, bool airborne, bool dbg) {
+// airborne: ledges up to mantle_max above the take-off height (ground_y) are mantled directly;
+// higher ones (still within hang reach of the current feet) are grabbed and hung from.
+static LedgeResult detect_ledge(PhysicsWorld *pw, vec3 feet, float ground_y, float yaw, BodyId ignore, bool allow_vault, bool airborne, bool dbg) {
     LedgeResult r;
     memset(&r, 0, sizeof(r));
     vec3 f = forward_from_yaw(yaw);
@@ -403,7 +405,7 @@ void player_move_tick(World *w, int slot, PlayerSim *sim, PhysCharacter *ch, con
         if (pull && m->hang_time > 0.15f) {
             // Re-run detection from the hang position to get a fresh clearance check.
             float wall_yaw = atan2f(m->hang_normal.x, m->hang_normal.z);
-            LedgeResult lr = detect_ledge(pw, m->hang_pos, wall_yaw, self, false, false, dbg);
+            LedgeResult lr = detect_ledge(pw, m->hang_pos, m->hang_pos.y, wall_yaw, self, false, false, dbg);
             if (lr.kind == LEDGE_MANTLE) {
                 start_mantle(m, &lr, m->hang_pos);
                 m->m_dur = (0.75f) / T->mantle_speed->f;
@@ -438,7 +440,7 @@ void player_move_tick(World *w, int slot, PlayerSim *sim, PhysCharacter *ch, con
         bool try_air = !on_ground && (buttons & BTN_JUMP) && vel.y < 3.0f;
         if (try_ground || try_air) {
             bool allow_vault = on_ground && m->sprinting;
-            LedgeResult lr = detect_ledge(pw, m->pos, m->yaw, self, allow_vault, !on_ground, dbg);
+            LedgeResult lr = detect_ledge(pw, m->pos, on_ground ? m->pos.y : m->fall_start_y, m->yaw, self, allow_vault, !on_ground, dbg);
             if (lr.kind == LEDGE_VAULT) {
                 start_vault(m, &lr, m->pos);
                 m->jump_buffer = 0;

@@ -60,5 +60,8 @@ int net_lan_servers(const LanServer **out);
 // Steam (no-ops when built without the SDK)
 void net_steam_invite(void);
 bool net_steam_in_lobby(void);
+void net_steam_register_commands(void);
+void net_steam_poll_idle(void);
+void net_steam_shutdown(void);
 
 #endif

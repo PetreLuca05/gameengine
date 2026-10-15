@@ -9,6 +9,7 @@
 //   --script <file>       queue a script into the command buffer (supports "wait N")
 //   --frames <n>          quit after n frames;  --screenshot <path> saves the last frame
 //   --validation          enable Vulkan validation layers;  --nosound  disable audio
+//   --test                automated test mode: no config load/save, no audio, 60 fps cap
 #include "core/engine.h"
 #include "core/log.h"
 #include "core/cvar.h"
@@ -33,7 +34,7 @@
 
 Engine g_engine;
 
-typedef struct AppOptions { int max_frames; const char *screenshot; } AppOptions;
+typedef struct AppOptions { int max_frames; const char *screenshot; bool test; } AppOptions;
 
 static void cmd_quit(int argc, const char **argv) { g_engine.quit = true; }
 
@@ -53,6 +54,7 @@ static void parse_args(int argc, char **argv, AppOptions *o) {
         const char *a = argv[i];
         if (!strcmp(a, "--frames") && i + 1 < argc) o->max_frames = atoi(argv[++i]);
         else if (!strcmp(a, "--screenshot") && i + 1 < argc) o->screenshot = argv[++i];
+        else if (!strcmp(a, "--test")) o->test = true;
         else if (!strcmp(a, "--exec") && i + 1 < argc) { char b[1024]; snprintf(b, sizeof(b), "exec \"%s\"", argv[++i]); cbuf_add(b); }
         else if (!strcmp(a, "--script") && i + 1 < argc) {
             size_t n = 0;
@@ -153,12 +155,14 @@ int main(int argc, char **argv) {
     game_init();
 
     // Persistent settings, then the command line (overrides).
-    if (config_exec_file(video_config_path())) log_info("config loaded from %s", video_config_path());
+    for (int i = 1; i < argc; i++) if (!strcmp(argv[i], "--test")) opt.test = true;
+    if (opt.test) cvar_set("r_maxfps", "60");
+    else if (config_exec_file(video_config_path())) log_info("config loaded from %s", video_config_path());
     if (cvar_find("r_mode")->i != 0 || cw->i != 1600 || ch->i != 900) video_apply();
     parse_args(argc, argv, &opt);
     if (!boot_commands_connect(argc, argv)) game_host(game()->g_map->str);
     cbuf_execute();
-    if (!game_world()) game_host("devroom");
+    if (!game_world() && net_role() != NET_CLIENT) game_host("devroom");
 
     g_engine.has_focus = true;
     input_set_game_focus(true);
