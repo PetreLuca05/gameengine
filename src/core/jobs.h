@@ -19,4 +19,10 @@ void jobs_submit(JobFn fn, JobFn done, void *user, JobCounter *counter);
 void jobs_wait(JobCounter *counter);   // helps run jobs while waiting
 void jobs_pump_completions(int max);   // main thread; max<=0 means all
 
+// fn(ctx, begin, end) over [0, count) in chunks, on the workers and the calling thread; returns
+// when every chunk is done. Chunks are claimed in order but may run concurrently: fn must only
+// write per-index outputs (results are then independent of the thread count).
+typedef void (*JobRangeFn)(void *ctx, int begin, int end);
+void jobs_parallel_for(int count, int chunk, JobRangeFn fn, void *ctx);
+
 #endif

@@ -54,6 +54,9 @@ static void run_job(Job *j) {
 static int worker_main(void *arg) {
     (void)arg;
     for (;;) {
+        // Bursty frame work: spin briefly for more before sleeping (a condition wake costs
+        // tens of microseconds, longer than most chunks).
+        for (int spin = 0; spin < 4000 && !s_jobs.quit && *(volatile int *)&s_jobs.pending.count == 0; spin++) SDL_CPUPauseInstruction();
         SDL_LockMutex(s_jobs.mutex);
         while (!s_jobs.quit && s_jobs.pending.count == 0) SDL_WaitCondition(s_jobs.cond, s_jobs.mutex);
         if (s_jobs.quit) { SDL_UnlockMutex(s_jobs.mutex); break; }
@@ -116,6 +119,69 @@ void jobs_wait(JobCounter *counter) {
         if (got) run_job(&j);
         else SDL_Delay(0);
     }
+}
+
+// ------------------------------------------------------------------ parallel for
+
+typedef struct ParFor {
+    JobRangeFn fn;
+    void *ctx;
+    int count, chunk, chunks;
+    SDL_AtomicInt next, done, gen;
+} ParFor;
+#define PARFOR_SLOTS 16
+static ParFor g_pf[PARFOR_SLOTS];
+static SDL_AtomicInt g_pf_seq;
+
+static void pf_run(ParFor *p, int gen) {
+    for (;;) {
+        if (SDL_GetAtomicInt(&p->gen) != gen) return;   // a late helper: this loop is over
+        int c = SDL_AddAtomicInt(&p->next, 1);
+        if (c >= p->chunks) return;
+        int b = c * p->chunk;
+        p->fn(p->ctx, b, DG_MIN(p->count, b + p->chunk));
+        SDL_AddAtomicInt(&p->done, 1);
+    }
+}
+
+typedef struct PfHelper { ParFor *p; int gen; } PfHelper;
+static PfHelper g_pf_helpers[PARFOR_SLOTS][MAX_WORKERS];
+static void pf_helper(void *u) {
+    PfHelper *h = (PfHelper *)u;
+    pf_run(h->p, h->gen);
+}
+
+void jobs_parallel_for(int count, int chunk, JobRangeFn fn, void *ctx) {
+    if (count <= 0) return;
+    chunk = DG_MAX(1, chunk);
+    int chunks = (count + chunk - 1) / chunk;
+    if (!g_engine.jobs || s_jobs.worker_count <= 0 || chunks <= 1) { fn(ctx, 0, count); return; }
+    int slot = (int)((u32)SDL_AddAtomicInt(&g_pf_seq, 1) % PARFOR_SLOTS);
+    ParFor *p = &g_pf[slot];
+    int gen = SDL_GetAtomicInt(&p->gen) + 1;
+    p->fn = fn;
+    p->ctx = ctx;
+    p->count = count;
+    p->chunk = chunk;
+    p->chunks = chunks;
+    SDL_SetAtomicInt(&p->next, 0);
+    SDL_SetAtomicInt(&p->done, 0);
+    SDL_SetAtomicInt(&p->gen, gen);
+    int helpers = DG_MIN(s_jobs.worker_count, chunks - 1);
+    SDL_LockMutex(s_jobs.mutex);
+    for (int k = 0; k < helpers; k++) {
+        PfHelper *h = &g_pf_helpers[slot][k];
+        h->p = p;
+        h->gen = gen;
+        Job j = { pf_helper, NULL, h, NULL };
+        queue_push(&s_jobs.pending, j);
+    }
+    SDL_BroadcastCondition(s_jobs.cond);
+    SDL_UnlockMutex(s_jobs.mutex);
+    pf_run(p, gen);
+    while (SDL_GetAtomicInt(&p->done) < chunks) SDL_CPUPauseInstruction();
+    // Helpers that never got a chunk see the generation change and leave.
+    SDL_SetAtomicInt(&p->gen, gen + 1);
 }
 
 void jobs_pump_completions(int max) {

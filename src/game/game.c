@@ -16,6 +16,7 @@
 #include "assets/anim_cache.h"
 #include "ui/anim_debug.h"
 #include "gameplay/flesh_fx.h"
+#include "gameplay/zombies/horde.h"
 #include "gameplay/effects.h"
 #include "player/hands.h"
 #include "render/render.h"
@@ -303,7 +304,9 @@ static void host_tick(World *w, const UserCmd *local_cmd) {
     }
     entities_tick(w, SIM_DT);
     projectiles_tick(w, SIM_DT);
+    horde_host_tick(w, SIM_DT);   // horde zombies: tiers, steering, mover, attacks (before their animation)
     chars_host_tick(w, SIM_DT);   // sim-only animation -> per-part hitboxes (before the lag-comp record)
+    horde_post_tick(w);
     if (w->chunks) chunks_update(w, SIM_DT);
     phys_step(w->phys, SIM_DT);
     // Props moved by physics: pull their new transforms.
@@ -642,6 +645,7 @@ bool game_host(const char *map) {
     }
     daynight_level_loaded(G->world);
     flesh_fx_clear();
+    horde_level_reset();
     G->mode = GM_HOST;
     G->local_slot = 0;
     G->client_seq = 0;
@@ -663,6 +667,7 @@ void game_cl_welcome(int slot, const char *map, u32 seed, u32 server_tick) {
     if (!load_map(G->world, map)) log_error("client: cannot load map '%s'", map);
     daynight_level_loaded(G->world);   // config; the time itself arrives with every snapshot
     flesh_fx_clear();
+    horde_level_reset();
     G->mode = GM_CLIENT;
     G->local_slot = slot;
     G->client_seq = 0;
@@ -1236,6 +1241,7 @@ void game_init(void) {
     basic_meshes_create(&G->meshes);
     fx_init(&G->meshes);
     flesh_fx_init();
+    horde_init();
     hands_init();
     game_render_init();
 }

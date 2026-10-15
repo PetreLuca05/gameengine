@@ -288,6 +288,15 @@ if(MSVC)
 endif()
 add_test(NAME flesh COMMAND test_flesh WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
 
+# Horde core: grid vs brute force, steering bit-identical across thread counts, tier hysteresis.
+add_executable(test_horde tests/test_horde.c src/gameplay/zombies/horde_grid.c src/gameplay/zombies/horde_steer.c src/core/jobs.c)
+set_target_properties(test_horde PROPERTIES C_STANDARD 11)
+target_link_libraries(test_horde PRIVATE dg_animcore)
+if(MSVC)
+  target_compile_options(test_horde PRIVATE /W3 /wd4100 /wd4201 /utf-8)
+endif()
+add_test(NAME horde COMMAND test_horde WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+
 add_executable(test_anim tests/test_anim.c)
 set_target_properties(test_anim PROPERTIES C_STANDARD 11)
 target_link_libraries(test_anim PRIVATE dg_animcore)

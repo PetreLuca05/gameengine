@@ -14,6 +14,7 @@
 #include "anim/procedural_internal.h"
 #include "cJSON.h"
 #include "core/platform.h"
+#include "core/jobs.h"
 #include "assets/assets.h"
 #include <math.h>
 #include <stdio.h>
@@ -425,7 +426,7 @@ CharacterInst *char_attach(World *w, EntityId e, u8 character_id) {
     c->pose_cur = (Xform *)calloc(ANIM_MAX_BONES, sizeof(Xform));
     c->pose_draw = (Xform *)calloc(ANIM_MAX_BONES, sizeof(Xform));
     memcpy(c->armor_left, def->armor_hits, sizeof(c->armor_left));
-    if (w->authority) c->history = (HitboxHistory *)calloc(1, sizeof(HitboxHistory));
+    if (w->authority && w->type[i] != ET_ZOMBIE) c->history = (HitboxHistory *)calloc(1, sizeof(HitboxHistory));
     c->body_yaw = quat_get_yaw(w->xf[i].rot);
     c->root = xf_make(feet_of(w, i), quat_yaw(c->body_yaw));
     c->is_player = w->type[i] == ET_PLAYER;
@@ -676,9 +677,14 @@ static void revive(World *w, CharacterInst *c) {
     c->have_pose = false;
 }
 
-static void sim_one(World *w, CharacterInst *c, int i, float dt) {
+static void sim_pre(World *w, CharacterInst *c, int i) {
     bool dead_now = (w->flags[i] & EF_DEAD) != 0 || (c->is_player && c->slot >= 0 && w->players[c->slot].sim.move.mode == MOVE_DEAD);
     if (c->dead && !dead_now && !c->tool_rag) revive(w, c);
+}
+
+// Animation + hitboxes for one character. Thread-safe for NPCs (touches only c, its entity's
+// transform and read-only shared data); players run it on the main thread.
+static void sim_core(World *w, CharacterInst *c, int i, float dt) {
     CharInputs in;
     if (c->is_player && c->slot >= 0 && w->players[c->slot].active) player_inputs(w, c, &w->players[c->slot], &in);
     else npc_inputs(w, c, i, &in);
@@ -687,8 +693,9 @@ static void sim_one(World *w, CharacterInst *c, int i, float dt) {
     host_triggers(w, c, i);
     charrt_tick(&c->rt, dt);
     charrt_eval_base(&c->rt);
-    // Root motion (host only) for clips flagged root_motion: NPCs move by it.
-    if (!c->is_player) {
+    // Root motion (host only) for clips flagged root_motion: NPCs move by it (the horde moves
+    // its zombies itself).
+    if (!c->is_player && !c->horde) {
         vec3 dp;
         float dy;
         ctrl_root_delta(&c->rt.ctrl, &LIB->lookup, dt, &dp, &dy);
@@ -705,21 +712,84 @@ static void sim_one(World *w, CharacterInst *c, int i, float dt) {
     charrt_to_world(&c->rt, c->rt.base_model, c->root, c->def->scale, world);
     hitbox_build(&LIB->hitboxes, &LIB->ragdoll, world, c->def->ragdoll_scale, &c->hit);
     c->hit.tick = w->tick;
+    c->hit_feet = c->root.t;
     if (c->history) hitbox_record(c->history, &c->hit);
     update_limbs(c, dt);
     capture_net(w, c);
 }
 
+static void sim_one(World *w, CharacterInst *c, int i, float dt) {
+    sim_pre(w, c, i);
+    sim_core(w, c, i, dt);
+}
+
+void chars_ensure_history(CharacterInst *c) {
+    if (!c->history) c->history = (HitboxHistory *)calloc(1, sizeof(HitboxHistory));
+}
+
+// Between evaluations a horde zombie's hitboxes move with its body (same pose, shifted), so hits
+// stay on the visible zombie; the facing is applied at the next evaluation.
+static void shift_hitboxes(World *w, CharacterInst *c, int i) {
+    c->body_yaw = c->ai.yaw;
+    c->root = xf_make(feet_of(w, i), quat_yaw(c->body_yaw));
+    vec3 d = v3_sub(c->root.t, c->hit_feet);
+    if (v3_len2(d) > 0) {
+        for (int k = 0; k < c->hit.count; k++) { c->hit.c[k].a = v3_add(c->hit.c[k].a, d); c->hit.c[k].b = v3_add(c->hit.c[k].b, d); }
+        c->hit_feet = c->root.t;
+    }
+    c->hit.tick = w->tick;
+    if (c->history) hitbox_record(c->history, &c->hit);
+    // Replicated locomotion follows the horde every tick (cheap fields only).
+    c->net.speed = anq_speed(c->ai.speed);
+    c->net.body_yaw = anq_angle(c->body_yaw);
+    c->net.aim_yaw = c->net.body_yaw;
+}
+
+typedef struct SimJob { World *w; CharacterInst **list; float dt; } SimJob;
+static void sim_range(void *u, int begin, int end) {
+    SimJob *j = (SimJob *)u;
+    for (int k = begin; k < end; k++) {
+        CharacterInst *c = j->list[k];
+        sim_core(j->w, c, (int)ENT_INDEX(c->ent), j->dt * (float)DG_MAX(1, c->sim_interval));
+    }
+}
+
+static int g_host_evals;
+static float g_host_ms;
+void chars_host_stats(int *evaluated, float *ms) { if (evaluated) *evaluated = g_host_evals; if (ms) *ms = g_host_ms; }
+
 void chars_host_tick(World *w, float dt) {
     if (!w->chars || !LIB) return;
+    double t0 = platform_time();
     w->chars->tick = w->tick;
+    // Horde zombies due this tick are evaluated in parallel jobs (chunks), everything else here.
+    static CharacterInst *due[MAX_CHARACTERS];
+    int due_n = 0, evals = 0;
     for (int k = 0; k < MAX_CHARACTERS; k++) {
         CharacterInst *c = w->chars->c[k];
         if (!c || !ent_valid(w, c->ent)) continue;
         int i = (int)ENT_INDEX(c->ent);
+        if (c->horde) {
+            int iv = DG_MAX(1, c->sim_interval);
+            sim_pre(w, c, i);
+            if (((w->tick + (u32)c->sim_phase) % (u32)iv) == 0 || c->hit.count == 0) due[due_n++] = c;
+            else shift_hitboxes(w, c, i);
+            continue;
+        }
         if (w->type[i] == ET_ZOMBIE) zombie_ai(w, c, i, dt);
+        if (w->type[i] == ET_ZOMBIE && !c->history) chars_ensure_history(c);
         sim_one(w, c, i, dt);
+        evals++;
     }
+    if (due_n > 0) {
+        SimJob j = { w, due, dt };
+        Cvar *pj = cvar_find("horde_jobs");
+        if (!pj || pj->i) jobs_parallel_for(due_n, 8, sim_range, &j);
+        else sim_range(&j, 0, due_n);
+        evals += due_n;
+    }
+    g_host_evals = evals;
+    g_host_ms = (float)((platform_time() - t0) * 1000.0);
     // Host-side dropped item lifetimes.
     ENT_FOREACH(w, i) {
         if (w->life[i] > 0) {
@@ -786,6 +856,18 @@ static void client_one(World *w, CharacterInst *c, int i, double rt, float dt) {
     // than ticks): the event's death holds until a newer snapshot says otherwise.
     bool rep_stale = c->dead && rep_tick < c->death_tick;
     if (rep_stale) { in.dead = true; rep.flags |= ANF_DEAD; }
+    if (w->type[i] == ET_ZOMBIE) {
+        // Zombies don't replicate their locomotion parameters (bandwidth for hordes): speed and
+        // facing come from the (interpolated) motion of the entity, they always walk forward.
+        vec3 feet = w->xf[i].pos;
+        float inst = dt > 1e-4f ? v3_len(v3_flat(v3_sub(feet, c->cl_prev_feet))) / dt : 0.0f;
+        if (inst > 12.0f) inst = c->cl_speed;   // teleport / first sample
+        c->cl_speed = lerpf(c->cl_speed, inst, 1.0f - expf(-dt * 8.0f));
+        c->cl_prev_feet = feet;
+        in.speed = c->cl_speed;
+        in.move_local = c->cl_speed > 0.05f ? v2(0, 1) : v2(0, 0);
+        in.body_yaw = in.aim_yaw = quat_get_yaw(w->xf[i].rot);
+    }
     c->body_yaw = in.body_yaw;
     charrt_set_inputs(&c->rt, &in);
     charrt_tick(&c->rt, dt);
@@ -1029,6 +1111,16 @@ bool chars_raycast(World *w, EntityId ignore, vec3 o, vec3 d, float range, u32 v
         CharacterInst *c = w->chars->c[k];
         if (!c || c->ent == ignore || !ent_valid(w, c->ent) || c->dead) continue;
         if (w->flags[ENT_INDEX(c->ent)] & EF_DEAD) continue;
+        {
+            // Broadphase: the ray against a sphere around the body (plus lag-compensation slack)
+            // before any rewind, so a crowd of hundreds costs little per shot.
+            vec3 cc = v3_add(c->root.t, v3(0, 0.95f, 0));
+            float rad = 1.4f + (view_tick256 && c->history ? 2.5f : 0.0f);
+            vec3 oc = v3_sub(cc, o);
+            float tca = v3_dot(oc, d);
+            if (tca < -rad || tca > best + rad) continue;
+            if (v3_len2(oc) - tca * tca > rad * rad) continue;
+        }
         const HitboxSet *set = &c->hit;
         if (w->authority && view_tick256 && c->history) {
             hitbox_rewind(c->history, view_tick256, &rew);
@@ -1948,6 +2040,19 @@ void zombies_attack(World *w) {
         ev.tick = w->tick;
         chars_push_event(w, &ev);
     }
+}
+
+void chars_npc_melee(World *w, CharacterInst *c) {
+    c->ai.attack_t = 1.2f;
+    c->ai.mode = ZM_ATTACK;
+    ctrl_set(&c->rt.ctrl, AP_SEED, (float)(dg_hash_u32(c->ent ^ w->tick) % 3));
+    charrt_trigger(&c->rt, AP_T_MELEE);
+    AnimEvent ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.type = AEV_MELEE;
+    ev.ent = c->ent;
+    ev.tick = w->tick;
+    chars_push_event(w, &ev);
 }
 
 static void zombie_ai(World *w, CharacterInst *c, int i, float dt) {

@@ -1,4 +1,5 @@
 // Presentation: builds draw lists for the world, local view, hands, effects, HUD and menus.
+#include "gameplay/zombies/horde.h"
 #include "vfx/vfx.h"
 #include "game_internal.h"
 #include "ui/recoil_debug.h"
@@ -504,6 +505,7 @@ static void draw_debug(World *w, vec3 cam) {
         }
     }
     chars_debug_draw(w, cam);
+    horde_debug_draw(w);
     if (G->r_drawhitboxes->i) {
         ENT_FOREACH(w, i) {
             if (!(w->comps[i] & C_HITBOX)) continue;

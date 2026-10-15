@@ -41,6 +41,8 @@ enum NetFieldBits {
     NF_EXTRA = 1 << 10,  // door knob / lever target data
     NF_ANIMST = 1 << 11, // replicated animation state (characters), own sub-field mask
     NF_ATTACH = 1 << 12, // weapon attachment ids (u8 per slot, own per-slot delta mask)
+    NF_DPOS  = 1 << 13,  // position as an i16 x 3 delta (1/256 m) from the baseline (instead of NF_POS)
+    NF_DPOS8 = 1 << 14,  // position as an i8 x 3 delta (1/64 m, moves under 2 m: walking zombies)
     NF_ALL   = 0x1FFF,
 };
 

@@ -1,0 +1,20 @@
+{
+  "_comment": "Horde tuning (src/gameplay/zombies, docs/ZOMBIES.md). Tiers are by distance to the nearest player: near / mid / far bounds (m), beyond far = dormant. Intervals are ticks (60 Hz) for steering + mover (sim) and host animation + hitboxes (anim), snapshots for the network (0 = not sent).",
+  "movement": {
+    "speed_mult": 1.0, "accel": 6.0, "turn_rate_deg": 220, "stop_dist": 0.9, "speed_jitter": 0.1,
+    "separation_radius": 0.85, "separation_weight": 2.2,
+    "alignment_radius": 2.2, "alignment_weight": 0.25,
+    "avoid_weight": 2.5, "seek_weight": 1.0,
+    "retarget_ticks": 15, "cast_interval": 6, "cast_len": 1.1,
+    "ground_interval": 8, "step_height": 0.45, "max_slope_deg": 50
+  },
+  "attack": { "range": 1.35, "facing_deg": 45, "cooldown": 1.6, "hit_time": 0.45, "damage": 10 },
+  "tiers": {
+    "dist": [20, 50, 140], "hysteresis": 3,
+    "sim_interval": [1, 2, 4, 60],
+    "anim_interval": [1, 2, 4, 60],
+    "physics_dist": 20, "physics_hysteresis": 4
+  },
+  "spawn": { "per_tick": 32, "radius": 30, "capacity": 2048 },
+  "net": { "interval": [1, 2, 4, 0], "near": 20, "mid": 50, "budget_bytes_per_s": 22000 }
+}

@@ -16,7 +16,7 @@
 #include "gameplay/hitboxes.h"
 #include "physics/ragdoll.h"
 
-#define MAX_CHARACTERS 256
+#define MAX_CHARACTERS 2048   // hordes (src/gameplay/zombies)
 #define CHAR_NET_SAMPLES 8
 
 typedef enum ZombieMode { ZM_IDLE, ZM_WANDER, ZM_ATTACK } ZombieMode;
@@ -88,6 +88,14 @@ typedef struct CharacterInst {
     float predicted_hit_t;
     int predicted_hit_part;
     ZombieAI ai;
+    // Horde zombies (src/gameplay/zombies/horde.c): the horde moves them; the host evaluates
+    // their animation + hitboxes every sim_interval ticks (phase spreads the work), shifting the
+    // hitboxes with the body in between.
+    int horde;                        // horde slot + 1 (0 = not in a horde)
+    int sim_interval, sim_phase;
+    vec3 hit_feet;                    // feet when the hitboxes were last built
+    vec3 cl_prev_feet;                // client: zombie locomotion derived from the replicated motion
+    float cl_speed;
     bool is_player, local;
     int slot;
     u32 events_received[AEV_COUNT];
@@ -128,6 +136,11 @@ CharacterInst *char_get_index(const World *w, int ent_index);
 
 // Host: sim-only animation for every character (call after movement / weapons, before lag-comp).
 void chars_host_tick(World *w, float dt);
+// Host: lag-compensation history for a character (allocated on first use; horde zombies only
+// keep one while near a player).
+void chars_ensure_history(CharacterInst *c);
+// Host stats of the last tick: characters evaluated (animation + hitboxes), ms spent.
+void chars_host_stats(int *evaluated, float *ms);
 // Gameplay notifications (host + local prediction).
 void chars_notify_attack(World *w, int player_slot, bool melee, bool first_predict);
 // Clients: replicated state from snapshots, then one tick of every replicated character.
@@ -176,6 +189,8 @@ void chars_predict_hit(World *w, EntityId target, int part, vec3 dir);
 // Zombies (host).
 EntityId spawn_zombie(World *w, vec3 feet, float yaw, u8 character_id);
 void zombies_attack(World *w);
+// Host: an NPC swings (melee animation + replicated event); the caller applies the damage.
+void chars_npc_melee(World *w, CharacterInst *c);
 // Extra spread (degrees) from arm injuries.
 float chars_limb_spread(const World *w, EntityId e);
 // Debug / tools.

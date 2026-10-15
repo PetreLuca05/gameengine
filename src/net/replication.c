@@ -5,6 +5,8 @@
 #include "game/game_internal.h"
 #include "gameplay/characters.h"
 #include "core/log.h"
+#include "core/engine.h"
+#include "gameplay/zombies/horde.h"
 #include <stdlib.h>
 
 void snap_history_init(SnapHistory *h) {
@@ -62,7 +64,20 @@ static void capture_one(World *w, int i, NetEnt *e) {
     }
     if (w->type[i] == ET_DOOR) e->extra = w->door[i].knob_local;
     const AnimNetState *as = chars_net_state(w, i);
-    if (as) { e->anim_state = *as; e->has_anim = true; }
+    if (as) {
+        e->anim_state = *as;
+        e->has_anim = true;
+        if (w->type[i] == ET_ZOMBIE) {
+            // Hordes: clients derive locomotion from the motion (characters.c client_one); only
+            // the discrete state (states, flags, limbs, weapon, character, death) goes out.
+            e->anim_state.speed = 0;
+            e->anim_state.move_x = e->anim_state.move_y = 0;
+            e->anim_state.aim_yaw = e->anim_state.body_yaw = 0;
+            e->anim_state.aim_pitch = 0;
+            e->anim_state.phase = 0;
+            e->anim_state.state_start = 0;
+        }
+    }
     if (w->type[i] == ET_SWITCH) e->extra.x = (float)w->lever[i].light_group;
     if (w->type[i] == ET_LIGHT) e->extra = v3(w->light[i].flicker, w->light[i].scheduled ? 1.0f : 0.0f, 0.0f);
 }
@@ -110,10 +125,25 @@ static u32 diff_mask(const NetEnt *a, const NetEnt *b) {
 // The anim sub-mask needs the baseline: written by repl_write_delta via this hook.
 static const NetEnt *g_write_base;
 
+static i16 g_dpos[3];   // NF_DPOS payload (set by repl_write_delta)
+static u32 g_field_count[16], g_bytes_by_type[32];
+void repl_debug_dump(void) {
+    char b[512];
+    int n = snprintf(b, sizeof(b), "repl fields:");
+    for (int k = 0; k < 14; k++) n += snprintf(b + n, sizeof(b) - (size_t)n, " %d:%u", k, g_field_count[k]);
+    n += snprintf(b + n, sizeof(b) - (size_t)n, " | bytes by type:");
+    for (int t = 0; t < 32; t++) if (g_bytes_by_type[t]) n += snprintf(b + n, sizeof(b) - (size_t)n, " %d:%u", t, g_bytes_by_type[t]);
+    log_info("%s", b);
+    memset(g_field_count, 0, sizeof(g_field_count));
+    memset(g_bytes_by_type, 0, sizeof(g_bytes_by_type));
+}
+
 static void write_fields(Writer *w, const NetEnt *e, u32 m) {
     if (m & NF_TYPE) { w_u8(w, e->type); w_u8(w, e->slot); }
     if (m & NF_FLAGS) w_u32(w, e->flags);
     if (m & NF_POS) w_vec3(w, e->pos);
+    if (m & NF_DPOS) w_bytes(w, g_dpos, sizeof(g_dpos));
+    if (m & NF_DPOS8) { i8 q[3] = { (i8)g_dpos[0], (i8)g_dpos[1], (i8)g_dpos[2] }; w_bytes(w, q, sizeof(q)); }
     if (m & NF_ROT) w_quat(w, e->rot);
     if (m & NF_ANIM) w_f32(w, e->anim);
     if (m & NF_ITEM) { w_u16(w, e->item); w_u16(w, e->count); }
@@ -141,6 +171,16 @@ static void read_fields(Reader *r, NetEnt *e, u32 m) {
     if (m & NF_TYPE) { e->type = r_u8(r); e->slot = r_u8(r); }
     if (m & NF_FLAGS) e->flags = r_u32(r);
     if (m & NF_POS) e->pos = r_vec3(r);
+    if (m & NF_DPOS8) {
+        i8 q[3];
+        r_bytes(r, q, sizeof(q));
+        e->pos = v3(e->pos.x + (float)q[0] * (1.0f / 64.0f), e->pos.y + (float)q[1] * (1.0f / 64.0f), e->pos.z + (float)q[2] * (1.0f / 64.0f));
+    }
+    if (m & NF_DPOS) {
+        i16 q[3];
+        r_bytes(r, q, sizeof(q));
+        e->pos = v3(e->pos.x + (float)q[0] * (1.0f / 256.0f), e->pos.y + (float)q[1] * (1.0f / 256.0f), e->pos.z + (float)q[2] * (1.0f / 256.0f));
+    }
     if (m & NF_ROT) e->rot = r_quat(r);
     if (m & NF_ANIM) e->anim = r_f32(r);
     if (m & NF_ITEM) { e->item = r_u16(r); e->count = r_u16(r); }
@@ -167,7 +207,7 @@ static quat quantize_rot(quat q) {
     return r_quat(&r);
 }
 
-void repl_write_delta(Writer *wr, const SnapFrame *base, const SnapFrame *cur) {
+void repl_write_delta(Writer *wr, const SnapFrame *base, SnapFrame *cur) {
     // Changes: walk both sorted lists.
     u32 count_pos = wr->len;
     w_u16(wr, 0);
@@ -176,17 +216,49 @@ void repl_write_delta(Writer *wr, const SnapFrame *base, const SnapFrame *cur) {
     for (int ci = 0; ci < cur->count; ci++) {
         NetEnt e = cur->ents[ci];
         e.rot = quantize_rot(e.rot);
+        cur->ents[ci].rot = e.rot;   // the baseline must hold what the client decodes, or every rotation looks changed
         u32 idx = ENT_INDEX(e.id);
         while (base && bi < base->count && ENT_INDEX(base->ents[bi].id) < idx) bi++;
         const NetEnt *b = (base && bi < base->count && base->ents[bi].id == e.id) ? &base->ents[bi] : NULL;
         u32 m = diff_mask(b, &e);
         if (!m) continue;
+        if ((m & NF_POS) && b && e.type == ET_ZOMBIE) {
+            // Walking zombies: a 3-byte delta (1/64 m) when it fits.
+            float qx = roundf((e.pos.x - b->pos.x) * 64.0f), qy = roundf((e.pos.y - b->pos.y) * 64.0f), qz = roundf((e.pos.z - b->pos.z) * 64.0f);
+            if (fabsf(qx) <= 127.0f && fabsf(qy) <= 127.0f && fabsf(qz) <= 127.0f) {
+                g_dpos[0] = (i16)qx;
+                g_dpos[1] = (i16)qy;
+                g_dpos[2] = (i16)qz;
+                e.pos = v3(b->pos.x + (float)(i8)g_dpos[0] * (1.0f / 64.0f), b->pos.y + (float)(i8)g_dpos[1] * (1.0f / 64.0f), b->pos.z + (float)(i8)g_dpos[2] * (1.0f / 64.0f));
+                cur->ents[ci].pos = e.pos;
+                m = (m & ~(u32)NF_POS) | NF_DPOS8;
+                if (v3_eq(e.pos, b->pos)) m &= ~(u32)NF_DPOS8;
+                if (!m) continue;
+            }
+        }
+        if ((m & NF_POS) && b) {
+            // Small moves: 6-byte delta from what the client has, stored back exactly as decoded.
+            float qx = roundf((e.pos.x - b->pos.x) * 256.0f), qy = roundf((e.pos.y - b->pos.y) * 256.0f), qz = roundf((e.pos.z - b->pos.z) * 256.0f);
+            if (fabsf(qx) < 32767.0f && fabsf(qy) < 32767.0f && fabsf(qz) < 32767.0f) {
+                g_dpos[0] = (i16)qx;
+                g_dpos[1] = (i16)qy;
+                g_dpos[2] = (i16)qz;
+                e.pos = v3(b->pos.x + (float)g_dpos[0] * (1.0f / 256.0f), b->pos.y + (float)g_dpos[1] * (1.0f / 256.0f), b->pos.z + (float)g_dpos[2] * (1.0f / 256.0f));
+                cur->ents[ci].pos = e.pos;
+                m = (m & ~(u32)NF_POS) | NF_DPOS;
+                if (v3_eq(e.pos, b->pos)) m &= ~(u32)NF_DPOS;   // moved less than the step
+                if (!m) continue;
+            }
+        }
+        u32 before = wr->len;
         w_u32(wr, e.id);
         w_u16(wr, (u16)m);
         g_write_base = b;
         write_fields(wr, &e, m);
         g_write_base = NULL;
         changes++;
+        for (int k = 0; k < 16; k++) if (m & (1u << k)) g_field_count[k]++;
+        g_bytes_by_type[DG_MIN(e.type, 31)] += wr->len - before;
     }
     memcpy(wr->buf + count_pos, &changes, 2);
     // Removals: baseline entities not present (by id) in the current frame.
@@ -204,6 +276,82 @@ void repl_write_delta(Writer *wr, const SnapFrame *base, const SnapFrame *cur) {
         }
     }
     memcpy(wr->buf + rem_pos, &removals, 2);
+}
+
+// ------------------------------------------------------------------ horde update rates
+
+typedef struct RateCand { int ci; u32 prio; } RateCand;
+static int cmp_cand(const void *a, const void *b) {
+    const RateCand *x = (const RateCand *)a, *y = (const RateCand *)b;
+    if (x->prio != y->prio) return x->prio > y->prio ? -1 : 1;
+    return x->ci < y->ci ? -1 : (x->ci > y->ci ? 1 : 0);
+}
+
+int repl_rate_limit(const SnapFrame *base, SnapFrame *cur, vec3 viewer, u32 snap_index, u8 *age, int budget_bytes) {
+    if (!base) return 0;
+    const HordeConfig *hc = horde_config();
+    static RateCand cand[MAX_SNAP_ENTS];
+    int nc = 0, held = 0;
+    int bi = 0;
+    const int cost = 14;   // bytes of a typical zombie update (measured: header 6, delta position 3, rotation 4; locomotion is derived on the client)
+    for (int ci = 0; ci < cur->count; ci++) {
+        NetEnt *e = &cur->ents[ci];
+        if (e->type != ET_ZOMBIE) continue;
+        u32 idx = ENT_INDEX(e->id);
+        while (bi < base->count && ENT_INDEX(base->ents[bi].id) < idx) bi++;
+        const NetEnt *b = (bi < base->count && base->ents[bi].id == e->id) ? &base->ents[bi] : NULL;
+        if (!b) { age[idx] = 0; continue; }   // new to this client: full state now
+        float d = v3_len(v3_sub(e->pos, viewer));
+        int band = d < hc->net_near ? 0 : (d < hc->net_mid ? 1 : 2);
+        int iv = hc ? hc->net_interval[band] : 1;
+        bool changed = !v3_eq(e->pos, b->pos) || memcmp(&e->rot, &b->rot, sizeof(quat)) || (e->has_anim && anim_net_diff(&b->anim_state, &e->anim_state));
+        bool due = iv > 0 && ((snap_index + idx) % (u32)iv) == 0;
+        // Big events (death, health) are never held; only the transform / animation fields.
+        if (!changed) { age[idx] = 0; continue; }
+        if (!due) {
+            e->pos = b->pos;
+            e->rot = b->rot;
+            e->anim = b->anim;
+            if (b->has_anim) e->anim_state = b->anim_state;
+            if (age[idx] < 255) age[idx]++;
+            held++;
+            continue;
+        }
+        static const u32 weight[3] = { 4, 2, 1 };
+        cand[nc].ci = ci;
+        cand[nc].prio = ((u32)age[idx] + 1u) * weight[band];
+        nc++;
+    }
+    // Byte budget: the highest priorities go out, the rest wait (and gain priority).
+    int room = budget_bytes > 0 ? budget_bytes / cost : nc;
+    if (nc > room) {
+        qsort(cand, (size_t)nc, sizeof(RateCand), cmp_cand);
+        bi = 0;
+        for (int k = room; k < nc; k++) {
+            NetEnt *e = &cur->ents[cand[k].ci];
+            int at = -1;
+            // Baseline lookup (binary search by index).
+            int lo = 0, hi = base->count - 1;
+            u32 idx = ENT_INDEX(e->id);
+            while (lo <= hi) {
+                int mid = (lo + hi) / 2;
+                u32 mi = ENT_INDEX(base->ents[mid].id);
+                if (mi == idx) { at = base->ents[mid].id == e->id ? mid : -1; break; }
+                if (mi < idx) lo = mid + 1; else hi = mid - 1;
+            }
+            if (at < 0) continue;
+            const NetEnt *b = &base->ents[at];
+            e->pos = b->pos;
+            e->rot = b->rot;
+            e->anim = b->anim;
+            if (b->has_anim) e->anim_state = b->anim_state;
+            if (age[idx] < 255) age[idx]++;
+            held++;
+        }
+        nc = room;
+    }
+    for (int k = 0; k < nc; k++) age[ENT_INDEX(cur->ents[cand[k].ci].id)] = 0;
+    return held;
 }
 
 static int find_ent(const SnapFrame *f, u32 id) {
@@ -393,11 +541,34 @@ void repl_apply(World *w, const SnapFrame *f, int local_slot, InterpBuffer *inte
         w->vis[i].emissive = e->emissive;
         dg_strcpy(w->names[i], sizeof(w->names[0]), e->name);
         bool is_local = e->type == ET_PLAYER && e->slot == local_slot;
-        if (!is_local) push_sample(&interp[i], e->id, f->tick, e->pos, e->rot, e->anim);
+        if (!is_local) {
+            // Zombies update at reduced rates: a sample only when they moved (an unchanged copy
+            // would make them stop and jump); interpolation / extrapolation fills the gaps.
+            InterpBuffer *ib = &interp[i];
+            const InterpSample *last = (ib->id == e->id && ib->count) ? &ib->s[(ib->head + INTERP_SAMPLES - 1) % INTERP_SAMPLES] : NULL;
+            bool skip = e->type == ET_ZOMBIE && last && v3_eq(last->pos, e->pos) && !memcmp(&last->rot, &e->rot, sizeof(quat)) && f->tick - last->tick < 60;
+            if (!skip) push_sample(ib, e->id, f->tick, e->pos, e->rot, e->anim);
+        }
     }
 }
 
+// Client: zombie motion smoothness (mean change of the per-frame velocity, m/s) - low = smooth,
+// high = stop-and-go between reduced-rate updates. repl_zombie_jitter() resets the window.
+static vec3 g_zprev[MAX_ENTITIES], g_zvel[MAX_ENTITIES];
+static double g_zjit_sum, g_zspeed_sum;
+static int g_zjit_n;
+static double g_zlast_rt;
+float repl_zombie_jitter(float *mean_speed) {
+    float j = g_zjit_n ? (float)(g_zjit_sum / g_zjit_n) : 0.0f;
+    if (mean_speed) *mean_speed = g_zjit_n ? (float)(g_zspeed_sum / g_zjit_n) : 0.0f;
+    g_zjit_sum = g_zspeed_sum = 0;
+    g_zjit_n = 0;
+    return j;
+}
+
 void repl_interpolate(World *w, InterpBuffer *interp, double rt, int local_slot) {
+    double frame_dt = (rt - g_zlast_rt) / (double)SIM_HZ;
+    g_zlast_rt = rt;
     for (int i = 1; i < w->max_used && i < CLIENT_ENTITY_BASE; i++) {
         if (!w->alive[i]) continue;
         if (w->type[i] == ET_PLAYER && w->player_slot[i] == local_slot) continue;
@@ -415,7 +586,18 @@ void repl_interpolate(World *w, InterpBuffer *interp, double rt, int local_slot)
         vec3 pos;
         quat rot;
         float anim;
-        if (c->tick == a->tick || rt >= (double)c->tick) {
+        if (rt > (double)c->tick && w->type[i] == ET_ZOMBIE && b->count >= 2) {
+            // Past the newest sample (a reduced-rate zombie): keep walking along its last
+            // velocity for up to 0.3 s instead of stopping.
+            const InterpSample *pv = &b->s[(b->head + INTERP_SAMPLES - 2) % INTERP_SAMPLES];
+            const InterpSample *nw = &b->s[(b->head + INTERP_SAMPLES - 1) % INTERP_SAMPLES];
+            float span = (float)(nw->tick - pv->tick);
+            float ex = fminf((float)(rt - (double)nw->tick), 0.3f * SIM_HZ);
+            pos = nw->pos;
+            if (span > 0 && span < 30.0f) pos = v3_add(nw->pos, v3_scale(v3_sub(nw->pos, pv->pos), ex / span));
+            rot = nw->rot;
+            anim = nw->anim;
+        } else if (c->tick == a->tick || rt >= (double)c->tick) {
             pos = c->pos; rot = c->rot; anim = c->anim;
         } else if (rt <= (double)a->tick) {
             pos = a->pos; rot = a->rot; anim = a->anim;
@@ -425,6 +607,22 @@ void repl_interpolate(World *w, InterpBuffer *interp, double rt, int local_slot)
             rot = quat_nlerp(a->rot, c->rot, t);
             anim = lerpf(a->anim, c->anim, t);
         }
+        if (w->type[i] == ET_ZOMBIE && frame_dt > 0 && frame_dt < 0.25 && v3_dist(g_zprev[i], pos) < 3.0f) {
+            // Reduced-rate zombies: the drawn position follows the network one smoothly (corrections
+            // blend over ~0.1 s instead of snapping).
+            float k = 1.0f - expf(-(float)frame_dt / 0.1f);
+            pos = v3_lerp(g_zprev[i], pos, k);
+        }
+        if (w->type[i] == ET_ZOMBIE && frame_dt > 1e-4 && frame_dt < 0.1) {
+            vec3 v = v3_scale(v3_sub(pos, g_zprev[i]), (float)(1.0 / frame_dt));
+            if (v3_len(v) < 20.0f) {
+                g_zjit_sum += v3_len(v3_sub(v, g_zvel[i]));
+                g_zspeed_sum += v3_len(v);
+                g_zjit_n++;
+            }
+            g_zvel[i] = v;
+        }
+        g_zprev[i] = pos;
         w->xf[i].pos = w->xf[i].prev_pos = pos;
         w->xf[i].rot = w->xf[i].prev_rot = rot;
         w->anim[i] = w->anim_prev[i] = anim;

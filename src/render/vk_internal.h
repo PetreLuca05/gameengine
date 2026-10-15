@@ -18,7 +18,7 @@
 #define MAX_DEFERRED 4096
 #define MAX_UPLOADS 4096
 #define DYN_BUFFER_SIZE (16u << 20)
-#define MAX_SKIN_BONES 65536
+#define MAX_SKIN_BONES 196608   // hordes: ~1000 characters x 65 bones + shadow draws
 #define MAX_SKIN_DRAWS 4096
 #define OBJ_SLOTS 16384                // power of two: object_id hash for previous transforms
 

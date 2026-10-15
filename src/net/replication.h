@@ -8,7 +8,7 @@
 #include "anim/anim_net.h"
 
 #define SNAP_HISTORY 32
-#define MAX_SNAP_ENTS 768
+#define MAX_SNAP_ENTS 2560   // hordes
 #define INTERP_SAMPLES 16
 
 typedef struct NetEnt {
@@ -52,12 +52,20 @@ SnapFrame *snap_history_slot(SnapHistory *h, u32 tick);
 // Host: gather entities relevant to a viewer.
 void repl_capture(World *w, vec3 center, float radius, SnapFrame *out);
 // Host: write entity deltas (current vs baseline, baseline may be NULL = full).
-void repl_write_delta(Writer *wr, const SnapFrame *base, const SnapFrame *cur);
+// cur is the history frame being sent: delta-coded positions are stored back quantized (exactly
+// what the client decodes), so later deltas never drift.
+void repl_write_delta(Writer *wr, const SnapFrame *base, SnapFrame *cur);
+// Host: horde update rates for one client. Zombies not due this snapshot (distance bands, then a
+// byte budget by priority = snapshots waited x distance weight) keep the baseline's transform /
+// animation, so nothing is sent for them. age[MAX_ENTITIES]: per-client snapshots since the last
+// update. Returns how many zombie updates were held back.
+int repl_rate_limit(const SnapFrame *base, SnapFrame *cur, vec3 viewer, u32 snap_index, u8 *age, int budget_bytes);
 // Client: decode deltas into out (starting from baseline copy). Returns false on malformed data.
 bool repl_read_delta(Reader *rd, const SnapFrame *base, SnapFrame *out);
 // Client: create/update/destroy replica entities; push interpolation samples.
 void repl_apply(World *w, const SnapFrame *f, int local_slot, InterpBuffer *interp);
 // Client: interpolate replicated transforms at render_tick (fractional server ticks).
 void repl_interpolate(World *w, InterpBuffer *interp, double render_tick, int local_slot);
+float repl_zombie_jitter(float *mean_speed);   // client: zombie motion smoothness since the last call
 
 #endif

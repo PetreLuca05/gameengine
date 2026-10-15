@@ -7,6 +7,7 @@
 #include "protocol.h"
 #include "bitbuf.h"
 #include "replication.h"
+#include "gameplay/zombies/horde.h"
 #include "core/engine.h"
 #include "core/cvar.h"
 #include "core/log.h"
@@ -31,6 +32,9 @@ typedef struct RemoteClient {
     u32 cvar_revision;
     double connect_time;
     float view_tick;
+    u8 zombie_age[MAX_ENTITIES];   // snapshots since each zombie was last updated (repl_rate_limit)
+    int zombies_held;
+    u64 bytes_sent;
 } RemoteClient;
 
 typedef struct Discovery {
@@ -332,6 +336,11 @@ void net_host_after_tick(World *w) {
         repl_capture(w, p->sim.move.pos, relevance_radius(w), cur);
         SnapFrame *base = snap_history_find(&c->history, c->acked_tick);
         if (base == cur) base = NULL;
+        {
+            const HordeConfig *hc = horde_config();
+            int budget = hc ? hc->net_budget / DG_MAX(1, rate) : 0;
+            c->zombies_held = repl_rate_limit(base, cur, p->sim.move.pos, w->tick / (u32)interval, c->zombie_age, budget);
+        }
 
         Writer wr = writer_make(N->buf, NET_BUF);
         w_u8(&wr, MSG_SNAPSHOT);
@@ -350,6 +359,7 @@ void net_host_after_tick(World *w) {
         }
         repl_write_delta(&wr, base, cur);
         N->snap_bytes = N->snap_bytes * 0.9f + (float)wr.len * 0.1f;
+        c->bytes_sent += wr.len;
         send_msg(c->peer, CH_UNRELIABLE, &wr);
     }
     N->t->flush(N->t);
@@ -827,6 +837,29 @@ static void cmd_lanlist(int argc, const char **argv) {
 
 static void cmd_lanrefresh(int argc, const char **argv) { net_lan_refresh(); }
 
+// net_snapstats: per-client snapshot bandwidth since the last call (host), held zombie updates;
+// on a client the zombie motion smoothness.
+static void cmd_snapstats(int argc, const char **argv) {
+    (void)argc; (void)argv;
+    if (N->role == NET_CLIENT) {
+        float sp = 0, j = repl_zombie_jitter(&sp);
+        log_info("net_snapstats: client zombie motion: mean speed %.2f m/s, velocity change per frame %.3f m/s (%.0f %%)", sp, j, sp > 0 ? 100.0f * j / sp : 0.0f);
+        return;
+    }
+    static double last;
+    double now = platform_time();
+    double span = last > 0 ? now - last : 1.0;
+    last = now;
+    for (int s = 0; s < MAX_PLAYERS; s++) {
+        RemoteClient *c = &N->clients[s];
+        if (!c->active) continue;
+        log_info("net_snapstats: client %d: %.1f kB/s snapshots (%.1f s), %d zombie updates held last snapshot", s, (double)c->bytes_sent / 1024.0 / span, span, c->zombies_held);
+        c->bytes_sent = 0;
+    }
+    void repl_debug_dump(void);
+    repl_debug_dump();
+}
+
 bool net_init(void) {
     N = (NetSystem *)calloc(1, sizeof(NetSystem));
     if (enet_initialize() != 0) { log_error("net: enet_initialize failed"); return false; }
@@ -839,6 +872,7 @@ bool net_init(void) {
     N->interp = (InterpBuffer *)calloc(MAX_ENTITIES, sizeof(InterpBuffer));
     snap_history_init(&N->cl_history);
     N->stats_time = platform_time();
+    cmd_register("net_snapstats", cmd_snapstats, "host: per-client snapshot kB/s since the last call, held zombie updates");
     cmd_register("connect", cmd_connect, "connect <ip[:port]> to a LAN/direct host");
     cmd_register("host", cmd_host, "host [lan|steam]: accept players into this game");
     cmd_register("disconnect", cmd_disconnect, "leave the session / stop hosting");
