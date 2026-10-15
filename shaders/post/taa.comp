@@ -66,7 +66,7 @@ void main() {
     for (int y = -1; y <= 1; y++)
         for (int x = -1; x <= 1; x++) {
             ivec2 q = clamp(rc + ivec2(x, y), ivec2(0), ivec2(rsz) - 1);
-            vec3 c = texelFetch(color_tex, q, 0).rgb;
+            vec3 c = sanitize(texelFetch(color_tex, q, 0).rgb);
             c = any(isnan(c)) ? vec3(0.0) : min(c, vec3(65000.0));
             vec2 spos = vec2(q) + 0.5 - jit;         // true position of what this sample shows
             vec2 d = (spos - rp) / radius;
@@ -124,5 +124,5 @@ void main() {
         float wc = (1.0 - w) / (1.0 + lc), wh = w / (1.0 + lh);
         res = (cur * wc + hist * wh) / max(wc + wh, 1e-5);
     }
-    imageStore(dst, op, vec4(res, w));
+    imageStore(dst, op, vec4(sanitize(res), w));
 }

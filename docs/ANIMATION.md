@@ -103,6 +103,11 @@ Character meshes must use the canonical rig or a compatible one (`rig_validate`)
 | renamed / re-parented / missing role bones | **FAIL** (the report names the bones) |
 | proportions differ by more than the tolerance | warning (animation is retargeted by rotation only) |
 
+Bone names match ignoring the namespace prefix (`mixamorig:`, `mixamorig1:`, `mixamorig8:` … depending
+on the Mixamo download). Skinned vertices are **retargeted** at import: each skin cluster's bind pose
+in the file is mapped onto the canonical bone's bind pose, so a character with other proportions keeps
+its shape on the shared skeleton (identity for `Dummy.fbx`).
+
 ## Characters
 
 `assets/characters/<id>.json`:
@@ -120,6 +125,22 @@ Character meshes must use the canonical rig or a compatible one (`rig_validate`)
 `kind` is `player`, `zombie` or `dummy`. Material colors override the FBX material colors by name.
 `lods` and `lod_bias` are optional per-character LOD overrides. Shipped definitions: `player` (1),
 `zombie_placeholder` (2), `zombie_brute` (3), `zombie_runner` (4), `target_dummy` (5).
+
+## Skins (`assets/human/skins.json`)
+
+A skin is a cosmetic mesh on the shared skeleton: same animation, hitboxes, ragdoll and network id,
+another look. `skins.json` lists them (`id`, `name`, `mesh`, optional texture `atlas` + `tiles`), the
+default for players (`"player"`) and one per non-player character type (`"npc"`: armed NPCs `player` →
+Officer, `target_dummy` → Athlete); zombies keep their own meshes. The local player picks with
+`cl_skin` or **Pause → Skin** (applies immediately, saved). Other players are shown with the default
+skin (skins aren't replicated yet).
+
+Textured skins: the FBX textures are extracted with `fbx_textures`
+(`build/bin/fbx_textures --out assets/human/textures assets/human/Ch42_nonPBR.fbx`), then
+`python tools/gen_skin_atlas.py` puts each skin's material diffuse maps side by side (1024² tiles) into
+`assets/human/textures/skin_<id>.png` and registers it in `data/assets.json`. At load every vertex's UV
+is remapped into its material's tile, so a skin is one mesh + one texture (`SkinnedDraw.texture`,
+batched by mesh and texture). Normal / specular / glossiness maps are extracted but not used yet.
 
 ## Anim sets
 

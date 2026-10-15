@@ -19,7 +19,7 @@
 #define LIB_MAX_CLIPS 160
 #define LIB_MAX_SETS 8
 #define LIB_MAX_CHARS 24
-#define LIB_MAX_MESHES 12
+#define LIB_MAX_MESHES 24
 
 typedef enum AssetCategory {
     AC_SKELETON, AC_CLIPS, AC_CONTROLLER, AC_HOLD_STYLES, AC_ANIM_SETS, AC_HITBOXES, AC_RAGDOLL, AC_CHARACTERS,
@@ -65,6 +65,7 @@ int anim_lib_find_set(const AnimLibrary *lib, const char *name);
 int anim_lib_find_clip(const AnimLibrary *lib, const char *name);
 const CharacterDef *anim_lib_char_by_net(const AnimLibrary *lib, u8 net_id);
 const CharacterDef *anim_lib_char_by_id(const AnimLibrary *lib, const char *id);
+int anim_lib_load_mesh(AnimLibrary *lib, const char *rel_path);   // index into lib->meshes (deduplicated), -1 on failure
 const char *asset_category_name(int c);
 u32 anim_manifest_combined(const AnimManifest *m);
 // Writes anim_sets/<name>_template.json listing every controller slot (+ weapon patterns).

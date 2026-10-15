@@ -11,6 +11,9 @@
 #include "render/debug_draw.h"
 #include "player/hands.h"
 #include "anim/procedural_internal.h"
+#include "cJSON.h"
+#include "core/platform.h"
+#include "assets/assets.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -20,8 +23,22 @@ static void cmd_fp_eye_check(int argc, const char **argv);
 #define CG (g_engine.chars)
 #define LIB (g_engine.anim)
 
+#define MAX_SKINS 16
+typedef struct CharSkin {
+    char id[32], name[48];
+    MeshId lod[CHAR_LOD_COUNT], arm, noarm;
+    TextureId texture;              // atlas (0 = vertex colours only)
+} CharSkin;
+
 typedef struct CharGlobals {
     MeshId mesh[LIB_MAX_CHARS][CHAR_LOD_COUNT];
+    i16 keep_map[ANIM_MAX_BONES];
+    CharSkin skins[MAX_SKINS];
+    int skin_count, player_skin;
+    char npc_def[LIB_MAX_CHARS][32];
+    int npc_skin[LIB_MAX_CHARS], npc_count;
+    bool skins_loaded;
+    Cvar *skin_cvar;
     // First-person body: arm-only meshes (viewmodel pass) and bone sets.
     MeshId arm_mesh[LIB_MAX_CHARS];
     MeshId noarm_mesh[LIB_MAX_CHARS];   // the body without those triangles (world pass in first person)
@@ -84,6 +101,7 @@ void characters_register_cvars(void) {
     g->lod_debug = cvar_reg_bool("r_lod_debug", false, 0, "per-character LOD / pixel size / update rate / systems");
     g->lod_force = cvar_reg_int("r_lod_force", -1, -1, 3, 0, "force a character LOD (-1 = automatic)");
     g->lod_bias = cvar_reg_float("r_lod_bias", 1.0f, 0.25f, 4.0f, CVAR_ARCHIVE, "character LOD bias (>1 = more detail)");
+    g->skin_cvar = cvar_reg_string("cl_skin", "", CVAR_ARCHIVE, "your character skin (assets/human/skins.json id; empty = the default)");
     g->fp_body = cvar_reg_bool("cl_fp_body", true, CVAR_ARCHIVE, "first person: draw your own body; the player model's arms replace the placeholder hands");
     g->fp_debug = cvar_reg_int("cl_fp_debug", 0, 0, 2, 0, "first person: 1 = log / draw hand targets and weapon pull-back, 2 = raw body pose (no arm IK, head visible)");
     g->eval_budget = cvar_reg_int("anim_eval_budget", 64, 0, 4096, CVAR_ARCHIVE, "max full character post-passes per tick (0 = unlimited); the rest wait a tick, biggest on screen first");
@@ -105,6 +123,11 @@ void characters_shutdown_globals(void) {
         render_mesh_destroy(CG->arm_mesh[c]);
         render_mesh_destroy(CG->noarm_mesh[c]);
     }
+    for (int k = 0; k < CG->skin_count; k++) {
+        for (int l = 0; l < CHAR_LOD_COUNT; l++) render_mesh_destroy(CG->skins[k].lod[l]);
+        render_mesh_destroy(CG->skins[k].arm);
+        render_mesh_destroy(CG->skins[k].noarm);
+    }
     free(CG);
     CG = NULL;
 }
@@ -116,6 +139,75 @@ static bool cv(Cvar *c) { return c && c->i != 0; }
 
 // GPU meshes per (character, LOD) with the character's material colors baked into the vertex
 // colors; LOD2+ fold finger / end bones onto their kept ancestors (reduced bone set).
+// GPU meshes of one skinned mesh: every LOD (LOD2+ fold end bones onto kept ancestors) with the
+// material colours baked into the vertex colours, plus the first-person arm / no-arm split of LOD0.
+// tiles > 0: texture atlas skin, vertex UVs remapped into the material's tile (mat_tile).
+static void build_char_meshes(const SkinMeshData *m, const u32 *colors, const int *mat_tile, int tiles, const i16 *keep_map,
+                              MeshId *out_lod, MeshId *out_arm, MeshId *out_noarm) {
+    for (int l = 0; l < m->lod_count && l < CHAR_LOD_COUNT; l++) {
+        const SkinLod *L = &m->lods[l];
+        SkinVertex *v = (SkinVertex *)malloc(sizeof(SkinVertex) * L->vcount);
+        for (u32 i = 0; i < L->vcount; i++) {
+            v[i] = L->verts[i];
+            int mat = DG_MIN((int)L->vmat[i], m->material_count - 1);
+            v[i].color = colors[mat];
+            // Texture atlas skins: the material's tile (side by side), repeat folded in.
+            if (tiles > 0) {
+                int tl = DG_CLAMP(mat_tile[mat], 0, tiles - 1);
+                float u = v[i].uv.x - floorf(v[i].uv.x), vv = v[i].uv.y - floorf(v[i].uv.y);
+                v[i].uv = v2(((float)tl + u) / (float)tiles, vv);
+            }
+            if (l >= 2)
+                for (int k = 0; k < 4; k++) v[i].joints[k] = (u8)keep_map[v[i].joints[k]];
+        }
+        out_lod[l] = render_skinned_mesh_create(v, L->vcount, L->indices, L->icount);
+        if (l == 0) {
+            // Arm-only copy for the first-person viewmodel pass: triangles whose vertices are
+            // mostly skinned to the arm chains, re-weighted onto arm bones only.
+            u32 *remap = (u32 *)malloc(sizeof(u32) * L->vcount);
+            SkinVertex *av = (SkinVertex *)malloc(sizeof(SkinVertex) * L->vcount);
+            u32 *ai = (u32 *)malloc(sizeof(u32) * L->icount);
+            u32 *bi = (u32 *)malloc(sizeof(u32) * L->icount);
+            u32 avc = 0, aic = 0, bic = 0;
+            for (u32 i = 0; i < L->vcount; i++) remap[i] = 0xFFFFFFFFu;
+            for (u32 t = 0; t + 2 < L->icount; t += 3) {
+                bool keep = true;
+                for (int k = 0; k < 3 && keep; k++) {
+                    const SkinVertex *sv = &v[L->indices[t + k]];
+                    int aw = 0;
+                    for (int j = 0; j < 4; j++) if (CG->arm_bone[sv->joints[j]]) aw += sv->weights[j];
+                    keep = aw >= 128;
+                }
+                if (!keep) {
+                    for (int k = 0; k < 3; k++) bi[bic++] = L->indices[t + k];
+                    continue;
+                }
+                for (int k = 0; k < 3; k++) {
+                    u32 src = L->indices[t + k];
+                    if (remap[src] == 0xFFFFFFFFu) {
+                        SkinVertex sv = v[src];
+                        int sum = 0;
+                        for (int j = 0; j < 4; j++) { if (!CG->arm_bone[sv.joints[j]]) sv.weights[j] = 0; sum += sv.weights[j]; }
+                        for (int j = 0; j < 4; j++) sv.weights[j] = (u8)(sum ? (sv.weights[j] * 255 + sum / 2) / sum : 0);
+                        remap[src] = avc;
+                        av[avc++] = sv;
+                    }
+                    ai[aic++] = remap[src];
+                }
+            }
+            if (aic) *out_arm = render_skinned_mesh_create(av, avc, ai, aic);
+            if (aic && bic) *out_noarm = render_skinned_mesh_create(v, L->vcount, bi, bic);
+            free(bi);
+            free(remap);
+            free(av);
+            free(ai);
+        }
+        free(v);
+    }
+}
+
+static void ensure_skins(void);
+
 static void ensure_gpu_meshes(void) {
     ensure_globals();
     if (!LIB || CG->lib_revision == LIB->revision) return;
@@ -133,11 +225,10 @@ static void ensure_gpu_meshes(void) {
         CG->head_bone[i] = i == s->role[BR_HEAD] || i == s->role[BR_NECK] || (p >= 0 && CG->head_bone[p]);
     }
     for (int i = 0; i < s->count; i++) CG->inv_bind[i] = xf_to_mat4(xf_inverse(s->bind_model[i]));
-    i16 keep_map[ANIM_MAX_BONES];
     for (int i = 0; i < s->count; i++) {
         int b = i;
         while (b >= 0 && !s->lod_keep[b]) b = s->parent[b];
-        keep_map[i] = (i16)(b >= 0 ? b : 0);
+        CG->keep_map[i] = (i16)(b >= 0 ? b : 0);
     }
     for (int c = 0; c < LIB->char_count; c++) {
         const CharacterDef *d = &LIB->chars[c];
@@ -150,62 +241,101 @@ static void ensure_gpu_meshes(void) {
                 if (!strcmp(d->material_names[o], m->material_names[k])) col = d->material_colors[o];
             colors[k] = rgba8v(col);
         }
-        for (int l = 0; l < m->lod_count && l < CHAR_LOD_COUNT; l++) {
-            const SkinLod *L = &m->lods[l];
-            SkinVertex *v = (SkinVertex *)malloc(sizeof(SkinVertex) * L->vcount);
-            for (u32 i = 0; i < L->vcount; i++) {
-                v[i] = L->verts[i];
-                v[i].color = colors[DG_MIN((int)L->vmat[i], m->material_count - 1)];
-                if (l >= 2)
-                    for (int k = 0; k < 4; k++) v[i].joints[k] = (u8)keep_map[v[i].joints[k]];
-            }
-            CG->mesh[c][l] = render_skinned_mesh_create(v, L->vcount, L->indices, L->icount);
-            if (l == 0) {
-                // Arm-only copy for the first-person viewmodel pass: triangles whose vertices are
-                // mostly skinned to the arm chains, re-weighted onto arm bones only.
-                u32 *remap = (u32 *)malloc(sizeof(u32) * L->vcount);
-                SkinVertex *av = (SkinVertex *)malloc(sizeof(SkinVertex) * L->vcount);
-                u32 *ai = (u32 *)malloc(sizeof(u32) * L->icount);
-                u32 *bi = (u32 *)malloc(sizeof(u32) * L->icount);
-                u32 avc = 0, aic = 0, bic = 0;
-                for (u32 i = 0; i < L->vcount; i++) remap[i] = 0xFFFFFFFFu;
-                for (u32 t = 0; t + 2 < L->icount; t += 3) {
-                    bool keep = true;
-                    for (int k = 0; k < 3 && keep; k++) {
-                        const SkinVertex *sv = &v[L->indices[t + k]];
-                        int aw = 0;
-                        for (int j = 0; j < 4; j++) if (CG->arm_bone[sv->joints[j]]) aw += sv->weights[j];
-                        keep = aw >= 128;
-                    }
-                    if (!keep) {
-                        for (int k = 0; k < 3; k++) bi[bic++] = L->indices[t + k];
-                        continue;
-                    }
-                    for (int k = 0; k < 3; k++) {
-                        u32 src = L->indices[t + k];
-                        if (remap[src] == 0xFFFFFFFFu) {
-                            SkinVertex sv = v[src];
-                            int sum = 0;
-                            for (int j = 0; j < 4; j++) { if (!CG->arm_bone[sv.joints[j]]) sv.weights[j] = 0; sum += sv.weights[j]; }
-                            for (int j = 0; j < 4; j++) sv.weights[j] = (u8)(sum ? (sv.weights[j] * 255 + sum / 2) / sum : 0);
-                            remap[src] = avc;
-                            av[avc++] = sv;
-                        }
-                        ai[aic++] = remap[src];
-                    }
-                }
-                if (aic) CG->arm_mesh[c] = render_skinned_mesh_create(av, avc, ai, aic);
-                if (aic && bic) CG->noarm_mesh[c] = render_skinned_mesh_create(v, L->vcount, bi, bic);
-                free(bi);
-                free(remap);
-                free(av);
-                free(ai);
-            }
-            free(v);
-        }
+        build_char_meshes(m, colors, NULL, 0, CG->keep_map, CG->mesh[c], &CG->arm_mesh[c], &CG->noarm_mesh[c]);
     }
     CG->lib_revision = LIB->revision;
+    CG->skins_loaded = false;
+    ensure_skins();
 }
+
+// ------------------------------------------------------------------ skins (assets/human/skins.json)
+
+static int skin_find(const char *id) {
+    for (int k = 0; k < CG->skin_count; k++) if (!strcmp(CG->skins[k].id, id)) return k;
+    return -1;
+}
+
+static void ensure_skins(void) {
+    if (CG->skins_loaded || !LIB) return;
+    CG->skins_loaded = true;
+    for (int k = 0; k < CG->skin_count; k++) {
+        for (int l = 0; l < CHAR_LOD_COUNT; l++) render_mesh_destroy(CG->skins[k].lod[l]);
+        render_mesh_destroy(CG->skins[k].arm);
+        render_mesh_destroy(CG->skins[k].noarm);
+    }
+    CG->skin_count = 0;
+    CG->npc_count = 0;
+    CG->player_skin = -1;
+    char buf[512];
+    char *text = platform_read_file(platform_data_path("assets/human/skins.json", buf, sizeof(buf)), NULL);
+    cJSON *root = text ? cJSON_Parse(text) : NULL;
+    free(text);
+    if (!root) return;
+    const cJSON *e;
+    cJSON_ArrayForEach(e, cJSON_GetObjectItemCaseSensitive(root, "skins")) {
+        if (CG->skin_count >= MAX_SKINS) break;
+        CharSkin *sk = &CG->skins[CG->skin_count];
+        memset(sk, 0, sizeof(*sk));
+        const cJSON *id = cJSON_GetObjectItemCaseSensitive(e, "id"), *nm = cJSON_GetObjectItemCaseSensitive(e, "name");
+        const cJSON *mesh = cJSON_GetObjectItemCaseSensitive(e, "mesh"), *atlas = cJSON_GetObjectItemCaseSensitive(e, "atlas");
+        if (!cJSON_IsString(id) || !cJSON_IsString(mesh)) continue;
+        dg_strcpy(sk->id, sizeof(sk->id), id->valuestring);
+        dg_strcpy(sk->name, sizeof(sk->name), cJSON_IsString(nm) ? nm->valuestring : id->valuestring);
+        int mi = anim_lib_load_mesh(LIB, mesh->valuestring);
+        if (mi < 0) { log_warn("skin %s: mesh %s unavailable", sk->id, mesh->valuestring); continue; }
+        const SkinMeshData *m = &LIB->meshes[mi];
+        // Material -> atlas tile; textured materials are white (the texture is the colour).
+        int tile[SKIN_MAX_MATERIALS];
+        u32 colors[SKIN_MAX_MATERIALS];
+        int tiles = 0;
+        for (int k = 0; k < m->material_count; k++) { tile[k] = 0; colors[k] = rgba8v(m->material_colors[k]); }
+        const cJSON *t;
+        cJSON_ArrayForEach(t, cJSON_GetObjectItemCaseSensitive(e, "tiles")) {
+            const cJSON *mat = cJSON_GetObjectItemCaseSensitive(t, "material");
+            if (cJSON_IsString(mat))
+                for (int k = 0; k < m->material_count; k++)
+                    if (!strcmp(m->material_names[k], mat->valuestring)) { tile[k] = tiles; colors[k] = 0xFFFFFFFFu; }
+            tiles++;
+        }
+        if (tiles && cJSON_IsString(atlas)) sk->texture = assets_texture(atlas->valuestring);
+        if (!sk->texture) tiles = 0;
+        build_char_meshes(m, colors, tile, tiles, CG->keep_map, sk->lod, &sk->arm, &sk->noarm);
+        CG->skin_count++;
+    }
+    const cJSON *pl = cJSON_GetObjectItemCaseSensitive(root, "player");
+    if (cJSON_IsString(pl)) CG->player_skin = skin_find(pl->valuestring);
+    const cJSON *npc = cJSON_GetObjectItemCaseSensitive(root, "npc");
+    cJSON_ArrayForEach(e, npc) {
+        if (CG->npc_count >= LIB_MAX_CHARS || !cJSON_IsString(e)) continue;
+        dg_strcpy(CG->npc_def[CG->npc_count], 32, e->string);
+        CG->npc_skin[CG->npc_count] = skin_find(e->valuestring);
+        CG->npc_count++;
+    }
+    cJSON_Delete(root);
+    log_info("characters: %d skin(s), player default '%s'", CG->skin_count, CG->player_skin >= 0 ? CG->skins[CG->player_skin].id : "-");
+}
+
+// Which skin a character instance wears: the local player's choice (cl_skin), other players the
+// default, non-player characters by type (skins.json "npc"); -1 = the character's own mesh.
+static int skin_for(const World *w, const CharacterInst *c, int local_slot) {
+    ensure_skins();
+    if (!CG->skin_count) return -1;
+    if (c->is_player) {
+        if (c->slot == local_slot && CG->skin_cvar && CG->skin_cvar->str[0]) {
+            int k = skin_find(CG->skin_cvar->str);
+            if (k >= 0) return k;
+        }
+        return CG->player_skin;
+    }
+    (void)w;
+    for (int k = 0; k < CG->npc_count; k++)
+        if (!strcmp(CG->npc_def[k], c->def->id)) return CG->npc_skin[k];
+    return -1;
+}
+
+int chars_skin_count(void) { ensure_globals(); ensure_skins(); return CG->skin_count; }
+const char *chars_skin_id(int i) { return i >= 0 && i < CG->skin_count ? CG->skins[i].id : ""; }
+const char *chars_skin_name(int i) { return i >= 0 && i < CG->skin_count ? CG->skins[i].name : ""; }
 
 // ------------------------------------------------------------------ system
 
@@ -1170,9 +1300,22 @@ void chars_present_tick(World *w, vec3 cam_pos, float fov_deg, float screen_h, f
 
 static mat4 g_palette[ANIM_MAX_BONES];
 
+// Skin of the character being drawn (skin_for; -1 = the character's own mesh).
+static int g_draw_skin = -1;
+
+static MeshId char_lod_mesh(const CharacterInst *c, int lod) {
+    lod = DG_CLAMP(lod, 0, CHAR_LOD_COUNT - 1);
+    if (g_draw_skin >= 0) {
+        for (int l = lod; l >= 0; l--) if (CG->skins[g_draw_skin].lod[l]) return CG->skins[g_draw_skin].lod[l];
+        return 0;
+    }
+    return CG->mesh[c->def_index][lod];
+}
+static TextureId char_texture(void) { return g_draw_skin >= 0 ? CG->skins[g_draw_skin].texture : 0; }
+
 static void draw_char(World *w, CharacterInst *c, const Xform *pose, int lod, float fade, u32 flags, bool shadow) {
     const Skeleton *s = &LIB->skel;
-    MeshId mesh = CG->mesh[c->def_index][DG_CLAMP(lod, 0, CHAR_LOD_COUNT - 1)];
+    MeshId mesh = char_lod_mesh(c, lod);
     if (!mesh) return;
     for (int b = 0; b < s->count; b++) g_palette[b] = mat4_mul(xf_to_mat4(pose[b]), CG->inv_bind[b]);
     SkinnedDraw d;
@@ -1187,6 +1330,8 @@ static void draw_char(World *w, CharacterInst *c, const Xform *pose, int lod, fl
     d.cast_shadow = shadow;
     d.center = pose[s->role[BR_HIPS]].t;
     d.radius = s->height * c->def->scale;
+    d.texture = char_texture();
+    if (d.texture) d.flags |= MAT_TEXTURED;
     // Stable id per character + LOD (previous palette -> per-bone velocity for TAA / motion blur).
     d.object_id = shadow ? 0u : (0x20000000u | ((u32)ENT_INDEX(c->ent) << 4) | (u32)DG_CLAMP(lod, 0, 7));
     render_draw_skinned(&d);
@@ -1208,6 +1353,8 @@ static void draw_char_mesh(MeshId mesh, CharacterInst *c, const Xform *pose, u32
     d.cast_shadow = shadow;
     d.center = pose[s->role[BR_HIPS]].t;
     d.radius = s->height * c->def->scale;
+    d.texture = char_texture();
+    if (d.texture) d.flags |= MAT_TEXTURED;
     d.object_id = 0x20000000u | ((u32)ENT_INDEX(c->ent) << 4) | ((flags & MAT_VIEWMODEL) ? 9u : 8u);
     render_draw_skinned(&d);
 }
@@ -1530,10 +1677,14 @@ void chars_render_local_fp(World *w, float alpha, int local_slot) {
     }
     // Arms are drawn once, in the viewmodel pass with the item (no wall clipping, own FOV); the
     // world pass gets the body without them.
-    MeshId body = CG->arm_mesh[c->def_index] && CG->noarm_mesh[c->def_index] ? CG->noarm_mesh[c->def_index] : CG->mesh[c->def_index][0];
+    g_draw_skin = skin_for(w, c, local_slot);
+    MeshId arm = g_draw_skin >= 0 ? CG->skins[g_draw_skin].arm : CG->arm_mesh[c->def_index];
+    MeshId noarm = g_draw_skin >= 0 ? CG->skins[g_draw_skin].noarm : CG->noarm_mesh[c->def_index];
+    MeshId body = arm && noarm ? noarm : char_lod_mesh(c, 0);
     draw_char_mesh(body, c, world, 0, false);
-    draw_char_mesh(CG->arm_mesh[c->def_index], c, world, MAT_VIEWMODEL, false);
-    hands_set_body_arms(CG->arm_mesh[c->def_index] != 0);
+    draw_char_mesh(arm, c, world, MAT_VIEWMODEL, false);
+    hands_set_body_arms(arm != 0);
+    g_draw_skin = -1;
     if (cv(CG->fp_debug))
         for (int h = 0; h < 2; h++) {
             if (t.ov_w[h] > 0.001f) dbg_cross(t.ov_palm[h].t, 0.03f, DBG_YELLOW, 0);
@@ -1604,6 +1755,7 @@ void chars_render(World *w, float alpha, vec3 cam_pos, int local_slot) {
         }
         bool local = c->is_player && c->slot == local_slot && !g_thirdperson;
         u32 flags = local ? MAT_SHADOW_ONLY : 0;
+        g_draw_skin = skin_for(w, c, local_slot);
         float dist = v3_dist(cam_pos, c->root.t);
         bool shadow = c->pixels > CG->lod.shadow_pixels || local;
         int lod = c->lod < 0 ? 0 : c->lod;
@@ -1615,6 +1767,7 @@ void chars_render(World *w, float alpha, vec3 cam_pos, int local_slot) {
         }
         // Shadows: one LOD coarser than the main draw.
         if (shadow) draw_char(w, c, pose, DG_MIN(lod + 1, CHAR_LOD_COUNT - 1), 0, MAT_SHADOW_ONLY, true);
+        g_draw_skin = -1;
         // Held item (glued to the right hand).
         if (c->item_valid && !c->dead && (c->item_weapon || c->item_def)) {
             float span = (float)DG_MAX(1, c->interval);

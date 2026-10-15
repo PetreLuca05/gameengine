@@ -73,7 +73,7 @@ void main() {
         float n = 0.15, f = U.s_vol3.w;
         float ps = log(max(pz, n) / n) / log(f / n);
         if (all(greaterThanEqual(puv, vec2(0.0))) && all(lessThanEqual(puv, vec2(1.0))) && ps >= 0.0 && ps <= 1.0) {
-            vec4 h = texture(history, vec3(puv, ps));
+            vec4 h = sanitize4(texture(history, vec3(puv, ps)));
             res = mix(cur, h, 0.9);
         }
     }

@@ -15,11 +15,12 @@
 #include "nuklear_config.h"
 #include "game/game_internal.h"
 #include "render/render.h"
+#include "gameplay/characters.h"
 #include <SDL3/SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
 
-typedef enum MenuPage { PAGE_NONE, PAGE_PAUSE, PAGE_SETTINGS, PAGE_MULTIPLAYER } MenuPage;
+typedef enum MenuPage { PAGE_NONE, PAGE_PAUSE, PAGE_SETTINGS, PAGE_MULTIPLAYER, PAGE_SKIN } MenuPage;
 typedef enum SettingsTab { TAB_GRAPHICS, TAB_CONTROLS, TAB_CROSSHAIR, TAB_AUDIO } SettingsTab;
 
 typedef struct GraphicsSettings {
@@ -116,6 +117,7 @@ static void cmd_menu(int argc, const char **argv) {
     if (!strcmp(page, "audio")) { M->page = PAGE_SETTINGS; M->tab = TAB_AUDIO; }
     if (!strcmp(page, "crosshair")) { M->page = PAGE_SETTINGS; M->tab = TAB_CROSSHAIR; }
     if (!strcmp(page, "multiplayer")) { M->page = PAGE_MULTIPLAYER; net_lan_refresh(); }
+    if (!strcmp(page, "skin")) M->page = PAGE_SKIN;
     if (g) g->menu_open = true;
     update_mouse_mode();
 }
@@ -244,9 +246,10 @@ static struct nk_rect centered(float w, float h) { return nk_rect((ui_width() - 
 
 static void draw_pause(struct nk_context *ctx) {
     Game *g = game();
-    if (nk_begin(ctx, "PAUSED", centered(S(320), S(400)), NK_WINDOW_BORDER | NK_WINDOW_TITLE | NK_WINDOW_NO_SCROLLBAR)) {
+    if (nk_begin(ctx, "PAUSED", centered(S(320), S(450)), NK_WINDOW_BORDER | NK_WINDOW_TITLE | NK_WINDOW_NO_SCROLLBAR)) {
         nk_layout_row_dynamic(ctx, S(40), 1);
         if (nk_button_label(ctx, "Resume")) { menus_close_all(); nk_end(ctx); return; }
+        if (nk_button_label(ctx, "Skin")) M->page = PAGE_SKIN;
         if (nk_button_label(ctx, "Settings")) { M->page = PAGE_SETTINGS; M->pending = read_graphics(); M->pending_valid = true; collect_resolutions(); }
         if (nk_button_label(ctx, "Multiplayer")) { M->page = PAGE_MULTIPLAYER; net_lan_refresh(); }
         bool steam = net_steam_available();
@@ -489,6 +492,35 @@ static void draw_settings(struct nk_context *ctx) {
     }
 }
 
+// Skin picker: the character skins of assets/human/skins.json (cl_skin, saved with the
+// settings). Applies immediately; non-player characters and zombies keep their own looks.
+static void draw_skin(struct nk_context *ctx) {
+    if (nk_begin(ctx, "SKIN", centered(S(360), S(420)), NK_WINDOW_BORDER | NK_WINDOW_TITLE)) {
+        Cvar *cs = cv("cl_skin");
+        int n = chars_skin_count();
+        nk_layout_row_dynamic(ctx, S(22), 1);
+        nk_label_colored(ctx, "Your character (visible in third person / mirrors / shadow):", NK_TEXT_LEFT, nk_rgb(170, 170, 170));
+        nk_layout_row_dynamic(ctx, S(36), 1);
+        for (int i = 0; i < n; i++) {
+            bool cur = cs && !strcmp(cs->str, chars_skin_id(i));
+            char label[96];
+            snprintf(label, sizeof(label), "%s%s", cur ? "> " : "", chars_skin_name(i));
+            if (nk_button_label(ctx, label) && cs) cvar_set_cv(cs, chars_skin_id(i));
+        }
+        if (cs && !cs->str[0]) {
+            nk_layout_row_dynamic(ctx, S(22), 1);
+            nk_label(ctx, "(using the default skin)", NK_TEXT_LEFT);
+        }
+        nk_layout_row_dynamic(ctx, S(34), 2);
+        if (nk_button_label(ctx, "Third person preview")) {
+            Cvar *tp = cv("cl_thirdperson");
+            if (tp) cvar_set_int(tp, tp->i ? 0 : 1);
+        }
+        if (nk_button_label(ctx, "Back")) { config_save(video_config_path()); M->page = PAGE_PAUSE; }
+    }
+    nk_end(ctx);
+}
+
 static void draw_multiplayer(struct nk_context *ctx) {
     if (nk_begin(ctx, "MULTIPLAYER", centered(S(560), S(520)), NK_WINDOW_BORDER | NK_WINDOW_TITLE)) {
         NetRole role = net_role();
@@ -662,6 +694,7 @@ void menus_draw(void) {
     case PAGE_PAUSE: draw_pause(ctx); break;
     case PAGE_SETTINGS: draw_settings(ctx); break;
     case PAGE_MULTIPLAYER: draw_multiplayer(ctx); break;
+    case PAGE_SKIN: draw_skin(ctx); break;
     default: break;
     }
     vfx_editor_draw();

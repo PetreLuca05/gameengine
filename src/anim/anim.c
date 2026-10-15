@@ -50,15 +50,20 @@ quat quat_twist(quat q, vec3 axis) {
 
 // ------------------------------------------------------------------ skeleton
 
-int skel_find(const Skeleton *s, const char *name) {
-    for (int i = 0; i < s->count; i++)
-        if (!strcmp(s->names[i], name)) return i;
-    return -1;
-}
-
 static const char *base_name(const char *n) {
     const char *c = strrchr(n, ':');
     return c ? c + 1 : n;
+}
+
+// Exact name first, then ignoring the namespace prefix: Mixamo exports name the same rig
+// "mixamorig:Hips", "mixamorig1:Hips", "mixamorig8:Hips" ... depending on the download.
+int skel_find(const Skeleton *s, const char *name) {
+    for (int i = 0; i < s->count; i++)
+        if (!strcmp(s->names[i], name)) return i;
+    const char *b = base_name(name);
+    for (int i = 0; i < s->count; i++)
+        if (!strcmp(base_name(s->names[i]), b)) return i;
+    return -1;
 }
 
 int skel_find_suffix(const Skeleton *s, const char *suffix) {

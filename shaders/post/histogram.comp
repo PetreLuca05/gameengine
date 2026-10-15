@@ -16,7 +16,7 @@ void main() {
     ivec2 sz = textureSize(color_tex, 0);
     ivec2 p = ivec2(gl_GlobalInvocationID.xy) * 2;
     if (p.x < sz.x && p.y < sz.y) {
-        vec3 c = texelFetch(color_tex, p, 0).rgb;
+        vec3 c = sanitize(texelFetch(color_tex, p, 0).rgb);
         float l = luma(c);
         vec2 uv = (vec2(p) + 0.5) / vec2(sz) - 0.5;
         uv.x *= U.misc.w;

@@ -148,6 +148,12 @@ static const char *nearest_shared_ancestor(const Skeleton *s, int b, const Skele
     return NULL;
 }
 
+// Bone names equal ignoring the namespace prefix ("mixamorig8:Hips" == "mixamorig1:Hips").
+static bool bone_name_eq(const char *a, const char *b) {
+    const char *ca = strrchr(a, ':'), *cb = strrchr(b, ':');
+    return !strcmp(ca ? ca + 1 : a, cb ? cb + 1 : b);
+}
+
 static bool has_canonical_descendant(const Skeleton *model, int b, const Skeleton *canon) {
     for (int i = b + 1; i < model->count; i++)
         if (skel_is_descendant(model, i, b) && skel_find(canon, model->names[i]) >= 0) return true;
@@ -171,7 +177,7 @@ bool rig_validate(const Skeleton *canon, const Skeleton *model, float tol, RigRe
             for (int m = 0; m < model->count; m++) {
                 if (skel_find(canon, model->names[m]) >= 0) continue;
                 const char *mp = model->parent[m] >= 0 ? model->names[model->parent[m]] : NULL;
-                if ((cp && mp && !strcmp(cp, mp)) || (!cp && !mp)) { cand = model->names[m]; break; }
+                if ((cp && mp && bone_name_eq(cp, mp)) || (!cp && !mp)) { cand = model->names[m]; break; }
             }
             r->hierarchy_errors++;
             if (cand) rep(r, "ERROR renamed bone: canonical '%s' appears as '%s'\n", canon->names[c], cand);
@@ -202,7 +208,7 @@ bool rig_validate(const Skeleton *canon, const Skeleton *model, float tol, RigRe
         // Parent check against the nearest shared ancestors.
         const char *mp = nearest_shared_ancestor(model, m, canon);
         const char *cp = nearest_shared_ancestor(canon, c, model);
-        if ((mp == NULL) != (cp == NULL) || (mp && cp && strcmp(mp, cp))) {
+        if ((mp == NULL) != (cp == NULL) || (mp && cp && !bone_name_eq(mp, cp))) {
             r->hierarchy_errors++;
             rep(r, "ERROR bone '%s' parent differs: model '%s' vs canonical '%s'\n", model->names[m], mp ? mp : "(root)", cp ? cp : "(root)");
             continue;

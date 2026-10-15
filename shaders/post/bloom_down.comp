@@ -11,7 +11,7 @@ layout(set = 0, binding = 8, rgba16f) uniform writeonly image2D dst;
 
 vec3 fetch(vec2 uv) {
     vec3 c = pc.u0.x == 0u ? textureLod(color_tex, uv, 0.0).rgb : textureLod(prev_mip, uv, 0.0).rgb;
-    return min(max(c, vec3(0.0)), vec3(60000.0));
+    return min(sanitize(c), vec3(60000.0));
 }
 float kw(vec3 a, vec3 b, vec3 c, vec3 d) { return 1.0 / (1.0 + luma((a + b + c + d) * 0.25)); }
 

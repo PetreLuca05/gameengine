@@ -140,6 +140,10 @@ vec3 chars_eye_offset(float yaw, float pitch);
 // pose with the spine aimed at (yaw, pitch) and returns the "camera" socket's world transform.
 // The camera takes the position; its rotation stays the view (pawn control rotation).
 bool chars_fp_bone_world(int role, Xform *out);
+// Character skins (assets/human/skins.json): the local player picks one with cl_skin.
+int chars_skin_count(void);
+const char *chars_skin_id(int i);
+const char *chars_skin_name(int i);
 float chars_fp_hold_weight(void);
 bool chars_fp_item_cam(Xform *item_off, int *state, float *blend);   // rendered item relative to its hold point (false: no hold)                 // 1 = the first-person hold IK owns both hands this frame   // this frame's first-person pose (tests)
 bool chars_fp_camera(World *w, float alpha, int local_slot, float yaw, float pitch, Xform *socket_world);

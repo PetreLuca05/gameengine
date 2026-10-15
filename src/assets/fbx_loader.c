@@ -241,12 +241,20 @@ bool fbx_load_skinned_mesh(const char *path, const Skeleton *canon, SkinMeshData
         const ufbx_skin_deformer *skin = m->skin_deformers.count ? m->skin_deformers.data[0] : NULL;
         // Per-cluster canonical joint.
         int cluster_joint[512];
+        // Retarget: each cluster's bind pose in this file -> the canonical bone's bind pose, so a
+        // character with other proportions keeps its shape on the shared skeleton (identity for
+        // the canonical model itself).
+        static Xform cluster_retarget[512];
         int ncl = skin ? (int)DG_MIN(skin->clusters.count, 512) : 0;
         for (int c = 0; c < ncl; c++) {
-            const ufbx_node *bn = skin->clusters.data[c]->bone_node;
+            const ufbx_skin_cluster *cl = skin->clusters.data[c];
+            const ufbx_node *bn = cl->bone_node;
             int j = bn ? skel_find(canon, bn->name.data) : -1;
             if (j < 0 && bn) { j = canon_index(canon, bn); remapped++; }
             cluster_joint[c] = j < 0 ? 0 : j;
+            Xform mb = conv_matrix(&cv, &cl->bind_to_world);
+            cluster_retarget[c] = xf_mul(canon->bind_model[cluster_joint[c]], xf_inverse(mb));
+            cluster_retarget[c].s = v3(1, 1, 1);
         }
         // Rigid (unskinned) meshes parented under a bone follow that bone.
         int rigid_joint = 0;
@@ -299,6 +307,22 @@ bool fbx_load_skinned_mesh(const char *path, const Skeleton *canon, SkinMeshData
                 u32 vid = m->vertex_indices.data[ix];
                 if (skin && vid < skin->vertices.count) {
                     ufbx_skin_vertex sv = skin->vertices.data[vid];
+                    // Blend the per-cluster retarget (linear, like the skinning itself).
+                    vec3 rp = v3(0, 0, 0), rn = v3(0, 0, 0);
+                    float rw = 0;
+                    for (u32 k = 0; k < sv.num_weights; k++) {
+                        ufbx_skin_weight sw = skin->weights.data[sv.weight_begin + k];
+                        if ((int)sw.cluster_index >= ncl) continue;
+                        const Xform *rt = &cluster_retarget[sw.cluster_index];
+                        float wgt = (float)sw.weight;
+                        rp = v3_madd(rp, xf_point(*rt, v.pos), wgt);
+                        rn = v3_madd(rn, quat_rotate(rt->r, v.normal), wgt);
+                        rw += wgt;
+                    }
+                    if (rw > 1e-6f) {
+                        v.pos = v3_scale(rp, 1.0f / rw);
+                        if (v3_len2(rn) > 1e-12f) v.normal = v3_norm(rn);
+                    }
                     // Top 4 weights, accumulated per canonical joint (remapped bones merge).
                     int js[16];
                     float ws[16];

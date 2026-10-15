@@ -134,6 +134,7 @@ typedef struct SkinnedDraw {
     vec3 center;            // bounding sphere (world) for culling
     float radius;
     u32 object_id;          // stable id (0 = none): previous palette -> per-bone velocity
+    TextureId texture;      // albedo (with MAT_TEXTURED in flags), 0 = vertex colours
 } SkinnedDraw;
 MeshId render_skinned_mesh_create(const SkinVertex *verts, u32 vcount, const u32 *indices, u32 icount);
 void render_draw_skinned(const SkinnedDraw *d);

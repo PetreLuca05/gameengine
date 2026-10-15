@@ -6,7 +6,7 @@
 #include "anim/anim.h"
 #include "anim/anim_mesh.h"
 
-#define ANIM_BAKE_VERSION 5
+#define ANIM_BAKE_VERSION 6   // 6: namespace-insensitive bones, skin retargeting to the canonical bind pose
 
 void anim_cache_set_dir(const char *dir);        // absolute directory (created on demand)
 void anim_cache_set_rebuild(bool rebuild);       // --rebuild-cache: ignore existing entries

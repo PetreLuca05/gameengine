@@ -472,12 +472,12 @@ static void draw_items(VkCommandBuffer cmd, DrawItem *items, u32 count, bool sha
 
 // ------------------------------------------------------------------ skinned characters
 
-typedef struct SkinBatch { u32 mesh, first, count; } SkinBatch;
+typedef struct SkinBatch { u32 mesh, texture, first, count; } SkinBatch;
 typedef struct SkinPass { SkinBatch batches[MAX_SKIN_DRAWS]; u32 batch_count; } SkinPass;
 typedef struct CpuSkin { VkDeviceSize offset; bool ok; } CpuSkin;
 
 static int cmp_skin_mesh(const void *a, const void *b) {
-    u32 ma = ((const SortKey *)a)->key, mb = ((const SortKey *)b)->key;
+    u64 ma = ((const SortKey *)a)->key, mb = ((const SortKey *)b)->key;   // texture << 32 | mesh
     return ma < mb ? -1 : (ma > mb ? 1 : 0);
 }
 
@@ -501,7 +501,7 @@ static u32 build_skin_pass(FrameResources *f, int pass, u32 base, SkinPass *out)
         const SkinnedDraw *d = &R->skin_draws[i];
         if (!skin_in_pass(d, pass)) continue;
         if (pass == 0 && R->r_culling->i && d->radius > 0 && !sphere_visible(R->frustum, d->center, d->radius)) { R->stats.culled++; continue; }
-        keys[n].key = d->mesh;
+        keys[n].key = ((u64)d->texture << 32) | d->mesh;
         keys[n].index = i;
         n++;
     }
@@ -522,17 +522,25 @@ static u32 build_skin_pass(FrameResources *f, int pass, u32 base, SkinPass *out)
             if (prev_palette(d->object_id, &off, &count) && count == (d->bone_count >> 20) && off + count <= R->prev_bone_count)
                 g->info[2] = R->skin_bone_count + off + 1;
         }
-        if (out->batch_count && out->batches[out->batch_count - 1].mesh == d->mesh) out->batches[out->batch_count - 1].count++;
-        else out->batches[out->batch_count++] = (SkinBatch){ d->mesh, base + k, 1 };
+        if (out->batch_count && out->batches[out->batch_count - 1].mesh == d->mesh && out->batches[out->batch_count - 1].texture == d->texture)
+            out->batches[out->batch_count - 1].count++;
+        else out->batches[out->batch_count++] = (SkinBatch){ d->mesh, d->texture, base + k, 1 };
     }
     arena_pop_to(mark);
     return n;
 }
 
 static void draw_skin_pass(VkCommandBuffer cmd, const SkinPass *p) {
+    u32 bound_tex = 0xFFFFFFFFu;
     for (u32 b = 0; b < p->batch_count; b++) {
         const SkinBatch *sb = &p->batches[b];
         GpuMesh *m = &R->meshes[sb->mesh];
+        // Albedo of textured skins (set 1); white otherwise.
+        TextureId tex = sb->texture && R->textures[sb->texture].used && R->textures[sb->texture].ready ? sb->texture : R->white_tex;
+        if (tex != bound_tex) {
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 1, 1, &R->textures[tex].set, 0, NULL);
+            bound_tex = tex;
+        }
         VkDeviceSize zero = 0;
         vkCmdBindVertexBuffers(cmd, 0, 1, &m->vb.buffer, &zero);
         vkCmdBindIndexBuffer(cmd, m->ib.buffer, 0, VK_INDEX_TYPE_UINT32);

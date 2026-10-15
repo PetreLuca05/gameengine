@@ -212,6 +212,8 @@ static int load_mesh(AnimLibrary *lib, const char *rel_path) {
     return i;
 }
 
+int anim_lib_load_mesh(AnimLibrary *lib, const char *rel_path) { return load_mesh(lib, rel_path); }
+
 bool anim_lib_reload_characters(AnimLibrary *lib) {
     int n = 0;
     char **files = list_files("assets/characters", "*.json", &n);

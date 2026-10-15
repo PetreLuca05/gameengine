@@ -44,7 +44,8 @@ void main() {
     target = clamp(target, U.s_exp2.x, U.s_exp2.y);
     if (U.s_lens2.w < 0.5) target = U.s_exp.y;
     float ev = X.e[1];
-    bool init = !(X.e[0] > 0.0) || U.misc.y > 0.5;
+    bool init = !(X.e[0] > 0.0) || U.misc.y > 0.5 || isnan(ev) || isinf(ev) || isnan(X.e[0]) || isinf(X.e[0]);
+    if (isnan(target) || isinf(target)) target = 0.0;
     if (init) ev = target;
     float speed = target > ev ? U.s_exp.z : U.s_exp.w;
     ev += (target - ev) * (1.0 - exp(-U.misc.x * speed));

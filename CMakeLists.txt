@@ -246,6 +246,10 @@ add_executable(bake_anim tools/bake_anim/bake_anim.c)
 set_target_properties(bake_anim PROPERTIES C_STANDARD 11)
 target_link_libraries(bake_anim PRIVATE dg_animcore)
 
+add_executable(fbx_textures tools/fbx_textures/fbx_textures.c)
+set_target_properties(fbx_textures PROPERTIES C_STANDARD 11)
+target_link_libraries(fbx_textures PRIVATE dg_animcore)
+
 add_executable(validate_rig tools/validate_rig/validate_rig.c)
 set_target_properties(validate_rig PROPERTIES C_STANDARD 11)
 target_link_libraries(validate_rig PRIVATE dg_animcore)
