@@ -52,6 +52,8 @@ static void exec_flare(VkCommandBuffer cmd, void *u) {
     PostBind b = { 0 };
     pb_ubo(&b);
     pb_tex_mip(&b, 0, B.down, B.mips > 1 ? 1 : 0, P.linear);
+    pb_tex_mip(&b, 1, B.down, B.mips > 3 ? 3 : DG_MAX(0, B.mips - 1), P.linear);   // ghosts: a blurred mip (soft discs)
+    pb_tex(&b, 2, P.noise, P.point);
     pb_img_fg(&b, 8, B.flare);
     pb_buf(&b, 13, P.exposure_buf.buffer, 64, false);
     pb_push(cmd, &b, VK_PIPELINE_BIND_POINT_COMPUTE);

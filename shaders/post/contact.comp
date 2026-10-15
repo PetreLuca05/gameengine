@@ -26,21 +26,34 @@ void main() {
     vec3 Nw = oct_decode(textureLod(normal_tex, uv, 0.0).rg);
     if (fade <= 0.0 || dot(Nw, Lw) <= 0.0) { imageStore(dst, p, vec4(1.0)); return; }
     vec3 L = normalize((U.view * vec4(Lw, 0.0)).xyz);
+    vec3 N = normalize((U.view * vec4(Nw, 0.0)).xyz);
     int steps = int(U.s_gi.w);
     float len = U.s_gi.z * clamp(-vp.z / 8.0, 0.4, 1.6);   // longer rays far away (pixel footprint)
     float jitter = blue_noise(noise_tex, p).r;
     float occ = 0.0;
     float thickness = 0.05 + 0.02 * -vp.z;
-    vec4 c0 = U.proj * vec4(vp + L * 0.01, 1.0);
-    vec4 c1 = U.proj * vec4(vp + L * (len + 0.01), 1.0);
+    // Start off the surface along its normal (grows with distance: depth precision and the pixel
+    // footprint), else a low sun's ray grazes a flat floor and the floor shadows itself.
+    float lift = 0.01 + 0.0025 * -vp.z;
+    vec3 start = vp + N * lift + L * 0.01;
+    vec4 c0 = U.proj * vec4(start, 1.0);
+    vec4 c1 = U.proj * vec4(start + L * len, 1.0);
+    float plane_min = 0.015 + 0.002 * -vp.z;   // an occluder must stand above the receiver's plane
     for (int i = 0; i < steps; i++) {
         float t = (float(i) + jitter) / float(steps);
         vec4 c = mix(c0, c1, t);
         vec2 suv = (c.xy / c.w + U.jitter.xy) * 0.5 + 0.5;
         if (any(lessThan(suv, vec2(0.0))) || any(greaterThan(suv, vec2(1.0)))) break;
-        float scene_z = linear_depth(textureLod(depth_tex, suv, 0.0).r);
+        float sd = textureLod(depth_tex, suv, 0.0).r;
+        float scene_z = linear_depth(sd);
         float delta = c.w - scene_z;   // clip w = view depth of the ray point
-        if (delta > 0.003 && delta < thickness) { occ = 1.0 - t * 0.6; break; }
+        if (delta > 0.003 && delta < thickness) {
+            // Same surface seen at a grazing angle (floor beyond the ray) is not an occluder.
+            vec3 op = view_pos(suv, sd);
+            if (dot(op - vp, N) < plane_min) continue;
+            occ = 1.0 - t * 0.6;
+            break;
+        }
     }
     imageStore(dst, p, vec4(1.0 - occ * fade));
 }

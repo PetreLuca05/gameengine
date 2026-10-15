@@ -14,6 +14,8 @@ typedef struct InputSystem {
     bool keys[SDL_SCANCODE_COUNT];
     bool mouse_buttons[8];
     vec2 mouse_accum;
+    vec2 sweep;                // scripted mouse motion (px / frame) for sweep_frames frames
+    int sweep_frames;
     float wheel_accum;
     InputFrame frame;
     bool game_focus;
@@ -203,6 +205,14 @@ static void cmd_plus(int argc, const char **argv) {
     IN->script_down[a] = down;
 }
 
+// mouse_sweep <dx> <dy> <frames>: scripted mouse motion in pixels per frame through the normal
+// look path (sensitivity, ADS scale), for tests of camera turns.
+static void cmd_mouse_sweep(int argc, const char **argv) {
+    if (argc < 4) { log_info("usage: mouse_sweep <dx px/frame> <dy px/frame> <frames>"); return; }
+    IN->sweep = v2((float)atof(argv[1]), (float)atof(argv[2]));
+    IN->sweep_frames = atoi(argv[3]);
+}
+
 static void write_binds(FILE *f) {
     fprintf(f, "unbindall\n");
     for (int a = 0; a < ACT_COUNT; a++)
@@ -225,6 +235,7 @@ void input_init(void) {
     cmd_register("bind", cmd_bind, "bind <key> <action> [slot]");
     cmd_register("unbindall", cmd_unbindall, "clear all bindings");
     cmd_register("bindlist", cmd_bindlist, "list bindings");
+    cmd_register("mouse_sweep", cmd_mouse_sweep, "mouse_sweep <dx> <dy> <frames>: scripted mouse motion (px / frame)");
     for (int a = 0; a < ACT_COUNT; a++) {
         char n[64];
         snprintf(n, sizeof(n), "+%s", k_action_names[a]);
@@ -340,6 +351,7 @@ void input_end_frame(float dt) {
     // Look
     float scale = input_aim_sensitivity_scale();
     float k = 0.0022f * scale; // radians per pixel at sensitivity 1
+    if (IN->sweep_frames > 0) { IN->mouse_accum = v2_add(IN->mouse_accum, IN->sweep); IN->sweep_frames--; }
     vec2 look = v2(-IN->mouse_accum.x * k * IN->sens->f, -IN->mouse_accum.y * k * IN->sens_y->f);
     IN->mouse_accum = v2(0, 0);
     vec2 move = v2(0, 0);
