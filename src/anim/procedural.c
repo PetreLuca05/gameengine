@@ -1,0 +1,305 @@
+// Procedural post-pass: parameters, hand frames and the fixed-order driver.
+#include "procedural_internal.h"
+#include "cJSON.h"
+#include "core/log.h"
+#include <math.h>
+#include <stdio.h>
+
+static const char *k_style_names[HOLD_COUNT] = { "none", "pistol", "rifle", "shotgun", "smg", "lmg", "melee_1h", "melee_2h", "item_small", "item_large" };
+
+static HoldStyle default_style(int id) {
+    HoldStyle h;
+    memset(&h, 0, sizeof(h));
+    dg_strcpy(h.name, sizeof(h.name), k_style_names[id]);
+    h.left_hand = true;
+    h.chest_offset = v3(0, 0.08f, 0);
+    h.hip_offset = v3(0.13f, -0.11f, -0.20f);
+    h.ads_distance = 0.30f;
+    h.sprint_offset = v3(0.12f, -0.26f, -0.18f);
+    h.sprint_rot = v3(-35, 35, 0);
+    h.crouch_offset = v3(0, 0.02f, 0);
+    h.elbow_r = v3(0.7f, -1.0f, 0.3f);
+    h.elbow_l = v3(-0.6f, -1.0f, 0.0f);
+    h.max_shift = 0.38f;
+    float cr[5] = { 20, 25, 70, 75, 80 }, cl[5] = { 40, 50, 55, 60, 65 };
+    memcpy(h.curl_r, cr, sizeof(cr));
+    memcpy(h.curl_l, cl, sizeof(cl));
+    h.aim_pitch_scale = 1.0f;
+    h.ads_weight = 1.0f;
+    switch (id) {
+    case HOLD_NONE: h.left_hand = false; h.hip_offset = v3(0.2f, -0.45f, -0.05f); memset(h.curl_r, 0, sizeof(h.curl_r)); break;
+    case HOLD_PISTOL: h.hip_offset = v3(0.08f, 0.02f, -0.40f); h.ads_distance = 0.36f; h.sprint_offset = v3(0.2f, -0.35f, -0.12f); h.sprint_rot = v3(-55, 10, 0);
+        h.elbow_l = v3(-0.8f, -1.0f, 0.2f); break;
+    case HOLD_RIFLE: break;
+    case HOLD_SHOTGUN: h.hip_offset = v3(0.13f, -0.12f, -0.19f); break;
+    case HOLD_SMG: h.hip_offset = v3(0.12f, -0.08f, -0.24f); h.ads_distance = 0.24f; break;
+    case HOLD_LMG: h.hip_offset = v3(0.16f, -0.2f, -0.16f); h.ads_distance = 0.26f; h.aim_pitch_scale = 0.85f; break;
+    case HOLD_MELEE_1H: h.ads_weight = 0; h.aim_pitch_scale = 0.6f; h.left_hand = false; h.hip_offset = v3(0.24f, -0.28f, -0.28f); h.hip_rot = v3(65, 0, 0); h.sprint_rot = v3(40, 10, 0);
+        { float c[5] = { 60, 85, 90, 90, 90 }; memcpy(h.curl_r, c, sizeof(c)); } break;
+    case HOLD_MELEE_2H: h.ads_weight = 0; h.aim_pitch_scale = 0.6f; h.hip_offset = v3(0.10f, -0.22f, -0.22f); h.hip_rot = v3(70, 0, 0); h.sprint_rot = v3(40, 20, 0);
+        { float c[5] = { 60, 85, 90, 90, 90 }; memcpy(h.curl_r, c, sizeof(c)); memcpy(h.curl_l, c, sizeof(c)); } break;
+    case HOLD_ITEM_SMALL: h.left_hand = false; h.hip_offset = v3(0.22f, -0.22f, -0.32f); h.hip_rot = v3(-20, 0, 0);
+        { float c[5] = { 30, 45, 50, 55, 60 }; memcpy(h.curl_r, c, sizeof(c)); } break;
+    case HOLD_ITEM_LARGE: h.hip_offset = v3(0.05f, -0.2f, -0.35f); break;
+    }
+    return h;
+}
+
+static vec3 jv(const cJSON *o, const char *k, vec3 def) {
+    const cJSON *v = cJSON_GetObjectItemCaseSensitive(o, k);
+    if (!cJSON_IsArray(v) || cJSON_GetArraySize(v) < 3) return def;
+    return v3((float)cJSON_GetArrayItem(v, 0)->valuedouble, (float)cJSON_GetArrayItem(v, 1)->valuedouble, (float)cJSON_GetArrayItem(v, 2)->valuedouble);
+}
+static float jf(const cJSON *o, const char *k, float def) {
+    const cJSON *v = cJSON_GetObjectItemCaseSensitive(o, k);
+    return cJSON_IsNumber(v) ? (float)v->valuedouble : def;
+}
+static void jarr(const cJSON *o, const char *k, float *out, int n) {
+    const cJSON *v = cJSON_GetObjectItemCaseSensitive(o, k);
+    if (!cJSON_IsArray(v)) return;
+    for (int i = 0; i < n && i < cJSON_GetArraySize(v); i++) out[i] = (float)cJSON_GetArrayItem(v, i)->valuedouble;
+}
+
+static DamagePreset preset(const char *name, float strength, float falloff, int depth, float k, float c, float drop, float push) {
+    DamagePreset d;
+    memset(&d, 0, sizeof(d));
+    dg_strcpy(d.name, sizeof(d.name), name);
+    d.strength = strength;
+    d.falloff = falloff;
+    d.chain_depth = depth;
+    d.stiffness = k;
+    d.damping = c;
+    d.pelvis_drop = drop;
+    d.translate = push;
+    return d;
+}
+
+bool proc_params_load(ProcParams *p, const cJSON *root) {
+    memset(p, 0, sizeof(*p));
+    float sw[5] = { 0.18f, 0.22f, 0.25f, 0.15f, 0.20f };
+    memcpy(p->spine_weights, sw, sizeof(sw));
+    p->yaw_limit = 100;
+    p->pitch_limit = 80;
+    p->turn_threshold = 65;
+    p->turn_speed = 260;
+    p->turn_mode = 0;
+    p->foot_lock_release = 0.22f;
+    p->foot_ray_up = 0.5f;
+    p->foot_ray_down = 0.6f;
+    p->pelvis_max_drop = 0.35f;
+    p->foot_align = 0.8f;
+    p->foot_smooth = 18.0f;
+    p->foot_height = 0.08f;
+    p->slope_lean = 0.35f;
+    p->accel_lean = 0.012f;
+    p->style_blend_time = 0.2f;
+    for (int i = 0; i < HOLD_COUNT; i++) p->styles[i] = default_style(i);
+    p->style_count = HOLD_COUNT;
+    p->presets[0] = preset("head", 26, 0.45f, 3, 240, 28, 0, 0);
+    p->presets[1] = preset("torso", 13, 0.6f, 3, 150, 22, 0, 0.04f);
+    p->presets[2] = preset("arm", 32, 0.5f, 3, 200, 25, 0, 0);
+    p->presets[3] = preset("leg", 16, 0.5f, 2, 170, 23, 0.09f, 0);
+    p->preset_count = 4;
+    // Body parts (gameplay/hitboxes.h order): head neck chest stomach pelvis, arms, hands, legs, feet.
+    static const int map[17] = { 0, 0, 1, 1, 1, 2, 2, 2, 2, 2, 2, 3, 3, 3, 3, 3, 3 };
+    for (int i = 0; i < 17; i++) p->part_preset[i] = map[i];
+    if (root) {
+        const cJSON *pr = cJSON_GetObjectItemCaseSensitive(root, "procedural");
+        if (pr) {
+            const cJSON *sp = cJSON_GetObjectItemCaseSensitive(pr, "spine");
+            if (sp) { jarr(sp, "weights", p->spine_weights, 5); p->yaw_limit = jf(sp, "yaw_limit", p->yaw_limit); p->pitch_limit = jf(sp, "pitch_limit", p->pitch_limit); }
+            const cJSON *tu = cJSON_GetObjectItemCaseSensitive(pr, "turn");
+            if (tu) {
+                p->turn_threshold = jf(tu, "threshold", p->turn_threshold);
+                p->turn_speed = jf(tu, "speed", p->turn_speed);
+                const cJSON *m = cJSON_GetObjectItemCaseSensitive(tu, "mode");
+                if (cJSON_IsString(m)) p->turn_mode = !strcmp(m->valuestring, "clips") ? 1 : 0;
+                p->foot_lock_release = jf(tu, "foot_lock_release", p->foot_lock_release);
+            }
+            const cJSON *fo = cJSON_GetObjectItemCaseSensitive(pr, "foot_ik");
+            if (fo) {
+                p->foot_ray_up = jf(fo, "ray_up", p->foot_ray_up);
+                p->foot_ray_down = jf(fo, "ray_down", p->foot_ray_down);
+                p->pelvis_max_drop = jf(fo, "pelvis_max_drop", p->pelvis_max_drop);
+                p->foot_align = jf(fo, "align", p->foot_align);
+                p->foot_smooth = jf(fo, "smooth", p->foot_smooth);
+                p->foot_height = jf(fo, "foot_height", p->foot_height);
+            }
+            const cJSON *le = cJSON_GetObjectItemCaseSensitive(pr, "lean");
+            if (le) { p->slope_lean = jf(le, "slope", p->slope_lean); p->accel_lean = jf(le, "accel", p->accel_lean); }
+        }
+        const cJSON *hs = cJSON_GetObjectItemCaseSensitive(root, "hold_styles");
+        const cJSON *e;
+        if (hs) {
+            p->style_blend_time = jf(hs, "blend_time", p->style_blend_time);
+            cJSON_ArrayForEach(e, hs) {
+                if (!cJSON_IsObject(e)) continue;
+                int id = proc_hold_style_index(p, e->string);
+                if (id < 0) {
+                    if (p->style_count >= HOLD_STYLE_MAX) continue;
+                    id = p->style_count++;
+                    p->styles[id] = default_style(HOLD_RIFLE);
+                    dg_strcpy(p->styles[id].name, 16, e->string);
+                }
+                HoldStyle *h = &p->styles[id];
+                const cJSON *lh = cJSON_GetObjectItemCaseSensitive(e, "left_hand");
+                if (cJSON_IsBool(lh)) h->left_hand = cJSON_IsTrue(lh);
+                h->hip_offset = jv(e, "hip_offset", h->hip_offset);
+                h->hip_rot = jv(e, "hip_rot", h->hip_rot);
+                h->ads_distance = jf(e, "ads_distance", h->ads_distance);
+                h->sprint_offset = jv(e, "sprint_offset", h->sprint_offset);
+                h->sprint_rot = jv(e, "sprint_rot", h->sprint_rot);
+                h->crouch_offset = jv(e, "crouch_offset", h->crouch_offset);
+                h->elbow_r = jv(e, "elbow_r", h->elbow_r);
+                h->elbow_l = jv(e, "elbow_l", h->elbow_l);
+                h->shoulder_r = jv(e, "shoulder_r", h->shoulder_r);
+                h->shoulder_l = jv(e, "shoulder_l", h->shoulder_l);
+                h->chest_offset = jv(e, "chest_offset", h->chest_offset);
+                h->max_shift = jf(e, "max_shift", h->max_shift);
+                h->aim_pitch_scale = jf(e, "aim_pitch_scale", h->aim_pitch_scale);
+                h->ads_weight = jf(e, "ads_weight", h->ads_weight);
+                jarr(e, "curl_r", h->curl_r, 5);
+                jarr(e, "curl_l", h->curl_l, 5);
+            }
+        }
+        const cJSON *dr = cJSON_GetObjectItemCaseSensitive(root, "damage_reactions");
+        if (dr) {
+            const cJSON *mode = cJSON_GetObjectItemCaseSensitive(dr, "hit_mode");
+            if (cJSON_IsString(mode)) p->hit_mode = !strcmp(mode->valuestring, "clips") ? 1 : (!strcmp(mode->valuestring, "both") ? 2 : 0);
+            cJSON_ArrayForEach(e, cJSON_GetObjectItemCaseSensitive(dr, "presets")) {
+                if (!cJSON_IsObject(e)) continue;
+                int id = -1;
+                for (int i = 0; i < p->preset_count; i++) if (!strcmp(p->presets[i].name, e->string)) id = i;
+                if (id < 0 && p->preset_count < DMG_PRESET_MAX) { id = p->preset_count++; p->presets[id] = preset(e->string, 15, 0.5f, 2, 180, 18, 0, 0); }
+                if (id < 0) continue;
+                DamagePreset *d = &p->presets[id];
+                d->strength = jf(e, "strength", d->strength);
+                d->falloff = jf(e, "falloff", d->falloff);
+                d->chain_depth = (int)jf(e, "chain_depth", (float)d->chain_depth);
+                d->stiffness = jf(e, "stiffness", d->stiffness);
+                d->damping = jf(e, "damping", d->damping);
+                d->pelvis_drop = jf(e, "pelvis_drop", d->pelvis_drop);
+                d->translate = jf(e, "translate", d->translate);
+            }
+            const cJSON *parts = cJSON_GetObjectItemCaseSensitive(dr, "parts");
+            static const char *part_names[17] = { "head", "neck", "chest", "stomach", "pelvis", "upper_arm_l", "upper_arm_r", "lower_arm_l",
+                                                  "lower_arm_r", "hand_l", "hand_r", "upper_leg_l", "upper_leg_r", "lower_leg_l",
+                                                  "lower_leg_r", "foot_l", "foot_r" };
+            for (int i = 0; i < 17 && parts; i++) {
+                const cJSON *v = cJSON_GetObjectItemCaseSensitive(parts, part_names[i]);
+                if (!cJSON_IsString(v)) continue;
+                for (int k = 0; k < p->preset_count; k++) if (!strcmp(p->presets[k].name, v->valuestring)) p->part_preset[i] = k;
+            }
+        }
+    }
+    u32 h = ANIM_HASH_SEED;
+    for (int i = 0; i < p->style_count; i++) {
+        p->styles[i].hash = anim_hash(&p->styles[i], sizeof(HoldStyle), ANIM_HASH_SEED);
+        h = anim_hash(&p->styles[i].hash, sizeof(u32), h);
+    }
+    p->hash = h;
+    return true;
+}
+
+const HoldStyle *proc_hold_style(const ProcParams *p, int style) {
+    if (style < 0 || style >= p->style_count) style = HOLD_NONE;
+    return &p->styles[style];
+}
+
+int proc_hold_style_index(const ProcParams *p, const char *name) {
+    for (int i = 0; i < p->style_count; i++) if (!strcmp(p->styles[i].name, name)) return i;
+    return -1;
+}
+
+// ------------------------------------------------------------------ hand frames
+
+static quat quat_from_axes(vec3 x, vec3 y, vec3 z) {
+    // Columns x, y, z of a rotation matrix.
+    float m00 = x.x, m11 = y.y, m22 = z.z;
+    float tr = m00 + m11 + m22;
+    quat q;
+    if (tr > 0) {
+        float s = sqrtf(tr + 1.0f) * 2;
+        q.w = 0.25f * s;
+        q.x = (y.z - z.y) / s;
+        q.y = (z.x - x.z) / s;
+        q.z = (x.y - y.x) / s;
+    } else if (m00 > m11 && m00 > m22) {
+        float s = sqrtf(1.0f + m00 - m11 - m22) * 2;
+        q.w = (y.z - z.y) / s;
+        q.x = 0.25f * s;
+        q.y = (y.x + x.y) / s;
+        q.z = (z.x + x.z) / s;
+    } else if (m11 > m22) {
+        float s = sqrtf(1.0f + m11 - m00 - m22) * 2;
+        q.w = (z.x - x.z) / s;
+        q.x = (y.x + x.y) / s;
+        q.y = 0.25f * s;
+        q.z = (z.y + y.z) / s;
+    } else {
+        float s = sqrtf(1.0f + m22 - m00 - m11) * 2;
+        q.w = (x.y - y.x) / s;
+        q.x = (z.x + x.z) / s;
+        q.y = (z.y + y.z) / s;
+        q.z = 0.25f * s;
+    }
+    return quat_norm(q);
+}
+
+void proc_hand_frames(const Skeleton *s, HandFrames *out) {
+    int hands[2] = { s->role[BR_L_HAND], s->role[BR_R_HAND] };
+    int mids[2] = { s->role[BR_L_MIDDLE1], s->role[BR_R_MIDDLE1] };
+    for (int h = 0; h < 2; h++) {
+        out->palm[h] = xf_identity();
+        out->curl_axis[h] = v3(-1, 0, 0);
+        if (hands[h] < 0) continue;
+        Xform hb = s->bind_model[hands[h]];
+        vec3 tip = mids[h] >= 0 ? s->bind_model[mids[h]].t : xf_point(hb, v3(0, 0.1f, 0));
+        vec3 f = v3_sub(tip, hb.t);
+        float len = v3_len(f);
+        f = v3_scale(f, 1.0f / fmaxf(len, 1e-4f));
+        vec3 up = v3(0, 1, 0);   // T-pose: palms face down, back of the hand up
+        vec3 b = v3_norm(v3_sub(up, v3_scale(f, v3_dot(up, f))));
+        vec3 z = v3_neg(f), y = b, x = v3_cross(y, z);
+        Xform palm;
+        palm.r = quat_from_axes(x, y, z);
+        palm.t = v3_sub(v3_madd(hb.t, f, len * 0.45f), v3_scale(b, 0.012f));
+        palm.s = v3(1, 1, 1);
+        out->palm[h] = xf_mul(xf_inverse(hb), palm);
+    }
+}
+
+// ------------------------------------------------------------------ driver
+
+void proc_reset(ProcState *s) { memset(s, 0, sizeof(*s)); s->style = s->prev_style = -1; }
+
+void proc_rotate_bone(const Skeleton *s, Pose *p, Xform *model, int b, quat q) {
+    if (b < 0) return;
+    Xform n = model[b];
+    n.r = quat_norm(quat_mul(q, n.r));
+    pose_set_model(s, p, model, b, n);
+    pose_update_children(s, p, model, b);
+}
+
+void proc_run(ProcState *st, const ProcInput *in0, Pose *pose, Xform *model) {
+    ProcInput in = *in0;
+    if (!st->init) {
+        st->init = true;
+        st->render_body_yaw = in.body_yaw;
+        st->prev_vel = in.velocity;
+        st->style = st->prev_style = in.hold_style;
+        st->style_t = 1;
+    }
+    proc_turn(st, &in);
+    in.root.r = quat_yaw(st->render_body_yaw);
+    float foot_off[2] = { 0, 0 };
+    vec3 anim_foot[2] = { { 0 }, { 0 } };
+    if (in.foot_ik) proc_foot_pelvis(st, &in, pose, model, foot_off, anim_foot);
+    if (in.lean) proc_lean(st, &in, pose, model);
+    if (in.spine) proc_spine(st, &in, pose, model);
+    if (in.hold && in.item) proc_hold(st, &in, pose, model);
+    else st->has_item = false;
+    if (in.hand_anchor_w > 0) proc_hand_anchors(st, &in, pose, model);
+    if (in.foot_ik) proc_foot_legs(st, &in, pose, model, foot_off, anim_foot);
+    st->prev_vel = in.velocity;
+}

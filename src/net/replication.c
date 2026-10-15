@@ -3,6 +3,7 @@
 #include "gameplay/entities.h"
 #include "gameplay/health.h"
 #include "game/game_internal.h"
+#include "gameplay/characters.h"
 #include "core/log.h"
 #include <stdlib.h>
 
@@ -59,6 +60,8 @@ static void capture_one(World *w, int i, NetEnt *e) {
         e->light_group = w->light[i].group;
     }
     if (w->type[i] == ET_DOOR) e->extra = w->door[i].knob_local;
+    const AnimNetState *as = chars_net_state(w, i);
+    if (as) { e->anim_state = *as; e->has_anim = true; }
     if (w->type[i] == ET_SWITCH) e->extra.x = (float)w->lever[i].light_group;
 }
 
@@ -92,8 +95,12 @@ static u32 diff_mask(const NetEnt *a, const NetEnt *b) {
     if (!v3_eq(a->light_color, b->light_color) || a->light_radius != b->light_radius || a->light_intensity != b->light_intensity ||
         a->light_group != b->light_group) m |= NF_LIGHT;
     if (!v3_eq(a->extra, b->extra)) m |= NF_EXTRA;
+    if (b->has_anim && (!a->has_anim || anim_net_diff(&a->anim_state, &b->anim_state))) m |= NF_ANIMST;
     return m;
 }
+
+// The anim sub-mask needs the baseline: written by repl_write_delta via this hook.
+static const NetEnt *g_write_base;
 
 static void write_fields(Writer *w, const NetEnt *e, u32 m) {
     if (m & NF_TYPE) { w_u8(w, e->type); w_u8(w, e->slot); }
@@ -107,6 +114,10 @@ static void write_fields(Writer *w, const NetEnt *e, u32 m) {
     if (m & NF_NAME) w_str(w, e->name);
     if (m & NF_LIGHT) { w_vec3(w, e->light_color); w_f32(w, e->light_radius); w_f32(w, e->light_intensity); w_u32(w, e->light_group); }
     if (m & NF_EXTRA) w_vec3(w, e->extra);
+    if (m & NF_ANIMST) {
+        u16 f = (g_write_base && g_write_base->has_anim) ? anim_net_diff(&g_write_base->anim_state, &e->anim_state) : anim_net_diff(NULL, &e->anim_state);
+        anim_net_write(w, &e->anim_state, f);
+    }
 }
 
 static void read_fields(Reader *r, NetEnt *e, u32 m) {
@@ -121,6 +132,7 @@ static void read_fields(Reader *r, NetEnt *e, u32 m) {
     if (m & NF_NAME) r_str(r, e->name, sizeof(e->name));
     if (m & NF_LIGHT) { e->light_color = r_vec3(r); e->light_radius = r_f32(r); e->light_intensity = r_f32(r); e->light_group = r_u32(r); }
     if (m & NF_EXTRA) e->extra = r_vec3(r);
+    if (m & NF_ANIMST) { anim_net_read(r, &e->anim_state, NULL); e->has_anim = true; }
 }
 
 // The quantized rotation round-trips lossy; compare/store what the client will decode so
@@ -149,7 +161,9 @@ void repl_write_delta(Writer *wr, const SnapFrame *base, const SnapFrame *cur) {
         if (!m) continue;
         w_u32(wr, e.id);
         w_u16(wr, (u16)m);
+        g_write_base = b;
         write_fields(wr, &e, m);
+        g_write_base = NULL;
         changes++;
     }
     memcpy(wr->buf + count_pos, &changes, 2);
@@ -256,7 +270,7 @@ static void setup_replica(World *w, const NetEnt *e, int local_slot) {
     w->flags[i] = e->flags;
     dg_strcpy(w->names[i], sizeof(w->names[0]), e->name);
     EntityType t = (EntityType)e->type;
-    if (t == ET_PLAYER || t == ET_DUMMY) w->comps[i] |= C_HEALTH;
+    if (t == ET_PLAYER || t == ET_DUMMY || t == ET_ZOMBIE) w->comps[i] |= C_HEALTH;
     if (t == ET_LIGHT) w->comps[i] |= C_LIGHT;
     if (t == ET_DOOR || t == ET_GATE) w->comps[i] |= C_DOOR;
     if (t == ET_PICKUP) w->comps[i] |= C_PICKUP;
@@ -327,8 +341,10 @@ void repl_apply(World *w, const SnapFrame *f, int local_slot, InterpBuffer *inte
         int i = (int)ENT_INDEX(e->id);
         if (!ent_valid(w, e->id)) {
             ent_spawn_at(w, e->id, (EntityType)e->type);
+            if (e->has_anim) w->char_id[i] = e->anim_state.character_id;
             setup_replica(w, e, local_slot);
         }
+        if (e->has_anim) chars_client_receive(w, e->id, &e->anim_state, f->tick);
         w->flags[i] = e->flags;
         w->item[i] = e->item;
         if (e->type == ET_PICKUP) { w->pickup[i].item = e->item; w->pickup[i].count = e->count; }

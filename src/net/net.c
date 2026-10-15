@@ -1,5 +1,8 @@
 // Session layer: host-authoritative peer-to-peer over a NetTransport (LAN or Steam).
 #include "net.h"
+#include "anim/anim_library.h"
+#include "anim/anim_net.h"
+#include "gameplay/characters.h"
 #include "net_transport.h"
 #include "protocol.h"
 #include "bitbuf.h"
@@ -154,6 +157,31 @@ static void host_handle_hello(PeerId peer, Reader *r) {
         N->t->disconnect(N->t, peer);
         return;
     }
+    // Animation asset identity: every category hash must match the host's.
+    {
+        u8 cats = r_u8(r);
+        AnimManifest theirs;
+        memset(&theirs, 0, sizeof(theirs));
+        for (int k = 0; k < cats && k < AC_CATEGORY_COUNT; k++) theirs.hash[k] = r_u32(r);
+        const AnimManifest *mine = g_engine.anim ? &g_engine.anim->manifest : NULL;
+        char reason[256] = "";
+        int len = 0;
+        if (mine) {
+            for (int k = 0; k < AC_CATEGORY_COUNT; k++)
+                if (k >= cats || theirs.hash[k] != mine->hash[k])
+                    len += snprintf(reason + len, sizeof(reason) - (size_t)len, "%s%s (host %08x, you %08x)", len ? ", " : "asset mismatch: ",
+                                    asset_category_name(k), mine->hash[k], k < cats ? theirs.hash[k] : 0);
+        }
+        if (len > 0) {
+            log_warn("net: rejecting '%s': %s", name, reason);
+            Writer w = writer_make(N->buf, NET_BUF);
+            w_u8(&w, MSG_REJECT);
+            w_str(&w, reason);
+            send_msg(peer, CH_RELIABLE, &w);
+            N->t->disconnect(N->t, peer);
+            return;
+        }
+    }
     RemoteClient *c = client_by_peer(peer);
     if (c && c->welcomed) return;
     int slot = game_sv_player_join(peer, name[0] ? name : "Player");
@@ -232,6 +260,37 @@ static void host_handle(const NetEvent *e) {
     }
 }
 
+void net_host_send_anim_events(World *w) {
+    if (N->role != NET_HOST || !w->anim_event_count) return;
+    for (int s = 0; s < MAX_PLAYERS; s++) {
+        RemoteClient *c = &N->clients[s];
+        if (!c->active || !c->welcomed) continue;
+        int k = 0;
+        while (k < w->anim_event_count) {
+            Writer wr = writer_make(N->buf, NET_BUF);
+            w_u8(&wr, MSG_ANIM_EVENTS);
+            u32 count_at = wr.len;
+            w_u8(&wr, 0);
+            u8 n = 0;
+            while (k < w->anim_event_count && n < 200 && wr.len + 20 < NET_BUF) {
+                anim_event_write(&wr, &w->anim_events[k]);
+                k++;
+                n++;
+            }
+            wr.buf[count_at] = n;
+            send_msg(c->peer, CH_RELIABLE, &wr);
+        }
+    }
+}
+
+int net_host_client_count(void) {
+    int n = 0;
+    for (int s = 0; s < MAX_PLAYERS; s++) if (N->clients[s].active && N->clients[s].welcomed) n++;
+    return n;
+}
+
+double net_client_render_tick(void) { return N ? N->render_tick : 0.0; }
+
 void net_host_send_events(World *w) {
     if (N->role != NET_HOST) return;
     for (int k = 0; k < w->event_count; k++) {
@@ -297,6 +356,8 @@ static void client_send_hello(void) {
     w_u8(&w, MSG_HELLO);
     w_u16(&w, DG_PROTOCOL_VERSION);
     w_str(&w, game()->cl_name->str);
+    w_u8(&w, AC_CATEGORY_COUNT);
+    for (int k = 0; k < AC_CATEGORY_COUNT; k++) w_u32(&w, g_engine.anim ? g_engine.anim->manifest.hash[k] : 0);
     send_msg(N->server_peer, CH_RELIABLE, &w);
 }
 
@@ -404,6 +465,16 @@ static void client_handle(const NetEvent *e) {
         GameEvent ev;
         r_bytes(&r, &ev, sizeof(ev));
         if (!r.overflow && game_world()) game_handle_event(&ev);
+        break;
+    }
+    case MSG_ANIM_EVENTS: {
+        u8 n = r_u8(&r);
+        World *w = game_world();
+        for (int k = 0; k < n; k++) {
+            AnimEvent ev;
+            if (!anim_event_read(&r, &ev)) break;
+            if (w) chars_on_event(w, &ev);
+        }
         break;
     }
     case MSG_INVENTORY: {

@@ -5,6 +5,7 @@
 
 #include "core/base.h"
 #include "core/dgmath.h"
+#include "anim/anim_mesh.h"
 
 struct SDL_Window;
 
@@ -41,6 +42,7 @@ enum MaterialFlags {
     MAT_TEXTURED  = 1u << 6,
     MAT_CHECKER   = 1u << 7,
     MAT_GRID_FINE = 1u << 8,  // 10 cm / 50 cm / 1 m measuring grid (recoil wall)
+    MAT_SHADOW_ONLY = 1u << 9, // casts shadows but is not drawn (the local player's own body)
 };
 
 typedef struct Material {
@@ -114,6 +116,23 @@ bool render_begin_frame(void);
 void render_set_camera(const RenderCamera *cam);
 void render_set_environment(const RenderEnvironment *env);
 void render_draw(const DrawItem *item);
+
+// Skinned characters: GPU skinning with per-frame bone palettes (SSBO), instanced draws batched
+// by mesh. palette[i] = bone_world[i] * inverse_bind[i] (vertices are in bind model space).
+typedef struct SkinnedDraw {
+    MeshId mesh;            // from render_skinned_mesh_create
+    const mat4 *palette;
+    u32 bone_count;
+    vec4 color;
+    float roughness, metallic, emissive;
+    u32 flags;              // MaterialFlags (MAT_SHADOW_ONLY, MAT_HIGHLIGHT, ...)
+    float fade;             // LOD cross-fade: 0 = visible, (0, 1] fading in, [-1, 0) fading out
+    bool cast_shadow;
+    vec3 center;            // bounding sphere (world) for culling
+    float radius;
+} SkinnedDraw;
+MeshId render_skinned_mesh_create(const SkinVertex *verts, u32 vcount, const u32 *indices, u32 icount);
+void render_draw_skinned(const SkinnedDraw *d);
 void render_draw_viewmodel(const DrawItem *item);
 void render_add_light(const PointLight *light);
 LineVertex *render_lines_alloc(u32 vertex_count, bool depth_test);

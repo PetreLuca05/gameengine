@@ -27,6 +27,8 @@ void dbg_sphere(vec3 c, float r, u32 color, float duration);
 void dbg_circle(vec3 c, vec3 normal, float r, u32 color, float duration);
 // Capsule standing on bottom (total height includes caps).
 void dbg_capsule(vec3 bottom, float radius, float height, u32 color, float duration);
+// Circles / spheres / capsules depth-test by default; false draws them as overlay (e.g. hitboxes inside meshes).
+void dbg_set_shape_depth(bool depth);
 void dbg_capsule_axis(vec3 a, vec3 b, float radius, u32 color, float duration);
 void dbg_text(vec3 pos, const char *text, u32 color, float size, float duration);
 // Flushes lines/text to the renderer and ages timed primitives.

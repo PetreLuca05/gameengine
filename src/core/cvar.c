@@ -276,12 +276,16 @@ void cbuf_execute(void) {
     if (s_cv.wait_frames > 0) { s_cv.wait_frames--; return; }
     int guard = 0;
     while (s_cv.cbuf_len > 0 && guard++ < 1000) {
-        // Extract one command up to ';' or newline (respecting quotes).
-        int i = 0; bool quoted = false;
+        // Extract one command up to ';' or newline (respecting quotes; a '//' comment runs to the
+        // end of the line, so a ';' inside it doesn't split it).
+        int i = 0; bool quoted = false, comment = false;
         for (; i < s_cv.cbuf_len; i++) {
             char c = s_cv.cbuf[i];
+            if (c == '\n') break;
+            if (comment) continue;
             if (c == '"') quoted = !quoted;
-            if (!quoted && (c == ';' || c == '\n')) break;
+            if (!quoted && c == '/' && i + 1 < s_cv.cbuf_len && s_cv.cbuf[i + 1] == '/') { comment = true; continue; }
+            if (!quoted && c == ';') break;
         }
         char line[1024];
         int n = DG_MIN(i, (int)sizeof(line) - 1);

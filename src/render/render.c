@@ -24,6 +24,7 @@ void render_register_cvars(void) {
     r->r_shader_hotreload = cvar_reg_bool("r_shader_hotreload", true, 0, "watch shader sources and reload on change");
     r->r_culling = cvar_reg_bool("r_culling", true, 0, "frustum culling");
     r->r_vm_fov = cvar_reg_float("r_viewmodel_fov", 0.0f, 0.0f, 120.0f, CVAR_ARCHIVE, "viewmodel FOV (0 = same as world, keeps IK hands aligned)");
+    r->r_cpu_skinning = cvar_reg_bool("r_cpu_skinning", false, 0, "skin characters on the CPU (fallback / debugging)");
     r->r_vsync->on_change = on_render_cvar_changed;
 }
 
@@ -50,6 +51,8 @@ static void create_frames(void) {
         VK_CHECK(vkCreateSemaphore(R->device, &sci, NULL, &f->image_available));
         f->ubo = vkr_buffer_create(sizeof(FrameData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, true);
         f->dyn = vkr_buffer_create(DYN_BUFFER_SIZE, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, true);
+        f->bones = vkr_buffer_create(sizeof(mat4) * MAX_SKIN_BONES, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);
+        f->instances = vkr_buffer_create(sizeof(GpuSkinInstance) * MAX_SKIN_DRAWS * 2, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);
 
         VkDescriptorSetAllocateInfo ai = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
         ai.descriptorPool = R->pool;
@@ -64,6 +67,17 @@ static void create_frames(void) {
         w.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
         w.pBufferInfo = &bi;
         vkUpdateDescriptorSets(R->device, 1, &w, 0, NULL);
+        VkDescriptorBufferInfo sb[2] = { { f->bones.buffer, 0, VK_WHOLE_SIZE }, { f->instances.buffer, 0, VK_WHOLE_SIZE } };
+        VkWriteDescriptorSet ws[2];
+        for (int k = 0; k < 2; k++) {
+            ws[k] = (VkWriteDescriptorSet){ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+            ws[k].dstSet = f->frame_set;
+            ws[k].dstBinding = (u32)(2 + k);
+            ws[k].descriptorCount = 1;
+            ws[k].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            ws[k].pBufferInfo = &sb[k];
+        }
+        vkUpdateDescriptorSets(R->device, 2, ws, 0, NULL);
     }
 }
 
@@ -73,6 +87,8 @@ static void destroy_frames(void) {
         vkr_flush_deferred(f);
         vkr_buffer_destroy_now(&f->ubo);
         vkr_buffer_destroy_now(&f->dyn);
+        vkr_buffer_destroy_now(&f->bones);
+        vkr_buffer_destroy_now(&f->instances);
         vkDestroySemaphore(R->device, f->image_available, NULL);
         vkDestroyFence(R->device, f->fence, NULL);
         vkDestroyCommandPool(R->device, f->pool, NULL);
@@ -93,6 +109,8 @@ bool render_init(SDL_Window *window) {
 
     R->draws = (DrawItem *)malloc(sizeof(DrawItem) * MAX_DRAWS);
     R->vm_draws = (DrawItem *)malloc(sizeof(DrawItem) * MAX_VM_DRAWS);
+    R->skin_draws = (SkinnedDraw *)malloc(sizeof(SkinnedDraw) * MAX_SKIN_DRAWS);
+    R->skin_bones = (mat4 *)malloc(sizeof(mat4) * MAX_SKIN_BONES);
     R->line_cap = 262144;
     R->line_cpu[0] = (LineVertex *)malloc(sizeof(LineVertex) * R->line_cap);
     R->line_cpu[1] = (LineVertex *)malloc(sizeof(LineVertex) * R->line_cap);
@@ -189,6 +207,7 @@ static void apply_setting_changes(void) {
 bool render_begin_frame(void) {
     R->frame_active = false;
     R->draw_count = R->vm_draw_count = R->light_count = 0;
+    R->skin_draw_count = R->skin_bone_count = 0;
     R->line_count[0] = R->line_count[1] = 0;
     R->text_count = 0;
     R->ui_vcount = R->ui_icount = R->ui_ccount = 0;
@@ -225,6 +244,19 @@ void render_draw(const DrawItem *item) {
     R->draws[R->draw_count++] = *item;
 }
 
+void render_draw_skinned(const SkinnedDraw *d) {
+    if (!d->mesh || !d->palette || !d->bone_count || R->skin_draw_count >= MAX_SKIN_DRAWS) return;
+    if (R->skin_bone_count + d->bone_count > MAX_SKIN_BONES) return;
+    if (!R->meshes[d->mesh].used || !R->meshes[d->mesh].skinned) return;
+    SkinnedDraw *s = &R->skin_draws[R->skin_draw_count++];
+    *s = *d;
+    memcpy(R->skin_bones + R->skin_bone_count, d->palette, sizeof(mat4) * d->bone_count);
+    // The palette pointer is replaced by its offset into this frame's bone buffer.
+    s->palette = NULL;
+    s->bone_count = R->skin_bone_count | ((u32)d->bone_count << 20);
+    R->skin_bone_count += d->bone_count;
+}
+
 void render_draw_viewmodel(const DrawItem *item) {
     if (!item->mesh || R->vm_draw_count >= MAX_VM_DRAWS) return;
     DrawItem *d = &R->vm_draws[R->vm_draw_count++];
@@ -248,7 +280,11 @@ LineVertex *render_lines_alloc(u32 count, bool depth_test) {
 }
 
 TextVertex *render_text_alloc(u32 count) {
-    if (R->text_count + count > R->text_cap) return NULL;
+    if (R->text_count + count > R->text_cap) {
+        static int warned;
+        if (!warned++) log_warn("render: 3D text buffer full (%u verts)", R->text_cap);
+        return NULL;
+    }
     TextVertex *v = R->text_cpu + R->text_count;
     R->text_count += count;
     return v;
@@ -343,6 +379,7 @@ static void draw_items(VkCommandBuffer cmd, DrawItem *items, u32 count, bool sha
         if (alpha_mode == 0 && blended) continue;
         if (alpha_mode == 1 && !blended) continue;
         if (shadow_pass && (d->mat.flags & MAT_NO_SHADOW)) continue;
+        if (!shadow_pass && (d->mat.flags & MAT_SHADOW_ONLY)) continue;
         if (cull) {
             vec3 c; float r;
             item_bounds(d, &c, &r);
@@ -384,6 +421,117 @@ static void draw_items(VkCommandBuffer cmd, DrawItem *items, u32 count, bool sha
         R->stats.triangles += m->index_count / 3;
     }
     arena_pop_to(mark);
+}
+
+
+// ------------------------------------------------------------------ skinned characters
+
+typedef struct SkinBatch { u32 mesh, first, count; } SkinBatch;
+typedef struct SkinPass { SkinBatch batches[MAX_SKIN_DRAWS]; u32 batch_count; } SkinPass;
+typedef struct CpuSkin { VkDeviceSize offset; bool ok; } CpuSkin;
+
+static int cmp_skin_mesh(const void *a, const void *b) {
+    u32 ma = ((const SortKey *)a)->key, mb = ((const SortKey *)b)->key;
+    return ma < mb ? -1 : (ma > mb ? 1 : 0);
+}
+
+// Writes instance records for one pass (culled, sorted by mesh) starting at `base`.
+static u32 build_skin_pass(FrameResources *f, bool shadow, u32 base, SkinPass *out) {
+    ArenaMark mark = arena_mark(&g_engine.frame_arena);
+    SortKey *keys = ARENA_PUSH_N(&g_engine.frame_arena, SortKey, R->skin_draw_count + 1);
+    u32 n = 0;
+    for (u32 i = 0; i < R->skin_draw_count; i++) {
+        const SkinnedDraw *d = &R->skin_draws[i];
+        if (shadow ? !d->cast_shadow : (d->flags & MAT_SHADOW_ONLY) != 0) continue;
+        if (!shadow && R->r_culling->i && d->radius > 0 && !sphere_visible(R->frustum, d->center, d->radius)) { R->stats.culled++; continue; }
+        keys[n].key = d->mesh;
+        keys[n].index = i;
+        n++;
+    }
+    qsort(keys, n, sizeof(SortKey), cmp_skin_mesh);
+    GpuSkinInstance *inst = (GpuSkinInstance *)f->instances.mapped;
+    out->batch_count = 0;
+    for (u32 k = 0; k < n; k++) {
+        const SkinnedDraw *d = &R->skin_draws[keys[k].index];
+        GpuSkinInstance *g = &inst[base + k];
+        g->color = d->color;
+        g->params = v4(d->roughness, d->metallic, d->emissive, d->fade);
+        g->info[0] = d->bone_count & 0xFFFFFu;
+        g->info[1] = d->flags;
+        g->info[2] = g->info[3] = 0;
+        if (out->batch_count && out->batches[out->batch_count - 1].mesh == d->mesh) out->batches[out->batch_count - 1].count++;
+        else out->batches[out->batch_count++] = (SkinBatch){ d->mesh, base + k, 1 };
+    }
+    arena_pop_to(mark);
+    return n;
+}
+
+static void draw_skin_pass(VkCommandBuffer cmd, const SkinPass *p) {
+    for (u32 b = 0; b < p->batch_count; b++) {
+        const SkinBatch *sb = &p->batches[b];
+        GpuMesh *m = &R->meshes[sb->mesh];
+        VkDeviceSize zero = 0;
+        vkCmdBindVertexBuffers(cmd, 0, 1, &m->vb.buffer, &zero);
+        vkCmdBindIndexBuffer(cmd, m->ib.buffer, 0, VK_INDEX_TYPE_UINT32);
+        vkCmdDrawIndexed(cmd, m->index_count, sb->count, 0, 0, sb->first);
+        R->stats.draw_calls++;
+        R->stats.triangles += m->index_count / 3 * sb->count;
+    }
+}
+
+// CPU fallback: skin into lit vertices in the dynamic buffer (same palettes as the GPU path).
+static void cpu_skin_all(FrameResources *f, CpuSkin *out) {
+    for (u32 i = 0; i < R->skin_draw_count; i++) {
+        const SkinnedDraw *d = &R->skin_draws[i];
+        GpuMesh *m = &R->meshes[d->mesh];
+        out[i].ok = false;
+        if (!m->cpu_verts) continue;
+        VkDeviceSize off = (f->dyn_used + 15) & ~(VkDeviceSize)15;
+        VkDeviceSize size = sizeof(Vertex) * m->vertex_count;
+        if (off + size > f->dyn.size) continue;
+        Vertex *dst = (Vertex *)((u8 *)f->dyn.mapped + off);
+        const mat4 *pal = R->skin_bones + (d->bone_count & 0xFFFFFu);
+        u32 nb = d->bone_count >> 20;
+        for (u32 v = 0; v < m->vertex_count; v++) {
+            const SkinVertex *sv = &m->cpu_verts[v];
+            vec3 p = v3(0, 0, 0), nn = v3(0, 0, 0);
+            for (int k = 0; k < 4; k++) {
+                if (!sv->weights[k] || sv->joints[k] >= nb) continue;
+                float w = (float)sv->weights[k] / 255.0f;
+                p = v3_madd(p, mat4_mul_point(pal[sv->joints[k]], sv->pos), w);
+                nn = v3_madd(nn, mat4_mul_dir(pal[sv->joints[k]], sv->normal), w);
+            }
+            dst[v].pos = p;
+            dst[v].normal = v3_norm(nn);
+            dst[v].uv = sv->uv;
+            dst[v].color = sv->color;
+        }
+        f->dyn_used = off + size;
+        out[i].offset = off;
+        out[i].ok = true;
+    }
+}
+
+static void draw_cpu_skinned(VkCommandBuffer cmd, FrameResources *f, const CpuSkin *cs, bool shadow) {
+    for (u32 i = 0; i < R->skin_draw_count; i++) {
+        const SkinnedDraw *d = &R->skin_draws[i];
+        if (!cs[i].ok) continue;
+        if (shadow ? !d->cast_shadow : (d->flags & MAT_SHADOW_ONLY) != 0) continue;
+        if (!shadow && R->r_culling->i && d->radius > 0 && !sphere_visible(R->frustum, d->center, d->radius)) continue;
+        GpuMesh *m = &R->meshes[d->mesh];
+        vkCmdBindVertexBuffers(cmd, 0, 1, &f->dyn.buffer, &cs[i].offset);
+        vkCmdBindIndexBuffer(cmd, m->ib.buffer, 0, VK_INDEX_TYPE_UINT32);
+        PushLit pc;
+        pc.model = mat4_identity();
+        pc.color = d->color;
+        pc.params = v4(d->roughness, d->metallic, d->emissive, 1.0f);
+        pc.flags[0] = d->flags & ~(u32)MAT_SHADOW_ONLY;
+        pc.flags[1] = pc.flags[2] = pc.flags[3] = 0;
+        vkCmdPushConstants(cmd, R->layout_lit, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushLit), &pc);
+        vkCmdDrawIndexed(cmd, m->index_count, 1, 0, 0, 0);
+        R->stats.draw_calls++;
+        R->stats.triangles += m->index_count / 3;
+    }
 }
 
 static void compute_matrices(FrameData *fd) {
@@ -457,8 +605,31 @@ void render_end_frame(void) {
     for (int k = 0; k < 2; k++)
         if (R->line_count[k]) line_off[k] = dyn_push(f, R->line_cpu[k], sizeof(LineVertex) * R->line_count[k]);
     VkDeviceSize text_off = R->text_count ? dyn_push(f, R->text_cpu, sizeof(TextVertex) * R->text_count) : 0;
+    {
+        static int warned;
+        if (text_off == (VkDeviceSize)-1 && !warned++)
+            log_warn("render: dynamic buffer full (%llu used of %llu, lines %u/%u, text %u verts) - 3D text dropped", (unsigned long long)f->dyn_used,
+                     (unsigned long long)f->dyn.size, R->line_count[0], R->line_count[1], R->text_count);
+    }
     VkDeviceSize ui_voff = R->ui_vcount ? dyn_push(f, R->ui_verts, sizeof(UiVertex) * R->ui_vcount) : 0;
     VkDeviceSize ui_ioff = R->ui_icount ? dyn_push(f, R->ui_indices, sizeof(u32) * R->ui_icount) : 0;
+
+    // Skinned characters: palettes + per-pass instance lists (GPU) or CPU-skinned vertices.
+    bool cpu_skin = R->r_cpu_skinning->i != 0;
+    static SkinPass skin_main, skin_shadow;
+    skin_main.batch_count = skin_shadow.batch_count = 0;
+    CpuSkin *cpu_skinned = NULL;
+    ArenaMark skin_mark = arena_mark(&g_engine.frame_arena);
+    if (R->skin_draw_count) {
+        if (cpu_skin) {
+            cpu_skinned = ARENA_PUSH_N(&g_engine.frame_arena, CpuSkin, R->skin_draw_count);
+            cpu_skin_all(f, cpu_skinned);
+        } else {
+            memcpy(f->bones.mapped, R->skin_bones, sizeof(mat4) * R->skin_bone_count);
+            u32 used = build_skin_pass(f, false, 0, &skin_main);
+            build_skin_pass(f, true, used, &skin_shadow);
+        }
+    }
 
     // ---------------------------------------------------------- shadow pass
     vkr_image_barrier(cmd, R->shadow.image, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
@@ -484,6 +655,11 @@ void render_end_frame(void) {
             vkCmdSetDepthBias(cmd, 1.25f, 0.0f, 1.75f);
             vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 0, 1, &f->frame_set, 0, NULL);
             draw_items(cmd, R->draws, R->draw_count, true, false, 0);
+            if (cpu_skinned) draw_cpu_skinned(cmd, f, cpu_skinned, true);
+            else if (skin_shadow.batch_count) {
+                vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_SKIN_SHADOW]);
+                draw_skin_pass(cmd, &skin_shadow);
+            }
         }
         vkCmdEndRendering(cmd);
     }
@@ -529,6 +705,15 @@ void render_end_frame(void) {
 
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[R->r_wireframe->i ? PIPE_LIT_WIRE : PIPE_LIT]);
         draw_items(cmd, R->draws, R->draw_count, false, R->r_culling->i != 0, 0);
+        if (cpu_skinned || skin_main.batch_count) {
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 1, 1, &R->textures[R->white_tex].set, 0, NULL);
+            if (cpu_skinned) draw_cpu_skinned(cmd, f, cpu_skinned, false);
+            else {
+                vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[R->r_wireframe->i ? PIPE_SKIN_WIRE : PIPE_SKIN]);
+                draw_skin_pass(cmd, &skin_main);
+            }
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[R->r_wireframe->i ? PIPE_LIT_WIRE : PIPE_LIT]);
+        }
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_LIT_BLEND]);
         draw_items(cmd, R->draws, R->draw_count, false, R->r_culling->i != 0, 1);
 
@@ -644,6 +829,7 @@ void render_end_frame(void) {
                           VK_PIPELINE_STAGE_2_NONE, 0, 1);
     }
 
+    arena_pop_to(skin_mark);
     VK_CHECK(vkEndCommandBuffer(cmd));
 
     VkSemaphoreSubmitInfo wait = { VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO };

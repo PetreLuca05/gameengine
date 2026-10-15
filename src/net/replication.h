@@ -5,6 +5,7 @@
 
 #include "world/world.h"
 #include "bitbuf.h"
+#include "anim/anim_net.h"
 
 #define SNAP_HISTORY 32
 #define MAX_SNAP_ENTS 768
@@ -27,6 +28,8 @@ typedef struct NetEnt {
     float light_radius, light_intensity;
     u32 light_group;
     vec3 extra;
+    AnimNetState anim_state;   // characters (NF_ANIMST: own sub-field delta mask)
+    bool has_anim;
 } NetEnt;
 
 typedef struct SnapFrame {

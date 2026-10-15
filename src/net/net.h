@@ -52,6 +52,9 @@ void net_host_send_events(struct World *w);      // host: deliver queued gamepla
 void net_client_send_cmds(const UserCmd *history, int history_size, u32 latest_seq);
 void net_client_interpolate(struct World *w, float dt);
 u32 net_client_view_tick256(void);
+double net_client_render_tick(void);    // fractional server tick being rendered
+int net_host_client_count(void);
+void net_host_send_anim_events(struct World *w);
 void net_send_rpc(int type, int a, int b, int c);
 NetStats net_stats(void);
 

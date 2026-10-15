@@ -5,6 +5,8 @@
 #include "core/base.h"
 #include "core/dgmath.h"
 #include "gameplay/recoil.h"
+#include "anim/procedural.h"
+#include "anim/body_parts.h"
 
 #define MAX_ITEM_DEFS 128
 #define MAX_WEAPON_DEFS 32
@@ -26,6 +28,8 @@ typedef struct ItemDef {
     vec3 size;             // half extents
     float heal, armor, use_time;
     int weapon;            // index into weapon defs (ITEM_WEAPON), -1 otherwise
+    char hold_style[16];   // third-person hold style for non-weapon items ("item_small", "item_large")
+    ItemSockets sockets;   // held-item sockets (non-weapons)
 } ItemDef;
 
 typedef struct WeaponModelPart { vec3 offset; vec3 half; vec4 color; } WeaponModelPart;
@@ -54,6 +58,12 @@ typedef struct WeaponDef {
     vec3 muzzle_offset;
     bool bolt_action;         // cycles the bolt after each shot (shot-event hook)
     RecoilParams recoil;      // guns: recoil, spread, fire modes, ADS/sway feel ("recoil" block)
+    // Third-person procedural hold ("hold" block): style + item sockets (shared with the viewmodel grip data).
+    char hold_style[16];
+    ItemSockets sockets;
+    // Per-body-part damage multipliers ("part_mult"), 1.0 = unlisted; range falloff.
+    float part_mult[BP_COUNT];
+    float falloff_start, falloff_end, falloff_min;
     char file[64];            // source file (data/weapons/*.json)
 } WeaponDef;
 

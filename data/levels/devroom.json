@@ -80,6 +80,9 @@
     { "pos": [-22, 0, 22.3], "yaw": 90, "floor": true, "size": 0.25, "text": "14 m" },
     { "pos": [-26, 0, 22.3], "yaw": 90, "floor": true, "size": 0.25, "text": "18 m" },
     { "pos": [6, 0, 10.5], "yaw": 0, "floor": true, "size": 0.25, "text": "physics props" },
+    { "pos": [-7, 0, 9.6], "yaw": 0, "floor": true, "size": 0.3, "text": "zombies (zombie_attack / shoot them)" },
+    { "pos": [8.4, 0, -2.2], "yaw": 0, "floor": true, "size": 0.25, "text": "hold styles" },
+    { "pos": [8.4, 0, 2.2], "yaw": 0, "floor": true, "size": 0.25, "text": "animation test stand (anim_stand)" },
     { "pos": [-6.3, 1.25, 29.74], "yaw": 180, "size": 0.12, "text": "main lights" },
     { "pos": [0, 0, 28.6], "yaw": 0, "floor": true, "size": 0.22, "text": "recoil lane (wpn_magdump)" },
     { "pos": [-29.74, 1.6, 16], "yaw": 90, "size": 0.12, "text": "zone lights" }
@@ -139,6 +142,13 @@
     { "type": "pickup", "item": "ammo_762", "count": 120, "pos": [5.6, 0.92, 27.4], "respawn": 10 },
     { "type": "pickup", "item": "ammo_9mm", "count": 60, "pos": [5.6, 0.92, 27.8], "respawn": 10 },
     { "type": "pickup", "item": "ammo_rifle", "count": 90, "pos": [2.6, 0.92, 27.3], "respawn": 10 },
+
+    { "type": "zombie_area", "pos": [-7, 0, 2], "rows": 5, "cols": 4, "spacing": [2.2, 0, 3.0], "radius": 1.6, "yaw": 90 },
+    { "type": "character", "character": "player", "item": "rifle", "pos": [6.0, 0, -4], "yaw": 180 },
+    { "type": "character", "character": "player", "item": "pistol", "pos": [7.6, 0, -4], "yaw": 180 },
+    { "type": "character", "character": "player", "item": "shotgun", "pos": [9.2, 0, -4], "yaw": 180 },
+    { "type": "character", "character": "player", "item": "bat", "pos": [10.8, 0, -4], "yaw": 180 },
+    { "type": "character", "character": "player", "item": "lmg", "pos": [8.4, 0, 0.5], "yaw": 180, "hp": 1000 },
 
     { "type": "dummy", "pos": [-14, 0, 24], "yaw": -90, "hp": 150 },
     { "type": "dummy", "pos": [-18, 0, 25.5], "yaw": -90, "hp": 150 },

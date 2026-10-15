@@ -1,9 +1,10 @@
 #include "world.h"
+#include "gameplay/characters.h"
 #include "core/log.h"
 #include <stdlib.h>
 
 static const char *k_type_names[ET_COUNT] = { "none", "player", "prop", "door", "gate", "lever", "switch", "light",
-                                              "container", "pickup", "dummy", "projectile", "marker" };
+                                              "container", "pickup", "dummy", "projectile", "marker", "zombie" };
 
 const char *ent_type_name(EntityType t) { return (t >= 0 && t < ET_COUNT) ? k_type_names[t] : "?"; }
 
@@ -14,6 +15,7 @@ World *world_create(bool authority, const ItemDB *items) {
     w->items = items;
     w->phys = phys_world_create();
     w->max_used = 1;
+    chars_system_create(w);
     for (int i = 0; i < MAX_PLAYERS; i++) w->players[i].peer = -1;
     return w;
 }
@@ -34,6 +36,7 @@ void world_clear(World *w) {
 void world_destroy(World *w) {
     if (!w) return;
     world_clear(w);
+    chars_system_destroy(w);
     phys_world_destroy(w->phys);
     free(w);
 }
@@ -61,6 +64,8 @@ static void reset_slot(World *w, int i, EntityType type) {
     memset(&w->proj[i], 0, sizeof(Projectile));
     memset(&w->hitbox[i], 0, sizeof(Hitbox));
     w->player_slot[i] = 0xFF;
+    w->char_id[i] = 0;
+    w->life[i] = 0;
     for (int t = 0; t < LAGCOMP_TICKS; t++) w->lag[t][i].valid = 0;
     if (i + 1 > w->max_used) w->max_used = i + 1;
 }
@@ -102,6 +107,7 @@ EntityId ent_from_index(const World *w, int i) {
 void ent_destroy(World *w, EntityId e) {
     if (!ent_valid(w, e)) return;
     int i = (int)ENT_INDEX(e);
+    if (w->chars) char_detach(w, e);
     if (w->body[i].body != PHYS_INVALID_BODY) phys_remove_body(w->phys, w->body[i].body);
     w->body[i].body = PHYS_INVALID_BODY;
     w->alive[i] = 0;

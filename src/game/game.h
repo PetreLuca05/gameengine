@@ -87,7 +87,7 @@ typedef struct Game {
     int magdump_first_tick, magdump_last_tick, magdump_shots, magdump_last_mag;
 
     Cvar *g_map, *sv_hostname, *cl_name, *dev_mode, *r_drawhitboxes, *r_drawcollision;
-    Cvar *cl_showfps, *net_autohost, *world_seed, *interact_range;
+    Cvar *cl_showfps, *net_autohost, *world_seed, *interact_range, *anim_rate;
 } Game;
 
 void game_init(void);

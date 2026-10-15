@@ -17,6 +17,22 @@
   "sound_fire": "swing",
   "grip": [0, 0, 0],
   "support": [0, -0.09, 0.0],
+  "hold": {
+    "style": "melee_2h",
+    "attach": "RightHand",
+    "sockets": {
+      "grip_r": {
+        "pos": [0, 0, 0],
+        "fingers": [0, 0, -1],
+        "back": [1, 0, 0]
+      },
+      "grip_l": {
+        "fingers": [0, 0, -1],
+        "back": [-1, 0, 0],
+        "pos": [0, -0.09, 0.0]
+      }
+    }
+  },
   "model": [
     { "offset": [0, 0.3, 0], "half": [0.03, 0.3, 0.03], "color": [0.6, 0.45, 0.25] },
     { "offset": [0, -0.02, 0], "half": [0.02, 0.08, 0.02], "color": [0.15, 0.12, 0.1] }

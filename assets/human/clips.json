@@ -1,0 +1,18 @@
+{
+  "_comment": "Per-clip metadata (clip name = FBX file stem, or 'file:take'). Keys: loop, speed, root_motion (host applies root travel; default off = in place), markers [left_plant, right_plant] (normalized foot plant phases; auto-detected when omitted), events [{time, type: footstep_l|footstep_r|weapon_fire|<custom>}], blend_in, blend_out, additive, reference (clip used as the additive reference pose).",
+  "clips": {
+    "idle": { "loop": true },
+    "walking": { "loop": true, "events": [] },
+    "running": { "loop": true },
+    "left strafe walking": { "loop": true },
+    "right strafe walking": { "loop": true },
+    "left strafe": { "loop": true },
+    "right strafe": { "loop": true },
+    "jump": { "loop": false },
+    "left turn 90": { "loop": false },
+    "right turn 90": { "loop": false },
+    "left turn": { "loop": false },
+    "right turn": { "loop": false },
+    "Hanging Idle": { "loop": true }
+  }
+}

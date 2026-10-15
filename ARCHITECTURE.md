@@ -33,24 +33,37 @@ src/
               (VMA buffers, staged uploads, textures + mips, deferred deletion), vk_pipelines
               (pipelines, shader hot reload), render.c (frame recording), mesh_gen (procedural meshes),
               debug_draw (timed lines/shapes/text)
-  physics/    Jolt wrapper: bodies, layers, ray/shape casts, overlaps, CharacterVirtual, debug draw
+  physics/    Jolt wrapper: bodies, layers, ray/shape casts, overlaps, CharacterVirtual, constraints,
+              debug draw; ragdoll (cosmetic Jolt ragdolls on the shared skeleton)
+  anim/       shared-skeleton animation: anim (skeleton, clips, pose math, IK), anim_mesh (skinned
+              meshes + LODs), controller (layers / state machines / blend trees), procedural
+              (turn, spine, weapon hold + hand glue, damage additive, foot IK), anim_net
+              (quantized state + events), ragdoll_def, anim_library (all assets + hashes),
+              character_rt (per-character runtime)
   input/      action map (keyboard/mouse/gamepad), rebinding + capture, +action script commands
   player/     movement (controller + mantle/vault/hang), camera (bob, FOV, stair smoothing),
               hands (arms + hands rig, pose clips, two-bone IK)
   gameplay/   items + inventory, health/damage, weapons (hitscan/projectile/melee), entities
               (doors, gates, levers, switches, lights, containers, pickups, props, dummies),
+              characters (skinned characters in the world: sim, client playback, LOD, ragdolls,
+              zombies), hitboxes (per-part hitboxes, lag-comp ring, damage multipliers),
               events (gameplay -> net/presentation), effects (decals, sparks, tracers, damage numbers)
   world/      world (entity table + components + players), level (JSON level builder),
               chunks (streaming, terrain LOD, heightfields, WorldGen)
   net/        net_transport.h + transport_lan (ENet) + transport_steam (shim) + conditioner (fake
               lag/loss), protocol, bitbuf, replication (snapshots, deltas, interpolation), net.c (session)
-  ui/         ui (Nuklear + HUD batcher), font (baked atlas, world text), console, hud, menus
+  ui/         ui (Nuklear + HUD batcher), font (baked atlas, world text), console, hud, menus,
+              recoil_debug, anim_debug (controller panel + animation test stand)
   audio/      miniaudio engine, sound groups, 3D one-shots, music loop
-  assets/     glTF (cgltf), PNG/JPG (stb_image), KTX2, asset manifest
+  assets/     glTF (cgltf), PNG/JPG (stb_image), KTX2, asset manifest, FBX (ufbx) + bake cache,
+              character definitions + rig validation
   game/       game.c (session/tick orchestration), game_events.c (client events, RPCs),
               game_render.c (presentation), usercmd.h
-shaders/      lit, shadow, lines, text, post (ACES + FXAA + gamma), ui  (GLSL -> SPIR-V at build time)
-tools/        gen_assets.py (placeholder content), tests/*.cfg (scripted automation)
+shaders/      lit, shadow, lines, text, post (ACES + FXAA + gamma), ui, skin / skin_shadow (GPU skinning)
+              (GLSL -> SPIR-V at build time)
+tools/        gen_assets.py (placeholder content), bake_anim (FBX -> cache), validate_rig,
+              tests/*.cfg (scripted automation)
+tests/        test_recoil, test_anim, test_ragdoll (ctest)
 ```
 
 ## Frame loop (`app/main.c`)
@@ -230,6 +243,27 @@ driven by the solved shoulder/elbow/wrist chain and `grip`, and author more clip
 (`hands_reload` hot-reloads it). Remote players use the same solver (`hands_render_remote`), driven by
 their replicated weapon and state.
 
+## Characters and animation (`anim/`, `gameplay/characters.c`)
+
+Players, zombies and dummies are skinned characters on one canonical skeleton
+(`assets/human/Dummy.fbx`):
+
+* **Host.** Runs a sim-only controller for every character each tick. That produces per-part
+  hitboxes (the ragdoll bodies) recorded for lag compensation, and a quantized `AnimNetState`
+  replicated in snapshots (`NF_ANIMST`). Discrete moments (jump, land, fire, reload, hit, die, …)
+  are compact reliable `MSG_ANIM_EVENTS`.
+* **Clients.** Run the same deterministic controller from the replicated parameters, snap to the
+  host's states on divergence, and add every cosmetic layer locally: spine aim, weapon hold with
+  hand glue, damage reactions, foot IK, ragdolls.
+* **Render side.** A LOD system (projected pixels, hysteresis, update intervals, per-LOD systems)
+  feeds GPU-skinned instanced draws.
+
+See [docs/ANIMATION.md](docs/ANIMATION.md), [docs/DAMAGE.md](docs/DAMAGE.md) and
+[docs/ANIMATION_NET.md](docs/ANIMATION_NET.md).
+
+The first-person hands (`player/hands.c`, below) are still a separate rig. The full-body local
+character is drawn shadow-only.
+
 ## World streaming (`world/chunks.c`)
 
 * The world is a grid of 32 m chunks with 33×33 height samples (shared edges).
@@ -248,10 +282,10 @@ their replicated weapon and state.
 
 | System | Hook |
 |---|---|
-| **Zombie AI** | New `ET_ZOMBIE` archetype in `gameplay/entities.c`, with health, a hitbox and a kinematic or CharacterVirtual body. AI runs host-side in `host_tick` before `phys_step`. The cleanest design has the AI emit `UserCmd`-like intents into the same movement code (`player_move_tick` or a variant). Zombies replicate as ordinary entities (pos/rot/anim/flags), so clients interpolate them for free, and lag compensation already covers anything with `C_HITBOX`. |
+| **Zombie AI** | `ET_ZOMBIE` exists: a skinned character with a kinematic capsule and a test wander / attack behaviour (`zombie_ai` in `gameplay/characters.c`, host only). Real AI replaces `zombie_ai`. It should drive `CharInputs` (speed, move direction, aim, triggers) and move the capsule; animation, hitboxes, replication and ragdolls already follow. |
 | **Spawning / director** | A host-side system that listens to `chunks_update` loads/unloads and to WorldGen structure points. |
 | **Real terrain / biomes / structures** | Implement a `ChunkProvider` or extend `WorldGen` (biome + `place_structures`). Spawn structure entities in the finalize step on the host (relevance handles replication), or build them as chunk-local static geometry on every machine for deterministic content. |
-| **Hand / character models** | `hands.c` rendering (see above), `game_render.c` remote player drawing, `assets/` glTF loader (skinning still to be added). |
+| **Hand / character models** | Character models: a new FBX on the canonical rig + `assets/characters/<id>.json` (check with `tools/validate_rig`). First-person hands: `hands.c` rendering (see above). |
 | **More weapons / items** | JSON only. New behavior goes in `weapons_tick` branches keyed by `WeaponKind`. |
 | **Persistence / save** | `World` + `Inventory` are plain data. Serialize entity component arrays the same way replication captures them (`repl_capture`). |
 | **Dedicated server** | The host code path doesn't depend on rendering. Add a headless main that skips `render_*`/`ui_*` and sets `g_engine.headless`. |

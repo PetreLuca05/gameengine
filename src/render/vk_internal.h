@@ -18,6 +18,8 @@
 #define MAX_DEFERRED 4096
 #define MAX_UPLOADS 4096
 #define DYN_BUFFER_SIZE (16u << 20)
+#define MAX_SKIN_BONES 65536
+#define MAX_SKIN_DRAWS 4096
 
 #define R (g_engine.render)
 
@@ -35,6 +37,9 @@ typedef struct GpuMesh {
     u32 vertex_count, index_count;
     AABB bounds;
     bool used;
+    bool skinned;
+    SkinVertex *cpu_verts;  // skinned meshes keep a CPU copy (r_cpu_skinning fallback)
+    u32 *cpu_indices;
 } GpuMesh;
 
 typedef struct GpuTexture {
@@ -87,6 +92,8 @@ typedef struct FrameResources {
     GpuBuffer ubo;
     VkDescriptorSet frame_set;
     GpuBuffer dyn;        // host-visible: lines, text, ui
+    GpuBuffer bones;      // host-visible SSBO: skinning palettes
+    GpuBuffer instances;  // host-visible SSBO: skinned instance data
     VkDeviceSize dyn_used;
     Deferred deferred[MAX_DEFERRED];
     int deferred_count;
@@ -109,8 +116,11 @@ typedef struct PushLit {
 
 typedef enum PipelineId {
     PIPE_LIT, PIPE_LIT_WIRE, PIPE_LIT_BLEND, PIPE_SHADOW, PIPE_LINES, PIPE_LINES_OVERLAY,
-    PIPE_TEXT, PIPE_POST, PIPE_UI, PIPE_COUNT
+    PIPE_TEXT, PIPE_POST, PIPE_UI, PIPE_SKIN, PIPE_SKIN_WIRE, PIPE_SKIN_SHADOW, PIPE_COUNT
 } PipelineId;
+
+// Must match SkinInstance in shaders/common.glsl (std430).
+typedef struct GpuSkinInstance { vec4 color; vec4 params; u32 info[4]; } GpuSkinInstance;
 
 typedef struct LineBatch { VkDeviceSize offset; u32 count; } LineBatch;
 
@@ -176,6 +186,10 @@ typedef struct Renderer {
     u32 draw_count;
     DrawItem *vm_draws;
     u32 vm_draw_count;
+    SkinnedDraw *skin_draws;      // palette pointers rewritten to offsets into skin_bones
+    u32 skin_draw_count;
+    mat4 *skin_bones;
+    u32 skin_bone_count;
     GpuPointLight lights[MAX_POINT_LIGHTS];
     u32 light_count;
     LineVertex *line_cpu[2];   // [0] depth tested, [1] overlay
@@ -202,7 +216,7 @@ typedef struct Renderer {
     // cvars
     Cvar *r_vsync, *r_wireframe, *r_render_scale, *r_shadow_quality, *r_aniso, *r_texture_quality;
     Cvar *r_aa, *r_brightness, *r_gamma, *r_grid, *r_vignette, *r_shader_hotreload, *r_culling;
-    Cvar *r_vm_fov;
+    Cvar *r_vm_fov, *r_cpu_skinning;
     u32 aniso_mod, texq_mod;
 } Renderer;
 

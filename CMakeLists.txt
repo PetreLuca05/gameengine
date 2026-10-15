@@ -83,16 +83,25 @@ target_link_libraries(vma PUBLIC volk)
 add_library(dg_thirdparty STATIC
   third_party/impl/tp_stb.c third_party/impl/tp_cgltf.c third_party/impl/tp_miniaudio.c
   third_party/impl/tp_nuklear.c third_party/impl/tp_fastnoise.c
-  third_party/cjson/cJSON.c)
+  third_party/cjson/cJSON.c third_party/ufbx/ufbx.c)
 set_target_properties(dg_thirdparty PROPERTIES C_STANDARD 11 C_EXTENSIONS ON)
 target_include_directories(dg_thirdparty PUBLIC
   third_party/stb third_party/cgltf third_party/miniaudio third_party/cjson
-  third_party/nuklear third_party/fastnoise third_party)
+  third_party/nuklear third_party/fastnoise third_party/ufbx third_party/meshoptimizer third_party)
 if(MSVC)
   target_compile_options(dg_thirdparty PRIVATE /W0)
 else()
   target_compile_options(dg_thirdparty PRIVATE -w)
   target_link_libraries(dg_thirdparty PUBLIC m dl pthread)
+endif()
+
+# meshoptimizer (simplifier only): generated character LODs.
+add_library(meshopt STATIC third_party/meshoptimizer/simplifier.cpp third_party/meshoptimizer/allocator.cpp)
+target_include_directories(meshopt PUBLIC third_party/meshoptimizer)
+if(MSVC)
+  target_compile_options(meshopt PRIVATE /W0)
+else()
+  target_compile_options(meshopt PRIVATE -w)
 endif()
 
 # Jolt shim: small extern "C" helpers for anything joltc lacks.
@@ -161,7 +170,7 @@ add_executable(deadground ${DG_SOURCES})
 set_target_properties(deadground PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
 add_dependencies(deadground dg_shaders)
 target_include_directories(deadground PRIVATE src)
-target_link_libraries(deadground PRIVATE SDL3::SDL3-static volk vma dg_thirdparty joltc jolt_shim enet)
+target_link_libraries(deadground PRIVATE SDL3::SDL3-static volk vma dg_thirdparty joltc jolt_shim enet meshopt)
 target_compile_definitions(deadground PRIVATE
   DG_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
   DG_SHADER_COMPILER="${DG_SHADER_COMPILER}"
@@ -200,3 +209,44 @@ else()
   target_link_libraries(test_recoil PRIVATE m)
 endif()
 add_test(NAME recoil COMMAND test_recoil)
+
+# ---------------------------------------------------------------- animation tools
+# Engine-free subset: anim core + FBX import + cache (+ log / platform helpers).
+set(DG_ANIMCORE_SOURCES
+  src/anim/anim.c src/anim/anim_mesh.c src/anim/controller.c src/anim/procedural.c src/anim/turn.c src/anim/spine.c
+  src/anim/weapon_hold.c src/anim/damage_additive.c src/anim/foot_ik.c src/anim/anim_net.c src/anim/ragdoll_def.c
+  src/anim/anim_library.c src/anim/character_rt.c src/gameplay/hitboxes.c src/gameplay/items.c src/gameplay/recoil.c src/core/spring.c
+  src/assets/fbx_loader.c src/assets/anim_cache.c src/assets/character.c
+  src/core/log.c src/core/platform.c)
+add_library(dg_animcore STATIC ${DG_ANIMCORE_SOURCES})
+set_target_properties(dg_animcore PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
+target_include_directories(dg_animcore PUBLIC src)
+target_link_libraries(dg_animcore PUBLIC dg_thirdparty meshopt SDL3::SDL3-static)
+if(MSVC)
+  target_compile_options(dg_animcore PRIVATE /W3 /wd4100 /wd4201 /utf-8)
+  target_link_libraries(dg_animcore PUBLIC winmm)
+else()
+  target_link_libraries(dg_animcore PUBLIC m pthread)
+endif()
+
+add_executable(bake_anim tools/bake_anim/bake_anim.c)
+set_target_properties(bake_anim PROPERTIES C_STANDARD 11)
+target_link_libraries(bake_anim PRIVATE dg_animcore)
+
+add_executable(validate_rig tools/validate_rig/validate_rig.c)
+set_target_properties(validate_rig PROPERTIES C_STANDARD 11)
+target_link_libraries(validate_rig PRIVATE dg_animcore)
+
+add_executable(test_anim tests/test_anim.c)
+set_target_properties(test_anim PROPERTIES C_STANDARD 11)
+target_link_libraries(test_anim PRIVATE dg_animcore)
+add_test(NAME anim COMMAND test_anim WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+
+# Ragdolls with real Jolt physics: joint limits over 10 s drops, rest / freeze.
+add_executable(test_ragdoll tests/test_ragdoll.c src/physics/physics.c src/physics/ragdoll.c)
+set_target_properties(test_ragdoll PROPERTIES C_STANDARD 11)
+target_link_libraries(test_ragdoll PRIVATE dg_animcore joltc jolt_shim)
+if(MSVC)
+  target_compile_options(test_ragdoll PRIVATE /W3 /wd4100 /wd4201 /utf-8)
+endif()
+add_test(NAME ragdoll COMMAND test_ragdoll WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)

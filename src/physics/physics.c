@@ -20,13 +20,18 @@ typedef struct BodyRecord {
     u64 user;
 } BodyRecord;
 
+#define MAX_CONSTRAINTS 4096
+
 struct PhysicsWorld {
+    JPH_Constraint *constraints[MAX_CONSTRAINTS];
+    int constraint_hint;
     JPH_PhysicsSystem *system;
     JPH_BodyInterface *bi;
     const JPH_NarrowPhaseQuery *npq;
     const JPH_BodyLockInterface *locks;
     BodyRecord *records;
     int body_count;
+    int collision_steps;     // substeps per phys_step (2 while ragdolls simulate)
 };
 
 struct PhysCharacter {
@@ -112,6 +117,8 @@ PhysicsWorld *phys_world_create(void) {
     JPH_BroadPhaseLayerInterfaceTable_MapObjectToBroadPhaseLayer(bp, PL_CHARACTER, 1);
     JPH_BroadPhaseLayerInterfaceTable_MapObjectToBroadPhaseLayer(bp, PL_DEBRIS, 1);
     JPH_BroadPhaseLayerInterfaceTable_MapObjectToBroadPhaseLayer(bp, PL_TRIGGER, 1);
+    JPH_BroadPhaseLayerInterfaceTable_MapObjectToBroadPhaseLayer(bp, PL_RAGDOLL, 1);
+    JPH_BroadPhaseLayerInterfaceTable_MapObjectToBroadPhaseLayer(bp, PL_RAGDOLL_SOLID, 1);
     JPH_ObjectLayerPairFilter *pairs = JPH_ObjectLayerPairFilterTable_Create(PL_COUNT);
     JPH_ObjectLayerPairFilterTable_EnableCollision(pairs, PL_STATIC, PL_MOVING);
     JPH_ObjectLayerPairFilterTable_EnableCollision(pairs, PL_STATIC, PL_CHARACTER);
@@ -121,6 +128,12 @@ PhysicsWorld *phys_world_create(void) {
     JPH_ObjectLayerPairFilterTable_EnableCollision(pairs, PL_CHARACTER, PL_CHARACTER);
     JPH_ObjectLayerPairFilterTable_EnableCollision(pairs, PL_TRIGGER, PL_MOVING);
     JPH_ObjectLayerPairFilterTable_EnableCollision(pairs, PL_TRIGGER, PL_CHARACTER);
+    JPH_ObjectLayerPairFilterTable_EnableCollision(pairs, PL_RAGDOLL, PL_STATIC);
+    JPH_ObjectLayerPairFilterTable_EnableCollision(pairs, PL_RAGDOLL, PL_RAGDOLL);
+    JPH_ObjectLayerPairFilterTable_EnableCollision(pairs, PL_RAGDOLL, PL_RAGDOLL_SOLID);
+    JPH_ObjectLayerPairFilterTable_EnableCollision(pairs, PL_RAGDOLL_SOLID, PL_STATIC);
+    JPH_ObjectLayerPairFilterTable_EnableCollision(pairs, PL_RAGDOLL_SOLID, PL_RAGDOLL_SOLID);
+    JPH_ObjectLayerPairFilterTable_EnableCollision(pairs, PL_RAGDOLL_SOLID, PL_CHARACTER);
     JPH_ObjectVsBroadPhaseLayerFilter *ovb = JPH_ObjectVsBroadPhaseLayerFilterTable_Create(bp, 2, pairs, PL_COUNT);
     JPH_PhysicsSystemSettings s = { 0 };
     s.maxBodies = MAX_BODIES;
@@ -141,6 +154,7 @@ PhysicsWorld *phys_world_create(void) {
 
 void phys_world_destroy(PhysicsWorld *w) {
     if (!w) return;
+    for (int i = 0; i < MAX_CONSTRAINTS; i++) phys_remove_constraint(w, i);
     for (int i = 0; i < MAX_BODIES; i++)
         if (w->records[i].used) JPH_BodyInterface_RemoveAndDestroyBody(w->bi, w->records[i].id);
     JPH_PhysicsSystem_Destroy(w->system);
@@ -148,7 +162,8 @@ void phys_world_destroy(PhysicsWorld *w) {
     free(w);
 }
 
-void phys_step(PhysicsWorld *w, float dt) { JPH_PhysicsSystem_Update(w->system, dt, 1, PG->jobs); }
+void phys_step(PhysicsWorld *w, float dt) { JPH_PhysicsSystem_Update(w->system, dt, w->collision_steps > 0 ? w->collision_steps : 1, PG->jobs); }
+void phys_set_collision_steps(PhysicsWorld *w, int steps) { w->collision_steps = DG_CLAMP(steps, 1, 4); }
 void phys_optimize(PhysicsWorld *w) { JPH_PhysicsSystem_OptimizeBroadPhase(w->system); }
 
 static JPH_Shape *create_shape(const ShapeDesc *d) {
@@ -214,6 +229,17 @@ BodyId phys_add_body(PhysicsWorld *w, const BodyDesc *d) {
     }
     if (d->motion == PM_KINEMATIC) JPH_BodyCreationSettings_SetAllowDynamicOrKinematic(bcs, true);
     if (d->sensor) JPH_BodyCreationSettings_SetIsSensor(bcs, true);
+    if (d->group_filter) {
+        JPH_CollisionGroup g;
+        memset(&g, 0, sizeof(g));
+        g.groupFilter = (const JPH_GroupFilter *)d->group_filter;
+        g.groupID = d->group_id;
+        g.subGroupID = d->sub_group_id;
+        JPH_BodyCreationSettings_SetCollisionGroup(bcs, &g);
+        // Grouped bodies are ragdoll parts: firmer contacts + joints (light limbs under heavy torsos).
+        JPH_BodyCreationSettings_SetNumVelocityStepsOverride(bcs, 16);
+        JPH_BodyCreationSettings_SetNumPositionStepsOverride(bcs, 8);
+    }
     JPH_Activation act = (d->motion == PM_STATIC || d->start_asleep) ? JPH_Activation_DontActivate : JPH_Activation_Activate;
     BodyId id = JPH_BodyInterface_CreateAndAddBody(w->bi, bcs, act);
     JPH_BodyCreationSettings_Destroy(bcs);
@@ -302,6 +328,98 @@ u64 phys_body_user(PhysicsWorld *w, BodyId id) {
 }
 
 int phys_body_count(PhysicsWorld *w) { return w->body_count; }
+
+// ------------------------------------------------------------------ constraints
+
+static ConstraintId store_constraint(PhysicsWorld *w, JPH_Constraint *c) {
+    if (!c) return -1;
+    for (int k = 0; k < MAX_CONSTRAINTS; k++) {
+        int i = (w->constraint_hint + k) % MAX_CONSTRAINTS;
+        if (!w->constraints[i]) {
+            w->constraints[i] = c;
+            w->constraint_hint = i + 1;
+            JPH_PhysicsSystem_AddConstraint(w->system, c);
+            return i;
+        }
+    }
+    JPH_Constraint_Destroy(c);
+    log_warn("physics: constraint table full");
+    return -1;
+}
+
+static JPH_Vec3 jv3(vec3 v) { JPH_Vec3 r = { v.x, v.y, v.z }; return r; }
+static JPH_RVec3 jrv3(vec3 v) { JPH_RVec3 r = { v.x, v.y, v.z }; return r; }
+
+ConstraintId phys_add_swing_twist(PhysicsWorld *w, BodyId a, BodyId b, vec3 pa, vec3 ta, vec3 pla, vec3 pb, vec3 tb, vec3 plb,
+                                  float normal_cone, float plane_cone, float twist_min, float twist_max, float friction) {
+    JPH_SwingTwistConstraintSettings s;
+    JPH_SwingTwistConstraintSettings_Init(&s);
+    // Ragdoll joints: extra solver iterations keep light limbs / the head inside their limits on impact.
+    s.base.numVelocityStepsOverride = 16;
+    s.base.numPositionStepsOverride = 8;
+    s.space = JPH_ConstraintSpace_LocalToBodyCOM;
+    s.position1 = jrv3(pa);
+    s.twistAxis1 = jv3(ta);
+    s.planeAxis1 = jv3(pla);
+    s.position2 = jrv3(pb);
+    s.twistAxis2 = jv3(tb);
+    s.planeAxis2 = jv3(plb);
+    s.swingType = JPH_SwingType_Cone;
+    s.normalHalfConeAngle = normal_cone;
+    s.planeHalfConeAngle = plane_cone;
+    s.twistMinAngle = twist_min;
+    s.twistMaxAngle = twist_max;
+    s.maxFrictionTorque = friction;
+    JPH_BodyID ids[2] = { a, b };
+    JPH_BodyLockMultiWrite *lk = JPH_BodyLockInterface_LockMultiWrite(w->locks, ids, 2);
+    JPH_Body *ba = JPH_BodyLockMultiWrite_GetBody(lk, 0), *bb = JPH_BodyLockMultiWrite_GetBody(lk, 1);
+    JPH_Constraint *c = (ba && bb) ? (JPH_Constraint *)JPH_SwingTwistConstraint_Create(&s, ba, bb) : NULL;
+    JPH_BodyLockMultiWrite_Destroy(lk);
+    return store_constraint(w, c);
+}
+
+ConstraintId phys_add_hinge(PhysicsWorld *w, BodyId a, BodyId b, vec3 pa, vec3 ha, vec3 na, vec3 pb, vec3 hb, vec3 nb,
+                            float min_angle, float max_angle, float friction) {
+    JPH_HingeConstraintSettings s;
+    JPH_HingeConstraintSettings_Init(&s);
+    s.base.numVelocityStepsOverride = 16;
+    s.base.numPositionStepsOverride = 8;
+    s.space = JPH_ConstraintSpace_LocalToBodyCOM;
+    s.point1 = jrv3(pa);
+    s.hingeAxis1 = jv3(ha);
+    s.normalAxis1 = jv3(na);
+    s.point2 = jrv3(pb);
+    s.hingeAxis2 = jv3(hb);
+    s.normalAxis2 = jv3(nb);
+    s.limitsMin = min_angle;
+    s.limitsMax = max_angle;
+    s.maxFrictionTorque = friction;
+    JPH_BodyID ids[2] = { a, b };
+    JPH_BodyLockMultiWrite *lk = JPH_BodyLockInterface_LockMultiWrite(w->locks, ids, 2);
+    JPH_Body *ba = JPH_BodyLockMultiWrite_GetBody(lk, 0), *bb = JPH_BodyLockMultiWrite_GetBody(lk, 1);
+    JPH_Constraint *c = (ba && bb) ? (JPH_Constraint *)JPH_HingeConstraint_Create(&s, ba, bb) : NULL;
+    JPH_BodyLockMultiWrite_Destroy(lk);
+    return store_constraint(w, c);
+}
+
+void phys_remove_constraint(PhysicsWorld *w, ConstraintId c) {
+    if (c < 0 || c >= MAX_CONSTRAINTS || !w->constraints[c]) return;
+    JPH_PhysicsSystem_RemoveConstraint(w->system, w->constraints[c]);
+    JPH_Constraint_Destroy(w->constraints[c]);
+    w->constraints[c] = NULL;
+}
+
+void *phys_group_filter_create(int sub_groups) { return JPH_GroupFilterTable_Create((uint32_t)sub_groups); }
+void phys_group_filter_disable(void *f, int a, int b) {
+    JPH_GroupFilterTable_DisableCollision((JPH_GroupFilterTable *)f, (JPH_CollisionSubGroupID)a, (JPH_CollisionSubGroupID)b);
+}
+void phys_group_filter_destroy(void *f) { if (f) JPH_GroupFilter_Destroy((JPH_GroupFilter *)f); }
+
+vec3 phys_get_angular_velocity(PhysicsWorld *w, BodyId id) {
+    JPH_Vec3 l, v;
+    JPH_BodyInterface_GetLinearAndAngularVelocity(w->bi, id, &l, &v);
+    return v3(v.x, v.y, v.z);
+}
 
 // ------------------------------------------------------------------ queries
 

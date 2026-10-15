@@ -15,6 +15,8 @@ typedef enum PhysLayer {
     PL_CHARACTER,      // character inner bodies, hitbox proxies
     PL_DEBRIS,         // small client-side bits (collide with static only)
     PL_TRIGGER,        // sensors
+    PL_RAGDOLL,        // cosmetic ragdoll bodies: static + other ragdolls only (never pushes gameplay props)
+    PL_RAGDOLL_SOLID,  // ragdolls that also block characters (anim_corpse_collision 1)
     PL_COUNT
 } PhysLayer;
 
@@ -55,6 +57,9 @@ typedef struct BodyDesc {
     float linear_damping, angular_damping;
     bool sensor;
     bool start_asleep;
+    // optional collision group (ragdolls: no collisions between joined bodies)
+    void *group_filter;      // from phys_group_filter_create
+    u32 group_id, sub_group_id;
 } BodyDesc;
 
 typedef struct RayHit {
@@ -103,6 +108,8 @@ void phys_global_shutdown(void);
 PhysicsWorld *phys_world_create(void);
 void phys_world_destroy(PhysicsWorld *w);
 void phys_step(PhysicsWorld *w, float dt);
+// Collision substeps per phys_step (default 1). Ragdolls need 2 to keep joints / contacts firm on impact.
+void phys_set_collision_steps(PhysicsWorld *w, int steps);
 void phys_optimize(PhysicsWorld *w);
 
 BodyId phys_add_body(PhysicsWorld *w, const BodyDesc *desc);
@@ -144,6 +151,19 @@ u64 phys_character_ground_user(PhysCharacter *c);
 BodyId phys_character_inner_body(PhysCharacter *c);
 void phys_character_set_max_slope(PhysCharacter *c, float deg);
 vec3 phys_character_cancel_steep(PhysCharacter *c, vec3 desired_velocity);
+
+// Constraints (ragdolls). Positions / axes are in each body's local (center of mass) space.
+typedef int ConstraintId;   // -1 = invalid
+ConstraintId phys_add_swing_twist(PhysicsWorld *w, BodyId a, BodyId b, vec3 pos_a, vec3 twist_a, vec3 plane_a, vec3 pos_b, vec3 twist_b,
+                                  vec3 plane_b, float normal_cone, float plane_cone, float twist_min, float twist_max, float friction);
+ConstraintId phys_add_hinge(PhysicsWorld *w, BodyId a, BodyId b, vec3 pos_a, vec3 hinge_a, vec3 normal_a, vec3 pos_b, vec3 hinge_b,
+                            vec3 normal_b, float min_angle, float max_angle, float friction);
+void phys_remove_constraint(PhysicsWorld *w, ConstraintId c);
+// Group filters: bodies sharing group_id collide unless their sub groups were disabled.
+void *phys_group_filter_create(int sub_groups);
+void phys_group_filter_disable(void *filter, int sub_a, int sub_b);
+void phys_group_filter_destroy(void *filter);
+vec3 phys_get_angular_velocity(PhysicsWorld *w, BodyId id);
 
 // Debug: draw collision shapes via debug lines.
 void phys_debug_draw(PhysicsWorld *w, vec3 around, float radius);

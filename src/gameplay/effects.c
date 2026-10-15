@@ -20,7 +20,7 @@ typedef struct Decal { vec3 pos, normal; float size, age; u32 color; } Decal;
 typedef struct Spark { vec3 pos, vel; float life, max_life; u32 color; } Spark;
 typedef struct Tracer { vec3 a, b; float age; } Tracer;
 typedef struct Flash { vec3 pos; float age; } Flash;
-typedef struct DmgNumber { vec3 pos; float amount, age; bool head; } DmgNumber;
+typedef struct DmgNumber { vec3 pos; float amount, age; bool head; char label[24]; } DmgNumber;
 
 typedef struct FxSystem {
     const BasicMeshes *meshes;
@@ -108,7 +108,9 @@ void fx_shell(vec3 pos, vec3 vel) {
     s->color = rgba8(0.85f, 0.65f, 0.25f, 1);
 }
 
-void fx_damage_number(vec3 pos, float amount, bool headshot) {
+void fx_damage_number(vec3 pos, float amount, bool headshot) { fx_damage_number_label(pos, amount, headshot, NULL); }
+
+void fx_damage_number_label(vec3 pos, float amount, bool headshot, const char *label) {
     if (!FX || !FX->dev_damage_numbers->i) return;
     DmgNumber *n = &FX->numbers[FX->number_head];
     FX->number_head = (FX->number_head + 1) % MAX_DMG_NUMBERS;
@@ -116,6 +118,7 @@ void fx_damage_number(vec3 pos, float amount, bool headshot) {
     n->amount = amount;
     n->age = 0;
     n->head = headshot;
+    dg_strcpy(n->label, sizeof(n->label), label ? label : "");
 }
 
 void fx_sound(const char *name, vec3 pos, float volume) { audio_play(name, pos, volume, SND_SFX); }
@@ -196,8 +199,9 @@ void fx_draw_hud(void) {
         vec2 s;
         if (!render_world_to_screen(p, &s)) continue;
         float a = 1.0f - n->age;
-        char buf[32];
-        snprintf(buf, sizeof(buf), "%.0f", n->amount);
+        char buf[48];
+        if (n->label[0]) snprintf(buf, sizeof(buf), "%.0f  %s", n->amount, n->label);
+        else snprintf(buf, sizeof(buf), "%.0f", n->amount);
         u32 c = n->head ? UI_RGBA(255, 70, 50, (int)(255 * a)) : UI_RGBA(255, 230, 120, (int)(255 * a));
         ui_text_shadow(s.x, s.y, n->head ? FONT_LARGE : FONT_UI, c, UI_ALIGN_CENTER, buf);
     }

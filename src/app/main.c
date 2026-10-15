@@ -10,12 +10,14 @@
 //   --frames <n>          quit after n frames;  --screenshot <path> saves the last frame
 //   --validation          enable Vulkan validation layers;  --nosound  disable audio
 //   --test                automated test mode: no config load/save, no audio, 60 fps cap
+//   --rebuild-cache       re-bake every FBX (skeleton, meshes, clips) into assets/cache/
 #include "core/engine.h"
 #include "core/log.h"
 #include "core/cvar.h"
 #include "core/platform.h"
 #include "core/jobs.h"
 #include "core/crash.h"
+#include "assets/anim_cache.h"
 #include "render/render.h"
 #include "render/debug_draw.h"
 #include "physics/physics.h"
@@ -154,6 +156,7 @@ int main(int argc, char **argv) {
     audio_init();
     net_init();
     assets_init("data/assets.json");
+    for (int i = 1; i < argc; i++) if (!strcmp(argv[i], "--rebuild-cache")) anim_cache_set_rebuild(true);   // before the anim library loads
     game_init();
 
     // Persistent settings, then the command line (overrides).

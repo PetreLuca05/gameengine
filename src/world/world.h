@@ -26,7 +26,7 @@ typedef u32 EntityId;
 
 typedef enum EntityType {
     ET_NONE, ET_PLAYER, ET_PROP, ET_DOOR, ET_GATE, ET_LEVER, ET_SWITCH, ET_LIGHT,
-    ET_CONTAINER, ET_PICKUP, ET_DUMMY, ET_PROJECTILE, ET_MARKER, ET_COUNT
+    ET_CONTAINER, ET_PICKUP, ET_DUMMY, ET_PROJECTILE, ET_MARKER, ET_ZOMBIE, ET_COUNT
 } EntityType;
 
 enum EntityFlags {
@@ -249,6 +249,8 @@ struct World {
     Projectile proj[MAX_ENTITIES];
     Hitbox hitbox[MAX_ENTITIES];
     u8 player_slot[MAX_ENTITIES];
+    u8 char_id[MAX_ENTITIES];       // character definition (character_id) for players / zombies / dummies
+    float life[MAX_ENTITIES];       // >0: host destroys the entity when it runs out (dropped items)
 
     LagRecord lag[LAGCOMP_TICKS][MAX_ENTITIES]; // hitbox entity positions per tick (lag compensation)
 
@@ -259,6 +261,9 @@ struct World {
 
     GameEvent events[MAX_PENDING_EVENTS];   // authority: produced this tick, drained by net/game
     int event_count;
+    struct AnimEvent *anim_events;          // authority: compact animation events this tick (reliable)
+    int anim_event_count;
+    struct CharacterSystem *chars;          // skinned characters (players, zombies, dummies)
     float time;                // seconds of simulated time
 };
 

@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-typedef enum VertexLayout { VL_NONE, VL_MESH, VL_MESH_POS_ONLY, VL_LINE, VL_TEXT, VL_UI } VertexLayout;
+typedef enum VertexLayout { VL_NONE, VL_MESH, VL_MESH_POS_ONLY, VL_LINE, VL_TEXT, VL_UI, VL_SKIN, VL_SKIN_SHADOW } VertexLayout;
 
 typedef struct PipeDesc {
     const char *vert, *frag;
@@ -21,7 +21,7 @@ typedef struct PipeDesc {
 } PipeDesc;
 
 bool vkp_create_layouts(void) {
-    VkDescriptorSetLayoutBinding fb[2] = { 0 };
+    VkDescriptorSetLayoutBinding fb[4] = { 0 };
     fb[0].binding = 0;
     fb[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     fb[0].descriptorCount = 1;
@@ -30,8 +30,14 @@ bool vkp_create_layouts(void) {
     fb[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     fb[1].descriptorCount = 1;
     fb[1].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    for (int i = 2; i < 4; i++) {
+        fb[i].binding = (u32)i;
+        fb[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        fb[i].descriptorCount = 1;
+        fb[i].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+    }
     VkDescriptorSetLayoutCreateInfo li = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
-    li.bindingCount = 2;
+    li.bindingCount = 4;
     li.pBindings = fb;
     VK_CHECK(vkCreateDescriptorSetLayout(R->device, &li, NULL, &R->frame_layout));
 
@@ -44,14 +50,15 @@ bool vkp_create_layouts(void) {
     li.pBindings = &tb;
     VK_CHECK(vkCreateDescriptorSetLayout(R->device, &li, NULL, &R->tex_layout));
 
-    VkDescriptorPoolSize sizes[2] = {
+    VkDescriptorPoolSize sizes[3] = {
         { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 16 },
         { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, MAX_TEXTURES + 64 },
+        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 16 },
     };
     VkDescriptorPoolCreateInfo pi = { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
     pi.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
     pi.maxSets = MAX_TEXTURES + 64;
-    pi.poolSizeCount = 2;
+    pi.poolSizeCount = 3;
     pi.pPoolSizes = sizes;
     VK_CHECK(vkCreateDescriptorPool(R->device, &pi, NULL, &R->pool));
 
@@ -123,7 +130,7 @@ static VkPipeline build_pipeline(const PipeDesc *d) {
     stages[1].pName = "main";
 
     VkVertexInputBindingDescription bind = { 0, 0, VK_VERTEX_INPUT_RATE_VERTEX };
-    VkVertexInputAttributeDescription attrs[4];
+    VkVertexInputAttributeDescription attrs[6];
     u32 attr_count = 0;
     switch (d->vl) {
     case VL_MESH:
@@ -157,6 +164,23 @@ static VkPipeline build_pipeline(const PipeDesc *d) {
         attrs[0] = (VkVertexInputAttributeDescription){ 0, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(UiVertex, pos) };
         attrs[1] = (VkVertexInputAttributeDescription){ 1, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(UiVertex, uv) };
         attrs[2] = (VkVertexInputAttributeDescription){ 2, 0, VK_FORMAT_R8G8B8A8_UNORM, offsetof(UiVertex, color) };
+        attr_count = 3;
+        break;
+    case VL_SKIN:
+        bind.stride = sizeof(SkinVertex);
+        attrs[0] = (VkVertexInputAttributeDescription){ 0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(SkinVertex, pos) };
+        attrs[1] = (VkVertexInputAttributeDescription){ 1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(SkinVertex, normal) };
+        attrs[2] = (VkVertexInputAttributeDescription){ 2, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(SkinVertex, uv) };
+        attrs[3] = (VkVertexInputAttributeDescription){ 3, 0, VK_FORMAT_R8G8B8A8_UNORM, offsetof(SkinVertex, color) };
+        attrs[4] = (VkVertexInputAttributeDescription){ 4, 0, VK_FORMAT_R8G8B8A8_UINT, offsetof(SkinVertex, joints) };
+        attrs[5] = (VkVertexInputAttributeDescription){ 5, 0, VK_FORMAT_R8G8B8A8_UNORM, offsetof(SkinVertex, weights) };
+        attr_count = 6;
+        break;
+    case VL_SKIN_SHADOW:
+        bind.stride = sizeof(SkinVertex);
+        attrs[0] = (VkVertexInputAttributeDescription){ 0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(SkinVertex, pos) };
+        attrs[1] = (VkVertexInputAttributeDescription){ 4, 0, VK_FORMAT_R8G8B8A8_UINT, offsetof(SkinVertex, joints) };
+        attrs[2] = (VkVertexInputAttributeDescription){ 5, 0, VK_FORMAT_R8G8B8A8_UNORM, offsetof(SkinVertex, weights) };
         attr_count = 3;
         break;
     case VL_NONE: break;
@@ -256,6 +280,17 @@ bool vkp_create_pipelines(void) {
     d[PIPE_UI] = (PipeDesc){ "ui.vert", "ui.frag", VL_UI, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, VK_POLYGON_MODE_FILL,
                              VK_CULL_MODE_NONE, false, false, true, R->swap_format, VK_FORMAT_UNDEFINED, false, R->layout_ui };
 
+    d[PIPE_SKIN] = d[PIPE_LIT];
+    d[PIPE_SKIN].vert = "skin.vert";
+    d[PIPE_SKIN].frag = "skin.frag";
+    d[PIPE_SKIN].vl = VL_SKIN;
+    d[PIPE_SKIN_WIRE] = d[PIPE_SKIN];
+    d[PIPE_SKIN_WIRE].polygon = R->has_wireframe ? VK_POLYGON_MODE_LINE : VK_POLYGON_MODE_FILL;
+    d[PIPE_SKIN_WIRE].cull = VK_CULL_MODE_NONE;
+    d[PIPE_SKIN_SHADOW] = d[PIPE_SHADOW];
+    d[PIPE_SKIN_SHADOW].vert = "skin_shadow.vert";
+    d[PIPE_SKIN_SHADOW].vl = VL_SKIN_SHADOW;
+
     VkPipeline built[PIPE_COUNT];
     bool ok = true;
     for (int i = 0; i < PIPE_COUNT; i++) {
@@ -281,7 +316,8 @@ void vkp_destroy_pipelines(void) {
 // ------------------------------------------------------------------ hot reload
 
 static const char *k_shader_files[] = { "lit.vert", "lit.frag", "shadow.vert", "lines.vert", "lines.frag", "text.vert",
-                                        "text.frag", "fullscreen.vert", "post.frag", "ui.vert", "ui.frag" };
+                                        "text.frag", "fullscreen.vert", "post.frag", "ui.vert", "ui.frag",
+                                        "skin.vert", "skin.frag", "skin_shadow.vert" };
 
 static i64 shader_sources_mtime(void) {
 #ifdef DG_SOURCE_DIR

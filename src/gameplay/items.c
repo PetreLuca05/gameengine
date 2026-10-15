@@ -2,6 +2,7 @@
 #include "core/log.h"
 #include "core/platform.h"
 #include "cJSON.h"
+#include "gameplay/hitboxes.h"
 #include <SDL3/SDL.h>
 #include <math.h>
 #include <stdio.h>
@@ -185,6 +186,99 @@ static void parse_recoil(const cJSON *w, RecoilParams *r) {
     }
 }
 
+// ------------------------------------------------------------------ hold sockets
+
+static quat frame_from(vec3 fingers, vec3 back) {
+    // Palm frame: -Z = fingers, +Y = back of the hand (orthonormalized).
+    vec3 z = v3_norm(v3_neg(fingers));
+    vec3 y = v3_sub(back, v3_scale(z, v3_dot(back, z)));
+    y = v3_len2(y) > 1e-8f ? v3_norm(y) : v3(0, 1, 0);
+    vec3 x = v3_cross(y, z);
+    // rotation from columns x, y, z
+    float tr = x.x + y.y + z.z;
+    quat q;
+    if (tr > 0) {
+        float r = sqrtf(tr + 1.0f) * 2;
+        q.w = 0.25f * r; q.x = (y.z - z.y) / r; q.y = (z.x - x.z) / r; q.z = (x.y - y.x) / r;
+    } else if (x.x > y.y && x.x > z.z) {
+        float r = sqrtf(1.0f + x.x - y.y - z.z) * 2;
+        q.w = (y.z - z.y) / r; q.x = 0.25f * r; q.y = (y.x + x.y) / r; q.z = (z.x + x.z) / r;
+    } else if (y.y > z.z) {
+        float r = sqrtf(1.0f + y.y - x.x - z.z) * 2;
+        q.w = (z.x - x.z) / r; q.x = (y.x + x.y) / r; q.y = 0.25f * r; q.z = (z.y + y.z) / r;
+    } else {
+        float r = sqrtf(1.0f + z.z - x.x - y.y) * 2;
+        q.w = (x.y - y.x) / r; q.x = (z.x + x.z) / r; q.y = (z.y + y.z) / r; q.z = 0.25f * r;
+    }
+    return quat_norm(q);
+}
+
+static Xform socket_from_json(const cJSON *o, Xform def) {
+    if (!o) return def;
+    Xform x = def;
+    const cJSON *p = cJSON_GetObjectItemCaseSensitive(o, "pos");
+    if (cJSON_IsArray(p) && cJSON_GetArraySize(p) >= 3)
+        x.t = v3((float)cJSON_GetArrayItem(p, 0)->valuedouble, (float)cJSON_GetArrayItem(p, 1)->valuedouble, (float)cJSON_GetArrayItem(p, 2)->valuedouble);
+    vec3 f = jvec3(o, "fingers", v3(0, 0, 0)), b = jvec3(o, "back", v3(0, 0, 0));
+    if (v3_len2(f) > 0 && v3_len2(b) > 0) x.r = frame_from(f, b);
+    vec3 e = jvec3(o, "rot", v3(1e9f, 0, 0));
+    if (e.x < 1e8f) x.r = quat_euler(e.y * DG_DEG2RAD, e.x * DG_DEG2RAD, e.z * DG_DEG2RAD);
+    return x;
+}
+
+// Default sockets per hold style, from the viewmodel grip data (grip = item origin, support offset).
+static void default_sockets(ItemSockets *k, const char *style, vec3 support, vec3 muzzle, const WeaponModelPart *parts, int part_count) {
+    memset(k, 0, sizeof(*k));
+    bool melee = !strncmp(style, "melee", 5);
+    bool pistol = !strcmp(style, "pistol");
+    bool small = !strcmp(style, "item_small") || !strcmp(style, "none");
+    // Right hand around the grip: back of the hand to the right, fingers wrapping forward-down.
+    k->grip_r = xf_make(v3(0, 0, 0), melee || small ? frame_from(v3(0, 0, -1), v3(1, 0, 0)) : frame_from(v3(0, -0.5f, -0.866f), v3(1, 0, 0)));
+    // Left hand: under the handguard (palm up-right), cupping the right hand for pistols,
+    // stacked below the right hand for two-handed melee.
+    quat lrot = frame_from(v3(0.75f, -0.45f, -0.3f), v3(-0.5f, -0.85f, 0.0f));
+    if (pistol) lrot = frame_from(v3(0, -0.5f, -0.866f), v3(-1, 0, 0));
+    if (melee) lrot = frame_from(v3(0, 0, -1), v3(-1, 0, 0));
+    k->grip_l = xf_make(support, lrot);
+    k->has_left = v3_len2(support) > 1e-6f && !small;
+    k->muzzle = muzzle;
+    float top = 0.03f, len = 0.1f;
+    for (int i = 0; i < part_count; i++) {
+        const WeaponModelPart *p = &parts[i];
+        if (fabsf(p->offset.x) < 0.03f) top = fmaxf(top, p->offset.y + p->half.y);
+        len = fmaxf(len, -(p->offset.z - p->half.z));
+        len = fmaxf(len, p->offset.y + p->half.y);   // melee: along +Y
+    }
+    k->sight_height = top;
+    k->length = len;
+}
+
+static void parse_hold(const cJSON *w, char *style, ItemSockets *k, const char *def_style, vec3 support, vec3 muzzle,
+                       const WeaponModelPart *parts, int part_count) {
+    const cJSON *h = cJSON_GetObjectItemCaseSensitive(w, "hold");
+    dg_strcpy(style, 16, jstr(h, "style", def_style));
+    default_sockets(k, style, support, muzzle, parts, part_count);
+    if (!h) return;
+    const cJSON *sk = cJSON_GetObjectItemCaseSensitive(h, "sockets");
+    if (!sk) return;
+    k->grip_r = socket_from_json(cJSON_GetObjectItemCaseSensitive(sk, "grip_r"), k->grip_r);
+    const cJSON *gl = cJSON_GetObjectItemCaseSensitive(sk, "grip_l");
+    if (cJSON_IsNull(gl)) k->has_left = false;
+    else if (gl) { k->grip_l = socket_from_json(gl, k->grip_l); k->has_left = true; }
+    const cJSON *fg = cJSON_GetObjectItemCaseSensitive(sk, "foregrip");
+    if (fg) { k->grip_l = socket_from_json(fg, k->grip_l); k->has_left = true; }
+    k->muzzle = jvec3(sk, "muzzle", k->muzzle);
+}
+
+static const char *default_style_for(const cJSON *w, WeaponKind kind, const char *id) {
+    const char *pose = jstr(w, "pose", "pistol");
+    if (kind == WPN_MELEE) return strstr(id, "knife") ? "melee_1h" : "melee_2h";
+    if (!strcmp(id, "shotgun")) return "shotgun";
+    if (!strcmp(id, "smg")) return "smg";
+    if (!strcmp(id, "lmg")) return "lmg";
+    return !strcmp(pose, "rifle") ? "rifle" : "pistol";
+}
+
 static void parse_weapon(ItemDB *db, const cJSON *w, const char *file) {
     if (db->weapon_count >= MAX_WEAPON_DEFS) { log_warn("items: too many weapons, skipping %s", file); return; }
     WeaponDef *d = &db->weapons[db->weapon_count];
@@ -244,6 +338,14 @@ static void parse_weapon(ItemDB *db, const cJSON *w, const char *file) {
         parse_recoil(w, &d->recoil);
         d->fire_rate = d->recoil.rpm / 60.0f;
     }
+    parse_hold(w, d->hold_style, &d->sockets, default_style_for(w, d->kind, d->id), d->support_offset, d->muzzle_offset, d->parts,
+               d->part_count);
+    part_mult_defaults(d->part_mult);
+    part_mult_parse(d->part_mult, cJSON_GetObjectItemCaseSensitive(w, "part_mult"));
+    const cJSON *fo = cJSON_GetObjectItemCaseSensitive(w, "falloff");
+    d->falloff_start = jnum(fo, "start", d->range);
+    d->falloff_end = jnum(fo, "end", d->range);
+    d->falloff_min = jnum(fo, "min", 1.0f);
     // Link to the item that carries this weapon.
     u16 item = item_find(db, jstr(w, "item", d->id));
     if (item) db->items[item].weapon = db->weapon_count;
@@ -322,6 +424,10 @@ bool items_load(ItemDB *db, const char *items_path, const char *weapons_path) {
         d->armor = jnum(it, "armor", 0);
         d->use_time = jnum(it, "use_time", 0);
         d->weapon = -1;
+        // Held non-weapon items: small by default, sockets from the pickup size.
+        dg_strcpy(d->hold_style, sizeof(d->hold_style), jstr(cJSON_GetObjectItemCaseSensitive(it, "hold"), "style", "item_small"));
+        WeaponModelPart part = { v3(0, d->size.y, -0.03f), d->size, d->color };
+        default_sockets(&d->sockets, d->hold_style, v3(0, 0, 0), v3(0, 0, -d->size.z), &part, 1);
     }
     cJSON_Delete(iroot);
     bool ok = load_weapons(db, weapons_path);

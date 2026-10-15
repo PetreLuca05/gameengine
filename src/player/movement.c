@@ -2,6 +2,7 @@
 // friction, air control, coyote time, jump buffering, stairs/slopes, and ledge traversal
 // (mantle, sprint-vault, ledge hang with pull-up / drop).
 #include "player.h"
+#include "anim/anim_library.h"
 #include "world/world.h"
 #include "physics/physics.h"
 #include "render/debug_draw.h"
@@ -57,6 +58,7 @@ void player_move_reset(PlayerSim *sim, vec3 feet, float yaw) {
     memset(&sim->move, 0, sizeof(sim->move));
     sim->move.pos = feet;
     sim->move.yaw = yaw;
+    sim->move.body_yaw = yaw;
     sim->move.mode = MOVE_WALK;
     sim->move.fall_start_y = feet.y;
 }
@@ -290,6 +292,12 @@ void player_move_tick(World *w, int slot, PlayerSim *sim, PhysCharacter *ch, con
     u16 pressed = (u16)(buttons & ~sim->last_buttons);
 
     m->yaw = cmd->yaw;
+    {
+        // Body yaw (turn in place): deterministic, predicted locally, replicated by the host.
+        const struct AnimLibrary *lib = g_engine.anim;
+        float hspeed = v3_len(v3_flat(m->vel));
+        m->body_yaw = anim_body_yaw_step(m->body_yaw, m->yaw, hspeed > 0.3f || m->mode != MOVE_WALK, lib ? &lib->proc : NULL, dt, &m->body_turning);
+    }
     m->pitch = clampf(cmd->pitch, -89.0f * DG_DEG2RAD, 89.0f * DG_DEG2RAD);
     if (m->regrab_cooldown > 0) m->regrab_cooldown -= dt;
     if (m->jump_buffer > 0) m->jump_buffer -= dt;

@@ -1,0 +1,9 @@
+{
+  "id": "zombie_placeholder", "character_id": 2, "kind": "zombie",
+  "_comment": "Placeholder until real zombie models exist: the dummy mesh with a sickly material.",
+  "mesh": "assets/human/Dummy.fbx",
+  "materials": { "Alpha_Body_MAT": [0.42, 0.52, 0.36], "Alpha_Joints_MAT": [0.25, 0.12, 0.10], "Body 2": [0.42, 0.52, 0.36] },
+  "anim_set": "zombie",
+  "part_mult": { "head": 4.0, "neck": 2.0, "chest": 1.0, "stomach": 1.0, "pelvis": 0.9, "limbs": 0.5 },
+  "ragdoll_scale": 1.0, "scale": 1.0, "hp": 120, "move_speed": 1.1
+}

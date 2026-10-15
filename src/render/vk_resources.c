@@ -51,6 +51,14 @@ static Deferred *push_deferred(void) {
 
 void vkr_defer_buffer(GpuBuffer *b) {
     if (!b->buffer) return;
+    // Drop staged copies into a buffer destroyed before its upload was recorded (e.g. a map
+    // switch on the first frame); the copy would target a deleted VkBuffer.
+    for (int i = 0; i < R->upload_count; i++) {
+        Upload *u = &R->uploads[i];
+        if (u->kind != UPLOAD_BUFFER || u->dst != b->buffer) continue;
+        vkr_buffer_destroy_now(&u->staging);
+        R->uploads[i--] = R->uploads[--R->upload_count];
+    }
     Deferred *d = push_deferred();
     memset(d, 0, sizeof(*d));
     d->kind = DEFER_BUFFER;
@@ -266,11 +274,46 @@ MeshId render_mesh_create(const Vertex *verts, u32 vcount, const u32 *indices, u
     return slot;
 }
 
+MeshId render_skinned_mesh_create(const SkinVertex *verts, u32 vcount, const u32 *indices, u32 icount) {
+    if (!vcount || !icount) return 0;
+    u32 slot = 0;
+    for (u32 n = 0; n < MAX_MESHES - 1; n++) {
+        u32 i = 1 + (R->mesh_free_hint + n) % (MAX_MESHES - 1);
+        if (!R->meshes[i].used) { slot = i; break; }
+    }
+    if (!slot) { log_error("render: out of mesh slots"); return 0; }
+    R->mesh_free_hint = slot;
+    GpuMesh *m = &R->meshes[slot];
+    memset(m, 0, sizeof(*m));
+    m->used = true;
+    m->skinned = true;
+    m->vertex_count = vcount;
+    m->index_count = icount;
+    VkDeviceSize vsize = sizeof(SkinVertex) * vcount, isize = sizeof(u32) * icount;
+    m->vb = vkr_buffer_create(vsize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, false);
+    m->ib = vkr_buffer_create(isize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, false);
+    stage_buffer_copy(m->vb.buffer, verts, vsize);
+    stage_buffer_copy(m->ib.buffer, indices, isize);
+    m->cpu_verts = (SkinVertex *)malloc((size_t)vsize);
+    memcpy(m->cpu_verts, verts, (size_t)vsize);
+    m->cpu_indices = (u32 *)malloc((size_t)isize);
+    memcpy(m->cpu_indices, indices, (size_t)isize);
+    AABB b = { verts[0].pos, verts[0].pos };
+    for (u32 i = 1; i < vcount; i++) { b.min = v3_min(b.min, verts[i].pos); b.max = v3_max(b.max, verts[i].pos); }
+    m->bounds = b;
+    R->stats.meshes_live++;
+    return slot;
+}
+
 void render_mesh_destroy(MeshId id) {
     if (!id || id >= MAX_MESHES || !R->meshes[id].used) return;
     GpuMesh *m = &R->meshes[id];
     vkr_defer_buffer(&m->vb);
     vkr_defer_buffer(&m->ib);
+    free(m->cpu_verts);
+    free(m->cpu_indices);
+    m->cpu_verts = NULL;
+    m->cpu_indices = NULL;
     m->used = false;
     R->stats.meshes_live--;
 }

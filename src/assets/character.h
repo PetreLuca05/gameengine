@@ -1,0 +1,58 @@
+// Character definitions (assets/characters/*.json) and rig validation against the shared,
+// canonical skeleton. Adding a model = one FBX + one JSON, no code:
+//
+//   { "id": "zombie_walker", "character_id": 3, "kind": "zombie",
+//     "mesh": "assets/human/Dummy.fbx", "materials": { "Alpha_Body_MAT": [0.4, 0.5, 0.35] },
+//     "anim_set": "zombie", "part_mult": { "head": 4.0, "limbs": 0.5 },
+//     "ragdoll_scale": 1.0, "scale": 1.0, "hp": 120, "move_speed": 1.2 }
+#ifndef DG_CHARACTER_H
+#define DG_CHARACTER_H
+
+#include "anim/anim.h"
+#include "anim/body_parts.h"
+#include "anim/anim_mesh.h"
+
+#define CHAR_LOD_FILES 4
+
+typedef enum CharKind { CK_PLAYER, CK_ZOMBIE, CK_DUMMY } CharKind;
+
+typedef struct CharacterDef {
+    u32 hash;
+    char id[32];
+    u8 net_id;                     // character_id on the wire
+    u8 kind;
+    char mesh_path[128];
+    char lod_paths[CHAR_LOD_FILES][128];   // optional explicit LOD files
+    int mesh;                      // index into the library's meshes
+    int material_count;
+    char material_names[SKIN_MAX_MATERIALS][48];
+    vec4 material_colors[SKIN_MAX_MATERIALS];
+    char anim_set[32];
+    int anim_set_index;
+    float part_mult[BP_COUNT];
+    float ragdoll_scale;
+    float scale;
+    float hp;
+    float move_speed;
+    float lod_bias;
+    bool valid;                    // mesh bound + rig validated
+} CharacterDef;
+
+bool character_def_parse(CharacterDef *d, const char *json_text, const char *source, char *err, int err_size);
+
+// Rig validation ------------------------------------------------------------
+typedef struct RigReport {
+    bool ok;
+    int identical;                 // 1 = same set + hierarchy
+    int missing, extra, hierarchy_errors, proportion_warnings;
+    char text[8192];
+    int len;
+} RigReport;
+
+// Compares a model's skeleton with the canonical one by bone name.
+//   identical / subset (missing bones take the canonical bind) / extra leaf bones -> ok
+//   renamed bones or a different hierarchy -> error (listed)
+//   bone lengths differing by more than tolerance (e.g. 0.05) -> warning
+bool rig_validate(const Skeleton *canon, const Skeleton *model, float tolerance, RigReport *r);
+
+#endif

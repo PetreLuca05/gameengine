@@ -81,6 +81,9 @@ void dbg_aabb(vec3 mn, vec3 mx, u32 color, float duration) {
     dbg_box(v3_scale(v3_add(mn, mx), 0.5f), v3_scale(v3_sub(mx, mn), 0.5f), quat_identity(), color, duration);
 }
 
+static bool s_shape_depth = true;
+void dbg_set_shape_depth(bool depth) { s_shape_depth = depth; }
+
 void dbg_circle(vec3 c, vec3 n, float r, u32 color, float duration) {
     n = v3_norm(n);
     vec3 t = fabsf(n.y) < 0.9f ? v3_norm(v3_cross(n, v3(0, 1, 0))) : v3(1, 0, 0);
@@ -90,7 +93,7 @@ void dbg_circle(vec3 c, vec3 n, float r, u32 color, float duration) {
     for (int i = 1; i <= seg; i++) {
         float a = (float)i / seg * 2.0f * DG_PI;
         vec3 p = v3_add(c, v3_add(v3_scale(t, cosf(a) * r), v3_scale(b, sinf(a) * r)));
-        dbg_line(prev, p, color, duration, true);
+        dbg_line(prev, p, color, duration, s_shape_depth);
         prev = p;
     }
 }
@@ -111,15 +114,15 @@ void dbg_capsule_axis(vec3 a, vec3 b, float r, u32 color, float duration) {
     vec3 s = v3_cross(n, t);
     vec3 dirs[4] = { t, v3_neg(t), s, v3_neg(s) };
     for (int i = 0; i < 4; i++) {
-        dbg_line(v3_madd(a, dirs[i], r), v3_madd(b, dirs[i], r), color, duration, true);
+        dbg_line(v3_madd(a, dirs[i], r), v3_madd(b, dirs[i], r), color, duration, s_shape_depth);
         // hemisphere arcs
         vec3 pa = v3_madd(a, dirs[i], r), pb = v3_madd(b, dirs[i], r);
         for (int k = 1; k <= 4; k++) {
             float ang = (float)k / 4 * DG_PI * 0.5f;
             vec3 qa = v3_add(a, v3_add(v3_scale(dirs[i], cosf(ang) * r), v3_scale(n, -sinf(ang) * r)));
             vec3 qb = v3_add(b, v3_add(v3_scale(dirs[i], cosf(ang) * r), v3_scale(n, sinf(ang) * r)));
-            dbg_line(pa, qa, color, duration, true);
-            dbg_line(pb, qb, color, duration, true);
+            dbg_line(pa, qa, color, duration, s_shape_depth);
+            dbg_line(pb, qb, color, duration, s_shape_depth);
             pa = qa; pb = qb;
         }
     }

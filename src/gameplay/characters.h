@@ -1,0 +1,147 @@
+// Skinned characters in the world (players, zombies, dummies) on the shared skeleton.
+//
+// Host:    sim-only animation for every character every tick (controller + base pose, no IK,
+//          no skinning) -> per-part hitboxes + lag-compensation history -> replicated state.
+// Clients: run the same controller from the replicated parameters (interpolated), snap to the
+//          host's state ids on divergence, and add every cosmetic layer locally.
+// Render:  LOD-scaled post-pass (damage additive, spine, hold + glue, foot IK) at tick rate,
+//          interpolated between the last two post-IK poses (hands + item move together).
+#ifndef DG_CHARACTERS_H
+#define DG_CHARACTERS_H
+
+#include "world/world.h"
+#include "anim/character_rt.h"
+#include "anim/anim_net.h"
+#include "anim/anim_lod.h"
+#include "gameplay/hitboxes.h"
+#include "physics/ragdoll.h"
+
+#define MAX_CHARACTERS 256
+#define CHAR_NET_SAMPLES 8
+
+typedef enum ZombieMode { ZM_IDLE, ZM_WANDER, ZM_ATTACK } ZombieMode;
+
+typedef struct ZombieAI {
+    u8 mode;
+    float timer;
+    vec3 home, target;
+    float wander_radius;
+    float yaw;
+    float speed;
+    float attack_t;
+} ZombieAI;
+
+typedef struct NetSample { u32 tick; AnimNetState s; } NetSample;
+
+typedef struct CharacterInst {
+    EntityId ent;
+    const CharacterDef *def;
+    int def_index;
+    CharRuntime rt;
+    // simulation (host) / replicated input state
+    Xform root;                       // feet + body yaw (world)
+    float body_yaw;
+    HitboxSet hit;                    // current hitboxes (host: sim pose; client: local pose)
+    HitboxHistory *history;           // host: lag compensation ring
+    AnimNetState net;                 // host: captured each tick; client: latest received
+    u32 state_enter_tick[2];
+    i16 last_state[2];
+    NetSample samples[CHAR_NET_SAMPLES];
+    int sample_count, sample_head;
+    int mismatch_ticks, resyncs;
+    bool synced;                      // client: controller adopted the host's states once (join / spawn)
+    u32 last_land_tick;
+    bool was_grounded, was_reloading;
+    float last_equip_t;
+    // render (any machine that draws)
+    Xform *pose_prev, *pose_cur;      // post-IK bone world transforms
+    Xform item_prev, item_cur;
+    bool item_valid;
+    const struct WeaponDef *item_weapon;
+    const struct ItemDef *item_def;
+    bool have_pose;
+    int lod, fade_from;
+    float lod_fade;
+    float pixels;
+    u32 last_eval;
+    int interval;
+    bool culled;
+    vec3 kick_x, kick_v;              // remote recoil kick on the item (cosmetic)
+    // death / ragdoll
+    Ragdoll rag;
+    bool dead, rag_pending, settled;
+    bool tool_rag;                    // ragdolled by a dev tool (not dead): no auto revive
+    u32 death_tick;
+    u8 death_seed, death_part;
+    vec3 death_impulse;
+    Xform *settled_pose;
+    // host gameplay
+    float leg_t, arm_t;
+    u8 limb;
+    float predicted_hit_t;
+    int predicted_hit_part;
+    ZombieAI ai;
+    bool is_player, local;
+    int slot;
+    u32 events_received[AEV_COUNT];
+} CharacterInst;
+
+typedef struct CharacterSystem {
+    CharacterInst *c[MAX_CHARACTERS];
+    int count;
+    u16 index[MAX_ENTITIES];          // entity index -> character slot + 1
+    int ragdolls;
+    u32 tick;
+    // Clients: reliable events wait until the interpolated render tick reaches their host tick,
+    // so a death / hit lines up with the replicated state stream (no transient mismatch).
+    AnimEvent pending[256];
+    int pending_count;
+} CharacterSystem;
+
+void characters_register_cvars(void);
+void characters_shutdown_globals(void);
+void chars_system_create(World *w);
+void chars_system_destroy(World *w);
+CharacterInst *char_attach(World *w, EntityId e, u8 character_id);
+void char_detach(World *w, EntityId e);
+CharacterInst *char_get(const World *w, EntityId e);
+CharacterInst *char_get_index(const World *w, int ent_index);
+
+// Host: sim-only animation for every character (call after movement / weapons, before lag-comp).
+void chars_host_tick(World *w, float dt);
+// Gameplay notifications (host + local prediction).
+void chars_notify_attack(World *w, int player_slot, bool melee, bool first_predict);
+// Clients: replicated state from snapshots, then one tick of every replicated character.
+void chars_client_receive(World *w, EntityId e, const AnimNetState *s, u32 tick);
+void chars_client_tick(World *w, double render_tick, float dt);
+// Local predicted player (client): controller follows the predicted PlayerSim.
+void chars_local_predict(World *w, int slot, bool first);
+// Render side, once per sim tick: LOD, post-pass, ragdolls.
+void chars_present_tick(World *w, vec3 cam_pos, float fov_deg, float screen_h, float dt, int local_slot);
+void chars_render(World *w, float alpha, vec3 cam_pos, int local_slot);
+// Events (reliable, compact): host queues + applies, clients apply what arrives.
+void chars_push_event(World *w, const AnimEvent *e);
+void chars_on_event(World *w, const AnimEvent *e);
+const AnimNetState *chars_net_state(const World *w, int ent_index);
+// Host damage hook: limb status, hit / death events. dir = shot direction (world).
+void chars_on_damage(World *w, EntityId target, float dealt, int part, vec3 dir, vec3 point, bool killed, int damage_type);
+// Hit tests against characters (host: rewound to view_tick256 when > 0; clients: current pose).
+bool chars_raycast(World *w, EntityId ignore, vec3 origin, vec3 dir, float range, u32 view_tick256, EntityId *ent, HitboxRayHit *hit);
+bool chars_sweep(World *w, EntityId ignore, vec3 a, vec3 b, float radius, EntityId *ent, HitboxRayHit *hit);
+// Client-side predicted (unconfirmed) reaction on a target the local player hit.
+void chars_predict_hit(World *w, EntityId target, int part, vec3 dir);
+// Zombies (host).
+EntityId spawn_zombie(World *w, vec3 feet, float yaw, u8 character_id);
+void zombies_attack(World *w);
+// Extra spread (degrees) from arm injuries.
+float chars_limb_spread(const World *w, EntityId e);
+// Debug / tools.
+void chars_debug_draw(World *w, vec3 cam_pos);
+void chars_force_lod(int lod);
+bool chars_ragdoll_now(World *w, EntityId e, vec3 impulse);
+bool chars_ragdoll_release(World *w, EntityId e);   // stands a tool ragdoll back up
+int chars_count(const World *w);
+void chars_budget_stats(int *evals, int *deferred);   // last present tick: post-passes run / deferred by anim_eval_budget
+const LodConfig *chars_lod_config(void);
+
+#endif

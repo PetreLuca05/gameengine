@@ -30,7 +30,7 @@ typedef struct HandClip {
     int key_count;
 } HandClip;
 
-typedef struct Pose { vec3 pos[2]; quat rot[2]; u8 grip[2]; } Pose;
+typedef struct HandPose { vec3 pos[2]; quat rot[2]; u8 grip[2]; } HandPose;
 
 typedef enum InteractPhase { IA_NONE, IA_REACH, IA_HOLD, IA_RETURN } InteractPhase;
 
@@ -152,8 +152,8 @@ static int find_clip(const char *name) {
 static quat euler_deg(vec3 e) { return quat_euler(e.y * DG_DEG2RAD, e.x * DG_DEG2RAD, e.z * DG_DEG2RAD); }
 
 // Samples a clip at normalized time u (0..1) into a camera-space pose.
-static Pose sample_clip(int ci, float u) {
-    Pose p;
+static HandPose sample_clip(int ci, float u) {
+    HandPose p;
     memset(&p, 0, sizeof(p));
     if (ci < 0 || ci >= H->clip_count || H->clips[ci].key_count == 0) {
         p.pos[0] = v3(-0.2f, -0.28f, -0.38f);
@@ -178,8 +178,8 @@ static Pose sample_clip(int ci, float u) {
     return p;
 }
 
-static Pose pose_lerp(const Pose *a, const Pose *b, float t) {
-    Pose p;
+static HandPose pose_lerp(const HandPose *a, const HandPose *b, float t) {
+    HandPose p;
     for (int h = 0; h < 2; h++) {
         p.pos[h] = v3_lerp(a->pos[h], b->pos[h], t);
         p.rot[h] = quat_nlerp(a->rot[h], b->rot[h], t);
@@ -218,23 +218,9 @@ const ArmChain *hands_chain(int hand) { return &H->chain[hand & 1]; }
 
 // ------------------------------------------------------------------ IK
 
-// Analytic two-bone IK. Returns false if the target was out of reach (arm fully extended).
+// Analytic two-bone IK: shared with the third-person characters (src/anim/anim.c).
 static bool solve_two_bone(vec3 shoulder, vec3 target, vec3 pole, float a, float b, vec3 *elbow, vec3 *wrist) {
-    vec3 d = v3_sub(target, shoulder);
-    float dist = v3_len(d);
-    vec3 dir = dist > 1e-5f ? v3_scale(d, 1.0f / dist) : v3(0, 0, -1);
-    float max_reach = a + b - 1e-3f;
-    float min_reach = fabsf(a - b) + 1e-3f;
-    bool reached = dist <= max_reach;
-    dist = clampf(dist, min_reach, max_reach);
-    float cos_a = clampf((a * a + dist * dist - b * b) / (2.0f * a * dist), -1.0f, 1.0f);
-    float sin_a = sqrtf(fmaxf(0.0f, 1.0f - cos_a * cos_a));
-    vec3 p = v3_sub(pole, v3_scale(dir, v3_dot(pole, dir)));
-    if (v3_len2(p) < 1e-8f) p = v3_cross(dir, v3(1, 0, 0));
-    p = v3_norm(p);
-    *elbow = v3_add(shoulder, v3_add(v3_scale(dir, a * cos_a), v3_scale(p, a * sin_a)));
-    *wrist = v3_madd(shoulder, dir, dist);
-    return reached;
+    return anim_ik_two_bone(shoulder, target, pole, a, b, elbow, wrist);
 }
 
 static void solve_arm(int h, vec3 cam_pos, quat cam_rot, vec3 hand_pos, quat hand_rot, u8 grip, ArmChain *out) {
@@ -345,10 +331,10 @@ void hands_update(const HandsInput *in) {
         else H->clip_t = fminf(H->clip_t, dur);
     }
     H->fade = fminf(1.0f, H->fade + dt / 0.15f);
-    Pose pose = sample_clip(H->clip, H->clip_t / dur);
+    HandPose pose = sample_clip(H->clip, H->clip_t / dur);
     if (H->fade < 1.0f && H->prev_clip >= 0) {
         float pd = fmaxf(0.01f, H->clips[H->prev_clip].duration);
-        Pose prev = sample_clip(H->prev_clip, fminf(1.0f, H->prev_clip_t / pd));
+        HandPose prev = sample_clip(H->prev_clip, fminf(1.0f, H->prev_clip_t / pd));
         pose = pose_lerp(&prev, &pose, smoothstepf(0, 1, H->fade));
     }
 
@@ -534,13 +520,15 @@ void hands_update(const HandsInput *in) {
 
 // ------------------------------------------------------------------ rendering
 
+static u32 s_world_item_flags = MAT_NO_SHADOW;   // flags for third-person held items (hands_draw_held)
+
 static void draw_box(vec3 center, quat rot, vec3 half, vec4 color, bool viewmodel) {
     DrawItem d;
     d.mesh = H->cube;
     d.model = mat4_trs(center, rot, v3_scale(half, 2.0f));
     d.mat = material_color(color);
     d.mat.roughness = 0.7f;
-    d.mat.flags = MAT_NO_SHADOW;
+    d.mat.flags = viewmodel ? MAT_NO_SHADOW : s_world_item_flags;
     if (viewmodel) render_draw_viewmodel(&d);
     else render_draw(&d);
 }
@@ -631,6 +619,14 @@ void hands_render(void) {
     else if (H->held_item && H->held_item->kind != ITEM_WEAPON) draw_held_item(H->held_item, H->weapon_pos, H->weapon_rot, true);
 }
 
+void hands_draw_held(const WeaponDef *wd, const ItemDef *it, vec3 pos, quat rot, u32 flags) {
+    if (!H) return;
+    s_world_item_flags = flags;
+    if (wd) draw_weapon(wd, pos, rot, false);
+    else if (it) draw_held_item(it, pos, rot, false);
+    s_world_item_flags = MAT_NO_SHADOW;
+}
+
 void hands_render_remote(World *w, int slot, vec3 eye, float yaw, float pitch) {
     if (!H) return;
     const Player *p = &w->players[slot];
@@ -641,7 +637,7 @@ void hands_render_remote(World *w, int slot, vec3 eye, float yaw, float pitch) {
     const char *name = "idle";
     if (wd) name = wd->kind == WPN_MELEE ? "melee" : (!strcmp(wd->pose, "rifle") ? "rifle" : "pistol");
     if (w->flags[ent_i] & EF_HANG) name = "hang";
-    Pose pose = sample_clip(find_clip(name), 0);
+    HandPose pose = sample_clip(find_clip(name), 0);
     ArmChain c[2];
     vec3 tp[2];
     quat tr[2];

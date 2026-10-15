@@ -36,6 +36,8 @@ typedef struct Engine {
     struct ChunkGlobals *chunk_globals;
     struct Menus *menus;
     struct VideoState *video;
+    struct AnimLibrary *anim;         // shared skeleton + animation assets (src/anim/anim_library.h)
+    struct CharGlobals *chars;        // character system cvars / GPU meshes (src/gameplay/characters.h)
 
     Arena perm_arena;   // lives for the whole run
     Arena frame_arena;  // reset every rendered frame

@@ -1,4 +1,7 @@
 #include "entities.h"
+#include "core/engine.h"
+#include "characters.h"
+#include "anim/anim_library.h"
 #include "health.h"
 #include "core/log.h"
 #include <stdio.h>
@@ -486,7 +489,38 @@ void entity_setup(World *w, EntityId e) {
         w->hitbox[i].head_radius = 0.15f;
         w->hitbox[i].head_height = 1.62f;
         break;
+    case ET_ZOMBIE: {
+        w->comps[i] |= C_HITBOX | C_HEALTH;
+        w->hitbox[i].radius = 0.3f;
+        w->hitbox[i].height = 1.8f;
+        w->hitbox[i].head_radius = 0.15f;
+        w->hitbox[i].head_height = 1.62f;
+        // Kinematic capsule so players bump into zombies (moved by the host AI).
+        BodyDesc d;
+        memset(&d, 0, sizeof(d));
+        d.shape.kind = SHAPE_CAPSULE;
+        d.shape.radius = 0.28f;
+        d.shape.half_height = 0.6f;
+        d.pos = v3_add(w->xf[i].pos, v3(0, 0.9f, 0));
+        d.rot = quat_identity();
+        d.motion = PM_KINEMATIC;
+        d.layer = PL_CHARACTER;
+        d.user = e;
+        w->body[i].body = phys_add_body(w->phys, &d);
+        w->body[i].motion = PM_KINEMATIC;
+        w->comps[i] |= C_BODY;
+        break;
+    }
     default: break;
+    }
+    // Skinned characters on the shared skeleton.
+    if (t == ET_PLAYER || t == ET_DUMMY || t == ET_ZOMBIE) {
+        u8 id = w->char_id[i];
+        if (!id && g_engine.anim) {
+            const CharacterDef *cd = anim_lib_char_by_id(g_engine.anim, t == ET_PLAYER ? "player" : (t == ET_DUMMY ? "target_dummy" : "zombie_placeholder"));
+            if (cd) id = cd->net_id;
+        }
+        if (id) char_attach(w, e, id);
     }
 }
 
@@ -556,9 +590,10 @@ void entities_client_sync(World *w) {
     ENT_FOREACH(w, i) {
         BodyId b = w->body[i].body;
         if (b == PHYS_INVALID_BODY || w->body[i].motion == PM_STATIC) continue;
-        // Player proxies are capsules centered at half height; entity positions are the feet.
-        vec3 pos = w->type[i] == ET_PLAYER ? v3_add(w->xf[i].pos, v3(0, PLAYER_HEIGHT * 0.5f, 0)) : w->xf[i].pos;
-        quat rot = w->type[i] == ET_PLAYER ? quat_identity() : w->xf[i].rot;
+        // Player / zombie proxies are capsules centered at half height; entity positions are the feet.
+        bool feet = w->type[i] == ET_PLAYER || w->type[i] == ET_ZOMBIE;
+        vec3 pos = feet ? v3_add(w->xf[i].pos, v3(0, w->type[i] == ET_PLAYER ? PLAYER_HEIGHT * 0.5f : 0.9f, 0)) : w->xf[i].pos;
+        quat rot = feet ? quat_identity() : w->xf[i].rot;
         phys_set_transform(w->phys, b, pos, rot, false);
     }
 }

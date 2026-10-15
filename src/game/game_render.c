@@ -9,6 +9,8 @@
 #include "world/level.h"
 #include "world/chunks.h"
 #include "gameplay/weapons.h"
+#include "gameplay/characters.h"
+#include "ui/anim_debug.h"
 #include "gameplay/effects.h"
 #include "player/hands.h"
 #include "ui/ui.h"
@@ -181,6 +183,12 @@ static void render_entity(World *w, int i, float alpha, bool focused) {
         break;
     }
     case ET_DUMMY: {
+        if (char_get_index(w, i)) {
+            // Skinned dummy (characters.c draws it): just the stand.
+            Material post = mat_from(rgba8(0.3f, 0.3f, 0.3f, 1), 0.6f, 0);
+            draw_shape(VIS_BOX, v3(0.25f, 0.02f, 0.25f), v3_add(v3_sub(pos, v3(0, 0.9f, 0)), v3(0, 0.02f, 0)), rot, post);
+            break;
+        }
         // Toppled backwards when dead.
         quat tilt = quat_mul(rot, quat_axis_angle(v3(1, 0, 0), -anim * 1.45f));
         vec3 base = v3_sub(pos, v3(0, 0.9f, 0));
@@ -195,9 +203,12 @@ static void render_entity(World *w, int i, float alpha, bool focused) {
         draw_shape(VIS_BOX, v3(0.25f, 0.02f, 0.25f), v3_add(base, v3(0, 0.02f, 0)), rot, post);
         break;
     }
+    case ET_ZOMBIE:
+        break;   // characters.c
     case ET_PLAYER: {
         int slot = w->player_slot[i];
         if (slot == G->local_slot) break; // first person: drawn as hands
+        if (char_get_index(w, i)) break;  // skinned character (characters.c)
         bool dead = (w->flags[i] & EF_DEAD) != 0;
         bool crouch = (w->flags[i] & EF_CROUCHED) != 0;
         float height = crouch ? PLAYER_CROUCH_HEIGHT : PLAYER_HEIGHT;
@@ -244,10 +255,11 @@ void game_render_world(World *w, float alpha, vec3 cam_pos, vec3 cam_fwd) {
     if (w->chunks) chunks_render(w, cam_pos);
     else level_draw_static(w, cam_pos, cam_fwd);
     ENT_FOREACH(w, i) {
-        if (!(w->comps[i] & C_VISUAL)) continue;
+        if (!(w->comps[i] & C_VISUAL) && w->type[i] != ET_ZOMBIE) continue;
         if ((w->flags[i] & EF_HIDDEN) && w->type[i] != ET_PICKUP) continue;
         render_entity(w, i, alpha, ENT_MAKE(i, w->gen[i]) == G->focus);
     }
+    chars_render(w, G->alpha, cam_pos, G->local_slot);
 }
 
 static void draw_debug(World *w, vec3 cam) {
@@ -260,6 +272,7 @@ static void draw_debug(World *w, vec3 cam) {
             dbg_capsule(phys_character_pos(p->character), PLAYER_RADIUS, h, DBG_MAGENTA, 0);
         }
     }
+    chars_debug_draw(w, cam);
     if (G->r_drawhitboxes->i) {
         ENT_FOREACH(w, i) {
             if (!(w->comps[i] & C_HITBOX)) continue;
@@ -354,6 +367,7 @@ void game_render(void) {
     fx_render();
     draw_debug(w, cam.pos);
     recoil_debug_draw(cam.pos);
+    anim_debug_draw();
     vec3 right = right_from_yaw(cam.yaw);
     vec3 up = v3_cross(right, fwd);
     dbg_submit((float)g_engine.frame_dt, cam.pos, right, up);

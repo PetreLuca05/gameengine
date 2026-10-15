@@ -1,0 +1,15 @@
+{
+  "name": "player",
+  "_comment": "Slot -> clip. Generated template with every slot: player_template.json. Modifiers: @reverse, @mirror, @a:b (normalized sub-range).",
+  "slots": {
+    "idle": "idle",
+    "walk_f": "walking", "walk_b": "walking@reverse", "walk_l": "left strafe walking", "walk_r": "right strafe walking",
+    "run_f": "running", "run_b": "running@reverse", "run_l": "left strafe", "run_r": "right strafe",
+    "sprint": "running",
+    "crouch_idle": "idle",
+    "crouch_f": "walking", "crouch_b": "walking@reverse", "crouch_l": "left strafe walking", "crouch_r": "right strafe walking",
+    "jump_start": "jump@0.0:0.34", "jump_loop": "jump@0.34:0.52", "jump_land": "jump@0.6:0.78", "jump_land_hard": "jump@0.6:0.85",
+    "hang_idle": "Hanging Idle",
+    "turn_l90": "left turn 90", "turn_r90": "right turn 90", "turn_l180": "left turn", "turn_r180": "right turn"
+  }
+}

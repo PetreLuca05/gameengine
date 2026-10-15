@@ -1,5 +1,6 @@
 #include "health.h"
 #include "weapons.h"
+#include "characters.h"
 #include <stdio.h>
 
 void health_init(Health *h, float hp, float armor) {
@@ -11,6 +12,11 @@ void health_init(Health *h, float hp, float armor) {
 }
 
 float apply_damage(World *w, EntityId target, float amount, DamageType type, EntityId attacker, vec3 point, vec3 dir, bool headshot) {
+    return apply_damage_part(w, target, amount, type, attacker, point, dir, headshot ? BP_HEAD : -1, 0.0f);
+}
+
+float apply_damage_part(World *w, EntityId target, float amount, DamageType type, EntityId attacker, vec3 point, vec3 dir, int part, float part_mult) {
+    bool headshot = part == BP_HEAD;
     if (!w->authority || !ent_valid(w, target)) return 0;
     int i = (int)ENT_INDEX(target);
     if (!(w->comps[i] & C_HEALTH) || (w->flags[i] & EF_DEAD)) return 0;
@@ -41,7 +47,8 @@ float apply_damage(World *w, EntityId target, float amount, DamageType type, Ent
     ev.ent = target;
     ev.pos = point;
     ev.value = amount * h->resist[type];
-    ev.id = (u32)type | (headshot ? 0x100u : 0u);
+    ev.id = (u32)type | (headshot ? 0x100u : 0u) | ((u32)(part >= 0 ? part + 1 : 0) << 16);
+    ev.dir = v3(part_mult, 0, 0);   // dev damage numbers: "part x mult"
     ev_push(w, &ev);
 
     if (attacker_player >= 0) {
@@ -86,6 +93,7 @@ float apply_damage(World *w, EntityId target, float amount, DamageType type, Ent
         }
         if (attacker_player >= 0 && attacker_player != victim_player && victim_player >= 0) w->players[attacker_player].kills++;
     }
+    chars_on_damage(w, target, dealt, part, dir, point, killed, (int)type);
     return dealt;
 }
 

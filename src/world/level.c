@@ -5,6 +5,8 @@
 #include "render/mesh_gen.h"
 #include "ui/font.h"
 #include "gameplay/entities.h"
+#include "gameplay/characters.h"
+#include "anim/anim_library.h"
 #include "cJSON.h"
 #include "assets/assets.h"
 #include <stdlib.h>
@@ -344,6 +346,40 @@ static void spawn_entity(World *w, const cJSON *e) {
         w->vis[ENT_INDEX(id)].model = assets_model_id(js(e, "model", ""));
     } else if (!strcmp(type, "dummy")) {
         id = spawn_dummy(w, pos, yaw, jf(e, "hp", 200));
+    } else if (!strcmp(type, "character")) {
+        // A dummy driven by a character definition (e.g. the player model holding an item).
+        if (!w->authority) return;
+        id = spawn_dummy(w, pos, yaw, jf(e, "hp", 300));
+        const CharacterDef *cd = g_engine.anim ? anim_lib_char_by_id(g_engine.anim, js(e, "character", "player")) : NULL;
+        if (id && cd) {
+            char_detach(w, id);
+            w->char_id[ENT_INDEX(id)] = cd->net_id;
+            char_attach(w, id, cd->net_id);
+        }
+        const char *item = js(e, "item", NULL);
+        if (id && item) w->item[ENT_INDEX(id)] = item_find(w->items, item);
+    } else if (!strcmp(type, "zombie")) {
+        if (!w->authority) return;
+        const CharacterDef *cd = g_engine.anim ? anim_lib_char_by_id(g_engine.anim, js(e, "character", "zombie_placeholder")) : NULL;
+        id = spawn_zombie(w, pos, yaw, cd ? cd->net_id : 2);
+    } else if (!strcmp(type, "zombie_area")) {
+        // rows x cols zombies on a grid, mixed character ids, each wandering around its spot.
+        if (!w->authority || !g_engine.anim) return;
+        int rows = (int)jf(e, "rows", 4), cols = (int)jf(e, "cols", 5);
+        vec3 sp = jv3(e, "spacing", v3(2, 0, 3));
+        float radius = jf(e, "radius", 1.8f);
+        static const char *kinds[3] = { "zombie_placeholder", "zombie_brute", "zombie_runner" };
+        int n = 0;
+        for (int r = 0; r < rows; r++)
+            for (int c = 0; c < cols; c++) {
+                const CharacterDef *cd = anim_lib_char_by_id(g_engine.anim, kinds[n % 3]);
+                vec3 p = v3_add(pos, v3((float)c * sp.x - (float)(cols - 1) * sp.x * 0.5f, 0, (float)r * sp.z - (float)(rows - 1) * sp.z * 0.5f));
+                EntityId z = spawn_zombie(w, p, yaw + (float)n * 0.7f, cd ? cd->net_id : 2);
+                CharacterInst *ci = char_get(w, z);
+                if (ci) ci->ai.wander_radius = radius;
+                n++;
+            }
+        return;
     } else if (!strcmp(type, "marker")) {
         const char *shape = js(e, "shape", "capsule");
         VisShape vs = !strcmp(shape, "box") ? VIS_BOX : (!strcmp(shape, "cylinder") ? VIS_CYLINDER : VIS_CAPSULE);

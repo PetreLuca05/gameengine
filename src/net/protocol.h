@@ -1,6 +1,6 @@
 // Wire protocol. Every message starts with a MsgType byte.
 //
-//   client -> host  reliable   HELLO{version,name}  RPC{type,a,b,c}
+//   client -> host  reliable   HELLO{version,name,anim manifest[categories]}  RPC{type,a,b,c}
 //   client -> host  unreliable CMDS{ack_snapshot, count, UserCmd[count]}   (last N cmds, redundancy)
 //   host -> client  reliable   WELCOME{slot,map,seed,tick,snaprate}  REJECT{reason}  EVENT{GameEvent}
 //                              INVENTORY{revision,slots}  CVARS{count,(name,value)*}
@@ -8,7 +8,7 @@
 #ifndef DG_PROTOCOL_H
 #define DG_PROTOCOL_H
 
-#define DG_PROTOCOL_VERSION 6
+#define DG_PROTOCOL_VERSION 7
 #define DG_DEFAULT_PORT 27015
 #define DG_DISCOVERY_PORT 27016
 
@@ -23,6 +23,7 @@ typedef enum MsgType {
     MSG_RPC,
     MSG_CVARS,
     MSG_BYE,
+    MSG_ANIM_EVENTS,   // host -> client reliable: count u8, AnimEvent[count] (compact, see anim/anim_net.h)
 } MsgType;
 
 // Per-entity delta field bits.
@@ -38,7 +39,8 @@ enum NetFieldBits {
     NF_NAME  = 1 << 8,
     NF_LIGHT = 1 << 9,   // light color/radius/intensity/group
     NF_EXTRA = 1 << 10,  // door knob / lever target data
-    NF_ALL   = 0x7FF,
+    NF_ANIMST = 1 << 11, // replicated animation state (characters), own sub-field mask
+    NF_ALL   = 0xFFF,
 };
 
 #define CMDS_PER_PACKET 4

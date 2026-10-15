@@ -1,0 +1,16 @@
+{
+  "_comment": "Hitboxes = ragdoll bodies (shared skeleton) tagged with a body part. Value: part name, or {part, radius_scale}. Damage multipliers per part live in assets/characters/<type>.json ('part_mult') and optionally per weapon ('part_mult' in data/weapons/*.json).",
+  "bodies": {
+    "head": { "part": "head", "radius_scale": 1.0 },
+    "neck": "neck",
+    "chest": "chest",
+    "stomach": "stomach",
+    "pelvis": "pelvis",
+    "upper_arm_l": "upper_arm_l", "upper_arm_r": "upper_arm_r",
+    "lower_arm_l": "lower_arm_l", "lower_arm_r": "lower_arm_r",
+    "hand_l": "hand_l", "hand_r": "hand_r",
+    "upper_leg_l": "upper_leg_l", "upper_leg_r": "upper_leg_r",
+    "lower_leg_l": "lower_leg_l", "lower_leg_r": "lower_leg_r",
+    "foot_l": "foot_l", "foot_r": "foot_r"
+  }
+}

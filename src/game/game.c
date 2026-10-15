@@ -10,6 +10,10 @@
 #include "gameplay/entities.h"
 #include "gameplay/health.h"
 #include "gameplay/weapons.h"
+#include "gameplay/characters.h"
+#include "anim/anim_library.h"
+#include "assets/anim_cache.h"
+#include "ui/anim_debug.h"
 #include "gameplay/effects.h"
 #include "player/hands.h"
 #include "render/render.h"
@@ -229,6 +233,7 @@ void game_sim_player(World *w, int slot, const UserCmd *cmd, float dt, bool firs
     player_move_tick(w, slot, &p->sim, p->character, &c, dt, first);
     WeaponOutput wo;
     weapons_tick(w, slot, &p->sim, &c, pressed, dt, first, &wo);
+    if (wo.fired || wo.swung) chars_notify_attack(w, slot, wo.swung, first);
     if (first && p->local && G) {
         // Aim recoil + recovery rotate the real view (the next command carries it).
         G->view.yaw += wo.view_kick.x;
@@ -293,6 +298,7 @@ static void host_tick(World *w, const UserCmd *local_cmd) {
     }
     entities_tick(w, SIM_DT);
     projectiles_tick(w, SIM_DT);
+    chars_host_tick(w, SIM_DT);   // sim-only animation -> per-part hitboxes (before the lag-comp record)
     if (w->chunks) chunks_update(w, SIM_DT);
     phys_step(w->phys, SIM_DT);
     // Props moved by physics: pull their new transforms.
@@ -312,7 +318,9 @@ static void dispatch_events(World *w) {
         if (to_local) game_handle_event(ev);
     }
     net_host_send_events(w);
+    net_host_send_anim_events(w);
     w->event_count = 0;
+    w->anim_event_count = 0;
 }
 
 // ------------------------------------------------------------------ commands
@@ -478,10 +486,14 @@ static void tick(void) {
         if (p && p->character) {
             G->predicted_prev = p->sim.move;
             game_sim_player(w, G->local_slot, &cmd, SIM_DT, true);
+            chars_local_predict(w, G->local_slot, true);
         }
+        chars_client_tick(w, net_client_render_tick(), SIM_DT);
         if (w->chunks) chunks_update(w, SIM_DT);
         w->tick++;
     }
+    // Render-side character work at tick rate (LOD-scaled post-pass, ragdolls).
+    chars_present_tick(w, G->view.eye, G->view.fov > 1 ? G->view.fov : 75.0f, (float)render_height(), SIM_DT, G->local_slot);
     weapon_feel_tick();
 }
 
@@ -834,6 +846,191 @@ static void cmd_weapon_reload(int argc, const char **argv) {
     if (weapons_reload_defs(&G->items, "data/weapons")) game_add_hint("Weapon definitions reloaded");
 }
 
+// ------------------------------------------------------------------ characters / animation
+
+static void cmd_zombie_spawn(int argc, const char **argv) {
+    World *w = G->world;
+    if (!w || G->mode != GM_HOST) { log_info("usage: zombie_spawn [count] [character_id|id] [radius] (host only)"); return; }
+    int count = argc > 1 ? atoi(argv[1]) : 1;
+    int cid = 0;
+    if (argc > 2) {
+        const CharacterDef *d = anim_lib_char_by_id(g_engine.anim, argv[2]);
+        cid = d ? d->net_id : atoi(argv[2]);
+    }
+    float radius = argc > 3 ? (float)atof(argv[3]) : 3.0f;
+    Player *p = game_local_player();
+    vec3 c = p ? v3_add(p->sim.move.pos, v3_scale(forward_from_yaw(G->view.yaw), radius + 2.0f)) : v3(0, 0, 0);
+    for (int k = 0; k < count; k++) {
+        float a = (float)k / (float)DG_MAX(1, count) * 2.0f * DG_PI;
+        vec3 pos = v3_add(c, v3(sinf(a) * radius * (count > 1), 0, cosf(a) * radius * (count > 1)));
+        RayHit rh;
+        if (phys_raycast(w->phys, v3_add(pos, v3(0, 3, 0)), v3(0, -8, 0), PL_MASK(PL_STATIC), PHYS_INVALID_BODY, &rh)) pos.y = rh.point.y;
+        int id = cid;
+        if (!id) {
+            static const char *kinds[3] = { "zombie_placeholder", "zombie_brute", "zombie_runner" };
+            const CharacterDef *d = anim_lib_char_by_id(g_engine.anim, kinds[k % 3]);
+            id = d ? d->net_id : 2;
+        }
+        spawn_zombie(w, pos, G->view.yaw + DG_PI + a * 0.3f, (u8)id);
+    }
+    log_info("spawned %d zombies", count);
+}
+
+static void cmd_zombie_attack(int argc, const char **argv) { if (G->world) zombies_attack(G->world); }
+
+static void cmd_zombie_clear(int argc, const char **argv) {
+    World *w = G->world;
+    if (!w || G->mode != GM_HOST) return;
+    int n = 0;
+    ENT_FOREACH(w, i) if (w->type[i] == ET_ZOMBIE) { ent_destroy(w, ENT_MAKE(i, w->gen[i])); n++; }
+    log_info("removed %d zombies", n);
+}
+
+static void warn_live_session(const char *what) {
+    if (net_role() != NET_OFF && G->mode == GM_HOST && net_host_client_count() > 0)
+        log_warn("%s: asset hashes changed in a live session - clients desync until they reload the same files", what);
+}
+
+static void cmd_anim_reload(int argc, const char **argv) {
+    if (!g_engine.anim) return;
+    anim_lib_reload_meta(g_engine.anim);
+    log_info("anim_reload: manifest %08x", anim_manifest_combined(&g_engine.anim->manifest));
+    warn_live_session("anim_reload");
+}
+
+static void cmd_anim_rebake(int argc, const char **argv) {
+    if (!g_engine.anim) return;
+    anim_lib_rebake(g_engine.anim);
+    log_info("anim_rebake: %d clips, manifest %08x", g_engine.anim->clip_count, anim_manifest_combined(&g_engine.anim->manifest));
+    warn_live_session("anim_rebake");
+}
+
+static void cmd_character_reload(int argc, const char **argv) {
+    if (!g_engine.anim) return;
+    anim_lib_reload_characters(g_engine.anim);
+    g_engine.anim->revision++;
+    warn_live_session("character_reload");
+}
+
+static void cmd_hitbox_reload(int argc, const char **argv) {
+    if (!g_engine.anim) return;
+    anim_lib_reload_hitboxes(g_engine.anim);
+    warn_live_session("hitbox_reload");
+}
+
+static void cmd_anim_template(int argc, const char **argv) {
+    if (!g_engine.anim) return;
+    anim_lib_write_template(g_engine.anim, "player", false);
+    anim_lib_write_template(g_engine.anim, "zombie", true);
+}
+
+static void cmd_ragdoll(int argc, const char **argv) {
+    World *w = G->world;
+    if (!w) return;
+    // ragdoll [push N]: drops (or pushes) the character under the crosshair.
+    vec3 dir = dir_from_angles(G->view.yaw, G->view.pitch);
+    EntityId e;
+    HitboxRayHit h;
+    if (!chars_raycast(w, game_local_player() ? game_local_player()->ent : ENT_NONE, G->view.eye, dir, 60.0f, 0, &e, &h)) { log_info("ragdoll: no character under the crosshair"); return; }
+    float strength = argc > 2 ? (float)atof(argv[2]) : 120.0f;
+    chars_ragdoll_now(w, e, v3_scale(dir, strength));
+}
+
+static void cmd_char_kill(int argc, const char **argv) {
+    // char_kill [damage]: host-side lethal hit on the character under the crosshair (dies -> ragdoll).
+    World *w = G->world;
+    if (!w || !w->authority) { log_info("char_kill: host only"); return; }
+    vec3 dir = dir_from_angles(G->view.yaw, G->view.pitch);
+    EntityId e;
+    HitboxRayHit h;
+    if (!chars_raycast(w, game_local_player() ? game_local_player()->ent : ENT_NONE, G->view.eye, dir, 120.0f, 0, &e, &h)) { log_info("char_kill: no character under the crosshair"); return; }
+    float dmg = argc > 1 ? (float)atof(argv[1]) : 100000.0f;
+    float done = apply_damage_part(w, e, dmg, DMG_BULLET, game_local_player() ? game_local_player()->ent : ENT_NONE, h.point, dir, h.part, 1.0f);
+    log_info("char_kill: ent %u hit %s for %.0f", e, body_part_name(h.part), done);
+}
+
+// char_spawn <character id> x y z [yaw] [item]: a character (dummy, or zombie for zombie ids) at an exact spot.
+static void cmd_char_spawn(int argc, const char **argv) {
+    World *w = G->world;
+    if (!w || !w->authority || !g_engine.anim || argc < 5) { log_info("usage: char_spawn <character> x y z [yaw_deg] [item] (host)"); return; }
+    const CharacterDef *d = anim_lib_char_by_id(g_engine.anim, argv[1]);
+    if (!d) { log_info("char_spawn: unknown character '%s'", argv[1]); return; }
+    vec3 pos = v3((float)atof(argv[2]), (float)atof(argv[3]), (float)atof(argv[4]));
+    float yaw = argc > 5 ? (float)atof(argv[5]) * DG_DEG2RAD : 0.0f;
+    EntityId e;
+    if (d->kind == CK_ZOMBIE) {
+        e = spawn_zombie(w, pos, yaw, d->net_id);
+    } else {
+        e = spawn_dummy(w, pos, yaw, d->hp > 0 ? d->hp : 300);
+        if (e) {
+            char_detach(w, e);
+            w->char_id[ENT_INDEX(e)] = d->net_id;
+            char_attach(w, e, d->net_id);
+        }
+    }
+    if (e && argc > 6) w->item[ENT_INDEX(e)] = item_find(w->items, argv[6]);
+    log_info("char_spawn: %s ent %u", d->id, e);
+}
+
+// LOD line-up: one player-model dummy (rifle) and one zombie at 5 / 15 / 30 / 60 / 120 m along the view.
+static EntityId g_lineup[16];
+static int g_lineup_count;
+
+static void cmd_anim_lod_lineup(int argc, const char **argv) {
+    World *w = G->world;
+    if (!w || !w->authority || !g_engine.anim) { log_info("anim_lod_lineup: host only"); return; }
+    for (int k = 0; k < g_lineup_count; k++) if (ent_valid(w, g_lineup[k])) ent_destroy(w, g_lineup[k]);
+    g_lineup_count = 0;
+    if (argc > 1 && !strcmp(argv[1], "clear")) { log_info("anim_lod_lineup: cleared"); return; }
+    Player *p = game_local_player();
+    if (!p) return;
+    static const float dist[5] = { 5, 15, 30, 60, 120 };
+    vec3 fwd = forward_from_yaw(G->view.yaw), right = right_from_yaw(G->view.yaw);
+    const CharacterDef *pd = anim_lib_char_by_id(g_engine.anim, "player");
+    const CharacterDef *zd = anim_lib_char_by_id(g_engine.anim, "zombie_placeholder");
+    for (int k = 0; k < 5; k++) {
+        for (int side = 0; side < 2; side++) {
+            vec3 pos = v3_add(p->sim.move.pos, v3_add(v3_scale(fwd, dist[k]), v3_scale(right, side ? 0.8f : -0.8f)));
+            RayHit rh;
+            if (phys_raycast(w->phys, v3_add(pos, v3(0, 10, 0)), v3(0, -30, 0), PL_MASK(PL_STATIC), PHYS_INVALID_BODY, &rh)) pos.y = rh.point.y;
+            float yaw = G->view.yaw + DG_PI;
+            EntityId e = ENT_NONE;
+            if (side == 0 && pd) {
+                e = spawn_dummy(w, pos, yaw, 300);
+                if (e) {
+                    char_detach(w, e);
+                    w->char_id[ENT_INDEX(e)] = pd->net_id;
+                    char_attach(w, e, pd->net_id);
+                    w->item[ENT_INDEX(e)] = item_find(w->items, "rifle");
+                }
+            } else if (zd) {
+                e = spawn_zombie(w, pos, yaw, zd->net_id);
+                CharacterInst *ci = e ? char_get(w, e) : NULL;
+                if (ci) ci->ai.wander_radius = 0;
+            }
+            if (e && g_lineup_count < 16) g_lineup[g_lineup_count++] = e;
+        }
+    }
+    log_info("anim_lod_lineup: %d characters at 5/15/30/60/120 m (r_lod_debug 1 shows LOD + pixels; anim_lod_lineup clear)", g_lineup_count);
+}
+
+static void cmd_char_list(int argc, const char **argv) {
+    World *w = G->world;
+    if (!w || !w->chars) return;
+    for (int k = 0; k < MAX_CHARACTERS; k++) {
+        CharacterInst *c = w->chars->c[k];
+        if (!c) continue;
+        const ControllerInst *ct = &c->rt.ctrl;
+        log_info("  ent %5u %-18s %-7s state %s/%s phase %.2f lod %d %.0fpx resyncs %d events hit %u die %u%s", c->ent, c->def->id,
+                 ent_type_name((EntityType)w->type[ENT_INDEX(c->ent)]), ctrl_state_name(ct, 0, ct->layer[0].state), ctrl_state_name(ct, 1, ct->layer[1].state),
+                 ct->layer[0].phase, c->lod, c->pixels, c->resyncs, c->events_received[AEV_HIT], c->events_received[AEV_DIE],
+                 c->dead ? (c->rag.active ? " DEAD ragdoll" : (c->settled ? " DEAD settled" : " DEAD")) : "");
+    }
+    int ev, df;
+    chars_budget_stats(&ev, &df);
+    log_info("  %d characters, %d ragdolls; last tick %d post-passes, %d deferred by anim_eval_budget", chars_count(w), w->chars->ragdolls, ev, df);
+}
+
 static void cmd_status(int argc, const char **argv) {
     World *w = G->world;
     if (!w) return;
@@ -874,6 +1071,19 @@ void game_init(void) {
     cmd_register("status", cmd_status, "print game status");
     cmd_register("inv", cmd_inv, "print local inventory");
     cmd_register("lookat", cmd_lookat, "aim the view at a world point: lookat x y z");
+    cmd_register("zombie_spawn", cmd_zombie_spawn, "zombie_spawn [count] [character_id|id] [radius]: spawn test zombies in front of you");
+    cmd_register("zombie_attack", cmd_zombie_attack, "all zombies play an attack");
+    cmd_register("zombie_clear", cmd_zombie_clear, "remove all zombies");
+    cmd_register("anim_reload", cmd_anim_reload, "reload anim sets, clips.json, controller.json (hold styles, presets)");
+    cmd_register("anim_rebake", cmd_anim_rebake, "re-bake changed FBX clips (cache keyed by file hash)");
+    cmd_register("character_reload", cmd_character_reload, "reload assets/characters/*.json");
+    cmd_register("hitbox_reload", cmd_hitbox_reload, "reload assets/human/hitboxes.json");
+    cmd_register("anim_template", cmd_anim_template, "write anim_sets/player_template.json + zombie_template.json");
+    cmd_register("ragdoll", cmd_ragdoll, "ragdoll [push N]: ragdoll / push the character under the crosshair (local)");
+    cmd_register("char_kill", cmd_char_kill, "char_kill [damage]: lethal hit on the character under the crosshair (host)");
+    cmd_register("char_spawn", cmd_char_spawn, "char_spawn <character> x y z [yaw] [item]: spawn a character (host)");
+    cmd_register("anim_lod_lineup", cmd_anim_lod_lineup, "anim_lod_lineup [clear]: characters at 5/15/30/60/120 m along the view (host)");
+    cmd_register("char_list", cmd_char_list, "list characters: state, LOD, resyncs, events");
     cmd_register("wpn_magdump", cmd_magdump, "wpn_magdump [weapon] [10|25|50] [ads]: empty a magazine at the recoil wall");
     cmd_register("weapon_reload", cmd_weapon_reload, "re-read data/weapons/*.json (live recoil tuning)");
     weapons_register_cvars();
@@ -882,6 +1092,16 @@ void game_init(void) {
     recoil_debug_init();
     camera_register_cvars();
     player_register_cvars();
+    // Animation assets (shared skeleton) before anything spawns characters.
+    characters_register_cvars();
+    G->anim_rate = cvar_reg_int("anim_sample_rate", 30, 30, 60, CVAR_ARCHIVE, "FBX bake sample rate (30 or 60 Hz, restart)");
+    g_engine.anim = (AnimLibrary *)calloc(1, sizeof(AnimLibrary));
+    if (!anim_lib_load(g_engine.anim, (float)G->anim_rate->i)) {
+        log_error("game: animation assets failed to load (characters fall back to capsules)");
+        free(g_engine.anim);
+        g_engine.anim = NULL;
+    }
+    anim_debug_init();
     if (!items_load(&G->items, "data/items.json", "data/weapons")) log_error("game: item data failed to load");
     g_engine.items = &G->items;
     basic_meshes_create(&G->meshes);

@@ -25,6 +25,9 @@ typedef struct PlayerMove {
     vec3 pos;           // feet
     vec3 vel;
     float yaw, pitch;
+    float body_yaw;     // lower-body facing (turn in place); host-owned, replicated quantized
+    u8 body_turning;
+    u8 pad_body[3];
     u8 mode;
     u8 on_ground;
     u8 crouched;        // collision shape is crouched

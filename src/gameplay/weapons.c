@@ -6,6 +6,7 @@
 #include "core/cvar.h"
 #include "render/debug_draw.h"
 #include "player/hands.h"
+#include "gameplay/characters.h"
 #include <math.h>
 
 static WeaponCvars WC;
@@ -67,7 +68,7 @@ float weapon_current_spread(const World *w, int slot) {
     const Player *p = &w->players[slot];
     if (!d || d->kind == WPN_MELEE) return 0;
     RecoilMods m = make_mods(&p->sim, cv_f(WC.spread_scale, 1));
-    return recoil_spread(&d->recoil, &p->sim.wpn.rc, &m);
+    return recoil_spread(&d->recoil, &p->sim.wpn.rc, &m) + chars_limb_spread(w, p->ent);
 }
 
 vec2 weapon_sway_deg(const WeaponDef *d, const WeaponState *ws, float t) {
@@ -115,6 +116,8 @@ typedef struct HitResult {
     BodyId body;
     bool hitbox;
     bool headshot;
+    int part;          // BodyPart for character hitboxes, -1 otherwise
+    bool character;
 } HitResult;
 
 // Lag-compensated hitscan: world geometry via Jolt, hitbox capsules rewound to view_tick.
@@ -134,10 +137,11 @@ static HitResult trace_shot(World *w, int shooter, vec3 origin, vec3 dir, float 
     }
     float best = r.hit ? r.dist : range;
     u32 view_tick = view_tick256 >> 8;
+    r.part = -1;
     ENT_FOREACH(w, i) {
         if (!(w->comps[i] & C_HITBOX) || (w->flags[i] & EF_DEAD)) continue;
         EntityId e = ENT_MAKE(i, w->gen[i]);
-        if (e == sp->ent) continue;
+        if (e == sp->ent || char_get_index(w, i)) continue;   // characters use per-part hitboxes below
         vec3 pos = w->xf[i].pos;
         if (w->authority && view_tick) world_lagcomp_get(w, e, view_tick, &pos);
         const Hitbox *hb = &w->hitbox[i];
@@ -165,6 +169,21 @@ static HitResult trace_shot(World *w, int shooter, vec3 origin, vec3 dir, float 
             r.body = PHYS_INVALID_BODY;
         }
     }
+    // Per-bone hitboxes on characters: the host rewinds them to the shooter's view tick.
+    EntityId ce;
+    HitboxRayHit hh;
+    if (chars_raycast(w, sp->ent, origin, dir, best, w->authority ? view_tick256 : 0, &ce, &hh)) {
+        r.hit = true;
+        r.dist = hh.t;
+        r.point = hh.point;
+        r.normal = v3_neg(dir);
+        r.ent = ce;
+        r.hitbox = true;
+        r.character = true;
+        r.part = hh.part;
+        r.headshot = hh.part == BP_HEAD;
+        r.body = PHYS_INVALID_BODY;
+    }
     return r;
 }
 
@@ -175,6 +194,19 @@ EntityId weapon_trace_target(World *w, int shooter, vec3 origin, vec3 dir, float
 
 static void apply_hit(World *w, int shooter, const WeaponDef *d, const HitResult *h, vec3 dir, float damage_scale) {
     Player *sp = &w->players[shooter];
+    if (h->character) {
+        // final = base x part_mult[character][part] x weapon_part_mult[weapon][part] x range falloff
+        CharacterInst *c = char_get(w, h->ent);
+        float fall = damage_falloff(h->dist, d->falloff_start, d->falloff_end, d->falloff_min);
+        float base = d->damage * damage_scale;
+        float dmg = damage_resolve(base, c ? c->def->part_mult : NULL, d->part_mult, h->part, fall);
+        float mult = base > 0 ? dmg / base : 0;
+        apply_damage_part(w, h->ent, dmg, d->damage_type, sp->ent, h->point, dir, h->part, mult);
+        if (w->type[ENT_INDEX(h->ent)] == ET_DUMMY)
+            log_info("dummy hit: %s x%.2f (char %.2f, weapon %.2f, falloff %.2f) = %.1f damage", body_part_name(h->part), mult,
+                     c ? c->def->part_mult[h->part] : 1.0f, d->part_mult[h->part], fall, dmg);
+        return;
+    }
     if (h->hitbox) {
         float dmg = d->damage * damage_scale * (h->headshot ? d->headshot_mult : 1.0f);
         apply_damage(w, h->ent, dmg, d->damage_type, sp->ent, h->point, dir, h->headshot);
@@ -300,6 +332,8 @@ static void fire(World *w, int slot, PlayerSim *sim, const WeaponDef *d, const U
             vec3 end = h.hit ? h.point : v3_madd(eye, sdir, d->range);
             fx_tracer(muzzle, end);
             if (h.hit) fx_impact(h.point, h.normal, h.hitbox ? 1 : 0);
+            // Unconfirmed reaction on what we hit (the host's hit event confirms / corrects it).
+            if (h.character) chars_predict_hit(w, h.ent, h.part, sdir);
         }
     }
     if (w->authority) ev_sound(w, d->sound_fire, eye, 1.0f, slot);
@@ -322,15 +356,27 @@ static void melee_step(World *w, int slot, PlayerSim *sim, const WeaponDef *d, b
 
     Player *p = &w->players[slot];
     BodyId self = p->character ? phys_character_inner_body(p->character) : PHYS_INVALID_BODY;
-    // Hitboxes: segment eye->tip against capsules.
+    // Hitboxes: segment eye->tip against capsules (characters: per-part hitboxes).
     float best = d->reach + 1;
     EntityId hit_ent = ENT_NONE;
     vec3 hit_point = tip;
     bool head = false;
+    int hit_part = -1;
+    {
+        EntityId ce;
+        HitboxRayHit hh;
+        if (chars_sweep(w, p->ent, eye, tip, d->sweep_radius, &ce, &hh) && hh.t <= d->reach) {
+            best = hh.t;
+            hit_ent = ce;
+            hit_point = hh.point;
+            hit_part = hh.part;
+            head = hh.part == BP_HEAD;
+        }
+    }
     ENT_FOREACH(w, i) {
         if (!(w->comps[i] & C_HITBOX) || (w->flags[i] & EF_DEAD)) continue;
         EntityId e = ENT_MAKE(i, w->gen[i]);
-        if (e == p->ent) continue;
+        if (e == p->ent || char_get_index(w, i)) continue;
         vec3 feet = w->type[i] == ET_DUMMY ? v3_sub(w->xf[i].pos, v3(0, 0.9f, 0)) : w->xf[i].pos;
         float r = w->hitbox[i].radius + d->sweep_radius;
         vec3 a = v3_add(feet, v3(0, 0.3f, 0)), b = v3_add(feet, v3(0, w->hitbox[i].height - 0.2f, 0));
@@ -340,6 +386,7 @@ static void melee_step(World *w, int slot, PlayerSim *sim, const WeaponDef *d, b
             hit_ent = e;
             hit_point = v3_madd(eye, dir, t);
             head = hit_point.y > feet.y + w->hitbox[i].head_height - 0.12f;
+            hit_part = -1;
         }
     }
     ShapeHit sh;
@@ -365,7 +412,17 @@ static void melee_step(World *w, int slot, PlayerSim *sim, const WeaponDef *d, b
     if (hit_ent) {
         ws->swing_hit_done = 1;
         if (local_view && first) { fx_impact(hit_point, v3_neg(dir), 1); fx_sound("melee_hit", hit_point, 1.0f); }
-        if (w->authority) apply_damage(w, hit_ent, d->damage * (head ? d->headshot_mult : 1.0f), d->damage_type, p->ent, hit_point, dir, head);
+        if (w->authority) {
+            CharacterInst *c = hit_part >= 0 ? char_get(w, hit_ent) : NULL;
+            if (c) {
+                float dmg = damage_resolve(d->damage, c->def->part_mult, d->part_mult, hit_part, 1.0f);
+                apply_damage_part(w, hit_ent, dmg, d->damage_type, p->ent, hit_point, dir, hit_part, d->damage > 0 ? dmg / d->damage : 0);
+            } else {
+                apply_damage(w, hit_ent, d->damage * (head ? d->headshot_mult : 1.0f), d->damage_type, p->ent, hit_point, dir, head);
+            }
+        } else if (local_view && first && hit_part >= 0) {
+            chars_predict_hit(w, hit_ent, hit_part, dir);
+        }
     }
 }
 
@@ -574,7 +631,7 @@ void weapons_tick(World *w, int slot, PlayerSim *sim, const UserCmd *cmd, u16 pr
             float pitch = m->pitch + (tick_kick.pitch + sway.y) * DG_DEG2RAD;
             vec3 dir = dir_from_angles(yaw, pitch);
             RecoilMods sm = make_mods(sim, sscale);
-            float cone = recoil_spread(rp, &ws->rc, &sm);
+            float cone = recoil_spread(rp, &ws->rc, &sm) + chars_limb_spread(w, p->ent);
             u32 seed = shot_seed(cmd, slot, ws->shots);
             (*mag)--;
             if (w->authority) ws->mag = s->ammo;

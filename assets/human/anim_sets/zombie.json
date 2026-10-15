@@ -1,0 +1,10 @@
+{
+  "name": "zombie",
+  "slots": {
+    "idle": "idle",
+    "walk_f": "walking", "walk_b": "walking@reverse", "walk_l": "left strafe walking", "walk_r": "right strafe walking",
+    "run_f": "running", "run_l": "left strafe", "run_r": "right strafe",
+    "jump_start": "jump@0.0:0.34", "jump_loop": "jump@0.34:0.52", "jump_land": "jump@0.6:0.78",
+    "turn_l90": "left turn 90", "turn_r90": "right turn 90"
+  }
+}

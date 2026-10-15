@@ -10,6 +10,7 @@
 #define MAT_TEXTURED   64u
 #define MAT_CHECKER    128u
 #define MAT_GRID_FINE  256u
+#define MAT_SHADOW_ONLY 512u
 
 struct PointLight {
     vec4 pos_radius;
@@ -36,3 +37,17 @@ layout(set = 0, binding = 0) uniform FrameData {
 layout(set = 0, binding = 1) uniform sampler2DShadow shadow_map;
 
 vec3 srgb_to_linear(vec3 c) { return pow(c, vec3(2.2)); }
+
+// Skinned characters (set 0, bindings 2 / 3): bone palettes and per-instance material data.
+struct SkinInstance {
+    vec4 color;
+    vec4 params;    // roughness, metallic, emissive, lod fade (-1..1, 0 = fully visible)
+    uvec4 info;     // x = first bone, y = material flags
+};
+layout(std430, set = 0, binding = 2) readonly buffer SkinBones { mat4 bones[]; } skin_bones;
+layout(std430, set = 0, binding = 3) readonly buffer SkinInstances { SkinInstance inst[]; } skin_inst;
+
+mat4 skin_matrix(uint first, uvec4 j, vec4 w) {
+    return skin_bones.bones[first + j.x] * w.x + skin_bones.bones[first + j.y] * w.y +
+           skin_bones.bones[first + j.z] * w.z + skin_bones.bones[first + j.w] * w.w;
+}

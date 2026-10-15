@@ -14,6 +14,7 @@ void fx_impact(vec3 pos, vec3 normal, int kind);   // kind 0 = surface, 1 = fles
 void fx_muzzle(vec3 pos, vec3 dir);
 void fx_shell(vec3 pos, vec3 vel);                 // ejected casing (brass spark with gravity)
 void fx_damage_number(vec3 pos, float amount, bool headshot);
+void fx_damage_number_label(vec3 pos, float amount, bool headshot, const char *label);  // "head x4.0"
 void fx_sound(const char *name, vec3 pos, float volume);
 void fx_update(float dt);
 void fx_render(void);   // world-space parts (decals, sparks, tracers, flashes)
