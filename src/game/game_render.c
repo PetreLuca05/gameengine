@@ -364,11 +364,12 @@ static void render_entity(World *w, int i, float alpha, bool focused) {
     }
     case ET_PICKUP: {
         if (w->flags[i] & EF_HIDDEN) break;
-        float t = (float)g_engine.real_time;
-        float bob = sinf(t * 2.0f + (float)i) * 0.025f;
-        quat spin = quat_yaw(t * 0.8f + (float)i);
-        m.emissive = 0.12f + (focused ? 0.2f : 0.0f);
-        draw_shape((VisShape)v->shape, v->half, v3_add(pos, v3(0, bob, 0)), spin, m);
+        // The same model as in the hands, lying where it landed (casts a shadow; highlighted on focus).
+        u16 it = w->item[i];
+        const WeaponDef *wd = it ? item_weapon(w->items, it) : NULL;
+        const ItemDef *idef = it ? item_def(w->items, it) : NULL;
+        if (wd || idef) hands_draw_held(wd, wd ? NULL : idef, pos, rot, hl);
+        else draw_shape((VisShape)v->shape, v->half, pos, rot, m);
         break;
     }
     case ET_DUMMY: {

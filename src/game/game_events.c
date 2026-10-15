@@ -142,13 +142,12 @@ static void drop_item(World *w, int slot, int inv_slot) {
     p->inv.revision++;
     vec3 eye = player_eye_pos(&p->sim.move);
     vec3 fwd = forward_from_yaw(p->sim.move.yaw);
-    vec3 at = v3_add(v3_madd(p->sim.move.pos, fwd, 0.8f), v3(0, 0.15f, 0));
+    // Let go at hand height in front of the player; the pickup falls onto whatever is below.
+    vec3 at = v3_add(v3_madd(p->sim.move.pos, fwd, 0.6f), v3(0, fminf(player_eye_height(&p->sim.move) * 0.7f, 1.2f), 0));
     // Don't drop inside a wall.
     RayHit rh;
     if (phys_raycast(w->phys, eye, v3_sub(at, eye), PL_MASK_WORLD, phys_character_inner_body(p->character), &rh))
         at = v3_madd(rh.point, rh.normal, 0.15f);
-    // Settle on the floor.
-    if (phys_raycast(w->phys, at, v3(0, -3, 0), PL_MASK_WORLD, PHYS_INVALID_BODY, &rh)) at.y = rh.point.y + item_def(w->items, s.item)->size.y + 0.02f;
     spawn_pickup(w, at, s.item, s.count, s.ammo, 0);
     ev_hint(w, slot, "Dropped %s", item_def(w->items, s.item)->name);
 }

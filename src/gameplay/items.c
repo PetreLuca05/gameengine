@@ -505,6 +505,35 @@ u16 item_find(const ItemDB *db, const char *id) {
     return ITEM_NONE;
 }
 
+void item_held_box(const ItemDef *it, vec3 *center, vec3 *half) {
+    vec3 h = it->size;
+    float m = fmaxf(h.x, fmaxf(h.y, h.z));
+    float s = m > 0.07f ? 0.07f / m : 1.0f;
+    h = v3_scale(h, s);
+    *half = h;
+    *center = v3(0, h.y + 0.03f, -0.05f);
+}
+
+bool item_model_bounds(const ItemDB *db, u16 item, vec3 *mn, vec3 *mx) {
+    const WeaponDef *wd = item_weapon(db, item);
+    *mn = v3s(1e9f);
+    *mx = v3s(-1e9f);
+    if (wd && wd->part_count > 0) {
+        for (int i = 0; i < wd->part_count; i++) {
+            *mn = v3_min(*mn, v3_sub(wd->parts[i].offset, wd->parts[i].half));
+            *mx = v3_max(*mx, v3_add(wd->parts[i].offset, wd->parts[i].half));
+        }
+        return true;
+    }
+    const ItemDef *d = item_def(db, item);
+    if (!d) return false;
+    vec3 c, h;
+    item_held_box(d, &c, &h);
+    *mn = v3_sub(c, h);
+    *mx = v3_add(c, h);
+    return true;
+}
+
 const ItemDef *item_def(const ItemDB *db, u16 item) {
     return (item < db->item_count) ? &db->items[item] : &db->items[0];
 }

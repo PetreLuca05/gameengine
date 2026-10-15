@@ -357,21 +357,50 @@ static void pickup_use(World *w, EntityId self, int player) {
 static bool pickup_hand(World *w, EntityId self, int player, int hand, vec3 *pos, quat *rot) {
     (void)hand;   // either hand (the free one when holding an item)
     int i = (int)ENT_INDEX(self);
-    *pos = v3_add(w->xf[i].pos, v3(0, w->vis[i].half.y + 0.02f, 0));
+    *pos = v3_add(ent_focus_point(w, self), v3(0, w->vis[i].half.y * 0.5f + 0.02f, 0));
     *rot = quat_mul(quat_yaw(w->players[player].sim.move.yaw), quat_axis_angle(v3(1, 0, 0), -1.2f));
     return true;
 }
 
 static const InteractDef k_pickup_def = { "pickup", pickup_focus, NULL, pickup_use, NULL, pickup_hand, 0.0f, HANDS_RIGHT };
 
+// Items on the ground use the model held in the hands, lying flat (guns on their side) at a yaw
+// derived from the spawn point, resting on the surface below: the lowest point of the rotated model
+// touches it. Dropped / spawned items above it fall there (pickups_tick).
+static quat pickup_rest_rot(const World *w, u16 item, vec3 pos) {
+    u32 h = (u32)(pos.x * 73.0f) * 2654435761u ^ (u32)(pos.z * 91.0f) * 40503u ^ item * 2246822519u;
+    float yaw = (float)(h % 6283u) * 0.001f;
+    quat q = quat_yaw(yaw);
+    if (item_weapon(w->items, item)) q = quat_mul(q, quat_axis_angle(v3(0, 0, 1), DG_PI * 0.5f));   // on its side
+    return q;
+}
+
+static float pickup_rest_y(World *w, u16 item, vec3 pos, quat rot) {
+    vec3 mn, mx;
+    if (!item_model_bounds(w->items, item, &mn, &mx)) { mn = v3s(-0.05f); mx = v3s(0.05f); }
+    float low = 1e9f;
+    for (int k = 0; k < 8; k++) {
+        vec3 c = v3((k & 1) ? mx.x : mn.x, (k & 2) ? mx.y : mn.y, (k & 4) ? mx.z : mn.z);
+        low = fminf(low, quat_rotate(rot, c).y);
+    }
+    // The surface below the item's footprint centre (floor, table, crate ...).
+    vec3 mid = quat_rotate(rot, v3_scale(v3_add(mn, mx), 0.5f));
+    RayHit rh;
+    vec3 from = v3(pos.x + mid.x, pos.y + 0.3f, pos.z + mid.z);
+    float ground = phys_raycast(w->phys, from, v3(0, -20.0f, 0), PL_MASK_WORLD, PHYS_INVALID_BODY, &rh) ? rh.point.y : pos.y - 0.5f;
+    return ground - low + 0.002f;
+}
+
 EntityId spawn_pickup(World *w, vec3 pos, u16 item, int count, i16 ammo, float respawn) {
     EntityId e = ent_spawn(w, ET_PICKUP);
     int i = (int)ENT_INDEX(e);
     const ItemDef *d = item_def(w->items, item);
-    w->vis[i].shape = (u8)d->shape;
-    w->vis[i].half = d->size;
+    vec3 mn, mx;
+    if (!item_model_bounds(w->items, item, &mn, &mx)) { mn = v3_neg(d->size); mx = d->size; }
+    w->vis[i].shape = (u8)VIS_BOX;
+    w->vis[i].half = v3_scale(v3_sub(mx, mn), 0.5f);   // interaction tolerance / hand target
     w->vis[i].color = rgba8v(d->color);
-    w->vis[i].emissive = 10;
+    w->vis[i].emissive = 0;
     w->comps[i] |= C_VISUAL | C_PICKUP | C_INTERACT;
     w->pickup[i].item = item;
     w->pickup[i].count = (u16)DG_MAX(1, count);
@@ -379,8 +408,14 @@ EntityId spawn_pickup(World *w, vec3 pos, u16 item, int count, i16 ammo, float r
     w->pickup[i].respawn_time = respawn;
     w->pickup[i].home = pos;
     w->item[i] = item;
-    ent_set_pos(w, e, pos, quat_identity(), true);
+    quat rot = pickup_rest_rot(w, item, pos);
+    w->pickup[i].rest_y = pickup_rest_y(w, item, pos, rot);
+    w->pickup[i].fall_vel = 0;
+    w->pickup[i].settled = pos.y <= w->pickup[i].rest_y;
+    if (w->pickup[i].settled) pos.y = w->pickup[i].rest_y;
+    ent_set_pos(w, e, pos, rot, true);
     entity_setup(w, e);
+    w->inter[i].focus_offset = v3_scale(v3_add(mn, mx), 0.5f);   // the model's centre (item space)
     return e;
 }
 
@@ -569,7 +604,19 @@ void entities_tick(World *w, float dt) {
                 if (pk->respawn_timer <= 0) {
                     w->flags[i] &= ~(u32)EF_HIDDEN;
                     w->inter[i].enabled = true;
+                    vec3 home = v3(pk->home.x, fmaxf(pk->home.y, pk->rest_y), pk->home.z);
+                    ent_set_pos(w, e, home, w->xf[i].rot, true);
+                    pk->settled = home.y <= pk->rest_y;
+                    pk->fall_vel = 0;
                 }
+            }
+            // Falling onto the surface below (host; positions replicate like any entity).
+            if (!pk->settled) {
+                vec3 p = w->xf[i].pos;
+                pk->fall_vel -= 9.81f * dt;
+                p.y += pk->fall_vel * dt;
+                if (p.y <= pk->rest_y) { p.y = pk->rest_y; pk->settled = true; pk->fall_vel = 0; }
+                ent_set_pos(w, e, p, w->xf[i].rot, false);
             }
             break;
         }

@@ -82,6 +82,11 @@ bool items_load(ItemDB *db, const char *items_path, const char *weapons_path);
 // Re-reads only the weapon definitions in place (live tuning). Item ids must not change.
 bool weapons_reload_defs(ItemDB *db, const char *weapons_path);
 u16 item_find(const ItemDB *db, const char *id);
+// The model drawn in the hands (and on the ground): non-weapons are a palm-sized box (pickup sizes
+// are world-scale, held items are capped at 7 cm half extent) offset from the grip; weapons are
+// their part boxes. Bounds are in the item's own space (-Z forward, +Y up, origin = the grip).
+void item_held_box(const ItemDef *it, vec3 *center, vec3 *half);
+bool item_model_bounds(const ItemDB *db, u16 item, vec3 *mn, vec3 *mx);
 const ItemDef *item_def(const ItemDB *db, u16 item);
 const WeaponDef *item_weapon(const ItemDB *db, u16 item); // NULL if not a weapon
 const char *damage_type_name(DamageType t);

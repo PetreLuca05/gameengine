@@ -148,7 +148,10 @@ typedef struct Pickup {
     float bob_phase;
     float respawn_time;   // >0: respawns after being taken (dev convenience)
     float respawn_timer;
-    vec3 home;
+    vec3 home;            // spawn point (respawns fall from here again)
+    float rest_y;         // resting height of the entity origin (model on the surface below)
+    float fall_vel;       // m/s, while falling to rest_y
+    bool settled;
 } Pickup;
 
 typedef struct Projectile {
