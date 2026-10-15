@@ -98,6 +98,9 @@ bool proc_holdpoint_load(ProcParams *p, const struct cJSON *holdpoint_root);   /
 void proc_params_rehash(ProcParams *p);
 const HoldStyle *proc_hold_style(const ProcParams *p, int style);
 int proc_hold_style_index(const ProcParams *p, const char *name);
+// How far the support hand may slide back along the handguard (item +Z) in ADS to stay in reach
+// instead of moving the item off its exact ADS transform (keeps 8 cm ahead of the grip).
+float proc_grip_l_slide_max(const ItemSockets *k);
 
 // Hand frames derived from the skeleton (palm frame relative to the hand bone).
 typedef struct HandFrames {
@@ -144,6 +147,7 @@ typedef struct ProcState {
     float right_err_pos;
     bool reach_shifted;
     float reach_shift;
+    float grip_l_slide;              // ADS: support hand slid back along the handguard (m, item +Z) to stay in reach
     // hold point (camera space item placement)
     HoldPointState hp;
     HoldPointOutput hp_out;

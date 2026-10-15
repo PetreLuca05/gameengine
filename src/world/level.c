@@ -1,3 +1,4 @@
+#include "gameplay/attachments.h"
 #include "level.h"
 #include "core/engine.h"
 #include "core/log.h"
@@ -22,8 +23,10 @@ typedef struct LevelBuild {
     MeshBuilder buckets[MAX_BUCKETS];
     u32 bucket_flags[MAX_BUCKETS];
     vec3 bucket_surf[MAX_BUCKETS];   // roughness, metallic, emissive
+    float bucket_spacing[MAX_BUCKETS];   // MAT_GRID_MOA grid spacing (m)
     int bucket_count;
     vec3 surf;                       // surface of the brush being built (PBR test geometry)
+    float spacing;                   // grid spacing of the brush being built (sighting targets)
 } LevelBuild;
 
 // ------------------------------------------------------------------ json helpers
@@ -55,12 +58,13 @@ static u32 jcol(const cJSON *o, const char *k, u32 def) {
 
 static MeshBuilder *bucket(LevelBuild *b, u32 flags) {
     for (int i = 0; i < b->bucket_count; i++)
-        if (b->bucket_flags[i] == flags && v3_len2(v3_sub(b->bucket_surf[i], b->surf)) < 1e-6f) return &b->buckets[i];
+        if (b->bucket_flags[i] == flags && v3_len2(v3_sub(b->bucket_surf[i], b->surf)) < 1e-6f && b->bucket_spacing[i] == b->spacing) return &b->buckets[i];
     if (b->bucket_count >= MAX_BUCKETS) return &b->buckets[0];
     int i = b->bucket_count++;
     mb_init(&b->buckets[i]);
     b->bucket_flags[i] = flags;
     b->bucket_surf[i] = b->surf;
+    b->bucket_spacing[i] = b->spacing;
     return &b->buckets[i];
 }
 
@@ -184,7 +188,34 @@ static void build_brush(LevelBuild *b, const cJSON *br) {
     b->material = surface_from_name(mat_name);
     if (b->material < 0) { log_warn("level: unknown material '%s'", mat_name); b->material = SURF_DEFAULT; }
 
-    if (!strcmp(type, "box")) {
+    if (!strcmp(type, "moa_target")) {
+        // Sighting-in target at `distance` m from the firing point: a square board with a 1 MOA
+        // grid (MAT_GRID_MOA), its centre snapped onto a 10 MOA line crossing, a 2 MOA aim square,
+        // a post and a distance label. Faces local +Z (yaw like boxes) towards the shooter.
+        float dist = jf(br, "distance", 10);
+        float s = dist * tanf(DG_DEG2RAD / 60.0f);
+        float side = jf(br, "size", 1);
+        float cy = jf(br, "center_height", 1.6f);
+        quat rot = quat_yaw(yaw);
+        vec3 rt = quat_rotate(rot, v3(1, 0, 0));
+        float snap = s * 10.0f;
+        // Snap the centre along the board's own axes (world grid coordinates of the face).
+        float u = v3_dot(pos, rt);
+        float du = roundf(u / snap) * snap - u;
+        pos = v3_madd(pos, rt, du);
+        cy = fmaxf(roundf(cy / snap) * snap, side * 0.5f + 0.1f);
+        b->spacing = s;
+        add_box(b, v3(pos.x, cy, pos.z), v3(side * 0.5f, side * 0.5f, 0.04f), yaw, color, MAT_GRID_MOA, jb(br, "collide", true));
+        b->spacing = 0;
+        vec3 face = v3_add(v3(pos.x, cy, pos.z), quat_rotate(rot, v3(0, 0, 0.0405f)));
+        add_box(b, face, v3(s, s, 0.0005f), yaw, rgba8(0.02f, 0.02f, 0.02f, 1), MAT_NO_SHADOW, false);
+        float post_h = cy - side * 0.5f;
+        if (post_h > 0.02f) add_box(b, v3(pos.x, post_h * 0.5f, pos.z), v3(0.03f, post_h * 0.5f, 0.03f), yaw, rgba8(0.3f, 0.3f, 0.32f, 1), 0, true);
+        char text[40];
+        snprintf(text, sizeof(text), "%.0f m  (1 square = 1 MOA = %.1f mm)", dist, s * 1000.0f);
+        add_wall_label(w, v3_add(v3(pos.x, cy + side * 0.5f + 0.04f + side * 0.06f, pos.z), quat_rotate(rot, v3(0, 0, 0.041f))), yaw,
+                       jf(br, "label_size", side * 0.05f), label_col, text);
+    } else if (!strcmp(type, "box")) {
         vec3 size = jv3(br, "size", v3(1, 1, 1));
         vec3 half = v3_scale(size, 0.5f);
         vec3 center = v3_add(pos, v3(0, half.y, 0));
@@ -375,6 +406,7 @@ static void spawn_entity(World *w, const cJSON *e) {
             s->item = item;
             s->count = (u16)count;
             s->ammo = wd ? (i16)wd->mag_size : 0;
+            attach_defaults(wd, s->att);
         }
     } else if (!strcmp(type, "pickup")) {
         u16 item = item_find(w->items, js(e, "item", ""));
@@ -424,6 +456,8 @@ static void spawn_entity(World *w, const cJSON *e) {
                 n++;
             }
         return;
+    } else if (!strcmp(type, "bench")) {
+        id = spawn_bench(w, pos, yaw);
     } else if (!strcmp(type, "marker")) {
         const char *shape = js(e, "shape", "capsule");
         VisShape vs = !strcmp(shape, "box") ? VIS_BOX : (!strcmp(shape, "cylinder") ? VIS_CYLINDER : VIS_CAPSULE);
@@ -509,6 +543,7 @@ bool level_load(World *w, const char *path) {
         d->mat.roughness = b.bucket_surf[i].x;
         d->mat.metallic = b.bucket_surf[i].y;
         d->mat.emissive = b.bucket_surf[i].z;
+        if (b.bucket_spacing[i] > 0) d->mat.tex_scale = b.bucket_spacing[i];
         d->model = mat4_identity();
         mb_free(&b.buckets[i]);
     }

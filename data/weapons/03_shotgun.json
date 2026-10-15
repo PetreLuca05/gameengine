@@ -57,6 +57,11 @@
   },
   "part_mult": { "head": 0.75 },
   "falloff": { "start": 8, "end": 30, "min": 0.2 },
+  "attachment_slots": {
+    "optic": {"pos": [0, 0.077, 0.02], "rail": [-0.1, 0.05], "allow": ["red_dot", "scope_4x"]},
+    "muzzle": {"allow": ["compensator"]},
+    "stock": {"pos": [0, 0.01, 0.03], "allow": ["heavy_stock"], "hide_parts": [2]}
+  },
   "model": [
     { "offset": [0, 0.055, -0.25], "half": [0.02, 0.022, 0.38], "color": [0.15, 0.15, 0.15] },
     { "offset": [0, 0.02, -0.3], "half": [0.026, 0.024, 0.12], "color": [0.35, 0.22, 0.12] },

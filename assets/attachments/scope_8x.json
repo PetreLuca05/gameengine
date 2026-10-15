@@ -1,0 +1,52 @@
+{
+  "_comment": "8x scope: picture-in-picture, mil-dot reticle (second focal plane, illuminated centre), tight eye box.",
+  "id": "scope_8x",
+  "name": "8x Scope",
+  "slot": "optic",
+  "sight": "scope",
+  "mount": {
+    "pos": [0, 0, 0]
+  },
+  "sight_socket": [0, 0.05, 0.196],
+  "eye_relief": 0.085,
+  "zoom": 8.0,
+  "main_zoom": 1.15,
+  "rail_offset": "auto",
+  "reticle": {
+    "shape": "mildot",
+    "moa": 0.35,
+    "outer_moa": 24,
+    "color": [0.01, 0.01, 0.01],
+    "brightness": 1.0,
+    "ffp": false,
+    "illuminated": true
+  },
+  "lens": {
+    "pos": [0, 0.05, 0.1965],
+    "radius": 0.0175,
+    "objective": [0, 0.05, -0.227],
+    "objective_radius": 0.026,
+    "eye_box": 0.005,
+    "eye_box_depth": 0.025,
+    "tint": [0.93, 0.97, 1.0],
+    "dust": 0.1,
+    "fresnel": 0.03,
+    "chromatic": 2.2
+  },
+  "ads_dof_near_blur": 5.0,
+  "modifiers": {
+    "ads_time": 1.4,
+    "sway_scale": 1.0
+  },
+  "model": [
+      {"offset": [0, 0.004, 0], "half": [0.012, 0.004, 0.085], "color": [0.07, 0.07, 0.075]},
+      {"offset": [0, 0.02, -0.065], "half": [0.011, 0.012, 0.009], "color": [0.08, 0.08, 0.085]},
+      {"offset": [0, 0.02, 0.065], "half": [0.011, 0.012, 0.009], "color": [0.08, 0.08, 0.085]},
+      {"offset": [0, 0.05, 0], "half": [0.0165, 0.0165, 0.145], "color": [0.05, 0.05, 0.055]},
+      {"offset": [0, 0.05, -0.19], "half": [0.028, 0.028, 0.036], "color": [0.045, 0.045, 0.05]},
+      {"offset": [0, 0.05, 0.17], "half": [0.0195, 0.0195, 0.026], "color": [0.045, 0.045, 0.05]},
+      {"offset": [0, 0.073, 0], "half": [0.009, 0.007, 0.009], "color": [0.09, 0.09, 0.09]},
+      {"offset": [0.024, 0.05, 0], "half": [0.007, 0.009, 0.009], "color": [0.09, 0.09, 0.09]},
+      {"offset": [-0.022, 0.05, 0.02], "half": [0.005, 0.007, 0.007], "color": [0.09, 0.09, 0.09]}
+    ]
+}

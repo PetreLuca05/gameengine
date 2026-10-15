@@ -61,6 +61,8 @@ typedef struct CharacterInst {
     bool item_valid;
     const struct WeaponDef *item_weapon;
     const struct ItemDef *item_def;
+    u8 item_att[5];                   // attachment ids of the held weapon (ATT_SLOTS, replicated)
+    ItemSockets item_sock;            // held weapon sockets with the attachments applied (sight, grip_l, muzzle)
     bool have_pose;
     int lod, fade_from;
     float lod_fade;

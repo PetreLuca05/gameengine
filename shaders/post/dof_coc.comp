@@ -19,11 +19,13 @@ void main() {
     float z = linear_depth(d);
     float S = max(X.e[2], 0.05);
     float f = U.s_dof.z * 0.001;                 // focal length m
-    float A = f / max(U.s_dof.y, 0.5);           // aperture diameter m
+    bool ads = pc.u0.x == 1u;                    // ADS mode: f-stop override, viewmodel near blur
+    float fstop = ads ? pc.p0.x : U.s_dof.y;
+    float A = f / max(fstop, 0.5);               // aperture diameter m
     float coc_m = A * f * (z - S) / (z * max(S - f, 1e-3));
     float px = coc_m / (U.s_dof2.w * 0.001) * float(sz.y);
-    float strength = U.s_dof2.z >= 2.0 ? 1.0 : U.misc.z;
+    float strength = (U.s_dof2.z >= 2.0 || ads) ? 1.0 : U.misc.z;
     px *= strength;
-    if ((gb_flags(textureLod(material_tex, uv, 0.0)) & GB_VIEWMODEL) != 0u) px = 0.0;
+    if ((gb_flags(textureLod(material_tex, uv, 0.0)) & GB_VIEWMODEL) != 0u) px = ads ? -pc.p0.y : 0.0;
     imageStore(coc_out, p, vec4(clamp(px, -U.s_dof.w, U.s_dof.w)));
 }

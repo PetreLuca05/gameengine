@@ -7,7 +7,7 @@
 #include "core/dgmath.h"
 
 #define EVENT_ALL 0xFF
-#define EVENT_DATA_SIZE 96
+#define EVENT_DATA_SIZE 144   // container contents: CONTAINER_SLOTS x InvSlot
 #define MAX_PENDING_EVENTS 512
 
 typedef enum EventType {
@@ -26,6 +26,7 @@ typedef enum EventType {
     EV_RESPAWN,        // ent = player entity
     EV_USE_ANIM,       // ent = user player entity, ent2 = target (for remote hand animation)
     EV_CHAT,           // text
+    EV_BENCH,          // to the user: ent = weapon bench (opens the attachment UI)
 } EventType;
 
 typedef struct GameEvent {

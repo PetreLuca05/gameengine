@@ -121,6 +121,7 @@ FgRes post_resolve(void) {
     FgRes aa_out = c;
     c = post_mb_build(c);
     c = post_dof_build(c);
+    c = post_sights_build(c);
     T.color = c;
     post_exposure_build(c);
     T.bloom = post_bloom_build(c);

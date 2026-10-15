@@ -16,7 +16,8 @@ typedef struct InvSlot {
     u16 item;
     u16 count;
     i16 ammo;     // rounds loaded (weapons)
-    u16 pad;
+    u8 att[ATT_SLOTS];   // attachment ids per slot (weapons; 0 = none, gameplay/attachments.h)
+    u8 pad;
 } InvSlot;
 
 typedef struct Inventory {
@@ -35,5 +36,8 @@ void inv_clear(Inventory *inv);
 
 // Generic slot array helpers (containers use these too).
 int slots_add(InvSlot *slots, int n, const ItemDB *db, u16 item, int count, i16 ammo, int prefer_first, int prefer_count);
+// With attachments (att NULL = the weapon's default attachments).
+int slots_add_att(InvSlot *slots, int n, const ItemDB *db, u16 item, int count, i16 ammo, const u8 *att, int prefer_first, int prefer_count);
+int inv_add_att(Inventory *inv, const ItemDB *db, u16 item, int count, i16 ammo, const u8 *att);
 
 #endif

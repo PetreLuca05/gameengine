@@ -57,6 +57,7 @@ typedef struct HoldPointOverride {
     bool any;
     HpPose state[HP_STATE_COUNT];
     float eye_relief;                 // 0 = style
+    float eye_relief_add;             // added to the resolved eye relief (attachments: keeps the stock weld)
     bool has_pivot;
     vec3 pivot;                       // item space
 } HoldPointOverride;

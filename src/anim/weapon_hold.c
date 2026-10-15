@@ -160,6 +160,11 @@ void proc_hold(ProcState *st, const ProcInput *in, Pose *pose, Xform *model) {
     float max_shift = fminf(hs.max_shift, hs.hp.reach_pull > 0 ? hs.hp.reach_pull : hs.max_shift);
     vec3 extra = v3(0, 0, 0);   // last resort (near-vertical views): pull straight towards the support shoulder
     bool emergency = false;
+    // ADS: the item must stay exactly on its hold point (sight on the view axis at the eye
+    // relief), so a short support arm slides the left hand back along the handguard first
+    // (towards the receiver, as a shooter shifts the grip) and only then moves the item.
+    bool ads_exact = st->hp_out.state == HP_ADS;
+    float slide = 0, max_slide = ads_exact ? proc_grip_l_slide_max(it) : 0.0f;
     for (int iter = 0; iter < 16; iter++) {
         if (iter > 0) {
             pose_copy(pose, &base_pose);
@@ -181,7 +186,9 @@ void proc_hold(ProcState *st, const ProcInput *in, Pose *pose, Xform *model) {
         st->right_err_pos = v3_dist(palm_r.t, xf_mul(want, it->grip_r).t);
         if (!hs.left_hand || !it->has_left || la < 0 || lf < 0 || lh < 0) { left_ok = true; break; }
         // Left hand: item-space socket -> model-space target, full rotation.
-        Xform sock_l = xf_mul(item, it->grip_l);
+        Xform grip_l = it->grip_l;
+        grip_l.t.z += slide;
+        Xform sock_l = xf_mul(item, grip_l);
         Xform hand_l = proc_hand_for_socket(sock_l, hf->palm[0]);
         float reach = v3_dist(model[la].t, model[lf].t) + v3_dist(model[lf].t, model[lh].t);
         float margin = 0.004f;
@@ -189,6 +196,14 @@ void proc_hold(ProcState *st, const ProcInput *in, Pose *pose, Xform *model) {
         // hold point; only what the shoulder can't cover moves the item.
         proc_clavicle_reach(s, pose, model, lsh, la, hand_l.t, reach, margin * 1.5f, 75.0f * w);
         float need = v3_dist(model[la].t, hand_l.t);
+        if (need > reach - margin * 0.5f && iter < 15 && slide < max_slide - 1e-5f) {
+            vec3 to_sh = v3_norm(v3_sub(model[la].t, hand_l.t));
+            float g = v3_dot(to_sh, quat_rotate(item.r, v3(0, 0, 1)));
+            if (g > 0.2f) {
+                slide = fminf(max_slide, slide + (need - reach + margin) / g);
+                continue;
+            }
+        }
         if (need > reach - margin * 0.5f && iter < 15 && shift >= max_shift - 1e-5f) {
             // The barrel-axis pull is exhausted: move the hold point towards the shoulder by the
             // remaining shortfall (never stretch the arm, never leave a gap).
@@ -228,11 +243,17 @@ void proc_hold(ProcState *st, const ProcInput *in, Pose *pose, Xform *model) {
     proc_curl_fingers(s, pose, model, 1, hs.curl_r, hf, w);
     if (hs.left_hand && it->has_left) proc_curl_fingers(s, pose, model, 0, hs.curl_l, hf, w);
     st->reach_shift = shift;
+    st->grip_l_slide = slide;
     // Camera-space target including the reach pull (the owner re-places the item per frame).
     st->item_cam = xf_mul(xf_inverse(cam), xf_make(v3_add(v3_madd(desired.t, back, shift), extra), desired.r));
     st->item_model = item;
     st->item_world = xf_mul(in->root, item);
     st->has_item = true;
+}
+
+float proc_grip_l_slide_max(const ItemSockets *k) {
+    if (!k || !k->has_left) return 0.0f;
+    return fmaxf(0.0f, -k->grip_l.t.z - 0.08f);
 }
 
 // Hands to world anchors (ledge grab during mantle / hang). Runs after the hold so it wins.

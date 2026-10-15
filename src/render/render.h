@@ -44,6 +44,7 @@ enum MaterialFlags {
     MAT_CHECKER   = 1u << 7,
     MAT_GRID_FINE = 1u << 8,  // 10 cm / 50 cm / 1 m measuring grid (recoil wall)
     MAT_SHADOW_ONLY = 1u << 9, // casts shadows but is not drawn (the local player's own body)
+    MAT_GRID_MOA = 1u << 10,  // sighting-in target: 1 MOA grid, spacing in tex_scale (m), bold every 5, red every 10
 };
 
 typedef struct Material {
@@ -76,6 +77,7 @@ typedef struct RenderCamera {
     float yaw, pitch, roll;
     float fov_deg;      // vertical FOV
     float znear, zfar;
+    float vm_fov_deg;   // arms / held item FOV when r_viewmodel_fov is 0 (the hip FOV: ADS zoom doesn't scale the weapon); 0 = fov_deg
 } RenderCamera;
 
 typedef struct RenderEnvironment {
@@ -191,6 +193,45 @@ void render_set_exposure_boost(float boost);
 void render_screenshot(const char *path);
 // Post stack (src/render/post): camera state the effects need, diagnostics, HDR capture.
 void render_set_camera_fx(bool ads, float ads_focus_dist);   // depth of field ADS mode / focus target
+
+// Weapon sights (game_sights.c -> post_sights.c + the scope picture-in-picture pass). Positions
+// and axes are in viewmodel world space (the space the held item is drawn in), the PiP camera in
+// true world space. One sight per frame: the local player's mounted optic.
+typedef enum RenderSightKind { RSIGHT_NONE, RSIGHT_REDDOT, RSIGHT_SCOPE_PIP, RSIGHT_SCOPE_FULL } RenderSightKind;
+typedef struct RenderSight {
+    int kind;                     // RenderSightKind
+    float ads_t;                  // 0 hip .. 1 aimed
+    bool complete;                // ADS finished this frame (full-screen scope / ADS DoF switch)
+    // Lens (red dot window / scope ocular) and the optic axis (fwd = towards the target).
+    vec3 lens_pos, fwd, up, right;
+    float lens_radius;
+    vec3 objective_pos;           // scopes: objective lens (world, for the PiP camera)
+    float objective_radius;
+    // Reticle
+    vec3 dot_point;               // red dot: where the collimated dot converges (parallax-free distance)
+    float reticle_moa, reticle_outer_moa;
+    int reticle_shape;            // ReticleShape
+    vec3 reticle_color;
+    float brightness;             // x sight_brightness
+    bool ffp, illuminated;
+    // Glass
+    vec3 tint;
+    float dust, fresnel, chromatic;
+    // Scopes
+    float zoom;                   // magnification (relative to the base FOV)
+    float base_fov;               // cl_fov: the zoom reference
+    float sight_fov;              // full-screen scope FOV
+    float eye_box, eye_box_depth, eye_relief;
+    float pip_scale;              // PiP resolution / render height
+    // ADS depth of field (complete only): fixed far focus, near-field (weapon) blur.
+    bool ads_dof;
+    float dof_focus, dof_fstop, dof_near_blur;
+    bool hide_viewmodel;          // full-screen scope: no weapon / arms
+    int debug;                    // sight_debug view
+} RenderSight;
+void render_set_sight(const RenderSight *s);   // every frame (kind NONE = no sight)
+const RenderSight *render_sight(void);         // what was set this frame
+float render_scope_pip_fov(void);              // last PiP camera FOV (deg), 0 = none
 void render_camera_cut(void);                                 // teleport / respawn: reset temporal history
 bool render_capture_hdr(const char *exr_path);                // next frame: linear HDR EXR
 bool render_load_lut(const char *cube_path);                  // grading LUT (.cube); NULL / "" = neutral
@@ -208,6 +249,7 @@ void render_poll_shader_hot_reload(void);
 // Queries
 bool render_world_to_screen(vec3 world, vec2 *out_px); // false if behind camera
 vec3 render_viewmodel_to_world(vec3 viewmodel_point);   // same pixel under the world FOV (muzzle flash / tracers)
+float render_vm_fov(void);   // the viewmodel (arms + held item) projection FOV this frame
 mat4 render_view_proj(void);
 int render_width(void);
 int render_height(void);

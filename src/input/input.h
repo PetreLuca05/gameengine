@@ -44,6 +44,7 @@ bool input_peek_press(Action a);
 InputFrame input_frame(void);
 float input_aim_sensitivity_scale(void);
 void input_set_ads(bool ads);
+void input_set_ads_fov_scale(float s);   // sight FOV sensitivity scaling (1 = none)
 
 // Mouse capture / game focus
 void input_set_game_focus(bool focus);   // relative mouse when true

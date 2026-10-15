@@ -1,7 +1,15 @@
 #include "inventory.h"
+#include "attachments.h"
 
 int slots_add(InvSlot *slots, int n, const ItemDB *db, u16 item, int count, i16 ammo, int prefer_first, int prefer_count) {
+    return slots_add_att(slots, n, db, item, count, ammo, NULL, prefer_first, prefer_count);
+}
+
+int slots_add_att(InvSlot *slots, int n, const ItemDB *db, u16 item, int count, i16 ammo, const u8 *att, int prefer_first, int prefer_count) {
     const ItemDef *d = item_def(db, item);
+    u8 a[ATT_SLOTS];
+    if (att) memcpy(a, att, ATT_SLOTS);
+    else attach_defaults(item_weapon(db, item), a);
     int max_stack = DG_MAX(1, d->max_stack);
     // Merge into existing stacks.
     if (max_stack > 1) {
@@ -22,18 +30,21 @@ int slots_add(InvSlot *slots, int n, const ItemDB *db, u16 item, int count, i16 
             slots[i].item = item;
             slots[i].count = (u16)add;
             slots[i].ammo = ammo;
+            memcpy(slots[i].att, a, ATT_SLOTS);
             count -= add;
         }
     }
     return count;
 }
 
-int inv_add(Inventory *inv, const ItemDB *db, u16 item, int count, i16 ammo) {
+int inv_add(Inventory *inv, const ItemDB *db, u16 item, int count, i16 ammo) { return inv_add_att(inv, db, item, count, ammo, NULL); }
+
+int inv_add_att(Inventory *inv, const ItemDB *db, u16 item, int count, i16 ammo, const u8 *att) {
     if (item == ITEM_NONE || count <= 0) return count;
     const ItemDef *d = item_def(db, item);
     bool hotbar_first = d->kind == ITEM_WEAPON || d->kind == ITEM_CONSUMABLE;
-    int left = slots_add(inv->slots, INV_SLOTS, db, item, count, ammo, hotbar_first ? 0 : INV_HOTBAR,
-                         hotbar_first ? INV_HOTBAR : INV_BACKPACK);
+    int left = slots_add_att(inv->slots, INV_SLOTS, db, item, count, ammo, att, hotbar_first ? 0 : INV_HOTBAR,
+                             hotbar_first ? INV_HOTBAR : INV_BACKPACK);
     if (left != count) inv->revision++;
     return left;
 }

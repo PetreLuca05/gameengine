@@ -1,4 +1,5 @@
 #include "entities.h"
+#include "attachments.h"
 #include "core/engine.h"
 #include "characters.h"
 #include "anim/anim_library.h"
@@ -338,7 +339,7 @@ static void pickup_use(World *w, EntityId self, int player) {
     Pickup *pk = &w->pickup[i];
     Player *p = &w->players[player];
     const ItemDef *d = item_def(w->items, pk->item);
-    int left = inv_add(&p->inv, w->items, pk->item, pk->count, pk->ammo);
+    int left = inv_add_att(&p->inv, w->items, pk->item, pk->count, pk->ammo, pk->att);
     int taken = pk->count - left;
     if (taken <= 0) { ev_hint(w, player, "Inventory full"); return; }
     if (taken > 1) ev_hint(w, player, "Picked up %s x%d", d->name, taken);
@@ -405,6 +406,8 @@ EntityId spawn_pickup(World *w, vec3 pos, u16 item, int count, i16 ammo, float r
     w->pickup[i].item = item;
     w->pickup[i].count = (u16)DG_MAX(1, count);
     w->pickup[i].ammo = ammo;
+    attach_defaults(item_weapon(w->items, item), w->pickup[i].att);   // spawned weapons: default attachments
+    memcpy(w->attach[i], w->pickup[i].att, sizeof(w->attach[i]));
     w->pickup[i].respawn_time = respawn;
     w->pickup[i].home = pos;
     w->item[i] = item;
@@ -462,6 +465,39 @@ EntityId spawn_marker(World *w, vec3 pos, quat rot, VisShape shape, vec3 half, u
     return e;
 }
 
+// ------------------------------------------------------------------ weapon bench
+
+// Weapon bench (dev room): opens the attachment UI for the equipped weapon. Changes go through
+// RPC_ATTACH (validated by the host, game_sv_attach).
+static void bench_focus(World *w, EntityId self, int player, char *prompt, int size) {
+    (void)w;
+    (void)self;
+    (void)player;
+    snprintf(prompt, (size_t)size, "Use Weapon Bench (attachments)");
+}
+
+static void bench_use(World *w, EntityId self, int player) {
+    GameEvent ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.type = EV_BENCH;
+    ev.target = (u8)player;
+    ev.except = EVENT_ALL;
+    ev.ent = self;
+    ev_push(w, &ev);
+}
+
+static const InteractDef k_bench_def = { "bench", bench_focus, NULL, bench_use, NULL, NULL, 0.0f, HANDS_RIGHT };
+
+EntityId spawn_bench(World *w, vec3 pos, float yaw) {
+    EntityId e = ent_spawn(w, ET_BENCH);
+    int i = (int)ENT_INDEX(e);
+    w->vis[i].shape = (u8)VIS_BOX;
+    w->vis[i].half = v3(0.6f, 0.15f, 0.35f);   // interaction volume on the bench top (not drawn: the bench is a brush)
+    ent_set_pos(w, e, pos, quat_yaw(yaw), true);
+    entity_setup(w, e);
+    return e;
+}
+
 // ------------------------------------------------------------------ setup / tick
 
 const InteractDef *interact_def_for(EntityType t) {
@@ -471,6 +507,7 @@ const InteractDef *interact_def_for(EntityType t) {
     case ET_SWITCH: return &k_switch_def;
     case ET_CONTAINER: return &k_container_def;
     case ET_PICKUP: return &k_pickup_def;
+    case ET_BENCH: return &k_bench_def;
     default: return NULL;
     }
 }

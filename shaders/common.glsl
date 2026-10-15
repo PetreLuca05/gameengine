@@ -11,6 +11,7 @@
 #define MAT_CHECKER    128u
 #define MAT_GRID_FINE  256u
 #define MAT_SHADOW_ONLY 512u
+#define MAT_GRID_MOA   1024u
 
 struct PointLight {
     vec4 pos_radius;

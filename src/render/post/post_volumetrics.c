@@ -69,26 +69,46 @@ void post_vol_build(void) {
 
 FgRes post_froxels(void) { return P.froxels; }
 
+// Sky targets: the main HDR (+ depth) or the scope picture-in-picture.
+typedef struct SkyTarget { FgRes color, depth; mat4 inv_vp; vec3 cam; } SkyTarget;
+static SkyTarget g_sky_main, g_sky_pip;
+
 static void exec_sky(VkCommandBuffer cmd, void *u) {
-    (void)u;
+    const SkyTarget *t = (const SkyTarget *)u;
     PostBind b = { 0 };
     pb_ubo(&b);
-    pb_tex_fg(&b, 0, P.in.depth, P.point);
-    pb_img_fg(&b, 8, P.in.hdr);
+    pb_tex_fg(&b, 0, t->depth, P.point);
+    pb_img_fg(&b, 8, t->color);
     pb_push(cmd, &b, VK_PIPELINE_BIND_POINT_COMPUTE);
     struct { float p[16]; u32 u[16]; } pc;
     memset(&pc, 0, sizeof(pc));
-    pc.p[0] = P.in.sky_zenith.x; pc.p[1] = P.in.sky_zenith.y; pc.p[2] = P.in.sky_zenith.z; pc.p[3] = P.in.clouds;
-    pc.p[4] = P.in.sky_horizon.x; pc.p[5] = P.in.sky_horizon.y; pc.p[6] = P.in.sky_horizon.z; pc.p[7] = P.in.time;
+    memcpy(pc.p, t->inv_vp.m, sizeof(float) * 16);
+    float zen[4] = { P.in.sky_zenith.x, P.in.sky_zenith.y, P.in.sky_zenith.z, P.in.clouds };
+    float hor[4] = { P.in.sky_horizon.x, P.in.sky_horizon.y, P.in.sky_horizon.z, P.in.time };
+    float cam[3] = { t->cam.x, t->cam.y, t->cam.z };
+    memcpy(&pc.u[0], zen, 16);
+    memcpy(&pc.u[4], hor, 16);
+    memcpy(&pc.u[8], cam, 12);
     post_push_constants(cmd, &pc, 128);
-    post_dispatch(cmd, "sky", P.in.render_w, P.in.render_h, 1, 8);
+    u32 w, h;
+    fg_extent(t->color, &w, &h);
+    post_dispatch(cmd, "sky", w, h, 1, 8);
 }
 
 void post_sky(void) {
     if (!P.ok || !P.in.sky_on) return;
-    int p = fg_pass("sky", exec_sky, NULL);
+    g_sky_main = (SkyTarget){ P.in.hdr, P.in.depth, P.in.inv_view_proj, P.in.cam_pos };
+    int p = fg_pass("sky", exec_sky, &g_sky_main);
     fg_read(p, P.in.depth, FG_SAMPLED);
     fg_write(p, P.in.hdr, FG_STORAGE);
+}
+
+void post_scope_sky(FgRes color, FgRes depth, mat4 inv_vp, vec3 cam) {
+    if (!P.ok || !P.in.sky_on || color < 0) return;
+    g_sky_pip = (SkyTarget){ color, depth, inv_vp, cam };
+    int p = fg_pass("scope_pip_sky", exec_sky, &g_sky_pip);
+    fg_read(p, depth, FG_SAMPLED);
+    fg_write(p, color, FG_STORAGE);
 }
 
 static void exec_fog_apply(VkCommandBuffer cmd, void *u) {

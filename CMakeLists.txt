@@ -144,8 +144,9 @@ message(STATUS "Deadground: shader compiler ${DG_SHADER_COMPILER}")
 
 file(GLOB DG_SHADER_SOURCES CONFIGURE_DEPENDS
   ${CMAKE_SOURCE_DIR}/shaders/*.vert ${CMAKE_SOURCE_DIR}/shaders/*.frag ${CMAKE_SOURCE_DIR}/shaders/*.comp
-  ${CMAKE_SOURCE_DIR}/shaders/post/*.vert ${CMAKE_SOURCE_DIR}/shaders/post/*.frag ${CMAKE_SOURCE_DIR}/shaders/post/*.comp)
-file(GLOB DG_SHADER_INCLUDES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/shaders/*.glsl ${CMAKE_SOURCE_DIR}/shaders/post/*.glsl ${CMAKE_SOURCE_DIR}/third_party/fsr/*.h
+  ${CMAKE_SOURCE_DIR}/shaders/post/*.vert ${CMAKE_SOURCE_DIR}/shaders/post/*.frag ${CMAKE_SOURCE_DIR}/shaders/post/*.comp
+  ${CMAKE_SOURCE_DIR}/shaders/sights/*.frag ${CMAKE_SOURCE_DIR}/shaders/sights/*.comp)
+file(GLOB DG_SHADER_INCLUDES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/shaders/*.glsl ${CMAKE_SOURCE_DIR}/shaders/post/*.glsl ${CMAKE_SOURCE_DIR}/shaders/sights/*.glsl ${CMAKE_SOURCE_DIR}/third_party/fsr/*.h
   ${CMAKE_SOURCE_DIR}/shaders/post/*.h)
 set(DG_SHADER_OUT ${CMAKE_BINARY_DIR}/bin/shaders)
 set(DG_SPV_FILES)
@@ -157,6 +158,9 @@ foreach(src ${DG_SHADER_SOURCES})
   if(dirname STREQUAL "post")
     set(sub "post/")
   endif()
+  if(dirname STREQUAL "sights")
+    set(sub "sights/")
+  endif()
   set(out ${DG_SHADER_OUT}/${sub}${name}.spv)
   if(DG_SHADER_COMPILER_KIND STREQUAL "glslc")
     set(cmd ${DG_SHADER_COMPILER} --target-env=vulkan1.3 -O -I ${CMAKE_SOURCE_DIR}/shaders -I ${CMAKE_SOURCE_DIR}/shaders/post -I ${CMAKE_SOURCE_DIR}/third_party/fsr -I ${CMAKE_SOURCE_DIR}/third_party/smaa -o ${out} ${src})
@@ -165,6 +169,7 @@ foreach(src ${DG_SHADER_SOURCES})
   endif()
   add_custom_command(OUTPUT ${out}
     COMMAND ${CMAKE_COMMAND} -E make_directory ${DG_SHADER_OUT}/post
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${DG_SHADER_OUT}/sights
     COMMAND ${cmd}
     DEPENDS ${src} ${DG_SHADER_INCLUDES}
     COMMENT "GLSL ${name}" VERBATIM)
@@ -227,7 +232,7 @@ add_test(NAME recoil COMMAND test_recoil)
 set(DG_ANIMCORE_SOURCES
   src/anim/anim.c src/anim/anim_mesh.c src/anim/controller.c src/anim/procedural.c src/anim/turn.c src/anim/spine.c
   src/anim/weapon_hold.c src/anim/damage_additive.c src/anim/foot_ik.c src/anim/anim_net.c src/anim/ragdoll_def.c
-  src/anim/anim_library.c src/anim/character_rt.c src/gameplay/hitboxes.c src/gameplay/items.c src/gameplay/recoil.c src/core/spring.c
+  src/anim/anim_library.c src/anim/character_rt.c src/gameplay/hitboxes.c src/gameplay/items.c src/gameplay/attachments.c src/gameplay/recoil.c src/core/spring.c
   src/vfx/vfx_curve.c src/vfx/vfx_library.c src/vfx/vfx_sim.c src/vfx/vfx_atlas.c src/player/holdpoint.c src/player/camera_fp_math.c
   src/assets/fbx_loader.c src/assets/anim_cache.c src/assets/character.c
   src/core/log.c src/core/platform.c)

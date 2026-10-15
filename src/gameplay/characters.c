@@ -1,3 +1,4 @@
+#include "gameplay/attachments.h"
 #include "characters.h"
 #include "net/net.h"
 #include "health.h"
@@ -438,6 +439,20 @@ void char_detach(World *w, EntityId e) {
 
 // ------------------------------------------------------------------ inputs
 
+// Held weapon sockets with the character's attachments applied (sight socket, eye relief, left grip).
+static void update_item_sockets(const World *w, CharacterInst *c, const u8 *att) {
+    if (!att) att = w->attach[ENT_INDEX(c->ent)];
+    memcpy(c->item_att, att, sizeof(c->item_att));
+    if (!c->item_weapon) return;
+    static WeaponDef eff;
+    attach_weapon_effective(w->items, c->item_weapon, att, &eff);
+    c->item_sock = eff.sockets;
+}
+
+static const ItemSockets *held_sockets(const CharacterInst *c) {
+    return c->item_weapon ? &c->item_sock : &c->item_def->sockets;
+}
+
 static int item_hold_style(const World *w, u16 item, const WeaponDef **wd_out, const ItemDef **it_out) {
     *wd_out = NULL;
     *it_out = NULL;
@@ -482,6 +497,8 @@ static void player_inputs(World *w, CharacterInst *c, const Player *p, CharInput
     u16 item = eq ? eq->item : 0;
     in->weapon_id = item;
     in->weapon_type = item_hold_style(w, item, &c->item_weapon, &c->item_def);
+    static const u8 none[ATT_SLOTS];
+    update_item_sockets(w, c, eq ? eq->att : none);   // players: straight from the (replicated) inventory
     in->health = w->health[ENT_INDEX(p->ent)].hp;
     in->limb_status = c->limb;
 }
@@ -501,6 +518,7 @@ static void npc_inputs(World *w, CharacterInst *c, int i, CharInputs *in) {
     in->limb_status = c->limb;
     in->weapon_type = HOLD_NONE;
     if (w->item[i]) in->weapon_type = item_hold_style(w, w->item[i], &c->item_weapon, &c->item_def);
+    update_item_sockets(w, c, NULL);
     in->weapon_id = w->item[i];
 }
 
@@ -558,6 +576,7 @@ static void inputs_from_net(const World *w, CharacterInst *c, const AnimNetState
     in->limb_status = s->limb_status;
     in->weapon_id = s->weapon;
     in->weapon_type = item_hold_style(w, s->weapon, &c->item_weapon, &c->item_def);
+    update_item_sockets(w, c, NULL);
 }
 
 // ------------------------------------------------------------------ host sim
@@ -1094,7 +1113,7 @@ static void post_one(World *w, CharacterInst *c, int i, float dt, vec3 cam_pos, 
     pi.ads_t = c->rt.in.ads ? 1.0f : 0.0f;
     ItemSockets sock;
     const ItemSockets *item = NULL;
-    if (c->item_weapon) item = &c->item_weapon->sockets;
+    if (c->item_weapon) item = &c->item_sock;
     else if (c->item_def && c->rt.in.weapon_id) item = &c->item_def->sockets;
     if (item) { sock = *item; item = &sock; }
     pi.item = item;
@@ -1556,7 +1575,7 @@ void chars_render_local_fp(World *w, float alpha, int local_slot) {
     // Clip-driven states (reload / equip / melee: hand IK weight < 1) hand control to the right
     // hand bone; the item is always finalized from the solved right hand.
     if (c->item_valid && (c->item_weapon || c->item_def) && CG->fp_cam_valid && !raw) {
-        const ItemSockets *k = c->item_weapon ? &c->item_weapon->sockets : &c->item_def->sockets;
+        const ItemSockets *k = held_sockets(c);
         float span = (float)DG_MAX(1, c->interval);
         float it = saturate(((float)(w->chars->tick - c->last_eval) + alpha) / span);
         Xform icam = xf_lerp(c->item_cam_prev, c->item_cam_cur, it);
@@ -1574,15 +1593,29 @@ void chars_render_local_fp(World *w, float alpha, int local_slot) {
         // Reach: this frame's spine (re-bent to the frame's view) can move the support shoulder
         // away from the tick's solve. If grip_l is out of reach, pull the hold point towards the
         // left shoulder by the shortfall (never stretch the arm); warn once per item.
+        Xform grip_l = k->grip_l;   // ADS: may slide back along the handguard (exact ADS kept)
         if (hs->left_hand && k->has_left && la >= 0 && lf >= 0 && lh >= 0 && ikw > 0.99f) {
             float reach = v3_dist(model[la].t, model[lf].t) + v3_dist(model[lf].t, model[lh].t);
             float pulled = 0;
-            // Shoulder first (clavicle), then the hold point.
+            bool ads_exact = c->rt.proc.hp_out.state == HP_ADS;
+            float slide = 0, max_slide = ads_exact ? proc_grip_l_slide_max(k) : 0.0f;
+            // Shoulder first (clavicle), then the support hand along the handguard (ADS), then the hold point.
             proc_clavicle_reach(s, posep, model, s->role[BR_L_SHOULDER], la, proc_hand_for_socket(xf_mul(want, k->grip_l), LIB->hands.palm[0]).t, reach, 0.004f, 75.0f);
-            for (int iter = 0; iter < 6; iter++) {
-                Xform hand_l = proc_hand_for_socket(xf_mul(want, k->grip_l), LIB->hands.palm[0]);
+            for (int iter = 0; iter < 8; iter++) {
+                grip_l = k->grip_l;
+                grip_l.t.z += slide;
+                Xform hand_l = proc_hand_for_socket(xf_mul(want, grip_l), LIB->hands.palm[0]);
                 float need = v3_dist(model[la].t, hand_l.t);
                 if (need <= reach - 0.002f) break;
+                if (need > reach + 0.5f) break;   // teleport frame: the body hasn't caught up with the camera yet
+                if (slide < max_slide - 1e-5f) {
+                    vec3 to_sh = v3_norm(v3_sub(model[la].t, hand_l.t));
+                    float g = v3_dot(to_sh, quat_rotate(want.r, v3(0, 0, 1)));
+                    if (g > 0.2f) {
+                        slide = fminf(max_slide, slide + (need - reach + 0.003f) / g);
+                        continue;
+                    }
+                }
                 // Along the item's own barrel axis first (sights stay on the view axis in ADS),
                 // towards the shoulder only when the barrel doesn't shorten the reach.
                 vec3 to_sh = v3_norm(v3_sub(model[la].t, hand_l.t));
@@ -1619,7 +1652,7 @@ void chars_render_local_fp(World *w, float alpha, int local_slot) {
         CG->fp_hold_w = ikw;
         for (int h = 0; h < 2; h++) if (t.ov_w[h] > 0.001f) CG->fp_hold_w = 0;   // interaction / ledge grab owns a hand
         if (hs->left_hand && k->has_left && la >= 0 && lf >= 0 && lh >= 0 && ikw > 0.001f) {
-            Xform sock_l = xf_mul(item, k->grip_l);
+            Xform sock_l = xf_mul(item, grip_l);
             Xform hand_l = proc_hand_for_socket(sock_l, LIB->hands.palm[0]);
             anim_ik_two_bone_pose(s, posep, model, la, lf, lh, hand_l.t, &hand_l.r, quat_rotate(cam_rm, hs->elbow_l), ikw);
             Xform palm_l = xf_mul(model[lh], LIB->hands.palm[0]);
@@ -1781,7 +1814,7 @@ void chars_render(World *w, float alpha, vec3 cam_pos, int local_slot) {
             float span = (float)DG_MAX(1, c->interval);
             float t = saturate(((float)(w->chars->tick - c->last_eval) + alpha) / span);
             Xform it = xf_lerp(c->item_prev, c->item_cur, t);
-            hands_draw_held(c->item_weapon, c->item_weapon ? NULL : c->item_def, it.t, it.r, local ? (MAT_SHADOW_ONLY) : 0);
+            hands_draw_held_att(c->item_weapon, c->item_weapon ? NULL : c->item_def, c->item_att, it.t, it.r, local ? (MAT_SHADOW_ONLY) : 0);
         }
         (void)dist;
     }
@@ -1803,7 +1836,7 @@ bool chars_ragdoll_now(World *w, EntityId e, vec3 impulse) {
 bool chars_item_muzzle(World *w, EntityId e, vec3 *pos, vec3 *dir) {
     CharacterInst *c = char_get(w, e);
     if (!c || !c->item_valid || !(c->item_weapon || c->item_def)) return false;
-    const ItemSockets *k = c->item_weapon ? &c->item_weapon->sockets : &c->item_def->sockets;
+    const ItemSockets *k = held_sockets(c);
     *pos = xf_point(c->item_cur, k->muzzle);
     *dir = quat_rotate(c->item_cur.r, v3(0, 0, -1));
     return true;
@@ -1965,7 +1998,7 @@ void chars_debug_draw(World *w, vec3 cam_pos) {
             dbg_set_shape_depth(true);
         }
         if (cv(CG->hold_debug) && near && c->item_valid && (c->item_weapon || c->item_def)) {
-            const ItemSockets *k2 = c->item_weapon ? &c->item_weapon->sockets : &c->item_def->sockets;
+            const ItemSockets *k2 = held_sockets(c);
             Xform it = c->item_cur;
             Xform gr = xf_mul(it, k2->grip_r), gl = xf_mul(it, k2->grip_l);
             dbg_cross(gr.t, 0.03f, DBG_GREEN, 0);

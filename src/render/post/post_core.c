@@ -236,7 +236,8 @@ VkPipeline post_graphics_pipe(const char *frag, VkFormat color, int blend) {
     if (!p) return VK_NULL_HANDLE;
     if (p->pipe) return p->pipe;
     char file[80];
-    snprintf(file, sizeof(file), "post/%s.frag", frag);
+    if (strchr(frag, '/')) snprintf(file, sizeof(file), "%s.frag", frag);   // other shader folders (sights/...)
+    else snprintf(file, sizeof(file), "post/%s.frag", frag);
     VkShaderModule vs = vkp_load_shader("fullscreen.vert"), fs = load_post_shader(file);
     if (!vs || !fs) {
         if (vs) vkDestroyShaderModule(R->device, vs, NULL);
@@ -264,7 +265,15 @@ VkPipeline post_graphics_pipe(const char *frag, VkFormat color, int blend) {
     VkPipelineDepthStencilStateCreateInfo ds = { VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO };
     VkPipelineColorBlendAttachmentState cba = { 0 };
     cba.colorWriteMask = 0xF;
-    if (blend) {
+    if (blend == 3) {
+        // Multiply (glass tint): dst * src.rgb, alpha kept.
+        cba.blendEnable = VK_TRUE;
+        cba.colorBlendOp = cba.alphaBlendOp = VK_BLEND_OP_ADD;
+        cba.srcColorBlendFactor = VK_BLEND_FACTOR_ZERO;
+        cba.dstColorBlendFactor = VK_BLEND_FACTOR_SRC_COLOR;
+        cba.srcAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+        cba.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+    } else if (blend) {
         cba.blendEnable = VK_TRUE;
         cba.colorBlendOp = cba.alphaBlendOp = VK_BLEND_OP_ADD;
         cba.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
@@ -380,6 +389,7 @@ void post_shutdown(void) {
     }
     vkr_buffer_destroy_now(&P.exposure_buf);
     vkr_buffer_destroy_now(&P.histogram_buf);
+    post_sights_shutdown();
     post_textures_shutdown();
     vkDestroySampler(R->device, P.linear, NULL);
     vkDestroySampler(R->device, P.linear_repeat, NULL);

@@ -1,3 +1,4 @@
+#include "gameplay/attachments.h"
 #include "hands.h"
 #include "core/engine.h"
 #include "core/cvar.h"
@@ -35,6 +36,8 @@ typedef struct HandPose { vec3 pos[2]; quat rot[2]; u8 grip[2]; } HandPose;
 typedef enum InteractPhase { IA_NONE, IA_REACH, IA_HOLD, IA_RETURN } InteractPhase;
 
 typedef struct HandsSystem {
+    WeaponDef weff;                 // the equipped weapon with its attachments (H->weapon points here)
+    const ItemDB *db;
     HandClip clips[MAX_CLIPS];
     int clip_count;
     char poses_path[256];
@@ -353,6 +356,11 @@ void hands_update(const HandsInput *in) {
     // Weapon attaches to the right hand's grip frame; the left hand supports it.
     const InvSlot *slot = weapon_equipped(w, in->player);
     H->weapon = slot ? item_weapon(w->items, slot->item) : NULL;
+    H->db = w->items;
+    if (H->weapon) {
+        attach_weapon_effective(w->items, H->weapon, slot->att, &H->weff);
+        H->weapon = &H->weff;
+    }
     H->held_item = slot ? item_def(w->items, slot->item) : NULL;
     bool weapon_two_handed = false;
     if (H->weapon && H->weapon->kind != WPN_MELEE && !sim->wpn.reloading) {
@@ -581,11 +589,18 @@ static void draw_arm(const ArmChain *c, int hand, quat cam_rot, bool viewmodel) 
     draw_hand(c, hand, viewmodel);
 }
 
+// wd: an effective weapon (attach_weapon_effective): its parts without the hidden ones, plus every
+// applied attachment's parts placed on its slot.
 static void draw_weapon(const WeaponDef *wd, vec3 pos, quat rot, bool viewmodel) {
     for (int i = 0; i < wd->part_count; i++) {
         const WeaponModelPart *p = &wd->parts[i];
         draw_box(v3_add(pos, quat_rotate(rot, p->offset)), rot, p->half, p->color, viewmodel);
     }
+    if (!H->db) return;
+    AttachDrawPart parts[ATT_SLOTS * ATT_MAX_PARTS];
+    int n = attach_draw_parts(H->db, wd, wd->att_applied, parts, ARRAY_COUNT(parts));
+    for (int i = 0; i < n; i++)
+        draw_box(v3_add(pos, quat_rotate(rot, parts[i].center)), quat_mul(rot, parts[i].rot), parts[i].half, parts[i].color, viewmodel);
 }
 
 static void draw_held_item(const ItemDef *it, vec3 pos, quat rot, bool viewmodel) {
@@ -600,6 +615,14 @@ bool hands_muzzle(vec3 *pos, vec3 *fwd) {
     // The viewmodel may use its own FOV: return where the barrel tip appears in the world.
     if (pos) *pos = render_viewmodel_to_world(v3_add(H->weapon_pos, quat_rotate(H->weapon_rot, H->weapon->muzzle_offset)));
     if (fwd) *fwd = quat_rotate(H->weapon_rot, v3(0, 0, -1));
+    return true;
+}
+
+bool hands_fp_item(vec3 *pos, quat *rot, const WeaponDef **wd) {
+    if (!H || !H->initialized || !H->weapon) return false;
+    if (pos) *pos = H->weapon_pos;
+    if (rot) *rot = H->weapon_rot;
+    if (wd) *wd = H->weapon;
     return true;
 }
 
@@ -649,6 +672,17 @@ void hands_draw_held(const WeaponDef *wd, const ItemDef *it, vec3 pos, quat rot,
     s_world_item_flags = MAT_NO_SHADOW;
 }
 
+void hands_draw_held_att(const WeaponDef *wd, const ItemDef *it, const u8 *att, vec3 pos, quat rot, u32 flags) {
+    if (!H) return;
+    if (wd && H->db) {
+        static WeaponDef eff;
+        attach_weapon_effective(H->db, wd, att, &eff);
+        hands_draw_held(&eff, NULL, pos, rot, flags);
+        return;
+    }
+    hands_draw_held(wd, it, pos, rot, flags);
+}
+
 void hands_render_remote(World *w, int slot, vec3 eye, float yaw, float pitch) {
     if (!H) return;
     const Player *p = &w->players[slot];
@@ -656,6 +690,12 @@ void hands_render_remote(World *w, int slot, vec3 eye, float yaw, float pitch) {
     int ent_i = (int)ENT_INDEX(p->ent);
     u16 item = w->item[ent_i];
     const WeaponDef *wd = item ? item_weapon(w->items, item) : NULL;
+    static WeaponDef eff;
+    if (wd) {
+        attach_weapon_effective(w->items, wd, w->attach[ent_i], &eff);
+        wd = &eff;
+    }
+    H->db = w->items;
     const char *name = "idle";
     if (wd) name = wd->kind == WPN_MELEE ? "melee" : (!strcmp(wd->pose, "rifle") ? "rifle" : "pistol");
     if (w->flags[ent_i] & EF_HANG) name = "hang";

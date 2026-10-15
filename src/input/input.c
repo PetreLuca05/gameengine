@@ -22,6 +22,7 @@ typedef struct InputSystem {
     int capture_action, capture_slot;
     bool capturing;
 
+    float ads_fov_scale;
     Cvar *sens, *sens_y, *ads_mult, *invert_y, *pad_sens, *pad_deadzone, *m_raw;
 } InputSystem;
 
@@ -337,7 +338,7 @@ void input_end_frame(float dt) {
     }
 
     // Look
-    float scale = IN->ads ? IN->ads_mult->f : 1.0f;
+    float scale = input_aim_sensitivity_scale();
     float k = 0.0022f * scale; // radians per pixel at sensitivity 1
     vec2 look = v2(-IN->mouse_accum.x * k * IN->sens->f, -IN->mouse_accum.y * k * IN->sens_y->f);
     IN->mouse_accum = v2(0, 0);
@@ -376,7 +377,9 @@ bool input_consume_press(Action a) {
 bool input_peek_press(Action a) { return IN->press_count[a] > 0; }
 InputFrame input_frame(void) { return IN->frame; }
 void input_set_ads(bool ads) { IN->ads = ads; }
-float input_aim_sensitivity_scale(void) { return IN->ads ? IN->ads_mult->f : 1.0f; }
+void input_set_ads_fov_scale(float s) { IN->ads_fov_scale = s > 0 ? s : 1.0f; }
+// While aiming: cl_ads_sensitivity x the sight FOV scaling (ads_sens_mode, game_sights.c).
+float input_aim_sensitivity_scale(void) { return IN->ads ? IN->ads_mult->f * (IN->ads_fov_scale > 0 ? IN->ads_fov_scale : 1.0f) : 1.0f; }
 
 void input_set_game_focus(bool focus) {
     if (IN->game_focus == focus) return;

@@ -17,7 +17,7 @@
 
 #include "render/vk_internal.h"
 
-#define FG_MAX_PASSES 64
+#define FG_MAX_PASSES 96
 #define FG_MAX_RES 96
 #define FG_MAX_MIPS 12
 

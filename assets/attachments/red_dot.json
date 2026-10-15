@@ -1,0 +1,42 @@
+{
+  "_comment": "Red dot sight: parallax-free at parallax_m, MOA dot, eye relief keeps the weapon stock weld. Attachment space: -Z forward, +Y up, mount = bottom centre on the rail.",
+  "id": "red_dot",
+  "name": "Red Dot Sight",
+  "slot": "optic",
+  "sight": "reddot",
+  "mount": {
+    "pos": [0, 0, 0]
+  },
+  "sight_socket": [0, 0.027, -0.006],
+  "eye_relief": "weapon",
+  "zoom": 1.4,
+  "rail_offset": 0.0,
+  "reticle": {
+    "shape": "dot",
+    "moa": 2.0,
+    "color": [1.0, 0.05, 0.02],
+    "brightness": 1.0,
+    "parallax_m": 50
+  },
+  "lens": {
+    "pos": [0, 0.027, -0.012],
+    "radius": 0.0105,
+    "tint": [0.88, 0.96, 1.0],
+    "dust": 0.3,
+    "fresnel": 0.05
+  },
+  "ads_dof_near_blur": 2.0,
+  "modifiers": {
+    "ads_time": 1.0,
+    "sway_scale": 1.0
+  },
+  "model": [
+      {"offset": [0, 0.005, -0.004], "half": [0.013, 0.005, 0.024], "color": [0.07, 0.07, 0.075]},
+      {"offset": [-0.0135, 0.027, -0.012], "half": [0.0025, 0.017, 0.006], "color": [0.08, 0.08, 0.085]},
+      {"offset": [0.0135, 0.027, -0.012], "half": [0.0025, 0.017, 0.006], "color": [0.08, 0.08, 0.085]},
+      {"offset": [0, 0.0455, -0.012], "half": [0.016, 0.0025, 0.006], "color": [0.08, 0.08, 0.085]},
+      {"offset": [0, 0.0115, -0.012], "half": [0.016, 0.0015, 0.006], "color": [0.08, 0.08, 0.085]},
+      {"offset": [0, 0.0135, 0.012], "half": [0.007, 0.0035, 0.008], "color": [0.1, 0.1, 0.1]},
+      {"offset": [0.016, 0.03, 0.004], "half": [0.003, 0.005, 0.005], "color": [0.12, 0.12, 0.12]}
+    ]
+}

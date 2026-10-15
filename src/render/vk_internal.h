@@ -97,6 +97,8 @@ typedef struct FrameResources {
     VkSemaphore image_available;
     GpuBuffer ubo;
     VkDescriptorSet frame_set;
+    GpuBuffer ubo_pip;    // scope picture-in-picture camera (same layout as ubo)
+    VkDescriptorSet frame_set_pip;
     GpuBuffer dyn;        // host-visible: lines, text, ui
     GpuBuffer bones;      // host-visible SSBO: skinning palettes
     GpuBuffer instances;  // host-visible SSBO: skinned instance data
@@ -224,6 +226,8 @@ typedef struct Renderer {
     bool have_prev, camera_cut;
     bool fx_ads;
     float fx_ads_focus;
+    RenderSight sight;                          // this frame's weapon sight (render_set_sight)
+    float pip_fov;                              // scope PiP camera FOV (deg)
     mat4 *prev_models_cpu;                      // this frame's previous-model list (index = DrawItem.prev_slot - 1)
     u32 prev_model_count;
     struct ObjSlot *obj_slots;                  // object_id -> last model / palette (hash, OBJ_SLOTS)

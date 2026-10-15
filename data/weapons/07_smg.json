@@ -55,6 +55,13 @@
   },
   "part_mult": { "head": 0.9, "limbs": 0.9 },
   "falloff": { "start": 15, "end": 50, "min": 0.55 },
+  "attachment_slots": {
+    "optic": {"pos": [0, 0.082, -0.02], "rail": [-0.06, 0.04], "allow": ["red_dot", "scope_4x"]},
+    "muzzle": {"allow": ["suppressor", "compensator"]},
+    "underbarrel": {"pos": [0, 0.018, -0.22], "allow": ["vertical_grip"]},
+    "magazine": {"pos": [0, 0.018, -0.1], "allow": ["extended_mag"], "hide_parts": [2]},
+    "stock": {"pos": [0, 0.04, 0.06], "allow": ["heavy_stock"], "hide_parts": [3]}
+  },
   "model": [
     { "offset": [0, 0.05, -0.12], "half": [0.02, 0.032, 0.2], "color": [0.14, 0.14, 0.15] },
     { "offset": [0, -0.02, 0.0], "half": [0.015, 0.05, 0.022], "color": [0.1, 0.1, 0.1] },

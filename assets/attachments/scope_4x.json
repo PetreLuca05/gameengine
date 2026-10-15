@@ -1,0 +1,51 @@
+{
+  "_comment": "4x scope: picture-in-picture (or full screen with r_scope_mode 1), second focal plane duplex reticle, eye box.",
+  "id": "scope_4x",
+  "name": "4x Scope",
+  "slot": "optic",
+  "sight": "scope",
+  "mount": {
+    "pos": [0, 0, 0]
+  },
+  "sight_socket": [0, 0.047, 0.176],
+  "eye_relief": 0.09,
+  "zoom": 4.0,
+  "main_zoom": 1.15,
+  "rail_offset": "auto",
+  "reticle": {
+    "shape": "duplex",
+    "moa": 0.6,
+    "outer_moa": 36,
+    "color": [0.01, 0.01, 0.01],
+    "brightness": 1.0,
+    "ffp": false,
+    "illuminated": false
+  },
+  "lens": {
+    "pos": [0, 0.047, 0.1765],
+    "radius": 0.0175,
+    "objective": [0, 0.047, -0.181],
+    "objective_radius": 0.02,
+    "eye_box": 0.007,
+    "eye_box_depth": 0.035,
+    "tint": [0.93, 0.97, 1.0],
+    "dust": 0.12,
+    "fresnel": 0.03,
+    "chromatic": 1.6
+  },
+  "ads_dof_near_blur": 4.0,
+  "modifiers": {
+    "ads_time": 1.25,
+    "sway_scale": 1.0
+  },
+  "model": [
+      {"offset": [0, 0.004, 0], "half": [0.012, 0.004, 0.075], "color": [0.07, 0.07, 0.075]},
+      {"offset": [0, 0.019, -0.055], "half": [0.011, 0.011, 0.009], "color": [0.08, 0.08, 0.085]},
+      {"offset": [0, 0.019, 0.055], "half": [0.011, 0.011, 0.009], "color": [0.08, 0.08, 0.085]},
+      {"offset": [0, 0.047, 0], "half": [0.0165, 0.0165, 0.125], "color": [0.06, 0.065, 0.06]},
+      {"offset": [0, 0.047, -0.153], "half": [0.022, 0.022, 0.028], "color": [0.055, 0.06, 0.055]},
+      {"offset": [0, 0.047, 0.15], "half": [0.0195, 0.0195, 0.0255], "color": [0.055, 0.06, 0.055]},
+      {"offset": [0, 0.069, 0], "half": [0.008, 0.006, 0.008], "color": [0.09, 0.09, 0.09]},
+      {"offset": [0.022, 0.047, 0], "half": [0.006, 0.008, 0.008], "color": [0.09, 0.09, 0.09]}
+    ]
+}

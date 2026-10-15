@@ -1,3 +1,4 @@
+#include "gameplay/attachments.h"
 #include "game.h"
 #include "game_internal.h"
 #include "core/engine.h"
@@ -264,6 +265,8 @@ void game_sim_player(World *w, int slot, const UserCmd *cmd, float dt, bool firs
     w->flags[i] = f;
     const InvSlot *eq = weapon_equipped(w, slot);
     w->item[i] = eq ? eq->item : 0;
+    if (eq) memcpy(w->attach[i], eq->att, sizeof(w->attach[i]));
+    else memset(w->attach[i], 0, sizeof(w->attach[i]));
 }
 
 static void host_tick(World *w, const UserCmd *local_cmd) {
@@ -402,7 +405,7 @@ static UserCmd build_cmd(void) {
     c.seq = ++G->client_seq;
     c.yaw = G->view.yaw;
     c.pitch = G->view.pitch;
-    bool can_play = input_game_focus() && !G->menu_open && !G->inventory_open && !G->container_open && !console_is_open();
+    bool can_play = input_game_focus() && !G->menu_open && !G->inventory_open && !G->container_open && !G->bench_open && !console_is_open();
     // Scripted "+action" commands work even without window focus (automated tests).
     InputFrame f = input_frame();
     c.move_x = axis_to_i8(f.move.x);
@@ -423,7 +426,7 @@ static UserCmd build_cmd(void) {
     if (input_consume_press(ACT_CROUCH)) c.buttons |= BTN_CROUCH;
     if (input_consume_press(ACT_FIREMODE)) c.buttons |= BTN_FIREMODE;
     if (G->noclip_request) { c.buttons |= BTN_NOCLIP; G->noclip_request = false; }
-    if (G->menu_open || G->inventory_open || G->container_open || console_is_open()) {
+    if (G->menu_open || G->inventory_open || G->container_open || G->bench_open || console_is_open()) {
         c.move_x = c.move_y = 0;
         c.buttons &= (u16)(BTN_CROUCH | BTN_NOCLIP);
     }
@@ -562,7 +565,7 @@ static void handle_hotbar(void) {
 
 void game_frame(float dt) {
     if (!G->world) return;
-    bool ui_blocking = G->menu_open || G->inventory_open || G->container_open || console_is_open();
+    bool ui_blocking = G->menu_open || G->inventory_open || G->container_open || G->bench_open || console_is_open();
     InputFrame f = input_frame();
     G->frame_look = ui_blocking ? v2(0, 0) : f.look_delta;
     camera_apply_look(&G->view, G->frame_look);
@@ -743,6 +746,75 @@ static void cmd_give(int argc, const char **argv) {
     int left = inv_add(&p->inv, &G->items, item, count, wd ? (i16)wd->mag_size : 0);
     p->inv.revision++;
     log_info("gave %d x %s", count - left, argv[1]);
+}
+
+// Host: put attachment id `att` (0 = remove) into attachment slot `aslot` of the weapon in
+// inventory slot `inv_slot` of player `slot`. Validated against the weapon's slots.
+bool game_sv_attach(World *w, int slot, int inv_slot, int aslot, int att) {
+    if (!w || slot < 0 || slot >= MAX_PLAYERS || !w->players[slot].active) return false;
+    Player *p = &w->players[slot];
+    if (inv_slot < 0 || inv_slot >= INV_SLOTS || aslot < 0 || aslot >= ATT_SLOTS) return false;
+    InvSlot *s = &p->inv.slots[inv_slot];
+    const WeaponDef *wd = item_weapon(w->items, s->item);
+    if (!wd || !wd->att_slots[aslot].present) { ev_hint(w, slot, "No %s slot on this weapon", attach_slot_name(aslot)); return false; }
+    const AttachmentDef *a = attach_def(w->items, (u8)att);
+    if (att && (!a || a->slot != aslot || !attach_allowed(wd, a))) { ev_hint(w, slot, "Doesn't fit"); return false; }
+    if (s->att[aslot] == (u8)att) return true;
+    s->att[aslot] = (u8)att;
+    // Capacity may have shrunk (extended magazine removed): the extra rounds go back to the reserve.
+    WeaponDef eff;
+    attach_weapon_effective(w->items, wd, s->att, &eff);
+    if (eff.mag_size > 0 && s->ammo > eff.mag_size) {
+        int extra = s->ammo - eff.mag_size;
+        s->ammo = (i16)eff.mag_size;
+        if (wd->ammo_item) inv_add(&p->inv, w->items, wd->ammo_item, extra, 0);
+    }
+    p->inv.revision++;
+    ev_hint(w, slot, a ? "Attached %s" : "Removed %s", a ? a->name : attach_slot_name(aslot));
+    return true;
+}
+
+// attach <slot> <attachment|none>: equipped weapon (host applies, clients send an RPC).
+static void cmd_attach(int argc, const char **argv) {
+    World *w = G->world;
+    Player *p = game_local_player();
+    if (!w || !p) return;
+    int inv_slot = DG_CLAMP((int)p->sim.wpn.slot, 0, INV_HOTBAR - 1);
+    const InvSlot *s = &p->inv.slots[inv_slot];
+    const WeaponDef *wd = item_weapon(&G->items, s->item);
+    if (argc < 3) {
+        log_info("usage: attach <optic|muzzle|underbarrel|magazine|stock> <attachment id|none>");
+        if (!wd) { log_info("  (no weapon equipped)"); return; }
+        for (int k = 0; k < ATT_SLOTS; k++) {
+            if (!wd->att_slots[k].present) continue;
+            const AttachmentDef *cur = attach_def(&G->items, s->att[k]);
+            char opts[256] = "";
+            for (int i = 1; i <= G->items.attachment_count; i++) {
+                const AttachmentDef *a = &G->items.attachments[i];
+                if (a->slot == k && attach_allowed(wd, a)) { strncat(opts, " ", sizeof(opts) - strlen(opts) - 1); strncat(opts, a->id, sizeof(opts) - strlen(opts) - 1); }
+            }
+            log_info("  %-11s %-14s options:%s", attach_slot_name(k), cur ? cur->id : "-", opts);
+        }
+        return;
+    }
+    int k = attach_slot_from_name(argv[1]);
+    if (k < 0) { log_warn("attach: unknown slot '%s'", argv[1]); return; }
+    int id = 0;
+    if (strcmp(argv[2], "none") && strcmp(argv[2], "0")) {
+        id = attach_find(&G->items, argv[2]);
+        if (!id) { log_warn("attach: unknown attachment '%s'", argv[2]); return; }
+    }
+    if (!wd) { log_warn("attach: no weapon equipped"); return; }
+    game_rpc(RPC_ATTACH, inv_slot, k, id);
+}
+
+// bench: open the weapon bench UI here (dev; the dev room benches open it with Use).
+static void cmd_bench(int argc, const char **argv) {
+    (void)argc;
+    (void)argv;
+    if (!G->world || !game_local_player()) return;
+    G->bench_open = !G->bench_open;
+    G->bench_ent = 0;
 }
 
 static void cmd_noclip(int argc, const char **argv) { G->noclip_request = true; }
@@ -1099,6 +1171,8 @@ void game_init(void) {
     G->world_seed = cvar_reg_int("world_seed", 1337, 0, 999999999, CVAR_ARCHIVE, "procedural world seed");
     cmd_register("map", cmd_map, "host a new game on a map");
     cmd_register("give", cmd_give, "give <item> [count]");
+    cmd_register("bench", cmd_bench, "toggle the weapon bench (attachments) UI");
+    cmd_register("attach", cmd_attach, "attach <slot> <attachment|none>: weapon attachments of the equipped weapon (no args: list)");
     cmd_register("noclip", cmd_noclip, "toggle noclip (sv_cheats)");
     cmd_register("kill", cmd_kill, "suicide");
     cmd_register("damage", cmd_damage, "damage <amount>: hurt yourself (testing)");
@@ -1150,6 +1224,7 @@ void game_init(void) {
     }
     anim_debug_init();
     if (g_engine.anim) movement_set_eye_offset(chars_eye_offset);
+    if (g_engine.anim) attach_set_hold_params(&g_engine.anim->proc);   // scope rail positions use the styles' eye relief
     if (!items_load(&G->items, "data/items.json", "data/weapons")) log_error("game: item data failed to load");
     g_engine.items = &G->items;
     basic_meshes_create(&G->meshes);

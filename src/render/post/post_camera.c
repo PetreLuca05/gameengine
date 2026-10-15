@@ -103,6 +103,13 @@ static void exec_dof_focus(VkCommandBuffer cmd, void *u) {
     pc.p[0] = (P.in.ads && P.in.ads_focus_dist > 0.0f) ? P.in.ads_focus_dist : 0.0f;
     pc.p[1] = P.in.ads ? 12.0f : 5.0f;
     pc.u[0] = P.set.dof_autofocus ? 1u : 0u;
+    float af, as, an;
+    if (post_sights_ads_dof(&af, &as, &an)) {
+        // ADS (aim complete): fixed far focus, applied at once.
+        pc.p[0] = af;
+        pc.p[1] = 1e4f;
+        pc.u[0] = 0u;
+    }
     post_push_constants(cmd, &pc, 128);
     post_dispatch(cmd, "dof_focus", 8, 8, 1, 8);
     post_buffer_barrier(cmd);
@@ -117,6 +124,15 @@ static void exec_dof_coc(VkCommandBuffer cmd, void *u) {
     pb_img_fg(&b, 8, C.coc);
     pb_buf(&b, 13, P.exposure_buf.buffer, 64, false);
     pb_push(cmd, &b, VK_PIPELINE_BIND_POINT_COMPUTE);
+    struct { float p[16]; u32 u[16]; } pc;
+    memset(&pc, 0, sizeof(pc));
+    float af, as, an;
+    if (post_sights_ads_dof(&af, &as, &an)) {
+        pc.p[0] = as;      // f-stop override
+        pc.p[1] = an;      // near-field (viewmodel) blur, CoC px
+        pc.u[0] = 1u;
+    }
+    post_push_constants(cmd, &pc, 128);
     u32 w, h;
     fg_extent(C.coc, &w, &h);
     post_dispatch(cmd, "dof_coc", w, h, 1, 8);
@@ -166,7 +182,11 @@ static void exec_dof_composite(VkCommandBuffer cmd, void *u) {
 
 FgRes post_dof_build(FgRes color) {
     const PostSettings *s = &P.set;
-    if (s->dof <= 0 || (s->dof == 1 && !P.in.ads)) return color;
+    // ADS depth of field (sights, aim complete) overrides the user's mode while it lasts; the mode
+    // applies again the frame the aim is no longer complete.
+    float af, as, an;
+    bool ads_dof = post_sights_ads_dof(&af, &as, &an);
+    if (!ads_dof && (s->dof <= 0 || (s->dof == 1 && !P.in.ads))) return color;
     C.dof_in = color;
     C.coc = tex("dof_coc", VK_FORMAT_R16_SFLOAT, FG_SIZE_OUTPUT);
     FgTexDesc hd = { "dof_half", VK_FORMAT_R16G16B16A16_SFLOAT, FG_SIZE_OUTPUT, 0, 0, 0, 1, 0.5f };

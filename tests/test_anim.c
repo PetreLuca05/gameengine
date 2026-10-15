@@ -363,7 +363,10 @@ static void glue_step(CharRuntime *rt, const ItemSockets *k, CharInputs *in, flo
     if (k->has_left && proc_hold_style(&L->proc, in->weapon_type)->left_hand) {
         // Left palm <-> grip_l from the FINAL pose.
         Xform palm_l = xf_mul(rt->final_model[s->role[BR_L_HAND]], L->hands.palm[0]);
-        Xform sock = xf_mul(rt->proc.item_model, k->grip_l);
+        // ADS may slide the support hand back along the handguard (keeps the exact ADS transform).
+        Xform gl = k->grip_l;
+        gl.t.z += rt->proc.grip_l_slide;
+        Xform sock = xf_mul(rt->proc.item_model, gl);
         float pe = v3_dist(palm_l.t, sock.t), ae = quat_angle_between(palm_l.r, sock.r) * DG_RAD2DEG;
         if ((pe > 0.002f || ae > 1.0f) && g->max_pos <= 0.002f && g->max_ang <= 1.0f)
             printf("  glue %s/%s tick %d: %.2f mm %.2f deg (pitch %.2f ads %d crouch %d sprint %d, right err %.1f mm)\n", weapon, what, g->ticks, pe * 1000, ae,

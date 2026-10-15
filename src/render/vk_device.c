@@ -341,7 +341,7 @@ void vkd_create_targets(void) {
     R->depth = vkr_target_create(w, h, VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
                                  VK_IMAGE_ASPECT_DEPTH_BIT);
     // Viewmodel depth: separate so the world depth survives the first-person pass.
-    R->vm_depth = vkr_target_create(w, h, VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_IMAGE_ASPECT_DEPTH_BIT);
+    R->vm_depth = vkr_target_create(w, h, VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_IMAGE_ASPECT_DEPTH_BIT);   // sampled: sight lens occlusion
     R->render_scale_applied = scale;
     vkx_targets_changed();
 }
@@ -360,12 +360,16 @@ void vkd_create_shadow_map(u32 size) {
     for (int i = 0; i < FRAMES_IN_FLIGHT; i++) {
         if (!R->frames[i].frame_set) continue;
         VkDescriptorImageInfo ii = { R->sampler_shadow, R->shadow.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
-        VkWriteDescriptorSet w = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-        w.dstSet = R->frames[i].frame_set;
-        w.dstBinding = 1;
-        w.descriptorCount = 1;
-        w.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        w.pImageInfo = &ii;
-        vkUpdateDescriptorSets(R->device, 1, &w, 0, NULL);
+        VkDescriptorSet sets[2] = { R->frames[i].frame_set, R->frames[i].frame_set_pip };
+        for (int k = 0; k < 2; k++) {
+            if (!sets[k]) continue;
+            VkWriteDescriptorSet w = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+            w.dstSet = sets[k];
+            w.dstBinding = 1;
+            w.descriptorCount = 1;
+            w.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            w.pImageInfo = &ii;
+            vkUpdateDescriptorSets(R->device, 1, &w, 0, NULL);
+        }
     }
 }

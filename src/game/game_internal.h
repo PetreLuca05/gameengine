@@ -26,6 +26,15 @@ void game_holdpoint_test_frame(void);
 bool game_holdpoint_test_active(void);
 bool holdpoint_save_all(const char *path_override);
 
+// game_sights.c: ADS sights (FOV, sensitivity, lens / reticle / PiP hand-off, tests)
+void sights_register(void);
+void sights_camera(const Player *p, const WeaponDef *wd, CameraAds *out);
+void sights_frame(const RenderCamera *cam, bool first_person);
+void sights_test_frame(const RenderCamera *cam);
+bool sights_test_running(void);
+bool sights_dof_managed(void);
+void sights_draw(void);
+
 // game_post.c: post-processing settings (presets, post volumes, gameplay feedback, photo mode)
 typedef struct PostFrameInfo {
     vec3 cam_pos;

@@ -41,6 +41,7 @@ static void capture_one(World *w, int i, NetEnt *e) {
     e->rot = w->xf[i].rot;
     e->anim = w->anim[i];
     e->item = w->item[i];
+    memcpy(e->attach, w->attach[i], sizeof(e->attach));
     if (w->type[i] == ET_PICKUP) e->count = w->pickup[i].count;
     if (w->comps[i] & C_HEALTH) {
         e->hp = w->health[i].hp;
@@ -81,7 +82,12 @@ void repl_capture(World *w, vec3 center, float radius, SnapFrame *out) {
 // ------------------------------------------------------------------ delta encoding
 
 static u32 diff_mask(const NetEnt *a, const NetEnt *b) {
-    if (!a) return NF_ALL;
+    if (!a) {
+        u32 all = NF_ALL;
+        u8 zero[sizeof(b->attach)] = { 0 };
+        if (!memcmp(b->attach, zero, sizeof(zero))) all &= ~(u32)NF_ATTACH;   // nothing attached: skip
+        return all;
+    }
     u32 m = 0;
     if (a->type != b->type || a->slot != b->slot) m |= NF_TYPE;
     if (a->flags != b->flags) m |= NF_FLAGS;
@@ -89,6 +95,7 @@ static u32 diff_mask(const NetEnt *a, const NetEnt *b) {
     if (memcmp(&a->rot, &b->rot, sizeof(quat)) != 0) m |= NF_ROT;
     if (a->anim != b->anim) m |= NF_ANIM;
     if (a->item != b->item || a->count != b->count) m |= NF_ITEM;
+    if (memcmp(a->attach, b->attach, sizeof(a->attach)) != 0) m |= NF_ATTACH;
     if (a->hp != b->hp || a->max_hp != b->max_hp || a->armor != b->armor) m |= NF_HP;
     if (a->shape != b->shape || a->model != b->model || a->emissive != b->emissive || !v3_eq(a->half, b->half) || a->color != b->color) m |= NF_VIS;
     if (strcmp(a->name, b->name) != 0) m |= NF_NAME;
@@ -114,6 +121,15 @@ static void write_fields(Writer *w, const NetEnt *e, u32 m) {
     if (m & NF_NAME) w_str(w, e->name);
     if (m & NF_LIGHT) { w_vec3(w, e->light_color); w_f32(w, e->light_radius); w_f32(w, e->light_intensity); w_u32(w, e->light_group); }
     if (m & NF_EXTRA) w_vec3(w, e->extra);
+    if (m & NF_ATTACH) {
+        // Per-slot delta against the baseline: a 5-bit mask, then only the changed ids.
+        u8 sub = 0;
+        for (int k = 0; k < (int)sizeof(e->attach); k++)
+            if (!g_write_base || g_write_base->attach[k] != e->attach[k]) sub |= (u8)(1u << k);
+        w_u8(w, sub);
+        for (int k = 0; k < (int)sizeof(e->attach); k++)
+            if (sub & (1u << k)) w_u8(w, e->attach[k]);
+    }
     if (m & NF_ANIMST) {
         u16 f = (g_write_base && g_write_base->has_anim) ? anim_net_diff(&g_write_base->anim_state, &e->anim_state) : anim_net_diff(NULL, &e->anim_state);
         anim_net_write(w, &e->anim_state, f);
@@ -132,6 +148,11 @@ static void read_fields(Reader *r, NetEnt *e, u32 m) {
     if (m & NF_NAME) r_str(r, e->name, sizeof(e->name));
     if (m & NF_LIGHT) { e->light_color = r_vec3(r); e->light_radius = r_f32(r); e->light_intensity = r_f32(r); e->light_group = r_u32(r); }
     if (m & NF_EXTRA) e->extra = r_vec3(r);
+    if (m & NF_ATTACH) {
+        u8 sub = r_u8(r);
+        for (int k = 0; k < (int)sizeof(e->attach); k++)
+            if (sub & (1u << k)) e->attach[k] = r_u8(r);
+    }
     if (m & NF_ANIMST) { anim_net_read(r, &e->anim_state, NULL); e->has_anim = true; }
 }
 
@@ -347,6 +368,8 @@ void repl_apply(World *w, const SnapFrame *f, int local_slot, InterpBuffer *inte
         if (e->has_anim) chars_client_receive(w, e->id, &e->anim_state, f->tick);
         w->flags[i] = e->flags;
         w->item[i] = e->item;
+        memcpy(w->attach[i], e->attach, sizeof(w->attach[i]));
+        if (e->type == ET_PICKUP) memcpy(w->pickup[i].att, e->attach, sizeof(w->pickup[i].att));
         if (e->type == ET_PICKUP) { w->pickup[i].item = e->item; w->pickup[i].count = e->count; }
         if (e->type == ET_DOOR) w->door[i].key_item = e->item;
         if (w->comps[i] & C_HEALTH) {

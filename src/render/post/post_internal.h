@@ -117,6 +117,7 @@ void post_vol_build(void);                     // post_volumetrics.c
 FgRes post_aa_build(FgRes color);              // post_aa.c: TAA / TAA-U / FXAA / SMAA / FSR1 (-> output res)
 FgRes post_mb_build(FgRes color);              // post_camera.c: motion blur
 FgRes post_dof_build(FgRes color);             // post_camera.c: depth of field
+FgRes post_sights_build(FgRes color);          // post_sights.c: red dot / scope (after DoF, before bloom)
 FgRes post_bloom_build(FgRes color);           // post_bloom.c (returns the bloom texture)
 void post_exposure_build(FgRes color);         // post_exposure.c
 FgRes post_flare_build(FgRes bloom);           // post_bloom.c

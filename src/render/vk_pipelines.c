@@ -356,6 +356,14 @@ static int g_extra_count;
 void vkp_register_shader(const char *name) {
     for (int i = 0; i < g_extra_count; i++) if (!strcmp(g_extra_shaders[i], name)) return;
     if (g_extra_count < 128) g_extra_shaders[g_extra_count++] = name;
+#ifdef DG_SOURCE_DIR
+    // A shader registered later (post passes are created lazily) is not a source change: move the
+    // hot reload baseline past it, otherwise its first use would recompile every shader.
+    char path[512];
+    snprintf(path, sizeof(path), "%s/shaders/%s", DG_SOURCE_DIR, name);
+    i64 t = platform_file_mtime(path);
+    if (R->shader_src_mtime && t > R->shader_src_mtime) R->shader_src_mtime = t;
+#endif
 }
 
 static i64 shader_sources_mtime(void) {

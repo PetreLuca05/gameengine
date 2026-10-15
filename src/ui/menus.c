@@ -1,3 +1,5 @@
+#include "gameplay/attachments.h"
+#include "player/camera.h"
 #include "menus.h"
 #include "crosshair.h"
 #include "ui.h"
@@ -141,7 +143,7 @@ static void update_mouse_mode(void) {
 
 bool menus_wants_mouse(void) {
     Game *g = game();
-    return (M && M->page != PAGE_NONE) || (g && (g->inventory_open || g->container_open)) || vfx_editor_open() || holdpoint_editor_open();
+    return (M && M->page != PAGE_NONE) || (g && (g->inventory_open || g->container_open || g->bench_open)) || vfx_editor_open() || holdpoint_editor_open();
 }
 
 void menus_close_all(void) {
@@ -152,6 +154,7 @@ void menus_close_all(void) {
         if (g->container_open) game_rpc(RPC_CONTAINER_CLOSE, 0, 0, 0);
         g->inventory_open = false;
         g->container_open = false;
+        g->bench_open = false;
     }
     config_save(video_config_path());
     update_mouse_mode();
@@ -159,7 +162,7 @@ void menus_close_all(void) {
 
 void menus_toggle_pause(void) {
     Game *g = game();
-    if (g && (g->inventory_open || g->container_open)) { menus_close_all(); return; }
+    if (g && (g->inventory_open || g->container_open || g->bench_open)) { menus_close_all(); return; }
     if (M->page != PAGE_NONE) {
         if (M->page == PAGE_PAUSE) menus_close_all();
         else M->page = PAGE_PAUSE;
@@ -393,6 +396,18 @@ static void draw_graphics(struct nk_context *ctx) {
         if (display_change) M->confirm_timer = 15.0f;
     }
     if (nk_button_label(ctx, "Revert")) M->pending = read_graphics();
+    {
+        // Weapon sights.
+        Cvar *sm = cv("r_scope_mode");
+        if (sm) {
+            static const char *labels[2] = { "Picture-in-picture", "Full screen" };
+            int ns = combo_row(ctx, "Scopes", labels, 2, DG_CLAMP(sm->i, 0, 1));
+            if (ns != sm->i) cvar_set_int(sm, ns);
+        }
+        slider_cvar(ctx, "Scope picture resolution", "r_scope_pip_scale", 0.2f, 1.0f, 0.05f, "%.2f");
+        slider_cvar(ctx, "Red dot brightness", "sight_brightness", 0.0f, 3.0f, 0.05f, "%.2f");
+        check_cvar(ctx, "ADS depth of field", "ads_dof");
+    }
     draw_post_settings(ctx);
 }
 
@@ -400,6 +415,19 @@ static void draw_controls(struct nk_context *ctx) {
     slider_cvar(ctx, "Mouse sensitivity X", "cl_sensitivity", 0.1f, 10, 0.05f, "%.2f");
     slider_cvar(ctx, "Mouse sensitivity Y", "cl_sensitivity_y", 0.1f, 10, 0.05f, "%.2f");
     slider_cvar(ctx, "ADS sensitivity multiplier", "cl_ads_sensitivity", 0.1f, 1.5f, 0.05f, "%.2f");
+    {
+        // Sight FOV scaling of the ADS sensitivity (game_sights.c): monitor distance / FOV ratio / off.
+        Cvar *m = cv("ads_sens_mode");
+        if (m) {
+            static const char *modes[3] = { "monitor_distance", "fov_ratio", "off" };
+            static const char *labels[3] = { "Monitor distance", "FOV ratio", "Off" };
+            int sel = 0;
+            for (int i = 0; i < 3; i++) if (!strcmp(m->str, modes[i])) sel = i;
+            int ns = combo_row(ctx, "ADS sensitivity scaling", labels, 3, sel);
+            if (ns != sel) cvar_set(m->name, modes[ns]);
+            slider_cvar(ctx, sel == 1 ? "ADS FOV ratio coefficient" : "ADS monitor distance coefficient", "ads_sens_coef", 0.0f, 2.0f, 0.01f, "%.2f");
+        }
+    }
     check_cvar(ctx, "Invert Y", "cl_invert_y");
     slider_cvar(ctx, "Gamepad sensitivity", "pad_sensitivity", 0.5f, 8, 0.1f, "%.1f");
     slider_cvar(ctx, "Gamepad deadzone", "pad_deadzone", 0, 0.5f, 0.01f, "%.2f");
@@ -686,10 +714,89 @@ static void draw_inventory(struct nk_context *ctx, bool with_container) {
     }
 }
 
+// Weapon bench: attachments of the equipped weapon, one row per slot (cycle with < >), and the
+// effective stats against the bare weapon. Changes are RPC_ATTACH (host validated).
+static void draw_bench(struct nk_context *ctx) {
+    Game *g = game();
+    World *w = g->world;
+    Player *p = game_local_player();
+    if (!p || !w) return;
+    // Walked away: close.
+    if (ent_valid(w, g->bench_ent) && v3_dist(p->sim.move.pos, w->xf[ENT_INDEX(g->bench_ent)].pos) > 3.5f) { menus_close_all(); return; }
+    int inv_slot = DG_CLAMP((int)p->sim.wpn.slot, 0, INV_HOTBAR - 1);
+    const InvSlot *s = &p->inv.slots[inv_slot];
+    const WeaponDef *wd = item_weapon(w->items, s->item);
+    float win_w = S(560), win_h = S(520);
+    if (nk_begin(ctx, "WEAPON BENCH", centered(win_w, win_h), NK_WINDOW_BORDER | NK_WINDOW_TITLE | NK_WINDOW_NO_SCROLLBAR)) {
+        nk_layout_row_dynamic(ctx, S(22), 1);
+        if (!wd || wd->kind == WPN_MELEE) {
+            nk_label_colored(ctx, "Equip a gun (1-9) to fit attachments.", NK_TEXT_LEFT, nk_rgb(220, 160, 120));
+        } else {
+            char line[160];
+            snprintf(line, sizeof(line), "%s", item_def(w->items, s->item)->name);
+            nk_label_colored(ctx, line, NK_TEXT_LEFT, nk_rgb(240, 200, 140));
+            for (int k = 0; k < ATT_SLOTS; k++) {
+                if (!wd->att_slots[k].present) continue;
+                // Options: none + every allowed attachment of this slot.
+                u8 opts[MAX_ATTACHMENTS + 1];
+                int n = 0, cur = 0;
+                opts[n++] = 0;
+                for (int i = 1; i <= w->items->attachment_count; i++) {
+                    const AttachmentDef *a = &w->items->attachments[i];
+                    if (a->slot == k && attach_allowed(wd, a)) {
+                        if (s->att[k] == i) cur = n;
+                        opts[n++] = (u8)i;
+                    }
+                }
+                const AttachmentDef *ca = attach_def(w->items, s->att[k]);
+                nk_layout_row_begin(ctx, NK_DYNAMIC, S(30), 4);
+                nk_layout_row_push(ctx, 0.22f);
+                nk_label(ctx, attach_slot_name(k), NK_TEXT_LEFT);
+                nk_layout_row_push(ctx, 0.12f);
+                bool prev = nk_button_label(ctx, "<") != 0;
+                nk_layout_row_push(ctx, 0.5f);
+                nk_label_colored(ctx, ca ? ca->name : "(none)", NK_TEXT_CENTERED, ca ? nk_rgb(160, 220, 160) : nk_rgb(150, 150, 150));
+                nk_layout_row_push(ctx, 0.12f);
+                bool next = nk_button_label(ctx, ">") != 0;
+                nk_layout_row_end(ctx);
+                if ((prev || next) && n > 1) {
+                    int ni = (cur + (next ? 1 : n - 1)) % n;
+                    game_rpc(RPC_ATTACH, inv_slot, k, opts[ni]);
+                }
+            }
+            // Effective stats.
+            WeaponDef eff;
+            attach_weapon_effective(w->items, wd, s->att, &eff);
+            const AttachmentDef *optic = attach_optic(w->items, s->att);
+            float base_fov = camera_base_fov();
+            nk_layout_row_dynamic(ctx, S(10), 1);
+            nk_layout_row_dynamic(ctx, S(20), 1);
+            snprintf(line, sizeof(line), "Sight: %s   zoom %.1fx   sight FOV %.1f deg", optic ? optic->name : "iron sights", optic ? optic->zoom : 75.0f / fmaxf(1, wd->ads_fov),
+                     attach_sight_fov(&eff, optic, base_fov));
+            nk_label(ctx, line, NK_TEXT_LEFT);
+            snprintf(line, sizeof(line), "Magazine %d (%d)   ADS time %.2f s (%.2f)   reload %.2f s", eff.mag_size, wd->mag_size, eff.recoil.ads_time, wd->recoil.ads_time, eff.reload_time);
+            nk_label(ctx, line, NK_TEXT_LEFT);
+            snprintf(line, sizeof(line), "Recoil vertical %.0f %%   horizontal %.0f %%   camera kick %.0f %%", 100.0f * eff.recoil.v_per / fmaxf(1e-4f, wd->recoil.v_per),
+                     100.0f * eff.recoil.h_per / fmaxf(1e-4f, wd->recoil.h_per), 100.0f * eff.recoil.cam_pitch / fmaxf(1e-4f, wd->recoil.cam_pitch));
+            nk_label(ctx, line, NK_TEXT_LEFT);
+            snprintf(line, sizeof(line), "Damage %.1f   range %.0f m   sway %.0f %%", eff.damage, eff.range,
+                     100.0f * (eff.recoil.idle_sway + eff.recoil.scope_sway) / fmaxf(1e-4f, wd->recoil.idle_sway + wd->recoil.scope_sway));
+            nk_label(ctx, line, NK_TEXT_LEFT);
+        }
+        nk_layout_row_dynamic(ctx, S(10), 1);
+        nk_layout_row_dynamic(ctx, S(20), 1);
+        nk_label_colored(ctx, "Also: console 'attach <slot> <attachment|none>'", NK_TEXT_LEFT, nk_rgb(150, 150, 150));
+        nk_layout_row_dynamic(ctx, S(34), 1);
+        if (nk_button_label(ctx, "Close")) menus_close_all();
+    }
+    nk_end(ctx);
+}
+
 void menus_draw(void) {
     struct nk_context *ctx = ui_nk();
     Game *g = game();
     if (g && (g->inventory_open || g->container_open) && M->page == PAGE_NONE) draw_inventory(ctx, g->container_open);
+    if (g && g->bench_open && M->page == PAGE_NONE) draw_bench(ctx);
     switch (M->page) {
     case PAGE_PAUSE: draw_pause(ctx); break;
     case PAGE_SETTINGS: draw_settings(ctx); break;

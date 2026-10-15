@@ -1,0 +1,20 @@
+{
+  "_comment": "Compensator: less vertical and horizontal recoil.",
+  "id": "compensator",
+  "name": "Compensator",
+  "slot": "muzzle",
+  "mount": {
+    "pos": [0, 0, 0]
+  },
+  "muzzle_length": 0.05,
+  "muzzle_device": "compensator",
+  "modifiers": {
+    "recoil_vertical": 0.86,
+    "recoil_horizontal": 0.78,
+    "camera_kick": 0.9
+  },
+  "model": [
+      {"offset": [0, 0, -0.025], "half": [0.014, 0.014, 0.025], "color": [0.13, 0.12, 0.1]},
+      {"offset": [0, 0.012, -0.03], "half": [0.006, 0.004, 0.012], "color": [0.05, 0.05, 0.05]}
+    ]
+}

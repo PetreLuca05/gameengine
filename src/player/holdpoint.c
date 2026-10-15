@@ -283,6 +283,7 @@ static HpPose pose_for(const HoldPointStyle *s, const HoldPointOverride *o, int 
 
 Xform holdpoint_ads_item(const HoldPointStyle *s, const HoldPointOverride *o, vec3 sight) {
     float relief = (o && o->eye_relief > 0) ? o->eye_relief : s->eye_relief;
+    if (o) relief += o->eye_relief_add;
     quat r = hp_euler_deg(s->ads_rot);
     // item * sight = (0, 0, -relief) with the item's barrel along the view axis.
     vec3 t = v3_sub(v3(0, 0, -relief), quat_rotate(r, sight));

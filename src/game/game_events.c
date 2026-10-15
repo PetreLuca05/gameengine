@@ -101,6 +101,10 @@ void game_handle_event(const GameEvent *ev) {
         G->inv_selected = -1;
         break;
     case EV_CONTAINER_CLOSE: G->container_open = false; break;
+    case EV_BENCH:
+        G->bench_open = true;
+        G->bench_ent = ev->ent;
+        break;
     case EV_RESPAWN:
         if (G->local_slot >= 0 && w->players[G->local_slot].ent == ev->ent) {
             G->view.yaw = ev->value;
@@ -148,7 +152,12 @@ static void drop_item(World *w, int slot, int inv_slot) {
     RayHit rh;
     if (phys_raycast(w->phys, eye, v3_sub(at, eye), PL_MASK_WORLD, phys_character_inner_body(p->character), &rh))
         at = v3_madd(rh.point, rh.normal, 0.15f);
-    spawn_pickup(w, at, s.item, s.count, s.ammo, 0);
+    EntityId pe = spawn_pickup(w, at, s.item, s.count, s.ammo, 0);
+    if (ent_valid(w, pe)) {
+        // The dropped weapon keeps its attachments.
+        memcpy(w->pickup[ENT_INDEX(pe)].att, s.att, sizeof(s.att));
+        memcpy(w->attach[ENT_INDEX(pe)], s.att, sizeof(s.att));
+    }
     ev_hint(w, slot, "Dropped %s", item_def(w->items, s.item)->name);
 }
 
@@ -159,6 +168,7 @@ void game_sv_handle_rpc(int slot, int type, int a, int b, int c) {
     switch (type) {
     case RPC_INV_MOVE: inv_move(&p->inv, w->items, a, b); break;
     case RPC_INV_DROP: drop_item(w, slot, a); break;
+    case RPC_ATTACH: game_sv_attach(w, slot, a, b, c); break;
     case RPC_CONTAINER_TAKE: {
         EntityId ce = p->open_container;
         if (!ent_valid(w, ce) || w->type[ENT_INDEX(ce)] != ET_CONTAINER) return;
@@ -168,7 +178,7 @@ void game_sv_handle_rpc(int slot, int type, int a, int b, int c) {
         for (int s = DG_MAX(0, first); s <= DG_MIN(CONTAINER_SLOTS - 1, last); s++) {
             InvSlot *cs = &ct->slots[s];
             if (!cs->item) continue;
-            int left = inv_add(&p->inv, w->items, cs->item, cs->count, cs->ammo);
+            int left = inv_add_att(&p->inv, w->items, cs->item, cs->count, cs->ammo, cs->att);
             if (left == cs->count) { ev_hint(w, slot, "Inventory full"); break; }
             if (left > 0) cs->count = (u16)left;
             else memset(cs, 0, sizeof(*cs));
@@ -182,7 +192,7 @@ void game_sv_handle_rpc(int slot, int type, int a, int b, int c) {
         if (!ent_valid(w, ce) || a < 0 || a >= INV_SLOTS) return;
         InvSlot *s = &p->inv.slots[a];
         if (!s->item) return;
-        int left = slots_add(w->cont[ENT_INDEX(ce)].slots, CONTAINER_SLOTS, w->items, s->item, s->count, s->ammo, 0, CONTAINER_SLOTS);
+        int left = slots_add_att(w->cont[ENT_INDEX(ce)].slots, CONTAINER_SLOTS, w->items, s->item, s->count, s->ammo, s->att, 0, CONTAINER_SLOTS);
         if (left > 0) s->count = (u16)left;
         else memset(s, 0, sizeof(*s));
         p->inv.revision++;

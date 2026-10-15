@@ -198,6 +198,7 @@ static void fp_cam_test_hands(void) {
     }
 }
 void game_render_init(void) {
+    sights_register();
     cmd_register("ads_sweep", cmd_ads_sweep, "ads_sweep start | report: sight socket distance / angle against the view axis while ADS");
     cmd_register("fp_pose", cmd_fp_pose, "print the first-person head position relative to the pelvis");
     cmd_register("fp_cam_test", cmd_fp_cam_test, "fp_cam_test start | report: first-person camera / body / hands invariants");
@@ -391,13 +392,14 @@ static void render_entity(World *w, int i, float alpha, bool focused) {
         draw_box_local(pos, rot, v3(h.x - 0.08f, 0, h.z + 0.005f), v3(0.03f, h.y * 0.9f, 0.01f), bm);
         break;
     }
+    case ET_BENCH: break;   // interaction volume only (the bench itself is a level brush)
     case ET_PICKUP: {
         if (w->flags[i] & EF_HIDDEN) break;
         // The same model as in the hands, lying where it landed (casts a shadow; highlighted on focus).
         u16 it = w->item[i];
         const WeaponDef *wd = it ? item_weapon(w->items, it) : NULL;
         const ItemDef *idef = it ? item_def(w->items, it) : NULL;
-        if (wd || idef) hands_draw_held(wd, wd ? NULL : idef, pos, rot, hl);
+        if (wd || idef) hands_draw_held_att(wd, wd ? NULL : idef, w->attach[i], pos, rot, hl);
         else draw_shape((VisShape)v->shape, v->half, pos, rot, m);
         break;
     }
@@ -533,7 +535,9 @@ void game_render(void) {
     if (wd && wd->kind == WPN_MELEE) ads = false;
     input_set_ads(ads);
     bool dead = p && p->sim.move.mode == MOVE_DEAD;
-    RenderCamera cam = camera_update(&G->view, &interp, (float)g_engine.frame_dt, ads, wd ? wd->ads_fov : 0, dead);
+    CameraAds cads;
+    sights_camera(p, wd, &cads);
+    RenderCamera cam = camera_update(&G->view, &interp, (float)g_engine.frame_dt, &cads, dead);
     // Weapon feel: camera kick spring (visual only, aim unaffected) + aim sway (bullets use it too).
     if (p && !dead) {
         float ck = cvar_find("cam_kick_scale") ? cvar_find("cam_kick_scale")->f : 1.0f;   // visual camera kick (aim recoil unaffected)
@@ -707,6 +711,9 @@ void game_render(void) {
         }
         if (!cvar_find("cl_thirdperson")->i) hands_render();
     }
+    // Sights: lens / reticle / scope picture-in-picture from the item as it is drawn this frame.
+    sights_frame(&cam, p && !dead && !cvar_find("cl_thirdperson")->i && GR->cam_mode != 3);
+    sights_test_frame(&cam);
     fx_render(cam.pos);
     draw_debug(w, cam.pos);
     recoil_debug_draw(cam.pos);
@@ -717,6 +724,7 @@ void game_render(void) {
     audio_update(cam.pos, fwd, up);
 
     if (!game_post_photo_mode()) hud_draw();
+    sights_draw();
     game_post_draw_overlay();
     game_post_draw_photo_ui();
     menus_draw();

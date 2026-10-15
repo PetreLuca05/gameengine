@@ -68,6 +68,8 @@ typedef struct Game {
     bool inventory_open;
     bool container_open;
     EntityId container_ent;
+    bool bench_open;                 // weapon bench attachment UI (EV_BENCH)
+    EntityId bench_ent;
     InvSlot container_slots[CONTAINER_SLOTS];
     int inv_selected;            // slot picked up for moving (-1 none)
 
@@ -117,7 +119,9 @@ void game_cl_disconnected(const char *reason);
 void game_handle_event(const GameEvent *ev);   // client-side event handling
 void game_rpc(int type, int a, int b, int c);   // client -> host request (inventory, containers)
 void game_sv_handle_rpc(int slot, int type, int a, int b, int c);
+// Host: weapon attachment change (validated; RPC_ATTACH / the attach command / the weapon bench).
+bool game_sv_attach(World *w, int slot, int inv_slot, int aslot, int att);
 
-enum RpcType { RPC_INV_MOVE = 1, RPC_INV_DROP, RPC_CONTAINER_TAKE, RPC_CONTAINER_PUT, RPC_CONTAINER_CLOSE, RPC_INV_USE };
+enum RpcType { RPC_INV_MOVE = 1, RPC_INV_DROP, RPC_CONTAINER_TAKE, RPC_CONTAINER_PUT, RPC_CONTAINER_CLOSE, RPC_INV_USE, RPC_ATTACH };
 
 #endif

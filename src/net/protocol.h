@@ -40,7 +40,8 @@ enum NetFieldBits {
     NF_LIGHT = 1 << 9,   // light color/radius/intensity/group
     NF_EXTRA = 1 << 10,  // door knob / lever target data
     NF_ANIMST = 1 << 11, // replicated animation state (characters), own sub-field mask
-    NF_ALL   = 0xFFF,
+    NF_ATTACH = 1 << 12, // weapon attachment ids (u8 per slot, own per-slot delta mask)
+    NF_ALL   = 0x1FFF,
 };
 
 #define CMDS_PER_PACKET 4

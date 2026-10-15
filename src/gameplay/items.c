@@ -4,6 +4,7 @@
 #include "core/platform.h"
 #include "cJSON.h"
 #include "gameplay/hitboxes.h"
+#include "gameplay/attachments.h"
 #include <SDL3/SDL.h>
 #include <math.h>
 #include <stdio.h>
@@ -189,7 +190,7 @@ static void parse_recoil(const cJSON *w, RecoilParams *r) {
 
 // ------------------------------------------------------------------ hold sockets
 
-static quat frame_from(vec3 fingers, vec3 back) {
+quat item_palm_frame(vec3 fingers, vec3 back) {
     // Palm frame: -Z = fingers, +Y = back of the hand (orthonormalized).
     vec3 z = v3_norm(v3_neg(fingers));
     vec3 y = v3_sub(back, v3_scale(z, v3_dot(back, z)));
@@ -221,7 +222,7 @@ static Xform socket_from_json(const cJSON *o, Xform def) {
     if (cJSON_IsArray(p) && cJSON_GetArraySize(p) >= 3)
         x.t = v3((float)cJSON_GetArrayItem(p, 0)->valuedouble, (float)cJSON_GetArrayItem(p, 1)->valuedouble, (float)cJSON_GetArrayItem(p, 2)->valuedouble);
     vec3 f = jvec3(o, "fingers", v3(0, 0, 0)), b = jvec3(o, "back", v3(0, 0, 0));
-    if (v3_len2(f) > 0 && v3_len2(b) > 0) x.r = frame_from(f, b);
+    if (v3_len2(f) > 0 && v3_len2(b) > 0) x.r = item_palm_frame(f, b);
     vec3 e = jvec3(o, "rot", v3(1e9f, 0, 0));
     if (e.x < 1e8f) x.r = quat_euler(e.y * DG_DEG2RAD, e.x * DG_DEG2RAD, e.z * DG_DEG2RAD);
     return x;
@@ -251,12 +252,12 @@ static void default_sockets(ItemSockets *k, const char *style, vec3 support, vec
     bool pistol = !strcmp(style, "pistol");
     bool small = !strcmp(style, "item_small") || !strcmp(style, "none");
     // Right hand around the grip: back of the hand to the right, fingers wrapping forward-down.
-    k->grip_r = xf_make(v3(0, 0, 0), melee || small ? frame_from(v3(0, 0, -1), v3(1, 0, 0)) : frame_from(v3(0, -0.5f, -0.866f), v3(1, 0, 0)));
+    k->grip_r = xf_make(v3(0, 0, 0), melee || small ? item_palm_frame(v3(0, 0, -1), v3(1, 0, 0)) : item_palm_frame(v3(0, -0.5f, -0.866f), v3(1, 0, 0)));
     // Left hand: under the handguard (palm up-right), cupping the right hand for pistols,
     // stacked below the right hand for two-handed melee.
-    quat lrot = frame_from(v3(0.75f, -0.45f, -0.3f), v3(-0.5f, -0.85f, 0.0f));
-    if (pistol) lrot = frame_from(v3(0, -0.5f, -0.866f), v3(-1, 0, 0));
-    if (melee) lrot = frame_from(v3(0, 0, -1), v3(-1, 0, 0));
+    quat lrot = item_palm_frame(v3(0.75f, -0.45f, -0.3f), v3(-0.5f, -0.85f, 0.0f));
+    if (pistol) lrot = item_palm_frame(v3(0, -0.5f, -0.866f), v3(-1, 0, 0));
+    if (melee) lrot = item_palm_frame(v3(0, 0, -1), v3(-1, 0, 0));
     k->grip_l = xf_make(support, lrot);
     k->has_left = v3_len2(support) > 1e-6f && !small;
     k->muzzle = muzzle;
@@ -381,6 +382,8 @@ static void parse_weapon(ItemDB *db, const cJSON *w, const char *file) {
         d->vfx_muzzle_device = dv >= 0 ? dv : VFX_DEV_BARE;
         d->vfx_caliber = c >= 0 ? c : cal;
     }
+    d->iron_sight = d->sockets.sight;
+    attachments_parse_weapon_slots(d, w);
     part_mult_defaults(d->part_mult);
     part_mult_parse(d->part_mult, cJSON_GetObjectItemCaseSensitive(w, "part_mult"));
     const cJSON *fo = cJSON_GetObjectItemCaseSensitive(w, "falloff");
@@ -472,7 +475,9 @@ bool items_load(ItemDB *db, const char *items_path, const char *weapons_path) {
         holdpoint_override_parse(&d->sockets.hp, cJSON_GetObjectItemCaseSensitive(it, "holdpoint"));
     }
     cJSON_Delete(iroot);
+    attachments_load(db, "assets/attachments");
     bool ok = load_weapons(db, weapons_path);
+    attachments_resolve(db);
     log_info("items: %d item defs, %d weapon defs", db->item_count - 1, db->weapon_count);
     return ok;
 }
@@ -494,6 +499,8 @@ bool weapons_reload_defs(ItemDB *db, const char *weapons_path) {
         log_warn("weapon_reload: load failed or the weapon set changed (restart to add/remove weapons)");
         return false;
     }
+    attachments_load(db, "assets/attachments");   // same files: ids unchanged
+    attachments_resolve(db);
     log_info("weapon_reload: %d weapon defs reloaded", db->weapon_count);
     return true;
 }

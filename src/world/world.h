@@ -26,7 +26,7 @@ typedef u32 EntityId;
 
 typedef enum EntityType {
     ET_NONE, ET_PLAYER, ET_PROP, ET_DOOR, ET_GATE, ET_LEVER, ET_SWITCH, ET_LIGHT,
-    ET_CONTAINER, ET_PICKUP, ET_DUMMY, ET_PROJECTILE, ET_MARKER, ET_ZOMBIE, ET_COUNT
+    ET_CONTAINER, ET_PICKUP, ET_DUMMY, ET_PROJECTILE, ET_MARKER, ET_ZOMBIE, ET_BENCH, ET_COUNT
 } EntityType;
 
 enum EntityFlags {
@@ -145,6 +145,7 @@ typedef struct Pickup {
     u16 item;
     u16 count;
     i16 ammo;
+    u8 att[5];            // weapon attachments (ATT_SLOTS, gameplay/attachments.h)
     float bob_phase;
     float respawn_time;   // >0: respawns after being taken (dev convenience)
     float respawn_timer;
@@ -240,6 +241,7 @@ struct World {
     float anim[MAX_ENTITIES];       // generic replicated 0..1 animation value
     float anim_prev[MAX_ENTITIES];
     u16 item[MAX_ENTITIES];         // replicated item id (pickups, player's weapon)
+    u8 attach[MAX_ENTITIES][5];     // replicated attachment ids of that item (ATT_SLOTS, per slot delta)
     int max_used;                   // highest used index + 1
 
     Transform xf[MAX_ENTITIES];

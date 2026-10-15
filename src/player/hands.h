@@ -60,6 +60,8 @@ void hands_render_remote(World *w, int slot, vec3 eye, float yaw, float pitch);
 const ArmChain *hands_chain(int hand);
 // Third-person held item at a grip transform (item origin = right grip), e.g. a character's hand.
 void hands_draw_held(const struct WeaponDef *wd, const struct ItemDef *it, vec3 pos, quat rot, u32 material_flags);
+// Same with the weapon's attachment ids (ATT_SLOTS, NULL = none): wd is the base definition.
+void hands_draw_held_att(const struct WeaponDef *wd, const struct ItemDef *it, const u8 *att, vec3 pos, quat rot, u32 material_flags);
 // First-person targets for the full-body player model (gameplay/characters.c): per-hand palm
 // frames in world space (palm convention: -Z fingers, +Y back of the hand) from the last
 // hands_update. Weapon hands sit on the item sockets (grip_r / grip_l) of the viewmodel weapon.
@@ -86,6 +88,9 @@ void hands_fp_shift(vec3 delta);
 void hands_fp_set_item(vec3 pos, quat rot);
 // World-space barrel tip of the local viewmodel weapon (last hands_update). False if no gun.
 bool hands_muzzle(vec3 *pos, vec3 *fwd);
+// The first-person weapon this frame (viewmodel world space) and its effective definition
+// (attachments applied). False when no weapon is held.
+bool hands_fp_item(vec3 *pos, quat *rot, const struct WeaponDef **wd);
 void hands_reload_poses(void);
 
 #endif

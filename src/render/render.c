@@ -57,6 +57,7 @@ static void create_frames(void) {
         VkSemaphoreCreateInfo sci = { VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
         VK_CHECK(vkCreateSemaphore(R->device, &sci, NULL, &f->image_available));
         f->ubo = vkr_buffer_create(sizeof(FrameData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, true);
+        f->ubo_pip = vkr_buffer_create(sizeof(FrameData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, true);
         f->dyn = vkr_buffer_create(DYN_BUFFER_SIZE, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, true);
         f->bones = vkr_buffer_create(sizeof(mat4) * MAX_SKIN_BONES * 2, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);   // + last frame's
         f->instances = vkr_buffer_create(sizeof(GpuSkinInstance) * MAX_SKIN_DRAWS * 2, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);
@@ -67,26 +68,32 @@ static void create_frames(void) {
         ai.descriptorSetCount = 1;
         ai.pSetLayouts = &R->frame_layout;
         VK_CHECK(vkAllocateDescriptorSets(R->device, &ai, &f->frame_set));
-        VkDescriptorBufferInfo bi = { f->ubo.buffer, 0, sizeof(FrameData) };
-        VkWriteDescriptorSet w = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-        w.dstSet = f->frame_set;
-        w.dstBinding = 0;
-        w.descriptorCount = 1;
-        w.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-        w.pBufferInfo = &bi;
-        vkUpdateDescriptorSets(R->device, 1, &w, 0, NULL);
-        VkDescriptorBufferInfo sb[3] = { { f->bones.buffer, 0, VK_WHOLE_SIZE }, { f->instances.buffer, 0, VK_WHOLE_SIZE },
-                                         { f->prev_models.buffer, 0, VK_WHOLE_SIZE } };
-        VkWriteDescriptorSet ws[3];
-        for (int k = 0; k < 3; k++) {
-            ws[k] = (VkWriteDescriptorSet){ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-            ws[k].dstSet = f->frame_set;
-            ws[k].dstBinding = (u32)(2 + k);
-            ws[k].descriptorCount = 1;
-            ws[k].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-            ws[k].pBufferInfo = &sb[k];
+        VK_CHECK(vkAllocateDescriptorSets(R->device, &ai, &f->frame_set_pip));
+        // The PiP set: its own frame UBO, the same skinning / previous-model buffers.
+        VkDescriptorSet sets[2] = { f->frame_set, f->frame_set_pip };
+        GpuBuffer *ubos[2] = { &f->ubo, &f->ubo_pip };
+        for (int s = 0; s < 2; s++) {
+            VkDescriptorBufferInfo bi = { ubos[s]->buffer, 0, sizeof(FrameData) };
+            VkWriteDescriptorSet w = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+            w.dstSet = sets[s];
+            w.dstBinding = 0;
+            w.descriptorCount = 1;
+            w.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            w.pBufferInfo = &bi;
+            vkUpdateDescriptorSets(R->device, 1, &w, 0, NULL);
+            VkDescriptorBufferInfo sb[3] = { { f->bones.buffer, 0, VK_WHOLE_SIZE }, { f->instances.buffer, 0, VK_WHOLE_SIZE },
+                                             { f->prev_models.buffer, 0, VK_WHOLE_SIZE } };
+            VkWriteDescriptorSet ws[3];
+            for (int k = 0; k < 3; k++) {
+                ws[k] = (VkWriteDescriptorSet){ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+                ws[k].dstSet = sets[s];
+                ws[k].dstBinding = (u32)(2 + k);
+                ws[k].descriptorCount = 1;
+                ws[k].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+                ws[k].pBufferInfo = &sb[k];
+            }
+            vkUpdateDescriptorSets(R->device, 3, ws, 0, NULL);
         }
-        vkUpdateDescriptorSets(R->device, 3, ws, 0, NULL);
     }
 }
 
@@ -95,6 +102,7 @@ static void destroy_frames(void) {
         FrameResources *f = &R->frames[i];
         vkr_flush_deferred(f);
         vkr_buffer_destroy_now(&f->ubo);
+        vkr_buffer_destroy_now(&f->ubo_pip);
         vkr_buffer_destroy_now(&f->dyn);
         vkr_buffer_destroy_now(&f->bones);
         vkr_buffer_destroy_now(&f->instances);
@@ -248,6 +256,7 @@ bool render_begin_frame(void) {
     R->line_count[0] = R->line_count[1] = 0;
     R->text_count = 0;
     R->ui_vcount = R->ui_icount = R->ui_ccount = 0;
+    memset(&R->sight, 0, sizeof(R->sight));   // the game sets this frame's sight (render_set_sight)
     R->last_stats = R->stats;
     R->stats.draw_calls = R->stats.triangles = R->stats.culled = 0;
 
@@ -676,7 +685,7 @@ static void compute_matrices(FrameData *fd) {
     R->view = mat4_fps_view(c->pos, c->yaw, c->pitch, c->roll);
     R->proj = mat4_perspective(c->fov_deg * DG_DEG2RAD, aspect, c->znear, c->zfar);
     R->view_proj = mat4_mul(R->proj, R->view);
-    float vm_fov = R->r_vm_fov->f > 1.0f ? R->r_vm_fov->f : c->fov_deg;
+    float vm_fov = render_vm_fov();
     R->vm_proj = mat4_perspective(vm_fov * DG_DEG2RAD, aspect, 0.01f, 100.0f);
     extract_frustum(R->view_proj, R->frustum);
 
@@ -763,6 +772,11 @@ static struct {
     VkDeviceSize line_off[2], text_off, ui_voff, ui_ioff;
     FgRes hdr, depth, vm_depth, normal, material, velocity, swap, scene_copy, ldr;
     PostLitInputs lit;
+    // Scope picture-in-picture (RSIGHT_SCOPE_PIP while aiming)
+    FgRes pip_color, pip_depth;
+    u32 pip_size;
+    vec4 pip_frustum[6];
+    mat4 pip_from_view;     // main view space -> PiP clip
 } F;
 
 static void begin_pass(VkCommandBuffer cmd, VkImageView color, bool clear_color, VkImageView depth, VkImageLayout depth_layout, bool clear_depth) {
@@ -940,7 +954,7 @@ static void exec_vm_prepass(VkCommandBuffer cmd, void *u) {
     ri.pDepthAttachment = &da;
     vkCmdBeginRendering(cmd, &ri);
     set_viewport(cmd, R->hdr.w, R->hdr.h);
-    if (R->vm_draw_count || F.any_skin_vm) {
+    if ((R->vm_draw_count || F.any_skin_vm) && !R->sight.hide_viewmodel) {
         bind_frame(cmd);
         post_push_lit_inputs(cmd, NULL, false);
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_PREPASS]);
@@ -956,7 +970,7 @@ static void exec_viewmodel(VkCommandBuffer cmd, void *u) {
     begin_pass(cmd, R->hdr.view, false, R->vm_depth.view, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, false);
     bind_frame(cmd);
     post_push_lit_inputs(cmd, NULL, false);
-    if (R->vm_draw_count || F.any_skin_vm) {
+    if ((R->vm_draw_count || F.any_skin_vm) && !R->sight.hide_viewmodel) {
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[R->r_wireframe->i ? PIPE_LIT_WIRE : PIPE_LIT]);
         draw_items(cmd, R->vm_draws, R->vm_draw_count, false, false, 2);
         // First-person arms (body model), same depth as the viewmodel weapon.
@@ -969,6 +983,86 @@ static void exec_viewmodel(VkCommandBuffer cmd, void *u) {
         R->stats.draw_calls++;
     }
     vkCmdEndRendering(cmd);
+}
+
+// Scope picture-in-picture: the opaque scene (static + characters, lit forward like the main
+// opaque pass, no screen-space inputs) from the objective lens at the scope FOV into a square
+// target; the sky is filled in by post_scope_sky. The local player's own weapon is in the
+// viewmodel list and never drawn here; the near plane skips the rest of the body.
+static void exec_scope_pip(VkCommandBuffer cmd, void *u) {
+    (void)u;
+    VkRenderingAttachmentInfo ca = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
+    ca.imageView = fg_view(F.pip_color);
+    ca.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    ca.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    ca.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    ca.clearValue.color.float32[0] = R->env.fog_color.x;
+    ca.clearValue.color.float32[1] = R->env.fog_color.y;
+    ca.clearValue.color.float32[2] = R->env.fog_color.z;
+    ca.clearValue.color.float32[3] = 1.0f;
+    VkRenderingAttachmentInfo da = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
+    da.imageView = fg_view(F.pip_depth);
+    da.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+    da.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    da.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    da.clearValue.depthStencil.depth = 1.0f;
+    VkRenderingInfo ri = { VK_STRUCTURE_TYPE_RENDERING_INFO };
+    ri.renderArea.extent.width = F.pip_size;
+    ri.renderArea.extent.height = F.pip_size;
+    ri.layerCount = 1;
+    ri.colorAttachmentCount = 1;
+    ri.pColorAttachments = &ca;
+    ri.pDepthAttachment = &da;
+    vkCmdBeginRendering(cmd, &ri);
+    set_viewport(cmd, F.pip_size, F.pip_size);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 0, 1, &F.f->frame_set_pip, 0, NULL);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 1, 1, &R->textures[R->white_tex].set, 0, NULL);
+    post_push_lit_inputs(cmd, NULL, false);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_LIT]);
+    vec4 saved[6];
+    memcpy(saved, R->frustum, sizeof(saved));
+    memcpy(R->frustum, F.pip_frustum, sizeof(saved));
+    draw_items(cmd, R->draws, R->draw_count, false, true, 0);
+    memcpy(R->frustum, saved, sizeof(saved));
+    draw_skinned(cmd, 0, PIPE_SKIN, PIPE_LIT, F.skin_main);
+    vkCmdEndRendering(cmd);
+}
+
+// PiP camera + its frame UBO; returns false when no PiP is needed this frame.
+static bool setup_scope_pip(FrameData *fd) {
+    const RenderSight *s = &R->sight;
+    R->pip_fov = 0;
+    if (s->kind != RSIGHT_SCOPE_PIP || s->ads_t < 0.02f) return false;
+    vec3 fwd = v3_norm(s->fwd), up = v3_norm(s->up);
+    if (v3_len2(fwd) < 0.5f) return false;
+    // The ocular's angular radius from the eye, magnified: the PiP covers exactly what the lens
+    // can show (plus a margin for the chromatic aberration / eye box shift).
+    float d = fmaxf(v3_dist(s->lens_pos, R->cam.pos), 0.02f);
+    float tan_vm = tanf(render_vm_fov() * 0.5f * DG_DEG2RAD);
+    float tan_base = tanf(fmaxf(s->base_fov, 10.0f) * 0.5f * DG_DEG2RAD);
+    float t_lens = (s->lens_radius / d) * tan_base / fmaxf(tan_vm, 1e-3f);
+    float tan_half = clampf(1.15f * t_lens / fmaxf(s->zoom, 1.0f), tanf(0.25f * DG_DEG2RAD), tanf(30.0f * DG_DEG2RAD));
+    R->pip_fov = 2.0f * atanf(tan_half) * DG_RAD2DEG;
+    u32 n = (u32)DG_CLAMP((int)lrintf((float)R->hdr.h * clampf(s->pip_scale, 0.2f, 1.0f)), 128, 1024);
+    F.pip_size = n;
+    mat4 view = mat4_look_at(s->objective_pos, v3_add(s->objective_pos, fwd), up);
+    mat4 proj = mat4_perspective(2.0f * atanf(tan_half), 1.0f, 0.3f, R->cam.zfar);
+    mat4 vp = mat4_mul(proj, view);
+    extract_frustum(vp, F.pip_frustum);
+    F.pip_from_view = mat4_mul(vp, mat4_inverse_rigid(R->view));
+    FrameData *pd = (FrameData *)F.f->ubo_pip.mapped;
+    memcpy(pd, fd, sizeof(FrameData));
+    pd->view_proj = vp;
+    pd->view = view;
+    pd->proj = proj;
+    pd->view_proj_nj = pd->prev_view_proj_nj = vp;
+    pd->jitter = v4(0, 0, 0, 0);
+    pd->post_flags = v4(0, 0, 0, 0);
+    pd->post_fog = v4(0, 80, 0, 0);
+    pd->fog = v4(R->env.fog_color.x, R->env.fog_color.y, R->env.fog_color.z, R->env.fog_density);
+    pd->camera_pos = v4(s->objective_pos.x, s->objective_pos.y, s->objective_pos.z, fd->camera_pos.w);
+    pd->screen = v4((float)n, (float)n, 1.0f / (float)n, 1.0f / (float)n);
+    return true;
 }
 
 // Final: post encode (CAS, grain, dither, sRGB / PQ) + UI into the swapchain image.
@@ -1145,6 +1239,25 @@ static void build_frame_graph(FrameData *fd) {
     p = fg_pass("viewmodel", exec_viewmodel, NULL);
     fg_write(p, F.hdr, FG_COLOR);
     fg_write(p, F.vm_depth, FG_DEPTH);
+
+    F.pip_color = F.pip_depth = FG_NONE;
+    if (setup_scope_pip(fd)) {
+        FgTexDesc pd = { "scope_pip", VK_FORMAT_R16G16B16A16_SFLOAT, FG_SIZE_ABS, F.pip_size, F.pip_size, 1, 1, 0 };
+        F.pip_color = fg_texture(&pd);
+        pd.name = "scope_pip_depth";
+        pd.format = R->depth.format;
+        F.pip_depth = fg_texture(&pd);
+        p = fg_pass("scope_pip", exec_scope_pip, NULL);
+        fg_write(p, F.pip_color, FG_COLOR);
+        fg_write(p, F.pip_depth, FG_DEPTH);
+        if (p < 0) F.pip_color = FG_NONE;
+        else {
+            mat4 view = mat4_look_at(R->sight.objective_pos, v3_add(R->sight.objective_pos, v3_norm(R->sight.fwd)), v3_norm(R->sight.up));
+            mat4 proj = mat4_perspective(R->pip_fov * DG_DEG2RAD, 1.0f, 0.3f, R->cam.zfar);
+            post_scope_sky(F.pip_color, F.pip_depth, mat4_inverse(mat4_mul(proj, view)), R->sight.objective_pos);
+        }
+    }
+    post_set_sight(&R->sight, F.pip_color, F.pip_from_view, R->vm_proj, R->pip_fov);
 
     F.ldr = post_resolve();
 
@@ -1362,6 +1475,9 @@ void render_set_camera_fx(bool ads, float ads_focus_dist) {
     R->fx_ads_focus = ads_focus_dist;
 }
 void render_camera_cut(void) { R->camera_cut = true; }
+void render_set_sight(const RenderSight *s) { R->sight = *s; }
+const RenderSight *render_sight(void) { return &R->sight; }
+float render_scope_pip_fov(void) { return R->pip_fov; }
 bool render_load_lut(const char *cube_path) {
     vkDeviceWaitIdle(R->device);   // the LUT image may be in flight
     return post_lut_load_cube(cube_path && cube_path[0] ? cube_path : NULL, 0);
@@ -1390,8 +1506,13 @@ bool render_world_to_screen(vec3 world, vec2 *out_px) {
 
 // A point placed in viewmodel space (drawn with the viewmodel FOV) -> the world point that
 // appears at the same pixel with the world FOV (same depth). Identity when the FOVs match.
+float render_vm_fov(void) {
+    if (R->r_vm_fov->f > 1.0f) return R->r_vm_fov->f;
+    return R->cam.vm_fov_deg > 1.0f ? R->cam.vm_fov_deg : R->cam.fov_deg;
+}
+
 vec3 render_viewmodel_to_world(vec3 p) {
-    float vm_fov = R->r_vm_fov->f > 1.0f ? R->r_vm_fov->f : R->cam.fov_deg;
+    float vm_fov = render_vm_fov();
     if (fabsf(vm_fov - R->cam.fov_deg) < 0.01f) return p;
     mat4 view = mat4_fps_view(R->cam.pos, R->cam.yaw, R->cam.pitch, R->cam.roll);
     vec3 v = mat4_mul_point(view, p);

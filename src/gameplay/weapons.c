@@ -1,4 +1,5 @@
 #include "weapons.h"
+#include "attachments.h"
 #include "health.h"
 #include "effects.h"
 #include "core/log.h"
@@ -59,9 +60,15 @@ const InvSlot *weapon_equipped(const World *w, int slot) {
     return p->inv.slots[s].item ? &p->inv.slots[s] : NULL;
 }
 
+// The equipped weapon with its attachments applied (per player slot storage: valid until the next
+// call for the same slot).
 const WeaponDef *weapon_equipped_def(const World *w, int slot) {
+    static WeaponDef eff[MAX_PLAYERS];
     const InvSlot *s = weapon_equipped(w, slot);
-    return s ? item_weapon(w->items, s->item) : NULL;
+    const WeaponDef *base = s ? item_weapon(w->items, s->item) : NULL;
+    if (!base || slot < 0 || slot >= MAX_PLAYERS) return base;
+    attach_weapon_effective(w->items, base, s->att, &eff[slot]);
+    return &eff[slot];
 }
 
 // Stance / movement / ADS state the recoil and spread math depends on (all from PlayerSim, so
@@ -525,6 +532,12 @@ void weapons_tick(World *w, int slot, PlayerSim *sim, const UserCmd *cmd, u16 pr
     InvSlot *s = &p->inv.slots[ws->slot];
     const ItemDef *idef = item_def(w->items, s->item);
     const WeaponDef *d = item_weapon(w->items, s->item);
+    // Attachments: the host and the predicting client apply the same modifiers (same inventory).
+    static WeaponDef eff[MAX_PLAYERS];
+    if (d && slot >= 0 && slot < MAX_PLAYERS) {
+        attach_weapon_effective(w->items, d, s->att, &eff[slot]);
+        d = &eff[slot];
+    }
     bool gun = d && d->kind != WPN_MELEE;
     if (s->item != ws->item) {
         // A different item landed in the selected slot (pickup / give / inventory move).

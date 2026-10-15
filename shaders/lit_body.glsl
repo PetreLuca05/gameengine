@@ -65,6 +65,29 @@ vec3 apply_fine_grid(vec3 base, vec3 p, vec3 n) {
     return col;
 }
 
+// Sighting-in target: 1 MOA squares at its distance (spacing s in metres), 5 MOA bold, 10 MOA red
+// (level.c snaps the target centre onto a 10 MOA crossing; the aim square is its own box).
+vec3 apply_moa_grid(vec3 base, vec3 p, vec3 n, float s) {
+    vec3 an = abs(n);
+    vec2 c;
+    if (an.y >= an.x && an.y >= an.z) c = p.xz;
+    else if (an.x >= an.z) c = p.zy;
+    else c = p.xy;
+    s = max(s, 1e-4);
+    // Each level fades out once its squares get smaller than a few pixels (readable through a
+    // scope, a clean board from far away).
+    float px = max(length(fwidth(c)), 1e-6);
+    float f1 = clamp((s / px - 4.0) / 4.0, 0.0, 1.0), f5 = clamp((s * 5.0 / px - 4.0) / 4.0, 0.0, 1.0), f10 = clamp((s * 10.0 / px - 4.0) / 4.0, 0.0, 1.0);
+    float minor = max(grid_line(c.x, s, 0.8), grid_line(c.y, s, 0.8)) * f1;
+    float five = max(grid_line(c.x, s * 5.0, 1.2), grid_line(c.y, s * 5.0, 1.2)) * f5;
+    float ten = max(grid_line(c.x, s * 10.0, 1.6), grid_line(c.y, s * 10.0, 1.6)) * f10;
+    vec3 col = base;
+    col = mix(col, col * 0.55, minor * 0.8);
+    col = mix(col, vec3(0.08, 0.1, 0.12), five * 0.85);
+    col = mix(col, vec3(0.8, 0.08, 0.05), ten);
+    return col;
+}
+
 float shadow_factor(vec3 p, vec3 n) {
     if (frame.sun_color.w < 0.5) return 1.0;
     vec3 offset_p = p + n * 0.04;
@@ -139,6 +162,7 @@ void main() {
     }
     if ((flags & MAT_GRID) != 0u && frame.params.x > 0.5) base.rgb = apply_grid(base.rgb, v_world, n);
     if ((flags & MAT_GRID_FINE) != 0u) base.rgb = apply_fine_grid(base.rgb, v_world, n);
+    if ((flags & MAT_GRID_MOA) != 0u) base.rgb = apply_moa_grid(base.rgb, v_world, n, MAT_PARAMS.w);
 
     vec3 color;
     if ((flags & MAT_UNLIT) != 0u) {

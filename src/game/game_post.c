@@ -512,7 +512,9 @@ void game_post_frame(const PostFrameInfo *fi) {
     build_settings(&s, fi);
     apply_feedback(&s, fi, dt);
     apply_photo(&s);
-    render_set_camera_fx(fi->ads, 0.0f);
+    // With ADS DoF on (game_sights.c), aiming switches the DoF exactly when the aim completes;
+    // the older button-driven "ADS only" mode stays for ads_dof 0.
+    render_set_camera_fx(fi->ads && !sights_dof_managed(), 0.0f);
     render_post_settings(&s);
     GP.last = s;
     if (GP.volumes_draw->i)
