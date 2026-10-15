@@ -595,8 +595,12 @@ static void draw_weapon(const WeaponDef *wd, vec3 pos, quat rot, bool viewmodel)
 }
 
 static void draw_held_item(const ItemDef *it, vec3 pos, quat rot, bool viewmodel) {
+    // Pickup sizes are world-scale; keep held items palm-sized so they don't fill the view.
     vec3 half = it->size;
-    draw_box(v3_add(pos, quat_rotate(rot, v3(0, half.y + 0.03f, -0.02f))), rot, half, it->color, viewmodel);
+    float m = fmaxf(half.x, fmaxf(half.y, half.z));
+    float s = m > 0.07f ? 0.07f / m : 1.0f;
+    half = v3_scale(half, s);
+    draw_box(v3_add(pos, quat_rotate(rot, v3(0, half.y + 0.03f, -0.05f))), rot, half, it->color, viewmodel);
 }
 
 void hands_render(void) {

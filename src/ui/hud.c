@@ -98,7 +98,7 @@ static void draw_vitals(Game *g, World *w, float s) {
 
 static void draw_ammo(Game *g, World *w, float s) {
     Player *p = game_local_player();
-    if (!p) return;
+    if (!p || p->sim.move.mode == MOVE_DEAD) return;
     const InvSlot *slot = weapon_equipped(w, g->local_slot);
     if (!slot) return;
     const ItemDef *it = item_def(w->items, slot->item);

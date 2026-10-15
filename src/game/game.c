@@ -623,6 +623,15 @@ static void cmd_kill(int argc, const char **argv) {
     if (p) apply_damage(G->world, p->ent, 10000, DMG_GENERIC, p->ent, p->sim.move.pos, v3(0, 0, 0), false);
 }
 
+static void cmd_damage(int argc, const char **argv) {
+    if (G->mode != GM_HOST || argc < 2) { log_info("usage: damage <amount> (host only)"); return; }
+    Player *p = game_local_player();
+    if (!p) return;
+    vec3 from = v3_madd(p->sim.move.pos, right_from_yaw(G->view.yaw), 3.0f); // hit from the right
+    apply_damage(G->world, p->ent, (float)atof(argv[1]), DMG_BULLET, ENT_NONE, v3_add(p->sim.move.pos, v3(0, 1.4f, 0)),
+                 v3_norm(v3_sub(p->sim.move.pos, from)), false);
+}
+
 static void cmd_setpos(int argc, const char **argv) {
     Player *p = game_local_player();
     if (!p || argc < 4) { log_info("usage: setpos x y z [yaw_deg] [pitch_deg]"); return; }
@@ -703,6 +712,7 @@ void game_init(void) {
     cmd_register("give", cmd_give, "give <item> [count]");
     cmd_register("noclip", cmd_noclip, "toggle noclip (sv_cheats)");
     cmd_register("kill", cmd_kill, "suicide");
+    cmd_register("damage", cmd_damage, "damage <amount>: hurt yourself (testing)");
     cmd_register("setpos", cmd_setpos, "teleport: setpos x y z [yaw] [pitch]");
     cmd_register("getpos", cmd_getpos, "print position");
     cmd_register("setang", cmd_setang, "set view angles: setang yaw pitch");
