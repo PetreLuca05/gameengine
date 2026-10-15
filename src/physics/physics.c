@@ -38,9 +38,6 @@ struct PhysCharacter {
 
 typedef struct PhysicsGlobal {
     JPH_JobSystem *jobs;
-    JPH_BroadPhaseLayerInterface *bp_interface;
-    JPH_ObjectLayerPairFilter *pair_filter;
-    JPH_ObjectVsBroadPhaseLayerFilter *obj_vs_bp;
     JPH_ObjectLayerFilter *layer_filters[MAX_LAYER_FILTERS];
     u32 layer_filter_masks[MAX_LAYER_FILTERS];
     int layer_filter_count;
@@ -77,25 +74,6 @@ void phys_global_init(void) {
     jc.numThreads = -1;
     pg->jobs = JPH_JobSystemThreadPool_Create(&jc);
 
-    // Two broadphase layers: static vs everything that moves.
-    pg->bp_interface = JPH_BroadPhaseLayerInterfaceTable_Create(PL_COUNT, 2);
-    JPH_BroadPhaseLayerInterfaceTable_MapObjectToBroadPhaseLayer(pg->bp_interface, PL_STATIC, 0);
-    JPH_BroadPhaseLayerInterfaceTable_MapObjectToBroadPhaseLayer(pg->bp_interface, PL_MOVING, 1);
-    JPH_BroadPhaseLayerInterfaceTable_MapObjectToBroadPhaseLayer(pg->bp_interface, PL_CHARACTER, 1);
-    JPH_BroadPhaseLayerInterfaceTable_MapObjectToBroadPhaseLayer(pg->bp_interface, PL_DEBRIS, 1);
-    JPH_BroadPhaseLayerInterfaceTable_MapObjectToBroadPhaseLayer(pg->bp_interface, PL_TRIGGER, 1);
-
-    pg->pair_filter = JPH_ObjectLayerPairFilterTable_Create(PL_COUNT);
-    JPH_ObjectLayerPairFilterTable_EnableCollision(pg->pair_filter, PL_STATIC, PL_MOVING);
-    JPH_ObjectLayerPairFilterTable_EnableCollision(pg->pair_filter, PL_STATIC, PL_CHARACTER);
-    JPH_ObjectLayerPairFilterTable_EnableCollision(pg->pair_filter, PL_STATIC, PL_DEBRIS);
-    JPH_ObjectLayerPairFilterTable_EnableCollision(pg->pair_filter, PL_MOVING, PL_MOVING);
-    JPH_ObjectLayerPairFilterTable_EnableCollision(pg->pair_filter, PL_MOVING, PL_CHARACTER);
-    JPH_ObjectLayerPairFilterTable_EnableCollision(pg->pair_filter, PL_CHARACTER, PL_CHARACTER);
-    JPH_ObjectLayerPairFilterTable_EnableCollision(pg->pair_filter, PL_TRIGGER, PL_MOVING);
-    JPH_ObjectLayerPairFilterTable_EnableCollision(pg->pair_filter, PL_TRIGGER, PL_CHARACTER);
-    pg->obj_vs_bp = JPH_ObjectVsBroadPhaseLayerFilterTable_Create(pg->bp_interface, 2, pg->pair_filter, PL_COUNT);
-
     // joltc keeps the procs pointer, so the tables must have static storage (immutable).
     static const JPH_ObjectLayerFilter_Procs olp = { layer_filter_cb };
     static const JPH_BodyFilter_Procs bfp = { body_filter_cb, body_filter_locked_cb };
@@ -126,15 +104,31 @@ static JPH_ObjectLayerFilter *layer_filter(u32 mask) {
 }
 
 PhysicsWorld *phys_world_create(void) {
-    PhysicsGlobal *pg = PG;
     PhysicsWorld *w = (PhysicsWorld *)calloc(1, sizeof(PhysicsWorld));
+    // Layer tables are created per world: JPH_PhysicsSystem_Destroy deletes the ones it was given.
+    JPH_BroadPhaseLayerInterface *bp = JPH_BroadPhaseLayerInterfaceTable_Create(PL_COUNT, 2);
+    JPH_BroadPhaseLayerInterfaceTable_MapObjectToBroadPhaseLayer(bp, PL_STATIC, 0);
+    JPH_BroadPhaseLayerInterfaceTable_MapObjectToBroadPhaseLayer(bp, PL_MOVING, 1);
+    JPH_BroadPhaseLayerInterfaceTable_MapObjectToBroadPhaseLayer(bp, PL_CHARACTER, 1);
+    JPH_BroadPhaseLayerInterfaceTable_MapObjectToBroadPhaseLayer(bp, PL_DEBRIS, 1);
+    JPH_BroadPhaseLayerInterfaceTable_MapObjectToBroadPhaseLayer(bp, PL_TRIGGER, 1);
+    JPH_ObjectLayerPairFilter *pairs = JPH_ObjectLayerPairFilterTable_Create(PL_COUNT);
+    JPH_ObjectLayerPairFilterTable_EnableCollision(pairs, PL_STATIC, PL_MOVING);
+    JPH_ObjectLayerPairFilterTable_EnableCollision(pairs, PL_STATIC, PL_CHARACTER);
+    JPH_ObjectLayerPairFilterTable_EnableCollision(pairs, PL_STATIC, PL_DEBRIS);
+    JPH_ObjectLayerPairFilterTable_EnableCollision(pairs, PL_MOVING, PL_MOVING);
+    JPH_ObjectLayerPairFilterTable_EnableCollision(pairs, PL_MOVING, PL_CHARACTER);
+    JPH_ObjectLayerPairFilterTable_EnableCollision(pairs, PL_CHARACTER, PL_CHARACTER);
+    JPH_ObjectLayerPairFilterTable_EnableCollision(pairs, PL_TRIGGER, PL_MOVING);
+    JPH_ObjectLayerPairFilterTable_EnableCollision(pairs, PL_TRIGGER, PL_CHARACTER);
+    JPH_ObjectVsBroadPhaseLayerFilter *ovb = JPH_ObjectVsBroadPhaseLayerFilterTable_Create(bp, 2, pairs, PL_COUNT);
     JPH_PhysicsSystemSettings s = { 0 };
     s.maxBodies = MAX_BODIES;
     s.maxBodyPairs = 65536;
     s.maxContactConstraints = 32768;
-    s.broadPhaseLayerInterface = pg->bp_interface;
-    s.objectLayerPairFilter = pg->pair_filter;
-    s.objectVsBroadPhaseLayerFilter = pg->obj_vs_bp;
+    s.broadPhaseLayerInterface = bp;
+    s.objectLayerPairFilter = pairs;
+    s.objectVsBroadPhaseLayerFilter = ovb;
     w->system = JPH_PhysicsSystem_Create(&s);
     JPH_Vec3 g = { 0, -9.81f, 0 };
     JPH_PhysicsSystem_SetGravity(w->system, &g);
