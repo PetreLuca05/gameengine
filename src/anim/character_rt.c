@@ -36,12 +36,14 @@ void charrt_set_inputs(CharRuntime *r, const CharInputs *in) {
     r->leg_yaw_target = leg_yaw_for(in->move_local, in->speed);
     // The blend tree gets the direction left after the legs turned (pure forward on diagonals);
     // the smoothed leg yaw makes sector changes blend instead of pop.
-    float cs = cosf(-r->leg_yaw), sn = sinf(-r->leg_yaw);
+    float cs = cosf(r->leg_yaw), sn = sinf(r->leg_yaw);
     vec2 m = v2(in->move_local.x * cs - in->move_local.y * sn, in->move_local.x * sn + in->move_local.y * cs);
     float ml = v2_len(m);
     if (ml > 1e-4f) m = v2_scale(m, 1.0f / ml);
-    ctrl_set(c, AP_MOVE_X, m.x);
-    ctrl_set(c, AP_MOVE_Y, m.y);
+    r->blend_dir_target = m;
+    if (v2_len(r->blend_dir) < 1e-3f) r->blend_dir = m;
+    ctrl_set(c, AP_MOVE_X, r->blend_dir.x);
+    ctrl_set(c, AP_MOVE_Y, r->blend_dir.y);
     ctrl_set(c, AP_GROUNDED, in->grounded ? 1.0f : 0.0f);
     ctrl_set(c, AP_CROUCH, in->crouch ? 1.0f : 0.0f);
     ctrl_set(c, AP_PRONE, in->prone ? 1.0f : 0.0f);
@@ -70,6 +72,18 @@ void charrt_set_inputs(CharRuntime *r, const CharInputs *in) {
 void charrt_trigger(CharRuntime *r, int p) { ctrl_trigger(&r->ctrl, p); }
 
 void charrt_tick(CharRuntime *r, float dt) {
+    // Ease the blend-tree direction (angle) and speed: direction / speed changes blend the clips
+    // over ~0.15 s instead of switching (deterministic, per tick).
+    {
+        float a0 = atan2f(r->blend_dir.x, r->blend_dir.y), a1 = atan2f(r->blend_dir_target.x, r->blend_dir_target.y);
+        float a = wrap_angle(a0 + wrap_angle(a1 - a0) * (1.0f - expf(-dt * 14.0f)));
+        r->blend_dir = v2(sinf(a), cosf(a));
+        float sp = r->in.speed;
+        r->blend_speed += (sp - r->blend_speed) * (1.0f - expf(-dt * 12.0f));
+        ctrl_set(&r->ctrl, AP_MOVE_X, r->blend_dir.x);
+        ctrl_set(&r->ctrl, AP_MOVE_Y, r->blend_dir.y);
+        ctrl_set(&r->ctrl, AP_SPEED, r->blend_speed);
+    }
     ctrl_tick(&r->ctrl, &r->lib->lookup, dt);
     // Legs turn towards the move direction at up to 360 deg/s with an exponential ease.
     float d = wrap_angle(r->leg_yaw_target - r->leg_yaw);

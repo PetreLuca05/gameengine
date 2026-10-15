@@ -61,8 +61,14 @@ is `jog_strafe_left@mirror`. `jump` and `Hanging Idle` stay separate files.
 **Diagonals.** There are no diagonal clips. On a forward or backward diagonal, the legs (Hips and
 below) turn toward the move direction, up to 60°, while the spine counter-rotates so the upper body
 keeps facing the aim. The blend tree gets the remaining direction (pure forward or backward). The
-leg yaw is smoothed per tick, so moving between forward, diagonal and strafe blends instead of
-popping (`CharRuntime.leg_yaw`, `character_rt.c`).
+leg yaw is smoothed per tick, and so are the blend-tree direction and speed (about 0.15 s), so
+changing direction or speed cross-fades the clips instead of popping (`CharRuntime.leg_yaw`,
+`blend_dir`, `character_rt.c`). `test_anim` checks the hip angle, chest facing and blend direction
+for every diagonal.
+
+**Sample rate.** Clips are baked at the simulation rate (60 Hz, `anim_sample_rate`), so the
+animation advances one baked frame per game tick. `cl_thirdperson 1` shows your own body from
+behind, for checking locomotion.
 
 **Facing.** At bake, each clip's start facing is aligned with the canonical bind, and `test_anim`
 checks every clip's chest faces forward. Bake version 4.

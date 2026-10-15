@@ -330,7 +330,14 @@ void game_render(void) {
     {
         Xform sock;
         Player *lp = game_local_player();
-        if (!dead && lp && cvar_find("cl_camera_socket")->i && chars_fp_camera(w, G->alpha, G->local_slot, cam.yaw, cam.pitch, &sock)) {
+        bool tp = cvar_find("cl_thirdperson")->i != 0;
+        chars_set_thirdperson(tp);
+        if (tp && lp) {
+            vec3 head = v3_add(interp.pos, v3(0, 1.6f, 0));
+            cam.pos = v3_madd(head, dir_from_angles(cam.yaw, cam.pitch), -cvar_find("cl_thirdperson_dist")->f);
+            cam.pos = v3_add(cam.pos, v3_scale(right_from_yaw(cam.yaw), 0.4f));
+            G->view.eye = cam.pos;
+        } else if (!dead && lp && cvar_find("cl_camera_socket")->i && chars_fp_camera(w, G->alpha, G->local_slot, cam.yaw, cam.pitch, &sock)) {
             float raw_eye = interp.pos.y + player_eye_height(&interp);
             float smooth = G->view.smooth_eye_y - raw_eye;   // stair smoothing (0 on flat ground)
             cam.pos = v3_add(sock.t, v3(0, smooth + G->view.land_offset, 0));
@@ -386,8 +393,8 @@ void game_render(void) {
         hi.vm_kick_pos = spring_vec3_sample(&G->recoil_vis.vm_pos, G->alpha);
         hi.vm_kick_rot = spring_vec3_sample(&G->recoil_vis.vm_rot, G->alpha);
         hands_update(&hi);
-        chars_render_local_fp(w, G->alpha, G->local_slot);
-        hands_render();
+        if (!cvar_find("cl_thirdperson")->i) chars_render_local_fp(w, G->alpha, G->local_slot);
+        if (!cvar_find("cl_thirdperson")->i) hands_render();
     }
     fx_render();
     draw_debug(w, cam.pos);

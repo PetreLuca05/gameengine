@@ -1034,9 +1034,9 @@ static void cmd_char_list(int argc, const char **argv) {
         CharacterInst *c = w->chars->c[k];
         if (!c) continue;
         const ControllerInst *ct = &c->rt.ctrl;
-        log_info("  ent %5u %-18s %-7s state %s/%s phase %.2f lod %d %.0fpx resyncs %d events hit %u die %u%s", c->ent, c->def->id,
+        log_info("  ent %5u %-18s %-7s state %s/%s phase %.2f legs %+.0f/%+.0f mv %.2f,%.2f lod %d %.0fpx resyncs %d events hit %u die %u%s", c->ent, c->def->id,
                  ent_type_name((EntityType)w->type[ENT_INDEX(c->ent)]), ctrl_state_name(ct, 0, ct->layer[0].state), ctrl_state_name(ct, 1, ct->layer[1].state),
-                 ct->layer[0].phase, c->lod, c->pixels, c->resyncs, c->events_received[AEV_HIT], c->events_received[AEV_DIE],
+                 ct->layer[0].phase, c->rt.leg_yaw * DG_RAD2DEG, c->rt.leg_yaw_target * DG_RAD2DEG, c->rt.in.move_local.x, c->rt.in.move_local.y, c->lod, c->pixels, c->resyncs, c->events_received[AEV_HIT], c->events_received[AEV_DIE],
                  c->dead ? (c->rag.active ? " DEAD ragdoll" : (c->settled ? " DEAD settled" : " DEAD")) : "");
     }
     int ev, df;
@@ -1107,10 +1107,12 @@ void game_init(void) {
     player_register_cvars();
     // Animation assets (shared skeleton) before anything spawns characters.
     characters_register_cvars();
+    cvar_reg_bool("cl_thirdperson", false, 0, "debug: camera behind the local player (full body visible)");
+    cvar_reg_float("cl_thirdperson_dist", 3.0f, 0.5f, 10.0f, 0, "debug third-person camera distance");
     cvar_reg_bool("cl_camera_socket", true, CVAR_ARCHIVE, "first-person camera on the player model's head socket (assets/characters/player.json \"sockets\")");
     cvar_reg_float("cl_camera_socket_roll", 0.0f, 0.0f, 1.0f, CVAR_ARCHIVE, "how much of the head socket's roll the camera takes (0 = none)");
     cvar_reg_bool("cl_healthbars", false, CVAR_ARCHIVE, "health bars and names above characters / dummies (HUD code kept, hidden by default)");
-    G->anim_rate = cvar_reg_int("anim_sample_rate", 30, 30, 60, CVAR_ARCHIVE, "FBX bake sample rate (30 or 60 Hz, restart)");
+    G->anim_rate = cvar_reg_int("anim_sample_rate", SIM_HZ, 30, 120, 0, "FBX bake sample rate (Hz); defaults to the simulation rate");
     g_engine.anim = (AnimLibrary *)calloc(1, sizeof(AnimLibrary));
     if (!anim_lib_load(g_engine.anim, (float)G->anim_rate->i)) {
         log_error("game: animation assets failed to load (characters fall back to capsules)");

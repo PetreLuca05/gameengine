@@ -123,6 +123,7 @@ void chars_render(World *w, float alpha, vec3 cam_pos, int local_slot);
 // First-person body of the local player (cl_fp_body): call after hands_update, before
 // hands_render. Draws the body (head hidden) and its arms on the first-person hand targets.
 void chars_render_local_fp(World *w, float alpha, int local_slot);
+void chars_set_thirdperson(bool on);   // debug: draw the local player like everyone else
 // Eye offset from the spine bend for an aim (yaw, pitch): added to the gameplay eye.
 vec3 chars_eye_offset(float yaw, float pitch);
 // First-person camera socket (Unreal-style camera on a head socket): prepares this frame's body

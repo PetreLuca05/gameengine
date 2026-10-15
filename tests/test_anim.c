@@ -61,6 +61,47 @@ static void test_clip_facing(void) {
     }
 }
 
+// Diagonal movement: forward / backward clip with the hips turned towards the move direction,
+// the chest still facing the aim.
+static void test_diagonal_legs(void) {
+    const CharacterDef *def = anim_lib_char_by_id(L, "player");
+    if (!def) return;
+    const Skeleton *s = &L->skel;
+    CharRuntime *rt = (CharRuntime *)malloc(sizeof(CharRuntime));
+    static const struct { float x, y; const char *name; } dirs[] = {
+        { 0.707f, 0.707f, "forward-right" }, { -0.707f, 0.707f, "forward-left" },
+        { 0.707f, -0.707f, "back-right" }, { -0.707f, -0.707f, "back-left" }, { 1, 0, "right" }, { 0, 1, "forward" },
+    };
+    for (int k = 0; k < (int)(sizeof(dirs) / sizeof(dirs[0])); k++) {
+        charrt_init(rt, L, def);
+        CharInputs in;
+        memset(&in, 0, sizeof(in));
+        in.grounded = true;
+        in.speed = 3.0f;
+        in.move_local = v2(dirs[k].x, dirs[k].y);
+        for (int t = 0; t < 60; t++) { charrt_set_inputs(rt, &in); charrt_tick(rt, 1.0f / 60.0f); }
+        charrt_eval_base(rt);
+        int hips = s->role[BR_HIPS], chest = s->role[BR_SPINE2];
+        // Forward of the hips / chest in model space (x right, -z forward).
+        quat dh = quat_mul(rt->base_model[hips].r, quat_conj(s->bind_model[hips].r));
+        quat dc = quat_mul(rt->base_model[chest].r, quat_conj(s->bind_model[chest].r));
+        vec3 fh = quat_rotate(dh, v3(0, 0, -1)), fc = quat_rotate(dc, v3(0, 0, -1));
+        float hip_deg = atan2f(fh.x, -fh.z) * DG_RAD2DEG, chest_deg = atan2f(fc.x, -fc.z) * DG_RAD2DEG;
+        float move_deg = atan2f(dirs[k].x, dirs[k].y) * DG_RAD2DEG;
+        float want = fabsf(move_deg) <= 60 ? move_deg : (fabsf(move_deg) >= 120 ? move_deg - (move_deg > 0 ? 180 : -180) : 0);
+        printf("  diagonal %-13s hips %+6.1f (want %+6.1f) chest %+6.1f  blend dir %.2f,%.2f\n", dirs[k].name, hip_deg, want, chest_deg,
+               ctrl_get(&rt->ctrl, AP_MOVE_X), ctrl_get(&rt->ctrl, AP_MOVE_Y));
+        CHECK(fabsf(hip_deg - want) < 12.0f, "%s: hips face %.1f deg, want %.1f", dirs[k].name, hip_deg, want);
+        CHECK(fabsf(chest_deg) < 20.0f, "%s: chest turned %.1f deg away from the aim", dirs[k].name, chest_deg);
+        // The blend tree must see the clip direction: forward / backward on diagonals.
+        vec2 bd = v2(ctrl_get(&rt->ctrl, AP_MOVE_X), ctrl_get(&rt->ctrl, AP_MOVE_Y));
+        float bdeg = atan2f(bd.x, bd.y) * DG_RAD2DEG;
+        CHECK(fabsf(wrap_angle((bdeg - (move_deg - want)) * DG_DEG2RAD)) < 6.0f * DG_DEG2RAD, "%s: blend tree direction %.0f deg, want %.0f", dirs[k].name, bdeg,
+              move_deg - want);
+    }
+    free(rt);
+}
+
 static void test_load(void) {
     CHECK(L->loaded, "library failed to load");
     CHECK(L->skel.count == 65, "skeleton bones %d", L->skel.count);
@@ -622,6 +663,7 @@ int main(int argc, char **argv) {
     test_body_parts(db);
     test_damage_reaction();
     test_clip_facing();
+    test_diagonal_legs();
     test_upper_oneshots();
     test_determinism();
     test_quantization();

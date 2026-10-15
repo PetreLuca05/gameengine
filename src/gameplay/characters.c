@@ -1340,6 +1340,9 @@ void chars_render_local_fp(World *w, float alpha, int local_slot) {
         }
 }
 
+static bool g_thirdperson;
+void chars_set_thirdperson(bool on) { g_thirdperson = on; }
+
 void chars_render(World *w, float alpha, vec3 cam_pos, int local_slot) {
     if (!w->chars || !LIB) return;
     ensure_gpu_meshes();
@@ -1363,7 +1366,7 @@ void chars_render(World *w, float alpha, vec3 cam_pos, int local_slot) {
             float t = saturate(((float)(w->chars->tick - c->last_eval) + alpha) / span);
             for (int b = 0; b < s->count; b++) pose[b] = xf_lerp(c->pose_prev[b], c->pose_cur[b], t);
         }
-        bool local = c->is_player && c->slot == local_slot;
+        bool local = c->is_player && c->slot == local_slot && !g_thirdperson;
         u32 flags = local ? MAT_SHADOW_ONLY : 0;
         float dist = v3_dist(cam_pos, c->root.t);
         bool shadow = c->pixels > CG->lod.shadow_pixels || local;
