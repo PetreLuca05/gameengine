@@ -7,6 +7,7 @@
 #include "core/base.h"
 #include "core/dgmath.h"
 #include "game/usercmd.h"
+#include "gameplay/recoil.h"
 
 struct World;
 struct PhysicsWorld;
@@ -62,16 +63,24 @@ typedef struct WeaponState {
     u8 prev_slot;
     u8 reloading;
     u8 swing_hit_done;  // melee: already hit something this swing
-    float cooldown;     // time until next shot/swing
+    float cooldown;     // time until next shot/swing; guns carry the sub-tick remainder (exact RPM)
     float reload_t;     // reload time remaining
     float swing_t;      // melee: time since swing start (<0 = idle)
     float use_t;        // consumable use progress (s), <0 idle
-    float spread;       // current bloom (degrees)
     float equip_t;      // time since equip (raise animation)
     u32 shots;          // total shots fired (seeds spread RNG)
-    float recoil_kick;  // visual: decays, drives viewmodel kick
+    float recoil_kick;  // 1 on a shot, decays (third-person firing flag)
     i16 mag;            // rounds in the equipped weapon (predicted on clients, mirrored by the host)
-    i16 pad;
+    u8 fire_mode;       // FireMode
+    u8 burst_left;      // shots left in the current burst
+    float ads_t;        // 0 hip .. 1 fully aimed (deterministic, drives recoil/spread/sway)
+    float since_sprint; // s since the player stopped sprinting
+    float breath;       // breath hold used (s)
+    u8 breath_holding;
+    u8 breath_exhausted;
+    u16 item;           // item in the equipped slot (a change counts as an equip)
+    float sway_k;       // smoothed sway amplitude multiplier (hold breath)
+    RecoilState rc;     // aim recoil + bloom (gameplay/recoil.h)
 } WeaponState;
 
 typedef struct PlayerSim {

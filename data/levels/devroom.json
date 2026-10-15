@@ -58,7 +58,19 @@
     { "type": "doorway", "pos": [20, 0, 24], "yaw": -90, "length": 12, "height": 4.0, "thickness": 0.3,
       "door_width": 3.0, "door_height": 3.0, "color": [0.55, 0.58, 0.62], "label": "gate (use lever)" },
     { "type": "box", "pos": [25, 0, 18], "size": [10, 4, 0.3], "color": [0.55, 0.58, 0.62] },
-    { "type": "box", "pos": [26, 0, 26.5], "size": [3, 0.9, 1], "color": [0.4, 0.42, 0.45], "label": "weapon rack" }
+    { "type": "box", "pos": [26, 0, 26.5], "size": [3, 0.9, 1], "color": [0.4, 0.42, 0.45], "label": "weapon rack" },
+
+    { "_comment": "Recoil lane: stand at (0, 0, 28) facing north (wpn_magdump does this). Walls 10 / 25 / 50 m, 10 cm grid, aim dot at 1.35 m.",
+      "type": "box", "pos": [-1.5, 0.1, 17.9], "size": [1.5, 2.5, 0.1], "color": [0.86, 0.86, 0.82], "fine_grid": true, "label": "10 m", "label_size": 0.12 },
+    { "type": "box", "pos": [1.5, 0.1, 2.9], "size": [1.5, 2.5, 0.1], "color": [0.86, 0.86, 0.82], "fine_grid": true, "label": "25 m", "label_size": 0.14 },
+    { "type": "box", "pos": [0, 0.1, -22.1], "size": [1.5, 2.5, 0.1], "color": [0.86, 0.86, 0.82], "fine_grid": true, "label": "50 m", "label_size": 0.2 },
+    { "type": "box", "pos": [-1.5, 1.335, 17.96], "size": [0.03, 0.03, 0.01], "color": [0.9, 0.1, 0.1], "grid": false, "collide": false, "shadow": false },
+    { "type": "box", "pos": [1.5, 1.335, 2.96], "size": [0.05, 0.05, 0.01], "color": [0.9, 0.1, 0.1], "grid": false, "collide": false, "shadow": false },
+    { "type": "box", "pos": [0, 1.33, -22.04], "size": [0.08, 0.08, 0.01], "color": [0.9, 0.1, 0.1], "grid": false, "collide": false, "shadow": false },
+    { "type": "box", "pos": [-1.5, 0, 17.75], "size": [0.12, 0.1, 0.4], "color": [0.3, 0.3, 0.32] },
+    { "type": "box", "pos": [1.5, 0, 2.75], "size": [0.12, 0.1, 0.4], "color": [0.3, 0.3, 0.32] },
+    { "type": "box", "pos": [0, 0, -22.25], "size": [0.12, 0.1, 0.4], "color": [0.3, 0.3, 0.32] },
+    { "type": "box", "pos": [4.2, 0, 27.6], "size": [3.4, 0.85, 1.0], "color": [0.4, 0.42, 0.45], "label": "weapon bench" }
   ],
 
   "labels": [
@@ -69,6 +81,7 @@
     { "pos": [-26, 0, 22.3], "yaw": 90, "floor": true, "size": 0.25, "text": "18 m" },
     { "pos": [6, 0, 10.5], "yaw": 0, "floor": true, "size": 0.25, "text": "physics props" },
     { "pos": [-6.3, 1.25, 29.74], "yaw": 180, "size": 0.12, "text": "main lights" },
+    { "pos": [0, 0, 28.6], "yaw": 0, "floor": true, "size": 0.22, "text": "recoil lane (wpn_magdump)" },
     { "pos": [-29.74, 1.6, 16], "yaw": 90, "size": 0.12, "text": "zone lights" }
   ],
 
@@ -118,6 +131,14 @@
     { "type": "prop", "shape": "cylinder", "size": [0.6, 0.9, 0.6], "pos": [8.8, 0, 6.3], "mass": 30, "color": [0.7, 0.25, 0.15], "model": "barrel" },
     { "type": "prop", "shape": "cylinder", "size": [0.6, 0.9, 0.6], "pos": [8.3, 0, 5.2], "mass": 30, "color": [0.25, 0.5, 0.3], "model": "barrel" },
     { "type": "prop", "shape": "sphere", "size": [0.5, 0.5, 0.5], "pos": [3.5, 0, 10.0], "mass": 5, "color": [0.9, 0.85, 0.2] },
+
+    { "type": "pickup", "item": "smg",      "pos": [2.9, 0.9, 27.6], "respawn": 10 },
+    { "type": "pickup", "item": "lmg",      "pos": [3.6, 0.9, 27.6], "respawn": 10 },
+    { "type": "pickup", "item": "dmr",      "pos": [4.3, 0.9, 27.6], "respawn": 10 },
+    { "type": "pickup", "item": "sniper",   "pos": [5.0, 0.9, 27.6], "respawn": 10 },
+    { "type": "pickup", "item": "ammo_762", "count": 120, "pos": [5.6, 0.92, 27.4], "respawn": 10 },
+    { "type": "pickup", "item": "ammo_9mm", "count": 60, "pos": [5.6, 0.92, 27.8], "respawn": 10 },
+    { "type": "pickup", "item": "ammo_rifle", "count": 90, "pos": [2.6, 0.92, 27.3], "respawn": 10 },
 
     { "type": "dummy", "pos": [-14, 0, 24], "yaw": -90, "hp": 150 },
     { "type": "dummy", "pos": [-18, 0, 25.5], "yaw": -90, "hp": 150 },

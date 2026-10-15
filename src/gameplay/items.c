@@ -2,6 +2,9 @@
 #include "core/log.h"
 #include "core/platform.h"
 #include "cJSON.h"
+#include <SDL3/SDL.h>
+#include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 
 static float jnum(const cJSON *o, const char *k, float def) {
@@ -17,6 +20,11 @@ static const char *jstr(const cJSON *o, const char *k, const char *def) {
 static bool jbool(const cJSON *o, const char *k, bool def) {
     const cJSON *v = cJSON_GetObjectItemCaseSensitive(o, k);
     return cJSON_IsBool(v) ? cJSON_IsTrue(v) : def;
+}
+
+static const cJSON *jobj(const cJSON *o, const char *k) {
+    const cJSON *v = cJSON_GetObjectItemCaseSensitive(o, k);
+    return cJSON_IsObject(v) ? v : NULL;
 }
 
 static vec3 jvec3(const cJSON *o, const char *k, vec3 def) {
@@ -73,6 +81,221 @@ static cJSON *load_json(const char *path) {
     return root;
 }
 
+// Gun feel: top-level fire keys + the "recoil" block (angles in degrees, see docs/RECOIL.md).
+// Missing keys keep recoil_params_default().
+static void parse_recoil(const cJSON *w, RecoilParams *r) {
+    recoil_params_default(r);
+    r->rpm = fmaxf(1.0f, jnum(w, "rpm", jnum(w, "fire_rate", 10) * 60.0f));
+    r->burst_rpm = jnum(w, "burst_rpm", r->rpm * 1.25f);
+    r->burst_count = (int)jnum(w, "burst_count", 3);
+    r->ads_time = jnum(w, "ads_time", r->ads_time);
+    r->sprint_to_fire = jnum(w, "sprint_to_fire", r->sprint_to_fire);
+    r->idle_sway = jnum(w, "idle_sway", r->idle_sway);
+    r->scope_sway = jnum(w, "scope_sway", r->scope_sway);
+    r->hold_breath_time = jnum(w, "hold_breath", r->hold_breath_time);
+    const cJSON *fm = cJSON_GetObjectItemCaseSensitive(w, "fire_modes");
+    if (cJSON_IsArray(fm)) {
+        r->fire_modes = 0;
+        const cJSON *e;
+        cJSON_ArrayForEach(e, fm) {
+            if (!cJSON_IsString(e)) continue;
+            if (!strcmp(e->valuestring, "single") || !strcmp(e->valuestring, "semi")) r->fire_modes |= FIRE_SINGLE;
+            else if (!strcmp(e->valuestring, "burst")) r->fire_modes |= FIRE_BURST;
+            else if (!strcmp(e->valuestring, "auto")) r->fire_modes |= FIRE_AUTO;
+        }
+    } else {
+        r->fire_modes = jbool(w, "automatic", false) ? (FIRE_AUTO | FIRE_SINGLE) : FIRE_SINGLE;
+    }
+    if (!r->fire_modes) r->fire_modes = FIRE_SINGLE;
+
+    const cJSON *rc = jobj(w, "recoil");
+    if (!rc) return;
+    const cJSON *o;
+    if ((o = jobj(rc, "vertical"))) {
+        r->v_first = jnum(o, "first_shot", r->v_first);
+        r->v_per = jnum(o, "per_shot", r->v_per);
+        r->v_min = jnum(o, "min", r->v_min);
+        r->v_max = jnum(o, "max", r->v_max);
+    }
+    if ((o = jobj(rc, "horizontal"))) {
+        r->h_per = jnum(o, "per_shot", r->h_per);
+        r->h_min = jnum(o, "min", r->h_min);
+        r->h_max = jnum(o, "max", r->h_max);
+        r->h_bias = jnum(o, "bias", r->h_bias);
+    }
+    const cJSON *pat = cJSON_GetObjectItemCaseSensitive(rc, "pattern");
+    if (cJSON_IsArray(pat)) {
+        r->pattern_count = 0;
+        const cJSON *e;
+        cJSON_ArrayForEach(e, pat) {
+            if (r->pattern_count >= RECOIL_MAX_PATTERN) break;
+            if (!cJSON_IsArray(e) || cJSON_GetArraySize(e) < 2) continue;
+            r->pattern[r->pattern_count++] = v2((float)cJSON_GetArrayItem(e, 0)->valuedouble, (float)cJSON_GetArrayItem(e, 1)->valuedouble);
+        }
+    }
+    r->pattern_randomness = jnum(rc, "pattern_randomness", r->pattern_randomness);
+    r->ramp_shots = (int)jnum(rc, "ramp_shots", (float)r->ramp_shots);
+    r->seed_per_mag = jbool(rc, "randomize_seed_per_mag", r->seed_per_mag);
+    if ((o = jobj(rc, "recovery"))) {
+        r->recovery_delay = jnum(o, "delay", r->recovery_delay);
+        r->recovery_speed = jnum(o, "speed", r->recovery_speed);
+        r->recovery_fraction = saturate(jnum(o, "fraction", r->recovery_fraction));
+        r->recovery_stop_on_input = jbool(o, "stop_on_input", r->recovery_stop_on_input);
+    }
+    if ((o = jobj(rc, "camera_kick"))) {
+        r->cam_pitch = jnum(o, "pitch", r->cam_pitch);
+        r->cam_yaw = jnum(o, "yaw", r->cam_yaw);
+        r->cam_roll = jnum(o, "roll", r->cam_roll);
+        r->cam_back = jnum(o, "back", r->cam_back);
+        r->cam_spring.stiffness = jnum(o, "stiffness", r->cam_spring.stiffness);
+        r->cam_spring.damping = jnum(o, "damping", r->cam_spring.damping);
+    }
+    if ((o = jobj(rc, "viewmodel_kick"))) {
+        r->vm_back = jnum(o, "back", r->vm_back);
+        r->vm_up = jnum(o, "up", r->vm_up);
+        r->vm_pitch = jnum(o, "pitch", r->vm_pitch);
+        r->vm_yaw = jnum(o, "yaw", r->vm_yaw);
+        r->vm_roll = jnum(o, "roll", r->vm_roll);
+        r->vm_random = jnum(o, "random", r->vm_random);
+        r->vm_spring.stiffness = jnum(o, "stiffness", r->vm_spring.stiffness);
+        r->vm_spring.damping = jnum(o, "damping", r->vm_spring.damping);
+        r->vm_ads_scale = jnum(o, "ads_scale", r->vm_ads_scale);
+    }
+    if ((o = jobj(rc, "spread"))) {
+        r->base_hip = jnum(o, "hip", r->base_hip);
+        r->base_ads = jnum(o, "ads", r->base_ads);
+        r->per_shot_bloom = jnum(o, "per_shot_bloom", r->per_shot_bloom);
+        r->bloom_max = jnum(o, "bloom_max", r->bloom_max);
+        r->bloom_recovery = jnum(o, "bloom_recovery", r->bloom_recovery);
+        r->s_move = jnum(o, "move", r->s_move);
+        r->s_crouch = jnum(o, "crouch", r->s_crouch);
+        r->s_prone = jnum(o, "prone", r->s_prone);
+        r->s_air = jnum(o, "air", r->s_air);
+    }
+    if ((o = jobj(rc, "modifiers"))) {
+        r->ads_mult = jnum(o, "ads", r->ads_mult);
+        r->crouch_mult = jnum(o, "crouch", r->crouch_mult);
+        r->prone_mult = jnum(o, "prone", r->prone_mult);
+        r->moving_mult = jnum(o, "moving", r->moving_mult);
+        r->air_mult = jnum(o, "air", r->air_mult);
+        r->fm_single = jnum(o, "single", r->fm_single);
+        r->fm_burst = jnum(o, "burst", r->fm_burst);
+        r->fm_auto = jnum(o, "auto", r->fm_auto);
+        r->after_sprint_kick = jnum(o, "after_sprint", r->after_sprint_kick);
+    }
+}
+
+static void parse_weapon(ItemDB *db, const cJSON *w, const char *file) {
+    if (db->weapon_count >= MAX_WEAPON_DEFS) { log_warn("items: too many weapons, skipping %s", file); return; }
+    WeaponDef *d = &db->weapons[db->weapon_count];
+    memset(d, 0, sizeof(*d));
+    dg_strcpy(d->file, sizeof(d->file), file);
+    dg_strcpy(d->id, sizeof(d->id), jstr(w, "id", "weapon"));
+    const char *k = jstr(w, "kind", "hitscan");
+    d->kind = !strcmp(k, "melee") ? WPN_MELEE : (!strcmp(k, "projectile") ? WPN_PROJECTILE : WPN_HITSCAN);
+    d->damage_type = dmg_from(jstr(w, "damage_type", d->kind == WPN_MELEE ? "melee" : "bullet"));
+    d->damage = jnum(w, "damage", 10);
+    d->automatic = jbool(w, "automatic", false);
+    d->mag_size = (int)jnum(w, "mag_size", 0);
+    d->ammo_item = item_find(db, jstr(w, "ammo", ""));
+    d->reload_time = jnum(w, "reload_time", 1.5f);
+    d->pellets = (int)jnum(w, "pellets", 1);
+    d->range = jnum(w, "range", 200);
+    d->impulse = jnum(w, "impulse", 40);
+    d->headshot_mult = jnum(w, "headshot_mult", 2);
+    d->projectile_speed = jnum(w, "projectile_speed", 60);
+    d->projectile_gravity = jnum(w, "projectile_gravity", 4);
+    d->swing_time = jnum(w, "swing_time", 0.6f);
+    d->active_start = jnum(w, "active_start", 0.15f);
+    d->active_end = jnum(w, "active_end", 0.35f);
+    d->reach = jnum(w, "reach", 1.8f);
+    d->sweep_radius = jnum(w, "sweep_radius", 0.15f);
+    d->knockback = jnum(w, "knockback", 200);
+    d->swing_arc = jnum(w, "swing_arc", 90);
+    d->ads_fov = jnum(w, "ads_fov", 0);
+    d->bolt_action = jbool(w, "bolt_action", false);
+    dg_strcpy(d->pose, sizeof(d->pose), jstr(w, "pose", "pistol"));
+    dg_strcpy(d->sound_fire, sizeof(d->sound_fire), jstr(w, "sound_fire", "shot"));
+    dg_strcpy(d->sound_reload, sizeof(d->sound_reload), jstr(w, "sound_reload", "reload"));
+    d->grip_offset = jvec3(w, "grip", v3(0, 0, 0));
+    d->support_offset = jvec3(w, "support", v3(0, 0, -0.1f));
+    d->muzzle_offset = jvec3(w, "muzzle", v3(0, 0.05f, -0.2f));
+    const cJSON *p;
+    cJSON_ArrayForEach(p, cJSON_GetObjectItemCaseSensitive(w, "model")) {
+        if (d->part_count >= 6) break;
+        WeaponModelPart *mp = &d->parts[d->part_count++];
+        mp->offset = jvec3(p, "offset", v3(0, 0, 0));
+        mp->half = jvec3(p, "half", v3(0.02f, 0.02f, 0.1f));
+        mp->color = jcolor(p, "color", v4(0.2f, 0.2f, 0.22f, 1));
+    }
+    if (d->kind != WPN_MELEE && d->part_count > 0 && !cJSON_GetObjectItemCaseSensitive(w, "muzzle_override")) {
+        // Muzzle = front face of the forward-most model part (the barrel tip), so flashes and
+        // tracers leave the visible barrel.
+        int best = 0;
+        for (int i = 1; i < d->part_count; i++)
+            if (d->parts[i].offset.z - d->parts[i].half.z < d->parts[best].offset.z - d->parts[best].half.z) best = i;
+        const WeaponModelPart *mp = &d->parts[best];
+        d->muzzle_offset = v3(mp->offset.x, mp->offset.y, mp->offset.z - mp->half.z - 0.01f);
+    }
+    if (d->kind == WPN_MELEE) {
+        d->fire_rate = jnum(w, "fire_rate", 2);
+        recoil_params_default(&d->recoil);
+    } else {
+        parse_recoil(w, &d->recoil);
+        d->fire_rate = d->recoil.rpm / 60.0f;
+    }
+    // Link to the item that carries this weapon.
+    u16 item = item_find(db, jstr(w, "item", d->id));
+    if (item) db->items[item].weapon = db->weapon_count;
+    else log_warn("items: weapon '%s' (%s) has no item", d->id, file);
+    db->weapon_count++;
+}
+
+static void parse_weapon_root(ItemDB *db, const cJSON *root, const char *file) {
+    const cJSON *arr = cJSON_GetObjectItemCaseSensitive(root, "weapons");
+    if (cJSON_IsArray(arr)) {
+        const cJSON *w;
+        cJSON_ArrayForEach(w, arr) parse_weapon(db, w, file);
+    } else if (cJSON_IsObject(root)) {
+        parse_weapon(db, root, file);
+    }
+}
+
+static int cmp_str(const void *a, const void *b) { return strcmp(*(const char *const *)a, *(const char *const *)b); }
+
+static bool load_weapons(ItemDB *db, const char *weapons_path) {
+    for (int i = 0; i < db->item_count; i++) db->items[i].weapon = -1;
+    db->weapon_count = 0;
+    size_t n = strlen(weapons_path);
+    if (n > 5 && !strcmp(weapons_path + n - 5, ".json")) {
+        cJSON *root = load_json(weapons_path);
+        if (!root) return false;
+        parse_weapon_root(db, root, weapons_path);
+        cJSON_Delete(root);
+        return true;
+    }
+    char dir[512];
+    platform_data_path(weapons_path, dir, sizeof(dir));
+    int count = 0;
+    char **files = SDL_GlobDirectory(dir, "*.json", 0, &count);
+    if (!files || count == 0) { log_error("items: no weapon files in %s", dir); SDL_free(files); return false; }
+    // Sorted so weapon indices (replicated) are identical on every machine.
+    char *names[MAX_WEAPON_DEFS * 2];
+    int nn = DG_MIN(count, ARRAY_COUNT(names));
+    for (int i = 0; i < nn; i++) names[i] = files[i];
+    qsort(names, (size_t)nn, sizeof(names[0]), cmp_str);
+    for (int i = 0; i < nn; i++) {
+        char rel[256];
+        snprintf(rel, sizeof(rel), "%s/%s", weapons_path, names[i]);
+        cJSON *root = load_json(rel);
+        if (!root) continue;
+        parse_weapon_root(db, root, rel);
+        cJSON_Delete(root);
+    }
+    SDL_free(files);
+    return true;
+}
+
 bool items_load(ItemDB *db, const char *items_path, const char *weapons_path) {
     memset(db, 0, sizeof(*db));
     dg_strcpy(db->items[0].id, sizeof(db->items[0].id), "none");
@@ -80,10 +303,8 @@ bool items_load(ItemDB *db, const char *items_path, const char *weapons_path) {
     db->items[0].weapon = -1;
     db->item_count = 1;
 
-    cJSON *wroot = load_json(weapons_path);
     cJSON *iroot = load_json(items_path);
-    if (!wroot || !iroot) { cJSON_Delete(wroot); cJSON_Delete(iroot); return false; }
-
+    if (!iroot) return false;
     // Items first (weapons reference ammo items by id).
     const cJSON *it;
     cJSON_ArrayForEach(it, cJSON_GetObjectItemCaseSensitive(iroot, "items")) {
@@ -102,65 +323,30 @@ bool items_load(ItemDB *db, const char *items_path, const char *weapons_path) {
         d->use_time = jnum(it, "use_time", 0);
         d->weapon = -1;
     }
-
-    const cJSON *w;
-    cJSON_ArrayForEach(w, cJSON_GetObjectItemCaseSensitive(wroot, "weapons")) {
-        if (db->weapon_count >= MAX_WEAPON_DEFS) break;
-        WeaponDef *d = &db->weapons[db->weapon_count];
-        dg_strcpy(d->id, sizeof(d->id), jstr(w, "id", "weapon"));
-        const char *k = jstr(w, "kind", "hitscan");
-        d->kind = !strcmp(k, "melee") ? WPN_MELEE : (!strcmp(k, "projectile") ? WPN_PROJECTILE : WPN_HITSCAN);
-        d->damage_type = dmg_from(jstr(w, "damage_type", d->kind == WPN_MELEE ? "melee" : "bullet"));
-        d->damage = jnum(w, "damage", 10);
-        d->fire_rate = jnum(w, "fire_rate", 2);
-        d->automatic = jbool(w, "automatic", false);
-        d->mag_size = (int)jnum(w, "mag_size", 0);
-        d->ammo_item = item_find(db, jstr(w, "ammo", ""));
-        d->reload_time = jnum(w, "reload_time", 1.5f);
-        d->pellets = (int)jnum(w, "pellets", 1);
-        d->spread_base = jnum(w, "spread_base", 0.5f);
-        d->spread_move = jnum(w, "spread_move", 1.5f);
-        d->spread_ads = jnum(w, "spread_ads", 0.3f);
-        d->spread_per_shot = jnum(w, "spread_per_shot", 0.5f);
-        d->spread_max = jnum(w, "spread_max", 6);
-        d->spread_recover = jnum(w, "spread_recover", 8);
-        d->recoil_pitch = jnum(w, "recoil_pitch", 1);
-        d->recoil_yaw = jnum(w, "recoil_yaw", 0.3f);
-        d->range = jnum(w, "range", 200);
-        d->impulse = jnum(w, "impulse", 40);
-        d->headshot_mult = jnum(w, "headshot_mult", 2);
-        d->projectile_speed = jnum(w, "projectile_speed", 60);
-        d->projectile_gravity = jnum(w, "projectile_gravity", 4);
-        d->swing_time = jnum(w, "swing_time", 0.6f);
-        d->active_start = jnum(w, "active_start", 0.15f);
-        d->active_end = jnum(w, "active_end", 0.35f);
-        d->reach = jnum(w, "reach", 1.8f);
-        d->sweep_radius = jnum(w, "sweep_radius", 0.15f);
-        d->knockback = jnum(w, "knockback", 200);
-        d->swing_arc = jnum(w, "swing_arc", 90);
-        d->ads_fov = jnum(w, "ads_fov", 0);
-        dg_strcpy(d->pose, sizeof(d->pose), jstr(w, "pose", "pistol"));
-        dg_strcpy(d->sound_fire, sizeof(d->sound_fire), jstr(w, "sound_fire", "shot"));
-        dg_strcpy(d->sound_reload, sizeof(d->sound_reload), jstr(w, "sound_reload", "reload"));
-        d->grip_offset = jvec3(w, "grip", v3(0, 0, 0));
-        d->support_offset = jvec3(w, "support", v3(0, 0, -0.1f));
-        d->muzzle_offset = jvec3(w, "muzzle", v3(0, 0.05f, -0.2f));
-        const cJSON *p;
-        cJSON_ArrayForEach(p, cJSON_GetObjectItemCaseSensitive(w, "model")) {
-            if (d->part_count >= 6) break;
-            WeaponModelPart *mp = &d->parts[d->part_count++];
-            mp->offset = jvec3(p, "offset", v3(0, 0, 0));
-            mp->half = jvec3(p, "half", v3(0.02f, 0.02f, 0.1f));
-            mp->color = jcolor(p, "color", v4(0.2f, 0.2f, 0.22f, 1));
-        }
-        // Link to the item that carries this weapon.
-        u16 item = item_find(db, jstr(w, "item", d->id));
-        if (item) db->items[item].weapon = db->weapon_count;
-        db->weapon_count++;
-    }
-    cJSON_Delete(wroot);
     cJSON_Delete(iroot);
+    bool ok = load_weapons(db, weapons_path);
     log_info("items: %d item defs, %d weapon defs", db->item_count - 1, db->weapon_count);
+    return ok;
+}
+
+bool weapons_reload_defs(ItemDB *db, const char *weapons_path) {
+    static WeaponDef backup[MAX_WEAPON_DEFS];
+    int links[MAX_ITEM_DEFS];
+    int before = db->weapon_count;
+    memcpy(backup, db->weapons, sizeof(backup));
+    for (int i = 0; i < db->item_count; i++) links[i] = db->items[i].weapon;
+    bool ok = load_weapons(db, weapons_path);
+    bool same = ok && db->weapon_count == before;
+    for (int i = 0; same && i < before; i++) same = !strcmp(backup[i].id, db->weapons[i].id);
+    if (!same) {
+        // Weapon indices are referenced by live state: refuse changes to the weapon set.
+        memcpy(db->weapons, backup, sizeof(backup));
+        db->weapon_count = before;
+        for (int i = 0; i < db->item_count; i++) db->items[i].weapon = links[i];
+        log_warn("weapon_reload: load failed or the weapon set changed (restart to add/remove weapons)");
+        return false;
+    }
+    log_info("weapon_reload: %d weapon defs reloaded", db->weapon_count);
     return true;
 }
 

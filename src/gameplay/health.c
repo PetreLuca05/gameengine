@@ -1,4 +1,5 @@
 #include "health.h"
+#include "weapons.h"
 #include <stdio.h>
 
 void health_init(Health *h, float hp, float armor) {
@@ -30,6 +31,7 @@ float apply_damage(World *w, EntityId target, float amount, DamageType type, Ent
 
     int victim_player = world_player_by_ent(w, target);
     int attacker_player = world_player_by_ent(w, attacker);
+    if (victim_player >= 0 && dealt > 0) weapon_flinch(w, victim_player, dealt);
 
     GameEvent ev;
     memset(&ev, 0, sizeof(ev));

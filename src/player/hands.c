@@ -381,7 +381,6 @@ void hands_update(const HandsInput *in) {
     H->breathe += dt;
     vec3 breathe = v3(0, sinf(H->breathe * 1.6f) * 0.003f, 0);
     float crouch_drop = -0.015f * m->crouch_amount;
-    float kick = sim->wpn.recoil_kick;
 
     for (int h = 0; h < 2; h++) {
         vec3 off = v3_add(bob_off, v3_add(v3(H->sway.x, H->sway.y, 0), v3_add(H->vel_lag, breathe)));
@@ -391,9 +390,24 @@ void hands_update(const HandsInput *in) {
         // Sway also tilts the hands slightly.
         pose.rot[h] = quat_mul(pose.rot[h], quat_euler(H->sway.x * 2.0f, -H->sway.y * 2.0f, H->sway.x * 1.5f));
     }
-    // Recoil: weapon hand pushed back and muzzle up.
-    pose.pos[HAND_RIGHT] = v3_add(pose.pos[HAND_RIGHT], v3(0, kick * 0.012f, kick * 0.05f));
-    pose.rot[HAND_RIGHT] = quat_mul(pose.rot[HAND_RIGHT], quat_axis_angle(v3(1, 0, 0), kick * 0.12f));
+    // ADS: keep the top of the weapon just under the line of sight (box guns have no sights).
+    if (in->ads) {
+        const InvSlot *es = weapon_equipped(w, in->player);
+        const WeaponDef *ew = es ? item_weapon(w->items, es->item) : NULL;
+        if (ew && ew->kind != WPN_MELEE) {
+            float top = -1.0f;
+            for (int i = 0; i < ew->part_count; i++)
+                if (fabsf(ew->parts[i].offset.x) < 0.03f) top = fmaxf(top, ew->parts[i].offset.y + ew->parts[i].half.y);
+            if (top > -1.0f) pose.pos[HAND_RIGHT].y = fminf(pose.pos[HAND_RIGHT].y, -0.04f - top);
+        }
+    }
+    // Recoil (viewmodel spring layer): weapon hand pushed back, muzzle up / sideways, rolled.
+    // The support hand follows through the weapon's support grip.
+    pose.pos[HAND_RIGHT] = v3_add(pose.pos[HAND_RIGHT], in->vm_kick_pos);
+    quat kick_rot = quat_mul(quat_axis_angle(v3(0, 1, 0), -in->vm_kick_rot.y * DG_DEG2RAD),
+                             quat_mul(quat_axis_angle(v3(1, 0, 0), in->vm_kick_rot.x * DG_DEG2RAD),
+                                      quat_axis_angle(v3(0, 0, 1), in->vm_kick_rot.z * DG_DEG2RAD)));
+    pose.rot[HAND_RIGHT] = quat_mul(pose.rot[HAND_RIGHT], kick_rot);
 
     // To world space.
     vec3 target_pos[2];
@@ -601,6 +615,13 @@ static void draw_held_item(const ItemDef *it, vec3 pos, quat rot, bool viewmodel
     float s = m > 0.07f ? 0.07f / m : 1.0f;
     half = v3_scale(half, s);
     draw_box(v3_add(pos, quat_rotate(rot, v3(0, half.y + 0.03f, -0.05f))), rot, half, it->color, viewmodel);
+}
+
+bool hands_muzzle(vec3 *pos, vec3 *fwd) {
+    if (!H || !H->initialized || !H->weapon || H->weapon->kind == WPN_MELEE) return false;
+    if (pos) *pos = v3_add(H->weapon_pos, quat_rotate(H->weapon_rot, H->weapon->muzzle_offset));
+    if (fwd) *fwd = quat_rotate(H->weapon_rot, v3(0, 0, -1));
+    return true;
 }
 
 void hands_render(void) {

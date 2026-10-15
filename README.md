@@ -148,6 +148,8 @@ Steam friends list or via **Invite Friends** (the overlay invite dialog), or wit
 | Use / interact (hold for crates) | E |
 | Attack / fire / use consumable (hold) | Mouse 1 |
 | Aim down sights | Mouse 2 |
+| Hold breath (while aiming) | Left Shift |
+| Fire mode (auto / burst / single) | B |
 | Reload | R |
 | Drop held item | G |
 | Hotbar | 1–9, mouse wheel |
@@ -167,7 +169,12 @@ The gamepad works through SDL3: sticks, south = jump, east = crouch, west = use,
 Useful commands: `map <devroom|streaming|flat>`, `host [lan|steam]`, `connect <ip[:port]>`,
 `disconnect`, `lan_refresh`/`lan_list`, `give <item> [count]`, `noclip`, `kill`, `setpos x y z [yaw] [pitch]`,
 `getpos`, `lookat x y z`, `inv`, `status`, `screenshot [path]`, `r_reloadshaders`, `hands_reload`,
-`menu <pause|settings|controls|audio|multiplayer|close>`, `quit`.
+`menu <pause|settings|controls|crosshair|audio|multiplayer|close>`, `quit`.
+
+Weapons: `wpn_magdump [weapon] [10|25|50] [ads]` stands you on the DevRoom recoil lane and empties a
+magazine at the 10 / 25 / 50 m grid wall. It logs the fire mode, measured RPM and view climb, and
+checks every bullet against its cone (PASS/FAIL). `weapon_reload` re-reads `data/weapons/*.json` for
+live tuning, and `crosshair_reload` re-reads `assets/ui/crosshair.json`. See [docs/RECOIL.md](docs/RECOIL.md).
 
 ### Debug toggles
 
@@ -179,6 +186,10 @@ Useful commands: `map <devroom|streaming|flat>`, `host [lan|steam]`, `connect <i
 | `pl_debug_mantle 1` | mantle / vault / hang shape casts (lasts 2 s per check) |
 | `hands_debug 1` | IK chains, hand targets, elbow pole vectors |
 | `wpn_debug_melee 1` | melee sweep rays |
+| `wpn_recoil_debug 1/2` | recoil panel (accumulated / countered / recovery / cone / breath), 30-shot pattern preview, cone circle at the aim distance, impact crosses (green = inside the cone); 2 also logs every shot |
+| `wpn_recoil_scale`, `wpn_spread_scale` | gameplay multipliers (host, replicated) |
+| `wpn_visual_scale` | camera + viewmodel kick only (client) |
+| `crosshair_follow_kick 1` | crosshair pinned to the screen center instead of the true aim point |
 | `net_showstats 1` / F3 | ping, command RTT, loss, bandwidth, snapshot size, prediction error |
 | `r_grid 0/1` | unit grid on dev geometry |
 | `world_debug_chunks 1` | chunk bounds/state, structure stubs |
@@ -208,6 +219,9 @@ deadground --test --script tools/tests/traverse.cfg     # mantle / ledge hang / 
 deadground --test --script tools/tests/interact.cfg     # pickups, pistol, dummies, reload
 deadground --test --script tools/tests/doors.cfg        # door knob IK, locked door, lever + gate, crate
 deadground --test --script tools/tests/weapons.cfg      # bat, rifle, shotgun, crossbow, light switch
+deadground --test --script tools/tests/recoil.cfg       # mag dumps of every preset at the recoil wall
+deadground --test --script tools/tests/recoil_modes.cfg # auto / burst / single + measured RPM
+ctest --test-dir build                                  # unit tests (tests/test_recoil.c)
 deadground --test --script tools/tests/ui.cfg           # menus, inventory, console
 deadground --test +map streaming --script tools/tests/stream.cfg
 # two-instance LAN test:

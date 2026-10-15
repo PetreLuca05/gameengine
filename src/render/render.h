@@ -40,6 +40,7 @@ enum MaterialFlags {
     MAT_HIGHLIGHT = 1u << 5,  // interaction focus glow
     MAT_TEXTURED  = 1u << 6,
     MAT_CHECKER   = 1u << 7,
+    MAT_GRID_FINE = 1u << 8,  // 10 cm / 50 cm / 1 m measuring grid (recoil wall)
 };
 
 typedef struct Material {

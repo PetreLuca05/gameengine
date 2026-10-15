@@ -17,6 +17,8 @@
 #include "net/net.h"
 #include "audio/audio.h"
 #include "ui/console.h"
+#include "ui/crosshair.h"
+#include "ui/recoil_debug.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
@@ -228,8 +230,14 @@ void game_sim_player(World *w, int slot, const UserCmd *cmd, float dt, bool firs
     WeaponOutput wo;
     weapons_tick(w, slot, &p->sim, &c, pressed, dt, first, &wo);
     if (first && p->local && G) {
+        // Aim recoil + recovery rotate the real view (the next command carries it).
         G->view.yaw += wo.view_kick.x;
         G->view.pitch = clampf(G->view.pitch + wo.view_kick.y, -88.0f * DG_DEG2RAD, 88.0f * DG_DEG2RAD);
+        if (wo.mode_changed) {
+            char t[64];
+            snprintf(t, sizeof(t), "Fire mode: %s", fire_mode_name((FireMode)p->sim.wpn.fire_mode));
+            game_add_hint(t);
+        }
     }
     if (w->authority) interact_tick(w, slot, &c, pressed, dt);
     p->last_cmd = c;
@@ -258,27 +266,22 @@ static void host_tick(World *w, const UserCmd *local_cmd) {
     for (int s = 0; s < MAX_PLAYERS; s++) {
         Player *p = &w->players[s];
         if (!p->active) continue;
-        UserCmd cmd;
         if (p->local) {
-            cmd = *local_cmd;
-        } else if (p->queue_count > 0) {
-            cmd = p->queue[0];
-            memmove(p->queue, p->queue + 1, sizeof(UserCmd) * (size_t)(p->queue_count - 1));
-            p->queue_count--;
-            // Too far behind (bursty network): drop extra commands to bound latency.
-            while (p->queue_count > 6) {
-                cmd = p->queue[0];
+            game_sim_player(w, s, local_cmd, SIM_DT, true);
+        } else {
+            // Remote players simulate exactly once per received command (never on a guess), so
+            // the host runs the same ticks the client predicted: movement, fire timing, recoil
+            // and ammo stay in lockstep. A starved queue waits; a backed-up one catches up.
+            int n = p->queue_count == 0 ? 0 : (p->queue_count > 3 ? 2 : 1);
+            if (p->queue_count > 16) n = p->queue_count - 8;   // long stall: bound the latency
+            for (int k = 0; k < n; k++) {
+                UserCmd cmd = p->queue[0];
                 memmove(p->queue, p->queue + 1, sizeof(UserCmd) * (size_t)(p->queue_count - 1));
                 p->queue_count--;
+                game_sim_player(w, s, &cmd, SIM_DT, true);
+                if (cmd.seq > p->last_processed_seq) p->last_processed_seq = cmd.seq;
             }
-        } else {
-            // No input arrived: repeat the last command without edge-triggered buttons.
-            cmd = p->last_cmd;
-            cmd.buttons &= (u16)~(BTN_JUMP | BTN_USE | BTN_RELOAD);
-            cmd.buttons |= (u16)(p->sim.last_buttons & (BTN_JUMP | BTN_USE | BTN_RELOAD));
         }
-        game_sim_player(w, s, &cmd, SIM_DT, true);
-        if (!p->local && cmd.seq > p->last_processed_seq) p->last_processed_seq = cmd.seq;
         // Death / respawn
         int i = (int)ENT_INDEX(p->ent);
         if (w->flags[i] & EF_DEAD) {
@@ -314,6 +317,75 @@ static void dispatch_events(World *w) {
 
 // ------------------------------------------------------------------ commands
 
+// ------------------------------------------------------------------ weapon feel (client presentation)
+
+// Shot hook: client-only cosmetic layers driven by every locally predicted shot.
+static void on_shot(const ShotEvent *ev, void *user) {
+    (void)user;
+    if (!ev->local_view || !G) return;
+    const WeaponCvars *wc = weapons_cvars();
+    recoil_visual_kick(&ev->def->recoil, &G->recoil_vis, wc->visual_scale->f, ev->ads_t, ev->seed);
+    // Shell casing out of the right side (bolt / pump guns eject when cycling instead).
+    if (ev->def->kind == WPN_HITSCAN && !ev->def->bolt_action) {
+        vec3 right = v3_norm(v3_cross(ev->dir, v3(0, 1, 0)));
+        fx_shell(ev->muzzle, v3_add(v3_scale(right, 2.2f), v3(0, 1.4f, 0)));
+    }
+    // Bolt / pump cycle after the shot (if rounds are left).
+    if (ev->def->bolt_action && ev->mag_left > 0) G->bolt_timer = fmaxf(0.25f, 60.0f / fmaxf(1.0f, ev->def->recoil.rpm) * 0.35f);
+}
+
+static void weapon_feel_tick(void) {
+    Player *p = game_local_player();
+    const WeaponDef *d = p ? weapon_equipped_def(G->world, G->local_slot) : NULL;
+    static RecoilParams fallback;
+    if (!fallback.rpm) recoil_params_default(&fallback);
+    recoil_visual_step(d && d->kind != WPN_MELEE ? &d->recoil : &fallback, &G->recoil_vis, SIM_DT);
+    G->spread_prev = G->spread_cur;
+    G->spread_cur = p ? weapon_current_spread(G->world, G->local_slot) : 0;
+    if (G->bolt_timer > 0) {
+        G->bolt_timer -= SIM_DT;
+        if (G->bolt_timer <= 0 && p && d && d->bolt_action) {
+            vec3 eye = player_eye_pos(&p->sim.move);
+            fx_sound("bolt_cycle", eye, 0.7f);
+            vec3 r = right_from_yaw(p->sim.move.yaw);
+            fx_shell(v3_add(eye, v3_add(v3_scale(r, 0.12f), dir_from_angles(p->sim.move.yaw, p->sim.move.pitch))),
+                     v3_add(v3_scale(r, 2.0f), v3(0, 1.5f, 0)));
+        }
+    }
+    // wpn_magdump: stop once the magazine is empty (or after 20 s).
+    if (G->magdump_ticks > 0) {
+        G->magdump_ticks++;
+        int mag = p ? p->sim.wpn.mag : 0;
+        if (G->magdump_ticks > 2 && mag < G->magdump_last_mag) {
+            if (!G->magdump_shots) G->magdump_first_tick = G->magdump_ticks;
+            G->magdump_last_tick = G->magdump_ticks;
+            G->magdump_shots += G->magdump_last_mag - mag;
+        }
+        G->magdump_last_mag = mag;
+        bool empty = p && mag <= 0 && G->magdump_ticks > 60;
+        if (empty || G->magdump_ticks > 60 * 20 || !p) {
+            const WeaponDebugStats *st = weapons_debug_stats();
+            float secs = (float)(G->magdump_last_tick - G->magdump_first_tick) * SIM_DT;
+            float rpm = (G->magdump_shots > 1 && secs > 0) ? (float)(G->magdump_shots - 1) / secs * 60.0f : 0.0f;
+            log_info("magdump: %d rounds, mode %s, measured %.0f rpm, view climbed %.2f deg | %u bullets checked, %u outside the cone, "
+                     "max offset %.0f%% of the cone radius -> %s",
+                     G->magdump_shots, p ? fire_mode_name((FireMode)p->sim.wpn.fire_mode) : "?", rpm, p ? p->sim.wpn.rc.acc_pitch : 0.0f,
+                     st->shots, st->outside, st->max_ratio * 100.0f, st->outside == 0 ? "PASS" : "FAIL");
+            G->magdump_ticks = 0;
+        }
+    }
+}
+
+// wpn_magdump drives the trigger: held for auto, clicked for single / burst.
+static void magdump_cmd(UserCmd *c) {
+    if (G->magdump_ads) c->buttons |= BTN_AIM;
+    if (G->magdump_ticks < 40) return;   // equip + aim settle
+    Player *p = game_local_player();
+    FireMode m = p ? (FireMode)p->sim.wpn.fire_mode : FM_AUTO;
+    bool held = m == FM_AUTO || ((G->magdump_ticks / 3) & 1);
+    if (held) c->buttons |= BTN_ATTACK;
+}
+
 static i8 axis_to_i8(float v) { return (i8)DG_CLAMP((int)lrintf(v * 127.0f), -127, 127); }
 
 static UserCmd build_cmd(void) {
@@ -341,11 +413,13 @@ static UserCmd build_cmd(void) {
     if (input_consume_press(ACT_ATTACK)) c.buttons |= BTN_ATTACK;
     if (input_consume_press(ACT_RELOAD)) c.buttons |= BTN_RELOAD;
     if (input_consume_press(ACT_CROUCH)) c.buttons |= BTN_CROUCH;
+    if (input_consume_press(ACT_FIREMODE)) c.buttons |= BTN_FIREMODE;
     if (G->noclip_request) { c.buttons |= BTN_NOCLIP; G->noclip_request = false; }
     if (G->menu_open || G->inventory_open || G->container_open || console_is_open()) {
         c.move_x = c.move_y = 0;
         c.buttons &= (u16)(BTN_CROUCH | BTN_NOCLIP);
     }
+    if (G->magdump_ticks > 0) magdump_cmd(&c);
     c.slot = G->hotbar_slot;
     c.use_target = G->focus;
     c.view_tick = net_client_view_tick256();
@@ -360,6 +434,7 @@ void game_cl_reconcile(const PlayerSim *server, u32 ack_seq) {
     if (ack_seq <= G->last_ack_seq && ack_seq != 0) return;
     G->last_ack_seq = ack_seq;
     vec3 before = p->sim.move.pos;
+    WeaponState before_w = p->sim.wpn;
     p->sim = *server;
     phys_character_set_crouched(w->phys, p->character, server->move.crouched != 0);
     phys_character_set_pos(p->character, server->move.pos);
@@ -372,6 +447,15 @@ void game_cl_reconcile(const PlayerSim *server, u32 ack_seq) {
         if (s == G->client_seq) G->predicted_prev = p->sim.move;
         game_sim_player(w, G->local_slot, c, SIM_DT, false);
     }
+    // Recoil is predicted too: the replay must land on the same aim state.
+    const RecoilState *ra = &before_w.rc, *rb = &p->sim.wpn.rc;
+    G->recoil_pred_error = fabsf(ra->acc_pitch - rb->acc_pitch) + fabsf(ra->acc_yaw - rb->acc_yaw) + fabsf(ra->bloom - rb->bloom) +
+                           (ra->shot_index != rb->shot_index ? 1.0f : 0.0f) + (before_w.mag != p->sim.wpn.mag ? 1.0f : 0.0f);
+    G->recoil_pred_error_max = fmaxf(G->recoil_pred_error_max, G->recoil_pred_error);
+    if (G->recoil_pred_error > 0.01f)
+        log_debug("recoil mispredict: ack %u seq %u: acc %.3f/%.3f -> %.3f/%.3f idx %u -> %u mag %d -> %d bloom %.2f -> %.2f seed %08x -> %08x rec %d -> %d cd %.3f -> %.3f",
+                 ack_seq, G->client_seq, ra->acc_pitch, ra->acc_yaw, rb->acc_pitch, rb->acc_yaw, ra->shot_index, rb->shot_index, before_w.mag,
+                 p->sim.wpn.mag, ra->bloom, rb->bloom, ra->mag_seed, rb->mag_seed, ra->recovering, rb->recovering, before_w.cooldown, p->sim.wpn.cooldown);
     vec3 after = p->sim.move.pos;
     float err = v3_dist(before, after);
     G->prediction_error = err;
@@ -398,6 +482,7 @@ static void tick(void) {
         if (w->chunks) chunks_update(w, SIM_DT);
         w->tick++;
     }
+    weapon_feel_tick();
 }
 
 // ------------------------------------------------------------------ focus
@@ -590,9 +675,21 @@ void game_sv_receive_cmd(int slot, const UserCmd *cmd) {
     if (!w || slot < 0 || slot >= MAX_PLAYERS) return;
     Player *p = &w->players[slot];
     if (!p->active || cmd->seq <= p->last_processed_seq) return;
-    for (int i = 0; i < p->queue_count; i++) if (p->queue[i].seq >= cmd->seq) return; // duplicate (redundant send)
-    if (p->queue_count >= 32) { memmove(p->queue, p->queue + 1, sizeof(UserCmd) * 31); p->queue_count = 31; }
-    p->queue[p->queue_count++] = *cmd;
+    // Keep the queue sorted by seq: redundant sends fill gaps left by lost packets.
+    int at = p->queue_count;
+    for (int i = 0; i < p->queue_count; i++) {
+        if (p->queue[i].seq == cmd->seq) return;   // duplicate (redundant send)
+        if (p->queue[i].seq > cmd->seq) { at = i; break; }
+    }
+    if (p->queue_count >= 32) {
+        if (at == 0) return;
+        memmove(p->queue, p->queue + 1, sizeof(UserCmd) * 31);
+        p->queue_count = 31;
+        at--;
+    }
+    memmove(p->queue + at + 1, p->queue + at, sizeof(UserCmd) * (size_t)(p->queue_count - at));
+    p->queue[at] = *cmd;
+    p->queue_count++;
 }
 
 // ------------------------------------------------------------------ console commands
@@ -605,13 +702,16 @@ static void cmd_map(int argc, const char **argv) {
 
 static void cmd_give(int argc, const char **argv) {
     World *w = G->world;
-    if (argc < 2 || G->mode != GM_HOST) { log_info("usage: give <item> [count] (host only)"); return; }
+    if (argc < 2 || G->mode != GM_HOST) { log_info("usage: give <item> [count] [player slot] (host only)"); return; }
     u16 item = item_find(&G->items, argv[1]);
     if (!item) { log_warn("give: unknown item '%s'", argv[1]); return; }
     int count = argc > 2 ? atoi(argv[2]) : (G->items.items[item].max_stack > 1 ? G->items.items[item].max_stack : 1);
     const WeaponDef *wd = item_weapon(&G->items, item);
-    Player *p = &w->players[G->local_slot];
+    int target = argc > 3 ? atoi(argv[3]) : G->local_slot;
+    if (target < 0 || target >= MAX_PLAYERS || !w->players[target].active) { log_warn("give: no player in slot %d", target); return; }
+    Player *p = &w->players[target];
     int left = inv_add(&p->inv, &G->items, item, count, wd ? (i16)wd->mag_size : 0);
+    p->inv.revision++;
     log_info("gave %d x %s", count - left, argv[1]);
 }
 
@@ -683,11 +783,65 @@ static void cmd_lookat(int argc, const char **argv) {
     G->view.pitch = atan2f(d.y, sqrtf(d.x * d.x + d.z * d.z));
 }
 
+// wpn_magdump [weapon] [10|25|50] [ads 0/1]: stands on the recoil lane, faces the wall at that
+// distance and empties a full magazine; every bullet is checked against its cone.
+static void cmd_magdump(int argc, const char **argv) {
+    World *w = G->world;
+    Player *p = game_local_player();
+    if (!w || !p || G->mode != GM_HOST) { log_info("usage: wpn_magdump [weapon] [10|25|50] [ads] (host only)"); return; }
+    if (argc > 1) {
+        u16 item = item_find(&G->items, argv[1]);
+        const WeaponDef *wd = item ? item_weapon(&G->items, item) : NULL;
+        if (!wd || wd->kind == WPN_MELEE) { log_warn("wpn_magdump: %s is not a gun", argv[1]); return; }
+        int at = -1;
+        for (int i = 0; i < INV_HOTBAR; i++) if (p->inv.slots[i].item == item) at = i;
+        if (at < 0) {
+            inv_add(&p->inv, &G->items, item, 1, (i16)wd->mag_size);
+            for (int i = 0; i < INV_HOTBAR; i++) if (p->inv.slots[i].item == item) at = i;
+        }
+        if (at < 0) { log_warn("wpn_magdump: no free hotbar slot"); return; }
+        G->hotbar_slot = (u8)at;
+    }
+    InvSlot *s = &p->inv.slots[G->hotbar_slot];
+    const WeaponDef *wd = item_weapon(&G->items, s->item);
+    if (!wd || wd->kind == WPN_MELEE) { log_warn("wpn_magdump: equip a gun first"); return; }
+    s->ammo = (i16)wd->mag_size;
+    p->sim.wpn.mag = s->ammo;
+    p->sim.wpn.reloading = 0;
+    float dist = argc > 2 ? (float)atof(argv[2]) : 25.0f;
+    vec3 target = dist <= 15 ? v3(-1.5f, 1.35f, 18) : (dist <= 35 ? v3(1.5f, 1.35f, 3) : v3(0, 1.35f, -22));
+    vec3 feet = v3(0, 0.05f, 28);
+    p->sim.move.pos = feet;
+    p->sim.move.vel = v3(0, 0, 0);
+    p->sim.move.mode = MOVE_WALK;
+    if (p->character) { phys_character_set_pos(p->character, feet); phys_character_set_vel(p->character, v3(0, 0, 0)); }
+    vec3 d = v3_sub(target, v3_add(feet, v3(0, PLAYER_EYE_STAND, 0)));
+    G->view.yaw = atan2f(-d.x, -d.z);
+    G->view.pitch = atan2f(d.y, sqrtf(d.x * d.x + d.z * d.z));
+    G->view.smooth_init = false;
+    G->magdump_ads = argc > 3 ? atoi(argv[3]) != 0 : true;
+    G->magdump_dist = v3_len(d);
+    G->magdump_ticks = 1;
+    G->magdump_shots = 0;
+    G->magdump_last_mag = s->ammo;
+    recoil_reset(&p->sim.wpn.rc, wd->recoil.seed_per_mag ? recoil_mag_seed(G->client_seq, (u32)G->local_slot) : (dg_hash_str(wd->id) | 1u));
+    p->sim.wpn.rc.have_prev = 0;   // the teleport / view snap is not "player input"
+    weapons_debug_reset();
+    log_info("magdump: %s, %d rounds at %.1f m (%s)", wd->id, wd->mag_size, G->magdump_dist, G->magdump_ads ? "ADS" : "hip");
+}
+
+static void cmd_weapon_reload(int argc, const char **argv) {
+    if (weapons_reload_defs(&G->items, "data/weapons")) game_add_hint("Weapon definitions reloaded");
+}
+
 static void cmd_status(int argc, const char **argv) {
     World *w = G->world;
     if (!w) return;
     log_info("map %s mode %s tick %u entities %d bodies %d", G->map, G->mode == GM_HOST ? "host" : "client", w->tick, w->max_used,
              phys_body_count(w->phys));
+    if (G->mode == GM_CLIENT)
+        log_info("  prediction error %.4f m, recoil prediction error %.4f (max %.4f)", G->prediction_error, G->recoil_pred_error,
+                 G->recoil_pred_error_max);
     for (int s = 0; s < MAX_PLAYERS; s++) {
         Player *p = &w->players[s];
         if (p->active) log_info("  slot %d %-16s %s peer %d hp %.0f", s, p->name, p->local ? "local" : "remote", p->peer, w->health[ENT_INDEX(p->ent)].hp);
@@ -720,9 +874,15 @@ void game_init(void) {
     cmd_register("status", cmd_status, "print game status");
     cmd_register("inv", cmd_inv, "print local inventory");
     cmd_register("lookat", cmd_lookat, "aim the view at a world point: lookat x y z");
+    cmd_register("wpn_magdump", cmd_magdump, "wpn_magdump [weapon] [10|25|50] [ads]: empty a magazine at the recoil wall");
+    cmd_register("weapon_reload", cmd_weapon_reload, "re-read data/weapons/*.json (live recoil tuning)");
+    weapons_register_cvars();
+    weapons_add_shot_hook(on_shot, NULL);
+    crosshair_init();
+    recoil_debug_init();
     camera_register_cvars();
     player_register_cvars();
-    if (!items_load(&G->items, "data/items.json", "data/weapons.json")) log_error("game: item data failed to load");
+    if (!items_load(&G->items, "data/items.json", "data/weapons")) log_error("game: item data failed to load");
     g_engine.items = &G->items;
     basic_meshes_create(&G->meshes);
     fx_init(&G->meshes);

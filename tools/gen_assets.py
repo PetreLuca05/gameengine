@@ -136,6 +136,14 @@ def gen_sounds():
     write_wav("hurt", thud(70, 0.2, 0.7, 0.2))
     write_wav("bolt_hit", concat(click(1000, 0.02, 0.6), thud(130, 0.12, 0.6, 0.6)))
     write_wav("ambient", ambient(8.0))
+    # recoil / weapons pass
+    write_wav("hit_head", concat(click(3400, 0.03, 0.55), click(2900, 0.05, 0.5), gap=0.015))
+    write_wav("switch", concat(click(1200, 0.02, 0.45), click(800, 0.03, 0.4), gap=0.04))
+    write_wav("bolt_cycle", concat(click(600, 0.04, 0.6), click(420, 0.05, 0.6), click(900, 0.04, 0.55), click(1200, 0.04, 0.5), gap=0.09))
+    write_wav("shot_smg", gunshot(0.22, 150, 0.8, 0.035, 0.5))
+    write_wav("shot_lmg", gunshot(0.4, 95, 0.8, 0.07, 0.4))
+    write_wav("shot_dmr", gunshot(0.5, 100, 0.8, 0.08, 0.35))
+    write_wav("shot_sniper", gunshot(0.8, 70, 0.85, 0.14, 0.3))
 
 
 # ----------------------------------------------------------------------------- textures

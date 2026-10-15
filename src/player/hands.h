@@ -33,6 +33,8 @@ typedef struct HandsInput {
     bool use_pressed;         // use edge this frame (local prediction of the interaction)
     bool use_held;
     bool ads;
+    vec3 vm_kick_pos;         // viewmodel recoil spring: camera space offset (m, +z = back)
+    vec3 vm_kick_rot;         // pitch (muzzle up), yaw (right), roll in degrees
 } HandsInput;
 
 typedef struct ArmChain {
@@ -51,6 +53,8 @@ void hands_render(void);                     // local player's arms/hands/weapon
 // Third-person rig for remote players (stateless; base pose + ledge anchors only).
 void hands_render_remote(World *w, int slot, vec3 eye, float yaw, float pitch);
 const ArmChain *hands_chain(int hand);
+// World-space barrel tip of the local viewmodel weapon (last hands_update). False if no gun.
+bool hands_muzzle(vec3 *pos, vec3 *fwd);
 void hands_reload_poses(void);
 
 #endif

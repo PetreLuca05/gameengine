@@ -187,3 +187,16 @@ endif()
 add_custom_command(TARGET deadground POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/data $<TARGET_FILE_DIR:deadground>/data
   COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/assets $<TARGET_FILE_DIR:deadground>/assets)
+
+# ---------------------------------------------------------------- unit tests (ctest)
+# Pure modules only: no SDL / Vulkan / Jolt, so this builds and runs anywhere.
+enable_testing()
+add_executable(test_recoil tests/test_recoil.c src/gameplay/recoil.c src/core/spring.c)
+set_target_properties(test_recoil PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
+target_include_directories(test_recoil PRIVATE src)
+if(MSVC)
+  target_compile_options(test_recoil PRIVATE /W3 /utf-8)
+else()
+  target_link_libraries(test_recoil PRIVATE m)
+endif()
+add_test(NAME recoil COMMAND test_recoil)

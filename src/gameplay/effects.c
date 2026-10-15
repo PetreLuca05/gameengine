@@ -99,6 +99,15 @@ void fx_muzzle(vec3 pos, vec3 dir) {
     spawn_sparks(pos, dir, 5, rgba8(1.0f, 0.85f, 0.4f, 1), 6.0f);
 }
 
+void fx_shell(vec3 pos, vec3 vel) {
+    if (!FX || FX->spark_count >= MAX_SPARKS) return;
+    Spark *s = &FX->sparks[FX->spark_count++];
+    s->pos = pos;
+    s->vel = v3_add(vel, v3(rng_range(&FX->rng, -0.3f, 0.3f), rng_range(&FX->rng, 0, 0.5f), rng_range(&FX->rng, -0.3f, 0.3f)));
+    s->max_life = s->life = 0.7f;
+    s->color = rgba8(0.85f, 0.65f, 0.25f, 1);
+}
+
 void fx_damage_number(vec3 pos, float amount, bool headshot) {
     if (!FX || !FX->dev_damage_numbers->i) return;
     DmgNumber *n = &FX->numbers[FX->number_head];

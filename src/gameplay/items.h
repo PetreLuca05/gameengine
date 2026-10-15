@@ -1,9 +1,10 @@
-// Data-driven item and weapon definitions (data/items.json, data/weapons.json).
+// Data-driven item and weapon definitions (data/items.json, data/weapons/*.json).
 #ifndef DG_ITEMS_H
 #define DG_ITEMS_H
 
 #include "core/base.h"
 #include "core/dgmath.h"
+#include "gameplay/recoil.h"
 
 #define MAX_ITEM_DEFS 128
 #define MAX_WEAPON_DEFS 32
@@ -34,14 +35,12 @@ typedef struct WeaponDef {
     WeaponKind kind;
     DamageType damage_type;
     float damage;
-    float fire_rate;          // shots (or swings) per second
-    bool automatic;
+    float fire_rate;          // shots (or swings) per second (guns: rpm / 60)
+    bool automatic;           // melee: hold to keep swinging
     int mag_size;
     u16 ammo_item;
     float reload_time;
     int pellets;
-    float spread_base, spread_move, spread_ads, spread_per_shot, spread_max, spread_recover; // degrees
-    float recoil_pitch, recoil_yaw;                                                          // degrees per shot
     float range, impulse, headshot_mult;
     float projectile_speed, projectile_gravity;
     float swing_time, active_start, active_end, reach, sweep_radius, knockback, swing_arc;
@@ -53,6 +52,9 @@ typedef struct WeaponDef {
     vec3 grip_offset;         // where the right hand holds it (model space)
     vec3 support_offset;      // where the left hand supports it (model space)
     vec3 muzzle_offset;
+    bool bolt_action;         // cycles the bolt after each shot (shot-event hook)
+    RecoilParams recoil;      // guns: recoil, spread, fire modes, ADS/sway feel ("recoil" block)
+    char file[64];            // source file (data/weapons/*.json)
 } WeaponDef;
 
 typedef struct ItemDB {
@@ -62,7 +64,11 @@ typedef struct ItemDB {
     int weapon_count;
 } ItemDB;
 
+// weapons_path: a directory of per-weapon JSON files (loaded sorted by file name so weapon
+// indices are identical on every machine) or a single JSON file with a "weapons" array.
 bool items_load(ItemDB *db, const char *items_path, const char *weapons_path);
+// Re-reads only the weapon definitions in place (live tuning). Item ids must not change.
+bool weapons_reload_defs(ItemDB *db, const char *weapons_path);
 u16 item_find(const ItemDB *db, const char *id);
 const ItemDef *item_def(const ItemDB *db, u16 item);
 const WeaponDef *item_weapon(const ItemDB *db, u16 item); // NULL if not a weapon

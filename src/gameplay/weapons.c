@@ -5,7 +5,35 @@
 #include "core/engine.h"
 #include "core/cvar.h"
 #include "render/debug_draw.h"
+#include "player/hands.h"
 #include <math.h>
+
+static WeaponCvars WC;
+
+void weapons_register_cvars(void) {
+    WC.recoil_scale = cvar_reg_float("wpn_recoil_scale", 1.0f, 0.0f, 5.0f, CVAR_SERVER, "aim recoil multiplier (gameplay, host)");
+    WC.spread_scale = cvar_reg_float("wpn_spread_scale", 1.0f, 0.0f, 5.0f, CVAR_SERVER, "bullet spread cone multiplier (gameplay, host)");
+    WC.visual_scale = cvar_reg_float("wpn_visual_scale", 1.0f, 0.0f, 3.0f, CVAR_ARCHIVE, "camera + viewmodel kick multiplier (cosmetic)");
+    WC.recoil_debug = cvar_reg_int("wpn_recoil_debug", 0, 0, 2, 0, "recoil overlay: 1 = panel + cone, 2 = also log every shot");
+}
+
+const WeaponCvars *weapons_cvars(void) { return &WC; }
+
+#define MAX_SHOT_HOOKS 8
+static struct { ShotHook fn; void *user; } g_hooks[MAX_SHOT_HOOKS];
+static int g_hook_count;
+
+void weapons_add_shot_hook(ShotHook fn, void *user) {
+    for (int i = 0; i < g_hook_count; i++)
+        if (g_hooks[i].fn == fn && g_hooks[i].user == user) return;
+    if (g_hook_count < MAX_SHOT_HOOKS) { g_hooks[g_hook_count].fn = fn; g_hooks[g_hook_count].user = user; g_hook_count++; }
+}
+
+static float cv_f(struct Cvar *c, float def) { return c ? c->f : def; }
+
+const char *fire_mode_name(FireMode m) {
+    return m == FM_AUTO ? "AUTO" : (m == FM_BURST ? "BURST" : "SINGLE");
+}
 
 const InvSlot *weapon_equipped(const World *w, int slot) {
     const Player *p = &w->players[slot];
@@ -18,31 +46,65 @@ const WeaponDef *weapon_equipped_def(const World *w, int slot) {
     return s ? item_weapon(w->items, s->item) : NULL;
 }
 
-static float base_spread(const WeaponDef *d, const PlayerMove *m, bool ads) {
-    float speed = v3_len(v3_flat(m->vel));
-    float move = saturate(speed / 6.0f);
-    float s = ads ? d->spread_ads : d->spread_base;
-    s += d->spread_move * move * (ads ? 0.5f : 1.0f);
-    if (!m->on_ground) s += d->spread_move;
-    if (m->crouched) s *= 0.7f;
-    return s;
+// Stance / movement / ADS state the recoil and spread math depends on (all from PlayerSim, so
+// host and predicting client agree).
+static RecoilMods make_mods(const PlayerSim *sim, float scale) {
+    RecoilMods m;
+    memset(&m, 0, sizeof(m));
+    m.ads_t = sim->wpn.ads_t;
+    m.move01 = saturate((v3_len(v3_flat(sim->move.vel)) - 0.3f) / 5.0f);
+    m.crouched = sim->move.crouched != 0;
+    m.prone = false;   // no prone stance yet (data only)
+    m.airborne = !sim->move.on_ground && sim->move.mode == MOVE_WALK;
+    m.fire_mode = (FireMode)sim->wpn.fire_mode;
+    m.extra = 1.0f;
+    m.scale = scale;
+    return m;
 }
 
 float weapon_current_spread(const World *w, int slot) {
     const WeaponDef *d = weapon_equipped_def(w, slot);
     const Player *p = &w->players[slot];
     if (!d || d->kind == WPN_MELEE) return 0;
-    return base_spread(d, &p->sim.move, (p->last_cmd.buttons & BTN_AIM) != 0) + p->sim.wpn.spread;
+    RecoilMods m = make_mods(&p->sim, cv_f(WC.spread_scale, 1));
+    return recoil_spread(&d->recoil, &p->sim.wpn.rc, &m);
 }
 
-// Uniform random direction inside a cone of half-angle deg around dir.
-static vec3 spread_dir(vec3 dir, float deg, Rng *rng) {
-    if (deg <= 0.0f) return dir;
-    vec3 t = fabsf(dir.y) < 0.95f ? v3_norm(v3_cross(dir, v3(0, 1, 0))) : v3(1, 0, 0);
-    vec3 b = v3_cross(t, dir);
-    float a = rng_float(rng) * 2.0f * DG_PI;
-    float r = sqrtf(rng_float(rng)) * tanf(deg * DG_DEG2RAD);
-    return v3_norm(v3_add(dir, v3_add(v3_scale(t, cosf(a) * r), v3_scale(b, sinf(a) * r))));
+vec2 weapon_sway_deg(const WeaponDef *d, const WeaponState *ws, float t) {
+    if (!d || d->kind == WPN_MELEE) return v2(0, 0);
+    const RecoilParams *rp = &d->recoil;
+    float amp = (rp->scope_sway > 0 ? rp->scope_sway : rp->idle_sway) * saturate(ws->ads_t) * ws->sway_k;
+    // Slow figure-eight, roughly breathing pace.
+    float x = sinf(t * 0.83f) * 0.7f + sinf(t * 1.97f + 1.1f) * 0.3f;
+    float y = sinf(t * 1.31f + 0.4f) * 0.6f + sinf(t * 2.63f + 2.0f) * 0.4f;
+    return v2(x * amp, y * amp * 0.8f);
+}
+
+void weapon_flinch(World *w, int slot, float damage) {
+    Player *p = &w->players[slot];
+    const WeaponDef *d = weapon_equipped_def(w, slot);
+    if (!d || d->kind == WPN_MELEE || damage <= 0) return;
+    RecoilState *rc = &p->sim.wpn.rc;
+    rc->bloom = fminf(fmaxf(rc->bloom, d->recoil.bloom_max), rc->bloom + damage * 0.04f);
+}
+
+static FireMode default_mode(u8 bits) {
+    if (bits & FIRE_AUTO) return FM_AUTO;
+    if (bits & FIRE_BURST) return FM_BURST;
+    return FM_SINGLE;
+}
+
+static FireMode next_mode(FireMode cur, u8 bits) {
+    // Cycle AUTO -> BURST -> SINGLE -> AUTO over the available modes.
+    static const FireMode order[3] = { FM_AUTO, FM_BURST, FM_SINGLE };
+    int at = 0;
+    for (int i = 0; i < 3; i++)
+        if (order[i] == cur) at = i;
+    for (int k = 1; k <= 3; k++) {
+        FireMode m = order[(at + k) % 3];
+        if (bits & (1u << m)) return m;
+    }
+    return cur;
 }
 
 typedef struct HitResult {
@@ -106,6 +168,11 @@ static HitResult trace_shot(World *w, int shooter, vec3 origin, vec3 dir, float 
     return r;
 }
 
+EntityId weapon_trace_target(World *w, int shooter, vec3 origin, vec3 dir, float range) {
+    HitResult h = trace_shot(w, shooter, origin, dir, range, 0);
+    return (h.hit && h.hitbox) ? h.ent : ENT_NONE;
+}
+
 static void apply_hit(World *w, int shooter, const WeaponDef *d, const HitResult *h, vec3 dir, float damage_scale) {
     Player *sp = &w->players[shooter];
     if (h->hitbox) {
@@ -139,8 +206,13 @@ static void push_shot_events(World *w, int shooter, vec3 from, const HitResult *
     }
 }
 
-static vec3 muzzle_world(const PlayerMove *m, const WeaponDef *d) {
-    // Approximate muzzle in front of the right side of the eye (viewmodel aligned).
+static vec3 muzzle_world(const PlayerMove *m, const WeaponDef *d, bool local_view) {
+    // Local player: the real barrel tip of the viewmodel. Bullets still trace from the eye
+    // (so they go where the crosshair says), only the flash / tracer / casing start here.
+    vec3 mp;
+    vec3 mf;
+    if (local_view && hands_muzzle(&mp, &mf) && v3_dist(mp, player_eye_pos(m)) < 1.5f) return v3_madd(mp, mf, 0.015f);
+    // Others (host-side events): approximate barrel in front of the right side of the eye.
     vec3 eye = player_eye_pos(m);
     vec3 f = dir_from_angles(m->yaw, m->pitch);
     vec3 r = right_from_yaw(m->yaw);
@@ -148,14 +220,38 @@ static vec3 muzzle_world(const PlayerMove *m, const WeaponDef *d) {
     return v3_add(eye, v3_add(v3_scale(f, 0.45f - d->muzzle_offset.z * 0.5f), v3_add(v3_scale(r, 0.14f), v3_scale(u, -0.1f))));
 }
 
-static void fire(World *w, int slot, PlayerSim *sim, const WeaponDef *d, const UserCmd *cmd, bool first, bool local_view) {
+static WeaponDebugStats g_dbg_stats;
+const WeaponDebugStats *weapons_debug_stats(void) { return &g_dbg_stats; }
+void weapons_debug_reset(void) { memset(&g_dbg_stats, 0, sizeof(g_dbg_stats)); }
+
+// Verifies a bullet left inside the advertised cone (what the crosshair shows).
+static float angle_deg(vec3 a, vec3 b) { return atan2f(v3_len(v3_cross(a, b)), v3_dot(a, b)) * DG_RAD2DEG; }
+
+static void debug_check_shot(int slot, vec3 aim, vec3 sdir, float cone, const RecoilState *rc, bool log_it) {
+    float off = angle_deg(aim, sdir);
+    float half = cone * 0.5f;
+    bool inside = off <= half + 1e-3f;
+    g_dbg_stats.shots++;
+    if (!inside) g_dbg_stats.outside++;
+    if (half > 1e-4f) g_dbg_stats.max_ratio = fmaxf(g_dbg_stats.max_ratio, off / half);
+    if (log_it)
+        log_info("shot p%d #%u idx %u cone %.3f off %.3f (%.0f%% of half) acc %.2f/%.2f bloom %.2f %s", slot, g_dbg_stats.shots,
+                 rc->shot_index, cone, off, half > 0 ? off / half * 100.0f : 0.0f, rc->acc_pitch, rc->acc_yaw, rc->bloom,
+                 inside ? "inside" : "OUTSIDE");
+}
+
+static u32 dbg_check_color(vec3 aim, vec3 sdir, float cone) {
+    float off = angle_deg(aim, sdir);
+    return off <= cone * 0.5f + 1e-3f ? DBG_GREEN : DBG_RED;
+}
+
+static void fire(World *w, int slot, PlayerSim *sim, const WeaponDef *d, const UserCmd *cmd, bool first, bool local_view,
+                 vec3 dir, float spread, u32 seed) {
     PlayerMove *m = &sim->move;
-    bool ads = (cmd->buttons & BTN_AIM) != 0;
     vec3 eye = player_eye_pos(m);
-    vec3 dir = dir_from_angles(m->yaw, m->pitch);
-    float spread = base_spread(d, m, ads) + sim->wpn.spread;
-    Rng rng = rng_make(((u64)cmd->seq << 8) ^ (u64)(slot + 1) * 0x9E3779B97F4A7C15ULL ^ sim->wpn.shots);
-    vec3 muzzle = muzzle_world(m, d);
+    Rng rng = rng_make(seed);
+    vec3 muzzle = muzzle_world(m, d, local_view);
+    int dbg = WC.recoil_debug ? WC.recoil_debug->i : 0;
     if (local_view && first) {
         fx_muzzle(muzzle, dir);
         fx_sound(d->sound_fire, eye, 1.0f);
@@ -168,7 +264,7 @@ static void fire(World *w, int slot, PlayerSim *sim, const WeaponDef *d, const U
             w->vis[i].half = v3(0.012f, 0.012f, 0.22f);
             w->vis[i].color = rgba8(0.5f, 0.4f, 0.3f, 1);
             w->comps[i] |= C_VISUAL | C_PROJECTILE;
-            vec3 pdir = spread_dir(dir, spread, &rng);
+            vec3 pdir = recoil_cone_dir(dir, spread, &rng);
             w->proj[i].vel = v3_scale(pdir, d->projectile_speed);
             w->proj[i].owner = w->players[slot].ent;
             w->proj[i].weapon = (int)(d - w->items->weapons);
@@ -181,7 +277,14 @@ static void fire(World *w, int slot, PlayerSim *sim, const WeaponDef *d, const U
     }
     int pellets = DG_MAX(1, d->pellets);
     for (int p = 0; p < pellets; p++) {
-        vec3 sdir = spread_dir(dir, spread, &rng);
+        vec3 sdir = recoil_cone_dir(dir, spread, &rng);
+        if (first && local_view) {
+            debug_check_shot(slot, dir, sdir, spread, &sim->wpn.rc, dbg >= 2);
+            if (dbg) {
+                HitResult dh = trace_shot(w, slot, eye, sdir, d->range, 0);
+                if (dh.hit) dbg_cross(dh.point, 0.03f, dbg_check_color(dir, sdir, spread), 10.0f);
+            }
+        }
         if (w->authority) {
             HitResult h = trace_shot(w, slot, eye, sdir, d->range, cmd->view_tick);
             vec3 end = h.hit ? h.point : v3_madd(eye, sdir, d->range);
@@ -266,6 +369,36 @@ static void melee_step(World *w, int slot, PlayerSim *sim, const WeaponDef *d, b
     }
 }
 
+static u32 shot_seed(const UserCmd *cmd, int slot, u32 shots) {
+    return dg_hash_u32(cmd->seq * 0x9E3779B1u ^ dg_hash_u32((u32)(slot + 1) * 0x85EBCA77u ^ shots));
+}
+
+static void reset_recoil(WeaponState *ws, const WeaponDef *d, const UserCmd *cmd, int slot) {
+    u32 seed = (d && !d->recoil.seed_per_mag) ? (dg_hash_str(d->id) | 1u) : recoil_mag_seed(cmd->seq, (u32)slot);
+    recoil_reset(&ws->rc, seed);
+}
+
+// ADS blend, sprint-to-fire timer, hold breath and sway amplitude: deterministic per tick.
+static void gun_feel_tick(WeaponState *ws, const PlayerSim *sim, const RecoilParams *rp, const UserCmd *cmd, float dt) {
+    bool aim = (cmd->buttons & BTN_AIM) && sim->move.mode == MOVE_WALK && !ws->reloading && ws->equip_t > 0.15f;
+    float rate = dt / fmaxf(0.02f, rp->ads_time);
+    ws->ads_t = aim ? fminf(1.0f, ws->ads_t + rate) : fmaxf(0.0f, ws->ads_t - rate * 1.3f);
+    ws->since_sprint = sim->move.sprinting ? 0.0f : fminf(ws->since_sprint + dt, 10.0f);
+    // Hold breath: sprint key while aimed steadies the sway until the capacity runs out.
+    bool want_hold = ws->ads_t > 0.8f && (cmd->buttons & BTN_SPRINT) && rp->hold_breath_time > 0;
+    ws->breath_holding = (u8)(want_hold && !ws->breath_exhausted);
+    if (ws->breath_holding) {
+        ws->breath += dt;
+        if (ws->breath >= rp->hold_breath_time) { ws->breath_exhausted = 1; ws->breath_holding = 0; }
+    } else {
+        ws->breath = fmaxf(0.0f, ws->breath - dt * (ws->breath_exhausted ? 0.5f : 0.8f));
+        if (ws->breath_exhausted && ws->breath <= 0.0f) ws->breath_exhausted = 0;
+    }
+    float sway_target = ws->breath_holding ? 0.12f : (ws->breath_exhausted ? 1.8f : 1.0f);
+    if (ws->sway_k <= 0.0f) ws->sway_k = 1.0f;
+    ws->sway_k = lerpf(ws->sway_k, sway_target, 1.0f - expf(-dt * 5.0f));
+}
+
 void weapons_tick(World *w, int slot, PlayerSim *sim, const UserCmd *cmd, u16 pressed, float dt, bool first, WeaponOutput *out) {
     memset(out, 0, sizeof(*out));
     WeaponState *ws = &sim->wpn;
@@ -274,7 +407,8 @@ void weapons_tick(World *w, int slot, PlayerSim *sim, const UserCmd *cmd, u16 pr
     if (sim->move.mode == MOVE_DEAD) return;
 
     u8 want = (u8)DG_CLAMP((int)cmd->slot, 0, INV_HOTBAR - 1);
-    if (want != ws->slot) {
+    bool equip_changed = want != ws->slot;
+    if (equip_changed) {
         ws->prev_slot = ws->slot;
         ws->slot = want;
         ws->reloading = 0;
@@ -282,15 +416,42 @@ void weapons_tick(World *w, int slot, PlayerSim *sim, const UserCmd *cmd, u16 pr
         ws->swing_t = -1;
         ws->use_t = -1;
         ws->equip_t = 0;
-        ws->spread = 0;
+        ws->ads_t = 0;
+        ws->burst_left = 0;
+        ws->cooldown = 0;
     }
     ws->equip_t += dt;
-    if (ws->cooldown > 0) ws->cooldown -= dt;
     ws->recoil_kick = fmaxf(0.0f, ws->recoil_kick - dt * 6.0f);
 
     InvSlot *s = &p->inv.slots[ws->slot];
     const ItemDef *idef = item_def(w->items, s->item);
     const WeaponDef *d = item_weapon(w->items, s->item);
+    bool gun = d && d->kind != WPN_MELEE;
+    if (s->item != ws->item) {
+        // A different item landed in the selected slot (pickup / give / inventory move).
+        ws->item = s->item;
+        if (!equip_changed) {
+            ws->reloading = 0;
+            ws->reload_t = 0;
+            ws->swing_t = -1;
+            ws->ads_t = 0;
+            ws->burst_left = 0;
+            ws->cooldown = 0;
+            ws->equip_t = dt;
+        }
+        equip_changed = true;
+    }
+    if (equip_changed) {
+        reset_recoil(ws, d, cmd, slot);
+        ws->rc.bloom = 0;
+        if (gun) ws->fire_mode = (u8)default_mode(d->recoil.fire_modes);
+    }
+    // How much of this tick's view change was the player fighting the recoil (needs every tick).
+    static RecoilParams no_gun;
+    if (!no_gun.rpm) recoil_params_default(&no_gun);
+    const RecoilParams *rp = gun ? &d->recoil : &no_gun;
+    recoil_observe_input(rp, &ws->rc, cmd->pitch * DG_RAD2DEG, -cmd->yaw * DG_RAD2DEG);
+
     // The host owns inventory; clients predict the magazine in WeaponState only, so replays
     // of unacknowledged commands never double-spend inventory.
     if (w->authority || ws->equip_t <= dt) ws->mag = s->ammo;
@@ -323,6 +484,7 @@ void weapons_tick(World *w, int slot, PlayerSim *sim, const UserCmd *cmd, u16 pr
     if (!d) return;
 
     if (d->kind == WPN_MELEE) {
+        if (ws->cooldown > 0) ws->cooldown -= dt;
         if (ws->swing_t >= 0) {
             ws->swing_t += dt;
             melee_step(w, slot, sim, d, first, local_view);
@@ -346,48 +508,118 @@ void weapons_tick(World *w, int slot, PlayerSim *sim, const UserCmd *cmd, u16 pr
         return;
     }
 
-    // Guns
-    ws->spread = fmaxf(0.0f, ws->spread - d->spread_recover * dt);
+    // ---- Guns
+    float rscale = cv_f(WC.recoil_scale, 1), sscale = cv_f(WC.spread_scale, 1);
+    if (!(rp->fire_modes & (1u << ws->fire_mode))) ws->fire_mode = (u8)default_mode(rp->fire_modes);
+    if ((pressed & BTN_FIREMODE) && !ws->reloading) {
+        FireMode nm = next_mode((FireMode)ws->fire_mode, rp->fire_modes);
+        if (nm != ws->fire_mode) {
+            ws->fire_mode = (u8)nm;
+            ws->burst_left = 0;
+            out->mode_changed = true;
+            if (local_view && first) fx_sound("switch", sim->move.pos, 0.5f);
+        }
+    }
+    gun_feel_tick(ws, sim, rp, cmd, dt);
+
+    RecoilKick tick_kick = { 0, 0 };
     int reserve = d->ammo_item ? inv_count(&p->inv, d->ammo_item) : 0;
+    bool wants_reload = (pressed & BTN_RELOAD) || ((pressed & BTN_ATTACK) && *mag <= 0);
     if (ws->reloading) {
         ws->reload_t -= dt;
+        ws->cooldown = 0;
         if (ws->reload_t <= 0) {
             int need = d->mag_size - *mag;
             int got = w->authority ? inv_remove(&p->inv, d->ammo_item, need) : DG_MIN(need, reserve);
             *mag = (i16)(*mag + got);
             ws->reloading = 0;
+            reset_recoil(ws, d, cmd, slot);   // new magazine: pattern restarts with a new seed
         }
         if (w->authority) ws->mag = s->ammo;
-        return;
-    }
-    bool wants_reload = (pressed & BTN_RELOAD) || ((pressed & BTN_ATTACK) && *mag <= 0);
-    if (wants_reload && *mag < d->mag_size && reserve > 0 && !busy) {
+    } else if (wants_reload && *mag < d->mag_size && reserve > 0 && !busy) {
         ws->reloading = 1;
         ws->reload_t = d->reload_time;
+        ws->burst_left = 0;
         if (local_view && first) fx_sound(d->sound_reload, sim->move.pos, 0.7f);
-        return;
-    }
-    bool trigger = d->automatic ? attack : (pressed & BTN_ATTACK) != 0;
-    bool can_fire = ws->cooldown <= 0 && ws->equip_t > 0.3f && !busy && !sim->move.sprinting;
-    if (trigger && can_fire) {
-        if (*mag <= 0) {
-            if ((pressed & BTN_ATTACK) && local_view && first) fx_sound("dry_fire", sim->move.pos, 0.6f);
-            return;
+    } else {
+        FireMode mode = (FireMode)ws->fire_mode;
+        bool ready = ws->equip_t > 0.3f && !busy && !sim->move.sprinting && ws->since_sprint >= rp->sprint_to_fire;
+        float interval = 60.0f / fmaxf(1.0f, rp->rpm);
+        int cap = 1;
+        bool trigger;
+        if (mode == FM_AUTO) {
+            trigger = attack;
+            cap = 8;
+        } else if (mode == FM_BURST) {
+            if ((pressed & BTN_ATTACK) && ws->burst_left == 0 && ws->cooldown <= dt) ws->burst_left = (u8)DG_CLAMP(rp->burst_count, 1, 10);
+            trigger = ws->burst_left > 0;
+            interval = 60.0f / fmaxf(1.0f, rp->burst_rpm);
+            cap = ws->burst_left;
+        } else {
+            trigger = (pressed & BTN_ATTACK) != 0;
         }
-        (*mag)--;
-        if (w->authority) ws->mag = s->ammo;
-        ws->cooldown = 1.0f / fmaxf(0.1f, d->fire_rate);
-        fire(w, slot, sim, d, cmd, first, local_view);
-        ws->shots++;
-        ws->spread = fminf(d->spread_max, ws->spread + d->spread_per_shot);
-        ws->recoil_kick = 1.0f;
-        out->fired = true;
-        // Recoil: mostly up, random-ish sideways (deterministic from shot count).
-        Rng rr = rng_make(ws->shots * 7919u + (u64)slot);
-        float side = rng_range(&rr, -1.0f, 1.0f);
-        float ads_mult = (cmd->buttons & BTN_AIM) ? 0.6f : 1.0f;
-        out->view_kick = v2(side * d->recoil_yaw * DG_DEG2RAD * ads_mult, d->recoil_pitch * DG_DEG2RAD * ads_mult);
+        if (trigger && ready && *mag <= 0) {
+            if ((pressed & BTN_ATTACK) && local_view && first) fx_sound("dry_fire", sim->move.pos, 0.6f);
+            ws->burst_left = 0;
+            trigger = false;
+        }
+        cap = DG_MIN(cap, (int)*mag);
+        int n = recoil_fire_budget(&ws->cooldown, interval, dt, trigger && ready && cap > 0, DG_MAX(cap, 0));
+        PlayerMove *m = &sim->move;
+        vec3 eye = player_eye_pos(m);
+        vec2 sway = weapon_sway_deg(d, ws, weapon_sway_time(cmd->seq));
+        for (int k = 0; k < n; k++) {
+            // Aim of this shot: command view + recoil already applied this tick + sway.
+            float yaw = m->yaw - (tick_kick.yaw + sway.x) * DG_DEG2RAD;
+            float pitch = m->pitch + (tick_kick.pitch + sway.y) * DG_DEG2RAD;
+            vec3 dir = dir_from_angles(yaw, pitch);
+            RecoilMods sm = make_mods(sim, sscale);
+            float cone = recoil_spread(rp, &ws->rc, &sm);
+            u32 seed = shot_seed(cmd, slot, ws->shots);
+            (*mag)--;
+            if (w->authority) ws->mag = s->ammo;
+            fire(w, slot, sim, d, cmd, first, local_view, dir, cone, seed);
+            ws->shots++;
+            RecoilMods am = make_mods(sim, rscale);
+            if (ws->rc.shot_index == 0 && ws->since_sprint < rp->sprint_to_fire + 0.35f) am.extra = rp->after_sprint_kick;
+            u16 pattern_index = ws->rc.shot_index;
+            RecoilKick kk = recoil_shot(rp, &ws->rc, &am);
+            tick_kick.pitch += kk.pitch;
+            tick_kick.yaw += kk.yaw;
+            ws->recoil_kick = 1.0f;
+            if (mode == FM_BURST && ws->burst_left > 0) ws->burst_left--;
+            out->fired = true;
+            out->shots++;
+            if (first) {
+                ShotEvent ev;
+                memset(&ev, 0, sizeof(ev));
+                ev.world = w;
+                ev.slot = slot;
+                ev.local_view = local_view;
+                ev.def = d;
+                ev.eye = eye;
+                ev.muzzle = muzzle_world(m, d, local_view);
+                ev.dir = dir;
+                ev.cone_deg = cone;
+                ev.pattern_index = pattern_index;
+                ev.shot_number = ws->shots;
+                ev.mag_left = *mag;
+                ev.mode = mode;
+                ev.ads_t = ws->ads_t;
+                ev.seed = seed;
+                for (int h = 0; h < g_hook_count; h++) g_hooks[h].fn(&ev, g_hooks[h].user);
+            }
+        }
+        // Burst finished: short pause before the next one.
+        if (mode == FM_BURST && n > 0 && ws->burst_left == 0) ws->cooldown += 60.0f / fmaxf(1.0f, rp->rpm);
+        if (mode == FM_BURST && (*mag <= 0 || !ready)) ws->burst_left = 0;
     }
+    // Recovery (and bloom decay) every tick; report everything applied to the view.
+    RecoilKick rec = recoil_tick(rp, &ws->rc, dt);
+    tick_kick.pitch += rec.pitch;
+    tick_kick.yaw += rec.yaw;
+    recoil_set_emitted(&ws->rc, tick_kick);
+    out->view_kick = v2(-tick_kick.yaw * DG_DEG2RAD, tick_kick.pitch * DG_DEG2RAD);
 }
 
 void projectiles_tick(World *w, float dt) {

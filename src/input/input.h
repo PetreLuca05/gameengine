@@ -13,7 +13,7 @@ typedef enum Action {
     ACT_USE, ACT_ATTACK, ACT_AIM, ACT_RELOAD, ACT_DROP,
     ACT_INVENTORY, ACT_NETSTATS,
     ACT_SLOT1, ACT_SLOT2, ACT_SLOT3, ACT_SLOT4, ACT_SLOT5, ACT_SLOT6, ACT_SLOT7, ACT_SLOT8, ACT_SLOT9,
-    ACT_NEXT_ITEM, ACT_PREV_ITEM,
+    ACT_NEXT_ITEM, ACT_PREV_ITEM, ACT_FIREMODE,
     ACT_COUNT
 } Action;
 
@@ -58,6 +58,7 @@ void input_set_binding(Action a, int slot, Binding b);
 const char *binding_name(Binding b, char *buf, size_t size);
 bool binding_from_name(const char *name, Binding *out);
 void input_reset_bindings(void);
+void input_bind_missing_defaults(void);  // after loading a config saved before new actions existed
 // Rebind capture: the next pressed input becomes the binding. Escape cancels.
 void input_begin_capture(Action a, int slot);
 bool input_capturing(void);

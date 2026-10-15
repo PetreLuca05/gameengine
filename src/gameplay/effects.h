@@ -12,6 +12,7 @@ void fx_shutdown(void);
 void fx_tracer(vec3 from, vec3 to);
 void fx_impact(vec3 pos, vec3 normal, int kind);   // kind 0 = surface, 1 = flesh/hitbox
 void fx_muzzle(vec3 pos, vec3 dir);
+void fx_shell(vec3 pos, vec3 vel);                 // ejected casing (brass spark with gravity)
 void fx_damage_number(vec3 pos, float amount, bool headshot);
 void fx_sound(const char *name, vec3 pos, float volume);
 void fx_update(float dt);

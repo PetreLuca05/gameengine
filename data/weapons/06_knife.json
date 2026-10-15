@@ -1,0 +1,24 @@
+{
+  "id": "knife",
+  "item": "knife",
+  "kind": "melee",
+  "damage_type": "melee",
+  "damage": 28,
+  "fire_rate": 2.6,
+  "swing_time": 0.38,
+  "active_start": 0.08,
+  "active_end": 0.2,
+  "reach": 1.4,
+  "sweep_radius": 0.1,
+  "knockback": 120,
+  "swing_arc": 70,
+  "headshot_mult": 2.0,
+  "pose": "melee",
+  "sound_fire": "swing",
+  "grip": [0, 0, 0],
+  "support": [0, -0.05, 0.05],
+  "model": [
+    { "offset": [0, 0.11, 0], "half": [0.004, 0.08, 0.015], "color": [0.8, 0.8, 0.85] },
+    { "offset": [0, 0.0, 0], "half": [0.012, 0.045, 0.016], "color": [0.1, 0.1, 0.1] }
+  ]
+}

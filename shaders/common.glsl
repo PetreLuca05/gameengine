@@ -9,6 +9,7 @@
 #define MAT_HIGHLIGHT  32u
 #define MAT_TEXTURED   64u
 #define MAT_CHECKER    128u
+#define MAT_GRID_FINE  256u
 
 struct PointLight {
     vec4 pos_radius;

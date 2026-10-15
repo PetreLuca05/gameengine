@@ -15,6 +15,7 @@ enum CmdButtons {
     BTN_RELOAD  = 1 << 6,
     BTN_WALK    = 1 << 7,
     BTN_NOCLIP  = 1 << 8,   // dev
+    BTN_FIREMODE = 1 << 9,  // cycle fire mode (edge)
 };
 
 typedef struct UserCmd {

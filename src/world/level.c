@@ -160,6 +160,7 @@ static void build_brush(LevelBuild *b, const cJSON *br) {
     float yaw = jf(br, "yaw", 0) * DG_DEG2RAD;
     u32 color = jcol(br, "color", rgba8(0.6f, 0.6f, 0.62f, 1));
     u32 flags = jb(br, "grid", true) ? MAT_GRID : 0;
+    if (jb(br, "fine_grid", false)) flags = MAT_GRID_FINE;
     if (!jb(br, "shadow", true)) flags |= MAT_NO_SHADOW;
     World *w = b->w;
     u32 label_col = rgba8(0.08f, 0.08f, 0.1f, 1);

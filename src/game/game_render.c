@@ -1,5 +1,6 @@
 // Presentation: builds draw lists for the world, local view, hands, effects, HUD and menus.
 #include "game_internal.h"
+#include "ui/recoil_debug.h"
 #include "core/engine.h"
 #include "core/cvar.h"
 #include "core/log.h"
@@ -300,6 +301,16 @@ void game_render(void) {
     input_set_ads(ads);
     bool dead = p && p->sim.move.mode == MOVE_DEAD;
     RenderCamera cam = camera_update(&G->view, &interp, (float)g_engine.frame_dt, ads, wd ? wd->ads_fov : 0, dead);
+    // Weapon feel: camera kick spring (visual only, aim unaffected) + aim sway (bullets use it too).
+    if (p && !dead) {
+        vec3 kr = spring_vec3_sample(&G->recoil_vis.cam_rot, G->alpha);
+        float kb = spring_f32_sample(&G->recoil_vis.cam_back, G->alpha);
+        vec2 sway = weapon_sway_deg(wd, &p->sim.wpn, weapon_sway_time(G->last_cmd.seq) + G->alpha * SIM_DT);
+        cam.pitch += (kr.x + sway.y) * DG_DEG2RAD;
+        cam.yaw -= (kr.y + sway.x) * DG_DEG2RAD;
+        cam.roll += kr.z * DG_DEG2RAD;
+        cam.pos = v3_madd(cam.pos, dir_from_angles(cam.yaw, cam.pitch), -kb);
+    }
     render_set_camera(&cam);
 
     LevelStatic *ls = &w->level;
@@ -335,11 +346,14 @@ void game_render(void) {
         hi.use_pressed = G->use_pressed_frame;
         hi.use_held = (G->last_cmd.buttons & BTN_USE) != 0;
         hi.ads = ads;
+        hi.vm_kick_pos = spring_vec3_sample(&G->recoil_vis.vm_pos, G->alpha);
+        hi.vm_kick_rot = spring_vec3_sample(&G->recoil_vis.vm_rot, G->alpha);
         hands_update(&hi);
         hands_render();
     }
     fx_render();
     draw_debug(w, cam.pos);
+    recoil_debug_draw(cam.pos);
     vec3 right = right_from_yaw(cam.yaw);
     vec3 up = v3_cross(right, fwd);
     dbg_submit((float)g_engine.frame_dt, cam.pos, right, up);

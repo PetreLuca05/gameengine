@@ -51,6 +51,23 @@ vec3 apply_grid(vec3 base, vec3 p, vec3 n) {
     return col;
 }
 
+// Measuring grid for the recoil wall: 10 cm minor, 50 cm major, 1 m bold lines.
+vec3 apply_fine_grid(vec3 base, vec3 p, vec3 n) {
+    vec3 an = abs(n);
+    vec2 c;
+    if (an.y >= an.x && an.y >= an.z) c = p.xz;
+    else if (an.x >= an.z) c = p.zy;
+    else c = p.xy;
+    float minor = max(grid_line(c.x, 0.1, 0.9), grid_line(c.y, 0.1, 0.9));
+    float half_m = max(grid_line(c.x, 0.5, 1.4), grid_line(c.y, 0.5, 1.4));
+    float meter = max(grid_line(c.x, 1.0, 2.0), grid_line(c.y, 1.0, 2.0));
+    vec3 col = base;
+    col = mix(col, col * 0.62, minor * 0.7);
+    col = mix(col, vec3(0.1, 0.3, 0.6), half_m * 0.8);
+    col = mix(col, vec3(0.75, 0.15, 0.1), meter);
+    return col;
+}
+
 float shadow_factor(vec3 p, vec3 n) {
     if (frame.sun_color.w < 0.5) return 1.0;
     vec3 offset_p = p + n * 0.04;
@@ -121,6 +138,7 @@ void main() {
         base.rgb *= mix(0.8, 1.0, k);
     }
     if ((flags & MAT_GRID) != 0u && frame.params.x > 0.5) base.rgb = apply_grid(base.rgb, v_world, n);
+    if ((flags & MAT_GRID_FINE) != 0u) base.rgb = apply_fine_grid(base.rgb, v_world, n);
 
     vec3 color;
     if ((flags & MAT_UNLIT) != 0u) {

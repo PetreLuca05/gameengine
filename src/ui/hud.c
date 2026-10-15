@@ -1,4 +1,5 @@
 #include "hud.h"
+#include "crosshair.h"
 #include "ui.h"
 #include "core/engine.h"
 #include "core/cvar.h"
@@ -19,38 +20,6 @@
 static void bar(float x, float y, float w, float h, float frac, u32 fill, u32 back) {
     ui_rect(x, y, w, h, back);
     ui_rect(x + 2, y + 2, (w - 4) * saturate(frac), h - 4, fill);
-}
-
-static void draw_crosshair(Game *g, World *w, float s) {
-    float cx = ui_width() * 0.5f, cy = ui_height() * 0.5f;
-    Player *p = game_local_player();
-    if (!p || p->sim.move.mode == MOVE_DEAD) return;
-    const WeaponDef *wd = weapon_equipped_def(w, g->local_slot);
-    bool ads = (g->last_cmd.buttons & BTN_AIM) != 0;
-    if (wd && wd->kind != WPN_MELEE && !ads) {
-        // Gap follows the actual spread cone projected to the screen.
-        float spread = weapon_current_spread(w, g->local_slot);
-        float fov = g->view.fov > 1 ? g->view.fov : 75.0f;
-        float gap = tanf(spread * DG_DEG2RAD) / tanf(fov * 0.5f * DG_DEG2RAD) * (ui_height() * 0.5f);
-        gap = fmaxf(gap, 4 * s);
-        float len = 8 * s, th = 2 * s;
-        u32 c = UI_RGBA(240, 240, 240, 220);
-        ui_rect(cx - gap - len, cy - th * 0.5f, len, th, c);
-        ui_rect(cx + gap, cy - th * 0.5f, len, th, c);
-        ui_rect(cx - th * 0.5f, cy - gap - len, th, len, c);
-        ui_rect(cx - th * 0.5f, cy + gap, th, len, c);
-    } else if (!ads) {
-        ui_rect(cx - 2 * s, cy - 2 * s, 4 * s, 4 * s, g->focus ? COL_ACCENT : UI_RGBA(240, 240, 240, 200));
-    }
-    if (g->hitmarker_time > 0) {
-        float a = g->hitmarker_time / 0.25f;
-        u32 c = g->hitmarker_kill ? UI_RGBA(255, 60, 40, (int)(255 * a)) : (g->hitmarker_head ? UI_RGBA(255, 200, 60, (int)(255 * a)) : UI_RGBA(255, 255, 255, (int)(255 * a)));
-        float in = 6 * s, out = 14 * s;
-        ui_line(cx - in, cy - in, cx - out, cy - out, 2.5f * s, c);
-        ui_line(cx + in, cy - in, cx + out, cy - out, 2.5f * s, c);
-        ui_line(cx - in, cy + in, cx - out, cy + out, 2.5f * s, c);
-        ui_line(cx + in, cy + in, cx + out, cy + out, 2.5f * s, c);
-    }
 }
 
 static void draw_damage_indicators(Game *g, float s) {
@@ -254,7 +223,7 @@ void hud_draw(void) {
     draw_world_bars(g, w, s);
     fx_draw_hud();
     if (!g->menu_open) {
-        draw_crosshair(g, w, s);
+        crosshair_draw((float)g_engine.frame_dt);
         draw_prompt(g, s);
     }
     draw_damage_indicators(g, s);

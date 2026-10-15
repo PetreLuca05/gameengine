@@ -50,6 +50,7 @@ typedef struct Game {
     PlayerMove predicted_prev;   // previous predicted tick (render interpolation)
     u32 last_ack_seq;
     float prediction_error;
+    float recoil_pred_error, recoil_pred_error_max;   // predicted vs replayed recoil state (should be 0)
     vec3 error_offset;           // smoothed visual correction after reconciliation
 
     // interaction focus (local)
@@ -75,6 +76,15 @@ typedef struct Game {
 
     bool noclip_request;
     bool show_netstats;
+
+    // weapon feel (client-only presentation, stepped per tick, sampled with alpha)
+    RecoilVisual recoil_vis;
+    float spread_prev, spread_cur;   // bullet cone (deg) for the crosshair
+    float bolt_timer;                // bolt / pump cycle sound pending
+    int magdump_ticks;               // wpn_magdump: >0 while holding the trigger
+    bool magdump_ads;
+    float magdump_dist;
+    int magdump_first_tick, magdump_last_tick, magdump_shots, magdump_last_mag;
 
     Cvar *g_map, *sv_hostname, *cl_name, *dev_mode, *r_drawhitboxes, *r_drawcollision;
     Cvar *cl_showfps, *net_autohost, *world_seed, *interact_range;

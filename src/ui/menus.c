@@ -1,4 +1,5 @@
 #include "menus.h"
+#include "crosshair.h"
 #include "ui.h"
 #include "console.h"
 #include "core/engine.h"
@@ -15,7 +16,7 @@
 #include <stdlib.h>
 
 typedef enum MenuPage { PAGE_NONE, PAGE_PAUSE, PAGE_SETTINGS, PAGE_MULTIPLAYER } MenuPage;
-typedef enum SettingsTab { TAB_GRAPHICS, TAB_CONTROLS, TAB_AUDIO } SettingsTab;
+typedef enum SettingsTab { TAB_GRAPHICS, TAB_CONTROLS, TAB_CROSSHAIR, TAB_AUDIO } SettingsTab;
 
 typedef struct GraphicsSettings {
     int width, height, mode, vsync, shadow, texq, aniso, aa, maxfps;
@@ -105,6 +106,7 @@ static void cmd_menu(int argc, const char **argv) {
     if (!strcmp(page, "settings")) { M->page = PAGE_SETTINGS; M->pending = read_graphics(); collect_resolutions(); }
     if (!strcmp(page, "controls")) { M->page = PAGE_SETTINGS; M->tab = TAB_CONTROLS; }
     if (!strcmp(page, "audio")) { M->page = PAGE_SETTINGS; M->tab = TAB_AUDIO; }
+    if (!strcmp(page, "crosshair")) { M->page = PAGE_SETTINGS; M->tab = TAB_CROSSHAIR; }
     if (!strcmp(page, "multiplayer")) { M->page = PAGE_MULTIPLAYER; net_lan_refresh(); }
     if (g) g->menu_open = true;
     update_mouse_mode();
@@ -333,6 +335,37 @@ static void draw_controls(struct nk_context *ctx) {
     if (nk_button_label(ctx, "Reset bindings to defaults")) input_reset_bindings();
 }
 
+static void draw_crosshair_tab(struct nk_context *ctx) {
+    static const char *styles[] = { "Cross", "Cross + dot", "Dot", "Circle" };
+    Cvar *st = cv("crosshair_style");
+    if (st) {
+        int sel = combo_row(ctx, "Style", styles, 4, DG_CLAMP(st->i, 0, 3));
+        if (sel != st->i) cvar_set_int(st, sel);
+    }
+    Cvar *col = cv("crosshair_color");
+    if (col) {
+        const char *names[8];
+        int n = DG_MIN(crosshair_color_count(), 8);
+        for (int i = 0; i < n; i++) names[i] = crosshair_color_name(i);
+        int sel = combo_row(ctx, "Color", names, n, DG_CLAMP(col->i, 0, n - 1));
+        if (sel != col->i) cvar_set_int(col, sel);
+    }
+    slider_cvar(ctx, "Line length", "crosshair_length", 1, 40, 0.5f, "%.1f");
+    slider_cvar(ctx, "Line thickness", "crosshair_thickness", 1, 8, 0.5f, "%.1f");
+    slider_cvar(ctx, "Extra gap", "crosshair_gap", 0, 30, 0.5f, "%.1f");
+    slider_cvar(ctx, "Opacity", "crosshair_opacity", 0.1f, 1, 0.05f, "%.2f");
+    check_cvar(ctx, "Outline", "crosshair_outline");
+    check_cvar(ctx, "Tint over enemies / friendlies", "crosshair_target_color");
+    check_cvar(ctx, "Hit markers", "crosshair_hitmarker");
+    check_cvar(ctx, "Follow camera kick (pin to screen center)", "crosshair_follow_kick");
+    nk_layout_row_dynamic(ctx, S(10), 1);
+    slider_cvar(ctx, "Weapon kick (visual only)", "wpn_visual_scale", 0, 2, 0.05f, "%.2f");
+    nk_layout_row_dynamic(ctx, S(22), 1);
+    nk_label(ctx, "The gap shows the exact bullet spread cone. Palette: assets/ui/crosshair.json", NK_TEXT_LEFT);
+    nk_layout_row_dynamic(ctx, S(30), 1);
+    if (nk_button_label(ctx, "Reload crosshair style")) crosshair_reload();
+}
+
 static void draw_audio(struct nk_context *ctx) {
     slider_cvar(ctx, "Master volume", "snd_master", 0, 1, 0.01f, "%.2f");
     slider_cvar(ctx, "Music volume", "snd_music", 0, 1, 0.01f, "%.2f");
@@ -342,14 +375,16 @@ static void draw_audio(struct nk_context *ctx) {
 
 static void draw_settings(struct nk_context *ctx) {
     if (nk_begin(ctx, "SETTINGS", centered(S(620), S(640)), NK_WINDOW_BORDER | NK_WINDOW_TITLE)) {
-        nk_layout_row_dynamic(ctx, S(32), 4);
+        nk_layout_row_dynamic(ctx, S(32), 5);
         if (nk_button_label(ctx, M->tab == TAB_GRAPHICS ? "> Graphics" : "Graphics")) M->tab = TAB_GRAPHICS;
         if (nk_button_label(ctx, M->tab == TAB_CONTROLS ? "> Controls" : "Controls")) M->tab = TAB_CONTROLS;
+        if (nk_button_label(ctx, M->tab == TAB_CROSSHAIR ? "> Crosshair" : "Crosshair")) M->tab = TAB_CROSSHAIR;
         if (nk_button_label(ctx, M->tab == TAB_AUDIO ? "> Audio" : "Audio")) M->tab = TAB_AUDIO;
         if (nk_button_label(ctx, "Back")) { config_save(video_config_path()); M->page = PAGE_PAUSE; }
         switch (M->tab) {
         case TAB_GRAPHICS: draw_graphics(ctx); break;
         case TAB_CONTROLS: draw_controls(ctx); break;
+        case TAB_CROSSHAIR: draw_crosshair_tab(ctx); break;
         case TAB_AUDIO: draw_audio(ctx); break;
         }
     }

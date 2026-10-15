@@ -16,7 +16,7 @@ Game code is C11. C++ appears only inside third-party libraries that expose C AP
   everything else is malloc/free with clear ownership.
 * **Fixed timestep:** the simulation runs at 60 Hz (`SIM_DT`). Rendering runs at display rate and
   interpolates between the previous and current tick.
-* **Data driven:** items (`data/items.json`), weapons (`data/weapons.json`), the level
+* **Data driven:** items (`data/items.json`), weapons (`data/weapons/*.json`, one file per gun, loaded sorted by file name so indices match on every machine), the level
   (`data/levels/devroom.json`), hand poses (`data/hand_poses.json`) and the asset manifest
   (`data/assets.json`). Adding a weapon or item needs no code changes.
 * **Plain structs + function pointers** for every extension point: `NetTransport`, `ChunkProvider`,
@@ -130,9 +130,14 @@ client-side prediction run it:
   * **hang**: airborne and above mantle height. You then pull up or drop.
 
   It also writes world-space **hand anchors** for the IK system.
-* `weapons_tick`: equip, consumables, melee sweep during active frames, guns (spread cone, recoil,
-  magazine, reload), projectiles. Clients predict the **magazine** in `WeaponState`, and only the host
-  edits inventories.
+* `weapons_tick`: equip, consumables, melee sweep during active frames, guns (fire modes, sub-tick
+  RPM, spread cone, three-layer recoil, ADS blend, sway / hold breath, magazine, reload), projectiles.
+  Clients predict the **magazine** and the **aim recoil state** (`RecoilState` in `WeaponState`), and only
+  the host edits inventories. Recoil math is the pure module `gameplay/recoil.c` (unit tested). See
+  [docs/RECOIL.md](docs/RECOIL.md).
+* The host simulates a remote player **once per received command** and never on a guess. A starved
+  queue waits and a backed-up one catches up two commands per tick, so fire timing, recoil and ammo
+  replay identically on the client.
 * `first == false` during reconciliation replays, so effects, sounds and recoil happen once.
 
 ### Interactions

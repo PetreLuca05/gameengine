@@ -160,6 +160,7 @@ int main(int argc, char **argv) {
     for (int i = 1; i < argc; i++) if (!strcmp(argv[i], "--test")) opt.test = true;
     if (opt.test) cvar_set("r_maxfps", "60");
     else if (config_exec_file(video_config_path())) log_info("config loaded from %s", video_config_path());
+    input_bind_missing_defaults();
     if (cvar_find("r_mode")->i != 0 || cw->i != 1600 || ch->i != 900) video_apply();
     parse_args(argc, argv, &opt);
     if (!boot_commands_connect(argc, argv)) game_host(game()->g_map->str);

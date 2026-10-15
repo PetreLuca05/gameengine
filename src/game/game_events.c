@@ -6,6 +6,7 @@
 #include "gameplay/entities.h"
 #include "net/net.h"
 #include "audio/audio.h"
+#include "ui/crosshair.h"
 #include <stdio.h>
 #include <math.h>
 
@@ -43,10 +44,10 @@ void game_handle_event(const GameEvent *ev) {
     case EV_SOUND: audio_play(ev->text, ev->pos, ev->value, SND_SFX); break;
     case EV_DAMAGE_NUMBER: fx_damage_number(ev->pos, ev->value, (ev->id & 0x100u) != 0); break;
     case EV_HIT_CONFIRM:
-        G->hitmarker_time = 0.25f;
+        G->hitmarker_time = crosshair_hitmarker_duration();
         G->hitmarker_kill = (ev->id & 1u) != 0;
         G->hitmarker_head = (ev->id & 2u) != 0;
-        audio_play_2d(G->hitmarker_kill ? "hit_kill" : "hit", 0.5f, SND_UI);
+        audio_play_2d(G->hitmarker_kill ? "hit_kill" : (G->hitmarker_head ? "hit_head" : "hit"), 0.5f, SND_UI);
         break;
     case EV_HURT: {
         for (int i = 0; i < MAX_HURT_MARKERS; i++) {
