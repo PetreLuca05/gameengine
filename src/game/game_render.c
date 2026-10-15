@@ -552,9 +552,14 @@ void game_render(void) {
         float ck = cvar_find("cam_kick_scale") ? cvar_find("cam_kick_scale")->f : 1.0f;   // visual camera kick (aim recoil unaffected)
         vec3 kr = v3_scale(spring_vec3_sample(&G->recoil_vis.cam_rot, G->alpha), ck);
         float kb = spring_f32_sample(&G->recoil_vis.cam_back, G->alpha) * ck;
-        vec2 sway = weapon_sway_deg(wd, &p->sim.wpn, weapon_sway_time(G->last_cmd.seq) + G->alpha * SIM_DT);
-        cam.pitch += (kr.x + sway.y) * DG_DEG2RAD;
-        cam.yaw -= (kr.y + sway.x) * DG_DEG2RAD;
+        // Sway and ADS bob move the weapon (about the eye), not the camera: the sight centre stays
+        // exactly on the bullets' line (weapon_aim_offset_deg is what the shots use).
+        vec2 sway = weapon_aim_offset_deg(wd, &p->sim.wpn, &p->sim.move, weapon_sway_time(G->last_cmd.seq) + G->alpha * SIM_DT);
+        Cvar *rvm = cvar_find("r_viewmodel_fov");
+        float vmf = rvm && rvm->f > 1.0f ? rvm->f : (cam.vm_fov_deg > 1.0f ? cam.vm_fov_deg : cam.fov_deg);
+        chars_set_fp_aim_offset(sway.x, sway.y, cam.pitch + kr.x * DG_DEG2RAD, cam.fov_deg, vmf);
+        cam.pitch += kr.x * DG_DEG2RAD;
+        cam.yaw -= kr.y * DG_DEG2RAD;
         cam.roll += kr.z * DG_DEG2RAD;
         cam.pos = v3_madd(cam.pos, dir_from_angles(cam.yaw, cam.pitch), -kb);
     }

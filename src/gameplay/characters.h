@@ -118,6 +118,9 @@ bool chars_item_muzzle(World *w, EntityId e, vec3 *pos, vec3 *dir);
 bool chars_head_world(World *w, EntityId e, float alpha, vec3 *out);
 // First person: this frame's final camera (the held item is placed relative to it).
 void chars_set_fp_camera(vec3 pos, quat rot, bool valid);
+// Aim offset of the held item (degrees right / up of the view, the view pitch in radians): the
+// first-person item turns about the eye so its sight points where the shots go.
+void chars_set_fp_aim_offset(float right_deg, float up_deg, float view_pitch, float world_fov_deg, float vm_fov_deg);
 // Last first-person frame: hand <-> socket error ([0] left, [1] right; m / deg) and ADS sight error.
 void chars_fp_diag(float glue_pos[2], float glue_ang[2], float *ads_pos, float *ads_ang);
 const char *chars_holdpoint_text(World *w, int local_slot);   // "hold <state> <blend>% pull .. reach .."

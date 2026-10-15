@@ -34,7 +34,7 @@ typedef void (*ShotHook)(const ShotEvent *ev, void *user);
 void weapons_add_shot_hook(ShotHook fn, void *user);
 
 typedef struct WeaponCvars {
-    struct Cvar *recoil_scale, *visual_scale, *spread_scale, *recoil_debug, *infinite_ammo, *sway_scale, *kick_scale, *bob_scale;
+    struct Cvar *recoil_scale, *visual_scale, *spread_scale, *recoil_debug, *infinite_ammo, *sway_scale, *kick_scale, *bob_scale, *ads_sway, *ads_bob;
 } WeaponCvars;
 void weapons_register_cvars(void);
 const WeaponCvars *weapons_cvars(void);
@@ -48,6 +48,12 @@ const WeaponDef *weapon_equipped_def(const World *w, int slot);
 float weapon_current_spread(const World *w, int slot);
 // Deterministic aim sway offset (degrees, x = yaw right, y = pitch up) at time t (s).
 vec2 weapon_sway_deg(const WeaponDef *d, const WeaponState *ws, float t);
+// Where the sight points relative to the view (degrees, x = yaw right, y = pitch up): the aim sway
+// (x wpn_ads_sway) plus the ADS walk bob (wpn_ads_bob). Deterministic from the simulated state, so
+// the host's bullets go exactly through the centre of the sight the shooter sees (the camera stays
+// steady; the held weapon is rotated about the eye by this offset).
+struct PlayerMove;
+vec2 weapon_aim_offset_deg(const WeaponDef *d, const WeaponState *ws, const struct PlayerMove *m, float t);
 // Sway clock: derived from the command sequence so host and client agree.
 DG_INLINE float weapon_sway_time(u32 seq) { return (float)(seq % 360000u) * (1.0f / 60.0f); }
 const char *fire_mode_name(FireMode m);

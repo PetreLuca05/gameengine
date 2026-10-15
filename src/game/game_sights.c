@@ -51,7 +51,7 @@ typedef struct SightTest {
 } SightTest;
 
 static struct {
-    Cvar *scope_mode, *pip_scale, *brightness, *ads_debug, *sight_debug, *sens_mode, *sens_coef;
+    Cvar *scope_mode, *pip_scale, *brightness, *ads_debug, *sight_debug, *sens_mode, *sens_coef, *relief_scale;
     Cvar *ads_dof, *dof_focus, *dof_fstop, *iron_blur, *thirdperson;
     // this frame
     const AttachmentDef *optic;
@@ -83,6 +83,7 @@ static float sens_scale(float sight_fov, float hip_fov) {
 void sights_camera(const Player *p, const WeaponDef *wd, CameraAds *out) {
     memset(out, 0, sizeof(*out));
     S.base_fov = camera_base_fov();
+    holdpoint_set_ads_relief_scale(S.relief_scale ? S.relief_scale->f : 1.0f);
     S.have_wd = wd != NULL;
     if (wd) S.wd = *wd;
     bool gun = wd && wd->kind != WPN_MELEE;
@@ -138,7 +139,9 @@ void sights_frame(const RenderCamera *cam, bool first_person) {
             rs->up = xf_dir(opt, v3(0, 1, 0));
             rs->right = xf_dir(opt, v3(1, 0, 0));
             // Collimated dot: converges on the optic axis at the parallax-free distance.
-            rs->dot_point = v3_madd(render_viewmodel_to_world(rs->lens_pos), rs->fwd, fmaxf(a->parallax_m, 1.0f));
+            // Through the viewmodel -> world mapping like the lens, so the dot sits on the pixel the
+            // optic axis points at (and the bullets go) whatever the viewmodel FOV.
+            rs->dot_point = render_viewmodel_to_world(v3_madd(rs->lens_pos, rs->fwd, fmaxf(a->parallax_m, 1.0f)));
             rs->reticle_moa = a->reticle.moa;
             rs->reticle_outer_moa = a->reticle.outer_moa;
             rs->reticle_shape = a->reticle.shape;
@@ -153,7 +156,7 @@ void sights_frame(const RenderCamera *cam, bool first_person) {
             rs->zoom = a->zoom;
             rs->eye_box = a->eye_box;
             rs->eye_box_depth = a->eye_box_depth;
-            rs->eye_relief = a->eye_relief > 0 ? a->eye_relief : 0.1f;
+            rs->eye_relief = holdpoint_ads_relief(a->eye_relief > 0 ? a->eye_relief : 0.1f);
             rs->pip_scale = S.pip_scale->f;
             rs->dof_near_blur = a->dof_near_blur;
             rs->hide_viewmodel = S.kind == RSIGHT_SCOPE_FULL && S.complete;
@@ -511,6 +514,7 @@ bool sights_dof_managed(void) { return S.ads_dof && S.ads_dof->i; }
 // ------------------------------------------------------------------ registration
 
 void sights_register(void) {
+    S.relief_scale = cvar_reg_float("ads_eye_relief_scale", 0.5f, 0.2f, 1.5f, CVAR_ARCHIVE, "ADS: sight distance from the eye x this (1 = the stock weld / the scope eye relief)");
     S.scope_mode = cvar_reg_int("r_scope_mode", 0, 0, 1, CVAR_ARCHIVE, "scopes: 0 = picture-in-picture (second scene render at the scope FOV), 1 = full-screen FOV + vignette");
     S.pip_scale = cvar_reg_float("r_scope_pip_scale", 0.5f, 0.2f, 1.0f, CVAR_ARCHIVE, "scope picture-in-picture resolution (fraction of the render height)");
     S.brightness = cvar_reg_float("sight_brightness", 1.0f, 0.0f, 4.0f, CVAR_ARCHIVE, "red dot / illuminated reticle brightness");

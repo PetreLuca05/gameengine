@@ -281,9 +281,17 @@ static HpPose pose_for(const HoldPointStyle *s, const HoldPointOverride *o, int 
     return p;
 }
 
+static float g_ads_relief_scale = 1.0f;
+void holdpoint_set_ads_relief_scale(float k) { g_ads_relief_scale = clampf(k, 0.2f, 1.5f); }
+float holdpoint_ads_relief(float relief) { return fmaxf(relief > 0.12f ? 0.10f : 0.055f, relief * g_ads_relief_scale); }
+
 Xform holdpoint_ads_item(const HoldPointStyle *s, const HoldPointOverride *o, vec3 sight) {
     float relief = (o && o->eye_relief > 0) ? o->eye_relief : s->eye_relief;
     if (o) relief += o->eye_relief_add;
+    // Iron sights / red dots sit at the stock weld (24-34 cm), scopes at their eye relief (8-9 cm):
+    // ads_eye_relief_scale brings either towards the eye so the sight picture fills more of the
+    // view (floors keep the ocular / rear sight in front of the near plane).
+    relief = holdpoint_ads_relief(relief);
     quat r = hp_euler_deg(s->ads_rot);
     // item * sight = (0, 0, -relief) with the item's barrel along the view axis.
     vec3 t = v3_sub(v3(0, 0, -relief), quat_rotate(r, sight));

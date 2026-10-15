@@ -198,7 +198,7 @@ void crosshair_draw(float dt) {
 
     // Where the next bullet goes: the view (+ sway); the camera adds the kick spring on top.
     float cx = scr_w * 0.5f, cy = scr_h * 0.5f;
-    vec2 sway = gun ? weapon_sway_deg(wd, &p->sim.wpn, weapon_sway_time(g->last_cmd.seq) + g->alpha * SIM_DT) : v2(0, 0);
+    vec2 sway = gun ? weapon_aim_offset_deg(wd, &p->sim.wpn, &p->sim.move, weapon_sway_time(g->last_cmd.seq) + g->alpha * SIM_DT) : v2(0, 0);
     vec3 aim = dir_from_angles(g->view.yaw - sway.x * DG_DEG2RAD, g->view.pitch + sway.y * DG_DEG2RAD);
     if (!CH.follow_kick->i) {
         vec2 px;

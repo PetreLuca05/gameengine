@@ -15,8 +15,12 @@ layout(set = 0, binding = 2) uniform sampler2D noise_tex;
 
 vec3 bright(vec2 uv, float expo) {
     if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return vec3(0.0);
+    // Only intense sources flare (the sun, strong lamps): a high soft-knee threshold on the
+    // exposed colour, so sky, white walls and ordinary specular highlights stay clean.
     vec3 c = textureLod(bloom_tex, uv, 0.0).rgb * expo;
-    return max(c - vec3(1.0), vec3(0.0));
+    float l = max(c.r, max(c.g, c.b));
+    float k = smoothstep(6.0, 24.0, l);
+    return c * k * 0.25;
 }
 vec3 chroma(vec2 uv, vec2 dir, float amt, float expo) {
     return vec3(bright(uv + dir * amt, expo).r, bright(uv, expo).g, bright(uv - dir * amt, expo).b);
@@ -26,7 +30,8 @@ vec3 chroma(vec2 uv, vec2 dir, float amt, float expo) {
 vec3 soft(vec2 uv, float expo) {
     if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return vec3(0.0);
     vec3 c = textureLod(soft_tex, uv, 0.0).rgb * expo;
-    return max(c - vec3(0.35), vec3(0.0)) * 2.5;
+    float l = max(c.r, max(c.g, c.b));
+    return c * smoothstep(2.0, 8.0, l) * 0.3;
 }
 vec3 ghost(vec2 uv, vec2 dir, float radius, float expo, float aspect) {
     return vec3(soft(uv + dir, expo).r, soft(uv, expo).g, soft(uv - dir, expo).b);
@@ -53,7 +58,7 @@ void main() {
         float hw = pow(1.0 - clamp(length(vec2(0.5) - fract(g + hd)) / 0.7071, 0.0, 1.0), 5.0);
         vec2 hc = g + hd, hs = hd * 0.012;   // halo: soft source, small colour split (no rainbow slashes)
         r += vec3(soft(hc + hs, expo).r, soft(hc, expo).g, soft(hc - hs, expo).b) * hw * 0.35;
-        r *= U.s_lens.x;
+        r *= U.s_lens.x * 0.5;
     }
     if (U.s_lens.y > 0.0) {
         // Dense taps (2 texels apart, jittered per pixel) so a small light makes a continuous

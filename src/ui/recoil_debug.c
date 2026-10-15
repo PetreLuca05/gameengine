@@ -41,7 +41,7 @@ void recoil_debug_draw(vec3 cam_pos) {
     float cone = lerpf(g->spread_prev, g->spread_cur, g->alpha);
 
     // World: the cone at the distance the aim ray hits.
-    vec2 sway = weapon_sway_deg(d, ws, weapon_sway_time(g->last_cmd.seq) + g->alpha * SIM_DT);
+    vec2 sway = weapon_aim_offset_deg(d, ws, &p->sim.move, weapon_sway_time(g->last_cmd.seq) + g->alpha * SIM_DT);
     vec3 aim = dir_from_angles(g->view.yaw - sway.x * DG_DEG2RAD, g->view.pitch + sway.y * DG_DEG2RAD);
     RayHit rh;
     BodyId self = p->character ? phys_character_inner_body(p->character) : PHYS_INVALID_BODY;

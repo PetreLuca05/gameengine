@@ -30,6 +30,8 @@ void weapons_register_cvars(void) {
     WC.visual_scale = cvar_reg_float("wpn_visual_scale", 1.0f, 0.0f, 3.0f, CVAR_ARCHIVE, "camera + viewmodel kick multiplier (cosmetic)");
     WC.sway_scale = cvar_reg_float("wpn_sway_scale", 1.0f, 0.0f, 3.0f, CVAR_SERVER, "weapon sway: aim sway (moves the view + bullets), the item's look lag / idle sway / breathing / sprint bob");
     WC.kick_scale = cvar_reg_float("wpn_kick_scale", 1.0f, 0.0f, 3.0f, CVAR_ARCHIVE, "visual recoil kick of the held item on its hold point (aim recoil is separate)");
+    WC.ads_sway = cvar_reg_float("wpn_ads_sway", 2.5f, 0.0f, 6.0f, CVAR_SERVER, "aim sway of the sight while aimed (x the weapon's idle sway; bullets follow the sight)");
+    WC.ads_bob = cvar_reg_float("wpn_ads_bob", 1.0f, 0.0f, 3.0f, CVAR_SERVER, "sight bob while walking aimed (bullets follow the sight)");
     WC.bob_scale = cvar_reg_float("wpn_bob_scale", 0.0f, 0.0f, 3.0f, CVAR_ARCHIVE, "item bob while walking (0 = the item stays still; sprinting always bobs)");
     WC.recoil_debug = cvar_reg_int("wpn_recoil_debug", 0, 0, 2, 0, "recoil overlay: 1 = panel + cone, 2 = also log every shot");
     // Replicated so clients' predicted magazines agree with the host.
@@ -104,6 +106,20 @@ vec2 weapon_sway_deg(const WeaponDef *d, const WeaponState *ws, float t) {
     float x = sinf(t * 0.83f) * 0.7f + sinf(t * 1.97f + 1.1f) * 0.3f;
     float y = sinf(t * 1.31f + 0.4f) * 0.6f + sinf(t * 2.63f + 2.0f) * 0.4f;
     return v2(x * amp, y * amp * 0.8f);
+}
+
+vec2 weapon_aim_offset_deg(const WeaponDef *d, const WeaponState *ws, const PlayerMove *m, float t) {
+    if (!d || d->kind == WPN_MELEE) return v2(0, 0);
+    vec2 o = v2_scale(weapon_sway_deg(d, ws, t), cv_f(WC.ads_sway, 1.0f));
+    if (m) {
+        // Walk bob of the sight: a figure-eight at the step rate, growing with speed.
+        float speed = sqrtf(m->vel.x * m->vel.x + m->vel.z * m->vel.z);
+        float k = saturate(speed / 4.5f) * saturate(ws->ads_t) * cv_f(WC.ads_bob, 1.0f) * (m->on_ground ? 1.0f : 0.3f);
+        float ph = t * (5.0f + fminf(speed, 6.0f) * 1.15f);
+        o.x += cosf(ph) * 0.32f * k;
+        o.y += (fabsf(sinf(ph)) - 0.5f) * 0.42f * k;
+    }
+    return o;
 }
 
 void weapon_flinch(World *w, int slot, float damage) {
@@ -751,9 +767,9 @@ void weapons_tick(World *w, int slot, PlayerSim *sim, const UserCmd *cmd, u16 pr
         int n = recoil_fire_budget(&ws->cooldown, interval, dt, trigger && ready && cap > 0, DG_MAX(cap, 0));
         PlayerMove *m = &sim->move;
         vec3 eye = player_eye_pos(m);
-        vec2 sway = weapon_sway_deg(d, ws, weapon_sway_time(cmd->seq));
+        vec2 sway = weapon_aim_offset_deg(d, ws, m, weapon_sway_time(cmd->seq));
         for (int k = 0; k < n; k++) {
-            // Aim of this shot: command view + recoil already applied this tick + sway.
+            // Aim of this shot: command view + recoil already applied this tick + the sight's offset.
             float yaw = m->yaw - (tick_kick.yaw + sway.x) * DG_DEG2RAD;
             float pitch = m->pitch + (tick_kick.pitch + sway.y) * DG_DEG2RAD;
             vec3 dir = dir_from_angles(yaw, pitch);

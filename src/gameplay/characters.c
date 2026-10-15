@@ -22,6 +22,7 @@
 static void cmd_fp_eye_check(int argc, const char **argv);
 
 #define CG (g_engine.chars)
+static quat g_fp_aim_off = { 0, 0, 0, 1 };   // chars_set_fp_aim_offset (sight sway / bob)
 #define LIB (g_engine.anim)
 
 #define MAX_SKINS 16
@@ -1601,6 +1602,7 @@ void chars_render_local_fp(World *w, float alpha, int local_slot) {
         float it = saturate(((float)(w->chars->tick - c->last_eval) + alpha) / span);
         Xform icam = xf_lerp(c->item_cam_prev, c->item_cam_cur, it);
         icam.s = v3(1, 1, 1);
+        icam = xf_mul(xf_make(v3(0, 0, 0), g_fp_aim_off), icam);   // sight sway / bob about the eye
         Xform cam_m = xf_mul(inv_root, CG->fp_cam);
         cam_m.s = v3(1, 1, 1);
         Xform want = xf_mul(cam_m, icam);
@@ -1753,6 +1755,19 @@ void chars_render_local_fp(World *w, float alpha, int local_slot) {
 
 static bool g_thirdperson;
 void chars_set_thirdperson(bool on) { g_thirdperson = on; }
+
+void chars_set_fp_aim_offset(float right_deg, float up_deg, float view_pitch, float world_fov_deg, float vm_fov_deg) {
+    // The shot is dir(yaw - a, pitch + b) = R(yaw, pitch) * q * forward with
+    // q = X(-pitch) * Y(-a) * X(pitch + b) in camera space (exact, not small-angle).
+    float a = right_deg * DG_DEG2RAD, b = up_deg * DG_DEG2RAD;
+    quat q = quat_mul(quat_axis_angle(v3(1, 0, 0), -view_pitch), quat_mul(quat_axis_angle(v3(0, 1, 0), -a), quat_axis_angle(v3(1, 0, 0), view_pitch + b)));
+    vec3 d = quat_rotate(quat_norm(q), v3(0, 0, -1));
+    // The item is drawn with the viewmodel FOV: aim it at the viewmodel-space direction that lands
+    // on the same pixel as the shot does with the world FOV (x / y scaled by the tan ratio).
+    float s = (world_fov_deg > 1.0f && vm_fov_deg > 1.0f) ? tanf(vm_fov_deg * 0.5f * DG_DEG2RAD) / tanf(world_fov_deg * 0.5f * DG_DEG2RAD) : 1.0f;
+    vec3 dv = v3_norm(v3(d.x * s, d.y * s, d.z));
+    g_fp_aim_off = quat_norm(quat_from_to(v3(0, 0, -1), dv));
+}
 
 void chars_set_fp_camera(vec3 pos, quat rot, bool valid) {
     ensure_globals();
