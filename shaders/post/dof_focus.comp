@@ -1,0 +1,41 @@
+#version 450
+// Depth of field autofocus: one 8x8 group samples the linear depth around the crosshair
+// (viewmodel and sky rejected), takes a robust near-weighted average and eases the focus
+// distance stored in exposure[2] towards it. Push: p0.x manual / ADS focus (> 0 overrides),
+// p0.y focus speed (1/s), u0.x autofocus on.
+#extension GL_GOOGLE_include_directive : require
+#include "post_common.glsl"
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0) uniform sampler2D depth_tex;
+layout(set = 0, binding = 1) uniform sampler2D material_tex;
+layout(std430, set = 0, binding = 13) buffer Exposure { float e[16]; } X;
+shared float sd[64];
+shared float sw[64];
+void main() {
+    uint li = gl_LocalInvocationIndex;
+    vec2 off = (vec2(gl_LocalInvocationID.xy) - 3.5) / 3.5;      // -1..1
+    vec2 uv = vec2(0.5) + off * vec2(0.025 / U.misc.w, 0.025);
+    float d = textureLod(depth_tex, uv, 0.0).r;
+    bool vm = (gb_flags(textureLod(material_tex, uv, 0.0)) & GB_VIEWMODEL) != 0u;
+    float z = linear_depth(d);
+    bool ok = !vm && d < 0.99999 && z < U.depthp.y * 0.95;
+    float w = ok ? exp(-dot(off, off) * 1.5) / max(z, 0.1) : 0.0;   // centre + near weighted
+    sd[li] = z * w;
+    sw[li] = w;
+    barrier();
+    for (uint s = 32u; s > 0u; s >>= 1u) {
+        if (li < s) { sd[li] += sd[li + s]; sw[li] += sw[li + s]; }
+        barrier();
+    }
+    if (li != 0u) return;
+    float target = sw[0] > 1e-5 ? sd[0] / sw[0] : 200.0;
+    if (pc.u0.x == 0u) target = U.s_dof.x;
+    if (pc.p0.x > 0.0) target = pc.p0.x;
+    float cur = X.e[2];
+    if (!(cur > 0.01) || U.misc.y > 0.5) cur = target;
+    // Ease in log space (perceptually even racking near and far).
+    float k = 1.0 - exp(-U.misc.x * pc.p0.y);
+    cur = exp(mix(log(cur), log(max(target, 0.05)), k));
+    X.e[2] = cur;
+    X.e[3] = target;
+}

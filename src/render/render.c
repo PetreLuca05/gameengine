@@ -1,5 +1,8 @@
-// Frame orchestration: shadow pass -> HDR scene -> post (tonemap/FXAA) + UI -> present.
+// Frame orchestration: particle compute -> shadow pass -> frame graph (G-buffer prepass,
+// screen-space lighting, lit scene, fog, transparency, viewmodel, post stack, final + UI) -> present.
 #include "vk_internal.h"
+#include "post/post.h"
+#include "graph/fg.h"
 #include "core/platform.h"
 #include <SDL3/SDL.h>
 #include <stdlib.h>
@@ -7,6 +10,7 @@
 #include "stb_image_write.h"
 
 static void on_render_cvar_changed(Cvar *cv) { (void)cv; }
+static size_t obj_slot_size(void);
 
 void render_register_cvars(void) {
     Renderer *r = R;
@@ -16,17 +20,18 @@ void render_register_cvars(void) {
     r->r_shadow_quality = cvar_reg_int("r_shadow_quality", 2, 0, 3, CVAR_ARCHIVE, "0 off, 1 low, 2 medium, 3 high");
     r->r_aniso = cvar_reg_int("r_aniso", 8, 1, 16, CVAR_ARCHIVE, "anisotropic filtering level");
     r->r_texture_quality = cvar_reg_int("r_texture_quality", 2, 0, 2, CVAR_ARCHIVE, "0 low, 1 medium, 2 high");
-    r->r_aa = cvar_reg_int("r_aa", 1, 0, 2, CVAR_ARCHIVE, "anti-aliasing: 0 none, 1 FXAA, 2 TAA (stub, uses FXAA)");
-    r->r_brightness = cvar_reg_float("r_brightness", 1.0f, 0.3f, 3.0f, CVAR_ARCHIVE, "exposure multiplier");
+    r->r_aa = cvar_reg_int("r_aa", 3, 0, 3, CVAR_ARCHIVE, "anti-aliasing: 0 none, 1 FXAA, 2 SMAA 1x, 3 TAA");
+    r->r_brightness = cvar_reg_float("r_brightness", 1.0f, 0.3f, 3.0f, CVAR_ARCHIVE, "display brightness (after the tonemapper)");
     r->r_gamma = cvar_reg_float("r_gamma", 1.0f, 0.5f, 2.0f, CVAR_ARCHIVE, "gamma adjustment");
     r->r_grid = cvar_reg_bool("r_grid", true, CVAR_ARCHIVE, "draw unit grid on dev geometry");
-    r->r_vignette = cvar_reg_float("r_vignette", 0.35f, 0.0f, 2.0f, CVAR_ARCHIVE, "vignette strength");
+    r->r_vignette = cvar_reg_float("r_vignette", 0.25f, 0.0f, 1.0f, CVAR_ARCHIVE, "vignette strength");
     r->r_shader_hotreload = cvar_reg_bool("r_shader_hotreload", true, 0, "watch shader sources and reload on change");
     r->r_culling = cvar_reg_bool("r_culling", true, 0, "frustum culling");
     r->r_vm_fov = cvar_reg_float("r_viewmodel_fov", 0.0f, 0.0f, 120.0f, CVAR_ARCHIVE, "viewmodel FOV (0 = same as world, keeps IK hands aligned)");
     r->r_cpu_skinning = cvar_reg_bool("r_cpu_skinning", false, 0, "skin characters on the CPU (fallback / debugging)");
     r->r_bloom = cvar_reg_bool("r_bloom", true, CVAR_ARCHIVE, "bloom (HDR mip chain)");
-    r->r_bloom_intensity = cvar_reg_float("r_bloom_intensity", 0.06f, 0.0f, 1.0f, CVAR_ARCHIVE, "bloom strength");
+    r->r_hdr_output = cvar_reg_bool("r_hdr_output", false, CVAR_ARCHIVE, "HDR10 output (PQ) when the display supports it");
+    r->r_bloom_intensity = cvar_reg_float("r_bloom_intensity", 0.05f, 0.0f, 0.5f, CVAR_ARCHIVE, "bloom strength (energy conserving mix)");
     r->r_vsync->on_change = on_render_cvar_changed;
 }
 
@@ -53,8 +58,9 @@ static void create_frames(void) {
         VK_CHECK(vkCreateSemaphore(R->device, &sci, NULL, &f->image_available));
         f->ubo = vkr_buffer_create(sizeof(FrameData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, true);
         f->dyn = vkr_buffer_create(DYN_BUFFER_SIZE, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, true);
-        f->bones = vkr_buffer_create(sizeof(mat4) * MAX_SKIN_BONES, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);
+        f->bones = vkr_buffer_create(sizeof(mat4) * MAX_SKIN_BONES * 2, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);   // + last frame's
         f->instances = vkr_buffer_create(sizeof(GpuSkinInstance) * MAX_SKIN_DRAWS * 2, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);
+        f->prev_models = vkr_buffer_create(sizeof(mat4) * (MAX_DRAWS + MAX_VM_DRAWS), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);
 
         VkDescriptorSetAllocateInfo ai = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
         ai.descriptorPool = R->pool;
@@ -69,9 +75,10 @@ static void create_frames(void) {
         w.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
         w.pBufferInfo = &bi;
         vkUpdateDescriptorSets(R->device, 1, &w, 0, NULL);
-        VkDescriptorBufferInfo sb[2] = { { f->bones.buffer, 0, VK_WHOLE_SIZE }, { f->instances.buffer, 0, VK_WHOLE_SIZE } };
-        VkWriteDescriptorSet ws[2];
-        for (int k = 0; k < 2; k++) {
+        VkDescriptorBufferInfo sb[3] = { { f->bones.buffer, 0, VK_WHOLE_SIZE }, { f->instances.buffer, 0, VK_WHOLE_SIZE },
+                                         { f->prev_models.buffer, 0, VK_WHOLE_SIZE } };
+        VkWriteDescriptorSet ws[3];
+        for (int k = 0; k < 3; k++) {
             ws[k] = (VkWriteDescriptorSet){ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
             ws[k].dstSet = f->frame_set;
             ws[k].dstBinding = (u32)(2 + k);
@@ -79,7 +86,7 @@ static void create_frames(void) {
             ws[k].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
             ws[k].pBufferInfo = &sb[k];
         }
-        vkUpdateDescriptorSets(R->device, 2, ws, 0, NULL);
+        vkUpdateDescriptorSets(R->device, 3, ws, 0, NULL);
     }
 }
 
@@ -91,6 +98,7 @@ static void destroy_frames(void) {
         vkr_buffer_destroy_now(&f->dyn);
         vkr_buffer_destroy_now(&f->bones);
         vkr_buffer_destroy_now(&f->instances);
+        vkr_buffer_destroy_now(&f->prev_models);
         vkDestroySemaphore(R->device, f->image_available, NULL);
         vkDestroyFence(R->device, f->fence, NULL);
         vkDestroyCommandPool(R->device, f->pool, NULL);
@@ -105,15 +113,21 @@ bool render_init(SDL_Window *window) {
     vkp_create_layouts();
     create_frames();
     if (!vkd_create_swapchain()) { log_error("render: initial swapchain creation failed"); return false; }
+    R->target_scale = 1.0f;
     vkd_create_targets();
     vkd_create_shadow_map(shadow_size_for_quality(R->r_shadow_quality->i));
     if (!vkp_create_pipelines()) { log_error("render: pipeline creation failed"); return false; }
     if (!vkx_init()) log_warn("render: VFX pipelines unavailable (particles disabled)");
+    fg_init();
+    if (!post_init()) { log_error("render: post-processing stack unavailable"); return false; }
 
     R->draws = (DrawItem *)malloc(sizeof(DrawItem) * MAX_DRAWS);
     R->vm_draws = (DrawItem *)malloc(sizeof(DrawItem) * MAX_VM_DRAWS);
     R->skin_draws = (SkinnedDraw *)malloc(sizeof(SkinnedDraw) * MAX_SKIN_DRAWS);
     R->skin_bones = (mat4 *)malloc(sizeof(mat4) * MAX_SKIN_BONES);
+    R->prev_bones = (mat4 *)malloc(sizeof(mat4) * MAX_SKIN_BONES);
+    R->prev_models_cpu = (mat4 *)malloc(sizeof(mat4) * (MAX_DRAWS + MAX_VM_DRAWS));
+    R->obj_slots = (struct ObjSlot *)calloc(OBJ_SLOTS, obj_slot_size());
     R->line_cap = 262144;
     R->line_cpu[0] = (LineVertex *)malloc(sizeof(LineVertex) * R->line_cap);
     R->line_cpu[1] = (LineVertex *)malloc(sizeof(LineVertex) * R->line_cap);
@@ -154,6 +168,8 @@ void render_shutdown(void) {
     if (!R) return;
     if (R->device) {
         vkDeviceWaitIdle(R->device);
+        post_shutdown();
+        fg_shutdown();
         vkx_shutdown();
         vkp_destroy_pipelines();
         vkr_destroy_all_resources();
@@ -166,10 +182,18 @@ void render_shutdown(void) {
     }
     vkd_destroy_device();
     free(R->draws); free(R->vm_draws);
+    free(R->skin_draws); free(R->skin_bones); free(R->prev_bones); free(R->prev_models_cpu); free(R->obj_slots);
     free(R->line_cpu[0]); free(R->line_cpu[1]); free(R->text_cpu);
     free(R->ui_verts); free(R->ui_indices); free(R->ui_cmds);
     free(R);
     g_engine.render = NULL;
+}
+
+static void targets_changed(void) {
+    fg_targets_changed();
+    post_targets_changed();
+    post_create_pipelines();   // the final pass depends on the swapchain format
+    R->camera_cut = true;
 }
 
 static void recreate_swapchain(void) {
@@ -178,6 +202,13 @@ static void recreate_swapchain(void) {
     if (!vkd_create_swapchain()) { R->swap_dirty = true; return; }
     vkd_create_targets();
     vkp_create_pipelines(); // swapchain format can change
+    targets_changed();
+}
+
+// Render resolution / output: r_render_scale (supersampling / plain scaling) times the
+// upscaler's render scale (TAA-U, FSR) when one is active.
+static float desired_target_scale(void) {
+    return clampf(R->r_render_scale->f * post_render_scale(), 0.25f, 2.0f);
 }
 
 static void apply_setting_changes(void) {
@@ -186,11 +217,14 @@ static void apply_setting_changes(void) {
     if (w <= 0 || h <= 0) return;
     if ((u32)w != R->swap_extent.width || (u32)h != R->swap_extent.height) R->swap_dirty = true;
     if ((R->r_vsync->i != 0) != R->vsync_applied) R->swap_dirty = true;
+    if (R->r_hdr_output->i != R->hdr_output_applied) R->swap_dirty = true;
     if (R->swap_dirty) recreate_swapchain();
-    if (fabsf(R->r_render_scale->f - R->render_scale_applied) > 1e-4f) {
+    if (fabsf(desired_target_scale() - R->render_scale_applied) > 1e-4f) {
         vkDeviceWaitIdle(R->device);
         vkd_destroy_targets();
+        R->target_scale = desired_target_scale();
         vkd_create_targets();
+        targets_changed();
     }
     if (shadow_size_for_quality(R->r_shadow_quality->i) != R->shadow_size) {
         vkDeviceWaitIdle(R->device);
@@ -203,7 +237,6 @@ static void apply_setting_changes(void) {
         vkr_destroy_samplers();
         vkr_create_samplers();
         vkr_rewrite_all_texture_sets();
-        vkr_write_tex_set(R->hdr_set, R->hdr.view, R->sampler_clamp);
         vkd_create_shadow_map(R->shadow_size);
     }
 }
@@ -254,6 +287,7 @@ void render_draw_skinned(const SkinnedDraw *d) {
     if (!R->meshes[d->mesh].used || !R->meshes[d->mesh].skinned) return;
     SkinnedDraw *s = &R->skin_draws[R->skin_draw_count++];
     *s = *d;
+    if (!s->object_id && (s->flags & MAT_VIEWMODEL)) s->object_id = 0x40000000u | R->skin_draw_count;
     memcpy(R->skin_bones + R->skin_bone_count, d->palette, sizeof(mat4) * d->bone_count);
     // The palette pointer is replaced by its offset into this frame's bone buffer.
     s->palette = NULL;
@@ -263,9 +297,13 @@ void render_draw_skinned(const SkinnedDraw *d) {
 
 void render_draw_viewmodel(const DrawItem *item) {
     if (!item->mesh || R->vm_draw_count >= MAX_VM_DRAWS) return;
-    DrawItem *d = &R->vm_draws[R->vm_draw_count++];
+    DrawItem *d = &R->vm_draws[R->vm_draw_count];
     *d = *item;
     d->mat.flags |= MAT_VIEWMODEL;
+    // Viewmodel parts move with the camera: without an id, the draw order identifies them (their
+    // velocity must come from their own motion, not from the camera rotation).
+    if (!d->object_id) d->object_id = 0x80000000u | (R->vm_draw_count + 1);
+    R->vm_draw_count++;
 }
 
 void render_add_light(const PointLight *l) {
@@ -370,6 +408,8 @@ static VkDeviceSize dyn_push(FrameResources *f, const void *data, VkDeviceSize s
     return off;
 }
 
+static bool g_froxel_fog_draws;   // transparent pass: blended lit draws apply the froxel fog
+
 static void draw_items(VkCommandBuffer cmd, DrawItem *items, u32 count, bool shadow_pass, bool cull, int alpha_mode) {
     // alpha_mode: 0 = opaque only, 1 = blended only, 2 = all
     if (!count) return;
@@ -418,7 +458,9 @@ static void draw_items(VkCommandBuffer cmd, DrawItem *items, u32 count, bool sha
         pc.color = d->mat.color;
         pc.params = v4(d->mat.roughness, d->mat.metallic, d->mat.emissive, d->mat.tex_scale);
         pc.flags[0] = d->mat.flags;
-        pc.flags[1] = pc.flags[2] = pc.flags[3] = 0;
+        pc.flags[1] = shadow_pass ? 0 : d->prev_slot;   // previous model (velocity), 0 = static
+        pc.flags[2] = g_froxel_fog_draws ? 1u : 0u;      // blended draws after the fog pass: froxel fog
+        pc.flags[3] = 0;
         vkCmdPushConstants(cmd, R->layout_lit, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushLit), &pc);
         vkCmdDrawIndexed(cmd, m->index_count, 1, 0, 0, 0);
         R->stats.draw_calls++;
@@ -447,6 +489,8 @@ static bool skin_in_pass(const SkinnedDraw *d, int pass) {
     return !vm && (d->flags & MAT_SHADOW_ONLY) == 0;
 }
 
+static bool prev_palette(u32 id, u32 *off, u32 *count);
+
 // Writes instance records for one pass (culled, sorted by mesh) starting at `base`.
 static u32 build_skin_pass(FrameResources *f, int pass, u32 base, SkinPass *out) {
     bool shadow = pass == 1;
@@ -472,6 +516,12 @@ static u32 build_skin_pass(FrameResources *f, int pass, u32 base, SkinPass *out)
         g->info[0] = d->bone_count & 0xFFFFFu;
         g->info[1] = d->flags;
         g->info[2] = g->info[3] = 0;
+        // Last frame's palette of the same object (appended after this frame's bones).
+        if (!shadow && d->object_id && !R->camera_cut) {
+            u32 off, count;
+            if (prev_palette(d->object_id, &off, &count) && count == (d->bone_count >> 20) && off + count <= R->prev_bone_count)
+                g->info[2] = R->skin_bone_count + off + 1;
+        }
         if (out->batch_count && out->batches[out->batch_count - 1].mesh == d->mesh) out->batches[out->batch_count - 1].count++;
         else out->batches[out->batch_count++] = (SkinBatch){ d->mesh, base + k, 1 };
     }
@@ -548,6 +598,70 @@ static void draw_cpu_skinned(VkCommandBuffer cmd, FrameResources *f, const CpuSk
     }
 }
 
+// ------------------------------------------------------------------ previous transforms (velocity)
+
+typedef struct ObjSlot {
+    u32 id;
+    u32 model_frame, pal_frame;   // frame_index the entry was written (0 = never)
+    mat4 model;
+    u32 pal_offset, pal_count;    // into prev_bones (the palette of pal_frame)
+} ObjSlot;
+
+static size_t obj_slot_size(void) { return sizeof(ObjSlot); }
+
+static ObjSlot *obj_find(u32 id, bool insert) {
+    if (!id || !R->obj_slots) return NULL;
+    u32 h = (id * 2654435761u) & (OBJ_SLOTS - 1);
+    for (u32 n = 0; n < 32; n++) {
+        ObjSlot *s = &R->obj_slots[(h + n) & (OBJ_SLOTS - 1)];
+        if (s->id == id) return s;
+        // Free or stale for more than a second: reuse.
+        bool stale = s->id && R->frame_index > DG_MAX(s->model_frame, s->pal_frame) + 120;
+        if (insert && (!s->id || stale)) {
+            memset(s, 0, sizeof(*s));
+            s->id = id;
+            return s;
+        }
+    }
+    return NULL;
+}
+
+// Moving draws: last frame's model goes into this frame's DrawPrev list (prev_slot = index + 1).
+static void assign_prev_model(DrawItem *d) {
+    d->prev_slot = 0;
+    if (!d->object_id) return;
+    ObjSlot *s = obj_find(d->object_id, true);
+    if (!s) return;
+    if (s->model_frame == R->frame_index && !R->camera_cut && R->prev_model_count < MAX_DRAWS) {
+        R->prev_models_cpu[R->prev_model_count] = s->model;
+        d->prev_slot = ++R->prev_model_count;
+    } else if (R->prev_model_count < MAX_DRAWS) {
+        // First frame of the object: no motion.
+        R->prev_models_cpu[R->prev_model_count] = d->model;
+        d->prev_slot = ++R->prev_model_count;
+    }
+}
+
+static void store_prev_models(DrawItem *items, u32 count) {
+    for (u32 i = 0; i < count; i++) {
+        if (!items[i].object_id) continue;
+        ObjSlot *s = obj_find(items[i].object_id, true);
+        if (!s) continue;
+        s->model = items[i].model;
+        s->model_frame = R->frame_index + 1;   // read next frame as "frame_index - 1 + 1"
+    }
+}
+
+static bool prev_palette(u32 id, u32 *off, u32 *count) {
+    ObjSlot *s = obj_find(id, false);
+    if (!s || s->pal_frame != R->frame_index) return false;
+    *off = s->pal_offset;
+    *count = s->pal_count;
+    return true;
+}
+
+// ------------------------------------------------------------------ frame matrices
+
 static void compute_matrices(FrameData *fd) {
     float aspect = (float)R->swap_extent.width / (float)DG_MAX(1u, R->swap_extent.height);
     RenderCamera *c = &R->cam;
@@ -557,6 +671,25 @@ static void compute_matrices(FrameData *fd) {
     float vm_fov = R->r_vm_fov->f > 1.0f ? R->r_vm_fov->f : c->fov_deg;
     R->vm_proj = mat4_perspective(vm_fov * DG_DEG2RAD, aspect, 0.01f, 100.0f);
     extract_frustum(R->view_proj, R->frustum);
+
+    // Sub-pixel jitter (Halton 2,3) for TAA / TAA-U: an NDC translation after the projection.
+    // R->view_proj stays unjittered for game queries (world_to_screen, culling).
+    R->prev_jitter = R->jitter;
+    R->jitter = v2(0, 0);
+    if (post_wants_jitter()) {
+        vec2 px = post_jitter_pixels(R->frame_index);
+        R->jitter = v2(2.0f * px.x / (float)R->hdr.w, 2.0f * px.y / (float)R->hdr.h);
+    }
+    mat4 jt = mat4_translate(v3(R->jitter.x, R->jitter.y, 0.0f));
+    R->proj_j = mat4_mul(jt, R->proj);
+    R->vm_proj_j = mat4_mul(jt, R->vm_proj);
+    // Camera cut: teleports / respawns reset the temporal history (and the velocities).
+    if (!R->have_prev || v3_len(v3_sub(c->pos, R->prev_cam_pos)) > 4.0f) R->camera_cut = true;
+    R->prev_view_proj_nj = R->have_prev && !R->camera_cut ? R->view_proj_nj : R->view_proj;
+    R->prev_vm_view_proj_nj = R->have_prev && !R->camera_cut ? R->vm_view_proj_nj : mat4_mul(R->vm_proj, R->view);
+    R->view_proj_nj = R->view_proj;
+    R->vm_view_proj_nj = mat4_mul(R->vm_proj, R->view);
+    R->prev_cam_pos = c->pos;
 
     // Directional shadow: ortho box around shadow_center, snapped to texels to avoid shimmer.
     RenderEnvironment *e = &R->env;
@@ -572,17 +705,27 @@ static void compute_matrices(FrameData *fd) {
     mat4 lproj = mat4_ortho(cl.x - ext, cl.x + ext, cl.y - ext, cl.y + ext, -cl.z - depth_range, -cl.z + depth_range);
     R->shadow_vp = mat4_mul(lproj, lview);
 
-    fd->view_proj = R->view_proj;
+    fd->view_proj = mat4_mul(R->proj_j, R->view);
     fd->view = R->view;
-    fd->proj = R->proj;
-    fd->vm_proj = R->vm_proj;
+    fd->proj = R->proj_j;
+    fd->vm_proj = R->vm_proj_j;
     fd->shadow_vp = R->shadow_vp;
+    fd->view_proj_nj = R->view_proj_nj;
+    fd->prev_view_proj_nj = R->prev_view_proj_nj;
+    fd->vm_view_proj_nj = R->vm_view_proj_nj;
+    fd->prev_vm_view_proj_nj = R->prev_vm_view_proj_nj;
+    fd->jitter = v4(R->jitter.x, R->jitter.y, R->prev_jitter.x, R->prev_jitter.y);
+    fd->post_flags = v4(0, 0, 0, 0);
+    fd->post_params = v4(1, 1, 1, 1);
+    fd->post_fog = v4(0, 80, 0, 0);
     fd->camera_pos = v4(c->pos.x, c->pos.y, c->pos.z, (float)g_engine.real_time);
     fd->sun_dir = v4(L.x, L.y, L.z, e->sun_intensity);
     fd->sun_color = v4(e->sun_color.x, e->sun_color.y, e->sun_color.z, R->r_shadow_quality->i > 0 ? 1.0f : 0.0f);
     fd->sky_ambient = v4(e->sky_ambient.x, e->sky_ambient.y, e->sky_ambient.z, e->ambient_intensity);
     fd->ground_ambient = v4(e->ground_ambient.x, e->ground_ambient.y, e->ground_ambient.z, (float)R->light_count);
-    fd->fog = v4(e->fog_color.x, e->fog_color.y, e->fog_color.z, e->fog_density);
+    // Volumetric fog replaces the analytic per-pixel fog of the lit shaders.
+    bool vol = post_settings()->volumetrics > 0 && fg_pass_enabled("vol_inject");
+    fd->fog = v4(e->fog_color.x, e->fog_color.y, e->fog_color.z, vol ? 0.0f : e->fog_density);
     int pcf = R->r_shadow_quality->i >= 3 ? 2 : 1;
     fd->params = v4(R->r_grid->i ? 1.0f : 0.0f, 1.0f / (float)R->shadow_size, (float)pcf, 0.0f);
     fd->screen = v4((float)R->hdr.w, (float)R->hdr.h, 1.0f / (float)R->hdr.w, 1.0f / (float)R->hdr.h);
@@ -601,6 +744,406 @@ static void save_screenshot(GpuBuffer *buf, u32 w, u32 h) {
     else log_error("screenshot: failed to write %s", R->screenshot_path);
 }
 
+// ------------------------------------------------------------------ frame graph passes
+
+static VkImageLayout g_swap_layout;
+static struct {
+    FrameResources *f;
+    CpuSkin *cpu_skinned;
+    SkinPass *skin_main, *skin_vm;
+    bool any_skin_vm;
+    VkDeviceSize line_off[2], text_off, ui_voff, ui_ioff;
+    FgRes hdr, depth, vm_depth, normal, material, velocity, swap, scene_copy, ldr;
+    PostLitInputs lit;
+} F;
+
+static void begin_pass(VkCommandBuffer cmd, VkImageView color, bool clear_color, VkImageView depth, VkImageLayout depth_layout, bool clear_depth) {
+    VkRenderingAttachmentInfo ca = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
+    ca.imageView = color;
+    ca.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    ca.loadOp = clear_color ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
+    ca.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    ca.clearValue.color.float32[0] = R->env.fog_color.x;
+    ca.clearValue.color.float32[1] = R->env.fog_color.y;
+    ca.clearValue.color.float32[2] = R->env.fog_color.z;
+    ca.clearValue.color.float32[3] = 1.0f;
+    VkRenderingAttachmentInfo da = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
+    da.imageView = depth;
+    da.imageLayout = depth_layout;
+    da.loadOp = clear_depth ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
+    da.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    da.clearValue.depthStencil.depth = 1.0f;
+    VkRenderingInfo ri = { VK_STRUCTURE_TYPE_RENDERING_INFO };
+    ri.renderArea.extent.width = R->hdr.w;
+    ri.renderArea.extent.height = R->hdr.h;
+    ri.layerCount = 1;
+    ri.colorAttachmentCount = color ? 1 : 0;
+    ri.pColorAttachments = &ca;
+    ri.pDepthAttachment = depth ? &da : NULL;
+    vkCmdBeginRendering(cmd, &ri);
+    set_viewport(cmd, R->hdr.w, R->hdr.h);
+}
+
+static void begin_gbuffer(VkCommandBuffer cmd, VkImageView depth, bool clear) {
+    VkRenderingAttachmentInfo ca[3];
+    VkImageView views[3] = { fg_view(F.normal), fg_view(F.material), fg_view(F.velocity) };
+    for (int i = 0; i < 3; i++) {
+        ca[i] = (VkRenderingAttachmentInfo){ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
+        ca[i].imageView = views[i];
+        ca[i].imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        ca[i].loadOp = clear ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
+        ca[i].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    }
+    // Sky: normal 0, material roughness 1, velocity 0 (camera-only reprojection reconstructs it).
+    ca[1].clearValue.color.float32[0] = 1.0f;
+    VkRenderingAttachmentInfo da = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
+    da.imageView = depth;
+    da.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+    da.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    da.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    da.clearValue.depthStencil.depth = 1.0f;
+    VkRenderingInfo ri = { VK_STRUCTURE_TYPE_RENDERING_INFO };
+    ri.renderArea.extent.width = R->hdr.w;
+    ri.renderArea.extent.height = R->hdr.h;
+    ri.layerCount = 1;
+    ri.colorAttachmentCount = 3;
+    ri.pColorAttachments = ca;
+    ri.pDepthAttachment = &da;
+    vkCmdBeginRendering(cmd, &ri);
+    set_viewport(cmd, R->hdr.w, R->hdr.h);
+}
+
+static void bind_frame(VkCommandBuffer cmd) {
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 0, 1, &F.f->frame_set, 0, NULL);
+}
+
+static void draw_skinned(VkCommandBuffer cmd, int pass, PipelineId gpu_pipe, PipelineId cpu_pipe, const SkinPass *sp) {
+    if (F.cpu_skinned) {
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[cpu_pipe]);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 1, 1, &R->textures[R->white_tex].set, 0, NULL);
+        draw_cpu_skinned(cmd, F.f, F.cpu_skinned, pass);
+    } else if (sp->batch_count) {
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[gpu_pipe]);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 1, 1, &R->textures[R->white_tex].set, 0, NULL);
+        draw_skin_pass(cmd, sp);
+    }
+}
+
+// G-buffer prepass: depth + normal / material / velocity for every opaque world draw.
+static void exec_prepass(VkCommandBuffer cmd, void *u) {
+    (void)u;
+    begin_gbuffer(cmd, R->depth.view, true);
+    bind_frame(cmd);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 1, 1, &R->textures[R->white_tex].set, 0, NULL);
+    post_push_lit_inputs(cmd, NULL, false);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_PREPASS]);
+    draw_items(cmd, R->draws, R->draw_count, false, R->r_culling->i != 0, 0);
+    draw_skinned(cmd, 0, PIPE_PREPASS_SKIN, PIPE_PREPASS, F.skin_main);
+    vkCmdEndRendering(cmd);
+}
+
+// Lit static opaque (depth from the prepass, LESS_OR_EQUAL: shades each pixel once).
+static void exec_opaque(VkCommandBuffer cmd, void *u) {
+    (void)u;
+    begin_pass(cmd, R->hdr.view, true, R->depth.view, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, false);
+    bind_frame(cmd);
+    post_push_lit_inputs(cmd, &F.lit, false);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[R->r_wireframe->i ? PIPE_LIT_WIRE : PIPE_LIT]);
+    draw_items(cmd, R->draws, R->draw_count, false, R->r_culling->i != 0, 0);
+    vkCmdEndRendering(cmd);
+}
+
+// Decals on the static scene; the characters drawn next cover any decal pixel on them.
+static void exec_decals(VkCommandBuffer cmd, void *u) {
+    (void)u;
+    begin_pass(cmd, R->hdr.view, false, R->depth.view, VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL, false);
+    vkx_draw_decals(cmd);
+    vkCmdEndRendering(cmd);
+}
+
+static void exec_opaque_dynamic(VkCommandBuffer cmd, void *u) {
+    (void)u;
+    begin_pass(cmd, R->hdr.view, false, R->depth.view, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, false);
+    bind_frame(cmd);
+    post_push_lit_inputs(cmd, &F.lit, false);
+    draw_skinned(cmd, 0, R->r_wireframe->i ? PIPE_SKIN_WIRE : PIPE_SKIN, R->r_wireframe->i ? PIPE_LIT_WIRE : PIPE_LIT, F.skin_main);
+    vkCmdEndRendering(cmd);
+}
+
+static void exec_scene_copy(VkCommandBuffer cmd, void *u) {
+    (void)u;
+    vkx_copy_scene(cmd);
+}
+
+// Transparency: blended items, world lines / text, particles (depth read-only, sampled).
+static void exec_transparent(VkCommandBuffer cmd, void *u) {
+    (void)u;
+    FrameResources *f = F.f;
+    begin_pass(cmd, R->hdr.view, false, R->depth.view, VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL, false);
+    bind_frame(cmd);
+    post_push_lit_inputs(cmd, NULL, true);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_LIT_BLEND]);
+    g_froxel_fog_draws = true;
+    draw_items(cmd, R->draws, R->draw_count, false, R->r_culling->i != 0, 1);
+    g_froxel_fog_draws = false;
+    if (R->line_count[0] && F.line_off[0] != (VkDeviceSize)-1) {
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_LINES]);
+        vkCmdBindVertexBuffers(cmd, 0, 1, &f->dyn.buffer, &F.line_off[0]);
+        vkCmdDraw(cmd, R->line_count[0], 1, 0, 0);
+        R->stats.draw_calls++;
+    }
+    if (R->text_count && F.text_off != (VkDeviceSize)-1) {
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_TEXT]);
+        TextureId atlas = R->textures[R->text_atlas].ready ? R->text_atlas : R->white_tex;
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 1, 1, &R->textures[atlas].set, 0, NULL);
+        vkCmdBindVertexBuffers(cmd, 0, 1, &f->dyn.buffer, &F.text_off);
+        vkCmdDraw(cmd, R->text_count, 1, 0, 0);
+        R->stats.draw_calls++;
+    }
+    vkx_draw_particles(cmd);
+    vkCmdEndRendering(cmd);
+}
+
+// Viewmodel G-buffer (own depth): marks first-person pixels (no SSR / motion blur / DoF) and
+// writes their velocity for TAA. Then the lit viewmodel + overlay lines.
+static void exec_vm_prepass(VkCommandBuffer cmd, void *u) {
+    (void)u;
+    VkRenderingAttachmentInfo ca[3];
+    VkImageView views[3] = { fg_view(F.normal), fg_view(F.material), fg_view(F.velocity) };
+    for (int i = 0; i < 3; i++) {
+        ca[i] = (VkRenderingAttachmentInfo){ VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
+        ca[i].imageView = views[i];
+        ca[i].imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        ca[i].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+        ca[i].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    }
+    VkRenderingAttachmentInfo da = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
+    da.imageView = R->vm_depth.view;
+    da.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+    da.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    da.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    da.clearValue.depthStencil.depth = 1.0f;
+    VkRenderingInfo ri = { VK_STRUCTURE_TYPE_RENDERING_INFO };
+    ri.renderArea.extent.width = R->hdr.w;
+    ri.renderArea.extent.height = R->hdr.h;
+    ri.layerCount = 1;
+    ri.colorAttachmentCount = 3;
+    ri.pColorAttachments = ca;
+    ri.pDepthAttachment = &da;
+    vkCmdBeginRendering(cmd, &ri);
+    set_viewport(cmd, R->hdr.w, R->hdr.h);
+    if (R->vm_draw_count || F.any_skin_vm) {
+        bind_frame(cmd);
+        post_push_lit_inputs(cmd, NULL, false);
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_PREPASS]);
+        draw_items(cmd, R->vm_draws, R->vm_draw_count, false, false, 2);
+        draw_skinned(cmd, 2, PIPE_PREPASS_SKIN, PIPE_PREPASS, F.skin_vm);
+    }
+    vkCmdEndRendering(cmd);
+}
+
+static void exec_viewmodel(VkCommandBuffer cmd, void *u) {
+    (void)u;
+    FrameResources *f = F.f;
+    begin_pass(cmd, R->hdr.view, false, R->vm_depth.view, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, false);
+    bind_frame(cmd);
+    post_push_lit_inputs(cmd, NULL, false);
+    if (R->vm_draw_count || F.any_skin_vm) {
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[R->r_wireframe->i ? PIPE_LIT_WIRE : PIPE_LIT]);
+        draw_items(cmd, R->vm_draws, R->vm_draw_count, false, false, 2);
+        // First-person arms (body model), same depth as the viewmodel weapon.
+        draw_skinned(cmd, 2, R->r_wireframe->i ? PIPE_SKIN_WIRE : PIPE_SKIN, R->r_wireframe->i ? PIPE_LIT_WIRE : PIPE_LIT, F.skin_vm);
+    }
+    if (R->line_count[1] && F.line_off[1] != (VkDeviceSize)-1) {
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_LINES_OVERLAY]);
+        vkCmdBindVertexBuffers(cmd, 0, 1, &f->dyn.buffer, &F.line_off[1]);
+        vkCmdDraw(cmd, R->line_count[1], 1, 0, 0);
+        R->stats.draw_calls++;
+    }
+    vkCmdEndRendering(cmd);
+}
+
+// Final: post encode (CAS, grain, dither, sRGB / PQ) + UI into the swapchain image.
+static void exec_final(VkCommandBuffer cmd, void *u) {
+    (void)u;
+    FrameResources *f = F.f;
+    VkRenderingAttachmentInfo ca = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
+    ca.imageView = R->swap_views[R->image_index];
+    ca.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    ca.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    ca.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    VkRenderingInfo ri = { VK_STRUCTURE_TYPE_RENDERING_INFO };
+    ri.renderArea.extent = R->swap_extent;
+    ri.layerCount = 1;
+    ri.colorAttachmentCount = 1;
+    ri.pColorAttachments = &ca;
+    vkCmdBeginRendering(cmd, &ri);
+    set_viewport(cmd, R->swap_extent.width, R->swap_extent.height);
+    post_final_draw(cmd, F.ldr);
+    if (R->ui_ccount && F.ui_voff != (VkDeviceSize)-1 && F.ui_ioff != (VkDeviceSize)-1) {
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_UI]);
+        float scr[4] = { 2.0f / (float)R->swap_extent.width, 2.0f / (float)R->swap_extent.height, 0, 0 };
+        vkCmdPushConstants(cmd, R->layout_ui, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(scr), scr);
+        vkCmdBindVertexBuffers(cmd, 0, 1, &f->dyn.buffer, &F.ui_voff);
+        vkCmdBindIndexBuffer(cmd, f->dyn.buffer, F.ui_ioff, VK_INDEX_TYPE_UINT32);
+        u32 bound = 0;
+        for (u32 i = 0; i < R->ui_ccount; i++) {
+            UiDrawCmd *c = &R->ui_cmds[i];
+            if (!c->index_count) continue;
+            TextureId tex = c->texture && R->textures[c->texture].used && R->textures[c->texture].ready ? c->texture : R->white_tex;
+            if (tex != bound) {
+                vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_ui, 0, 1, &R->textures[tex].set, 0, NULL);
+                bound = tex;
+            }
+            int x0 = DG_CLAMP(c->clip_x, 0, (int)R->swap_extent.width);
+            int y0 = DG_CLAMP(c->clip_y, 0, (int)R->swap_extent.height);
+            int x1 = DG_CLAMP(c->clip_x + c->clip_w, 0, (int)R->swap_extent.width);
+            int y1 = DG_CLAMP(c->clip_y + c->clip_h, 0, (int)R->swap_extent.height);
+            if (x1 <= x0 || y1 <= y0) continue;
+            VkRect2D sc = { { x0, y0 }, { (u32)(x1 - x0), (u32)(y1 - y0) } };
+            vkCmdSetScissor(cmd, 0, 1, &sc);
+            vkCmdDrawIndexed(cmd, c->index_count, 1, c->index_offset, 0, 0);
+            R->stats.draw_calls++;
+        }
+    }
+    vkCmdEndRendering(cmd);
+}
+
+// Builds this frame's graph:
+//   prepass -> [hi-z, contact, GTAO, SSGI, SSR, froxels] -> opaque -> decals -> opaque_dynamic ->
+//   fog_apply -> scene_copy -> transparent -> [colour pyramid, depth history] -> vm_prepass ->
+//   viewmodel -> [AA ... tonemap] -> final + UI
+static void build_frame_graph(FrameData *fd) {
+    fg_begin(R->hdr.w, R->hdr.h, R->swap_extent.width, R->swap_extent.height);
+    F.hdr = fg_import("hdr", R->hdr.image, R->hdr.view, R->hdr.format, R->hdr.w, R->hdr.h, VK_IMAGE_ASPECT_COLOR_BIT, &R->hdr.layout);
+    F.depth = fg_import("depth", R->depth.image, R->depth.view, R->depth.format, R->depth.w, R->depth.h, VK_IMAGE_ASPECT_DEPTH_BIT, &R->depth.layout);
+    F.vm_depth = fg_import("vm_depth", R->vm_depth.image, R->vm_depth.view, R->vm_depth.format, R->vm_depth.w, R->vm_depth.h, VK_IMAGE_ASPECT_DEPTH_BIT,
+                           &R->vm_depth.layout);
+    g_swap_layout = VK_IMAGE_LAYOUT_UNDEFINED;
+    F.swap = fg_import("swapchain", R->swap_images[R->image_index], R->swap_views[R->image_index], R->swap_format, R->swap_extent.width,
+                       R->swap_extent.height, VK_IMAGE_ASPECT_COLOR_BIT, &g_swap_layout);
+    RenderTarget *sc = vkx_scene_copy();
+    F.scene_copy = sc ? fg_import("hdr_opaque", sc->image, sc->view, sc->format, sc->w, sc->h, VK_IMAGE_ASPECT_COLOR_BIT, &sc->layout) : FG_NONE;
+    FgTexDesc gd = { "gb_normal", GB_NORMAL_FORMAT, FG_SIZE_RENDER, 0, 0, 0, 1, 0 };
+    F.normal = fg_texture(&gd);
+    gd.name = "gb_material";
+    gd.format = GB_MATERIAL_FORMAT;
+    F.material = fg_texture(&gd);
+    gd.name = "gb_velocity";
+    gd.format = GB_VELOCITY_FORMAT;
+    F.velocity = fg_texture(&gd);
+
+    PostFrameIn in;
+    memset(&in, 0, sizeof(in));
+    in.hdr = F.hdr;
+    in.depth = F.depth;
+    in.normal = F.normal;
+    in.material = F.material;
+    in.velocity = F.velocity;
+    in.hdr_opaque = F.scene_copy;
+    in.vm_depth = F.vm_depth;
+    in.swap = F.swap;
+    in.render_w = R->hdr.w;
+    in.render_h = R->hdr.h;
+    in.output_w = R->swap_extent.width;
+    in.output_h = R->swap_extent.height;
+    in.view = R->view;
+    in.proj = R->proj;   // unjittered: the post shaders add / remove the jitter themselves
+    in.view_proj = fd->view_proj;
+    in.inv_view_proj = mat4_inverse(fd->view_proj);
+    in.view_proj_nj = R->view_proj_nj;
+    in.prev_view_proj_nj = R->prev_view_proj_nj;
+    in.inv_proj = mat4_inverse(R->proj);
+    in.cam_pos = R->cam.pos;
+    in.jitter = R->jitter;
+    in.prev_jitter = R->prev_jitter;
+    in.znear = R->cam.znear;
+    in.zfar = R->cam.zfar;
+    in.fov_y = R->cam.fov_deg * DG_DEG2RAD;
+    in.sun_dir = v3_norm(R->env.sun_dir);
+    in.sun_color = R->env.sun_color;
+    in.sun_intensity = R->env.sun_intensity;
+    in.sky = R->env.sky_ambient;
+    in.ground = R->env.ground_ambient;
+    in.ambient = R->env.ambient_intensity;
+    in.dt = (float)g_engine.frame_dt;
+    in.time = (float)g_engine.real_time;
+    in.frame = R->frame_index;
+    in.camera_cut = R->camera_cut;
+    in.ads = R->fx_ads;
+    in.ads_focus_dist = R->fx_ads_focus;
+    post_begin_frame(&in);
+
+    int p = fg_pass("prepass", exec_prepass, NULL);
+    fg_write(p, F.depth, FG_DEPTH);
+    fg_write(p, F.normal, FG_COLOR);
+    fg_write(p, F.material, FG_COLOR);
+    fg_write(p, F.velocity, FG_COLOR);
+
+    post_screen_space(&F.lit);
+    const PostSettings *ps = post_settings();
+    fd->post_flags = v4(F.lit.ao_on ? 1.0f : 0.0f, F.lit.contact_on ? 1.0f : 0.0f, F.lit.ssr_on ? 1.0f : 0.0f, F.lit.ssgi_on ? 1.0f : 0.0f);
+    fd->post_params = v4(ps->ssr_intensity, ps->ssgi_intensity, ps->ao_intensity, 1.0f);
+
+    p = fg_pass("opaque", exec_opaque, NULL);
+    fg_write(p, F.hdr, FG_COLOR);
+    fg_write(p, F.depth, FG_DEPTH);
+    if (F.lit.ao_on) fg_read(p, F.lit.ao, FG_SAMPLED);
+    if (F.lit.contact_on) fg_read(p, F.lit.contact, FG_SAMPLED);
+    if (F.lit.ssr_on) fg_read(p, F.lit.ssr, FG_SAMPLED);
+    if (F.lit.ssgi_on) fg_read(p, F.lit.ssgi, FG_SAMPLED);
+    if (p < 0) log_warn("render: opaque pass disabled (r_post_disable)");
+
+    p = fg_pass("decals", exec_decals, NULL);
+    fg_write(p, F.hdr, FG_COLOR);
+    fg_read(p, F.depth, FG_DEPTH_READ);
+
+    p = fg_pass("opaque_dynamic", exec_opaque_dynamic, NULL);
+    fg_write(p, F.hdr, FG_COLOR);
+    fg_write(p, F.depth, FG_DEPTH);
+    if (F.lit.ao_on) fg_read(p, F.lit.ao, FG_SAMPLED);
+    if (F.lit.contact_on) fg_read(p, F.lit.contact, FG_SAMPLED);
+    if (F.lit.ssr_on) fg_read(p, F.lit.ssr, FG_SAMPLED);
+    if (F.lit.ssgi_on) fg_read(p, F.lit.ssgi, FG_SAMPLED);
+
+    post_fog_apply();
+
+    if (F.scene_copy != FG_NONE) {
+        p = fg_pass("scene_copy", exec_scene_copy, NULL);
+        fg_write(p, F.hdr, FG_COLOR);
+        fg_write(p, F.scene_copy, FG_SAMPLED);
+        if (p < 0) F.scene_copy = FG_NONE;
+    }
+
+    p = fg_pass("transparent", exec_transparent, NULL);
+    fg_write(p, F.hdr, FG_COLOR);
+    fg_read(p, F.depth, FG_DEPTH_READ);
+    fg_read(p, F.scene_copy, FG_SAMPLED);
+    fg_read(p, post_froxels(), FG_SAMPLED);
+    fd->post_fog = v4(post_froxels() >= 0 ? 1.0f : 0.0f, 80.0f, 0.0f, 0.0f);
+
+    post_capture_scene(F.hdr);
+
+    p = fg_pass("vm_prepass", exec_vm_prepass, NULL);
+    fg_write(p, F.vm_depth, FG_DEPTH);
+    fg_write(p, F.normal, FG_COLOR);
+    fg_write(p, F.material, FG_COLOR);
+    fg_write(p, F.velocity, FG_COLOR);
+    p = fg_pass("viewmodel", exec_viewmodel, NULL);
+    fg_write(p, F.hdr, FG_COLOR);
+    fg_write(p, F.vm_depth, FG_DEPTH);
+
+    F.ldr = post_resolve();
+
+    p = fg_pass("final", exec_final, NULL);
+    fg_read(p, F.ldr, FG_SAMPLED);
+    fg_write(p, F.swap, FG_COLOR);
+    if (p < 0) {
+        static int warned;
+        if (!warned++) log_warn("render: the final pass can't be disabled (black frame)");
+    }
+}
+
 void render_end_frame(void) {
     if (!R->frame_active) return;
     FrameResources *f = &R->frames[R->frame_slot];
@@ -614,34 +1157,44 @@ void render_end_frame(void) {
 
     FrameData *fd = (FrameData *)f->ubo.mapped;
     compute_matrices(fd);
+    memset(&F, 0, sizeof(F));
+    F.f = f;
 
-    VkDeviceSize line_off[2] = { 0, 0 };
+    // Previous transforms of moving draws (DrawPrev SSBO, velocity).
+    R->prev_model_count = 0;
+    for (u32 i = 0; i < R->draw_count; i++) assign_prev_model(&R->draws[i]);
+    for (u32 i = 0; i < R->vm_draw_count; i++) assign_prev_model(&R->vm_draws[i]);
+    if (R->prev_model_count) memcpy(f->prev_models.mapped, R->prev_models_cpu, sizeof(mat4) * R->prev_model_count);
+
     for (int k = 0; k < 2; k++)
-        if (R->line_count[k]) line_off[k] = dyn_push(f, R->line_cpu[k], sizeof(LineVertex) * R->line_count[k]);
-    VkDeviceSize text_off = R->text_count ? dyn_push(f, R->text_cpu, sizeof(TextVertex) * R->text_count) : 0;
+        if (R->line_count[k]) F.line_off[k] = dyn_push(f, R->line_cpu[k], sizeof(LineVertex) * R->line_count[k]);
+    F.text_off = R->text_count ? dyn_push(f, R->text_cpu, sizeof(TextVertex) * R->text_count) : 0;
     {
         static int warned;
-        if (text_off == (VkDeviceSize)-1 && !warned++)
+        if (F.text_off == (VkDeviceSize)-1 && !warned++)
             log_warn("render: dynamic buffer full (%llu used of %llu, lines %u/%u, text %u verts) - 3D text dropped", (unsigned long long)f->dyn_used,
                      (unsigned long long)f->dyn.size, R->line_count[0], R->line_count[1], R->text_count);
     }
-    VkDeviceSize ui_voff = R->ui_vcount ? dyn_push(f, R->ui_verts, sizeof(UiVertex) * R->ui_vcount) : 0;
-    VkDeviceSize ui_ioff = R->ui_icount ? dyn_push(f, R->ui_indices, sizeof(u32) * R->ui_icount) : 0;
+    F.ui_voff = R->ui_vcount ? dyn_push(f, R->ui_verts, sizeof(UiVertex) * R->ui_vcount) : 0;
+    F.ui_ioff = R->ui_icount ? dyn_push(f, R->ui_indices, sizeof(u32) * R->ui_icount) : 0;
 
     // Skinned characters: palettes + per-pass instance lists (GPU) or CPU-skinned vertices.
+    // The bone SSBO holds this frame's palettes, then last frame's (previous-palette velocity).
     bool cpu_skin = R->r_cpu_skinning->i != 0;
     static SkinPass skin_main, skin_shadow, skin_vm;
     skin_main.batch_count = skin_shadow.batch_count = skin_vm.batch_count = 0;
-    bool any_skin_vm = false;
-    for (u32 i = 0; i < R->skin_draw_count; i++) any_skin_vm |= (R->skin_draws[i].flags & MAT_VIEWMODEL) != 0;
-    CpuSkin *cpu_skinned = NULL;
+    F.skin_main = &skin_main;
+    F.skin_vm = &skin_vm;
+    for (u32 i = 0; i < R->skin_draw_count; i++) F.any_skin_vm |= (R->skin_draws[i].flags & MAT_VIEWMODEL) != 0;
     ArenaMark skin_mark = arena_mark(&g_engine.frame_arena);
     if (R->skin_draw_count) {
         if (cpu_skin) {
-            cpu_skinned = ARENA_PUSH_N(&g_engine.frame_arena, CpuSkin, R->skin_draw_count);
-            cpu_skin_all(f, cpu_skinned);
+            F.cpu_skinned = ARENA_PUSH_N(&g_engine.frame_arena, CpuSkin, R->skin_draw_count);
+            cpu_skin_all(f, F.cpu_skinned);
         } else {
             memcpy(f->bones.mapped, R->skin_bones, sizeof(mat4) * R->skin_bone_count);
+            if (R->prev_bone_count && R->skin_bone_count + R->prev_bone_count <= MAX_SKIN_BONES * 2)
+                memcpy((mat4 *)f->bones.mapped + R->skin_bone_count, R->prev_bones, sizeof(mat4) * R->prev_bone_count);
             u32 used = build_skin_pass(f, 0, 0, &skin_main);
             used += build_skin_pass(f, 1, used, &skin_shadow);
             build_skin_pass(f, 2, used, &skin_vm);
@@ -654,7 +1207,7 @@ void render_end_frame(void) {
 
     // ---------------------------------------------------------- shadow pass
     vkr_image_barrier(cmd, R->shadow.image, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-                      VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, 0,
+                      VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, 0,
                       VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
                       VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, 1);
     {
@@ -676,7 +1229,7 @@ void render_end_frame(void) {
             vkCmdSetDepthBias(cmd, 1.25f, 0.0f, 1.75f);
             vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 0, 1, &f->frame_set, 0, NULL);
             draw_items(cmd, R->draws, R->draw_count, true, false, 0);
-            if (cpu_skinned) draw_cpu_skinned(cmd, f, cpu_skinned, 1);
+            if (F.cpu_skinned) draw_cpu_skinned(cmd, f, F.cpu_skinned, 1);
             else if (skin_shadow.batch_count) {
                 vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_SKIN_SHADOW]);
                 draw_skin_pass(cmd, &skin_shadow);
@@ -686,216 +1239,28 @@ void render_end_frame(void) {
     }
     vkr_image_barrier(cmd, R->shadow.image, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
                       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-                      VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                      VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                       VK_ACCESS_2_SHADER_SAMPLED_READ_BIT, 1);
 
-    // ---------------------------------------------------------- scene passes (HDR)
-    // 1 static opaque (clears) | 2 decals (depth read-only) | 3 characters + blended items |
-    // scene copy (distortion) | 4 particles, lines, text (depth read-only, sampled) |
-    // 5 viewmodel on its own depth (world depth survives for next frame's particle collision).
-    const VkPipelineStageFlags2 DEPTH_STAGES = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
-    const VkAccessFlags2 DEPTH_RW = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
-    vkr_image_barrier(cmd, R->hdr.image, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                      VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, 0, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-                      VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, 1);
-    // Last frame's depth was read by this frame's particle compute: WAR on compute before clearing.
-    vkr_image_barrier(cmd, R->depth.image, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-                      VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT, 0,
-                      DEPTH_STAGES, DEPTH_RW, 1);
-    {
-        VkRenderingAttachmentInfo ca = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
-        ca.imageView = R->hdr.view;
-        ca.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-        ca.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-        ca.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-        ca.clearValue.color.float32[0] = R->env.fog_color.x;
-        ca.clearValue.color.float32[1] = R->env.fog_color.y;
-        ca.clearValue.color.float32[2] = R->env.fog_color.z;
-        ca.clearValue.color.float32[3] = 1.0f;
-        VkRenderingAttachmentInfo da = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
-        da.imageView = R->depth.view;
-        da.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
-        da.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-        da.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-        da.clearValue.depthStencil.depth = 1.0f;
-        VkRenderingInfo ri = { VK_STRUCTURE_TYPE_RENDERING_INFO };
-        ri.renderArea.extent.width = R->hdr.w;
-        ri.renderArea.extent.height = R->hdr.h;
-        ri.layerCount = 1;
-        ri.colorAttachmentCount = 1;
-        ri.pColorAttachments = &ca;
-        ri.pDepthAttachment = &da;
+    // ---------------------------------------------------------- frame graph: scene + post + UI
+    build_frame_graph(fd);
+    fg_execute(cmd);
 
-        // ---- 1: static opaque
-        vkCmdBeginRendering(cmd, &ri);
-        set_viewport(cmd, R->hdr.w, R->hdr.h);
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 0, 1, &f->frame_set, 0, NULL);
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[R->r_wireframe->i ? PIPE_LIT_WIRE : PIPE_LIT]);
-        draw_items(cmd, R->draws, R->draw_count, false, R->r_culling->i != 0, 0);
-        vkCmdEndRendering(cmd);
-
-        // ---- 2: decals (box projected onto the static scene; characters come after so they never receive them)
-        vkr_image_barrier(cmd, R->depth.image, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL,
-                          DEPTH_STAGES, VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, DEPTH_STAGES | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-                          VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_SHADER_SAMPLED_READ_BIT, 1);
-        ca.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
-        da.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
-        da.imageLayout = VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL;
-        vkCmdBeginRendering(cmd, &ri);
-        set_viewport(cmd, R->hdr.w, R->hdr.h);
-        vkx_draw_decals(cmd);
-        vkCmdEndRendering(cmd);
-        vkr_image_barrier(cmd, R->depth.image, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-                          DEPTH_STAGES | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT, DEPTH_STAGES, DEPTH_RW, 1);
-
-        // ---- 3: characters + blended items
-        da.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
-        vkCmdBeginRendering(cmd, &ri);
-        set_viewport(cmd, R->hdr.w, R->hdr.h);
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 0, 1, &f->frame_set, 0, NULL);
-        if (cpu_skinned || skin_main.batch_count) {
-            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[R->r_wireframe->i ? PIPE_LIT_WIRE : PIPE_LIT]);
-            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 1, 1, &R->textures[R->white_tex].set, 0, NULL);
-            if (cpu_skinned) draw_cpu_skinned(cmd, f, cpu_skinned, 0);
-            else {
-                vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[R->r_wireframe->i ? PIPE_SKIN_WIRE : PIPE_SKIN]);
-                draw_skin_pass(cmd, &skin_main);
-            }
-        }
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_LIT_BLEND]);
-        draw_items(cmd, R->draws, R->draw_count, false, R->r_culling->i != 0, 1);
-        vkCmdEndRendering(cmd);
-
-        // ---- scene copy for distortion, depth -> read-only (sampled by soft particles)
-        vkx_copy_scene(cmd);
-        vkr_image_barrier(cmd, R->depth.image, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL,
-                          DEPTH_STAGES, VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-                          DEPTH_STAGES | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                          VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_SHADER_SAMPLED_READ_BIT, 1);
-
-        // ---- 4: particles + world lines / text
-        da.imageLayout = VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL;
-        vkCmdBeginRendering(cmd, &ri);
-        set_viewport(cmd, R->hdr.w, R->hdr.h);
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 0, 1, &f->frame_set, 0, NULL);
-        if (R->line_count[0] && line_off[0] != (VkDeviceSize)-1) {
-            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_LINES]);
-            vkCmdBindVertexBuffers(cmd, 0, 1, &f->dyn.buffer, &line_off[0]);
-            vkCmdDraw(cmd, R->line_count[0], 1, 0, 0);
-            R->stats.draw_calls++;
-        }
-        if (R->text_count && text_off != (VkDeviceSize)-1) {
-            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_TEXT]);
-            TextureId atlas = R->textures[R->text_atlas].ready ? R->text_atlas : R->white_tex;
-            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 1, 1, &R->textures[atlas].set, 0, NULL);
-            vkCmdBindVertexBuffers(cmd, 0, 1, &f->dyn.buffer, &text_off);
-            vkCmdDraw(cmd, R->text_count, 1, 0, 0);
-            R->stats.draw_calls++;
-        }
-        vkx_draw_particles(cmd);
-        vkCmdEndRendering(cmd);
-
-        // ---- 5: viewmodel (own depth) + overlay lines
-        VkRenderingAttachmentInfo vda = da;
-        vda.imageView = R->vm_depth.view;
-        vda.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
-        vda.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-        vda.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-        vkr_image_barrier(cmd, R->vm_depth.image, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, DEPTH_STAGES,
-                          0, DEPTH_STAGES, DEPTH_RW, 1);
-        ri.pDepthAttachment = &vda;
-        vkCmdBeginRendering(cmd, &ri);
-        set_viewport(cmd, R->hdr.w, R->hdr.h);
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 0, 1, &f->frame_set, 0, NULL);
-        if (R->vm_draw_count || any_skin_vm) {
-            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[R->r_wireframe->i ? PIPE_LIT_WIRE : PIPE_LIT]);
-            draw_items(cmd, R->vm_draws, R->vm_draw_count, false, false, 2);
-            // First-person arms (body model), same depth as the viewmodel weapon.
-            if (cpu_skinned || skin_vm.batch_count) {
-                vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 1, 1, &R->textures[R->white_tex].set, 0, NULL);
-                if (cpu_skinned) draw_cpu_skinned(cmd, f, cpu_skinned, 2);
-                else {
-                    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[R->r_wireframe->i ? PIPE_SKIN_WIRE : PIPE_SKIN]);
-                    draw_skin_pass(cmd, &skin_vm);
-                }
-            }
-        }
-        if (R->line_count[1] && line_off[1] != (VkDeviceSize)-1) {
-            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_LINES_OVERLAY]);
-            vkCmdBindVertexBuffers(cmd, 0, 1, &f->dyn.buffer, &line_off[1]);
-            vkCmdDraw(cmd, R->line_count[1], 1, 0, 0);
-            R->stats.draw_calls++;
-        }
-        vkCmdEndRendering(cmd);
+    // Depth stays readable for next frame's particle collision compute (VFX set binding 19).
+    if (R->depth.layout != VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL) {
+        vkr_image_barrier(cmd, R->depth.image, VK_IMAGE_ASPECT_DEPTH_BIT, R->depth.layout, VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL,
+                          VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_WRITE_BIT, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+                          VK_ACCESS_2_SHADER_SAMPLED_READ_BIT, 1);
+        R->depth.layout = VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL;
     }
-    vkr_image_barrier(cmd, R->hdr.image, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-                      VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
-                      VK_ACCESS_2_SHADER_SAMPLED_READ_BIT, 1);
-    vkx_bloom(cmd);
 
-    // ---------------------------------------------------------- post + UI (swapchain)
     VkImage swap = R->swap_images[R->image_index];
-    vkr_image_barrier(cmd, swap, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                      VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, 0, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
-                      VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, 1);
-    {
-        VkRenderingAttachmentInfo ca = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
-        ca.imageView = R->swap_views[R->image_index];
-        ca.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-        ca.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-        ca.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-        VkRenderingInfo ri = { VK_STRUCTURE_TYPE_RENDERING_INFO };
-        ri.renderArea.extent = R->swap_extent;
-        ri.layerCount = 1;
-        ri.colorAttachmentCount = 1;
-        ri.pColorAttachments = &ca;
-        vkCmdBeginRendering(cmd, &ri);
-        set_viewport(cmd, R->swap_extent.width, R->swap_extent.height);
-
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_POST]);
-        VkDescriptorSet post_sets[2] = { R->hdr_set, vkx_bloom_set() };
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_post2, 0, 2, post_sets, 0, NULL);
-        float post[8] = { R->r_brightness->f, R->r_gamma->f, R->r_aa->i > 0 ? 1.0f : 0.0f, R->r_vignette->f,
-                          1.0f / (float)R->hdr.w, 1.0f / (float)R->hdr.h, vkx_bloom_intensity(), R->exposure_boost };
-        vkCmdPushConstants(cmd, R->layout_post2, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(post), post);
-        vkCmdDraw(cmd, 3, 1, 0, 0);
-
-        if (R->ui_ccount && ui_voff != (VkDeviceSize)-1 && ui_ioff != (VkDeviceSize)-1) {
-            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_UI]);
-            float scr[4] = { 2.0f / (float)R->swap_extent.width, 2.0f / (float)R->swap_extent.height, 0, 0 };
-            vkCmdPushConstants(cmd, R->layout_ui, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(scr), scr);
-            vkCmdBindVertexBuffers(cmd, 0, 1, &f->dyn.buffer, &ui_voff);
-            vkCmdBindIndexBuffer(cmd, f->dyn.buffer, ui_ioff, VK_INDEX_TYPE_UINT32);
-            u32 bound = 0;
-            for (u32 i = 0; i < R->ui_ccount; i++) {
-                UiDrawCmd *c = &R->ui_cmds[i];
-                if (!c->index_count) continue;
-                TextureId tex = c->texture && R->textures[c->texture].used && R->textures[c->texture].ready ? c->texture : R->white_tex;
-                if (tex != bound) {
-                    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_ui, 0, 1, &R->textures[tex].set, 0, NULL);
-                    bound = tex;
-                }
-                int x0 = DG_CLAMP(c->clip_x, 0, (int)R->swap_extent.width);
-                int y0 = DG_CLAMP(c->clip_y, 0, (int)R->swap_extent.height);
-                int x1 = DG_CLAMP(c->clip_x + c->clip_w, 0, (int)R->swap_extent.width);
-                int y1 = DG_CLAMP(c->clip_y + c->clip_h, 0, (int)R->swap_extent.height);
-                if (x1 <= x0 || y1 <= y0) continue;
-                VkRect2D sc = { { x0, y0 }, { (u32)(x1 - x0), (u32)(y1 - y0) } };
-                vkCmdSetScissor(cmd, 0, 1, &sc);
-                vkCmdDrawIndexed(cmd, c->index_count, 1, c->index_offset, 0, 0);
-                R->stats.draw_calls++;
-            }
-        }
-        vkCmdEndRendering(cmd);
-    }
-
     GpuBuffer shot = { 0 };
     bool want_shot = R->screenshot_path[0] != 0;
     if (want_shot) {
         u32 w = R->swap_extent.width, h = R->swap_extent.height;
         shot = vkr_buffer_create_readback((VkDeviceSize)w * h * 4);
-        vkr_image_barrier(cmd, swap, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        vkr_image_barrier(cmd, swap, VK_IMAGE_ASPECT_COLOR_BIT, g_swap_layout,
                           VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                           VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_READ_BIT, 1);
         VkBufferImageCopy region = { 0 };
@@ -908,7 +1273,7 @@ void render_end_frame(void) {
         vkr_image_barrier(cmd, swap, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
                           VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_READ_BIT, VK_PIPELINE_STAGE_2_NONE, 0, 1);
     } else {
-        vkr_image_barrier(cmd, swap, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+        vkr_image_barrier(cmd, swap, VK_IMAGE_ASPECT_COLOR_BIT, g_swap_layout, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
                           VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT,
                           VK_PIPELINE_STAGE_2_NONE, 0, 1);
     }
@@ -943,19 +1308,63 @@ void render_end_frame(void) {
     if (pres == VK_ERROR_OUT_OF_DATE_KHR || pres == VK_SUBOPTIMAL_KHR) R->swap_dirty = true;
     else if (pres != VK_SUCCESS) log_error("present failed %d", (int)pres);
 
+    bool want_exr = post_exr_capture_armed();
+    if (want_shot || want_exr) VK_CHECK(vkWaitForFences(R->device, 1, &f->fence, VK_TRUE, UINT64_MAX));
     if (want_shot) {
-        VK_CHECK(vkWaitForFences(R->device, 1, &f->fence, VK_TRUE, UINT64_MAX));
         vmaInvalidateAllocation(R->vma, shot.alloc, 0, VK_WHOLE_SIZE);
         save_screenshot(&shot, R->swap_extent.width, R->swap_extent.height);
         vkr_buffer_destroy_now(&shot);
         R->screenshot_path[0] = 0;
     }
+    if (want_exr) post_exr_finish();
+
+    // Temporal bookkeeping for the next frame: models, palettes, matrices.
+    store_prev_models(R->draws, R->draw_count);
+    store_prev_models(R->vm_draws, R->vm_draw_count);
+    if (!cpu_skin) {
+        memcpy(R->prev_bones, R->skin_bones, sizeof(mat4) * R->skin_bone_count);
+        R->prev_bone_count = R->skin_bone_count;
+        for (u32 i = 0; i < R->skin_draw_count; i++) {
+            const SkinnedDraw *d = &R->skin_draws[i];
+            if (!d->object_id) continue;
+            ObjSlot *s = obj_find(d->object_id, true);
+            if (!s) continue;
+            s->pal_offset = d->bone_count & 0xFFFFFu;
+            s->pal_count = d->bone_count >> 20;
+            s->pal_frame = R->frame_index + 1;
+        }
+    }
+    R->have_prev = true;
+    R->camera_cut = false;
+    R->frame_index++;
 
     R->frame_slot = (R->frame_slot + 1) % FRAMES_IN_FLIGHT;
     R->frame_active = false;
 }
 
 void render_screenshot(const char *path) { dg_strcpy(R->screenshot_path, sizeof(R->screenshot_path), path); }
+
+void render_set_camera_fx(bool ads, float ads_focus_dist) {
+    R->fx_ads = ads;
+    R->fx_ads_focus = ads_focus_dist;
+}
+void render_camera_cut(void) { R->camera_cut = true; }
+bool render_load_lut(const char *cube_path) {
+    vkDeviceWaitIdle(R->device);   // the LUT image may be in flight
+    return post_lut_load_cube(cube_path && cube_path[0] ? cube_path : NULL, 0);
+}
+bool render_capture_hdr(const char *exr_path) { return post_hdr_capture(exr_path); }
+int render_pass_count(void) { return fg_pass_count(); }
+const char *render_pass_name(int i) { return fg_pass_name(i); }
+float render_pass_ms(int i) { return fg_pass_ms(i); }
+u64 render_post_memory(void) { return fg_memory_bytes(); }
+float render_exposure_ev(void) { return post_exposure_ev(); }
+bool render_hdr_supported(void) { return R->hdr_supported; }
+bool render_hdr_active(void) { return R->swap_hdr; }
+void render_render_size(u32 *w, u32 *h) {
+    *w = R->hdr.w;
+    *h = R->hdr.h;
+}
 
 bool render_world_to_screen(vec3 world, vec2 *out_px) {
     vec4 c = mat4_mul_v4(R->view_proj, v4(world.x, world.y, world.z, 1.0f));

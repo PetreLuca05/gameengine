@@ -5,6 +5,13 @@ layout(location = 2) in vec2 v_uv;
 layout(location = 3) in vec4 v_color;
 
 layout(set = 1, binding = 0) uniform sampler2D tex;
+// Screen-space inputs from the post stack (push descriptor, render resolution): ambient occlusion
+// (indirect only), sun contact shadows, reflections (rgb + confidence), diffuse GI.
+layout(set = 2, binding = 0) uniform sampler2D post_ao;
+layout(set = 2, binding = 1) uniform sampler2D post_contact;
+layout(set = 2, binding = 2) uniform sampler2D post_ssr;
+layout(set = 2, binding = 3) uniform sampler2D post_ssgi;
+layout(set = 2, binding = 4) uniform sampler3D post_froxel;   // integrated volumetric fog (blended draws)
 
 layout(location = 0) out vec4 out_color;
 
@@ -141,13 +148,32 @@ void main() {
         float rough = clamp(MAT_PARAMS.x, 0.04, 1.0);
         float metal = clamp(MAT_PARAMS.y, 0.0, 1.0);
         vec3 albedo = base.rgb;
-        // hemispheric ambient
+        // Screen-space inputs (never on the viewmodel: it is excluded from the screen-space passes).
+        bool vm = (flags & MAT_VIEWMODEL) != 0u;
+        vec2 suv = gl_FragCoord.xy * frame.screen.zw;
+        float ao = (!vm && frame.post_flags.x > 0.5) ? mix(1.0, texture(post_ao, suv).r, frame.post_params.z) : 1.0;
+        float contact = (!vm && frame.post_flags.y > 0.5) ? texture(post_contact, suv).r : 1.0;
+        // hemispheric ambient (indirect diffuse): AO only darkens indirect light
         float hemi = n.y * 0.5 + 0.5;
         vec3 ambient = mix(frame.ground_ambient.rgb, frame.sky_ambient.rgb, hemi) * frame.sky_ambient.w;
-        color = ambient * albedo * (1.0 - metal * 0.5);
+        if (!vm && frame.post_flags.w > 0.5) ambient += texture(post_ssgi, suv).rgb * frame.post_params.y;
+        color = ambient * albedo * (1.0 - metal) * ao;
+        // indirect specular: sky / ground by the reflection vector, replaced by SSR where it hit
+        vec3 rv = reflect(-v, n);
+        float ndv0 = max(dot(n, v), 1e-4);
+        vec3 f0 = mix(vec3(0.04), albedo, metal);
+        vec3 fr = f0 + (max(vec3(1.0 - rough), f0) - f0) * pow(1.0 - ndv0, 5.0);
+        vec3 env = mix(frame.ground_ambient.rgb, frame.sky_ambient.rgb, rv.y * 0.5 + 0.5) * frame.sky_ambient.w;
+        vec3 spec_ind = env;
+        if (!vm && frame.post_flags.z > 0.5) {
+            vec4 ssr = texture(post_ssr, suv);
+            spec_ind = mix(env, ssr.rgb, clamp(ssr.a * frame.post_params.x, 0.0, 1.0));
+        }
+        float spec_occ = clamp(pow(ndv0 + ao, exp2(-16.0 * rough - 1.0)) - 1.0 + ao, 0.0, 1.0);
+        color += spec_ind * fr * frame.post_params.w * spec_occ;
         // sun
         vec3 l = normalize(frame.sun_dir.xyz);
-        float sh = shadow_factor(v_world, n);
+        float sh = shadow_factor(v_world, n) * contact;
         color += brdf(n, v, l, albedo, rough, metal) * frame.sun_color.rgb * frame.sun_dir.w * sh;
         // point lights
         int count = int(frame.ground_ambient.w);
@@ -176,6 +202,17 @@ void main() {
     float fd = length(frame.camera_pos.xyz - v_world);
     float fog = 1.0 - exp(-fd * frame.fog.w);
     color = mix(color, frame.fog.rgb, clamp(fog, 0.0, 1.0));
+#ifdef LIT_FROXEL_FOG
+    // Blended surfaces are drawn after the volumetric fog pass: fog their own contribution with
+    // the froxel volume (in-scattering + transmittance up to this depth).
+    if (LIT_FROXEL_FOG && frame.post_fog.x > 0.5) {
+        vec2 fuv = gl_FragCoord.xy * frame.screen.zw;
+        float vz = max(dot(v_world - frame.camera_pos.xyz, -vec3(frame.view[0][2], frame.view[1][2], frame.view[2][2])), 0.15);
+        float w = clamp(log(vz / 0.15) / log(frame.post_fog.y / 0.15), 0.0, 1.0);
+        vec4 fv = textureLod(post_froxel, vec3(fuv, w), 0.0);
+        color = color * fv.a + fv.rgb;
+    }
+#endif
 
     out_color = vec4(color, base.a);
 }

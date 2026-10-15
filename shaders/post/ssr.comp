@@ -1,0 +1,118 @@
+#version 450
+// Screen-space reflections: GGX-importance-sampled reflection ray (roughness-dependent cone via
+// the blue noise), Hi-Z traversal (min-depth pyramid, GPU Pro 5 style), confidence fade at the
+// screen edges / ray end / back faces, colour from the previous frame's colour pyramid at the
+// reprojected hit point (mip by roughness and distance). Output: rgb, a = confidence.
+#extension GL_GOOGLE_include_directive : require
+#include "post_common.glsl"
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0) uniform sampler2D depth_tex;
+layout(set = 0, binding = 1) uniform sampler2D normal_tex;
+layout(set = 0, binding = 2) uniform sampler2D material_tex;
+layout(set = 0, binding = 3) uniform sampler2D hiz_tex;
+layout(set = 0, binding = 4) uniform sampler2D color_prev;
+layout(set = 0, binding = 5) uniform sampler2D velocity_tex;
+layout(set = 0, binding = 6) uniform sampler2D noise_tex;
+layout(set = 0, binding = 8) uniform writeonly image2D dst;
+
+vec3 importance_ggx(vec2 xi, float a, vec3 N) {
+    float phi = 2.0 * PI * xi.x;
+    float cos_t = sqrt((1.0 - xi.y) / (1.0 + (a * a - 1.0) * xi.y));
+    float sin_t = sqrt(1.0 - cos_t * cos_t);
+    vec3 h = vec3(cos(phi) * sin_t, sin(phi) * sin_t, cos_t);
+    vec3 up = abs(N.z) < 0.999 ? vec3(0, 0, 1) : vec3(1, 0, 0);
+    vec3 tx = normalize(cross(up, N)), ty = cross(N, tx);
+    return normalize(tx * h.x + ty * h.y + N * h.z);
+}
+
+// Screen-space point: (uv, ndc depth) of a view-space point (jittered, like the depth buffer).
+vec3 to_screen(vec3 v) {
+    vec4 c = U.proj * vec4(v, 1.0);
+    vec3 n = c.xyz / c.w;
+    return vec3((n.xy + U.jitter.xy) * 0.5 + 0.5, n.z);
+}
+
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 sz = imageSize(dst);
+    if (p.x >= sz.x || p.y >= sz.y) return;
+    vec2 uv = (vec2(p) + 0.5) / vec2(sz);
+    float d = textureLod(depth_tex, uv, 0.0).r;
+    vec4 mat = textureLod(material_tex, uv, 0.0);
+    float rough = mat.r;
+    if (d >= 1.0 || rough > U.s_ssr.y || (gb_flags(mat) & (GB_VIEWMODEL | GB_UNLIT)) != 0u) { imageStore(dst, p, vec4(0.0)); return; }
+    vec3 vp = view_pos(uv, d);
+    vec3 N = normalize((U.view * vec4(oct_decode(textureLod(normal_tex, uv, 0.0).rg), 0.0)).xyz);
+    vec3 V = normalize(-vp);
+    vec4 noise = blue_noise(noise_tex, p);
+    float a = max(rough * rough, 0.002);
+    vec3 H = importance_ggx(vec2(noise.x, noise.y * 0.85), a, N);
+    vec3 Rv = reflect(-V, H);
+    if (dot(Rv, N) <= 0.0) Rv = reflect(-V, N);
+    // Ray end: max distance, clipped to the near plane.
+    float max_dist = 30.0;
+    float ray_len = (vp.z + Rv.z * max_dist) > -U.depthp.x ? (-U.depthp.x - vp.z) / Rv.z * 0.99 : max_dist;
+    vec3 o = to_screen(vp + N * (0.002 + 0.0005 * -vp.z));
+    vec3 e = to_screen(vp + Rv * ray_len);
+    vec3 dir = e - o;
+    // Hi-Z traversal.
+    int max_level = textureQueryLevels(hiz_tex) - 1;
+    vec2 hiz0 = vec2(textureSize(hiz_tex, 0));
+    int level = 0;
+    vec2 cross_step = vec2(dir.x >= 0.0 ? 1.0 : 0.0, dir.y >= 0.0 ? 1.0 : 0.0);
+    vec2 cross_off = vec2(dir.x >= 0.0 ? 1.0 : -1.0, dir.y >= 0.0 ? 1.0 : -1.0) * 0.00002;
+    float t = 0.0;
+    // Start just outside the start cell (no self intersection).
+    {
+        vec2 cell = floor(o.xy * hiz0);
+        vec2 bnd = (cell + cross_step) / hiz0 + cross_off;
+        vec2 tt = (bnd - o.xy) / dir.xy;
+        tt = mix(tt, vec2(1e9), lessThan(abs(dir.xy), vec2(1e-7)));
+        t = max(min(tt.x, tt.y), 0.0);
+    }
+    bool hit = false;
+    int iters = U.s_ssr.z >= 2.0 ? 96 : 56;
+    float thickness = U.s_ssr.w;
+    for (int i = 0; i < iters && level >= 0 && t <= 1.0; i++) {
+        vec3 ray = o + dir * t;
+        vec2 cnt = max(floor(hiz0 / exp2(float(level))), vec2(1.0));
+        vec2 cell = floor(ray.xy * cnt);
+        if (any(lessThan(cell, vec2(0.0))) || any(greaterThanEqual(cell, cnt))) break;
+        float zmin = texelFetch(hiz_tex, ivec2(cell), level).r;
+        // Distance to the cell boundary along the ray.
+        vec2 bnd = (cell + cross_step) / cnt + cross_off;
+        vec2 tt = (bnd - o.xy) / dir.xy;
+        tt = mix(tt, vec2(1e9), lessThan(abs(dir.xy), vec2(1e-7)));
+        float t_cell = min(tt.x, tt.y);
+        if (ray.z < zmin) {
+            // In front of everything in this cell: move to the depth plane or the boundary.
+            float t_plane = dir.z > 1e-7 ? (zmin - o.z) / dir.z : 1e9;
+            if (t_plane < t_cell) { t = t_plane; level = max(level - 1, 0); if (level == 0 && t_plane >= t_cell) level = 0; }
+            else { t = t_cell; level = min(level + 1, max_level); }
+        } else {
+            if (level == 0) {
+                // Thickness test in linear depth.
+                float scene_z = linear_depth(zmin), ray_z = linear_depth(ray.z);
+                if (ray_z - scene_z < thickness + scene_z * 0.02) { hit = true; break; }
+                t = t_cell;   // behind a thin object: continue past it
+            } else {
+                level--;
+            }
+        }
+    }
+    if (!hit) { imageStore(dst, p, vec4(0.0)); return; }
+    vec3 hp = o + dir * t;
+    vec2 huv = hp.xy;
+    // Back-facing hits (the inside of an object) do not reflect.
+    vec3 hn = normalize((U.view * vec4(oct_decode(textureLod(normal_tex, huv, 0.0).rg), 0.0)).xyz);
+    if (dot(hn, Rv) > 0.2) { imageStore(dst, p, vec4(0.0)); return; }
+    vec2 edge = smoothstep(0.0, 0.08, huv) * (1.0 - smoothstep(0.92, 1.0, huv));
+    float conf = edge.x * edge.y * (1.0 - smoothstep(0.75, 1.0, t)) * (1.0 - smoothstep(U.s_ssr.y * 0.6, U.s_ssr.y, rough));
+    if ((gb_flags(textureLod(material_tex, huv, 0.0)) & GB_VIEWMODEL) != 0u) conf = 0.0;
+    vec2 puv = huv - textureLod(velocity_tex, huv, 0.0).rg;
+    float hit_dist = t * ray_len;
+    float mip = clamp(log2(1.0 + rough * hit_dist * 24.0), 0.0, float(textureQueryLevels(color_prev) - 1));
+    vec3 col = textureLod(color_prev, puv, mip).rgb;
+    col = min(col, vec3(64.0));   // fireflies
+    imageStore(dst, p, vec4(col, conf));
+}

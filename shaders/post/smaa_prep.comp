@@ -1,0 +1,15 @@
+#version 450
+// SMAA input: a gamma-like tonemapped copy of the HDR colour for luma edge detection.
+#extension GL_GOOGLE_include_directive : require
+#include "post_common.glsl"
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0) uniform sampler2D color_tex;
+layout(set = 0, binding = 8, rgba8) uniform writeonly image2D dst;
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 sz = imageSize(dst);
+    if (p.x >= sz.x || p.y >= sz.y) return;
+    vec3 c = texelFetch(color_tex, p, 0).rgb;
+    c = c / (1.0 + c);
+    imageStore(dst, p, vec4(sqrt(c), 1.0));
+}

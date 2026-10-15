@@ -143,20 +143,28 @@ endif()
 message(STATUS "Deadground: shader compiler ${DG_SHADER_COMPILER}")
 
 file(GLOB DG_SHADER_SOURCES CONFIGURE_DEPENDS
-  ${CMAKE_SOURCE_DIR}/shaders/*.vert ${CMAKE_SOURCE_DIR}/shaders/*.frag ${CMAKE_SOURCE_DIR}/shaders/*.comp)
-file(GLOB DG_SHADER_INCLUDES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/shaders/*.glsl)
+  ${CMAKE_SOURCE_DIR}/shaders/*.vert ${CMAKE_SOURCE_DIR}/shaders/*.frag ${CMAKE_SOURCE_DIR}/shaders/*.comp
+  ${CMAKE_SOURCE_DIR}/shaders/post/*.vert ${CMAKE_SOURCE_DIR}/shaders/post/*.frag ${CMAKE_SOURCE_DIR}/shaders/post/*.comp)
+file(GLOB DG_SHADER_INCLUDES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/shaders/*.glsl ${CMAKE_SOURCE_DIR}/shaders/post/*.glsl ${CMAKE_SOURCE_DIR}/third_party/fsr/*.h
+  ${CMAKE_SOURCE_DIR}/shaders/post/*.h)
 set(DG_SHADER_OUT ${CMAKE_BINARY_DIR}/bin/shaders)
 set(DG_SPV_FILES)
 foreach(src ${DG_SHADER_SOURCES})
   get_filename_component(name ${src} NAME)
-  set(out ${DG_SHADER_OUT}/${name}.spv)
+  get_filename_component(dir ${src} DIRECTORY)
+  get_filename_component(dirname ${dir} NAME)
+  set(sub "")
+  if(dirname STREQUAL "post")
+    set(sub "post/")
+  endif()
+  set(out ${DG_SHADER_OUT}/${sub}${name}.spv)
   if(DG_SHADER_COMPILER_KIND STREQUAL "glslc")
-    set(cmd ${DG_SHADER_COMPILER} --target-env=vulkan1.3 -O -I ${CMAKE_SOURCE_DIR}/shaders -o ${out} ${src})
+    set(cmd ${DG_SHADER_COMPILER} --target-env=vulkan1.3 -O -I ${CMAKE_SOURCE_DIR}/shaders -I ${CMAKE_SOURCE_DIR}/shaders/post -I ${CMAKE_SOURCE_DIR}/third_party/fsr -I ${CMAKE_SOURCE_DIR}/third_party/smaa -o ${out} ${src})
   else()
-    set(cmd ${DG_SHADER_COMPILER} -V --target-env vulkan1.3 -I${CMAKE_SOURCE_DIR}/shaders -o ${out} ${src})
+    set(cmd ${DG_SHADER_COMPILER} -V --target-env vulkan1.3 -I${CMAKE_SOURCE_DIR}/shaders -I${CMAKE_SOURCE_DIR}/shaders/post -I${CMAKE_SOURCE_DIR}/third_party/fsr -I${CMAKE_SOURCE_DIR}/third_party/smaa -o ${out} ${src})
   endif()
   add_custom_command(OUTPUT ${out}
-    COMMAND ${CMAKE_COMMAND} -E make_directory ${DG_SHADER_OUT}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${DG_SHADER_OUT}/post
     COMMAND ${cmd}
     DEPENDS ${src} ${DG_SHADER_INCLUDES}
     COMMENT "GLSL ${name}" VERBATIM)
@@ -169,7 +177,7 @@ file(GLOB_RECURSE DG_SOURCES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/src/*.c ${CMA
 add_executable(deadground ${DG_SOURCES})
 set_target_properties(deadground PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
 add_dependencies(deadground dg_shaders)
-target_include_directories(deadground PRIVATE src)
+target_include_directories(deadground PRIVATE src third_party/smaa third_party/fsr)
 target_link_libraries(deadground PRIVATE SDL3::SDL3-static volk vma dg_thirdparty joltc jolt_shim enet meshopt)
 target_compile_definitions(deadground PRIVATE
   DG_SOURCE_DIR="${CMAKE_SOURCE_DIR}"

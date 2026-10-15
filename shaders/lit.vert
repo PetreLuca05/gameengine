@@ -11,13 +11,18 @@ layout(push_constant) uniform Push {
     mat4 model;
     vec4 color;
     vec4 params;   // roughness, metallic, emissive, tex_scale
-    uvec4 flags;   // x = material flags
+    uvec4 flags;   // x = material flags, y = previous model index + 1 (0 = static)
 } pc;
 
 layout(location = 0) out vec3 v_world;
 layout(location = 1) out vec3 v_normal;
 layout(location = 2) out vec2 v_uv;
 layout(location = 3) out vec4 v_color;
+layout(location = 7) out vec4 v_cur_clip;    // unjittered (velocity)
+layout(location = 8) out vec4 v_prev_clip;
+
+// The prepass (gbuffer.frag) and the lit pass must produce bit-identical depth.
+invariant gl_Position;
 
 void main() {
     vec4 world = pc.model * vec4(in_pos, 1.0);
@@ -26,8 +31,14 @@ void main() {
     v_normal = normalize(nmat * in_normal);
     v_uv = in_uv;
     v_color = in_color;
-    if ((pc.flags.x & MAT_VIEWMODEL) != 0u)
+    vec4 prev_world = pc.flags.y != 0u ? draw_prev.prev_models[pc.flags.y - 1u] * vec4(in_pos, 1.0) : world;
+    if ((pc.flags.x & MAT_VIEWMODEL) != 0u) {
         gl_Position = frame.vm_proj * frame.view * world;
-    else
+        v_cur_clip = frame.vm_view_proj_nj * world;
+        v_prev_clip = frame.prev_vm_view_proj_nj * prev_world;
+    } else {
         gl_Position = frame.view_proj * world;
+        v_cur_clip = frame.view_proj_nj * world;
+        v_prev_clip = frame.prev_view_proj_nj * prev_world;
+    }
 }

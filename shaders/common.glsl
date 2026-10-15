@@ -23,6 +23,16 @@ layout(set = 0, binding = 0) uniform FrameData {
     mat4 proj;
     mat4 vm_proj;
     mat4 shadow_vp;
+    // Velocity (TAA / motion blur): unjittered current and previous view-projections (world and
+    // viewmodel). Jitter: xy this frame, zw previous frame (NDC units).
+    mat4 view_proj_nj;
+    mat4 prev_view_proj_nj;
+    mat4 vm_view_proj_nj;
+    mat4 prev_vm_view_proj_nj;
+    vec4 jitter;
+    vec4 post_flags;      // x AO, y contact shadows, z SSR, w SSGI (1 = input valid)
+    vec4 post_params;     // x SSR intensity, y SSGI intensity, z AO intensity, w specular ambient
+    vec4 post_fog;        // x volumetric froxel fog valid, y its max distance (m)
     vec4 camera_pos;      // xyz, w = time
     vec4 sun_dir;         // xyz towards light, w = intensity
     vec4 sun_color;       // rgb, w = shadows enabled
@@ -35,6 +45,8 @@ layout(set = 0, binding = 0) uniform FrameData {
 } frame;
 
 layout(set = 0, binding = 1) uniform sampler2DShadow shadow_map;
+// Previous-frame model matrices of moving draws (velocity), indexed by push flags.y - 1.
+layout(std430, set = 0, binding = 4) readonly buffer DrawPrev { mat4 prev_models[]; } draw_prev;
 
 vec3 srgb_to_linear(vec3 c) { return pow(c, vec3(2.2)); }
 

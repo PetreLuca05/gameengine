@@ -14,14 +14,16 @@
 #include <stdio.h>
 #include <math.h>
 
-#define MAX_BUCKETS 4
+#define MAX_BUCKETS 32
 
 typedef struct LevelBuild {
     World *w;
     int material;   // SurfaceMaterial applied to the bodies being added
     MeshBuilder buckets[MAX_BUCKETS];
     u32 bucket_flags[MAX_BUCKETS];
+    vec3 bucket_surf[MAX_BUCKETS];   // roughness, metallic, emissive
     int bucket_count;
+    vec3 surf;                       // surface of the brush being built (PBR test geometry)
 } LevelBuild;
 
 // ------------------------------------------------------------------ json helpers
@@ -52,11 +54,13 @@ static u32 jcol(const cJSON *o, const char *k, u32 def) {
 // ------------------------------------------------------------------ geometry emitters
 
 static MeshBuilder *bucket(LevelBuild *b, u32 flags) {
-    for (int i = 0; i < b->bucket_count; i++) if (b->bucket_flags[i] == flags) return &b->buckets[i];
+    for (int i = 0; i < b->bucket_count; i++)
+        if (b->bucket_flags[i] == flags && v3_len2(v3_sub(b->bucket_surf[i], b->surf)) < 1e-6f) return &b->buckets[i];
     if (b->bucket_count >= MAX_BUCKETS) return &b->buckets[0];
     int i = b->bucket_count++;
     mb_init(&b->buckets[i]);
     b->bucket_flags[i] = flags;
+    b->bucket_surf[i] = b->surf;
     return &b->buckets[i];
 }
 
@@ -174,6 +178,9 @@ static void build_brush(LevelBuild *b, const cJSON *br) {
     // Surface material (impact VFX / sounds): explicit, or a sensible default per brush type.
     const char *def_mat = !strcmp(type, "doorway") ? "plaster" : (!strcmp(type, "ramp") ? "wood" : "concrete");
     const char *mat_name = js(br, "material", def_mat);
+    // Optional PBR surface (glossy floors, metal props, emissive signs); batched per surface.
+    b->surf = v3(jf(br, "roughness", 0.85f), jf(br, "metallic", 0.0f), jf(br, "emissive", 0.0f));
+    if (jb(br, "unlit", false)) flags |= MAT_UNLIT;
     b->material = surface_from_name(mat_name);
     if (b->material < 0) { log_warn("level: unknown material '%s'", mat_name); b->material = SURF_DEFAULT; }
 
@@ -430,6 +437,7 @@ bool level_load(World *w, const char *path) {
     LevelBuild b;
     memset(&b, 0, sizeof(b));
     b.w = w;
+    b.surf = v3(0.85f, 0.0f, 0.0f);
     const cJSON *room = cJSON_GetObjectItemCaseSensitive(root, "room");
     if (room) build_room(&b, room);
     const cJSON *br;
@@ -469,7 +477,9 @@ bool level_load(World *w, const char *path) {
         d->mesh = mb_upload(&b.buckets[i]);
         d->mat = material_color(v4(1, 1, 1, 1));
         d->mat.flags = b.bucket_flags[i];
-        d->mat.roughness = 0.85f;
+        d->mat.roughness = b.bucket_surf[i].x;
+        d->mat.metallic = b.bucket_surf[i].y;
+        d->mat.emissive = b.bucket_surf[i].z;
         d->model = mat4_identity();
         mb_free(&b.buckets[i]);
     }
@@ -483,6 +493,7 @@ void level_draw_static(const World *w, vec3 cam_pos, vec3 cam_fwd) {
     const LevelStatic *ls = &w->level;
     for (int i = 0; i < ls->draw_count; i++) {
         DrawItem d;
+        memset(&d, 0, sizeof(d));
         d.mesh = ls->draws[i].mesh;
         d.model = ls->draws[i].model;
         d.mat = ls->draws[i].mat;

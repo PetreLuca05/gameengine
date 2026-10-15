@@ -1111,6 +1111,7 @@ void game_init(void) {
     camera_register_cvars();
     camera_fp_register_cvars();
     game_holdpoint_register();
+    game_post_init();
     player_register_cvars();
     // Animation assets (shared skeleton) before anything spawns characters.
     characters_register_cvars();

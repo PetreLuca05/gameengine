@@ -1,9 +1,11 @@
 // GPU VFX: persistent SoA particle pool simulated in compute (emit -> sub-emit -> update ->
 // draw args -> bitonic sort), vertex-pulled particle draws (sorted alpha, additive, distortion,
-// CPU sprites), box-projected decals, a texture atlas (2D array) built from the VFX library and a
-// bloom chain. No CPU readback in the hot path: counters are copied to a host buffer and read two
-// frames later for stats and sort sizing only.
+// CPU sprites), box-projected decals and a texture atlas (2D array) built from the VFX library
+// (the HDR bloom lives in the post stack, src/render/post/post_bloom.c). No CPU readback in the
+// hot path: counters are copied to a host buffer and read two frames later for stats and sort
+// sizing only.
 #include "vk_internal.h"
+#include "graph/fg.h"
 #include "core/platform.h"
 #include "vfx/vfx_sim.h"
 #include "vfx/vfx_atlas.h"
@@ -19,7 +21,6 @@
 #define VFX_MAX_SPRITES 8192u
 #define VFX_MAX_GPU_DECALS 4096u
 #define VFX_PAGE 2048
-#define VFX_BLOOM_MIPS 6
 #define VFX_BINDINGS 24
 
 // std430 / std140 mirrors of shaders/vfx_common.glsl
@@ -60,7 +61,6 @@ static struct {
     VkPipelineLayout comp_layout, gfx_layout;
     VkPipeline c_reset, c_begin, c_emit, c_emit_sub, c_args, c_update, c_draw_args, c_sort;
     VkPipeline g_add, g_alpha, g_distort, g_decal;
-    VkPipeline b_prefilter, b_down, b_up;
     GpuBuffer pos, vel, misc, info, dead, alive_a, alive_b, counters, emitters, luts, list_add, sort_keys, list_distort, subs;
     VfxFrameRes fr[FRAMES_IN_FLIGHT];
     VkImage atlas;
@@ -72,12 +72,6 @@ static struct {
     VmaAllocation noise_alloc;
     VkImageView noise_view;
     RenderTarget scene_copy;
-    VkImage bloom;
-    VmaAllocation bloom_alloc;
-    VkImageView bloom_views[VFX_BLOOM_MIPS];
-    VkDescriptorSet bloom_sets[VFX_BLOOM_MIPS];
-    u32 bloom_w[VFX_BLOOM_MIPS], bloom_h[VFX_BLOOM_MIPS];
-    int bloom_mips;
     VkQueryPool qp;
     float ts_period;
     bool need_reset;
@@ -311,7 +305,7 @@ static VkPipeline graphics_pipe(const char *vs_name, const char *fs_name, VkPipe
 
 static void destroy_pipelines(void) {
     VkPipeline *all[] = { &X.c_reset, &X.c_begin, &X.c_emit, &X.c_emit_sub, &X.c_args, &X.c_update, &X.c_draw_args, &X.c_sort,
-                          &X.g_add, &X.g_alpha, &X.g_distort, &X.g_decal, &X.b_prefilter, &X.b_down, &X.b_up };
+                          &X.g_add, &X.g_alpha, &X.g_distort, &X.g_decal };
     for (int i = 0; i < (int)ARRAY_COUNT(all); i++) {
         if (*all[i]) vkDestroyPipeline(R->device, *all[i], NULL);
         *all[i] = VK_NULL_HANDLE;
@@ -335,11 +329,8 @@ bool vkx_create_pipelines(void) {
     X.g_distort = graphics_pipe("vfx_particle.vert", "vfx_particle.frag", X.gfx_layout, BL_ALPHA, true, VK_CULL_MODE_NONE, hdr, depth);
     // Decals: back faces, no depth test (camera inside the box works), blended over the scene.
     X.g_decal = graphics_pipe("vfx_decal.vert", "vfx_decal.frag", X.gfx_layout, BL_PREMUL, false, VK_CULL_MODE_FRONT_BIT, hdr, depth);
-    X.b_prefilter = graphics_pipe("fullscreen.vert", "bloom_prefilter.frag", R->layout_post, BL_NONE, false, VK_CULL_MODE_NONE, hdr, VK_FORMAT_UNDEFINED);
-    X.b_down = graphics_pipe("fullscreen.vert", "bloom_down.frag", R->layout_post, BL_NONE, false, VK_CULL_MODE_NONE, hdr, VK_FORMAT_UNDEFINED);
-    X.b_up = graphics_pipe("fullscreen.vert", "bloom_up.frag", R->layout_post, BL_ADD, false, VK_CULL_MODE_NONE, hdr, VK_FORMAT_UNDEFINED);
     bool ok = X.c_reset && X.c_begin && X.c_emit && X.c_emit_sub && X.c_args && X.c_update && X.c_draw_args && X.c_sort && X.g_add && X.g_alpha &&
-              X.g_distort && X.g_decal && X.b_prefilter && X.b_down && X.b_up;
+              X.g_distort && X.g_decal;
     if (!ok) log_error("vfx: some pipelines failed to build (VFX disabled until shaders are fixed)");
     X.ok = ok;
     return ok;
@@ -704,16 +695,7 @@ bool render_vfx_set_library(VfxLibrary *lib) {
     return true;
 }
 
-// ------------------------------------------------------------------ targets (scene copy / bloom)
-
-static void destroy_bloom(void) {
-    for (int i = 0; i < X.bloom_mips; i++) {
-        if (X.bloom_views[i]) vkDestroyImageView(R->device, X.bloom_views[i], NULL);
-        X.bloom_views[i] = VK_NULL_HANDLE;
-    }
-    if (X.bloom) vmaDestroyImage(R->vma, X.bloom, X.bloom_alloc);
-    X.bloom = VK_NULL_HANDLE;
-}
+// ------------------------------------------------------------------ targets (scene copy)
 
 void vkx_targets_changed(void) {
     if (!X.layout) return;
@@ -721,42 +703,16 @@ void vkx_targets_changed(void) {
     vkr_target_destroy(&X.scene_copy);
     X.scene_copy = vkr_target_create(R->hdr.w, R->hdr.h, VK_FORMAT_R16G16B16A16_SFLOAT, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
                                      VK_IMAGE_ASPECT_COLOR_BIT);
-    destroy_bloom();
-    u32 w = DG_MAX(1u, R->hdr.w / 2), h = DG_MAX(1u, R->hdr.h / 2);
-    X.bloom_mips = 0;
-    for (int i = 0; i < VFX_BLOOM_MIPS; i++) {
-        if (w < 8 || h < 8) break;
-        X.bloom_w[i] = w;
-        X.bloom_h[i] = h;
-        X.bloom_mips++;
-        w /= 2;
-        h /= 2;
-    }
-    X.bloom = create_image(VK_IMAGE_TYPE_2D, VK_FORMAT_R16G16B16A16_SFLOAT, X.bloom_w[0], X.bloom_h[0], 1, (u32)X.bloom_mips, 1,
-                           VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT, &X.bloom_alloc);
-    for (int i = 0; i < X.bloom_mips; i++) {
-        VkImageViewCreateInfo vci = { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
-        vci.image = X.bloom;
-        vci.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        vci.format = VK_FORMAT_R16G16B16A16_SFLOAT;
-        vci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-        vci.subresourceRange.baseMipLevel = (u32)i;
-        vci.subresourceRange.levelCount = 1;
-        vci.subresourceRange.layerCount = 1;
-        VK_CHECK(vkCreateImageView(R->device, &vci, NULL, &X.bloom_views[i]));
-        if (!X.bloom_sets[i]) X.bloom_sets[i] = vkr_alloc_tex_set(X.bloom_views[i], R->sampler_clamp);
-        else vkr_write_tex_set(X.bloom_sets[i], X.bloom_views[i], R->sampler_clamp);
-    }
-    // Initial layouts: depth / scene copy / bloom readable (the descriptors expect them).
+    // Initial layouts: depth / scene copy readable (the descriptors expect them).
     VkCommandPool pool;
     VkCommandBuffer cmd = begin_once(&pool);
     image_barrier_mips(cmd, R->depth.image, VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 1, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL,
                        VK_PIPELINE_STAGE_2_NONE, 0, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_SHADER_READ_BIT);
     image_barrier_mips(cmd, X.scene_copy.image, VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 1, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
                        VK_PIPELINE_STAGE_2_NONE, 0, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_SHADER_READ_BIT);
-    image_barrier_mips(cmd, X.bloom, VK_IMAGE_ASPECT_COLOR_BIT, 0, (u32)X.bloom_mips, 1, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                       VK_PIPELINE_STAGE_2_NONE, 0, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_SHADER_READ_BIT);
     end_once(pool, cmd);
+    R->depth.layout = VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL;
+    X.scene_copy.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     for (int i = 0; i < FRAMES_IN_FLIGHT; i++) {
         write_image(X.fr[i].set, 19, R->depth.view, X.depth_sampler, VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL);
         write_image(X.fr[i].set, 20, X.scene_copy.view, R->sampler_clamp, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
@@ -764,8 +720,6 @@ void vkx_targets_changed(void) {
     X.depth_valid = false;
 }
 
-VkDescriptorSet vkx_bloom_set(void) { return X.bloom_sets[0] ? X.bloom_sets[0] : R->textures[R->white_tex].set; }
-float vkx_bloom_intensity(void) { return (X.bloom_sets[0] && R->r_bloom->i) ? R->r_bloom_intensity->f : 0.0f; }
 
 // ------------------------------------------------------------------ init
 
@@ -882,7 +836,6 @@ void vkx_shutdown(void) {
         for (int k = 0; k < (int)ARRAY_COUNT(fb); k++) vkr_buffer_destroy_now(fb[k]);
     }
     destroy_atlas();
-    destroy_bloom();
     vkr_target_destroy(&X.scene_copy);
     if (X.noise_view) vkDestroyImageView(R->device, X.noise_view, NULL);
     if (X.noise) vmaDestroyImage(R->vma, X.noise, X.noise_alloc);
@@ -964,7 +917,9 @@ static void read_back(VfxFrameRes *f) {
         X.stats.ms_compute = (float)(ts[1] - ts[0]) * k;
         X.stats.ms_decals = (float)(ts[3] - ts[2]) * k;
         X.stats.ms_particles = (float)(ts[5] - ts[4]) * k;
-        X.stats.ms_bloom = (float)(ts[7] - ts[6]) * k;
+        X.stats.ms_bloom = 0.0f;
+        for (int i = 0; i < fg_pass_count(); i++)
+            if (!strcmp(fg_pass_name(i), "bloom")) X.stats.ms_bloom = fg_pass_ms(i);   // post stack bloom
     }
     X.stats.pool = X.max_particles;
     X.stats.atlas_pages = X.pages;
@@ -1107,13 +1062,18 @@ void vkx_draw_decals(VkCommandBuffer cmd) {
     vkx_timestamp(cmd, 3);
 }
 
+RenderTarget *vkx_scene_copy(void) { return X.layout && X.scene_copy.image ? &X.scene_copy : NULL; }
+
+// Always copied: distortion particles refract it and TAA compares against it (opaque vs.
+// transparent pixels, "hdr_opaque"). Runs inside a frame graph pass that holds the HDR target
+// as a colour attachment; the layouts are restored before returning.
 void vkx_copy_scene(VkCommandBuffer cmd) {
-    if (!X.ok || (X.last_distort == 0 && X.frames_since_spawn > 4)) return;
+    if (!X.layout || !X.scene_copy.image) return;
     vkr_image_barrier(cmd, R->hdr.image, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
                       VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_2_TRANSFER_BIT,
                       VK_ACCESS_2_TRANSFER_READ_BIT, 1);
     vkr_image_barrier(cmd, X.scene_copy.image, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-                      VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT, VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                      VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT, VK_PIPELINE_STAGE_2_TRANSFER_BIT,
                       VK_ACCESS_2_TRANSFER_WRITE_BIT, 1);
     VkImageCopy ic = { 0 };
     ic.srcSubresource.aspectMask = ic.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
@@ -1123,7 +1083,7 @@ void vkx_copy_scene(VkCommandBuffer cmd) {
     ic.extent.depth = 1;
     vkCmdCopyImage(cmd, R->hdr.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, X.scene_copy.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &ic);
     vkr_image_barrier(cmd, X.scene_copy.image, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                      VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                      VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                       VK_ACCESS_2_SHADER_SAMPLED_READ_BIT, 1);
     vkr_image_barrier(cmd, R->hdr.image, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                       VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_READ_BIT, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
@@ -1157,58 +1117,4 @@ void vkx_draw_particles(VkCommandBuffer cmd) {
         R->stats.draw_calls += 5;
     }
     vkx_timestamp(cmd, 5);
-}
-
-static void bloom_pass(VkCommandBuffer cmd, VkPipeline pipe, int dst_mip, VkDescriptorSet src_set, float tw, float th, vec4 params, bool load) {
-    VkRenderingAttachmentInfo ca = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
-    ca.imageView = X.bloom_views[dst_mip];
-    ca.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-    ca.loadOp = load ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    ca.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    VkRenderingInfo ri = { VK_STRUCTURE_TYPE_RENDERING_INFO };
-    ri.renderArea.extent.width = X.bloom_w[dst_mip];
-    ri.renderArea.extent.height = X.bloom_h[dst_mip];
-    ri.layerCount = 1;
-    ri.colorAttachmentCount = 1;
-    ri.pColorAttachments = &ca;
-    vkCmdBeginRendering(cmd, &ri);
-    VkViewport vp = { 0, 0, (float)X.bloom_w[dst_mip], (float)X.bloom_h[dst_mip], 0, 1 };
-    VkRect2D sc = { { 0, 0 }, { X.bloom_w[dst_mip], X.bloom_h[dst_mip] } };
-    vkCmdSetViewport(cmd, 0, 1, &vp);
-    vkCmdSetScissor(cmd, 0, 1, &sc);
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_post, 0, 1, &src_set, 0, NULL);
-    float pc[8] = { tw, th, params.x, params.y, params.z, params.w, 0, 0 };
-    vkCmdPushConstants(cmd, R->layout_post, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pc), pc);
-    vkCmdDraw(cmd, 3, 1, 0, 0);
-    vkCmdEndRendering(cmd);
-}
-
-void vkx_bloom(VkCommandBuffer cmd) {
-    vkx_timestamp(cmd, 6);
-    if (X.ok && X.bloom && R->r_bloom->i && X.bloom_mips > 1) {
-        const VkPipelineStageFlags2 FS = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, CO = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
-        const VkAccessFlags2 SR = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT, CW = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_COLOR_ATTACHMENT_READ_BIT;
-        // Prefilter: HDR -> mip 0.
-        image_barrier_mips(cmd, X.bloom, VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 1, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, FS,
-                           SR, CO, CW);
-        bloom_pass(cmd, X.b_prefilter, 0, R->hdr_set, 1.0f / (float)R->hdr.w, 1.0f / (float)R->hdr.h, v4(1.0f, 0.6f, 0, 0), false);
-        image_barrier_mips(cmd, X.bloom, VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 1, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, CO,
-                           CW, FS, SR);
-        for (int m = 1; m < X.bloom_mips; m++) {
-            image_barrier_mips(cmd, X.bloom, VK_IMAGE_ASPECT_COLOR_BIT, (u32)m, 1, 1, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                               VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, FS, SR, CO, CW);
-            bloom_pass(cmd, X.b_down, m, X.bloom_sets[m - 1], 1.0f / (float)X.bloom_w[m - 1], 1.0f / (float)X.bloom_h[m - 1], v4(0, 0, 0, 0), false);
-            image_barrier_mips(cmd, X.bloom, VK_IMAGE_ASPECT_COLOR_BIT, (u32)m, 1, 1, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                               VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, CO, CW, FS, SR);
-        }
-        for (int m = X.bloom_mips - 1; m > 0; m--) {
-            image_barrier_mips(cmd, X.bloom, VK_IMAGE_ASPECT_COLOR_BIT, (u32)(m - 1), 1, 1, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                               VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, FS, SR, CO, CW);
-            bloom_pass(cmd, X.b_up, m - 1, X.bloom_sets[m], 1.0f / (float)X.bloom_w[m], 1.0f / (float)X.bloom_h[m], v4(1.0f, 0, 0, 0), true);
-            image_barrier_mips(cmd, X.bloom, VK_IMAGE_ASPECT_COLOR_BIT, (u32)(m - 1), 1, 1, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                               VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, CO, CW, FS, SR);
-        }
-    }
-    vkx_timestamp(cmd, 7);
 }

@@ -1,0 +1,39 @@
+#version 450
+// Bloom downsample (Jimenez, "Next Generation Post Processing in Call of Duty: AW"): 13 bilinear
+// taps as 5 overlapping 4x4 boxes. The first mip uses the Karis (1 / (1 + luma)) weighting per
+// box so single bright pixels don't flicker. pc.u0.x = destination mip (0 reads the HDR colour).
+#extension GL_GOOGLE_include_directive : require
+#include "post_common.glsl"
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0) uniform sampler2D color_tex;
+layout(set = 0, binding = 1) uniform sampler2D prev_mip;
+layout(set = 0, binding = 8, rgba16f) uniform writeonly image2D dst;
+
+vec3 fetch(vec2 uv) {
+    vec3 c = pc.u0.x == 0u ? textureLod(color_tex, uv, 0.0).rgb : textureLod(prev_mip, uv, 0.0).rgb;
+    return min(max(c, vec3(0.0)), vec3(60000.0));
+}
+float kw(vec3 a, vec3 b, vec3 c, vec3 d) { return 1.0 / (1.0 + luma((a + b + c + d) * 0.25)); }
+
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 sz = imageSize(dst);
+    if (p.x >= sz.x || p.y >= sz.y) return;
+    vec2 uv = (vec2(p) + 0.5) / vec2(sz);
+    vec2 t = pc.u0.x == 0u ? 1.0 / vec2(textureSize(color_tex, 0)) : 1.0 / vec2(textureSize(prev_mip, 0));
+    vec3 a = fetch(uv + t * vec2(-2, -2)), b = fetch(uv + t * vec2(0, -2)), c = fetch(uv + t * vec2(2, -2));
+    vec3 d = fetch(uv + t * vec2(-1, -1)), e = fetch(uv + t * vec2(1, -1));
+    vec3 f = fetch(uv + t * vec2(-2, 0)), g = fetch(uv), h = fetch(uv + t * vec2(2, 0));
+    vec3 i = fetch(uv + t * vec2(-1, 1)), j = fetch(uv + t * vec2(1, 1));
+    vec3 k = fetch(uv + t * vec2(-2, 2)), l = fetch(uv + t * vec2(0, 2)), m = fetch(uv + t * vec2(2, 2));
+    vec3 r;
+    if (pc.u0.x == 0u) {
+        float w0 = kw(d, e, i, j) * 0.5, w1 = kw(a, b, f, g) * 0.125, w2 = kw(b, c, g, h) * 0.125;
+        float w3 = kw(f, g, k, l) * 0.125, w4 = kw(g, h, l, m) * 0.125;
+        r = ((d + e + i + j) * w0 + (a + b + f + g) * w1 + (b + c + g + h) * w2 + (f + g + k + l) * w3 + (g + h + l + m) * w4) * 0.25;
+        r /= (w0 + w1 + w2 + w3 + w4);
+    } else {
+        r = (d + e + i + j) * 0.125 + (a + c + k + m) * 0.03125 + (b + f + h + l) * 0.0625 + g * 0.125;
+    }
+    imageStore(dst, p, vec4(r, 1.0));
+}

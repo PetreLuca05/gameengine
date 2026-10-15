@@ -1,0 +1,24 @@
+#version 450
+// Volumetric fog, step 3: applied to the lit opaque scene before transparency (particles sample
+// the same volume themselves): hdr = hdr * transmittance + in-scattering at the pixel depth.
+#extension GL_GOOGLE_include_directive : require
+#include "post_common.glsl"
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0) uniform sampler3D volume;
+layout(set = 0, binding = 1) uniform sampler2D depth_tex;
+layout(set = 0, binding = 8, rgba16f) uniform image2D hdr;
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 sz = imageSize(hdr);
+    if (p.x >= sz.x || p.y >= sz.y) return;
+    vec2 uv = (vec2(p) + 0.5) / vec2(sz);
+    float d = texelFetch(depth_tex, p, 0).r;
+    float z = d >= 1.0 ? U.s_vol3.w : linear_depth(d);
+    float n = 0.15, f = U.s_vol3.w;
+    float w = clamp(log(max(z, n) / n) / log(f / n), 0.0, 1.0);
+    // The slice stores the integral up to its far edge: shift by half a slice.
+    w = clamp(w - 0.5 / U.s_vol3.z, 0.0, 1.0);
+    vec4 v = textureLod(volume, vec3(uv, w), 0.0);
+    vec4 c = imageLoad(hdr, p);
+    imageStore(hdr, p, vec4(c.rgb * v.a + v.rgb, c.a));
+}

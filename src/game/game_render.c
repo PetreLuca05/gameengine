@@ -105,8 +105,14 @@ static vec4 unpack(u32 c) {
     return v4((float)(c & 0xFF) / 255.0f, (float)((c >> 8) & 0xFF) / 255.0f, (float)((c >> 16) & 0xFF) / 255.0f, (float)(c >> 24) / 255.0f);
 }
 
+// Stable per-part ids of moving entities (velocity / motion blur): entity index + part counter.
+static u32 g_obj_base, g_obj_part;
+static u32 next_object_id(void) { return g_obj_base ? g_obj_base + (g_obj_part++ & 63u) : 0u; }
+
 static void draw_shape(VisShape shape, vec3 half, vec3 pos, quat rot, Material mat) {
     DrawItem d;
+    memset(&d, 0, sizeof(d));
+    d.object_id = next_object_id();
     d.mat = mat;
     switch (shape) {
     case VIS_CYLINDER: d.mesh = G->meshes.cylinder; d.model = mat4_trs(pos, rot, v3(half.x * 2, half.y * 2, half.z * 2)); break;
@@ -138,6 +144,8 @@ static void render_entity(World *w, int i, float alpha, bool focused) {
     Visual *v = &w->vis[i];
     u32 hl = focused ? MAT_HIGHLIGHT : 0;
     Material m = mat_from(v->color, 0.75f, hl);
+    g_obj_base = ((u32)i + 1u) << 6;
+    g_obj_part = 0;
     if (v->emissive) m.emissive = v->emissive / 255.0f;
 
     if (v->model) {
@@ -150,6 +158,8 @@ static void render_entity(World *w, int i, float alpha, bool focused) {
             mat4 base = mat4_mul(mat4_trs(pos, rot, sc), mat4_translate(v3_neg(mid)));
             for (int k = 0; k < mdl->mesh_count; k++) {
                 DrawItem d;
+                memset(&d, 0, sizeof(d));
+                d.object_id = next_object_id();
                 d.mesh = mdl->meshes[k].mesh;
                 d.model = mat4_mul(base, mdl->meshes[k].local);
                 d.mat = mdl->meshes[k].mat;
@@ -311,6 +321,7 @@ void game_render_world(World *w, float alpha, vec3 cam_pos, vec3 cam_fwd) {
         if ((w->flags[i] & EF_HIDDEN) && w->type[i] != ET_PICKUP) continue;
         render_entity(w, i, alpha, ENT_MAKE(i, w->gen[i]) == G->focus);
     }
+    g_obj_base = 0;
     chars_render(w, G->alpha, cam_pos, G->local_slot);
 }
 
@@ -458,6 +469,15 @@ void game_render(void) {
         }
     }
     render_set_camera(&cam);
+    {
+        PostFrameInfo pfi;
+        memset(&pfi, 0, sizeof(pfi));
+        pfi.cam_pos = cam.pos;
+        pfi.ads = ads;
+        pfi.sprinting = p && p->sim.move.sprinting;
+        pfi.level_fog = w->level.fog_density;
+        game_post_frame(&pfi);
+    }
 
     LevelStatic *ls = &w->level;
     RenderEnvironment env;
@@ -518,7 +538,9 @@ void game_render(void) {
     dbg_submit((float)g_engine.frame_dt, cam.pos, right, up);
     audio_update(cam.pos, fwd, up);
 
-    hud_draw();
+    if (!game_post_photo_mode()) hud_draw();
+    game_post_draw_overlay();
+    game_post_draw_photo_ui();
     menus_draw();
     console_draw();
 }

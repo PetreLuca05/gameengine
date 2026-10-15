@@ -1172,6 +1172,8 @@ static void draw_char(World *w, CharacterInst *c, const Xform *pose, int lod, fl
     d.cast_shadow = shadow;
     d.center = pose[s->role[BR_HIPS]].t;
     d.radius = s->height * c->def->scale;
+    // Stable id per character + LOD (previous palette -> per-bone velocity for TAA / motion blur).
+    d.object_id = shadow ? 0u : (0x20000000u | ((u32)ENT_INDEX(c->ent) << 4) | (u32)DG_CLAMP(lod, 0, 7));
     render_draw_skinned(&d);
     (void)w;
 }
@@ -1191,6 +1193,7 @@ static void draw_char_mesh(MeshId mesh, CharacterInst *c, const Xform *pose, u32
     d.cast_shadow = shadow;
     d.center = pose[s->role[BR_HIPS]].t;
     d.radius = s->height * c->def->scale;
+    d.object_id = 0x20000000u | ((u32)ENT_INDEX(c->ent) << 4) | ((flags & MAT_VIEWMODEL) ? 9u : 8u);
     render_draw_skinned(&d);
 }
 

@@ -510,6 +510,7 @@ static u32 s_world_item_flags = MAT_NO_SHADOW;   // flags for third-person held 
 
 static void draw_box(vec3 center, quat rot, vec3 half, vec4 color, bool viewmodel) {
     DrawItem d;
+    memset(&d, 0, sizeof(d));
     d.mesh = H->cube;
     d.model = mat4_trs(center, rot, v3_scale(half, 2.0f));
     d.mat = material_color(color);
@@ -535,6 +536,7 @@ static void draw_segment(vec3 a, vec3 b, float th, vec4 color, vec3 up_hint, boo
     vec3 c = v3_scale(v3_add(a, b), 0.5f);
     m.m[12] = c.x; m.m[13] = c.y; m.m[14] = c.z;
     DrawItem di;
+    memset(&di, 0, sizeof(di));
     di.mesh = H->cube;
     di.model = m;
     di.mat = material_color(color);

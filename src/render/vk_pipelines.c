@@ -18,10 +18,12 @@ typedef struct PipeDesc {
     VkFormat depth_format;
     bool depth_bias;
     VkPipelineLayout layout;
+    int extra_colors;       // MRT: additional attachments (no blending), formats below
+    VkFormat extra_formats[3];
 } PipeDesc;
 
 bool vkp_create_layouts(void) {
-    VkDescriptorSetLayoutBinding fb[4] = { 0 };
+    VkDescriptorSetLayoutBinding fb[5] = { 0 };
     fb[0].binding = 0;
     fb[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     fb[0].descriptorCount = 1;
@@ -30,14 +32,14 @@ bool vkp_create_layouts(void) {
     fb[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     fb[1].descriptorCount = 1;
     fb[1].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;   // particles light per vertex
-    for (int i = 2; i < 4; i++) {
+    for (int i = 2; i < 5; i++) {
         fb[i].binding = (u32)i;
         fb[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         fb[i].descriptorCount = 1;
         fb[i].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
     }
     VkDescriptorSetLayoutCreateInfo li = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
-    li.bindingCount = 4;
+    li.bindingCount = 5;
     li.pBindings = fb;
     VK_CHECK(vkCreateDescriptorSetLayout(R->device, &li, NULL, &R->frame_layout));
 
@@ -62,25 +64,31 @@ bool vkp_create_layouts(void) {
     pi.pPoolSizes = sizes;
     VK_CHECK(vkCreateDescriptorPool(R->device, &pi, NULL, &R->pool));
 
-    VkDescriptorSetLayout sets[2] = { R->frame_layout, R->tex_layout };
+    // Set 2: screen-space inputs of the lit shaders (AO, contact shadows, SSR, SSGI, froxel fog for
+    // blended surfaces), pushed per pass.
+    VkDescriptorSetLayoutBinding pb[5];
+    memset(pb, 0, sizeof(pb));
+    for (u32 i = 0; i < 5; i++) {
+        pb[i].binding = i;
+        pb[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        pb[i].descriptorCount = 1;
+        pb[i].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    }
+    VkDescriptorSetLayoutCreateInfo pli2 = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+    pli2.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR;
+    pli2.bindingCount = 5;
+    pli2.pBindings = pb;
+    VK_CHECK(vkCreateDescriptorSetLayout(R->device, &pli2, NULL, &R->lit_post_layout));
+
+    VkDescriptorSetLayout sets[3] = { R->frame_layout, R->tex_layout, R->lit_post_layout };
     VkPushConstantRange pr = { VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushLit) };
     VkPipelineLayoutCreateInfo pli = { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
-    pli.setLayoutCount = 2;
+    pli.setLayoutCount = 3;
     pli.pSetLayouts = sets;
     pli.pushConstantRangeCount = 1;
     pli.pPushConstantRanges = &pr;
     VK_CHECK(vkCreatePipelineLayout(R->device, &pli, NULL, &R->layout_lit));
 
-    VkPushConstantRange pp = { VK_SHADER_STAGE_FRAGMENT_BIT, 0, 32 };
-    pli.setLayoutCount = 1;
-    pli.pSetLayouts = &R->tex_layout;
-    pli.pPushConstantRanges = &pp;
-    VK_CHECK(vkCreatePipelineLayout(R->device, &pli, NULL, &R->layout_post));
-
-    VkDescriptorSetLayout post2[2] = { R->tex_layout, R->tex_layout };
-    pli.setLayoutCount = 2;
-    pli.pSetLayouts = post2;
-    VK_CHECK(vkCreatePipelineLayout(R->device, &pli, NULL, &R->layout_post2));
     pli.setLayoutCount = 1;
     pli.pSetLayouts = &R->tex_layout;
 
@@ -92,12 +100,11 @@ bool vkp_create_layouts(void) {
 
 void vkp_destroy_layouts(void) {
     vkDestroyPipelineLayout(R->device, R->layout_lit, NULL);
-    vkDestroyPipelineLayout(R->device, R->layout_post, NULL);
-    vkDestroyPipelineLayout(R->device, R->layout_post2, NULL);
     vkDestroyPipelineLayout(R->device, R->layout_ui, NULL);
     vkDestroyDescriptorPool(R->device, R->pool, NULL);
     vkDestroyDescriptorSetLayout(R->device, R->frame_layout, NULL);
     vkDestroyDescriptorSetLayout(R->device, R->tex_layout, NULL);
+    vkDestroyDescriptorSetLayout(R->device, R->lit_post_layout, NULL);
 }
 
 VkShaderModule vkp_load_shader(const char *name) {
@@ -228,17 +235,21 @@ static VkPipeline build_pipeline(const PipeDesc *d) {
         cba.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
         cba.alphaBlendOp = VK_BLEND_OP_ADD;
     }
+    VkPipelineColorBlendAttachmentState cbas[4];
+    cbas[0] = cba;
+    for (int i = 0; i < d->extra_colors; i++) { memset(&cbas[1 + i], 0, sizeof(cba)); cbas[1 + i].colorWriteMask = 0xF; }
     VkPipelineColorBlendStateCreateInfo cb = { VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO };
-    cb.attachmentCount = d->color_format != VK_FORMAT_UNDEFINED ? 1 : 0;
-    cb.pAttachments = &cba;
+    cb.attachmentCount = d->color_format != VK_FORMAT_UNDEFINED ? 1u + (u32)d->extra_colors : 0;
+    cb.pAttachments = cbas;
     VkDynamicState dyn[3] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR, VK_DYNAMIC_STATE_DEPTH_BIAS };
     VkPipelineDynamicStateCreateInfo dy = { VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO };
     dy.dynamicStateCount = d->depth_bias ? 3 : 2;
     dy.pDynamicStates = dyn;
 
+    VkFormat cfmts[4] = { d->color_format, d->extra_formats[0], d->extra_formats[1], d->extra_formats[2] };
     VkPipelineRenderingCreateInfo rci = { VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO };
-    rci.colorAttachmentCount = d->color_format != VK_FORMAT_UNDEFINED ? 1 : 0;
-    rci.pColorAttachmentFormats = &d->color_format;
+    rci.colorAttachmentCount = d->color_format != VK_FORMAT_UNDEFINED ? 1u + (u32)d->extra_colors : 0;
+    rci.pColorAttachmentFormats = cfmts;
     rci.depthAttachmentFormat = d->depth_format;
 
     VkGraphicsPipelineCreateInfo gp = { VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
@@ -283,8 +294,13 @@ bool vkp_create_pipelines(void) {
     d[PIPE_LINES_OVERLAY].depth_test = false;
     d[PIPE_TEXT] = (PipeDesc){ "text.vert", "text.frag", VL_TEXT, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, VK_POLYGON_MODE_FILL,
                                VK_CULL_MODE_NONE, true, false, true, hdr, depth, false, R->layout_lit };
-    d[PIPE_POST] = (PipeDesc){ "fullscreen.vert", "post.frag", VL_NONE, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, VK_POLYGON_MODE_FILL,
-                               VK_CULL_MODE_NONE, false, false, false, R->swap_format, VK_FORMAT_UNDEFINED, false, R->layout_post2 };
+    // G-buffer prepass: normal (RG16 snorm, octahedral), material (RGBA8), velocity (RG16F) + depth.
+    d[PIPE_PREPASS] = d[PIPE_LIT];
+    d[PIPE_PREPASS].frag = "gbuffer.frag";
+    d[PIPE_PREPASS].color_format = GB_NORMAL_FORMAT;
+    d[PIPE_PREPASS].extra_colors = 2;
+    d[PIPE_PREPASS].extra_formats[0] = GB_MATERIAL_FORMAT;
+    d[PIPE_PREPASS].extra_formats[1] = GB_VELOCITY_FORMAT;
     d[PIPE_UI] = (PipeDesc){ "ui.vert", "ui.frag", VL_UI, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, VK_POLYGON_MODE_FILL,
                              VK_CULL_MODE_NONE, false, false, true, R->swap_format, VK_FORMAT_UNDEFINED, false, R->layout_ui };
 
@@ -295,6 +311,10 @@ bool vkp_create_pipelines(void) {
     d[PIPE_SKIN_WIRE] = d[PIPE_SKIN];
     d[PIPE_SKIN_WIRE].polygon = R->has_wireframe ? VK_POLYGON_MODE_LINE : VK_POLYGON_MODE_FILL;
     d[PIPE_SKIN_WIRE].cull = VK_CULL_MODE_NONE;
+    d[PIPE_PREPASS_SKIN] = d[PIPE_PREPASS];
+    d[PIPE_PREPASS_SKIN].vert = "skin.vert";
+    d[PIPE_PREPASS_SKIN].frag = "gbuffer_skin.frag";
+    d[PIPE_PREPASS_SKIN].vl = VL_SKIN;
     d[PIPE_SKIN_SHADOW] = d[PIPE_SHADOW];
     d[PIPE_SKIN_SHADOW].vert = "skin_shadow.vert";
     d[PIPE_SKIN_SHADOW].vl = VL_SKIN_SHADOW;
@@ -324,11 +344,19 @@ void vkp_destroy_pipelines(void) {
 // ------------------------------------------------------------------ hot reload
 
 static const char *k_shader_files[] = { "lit.vert", "lit.frag", "shadow.vert", "lines.vert", "lines.frag", "text.vert",
-                                        "text.frag", "fullscreen.vert", "post.frag", "ui.vert", "ui.frag",
+                                        "text.frag", "fullscreen.vert", "gbuffer.frag", "gbuffer_skin.frag", "ui.vert", "ui.frag",
                                         "skin.vert", "skin.frag", "skin_shadow.vert",
                                         "vfx_reset.comp", "vfx_begin.comp", "vfx_emit.comp", "vfx_emit_sub.comp", "vfx_args.comp",
                                         "vfx_update.comp", "vfx_draw_args.comp", "vfx_sort.comp", "vfx_particle.vert", "vfx_particle.frag",
-                                        "vfx_decal.vert", "vfx_decal.frag", "bloom_prefilter.frag", "bloom_down.frag", "bloom_up.frag" };
+                                        "vfx_decal.vert", "vfx_decal.frag" };
+
+// Shaders registered at runtime (post-processing passes: "post/<name>").
+static const char *g_extra_shaders[128];
+static int g_extra_count;
+void vkp_register_shader(const char *name) {
+    for (int i = 0; i < g_extra_count; i++) if (!strcmp(g_extra_shaders[i], name)) return;
+    if (g_extra_count < 128) g_extra_shaders[g_extra_count++] = name;
+}
 
 static i64 shader_sources_mtime(void) {
 #ifdef DG_SOURCE_DIR
@@ -339,7 +367,12 @@ static i64 shader_sources_mtime(void) {
         i64 t = platform_file_mtime(path);
         if (t > newest) newest = t;
     }
-    static const char *incs[] = { "common.glsl", "vfx_common.glsl", "vfx_spawn.glsl", "lit_body.glsl" };
+    for (int i = 0; i < g_extra_count; i++) {
+        snprintf(path, sizeof(path), "%s/shaders/%s", DG_SOURCE_DIR, g_extra_shaders[i]);
+        i64 t = platform_file_mtime(path);
+        if (t > newest) newest = t;
+    }
+    static const char *incs[] = { "common.glsl", "vfx_common.glsl", "vfx_spawn.glsl", "lit_body.glsl", "post/post_common.glsl" };
     for (int i = 0; i < ARRAY_COUNT(incs); i++) {
         snprintf(path, sizeof(path), "%s/shaders/%s", DG_SOURCE_DIR, incs[i]);
         i64 t = platform_file_mtime(path);
@@ -353,15 +386,17 @@ static i64 shader_sources_mtime(void) {
 
 static bool compile_shaders_from_source(void) {
 #if defined(DG_SOURCE_DIR) && defined(DG_SHADER_COMPILER)
-    for (int i = 0; i < ARRAY_COUNT(k_shader_files); i++) {
+    int total = ARRAY_COUNT(k_shader_files) + g_extra_count;
+    for (int i = 0; i < total; i++) {
+        const char *file = i < ARRAY_COUNT(k_shader_files) ? k_shader_files[i] : g_extra_shaders[i - ARRAY_COUNT(k_shader_files)];
         char cmd[2048];
         const char *src_dir = DG_SOURCE_DIR "/shaders";
         if (strcmp(DG_SHADER_COMPILER_KIND, "glslc") == 0)
-            snprintf(cmd, sizeof(cmd), "\"\"%s\" --target-env=vulkan1.3 -O -I \"%s\" -o \"%sshaders/%s.spv\" \"%s/%s\"\"",
-                     DG_SHADER_COMPILER, src_dir, platform_base_dir(), k_shader_files[i], src_dir, k_shader_files[i]);
+            snprintf(cmd, sizeof(cmd), "\"\"%s\" --target-env=vulkan1.3 -O -I \"%s\" -I \"%s/post\" -I \"%s/../third_party/fsr\" -I \"%s/../third_party/smaa\" -o \"%sshaders/%s.spv\" \"%s/%s\"\"",
+                     DG_SHADER_COMPILER, src_dir, src_dir, src_dir, src_dir, platform_base_dir(), file, src_dir, file);
         else
-            snprintf(cmd, sizeof(cmd), "\"\"%s\" -V --quiet --target-env vulkan1.3 -I\"%s\" -o \"%sshaders/%s.spv\" \"%s/%s\"\"",
-                     DG_SHADER_COMPILER, src_dir, platform_base_dir(), k_shader_files[i], src_dir, k_shader_files[i]);
+            snprintf(cmd, sizeof(cmd), "\"\"%s\" -V --quiet --target-env vulkan1.3 -I\"%s\" -I\"%s/post\" -I\"%s/../third_party/fsr\" -I\"%s/../third_party/smaa\" -o \"%sshaders/%s.spv\" \"%s/%s\"\"",
+                     DG_SHADER_COMPILER, src_dir, src_dir, src_dir, src_dir, platform_base_dir(), file, src_dir, file);
 #ifndef _WIN32
         // POSIX shells don't need the outer quote pair cmd.exe wants.
         size_t n = strlen(cmd);
@@ -369,7 +404,7 @@ static bool compile_shaders_from_source(void) {
         cmd[n - 2] = 0;
 #endif
         int rc = system(cmd);
-        if (rc != 0) { log_error("shader compile failed: %s", k_shader_files[i]); return false; }
+        if (rc != 0) { log_error("shader compile failed: %s", file); return false; }
     }
     return true;
 #else
@@ -382,6 +417,7 @@ bool render_reload_shaders(void) {
     vkDeviceWaitIdle(R->device);
     bool ok = vkp_create_pipelines();
     if (ok) ok = vkx_create_pipelines();
+    if (ok) ok = post_create_pipelines();
     log_info(ok ? "shaders: reloaded" : "shaders: reload failed, keeping old pipelines");
     return ok;
 }

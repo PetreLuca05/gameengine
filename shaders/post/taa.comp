@@ -1,0 +1,128 @@
+#version 450
+// Temporal anti-aliasing / temporal upsampling (TAA-U), output resolution.
+//   * reconstruction: the current frame's 3x3 render-res samples at their jittered positions,
+//     weighted by distance to the output pixel (Blackman-Harris): unjitters and upsamples
+//   * history: closest-depth dilated velocity, Catmull-Rom 5-tap sample
+//   * rejection: variance clipping in YCoCg, depth disocclusion test against last frame's depth,
+//     offscreen / camera cut / invalid history -> weight 0
+//   * responsiveness: particles (reactive mask = transparency luminance delta) and the viewmodel
+//     get less history; luminance-weighted blend (no fireflies)
+// Output: rgb, a = the history weight used (debug view "taa_weight", ghosting test).
+#extension GL_GOOGLE_include_directive : require
+#include "post_common.glsl"
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0) uniform sampler2D color_tex;
+layout(set = 0, binding = 1) uniform sampler2D history_tex;
+layout(set = 0, binding = 2) uniform sampler2D velocity_tex;
+layout(set = 0, binding = 3) uniform sampler2D depth_tex;
+layout(set = 0, binding = 4) uniform sampler2D prev_depth_tex;
+layout(set = 0, binding = 5) uniform sampler2D material_tex;
+layout(set = 0, binding = 6) uniform sampler2D opaque_tex;
+layout(set = 0, binding = 8, rgba16f) uniform writeonly image2D dst;
+
+float bh(float x) {   // Blackman-Harris over [-1, 1] (x in units of the kernel radius)
+    x = clamp(abs(x), 0.0, 1.0) * 0.5 + 0.5;
+    float a = 2.0 * PI * x;
+    return 0.35875 - 0.48829 * cos(a) + 0.14128 * cos(2.0 * a) - 0.01168 * cos(3.0 * a);
+}
+
+vec3 tonemap_k(vec3 c) { return c / (1.0 + luma(c)); }
+
+vec4 history_catmull(vec2 uv, vec2 size) {
+    vec2 pos = uv * size;
+    vec2 c = floor(pos - 0.5) + 0.5;
+    vec2 f = pos - c;
+    vec2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f));
+    vec2 w1 = 1.0 + f * f * (-2.5 + 1.5 * f);
+    vec2 w2 = f * (0.5 + f * (2.0 - 1.5 * f));
+    vec2 w3 = f * f * (-0.5 + 0.5 * f);
+    vec2 w12 = w1 + w2;
+    vec2 t0 = (c - 1.0) / size, t3 = (c + 2.0) / size, t12 = (c + w2 / w12) / size;
+    vec4 r = textureLod(history_tex, vec2(t12.x, t0.y), 0.0) * (w12.x * w0.y) +
+             textureLod(history_tex, vec2(t0.x, t12.y), 0.0) * (w0.x * w12.y) +
+             textureLod(history_tex, vec2(t12.x, t12.y), 0.0) * (w12.x * w12.y) +
+             textureLod(history_tex, vec2(t3.x, t12.y), 0.0) * (w3.x * w12.y) +
+             textureLod(history_tex, vec2(t12.x, t3.y), 0.0) * (w12.x * w3.y);
+    float ws = w12.x * w0.y + w0.x * w12.y + w12.x * w12.y + w3.x * w12.y + w12.x * w3.y;
+    return max(r / ws, vec4(0.0));
+}
+
+void main() {
+    ivec2 op = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 osz = imageSize(dst);
+    if (op.x >= osz.x || op.y >= osz.y) return;
+    vec2 uv = (vec2(op) + 0.5) / vec2(osz);
+    vec2 rsz = U.screen.xy;
+    float scale = rsz.x / float(osz.x);          // render / output (<= 1 when upsampling)
+    // Render-space position of the output pixel centre, and the jitter in render pixels.
+    vec2 rp = uv * rsz;
+    vec2 jit = U.jitter.xy * 0.5 * rsz;          // NDC -> pixels (sample offset inside its pixel)
+    ivec2 rc = ivec2(floor(rp));
+    // Reconstruction + neighbourhood moments + closest depth.
+    vec3 sum = vec3(0.0), m1 = vec3(0.0), m2 = vec3(0.0);
+    float wsum = 0.0, closest = 1.0;
+    ivec2 closest_px = rc;
+    float radius = max(1.0, 1.0 / scale) * 1.2;
+    for (int y = -1; y <= 1; y++)
+        for (int x = -1; x <= 1; x++) {
+            ivec2 q = clamp(rc + ivec2(x, y), ivec2(0), ivec2(rsz) - 1);
+            vec3 c = texelFetch(color_tex, q, 0).rgb;
+            c = any(isnan(c)) ? vec3(0.0) : min(c, vec3(65000.0));
+            vec2 spos = vec2(q) + 0.5 - jit;         // true position of what this sample shows
+            vec2 d = (spos - rp) / radius;
+            float w = bh(d.x) * bh(d.y);
+            sum += c * w;
+            wsum += w;
+            vec3 yc = rgb_to_ycocg(tonemap_k(c));
+            m1 += yc;
+            m2 += yc * yc;
+            float z = texelFetch(depth_tex, q, 0).r;
+            if (z < closest) { closest = z; closest_px = q; }
+        }
+    vec3 cur = sum / max(wsum, 1e-5);
+    vec3 mean = m1 / 9.0;
+    vec3 sigma = sqrt(max(m2 / 9.0 - mean * mean, vec3(0.0)));
+    vec4 mat = texelFetch(material_tex, rc, 0);
+    bool vm = (gb_flags(mat) & GB_VIEWMODEL) != 0u;
+    vec2 vel = texelFetch(velocity_tex, vm ? rc : closest_px, 0).rg;
+    vec2 puv = uv - vel;
+    float w = pc.u0.x != 0u && U.misc.y < 0.5 ? (scale < 0.99 ? 0.95 : 0.92) : 0.0;
+    if (any(lessThan(puv, vec2(0.0))) || any(greaterThan(puv, vec2(1.0)))) w = 0.0;
+    // Disocclusion: last frame's depth at the reprojected position vs where this surface was.
+    if (w > 0.0 && !vm) {
+        float d = texelFetch(depth_tex, rc, 0).r;
+        vec3 wp = world_pos((vec2(rc) + 0.5) / rsz, d);
+        vec4 pc4 = U.prev_view_proj_nj * vec4(wp, 1.0);
+        float expect = pc4.w;
+        float prev = linear_depth(textureLod(prev_depth_tex, puv, 0.0).r);
+        if (abs(prev - expect) > max(0.05 * expect, 0.04)) w = 0.0;
+    }
+    // Motion: less history when moving fast (sharper under motion, less smear).
+    float vpx = length(vel * vec2(osz));
+    w *= mix(1.0, 0.85, clamp(vpx / 40.0, 0.0, 1.0));
+    // Reactive: transparency / particles changed this pixel this frame.
+    float reactive = clamp(abs(luma(texelFetch(color_tex, rc, 0).rgb) - luma(texelFetch(opaque_tex, rc, 0).rgb)) * 3.0, 0.0, 1.0);
+    w *= 1.0 - 0.8 * reactive;
+    if (vm) w = min(w, 0.7);
+    vec3 res = cur;
+    if (w > 0.0) {
+        vec3 hist = history_catmull(puv, vec2(osz)).rgb;
+        // Variance clip (YCoCg, tonemapped space): pull the history to the AABB of the moments.
+        float gamma = vm ? 0.75 : 1.25;
+        vec3 hy = rgb_to_ycocg(tonemap_k(hist));
+        vec3 bmin = mean - sigma * gamma, bmax = mean + sigma * gamma;
+        vec3 cen = 0.5 * (bmax + bmin), ext = 0.5 * (bmax - bmin) + 1e-5;
+        vec3 off = hy - cen;
+        vec3 ts = abs(off / ext);
+        float mx = max(ts.x, max(ts.y, ts.z));
+        if (mx > 1.0) {
+            hy = cen + off / mx;
+            vec3 t = ycocg_to_rgb(hy);
+            hist = t / max(1.0 - luma(t), 1e-3);   // undo tonemap_k
+        }
+        float lc = luma(cur), lh = luma(hist);
+        float wc = (1.0 - w) / (1.0 + lc), wh = w / (1.0 + lh);
+        res = (cur * wc + hist * wh) / max(wc + wh, 1e-5);
+    }
+    imageStore(dst, op, vec4(res, w));
+}

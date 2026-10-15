@@ -1,0 +1,56 @@
+#version 450
+// Auto exposure 2/2 (one group of 256): average log luminance between the low / high histogram
+// percentiles, EV100 = log2(L * 100 / 12.5), clamped to [ev_min, ev_max], adapted with separate
+// up / down speeds (exponential, frame-rate independent), then key 0.18 + compensation.
+// Manual mode uses s_exp.y as EV100. Clears the histogram for the next frame.
+//   exposure[0] = linear exposure multiplier, [1] = EV100, [4] = target EV100
+#extension GL_GOOGLE_include_directive : require
+#include "post_common.glsl"
+layout(local_size_x = 256) in;
+layout(std430, set = 0, binding = 13) buffer Exposure { float e[16]; } X;
+layout(std430, set = 0, binding = 14) buffer Hist { uint bins[256]; } H;
+shared float sc[256];
+shared float sl[256];
+const float LMIN = -12.0, LRANGE = 30.0;
+void main() {
+    uint i = gl_LocalInvocationIndex;
+    float cnt = float(H.bins[i]);
+    sc[i] = cnt;
+    barrier();
+    // Inclusive prefix sum (Hillis-Steele) for the percentile bounds.
+    for (uint o = 1u; o < 256u; o <<= 1u) {
+        float v = i >= o ? sc[i - o] : 0.0;
+        barrier();
+        sc[i] += v;
+        barrier();
+    }
+    float total = sc[255];
+    float lo = total * U.s_exp2.z, hi = total * U.s_exp2.w;
+    float before = sc[i] - cnt;
+    float kept = clamp(min(sc[i], hi) - max(before, lo), 0.0, cnt);
+    if (i == 0u) kept = 0.0;   // black pixels don't drag the exposure
+    float lum = LMIN + (float(i) - 1.0 + 0.5) / 254.0 * LRANGE;
+    sl[i] = kept * lum;
+    sc[i] = kept;
+    barrier();
+    for (uint s = 128u; s > 0u; s >>= 1u) {
+        if (i < s) { sl[i] += sl[i + s]; sc[i] += sc[i + s]; }
+        barrier();
+    }
+    H.bins[i] = 0u;
+    if (i != 0u) return;
+    float log_avg = sc[0] > 0.0 ? sl[0] / sc[0] : -2.0;
+    float target = log_avg + log2(100.0 / 12.5);   // EV100
+    target = clamp(target, U.s_exp2.x, U.s_exp2.y);
+    if (U.s_lens2.w < 0.5) target = U.s_exp.y;
+    float ev = X.e[1];
+    bool init = !(X.e[0] > 0.0) || U.misc.y > 0.5;
+    if (init) ev = target;
+    float speed = target > ev ? U.s_exp.z : U.s_exp.w;
+    ev += (target - ev) * (1.0 - exp(-U.misc.x * speed));
+    if (U.s_lens2.w < 0.5) ev = target;
+    float lavg = exp2(ev) * 12.5 / 100.0;
+    X.e[0] = 0.18 / lavg * exp2(U.s_exp.x);
+    X.e[1] = ev;
+    X.e[4] = target;
+}

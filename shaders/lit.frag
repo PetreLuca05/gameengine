@@ -12,5 +12,6 @@ layout(push_constant) uniform Push {
 #define MAT_COLOR pc.color
 #define MAT_PARAMS pc.params
 #define MAT_FLAGS pc.flags.x
+#define LIT_FROXEL_FOG (pc.flags.z != 0u)   // set by the transparent pass
 
 #include "lit_body.glsl"

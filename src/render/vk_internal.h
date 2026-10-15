@@ -20,8 +20,14 @@
 #define DYN_BUFFER_SIZE (16u << 20)
 #define MAX_SKIN_BONES 65536
 #define MAX_SKIN_DRAWS 4096
+#define OBJ_SLOTS 16384                // power of two: object_id hash for previous transforms
 
 #define R (g_engine.render)
+
+// G-buffer formats (prepass).
+#define GB_NORMAL_FORMAT VK_FORMAT_R16G16_SNORM
+#define GB_MATERIAL_FORMAT VK_FORMAT_R8G8B8A8_UNORM
+#define GB_VELOCITY_FORMAT VK_FORMAT_R16G16_SFLOAT
 
 #define VK_CHECK(x) do { VkResult _r = (x); if (_r != VK_SUCCESS) log_fatal("Vulkan error %d at %s:%d (%s)", (int)_r, __FILE__, __LINE__, #x); } while (0)
 
@@ -94,6 +100,7 @@ typedef struct FrameResources {
     GpuBuffer dyn;        // host-visible: lines, text, ui
     GpuBuffer bones;      // host-visible SSBO: skinning palettes
     GpuBuffer instances;  // host-visible SSBO: skinned instance data
+    GpuBuffer prev_models; // host-visible SSBO: previous model matrices of moving draws (velocity)
     VkDeviceSize dyn_used;
     Deferred deferred[MAX_DEFERRED];
     int deferred_count;
@@ -103,6 +110,8 @@ typedef struct FrameResources {
 typedef struct GpuPointLight { vec4 pos_radius; vec4 color_intensity; } GpuPointLight;
 typedef struct FrameData {
     mat4 view_proj, view, proj, vm_proj, shadow_vp;
+    mat4 view_proj_nj, prev_view_proj_nj, vm_view_proj_nj, prev_vm_view_proj_nj;
+    vec4 jitter, post_flags, post_params, post_fog;   // post_fog: x froxel fog on, y max distance (m)
     vec4 camera_pos, sun_dir, sun_color, sky_ambient, ground_ambient, fog, params, screen;
     GpuPointLight lights[MAX_POINT_LIGHTS];
 } FrameData;
@@ -116,7 +125,7 @@ typedef struct PushLit {
 
 typedef enum PipelineId {
     PIPE_LIT, PIPE_LIT_WIRE, PIPE_LIT_BLEND, PIPE_SHADOW, PIPE_LINES, PIPE_LINES_OVERLAY,
-    PIPE_TEXT, PIPE_POST, PIPE_UI, PIPE_SKIN, PIPE_SKIN_WIRE, PIPE_SKIN_SHADOW, PIPE_COUNT
+    PIPE_TEXT, PIPE_PREPASS, PIPE_UI, PIPE_SKIN, PIPE_SKIN_WIRE, PIPE_SKIN_SHADOW, PIPE_PREPASS_SKIN, PIPE_COUNT
 } PipelineId;
 
 // Must match SkinInstance in shaders/common.glsl (std430).
@@ -136,6 +145,9 @@ typedef struct Renderer {
     VmaAllocator vma;
     bool validation;
     bool has_wireframe;
+    bool has_push_descriptor, has_colorspace_ext;
+    bool hdr_supported, swap_hdr;
+    int hdr_output_applied;
     float max_anisotropy;
 
     // swapchain
@@ -153,15 +165,13 @@ typedef struct Renderer {
     // targets
     RenderTarget hdr, depth, shadow, vm_depth;
     u32 shadow_size;
-    VkDescriptorSet hdr_set;   // set-1 style descriptor for post
 
     // descriptors
     VkDescriptorSetLayout frame_layout;   // set 0
     VkDescriptorSetLayout tex_layout;     // set 1
+    VkDescriptorSetLayout lit_post_layout; // set 2 of layout_lit (push descriptor: AO, contact, SSR, SSGI)
     VkDescriptorPool pool;
     VkPipelineLayout layout_lit;          // set0 + set1 + push lit
-    VkPipelineLayout layout_post;         // set1 + push
-    VkPipelineLayout layout_post2;        // hdr + bloom + push (post pass)
     VkPipelineLayout layout_ui;           // set1 + push
     VkPipeline pipes[PIPE_COUNT];
     VkSampler sampler_linear;   // material textures (aniso)
@@ -205,6 +215,21 @@ typedef struct Renderer {
     RenderCamera cam;
     RenderEnvironment env;
     mat4 view, proj, view_proj, vm_proj, shadow_vp;
+    // temporal state (TAA / motion blur / velocity)
+    mat4 proj_j, vm_proj_j;                     // jittered projections (this frame)
+    mat4 view_proj_nj, prev_view_proj_nj, vm_view_proj_nj, prev_vm_view_proj_nj;
+    vec2 jitter, prev_jitter;                   // NDC
+    vec3 prev_cam_pos;
+    u32 frame_index;
+    bool have_prev, camera_cut;
+    bool fx_ads;
+    float fx_ads_focus;
+    mat4 *prev_models_cpu;                      // this frame's previous-model list (index = DrawItem.prev_slot - 1)
+    u32 prev_model_count;
+    struct ObjSlot *obj_slots;                  // object_id -> last model / palette (hash, OBJ_SLOTS)
+    mat4 *prev_bones;                           // last frame's bone palettes (copy of skin_bones)
+    u32 prev_bone_count;
+    float target_scale;                         // render resolution / output resolution
     vec4 frustum[6];
     float render_scale_applied;
     char screenshot_path[512];
@@ -217,7 +242,7 @@ typedef struct Renderer {
     // cvars
     Cvar *r_vsync, *r_wireframe, *r_render_scale, *r_shadow_quality, *r_aniso, *r_texture_quality;
     Cvar *r_aa, *r_brightness, *r_gamma, *r_grid, *r_vignette, *r_shader_hotreload, *r_culling;
-    Cvar *r_vm_fov, *r_cpu_skinning, *r_bloom, *r_bloom_intensity;
+    Cvar *r_vm_fov, *r_cpu_skinning, *r_bloom, *r_bloom_intensity, *r_hdr_output;
     float exposure_boost;
     u32 aniso_mod, texq_mod;
 } Renderer;
@@ -258,8 +283,12 @@ bool vkp_create_pipelines(void);
 void vkp_destroy_pipelines(void);
 void vkp_destroy_layouts(void);
 VkShaderModule vkp_load_shader(const char *name);
+void vkp_register_shader(const char *name);   // hot reload / recompile list ("post/taa.comp")
 
-// vk_vfx.c: GPU particles, decals, distortion, bloom
+// post/post_core.c: frame graph post-processing stack
+bool post_create_pipelines(void);
+
+// vk_vfx.c: GPU particles, decals, distortion
 bool vkx_init(void);
 void vkx_shutdown(void);
 bool vkx_create_pipelines(void);
@@ -268,10 +297,8 @@ void vkx_record_compute(VkCommandBuffer cmd); // frame start, before the shadow 
 void vkx_draw_decals(VkCommandBuffer cmd);    // inside the scene pass, depth read-only
 void vkx_copy_scene(VkCommandBuffer cmd);     // outside rendering: HDR -> scene copy (distortion)
 void vkx_draw_particles(VkCommandBuffer cmd); // inside the scene pass, depth read-only
-void vkx_bloom(VkCommandBuffer cmd);          // after the scene pass (HDR in SHADER_READ_ONLY)
-VkDescriptorSet vkx_bloom_set(void);          // post pass set 1
-float vkx_bloom_intensity(void);
 void vkx_timestamp(VkCommandBuffer cmd, int slot);
+RenderTarget *vkx_scene_copy(void);           // opaque HDR copy (distortion; TAA "hdr_opaque"), SHADER_READ_ONLY
 void vkx_begin_frame_queries(VkCommandBuffer cmd);
 
 #endif

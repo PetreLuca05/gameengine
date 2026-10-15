@@ -13,6 +13,8 @@
 #include "vfx_editor.h"
 #include "holdpoint_editor.h"
 #include "nuklear_config.h"
+#include "game/game_internal.h"
+#include "render/render.h"
 #include <SDL3/SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -21,10 +23,10 @@ typedef enum MenuPage { PAGE_NONE, PAGE_PAUSE, PAGE_SETTINGS, PAGE_MULTIPLAYER }
 typedef enum SettingsTab { TAB_GRAPHICS, TAB_CONTROLS, TAB_CROSSHAIR, TAB_AUDIO } SettingsTab;
 
 typedef struct GraphicsSettings {
-    int width, height, mode, vsync, shadow, texq, aniso, aa, maxfps;
+    int width, height, mode, vsync, shadow, texq, aniso, maxfps;
     float fov, scale, brightness, gamma;
     float vm_fov;          // 0 = follow the camera FOV
-    int vfxq, bloom;
+    int vfxq;
 } GraphicsSettings;
 
 #define MAX_RES 48
@@ -74,7 +76,6 @@ static GraphicsSettings read_graphics(void) {
     g.shadow = cv("r_shadow_quality")->i;
     g.texq = cv("r_texture_quality")->i;
     g.aniso = cv("r_aniso")->i;
-    g.aa = cv("r_aa")->i;
     g.maxfps = cv("r_maxfps")->i;
     g.fov = cv("cl_fov")->f;
     g.vm_fov = cv("cam_weapon_fov")->f;
@@ -82,7 +83,6 @@ static GraphicsSettings read_graphics(void) {
     g.brightness = cv("r_brightness")->f;
     g.gamma = cv("r_gamma")->f;
     g.vfxq = cv("vfx_quality")->i;
-    g.bloom = cv("r_bloom")->i;
     return g;
 }
 
@@ -94,7 +94,6 @@ static void write_graphics(const GraphicsSettings *g) {
     cvar_set_int(cv("r_shadow_quality"), g->shadow);
     cvar_set_int(cv("r_texture_quality"), g->texq);
     cvar_set_int(cv("r_aniso"), g->aniso);
-    cvar_set_int(cv("r_aa"), g->aa);
     cvar_set_int(cv("r_maxfps"), g->maxfps);
     cvar_set_float(cv("cl_fov"), g->fov);
     cvar_set_float(cv("cam_weapon_fov"), g->vm_fov);
@@ -102,7 +101,6 @@ static void write_graphics(const GraphicsSettings *g) {
     cvar_set_float(cv("r_brightness"), g->brightness);
     cvar_set_float(cv("r_gamma"), g->gamma);
     cvar_set_int(cv("vfx_quality"), g->vfxq);
-    cvar_set_int(cv("r_bloom"), g->bloom);
     video_apply();
 }
 
@@ -267,6 +265,74 @@ static void draw_pause(struct nk_context *ctx) {
     nk_end(ctx);
 }
 
+static void combo_cvar(struct nk_context *ctx, const char *label, const char *name, const char **items, int count) {
+    Cvar *c = cv(name);
+    if (!c) return;
+    int sel = combo_row(ctx, label, items, count, DG_CLAMP(c->i, 0, count - 1));
+    if (sel != c->i) cvar_set_int(c, sel);
+}
+
+static void section(struct nk_context *ctx, const char *title) {
+    nk_layout_row_dynamic(ctx, S(8), 1);
+    nk_layout_row_dynamic(ctx, S(24), 1);
+    nk_label_colored(ctx, title, NK_TEXT_LEFT, nk_rgb(240, 200, 140));
+}
+
+// Post-processing: applied immediately (cvars, saved with the config). The preset sets the
+// quality options; touching any of them shows "Custom".
+static void draw_post_settings(struct nk_context *ctx) {
+    section(ctx, "Post-processing");
+    int cur = game_post_detect_preset();
+    static const char *presets[] = { "Low", "Medium", "High", "Ultra", "Custom" };
+    int sel = combo_row(ctx, "Quality preset", presets, 5, cur);
+    if (sel != cur && sel < 4) game_post_apply_preset(sel);
+    static const char *aa[] = { "Off", "FXAA", "SMAA 1x", "TAA" };
+    combo_cvar(ctx, "Anti-aliasing", "r_aa", aa, 4);
+    static const char *up[] = { "Off (native)", "TAA-U", "FSR 1", "FSR 2 (not bundled: FSR 1)", "DLSS (not bundled: FSR 1)" };
+    combo_cvar(ctx, "Upscaler", "r_upscaler", up, 5);
+    if (cv("r_upscaler") && cv("r_upscaler")->i) slider_cvar(ctx, "Upscaler render resolution", "r_upscale_ratio", 0.5f, 1.0f, 0.01f, "%.2fx");
+    slider_cvar(ctx, "Sharpening (CAS)", "r_sharpen", 0, 1, 0.05f, "%.2f");
+    static const char *ao[] = { "Off", "Low", "High" };
+    combo_cvar(ctx, "Ambient occlusion (GTAO)", "r_ao", ao, 3);
+    static const char *cs[] = { "Off", "Low", "High" };
+    combo_cvar(ctx, "Contact shadows", "r_contact_shadows", cs, 3);
+    static const char *ssr[] = { "Off", "Half resolution", "Full resolution" };
+    combo_cvar(ctx, "Screen-space reflections", "r_ssr", ssr, 3);
+    check_cvar(ctx, "Screen-space global illumination", "r_ssgi");
+    static const char *vol[] = { "Off", "Low", "High", "Ultra" };
+    combo_cvar(ctx, "Volumetric fog / light shafts", "r_volumetrics", vol, 4);
+    static const char *mb[] = { "Off", "Camera", "Camera + objects" };
+    combo_cvar(ctx, "Motion blur", "r_motion_blur", mb, 3);
+    if (cv("r_motion_blur") && cv("r_motion_blur")->i) slider_cvar(ctx, "Motion blur strength", "r_motion_blur_strength", 0.05f, 1, 0.05f, "%.2f");
+    static const char *dof[] = { "Off", "When aiming", "Always" };
+    combo_cvar(ctx, "Depth of field", "r_dof", dof, 3);
+    check_cvar(ctx, "Bloom", "r_bloom");
+    static const char *bq[] = { "-", "Low", "High" };
+    combo_cvar(ctx, "Bloom quality", "r_bloom_quality", bq, 3);
+    slider_cvar(ctx, "Bloom intensity", "r_bloom_intensity", 0, 0.3f, 0.005f, "%.3f");
+    slider_cvar(ctx, "Lens flare", "r_lens_flare", 0, 2, 0.05f, "%.2f");
+    slider_cvar(ctx, "Lens dirt", "r_lens_dirt", 0, 2, 0.05f, "%.2f");
+    slider_cvar(ctx, "Chromatic aberration", "r_chromatic", 0, 2, 0.05f, "%.2f");
+    slider_cvar(ctx, "Vignette", "r_vignette", 0, 1, 0.05f, "%.2f");
+    slider_cvar(ctx, "Film grain", "r_film_grain", 0, 1, 0.01f, "%.2f");
+    section(ctx, "Image");
+    static const char *tm[] = { "ACES (filmic)", "AgX", "PBR Neutral" };
+    combo_cvar(ctx, "Tonemapper", "r_tonemapper", tm, 3);
+    check_cvar(ctx, "Auto exposure", "r_auto_exposure");
+    slider_cvar(ctx, "Exposure compensation (EV)", "r_exposure", -3, 3, 0.1f, "%+.1f");
+    static const char *cb[] = { "Off", "Protanopia", "Deuteranopia", "Tritanopia" };
+    combo_cvar(ctx, "Colour-blind filter", "r_colorblind", cb, 4);
+    slider_cvar(ctx, "Screen effects (damage, flash ...)", "r_post_feedback", 0, 1, 0.05f, "%.2f");
+    nk_layout_row_dynamic(ctx, S(24), 1);
+    if (render_hdr_supported()) {
+        check_cvar(ctx, "HDR10 output", "r_hdr_output");
+        slider_cvar(ctx, "HDR paper white (nits)", "r_hdr_paper_white", 80, 500, 10, "%.0f");
+        slider_cvar(ctx, "HDR peak brightness (nits)", "r_hdr_max_nits", 400, 4000, 50, "%.0f");
+    } else {
+        nk_label_colored(ctx, "HDR10 output: display not HDR capable", NK_TEXT_LEFT, nk_rgb(150, 150, 150));
+    }
+}
+
 static void draw_graphics(struct nk_context *ctx) {
     GraphicsSettings *p = &M->pending;
     // Resolution
@@ -304,17 +370,11 @@ static void draw_graphics(struct nk_context *ctx) {
     p->texq = combo_row(ctx, "Texture quality", texq, 3, p->texq);
     static const char *vfxq[] = { "Low", "Medium", "High", "Ultra" };
     p->vfxq = combo_row(ctx, "Effects quality (particles)", vfxq, 4, p->vfxq);
-    nk_layout_row_dynamic(ctx, S(24), 1);
-    nk_bool bl = p->bloom != 0;
-    nk_checkbox_label(ctx, "Bloom", &bl);
-    p->bloom = bl ? 1 : 0;
     static const char *aniso[] = { "Off", "2x", "4x", "8x", "16x" };
     static const int aniso_v[] = { 1, 2, 4, 8, 16 };
     int ai = 0;
     for (int i = 0; i < 5; i++) if (aniso_v[i] == p->aniso) ai = i;
     p->aniso = aniso_v[combo_row(ctx, "Anisotropic filtering", aniso, 5, ai)];
-    static const char *aa[] = { "None", "FXAA", "TAA (stub: FXAA)" };
-    p->aa = combo_row(ctx, "Anti-aliasing", aa, 3, p->aa);
     float fps = (float)p->maxfps;
     slider_f(ctx, "Max FPS (0 = unlimited)", &fps, 0, 300, 10, "%.0f");
     p->maxfps = (int)fps;
@@ -330,6 +390,7 @@ static void draw_graphics(struct nk_context *ctx) {
         if (display_change) M->confirm_timer = 15.0f;
     }
     if (nk_button_label(ctx, "Revert")) M->pending = read_graphics();
+    draw_post_settings(ctx);
 }
 
 static void draw_controls(struct nk_context *ctx) {

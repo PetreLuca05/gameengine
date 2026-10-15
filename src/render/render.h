@@ -6,6 +6,7 @@
 #include "core/base.h"
 #include "core/dgmath.h"
 #include "anim/anim_mesh.h"
+#include "render/post/post_settings.h"
 
 struct SDL_Window;
 
@@ -59,6 +60,8 @@ typedef struct DrawItem {
     MeshId mesh;
     mat4 model;
     Material mat;
+    u32 object_id;          // stable id of a moving object (0 = static): previous transform -> velocity
+    u32 prev_slot;          // renderer internal
 } DrawItem;
 
 typedef struct PointLight {
@@ -130,6 +133,7 @@ typedef struct SkinnedDraw {
     bool cast_shadow;
     vec3 center;            // bounding sphere (world) for culling
     float radius;
+    u32 object_id;          // stable id (0 = none): previous palette -> per-bone velocity
 } SkinnedDraw;
 MeshId render_skinned_mesh_create(const SkinVertex *verts, u32 vcount, const u32 *indices, u32 icount);
 void render_draw_skinned(const SkinnedDraw *d);
@@ -180,6 +184,19 @@ void render_vfx_stats(RenderVfxStats *out);
 void render_set_exposure_boost(float boost);
 
 void render_screenshot(const char *path);
+// Post stack (src/render/post): camera state the effects need, diagnostics, HDR capture.
+void render_set_camera_fx(bool ads, float ads_focus_dist);   // depth of field ADS mode / focus target
+void render_camera_cut(void);                                 // teleport / respawn: reset temporal history
+bool render_capture_hdr(const char *exr_path);                // next frame: linear HDR EXR
+bool render_load_lut(const char *cube_path);                  // grading LUT (.cube); NULL / "" = neutral
+int render_pass_count(void);                                  // frame graph passes (last completed frame)
+const char *render_pass_name(int i);
+float render_pass_ms(int i);
+u64 render_post_memory(void);
+float render_exposure_ev(void);
+bool render_hdr_supported(void);
+bool render_hdr_active(void);
+void render_render_size(u32 *w, u32 *h);                      // internal 3D resolution
 bool render_reload_shaders(void);
 void render_poll_shader_hot_reload(void);
 

@@ -1,0 +1,29 @@
+#version 450
+// Depth of field composite (output resolution): sharp -> far layer by the full-res CoC, then the
+// near layer over it by its coverage. The half-res layers are filtered with a 4-tap tent.
+#extension GL_GOOGLE_include_directive : require
+#include "post_common.glsl"
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0) uniform sampler2D color_tex;
+layout(set = 0, binding = 1) uniform sampler2D coc_tex;
+layout(set = 0, binding = 2) uniform sampler2D far_tex;
+layout(set = 0, binding = 3) uniform sampler2D near_tex;
+layout(set = 0, binding = 8, rgba16f) uniform writeonly image2D dst;
+vec4 tent(sampler2D t, vec2 uv) {
+    vec2 h = 0.5 / vec2(textureSize(t, 0));
+    return 0.25 * (textureLod(t, uv + vec2(-h.x, -h.y), 0.0) + textureLod(t, uv + vec2(h.x, -h.y), 0.0) +
+                   textureLod(t, uv + vec2(-h.x, h.y), 0.0) + textureLod(t, uv + vec2(h.x, h.y), 0.0));
+}
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 sz = imageSize(dst);
+    if (p.x >= sz.x || p.y >= sz.y) return;
+    vec2 uv = (vec2(p) + 0.5) / vec2(sz);
+    vec4 sharp = texelFetch(color_tex, p, 0);
+    float coc = texelFetch(coc_tex, p, 0).r;
+    vec3 far = tent(far_tex, uv).rgb;
+    vec4 near = tent(near_tex, uv);
+    vec3 c = mix(sharp.rgb, far, smoothstep(0.5, 2.0, coc));
+    c = mix(c, near.rgb, near.a);
+    imageStore(dst, p, vec4(c, sharp.a));
+}

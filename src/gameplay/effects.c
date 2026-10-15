@@ -184,6 +184,7 @@ void fx_render(vec3 cam) {
         vec3 p = v3_madd(d->pos, n, 0.004f);
         m.m[12] = p.x; m.m[13] = p.y; m.m[14] = p.z;
         DrawItem di;
+        memset(&di, 0, sizeof(di));
         di.mesh = FX->meshes->quad;
         di.model = m;
         di.mat = material_color(v4(0.03f, 0.03f, 0.03f, 0.9f * saturate(1.0f - (d->age - 25.0f) / 5.0f)));

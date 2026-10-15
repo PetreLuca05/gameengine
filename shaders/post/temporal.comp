@@ -1,0 +1,44 @@
+#version 450
+// Generic temporal accumulation (AO, SSGI, SSR): reprojects the history with the velocity buffer,
+// clamps it to the current 3x3 neighbourhood (rejects stale values) and blends.
+//   pc.p0.x  history weight (e.g. 0.9)        pc.p0.y  depth rejection threshold (relative)
+//   pc.u0.x  history valid (0 = reset)         pc.u0.y  channels (1 = r only)
+#extension GL_GOOGLE_include_directive : require
+#include "post_common.glsl"
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0) uniform sampler2D cur_tex;
+layout(set = 0, binding = 1) uniform sampler2D hist_tex;
+layout(set = 0, binding = 2) uniform sampler2D velocity_tex;
+layout(set = 0, binding = 3) uniform sampler2D depth_tex;
+layout(set = 0, binding = 4) uniform sampler2D prev_depth_tex;
+layout(set = 0, binding = 8) uniform writeonly image2D dst;
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 sz = imageSize(dst);
+    if (p.x >= sz.x || p.y >= sz.y) return;
+    vec2 uv = (vec2(p) + 0.5) / vec2(sz);
+    vec4 cur = textureLod(cur_tex, uv, 0.0);
+    vec4 mn = cur, mx = cur;
+    for (int y = -1; y <= 1; y++)
+        for (int x = -1; x <= 1; x++) {
+            if (x == 0 && y == 0) continue;
+            vec4 c = textureLod(cur_tex, uv + vec2(x, y) / vec2(sz), 0.0);
+            mn = min(mn, c);
+            mx = max(mx, c);
+        }
+    vec2 vel = textureLod(velocity_tex, uv, 0.0).rg;
+    vec2 puv = uv - vel;
+    bool valid = pc.u0.x != 0u && U.misc.y < 0.5 && all(greaterThanEqual(puv, vec2(0.0))) && all(lessThanEqual(puv, vec2(1.0)));
+    vec4 res = cur;
+    if (valid) {
+        // Disocclusion: the reprojected surface was not there last frame.
+        float z = linear_depth(textureLod(depth_tex, uv, 0.0).r);
+        float pz = linear_depth(textureLod(prev_depth_tex, puv, 0.0).r);
+        bool occluded = abs(pz - z) > z * pc.p0.y;
+        vec4 hist = textureLod(hist_tex, puv, 0.0);
+        hist = clamp(hist, mn, mx);
+        float w = occluded ? 0.0 : pc.p0.x;
+        res = mix(cur, hist, w);
+    }
+    imageStore(dst, p, pc.u0.y == 1u ? vec4(res.r) : res);
+}

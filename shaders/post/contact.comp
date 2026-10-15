@@ -1,0 +1,46 @@
+#version 450
+// Screen-space sun contact shadows: a short view-space march from the surface towards the sun
+// against the depth buffer (fixes peter-panning and small-scale contact the shadow map misses).
+// The ray is interpolated in clip space (no per-step matrix multiply); pixels facing away from
+// the sun (N.L <= 0, already dark in the BRDF) and beyond the fade distance skip the march.
+// s_gi.w = steps (8 low, 14 high). Low quality runs at half resolution (the lit pass samples it
+// bilinearly).
+#extension GL_GOOGLE_include_directive : require
+#include "post_common.glsl"
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0) uniform sampler2D depth_tex;
+layout(set = 0, binding = 1) uniform sampler2D material_tex;
+layout(set = 0, binding = 2) uniform sampler2D noise_tex;
+layout(set = 0, binding = 3) uniform sampler2D normal_tex;
+layout(set = 0, binding = 8, r8) uniform writeonly image2D dst;
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 sz = imageSize(dst);
+    if (p.x >= sz.x || p.y >= sz.y) return;
+    vec2 uv = (vec2(p) + 0.5) / vec2(sz);
+    float d = textureLod(depth_tex, uv, 0.0).r;
+    if (d >= 1.0 || (gb_flags(textureLod(material_tex, uv, 0.0)) & GB_VIEWMODEL) != 0u) { imageStore(dst, p, vec4(1.0)); return; }
+    vec3 vp = view_pos(uv, d);
+    float fade = 1.0 - clamp((-vp.z - 30.0) / 20.0, 0.0, 1.0);   // the shadow map handles the far field
+    vec3 Lw = normalize(U.sun_dir.xyz);
+    vec3 Nw = oct_decode(textureLod(normal_tex, uv, 0.0).rg);
+    if (fade <= 0.0 || dot(Nw, Lw) <= 0.0) { imageStore(dst, p, vec4(1.0)); return; }
+    vec3 L = normalize((U.view * vec4(Lw, 0.0)).xyz);
+    int steps = int(U.s_gi.w);
+    float len = U.s_gi.z * clamp(-vp.z / 8.0, 0.4, 1.6);   // longer rays far away (pixel footprint)
+    float jitter = blue_noise(noise_tex, p).r;
+    float occ = 0.0;
+    float thickness = 0.05 + 0.02 * -vp.z;
+    vec4 c0 = U.proj * vec4(vp + L * 0.01, 1.0);
+    vec4 c1 = U.proj * vec4(vp + L * (len + 0.01), 1.0);
+    for (int i = 0; i < steps; i++) {
+        float t = (float(i) + jitter) / float(steps);
+        vec4 c = mix(c0, c1, t);
+        vec2 suv = (c.xy / c.w + U.jitter.xy) * 0.5 + 0.5;
+        if (any(lessThan(suv, vec2(0.0))) || any(greaterThan(suv, vec2(1.0)))) break;
+        float scene_z = linear_depth(textureLod(depth_tex, suv, 0.0).r);
+        float delta = c.w - scene_z;   // clip w = view depth of the ray point
+        if (delta > 0.003 && delta < thickness) { occ = 1.0 - t * 0.6; break; }
+    }
+    imageStore(dst, p, vec4(1.0 - occ * fade));
+}

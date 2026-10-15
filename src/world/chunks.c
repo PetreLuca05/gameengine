@@ -406,6 +406,7 @@ void chunks_render(World *w, vec3 cam) {
         float d = v3_len(v3_flat(v3_sub(center, cam)));
         int lod = d < lod_d ? 0 : d < lod_d * 2 ? 1 : d < lod_d * 4 ? 2 : 3;
         DrawItem di;
+        memset(&di, 0, sizeof(di));
         di.mesh = ch->lod[lod];
         di.model = mat4_translate(origin);
         di.mat = material_color(v4(1, 1, 1, 1));

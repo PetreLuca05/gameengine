@@ -3,12 +3,20 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
 #include <stdlib.h>
+#include <string.h>
 
 static VKAPI_ATTR VkBool32 VKAPI_CALL debug_callback(VkDebugUtilsMessageSeverityFlagBitsEXT severity,
     VkDebugUtilsMessageTypeFlagsEXT type, const VkDebugUtilsMessengerCallbackDataEXT *data, void *user) {
     (void)type; (void)user;
-    if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) log_error("[vk] %s", data->pMessage);
-    else if (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT) log_warn("[vk] %s", data->pMessage);
+    bool err = (severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT) != 0;
+    if (!err && !(severity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT)) return VK_FALSE;
+    // Log lines are short (LOG_LINE_MAX): long validation messages continue on "[vk+]" lines.
+    const char *m = data->pMessage;
+    size_t n = strlen(m);
+    for (size_t off = 0; off < n && off < 2000; off += 200) {
+        if (err) log_error("%s %.200s", off ? "[vk+]" : "[vk]", m + off);
+        else log_warn("%s %.200s", off ? "[vk+]" : "[vk]", m + off);
+    }
     return VK_FALSE;
 }
 
@@ -38,6 +46,19 @@ bool vkd_create_device(SDL_Window *window) {
     const char *exts[16];
     u32 ext_count = 0;
     for (u32 i = 0; i < sdl_ext_count && ext_count < 14; i++) exts[ext_count++] = sdl_exts[i];
+    // HDR10 output needs the extended colour spaces of VK_EXT_swapchain_colorspace.
+    {
+        u32 n = 0;
+        vkEnumerateInstanceExtensionProperties(NULL, &n, NULL);
+        VkExtensionProperties props[256];
+        n = DG_MIN(n, 256u);
+        vkEnumerateInstanceExtensionProperties(NULL, &n, props);
+        for (u32 i = 0; i < n; i++)
+            if (!strcmp(props[i].extensionName, VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME) && ext_count < 14) {
+                exts[ext_count++] = VK_EXT_SWAPCHAIN_COLOR_SPACE_EXTENSION_NAME;
+                R->has_colorspace_ext = true;
+            }
+    }
 
     const char *layers[1];
     u32 layer_count = 0;
@@ -140,13 +161,35 @@ bool vkd_create_device(SDL_Window *window) {
     f2.features.samplerAnisotropy = supported.samplerAnisotropy;
     f2.features.fillModeNonSolid = supported.fillModeNonSolid;
     f2.features.textureCompressionBC = supported.textureCompressionBC;
+    // Post-processing: storage images of every format (r8, rg16f, r11g11b10...) without format
+    // qualifiers where needed, independent blend for MRT pipelines.
+    f2.features.shaderStorageImageExtendedFormats = supported.shaderStorageImageExtendedFormats;
+    f2.features.shaderStorageImageReadWithoutFormat = supported.shaderStorageImageReadWithoutFormat;
+    f2.features.shaderStorageImageWriteWithoutFormat = supported.shaderStorageImageWriteWithoutFormat;
+    f2.features.independentBlend = supported.independentBlend;
+    f2.features.fragmentStoresAndAtomics = supported.fragmentStoresAndAtomics;
+    if (!supported.shaderStorageImageExtendedFormats) log_warn("vulkan: shaderStorageImageExtendedFormats missing - some post effects disabled");
 
-    const char *dev_exts[] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
+    const char *dev_exts[4] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
+    u32 dev_ext_count = 1;
+    {
+        u32 n = 0;
+        vkEnumerateDeviceExtensionProperties(R->gpu, NULL, &n, NULL);
+        VkExtensionProperties *props = (VkExtensionProperties *)malloc(sizeof(VkExtensionProperties) * n);
+        vkEnumerateDeviceExtensionProperties(R->gpu, NULL, &n, props);
+        for (u32 i = 0; i < n; i++)
+            if (!strcmp(props[i].extensionName, VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME)) {
+                dev_exts[dev_ext_count++] = VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME;
+                R->has_push_descriptor = true;
+            }
+        free(props);
+        if (!R->has_push_descriptor) log_error("vulkan: VK_KHR_push_descriptor missing - post-processing disabled");
+    }
     VkDeviceCreateInfo dci = { VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
     dci.pNext = &f2;
     dci.queueCreateInfoCount = 1;
     dci.pQueueCreateInfos = &qci;
-    dci.enabledExtensionCount = 1;
+    dci.enabledExtensionCount = dev_ext_count;
     dci.ppEnabledExtensionNames = dev_exts;
     res = vkCreateDevice(R->gpu, &dci, NULL, &R->device);
     if (res != VK_SUCCESS) { log_error("vkCreateDevice failed (%d)", (int)res); return false; }
@@ -195,6 +238,16 @@ bool vkd_create_swapchain(void) {
         if ((fmts[i].format == VK_FORMAT_B8G8R8A8_UNORM || fmts[i].format == VK_FORMAT_R8G8B8A8_UNORM) &&
             fmts[i].colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR) { chosen = fmts[i]; break; }
     }
+    // HDR10 (ST.2084 PQ, BT.2020 primaries) when the display offers it and r_hdr_output is on.
+    R->hdr_supported = false;
+    for (u32 i = 0; i < fmt_count; i++)
+        if (R->has_colorspace_ext && fmts[i].colorSpace == VK_COLOR_SPACE_HDR10_ST2084_EXT &&
+            (fmts[i].format == VK_FORMAT_A2B10G10R10_UNORM_PACK32 || fmts[i].format == VK_FORMAT_A2R10G10B10_UNORM_PACK32)) {
+            R->hdr_supported = true;
+            if (R->r_hdr_output && R->r_hdr_output->i) chosen = fmts[i];
+        }
+    R->swap_hdr = chosen.colorSpace == VK_COLOR_SPACE_HDR10_ST2084_EXT;
+    R->hdr_output_applied = R->r_hdr_output ? R->r_hdr_output->i : 0;
 
     u32 pm_count = 0;
     vkGetPhysicalDeviceSurfacePresentModesKHR(R->gpu, R->surface, &pm_count, NULL);
@@ -261,8 +314,8 @@ bool vkd_create_swapchain(void) {
         VK_CHECK(vkCreateSemaphore(R->device, &sem, NULL, &R->render_done[i]));
     }
     static const char *mode_names[] = { "immediate", "mailbox", "fifo", "fifo_relaxed" };
-    log_info("swapchain: %ux%u, %u images, present=%s", extent.width, extent.height, R->swap_count,
-             mode <= 3 ? mode_names[mode] : "?");
+    log_info("swapchain: %ux%u, %u images, present=%s, %s%s", extent.width, extent.height, R->swap_count,
+             mode <= 3 ? mode_names[mode] : "?", R->swap_hdr ? "HDR10 (PQ)" : "SDR (sRGB)", R->hdr_supported ? ", display supports HDR10" : "");
     R->swap_dirty = false;
     return true;
 }
@@ -278,11 +331,11 @@ void vkd_destroy_swapchain(void) {
 }
 
 void vkd_create_targets(void) {
-    float scale = clampf(R->r_render_scale->f, 0.25f, 2.0f);
+    float scale = clampf(R->target_scale > 0.0f ? R->target_scale : 1.0f, 0.25f, 2.0f);   // render.c: r_render_scale x upscaler
     u32 w = DG_MAX(1u, (u32)(R->swap_extent.width * scale));
     u32 h = DG_MAX(1u, (u32)(R->swap_extent.height * scale));
     R->hdr = vkr_target_create(w, h, VK_FORMAT_R16G16B16A16_SFLOAT,
-                               VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+                               VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_STORAGE_BIT,
                                VK_IMAGE_ASPECT_COLOR_BIT);
     // Depth is kept (STORE) and sampled: soft particles, decals and next-frame GPU particle collision.
     R->depth = vkr_target_create(w, h, VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
@@ -290,8 +343,6 @@ void vkd_create_targets(void) {
     // Viewmodel depth: separate so the world depth survives the first-person pass.
     R->vm_depth = vkr_target_create(w, h, VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_IMAGE_ASPECT_DEPTH_BIT);
     R->render_scale_applied = scale;
-    if (!R->hdr_set) R->hdr_set = vkr_alloc_tex_set(R->hdr.view, R->sampler_clamp);
-    else vkr_write_tex_set(R->hdr_set, R->hdr.view, R->sampler_clamp);
     vkx_targets_changed();
 }
 
