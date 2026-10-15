@@ -179,6 +179,7 @@ static void cmd_bind(int argc, const char **argv) {
         for (int s = 0; s < BINDS_PER_ACTION; s++) if (IN->binds[a][s].type == BIND_NONE) { slot = s; break; }
     }
     IN->binds[a][slot] = b;
+    config_mark_dirty();
 }
 
 static void cmd_unbindall(int argc, const char **argv) { memset(IN->binds, 0, sizeof(IN->binds)); }
@@ -257,6 +258,7 @@ static bool binding_active(Binding b) {
 
 static void finish_capture(Binding b) {
     IN->binds[IN->capture_action][IN->capture_slot] = b;
+    config_mark_dirty();
     IN->capturing = false;
     char n[48];
     log_info("bound %s to %s", binding_name(b, n, sizeof(n)), k_action_names[IN->capture_action]);
@@ -389,7 +391,7 @@ void input_set_game_focus(bool focus) {
 bool input_game_focus(void) { return IN->game_focus; }
 bool input_gamepad_connected(void) { return IN->pad != NULL; }
 Binding input_get_binding(Action a, int slot) { return IN->binds[a][slot]; }
-void input_set_binding(Action a, int slot, Binding b) { IN->binds[a][slot] = b; }
+void input_set_binding(Action a, int slot, Binding b) { IN->binds[a][slot] = b; config_mark_dirty(); }
 
 void input_begin_capture(Action a, int slot) {
     IN->capturing = true;

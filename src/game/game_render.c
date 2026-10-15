@@ -362,6 +362,7 @@ void game_render(void) {
         hi.vm_kick_pos = spring_vec3_sample(&G->recoil_vis.vm_pos, G->alpha);
         hi.vm_kick_rot = spring_vec3_sample(&G->recoil_vis.vm_rot, G->alpha);
         hands_update(&hi);
+        chars_render_local_fp(w, G->alpha, G->local_slot);
         hands_render();
     }
     fx_render();

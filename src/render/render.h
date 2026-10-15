@@ -147,6 +147,7 @@ void render_poll_shader_hot_reload(void);
 
 // Queries
 bool render_world_to_screen(vec3 world, vec2 *out_px); // false if behind camera
+vec3 render_viewmodel_to_world(vec3 viewmodel_point);   // same pixel under the world FOV (muzzle flash / tracers)
 mat4 render_view_proj(void);
 int render_width(void);
 int render_height(void);

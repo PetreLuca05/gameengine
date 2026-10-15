@@ -222,6 +222,30 @@ animation follows the movement (`speed_match`).
   keep a body shadow without clipping the camera.
 * **Held items.** Rendered at the procedural `item_world` with `hands_draw_held`.
 
+## First-person body (`cl_fp_body`)
+
+The local player sees their own body, and **the player model's arms replace the placeholder hands**:
+
+* **Targets.** `hands.c` still decides where the hands go: clips, sway, recoil, interactions, ledge
+  grabs. It exports palm frames per hand (`hands_fp_targets`). Hands on a weapon go to its
+  `grip_r` / `grip_l` sockets; everything else uses the solved hand frames.
+* **IK.** `chars_render_local_fp` takes the interpolated body pose, moves it under the camera, then
+  runs two-bone IK on both arms to those palm frames. If a target is out of reach, the shoulder
+  moves toward it, up to `cl_fp_shoulder_shift`.
+* **Fingers.** Hands on the weapon keep the hold style's finger curl. Other hands curl by grip type.
+* **Head.** The head bones are collapsed so the camera never sees inside them.
+* **Passes.** The body is drawn in the world pass and the arm-only mesh (built at load) again in the
+  viewmodel pass, with the weapon, so neither clips into walls. Your third-person pose and weapon
+  still cast your shadow.
+* **Offsets.** `cl_fp_body_back` (0) sets the body offset behind the camera, and
+  `cl_fp_body_back_down` (0.22 m) slides it back as you look down, so you see your legs and feet
+  instead of the inside of your chest.
+* **FOV.** The camera FOV (`cl_fov`) and the hands / weapon FOV (`r_viewmodel_fov`, 0 = follow
+  the camera) are separate sliders in Settings → Graphics. Muzzle flash and tracers start where
+  the barrel appears on screen.
+* **Debug.** `cl_fp_debug 1` logs reach shifts and draws targets; `2` shows the raw body pose.
+  `cl_fp_body 0` brings back the cube hands.
+
 ## LOD
 
 `lod_select` picks a LOD from the projected height in pixels, with hysteresis 0.15, moving one

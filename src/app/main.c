@@ -50,7 +50,10 @@ static void cmd_screenshot(int argc, const char **argv) {
 
 static void cmd_reload_shaders(int argc, const char **argv) { render_reload_shaders(); }
 static void cmd_vid_restart(int argc, const char **argv) { video_apply(); }
-static void cmd_writeconfig(int argc, const char **argv) { config_save(video_config_path()); log_info("config written to %s", video_config_path()); }
+static void cmd_writeconfig(int argc, const char **argv) {
+    if (config_save(video_config_path())) log_info("config written to %s", video_config_path());
+    else log_info("writeconfig: disabled in --test runs");
+}
 
 static void parse_args(int argc, char **argv, AppOptions *o) {
     for (int i = 1; i < argc; i++) {
@@ -161,9 +164,13 @@ int main(int argc, char **argv) {
 
     // Persistent settings, then the command line (overrides).
     for (int i = 1; i < argc; i++) if (!strcmp(argv[i], "--test")) opt.test = true;
+    // Test runs never read or write the user's settings (they used to overwrite them on exit).
+    config_set_enabled(!opt.test);
     if (opt.test) cvar_set("r_maxfps", "60");
     else if (config_exec_file(video_config_path())) log_info("config loaded from %s", video_config_path());
+    else log_info("no config yet: settings will be saved to %s", video_config_path());
     input_bind_missing_defaults();
+    config_clear_dirty();   // loading the config is not a change
     if (cvar_find("r_mode")->i != 0 || cw->i != 1600 || ch->i != 900) video_apply();
     parse_args(argc, argv, &opt);
     if (!boot_commands_connect(argc, argv)) game_host(game()->g_map->str);
@@ -199,6 +206,7 @@ int main(int argc, char **argv) {
         if (input_consume_press(ACT_NETSTATS)) game()->show_netstats = !game()->show_netstats;
 
         cbuf_execute();
+        config_autosave(video_config_path());
         menus_tick((float)dt);
         net_update((float)dt);
         game_frame((float)dt);
@@ -228,7 +236,7 @@ int main(int argc, char **argv) {
 
     if (g_engine.frame_index > 6) log_info("frames %llu, avg %.2f ms, worst %.1f ms", (unsigned long long)g_engine.frame_index, total_time * 1000.0 / (double)(g_engine.frame_index - 6), worst_dt * 1000.0);
     log_info("shutting down");
-    config_save(video_config_path());
+    if (config_save_if_dirty(video_config_path())) log_info("settings saved to %s", video_config_path());
     render_wait_idle();
     game_shutdown();
     assets_shutdown();

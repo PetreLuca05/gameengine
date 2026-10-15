@@ -71,7 +71,15 @@ int cmd_complete(const char *prefix, const char **out, int max);
 // Config persistence (archive cvars). Extra writers (e.g. key binds) hook in.
 typedef void (*ConfigWriterFn)(FILE *f);
 void config_add_writer(ConfigWriterFn fn);
-bool config_save(const char *path);
+bool config_save(const char *path);          // no-op while disabled (--test)
+// Settings persistence: archived cvar / bind changes mark the config dirty; it's written one
+// second after the last change and on exit, never in --test runs.
+void config_set_enabled(bool enabled);
+bool config_enabled(void);
+void config_mark_dirty(void);
+void config_clear_dirty(void);
+bool config_save_if_dirty(const char *path);
+bool config_autosave(const char *path);
 bool config_exec_file(const char *path);
 
 #endif

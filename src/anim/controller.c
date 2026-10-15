@@ -581,7 +581,10 @@ static float advance_phase(const ControllerInst *c, const LayerDef *L, int state
     int node = state_node(L, state, variant);
     if (node < 0) { *finished = true; return 0; }
     LeafSet ls;
-    resolve_leaves(c, node, &ls);
+    // Same fallback rule as evaluation: only the base layer plays idle for unbound clips; an
+    // unbound one-shot on an upper layer finishes at once (it must not hold the hands for the
+    // length of the idle clip).
+    resolve_leaves_ex(c, node, &ls, L == &c->def->layers[0]);
     float dur = leaves_duration(&ls, cl);
     float speed = S->speed * (S->speed_param >= 0 ? c->params[S->speed_param] : 1.0f);
     if (S->speed_match) {

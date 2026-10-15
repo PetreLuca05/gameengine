@@ -14,6 +14,7 @@
 #include "core/base.h"
 #include "core/dgmath.h"
 #include "world/world.h"
+#include "anim/anim.h"
 
 typedef enum GripType {
     GRIP_RELAXED, GRIP_FIST, GRIP_POINT, GRIP_GRAB, GRIP_PISTOL, GRIP_RIFLE, GRIP_MELEE, GRIP_PALM, GRIP_COUNT
@@ -55,6 +56,22 @@ void hands_render_remote(World *w, int slot, vec3 eye, float yaw, float pitch);
 const ArmChain *hands_chain(int hand);
 // Third-person held item at a grip transform (item origin = right grip), e.g. a character's hand.
 void hands_draw_held(const struct WeaponDef *wd, const struct ItemDef *it, vec3 pos, quat rot, u32 material_flags);
+// First-person targets for the full-body player model (gameplay/characters.c): per-hand palm
+// frames in world space (palm convention: -Z fingers, +Y back of the hand) from the last
+// hands_update. Weapon hands sit on the item sockets (grip_r / grip_l) of the viewmodel weapon.
+typedef struct HandsFpTargets {
+    Xform palm[2];
+    u8 grip[2];               // GripType
+    bool on_weapon[2];        // palm is on the held item's socket (finger curl from the hold style)
+    const struct WeaponDef *weapon;
+    const struct ItemDef *item;
+    vec3 cam_pos;
+    quat cam_rot;
+} HandsFpTargets;
+bool hands_fp_targets(HandsFpTargets *out);
+// When the body model draws the first-person arms, hands_render skips the placeholder cubes
+// (call every frame before hands_render; resets after rendering).
+void hands_set_body_arms(bool on);
 // World-space barrel tip of the local viewmodel weapon (last hands_update). False if no gun.
 bool hands_muzzle(vec3 *pos, vec3 *fwd);
 void hands_reload_poses(void);

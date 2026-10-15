@@ -100,6 +100,9 @@ typedef struct HandFrames {
     vec3 curl_axis[2];         // finger curl axis in the palm frame
 } HandFrames;
 void proc_hand_frames(const Skeleton *s, HandFrames *out);
+// Curls one hand's fingers (side 0 left, 1 right) by curl[5] degrees (thumb..pinky), scaled by weight.
+// Fingers never move the wrist. Model transforms of the finger chains are updated.
+void proc_curl_fingers(const Skeleton *s, Pose *pose, Xform *model, int side, const float *curl, const HandFrames *hf, float weight);
 
 // Per-character procedural state (render side).
 typedef struct FootState {

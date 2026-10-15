@@ -29,7 +29,7 @@ static HoldStyle blend_style(const HoldStyle *a, const HoldStyle *b, float t) {
     return h;
 }
 
-static void curl_fingers(const Skeleton *s, Pose *pose, Xform *model, int side, const float *curl, const HandFrames *hf, float weight) {
+void proc_curl_fingers(const Skeleton *s, Pose *pose, Xform *model, int side, const float *curl, const HandFrames *hf, float weight) {
     static const BoneRole first[2][5] = {
         { BR_L_THUMB1, BR_L_INDEX1, BR_L_MIDDLE1, BR_L_RING1, BR_L_PINKY1 },
         { BR_R_THUMB1, BR_R_INDEX1, BR_R_MIDDLE1, BR_R_RING1, BR_R_PINKY1 },
@@ -179,8 +179,8 @@ void proc_hold(ProcState *st, const ProcInput *in, Pose *pose, Xform *model) {
         log_warn("hold style '%s': grip_l out of reach even after shifting %.0f mm (fix the socket)", hs.name, shift * 1000.0f);
     }
     // Fingers last: they never move the wrist.
-    curl_fingers(s, pose, model, 1, hs.curl_r, hf, w);
-    if (hs.left_hand && it->has_left) curl_fingers(s, pose, model, 0, hs.curl_l, hf, w);
+    proc_curl_fingers(s, pose, model, 1, hs.curl_r, hf, w);
+    if (hs.left_hand && it->has_left) proc_curl_fingers(s, pose, model, 0, hs.curl_l, hf, w);
     st->item_model = item;
     st->item_world = xf_mul(in->root, item);
     st->has_item = true;

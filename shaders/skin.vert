@@ -29,5 +29,7 @@ void main() {
     v_mat_color = si.color;
     v_mat_params = si.params;
     v_mat_flags = si.info.y;
-    gl_Position = frame.view_proj * world;
+    // First-person arms from the body model are drawn in the viewmodel pass (own projection).
+    if ((si.info.y & MAT_VIEWMODEL) != 0u) gl_Position = frame.vm_proj * frame.view * world;
+    else gl_Position = frame.view_proj * world;
 }

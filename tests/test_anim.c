@@ -418,6 +418,41 @@ static void feed(ControllerInst *c, int t, u32 *seed) {
     if ((t % 37) == 0) ctrl_trigger(c, AP_T_FIRE);
 }
 
+// Upper-body one-shots (equip / reload / fire / melee) must return to "none" and give the hands
+// back to the weapon hold, also when their clips are unbound (placeholder anim sets).
+static void test_upper_oneshots(void) {
+    const CharacterDef *def = anim_lib_char_by_id(L, "player");
+    if (!def) return;
+    CharRuntime *rt = (CharRuntime *)malloc(sizeof(CharRuntime));
+    static const int trig[4] = { AP_T_EQUIP, AP_T_RELOAD, AP_T_FIRE, AP_T_MELEE };
+    static const char *names[4] = { "equip", "reload", "fire", "melee" };
+    for (int k = 0; k < 4; k++) {
+        charrt_init(rt, L, def);
+        CharInputs in;
+        memset(&in, 0, sizeof(in));
+        in.grounded = true;
+        in.weapon_type = proc_hold_style_index(&L->proc, "rifle");
+        in.weapon_id = 2;
+        charrt_set_inputs(rt, &in);
+        charrt_tick(rt, 1.0f / 60.0f);
+        charrt_trigger(rt, trig[k]);
+        int back = -1;
+        for (int t = 0; t < 600 && back < 0; t++) {
+            charrt_set_inputs(rt, &in);
+            charrt_tick(rt, 1.0f / 60.0f);
+            if (t > 0 && !strcmp(ctrl_state_name(&rt->ctrl, 1, rt->ctrl.layer[1].state), "none")) back = t;
+        }
+        float w = 0;
+        bool ik = ctrl_hand_ik_weight(&rt->ctrl, &w);
+        CHECK(back >= 0, "upper %s never returned to none (stuck in %s)", names[k], ctrl_state_name(&rt->ctrl, 1, rt->ctrl.layer[1].state));
+        for (int t = 0; t < 30; t++) { charrt_set_inputs(rt, &in); charrt_tick(rt, 1.0f / 60.0f); }
+        ik = ctrl_hand_ik_weight(&rt->ctrl, &w);
+        CHECK(ik && w > 0.99f, "upper %s: hand IK weight %.2f after returning", names[k], w);
+        printf("  upper %-6s back to none after %d ticks, hand ik %.2f\n", names[k], back, w);
+    }
+    free(rt);
+}
+
 static void test_determinism(void) {
     ControllerInst *a = (ControllerInst *)malloc(sizeof(ControllerInst)), *b = (ControllerInst *)malloc(sizeof(ControllerInst));
     ctrl_init(a, &L->ctrl, &L->sets[0]);
@@ -495,7 +530,10 @@ static void test_quantization(void) {
     w = writer_make(buf, sizeof(buf));
     anim_event_write(&w, &e);
     r = reader_make(buf, w.len);
-    CHECK(anim_event_read(&r, &e2) && !memcmp(&e, &e2, sizeof(e)) && (int)w.len == anim_event_size(&e), "hit event round trip");
+    bool rd = anim_event_read(&r, &e2);
+    CHECK(rd && e2.type == e.type && e2.ent == e.ent && e2.tick == e.tick && e2.seed == e.seed && e2.body_part == e.body_part && e2.dir == e.dir &&
+              e2.strength == e.strength && e2.damage_type == e.damage_type && (int)w.len == anim_event_size(&e),
+          "hit event round trip");
 }
 
 static void test_lagcomp(void) {
@@ -561,6 +599,7 @@ int main(int argc, char **argv) {
     test_hold_and_glue(db);
     test_body_parts(db);
     test_damage_reaction();
+    test_upper_oneshots();
     test_determinism();
     test_quantization();
     test_lagcomp();

@@ -119,6 +119,9 @@ void chars_local_predict(World *w, int slot, bool first);
 // Render side, once per sim tick: LOD, post-pass, ragdolls.
 void chars_present_tick(World *w, vec3 cam_pos, float fov_deg, float screen_h, float dt, int local_slot);
 void chars_render(World *w, float alpha, vec3 cam_pos, int local_slot);
+// First-person body of the local player (cl_fp_body): call after hands_update, before
+// hands_render. Draws the body (head hidden) and its arms on the first-person hand targets.
+void chars_render_local_fp(World *w, float alpha, int local_slot);
 // Events (reliable, compact): host queues + applies, clients apply what arrives.
 void chars_push_event(World *w, const AnimEvent *e);
 void chars_on_event(World *w, const AnimEvent *e);

@@ -136,6 +136,10 @@ deadground +set g_map streaming # make the streaming demo the default boot map (
 deadground --validation         # Vulkan validation layers (needs the layer installed)
 ```
 
+Settings autosave about a second after a change (and on exit, only if something changed), to
+`config.cfg` in the user pref dir. The previous file is kept as `config.cfg.bak`. Builds never touch
+it, and `--test` runs neither read nor write it.
+
 Config, log and screenshots go to the user pref dir. On Windows that's
 `%APPDATA%\Deadground\Deadground\`, which holds `config.cfg` and `deadground.log`.
 
@@ -219,6 +223,8 @@ live tuning, and `crosshair_reload` re-reads `assets/ui/crosshair.json`. See [do
 | `anim_ragdoll_debug 1` | ragdoll bodies, masses, joint limits |
 | `r_lod_debug 1` | character LOD, pixel height, update rate, active systems |
 | `r_cpu_skinning 1` | CPU skinning fallback |
+| `cl_fp_body 0/1` | own body + model arms in first person (0 = placeholder cube hands) |
+| `cl_fov`, `r_viewmodel_fov` | camera FOV / hands + weapon FOV (0 = follow camera), also in Settings |
 | `pl_debug_mantle 1` | mantle / vault / hang shape casts (lasts 2 s per check) |
 | `hands_debug 1` | IK chains, hand targets, elbow pole vectors |
 | `wpn_debug_melee 1` | melee sweep rays |

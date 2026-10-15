@@ -21,6 +21,7 @@ typedef enum SettingsTab { TAB_GRAPHICS, TAB_CONTROLS, TAB_CROSSHAIR, TAB_AUDIO 
 typedef struct GraphicsSettings {
     int width, height, mode, vsync, shadow, texq, aniso, aa, maxfps;
     float fov, scale, brightness, gamma;
+    float vm_fov;          // 0 = follow the camera FOV
 } GraphicsSettings;
 
 #define MAX_RES 48
@@ -73,6 +74,7 @@ static GraphicsSettings read_graphics(void) {
     g.aa = cv("r_aa")->i;
     g.maxfps = cv("r_maxfps")->i;
     g.fov = cv("cl_fov")->f;
+    g.vm_fov = cv("r_viewmodel_fov")->f;
     g.scale = cv("r_render_scale")->f;
     g.brightness = cv("r_brightness")->f;
     g.gamma = cv("r_gamma")->f;
@@ -90,6 +92,7 @@ static void write_graphics(const GraphicsSettings *g) {
     cvar_set_int(cv("r_aa"), g->aa);
     cvar_set_int(cv("r_maxfps"), g->maxfps);
     cvar_set_float(cv("cl_fov"), g->fov);
+    cvar_set_float(cv("r_viewmodel_fov"), g->vm_fov);
     cvar_set_float(cv("r_render_scale"), g->scale);
     cvar_set_float(cv("r_brightness"), g->brightness);
     cvar_set_float(cv("r_gamma"), g->gamma);
@@ -277,7 +280,16 @@ static void draw_graphics(struct nk_context *ctx) {
     nk_bool vs = p->vsync != 0;
     nk_checkbox_label(ctx, "VSync", &vs);
     p->vsync = vs ? 1 : 0;
-    slider_f(ctx, "Field of view", &p->fov, 60, 110, 1, "%.0f");
+    slider_f(ctx, "Field of view (camera)", &p->fov, 50, 120, 1, "%.0f");
+    // Hands / weapon / first-person arms: own FOV, or follow the camera.
+    nk_layout_row_dynamic(ctx, S(24), 1);
+    nk_bool vm_follow = p->vm_fov < 1.0f;
+    nk_checkbox_label(ctx, "Hands FOV follows camera", &vm_follow);
+    if (vm_follow) p->vm_fov = 0;
+    else {
+        if (p->vm_fov < 1.0f) p->vm_fov = p->fov;
+        slider_f(ctx, "Field of view (hands / weapon)", &p->vm_fov, 40, 120, 1, "%.0f");
+    }
     slider_f(ctx, "Render scale", &p->scale, 0.5f, 2.0f, 0.05f, "%.2fx");
     static const char *shadow[] = { "Off", "Low", "Medium", "High" };
     p->shadow = combo_row(ctx, "Shadow quality", shadow, 4, p->shadow);

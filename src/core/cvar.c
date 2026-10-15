@@ -25,6 +25,11 @@ typedef struct CvarSystem {
     int cbuf_len;
     int wait_frames;
     Cvar *sv_cheats;
+    // Config persistence: saves only when something archived changed (autosave + exit).
+    bool cfg_disabled;     // --test: never load or write the user's config
+    bool cfg_dirty;
+    double cfg_dirty_time;
+    bool cfg_backed_up;
 } CvarSystem;
 #define s_cv (*g_engine.cvars)
 
@@ -177,6 +182,7 @@ void cvar_set_cv(Cvar *cv, const char *value) {
     parse_value(cv);
     if (strcmp(old, cv->str) != 0) {
         cv->modified++;
+        if (cv->flags & CVAR_ARCHIVE) config_mark_dirty();
         if (cv->flags & CVAR_NOTIFY) log_info("%s changed to %s", cv->name, cv->str);
         if (cv->on_change) cv->on_change(cv);
     }
@@ -324,7 +330,36 @@ void config_add_writer(ConfigWriterFn fn) {
     if (s_cv.writer_count < MAX_WRITERS) s_cv.writers[s_cv.writer_count++] = fn;
 }
 
+void config_set_enabled(bool enabled) { s_cv.cfg_disabled = !enabled; }
+bool config_enabled(void) { return !s_cv.cfg_disabled; }
+void config_mark_dirty(void) {
+    if (!s_cv.cfg_dirty) s_cv.cfg_dirty_time = platform_time();
+    s_cv.cfg_dirty = true;
+}
+void config_clear_dirty(void) { s_cv.cfg_dirty = false; }
+
+bool config_save_if_dirty(const char *path) { return s_cv.cfg_dirty ? config_save(path) : false; }
+
+bool config_autosave(const char *path) {
+    // One second after the last burst of changes (a slider drag is many changes).
+    if (!s_cv.cfg_dirty || platform_time() - s_cv.cfg_dirty_time < 1.0) return false;
+    return config_save(path);
+}
+
 bool config_save(const char *path) {
+    if (s_cv.cfg_disabled) return false;
+    // First write of the session keeps the previous file as config.cfg.bak.
+    if (!s_cv.cfg_backed_up) {
+        s_cv.cfg_backed_up = true;
+        size_t n = 0;
+        char *old = platform_read_file(path, &n);
+        if (old) {
+            char bak[600];
+            snprintf(bak, sizeof(bak), "%s.bak", path);
+            platform_write_file(bak, old, n);
+            free(old);
+        }
+    }
     FILE *f = fopen(path, "w");
     if (!f) { log_warn("config: cannot write %s", path); return false; }
     fprintf(f, "// Deadground config - generated, edits are kept for known cvars\n");
@@ -334,6 +369,7 @@ bool config_save(const char *path) {
     }
     for (int i = 0; i < s_cv.writer_count; i++) s_cv.writers[i](f);
     fclose(f);
+    s_cv.cfg_dirty = false;
     return true;
 }
 

@@ -435,15 +435,24 @@ static int cmp_skin_mesh(const void *a, const void *b) {
     return ma < mb ? -1 : (ma > mb ? 1 : 0);
 }
 
+// Skinned passes: 0 = main (world), 1 = shadow, 2 = viewmodel (first-person arms, after the depth clear).
+static bool skin_in_pass(const SkinnedDraw *d, int pass) {
+    bool vm = (d->flags & MAT_VIEWMODEL) != 0;
+    if (pass == 1) return d->cast_shadow && !vm;
+    if (pass == 2) return vm;
+    return !vm && (d->flags & MAT_SHADOW_ONLY) == 0;
+}
+
 // Writes instance records for one pass (culled, sorted by mesh) starting at `base`.
-static u32 build_skin_pass(FrameResources *f, bool shadow, u32 base, SkinPass *out) {
+static u32 build_skin_pass(FrameResources *f, int pass, u32 base, SkinPass *out) {
+    bool shadow = pass == 1;
     ArenaMark mark = arena_mark(&g_engine.frame_arena);
     SortKey *keys = ARENA_PUSH_N(&g_engine.frame_arena, SortKey, R->skin_draw_count + 1);
     u32 n = 0;
     for (u32 i = 0; i < R->skin_draw_count; i++) {
         const SkinnedDraw *d = &R->skin_draws[i];
-        if (shadow ? !d->cast_shadow : (d->flags & MAT_SHADOW_ONLY) != 0) continue;
-        if (!shadow && R->r_culling->i && d->radius > 0 && !sphere_visible(R->frustum, d->center, d->radius)) { R->stats.culled++; continue; }
+        if (!skin_in_pass(d, pass)) continue;
+        if (pass == 0 && R->r_culling->i && d->radius > 0 && !sphere_visible(R->frustum, d->center, d->radius)) { R->stats.culled++; continue; }
         keys[n].key = d->mesh;
         keys[n].index = i;
         n++;
@@ -512,12 +521,13 @@ static void cpu_skin_all(FrameResources *f, CpuSkin *out) {
     }
 }
 
-static void draw_cpu_skinned(VkCommandBuffer cmd, FrameResources *f, const CpuSkin *cs, bool shadow) {
+static void draw_cpu_skinned(VkCommandBuffer cmd, FrameResources *f, const CpuSkin *cs, int pass) {
+    bool shadow = pass == 1;
     for (u32 i = 0; i < R->skin_draw_count; i++) {
         const SkinnedDraw *d = &R->skin_draws[i];
         if (!cs[i].ok) continue;
-        if (shadow ? !d->cast_shadow : (d->flags & MAT_SHADOW_ONLY) != 0) continue;
-        if (!shadow && R->r_culling->i && d->radius > 0 && !sphere_visible(R->frustum, d->center, d->radius)) continue;
+        if (!skin_in_pass(d, pass)) continue;
+        if (pass == 0 && R->r_culling->i && d->radius > 0 && !sphere_visible(R->frustum, d->center, d->radius)) continue;
         GpuMesh *m = &R->meshes[d->mesh];
         vkCmdBindVertexBuffers(cmd, 0, 1, &f->dyn.buffer, &cs[i].offset);
         vkCmdBindIndexBuffer(cmd, m->ib.buffer, 0, VK_INDEX_TYPE_UINT32);
@@ -616,8 +626,10 @@ void render_end_frame(void) {
 
     // Skinned characters: palettes + per-pass instance lists (GPU) or CPU-skinned vertices.
     bool cpu_skin = R->r_cpu_skinning->i != 0;
-    static SkinPass skin_main, skin_shadow;
-    skin_main.batch_count = skin_shadow.batch_count = 0;
+    static SkinPass skin_main, skin_shadow, skin_vm;
+    skin_main.batch_count = skin_shadow.batch_count = skin_vm.batch_count = 0;
+    bool any_skin_vm = false;
+    for (u32 i = 0; i < R->skin_draw_count; i++) any_skin_vm |= (R->skin_draws[i].flags & MAT_VIEWMODEL) != 0;
     CpuSkin *cpu_skinned = NULL;
     ArenaMark skin_mark = arena_mark(&g_engine.frame_arena);
     if (R->skin_draw_count) {
@@ -626,8 +638,9 @@ void render_end_frame(void) {
             cpu_skin_all(f, cpu_skinned);
         } else {
             memcpy(f->bones.mapped, R->skin_bones, sizeof(mat4) * R->skin_bone_count);
-            u32 used = build_skin_pass(f, false, 0, &skin_main);
-            build_skin_pass(f, true, used, &skin_shadow);
+            u32 used = build_skin_pass(f, 0, 0, &skin_main);
+            used += build_skin_pass(f, 1, used, &skin_shadow);
+            build_skin_pass(f, 2, used, &skin_vm);
         }
     }
 
@@ -655,7 +668,7 @@ void render_end_frame(void) {
             vkCmdSetDepthBias(cmd, 1.25f, 0.0f, 1.75f);
             vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 0, 1, &f->frame_set, 0, NULL);
             draw_items(cmd, R->draws, R->draw_count, true, false, 0);
-            if (cpu_skinned) draw_cpu_skinned(cmd, f, cpu_skinned, true);
+            if (cpu_skinned) draw_cpu_skinned(cmd, f, cpu_skinned, 1);
             else if (skin_shadow.batch_count) {
                 vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_SKIN_SHADOW]);
                 draw_skin_pass(cmd, &skin_shadow);
@@ -707,7 +720,7 @@ void render_end_frame(void) {
         draw_items(cmd, R->draws, R->draw_count, false, R->r_culling->i != 0, 0);
         if (cpu_skinned || skin_main.batch_count) {
             vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 1, 1, &R->textures[R->white_tex].set, 0, NULL);
-            if (cpu_skinned) draw_cpu_skinned(cmd, f, cpu_skinned, false);
+            if (cpu_skinned) draw_cpu_skinned(cmd, f, cpu_skinned, 0);
             else {
                 vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[R->r_wireframe->i ? PIPE_SKIN_WIRE : PIPE_SKIN]);
                 draw_skin_pass(cmd, &skin_main);
@@ -731,12 +744,21 @@ void render_end_frame(void) {
             vkCmdDraw(cmd, R->text_count, 1, 0, 0);
             R->stats.draw_calls++;
         }
-        if (R->vm_draw_count) {
+        if (R->vm_draw_count || any_skin_vm) {
             VkClearAttachment clr = { VK_IMAGE_ASPECT_DEPTH_BIT, 0, { .depthStencil = { 1.0f, 0 } } };
             VkClearRect rect = { { { 0, 0 }, { R->hdr.w, R->hdr.h } }, 0, 1 };
             vkCmdClearAttachments(cmd, 1, &clr, 1, &rect);
             vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[R->r_wireframe->i ? PIPE_LIT_WIRE : PIPE_LIT]);
             draw_items(cmd, R->vm_draws, R->vm_draw_count, false, false, 2);
+            // First-person arms (body model), same depth as the viewmodel weapon.
+            if (cpu_skinned || skin_vm.batch_count) {
+                vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 1, 1, &R->textures[R->white_tex].set, 0, NULL);
+                if (cpu_skinned) draw_cpu_skinned(cmd, f, cpu_skinned, 2);
+                else {
+                    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[R->r_wireframe->i ? PIPE_SKIN_WIRE : PIPE_SKIN]);
+                    draw_skin_pass(cmd, &skin_vm);
+                }
+            }
         }
         if (R->line_count[1] && line_off[1] != (VkDeviceSize)-1) {
             vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_LINES_OVERLAY]);
@@ -880,6 +902,19 @@ bool render_world_to_screen(vec3 world, vec2 *out_px) {
     out_px->x = (nx * 0.5f + 0.5f) * (float)R->swap_extent.width;
     out_px->y = (ny * 0.5f + 0.5f) * (float)R->swap_extent.height;
     return true;
+}
+
+// A point placed in viewmodel space (drawn with the viewmodel FOV) -> the world point that
+// appears at the same pixel with the world FOV (same depth). Identity when the FOVs match.
+vec3 render_viewmodel_to_world(vec3 p) {
+    float vm_fov = R->r_vm_fov->f > 1.0f ? R->r_vm_fov->f : R->cam.fov_deg;
+    if (fabsf(vm_fov - R->cam.fov_deg) < 0.01f) return p;
+    mat4 view = mat4_fps_view(R->cam.pos, R->cam.yaw, R->cam.pitch, R->cam.roll);
+    vec3 v = mat4_mul_point(view, p);
+    float k = tanf(R->cam.fov_deg * 0.5f * DG_DEG2RAD) / tanf(vm_fov * 0.5f * DG_DEG2RAD);
+    v.x *= k;
+    v.y *= k;
+    return mat4_mul_point(mat4_inverse_rigid(view), v);
 }
 
 mat4 render_view_proj(void) { return R->view_proj; }

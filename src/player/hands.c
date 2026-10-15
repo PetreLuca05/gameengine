@@ -77,6 +77,10 @@ typedef struct HandsSystem {
     vec3 cam_pos;
     quat cam_rot;
 
+    // first-person targets for the body model
+    HandsFpTargets fp;
+    bool fp_valid, body_arms;
+
     MeshId cube;
     Cvar *debug, *upper_len, *fore_len, *bob_scale, *sway_scale, *headbob;
 } HandsSystem;
@@ -505,6 +509,36 @@ void hands_update(const HandsInput *in) {
     H->initialized = true;
     H->weapon_pos = H->chain[HAND_RIGHT].hand_pos;
     H->weapon_rot = H->chain[HAND_RIGHT].hand_rot;
+
+    // ---- 5. palm frames for the full-body model: weapon hands on the item sockets, everything
+    //         else (idle, consumables, interactions, ledges) on the solved hand frames.
+    {
+        HandsFpTargets *t = &H->fp;
+        memset(t, 0, sizeof(*t));
+        t->weapon = H->weapon;
+        t->item = H->held_item;
+        t->cam_pos = in->eye;
+        t->cam_rot = cam_rot;
+        const ItemSockets *k = H->weapon ? &H->weapon->sockets : (H->held_item ? &H->held_item->sockets : NULL);
+        Xform item = xf_make(H->weapon_pos, H->weapon_rot);
+        bool melee = H->weapon && H->weapon->kind == WPN_MELEE;
+        for (int h = 0; h < 2; h++) {
+            Xform hand = xf_make(H->chain[h].hand_pos, H->chain[h].hand_rot);
+            t->palm[h] = hand;
+            t->grip[h] = H->chain[h].grip;
+            Xform sock;
+            bool use = false;
+            if (k && h == HAND_RIGHT && (H->weapon || H->held_item)) { sock = xf_mul(item, k->grip_r); use = true; }
+            if (k && h == HAND_LEFT && k->has_left && H->weapon && !sim->wpn.reloading && (weapon_two_handed || melee)) { sock = xf_mul(item, k->grip_l); use = true; }
+            if (use) {
+                float ov = smoothstepf(0, 1, H->ov_w[h]);
+                t->palm[h].t = v3_lerp(sock.t, hand.t, ov);
+                t->palm[h].r = quat_nlerp(sock.r, hand.r, ov);
+                t->on_weapon[h] = ov < 0.5f;
+            }
+        }
+        H->fp_valid = true;
+    }
     (void)weapon_two_handed;
 
     if (H->debug->i) {
@@ -607,14 +641,25 @@ static void draw_held_item(const ItemDef *it, vec3 pos, quat rot, bool viewmodel
 
 bool hands_muzzle(vec3 *pos, vec3 *fwd) {
     if (!H || !H->initialized || !H->weapon || H->weapon->kind == WPN_MELEE) return false;
-    if (pos) *pos = v3_add(H->weapon_pos, quat_rotate(H->weapon_rot, H->weapon->muzzle_offset));
+    // The viewmodel may use its own FOV: return where the barrel tip appears in the world.
+    if (pos) *pos = render_viewmodel_to_world(v3_add(H->weapon_pos, quat_rotate(H->weapon_rot, H->weapon->muzzle_offset)));
     if (fwd) *fwd = quat_rotate(H->weapon_rot, v3(0, 0, -1));
     return true;
 }
 
+bool hands_fp_targets(HandsFpTargets *out) {
+    if (!H || !H->fp_valid) return false;
+    *out = H->fp;
+    return true;
+}
+
+void hands_set_body_arms(bool on) { if (H) H->body_arms = on; }
+
 void hands_render(void) {
     if (!H || !H->initialized) return;
-    for (int h = 0; h < 2; h++) draw_arm(&H->chain[h], h, H->cam_rot, true);
+    if (!H->body_arms)
+        for (int h = 0; h < 2; h++) draw_arm(&H->chain[h], h, H->cam_rot, true);
+    H->body_arms = false;
     if (H->weapon) draw_weapon(H->weapon, H->weapon_pos, H->weapon_rot, true);
     else if (H->held_item && H->held_item->kind != ITEM_WEAPON) draw_held_item(H->held_item, H->weapon_pos, H->weapon_rot, true);
 }
