@@ -2,6 +2,7 @@
 // screen-space lighting, lit scene, fog, transparency, viewmodel, post stack, final + UI) -> present.
 #include "vk_internal.h"
 #include "post/post.h"
+#include "sky/sky.h"
 #include "graph/fg.h"
 #include "core/platform.h"
 #include <SDL3/SDL.h>
@@ -97,6 +98,34 @@ static void create_frames(void) {
     }
 }
 
+// Frame sets: the sky module's persistent environment / SH / cloud shadow (kept in GENERAL).
+static void write_sky_bindings(void) {
+    for (int i = 0; i < FRAMES_IN_FLIGHT; i++) {
+        VkDescriptorSet sets[2] = { R->frames[i].frame_set, R->frames[i].frame_set_pip };
+        for (int s = 0; s < 2; s++) {
+            if (!sets[s]) continue;
+            VkDescriptorImageInfo env = { R->sampler_clamp, sky_env_view(), VK_IMAGE_LAYOUT_GENERAL };
+            VkDescriptorImageInfo cs = env;
+            cs.imageView = sky_cloud_shadow_view();
+            VkDescriptorBufferInfo sh = { sky_sh_buffer(), 0, sky_sh_size() };
+            VkWriteDescriptorSet w[3];
+            for (int k = 0; k < 3; k++) {
+                w[k] = (VkWriteDescriptorSet){ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+                w[k].dstSet = sets[s];
+                w[k].dstBinding = (u32)(5 + k);
+                w[k].descriptorCount = 1;
+            }
+            w[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            w[0].pImageInfo = &env;
+            w[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            w[1].pBufferInfo = &sh;
+            w[2].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            w[2].pImageInfo = &cs;
+            vkUpdateDescriptorSets(R->device, 3, w, 0, NULL);
+        }
+    }
+}
+
 static void destroy_frames(void) {
     for (int i = 0; i < FRAMES_IN_FLIGHT; i++) {
         FrameResources *f = &R->frames[i];
@@ -128,6 +157,8 @@ bool render_init(SDL_Window *window) {
     if (!vkx_init()) log_warn("render: VFX pipelines unavailable (particles disabled)");
     fg_init();
     if (!post_init()) { log_error("render: post-processing stack unavailable"); return false; }
+    sky_init();
+    write_sky_bindings();
 
     R->draws = (DrawItem *)malloc(sizeof(DrawItem) * MAX_DRAWS);
     R->vm_draws = (DrawItem *)malloc(sizeof(DrawItem) * MAX_VM_DRAWS);
@@ -176,6 +207,7 @@ void render_shutdown(void) {
     if (!R) return;
     if (R->device) {
         vkDeviceWaitIdle(R->device);
+        sky_shutdown();
         post_shutdown();
         fg_shutdown();
         vkx_shutdown();
@@ -419,6 +451,8 @@ static VkDeviceSize dyn_push(FrameResources *f, const void *data, VkDeviceSize s
 
 static bool g_froxel_fog_draws;   // transparent pass: blended lit draws apply the froxel fog
 
+static u32 g_shadow_cascade;   // shadow pass: the cascade being drawn (push constants flags.w)
+
 static void draw_items(VkCommandBuffer cmd, DrawItem *items, u32 count, bool shadow_pass, bool cull, int alpha_mode) {
     // alpha_mode: 0 = opaque only, 1 = blended only, 2 = all
     if (!count) return;
@@ -469,7 +503,7 @@ static void draw_items(VkCommandBuffer cmd, DrawItem *items, u32 count, bool sha
         pc.flags[0] = d->mat.flags;
         pc.flags[1] = shadow_pass ? 0 : d->prev_slot;   // previous model (velocity), 0 = static
         pc.flags[2] = g_froxel_fog_draws ? 1u : 0u;      // blended draws after the fog pass: froxel fog
-        pc.flags[3] = 0;
+        pc.flags[3] = shadow_pass ? g_shadow_cascade : 0;
         vkCmdPushConstants(cmd, R->layout_lit, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushLit), &pc);
         vkCmdDrawIndexed(cmd, m->index_count, 1, 0, 0, 0);
         R->stats.draw_calls++;
@@ -607,7 +641,8 @@ static void draw_cpu_skinned(VkCommandBuffer cmd, FrameResources *f, const CpuSk
         pc.color = d->color;
         pc.params = v4(d->roughness, d->metallic, d->emissive, 1.0f);
         pc.flags[0] = d->flags & ~(u32)MAT_SHADOW_ONLY;
-        pc.flags[1] = pc.flags[2] = pc.flags[3] = 0;
+        pc.flags[1] = pc.flags[2] = 0;
+        pc.flags[3] = pass == 1 ? g_shadow_cascade : 0;
         vkCmdPushConstants(cmd, R->layout_lit, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushLit), &pc);
         vkCmdDrawIndexed(cmd, m->index_count, 1, 0, 0, 0);
         R->stats.draw_calls++;
@@ -708,25 +743,46 @@ static void compute_matrices(FrameData *fd) {
     R->vm_view_proj_nj = mat4_mul(R->vm_proj, R->view);
     R->prev_cam_pos = c->pos;
 
-    // Directional shadow: ortho box around shadow_center, snapped to texels to avoid shimmer.
+    // Directional shadow: 3 cascades in a 2 x 2 atlas of the shadow map. Each cascade is a fixed
+    // size ortho box (a sphere-sized square: rotating the camera never changes it) around the
+    // camera, nudged forward, snapped to its own texels: stable under camera motion and as the sun
+    // moves (the game also steps the light direction, game_daynight.c).
     RenderEnvironment *e = &R->env;
     float ext = e->shadow_extent > 1.0f ? e->shadow_extent : 40.0f;
     vec3 L = v3_norm(e->sun_dir);
     vec3 up = fabsf(L.y) > 0.99f ? v3(0, 0, 1) : v3(0, 1, 0);
     mat4 lview = mat4_look_at(v3(0, 0, 0), v3_neg(L), up);
-    vec3 cl = mat4_mul_point(lview, e->shadow_center);
-    float texel = (2.0f * ext) / (float)R->shadow_size;
-    cl.x = floorf(cl.x / texel) * texel;
-    cl.y = floorf(cl.y / texel) * texel;
-    float depth_range = ext * 4.0f;
-    mat4 lproj = mat4_ortho(cl.x - ext, cl.x + ext, cl.y - ext, cl.y + ext, -cl.z - depth_range, -cl.z + depth_range);
-    R->shadow_vp = mat4_mul(lproj, lview);
+    float radii[3] = { 12.0f, fmaxf(ext * 1.1f, 36.0f), fmaxf(ext * 3.5f, 110.0f) };
+    vec3 fwd = v3_norm(v3(-sinf(c->yaw), 0, -cosf(c->yaw)));
+    u32 tile = R->shadow_size / 2;
+    for (int k = 0; k < 3; k++) {
+        float r = radii[k];
+        vec3 center = v3_madd(c->pos, fwd, r * 0.35f);
+        if (k == 2) center = v3_lerp(center, e->shadow_center, 0.5f);
+        vec3 cl = mat4_mul_point(lview, center);
+        float texel = (2.0f * r) / (float)tile;
+        cl.x = floorf(cl.x / texel) * texel;
+        cl.y = floorf(cl.y / texel) * texel;
+        float depth_range = fmaxf(r * 4.0f, 120.0f);
+        mat4 lproj = mat4_ortho(cl.x - r, cl.x + r, cl.y - r, cl.y + r, -cl.z - depth_range, -cl.z + depth_range);
+        // NDC -> the cascade's atlas tile (x right, y down in the atlas).
+        mat4 t = mat4_identity();
+        t.m[0] = 0.5f;
+        t.m[5] = 0.5f;
+        t.m[12] = (k & 1) ? 0.5f : -0.5f;
+        t.m[13] = (k >> 1) ? 0.5f : -0.5f;
+        R->shadow_vps[k] = mat4_mul(t, mat4_mul(lproj, lview));
+    }
+    R->shadow_splits = v4(radii[0], radii[1], radii[2], 3.0f);
+    R->shadow_vp = R->shadow_vps[2];
 
     fd->view_proj = mat4_mul(R->proj_j, R->view);
     fd->view = R->view;
     fd->proj = R->proj_j;
     fd->vm_proj = R->vm_proj_j;
     fd->shadow_vp = R->shadow_vp;
+    memcpy(fd->shadow_vps, R->shadow_vps, sizeof(fd->shadow_vps));
+    fd->shadow_splits = R->shadow_splits;
     fd->view_proj_nj = R->view_proj_nj;
     fd->prev_view_proj_nj = R->prev_view_proj_nj;
     fd->vm_view_proj_nj = R->vm_view_proj_nj;
@@ -744,8 +800,21 @@ static void compute_matrices(FrameData *fd) {
     bool vol = post_settings()->volumetrics > 0 && fg_pass_enabled("vol_inject");
     fd->fog = v4(e->fog_color.x, e->fog_color.y, e->fog_color.z, vol ? 0.0f : e->fog_density);
     int pcf = R->r_shadow_quality->i >= 3 ? 2 : 1;
+    if (e->atmosphere && e->cloud_cover > 0.65f) pcf++;   // weather: overcast skies soften the shadows
     fd->params = v4(R->r_grid->i ? 1.0f : 0.0f, 1.0f / (float)R->shadow_size, (float)pcf, 0.0f);
     fd->screen = v4((float)R->hdr.w, (float)R->hdr.h, 1.0f / (float)R->hdr.w, 1.0f / (float)R->hdr.h);
+    {
+        // Time-of-day sky: fill light, environment / SH ambient, cloud shadow (lit shaders).
+        bool atmo = sky_active();
+        vec3 fd_dir = v3_len2(e->fill_dir) > 0 ? v3_norm(e->fill_dir) : v3(0, 1, 0);
+        fd->fill_dir = v4(fd_dir.x, fd_dir.y, fd_dir.z, atmo ? e->fill_intensity : 0.0f);
+        fd->fill_color = v4(e->fill_color.x, e->fill_color.y, e->fill_color.z, 0.0f);
+        fd->sky_flags = v4(atmo ? 1.0f : 0.0f, e->ambient_scale > 0 ? e->ambient_scale : 1.0f, (float)(sky_env_mips() - 1), atmo && e->cloud_cover > 0.001f ? 1.0f : 0.0f);
+        vec2 co;
+        float csz;
+        sky_cloud_shadow_region(&co, &csz);
+        fd->cshadow = v4(co.x, co.y, 1.0f / fmaxf(csz, 1.0f), 0.0f);
+    }
     memcpy(fd->lights, R->lights, sizeof(GpuPointLight) * R->light_count);
 }
 
@@ -1179,6 +1248,7 @@ static void build_frame_graph(FrameData *fd) {
     in.ads = R->fx_ads;
     in.ads_focus_dist = R->fx_ads_focus;
     post_begin_frame(&in);
+    sky_build();   // atmosphere LUTs, sky view, aerial perspective, cloud shadow, environment refilter
 
     int p = fg_pass("prepass", exec_prepass, NULL);
     fg_write(p, F.depth, FG_DEPTH);
@@ -1350,16 +1420,30 @@ void render_end_frame(void) {
         ri.pDepthAttachment = &da;
         vkCmdBeginRendering(cmd, &ri);
         if (R->r_shadow_quality->i > 0) {
-            set_viewport(cmd, R->shadow.w, R->shadow.h);
-            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_SHADOW]);
-            vkCmdSetDepthBias(cmd, 1.25f, 0.0f, 1.75f);
-            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 0, 1, &f->frame_set, 0, NULL);
-            draw_items(cmd, R->draws, R->draw_count, true, false, 0);
-            if (F.cpu_skinned) draw_cpu_skinned(cmd, f, F.cpu_skinned, 1);
-            else if (skin_shadow.batch_count) {
-                vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_SKIN_SHADOW]);
-                draw_skin_pass(cmd, &skin_shadow);
+            // One atlas tile per cascade (the cascade index rides in the push constants). The
+            // cascade matrices already map into their tile: full viewport, scissored to the tile.
+            u32 tile = R->shadow.w / 2;
+            for (int k = 0; k < 3; k++) {
+                VkViewport vp = { 0.0f, 0.0f, (float)R->shadow.w, (float)R->shadow.h, 0.0f, 1.0f };
+                VkRect2D sc = { { (int)((k & 1) * tile), (int)((k >> 1) * tile) }, { tile, tile } };
+                vkCmdSetViewport(cmd, 0, 1, &vp);
+                vkCmdSetScissor(cmd, 0, 1, &sc);
+                vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_SHADOW]);
+                vkCmdSetDepthBias(cmd, 1.25f, 0.0f, 1.75f);
+                vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 0, 1, &f->frame_set, 0, NULL);
+                g_shadow_cascade = (u32)k;
+                draw_items(cmd, R->draws, R->draw_count, true, false, 0);
+                if (F.cpu_skinned) draw_cpu_skinned(cmd, f, F.cpu_skinned, 1);
+                else if (skin_shadow.batch_count) {
+                    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_SKIN_SHADOW]);
+                    PushLit pc;
+                    memset(&pc, 0, sizeof(pc));
+                    pc.flags[3] = (u32)k;
+                    vkCmdPushConstants(cmd, R->layout_lit, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushLit), &pc);
+                    draw_skin_pass(cmd, &skin_shadow);
+                }
             }
+            g_shadow_cascade = 0;
         }
         vkCmdEndRendering(cmd);
     }
@@ -1478,6 +1562,9 @@ void render_camera_cut(void) { R->camera_cut = true; }
 void render_set_sight(const RenderSight *s) { R->sight = *s; }
 const RenderSight *render_sight(void) { return &R->sight; }
 float render_scope_pip_fov(void) { return R->pip_fov; }
+vec3 render_sky_irradiance(vec3 dir) { return sky_irradiance_cpu(dir); }
+float render_sky_luminance(float *latest) { return sky_sh_luminance(latest); }
+u32 render_sky_refilters(void) { return sky_refilter_count(); }
 bool render_load_lut(const char *cube_path) {
     vkDeviceWaitIdle(R->device);   // the LUT image may be in flight
     return post_lut_load_cube(cube_path && cube_path[0] ? cube_path : NULL, 0);

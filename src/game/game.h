@@ -122,6 +122,15 @@ void game_sv_handle_rpc(int slot, int type, int a, int b, int c);
 // Host: weapon attachment change (validated; RPC_ATTACH / the attach command / the weapon bench).
 bool game_sv_attach(World *w, int slot, int inv_slot, int aslot, int att);
 
+// Time of day (game_daynight.c, docs/DAYNIGHT.md): gameplay queries on the replicated world time.
+typedef void (*TodEventFn)(u32 event, float hours, void *user);   // event: TodEvent bit
+float world_time_hours(World *w);                // 0..24
+int world_day_number(World *w);
+bool world_is_night(World *w);                   // sun below -6 deg (civil twilight over)
+float world_sun_elevation_deg(World *w);
+float world_light_level(World *w, vec3 pos);     // 0..1: sun / moon (visible from pos) + sky + lamps
+void daynight_add_listener(TodEventFn fn, void *user);   // sunrise / sunset / midnight / noon on every machine
+
 enum RpcType { RPC_INV_MOVE = 1, RPC_INV_DROP, RPC_CONTAINER_TAKE, RPC_CONTAINER_PUT, RPC_CONTAINER_CLOSE, RPC_INV_USE, RPC_ATTACH };
 
 #endif

@@ -88,23 +88,73 @@ vec3 apply_moa_grid(vec3 base, vec3 p, vec3 n, float s) {
     return col;
 }
 
-float shadow_factor(vec3 p, vec3 n) {
-    if (frame.sun_color.w < 0.5) return 1.0;
-    vec3 offset_p = p + n * 0.04;
-    vec4 sp = frame.shadow_vp * vec4(offset_p, 1.0);
+// Time-of-day sky (src/render/sky): irradiance from the SH9 of the environment, the
+// environment itself (octahedral, mips by roughness), the cloud shadow on the ground plane.
+vec3 sky_irradiance(vec3 d) {
+    const float A0 = 3.14159265, A1 = 2.0943951, A2 = 0.785398163;
+    vec3 e = sky_sh.sh[0].rgb * 0.282095 * A0;
+    e += (sky_sh.sh[1].rgb * d.y + sky_sh.sh[2].rgb * d.z + sky_sh.sh[3].rgb * d.x) * 0.488603 * A1;
+    e += (sky_sh.sh[4].rgb * 1.092548 * d.x * d.y + sky_sh.sh[5].rgb * 1.092548 * d.y * d.z + sky_sh.sh[6].rgb * 0.315392 * (3.0 * d.z * d.z - 1.0) +
+          sky_sh.sh[7].rgb * 1.092548 * d.x * d.z + sky_sh.sh[8].rgb * 0.546274 * (d.x * d.x - d.y * d.y)) * A2;
+    return max(e, vec3(0.0));
+}
+vec2 sky_env_uv(vec3 n) {
+    n /= (abs(n.x) + abs(n.y) + abs(n.z));
+    vec2 e = n.y >= 0.0 ? n.xz : (1.0 - abs(n.zx)) * vec2(n.x >= 0.0 ? 1.0 : -1.0, n.z >= 0.0 ? 1.0 : -1.0);
+    return e * 0.5 + 0.5;
+}
+float cloud_shadow_at(vec3 p) {
+    if (frame.sky_flags.w < 0.5) return 1.0;
+    vec2 uv = (p.xz - frame.cshadow.xy) * frame.cshadow.z;
+    if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return 1.0;
+    return textureLod(sky_cloud_shadow, uv, 0.0).r;
+}
+
+// One cascade of the 2 x 2 shadow atlas: -1 when p is outside its tile.
+float shadow_cascade(int c, vec3 p, vec3 n) {
+    float k = c == 0 ? 1.0 : (c == 1 ? 2.5 : 7.0);   // texel size relative to cascade 0
+    vec3 offset_p = p + n * 0.03 * k;
+    vec4 sp = frame.shadow_vps[c] * vec4(offset_p, 1.0);
     sp.xyz /= sp.w;
     vec2 uv = sp.xy * 0.5 + 0.5;
-    if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0 || sp.z > 1.0) return 1.0;
+    vec2 tile = vec2(c & 1, c >> 1) * 0.5;
+    vec2 local = (uv - tile) * 2.0;
+    float edge = 2.0 * frame.params.y * (frame.params.z + 1.0);
+    if (any(lessThan(local, vec2(edge))) || any(greaterThan(local, vec2(1.0 - edge))) || sp.z > 1.0 || sp.z < 0.0) return -1.0;
     float texel = frame.params.y;
     int r = int(frame.params.z);
     float sum = 0.0;
     float count = 0.0;
     for (int y = -r; y <= r; y++)
         for (int x = -r; x <= r; x++) {
-            sum += texture(shadow_map, vec3(uv + vec2(x, y) * texel, sp.z - 0.0015));
+            sum += texture(shadow_map, vec3(uv + vec2(x, y) * texel, sp.z - 0.0012 * k));
             count += 1.0;
         }
     return sum / count;
+}
+
+float shadow_factor(vec3 p, vec3 n) {
+    if (frame.sun_color.w < 0.5) return 1.0;
+    int count = int(frame.shadow_splits.w);
+    if (count <= 1) {
+        float s = shadow_cascade(0, p, n);
+        return s < 0.0 ? 1.0 : s;
+    }
+    // Cascade by distance from the camera; the last 15 % of a cascade blends into the next one.
+    float d = length(p - frame.camera_pos.xyz);
+    for (int c = 0; c < 3; c++) {
+        float radius = frame.shadow_splits[c];
+        if (d > radius && c < 2) continue;
+        float s = shadow_cascade(c, p, n);
+        if (s < 0.0) continue;
+        float blend = c < 2 ? smoothstep(radius * 0.85, radius, d) : 0.0;
+        if (blend > 0.0) {
+            float s2 = shadow_cascade(c + 1, p, n);
+            if (s2 >= 0.0) s = mix(s, s2, blend);
+        }
+        return s;
+    }
+    return 1.0;
 }
 
 float d_ggx(float ndh, float a) {
@@ -180,6 +230,8 @@ void main() {
         // hemispheric ambient (indirect diffuse): AO only darkens indirect light
         float hemi = n.y * 0.5 + 0.5;
         vec3 ambient = mix(frame.ground_ambient.rgb, frame.sky_ambient.rgb, hemi) * frame.sky_ambient.w;
+        bool sky_env_on = frame.sky_flags.x > 0.5;
+        if (sky_env_on) ambient = sky_irradiance(n) / PI * frame.sky_flags.y;   // time-of-day sky (Lambert: E / pi)
         if (!vm && frame.post_flags.w > 0.5) ambient += texture(post_ssgi, suv).rgb * frame.post_params.y;
         color = ambient * albedo * (1.0 - metal) * ao;
         // indirect specular: sky / ground by the reflection vector, replaced by SSR where it hit
@@ -188,6 +240,7 @@ void main() {
         vec3 f0 = mix(vec3(0.04), albedo, metal);
         vec3 fr = f0 + (max(vec3(1.0 - rough), f0) - f0) * pow(1.0 - ndv0, 5.0);
         vec3 env = mix(frame.ground_ambient.rgb, frame.sky_ambient.rgb, rv.y * 0.5 + 0.5) * frame.sky_ambient.w;
+        if (sky_env_on) env = textureLod(sky_env, sky_env_uv(rv), rough * frame.sky_flags.z).rgb * frame.sky_flags.y;
         vec3 spec_ind = env;
         if (!vm && frame.post_flags.z > 0.5) {
             vec4 ssr = texture(post_ssr, suv);
@@ -197,8 +250,10 @@ void main() {
         color += spec_ind * fr * frame.post_params.w * spec_occ;
         // sun
         vec3 l = normalize(frame.sun_dir.xyz);
-        float sh = shadow_factor(v_world, n) * contact;
+        float sh = shadow_factor(v_world, n) * contact * cloud_shadow_at(v_world);
         color += brdf(n, v, l, albedo, rough, metal) * frame.sun_color.rgb * frame.sun_dir.w * sh;
+        // Fill: the other celestial light (the moon by day / the sun at twilight), unshadowed.
+        if (frame.fill_dir.w > 0.0) color += brdf(n, v, normalize(frame.fill_dir.xyz), albedo, rough, metal) * frame.fill_color.rgb * frame.fill_dir.w;
         // point lights
         int count = int(frame.ground_ambient.w);
         for (int i = 0; i < count; i++) {

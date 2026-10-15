@@ -35,6 +35,18 @@ bool sights_test_running(void);
 bool sights_dof_managed(void);
 void sights_draw(void);
 
+// game_daynight.c: day / night cycle
+struct PostSettings;
+void daynight_register(void);
+void daynight_level_loaded(World *w);
+void daynight_host_tick(World *w);
+void daynight_handle_event(const GameEvent *ev);
+bool daynight_active(World *w);
+void daynight_environment(World *w, const RenderCamera *cam, RenderEnvironment *env);
+void daynight_post(struct PostSettings *s);
+void daynight_draw(void);
+bool daynight_editor_open(void);
+
 // game_post.c: post-processing settings (presets, post volumes, gameplay feedback, photo mode)
 typedef struct PostFrameInfo {
     vec3 cam_pos;

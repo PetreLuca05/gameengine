@@ -391,6 +391,14 @@ static void spawn_entity(World *w, const cJSON *e) {
         id = spawn_switch(w, pos, yaw, (u32)jf(e, "group", 1));
     } else if (!strcmp(type, "light")) {
         id = spawn_light(w, pos, jv3(e, "color", v3(1, 0.95f, 0.85f)), jf(e, "radius", 12), jf(e, "intensity", 20), (u32)jf(e, "group", 0), jb(e, "on", true));
+        if (id && jb(e, "schedule", false)) {
+            // light_schedule: on at dusk / off at dawn (assets/world/daynight.json), off until then.
+            LightComp *lc = &w->light[ENT_INDEX(id)];
+            lc->scheduled = true;
+            lc->flicker = jf(e, "flicker", 0.0f);
+            lc->sched_state = false;
+            w->flags[ENT_INDEX(id)] &= ~(u32)EF_ON;
+        }
     } else if (!strcmp(type, "container")) {
         id = spawn_container(w, pos, yaw);
         const cJSON *loot = cJSON_GetObjectItemCaseSensitive(e, "loot");

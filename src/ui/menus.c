@@ -143,7 +143,7 @@ static void update_mouse_mode(void) {
 
 bool menus_wants_mouse(void) {
     Game *g = game();
-    return (M && M->page != PAGE_NONE) || (g && (g->inventory_open || g->container_open || g->bench_open)) || vfx_editor_open() || holdpoint_editor_open();
+    return (M && M->page != PAGE_NONE) || (g && (g->inventory_open || g->container_open || g->bench_open)) || vfx_editor_open() || holdpoint_editor_open() || daynight_editor_open();
 }
 
 void menus_close_all(void) {

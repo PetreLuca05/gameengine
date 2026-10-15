@@ -23,7 +23,7 @@ typedef struct PipeDesc {
 } PipeDesc;
 
 bool vkp_create_layouts(void) {
-    VkDescriptorSetLayoutBinding fb[5] = { 0 };
+    VkDescriptorSetLayoutBinding fb[8] = { 0 };
     fb[0].binding = 0;
     fb[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     fb[0].descriptorCount = 1;
@@ -38,8 +38,15 @@ bool vkp_create_layouts(void) {
         fb[i].descriptorCount = 1;
         fb[i].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
     }
+    // 5 environment (octahedral, sky), 6 sky SH irradiance, 7 cloud shadow map (src/render/sky).
+    for (int i = 5; i < 8; i++) {
+        fb[i].binding = (u32)i;
+        fb[i].descriptorType = i == 6 ? VK_DESCRIPTOR_TYPE_STORAGE_BUFFER : VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        fb[i].descriptorCount = 1;
+        fb[i].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+    }
     VkDescriptorSetLayoutCreateInfo li = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
-    li.bindingCount = 5;
+    li.bindingCount = 8;
     li.pBindings = fb;
     VK_CHECK(vkCreateDescriptorSetLayout(R->device, &li, NULL, &R->frame_layout));
 
@@ -55,7 +62,7 @@ bool vkp_create_layouts(void) {
     VkDescriptorPoolSize sizes[3] = {
         { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 16 },
         { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, MAX_TEXTURES + 64 },
-        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 16 },
+        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 64 },
     };
     VkDescriptorPoolCreateInfo pi = { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
     pi.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;

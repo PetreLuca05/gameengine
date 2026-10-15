@@ -64,6 +64,7 @@ static void capture_one(World *w, int i, NetEnt *e) {
     const AnimNetState *as = chars_net_state(w, i);
     if (as) { e->anim_state = *as; e->has_anim = true; }
     if (w->type[i] == ET_SWITCH) e->extra.x = (float)w->lever[i].light_group;
+    if (w->type[i] == ET_LIGHT) e->extra = v3(w->light[i].flicker, w->light[i].scheduled ? 1.0f : 0.0f, 0.0f);
 }
 
 void repl_capture(World *w, vec3 center, float radius, SnapFrame *out) {
@@ -383,6 +384,8 @@ void repl_apply(World *w, const SnapFrame *f, int local_slot, InterpBuffer *inte
             w->light[i].radius = e->light_radius;
             w->light[i].intensity = e->light_intensity;
             w->light[i].group = e->light_group;
+            w->light[i].flicker = e->extra.x;
+            w->light[i].scheduled = e->extra.y > 0.5f;
         }
         if (e->type == ET_CONTAINER) w->cont[i].opened = (e->flags & EF_OPEN) != 0;
         if (w->comps[i] & C_INTERACT) w->inter[i].enabled = !(e->flags & EF_HIDDEN);

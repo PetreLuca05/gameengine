@@ -95,6 +95,28 @@ typedef struct RenderEnvironment {
     bool sky;
     vec3 sky_zenith, sky_horizon;
     float clouds;       // cloud coverage 0..1
+    // Physically based sky + time of day (game_daynight.c, src/render/sky): replaces the gradient
+    // sky above and the hemispheric ambient (environment map + SH irradiance) when set. The key
+    // light (sun_dir / sun_color / sun_intensity: shadowed) is the sun by day, the moon at night;
+    // the other one is the unshadowed fill light.
+    bool atmosphere;
+    vec3 sun_true_dir, moon_dir;        // towards the bodies
+    float sun_illuminance;              // above the atmosphere (cloud loss applied)
+    float moon_illuminance;             // moonlight above the atmosphere (phase + cloud loss applied)
+    float moon_full_illuminance;        // full moon (disc brightness)
+    float sun_size, moon_size;          // angular radius multipliers
+    vec3 cel_x, cel_y, cel_z;           // world -> celestial rows (stars, milky way)
+    float star_brightness, milky_way, night_floor;
+    float cloud_cover, cloud_altitude, cloud_scale, cloud_shadow_strength;
+    vec2 cloud_offset;                  // wind drift (m)
+    float ambient_scale;                // environment (SH + specular) multiplier
+    float aerial_scale;                 // world distance multiplier of the aerial perspective
+    float aerial_max;                   // m covered by the aerial perspective froxels
+    float mie_scale;                    // aerosol density (haze / weather)
+    vec3 fill_dir, fill_color;          // unshadowed secondary directional light
+    float fill_intensity;
+    bool moon_key;                      // the key light is the moon
+    int sky_debug;                      // sky_debug view (1 transmittance .. 6 aerial perspective)
 } RenderEnvironment;
 
 typedef struct RenderStats {
@@ -232,6 +254,11 @@ typedef struct RenderSight {
 void render_set_sight(const RenderSight *s);   // every frame (kind NONE = no sight)
 const RenderSight *render_sight(void);         // what was set this frame
 float render_scope_pip_fov(void);              // last PiP camera FOV (deg), 0 = none
+// Time-of-day sky diagnostics (src/render/sky): SH irradiance in use (CPU copy, a frame late), the
+// luminance of its DC term and of the latest refilter, refilter cycles completed.
+vec3 render_sky_irradiance(vec3 dir);
+float render_sky_luminance(float *latest);
+u32 render_sky_refilters(void);
 void render_camera_cut(void);                                 // teleport / respawn: reset temporal history
 bool render_capture_hdr(const char *exr_path);                // next frame: linear HDR EXR
 bool render_load_lut(const char *cube_path);                  // grading LUT (.cube); NULL / "" = neutral

@@ -115,6 +115,12 @@ typedef struct FrameData {
     mat4 view_proj_nj, prev_view_proj_nj, vm_view_proj_nj, prev_vm_view_proj_nj;
     vec4 jitter, post_flags, post_params, post_fog;   // post_fog: x froxel fog on, y max distance (m)
     vec4 camera_pos, sun_dir, sun_color, sky_ambient, ground_ambient, fog, params, screen;
+    vec4 fill_dir;        // xyz towards the fill (unshadowed) directional light, w intensity
+    vec4 fill_color;      // rgb
+    vec4 sky_flags;       // x environment + SH valid, y ambient scale, z environment mips, w cloud shadow valid
+    vec4 cshadow;         // xy cloud shadow origin (world xz), z 1 / size
+    mat4 shadow_vps[3];   // cascaded shadow maps: world -> atlas tile (2 x 2 atlas, tile 3 unused)
+    vec4 shadow_splits;   // x, y, z: cascade radii (m), w: cascade count
     GpuPointLight lights[MAX_POINT_LIGHTS];
 } FrameData;
 
@@ -216,7 +222,9 @@ typedef struct Renderer {
 
     RenderCamera cam;
     RenderEnvironment env;
-    mat4 view, proj, view_proj, vm_proj, shadow_vp;
+    mat4 view, proj, view_proj, vm_proj, shadow_vp;   // shadow_vp: the widest cascade (volumetrics, particles, decals)
+    mat4 shadow_vps[3];
+    vec4 shadow_splits;
     // temporal state (TAA / motion blur / velocity)
     mat4 proj_j, vm_proj_j;                     // jittered projections (this frame)
     mat4 view_proj_nj, prev_view_proj_nj, vm_view_proj_nj, prev_vm_view_proj_nj;

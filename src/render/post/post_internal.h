@@ -99,6 +99,7 @@ VkPipeline post_graphics_pipe(const char *frag, VkFormat color, int blend);
 // Descriptor push helpers.
 void pb_tex(PostBind *b, u32 binding, VkImageView view, VkSampler s);
 void pb_tex_fg(PostBind *b, u32 binding, FgRes r, VkSampler s);   // falls back to white when r is invalid
+void pb_tex_general(PostBind *b, u32 binding, VkImageView view, VkSampler s);   // persistent image kept in GENERAL layout (sky)
 void pb_tex_mip(PostBind *b, u32 binding, FgRes r, u32 mip, VkSampler s);   // GENERAL layout (mip chains)
 void pb_img(PostBind *b, u32 binding, VkImageView view);
 void pb_img_fg(PostBind *b, u32 binding, FgRes r);

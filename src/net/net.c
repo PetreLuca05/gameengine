@@ -342,6 +342,12 @@ void net_host_after_tick(World *w) {
         w_bytes(&wr, &p->sim, sizeof(PlayerSim));
         w_f32(&wr, p->hold_progress);
         w_u32(&wr, p->open_container);
+        {
+            // World time (every snapshot: 20 bytes, late joiners are in sync at once).
+            u8 tw[20];
+            tod_pack(&w->tod, tw);
+            w_bytes(&wr, tw, sizeof(tw));
+        }
         repl_write_delta(&wr, base, cur);
         N->snap_bytes = N->snap_bytes * 0.9f + (float)wr.len * 0.1f;
         send_msg(c->peer, CH_UNRELIABLE, &wr);
@@ -371,7 +377,10 @@ static void client_handle_snapshot(Reader *r) {
     r_bytes(r, &sim, sizeof(sim));
     float hold = r_f32(r);
     u32 open_container = r_u32(r);
+    u8 tw[20];
+    r_bytes(r, tw, sizeof(tw));
     if (tick <= N->latest_snap) return; // old / duplicate (unreliable reordering)
+    if (!r->overflow) tod_unpack(&w->tod, tw);
     // Application-level stats: RTT via acked command, loss via snapshot tick gaps.
     {
         double sent = N->cmd_send_time[ack_seq % 128];

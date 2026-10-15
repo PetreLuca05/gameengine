@@ -510,6 +510,7 @@ void game_post_frame(const PostFrameInfo *fi) {
     }
     PostSettings s;
     build_settings(&s, fi);
+    daynight_post(&s);
     apply_feedback(&s, fi, dt);
     apply_photo(&s);
     // With ADS DoF on (game_sights.c), aiming switches the DoF exactly when the aim completes;

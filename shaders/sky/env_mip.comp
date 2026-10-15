@@ -1,0 +1,22 @@
+#version 450
+// Environment mip chain (rough reflections): a small tent from the previous level.
+// pc.u0.x = source level; the destination level is bound at 8.
+#extension GL_GOOGLE_include_directive : require
+#include "sky_common.glsl"
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 4) uniform sampler2D src_env;
+layout(set = 0, binding = 8, rgba16f) uniform writeonly image2D dst;
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 sz = imageSize(dst);
+    if (p.x >= sz.x || p.y >= sz.y) return;
+    float lod = float(pc.u0.x);
+    vec2 texel = 1.0 / vec2(sz);
+    vec2 uv = (vec2(p) + 0.5) * texel;
+    vec3 c = textureLod(src_env, uv, lod).rgb * 0.4;
+    c += textureLod(src_env, uv + vec2(texel.x, 0.0) * 0.75, lod).rgb * 0.15;
+    c += textureLod(src_env, uv - vec2(texel.x, 0.0) * 0.75, lod).rgb * 0.15;
+    c += textureLod(src_env, uv + vec2(0.0, texel.y) * 0.75, lod).rgb * 0.15;
+    c += textureLod(src_env, uv - vec2(0.0, texel.y) * 0.75, lod).rgb * 0.15;
+    imageStore(dst, p, vec4(c, 1.0));
+}

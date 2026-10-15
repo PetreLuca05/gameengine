@@ -271,6 +271,7 @@ void game_sim_player(World *w, int slot, const UserCmd *cmd, float dt, bool firs
 
 static void host_tick(World *w, const UserCmd *local_cmd) {
     world_store_prev(w);
+    daynight_host_tick(w);
     for (int s = 0; s < MAX_PLAYERS; s++) {
         Player *p = &w->players[s];
         if (!p->active) continue;
@@ -638,6 +639,7 @@ bool game_host(const char *map) {
         dg_strcpy(G->map, sizeof(G->map), "devroom");
         if (!load_map(G->world, "devroom")) return false;
     }
+    daynight_level_loaded(G->world);
     G->mode = GM_HOST;
     G->local_slot = 0;
     G->client_seq = 0;
@@ -657,6 +659,7 @@ void game_cl_welcome(int slot, const char *map, u32 seed, u32 server_tick) {
     dg_strcpy(G->map, sizeof(G->map), map);
     cvar_set_int(G->world_seed, (int)seed);
     if (!load_map(G->world, map)) log_error("client: cannot load map '%s'", map);
+    daynight_level_loaded(G->world);   // config; the time itself arrives with every snapshot
     G->mode = GM_CLIENT;
     G->local_slot = slot;
     G->client_seq = 0;

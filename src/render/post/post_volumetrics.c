@@ -3,6 +3,7 @@
 // Grid by quality: Low 80x45x48, High 160x90x64, Ultra 240x135x96 (camera-relative, 80 m deep,
 // exponential slices).
 #include "post_internal.h"
+#include "render/sky/sky.h"
 #include <string.h>
 
 static struct { FgRes scatter, hist_in, hist_out, integrated; u32 w, h, d; } V;
@@ -75,6 +76,11 @@ static SkyTarget g_sky_main, g_sky_pip;
 
 static void exec_sky(VkCommandBuffer cmd, void *u) {
     const SkyTarget *t = (const SkyTarget *)u;
+    if (sky_active()) {
+        // Time-of-day atmosphere (src/render/sky).
+        sky_render_exec(cmd, t->color, t->depth, t->inv_vp, t->cam, t != &g_sky_main);
+        return;
+    }
     PostBind b = { 0 };
     pb_ubo(&b);
     pb_tex_fg(&b, 0, t->depth, P.point);
@@ -96,7 +102,7 @@ static void exec_sky(VkCommandBuffer cmd, void *u) {
 }
 
 void post_sky(void) {
-    if (!P.ok || !P.in.sky_on) return;
+    if (!P.ok || (!P.in.sky_on && !sky_active())) return;
     g_sky_main = (SkyTarget){ P.in.hdr, P.in.depth, P.in.inv_view_proj, P.in.cam_pos };
     int p = fg_pass("sky", exec_sky, &g_sky_main);
     fg_read(p, P.in.depth, FG_SAMPLED);
@@ -104,7 +110,7 @@ void post_sky(void) {
 }
 
 void post_scope_sky(FgRes color, FgRes depth, mat4 inv_vp, vec3 cam) {
-    if (!P.ok || !P.in.sky_on || color < 0) return;
+    if (!P.ok || (!P.in.sky_on && !sky_active()) || color < 0) return;
     g_sky_pip = (SkyTarget){ color, depth, inv_vp, cam };
     int p = fg_pass("scope_pip_sky", exec_sky, &g_sky_pip);
     fg_read(p, depth, FG_SAMPLED);
@@ -115,17 +121,28 @@ static void exec_fog_apply(VkCommandBuffer cmd, void *u) {
     (void)u;
     PostBind b = { 0 };
     pb_ubo(&b);
-    pb_tex_fg(&b, 0, P.froxels, P.linear);
+    bool vol = P.froxels != FG_NONE, ap = sky_active();
+    // Binding 0 must be a 3D view either way: the aerial perspective stands in without froxels.
+    if (vol) pb_tex_fg(&b, 0, P.froxels, P.linear);
+    else sky_bind_aerial(&b, 0);
     pb_tex_fg(&b, 1, P.in.depth, P.point);
+    if (ap) sky_bind_aerial(&b, 2);
+    else if (vol) pb_tex_fg(&b, 2, P.froxels, P.linear);
     pb_img_fg(&b, 8, P.in.hdr);
     pb_push(cmd, &b, VK_PIPELINE_BIND_POINT_COMPUTE);
+    struct { float p[16]; u32 u[16]; } pc;
+    memset(&pc, 0, sizeof(pc));
+    pc.u[0] = vol ? 1u : 0u;
+    pc.u[1] = ap ? 1u : 0u;
+    pc.p[0] = R->env.aerial_max > 10.0f ? R->env.aerial_max : 3000.0f;
+    post_push_constants(cmd, &pc, 128);
     post_dispatch(cmd, "fog_apply", P.in.render_w, P.in.render_h, 1, 8);
 }
 
 void post_fog_apply(void) {
-    if (!P.ok || P.froxels == FG_NONE) return;
+    if (!P.ok || (P.froxels == FG_NONE && !sky_active())) return;
     int p = fg_pass("fog_apply", exec_fog_apply, NULL);
-    fg_read(p, P.froxels, FG_SAMPLED);
+    if (P.froxels != FG_NONE) fg_read(p, P.froxels, FG_SAMPLED);
     fg_read(p, P.in.depth, FG_SAMPLED);
     fg_write(p, P.in.hdr, FG_STORAGE);
 }

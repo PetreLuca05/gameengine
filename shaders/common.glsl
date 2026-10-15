@@ -42,10 +42,20 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 fog;             // rgb, w = density
     vec4 params;          // x = grid enabled, y = shadow texel, z = pcf radius, w = highlight pulse
     vec4 screen;          // w, h, 1/w, 1/h
+    vec4 fill_dir;        // xyz towards the fill (unshadowed) directional light, w intensity
+    vec4 fill_color;      // rgb
+    vec4 sky_flags;       // x environment + SH valid, y ambient scale, z environment mips, w cloud shadow valid
+    vec4 cshadow;         // xy cloud shadow origin (world xz), z 1 / size
+    mat4 shadow_vps[3];   // cascaded shadow maps: world -> atlas tile (2 x 2 atlas)
+    vec4 shadow_splits;   // x, y, z: cascade radii (m), w: cascade count
     PointLight lights[MAX_POINT_LIGHTS];
 } frame;
 
 layout(set = 0, binding = 1) uniform sampler2DShadow shadow_map;
+// Time-of-day sky (src/render/sky): environment (octahedral), SH9 irradiance, cloud shadow.
+layout(set = 0, binding = 5) uniform sampler2D sky_env;
+layout(std430, set = 0, binding = 6) readonly buffer SkySH { vec4 sh[20]; } sky_sh;
+layout(set = 0, binding = 7) uniform sampler2D sky_cloud_shadow;
 // Previous-frame model matrices of moving draws (velocity), indexed by push flags.y - 1.
 layout(std430, set = 0, binding = 4) readonly buffer DrawPrev { mat4 prev_models[]; } draw_prev;
 

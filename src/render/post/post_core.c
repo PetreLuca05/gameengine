@@ -119,6 +119,12 @@ void pb_tex(PostBind *b, u32 binding, VkImageView view, VkSampler s) {
     pb_add(b, binding, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
 }
 
+void pb_tex_general(PostBind *b, u32 binding, VkImageView view, VkSampler s) {
+    if (b->n >= 16) return;
+    b->img[b->n] = (VkDescriptorImageInfo){ s ? s : P.linear, view ? view : P.white, view ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+    pb_add(b, binding, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+}
+
 void pb_tex_fg(PostBind *b, u32 binding, FgRes r, VkSampler s) {
     if (b->n >= 16) return;
     VkImageLayout lay = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
@@ -216,7 +222,8 @@ VkPipeline post_compute_pipe(const char *name) {
     if (!p) return VK_NULL_HANDLE;
     if (p->pipe) return p->pipe;
     char file[80];
-    snprintf(file, sizeof(file), "post/%s.comp", name);
+    if (strchr(name, '/')) snprintf(file, sizeof(file), "%s.comp", name);   // other shader folders (sky/...)
+    else snprintf(file, sizeof(file), "post/%s.comp", name);
     VkShaderModule m = load_post_shader(file);
     if (!m) return VK_NULL_HANDLE;
     VkComputePipelineCreateInfo ci = { VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO };

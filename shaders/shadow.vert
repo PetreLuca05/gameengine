@@ -12,5 +12,5 @@ layout(push_constant) uniform Push {
 } pc;
 
 void main() {
-    gl_Position = frame.shadow_vp * pc.model * vec4(in_pos, 1.0);
+    gl_Position = frame.shadow_vps[min(pc.flags.w, 2u)] * pc.model * vec4(in_pos, 1.0);
 }

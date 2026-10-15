@@ -199,6 +199,7 @@ static void fp_cam_test_hands(void) {
 }
 void game_render_init(void) {
     sights_register();
+    daynight_register();
     cmd_register("ads_sweep", cmd_ads_sweep, "ads_sweep start | report: sight socket distance / angle against the view axis while ADS");
     cmd_register("fp_pose", cmd_fp_pose, "print the first-person head position relative to the pelvis");
     cmd_register("fp_cam_test", cmd_fp_cam_test, "fp_cam_test start | report: first-person camera / body / hands invariants");
@@ -370,7 +371,14 @@ static void render_entity(World *w, int i, float alpha, bool focused) {
         else lm.color = v4(0.15f, 0.15f, 0.15f, 1);
         draw_shape(VIS_BOX, v->half, pos, rot, lm);
         if (on) {
-            PointLight l = { v3_add(pos, v3(0, -0.15f, 0)), w->light[i].radius, w->light[i].color, w->light[i].intensity };
+            // Scheduled lamps may flicker (cosmetic, deterministic per lamp).
+            float k = 1.0f;
+            if (w->light[i].flicker > 0) {
+                float t = (float)g_engine.real_time * 9.0f + (float)i * 3.17f;
+                float n = 0.5f + 0.5f * sinf(t) * sinf(t * 2.31f + 1.3f) * sinf(t * 0.37f + 0.7f);
+                k = 1.0f - w->light[i].flicker * (n > 0.82f ? 0.85f : n * 0.25f);
+            }
+            PointLight l = { v3_add(pos, v3(0, -0.15f, 0)), w->light[i].radius, w->light[i].color, w->light[i].intensity * k };
             render_add_light(&l);
         }
         break;
@@ -643,6 +651,10 @@ void game_render(void) {
         }
     }
     render_set_camera(&cam);
+    // Time of day first: the post settings (exposure floor / curves, fog) follow this frame's sky.
+    RenderEnvironment tod_env;
+    memset(&tod_env, 0, sizeof(tod_env));
+    daynight_environment(w, &cam, &tod_env);
     {
         PostFrameInfo pfi;
         memset(&pfi, 0, sizeof(pfi));
@@ -670,7 +682,11 @@ void game_render(void) {
     env.clouds = ls->clouds;
     env.shadow_center = v3_madd(cam.pos, dir_from_angles(cam.yaw, 0), 12.0f);
     env.shadow_extent = 32.0f;
-    if (vfx_game_night()) {
+    if (tod_env.atmosphere) {
+        // Physically based sky + day / night (game_daynight.c): everything but the shadow extent.
+        tod_env.shadow_extent = env.shadow_extent;
+        env = tod_env;
+    } else if (vfx_game_night()) {
         // Dev night: moonlight + dim ambient (muzzle flashes and their lights dominate).
         env.sun_intensity *= 0.03f;
         env.sun_color = v3(0.6f, 0.7f, 1.0f);
@@ -725,6 +741,7 @@ void game_render(void) {
 
     if (!game_post_photo_mode()) hud_draw();
     sights_draw();
+    daynight_draw();
     game_post_draw_overlay();
     game_post_draw_photo_ui();
     menus_draw();

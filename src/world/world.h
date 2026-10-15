@@ -10,6 +10,7 @@
 #include "render/render.h"
 #include "gameplay/items.h"
 #include "gameplay/inventory.h"
+#include "world/time_of_day.h"
 #include "player/player.h"
 #include "gameplay/events.h"
 
@@ -132,6 +133,9 @@ typedef struct LightComp {
     vec3 color;
     float radius, intensity;
     u32 group;
+    bool scheduled;       // light_schedule: on at dusk / off at dawn (time of day), per-light offset
+    float flicker;        // 0..1 cosmetic flicker (replicated in NetEnt.extra.x)
+    bool sched_state;     // host: last scheduled state (a switch may override until the next change)
 } LightComp;
 
 typedef struct Container {
@@ -273,6 +277,7 @@ struct World {
     int anim_event_count;
     struct CharacterSystem *chars;          // skinned characters (players, zombies, dummies)
     float time;                // seconds of simulated time
+    TimeState tod;             // time of day: host-authoritative, in every snapshot (world/time_of_day.h)
 };
 
 World *world_create(bool authority, const ItemDB *items);

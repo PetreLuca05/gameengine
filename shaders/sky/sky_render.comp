@@ -1,0 +1,168 @@
+#version 450
+// Sky on every pixel without geometry (depth = 1): the sky-view LUT, the sun disc (limb
+// darkening, through the transmittance), the moon (phase lit by the sun direction, procedural
+// maria / craters, earthshine), stars and the milky way on the celestial sphere (rotating with
+// the sidereal time, fading with the sky brightness, extinguished near the horizon) and the 2D
+// cloud layer lit by the sun / moon (occludes them). Main view and the scope picture-in-picture.
+//   pc.p0..p3 inverse view-projection of the target, pc.u2.xyz camera (float bits), pc.u3.x 1 = PiP
+#extension GL_GOOGLE_include_directive : require
+#include "sky_common.glsl"
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0) uniform sampler2D trans_lut;
+layout(set = 0, binding = 1) uniform sampler2D ms_lut;
+layout(set = 0, binding = 2) uniform sampler2D skyview_lut;
+layout(set = 0, binding = 3) uniform sampler2D milky_tex;   // milky way, celestial equirectangular (baked once)
+layout(set = 0, binding = 4) uniform sampler2D env_tex;
+layout(set = 0, binding = 5) uniform sampler2D clouds_tex;
+layout(set = 0, binding = 6) uniform sampler2D depth_tex;
+layout(set = 0, binding = 7) uniform sampler2D cshadow_tex;
+layout(set = 0, binding = 8, rgba16f) uniform image2D hdr;
+
+vec3 transmittance(float r, float mu) { return textureLod(trans_lut, trans_uv(r, mu), 0.0).rgb; }
+
+vec3 sky_lut(vec3 dir) {
+    float r = length(planet_pos());
+    vec2 uv = skyview_uv(r, dir);
+    uv.y = clamp(uv.y, 0.5 / float(SKYVIEW_SIZE.y), 1.0 - 0.5 / float(SKYVIEW_SIZE.y));
+    return textureLod(skyview_lut, uv, 0.0).rgb;
+}
+
+float h31(vec3 p) { return fract(sin(dot(p, vec3(127.1, 311.7, 74.7))) * 43758.5453); }
+vec3 h33(vec3 p) {
+    return fract(sin(vec3(dot(p, vec3(127.1, 311.7, 74.7)), dot(p, vec3(269.5, 183.3, 246.1)), dot(p, vec3(113.5, 271.9, 124.6)))) * 43758.5453);
+}
+
+// Stars: at most one jittered point per cell of a 3D grid on the celestial sphere, two layers
+// (a few thousand bright, more faint ones); gaussian points about a pixel wide.
+vec3 stars(vec3 c, float px) {
+    vec3 col = vec3(0.0);
+    for (int layer = 0; layer < 2; layer++) {
+        float scale = layer == 0 ? 140.0 : 320.0;
+        vec3 cell = floor(c * scale);
+        float h = h31(cell + float(layer) * 31.7);
+        if (h < (layer == 0 ? 0.988 : 0.9978)) continue;
+        vec3 sp = normalize((cell + 0.15 + h33(cell) * 0.7) / scale);
+        float d = length(c - sp);
+        float mag = pow(h33(cell + 7.0).x, layer == 0 ? 3.0 : 6.0);
+        float w = max(px * 0.8, 1e-5);
+        float b = exp(-d * d / (w * w)) * mag;
+        vec3 tint = mix(vec3(1.0, 0.78, 0.6), vec3(0.7, 0.82, 1.0), h33(cell + 3.0).y);
+        col += tint * b * (layer == 0 ? 1.0 : 0.45);
+    }
+    return col;
+}
+
+// Moon albedo (maria + craters), uv in -1..1 on the disc.
+float moon_albedo(vec2 uv) {
+    float m = sk_fbm(uv * 2.2 + vec2(4.1, 1.3), 5);
+    float maria = smoothstep(0.45, 0.62, m);
+    float cr = 0.0;
+    for (int i = 0; i < 6; i++) {
+        vec2 c = vec2(sk_hash(vec2(i, 1.3)), sk_hash(vec2(2.7, i))) * 1.6 - 0.8;
+        float r = 0.06 + 0.12 * sk_hash(vec2(i, 9.1));
+        float d = length(uv - c) / r;
+        cr += smoothstep(1.0, 0.8, d) * smoothstep(0.55, 0.85, d) * 0.5 - smoothstep(0.75, 0.2, d) * 0.12;
+    }
+    return clamp(0.16 - 0.07 * maria + 0.03 * sk_fbm(uv * 9.0, 3) + cr * 0.05, 0.04, 0.3);
+}
+
+vec3 sky_color(vec3 dir, float px, bool clouds_on) {
+    vec3 ro = planet_pos();
+    float r = length(ro);
+    vec3 L = sky_lut(dir);
+    vec3 view_t = ray_sphere(ro, dir, R_BOTTOM) > 0.0 ? vec3(0.0) : transmittance(r, dir.y);
+    float lum = dot(L, vec3(0.2126, 0.7152, 0.0722));
+    // Celestial sphere (stars, milky way): only when the sky is dark.
+    vec3 cel = vec3(dot(dir, SK.cel_x.xyz), dot(dir, SK.cel_y.xyz), dot(dir, SK.cel_z.xyz));
+    float night = 1.0 - smoothstep(0.0015, 0.025, lum);
+    vec3 C = vec3(0.0);
+    if (night > 0.001 && dir.y > -0.05) {
+        C += stars(cel, px) * SK.cel_x.w * 0.12;
+        vec2 muv = vec2(atan(cel.y, cel.x) / (2.0 * PI) + 0.5, acos(clamp(cel.z, -1.0, 1.0)) / PI);
+        C += textureLod(milky_tex, muv, 0.0).rgb * SK.cel_y.w * 0.0022;
+        C *= night * view_t;
+    }
+    // Sun disc.
+    vec3 S = normalize(SK.sun_dir.xyz);
+    float cs = dot(dir, S);
+    float disc_sun = 0.0;
+    if (cs > SK.sun_disc.x - 1e-4) {
+        float a = acos(clamp(cs, -1.0, 1.0)) / max(SK.sun_disc.y, 1e-5);
+        float mu = sqrt(max(1.0 - a * a, 0.0));
+        float limb = 1.0 - SK.sun_disc.w * (1.0 - mu);
+        float edge = 1.0 - smoothstep(0.92, 1.0, a);
+        disc_sun = edge * limb;
+        C += SK.sun_dir.w * SK.sun_disc.z / (PI * SK.sun_disc.y * SK.sun_disc.y) * view_t * disc_sun;
+    }
+    // Moon disc: a sphere lit by the sun (phases follow), earthshine on the dark side.
+    vec3 M = normalize(SK.moon_dir.xyz);
+    float cm = dot(dir, M);
+    if (cm > SK.moon_disc.x - 1e-4) {
+        vec3 up = abs(M.y) > 0.9 ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 1.0, 0.0);
+        vec3 rx = normalize(cross(up, M)), ry = cross(M, rx);
+        vec2 q = vec2(dot(dir, rx), dot(dir, ry)) / max(SK.moon_disc.y, 1e-5);
+        float r2 = dot(q, q);
+        if (r2 < 1.0) {
+            vec3 n = rx * q.x + ry * q.y - M * sqrt(1.0 - r2);
+            float lit = max(dot(n, S), 0.0);
+            float alb = moon_albedo(q);
+            float edge = 1.0 - smoothstep(0.9, 1.0, sqrt(r2));
+            vec3 moon = vec3(1.0, 0.97, 0.92) * alb / 0.12 * (lit + SK.moon_disc.w) * SK.moon_disc.z / (PI * SK.moon_disc.y * SK.moon_disc.y);
+            // The disc hides the stars / milky way behind it.
+            C = mix(C, moon * view_t, edge);
+        }
+    }
+    // Below the horizon: the lit ground (the sky-view LUT only holds the in-scattering towards it).
+    float t_ground = ray_sphere(ro, dir, R_BOTTOM);
+    if (t_ground > 0.0) {
+        float rg = R_BOTTOM + 0.001;
+        vec3 E = transmittance(rg, S.y) * SK.sun_dir.w * max(S.y, 0.0) + transmittance(rg, M.y) * SK.moon_dir.w * max(M.y, 0.0);
+        E *= textureLod(cshadow_tex, vec2(0.5), 0.0).r;
+        E += (sky_lut(vec3(0.0, 1.0, 0.0)) + sky_lut(normalize(vec3(1.0, 0.25, 0.0))) + sky_lut(normalize(vec3(-1.0, 0.25, 0.0)))) * (PI / 3.0) * 1.6;
+        vec3 ground = SK.ground.rgb / PI * E;
+        L += ground * exp(-medium(0.0).ext * t_ground);
+    }
+    vec3 sky = L + C;
+    // Clouds: the cloud map of this frame (shaders/sky/clouds.comp), premultiplied.
+    if (clouds_on && dir.y > 0.0) {
+        vec4 cl = textureLod(clouds_tex, hemi_uv(dir), 0.0);
+        sky = sky * (1.0 - cl.a) + cl.rgb;
+    }
+    sky += vec3(0.55, 0.65, 1.0) * SK.cel_z.w;   // airglow / starlight floor: night is never pitch black
+    return sky;
+}
+
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 sz = imageSize(hdr);
+    if (p.x >= sz.x || p.y >= sz.y) return;
+    vec2 uv = (vec2(p) + 0.5) / vec2(sz);
+    bool pip = pc.u3.x == 1u;
+    // sky_debug: LUTs / cloud shadow / environment in the top-left corner of the main view.
+    int dbg = int(SK.env.w + 0.5);
+    if (dbg > 0 && !pip) {
+        vec2 box = vec2(0.42, 0.42 * float(sz.x) / float(sz.y));
+        if (uv.x < box.x && uv.y < box.y) {
+            vec2 q = uv / box;
+            vec3 c = vec3(0.0);
+            if (dbg == 1) c = textureLod(trans_lut, q, 0.0).rgb;
+            else if (dbg == 2) c = textureLod(ms_lut, q, 0.0).rgb * 30.0;
+            else if (dbg == 3) c = textureLod(skyview_lut, q, 0.0).rgb * 2.0;
+            else if (dbg == 4) c = vec3(textureLod(cshadow_tex, q, 0.0).r);
+            else if (dbg == 5) c = textureLod(env_tex, q, 0.0).rgb * 2.0;
+            else if (dbg == 6) c = textureLod(milky_tex, q, 0.0).rgb * 0.01;
+            float expo = 1.0;   // shown unexposed-scaled (the tonemap exposure still applies)
+            imageStore(hdr, p, vec4(c * expo, 1.0));
+            return;
+        }
+    }
+    if (texelFetch(depth_tex, p, 0).r < 1.0) return;
+    mat4 inv_vp = mat4(pc.p0, pc.p1, pc.p2, pc.p3);
+    vec4 wp = inv_vp * vec4(uv * 2.0 - 1.0, 1.0, 1.0);
+    vec3 cam = uintBitsToFloat(pc.u2.xyz);
+    vec3 dir = normalize(wp.xyz / wp.w - cam);
+    vec4 wp2 = inv_vp * vec4((uv + vec2(0.0, 1.0 / float(sz.y))) * 2.0 - 1.0, 1.0, 1.0);
+    float px = length(normalize(wp2.xyz / wp2.w - cam) - dir);
+    vec3 col = sky_color(dir, px, true);
+    imageStore(hdr, p, vec4(sanitize(col), 1.0));
+}

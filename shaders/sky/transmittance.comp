@@ -1,0 +1,24 @@
+#version 450
+// Transmittance LUT (256 x 64): optical depth to the top of the atmosphere for (r, mu).
+// Recomputed only when the atmosphere parameters change.
+#extension GL_GOOGLE_include_directive : require
+#include "sky_common.glsl"
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 8, rgba16f) uniform writeonly image2D out_lut;
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    if (p.x >= TRANS_SIZE.x || p.y >= TRANS_SIZE.y) return;
+    vec2 uv = (vec2(p) + 0.5) / vec2(TRANS_SIZE);
+    vec2 rm = trans_params(uv);
+    vec3 ro = vec3(0.0, rm.x, 0.0);
+    vec3 rd = vec3(sqrt(max(1.0 - rm.y * rm.y, 0.0)), rm.y, 0.0);
+    float t_max = ray_sphere(ro, rd, R_TOP);
+    vec3 od = vec3(0.0);
+    const int N = 40;
+    float dt = max(t_max, 0.0) / float(N);
+    for (int i = 0; i < N; i++) {
+        vec3 x = ro + rd * (float(i) + 0.5) * dt;
+        od += medium(length(x) - R_BOTTOM).ext * dt;
+    }
+    imageStore(out_lut, p, vec4(exp(-od), 1.0));
+}

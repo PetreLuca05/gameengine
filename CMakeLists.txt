@@ -145,8 +145,9 @@ message(STATUS "Deadground: shader compiler ${DG_SHADER_COMPILER}")
 file(GLOB DG_SHADER_SOURCES CONFIGURE_DEPENDS
   ${CMAKE_SOURCE_DIR}/shaders/*.vert ${CMAKE_SOURCE_DIR}/shaders/*.frag ${CMAKE_SOURCE_DIR}/shaders/*.comp
   ${CMAKE_SOURCE_DIR}/shaders/post/*.vert ${CMAKE_SOURCE_DIR}/shaders/post/*.frag ${CMAKE_SOURCE_DIR}/shaders/post/*.comp
-  ${CMAKE_SOURCE_DIR}/shaders/sights/*.frag ${CMAKE_SOURCE_DIR}/shaders/sights/*.comp)
-file(GLOB DG_SHADER_INCLUDES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/shaders/*.glsl ${CMAKE_SOURCE_DIR}/shaders/post/*.glsl ${CMAKE_SOURCE_DIR}/shaders/sights/*.glsl ${CMAKE_SOURCE_DIR}/third_party/fsr/*.h
+  ${CMAKE_SOURCE_DIR}/shaders/sights/*.frag ${CMAKE_SOURCE_DIR}/shaders/sights/*.comp
+  ${CMAKE_SOURCE_DIR}/shaders/sky/*.comp)
+file(GLOB DG_SHADER_INCLUDES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/shaders/*.glsl ${CMAKE_SOURCE_DIR}/shaders/post/*.glsl ${CMAKE_SOURCE_DIR}/shaders/sights/*.glsl ${CMAKE_SOURCE_DIR}/shaders/sky/*.glsl ${CMAKE_SOURCE_DIR}/third_party/fsr/*.h
   ${CMAKE_SOURCE_DIR}/shaders/post/*.h)
 set(DG_SHADER_OUT ${CMAKE_BINARY_DIR}/bin/shaders)
 set(DG_SPV_FILES)
@@ -161,6 +162,9 @@ foreach(src ${DG_SHADER_SOURCES})
   if(dirname STREQUAL "sights")
     set(sub "sights/")
   endif()
+  if(dirname STREQUAL "sky")
+    set(sub "sky/")
+  endif()
   set(out ${DG_SHADER_OUT}/${sub}${name}.spv)
   if(DG_SHADER_COMPILER_KIND STREQUAL "glslc")
     set(cmd ${DG_SHADER_COMPILER} --target-env=vulkan1.3 -O -I ${CMAKE_SOURCE_DIR}/shaders -I ${CMAKE_SOURCE_DIR}/shaders/post -I ${CMAKE_SOURCE_DIR}/third_party/fsr -I ${CMAKE_SOURCE_DIR}/third_party/smaa -o ${out} ${src})
@@ -170,6 +174,7 @@ foreach(src ${DG_SHADER_SOURCES})
   add_custom_command(OUTPUT ${out}
     COMMAND ${CMAKE_COMMAND} -E make_directory ${DG_SHADER_OUT}/post
     COMMAND ${CMAKE_COMMAND} -E make_directory ${DG_SHADER_OUT}/sights
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${DG_SHADER_OUT}/sky
     COMMAND ${cmd}
     DEPENDS ${src} ${DG_SHADER_INCLUDES}
     COMMENT "GLSL ${name}" VERBATIM)
@@ -233,7 +238,7 @@ set(DG_ANIMCORE_SOURCES
   src/anim/anim.c src/anim/anim_mesh.c src/anim/controller.c src/anim/procedural.c src/anim/turn.c src/anim/spine.c
   src/anim/weapon_hold.c src/anim/damage_additive.c src/anim/foot_ik.c src/anim/anim_net.c src/anim/ragdoll_def.c
   src/anim/anim_library.c src/anim/character_rt.c src/gameplay/hitboxes.c src/gameplay/items.c src/gameplay/attachments.c src/gameplay/recoil.c src/core/spring.c
-  src/vfx/vfx_curve.c src/vfx/vfx_library.c src/vfx/vfx_sim.c src/vfx/vfx_atlas.c src/player/holdpoint.c src/player/camera_fp_math.c
+  src/world/time_of_day.c src/vfx/vfx_curve.c src/vfx/vfx_library.c src/vfx/vfx_sim.c src/vfx/vfx_atlas.c src/player/holdpoint.c src/player/camera_fp_math.c
   src/assets/fbx_loader.c src/assets/anim_cache.c src/assets/character.c
   src/core/log.c src/core/platform.c)
 add_library(dg_animcore STATIC ${DG_ANIMCORE_SOURCES})
@@ -267,6 +272,12 @@ if(MSVC)
   target_compile_options(test_vfx PRIVATE /W3 /wd4100 /wd4201 /utf-8)
 endif()
 add_test(NAME vfx COMMAND test_vfx WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+
+# Day / night core: sun / moon positions, time replication, curves, events, light schedules.
+add_executable(test_daynight tests/test_daynight.c)
+set_target_properties(test_daynight PROPERTIES C_STANDARD 11)
+target_link_libraries(test_daynight PRIVATE dg_animcore)
+add_test(NAME daynight COMMAND test_daynight WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
 
 add_executable(test_anim tests/test_anim.c)
 set_target_properties(test_anim PROPERTIES C_STANDARD 11)
