@@ -112,5 +112,8 @@ void player_move_tick(struct World *w, int slot, PlayerSim *sim, struct PhysChar
 void player_move_reset(PlayerSim *sim, vec3 feet, float yaw);
 float player_eye_height(const PlayerMove *m);
 vec3 player_eye_pos(const PlayerMove *m);
+// Spine-bend eye offset (set by the animation system; zero without it).
+void movement_set_eye_offset(vec3 (*fn)(float yaw, float pitch));
+vec3 player_eye_offset(float yaw, float pitch);
 
 #endif

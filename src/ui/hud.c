@@ -158,6 +158,10 @@ static void draw_hints(Game *g, float s) {
 }
 
 static void draw_world_bars(Game *g, World *w, float s) {
+    // Floating health bars / names above characters: hidden unless cl_healthbars 1.
+    static Cvar *show;
+    if (!show) show = cvar_find("cl_healthbars");   // registered in game_init (before the config loads)
+    if (!show || !show->i) return;
     vec3 cam = g->view.eye;
     ENT_FOREACH(w, i) {
         if (!(w->comps[i] & C_HEALTH)) continue;

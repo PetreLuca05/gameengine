@@ -224,26 +224,33 @@ animation follows the movement (`speed_match`).
 
 ## First-person body (`cl_fp_body`)
 
-The local player sees their own body, and **the player model's arms replace the placeholder hands**:
+The local player sees their own, undistorted body, and **the player model's arms replace the
+placeholder hands**:
 
+* **Camera at the eyes.** Looking up and down bends Spine, Spine1, Spine2, Neck and Head with the
+  controller's spine weights, so the body leans over its feet. `chars_eye_offset(yaw, pitch)` is
+  the same bend applied to the bind pose. It moves both the camera and the gameplay eye
+  (`player_eye_pos`: shots, interactions), so looking down carries the eyes forward and you see
+  your chest, legs and feet. It's a pure function of the shared assets, so host and clients agree.
+* **No distortion.** The body stays where the player stands. Only the head is hidden (collapsed to
+  its joint) so the camera never sees inside it.
 * **Targets.** `hands.c` still decides where the hands go: clips, sway, recoil, interactions, ledge
   grabs. It exports palm frames per hand (`hands_fp_targets`). Hands on a weapon go to its
   `grip_r` / `grip_l` sockets; everything else uses the solved hand frames.
-* **IK.** `chars_render_local_fp` takes the interpolated body pose, moves it under the camera, then
-  runs two-bone IK on both arms to those palm frames. If a target is out of reach, the shoulder
-  moves toward it, up to `cl_fp_shoulder_shift`.
+* **IK and reach.** `chars_render_local_fp` runs two-bone IK on both arms to those palms. If a grip
+  is out of reach, the weapon itself moves back along the camera axis until both hands reach it
+  (`hands_fp_shift`). The arms never stretch or detach.
 * **Fingers.** Hands on the weapon keep the hold style's finger curl. Other hands curl by grip type.
-* **Head.** The head bones are collapsed so the camera never sees inside them.
-* **Passes.** The body is drawn in the world pass and the arm-only mesh (built at load) again in the
-  viewmodel pass, with the weapon, so neither clips into walls. Your third-person pose and weapon
-  still cast your shadow.
-* **Offsets.** `cl_fp_body_back` (0) sets the body offset behind the camera, and
-  `cl_fp_body_back_down` (0.22 m) slides it back as you look down, so you see your legs and feet
-  instead of the inside of your chest.
+* **Static arms.** While an item is held, the arms (clavicles down) don't play the locomotion clip.
+  They take a fixed relaxed pose and the hold IK places the hands. This applies in third person and
+  on other players too.
+* **Passes.** The world pass draws the body without its arm triangles. The arms are drawn once,
+  in the viewmodel pass, with the weapon and its own FOV, so there's never a second pair of arms
+  and they don't clip into walls. Your third-person pose and weapon still cast your shadow.
 * **FOV.** The camera FOV (`cl_fov`) and the hands / weapon FOV (`r_viewmodel_fov`, 0 = follow
   the camera) are separate sliders in Settings → Graphics. Muzzle flash and tracers start where
   the barrel appears on screen.
-* **Debug.** `cl_fp_debug 1` logs reach shifts and draws targets; `2` shows the raw body pose.
+* **Debug.** `cl_fp_debug 1` logs weapon pull-backs and draws targets; `2` shows the raw body pose.
   `cl_fp_body 0` brings back the cube hands.
 
 ## LOD

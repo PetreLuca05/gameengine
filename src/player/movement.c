@@ -52,7 +52,13 @@ float player_eye_height(const PlayerMove *m) {
     return lerpf(PLAYER_EYE_STAND, PLAYER_EYE_CROUCH, smoothstepf(0, 1, m->crouch_amount));
 }
 
-vec3 player_eye_pos(const PlayerMove *m) { return v3_add(m->pos, v3(0, player_eye_height(m), 0)); }
+static vec3 (*g_eye_offset)(float yaw, float pitch);
+void movement_set_eye_offset(vec3 (*fn)(float yaw, float pitch)) { g_eye_offset = fn; }
+vec3 player_eye_offset(float yaw, float pitch) { return g_eye_offset ? g_eye_offset(yaw, pitch) : v3(0, 0, 0); }
+// Eye = standing / crouched eye height + the spine bend of the aim (looking down leans forward).
+vec3 player_eye_pos(const PlayerMove *m) {
+    return v3_add(v3_add(m->pos, v3(0, player_eye_height(m), 0)), player_eye_offset(m->yaw, m->pitch));
+}
 
 void player_move_reset(PlayerSim *sim, vec3 feet, float yaw) {
     memset(&sim->move, 0, sizeof(sim->move));

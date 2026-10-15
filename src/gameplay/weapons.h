@@ -34,7 +34,7 @@ typedef void (*ShotHook)(const ShotEvent *ev, void *user);
 void weapons_add_shot_hook(ShotHook fn, void *user);
 
 typedef struct WeaponCvars {
-    struct Cvar *recoil_scale, *visual_scale, *spread_scale, *recoil_debug;
+    struct Cvar *recoil_scale, *visual_scale, *spread_scale, *recoil_debug, *infinite_ammo;
 } WeaponCvars;
 void weapons_register_cvars(void);
 const WeaponCvars *weapons_cvars(void);

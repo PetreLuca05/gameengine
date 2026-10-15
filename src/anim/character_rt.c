@@ -60,6 +60,19 @@ void charrt_eval_base(CharRuntime *r) {
         if (r->override_mirror) pose_mirror(&r->lib->skel, &tmp, &r->base);
     } else {
         ctrl_evaluate(&r->ctrl, &r->lib->skel, &r->lib->lookup, &r->base);
+        // Holding an item: the arms (clavicles down) don't play the locomotion clip - they take a
+        // fixed relaxed pose (first frame of idle) and the procedural hold places the hands.
+        float hw = 0;
+        const Skeleton *s = &r->lib->skel;
+        int idle = r->ctrl.bind ? r->ctrl.bind->fallback_clip : -1;
+        if (r->in.weapon_id && ctrl_hand_ik_weight(&r->ctrl, &hw) && hw > 0 && idle >= 0 && idle < r->lib->clip_count) {
+            static Pose still;
+            clip_sample(&r->lib->clips[idle], 0.0f, &still);
+            int roots[2] = { s->role[BR_L_SHOULDER], s->role[BR_R_SHOULDER] };
+            for (int b = 0; b < s->count; b++)
+                if ((roots[0] >= 0 && skel_is_descendant(s, b, roots[0])) || (roots[1] >= 0 && skel_is_descendant(s, b, roots[1])))
+                    r->base.local[b] = xf_lerp(r->base.local[b], still.local[b], hw);
+        }
     }
     pose_to_model(&r->lib->skel, &r->base, r->base_model);
     r->base_valid = true;

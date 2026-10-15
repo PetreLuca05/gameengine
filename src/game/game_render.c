@@ -324,6 +324,8 @@ void game_render(void) {
         cam.roll += kr.z * DG_DEG2RAD;
         cam.pos = v3_madd(cam.pos, dir_from_angles(cam.yaw, cam.pitch), -kb);
     }
+    // Camera at the body's eyes: the aim pitch bends the spine (same offset as the gameplay eye).
+    if (!dead) cam.pos = v3_add(cam.pos, player_eye_offset(cam.yaw, cam.pitch));
     render_set_camera(&cam);
 
     LevelStatic *ls = &w->level;

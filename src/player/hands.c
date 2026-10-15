@@ -655,6 +655,16 @@ bool hands_fp_targets(HandsFpTargets *out) {
 
 void hands_set_body_arms(bool on) { if (H) H->body_arms = on; }
 
+void hands_fp_shift(vec3 delta) {
+    if (!H) return;
+    H->weapon_pos = v3_add(H->weapon_pos, delta);
+    for (int h = 0; h < 2; h++)
+        if (H->fp.on_weapon[h]) {
+            H->fp.palm[h].t = v3_add(H->fp.palm[h].t, delta);
+            H->chain[h].hand_pos = v3_add(H->chain[h].hand_pos, delta);
+        }
+}
+
 void hands_render(void) {
     if (!H || !H->initialized) return;
     if (!H->body_arms)

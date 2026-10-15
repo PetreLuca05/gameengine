@@ -72,6 +72,8 @@ bool hands_fp_targets(HandsFpTargets *out);
 // When the body model draws the first-person arms, hands_render skips the placeholder cubes
 // (call every frame before hands_render; resets after rendering).
 void hands_set_body_arms(bool on);
+// Moves the held item (and the hands on it) by delta this frame (body arms out of reach).
+void hands_fp_shift(vec3 delta);
 // World-space barrel tip of the local viewmodel weapon (last hands_update). False if no gun.
 bool hands_muzzle(vec3 *pos, vec3 *fwd);
 void hands_reload_poses(void);

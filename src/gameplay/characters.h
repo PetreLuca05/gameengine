@@ -122,6 +122,8 @@ void chars_render(World *w, float alpha, vec3 cam_pos, int local_slot);
 // First-person body of the local player (cl_fp_body): call after hands_update, before
 // hands_render. Draws the body (head hidden) and its arms on the first-person hand targets.
 void chars_render_local_fp(World *w, float alpha, int local_slot);
+// Eye offset from the spine bend for an aim (yaw, pitch): added to the gameplay eye and the camera.
+vec3 chars_eye_offset(float yaw, float pitch);
 // Events (reliable, compact): host queues + applies, clients apply what arrives.
 void chars_push_event(World *w, const AnimEvent *e);
 void chars_on_event(World *w, const AnimEvent *e);

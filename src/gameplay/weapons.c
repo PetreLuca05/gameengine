@@ -7,15 +7,28 @@
 #include "render/debug_draw.h"
 #include "player/hands.h"
 #include "gameplay/characters.h"
+#include "game/game.h"
 #include <math.h>
+#include <stdlib.h>
 
 static WeaponCvars WC;
+
+static void cmd_infinite_ammo(int argc, const char **argv) {
+    World *w = game_world();
+    if (w && !w->authority) { log_info("infinite_ammo: host only"); return; }
+    bool on = argc > 1 ? atoi(argv[1]) != 0 : !WC.infinite_ammo->i;
+    cvar_set_cv(WC.infinite_ammo, on ? "1" : "0");
+    log_info("infinite ammo %s", on ? "ON" : "off");
+}
 
 void weapons_register_cvars(void) {
     WC.recoil_scale = cvar_reg_float("wpn_recoil_scale", 1.0f, 0.0f, 5.0f, CVAR_SERVER, "aim recoil multiplier (gameplay, host)");
     WC.spread_scale = cvar_reg_float("wpn_spread_scale", 1.0f, 0.0f, 5.0f, CVAR_SERVER, "bullet spread cone multiplier (gameplay, host)");
     WC.visual_scale = cvar_reg_float("wpn_visual_scale", 1.0f, 0.0f, 3.0f, CVAR_ARCHIVE, "camera + viewmodel kick multiplier (cosmetic)");
     WC.recoil_debug = cvar_reg_int("wpn_recoil_debug", 0, 0, 2, 0, "recoil overlay: 1 = panel + cone, 2 = also log every shot");
+    // Replicated so clients' predicted magazines agree with the host.
+    WC.infinite_ammo = cvar_reg_bool("sv_infinite_ammo", false, CVAR_SERVER, "shots don't use ammo (host, replicated)");
+    cmd_register("infinite_ammo", cmd_infinite_ammo, "infinite_ammo [0|1]: toggle infinite ammo (host)");
 }
 
 const WeaponCvars *weapons_cvars(void) { return &WC; }
@@ -633,7 +646,7 @@ void weapons_tick(World *w, int slot, PlayerSim *sim, const UserCmd *cmd, u16 pr
             RecoilMods sm = make_mods(sim, sscale);
             float cone = recoil_spread(rp, &ws->rc, &sm) + chars_limb_spread(w, p->ent);
             u32 seed = shot_seed(cmd, slot, ws->shots);
-            (*mag)--;
+            if (!WC.infinite_ammo->i) (*mag)--;
             if (w->authority) ws->mag = s->ammo;
             fire(w, slot, sim, d, cmd, first, local_view, dir, cone, seed);
             ws->shots++;

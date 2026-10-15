@@ -1094,6 +1094,7 @@ void game_init(void) {
     player_register_cvars();
     // Animation assets (shared skeleton) before anything spawns characters.
     characters_register_cvars();
+    cvar_reg_bool("cl_healthbars", false, CVAR_ARCHIVE, "health bars and names above characters / dummies (HUD code kept, hidden by default)");
     G->anim_rate = cvar_reg_int("anim_sample_rate", 30, 30, 60, CVAR_ARCHIVE, "FBX bake sample rate (30 or 60 Hz, restart)");
     g_engine.anim = (AnimLibrary *)calloc(1, sizeof(AnimLibrary));
     if (!anim_lib_load(g_engine.anim, (float)G->anim_rate->i)) {
@@ -1102,6 +1103,7 @@ void game_init(void) {
         g_engine.anim = NULL;
     }
     anim_debug_init();
+    if (g_engine.anim) movement_set_eye_offset(chars_eye_offset);
     if (!items_load(&G->items, "data/items.json", "data/weapons")) log_error("game: item data failed to load");
     g_engine.items = &G->items;
     basic_meshes_create(&G->meshes);

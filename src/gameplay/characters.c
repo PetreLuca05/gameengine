@@ -21,8 +21,9 @@ typedef struct CharGlobals {
     MeshId mesh[LIB_MAX_CHARS][CHAR_LOD_COUNT];
     // First-person body: arm-only meshes (viewmodel pass) and bone sets.
     MeshId arm_mesh[LIB_MAX_CHARS];
+    MeshId noarm_mesh[LIB_MAX_CHARS];   // the body without those triangles (world pass in first person)
     bool arm_bone[ANIM_MAX_BONES], head_bone[ANIM_MAX_BONES];
-    Cvar *fp_body, *fp_back, *fp_back_down, *fp_max_shift, *fp_debug;
+    Cvar *fp_body, *fp_debug;
     u32 lib_revision;
     mat4 inv_bind[ANIM_MAX_BONES];
     LodConfig lod;
@@ -69,10 +70,7 @@ void characters_register_cvars(void) {
     g->lod_force = cvar_reg_int("r_lod_force", -1, -1, 3, 0, "force a character LOD (-1 = automatic)");
     g->lod_bias = cvar_reg_float("r_lod_bias", 1.0f, 0.25f, 4.0f, CVAR_ARCHIVE, "character LOD bias (>1 = more detail)");
     g->fp_body = cvar_reg_bool("cl_fp_body", true, CVAR_ARCHIVE, "first person: draw your own body; the player model's arms replace the placeholder hands");
-    g->fp_back = cvar_reg_float("cl_fp_body_back", 0.0f, -2.0f, 1.0f, CVAR_ARCHIVE, "first person: body offset behind the camera (m), keeps the chest out of the view");
-    g->fp_back_down = cvar_reg_float("cl_fp_body_back_down", 0.22f, 0.0f, 1.0f, CVAR_ARCHIVE, "first person: extra body offset when looking straight down (m)");
-    g->fp_max_shift = cvar_reg_float("cl_fp_shoulder_shift", 0.45f, 0.0f, 1.0f, 0, "first person: max shoulder move towards an out-of-reach hand target (m)");
-    g->fp_debug = cvar_reg_int("cl_fp_debug", 0, 0, 2, 0, "first person: 1 = log / draw arm reach and shoulder shifts, 2 = raw body pose (no arm IK, head visible)");
+    g->fp_debug = cvar_reg_int("cl_fp_debug", 0, 0, 2, 0, "first person: 1 = log / draw hand targets and weapon pull-back, 2 = raw body pose (no arm IK, head visible)");
     g->eval_budget = cvar_reg_int("anim_eval_budget", 64, 0, 4096, CVAR_ARCHIVE, "max full character post-passes per tick (0 = unlimited); the rest wait a tick, biggest on screen first");
     g->lod_quality = cvar_reg_int("r_char_quality", 2, 0, 3, CVAR_ARCHIVE, "character detail (0 low .. 3 ultra), scales LOD thresholds");
     g->predict_hits = cvar_reg_bool("cl_predict_hit_reactions", true, CVAR_ARCHIVE, "show an unconfirmed reaction on targets you hit");
@@ -87,6 +85,7 @@ void characters_shutdown_globals(void) {
     for (int c = 0; c < LIB_MAX_CHARS; c++) {
         for (int l = 0; l < CHAR_LOD_COUNT; l++) render_mesh_destroy(CG->mesh[c][l]);
         render_mesh_destroy(CG->arm_mesh[c]);
+        render_mesh_destroy(CG->noarm_mesh[c]);
     }
     free(CG);
     CG = NULL;
@@ -105,7 +104,8 @@ static void ensure_gpu_meshes(void) {
     for (int c = 0; c < LIB_MAX_CHARS; c++) {
         for (int l = 0; l < CHAR_LOD_COUNT; l++) { render_mesh_destroy(CG->mesh[c][l]); CG->mesh[c][l] = 0; }
         render_mesh_destroy(CG->arm_mesh[c]);
-        CG->arm_mesh[c] = 0;
+        render_mesh_destroy(CG->noarm_mesh[c]);
+        CG->arm_mesh[c] = CG->noarm_mesh[c] = 0;
     }
     const Skeleton *s = &LIB->skel;
     // Bone sets for the first-person body: both arm chains (upper arm and below) and the head.
@@ -148,7 +148,8 @@ static void ensure_gpu_meshes(void) {
                 u32 *remap = (u32 *)malloc(sizeof(u32) * L->vcount);
                 SkinVertex *av = (SkinVertex *)malloc(sizeof(SkinVertex) * L->vcount);
                 u32 *ai = (u32 *)malloc(sizeof(u32) * L->icount);
-                u32 avc = 0, aic = 0;
+                u32 *bi = (u32 *)malloc(sizeof(u32) * L->icount);
+                u32 avc = 0, aic = 0, bic = 0;
                 for (u32 i = 0; i < L->vcount; i++) remap[i] = 0xFFFFFFFFu;
                 for (u32 t = 0; t + 2 < L->icount; t += 3) {
                     bool keep = true;
@@ -158,7 +159,10 @@ static void ensure_gpu_meshes(void) {
                         for (int j = 0; j < 4; j++) if (CG->arm_bone[sv->joints[j]]) aw += sv->weights[j];
                         keep = aw >= 128;
                     }
-                    if (!keep) continue;
+                    if (!keep) {
+                        for (int k = 0; k < 3; k++) bi[bic++] = L->indices[t + k];
+                        continue;
+                    }
                     for (int k = 0; k < 3; k++) {
                         u32 src = L->indices[t + k];
                         if (remap[src] == 0xFFFFFFFFu) {
@@ -173,6 +177,8 @@ static void ensure_gpu_meshes(void) {
                     }
                 }
                 if (aic) CG->arm_mesh[c] = render_skinned_mesh_create(av, avc, ai, aic);
+                if (aic && bic) CG->noarm_mesh[c] = render_skinned_mesh_create(v, L->vcount, bi, bic);
+                free(bi);
                 free(remap);
                 free(av);
                 free(ai);
@@ -1145,6 +1151,33 @@ static void draw_char_mesh(MeshId mesh, CharacterInst *c, const Xform *pose, u32
     render_draw_skinned(&d);
 }
 
+// Camera / eye offset produced by the aim pitch bending the spine (Spine, Spine1, Spine2, Neck,
+// Head with the controller's spine weights), from the canonical bind pose: looking down moves
+// the eyes forward and down over the feet. Pure function of (yaw, pitch) and the shared assets,
+// so the host and every client get the same gameplay eye (player_eye_pos).
+vec3 chars_eye_offset(float yaw, float pitch) {
+    if (!LIB || !LIB->loaded) return v3(0, 0, 0);
+    const Skeleton *s = &LIB->skel;
+    const ProcParams *p = &LIB->proc;
+    int bones[5] = { s->role[BR_SPINE], s->role[BR_SPINE1], s->role[BR_SPINE2], s->role[BR_NECK], s->role[BR_HEAD] };
+    int head = s->role[BR_HEAD];
+    if (head < 0) return v3(0, 0, 0);
+    // Eyes: in front of and above the head joint (character faces -Z in bind).
+    vec3 eye0 = v3_add(s->bind_model[head].t, v3(0, 0.08f, -0.09f));
+    vec3 pivots[5];
+    for (int i = 0; i < 5; i++) pivots[i] = bones[i] >= 0 ? s->bind_model[bones[i]].t : eye0;
+    float lim = p->pitch_limit * DG_DEG2RAD;
+    float pt = clampf(pitch, -lim, lim);
+    vec3 eye = eye0;
+    for (int i = 0; i < 5; i++) {
+        if (bones[i] < 0) continue;
+        quat q = quat_axis_angle(v3(1, 0, 0), pt * p->spine_weights[i]);
+        eye = v3_add(pivots[i], quat_rotate(q, v3_sub(eye, pivots[i])));
+        for (int j = i + 1; j < 5; j++) pivots[j] = v3_add(pivots[i], quat_rotate(q, v3_sub(pivots[j], pivots[i])));
+    }
+    return quat_rotate(quat_yaw(yaw), v3_sub(eye, eye0));
+}
+
 static CharacterInst *local_fp_char(World *w, int local_slot) {
     if (!w->chars || !LIB || !CG || !cv(CG->fp_body)) return NULL;
     for (int k = 0; k < MAX_CHARACTERS; k++) {
@@ -1173,30 +1206,40 @@ void chars_render_local_fp(World *w, float alpha, int local_slot) {
     float span = (float)DG_MAX(1, c->interval);
     float it = saturate(((float)(w->chars->tick - c->last_eval) + alpha) / span);
     for (int b = 0; b < s->count; b++) world[b] = xf_lerp(c->pose_prev[b], c->pose_cur[b], it);
-    // Body under the camera, shifted back along the flat view direction so the chest stays out
-    // of the view when looking down.
-    vec3 fwd = quat_rotate(t.cam_rot, v3(0, 0, -1));
-    float down = fmaxf(0.0f, -fwd.y);   // 0 level .. 1 straight down
-    fwd.y = 0;
-    fwd = v3_len2(fwd) > 1e-6f ? v3_norm(fwd) : v3(0, 0, -1);
-    int head = s->role[BR_HEAD];
-    // Looking down slides the body back: the aim-bent chest would otherwise sit under the camera.
-    vec3 want = v3_madd(t.cam_pos, fwd, -(CG->fp_back->f + CG->fp_back_down->f * down));
-    vec3 shift = v3(want.x - world[head].t.x, 0, want.z - world[head].t.z);
-    if (CG->fp_debug && CG->fp_debug->i && (g_engine.frame_index % 60) == 0)
-        log_info("fp body: cam %.2f %.2f %.2f head %.2f %.2f %.2f (s %.2f) root %.2f %.2f %.2f shift %.2f %.2f", t.cam_pos.x, t.cam_pos.y, t.cam_pos.z,
-                 world[head].t.x, world[head].t.y, world[head].t.z, world[head].s.x, c->root.t.x, c->root.t.y, c->root.t.z, shift.x, shift.z);
-    // Model space of a root at the shifted feet.
+    // The body stays exactly where the player stands (no offsets): the camera is at its eyes
+    // (chars_eye_offset bends the spine), so looking down shows the chest, legs and feet.
     Xform root = c->root;
-    root.t = v3_add(root.t, shift);
     root.s = v3s(c->def->scale);
     Xform inv_root = xf_inverse(root);
     pose.count = s->count;
     for (int b = 0; b < s->count; b++) {
-        world[b].t = v3_add(world[b].t, shift);
         model[b] = xf_mul(inv_root, world[b]);
         int p = s->parent[b];
         pose.local[b] = p >= 0 ? xf_mul(xf_inverse(model[p]), model[b]) : model[b];
+    }
+    // Out-of-reach weapon grips: the weapon moves back towards the body (along the camera's back
+    // axis) until both hands on it reach - the arms are never stretched or detached.
+    {
+        vec3 back = quat_rotate(t.cam_rot, v3(0, 0, 1));
+        float pull = 0;
+        for (int h = 0; h < 2; h++) {
+            int ua = s->role[h ? BR_R_ARM : BR_L_ARM], fa = s->role[h ? BR_R_FOREARM : BR_L_FOREARM], ha = s->role[h ? BR_R_HAND : BR_L_HAND];
+            if (!t.on_weapon[h] || ua < 0 || fa < 0 || ha < 0) continue;
+            float reach = (v3_dist(model[ua].t, model[fa].t) + v3_dist(model[fa].t, model[ha].t)) * c->def->scale * 0.985f;
+            Xform hand = proc_hand_for_socket(t.palm[h], LIB->hands.palm[h]);
+            vec3 d = v3_sub(hand.t, world[ua].t);
+            float db = v3_dot(d, back), dd = v3_dot(d, d);
+            if (dd <= reach * reach) continue;
+            float disc = db * db - dd + reach * reach;
+            float sh = disc >= 0 ? -db - sqrtf(disc) : -db;   // smallest pull that reaches (or the closest approach)
+            pull = fmaxf(pull, fminf(sh, 0.6f));
+        }
+        if (pull > 0) {
+            vec3 delta = v3_scale(back, pull);
+            hands_fp_shift(delta);
+            for (int h = 0; h < 2; h++) if (t.on_weapon[h]) t.palm[h].t = v3_add(t.palm[h].t, delta);
+            if (CG->fp_debug && CG->fp_debug->i) log_info("fp body: weapon pulled back %.0f mm to reach the grips", pull * 1000);
+        }
     }
     // Arms onto the first-person hand targets.
     bool raw = CG->fp_debug && CG->fp_debug->i >= 2;
@@ -1205,16 +1248,6 @@ void chars_render_local_fp(World *w, float alpha, int local_slot) {
         if (ua < 0 || fa < 0 || ha < 0) continue;
         Xform palm = xf_mul(inv_root, t.palm[h]);
         Xform hand = proc_hand_for_socket(palm, LIB->hands.palm[h]);
-        float reach = v3_dist(model[ua].t, model[fa].t) + v3_dist(model[fa].t, model[ha].t);
-        float need = v3_dist(model[ua].t, hand.t);
-        if (need > reach * 0.985f) {
-            // Out of reach: move the shoulder towards the target (the hand never leaves its grip).
-            float move = fminf(need - reach * 0.985f, CG->fp_max_shift->f);
-            vec3 dir = v3_scale(v3_sub(hand.t, model[ua].t), 1.0f / need);
-            pose_set_model(s, &pose, model, ua, xf_make(v3_madd(model[ua].t, dir, move), model[ua].r));
-            pose_update_children(s, &pose, model, ua);
-            if (cv(CG->fp_debug)) log_info("fp body: %s arm short by %.0f mm, shoulder moved %.0f mm", h ? "right" : "left", (need - reach) * 1000, move * 1000);
-        }
         float side = h ? 1.0f : -1.0f;
         vec3 pole = quat_rotate(quat_conj(root.r), quat_rotate(t.cam_rot, v3(0.8f * side, -1.0f, 0.25f)));
         anim_ik_two_bone_pose(s, &pose, model, ua, fa, ha, hand.t, &hand.r, pole, 1.0f);
@@ -1226,7 +1259,9 @@ void chars_render_local_fp(World *w, float alpha, int local_slot) {
         world[b] = xf_mul(root, model[b]);
         if (CG->head_bone[b] && !raw) world[b].s = v3s(1e-4f);
     }
-    draw_char_mesh(CG->mesh[c->def_index][0], c, world, 0, false);
+    // Arms are drawn once, in the viewmodel pass (own FOV): the world pass gets the body without them.
+    MeshId body = CG->arm_mesh[c->def_index] && CG->noarm_mesh[c->def_index] ? CG->noarm_mesh[c->def_index] : CG->mesh[c->def_index][0];
+    draw_char_mesh(body, c, world, 0, false);
     draw_char_mesh(CG->arm_mesh[c->def_index], c, world, MAT_VIEWMODEL, false);
     hands_set_body_arms(CG->arm_mesh[c->def_index] != 0);
     if (cv(CG->fp_debug))
