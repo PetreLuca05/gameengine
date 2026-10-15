@@ -102,6 +102,98 @@ static void test_diagonal_legs(void) {
     free(rt);
 }
 
+// Locomotion smoothness: a player-like input sequence (accelerate, diagonals, strafe, back, stop)
+// at 60 Hz through the full runtime (controller + post-pass); the per-tick acceleration of key
+// bones (model space) must not spike - spikes are pops / jitter.
+// Looping clips must wrap seamlessly: the jump from the last to the first frame is no bigger
+// than a normal frame step (feet / hands, model space).
+static void test_loop_seams(void) {
+    const Skeleton *s = &L->skel;
+    int bones[3] = { s->role[BR_L_FOOT], s->role[BR_R_HAND], s->role[BR_HIPS] };
+    for (int i = 0; i < L->clip_count; i++) {
+        const Clip *c = &L->clips[i];
+        if (!c->loop || c->frames < 4) continue;
+        Pose p;
+        Xform m[ANIM_MAX_BONES];
+        vec3 pos[4][3];
+        float ph[4] = { (float)(c->frames - 3) / (float)(c->frames - 1), (float)(c->frames - 2) / (float)(c->frames - 1), 0.0f, 1.0f / (float)(c->frames - 1) };
+        for (int k = 0; k < 4; k++) {
+            clip_sample_phase(c, ph[k], &p);
+            pose_to_model(s, &p, m);
+            for (int b = 0; b < 3; b++) pos[k][b] = m[bones[b]].t;
+        }
+        float step = 0, seam = 0;
+        for (int b = 0; b < 3; b++) {
+            step = fmaxf(step, fmaxf(v3_dist(pos[0][b], pos[1][b]), v3_dist(pos[2][b], pos[3][b])));
+            seam = fmaxf(seam, v3_dist(pos[1][b], pos[2][b]));
+        }
+        printf("  seam %-22s frame step %5.1f mm, wrap %5.1f mm\n", c->name, step * 1000, seam * 1000);
+        CHECK(seam < step * 2.5f + 0.004f, "clip %s: loop seam %.1f mm (frame step %.1f mm)", c->name, seam * 1000, step * 1000);
+    }
+}
+
+static void test_locomotion_smooth(void) {
+    const CharacterDef *def = anim_lib_char_by_id(L, "player");
+    if (!def) return;
+    const Skeleton *s = &L->skel;
+    CharRuntime *rt = (CharRuntime *)malloc(sizeof(CharRuntime));
+    charrt_init(rt, L, def);
+    const float dt = 1.0f / 60.0f;
+    CharInputs in;
+    memset(&in, 0, sizeof(in));
+    in.grounded = true;
+    vec2 vel = v2(0, 0);
+    int bones[4] = { s->role[BR_HIPS], s->role[BR_HEAD], s->role[BR_L_FOOT], s->role[BR_R_HAND] };
+    const char *bn[4] = { "hips", "head", "foot_l", "hand_r" };
+    vec3 hist[4][3];
+    float worst[4] = { 0 }, avg[4] = { 0 };
+    int worst_t[4] = { 0 }, n = 0;
+    for (int t = 0; t < 900; t++) {
+        // Input: wish direction (local x right, y forward), acceleration like the player controller.
+        vec2 wish = v2(0, 0);
+        int ph = t / 90;
+        static const float W[10][2] = { {0,0},{0,1},{1,1},{1,0},{1,-1},{0,-1},{-1,-1},{-1,0},{-1,1},{0,0} };
+        wish = v2(W[ph][0], W[ph][1]);
+        if (getenv("JERK_CONST")) wish = v2((float)atof(getenv("JERK_CONST")), 1.0f);
+        if (v2_len(wish) > 0) wish = v2_scale(wish, 4.2f / v2_len(wish));
+        vec2 dv = v2_sub(wish, vel);
+        float dl = v2_len(dv), acc = 40.0f * dt;
+        vel = dl > acc ? v2_add(vel, v2_scale(dv, acc / dl)) : wish;
+        float sp = v2_len(vel);
+        in.speed = sp;
+        in.move_local = sp > 0.05f ? v2_scale(vel, 1.0f / sp) : v2(0, 1);
+        charrt_set_inputs(rt, &in);
+        charrt_tick(rt, dt);
+        charrt_eval_base(rt);
+        ProcInput pi;
+        charrt_proc_input(rt, &pi, xf_make(v3(0, 0, 0), quat_identity()), dt);
+        charrt_post(rt, &pi);
+        for (int k = 0; k < 4; k++) {
+            hist[k][0] = hist[k][1];
+            hist[k][1] = hist[k][2];
+            hist[k][2] = rt->final_model[bones[k]].t;
+            if (t < 2) continue;
+            float a = v3_len(v3_add(v3_sub(hist[k][2], v3_scale(hist[k][1], 2.0f)), hist[k][0]));
+            avg[k] += a;
+            if (a > worst[k]) { worst[k] = a; worst_t[k] = t; }
+            if (getenv("JERK_TRACE") && k == 2 && t >= atoi(getenv("JERK_TRACE")) && t < atoi(getenv("JERK_TRACE")) + 20)
+                printf("    t%4d foot accel %6.1f mm  speed %.2f bspeed %.2f phase %.3f st %d blend %u/%u leg %+.1f dir %.2f,%.2f\n", t, a * 1000, in.speed,
+                       rt->blend_speed, rt->ctrl.layer[0].phase, rt->ctrl.layer[0].state, rt->ctrl.layer[0].blend_ticks, rt->ctrl.layer[0].blend_total,
+                       rt->leg_yaw * DG_RAD2DEG, rt->blend_dir.x, rt->blend_dir.y);
+        }
+        if (t >= 2) n++;
+    }
+    for (int k = 0; k < 4; k++) {
+        avg[k] /= (float)n;
+        printf("  smooth %-7s worst accel %6.2f mm/tick^2 (tick %d, phase %d)  mean %5.2f  ratio %.1f\n", bn[k], worst[k] * 1000, worst_t[k], worst_t[k] / 90,
+               avg[k] * 1000, worst[k] / fmaxf(avg[k], 1e-6f));
+        // Feet have sharp ground contacts in the clips themselves; transition pops are far larger.
+        float lim = k == 2 ? 8.0f : 6.0f;
+        CHECK(worst[k] < avg[k] * lim + 0.002f, "%s pops: worst %.2f mm/tick^2 vs mean %.2f (tick %d)", bn[k], worst[k] * 1000, avg[k] * 1000, worst_t[k]);
+    }
+    free(rt);
+}
+
 static void test_load(void) {
     CHECK(L->loaded, "library failed to load");
     CHECK(L->skel.count == 65, "skeleton bones %d", L->skel.count);
@@ -664,6 +756,8 @@ int main(int argc, char **argv) {
     test_damage_reaction();
     test_clip_facing();
     test_diagonal_legs();
+    test_loop_seams();
+    test_locomotion_smooth();
     test_upper_oneshots();
     test_determinism();
     test_quantization();

@@ -90,16 +90,23 @@ void proc_foot_legs(ProcState *st, const ProcInput *in, Pose *pose, Xform *model
         target.y += off[f];
         // Foot locking while planted (turn in place): keep the world position until it drifts.
         vec3 tw = xf_point(in->root, target);
+        // The lock eases in / out and a drifting lock glides to the new spot (a short "step")
+        // instead of snapping, so stopping / starting never pops the feet.
+        float ease = 1.0f - expf(-in->dt * 10.0f);
         if (planted) {
             if (!fs->locked) { fs->locked = true; fs->lock_pos = tw; }
             vec3 d = v3_sub(tw, fs->lock_pos);
             d.y = 0;
-            if (v3_len(d) > in->params->foot_lock_release) fs->lock_pos = tw;   // step
-            vec3 lp = xf_point(inv_root, fs->lock_pos);
-            target.x = lp.x;
-            target.z = lp.z;
+            if (v3_len(d) > in->params->foot_lock_release * 0.5f) fs->lock_pos = v3_add(fs->lock_pos, v3_scale(d, ease * 1.5f));
         } else {
-            fs->locked = false;
+            fs->lock_pos = tw;
+        }
+        fs->lock_w = clampf(fs->lock_w + ((planted ? 1.0f : 0.0f) - fs->lock_w) * ease, 0.0f, 1.0f);
+        if (!planted && fs->lock_w < 0.01f) fs->locked = false;
+        if (fs->lock_w > 0.0f) {
+            vec3 lp = xf_point(inv_root, fs->lock_pos);
+            target.x = lerpf(target.x, lp.x, fs->lock_w);
+            target.z = lerpf(target.z, lp.z, fs->lock_w);
         }
         // Pole: keep the knee where the animation put it.
         vec3 mid = v3_scale(v3_add(model[a].t, model[c].t), 0.5f);

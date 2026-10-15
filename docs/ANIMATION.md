@@ -66,6 +66,20 @@ changing direction or speed cross-fades the clips instead of popping (`CharRunti
 `blend_dir`, `character_rt.c`). `test_anim` checks the hip angle, chest facing and blend direction
 for every diagonal.
 
+**Smooth locomotion.** Speed and move direction go through critically damped springs (no
+velocity kinks), and the direction is split continuously into hip yaw plus blend direction:
+exactly 45° on a diagonal, untwisting through the strafe band, with no cut-off angles. Every
+looping clip's feet are synced to one shared reference (phase 0 = left-foot plant; mirror and
+reverse aware), so leaves can join or leave a blend without a phase jump. Blend spaces only use
+bound children, so unbound slots never take weight. Loops are made seamless at bake (bake
+version 5), and foot locking eases in and out. `test_anim` drives a full accelerate / diagonal /
+strafe / back / stop sequence through the runtime and fails on any acceleration spike, and checks
+every loop seam.
+
+**First-person camera.** The camera is the capsule eye plus the view's spine bend. It takes only a
+filtered, clamped share of the head socket's vertical bob (`cl_camera_socket_follow`, 0.35;
+0 = rock steady), so turning and direction changes never move it sideways.
+
 **Sample rate.** Clips are baked at the simulation rate (60 Hz, `anim_sample_rate`), so the
 animation advances one baked frame per game tick. `cl_thirdperson 1` shows your own body from
 behind, for checking locomotion.

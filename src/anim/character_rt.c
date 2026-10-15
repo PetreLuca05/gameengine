@@ -18,30 +18,43 @@ void charrt_init(CharRuntime *r, const AnimLibrary *lib, const CharacterDef *def
     r->in.health = def ? def->hp : 100;
 }
 
-// Lower-body yaw for a move direction (x right, y forward): forward sector -> forward clip turned
-// by the angle, backward sector -> backward clip turned, sideways -> strafe clips straight.
-static float leg_yaw_for(vec2 m, float speed) {
-    if (speed < 0.3f) return 0.0f;
-    float a = atan2f(m.x, m.y);                       // 0 forward, +90 right, 180 back
-    const float lim = 60.0f * DG_DEG2RAD;
-    if (fabsf(a) <= lim) return a;                    // forward diagonals
-    if (fabsf(a) >= DG_PI - lim) return wrap_angle(a - DG_PI);   // backward diagonals
-    return 0.0f;                                      // strafe
+// Continuous direction split (no cut-offs): move angle a (0 forward, +90 right, 180 back) ->
+// leg (hips) yaw l + blend-tree angle b with l + b = a.
+//   |a| <= 45      forward clip, hips turned by a           (b = 0)
+//   45 .. 90       hips untwist to 0 while the blend moves forward -> strafe
+//   90 .. 135      hips turn the other way while the blend moves strafe -> backward
+//   >= 135         backward clip, hips turned by a - 180    (b = 180)
+static float leg_yaw_of(float a) {
+    float s = a < 0 ? -1.0f : 1.0f, x = fabsf(a);
+    const float q = 0.25f * DG_PI;
+    if (x <= q) return a;
+    if (x <= 2 * q) return s * (2 * q - x);              // 45 -> 0
+    if (x <= 3 * q) return -s * (x - 2 * q);             // 0 -> -45
+    return wrap_angle(a - s * DG_PI);                    // a - 180
+}
+
+// Critically damped spring step (no velocity jumps when the target moves).
+static void spring_step(float *x, float *v, float target, float omega, float dt) {
+    float k = omega * omega, c = 2.0f * omega;
+    float acc = k * (target - *x) - c * *v;
+    *v += acc * dt;
+    *x += *v * dt;
+}
+
+static void apply_direction(CharRuntime *r) {
+    r->leg_yaw = leg_yaw_of(r->dir_ang);
+    float b = r->dir_ang - r->leg_yaw;
+    r->blend_dir = v2(sinf(b), cosf(b));
 }
 
 void charrt_set_inputs(CharRuntime *r, const CharInputs *in) {
     r->in = *in;
     ControllerInst *c = &r->ctrl;
-    ctrl_set(c, AP_SPEED, in->speed);
-    r->leg_yaw_target = leg_yaw_for(in->move_local, in->speed);
-    // The blend tree gets the direction left after the legs turned (pure forward on diagonals);
-    // the smoothed leg yaw makes sector changes blend instead of pop.
-    float cs = cosf(r->leg_yaw), sn = sinf(r->leg_yaw);
-    vec2 m = v2(in->move_local.x * cs - in->move_local.y * sn, in->move_local.x * sn + in->move_local.y * cs);
-    float ml = v2_len(m);
-    if (ml > 1e-4f) m = v2_scale(m, 1.0f / ml);
-    r->blend_dir_target = m;
-    if (v2_len(r->blend_dir) < 1e-3f) r->blend_dir = m;
+    // Move direction target (smoothed in charrt_tick); the blend tree and the hips are derived
+    // from the one smoothed angle, so they always agree.
+    r->dir_target = atan2f(in->move_local.x, in->move_local.y);
+    if (!r->dir_init) { r->dir_ang = r->dir_target; r->dir_init = true; apply_direction(r); }
+    ctrl_set(c, AP_SPEED, r->blend_speed);
     ctrl_set(c, AP_MOVE_X, r->blend_dir.x);
     ctrl_set(c, AP_MOVE_Y, r->blend_dir.y);
     ctrl_set(c, AP_GROUNDED, in->grounded ? 1.0f : 0.0f);
@@ -72,24 +85,28 @@ void charrt_set_inputs(CharRuntime *r, const CharInputs *in) {
 void charrt_trigger(CharRuntime *r, int p) { ctrl_trigger(&r->ctrl, p); }
 
 void charrt_tick(CharRuntime *r, float dt) {
-    // Ease the blend-tree direction (angle) and speed: direction / speed changes blend the clips
-    // over ~0.15 s instead of switching (deterministic, per tick).
-    {
-        float a0 = atan2f(r->blend_dir.x, r->blend_dir.y), a1 = atan2f(r->blend_dir_target.x, r->blend_dir_target.y);
-        float a = wrap_angle(a0 + wrap_angle(a1 - a0) * (1.0f - expf(-dt * 14.0f)));
-        r->blend_dir = v2(sinf(a), cosf(a));
-        float sp = r->in.speed;
-        r->blend_speed += (sp - r->blend_speed) * (1.0f - expf(-dt * 12.0f));
-        ctrl_set(&r->ctrl, AP_MOVE_X, r->blend_dir.x);
-        ctrl_set(&r->ctrl, AP_MOVE_Y, r->blend_dir.y);
-        ctrl_set(&r->ctrl, AP_SPEED, r->blend_speed);
+    // Speed and direction follow the input through critically damped springs: starting,
+    // stopping and direction changes cross-fade the clips and turn the hips without kinks.
+    spring_step(&r->blend_speed, &r->blend_speed_v, r->in.speed, 9.0f, dt);
+    if (r->blend_speed < 0.0f) { r->blend_speed = 0.0f; r->blend_speed_v = fmaxf(r->blend_speed_v, 0.0f); }
+    float target = r->dir_ang + wrap_angle(r->dir_target - r->dir_ang);   // shortest way round
+    if (r->blend_speed < 0.5f && r->in.speed < 0.5f) {
+        // Standing: the direction doesn't matter yet - follow at once, so the first step goes
+        // straight into the right clip instead of sweeping through others.
+        r->dir_ang = r->dir_target;
+        r->dir_ang_v = 0;
+    } else {
+        spring_step(&r->dir_ang, &r->dir_ang_v, target, 11.0f, dt);
+        r->dir_ang = wrap_angle(r->dir_ang);
     }
+    apply_direction(r);
+    // Standing still: the hips face the body (no leg twist while idle).
+    float move_w = saturate((r->blend_speed - 0.2f) / 1.0f);
+    r->leg_yaw *= move_w;
+    ctrl_set(&r->ctrl, AP_MOVE_X, r->blend_dir.x);
+    ctrl_set(&r->ctrl, AP_MOVE_Y, r->blend_dir.y);
+    ctrl_set(&r->ctrl, AP_SPEED, r->blend_speed);
     ctrl_tick(&r->ctrl, &r->lib->lookup, dt);
-    // Legs turn towards the move direction at up to 360 deg/s with an exponential ease.
-    float d = wrap_angle(r->leg_yaw_target - r->leg_yaw);
-    float step = d * (1.0f - expf(-dt * 10.0f));
-    float maxs = 6.2832f * dt;
-    r->leg_yaw = wrap_angle(r->leg_yaw + clampf(step, -maxs, maxs));
 }
 
 // Hips (and everything below) yawed by leg_yaw about the hips; Spine counter-rotated so the

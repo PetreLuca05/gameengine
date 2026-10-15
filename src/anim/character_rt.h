@@ -34,9 +34,11 @@ typedef struct CharRuntime {
     // counter-rotates so the upper body keeps facing the aim; the blend tree sees the remaining
     // (cardinal) direction. Smoothed per tick (deterministic).
     float leg_yaw, leg_yaw_target;
-    // Blend-tree direction, eased per tick so direction changes cross-fade the clips.
-    vec2 blend_dir, blend_dir_target;
-    float blend_speed;
+    // Smoothed move direction (spring) -> blend-tree direction + hip yaw; smoothed speed.
+    float dir_ang, dir_ang_v, dir_target;
+    bool dir_init;
+    vec2 blend_dir;
+    float blend_speed, blend_speed_v;
     // Tools (test stand): replaces the controller output with one clip at a fixed time.
     i16 override_clip;                // -1 = off
     float override_time;

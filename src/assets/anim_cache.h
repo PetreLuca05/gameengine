@@ -6,7 +6,7 @@
 #include "anim/anim.h"
 #include "anim/anim_mesh.h"
 
-#define ANIM_BAKE_VERSION 4
+#define ANIM_BAKE_VERSION 5
 
 void anim_cache_set_dir(const char *dir);        // absolute directory (created on demand)
 void anim_cache_set_rebuild(bool rebuild);       // --rebuild-cache: ignore existing entries

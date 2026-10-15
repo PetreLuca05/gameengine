@@ -1110,6 +1110,7 @@ void game_init(void) {
     cvar_reg_bool("cl_thirdperson", false, 0, "debug: camera behind the local player (full body visible)");
     cvar_reg_float("cl_thirdperson_dist", 3.0f, 0.5f, 10.0f, 0, "debug third-person camera distance");
     cvar_reg_bool("cl_camera_socket", true, CVAR_ARCHIVE, "first-person camera on the player model's head socket (assets/characters/player.json \"sockets\")");
+    cvar_reg_float("cl_camera_socket_follow", 0.35f, 0.0f, 1.0f, CVAR_ARCHIVE, "how much of the head socket's vertical bob the first-person camera takes (0 = none, rock steady)");
     cvar_reg_float("cl_camera_socket_roll", 0.0f, 0.0f, 1.0f, CVAR_ARCHIVE, "how much of the head socket's roll the camera takes (0 = none)");
     cvar_reg_bool("cl_healthbars", false, CVAR_ARCHIVE, "health bars and names above characters / dummies (HUD code kept, hidden by default)");
     G->anim_rate = cvar_reg_int("anim_sample_rate", SIM_HZ, 30, 120, 0, "FBX bake sample rate (Hz); defaults to the simulation rate");

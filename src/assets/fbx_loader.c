@@ -513,6 +513,23 @@ int fbx_bake_clips(const char *path, const Skeleton *canon, const FbxBakeOptions
             r->t = v3_sub(r->t, off);
         }
         free(yaw);
+        // Seamless loops: spread the last-frame -> first-frame difference over the whole clip
+        // (per bone, local space), so the cycle wraps without a pop.
+        if (c->loop && frames > 2) {
+            const Xform *f0 = c->data;
+            const Xform *fl = c->data + (size_t)(frames - 1) * canon->count;
+            for (int i = 0; i < canon->count; i++) {
+                vec3 dt_ = v3_sub(f0[i].t, fl[i].t);
+                quat dr = quat_norm(quat_mul(f0[i].r, quat_conj(fl[i].r)));
+                if (dr.w < 0) { dr.x = -dr.x; dr.y = -dr.y; dr.z = -dr.z; dr.w = -dr.w; }
+                for (int f = 1; f < frames; f++) {
+                    float u = (float)f / (float)(frames - 1);
+                    Xform *x = &c->data[(size_t)f * canon->count + i];
+                    x->t = v3_madd(x->t, dt_, u);
+                    x->r = quat_norm(quat_mul(quat_nlerp(quat_identity(), dr, u), x->r));
+                }
+            }
+        }
         float dist = v3_len(c->root_t[frames - 1]);
         c->avg_speed = c->duration > 0 ? dist / c->duration : 0;
         clip_detect_markers(c, canon);

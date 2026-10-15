@@ -8,3 +8,6 @@
 screenshots/
 build.log
 /assets/cache/
+
+# Local secrets (Higgsfield API token etc.) - never commit
+.env

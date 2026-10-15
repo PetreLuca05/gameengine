@@ -110,6 +110,7 @@ void proc_curl_fingers(const Skeleton *s, Pose *pose, Xform *model, int side, co
 typedef struct FootState {
     bool locked;
     vec3 lock_pos;             // world
+    float lock_w;              // lock blend weight (eased in / out: no snaps)
     float ground_y, prev_offset;
     vec3 ground_n;
 } FootState;

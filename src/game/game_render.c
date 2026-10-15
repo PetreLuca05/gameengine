@@ -340,7 +340,18 @@ void game_render(void) {
         } else if (!dead && lp && cvar_find("cl_camera_socket")->i && chars_fp_camera(w, G->alpha, G->local_slot, cam.yaw, cam.pitch, &sock)) {
             float raw_eye = interp.pos.y + player_eye_height(&interp);
             float smooth = G->view.smooth_eye_y - raw_eye;   // stair smoothing (0 on flat ground)
-            cam.pos = v3_add(sock.t, v3(0, smooth + G->view.land_offset, 0));
+            // Stable eye: capsule eye + the spine bend of the view (in view yaw, so turning the
+            // mouse or the body never swings the camera). The animated head socket only adds a
+            // filtered, clamped vertical bob - no horizontal sway, no direction-change jitter.
+            vec3 stable = v3_add(v3(interp.pos.x, G->view.smooth_eye_y + G->view.land_offset, interp.pos.z), player_eye_offset(cam.yaw, cam.pitch));
+            float follow = cvar_find("cl_camera_socket_follow")->f;
+            float dev = clampf(sock.t.y + smooth + G->view.land_offset - stable.y, -0.05f, 0.05f) * follow;
+            static float dev_f;
+            static bool dev_init;
+            float k = 1.0f - expf(-(float)g_engine.frame_dt * 8.0f);
+            if (!dev_init) { dev_f = dev; dev_init = true; }
+            dev_f += (dev - dev_f) * k;
+            cam.pos = v3_add(stable, v3(0, dev_f, 0));
             cam.roll = G->view.roll;
             float hr = cvar_find("cl_camera_socket_roll")->f;
             if (hr > 0) {

@@ -445,6 +445,53 @@ static void blend2d_weights(const BlendNode *n, vec2 pt, bool polar, float *w) {
     for (int i = 0; i < k; i++) w[i] /= sum;
 }
 
+// A node is bound if it (or any child) resolves to a clip in the anim set.
+static bool node_bound(const ControllerInst *c, int node, int depth) {
+    if (node < 0 || depth > 8) return false;
+    const BlendNode *n = &c->def->nodes[node];
+    if (n->kind == NK_CLIP) {
+        if (n->slot_pattern[0]) {
+            int wt = DG_CLAMP((int)c->params[AP_WEAPON_TYPE], 0, 15);
+            return c->bind->pattern_slot[node][wt] <= -2;
+        }
+        return n->slot >= 0 && c->bind->slots[n->slot].clip >= 0;
+    }
+    for (int i = 0; i < n->child_count; i++) if (node_bound(c, n->child[i], depth + 1)) return true;
+    return false;
+}
+
+static void collect(const ControllerInst *c, int node, float weight, float speed, LeafSet *out);
+
+// Blend weights over the bound children only (unbound ones are left out of the blend space, so
+// they never take weight and force a renormalization pop near their position).
+static void blend_weights_bound(const ControllerInst *c, const BlendNode *n, float *w) {
+    int k = n->child_count, idx[AC_MAX_CHILDREN], m = 0;
+    for (int i = 0; i < k; i++) { w[i] = 0; if (node_bound(c, n->child[i], 0)) idx[m++] = i; }
+    if (m == 0) for (int i = 0; i < k; i++) idx[m++] = i;
+    BlendNode t = *n;
+    t.child_count = m;
+    for (int j = 0; j < m; j++) { t.child[j] = n->child[idx[j]]; t.threshold[j] = n->threshold[idx[j]]; t.pos[j] = n->pos[idx[j]]; }
+    float tw[AC_MAX_CHILDREN] = { 0 };
+    if (n->kind == NK_BLEND1D) {
+        float v = pv(c, n->param_x);
+        if (m == 1 || v <= t.threshold[0]) tw[0] = 1;
+        else if (v >= t.threshold[m - 1]) tw[m - 1] = 1;
+        else {
+            for (int i = 0; i < m - 1; i++)
+                if (v >= t.threshold[i] && v <= t.threshold[i + 1]) {
+                    float span = t.threshold[i + 1] - t.threshold[i];
+                    float u = span > 1e-6f ? (v - t.threshold[i]) / span : 0;
+                    tw[i] = 1 - u;
+                    tw[i + 1] = u;
+                    break;
+                }
+        }
+    } else {
+        blend2d_weights(&t, v2(pv(c, n->param_x), pv(c, n->param_y)), n->kind == NK_BLEND2D_DIR, tw);
+    }
+    for (int j = 0; j < m; j++) w[idx[j]] = tw[j];
+}
+
 static void collect(const ControllerInst *c, int node, float weight, float speed, LeafSet *out) {
     if (node < 0 || weight <= 0.0f) return;
     const BlendNode *n = &c->def->nodes[node];
@@ -475,24 +522,7 @@ static void collect(const ControllerInst *c, int node, float weight, float speed
     }
     float w[AC_MAX_CHILDREN];
     int k = n->child_count;
-    for (int i = 0; i < k; i++) w[i] = 0;
-    if (n->kind == NK_BLEND1D) {
-        float v = pv(c, n->param_x);
-        if (k == 1 || v <= n->threshold[0]) w[0] = 1;
-        else if (v >= n->threshold[k - 1]) w[k - 1] = 1;
-        else {
-            for (int i = 0; i < k - 1; i++)
-                if (v >= n->threshold[i] && v <= n->threshold[i + 1]) {
-                    float span = n->threshold[i + 1] - n->threshold[i];
-                    float t = span > 1e-6f ? (v - n->threshold[i]) / span : 0;
-                    w[i] = 1 - t;
-                    w[i + 1] = t;
-                    break;
-                }
-        }
-    } else {
-        blend2d_weights(n, v2(pv(c, n->param_x), pv(c, n->param_y)), n->kind == NK_BLEND2D_DIR, w);
-    }
+    blend_weights_bound(c, n, w);
     for (int i = 0; i < k; i++) collect(c, n->child[i], weight * w[i], speed, out);
 }
 
@@ -741,16 +771,18 @@ static void sample_leaves(const ControllerInst *c, const Skeleton *skel, const C
     Pose tmp;
     float total = 0;
     bool first = true;
-    // Phase sync: children align their first foot plant to the first leaf's.
-    float ref_plant = 0;
-    if (ls->n && ls->l[0].clip >= 0 && cl->clips[ls->l[0].clip].has_markers) ref_plant = cl->clips[ls->l[0].clip].plant[0];
+    // Phase sync on one shared reference: state phase 0 = the left foot plant of every looping
+    // clip (mirrored clips swap feet, reversed clips run their plants backwards). The reference
+    // never depends on which leaves are active, so weights / leaf sets can change without a pop.
     for (int i = 0; i < ls->n; i++) {
         const Leaf *l = &ls->l[i];
         if (l->clip < 0 || l->clip >= cl->count) continue;
         const Clip *cp = &cl->clips[l->clip];
         float ph = phase;
-        if (cp->loop && cp->has_markers && i > 0) {
-            ph = phase + (cp->plant[0] - ref_plant);
+        bool synced = cp->loop && cp->has_markers;
+        if (synced) {
+            float left = l->mirror ? cp->plant[1] : cp->plant[0];
+            ph = phase + (l->reverse ? 1.0f - left : left);
             ph -= floorf(ph);
         }
         if (l->reverse) ph = 1.0f - ph;
