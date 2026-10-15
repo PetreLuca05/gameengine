@@ -13,6 +13,21 @@
 #include "anim/anim_mesh.h"
 
 #define CHAR_LOD_FILES 4
+#define CHAR_MAX_SOCKETS 8
+
+// Named attach point parented to a bone (like an Unreal Engine skeletal mesh socket): relative
+// location / rotation in the bone's space. JSON:
+//   "sockets": { "camera": { "bone": "Head", "offset": [0, 0.10, -0.10], "rotation": [0, 0, 0], "space": "bind" } }
+// "space": "bone" = offset / rotation in the bone's local frame; "bind" (default) = model-space
+// offset at the bind pose (character faces -Z, +Y up), converted to the bone's frame at load.
+typedef struct CharSocket {
+    char name[24];
+    char bone_name[48];
+    int bone;                      // resolved skeleton index (-1 = unresolved)
+    vec3 offset, rotation_deg;
+    bool bind_space;
+    Xform rel;                     // bone space
+} CharSocket;
 
 typedef enum CharKind { CK_PLAYER, CK_ZOMBIE, CK_DUMMY } CharKind;
 
@@ -35,8 +50,17 @@ typedef struct CharacterDef {
     float hp;
     float move_speed;
     float lod_bias;
+    CharSocket sockets[CHAR_MAX_SOCKETS];
+    int socket_count;
     bool valid;                    // mesh bound + rig validated
 } CharacterDef;
+
+// Resolves socket bones against the skeleton (after loading). Missing "camera" sockets on player
+// characters get the default eye socket on the Head bone.
+void character_resolve_sockets(CharacterDef *d, const Skeleton *s);
+const CharSocket *character_socket(const CharacterDef *d, const char *name);
+// World transform of a socket from bone world transforms (false if missing).
+bool character_socket_world(const CharacterDef *d, const char *name, const Xform *bone_world, Xform *out);
 
 bool character_def_parse(CharacterDef *d, const char *json_text, const char *source, char *err, int err_size);
 

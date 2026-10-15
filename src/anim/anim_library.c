@@ -219,6 +219,7 @@ bool anim_lib_reload_characters(AnimLibrary *lib) {
         d->anim_set_index = anim_lib_find_set(lib, d->anim_set);
         if (d->anim_set_index < 0) { log_warn("character %s: anim set '%s' not found, using '%s'", d->id, d->anim_set, lib->sets[0].name); d->anim_set_index = 0; }
         d->valid = d->mesh >= 0;
+        character_resolve_sockets(d, &lib->skel);
         h = anim_hash(&d->hash, sizeof(u32), h);
         lib->char_count++;
     }

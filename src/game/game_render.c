@@ -324,8 +324,27 @@ void game_render(void) {
         cam.roll += kr.z * DG_DEG2RAD;
         cam.pos = v3_madd(cam.pos, dir_from_angles(cam.yaw, cam.pitch), -kb);
     }
-    // Camera at the body's eyes: the aim pitch bends the spine (same offset as the gameplay eye).
-    if (!dead) cam.pos = v3_add(cam.pos, player_eye_offset(cam.yaw, cam.pitch));
+    // First-person camera on the body's head socket (Unreal-style): position from the animated
+    // head (spine bent to this frame's view), rotation = the view (pawn control rotation). Stair
+    // smoothing and the landing dip are kept; the animation replaces the procedural head bob.
+    {
+        Xform sock;
+        Player *lp = game_local_player();
+        if (!dead && lp && cvar_find("cl_camera_socket")->i && chars_fp_camera(w, G->alpha, G->local_slot, cam.yaw, cam.pitch, &sock)) {
+            float raw_eye = interp.pos.y + player_eye_height(&interp);
+            float smooth = G->view.smooth_eye_y - raw_eye;   // stair smoothing (0 on flat ground)
+            cam.pos = v3_add(sock.t, v3(0, smooth + G->view.land_offset, 0));
+            cam.roll = G->view.roll;
+            float hr = cvar_find("cl_camera_socket_roll")->f;
+            if (hr > 0) {
+                vec3 rgt = quat_rotate(sock.r, v3(1, 0, 0));
+                cam.roll += asinf(clampf(rgt.y, -1.0f, 1.0f)) * hr;   // a little of the head's own roll
+            }
+            G->view.eye = cam.pos;
+        } else if (!dead) {
+            cam.pos = v3_add(cam.pos, player_eye_offset(cam.yaw, cam.pitch));
+        }
+    }
     render_set_camera(&cam);
 
     LevelStatic *ls = &w->level;
@@ -357,7 +376,10 @@ void game_render(void) {
         hi.roll = cam.roll;
         hi.look_delta = G->frame_look;
         hi.dt = (float)g_engine.frame_dt;
-        hi.focus = G->focus;
+        hi.focus = G->use_pressed_frame && G->use_focus ? G->use_focus : G->focus;
+        hi.use_target_valid = G->use_pressed_frame && G->use_focus_hands >= 0;
+        hi.use_target = G->use_focus_point;
+        hi.use_target_hands = G->use_focus_hands;
         hi.use_pressed = G->use_pressed_frame;
         hi.use_held = (G->last_cmd.buttons & BTN_USE) != 0;
         hi.ads = ads;

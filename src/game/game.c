@@ -568,6 +568,19 @@ void game_frame(float dt) {
     camera_apply_look(&G->view, G->frame_look);
     if (!ui_blocking) handle_hotbar();
     G->use_pressed_frame = !ui_blocking && input_peek_press(ACT_USE);
+    // The interaction may finish inside this frame's tick (pickups vanish): remember its target
+    // for the hand reach.
+    if (G->use_pressed_frame) {
+        G->use_focus = G->focus;
+        G->use_focus_hands = -1;
+        if (ent_valid(G->world, G->focus)) {
+            const InteractDef *def = G->world->inter[ENT_INDEX(G->focus)].def;
+            if (def && def->hand_target) {
+                G->use_focus_point = ent_focus_point(G->world, G->focus);
+                G->use_focus_hands = (int)def->hands;
+            }
+        }
+    }
 
     G->accumulator += dt;
     int steps = 0;
@@ -1094,6 +1107,8 @@ void game_init(void) {
     player_register_cvars();
     // Animation assets (shared skeleton) before anything spawns characters.
     characters_register_cvars();
+    cvar_reg_bool("cl_camera_socket", true, CVAR_ARCHIVE, "first-person camera on the player model's head socket (assets/characters/player.json \"sockets\")");
+    cvar_reg_float("cl_camera_socket_roll", 0.0f, 0.0f, 1.0f, CVAR_ARCHIVE, "how much of the head socket's roll the camera takes (0 = none)");
     cvar_reg_bool("cl_healthbars", false, CVAR_ARCHIVE, "health bars and names above characters / dummies (HUD code kept, hidden by default)");
     G->anim_rate = cvar_reg_int("anim_sample_rate", 30, 30, 60, CVAR_ARCHIVE, "FBX bake sample rate (30 or 60 Hz, restart)");
     g_engine.anim = (AnimLibrary *)calloc(1, sizeof(AnimLibrary));

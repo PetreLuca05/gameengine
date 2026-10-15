@@ -43,6 +43,8 @@ typedef struct HoldStyle {
     float curl_r[5], curl_l[5];// finger curl (deg) thumb, index, middle, ring, pinky
     float aim_pitch_scale;     // how much the item follows aim pitch (1 = fully)
     float ads_weight;          // how far ADS moves the item to the eye (0 = no ADS pose, melee)
+    vec3 fp_hip;               // owner-only first-person hip position in eye space (x right, y up, -z fwd)
+    float fp_weight;           // 0 = first person uses the normal hip pose
 } HoldStyle;
 
 // Item sockets in item space (item origin = right grip, -Z = barrel forward, +Y up).
@@ -162,6 +164,7 @@ typedef struct ProcInput {
     bool foot_ik, spine, turn, hold, lean, damage;  // per-system enables (LOD + cvars)
     vec3 item_kick_pos, item_kick_rot;   // recoil kick applied to the item (aim space, m / deg)
     float crouch_drop;         // procedural crouch: pelvis lowering (m) when no crouch clips are bound
+    bool first_person;         // the local player's own body (owner-only hold adjustments)
     vec3 hand_anchor[2];       // world-space ledge anchors (mantle / hang), weight below
     float hand_anchor_w;
 } ProcInput;

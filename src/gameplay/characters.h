@@ -53,6 +53,7 @@ typedef struct CharacterInst {
     u32 last_land_tick;
     bool was_grounded, was_reloading;
     float last_equip_t;
+    float fp_pitch[2], fp_yaw[2], fp_body_yaw[2];   // aim used by the last two post-passes (prev, cur)
     // render (any machine that draws)
     Xform *pose_prev, *pose_cur;      // post-IK bone world transforms
     Xform item_prev, item_cur;
@@ -122,8 +123,12 @@ void chars_render(World *w, float alpha, vec3 cam_pos, int local_slot);
 // First-person body of the local player (cl_fp_body): call after hands_update, before
 // hands_render. Draws the body (head hidden) and its arms on the first-person hand targets.
 void chars_render_local_fp(World *w, float alpha, int local_slot);
-// Eye offset from the spine bend for an aim (yaw, pitch): added to the gameplay eye and the camera.
+// Eye offset from the spine bend for an aim (yaw, pitch): added to the gameplay eye.
 vec3 chars_eye_offset(float yaw, float pitch);
+// First-person camera socket (Unreal-style camera on a head socket): prepares this frame's body
+// pose with the spine aimed at (yaw, pitch) and returns the "camera" socket's world transform.
+// The camera takes the position; its rotation stays the view (pawn control rotation).
+bool chars_fp_camera(World *w, float alpha, int local_slot, float yaw, float pitch, Xform *socket_world);
 // Events (reliable, compact): host queues + applies, clients apply what arrives.
 void chars_push_event(World *w, const AnimEvent *e);
 void chars_on_event(World *w, const AnimEvent *e);

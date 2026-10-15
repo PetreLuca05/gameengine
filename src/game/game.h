@@ -55,6 +55,9 @@ typedef struct Game {
 
     // interaction focus (local)
     EntityId focus;
+    EntityId use_focus;            // focus at this frame's use press (before the tick consumed it)
+    vec3 use_focus_point;          // its focus point (pickups vanish inside the tick)
+    int use_focus_hands;           // HandMode of its interaction (-1 none)
     char focus_prompt[96];
     float hold_progress;         // 0..1 for hold interactions (from host state)
 

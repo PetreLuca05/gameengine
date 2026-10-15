@@ -42,8 +42,73 @@ bool character_def_parse(CharacterDef *d, const char *text, const char *source, 
     d->hp = jf(root, "hp", d->kind == CK_PLAYER ? 100.0f : 120.0f);
     d->move_speed = jf(root, "move_speed", 1.3f);
     d->lod_bias = jf(root, "lod_bias", 1.0f);
+    d->socket_count = 0;
+    cJSON_ArrayForEach(e, cJSON_GetObjectItemCaseSensitive(root, "sockets")) {
+        if (!cJSON_IsObject(e) || d->socket_count >= CHAR_MAX_SOCKETS) continue;
+        CharSocket *k = &d->sockets[d->socket_count++];
+        memset(k, 0, sizeof(*k));
+        dg_strcpy(k->name, sizeof(k->name), e->string);
+        dg_strcpy(k->bone_name, sizeof(k->bone_name), js(e, "bone", "Head"));
+        const cJSON *o = cJSON_GetObjectItemCaseSensitive(e, "offset");
+        if (cJSON_IsArray(o) && cJSON_GetArraySize(o) >= 3)
+            k->offset = v3((float)cJSON_GetArrayItem(o, 0)->valuedouble, (float)cJSON_GetArrayItem(o, 1)->valuedouble, (float)cJSON_GetArrayItem(o, 2)->valuedouble);
+        const cJSON *r = cJSON_GetObjectItemCaseSensitive(e, "rotation");
+        if (cJSON_IsArray(r) && cJSON_GetArraySize(r) >= 3)
+            k->rotation_deg = v3((float)cJSON_GetArrayItem(r, 0)->valuedouble, (float)cJSON_GetArrayItem(r, 1)->valuedouble, (float)cJSON_GetArrayItem(r, 2)->valuedouble);
+        k->bind_space = strcmp(js(e, "space", "bind"), "bone") != 0;
+        k->bone = -1;
+    }
     d->hash = anim_hash_str(text, ANIM_HASH_SEED);
     cJSON_Delete(root);
+    return true;
+}
+
+// ------------------------------------------------------------------ sockets
+
+static quat socket_euler(vec3 deg) {
+    return quat_euler(deg.y * DG_DEG2RAD, deg.x * DG_DEG2RAD, deg.z * DG_DEG2RAD);
+}
+
+void character_resolve_sockets(CharacterDef *d, const Skeleton *s) {
+    if (d->kind == CK_PLAYER && !character_socket(d, "camera") && d->socket_count < CHAR_MAX_SOCKETS) {
+        CharSocket *k = &d->sockets[d->socket_count++];
+        memset(k, 0, sizeof(*k));
+        dg_strcpy(k->name, sizeof(k->name), "camera");
+        dg_strcpy(k->bone_name, sizeof(k->bone_name), "Head");
+        k->offset = v3(0, 0.10f, -0.10f);   // eyes: above / in front of the head joint
+        k->bind_space = true;
+    }
+    for (int i = 0; i < d->socket_count; i++) {
+        CharSocket *k = &d->sockets[i];
+        k->bone = skel_find(s, k->bone_name);
+        if (k->bone < 0) k->bone = skel_find_suffix(s, k->bone_name);
+        if (k->bone < 0) { k->rel = xf_identity(); continue; }
+        quat rot = socket_euler(k->rotation_deg);
+        if (k->bind_space) {
+            Xform bind = s->bind_model[k->bone];
+            Xform want = xf_make(v3_add(bind.t, k->offset), rot);
+            k->rel = xf_mul(xf_inverse(bind), want);
+        } else {
+            k->rel = xf_make(k->offset, rot);
+        }
+        k->rel.s = v3(1, 1, 1);
+    }
+}
+
+const CharSocket *character_socket(const CharacterDef *d, const char *name) {
+    for (int i = 0; i < d->socket_count; i++) if (!strcmp(d->sockets[i].name, name)) return &d->sockets[i];
+    return NULL;
+}
+
+bool character_socket_world(const CharacterDef *d, const char *name, const Xform *bone_world, Xform *out) {
+    const CharSocket *k = character_socket(d, name);
+    if (!k || k->bone < 0) return false;
+    Xform b = bone_world[k->bone];
+    float sc = b.s.x;
+    // Bone world transforms carry the character scale: scale the offset, keep the rotation pure.
+    out->t = v3_add(b.t, quat_rotate(b.r, v3_scale(k->rel.t, sc)));
+    out->r = quat_norm(quat_mul(b.r, k->rel.r));
+    out->s = v3(1, 1, 1);
     return true;
 }
 

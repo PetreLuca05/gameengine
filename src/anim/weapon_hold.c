@@ -26,6 +26,8 @@ static HoldStyle blend_style(const HoldStyle *a, const HoldStyle *b, float t) {
     for (int i = 0; i < 5; i++) { h.curl_r[i] = lerpf(a->curl_r[i], b->curl_r[i], t); h.curl_l[i] = lerpf(a->curl_l[i], b->curl_l[i], t); }
     h.aim_pitch_scale = lerpf(a->aim_pitch_scale, b->aim_pitch_scale, t);
     h.ads_weight = lerpf(a->ads_weight, b->ads_weight, t);
+    h.fp_hip = v3_lerp(a->fp_hip, b->fp_hip, t);
+    h.fp_weight = lerpf(a->fp_weight, b->fp_weight, t);
     return h;
 }
 
@@ -89,6 +91,12 @@ void proc_hold(ProcState *st, const ProcInput *in, Pose *pose, Xform *model) {
     Xform hip = xf_make(v3_add(anchor, quat_rotate(aim, hs.hip_offset)), quat_mul(aim, euler_deg(hs.hip_rot)));
     vec3 eye = head >= 0 ? v3_add(model[head].t, quat_rotate(yaw_q, v3(0, 0.075f, -0.09f))) : v3_add(anchor, v3(0, 0.3f, 0));
     Xform ads = xf_make(v3_add(eye, quat_rotate(aim, v3(0, -it->sight_height - 0.012f, -hs.ads_distance))), aim);
+    // Owner's first-person body: the hip pose sits in view below the eyes (like an owner-only aim
+    // pose); everyone else sees the normal hip pose. Reach / glue rules are the same.
+    if (in->first_person && hs.fp_weight > 0) {
+        Xform fp = xf_make(v3_add(eye, quat_rotate(aim, hs.fp_hip)), hip.r);
+        hip = xf_lerp(hip, fp, saturate(hs.fp_weight));
+    }
     float ads_t = saturate(in->ads_t) * hs.ads_weight;
     Xform desired = xf_lerp(hip, ads, ads_t);
     if (in->sprinting && ads_t < 0.5f) {

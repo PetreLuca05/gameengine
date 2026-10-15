@@ -34,6 +34,10 @@ typedef struct HandsInput {
     bool use_pressed;         // use edge this frame (local prediction of the interaction)
     bool use_held;
     bool ads;
+    // Interaction target captured at the use press (the entity may vanish within the frame).
+    bool use_target_valid;
+    vec3 use_target;
+    int use_target_hands;
     vec3 vm_kick_pos;         // viewmodel recoil spring: camera space offset (m, +z = back)
     vec3 vm_kick_rot;         // pitch (muzzle up), yaw (right), roll in degrees
 } HandsInput;
@@ -63,6 +67,8 @@ typedef struct HandsFpTargets {
     Xform palm[2];
     u8 grip[2];               // GripType
     bool on_weapon[2];        // palm is on the held item's socket (finger curl from the hold style)
+    Xform ov_palm[2];         // interaction / ledge target palm (world)
+    float ov_w[2];            // its weight (0 = the body's own hold / pose)
     const struct WeaponDef *weapon;
     const struct ItemDef *item;
     vec3 cam_pos;
@@ -74,6 +80,8 @@ bool hands_fp_targets(HandsFpTargets *out);
 void hands_set_body_arms(bool on);
 // Moves the held item (and the hands on it) by delta this frame (body arms out of reach).
 void hands_fp_shift(vec3 delta);
+// True first person: draw the held item (and its muzzle) at the body's hold transform this frame.
+void hands_fp_set_item(vec3 pos, quat rot);
 // World-space barrel tip of the local viewmodel weapon (last hands_update). False if no gun.
 bool hands_muzzle(vec3 *pos, vec3 *fwd);
 void hands_reload_poses(void);

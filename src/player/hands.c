@@ -447,17 +447,27 @@ void hands_update(const HandsInput *in) {
             H->ia_mode = def->hands;
         }
     }
+    // The target vanished inside this frame's tick (a pickup): reach for where it was.
+    if (in->use_pressed && H->ia_phase == IA_NONE && in->use_target_valid) {
+        H->ia_phase = IA_REACH;
+        H->ia_target = ENT_NONE;
+        H->ia_t = 0;
+        H->ia_mode = (HandMode)in->use_target_hands;
+        quat palm_down = quat_mul(quat_yaw(in->yaw), quat_axis_angle(v3(1, 0, 0), -1.2f));   // as pickup_hand
+        for (int h = 0; h < 2; h++) { H->ia_last_pos[h] = in->use_target; H->ia_last_rot[h] = palm_down; }
+    }
     if (H->ia_phase != IA_NONE) {
         H->ia_t += dt;
         bool valid = ent_valid(w, H->ia_target) && w->inter[ENT_INDEX(H->ia_target)].def;
         const InteractDef *def = valid ? w->inter[ENT_INDEX(H->ia_target)].def : NULL;
         float reach_time = 0.16f;
-        float hold_time = def ? (def->hold_time > 0 ? def->hold_time + 0.25f : 0.38f) : 0.0f;
+        float hold_time = def ? (def->hold_time > 0 ? def->hold_time + 0.25f : 0.38f) : (H->ia_target == ENT_NONE ? 0.12f : 0.0f);
         if (H->ia_phase == IA_REACH && H->ia_t >= reach_time) { H->ia_phase = IA_HOLD; H->ia_t = 0; }
         if (H->ia_phase == IA_HOLD) {
             bool hold_interaction = def && def->hold_time > 0;
             bool released = hold_interaction && !in->use_held && H->ia_t < def->hold_time;
-            if (!valid || released || H->ia_t >= hold_time) { H->ia_phase = IA_RETURN; H->ia_t = 0; }
+            bool gone = !valid && H->ia_target != ENT_NONE;
+            if (gone || released || H->ia_t >= hold_time) { H->ia_phase = IA_RETURN; H->ia_t = 0; }
         }
         if (H->ia_phase == IA_RETURN && H->ia_t >= 0.22f) H->ia_phase = IA_NONE;
 
@@ -465,8 +475,11 @@ void hands_update(const HandsInput *in) {
         if (H->ia_phase == IA_REACH) wgt = smoothstepf(0, 1, H->ia_t / reach_time);
         else if (H->ia_phase == IA_HOLD) wgt = 1;
         else if (H->ia_phase == IA_RETURN) wgt = 1.0f - smoothstepf(0, 1, H->ia_t / 0.22f);
+        // Holding something: the free (left) hand does the interaction / pickup, the item stays.
+        bool holding = H->weapon || H->held_item;
+        int free_hand = holding ? HAND_LEFT : HAND_RIGHT;
         for (int h = 0; h < 2; h++) {
-            bool uses_hand = (H->ia_mode == HANDS_BOTH) || h == HAND_RIGHT;
+            bool uses_hand = (H->ia_mode == HANDS_BOTH && !holding) || h == free_hand;
             if (!uses_hand) continue;
             vec3 tp;
             quat tr;
@@ -482,7 +495,7 @@ void hands_update(const HandsInput *in) {
                 H->ov_grip[h] = H->ia_mode == HANDS_POINT ? GRIP_POINT : GRIP_GRAB;
             }
             // A one-handed interaction releases the weapon support grip.
-            if (h == HAND_RIGHT && weapon_two_handed && wgt > 0) weapon_two_handed = false;
+            if (h == free_hand && weapon_two_handed && wgt > 0) weapon_two_handed = false;
         }
     }
     for (int h = 0; h < 2; h++) {
@@ -525,6 +538,8 @@ void hands_update(const HandsInput *in) {
         for (int h = 0; h < 2; h++) {
             Xform hand = xf_make(H->chain[h].hand_pos, H->chain[h].hand_rot);
             t->palm[h] = hand;
+            t->ov_palm[h] = xf_make(H->ov_pos[h], H->ov_rot[h]);
+            t->ov_w[h] = smoothstepf(0, 1, H->ov_w[h]);
             t->grip[h] = H->chain[h].grip;
             Xform sock;
             bool use = false;
@@ -654,6 +669,12 @@ bool hands_fp_targets(HandsFpTargets *out) {
 }
 
 void hands_set_body_arms(bool on) { if (H) H->body_arms = on; }
+
+void hands_fp_set_item(vec3 pos, quat rot) {
+    if (!H) return;
+    H->weapon_pos = pos;
+    H->weapon_rot = rot;
+}
 
 void hands_fp_shift(vec3 delta) {
     if (!H) return;

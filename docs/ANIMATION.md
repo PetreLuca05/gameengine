@@ -222,36 +222,31 @@ animation follows the movement (`speed_match`).
   keep a body shadow without clipping the camera.
 * **Held items.** Rendered at the procedural `item_world` with `hands_draw_held`.
 
-## First-person body (`cl_fp_body`)
+## First-person body (`cl_fp_body`, true first person)
 
-The local player sees their own, undistorted body, and **the player model's arms replace the
-placeholder hands**:
+The local player sees their own, undistorted body, Unreal "true first person" style:
 
-* **Camera at the eyes.** Looking up and down bends Spine, Spine1, Spine2, Neck and Head with the
-  controller's spine weights, so the body leans over its feet. `chars_eye_offset(yaw, pitch)` is
-  the same bend applied to the bind pose. It moves both the camera and the gameplay eye
-  (`player_eye_pos`: shots, interactions), so looking down carries the eyes forward and you see
-  your chest, legs and feet. It's a pure function of the shared assets, so host and clients agree.
-* **No distortion.** The body stays where the player stands. Only the head is hidden (collapsed to
-  its joint) so the camera never sees inside it.
-* **Targets.** `hands.c` still decides where the hands go: clips, sway, recoil, interactions, ledge
-  grabs. It exports palm frames per hand (`hands_fp_targets`). Hands on a weapon go to its
-  `grip_r` / `grip_l` sockets; everything else uses the solved hand frames.
-* **IK and reach.** `chars_render_local_fp` runs two-bone IK on both arms to those palms. If a grip
-  is out of reach, the weapon itself moves back along the camera axis until both hands reach it
-  (`hands_fp_shift`). The arms never stretch or detach.
-* **Fingers.** Hands on the weapon keep the hold style's finger curl. Other hands curl by grip type.
+* **Camera socket.** Characters have named sockets (bone + offset / rotation, like Unreal skeletal
+  mesh sockets) in `assets/characters/*.json` → `"sockets"`. The camera position follows the
+  `camera` socket on the `Head` bone; its rotation is the view (pawn control rotation). Each frame
+  the spine is bent to that frame's view first, so the head and camera never lag the mouse.
+  Stair smoothing and the landing dip are kept. `cl_camera_socket 0` uses the old eye camera, and
+  `cl_camera_socket_roll` blends in the head's roll.
+* **Same pose everyone sees.** The weapon is the body's procedural hold, with both hands glued, as
+  other players see it. The owner gets a raised hip pose (`fp_hip` per hold style, eye space) so
+  the weapon sits in view. Only the head is hidden.
 * **Static arms.** While an item is held, the arms (clavicles down) don't play the locomotion clip.
-  They take a fixed relaxed pose and the hold IK places the hands. This applies in third person and
-  on other players too.
+  They take a fixed relaxed pose under the hold IK, in third person and on other players too.
+* **Interactions.** Door knobs, levers, switches, pickups and ledge grabs are IK'd on top of the
+  body pose, blended by weight. While holding an item, the free (left) hand does them and the item
+  stays in the right. The target is captured at the use press, so pickups that vanish in the same
+  tick still get a reach.
 * **Passes.** The world pass draws the body without its arm triangles. The arms are drawn once,
-  in the viewmodel pass, with the weapon and its own FOV, so there's never a second pair of arms
-  and they don't clip into walls. Your third-person pose and weapon still cast your shadow.
-* **FOV.** The camera FOV (`cl_fov`) and the hands / weapon FOV (`r_viewmodel_fov`, 0 = follow
-  the camera) are separate sliders in Settings → Graphics. Muzzle flash and tracers start where
-  the barrel appears on screen.
-* **Debug.** `cl_fp_debug 1` logs weapon pull-backs and draws targets; `2` shows the raw body pose.
-  `cl_fp_body 0` brings back the cube hands.
+  in the viewmodel pass, with the weapon and its own FOV.
+* **FOV.** Camera FOV (`cl_fov`) and hands / weapon FOV (`r_viewmodel_fov`, 0 = follow the camera)
+  are separate sliders in Settings → Graphics.
+* **Debug.** `cl_fp_debug 1` draws targets; `2` shows the raw body pose. `cl_fp_body 0` brings back
+  the cube hands.
 
 ## LOD
 

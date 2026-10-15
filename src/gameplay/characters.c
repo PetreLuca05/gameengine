@@ -10,6 +10,7 @@
 #include "render/render.h"
 #include "render/debug_draw.h"
 #include "player/hands.h"
+#include "anim/procedural_internal.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -469,6 +470,8 @@ void chars_notify_attack(World *w, int slot, bool melee, bool first) {
     } else if (first && p->local) {
         charrt_trigger(&c->rt, melee ? AP_T_MELEE : AP_T_FIRE);
     }
+    // Own shots kick the held item (first person shows the body's weapon).
+    if (p->local && !melee && first) c->kick_v = v3_add(c->kick_v, v3(0, 0.6f, 1.4f));
 }
 
 static void update_limbs(CharacterInst *c, float dt) {
@@ -950,6 +953,7 @@ static void post_one(World *w, CharacterInst *c, int i, float dt, vec3 cam_pos, 
     pi.item_kick_pos = v3(0, c->kick_x.y * 0.01f, c->kick_x.z * 0.02f);
     pi.item_kick_rot = v3(c->kick_x.y * 3.0f, 0, 0);
     if (c->rt.in.crouch) pi.crouch_drop = 0.38f;
+    pi.first_person = c->local && cv(CG->fp_body);
     if (c->is_player && c->slot >= 0) {
         const PlayerMove *m = &w->players[c->slot].sim.move;
         if (m->hand_anchor_valid && (m->mode == MOVE_HANG || m->mode == MOVE_MANTLE || m->mode == MOVE_VAULT)) {
@@ -959,6 +963,18 @@ static void post_one(World *w, CharacterInst *c, int i, float dt, vec3 cam_pos, 
         }
     }
     charrt_post(&c->rt, &pi);
+    // Aim of this post-pass (the first-person pass corrects the spine to the frame's view).
+    c->fp_pitch[0] = c->fp_pitch[1];
+    c->fp_yaw[0] = c->fp_yaw[1];
+    c->fp_body_yaw[0] = c->fp_body_yaw[1];
+    c->fp_pitch[1] = pi.aim_pitch;
+    c->fp_yaw[1] = pi.aim_yaw;
+    c->fp_body_yaw[1] = c->rt.proc.render_body_yaw;
+    if (!c->have_pose) {
+        c->fp_pitch[0] = c->fp_pitch[1];
+        c->fp_yaw[0] = c->fp_yaw[1];
+        c->fp_body_yaw[0] = c->fp_body_yaw[1];
+    }
     // LOD2+: baked per-style arm pose, item pinned to the right hand.
     const Skeleton *s = &LIB->skel;
     int style = DG_CLAMP(c->rt.in.weapon_type, 0, HOLD_STYLE_MAX - 1);
@@ -1178,6 +1194,70 @@ vec3 chars_eye_offset(float yaw, float pitch) {
     return quat_rotate(quat_yaw(yaw), v3_sub(eye, eye0));
 }
 
+// This frame's first-person body pose (shared by the camera socket and the body / arm draw).
+static struct {
+    u64 frame;
+    EntityId ent;
+    Xform world[ANIM_MAX_BONES], model[ANIM_MAX_BONES];
+    Pose pose;
+    Xform root;
+    Xform spine2_before;   // chest before the frame's spine correction (the held item follows it)
+} FP;
+
+static float lerp_angle_fp(float a, float b, float t) { return wrap_angle(a + wrap_angle(b - a) * t); }
+
+static void fp_prepare(World *w, CharacterInst *c, float alpha, float yaw, float pitch) {
+    const Skeleton *s = &LIB->skel;
+    const ProcParams *pp = &LIB->proc;
+    float span = (float)DG_MAX(1, c->interval);
+    float it = saturate(((float)(w->chars->tick - c->last_eval) + alpha) / span);
+    for (int b = 0; b < s->count; b++) FP.world[b] = xf_lerp(c->pose_prev[b], c->pose_cur[b], it);
+    // Model space = the rendered body frame (feet + smoothed body yaw), as the post-pass used.
+    float body_yaw = lerp_angle_fp(c->fp_body_yaw[0], c->fp_body_yaw[1], it);
+    FP.root = xf_make(c->root.t, quat_yaw(body_yaw));
+    FP.root.s = v3s(c->def->scale);
+    Xform inv_root = xf_inverse(FP.root);
+    FP.pose.count = s->count;
+    for (int b = 0; b < s->count; b++) {
+        FP.model[b] = xf_mul(inv_root, FP.world[b]);
+        int p = s->parent[b];
+        FP.pose.local[b] = p >= 0 ? xf_mul(xf_inverse(FP.model[p]), FP.model[b]) : FP.model[b];
+    }
+    // The post-pass aimed the spine at the tick's view; bend it the rest of the way to this
+    // frame's view (same bones / weights / limits as proc_spine), so the head - and the camera
+    // socket on it - follows the mouse without a tick of lag.
+    if (s->role[BR_SPINE2] >= 0) FP.spine2_before = FP.world[s->role[BR_SPINE2]];
+    if (cv(CG->spine)) {
+        float lim_p = pp->pitch_limit * DG_DEG2RAD, lim_y = pp->yaw_limit * DG_DEG2RAD;
+        float posed_pitch = clampf(lerpf(c->fp_pitch[0], c->fp_pitch[1], it), -lim_p, lim_p);
+        float posed_aim = lerp_angle_fp(c->fp_yaw[0], c->fp_yaw[1], it);
+        float posed_rel = clampf(wrap_angle(posed_aim - body_yaw), -lim_y, lim_y);
+        float want_rel = clampf(wrap_angle(yaw - body_yaw), -lim_y, lim_y);
+        float dp = clampf(pitch, -lim_p, lim_p) - posed_pitch, dy = want_rel - posed_rel;
+        int bones[5] = { s->role[BR_SPINE], s->role[BR_SPINE1], s->role[BR_SPINE2], s->role[BR_NECK], s->role[BR_HEAD] };
+        float acc = 0;
+        for (int i = 0; i < 5; i++) {
+            if (bones[i] < 0) continue;
+            float wgt = pp->spine_weights[i];
+            acc += want_rel * wgt;
+            vec3 lateral = quat_rotate(quat_yaw(acc), v3(1, 0, 0));
+            proc_rotate_bone(s, &FP.pose, FP.model, bones[i], quat_mul(quat_axis_angle(lateral, dp * wgt), quat_yaw(dy * wgt)));
+        }
+    }
+    for (int b = 0; b < s->count; b++) FP.world[b] = xf_mul(FP.root, FP.model[b]);
+    FP.frame = g_engine.frame_index;
+    FP.ent = c->ent;
+}
+
+static CharacterInst *local_fp_char(World *w, int local_slot);
+
+bool chars_fp_camera(World *w, float alpha, int local_slot, float yaw, float pitch, Xform *socket_world) {
+    CharacterInst *c = local_fp_char(w, local_slot);
+    if (!c) return false;
+    fp_prepare(w, c, alpha, yaw, pitch);
+    return character_socket_world(c->def, "camera", FP.world, socket_world);
+}
+
 static CharacterInst *local_fp_char(World *w, int local_slot) {
     if (!w->chars || !LIB || !CG || !cv(CG->fp_body)) return NULL;
     for (int k = 0; k < MAX_CHARACTERS; k++) {
@@ -1200,73 +1280,56 @@ void chars_render_local_fp(World *w, float alpha, int local_slot) {
     HandsFpTargets t;
     if (!c || !hands_fp_targets(&t)) return;
     const Skeleton *s = &LIB->skel;
-    static Xform world[ANIM_MAX_BONES], model[ANIM_MAX_BONES];
-    static Pose pose;
-    // Interpolated post-IK pose (as the third-person draw).
-    float span = (float)DG_MAX(1, c->interval);
-    float it = saturate(((float)(w->chars->tick - c->last_eval) + alpha) / span);
-    for (int b = 0; b < s->count; b++) world[b] = xf_lerp(c->pose_prev[b], c->pose_cur[b], it);
-    // The body stays exactly where the player stands (no offsets): the camera is at its eyes
-    // (chars_eye_offset bends the spine), so looking down shows the chest, legs and feet.
-    Xform root = c->root;
-    root.s = v3s(c->def->scale);
+    // This frame's pose (prepared by the camera socket; otherwise aimed at the hands' camera).
+    if (FP.frame != g_engine.frame_index || FP.ent != c->ent) {
+        vec3 f = quat_rotate(t.cam_rot, v3(0, 0, -1));
+        fp_prepare(w, c, alpha, atan2f(-f.x, -f.z), asinf(clampf(f.y, -1.0f, 1.0f)));
+    }
+    // True first person (Unreal-style): the body and the item it holds are exactly the
+    // third-person character everyone else sees - procedural hold, both hands glued, no
+    // viewmodel offsets, no stretching - and the camera sits on the head socket.
+    Xform *world = FP.world, *model = FP.model;
+    Pose *posep = &FP.pose;
+    Xform root = FP.root;
     Xform inv_root = xf_inverse(root);
-    pose.count = s->count;
-    for (int b = 0; b < s->count; b++) {
-        model[b] = xf_mul(inv_root, world[b]);
-        int p = s->parent[b];
-        pose.local[b] = p >= 0 ? xf_mul(xf_inverse(model[p]), model[b]) : model[b];
-    }
-    // Out-of-reach weapon grips: the weapon moves back towards the body (along the camera's back
-    // axis) until both hands on it reach - the arms are never stretched or detached.
-    {
-        vec3 back = quat_rotate(t.cam_rot, v3(0, 0, 1));
-        float pull = 0;
-        for (int h = 0; h < 2; h++) {
-            int ua = s->role[h ? BR_R_ARM : BR_L_ARM], fa = s->role[h ? BR_R_FOREARM : BR_L_FOREARM], ha = s->role[h ? BR_R_HAND : BR_L_HAND];
-            if (!t.on_weapon[h] || ua < 0 || fa < 0 || ha < 0) continue;
-            float reach = (v3_dist(model[ua].t, model[fa].t) + v3_dist(model[fa].t, model[ha].t)) * c->def->scale * 0.985f;
-            Xform hand = proc_hand_for_socket(t.palm[h], LIB->hands.palm[h]);
-            vec3 d = v3_sub(hand.t, world[ua].t);
-            float db = v3_dot(d, back), dd = v3_dot(d, d);
-            if (dd <= reach * reach) continue;
-            float disc = db * db - dd + reach * reach;
-            float sh = disc >= 0 ? -db - sqrtf(disc) : -db;   // smallest pull that reaches (or the closest approach)
-            pull = fmaxf(pull, fminf(sh, 0.6f));
-        }
-        if (pull > 0) {
-            vec3 delta = v3_scale(back, pull);
-            hands_fp_shift(delta);
-            for (int h = 0; h < 2; h++) if (t.on_weapon[h]) t.palm[h].t = v3_add(t.palm[h].t, delta);
-            if (CG->fp_debug && CG->fp_debug->i) log_info("fp body: weapon pulled back %.0f mm to reach the grips", pull * 1000);
-        }
-    }
-    // Arms onto the first-person hand targets.
     bool raw = CG->fp_debug && CG->fp_debug->i >= 2;
+    // The held item follows the chest through this frame's spine correction.
+    if (c->item_valid) {
+        float span = (float)DG_MAX(1, c->interval);
+        float it = saturate(((float)(w->chars->tick - c->last_eval) + alpha) / span);
+        Xform item = xf_lerp(c->item_prev, c->item_cur, it);
+        int sp2 = s->role[BR_SPINE2];
+        if (sp2 >= 0) item = xf_mul(xf_mul(world[sp2], xf_inverse(FP.spine2_before)), item);
+        item.s = v3(1, 1, 1);
+        hands_fp_set_item(item.t, item.r);
+    }
+    // Interactions / ledge grabs from the first-person hand system (door knobs, levers, pickups
+    // with the free hand) are IK'd on top of the body, blended by their weight.
     for (int h = 0; h < 2 && !raw; h++) {
+        if (t.ov_w[h] <= 0.001f) continue;
         int ua = s->role[h ? BR_R_ARM : BR_L_ARM], fa = s->role[h ? BR_R_FOREARM : BR_L_FOREARM], ha = s->role[h ? BR_R_HAND : BR_L_HAND];
         if (ua < 0 || fa < 0 || ha < 0) continue;
-        Xform palm = xf_mul(inv_root, t.palm[h]);
+        Xform palm = xf_mul(inv_root, t.ov_palm[h]);
         Xform hand = proc_hand_for_socket(palm, LIB->hands.palm[h]);
         float side = h ? 1.0f : -1.0f;
         vec3 pole = quat_rotate(quat_conj(root.r), quat_rotate(t.cam_rot, v3(0.8f * side, -1.0f, 0.25f)));
-        anim_ik_two_bone_pose(s, &pose, model, ua, fa, ha, hand.t, &hand.r, pole, 1.0f);
-        // Hands on the held item keep the hold style's finger curl from the third-person pass.
-        if (!t.on_weapon[h] && t.grip[h] < GRIP_COUNT) proc_curl_fingers(s, &pose, model, h, k_grip_curl[t.grip[h]], &LIB->hands, 1.0f);
+        anim_ik_two_bone_pose(s, posep, model, ua, fa, ha, hand.t, &hand.r, pole, t.ov_w[h]);
+        if (t.grip[h] < GRIP_COUNT) proc_curl_fingers(s, posep, model, h, k_grip_curl[t.grip[h]], &LIB->hands, t.ov_w[h]);
     }
-    // Head (and eyes / end bones) collapsed: the camera sits where the head is.
+    // Head (and eyes / end bones) collapsed: the camera sits where the head is (owner-only hide).
     for (int b = 0; b < s->count; b++) {
         world[b] = xf_mul(root, model[b]);
         if (CG->head_bone[b] && !raw) world[b].s = v3s(1e-4f);
     }
-    // Arms are drawn once, in the viewmodel pass (own FOV): the world pass gets the body without them.
+    // Arms are drawn once, in the viewmodel pass with the item (no wall clipping, own FOV); the
+    // world pass gets the body without them.
     MeshId body = CG->arm_mesh[c->def_index] && CG->noarm_mesh[c->def_index] ? CG->noarm_mesh[c->def_index] : CG->mesh[c->def_index][0];
     draw_char_mesh(body, c, world, 0, false);
     draw_char_mesh(CG->arm_mesh[c->def_index], c, world, MAT_VIEWMODEL, false);
     hands_set_body_arms(CG->arm_mesh[c->def_index] != 0);
     if (cv(CG->fp_debug))
         for (int h = 0; h < 2; h++) {
-            dbg_cross(t.palm[h].t, 0.03f, t.on_weapon[h] ? DBG_GREEN : DBG_YELLOW, 0);
+            if (t.ov_w[h] > 0.001f) dbg_cross(t.ov_palm[h].t, 0.03f, DBG_YELLOW, 0);
             dbg_cross(world[s->role[h ? BR_R_HAND : BR_L_HAND]].t, 0.02f, DBG_RED, 0);
         }
 }

@@ -77,7 +77,7 @@ static void door_use(World *w, EntityId self, int player) {
 }
 
 static bool door_hand(World *w, EntityId self, int player, int hand, vec3 *pos, quat *rot) {
-    if (hand != 1) return false; // right hand only
+    (void)hand;   // either hand (the free one when holding an item)
     int i = (int)ENT_INDEX(self);
     Door *d = &w->door[i];
     // Knob on the user's side of the panel (follows the panel as it swings).
@@ -167,7 +167,7 @@ static void lever_use(World *w, EntityId self, int player) {
 }
 
 static bool lever_hand(World *w, EntityId self, int player, int hand, vec3 *pos, quat *rot) {
-    if (hand != 1) return false;
+    (void)hand;   // either hand (the free one when holding an item)
     int i = (int)ENT_INDEX(self);
     *pos = lever_handle_tip(w, self, w->anim[i]);
     *rot = quat_mul(w->xf[i].rot, quat_axis_angle(v3(1, 0, 0), -0.5f));
@@ -211,7 +211,7 @@ static void switch_use(World *w, EntityId self, int player) {
 }
 
 static bool switch_hand(World *w, EntityId self, int player, int hand, vec3 *pos, quat *rot) {
-    if (hand != 1) return false;
+    (void)hand;   // either hand (the free one when holding an item)
     int i = (int)ENT_INDEX(self);
     // Finger tip presses the rocker on the plate's front face (+Z local).
     float rocker = (w->flags[i] & EF_ON) ? 0.025f : -0.025f;
@@ -355,7 +355,7 @@ static void pickup_use(World *w, EntityId self, int player) {
 }
 
 static bool pickup_hand(World *w, EntityId self, int player, int hand, vec3 *pos, quat *rot) {
-    if (hand != 1) return false;
+    (void)hand;   // either hand (the free one when holding an item)
     int i = (int)ENT_INDEX(self);
     *pos = v3_add(w->xf[i].pos, v3(0, w->vis[i].half.y + 0.02f, 0));
     *rot = quat_mul(quat_yaw(w->players[player].sim.move.yaw), quat_axis_angle(v3(1, 0, 0), -1.2f));
