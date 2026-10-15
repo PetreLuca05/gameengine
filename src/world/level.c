@@ -274,14 +274,39 @@ static void build_room(LevelBuild *b, const cJSON *room) {
     u32 wall_col = jcol(room, "wall_color", rgba8(0.7f, 0.7f, 0.68f, 1));
     float hx = size.x * 0.5f, hz = size.z * 0.5f, h = size.y;
     int fm = surface_from_name(js(room, "floor_material", "concrete")), wm = surface_from_name(js(room, "wall_material", "plaster"));
+    // Open rooms: "walls" / "ceiling" false (outdoor test area under the sky); the floor can be
+    // larger than the room ("floor_size") and invisible boundary walls keep players on it.
+    bool walls = jb(room, "walls", true), ceiling = jb(room, "ceiling", true);
+    vec3 fsz = jv3(room, "floor_size", v3(size.x, 0, size.z));
+    float fx = fmaxf(fsz.x * 0.5f, hx), fz = fmaxf(fsz.z * 0.5f, hz);
     b->material = fm >= 0 ? fm : SURF_CONCRETE;
-    add_box(b, v3(0, -t * 0.5f, 0), v3(hx + t, t * 0.5f, hz + t), 0, floor_col, MAT_GRID, true);
+    add_box(b, v3(0, -t * 0.5f, 0), v3(fx + t, t * 0.5f, fz + t), 0, floor_col, MAT_GRID, true);
     b->material = wm >= 0 ? wm : SURF_PLASTER;
-    add_box(b, v3(0, h + t * 0.5f, 0), v3(hx + t, t * 0.5f, hz + t), 0, wall_col, MAT_GRID | MAT_NO_SHADOW, true);
-    add_box(b, v3(-hx - t * 0.5f, h * 0.5f, 0), v3(t * 0.5f, h * 0.5f, hz), 0, wall_col, MAT_GRID, true);
-    add_box(b, v3(hx + t * 0.5f, h * 0.5f, 0), v3(t * 0.5f, h * 0.5f, hz), 0, wall_col, MAT_GRID, true);
-    add_box(b, v3(0, h * 0.5f, -hz - t * 0.5f), v3(hx, h * 0.5f, t * 0.5f), 0, wall_col, MAT_GRID, true);
-    add_box(b, v3(0, h * 0.5f, hz + t * 0.5f), v3(hx, h * 0.5f, t * 0.5f), 0, wall_col, MAT_GRID, true);
+    if (ceiling) add_box(b, v3(0, h + t * 0.5f, 0), v3(hx + t, t * 0.5f, hz + t), 0, wall_col, MAT_GRID | MAT_NO_SHADOW, true);
+    if (walls) {
+        add_box(b, v3(-hx - t * 0.5f, h * 0.5f, 0), v3(t * 0.5f, h * 0.5f, hz), 0, wall_col, MAT_GRID, true);
+        add_box(b, v3(hx + t * 0.5f, h * 0.5f, 0), v3(t * 0.5f, h * 0.5f, hz), 0, wall_col, MAT_GRID, true);
+        add_box(b, v3(0, h * 0.5f, -hz - t * 0.5f), v3(hx, h * 0.5f, t * 0.5f), 0, wall_col, MAT_GRID, true);
+        add_box(b, v3(0, h * 0.5f, hz + t * 0.5f), v3(hx, h * 0.5f, t * 0.5f), 0, wall_col, MAT_GRID, true);
+    } else {
+        // Invisible boundary at the floor edge (collision only, 6 m tall).
+        const float bh = 3.0f, bt = 0.5f;
+        vec3 c[4] = { v3(-fx - bt, bh, 0), v3(fx + bt, bh, 0), v3(0, bh, -fz - bt), v3(0, bh, fz + bt) };
+        vec3 hh[4] = { v3(bt, bh, fz + 2 * bt), v3(bt, bh, fz + 2 * bt), v3(fx + 2 * bt, bh, bt), v3(fx + 2 * bt, bh, bt) };
+        for (int i = 0; i < 4; i++) {
+            BodyDesc d;
+            memset(&d, 0, sizeof(d));
+            d.shape.kind = SHAPE_BOX;
+            d.shape.half = hh[i];
+            d.pos = c[i];
+            d.rot = quat_identity();
+            d.motion = PM_STATIC;
+            d.layer = PL_STATIC;
+            d.friction = 0.2f;
+            d.material = (u8)b->material;
+            add_static_body(b, &d);
+        }
+    }
 
     World *w = b->w;
     u32 lc = rgba8(0.15f, 0.15f, 0.18f, 1);
@@ -302,7 +327,7 @@ static void build_room(LevelBuild *b, const cJSON *room) {
         }
     add_label(w, v3(0.1f, 0.005f, 0.3f), v3(1, 0, 0), v3(0, 0, -1), 0.24f, lc, "0,0");
     // Wall height marks every 0.5 m on each wall, at several positions.
-    for (int wall = 0; wall < 4; wall++) {
+    for (int wall = 0; wall < 4 && walls; wall++) {
         for (float along = -20; along <= 20; along += 10) {
             for (int k = 1; k <= (int)(fminf(h, 6.0f) * 2); k++) {
                 float y = k * 0.5f;
@@ -433,6 +458,10 @@ bool level_load(World *w, const char *path) {
     ls->ambient_ground = jv3(env, "ground", v3(0.3f, 0.28f, 0.25f));
     ls->fog_color = jv3(env, "fog", v3(0.45f, 0.48f, 0.52f));
     ls->fog_density = jf(env, "fog_density", 0.0f);
+    ls->sky = cJSON_GetObjectItemCaseSensitive(env, "sky_zenith") != NULL;
+    ls->sky_zenith = jv3(env, "sky_zenith", v3(0.22f, 0.42f, 0.78f));
+    ls->sky_horizon = jv3(env, "sky_horizon", v3(0.72f, 0.8f, 0.9f));
+    ls->clouds = jf(env, "clouds", 0.4f);
 
     LevelBuild b;
     memset(&b, 0, sizeof(b));

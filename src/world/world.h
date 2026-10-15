@@ -219,6 +219,9 @@ typedef struct LevelStatic {
     float fog_density;
     vec3 sun_dir, sun_color;
     float sun_intensity;
+    bool sky;                  // procedural sky (open levels): env "sky_zenith" / "sky_horizon" / "clouds"
+    vec3 sky_zenith, sky_horizon;
+    float clouds;
     u32 seed;
 } LevelStatic;
 

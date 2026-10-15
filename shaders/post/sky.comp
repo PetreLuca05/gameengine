@@ -1,0 +1,64 @@
+#version 450
+// Procedural sky on every pixel without geometry (depth = 1), after the opaque scene and before
+// the volumetric fog (which adds the aerial haze): zenith -> horizon gradient, a darker ground
+// below the horizon, sun disk + glow (the sun the shadows and volumetrics use) and two layers of
+// drifting value-noise clouds lit by the sun. Linear HDR in the scene's units: the sky colours are
+// scaled by the ambient intensity, the sun by its intensity, so night levels darken it too.
+//   pc.p0 = zenith rgb, w clouds (coverage 0..1)   pc.p1 = horizon rgb, w time (s)
+#extension GL_GOOGLE_include_directive : require
+#include "post_common.glsl"
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0) uniform sampler2D depth_tex;
+layout(set = 0, binding = 8, rgba16f) uniform image2D hdr;
+
+float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float vnoise(vec2 p) {
+    vec2 i = floor(p), f = fract(p);
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    return mix(mix(hash(i), hash(i + vec2(1, 0)), u.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), u.x), u.y);
+}
+float fbm(vec2 p) {
+    float a = 0.5, s = 0.0;
+    for (int i = 0; i < 5; i++) { s += a * vnoise(p); p = p * 2.03 + vec2(17.1, 9.7); a *= 0.5; }
+    return s;
+}
+
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 sz = imageSize(hdr);
+    if (p.x >= sz.x || p.y >= sz.y) return;
+    if (texelFetch(depth_tex, p, 0).r < 1.0) return;
+    vec2 uv = (vec2(p) + 0.5) / vec2(sz);
+    vec3 dir = normalize(world_pos(uv, 1.0) - U.cam_pos.xyz);
+    float amb = max(U.sky.w, 0.0);
+    vec3 zenith = pc.p0.rgb * amb * 3.5, horizon = pc.p1.rgb * amb * 3.5;   // close to sunlit ground
+    vec3 L = normalize(U.sun_dir.xyz);
+    vec3 sun = U.sun_color.rgb * U.sun_dir.w;
+    float h = dir.y;
+    vec3 sky;
+    if (h >= 0.0) {
+        sky = mix(horizon, zenith, pow(h, 0.45));
+    } else {
+        // Below the horizon: haze fading into a darker ground tone.
+        vec3 ground = U.ground.rgb * amb * 1.4;
+        sky = mix(horizon, ground, 1.0 - exp(h * 12.0));
+    }
+    // Sun: glow towards the sun (stronger near the horizon) + the disk.
+    float mu = max(dot(dir, L), 0.0);
+    sky += sun * (pow(mu, 8.0) * 0.06 + pow(mu, 64.0) * 0.18);
+    float disk = smoothstep(0.99955, 0.99975, mu);
+    // Clouds: a plane above the camera, two fbm layers drifting with time.
+    float cov = clamp(pc.p0.w, 0.0, 1.0);
+    if (h > 0.01 && cov > 0.0) {
+        vec2 cp = dir.xz / (h + 0.06) * 1.1;
+        float t = pc.p1.w;
+        float n = fbm(cp + vec2(t * 0.010, t * 0.004)) * 0.65 + fbm(cp * 2.7 - vec2(t * 0.02, 0.0)) * 0.35;
+        float c = smoothstep(0.85 - cov, 1.05 - cov, n) * smoothstep(0.01, 0.15, h);
+        // Lit side towards the sun, darker bellies; the horizon fades them out.
+        vec3 cloud = mix(vec3(luma(horizon)) * 0.8, vec3(luma(horizon)) * 1.35 + sun * 0.12, 0.5 + 0.5 * mu);
+        sky = mix(sky, cloud, c * 0.9);
+        disk *= 1.0 - c;   // behind the clouds
+    }
+    sky += sun * disk * 40.0;
+    imageStore(hdr, p, vec4(sanitize(sky), 1.0));
+}

@@ -633,6 +633,10 @@ void game_render(void) {
     env.ambient_intensity = 0.55f;
     env.fog_color = ls->fog_color;
     env.fog_density = ls->fog_density;
+    env.sky = ls->sky;
+    env.sky_zenith = ls->sky_zenith;
+    env.sky_horizon = ls->sky_horizon;
+    env.clouds = ls->clouds;
     env.shadow_center = v3_madd(cam.pos, dir_from_angles(cam.yaw, 0), 12.0f);
     env.shadow_extent = 32.0f;
     if (vfx_game_night()) {

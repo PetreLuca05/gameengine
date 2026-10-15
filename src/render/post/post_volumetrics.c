@@ -69,6 +69,28 @@ void post_vol_build(void) {
 
 FgRes post_froxels(void) { return P.froxels; }
 
+static void exec_sky(VkCommandBuffer cmd, void *u) {
+    (void)u;
+    PostBind b = { 0 };
+    pb_ubo(&b);
+    pb_tex_fg(&b, 0, P.in.depth, P.point);
+    pb_img_fg(&b, 8, P.in.hdr);
+    pb_push(cmd, &b, VK_PIPELINE_BIND_POINT_COMPUTE);
+    struct { float p[16]; u32 u[16]; } pc;
+    memset(&pc, 0, sizeof(pc));
+    pc.p[0] = P.in.sky_zenith.x; pc.p[1] = P.in.sky_zenith.y; pc.p[2] = P.in.sky_zenith.z; pc.p[3] = P.in.clouds;
+    pc.p[4] = P.in.sky_horizon.x; pc.p[5] = P.in.sky_horizon.y; pc.p[6] = P.in.sky_horizon.z; pc.p[7] = P.in.time;
+    post_push_constants(cmd, &pc, 128);
+    post_dispatch(cmd, "sky", P.in.render_w, P.in.render_h, 1, 8);
+}
+
+void post_sky(void) {
+    if (!P.ok || !P.in.sky_on) return;
+    int p = fg_pass("sky", exec_sky, NULL);
+    fg_read(p, P.in.depth, FG_SAMPLED);
+    fg_write(p, P.in.hdr, FG_STORAGE);
+}
+
 static void exec_fog_apply(VkCommandBuffer cmd, void *u) {
     (void)u;
     PostBind b = { 0 };

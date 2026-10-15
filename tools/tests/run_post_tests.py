@@ -99,6 +99,9 @@ def test_toggle():
         # Velocity, flare and motion blur tiles are legitimately empty with a still camera.
         if not good and n in ('debug_05', 'debug_15', 'debug_16'):
             good = True
+        # Indirect-light views are dim outdoors (little bounce light): only need some variation.
+        if not good and n in ('debug_04',) and sd > 0.015:
+            good = True
         if not good:
             bad.append('%s (mean %.3f sd %.3f)' % (n, m, sd))
     exr = read_exr_header(OUT + '/post_toggle/hdr_capture.exr') if os.path.exists(OUT + '/post_toggle/hdr_capture.exr') else None

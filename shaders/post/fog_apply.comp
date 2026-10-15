@@ -19,6 +19,8 @@ void main() {
     // The slice stores the integral up to its far edge: shift by half a slice.
     w = clamp(w - 0.5 / U.s_vol3.z, 0.0, 1.0);
     vec4 v = textureLod(volume, vec3(uv, w), 0.0);
+    // The procedural sky already contains its haze: only a fraction of the fog over it.
+    if (d >= 1.0) v = mix(vec4(0.0, 0.0, 0.0, 1.0), v, 0.3);
     vec4 c = imageLoad(hdr, p);
     imageStore(hdr, p, vec4(c.rgb * v.a + v.rgb, c.a));
 }

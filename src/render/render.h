@@ -89,6 +89,10 @@ typedef struct RenderEnvironment {
     float fog_density;
     vec3 shadow_center; // where the shadow frustum is centered
     float shadow_extent;
+    // Procedural sky (drawn where nothing else is): off = the fog colour (indoor levels).
+    bool sky;
+    vec3 sky_zenith, sky_horizon;
+    float clouds;       // cloud coverage 0..1
 } RenderEnvironment;
 
 typedef struct RenderStats {

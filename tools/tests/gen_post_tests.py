@@ -16,7 +16,7 @@ here = os.path.dirname(os.path.abspath(__file__))
 
 # Every frame graph pass that can be skipped with r_post_disable (render.c + src/render/post).
 PASSES = ['hiz', 'contact', 'gtao', 'gtao_temporal', 'gtao_upsample', 'ssgi', 'ssgi_temporal', 'ssgi_upsample', 'ssr',
-          'ssr_temporal', 'vol_inject', 'vol_integrate', 'fog_apply', 'decals', 'scene_copy', 'transparent',
+          'ssr_temporal', 'vol_inject', 'vol_integrate', 'sky', 'fog_apply', 'decals', 'scene_copy', 'transparent',
           'color_pyramid', 'depth_history', 'vm_prepass', 'viewmodel', 'taa', 'mb_tiles', 'mb_neighbor', 'mb_blur', 'dof_focus',
           'dof_coc', 'dof_down', 'dof_gather', 'dof_composite', 'exposure', 'bloom', 'flare', 'tonemap']
 

@@ -32,6 +32,9 @@ typedef struct PostFrameIn {
     bool camera_cut;              // teleport / respawn / map change: reset temporal history
     bool ads;
     float ads_focus_dist;         // ADS: distance to the crosshair target
+    bool sky_on;                  // procedural sky where depth = 1
+    vec3 sky_zenith, sky_horizon;
+    float clouds;
 } PostFrameIn;
 
 // Outputs the lit pass consumes (render resolution).
@@ -45,6 +48,7 @@ void post_targets_changed(void);
 // Frame graph construction (called by render_end_frame in order).
 void post_begin_frame(const PostFrameIn *in);
 void post_screen_space(PostLitInputs *out);        // hi-z, contact, gtao, ssgi, ssr, volumetric froxels
+void post_sky(void);                               // after the opaque scene: procedural sky on empty pixels
 void post_fog_apply(void);                         // after the lit opaque pass
 void post_capture_scene(FgRes hdr);                // after transparency: colour pyramid + depth history (next frame)
 FgRes post_resolve(void);                          // AA / upscale ... tonemap -> LDR (output res)

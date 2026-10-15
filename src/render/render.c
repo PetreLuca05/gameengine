@@ -1078,6 +1078,10 @@ static void build_frame_graph(FrameData *fd) {
     in.time = (float)g_engine.real_time;
     in.frame = R->frame_index;
     in.camera_cut = R->camera_cut;
+    in.sky_on = R->env.sky;
+    in.sky_zenith = R->env.sky_zenith;
+    in.sky_horizon = R->env.sky_horizon;
+    in.clouds = R->env.clouds;
     in.ads = R->fx_ads;
     in.ads_focus_dist = R->fx_ads_focus;
     post_begin_frame(&in);
@@ -1114,6 +1118,7 @@ static void build_frame_graph(FrameData *fd) {
     if (F.lit.ssr_on) fg_read(p, F.lit.ssr, FG_SAMPLED);
     if (F.lit.ssgi_on) fg_read(p, F.lit.ssgi, FG_SAMPLED);
 
+    post_sky();
     post_fog_apply();
 
     if (F.scene_copy != FG_NONE) {
