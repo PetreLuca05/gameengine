@@ -57,6 +57,8 @@ typedef struct WeaponDef {
     vec3 support_offset;      // where the left hand supports it (model space)
     vec3 muzzle_offset;
     bool bolt_action;         // cycles the bolt after each shot (shot-event hook)
+    // VFX ("vfx" block): muzzle flash type x device, impact caliber (src/vfx/vfx_library.h enums).
+    int vfx_muzzle_type, vfx_muzzle_device, vfx_caliber;
     RecoilParams recoil;      // guns: recoil, spread, fire modes, ADS/sway feel ("recoil" block)
     // Third-person procedural hold ("hold" block): style + item sockets (shared with the viewmodel grip data).
     char hold_style[16];

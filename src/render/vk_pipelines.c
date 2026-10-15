@@ -29,7 +29,7 @@ bool vkp_create_layouts(void) {
     fb[1].binding = 1;
     fb[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     fb[1].descriptorCount = 1;
-    fb[1].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+    fb[1].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;   // particles light per vertex
     for (int i = 2; i < 4; i++) {
         fb[i].binding = (u32)i;
         fb[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
@@ -77,6 +77,13 @@ bool vkp_create_layouts(void) {
     pli.pPushConstantRanges = &pp;
     VK_CHECK(vkCreatePipelineLayout(R->device, &pli, NULL, &R->layout_post));
 
+    VkDescriptorSetLayout post2[2] = { R->tex_layout, R->tex_layout };
+    pli.setLayoutCount = 2;
+    pli.pSetLayouts = post2;
+    VK_CHECK(vkCreatePipelineLayout(R->device, &pli, NULL, &R->layout_post2));
+    pli.setLayoutCount = 1;
+    pli.pSetLayouts = &R->tex_layout;
+
     VkPushConstantRange pu = { VK_SHADER_STAGE_VERTEX_BIT, 0, 16 };
     pli.pPushConstantRanges = &pu;
     VK_CHECK(vkCreatePipelineLayout(R->device, &pli, NULL, &R->layout_ui));
@@ -86,13 +93,14 @@ bool vkp_create_layouts(void) {
 void vkp_destroy_layouts(void) {
     vkDestroyPipelineLayout(R->device, R->layout_lit, NULL);
     vkDestroyPipelineLayout(R->device, R->layout_post, NULL);
+    vkDestroyPipelineLayout(R->device, R->layout_post2, NULL);
     vkDestroyPipelineLayout(R->device, R->layout_ui, NULL);
     vkDestroyDescriptorPool(R->device, R->pool, NULL);
     vkDestroyDescriptorSetLayout(R->device, R->frame_layout, NULL);
     vkDestroyDescriptorSetLayout(R->device, R->tex_layout, NULL);
 }
 
-static VkShaderModule load_shader(const char *name) {
+VkShaderModule vkp_load_shader(const char *name) {
     char path[512];
     snprintf(path, sizeof(path), "%sshaders/%s.spv", platform_base_dir(), name);
     size_t size = 0;
@@ -113,8 +121,8 @@ static VkShaderModule load_shader(const char *name) {
 }
 
 static VkPipeline build_pipeline(const PipeDesc *d) {
-    VkShaderModule vs = load_shader(d->vert);
-    VkShaderModule fs = d->frag ? load_shader(d->frag) : VK_NULL_HANDLE;
+    VkShaderModule vs = vkp_load_shader(d->vert);
+    VkShaderModule fs = d->frag ? vkp_load_shader(d->frag) : VK_NULL_HANDLE;
     if (!vs || (d->frag && !fs)) {
         if (vs) vkDestroyShaderModule(R->device, vs, NULL);
         if (fs) vkDestroyShaderModule(R->device, fs, NULL);
@@ -276,7 +284,7 @@ bool vkp_create_pipelines(void) {
     d[PIPE_TEXT] = (PipeDesc){ "text.vert", "text.frag", VL_TEXT, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, VK_POLYGON_MODE_FILL,
                                VK_CULL_MODE_NONE, true, false, true, hdr, depth, false, R->layout_lit };
     d[PIPE_POST] = (PipeDesc){ "fullscreen.vert", "post.frag", VL_NONE, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, VK_POLYGON_MODE_FILL,
-                               VK_CULL_MODE_NONE, false, false, false, R->swap_format, VK_FORMAT_UNDEFINED, false, R->layout_post };
+                               VK_CULL_MODE_NONE, false, false, false, R->swap_format, VK_FORMAT_UNDEFINED, false, R->layout_post2 };
     d[PIPE_UI] = (PipeDesc){ "ui.vert", "ui.frag", VL_UI, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, VK_POLYGON_MODE_FILL,
                              VK_CULL_MODE_NONE, false, false, true, R->swap_format, VK_FORMAT_UNDEFINED, false, R->layout_ui };
 
@@ -317,7 +325,10 @@ void vkp_destroy_pipelines(void) {
 
 static const char *k_shader_files[] = { "lit.vert", "lit.frag", "shadow.vert", "lines.vert", "lines.frag", "text.vert",
                                         "text.frag", "fullscreen.vert", "post.frag", "ui.vert", "ui.frag",
-                                        "skin.vert", "skin.frag", "skin_shadow.vert" };
+                                        "skin.vert", "skin.frag", "skin_shadow.vert",
+                                        "vfx_reset.comp", "vfx_begin.comp", "vfx_emit.comp", "vfx_emit_sub.comp", "vfx_args.comp",
+                                        "vfx_update.comp", "vfx_draw_args.comp", "vfx_sort.comp", "vfx_particle.vert", "vfx_particle.frag",
+                                        "vfx_decal.vert", "vfx_decal.frag", "bloom_prefilter.frag", "bloom_down.frag", "bloom_up.frag" };
 
 static i64 shader_sources_mtime(void) {
 #ifdef DG_SOURCE_DIR
@@ -328,9 +339,13 @@ static i64 shader_sources_mtime(void) {
         i64 t = platform_file_mtime(path);
         if (t > newest) newest = t;
     }
-    snprintf(path, sizeof(path), "%s/shaders/common.glsl", DG_SOURCE_DIR);
-    i64 t = platform_file_mtime(path);
-    return t > newest ? t : newest;
+    static const char *incs[] = { "common.glsl", "vfx_common.glsl", "vfx_spawn.glsl", "lit_body.glsl" };
+    for (int i = 0; i < ARRAY_COUNT(incs); i++) {
+        snprintf(path, sizeof(path), "%s/shaders/%s", DG_SOURCE_DIR, incs[i]);
+        i64 t = platform_file_mtime(path);
+        if (t > newest) newest = t;
+    }
+    return newest;
 #else
     return 0;
 #endif
@@ -366,6 +381,7 @@ bool render_reload_shaders(void) {
     if (!compile_shaders_from_source()) log_warn("shaders: recompile failed or unavailable, reloading existing SPIR-V");
     vkDeviceWaitIdle(R->device);
     bool ok = vkp_create_pipelines();
+    if (ok) ok = vkx_create_pipelines();
     log_info(ok ? "shaders: reloaded" : "shaders: reload failed, keeping old pipelines");
     return ok;
 }

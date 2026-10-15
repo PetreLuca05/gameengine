@@ -1,6 +1,7 @@
 {
   "_comment": "Projectile weapon: simple recoil block, near-zero ADS cone.",
   "id": "crossbow",
+  "vfx": { "caliber": "pistol" },
   "item": "crossbow",
   "kind": "projectile",
   "damage_type": "bullet",

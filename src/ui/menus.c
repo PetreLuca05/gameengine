@@ -10,6 +10,7 @@
 #include "input/input.h"
 #include "net/net.h"
 #include "app/video.h"
+#include "vfx_editor.h"
 #include "nuklear_config.h"
 #include <SDL3/SDL.h>
 #include <stdio.h>
@@ -22,6 +23,7 @@ typedef struct GraphicsSettings {
     int width, height, mode, vsync, shadow, texq, aniso, aa, maxfps;
     float fov, scale, brightness, gamma;
     float vm_fov;          // 0 = follow the camera FOV
+    int vfxq, bloom;
 } GraphicsSettings;
 
 #define MAX_RES 48
@@ -78,6 +80,8 @@ static GraphicsSettings read_graphics(void) {
     g.scale = cv("r_render_scale")->f;
     g.brightness = cv("r_brightness")->f;
     g.gamma = cv("r_gamma")->f;
+    g.vfxq = cv("vfx_quality")->i;
+    g.bloom = cv("r_bloom")->i;
     return g;
 }
 
@@ -96,6 +100,8 @@ static void write_graphics(const GraphicsSettings *g) {
     cvar_set_float(cv("r_render_scale"), g->scale);
     cvar_set_float(cv("r_brightness"), g->brightness);
     cvar_set_float(cv("r_gamma"), g->gamma);
+    cvar_set_int(cv("vfx_quality"), g->vfxq);
+    cvar_set_int(cv("r_bloom"), g->bloom);
     video_apply();
 }
 
@@ -134,7 +140,7 @@ static void update_mouse_mode(void) {
 
 bool menus_wants_mouse(void) {
     Game *g = game();
-    return (M && M->page != PAGE_NONE) || (g && (g->inventory_open || g->container_open));
+    return (M && M->page != PAGE_NONE) || (g && (g->inventory_open || g->container_open)) || vfx_editor_open();
 }
 
 void menus_close_all(void) {
@@ -295,6 +301,12 @@ static void draw_graphics(struct nk_context *ctx) {
     p->shadow = combo_row(ctx, "Shadow quality", shadow, 4, p->shadow);
     static const char *texq[] = { "Low", "Medium", "High" };
     p->texq = combo_row(ctx, "Texture quality", texq, 3, p->texq);
+    static const char *vfxq[] = { "Low", "Medium", "High", "Ultra" };
+    p->vfxq = combo_row(ctx, "Effects quality (particles)", vfxq, 4, p->vfxq);
+    nk_layout_row_dynamic(ctx, S(24), 1);
+    nk_bool bl = p->bloom != 0;
+    nk_checkbox_label(ctx, "Bloom", &bl);
+    p->bloom = bl ? 1 : 0;
     static const char *aniso[] = { "Off", "2x", "4x", "8x", "16x" };
     static const int aniso_v[] = { 1, 2, 4, 8, 16 };
     int ai = 0;
@@ -590,4 +602,5 @@ void menus_draw(void) {
     case PAGE_MULTIPLAYER: draw_multiplayer(ctx); break;
     default: break;
     }
+    vfx_editor_draw();
 }

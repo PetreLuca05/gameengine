@@ -1,0 +1,17 @@
+#version 450
+// Pool reset: every slot dead, no particles alive.
+#extension GL_GOOGLE_include_directive : require
+#include "vfx_common.glsl"
+layout(local_size_x = 256) in;
+void main() {
+    uint i = gl_GlobalInvocationID.x;
+    if (i < vf.caps.x) dead_list[i] = i;
+    if (i == 0u) {
+        ctr.dead = vf.caps.x;
+        ctr.alive[0] = 0u;
+        ctr.alive[1] = 0u;
+        ctr.add = ctr.alpha = ctr.distort = 0u;
+        ctr.sub = ctr.sub_pending = 0u;
+        ctr.emitted = uvec4(0);
+    }
+}

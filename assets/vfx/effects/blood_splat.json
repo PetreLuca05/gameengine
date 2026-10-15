@@ -1,0 +1,25 @@
+{
+  "duration": 0.05,
+  "priority": 0,
+  "max_instances": 64,
+  "emitters": [],
+  "decal": {
+    "texture": "decal_blood",
+    "normal": "decal_blood_n",
+    "size": [
+      0.08,
+      0.192
+    ],
+    "lifetime": 120,
+    "depth": 0.08,
+    "variants": 4,
+    "tint": [
+      1,
+      1,
+      1,
+      1
+    ]
+  },
+  "name": "blood_splat",
+  "_generated": "make_effects.py"
+}

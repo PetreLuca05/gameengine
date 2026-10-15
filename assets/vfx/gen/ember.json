@@ -1,0 +1,12 @@
+{
+  "kind": "emissive",
+  "grid": [
+    1,
+    1
+  ],
+  "cell": 64,
+  "placeholder": {
+    "type": "ember"
+  },
+  "name": "ember"
+}

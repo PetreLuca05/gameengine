@@ -1,0 +1,14 @@
+{
+  "kind": "sprite",
+  "grid": [
+    4,
+    4
+  ],
+  "variants": 16,
+  "cell": 64,
+  "placeholder": {
+    "type": "drops",
+    "seed": 39
+  },
+  "name": "blood_drops"
+}

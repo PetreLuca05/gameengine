@@ -1,0 +1,45 @@
+{
+  "kind": "volume",
+  "grid": [
+    8,
+    8
+  ],
+  "frames": 64,
+  "cell": 128,
+  "fps": 30,
+  "motion_vectors": true,
+  "lighting": "sixway",
+  "placeholder": {
+    "type": "puff",
+    "seed": 21,
+    "grow": [
+      0.3,
+      0.95
+    ],
+    "density": 1.0,
+    "detail": 4.0,
+    "rise": 0.12
+  },
+  "model": "kling-video/v2.5-turbo/pro/text-to-video",
+  "duration": 5,
+  "aspect_ratio": "1:1",
+  "cfg_scale": 0.6,
+  "negative_prompt": "camera movement, zoom, text, watermark, logo, people, hands, gun, background objects, ground, floor, colored background",
+  "prompt": "slow motion studio footage of a single puff of thick white smoke bursting out from the center and slowly expanding and dissipating, soft billowing volumetric shapes, evenly lit from the front, static locked-off camera, the smoke stays centered and fully inside the frame, pure black background",
+  "background": "black",
+  "alpha": {
+    "black": 0.04,
+    "white": 0.5,
+    "gamma": 1.1,
+    "albedo": [
+      1.0,
+      1.0,
+      1.0
+    ]
+  },
+  "trim": [
+    0.0,
+    0.85
+  ],
+  "name": "smoke_puff"
+}

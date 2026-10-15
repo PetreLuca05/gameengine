@@ -2,10 +2,11 @@
 // Tonemap + optional FXAA + brightness/gamma. Output is UNORM, so sRGB encoding is done here.
 layout(location = 0) in vec2 v_uv;
 layout(set = 0, binding = 0) uniform sampler2D hdr;
+layout(set = 1, binding = 0) uniform sampler2D bloom;   // bloom mip 0 (half resolution)
 
 layout(push_constant) uniform Push {
     vec4 params;   // x exposure, y gamma, z aa mode (0 none, 1 fxaa, 2 taa stub), w vignette
-    vec4 texel;    // xy = 1/source size
+    vec4 texel;    // xy = 1/source size, z = bloom intensity, w = exposure boost (muzzle flash flicker)
 } pc;
 
 layout(location = 0) out vec4 out_color;
@@ -15,8 +16,8 @@ vec3 aces(vec3 x) {
     return clamp((x * (a * x + b)) / (x * (c * x + d) + e), 0.0, 1.0);
 }
 
-vec3 tonemap(vec3 c) { return aces(c * pc.params.x); }
-vec3 fetch(vec2 uv) { return tonemap(texture(hdr, uv).rgb); }
+vec3 tonemap(vec3 c) { return aces(c * pc.params.x * (1.0 + pc.texel.w)); }
+vec3 fetch(vec2 uv) { return tonemap(texture(hdr, uv).rgb + texture(bloom, uv).rgb * pc.texel.z); }
 float luma(vec3 c) { return dot(c, vec3(0.299, 0.587, 0.114)); }
 
 vec3 fxaa(vec2 uv) {

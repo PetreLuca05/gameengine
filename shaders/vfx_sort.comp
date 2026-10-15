@@ -1,0 +1,20 @@
+#version 450
+// Bitonic sort of the alpha list (key = back-to-front distance), plus the padding pass.
+#extension GL_GOOGLE_include_directive : require
+#include "vfx_common.glsl"
+layout(local_size_x = 256) in;
+layout(push_constant) uniform SortPush { uint j; uint k; uint n; uint mode; } sp;
+void main() {
+    uint i = gl_GlobalInvocationID.x;
+    if (i >= sp.n) return;
+    if (sp.mode == 0u) {
+        // Pad entries past the live count (sort to the end).
+        if (i >= min(ctr.alpha, vf.caps.y)) sort_keys[i] = uvec2(0xFFFFFFFFu, 0xFFFFFFFFu);
+        return;
+    }
+    uint l = i ^ sp.j;
+    if (l <= i) return;
+    uvec2 a = sort_keys[i], b = sort_keys[l];
+    bool ascending = (i & sp.k) == 0u;
+    if ((a.x > b.x) == ascending) { sort_keys[i] = b; sort_keys[l] = a; }
+}

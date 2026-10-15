@@ -18,6 +18,7 @@ typedef struct BodyRecord {
     PhysLayer layer;
     PhysMotion motion;
     u64 user;
+    u8 material;
 } BodyRecord;
 
 #define MAX_CONSTRAINTS 4096
@@ -252,6 +253,7 @@ BodyId phys_add_body(PhysicsWorld *w, const BodyDesc *d) {
     r->layer = d->layer;
     r->motion = d->motion;
     r->user = d->user;
+    r->material = d->material;
     w->body_count++;
     return id;
 }
@@ -437,6 +439,17 @@ static vec3 surface_normal(PhysicsWorld *w, BodyId body, JPH_SubShapeID sub, vec
     return n;
 }
 
+int phys_body_material(PhysicsWorld *w, BodyId id) {
+    if (id == PHYS_INVALID_BODY) return 0;
+    BodyRecord *r = &w->records[BODY_INDEX(id)];
+    return (r->used && r->id == id) ? r->material : 0;
+}
+void phys_set_body_material(PhysicsWorld *w, BodyId id, int material) {
+    if (id == PHYS_INVALID_BODY) return;
+    BodyRecord *r = &w->records[BODY_INDEX(id)];
+    if (r->used && r->id == id) r->material = (u8)material;
+}
+
 bool phys_raycast(PhysicsWorld *w, vec3 origin, vec3 dir_len, u32 mask, BodyId ignore, RayHit *out) {
     JPH_RVec3 o = { origin.x, origin.y, origin.z };
     JPH_Vec3 d = { dir_len.x, dir_len.y, dir_len.z };
@@ -455,6 +468,7 @@ bool phys_raycast(PhysicsWorld *w, vec3 origin, vec3 dir_len, u32 mask, BodyId i
         BodyRecord *r = &w->records[BODY_INDEX(hit.bodyID)];
         out->user = r->used ? r->user : 0;
         out->layer = r->layer;
+        out->material = r->used ? r->material : 0;
     }
     return true;
 }

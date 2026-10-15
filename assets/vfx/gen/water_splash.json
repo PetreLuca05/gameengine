@@ -1,0 +1,17 @@
+{
+  "kind": "volume",
+  "grid": [
+    4,
+    4
+  ],
+  "frames": 16,
+  "cell": 128,
+  "fps": 30,
+  "motion_vectors": true,
+  "lighting": "simple",
+  "placeholder": {
+    "type": "splash",
+    "seed": 24
+  },
+  "name": "water_splash"
+}

@@ -26,6 +26,7 @@
 #include "ui/ui.h"
 #include "ui/console.h"
 #include "ui/menus.h"
+#include "ui/vfx_editor.h"
 #include "game/game.h"
 #include "net/net.h"
 #include "app/video.h"
@@ -104,6 +105,11 @@ static void handle_event(const SDL_Event *ev) {
             if (console_is_open()) console_set_open(false);
             else menus_toggle_pause();
             menus_tick(0);
+            return;
+        }
+        if (ev->key.scancode == SDL_SCANCODE_F7 && !console_is_open() && !input_capturing()) {
+            vfx_editor_toggle();
+            input_set_game_focus(!vfx_editor_open() && !menus_wants_mouse());
             return;
         }
         if (console_handle_event(ev)) return;

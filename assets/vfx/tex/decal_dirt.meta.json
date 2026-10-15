@@ -1,0 +1,23 @@
+{
+  "file": "decal_dirt.png",
+  "width": 256,
+  "height": 256,
+  "grid": [
+    2,
+    2
+  ],
+  "frames": 4,
+  "variants": 4,
+  "fps": 30,
+  "loop": false,
+  "motion_vectors": false,
+  "lighting": "none",
+  "premultiplied": true,
+  "placeholder": true,
+  "kind": "decal",
+  "source": "procedural",
+  "recipe": "assets/vfx/gen/decal_dirt.json",
+  "recipe_hash": "d28ebd11f1c07923d17cbc72",
+  "generated": "2026-10-15T16:10:28",
+  "tool_version": 3
+}

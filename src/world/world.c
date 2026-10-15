@@ -1,3 +1,4 @@
+#include "vfx/vfx_types.h"
 #include "world.h"
 #include "gameplay/characters.h"
 #include "core/log.h"
@@ -135,6 +136,19 @@ vec3 ent_focus_point(const World *w, EntityId e) {
     return v3_add(w->xf[i].pos, quat_rotate(w->xf[i].rot, w->inter[i].focus_offset));
 }
 
+// Surface material of entity bodies (impact VFX / sounds), identical on host and clients.
+static u8 entity_material(const World *w, int i) {
+    switch (w->type[i]) {
+    case ET_PROP: return (u8)(w->vis[i].shape == VIS_CYLINDER ? SURF_METAL_THIN : (w->vis[i].shape == VIS_SPHERE ? SURF_CLOTH : SURF_WOOD));
+    case ET_DOOR: return SURF_WOOD;
+    case ET_GATE: return SURF_METAL_THICK;
+    case ET_CONTAINER: return SURF_METAL_THIN;
+    case ET_LEVER: case ET_SWITCH: case ET_LIGHT: return SURF_METAL_THIN;
+    case ET_PLAYER: case ET_DUMMY: case ET_ZOMBIE: return SURF_FLESH;
+    default: return SURF_DEFAULT;
+    }
+}
+
 void ent_create_body(World *w, EntityId e, PhysMotion motion, PhysLayer layer, float mass) {
     int i = (int)ENT_INDEX(e);
     Visual *v = &w->vis[i];
@@ -154,6 +168,7 @@ void ent_create_body(World *w, EntityId e, PhysMotion motion, PhysLayer layer, f
     d.mass = mass;
     d.friction = 0.7f;
     d.restitution = 0.05f;
+    d.material = entity_material(w, i);
     if (w->body[i].body != PHYS_INVALID_BODY) phys_remove_body(w->phys, w->body[i].body);
     w->body[i].body = phys_add_body(w->phys, &d);
     w->body[i].motion = motion;

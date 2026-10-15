@@ -1,6 +1,7 @@
 {
   "_comment": "Preset: bolt-action sniper. One huge kick per shot that fully recovers, bolt cycle hook, heavy scope sway.",
   "id": "sniper",
+  "vfx": { "muzzle": { "type": "sniper", "device": "bare" }, "caliber": "sniper" },
   "item": "sniper",
   "kind": "hitscan",
   "damage_type": "bullet",

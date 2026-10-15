@@ -106,6 +106,8 @@ void chars_system_destroy(World *w);
 CharacterInst *char_attach(World *w, EntityId e, u8 character_id);
 void char_detach(World *w, EntityId e);
 CharacterInst *char_get(const World *w, EntityId e);
+// Visual muzzle of the item a character holds (world space, barrel forward). VFX for remote shooters.
+bool chars_item_muzzle(World *w, EntityId e, vec3 *pos, vec3 *dir);
 CharacterInst *char_get_index(const World *w, int ent_index);
 
 // Host: sim-only animation for every character (call after movement / weapons, before lag-comp).

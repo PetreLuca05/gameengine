@@ -1,0 +1,23 @@
+{
+  "file": "heat_distort.png",
+  "width": 128,
+  "height": 128,
+  "grid": [
+    1,
+    1
+  ],
+  "frames": 1,
+  "variants": 1,
+  "fps": 30,
+  "loop": false,
+  "motion_vectors": false,
+  "lighting": "none",
+  "premultiplied": false,
+  "placeholder": true,
+  "kind": "distortion",
+  "source": "procedural",
+  "recipe": "assets/vfx/gen/heat_distort.json",
+  "recipe_hash": "e1d6eaca5d8d83fad440ea37",
+  "generated": "2026-10-15T16:14:30",
+  "tool_version": 3
+}

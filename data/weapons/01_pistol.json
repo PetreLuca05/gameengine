@@ -1,6 +1,7 @@
 {
   "_comment": "Preset: pistol. Snappy semi-auto, big first-shot punch, fast full recovery.",
   "id": "pistol",
+  "vfx": { "muzzle": { "type": "pistol", "device": "bare" }, "caliber": "pistol" },
   "item": "pistol",
   "kind": "hitscan",
   "damage_type": "bullet",

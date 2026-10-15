@@ -6,6 +6,10 @@
 #include "render/debug_draw.h"
 #include "audio/audio.h"
 #include "ui/ui.h"
+#include "vfx/vfx.h"
+#include "ui/vfx_editor.h"
+#include "vfx/vfx_library.h"
+#include "player/hands.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <math.h>
@@ -46,9 +50,12 @@ void fx_init(const BasicMeshes *meshes) {
     FX->rng = rng_make(1234);
     FX->dev_damage_numbers = cvar_reg_bool("dev_damage_numbers", true, CVAR_ARCHIVE, "show floating damage numbers");
     FX->fx_tracers = cvar_reg_bool("fx_tracers", true, CVAR_ARCHIVE, "draw bullet tracers");
+    vfx_game_init(meshes);
+    vfx_editor_init();
 }
 
 void fx_shutdown(void) {
+    vfx_game_shutdown();
     free(FX);
     FX = NULL;
 }
@@ -74,7 +81,10 @@ static void spawn_sparks(vec3 p, vec3 n, int count, u32 color, float speed) {
 }
 
 void fx_impact(vec3 pos, vec3 normal, int kind) {
-    if (!FX) return;
+    fx_impact_ex(pos, normal, v3_neg(normal), kind ? SURF_FLESH : SURF_DEFAULT, VFX_CAL_RIFLE, kind ? FX_IMPACT_FLESH : FX_IMPACT_DECAL);
+}
+
+static void legacy_impact(vec3 pos, vec3 normal, int kind) {
     if (kind == 0) {
         Decal *d = &FX->decals[FX->decal_head];
         FX->decal_head = (FX->decal_head + 1) % MAX_DECALS;
@@ -90,8 +100,17 @@ void fx_impact(vec3 pos, vec3 normal, int kind) {
     }
 }
 
-void fx_muzzle(vec3 pos, vec3 dir) {
+void fx_impact_ex(vec3 pos, vec3 normal, vec3 incoming, int material, int caliber, u32 flags) {
     if (!FX) return;
+    if (vfx_game_active()) { vfx_game_impact(pos, normal, incoming, material, caliber, flags); return; }
+    legacy_impact(pos, normal, (flags & FX_IMPACT_FLESH) ? 1 : 0);
+}
+
+void fx_muzzle(vec3 pos, vec3 dir) { fx_muzzle_ex(pos, dir, VFX_MUZZLE_RIFLE, VFX_DEV_BARE, false); }
+
+void fx_muzzle_ex(vec3 pos, vec3 dir, int type, int device, bool viewmodel) {
+    if (!FX) return;
+    if (vfx_game_active()) { vfx_game_muzzle(pos, dir, type, device, viewmodel); return; }
     Flash *f = &FX->flashes[FX->flash_head];
     FX->flash_head = (FX->flash_head + 1) % MAX_FLASHES;
     f->pos = pos;
@@ -99,8 +118,12 @@ void fx_muzzle(vec3 pos, vec3 dir) {
     spawn_sparks(pos, dir, 5, rgba8(1.0f, 0.85f, 0.4f, 1), 6.0f);
 }
 
-void fx_shell(vec3 pos, vec3 vel) {
-    if (!FX || FX->spark_count >= MAX_SPARKS) return;
+void fx_shell(vec3 pos, vec3 vel) { fx_shell_ex(pos, vel, VFX_CAL_RIFLE); }
+
+void fx_shell_ex(vec3 pos, vec3 vel, int caliber) {
+    if (!FX) return;
+    if (vfx_game_active()) { vfx_game_shell(pos, vel, caliber); return; }
+    if (FX->spark_count >= MAX_SPARKS) return;
     Spark *s = &FX->sparks[FX->spark_count++];
     s->pos = pos;
     s->vel = v3_add(vel, v3(rng_range(&FX->rng, -0.3f, 0.3f), rng_range(&FX->rng, 0, 0.5f), rng_range(&FX->rng, -0.3f, 0.3f)));
@@ -125,6 +148,7 @@ void fx_sound(const char *name, vec3 pos, float volume) { audio_play(name, pos, 
 
 void fx_update(float dt) {
     if (!FX) return;
+    vfx_game_update(dt);
     for (int i = 0; i < FX->spark_count;) {
         Spark *s = &FX->sparks[i];
         s->life -= dt;
@@ -139,8 +163,12 @@ void fx_update(float dt) {
     for (int i = 0; i < MAX_DECALS; i++) FX->decals[i].age += dt;
 }
 
-void fx_render(void) {
+void fx_render(vec3 cam) {
     if (!FX) return;
+    vec3 mp, mf;
+    bool mv = hands_muzzle(&mp, &mf);
+    vfx_game_set_local_muzzle(v3_madd(mp, mf, 0.015f), mf, mv);
+    vfx_game_render(cam);
     // Decals: thin dark quads slightly off the surface.
     for (int i = 0; i < FX->decal_count; i++) {
         Decal *d = &FX->decals[i];

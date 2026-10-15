@@ -336,7 +336,7 @@ static void on_shot(const ShotEvent *ev, void *user) {
     // Shell casing out of the right side (bolt / pump guns eject when cycling instead).
     if (ev->def->kind == WPN_HITSCAN && !ev->def->bolt_action) {
         vec3 right = v3_norm(v3_cross(ev->dir, v3(0, 1, 0)));
-        fx_shell(ev->muzzle, v3_add(v3_scale(right, 2.2f), v3(0, 1.4f, 0)));
+        fx_shell_ex(v3_madd(ev->muzzle, ev->dir, -0.12f), v3_add(v3_scale(right, 2.2f), v3(0, 1.4f, 0)), ev->def->vfx_caliber);
     }
     // Bolt / pump cycle after the shot (if rounds are left).
     if (ev->def->bolt_action && ev->mag_left > 0) G->bolt_timer = fmaxf(0.25f, 60.0f / fmaxf(1.0f, ev->def->recoil.rpm) * 0.35f);
@@ -356,8 +356,8 @@ static void weapon_feel_tick(void) {
             vec3 eye = player_eye_pos(&p->sim.move);
             fx_sound("bolt_cycle", eye, 0.7f);
             vec3 r = right_from_yaw(p->sim.move.yaw);
-            fx_shell(v3_add(eye, v3_add(v3_scale(r, 0.12f), dir_from_angles(p->sim.move.yaw, p->sim.move.pitch))),
-                     v3_add(v3_scale(r, 2.0f), v3(0, 1.5f, 0)));
+            fx_shell_ex(v3_add(eye, v3_add(v3_scale(r, 0.12f), dir_from_angles(p->sim.move.yaw, p->sim.move.pitch))),
+                     v3_add(v3_scale(r, 2.0f), v3(0, 1.5f, 0)), d->vfx_caliber);
         }
     }
     // wpn_magdump: stop once the magazine is empty (or after 20 s).

@@ -4,6 +4,7 @@
 #include "core/log.h"
 #include "gameplay/effects.h"
 #include "gameplay/entities.h"
+#include "gameplay/characters.h"
 #include "net/net.h"
 #include "audio/audio.h"
 #include "anim/body_parts.h"
@@ -67,8 +68,29 @@ void game_handle_event(const GameEvent *ev) {
         audio_play_2d("hurt", 0.7f, SND_SFX);
         break;
     }
-    case EV_IMPACT: fx_impact(ev->pos, ev->dir, (int)ev->id); break;
-    case EV_TRACER: fx_tracer(ev->pos, ev->dir); break;
+    case EV_IMPACT: {
+        // Own shots were predicted locally (cl_predict_impacts): skip the host's copy.
+        if (ev->ent2 && (int)ev->ent2 - 1 == G->local_slot && fx_predict_impacts()) break;
+        vec3 inc;
+        memcpy(&inc, ev->data, sizeof(inc));
+        fx_impact_ex(ev->pos, ev->dir, inc, (int)(ev->id & 0xFF), (int)((ev->id >> 8) & 0xF), (ev->id >> 12) & 0xF);
+        break;
+    }
+    case EV_TRACER: {
+        vec3 from = ev->pos;
+        if (ev->id & 1u) {
+            // Remote shot: flash (and tracer start) at the shooter's visible barrel when we have it.
+            vec3 mp, md = v3_norm(v3_sub(ev->dir, ev->pos));
+            if (ent_valid(w, ev->ent) && chars_item_muzzle(w, ev->ent, &mp, &md)) from = mp;
+            fx_muzzle_ex(from, md, (int)((ev->id >> 4) & 0xF), (int)((ev->id >> 8) & 0xF), false);
+            if (((ev->id >> 12) & 0xF) != 3u) {   // not shotgun shells: casing out of the right side
+                vec3 right = v3_norm(v3_cross(md, v3(0, 1, 0)));
+                fx_shell_ex(from, v3_add(v3_scale(right, 2.2f), v3(0, 1.4f, 0)), (int)((ev->id >> 12) & 0xF));
+            }
+        }
+        fx_tracer(from, ev->dir);
+        break;
+    }
     case EV_MUZZLE:
         if (ent_valid(w, ev->ent)) {
             int i = (int)ENT_INDEX(ev->ent);

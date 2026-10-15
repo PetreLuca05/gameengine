@@ -193,9 +193,13 @@ else()
   target_compile_options(deadground PRIVATE -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers)
   target_link_libraries(deadground PRIVATE m pthread)
 endif()
-add_custom_command(TARGET deadground POST_BUILD
-  COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/data $<TARGET_FILE_DIR:deadground>/data
-  COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/assets $<TARGET_FILE_DIR:deadground>/assets)
+# Data / assets are mirrored next to the exe on every build (not only when it relinks), so asset-only
+# edits (effects, textures) reach the tests and the game. copy_directory_if_different skips unchanged files.
+add_custom_target(dg_copy_data ALL
+  COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different ${CMAKE_SOURCE_DIR}/data ${CMAKE_BINARY_DIR}/bin/data
+  COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different ${CMAKE_SOURCE_DIR}/assets ${CMAKE_BINARY_DIR}/bin/assets
+  COMMENT "Mirroring data/ and assets/")
+add_dependencies(deadground dg_copy_data)
 
 # ---------------------------------------------------------------- unit tests (ctest)
 # Pure modules only: no SDL / Vulkan / Jolt, so this builds and runs anywhere.
@@ -216,6 +220,7 @@ set(DG_ANIMCORE_SOURCES
   src/anim/anim.c src/anim/anim_mesh.c src/anim/controller.c src/anim/procedural.c src/anim/turn.c src/anim/spine.c
   src/anim/weapon_hold.c src/anim/damage_additive.c src/anim/foot_ik.c src/anim/anim_net.c src/anim/ragdoll_def.c
   src/anim/anim_library.c src/anim/character_rt.c src/gameplay/hitboxes.c src/gameplay/items.c src/gameplay/recoil.c src/core/spring.c
+  src/vfx/vfx_curve.c src/vfx/vfx_library.c src/vfx/vfx_sim.c src/vfx/vfx_atlas.c
   src/assets/fbx_loader.c src/assets/anim_cache.c src/assets/character.c
   src/core/log.c src/core/platform.c)
 add_library(dg_animcore STATIC ${DG_ANIMCORE_SOURCES})
@@ -236,6 +241,15 @@ target_link_libraries(bake_anim PRIVATE dg_animcore)
 add_executable(validate_rig tools/validate_rig/validate_rig.c)
 set_target_properties(validate_rig PROPERTIES C_STANDARD 11)
 target_link_libraries(validate_rig PRIVATE dg_animcore)
+
+# VFX core (pure): curves, library, simulation, atlas packing.
+add_executable(test_vfx tests/test_vfx.c)
+set_target_properties(test_vfx PROPERTIES C_STANDARD 11)
+target_link_libraries(test_vfx PRIVATE dg_animcore)
+if(MSVC)
+  target_compile_options(test_vfx PRIVATE /W3 /wd4100 /wd4201 /utf-8)
+endif()
+add_test(NAME vfx COMMAND test_vfx WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
 
 add_executable(test_anim tests/test_anim.c)
 set_target_properties(test_anim PROPERTIES C_STANDARD 11)

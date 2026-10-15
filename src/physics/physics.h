@@ -60,6 +60,7 @@ typedef struct BodyDesc {
     // optional collision group (ragdolls: no collisions between joined bodies)
     void *group_filter;      // from phys_group_filter_create
     u32 group_id, sub_group_id;
+    u8 material;             // SurfaceMaterial (src/vfx/vfx_types.h): impact VFX / sounds
 } BodyDesc;
 
 typedef struct RayHit {
@@ -70,6 +71,7 @@ typedef struct RayHit {
     float fraction;
     float distance;
     PhysLayer layer;
+    u8 material;
 } RayHit;
 
 typedef struct ShapeHit {
@@ -126,6 +128,8 @@ u64 phys_body_user(PhysicsWorld *w, BodyId id);
 void phys_set_body_enabled(PhysicsWorld *w, BodyId id, bool enabled); // add/remove from broadphase
 
 // Queries. mask = PL_MASK(...) bits; ignore = body to skip (or PHYS_INVALID_BODY).
+int phys_body_material(PhysicsWorld *w, BodyId id);
+void phys_set_body_material(PhysicsWorld *w, BodyId id, int material);
 bool phys_raycast(PhysicsWorld *w, vec3 origin, vec3 dir_len, u32 mask, BodyId ignore, RayHit *out);
 bool phys_sphere_cast(PhysicsWorld *w, vec3 from, vec3 dir_len, float radius, u32 mask, BodyId ignore, ShapeHit *out);
 bool phys_capsule_cast(PhysicsWorld *w, vec3 bottom_center, float radius, float total_height, vec3 dir_len, u32 mask, BodyId ignore, ShapeHit *out);

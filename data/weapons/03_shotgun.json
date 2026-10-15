@@ -1,6 +1,7 @@
 {
   "_comment": "Preset: pump shotgun. Fixed pellet cone (the crosshair shows it as a circle), heavy kick, pump cycle hook.",
   "id": "shotgun",
+  "vfx": { "muzzle": { "type": "shotgun", "device": "bare" }, "caliber": "shotgun" },
   "item": "shotgun",
   "kind": "hitscan",
   "damage_type": "bullet",

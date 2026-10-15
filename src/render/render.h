@@ -141,6 +141,44 @@ void render_set_text_atlas(TextureId atlas);
 void render_ui(const UiVertex *verts, u32 vcount, const u32 *indices, u32 icount, const UiDrawCmd *cmds, u32 ccount);
 void render_end_frame(void);
 
+// ------------------------------------------------------------------ VFX (src/render/vk_vfx.c)
+// GPU particle simulation (compute), sorted / additive / distortion particle passes, decals and
+// bloom. The game layer (src/vfx/vfx.c) feeds one RenderVfxFrame per rendered frame.
+struct VfxLibrary;
+// Must match CpuSprite / Decal in shaders/vfx_common.glsl (std430).
+typedef struct RenderVfxSprite { vec4 pos_size; vec4 vel_rot; vec4 color; u32 info[4]; } RenderVfxSprite;
+typedef struct RenderVfxDecal { vec4 pos_size; vec4 normal_depth; vec4 tangent_angle; vec4 uv; vec4 nuv; vec4 tint; u32 info[4]; } RenderVfxDecal;
+typedef struct RenderVfxFrame {
+    const void *spawns;          // VfxGpuSpawn[spawn_count] (src/vfx/vfx_sim.h)
+    int spawn_count;
+    const RenderVfxSprite *sprites;   // CPU tier: additive first (sprite_add), then alpha back to front
+    int sprite_add, sprite_alpha;
+    const RenderVfxDecal *decals;
+    int decal_count;
+    const vec4 *instances;       // [2 * slot]: pos, rot (local-space emitters)
+    int instance_count;
+    float dt;                    // scaled simulation dt for this frame
+    float timescale;
+    vec3 wind;
+    float exposure_visibility;   // exposure-aware emitters: 1 at night .. ~0.15 in full daylight
+    bool lighting, collision;
+    bool reset;                  // clear all GPU particles
+    int max_sorted;              // alpha particles sorted per frame (quality)
+} RenderVfxFrame;
+typedef struct RenderVfxStats {
+    u32 alive, emitted, dropped, add, alpha, distort, sort_n, pool;
+    float ms_compute, ms_decals, ms_particles, ms_bloom;   // GPU time (last completed frame)
+    int atlas_pages, atlas_textures;
+} RenderVfxStats;
+// Packs and uploads every texture of the library (fills its atlas placements) and the emitter
+// table. Call after (re)loading the library.
+bool render_vfx_set_library(struct VfxLibrary *lib);
+void render_vfx_frame(const RenderVfxFrame *f);
+// Re-uploads only the emitter table + curve LUTs (editor tweaks; textures unchanged).
+void render_vfx_update_emitters(struct VfxLibrary *lib);
+void render_vfx_stats(RenderVfxStats *out);
+void render_set_exposure_boost(float boost);
+
 void render_screenshot(const char *path);
 bool render_reload_shaders(void);
 void render_poll_shader_hot_reload(void);

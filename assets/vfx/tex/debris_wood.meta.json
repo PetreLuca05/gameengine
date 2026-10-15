@@ -1,0 +1,23 @@
+{
+  "file": "debris_wood.png",
+  "width": 256,
+  "height": 256,
+  "grid": [
+    4,
+    4
+  ],
+  "frames": 16,
+  "variants": 16,
+  "fps": 30,
+  "loop": false,
+  "motion_vectors": false,
+  "lighting": "none",
+  "premultiplied": true,
+  "placeholder": true,
+  "kind": "sprite",
+  "source": "procedural",
+  "recipe": "assets/vfx/gen/debris_wood.json",
+  "recipe_hash": "b5bb91078ec57e9aed029376",
+  "generated": "2026-10-15T16:10:23",
+  "tool_version": 3
+}

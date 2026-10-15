@@ -1,0 +1,23 @@
+{
+  "file": "flash_suppressed.png",
+  "width": 256,
+  "height": 256,
+  "grid": [
+    2,
+    2
+  ],
+  "frames": 4,
+  "variants": 4,
+  "fps": 30,
+  "loop": false,
+  "motion_vectors": false,
+  "lighting": "none",
+  "premultiplied": true,
+  "placeholder": true,
+  "kind": "emissive",
+  "source": "procedural",
+  "recipe": "assets/vfx/gen/flash_suppressed.json",
+  "recipe_hash": "f031fcb0aa9dd569e6e25255",
+  "generated": "2026-10-15T16:14:30",
+  "tool_version": 3
+}

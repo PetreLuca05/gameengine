@@ -5,7 +5,7 @@
     "sun_dir": [0.32, 1.0, 0.22], "sun_color": [1.0, 0.96, 0.9], "sun_intensity": 2.4,
     "sky": [0.55, 0.6, 0.7], "ground": [0.32, 0.3, 0.27], "fog": [0.42, 0.45, 0.5], "fog_density": 0.0
   },
-  "room": { "size": [60, 10, 60], "wall": 0.5, "floor_color": [0.6, 0.6, 0.58], "wall_color": [0.68, 0.68, 0.66] },
+  "room": { "size": [60, 10, 60], "wall": 0.5, "floor_material": "concrete", "wall_material": "plaster", "floor_color": [0.6, 0.6, 0.58], "wall_color": [0.68, 0.68, 0.66] },
 
   "spawns": [
     { "pos": [0, 0.05, 24], "yaw": 0 },
@@ -15,8 +15,8 @@
   ],
 
   "brushes": [
-    { "type": "box", "pos": [-2, 0, 19], "size": [3.2, 0.85, 1.0], "color": [0.4, 0.42, 0.45], "label": "loadout table" },
-    { "type": "box", "pos": [-4.5, 0, 22.5], "size": [1, 1, 1], "color": [0.85, 0.55, 0.2], "label": "1 m cube" },
+    { "type": "box", "pos": [-2, 0, 19], "size": [3.2, 0.85, 1.0], "color": [0.4, 0.42, 0.45], "label": "loadout table", "material": "metal_thick" },
+    { "type": "box", "pos": [-4.5, 0, 22.5], "size": [1, 1, 1], "color": [0.85, 0.55, 0.2], "label": "1 m cube", "material": "wood" },
 
     { "type": "stairs", "pos": [-26, 0, 13], "rise": 0.15, "run": 0.3, "count": 10, "width": 2.5, "platform": 2, "color": [0.55, 0.6, 0.7], "label": "steps 15 cm" },
     { "type": "stairs", "pos": [-22, 0, 13], "rise": 0.20, "run": 0.3, "count": 10, "width": 2.5, "platform": 2, "color": [0.55, 0.65, 0.6], "label": "steps 20 cm" },
@@ -24,8 +24,8 @@
 
     { "type": "ramp", "pos": [-26, 0, 1.0], "width": 2.5, "length": 6, "angle": 15, "platform": 2, "color": [0.5, 0.58, 0.68], "label": "ramp 15 deg" },
     { "type": "ramp", "pos": [-22, 0, 2.0], "width": 2.5, "length": 4, "angle": 30, "platform": 2, "color": [0.5, 0.65, 0.55], "label": "ramp 30 deg" },
-    { "type": "ramp", "pos": [-18, 0, 2.5], "width": 2.5, "length": 3, "angle": 45, "platform": 2, "color": [0.68, 0.6, 0.5], "label": "ramp 45 deg" },
-    { "type": "ramp", "pos": [-14, 0, 3.0], "width": 2.5, "length": 2, "angle": 60, "platform": 2, "color": [0.7, 0.5, 0.5], "label": "ramp 60 deg (too steep)" },
+    { "type": "ramp", "pos": [-18, 0, 2.5], "width": 2.5, "length": 3, "angle": 45, "platform": 2, "color": [0.68, 0.6, 0.5], "label": "ramp 45 deg", "material": "metal_thick" },
+    { "type": "ramp", "pos": [-14, 0, 3.0], "width": 2.5, "length": 2, "angle": 60, "platform": 2, "color": [0.7, 0.5, 0.5], "label": "ramp 60 deg (too steep)", "material": "metal_thick" },
 
     { "type": "box", "pos": [-10, 0, -18], "size": [2.0, 0.5, 1.5], "color": [0.6, 0.62, 0.75], "label": "0.5 m" },
     { "type": "box", "pos": [-6, 0, -18], "size": [2.0, 1.0, 1.5], "color": [0.6, 0.7, 0.62], "label": "1.0 m" },
@@ -58,7 +58,7 @@
     { "type": "doorway", "pos": [20, 0, 24], "yaw": -90, "length": 12, "height": 4.0, "thickness": 0.3,
       "door_width": 3.0, "door_height": 3.0, "color": [0.55, 0.58, 0.62], "label": "gate (use lever)" },
     { "type": "box", "pos": [25, 0, 18], "size": [10, 4, 0.3], "color": [0.55, 0.58, 0.62] },
-    { "type": "box", "pos": [26, 0, 26.5], "size": [3, 0.9, 1], "color": [0.4, 0.42, 0.45], "label": "weapon rack" },
+    { "type": "box", "pos": [26, 0, 26.5], "size": [3, 0.9, 1], "color": [0.4, 0.42, 0.45], "label": "weapon rack", "material": "metal_thin" },
 
     { "_comment": "Recoil lane: stand at (0, 0, 28) facing north (wpn_magdump does this). Walls 10 / 25 / 50 m, 10 cm grid, aim dot at 1.35 m.",
       "type": "box", "pos": [-1.5, 0.1, 17.9], "size": [1.5, 2.5, 0.1], "color": [0.86, 0.86, 0.82], "fine_grid": true, "label": "10 m", "label_size": 0.12 },
@@ -70,10 +70,29 @@
     { "type": "box", "pos": [-1.5, 0, 17.75], "size": [0.12, 0.1, 0.4], "color": [0.3, 0.3, 0.32] },
     { "type": "box", "pos": [1.5, 0, 2.75], "size": [0.12, 0.1, 0.4], "color": [0.3, 0.3, 0.32] },
     { "type": "box", "pos": [0, 0, -22.25], "size": [0.12, 0.1, 0.4], "color": [0.3, 0.3, 0.32] },
-    { "type": "box", "pos": [4.2, 0, 27.6], "size": [3.4, 0.85, 1.0], "color": [0.4, 0.42, 0.45], "label": "weapon bench" }
+    { "type": "box", "pos": [4.2, 0, 27.6], "size": [3.4, 0.85, 1.0], "color": [0.4, 0.42, 0.45], "label": "weapon bench", "material": "metal_thick" },
+    { "type": "box", "pos": [-28.0, 0, -12.0], "size": [0.72, 2.2, 0.3], "color": [0.62, 0.62, 0.6], "grid": false, "material": "concrete", "label": "concrete", "label_size": 0.07 },
+    { "type": "box", "pos": [-27.2, 0, -12.0], "size": [0.72, 2.2, 0.3], "color": [0.6, 0.3, 0.22], "grid": false, "material": "brick", "label": "brick", "label_size": 0.07 },
+    { "type": "box", "pos": [-26.4, 0, -12.0], "size": [0.72, 2.2, 0.3], "color": [0.9, 0.89, 0.86], "grid": false, "material": "plaster", "label": "plaster", "label_size": 0.07 },
+    { "type": "box", "pos": [-25.6, 0, -12.0], "size": [0.72, 2.2, 0.3], "color": [0.55, 0.58, 0.62], "grid": false, "material": "metal_thin", "label": "metal_thin", "label_size": 0.07 },
+    { "type": "box", "pos": [-24.8, 0, -12.0], "size": [0.72, 2.2, 0.3], "color": [0.35, 0.37, 0.4], "grid": false, "material": "metal_thick", "label": "metal_thick", "label_size": 0.07 },
+    { "type": "box", "pos": [-24.0, 0, -12.0], "size": [0.72, 2.2, 0.3], "color": [0.62, 0.45, 0.26], "grid": false, "material": "wood", "label": "wood", "label_size": 0.07 },
+    { "type": "box", "pos": [-23.2, 0, -12.0], "size": [0.72, 2.2, 0.3], "color": [0.4, 0.31, 0.22], "grid": false, "material": "dirt", "label": "dirt", "label_size": 0.07 },
+    { "type": "box", "pos": [-22.4, 0, -12.0], "size": [0.72, 2.2, 0.3], "color": [0.8, 0.7, 0.5], "grid": false, "material": "sand", "label": "sand", "label_size": 0.07 },
+    { "type": "box", "pos": [-21.6, 0, -12.0], "size": [0.72, 2.2, 0.3], "color": [0.52, 0.5, 0.47], "grid": false, "material": "gravel", "label": "gravel", "label_size": 0.07 },
+    { "type": "box", "pos": [-20.8, 0, -12.0], "size": [0.72, 2.2, 0.3], "color": [0.3, 0.5, 0.22], "grid": false, "material": "grass", "label": "grass", "label_size": 0.07 },
+    { "type": "box", "pos": [-20.0, 0, -12.0], "size": [0.72, 2.2, 0.3], "color": [0.75, 0.88, 0.95], "grid": false, "material": "glass", "label": "glass", "label_size": 0.07 },
+    { "type": "box", "pos": [-19.2, 0, -12.0], "size": [0.72, 2.2, 0.3], "color": [0.75, 0.45, 0.4], "grid": false, "material": "flesh", "label": "flesh", "label_size": 0.07 },
+    { "type": "box", "pos": [-18.4, 0, -12.0], "size": [0.72, 2.2, 0.3], "color": [0.35, 0.38, 0.55], "grid": false, "material": "cloth", "label": "cloth", "label_size": 0.07 },
+    { "type": "box", "pos": [-17.6, 0, -12.0], "size": [0.72, 2.2, 0.3], "color": [0.86, 0.88, 0.9], "grid": false, "material": "tile", "label": "tile", "label_size": 0.07 },
+    { "type": "box", "pos": [-16.8, 0, -12.0], "size": [0.72, 2.2, 0.3], "color": [0.22, 0.22, 0.23], "grid": false, "material": "asphalt", "label": "asphalt", "label_size": 0.07 },
+    { "type": "box", "pos": [-16.0, 0, -12.0], "size": [0.72, 2.2, 0.3], "color": [0.7, 0.7, 0.7], "grid": false, "material": "default", "label": "default", "label_size": 0.07 },
+    { "type": "box", "pos": [-22.0, 0, -9.5], "size": [3.0, 0.04, 1.6], "color": [0.2, 0.35, 0.5], "grid": false, "material": "water", "label": "water", "label_size": 0.07 },
+    { "type": "box", "pos": [-25.0, 0, -6.0], "size": [0.6, 1.1, 0.6], "color": [0.3, 0.3, 0.33], "material": "metal_thick", "label": "muzzle pedestal (vfx_pedestal)", "label_size": 0.06 }
   ],
 
   "labels": [
+    { "pos": [-22, 0, -7.5], "yaw": 0, "floor": true, "size": 0.25, "text": "impact range: every surface material (vfx)" },
     { "pos": [-8, 0, 24], "yaw": 90, "floor": true, "size": 0.3, "text": "firing line" },
     { "pos": [-14, 0, 22.3], "yaw": 90, "floor": true, "size": 0.25, "text": "6 m" },
     { "pos": [-18, 0, 22.3], "yaw": 90, "floor": true, "size": 0.25, "text": "10 m" },

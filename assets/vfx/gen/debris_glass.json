@@ -1,0 +1,21 @@
+{
+  "kind": "sprite",
+  "grid": [
+    4,
+    4
+  ],
+  "variants": 16,
+  "cell": 64,
+  "placeholder": {
+    "type": "chunks",
+    "seed": 34,
+    "color": [
+      0.8,
+      0.9,
+      0.95
+    ],
+    "translucent": 0.6,
+    "roughness": 0.1
+  },
+  "name": "debris_glass"
+}

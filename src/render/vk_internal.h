@@ -151,7 +151,7 @@ typedef struct Renderer {
     bool vsync_applied;
 
     // targets
-    RenderTarget hdr, depth, shadow;
+    RenderTarget hdr, depth, shadow, vm_depth;
     u32 shadow_size;
     VkDescriptorSet hdr_set;   // set-1 style descriptor for post
 
@@ -161,6 +161,7 @@ typedef struct Renderer {
     VkDescriptorPool pool;
     VkPipelineLayout layout_lit;          // set0 + set1 + push lit
     VkPipelineLayout layout_post;         // set1 + push
+    VkPipelineLayout layout_post2;        // hdr + bloom + push (post pass)
     VkPipelineLayout layout_ui;           // set1 + push
     VkPipeline pipes[PIPE_COUNT];
     VkSampler sampler_linear;   // material textures (aniso)
@@ -216,7 +217,8 @@ typedef struct Renderer {
     // cvars
     Cvar *r_vsync, *r_wireframe, *r_render_scale, *r_shadow_quality, *r_aniso, *r_texture_quality;
     Cvar *r_aa, *r_brightness, *r_gamma, *r_grid, *r_vignette, *r_shader_hotreload, *r_culling;
-    Cvar *r_vm_fov, *r_cpu_skinning;
+    Cvar *r_vm_fov, *r_cpu_skinning, *r_bloom, *r_bloom_intensity;
+    float exposure_boost;
     u32 aniso_mod, texq_mod;
 } Renderer;
 
@@ -255,5 +257,21 @@ bool vkp_create_layouts(void);
 bool vkp_create_pipelines(void);
 void vkp_destroy_pipelines(void);
 void vkp_destroy_layouts(void);
+VkShaderModule vkp_load_shader(const char *name);
+
+// vk_vfx.c: GPU particles, decals, distortion, bloom
+bool vkx_init(void);
+void vkx_shutdown(void);
+bool vkx_create_pipelines(void);
+void vkx_targets_changed(void);               // after vkd_create_targets (depth / scene copy / bloom views)
+void vkx_record_compute(VkCommandBuffer cmd); // frame start, before the shadow pass
+void vkx_draw_decals(VkCommandBuffer cmd);    // inside the scene pass, depth read-only
+void vkx_copy_scene(VkCommandBuffer cmd);     // outside rendering: HDR -> scene copy (distortion)
+void vkx_draw_particles(VkCommandBuffer cmd); // inside the scene pass, depth read-only
+void vkx_bloom(VkCommandBuffer cmd);          // after the scene pass (HDR in SHADER_READ_ONLY)
+VkDescriptorSet vkx_bloom_set(void);          // post pass set 1
+float vkx_bloom_intensity(void);
+void vkx_timestamp(VkCommandBuffer cmd, int slot);
+void vkx_begin_frame_queries(VkCommandBuffer cmd);
 
 #endif

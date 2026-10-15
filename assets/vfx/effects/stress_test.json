@@ -1,0 +1,94 @@
+{
+  "duration": 1.0,
+  "priority": 3,
+  "max_instances": 2,
+  "cull_distance": 1000,
+  "lod": [
+    [
+      1000000000.0,
+      1.0
+    ],
+    [
+      1000000000.0,
+      1.0
+    ],
+    [
+      1000000000.0,
+      1.0
+    ]
+  ],
+  "emitters": [
+    {
+      "name": "swarm",
+      "tier": "gpu",
+      "spawn": {
+        "mode": "rate",
+        "rate": 600000,
+        "duration": 1.0,
+        "count": 1,
+        "shape": "sphere",
+        "radius": 4.0,
+        "life": [
+          4.0,
+          6.0
+        ],
+        "size": [
+          0.02,
+          0.04
+        ],
+        "speed": [
+          0.2,
+          1.0
+        ],
+        "dir": "random",
+        "color": [
+          0.4,
+          0.7,
+          1.0,
+          1.0
+        ],
+        "color2": [
+          1.0,
+          0.5,
+          0.2,
+          1.0
+        ]
+      },
+      "update": {
+        "turbulence": {
+          "strength": 3.0,
+          "freq": 0.4,
+          "speed": 0.4
+        },
+        "drag": 0.5,
+        "alpha_curve": [
+          [
+            0,
+            0
+          ],
+          [
+            0.1,
+            1
+          ],
+          [
+            0.8,
+            1
+          ],
+          [
+            1,
+            0
+          ]
+        ]
+      },
+      "render": {
+        "mode": "add",
+        "texture": "glow",
+        "emissive": 0.6,
+        "soft": 0.0,
+        "near_fade": 0.1
+      }
+    }
+  ],
+  "name": "stress_test",
+  "_generated": "make_effects.py"
+}

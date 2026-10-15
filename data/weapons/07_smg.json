@@ -1,6 +1,7 @@
 {
   "_comment": "Preset: SMG. Fast, low per-shot kick but a jittery random horizontal; best hip fire.",
   "id": "smg",
+  "vfx": { "muzzle": { "type": "smg", "device": "bare" }, "caliber": "smg" },
   "item": "smg",
   "kind": "hitscan",
   "damage_type": "bullet",

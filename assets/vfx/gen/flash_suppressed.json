@@ -1,0 +1,14 @@
+{
+  "kind": "emissive",
+  "grid": [
+    2,
+    2
+  ],
+  "variants": 4,
+  "cell": 128,
+  "placeholder": {
+    "type": "flash_suppressed",
+    "seed": 13
+  },
+  "name": "flash_suppressed"
+}

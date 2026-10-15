@@ -1403,6 +1403,15 @@ bool chars_ragdoll_now(World *w, EntityId e, vec3 impulse) {
     return true;
 }
 
+bool chars_item_muzzle(World *w, EntityId e, vec3 *pos, vec3 *dir) {
+    CharacterInst *c = char_get(w, e);
+    if (!c || !c->item_valid || !(c->item_weapon || c->item_def)) return false;
+    const ItemSockets *k = c->item_weapon ? &c->item_weapon->sockets : &c->item_def->sockets;
+    *pos = xf_point(c->item_cur, k->muzzle);
+    *dir = quat_rotate(c->item_cur.r, v3(0, 0, -1));
+    return true;
+}
+
 bool chars_ragdoll_release(World *w, EntityId e) {
     CharacterInst *c = char_get(w, e);
     if (!c || !c->tool_rag) return false;

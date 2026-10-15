@@ -1,5 +1,6 @@
 {
   "id": "bat",
+  "vfx": { "caliber": "melee" },
   "item": "bat",
   "kind": "melee",
   "damage_type": "melee",

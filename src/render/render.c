@@ -25,6 +25,8 @@ void render_register_cvars(void) {
     r->r_culling = cvar_reg_bool("r_culling", true, 0, "frustum culling");
     r->r_vm_fov = cvar_reg_float("r_viewmodel_fov", 0.0f, 0.0f, 120.0f, CVAR_ARCHIVE, "viewmodel FOV (0 = same as world, keeps IK hands aligned)");
     r->r_cpu_skinning = cvar_reg_bool("r_cpu_skinning", false, 0, "skin characters on the CPU (fallback / debugging)");
+    r->r_bloom = cvar_reg_bool("r_bloom", true, CVAR_ARCHIVE, "bloom (HDR mip chain)");
+    r->r_bloom_intensity = cvar_reg_float("r_bloom_intensity", 0.06f, 0.0f, 1.0f, CVAR_ARCHIVE, "bloom strength");
     r->r_vsync->on_change = on_render_cvar_changed;
 }
 
@@ -106,6 +108,7 @@ bool render_init(SDL_Window *window) {
     vkd_create_targets();
     vkd_create_shadow_map(shadow_size_for_quality(R->r_shadow_quality->i));
     if (!vkp_create_pipelines()) { log_error("render: pipeline creation failed"); return false; }
+    if (!vkx_init()) log_warn("render: VFX pipelines unavailable (particles disabled)");
 
     R->draws = (DrawItem *)malloc(sizeof(DrawItem) * MAX_DRAWS);
     R->vm_draws = (DrawItem *)malloc(sizeof(DrawItem) * MAX_VM_DRAWS);
@@ -151,6 +154,7 @@ void render_shutdown(void) {
     if (!R) return;
     if (R->device) {
         vkDeviceWaitIdle(R->device);
+        vkx_shutdown();
         vkp_destroy_pipelines();
         vkr_destroy_all_resources();
         vkr_target_destroy(&R->shadow);
@@ -644,6 +648,10 @@ void render_end_frame(void) {
         }
     }
 
+    // ---------------------------------------------------------- GPU particle simulation
+    vkx_begin_frame_queries(cmd);
+    vkx_record_compute(cmd);
+
     // ---------------------------------------------------------- shadow pass
     vkr_image_barrier(cmd, R->shadow.image, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
                       VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, 0,
@@ -681,14 +689,19 @@ void render_end_frame(void) {
                       VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
                       VK_ACCESS_2_SHADER_SAMPLED_READ_BIT, 1);
 
-    // ---------------------------------------------------------- scene pass (HDR)
+    // ---------------------------------------------------------- scene passes (HDR)
+    // 1 static opaque (clears) | 2 decals (depth read-only) | 3 characters + blended items |
+    // scene copy (distortion) | 4 particles, lines, text (depth read-only, sampled) |
+    // 5 viewmodel on its own depth (world depth survives for next frame's particle collision).
+    const VkPipelineStageFlags2 DEPTH_STAGES = VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
+    const VkAccessFlags2 DEPTH_RW = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
     vkr_image_barrier(cmd, R->hdr.image, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                       VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, 0, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                       VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, 1);
+    // Last frame's depth was read by this frame's particle compute: WAR on compute before clearing.
     vkr_image_barrier(cmd, R->depth.image, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-                      VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT, 0,
-                      VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-                      VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT, 1);
+                      VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT, 0,
+                      DEPTH_STAGES, DEPTH_RW, 1);
     {
         VkRenderingAttachmentInfo ca = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
         ca.imageView = R->hdr.view;
@@ -703,7 +716,7 @@ void render_end_frame(void) {
         da.imageView = R->depth.view;
         da.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
         da.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-        da.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        da.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
         da.clearValue.depthStencil.depth = 1.0f;
         VkRenderingInfo ri = { VK_STRUCTURE_TYPE_RENDERING_INFO };
         ri.renderArea.extent.width = R->hdr.w;
@@ -712,24 +725,59 @@ void render_end_frame(void) {
         ri.colorAttachmentCount = 1;
         ri.pColorAttachments = &ca;
         ri.pDepthAttachment = &da;
+
+        // ---- 1: static opaque
         vkCmdBeginRendering(cmd, &ri);
         set_viewport(cmd, R->hdr.w, R->hdr.h);
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 0, 1, &f->frame_set, 0, NULL);
-
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[R->r_wireframe->i ? PIPE_LIT_WIRE : PIPE_LIT]);
         draw_items(cmd, R->draws, R->draw_count, false, R->r_culling->i != 0, 0);
+        vkCmdEndRendering(cmd);
+
+        // ---- 2: decals (box projected onto the static scene; characters come after so they never receive them)
+        vkr_image_barrier(cmd, R->depth.image, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL,
+                          DEPTH_STAGES, VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, DEPTH_STAGES | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                          VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_SHADER_SAMPLED_READ_BIT, 1);
+        ca.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+        da.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+        da.imageLayout = VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL;
+        vkCmdBeginRendering(cmd, &ri);
+        set_viewport(cmd, R->hdr.w, R->hdr.h);
+        vkx_draw_decals(cmd);
+        vkCmdEndRendering(cmd);
+        vkr_image_barrier(cmd, R->depth.image, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+                          DEPTH_STAGES | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT, DEPTH_STAGES, DEPTH_RW, 1);
+
+        // ---- 3: characters + blended items
+        da.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+        vkCmdBeginRendering(cmd, &ri);
+        set_viewport(cmd, R->hdr.w, R->hdr.h);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 0, 1, &f->frame_set, 0, NULL);
         if (cpu_skinned || skin_main.batch_count) {
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[R->r_wireframe->i ? PIPE_LIT_WIRE : PIPE_LIT]);
             vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 1, 1, &R->textures[R->white_tex].set, 0, NULL);
             if (cpu_skinned) draw_cpu_skinned(cmd, f, cpu_skinned, 0);
             else {
                 vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[R->r_wireframe->i ? PIPE_SKIN_WIRE : PIPE_SKIN]);
                 draw_skin_pass(cmd, &skin_main);
             }
-            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[R->r_wireframe->i ? PIPE_LIT_WIRE : PIPE_LIT]);
         }
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_LIT_BLEND]);
         draw_items(cmd, R->draws, R->draw_count, false, R->r_culling->i != 0, 1);
+        vkCmdEndRendering(cmd);
 
+        // ---- scene copy for distortion, depth -> read-only (sampled by soft particles)
+        vkx_copy_scene(cmd);
+        vkr_image_barrier(cmd, R->depth.image, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL,
+                          DEPTH_STAGES, VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                          DEPTH_STAGES | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                          VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_2_SHADER_SAMPLED_READ_BIT, 1);
+
+        // ---- 4: particles + world lines / text
+        da.imageLayout = VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL;
+        vkCmdBeginRendering(cmd, &ri);
+        set_viewport(cmd, R->hdr.w, R->hdr.h);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 0, 1, &f->frame_set, 0, NULL);
         if (R->line_count[0] && line_off[0] != (VkDeviceSize)-1) {
             vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_LINES]);
             vkCmdBindVertexBuffers(cmd, 0, 1, &f->dyn.buffer, &line_off[0]);
@@ -744,10 +792,22 @@ void render_end_frame(void) {
             vkCmdDraw(cmd, R->text_count, 1, 0, 0);
             R->stats.draw_calls++;
         }
+        vkx_draw_particles(cmd);
+        vkCmdEndRendering(cmd);
+
+        // ---- 5: viewmodel (own depth) + overlay lines
+        VkRenderingAttachmentInfo vda = da;
+        vda.imageView = R->vm_depth.view;
+        vda.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+        vda.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        vda.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        vkr_image_barrier(cmd, R->vm_depth.image, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, DEPTH_STAGES,
+                          0, DEPTH_STAGES, DEPTH_RW, 1);
+        ri.pDepthAttachment = &vda;
+        vkCmdBeginRendering(cmd, &ri);
+        set_viewport(cmd, R->hdr.w, R->hdr.h);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 0, 1, &f->frame_set, 0, NULL);
         if (R->vm_draw_count || any_skin_vm) {
-            VkClearAttachment clr = { VK_IMAGE_ASPECT_DEPTH_BIT, 0, { .depthStencil = { 1.0f, 0 } } };
-            VkClearRect rect = { { { 0, 0 }, { R->hdr.w, R->hdr.h } }, 0, 1 };
-            vkCmdClearAttachments(cmd, 1, &clr, 1, &rect);
             vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[R->r_wireframe->i ? PIPE_LIT_WIRE : PIPE_LIT]);
             draw_items(cmd, R->vm_draws, R->vm_draw_count, false, false, 2);
             // First-person arms (body model), same depth as the viewmodel weapon.
@@ -772,6 +832,7 @@ void render_end_frame(void) {
                       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                       VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
                       VK_ACCESS_2_SHADER_SAMPLED_READ_BIT, 1);
+    vkx_bloom(cmd);
 
     // ---------------------------------------------------------- post + UI (swapchain)
     VkImage swap = R->swap_images[R->image_index];
@@ -793,10 +854,11 @@ void render_end_frame(void) {
         set_viewport(cmd, R->swap_extent.width, R->swap_extent.height);
 
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_POST]);
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_post, 0, 1, &R->hdr_set, 0, NULL);
+        VkDescriptorSet post_sets[2] = { R->hdr_set, vkx_bloom_set() };
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_post2, 0, 2, post_sets, 0, NULL);
         float post[8] = { R->r_brightness->f, R->r_gamma->f, R->r_aa->i > 0 ? 1.0f : 0.0f, R->r_vignette->f,
-                          1.0f / (float)R->hdr.w, 1.0f / (float)R->hdr.h, 0, 0 };
-        vkCmdPushConstants(cmd, R->layout_post, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(post), post);
+                          1.0f / (float)R->hdr.w, 1.0f / (float)R->hdr.h, vkx_bloom_intensity(), R->exposure_boost };
+        vkCmdPushConstants(cmd, R->layout_post2, VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(post), post);
         vkCmdDraw(cmd, 3, 1, 0, 0);
 
         if (R->ui_ccount && ui_voff != (VkDeviceSize)-1 && ui_ioff != (VkDeviceSize)-1) {

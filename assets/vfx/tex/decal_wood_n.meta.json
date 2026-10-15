@@ -1,0 +1,23 @@
+{
+  "file": "decal_wood_n.png",
+  "width": 256,
+  "height": 256,
+  "grid": [
+    2,
+    2
+  ],
+  "frames": 4,
+  "variants": 4,
+  "fps": 30,
+  "loop": false,
+  "motion_vectors": false,
+  "lighting": "none",
+  "premultiplied": false,
+  "placeholder": true,
+  "kind": "normal",
+  "source": "procedural",
+  "recipe": "assets/vfx/gen/decal_wood.json",
+  "recipe_hash": "41c2766cad3eaaa4ea6f2d1e",
+  "generated": "2026-10-15T16:15:15",
+  "tool_version": 3
+}

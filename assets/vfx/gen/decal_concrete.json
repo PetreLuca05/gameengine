@@ -1,0 +1,29 @@
+{
+  "kind": "decal",
+  "grid": [
+    2,
+    2
+  ],
+  "variants": 4,
+  "cell": 128,
+  "normal_map": true,
+  "normal_strength": 7.0,
+  "placeholder": {
+    "type": "decal_hole",
+    "seed": 51,
+    "kind": "concrete"
+  },
+  "edge_margin": 0.04,
+  "model": "higgsfield-ai/soul/standard",
+  "aspect_ratio": "1:1",
+  "resolution": "1080p",
+  "prompt": "macro photograph, orthographic top-down view, of a single bullet impact hole in grey concrete with a chipped crater and fine radial cracks, centered, filling about two thirds of the frame, isolated on a solid flat pure green (#00FF00) chroma key background, even soft lighting, no shadows, no text",
+  "background": "green",
+  "alpha": {
+    "tol": 0.1,
+    "soft": 0.12
+  },
+  "name": "decal_concrete",
+  "fill_holes": true,
+  "api_variants": 1
+}

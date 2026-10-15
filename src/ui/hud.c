@@ -7,6 +7,7 @@
 #include "gameplay/weapons.h"
 #include "gameplay/effects.h"
 #include "render/render.h"
+#include "vfx/vfx.h"
 #include "net/net.h"
 #include "input/input.h"
 #include <stdio.h>
@@ -185,6 +186,10 @@ static void draw_dev(Game *g, World *w, float s) {
         RenderStats rs = render_stats();
         ui_textf(10 * s, y, FONT_SMALL, UI_RGBA(200, 255, 200, 230), UI_ALIGN_LEFT, "%.0f fps  %.2f ms  draws %u  tris %uk  culled %u",
                  g_engine.fps_smoothed, 1000.0 / fmax(1.0, g_engine.fps_smoothed), rs.draw_calls, rs.triangles / 1000, rs.culled);
+        y += 16 * s;
+    }
+    if (vfx_game_stats_text()[0]) {
+        ui_textf(10 * s, y, FONT_SMALL, UI_RGBA(255, 220, 160, 230), UI_ALIGN_LEFT, "%s", vfx_game_stats_text());
         y += 16 * s;
     }
     if (g->dev_mode->i) {

@@ -1,6 +1,7 @@
 {
   "_comment": "Preset: assault rifle (AR). Controllable climb with a learnable right-then-left drift.",
   "id": "rifle",
+  "vfx": { "muzzle": { "type": "rifle", "device": "hider" }, "caliber": "rifle" },
   "item": "rifle",
   "kind": "hitscan",
   "damage_type": "bullet",

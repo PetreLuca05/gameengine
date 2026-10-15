@@ -7,6 +7,7 @@
 #include "gameplay/entities.h"
 #include "gameplay/characters.h"
 #include "anim/anim_library.h"
+#include "vfx/vfx_library.h"
 #include "cJSON.h"
 #include "assets/assets.h"
 #include <stdlib.h>
@@ -17,6 +18,7 @@
 
 typedef struct LevelBuild {
     World *w;
+    int material;   // SurfaceMaterial applied to the bodies being added
     MeshBuilder buckets[MAX_BUCKETS];
     u32 bucket_flags[MAX_BUCKETS];
     int bucket_count;
@@ -78,6 +80,7 @@ static void add_box(LevelBuild *b, vec3 center, vec3 half, float yaw, u32 color,
         d.motion = PM_STATIC;
         d.layer = PL_STATIC;
         d.friction = 0.8f;
+        d.material = (u8)b->material;
         add_static_body(b, &d);
     }
     LevelStatic *ls = &b->w->level;
@@ -153,6 +156,7 @@ static void add_ramp(LevelBuild *b, vec3 base, float yaw, float width, float len
     bd.motion = PM_STATIC;
     bd.layer = PL_STATIC;
     bd.friction = 0.8f;
+    bd.material = (u8)b->material;
     add_static_body(b, &bd);
 }
 
@@ -167,6 +171,11 @@ static void build_brush(LevelBuild *b, const cJSON *br) {
     World *w = b->w;
     u32 label_col = rgba8(0.08f, 0.08f, 0.1f, 1);
     const char *label = js(br, "label", NULL);
+    // Surface material (impact VFX / sounds): explicit, or a sensible default per brush type.
+    const char *def_mat = !strcmp(type, "doorway") ? "plaster" : (!strcmp(type, "ramp") ? "wood" : "concrete");
+    const char *mat_name = js(br, "material", def_mat);
+    b->material = surface_from_name(mat_name);
+    if (b->material < 0) { log_warn("level: unknown material '%s'", mat_name); b->material = SURF_DEFAULT; }
 
     if (!strcmp(type, "box")) {
         vec3 size = jv3(br, "size", v3(1, 1, 1));
@@ -257,7 +266,10 @@ static void build_room(LevelBuild *b, const cJSON *room) {
     u32 floor_col = jcol(room, "floor_color", rgba8(0.62f, 0.62f, 0.6f, 1));
     u32 wall_col = jcol(room, "wall_color", rgba8(0.7f, 0.7f, 0.68f, 1));
     float hx = size.x * 0.5f, hz = size.z * 0.5f, h = size.y;
+    int fm = surface_from_name(js(room, "floor_material", "concrete")), wm = surface_from_name(js(room, "wall_material", "plaster"));
+    b->material = fm >= 0 ? fm : SURF_CONCRETE;
     add_box(b, v3(0, -t * 0.5f, 0), v3(hx + t, t * 0.5f, hz + t), 0, floor_col, MAT_GRID, true);
+    b->material = wm >= 0 ? wm : SURF_PLASTER;
     add_box(b, v3(0, h + t * 0.5f, 0), v3(hx + t, t * 0.5f, hz + t), 0, wall_col, MAT_GRID | MAT_NO_SHADOW, true);
     add_box(b, v3(-hx - t * 0.5f, h * 0.5f, 0), v3(t * 0.5f, h * 0.5f, hz), 0, wall_col, MAT_GRID, true);
     add_box(b, v3(hx + t * 0.5f, h * 0.5f, 0), v3(t * 0.5f, h * 0.5f, hz), 0, wall_col, MAT_GRID, true);

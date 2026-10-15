@@ -1,0 +1,23 @@
+{
+  "file": "decal_metal.png",
+  "width": 256,
+  "height": 256,
+  "grid": [
+    2,
+    2
+  ],
+  "frames": 4,
+  "variants": 4,
+  "fps": 30,
+  "loop": false,
+  "motion_vectors": false,
+  "lighting": "none",
+  "premultiplied": true,
+  "placeholder": true,
+  "kind": "decal",
+  "source": "procedural",
+  "recipe": "assets/vfx/gen/decal_metal.json",
+  "recipe_hash": "3e392b368cbbe8f2c8e21556",
+  "generated": "2026-10-15T16:15:15",
+  "tool_version": 3
+}

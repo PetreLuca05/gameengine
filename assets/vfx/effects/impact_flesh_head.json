@@ -1,0 +1,194 @@
+{
+  "duration": 0.1,
+  "priority": 1,
+  "max_instances": 48,
+  "cull_distance": 160,
+  "lod": [
+    [
+      25,
+      0.7
+    ],
+    [
+      60,
+      0.4
+    ],
+    [
+      110,
+      0.2
+    ]
+  ],
+  "emitters": [
+    {
+      "name": "mist",
+      "tier": "gpu",
+      "spawn": {
+        "mode": "burst",
+        "count": [
+          4,
+          6
+        ],
+        "life": [
+          0.25,
+          0.45
+        ],
+        "size": [
+          0.2,
+          0.32
+        ],
+        "speed": [
+          0.4,
+          1.4
+        ],
+        "dir": "incoming",
+        "angle": 35,
+        "rotation": [
+          0,
+          360
+        ],
+        "color": [
+          0.42,
+          0.03,
+          0.03,
+          0.75
+        ],
+        "color2": [
+          0.3,
+          0.02,
+          0.02,
+          0.6
+        ]
+      },
+      "update": {
+        "drag": 4.0,
+        "gravity": 0.1,
+        "size_curve": [
+          [
+            0,
+            0.5
+          ],
+          [
+            1,
+            1.8
+          ]
+        ],
+        "alpha_curve": [
+          [
+            0,
+            1
+          ],
+          [
+            0.4,
+            0.7
+          ],
+          [
+            1,
+            0
+          ]
+        ],
+        "frame_over_life": true
+      },
+      "render": {
+        "mode": "alpha",
+        "lighting": "simple",
+        "texture": "blood_mist",
+        "soft": 0.15,
+        "near_fade": 0.2
+      }
+    },
+    {
+      "name": "drops",
+      "tier": "cpu",
+      "spawn": {
+        "mode": "burst",
+        "count": [
+          8,
+          12
+        ],
+        "life": [
+          0.6,
+          1.2
+        ],
+        "size": [
+          0.012,
+          0.025
+        ],
+        "speed": [
+          2.0,
+          5.0
+        ],
+        "dir": "incoming",
+        "angle": 30,
+        "color": [
+          0.4,
+          0.02,
+          0.02,
+          1.0
+        ]
+      },
+      "update": {
+        "gravity": 1.0,
+        "drag": 0.2,
+        "collide": "physics",
+        "kill_on_hit": true,
+        "sub_emitter": {
+          "on": "collision",
+          "effect": "blood_splat"
+        }
+      },
+      "render": {
+        "mode": "alpha",
+        "lighting": "simple",
+        "orient": "stretch",
+        "texture": "blood_drops",
+        "stretch": 0.01,
+        "stretch_max": 3
+      }
+    },
+    {
+      "name": "spray",
+      "tier": "gpu",
+      "spawn": {
+        "mode": "burst",
+        "count": [
+          4,
+          8
+        ],
+        "life": [
+          0.15,
+          0.35
+        ],
+        "size": [
+          0.01,
+          0.02
+        ],
+        "speed": [
+          2,
+          5
+        ],
+        "dir": "normal",
+        "angle": 40,
+        "color": [
+          0.45,
+          0.03,
+          0.03,
+          0.9
+        ]
+      },
+      "update": {
+        "gravity": 1.0,
+        "drag": 1.0
+      },
+      "render": {
+        "mode": "alpha",
+        "lighting": "simple",
+        "orient": "stretch",
+        "texture": "blood_drops",
+        "stretch": 0.01,
+        "stretch_max": 3
+      }
+    }
+  ],
+  "sound": "impact_flesh",
+  "name": "impact_flesh_head",
+  "_generated": "make_effects.py"
+}

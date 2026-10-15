@@ -1,4 +1,5 @@
 // Presentation: builds draw lists for the world, local view, hands, effects, HUD and menus.
+#include "vfx/vfx.h"
 #include "game_internal.h"
 #include "ui/recoil_debug.h"
 #include "core/engine.h"
@@ -378,7 +379,15 @@ void game_render(void) {
     env.fog_density = ls->fog_density;
     env.shadow_center = v3_madd(cam.pos, dir_from_angles(cam.yaw, 0), 12.0f);
     env.shadow_extent = 32.0f;
+    if (vfx_game_night()) {
+        // Dev night: moonlight + dim ambient (muzzle flashes and their lights dominate).
+        env.sun_intensity *= 0.03f;
+        env.sun_color = v3(0.6f, 0.7f, 1.0f);
+        env.ambient_intensity *= 0.08f;
+        env.fog_color = v3_scale(env.fog_color, 0.05f);
+    }
     render_set_environment(&env);
+    vfx_game_set_environment(env.sun_intensity, v3(0.6f, 0.0f, 0.25f));
 
     vec3 fwd = dir_from_angles(cam.yaw, cam.pitch);
     game_render_world(w, G->mode == GM_HOST ? G->alpha : 1.0f, cam.pos, fwd);
@@ -407,7 +416,7 @@ void game_render(void) {
         if (!cvar_find("cl_thirdperson")->i) chars_render_local_fp(w, G->alpha, G->local_slot);
         if (!cvar_find("cl_thirdperson")->i) hands_render();
     }
-    fx_render();
+    fx_render(cam.pos);
     draw_debug(w, cam.pos);
     recoil_debug_draw(cam.pos);
     anim_debug_draw();

@@ -1,0 +1,9 @@
+#version 450
+// Indirect dispatch size for vfx_update.
+#extension GL_GOOGLE_include_directive : require
+#include "vfx_common.glsl"
+layout(local_size_x = 1) in;
+void main() {
+    uint cur = vf.counts.w & 1u;
+    ctr.update_args = uvec4((ctr.alive[cur] + 63u) / 64u, 1u, 1u, 0u);
+}

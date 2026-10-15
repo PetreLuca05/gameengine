@@ -1,0 +1,10 @@
+#version 450
+// Indirect draw arguments (6 vertices per particle quad).
+#extension GL_GOOGLE_include_directive : require
+#include "vfx_common.glsl"
+layout(local_size_x = 1) in;
+void main() {
+    ctr.draw_add = uvec4(6u, min(ctr.add, vf.caps.x), 0u, 0u);
+    ctr.draw_alpha = uvec4(6u, min(ctr.alpha, vf.caps.y), 0u, 0u);
+    ctr.draw_distort = uvec4(6u, min(ctr.distort, vf.caps.z), 0u, 0u);
+}

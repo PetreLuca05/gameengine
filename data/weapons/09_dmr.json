@@ -1,6 +1,7 @@
 {
   "_comment": "Preset: DMR. Semi-auto, strong per-shot kick that recovers almost fully; tight ADS cone, scope sway + hold breath.",
   "id": "dmr",
+  "vfx": { "muzzle": { "type": "sniper", "device": "comp" }, "caliber": "sniper" },
   "item": "dmr",
   "kind": "hitscan",
   "damage_type": "bullet",

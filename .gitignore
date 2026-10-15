@@ -11,3 +11,8 @@ build.log
 
 # Local secrets (Higgsfield API token etc.) - never commit
 .env
+
+# vfxgen: downloaded generations (re-creatable from the cache key) and the API call log
+/tools/vfxgen/cache/
+/tools/vfxgen/logs/
+__pycache__/

@@ -1,6 +1,7 @@
 {
   "_comment": "Preset: LMG. Heavy start that settles into a steady climb; slow ADS, crouch steadies it a lot.",
   "id": "lmg",
+  "vfx": { "muzzle": { "type": "lmg", "device": "hider" }, "caliber": "rifle" },
   "item": "lmg",
   "kind": "hitscan",
   "damage_type": "bullet",

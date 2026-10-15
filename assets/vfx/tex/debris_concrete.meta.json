@@ -1,0 +1,23 @@
+{
+  "file": "debris_concrete.png",
+  "width": 256,
+  "height": 256,
+  "grid": [
+    4,
+    4
+  ],
+  "frames": 16,
+  "variants": 16,
+  "fps": 30,
+  "loop": false,
+  "motion_vectors": false,
+  "lighting": "none",
+  "premultiplied": true,
+  "placeholder": true,
+  "kind": "sprite",
+  "source": "procedural",
+  "recipe": "assets/vfx/gen/debris_concrete.json",
+  "recipe_hash": "58f89956e67e94eaa3c6c455",
+  "generated": "2026-10-15T16:10:22",
+  "tool_version": 3
+}

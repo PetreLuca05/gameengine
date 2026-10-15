@@ -8,6 +8,7 @@
 #include "player/hands.h"
 #include "gameplay/characters.h"
 #include "game/game.h"
+#include "vfx/vfx_library.h"
 #include <math.h>
 #include <stdlib.h>
 
@@ -131,6 +132,7 @@ typedef struct HitResult {
     bool headshot;
     int part;          // BodyPart for character hitboxes, -1 otherwise
     bool character;
+    int material;      // SurfaceMaterial (flesh for hitboxes)
 } HitResult;
 
 // Lag-compensated hitscan: world geometry via Jolt, hitbox capsules rewound to view_tick.
@@ -147,6 +149,7 @@ static HitResult trace_shot(World *w, int shooter, vec3 origin, vec3 dir, float 
         r.normal = rh.normal;
         r.ent = (EntityId)rh.user;
         r.body = rh.body;
+        r.material = rh.material;
     }
     float best = r.hit ? r.dist : range;
     u32 view_tick = view_tick256 >> 8;
@@ -180,6 +183,7 @@ static HitResult trace_shot(World *w, int shooter, vec3 origin, vec3 dir, float 
             r.hitbox = true;
             r.headshot = head;
             r.body = PHYS_INVALID_BODY;
+            r.material = SURF_FLESH;
         }
     }
     // Per-bone hitboxes on characters: the host rewinds them to the shooter's view tick.
@@ -196,6 +200,7 @@ static HitResult trace_shot(World *w, int shooter, vec3 origin, vec3 dir, float 
         r.part = hh.part;
         r.headshot = hh.part == BP_HEAD;
         r.body = PHYS_INVALID_BODY;
+        r.material = SURF_FLESH;
     }
     return r;
 }
@@ -230,7 +235,16 @@ static void apply_hit(World *w, int shooter, const WeaponDef *d, const HitResult
         apply_damage(w, h->ent, d->damage * damage_scale, d->damage_type, sp->ent, h->point, dir, false);
 }
 
-static void push_shot_events(World *w, int shooter, vec3 from, const HitResult *h, vec3 end) {
+static u32 impact_flags(const HitResult *h) {
+    u32 f = 0;
+    if (h->headshot) f |= FX_IMPACT_HEAD;
+    if (h->hitbox) f |= FX_IMPACT_FLESH;
+    else if (!h->ent) f |= FX_IMPACT_DECAL;   // static level geometry takes decals; props / doors don't
+    return f;
+}
+
+static void push_shot_events(World *w, int shooter, vec3 from, const HitResult *h, vec3 end, const WeaponDef *d, bool flash) {
+    int caliber = d->vfx_caliber;
     GameEvent ev;
     memset(&ev, 0, sizeof(ev));
     ev.type = EV_TRACER;
@@ -238,6 +252,9 @@ static void push_shot_events(World *w, int shooter, vec3 from, const HitResult *
     ev.except = (u8)shooter;
     ev.pos = from;
     ev.dir = end;
+    // First pellet of a shot carries the muzzle flash (exactly one flash per shot for observers).
+    ev.ent = w->players[shooter].ent;
+    ev.id = flash ? (1u | ((u32)d->vfx_muzzle_type << 4) | ((u32)d->vfx_muzzle_device << 8) | ((u32)caliber << 12)) : 0u;
     ev_push(w, &ev);
     if (h->hit) {
         memset(&ev, 0, sizeof(ev));
@@ -246,7 +263,12 @@ static void push_shot_events(World *w, int shooter, vec3 from, const HitResult *
         ev.except = (u8)shooter;
         ev.pos = h->point;
         ev.dir = h->normal;
-        ev.id = h->hitbox ? 1 : 0;
+        // Shooter receives it too: it skips it when it predicted the impact (cl_predict_impacts).
+        ev.except = EVENT_ALL;
+        ev.ent2 = (u32)shooter + 1u;
+        ev.id = fx_impact_pack(h->material, caliber, impact_flags(h));
+        vec3 inc = v3_norm(v3_sub(end, from));
+        memcpy(ev.data, &inc, sizeof(inc));
         ev_push(w, &ev);
     }
 }
@@ -298,7 +320,7 @@ static void fire(World *w, int slot, PlayerSim *sim, const WeaponDef *d, const U
     vec3 muzzle = muzzle_world(m, d, local_view);
     int dbg = WC.recoil_debug ? WC.recoil_debug->i : 0;
     if (local_view && first) {
-        fx_muzzle(muzzle, dir);
+        fx_muzzle_ex(muzzle, dir, d->vfx_muzzle_type, d->vfx_muzzle_device, true);
         fx_sound(d->sound_fire, eye, 1.0f);
     }
     if (d->kind == WPN_PROJECTILE) {
@@ -334,17 +356,17 @@ static void fire(World *w, int slot, PlayerSim *sim, const WeaponDef *d, const U
             HitResult h = trace_shot(w, slot, eye, sdir, d->range, cmd->view_tick);
             vec3 end = h.hit ? h.point : v3_madd(eye, sdir, d->range);
             if (h.hit) apply_hit(w, slot, d, &h, sdir, 1.0f);
-            push_shot_events(w, slot, muzzle, &h, end);
+            push_shot_events(w, slot, muzzle, &h, end, d, p == 0);
             if (local_view && first) {
                 fx_tracer(muzzle, end);
-                if (h.hit) fx_impact(h.point, h.normal, h.hitbox ? 1 : 0);
+                if (h.hit && fx_predict_impacts()) fx_impact_ex(h.point, h.normal, sdir, h.material, d->vfx_caliber, impact_flags(&h));
             }
         } else if (local_view && first) {
             // Predicted cosmetic trace against the replica world.
             HitResult h = trace_shot(w, slot, eye, sdir, d->range, 0);
             vec3 end = h.hit ? h.point : v3_madd(eye, sdir, d->range);
             fx_tracer(muzzle, end);
-            if (h.hit) fx_impact(h.point, h.normal, h.hitbox ? 1 : 0);
+            if (h.hit && fx_predict_impacts()) fx_impact_ex(h.point, h.normal, sdir, h.material, d->vfx_caliber, impact_flags(&h));
             // Unconfirmed reaction on what we hit (the host's hit event confirms / corrects it).
             if (h.character) chars_predict_hit(w, h.ent, h.part, sdir);
         }
@@ -406,7 +428,9 @@ static void melee_step(World *w, int slot, PlayerSim *sim, const WeaponDef *d, b
     bool world_hit = phys_sphere_cast(w->phys, eye, v3_scale(dir, d->reach), d->sweep_radius, PL_MASK_WORLD, self, &sh);
     if (world_hit && sh.distance < best) {
         ws->swing_hit_done = 1;
-        if (local_view && first) { fx_impact(sh.point, sh.normal, 0); fx_sound("melee_hit_wall", sh.point, 0.9f); }
+        int mat = phys_body_material(w->phys, sh.body);
+        u32 mflags = sh.user ? 0u : FX_IMPACT_DECAL;
+        if (local_view && first) { fx_impact_ex(sh.point, sh.normal, dir, mat, VFX_CAL_MELEE, mflags); fx_sound("melee_hit_wall", sh.point, 0.9f); }
         if (w->authority) {
             phys_add_impulse(w->phys, sh.body, v3_scale(dir, d->knockback * 0.25f), sh.point);
             GameEvent ev;
@@ -416,6 +440,8 @@ static void melee_step(World *w, int slot, PlayerSim *sim, const WeaponDef *d, b
             ev.except = (u8)slot;
             ev.pos = sh.point;
             ev.dir = sh.normal;
+            ev.id = fx_impact_pack(mat, VFX_CAL_MELEE, mflags);
+            memcpy(ev.data, &dir, sizeof(dir));
             ev_push(w, &ev);
             if (ent_valid(w, (EntityId)sh.user) && (w->comps[ENT_INDEX(sh.user)] & C_HEALTH))
                 apply_damage(w, (EntityId)sh.user, d->damage, d->damage_type, p->ent, sh.point, dir, false);
@@ -424,7 +450,7 @@ static void melee_step(World *w, int slot, PlayerSim *sim, const WeaponDef *d, b
     }
     if (hit_ent) {
         ws->swing_hit_done = 1;
-        if (local_view && first) { fx_impact(hit_point, v3_neg(dir), 1); fx_sound("melee_hit", hit_point, 1.0f); }
+        if (local_view && first) { fx_impact_ex(hit_point, v3_neg(dir), dir, SURF_FLESH, VFX_CAL_MELEE, FX_IMPACT_FLESH | (head ? FX_IMPACT_HEAD : 0u)); fx_sound("melee_hit", hit_point, 1.0f); }
         if (w->authority) {
             CharacterInst *c = hit_part >= 0 ? char_get(w, hit_ent) : NULL;
             if (c) {

@@ -1,0 +1,23 @@
+{
+  "file": "glow.png",
+  "width": 64,
+  "height": 64,
+  "grid": [
+    1,
+    1
+  ],
+  "frames": 1,
+  "variants": 1,
+  "fps": 30,
+  "loop": false,
+  "motion_vectors": false,
+  "lighting": "none",
+  "premultiplied": true,
+  "placeholder": true,
+  "kind": "emissive",
+  "source": "procedural",
+  "recipe": "assets/vfx/gen/glow.json",
+  "recipe_hash": "434c28ed6095ee3c334e0d44",
+  "generated": "2026-10-15T16:14:30",
+  "tool_version": 3
+}

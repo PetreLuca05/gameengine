@@ -1,0 +1,23 @@
+{
+  "file": "water_splash.png",
+  "width": 512,
+  "height": 512,
+  "grid": [
+    4,
+    4
+  ],
+  "frames": 16,
+  "variants": 1,
+  "fps": 30,
+  "loop": false,
+  "motion_vectors": true,
+  "lighting": "simple",
+  "premultiplied": true,
+  "placeholder": true,
+  "kind": "volume",
+  "source": "procedural",
+  "recipe": "assets/vfx/gen/water_splash.json",
+  "recipe_hash": "f6903f01831b7859168a60a4",
+  "generated": "2026-10-15T16:14:54",
+  "tool_version": 3
+}

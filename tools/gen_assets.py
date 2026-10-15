@@ -111,6 +111,45 @@ def ambient(length):
     return synth(length, s)
 
 
+def tink(freqs, length=0.12, level=0.45, decay=0.03):
+    """Metallic ring (casings): a few inharmonic partials with fast decay."""
+    def s(t, i):
+        return sum(math.sin(2 * math.pi * f * t) * math.exp(-t / (decay * (1 + k * 0.4))) for k, f in enumerate(freqs)) / len(freqs) * level
+    return synth(length, s)
+
+
+def crunch(length, lp, level=0.7, decay=0.04, grains=6):
+    """Granular noise burst (impacts on concrete / dirt / glass)."""
+    f = LowPass(lp)
+    starts = sorted(random.uniform(0, length * 0.5) for _ in range(grains))
+    def s(t, i):
+        e = sum(math.exp(-(t - st) / decay) for st in starts if t >= st) / grains * 2.0
+        return f(random.uniform(-1, 1)) * e * level
+    return synth(length, s)
+
+
+def gen_vfx_sounds():
+    """Impact / casing / debris sounds used by the VFX system (src/vfx/vfx.c maps
+    '<kind>_<material>' to '<kind>_<class>')."""
+    write_wav("impact_hard", concat(click(2200, 0.012, 0.6), crunch(0.18, 0.45, 0.8, 0.025)))
+    write_wav("impact_metal", concat(tink([1850, 2710, 4130], 0.35, 0.55, 0.08)))
+    write_wav("impact_wood", concat(thud(220, 0.12, 0.7, 0.5), crunch(0.12, 0.25, 0.4, 0.02, 3)))
+    write_wav("impact_soft", crunch(0.2, 0.08, 0.8, 0.05, 4))
+    write_wav("impact_glass", concat(tink([3200, 4700, 6100], 0.25, 0.4, 0.04), crunch(0.35, 0.7, 0.5, 0.05, 14)))
+    write_wav("impact_water", sweep(900, 300, 0.25, 0.35, 0.9, 0.08))
+    write_wav("impact_flesh", thud(110, 0.15, 0.8, 0.7))
+    write_wav("casing_hard", concat(tink([3900, 5300, 6900], 0.09, 0.4, 0.02), tink([3600, 5100], 0.07, 0.25, 0.015), gap=0.05))
+    write_wav("casing_metal", concat(tink([4100, 5900, 7400], 0.14, 0.45, 0.04), tink([3800, 5600], 0.1, 0.3, 0.03), gap=0.06))
+    write_wav("casing_wood", concat(tink([2400, 3300], 0.06, 0.3, 0.012), click(900, 0.03, 0.3), gap=0.05))
+    write_wav("casing_soft", click(600, 0.04, 0.25))
+    write_wav("casing_water", sweep(1400, 600, 0.08, 0.15, 0.8, 0.03))
+    write_wav("shell_hard", concat(thud(380, 0.06, 0.4, 0.4), click(1400, 0.02, 0.3), gap=0.04))
+    write_wav("shell_soft", click(400, 0.04, 0.25))
+    write_wav("debris_hard", crunch(0.06, 0.5, 0.35, 0.012, 2))
+    write_wav("debris_soft", crunch(0.06, 0.1, 0.25, 0.015, 2))
+    write_wav("shard_glass", tink([5200, 6900, 8800], 0.08, 0.25, 0.015))
+
+
 def gen_sounds():
     write_wav("shot_pistol", gunshot(0.35, 140, 0.75, 0.06))
     write_wav("shot_rifle", gunshot(0.3, 110, 0.8, 0.05, 0.45))
@@ -311,7 +350,13 @@ def barrel_gltf(radius=0.3, half_h=0.45, seg=24):
 
 
 if __name__ == "__main__":
+    import sys
+    if "--vfx-sounds" in sys.argv:
+        gen_vfx_sounds()
+        print("vfx sounds generated")
+        sys.exit(0)
     gen_sounds()
+    gen_vfx_sounds()
     crate_texture()
     ktx2_texture()
     barrel_gltf()

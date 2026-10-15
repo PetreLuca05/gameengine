@@ -1,0 +1,23 @@
+{
+  "kind": "emissive",
+  "grid": [
+    2,
+    2
+  ],
+  "variants": 4,
+  "cell": 256,
+  "placeholder": {
+    "type": "flash_core",
+    "seed": 11
+  },
+  "model": "higgsfield-ai/soul/standard",
+  "aspect_ratio": "1:1",
+  "resolution": "1080p",
+  "prompt": "high speed photograph of a single gun muzzle flash seen head-on from the front: a star shaped burst of white-hot yellow and orange flame petals radiating from a bright core, centered in frame, isolated on a pure black background, no gun visible, no smoke, sharp, high dynamic range",
+  "background": "black",
+  "alpha": {
+    "black": 0.03,
+    "white": 0.55
+  },
+  "name": "flash_core"
+}

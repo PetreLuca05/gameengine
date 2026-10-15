@@ -1,5 +1,6 @@
 {
   "id": "knife",
+  "vfx": { "caliber": "melee" },
   "item": "knife",
   "kind": "melee",
   "damage_type": "melee",

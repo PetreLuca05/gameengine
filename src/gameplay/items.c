@@ -1,3 +1,4 @@
+#include "vfx/vfx_library.h"
 #include "items.h"
 #include "core/log.h"
 #include "core/platform.h"
@@ -340,6 +341,26 @@ static void parse_weapon(ItemDB *db, const cJSON *w, const char *file) {
     }
     parse_hold(w, d->hold_style, &d->sockets, default_style_for(w, d->kind, d->id), d->support_offset, d->muzzle_offset, d->parts,
                d->part_count);
+    {
+        // VFX defaults from the weapon id / kind, overridable per weapon.
+        const char *id = d->id;
+        int mt = VFX_MUZZLE_RIFLE, cal = VFX_CAL_RIFLE;
+        if (strstr(id, "pistol")) { mt = VFX_MUZZLE_PISTOL; cal = VFX_CAL_PISTOL; }
+        else if (strstr(id, "smg")) { mt = VFX_MUZZLE_SMG; cal = VFX_CAL_SMG; }
+        else if (strstr(id, "lmg")) { mt = VFX_MUZZLE_LMG; cal = VFX_CAL_RIFLE; }
+        else if (strstr(id, "shotgun") || d->pellets > 1) { mt = VFX_MUZZLE_SHOTGUN; cal = VFX_CAL_SHOTGUN; }
+        else if (strstr(id, "sniper") || strstr(id, "dmr")) { mt = VFX_MUZZLE_SNIPER; cal = VFX_CAL_SNIPER; }
+        if (d->kind == WPN_MELEE) cal = VFX_CAL_MELEE;
+        if (d->kind == WPN_PROJECTILE) cal = VFX_CAL_PISTOL;
+        const cJSON *vx = cJSON_GetObjectItemCaseSensitive(w, "vfx");
+        const cJSON *mz = cJSON_GetObjectItemCaseSensitive(vx, "muzzle");
+        int t = vfx_muzzle_type_from_name(jstr(mz, "type", ""));
+        int dv = vfx_muzzle_device_from_name(jstr(mz, "device", ""));
+        int c = vfx_caliber_from_name(jstr(vx, "caliber", ""));
+        d->vfx_muzzle_type = t >= 0 ? t : mt;
+        d->vfx_muzzle_device = dv >= 0 ? dv : VFX_DEV_BARE;
+        d->vfx_caliber = c >= 0 ? c : cal;
+    }
     part_mult_defaults(d->part_mult);
     part_mult_parse(d->part_mult, cJSON_GetObjectItemCaseSensitive(w, "part_mult"));
     const cJSON *fo = cJSON_GetObjectItemCaseSensitive(w, "falloff");
