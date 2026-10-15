@@ -16,7 +16,7 @@ void proc_spine(ProcState *st, const ProcInput *in, Pose *pose, Xform *model) {
         int b = bones[i];
         if (b < 0) continue;
         float w = p->spine_weights[i];
-        float y = yaw * w, pt = pitch * w;
+        float y = yaw * w, pt = pitch * (pitch > 0 ? p->spine_weights_up[i] : w);
         acc_yaw += y;
         // Yaw about model up, pitch about the (already yawed) lateral axis.
         vec3 lateral = quat_rotate(quat_yaw(acc_yaw), v3(1, 0, 0));

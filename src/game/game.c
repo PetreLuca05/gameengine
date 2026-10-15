@@ -1063,7 +1063,21 @@ static void cmd_status(int argc, const char **argv) {
     }
 }
 
+// Settings migrations after the config file is loaded (archived values of renamed / repurposed
+// cvars). 1: cam_bob_scale now offsets the camera from the head eye (default 0).
+void game_config_loaded(void) {
+    Cvar *ver = cvar_find("cfg_migration");
+    if (!ver) return;
+    if (ver->i < 1) {
+        Cvar *bob = cvar_find("cam_bob_scale");
+        if (bob) cvar_reset(bob);
+        log_info("config: migrated cam_bob_scale to its new default (first-person camera on the head)");
+    }
+    cvar_set_int(ver, 1);
+}
+
 void game_init(void) {
+    cvar_reg_int("cfg_migration", 0, 0, 1000, CVAR_ARCHIVE, "settings migration level (internal)");
     G = (Game *)calloc(1, sizeof(Game));
     G->local_slot = -1;
     G->inv_selected = -1;

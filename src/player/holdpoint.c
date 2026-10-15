@@ -425,12 +425,14 @@ void holdpoint_eval(HoldPointState *st, const HoldPointInput *in, HoldPointOutpu
     // ---- procedural layer (around the pivot)
     float ads_k = state == HP_ADS ? s->ads_scale + (1.0f - s->ads_scale) * k : 1.0f;   // eases with the blend
     if (in->static_pose) ads_k = 0.0f;
+    ads_k *= in->sway_scale;
+    float lag_k = in->static_pose ? 0.0f : in->sway_scale;
     float wy = dt > 1e-6f ? wrap_angle(in->aim_yaw - st->prev_yaw) / dt : 0.0f;
     float wp = dt > 1e-6f ? (in->aim_pitch - st->prev_pitch) / dt : 0.0f;
     st->prev_yaw = in->aim_yaw;
     st->prev_pitch = in->aim_pitch;
     // Look lag: the item trails the view rotation (muzzle behind the turn).
-    vec2 lag_t = v2(clampf(-wp * s->lag_rot, -s->lag_max, s->lag_max), clampf(-wy * s->lag_rot, -s->lag_max, s->lag_max));
+    vec2 lag_t = v2(clampf(-wp * s->lag_rot, -s->lag_max, s->lag_max) * lag_k, clampf(-wy * s->lag_rot, -s->lag_max, s->lag_max) * lag_k);
     st->lag.x = spring1(st->lag.x, &st->lag_v.x, lag_t.x, s->lag_k, s->lag_d, dt);
     st->lag.y = spring1(st->lag.y, &st->lag_v.y, lag_t.y, s->lag_k, s->lag_d, dt);
     st->t += dt;

@@ -49,7 +49,8 @@ RenderCamera camera_update(ViewState *v, const PlayerMove *m, float dt, bool ads
 
     // Head bob.
     float speed = v3_len(v3_flat(m->vel));
-    float bob_target = (c->headbob->i && grounded) ? saturate(speed / 6.5f) * c->bob_amount->f : 0.0f;
+    Cvar *bs = cvar_find("cam_bob_scale");
+    float bob_target = (c->headbob->i && grounded) ? saturate(speed / 6.5f) * c->bob_amount->f * (bs ? bs->f : 0.0f) : 0.0f;
     if (ads) bob_target *= 0.2f;
     v->bob_amount = lerpf(v->bob_amount, bob_target, exp_decay(8.0f, dt));
     v->bob_phase += dt * (5.0f + speed * 1.15f);

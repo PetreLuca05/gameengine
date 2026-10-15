@@ -67,6 +67,8 @@ typedef struct DamagePreset {
 typedef struct ProcParams {
     // spine / look
     float spine_weights[5];    // spine, spine1, spine2, neck, head (sum ~1)
+    float spine_weights_up[5]; // pitch weights when looking up: mostly neck / head, so the torso
+                               // doesn't lean back (the head stays over the body)
     float yaw_limit, pitch_limit;  // degrees
     // turn in place
     float turn_threshold;      // degrees of aim vs body before the body turns (sim)
@@ -176,6 +178,7 @@ typedef struct ProcInput {
     bool prone, inspect, empty_hands;   // hold point state flags (empty: mantle / hang / vault)
     int item_key;              // hold point blend key (changes when the held item changes)
     bool hp_static;            // hold point without its procedural layer (tests / editor)
+    float hp_sway_scale;       // hold point look lag / sway / breathing / bob (wpn_sway_scale, 0 = none)
     vec3 hand_anchor[2];       // world-space ledge anchors (mantle / hang), weight below
     float hand_anchor_w;
 } ProcInput;

@@ -1,11 +1,11 @@
 // True first-person camera on the head bone.
 //
 // Rotation is always the player's view angles (mouse input), never the bone's. Position:
-//   ideal eye  = capsule eye (stair smoothing, landing) + the spine-bend offset of the view
-//   head eye   = the animated Head bone + eye socket (after the spine look solved the view)
-//   camera     = ideal + clamp(spring(head - ideal) * follow * bob scale)
-// so landing / stagger / mantle / hit animations move the camera but never sickeningly, and the
-// head bob comes from the animation. A sphere cast keeps the eye out of walls and ledges.
+//   head eye   = the animated Head bone x eye socket (after the spine look solved the view)
+//   camera     = head eye (+ cam_bob_scale x the old stabilizer offset, default 0)
+// The stabilizer (ideal capsule eye + clamped spring towards the head) is kept for tuning only:
+// on its own it left the camera behind the head whenever the animation leaned forward. A sphere
+// cast keeps the eye out of walls and ledges.
 // Solve order (no feedback loop): view angles -> spine / head solve (tick + per-frame
 // correction) -> read the head eye -> stabilizer -> camera -> hold point / arms per frame.
 #ifndef DG_CAMERA_FP_H
@@ -28,7 +28,7 @@ typedef struct CamHeadStab {
 
 typedef struct CamFpCvars {
     struct Cvar *stiffness, *damping, *follow, *follow_lateral, *clamp, *bob_scale, *recon_smooth, *third, *debug;
-    struct Cvar *radius, *death_follow, *death_spectate, *weapon_fov;
+    struct Cvar *radius, *death_follow, *death_spectate, *weapon_fov, *kick_scale;
 } CamFpCvars;
 
 // Pure stabilizer parameters (camera_fp_math.c, unit tested); camera_fp_stabilize fills them

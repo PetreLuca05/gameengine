@@ -333,8 +333,12 @@ void hands_update(const HandsInput *in) {
     //         and the empty-hands fallback when the body is not drawn (cl_fp_body 0).
     const PlayerMove *mm = m;
     (void)mm;
-    H->kick_pos = in->vm_kick_pos;
-    H->kick_rot = in->vm_kick_rot;
+    {
+        const WeaponCvars *wc = weapons_cvars();
+        float kk = wc->kick_scale ? wc->kick_scale->f : 0.0f;   // wpn_kick_scale: visual item kick (default 0)
+        H->kick_pos = v3_scale(in->vm_kick_pos, kk);
+        H->kick_rot = v3_scale(in->vm_kick_rot, kk);
+    }
 
     // To world space.
     vec3 target_pos[2];

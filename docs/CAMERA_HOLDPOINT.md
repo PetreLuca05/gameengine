@@ -52,11 +52,9 @@ Input never depends on output: angles → spine → head → camera → hold poi
 
 | Cvar | Default | Meaning |
 |---|---|---|
-| `cam_head_follow` | 0.8 | 0 = camera locked to the ideal eye, 1 = fully follows the animated head |
-| `cam_head_follow_lateral` | 0.35 | extra factor on horizontal head motion (sway is the motion-sickness axis) |
-| `cam_head_stiffness`, `cam_head_damping` | 260, 30 | per-axis spring on the head displacement |
-| `cam_head_clamp` | 0.07 | max distance from the ideal eye (m), soft knee |
-| `cam_bob_scale` | 1 | head bob from the animation (there is no synthetic bob) |
+| `cam_bob_scale` | 0 | how much of the old capsule stabilizer offset (and the landing dip) is added to the head eye; 0 = the camera is exactly on the head |
+| `cam_kick_scale` | 0 | visual camera kick on shots (aim recoil is separate and unchanged) |
+| `cam_head_follow`, `cam_head_follow_lateral`, `cam_head_stiffness`, `cam_head_damping`, `cam_head_clamp` | 0.8, 0.35, 260, 30, 0.07 | the stabilizer that `cam_bob_scale` blends in |
 | `cam_collision_radius` | 0.11 | sphere cast from the capsule to the eye; pulls in instantly, releases smoothly |
 | `cam_recon_smooth_time` | 0.1 | prediction-correction smoothing |
 | `cam_death_follow`, `cam_death_spectate` | 6, 0 | damped follow of the ragdoll's eye socket; seconds before lifting into a spectator view (0 = stay) |
@@ -64,15 +62,21 @@ Input never depends on output: angles → spine → head → camera → hold poi
 | `cam_third` (or `cl_thirdperson`) | 0 | third-person debug camera, same body / hold point math |
 | `cam_debug` | 0 | 1: draws (head eye red, ideal green, camera white, hold point axes, pivot magenta, sight cyan, muzzle orange, grips yellow, collision cast) and a stats line; 2: also logs it |
 
-**Positions:**
-- **Ideal eye** = capsule eye, with stair smoothing and the landing dip, plus the spine-bend offset of
-  the view (`player_eye_offset`).
-- **Head eye** = the animated head socket.
-- **Camera** = ideal + clamp(spring(head − ideal) × follow).
+**Position = the head eye**: the `Head` bone × the `"camera"` socket of the character
+(`assets/characters/player.json`: 0.10 m up, 0.10 m forward in bind space), read after this frame's
+spine / head look. `fp_eye_check` verifies it against the mesh: 11 cm below the top of the head and
+1.2 cm behind the face surface, i.e. at the eyes. Rotation is always the view angles.
 
-Landing, stagger, mantle and hit animations therefore move the camera, but never more than the clamp.
-Pitch is clamped to ±88°. The head, neck and eyes of the owner's body are collapsed to zero scale, so
-they never block the view.
+Before October 2026 the camera was "ideal eye (capsule) + clamp(spring(head − ideal) × follow)": the
+capsule eye with a 7 cm clamp and only 28 % of the horizontal head motion. The rifle stance and the
+walk / sprint lean put the head 10–32 cm in front of the capsule (crouch 27 cm above it), so the camera
+sat 8–45 cm behind the head, inside the neck and back, and you saw your own shoulders from behind.
+That stabilizer is now an optional offset (`cam_bob_scale`, default 0).
+
+Pitch is clamped to ±88°. Looking up puts most of the pitch into the neck and head
+(`spine.weights_up` in `assets/human/controller.json`), so the torso doesn't lean back. The neck, head
+(hair, eyes) of the owner's body are collapsed to zero scale in the owner's view only; other players
+and the shadow see the full body.
 
 `cam_stats` (with `cam_debug 1`) reports frames where the eye was behind geometry, as seen from the
 capsule, or geometry came within 6 cm. `tools/tests/cam_sweep.cfg` mantles, vaults, crawls the crouch
@@ -108,11 +112,15 @@ It is scaled down to `ads_scale` in ADS, and every rotation is around the **pivo
 
 | Layer | Driven by |
 |---|---|
-| look lag | rate of change of the view angles (the item trails turns), spring `look_lag` |
-| idle sway + breathing | time (`sway`) |
-| movement bob | camera-space velocity (`bob`); the camera's own bob comes from the animation |
-| kick | the recoil system's item spring (`recoil_visual_kick` → `vm_pos` / `vm_rot`); aim recoil still drives the view angles |
-| soft pitch limit | past `pitch_soft` (45°; 65° in ADS) the item follows the view pitch only by `pitch_follow`, so arms stay in reach when looking steeply up or down |
+| look lag | rate of change of the view angles (the item trails turns), spring `look_lag` — × `wpn_sway_scale` |
+| idle sway + breathing | time (`sway`) — × `wpn_sway_scale` |
+| movement bob | camera-space velocity (`bob`) — × `wpn_sway_scale` |
+| kick | the recoil system's item spring (`recoil_visual_kick` → `vm_pos` / `vm_rot`) — × `wpn_kick_scale`; aim recoil still drives the view angles |
+| soft pitch limit | past `pitch_soft` (65°; none in ADS) the item follows the view pitch only by `pitch_follow`, so arms stay in reach at near-vertical views |
+
+`wpn_sway_scale` (0, replicated: it also scales the aim sway of `weapon_sway_deg`, so bullets and
+the crosshair agree) and `wpn_kick_scale` (0) default to zero: **the item is fixed to the camera**
+except for the state poses (sprint, ADS, crouch …) and vault / mantle hand placement.
 
 ### Pivot
 
@@ -128,11 +136,15 @@ around the pivot. It's cosmetic: shots always use the camera ray.
 
 ### Reach
 
-If the support hand can't reach `grip_l`:
-1. The hold point slides along the item toward the body, up to `reach_pull`.
-2. At near-vertical views, it then moves straight toward the support shoulder by the remaining
+If a hand can't reach its socket:
+1. The **shoulder reaches first**: the clavicle rotates towards the socket (up to 45°), so the item
+   stays on its hold point while the walk / jump animation swings the shoulders.
+2. Then the hold point slides along the item toward the body, up to `reach_pull` (the sight stays on
+   the view axis in ADS).
+3. At near-vertical views, it then moves straight toward the support shoulder by the remaining
    shortfall.
-3. A warning is logged once per style.
+4. A warning is logged once per style (the per-frame first-person re-solve does the same, warned once
+   per item).
 
 Arms are never stretched and hands never leave their sockets.
 
@@ -209,3 +221,13 @@ hold point.
 
 `tools/tests/hp_test.cfg` runs `holdpoint_test` in the game. `tools/tests/cam_sweep.cfg` runs the
 camera penetration sweep.
+
+`tools/tests/fp_cam_test.cfg` (generated by `gen_fp_cam_test.py`) drives ~1770 frames of walking,
+strafing, sprinting, a 360° turn, crouching, steep looks, jumps, a mantle and every weapon hip + ADS,
+and `fp_cam_test report` checks every frame:
+- |camera − head bone| < 0.15 m (it is the 0.141 m eye offset);
+- the camera is never behind the head along the view yaw, nor behind the pelvis looking level or down;
+- both hands on their sockets < 2 mm / 1° while the hold owns them;
+- the item on its hold point (camera space) within 10 mm outside sprint / ADS / vault (0.5 mm in
+  > 98 % of frames; jump landings reach ~7 mm for a few frames);
+- ADS: the sight on the view axis < 0.5 mm / 0.2° for every weapon.

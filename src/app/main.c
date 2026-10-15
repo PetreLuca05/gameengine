@@ -183,6 +183,7 @@ int main(int argc, char **argv) {
     else log_info("no config yet: settings will be saved to %s", video_config_path());
     input_bind_missing_defaults();
     config_clear_dirty();   // loading the config is not a change
+    if (!opt.test) game_config_loaded();   // migrations are changes: saved on exit
     if (cvar_find("r_mode")->i != 0 || cw->i != 1600 || ch->i != 900) video_apply();
     parse_args(argc, argv, &opt);
     if (!boot_commands_connect(argc, argv)) game_host(game()->g_map->str);

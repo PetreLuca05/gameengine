@@ -15,6 +15,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+static void cmd_fp_eye_check(int argc, const char **argv);
+
 #define CG (g_engine.chars)
 #define LIB (g_engine.anim)
 
@@ -41,6 +43,11 @@ typedef struct CharGlobals {
     Cvar *hp_force_state, *hp_static, *cam_debug;
     // hold point / first person diagnostics (last frame)
     float fp_glue_pos[2], fp_glue_ang[2];
+    Xform fp_item_cam;               // this frame's rendered item in camera space
+    Xform fp_item_target;            // the hold point's item in camera space (no reach pull)
+    int fp_hp_state;                 // hold point state / blend progress (tests)
+    float fp_hp_blend;
+    float fp_hold_w;                 // hand IK weight of this frame's first-person hold (1 = the hold owns the hands)
     float fp_ads_pos, fp_ads_ang;
     Xform fp_cam;
     bool fp_cam_valid;
@@ -71,6 +78,7 @@ void characters_register_cvars(void) {
     g->max_ragdolls = cvar_reg_int("anim_max_ragdolls", 24, 1, 256, CVAR_ARCHIVE, "maximum simultaneous simulated ragdolls");
     g->debug = cvar_reg_int("anim_debug", 0, 0, 2, 0, "animation debug: 1 = skeleton + window, 2 = all characters");
     g->hold_debug = cvar_reg_bool("anim_hold_debug", false, 0, "draw hold sockets / wrists and print the left-hand glue error");
+    cmd_register("fp_eye_check", cmd_fp_eye_check, "print where the first-person camera socket sits on each character's head (bind pose)");
     g->hold_assert = cvar_reg_bool("anim_hold_assert", false, 0, "log any left hand <-> grip_l error above 2 mm / 1 deg");
     g->hitbox_debug = cvar_reg_bool("hitbox_debug", false, 0, "draw per-part hitboxes with their multipliers");
     g->lod_debug = cvar_reg_bool("r_lod_debug", false, 0, "per-character LOD / pixel size / update rate / systems");
@@ -122,7 +130,7 @@ static void ensure_gpu_meshes(void) {
     for (int i = 0; i < s->count; i++) {
         int p = s->parent[i];
         CG->arm_bone[i] = i == s->role[BR_L_ARM] || i == s->role[BR_R_ARM] || (p >= 0 && CG->arm_bone[p]);
-        CG->head_bone[i] = i == s->role[BR_HEAD] || (p >= 0 && CG->head_bone[p]);
+        CG->head_bone[i] = i == s->role[BR_HEAD] || i == s->role[BR_NECK] || (p >= 0 && CG->head_bone[p]);
     }
     for (int i = 0; i < s->count; i++) CG->inv_bind[i] = xf_to_mat4(xf_inverse(s->bind_model[i]));
     i16 keep_map[ANIM_MAX_BONES];
@@ -967,6 +975,13 @@ static void post_one(World *w, CharacterInst *c, int i, float dt, vec3 cam_pos, 
         pi.item_kick_pos = kp;
         pi.item_kick_rot = kr;
     }
+    {
+        const WeaponCvars *wc = weapons_cvars();
+        float kk = c->local ? 1.0f : (wc->kick_scale ? wc->kick_scale->f : 0.0f);   // the owner's springs are scaled in hands.c
+        pi.item_kick_pos = v3_scale(pi.item_kick_pos, kk);
+        pi.item_kick_rot = v3_scale(pi.item_kick_rot, kk);
+        pi.hp_sway_scale = wc->sway_scale ? wc->sway_scale->f : 0.0f;
+    }
     if (c->rt.in.crouch) pi.crouch_drop = 0.38f;
     pi.first_person = c->local && cv(CG->fp_body);
     pi.hp_static = cv(CG->hp_static);
@@ -1217,7 +1232,7 @@ vec3 chars_eye_offset(float yaw, float pitch) {
     vec3 eye = eye0;
     for (int i = 0; i < 5; i++) {
         if (bones[i] < 0) continue;
-        quat q = quat_axis_angle(v3(1, 0, 0), pt * p->spine_weights[i]);
+        quat q = quat_axis_angle(v3(1, 0, 0), pt * (pt > 0 ? p->spine_weights_up[i] : p->spine_weights[i]));
         eye = v3_add(pivots[i], quat_rotate(q, v3_sub(eye, pivots[i])));
         for (int j = i + 1; j < 5; j++) pivots[j] = v3_add(pivots[i], quat_rotate(q, v3_sub(pivots[j], pivots[i])));
     }
@@ -1263,7 +1278,7 @@ static void fp_prepare(World *w, CharacterInst *c, float alpha, float yaw, float
         float posed_aim = lerp_angle_fp(c->fp_yaw[0], c->fp_yaw[1], it);
         float posed_rel = clampf(wrap_angle(posed_aim - body_yaw), -lim_y, lim_y);
         float want_rel = clampf(wrap_angle(yaw - body_yaw), -lim_y, lim_y);
-        float dp = clampf(pitch, -lim_p, lim_p) - posed_pitch, dy = want_rel - posed_rel;
+        float dy = want_rel - posed_rel;
         int bones[5] = { s->role[BR_SPINE], s->role[BR_SPINE1], s->role[BR_SPINE2], s->role[BR_NECK], s->role[BR_HEAD] };
         float acc = 0;
         for (int i = 0; i < 5; i++) {
@@ -1271,7 +1286,11 @@ static void fp_prepare(World *w, CharacterInst *c, float alpha, float yaw, float
             float wgt = pp->spine_weights[i];
             acc += want_rel * wgt;
             vec3 lateral = quat_rotate(quat_yaw(acc), v3(1, 0, 0));
-            proc_rotate_bone(s, &FP.pose, FP.model, bones[i], quat_mul(quat_axis_angle(lateral, dp * wgt), quat_yaw(dy * wgt)));
+            // Pitch: the difference of the up / down distributions between the tick's pose and
+            // this frame's view (same split as proc_spine).
+            float want_p = clampf(pitch, -lim_p, lim_p);
+            float pw = want_p * (want_p > 0 ? pp->spine_weights_up[i] : wgt) - posed_pitch * (posed_pitch > 0 ? pp->spine_weights_up[i] : wgt);
+            proc_rotate_bone(s, &FP.pose, FP.model, bones[i], quat_mul(quat_axis_angle(lateral, pw), quat_yaw(dy * wgt)));
         }
     }
     for (int b = 0; b < s->count; b++) FP.world[b] = xf_mul(FP.root, FP.model[b]);
@@ -1280,6 +1299,62 @@ static void fp_prepare(World *w, CharacterInst *c, float alpha, float yaw, float
 }
 
 static CharacterInst *local_fp_char(World *w, int local_slot);
+
+// World transform of a role bone in this frame's first-person pose (tests / debug).
+bool chars_fp_bone_world(int role, Xform *out) {
+    if (!LIB || !CG || FP.frame + 1 < g_engine.frame_index) return false;   // this or the previous frame (console commands run before render)
+    int b = LIB->skel.role[role];
+    if (b < 0) return false;
+    *out = FP.world[b];
+    return true;
+}
+
+// fp_eye_check: where the "camera" socket sits on the player model's head (bind pose): relative
+// to the head bone, the front of the face and the top of the skull (vertices mostly skinned to
+// the head). The eye should be ~ 8..14 cm below the top and just behind the face surface.
+static void cmd_fp_eye_check(int argc, const char **argv) {
+    (void)argc;
+    (void)argv;
+    ensure_globals();
+    if (!LIB) return;
+    const Skeleton *s = &LIB->skel;
+    int head = s->role[BR_HEAD];
+    if (head < 0) return;
+    for (int c = 0; c < LIB->char_count; c++) {
+        const CharacterDef *d = &LIB->chars[c];
+        if (!d->valid) continue;
+        Xform eye;
+        if (!character_socket_world(d, "camera", s->bind_model, &eye)) continue;
+        const SkinLod *L = &LIB->meshes[d->mesh].lods[0];
+        float top = -1e9f, front = 1e9f, back = -1e9f, chin = 1e9f;
+        int n = 0;
+        for (u32 i = 0; i < L->vcount; i++) {
+            const SkinVertex *v = &L->verts[i];
+            int hw = 0;
+            for (int k = 0; k < 4; k++) if (CG->head_bone[v->joints[k]] && v->joints[k] != s->role[BR_NECK]) hw += v->weights[k];
+            if (hw < 200) continue;
+            n++;
+            top = fmaxf(top, v->pos.y);
+            chin = fminf(chin, v->pos.y);
+            front = fminf(front, v->pos.z);   // model forward = -Z
+            back = fmaxf(back, v->pos.z);
+            // Eye-level face front: the vertices near the eye height.
+        }
+        float face_at_eye = 1e9f;
+        for (u32 i = 0; i < L->vcount; i++) {
+            const SkinVertex *v = &L->verts[i];
+            int hw = 0;
+            for (int k = 0; k < 4; k++) if (CG->head_bone[v->joints[k]] && v->joints[k] != s->role[BR_NECK]) hw += v->weights[k];
+            if (hw < 200 || fabsf(v->pos.y - eye.t.y) > 0.04f) continue;
+            face_at_eye = fminf(face_at_eye, v->pos.z);
+        }
+        vec3 hb = s->bind_model[head].t;
+        log_info("fp_eye_check %s: head bone (%.3f %.3f %.3f), eye (%.3f %.3f %.3f) = head + (%.3f up, %.3f fwd); head mesh %d verts: "
+                 "top %.3f (eye %.3f below), chin %.3f, face front %.3f, back %.3f, face at eye height %.3f -> eye %.3f %s the face",
+                 d->id, hb.x, hb.y, hb.z, eye.t.x, eye.t.y, eye.t.z, eye.t.y - hb.y, hb.z - eye.t.z, n, top, top - eye.t.y, chin, front, back,
+                 face_at_eye, fabsf(eye.t.z - face_at_eye), eye.t.z < face_at_eye ? "in front of" : "behind");
+    }
+}
 
 bool chars_fp_camera(World *w, float alpha, int local_slot, float yaw, float pitch, Xform *socket_world) {
     CharacterInst *c = local_fp_char(w, local_slot);
@@ -1308,6 +1383,9 @@ static const float k_grip_curl[GRIP_COUNT][5] = {
 void chars_render_local_fp(World *w, float alpha, int local_slot) {
     CharacterInst *c = local_fp_char(w, local_slot);
     HandsFpTargets t;
+    ensure_globals();
+    CG->fp_hold_w = 0;
+    CG->fp_glue_pos[0] = CG->fp_glue_pos[1] = -1;   // no hold this frame
     if (!c || !hands_fp_targets(&t)) return;
     const Skeleton *s = &LIB->skel;
     // This frame's pose (prepared by the camera socket; otherwise aimed at the hands' camera).
@@ -1343,8 +1421,41 @@ void chars_render_local_fp(World *w, float alpha, int local_slot) {
         int ra = s->role[BR_R_ARM], rf = s->role[BR_R_FOREARM], rh = s->role[BR_R_HAND];
         int la = s->role[BR_L_ARM], lf = s->role[BR_L_FOREARM], lh = s->role[BR_L_HAND];
         quat cam_rm = cam_m.r;
+        // Reach: this frame's spine (re-bent to the frame's view) can move the support shoulder
+        // away from the tick's solve. If grip_l is out of reach, pull the hold point towards the
+        // left shoulder by the shortfall (never stretch the arm); warn once per item.
+        if (hs->left_hand && k->has_left && la >= 0 && lf >= 0 && lh >= 0 && ikw > 0.99f) {
+            float reach = v3_dist(model[la].t, model[lf].t) + v3_dist(model[lf].t, model[lh].t);
+            float pulled = 0;
+            // Shoulder first (clavicle), then the hold point.
+            proc_clavicle_reach(s, posep, model, s->role[BR_L_SHOULDER], la, proc_hand_for_socket(xf_mul(want, k->grip_l), LIB->hands.palm[0]).t, reach, 0.004f, 45.0f);
+            for (int iter = 0; iter < 6; iter++) {
+                Xform hand_l = proc_hand_for_socket(xf_mul(want, k->grip_l), LIB->hands.palm[0]);
+                float need = v3_dist(model[la].t, hand_l.t);
+                if (need <= reach - 0.002f) break;
+                // Along the item's own barrel axis first (sights stay on the view axis in ADS),
+                // towards the shoulder only when the barrel doesn't shorten the reach.
+                vec3 to_sh = v3_norm(v3_sub(model[la].t, hand_l.t));
+                vec3 back = quat_rotate(want.r, v3(0, 0, 1));
+                float gain = v3_dot(to_sh, back);
+                vec3 dir = gain >= 0.5f ? back : to_sh;
+                float d = (need - reach + 0.003f) / (gain >= 0.5f ? gain : 1.0f);
+                want.t = v3_madd(want.t, dir, d);
+                pulled += d;
+            }
+            static u32 warned_item;
+            u32 key = (u32)(uintptr_t)k;
+            if (pulled > 0.03f && warned_item != key) {
+                warned_item = key;
+                log_warn("first person: grip_l out of reach this frame, hold point pulled %.0f mm towards the shoulder", pulled * 1000.0f);
+            }
+        }
         if (ra >= 0 && rf >= 0 && rh >= 0) {
             Xform hand_r = proc_hand_for_socket(xf_mul(want, k->grip_r), LIB->hands.palm[1]);
+            if (ikw > 0.99f) {
+                float reach_r = v3_dist(model[ra].t, model[rf].t) + v3_dist(model[rf].t, model[rh].t);
+                proc_clavicle_reach(s, posep, model, s->role[BR_R_SHOULDER], ra, hand_r.t, reach_r, 0.003f, 45.0f);
+            }
             anim_ik_two_bone_pose(s, posep, model, ra, rf, rh, hand_r.t, &hand_r.r, quat_rotate(cam_rm, hs->elbow_r), ikw);
         }
         Xform item = want;
@@ -1354,6 +1465,8 @@ void chars_render_local_fp(World *w, float alpha, int local_slot) {
         CG->fp_glue_pos[1] = v3_dist(palm_r.t, sock_r.t);
         CG->fp_glue_ang[1] = quat_angle_between(palm_r.r, sock_r.r) * DG_RAD2DEG;
         CG->fp_glue_pos[0] = CG->fp_glue_ang[0] = 0;
+        CG->fp_hold_w = ikw;
+        for (int h = 0; h < 2; h++) if (t.ov_w[h] > 0.001f) CG->fp_hold_w = 0;   // interaction / ledge grab owns a hand
         if (hs->left_hand && k->has_left && la >= 0 && lf >= 0 && lh >= 0 && ikw > 0.001f) {
             Xform sock_l = xf_mul(item, k->grip_l);
             Xform hand_l = proc_hand_for_socket(sock_l, LIB->hands.palm[0]);
@@ -1366,6 +1479,10 @@ void chars_render_local_fp(World *w, float alpha, int local_slot) {
         vec3 sight_c = xf_point(xf_mul(xf_inverse(cam_m), item), k->sight);
         CG->fp_ads_pos = sqrtf(sight_c.x * sight_c.x + sight_c.y * sight_c.y);
         CG->fp_ads_ang = quat_angle_between(xf_mul(xf_inverse(cam_m), item).r, quat_identity()) * DG_RAD2DEG;
+        CG->fp_item_cam = xf_mul(xf_inverse(cam_m), item);
+        CG->fp_item_target = c->rt.proc.hp_out.item;   // the hold point's item (before any reach pull)
+        CG->fp_hp_state = c->rt.proc.hp_out.state;
+        CG->fp_hp_blend = c->rt.proc.hp_out.blend;
         Xform item_w = xf_mul(root, item);
         item_w.s = v3(1, 1, 1);
         hands_fp_set_item(item_w.t, item_w.r);
@@ -1405,7 +1522,8 @@ void chars_render_local_fp(World *w, float alpha, int local_slot) {
         anim_ik_two_bone_pose(s, posep, model, ua, fa, ha, hand.t, &hand.r, pole, t.ov_w[h]);
         if (t.grip[h] < GRIP_COUNT) proc_curl_fingers(s, posep, model, h, k_grip_curl[t.grip[h]], &LIB->hands, t.ov_w[h]);
     }
-    // Head (and eyes / end bones) collapsed: the camera sits where the head is (owner-only hide).
+    // Neck, head (and hair / eyes / end bones) collapsed: the camera sits inside the head
+    // (owner's view only: other players and the shadow pass get the full body).
     for (int b = 0; b < s->count; b++) {
         world[b] = xf_mul(root, model[b]);
         if (CG->head_bone[b] && !raw) world[b].s = v3s(1e-4f);
@@ -1441,6 +1559,17 @@ const char *chars_holdpoint_text(World *w, int local_slot) {
     snprintf(buf, sizeof(buf), "hold %s %.0f%%  pull %.2f  reach %.0f mm", holdpoint_state_name(p->hp_out.state), p->hp_out.blend * 100.0f, p->hp_out.pull,
              p->reach_shift * 1000.0f);
     return buf;
+}
+
+float chars_fp_hold_weight(void) { ensure_globals(); return CG->fp_hold_w; }
+bool chars_fp_item_cam(Xform *item_cam, int *state, float *blend) {
+    ensure_globals();
+    if (CG->fp_hold_w < 0.99f) return false;
+    // Offset of the rendered item from its hold point target (camera space).
+    *item_cam = xf_mul(xf_inverse(CG->fp_item_target), CG->fp_item_cam);
+    *state = CG->fp_hp_state;
+    *blend = CG->fp_hp_blend;
+    return true;
 }
 
 void chars_fp_diag(float *glue_pos, float *glue_ang, float *ads_pos, float *ads_ang) {

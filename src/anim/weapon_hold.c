@@ -128,6 +128,7 @@ void proc_hold(ProcState *st, const ProcInput *in, Pose *pose, Xform *model) {
     hi.raycast = (HoldPointRayFn)in->raycast;
     hi.ray_ctx = in->ray_ctx;
     hi.static_pose = in->hp_static;
+    hi.sway_scale = in->hp_sway_scale;
     holdpoint_eval(&st->hp, &hi, &st->hp_out);
     st->item_cam = st->hp_out.item;
     Xform desired = xf_mul(cam, st->hp_out.item);
@@ -165,8 +166,12 @@ void proc_hold(ProcState *st, const ProcInput *in, Pose *pose, Xform *model) {
         }
         Xform want = desired;
         want.t = v3_add(v3_madd(want.t, back, shift), extra);
-        // Right hand: the palm on grip_r.
+        // Right hand: the palm on grip_r (the shoulder reaches first, the arm never stretches).
         Xform hand_r = proc_hand_for_socket(xf_mul(want, it->grip_r), hf->palm[1]);
+        {
+            float reach_r = v3_dist(model[ra].t, model[rf].t) + v3_dist(model[rf].t, model[rh].t);
+            proc_clavicle_reach(s, pose, model, rsh, ra, hand_r.t, reach_r, 0.003f, 45.0f * w);
+        }
         vec3 pole_r = quat_rotate(yaw_q, hs.elbow_r);
         anim_ik_two_bone_pose(s, pose, model, ra, rf, rh, hand_r.t, &hand_r.r, pole_r, w);
         // Item finalized from the solved right hand (this is what gets rendered).
@@ -178,8 +183,11 @@ void proc_hold(ProcState *st, const ProcInput *in, Pose *pose, Xform *model) {
         Xform sock_l = xf_mul(item, it->grip_l);
         Xform hand_l = proc_hand_for_socket(sock_l, hf->palm[0]);
         float reach = v3_dist(model[la].t, model[lf].t) + v3_dist(model[lf].t, model[lh].t);
-        float need = v3_dist(model[la].t, hand_l.t);
         float margin = 0.004f;
+        // The shoulder reaches first (clavicle protraction, up to 45 deg): the item stays on its
+        // hold point; only what the shoulder can't cover moves the item.
+        proc_clavicle_reach(s, pose, model, lsh, la, hand_l.t, reach, margin * 1.5f, 45.0f * w);
+        float need = v3_dist(model[la].t, hand_l.t);
         if (need > reach - margin * 0.5f && iter < 15 && shift >= max_shift - 1e-5f) {
             // The barrel-axis pull is exhausted: move the hold point towards the shoulder by the
             // remaining shortfall (never stretch the arm, never leave a gap).

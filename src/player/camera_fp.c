@@ -13,7 +13,8 @@ void camera_fp_register_cvars(void) {
     c->follow = cvar_reg_float("cam_head_follow", 0.8f, 0.0f, 1.0f, CVAR_ARCHIVE, "0 = camera locked to the ideal eye, 1 = fully follows the animated head");
     c->follow_lateral = cvar_reg_float("cam_head_follow_lateral", 0.35f, 0.0f, 1.0f, CVAR_ARCHIVE, "extra factor on horizontal head motion (sway is the motion-sickness axis)");
     c->clamp = cvar_reg_float("cam_head_clamp", 0.07f, 0.0f, 0.5f, CVAR_ARCHIVE, "max camera displacement from the ideal eye (m)");
-    c->bob_scale = cvar_reg_float("cam_bob_scale", 1.0f, 0.0f, 2.0f, CVAR_ARCHIVE, "head bob (from the animation) scale");
+    c->bob_scale = cvar_reg_float("cam_bob_scale", 0.0f, 0.0f, 2.0f, CVAR_ARCHIVE, "first-person camera stabilizer / landing dip / bob offset from the head eye (0 = camera exactly on the head)");
+    c->kick_scale = cvar_reg_float("cam_kick_scale", 0.0f, 0.0f, 3.0f, CVAR_ARCHIVE, "visual camera kick on shots (aim recoil is separate)");
     c->recon_smooth = cvar_reg_float("cam_recon_smooth_time", 0.1f, 0.0f, 1.0f, CVAR_ARCHIVE, "seconds to smooth prediction corrections of the camera");
     c->third = cvar_reg_bool("cam_third", false, 0, "third-person debug camera (same body / hold point math)");
     c->debug = cvar_reg_int("cam_debug", 0, 0, 2, 0, "1: draw eye / head / hold point / pivot / sockets / IK targets / collision + stats, 2: also log");
@@ -36,7 +37,7 @@ vec3 camera_fp_stabilize(CamHeadStab *s, vec3 ideal, vec3 head, float yaw, float
     p.follow = cvf(g_cv.follow, p.follow);
     p.follow_lateral = cvf(g_cv.follow_lateral, p.follow_lateral);
     p.clamp = cvf(g_cv.clamp, p.clamp);
-    p.bob_scale = cvf(g_cv.bob_scale, p.bob_scale);
+    // cam_bob_scale blends this result in from outside (game_render.c); the spring itself runs fully.
     return camera_fp_stabilize_ex(s, ideal, head, yaw, dt, &p);
 }
 

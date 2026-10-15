@@ -63,6 +63,8 @@ bool proc_params_load(ProcParams *p, const cJSON *root) {
     memset(p, 0, sizeof(*p));
     float sw[5] = { 0.18f, 0.22f, 0.25f, 0.15f, 0.20f };
     memcpy(p->spine_weights, sw, sizeof(sw));
+    float swu[5] = { 0.0f, 0.02f, 0.05f, 0.38f, 0.55f };
+    memcpy(p->spine_weights_up, swu, sizeof(swu));
     p->yaw_limit = 100;
     p->pitch_limit = 80;
     p->turn_threshold = 65;
@@ -92,7 +94,7 @@ bool proc_params_load(ProcParams *p, const cJSON *root) {
         const cJSON *pr = cJSON_GetObjectItemCaseSensitive(root, "procedural");
         if (pr) {
             const cJSON *sp = cJSON_GetObjectItemCaseSensitive(pr, "spine");
-            if (sp) { jarr(sp, "weights", p->spine_weights, 5); p->yaw_limit = jf(sp, "yaw_limit", p->yaw_limit); p->pitch_limit = jf(sp, "pitch_limit", p->pitch_limit); }
+            if (sp) { jarr(sp, "weights", p->spine_weights, 5); jarr(sp, "weights_up", p->spine_weights_up, 5); p->yaw_limit = jf(sp, "yaw_limit", p->yaw_limit); p->pitch_limit = jf(sp, "pitch_limit", p->pitch_limit); }
             const cJSON *tu = cJSON_GetObjectItemCaseSensitive(pr, "turn");
             if (tu) {
                 p->turn_threshold = jf(tu, "threshold", p->turn_threshold);
@@ -287,6 +289,29 @@ void proc_rotate_bone(const Skeleton *s, Pose *p, Xform *model, int b, quat q) {
     n.r = quat_norm(quat_mul(q, n.r));
     pose_set_model(s, p, model, b, n);
     pose_update_children(s, p, model, b);
+}
+
+// Brings the arm root (shoulder joint `arm`) within `reach - margin` of `target` by rotating the
+// clavicle `clav` towards it (at most max_deg): shoulder protraction / elevation instead of moving
+// the held item. Returns the remaining shortfall (0 = in reach).
+float proc_clavicle_reach(const Skeleton *s, Pose *p, Xform *model, int clav, int arm, vec3 target, float reach, float margin, float max_deg) {
+    if (clav < 0 || arm < 0) return 0;
+    float need = v3_dist(model[arm].t, target) - (reach - margin);
+    if (need <= 0) return 0;
+    vec3 c = model[clav].t;
+    vec3 v = v3_sub(model[arm].t, c), u = v3_sub(target, c);
+    vec3 axis = v3_cross(v, u);
+    if (v3_len2(axis) < 1e-10f) return need;
+    axis = v3_norm(axis);
+    // Distance to the target falls monotonically while rotating v towards u: bisect the angle.
+    float lo = 0, hi = fminf(max_deg * DG_DEG2RAD, acosf(clampf(v3_dot(v3_norm(v), v3_norm(u)), -1.0f, 1.0f)));
+    for (int i = 0; i < 20; i++) {
+        float mid = 0.5f * (lo + hi);
+        vec3 a = v3_add(c, quat_rotate(quat_axis_angle(axis, mid), v));
+        if (v3_dist(a, target) > reach - margin) lo = mid; else hi = mid;
+    }
+    proc_rotate_bone(s, p, model, clav, quat_axis_angle(axis, hi));
+    return fmaxf(0.0f, v3_dist(model[arm].t, target) - (reach - margin));
 }
 
 void proc_run(ProcState *st, const ProcInput *in0, Pose *pose, Xform *model) {

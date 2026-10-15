@@ -12,6 +12,7 @@
 #include "gameplay/weapons.h"
 #include "gameplay/characters.h"
 #include "ui/anim_debug.h"
+#include "player/holdpoint.h"
 #include "gameplay/effects.h"
 #include "player/hands.h"
 #include "player/camera_fp.h"
@@ -44,7 +45,133 @@ typedef struct GameRender {
 #define GR (g_engine.game_render)
 
 static void cmd_cam_stats(int argc, const char **argv);
+
+// fp_cam_test start | report: per-frame first-person invariants while a script drives the player
+//   |camera - head bone| < 0.15 m, camera forward . (camera - pelvis) >= 0 (never behind the body),
+//   hands on their sockets (< 2 mm / 1 deg while the hold IK owns them).
+static struct {
+    bool active;
+    int frames, bad_head, bad_behind, hand_frames, bad_hands;
+    float max_head, min_front, max_hand_mm, max_hand_deg;
+    // item steadiness: camera-space drift inside one settled hold state (not sprint / ADS / vault)
+    int ref_state, item_frames, bad_item, snap_skip, over_half_mm, ads_frames;
+    float max_ads_mm, max_ads_deg;
+    float prev_yaw, prev_pitch;
+    Xform ref_item;
+    float max_item_mm, max_item_deg;
+} FT;
+static void cmd_fp_cam_test(int argc, const char **argv) {
+    if (argc > 1 && !strcmp(argv[1], "start")) {
+        memset(&FT, 0, sizeof(FT));
+        FT.active = true;
+        FT.min_front = 1e9f;
+        FT.ref_state = -1;
+        log_info("fp_cam_test: recording");
+        return;
+    }
+    FT.active = false;
+    bool ads_ok = FT.ads_frames > 0 && FT.max_ads_mm < 0.5f && FT.max_ads_deg < 0.2f;
+    bool ok = FT.frames >= 600 && !FT.bad_head && !FT.bad_behind && !FT.bad_hands && !FT.bad_item && ads_ok;
+    log_info("fp_cam_test: ADS %d settled frames, sight off the view axis max %.3f mm, barrel %.3f deg (limit 0.5 mm / 0.2 deg)", FT.ads_frames, FT.max_ads_mm, FT.max_ads_deg);
+    log_info("fp_cam_test: item on its hold point %d frames (not sprint / ADS / vault): max offset %.2f mm %.2f deg, %d frames over 0.5 mm, %d over 10 mm / 0.5 deg",
+             FT.item_frames, FT.max_item_mm, FT.max_item_deg, FT.over_half_mm, FT.bad_item);
+    log_info("fp_cam_test: %d frames | camera-head max %.1f mm (%d > 150 mm) | min forward.(cam - head / pelvis) %.1f mm (%d < 0) | hands %d frames, max %.2f mm %.2f deg (%d over 2 mm / 1 deg) -> %s",
+             FT.frames, FT.max_head * 1000, FT.bad_head, FT.min_front * 1000, FT.bad_behind, FT.hand_frames, FT.max_hand_mm, FT.max_hand_deg, FT.bad_hands,
+             ok ? "PASS" : "FAIL");
+}
+static void fp_cam_test_frame(vec3 cam_pos, vec3 fwd) {
+    if (!FT.active) return;
+    Xform head, pelvis;
+    if (!chars_fp_bone_world(BR_HEAD, &head) || !chars_fp_bone_world(BR_HIPS, &pelvis)) return;
+    FT.frames++;
+    float dh = v3_len(v3_sub(cam_pos, head.t));
+    // "Behind the body" (horizontal, along the view yaw): the camera must never be behind the
+    // head (that exposes the neck / back), nor behind the pelvis while looking level or down
+    // (looking up, the eyes rotate back over the neck: anatomical, the view points away from the body).
+    vec3 fh = v3_norm(v3(fwd.x, 0, fwd.z));
+    float dhead = v3_dot(fh, v3_sub(cam_pos, head.t));
+    float dpel = v3_dot(fh, v3_sub(cam_pos, pelvis.t));
+    float df = fwd.y > 0.35f ? dhead : fminf(dhead, dpel);
+    FT.max_head = fmaxf(FT.max_head, dh);
+    FT.min_front = fminf(FT.min_front, df);
+    if (dh > 0.15f) FT.bad_head++;
+    if (df < 0.0f) FT.bad_behind++;
+    if ((dh > 0.15f || df < 0.0f) && FT.bad_head + FT.bad_behind < 40) {
+        Player *p = game_local_player();
+        log_info("fp_cam_test: frame %d cam-head %.0f mm fwd.(cam-pelvis) %.0f mm mode %d crouch %.2f pitch %.0f cam (%.2f %.2f %.2f) head (%.2f %.2f %.2f) pelvis (%.2f %.2f %.2f)",
+                 FT.frames, dh * 1000, df * 1000, p ? p->sim.move.mode : -1, p ? p->sim.move.crouch_amount : 0, asinf(clampf(fwd.y, -1, 1)) * DG_RAD2DEG,
+                 cam_pos.x, cam_pos.y, cam_pos.z, head.t.x, head.t.y, head.t.z, pelvis.t.x, pelvis.t.y, pelvis.t.z);
+    }
+}
+// fp_pose: head / camera relative to the pelvis (forward = view yaw), this frame.
+static void cmd_fp_pose(int argc, const char **argv) {
+    (void)argc;
+    (void)argv;
+    Xform head, pelvis;
+    if (!chars_fp_bone_world(BR_HEAD, &head) || !chars_fp_bone_world(BR_HIPS, &pelvis)) { log_info("fp_pose: no first-person pose"); return; }
+    vec3 f = dir_from_angles(G->view.yaw, 0);
+    vec3 d = v3_sub(head.t, pelvis.t);
+    log_info("fp_pose: pitch %.0f head-pelvis fwd %.0f mm up %.0f mm", G->view.pitch * DG_RAD2DEG, v3_dot(d, f) * 1000, d.y * 1000);
+}
+
+static void fp_cam_test_hands(void) {
+    if (!FT.active) return;
+    float gp[2], ga[2], ap, aa;
+    chars_fp_diag(gp, ga, &ap, &aa);
+    if (gp[1] < 0 || chars_fp_hold_weight() < 0.99f) return;   // no hold, or a clip / interaction owns the hands
+    {
+        Xform ic;
+        int st;
+        float bl;
+        Player *p = game_local_player();
+        bool vault = p && (p->sim.move.mode == MOVE_VAULT || p->sim.move.mode == MOVE_MANTLE || p->sim.move.mode == MOVE_HANG);
+        // Scripted view snaps (setang: > 30 deg in one frame) are skipped for 5 frames: the tick's
+        // spine pose catches up with the frame's view (no real mouse input does this).
+        float dv = fmaxf(fabsf(wrap_angle(G->view.yaw - FT.prev_yaw)), fabsf(G->view.pitch - FT.prev_pitch)) * DG_RAD2DEG;
+        FT.prev_yaw = G->view.yaw;
+        FT.prev_pitch = G->view.pitch;
+        if (dv > 30.0f) FT.snap_skip = 5;
+        if (FT.snap_skip > 0) FT.snap_skip--;
+        else if (chars_fp_item_cam(&ic, &st, &bl)) {
+            if (bl >= 0.999f && st == HP_ADS) {
+                FT.ads_frames++;
+                FT.max_ads_mm = fmaxf(FT.max_ads_mm, ap * 1000.0f);
+                if (ap * 1000.0f > 0.5f && FT.ads_frames % 4 == 0) {
+                    const WeaponDef *wd = weapon_equipped_def(G->world, G->local_slot);
+                    log_info("fp_cam_test: frame %d ADS sight %.2f mm (%s) pitch %.0f | %s", FT.frames, ap * 1000.0f, wd ? wd->id : "?", G->view.pitch * DG_RAD2DEG,
+                             chars_holdpoint_text(G->world, G->local_slot));
+                }
+                FT.max_ads_deg = fmaxf(FT.max_ads_deg, aa);
+            }
+            bool settled = bl >= 0.999f && st != HP_SPRINT && st != HP_ADS && !vault;
+            FT.ref_state = st;
+            if (settled) {
+                FT.item_frames++;
+                float mm = v3_len(ic.t) * 1000.0f, deg = quat_angle_between(ic.r, quat_identity()) * DG_RAD2DEG;
+                FT.max_item_mm = fmaxf(FT.max_item_mm, mm);
+                FT.max_item_deg = fmaxf(FT.max_item_deg, deg);
+                if (mm > 0.5f || deg > 0.2f) FT.over_half_mm++;
+                if (mm > 10.0f || deg > 0.5f) {
+                    if (FT.bad_item < 60)
+                        log_info("fp_cam_test: frame %d item drift %.2f mm %.2f deg (state %d) speed %.1f pitch %.0f | %s", FT.frames, mm, deg, st,
+                                 p ? v3_len(v3_flat(p->sim.move.vel)) : 0, G->view.pitch * DG_RAD2DEG, chars_holdpoint_text(G->world, G->local_slot));
+                    FT.bad_item++;
+                }
+            }
+        }
+    }
+    FT.hand_frames++;
+    float mm = fmaxf(gp[0], gp[1]) * 1000.0f, deg = fmaxf(ga[0], ga[1]);
+    FT.max_hand_mm = fmaxf(FT.max_hand_mm, mm);
+    FT.max_hand_deg = fmaxf(FT.max_hand_deg, deg);
+    if (mm > 2.0f || deg > 1.0f) {
+        FT.bad_hands++;
+        if (FT.bad_hands < 25) log_info("fp_cam_test: frame %d hands R %.2f mm %.2f deg  L %.2f mm %.2f deg ikw %.2f | %s", FT.frames, gp[1] * 1000, ga[1], gp[0] * 1000, ga[0], chars_fp_hold_weight(), chars_holdpoint_text(G->world, G->local_slot));
+    }
+}
 void game_render_init(void) {
+    cmd_register("fp_pose", cmd_fp_pose, "print the first-person head position relative to the pelvis");
+    cmd_register("fp_cam_test", cmd_fp_cam_test, "fp_cam_test start | report: first-person camera / body / hands invariants");
     GR = ARENA_PUSH(&g_engine.perm_arena, GameRender);
     GR->pen_min_dist = 1e9f;
     cmd_register("cam_stats", cmd_cam_stats, "print + reset camera penetration / stabilizer stats (sampled while cam_debug is on)");
@@ -379,8 +506,9 @@ void game_render(void) {
     RenderCamera cam = camera_update(&G->view, &interp, (float)g_engine.frame_dt, ads, wd ? wd->ads_fov : 0, dead);
     // Weapon feel: camera kick spring (visual only, aim unaffected) + aim sway (bullets use it too).
     if (p && !dead) {
-        vec3 kr = spring_vec3_sample(&G->recoil_vis.cam_rot, G->alpha);
-        float kb = spring_f32_sample(&G->recoil_vis.cam_back, G->alpha);
+        float ck = cvar_find("cam_kick_scale") ? cvar_find("cam_kick_scale")->f : 0.0f;   // visual camera kick (aim recoil unaffected)
+        vec3 kr = v3_scale(spring_vec3_sample(&G->recoil_vis.cam_rot, G->alpha), ck);
+        float kb = spring_f32_sample(&G->recoil_vis.cam_back, G->alpha) * ck;
         vec2 sway = weapon_sway_deg(wd, &p->sim.wpn, weapon_sway_time(G->last_cmd.seq) + G->alpha * SIM_DT);
         cam.pitch += (kr.x + sway.y) * DG_DEG2RAD;
         cam.yaw -= (kr.y + sway.x) * DG_DEG2RAD;
@@ -398,10 +526,15 @@ void game_render(void) {
             seen_r = rv->modified;
         }
     }
-    // True first-person camera (src/player/camera_fp.c): rotation = the view, position = the ideal
-    // eye followed by the animated head (spring + clamp), kept out of walls. Solve order: view ->
-    // spine / head (chars_fp_camera re-bends the spine to this frame's view) -> head eye ->
-    // stabilizer -> camera -> hold point + arms (chars_render_local_fp, per frame).
+    // True first-person camera. Order of operations (nothing after the arm IK moves the camera,
+    // the hold point or the item):
+    //   tick:  input -> movement -> animation (base, upper body, additive) -> spine / head look ->
+    //          head eye (model space) -> hold point (camera relative) -> item on the hold point ->
+    //          arm IK to grip_r / grip_l -> finger curl -> foot IK      (weapon_hold.c, procedural.c)
+    //   frame: view angles -> spine / head re-bent to this frame's view (chars_fp_camera) -> read
+    //          the head bone x eye socket -> camera (+ wall collision) -> hold point re-applied to
+    //          this camera -> item -> arm IK -> fingers (chars_render_local_fp) -> render.
+    // Rotation is always the view angles; position is the head eye.
     {
         Xform sock;
         Player *lp = game_local_player();
@@ -424,11 +557,16 @@ void game_render(void) {
                 GR->cam_mode = 2;
             }
         } else if (lp && cvar_find("cl_camera_socket")->i && chars_fp_camera(w, G->alpha, G->local_slot, cam.yaw, cam.pitch, &sock)) {
-            // Ideal eye: capsule eye (stair smoothing, landing dip) + the spine bend of the view.
+            // Camera = the head eye: Head bone x the "camera" socket (assets/characters/player.json),
+            // read after this frame's spine / head look solve. The old capsule-based stabilizer (an
+            // "ideal" capsule eye followed by a clamped spring, which left the camera up to 45 cm
+            // behind the head) is kept as an optional offset scaled by cam_bob_scale (0 = none).
+            // No extra smoothing: the body and the camera move as one (step-ups move both).
+            float bob_k = camera_fp_cvars()->bob_scale ? camera_fp_cvars()->bob_scale->f : 0.0f;
+            vec3 head = v3_add(sock.t, v3(0, G->view.land_offset * bob_k, 0));
             vec3 ideal = v3_add(v3(interp.pos.x, G->view.smooth_eye_y + G->view.land_offset, interp.pos.z), player_eye_offset(cam.yaw, cam.pitch));
-            float raw_eye = interp.pos.y + player_eye_height(&interp);
-            vec3 head = v3_add(sock.t, v3(0, G->view.smooth_eye_y - raw_eye + G->view.land_offset, 0));   // stairs / landing on the head too
-            vec3 eye = camera_fp_stabilize(&G->cam_stab, ideal, head, cam.yaw, fdt);
+            vec3 stab = camera_fp_stabilize(&G->cam_stab, ideal, head, cam.yaw, fdt);
+            vec3 eye = v3_madd(head, v3_sub(stab, head), bob_k);
             // Never inside walls / ledges (mantle, vault, crouch under geometry): cast from the capsule.
             vec3 safe = v3(interp.pos.x, interp.pos.y + fminf(player_eye_height(&interp) * 0.6f, 1.0f), interp.pos.z);
             eye = camera_fp_collide(&G->cam_stab, safe, eye, cam_sphere_cast, w->phys, fdt);
@@ -448,6 +586,7 @@ void game_render(void) {
             cam.pos = v3_add(cam.pos, player_eye_offset(cam.yaw, cam.pitch));
         }
         chars_set_fp_camera(cam.pos, quat_euler(cam.yaw, cam.pitch, cam.roll), GR->cam_mode == 1);
+        if (GR->cam_mode == 1) fp_cam_test_frame(cam.pos, dir_from_angles(cam.yaw, cam.pitch));
         // cam_debug: eye / head / ideal markers + the stats line (HUD).
         GR->cam_text[0] = 0;
         if (cc->debug && cc->debug->i && lp) {
@@ -456,8 +595,9 @@ void game_render(void) {
             const char *modes[] = { "fallback", "head", "death", "third" };
             vec3 d = G->cam_stab.disp;
             snprintf(GR->cam_text, sizeof(GR->cam_text),
-                     "cam %s  disp %.1f %.1f %.1f mm (max %.1f, clamp %.0f)  wall %.0f mm | hands R %.2f mm %.2f deg  L %.2f mm %.2f deg | sight %.2f mm %.2f deg | %s",
-                     modes[GR->cam_mode], d.x * 1000, d.y * 1000, d.z * 1000, G->cam_stab.max_seen * 1000, cc->clamp->f * 1000, G->cam_stab.col_push * 1000,
+                     "cam %s  head-ideal %.0f %.0f %.0f mm  cam-head %.0f mm  disp %.1f %.1f %.1f mm (max %.1f, clamp %.0f)  wall %.0f mm | hands R %.2f mm %.2f deg  L %.2f mm %.2f deg | sight %.2f mm %.2f deg | %s",
+                     modes[GR->cam_mode], G->cam_stab.last_raw.x * 1000, G->cam_stab.last_raw.y * 1000, G->cam_stab.last_raw.z * 1000,
+                     v3_len(v3_sub(cam.pos, GR->head_eye)) * 1000, d.x * 1000, d.y * 1000, d.z * 1000, G->cam_stab.max_seen * 1000, cc->clamp->f * 1000, G->cam_stab.col_push * 1000,
                      gp[1] * 1000, ga[1], gp[0] * 1000, ga[0], ap * 1000, aa, chars_holdpoint_text(w, G->local_slot));
             if (GR->cam_mode == 1) {
                 vec3 f = dir_from_angles(cam.yaw, cam.pitch);
@@ -526,7 +666,10 @@ void game_render(void) {
         hi.vm_kick_pos = spring_vec3_sample(&G->recoil_vis.vm_pos, G->alpha);
         hi.vm_kick_rot = spring_vec3_sample(&G->recoil_vis.vm_rot, G->alpha);
         hands_update(&hi);
-        if (!cvar_find("cl_thirdperson")->i) chars_render_local_fp(w, G->alpha, G->local_slot);
+        if (!cvar_find("cl_thirdperson")->i) {
+            chars_render_local_fp(w, G->alpha, G->local_slot);
+            fp_cam_test_hands();
+        }
         if (!cvar_find("cl_thirdperson")->i) hands_render();
     }
     fx_render(cam.pos);

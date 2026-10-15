@@ -96,6 +96,7 @@ typedef struct Game {
 } Game;
 
 void game_init(void);
+void game_config_loaded(void);   // after the config file: one-time settings migrations
 void game_shutdown(void);
 bool game_host(const char *map);
 void game_frame(float dt);

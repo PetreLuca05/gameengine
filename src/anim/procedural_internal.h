@@ -8,6 +8,8 @@ DG_INLINE quat euler_deg(vec3 e) { return quat_euler(e.y * DG_DEG2RAD, e.x * DG_
 
 // Rotates bone b in model space about its own pivot by q (premultiplied), updating children.
 void proc_rotate_bone(const Skeleton *s, Pose *p, Xform *model, int b, quat q);
+// Shoulder reach: rotate the clavicle so the arm root gets within reach of target (<= max_deg).
+float proc_clavicle_reach(const Skeleton *s, Pose *p, Xform *model, int clav, int arm, vec3 target, float reach, float margin, float max_deg);
 
 // Steps (see procedural.h for the order).
 void proc_turn(ProcState *st, const ProcInput *in);
