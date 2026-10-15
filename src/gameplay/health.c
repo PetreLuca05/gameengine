@@ -1,0 +1,112 @@
+#include "health.h"
+#include <stdio.h>
+
+void health_init(Health *h, float hp, float armor) {
+    memset(h, 0, sizeof(*h));
+    h->hp = h->max_hp = hp;
+    h->armor = armor;
+    h->max_armor = 100.0f;
+    for (int i = 0; i < DMG_COUNT; i++) h->resist[i] = 1.0f;
+}
+
+float apply_damage(World *w, EntityId target, float amount, DamageType type, EntityId attacker, vec3 point, vec3 dir, bool headshot) {
+    if (!w->authority || !ent_valid(w, target)) return 0;
+    int i = (int)ENT_INDEX(target);
+    if (!(w->comps[i] & C_HEALTH) || (w->flags[i] & EF_DEAD)) return 0;
+    Health *h = &w->health[i];
+    float dmg = amount * h->resist[type];
+    if (dmg <= 0) return 0;
+    // Armor soaks a share of the damage until it runs out.
+    if (h->armor > 0 && type != DMG_FALL) {
+        float soak = fminf(h->armor, dmg * ARMOR_ABSORB);
+        h->armor -= soak;
+        dmg -= soak;
+    }
+    float before = h->hp;
+    h->hp = fmaxf(0.0f, h->hp - dmg);
+    h->last_damage_time = w->time;
+    float dealt = before - h->hp;
+    bool killed = h->hp <= 0.0f;
+
+    int victim_player = world_player_by_ent(w, target);
+    int attacker_player = world_player_by_ent(w, attacker);
+
+    GameEvent ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.type = EV_DAMAGE_NUMBER;
+    ev.target = EVENT_ALL;
+    ev.except = EVENT_ALL;
+    ev.ent = target;
+    ev.pos = point;
+    ev.value = amount * h->resist[type];
+    ev.id = (u32)type | (headshot ? 0x100u : 0u);
+    ev_push(w, &ev);
+
+    if (attacker_player >= 0) {
+        memset(&ev, 0, sizeof(ev));
+        ev.type = EV_HIT_CONFIRM;
+        ev.target = (u8)attacker_player;
+        ev.except = EVENT_ALL;
+        ev.value = dealt;
+        ev.id = (killed ? 1u : 0u) | (headshot ? 2u : 0u);
+        ev.ent = target;
+        ev_push(w, &ev);
+    }
+    if (victim_player >= 0) {
+        memset(&ev, 0, sizeof(ev));
+        ev.type = EV_HURT;
+        ev.target = (u8)victim_player;
+        ev.except = EVENT_ALL;
+        ev.value = dmg;
+        ev.dir = dir;
+        ev.pos = point;
+        ev_push(w, &ev);
+    }
+
+    if (killed) {
+        w->flags[i] |= EF_DEAD;
+        h->respawn_timer = victim_player >= 0 ? PLAYER_RESPAWN_TIME : 3.0f;
+        memset(&ev, 0, sizeof(ev));
+        ev.type = EV_KILL;
+        ev.target = EVENT_ALL;
+        ev.except = EVENT_ALL;
+        ev.ent = target;
+        ev.ent2 = attacker;
+        const char *vname = victim_player >= 0 ? w->players[victim_player].name : ent_type_name((EntityType)w->type[i]);
+        const char *aname = attacker_player >= 0 ? w->players[attacker_player].name : "the world";
+        snprintf(ev.text, sizeof(ev.text), "%s killed %s (%s)", aname, vname, damage_type_name(type));
+        ev_push(w, &ev);
+        if (victim_player >= 0) {
+            Player *p = &w->players[victim_player];
+            p->sim.move.mode = MOVE_DEAD;
+            p->respawn_timer = PLAYER_RESPAWN_TIME;
+            p->deaths++;
+        }
+        if (attacker_player >= 0 && attacker_player != victim_player && victim_player >= 0) w->players[attacker_player].kills++;
+    }
+    return dealt;
+}
+
+void heal(World *w, EntityId target, float hp, float armor) {
+    if (!ent_valid(w, target)) return;
+    Health *h = &w->health[ENT_INDEX(target)];
+    h->hp = fminf(h->max_hp, h->hp + hp);
+    h->armor = fminf(h->max_armor, h->armor + armor);
+}
+
+void health_tick_dummy(World *w, EntityId e, float dt) {
+    int i = (int)ENT_INDEX(e);
+    Health *h = &w->health[i];
+    if (w->flags[i] & EF_DEAD) {
+        // Topple over, then stand back up with full health.
+        w->anim[i] = approachf(w->anim[i], 1.0f, dt * 3.0f);
+        h->respawn_timer -= dt;
+        if (h->respawn_timer <= 0) {
+            w->flags[i] &= ~(u32)EF_DEAD;
+            h->hp = h->max_hp;
+        }
+        return;
+    }
+    w->anim[i] = approachf(w->anim[i], 0.0f, dt * 2.0f);
+    if (h->hp < h->max_hp && w->time - h->last_damage_time > h->regen_delay) h->hp = fminf(h->max_hp, h->hp + h->max_hp * dt);
+}

@@ -1,0 +1,173 @@
+// Client-side event handling, HUD timers, and inventory/container RPCs.
+#include "game_internal.h"
+#include "core/engine.h"
+#include "core/log.h"
+#include "gameplay/effects.h"
+#include "gameplay/entities.h"
+#include "net/net.h"
+#include "audio/audio.h"
+#include <stdio.h>
+#include <math.h>
+
+#define G (g_engine.game)
+
+void game_add_hint(const char *text) {
+    if (!G) return;
+    memmove(&G->hints[1], &G->hints[0], sizeof(Hint) * (MAX_HINTS - 1));
+    dg_strcpy(G->hints[0].text, sizeof(G->hints[0].text), text);
+    G->hints[0].time = 4.0f;
+}
+
+static void add_kill(const char *text) {
+    memmove(&G->killfeed[1], &G->killfeed[0], sizeof(Hint) * (MAX_KILLFEED - 1));
+    dg_strcpy(G->killfeed[0].text, sizeof(G->killfeed[0].text), text);
+    G->killfeed[0].time = 6.0f;
+}
+
+void game_hud_tick(float dt) {
+    for (int i = 0; i < MAX_HINTS; i++) if (G->hints[i].time > 0) G->hints[i].time -= dt;
+    for (int i = 0; i < MAX_KILLFEED; i++) if (G->killfeed[i].time > 0) G->killfeed[i].time -= dt;
+    for (int i = 0; i < MAX_HURT_MARKERS; i++) if (G->hurt[i].time > 0) G->hurt[i].time -= dt;
+    if (G->hitmarker_time > 0) G->hitmarker_time -= dt;
+    G->damage_flash = fmaxf(0.0f, G->damage_flash - dt * 1.5f);
+    fx_update(dt);
+    // Hold-interaction progress for the HUD: authoritative value (host) or replicated (client).
+    Player *p = game_local_player();
+    G->hold_progress = p ? p->hold_progress : 0;
+}
+
+void game_handle_event(const GameEvent *ev) {
+    World *w = G->world;
+    switch (ev->type) {
+    case EV_HINT: game_add_hint(ev->text); break;
+    case EV_SOUND: audio_play(ev->text, ev->pos, ev->value, SND_SFX); break;
+    case EV_DAMAGE_NUMBER: fx_damage_number(ev->pos, ev->value, (ev->id & 0x100u) != 0); break;
+    case EV_HIT_CONFIRM:
+        G->hitmarker_time = 0.25f;
+        G->hitmarker_kill = (ev->id & 1u) != 0;
+        G->hitmarker_head = (ev->id & 2u) != 0;
+        audio_play_2d(G->hitmarker_kill ? "hit_kill" : "hit", 0.5f, SND_UI);
+        break;
+    case EV_HURT: {
+        for (int i = 0; i < MAX_HURT_MARKERS; i++) {
+            if (G->hurt[i].time > 0) continue;
+            G->hurt[i].from = v3_sub(ev->pos, v3_scale(ev->dir, 5.0f));
+            G->hurt[i].time = 1.5f;
+            break;
+        }
+        G->damage_flash = fminf(1.0f, G->damage_flash + ev->value / 40.0f);
+        audio_play_2d("hurt", 0.7f, SND_SFX);
+        break;
+    }
+    case EV_IMPACT: fx_impact(ev->pos, ev->dir, (int)ev->id); break;
+    case EV_TRACER: fx_tracer(ev->pos, ev->dir); break;
+    case EV_MUZZLE:
+        if (ent_valid(w, ev->ent)) {
+            int i = (int)ENT_INDEX(ev->ent);
+            vec3 eye = v3_add(w->xf[i].pos, v3(0, (w->flags[i] & EF_CROUCHED) ? PLAYER_EYE_CROUCH : PLAYER_EYE_STAND, 0));
+            float yaw = quat_get_yaw(w->xf[i].rot);
+            fx_muzzle(v3_madd(eye, forward_from_yaw(yaw), 0.6f), forward_from_yaw(yaw));
+        }
+        break;
+    case EV_KILL: add_kill(ev->text); break;
+    case EV_CONTAINER:
+        G->container_open = true;
+        G->container_ent = ev->ent;
+        memcpy(G->container_slots, ev->data, sizeof(G->container_slots));
+        G->inv_selected = -1;
+        break;
+    case EV_CONTAINER_CLOSE: G->container_open = false; break;
+    case EV_RESPAWN:
+        if (G->local_slot >= 0 && w->players[G->local_slot].ent == ev->ent) {
+            G->view.yaw = ev->value;
+            G->view.pitch = 0;
+            G->view.smooth_init = false;
+            G->error_offset = v3(0, 0, 0);
+        }
+        break;
+    case EV_CHAT: game_add_hint(ev->text); break;
+    default: break;
+    }
+}
+
+// ------------------------------------------------------------------ RPCs
+
+void game_rpc(int type, int a, int b, int c) {
+    if (!G || !G->world) return;
+    if (G->mode == GM_HOST) game_sv_handle_rpc(G->local_slot, type, a, b, c);
+    else net_send_rpc(type, a, b, c);
+}
+
+static void send_container(World *w, int slot, EntityId cont) {
+    GameEvent ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.type = EV_CONTAINER;
+    ev.target = (u8)slot;
+    ev.except = EVENT_ALL;
+    ev.ent = cont;
+    memcpy(ev.data, w->cont[ENT_INDEX(cont)].slots, sizeof(w->cont[0].slots));
+    ev_push(w, &ev);
+}
+
+static void drop_item(World *w, int slot, int inv_slot) {
+    Player *p = &w->players[slot];
+    if (inv_slot < 0 || inv_slot >= INV_SLOTS) return;
+    InvSlot s = p->inv.slots[inv_slot];
+    if (!s.item) return;
+    memset(&p->inv.slots[inv_slot], 0, sizeof(InvSlot));
+    p->inv.revision++;
+    vec3 eye = player_eye_pos(&p->sim.move);
+    vec3 fwd = forward_from_yaw(p->sim.move.yaw);
+    vec3 at = v3_add(v3_madd(p->sim.move.pos, fwd, 0.8f), v3(0, 0.15f, 0));
+    // Don't drop inside a wall.
+    RayHit rh;
+    if (phys_raycast(w->phys, eye, v3_sub(at, eye), PL_MASK_WORLD, phys_character_inner_body(p->character), &rh))
+        at = v3_madd(rh.point, rh.normal, 0.15f);
+    // Settle on the floor.
+    if (phys_raycast(w->phys, at, v3(0, -3, 0), PL_MASK_WORLD, PHYS_INVALID_BODY, &rh)) at.y = rh.point.y + item_def(w->items, s.item)->size.y + 0.02f;
+    spawn_pickup(w, at, s.item, s.count, s.ammo, 0);
+    ev_hint(w, slot, "Dropped %s", item_def(w->items, s.item)->name);
+}
+
+void game_sv_handle_rpc(int slot, int type, int a, int b, int c) {
+    World *w = G->world;
+    if (!w || slot < 0 || slot >= MAX_PLAYERS || !w->players[slot].active) return;
+    Player *p = &w->players[slot];
+    switch (type) {
+    case RPC_INV_MOVE: inv_move(&p->inv, w->items, a, b); break;
+    case RPC_INV_DROP: drop_item(w, slot, a); break;
+    case RPC_CONTAINER_TAKE: {
+        EntityId ce = p->open_container;
+        if (!ent_valid(w, ce) || w->type[ENT_INDEX(ce)] != ET_CONTAINER) return;
+        if (v3_dist(p->sim.move.pos, w->xf[ENT_INDEX(ce)].pos) > 3.5f) return; // validate proximity
+        Container *ct = &w->cont[ENT_INDEX(ce)];
+        int first = a == 255 ? 0 : a, last = a == 255 ? CONTAINER_SLOTS - 1 : a;
+        for (int s = DG_MAX(0, first); s <= DG_MIN(CONTAINER_SLOTS - 1, last); s++) {
+            InvSlot *cs = &ct->slots[s];
+            if (!cs->item) continue;
+            int left = inv_add(&p->inv, w->items, cs->item, cs->count, cs->ammo);
+            if (left == cs->count) { ev_hint(w, slot, "Inventory full"); break; }
+            if (left > 0) cs->count = (u16)left;
+            else memset(cs, 0, sizeof(*cs));
+        }
+        ct->revision++;
+        send_container(w, slot, ce);
+        break;
+    }
+    case RPC_CONTAINER_PUT: {
+        EntityId ce = p->open_container;
+        if (!ent_valid(w, ce) || a < 0 || a >= INV_SLOTS) return;
+        InvSlot *s = &p->inv.slots[a];
+        if (!s->item) return;
+        int left = slots_add(w->cont[ENT_INDEX(ce)].slots, CONTAINER_SLOTS, w->items, s->item, s->count, s->ammo, 0, CONTAINER_SLOTS);
+        if (left > 0) s->count = (u16)left;
+        else memset(s, 0, sizeof(*s));
+        p->inv.revision++;
+        send_container(w, slot, ce);
+        break;
+    }
+    case RPC_CONTAINER_CLOSE: p->open_container = ENT_NONE; break;
+    default: break;
+    }
+    (void)c;
+}

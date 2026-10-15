@@ -1,0 +1,127 @@
+{
+  "name": "DevRoom",
+  "_comment": "Units are meters, yaw in degrees. Y up, yaw 0 looks towards -Z (north). Box pos = bottom center.",
+  "env": {
+    "sun_dir": [0.32, 1.0, 0.22], "sun_color": [1.0, 0.96, 0.9], "sun_intensity": 2.4,
+    "sky": [0.55, 0.6, 0.7], "ground": [0.32, 0.3, 0.27], "fog": [0.42, 0.45, 0.5], "fog_density": 0.0
+  },
+  "room": { "size": [60, 10, 60], "wall": 0.5, "floor_color": [0.6, 0.6, 0.58], "wall_color": [0.68, 0.68, 0.66] },
+
+  "spawns": [
+    { "pos": [0, 0.05, 24], "yaw": 0 },
+    { "pos": [2, 0.05, 24.5], "yaw": 0 },
+    { "pos": [-2, 0.05, 24.5], "yaw": 0 },
+    { "pos": [0, 0.05, 26.5], "yaw": 0 }
+  ],
+
+  "brushes": [
+    { "type": "box", "pos": [-2, 0, 19], "size": [3.2, 0.85, 1.0], "color": [0.4, 0.42, 0.45], "label": "loadout table" },
+    { "type": "box", "pos": [-4.5, 0, 22.5], "size": [1, 1, 1], "color": [0.85, 0.55, 0.2], "label": "1 m cube" },
+
+    { "type": "stairs", "pos": [-26, 0, 13], "rise": 0.15, "run": 0.3, "count": 10, "width": 2.5, "platform": 2, "color": [0.55, 0.6, 0.7], "label": "steps 15 cm" },
+    { "type": "stairs", "pos": [-22, 0, 13], "rise": 0.20, "run": 0.3, "count": 10, "width": 2.5, "platform": 2, "color": [0.55, 0.65, 0.6], "label": "steps 20 cm" },
+    { "type": "stairs", "pos": [-18, 0, 13], "rise": 0.25, "run": 0.3, "count": 10, "width": 2.5, "platform": 2, "color": [0.65, 0.6, 0.55], "label": "steps 25 cm" },
+
+    { "type": "ramp", "pos": [-26, 0, 1.0], "width": 2.5, "length": 6, "angle": 15, "platform": 2, "color": [0.5, 0.58, 0.68], "label": "ramp 15 deg" },
+    { "type": "ramp", "pos": [-22, 0, 2.0], "width": 2.5, "length": 4, "angle": 30, "platform": 2, "color": [0.5, 0.65, 0.55], "label": "ramp 30 deg" },
+    { "type": "ramp", "pos": [-18, 0, 2.5], "width": 2.5, "length": 3, "angle": 45, "platform": 2, "color": [0.68, 0.6, 0.5], "label": "ramp 45 deg" },
+    { "type": "ramp", "pos": [-14, 0, 3.0], "width": 2.5, "length": 2, "angle": 60, "platform": 2, "color": [0.7, 0.5, 0.5], "label": "ramp 60 deg (too steep)" },
+
+    { "type": "box", "pos": [-10, 0, -18], "size": [2.0, 0.5, 1.5], "color": [0.6, 0.62, 0.75], "label": "0.5 m" },
+    { "type": "box", "pos": [-6, 0, -18], "size": [2.0, 1.0, 1.5], "color": [0.6, 0.7, 0.62], "label": "1.0 m" },
+    { "type": "box", "pos": [-2, 0, -18], "size": [2.0, 1.5, 1.5], "color": [0.72, 0.66, 0.55], "label": "1.5 m" },
+    { "type": "box", "pos": [2, 0, -18], "size": [2.0, 2.0, 1.5], "color": [0.75, 0.6, 0.55], "label": "2.0 m" },
+    { "type": "box", "pos": [6, 0, -18], "size": [2.0, 2.5, 1.5], "color": [0.7, 0.55, 0.65], "label": "2.5 m (jump + hang)" },
+    { "type": "box", "pos": [10, 0, -18], "size": [2.0, 3.0, 1.5], "color": [0.6, 0.55, 0.72], "label": "3.0 m (jump + hang)" },
+    { "type": "box", "pos": [-14, 0, -18], "size": [2.0, 3.5, 1.5], "color": [0.5, 0.5, 0.55], "label": "3.5 m (out of reach)" },
+
+    { "type": "box", "pos": [-6, 0, -10], "size": [2.5, 0.9, 0.3], "color": [0.75, 0.7, 0.4], "label": "vault 0.9 m" },
+    { "type": "box", "pos": [-2, 0, -10], "size": [2.5, 1.2, 0.3], "color": [0.75, 0.62, 0.4], "label": "vault 1.2 m" },
+    { "type": "box", "pos": [2, 0, -10], "size": [2.5, 1.0, 0.8], "color": [0.65, 0.65, 0.45], "label": "vault 1.0 m thick" },
+
+    { "type": "box", "pos": [15, 0, -25], "size": [3, 1, 3], "color": [0.55, 0.6, 0.7] },
+    { "type": "box", "pos": [20.5, 0, -25], "size": [3, 1, 3], "color": [0.55, 0.6, 0.7], "label": "gap 2.5 m" },
+    { "type": "box", "pos": [15, 0, -19], "size": [3, 1, 3], "color": [0.6, 0.7, 0.6] },
+    { "type": "box", "pos": [19.5, 0, -19], "size": [3, 1, 3], "color": [0.6, 0.7, 0.6], "label": "gap 1.5 m" },
+
+    { "type": "tunnel", "pos": [25, 0, -4], "yaw": 0, "length": 6, "inner_height": 1.25, "inner_width": 1.4, "color": [0.5, 0.5, 0.55], "label": "crouch tunnel 1.25 m" },
+
+    { "type": "doorway", "pos": [12, 0, 9], "yaw": -90, "length": 10, "height": 3.5, "thickness": 0.25,
+      "door_width": 1.1, "door_height": 2.1, "color": [0.62, 0.6, 0.58], "label": "door 2.1 m",
+      "door": { "name": "door_a", "locked": false, "color": [0.55, 0.4, 0.25] } },
+    { "type": "doorway", "pos": [17, 0, 14], "yaw": 0, "length": 10.25, "height": 3.5, "thickness": 0.25,
+      "door_width": 1.1, "door_height": 2.1, "color": [0.62, 0.6, 0.58], "label": "locked: red key",
+      "door": { "name": "door_b", "locked": true, "key": "key_red", "color": [0.6, 0.15, 0.12] } },
+    { "type": "box", "pos": [17, 0, 4], "size": [10.25, 3.5, 0.25], "color": [0.62, 0.6, 0.58] },
+    { "type": "box", "pos": [22, 0, 9], "size": [0.25, 3.5, 10], "color": [0.62, 0.6, 0.58] },
+
+    { "type": "doorway", "pos": [20, 0, 24], "yaw": -90, "length": 12, "height": 4.0, "thickness": 0.3,
+      "door_width": 3.0, "door_height": 3.0, "color": [0.55, 0.58, 0.62], "label": "gate (use lever)" },
+    { "type": "box", "pos": [25, 0, 18], "size": [10, 4, 0.3], "color": [0.55, 0.58, 0.62] },
+    { "type": "box", "pos": [26, 0, 26.5], "size": [3, 0.9, 1], "color": [0.4, 0.42, 0.45], "label": "weapon rack" }
+  ],
+
+  "labels": [
+    { "pos": [-8, 0, 24], "yaw": 90, "floor": true, "size": 0.3, "text": "firing line" },
+    { "pos": [-14, 0, 22.3], "yaw": 90, "floor": true, "size": 0.25, "text": "6 m" },
+    { "pos": [-18, 0, 22.3], "yaw": 90, "floor": true, "size": 0.25, "text": "10 m" },
+    { "pos": [-22, 0, 22.3], "yaw": 90, "floor": true, "size": 0.25, "text": "14 m" },
+    { "pos": [-26, 0, 22.3], "yaw": 90, "floor": true, "size": 0.25, "text": "18 m" },
+    { "pos": [6, 0, 10.5], "yaw": 0, "floor": true, "size": 0.25, "text": "physics props" },
+    { "pos": [-6.3, 1.25, 29.74], "yaw": 180, "size": 0.12, "text": "main lights" },
+    { "pos": [-29.74, 1.6, 16], "yaw": 90, "size": 0.12, "text": "zone lights" }
+  ],
+
+  "entities": [
+    { "type": "marker", "pos": [3, 0, 22], "shape": "capsule", "half": [0.3, 0.6, 0.3], "color": [0.2, 0.55, 0.9], "name": "ref_capsule" },
+
+    { "type": "pickup", "item": "pistol",   "pos": [-3.2, 0.9, 19], "respawn": 10 },
+    { "type": "pickup", "item": "ammo_9mm", "count": 36, "pos": [-2.6, 0.9, 19], "respawn": 10 },
+    { "type": "pickup", "item": "medkit",   "count": 2, "pos": [-2.0, 0.93, 19], "respawn": 15 },
+    { "type": "pickup", "item": "bandage",  "count": 3, "pos": [-1.5, 0.9, 19], "respawn": 15 },
+    { "type": "pickup", "item": "bat",      "pos": [-0.9, 0.9, 19], "respawn": 10 },
+    { "type": "pickup", "item": "knife",    "pos": [-0.4, 0.88, 19], "respawn": 10 },
+    { "type": "pickup", "item": "key_red",  "pos": [2, 2.1, -18] },
+
+    { "type": "container", "pos": [6, 0, 19], "yaw": 180, "loot": [["ammo_9mm", 24], ["bandage", 2], ["scrap", 5], ["battery", 1]] },
+    { "type": "container", "pos": [17, 0, 7], "yaw": 0, "loot": [["rifle", 1], ["ammo_rifle", 60], ["armor", 1]] },
+
+    { "type": "gate", "name": "gate1", "pos": [20, 0, 24], "yaw": -90, "width": 2.96, "height": 2.98, "lift": 2.9 },
+    { "type": "lever", "pos": [18.6, 0, 21.4], "yaw": -90, "target": "gate1" },
+    { "type": "pickup", "item": "shotgun",    "pos": [25, 1.0, 26.5], "respawn": 10 },
+    { "type": "pickup", "item": "crossbow",   "pos": [26.2, 1.0, 26.5], "respawn": 10 },
+    { "type": "pickup", "item": "ammo_shell", "count": 16, "pos": [27.1, 0.95, 26.5], "respawn": 10 },
+    { "type": "pickup", "item": "ammo_bolt",  "count": 8, "pos": [27.1, 0.95, 26.2], "respawn": 10 },
+    { "type": "pickup", "item": "armor",      "pos": [24.6, 0.93, 26.2], "respawn": 20 },
+
+    { "type": "switch", "pos": [-6, 1.3, 29.72], "yaw": 180, "group": 1 },
+    { "type": "switch", "pos": [-29.72, 1.3, 16], "yaw": 90, "group": 2 },
+    { "type": "light", "pos": [-15, 9.6, -15], "group": 1, "radius": 22, "intensity": 110 },
+    { "type": "light", "pos": [0, 9.6, -15], "group": 1, "radius": 22, "intensity": 110 },
+    { "type": "light", "pos": [15, 9.6, -15], "group": 1, "radius": 22, "intensity": 110 },
+    { "type": "light", "pos": [-15, 9.6, 10], "group": 1, "radius": 22, "intensity": 110 },
+    { "type": "light", "pos": [0, 9.6, 10], "group": 1, "radius": 22, "intensity": 110 },
+    { "type": "light", "pos": [15, 9.6, 10], "group": 1, "radius": 22, "intensity": 110 },
+    { "type": "light", "pos": [-22, 3.8, 0], "group": 2, "radius": 10, "intensity": 90, "color": [0.4, 0.6, 1.0] },
+    { "type": "light", "pos": [-22, 3.8, 9], "group": 2, "radius": 10, "intensity": 90, "color": [1.0, 0.6, 0.3] },
+    { "type": "light", "pos": [17, 3.2, 9], "group": 0, "radius": 8, "intensity": 60, "color": [1.0, 0.9, 0.7] },
+
+    { "type": "prop", "shape": "box", "size": [0.8, 0.8, 0.8], "pos": [5.0, 0, 8.0], "mass": 25, "color": [0.6, 0.45, 0.25] },
+    { "type": "prop", "shape": "box", "size": [0.8, 0.8, 0.8], "pos": [5.9, 0, 8.0], "mass": 25, "color": [0.55, 0.42, 0.24] },
+    { "type": "prop", "shape": "box", "size": [0.8, 0.8, 0.8], "pos": [6.8, 0, 8.0], "mass": 25, "color": [0.6, 0.45, 0.25] },
+    { "type": "prop", "shape": "box", "size": [0.8, 0.8, 0.8], "pos": [5.45, 0.81, 8.0], "mass": 25, "color": [0.58, 0.44, 0.26] },
+    { "type": "prop", "shape": "box", "size": [0.8, 0.8, 0.8], "pos": [6.35, 0.81, 8.0], "mass": 25, "color": [0.6, 0.46, 0.27] },
+    { "type": "prop", "shape": "box", "size": [0.8, 0.8, 0.8], "pos": [5.9, 1.62, 8.0], "mass": 25, "color": [0.62, 0.47, 0.27] },
+    { "type": "prop", "shape": "box", "size": [0.5, 0.5, 0.5], "pos": [8.5, 0, 9.0], "mass": 8, "color": [0.5, 0.38, 0.22] },
+    { "type": "prop", "shape": "box", "size": [0.5, 0.5, 0.5], "pos": [9.2, 0, 9.4], "mass": 8, "color": [0.5, 0.38, 0.22] },
+    { "type": "prop", "shape": "cylinder", "size": [0.6, 0.9, 0.6], "pos": [8.0, 0, 6.0], "mass": 30, "color": [0.2, 0.35, 0.6] },
+    { "type": "prop", "shape": "cylinder", "size": [0.6, 0.9, 0.6], "pos": [8.8, 0, 6.3], "mass": 30, "color": [0.7, 0.25, 0.15] },
+    { "type": "prop", "shape": "cylinder", "size": [0.6, 0.9, 0.6], "pos": [8.3, 0, 5.2], "mass": 30, "color": [0.25, 0.5, 0.3] },
+    { "type": "prop", "shape": "sphere", "size": [0.5, 0.5, 0.5], "pos": [3.5, 0, 10.0], "mass": 5, "color": [0.9, 0.85, 0.2] },
+
+    { "type": "dummy", "pos": [-14, 0, 24], "yaw": -90, "hp": 150 },
+    { "type": "dummy", "pos": [-18, 0, 25.5], "yaw": -90, "hp": 150 },
+    { "type": "dummy", "pos": [-22, 0, 23], "yaw": -90, "hp": 200 },
+    { "type": "dummy", "pos": [-26, 0, 25], "yaw": -90, "hp": 300 }
+  ]
+}

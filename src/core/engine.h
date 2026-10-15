@@ -24,6 +24,18 @@ typedef struct Engine {
     struct Game *game;
     struct Console *console;
     struct DebugDraw *debug;
+    struct PhysicsGlobal *physics;
+    struct AssetSystem *assets;
+    struct FontSystem *fonts;
+    struct PlayerTuning *ptuning;
+    struct ItemDB *items;
+    struct FxSystem *fx;
+    struct HandsSystem *hands;
+    struct CameraCvars *camera_cvars;
+    struct GameRender *game_render;
+    struct ChunkGlobals *chunk_globals;
+    struct Menus *menus;
+    struct VideoState *video;
 
     Arena perm_arena;   // lives for the whole run
     Arena frame_arena;  // reset every rendered frame

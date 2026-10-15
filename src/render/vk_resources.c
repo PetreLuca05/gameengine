@@ -18,6 +18,22 @@ GpuBuffer vkr_buffer_create(VkDeviceSize size, VkBufferUsageFlags usage, bool ho
     return b;
 }
 
+// Host-cached memory for GPU -> CPU readback (write-combined memory is very slow to read).
+GpuBuffer vkr_buffer_create_readback(VkDeviceSize size) {
+    GpuBuffer b = { 0 };
+    VkBufferCreateInfo bci = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
+    bci.size = size;
+    bci.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    VmaAllocationCreateInfo aci = { 0 };
+    aci.usage = VMA_MEMORY_USAGE_AUTO;
+    aci.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_RANDOM_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
+    VmaAllocationInfo info;
+    VK_CHECK(vmaCreateBuffer(R->vma, &bci, &aci, &b.buffer, &b.alloc, &info));
+    b.mapped = info.pMappedData;
+    b.size = size;
+    return b;
+}
+
 void vkr_buffer_destroy_now(GpuBuffer *b) {
     if (b->buffer) vmaDestroyBuffer(R->vma, b->buffer, b->alloc);
     memset(b, 0, sizeof(*b));

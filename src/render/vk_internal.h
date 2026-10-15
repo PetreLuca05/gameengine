@@ -193,7 +193,7 @@ typedef struct Renderer {
     vec4 frustum[6];
     float render_scale_applied;
     char screenshot_path[512];
-    RenderStats stats;
+    RenderStats stats, last_stats;
 
     // shader hot reload
     double next_shader_poll;
@@ -218,6 +218,7 @@ void vkd_create_shadow_map(u32 size);
 // vk_resources.c
 GpuBuffer vkr_buffer_create(VkDeviceSize size, VkBufferUsageFlags usage, bool host_visible);
 void vkr_buffer_destroy_now(GpuBuffer *b);
+GpuBuffer vkr_buffer_create_readback(VkDeviceSize size);
 void vkr_defer_buffer(GpuBuffer *b);
 void vkr_defer_image(VkImage image, VkImageView view, VmaAllocation alloc);
 void vkr_flush_deferred(FrameResources *f);

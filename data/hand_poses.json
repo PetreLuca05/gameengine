@@ -1,0 +1,101 @@
+{
+  "_comment": [
+    "First-person hand pose clips. Camera space: x right, y up, -z forward (meters).",
+    "rot = [pitch, yaw, roll] degrees applied to the hand frame (fingers -Z, back of hand +Y).",
+    "For weapon poses the RIGHT hand frame is the weapon grip frame (weapon model attaches to it);",
+    "the LEFT hand is IK-attached to the weapon's support point unless the clip is a reload.",
+    "Timed clips (melee_swing, reload_*, consumable_use, mantle, vault) are sampled by action progress 0..1.",
+    "World-space IK (door knobs, levers, ledges, ...) overrides these per hand at runtime.",
+    "grip: relaxed | fist | point | grab | pistol | rifle | melee | palm   -- reload with 'hands_reload'."
+  ],
+  "clips": [
+    { "name": "idle", "duration": 4.0, "loop": true, "keys": [
+      { "t": 0.0, "left": { "pos": [-0.22, -0.31, -0.40], "rot": [-10, -12, 22], "grip": "relaxed" }, "right": { "pos": [0.22, -0.31, -0.40], "rot": [-10, 12, -22], "grip": "relaxed" } },
+      { "t": 0.5, "left": { "pos": [-0.22, -0.30, -0.41], "rot": [-8, -12, 20], "grip": "relaxed" },  "right": { "pos": [0.22, -0.30, -0.41], "rot": [-8, 12, -20], "grip": "relaxed" } },
+      { "t": 1.0, "left": { "pos": [-0.22, -0.31, -0.40], "rot": [-10, -12, 22], "grip": "relaxed" }, "right": { "pos": [0.22, -0.31, -0.40], "rot": [-10, 12, -22], "grip": "relaxed" } }
+    ]},
+    { "name": "sprint", "duration": 0.62, "loop": true, "keys": [
+      { "t": 0.0, "left": { "pos": [-0.23, -0.40, -0.46], "rot": [-35, -10, 30], "grip": "fist" }, "right": { "pos": [0.23, -0.30, -0.30], "rot": [10, 10, -30], "grip": "fist" } },
+      { "t": 0.5, "left": { "pos": [-0.23, -0.30, -0.30], "rot": [10, -10, 30], "grip": "fist" },  "right": { "pos": [0.23, -0.40, -0.46], "rot": [-35, 10, -30], "grip": "fist" } },
+      { "t": 1.0, "left": { "pos": [-0.23, -0.40, -0.46], "rot": [-35, -10, 30], "grip": "fist" }, "right": { "pos": [0.23, -0.30, -0.30], "rot": [10, 10, -30], "grip": "fist" } }
+    ]},
+
+    { "name": "pistol", "duration": 1.0, "loop": true, "keys": [
+      { "t": 0.0, "left": { "pos": [-0.1, -0.24, -0.4], "grip": "grab" }, "right": { "pos": [0.15, -0.17, -0.42], "rot": [0, 0, 0], "grip": "pistol" } }
+    ]},
+    { "name": "pistol_ads", "duration": 1.0, "loop": true, "keys": [
+      { "t": 0.0, "left": { "pos": [-0.04, -0.13, -0.3], "grip": "grab" }, "right": { "pos": [0.0, -0.078, -0.31], "rot": [0, 0, 0], "grip": "pistol" } }
+    ]},
+    { "name": "pistol_sprint", "duration": 1.0, "loop": true, "keys": [
+      { "t": 0.0, "left": { "pos": [-0.2, -0.36, -0.36], "rot": [-25, -10, 25], "grip": "fist" }, "right": { "pos": [0.17, -0.27, -0.33], "rot": [-38, 22, 8], "grip": "pistol" } }
+    ]},
+    { "name": "reload_pistol", "duration": 1.0, "loop": false, "keys": [
+      { "t": 0.0,  "left": { "pos": [-0.06, -0.22, -0.40], "rot": [0, 0, -50], "grip": "grab" },  "right": { "pos": [0.15, -0.17, -0.42], "rot": [0, 0, 0], "grip": "pistol" } },
+      { "t": 0.2,  "left": { "pos": [-0.16, -0.42, -0.30], "rot": [-20, 0, 0], "grip": "grab" },  "right": { "pos": [0.12, -0.19, -0.38], "rot": [18, 22, 32], "grip": "pistol" } },
+      { "t": 0.55, "left": { "pos": [0.10, -0.29, -0.38], "rot": [-60, 0, 0], "grip": "grab" },  "right": { "pos": [0.12, -0.19, -0.38], "rot": [18, 22, 32], "grip": "pistol" } },
+      { "t": 0.8,  "left": { "pos": [0.12, -0.13, -0.33], "rot": [0, 0, -80], "grip": "grab" },  "right": { "pos": [0.14, -0.17, -0.40], "rot": [6, 8, 10], "grip": "pistol" } },
+      { "t": 1.0,  "left": { "pos": [-0.06, -0.22, -0.40], "rot": [0, 0, -50], "grip": "grab" },  "right": { "pos": [0.15, -0.17, -0.42], "rot": [0, 0, 0], "grip": "pistol" } }
+    ]},
+
+    { "name": "rifle", "duration": 1.0, "loop": true, "keys": [
+      { "t": 0.0, "left": { "pos": [0.0, -0.22, -0.55], "grip": "grab" }, "right": { "pos": [0.15, -0.2, -0.28], "rot": [0, 0, 0], "grip": "rifle" } }
+    ]},
+    { "name": "rifle_ads", "duration": 1.0, "loop": true, "keys": [
+      { "t": 0.0, "left": { "pos": [0.0, -0.15, -0.5], "grip": "grab" }, "right": { "pos": [0.0, -0.105, -0.2], "rot": [0, 0, 0], "grip": "rifle" } }
+    ]},
+    { "name": "rifle_sprint", "duration": 1.0, "loop": true, "keys": [
+      { "t": 0.0, "left": { "pos": [-0.05, -0.28, -0.45], "grip": "grab" }, "right": { "pos": [0.13, -0.25, -0.26], "rot": [-22, 38, 18], "grip": "rifle" } }
+    ]},
+    { "name": "reload_rifle", "duration": 1.0, "loop": false, "keys": [
+      { "t": 0.0,  "left": { "pos": [0.0, -0.22, -0.55], "rot": [0, 0, -60], "grip": "grab" }, "right": { "pos": [0.15, -0.2, -0.28], "rot": [0, 0, 0], "grip": "rifle" } },
+      { "t": 0.15, "left": { "pos": [0.08, -0.30, -0.36], "rot": [-40, 0, 0], "grip": "grab" }, "right": { "pos": [0.13, -0.18, -0.30], "rot": [12, 15, 25], "grip": "rifle" } },
+      { "t": 0.4,  "left": { "pos": [-0.12, -0.44, -0.25], "rot": [-30, 0, 0], "grip": "grab" }, "right": { "pos": [0.13, -0.18, -0.30], "rot": [12, 15, 25], "grip": "rifle" } },
+      { "t": 0.7,  "left": { "pos": [0.08, -0.30, -0.36], "rot": [-50, 0, 0], "grip": "grab" }, "right": { "pos": [0.13, -0.18, -0.30], "rot": [12, 15, 25], "grip": "rifle" } },
+      { "t": 0.85, "left": { "pos": [0.1, -0.16, -0.34], "rot": [0, 0, -90], "grip": "grab" }, "right": { "pos": [0.14, -0.19, -0.29], "rot": [4, 5, 8], "grip": "rifle" } },
+      { "t": 1.0,  "left": { "pos": [0.0, -0.22, -0.55], "rot": [0, 0, -60], "grip": "grab" }, "right": { "pos": [0.15, -0.2, -0.28], "rot": [0, 0, 0], "grip": "rifle" } }
+    ]},
+
+    { "name": "melee", "duration": 3.0, "loop": true, "keys": [
+      { "t": 0.0, "left": { "pos": [-0.22, -0.32, -0.40], "rot": [-10, -12, 22], "grip": "fist" }, "right": { "pos": [0.24, -0.22, -0.33], "rot": [28, -18, -28], "grip": "melee" } },
+      { "t": 0.5, "left": { "pos": [-0.22, -0.31, -0.41], "rot": [-10, -12, 22], "grip": "fist" }, "right": { "pos": [0.24, -0.215, -0.335], "rot": [30, -18, -27], "grip": "melee" } },
+      { "t": 1.0, "left": { "pos": [-0.22, -0.32, -0.40], "rot": [-10, -12, 22], "grip": "fist" }, "right": { "pos": [0.24, -0.22, -0.33], "rot": [28, -18, -28], "grip": "melee" } }
+    ]},
+    { "name": "melee_sprint", "duration": 0.62, "loop": true, "keys": [
+      { "t": 0.0, "left": { "pos": [-0.23, -0.40, -0.46], "rot": [-35, -10, 30], "grip": "fist" }, "right": { "pos": [0.25, -0.25, -0.30], "rot": [45, -25, -35], "grip": "melee" } },
+      { "t": 0.5, "left": { "pos": [-0.23, -0.30, -0.30], "rot": [10, -10, 30], "grip": "fist" },  "right": { "pos": [0.25, -0.28, -0.32], "rot": [40, -25, -35], "grip": "melee" } },
+      { "t": 1.0, "left": { "pos": [-0.23, -0.40, -0.46], "rot": [-35, -10, 30], "grip": "fist" }, "right": { "pos": [0.25, -0.25, -0.30], "rot": [45, -25, -35], "grip": "melee" } }
+    ]},
+    { "name": "melee_swing", "duration": 1.0, "loop": false, "keys": [
+      { "t": 0.0,  "left": { "pos": [-0.22, -0.32, -0.40], "rot": [-10, -12, 22], "grip": "fist" }, "right": { "pos": [0.24, -0.22, -0.33], "rot": [28, -18, -28], "grip": "melee" } },
+      { "t": 0.22, "left": { "pos": [-0.20, -0.30, -0.36], "rot": [-10, -12, 22], "grip": "fist" }, "right": { "pos": [0.32, -0.10, -0.24], "rot": [50, -45, -45], "grip": "melee" } },
+      { "t": 0.42, "left": { "pos": [-0.18, -0.34, -0.44], "rot": [-10, -12, 22], "grip": "fist" }, "right": { "pos": [0.05, -0.17, -0.55], "rot": [-80, 25, -10], "grip": "melee" } },
+      { "t": 0.6,  "left": { "pos": [-0.20, -0.34, -0.42], "rot": [-10, -12, 22], "grip": "fist" }, "right": { "pos": [-0.24, -0.28, -0.44], "rot": [-75, 85, 25], "grip": "melee" } },
+      { "t": 1.0,  "left": { "pos": [-0.22, -0.32, -0.40], "rot": [-10, -12, 22], "grip": "fist" }, "right": { "pos": [0.24, -0.22, -0.33], "rot": [28, -18, -28], "grip": "melee" } }
+    ]},
+
+    { "name": "consumable", "duration": 2.0, "loop": true, "keys": [
+      { "t": 0.0, "left": { "pos": [-0.21, -0.31, -0.40], "rot": [-10, -12, 22], "grip": "relaxed" }, "right": { "pos": [0.13, -0.22, -0.38], "rot": [-15, 0, 0], "grip": "grab" } },
+      { "t": 1.0, "left": { "pos": [-0.21, -0.31, -0.40], "rot": [-10, -12, 22], "grip": "relaxed" }, "right": { "pos": [0.13, -0.22, -0.38], "rot": [-15, 0, 0], "grip": "grab" } }
+    ]},
+    { "name": "consumable_use", "duration": 1.0, "loop": false, "keys": [
+      { "t": 0.0,  "left": { "pos": [-0.21, -0.31, -0.40], "rot": [-10, -12, 22], "grip": "relaxed" }, "right": { "pos": [0.13, -0.22, -0.38], "rot": [-15, 0, 0], "grip": "grab" } },
+      { "t": 0.25, "left": { "pos": [-0.06, -0.24, -0.34], "rot": [0, 30, 60], "grip": "grab" },    "right": { "pos": [0.05, -0.21, -0.32], "rot": [-35, -10, 0], "grip": "grab" } },
+      { "t": 0.6,  "left": { "pos": [-0.05, -0.22, -0.32], "rot": [0, 35, 60], "grip": "grab" },    "right": { "pos": [0.06, -0.18, -0.30], "rot": [-45, -10, 10], "grip": "grab" } },
+      { "t": 1.0,  "left": { "pos": [-0.06, -0.24, -0.34], "rot": [0, 30, 60], "grip": "grab" },    "right": { "pos": [0.05, -0.21, -0.32], "rot": [-35, -10, 0], "grip": "grab" } }
+    ]},
+
+    { "name": "hang", "duration": 1.0, "loop": true, "keys": [
+      { "t": 0.0, "left": { "pos": [-0.25, 0.28, -0.32], "rot": [-15, 0, 0], "grip": "palm" }, "right": { "pos": [0.25, 0.28, -0.32], "rot": [-15, 0, 0], "grip": "palm" } }
+    ]},
+    { "name": "mantle", "duration": 1.0, "loop": false, "keys": [
+      { "t": 0.0, "left": { "pos": [-0.25, 0.10, -0.38], "rot": [-15, 0, 0], "grip": "palm" }, "right": { "pos": [0.25, 0.10, -0.38], "rot": [-15, 0, 0], "grip": "palm" } },
+      { "t": 0.6, "left": { "pos": [-0.25, -0.28, -0.36], "rot": [-30, 0, 0], "grip": "palm" }, "right": { "pos": [0.25, -0.28, -0.36], "rot": [-30, 0, 0], "grip": "palm" } },
+      { "t": 1.0, "left": { "pos": [-0.22, -0.31, -0.40], "rot": [-10, -12, 22], "grip": "relaxed" }, "right": { "pos": [0.22, -0.31, -0.40], "rot": [-10, 12, -22], "grip": "relaxed" } }
+    ]},
+    { "name": "vault", "duration": 1.0, "loop": false, "keys": [
+      { "t": 0.0, "left": { "pos": [-0.15, -0.35, -0.50], "rot": [-40, 0, 0], "grip": "palm" }, "right": { "pos": [0.28, -0.20, -0.30], "rot": [10, 20, -30], "grip": "fist" } },
+      { "t": 0.5, "left": { "pos": [-0.10, -0.45, -0.20], "rot": [-50, 0, 0], "grip": "palm" }, "right": { "pos": [0.32, -0.10, -0.30], "rot": [20, 30, -40], "grip": "fist" } },
+      { "t": 1.0, "left": { "pos": [-0.22, -0.31, -0.40], "rot": [-10, -12, 22], "grip": "relaxed" }, "right": { "pos": [0.22, -0.31, -0.40], "rot": [-10, 12, -22], "grip": "relaxed" } }
+    ]}
+  ]
+}

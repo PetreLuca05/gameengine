@@ -192,6 +192,7 @@ bool render_begin_frame(void) {
     R->line_count[0] = R->line_count[1] = 0;
     R->text_count = 0;
     R->ui_vcount = R->ui_icount = R->ui_ccount = 0;
+    R->last_stats = R->stats;
     R->stats.draw_calls = R->stats.triangles = R->stats.culled = 0;
 
     apply_setting_changes();
@@ -433,6 +434,7 @@ static void save_screenshot(GpuBuffer *buf, u32 w, u32 h) {
         if (bgra) { u8 t = px[i * 4]; px[i * 4] = px[i * 4 + 2]; px[i * 4 + 2] = t; }
         px[i * 4 + 3] = 255;
     }
+    stbi_write_png_compression_level = 1; // stb's default level is very slow for full-screen captures
     if (stbi_write_png(R->screenshot_path, (int)w, (int)h, 4, px, (int)w * 4)) log_info("screenshot saved: %s", R->screenshot_path);
     else log_error("screenshot: failed to write %s", R->screenshot_path);
 }
@@ -623,7 +625,7 @@ void render_end_frame(void) {
     bool want_shot = R->screenshot_path[0] != 0;
     if (want_shot) {
         u32 w = R->swap_extent.width, h = R->swap_extent.height;
-        shot = vkr_buffer_create((VkDeviceSize)w * h * 4, VK_BUFFER_USAGE_TRANSFER_DST_BIT, true);
+        shot = vkr_buffer_create_readback((VkDeviceSize)w * h * 4);
         vkr_image_barrier(cmd, swap, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                           VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT,
                           VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_READ_BIT, 1);
@@ -673,6 +675,7 @@ void render_end_frame(void) {
 
     if (want_shot) {
         VK_CHECK(vkWaitForFences(R->device, 1, &f->fence, VK_TRUE, UINT64_MAX));
+        vmaInvalidateAllocation(R->vma, shot.alloc, 0, VK_WHOLE_SIZE);
         save_screenshot(&shot, R->swap_extent.width, R->swap_extent.height);
         vkr_buffer_destroy_now(&shot);
         R->screenshot_path[0] = 0;
@@ -696,5 +699,5 @@ bool render_world_to_screen(vec3 world, vec2 *out_px) {
 mat4 render_view_proj(void) { return R->view_proj; }
 int render_width(void) { return (int)R->swap_extent.width; }
 int render_height(void) { return (int)R->swap_extent.height; }
-RenderStats render_stats(void) { return R->stats; }
+RenderStats render_stats(void) { return R->last_stats; }
 const char *render_device_name(void) { return R->gpu_props.deviceName; }
