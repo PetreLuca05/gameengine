@@ -5,9 +5,8 @@ if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Build type" FORCE)
 endif()
 
-set(CMAKE_C_STANDARD 11)
-set(CMAKE_C_STANDARD_REQUIRED ON)
-set(CMAKE_C_EXTENSIONS OFF)
+# C11 is enforced on our own target only (see below); third-party C code keeps its defaults
+# (e.g. ENet needs POSIX declarations that strict -std=c11 hides on Linux).
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # Jolt/joltc default to the static CRT; use it everywhere so all objects agree.
@@ -85,6 +84,7 @@ add_library(dg_thirdparty STATIC
   third_party/impl/tp_stb.c third_party/impl/tp_cgltf.c third_party/impl/tp_miniaudio.c
   third_party/impl/tp_nuklear.c third_party/impl/tp_fastnoise.c
   third_party/cjson/cJSON.c)
+set_target_properties(dg_thirdparty PROPERTIES C_STANDARD 11 C_EXTENSIONS ON)
 target_include_directories(dg_thirdparty PUBLIC
   third_party/stb third_party/cgltf third_party/miniaudio third_party/cjson
   third_party/nuklear third_party/fastnoise third_party)
@@ -158,6 +158,7 @@ add_custom_target(dg_shaders DEPENDS ${DG_SPV_FILES})
 # ---------------------------------------------------------------- game
 file(GLOB_RECURSE DG_SOURCES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/src/*.c ${CMAKE_SOURCE_DIR}/src/*.h)
 add_executable(deadground ${DG_SOURCES})
+set_target_properties(deadground PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
 add_dependencies(deadground dg_shaders)
 target_include_directories(deadground PRIVATE src)
 target_link_libraries(deadground PRIVATE SDL3::SDL3-static volk vma dg_thirdparty joltc jolt_shim enet)

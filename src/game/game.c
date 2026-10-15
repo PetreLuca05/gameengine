@@ -410,7 +410,7 @@ static void update_focus(void) {
     if (!p || p->sim.move.mode == MOVE_DEAD) return;
     vec3 eye = G->view.eye;
     vec3 dir = dir_from_angles(G->view.yaw, G->view.pitch);
-    float range = 3.0f;
+    float range = G->interact_range->f;
     BodyId self = p->character ? phys_character_inner_body(p->character) : PHYS_INVALID_BODY;
     RayHit rh;
     float wall = range;
@@ -697,6 +697,7 @@ void game_init(void) {
     G->r_drawcollision = cvar_reg_bool("r_drawcollision", false, 0, "draw physics collision shapes");
     G->cl_showfps = cvar_reg_bool("cl_showfps", true, CVAR_ARCHIVE, "show FPS counter");
     G->net_autohost = cvar_reg_bool("net_autohost", true, CVAR_ARCHIVE, "accept LAN connections when hosting");
+    G->interact_range = cvar_reg_float("cl_interact_range", 3.0f, 0.5f, 10.0f, 0, "interaction focus raycast length (m); each interactable also has its own range");
     G->world_seed = cvar_reg_int("world_seed", 1337, 0, 999999999, CVAR_ARCHIVE, "procedural world seed");
     cmd_register("map", cmd_map, "host a new game on a map");
     cmd_register("give", cmd_give, "give <item> [count]");

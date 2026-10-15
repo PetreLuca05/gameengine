@@ -77,7 +77,7 @@ typedef struct Game {
     bool show_netstats;
 
     Cvar *g_map, *sv_hostname, *cl_name, *dev_mode, *r_drawhitboxes, *r_drawcollision;
-    Cvar *cl_showfps, *net_autohost, *world_seed;
+    Cvar *cl_showfps, *net_autohost, *world_seed, *interact_range;
 } Game;
 
 void game_init(void);

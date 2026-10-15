@@ -28,7 +28,7 @@ static bool lan_listen(NetTransport *t, u16 port, int max_peers) {
     addr.host = ENET_HOST_ANY;
     addr.port = port;
     l->host = enet_host_create(&addr, (size_t)DG_MIN(max_peers, LAN_MAX_PEERS), CH_COUNT, 0, 0);
-    if (!l->host) { log_error("lan: cannot listen on port %u (in use?)", port); return false; }
+    if (!l->host) { log_warn("lan: UDP port %u is busy (another host on this machine?) - not accepting LAN players", port); return false; }
     l->is_server = true;
     log_info("lan: listening on UDP port %u", port);
     return true;

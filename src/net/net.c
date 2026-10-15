@@ -500,7 +500,7 @@ static void discovery_host_poll(void) {
     if (!d->open) return;
     for (int k = 0; k < 8; k++) {
         char data[256];
-        ENetBuffer b = { sizeof(data) - 1, data };
+        ENetBuffer b = { .data = data, .dataLength = sizeof(data) - 1 }; // field order differs per platform
         ENetAddress from;
         int n = enet_socket_receive(d->sock, &from, &b, 1);
         if (n <= 0) break;
@@ -512,7 +512,7 @@ static void discovery_host_poll(void) {
         char reply[256];
         snprintf(reply, sizeof(reply), "DGA1|%d|%d|%d|%s|%s", N->port->i, players, N->maxplayers->i,
                  game()->map, game()->sv_hostname->str);
-        ENetBuffer rb = { strlen(reply), reply };
+        ENetBuffer rb = { .data = reply, .dataLength = strlen(reply) };
         enet_socket_send(d->sock, &from, &rb, 1);
     }
 }
@@ -533,7 +533,7 @@ void net_lan_refresh(void) {
     d->browse_until = platform_time() + 3.0;
     d->query_time = platform_time();
     const char *q = "DGQ1";
-    ENetBuffer b = { 4, (void *)q };
+    ENetBuffer b = { .data = (void *)q, .dataLength = 4 };
     ENetAddress bcast = { ENET_HOST_BROADCAST, DG_DISCOVERY_PORT };
     enet_socket_send(d->sock, &bcast, &b, 1);
     ENetAddress local;
@@ -547,7 +547,7 @@ static void discovery_browse_poll(void) {
     if (!d->open || !d->browsing) return;
     for (int k = 0; k < 16; k++) {
         char data[256];
-        ENetBuffer b = { sizeof(data) - 1, data };
+        ENetBuffer b = { .data = data, .dataLength = sizeof(data) - 1 }; // field order differs per platform
         ENetAddress from;
         int n = enet_socket_receive(d->sock, &from, &b, 1);
         if (n <= 0) break;

@@ -332,6 +332,7 @@ void repl_apply(World *w, const SnapFrame *f, int local_slot, InterpBuffer *inte
         w->flags[i] = e->flags;
         w->item[i] = e->item;
         if (e->type == ET_PICKUP) { w->pickup[i].item = e->item; w->pickup[i].count = e->count; }
+        if (e->type == ET_DOOR) w->door[i].key_item = e->item;
         if (w->comps[i] & C_HEALTH) {
             w->health[i].hp = e->hp;
             w->health[i].max_hp = e->max_hp;

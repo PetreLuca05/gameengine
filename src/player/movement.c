@@ -88,7 +88,6 @@ static LedgeResult detect_ledge(PhysicsWorld *pw, vec3 feet, float ground_y, flo
     LedgeResult r;
     memset(&r, 0, sizeof(r));
     vec3 f = forward_from_yaw(yaw);
-    vec3 up = v3(0, 1, 0);
     float reach = PLAYER_RADIUS + T->mantle_reach->f;
     float min_h = T->mantle_min->f;
     float max_h = airborne ? T->air_mantle_max->f : T->mantle_max->f;

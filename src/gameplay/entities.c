@@ -37,11 +37,12 @@ static void door_pose(const World *w, int i, float progress, vec3 *pos, quat *ro
 static void door_focus(World *w, EntityId self, int player, char *prompt, int size) {
     int i = (int)ENT_INDEX(self);
     if (w->flags[i] & EF_LOCKED) {
-        const ItemDef *key = item_def(w->items, w->door[i].key_item);
+        // key_item travels in the replicated item field so clients can name the key too.
+        const ItemDef *key = item_def(w->items, w->door[i].key_item ? w->door[i].key_item : w->item[i]);
         snprintf(prompt, (size_t)size, "Locked - requires %s", key->name);
         return;
     }
-    snprintf(prompt, (size_t)size, w->door[i].target > 0.5f ? "Close Door" : "Open Door");
+    snprintf(prompt, (size_t)size, (w->flags[i] & EF_OPEN) ? "Close Door" : "Open Door");
 }
 
 static void door_use(World *w, EntityId self, int player) {
@@ -106,6 +107,7 @@ EntityId spawn_door(World *w, vec3 base, float yaw, float width, float height, b
     d->speed = 1.6f;
     d->swing_sign = 1.0f;
     d->key_item = key_item;
+    w->item[i] = key_item;
     d->knob_local = v3(width * 0.5f - 0.09f, -height * 0.5f + 1.0f, 0.07f);
     if (locked) w->flags[i] |= EF_LOCKED;
     ent_set_pos(w, e, center, rot, true);
@@ -442,7 +444,12 @@ void entity_setup(World *w, EntityId e) {
     if (def) {
         w->comps[i] |= C_INTERACT;
         w->inter[i].def = def;
-        w->inter[i].range = t == ET_PICKUP ? 2.2f : 2.5f;
+        // Short ranges keep interactions within (stretched) arm's reach for the hand IK.
+        switch (t) {
+        case ET_SWITCH: w->inter[i].range = 1.9f; break;
+        case ET_DOOR: case ET_LEVER: w->inter[i].range = 2.1f; break;
+        default: w->inter[i].range = 2.3f; break;
+        }
         w->inter[i].enabled = !(w->flags[i] & EF_HIDDEN);
         if (t == ET_DOOR) w->inter[i].focus_offset = v3(w->vis[i].half.x - 0.09f, -w->vis[i].half.y + 1.0f, 0);
         if (t == ET_LEVER) w->inter[i].focus_offset = v3(0, 0.6f, 0);

@@ -227,8 +227,8 @@ The scripts write screenshots to `C:/C/Game/build/`. Edit the paths for your che
 * **Steam transport is untested**: no Steamworks SDK was available while building it. The shim targets
   SDK 1.5x/1.6x (`ISteamNetworkingSockets`, lobbies, rich presence). Expect small API fixes when you
   first build with `STEAM_SDK_DIR`.
-* **Linux**: the CMake paths and code are portable, but they were only compile-checked under WSL (see the
-  commit log). Runtime on Linux is unverified.
+* **Linux**: compiles and links with GCC 13.3 (checked under WSL with a headless SDL build); running it
+  needs a desktop session and a Vulkan driver and is unverified.
 * **clang-cl**: no clang-cl was installed on the build machine, so that path is untested.
 * Snapshot and event payloads embed some structs (`PlayerSim`, `GameEvent`, `UserCmd`) byte-for-byte.
   Host and clients must run the same build; the protocol version check enforces this.
