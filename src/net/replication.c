@@ -47,6 +47,7 @@ static void capture_one(World *w, int i, NetEnt *e) {
         e->armor = w->health[i].armor;
     }
     e->shape = w->vis[i].shape;
+    e->model = w->vis[i].model;
     e->emissive = w->vis[i].emissive;
     e->half = w->vis[i].half;
     e->color = w->vis[i].color;
@@ -86,7 +87,7 @@ static u32 diff_mask(const NetEnt *a, const NetEnt *b) {
     if (a->anim != b->anim) m |= NF_ANIM;
     if (a->item != b->item || a->count != b->count) m |= NF_ITEM;
     if (a->hp != b->hp || a->max_hp != b->max_hp || a->armor != b->armor) m |= NF_HP;
-    if (a->shape != b->shape || a->emissive != b->emissive || !v3_eq(a->half, b->half) || a->color != b->color) m |= NF_VIS;
+    if (a->shape != b->shape || a->model != b->model || a->emissive != b->emissive || !v3_eq(a->half, b->half) || a->color != b->color) m |= NF_VIS;
     if (strcmp(a->name, b->name) != 0) m |= NF_NAME;
     if (!v3_eq(a->light_color, b->light_color) || a->light_radius != b->light_radius || a->light_intensity != b->light_intensity ||
         a->light_group != b->light_group) m |= NF_LIGHT;
@@ -102,7 +103,7 @@ static void write_fields(Writer *w, const NetEnt *e, u32 m) {
     if (m & NF_ANIM) w_f32(w, e->anim);
     if (m & NF_ITEM) { w_u16(w, e->item); w_u16(w, e->count); }
     if (m & NF_HP) { w_f32(w, e->hp); w_f32(w, e->max_hp); w_f32(w, e->armor); }
-    if (m & NF_VIS) { w_u8(w, e->shape); w_u8(w, e->emissive); w_vec3(w, e->half); w_u32(w, e->color); }
+    if (m & NF_VIS) { w_u8(w, e->shape); w_u16(w, e->model); w_u8(w, e->emissive); w_vec3(w, e->half); w_u32(w, e->color); }
     if (m & NF_NAME) w_str(w, e->name);
     if (m & NF_LIGHT) { w_vec3(w, e->light_color); w_f32(w, e->light_radius); w_f32(w, e->light_intensity); w_u32(w, e->light_group); }
     if (m & NF_EXTRA) w_vec3(w, e->extra);
@@ -116,7 +117,7 @@ static void read_fields(Reader *r, NetEnt *e, u32 m) {
     if (m & NF_ANIM) e->anim = r_f32(r);
     if (m & NF_ITEM) { e->item = r_u16(r); e->count = r_u16(r); }
     if (m & NF_HP) { e->hp = r_f32(r); e->max_hp = r_f32(r); e->armor = r_f32(r); }
-    if (m & NF_VIS) { e->shape = r_u8(r); e->emissive = r_u8(r); e->half = r_vec3(r); e->color = r_u32(r); }
+    if (m & NF_VIS) { e->shape = r_u8(r); e->model = r_u16(r); e->emissive = r_u8(r); e->half = r_vec3(r); e->color = r_u32(r); }
     if (m & NF_NAME) r_str(r, e->name, sizeof(e->name));
     if (m & NF_LIGHT) { e->light_color = r_vec3(r); e->light_radius = r_f32(r); e->light_intensity = r_f32(r); e->light_group = r_u32(r); }
     if (m & NF_EXTRA) e->extra = r_vec3(r);
@@ -245,6 +246,7 @@ static void push_sample(InterpBuffer *b, u32 id, u32 tick, vec3 pos, quat rot, f
 static void setup_replica(World *w, const NetEnt *e, int local_slot) {
     int i = (int)ENT_INDEX(e->id);
     w->vis[i].shape = e->shape;
+    w->vis[i].model = e->model;
     w->vis[i].emissive = e->emissive;
     w->vis[i].half = e->half;
     w->vis[i].color = e->color;

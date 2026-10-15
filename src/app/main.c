@@ -27,6 +27,7 @@
 #include "game/game.h"
 #include "net/net.h"
 #include "app/video.h"
+#include "assets/assets.h"
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 #include <stdlib.h>
@@ -152,6 +153,7 @@ int main(int argc, char **argv) {
     input_init();
     audio_init();
     net_init();
+    assets_init("data/assets.json");
     game_init();
 
     // Persistent settings, then the command line (overrides).
@@ -169,7 +171,7 @@ int main(int argc, char **argv) {
     audio_play_music("ambient");
 
     double last = platform_time();
-    double worst_dt = 0, total_time = 0;
+    double worst_dt = 0, total_time = 0, smoothed_dt = 0;
     while (!g_engine.quit) {
         double frame_start = platform_time();
         double dt = frame_start - last;
@@ -178,7 +180,8 @@ int main(int argc, char **argv) {
         if (dt > 0.25) dt = 0.25;
         g_engine.real_time = frame_start;
         g_engine.frame_dt = dt;
-        if (dt > 0) g_engine.fps_smoothed = g_engine.fps_smoothed * 0.95 + (1.0 / dt) * 0.05;
+        // Smooth the frame time (not 1/dt, which outliers dominate).
+        if (dt > 0) { smoothed_dt = smoothed_dt > 0 ? smoothed_dt * 0.95 + dt * 0.05 : dt; g_engine.fps_smoothed = 1.0 / smoothed_dt; }
         arena_reset(&g_engine.frame_arena);
 
         input_begin_frame();
@@ -224,6 +227,7 @@ int main(int argc, char **argv) {
     config_save(video_config_path());
     render_wait_idle();
     game_shutdown();
+    assets_shutdown();
     net_shutdown();
     audio_shutdown();
     input_shutdown();

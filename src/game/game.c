@@ -286,7 +286,7 @@ static void host_tick(World *w, const UserCmd *local_cmd) {
             if (p->respawn_timer <= 0) game_respawn_player(w, s);
         }
         // Fell out of the world.
-        if (p->sim.move.pos.y < -60.0f) game_respawn_player(w, s);
+        if (p->sim.move.pos.y < -60.0f && p->sim.move.mode != MOVE_NOCLIP) game_respawn_player(w, s);
     }
     entities_tick(w, SIM_DT);
     projectiles_tick(w, SIM_DT);
@@ -395,6 +395,7 @@ static void tick(void) {
             G->predicted_prev = p->sim.move;
             game_sim_player(w, G->local_slot, &cmd, SIM_DT, true);
         }
+        if (w->chunks) chunks_update(w, SIM_DT);
         w->tick++;
     }
 }
@@ -695,7 +696,7 @@ void game_init(void) {
     G->r_drawcollision = cvar_reg_bool("r_drawcollision", false, 0, "draw physics collision shapes");
     G->cl_showfps = cvar_reg_bool("cl_showfps", true, CVAR_ARCHIVE, "show FPS counter");
     G->net_autohost = cvar_reg_bool("net_autohost", true, CVAR_ARCHIVE, "accept LAN connections when hosting");
-    G->world_seed = cvar_reg_int("world_seed", 1337, 0, 2147483647, CVAR_ARCHIVE, "procedural world seed");
+    G->world_seed = cvar_reg_int("world_seed", 1337, 0, 999999999, CVAR_ARCHIVE, "procedural world seed");
     cmd_register("map", cmd_map, "host a new game on a map");
     cmd_register("give", cmd_give, "give <item> [count]");
     cmd_register("noclip", cmd_noclip, "toggle noclip (sv_cheats)");

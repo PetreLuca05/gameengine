@@ -15,6 +15,7 @@
 #include "ui/menus.h"
 #include "ui/console.h"
 #include "audio/audio.h"
+#include "assets/assets.h"
 #include "net/net.h"
 #include "input/input.h"
 #include <math.h>
@@ -84,6 +85,26 @@ static void render_entity(World *w, int i, float alpha, bool focused) {
     Material m = mat_from(v->color, 0.75f, hl);
     if (v->emissive) m.emissive = v->emissive / 255.0f;
 
+    if (v->model) {
+        const Model *mdl = assets_model(v->model);
+        if (mdl) {
+            // Fit the model's bounds to the entity's physical extents.
+            vec3 ext = v3_scale(v3_sub(mdl->bounds.max, mdl->bounds.min), 0.5f);
+            vec3 mid = v3_scale(v3_add(mdl->bounds.max, mdl->bounds.min), 0.5f);
+            vec3 sc = v3(v->half.x / fmaxf(ext.x, 1e-3f), v->half.y / fmaxf(ext.y, 1e-3f), v->half.z / fmaxf(ext.z, 1e-3f));
+            mat4 base = mat4_mul(mat4_trs(pos, rot, sc), mat4_translate(v3_neg(mid)));
+            for (int k = 0; k < mdl->mesh_count; k++) {
+                DrawItem d;
+                d.mesh = mdl->meshes[k].mesh;
+                d.model = mat4_mul(base, mdl->meshes[k].local);
+                d.mat = mdl->meshes[k].mat;
+                d.mat.color = v4_lerp(d.mat.color, unpack(v->color), 0.35f);
+                d.mat.flags |= hl;
+                render_draw(&d);
+            }
+            return;
+        }
+    }
     switch (t) {
     case ET_DOOR: {
         draw_shape(VIS_BOX, v->half, pos, rot, m);
@@ -134,6 +155,8 @@ static void render_entity(World *w, int i, float alpha, bool focused) {
     }
     case ET_CONTAINER: {
         vec3 h = v->half;
+        m.texture = assets_texture("crate");
+        if (m.texture) { m.flags |= MAT_TEXTURED | MAT_TRIPLANAR; m.tex_scale = 1.6f; m.color = v4(1, 1, 1, 1); }
         float lid_h = 0.06f;
         draw_box_local(pos, rot, v3(0, -lid_h * 0.5f, 0), v3(h.x, h.y - lid_h * 0.5f, h.z), m);
         // Lid hinged at the back top edge.
@@ -197,6 +220,18 @@ static void render_entity(World *w, int i, float alpha, bool focused) {
     }
     case ET_PROJECTILE:
         draw_shape(VIS_BOX, v->half, pos, rot, m);
+        break;
+    case ET_GATE:
+        m.texture = assets_texture("hazard");
+        if (m.texture) { m.flags |= MAT_TEXTURED | MAT_TRIPLANAR; m.tex_scale = 0.5f; m.color = v4(1, 1, 1, 1); m.metallic = 0.6f; m.roughness = 0.5f; }
+        draw_shape(VIS_BOX, v->half, pos, rot, m);
+        break;
+    case ET_PROP:
+        if (v->shape == VIS_BOX) {
+            m.texture = assets_texture("crate");
+            if (m.texture) { m.flags |= MAT_TEXTURED | MAT_TRIPLANAR; m.tex_scale = 1.0f / fmaxf(0.2f, v->half.x * 2.0f); m.color = v4_lerp(v4(1, 1, 1, 1), unpack(v->color), 0.3f); }
+        }
+        draw_shape((VisShape)v->shape, v->half, pos, rot, m);
         break;
     default:
         draw_shape((VisShape)v->shape, v->half, pos, rot, m);

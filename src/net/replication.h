@@ -13,6 +13,7 @@
 typedef struct NetEnt {
     u32 id;
     u8 type, slot, shape, emissive;
+    u16 model, pad;
     u32 flags;
     vec3 pos;
     quat rot;

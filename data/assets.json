@@ -1,0 +1,10 @@
+{
+  "_comment": "Asset manifest. Model ids are 1-based indices into 'models' (replicated over the network), keep the order stable.",
+  "textures": [
+    { "name": "crate",  "path": "assets/textures/crate.png" },
+    { "name": "hazard", "path": "assets/textures/hazard.ktx2" }
+  ],
+  "models": [
+    { "name": "barrel", "path": "assets/models/barrel.gltf" }
+  ]
+}

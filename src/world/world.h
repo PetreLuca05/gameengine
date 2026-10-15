@@ -64,6 +64,8 @@ typedef struct Visual {
     u16 mat_flags;
     vec3 half;       // box half extents, or (radius, half_height, radius)
     u32 color;       // RGBA8
+    u16 model;       // asset model id (data/assets.json), 0 = primitive shape
+    u16 pad;
 } Visual;
 
 typedef struct BodyComp {
