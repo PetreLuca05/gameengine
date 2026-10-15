@@ -423,10 +423,12 @@ void holdpoint_eval(HoldPointState *st, const HoldPointInput *in, HoldPointOutpu
     vec3 pivot = xf_point(item, pivot_item);
 
     // ---- procedural layer (around the pivot)
-    float ads_k = state == HP_ADS ? s->ads_scale + (1.0f - s->ads_scale) * k : 1.0f;   // eases with the blend
-    if (in->static_pose) ads_k = 0.0f;
-    ads_k *= in->sway_scale;
-    float lag_k = in->static_pose ? 0.0f : in->sway_scale;
+    // In ADS the sight stays on the view axis: item lag / sway / bob fade out with the blend
+    // (ads_scale, 0 by default); scope sway comes from the aim sway, which moves the view itself.
+    float ads_w = state == HP_ADS ? s->ads_scale + (1.0f - s->ads_scale) * k : 1.0f;   // eases with the blend
+    if (in->static_pose) ads_w = 0.0f;
+    float ads_k = ads_w * in->sway_scale;
+    float lag_k = ads_w * in->sway_scale;
     float wy = dt > 1e-6f ? wrap_angle(in->aim_yaw - st->prev_yaw) / dt : 0.0f;
     float wp = dt > 1e-6f ? (in->aim_pitch - st->prev_pitch) / dt : 0.0f;
     st->prev_yaw = in->aim_yaw;
@@ -445,7 +447,8 @@ void holdpoint_eval(HoldPointState *st, const HoldPointInput *in, HoldPointOutpu
     float bob_target = in->grounded ? clampf(speed / 6.0f, 0, 1) : 0.0f;
     st->bob_amt += (bob_target - st->bob_amt) * (1.0f - expf(-8.0f * dt));
     st->bob_phase += dt * (4.5f + speed * 1.1f) * s->bob_freq;
-    float bob = st->bob_amt * ads_k;
+    // Walking leaves the item still (bob_scale, default 0); sprinting keeps its bob.
+    float bob = st->bob_amt * ads_w * (state == HP_SPRINT ? in->sway_scale : in->bob_scale);
     vec3 bob_pos = v3(sinf(st->bob_phase) * s->bob_pos * bob, -fabsf(cosf(st->bob_phase)) * s->bob_pos * 1.2f * bob, 0);
     vec3 bob_rot = v3(0, 0, sinf(st->bob_phase) * s->bob_rot * bob);
     // Recoil item spring (from the recoil system).

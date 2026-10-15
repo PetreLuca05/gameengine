@@ -1111,6 +1111,7 @@ static void post_one(World *w, CharacterInst *c, int i, float dt, vec3 cam_pos, 
         pi.item_kick_pos = v3_scale(pi.item_kick_pos, kk);
         pi.item_kick_rot = v3_scale(pi.item_kick_rot, kk);
         pi.hp_sway_scale = wc->sway_scale ? wc->sway_scale->f : 0.0f;
+        pi.hp_bob_scale = wc->bob_scale ? wc->bob_scale->f : 0.0f;
     }
     if (c->rt.in.crouch) pi.crouch_drop = 0.38f;
     pi.first_person = c->local && cv(CG->fp_body);

@@ -1073,7 +1073,13 @@ void game_config_loaded(void) {
         if (bob) cvar_reset(bob);
         log_info("config: migrated cam_bob_scale to its new default (first-person camera on the head)");
     }
-    cvar_set_int(ver, 1);
+    if (ver->i < 2) {
+        // 2: gun sway / recoil kick back on (they were saved as 0 by the camera-fix build).
+        const char *names[] = { "wpn_kick_scale", "cam_kick_scale" };
+        for (int i = 0; i < 2; i++) { Cvar *c = cvar_find(names[i]); if (c) cvar_reset(c); }
+        log_info("config: weapon kick / camera kick reset to their defaults");
+    }
+    cvar_set_int(ver, 2);
 }
 
 void game_init(void) {

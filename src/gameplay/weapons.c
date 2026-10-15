@@ -26,8 +26,9 @@ void weapons_register_cvars(void) {
     WC.recoil_scale = cvar_reg_float("wpn_recoil_scale", 1.0f, 0.0f, 5.0f, CVAR_SERVER, "aim recoil multiplier (gameplay, host)");
     WC.spread_scale = cvar_reg_float("wpn_spread_scale", 1.0f, 0.0f, 5.0f, CVAR_SERVER, "bullet spread cone multiplier (gameplay, host)");
     WC.visual_scale = cvar_reg_float("wpn_visual_scale", 1.0f, 0.0f, 3.0f, CVAR_ARCHIVE, "camera + viewmodel kick multiplier (cosmetic)");
-    WC.sway_scale = cvar_reg_float("wpn_sway_scale", 0.0f, 0.0f, 3.0f, CVAR_SERVER, "weapon sway: aim sway, look lag, idle sway, breathing, item bob (0 = none)");
-    WC.kick_scale = cvar_reg_float("wpn_kick_scale", 0.0f, 0.0f, 3.0f, CVAR_ARCHIVE, "visual recoil kick on the held item (aim recoil is separate)");
+    WC.sway_scale = cvar_reg_float("wpn_sway_scale", 1.0f, 0.0f, 3.0f, CVAR_SERVER, "weapon sway: aim sway (moves the view + bullets), the item's look lag / idle sway / breathing / sprint bob");
+    WC.kick_scale = cvar_reg_float("wpn_kick_scale", 1.0f, 0.0f, 3.0f, CVAR_ARCHIVE, "visual recoil kick of the held item on its hold point (aim recoil is separate)");
+    WC.bob_scale = cvar_reg_float("wpn_bob_scale", 0.0f, 0.0f, 3.0f, CVAR_ARCHIVE, "item bob while walking (0 = the item stays still; sprinting always bobs)");
     WC.recoil_debug = cvar_reg_int("wpn_recoil_debug", 0, 0, 2, 0, "recoil overlay: 1 = panel + cone, 2 = also log every shot");
     // Replicated so clients' predicted magazines agree with the host.
     WC.infinite_ammo = cvar_reg_bool("sv_infinite_ammo", false, CVAR_SERVER, "shots don't use ammo (host, replicated)");
@@ -90,7 +91,7 @@ float weapon_current_spread(const World *w, int slot) {
 vec2 weapon_sway_deg(const WeaponDef *d, const WeaponState *ws, float t) {
     if (!d || d->kind == WPN_MELEE) return v2(0, 0);
     const RecoilParams *rp = &d->recoil;
-    float amp = (rp->scope_sway > 0 ? rp->scope_sway : rp->idle_sway) * saturate(ws->ads_t) * ws->sway_k * cv_f(WC.sway_scale, 0.0f);
+    float amp = (rp->scope_sway > 0 ? rp->scope_sway : rp->idle_sway) * saturate(ws->ads_t) * ws->sway_k * cv_f(WC.sway_scale, 1.0f);
     // Slow figure-eight, roughly breathing pace.
     float x = sinf(t * 0.83f) * 0.7f + sinf(t * 1.97f + 1.1f) * 0.3f;
     float y = sinf(t * 1.31f + 0.4f) * 0.6f + sinf(t * 2.63f + 2.0f) * 0.4f;

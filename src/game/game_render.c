@@ -50,7 +50,7 @@ static void cmd_cam_stats(int argc, const char **argv);
 //   |camera - head bone| < 0.15 m, camera forward . (camera - pelvis) >= 0 (never behind the body),
 //   hands on their sockets (< 2 mm / 1 deg while the hold IK owns them).
 static struct {
-    bool active;
+    bool active, loose;   // loose: sway / kick on, item steadiness + ADS sight checks off
     int frames, bad_head, bad_behind, hand_frames, bad_hands;
     float max_head, min_front, max_hand_mm, max_hand_deg;
     // item steadiness: camera-space drift inside one settled hold state (not sprint / ADS / vault)
@@ -64,13 +64,15 @@ static void cmd_fp_cam_test(int argc, const char **argv) {
     if (argc > 1 && !strcmp(argv[1], "start")) {
         memset(&FT, 0, sizeof(FT));
         FT.active = true;
+        FT.loose = argc > 2 && !strcmp(argv[2], "loose");
         FT.min_front = 1e9f;
         FT.ref_state = -1;
         log_info("fp_cam_test: recording");
         return;
     }
     FT.active = false;
-    bool ads_ok = FT.ads_frames > 0 && FT.max_ads_mm < 0.5f && FT.max_ads_deg < 0.2f;
+    bool ads_ok = FT.loose || (FT.ads_frames > 0 && FT.max_ads_mm < 0.5f && FT.max_ads_deg < 0.2f);
+    if (FT.loose) FT.bad_item = 0;
     bool ok = FT.frames >= 600 && !FT.bad_head && !FT.bad_behind && !FT.bad_hands && !FT.bad_item && ads_ok;
     log_info("fp_cam_test: ADS %d settled frames, sight off the view axis max %.3f mm, barrel %.3f deg (limit 0.5 mm / 0.2 deg)", FT.ads_frames, FT.max_ads_mm, FT.max_ads_deg);
     log_info("fp_cam_test: item on its hold point %d frames (not sprint / ADS / vault): max offset %.2f mm %.2f deg, %d frames over 0.5 mm, %d over 10 mm / 0.5 deg",
@@ -507,7 +509,7 @@ void game_render(void) {
     RenderCamera cam = camera_update(&G->view, &interp, (float)g_engine.frame_dt, ads, wd ? wd->ads_fov : 0, dead);
     // Weapon feel: camera kick spring (visual only, aim unaffected) + aim sway (bullets use it too).
     if (p && !dead) {
-        float ck = cvar_find("cam_kick_scale") ? cvar_find("cam_kick_scale")->f : 0.0f;   // visual camera kick (aim recoil unaffected)
+        float ck = cvar_find("cam_kick_scale") ? cvar_find("cam_kick_scale")->f : 1.0f;   // visual camera kick (aim recoil unaffected)
         vec3 kr = v3_scale(spring_vec3_sample(&G->recoil_vis.cam_rot, G->alpha), ck);
         float kb = spring_f32_sample(&G->recoil_vis.cam_back, G->alpha) * ck;
         vec2 sway = weapon_sway_deg(wd, &p->sim.wpn, weapon_sway_time(G->last_cmd.seq) + G->alpha * SIM_DT);

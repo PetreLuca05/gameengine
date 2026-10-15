@@ -101,7 +101,8 @@ typedef struct HoldPointInput {
     HoldPointRayFn raycast;
     void *ray_ctx;
     bool static_pose;                 // no procedural layer (alignment tests, editor)
-    float sway_scale;                 // look lag, idle sway, breathing, movement bob (wpn_sway_scale; 0 = none)
+    float sway_scale;                 // look lag, idle sway, breathing, sprint bob (wpn_sway_scale; 0 = none)
+    float bob_scale;                  // movement bob outside sprint (wpn_bob_scale; 0 = the item stays still)
 } HoldPointInput;
 
 typedef struct HoldPointOutput {
