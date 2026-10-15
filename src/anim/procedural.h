@@ -3,7 +3,9 @@
 // Fixed order (each step only touches what comes after it):
 //   0. pelvis   foot IK pelvis lowering + slope / acceleration lean (moves the whole body)
 //   1. spine    turn-in-place counter-rotation + aim pitch / yaw spread over spine..head
-//   2. right    right-arm IK places the held item (hold style, ADS, sprint, wall pull-back)
+//   2. right    hold point (camera = head bone + eye socket, view rotation; item = camera * hold
+//               point: state, ADS from the sight socket, sway / lag / bob / kick, wall collision,
+//               src/player/holdpoint.c) -> right-arm IK places the item
 //   3. item     item transform finalized from the solved right hand (glued by construction)
 //   4. left     left-hand IK to the item's grip_l socket (position + rotation, item space)
 //   5. fingers  per-style finger curl
@@ -14,6 +16,7 @@
 #define DG_PROCEDURAL_H
 
 #include "anim.h"
+#include "player/holdpoint.h"
 
 struct cJSON;
 
@@ -30,31 +33,25 @@ typedef struct HoldStyle {
     u32 hash;
     bool left_hand;            // left hand IK to grip_l
     bool left_to_wrist;        // pistol: left hand cups the right wrist
-    vec3 hip_offset;           // item origin in aim space (x right, y up, -z forward) relative to the chest anchor
-    vec3 hip_rot;              // item rotation in aim space (deg pitch, yaw, roll)
-    float ads_distance;        // sights distance in front of the eye
-    vec3 sprint_offset;        // lowered sprint pose (aim space)
-    vec3 sprint_rot;
-    vec3 crouch_offset;        // additional offset while crouched
-    vec3 elbow_r, elbow_l;     // pole hints (aim space directions)
+    vec3 elbow_r, elbow_l;     // pole hints (camera space directions)
     vec3 shoulder_r, shoulder_l; // clavicle rotation (deg)
-    vec3 chest_offset;         // aim anchor relative to the Spine2 bone (model axes after yaw)
     float max_shift;           // how far the item may move towards the body to keep the left hand on its grip
     float curl_r[5], curl_l[5];// finger curl (deg) thumb, index, middle, ring, pinky
-    float aim_pitch_scale;     // how much the item follows aim pitch (1 = fully)
-    float ads_weight;          // how far ADS moves the item to the eye (0 = no ADS pose, melee)
-    vec3 fp_hip;               // owner-only first-person hip position in eye space (x right, y up, -z fwd)
-    float fp_weight;           // 0 = first person uses the normal hip pose
+    HoldPointStyle hp;         // where the item sits relative to the camera (assets/human/holdpoint.json)
 } HoldStyle;
 
 // Item sockets in item space (item origin = right grip, -Z = barrel forward, +Y up).
 // A socket frame uses the palm convention: -Z = finger direction, +Y = back of the hand.
 typedef struct ItemSockets {
     Xform grip_r, grip_l;
+    Xform anchor;              // the socket placed on the hold point (default grip_r)
     vec3 muzzle;
-    float sight_height;        // top of the item above its origin (ADS eye line)
-    float length;              // item length (wall pull-back)
+    vec3 sight;                // ADS: this point lands on the view axis at the style's eye relief
+    vec3 pivot;                // rotation pivot of sway / kick / lag (default between the hands)
+    float sight_height;        // top of the item above its origin
+    float length;              // item length (wall collision cast)
     bool has_left;
+    HoldPointOverride hp;      // per item hold point override ("holdpoint" block)
 } ItemSockets;
 
 typedef struct DamagePreset {
@@ -93,6 +90,8 @@ typedef struct ProcParams {
 } ProcParams;
 
 bool proc_params_load(ProcParams *p, const struct cJSON *controller_root);
+bool proc_holdpoint_load(ProcParams *p, const struct cJSON *holdpoint_root);   // after proc_params_load
+void proc_params_rehash(ProcParams *p);
 const HoldStyle *proc_hold_style(const ProcParams *p, int style);
 int proc_hold_style_index(const ProcParams *p, const char *name);
 
@@ -139,6 +138,12 @@ typedef struct ProcState {
     float glue_err_pos, glue_err_ang;   // left hand <-> grip_l after the solve (m, deg)
     float right_err_pos;
     bool reach_shifted;
+    float reach_shift;
+    // hold point (camera space item placement)
+    HoldPointState hp;
+    HoldPointOutput hp_out;
+    Xform cam_model;           // camera (head bone + eye socket, view rotation), model space
+    Xform item_cam;            // item target in camera space (pre-IK; the owner re-solves per frame)
     u32 warned_styles;
 } ProcState;
 
@@ -165,7 +170,12 @@ typedef struct ProcInput {
     bool foot_ik, spine, turn, hold, lean, damage;  // per-system enables (LOD + cvars)
     vec3 item_kick_pos, item_kick_rot;   // recoil kick applied to the item (aim space, m / deg)
     float crouch_drop;         // procedural crouch: pelvis lowering (m) when no crouch clips are bound
-    bool first_person;         // the local player's own body (owner-only hold adjustments)
+    bool first_person;         // the local player's own body (diagnostics only: never changes the pose)
+    int eye_bone;              // camera parent bone (Head) and the eye socket relative to it
+    Xform eye_local;
+    bool prone, inspect, empty_hands;   // hold point state flags (empty: mantle / hang / vault)
+    int item_key;              // hold point blend key (changes when the held item changes)
+    bool hp_static;            // hold point without its procedural layer (tests / editor)
     vec3 hand_anchor[2];       // world-space ledge anchors (mantle / hang), weight below
     float hand_anchor_w;
 } ProcInput;

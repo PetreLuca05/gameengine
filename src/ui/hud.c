@@ -188,6 +188,10 @@ static void draw_dev(Game *g, World *w, float s) {
                  g_engine.fps_smoothed, 1000.0 / fmax(1.0, g_engine.fps_smoothed), rs.draw_calls, rs.triangles / 1000, rs.culled);
         y += 16 * s;
     }
+    if (game_cam_debug_text()[0]) {
+        ui_textf(10 * s, y, FONT_SMALL, UI_RGBA(180, 230, 255, 230), UI_ALIGN_LEFT, "%s", game_cam_debug_text());
+        y += 16 * s;
+    }
     if (vfx_game_stats_text()[0]) {
         ui_textf(10 * s, y, FONT_SMALL, UI_RGBA(255, 220, 160, 230), UI_ALIGN_LEFT, "%s", vfx_game_stats_text());
         y += 16 * s;

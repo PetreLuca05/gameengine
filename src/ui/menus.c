@@ -11,6 +11,7 @@
 #include "net/net.h"
 #include "app/video.h"
 #include "vfx_editor.h"
+#include "holdpoint_editor.h"
 #include "nuklear_config.h"
 #include <SDL3/SDL.h>
 #include <stdio.h>
@@ -76,7 +77,7 @@ static GraphicsSettings read_graphics(void) {
     g.aa = cv("r_aa")->i;
     g.maxfps = cv("r_maxfps")->i;
     g.fov = cv("cl_fov")->f;
-    g.vm_fov = cv("r_viewmodel_fov")->f;
+    g.vm_fov = cv("cam_weapon_fov")->f;
     g.scale = cv("r_render_scale")->f;
     g.brightness = cv("r_brightness")->f;
     g.gamma = cv("r_gamma")->f;
@@ -96,7 +97,7 @@ static void write_graphics(const GraphicsSettings *g) {
     cvar_set_int(cv("r_aa"), g->aa);
     cvar_set_int(cv("r_maxfps"), g->maxfps);
     cvar_set_float(cv("cl_fov"), g->fov);
-    cvar_set_float(cv("r_viewmodel_fov"), g->vm_fov);
+    cvar_set_float(cv("cam_weapon_fov"), g->vm_fov);
     cvar_set_float(cv("r_render_scale"), g->scale);
     cvar_set_float(cv("r_brightness"), g->brightness);
     cvar_set_float(cv("r_gamma"), g->gamma);
@@ -140,7 +141,7 @@ static void update_mouse_mode(void) {
 
 bool menus_wants_mouse(void) {
     Game *g = game();
-    return (M && M->page != PAGE_NONE) || (g && (g->inventory_open || g->container_open)) || vfx_editor_open();
+    return (M && M->page != PAGE_NONE) || (g && (g->inventory_open || g->container_open)) || vfx_editor_open() || holdpoint_editor_open();
 }
 
 void menus_close_all(void) {
@@ -603,4 +604,5 @@ void menus_draw(void) {
     default: break;
     }
     vfx_editor_draw();
+    holdpoint_editor_draw();
 }

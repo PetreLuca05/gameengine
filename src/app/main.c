@@ -27,6 +27,7 @@
 #include "ui/console.h"
 #include "ui/menus.h"
 #include "ui/vfx_editor.h"
+#include "ui/holdpoint_editor.h"
 #include "game/game.h"
 #include "net/net.h"
 #include "app/video.h"
@@ -110,6 +111,11 @@ static void handle_event(const SDL_Event *ev) {
         if (ev->key.scancode == SDL_SCANCODE_F7 && !console_is_open() && !input_capturing()) {
             vfx_editor_toggle();
             input_set_game_focus(!vfx_editor_open() && !menus_wants_mouse());
+            return;
+        }
+        if (ev->key.scancode == SDL_SCANCODE_F8 && !console_is_open() && !input_capturing()) {
+            holdpoint_editor_toggle();
+            input_set_game_focus(!menus_wants_mouse());
             return;
         }
         if (console_handle_event(ev)) return;

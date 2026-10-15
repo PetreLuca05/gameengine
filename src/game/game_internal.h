@@ -20,4 +20,10 @@ void game_render_init(void);
 void game_render_world(World *w, float alpha, vec3 cam_pos, vec3 cam_fwd);
 MeshId game_capsule_mesh(float radius, float half_height);
 
+// game_holdpoint.c
+void game_holdpoint_register(void);
+void game_holdpoint_test_frame(void);
+bool game_holdpoint_test_active(void);
+bool holdpoint_save_all(const char *path_override);
+
 #endif

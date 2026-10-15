@@ -58,6 +58,23 @@ bool character_def_parse(CharacterDef *d, const char *text, const char *source, 
         k->bind_space = strcmp(js(e, "space", "bind"), "bone") != 0;
         k->bone = -1;
     }
+    // "eye_offset": eye position relative to the Head bone (bind model axes): the first-person
+    // camera and every hold point hang off it. Overrides the "camera" socket offset.
+    const cJSON *eo = cJSON_GetObjectItemCaseSensitive(root, "eye_offset");
+    if (cJSON_IsArray(eo) && cJSON_GetArraySize(eo) >= 3) {
+        vec3 off = v3((float)cJSON_GetArrayItem(eo, 0)->valuedouble, (float)cJSON_GetArrayItem(eo, 1)->valuedouble, (float)cJSON_GetArrayItem(eo, 2)->valuedouble);
+        CharSocket *k = NULL;
+        for (int i = 0; i < d->socket_count; i++) if (!strcmp(d->sockets[i].name, "camera")) k = &d->sockets[i];
+        if (!k && d->socket_count < CHAR_MAX_SOCKETS) {
+            k = &d->sockets[d->socket_count++];
+            memset(k, 0, sizeof(*k));
+            dg_strcpy(k->name, sizeof(k->name), "camera");
+            dg_strcpy(k->bone_name, sizeof(k->bone_name), "Head");
+            k->bind_space = true;
+            k->bone = -1;
+        }
+        if (k) k->offset = off;
+    }
     d->hash = anim_hash_str(text, ANIM_HASH_SEED);
     cJSON_Delete(root);
     return true;
@@ -70,7 +87,8 @@ static quat socket_euler(vec3 deg) {
 }
 
 void character_resolve_sockets(CharacterDef *d, const Skeleton *s) {
-    if (d->kind == CK_PLAYER && !character_socket(d, "camera") && d->socket_count < CHAR_MAX_SOCKETS) {
+    // Every character has an eye socket (hold points of remote players / dummies hang off it too).
+    if (!character_socket(d, "camera") && d->socket_count < CHAR_MAX_SOCKETS) {
         CharSocket *k = &d->sockets[d->socket_count++];
         memset(k, 0, sizeof(*k));
         dg_strcpy(k->name, sizeof(k->name), "camera");

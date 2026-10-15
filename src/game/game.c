@@ -590,8 +590,13 @@ void game_frame(float dt) {
         steps++;
     }
     if (steps == 8) G->accumulator = 0; // spiral of death guard
+    game_holdpoint_test_frame();
     G->alpha = (float)(G->accumulator / SIM_DT);
-    G->error_offset = v3_scale(G->error_offset, 1.0f - exp_decay(12.0f, dt));
+    // Reconciliation corrections fade over cam_recon_smooth_time (the head stabilizer adds its own spring).
+    {
+        float tsm = camera_fp_cvars()->recon_smooth ? camera_fp_cvars()->recon_smooth->f : 0.08f;
+        G->error_offset = tsm > 1e-4f ? v3_scale(G->error_offset, 1.0f - exp_decay(3.0f / tsm, dt)) : v3(0, 0, 0);
+    }
     if (G->mode == GM_CLIENT) net_client_interpolate(G->world, dt);
     update_focus();
     game_hud_tick(dt);
@@ -1104,6 +1109,8 @@ void game_init(void) {
     crosshair_init();
     recoil_debug_init();
     camera_register_cvars();
+    camera_fp_register_cvars();
+    game_holdpoint_register();
     player_register_cvars();
     // Animation assets (shared skeleton) before anything spawns characters.
     characters_register_cvars();

@@ -14,6 +14,8 @@
 #include "ui/anim_debug.h"
 #include "gameplay/effects.h"
 #include "player/hands.h"
+#include "player/camera_fp.h"
+#include "physics/physics.h"
 #include "ui/ui.h"
 #include "ui/hud.h"
 #include "ui/menus.h"
@@ -28,10 +30,59 @@
 #define MAX_CAPSULE_MESHES 16
 
 typedef struct CapsuleMesh { float r, hh; MeshId mesh; } CapsuleMesh;
-typedef struct GameRender { CapsuleMesh capsules[MAX_CAPSULE_MESHES]; int capsule_count; } GameRender;
+typedef struct GameRender {
+    CapsuleMesh capsules[MAX_CAPSULE_MESHES];
+    int capsule_count;
+    int cam_mode;              // 0 fallback, 1 head camera, 2 death camera, 3 third person
+    vec3 head_eye, ideal_eye;  // cam_debug
+    char cam_text[256];
+    // camera penetration stats (cam_debug / cam_stats): frames where the eye is behind geometry
+    // as seen from the capsule, or geometry is closer than the near plane margin
+    u32 pen_frames, pen_behind, pen_near;
+    float pen_min_dist;
+} GameRender;
 #define GR (g_engine.game_render)
 
-void game_render_init(void) { GR = ARENA_PUSH(&g_engine.perm_arena, GameRender); }
+static void cmd_cam_stats(int argc, const char **argv);
+void game_render_init(void) {
+    GR = ARENA_PUSH(&g_engine.perm_arena, GameRender);
+    GR->pen_min_dist = 1e9f;
+    cmd_register("cam_stats", cmd_cam_stats, "print + reset camera penetration / stabilizer stats (sampled while cam_debug is on)");
+}
+const char *game_cam_debug_text(void) { return GR ? GR->cam_text : ""; }
+
+static void cam_penetration_sample(PhysicsWorld *pw, vec3 safe, vec3 eye) {
+    GR->pen_frames++;
+    RayHit rh;
+    vec3 d = v3_sub(eye, safe);
+    if (v3_len2(d) > 1e-8f && phys_raycast(pw, safe, d, PL_MASK_WORLD, PHYS_INVALID_BODY, &rh) && rh.fraction < 0.999f) GR->pen_behind++;
+    // 14 directions: geometry closer than the near plane margin would clip into view.
+    static const vec3 dirs[14] = { { 1, 0, 0 }, { -1, 0, 0 }, { 0, 1, 0 }, { 0, -1, 0 }, { 0, 0, 1 }, { 0, 0, -1 }, { 0.577f, 0.577f, 0.577f },
+                                   { -0.577f, 0.577f, 0.577f }, { 0.577f, -0.577f, 0.577f }, { 0.577f, 0.577f, -0.577f }, { -0.577f, -0.577f, 0.577f },
+                                   { -0.577f, 0.577f, -0.577f }, { 0.577f, -0.577f, -0.577f }, { -0.577f, -0.577f, -0.577f } };
+    float near_margin = 0.06f, best = 1e9f;
+    for (int i = 0; i < 14; i++)
+        if (phys_raycast(pw, eye, v3_scale(dirs[i], 0.5f), PL_MASK_WORLD, PHYS_INVALID_BODY, &rh)) best = fminf(best, rh.distance);
+    if (best < near_margin) GR->pen_near++;
+    if (GR->pen_frames == 1 || best < GR->pen_min_dist) GR->pen_min_dist = best;
+}
+
+static void cmd_cam_stats(int argc, const char **argv) {
+    (void)argc;
+    (void)argv;
+    log_info("cam_stats: %u frames, eye behind geometry %u, geometry within 6 cm of the eye %u, closest %.1f mm, stabilizer max %.1f mm",
+             GR->pen_frames, GR->pen_behind, GR->pen_near, GR->pen_min_dist * 1000.0f, G->cam_stab.max_seen * 1000.0f);
+    GR->pen_frames = GR->pen_behind = GR->pen_near = 0;
+    GR->pen_min_dist = 1e9f;
+    G->cam_stab.max_seen = 0;
+}
+
+static bool cam_sphere_cast(void *ctx, vec3 from, vec3 delta, float radius, float *fraction) {
+    ShapeHit h;
+    if (!phys_sphere_cast((PhysicsWorld *)ctx, from, delta, radius, PL_MASK_WORLD, PHYS_INVALID_BODY, &h)) return false;
+    *fraction = h.fraction;
+    return true;
+}
 
 MeshId game_capsule_mesh(float r, float hh) {
     for (int i = 0; i < GR->capsule_count; i++)
@@ -325,34 +376,53 @@ void game_render(void) {
         cam.roll += kr.z * DG_DEG2RAD;
         cam.pos = v3_madd(cam.pos, dir_from_angles(cam.yaw, cam.pitch), -kb);
     }
-    // First-person camera on the body's head socket (Unreal-style): position from the animated
-    // head (spine bent to this frame's view), rotation = the view (pawn control rotation). Stair
-    // smoothing and the landing dip are kept; the animation replaces the procedural head bob.
+    // cam_weapon_fov (arms + held item projection) <-> the renderer's r_viewmodel_fov (older configs).
+    {
+        static u32 seen_cam, seen_r;
+        Cvar *cw = camera_fp_cvars()->weapon_fov, *rv = cvar_find("r_viewmodel_fov");
+        if (cw && rv) {
+            if (cw->modified != seen_cam && cw->f != rv->f) cvar_set_float(rv, cw->f);
+            else if (rv->modified != seen_r && cw->f != rv->f) cvar_set_float(cw, rv->f);
+            seen_cam = cw->modified;
+            seen_r = rv->modified;
+        }
+    }
+    // True first-person camera (src/player/camera_fp.c): rotation = the view, position = the ideal
+    // eye followed by the animated head (spring + clamp), kept out of walls. Solve order: view ->
+    // spine / head (chars_fp_camera re-bends the spine to this frame's view) -> head eye ->
+    // stabilizer -> camera -> hold point + arms (chars_render_local_fp, per frame).
     {
         Xform sock;
         Player *lp = game_local_player();
-        bool tp = cvar_find("cl_thirdperson")->i != 0;
+        const CamFpCvars *cc = camera_fp_cvars();
+        bool tp = cvar_find("cl_thirdperson")->i != 0 || (cc->third && cc->third->i);
+        float fdt = (float)g_engine.frame_dt;
         chars_set_thirdperson(tp);
+        GR->cam_mode = 0;
         if (tp && lp) {
             vec3 head = v3_add(interp.pos, v3(0, 1.6f, 0));
             cam.pos = v3_madd(head, dir_from_angles(cam.yaw, cam.pitch), -cvar_find("cl_thirdperson_dist")->f);
             cam.pos = v3_add(cam.pos, v3_scale(right_from_yaw(cam.yaw), 0.4f));
             G->view.eye = cam.pos;
-        } else if (!dead && lp && cvar_find("cl_camera_socket")->i && chars_fp_camera(w, G->alpha, G->local_slot, cam.yaw, cam.pitch, &sock)) {
+            GR->cam_mode = 3;
+        } else if (dead && lp) {
+            vec3 head;
+            if (chars_head_world(w, lp->ent, G->alpha, &head)) {
+                cam.pos = camera_fp_death(&G->cam_stab, head, fdt);
+                G->view.eye = cam.pos;
+                GR->cam_mode = 2;
+            }
+        } else if (lp && cvar_find("cl_camera_socket")->i && chars_fp_camera(w, G->alpha, G->local_slot, cam.yaw, cam.pitch, &sock)) {
+            // Ideal eye: capsule eye (stair smoothing, landing dip) + the spine bend of the view.
+            vec3 ideal = v3_add(v3(interp.pos.x, G->view.smooth_eye_y + G->view.land_offset, interp.pos.z), player_eye_offset(cam.yaw, cam.pitch));
             float raw_eye = interp.pos.y + player_eye_height(&interp);
-            float smooth = G->view.smooth_eye_y - raw_eye;   // stair smoothing (0 on flat ground)
-            // Stable eye: capsule eye + the spine bend of the view (in view yaw, so turning the
-            // mouse or the body never swings the camera). The animated head socket only adds a
-            // filtered, clamped vertical bob - no horizontal sway, no direction-change jitter.
-            vec3 stable = v3_add(v3(interp.pos.x, G->view.smooth_eye_y + G->view.land_offset, interp.pos.z), player_eye_offset(cam.yaw, cam.pitch));
-            float follow = cvar_find("cl_camera_socket_follow")->f;
-            float dev = clampf(sock.t.y + smooth + G->view.land_offset - stable.y, -0.05f, 0.05f) * follow;
-            static float dev_f;
-            static bool dev_init;
-            float k = 1.0f - expf(-(float)g_engine.frame_dt * 8.0f);
-            if (!dev_init) { dev_f = dev; dev_init = true; }
-            dev_f += (dev - dev_f) * k;
-            cam.pos = v3_add(stable, v3(0, dev_f, 0));
+            vec3 head = v3_add(sock.t, v3(0, G->view.smooth_eye_y - raw_eye + G->view.land_offset, 0));   // stairs / landing on the head too
+            vec3 eye = camera_fp_stabilize(&G->cam_stab, ideal, head, cam.yaw, fdt);
+            // Never inside walls / ledges (mantle, vault, crouch under geometry): cast from the capsule.
+            vec3 safe = v3(interp.pos.x, interp.pos.y + fminf(player_eye_height(&interp) * 0.6f, 1.0f), interp.pos.z);
+            eye = camera_fp_collide(&G->cam_stab, safe, eye, cam_sphere_cast, w->phys, fdt);
+            if (cc->debug && cc->debug->i) cam_penetration_sample(w->phys, safe, eye);
+            cam.pos = eye;
             cam.roll = G->view.roll;
             float hr = cvar_find("cl_camera_socket_roll")->f;
             if (hr > 0) {
@@ -360,8 +430,31 @@ void game_render(void) {
                 cam.roll += asinf(clampf(rgt.y, -1.0f, 1.0f)) * hr;   // a little of the head's own roll
             }
             G->view.eye = cam.pos;
+            GR->cam_mode = 1;
+            GR->head_eye = head;
+            GR->ideal_eye = ideal;
         } else if (!dead) {
             cam.pos = v3_add(cam.pos, player_eye_offset(cam.yaw, cam.pitch));
+        }
+        chars_set_fp_camera(cam.pos, quat_euler(cam.yaw, cam.pitch, cam.roll), GR->cam_mode == 1);
+        // cam_debug: eye / head / ideal markers + the stats line (HUD).
+        GR->cam_text[0] = 0;
+        if (cc->debug && cc->debug->i && lp) {
+            float gp[2], ga[2], ap, aa;
+            chars_fp_diag(gp, ga, &ap, &aa);
+            const char *modes[] = { "fallback", "head", "death", "third" };
+            vec3 d = G->cam_stab.disp;
+            snprintf(GR->cam_text, sizeof(GR->cam_text),
+                     "cam %s  disp %.1f %.1f %.1f mm (max %.1f, clamp %.0f)  wall %.0f mm | hands R %.2f mm %.2f deg  L %.2f mm %.2f deg | sight %.2f mm %.2f deg | %s",
+                     modes[GR->cam_mode], d.x * 1000, d.y * 1000, d.z * 1000, G->cam_stab.max_seen * 1000, cc->clamp->f * 1000, G->cam_stab.col_push * 1000,
+                     gp[1] * 1000, ga[1], gp[0] * 1000, ga[0], ap * 1000, aa, chars_holdpoint_text(w, G->local_slot));
+            if (GR->cam_mode == 1) {
+                vec3 f = dir_from_angles(cam.yaw, cam.pitch);
+                dbg_cross(v3_madd(GR->head_eye, f, 0.3f), 0.01f, DBG_RED, 0);       // head eye (shown 30 cm ahead)
+                dbg_cross(v3_madd(GR->ideal_eye, f, 0.3f), 0.01f, DBG_GREEN, 0);    // ideal eye
+                dbg_cross(v3_madd(cam.pos, f, 0.3f), 0.006f, DBG_WHITE, 0);         // camera
+            }
+            if (cc->debug->i >= 2 && (g_engine.frame_index % 30) == 0) log_info("cam_debug: %s", GR->cam_text);
         }
     }
     render_set_camera(&cam);

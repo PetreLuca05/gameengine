@@ -7,6 +7,7 @@
 #ifndef DG_GAME_H
 #define DG_GAME_H
 
+#include "player/camera_fp.h"
 #include "core/base.h"
 #include "core/cvar.h"
 #include "world/world.h"
@@ -40,6 +41,7 @@ typedef struct Game {
 
     // local view + command building
     ViewState view;
+    CamHeadStab cam_stab;        // first-person head camera stabilizer (src/player/camera_fp.c)
     u8 hotbar_slot;
     UserCmd last_cmd;
     vec2 frame_look;
@@ -98,6 +100,7 @@ void game_shutdown(void);
 bool game_host(const char *map);
 void game_frame(float dt);
 void game_render(void);
+const char *game_cam_debug_text(void);   // cam_debug stats line (HUD)
 void game_disconnect_to_local(const char *reason);
 Game *game(void);
 World *game_world(void);

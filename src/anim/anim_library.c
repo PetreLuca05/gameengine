@@ -119,6 +119,14 @@ static bool load_controller(AnimLibrary *lib) {
     cJSON *root = cJSON_Parse(text);
     proc_params_load(&lib->proc, root);
     cJSON_Delete(root);
+    // Hold points (camera-space item placement per style / state).
+    snprintf(rel, sizeof(rel), "%s/holdpoint.json", lib->human_dir);
+    char *hp_text = read_text(rel);
+    cJSON *hp_root = hp_text ? cJSON_Parse(hp_text) : NULL;
+    if (hp_text && !hp_root) log_error("anim: %s: JSON parse error", rel);
+    proc_holdpoint_load(&lib->proc, hp_root);
+    cJSON_Delete(hp_root);
+    free(hp_text);
     lib->manifest.hash[AC_CONTROLLER] = lib->ctrl.hash;
     lib->manifest.hash[AC_HOLD_STYLES] = lib->proc.hash;
     free(text);

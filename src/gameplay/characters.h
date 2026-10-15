@@ -57,6 +57,7 @@ typedef struct CharacterInst {
     // render (any machine that draws)
     Xform *pose_prev, *pose_cur;      // post-IK bone world transforms
     Xform item_prev, item_cur;
+    Xform item_cam_prev, item_cam_cur;   // hold point item in camera space (owner re-places per frame)
     bool item_valid;
     const struct WeaponDef *item_weapon;
     const struct ItemDef *item_def;
@@ -108,6 +109,13 @@ void char_detach(World *w, EntityId e);
 CharacterInst *char_get(const World *w, EntityId e);
 // Visual muzzle of the item a character holds (world space, barrel forward). VFX for remote shooters.
 bool chars_item_muzzle(World *w, EntityId e, vec3 *pos, vec3 *dir);
+// Eye (camera socket) of a character's current pose, ragdoll included (death camera).
+bool chars_head_world(World *w, EntityId e, float alpha, vec3 *out);
+// First person: this frame's final camera (the held item is placed relative to it).
+void chars_set_fp_camera(vec3 pos, quat rot, bool valid);
+// Last first-person frame: hand <-> socket error ([0] left, [1] right; m / deg) and ADS sight error.
+void chars_fp_diag(float glue_pos[2], float glue_ang[2], float *ads_pos, float *ads_ang);
+const char *chars_holdpoint_text(World *w, int local_slot);   // "hold <state> <blend>% pull .. reach .."
 CharacterInst *char_get_index(const World *w, int ent_index);
 
 // Host: sim-only animation for every character (call after movement / weapons, before lag-comp).

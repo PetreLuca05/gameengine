@@ -38,6 +38,12 @@ typedef struct CharGlobals {
     int last_evals, last_deferred;      // budget stats (previous present tick)
     Cvar *predict_hits, *resync_ticks, *local_resim, *net_debug, *zombie_speed;
     u32 hold_failures;
+    Cvar *hp_force_state, *hp_static, *cam_debug;
+    // hold point / first person diagnostics (last frame)
+    float fp_glue_pos[2], fp_glue_ang[2];
+    float fp_ads_pos, fp_ads_ang;
+    Xform fp_cam;
+    bool fp_cam_valid;
 } CharGlobals;
 
 // ------------------------------------------------------------------ globals
@@ -79,6 +85,9 @@ void characters_register_cvars(void) {
     g->local_resim = cvar_reg_bool("anim_local_resim", false, 0, "local player: re-simulate the controller on reconcile (else snap state ids)");
     g->net_debug = cvar_reg_bool("anim_net_debug", false, 0, "log resyncs and replicated vs local state");
     g->zombie_speed = cvar_reg_float("zombie_speed", 1.0f, 0.0f, 4.0f, CVAR_SERVER, "zombie wander speed multiplier");
+    g->hp_force_state = cvar_reg_int("holdpoint_force_state", -1, -1, HP_STATE_COUNT - 1, 0,
+                                     "force a hold point state on every character: -1 auto, 0 hip 1 ads 2 sprint 3 crouch 4 prone 5 empty 6 inspect");
+    g->hp_static = cvar_reg_bool("holdpoint_static", false, 0, "hold point without sway / bob / look lag / kick (alignment checks, editing)");
 }
 
 void characters_shutdown_globals(void) {
@@ -960,6 +969,16 @@ static void post_one(World *w, CharacterInst *c, int i, float dt, vec3 cam_pos, 
     }
     if (c->rt.in.crouch) pi.crouch_drop = 0.38f;
     pi.first_person = c->local && cv(CG->fp_body);
+    pi.hp_static = cv(CG->hp_static);
+    if (CG->hp_force_state && CG->hp_force_state->i >= 0) {
+        int fs = CG->hp_force_state->i;
+        pi.ads_t = fs == HP_ADS ? 1.0f : 0.0f;
+        pi.sprinting = fs == HP_SPRINT;
+        pi.crouched = fs == HP_CROUCH;
+        pi.prone = fs == HP_PRONE;
+        pi.empty_hands = fs == HP_EMPTY;
+        pi.inspect = fs == HP_INSPECT;
+    }
     if (c->is_player && c->slot >= 0) {
         const PlayerMove *m = &w->players[c->slot].sim.move;
         if (m->hand_anchor_valid && (m->mode == MOVE_HANG || m->mode == MOVE_MANTLE || m->mode == MOVE_VAULT)) {
@@ -1017,11 +1036,13 @@ static void post_one(World *w, CharacterInst *c, int i, float dt, vec3 cam_pos, 
     Xform root = xf_make(c->root.t, quat_yaw(c->rt.proc.render_body_yaw));
     memcpy(c->pose_prev, c->pose_cur, sizeof(Xform) * (size_t)s->count);
     c->item_prev = c->item_cur;
+    c->item_cam_prev = c->item_cam_cur;
+    if (c->rt.proc.has_item) c->item_cam_cur = c->rt.proc.item_cam;
     charrt_to_world(&c->rt, c->rt.final_model, root, c->def->scale, c->pose_cur);
     c->item_cur = c->rt.proc.has_item ? xf_mul(xf_make(root.t, root.r), xf_make(v3_scale(c->rt.proc.item_model.t, c->def->scale), c->rt.proc.item_model.r)) : c->item_cur;
     bool had_item = c->item_valid;
     c->item_valid = c->rt.proc.has_item;
-    if (!c->have_pose || !had_item) { memcpy(c->pose_prev, c->pose_cur, sizeof(Xform) * (size_t)s->count); c->item_prev = c->item_cur; }
+    if (!c->have_pose || !had_item) { memcpy(c->pose_prev, c->pose_cur, sizeof(Xform) * (size_t)s->count); c->item_prev = c->item_cur; c->item_cam_prev = c->item_cam_cur; }
     c->have_pose = true;
     // Client-side hitboxes from the local pose (predicted reactions, debug).
     if (!w->authority) {
@@ -1299,13 +1320,72 @@ void chars_render_local_fp(World *w, float alpha, int local_slot) {
     Xform root = FP.root;
     Xform inv_root = xf_inverse(root);
     bool raw = CG->fp_debug && CG->fp_debug->i >= 2;
-    // The held item follows the chest through this frame's spine correction.
-    if (c->item_valid) {
+    // Hold point (true first person): the item is a child of this frame's camera; both arms are
+    // re-solved onto its sockets every frame, so hands stay glued and the item never lags the view.
+    // Clip-driven states (reload / equip / melee: hand IK weight < 1) hand control to the right
+    // hand bone; the item is always finalized from the solved right hand.
+    if (c->item_valid && (c->item_weapon || c->item_def) && CG->fp_cam_valid && !raw) {
+        const ItemSockets *k = c->item_weapon ? &c->item_weapon->sockets : &c->item_def->sockets;
+        float span = (float)DG_MAX(1, c->interval);
+        float it = saturate(((float)(w->chars->tick - c->last_eval) + alpha) / span);
+        Xform icam = xf_lerp(c->item_cam_prev, c->item_cam_cur, it);
+        icam.s = v3(1, 1, 1);
+        Xform cam_m = xf_mul(inv_root, CG->fp_cam);
+        cam_m.s = v3(1, 1, 1);
+        Xform want = xf_mul(cam_m, icam);
+        float ikw = 1.0f;
+        ctrl_hand_ik_weight(&c->rt.ctrl, &ikw);
+        int style = DG_CLAMP(c->rt.in.weapon_type, 0, HOLD_STYLE_MAX - 1);
+        const HoldStyle *hs = proc_hold_style(&LIB->proc, style);
+        int ra = s->role[BR_R_ARM], rf = s->role[BR_R_FOREARM], rh = s->role[BR_R_HAND];
+        int la = s->role[BR_L_ARM], lf = s->role[BR_L_FOREARM], lh = s->role[BR_L_HAND];
+        quat cam_rm = cam_m.r;
+        if (ra >= 0 && rf >= 0 && rh >= 0) {
+            Xform hand_r = proc_hand_for_socket(xf_mul(want, k->grip_r), LIB->hands.palm[1]);
+            anim_ik_two_bone_pose(s, posep, model, ra, rf, rh, hand_r.t, &hand_r.r, quat_rotate(cam_rm, hs->elbow_r), ikw);
+        }
+        Xform item = want;
+        if (rh >= 0) item = xf_mul(xf_mul(model[rh], LIB->hands.palm[1]), xf_inverse(k->grip_r));
+        Xform palm_r = rh >= 0 ? xf_mul(model[rh], LIB->hands.palm[1]) : xf_identity();
+        Xform sock_r = xf_mul(want, k->grip_r);
+        CG->fp_glue_pos[1] = v3_dist(palm_r.t, sock_r.t);
+        CG->fp_glue_ang[1] = quat_angle_between(palm_r.r, sock_r.r) * DG_RAD2DEG;
+        CG->fp_glue_pos[0] = CG->fp_glue_ang[0] = 0;
+        if (hs->left_hand && k->has_left && la >= 0 && lf >= 0 && lh >= 0 && ikw > 0.001f) {
+            Xform sock_l = xf_mul(item, k->grip_l);
+            Xform hand_l = proc_hand_for_socket(sock_l, LIB->hands.palm[0]);
+            anim_ik_two_bone_pose(s, posep, model, la, lf, lh, hand_l.t, &hand_l.r, quat_rotate(cam_rm, hs->elbow_l), ikw);
+            Xform palm_l = xf_mul(model[lh], LIB->hands.palm[0]);
+            CG->fp_glue_pos[0] = v3_dist(palm_l.t, sock_l.t);
+            CG->fp_glue_ang[0] = quat_angle_between(palm_l.r, sock_l.r) * DG_RAD2DEG;
+        }
+        // ADS check: the sight on the view axis (lateral error + barrel angle to the view).
+        vec3 sight_c = xf_point(xf_mul(xf_inverse(cam_m), item), k->sight);
+        CG->fp_ads_pos = sqrtf(sight_c.x * sight_c.x + sight_c.y * sight_c.y);
+        CG->fp_ads_ang = quat_angle_between(xf_mul(xf_inverse(cam_m), item).r, quat_identity()) * DG_RAD2DEG;
+        Xform item_w = xf_mul(root, item);
+        item_w.s = v3(1, 1, 1);
+        hands_fp_set_item(item_w.t, item_w.r);
+        // cam_debug: hold point axes, pivot, sockets, IK targets, collision cast.
+        Cvar *cd = cvar_find("cam_debug");
+        if (cd && cd->i) {
+            Xform hold_w = xf_mul(CG->fp_cam, xf_mul(icam, xf_make(k->anchor.t, quat_identity())));
+            vec3 o = hold_w.t;
+            dbg_line(o, v3_add(o, quat_rotate(hold_w.r, v3(0.05f, 0, 0))), DBG_RED, 0, false);
+            dbg_line(o, v3_add(o, quat_rotate(hold_w.r, v3(0, 0.05f, 0))), DBG_GREEN, 0, false);
+            dbg_line(o, v3_add(o, quat_rotate(hold_w.r, v3(0, 0, -0.08f))), DBG_BLUE, 0, false);
+            dbg_cross(xf_point(item_w, k->pivot), 0.015f, DBG_MAGENTA, 0);
+            dbg_cross(xf_point(item_w, k->sight), 0.01f, DBG_CYAN, 0);
+            dbg_cross(xf_point(item_w, k->muzzle), 0.012f, DBG_ORANGE, 0);
+            dbg_cross(xf_mul(item_w, k->grip_r).t, 0.012f, DBG_YELLOW, 0);
+            if (k->has_left) dbg_cross(xf_mul(item_w, k->grip_l).t, 0.012f, DBG_YELLOW, 0);
+            const HoldPointOutput *ho = &c->rt.proc.hp_out;
+            if (v3_len2(v3_sub(ho->cast_to, ho->cast_from)) > 0) dbg_line(ho->cast_from, ho->cast_to, ho->cast_hit ? DBG_RED : DBG_GREEN, 0, false);
+        }
+    } else if (c->item_valid) {
         float span = (float)DG_MAX(1, c->interval);
         float it = saturate(((float)(w->chars->tick - c->last_eval) + alpha) / span);
         Xform item = xf_lerp(c->item_prev, c->item_cur, it);
-        int sp2 = s->role[BR_SPINE2];
-        if (sp2 >= 0) item = xf_mul(xf_mul(world[sp2], xf_inverse(FP.spine2_before)), item);
         item.s = v3(1, 1, 1);
         hands_fp_set_item(item.t, item.r);
     }
@@ -1342,6 +1422,30 @@ void chars_render_local_fp(World *w, float alpha, int local_slot) {
 
 static bool g_thirdperson;
 void chars_set_thirdperson(bool on) { g_thirdperson = on; }
+
+void chars_set_fp_camera(vec3 pos, quat rot, bool valid) {
+    ensure_globals();
+    CG->fp_cam = xf_make(pos, rot);
+    CG->fp_cam_valid = valid;
+}
+
+const char *chars_holdpoint_text(World *w, int local_slot) {
+    static char buf[96];
+    buf[0] = 0;
+    CharacterInst *c = local_fp_char(w, local_slot);
+    if (!c) return buf;
+    const ProcState *p = &c->rt.proc;
+    snprintf(buf, sizeof(buf), "hold %s %.0f%%  pull %.2f  reach %.0f mm", holdpoint_state_name(p->hp_out.state), p->hp_out.blend * 100.0f, p->hp_out.pull,
+             p->reach_shift * 1000.0f);
+    return buf;
+}
+
+void chars_fp_diag(float *glue_pos, float *glue_ang, float *ads_pos, float *ads_ang) {
+    ensure_globals();
+    for (int h = 0; h < 2; h++) { glue_pos[h] = CG->fp_glue_pos[h]; glue_ang[h] = CG->fp_glue_ang[h]; }
+    *ads_pos = CG->fp_ads_pos;
+    *ads_ang = CG->fp_ads_ang;
+}
 
 void chars_render(World *w, float alpha, vec3 cam_pos, int local_slot) {
     if (!w->chars || !LIB) return;
@@ -1409,6 +1513,26 @@ bool chars_item_muzzle(World *w, EntityId e, vec3 *pos, vec3 *dir) {
     const ItemSockets *k = c->item_weapon ? &c->item_weapon->sockets : &c->item_def->sockets;
     *pos = xf_point(c->item_cur, k->muzzle);
     *dir = quat_rotate(c->item_cur.r, v3(0, 0, -1));
+    return true;
+}
+
+bool chars_head_world(World *w, EntityId e, float alpha, vec3 *out) {
+    CharacterInst *c = char_get(w, e);
+    if (!c || !c->have_pose || !LIB) return false;
+    const Skeleton *s = &LIB->skel;
+    static Xform pose[ANIM_MAX_BONES];
+    if (c->rag.active) ragdoll_read_pose(&c->rag, w->phys, &LIB->ragdoll, s, pose);
+    else if (c->dead && c->settled_pose) memcpy(pose, c->settled_pose, sizeof(Xform) * (size_t)s->count);
+    else {
+        float span = (float)DG_MAX(1, c->interval);
+        float t = saturate(((float)(w->chars->tick - c->last_eval) + alpha) / span);
+        for (int b = 0; b < s->count; b++) pose[b] = xf_lerp(c->pose_prev[b], c->pose_cur[b], t);
+    }
+    Xform eye;
+    if (character_socket_world(c->def, "camera", pose, &eye)) { *out = eye.t; return true; }
+    int head = s->role[BR_HEAD];
+    if (head < 0) return false;
+    *out = pose[head].t;
     return true;
 }
 

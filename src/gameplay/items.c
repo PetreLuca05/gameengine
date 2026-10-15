@@ -227,6 +227,23 @@ static Xform socket_from_json(const cJSON *o, Xform def) {
     return x;
 }
 
+// Derived sockets: anchor (default grip_r), sight (top of the item, slightly behind the grip:
+// the rear sight / optic), pivot (between the hands, or just behind a one-handed grip: the wrist).
+static void finish_sockets(ItemSockets *k, const cJSON *sk) {
+    k->anchor = k->grip_r;
+    k->sight = v3(0, k->sight_height + 0.012f, -0.04f);
+    k->pivot = k->has_left ? v3_scale(v3_add(k->grip_r.t, k->grip_l.t), 0.5f) : v3_add(k->grip_r.t, v3(0, -0.02f, 0.07f));
+    if (!sk) return;
+    const cJSON *an = cJSON_GetObjectItemCaseSensitive(sk, "anchor");
+    if (cJSON_IsString(an)) {
+        if (!strcmp(an->valuestring, "grip_l")) k->anchor = k->grip_l;
+    } else if (an) {
+        k->anchor = socket_from_json(an, k->grip_r);
+    }
+    k->sight = jvec3(sk, "sight", k->sight);
+    k->pivot = jvec3(sk, "pivot", k->pivot);
+}
+
 // Default sockets per hold style, from the viewmodel grip data (grip = item origin, support offset).
 static void default_sockets(ItemSockets *k, const char *style, vec3 support, vec3 muzzle, const WeaponModelPart *parts, int part_count) {
     memset(k, 0, sizeof(*k));
@@ -252,6 +269,7 @@ static void default_sockets(ItemSockets *k, const char *style, vec3 support, vec
     }
     k->sight_height = top;
     k->length = len;
+    finish_sockets(k, NULL);
 }
 
 static void parse_hold(const cJSON *w, char *style, ItemSockets *k, const char *def_style, vec3 support, vec3 muzzle,
@@ -259,6 +277,7 @@ static void parse_hold(const cJSON *w, char *style, ItemSockets *k, const char *
     const cJSON *h = cJSON_GetObjectItemCaseSensitive(w, "hold");
     dg_strcpy(style, 16, jstr(h, "style", def_style));
     default_sockets(k, style, support, muzzle, parts, part_count);
+    holdpoint_override_parse(&k->hp, cJSON_GetObjectItemCaseSensitive(w, "holdpoint"));
     if (!h) return;
     const cJSON *sk = cJSON_GetObjectItemCaseSensitive(h, "sockets");
     if (!sk) return;
@@ -269,6 +288,7 @@ static void parse_hold(const cJSON *w, char *style, ItemSockets *k, const char *
     const cJSON *fg = cJSON_GetObjectItemCaseSensitive(sk, "foregrip");
     if (fg) { k->grip_l = socket_from_json(fg, k->grip_l); k->has_left = true; }
     k->muzzle = jvec3(sk, "muzzle", k->muzzle);
+    finish_sockets(k, sk);
 }
 
 static const char *default_style_for(const cJSON *w, WeaponKind kind, const char *id) {
@@ -449,6 +469,7 @@ bool items_load(ItemDB *db, const char *items_path, const char *weapons_path) {
         dg_strcpy(d->hold_style, sizeof(d->hold_style), jstr(cJSON_GetObjectItemCaseSensitive(it, "hold"), "style", "item_small"));
         WeaponModelPart part = { v3(0, d->size.y, -0.03f), d->size, d->color };
         default_sockets(&d->sockets, d->hold_style, v3(0, 0, 0), v3(0, 0, -d->size.z), &part, 1);
+        holdpoint_override_parse(&d->sockets.hp, cJSON_GetObjectItemCaseSensitive(it, "holdpoint"));
     }
     cJSON_Delete(iroot);
     bool ok = load_weapons(db, weapons_path);

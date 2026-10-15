@@ -11,23 +11,12 @@
 
 static HoldStyle blend_style(const HoldStyle *a, const HoldStyle *b, float t) {
     if (t >= 1.0f || a == b) return *b;
-    HoldStyle h = *b;
-    h.hip_offset = v3_lerp(a->hip_offset, b->hip_offset, t);
-    h.hip_rot = v3_lerp(a->hip_rot, b->hip_rot, t);
-    h.ads_distance = lerpf(a->ads_distance, b->ads_distance, t);
-    h.sprint_offset = v3_lerp(a->sprint_offset, b->sprint_offset, t);
-    h.sprint_rot = v3_lerp(a->sprint_rot, b->sprint_rot, t);
-    h.crouch_offset = v3_lerp(a->crouch_offset, b->crouch_offset, t);
+    HoldStyle h = *b;   // hold point data: the current style's (the hold point blends itself)
     h.elbow_r = v3_lerp(a->elbow_r, b->elbow_r, t);
     h.elbow_l = v3_lerp(a->elbow_l, b->elbow_l, t);
     h.shoulder_r = v3_lerp(a->shoulder_r, b->shoulder_r, t);
     h.shoulder_l = v3_lerp(a->shoulder_l, b->shoulder_l, t);
-    h.chest_offset = v3_lerp(a->chest_offset, b->chest_offset, t);
     for (int i = 0; i < 5; i++) { h.curl_r[i] = lerpf(a->curl_r[i], b->curl_r[i], t); h.curl_l[i] = lerpf(a->curl_l[i], b->curl_l[i], t); }
-    h.aim_pitch_scale = lerpf(a->aim_pitch_scale, b->aim_pitch_scale, t);
-    h.ads_weight = lerpf(a->ads_weight, b->ads_weight, t);
-    h.fp_hip = v3_lerp(a->fp_hip, b->fp_hip, t);
-    h.fp_weight = lerpf(a->fp_weight, b->fp_weight, t);
     return h;
 }
 
@@ -80,48 +69,75 @@ void proc_hold(ProcState *st, const ProcInput *in, Pose *pose, Xform *model) {
     HoldStyle hs = blend_style(proc_hold_style(p, st->prev_style), proc_hold_style(p, st->style), smoothstepf(0, 1, st->style_t));
     float w = saturate(in->hand_ik_weight);
 
-    // Aim frame (model space, relative to the rendered body yaw).
-    float yaw = clampf(wrap_angle(in->aim_yaw - st->render_body_yaw), -p->yaw_limit * DG_DEG2RAD, p->yaw_limit * DG_DEG2RAD);
-    float pitch = clampf(in->aim_pitch, -p->pitch_limit * DG_DEG2RAD, p->pitch_limit * DG_DEG2RAD) * hs.aim_pitch_scale;
-    quat yaw_q = quat_yaw(yaw);
-    quat aim = quat_mul(yaw_q, quat_axis_angle(v3(1, 0, 0), pitch));
-    vec3 anchor = v3_add(model[sp2].t, quat_rotate(yaw_q, hs.chest_offset));
-
-    // Desired item transform: hip -> ADS -> sprint, plus crouch, kick.
-    Xform hip = xf_make(v3_add(anchor, quat_rotate(aim, hs.hip_offset)), quat_mul(aim, euler_deg(hs.hip_rot)));
-    vec3 eye = head >= 0 ? v3_add(model[head].t, quat_rotate(yaw_q, v3(0, 0.075f, -0.09f))) : v3_add(anchor, v3(0, 0.3f, 0));
-    Xform ads = xf_make(v3_add(eye, quat_rotate(aim, v3(0, -it->sight_height - 0.012f, -hs.ads_distance))), aim);
-    // Owner's first-person body: the hip pose sits in view below the eyes (like an owner-only aim
-    // pose); everyone else sees the normal hip pose. Reach / glue rules are the same.
-    if (in->first_person && hs.fp_weight > 0) {
-        Xform fp = xf_make(v3_add(eye, quat_rotate(aim, hs.fp_hip)), hip.r);
-        hip = xf_lerp(hip, fp, saturate(hs.fp_weight));
-    }
-    float ads_t = saturate(in->ads_t) * hs.ads_weight;
-    Xform desired = xf_lerp(hip, ads, ads_t);
-    if (in->sprinting && ads_t < 0.5f) {
-        Xform spr = xf_make(v3_add(anchor, quat_rotate(yaw_q, hs.sprint_offset)), quat_mul(yaw_q, euler_deg(hs.sprint_rot)));
-        desired = xf_lerp(desired, spr, 0.85f);
-    }
-    if (in->crouched) desired.t = v3_add(desired.t, quat_rotate(aim, hs.crouch_offset));
-    desired.t = v3_add(desired.t, quat_rotate(aim, in->item_kick_pos));
-    desired.r = quat_norm(quat_mul(desired.r, euler_deg(in->item_kick_rot)));
-
-    // Muzzle wall pull-back (local raycast, cosmetic: never changes where bullets go).
-    if (in->raycast && it->length > 0.05f) {
-        vec3 base_w = xf_point(in->root, anchor);
-        vec3 muzzle_w = xf_point(in->root, xf_point(desired, it->muzzle));
-        vec3 d = v3_sub(muzzle_w, base_w);
-        float frac;
-        vec3 hp, hn;
-        if (in->raycast(in->ray_ctx, base_w, d, &frac, &hp, &hn) && frac < 1.0f) {
-            float pull = (1.0f - frac) * v3_len(d);
-            pull = fminf(pull, it->length * 0.7f);
-            vec3 fwd = quat_rotate(aim, v3(0, 0, -1));
-            desired.t = v3_madd(desired.t, fwd, -pull);
-            desired.r = quat_norm(quat_mul(quat_axis_angle(quat_rotate(aim, v3(1, 0, 0)), -pull * 1.6f), desired.r));
+    // Bladed stance (before the camera / arms): the chest yaws so the support shoulder comes
+    // forward, the neck counter-rotates so the head (and the camera on it) keeps facing the view;
+    // clavicles protract. Scaled by the hand IK weight (clips own the body otherwise).
+    {
+        float tw = hs.hp.twist * DG_DEG2RAD * w;
+        int sp1 = s->role[BR_SPINE1], neck = s->role[BR_NECK];
+        if (fabsf(tw) > 1e-5f && sp1 >= 0 && neck >= 0) {
+            float base_yaw = wrap_angle(in->aim_yaw - st->render_body_yaw);
+            (void)base_yaw;
+            proc_rotate_bone(s, pose, model, sp1, quat_yaw(-tw * 0.45f));
+            proc_rotate_bone(s, pose, model, sp2, quat_yaw(-tw * 0.55f));
+            proc_rotate_bone(s, pose, model, neck, quat_yaw(tw));
         }
+        if (lsh >= 0 && v3_len2(hs.hp.clav_l) > 0 && hs.left_hand && it->has_left) proc_rotate_bone(s, pose, model, lsh, euler_deg(v3_scale(hs.hp.clav_l, w)));
+        if (rsh >= 0 && v3_len2(hs.hp.clav_r) > 0) proc_rotate_bone(s, pose, model, rsh, euler_deg(v3_scale(hs.hp.clav_r, w)));
     }
+
+    // Camera (model space): the head bone + eye socket after the spine look, rotated by the view
+    // (relative to the rendered body yaw). Same for the owner and every remote copy.
+    float rel_yaw = wrap_angle(in->aim_yaw - st->render_body_yaw);
+    float pitch = clampf(in->aim_pitch, -89.0f * DG_DEG2RAD, 89.0f * DG_DEG2RAD);
+    quat yaw_q = quat_yaw(rel_yaw);
+    quat aim = quat_mul(yaw_q, quat_axis_angle(v3(1, 0, 0), pitch));
+    vec3 eye = (in->eye_bone >= 0 && in->eye_bone < s->count) ? xf_point(model[in->eye_bone], in->eye_local.t)
+                                                                : (head >= 0 ? v3_add(model[head].t, quat_rotate(yaw_q, v3(0, 0.08f, -0.09f))) : v3_add(model[sp2].t, v3(0, 0.3f, 0)));
+    Xform cam = xf_make(eye, aim);
+    st->cam_model = cam;
+
+    // Hold point: camera-space item placement (state, ADS from the sight socket, lag / sway / bob /
+    // kick around the pivot, wall collision).
+    HoldPointInput hi;
+    memset(&hi, 0, sizeof(hi));
+    hi.style = &proc_hold_style(p, st->style)->hp;
+    hi.ovr = &it->hp;
+    hi.style_key = in->item_key * 64 + st->style;
+    hi.anchor = xf_make(it->anchor.t, quat_identity());   // the anchor is a point: the hold point's rotation orients the item
+    hi.sight = it->sight;
+    hi.pivot = it->pivot;
+    hi.length = it->length;
+    hi.has_item = true;
+    hi.ads = in->ads_t > 0.5f;
+    hi.sprint = in->sprinting;
+    hi.crouch = in->crouched;
+    hi.prone = in->prone;
+    hi.inspect = in->inspect;
+    hi.empty = in->empty_hands;
+    hi.dt = in->dt;
+    hi.aim_yaw = in->aim_yaw;
+    hi.aim_pitch = pitch;
+    Xform cam_world = xf_mul(in->root, cam);
+    cam_world.s = v3(1, 1, 1);
+    hi.vel_cam = quat_rotate(quat_conj(cam_world.r), in->velocity);
+    hi.grounded = in->grounded;
+    hi.kick_pos = in->item_kick_pos;
+    hi.kick_rot = in->item_kick_rot;
+    hi.cam_world = cam_world;
+    hi.raycast = (HoldPointRayFn)in->raycast;
+    hi.ray_ctx = in->ray_ctx;
+    hi.static_pose = in->hp_static;
+    holdpoint_eval(&st->hp, &hi, &st->hp_out);
+    st->item_cam = st->hp_out.item;
+    Xform desired = xf_mul(cam, st->hp_out.item);
+    // Upper body follows the hold point: clavicle additive from its offset to the hip pose.
+    vec3 off = st->hp_out.offset;
+    float cg = hs.hp.clavicle_gain;
+    vec3 add_r = v3(0, clampf(-off.x * cg * 0.5f, -8, 8), clampf(off.y * cg, -10, 10));
+    vec3 add_l = v3(0, clampf(-off.x * cg * 0.5f, -8, 8), clampf(-off.y * cg, -10, 10));
+    hs.shoulder_r = v3_add(hs.shoulder_r, add_r);
+    if (hs.left_hand && it->has_left) hs.shoulder_l = v3_add(hs.shoulder_l, add_l);
 
     // Clavicles.
     if (rsh >= 0 && v3_len2(hs.shoulder_r) > 0) proc_rotate_bone(s, pose, model, rsh, euler_deg(v3_scale(hs.shoulder_r, w)));
@@ -139,13 +155,16 @@ void proc_hold(ProcState *st, const ProcInput *in, Pose *pose, Xform *model) {
     Xform item = desired;
     bool left_ok = true;
     vec3 back = quat_rotate(desired.r, v3(0, 0, 1));   // towards the body
-    for (int iter = 0; iter < 10; iter++) {
+    float max_shift = fminf(hs.max_shift, hs.hp.reach_pull > 0 ? hs.hp.reach_pull : hs.max_shift);
+    vec3 extra = v3(0, 0, 0);   // last resort (near-vertical views): pull straight towards the support shoulder
+    bool emergency = false;
+    for (int iter = 0; iter < 16; iter++) {
         if (iter > 0) {
             pose_copy(pose, &base_pose);
             memcpy(model, base_model, sizeof(Xform) * (size_t)s->count);
         }
         Xform want = desired;
-        want.t = v3_madd(want.t, back, shift);
+        want.t = v3_add(v3_madd(want.t, back, shift), extra);
         // Right hand: the palm on grip_r.
         Xform hand_r = proc_hand_for_socket(xf_mul(want, it->grip_r), hf->palm[1]);
         vec3 pole_r = quat_rotate(yaw_q, hs.elbow_r);
@@ -161,7 +180,16 @@ void proc_hold(ProcState *st, const ProcInput *in, Pose *pose, Xform *model) {
         float reach = v3_dist(model[la].t, model[lf].t) + v3_dist(model[lf].t, model[lh].t);
         float need = v3_dist(model[la].t, hand_l.t);
         float margin = 0.004f;
-        if (need > reach - margin * 0.5f && iter < 9 && shift < hs.max_shift) {
+        if (need > reach - margin * 0.5f && iter < 15 && shift >= max_shift - 1e-5f) {
+            // The barrel-axis pull is exhausted: move the hold point towards the shoulder by the
+            // remaining shortfall (never stretch the arm, never leave a gap).
+            vec3 to_sh = v3_norm(v3_sub(model[la].t, hand_l.t));
+            extra = v3_madd(extra, to_sh, need - reach + margin);
+            emergency = true;
+            st->reach_shifted = true;
+            continue;
+        }
+        if (need > reach - margin * 0.5f && iter < 15 && shift < max_shift) {
             // How much does moving along `back` shorten the shoulder -> hand distance?
             vec3 to_sh = v3_norm(v3_sub(model[la].t, hand_l.t));
             float gain = v3_dot(to_sh, back);
@@ -170,7 +198,7 @@ void proc_hold(ProcState *st, const ProcInput *in, Pose *pose, Xform *model) {
                 back = v3_norm(v3_add(v3_scale(back, fmaxf(gain, 0.0f)), to_sh));
                 gain = fmaxf(0.5f, v3_dot(to_sh, back));
             }
-            shift = fminf(hs.max_shift, shift + (need - reach + margin) / gain);
+            shift = fminf(max_shift, shift + (need - reach + margin) / gain);
             st->reach_shifted = true;
             continue;
         }
@@ -182,13 +210,17 @@ void proc_hold(ProcState *st, const ProcInput *in, Pose *pose, Xform *model) {
         break;
     }
     // Only meaningful at full IK weight (equip / reload blends move the hands on purpose).
-    if (!left_ok && w > 0.99f && !(st->warned_styles & (1u << (st->style & 31)))) {
+    if ((!left_ok || emergency) && w > 0.99f && !(st->warned_styles & (1u << (st->style & 31)))) {
         st->warned_styles |= 1u << (st->style & 31);
-        log_warn("hold style '%s': grip_l out of reach even after shifting %.0f mm (fix the socket)", hs.name, shift * 1000.0f);
+        log_warn("hold point '%s' / %s: grip_l out of reach (pitch %.0f deg): hold point pulled %.0f mm along the item + %.0f mm towards the shoulder",
+                 hs.name, holdpoint_state_name(st->hp_out.state), pitch * DG_RAD2DEG, shift * 1000.0f, v3_len(extra) * 1000.0f);
     }
     // Fingers last: they never move the wrist.
     proc_curl_fingers(s, pose, model, 1, hs.curl_r, hf, w);
     if (hs.left_hand && it->has_left) proc_curl_fingers(s, pose, model, 0, hs.curl_l, hf, w);
+    st->reach_shift = shift;
+    // Camera-space target including the reach pull (the owner re-places the item per frame).
+    st->item_cam = xf_mul(xf_inverse(cam), xf_make(v3_add(v3_madd(desired.t, back, shift), extra), desired.r));
     st->item_model = item;
     st->item_world = xf_mul(in->root, item);
     st->has_item = true;

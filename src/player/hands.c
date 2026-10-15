@@ -43,13 +43,6 @@ typedef struct HandsSystem {
     int clip, prev_clip;
     float clip_t, prev_clip_t, fade;
 
-    // procedural state
-    float bob_phase, bob_amount;
-    vec2 sway, sway_vel;
-    vec3 vel_lag, vel_lag_vel;
-    float land_dip, land_vel;
-    float breathe;
-    u32 last_land_tick;
 
     // world overrides
     float ov_w[2];
@@ -83,7 +76,7 @@ typedef struct HandsSystem {
     bool fp_valid, body_arms;
 
     MeshId cube;
-    Cvar *debug, *upper_len, *fore_len, *bob_scale, *sway_scale, *headbob;
+    Cvar *debug, *upper_len, *fore_len;
 } HandsSystem;
 
 #define H (g_engine.hands)
@@ -200,9 +193,6 @@ bool hands_init(void) {
     H->debug = cvar_reg_bool("hands_debug", false, 0, "draw hand IK chains, targets and pole vectors");
     H->upper_len = cvar_reg_float("hands_upper_arm", 0.30f, 0.1f, 1.0f, 0, "upper arm length (m)");
     H->fore_len = cvar_reg_float("hands_forearm", 0.29f, 0.1f, 1.0f, 0, "forearm length (m)");
-    H->bob_scale = cvar_reg_float("hands_bob", 1.0f, 0.0f, 3.0f, CVAR_ARCHIVE, "viewmodel bob amount");
-    H->sway_scale = cvar_reg_float("hands_sway", 1.0f, 0.0f, 3.0f, CVAR_ARCHIVE, "viewmodel sway amount");
-    H->headbob = cvar_find("cl_headbob");
     cmd_register("hands_reload", cmd_reload_poses, "reload data/hand_poses.json");
     H->clip = H->prev_clip = -1;
     MeshBuilder mb;
@@ -299,12 +289,6 @@ static vec3 cam_to_world(vec3 cam_pos, quat cam_rot, vec3 local) { return v3_add
 
 // ------------------------------------------------------------------ update
 
-static float spring(float x, float *v, float target, float k, float damp, float dt) {
-    float a = (target - x) * k - *v * damp;
-    *v += a * dt;
-    return x + *v * dt;
-}
-
 void hands_update(const HandsInput *in) {
     World *w = in->world;
     const Player *p = &w->players[in->player];
@@ -343,64 +327,14 @@ void hands_update(const HandsInput *in) {
         pose = pose_lerp(&prev, &pose, smoothstepf(0, 1, H->fade));
     }
 
-    // ---- 2. procedural layer (camera space)
-    float speed = v3_len(v3_flat(m->vel));
-    bool grounded = m->on_ground && m->mode == MOVE_WALK;
-    float bob_target = grounded ? saturate(speed / 6.0f) : 0.0f;
-    H->bob_amount = lerpf(H->bob_amount, bob_target, exp_decay(8.0f, dt));
-    H->bob_phase += dt * (5.0f + speed * 1.1f);
-    float bob = H->bob_amount * H->bob_scale->f * (in->ads ? 0.25f : 1.0f);
-    vec3 bob_off = v3(sinf(H->bob_phase) * 0.014f * bob, -fabsf(cosf(H->bob_phase)) * 0.018f * bob, 0);
-    // Look sway: hands lag behind view rotation.
-    float sway_k = H->sway_scale->f * (in->ads ? 0.3f : 1.0f);
-    vec2 sway_target = v2(clampf(-in->look_delta.x / fmaxf(dt, 1e-3f) * 0.012f, -0.06f, 0.06f) * sway_k,
-                          clampf(-in->look_delta.y / fmaxf(dt, 1e-3f) * 0.012f, -0.05f, 0.05f) * sway_k);
-    H->sway.x = spring(H->sway.x, &H->sway_vel.x, sway_target.x, 120.0f, 16.0f, dt);
-    H->sway.y = spring(H->sway.y, &H->sway_vel.y, sway_target.y, 120.0f, 16.0f, dt);
-    // Velocity lag in camera space.
-    vec3 vel_cam = quat_rotate(quat_conj(cam_rot), m->vel);
-    vec3 lag_target = v3(clampf(-vel_cam.x * 0.004f, -0.03f, 0.03f), clampf(-vel_cam.y * 0.004f, -0.04f, 0.04f), clampf(vel_cam.z * 0.003f, -0.02f, 0.02f));
-    H->vel_lag.x = spring(H->vel_lag.x, &H->vel_lag_vel.x, lag_target.x, 90.0f, 14.0f, dt);
-    H->vel_lag.y = spring(H->vel_lag.y, &H->vel_lag_vel.y, lag_target.y, 90.0f, 14.0f, dt);
-    H->vel_lag.z = spring(H->vel_lag.z, &H->vel_lag_vel.z, lag_target.z, 90.0f, 14.0f, dt);
-    // Landing dip.
-    if (m->land_tick != H->last_land_tick) {
-        H->last_land_tick = m->land_tick;
-        H->land_vel -= clampf(m->land_speed * 0.03f, 0.0f, 0.4f);
-    }
-    H->land_dip = spring(H->land_dip, &H->land_vel, 0.0f, 150.0f, 14.0f, dt);
-    H->breathe += dt;
-    vec3 breathe = v3(0, sinf(H->breathe * 1.6f) * 0.003f, 0);
-    float crouch_drop = -0.015f * m->crouch_amount;
-
-    for (int h = 0; h < 2; h++) {
-        vec3 off = v3_add(bob_off, v3_add(v3(H->sway.x, H->sway.y, 0), v3_add(H->vel_lag, breathe)));
-        off.y += H->land_dip + crouch_drop;
-        if (h == HAND_LEFT) off.x = -off.x * 0.6f + off.x * 0.4f;
-        pose.pos[h] = v3_add(pose.pos[h], off);
-        // Sway also tilts the hands slightly.
-        pose.rot[h] = quat_mul(pose.rot[h], quat_euler(H->sway.x * 2.0f, -H->sway.y * 2.0f, H->sway.x * 1.5f));
-    }
-    // ADS: keep the top of the weapon just under the line of sight (box guns have no sights).
-    if (in->ads) {
-        const InvSlot *es = weapon_equipped(w, in->player);
-        const WeaponDef *ew = es ? item_weapon(w->items, es->item) : NULL;
-        if (ew && ew->kind != WPN_MELEE) {
-            float top = -1.0f;
-            for (int i = 0; i < ew->part_count; i++)
-                if (fabsf(ew->parts[i].offset.x) < 0.03f) top = fmaxf(top, ew->parts[i].offset.y + ew->parts[i].half.y);
-            if (top > -1.0f) pose.pos[HAND_RIGHT].y = fminf(pose.pos[HAND_RIGHT].y, -0.04f - top);
-        }
-    }
-    // Recoil (viewmodel spring layer): weapon hand pushed back, muzzle up / sideways, rolled.
-    // The support hand follows through the weapon's support grip.
+    // ---- 2. procedural layer: none here. Held items live on the hold point
+    //         (src/player/holdpoint.c: sway, look lag, bob, kick, ADS from the sight socket); the
+    //         body's arms are solved onto it. This rig only supplies interaction / ledge targets
+    //         and the empty-hands fallback when the body is not drawn (cl_fp_body 0).
+    const PlayerMove *mm = m;
+    (void)mm;
     H->kick_pos = in->vm_kick_pos;
     H->kick_rot = in->vm_kick_rot;
-    pose.pos[HAND_RIGHT] = v3_add(pose.pos[HAND_RIGHT], in->vm_kick_pos);
-    quat kick_rot = quat_mul(quat_axis_angle(v3(0, 1, 0), -in->vm_kick_rot.y * DG_DEG2RAD),
-                             quat_mul(quat_axis_angle(v3(1, 0, 0), in->vm_kick_rot.x * DG_DEG2RAD),
-                                      quat_axis_angle(v3(0, 0, 1), in->vm_kick_rot.z * DG_DEG2RAD)));
-    pose.rot[HAND_RIGHT] = quat_mul(pose.rot[HAND_RIGHT], kick_rot);
 
     // To world space.
     vec3 target_pos[2];

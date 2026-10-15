@@ -1,0 +1,133 @@
+// Hold point: the single transform in front of the camera where every held item lives.
+//
+// Everything about where an item sits is defined relative to the camera (x right, y up, -z
+// forward), per hold style and per state, with per-item overrides:
+//   state target (hip / ADS / sprint / crouch / prone / empty / inspect)
+//     -> inertialized blend between states (no pops when a state or the item changes)
+//     -> ADS computed from the item's sight socket (sight on the view axis at the eye relief)
+//     -> procedural layer around the pivot: look lag, idle sway + breathing, movement bob, kick
+//     -> weapon collision (forward cast along the item, pull back / up along a curve)
+//   item (camera space) = hold point * inverse(anchor socket)
+// The evaluation is pure and deterministic: the same inputs give bit-identical results, so the
+// local player and every remote copy of it solve the same pose (see docs/CAMERA_HOLDPOINT.md).
+#ifndef DG_HOLDPOINT_H
+#define DG_HOLDPOINT_H
+
+#include "core/base.h"
+#include "core/dgmath.h"
+#include "anim/anim.h"
+
+struct cJSON;
+
+typedef enum HoldState {
+    HP_HIP, HP_ADS, HP_SPRINT, HP_CROUCH, HP_PRONE, HP_EMPTY, HP_INSPECT, HP_STATE_COUNT
+} HoldState;
+
+const char *holdpoint_state_name(int s);
+int holdpoint_state_from_name(const char *s);
+
+// One state target: position in camera space as (right, up, forward) meters, rotation as
+// (pitch, yaw, roll) degrees (pitch + = muzzle up, yaw + = muzzle left, roll + = cant left).
+typedef struct HpPose { vec3 pos, rot; bool set; } HpPose;
+
+typedef struct HoldPointStyle {
+    char name[16];
+    HpPose state[HP_STATE_COUNT];
+    float blend_in[HP_STATE_COUNT];   // blend time into each state (s)
+    float eye_relief;                 // ADS: sight distance in front of the eye (m)
+    vec3 ads_rot;                     // ADS extra rotation (deg), normally 0
+    // procedural layer (scaled by ads_scale while aiming down sights)
+    float ads_scale;
+    float lag_rot, lag_pos, lag_max, lag_k, lag_d;   // look lag: deg / m per rad/s, clamp deg, spring
+    float sway_rot, sway_freq, breath_pos, breath_freq;
+    float bob_pos, bob_rot, bob_freq;
+    float kick_scale;
+    // weapon collision
+    float col_back, col_up, col_pitch, col_curve, col_in_speed, col_out_speed, col_radius;
+    float clavicle_gain;              // clavicle additive (deg per m of hold offset from the hip pose)
+    float pitch_soft, pitch_follow;   // beyond pitch_soft (deg) the hold point follows the view pitch by pitch_follow
+    float ads_pitch_soft, ads_pitch_follow;   // the same in ADS (sight exactly on the view axis below ads_pitch_soft)
+    float twist;                      // torso blading (deg, + = left shoulder forward), neck counter-rotated
+    vec3 clav_l, clav_r;              // clavicle protraction (deg pitch, yaw, roll) while holding
+    float reach_pull;                 // max hold point pull towards the shoulders when out of reach (m)
+} HoldPointStyle;
+
+// Per item override (weapon / item JSON "holdpoint" block): only the set fields apply.
+typedef struct HoldPointOverride {
+    bool any;
+    HpPose state[HP_STATE_COUNT];
+    float eye_relief;                 // 0 = style
+    bool has_pivot;
+    vec3 pivot;                       // item space
+} HoldPointOverride;
+
+typedef struct HoldPointState {
+    bool init;
+    int state, style_key;
+    float blend_t, blend_dur;
+    vec3 off_pos;                     // inertialization offset at the last switch (camera space)
+    quat off_rot;
+    // Velocity-preserving inertialization (quintic per component: position + rotation vector)
+    float ix0[6], iv0[6], iT[6];
+    vec3 base_vel, base_avel;         // last tick's hold point velocity (m/s, rad/s rotation vector)
+    Xform base;                       // last blended state transform (hold point, camera space)
+    float prev_yaw, prev_pitch;
+    vec2 lag, lag_v;                  // look lag (deg pitch, yaw) spring
+    float bob_phase, bob_amt, t;
+    float pull;                       // collision pull 0..1 (smoothed)
+    float pitch_w;                    // soft pitch limit weight (0 in ADS)
+} HoldPointState;
+
+typedef bool (*HoldPointRayFn)(void *ctx, vec3 origin, vec3 dir_len, float *fraction, vec3 *point, vec3 *normal);
+
+typedef struct HoldPointInput {
+    const HoldPointStyle *style;
+    const HoldPointOverride *ovr;
+    int style_key;                    // changes -> inertialized blend (style / item switch)
+    // item sockets (item space; anchor = grip_r position unless the item names another). The
+    // anchor is used as a point: the hold point's rotation is the item's orientation.
+    Xform anchor;
+    vec3 sight, pivot;
+    float length;
+    bool has_item;
+    // requested state flags (priority: empty > inspect > sprint > ads > prone > crouch > hip)
+    bool ads, sprint, crouch, prone, empty, inspect;
+    float dt;
+    float aim_yaw, aim_pitch;         // view angles (radians): look lag from their rate
+    vec3 vel_cam;                     // velocity in camera space (m/s)
+    bool grounded;
+    vec3 kick_pos, kick_rot;          // recoil item spring: camera space m (+z back) / deg (pitch up, yaw right, roll)
+    Xform cam_world;                  // for the collision cast
+    HoldPointRayFn raycast;
+    void *ray_ctx;
+    bool static_pose;                 // no procedural layer (alignment tests, editor)
+} HoldPointInput;
+
+typedef struct HoldPointOutput {
+    Xform hold;                       // hold point (camera space): where the anchor socket goes
+    Xform item;                       // item transform (camera space)
+    vec3 pivot;                       // rotation pivot (camera space)
+    vec3 offset;                      // hold point offset from the style's hip pose (camera space)
+    Xform ads_item;                   // the exact ADS item transform (tests / debug)
+    int state;
+    float blend;                      // 0..1 progress of the current blend
+    float pull;                       // collision pull 0..1
+    vec3 cast_from, cast_to;          // world, last collision cast (debug)
+    bool cast_hit;
+} HoldPointOutput;
+
+void holdpoint_style_defaults(HoldPointStyle *s, const char *style_name);
+void holdpoint_style_parse(HoldPointStyle *s, const struct cJSON *o);
+void holdpoint_override_parse(HoldPointOverride *o, const struct cJSON *j);
+char *holdpoint_style_to_json(const HoldPointStyle *s);   // caller frees
+void holdpoint_reset(HoldPointState *st);
+// Resolves the requested state from the flags (documented priority).
+int holdpoint_pick_state(const HoldPointInput *in);
+// Exact ADS item transform: sight socket on the view axis at the eye relief, barrel along -Z.
+Xform holdpoint_ads_item(const HoldPointStyle *s, const HoldPointOverride *ovr, vec3 sight);
+void holdpoint_eval(HoldPointState *st, const HoldPointInput *in, HoldPointOutput *out);
+
+DG_INLINE quat hp_euler_deg(vec3 e) { return quat_euler(e.y * DG_DEG2RAD, e.x * DG_DEG2RAD, e.z * DG_DEG2RAD); }
+DG_INLINE vec3 hp_cam_pos(vec3 ruf) { return v3(ruf.x, ruf.y, -ruf.z); }
+
+#endif

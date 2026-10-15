@@ -178,6 +178,13 @@ void charrt_proc_input(const CharRuntime *r, ProcInput *in, Xform root, float dt
     in->hold_style = r->in.weapon_type;
     ctrl_hand_ik_weight(&r->ctrl, &in->hand_ik_weight);
     in->foot_ik = in->spine = in->turn = in->hold = in->lean = in->damage = true;
+    // Hold point camera: the character's eye socket on the Head bone; blend key = held item.
+    const CharSocket *eye = r->def ? character_socket(r->def, "camera") : NULL;
+    in->eye_bone = eye ? eye->bone : -1;
+    in->eye_local = eye ? eye->rel : xf_identity();
+    in->item_key = (int)r->in.weapon_id;
+    in->empty_hands = r->in.hanging || r->in.mantling || r->in.vaulting;
+    in->prone = r->in.prone;
 }
 
 void charrt_post(CharRuntime *r, ProcInput *in) {

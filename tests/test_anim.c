@@ -2,6 +2,7 @@
 // FBX load, rig validation, pose math, IK, hold styles + hand glue, body-part hitboxes and
 // damage multipliers, damage reactions, controller determinism, quantization, lag-comp
 // rewind and LOD hysteresis.
+#include "player/camera_fp.h"
 #include "anim/anim.h"
 #include "anim/anim_library.h"
 #include "anim/character_rt.h"
@@ -337,7 +338,7 @@ static void test_ik(void) {
 
 // ------------------------------------------------------------------ hold + glue
 
-typedef struct GlueStats { float max_pos, max_ang, max_item; int ticks; } GlueStats;
+typedef struct GlueStats { float max_pos, max_ang, max_item; int ticks; int worst_tick, worst_flags; float worst_pitch, worst_yaw; char worst_what[24]; } GlueStats;
 
 static Xform root_at(vec3 pos, float yaw) { return xf_make(pos, quat_yaw(yaw)); }
 
@@ -367,13 +368,40 @@ static void glue_step(CharRuntime *rt, const ItemSockets *k, CharInputs *in, flo
         if ((pe > 0.002f || ae > 1.0f) && g->max_pos <= 0.002f && g->max_ang <= 1.0f)
             printf("  glue %s/%s tick %d: %.2f mm %.2f deg (pitch %.2f ads %d crouch %d sprint %d, right err %.1f mm)\n", weapon, what, g->ticks, pe * 1000, ae,
                    in->aim_pitch, in->ads, in->crouch, in->sprint, rt->proc.right_err_pos * 1000);
+        if (pe > g->max_pos && pe > 0.002f) {
+            g->worst_tick = g->ticks;
+            g->worst_pitch = in->aim_pitch;
+            g->worst_flags = (in->ads ? 1 : 0) | (in->crouch ? 2 : 0) | (in->sprint ? 4 : 0);
+            g->worst_yaw = wrap_angle(in->aim_yaw - in->body_yaw);
+            snprintf(g->worst_what, sizeof(g->worst_what), "%s", what);
+        }
         g->max_pos = fmaxf(g->max_pos, pe);
         g->max_ang = fmaxf(g->max_ang, ae);
     }
     g->ticks++;
 }
 
+// Reach report: shoulder positions relative to the eye (camera space at the bind pose) and arm
+// lengths - the envelope every hold point state has to stay inside.
+static void report_reach(void) {
+    const Skeleton *s = &L->skel;
+    const CharacterDef *def = anim_lib_char_by_id(L, "player");
+    const CharSocket *eye = def ? character_socket(def, "camera") : NULL;
+    if (!eye || eye->bone < 0) return;
+    vec3 e = xf_point(s->bind_model[eye->bone], eye->rel.t);
+    for (int h = 0; h < 2; h++) {
+        int a = s->role[h ? BR_R_ARM : BR_L_ARM], f = s->role[h ? BR_R_FOREARM : BR_L_FOREARM], w = s->role[h ? BR_R_HAND : BR_L_HAND];
+        if (a < 0 || f < 0 || w < 0) continue;
+        vec3 sh = v3_sub(s->bind_model[a].t, e);
+        float len = v3_dist(s->bind_model[a].t, s->bind_model[f].t) + v3_dist(s->bind_model[f].t, s->bind_model[w].t);
+        Xform palm = xf_mul(s->bind_model[w], L->hands.palm[h]);
+        printf("  reach %s shoulder (right %.3f, up %.3f, fwd %.3f) from the eye, arm %.3f m, palm %.3f from the wrist\n", h ? "R" : "L", sh.x, sh.y, -sh.z, len,
+               v3_dist(palm.t, s->bind_model[w].t));
+    }
+}
+
 static void test_hold_and_glue(const ItemDB *db) {
+    report_reach();
     const float dt = 1.0f / 60.0f;
     const CharacterDef *def = anim_lib_char_by_id(L, "player");
     CHECK(def != NULL, "player character missing");
@@ -471,9 +499,166 @@ static void test_hold_and_glue(const ItemDB *db) {
         bool has_left = wd->sockets.has_left && proc_hold_style(&L->proc, style)->left_hand;
         if (has_left) CHECK(g.max_pos < 0.002f && g.max_ang < 1.0f, "%s glue: max %.2f mm / %.2f deg over 600 ticks + pitch sweep", wd->id, g.max_pos * 1000, g.max_ang);
         CHECK(g.max_item < 1e-4f, "%s: item moved %.6f after the right-hand solve", wd->id, g.max_item);
-        printf("  hold %-9s style %-9s glue max %.3f mm / %.3f deg, item drift %.2e\n", wd->id, wd->hold_style, g.max_pos * 1000, g.max_ang, g.max_item);
+        printf("  hold %-9s style %-9s glue max %.3f mm / %.3f deg, item drift %.2e", wd->id, wd->hold_style, g.max_pos * 1000, g.max_ang, g.max_item);
+        if (g.max_pos > 0.002f)
+            printf("  (worst: %s tick %d pitch %.2f rel yaw %.2f ads %d crouch %d sprint %d)", g.worst_what, g.worst_tick, g.worst_pitch, g.worst_yaw,
+                   g.worst_flags & 1, (g.worst_flags >> 1) & 1, (g.worst_flags >> 2) & 1);
+        printf("\n");
     }
     free(rt);
+}
+
+
+// ------------------------------------------------------------------ hold point / first person camera
+
+static void hp_step(CharRuntime *rt, const ItemSockets *k, CharInputs *in, float dt, bool static_pose, bool first_person, vec3 kick_p, vec3 kick_r) {
+    charrt_set_inputs(rt, in);
+    charrt_tick(rt, dt);
+    charrt_eval_base(rt);
+    ProcInput pi;
+    charrt_proc_input(rt, &pi, root_at(v3(0, 0, 0), in->body_yaw), dt);
+    pi.item = k;
+    pi.hand_ik_weight = 1.0f;
+    pi.hp_static = static_pose;
+    pi.first_person = first_person;
+    pi.item_kick_pos = kick_p;
+    pi.item_kick_rot = kick_r;
+    charrt_post(rt, &pi);
+}
+
+static void test_holdpoint(const ItemDB *db) {
+    const float dt = 1.0f / 60.0f;
+    const CharacterDef *def = anim_lib_char_by_id(L, "player");
+    if (!def) return;
+    CharRuntime *a = (CharRuntime *)malloc(sizeof(CharRuntime)), *b = (CharRuntime *)malloc(sizeof(CharRuntime));
+    // 1) ADS: the sight socket on the view axis within 0.5 mm / 0.1 deg after the full solve
+    //    (right-arm IK + reach pull), for every gun, at several view pitches.
+    for (int wi = 0; wi < db->weapon_count; wi++) {
+        const WeaponDef *wd = &db->weapons[wi];
+        if (wd->kind == WPN_MELEE) continue;
+        int style = proc_hold_style_index(&L->proc, wd->hold_style);
+        float worst_p = 0, worst_a = 0;
+        for (int pt = 0; pt < 5; pt++) {
+            charrt_init(a, L, def);
+            CharInputs in;
+            memset(&in, 0, sizeof(in));
+            in.grounded = true;
+            in.weapon_type = style;
+            in.weapon_id = (u16)(wi + 1);
+            in.ads = true;
+            in.aim_pitch = (-0.6f + 0.3f * (float)pt);
+            for (int t = 0; t < 40; t++) hp_step(a, &wd->sockets, &in, dt, true, false, v3(0, 0, 0), v3(0, 0, 0));
+            Xform ic = xf_mul(xf_inverse(a->proc.cam_model), a->proc.item_model);
+            vec3 sc = xf_point(ic, wd->sockets.sight);
+            float pe = sqrtf(sc.x * sc.x + sc.y * sc.y), ae = quat_angle_between(ic.r, quat_identity()) * DG_RAD2DEG;
+            worst_p = fmaxf(worst_p, pe);
+            worst_a = fmaxf(worst_a, ae);
+        }
+        CHECK(worst_p < 0.0005f && worst_a < 0.1f, "%s: ADS sight %.3f mm / %.3f deg off the view axis", wd->id, worst_p * 1000, worst_a);
+        printf("  ads %-9s sight on axis within %.4f mm / %.4f deg\n", wd->id, worst_p * 1000, worst_a);
+    }
+    // 2) The owner and a remote copy solve bit-identical poses from the same inputs (no
+    //    first-person-only pose code): 300 ticks through states, look, recoil.
+    for (int wi = 0; wi < db->weapon_count; wi++) {
+        const WeaponDef *wd = &db->weapons[wi];
+        int style = proc_hold_style_index(&L->proc, wd->hold_style);
+        charrt_init(a, L, def);
+        charrt_init(b, L, def);
+        CharInputs in;
+        memset(&in, 0, sizeof(in));
+        in.grounded = true;
+        in.weapon_type = style;
+        in.weapon_id = (u16)(wi + 1);
+        bool same = true;
+        for (int t = 0; t < 300; t++) {
+            int ph = t / 50;
+            in.ads = ph == 1 || ph == 4;
+            in.sprint = ph == 2;
+            in.crouch = ph == 3;
+            in.speed = ph == 2 ? 6.0f : (ph == 3 ? 1.2f : 0.0f);
+            in.aim_yaw = 0.6f * sinf((float)t * 0.05f);
+            in.aim_pitch = 0.4f * sinf((float)t * 0.031f);
+            vec3 kp = ph == 4 ? v3(0, 0.004f, 0.02f * fabsf(sinf((float)t))) : v3(0, 0, 0);
+            vec3 kr = ph == 4 ? v3(3.0f * fabsf(sinf((float)t)), 0.5f, 0.8f) : v3(0, 0, 0);
+            u8 turning = 0;
+            in.body_yaw = anim_body_yaw_step(in.body_yaw, in.aim_yaw, in.speed > 0.3f, &L->proc, dt, &turning);
+            hp_step(a, &wd->sockets, &in, dt, false, false, kp, kr);
+            hp_step(b, &wd->sockets, &in, dt, false, true, kp, kr);
+            if (memcmp(a->final_model, b->final_model, sizeof(Xform) * (size_t)L->skel.count) != 0 ||
+                memcmp(&a->proc.item_model, &b->proc.item_model, sizeof(Xform)) != 0) {
+                same = false;
+                break;
+            }
+        }
+        CHECK(same, "%s: owner and remote hold point poses differ", wd->id);
+    }
+    // 3) State switches are continuous: the hold point never jumps (inertialized blends).
+    {
+        const WeaponDef *wd = &db->weapons[1];
+        int style = proc_hold_style_index(&L->proc, wd->hold_style);
+        charrt_init(a, L, def);
+        CharInputs in;
+        memset(&in, 0, sizeof(in));
+        in.grounded = true;
+        in.weapon_type = style;
+        in.weapon_id = 2;
+        // A snap would move the full state distance (~20 cm) in one tick. Velocity continuity: a
+        // switch that interrupts a running blend must not change the velocity more than an
+        // uninterrupted blend itself does (a kink shows up as a much larger per-tick change).
+        float step[2] = { 0, 0 }, dvm[2] = { 0, 0 };
+        const int period[2] = { 60, 5 };   // calm switches (baseline) / switches every 83 ms (mid-blend)
+        for (int run = 0; run < 2; run++) {
+            charrt_init(a, L, def);
+            Xform prev = xf_identity();
+            vec3 prev_v = v3(0, 0, 0);
+            for (int t = 0; t < 480; t++) {
+                int ph = (t / period[run]) % 6;
+                in.ads = ph == 1 || ph == 4;
+                in.sprint = ph == 2;
+                in.crouch = ph == 3 || ph == 4;
+                hp_step(a, &wd->sockets, &in, dt, true, false, v3(0, 0, 0), v3(0, 0, 0));
+                Xform h = a->proc.hp_out.hold;
+                if (t > 0) {
+                    vec3 v = v3_sub(h.t, prev.t);
+                    step[run] = fmaxf(step[run], v3_len(v));
+                    if (t > 1) dvm[run] = fmaxf(dvm[run], v3_dist(v, prev_v));
+                    prev_v = v;
+                }
+                prev = h;
+            }
+        }
+        CHECK(step[0] < 0.05f && step[1] < 0.05f, "hold point state blend jumps %.1f / %.1f mm in one tick", step[0] * 1000, step[1] * 1000);
+        CHECK(dvm[1] < dvm[0] * 1.6f, "interrupted blends change velocity %.2f mm/tick vs %.2f uninterrupted (kink)", dvm[1] * 1000, dvm[0] * 1000);
+        printf("  hold point blend: max %.1f mm/tick; velocity change %.2f mm/tick interrupted every 83 ms vs %.2f uninterrupted\n",
+               fmaxf(step[0], step[1]) * 1000, dvm[1] * 1000, dvm[0] * 1000);
+    }
+    free(a);
+    free(b);
+    // 4) Head stabilizer: landing dip, hit jerk, mantle push and stagger never move the camera
+    //    more than the clamp away from the ideal eye, and never jump between frames.
+    {
+        CamHeadStab st;
+        memset(&st, 0, sizeof(st));
+        CamStabParams prm = cam_stab_params_default();
+        float worst = 0, worst_step = 0;
+        vec3 prev_eye = v3(0, 1.6f, 0);
+        for (int f = 0; f < 600; f++) {
+            float t = (float)f / 144.0f;
+            vec3 ideal = v3(0, 1.6f, 0);
+            vec3 off = v3(0, 0, 0);
+            if (t > 0.5f && t < 0.8f) off.y = -0.25f * sinf((t - 0.5f) / 0.3f * DG_PI);           // landing
+            if (t > 1.2f && t < 1.35f) off.x = 0.15f;                                              // hit jerk
+            if (t > 2.0f && t < 2.8f) off = v3(0, 0.2f * sinf((t - 2.0f) / 0.8f * DG_PI), -0.4f);  // mantle
+            if (t > 3.2f) off = v3(0.06f * sinf(t * 21.0f), 0.04f * sinf(t * 13.0f), 0);          // stagger
+            vec3 eye = camera_fp_stabilize_ex(&st, ideal, v3_add(ideal, off), 0.0f, 1.0f / 144.0f, &prm);
+            worst = fmaxf(worst, v3_dist(eye, ideal));
+            if (f > 0) worst_step = fmaxf(worst_step, v3_dist(eye, prev_eye));
+            prev_eye = eye;
+        }
+        CHECK(worst <= prm.clamp + 1e-4f, "stabilizer displacement %.1f mm exceeds the clamp %.1f mm", worst * 1000, prm.clamp * 1000);
+        CHECK(worst_step < 0.01f, "stabilizer jumped %.1f mm in one 144 Hz frame", worst_step * 1000);
+        printf("  head stabilizer: max %.1f mm from the ideal eye (clamp %.0f), max step %.2f mm / frame\n", worst * 1000, prm.clamp * 1000, worst_step * 1000);
+    }
 }
 
 // ------------------------------------------------------------------ hitboxes / damage
@@ -752,6 +937,7 @@ int main(int argc, char **argv) {
     test_pose_math();
     test_ik();
     test_hold_and_glue(db);
+    test_holdpoint(db);
     test_body_parts(db);
     test_damage_reaction();
     test_clip_facing();
