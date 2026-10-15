@@ -1,0 +1,300 @@
+{
+  "duration": 0.1,
+  "priority": 1,
+  "max_instances": 48,
+  "cull_distance": 150,
+  "lod": [
+    [
+      25,
+      0.75
+    ],
+    [
+      60,
+      0.45
+    ],
+    [
+      110,
+      0.2
+    ]
+  ],
+  "emitters": [
+    {
+      "name": "hitflash",
+      "tier": "cpu",
+      "spawn": {
+        "mode": "burst",
+        "count": 1,
+        "life": [
+          0.03,
+          0.05
+        ],
+        "size": [
+          0.06,
+          0.09
+        ],
+        "offset": 0.01,
+        "dir": "normal",
+        "color": [
+          1.0,
+          0.8,
+          0.55,
+          1.0
+        ]
+      },
+      "update": {
+        "alpha_curve": [
+          [
+            0,
+            1
+          ],
+          [
+            0.5,
+            0.85
+          ],
+          [
+            1,
+            0
+          ]
+        ]
+      },
+      "render": {
+        "mode": "add",
+        "texture": "ember",
+        "emissive": 3.0,
+        "near_fade": 0.05
+      }
+    },
+    {
+      "name": "sparks",
+      "tier": "gpu",
+      "spawn": {
+        "mode": "burst",
+        "count": [
+          12,
+          24
+        ],
+        "life": [
+          0.1,
+          0.35
+        ],
+        "size": [
+          0.006,
+          0.012
+        ],
+        "speed": [
+          4.0,
+          11.0
+        ],
+        "dir": "reflect",
+        "dir_bias": 0.4,
+        "angle": 40,
+        "frame_random": true,
+        "color": [
+          1.0,
+          0.72,
+          0.38,
+          1.0
+        ],
+        "color2": [
+          1.0,
+          0.52,
+          0.2,
+          1.0
+        ]
+      },
+      "update": {
+        "gravity": 1.0,
+        "drag": 0.8,
+        "collide": "depth",
+        "bounce": 0.35,
+        "friction": 0.3,
+        "alpha_curve": [
+          [
+            0,
+            1
+          ],
+          [
+            0.6,
+            0.9
+          ],
+          [
+            1,
+            0
+          ]
+        ]
+      },
+      "render": {
+        "mode": "add",
+        "orient": "stretch",
+        "texture": "helmet_spark",
+        "emissive": 5.0,
+        "stretch": 0.012,
+        "stretch_max": 10,
+        "near_fade": 0.05
+      }
+    },
+    {
+      "name": "dust",
+      "tier": "gpu",
+      "spawn": {
+        "mode": "burst",
+        "count": [
+          2,
+          3
+        ],
+        "life": [
+          0.6,
+          1.4
+        ],
+        "size": [
+          0.1,
+          0.18
+        ],
+        "speed": [
+          0.4,
+          1.5
+        ],
+        "dir": "normal",
+        "angle": 35,
+        "rotation": [
+          0,
+          360
+        ],
+        "spin": [
+          -30,
+          30
+        ],
+        "color": [
+          0.35,
+          0.37,
+          0.32,
+          0.5
+        ]
+      },
+      "update": {
+        "gravity": 0.03,
+        "drag": 3.5,
+        "wind": 0.4,
+        "size_curve": {
+          "type": "bezier",
+          "keys": [
+            [
+              0,
+              0.4
+            ],
+            [
+              0.2,
+              1.3
+            ],
+            [
+              1,
+              2.6
+            ]
+          ]
+        },
+        "alpha_curve": {
+          "type": "bezier",
+          "keys": [
+            [
+              0,
+              0
+            ],
+            [
+              0.06,
+              1
+            ],
+            [
+              0.45,
+              0.6
+            ],
+            [
+              1,
+              0
+            ]
+          ]
+        },
+        "frame_over_life": true
+      },
+      "render": {
+        "mode": "alpha",
+        "lighting": "sixway",
+        "texture": "dust_puff",
+        "soft": 0.3,
+        "near_fade": 0.25
+      }
+    },
+    {
+      "name": "chunks",
+      "tier": "cpu",
+      "spawn": {
+        "mode": "burst",
+        "count": [
+          2,
+          4
+        ],
+        "life": [
+          2.0,
+          3.5
+        ],
+        "size": [
+          0.015,
+          0.035
+        ],
+        "speed": [
+          1.5,
+          4.0
+        ],
+        "dir": "incoming",
+        "angle": 35,
+        "spin": [
+          -900,
+          900
+        ],
+        "color": [
+          0.25,
+          0.28,
+          0.22,
+          1.0
+        ]
+      },
+      "update": {
+        "gravity": 1.0,
+        "drag": 0.25,
+        "collide": "physics",
+        "bounce": 0.25,
+        "friction": 0.6,
+        "alpha_curve": [
+          [
+            0,
+            1
+          ],
+          [
+            0.85,
+            1
+          ],
+          [
+            1,
+            0
+          ]
+        ]
+      },
+      "render": {
+        "mode": "mesh",
+        "mesh": "shard_helmet"
+      }
+    }
+  ],
+  "light": {
+    "color": [
+      1.0,
+      0.7,
+      0.4
+    ],
+    "intensity": 3.0,
+    "radius": 2.0,
+    "duration": 0.05,
+    "exposure_aware": true
+  },
+  "name": "flesh_helmet_break",
+  "_generated": "make_flesh_effects.py"
+}

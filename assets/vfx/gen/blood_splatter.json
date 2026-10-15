@@ -1,0 +1,27 @@
+{
+  "kind": "decal",
+  "grid": [
+    4,
+    4
+  ],
+  "variants": 16,
+  "cell": 128,
+  "normal_map": true,
+  "normal_strength": 6.0,
+  "placeholder": {
+    "type": "splatter",
+    "seed": 74
+  },
+  "edge_margin": 0.03,
+  "model": "higgsfield-ai/soul/standard",
+  "aspect_ratio": "1:1",
+  "resolution": "1080p",
+  "background": "green",
+  "alpha": {
+    "tol": 0.1,
+    "soft": 0.12
+  },
+  "api_variants": 1,
+  "prompt": "orthographic top down photograph of a directional spatter of dark dried and wet blood on a flat surface, a main mass with satellite droplets and spines thrown to the right, centered, filling the frame, isolated on a solid flat pure green (#00FF00) chroma key background, even soft lighting, no shadows, no text, forensic reference photograph, realistic, not cartoon",
+  "name": "blood_splatter"
+}

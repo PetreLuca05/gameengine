@@ -386,6 +386,169 @@ def decal_hole(cell, variants, seed, kind="concrete", **_):
     return out, heights
 
 
+
+# ------------------------------------------------------------------ flesh (blood decals, wounds)
+# Real blood: very dark, desaturated red; wet centres slightly lighter, dried rims darker
+# (coffee ring). Albedo in sRGB; height for the normal pass (thick drops stand up).
+
+_BLOOD_WET = np.array([0.31, 0.04, 0.034], np.float32)
+_BLOOD_RIM = np.array([0.17, 0.028, 0.022], np.float32)
+
+
+def _blood_col(a, n, rim_w=0.25):
+    rim = np.clip(1 - a / max(rim_w, 1e-3), 0, 1) * (a > 0.02)
+    col = _BLOOD_WET[None, None, :] * (0.85 + 0.3 * n[..., None]) * (1 - rim[..., None]) + _BLOOD_RIM[None, None, :] * rim[..., None]
+    return col
+
+
+def splatter(cell, variants, seed, **_):
+    """Directional splatter: main mass on the left, satellite drops and spines thrown to +u
+    (the decal tangent points along the ray, so stretched splats smear the same way)."""
+    out, heights = [], []
+    rng = np.random.default_rng(seed)
+    u, v = grid(cell)
+    for i in range(variants):
+        n = fbm(u * 5 + i * 3.1, v * 5, 0, 5, seed + i)
+        a = np.zeros_like(u)
+        h = np.zeros_like(u)
+        cx, cy = rng.uniform(-0.45, -0.2), rng.uniform(-0.12, 0.12)
+        rr = np.sqrt(((u - cx) / 1.25) ** 2 + (v - cy) ** 2) * (0.8 + 0.45 * n)
+        core = smooth(rng.uniform(0.28, 0.42), 0.12, rr)
+        a = np.maximum(a, core)
+        h = np.maximum(h, core * 0.5)
+        for k in range(int(rng.integers(10, 26))):
+            d = rng.uniform(0.15, 1.25)
+            ang = rng.normal(0, 0.45)
+            x, y = cx + math.cos(ang) * d, cy + math.sin(ang) * d * 0.8
+            s = rng.uniform(0.012, 0.07) * (1.15 - d * 0.5)
+            el = 1 + d * rng.uniform(0.5, 2.5)
+            c, sn = math.cos(ang), math.sin(ang)
+            pu, pv = (u - x) * c + (v - y) * sn, -(u - x) * sn + (v - y) * c
+            drop = smooth(s, s * 0.45, np.sqrt((pu / el) ** 2 + pv ** 2))
+            a = np.maximum(a, drop)
+            h = np.maximum(h, drop * 0.8)
+            if rng.uniform() < 0.35:   # spine back to the mass
+                spine = smooth(s * 0.35, 0.0, np.abs(pv)) * (pu < 0) * (pu > -d * 0.5) * smooth(-d * 0.5, -d * 0.2, pu)
+                a = np.maximum(a, spine * 0.8)
+        a = np.clip(a * (0.75 + 0.35 * n), 0, 1) * smooth(1.0, 0.85, np.maximum(np.abs(u), np.abs(v)))
+        out.append(rgba(_blood_col(a, n), a))
+        heights.append((h * a).astype(np.float32) * 0.6)
+    return out, heights
+
+
+def drip_strip(cell, variants, seed, **_):
+    """Run down a wall: source blob at u = -1 (top), a tapering trail to +u, a bulb at the end."""
+    out, heights = [], []
+    rng = np.random.default_rng(seed)
+    u, v = grid(cell)
+    for i in range(variants):
+        n = fbm(u * 3 + i, v * 9, 0, 4, seed + i)
+        wob = (fbm(u * 2.5 + i * 7, v * 0.2, 0, 3, seed + 40 + i) - 0.5) * 0.12
+        end = rng.uniform(0.55, 0.85)
+        width = 0.11 * (1 - 0.55 * (u + 1) / 2)
+        trail = smooth(width, width * 0.5, np.abs(v - wob)) * (u < end)
+        head = smooth(0.3, 0.12, np.sqrt(((u + 0.72) / 1.3) ** 2 + (v - wob) ** 2) * (0.85 + 0.3 * n))
+        bulb = smooth(0.1, 0.05, np.sqrt((u - end) ** 2 + (v - wob) ** 2 * 1.4))
+        a = np.clip(np.maximum(np.maximum(trail, head), bulb) * (0.8 + 0.3 * n), 0, 1)
+        out.append(rgba(_blood_col(a, n, 0.35), a))
+        heights.append((np.maximum(trail * 0.5, bulb) * a).astype(np.float32) * 0.6)
+    return out, heights
+
+
+def pool_mask(cell, variants, seed, **_):
+    """Pool: a thick, smooth edged irregular mass (grows from small to large in the game)."""
+    out, heights = [], []
+    u, v = grid(cell)
+    r = np.sqrt(u * u + v * v)
+    ang = np.arctan2(v, u)
+    for i in range(variants):
+        n = fbm(u * 2 + i * 1.7, v * 2, 0, 4, seed + i)
+        lobes = 0.12 * np.sin(ang * (3 + i) + i) + 0.08 * np.sin(ang * (5 + i * 2) + 1.3 * i)
+        edge = 0.72 + lobes + (n - 0.5) * 0.3
+        a = smooth(edge, edge - 0.05, r)
+        col = _blood_col(a, n * 0.4 + 0.3, 0.08) * (0.8 + 0.2 * smooth(0.0, 0.6, r))[..., None]
+        out.append(rgba(col, a))
+        heights.append((smooth(edge, edge - 0.12, r) * 0.6).astype(np.float32))
+    return out, heights
+
+
+def wound(cell, variants, seed, kind="entry", **_):
+    """Bullet wounds: entry = small dark hole + abrasion ring; exit = larger ragged tear;
+    slash = a long cut along u."""
+    out, heights = [], []
+    rng = np.random.default_rng(seed)
+    u, v = grid(cell)
+    r = np.sqrt(u * u + v * v)
+    ang = np.arctan2(v, u)
+    for i in range(variants):
+        n = fbm(u * 7 + i * 2.3, v * 7, 0, 5, seed + i)
+        if kind == "entry":
+            jag = 1 + 0.15 * (fbm(np.cos(ang) * 2 + i, np.sin(ang) * 2, 0, 3, seed + 9 + i) - 0.5)
+            rr = r * jag
+            hole = smooth(0.17, 0.11, rr)
+            ring = smooth(0.42, 0.2, rr) * (1 - hole)
+            bruise = smooth(0.95, 0.3, rr * (0.8 + 0.4 * n)) * (1 - ring) * (1 - hole)
+            col = (np.array([0.05, 0.01, 0.01])[None, None] * hole[..., None] + np.array([0.36, 0.08, 0.06])[None, None] * ring[..., None]
+                   + np.array([0.24, 0.1, 0.1])[None, None] * bruise[..., None])
+            a = np.clip(hole + ring * 0.95 + bruise * 0.15, 0, 1) * smooth(1.0, 0.8, r)
+            h = -hole * 0.8 + ring * 0.15
+        elif kind == "slash":
+            wob = (fbm(u * 2 + i * 3, v * 0.1, 0, 3, seed + 5 + i) - 0.5) * 0.15
+            w = 0.07 * (1 - u * u) + 0.01
+            cut = smooth(w, w * 0.3, np.abs(v - wob)) * smooth(0.95, 0.75, np.abs(u))
+            blood = smooth(w * 3.5, w, np.abs(v - wob) * (0.8 + 0.4 * n)) * smooth(1.0, 0.6, np.abs(u)) * (1 - cut)
+            col = np.array([0.12, 0.012, 0.01])[None, None] * cut[..., None] + _BLOOD_WET[None, None] * blood[..., None]
+            a = np.clip(cut + blood * 0.8, 0, 1)
+            h = -cut * 0.6 + blood * 0.1
+        else:
+            k = int(rng.integers(4, 7))
+            star = 0.25 + 0.18 * np.abs(np.sin(ang * k * 0.5 + rng.uniform(0, 3))) + (fbm(np.cos(ang) * 3 + i, np.sin(ang) * 3, 0, 4, seed + 21 + i) - 0.5) * 0.25
+            tear = smooth(star, star - 0.06, r)
+            tissue = tear * (fbm(u * 14 + i, v * 14, 0, 3, seed + 33 + i) > 0.55)
+            blood = smooth(0.85, 0.3, r * (0.75 + 0.5 * n)) * (1 - tear)
+            col = (np.array([0.16, 0.015, 0.012])[None, None] * tear[..., None] * (1 - tissue[..., None]) + np.array([0.5, 0.16, 0.14])[None, None] * tissue[..., None]
+                   + _BLOOD_WET[None, None] * blood[..., None])
+            a = np.clip(tear + blood * 0.85, 0, 1) * smooth(1.0, 0.8, r)
+            h = -tear * 0.4 + tissue * 0.5 + blood * 0.15
+        out.append(rgba(col, a))
+        heights.append(h.astype(np.float32))
+    return out, heights
+
+
+def stain(cell, variants, seed, cloth=False, **_):
+    """Blood soaking into skin or cloth: soft irregular blob, darker wicking edge; cloth shows
+    the weave."""
+    out, heights = [], []
+    u, v = grid(cell)
+    r = np.sqrt(u * u + v * v)
+    for i in range(variants):
+        n = fbm(u * 3 + i * 4.1, v * 3, 0, 5, seed + i)
+        edge = 0.65 + (n - 0.5) * 0.55
+        a = smooth(edge, edge - 0.25, r)
+        wick = np.exp(-((r - edge + 0.08) ** 2) / 0.004) * 0.5
+        if cloth:
+            weave = 0.85 + 0.15 * np.sin(u * cell * 0.9) * np.sin(v * cell * 0.9)
+            a = a * weave
+        a = np.clip(a * 0.9 + wick * a, 0, 1)
+        col = _blood_col(a, n, 0.15) * (1 - 0.3 * wick[..., None])
+        out.append(rgba(col, a))
+        heights.append((a * 0.05).astype(np.float32))
+    return out, heights
+
+
+def strand(cell, variants, seed, **_):
+    """Stretched blood strand: along v, tapering, a drop at the head."""
+    out = []
+    u, v = grid(cell)
+    for i in range(variants):
+        wob = (fbm(v * 2 + i * 5, u * 0.1, 0, 3, seed + i) - 0.5) * 0.2
+        w = 0.12 * (0.35 + 0.65 * (v + 1) / 2)
+        line = smooth(w, w * 0.4, np.abs(u - wob)) * smooth(-0.95, -0.7, v)
+        head = smooth(0.2, 0.1, np.sqrt((u - wob) ** 2 + (v - 0.75) ** 2))
+        a = np.clip(np.maximum(line, head), 0, 1)
+        out.append(rgba(_BLOOD_WET * 0.9, a))
+    return out
+
 GENERATORS = {
     "flash_core": flash_core,
     "flash_side": flash_side,
@@ -402,4 +565,10 @@ GENERATORS = {
     "grass_bits": grass_bits,
     "heat_normal": heat_normal,
     "decal_hole": decal_hole,
+    "splatter": splatter,
+    "drip_strip": drip_strip,
+    "pool_mask": pool_mask,
+    "wound": wound,
+    "stain": stain,
+    "strand": strand,
 }

@@ -3,6 +3,7 @@
 #include "core/engine.h"
 #include "core/log.h"
 #include "gameplay/effects.h"
+#include "gameplay/flesh_fx.h"
 #include "gameplay/entities.h"
 #include "gameplay/characters.h"
 #include "net/net.h"
@@ -34,6 +35,7 @@ void game_hud_tick(float dt) {
     if (G->hitmarker_time > 0) G->hitmarker_time -= dt;
     G->damage_flash = fmaxf(0.0f, G->damage_flash - dt * 1.5f);
     fx_update(dt);
+    flesh_fx_update(G->world, dt);
     // Hold-interaction progress for the HUD: authoritative value (host) or replicated (client).
     Player *p = game_local_player();
     G->hold_progress = p ? p->hold_progress : 0;
@@ -63,8 +65,25 @@ void game_handle_event(const GameEvent *ev) {
         break;
     }
     case EV_IMPACT: {
+        bool predicted = ev->ent2 && (int)ev->ent2 - 1 == G->local_slot && fx_predict_impacts();
+        if (ev->ent && (((ev->id >> 12) & 0xF) & FX_IMPACT_FLESH)) {
+            // Character hit: flesh effects (the shooter predicted only the entry burst).
+            FleshHit fh;
+            memset(&fh, 0, sizeof(fh));
+            bool kill, melee;
+            flesh_unpack_event(ev->data, &fh.dir, &fh.part, &kill, &melee, &fh.dist);
+            fh.target = ev->ent;
+            fh.pos = ev->pos;
+            fh.normal = ev->dir;
+            fh.caliber = (int)((ev->id >> 8) & 0xF);
+            fh.damage = ev->value;
+            u32 fl = (ev->id >> 12) & 0xF;
+            fh.flags = ((fl & FX_IMPACT_HEAD) ? FLESH_HEAD : 0u) | (kill ? FLESH_KILL : 0u) | (melee ? FLESH_MELEE : 0u) | (predicted ? FLESH_NO_ENTRY : 0u);
+            flesh_fx_hit(w, &fh);
+            break;
+        }
         // Own shots were predicted locally (cl_predict_impacts): skip the host's copy.
-        if (ev->ent2 && (int)ev->ent2 - 1 == G->local_slot && fx_predict_impacts()) break;
+        if (predicted) break;
         vec3 inc;
         memcpy(&inc, ev->data, sizeof(inc));
         fx_impact_ex(ev->pos, ev->dir, inc, (int)(ev->id & 0xFF), (int)((ev->id >> 8) & 0xF), (ev->id >> 12) & 0xF);

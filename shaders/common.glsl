@@ -48,6 +48,7 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 cshadow;         // xy cloud shadow origin (world xz), z 1 / size
     mat4 shadow_vps[3];   // cascaded shadow maps: world -> atlas tile (2 x 2 atlas)
     vec4 shadow_splits;   // x, y, z: cascade radii (m), w: cascade count
+    vec4 shadow_bias;     // x, y, z: per-cascade depth bias scale (constant bias in metres)
     PointLight lights[MAX_POINT_LIGHTS];
 } frame;
 

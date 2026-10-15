@@ -17,11 +17,22 @@ VfxSpawnParams vfx_spawn_params(vec3 pos) {
     return p;
 }
 
+static void decal_index_reset(VfxSystem *s) {
+    s->decal_free_n = 0;
+    for (int i = VFX_MAX_DECALS_HARD - 1; i >= 0; i--) { s->decal_free[s->decal_free_n++] = i; s->decal_live_pos[i] = -1; s->skin_pos[i] = -1; }
+    s->decal_live_n = s->skin_n = 0;
+    memset(s->pool_count, 0, sizeof(s->pool_count));
+    memset(s->pool_ring_head, 0, sizeof(s->pool_ring_head));
+    memset(s->pool_ring_n, 0, sizeof(s->pool_ring_n));
+}
+
 void vfx_sys_init(VfxSystem *s, const VfxLibrary *lib) {
     memset(s, 0, sizeof(*s));
+    decal_index_reset(s);
     s->lib = lib;
     s->cfg.quality_mul = 1.0f;
     s->cfg.decal_max = 256;
+    s->cfg.blood_decal_max = 256;
     s->cfg.max_cpu = VFX_MAX_CPU_PARTICLES;
     s->cfg.timescale = 1.0f;
     s->cfg.lighting = true;
@@ -201,8 +212,15 @@ u32 vfx_sys_spawn(VfxSystem *s, int effect, const VfxSpawnParams *p) {
     // Effect light (1-2 ticks for flashes).
     // Decal (impacts on static surfaces).
     if (fx->decal.enabled && p->decal_ok) {
-        u32 st = in->seed ^ 0xdeca1u;
-        vfx_sys_add_decal(s, &fx->decal, p->pos, p->normal, p->scale, vfx_hash(st));
+        u32 st = vfx_hash(in->seed ^ 0xdeca1u);
+        VfxDecalSpawn ds;
+        memset(&ds, 0, sizeof(ds));
+        ds.pos = p->pos;
+        ds.normal = p->normal;
+        u32 st2 = st;
+        ds.size = vfx_range(fx->decal.size, &st2) * p->scale;
+        ds.tint = p->tint;
+        vfx_sys_add_decal_ex(s, &fx->decal, &ds, st);
     }
     return in->handle;
 }
@@ -232,39 +250,159 @@ void vfx_sys_stop(VfxSystem *s, u32 handle) {
 }
 
 void vfx_sys_add_decal(VfxSystem *s, const VfxDecalDef *d, vec3 pos, vec3 normal, float scale, u32 seed) {
-    int max = s->cfg.decal_max;
-    if (max <= 0) return;
-    if (max > VFX_MAX_DECALS_HARD) max = VFX_MAX_DECALS_HARD;
-    // Ring buffer: the oldest decal is recycled once the budget is reached (never exceeded).
-    int slot;
-    if (s->decal_count < max) {
-        slot = -1;
-        for (int i = 0; i < max; i++) if (!s->decals[i].alive) { slot = i; break; }
-        if (slot < 0) slot = s->decal_head % max;
-    } else {
-        // Find the oldest within the budget window.
-        u32 best = 0xFFFFFFFFu;
-        slot = 0;
-        for (int i = 0; i < max; i++) if (s->decals[i].alive && s->decals[i].serial < best) { best = s->decals[i].serial; slot = i; }
+    VfxDecalSpawn sp;
+    memset(&sp, 0, sizeof(sp));
+    sp.pos = pos;
+    sp.normal = normal;
+    u32 st = seed;
+    sp.size = vfx_range(d->size, &st) * scale;
+    vfx_sys_add_decal_ex(s, d, &sp, seed);
+}
+
+void vfx_sys_decal_release(VfxSystem *s, int slot) {
+    if (slot < 0 || slot >= VFX_MAX_DECALS_HARD || !s->decals[slot].alive) return;
+    VfxDecal *d = &s->decals[slot];
+    d->alive = false;
+    s->decal_count--;
+    s->pool_count[d->pool]--;
+    int lp = s->decal_live_pos[slot];
+    if (lp >= 0) {
+        int last = s->decal_live[--s->decal_live_n];
+        s->decal_live[lp] = last;
+        s->decal_live_pos[last] = lp;
+        s->decal_live_pos[slot] = -1;
     }
+    int sp = s->skin_pos[slot];
+    if (sp >= 0) {
+        int last = s->skin_slots[--s->skin_n];
+        s->skin_slots[sp] = last;
+        s->skin_pos[last] = sp;
+        s->skin_pos[slot] = -1;
+    }
+    s->decal_free[s->decal_free_n++] = slot;
+}
+
+int vfx_sys_decal_count(const VfxSystem *s, int pool, u32 attach) {
+    if (!attach) return s->pool_count[DG_CLAMP(pool, 0, VFX_DECAL_POOL_COUNT - 1)];
+    int n = 0;
+    for (int i = 0; i < s->skin_n; i++) {
+        const VfxDecal *d = &s->decals[s->skin_slots[i]];
+        if (d->pool == pool && d->attach == attach) n++;
+    }
+    return n;
+}
+
+void vfx_sys_kill_decals(VfxSystem *s, u32 attach) {
+    if (!attach) return;
+    for (int i = s->skin_n - 1; i >= 0; i--) {
+        int slot = s->skin_slots[i];
+        if (s->decals[slot].attach == attach) vfx_sys_decal_release(s, slot);
+    }
+}
+
+static int cmp_ring(const void *a, const void *b) {
+    u32 x = ((const u32 *)a)[1], y = ((const u32 *)b)[1];
+    return x < y ? -1 : (x > y ? 1 : 0);
+}
+
+// Rebuilds a pool's ring from the live decals (oldest first); returns its length.
+static int pool_ring_rebuild(VfxSystem *s, int pool) {
+    int n = 0;
+    for (int i = 0; i < s->decal_live_n; i++) {
+        int slot = s->decal_live[i];
+        if (s->decals[slot].pool != pool) continue;
+        s->pool_ring[pool][n].slot = slot;
+        s->pool_ring[pool][n].serial = s->decals[slot].serial;
+        n++;
+    }
+    qsort(s->pool_ring[pool], (size_t)n, sizeof(s->pool_ring[pool][0]), cmp_ring);
+    s->pool_ring_head[pool] = 0;
+    s->pool_ring_n[pool] = n;
+    return n;
+}
+
+// Oldest live decal of a pool (ring in spawn order; entries of decals that died since are skipped).
+static int pool_oldest(VfxSystem *s, int pool) {
+    while (s->pool_ring_n[pool] > 0) {
+        int h = s->pool_ring_head[pool];
+        int slot = s->pool_ring[pool][h].slot;
+        if (s->decals[slot].alive && s->decals[slot].serial == s->pool_ring[pool][h].serial) return slot;
+        s->pool_ring_head[pool] = (h + 1) % VFX_MAX_DECALS_HARD;
+        s->pool_ring_n[pool]--;
+    }
+    return -1;
+}
+
+int vfx_sys_add_decal_ex(VfxSystem *s, const VfxDecalDef *d, const VfxDecalSpawn *sp, u32 seed) {
+    int pool = DG_CLAMP(d->pool, 0, VFX_DECAL_POOL_COUNT - 1);
+    int max = pool == VFX_DECAL_POOL_BLOOD ? s->cfg.blood_decal_max : s->cfg.decal_max;
+    if (max <= 0) return -1;
+    // Budgets: the character's own for skinned decals, then the pool's (oldest recycled first).
+    bool skinned = sp->kind == VFX_DECAL_SKINNED && sp->attach;
+    if (skinned) {
+        int in_char = 0, oldest = -1;
+        u32 oc = 0xFFFFFFFFu;
+        for (int i = 0; i < s->skin_n; i++) {
+            const VfxDecal *e = &s->decals[s->skin_slots[i]];
+            if (e->attach != sp->attach) continue;
+            in_char++;
+            if (e->serial < oc) { oc = e->serial; oldest = s->skin_slots[i]; }
+        }
+        if (in_char >= VFX_SKINNED_DECALS_PER_CHAR) vfx_sys_decal_release(s, oldest);
+        else if (s->skin_n >= VFX_MAX_SKINNED_DECALS) return -1;
+    }
+    if (s->pool_count[pool] >= max) vfx_sys_decal_release(s, pool_oldest(s, pool));
+    if (s->pool_count[pool] >= max || s->decal_free_n <= 0) return -1;
+    int slot = s->decal_free[--s->decal_free_n];
     VfxDecal *dc = &s->decals[slot];
-    if (!dc->alive) s->decal_count++;
+    s->decal_count++;
+    s->pool_count[pool]++;
+    s->decal_live_pos[slot] = s->decal_live_n;
+    s->decal_live[s->decal_live_n++] = slot;
+    if (skinned) { s->skin_pos[slot] = s->skin_n; s->skin_slots[s->skin_n++] = slot; }
     u32 st = seed;
     memset(dc, 0, sizeof(*dc));
     dc->alive = true;
-    dc->pos = pos;
-    dc->normal = v3_len2(normal) > 1e-6f ? v3_norm(normal) : v3(0, 1, 0);
+    dc->pool = (u8)pool;
+    dc->kind = (u8)sp->kind;
+    dc->pos = sp->pos;
+    dc->normal = v3_len2(sp->normal) > 1e-6f ? v3_norm(sp->normal) : v3(0, 1, 0);
     dc->angle = vfx_rand01(&st) * 6.2831853f;
-    dc->size = vfx_range(d->size, &st) * scale;
+    dc->tangent = sp->tangent;
+    dc->size = sp->size > 0 ? sp->size : vfx_range(d->size, &st);
+    dc->aspect = sp->aspect > 0 ? sp->aspect : 1.0f;
     dc->depth = d->depth > 0 ? d->depth : 0.05f;
-    dc->life = d->lifetime > 0 ? d->lifetime : 60.0f;
+    dc->life = sp->life > 0 ? sp->life : (d->lifetime > 0 ? d->lifetime : 60.0f);
     dc->texture = d->texture_id;
     dc->normal_tex = d->normal_id;
     dc->variants = d->variants > 0 ? d->variants : 1;
     dc->variant = (int)(vfx_rand01(&st) * (float)dc->variants) % dc->variants;
     dc->tint = d->tint;
+    if (sp->tint.w > 0) dc->tint = v4(d->tint.x * sp->tint.x, d->tint.y * sp->tint.y, d->tint.z * sp->tint.z, d->tint.w * sp->tint.w);
+    dc->attach = sp->attach;
+    dc->bone = sp->bone;
+    dc->lpos = sp->lpos;
+    dc->lnormal = sp->lnormal;
+    dc->ltangent = sp->ltangent;
+    dc->grow_to = sp->grow_to;
+    dc->grow_time = sp->grow_time;
+    dc->drip_len = sp->drip_len;
+    dc->drip_time = sp->drip_time;
+    dc->drip_start = sp->pos;
+    dc->roughness = d->roughness;
+    dc->dry_time = d->dry_time;
+    dc->dry_darken = d->dry_darken > 0 ? d->dry_darken : 1.0f;
     dc->serial = ++s->decal_serial;
+    {
+        int n = s->pool_ring_n[pool];
+        if (n >= VFX_MAX_DECALS_HARD) n = pool_ring_rebuild(s, pool);   // full of stale entries: compact
+        int at = (s->pool_ring_head[pool] + n) % VFX_MAX_DECALS_HARD;
+        s->pool_ring[pool][at].slot = slot;
+        s->pool_ring[pool][at].serial = dc->serial;
+        s->pool_ring_n[pool] = n + 1;
+    }
     s->decal_head = slot + 1;
+    return slot;
 }
 
 static int cpu_alloc(VfxSystem *s) {
@@ -308,6 +446,7 @@ static void spawn_cpu(VfxSystem *s, VfxInstance *in, int slot_k, const VfxEmitte
         float c = vfx_rand01(&st);
         p->color = v4(sp->color_a.x + (sp->color_b.x - sp->color_a.x) * c, sp->color_a.y + (sp->color_b.y - sp->color_a.y) * c,
                       sp->color_a.z + (sp->color_b.z - sp->color_a.z) * c, (sp->color_a.w + (sp->color_b.w - sp->color_a.w) * c) * in->p.intensity);
+        if (in->p.tint.w > 0) { p->color.x *= in->p.tint.x; p->color.y *= in->p.tint.y; p->color.z *= in->p.tint.z; }
         p->frame = variant >= 0 ? (float)variant : (sp->frame_random ? floorf(vfx_rand01(&st) * 64.0f) : 0.0f);
         p->rot = quat_norm(quat_mul(in->p.rot, quat_axis_angle(rand_unit(&st), vfx_rand01(&st) * 6.283f)));
         p->ang_vel = v3_scale(rand_unit(&st), vfx_range(sp->spin, &st) * DG_DEG2RAD);
@@ -326,6 +465,7 @@ static void spawn_gpu(VfxSystem *s, VfxInstance *in, const VfxEmitterDef *e, int
     g->normal_energy = v4(in->p.normal.x, in->p.normal.y, in->p.normal.z, in->p.energy);
     g->incoming_alpha = v4(in->p.incoming.x, in->p.incoming.y, in->p.incoming.z, in->p.intensity);
     g->vel_time = v4(in->p.velocity.x * e->spawn.inherit, in->p.velocity.y * e->spawn.inherit, in->p.velocity.z * e->spawn.inherit, time_offset);
+    g->tint = in->p.tint.w > 0 ? v4(in->p.tint.x, in->p.tint.y, in->p.tint.z, 1) : v4(1, 1, 1, 1);
     u32 flags = 0;
     if (!s->cfg.lighting || in->lod_mul < 0.3f) flags |= VFX_SF_NO_LIGHTING;
     if (in->lod_mul < 0.5f) flags |= VFX_SF_NO_COLLIDE;
@@ -453,6 +593,8 @@ static void tick_cpu(VfxSystem *s, VfxCpuParticle *p, float dt) {
         vec3 hit, n;
         int mat = 0;
         if (u->collide != VFX_COLLIDE_NONE && s->raycast && v3_len2(delta) > 1e-10f && s->raycast(s->cb_ctx, p->pos, delta, &hit, &n, &mat)) {
+            bool on_static = (mat & 0x100) == 0;
+            mat &= 0xFF;
             if (u->kill_on_hit) { p->age = p->life; }
             p->pos = v3_madd(hit, n, 0.004f);
             float vn = v3_dot(p->vel, n);
@@ -467,8 +609,9 @@ static void tick_cpu(VfxSystem *s, VfxCpuParticle *p, float dt) {
             }
             if (u->sub_on == VFX_SUB_COLLISION && u->sub_effect_id >= 0 && p->sound_played <= 1) {
                 VfxSpawnParams sp = vfx_spawn_params(hit);
-                sp.decal_ok = true;   // physics hit (blood drops leave splats)
+                sp.decal_ok = on_static;   // physics hit on the level (blood drops leave splats)
                 sp.normal = n;
+                if (p->instance >= 0 && s->inst[p->instance].active) sp.tint = s->inst[p->instance].p.tint;
                 sp.seed = p->seed;
                 sp.material = mat;
                 vfx_sys_spawn(s, u->sub_effect_id, &sp);
@@ -528,11 +671,11 @@ void vfx_sys_tick(VfxSystem *s, float dt) {
         live++;
     }
     s->inst_live = live;
-    for (int i = 0; i < VFX_MAX_DECALS_HARD; i++) {
-        VfxDecal *d = &s->decals[i];
-        if (!d->alive) continue;
+    for (int i = s->decal_live_n - 1; i >= 0; i--) {
+        int slot = s->decal_live[i];
+        VfxDecal *d = &s->decals[slot];
         d->age += dt;
-        if (d->age >= d->life) { d->alive = false; s->decal_count--; }
+        if (d->age >= d->life) vfx_sys_decal_release(s, slot);
     }
     s->stats.instances = live;
     s->stats.cpu_particles = alive;

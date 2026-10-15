@@ -238,7 +238,7 @@ set(DG_ANIMCORE_SOURCES
   src/anim/anim.c src/anim/anim_mesh.c src/anim/controller.c src/anim/procedural.c src/anim/turn.c src/anim/spine.c
   src/anim/weapon_hold.c src/anim/damage_additive.c src/anim/foot_ik.c src/anim/anim_net.c src/anim/ragdoll_def.c
   src/anim/anim_library.c src/anim/character_rt.c src/gameplay/hitboxes.c src/gameplay/items.c src/gameplay/attachments.c src/gameplay/recoil.c src/core/spring.c
-  src/world/time_of_day.c src/vfx/vfx_curve.c src/vfx/vfx_library.c src/vfx/vfx_sim.c src/vfx/vfx_atlas.c src/player/holdpoint.c src/player/camera_fp_math.c
+  src/world/time_of_day.c src/vfx/vfx_curve.c src/vfx/vfx_library.c src/vfx/vfx_sim.c src/vfx/vfx_flesh.c src/vfx/vfx_atlas.c src/player/holdpoint.c src/player/camera_fp_math.c
   src/assets/fbx_loader.c src/assets/anim_cache.c src/assets/character.c
   src/core/log.c src/core/platform.c)
 add_library(dg_animcore STATIC ${DG_ANIMCORE_SOURCES})
@@ -278,6 +278,15 @@ add_executable(test_daynight tests/test_daynight.c)
 set_target_properties(test_daynight PROPERTIES C_STANDARD 11)
 target_link_libraries(test_daynight PRIVATE dg_animcore)
 add_test(NAME daynight COMMAND test_daynight WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+
+# Flesh impacts: exit rules / thickness, splatter placement, skinned decal budgets, gore off.
+add_executable(test_flesh tests/test_flesh.c)
+set_target_properties(test_flesh PROPERTIES C_STANDARD 11)
+target_link_libraries(test_flesh PRIVATE dg_animcore)
+if(MSVC)
+  target_compile_options(test_flesh PRIVATE /W3 /wd4100 /wd4201 /utf-8)
+endif()
+add_test(NAME flesh COMMAND test_flesh WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
 
 add_executable(test_anim tests/test_anim.c)
 set_target_properties(test_anim PROPERTIES C_STANDARD 11)

@@ -10,6 +10,10 @@
     {"pos": [0, 0.05, 26.5], "yaw": 0}
   ],
   "brushes": [
+    {"_comment": "Flesh range (north, outside the room): firing line z = -34 facing -Z; per distance group (5 / 15 / 40 m) a player, a zombie and a helmet zombie with a wall behind (src/game/game_flesh_range.c, flesh_range).", "type": "box", "pos": [0, 0, -33.2], "size": [26, 0.85, 0.6], "color": [0.4, 0.42, 0.45], "label": "flesh range: firing line (flesh_range)", "material": "metal_thick"},
+    {"type": "box", "pos": [-10, 0, -41.2], "size": [6.0, 3.2, 0.3], "color": [0.55, 0.55, 0.53], "material": "concrete", "label": "5 m wall (concrete)"},
+    {"type": "box", "pos": [0, 0, -51.2], "size": [6.0, 3.2, 0.3], "color": [0.5, 0.32, 0.26], "material": "brick", "label": "15 m wall (brick)"},
+    {"type": "box", "pos": [10, 0, -76.2], "size": [6.0, 3.2, 0.3], "color": [0.75, 0.74, 0.7], "material": "plaster", "label": "40 m wall (plaster)"},
     {"type": "box", "pos": [-2, 0, 19], "size": [3.2, 0.85, 1.0], "color": [0.4, 0.42, 0.45], "label": "loadout table", "material": "metal_thick"},
     {"type": "box", "pos": [-4.5, 0, 22.5], "size": [1, 1, 1], "color": [0.85, 0.55, 0.2], "label": "1 m cube", "material": "wood"},
     {"type": "stairs", "pos": [-26, 0, 13], "rise": 0.15, "run": 0.3, "count": 10, "width": 2.5, "platform": 2, "color": [0.55, 0.6, 0.7], "label": "steps 15 cm"},
@@ -139,6 +143,9 @@
     {"type": "box", "pos": [-22.75, 0, -30.15], "size": [9.5, 3.0, 0.2], "color": [0.55, 0.55, 0.57], "_open_room": true}
   ],
   "labels": [
+    {"pos": [-10, 0, -34.9], "yaw": 0, "floor": true, "size": 0.25, "text": "5 m: player / zombie / helmet"},
+    {"pos": [0, 0, -34.9], "yaw": 0, "floor": true, "size": 0.25, "text": "15 m: player / zombie / helmet"},
+    {"pos": [10, 0, -34.9], "yaw": 0, "floor": true, "size": 0.25, "text": "40 m: player / zombie / helmet"},
     {"pos": [32, 0, -9.4], "yaw": -90, "floor": true, "size": 0.22, "text": "sighting lane: 10 / 25 / 50 / 100 / 200 m (sight_test, ads_debug 1)"},
     {"pos": [-22, 0, -7.5], "yaw": 0, "floor": true, "size": 0.25, "text": "impact range: every surface material (vfx)"},
     {"pos": [-8, 0, 24], "yaw": 90, "floor": true, "size": 0.3, "text": "firing line"},
@@ -156,6 +163,18 @@
     {"pos": [-22.5, 0.03, -21.6], "text": "POST-PROCESS TEST CORNER", "size": 0.3, "floor": true, "yaw": 0, "_post_corner": true}
   ],
   "entities": [
+    {"type": "character", "character": "player", "pos": [-11.6, 0, -39.0], "yaw": 180, "hp": 1000, "name": "flesh_player_5"},
+    {"type": "character", "character": "zombie_placeholder", "pos": [-10, 0, -39.0], "yaw": 180, "hp": 1000, "name": "flesh_zombie_placeholder_5"},
+    {"type": "character", "character": "zombie_helmet", "pos": [-8.4, 0, -39.0], "yaw": 180, "hp": 1000, "name": "flesh_zombie_helmet_5"},
+    {"type": "light", "pos": [-10, 3.6, -37.5], "color": [1.0, 0.8, 0.55], "radius": 9, "intensity": 10, "schedule": true},
+    {"type": "character", "character": "player", "pos": [-1.6, 0, -49.0], "yaw": 180, "hp": 1000, "name": "flesh_player_15"},
+    {"type": "character", "character": "zombie_placeholder", "pos": [0, 0, -49.0], "yaw": 180, "hp": 1000, "name": "flesh_zombie_placeholder_15"},
+    {"type": "character", "character": "zombie_helmet", "pos": [1.6, 0, -49.0], "yaw": 180, "hp": 1000, "name": "flesh_zombie_helmet_15"},
+    {"type": "light", "pos": [0, 3.6, -47.5], "color": [1.0, 0.8, 0.55], "radius": 9, "intensity": 10, "schedule": true},
+    {"type": "character", "character": "player", "pos": [8.4, 0, -74.0], "yaw": 180, "hp": 1000, "name": "flesh_player_40"},
+    {"type": "character", "character": "zombie_placeholder", "pos": [10, 0, -74.0], "yaw": 180, "hp": 1000, "name": "flesh_zombie_placeholder_40"},
+    {"type": "character", "character": "zombie_helmet", "pos": [11.6, 0, -74.0], "yaw": 180, "hp": 1000, "name": "flesh_zombie_helmet_40"},
+    {"type": "light", "pos": [10, 3.6, -72.5], "color": [1.0, 0.8, 0.55], "radius": 9, "intensity": 10, "schedule": true},
     {"type": "light", "pos": [36, 4.95, 22], "color": [1.0, 0.78, 0.5], "radius": 16, "intensity": 16, "schedule": true},
     {"type": "light", "pos": [44, 4.95, 28], "color": [1.0, 0.78, 0.5], "radius": 16, "intensity": 16, "schedule": true},
     {"type": "light", "pos": [52, 4.95, 22], "color": [1.0, 0.78, 0.5], "radius": 16, "intensity": 16, "schedule": true},

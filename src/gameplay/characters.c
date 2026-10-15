@@ -349,11 +349,24 @@ void chars_system_create(World *w) {
     if (!w->anim_events) w->anim_events = (AnimEvent *)calloc(MAX_PENDING_EVENTS, sizeof(AnimEvent));
 }
 
+static CharLifeFn g_life_hook;
+void chars_set_life_hook(CharLifeFn fn) { g_life_hook = fn; }
+
+int chars_bone_draw(World *w, EntityId e, int bone, Xform *out) {
+    CharacterInst *c = char_get(w, e);
+    if (!c || !LIB || bone < 0 || bone >= LIB->skel.count) return -1;
+    if (!c->pose_draw || !c->pose_draw_frame) return 0;
+    if (c->pose_draw_frame + 1 < g_engine.frame_index) return 0;   // not drawn this frame (culled / hidden)
+    *out = c->pose_draw[bone];
+    return 1;
+}
+
 static void free_inst(World *w, CharacterInst *c) {
     if (c->rag.active) { ragdoll_destroy(&c->rag, w->phys); w->chars->ragdolls--; }
     free(c->history);
     free(c->pose_prev);
     free(c->pose_cur);
+    free(c->pose_draw);
     free(c->settled_pose);
     free(c);
 }
@@ -409,6 +422,8 @@ CharacterInst *char_attach(World *w, EntityId e, u8 character_id) {
     charrt_init(&c->rt, LIB, def);
     c->pose_prev = (Xform *)calloc(ANIM_MAX_BONES, sizeof(Xform));
     c->pose_cur = (Xform *)calloc(ANIM_MAX_BONES, sizeof(Xform));
+    c->pose_draw = (Xform *)calloc(ANIM_MAX_BONES, sizeof(Xform));
+    memcpy(c->armor_left, def->armor_hits, sizeof(c->armor_left));
     if (w->authority) c->history = (HitboxHistory *)calloc(1, sizeof(HitboxHistory));
     c->body_yaw = quat_get_yaw(w->xf[i].rot);
     c->root = xf_make(feet_of(w, i), quat_yaw(c->body_yaw));
@@ -650,6 +665,8 @@ static void update_limbs(CharacterInst *c, float dt) {
 static void zombie_ai(World *w, CharacterInst *c, int i, float dt);
 
 static void revive(World *w, CharacterInst *c) {
+    if (c->dead && g_life_hook) g_life_hook(w, c, false);
+    memcpy(c->armor_left, c->def->armor_hits, sizeof(c->armor_left));
     c->dead = c->rag_pending = c->settled = c->tool_rag = false;
     if (c->rag.active) { ragdoll_destroy(&c->rag, w->phys); w->chars->ragdolls--; }
     free(c->settled_pose);
@@ -811,6 +828,7 @@ static void client_one(World *w, CharacterInst *c, int i, double rt, float dt) {
         // Long dead already (or never seen alive): settled pose, no simulation.
         c->rag_pending = (u32)rt < rep.death_tick + 30 && c->have_pose;
         if (!c->rag_pending) c->settled = true;
+        else if (g_life_hook) g_life_hook(w, c, true);
     }
     if (!(rep.flags & ANF_DEAD) && c->dead && !c->tool_rag) revive(w, c);
 }
@@ -925,7 +943,8 @@ static void apply_event(World *w, const AnimEvent *e) {
         start_reaction(c, e->body_part, and_dir(e->dir), and_strength(e->strength));
         break;
     }
-    case AEV_DIE:
+    case AEV_DIE: {
+        bool was_dead = c->dead;
         c->dead = true;
         c->death_tick = e->tick;
         c->death_seed = e->seed;
@@ -934,7 +953,9 @@ static void apply_event(World *w, const AnimEvent *e) {
         c->rag_pending = true;
         c->settled = false;
         if (remote) { ctrl_set(&c->rt.ctrl, AP_SEED, (float)e->seed); charrt_trigger(&c->rt, AP_T_DIE); }
+        if (!was_dead && g_life_hook) g_life_hook(w, c, true);
         break;
+    }
     default: break;
     }
 }
@@ -1796,6 +1817,8 @@ void chars_render(World *w, float alpha, vec3 cam_pos, int local_slot) {
         }
         bool local = c->is_player && c->slot == local_slot && !g_thirdperson;
         u32 flags = local ? MAT_SHADOW_ONLY : 0;
+        memcpy(c->pose_draw, pose, sizeof(Xform) * (size_t)s->count);
+        c->pose_draw_frame = g_engine.frame_index;
         g_draw_skin = skin_for(w, c, local_slot);
         float dist = v3_dist(cam_pos, c->root.t);
         bool shadow = c->pixels > CG->lod.shadow_pixels || local;

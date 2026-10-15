@@ -273,17 +273,17 @@ IMPACTS = {
     "flesh": impact([
         {"name": "mist", "tier": "gpu",
          "spawn": {"mode": "burst", "count": [2, 3], "life": [0.25, 0.45], "size": [0.12, 0.2], "speed": [0.4, 1.4], "dir": "incoming", "angle": 35,
-                   "rotation": [0, 360], "color": [0.42, 0.03, 0.03, 0.75], "color2": [0.3, 0.02, 0.02, 0.6]},
+                   "rotation": [0, 360], "color": [0.26, 0.022, 0.018, 0.6], "color2": [0.17, 0.016, 0.013, 0.5]},
          "update": {"drag": 4.0, "gravity": 0.1, "size_curve": [[0, 0.5], [1, 1.8]], "alpha_curve": [[0, 1], [0.4, 0.7], [1, 0]], "frame_over_life": True},
          "render": {"mode": "alpha", "lighting": "simple", "texture": "blood_mist", "soft": 0.15, "near_fade": 0.2}},
         {"name": "drops", "tier": "cpu",
          "spawn": {"mode": "burst", "count": [3, 6], "life": [0.6, 1.2], "size": [0.012, 0.025], "speed": [1.5, 4.0], "dir": "incoming", "angle": 30,
-                   "color": [0.4, 0.02, 0.02, 1.0]},
+                   "color": [0.26, 0.022, 0.018, 1.0]},
          "update": {"gravity": 1.0, "drag": 0.2, "collide": "physics", "kill_on_hit": True, "sub_emitter": {"on": "collision", "effect": "blood_splat"}},
          "render": {"mode": "alpha", "lighting": "simple", "orient": "stretch", "texture": "blood_drops", "stretch": 0.01, "stretch_max": 3}},
         {"name": "spray", "tier": "gpu",
          "spawn": {"mode": "burst", "count": [4, 8], "life": [0.15, 0.35], "size": [0.01, 0.02], "speed": [2, 5], "dir": "normal", "angle": 40,
-                   "color": [0.45, 0.03, 0.03, 0.9]},
+                   "color": [0.26, 0.022, 0.018, 0.9]},
          "update": {"gravity": 1.0, "drag": 1.0},
          "render": {"mode": "alpha", "lighting": "simple", "orient": "stretch", "texture": "blood_drops", "stretch": 0.01, "stretch_max": 3}}],
         sound="impact_flesh"),
@@ -330,7 +330,8 @@ def main():
         write(f"impact_{m}", fx)
     write("impact_flesh_head", headshot())
     write("blood_splat", {"duration": 0.05, "priority": 0, "max_instances": 64, "emitters": [],
-                          "decal": decal("decal_blood", size=(0.05, 0.12), life=120, depth=0.08)})
+                          "decal": dict(decal("decal_blood", size=(0.05, 0.12), life=120, depth=0.08),
+                                        roughness=0.15, dry_time=120, dry_darken=0.55, pool="blood")})
     write("shell_pistol", shell("shell_pistol", "casing_pistol", 0.02, [0.85, 0.65, 0.25]))
     write("shell_rifle", shell("shell_rifle", "casing_rifle", 0.045, [0.85, 0.65, 0.25]))
     write("shell_shotgun", shell("shell_shotgun", "shell_shotgun", 0.06, [0.7, 0.12, 0.1]))

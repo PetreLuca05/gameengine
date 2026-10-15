@@ -755,6 +755,7 @@ static void compute_matrices(FrameData *fd) {
     float radii[3] = { 12.0f, fmaxf(ext * 1.1f, 36.0f), fmaxf(ext * 3.5f, 110.0f) };
     vec3 fwd = v3_norm(v3(-sinf(c->yaw), 0, -cosf(c->yaw)));
     u32 tile = R->shadow_size / 2;
+    float bias[3];
     for (int k = 0; k < 3; k++) {
         float r = radii[k];
         vec3 center = v3_madd(c->pos, fwd, r * 0.35f);
@@ -764,7 +765,13 @@ static void compute_matrices(FrameData *fd) {
         cl.x = floorf(cl.x / texel) * texel;
         cl.y = floorf(cl.y / texel) * texel;
         float depth_range = fmaxf(r * 4.0f, 120.0f);
-        mat4 lproj = mat4_ortho(cl.x - r, cl.x + r, cl.y - r, cl.y + r, -cl.z - depth_range, -cl.z + depth_range);
+        // Towards the sun the box reaches far out: distant tall casters (the towers on the
+        // horizon) throw long shadows at a low sun, and a box that only sometimes contained them
+        // (its centre follows the view) made those shadows pop in and out as the camera turned.
+        // The depth bias is rescaled so it stays the same in metres.
+        float reach = 3000.0f;
+        mat4 lproj = mat4_ortho(cl.x - r, cl.x + r, cl.y - r, cl.y + r, -cl.z - reach, -cl.z + depth_range);
+        bias[k] = (2.0f * depth_range) / (reach + depth_range);
         // NDC -> the cascade's atlas tile (x right, y down in the atlas).
         mat4 t = mat4_identity();
         t.m[0] = 0.5f;
@@ -774,6 +781,7 @@ static void compute_matrices(FrameData *fd) {
         R->shadow_vps[k] = mat4_mul(t, mat4_mul(lproj, lview));
     }
     R->shadow_splits = v4(radii[0], radii[1], radii[2], 3.0f);
+    R->shadow_bias = v4(bias[0], bias[1], bias[2], 0);
     R->shadow_vp = R->shadow_vps[2];
 
     fd->view_proj = mat4_mul(R->proj_j, R->view);
@@ -783,6 +791,7 @@ static void compute_matrices(FrameData *fd) {
     fd->shadow_vp = R->shadow_vp;
     memcpy(fd->shadow_vps, R->shadow_vps, sizeof(fd->shadow_vps));
     fd->shadow_splits = R->shadow_splits;
+    fd->shadow_bias = R->shadow_bias;
     fd->view_proj_nj = R->view_proj_nj;
     fd->prev_view_proj_nj = R->prev_view_proj_nj;
     fd->vm_view_proj_nj = R->vm_view_proj_nj;
@@ -948,7 +957,15 @@ static void exec_opaque(VkCommandBuffer cmd, void *u) {
 static void exec_decals(VkCommandBuffer cmd, void *u) {
     (void)u;
     begin_pass(cmd, R->hdr.view, false, R->depth.view, VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL, false);
-    vkx_draw_decals(cmd);
+    vkx_draw_decals(cmd, false);
+    vkCmdEndRendering(cmd);
+}
+
+// Skinned decals (wounds, blood stains) on the characters just drawn.
+static void exec_decals_dynamic(VkCommandBuffer cmd, void *u) {
+    (void)u;
+    begin_pass(cmd, R->hdr.view, false, R->depth.view, VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL, false);
+    vkx_draw_decals(cmd, true);
     vkCmdEndRendering(cmd);
 }
 
@@ -1281,6 +1298,10 @@ static void build_frame_graph(FrameData *fd) {
     if (F.lit.contact_on) fg_read(p, F.lit.contact, FG_SAMPLED);
     if (F.lit.ssr_on) fg_read(p, F.lit.ssr, FG_SAMPLED);
     if (F.lit.ssgi_on) fg_read(p, F.lit.ssgi, FG_SAMPLED);
+
+    p = fg_pass("decals_dynamic", exec_decals_dynamic, NULL);
+    fg_write(p, F.hdr, FG_COLOR);
+    fg_read(p, F.depth, FG_DEPTH_READ);
 
     post_sky();
     post_fog_apply();

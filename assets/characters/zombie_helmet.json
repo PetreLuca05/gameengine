@@ -1,0 +1,12 @@
+{
+  "id": "zombie_helmet", "character_id": 6, "kind": "zombie",
+  "mesh": "assets/human/Dummy.fbx",
+  "materials": { "Alpha_Body_MAT": [0.36, 0.40, 0.30], "Alpha_Joints_MAT": [0.16, 0.18, 0.12], "Body 2": [0.36, 0.40, 0.30] },
+  "anim_set": "zombie",
+  "part_mult": { "head": 3.0, "neck": 1.5, "limbs": 0.4 },
+  "blood": { "color": [0.17, 0.035, 0.022], "darkness": 0.75, "amount": 1.35, "mist": 0.6, "decay": 0.55 },
+  "surface": { "torso": "cloth", "legs": "cloth" },
+  "armor": { "head": { "type": "helmet", "hits": 2 } },
+  "ragdoll_scale": 1.0, "scale": 1.0, "hp": 160, "move_speed": 1.1,
+  "eye_offset": [0, 0.10, -0.10]
+}

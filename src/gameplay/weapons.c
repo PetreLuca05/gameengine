@@ -2,6 +2,7 @@
 #include "attachments.h"
 #include "health.h"
 #include "effects.h"
+#include "flesh_fx.h"
 #include "core/log.h"
 #include "core/engine.h"
 #include "core/cvar.h"
@@ -253,7 +254,29 @@ static u32 impact_flags(const HitResult *h) {
     return f;
 }
 
-static void push_shot_events(World *w, int shooter, vec3 from, const HitResult *h, vec3 end, const WeaponDef *d, bool flash) {
+// Dealt damage for the flesh effects (the same resolution as apply_hit, without side effects).
+static float shot_damage(World *w, const WeaponDef *d, const HitResult *h) {
+    CharacterInst *c = h->character ? char_get(w, h->ent) : NULL;
+    float fall = damage_falloff(h->dist, d->falloff_start, d->falloff_end, d->falloff_min);
+    return c ? damage_resolve(d->damage, c->def->part_mult, d->part_mult, h->part, fall) : d->damage;
+}
+
+static void flesh_predict(World *w, const HitResult *h, vec3 dir, const WeaponDef *d) {
+    FleshHit fh;
+    memset(&fh, 0, sizeof(fh));
+    fh.target = h->ent;
+    fh.part = h->part;
+    fh.pos = h->point;
+    fh.normal = h->normal;
+    fh.dir = dir;
+    fh.caliber = d->vfx_caliber;
+    fh.dist = h->dist;
+    fh.damage = shot_damage(w, d, h);
+    fh.flags = FLESH_ENTRY_ONLY | (h->headshot ? FLESH_HEAD : 0u);
+    flesh_fx_hit(w, &fh);
+}
+
+static void push_shot_events(World *w, int shooter, vec3 from, const HitResult *h, vec3 end, const WeaponDef *d, bool flash, bool killed) {
     int caliber = d->vfx_caliber;
     GameEvent ev;
     memset(&ev, 0, sizeof(ev));
@@ -279,6 +302,12 @@ static void push_shot_events(World *w, int shooter, vec3 from, const HitResult *
         ev.id = fx_impact_pack(h->material, caliber, impact_flags(h));
         vec3 inc = v3_norm(v3_sub(end, from));
         memcpy(ev.data, &inc, sizeof(inc));
+        if (h->character) {
+            // Flesh effects on every machine: target, part, damage, kill (src/gameplay/flesh_fx.c).
+            ev.ent = h->ent;
+            ev.value = shot_damage(w, d, h);
+            flesh_pack_event(ev.data, inc, h->part, killed, false, h->dist);
+        }
         ev_push(w, &ev);
     }
 }
@@ -365,18 +394,26 @@ static void fire(World *w, int slot, PlayerSim *sim, const WeaponDef *d, const U
         if (w->authority) {
             HitResult h = trace_shot(w, slot, eye, sdir, d->range, cmd->view_tick);
             vec3 end = h.hit ? h.point : v3_madd(eye, sdir, d->range);
+            bool was_alive = h.hit && h.character && ent_valid(w, h.ent) && !(w->flags[ENT_INDEX(h.ent)] & EF_DEAD);
             if (h.hit) apply_hit(w, slot, d, &h, sdir, 1.0f);
-            push_shot_events(w, slot, muzzle, &h, end, d, p == 0);
+            bool killed = was_alive && (w->flags[ENT_INDEX(h.ent)] & EF_DEAD);
+            push_shot_events(w, slot, muzzle, &h, end, d, p == 0, killed);
             if (local_view && first) {
                 fx_tracer(muzzle, end);
-                if (h.hit && fx_predict_impacts()) fx_impact_ex(h.point, h.normal, sdir, h.material, d->vfx_caliber, impact_flags(&h));
+                if (h.hit && fx_predict_impacts()) {
+                    if (h.character) flesh_predict(w, &h, sdir, d);
+                    else fx_impact_ex(h.point, h.normal, sdir, h.material, d->vfx_caliber, impact_flags(&h));
+                }
             }
         } else if (local_view && first) {
             // Predicted cosmetic trace against the replica world.
             HitResult h = trace_shot(w, slot, eye, sdir, d->range, 0);
             vec3 end = h.hit ? h.point : v3_madd(eye, sdir, d->range);
             fx_tracer(muzzle, end);
-            if (h.hit && fx_predict_impacts()) fx_impact_ex(h.point, h.normal, sdir, h.material, d->vfx_caliber, impact_flags(&h));
+            if (h.hit && fx_predict_impacts()) {
+                if (h.character) flesh_predict(w, &h, sdir, d);
+                else fx_impact_ex(h.point, h.normal, sdir, h.material, d->vfx_caliber, impact_flags(&h));
+            }
             // Unconfirmed reaction on what we hit (the host's hit event confirms / corrects it).
             if (h.character) chars_predict_hit(w, h.ent, h.part, sdir);
         }
@@ -460,12 +497,47 @@ static void melee_step(World *w, int slot, PlayerSim *sim, const WeaponDef *d, b
     }
     if (hit_ent) {
         ws->swing_hit_done = 1;
-        if (local_view && first) { fx_impact_ex(hit_point, v3_neg(dir), dir, SURF_FLESH, VFX_CAL_MELEE, FX_IMPACT_FLESH | (head ? FX_IMPACT_HEAD : 0u)); fx_sound("melee_hit", hit_point, 1.0f); }
+        // Slash direction: along the swing (right to left), a little into the target.
+        vec3 swing = v3_norm(v3_add(v3_scale(v3_norm(v3_sub(dir_from_angles(yaw + 0.1f, pitch - 0.035f), dir)), 0.85f), v3_scale(dir, 0.35f)));
+        bool flesh = hit_part >= 0 && char_get(w, hit_ent);
+        if (local_view && first) {
+            if (flesh && fx_predict_impacts()) {
+                FleshHit fh;
+                memset(&fh, 0, sizeof(fh));
+                fh.target = hit_ent;
+                fh.part = hit_part;
+                fh.pos = hit_point;
+                fh.normal = v3_neg(dir);
+                fh.dir = swing;
+                fh.caliber = VFX_CAL_MELEE;
+                fh.damage = d->damage;
+                fh.dist = v3_dist(eye, hit_point);
+                fh.flags = FLESH_ENTRY_ONLY | FLESH_MELEE | (head ? FLESH_HEAD : 0u);
+                flesh_fx_hit(w, &fh);
+            } else if (!flesh) {
+                fx_impact_ex(hit_point, v3_neg(dir), dir, SURF_FLESH, VFX_CAL_MELEE, FX_IMPACT_FLESH | (head ? FX_IMPACT_HEAD : 0u));
+            }
+            fx_sound("melee_hit", hit_point, 1.0f);
+        }
         if (w->authority) {
             CharacterInst *c = hit_part >= 0 ? char_get(w, hit_ent) : NULL;
             if (c) {
                 float dmg = damage_resolve(d->damage, c->def->part_mult, d->part_mult, hit_part, 1.0f);
+                bool was_alive = !(w->flags[ENT_INDEX(hit_ent)] & EF_DEAD);
                 apply_damage_part(w, hit_ent, dmg, d->damage_type, p->ent, hit_point, dir, hit_part, d->damage > 0 ? dmg / d->damage : 0);
+                GameEvent ev;
+                memset(&ev, 0, sizeof(ev));
+                ev.type = EV_IMPACT;
+                ev.target = EVENT_ALL;
+                ev.except = EVENT_ALL;
+                ev.ent2 = (u32)slot + 1u;   // the swinger skips the entry it predicted
+                ev.pos = hit_point;
+                ev.dir = v3_neg(dir);
+                ev.ent = hit_ent;
+                ev.value = dmg;
+                ev.id = fx_impact_pack(SURF_FLESH, VFX_CAL_MELEE, FX_IMPACT_FLESH | (head ? FX_IMPACT_HEAD : 0u));
+                flesh_pack_event(ev.data, swing, hit_part, was_alive && (w->flags[ENT_INDEX(hit_ent)] & EF_DEAD), true, v3_dist(eye, hit_point));
+                ev_push(w, &ev);
             } else {
                 apply_damage(w, hit_ent, d->damage * (head ? d->headshot_mult : 1.0f), d->damage_type, p->ent, hit_point, dir, head);
             }

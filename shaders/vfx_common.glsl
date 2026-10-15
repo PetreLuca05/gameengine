@@ -72,6 +72,7 @@ struct Spawn {
     vec4 incoming_alpha;
     vec4 vel_time;
     uvec4 info;       // emitter, seed, count, variant (12) | flags (4) << 12 | instance << 16
+    vec4 tint;        // rgb colour multiplier (per-character blood), w unused
 };
 
 struct SubSpawn { vec4 pos; vec4 normal; uvec4 info; };   // info.x emitter, y seed, z count

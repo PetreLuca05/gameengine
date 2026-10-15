@@ -46,6 +46,10 @@ void daynight_environment(World *w, const RenderCamera *cam, RenderEnvironment *
 void daynight_post(struct PostSettings *s);
 void daynight_draw(void);
 bool daynight_editor_open(void);
+// game_flesh_range.c: flesh impact range panel / tests (dev room)
+void flesh_range_register(void);
+void flesh_range_draw(void);
+bool flesh_range_open(void);
 
 // game_post.c: post-processing settings (presets, post volumes, gameplay feedback, photo mode)
 typedef struct PostFrameInfo {

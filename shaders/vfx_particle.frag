@@ -115,6 +115,8 @@ void main() {
     } else {
         light = vec3(1.0);
     }
+    // Thin, backlit parts of the volume glow (forward scattering): blood mist against the sun.
+    if (e.render1.y > 0.0) light += v_l4 * e.render1.y * (1.0 - clamp(alpha, 0.0, 1.0) * 0.6) * 1.6;
     vec3 c = albedo * v_color.rgb * light + albedo * v_color.rgb * emissive;
     out_color = vec4(c * alpha, alpha);
 }

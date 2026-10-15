@@ -243,6 +243,7 @@ static void parse_emitter(VfxEmitterDef *e, const cJSON *j) {
     r->exposure_aware = jb(rd, "exposure_aware", false);
     r->near_fade = jf(rd, "near_fade", 0.25f);
     r->distortion = jf(rd, "distortion", 0.02f);
+    r->scatter = jf(rd, "scatter", 0.0f);
     r->aspect = jf(rd, "aspect", 1.0f);
     const cJSON *pl = jget(rd, "light");
     r->light_radius = jf(pl, "radius", 0);
@@ -317,6 +318,10 @@ int vfx_lib_add_effect_json(VfxLibrary *lib, const char *json_text, const char *
     fx->decal.depth = jf(dc, "depth", 0.05f);
     fx->decal.variants = (int)jf(dc, "variants", 1);
     fx->decal.tint = jcolor(dc, "tint", v4(1, 1, 1, 1));
+    fx->decal.roughness = jf(dc, "roughness", 0.0f);
+    fx->decal.dry_time = jf(dc, "dry_time", 0.0f);
+    fx->decal.dry_darken = jf(dc, "dry_darken", 1.0f);
+    fx->decal.pool = !strcmp(js(dc, "pool", "impact"), "blood") ? VFX_DECAL_POOL_BLOOD : VFX_DECAL_POOL_IMPACT;
     dg_strcpy(fx->sound, sizeof(fx->sound), js(root, "sound", ""));
     const cJSON *ems = jget(root, "emitters");
     const cJSON *ej;

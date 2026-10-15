@@ -29,7 +29,7 @@ typedef struct GraphicsSettings {
     int width, height, mode, vsync, shadow, texq, aniso, maxfps;
     float fov, scale, brightness, gamma;
     float vm_fov;          // 0 = follow the camera FOV
-    int vfxq;
+    int vfxq, gore;
 } GraphicsSettings;
 
 #define MAX_RES 48
@@ -86,6 +86,7 @@ static GraphicsSettings read_graphics(void) {
     g.brightness = cv("r_brightness")->f;
     g.gamma = cv("r_gamma")->f;
     g.vfxq = cv("vfx_quality")->i;
+    g.gore = cv("gore_level")->i;
     return g;
 }
 
@@ -104,6 +105,7 @@ static void write_graphics(const GraphicsSettings *g) {
     cvar_set_float(cv("r_brightness"), g->brightness);
     cvar_set_float(cv("r_gamma"), g->gamma);
     cvar_set_int(cv("vfx_quality"), g->vfxq);
+    cvar_set_int(cv("gore_level"), g->gore);
     video_apply();
 }
 
@@ -143,7 +145,7 @@ static void update_mouse_mode(void) {
 
 bool menus_wants_mouse(void) {
     Game *g = game();
-    return (M && M->page != PAGE_NONE) || (g && (g->inventory_open || g->container_open || g->bench_open)) || vfx_editor_open() || holdpoint_editor_open() || daynight_editor_open();
+    return (M && M->page != PAGE_NONE) || (g && (g->inventory_open || g->container_open || g->bench_open)) || vfx_editor_open() || holdpoint_editor_open() || daynight_editor_open() || flesh_range_open();
 }
 
 void menus_close_all(void) {
@@ -376,6 +378,8 @@ static void draw_graphics(struct nk_context *ctx) {
     p->texq = combo_row(ctx, "Texture quality", texq, 3, p->texq);
     static const char *vfxq[] = { "Low", "Medium", "High", "Ultra" };
     p->vfxq = combo_row(ctx, "Effects quality (particles)", vfxq, 4, p->vfxq);
+    static const char *gore[] = { "Off", "Low", "High" };
+    p->gore = combo_row(ctx, "Gore (blood, wounds)", gore, 3, p->gore);
     static const char *aniso[] = { "Off", "2x", "4x", "8x", "16x" };
     static const int aniso_v[] = { 1, 2, 4, 8, 16 };
     int ai = 0;

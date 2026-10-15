@@ -1,0 +1,71 @@
+{
+  "duration": 0.1,
+  "priority": 0,
+  "max_instances": 96,
+  "cull_distance": 60,
+  "lod": [
+    [
+      25,
+      0.75
+    ],
+    [
+      60,
+      0.45
+    ],
+    [
+      110,
+      0.2
+    ]
+  ],
+  "emitters": [
+    {
+      "name": "drop",
+      "tier": "cpu",
+      "spawn": {
+        "mode": "burst",
+        "count": 1,
+        "life": [
+          1.5,
+          2.5
+        ],
+        "size": [
+          0.008,
+          0.014
+        ],
+        "speed": [
+          0.0,
+          0.25
+        ],
+        "dir": "normal",
+        "angle": 60,
+        "frame_random": true,
+        "color": [
+          0.26,
+          0.022,
+          0.018,
+          1.0
+        ]
+      },
+      "update": {
+        "gravity": 1.0,
+        "drag": 0.1,
+        "collide": "physics",
+        "kill_on_hit": true,
+        "sub_emitter": {
+          "on": "collision",
+          "effect": "blood_drip_splat"
+        }
+      },
+      "render": {
+        "mode": "alpha",
+        "lighting": "simple",
+        "orient": "stretch",
+        "texture": "blood_droplet",
+        "stretch": 0.01,
+        "stretch_max": 3
+      }
+    }
+  ],
+  "name": "flesh_bleed",
+  "_generated": "make_flesh_effects.py"
+}

@@ -56,6 +56,9 @@ typedef struct CharacterInst {
     float fp_pitch[2], fp_yaw[2], fp_body_yaw[2];   // aim used by the last two post-passes (prev, cur)
     // render (any machine that draws)
     Xform *pose_prev, *pose_cur;      // post-IK bone world transforms
+    Xform *pose_draw;                 // the pose drawn this frame (interpolated / ragdoll): skinned decals
+    u64 pose_draw_frame;              // engine frame of pose_draw (0 = never drawn)
+    u8 armor_left[BP_COUNT];          // cosmetic (each machine): hits until the part's armour breaks
     Xform item_prev, item_cur;
     Xform item_cam_prev, item_cam_cur;   // hold point item in camera space (owner re-places per frame)
     bool item_valid;
@@ -152,6 +155,11 @@ float chars_fp_reach_pull(void);  // first-person reach pull this frame (m)
 bool chars_fp_item_cam(Xform *item_off, int *state, float *blend);   // rendered item relative to its hold point (false: no hold)                 // 1 = the first-person hold IK owns both hands this frame   // this frame's first-person pose (tests)
 bool chars_fp_camera(World *w, float alpha, int local_slot, float yaw, float pitch, Xform *socket_world);
 // Events (reliable, compact): host queues + applies, clients apply what arrives.
+// Death / revive notifications on every machine (flesh effects: kill burst, pools, bleeding).
+typedef void (*CharLifeFn)(World *w, CharacterInst *c, bool died);
+void chars_set_life_hook(CharLifeFn fn);
+// Bone world transform as drawn this frame: 1 ok, 0 not drawn this frame (culled), -1 gone.
+int chars_bone_draw(World *w, EntityId e, int bone, Xform *out);
 void chars_push_event(World *w, const AnimEvent *e);
 void chars_on_event(World *w, const AnimEvent *e);
 const AnimNetState *chars_net_state(const World *w, int ent_index);

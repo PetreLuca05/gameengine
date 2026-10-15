@@ -4,6 +4,8 @@
   "materials": { "Alpha_Body_MAT": [0.48, 0.40, 0.34], "Alpha_Joints_MAT": [0.30, 0.08, 0.06], "Body 2": [0.48, 0.40, 0.34] },
   "anim_set": "zombie",
   "part_mult": { "head": 3.0, "neck": 1.5, "limbs": 0.4 },
+  "blood": { "color": [0.17, 0.035, 0.022], "darkness": 0.75, "amount": 1.35, "mist": 0.6, "decay": 0.55 },
+  "surface": { "torso": "cloth", "legs": "cloth" },
   "ragdoll_scale": 1.12, "scale": 1.12, "hp": 260, "move_speed": 0.9,
   "eye_offset": [0, 0.10, -0.10]
 }

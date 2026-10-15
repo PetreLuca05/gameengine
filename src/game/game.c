@@ -15,6 +15,7 @@
 #include "anim/anim_library.h"
 #include "assets/anim_cache.h"
 #include "ui/anim_debug.h"
+#include "gameplay/flesh_fx.h"
 #include "gameplay/effects.h"
 #include "player/hands.h"
 #include "render/render.h"
@@ -640,6 +641,7 @@ bool game_host(const char *map) {
         if (!load_map(G->world, "devroom")) return false;
     }
     daynight_level_loaded(G->world);
+    flesh_fx_clear();
     G->mode = GM_HOST;
     G->local_slot = 0;
     G->client_seq = 0;
@@ -660,6 +662,7 @@ void game_cl_welcome(int slot, const char *map, u32 seed, u32 server_tick) {
     cvar_set_int(G->world_seed, (int)seed);
     if (!load_map(G->world, map)) log_error("client: cannot load map '%s'", map);
     daynight_level_loaded(G->world);   // config; the time itself arrives with every snapshot
+    flesh_fx_clear();
     G->mode = GM_CLIENT;
     G->local_slot = slot;
     G->client_seq = 0;
@@ -1232,6 +1235,7 @@ void game_init(void) {
     g_engine.items = &G->items;
     basic_meshes_create(&G->meshes);
     fx_init(&G->meshes);
+    flesh_fx_init();
     hands_init();
     game_render_init();
 }

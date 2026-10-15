@@ -127,7 +127,7 @@ float shadow_cascade(int c, vec3 p, vec3 n) {
     float count = 0.0;
     for (int y = -r; y <= r; y++)
         for (int x = -r; x <= r; x++) {
-            sum += texture(shadow_map, vec3(uv + vec2(x, y) * texel, sp.z - 0.0012 * k));
+            sum += texture(shadow_map, vec3(uv + vec2(x, y) * texel, sp.z - 0.0012 * k * frame.shadow_bias[c]));
             count += 1.0;
         }
     return sum / count;

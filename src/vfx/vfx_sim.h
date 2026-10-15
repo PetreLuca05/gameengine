@@ -20,6 +20,7 @@ typedef struct VfxGpuSpawn {
     vec4 incoming_alpha;    // incoming direction, w = alpha / intensity scale
     vec4 vel_time;          // inherited velocity, w = sub-tick time offset (s)
     u32 info[4];            // x emitter, y seed, z count, w variant (12) | flags (4) << 12 | instance slot << 16
+    vec4 tint;              // rgb colour multiplier
 } VfxGpuSpawn;
 
 enum VfxSpawnFlags {
@@ -43,6 +44,7 @@ typedef struct VfxSpawnParams {
     bool decal_ok;          // surface accepts decals (static world, not characters)
     bool viewmodel;
     int socket;             // > 0: parented, the owner updates the transform via vfx_set_transform
+    vec4 tint;              // w > 0: rgb multiplies particle and decal colours (per-character blood)
 } VfxSpawnParams;
 
 typedef struct VfxInstance {
@@ -83,17 +85,50 @@ typedef struct VfxCpuParticle {
     int trail_count;
 } VfxCpuParticle;
 
+#define VFX_SKINNED_DECALS_PER_CHAR 16
+#define VFX_MAX_SKINNED_DECALS 1024   // all characters together
+
 typedef struct VfxDecal {
     bool alive;
     vec3 pos, normal;
     float angle;            // rotation around the normal
+    vec3 tangent;           // explicit tangent (stretched / drip decals); zero = from the angle
     float size, depth;
+    float aspect;           // height / width (along the bitangent)
     float age, life;
     int texture, normal_tex;
     int variant, variants;
     vec4 tint;
     u32 serial;
+    u8 pool, kind;          // VfxDecalPool, VfxDecalKind
+    // Skinned: the box in bone space of an entity (the game layer resolves the bone each frame).
+    u32 attach;
+    int bone;
+    vec3 lpos, lnormal, ltangent;
+    // Growth (stains, pools): size eases from size to grow_to over grow_time.
+    float grow_to, grow_time;
+    // Drips: the decal extends drip_len metres down the surface over drip_time.
+    float drip_len, drip_time;
+    vec3 drip_start;
+    // Wet look: roughness rises and the colour darkens while drying.
+    float roughness, dry_time, dry_darken;
 } VfxDecal;
+
+// Everything a gameplay decal can ask for (vfx_sys_add_decal_ex).
+typedef struct VfxDecalSpawn {
+    vec3 pos, normal;
+    vec3 tangent;           // optional (zero = random rotation around the normal)
+    float size;             // 0 = the def's random size
+    float aspect;           // 0 = 1
+    int kind;
+    u32 attach;
+    int bone;
+    vec3 lpos, lnormal, ltangent;
+    float grow_to, grow_time;
+    float drip_len, drip_time;
+    vec4 tint;              // multiplies the def's tint (w 0 = 1)
+    float life;             // 0 = the def's lifetime
+} VfxDecalSpawn;
 
 typedef struct VfxLight {
     vec3 pos, color;
@@ -109,6 +144,7 @@ typedef void (*VfxSoundFn)(void *ctx, const char *name, vec3 pos, float volume);
 typedef struct VfxConfig {
     float quality_mul;      // count multiplier (vfx_quality)
     int decal_max;
+    int blood_decal_max;    // separate pool for blood decals (gore_level)
     int max_cpu;
     float timescale;
     vec3 camera;
@@ -134,6 +170,14 @@ typedef struct VfxSystem {
     VfxDecal decals[VFX_MAX_DECALS_HARD];
     int decal_head, decal_count;
     u32 decal_serial;
+    // Decal index (O(1) adds at 50 hits / s): free slots, the live list, per-pool rings in
+    // spawn order (oldest first, dead entries skipped lazily), the skinned subset.
+    int decal_free[VFX_MAX_DECALS_HARD], decal_free_n;
+    int decal_live[VFX_MAX_DECALS_HARD], decal_live_pos[VFX_MAX_DECALS_HARD], decal_live_n;
+    int pool_count[VFX_DECAL_POOL_COUNT];
+    struct { int slot; u32 serial; } pool_ring[VFX_DECAL_POOL_COUNT][VFX_MAX_DECALS_HARD];
+    int pool_ring_head[VFX_DECAL_POOL_COUNT], pool_ring_n[VFX_DECAL_POOL_COUNT];
+    int skin_slots[VFX_MAX_SKINNED_DECALS], skin_pos[VFX_MAX_DECALS_HARD], skin_n;
     VfxLight lights[VFX_MAX_LIGHTS];
     int light_count;
     VfxGpuSpawn spawns[VFX_MAX_GPU_SPAWNS];
@@ -162,6 +206,12 @@ int vfx_sys_collect_lights(VfxSystem *s, VfxLight *out, int max);
 u32 vfx_sys_cpu_hash(const VfxSystem *s);
 // Adds a decal directly (blood splats behind hits).
 void vfx_sys_add_decal(VfxSystem *s, const VfxDecalDef *d, vec3 pos, vec3 normal, float scale, u32 seed);
+// Pool budgets (impacts / blood) and the per-character skinned budget are never exceeded: the
+// oldest decal of the same pool (or of the same character) is recycled. Returns the slot or -1.
+int vfx_sys_add_decal_ex(VfxSystem *s, const VfxDecalDef *d, const VfxDecalSpawn *sp, u32 seed);
+int vfx_sys_decal_count(const VfxSystem *s, int pool, u32 attach);   // attach 0 = whole pool
+void vfx_sys_kill_decals(VfxSystem *s, u32 attach);
+void vfx_sys_decal_release(VfxSystem *s, int slot);   // kills one decal (keeps the index consistent)                  // a character went away
 // Default spawn params (identity rotation, scale 1, ...).
 VfxSpawnParams vfx_spawn_params(vec3 pos);
 

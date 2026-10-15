@@ -1,0 +1,45 @@
+{
+  "kind": "volume",
+  "grid": [
+    8,
+    8
+  ],
+  "frames": 64,
+  "cell": 64,
+  "fps": 30,
+  "motion_vectors": true,
+  "lighting": "sixway",
+  "placeholder": {
+    "type": "mist",
+    "seed": 71,
+    "grow": [
+      0.18,
+      0.95
+    ],
+    "density": 0.75,
+    "detail": 7.5,
+    "swirl": 0.8
+  },
+  "model": "kling-video/v2.5-turbo/pro/text-to-video",
+  "duration": 5,
+  "aspect_ratio": "1:1",
+  "cfg_scale": 0.6,
+  "negative_prompt": "camera movement, zoom, text, watermark, logo, people, gun, background objects, ground, colored background, cartoon",
+  "prompt": "high speed footage of a fine aerosol mist of dark blood bursting from the center and slowly dispersing into a thin haze, static locked off camera, centered and fully inside the frame, evenly lit, pure black background",
+  "background": "black",
+  "alpha": {
+    "black": 0.04,
+    "white": 0.5,
+    "gamma": 1.0,
+    "albedo": [
+      1.0,
+      1.0,
+      1.0
+    ]
+  },
+  "trim": [
+    0.0,
+    0.8
+  ],
+  "name": "flesh_mist"
+}

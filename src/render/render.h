@@ -186,8 +186,8 @@ typedef struct RenderVfxFrame {
     int spawn_count;
     const RenderVfxSprite *sprites;   // CPU tier: additive first (sprite_add), then alpha back to front
     int sprite_add, sprite_alpha;
-    const RenderVfxDecal *decals;
-    int decal_count;
+    const RenderVfxDecal *decals;     // static first, then decal_dynamic skinned ones at the end
+    int decal_count, decal_dynamic;
     const vec4 *instances;       // [2 * slot]: pos, rot (local-space emitters)
     int instance_count;
     float dt;                    // scaled simulation dt for this frame

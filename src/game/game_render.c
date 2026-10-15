@@ -200,6 +200,7 @@ static void fp_cam_test_hands(void) {
 void game_render_init(void) {
     sights_register();
     daynight_register();
+    flesh_range_register();
     cmd_register("ads_sweep", cmd_ads_sweep, "ads_sweep start | report: sight socket distance / angle against the view axis while ADS");
     cmd_register("fp_pose", cmd_fp_pose, "print the first-person head position relative to the pelvis");
     cmd_register("fp_cam_test", cmd_fp_cam_test, "fp_cam_test start | report: first-person camera / body / hands invariants");
@@ -742,6 +743,7 @@ void game_render(void) {
     if (!game_post_photo_mode()) hud_draw();
     sights_draw();
     daynight_draw();
+    flesh_range_draw();
     game_post_draw_overlay();
     game_post_draw_photo_ui();
     menus_draw();

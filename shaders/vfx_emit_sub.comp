@@ -12,5 +12,5 @@ void main() {
     uint count = min(s.info.z, 16u);
     for (uint k = 0u; k < count; k++)
         spawn_particle(s.info.x, s.pos.xyz, vec4(0, 0, 0, 1), s.normal.xyz, -s.normal.xyz, s.pos.w, 1.0, 1.0, vec3(0), 0.0,
-                       s.info.y, 0xFFFu, 0u, 0xFFFFu, k, cur);
+                       s.info.y, 0xFFFu, 0u, 0xFFFFu, k, cur, vec3(1.0));
 }

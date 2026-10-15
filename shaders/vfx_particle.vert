@@ -33,7 +33,7 @@ float shadow_at(vec3 wp) {
     vec3 s = sc.xyz / sc.w;
     vec2 uv = s.xy * 0.5 + 0.5;
     if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return 1.0;
-    return texture(shadow_map, vec3(uv, s.z - 0.002));
+    return texture(shadow_map, vec3(uv, s.z - 0.002 * frame.shadow_bias.z));
 }
 
 void accumulate(vec3 L, vec3 col, vec3 R, vec3 U, vec3 F) {

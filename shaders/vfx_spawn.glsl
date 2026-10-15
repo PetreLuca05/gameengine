@@ -39,7 +39,7 @@ vec3 shape_offset(Emitter e, vec3 axis, inout uint s) {
 
 // Pops a dead slot and initializes a particle. Returns false when the pool is exhausted.
 bool spawn_particle(uint emitter, vec3 pos, vec4 rot, vec3 n, vec3 incoming, float scale, float energy, float alpha, vec3 vel_inherit,
-                    float time_offset, uint seed, uint variant, uint flags, uint instance, uint counter, uint cur) {
+                    float time_offset, uint seed, uint variant, uint flags, uint instance, uint counter, uint cur, vec3 tint) {
     int slot = int(atomicAdd(ctr.dead, uint(-1))) - 1;
     if (slot < 0) {
         atomicAdd(ctr.dead, 1u);
@@ -71,6 +71,7 @@ bool spawn_particle(uint emitter, vec3 pos, vec4 rot, vec3 n, vec3 incoming, flo
     float cm = rand01(s);
     vec4 col = mix(e.color_a, e.color_b, cm);
     col.a *= alpha;
+    col.rgb *= tint;
     col.rgb = sqrt(clamp(col.rgb, 0.0, 1.0));   // rgba8 storage with more precision in the darks (squared on read)
     uint frames = max((e.modes.z >> 16) & 0xFFFFu, 1u);
     float frame = variant != 0xFFFu ? float(variant) : ((((e.modes.x >> 16) & EF_FRAME_RANDOM) != 0u) ? floor(rand01(s) * float(frames)) : 0.0);

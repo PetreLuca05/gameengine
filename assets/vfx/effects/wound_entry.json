@@ -1,0 +1,29 @@
+{
+  "duration": 0.05,
+  "priority": 0,
+  "max_instances": 64,
+  "emitters": [],
+  "decal": {
+    "texture": "wound_entry",
+    "size": [
+      0.035,
+      0.035
+    ],
+    "lifetime": 600,
+    "depth": 0.05,
+    "variants": 4,
+    "tint": [
+      1,
+      1,
+      1,
+      1
+    ],
+    "roughness": 0.3,
+    "dry_time": 90,
+    "dry_darken": 0.7,
+    "pool": "blood",
+    "normal": "wound_entry_n"
+  },
+  "name": "wound_entry",
+  "_generated": "make_flesh_effects.py"
+}

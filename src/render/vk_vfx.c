@@ -48,7 +48,7 @@ typedef struct VfxFrameRes {
     GpuBuffer ubo, spawns, prefix, sprites, decals, instances, readback;
     VkDescriptorSet set;
     u32 spawn_particles, spawn_records;
-    int sprite_add, sprite_alpha, decal_count;
+    int sprite_add, sprite_alpha, decal_count, decal_dynamic;
     bool readback_valid;
     bool fed;
 } VfxFrameRes;
@@ -567,7 +567,7 @@ static void upload_emitters(const VfxLibrary *lib) {
         g->phys0 = v4(u->gravity, u->drag, u->wind, u->turbulence);
         g->phys1 = v4(u->turb_freq, u->turb_speed, u->bounce, u->friction);
         g->render0 = v4(r->stretch, r->stretch_max, r->soft, r->emissive);
-        g->render1 = v4(r->near_fade, r->distortion, r->aspect, u->fps);
+        g->render1 = v4(r->near_fade, r->mode == VFX_RENDER_DISTORT ? r->distortion : r->scatter, r->aspect, u->fps);
         int grid_cols = 1, grid_rows = 1, frames = 1, page = 0, mvp = 0, lmp = 0, np = 0;
         g->tex_uv = g->mv_uv = g->lm0_uv = g->lm1_uv = g->nrm_uv = v4(0, 0, 0, 0);
         if (r->texture_id >= 0) {
@@ -885,6 +885,7 @@ void render_vfx_frame(const RenderVfxFrame *in) {
     int dc = DG_MIN(in->decal_count, (int)VFX_MAX_GPU_DECALS);
     if (in->decals && dc > 0) memcpy(f->decals.mapped, in->decals, sizeof(RenderVfxDecal) * (size_t)dc);
     f->decal_count = dc;
+    f->decal_dynamic = DG_CLAMP(in->decal_dynamic, 0, dc);
     int ic = DG_MIN(in->instance_count, VFX_MAX_INSTANCES);
     if (in->instances && ic > 0) memcpy(f->instances.mapped, in->instances, sizeof(vec4) * 2 * (size_t)ic);
     if (in->reset) X.need_reset = true;
@@ -941,7 +942,7 @@ void vkx_record_compute(VkCommandBuffer cmd) {
     read_back(f);
     vkx_timestamp(cmd, 0);
     if (!X.ok) { vkx_timestamp(cmd, 1); f->readback_valid = true; return; }
-    if (!f->fed) { f->spawn_particles = f->spawn_records = 0; f->sprite_add = f->sprite_alpha = f->decal_count = 0; }
+    if (!f->fed) { f->spawn_particles = f->spawn_records = 0; f->sprite_add = f->sprite_alpha = f->decal_count = f->decal_dynamic = 0; }
     f->fed = false;
     // Sort size from the last known alpha count (2 frames old): next power of two with headroom.
     u32 want = X.last_alpha + X.last_alpha / 3 + 256;
@@ -1050,16 +1051,20 @@ static void push_mode(VkCommandBuffer cmd, u32 mode) {
     vkCmdPushConstants(cmd, X.gfx_layout, VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pc), pc);
 }
 
-void vkx_draw_decals(VkCommandBuffer cmd) {
-    vkx_timestamp(cmd, 2);
+// Static decals before the characters; the skinned ones (wounds, stains) after them, so they
+// project onto the character's own depth.
+void vkx_draw_decals(VkCommandBuffer cmd, bool dynamic) {
+    if (!dynamic) vkx_timestamp(cmd, 2);
     VfxFrameRes *f = &X.fr[R->frame_slot];
-    if (X.ok && f->decal_count > 0) {
+    int ns = f->decal_count - f->decal_dynamic;
+    int first = dynamic ? ns : 0, count = dynamic ? f->decal_dynamic : ns;
+    if (X.ok && count > 0) {
         bind_gfx(cmd);
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, X.g_decal);
-        vkCmdDraw(cmd, 36, (u32)f->decal_count, 0, 0);
+        vkCmdDraw(cmd, 36, (u32)count, 0, (u32)first);
         R->stats.draw_calls++;
     }
-    vkx_timestamp(cmd, 3);
+    if (!dynamic) vkx_timestamp(cmd, 3);
 }
 
 RenderTarget *vkx_scene_copy(void) { return X.layout && X.scene_copy.image ? &X.scene_copy : NULL; }

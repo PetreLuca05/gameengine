@@ -14,6 +14,65 @@ static float jf(const cJSON *o, const char *k, float def) {
     return cJSON_IsNumber(v) ? (float)v->valuedouble : def;
 }
 
+int character_part_group(const char *name, bool *out) {
+    memset(out, 0, sizeof(bool) * BP_COUNT);
+    int p = body_part_from_name(name);
+    if (p >= 0) { out[p] = true; return 1; }
+    int a = -1, b = -1;
+    if (!strcmp(name, "arms")) { a = BP_UPPER_ARM_L; b = BP_LOWER_ARM_R; }
+    else if (!strcmp(name, "hands")) { a = BP_HAND_L; b = BP_HAND_R; }
+    else if (!strcmp(name, "legs")) { a = BP_UPPER_LEG_L; b = BP_LOWER_LEG_R; }
+    else if (!strcmp(name, "feet")) { a = BP_FOOT_L; b = BP_FOOT_R; }
+    else if (!strcmp(name, "limbs")) { a = BP_UPPER_ARM_L; b = BP_FOOT_R; }
+    else if (!strcmp(name, "torso")) { a = BP_CHEST; b = BP_PELVIS; }
+    else if (!strcmp(name, "all")) { a = 0; b = BP_COUNT - 1; }
+    if (a < 0) return 0;
+    for (int i = a; i <= b; i++) out[i] = true;
+    return b - a + 1;
+}
+
+const char *char_surface_name(int s) {
+    static const char *const n[CSURF_COUNT] = { "flesh", "cloth", "armor", "bone" };
+    return s >= 0 && s < CSURF_COUNT ? n[s] : "flesh";
+}
+
+static void parse_blood(CharacterDef *d, const cJSON *root) {
+    bool zombie = d->kind == CK_ZOMBIE;
+    // Zombies: darker, thicker (less aerosol), clotted wounds bleed out slower.
+    d->blood.color = zombie ? v3(0.20f, 0.035f, 0.02f) : v3(0.30f, 0.02f, 0.015f);
+    d->blood.darkness = zombie ? 0.7f : 0.55f;
+    d->blood.amount = zombie ? 1.15f : 1.0f;
+    d->blood.mist = zombie ? 0.7f : 1.0f;
+    d->blood.decay = zombie ? 0.7f : 1.0f;
+    const cJSON *b = cJSON_GetObjectItemCaseSensitive(root, "blood");
+    if (cJSON_IsObject(b)) {
+        const cJSON *c = cJSON_GetObjectItemCaseSensitive(b, "color");
+        if (cJSON_IsArray(c) && cJSON_GetArraySize(c) >= 3)
+            d->blood.color = v3((float)cJSON_GetArrayItem(c, 0)->valuedouble, (float)cJSON_GetArrayItem(c, 1)->valuedouble, (float)cJSON_GetArrayItem(c, 2)->valuedouble);
+        d->blood.darkness = jf(b, "darkness", d->blood.darkness);
+        d->blood.amount = jf(b, "amount", d->blood.amount);
+        d->blood.mist = jf(b, "mist", d->blood.mist);
+        d->blood.decay = jf(b, "decay", d->blood.decay);
+    }
+    // Surfaces: players wear clothes on the torso and limbs by default, zombies rags.
+    for (int i = 0; i < BP_COUNT; i++) d->part_surface[i] = CSURF_FLESH;
+    if (d->kind == CK_PLAYER)
+        for (int i = BP_CHEST; i <= BP_FOOT_R; i++) d->part_surface[i] = (i == BP_HAND_L || i == BP_HAND_R) ? CSURF_FLESH : CSURF_CLOTH;
+    const cJSON *e;
+    bool m[BP_COUNT];
+    cJSON_ArrayForEach(e, cJSON_GetObjectItemCaseSensitive(root, "surface")) {
+        if (!cJSON_IsString(e) || !character_part_group(e->string, m)) continue;
+        int s = CSURF_FLESH;
+        for (int k = 0; k < CSURF_COUNT; k++) if (!strcmp(e->valuestring, char_surface_name(k))) s = k;
+        for (int i = 0; i < BP_COUNT; i++) if (m[i]) d->part_surface[i] = (u8)s;
+    }
+    cJSON_ArrayForEach(e, cJSON_GetObjectItemCaseSensitive(root, "armor")) {
+        if (!character_part_group(e->string, m)) continue;
+        int hits = cJSON_IsObject(e) ? (int)jf(e, "hits", 2) : (cJSON_IsNumber(e) ? (int)e->valuedouble : 2);
+        for (int i = 0; i < BP_COUNT; i++) if (m[i]) { d->armor_hits[i] = (u8)DG_CLAMP(hits, 0, 255); d->part_surface[i] = CSURF_ARMOR; }
+    }
+}
+
 bool character_def_parse(CharacterDef *d, const char *text, const char *source, char *err, int err_size) {
     memset(d, 0, sizeof(*d));
     cJSON *root = cJSON_Parse(text);
@@ -37,6 +96,7 @@ bool character_def_parse(CharacterDef *d, const char *text, const char *source, 
     dg_strcpy(d->anim_set, sizeof(d->anim_set), js(root, "anim_set", d->kind == CK_PLAYER ? "player" : "zombie"));
     part_mult_defaults(d->part_mult);
     part_mult_parse(d->part_mult, cJSON_GetObjectItemCaseSensitive(root, "part_mult"));
+    parse_blood(d, root);
     d->ragdoll_scale = jf(root, "ragdoll_scale", 1.0f);
     d->scale = jf(root, "scale", 1.0f);
     d->hp = jf(root, "hp", d->kind == CK_PLAYER ? 100.0f : 120.0f);

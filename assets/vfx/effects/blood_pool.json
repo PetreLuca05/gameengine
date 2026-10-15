@@ -1,0 +1,29 @@
+{
+  "duration": 0.05,
+  "priority": 0,
+  "max_instances": 64,
+  "emitters": [],
+  "decal": {
+    "texture": "blood_pool",
+    "size": [
+      0.25,
+      0.25
+    ],
+    "lifetime": 360,
+    "depth": 0.3,
+    "variants": 4,
+    "tint": [
+      1,
+      1,
+      1,
+      1
+    ],
+    "roughness": 0.06,
+    "dry_time": 300,
+    "dry_darken": 0.6,
+    "pool": "blood",
+    "normal": "blood_pool_n"
+  },
+  "name": "blood_pool",
+  "_generated": "make_flesh_effects.py"
+}

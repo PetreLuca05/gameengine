@@ -15,7 +15,13 @@ float shadow_at(vec3 wp) {
     vec3 s = sc.xyz / sc.w;
     vec2 uv = s.xy * 0.5 + 0.5;
     if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return 1.0;
-    return texture(shadow_map, vec3(uv, s.z - 0.003));
+    return texture(shadow_map, vec3(uv, s.z - 0.003 * frame.shadow_bias.z));
+}
+
+vec2 env_uv(vec3 n) {   // octahedral, as sky_env_uv in lit_body.glsl
+    n /= (abs(n.x) + abs(n.y) + abs(n.z));
+    vec2 e = n.y >= 0.0 ? n.xz : (1.0 - abs(n.zx)) * vec2(n.x >= 0.0 ? 1.0 : -1.0, n.z >= 0.0 ? 1.0 : -1.0);
+    return e * 0.5 + 0.5;
 }
 
 void main() {
@@ -27,7 +33,8 @@ void main() {
     vec3 n = d.normal_depth.xyz, t = d.tangent_angle.xyz, b = cross(n, t);
     vec3 rel = wp - d.pos_size.xyz;
     float hs = d.pos_size.w * 0.5;
-    vec3 lp = vec3(dot(rel, t) / hs, dot(rel, b) / hs, dot(rel, n) / d.normal_depth.w);
+    float asp = d.tangent_angle.w > 0.0 ? d.tangent_angle.w : 1.0;
+    vec3 lp = vec3(dot(rel, t) / (hs * asp), dot(rel, b) / hs, dot(rel, n) / d.normal_depth.w);
     if (any(greaterThan(abs(lp), vec3(1.0)))) discard;
     // Surface normal from depth derivatives: reject surfaces facing away from the decal.
     vec3 sn = normalize(cross(dFdx(wp), dFdy(wp)));
@@ -62,5 +69,27 @@ void main() {
         att = att * att / (dist * dist + 1.0);
         light += frame.lights[i].color_intensity.rgb * frame.lights[i].color_intensity.w * att * max(dot(nn, dl / dist), 0.0) * INV_PI;
     }
-    out_color = vec4(albedo * light * a, a);
+    vec3 col = albedo * light;
+    // Wet decals (blood): a GGX sun highlight plus the sky reflection, fading as they dry.
+    if ((d.info.w & 0x100u) != 0u) {
+        float rough = max(float(d.info.w & 255u) / 255.0, 0.05);
+        vec3 V = normalize(vf.cam_pos.xyz - wp);
+        vec3 H = normalize(L + V);
+        float NdH = max(dot(nn, H), 0.0), NdL = max(dot(nn, L), 0.0), NdV = max(dot(nn, V), 1e-3);
+        float a2 = rough * rough * rough * rough;
+        float dd = NdH * NdH * (a2 - 1.0) + 1.0;
+        float D = a2 / (3.14159265 * dd * dd);
+        float VdH = max(dot(V, H), 0.0);
+        float Fr = 0.02 + 0.98 * pow(1.0 - VdH, 5.0);
+        float k = (rough + 1.0) * (rough + 1.0) / 8.0;
+        float G = NdL / (NdL * (1.0 - k) + k) * NdV / (NdV * (1.0 - k) + k);
+        float wet = 1.0 - smoothstep(0.35, 0.85, rough);
+        vec3 spec = frame.sun_color.rgb * frame.sun_dir.w * D * Fr * G / (4.0 * NdV) * shadow_at(wp + sn * 0.01);
+        vec3 rv = reflect(-V, nn);
+        float Fv = 0.02 + 0.98 * pow(1.0 - NdV, 5.0);
+        vec3 env = frame.sky_flags.x > 0.5 ? textureLod(sky_env, env_uv(rv), rough * frame.sky_flags.z).rgb * frame.sky_flags.y
+                                           : frame.sky_ambient.rgb * frame.sky_ambient.w;
+        col += (spec + env * Fv) * wet;
+    }
+    out_color = vec4(col * a, a);
 }

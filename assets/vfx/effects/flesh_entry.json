@@ -1,0 +1,129 @@
+{
+  "duration": 0.1,
+  "priority": 1,
+  "max_instances": 48,
+  "cull_distance": 150,
+  "lod": [
+    [
+      25,
+      0.75
+    ],
+    [
+      60,
+      0.45
+    ],
+    [
+      110,
+      0.2
+    ]
+  ],
+  "emitters": [
+    {
+      "name": "drops",
+      "tier": "cpu",
+      "spawn": {
+        "mode": "burst",
+        "count": [
+          2,
+          5
+        ],
+        "life": [
+          0.6,
+          1.2
+        ],
+        "size": [
+          0.008,
+          0.02
+        ],
+        "speed": [
+          0.8,
+          2.2
+        ],
+        "dir": "incoming",
+        "angle": 40,
+        "frame_random": true,
+        "color": [
+          0.26,
+          0.022,
+          0.018,
+          1.0
+        ],
+        "color2": [
+          0.17,
+          0.016,
+          0.013,
+          1.0
+        ]
+      },
+      "update": {
+        "gravity": 1.0,
+        "drag": 0.25,
+        "collide": "physics",
+        "kill_on_hit": true,
+        "sub_emitter": {
+          "on": "collision",
+          "effect": "blood_splat"
+        }
+      },
+      "render": {
+        "mode": "alpha",
+        "lighting": "simple",
+        "orient": "stretch",
+        "texture": "blood_droplet",
+        "stretch": 0.012,
+        "stretch_max": 4,
+        "near_fade": 0.45
+      }
+    },
+    {
+      "name": "spray",
+      "tier": "gpu",
+      "spawn": {
+        "mode": "burst",
+        "count": [
+          4,
+          9
+        ],
+        "life": [
+          0.12,
+          0.3
+        ],
+        "size": [
+          0.006,
+          0.014
+        ],
+        "speed": [
+          1.0,
+          3.0
+        ],
+        "dir": "incoming",
+        "angle": 45,
+        "frame_random": true,
+        "color": [
+          0.26,
+          0.022,
+          0.018,
+          0.9
+        ]
+      },
+      "update": {
+        "gravity": 1.0,
+        "drag": 1.5,
+        "collide": "depth",
+        "bounce": 0.0,
+        "friction": 1.0
+      },
+      "render": {
+        "mode": "alpha",
+        "lighting": "simple",
+        "orient": "stretch",
+        "texture": "blood_droplet",
+        "stretch": 0.015,
+        "stretch_max": 5,
+        "near_fade": 0.45
+      }
+    }
+  ],
+  "name": "flesh_entry",
+  "_generated": "make_flesh_effects.py"
+}

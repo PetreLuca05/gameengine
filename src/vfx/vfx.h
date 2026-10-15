@@ -26,9 +26,14 @@ u32 vfx_game_muzzle(vec3 pos, vec3 dir, int type, int device, bool viewmodel);
 void vfx_game_shell(vec3 pos, vec3 vel, int caliber);
 // Local first-person muzzle socket: flashes follow the barrel while they live.
 void vfx_game_set_local_muzzle(vec3 pos, vec3 dir, bool valid);
-bool vfx_game_night(void);             // env_night (dev day / night toggle)
+bool vfx_game_night(void);
+int vfx_game_gore(void);             // gore_level: 0 off, 1 low, 2 high             // env_night (dev day / night toggle)
 VfxSystem *vfx_game_system(void);
 VfxLibrary *vfx_game_library(void);
 const char *vfx_game_stats_text(void);
+// World transform of a character bone (skinned decals, bleeding emitters): false when the
+// entity or bone no longer exists. Installed by the game layer.
+typedef bool (*VfxBoneFn)(u32 entity, int bone, vec3 *pos, quat *rot);
+void vfx_game_set_bone_fn(VfxBoneFn fn);
 
 #endif

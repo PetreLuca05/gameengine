@@ -121,6 +121,7 @@ typedef struct FrameData {
     vec4 cshadow;         // xy cloud shadow origin (world xz), z 1 / size
     mat4 shadow_vps[3];   // cascaded shadow maps: world -> atlas tile (2 x 2 atlas, tile 3 unused)
     vec4 shadow_splits;   // x, y, z: cascade radii (m), w: cascade count
+    vec4 shadow_bias;     // x, y, z: per-cascade depth bias scale (constant bias in metres)
     GpuPointLight lights[MAX_POINT_LIGHTS];
 } FrameData;
 
@@ -225,6 +226,7 @@ typedef struct Renderer {
     mat4 view, proj, view_proj, vm_proj, shadow_vp;   // shadow_vp: the widest cascade (volumetrics, particles, decals)
     mat4 shadow_vps[3];
     vec4 shadow_splits;
+    vec4 shadow_bias;
     // temporal state (TAA / motion blur / velocity)
     mat4 proj_j, vm_proj_j;                     // jittered projections (this frame)
     mat4 view_proj_nj, prev_view_proj_nj, vm_view_proj_nj, prev_vm_view_proj_nj;
@@ -306,7 +308,7 @@ void vkx_shutdown(void);
 bool vkx_create_pipelines(void);
 void vkx_targets_changed(void);               // after vkd_create_targets (depth / scene copy / bloom views)
 void vkx_record_compute(VkCommandBuffer cmd); // frame start, before the shadow pass
-void vkx_draw_decals(VkCommandBuffer cmd);    // inside the scene pass, depth read-only
+void vkx_draw_decals(VkCommandBuffer cmd, bool dynamic);    // inside the scene pass, depth read-only
 void vkx_copy_scene(VkCommandBuffer cmd);     // outside rendering: HDR -> scene copy (distortion)
 void vkx_draw_particles(VkCommandBuffer cmd); // inside the scene pass, depth read-only
 void vkx_timestamp(VkCommandBuffer cmd, int slot);

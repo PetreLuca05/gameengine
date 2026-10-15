@@ -149,6 +149,7 @@ typedef struct VfxRenderDef {
     float aspect;            // quad width / height
     float light_radius, light_intensity;   // CPU tier: per particle light (budgeted)
     vec3 light_color;
+    float scatter;           // alpha particles: forward scattering when backlit (blood mist rim)
 } VfxRenderDef;
 
 typedef struct VfxEmitterDef {
@@ -182,7 +183,18 @@ typedef struct VfxDecalDef {
     float depth;             // projection depth (m)
     int variants;            // texture variants (flipbook cells)
     vec4 tint;
+    float roughness;         // 0 = default (dry, diffuse); wet decals (blood) 0.1 .. 0.3
+    float dry_time;          // s until fully dry (roughness up, darker); 0 = never
+    float dry_darken;        // colour multiplier when dry
+    int pool;                // VfxDecalPool
 } VfxDecalDef;
+
+typedef enum VfxDecalPool { VFX_DECAL_POOL_IMPACT, VFX_DECAL_POOL_BLOOD, VFX_DECAL_POOL_COUNT } VfxDecalPool;
+typedef enum VfxDecalKind {
+    VFX_DECAL_STATIC,        // world-space box on the level
+    VFX_DECAL_SKINNED,       // bone-space box on a character (follows animation and the ragdoll)
+    VFX_DECAL_DRIP,          // runs down a vertical surface over its first seconds
+} VfxDecalKind;
 
 typedef struct VfxEffectDef {
     char name[VFX_NAME];

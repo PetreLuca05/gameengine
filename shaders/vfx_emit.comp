@@ -18,5 +18,5 @@ void main() {
     uint cur = vf.counts.w & 1u;
     spawn_particle(sp.info.x, sp.pos_scale.xyz, sp.rot, sp.normal_energy.xyz, sp.incoming_alpha.xyz, sp.pos_scale.w, sp.normal_energy.w,
                    sp.incoming_alpha.w, sp.vel_time.xyz, sp.vel_time.w, sp.info.y, sp.info.w & 0xFFFu, (sp.info.w >> 12) & 0xFu,
-                   sp.info.w >> 16, k, cur);
+                   sp.info.w >> 16, k, cur, sp.tint.rgb);
 }

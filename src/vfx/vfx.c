@@ -38,7 +38,7 @@ typedef struct VfxGame {
     float sort_d[MAX_FRAME_SPRITES];
     int sort_idx[MAX_FRAME_SPRITES];
     char stats[256];
-    Cvar *enable, *quality, *debug, *half_res, *lighting, *decal_max, *timescale, *predict, *night;
+    Cvar *enable, *quality, *debug, *half_res, *lighting, *decal_max, *timescale, *predict, *night, *gore;
     // dev room muzzle pedestal
     bool pedestal;
     int ped_type, ped_device, ped_shots, ped_fixed;
@@ -61,7 +61,7 @@ static bool cb_raycast(void *ctx, vec3 from, vec3 delta, vec3 *hit, vec3 *normal
     if (!phys_raycast(w->phys, from, delta, PL_MASK_WORLD, PHYS_INVALID_BODY, &rh)) return false;
     *hit = rh.point;
     *normal = rh.normal;
-    *material = rh.material;
+    *material = rh.material | (rh.user ? 0x100 : 0);   // 0x100: not level static (no decals on props / doors)
     return true;
 }
 
@@ -246,6 +246,8 @@ static void pedestal_tick(float dt) {
     }
 }
 
+int vfx_game_gore(void) { return V ? DG_CLAMP(V->gore->i, 0, 2) : 2; }
+
 bool vfx_game_night(void) { return V && V->night->i; }
 
 void vfx_game_init(const BasicMeshes *meshes) {
@@ -261,6 +263,7 @@ void vfx_game_init(const BasicMeshes *meshes) {
     V->timescale = cvar_reg_float("vfx_timescale", 1.0f, 0.0f, 4.0f, CVAR_CHEAT, "VFX time scale (editor slow motion)");
     V->predict = cvar_reg_bool("cl_predict_impacts", true, CVAR_ARCHIVE, "show own bullet impacts immediately (predicted)");
     V->night = cvar_reg_bool("env_night", false, 0, "night lighting (dev: muzzle flash day/night look)");
+    V->gore = cvar_reg_int("gore_level", 2, 0, 2, CVAR_ARCHIVE, "gore: 0 off (dust puffs, no blood decals), 1 low, 2 high");
     cmd_register("vfx_pedestal", cmd_vfx_pedestal, "vfx_pedestal [type [device] | off]: dev room muzzle flash pedestal");
     cmd_register("vfx_daynight", cmd_vfx_daynight, "vfx_daynight [0|1]: toggle night lighting");
     cmd_register("vfx_reload", cmd_vfx_reload, "reload assets/vfx effects and textures");
@@ -376,6 +379,11 @@ static void apply_config(vec3 cam) {
     int q = DG_CLAMP(V->quality->i, 0, 3);
     c->quality_mul = k_quality_mul[q];
     c->decal_max = V->decal_max->i;
+    static const int k_blood_max[3] = { 0, 96, 256 };
+    c->blood_decal_max = k_blood_max[DG_CLAMP(V->gore->i, 0, 2)];
+    if (c->blood_decal_max == 0 && V->sys.decal_count > 0)   // gore switched off: no blood stays behind
+        for (int i = V->sys.decal_live_n - 1; i >= 0; i--)
+            if (V->sys.decals[V->sys.decal_live[i]].pool == VFX_DECAL_POOL_BLOOD) vfx_sys_decal_release(&V->sys, V->sys.decal_live[i]);
     c->timescale = V->timescale->f;
     c->camera = cam;
     c->wind = V->wind;
@@ -490,40 +498,113 @@ static int build_sprites(vec3 cam, int *out_add) {
     return alpha;
 }
 
-static int build_decals(void) {
+static VfxBoneFn g_bone_fn;
+void vfx_game_set_bone_fn(VfxBoneFn fn) { g_bone_fn = fn; }
+
+static bool fill_decal(const VfxDecal *d, RenderVfxDecal *o, bool *dynamic) {
     const VfxLibrary *lib = &V->lib;
-    int n = 0;
-    for (int i = 0; i < VFX_MAX_DECALS_HARD && n < MAX_FRAME_DECALS; i++) {
-        const VfxDecal *d = &V->sys.decals[i];
-        if (!d->alive || d->texture < 0) continue;
-        const VfxTextureMeta *m = &lib->textures[d->texture];
-        if (!(m->uv.z > m->uv.x)) continue;
-        RenderVfxDecal *o = &V->decals[n++];
-        vec3 nn = d->normal;
+    const VfxTextureMeta *m = &lib->textures[d->texture];
+    if (!(m->uv.z > m->uv.x)) return false;
+    vec3 pos = d->pos, nn = d->normal, tan = d->tangent;
+    *dynamic = false;
+    if (d->kind == VFX_DECAL_SKINNED) {
+        // Bone space -> world with this frame's pose (animation or ragdoll).
+        vec3 bp;
+        quat br;
+        if (!g_bone_fn || !g_bone_fn(d->attach, d->bone, &bp, &br)) return false;
+        pos = v3_add(bp, quat_rotate(br, d->lpos));
+        nn = v3_norm(quat_rotate(br, d->lnormal));
+        tan = quat_rotate(br, d->ltangent);
+        *dynamic = true;
+    }
+    float size = d->size, aspect = d->aspect > 0 ? d->aspect : 1.0f;
+    if (d->grow_time > 0 && d->grow_to > size) {
+        float g = clampf(d->age / d->grow_time, 0, 1);
+        g = 1.0f - (1.0f - g) * (1.0f - g);   // fast, then slowing (a pool spreading, a stain soaking)
+        size = size + (d->grow_to - size) * g;
+    }
+    if (d->kind == VFX_DECAL_DRIP && d->drip_len > 0) {
+        // The drip runs down the surface: a strip growing from the impact along the down slope.
+        float g = clampf(d->age / fmaxf(d->drip_time, 0.1f), 0, 1);
+        g = sqrtf(g);
+        vec3 down = v3_sub(v3(0, -1, 0), v3_scale(nn, -nn.y));
+        down = v3_len2(down) > 1e-6f ? v3_norm(down) : v3(0, 0, 1);
+        float len = fmaxf(size, d->drip_len * g);
+        aspect = len / fmaxf(size, 1e-3f);
+        pos = v3_madd(d->drip_start, down, len * 0.5f - size * 0.5f);
+        tan = down;   // stretched along the run
+    }
+    vec3 t;
+    if (v3_len2(tan) > 1e-6f) {
+        t = v3_norm(v3_sub(tan, v3_scale(nn, v3_dot(tan, nn))));
+    } else {
         vec3 up = fabsf(nn.y) > 0.9f ? v3(0, 0, 1) : v3(0, 1, 0);
         vec3 t0 = v3_norm(v3_cross(up, nn));
         vec3 b0 = v3_cross(nn, t0);
         float ca = cosf(d->angle), sa = sinf(d->angle);
-        vec3 t = v3_add(v3_scale(t0, ca), v3_scale(b0, sa));
-        float fade = d->life > 0 ? clampf((d->life - d->age) / (d->life * 0.2f), 0, 1) : 1.0f;
-        o->pos_size = v4(d->pos.x, d->pos.y, d->pos.z, d->size);
-        o->normal_depth = v4(nn.x, nn.y, nn.z, d->depth);
-        o->tangent_angle = v4(t.x, t.y, t.z, d->angle);
-        o->uv = m->uv;
-        o->nuv = v4(0, 0, 0, 0);
-        int np = 0;
-        if (d->normal_tex >= 0 && lib->textures[d->normal_tex].uv.z > lib->textures[d->normal_tex].uv.x) {
-            o->nuv = lib->textures[d->normal_tex].uv;
-            np = lib->textures[d->normal_tex].page;
-        }
-        o->tint = v4(d->tint.x, d->tint.y, d->tint.z, d->tint.w * fade);
-        int frames = m->variants > 1 ? m->variants : m->frames;
-        o->info[0] = (u32)DG_CLAMP(m->cols, 1, 255) | ((u32)DG_CLAMP(m->rows, 1, 255) << 8) | ((u32)DG_CLAMP(frames, 1, 65535) << 16);
-        o->info[1] = (u32)(d->variant % DG_MAX(1, frames));
-        o->info[2] = (u32)m->page | ((u32)np << 8);
-        o->info[3] = 0;
+        t = v3_add(v3_scale(t0, ca), v3_scale(b0, sa));
     }
-    return n;
+    float fade = d->life > 0 ? clampf((d->life - d->age) / (d->life * 0.2f), 0, 1) : 1.0f;
+    // Drying: wet blood dries darker and rougher.
+    float dry = d->dry_time > 0 ? clampf(d->age / d->dry_time, 0, 1) : 0.0f;
+    float dk = 1.0f + (d->dry_darken - 1.0f) * dry;
+    float rough = d->roughness > 0 ? d->roughness + (0.85f - d->roughness) * dry : 1.0f;
+    o->pos_size = v4(pos.x, pos.y, pos.z, size);
+    o->normal_depth = v4(nn.x, nn.y, nn.z, d->depth);
+    o->tangent_angle = v4(t.x, t.y, t.z, aspect);
+    o->uv = m->uv;
+    o->nuv = v4(0, 0, 0, 0);
+    int np = 0;
+    if (d->normal_tex >= 0 && lib->textures[d->normal_tex].uv.z > lib->textures[d->normal_tex].uv.x) {
+        o->nuv = lib->textures[d->normal_tex].uv;
+        np = lib->textures[d->normal_tex].page;
+    }
+    o->tint = v4(d->tint.x * dk, d->tint.y * dk, d->tint.z * dk, d->tint.w * fade);
+    int frames = m->variants > 1 ? m->variants : m->frames;
+    o->info[0] = (u32)DG_CLAMP(m->cols, 1, 255) | ((u32)DG_CLAMP(m->rows, 1, 255) << 8) | ((u32)DG_CLAMP(frames, 1, 65535) << 16);
+    o->info[1] = (u32)(d->variant % DG_MAX(1, frames));
+    o->info[2] = (u32)m->page | ((u32)np << 8);
+    o->info[3] = (u32)DG_CLAMP((int)(rough * 255.0f), 0, 255) | (d->roughness > 0 ? 0x100u : 0u);
+    return true;
+}
+
+// Static decals first, then the skinned ones (drawn after the characters): returns the total,
+// *dyn = how many at the end are skinned.
+static int build_decals(int *dyn) {
+    int n = 0, nd = 0;
+    static RenderVfxDecal tmp_dyn[MAX_FRAME_DECALS];
+    for (int li = 0; li < V->sys.decal_live_n && n + nd < MAX_FRAME_DECALS; li++) {
+        int slot = V->sys.decal_live[li];
+        VfxDecal *d = &V->sys.decals[slot];
+        if (d->texture < 0) continue;
+        RenderVfxDecal o;
+        bool dynamic;
+        if (!fill_decal(d, &o, &dynamic)) {
+            if (d->kind == VFX_DECAL_SKINNED) { vfx_sys_decal_release(&V->sys, slot); li--; }   // its character is gone (the last entry moved here)
+            continue;
+        }
+        if (dynamic) tmp_dyn[nd++] = o;
+        else V->decals[n++] = o;
+        if (V->debug->i >= 1 && d->pool == VFX_DECAL_POOL_BLOOD) {
+            // Projection box (blood decals): tangent stretched by the aspect, depth along the normal.
+            vec3 c0 = v3(o.pos_size.x, o.pos_size.y, o.pos_size.z), nn = v3(o.normal_depth.x, o.normal_depth.y, o.normal_depth.z);
+            vec3 t = v3(o.tangent_angle.x, o.tangent_angle.y, o.tangent_angle.z), bb = v3_cross(nn, t);
+            float hx = o.pos_size.w * 0.5f * o.tangent_angle.w, hy = o.pos_size.w * 0.5f, hz = o.normal_depth.w;
+            vec3 cr[8];
+            for (int k = 0; k < 8; k++)
+                cr[k] = v3_add(c0, v3_add(v3_scale(t, (k & 1) ? hx : -hx), v3_add(v3_scale(bb, (k & 2) ? hy : -hy), v3_scale(nn, (k & 4) ? hz : -hz))));
+            static const u8 ed[12][2] = { { 0, 1 }, { 2, 3 }, { 4, 5 }, { 6, 7 }, { 0, 2 }, { 1, 3 }, { 4, 6 }, { 5, 7 }, { 0, 4 }, { 1, 5 }, { 2, 6 }, { 3, 7 } };
+            u32 colr = dynamic ? DBG_MAGENTA : (d->kind == VFX_DECAL_DRIP ? DBG_CYAN : DBG_ORANGE);
+            for (int k = 0; k < 12; k++) dbg_line(cr[ed[k][0]], cr[ed[k][1]], colr, 0, false);
+        }
+        if (V->debug->i >= 2) {
+            vec3 p = v3(o.pos_size.x, o.pos_size.y, o.pos_size.z), nn = v3(o.normal_depth.x, o.normal_depth.y, o.normal_depth.z);
+            dbg_line(p, v3_madd(p, nn, 0.08f), dynamic ? DBG_MAGENTA : DBG_YELLOW, 0, false);
+        }
+    }
+    memcpy(&V->decals[n], tmp_dyn, sizeof(RenderVfxDecal) * (size_t)nd);
+    *dyn = nd;
+    return n + nd;
 }
 
 void vfx_game_render(vec3 cam) {
@@ -555,7 +636,8 @@ void vfx_game_render(vec3 cam) {
     }
     int add = 0;
     int alpha = build_sprites(cam, &add);
-    int decals = build_decals();
+    int dyn_decals = 0;
+    int decals = build_decals(&dyn_decals);
     RenderVfxFrame f;
     memset(&f, 0, sizeof(f));
     f.spawns = V->sys.spawns;
@@ -565,6 +647,7 @@ void vfx_game_render(vec3 cam) {
     f.sprite_alpha = alpha;
     f.decals = V->decals;
     f.decal_count = decals;
+    f.decal_dynamic = dyn_decals;
     f.instances = V->instances;
     f.instance_count = inst_count;
     f.dt = (float)g_engine.frame_dt * V->timescale->f;

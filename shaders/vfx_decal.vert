@@ -15,7 +15,8 @@ void main() {
     vec3 b = cross(n, t);
     vec3 c = k_corners[k_idx[gl_VertexIndex]];
     float hs = d.pos_size.w * 0.5;
-    vec3 wp = d.pos_size.xyz + t * c.x * hs + b * c.y * hs + n * c.z * d.normal_depth.w;
+    float asp = d.tangent_angle.w > 0.0 ? d.tangent_angle.w : 1.0;   // stretched along t
+    vec3 wp = d.pos_size.xyz + t * c.x * hs * asp + b * c.y * hs + n * c.z * d.normal_depth.w;
     v_decal = gl_InstanceIndex;
     gl_Position = frame.view_proj * vec4(wp, 1.0);
 }

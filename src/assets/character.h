@@ -31,6 +31,15 @@ typedef struct CharSocket {
 
 typedef enum CharKind { CK_PLAYER, CK_ZOMBIE, CK_DUMMY } CharKind;
 
+// Hit surface per body part (flesh effects): what a bullet meets first.
+typedef enum CharSurface { CSURF_FLESH, CSURF_CLOTH, CSURF_ARMOR, CSURF_BONE, CSURF_COUNT } CharSurface;
+// "blood": { "color": [0.30, 0.02, 0.015], "darkness": 0.55, "amount": 1.0, "mist": 1.0, "decay": 1.0 }
+//   color / darkness: wet blood colour (darkness multiplies it down); amount scales droplets,
+//   splatter and pools; mist scales the aerosol; decay scales how fast wounds stop bleeding.
+// "surface": { "torso": "cloth", "limbs": "cloth", "head": "flesh" }   (part names or groups)
+// "armor":   { "head": { "type": "helmet", "hits": 2 } }  sparks, no blood until it breaks
+typedef struct CharBlood { vec3 color; float darkness, amount, mist, decay; } CharBlood;
+
 typedef struct CharacterDef {
     u32 hash;
     char id[32];
@@ -45,6 +54,9 @@ typedef struct CharacterDef {
     char anim_set[32];
     int anim_set_index;
     float part_mult[BP_COUNT];
+    CharBlood blood;
+    u8 part_surface[BP_COUNT];     // CharSurface
+    u8 armor_hits[BP_COUNT];       // > 0: armour on that part absorbs this many hits before breaking
     float ragdoll_scale;
     float scale;
     float hp;
@@ -62,6 +74,10 @@ const CharSocket *character_socket(const CharacterDef *d, const char *name);
 // World transform of a socket from bone world transforms (false if missing).
 bool character_socket_world(const CharacterDef *d, const char *name, const Xform *bone_world, Xform *out);
 
+// Expands a part name or group ("arms", "hands", "legs", "feet", "limbs", "torso", "all") into
+// out[BP_COUNT] flags; returns how many parts matched.
+int character_part_group(const char *name, bool *out);
+const char *char_surface_name(int s);
 bool character_def_parse(CharacterDef *d, const char *json_text, const char *source, char *err, int err_size);
 
 // Rig validation ------------------------------------------------------------
