@@ -294,6 +294,7 @@ static bool mapgen_parse_feature(MapGen *g, const cJSON *f, char *err, size_t er
         m.size = jradius(f, "radius", v2(150, 150));
         m.param = jnum(f, "density", 2.5f);
         m.height = jnum(f, "pine", 0.6f);
+        m.depth = jnum(f, "dead", 0.035f);
     } else {
         snprintf(err, err_size, "unknown feature type '%s'", type);
         return false;
@@ -623,8 +624,8 @@ bool mapgen_in_keepout(const MapGen *g, float x, float z, float margin) {
     return false;
 }
 
-float mapgen_tree_density(const MapGen *g, const MgRaster *r, float x, float z, float *pine) {
-    float dens = 0, pf = 0.7f;
+float mapgen_tree_density(const MapGen *g, const MgRaster *r, float x, float z, float *pine, float *dead) {
+    float dens = 0, pf = 0.7f, df = 0.035f;
     const int *fl;
     int fn = feature_cell(g, x, z, &fl);
     for (int k = 0; k < fn; k++) {
@@ -635,7 +636,7 @@ float mapgen_tree_density(const MapGen *g, const MgRaster *r, float x, float z, 
         float w = 1.0f - smoothstepf(0.75f, 1.0f, d);
         float clearing = smoothstepf(-0.55f, -0.35f, noise2(&g->n_hills, x * 3.1f, z * 3.1f + 777.0f));   // open patches
         float dd = f->param * 0.01f * w * clearing;
-        if (dd > dens) { dens = dd; pf = f->height; }
+        if (dd > dens) { dens = dd; pf = f->height; df = f->depth; }
     }
     float h = mapgen_raster_height(r, x, z), slope = mapgen_raster_slope(r, x, z);
     u8 mat = mapgen_raster_mat(r, x, z);
@@ -648,10 +649,11 @@ float mapgen_tree_density(const MapGen *g, const MgRaster *r, float x, float z, 
     if (pad && mat != MGM_GRASS) return 0;   // yards / lots stay clear (parks are painted grass)
     if (!pad) {
         // scattered pines on the mountains, sparse trees on open grass
-        if (h > 34.0f && slope < 0.9f) { float m = 0.006f * (1.0f - smoothstepf(150.0f, 220.0f, h)); if (m > dens) { dens = m; pf = 0.95f; } }
+        if (h > 34.0f && slope < 0.9f) { float m = 0.006f * (1.0f - smoothstepf(150.0f, 220.0f, h)); if (m > dens) { dens = m; pf = 0.95f; df = 0.035f; } }
         if (mat == MGM_GRASS && dens < 0.0007f) dens = 0.0007f * saturate(noise2(&g->n_hills, x * 4.0f, z * 4.0f) * 2.0f + 0.4f);
     }
     if (pine) *pine = pf;
+    if (dead) *dead = df;
     if (dens <= 0) return 0;
     if (mat == MGM_ASPHALT || mat == MGM_CONCRETE || mat == MGM_DIRT_ROAD || mat == MGM_FIELD || mat == MGM_CROP || mat == MGM_PLOWED || mat == MGM_SAND ||
         mat == MGM_GRAVEL || mat == MGM_MUD || slope > 1.1f)

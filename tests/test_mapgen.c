@@ -191,18 +191,18 @@ static void test_pois(Map *m) {
                 printf("  %s at (%.0f, %.0f) on road '%s'\n", mappoi_lot_name(l->kind), l->pos.x, l->pos.y, m->g.roads[m->g.rs[rs].road].name);
                 break;
             }
-            CHECK(mapgen_tree_density(&m->g, &m->r, x, z, NULL) == 0.0f, "tree density inside %s at (%.0f, %.0f)", mappoi_lot_name(l->kind), x, z);
+            CHECK(mapgen_tree_density(&m->g, &m->r, x, z, NULL, NULL) == 0.0f, "tree density inside %s at (%.0f, %.0f)", mappoi_lot_name(l->kind), x, z);
         }
     }
     CHECK(buildings > 300, "buildings %d", buildings);
     CHECK(on_road == 0, "%d buildings on a carriageway", on_road);
     int tree_on_road = 0;
     for (int i = 0; i < m->g.rs_count; i += 7)
-        if (mapgen_tree_density(&m->g, &m->r, m->g.rs[i].p.x, m->g.rs[i].p.y, NULL) > 0) tree_on_road++;
+        if (mapgen_tree_density(&m->g, &m->r, m->g.rs[i].p.x, m->g.rs[i].p.y, NULL, NULL) > 0) tree_on_road++;
     CHECK(tree_on_road == 0, "%d road samples with trees", tree_on_road);
     // forests are dense, fields are not
-    CHECK(mapgen_tree_density(&m->g, &m->r, -100, 560, NULL) > 0.01f || mapgen_tree_density(&m->g, &m->r, -60, 640, NULL) > 0.01f, "forest density");
-    CHECK(mapgen_tree_density(&m->g, &m->r, 600, 40, NULL) == 0.0f || mapgen_raster_mat(&m->r, 600, 40) == MGM_GRASS, "no trees in the fields");
+    CHECK(mapgen_tree_density(&m->g, &m->r, -100, 560, NULL, NULL) > 0.01f || mapgen_tree_density(&m->g, &m->r, -60, 640, NULL, NULL) > 0.01f, "forest density");
+    CHECK(mapgen_tree_density(&m->g, &m->r, 600, 40, NULL, NULL) == 0.0f || mapgen_raster_mat(&m->r, 600, 40) == MGM_GRASS, "no trees in the fields");
     // entities: spawns in the suburbs on dry land, containers / zombie spots / doors / vehicles
     int spawns = 0, cont = 0, spots = 0, doors = 0, veh = 0, locked = 0;
     for (int i = 0; i < p->ent_count; i++) {

@@ -50,8 +50,8 @@ static int tree_chunk(const OpenWorld *o, int cx, int cz, RenderFoliageInst *out
             u32 h = hash3(ix, iz, o->gen.seed);
             float x = x0 + ((float)gx + h01(h)) * cell, z = z0 + ((float)gz + h01(h >> 7 ^ 0x9e37u)) * cell;
             if (fabsf(x) > o->gen.half_size + 60.0f || fabsf(z) > o->gen.half_size + 60.0f) continue;
-            float pine;
-            float d = mapgen_tree_density(&o->gen, &o->raster, x, z, &pine);
+            float pine, dead;
+            float d = mapgen_tree_density(&o->gen, &o->raster, x, z, &pine, &dead);
             if (d <= 0) continue;
             u32 h2 = hash3(ix, iz, o->gen.seed + 17u);
             float pick = h01(h2);
@@ -60,7 +60,7 @@ static int tree_chunk(const OpenWorld *o, int cx, int cz, RenderFoliageInst *out
             t->yaw = h01(h2 >> 3) * 6.2831853f;
             if (pick < d * cell * cell) {
                 float k = h01(h2 >> 11);
-                t->kind = k < 0.035f ? T_DEAD : (k < pine ? T_PINE : T_BROAD);
+                t->kind = k < dead ? T_DEAD : (k < dead + pine * (1.0f - dead) ? T_PINE : T_BROAD);   // dead first, the rest split by the pine fraction
                 t->scale = 0.72f + 0.55f * h01(h2 >> 5);
                 n++;
             } else if (d > 0.006f && pick < d * cell * cell * 1.6f) {   // forest underbrush

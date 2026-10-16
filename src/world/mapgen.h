@@ -31,7 +31,7 @@ typedef enum MgFeatureKind {
     MGF_LAKE,       // pos, size = radii, level (water surface), depth, param = shoreline noise (m)
     MGF_PIT,        // pos, size = radii, depth, terraces (stepped quarry), yaw
     MGF_PAD,        // pos, size = half extents, yaw, level (or auto), blend (m), material (-1 keeps)
-    MGF_FOREST,     // pos, size = radii, param = trees per 100 m2, height = pine fraction 0..1
+    MGF_FOREST,     // pos, size = radii, param = trees per 100 m2, height = pine fraction 0..1, depth = dead fraction 0..1
     MGF_PAINT,      // pos, size = half extents, yaw, material: surface only (fields, yards, lots)
     MGF_HILL,       // pos, size = radii, height (smooth bump, no ridges)
 } MgFeatureKind;
@@ -160,7 +160,7 @@ int mapgen_nearest_road(const MapGen *g, float x, float z, float max_dist, float
 bool mapgen_in_keepout(const MapGen *g, float x, float z, float margin);
 // Tree density (trees per m2) at (x, z) from the forest features and the terrain (0 on roads, water,
 // pads, steep rock and keep-outs; needs the raster for the slope).
-float mapgen_tree_density(const MapGen *g, const MgRaster *r, float x, float z, float *pine_fraction);
+float mapgen_tree_density(const MapGen *g, const MgRaster *r, float x, float z, float *pine_fraction, float *dead_fraction);
 // Signed distance to the sea polygon's boundary (> 0 inside the sea), shoreline noise included.
 float mapgen_sea_distance(const MapGen *g, float x, float z);
 
