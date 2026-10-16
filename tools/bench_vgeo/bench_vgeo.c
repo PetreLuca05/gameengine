@@ -26,6 +26,16 @@ Engine g_engine;
 #define H 1080
 #define FOV (70.0f * DG_DEG2RAD)
 
+static int float_cmp(const void *a, const void *b) {
+    float x = *(const float *)a, y = *(const float *)b;
+    return x < y ? -1 : x > y;
+}
+static double median(float *v, u32 n) {
+    if (!n) return 0.0;
+    qsort(v, n, sizeof(float), float_cmp);
+    return v[n / 2];
+}
+
 static u32 g_rng = 99;
 static float rnd(void) {
     g_rng = g_rng * 1664525u + 1013904223u;
@@ -162,7 +172,8 @@ int main(int argc, char **argv) {
             float eye[3] = { cams[ci].eye.x, cams[ci].eye.y, cams[ci].eye.z };
             vgeo_view_setup(&v, vp.m, vp.m, eye, (float)H / (2.0f * tanf(FOV * 0.5f)), 0.1f, W, H, 1.0f, 32.0f,
                             occ ? VGV_TWO_PASS : VGV_NO_OCCLUSION);
-            double acc[4] = { 0 }, racc[4] = { 0 };
+            double acc[4] = { 0 };
+            float *rs = (float *)malloc(sizeof(float) * 4 * frames);   // raster ms per frame (median: robust to a shared GPU)
             u32 n = 0;
             for (u32 f = 0; f < frames; f++) {
                 VkCommandPool pool;
@@ -176,21 +187,23 @@ int main(int argc, char **argv) {
                 if (f >= 2 && vg_cull_timings(&c, 0, 0, true, ms) && vg_raster_timings(&rast, 0, 0, 1, true, r1) &&
                     (!occ || vg_raster_timings(&rast, 0, 0, 2, true, r2))) {
                     for (int k = 0; k < 4; k++) acc[k] += ms[k];
-                    racc[0] += r1[0];
-                    racc[1] += r1[1];
-                    racc[2] += r2[0];
-                    racc[3] += r2[1];
+                    rs[0 * frames + n] = r1[0];
+                    rs[1 * frames + n] = r1[1];
+                    rs[2 * frames + n] = r2[0];
+                    rs[3 * frames + n] = r2[1];
                     n++;
                 }
             }
             vg_cull_collect(&c, 0);
             VgCounters ctr;
             vg_cull_counters(&c, 0, &ctr);
+            double racc[4];
             for (int k = 0; k < 4; k++) {
                 acc[k] /= n ? n : 1;
-                racc[k] /= n ? n : 1;
+                racc[k] = median(rs + k * frames, n);
                 rr[ci * 2 + occ].ms[k] = racc[k];
             }
+            free(rs);
             rr[ci * 2 + occ].tris = ctr.n[VGN_TRIS];
             rr[ci * 2 + occ].hw = ctr.n[VGN_HW];
             rr[ci * 2 + occ].sw = ctr.n[VGN_SW];
@@ -203,7 +216,7 @@ int main(int argc, char **argv) {
                    ctr.n[VGN_INST_VIS] + ctr.n[VGN_INST_P2], ctr.n[VGN_NODES_VISITED], vis, ctr.n[VGN_TRIS], vis ? 100.0 * ctr.n[VGN_SW] / vis : 0.0,
                    ctr.n[VGN_OVERFLOW] ? " OVERFLOW" : "");
         }
-    printf("\nraster (%s, HW / SW serialised)\n%-20s %-9s %8s %8s %8s %8s %8s | %11s %9s %9s %6s\n", rast.use_mesh ? "mesh shader" : "vertex pulling", "camera",
+    printf("\nraster (%s, HW / SW serialised, median ms)\n%-20s %-9s %8s %8s %8s %8s %8s | %11s %9s %9s %6s\n", rast.use_mesh ? "mesh shader" : "vertex pulling", "camera",
            "occlusion", "HW p1", "SW p1", "HW p2", "SW p2", "total", "tris", "HW cl", "SW cl", "SW %");
     for (int ci = 0; ci < 4; ci++)
         for (int occ = 0; occ < 2; occ++) {
