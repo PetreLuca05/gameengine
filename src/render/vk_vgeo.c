@@ -7,6 +7,10 @@
 // Phase 2: culling and LOD selection only (the visible lists are not rasterised until Phase 3).
 // Per frame the CPU uploads one view and records a fixed number of dispatches; counters come back
 // through a per-frame readback (vgeo_stats). Test content: vgeo_test_scene.
+//
+// no-nanite build (docs/NO_NANITE.md): r_vgeo is forced to 0 and none of the passes above run. The
+// scene tables, foliage placements and the displacement buffer stay (CPU data, load-time uploads);
+// the classic instanced renderer (vk_classic.c) draws the content from them.
 #include "vk_internal.h"
 #include <SDL3/SDL.h>
 #include "graph/fg.h"
@@ -80,18 +84,6 @@ static struct {
     u32 test_meshes;             // procedural rocks registered by vgeo_test_scene
     struct { char name[96]; u32 mesh; } named[64];   // level meshes loaded so far (by name)
     u32 named_count;
-    // Era fallback (r_era 2015 / 2010): the exported discrete LODs per mesh, uploaded on first use
-    // and drawn through the legacy path with a CPU LOD pick per instance.
-    struct FallbackMesh {
-        VgDiscreteLod lods[VGEO_MAX_LODS];
-        u32 lod_count;
-        const VgLodVertex *verts;
-        const u32 *indices;
-        bool own;                // verts / indices are copies (transient builds)
-        MeshId gpu[VGEO_MAX_LODS];
-        float radius;
-    } *fb;
-    u32 fb_cap;
     bool applying_era;
     // vgeo_bench: a fixed spline flythrough, per-frame pass timings to CSV + a summary.
     struct {
@@ -152,6 +144,7 @@ static void cmd_foliage_push_test(int argc, const char **argv);
 static void cmd_foliage_stats(int argc, const char **argv);
 static void cmd_foliage_query(int argc, const char **argv);
 static void cmd_foliage_check(int argc, const char **argv);
+static void cmd_classic_stats(int argc, const char **argv) { (void)argc; (void)argv; vkc_stats(); }
 
 // ------------------------------------------------------------------ graphics pipelines
 
@@ -354,7 +347,7 @@ static void cmd_vgeo_clear(int argc, const char **argv) {
 // ------------------------------------------------------------------ lifetime
 
 void vkg_init(void) {
-    G.r_vgeo = cvar_reg_bool("r_vgeo", true, CVAR_ARCHIVE, "virtualized geometry (docs/VGEO.md)");
+    G.r_vgeo = cvar_reg_bool("r_vgeo", false, CVAR_ARCHIVE, "virtualized geometry (docs/VGEO.md); no-nanite build: always 0 (docs/NO_NANITE.md)");
     G.error_px = cvar_reg_float("r_vgeo_error_px", 1.0f, 0.25f, 16.0f, CVAR_ARCHIVE, "vgeo: allowed projected LOD error (pixels)");
     G.shadow_error_px = cvar_reg_float("r_vgeo_shadow_error_px", 2.0f, 0.25f, 32.0f, CVAR_ARCHIVE, "vgeo: projected LOD error in shadow views (pixels, Phase 3)");
     G.sw_px = cvar_reg_float("r_vgeo_sw_px", 32.0f, 0.0f, 512.0f, CVAR_ARCHIVE, "vgeo: clusters smaller than this (pixels across) go to the software rasteriser");
@@ -372,6 +365,7 @@ void vkg_init(void) {
     cmd_register("foliage_stats", cmd_foliage_stats, "foliage: placement chunks, region allocator audit, last frame's foliage counters");
     cmd_register("foliage_query", cmd_foliage_query, "foliage_query [radius=2]: placement instances around the camera (foliage_query API)");
     cmd_register("foliage_check", cmd_foliage_check, "foliage_check: scripted checks (Hi-Z behind the foliage yard wall, density stability over 600 frames)");
+    cmd_register("classic_stats", cmd_classic_stats, "classic instanced renderer (no-nanite): meshes, last frame's instances / batches / draws, CPU cull ms");
     cmd_register("vgeo_stats", cmd_vgeo_stats, "virtualized geometry: scene, last frame's culling counters and pass timings");
     cmd_register("vgeo_test_scene", cmd_vgeo_test_scene, "vgeo_test_scene [count=20000] [spacing=6] [meshes=4]: procedural rock field around the camera");
     cmd_register("vgeo_clear", cmd_vgeo_clear, "remove every vgeo instance");
@@ -425,11 +419,13 @@ void vkg_init(void) {
         return;
     }
     G.ok = true;
-    log_info("vgeo: culling ready (indirect count %d, mesh shader %d)", c->draw_indirect_count, c->mesh_shader);
+    log_info("vgeo: no-nanite build: r_vgeo forced to 0, no vgeo culling / raster passes; the classic instanced renderer draws the vgeo content");
+    vkc_init();
 }
 
 void vkg_shutdown(void) {
     if (!G.ok) return;
+    vkc_shutdown();
     for (u32 f = 0; f < FRAMES_IN_FLIGHT; f++) vgc_buffer_free(&G.ctx, &G.dbg_rb[f]);
     vkDeviceWaitIdle(R->device);
     destroy_gfx();
@@ -446,12 +442,7 @@ void vkg_shutdown(void) {
     vg_raster_shutdown(&G.raster);
     vg_cull_shutdown(&G.cull);
     vgeo_scene_free(&G.scene);
-    for (u32 i = 0; i < G.fb_cap; i++)
-        if (G.fb[i].own) { free((void *)G.fb[i].verts); free((void *)G.fb[i].indices); }
     vgeo_file_release_all();
-    free(G.fb);
-    G.fb = NULL;
-    G.fb_cap = 0;
     G.ok = false;
 }
 
@@ -736,6 +727,7 @@ void vkg_graph_hiz(int depth_res, int velocity_res) {
 // frustum + LOD only, every cluster to the HW list, and its draw args.
 // Start of the frame's vgeo work (before every cull): last time's counters / debug readback of this
 // frame slot (its fence has been waited), the visibility buffer size, page streaming.
+static void displace_frame(VkCommandBuffer cmd);
 static void frame_begin(VkCommandBuffer cmd) {
     u32 frame = R->frame_slot;
     vg_cull_prepare(&G.cull);   // after a commit (characters, level): before any of this frame's vgeo commands
@@ -762,6 +754,12 @@ static void frame_begin(VkCommandBuffer cmd) {
     skin_record(cmd);
     // foliage: placement chunk changes, the displacement buffer around the camera
     vgeo_scene_placement_record(&G.scene, cmd, frame);
+    displace_frame(cmd);
+}
+
+// The foliage displacement buffer around the camera (both renderers: WPO_DISPLACE reads it).
+static void displace_frame(VkCommandBuffer cmd) {
+    u32 frame = R->frame_slot;
     if (G.disp_ok) {
         double now = (double)SDL_GetTicksNS() * 1e-9;
         float dt = G.disp_time > 0 ? (float)fmin(now - G.disp_time, 0.1) : 0.0f;
@@ -781,6 +779,7 @@ static void frame_begin(VkCommandBuffer cmd) {
 
 void vkg_record_shadow_cull(VkCommandBuffer cmd) {
     G.shadow_culled = false;
+    if (G.ok && !active()) displace_frame(cmd);   // no-nanite: the classic renderer's grass reads it
     if (!active()) return;
     frame_begin(cmd);
     if (!G.shadows->i || R->r_shadow_quality->i <= 0) return;
@@ -980,8 +979,8 @@ void render_vgeo_set_level(const RenderVgeoPlacement *p, int count) {
 // reads back as Custom (4).
 typedef struct EraDef { int vgeo; float error_px, shadow_px, lod_px, foliage; } EraDef;
 static const EraDef k_eras[4] = {
-    { 1, 1.0f, 2.0f, 2.0f, 1.0f },   // modern: vgeo, 1 px
-    { 1, 2.0f, 4.0f, 3.0f, 0.7f },   // 2020: vgeo, 2 px
+    { 0, 1.0f, 2.0f, 2.0f, 1.0f },   // modern (no-nanite: classic LODs at 2 px, full foliage)
+    { 0, 2.0f, 4.0f, 3.0f, 0.7f },   // 2020 (no-nanite: classic LODs at 3 px)
     { 0, 1.0f, 2.0f, 4.0f, 0.4f },   // 2015: discrete DAG LODs (4), CPU LOD by screen size
     { 0, 1.0f, 2.0f, 12.0f, 0.2f },  // 2010: 3 LODs, more aggressive distances
 };
@@ -1019,7 +1018,11 @@ static void on_era(Cvar *c) {
 }
 
 static void on_era_value(Cvar *c) {
-    (void)c;
+    if (c == G.r_vgeo && c->i) {   // no-nanite build: vgeo never turns on
+        log_info("vgeo: no-nanite build: r_vgeo stays 0 (docs/NO_NANITE.md)");
+        cvar_set_int(c, 0);
+        return;
+    }
     if (G.applying_era || !G.era) return;
     int e = era_detect();
     if (G.era->i != e) {
@@ -1047,109 +1050,14 @@ static void vkg_register_era(void) {
     on_era_value(NULL);
 }
 
-// Keeps a CPU copy of a mesh's exported LODs (the fallback uploads them when first drawn).
-static void fallback_register(u32 mesh, const VgBuilt *b, bool persistent) {
-    if (mesh >= G.fb_cap) {
-        u32 cap = G.fb_cap ? G.fb_cap : 16;
-        while (cap <= mesh) cap *= 2;
-        G.fb = (struct FallbackMesh *)realloc(G.fb, sizeof(*G.fb) * cap);
-        memset(G.fb + G.fb_cap, 0, sizeof(*G.fb) * (cap - G.fb_cap));
-        G.fb_cap = cap;
-    }
-    struct FallbackMesh *f = &G.fb[mesh];
-    f->lod_count = b->hdr.lod_count;
-    memcpy(f->lods, b->lods, sizeof(f->lods));
-    u32 nv = 0, ni = 0;
-    for (u32 k = 0; k < f->lod_count; k++) {
-        nv = DG_MAX(nv, b->lods[k].first_vertex + b->lods[k].vertex_count);
-        ni = DG_MAX(ni, b->lods[k].first_index + b->lods[k].index_count);
-    }
-    f->own = !persistent;
-    if (persistent) {
-        f->verts = b->lod_vertices;
-        f->indices = b->lod_indices;
-    } else {
-        VgLodVertex *v = (VgLodVertex *)malloc(sizeof(VgLodVertex) * (nv + 1));
-        u32 *ix = (u32 *)malloc(sizeof(u32) * (ni + 1));
-        memcpy(v, b->lod_vertices, sizeof(VgLodVertex) * nv);
-        memcpy(ix, b->lod_indices, sizeof(u32) * ni);
-        f->verts = v;
-        f->indices = ix;
-    }
-    f->radius = b->hdr.sphere[3];
-}
+// Every scene mesh also goes to the classic renderer (its LOD chain, impostor textures).
+static void fallback_register(u32 mesh, const VgBuilt *b, bool persistent) { vkc_register_mesh(mesh, b, persistent); }
 
-static MeshId fallback_lod_mesh(struct FallbackMesh *f, u32 k) {
-    if (f->gpu[k]) return f->gpu[k];
-    const VgDiscreteLod *l = &f->lods[k];
-    Vertex *v = (Vertex *)malloc(sizeof(Vertex) * (l->vertex_count + 1));
-    for (u32 i = 0; i < l->vertex_count; i++) {
-        const VgLodVertex *s = &f->verts[l->first_vertex + i];
-        v[i].pos = v3(s->pos[0], s->pos[1], s->pos[2]);
-        v[i].normal = v3(s->normal[0], s->normal[1], s->normal[2]);
-        v[i].uv = v2(s->uv[0], s->uv[1]);
-        v[i].color = 0xFFFFFFFFu;
-    }
-    u32 *idx = (u32 *)malloc(sizeof(u32) * (l->index_count + 1));
-    for (u32 i = 0; i < l->index_count; i++) idx[i] = f->indices[l->first_index + i];   // local to the LOD's vertices
-    f->gpu[k] = render_mesh_create(v, l->vertex_count, idx, l->index_count);
-    free(v);
-    free(idx);
-    return f->gpu[k];
-}
-
-// Era fallback, once per frame after the camera is set (render.c): the coarsest discrete LOD whose
-// projected error stays under r_vgeo_lod_px, per instance, through the legacy draw list. 2010 never
-// draws LOD 0. CPU work per instance here is the fallback's cost (the vgeo path has none).
-// Foliage in the fallback / local light shadows (CPU, per instance): drawn when its density / fade
-// keeps it (vgeo_foliage_alpha, the same hash and distances as the GPU); masked meshes are not (the
-// legacy pipelines have no alpha test).
-static bool fallback_keep(const VgInstance *in, const VgMesh *m) {
-    if (m->fflags & VGMF_MASKED) return false;
-    if (!(m->fflags & VGMF_FOLIAGE)) return true;
-    float dx = in->pos[0] - R->cam.pos.x, dy = in->pos[1] - R->cam.pos.y, dz = in->pos[2] - R->cam.pos.z;
-    return vgeo_foliage_alpha(m, in->flags_phase, sqrtf(dx * dx + dy * dy + dz * dz), G.foliage_density->f) > 0;
-}
-
+// Once per frame after the camera is set (render.c): the classic renderer's culling, LOD selection
+// and instance batches for the main view and the sun cascades (r_vgeo 0: always, in this build).
 void vkg_submit_fallback(void) {
-    if (!G.ok || G.r_vgeo->i || !vgeo_scene_gpu_instances(&G.scene) || !G.fb) return;
-    bool era2010 = G.era && G.era->i == 3;
-    float ps = (float)R->hdr.h / (2.0f * tanf(R->cam.fov_deg * DG_DEG2RAD * 0.5f));
-    u32 total = vgeo_scene_gpu_instances(&G.scene);
-    for (u32 i = 0; i < total; i++) {
-        const VgInstance *in = vgeo_scene_instance(&G.scene, i);
-        if (i >= G.scene.instance_count) {   // placement region: live instances only
-            u32 ri = i - G.scene.instance_count;
-            if (in->cell >= G.scene.pl.cell_cap) continue;
-            const VgCell *cl = &G.scene.pl.cells[in->cell];
-            if (!cl->count || ri < cl->first || ri >= cl->first + cl->count) continue;
-        }
-        if (in->mesh >= G.fb_cap || !G.fb[in->mesh].lod_count) continue;
-        struct FallbackMesh *f = &G.fb[in->mesh];
-        float p[3], q[4], s;
-        vgeo_instance_decode(in, p, q, &s);
-        const VgMesh *m = &G.scene.meshes[in->mesh];
-        if (!fallback_keep(in, m)) continue;
-        quat qq = { q[0], q[1], q[2], q[3] };
-        vec3 c = v3_add(v3(p[0], p[1], p[2]), quat_rotate(qq, v3(m->center[0] * s, m->center[1] * s, m->center[2] * s)));
-        float r = m->radius * s;
-        float d = fmaxf(v3_dist(c, R->cam.pos) - r, R->cam.znear);
-        u32 k = era2010 && f->lod_count > 1 ? 1 : 0;
-        while (k + 1 < f->lod_count && f->lods[k + 1].error * s * ps / d <= G.lod_px->f) k++;
-        MeshId mesh = fallback_lod_mesh(f, k);
-        if (!mesh) continue;
-        DrawItem di;
-        memset(&di, 0, sizeof(di));
-        di.mesh = mesh;
-        di.model = mat4_trs(v3(p[0], p[1], p[2]), qq, v3s(s));
-        const VgMaterial *vm = &G.scene.materials[m->material_base < G.scene.material_count ? m->material_base : 0];
-        di.mat.color = v4(vm->color[0], vm->color[1], vm->color[2], 1.0f);
-        di.mat.roughness = vm->roughness;
-        di.mat.metallic = vm->metallic;
-        di.mat.emissive = vm->emissive;
-        di.mat.tex_scale = vm->tex_scale;
-        render_draw(&di);
-    }
+    if (!G.ok || G.r_vgeo->i) return;
+    vkc_frame(&G.scene, G.disp_ok ? &G.disp : NULL, G.foliage_density->f, G.lod_px->f, G.shadow_error_px->f, G.impostor_px->f, G.era && G.era->i == 3, G.shadows->i != 0);
 }
 
 // ------------------------------------------------------------------ vgeo_bench (flythrough)
@@ -1267,64 +1175,11 @@ static void cmd_vgeo_bench(int argc, const char **argv) {
 
 // ------------------------------------------------------------------ point / spot light shadows
 
-static bool sphere_planes(const vec4 planes[6], vec3 c, float r) {
-    for (int k = 0; k < 6; k++)
-        if (planes[k].x * c.x + planes[k].y * c.y + planes[k].z * c.z + planes[k].w < -r) return false;
-    return true;
-}
-
-// Local light shadow tile (vk_light_shadow.c): the vgeo instances of the placement cells touching the
-// light's sphere and the tile frustum, as their discrete LOD meshes (picked by distance to the light,
-// ~2 texels of error at the tile's resolution). Inside the atlas pass, PIPE_SHADOW bound by the caller.
+// Local light shadow tile (vk_light_shadow.c): the classic renderer's instances near the light.
+// Inside the atlas pass, PIPE_SHADOW bound by the caller.
 u32 vkg_draw_local_shadow(VkCommandBuffer cmd, vec4 sphere, const vec4 planes[6], u32 cascade, u32 tile_px) {
-    if (!G.ok || !G.r_vgeo->i || !G.shadows->i || !vgeo_scene_gpu_instances(&G.scene) || !G.fb) return 0;
-    vec3 lc = v3(sphere.x, sphere.y, sphere.z);
-    float px_scale = (float)tile_px * 0.5f;   // 90 degree face: px per metre at distance 1
-    u32 n = 0, bound = 0;
-    u32 ncells = vgeo_scene_gpu_cells(&G.scene);
-    for (u32 ci = 0; ci < ncells; ci++) {
-        VgCell tmp;
-        const VgCell *cl = vgeo_scene_gpu_cell(&G.scene, ci, &tmp);
-        if (!cl || !cl->count) continue;
-        vec3 mn = v3(cl->min[0], cl->min[1], cl->min[2]), mx = v3(cl->max[0], cl->max[1], cl->max[2]);
-        vec3 q = v3_max(mn, v3_min(lc, mx));
-        if (v3_len2(v3_sub(q, lc)) > sphere.w * sphere.w) continue;
-        for (u32 i = cl->first; i < cl->first + cl->count; i++) {
-            const VgInstance *in = vgeo_scene_instance(&G.scene, i);
-            if (!in || in->mesh >= G.fb_cap || !G.fb[in->mesh].lod_count) continue;
-            struct FallbackMesh *f = &G.fb[in->mesh];
-            const VgMesh *m = &G.scene.meshes[in->mesh];
-            if (!fallback_keep(in, m)) continue;
-            float p[3], qr[4], s;
-            vgeo_instance_decode(in, p, qr, &s);
-            quat qq = { qr[0], qr[1], qr[2], qr[3] };
-            vec3 c = v3_add(v3(p[0], p[1], p[2]), quat_rotate(qq, v3(m->center[0] * s, m->center[1] * s, m->center[2] * s)));
-            float r = m->radius * s;
-            if (v3_len2(v3_sub(c, lc)) > (r + sphere.w) * (r + sphere.w) || !sphere_planes(planes, c, r)) continue;
-            float d = fmaxf(v3_dist(c, lc) - r, 0.05f);
-            u32 k = 0;
-            while (k + 1 < f->lod_count && f->lods[k + 1].error * s * px_scale / d <= 2.0f) k++;
-            MeshId mesh = fallback_lod_mesh(f, k);
-            if (!mesh || !R->meshes[mesh].used) continue;
-            GpuMesh *gm = &R->meshes[mesh];
-            if (mesh != bound) {
-                VkDeviceSize zero = 0;
-                vkCmdBindVertexBuffers(cmd, 0, 1, &gm->vb.buffer, &zero);
-                vkCmdBindIndexBuffer(cmd, gm->ib.buffer, 0, VK_INDEX_TYPE_UINT32);
-                bound = mesh;
-            }
-            PushLit pc;
-            memset(&pc, 0, sizeof(pc));
-            pc.model = mat4_trs(v3(p[0], p[1], p[2]), qq, v3s(s));
-            pc.color = v4(1, 1, 1, 1);
-            pc.flags[3] = cascade;
-            vkCmdPushConstants(cmd, R->layout_lit, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushLit), &pc);
-            vkCmdDrawIndexed(cmd, gm->index_count, 1, 0, 0, 0);
-            R->stats.draw_calls++;
-            n++;
-        }
-    }
-    return n;
+    if (!G.ok || !G.shadows->i) return 0;
+    return vkc_draw_local_shadow(cmd, sphere, planes, cascade, tile_px);
 }
 
 // ------------------------------------------------------------------ skinned characters
@@ -1662,6 +1517,7 @@ static void foliage_build_kinds(int k0, int k1, u32 atlas) {
             vg_tex_build_mips(q->masks[m], msize, msize, mips);
             u32 t = vg_tex_create(&G.cull.tex, msize, msize, levels, mips, true, true);
             q->mats[m].mask_tex = q->mats[m].albedo_tex = t;
+            vkc_set_module_texture(t, vkc_mask_texture(q->masks[m], msize));   // the classic renderer's copy
         }
         u32 mesh = vgeo_scene_add_mesh(&G.scene, &q->b);
         fallback_register(mesh, &q->b, false);
@@ -1890,6 +1746,7 @@ int render_foliage_chunk_load(const void *data, size_t size) {
     foliage_region();
     u32 h = vgeo_foliage_chunk_load(&G.scene, &v, foliage_resolve, NULL, (u32)(u16)(i16)v.hdr->chunk_x | (u32)(u16)(i16)v.hdr->chunk_z << 16);
     foliage_commit();   // a new mesh / the region: load time
+    if (h != ~0u) vkc_chunk_loaded(&G.scene, h);
     return h == ~0u ? -1 : (int)h;
 }
 

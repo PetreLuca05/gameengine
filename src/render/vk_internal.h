@@ -406,6 +406,24 @@ u32 vkg_route_skinned(const SkinnedDraw *draws, u32 n, const mat4 *bones, u8 *ro
 // Point / spot light shadow tile: vgeo instances near the light as discrete LOD meshes (PIPE_SHADOW bound).
 u32 vkg_draw_local_shadow(VkCommandBuffer cmd, vec4 sphere, const vec4 planes[6], u32 cascade, u32 tile_px);               // r_era 2015 / 2010: discrete LODs through the legacy draws (after compute_matrices)
 
+// vk_classic.c: the classic instanced renderer of the vgeo scene content (no-nanite, docs/NO_NANITE.md)
+struct VgScene;
+struct VgBuilt;
+struct VgDisplace;
+void vkc_init(void);
+void vkc_shutdown(void);
+void vkc_register_mesh(u32 mesh, const struct VgBuilt *b, bool persistent);   // LOD chain + impostor textures
+TextureId vkc_mask_texture(const u8 *rgba, u32 size);                         // renderer copy of a procedural mask
+void vkc_set_module_texture(u32 vgeo_index, TextureId id);                     // vgeo module texture -> renderer texture
+void vkc_chunk_loaded(const struct VgScene *s, u32 handle);                    // placement chunk: per-cell distance limits
+void vkc_frame(const struct VgScene *s, const struct VgDisplace *disp, float density, float lod_px, float shadow_lod_px, float small_impostor_px, bool era2010,
+               bool shadows);
+void vkc_draw_gbuffer(VkCommandBuffer cmd);   // inside the prepass (frame set bound)
+void vkc_draw_lit(VkCommandBuffer cmd);       // inside the opaque pass (depth EQUAL)
+void vkc_draw_shadow(VkCommandBuffer cmd, u32 cascade);   // inside the sun shadow pass
+u32 vkc_draw_local_shadow(VkCommandBuffer cmd, vec4 sphere, const vec4 planes[6], u32 view, u32 tile_px);
+void vkc_stats(void);
+
 // vk_vfx.c: GPU particles, decals, distortion
 bool vkx_init(void);
 void vkx_shutdown(void);

@@ -995,8 +995,8 @@ set 4 is gone.
 - **Shadows.** Cascade views list masked clusters in their (otherwise unused) SW half. `vgeo_shadow_masked.vert` /
   `.frag` draws them alpha-tested, the HW half depth only. vgeo shadow cull and draw are timed:
   `vgeo_stats`, `foliage_stats`, `vgeo_bench`.
-- **Fallback.** The 2015 / 2010 fallback and the local light shadows apply the same density / fade per
-  instance and skip masked meshes (the legacy pipelines have no alpha test).
+- **Fallback.** `no-nanite` branch: replaced by the classic instanced renderer (docs/NO_NANITE.md), which
+  draws masked / two-sided / WPO foliage, impostors and masked shadows; vgeo is off there.
 - **Commands:** `foliage_stats` (chunks, region, audit, last frame's counters), `foliage_query [r]`,
   `foliage_push_test [s]`, `foliage_check` (scripted, below).
 
