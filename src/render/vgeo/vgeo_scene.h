@@ -1,13 +1,20 @@
 // Virtualized geometry scene (docs/VGEO.md "GPU module"): the global GPU tables every view culls
 // against. Meshes (VgMesh + their BVH nodes, groups and pages) and instances (32 B VgInstance,
 // binned into 8 m placement cells) are registered at load time and uploaded by vgeo_scene_commit;
-// nothing here runs per frame. Until streaming (Phase 4) every page is resident: page slot = global
-// page index. The CPU tables are kept for the CPU reference cut (tests) and re-commits.
+// nothing here runs per frame. Page pool: without a budget every page is resident (slot = global
+// page index); with one (vgeo_scene_set_pool, the streamer) the pool has that many 128 KiB slots and
+// only the root pages are resident after a commit: src/render/vgeo/vgeo_stream.c fills the rest.
+// The CPU keeps every page's header + cluster records ("meta": the CPU reference cut, tests, debug)
+// and a source for the payload: the page data in memory, or a byte range of the .vgeo file.
 #ifndef DG_VGEO_SCENE_H
 #define DG_VGEO_SCENE_H
 
 #include "vgeo_ctx.h"
 #include "vgeo_build.h"
+
+// Where a mesh's page payloads come from: data (owned copy of VgBuilt.page_data) or path + base
+// (the page data section of a .vgeo file; VgPageDesc.file_offset is relative to it).
+typedef struct VgPageSource { u8 *data; char *path; u64 base; } VgPageSource;
 
 typedef struct VgScene {
     const VgContext *ctx;
@@ -17,9 +24,20 @@ typedef struct VgScene {
     u32 node_count, node_cap;
     VgGroup *groups;
     u32 group_count, group_cap;
-    u8 *pool;                    // CPU copy of the page pool (slot * VGEO_PAGE_SIZE)
     u32 page_count, page_cap;
-    u32 *page_table;             // global page -> slot (~0 = not resident)
+    u32 *page_table;             // global page -> slot (~0 = not resident): CPU mirror of b_page_table
+    VgPageDesc *page_desc;       // per global page: offset / size in its mesh's source, groups
+    u32 *page_mesh;              // per global page: mesh index
+    u8 *page_root;               // per global page: 1 = root page (pinned, resident from the commit)
+    u32 *meta_off;               // per global page: offset of its header + clusters in meta
+    u8 *meta;
+    size_t meta_size, meta_cap;
+    VgPageSource *sources;       // per mesh
+    u32 root_count;              // root pages over all meshes
+    u32 pool_budget;             // slots requested (0 = every page resident)
+    u32 pool_slots;              // slots of b_pool after the commit
+    u32 *slot_page;              // slot -> global page (~0 = free)
+    u32 stamp_frame;             // written by the streamer: the cull stamps used pages with it (b_stamps)
     u32 *mesh_depth;             // BVH depth per mesh
     VgInstance *instances;       // sorted by cell after commit
     u32 instance_count, instance_cap;
@@ -30,13 +48,21 @@ typedef struct VgScene {
     VgMaterial *materials;       // [0] = default grey
     u32 material_count, material_cap;
     VgBuffer b_meshes, b_nodes, b_groups, b_page_table, b_pool, b_instances, b_cells, b_materials;
+    VgBuffer b_stamps;           // u32 per pool slot: last frame a leaf emitted one of its groups (binding 20)
     u32 generation;              // bumps on every commit (cullers rewrite their descriptor sets)
 } VgScene;
 
 void vgeo_scene_init(VgScene *s, const VgContext *ctx);
 void vgeo_scene_free(VgScene *s);
-// Registers a built mesh (copies its tables and pages). Returns the mesh index.
+// Registers a built mesh (copies its tables, page meta and page data). Returns the mesh index.
 u32 vgeo_scene_add_mesh(VgScene *s, const VgBuilt *b);
+// The same with the page payloads left in a .vgeo file: b must be the vgeo_deserialize of that file
+// (its section table locates the page data); pages are read back with a file-range read.
+u32 vgeo_scene_add_mesh_file(VgScene *s, const VgBuilt *b, const char *path);
+// Pool budget in slots for the next commit (0 = every page resident; clamped to [root pages, pages]).
+void vgeo_scene_set_pool(VgScene *s, u32 slots);
+// Reads a page payload (desc size bytes) from its source into dst. Thread-safe.
+bool vgeo_scene_read_page(const VgScene *s, u32 page, void *dst);
 // Material table: returns the index; a mesh's clusters use materials material_base + cluster material.
 u32 vgeo_scene_add_material(VgScene *s, const VgMaterial *m);
 void vgeo_scene_set_mesh_materials(VgScene *s, u32 mesh, u32 material_base);
@@ -49,11 +75,15 @@ bool vgeo_scene_commit(VgScene *s);
 
 // Decoded instance transform, exactly as the shaders decode it.
 void vgeo_instance_decode(const VgInstance *in, float pos[3], float rot[4], float *scale);
-// The cluster record of a resident page slot.
+// The cluster record of a pool slot (a zeroed record when the slot is free).
 const VgCluster *vgeo_scene_cluster(const VgScene *s, u32 slot, u32 index);
+// Header / cluster record of a global page (resident or not).
+const VgPageHeader *vgeo_scene_page_header(const VgScene *s, u32 page);
+const VgCluster *vgeo_scene_page_cluster(const VgScene *s, u32 page, u32 index);
 
 typedef struct VgRefCluster {
-    u32 instance, packed;        // packed = page slot << VG_CLUSTER_BITS | cluster
+    u32 instance, packed;        // packed = page slot << VG_CLUSTER_BITS | cluster (slot bits all set: not resident)
+    u32 page;                    // global page
     float lod_margin;            // min |px - threshold| / threshold of the two LOD tests (borderline when tiny)
     i8 frustum;                  // 1 inside, 0 outside, -1 within the borderline band of a plane
 } VgRefCluster;
@@ -61,6 +91,8 @@ typedef struct VgRefCluster {
 // px(g.parent_error, g.lod) > t and (px(c.error, c.lod) <= t or its child group's page is missing).
 // With frustum, the culling sphere is also classified against the view planes. Returns the count.
 u32 vgeo_scene_cpu_select(const VgScene *s, const VgViewGpu *v, VgRefCluster *out, u32 cap);
+// all_resident: as if every page were resident (the converged streaming cut).
+u32 vgeo_scene_cpu_select_ex(const VgScene *s, const VgViewGpu *v, bool all_resident, VgRefCluster *out, u32 cap);
 
 // View constants from a view-projection matrix (planes, viewport) and the error settings.
 void vgeo_view_setup(VgViewGpu *v, const float view_proj[16], const float prev_view_proj[16], const float cam_pos[3], float proj_scale, float znear, u32 w,
