@@ -1,0 +1,28 @@
+#version 450
+// Test-only kernel (tests/test_vgeo_skinned.c): the shared skinning helpers of vg_decode.glsl, which
+// the rasterisers and the resolve call, on a list of (instance, page slot << 12 | cluster, vertex):
+// out[4 i] world position, [4 i + 1] previous-palette world position, [4 i + 2] world normal (skinned,
+// not normalised), [4 i + 3] raster clip position. a[0] = item count.
+#extension GL_GOOGLE_include_directive : require
+#define VG_COMPUTE
+#include "vgeo_common.glsl"
+#include "vg_decode.glsl"
+#include "vg_raster.glsl"
+layout(local_size_x = 64) in;
+layout(set = 1, binding = 0) readonly buffer Items { uvec4 items[]; };
+layout(set = 1, binding = 1) writeonly buffer Out { vec4 outv[]; };
+
+void main() {
+    uint i = gl_GlobalInvocationID.x;
+    if (i >= pc.a[0]) return;
+    uvec4 it = items[i];
+    VgXf x = vg_instance_xf(it.x);
+    VgMesh m = meshes[x.mesh];
+    VgClusterRef r = vg_cluster_ref(it.y);
+    VgClusterData c = vg_cluster(r.slot, r.index);
+    uint v = it.z;
+    outv[i * 4u] = vec4(vg_vertex_world(x, c, m, v), 1.0);
+    outv[i * 4u + 1u] = vec4(vg_xf_point(x, (vg_vertex_skin_matrix(x, c, m, v, true) * vec4(vg_vertex_pos(c, m, v), 1.0)).xyz), 1.0);
+    outv[i * 4u + 2u] = vec4(vg_xf_dir(x, mat3(vg_vertex_skin_matrix(x, c, m, v, false)) * vg_vertex_normal(c, m, v)), 0.0);
+    outv[i * 4u + 3u] = vg_raster_clip(x, c, m, v);
+}

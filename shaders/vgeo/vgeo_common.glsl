@@ -26,6 +26,7 @@ struct VgGroup { vec4 lod; float parent_error; uint page; uint first_count; uint
 struct VgMesh { vec4 sphere; uint root_node, node_base, group_base, page_base; uint page_count, flags, material_base, impostor; float max_wpo, q_step, pad0, pad1; };
 struct VgInstance { vec3 pos; uint rot; uint scale_mesh; uint flags_phase; uint extra; uint cell; };
 struct VgCell { vec3 mn; uint first; vec3 mx; uint count; };
+struct VgPaletteSlot { uint first, prev_first, bone_count, pad0; float max_scale, k0, k1, pad1; };
 
 #define VGV_NO_FRUSTUM 1u
 #define VGV_NO_CONE 2u
@@ -48,7 +49,9 @@ struct VgCell { vec3 mn; uint first; vec3 mx; uint count; };
 #define VGA_SW 6
 #define VGA_MESH 7
 #define VG_VIS_TRI_BITS 7u
+#define VGF_SKINNED 1u
 #define VGF_HAS_COLOR 4u
+#define VGI_SKINNED 2u
 #define VGN_CELLS_VIS 0
 #define VGN_CELLS_OCC 1
 #define VGN_INST_VIS 2
@@ -100,6 +103,9 @@ layout(set = VG_SET, binding = 17) uniform sampler2D hiz_cur;
 layout(set = VG_SET, binding = 19, scalar) readonly buffer Materials { VgMaterial materials[]; };
 // Streaming: per pool slot, the last frame (counts.w) a leaf emitted one of its groups (LRU).
 layout(set = VG_SET, binding = 20) buffer PageStamps { uint page_stamp[]; };
+// Skinned instances (vgeo_skin.h): palettes (bind space -> instance space) and the slot table.
+layout(set = VG_SET, binding = 21) readonly buffer Palettes { mat4 palette[]; };
+layout(set = VG_SET, binding = 22, scalar) readonly buffer PaletteSlots { VgPaletteSlot palette_slots[]; };
 // Visibility buffer (binding 18, see vgeo_gpu.h): define VG_VIS before including (needs int64).
 #ifdef VG_VIS
 layout(set = VG_SET, binding = 18) coherent buffer VisBuffer { uint64_t vis[]; };
@@ -126,17 +132,69 @@ vec3 vg_qrot(vec4 q, vec3 v) {
     vec3 t = 2.0 * cross(q.xyz, v);
     return v + q.w * t + cross(q.xyz, t);
 }
-struct VgXf { vec3 pos; vec4 rot; float scale; uint mesh; };
+// scale: the error / bounds scale (skinned: instance scale x the slot's max bone scale); pscale: the
+// instance's own scale (positions). Skinned (skin): first / prev_first = the slot's palette regions,
+// root = palette[first] (bone 0), skin_s / skin_k: the sphere transform of vg_world_sphere.
+struct VgXf { vec3 pos; vec4 rot; float scale; uint mesh; float pscale; bool skin, live; uint first, prev_first; mat4 root; float skin_s, skin_k; };
 VgXf vg_instance_xf(uint i) {
     VgInstance in_ = instances[i];
     VgXf x;
     x.pos = in_.pos;
     x.rot = vg_quat_decode(in_.rot);
-    x.scale = unpackHalf2x16(in_.scale_mesh & 0xFFFFu).x;
+    x.pscale = unpackHalf2x16(in_.scale_mesh & 0xFFFFu).x;
+    x.scale = x.pscale;
     x.mesh = in_.scale_mesh >> 16;
+    x.skin = false;
+    x.live = true;
+    x.first = x.prev_first = 0u;
+    x.root = mat4(1.0);
+    x.skin_s = 1.0;
+    x.skin_k = 0.0;
+    if ((in_.flags_phase >> 16 & VGI_SKINNED) != 0u) {
+        VgMesh m = meshes[x.mesh];
+        if ((m.flags & VGF_SKINNED) != 0u) {
+            VgPaletteSlot s = palette_slots[in_.extra];
+            x.skin = true;
+            x.live = s.bone_count != 0u;
+            x.first = s.first;
+            x.prev_first = s.prev_first;
+            x.root = palette[s.first];
+            x.skin_s = s.max_scale;
+            x.skin_k = s.k0 + s.k1 * (length(m.sphere.xyz) + m.sphere.w);
+            x.scale = x.pscale * s.max_scale;
+        }
+    }
     return x;
 }
-vec4 vg_world_sphere(VgXf x, vec4 s) { return vec4(x.pos + vg_qrot(x.rot, s.xyz * x.scale), s.w * x.scale); }
+// Instance-space sphere -> world.
+vec4 vg_instance_sphere(VgXf x, vec4 s) { return vec4(x.pos + vg_qrot(x.rot, s.xyz * x.pscale), s.w * x.pscale); }
+// Mesh-space sphere -> world. Skinned: (P_0 c, r max_scale + k) first, which contains the skinned
+// position of every bind-space point of the sphere (|P_b v - P_0 v| <= k for every bone b), and
+// keeps nested spheres nested (the DAG cut stays monotonic). CPU mirror: vgeo_xf_sphere.
+vec4 vg_world_sphere(VgXf x, vec4 s) {
+    if (x.skin) s = vec4((x.root * vec4(s.xyz, 1.0)).xyz, s.w * x.skin_s + x.skin_k);
+    return vg_instance_sphere(x, s);
+}
+
+// Animated culling sphere of a skinned cluster (instance space) from its bone set at pool word w
+// (vgeo_gpu.h): the box around the union over its bones of AABB(palette[b] * box_b), conservative for
+// linear blend skinning. CPU mirror: vgeo_skin_cluster_sphere.
+vec4 vg_skin_bounds(VgXf x, uint w) {
+    uint n = min(pool[w], 16u);
+    vec3 mn = vec3(3.0e38), mx = vec3(-3.0e38);
+    for (uint i = 0u; i < n; i++) {
+        uint e0 = pool[w + 1u + i * 4u], e1 = pool[w + 2u + i * 4u], e2 = pool[w + 3u + i * 4u], e3 = pool[w + 4u + i * 4u];
+        vec3 lo = vec3(unpackHalf2x16(e0).y, unpackHalf2x16(e1)), hi = vec3(unpackHalf2x16(e2), unpackHalf2x16(e3).x);
+        mat4 p = palette[x.first + (e0 & 0xFFu)];
+        vec3 c = (lo + hi) * 0.5, e = (hi - lo) * 0.5;
+        vec3 cc = (p * vec4(c, 1.0)).xyz, ee = abs(p[0].xyz) * e.x + abs(p[1].xyz) * e.y + abs(p[2].xyz) * e.z;
+        mn = min(mn, cc - ee);
+        mx = max(mx, cc + ee);
+    }
+    vec3 c = (mn + mx) * 0.5, h = (mx - mn) * 0.5;
+    float hl = length(h);
+    return vec4(c, hl + 1e-5 * (length(c) + hl) + 1e-6);
+}
 
 // ------------------------------------------------------------------ tests
 

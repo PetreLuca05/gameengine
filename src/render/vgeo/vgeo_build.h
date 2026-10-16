@@ -10,7 +10,7 @@
 
 #include "vgeo_gpu.h"
 
-#define VGEO_BUILD_VERSION 1     // bump when the output of the builder changes (cache key)
+#define VGEO_BUILD_VERSION 2     // bump when the output of the builder changes (cache key); 2: skinned meshes
 #define VGEO_MAX_LEVELS 32
 
 typedef struct VgSource {
@@ -19,6 +19,13 @@ typedef struct VgSource {
     const float *normal;         // xyz per vertex (NULL: flat normals from the faces)
     const float *uv;             // uv per vertex (NULL: zero)
     const u32 *color;            // RGBA8 per vertex (NULL: none, VGF_HAS_COLOR off)
+    // Skinned (VGF_SKINNED; built in the bind pose): 4 joints per vertex (canonical skeleton, < 128) and
+    // their weights as u8 (weights_u8) or float (weights); NULL joints: static. Weights are normalised to
+    // <= 4 influences summing to 255; every vertex at one grid position takes the skin of the first
+    // (lowest index) of them, so vertices shared by clusters skin bit-identically.
+    const u8 *joints;
+    const u8 *weights_u8;
+    const float *weights;
     u32 index_count;
     const u32 *indices;
     const u16 *tri_material;     // per triangle (NULL: material 0)
@@ -98,8 +105,21 @@ typedef struct VgDecoded {
     float normal[VGEO_MAX_CLUSTER_VERTS][3];
     float uv[VGEO_MAX_CLUSTER_VERTS][2];
     u8 tri[VGEO_MAX_CLUSTER_TRIS][3];
+    u8 joints[VGEO_MAX_CLUSTER_VERTS][4], weights[VGEO_MAX_CLUSTER_VERTS][4];   // VGF_SKINNED (else 0)
 } VgDecoded;
 void vgeo_decode_cluster(const VgBuilt *b, u32 page, u32 index, VgDecoded *out);
+
+// Vertex stride of a mesh's page data (VgFileHeader / VgMesh flags).
+DG_INLINE u32 vgeo_vertex_bytes(u32 flags) {
+    return VGEO_VERTEX_BYTES + ((flags & VGF_HAS_COLOR) ? VGEO_VERTEX_COLOR_BYTES : 0) + ((flags & VGF_SKINNED) ? VGEO_VERTEX_SKIN_BYTES : 0);
+}
+// Skinned cluster bone set (vgeo_gpu.h) of a cluster of a page (page = its VgPageHeader). Returns the count.
+typedef struct VgBoneBox { u32 bone; float min[3], max[3]; } VgBoneBox;
+u32 vgeo_cluster_bones(const u8 *page, const VgCluster *c, VgBoneBox out[VGEO_MAX_CLUSTER_BONES]);
+// Bind-space influence sphere per bone of a skinned mesh (xyz, r; r < 0: no vertex weighted on it),
+// from its leaf clusters' bone boxes: every vertex with a non-zero weight on bone b lies in out[b].
+// The input of vg_palettes_set_bone_bounds (tight skinned LOD / instance bounds, vgeo_skin.h).
+void vgeo_bone_bounds(const VgBuilt *b, float out[VGEO_MAX_BONES][4]);
 
 // CPU reference cut at an object-space error: cluster c of group g is in the cut when
 // g.parent_error > t and c.error <= t (every page resident). Returns the count; out may be NULL.

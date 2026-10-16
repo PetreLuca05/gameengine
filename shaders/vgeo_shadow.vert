@@ -20,5 +20,5 @@ void main() {
     if (tri >= c.tri_count) { gl_Position = vec4(0.0, 0.0, 0.0, 1.0); return; }
     uvec3 t = vg_triangle(c, tri);
     uint v = corner == 0u ? t.x : (corner == 1u ? t.y : t.z);
-    gl_Position = shadow_pass_vp(pc.flags.w) * vec4(vg_xf_point(x, vg_vertex_pos(c, m, v)), 1.0);
+    gl_Position = shadow_pass_vp(pc.flags.w) * vec4(vg_vertex_world(x, c, m, v), 1.0);   // skinned: re-skinned
 }

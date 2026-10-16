@@ -11,9 +11,9 @@ uvec2 vg_raster_range(bool sw) {
     return pc.pass == 1u ? uvec2(0u, p1) : uvec2(p1, max(all, p1));
 }
 
-// Clip position of cluster vertex v with the raster view.
+// Clip position of cluster vertex v with the raster view (skinned instances: skinned first).
 vec4 vg_raster_clip(VgXf x, VgClusterData c, VgMesh m, uint v) {
-    return V.raster_view_proj * vec4(vg_xf_point(x, vg_vertex_pos(c, m, v)), 1.0);
+    return V.raster_view_proj * vec4(vg_vertex_world(x, c, m, v), 1.0);
 }
 
 #ifdef VG_VIS

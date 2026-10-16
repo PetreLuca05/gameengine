@@ -1,7 +1,7 @@
 // build_vgeo: offline virtualized-geometry build (docs/VGEO.md "Builder").
 //
 //   build_vgeo <mesh.gltf> [--out file.vgeo] [--stats] [--threads N]
-//   build_vgeo --gen rock|field|statue|torus|building [--tris N] [--seed S] [--out file.vgeo] [--stats] [--threads N]
+//   build_vgeo --gen rock|field|statue|torus|building|creature [--tris N] [--seed S] [--out file.vgeo] [--stats] [--threads N]
 //
 // Prints the build report (levels, clusters, triangles, error ranges, pages, ms per stage) with
 // --stats, plus wall time and the process peak memory. Generated meshes are never committed: tests and
@@ -9,6 +9,7 @@
 #include "render/vgeo/vgeo_build.h"
 #include "render/vgeo/vgeo_import.h"
 #include "render/vgeo/vgeo_procgen.h"
+#include "render/vgeo/vgeo_procgen_skinned.h"
 #include "core/engine.h"
 #include "core/platform.h"
 #include <SDL3/SDL.h>
@@ -56,7 +57,7 @@ int main(int argc, char **argv) {
         else { fprintf(stderr, "unknown option %s\n", argv[i]); return 2; }
     }
     if (!in && !gen) {
-        fprintf(stderr, "usage: build_vgeo <mesh.gltf> | --gen rock|field|statue|torus|building [--tris N] [--seed S] [--out f] [--stats] [--threads N]\n");
+        fprintf(stderr, "usage: build_vgeo <mesh.gltf> | --gen rock|field|statue|torus|building|creature [--tris N] [--seed S] [--out f] [--stats] [--threads N]\n");
         return 2;
     }
     VgBuildOptions opt;
@@ -71,7 +72,12 @@ int main(int argc, char **argv) {
         VgGenMesh m;
         memset(&m, 0, sizeof(m));
         float c[3] = { 0, 0, 0 };
-        if (!strcmp(gen, "rock")) vgeo_gen_rock(&m, seed, (u32)SDL_sqrt((double)(tris ? tris : 80000) / 20.0), 1.0f, c, 0.3f);
+        VgGenSkinned sk;
+        memset(&sk, 0, sizeof(sk));
+        if (!strcmp(gen, "creature")) {   // skinned: body + 5 tentacles of 6 bones
+            vgeo_gen_creature(&sk, seed, 5, 6, tris ? tris : 30000ull);
+            m = sk.mesh;
+        } else if (!strcmp(gen, "rock")) vgeo_gen_rock(&m, seed, (u32)SDL_sqrt((double)(tris ? tris : 80000) / 20.0), 1.0f, c, 0.3f);
         else if (!strcmp(gen, "field")) vgeo_gen_rock_field(&m, seed, tris ? tris : 10000000ull);
         else if (!strcmp(gen, "statue")) vgeo_gen_statue(&m, seed, tris ? tris : 500000ull);
         else if (!strcmp(gen, "building")) vgeo_gen_building(&m, seed, tris ? tris : 2000000ull);
@@ -85,10 +91,13 @@ int main(int argc, char **argv) {
         src.pos = m.pos;
         src.index_count = m.index_count;
         src.indices = m.indices;
+        src.joints = sk.joints;
+        src.weights = sk.weights;
         printf("generated %s: %u triangles, %u vertices\n", gen, m.index_count / 3, m.vertex_count);
         ok = vgeo_build(&src, &opt, &b, err, sizeof(err));
         key = vgeo_fnv1a(gen, strlen(gen), seed);
-        vgeo_gen_free(&m);
+        if (sk.joints) vgeo_gen_skinned_free(&sk);
+        else vgeo_gen_free(&m);
     } else {
         VgImported im;
         ok = vgeo_import_gltf(in, &im, err, sizeof(err));

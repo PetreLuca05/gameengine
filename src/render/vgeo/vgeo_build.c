@@ -246,7 +246,84 @@ typedef struct B {
     u32 material_count;
     float radius;
     bool has_color;
+    bool skinned;                // VGF_SKINNED
+    u8 *skin;                    // per welded vertex: joints[4], weights[4] (sorted by weight, sum 255)
+    u32 bone_count;              // max joint with a non-zero weight + 1
 } B;
+
+// ------------------------------------------------------------------ skin
+
+// One source vertex's skin: duplicate joints merged, <= 4 influences sorted by weight (ties: lower
+// joint), quantised to u8 summing to 255 (largest remainder). Unused slots repeat the dominant joint
+// with weight 0, so out[0] is the dominant bone.
+static void skin_normalise(const u8 j[4], const float w[4], u8 out[8]) {
+    u8 jj[4];
+    float ww[4];
+    int n = 0;
+    for (int k = 0; k < 4; k++) {
+        float x = isfinite(w[k]) && w[k] > 0 ? w[k] : 0.0f;
+        int f = 0;
+        while (f < n && jj[f] != j[k]) f++;
+        if (f == n) { jj[n] = j[k]; ww[n] = 0; n++; }
+        ww[f] += x;
+    }
+    for (int a = 1; a < n; a++)
+        for (int c = a; c > 0 && (ww[c] > ww[c - 1] || (ww[c] == ww[c - 1] && jj[c] < jj[c - 1])); c--) {
+            float t = ww[c]; ww[c] = ww[c - 1]; ww[c - 1] = t;
+            u8 u = jj[c]; jj[c] = jj[c - 1]; jj[c - 1] = u;
+        }
+    float sum = 0;
+    for (int k = 0; k < n; k++) sum += ww[k];
+    if (!(sum > 0)) { ww[0] = 1.0f; sum = 1.0f; for (int k = 1; k < n; k++) ww[k] = 0; }
+    int q[4] = { 0, 0, 0, 0 }, total = 0;
+    float rem[4] = { 0, 0, 0, 0 };
+    for (int k = 0; k < n; k++) {
+        float x = ww[k] / sum * 255.0f;
+        q[k] = (int)floorf(x);
+        rem[k] = x - (float)q[k];
+        total += q[k];
+    }
+    while (total < 255) {   // largest remainder first (ties: the heavier slot)
+        int best = 0;
+        for (int k = 1; k < n; k++) if (rem[k] > rem[best]) best = k;
+        q[best]++;
+        rem[best] = -1.0f;
+        total++;
+    }
+    for (int k = 0; k < 4; k++) {
+        bool used = k < n && q[k] > 0;
+        out[k] = used ? jj[k] : jj[0];
+        out[4 + k] = used ? (u8)q[k] : 0;
+    }
+}
+
+static int popcount64(u64 x) {
+    int c = 0;
+    while (x) { x &= x - 1; c++; }
+    return c;
+}
+
+// Bones with a non-zero weight on welded vertex v, as a 128-bit mask.
+static void skin_mask(const B *b, u32 v, u64 m[2]) {
+    const u8 *s = &b->skin[v * 8];
+    for (int k = 0; k < 4; k++)
+        if (s[4 + k]) m[s[k] >> 6] |= 1ull << (s[k] & 63);
+}
+
+// Conservative half rounding (bone boxes): the half at or below / above f.
+static u16 half_step(u16 h, bool up) {
+    bool neg = (h & 0x8000u) != 0;
+    if ((h & 0x7FFFu) == 0) return up ? 0x0001u : 0x8001u;
+    return (u16)(neg == up ? h - 1 : h + 1);
+}
+static u16 half_down(float f) {
+    u16 h = vgeo_half(f);
+    return vgeo_half_to_float(h) > f ? half_step(h, false) : h;
+}
+static u16 half_up(float f) {
+    u16 h = vgeo_half(f);
+    return vgeo_half_to_float(h) < f ? half_step(h, true) : h;
+}
 
 static Sph cluster_bounds_and_cone(const B *b, const u32 *tris, u32 tri_count, u32 *cone_out) {
     // meshopt bounds on a compact copy (meshopt_computeClusterBounds takes global indices).
@@ -260,7 +337,7 @@ static Sph cluster_bounds_and_cone(const B *b, const u32 *tris, u32 tri_count, u
     }
     s.r = s.r * (1.0f + 1e-6f) + 1e-7f;
     u32 flags = 0;
-    if (mb.cone_cutoff >= 1.0f - 1e-4f) flags |= VGC_NO_CONE;
+    if (mb.cone_cutoff >= 1.0f - 1e-4f || b->skinned) flags |= VGC_NO_CONE;   // skinned: the bind-pose cone says nothing
     float ax[3] = { mb.cone_axis[0], mb.cone_axis[1], mb.cone_axis[2] };
     *cone_out = oct_encode8(ax) | ((u32)(u8)mb.cone_cutoff_s8 << 16) | (flags << 24);
     return s;
@@ -277,24 +354,41 @@ static void meshletize(B *b, const u32 *lidx, size_t lcount, const float *lpos, 
     size_t mc = meshopt_buildMeshlets(ml, mv, mt, lidx, lcount, lpos, lv, sizeof(float) * 3, VGEO_MAX_CLUSTER_VERTS, VGEO_MAX_CLUSTER_TRIS, 0.25f);
     for (size_t m = 0; m < mc; m++) {
         meshopt_optimizeMeshlet(&mv[ml[m].vertex_offset], &mt[ml[m].triangle_offset], ml[m].triangle_count, ml[m].vertex_count);
-        BCluster c;
-        memset(&c, 0, sizeof(c));
-        c.first = (u32)out_idx->n;
-        c.tris = ml[m].triangle_count;
-        c.material = material;
-        c.level = level;
-        c.group = ~0u;
-        c.child_group = child_group;
-        c.error = error;
-        c.lod = lod;
-        VEC_RESERVE(*out_idx, (size_t)c.tris * 3);
-        for (u32 t = 0; t < c.tris * 3; t++) {
-            u32 local = mv[ml[m].vertex_offset + mt[ml[m].triangle_offset + t]];
-            out_idx->p[out_idx->n++] = l2g ? l2g[local] : local;
+        // Skinned: split into runs of triangles (meshlet order) touching <= VGEO_MAX_CLUSTER_BONES bones.
+        for (u32 t0 = 0, t1; t0 < ml[m].triangle_count; t0 = t1) {
+            t1 = ml[m].triangle_count;
+            if (b->skinned) {
+                u64 mask[2] = { 0, 0 };
+                for (t1 = t0; t1 < ml[m].triangle_count; t1++) {
+                    u64 tm[2] = { mask[0], mask[1] };
+                    for (int k = 0; k < 3; k++) {
+                        u32 local = mv[ml[m].vertex_offset + mt[ml[m].triangle_offset + t1 * 3 + k]];
+                        skin_mask(b, l2g ? l2g[local] : local, tm);
+                    }
+                    if (t1 > t0 && popcount64(tm[0]) + popcount64(tm[1]) > VGEO_MAX_CLUSTER_BONES) break;
+                    mask[0] = tm[0];
+                    mask[1] = tm[1];
+                }
+            }
+            BCluster c;
+            memset(&c, 0, sizeof(c));
+            c.first = (u32)out_idx->n;
+            c.tris = t1 - t0;
+            c.material = material;
+            c.level = level;
+            c.group = ~0u;
+            c.child_group = child_group;
+            c.error = error;
+            c.lod = lod;
+            VEC_RESERVE(*out_idx, (size_t)c.tris * 3);
+            for (u32 t = t0 * 3; t < t1 * 3; t++) {
+                u32 local = mv[ml[m].vertex_offset + mt[ml[m].triangle_offset + t]];
+                out_idx->p[out_idx->n++] = l2g ? l2g[local] : local;
+            }
+            c.bounds = cluster_bounds_and_cone(b, &out_idx->p[c.first], c.tris, &c.cone);
+            if (lod.r < 0) c.lod = c.bounds;   // leaves: their own sphere, error 0
+            VEC_PUSH(*out_clusters, c);
         }
-        c.bounds = cluster_bounds_and_cone(b, &out_idx->p[c.first], c.tris, &c.cone);
-        if (lod.r < 0) c.lod = c.bounds;   // leaves: their own sphere, error 0
-        VEC_PUSH(*out_clusters, c);
     }
     free(ml);
     free(mv);
@@ -319,6 +413,10 @@ static bool weld(B *b, const VgSource *src, u32 **out_idx, u32 *out_count, u16 *
         for (int k = 0; k < 3; k++) {
             float v = src->pos[i * 3 + k];
             if (!isfinite(v)) { snprintf(err, (size_t)err_size, "vertex %u is not finite", i); return false; }
+            if (src->joints && (src->joints[(size_t)i * 4 + k] >= VGEO_MAX_BONES || (k == 2 && src->joints[(size_t)i * 4 + 3] >= VGEO_MAX_BONES))) {
+                snprintf(err, (size_t)err_size, "vertex %u: joint >= %d", i, VGEO_MAX_BONES);
+                return false;
+            }
             mn[k] = fminf(mn[k], v);
             mx[k] = fmaxf(mx[k], v);
         }
@@ -392,6 +490,29 @@ static bool weld(B *b, const VgSource *src, u32 **out_idx, u32 *out_count, u16 *
         idx[kept * 3 + 2] = v2;
         tm[kept] = src->tri_material ? src->tri_material[t] : 0;
         kept++;
+    }
+    // Skin per position: every welded vertex at a grid position takes the normalised skin of the first
+    // source vertex there (crack-free animated cuts: shared vertices skin bit-identically).
+    if (b->skinned) {
+        u8 *pskin = (u8 *)malloc((size_t)pcount * 8);
+        u8 *pset = (u8 *)calloc(pcount ? pcount : 1, 1);
+        for (u32 i = 0; i < n; i++) {
+            u32 p = b->pid[remap[i]];
+            if (pset[p]) continue;
+            pset[p] = 1;
+            float w[4] = { 1, 0, 0, 0 };
+            for (int k = 0; k < 4 && (src->weights || src->weights_u8); k++)
+                w[k] = src->weights ? src->weights[(size_t)i * 4 + k] : (float)src->weights_u8[(size_t)i * 4 + k];
+            skin_normalise(&src->joints[(size_t)i * 4], w, &pskin[(size_t)p * 8]);
+        }
+        b->skin = (u8 *)malloc((size_t)vc * 8);
+        for (u32 v = 0; v < vc; v++) {
+            memcpy(&b->skin[(size_t)v * 8], &pskin[(size_t)b->pid[v] * 8], 8);
+            for (int k = 0; k < 4; k++)
+                if (b->skin[v * 8 + 4 + k]) b->bone_count = DG_MAX(b->bone_count, (u32)b->skin[v * 8 + k] + 1);
+        }
+        free(pskin);
+        free(pset);
     }
     free(remap);
     // Missing normals: smooth, area weighted, per position.
@@ -652,28 +773,49 @@ static void group_job(void *ctx, u32 gi, int worker) {
             while (lo < hi) { size_t mid = (lo + hi) / 2; if (uv[mid] < tri.p[i]) lo = mid + 1; else hi = mid; }
             lidx[i] = (u32)lo;
         }
+        // Attributes: normal, uv [, skinned: the 4 weights (sorted slots, at low weight)].
+        const size_t NA = b->skinned ? 9 : 5;
         float *lpos = (float *)malloc(sizeof(float) * 3 * lv);
-        float *lattr = (float *)malloc(sizeof(float) * 5 * lv);
+        float *lattr = (float *)malloc(sizeof(float) * NA * lv);
         u8 *lock = (u8 *)malloc(lv);
         u32 key = g * b->material_count + mat;
         for (size_t v = 0; v < lv; v++) {
             memcpy(&lpos[v * 3], &b->pos[uv[v] * 3], 12);
-            memcpy(&lattr[v * 5], &b->nrm[uv[v] * 3], 12);
-            memcpy(&lattr[v * 5 + 3], &b->uv[uv[v] * 2], 8);
+            memcpy(&lattr[v * NA], &b->nrm[uv[v] * 3], 12);
+            memcpy(&lattr[v * NA + 3], &b->uv[uv[v] * 2], 8);
+            for (size_t k = 5; k < NA; k++) lattr[v * NA + k] = (float)b->skin[uv[v] * 8 + 4 + (k - 5)] / 255.0f;
             lock[v] = j->owner[b->pid[uv[v]]] != key;   // shared with another group or material: locked
         }
+        if (b->skinned && j->level == 0) {
+            // Bone-set penalty, kept simple: a vertex whose dominant bone differs from the dominant bone
+            // of every one of its neighbours (a lone vertex of one bone in another's region, e.g. a tip)
+            // is locked, so the simplifier never drags it across the bone boundary. Only on the source
+            // mesh (the first simplification): at coarser levels earlier collapses isolate vertices,
+            // and locking those pinched thin parts (the test creature: 90 pinched cut edges vs 0).
+            // Beyond that the 4 weights are simplification attributes.
+            u8 *nb = (u8 *)calloc(lv, 1);   // bit 0: has a neighbour, bit 1: one shares the dominant bone
+            for (size_t t = 0; t < tri.n; t += 3)
+                for (int e = 0; e < 3; e++) {
+                    u32 x = lidx[t + e], y = lidx[t + (e + 1) % 3];
+                    u8 same = b->skin[uv[x] * 8] == b->skin[uv[y] * 8] ? 2 : 0;
+                    nb[x] |= 1 | same;
+                    nb[y] |= 1 | same;
+                }
+            for (size_t v = 0; v < lv; v++) if (nb[v] == 1) lock[v] = 1;
+            free(nb);
+        }
         float wn = b->radius * 0.01f, wt = b->radius * 0.005f;
-        float weights[5] = { wn, wn, wn, wt, wt };
+        float weights[9] = { wn, wn, wn, wt, wt, wt, wt, wt, wt };
         size_t target = (tri.n / 3 / 2) * 3;
         if (target < 3) target = 3;
         u32 *dst = (u32 *)malloc(sizeof(u32) * tri.n);
         float e = 0;
-        size_t r = meshopt_simplifyWithAttributes(dst, lidx, tri.n, lpos, lv, sizeof(float) * 3, lattr, sizeof(float) * 5, weights, 5, lock, target,
+        size_t r = meshopt_simplifyWithAttributes(dst, lidx, tri.n, lpos, lv, sizeof(float) * 3, lattr, sizeof(float) * NA, weights, NA, lock, target,
                                                   b->radius * 4.0f, meshopt_SimplifyErrorAbsolute, &e);
         if (r > tri.n * 3 / 4) {
             // Retry harder; if the lock still holds it, carry the subset through unchanged.
             float e2 = 0;
-            size_t r2 = meshopt_simplifyWithAttributes(dst, lidx, tri.n, lpos, lv, sizeof(float) * 3, lattr, sizeof(float) * 5, weights, 5, lock,
+            size_t r2 = meshopt_simplifyWithAttributes(dst, lidx, tri.n, lpos, lv, sizeof(float) * 3, lattr, sizeof(float) * NA, weights, NA, lock,
                                                        (tri.n / 3 / 4) * 3, b->radius * 16.0f, meshopt_SimplifyErrorAbsolute, &e2);
             if (r2 <= tri.n * 3 / 4) { r = r2; e = e2; }
             else { memcpy(dst, lidx, sizeof(u32) * tri.n); r = tri.n; e = 0; }
@@ -803,9 +945,40 @@ static void pack_local(const B *b, const BCluster *c, PackCluster *pc) {
         }
 }
 
-static u32 cluster_bytes(const B *b, u32 vc, u32 tris) {
-    u32 vb = VGEO_VERTEX_BYTES + (b->has_color ? VGEO_VERTEX_COLOR_BYTES : 0);
-    return (u32)sizeof(VgCluster) + ((vc * vb + 15u) & ~15u) + ((tris * VGEO_TRI_BYTES + 15u) & ~15u);
+static u32 vertex_bytes(const B *b) { return vgeo_vertex_bytes((b->has_color ? VGF_HAS_COLOR : 0) | (b->skinned ? VGF_SKINNED : 0)); }
+
+// Skinned: the cluster's bone set, ascending bone ids, with the bind-space box of the vertices that
+// have a non-zero weight on each bone. Returns the count (0 when static).
+static u32 cluster_bone_set(const B *b, const PackCluster *pc, VgBoneBox *out) {
+    if (!b->skinned) return 0;
+    u64 mask[2] = { 0, 0 };
+    for (u32 v = 0; v < pc->vc; v++) skin_mask(b, pc->verts[v], mask);
+    u32 n = 0;
+    for (u32 bone = 0; bone < VGEO_MAX_BONES && n < VGEO_MAX_CLUSTER_BONES; bone++) {
+        if (!(mask[bone >> 6] >> (bone & 63) & 1)) continue;
+        VgBoneBox *bx = &out[n++];
+        bx->bone = bone;
+        for (int k = 0; k < 3; k++) { bx->min[k] = FLT_MAX; bx->max[k] = -FLT_MAX; }
+        for (u32 v = 0; v < pc->vc; v++) {
+            const u8 *s = &b->skin[pc->verts[v] * 8];
+            bool on = false;
+            for (int k = 0; k < 4; k++) on |= s[k] == bone && s[4 + k];
+            if (!on) continue;
+            for (int k = 0; k < 3; k++) {
+                bx->min[k] = fminf(bx->min[k], b->pos[pc->verts[v] * 3 + k]);
+                bx->max[k] = fmaxf(bx->max[k], b->pos[pc->verts[v] * 3 + k]);
+            }
+        }
+    }
+    return n;
+}
+
+static u32 bone_set_bytes(const B *b, u32 bones) { return b->skinned ? 4u + bones * VGEO_BONE_BOX_BYTES : 0u; }
+
+static u32 cluster_bytes(const B *b, const PackCluster *pc, u32 tris) {
+    VgBoneBox bx[VGEO_MAX_CLUSTER_BONES];
+    u32 nb = cluster_bone_set(b, pc, bx);
+    return (u32)sizeof(VgCluster) + ((pc->vc * vertex_bytes(b) + 15u) & ~15u) + ((tris * VGEO_TRI_BYTES + bone_set_bytes(b, nb) + 15u) & ~15u);
 }
 
 
@@ -813,14 +986,17 @@ static u32 cluster_bytes(const B *b, u32 vc, u32 tris) {
 static void flush_page(const B *b, VgPageDesc *pd, VecU32 *page_cl, VecU8 *data, const u32 *gfinal) {
     u32 ncl = (u32)page_cl->n;
     if (!ncl) return;
-    u32 vb = VGEO_VERTEX_BYTES + (b->has_color ? VGEO_VERTEX_COLOR_BYTES : 0);
+    u32 vb = vertex_bytes(b);
     PackCluster *pcs = (PackCluster *)malloc(sizeof(PackCluster) * ncl);
-    u32 vbytes = 0, tbytes = 0;
+    u32 vbytes = 0, tbytes = 0, sbytes = 0;
+    VgBoneBox bx[VGEO_MAX_CLUSTER_BONES];
     for (u32 q = 0; q < ncl; q++) {
         const BCluster *bc = &b->clusters.p[page_cl->p[q]];
         pack_local(b, bc, &pcs[q]);
+        u32 nb = bone_set_bytes(b, cluster_bone_set(b, &pcs[q], bx));
         vbytes += (pcs[q].vc * vb + 15u) & ~15u;
-        tbytes += (bc->tris * VGEO_TRI_BYTES + 15u) & ~15u;
+        tbytes += (bc->tris * VGEO_TRI_BYTES + nb + 15u) & ~15u;   // skinned: the bone set follows the triangles
+        sbytes += nb;
     }
     u32 size = (u32)sizeof(VgPageHeader) + ncl * (u32)sizeof(VgCluster) + vbytes + tbytes;
     size_t at = data->n;
@@ -832,6 +1008,7 @@ static void flush_page(const B *b, VgPageDesc *pd, VecU32 *page_cl, VecU8 *data,
     ph->cluster_count = ncl;
     ph->vertex_bytes = vbytes;
     ph->index_bytes = tbytes;
+    ph->skin_bytes = sbytes;   // the bone sets inside index_bytes
     u32 voff = (u32)sizeof(VgPageHeader) + ncl * (u32)sizeof(VgCluster), toff = voff + vbytes;
     for (u32 q = 0; q < ncl; q++) {
         const BCluster *bc = &b->clusters.p[page_cl->p[q]];
@@ -862,6 +1039,7 @@ static void flush_page(const B *b, VgPageDesc *pd, VecU32 *page_cl, VecU8 *data,
             memcpy(vp + 8, &hu, 2);
             memcpy(vp + 10, &hv, 2);
             if (b->has_color) memcpy(vp + 12, &b->col[pc->verts[v]], 4);
+            if (b->skinned) memcpy(vp + (b->has_color ? 16 : 12), &b->skin[pc->verts[v] * 8], 8);
         }
         for (u32 t = 0; t < bc->tris; t++) {
             u8 *tp = page + toff + t * VGEO_TRI_BYTES;
@@ -869,8 +1047,28 @@ static void flush_page(const B *b, VgPageDesc *pd, VecU32 *page_cl, VecU8 *data,
             tp[1] = pc->tri[t][1];
             tp[2] = pc->tri[t][2];
         }
+        // Bone set: count, then { bone | half min.x << 16, min.y | min.z << 16, max.x | max.y << 16, max.z }
+        // with the decoded-position box rounded outwards (the GPU's f32 decode may differ by an ulp).
+        u32 nb = cluster_bone_set(b, pc, bx);
+        if (b->skinned) {
+            u32 *w = (u32 *)(page + toff + bc->tris * VGEO_TRI_BYTES);
+            w[0] = nb;
+            for (u32 i = 0; i < nb; i++) {
+                u16 lo[3], hi[3];
+                for (int k = 0; k < 3; k++) {
+                    float a = bx[i].min[k], c = bx[i].max[k];
+                    lo[k] = half_down(a - (fabsf(a) * 1e-6f + 1e-7f));
+                    hi[k] = half_up(c + (fabsf(c) * 1e-6f + 1e-7f));
+                }
+                u32 *e = &w[1 + i * 4];
+                e[0] = bx[i].bone | (u32)lo[0] << 16;
+                e[1] = lo[1] | (u32)lo[2] << 16;
+                e[2] = hi[0] | (u32)hi[1] << 16;
+                e[3] = hi[2];
+            }
+        }
         voff += (pc->vc * vb + 15u) & ~15u;
-        toff += (bc->tris * VGEO_TRI_BYTES + 15u) & ~15u;
+        toff += (bc->tris * VGEO_TRI_BYTES + bone_set_bytes(b, nb) + 15u) & ~15u;
     }
     pd->size = size;
     page_cl->n = 0;
@@ -901,6 +1099,7 @@ static void free_b(B *b) {
     free(b->col);
     free(b->pid);
     free(b->grid);
+    free(b->skin);
     VEC_FREE(b->clusters);
     VEC_FREE(b->idx);
     VEC_FREE(b->groups);
@@ -920,6 +1119,7 @@ bool vgeo_build(const VgSource *src, const VgBuildOptions *optp, VgBuilt *out, c
     b.threads = resolve_threads(opt->threads);
     b.material_count = DG_MAX(src->material_count, 1u);
     b.has_color = src->color != NULL;
+    b.skinned = src->joints != NULL;
     VgBuildStats *st = &out->stats;
     st->threads = b.threads;
     st->input_tris = src->index_count / 3;
@@ -1076,7 +1276,7 @@ bool vgeo_build(const VgSource *src, const VgBuildOptions *optp, VgBuilt *out, c
         for (u32 m = 0; m < bg->member_count; m++) {
             const BCluster *c = &b.clusters.p[b.members.p[bg->first_member + m]];
             pack_local(&b, c, &pc[0]);
-            gbytes += cluster_bytes(&b, pc[0].vc, c->tris);
+            gbytes += cluster_bytes(&b, &pc[0], c->tris);
         }
         if (page_used + gbytes > VGEO_PAGE_SIZE || page_clusters + bg->member_count > 4096) {
             if (pages.n) flush_page(&b, &pages.p[pages.n - 1], &page_cl, &data, gfinal);
@@ -1180,7 +1380,8 @@ bool vgeo_build(const VgSource *src, const VgBuildOptions *optp, VgBuilt *out, c
     VgFileHeader *hd = &out->hdr;
     hd->magic = VGEO_MAGIC;
     hd->version = VGEO_FILE_VERSION;
-    hd->flags = b.has_color ? VGF_HAS_COLOR : 0;
+    hd->flags = (b.has_color ? VGF_HAS_COLOR : 0) | (b.skinned ? VGF_SKINNED : 0);
+    hd->bone_count = b.bone_count;
     hd->cluster_count = cluster_total;
     hd->group_count = (u32)b.groups.n;
     hd->node_count = (u32)h.nodes.n;
@@ -1327,8 +1528,12 @@ void vgeo_decode_cluster(const VgBuilt *b, u32 page, u32 index, VgDecoded *o) {
     o->tri_count = (c->counts >> 8) & 0xFFu;
     o->material = c->counts >> 16;
     u32 voff = (c->offsets & 0x7FFFu) * 4u, toff = ((c->offsets >> 15) & 0x7FFFu) * 4u;
-    u32 vb = VGEO_VERTEX_BYTES + ((b->hdr.flags & VGF_HAS_COLOR) ? VGEO_VERTEX_COLOR_BYTES : 0);
+    u32 vb = vgeo_vertex_bytes(b->hdr.flags), skin_at = (b->hdr.flags & VGF_HAS_COLOR) ? 16 : 12;
     for (u32 v = 0; v < o->vert_count; v++) {
+        if (b->hdr.flags & VGF_SKINNED) {
+            memcpy(o->joints[v], base + voff + v * vb + skin_at, 4);
+            memcpy(o->weights[v], base + voff + v * vb + skin_at + 4, 4);
+        }
         const u8 *vp = base + voff + v * vb;
         for (int k = 0; k < 3; k++) {
             u16 q;
@@ -1349,6 +1554,52 @@ void vgeo_decode_cluster(const VgBuilt *b, u32 page, u32 index, VgDecoded *o) {
         o->tri[t][0] = tp[0];
         o->tri[t][1] = tp[1];
         o->tri[t][2] = tp[2];
+    }
+}
+
+u32 vgeo_cluster_bones(const u8 *page, const VgCluster *c, VgBoneBox out[VGEO_MAX_CLUSTER_BONES]) {
+    const u32 *w = (const u32 *)(page + ((c->offsets >> 15) & 0x7FFFu) * 4u) + ((c->counts >> 8) & 0xFFu);
+    u32 n = DG_MIN(w[0], (u32)VGEO_MAX_CLUSTER_BONES);
+    for (u32 i = 0; i < n; i++) {
+        const u32 *e = &w[1 + i * 4];
+        out[i].bone = e[0] & 0xFFu;
+        out[i].min[0] = vgeo_half_to_float((u16)(e[0] >> 16));
+        out[i].min[1] = vgeo_half_to_float((u16)e[1]);
+        out[i].min[2] = vgeo_half_to_float((u16)(e[1] >> 16));
+        out[i].max[0] = vgeo_half_to_float((u16)e[2]);
+        out[i].max[1] = vgeo_half_to_float((u16)(e[2] >> 16));
+        out[i].max[2] = vgeo_half_to_float((u16)e[3]);
+    }
+    return n;
+}
+
+void vgeo_bone_bounds(const VgBuilt *b, float out[VGEO_MAX_BONES][4]) {
+    float mn[VGEO_MAX_BONES][3], mx[VGEO_MAX_BONES][3];
+    for (u32 i = 0; i < VGEO_MAX_BONES; i++)
+        for (int k = 0; k < 3; k++) { mn[i][k] = FLT_MAX; mx[i][k] = -FLT_MAX; }
+    if (b->hdr.flags & VGF_SKINNED)
+        for (u32 p = 0; p < b->hdr.page_count; p++) {
+            const u8 *page = (const u8 *)vgeo_page(b, p);
+            for (u32 i = 0; i < ((const VgPageHeader *)page)->cluster_count; i++) {
+                const VgCluster *c = vgeo_page_cluster(b, p, i);
+                if (c->child_group != ~0u) continue;   // coarser clusters keep a subset of the leaves' vertices
+                VgBoneBox bx[VGEO_MAX_CLUSTER_BONES];
+                u32 n = vgeo_cluster_bones(page, c, bx);
+                for (u32 k = 0; k < n; k++)
+                    for (int a = 0; a < 3; a++) {
+                        mn[bx[k].bone][a] = fminf(mn[bx[k].bone][a], bx[k].min[a]);
+                        mx[bx[k].bone][a] = fmaxf(mx[bx[k].bone][a], bx[k].max[a]);
+                    }
+            }
+        }
+    for (u32 i = 0; i < VGEO_MAX_BONES; i++) {
+        if (mn[i][0] > mx[i][0]) { out[i][0] = out[i][1] = out[i][2] = 0; out[i][3] = -1.0f; continue; }
+        float h2 = 0;
+        for (int k = 0; k < 3; k++) {
+            out[i][k] = (mn[i][k] + mx[i][k]) * 0.5f;
+            h2 += (mx[i][k] - mn[i][k]) * (mx[i][k] - mn[i][k]) * 0.25f;
+        }
+        out[i][3] = sqrtf(h2) * (1.0f + 1e-5f) + 1e-6f;
     }
 }
 
