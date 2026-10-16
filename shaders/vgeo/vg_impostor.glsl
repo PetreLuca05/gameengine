@@ -51,7 +51,7 @@ struct VgImpostorFrames { vec2 fr[3]; vec3 w; uint ta, tn; float n, lod, hm, rad
 VgImpostorFrames vg_impostor_frames(VgXf x, VgMesh m, VgImpostorQuad q) {
     VgImpostorFrames F;
     vec3 dl = vg_qrot(vec4(-x.rot.xyz, x.rot.w), V.cam_pos.xyz - q.c);
-    uint n = max(m.impostor_grid, 2u);
+    uint n = max(m.impostor_grid & 0xFFFFu, 2u);
     vec2 g = vg_hemi_oct_encode(dot(dl, dl) > 1e-12 ? normalize(dl) : vec3(0.0, 1.0, 0.0)) * float(n - 1u);
     vec2 i0 = clamp(floor(g), vec2(0.0), vec2(float(n) - 2.0)), f = g - i0;
     if (f.x + f.y < 1.0) { F.fr[0] = i0; F.fr[1] = i0 + vec2(1.0, 0.0); F.fr[2] = i0 + vec2(0.0, 1.0); F.w = vec3(1.0 - f.x - f.y, f.x, f.y); }

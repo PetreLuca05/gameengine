@@ -196,19 +196,24 @@ void render_vgeo_set_level(const RenderVgeoPlacement *p, int count);
 
 // Foliage on vgeo (docs/VGEO.md "Foliage support"): placement chunks (.vgp, 32 m: 4 x 4 cells of 32 B
 // instances) loaded / freed with world chunks, over foliage meshes resolved by name (the procedural
-// test types "test_tuft" / "test_bush", or models with "vgeo": true and a "foliage" block).
+// grass "test_tuft", the imported trees / bushes / flowers (docs/VGEO.md "Tree models"), or models with "vgeo": true and a "foliage" block).
 typedef struct RenderCapsule { vec3 a, b; float radius; } RenderCapsule;
 typedef struct RenderFoliageHit { vec3 pos; float scale, dist; u32 instance; char type[48]; } RenderFoliageHit;
-int render_foliage_test_types(void);            // registers the procedural test types (once, load time); returns their count
-// The open-world map kinds (tree_pine, tree_broadleaf, tree_dead, crop_wheat; plus the test types),
-// once, load time; returns their count.
+int render_foliage_test_types(void);            // registers the tufts, imported bushes and flowers (once, load time); returns the type count
+// The open-world map kinds (the imported tree species of docs/VGEO.md "Tree models", crop_wheat; plus
+// the tufts and the imported bushes / flowers), once, load time; returns the type count.
 int render_foliage_map_types(void);
+// Scatter roles of the tree types (the order of vgeo_tree.h VgTreeRole).
+enum { RENDER_TREE_CONIFER, RENDER_TREE_BROADLEAF, RENDER_TREE_DEAD, RENDER_TREE_BUSH, RENDER_TREE_FLOWER, RENDER_TREE_ROLES };
+// The registered types of a role (names, pick weights; registration order: the same on every machine
+// with the same assets). Returns the count (<= max).
+int render_foliage_role_types(int role, char (*names)[48], float *weights, int max);
 // A placement chunk (.vgp, malloc'd; thread-safe) from the caller's instances: kind = index into names
 // (registered type or vgeo model names). Instances outside chunk (cx, cz) are dropped. NULL when empty.
 typedef struct RenderFoliageInst { vec3 pos; float yaw, scale; u16 kind; } RenderFoliageInst;
 void *render_foliage_make_chunk(int cx, int cz, const char (*names)[48], int name_count, const RenderFoliageInst *inst, int n, size_t *size);
-// A .vgp chunk of test foliage for chunk (cx, cz): jittered grid at `density` per m2 (90 % tufts, 10 %
-// bushes), on height(user, x, z) (NULL: 0), inside [x0, x1) x [z0, z1). Thread-safe (job threads):
+// A .vgp chunk of test foliage for chunk (cx, cz): jittered grid at `density` per m2 (90 % tufts, the
+// rest imported bushes and daisies), on height(user, x, z) (NULL: 0), inside [x0, x1) x [z0, z1). Thread-safe (job threads):
 // returns a malloc'd file (size in *size), NULL when the chunk gets nothing.
 void *render_foliage_test_chunk(int cx, int cz, float density, float x0, float z0, float x1, float z1, float (*height)(void *user, float x, float z), void *user,
                                 size_t *size);

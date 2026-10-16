@@ -3,10 +3,13 @@
 //   build_vgeo <mesh.gltf> [--out file.vgeo] [--stats] [--threads N] [--impostor [size] [grid]]
 //   build_vgeo --gen rock|field|statue|torus|building|creature|tuft|bush [--tris N] [--seed S] [--out file.vgeo] [--stats] [--threads N]
 //              [--impostor [size] [grid]]
+//   build_vgeo --trees <tree dir/> <out dir/>
 //
 // --impostor bakes the hemi-octahedral impostor atlas (grid x grid frames in a size^2 atlas, default
 // 1024 / 8) into the file on the CPU (vgeo_impostor.h): glTF and plain generated meshes in white,
 // the foliage generators (tuft, bush) with their materials and alpha masks.
+// --trees imports every tree species (vgeo_tree.h) from the tree directory and writes
+// <out dir>/<name>.dgtree (clusters, DAG, impostor, materials, capsule), the species in parallel.
 // Prints the build report (levels, clusters, triangles, error ranges, pages, ms per stage) with
 // --stats, plus wall time and the process peak memory. Generated meshes are never committed: tests and
 // the build produce them with this tool.
@@ -16,6 +19,7 @@
 #include "render/vgeo/vgeo_procgen_skinned.h"
 #include "render/vgeo/vgeo_procgen_foliage.h"
 #include "render/vgeo/vgeo_impostor.h"
+#include "render/vgeo/vgeo_tree.h"
 #include "core/engine.h"
 #include "core/platform.h"
 #include <SDL3/SDL.h>
@@ -46,6 +50,49 @@ static double peak_mb(void) {
 
 static void print_line(const char *l) { printf("%s\n", l); }
 
+typedef struct TreeJob { const char *dir, *out; SDL_AtomicInt next; int failed; } TreeJob;
+
+static int tree_thread(void *u) {
+    TreeJob *j = (TreeJob *)u;
+    for (;;) {
+        u32 i = (u32)SDL_AddAtomicInt(&j->next, 1);
+        const VgTreeSpecies *sp = vgeo_tree_species(i);
+        if (!sp) return 0;
+        double t0 = (double)SDL_GetPerformanceCounter() / (double)SDL_GetPerformanceFrequency();
+        VgTree t;
+        char err[512] = "";
+        if (!vgeo_tree_load_or_build(sp, j->dir, NULL, NULL, &t, err, sizeof(err))) {
+            fprintf(stderr, "%s: %s\n", sp->name, err);
+            j->failed = 1;
+            continue;
+        }
+        char path[700];
+        snprintf(path, sizeof(path), "%s%s.dgtree", j->out, sp->name);
+        if (!vgeo_tree_write(&t, t.b.hdr.key, path)) { fprintf(stderr, "cannot write %s\n", path); j->failed = 1; }
+        char mats[256] = "";
+        for (u32 k = 0; k < t.material_count; k++)
+            snprintf(mats + strlen(mats), sizeof(mats) - strlen(mats), "%s%s%s", k ? ", " : "", t.tex[k], t.masked[k] ? " (masked)" : "");
+        printf("%-14s %6u tris, %5u clusters, %2u levels, lod tris %u/%u/%u/%u, scale %.4f (%.1f -> %.1f m), capsule r %.2f h %.1f, %s; %.2f s\n", sp->name,
+               t.b.stats.input_tris, t.b.stats.clusters, t.b.stats.levels, t.b.lods[0].tris, t.b.lods[1].tris, t.b.lods[2].tris, t.b.lods[3].tris, (double)t.scale,
+               (double)t.src_height, (double)sp->height, (double)t.cap_r, (double)t.cap_h, mats,
+               (double)SDL_GetPerformanceCounter() / (double)SDL_GetPerformanceFrequency() - t0);
+        vgeo_tree_free(&t);
+    }
+}
+
+static int build_trees(const char *dir, const char *out) {
+    TreeJob j;
+    memset(&j, 0, sizeof(j));
+    j.dir = dir;
+    j.out = out;
+    SDL_Thread *th[16];
+    int n = DG_CLAMP(SDL_GetNumLogicalCPUCores(), 1, 16);
+    for (int i = 0; i < n; i++) th[i] = SDL_CreateThread(tree_thread, "tree", &j);
+    for (int i = 0; i < n; i++) SDL_WaitThread(th[i], NULL);
+    printf("build_vgeo: %u tree species, peak memory %.0f MB\n", vgeo_tree_species_count(), peak_mb());
+    return j.failed;
+}
+
 int main(int argc, char **argv) {
     const char *in = NULL, *out = NULL, *gen = NULL;
     bool stats = false;
@@ -60,6 +107,7 @@ int main(int argc, char **argv) {
             if (i + 1 < argc && argv[i + 1][0] != '-') imp_size = (u32)atoi(argv[++i]);
             if (i + 1 < argc && argv[i + 1][0] != '-') imp_grid = (u32)atoi(argv[++i]);
         }
+        else if (!strcmp(argv[i], "--trees") && i + 2 < argc) return build_trees(argv[i + 1], argv[i + 2]);
         else if (!strcmp(argv[i], "--stats")) stats = true;
         else if (!strcmp(argv[i], "--threads") && i + 1 < argc) threads = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--gen") && i + 1 < argc) gen = argv[++i];

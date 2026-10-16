@@ -49,7 +49,8 @@ typedef struct VgMesh {
     float fade_start, fade_end;  // m: instance distance fade + density thinning (VGMF_FOLIAGE; fade_end 0 = no fade)
     float shadow_max_dist;       // m: not in the sun cascades beyond this distance from the camera (0 = always)
     u32 fflags;                  // VgMeshFoliage
-    u32 impostor_grid;           // impostor atlas: frames per side (hemi-octahedral)
+    u32 impostor_grid;           // impostor atlas: frames per side (hemi-octahedral, bits 0-15); bits 16-31: the mesh's
+                                 // switch size in 1/16 of the view's (VgViewGpu.foliage[3]; 0 = 1x, vgeo_impostor_scale)
     float impostor_radius;       // m: the atlas frames' half extent (mesh space; the billboard's half size)
 } VgMesh;
 
