@@ -1,6 +1,7 @@
 // Wire protocol. Every message starts with a MsgType byte.
 //
-//   client -> host  reliable   HELLO{version,name,anim manifest[categories]}  RPC{type,a,b,c}
+//   client -> host  reliable   HELLO{version,name,anim manifest[categories],build hash,build version,steam id,listen port}  RPC{type,a,b,c}
+//   both ways       reliable   LOBBY{LobbyOp, payload}   (src/net/lobby.h: snapshots, chat, intents, start, kick, migrate)
 //   client -> host  unreliable CMDS{ack_snapshot, count, UserCmd[count]}   (last N cmds, redundancy)
 //   host -> client  reliable   WELCOME{slot,map,seed,tick,snaprate}  REJECT{reason}  EVENT{GameEvent}
 //                              INVENTORY{revision,slots}  CVARS{count,(name,value)*}
@@ -8,7 +9,7 @@
 #ifndef DG_PROTOCOL_H
 #define DG_PROTOCOL_H
 
-#define DG_PROTOCOL_VERSION 15  // 15: hand poses (AC_HAND_POSES in the join manifest); 14: phone (UserCmd phone_rot / phone_flags, ANS_PHONE in the character state); 13: modular character parts (ANS_PARTS in the anim state, RPC_SET_PART); 12: PlayerMove.veh_raise; 11: vehicles (PlayerMove seat fields, vehicle block in snapshots, BTN_VEHICLE); 10: weather in snapshots; 9: inventory intents (RPC_INV_OP, MSG_INVENTORY ack); 8: weapon attachments (InvSlot.att, NF_ATTACH), time of day in snapshots
+#define DG_PROTOCOL_VERSION 16  // 16: lobby (HELLO build hash / version / Steam id / listen port, MSG_LOBBY); 15: hand poses (AC_HAND_POSES in the join manifest); 14: phone (UserCmd phone_rot / phone_flags, ANS_PHONE in the character state); 13: modular character parts (ANS_PARTS in the anim state, RPC_SET_PART); 12: PlayerMove.veh_raise; 11: vehicles (PlayerMove seat fields, vehicle block in snapshots, BTN_VEHICLE); 10: weather in snapshots; 9: inventory intents (RPC_INV_OP, MSG_INVENTORY ack); 8: weapon attachments (InvSlot.att, NF_ATTACH), time of day in snapshots
 #define DG_DEFAULT_PORT 27015
 #define DG_DISCOVERY_PORT 27016
 
@@ -24,6 +25,7 @@ typedef enum MsgType {
     MSG_CVARS,
     MSG_BYE,
     MSG_ANIM_EVENTS,   // host -> client reliable: count u8, AnimEvent[count] (compact, see anim/anim_net.h)
+    MSG_LOBBY,         // both ways reliable: lobby (src/net/lobby.h LobbyOp + payload)
 } MsgType;
 
 // Per-entity delta field bits.

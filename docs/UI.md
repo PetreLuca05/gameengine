@@ -6,6 +6,9 @@ the developer editors (VFX, hold point, day/night, flesh range) still use Nuklea
 
 ## Screen map
 
+The main menu, the lobby, the loading screen and the in-game chat are in docs/MENU_LOBBY.md (they use
+this document's theme, widgets and layouts; the pause menu gains Lobby and Leave to main menu).
+
 ```
 in game ── Esc / pad Start ──▶ PAUSE
                                  button stack (bottom left)       logo, version, ping (bottom right)
@@ -37,7 +40,7 @@ world: weapon bench   ──▶ BENCH (free attachment changes, stats)
 | `src/ui/gui/gui_layout.c` | Retained layout: a flat node tree (parent before child) solved into rects. Anchors (9-point + offset), row / column stacks (gap, padding, cross alignment incl. stretch, flex shares), fixed / percent / fit sizes, min / max (incl. percent of the parent), aspect ratio, safe area, `avoid`. Pure (tested). |
 | `src/ui/gui/gui_draw.c` | Draw list in three layers (base, overlay for popups, top for tooltips / drag ghost): rects, gradients, SDF rounded rects and circles (9-slice of an SDF circle, crisp at any radius), outlines, soft-shadow 9-slices, rings, images, the blurred backdrop, SDF text. One draw per texture / clip change. |
 | `src/ui/gui/gui.c` | Frame input (mouse, keyboard, gamepad incl. stick auto-repeat), ids, hover resolved topmost-first (1-frame latency, `gui_block_rect` for opaque popups), press / click / double click, spatial keyboard + gamepad focus with scopes, tweens, UI sounds, tooltips, `ui_debug`. |
-| `src/ui/gui/gui_widgets.c` | Menu item (slide + fade in, accent bar), buttons, tabs (animated underline), slider, toggle, dropdown (overlay list; `gw_dropdown_ex`: greyed items + right-aligned notes), key-bind button, text field, scroll region (wheel, draggable bar, keeps the focus visible), settings row, inventory slot. `gw_disabled(true)`: following rows / sliders / toggles / dropdowns faint and without input. Sliders only snap / change on a drag or key press. |
+| `src/ui/gui/gui_widgets.c` | Menu item (slide + fade in, accent bar), buttons, tabs (animated underline), the top tab bar (`gw_tabbar`: key hints, locked tabs with a reason), the power icon, avatars, slider, toggle, dropdown (overlay list; `gw_dropdown_ex`: greyed items + right-aligned notes), key-bind button, text field, scroll region (wheel, draggable bar, keeps the focus visible), settings row, inventory slot. `gw_disabled(true)`: following rows / sliders / toggles / dropdowns faint and without input. Sliders only snap / change on a drag or key press. |
 | `src/ui/gui/gui_theme.c` | `assets/ui/theme.json`. |
 | `src/ui/menus.c` | Screen stack, pause screen (from `assets/ui/screens/pause.json`), confirm dialog, commands. |
 | `src/ui/screens/` | Settings, multiplayer, inventory, bench. |
@@ -96,6 +99,8 @@ small caps at 12 px as well as at 4K.
   * `modal` is where sub-menus open: 60 % of the width, 640–1160 design px, `avoid: stack` so it
     moves beside the stack on 4:3.
   * `dialog` is the confirm box.
+* **`"layout"` tokens** (theme.json): named design-px sizes; a screen JSON size may be `"@name"` (the main menu
+  screens use nothing else, linted by test_lobby), code reads them with `gui_tok`.
 * **Hot reload:** `ui_reload` reloads the theme, fonts, screen layouts and icons.
 * **Item JSON:**
   * `"icon": "path.png"` overrides an item's icon.

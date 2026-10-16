@@ -2,6 +2,7 @@
 // Compiled to stubs when the Steamworks SDK is not configured (LAN-only build).
 #include "net_transport.h"
 #include "net.h"
+#include "lobby_net.h"
 #include "core/engine.h"
 #include "core/cvar.h"
 #include "core/log.h"
@@ -31,9 +32,13 @@ static bool st_listen(NetTransport *t, u16 port, int max_peers) {
     SteamImpl *s = (SteamImpl *)t->impl;
     (void)port;
     if (!dgs_listen()) { log_error("steam: CreateListenSocketP2P failed"); return false; }
-    dgs_create_lobby(max_peers);
+    // The lobby's privacy (lobby_privacy, set by the lobby): public / friends only / invite only.
+    Cvar *pv = cvar_find("lobby_privacy");
+    int privacy = pv ? pv->i : 1;
+    static const int types[3] = { DGS_LOBBY_PUBLIC, DGS_LOBBY_FRIENDS, DGS_LOBBY_PRIVATE };
+    dgs_create_lobby_typed(max_peers, types[DG_CLAMP(privacy, 0, 2)]);
     s->is_server = true;
-    log_info("steam: listening (P2P) as %llu, creating friends-only lobby", (unsigned long long)dgs_my_id());
+    log_info("steam: listening (P2P) as %llu, creating a %s lobby", (unsigned long long)dgs_my_id(), privacy == 0 ? "public" : (privacy == 2 ? "invite-only" : "friends-only"));
     return true;
 }
 
@@ -117,6 +122,15 @@ static bool st_stats(NetTransport *t, PeerId peer, float *rtt, float *loss) {
     return dgs_stats(s->conns[peer], rtt, loss);
 }
 
+static bool st_address(NetTransport *t, PeerId peer, char *out, int size) {
+    SteamImpl *s = (SteamImpl *)t->impl;
+    if (peer < 0 || peer >= STEAM_MAX_PEERS || !s->conns[peer]) return false;
+    u64 id = 0;
+    if (!dgs_conn_steam_id(s->conns[peer], &id)) return false;
+    snprintf(out, (size_t)size, "%llu", (unsigned long long)id);
+    return true;
+}
+
 static void st_destroy(NetTransport *t) {
     SteamImpl *s = (SteamImpl *)t->impl;
     for (int i = 0; i < STEAM_MAX_PEERS; i++) if (s->conns[i]) dgs_close(s->conns[i]);
@@ -137,6 +151,7 @@ NetTransport *transport_steam_create(void) {
     t->disconnect = st_disconnect;
     t->flush = st_flush;
     t->peer_stats = st_stats;
+    t->peer_address = st_address;
     t->destroy = st_destroy;
     return t;
 }
@@ -145,15 +160,17 @@ bool net_steam_available(void) { return dgs_available() || dgs_init(); }
 void net_steam_invite(void) { dgs_invite_overlay(); }
 bool net_steam_in_lobby(void) { return dgs_current_lobby() != 0; }
 
+// Friends list "Join game", an accepted invite and the +connect_lobby launch parameter all land here:
+// through the lobby (version check, lobby screen), not straight into the game.
 static void cmd_connect_lobby(int argc, const char **argv) {
     if (argc < 2) return;
     char addr[64];
     snprintf(addr, sizeof(addr), "lobby:%s", argv[1]);
-    net_connect(TRANSPORT_STEAM, addr);
+    lobby_join(TRANSPORT_STEAM, addr);
 }
 
 static void cmd_connect_steam(int argc, const char **argv) {
-    if (argc > 1) net_connect(TRANSPORT_STEAM, argv[1]);
+    if (argc > 1) lobby_join(TRANSPORT_STEAM, argv[1]);
 }
 
 void net_steam_register_commands(void) {

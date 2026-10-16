@@ -1,6 +1,7 @@
 #include "gameplay/phone/phone.h"
 #include "gameplay/attachments.h"
 #include "game.h"
+#include "ui/mainmenu/mainmenu.h"
 #include "game_internal.h"
 #include "editor/handpose/hp_system.h"
 #include "editor/handpose/hp_editor.h"
@@ -685,8 +686,12 @@ static bool load_map(World *w, const char *map) {
     return ok;
 }
 
-bool game_host(const char *map) {
-    net_stop();
+bool game_host(const char *map) { return game_host_ex(map, 0); }
+
+// flags: GH_KEEP_NET (a lobby session is starting its game: the connected players stay connected and
+// are welcomed after the load), GH_NO_AUTOHOST (main menu background: not reachable on the LAN).
+bool game_host_ex(const char *map, u32 flags) {
+    if (!(flags & GH_KEEP_NET)) net_stop();
     destroy_world();
     G->world = world_create(true, &G->items);
     dg_strcpy(G->map, sizeof(G->map), map);
@@ -711,7 +716,7 @@ bool game_host(const char *map) {
     memset(&G->view, 0, sizeof(G->view));
     game_spawn_player(G->world, 0, G->cl_name->str, true, -1);
     G->view.yaw = G->world->players[0].sim.move.yaw;
-    if (G->net_autohost->i) net_host(TRANSPORT_LAN, (u16)cvar_find("net_port")->i);
+    if (G->net_autohost->i && !(flags & (GH_KEEP_NET | GH_NO_AUTOHOST))) net_host(TRANSPORT_LAN, (u16)cvar_find("net_port")->i);
     log_info("game: hosting '%s'", G->map);
     return true;
 }
@@ -747,6 +752,11 @@ void game_cl_disconnected(const char *reason) {
 
 void game_disconnect_to_local(const char *reason) {
     net_stop();
+    // Main menu builds (not --test): a lost / left session returns to the menu.
+    if (mainmenu_enabled()) {
+        mainmenu_enter(reason);
+        return;
+    }
     char hint[64];
     snprintf(hint, sizeof(hint), "Disconnected: %s", reason ? reason : "");
     game_host(G->g_map->str);
@@ -801,6 +811,7 @@ void game_sv_receive_cmd(int slot, const UserCmd *cmd) {
 static void cmd_map(int argc, const char **argv) {
     if (argc < 2) { log_info("usage: map <devroom|streaming|flat>"); return; }
     cvar_set_cv(G->g_map, argv[1]);
+    if (mainmenu_active()) mainmenu_session_started();   // map from the console: the menu closes
     game_host(argv[1]);
 }
 

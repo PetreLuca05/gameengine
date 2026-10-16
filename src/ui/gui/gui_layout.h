@@ -56,6 +56,12 @@ typedef struct LayoutParams {
     float max_aspect;         // safe area aspect limit (0 = none)
 } LayoutParams;
 
+// Theme tokens (assets/ui/theme.json "layout"): a screen JSON size may be "@name" instead of a number
+// (the main menu screens use only tokens: tests/test_lobby.c lints them). The table is not copied.
+typedef struct LayoutToken { char name[32]; float value; } LayoutToken;
+void gui_layout_set_tokens(const LayoutToken *tokens, int count);
+bool gui_layout_token(const char *name, float *out);   // name without the '@'
+
 float gui_layout_scale(float w, float h, float user_scale);   // user_scale > 0 overrides
 GuiRect gui_layout_safe_rect(const LayoutParams *p);
 void gui_layout_solve(LayoutNode *n, int count, const LayoutParams *p);

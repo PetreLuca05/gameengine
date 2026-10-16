@@ -1,0 +1,91 @@
+// Main menu internals (src/ui/mainmenu): shared state, layouts and drawing helpers of the tabs.
+#ifndef DG_MM_INTERNAL_H
+#define DG_MM_INTERNAL_H
+
+#include "mainmenu.h"
+#include "net/lobby_net.h"
+#include "render/render.h"
+
+#define TH (gui_theme())
+#define TOK(n) gui_s(gui_tok(n))
+
+typedef enum MmTab { MT_PLAY, MT_PLAYER, MT_COSMETICS, MT_MAPS, MT_SETTINGS, MT_CREDITS, MT_COUNT } MmTab;
+typedef enum MmPlayPage { PP_MAIN, PP_BROWSER } MmPlayPage;
+
+// A screen layout (assets/ui/screens/<name>.json) solved into a rect each frame.
+#define MM_LAYOUT_NODES 48
+typedef struct MmLayout {
+    char file[48];
+    LayoutNode nodes[MM_LAYOUT_NODES];
+    int count;
+    bool loaded;
+} MmLayout;
+bool mm_layout_load(MmLayout *l, const char *name);
+// Solves inside r (safe roots: against the window's safe area) and returns the root rect.
+GuiRect mm_layout_solve(MmLayout *l, GuiRect r);
+GuiRect mm_node(const MmLayout *l, const char *id);
+const LayoutNode *mm_node_info(const MmLayout *l, const char *id);
+
+typedef struct MainMenu {
+    bool inited, enabled, active;
+    int tab;
+    int play_page;
+    double open_time, boot_time;
+    bool splash;
+    char notice[192];              // shown once on the Play tab (Disconnected: ..., Kicked ...)
+    double notice_time;
+    // selection
+    char map[32];                  // the map selected in the Maps tab (host: the lobby's map)
+    int season, hour;
+    char weather[24];              // "" = the season's pick
+    bool dynamic_weather;
+    bool show_dev_maps;
+    bool env_dirty;                // the background must take the selection's look
+    // player preview (scene camera)
+    float orbit_yaw, orbit_pitch, orbit_zoom;
+    bool preview_tod;              // Player tab: "Preview in map lighting" (else neutral studio-ish noon)
+    GuiRect preview_rect;          // where the character should be framed this frame (0 = background drift)
+    // cosmetics
+    int cos_slot;
+    int cos_selected;              // item index, -1 none
+    // layouts
+    MmLayout shell, play, browser, player, cosmetics, maps, settings, credits, lobby, loading, chat;
+    // Steam avatar
+    TextureId avatar;
+    u64 avatar_id;
+    double avatar_try;
+} MainMenu;
+
+MainMenu *mm(void);
+
+// tabs (mm_*.c)
+void mm_play_draw(GuiRect content);
+void mm_player_draw(GuiRect content);
+void mm_cosmetics_draw(GuiRect content);
+void mm_maps_draw(GuiRect content);
+void mm_credits_draw(GuiRect content);
+void mm_lobby_draw(GuiRect content);
+void mm_loading_draw(void);
+void mm_play_tick(float dt);           // quick play search
+
+// scene (mm_scene.c)
+void mm_scene_register(void);
+void mm_scene_enter(void);
+void mm_scene_apply_environment(void); // the selection's season / time / weather on the background world
+void mm_select_map(const char *id);    // Maps tab / lobby: selection, defaults from the map, background
+
+// shared drawing
+void mm_panel(GuiRect r);              // the pause menu's panel (blurred, semi-transparent, hairline)
+void mm_title(GuiRect r, const char *text);           // small-caps section title like the pause stack's
+void mm_kv(GuiCursor *c, const char *key, const char *value);   // "Key ........ value" row
+void mm_thumb(GuiRect r, const char *path);           // a map thumbnail (cached texture), letterboxed
+TextureId mm_texture(const char *path);               // cached PNG texture (0 = missing)
+// Chat log + input (lobby screen, pause > Lobby, in-game chat). Returns true when a line was sent.
+bool mm_chat_panel(GuiRect r, bool input, bool keep_editing, float fade_after);
+u32 mm_name_color(int member_id);
+void mm_footer_hint(GuiRect r, const char *text);
+// Season / start time / start weather / dynamic rows on a settings cursor (Maps tab, lobby centre).
+// Returns true when something changed; enabled false: read-only.
+bool mm_environment_rows(GuiCursor *c, LobbySettings *s, bool enabled);
+
+#endif

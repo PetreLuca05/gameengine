@@ -29,6 +29,8 @@
 #include "vfx_editor.h"
 #include "holdpoint_editor.h"
 #include "game/scene.h"
+#include "mainmenu/mainmenu.h"
+#include "net/lobby_net.h"
 #include <SDL3/SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -51,7 +53,7 @@ typedef struct Menus {
 #define M (g_engine.menus)
 #define TH (gui_theme())
 
-static const char *k_names[SCR_COUNT] = { "none", "pause", "settings", "multiplayer", "inventory", "bench", "confirm" };
+static const char *k_names[SCR_COUNT] = { "none", "pause", "settings", "multiplayer", "inventory", "bench", "confirm", "mainmenu", "chat", "lobby" };
 const char *screen_name(int id) { return id >= 0 && id < SCR_COUNT ? k_names[id] : "?"; }
 
 static bool load_layout(void) {
@@ -155,6 +157,9 @@ static bool cond_true(const char *c) {
     if (!strcmp(c, "steam")) v = net_steam_available();
     else if (!strcmp(c, "online")) v = online();
     else if (!strcmp(c, "world")) v = game_world() != NULL;
+    else if (!strcmp(c, "lobby")) v = lobby_active();                       // a lobby session (pause > Lobby)
+    else if (!strcmp(c, "menu")) v = mainmenu_enabled();                    // the main menu flow (Leave to main menu)
+    else if (!strcmp(c, "legacy_online")) v = online() && !mainmenu_enabled();   // console sessions without the menu
     return neg ? !v : v;
 }
 
@@ -217,7 +222,7 @@ static int sub_of(void) {
     // The pause entry highlighted while its sub-menu is open.
     for (int i = M->depth - 1; i >= 1; i--) {
         int s = M->stack[i];
-        if (s == SCR_SETTINGS || s == SCR_MULTIPLAYER || s == SCR_INVENTORY) return s;
+        if (s == SCR_SETTINGS || s == SCR_MULTIPLAYER || s == SCR_INVENTORY || s == SCR_LOBBY) return s;
     }
     return SCR_NONE;
 }
@@ -228,6 +233,11 @@ static void do_action(const char *action) {
     else if (!strcmp(action, "settings")) { while (screens_top() != SCR_PAUSE && M->depth) screens_pop(); settings_open(-1); screens_push(SCR_SETTINGS); }
     else if (!strcmp(action, "multiplayer")) { while (screens_top() != SCR_PAUSE && M->depth) screens_pop(); net_lan_refresh(); screens_push(SCR_MULTIPLAYER); }
     else if (!strcmp(action, "invite")) net_steam_invite();
+    else if (!strcmp(action, "lobby")) { while (screens_top() != SCR_PAUSE && M->depth) screens_pop(); screens_push(SCR_LOBBY); }
+    else if (!strcmp(action, "mainmenu")) {
+        bool host = lobby_is_host() && lobby_count(lobby_get()) > 1;
+        screens_confirm(CONFIRM_MAINMENU, "Leave to main menu?", host ? "You are the host: the game ends for everyone." : "You will leave the game.", 0);
+    }
     else if (!strcmp(action, "leave")) {
         Game *g = game();
         bool client = g && g->mode == GM_CLIENT;
@@ -266,7 +276,7 @@ static void draw_pause(bool top) {
             label = g && g->mode == GM_CLIENT ? "Leave game" : "Stop hosting";
         }
         bool selected = (!strcmp(n->action, "settings") && sub == SCR_SETTINGS) || (!strcmp(n->action, "multiplayer") && sub == SCR_MULTIPLAYER) ||
-                        (!strcmp(n->action, "inventory") && sub == SCR_INVENTORY);
+                        (!strcmp(n->action, "inventory") && sub == SCR_INVENTORY) || (!strcmp(n->action, "lobby") && sub == SCR_LOBBY);
         bool enabled = !(!strcmp(n->action, "inventory") && !game_local_player());
         u32 flags_default = !strcmp(n->action, "resume");
         (void)flags_default;
@@ -306,6 +316,7 @@ static void draw_confirm(bool top) {
     switch (M->confirm_kind) {
     case CONFIRM_QUIT: yes_l = "Quit"; yes_kind = GB_DANGER; break;
     case CONFIRM_LEAVE: yes_l = "Leave"; yes_kind = GB_DANGER; break;
+    case CONFIRM_MAINMENU: yes_l = "Leave"; yes_kind = GB_DANGER; break;
     case CONFIRM_DROP: yes_l = "Drop"; break;
     case CONFIRM_DISPLAY: yes_l = "Keep"; no_l = "Revert"; break;
     case CONFIRM_RESET_BINDS: yes_l = "Reset"; yes_kind = GB_DANGER; break;
@@ -325,7 +336,10 @@ static void draw_confirm(bool top) {
         bool yes_pressed = y;
         screens_pop();
         switch (kind) {
-        case CONFIRM_QUIT: if (yes_pressed) g_engine.quit = true; break;
+        case CONFIRM_QUIT: if (yes_pressed) g_engine.quit = true; break;   // main.c: settings + profile saved, lobby left, Steam shut down
+        case CONFIRM_MAINMENU:
+            if (yes_pressed) { lobby_leave("left to the main menu"); mainmenu_enter(NULL); }
+            break;
         case CONFIRM_LEAVE:
             if (yes_pressed) { menus_close_all(); game_disconnect_to_local("left the session"); }
             break;
@@ -357,6 +371,7 @@ static void draw_modal(int id, bool top) {
     case SCR_SETTINGS: close = settings_draw(r); break;
     case SCR_MULTIPLAYER: close = multiplayer_draw(r); break;
     case SCR_BENCH: close = bench_draw(screens_dialog_rect().w > 0 ? r : r); break;
+    case SCR_LOBBY: close = mainmenu_lobby_page_draw(r) || !lobby_active(); break;
     default: break;
     }
     gui_pop_input();
@@ -396,9 +411,13 @@ void menus_tick(float dt) {
     // Gamepad Start: pause / resume. Tab / I / pad Back (or the inventory binding): inventory.
     if (gui_nav(NAV_MENU)) {
         gui_nav_consume(NAV_MENU);
-        if (!M->depth) screens_push(SCR_PAUSE);
+        if (M->depth && M->stack[0] == SCR_MAINMENU) { /* the main menu stays: Start does nothing there */ }
+        else if (!M->depth) screens_push(SCR_PAUSE);
         else menus_close_all();
     }
+    // Enter: the chat line, in a multiplayer game (the lobby's chat backend).
+    if (!M->depth && !console_is_open() && lobby_active() && game_world() && gui_key_pressed(SDL_SCANCODE_RETURN)) mainmenu_chat_open();
+    mainmenu_tick(dt);
     bool inv_key = gui_nav(NAV_VIEW) || (!M->depth && !console_is_open() && input_consume_press(ACT_INVENTORY));
     if (inv_key && !console_is_open() && (!M->depth || screens_top() == SCR_INVENTORY) && inventory_wants_back()) {
         gui_nav_consume(NAV_VIEW);
@@ -417,7 +436,7 @@ void menus_tick(float dt) {
 }
 
 void menus_draw(void) {
-    if (!M->depth) { vfx_editor_draw(); holdpoint_editor_draw(); return; }
+    if (!M->depth) { mainmenu_chat_feed_draw(); vfx_editor_draw(); holdpoint_editor_draw(); return; }
     solve_layout();
     int top = screens_top();
     for (int i = 0; i < M->depth; i++) {
@@ -435,12 +454,16 @@ void menus_draw(void) {
             break;
         }
         case SCR_CONFIRM: draw_confirm(is_top); break;
+        case SCR_MAINMENU: mainmenu_draw(is_top); break;
+        case SCR_CHAT:
+            if (mainmenu_chat_draw(is_top) && is_top) screens_pop();
+            break;
         default: draw_modal(id, is_top); break;
         }
     }
     gd_set_layer(GL_BASE);
     // Back (Esc / B) not taken by a widget: pop the top screen.
-    if (gui_nav(NAV_BACK) && M->depth && screens_top() == top) {
+    if (gui_nav(NAV_BACK) && M->depth && screens_top() == top && top != SCR_MAINMENU) {
         gui_nav_consume(NAV_BACK);
         if (top != SCR_INVENTORY || inventory_wants_back()) screens_pop();
     }
@@ -521,6 +544,18 @@ static void cmd_ui_nav(int argc, const char **argv) {
     log_warn("ui_nav: unknown '%s'", argv[1]);
 }
 
+// ui_key <SDL key name>: a synthetic key press ("1".."9", "Return", "Q", "E" ...; scripted tests).
+static void cmd_ui_key(int argc, const char **argv) {
+    if (argc < 2) return;
+    SDL_Scancode sc = SDL_GetScancodeFromName(argv[1]);
+    if (sc == SDL_SCANCODE_UNKNOWN) { log_warn("ui_key: unknown key '%s'", argv[1]); return; }
+    SDL_Event ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.type = SDL_EVENT_KEY_DOWN;
+    ev.key.scancode = sc;
+    gui_handle_event(&ev);
+}
+
 // ui_mouse <x> <y> [down|up|click|rclick|dclick|wheel <n>] (fractions 0..1 of the window when <= 1)
 static void cmd_ui_mouse(int argc, const char **argv) {
     if (argc < 3) return;
@@ -571,6 +606,7 @@ static void cmd_ui_reload(int argc, const char **argv) {
     (void)argv;
     gui_reload();
     load_layout();
+    mainmenu_reload_layouts();
     icons_reload();
     log_info("ui: reloaded theme, fonts, screen layouts and icons");
 }
@@ -596,6 +632,7 @@ void menus_init(void) {
     cmd_register("ui_reload", cmd_ui_reload, "reload the UI theme, fonts, screen layouts and icons");
     cmd_register("ui_nav", cmd_ui_nav, "ui_nav <up|down|left|right|accept|back|tab_next|tab_prev|alt|alt2|menu|view> [pad]: synthetic UI navigation");
     cmd_register("ui_mouse", cmd_ui_mouse, "ui_mouse <x> <y> [down|up|click|rclick|dclick|wheel n]: synthetic UI mouse (0..1 = window fraction)");
+    cmd_register("ui_key", cmd_ui_key, "ui_key <key name>: synthetic key press (scripted tests)");
     M->inited = true;
 }
 

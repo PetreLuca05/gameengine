@@ -6,10 +6,14 @@
 #include "ui/gui/gui_widgets.h"
 
 typedef enum ScreenId {
-    SCR_NONE, SCR_PAUSE, SCR_SETTINGS, SCR_MULTIPLAYER, SCR_INVENTORY, SCR_BENCH, SCR_CONFIRM, SCR_COUNT
+    SCR_NONE, SCR_PAUSE, SCR_SETTINGS, SCR_MULTIPLAYER, SCR_INVENTORY, SCR_BENCH, SCR_CONFIRM,
+    SCR_MAINMENU,   // the main menu (src/ui/mainmenu): stack bottom, never popped by Back
+    SCR_CHAT,       // in-game chat line (Enter)
+    SCR_LOBBY,      // pause > Lobby: players, chat, invite, kick
+    SCR_COUNT
 } ScreenId;
 
-typedef enum ConfirmKind { CONFIRM_QUIT, CONFIRM_LEAVE, CONFIRM_DROP, CONFIRM_DISPLAY, CONFIRM_RESET_BINDS, CONFIRM_FIDELITY } ConfirmKind;
+typedef enum ConfirmKind { CONFIRM_QUIT, CONFIRM_LEAVE, CONFIRM_DROP, CONFIRM_DISPLAY, CONFIRM_RESET_BINDS, CONFIRM_FIDELITY, CONFIRM_MAINMENU } ConfirmKind;
 
 // Shared by the screens (menus.c)
 const char *screen_name(int id);

@@ -122,6 +122,12 @@ static bool lan_stats(NetTransport *t, PeerId peer, float *rtt, float *loss) {
     return true;
 }
 
+static bool lan_address(NetTransport *t, PeerId peer, char *out, int size) {
+    LanImpl *l = (LanImpl *)t->impl;
+    if (peer < 0 || peer >= LAN_MAX_PEERS || !l->peers[peer]) return false;
+    return enet_address_get_host_ip(&l->peers[peer]->address, out, (size_t)size) == 0;
+}
+
 static void lan_destroy(NetTransport *t) {
     LanImpl *l = (LanImpl *)t->impl;
     for (int i = 0; i < l->held_count; i++) enet_packet_destroy(l->held[i]);
@@ -146,6 +152,7 @@ NetTransport *transport_lan_create(void) {
     t->disconnect = lan_disconnect;
     t->flush = lan_flush;
     t->peer_stats = lan_stats;
+    t->peer_address = lan_address;
     t->destroy = lan_destroy;
     return t;
 }

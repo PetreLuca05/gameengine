@@ -7,6 +7,8 @@
 #include "protocol.h"
 #include "bitbuf.h"
 #include "replication.h"
+#include "lobby_net.h"
+#include "ui/mainmenu/mainmenu.h"
 #include "gameplay/zombies/horde.h"
 #include "core/engine.h"
 #include "core/cvar.h"
@@ -59,6 +61,7 @@ typedef struct NetSystem {
     // client
     PeerId server_peer;
     bool connected, welcomed;
+    bool lobby_seen;            // the host answered with the lobby (we wait there: no connect timeout)
     double connect_started;
     int local_slot;
     SnapHistory cl_history;
@@ -190,8 +193,32 @@ static void host_handle_hello(PeerId peer, Reader *r) {
             return;
         }
     }
+    // Lobby (docs/MENU_LOBBY.md): build / content identity, kick bans, lobby size; players wait in
+    // the lobby until the host starts (late joiners into a running game are welcomed at once).
+    LobbyHello lh;
+    lobby_read_hello_ext(r, &lh);
+    dg_strcpy(lh.name, sizeof(lh.name), name);
+    char why[160];
+    int join = lobby_on_hello(peer, &lh, why, sizeof(why));
+    if (join == LJ_REJECT) {
+        log_warn("net: rejecting '%s': %s", name, why);
+        Writer w = writer_make(N->buf, NET_BUF);
+        w_u8(&w, MSG_REJECT);
+        w_str(&w, why);
+        send_msg(peer, CH_RELIABLE, &w);
+        N->t->flush(N->t);
+        N->t->disconnect(N->t, peer);
+        return;
+    }
+    if (join == LJ_LOBBY) return;
+    net_host_welcome(peer, name);
+}
+
+// Spawns a connected peer into the running game: WELCOME (map, seed, tick), server cvars, inventory.
+bool net_host_welcome(int peer, const char *name) {
+    if (N->role != NET_HOST || !N->t) return false;
     RemoteClient *c = client_by_peer(peer);
-    if (c && c->welcomed) return;
+    if (c && c->welcomed) return true;
     int slot = game_sv_player_join(peer, name[0] ? name : "Player");
     if (slot < 0) {
         Writer w = writer_make(N->buf, NET_BUF);
@@ -199,7 +226,7 @@ static void host_handle_hello(PeerId peer, Reader *r) {
         w_str(&w, "server full");
         send_msg(peer, CH_RELIABLE, &w);
         N->t->disconnect(N->t, peer);
-        return;
+        return false;
     }
     c = &N->clients[slot];
     memset(c, 0, sizeof(*c));
@@ -222,6 +249,7 @@ static void host_handle_hello(PeerId peer, Reader *r) {
     send_inventory(c);
     c->cvar_revision = server_cvar_revision();
     log_info("net: '%s' joined as slot %d (peer %d)", name, slot, peer);
+    return true;
 }
 
 static void host_handle_cmds(RemoteClient *c, Reader *r) {
@@ -249,7 +277,7 @@ static void host_disconnect_client(PeerId peer) {
 
 static void host_handle(const NetEvent *e) {
     if (e->type == NETEV_CONNECT) { log_info("net: peer %d connected, waiting for hello", e->peer); return; }
-    if (e->type == NETEV_DISCONNECT) { host_disconnect_client(e->peer); return; }
+    if (e->type == NETEV_DISCONNECT) { host_disconnect_client(e->peer); lobby_on_peer_left(e->peer); return; }
     Reader r = reader_make(e->data, e->size);
     u8 type = r_u8(&r);
     RemoteClient *c = client_by_peer(e->peer);
@@ -264,6 +292,7 @@ static void host_handle(const NetEvent *e) {
         break;
     }
     case MSG_BYE: N->t->disconnect(N->t, e->peer); break;
+    case MSG_LOBBY: lobby_on_host_msg(e->peer, &r); break;
     default: break;
     }
 }
@@ -388,9 +417,10 @@ static void client_send_hello(void) {
     Writer w = writer_make(N->buf, NET_BUF);
     w_u8(&w, MSG_HELLO);
     w_u16(&w, DG_PROTOCOL_VERSION);
-    w_str(&w, game()->cl_name->str);
+    w_str(&w, lobby_local_name());
     w_u8(&w, AC_CATEGORY_COUNT);
     for (int k = 0; k < AC_CATEGORY_COUNT; k++) w_u32(&w, g_engine.anim ? g_engine.anim->manifest.hash[k] : 0);
+    lobby_write_hello_ext(&w);
     send_msg(N->server_peer, CH_RELIABLE, &w);
 }
 
@@ -469,8 +499,9 @@ static void client_handle(const NetEvent *e) {
     }
     if (e->type == NETEV_DISCONNECT) {
         bool was = N->welcomed;
+        const char *why = was || N->lobby_seen ? "connection lost" : "could not connect";
         net_stop();
-        game_cl_disconnected(was ? "connection lost" : "could not connect");
+        if (!lobby_on_client_lost(why, false)) game_cl_disconnected(why);
         return;
     }
     N->bytes_in += e->size;
@@ -492,15 +523,20 @@ static void client_handle(const NetEvent *e) {
         for (int i = 0; i < SNAP_HISTORY; i++) N->cl_history.frames[i].tick = 0;
         memset(N->interp, 0, sizeof(InterpBuffer) * MAX_ENTITIES);
         game_cl_welcome(slot, map, seed, tick);
+        lobby_on_welcome();
         break;
     }
     case MSG_REJECT: {
-        char reason[128];
+        char reason[160];
         r_str(&r, reason, sizeof(reason));
         net_stop();
-        game_cl_disconnected(reason);
+        if (!lobby_on_client_lost(reason, true)) game_cl_disconnected(reason);
         break;
     }
+    case MSG_LOBBY:
+        N->lobby_seen = true;
+        lobby_on_client_msg(&r);
+        break;
     case MSG_SNAPSHOT: client_handle_snapshot(&r); break;
     case MSG_EVENT: {
         GameEvent ev;
@@ -619,12 +655,15 @@ static void discovery_host_poll(void) {
         if (n <= 0) break;
         data[n] = 0;
         if (strncmp(data, "DGQ1", 4) != 0) continue;
+        if (lobby_discovery_hidden()) continue;   // invite-only lobby
         World *w = game_world();
-        int players = 0;
-        if (w) for (int s = 0; s < MAX_PLAYERS; s++) if (w->players[s].active) players++;
+        int players = lobby_discovery_players();
+        if (players < 0) { players = 0; if (w) for (int s = 0; s < MAX_PLAYERS; s++) if (w->players[s].active) players++; }
         char reply[256];
-        snprintf(reply, sizeof(reply), "DGA1|%d|%d|%d|%s|%s", N->port->i, players, N->maxplayers->i,
-                 game()->map, game()->sv_hostname->str);
+        // DGA2|port|players|max|map|state (0 lobby, 1 in game)|build hash|name
+        const Lobby *L = lobby_get();
+        snprintf(reply, sizeof(reply), "DGA2|%d|%d|%d|%s|%d|%08x|%s", N->port->i, players, N->maxplayers->i,
+                 lobby_active() ? L->settings.map : game()->map, lobby_discovery_state(), lobby_version_hash_local(), game()->sv_hostname->str);
         ENetBuffer rb = { .data = reply, .dataLength = strlen(reply) };
         enet_socket_send(d->sock, &from, &rb, 1);
     }
@@ -665,8 +704,10 @@ static void discovery_browse_poll(void) {
         int n = enet_socket_receive(d->sock, &from, &b, 1);
         if (n <= 0) break;
         data[n] = 0;
-        if (strncmp(data, "DGA1|", 5) != 0) continue;
-        int port = 0, players = 0, maxp = 0;
+        bool v2 = !strncmp(data, "DGA2|", 5);
+        if (!v2 && strncmp(data, "DGA1|", 5) != 0) continue;
+        int port = 0, players = 0, maxp = 0, state = 1;
+        u32 version = 0;
         char map[32] = { 0 }, name[64] = { 0 };
         char *p = data + 5;
         port = atoi(p); p = strchr(p, '|'); if (!p) continue; p++;
@@ -676,7 +717,12 @@ static void discovery_browse_poll(void) {
         if (!bar) continue;
         *bar = 0;
         dg_strcpy(map, sizeof(map), p);
-        dg_strcpy(name, sizeof(name), bar + 1);
+        p = bar + 1;
+        if (v2) {
+            state = atoi(p); p = strchr(p, '|'); if (!p) continue; p++;
+            version = (u32)strtoul(p, NULL, 16); p = strchr(p, '|'); if (!p) continue; p++;
+        }
+        dg_strcpy(name, sizeof(name), p);
         char ip[64];
         enet_address_get_host_ip(&from, ip, sizeof(ip));
         char addr[64];
@@ -690,6 +736,8 @@ static void discovery_browse_poll(void) {
         dg_strcpy(s->address, sizeof(s->address), addr);
         s->players = players;
         s->max_players = maxp;
+        s->in_game = state != 0;
+        s->version = version;
         s->ping_ms = (float)((platform_time() - d->query_time) * 1000.0);
         s->last_seen = platform_time();
     }
@@ -737,7 +785,7 @@ bool net_connect(TransportKind kind, const char *address) {
     }
     N->role = NET_CLIENT;
     N->kind = kind;
-    N->connected = N->welcomed = false;
+    N->connected = N->welcomed = N->lobby_seen = false;
     N->connect_started = platform_time();
     char hint[96];
     snprintf(hint, sizeof(hint), "Connecting to %s ...", address);
@@ -764,9 +812,42 @@ void net_stop(void) {
     close_transport();
     discovery_close(&N->disc);
     N->role = NET_OFF;
-    N->connected = N->welcomed = false;
+    N->connected = N->welcomed = N->lobby_seen = false;
     N->time_init = false;
 }
+
+// ------------------------------------------------------------------ lobby helpers (lobby_net.c)
+
+bool net_send_reliable(int peer, const void *data, u32 size) {
+    if (!N || !N->t || N->role == NET_OFF) return false;
+    if (N->role == NET_CLIENT) peer = N->server_peer;
+    N->bytes_out += size;
+    N->win_out += size;
+    return N->t->send(N->t, peer, CH_RELIABLE, data, size);
+}
+
+void net_flush(void) { if (N && N->t) N->t->flush(N->t); }
+
+void net_drop_peer(int peer) {
+    if (!N || !N->t || N->role != NET_HOST) return;
+    N->t->flush(N->t);
+    N->t->disconnect(N->t, peer);
+}
+
+bool net_peer_address(int peer, char *out, int size) {
+    if (!N || !N->t || !N->t->peer_address) return false;
+    return N->t->peer_address(N->t, N->role == NET_CLIENT ? N->server_peer : peer, out, size);
+}
+
+float net_peer_ping(int peer) {
+    float rtt = 0, loss = 0;
+    if (!N || !N->t || !N->t->peer_stats(N->t, N->role == NET_CLIENT ? N->server_peer : peer, &rtt, &loss)) return -1.0f;
+    return rtt;
+}
+
+TransportKind net_kind(void) { return N ? N->kind : TRANSPORT_LAN; }
+bool net_client_welcomed(void) { return N && N->role == NET_CLIENT && N->welcomed; }
+int net_listen_port(void) { return N ? N->port->i : DG_DEFAULT_PORT; }
 
 NetRole net_role(void) { return N ? N->role : NET_OFF; }
 
@@ -788,9 +869,9 @@ void net_update(float dt) {
             client_handle(&events[i]);
         }
     }
-    if (N->role == NET_CLIENT && !N->welcomed && platform_time() - N->connect_started > 10.0) {
+    if (N->role == NET_CLIENT && !N->welcomed && !N->lobby_seen && platform_time() - N->connect_started > 10.0) {
         net_stop();
-        game_cl_disconnected("connection timed out");
+        if (!lobby_on_client_lost("connection timed out", false)) game_cl_disconnected("connection timed out");
     }
     double now = platform_time();
     if (now - N->stats_time >= 1.0) {
@@ -841,6 +922,8 @@ NetStats net_stats(void) {
 
 static void cmd_connect(int argc, const char **argv) {
     if (argc < 2) { log_info("usage: connect <ip[:port]>"); return; }
+    // With the main menu: through the lobby (version check, lobby screen, loading screen).
+    if (mainmenu_enabled()) { lobby_join(TRANSPORT_LAN, argv[1]); return; }
     net_connect(TRANSPORT_LAN, argv[1]);
 }
 

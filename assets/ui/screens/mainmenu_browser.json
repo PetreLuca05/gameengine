@@ -1,0 +1,20 @@
+{
+  "_doc": "Server browser (Play > Join): sources (Steam lobbies, friends, LAN, direct IP), filters, the list, the selected entry.",
+  "nodes": [
+    { "id": "root", "dir": "row", "align": "stretch", "gap": "@mm_gap_lg" },
+    { "id": "main", "parent": "root", "flex": 1, "dir": "column", "align": "stretch", "gap": "@mm_gap" },
+    { "id": "sources", "parent": "main", "h": "@mm_source_h" },
+    { "id": "filters", "parent": "main", "h": "@mm_filter_h", "dir": "row", "align": "stretch", "gap": "@mm_gap" },
+    { "id": "f_map", "parent": "filters", "w": "@mm_filter_w" },
+    { "id": "f_players", "parent": "filters", "w": "@mm_filter_w" },
+    { "id": "f_region", "parent": "filters", "w": "@mm_filter_w" },
+    { "id": "f_friends", "parent": "filters", "flex": 1 },
+    { "id": "f_refresh", "parent": "filters", "w": "@mm_button_w" },
+    { "id": "list", "parent": "main", "flex": 1 },
+    { "id": "detail", "parent": "root", "w": "@mm_detail_w", "dir": "column", "align": "stretch", "gap": "@mm_gap" },
+    { "id": "d_thumb", "parent": "detail", "aspect": 1.7778 },
+    { "id": "d_info", "parent": "detail", "flex": 1 },
+    { "id": "d_join", "parent": "detail", "h": "@mm_button_h" },
+    { "id": "d_back", "parent": "detail", "h": "@mm_button_h" }
+  ]
+}

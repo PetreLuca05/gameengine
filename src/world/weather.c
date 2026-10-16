@@ -230,7 +230,7 @@ WeatherWind weather_wind(const WeatherParams *c, double time_s) {
 // ------------------------------------------------------------------ scheduler
 
 // Markov-style table: from each preset, weights for the next one (clearing / worsening cycles).
-static int pick_next(const WeatherLib *l, int cur, u32 r) {
+static int pick_markov(const WeatherLib *l, int cur, u32 r) {
     static const struct { const char *from; const char *to[4]; float w[4]; } k[] = {
         { "clear", { "little_cloudy", "fog", "clear", NULL }, { 0.6f, 0.15f, 0.25f, 0 } },
         { "little_cloudy", { "cloudy", "clear", "little_cloudy", NULL }, { 0.5f, 0.3f, 0.2f, 0 } },
@@ -259,17 +259,60 @@ static int pick_next(const WeatherLib *l, int cur, u32 r) {
     return weather_find_preset(l, "cloudy");
 }
 
+// The season's own distribution (bias weights over every preset).
+static int pick_bias(const WeatherLib *l, u32 r) {
+    float sum = 0;
+    for (int i = 0; i < l->count; i++) sum += fmaxf(l->bias[i], 0.0f);
+    if (sum <= 0) return -1;
+    float x = (float)(r & 0xFFFF) / 65536.0f * sum;
+    for (int i = 0; i < l->count; i++) {
+        if (l->bias[i] <= 0) continue;
+        if (x < l->bias[i]) return i;
+        x -= l->bias[i];
+    }
+    for (int i = l->count - 1; i >= 0; i--) if (l->bias[i] > 0) return i;
+    return -1;
+}
+
+void weather_lib_set_bias(WeatherLib *l, const float *bias, float temp_offset) {
+    l->bias_on = bias != NULL;
+    for (int i = 0; i < WEATHER_MAX_PRESETS; i++) l->bias[i] = bias ? bias[i] : 0.0f;
+    l->temp_offset = bias ? temp_offset : 0.0f;
+}
+
+void weather_seasonal_params(const WeatherLib *l, WeatherParams *p) {
+    if (!l->bias_on) return;
+    p->v[WP_TEMPERATURE] = fminf(fmaxf(p->v[WP_TEMPERATURE] + l->temp_offset, -30.0f), 45.0f);
+}
+
+// With a season: half the changes follow the Markov table re-weighted by the season (natural
+// clearing / worsening steps), half jump straight to the season's distribution, so over a session
+// the weather looks like the season (autumn: rain, winter: snow). Presets weighted 0 never come.
+int weather_pick_next(const WeatherLib *l, int cur, u32 r) {
+    if (!l->bias_on) return pick_markov(l, cur, r);
+    if ((hash32(r ^ 0x51ED27u) & 1u) == 0) {
+        // Markov step re-weighted: try a few draws, keep the first the season allows.
+        for (int k = 0; k < 6; k++) {
+            int n = pick_markov(l, cur, hash32(r + (u32)k * 0x9E3779B9u));
+            if (n >= 0 && n < l->count && l->bias[n] > 0 && hash32(r ^ (u32)k) % 1000u < (u32)(fminf(l->bias[n], 3.0f) / 3.0f * 1000.0f) + 1u) return n;
+        }
+    }
+    int b = pick_bias(l, hash32(r * 31u + 7u));
+    return b >= 0 ? b : pick_markov(l, cur, r);
+}
+
 bool weather_schedule(WeatherState *s, const WeatherLib *l, u32 tick, float tick_dt) {
     if (!s->random || s->locked) return false;
     if (s->next_change_tick && tick < s->next_change_tick) return false;
     u32 r = hash32(tick ^ s->seed ^ 0xA341316Cu);
-    int next = s->next_change_tick ? pick_next(l, s->preset == 255 ? -1 : s->preset, r) : (s->preset == 255 ? weather_find_preset(l, "clear") : s->preset);
+    int next = s->next_change_tick ? weather_pick_next(l, s->preset == 255 ? -1 : s->preset, r) : (s->preset == 255 ? weather_find_preset(l, "clear") : s->preset);
     if (next < 0) next = 0;
     const WeatherPreset *p = &l->presets[next];
     WeatherParams cur, tgt;
     weather_eval(s, tick, tick_dt, &cur);
     tgt = cur;
     for (int k = 0; k < WP_COUNT; k++) if (p->set_mask & (1u << k)) tgt.v[k] = p->p.v[k];
+    if (p->set_mask & (1u << WP_TEMPERATURE)) weather_seasonal_params(l, &tgt);
     // The wind veers a little with every change.
     tgt.v[WP_WIND_DIR] = fmodf(cur.v[WP_WIND_DIR] + (float)((int)(hash32(r) % 61u) - 30) + 360.0f, 360.0f);
     weather_set_target(s, &tgt, tick, p->transition);

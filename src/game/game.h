@@ -111,6 +111,8 @@ void game_config_loaded(void);   // after the config file: one-time settings mig
 void game_fidelity_settings_loaded(bool first_run);   // Engine Fidelity: after the config, before scripts
 void game_shutdown(void);
 bool game_host(const char *map);
+enum { GH_KEEP_NET = 1u << 0, GH_NO_AUTOHOST = 1u << 1 };
+bool game_host_ex(const char *map, u32 flags);
 void game_frame(float dt);
 void game_render(void);
 const char *game_cam_debug_text(void);   // cam_debug stats line (HUD)
