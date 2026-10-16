@@ -1,6 +1,6 @@
 {
   "name": "Vegetation",
-  "comment": "Vegetation showcase (map vegetation): every foliage kind of the open-world generator in one 500 m valley. Pine forest NW, broadleaf NE, dead forest W, mixed E, a bush + grass meadow in the middle, a wheat field south, a pond north. Engine coordinates: X east, Z south (north = -Z). Format: docs/ZOMBIE_MAP.md.",
+  "comment": "Vegetation showcase (map vegetation): every foliage kind of the open-world generator in one 500 m valley. Tree It conifers NW and broadleaves NE (forest species lists, data/foliage/species.json), procedural dead forest W and mixed forest E, a bush + grass meadow in the middle, a wheat field south, a pond north. Engine coordinates: X east, Z south (north = -Z). Format: docs/ZOMBIE_MAP.md.",
   "env": {"sun_dir": [0.45, 0.8, 0.35], "sun_color": [1.0, 0.95, 0.86], "sun_intensity": 3.0, "sky": [0.45, 0.55, 0.72], "ground": [0.28, 0.27, 0.22], "fog": [0.62, 0.68, 0.75], "fog_density": 0.0012, "sky_zenith": [0.24, 0.42, 0.72], "sky_horizon": [0.7, 0.76, 0.84], "clouds": 0.35},
   "weather": "clear",
   "world": {
@@ -16,8 +16,8 @@
       {"type": "paint", "pos": [0, 10], "size": [190, 120], "material": "meadow"},
       {"type": "paint", "pos": [0, 140], "size": [150, 70], "material": "field"},
       {"type": "pad", "pos": [0, 60], "size": [10, 10], "level": 14.4, "blend": 12, "material": "meadow"},
-      {"type": "forest", "pos": [-135, -125], "radius": [85, 70], "density": 3.6, "pine": 1.0, "dead": 0.02},
-      {"type": "forest", "pos": [135, -125], "radius": [85, 70], "density": 3.0, "pine": 0.0, "dead": 0.02},
+      {"type": "forest", "pos": [-135, -125], "radius": [85, 70], "density": 3.6, "pine": 1.0, "dead": 0.02, "species": ["treeit_pine", "treeit_spruce", "treeit_fir", "treeit_juniper"]},
+      {"type": "forest", "pos": [135, -125], "radius": [85, 70], "density": 3.0, "pine": 0.0, "dead": 0.02, "species": ["treeit_beech", "treeit_maple", "treeit_oak", "treeit_elm", "treeit_birch"]},
       {"type": "forest", "pos": [-160, 95], "radius": [65, 75], "density": 2.2, "pine": 0.3, "dead": 0.85},
       {"type": "forest", "pos": [160, 120], "radius": [65, 70], "density": 2.8, "pine": 0.5, "dead": 0.12}
     ],

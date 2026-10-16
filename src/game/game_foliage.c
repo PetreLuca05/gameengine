@@ -74,6 +74,68 @@ static void cmd_foliage_test_scatter(int argc, const char **argv) {
              (double)density, FG.count, (double)total / (1024.0 * 1024.0), FG.ncapsules, FG.nbodies);
 }
 
+// foliage_grove [spacing=16]: every imported species (data/foliage/species.json: the Tree It trees)
+// in rows across the foliage yard (x 80..360, z 130..230, facing the foliage_check camera at z 120),
+// 3 instances each with scale jitter, daisies scattered between them; placement chunks + trunk capsules.
+static void cmd_foliage_grove(int argc, const char **argv) {
+    World *w = game_world();
+    if (!w || !w->phys) { log_warn("foliage_grove: no world"); return; }
+    float spacing = argc > 1 ? (float)atof(argv[1]) : 16.0f;
+    int ns = render_foliage_species_types();
+    if (!ns) { log_warn("foliage_grove: no species (vgeo unavailable or data/foliage/species.json missing)"); return; }
+    if (!FG.bodies) FG.bodies = (BodyId *)malloc(sizeof(BodyId) * FOL_MAX_BODIES);
+    FG.world = w;
+    static char names[32][48];
+    int trees = 0, daisy = -1;
+    for (int i = 0; i < ns && i < 32; i++) {
+        dg_strcpy(names[i], 48, render_foliage_species_name(i));
+        if (strstr(names[i], "daisy")) daisy = i;
+        else trees++;
+    }
+    static RenderFoliageInst inst[4096];
+    int n = 0, row = 0, col = 0, per_row = (int)(280.0f / spacing);
+    u32 h = 0x9E3779B9u;
+    for (int i = 0; i < ns && i < 32; i++) {
+        if (i == daisy) continue;
+        for (int k = 0; k < 3 && n < 4096; k++) {
+            h = h * 1664525u + 1013904223u;
+            RenderFoliageInst *t = &inst[n++];
+            t->pos = v3(80.0f + ((float)col + 0.5f) * spacing + (float)((h >> 8) & 255) / 255.0f * 3.0f - 1.5f, 0.0f, 130.0f + ((float)row + 0.5f) * spacing);
+            t->yaw = (float)((h >> 16) & 1023) / 1023.0f * 6.2831853f;
+            t->scale = 0.85f + 0.3f * (float)((h >> 4) & 255) / 255.0f;
+            t->kind = (u16)i;
+            if (++col >= per_row) { col = 0; row++; }
+        }
+    }
+    float z1 = 130.0f + (float)(row + 1) * spacing;
+    for (int k = 0; daisy >= 0 && k < 600 && n < 4096; k++) {
+        h = h * 1664525u + 1013904223u;
+        RenderFoliageInst *t = &inst[n++];
+        t->pos = v3(80.0f + (float)(h >> 8) / 16777216.0f * 280.0f, 0.0f, 125.0f + (float)((h * 2654435761u) >> 8) / 16777216.0f * (z1 - 125.0f));
+        t->yaw = (float)(h & 1023) / 1023.0f * 6.2831853f;
+        t->scale = 0.7f + 0.5f * (float)((h >> 3) & 255) / 255.0f;
+        t->kind = (u16)daisy;
+    }
+    int chunks = 0, nc_total = 0;
+    for (int cz = (int)floorf(120.0f / 32.0f); cz <= (int)floorf(z1 / 32.0f); cz++)
+        for (int cx = (int)floorf(80.0f / 32.0f); cx <= (int)floorf(360.0f / 32.0f); cx++) {
+            size_t size = 0;
+            void *blob = render_foliage_make_chunk(cx, cz, (const char (*)[48])names, DG_MIN(ns, 32), inst, n, &size);
+            if (!blob) continue;
+            int hd = render_foliage_chunk_load(blob, size);
+            free(blob);
+            if (hd < 0 || FG.count >= FOL_MAX_CHUNKS) continue;
+            FG.handles[FG.count++] = hd;
+            chunks++;
+            int nc = foliage_add_capsules(w, hd, FG.bodies + FG.nbodies, FOL_MAX_BODIES - FG.nbodies);
+            if (nc) FG.nbodies++;
+            FG.ncapsules += nc;
+            nc_total += nc;
+        }
+    phys_optimize(w->phys);
+    log_info("foliage_grove: %d species (%d trees x 3, daisies), %d instances in %d placement chunks, %d trunk capsules", ns, trees, n, chunks, nc_total);
+}
+
 void foliage_level_reset(void) {
     for (int i = 0; i < FG.count; i++) render_foliage_chunk_unload(FG.handles[i]);
     FG.count = 0;
@@ -92,6 +154,7 @@ void foliage_register(void) {
     chunks_register_cvars();   // world_foliage_test must exist before a streamed map loads
     cmd_register("foliage_test_scatter", cmd_foliage_test_scatter, "foliage_test_scatter [count=300000]: procedural grass + bushes over the devroom foliage yard (placement chunks)");
     cmd_register("foliage_test_clear", cmd_foliage_test_clear, "remove the foliage_test_scatter placements");
+    cmd_register("foliage_grove", cmd_foliage_grove, "foliage_grove [spacing=16]: every imported species (Tree It trees, data/foliage/species.json) in the devroom foliage yard");
 }
 
 // Per frame: every player on the ground flattens the grass around its feet (moving harder).

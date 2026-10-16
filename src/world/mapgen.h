@@ -13,6 +13,7 @@
 #include "FastNoiseLite.h"
 
 #define MG_MAX_FEATURES 2048
+#define MG_MAX_SPECIES 24
 #define MG_MAX_ROADS 256
 #define MG_MAX_POLY 64           // points per polygon / control polyline
 #define MG_MAX_RIVERS 4
@@ -45,6 +46,7 @@ typedef struct MgFeature {
     vec2 range;                  // rim: [min, max] along the edge
     int material, terraces, edge, variant;
     bool auto_level;             // pad: level from the terrain under it (mean)
+    int species_first, species_count;   // forest: imported species (MapGen.species) its living trees are drawn from (0: procedural)
 } MgFeature;
 
 typedef enum MgRoadClass { MGR_MAIN, MGR_SECONDARY, MGR_STREET, MGR_DIRT, MGR_TRAIL, MGR_RUNWAY, MGR_CLASS_COUNT } MgRoadClass;
@@ -103,6 +105,8 @@ typedef struct MapGen {
     int sea_count;
     MgFeature features[MG_MAX_FEATURES];
     int feature_count;
+    char species[MG_MAX_SPECIES][48];   // forest "species": foliage type names (data/foliage/species.json)
+    int species_count;
     MgRiver rivers[MG_MAX_RIVERS];
     int river_count;
     MgRoad roads[MG_MAX_ROADS];
@@ -161,6 +165,8 @@ bool mapgen_in_keepout(const MapGen *g, float x, float z, float margin);
 // Tree density (trees per m2) at (x, z) from the forest features and the terrain (0 on roads, water,
 // pads, steep rock and keep-outs; needs the raster for the slope).
 float mapgen_tree_density(const MapGen *g, const MgRaster *r, float x, float z, float *pine_fraction, float *dead_fraction);
+// The same, and the forest feature that sets the density there (-1: none / scattered trees).
+float mapgen_tree_density_ex(const MapGen *g, const MgRaster *r, float x, float z, float *pine_fraction, float *dead_fraction, int *forest);
 // Signed distance to the sea polygon's boundary (> 0 inside the sea), shoreline noise included.
 float mapgen_sea_distance(const MapGen *g, float x, float z);
 

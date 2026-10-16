@@ -16,7 +16,7 @@
 #include <string.h>
 
 static const char k_tree_names[4][48] = { "tree_pine", "tree_broadleaf", "tree_dead", "test_bush" };
-enum { T_PINE, T_BROAD, T_DEAD, T_BUSH };
+enum { T_PINE, T_BROAD, T_DEAD, T_BUSH, T_SPECIES };   // T_SPECIES + i: MapGen.species[i] (a forest's "species")
 static const char k_cover_names[3][48] = { "test_tuft", "crop_wheat", "test_bush" };
 enum { C_TUFT, C_CROP, C_BUSH };
 
@@ -36,6 +36,8 @@ typedef struct TreeJob {
     void **blob;
     size_t *size;
     int *count;
+    char (*names)[48];           // k_tree_names, then the map's species
+    int name_count;
 } TreeJob;
 
 // Candidates on a jittered 3 m grid, kept with probability density x cell area.
@@ -51,7 +53,8 @@ static int tree_chunk(const OpenWorld *o, int cx, int cz, RenderFoliageInst *out
             float x = x0 + ((float)gx + h01(h)) * cell, z = z0 + ((float)gz + h01(h >> 7 ^ 0x9e37u)) * cell;
             if (fabsf(x) > o->gen.half_size + 60.0f || fabsf(z) > o->gen.half_size + 60.0f) continue;
             float pine, dead;
-            float d = mapgen_tree_density(&o->gen, &o->raster, x, z, &pine, &dead);
+            int forest = -1;
+            float d = mapgen_tree_density_ex(&o->gen, &o->raster, x, z, &pine, &dead, &forest);
             if (d <= 0) continue;
             u32 h2 = hash3(ix, iz, o->gen.seed + 17u);
             float pick = h01(h2);
@@ -61,6 +64,9 @@ static int tree_chunk(const OpenWorld *o, int cx, int cz, RenderFoliageInst *out
             if (pick < d * cell * cell) {
                 float k = h01(h2 >> 11);
                 t->kind = k < dead ? T_DEAD : (k < dead + pine * (1.0f - dead) ? T_PINE : T_BROAD);   // dead first, the rest split by the pine fraction
+                const MgFeature *f = forest >= 0 ? &o->gen.features[forest] : NULL;
+                if (f && f->species_count && t->kind != T_DEAD)   // a forest of imported species: one by hash
+                    t->kind = (u16)(T_SPECIES + f->species_first + (int)((h2 >> 17) % (u32)f->species_count));
                 t->scale = 0.72f + 0.55f * h01(h2 >> 5);
                 n++;
             } else if (d > 0.006f && pick < d * cell * cell * 1.6f) {   // forest underbrush
@@ -79,7 +85,7 @@ static void tree_range(void *ctx, int begin, int end) {
         int cx = j->origin + i % j->n, cz = j->origin + i / j->n;
         int n = tree_chunk(j->o, cx, cz, tmp, 256);
         j->count[i] = n;
-        j->blob[i] = n ? render_foliage_make_chunk(cx, cz, k_tree_names, 4, tmp, n, &j->size[i]) : NULL;
+        j->blob[i] = n ? render_foliage_make_chunk(cx, cz, (const char (*)[48])j->names, j->name_count, tmp, n, &j->size[i]) : NULL;
     }
     free(tmp);
 }
@@ -89,6 +95,12 @@ void ow_foliage_load(World *w, OpenWorld *o) {
     u64 t0 = SDL_GetTicksNS();
     TreeJob j;
     j.o = o;
+    static char names[T_SPECIES + MG_MAX_SPECIES][48];
+    memcpy(names, k_tree_names, sizeof(k_tree_names));
+    for (int i = 0; i < o->gen.species_count; i++) dg_strcpy(names[T_SPECIES + i], 48, o->gen.species[i]);
+    j.names = names;
+    j.name_count = T_SPECIES + o->gen.species_count;
+    if (o->gen.species_count && !render_foliage_species_types()) log_warn("openworld: imported tree species unavailable (their forests lose those trees)");
     j.n = (int)ceilf(2.0f * o->gen.raster_half / CHUNK_SIZE);
     j.origin = (int)floorf(-o->gen.raster_half / CHUNK_SIZE);
     int total = j.n * j.n;

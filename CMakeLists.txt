@@ -281,7 +281,7 @@ target_link_libraries(fbx_textures PRIVATE dg_animcore)
 
 # Virtualized geometry builder (pure C): the game compiles the same sources through the src glob.
 add_library(dg_vgeo STATIC src/render/vgeo/vgeo_build.c src/render/vgeo/vgeo_procgen.c src/render/vgeo/vgeo_procgen_building.c src/render/vgeo/vgeo_procgen_skinned.c src/render/vgeo/vgeo_import.c src/render/vgeo/vgeo_impostor.c src/render/vgeo/vgeo_procgen_foliage.c
-  src/render/vgeo/foliage_wind.c src/render/vgeo/foliage_import.c)
+  src/render/vgeo/foliage_wind.c src/render/vgeo/foliage_import.c src/render/vgeo/foliage_species.c)
 set_target_properties(dg_vgeo PROPERTIES C_STANDARD 11)
 target_link_libraries(dg_vgeo PUBLIC dg_animcore meshopt)
 if(MSVC)

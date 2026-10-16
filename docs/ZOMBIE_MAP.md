@@ -21,8 +21,10 @@ the first map load of a session.
 ## Vegetation showcase
 
 `map vegetation` (`data/levels/vegetation.json`) is a 500 m valley that uses the same generator to show
-every foliage kind: a pine forest (NW), a broadleaf forest (NE), a dead forest (W), a mixed forest (E),
-a meadow of grass tufts and bushes in the middle, a wheat field (south) and a pond. No zombies, no POIs.
+every foliage kind: Tree It conifers (NW: pine, spruce, fir, juniper) and broadleaves (NE: beech, maple,
+oak, elm, birch) through the forests' `species` lists, a procedural dead forest (W), a procedural mixed
+forest (E), a meadow of grass tufts and bushes in the middle, a wheat field (south) and a pond. No
+zombies, no POIs.
 
 ## Coordinates
 
@@ -101,7 +103,7 @@ handles it, and `env`, `weather` and `name` work as in other levels.
 | `pit` | `pos`, `radius`, `yaw`, `depth`, `terraces` | stepped excavation (rock risers, gravel benches) |
 | `pad` | `pos`, `size` [w, d], `yaw`, `level` (number or omitted = mean of the terrain), `blend`, `material` | flat building ground |
 | `paint` | `pos`, `size`, `yaw`, `material` | surface material only |
-| `forest` | `pos`, `radius`, `density` (trees / 100 m²), `pine` (fraction of the living trees), `dead` (fraction, default 0.035) | tree scatter + forest floor |
+| `forest` | `pos`, `radius`, `density` (trees / 100 m²), `pine` (fraction of the living trees), `dead` (fraction, default 0.035), `species` (optional: imported foliage types, `data/foliage/species.json`, that replace the procedural living trees, picked by hash; docs/FOLIAGE_WIND.md) | tree scatter + forest floor |
 
 **Materials:** `grass`, `meadow`, `forest`, `dirt`, `rock`, `sand`, `gravel`, `asphalt`, `dirt_road`,
 `concrete`, `field`, `crop`, `plowed`, `mud`. Slopes over 0.85 become rock and slopes over 0.55 become

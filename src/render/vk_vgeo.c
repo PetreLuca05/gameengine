@@ -20,6 +20,8 @@
 #include "vgeo/foliage_support.h"
 #include "vgeo/vgeo_procgen_foliage.h"
 #include "vgeo/vgeo_impostor.h"
+#include "vgeo/foliage_species.h"
+#include "stb_image.h"
 #include "fidelity/fidelity.h"
 #include "assets/assets.h"
 #include "core/platform.h"
@@ -1798,6 +1800,241 @@ int render_foliage_test_types(void) {
     log_info("vgeo: foliage test types ready in %.0f ms", (double)(SDL_GetTicksNS() - t0) / 1e6);
     return VG_FOLIAGE_KINDS;
 }
+
+// ------------------------------------------------------------------ imported species (docs/FOLIAGE_WIND.md)
+//
+// data/foliage/species.json: each entry's source (Tree It FBX / OBJ) is imported with its wind channels
+// remapped to the canonical layout (foliage_import.h), built to vgeo, its impostor baked from the
+// textures; the build is cached as assets/cache/<name>.species.<key>.dgc (+ .mat: material kinds,
+// texture files, height) so later runs only load it. Key: the source file, the entry's JSON, the
+// builder and import versions.
+#define SPECIES_IMPORT_VERSION 1
+typedef struct SpeciesBuild {
+    const VgSpecies *sp;
+    VgBuilt b;
+    bool ok, cached;
+    char err[256];
+    char path[600], cache[700];
+    u32 key;
+    u32 nmat;
+    u8 kind[16];
+    char tex[16][64];
+    float height;
+    u8 *px[16];                  // impostor bake: the material textures (RGBA8, <= 256 px)
+    u32 pw[16], ph[16];
+    VgImpostorMaterial im[16];
+} SpeciesBuild;
+
+static VgSpeciesLib g_species;
+static int g_species_n;
+static char g_species_names[VG_SPECIES_MAX][48];
+
+static bool species_cache_load(SpeciesBuild *q) {
+    size_t cs = 0, ms = 0;
+    u8 *cd = (u8 *)platform_read_file(q->cache, &cs);
+    char mpath[720];
+    snprintf(mpath, sizeof(mpath), "%s.mat", q->cache);
+    u8 *md = (u8 *)platform_read_file(mpath, &ms);
+    bool ok = cd && md && ms >= 8 && vgeo_deserialize(cd, cs, &q->b) && q->b.hdr.key == q->key;
+    if (ok) {
+        memcpy(&q->nmat, md, 4);
+        memcpy(&q->height, md + 4, 4);
+        ok = q->nmat <= 16 && ms >= 8 + (size_t)q->nmat * 65;
+        for (u32 m = 0; ok && m < q->nmat; m++) {
+            q->kind[m] = md[8 + m * 65];
+            memcpy(q->tex[m], md + 8 + m * 65 + 1, 64);
+            q->tex[m][63] = 0;
+        }
+        if (!ok) vgeo_free(&q->b);
+    }
+    free(cd);
+    free(md);
+    return ok;
+}
+
+static void species_cache_save(const SpeciesBuild *q) {
+    u8 *data = NULL;
+    size_t size = 0;
+    if (!vgeo_serialize(&q->b, q->key, &data, &size)) return;
+    platform_write_file(q->cache, data, size);
+    free(data);
+    u8 md[8 + 16 * 65];
+    memset(md, 0, sizeof(md));
+    memcpy(md, &q->nmat, 4);
+    memcpy(md + 4, &q->height, 4);
+    for (u32 m = 0; m < q->nmat; m++) {
+        md[8 + m * 65] = q->kind[m];
+        memcpy(md + 8 + m * 65 + 1, q->tex[m], 64);
+    }
+    char mpath[720];
+    snprintf(mpath, sizeof(mpath), "%s.mat", q->cache);
+    platform_write_file(mpath, md, 8 + (size_t)q->nmat * 65);
+}
+
+// A material texture for the impostor bake: the albedo, box-downscaled to <= 256 px.
+static u8 *species_tex_cpu(const char *path, u32 *w, u32 *h) {
+    int iw, ih, ic;
+    stbi_uc *px = stbi_load(path, &iw, &ih, &ic, 4);
+    if (!px) return NULL;
+    int f = 1;
+    while (iw / f > 256 || ih / f > 256) f *= 2;
+    u32 ow = (u32)(iw / f), oh = (u32)(ih / f);
+    u8 *o = (u8 *)malloc((size_t)ow * oh * 4);
+    for (u32 y = 0; y < oh; y++)
+        for (u32 x = 0; x < ow; x++) {
+            u32 acc[4] = { 0 };
+            for (int j = 0; j < f; j++)
+                for (int i = 0; i < f; i++)
+                    for (int c = 0; c < 4; c++) acc[c] += px[((y * f + (u32)j) * (u32)iw + x * f + (u32)i) * 4 + (u32)c];
+            for (int c = 0; c < 4; c++) o[(y * ow + x) * 4 + (u32)c] = (u8)(acc[c] / (u32)(f * f));
+        }
+    stbi_image_free(px);
+    *w = ow, *h = oh;
+    return o;
+}
+
+static void species_job(void *ctx, int begin, int end) {
+    SpeciesBuild *kb = (SpeciesBuild *)ctx;
+    for (int i = begin; i < end; i++) {
+        SpeciesBuild *q = &kb[i];
+        if (species_cache_load(q)) { q->ok = q->cached = true; continue; }
+        VgFoliageAsset a;
+        if (!vgeo_foliage_import(q->path, &q->sp->import, &a, q->err, sizeof(q->err))) continue;
+        q->nmat = DG_MIN(a.im.material_count, 16u);
+        q->height = a.height;
+        char dir[600];
+        dg_strcpy(dir, sizeof(dir), q->path);
+        char *sl = strrchr(dir, '/');
+        if (sl) sl[1] = 0;
+        for (u32 m = 0; m < q->nmat; m++) {
+            q->kind[m] = a.material_kind[m];
+            dg_strcpy(q->tex[m], 64, a.textures[m]);
+            q->im[m].color[0] = q->im[m].color[1] = q->im[m].color[2] = q->im[m].color[3] = 1.0f;
+            q->im[m].masked = a.material_kind[m] == VGFM_LEAF;
+            q->im[m].cutoff = q->sp->alpha_cutoff;
+            if (q->tex[m][0]) {
+                char tp[700];
+                snprintf(tp, sizeof(tp), "%s%s", dir, q->tex[m]);
+                q->px[m] = species_tex_cpu(tp, &q->pw[m], &q->ph[m]);
+                q->im[m].rgba = q->px[m];
+                q->im[m].w = q->pw[m];
+                q->im[m].h = q->ph[m];
+            }
+        }
+        VgSource src;
+        vgeo_foliage_asset_source(&a, &src);
+        VgBuildOptions opt;
+        memset(&opt, 0, sizeof(opt));
+        opt.threads = 1;   // the species build in parallel already
+        q->ok = vgeo_build(&src, &opt, &q->b, q->err, sizeof(q->err));
+        vgeo_foliage_asset_free(&a);
+        if (!q->ok) continue;
+        if (q->sp->impostor) {
+            VgImpostorOptions io = { 512, 8, q->im, q->nmat };
+            vgeo_impostor_bake(&q->b, &io);
+        }
+        q->b.hdr.key = q->key;
+        species_cache_save(q);
+    }
+}
+
+int render_foliage_species_types(void) {
+    if (!G.ok) return 0;
+    if (g_species_n) return g_species_n;
+    char path[512], err[256] = "";
+    char *text = platform_read_file(platform_data_path("data/foliage/species.json", path, sizeof(path)), NULL);
+    if (!text) { log_warn("vgeo: no data/foliage/species.json"); return 0; }
+    bool parsed = vgeo_species_parse(text, &g_species, err, sizeof(err));
+    free(text);
+    if (!parsed) { log_error("vgeo: %s", err); return 0; }
+    if (err[0]) log_warn("vgeo: %s", err);
+    u64 t0 = SDL_GetTicksNS();
+    char cache_dir[512];
+    platform_data_path("assets/cache/", cache_dir, sizeof(cache_dir));
+    SDL_CreateDirectory(cache_dir);
+    int n = g_species.count;
+    SpeciesBuild *kb = (SpeciesBuild *)calloc((size_t)(n ? n : 1), sizeof(SpeciesBuild));
+    for (int i = 0; i < n; i++) {
+        SpeciesBuild *q = &kb[i];
+        q->sp = &g_species.s[i];
+        platform_data_path(q->sp->source, q->path, sizeof(q->path));
+        size_t fs = 0;
+        char *file = platform_read_file(q->path, &fs);
+        u32 v[3] = { VGEO_BUILD_VERSION, SPECIES_IMPORT_VERSION, q->sp->key };
+        q->key = vgeo_fnv1a(v, sizeof(v), file ? vgeo_fnv1a(file, fs, 0) : 0) | 1u;
+        free(file);
+        snprintf(q->cache, sizeof(q->cache), "%s%s.species.%08x.dgc", cache_dir, q->sp->name, q->key);
+    }
+    jobs_parallel_for(n, 1, species_job, kb);
+    int built = 0, cached = 0;
+    for (int i = 0; i < n; i++) {
+        SpeciesBuild *q = &kb[i];
+        for (u32 m = 0; m < 16; m++) free(q->px[m]);
+        if (!q->ok) { log_error("vgeo: species %s (%s): %s", q->sp->name, q->sp->source, q->err); continue; }
+        if (G.ftype_count >= 32) { log_warn("vgeo: species %s: no room for more foliage types", q->sp->name); vgeo_free(&q->b); continue; }
+        VgWindParams wp;
+        vgeo_species_wind(q->sp, q->height, &wp);
+        u32 mesh = vgeo_scene_add_mesh(&G.scene, &q->b);
+        fallback_register(mesh, &q->b, false);
+        u32 base = 0;
+        char dir[512];
+        dg_strcpy(dir, sizeof(dir), q->path);
+        char *sl = strrchr(dir, '/');
+        if (sl) sl[1] = 0;
+        for (u32 m = 0; m < q->nmat; m++) {
+            VgMaterial mt;
+            memset(&mt, 0, sizeof(mt));
+            mt.color[0] = mt.color[1] = mt.color[2] = mt.color[3] = 1.0f;
+            mt.tex_scale = 1.0f;
+            bool leaf = q->kind[m] == VGFM_LEAF;
+            mt.roughness = leaf ? q->sp->rough_leaf : q->sp->rough_bark;
+            mt.flags = VGM_FOLIAGE | VGM_DITHER_FADE | (leaf ? VGM_MASKED | VGM_TWO_SIDED : 0);
+            if (q->tex[m][0]) {
+                char tp[700];
+                snprintf(tp, sizeof(tp), "%s%s", dir, q->tex[m]);
+                TextureId t = texture_load_file(tp, true);
+                if (t) { mt.albedo_tex = mt.mask_tex = t; mt.flags |= MAT_TEXTURED; tex_use(t); }
+            }
+            if (!(mt.flags & MAT_TEXTURED)) {
+                mt.flags &= ~VGM_MASKED;
+                if (!leaf) mt.color[0] = 0.3f, mt.color[1] = 0.22f, mt.color[2] = 0.15f;
+                else mt.color[0] = 0.2f, mt.color[1] = 0.35f, mt.color[2] = 0.12f;
+            }
+            mt.alpha_cutoff = q->sp->alpha_cutoff;
+            mt.wpo = (q->sp->preset == VGWP_GRASS ? WPO_GRASS : q->sp->preset == VGWP_BUSH ? WPO_BUSH : WPO_TREE) | (q->sp->preset != VGWP_TREE ? WPO_DISPLACE : 0);
+            vgeo_wind_pack(&wp, mt.wpo_params, mt.wind_params);
+            mt.fade_start = q->sp->fade_start;
+            mt.fade_end = q->sp->fade_end;
+            mt.shadow_max_dist = q->sp->shadow_max_dist;
+            u32 idx = vgeo_scene_add_material(&G.scene, &mt);
+            if (!m) base = idx;
+        }
+        vgeo_scene_set_mesh_materials(&G.scene, mesh, base);
+        if (q->b.impostor) vgeo_foliage_impostor_upload(&G.scene, &G.cull.tex, mesh, &q->b);
+        struct FoliageType *ft = &G.ftype[G.ftype_count++];
+        dg_strcpy(ft->name, sizeof(ft->name), q->sp->name);
+        ft->mesh = mesh;
+        ft->capsule = q->sp->capsule;
+        ft->cap_r = q->sp->capsule_r;
+        ft->cap_h = q->sp->capsule_h;
+        dg_strcpy(g_species_names[g_species_n], 48, q->sp->name);
+        g_species_n++;
+        built += !q->cached;
+        cached += q->cached;
+        log_info("vgeo: species %s: %u tris, %u clusters, %.1f m, wind trunk %.3f / branch %.2f / leaf %.3f, impostor %s%s", q->sp->name, q->b.stats.input_tris,
+                 q->b.hdr.cluster_count, (double)q->height, (double)wp.trunk_stiffness, (double)wp.branch_stiffness, (double)wp.leaf_stiffness,
+                 q->b.impostor ? "8x8" : "none", q->cached ? " (cached)" : "");
+        vgeo_free(&q->b);
+    }
+    free(kb);
+    foliage_region();
+    G.need_commit = true;
+    foliage_commit();
+    log_info("vgeo: %d foliage species ready (%d built, %d cached) in %.0f ms", g_species_n, built, cached, (double)(SDL_GetTicksNS() - t0) / 1e6);
+    return g_species_n;
+}
+
+const char *render_foliage_species_name(int i) { return i >= 0 && i < g_species_n ? g_species_names[i] : NULL; }
 
 void *render_foliage_test_chunk(int cx, int cz, float density, float x0, float z0, float x1, float z1, float (*height)(void *user, float x, float z), void *user,
                                 size_t *size) {

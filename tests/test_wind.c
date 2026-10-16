@@ -12,6 +12,7 @@
 #include "world/wind.h"
 #include "render/vgeo/foliage_wind.h"
 #include "render/vgeo/foliage_import.h"
+#include "render/vgeo/foliage_species.h"
 #include "render/vgeo/vgeo_gpu.h"
 #include "core/engine.h"
 #include <math.h>
@@ -494,6 +495,68 @@ static void test_import(void) {
     }
 }
 
+// Every species of data/foliage/species.json: imports with its channels, a plausible height, and every
+// displaced vertex at max wind (any direction, gusts beyond full wind, random time / instance scale /
+// phase) lies within its declared bound (vgeo_wind_layer_max: the culling margin of the asset).
+static char *read_text(const char *path) {
+    FILE *f = fopen(path, "rb");
+    if (!f) return NULL;
+    fseek(f, 0, SEEK_END);
+    long n = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    char *t = (char *)malloc((size_t)n + 1);
+    t[fread(t, 1, (size_t)n, f)] = 0;
+    fclose(f);
+    return t;
+}
+
+static void test_species(void) {
+    printf("species: data/foliage/species.json\n");
+    char *txt = read_text("data/foliage/species.json");
+    CHECK(txt != NULL, "data/foliage/species.json readable");
+    if (!txt) return;
+    static VgSpeciesLib lib;
+    char err[256] = "";
+    bool ok = vgeo_species_parse(txt, &lib, err, sizeof(err));
+    free(txt);
+    CHECK(ok && !err[0], "species parse: %s", err);
+    CHECK(lib.count >= 13, "%d species (every Tree It export)", lib.count);
+    u32 seed = 7;
+    for (int i = 0; i < lib.count; i++) {
+        const VgSpecies *sp = &lib.s[i];
+        VgFoliageAsset a;
+        if (!vgeo_foliage_import(sp->source, &sp->import, &a, err, sizeof(err))) { CHECK(0, "%s: %s", sp->name, err); continue; }
+        CHECK(!a.inferred, "%s: wind channels from the vertex colours", sp->name);
+        CHECK(a.height > 0.3f && a.height < 20.0f, "%s: height %.2f m", sp->name, a.height);
+        VgWindParams wp;
+        vgeo_species_wind(sp, a.height, &wp);
+        float wpo[4], wpr[8], lm[3];
+        vgeo_wind_pack(&wp, wpo, wpr);
+        vgeo_wind_layer_max(wpo, wpr, lm);
+        float bound = lm[0] + lm[1] + lm[2];
+        double worst = 0;
+        u32 step = a.im.vertex_count / 4000 + 1;
+        for (u32 v = 0; v < a.im.vertex_count; v += step) {
+            VgWindVertex wv;
+            memset(&wv, 0, sizeof(wv));
+            float sc = 0.7f + (float)frand(&seed) * 0.8f;
+            for (int k = 0; k < 3; k++) wv.p[k] = a.im.pos[v * 3 + (u32)k] * sc, wv.n[k] = a.im.normal[v * 3 + (u32)k];
+            wv.pscale = sc;
+            u32 c = a.color[v];
+            for (int k = 0; k < 4; k++) wv.col[k] = (float)((c >> (8 * k)) & 0xFFu) / 255.0f;
+            wv.phase = (float)frand(&seed);
+            float an = (float)(frand(&seed) * 6.283), sp_ = 30.0f + (float)frand(&seed) * 30.0f;
+            float wind[4] = { cosf(an) * sp_, sinf(an) * sp_, cosf(an) * sp_, sinf(an) * sp_ }, o[3];
+            vgeo_wind_eval(wpo, wpr, &wv, wind, (float)frand(&seed) * 500.0f, VGW_ALL, NULL, o, NULL);
+            worst = fmax(worst, sqrt(o[0] * o[0] + o[1] * o[1] + o[2] * o[2]) / (bound * fmaxf(sc, 1.0f)));
+        }
+        CHECK(worst <= 1.0, "%s: displacement %.3f of its bound", sp->name, worst);
+        printf("  %-15s %5u verts, %.1f m, bound %.2f m (main %.2f, detail %.2f, flutter %.3f), worst use %.2f\n", sp->name, a.im.vertex_count, a.height, bound, lm[0],
+               lm[1], lm[2], worst);
+        vgeo_foliage_asset_free(&a);
+    }
+}
+
 int main(int argc, char **argv) {
     (void)argc;
     (void)argv;
@@ -509,6 +572,7 @@ int main(int argc, char **argv) {
     test_normals();
     test_channels();
     test_import();
+    test_species();
     printf("%d checks, %d failed\n", g_checks, g_fail);
     return g_fail ? 1 : 0;
 }

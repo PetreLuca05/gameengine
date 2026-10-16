@@ -397,8 +397,13 @@ static float cpu_alpha(const VgViewGpu *v, const Px *p, u32 x, u32 y) {
         uv[j][0] = dec.uv[vi][0] * mt->tex_scale;
         uv[j][1] = dec.uv[vi][1] * mt->tex_scale;
     }
-    // the mip LOD of the triangle: the pixel footprint at its screen centroid (vg_uv_plane_lod)
-    float cx = (c[0][0] / c[0][3] + c[1][0] / c[1][3] + c[2][0] / c[2][3]) / 3.0f, cy = (c[0][1] / c[0][3] + c[1][1] / c[1][3] + c[2][1] / c[2][3]) / 3.0f;
+    // the mip LOD of the triangle: the pixel footprint at the screen centroid of its vertices in front
+    // of the camera, clamped to the screen, capped at the 4 x 4 mip (vg_uv_plane_lod)
+    float cx = 0, cy = 0, kc = 0;
+    for (int j = 0; j < 3; j++)
+        if (c[j][3] > 1e-6f) { cx += c[j][0] / c[j][3]; cy += c[j][1] / c[j][3]; kc += 1; }
+    cx = kc > 0 ? fminf(fmaxf(cx / kc, -1.0f), 1.0f) : 0.0f;
+    cy = kc > 0 ? fminf(fmaxf(cy / kc, -1.0f), 1.0f) : 0.0f;
     float pn[4][2] = { { cx, cy }, { cx + 2.0f / W, cy }, { cx, cy + 2.0f / H }, { ((float)x + 0.5f) / W * 2 - 1, ((float)y + 0.5f) / H * 2 - 1 } };
     float u3[4][2];
     for (int s = 0; s < 4; s++) {
@@ -408,7 +413,7 @@ static float cpu_alpha(const VgViewGpu *v, const Px *p, u32 x, u32 y) {
         u3[s][1] = uv[0][1] * b[0] + uv[1][1] * b[1] + uv[2][1] * b[2];
     }
     float dx = hypotf((u3[1][0] - u3[0][0]) * MASK_SIZE, (u3[1][1] - u3[0][1]) * MASK_SIZE), dy = hypotf((u3[2][0] - u3[0][0]) * MASK_SIZE, (u3[2][1] - u3[0][1]) * MASK_SIZE);
-    float lod = log2f(fmaxf(fmaxf(dx, dy), 1e-6f));
+    float lod = fminf(fmaxf(log2f(fmaxf(fmaxf(dx, dy), 1e-6f)), 0.0f), log2f((float)MASK_SIZE) - 2.0f);
     return alpha_tri(g_mask_mips[k][dec.material], u3[3][0], u3[3][1], lod);
 }
 

@@ -65,16 +65,27 @@ VgUvPlane vg_uv_plane(vec4 c0, vec4 c1, vec4 c2, vec2 uv0, vec2 uv1, vec2 uv2) {
     return pl;
 }
 // The mask's mip LOD of a triangle (one per triangle, so both rasterisers sample the same mip): the
-// UV footprint of a pixel at the triangle's screen centroid, in texels of a tsz texture.
+// UV footprint of a pixel at the triangle's screen centroid, in texels of a tsz texture. The centroid
+// of the vertices in front of the camera only, clamped to the screen: a large card crossing the camera
+// plane (Tree It conifer cards next to the camera) would otherwise put it where a vertex behind the
+// camera projects (anywhere), and the footprint there picks the coarsest mip, whose averaged alpha
+// passes the cutoff over the whole card. Capped at the 4 x 4 mip for the same reason (CPU mirror:
+// tests/test_vgeo_foliage.c cpu_alpha).
 float vg_uv_plane_lod(VgUvPlane pl, vec4 c0, vec4 c1, vec4 c2, vec2 tsz) {
-    vec3 p = vec3((c0.xy / c0.w + c1.xy / c1.w + c2.xy / c2.w) / 3.0, 1.0);
+    vec2 s = vec2(0.0);
+    float k = 0.0;
+    if (c0.w > 1e-6) { s += c0.xy / c0.w; k += 1.0; }
+    if (c1.w > 1e-6) { s += c1.xy / c1.w; k += 1.0; }
+    if (c2.w > 1e-6) { s += c2.xy / c2.w; k += 1.0; }
+    vec3 p = vec3(k > 0.0 ? clamp(s / k, vec2(-1.0), vec2(1.0)) : vec2(0.0), 1.0);
     vec2 d = V.viewport.zw * 2.0;
     vec2 n = vec2(dot(pl.u, p), dot(pl.v, p));
-    float w = dot(pl.d, p);
+    float w = dot(pl.d, p), wx = w + pl.d.x * d.x, wy = w + pl.d.y * d.y;
+    if (w <= 0.0 || wx <= 0.0 || wy <= 0.0) return 0.0;   // the plane's horizon: no footprint there
     vec2 uv = n / w;
-    vec2 ux = (n + vec2(pl.u.x, pl.v.x) * d.x) / (w + pl.d.x * d.x), uy = (n + vec2(pl.u.y, pl.v.y) * d.y) / (w + pl.d.y * d.y);
+    vec2 ux = (n + vec2(pl.u.x, pl.v.x) * d.x) / wx, uy = (n + vec2(pl.u.y, pl.v.y) * d.y) / wy;
     float rho = max(length((ux - uv) * tsz), length((uy - uv) * tsz));
-    return log2(max(rho, 1e-6));
+    return clamp(log2(max(rho, 1e-6)), 0.0, max(log2(max(tsz.x, tsz.y)) - 2.0, 0.0));
 }
 
 // Clip position of cluster vertex v with the raster view (skinned instances: skinned first).

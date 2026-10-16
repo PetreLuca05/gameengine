@@ -261,6 +261,11 @@ typedef struct RenderFoliageWind {
     float trunk_stiffness, branch_stiffness, leaf_stiffness, full_wind;
     float main_freq, detail_freq, flutter_freq, max_bend_deg, settle_time, response, height, pad;
 } RenderFoliageWind;
+// Imported species (data/foliage/species.json: Tree It exports with their wind channels): built (or
+// loaded from assets/cache), textured and registered as foliage types on the first call. Returns the
+// count; render_foliage_species_name(i) their type names.
+int render_foliage_species_types(void);
+const char *render_foliage_species_name(int i);
 int render_foliage_type_count(void);
 const char *render_foliage_type_name(int i);
 bool render_foliage_wind_get(const char *type, RenderFoliageWind *out);
