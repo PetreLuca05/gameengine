@@ -166,9 +166,9 @@ Steam friends list or via **Invite Friends** (the overlay invite dialog), or wit
 | Action | Key |
 |---|---|
 | Move | W A S D |
-| Jump / mantle / pull up | Space (hold while airborne to grab ledges) |
+| Jump / vault / mantle / pull up | Space (moving forward at a low wall or table: vault / mantle; hold while airborne to grab ledges) |
 | Crouch / drop from ledge | Left Ctrl |
-| Sprint (sprint into low walls to vault) | Left Shift |
+| Sprint | Left Shift |
 | Slow walk | Left Alt |
 | Use / interact (hold for crates) | E |
 | Attack / fire / use consumable (hold) | Mouse 1 |

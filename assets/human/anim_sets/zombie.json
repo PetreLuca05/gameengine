@@ -16,8 +16,8 @@
     "crouch_b": "jog_backward",
     "crouch_l": "jog_strafe_left",
     "crouch_r": "jog_strafe_left@mirror",
-    "jump_start": "jump@0.0:0.34",
-    "jump_loop": "jump@0.34:0.52",
+    "jump_start": "jump@0.24:0.38",
+    "jump_loop": "jump@0.38:0.52",
     "jump_land": "jump@0.6:0.78",
     "jump_land_hard": "jump@0.6:0.85",
     "hang_idle": "Hanging Idle"

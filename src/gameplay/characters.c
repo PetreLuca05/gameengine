@@ -1338,7 +1338,11 @@ static void post_one(World *w, CharacterInst *c, int i, float dt, vec3 cam_pos, 
     c->item_cur = c->rt.proc.has_item ? xf_mul(xf_make(root.t, root.r), xf_make(v3_scale(c->rt.proc.item_model.t, c->def->scale), c->rt.proc.item_model.r)) : c->item_cur;
     bool had_item = c->item_valid;
     c->item_valid = c->rt.proc.has_item;
-    if (!c->have_pose || !had_item) { memcpy(c->pose_prev, c->pose_cur, sizeof(Xform) * (size_t)s->count); c->item_prev = c->item_cur; c->item_cam_prev = c->item_cam_cur; }
+    // First pose: nothing to interpolate from. A newly held item: snap only its own transforms (the
+    // body keeps interpolating - snapping it whenever the hands were empty made the head, and the
+    // first-person camera on it, move in tick-sized steps with no item selected).
+    if (!c->have_pose) memcpy(c->pose_prev, c->pose_cur, sizeof(Xform) * (size_t)s->count);
+    if (!c->have_pose || !had_item) { c->item_prev = c->item_cur; c->item_cam_prev = c->item_cam_cur; }
     c->have_pose = true;
     // Client-side hitboxes from the local pose (predicted reactions, debug).
     if (!w->authority) {

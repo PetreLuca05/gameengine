@@ -449,10 +449,11 @@ void player_move_tick(World *w, int slot, PlayerSim *sim, PhysCharacter *ch, con
     bool moving_fwd = mv.y > 0.2f;
     bool jump_wanted = m->jump_buffer > 0.0f;
     if (moving_fwd && !m->crouched && m->regrab_cooldown <= 0) {
-        bool try_ground = on_ground && (jump_wanted || m->sprinting);
+        // Vaults and mantles only on a jump press (never automatic from sprinting into a table).
+        bool try_ground = on_ground && jump_wanted;
         bool try_air = !on_ground && (buttons & BTN_JUMP) && vel.y < 3.0f;
         if (try_ground || try_air) {
-            bool allow_vault = on_ground && m->sprinting;
+            bool allow_vault = on_ground;
             LedgeResult lr = detect_ledge(pw, m->pos, on_ground ? m->pos.y : m->fall_start_y, m->yaw, self, allow_vault, !on_ground, dbg);
             if (lr.kind == LEDGE_VAULT) {
                 start_vault(m, &lr, m->pos);

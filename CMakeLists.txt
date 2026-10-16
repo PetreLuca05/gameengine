@@ -328,3 +328,7 @@ if(MSVC)
   target_compile_options(test_ui PRIVATE /W3 /wd4100 /wd4201 /utf-8)
 endif()
 add_test(NAME ui COMMAND test_ui WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+
+add_executable(anim_probe tools/anim_probe/anim_probe.c)
+set_target_properties(anim_probe PROPERTIES C_STANDARD 11)
+target_link_libraries(anim_probe PRIVATE dg_animcore)
