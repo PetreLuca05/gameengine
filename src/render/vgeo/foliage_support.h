@@ -95,6 +95,9 @@ u32 vgeo_foliage_query(const VgScene *s, const float pos[3], float radius, VgFol
 // Uploads a mesh's impostor atlas (vgeo_impostor.h; with mips) into two module textures and points the
 // mesh at them (VgMesh impostor / impostor_grid / impostor_radius; before the next commit).
 bool vgeo_foliage_impostor_upload(VgScene *s, VgTextures *t, u32 mesh, const VgBuilt *b);
+// The mesh switches to its impostor below scale x the view's switch size (r_vgeo_impostor_px): large,
+// card-heavy meshes (trees) whose DAG cannot coarsen their cards switch sooner. 1/16 steps.
+void vgeo_impostor_scale(VgScene *s, u32 mesh, float scale);
 
 // ------------------------------------------------------------------ displacement buffer
 

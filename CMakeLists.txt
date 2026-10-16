@@ -280,7 +280,7 @@ set_target_properties(fbx_textures PROPERTIES C_STANDARD 11)
 target_link_libraries(fbx_textures PRIVATE dg_animcore)
 
 # Virtualized geometry builder (pure C): the game compiles the same sources through the src glob.
-add_library(dg_vgeo STATIC src/render/vgeo/vgeo_build.c src/render/vgeo/vgeo_procgen.c src/render/vgeo/vgeo_procgen_building.c src/render/vgeo/vgeo_procgen_skinned.c src/render/vgeo/vgeo_import.c src/render/vgeo/vgeo_impostor.c src/render/vgeo/vgeo_procgen_foliage.c)
+add_library(dg_vgeo STATIC src/render/vgeo/vgeo_build.c src/render/vgeo/vgeo_procgen.c src/render/vgeo/vgeo_procgen_building.c src/render/vgeo/vgeo_procgen_skinned.c src/render/vgeo/vgeo_import.c src/render/vgeo/vgeo_impostor.c src/render/vgeo/vgeo_procgen_foliage.c src/render/vgeo/vgeo_tree.c)
 set_target_properties(dg_vgeo PROPERTIES C_STANDARD 11)
 target_link_libraries(dg_vgeo PUBLIC dg_animcore meshopt)
 if(MSVC)
@@ -324,6 +324,17 @@ foreach(item "rock_field;field;10000000" "statue;statue;500000" "building;buildi
     COMMENT "vgeo content ${vg_name}.vgeo" VERBATIM)
   list(APPEND DG_VGEO_CONTENT ${DG_VGEO_OUT}/${vg_name}.vgeo)
 endforeach()
+# Imported trees (docs/VGEO.md "Tree models"): the assets/treefbx species built (clusters, DAG,
+# impostors) into bin/assets/vgeo/trees/<name>.dgtree; the game rebuilds into assets/cache when a
+# file is missing or its key is stale.
+file(GLOB DG_TREE_SOURCES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/assets/treefbx/*)
+add_custom_command(OUTPUT ${DG_VGEO_OUT}/trees/trees.stamp
+  COMMAND ${CMAKE_COMMAND} -E make_directory ${DG_VGEO_OUT}/trees
+  COMMAND $<TARGET_FILE:build_vgeo> --trees ${CMAKE_SOURCE_DIR}/assets/treefbx/ ${DG_VGEO_OUT}/trees/
+  COMMAND ${CMAKE_COMMAND} -E touch ${DG_VGEO_OUT}/trees/trees.stamp
+  DEPENDS ${DG_TREE_SOURCES} ${CMAKE_SOURCE_DIR}/src/render/vgeo/vgeo_tree.c ${CMAKE_SOURCE_DIR}/src/render/vgeo/vgeo_tree.h
+  COMMENT "vgeo content: trees" VERBATIM)
+list(APPEND DG_VGEO_CONTENT ${DG_VGEO_OUT}/trees/trees.stamp)
 add_custom_target(dg_vgeo_content ALL DEPENDS ${DG_VGEO_CONTENT})
 add_dependencies(dg_vgeo_content build_vgeo)
 

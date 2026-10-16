@@ -20,6 +20,7 @@
 #include "vgeo/foliage_support.h"
 #include "vgeo/vgeo_procgen_foliage.h"
 #include "vgeo/vgeo_impostor.h"
+#include "vgeo/vgeo_tree.h"
 #include "fidelity/fidelity.h"
 #include "assets/assets.h"
 #include "core/platform.h"
@@ -118,9 +119,13 @@ static struct {
     bool wind_init;
     VgDisplace disp;
     bool disp_ok;
-    struct FoliageType { char name[48]; u32 mesh; bool capsule; float cap_r, cap_h; } ftype[32];
+    // role / weight: the scatter role of a tree type (RENDER_TREE_*, -1 none) and its pick weight
+    struct FoliageType { char name[48]; u32 mesh; bool capsule; float cap_r, cap_h; int role; float weight; } ftype[32];
     u32 ftype_count;
     bool test_types, map_types;
+    u32 tree_roles;              // roles whose imported species were loaded (bits of VgTreeRole)
+    struct { char name[48]; u32 tex; } tree_tex[48];   // imported tree textures by file (shared by species)
+    u32 tree_tex_count;
     double disp_time;
     float push_test;             // foliage_push_test: seconds left
     bool need_commit;            // a placement chunk resolved a mesh the scene did not have
@@ -1671,6 +1676,8 @@ static void foliage_build_kinds(int k0, int k1, u32 atlas) {
         dg_strcpy(ft->name, sizeof(ft->name), vgeo_foliage_name(q->k));
         ft->mesh = mesh;
         ft->capsule = vgeo_foliage_capsule(q->k, &ft->cap_r, &ft->cap_h);   // the bush / tree trunks
+        ft->role = -1;   // ground cover, not a tree role
+        ft->weight = 0;
         log_info("vgeo: foliage type %s: %u tris, %u clusters, %u levels, impostor %s", ft->name, q->b.stats.input_tris, q->b.hdr.cluster_count, q->b.hdr.level_count,
                  q->impostor ? "8x8 frames" : "none");
         vgeo_free(&q->b);
@@ -1683,52 +1690,150 @@ static void foliage_build_kinds(int k0, int k1, u32 atlas) {
     free(mips);
 }
 
+// Imported trees (vgeo_tree.h, docs/VGEO.md "Tree models"): the species of the roles in role_mask not
+// loaded yet, from the build's assets/vgeo/trees (else built into assets/cache) on the job system;
+// textures shared by file, masks = the albedo alpha. Returns the species registered.
+typedef struct TreeBuild { const VgTreeSpecies *sp; VgTree t; bool ok; char err[256]; const char *dir, *built, *cache; } TreeBuild;
+
+static void tree_job(void *ctx, int begin, int end) {
+    TreeBuild *tb = (TreeBuild *)ctx;
+    for (int i = begin; i < end; i++) tb[i].ok = vgeo_tree_load_or_build(tb[i].sp, tb[i].dir, tb[i].built, tb[i].cache, &tb[i].t, tb[i].err, sizeof(tb[i].err));
+}
+
+static u32 tree_texture(const VgTree *t, u32 k) {
+    for (u32 i = 0; i < G.tree_tex_count; i++)
+        if (!strcmp(G.tree_tex[i].name, t->tex[k])) return G.tree_tex[i].tex;
+    const VgTreeTexture *x = &t->texture[k];
+    if (!x->rgba || G.tree_tex_count >= 48) return 0;
+    u32 levels;
+    u8 *mips = (u8 *)malloc(vg_tex_mip_bytes(x->w, x->h, &levels));
+    vg_tex_build_mips(x->rgba, x->w, x->h, mips);
+    if (t->masked[k]) vgeo_tree_mip_coverage(mips, x->w, x->h, levels, 0.5f);
+    u32 id = vg_tex_create(&G.cull.tex, x->w, x->h, levels, mips, true, true);
+    free(mips);
+    dg_strcpy(G.tree_tex[G.tree_tex_count].name, sizeof(G.tree_tex[0].name), t->tex[k]);
+    G.tree_tex[G.tree_tex_count++].tex = id;
+    return id;
+}
+
+static int foliage_build_trees(u32 role_mask) {
+    role_mask &= ~G.tree_roles;
+    if (!role_mask) return 0;
+    char dir[512], built[512], cache[512];
+    platform_data_path("assets/treefbx/", dir, sizeof(dir));
+    platform_data_path("assets/vgeo/trees/", built, sizeof(built));
+    platform_data_path("assets/cache/", cache, sizeof(cache));
+    u32 ns = vgeo_tree_species_count();
+    TreeBuild *tb = (TreeBuild *)calloc(ns, sizeof(TreeBuild));
+    int n = 0;
+    for (u32 i = 0; i < ns; i++) {
+        const VgTreeSpecies *sp = vgeo_tree_species(i);
+        if (!(role_mask & (1u << sp->role))) continue;
+        tb[n].sp = sp;
+        tb[n].dir = dir, tb[n].built = built, tb[n].cache = cache;
+        n++;
+    }
+    u64 t0 = SDL_GetTicksNS();
+    jobs_parallel_for(n, 1, tree_job, tb);
+    int reg = 0, cached = 0;
+    for (int i = 0; i < n; i++) {
+        TreeBuild *q = &tb[i];
+        if (!q->ok) { log_error("vgeo: tree %s: %s", q->sp->name, q->err); continue; }
+        if (G.ftype_count >= 32) { vgeo_tree_free(&q->t); continue; }
+        VgMaterial mats[VG_TREE_MAX_MATERIALS];
+        vgeo_tree_materials(&q->t, mats);
+        u32 mesh = vgeo_scene_add_mesh(&G.scene, &q->t.b);
+        fallback_register(mesh, &q->t.b, false);
+        u32 base = 0;
+        for (u32 k = 0; k < q->t.material_count; k++) {
+            mats[k].albedo_tex = mats[k].mask_tex = tree_texture(&q->t, k);
+            u32 idx = vgeo_scene_add_material(&G.scene, &mats[k]);
+            if (!k) base = idx;
+        }
+        vgeo_scene_set_mesh_materials(&G.scene, mesh, base);
+        bool imp = vgeo_impostor(&q->t.b, NULL, NULL) != NULL;
+        if (imp && vgeo_foliage_impostor_upload(&G.scene, &G.cull.tex, mesh, &q->t.b)) vgeo_impostor_scale(&G.scene, mesh, q->sp->impostor_scale);
+        struct FoliageType *ft = &G.ftype[G.ftype_count++];
+        dg_strcpy(ft->name, sizeof(ft->name), q->sp->name);
+        ft->mesh = mesh;
+        ft->capsule = q->sp->capsule;
+        ft->cap_r = q->t.cap_r;
+        ft->cap_h = q->t.cap_h;
+        ft->role = q->sp->role;
+        ft->weight = q->sp->weight;
+        G.tree_roles |= 1u << q->sp->role;
+        cached += q->t.from_cache;
+        reg++;
+        log_info("vgeo: tree %s: %u tris, %u clusters, %u levels, %u materials, capsule r %.2f m, impostor %s%s", ft->name, q->t.b.stats.input_tris, q->t.b.hdr.cluster_count,
+                 q->t.b.hdr.level_count, q->t.material_count, (double)ft->cap_r, imp ? "8x8 frames" : "none", q->t.from_cache ? "" : " (built)");
+        vgeo_tree_free(&q->t);
+    }
+    free(tb);
+    log_info("vgeo: %d tree species (%d cached) in %.0f ms, %u tree textures", reg, cached, (double)(SDL_GetTicksNS() - t0) / 1e6, G.tree_tex_count);
+    return reg;
+}
+
 int render_foliage_map_types(void) {
     if (!G.ok) return 0;
-    if (G.map_types) return VG_FOLIAGE_ALL_KINDS - VG_FOLIAGE_KINDS;
-    render_foliage_test_types();   // grass tufts and bushes are part of the maps' cover
+    if (G.map_types) return (int)G.ftype_count;
+    render_foliage_test_types();   // grass tufts, bushes and flowers are part of the maps' cover
     u64 t0 = SDL_GetTicksNS();
-    foliage_build_kinds(VG_FOLIAGE_KINDS, VG_FOLIAGE_ALL_KINDS, 512);   // distant trees: 64 px frames are plenty
+    foliage_build_trees((1u << VG_TREE_CONIFER) | (1u << VG_TREE_BROADLEAF) | (1u << VG_TREE_DEAD));
+    foliage_build_kinds(VG_FOLIAGE_CROP, VG_FOLIAGE_CROP + 1, 512);
     G.map_types = true;
     foliage_region();
     G.need_commit = true;
     foliage_commit();
     log_info("vgeo: foliage map types ready in %.0f ms", (double)(SDL_GetTicksNS() - t0) / 1e6);
-    return VG_FOLIAGE_ALL_KINDS - VG_FOLIAGE_KINDS;
+    return (int)G.ftype_count;
+}
+
+int render_foliage_role_types(int role, char (*names)[48], float *weights, int max) {
+    int n = 0;
+    for (u32 i = 0; i < G.ftype_count && n < max; i++)
+        if (G.ftype[i].role == role) {
+            dg_strcpy(names[n], 48, G.ftype[i].name);
+            if (weights) weights[n] = G.ftype[i].weight;
+            n++;
+        }
+    return n;
 }
 
 int render_foliage_test_types(void) {
     if (!G.ok) return 0;
-    if (G.test_types) return VG_FOLIAGE_KINDS;
+    if (G.test_types) return (int)G.ftype_count;
     u64 t0 = SDL_GetTicksNS();
-    foliage_build_kinds(0, VG_FOLIAGE_KINDS, 1024);
+    foliage_build_kinds(VG_FOLIAGE_TUFT, VG_FOLIAGE_TUFT + 1, 1024);   // the procedural bush is GPU test content only
+    foliage_build_trees((1u << VG_TREE_BUSH) | (1u << VG_TREE_FLOWER));   // the imported bushes and flowers
     G.test_types = true;
     foliage_region();
     G.need_commit = true;
     foliage_commit();
     log_info("vgeo: foliage test types ready in %.0f ms", (double)(SDL_GetTicksNS() - t0) / 1e6);
-    return VG_FOLIAGE_KINDS;
+    return (int)G.ftype_count;
 }
 
 void *render_foliage_test_chunk(int cx, int cz, float density, float x0, float z0, float x1, float z1, float (*height)(void *user, float x, float z), void *user,
                                 size_t *size) {
-    static const char names[2][48] = { "test_tuft", "test_bush" };
+    // tufts, the imported bushes and daisies (dropped at load when not registered)
+    static const char names[5][48] = { "test_tuft", "bush_juniper", "bush_bamboo", "bush_acacia", "flower_daisy" };
+    static const float weight[5] = { 9.0f, 0.45f, 0.15f, 0.1f, 0.3f }, scale[5][2] = { { 0.8f, 1.3f }, { 0.6f, 1.1f }, { 0.6f, 1.0f }, { 0.6f, 1.0f }, { 0.8f, 1.3f } };
     VgScatter sc;
     memset(&sc, 0, sizeof(sc));
     sc.x0 = x0, sc.z0 = z0, sc.x1 = x1, sc.z1 = z1;
     sc.density = density;
-    sc.kinds = 2;
-    sc.weight[0] = 9.0f;
-    sc.weight[1] = 1.0f;
-    sc.scale[0][0] = 0.8f, sc.scale[0][1] = 1.3f;
-    sc.scale[1][0] = 0.8f, sc.scale[1][1] = 1.5f;
+    sc.kinds = 5;
+    for (int k = 0; k < 5; k++) {
+        sc.weight[k] = weight[k];
+        sc.scale[k][0] = scale[k][0], sc.scale[k][1] = scale[k][1];
+    }
     sc.height = height;
     sc.user = user;
     sc.seed = 1234;
     u32 cap = (u32)(density * VGP_CHUNK_SIZE * VGP_CHUNK_SIZE * 1.3f) + 64;
     VgInstance *tmp = (VgInstance *)malloc(sizeof(VgInstance) * cap);
     u32 n = vgeo_foliage_scatter_chunk(&sc, cx, cz, tmp, cap);
-    u8 *blob = n ? vgp_write(cx, cz, names, 2, tmp, n, size) : NULL;
+    u8 *blob = n ? vgp_write(cx, cz, names, 5, tmp, n, size) : NULL;
     free(tmp);
     return blob;
 }
@@ -1773,6 +1878,8 @@ static u32 foliage_resolve(const char *name, void *u) {
     ft->capsule = model->foliage.capsule;
     ft->cap_r = model->foliage.capsule_radius;
     ft->cap_h = model->foliage.capsule_height;
+    ft->role = -1;
+    ft->weight = 0;
     return mesh;
 }
 

@@ -59,7 +59,8 @@ Simplification and clustering use meshoptimizer v0.22 (`simplifier.cpp`, `cluste
 | `src/render/vgeo/vgeo_tex.{c,h}` | `VgTextures`: the texture table at binding 23 of every cull set (renderer ids + module textures) |
 | `src/render/vgeo/foliage_support.{c,h}` | WPO CPU mirror + declared bounds, fade / density / impostor mirrors, `.vgp` chunks, scatter, `foliage_query`, impostor upload, displacement buffer |
 | `src/render/vgeo/vgeo_impostor.{c,h}` | CPU hemi-octahedral impostor baker, file section |
-| `src/render/vgeo/vgeo_procgen_foliage.{c,h}` | test content: grass tuft, bush, alpha masks, their materials |
+| `src/render/vgeo/vgeo_procgen_foliage.{c,h}` | grass tuft, wheat, the test bush, alpha masks, their materials |
+| `src/render/vgeo/vgeo_tree.{c,h}` | imported tree models: species table, FBX / OBJ import, wind weights, capsules, cache, coverage mips |
 | `shaders/vgeo/wpo.glsl`, `vg_mask.glsl`, `vg_impostor.glsl` | WPO snippets, the shared per-pixel mask test, impostor quads / atlas |
 | `shaders/vgeo/vg_raster_sw*.comp`, `vg_raster_hw*` | raster variants: plain / masked / impostor (SW), plain / masked (HW), bodies in `*.glsl` |
 | `shaders/vgeo/vg_displace.comp`, `vg_test_wpo.comp` | displacement buffer update; test-only WPO kernel |
@@ -839,8 +840,8 @@ renderer already binds as set 3.
 ## Foliage support (Phase 7)
 
 Foliage is ordinary vgeo content plus a few material, instance and placement features. Culling, LOD,
-both rasterisers, the shadows and streaming are the core's. No foliage content ships; procedural test
-types exercise it.
+both rasterisers, the shadows and streaming are the core's. The content is the imported tree models
+("Tree models") plus procedural grass tufts and wheat; procedural test types exercise the GPU paths.
 
 ### Materials (`VgMaterial`, 96 B)
 
@@ -859,8 +860,8 @@ and `"colliders": "capsule"`, `"capsule": [r, h]` on the model entry.
 
 ### Textures
 
-One array of 1088 combined image samplers at binding 23 of the cull set (`vgeo_tex.h`). Entries 0-1023 are the
-renderer's texture ids, 1024-1087 the module's own (masks, impostor atlases, the displacement buffer).
+One array of 1152 combined image samplers at binding 23 of the cull set (`vgeo_tex.h`). Entries 0-1023 are the
+renderer's texture ids, 1024-1151 the module's own (masks, tree textures, impostor atlases, the displacement buffer).
 Every cull kernel, both rasterisers, the shadow passes and the resolve can sample it. A change reaches a cull
 set when that set is next recorded, so no descriptor changes under a frame in flight. The lit resolve's old
 set 4 is gone.
@@ -977,11 +978,13 @@ set 4 is gone.
 ### In the game (`vk_vgeo.c`, `game_foliage.c`, `chunks.c`)
 
 - **API (render.h):**
-  - `render_foliage_test_types`: builds the procedural tuft and bush, their masks and 1024 px impostors.
+  - `render_foliage_test_types`: builds the procedural tuft (mask, 1024 px impostor) and loads the imported
+    bushes and daisies ("Tree models").
+  - `render_foliage_map_types`: the imported trees and the procedural wheat; `render_foliage_role_types`.
   - `render_foliage_test_chunk` (thread-safe .vgp of a chunk), `render_foliage_chunk_load` / `_unload`,
     `render_foliage_chunk_capsules`, `render_foliage_query`, `render_foliage_push`, `render_foliage_clear`.
-- **Devroom.** `foliage_test_scatter [count=300000]` fills the foliage yard (x 60..380, z 80..400): 90 % tufts, 10 %
-  bushes, 121 chunks. The bushes' trunk capsules become one static triangle-mesh body per chunk: hexagonal
+- **Devroom.** `foliage_test_scatter [count=300000]` fills the foliage yard (x 60..380, z 80..400): 90 % tufts, the
+  rest juniper / bamboo / acacia bushes and daisies, 121 chunks. The bushes' trunk capsules become one static triangle-mesh body per chunk: hexagonal
   prisms (`chunks_capsule_body`). A body per capsule would exhaust the physics world's 16k bodies.
   `foliage_test_clear` removes it all; a map change clears the placements.
 - **Streamed terrain.** `world_foliage_test 1` makes the chunk jobs generate 1.5 instances per m² on the
@@ -996,6 +999,74 @@ set 4 is gone.
   instance and skip masked meshes (the legacy pipelines have no alpha test).
 - **Commands:** `foliage_stats` (chunks, region, audit, last frame's counters), `foliage_query [r]`,
   `foliage_push_test [s]`, `foliage_check` (scripted, below).
+
+### Tree models (`vgeo_tree.c`, `assets/treefbx`)
+
+The game's trees, bushes and flowers are Tree It exports (CC BY 4.0, docs/CREDITS.md): FBX 6.1 / OBJ
+meshes and PNG textures in `assets/treefbx`. There are no procedural trees any more; the procedural
+bush is GPU test / bench content only (`vgeo_foliage`, `bench_vgeo`, `build_vgeo --gen bush`).
+
+- **Import** (`vgeo_tree_import`, ufbx for both formats). Every triangle of every mesh node; one material
+  per texture (the FBX model name or the OBJ `usemtl` minus Tree It's `_N` suffix, + `.png`).
+  - A material whose texture cuts out (> 2 % of the texels below half alpha) is a masked, two-sided card
+    with the albedo alpha as the mask (cutoff 0.5). Bark, stumps and stems are opaque.
+  - The files are centimetres, Y up, ground at y = 0. The mesh is scaled to the species height and
+    re-centred on its trunk base (the bark between 0 and 1.5 m).
+  - Tree It card normals point up / outwards whatever the winding (and are not unit length). Each card
+    triangle is re-wound towards its normal, so the front face is the lit side (the resolve flips only
+    back faces). Without this, half of the leaves turned black.
+  - Wind weights in the vertex colour: R = (y / H)^1.5 (trunk sway), G = (r / crown radius)^1.3,
+    faded in over the lowest quarter of the height (branch bounce), B = 1 on card-only vertices (flutter).
+    Shared positions get the same R / G, so bark and cards bend together.
+  - Trunk capsule: the 25th percentile of the bark's distance from the axis between 0.4 and 1.6 m
+    (scaled down for bushes), + 10 %; height min(H / 2, 5 m).
+- **Build.** The ordinary vgeo builder: its DAG is the LOD chain (the files' own `_LODn` meshes are not
+  used). Card-only groups do not coarsen (see "Test content"), so a tree's coarsest cut stays at about
+  30-90 % of its triangles. Hence the impostors.
+- **Impostors.** 512 px atlas, 8 × 8 frames, baked with the textures. Trees switch at
+  `impostor_scale` × `r_vgeo_impostor_px`: 6× (96 px across, about 120 m for a 17 m tree) for the
+  leafy trees, 2× for bushes, 1× for the bare old tree (its twigs thin out in a 64 px frame).
+  The per-mesh scale lives in the high 16 bits of `VgMesh.impostor_grid` (`vgeo_impostor_scale`, 1/16
+  steps, 0 = 1×), mirrored by `vgeo_use_impostor`.
+- **Textures.** Albedo only (RGBA8, sRGB). Normal, roughness and transmission maps are not used: the
+  vgeo vertex format has no tangents. Loaded with stb_image and box-filtered (alpha-weighted) to 512 px.
+  Masked textures get coverage-preserving mips (`vgeo_tree_mip_coverage`: each level's alpha is scaled so
+  the share of texels above the cutoff matches level 0); with plain box mips, cards thinned out and
+  distant crowns turned into bare sticks. Shared by file across species (27 textures). They are module
+  textures, so `VG_TEX_OWN` is now 128 (the table holds 1152 entries).
+- **Cache.** `build_vgeo --trees <dir/> <out/>` builds every species in parallel at build time (CMake
+  `dg_vgeo_content`, about 1.4 s) into `bin/assets/vgeo/trees/<name>.dgtree`: a `VgTreeCacheHeader`
+  (key, materials, masks, capsule, scale) + the `.vgeo` bytes. The key hashes the source file, the
+  species height and atlas size, `VG_TREE_VERSION` and `VGEO_BUILD_VERSION`. When a file is missing or
+  stale the game builds the species on the job system (about 1.1 s for all) and writes
+  `assets/cache/<name>.tree.<key>.dgc`. Texture edits do not change the key: bump `VG_TREE_VERSION`.
+- **Registration** (`foliage_build_trees` in `vk_vgeo.c`): `render_foliage_test_types` loads the bushes
+  and flowers, `render_foliage_map_types` the trees. Each species is a foliage type with a role
+  (`render_foliage_role_types(role, names, weights, max)`), in table order on every machine.
+
+| Species (type) | File | Role | Height | Triangles (leaf / coarsest cut) | Materials |
+|---|---|---|---|---|---|
+| `tree_pine` | pine.fbx | conifer | 17 m | 7 027 / 1 628 | bark09, stump01, pine branch (masked) |
+| `tree_fir` | fir.fbx | conifer | 15 m | 4 973 / 3 925 | bark07, fir branch |
+| `tree_spruce` | spruce.fbx | conifer | 18 m | 9 010 / 5 642 | bark08, spruce branch, branch06 |
+| `tree_oak` | oak.fbx | broadleaf | 16 m | 8 990 / 6 072 | mossybark02, stump03, oak leaf |
+| `tree_beech` | beech.fbx | broadleaf | 17 m | 10 584 / 9 755 | bark01, beech leaf |
+| `tree_birch` | birch.fbx | broadleaf (0.8) | 14 m | 6 944 / 2 579 | bark11, birch leaf |
+| `tree_elm` | elm.fbx | broadleaf (0.8) | 15 m | 4 013 / 1 508 | bark07, elm leaf |
+| `tree_maple` | maple.fbx | broadleaf | 14 m | 17 962 / 4 043 | bark02, leaf maple |
+| `tree_old` | old.fbx | dead | 11 m | 5 873 / 2 606 | bark04, stump01, branch06 (a rooted snag with a few twig cards) |
+| `bush_juniper` | juniper.fbx | bush | 3.2 m | 2 906 / 1 944 | bark05, juniper branch |
+| `bush_bamboo` | bamboo.obj | bush (0.4) | 3.6 m | 3 324 / 827 | plant02, bamboo branch |
+| `bush_acacia` | tree1.obj | bush (0.4) | 4.5 m | 8 957 / 4 082 | bark05, acacia branch |
+| `flower_daisy` | daisy.fbx | flower | 0.7 m | 632 / 632 | plant05, flower daisy, daisy leaf (no impostor) |
+
+Wind (m at full wind, sway / branch / flutter): conifers 0.18-0.2 / 0.12 / 0.02, broadleaves
+0.18-0.26 / 0.16-0.18 / 0.04-0.05, the old tree 0.08 / 0.05 / 0.02, bushes 0.05-0.08. Trees fade at
+850-1100 m with shadows to 70 m; bushes 150-210 m / 40 m; daisies 50-80 m / 15 m.
+
+**Budget.** 13 species, 91k source triangles, 2.2k clusters; .dgtree files 40 MB on disk (mostly the
+impostor atlases and the pages). GPU: 27 textures at ≤ 512 px with mips ≈ 35 MB, 12 impostor atlas
+pairs ≈ 34 MB, cluster pages a few MB.
 
 ### Test content (`vgeo_procgen_foliage.c`)
 
@@ -1060,6 +1131,10 @@ In game, `vgeo_bench 600 f.csv foliage` over the yard (frame-graph passes + the 
   0.04;
 - shadows: cascade cull 0.58, cascade draws 0.50;
 - about **3.2 ms** in all against the **2.5 ms** budget, before the shared prepass / opaque resolve.
+
+These yard figures predate the tree models: the yard then held the 600-triangle procedural bush. Its 10 %
+of bushes are now juniper / bamboo / acacia models and daisies (thousands of triangles each), so the yard
+draws about 4M triangles at eye level and has not been re-benched.
 
 The harness total (main view + cascade culls) is 2.0-2.6 ms; adding the cascade draws puts every camera over
 the budget, by up to about 0.6-1 ms. What it costs:

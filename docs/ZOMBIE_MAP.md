@@ -4,8 +4,8 @@
 [docs/reference/zombie_map/SPEC.md](reference/zombie_map/SPEC.md). Nothing is hand-modelled. A data file
 describes the world (`data/levels/zombieland.json`: terrain regions, sea, river, roads, ten points of
 interest). The generator turns it into terrain, roads, bridges, buildings, props, trees, loot and spawns
-at load time. This takes about 1 s, plus about 1.6 s for the procedural foliage meshes and impostors on
-the first map load of a session.
+at load time. This takes about 1 s, plus about 0.4 s to load the tree models (built at build time) and
+the procedural grass on the first map load of a session.
 
 | Piece | Code |
 |---|---|
@@ -13,7 +13,7 @@ the first map load of a session.
 | POI planner + building / prop kit (pure) | `src/world/mapgen_poi.c/.h` |
 | Loot tables (pure) | `src/gameplay/loot.c/.h`, `data/loot.json` |
 | Game glue: collision, meshes, water, entities, rules | `src/world/openworld.c/.h`, `openworld_internal.h` |
-| Trees, grass, crops | `src/world/openworld_foliage.c`, foliage kinds in `src/render/vgeo/vgeo_procgen_foliage.c` |
+| Trees, grass, crops | `src/world/openworld_foliage.c`; tree models `assets/treefbx` via `src/render/vgeo/vgeo_tree.c` (docs/VGEO.md "Tree models"); grass / wheat in `src/render/vgeo/vgeo_procgen_foliage.c` |
 | Streaming (custom bounded provider, far tiles) | `src/world/chunks.c` (`chunks_create_custom`) |
 | Zombie hooks | `src/gameplay/zombies/horde.c` (`horde_spawn_at`, `horde_set_water`, `horde_set_sense`) |
 | Tools / tests | `tools/mapgen_preview`, `tests/test_mapgen.c` (ctest `mapgen`), `tools/tests/zl_*.cfg` |
@@ -21,8 +21,14 @@ the first map load of a session.
 ## Vegetation showcase
 
 `map vegetation` (`data/levels/vegetation.json`) is a 500 m valley that uses the same generator to show
-every foliage kind: a pine forest (NW), a broadleaf forest (NE), a dead forest (W), a mixed forest (E),
-a meadow of grass tufts and bushes in the middle, a wheat field (south) and a pond. No zombies, no POIs.
+every foliage kind: a conifer forest (NW: pine, fir, spruce), a broadleaf forest (NE: oak, beech, birch,
+elm, maple), a dead forest (W: old rooted snags), a mixed forest (E), a meadow of grass tufts, bushes
+(juniper, bamboo, small acacias) and daisies in the middle, a wheat field (south) and a pond. No
+zombies, no POIs.
+
+**Species.** A tree's role comes from the forest's `pine` / `dead` fractions as before; its species is a
+weighted pick within the role by a position hash (`openworld_foliage.c` `role_pick`, the type order of
+`render_foliage_role_types`). Every machine places the same species, and the trunk capsules match.
 
 ## Coordinates
 
@@ -101,7 +107,7 @@ handles it, and `env`, `weather` and `name` work as in other levels.
 | `pit` | `pos`, `radius`, `yaw`, `depth`, `terraces` | stepped excavation (rock risers, gravel benches) |
 | `pad` | `pos`, `size` [w, d], `yaw`, `level` (number or omitted = mean of the terrain), `blend`, `material` | flat building ground |
 | `paint` | `pos`, `size`, `yaw`, `material` | surface material only |
-| `forest` | `pos`, `radius`, `density` (trees / 100 m²), `pine` (fraction of the living trees), `dead` (fraction, default 0.035) | tree scatter + forest floor |
+| `forest` | `pos`, `radius`, `density` (trees / 100 m²), `pine` (conifer fraction of the living trees), `dead` (old-tree fraction, default 0.035) | tree scatter + forest floor |
 
 **Materials:** `grass`, `meadow`, `forest`, `dirt`, `rock`, `sand`, `gravel`, `asphalt`, `dirt_road`,
 `concrete`, `field`, `crop`, `plowed`, `mud`. Slopes over 0.85 become rock and slopes over 0.55 become
@@ -294,12 +300,29 @@ goes to the log (`src/core/crash.c`).
 The frame-graph figures include about 0.2–0.5 ms of vgeo foliage raster. The whole uncapped day script
 averaged 6.5 ms per frame, loads included.
 
+**Tree models** (docs/VGEO.md "Tree models", same script, all passes, best of 3 runs each: the GPU was
+shared with other jobs, so single runs varied by up to 2×):
+
+| Spot | Procedural trees | Tree models |
+|---|---|---|
+| city street | 3.10 ms | 3.20 ms |
+| suburbs | 3.46 ms | 3.68 ms |
+| forest, eye level | 3.41 ms | 5.14 ms (vgeo raster 0.36 → 1.79 ms) |
+| over the city | 3.15 ms | 3.12 ms |
+| overview | 3.41 ms | 3.37 ms |
+| mountain view | 3.36 ms | 3.54 ms |
+| whole script (frame avg) | 6.1 ms | 7.0 ms |
+
+Inside the forest the nearby trees (geometry up to about 120 m, then impostors) cost about 1.4 ms of
+masked card raster: Tree It cards are about 83 % transparent and do not simplify.
+
 What the map holds:
 - **Static geometry:** about 500k triangles in 1359 draws (64 m tiles × material). The renderer
   frustum-culls them per tile and detail tiles are distance-culled. Small tiles also keep the sun-cascade
   and local-light caster lists short.
 - **Collision:** 2036 static bodies.
-- **Trees and bushes:** 16.6k. They LOD, fade (850–1100 m) and switch to impostors on the vgeo path.
+- **Trees and bushes:** 16.2k imported models (13 species). They LOD, fade (850–1100 m) and switch to
+  impostors on the vgeo path (trees at 96 px across).
 - **Grass and crops:** on the streamed chunks, fading at 65 / 95 m.
 - **Terrain:** about 160 visual chunks and 256 far tiles.
 
@@ -307,9 +330,11 @@ What the map holds:
 `LIGHT_GROUP_NO_SHADOW` (`world.h`, replicated with the light group). Campfires and the fuel canopy do
 cast. With every lamp shadowed, the night city took 36 ms a frame.
 
-**Load.** The generator, raster and uploads take about 1 s. Building the 6 procedural foliage kinds
-takes about 1.6 s: cluster builds and impostor bakes run in parallel, and the tree kinds use 512 px
-atlases. A client therefore joins well inside the 4 s ENet timeout.
+**Load.** The generator, raster and uploads take about 1 s. The foliage types take about 0.4 s: the tree
+models load from the build's `assets/vgeo/trees/*.dgtree` (0.23 s for the 9 trees, textures included),
+the grass tuft and wheat are built procedurally. Without those files the game builds the species itself
+(about 1.1 s more, once: cached in `assets/cache`). A client therefore joins well inside the 4 s ENet
+timeout.
 
 ## What is placeholder
 
@@ -325,8 +350,9 @@ atlases. A client therefore joins well inside the 4 s ENet timeout.
 - **Quests.** Not implemented: the radio tower, the locked ship, the harbor control room and the bunker
   are just places with loot. The `ambience` fields are informative; there are no per-region ambient
   sounds yet.
-- **Unused assets.** The tree assets in `assets/trees` (TreeIt `.tre`, CC BY) are not used: the format is
-  not loadable. The trees are procedural vgeo foliage instead.
+- **Tree materials.** The tree models use their albedo textures only: their normal, roughness and
+  transmission maps are not used (the vgeo vertex format has no tangents, the lit shader no
+  translucency).
 - **Static wrecks.** Abandoned cars on roads cannot be driven, searched or moved.
 - **Indoor light.** Interiors get the sky ambient through the open floor plan (no indoor occlusion beyond
   GTAO), so floors read bluish. They are not much darker than outside, except at night.

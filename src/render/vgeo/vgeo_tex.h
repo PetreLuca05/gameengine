@@ -13,7 +13,7 @@
 #include "vgeo_ctx.h"
 
 #define VG_TEX_GAME 1024
-#define VG_TEX_OWN 64
+#define VG_TEX_OWN 128
 #define VG_TEX_COUNT (VG_TEX_GAME + VG_TEX_OWN)
 #define VG_TEX_BINDING 23
 

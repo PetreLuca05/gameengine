@@ -1,10 +1,12 @@
 // Trees and ground cover of open-world maps (docs/ZOMBIE_MAP.md "Vegetation"), on the vgeo foliage
 // path (masked cards, wind WPO, impostors, placement chunks):
-//   - trees (pine / broadleaf / dead) and forest underbrush (bushes) for the whole map at load, one
+//   - trees (conifer / broadleaf / dead roles, a hash-picked species of each: docs/VGEO.md "Tree
+//     models") and forest underbrush (bushes) for the whole map at load, one
 //     placement chunk per 32 m chunk (generated on the job system from mapgen_tree_density), their
 //     trunk capsules merged into one static collision mesh per 128 m tile;
-//   - grass tufts and crops per streamed terrain chunk (ow_foliage_chunk, thread-safe, by surface
-//     material: grass / meadow / forest floor / fields), loaded and freed with the chunk by chunks.c.
+//   - grass tufts, crops, meadow bushes and daisies per streamed terrain chunk (ow_foliage_chunk,
+//     thread-safe, by surface material: grass / meadow / forest floor / fields), loaded and freed with
+//     the chunk by chunks.c.
 #include "openworld_internal.h"
 #include "chunks.h"
 #include "core/jobs.h"
@@ -15,10 +17,53 @@
 #include <stdlib.h>
 #include <string.h>
 
-static const char k_tree_names[4][48] = { "tree_pine", "tree_broadleaf", "tree_dead", "test_bush" };
-enum { T_PINE, T_BROAD, T_DEAD, T_BUSH };
-static const char k_cover_names[3][48] = { "test_tuft", "crop_wheat", "test_bush" };
-enum { C_TUFT, C_CROP, C_BUSH };
+// Type tables, filled at load from the registered types (render_foliage_role_types: the same order
+// on every machine, so the hash picks below place the same species everywhere). Read-only while the
+// chunk jobs run.
+//   tree chunks:  names = the conifer, broadleaf, dead and bush species, a role = a range of them
+//   cover chunks: names = test_tuft, crop_wheat, the bush species, the flower species
+#define OW_MAX_TYPES 40
+typedef struct OwRole { int first, count; float wsum; } OwRole;
+static struct {
+    char tree_names[OW_MAX_TYPES][48];
+    float tree_w[OW_MAX_TYPES];
+    int tree_count;
+    OwRole role[RENDER_TREE_ROLES];       // T_* ranges in tree_names
+    char cover_names[OW_MAX_TYPES][48];
+    float cover_w[OW_MAX_TYPES];
+    int cover_count;
+    OwRole cover_bush, cover_flower;
+} OT;
+enum { C_TUFT, C_CROP };
+
+static void role_add(char (*names)[48], float *w, int *count, OwRole *r, int role) {
+    r->first = *count;
+    r->count = render_foliage_role_types(role, names + *count, w + *count, OW_MAX_TYPES - *count);
+    r->wsum = 0;
+    for (int i = 0; i < r->count; i++) r->wsum += w[*count + i];
+    *count += r->count;
+}
+
+static void ow_types(void) {
+    memset(&OT, 0, sizeof(OT));
+    for (int r = RENDER_TREE_CONIFER; r <= RENDER_TREE_BUSH; r++) role_add(OT.tree_names, OT.tree_w, &OT.tree_count, &OT.role[r], r);
+    dg_strcpy(OT.cover_names[C_TUFT], 48, "test_tuft");
+    dg_strcpy(OT.cover_names[C_CROP], 48, "crop_wheat");
+    OT.cover_count = 2;
+    role_add(OT.cover_names, OT.cover_w, &OT.cover_count, &OT.cover_bush, RENDER_TREE_BUSH);
+    role_add(OT.cover_names, OT.cover_w, &OT.cover_count, &OT.cover_flower, RENDER_TREE_FLOWER);
+}
+
+// The weighted type of a role for u in [0, 1); -1 when the role has none.
+static int role_pick(const OwRole *r, const float *w, float u) {
+    if (!r->count) return -1;
+    float t = u * r->wsum;
+    for (int i = 0; i < r->count - 1; i++) {
+        t -= w[r->first + i];
+        if (t < 0) return r->first + i;
+    }
+    return r->first + r->count - 1;
+}
 
 static u32 hash3(int x, int z, u32 salt) {
     u32 h = (u32)x * 73856093u ^ (u32)z * 19349663u ^ salt * 83492791u;
@@ -58,14 +103,20 @@ static int tree_chunk(const OpenWorld *o, int cx, int cz, RenderFoliageInst *out
             RenderFoliageInst *t = &out[n];
             t->pos = v3(x, mapgen_raster_height(&o->raster, x, z) - 0.15f, z);
             t->yaw = h01(h2 >> 3) * 6.2831853f;
+            float species = h01(hash3(ix, iz, o->gen.seed + 29u));
             if (pick < d * cell * cell) {
                 float k = h01(h2 >> 11);
-                t->kind = k < dead ? T_DEAD : (k < dead + pine * (1.0f - dead) ? T_PINE : T_BROAD);   // dead first, the rest split by the pine fraction
+                int role = k < dead ? RENDER_TREE_DEAD : (k < dead + pine * (1.0f - dead) ? RENDER_TREE_CONIFER : RENDER_TREE_BROADLEAF);   // dead first, the rest split by the pine fraction
+                int kind = role_pick(&OT.role[role], OT.tree_w, species);
+                if (kind < 0) continue;
+                t->kind = (u16)kind;
                 t->scale = 0.72f + 0.55f * h01(h2 >> 5);
                 n++;
             } else if (d > 0.006f && pick < d * cell * cell * 1.6f) {   // forest underbrush
-                t->kind = T_BUSH;
-                t->scale = 1.0f + 0.9f * h01(h2 >> 5);
+                int kind = role_pick(&OT.role[RENDER_TREE_BUSH], OT.tree_w, species);
+                if (kind < 0) continue;
+                t->kind = (u16)kind;
+                t->scale = 0.65f + 0.5f * h01(h2 >> 5);
                 n++;
             }
         }
@@ -79,13 +130,14 @@ static void tree_range(void *ctx, int begin, int end) {
         int cx = j->origin + i % j->n, cz = j->origin + i / j->n;
         int n = tree_chunk(j->o, cx, cz, tmp, 256);
         j->count[i] = n;
-        j->blob[i] = n ? render_foliage_make_chunk(cx, cz, k_tree_names, 4, tmp, n, &j->size[i]) : NULL;
+        j->blob[i] = n ? render_foliage_make_chunk(cx, cz, (const char(*)[48])OT.tree_names, OT.tree_count, tmp, n, &j->size[i]) : NULL;
     }
     free(tmp);
 }
 
 void ow_foliage_load(World *w, OpenWorld *o) {
     if (!render_foliage_map_types()) { log_warn("openworld: vgeo foliage unavailable (no trees)"); return; }
+    ow_types();
     u64 t0 = SDL_GetTicksNS();
     TreeJob j;
     j.o = o;
@@ -158,7 +210,8 @@ void ow_foliage_frame(World *w, OpenWorld *o, vec3 cam) {
 }
 
 // Ground cover of a streamed chunk: tufts on grass / meadow / forest floor, wheat on fields, a few
-// bushes on meadows; nothing on roads, lots, sand, rock, water or inside keep-outs.
+// bushes on meadows, daisies on meadows and grass; nothing on roads, lots, sand, rock, water or inside
+// keep-outs.
 void *ow_foliage_chunk(void *user, int cx, int cz, size_t *size) {
     const OpenWorld *o = (const OpenWorld *)user;
     *size = 0;
@@ -188,7 +241,15 @@ void *ow_foliage_chunk(void *user, int cx, int cz, size_t *size) {
             }
             float pick = h01(hash3(ix, iz, o->gen.seed + 202u));
             if (pick >= dens) continue;
-            if (mat == MGM_MEADOW && pick < 0.012f) kind = C_BUSH;
+            float species = h01(hash3(ix, iz, o->gen.seed + 303u));
+            bool bush = false;
+            if (mat == MGM_MEADOW && pick < 0.012f) {
+                int k = role_pick(&OT.cover_bush, OT.cover_w, species);
+                if (k >= 0) kind = k, bush = true;
+            } else if ((mat == MGM_MEADOW && pick < 0.05f) || (mat == MGM_GRASS && pick < 0.012f)) {
+                int k = role_pick(&OT.cover_flower, OT.cover_w, species);
+                if (k >= 0) kind = k;
+            }
             float y = mapgen_raster_height(&o->raster, x, z);
             if (mapgen_raster_slope(&o->raster, x, z) > 1.0f) continue;
             if (mapgen_water_level(&o->gen, x, z) > y - 0.15f) continue;
@@ -197,7 +258,8 @@ void *ow_foliage_chunk(void *user, int cx, int cz, size_t *size) {
             t->pos = v3(x, y - 0.03f, z);
             t->yaw = h01(h >> 5) * 6.2831853f;
             t->kind = (u16)kind;
-            t->scale = kind == C_CROP ? 0.85f + 0.3f * h01(h >> 3) : (kind == C_BUSH ? 1.2f + 0.8f * h01(h >> 3) : 0.75f + 0.6f * h01(h >> 3));
+            t->scale = kind == C_CROP ? 0.85f + 0.3f * h01(h >> 3)
+                                      : bush ? 0.6f + 0.45f * h01(h >> 3) : 0.75f + 0.6f * h01(h >> 3);
             // crops twice as dense (a second stalk clump in the cell)
             if (kind == C_CROP) {
                 RenderFoliageInst *t2 = &tmp[n++];
@@ -208,7 +270,7 @@ void *ow_foliage_chunk(void *user, int cx, int cz, size_t *size) {
                 t2->yaw += 1.7f;
             }
         }
-    void *blob = n ? render_foliage_make_chunk(cx, cz, k_cover_names, 3, tmp, n, size) : NULL;
+    void *blob = n ? render_foliage_make_chunk(cx, cz, (const char(*)[48])OT.cover_names, OT.cover_count, tmp, n, size) : NULL;
     free(tmp);
     return blob;
 }

@@ -107,8 +107,8 @@ struct VgPaletteSlot { uint first, prev_first, bone_count, pad0; float max_scale
 #define WPO_DISPLACE 256u
 #define VG_DISPLACE_MAX 0.6
 // Material / impostor / displacement textures (vgeo_tex.h): binding 23, renderer texture ids [0, 1024),
-// the vgeo module's own [1024, 1088).
-#define VG_TEX_COUNT 1088
+// the vgeo module's own [1024, 1152).
+#define VG_TEX_COUNT 1152
 
 // Descriptor set of the vgeo bindings (the resolve passes put it after the renderer's sets) and the
 // push constants: VG_NO_PUSH for shaders with their own push block (the view is then VG_VIEW_INDEX).
@@ -288,7 +288,9 @@ float vg_project_size(vec4 s) {
 }
 
 bool vg_use_impostor(VgMesh m, vec4 s) {   // s: the WPO-inflated sphere; the switch measures the mesh's own size
-    return m.impostor != 0xFFFFFFFFu && V.foliage.w > 0.0 && (vg_flags() & VGV_ORTHO) == 0u && vg_project_size(vec4(s.xyz, s.w - m.max_wpo)) < V.foliage.w;
+    uint k = m.impostor_grid >> 16;   // the mesh's switch scale (1/16 units, 0 = 1x)
+    float px = V.foliage.w * (k != 0u ? float(k) / 16.0 : 1.0);
+    return m.impostor != 0xFFFFFFFFu && V.foliage.w > 0.0 && (vg_flags() & VGV_ORTHO) == 0u && vg_project_size(vec4(s.xyz, s.w - m.max_wpo)) < px;
 }
 
 // Per-pixel dither threshold in [0, 1) (interleaved gradient noise), rotated per frame for TAA.

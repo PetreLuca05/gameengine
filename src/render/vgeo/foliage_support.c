@@ -69,7 +69,9 @@ float vgeo_project_size(const VgViewGpu *v, const float s[4]) {
 
 bool vgeo_use_impostor(const VgViewGpu *v, const VgMesh *m, const float s[4]) {
     float t[4] = { s[0], s[1], s[2], s[3] - m->max_wpo };   // the mesh's own size, as vg_use_impostor
-    return m->impostor != ~0u && v->foliage[3] > 0.0f && !(v->flags & VGV_ORTHO) && vgeo_project_size(v, t) < v->foliage[3];
+    u32 k = m->impostor_grid >> 16;   // the mesh's switch scale (1/16 units, 0 = 1x)
+    float px = v->foliage[3] * (k ? (float)k / 16.0f : 1.0f);
+    return m->impostor != ~0u && v->foliage[3] > 0.0f && !(v->flags & VGV_ORTHO) && vgeo_project_size(v, t) < px;
 }
 
 void vgeo_foliage_instance(VgInstance *out, u32 mesh, const float pos[3], float yaw, float scale) {
@@ -285,9 +287,14 @@ bool vgeo_foliage_impostor_upload(VgScene *s, VgTextures *t, u32 mesh, const VgB
     }
     VgMesh *m = &s->meshes[mesh];
     m->impostor = ta | tn << 16;
-    m->impostor_grid = h->grid;
+    m->impostor_grid = h->grid | (m->impostor_grid & 0xFFFF0000u);   // keeps a switch scale set before
     m->impostor_radius = h->radius;
     return true;
+}
+
+void vgeo_impostor_scale(VgScene *s, u32 mesh, float scale) {
+    u32 k = (u32)DG_CLAMP(scale * 16.0f + 0.5f, 0.0f, 65535.0f);
+    s->meshes[mesh].impostor_grid = (s->meshes[mesh].impostor_grid & 0xFFFFu) | k << 16;
 }
 
 // ------------------------------------------------------------------ displacement buffer
