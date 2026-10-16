@@ -51,7 +51,11 @@ void emit(uint inst, VgXf x, uint slot, uint ci, bool retest) {
     // the shadow pass draws with the alpha test.
     bool near = (vg_flags() & VGV_ORTHO) == 0u && dot(V.planes[4].xyz, cs.xyz) + V.planes[4].w - cs.w < V.params.z;
     // the SW / HW size test on the cluster's own size (the WPO margin only keeps the culling safe)
-    bool sw = (vg_flags() & VGV_ORTHO) != 0u ? (mflags & VGM_MASKED) != 0u : !near && vg_project_size(vec4(cs.xyz, x.skin ? cs.w : cs.w - x.wpo)) < V.params.y;
+    // Masked clusters are foliage cards: few, large triangles. SW scans one triangle per thread, so they
+    // go SW only once their triangles are small: below sw_px x sqrt(tris / 128) / 2 across.
+    float swpx = V.params.y;
+    if ((mflags & VGM_MASKED) != 0u) swpx *= 0.5 * sqrt(float((pool[w + 10u] >> 8) & 0xFFu) / 128.0);
+    bool sw = (vg_flags() & VGV_ORTHO) != 0u ? (mflags & VGM_MASKED) != 0u : !near && vg_project_size(vec4(cs.xyz, x.skin ? cs.w : cs.w - x.wpo)) < swpx;
     uint cap = V.caps0.z;
     uint k = vg_append(sw ? VGN_SW : VGN_HW, cap);
     if (k == 0xFFFFFFFFu) return;

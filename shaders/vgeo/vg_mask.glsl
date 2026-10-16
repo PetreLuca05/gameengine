@@ -65,12 +65,5 @@ bool vg_impostor_pass(VgImpostorTri it, ivec2 px) {
     }
     return a >= 0.5;
 }
-
-#ifdef VG_VIS
-// The pixel already holds a nearer (or equal, larger payload) surface: the atomic would lose, the
-// test can be skipped. A stale read only means the test runs.
-bool vg_vis_loses(uint px, uint py, float z, uint payload) {
-    uint64_t v = uint64_t(floatBitsToUint(1.0 - z)) << 32 | uint64_t(payload);
-    return vis[py * uint(V.viewport.x) + px] >= v;
-}
-#endif
+// (A visibility buffer read skipping the test where the atomic would lose anyway measured slower: the
+// dependent read costs more than the plane + one mask fetch it saves.)

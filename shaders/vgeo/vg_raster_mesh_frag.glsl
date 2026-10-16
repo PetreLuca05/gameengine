@@ -23,7 +23,6 @@ void main() {
     uint x = uint(gl_FragCoord.x), y = uint(gl_FragCoord.y);
 #if VG_HW_MASKED
     if ((i_info & 3u) != 0u) {
-        if (vg_vis_loses(x, y, gl_FragCoord.z, i_payload)) return;
         VgUvPlane pl;
         pl.u = i_pu;
         pl.v = i_pv;
