@@ -189,6 +189,7 @@ void vkr_recreate_linear_sampler(void) {
     create_linear_sampler();
     vkr_rewrite_all_texture_sets();
     vkg_samplers_changed();
+    vks_samplers_changed();
 }
 
 void vkr_create_samplers(void) {
@@ -550,6 +551,64 @@ static void record_texture_upload(VkCommandBuffer cmd, Upload *u) {
     t->ready = true;
 }
 
+void vkr_upload_image(VkImage image, u32 w, u32 h, u32 mips, u32 layers, const void *data, const size_t *mip_offsets, size_t size) {
+    Upload *u = push_upload();
+    if (!u) return;
+    u->kind = UPLOAD_IMAGE;
+    u->staging = vkr_buffer_create(size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, true);
+    memcpy(u->staging.mapped, data, size);
+    u->image = image;
+    u->w = w;
+    u->h = h;
+    u->layers = layers;
+    u->levels_in_data = (int)DG_MIN(mips, 16u);
+    for (int i = 0; i < u->levels_in_data; i++) u->level_offsets[i] = mip_offsets[i];
+}
+
+// An image destroyed before its queued upload was recorded (replaced within one frame).
+void vkr_cancel_image_upload(VkImage image) {
+    for (int i = 0; i < R->upload_count; i++)
+        if (R->uploads[i].kind == UPLOAD_IMAGE && R->uploads[i].image == image) R->uploads[i].image = VK_NULL_HANDLE;
+}
+
+// UPLOAD_IMAGE: every mip / layer from the staging buffer, then shader-readable (all layers).
+static void record_image_upload(VkCommandBuffer cmd, Upload *u) {
+    if (!u->image) return;   // cancelled
+    VkImageMemoryBarrier2 b = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
+    b.srcStageMask = VK_PIPELINE_STAGE_2_NONE;
+    b.dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+    b.dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+    b.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    b.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    b.image = u->image;
+    b.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    b.subresourceRange.levelCount = (u32)u->levels_in_data;
+    b.subresourceRange.layerCount = u->layers;
+    VkDependencyInfo dep = { VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+    dep.imageMemoryBarrierCount = 1;
+    dep.pImageMemoryBarriers = &b;
+    vkCmdPipelineBarrier2(cmd, &dep);
+    for (int lvl = 0; lvl < u->levels_in_data; lvl++) {
+        VkBufferImageCopy region = { 0 };
+        region.bufferOffset = u->level_offsets[lvl];
+        region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        region.imageSubresource.mipLevel = (u32)lvl;
+        region.imageSubresource.layerCount = u->layers;
+        region.imageExtent.width = DG_MAX(1u, u->w >> lvl);
+        region.imageExtent.height = DG_MAX(1u, u->h >> lvl);
+        region.imageExtent.depth = 1;
+        vkCmdCopyBufferToImage(cmd, u->staging.buffer, u->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+    }
+    b.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+    b.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+    b.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+    b.dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT;
+    b.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    b.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    vkCmdPipelineBarrier2(cmd, &dep);
+}
+
 void vkr_record_uploads(VkCommandBuffer cmd) {
     if (!R->upload_count) return;
     for (int i = 0; i < R->upload_count; i++) {
@@ -557,6 +616,8 @@ void vkr_record_uploads(VkCommandBuffer cmd) {
         if (u->kind == UPLOAD_BUFFER) {
             VkBufferCopy c = { 0, 0, u->size };
             vkCmdCopyBuffer(cmd, u->staging.buffer, u->dst, 1, &c);
+        } else if (u->kind == UPLOAD_IMAGE) {
+            record_image_upload(cmd, u);
         } else {
             record_texture_upload(cmd, u);
         }
