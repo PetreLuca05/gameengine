@@ -11,6 +11,7 @@
 #include "gameplay/weapons.h"
 #include "gameplay/characters.h"
 #include "gameplay/entities.h"
+#include "editor/handpose/hp_system.h"
 #include "cJSON.h"
 #include <stdlib.h>
 #include <math.h>
@@ -415,7 +416,7 @@ void hands_update(const HandsInput *in) {
     if (in->use_pressed && ent_valid(w, in->focus) && H->ia_phase == IA_NONE) {
         int fi = (int)ENT_INDEX(in->focus);
         const InteractDef *def = w->inter[fi].def;
-        if (def && def->hand_target) {
+        if (handpose_interact_has_target(def)) {
             H->ia_phase = IA_REACH;
             H->ia_target = in->focus;
             H->ia_t = 0;
@@ -458,7 +459,7 @@ void hands_update(const HandsInput *in) {
             if (!uses_hand) continue;
             vec3 tp;
             quat tr;
-            if (valid && def->hand_target(w, H->ia_target, in->player, h, &tp, &tr)) {
+            if (valid && handpose_interact_target(w, H->ia_target, in->player, h, &tp, &tr)) {
                 H->ia_last_pos[h] = tp;
                 H->ia_last_rot[h] = tr;
             }

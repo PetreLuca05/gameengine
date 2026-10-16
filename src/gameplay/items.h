@@ -30,6 +30,7 @@ typedef struct ItemDef {
     int weapon;            // index into weapon defs (ITEM_WEAPON), -1 otherwise
     char hold_style[16];   // third-person hold style for non-weapon items ("item_small", "item_large")
     ItemSockets sockets;   // held-item sockets (non-weapons)
+    bool has_hold;         // the JSON has a "hold" block (hand pose discovery, docs/HANDPOSE.md)
     u8 attachment;         // ITEM_ATTACHMENT: the attachment id it mounts (gameplay/inv_ops.c)
     char icon[64];         // UI icon override (assets path, "icon" in the item JSON); empty = baked icon
     u8 vehicle_use;        // VehicleUse: consumables used on a vehicle (docs/VEHICLES.md)
@@ -159,6 +160,7 @@ typedef struct WeaponDef {
     // Third-person procedural hold ("hold" block): style + item sockets (shared with the viewmodel grip data).
     char hold_style[16];
     ItemSockets sockets;
+    bool has_hold;            // the JSON has a "hold" block (hand pose discovery)
     // Per-body-part damage multipliers ("part_mult"), 1.0 = unlisted; range falloff.
     float part_mult[BP_COUNT];
     float falloff_start, falloff_end, falloff_min;

@@ -2,6 +2,7 @@
 #include "gameplay/attachments.h"
 #include "game.h"
 #include "game_internal.h"
+#include "editor/handpose/hp_system.h"
 #include "core/engine.h"
 #include "core/cvar.h"
 #include "core/log.h"
@@ -604,6 +605,7 @@ float game_ads_vis(void) {
 }
 
 void game_frame(float dt) {
+    handpose_system_poll();
     if (!G->world) return;
     bool ui_blocking = G->menu_open || G->inventory_open || G->container_open || G->bench_open || console_is_open();
     InputFrame f = input_frame();
@@ -619,7 +621,7 @@ void game_frame(float dt) {
         G->use_focus_hands = -1;
         if (ent_valid(G->world, G->focus)) {
             const InteractDef *def = G->world->inter[ENT_INDEX(G->focus)].def;
-            if (def && def->hand_target) {
+            if (handpose_interact_has_target(def)) {
                 G->use_focus_point = ent_focus_point(G->world, G->focus);
                 G->use_focus_hands = (int)def->hands;
             }
@@ -693,6 +695,7 @@ bool game_host(const char *map) {
     daynight_level_loaded(G->world);
     weather_level_loaded(G->world, G->map);
     vehicles_level_loaded(G->world, G->map);
+    handpose_system_scan(G->world, false);   // interactables placed in this level
     flesh_fx_clear();
     horde_level_reset();
     G->mode = GM_HOST;
@@ -717,6 +720,7 @@ void game_cl_welcome(int slot, const char *map, u32 seed, u32 server_tick) {
     daynight_level_loaded(G->world);   // config; the time itself arrives with every snapshot
     weather_level_loaded(G->world, map);   // puddle mask; the weather state arrives with the snapshots
     vehicles_level_loaded(G->world, map);   // spike zones; vehicles replicate
+    handpose_system_scan(G->world, false);   // interactables placed in this level
     flesh_fx_clear();
     horde_level_reset();
     G->mode = GM_CLIENT;
@@ -1289,6 +1293,7 @@ void game_init(void) {
     camera_register_cvars();
     camera_fp_register_cvars();
     game_holdpoint_register();
+    handpose_system_init();
     game_post_init();
     player_register_cvars();
     // Animation assets (shared skeleton) before anything spawns characters.
@@ -1317,6 +1322,7 @@ void game_init(void) {
     horde_init();
     hands_init();
     game_render_init();
+    handpose_system_startup();   // items, attachments, vehicles and interactables are registered now
 }
 
 void game_shutdown(void) {

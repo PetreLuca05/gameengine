@@ -5,8 +5,11 @@
 #include "anim/anim_library.h"
 #include "anim/character_rt.h"
 #include "anim/handpose.h"
+#include "editor/handpose/hp_discover.h"
 #include "gameplay/items.h"
 #include "core/engine.h"
+#include "core/platform.h"
+#include <SDL3/SDL.h>
 #include "core/log.h"
 #include "cJSON.h"
 #include <math.h>
@@ -438,6 +441,210 @@ static void test_glue_tweaks(const ItemDB *idb) {
     free(rt);
 }
 
+
+// ------------------------------------------------------------------ discovery
+
+// A plain text scan of the asset files (what `grep` sees), independent of the parsers.
+static int grep_sources(char ids[][64], int max) {
+    int n = 0;
+    // items.json: one chunk per "id" (an item may span several lines).
+    char *txt = platform_read_file("data/items.json", NULL);
+    for (char *id = txt ? strstr(txt, "\"id\":") : NULL; id && n < max;) {
+        char *next = strstr(id + 5, "\"id\":");
+        char save = 0;
+        if (next) { save = *next; *next = 0; }
+        char v[48];
+        if (strstr(id, "\"hold\"") && !strstr(id, "\"kind\": \"weapon\"") && sscanf(id, "\"id\": \"%47[^\"]\"", v) == 1) snprintf(ids[n++], 64, "%s", v);
+        if (next) *next = save;
+        id = next;
+    }
+    free(txt);
+    static const struct { const char *dir, *needle, *prefix; } dirs[] = {
+        { "data/weapons", "\"hold\"", "" }, { "assets/attachments", "\"grip_l\"", "att_" }, { "assets/vehicles", "\"driver\": true", "veh_" },
+    };
+    for (int d = 0; d < 3; d++) {
+        int count = 0;
+        char base[512];
+        platform_data_path(dirs[d].dir, base, sizeof(base));
+        char **files = SDL_GlobDirectory(base, "*.json", 0, &count);
+        for (int i = 0; files && i < count && n < max; i++) {
+            char path[800];
+            snprintf(path, sizeof(path), "%s/%s", base, files[i]);
+            char *t = platform_read_file(path, NULL);
+            if (t && strstr(t, dirs[d].needle)) {
+                char v[48] = "";
+                const char *key = d == 2 ? "\"name\":" : "\"id\":";
+                char *k = strstr(t, key);
+                if (k && sscanf(k + strlen(key), " \"%47[^\"]\"", v) == 1) snprintf(ids[n++], 64, "%s%s", dirs[d].prefix, v);
+            }
+            free(t);
+        }
+        SDL_free(files);
+    }
+    return n;
+}
+
+static int count_files(const char *dir) {
+    int count = 0;
+    char **files = SDL_GlobDirectory(dir, "*.json", 0, &count);
+    SDL_free(files);
+    return files ? count : 0;
+}
+
+// Removes every *.json in dir (and dir/styles), then the directories.
+static void clear_dir(const char *dir) {
+    const char *subs[2] = { "/styles", "" };
+    for (int k = 0; k < 2; k++) {
+        char d[400];
+        snprintf(d, sizeof(d), "%s%s", dir, subs[k]);
+        int count = 0;
+        char **files = SDL_GlobDirectory(d, "*.json", 0, &count);
+        for (int i = 0; files && i < count; i++) {
+            char p[600];
+            snprintf(p, sizeof(p), "%s/%s", d, files[i]);
+            remove(p);
+        }
+        SDL_free(files);
+        SDL_RemovePath(d);
+    }
+}
+
+static void test_discovery(const ItemDB *idb) {
+    // 1) Discovery == the text scan of the assets.
+    HandPoseSourceList src = { 0 };
+    hp_sources_from_items(&src, idb, &L->proc);
+    hp_sources_from_vehicle_dir(&src, "assets/vehicles");
+    static char grep_ids[128][64];
+    int gn = grep_sources(grep_ids, 128);
+    int matched = 0;
+    for (int g = 0; g < gn; g++) {
+        bool found = false;
+        for (int k = 0; k < src.count && !found; k++) {
+            char id[96];
+            handpose_entry_id(id, sizeof(id), src.v[k].category, src.v[k].name);
+            found = !strcmp(id, grep_ids[g]);
+        }
+        CHECK(found, "discovery missed %s (found by the text scan)", grep_ids[g]);
+        matched += found;
+    }
+    CHECK(gn == src.count, "discovery found %d sources, the text scan %d", src.count, gn);
+    printf("  discovery: %d sources, text scan %d, matched %d\n", src.count, gn, matched);
+    // Hands / states of a few known sources.
+    for (int k = 0; k < src.count; k++) {
+        const HandPoseSource *s = &src.v[k];
+        if (s->category == HPC_WEAPON && !strcmp(s->name, "rifle"))
+            CHECK(s->hands == 3 && (s->states & (1u << HPS_ADS)) && (s->states & (1u << HPS_SPRINT)) && !strcmp(s->inherits, "style/rifle"), "rifle source: hands %d states %x %s", s->hands, s->states, s->inherits);
+        if (s->category == HPC_WEAPON && !strcmp(s->name, "knife")) CHECK(s->hands == 2, "knife: one hand (%d)", s->hands);
+        if (s->category == HPC_ITEM && !strcmp(s->name, "phone"))
+            CHECK((s->states & (1u << HPS_PHONE_PORTRAIT)) && (s->states & (1u << HPS_PHONE_LANDSCAPE)) && (s->hands & 1), "phone: portrait + landscape, both hands (%x, %d)", s->states, s->hands);
+        if (s->category == HPC_ATTACHMENT) CHECK(s->hands == 1 && s->inherits[0], "attachment grip %s: left hand, inherits a host style", s->name);
+        if (s->category == HPC_VEHICLE) CHECK(s->relative && (s->states & (1u << HPS_DRIVE)) && s->hands == 3, "vehicle %s: relative, drive, both hands", s->name);
+    }
+
+    // 2) New sources: an item added to items.json and an interactable placed in the dev room
+    // (a type with no hand target in code) -> exactly one stub each, nothing else written.
+    const char *tmp = "test_handpose_tmp";
+    char dir[300], rel[300];
+    snprintf(dir, sizeof(dir), "%s/handposes", tmp);
+    clear_dir(dir);
+    SDL_CreateDirectory(dir);
+    char *items = platform_read_file("data/items.json", NULL);
+    char *at = items ? strstr(items, "\"items\": [") : NULL;
+    CHECK(at != NULL, "items.json layout");
+    if (!at) return;
+    at += strlen("\"items\": [");
+    char *mod = (char *)malloc(strlen(items) + 512);
+    size_t pre = (size_t)(at - items);
+    memcpy(mod, items, pre);
+    sprintf(mod + pre, "\n    { \"id\": \"test_crowbar\", \"name\": \"Crowbar\", \"kind\": \"misc\", \"size\": [0.02, 0.3, 0.02], \"hold\": { \"style\": \"item_large\" } },%s", at);
+    snprintf(rel, sizeof(rel), "%s/items_plus.json", tmp);
+    platform_write_file(rel, mod, strlen(mod));
+    ItemDB *db2 = (ItemDB *)calloc(1, sizeof(ItemDB));
+    items_load(db2, rel, "data/weapons");
+    HandPoseSourceList src2 = { 0 };
+    hp_sources_from_items(&src2, db2, &L->proc);
+    hp_sources_from_vehicle_dir(&src2, "assets/vehicles");
+    hp_source_from_interactable(&src2, "test_crank", 1 /* both hands */, 1.5f, false, "interactable:test_crank (level:devroom)");
+    HandPoseDB db;
+    handpose_db_init(&db);
+    handpose_add_style_defaults(&db, &L->proc);
+    HandPoseScanOpts o = { dir, NULL, false };
+    HandPoseScanReport r;
+    hp_scan(&db, &src, &o, &r);   // the shipped assets first
+    int base_files = count_files(dir);
+    CHECK(r.created == src.count && base_files == src.count, "first scan: %d created, %d files for %d sources", r.created, base_files, src.count);
+    hp_scan(&db, &src2, &o, &r);
+    CHECK(r.created == 2 && r.written == 2 && count_files(dir) == base_files + 2, "new item + interactable: %d created, %d written (want 2)", r.created, r.written);
+    int ci = handpose_find(&db, "test_crowbar"), ii = handpose_find(&db, "use_test_crank");
+    CHECK(ci >= 0 && ii >= 0, "stub entries missing");
+    if (ci >= 0) {
+        const HandPoseEntry *e = &db.e[ci];
+        CHECK(!strcmp(e->inherits, "style/item_large") && e->hands == (2 | (proc_hold_style(&L->proc, proc_hold_style_index(&L->proc, "item_large"))->left_hand && db2->items[1].sockets.has_left ? 1 : 0)) &&
+              !e->reviewed && !handpose_entry_has_overrides(e) && e->category == HPC_ITEM,
+              "crowbar stub: inherits %s hands %d reviewed %d", e->inherits, e->hands, e->reviewed);
+        CHECK(e->states == hp_style_states(&L->proc, "item_large"), "crowbar stub states %x", e->states);
+    }
+    if (ii >= 0) {
+        const HandPoseEntry *e = &db.e[ii];
+        CHECK(e->hands == 3 && (e->states & (1u << HPS_USE)) && (e->states & (1u << HPS_HOLD)) && e->relative && e->auto_placed && !e->reviewed &&
+              !strcmp(e->inherits, "style/grip_grab"),
+              "crank stub: hands %d states %x relative %d auto %d", e->hands, e->states, e->relative, e->auto_placed);
+        CHECK((e->layer[0][HPS_DEFAULT].set & HPL_SOCKET) && (e->layer[1][HPS_DEFAULT].set & HPL_SOCKET) && e->layer[0][HPS_DEFAULT].socket.t.x < 0,
+              "auto-placed sockets on both hands, apart");
+    }
+    // The stub files read back as the same entries.
+    HandPoseDB back;
+    handpose_db_init(&back);
+    handpose_db_load_dir(&back, dir);
+    int bi = handpose_find(&back, "use_test_crank");
+    CHECK(bi >= 0 && back.e[bi].auto_placed && back.e[bi].hands == 3 && back.e[bi].states == db.e[ii].states, "stub file round trip");
+    handpose_db_free(&back);
+    // Idempotent: a rescan creates nothing.
+    hp_scan(&db, &src2, &o, &r);
+    CHECK(r.created == 0 && r.written == 0, "rescan created %d", r.created);
+    // Never over a file: an existing file for a source the DB doesn't know stays untouched.
+    char path[400];
+    snprintf(path, sizeof(path), "%s/test_kept.json", dir);
+    const char *mine = "{ \"schema\": 1, \"reviewed\": true, \"note\": \"hand-made\" }\n";
+    platform_write_file(path, mine, strlen(mine));
+    hp_source_from_interactable(&src2, "test_kept_src", 0, 0, true, "interactable:x");
+    snprintf(src2.v[src2.count - 1].name, sizeof(src2.v[0].name), "kept");
+    src2.v[src2.count - 1].category = HPC_ITEM;
+    snprintf(src2.v[src2.count - 1].name, sizeof(src2.v[0].name), "test_kept");
+    hp_scan(&db, &src2, &o, &r);
+    char *now = platform_read_file(path, NULL);
+    CHECK(now && !strcmp(now, mine), "an existing file was overwritten by a stub");
+    free(now);
+    src2.count--;
+    remove(path);
+    // 3) Remove both sources: their stubs are orphaned, reported, removed only on request.
+    src.categories |= 1u << HPC_INTERACT;   // the game's list always covers the registered interactables
+    hp_scan(&db, &src, &o, &r);
+    ci = handpose_find(&db, "test_crowbar");
+    ii = handpose_find(&db, "use_test_crank");
+    CHECK(ci >= 0 && db.e[ci].orphan && ii >= 0 && db.e[ii].orphan, "removed sources not orphaned");
+    // + the never-overwrite case's entry (in memory only, its source removed too).
+    CHECK(r.orphans == 3, "orphan count %d", r.orphans);
+    char *rep = (char *)malloc(65536);
+    hp_report_text(&db, rep, 65536);
+    CHECK(strstr(rep, "orphaned") && strstr(rep, "test_crowbar") && strstr(rep, "use_test_crank"), "report doesn't list the orphans");
+    free(rep);
+    CHECK(count_files(dir) == base_files + 2, "orphans deleted without confirmation");
+    CHECK(!hp_remove_orphan(&db, handpose_find(&db, "rifle"), dir, NULL), "a live entry was removable");
+    hp_remove_orphan(&db, handpose_find(&db, "test_crowbar"), dir, NULL);
+    hp_remove_orphan(&db, handpose_find(&db, "use_test_crank"), dir, NULL);
+    CHECK(count_files(dir) == base_files && handpose_find(&db, "test_crowbar") < 0, "orphan removal");
+    handpose_db_free(&db);
+    hp_sources_free(&src);
+    hp_sources_free(&src2);
+    free(items);
+    free(mod);
+    free(db2);
+    SDL_RemovePath(rel);
+    clear_dir(dir);
+    SDL_RemovePath(tmp);
+}
+
 int main(int argc, char **argv) {
     (void)argc;
     (void)argv;
@@ -454,6 +661,7 @@ int main(int argc, char **argv) {
     test_mirror_limits();
     test_contact();
     test_glue_tweaks(db);
+    test_discovery(db);
     printf("%d checks, %d failed\n", g_checks, g_fail);
     return g_fail ? 1 : 0;
 }
