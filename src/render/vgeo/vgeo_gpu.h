@@ -5,6 +5,7 @@
 #define DG_VGEO_GPU_H
 
 #include "core/base.h"
+#include <math.h>
 
 #define VGEO_MAGIC 0x4F454756u           // 'VGEO'
 #define VGEO_FILE_VERSION 1
@@ -107,6 +108,79 @@ typedef struct VgInstance {
     u32 cell;                    // owning placement cell
 } VgInstance;
 
+// Placement cell (8 m): the first level of instance culling. Instances of a cell are contiguous.
+typedef struct VgCell { float min[3]; u32 first; float max[3]; u32 count; } VgCell;
+#define VGEO_CELL_SIZE 8.0f
+
+// ------------------------------------------------------------------ culling (Phase 2)
+
+#define VG_MAX_VIEWS 4               // main camera + 3 shadow cascades
+#define VG_PAGE_WORDS (VGEO_PAGE_SIZE / 4u)
+#define VG_CLUSTER_BITS 12           // visible entry: page slot << 12 | cluster within the page
+enum VgViewFlags {
+    VGV_NO_FRUSTUM = 1u << 0,        // tests: LOD selection only
+    VGV_NO_CONE = 1u << 1,
+    VGV_NO_OCCLUSION = 1u << 2,
+    VGV_ORTHO = 1u << 3,             // shadow cascades: error projects without distance
+    VGV_TWO_PASS = 1u << 4,          // pass 2 re-tests pass 1 occluders against the current Hi-Z
+};
+
+// Per-view constants (std430, binding 0). Planes are normalised (inside: dot(n, p) + d >= 0).
+typedef struct VgViewGpu {
+    float view_proj[16];
+    float prev_view_proj[16];        // the view the previous Hi-Z was built with (pass 1)
+    float planes[6][4];
+    float cam_pos[3], proj_scale;    // proj_scale = render_h / (2 tan(fov / 2)), ortho: px per metre
+    float error_px, sw_px, znear;
+    u32 flags;                       // VgViewFlags
+    float viewport[4];               // w, h, 1 / w, 1 / h
+    float hiz_prev[4];               // mip 0 w, h, mip count, valid
+    float hiz_cur[4];
+    u32 cell_count, instance_count, max_depth, pad0;
+    u32 cap_nodes, cap_groups, cap_visible, cap_occluded;
+    u32 cap_cells, cap_instances, cap_requests, pad1;
+} VgViewGpu;
+
+// Counters (binding 8): indirect dispatch args first (x, y, z, unused), then counts.
+enum VgArgs { VGA_INST, VGA_NODE, VGA_GROUP, VGA_INSTLIST, VGA_OCCL, VGA_COUNT = 8 };
+enum VgCount {
+    VGN_CELLS_VIS, VGN_CELLS_OCC, VGN_INST_VIS, VGN_INST_OCC,
+    VGN_NODEQ0, VGN_NODEQ1, VGN_NODEQ2,          // node queue regions (0 / 1 ping-pong, 2 = pass 2 seeds)
+    VGN_NODES_VISITED, VGN_NODES_OCC,
+    VGN_GROUPS0, VGN_GROUPS1,                    // group items, pass 1 / pass 2
+    VGN_CLUSTERS_SELECTED, VGN_HW, VGN_SW, VGN_HW_P1, VGN_SW_P1,
+    VGN_CL_OCC, VGN_PAGE_REQ, VGN_OVERFLOW, VGN_TRIS, VGN_INST_P2, VGN_CL_P2, VGN_CELLS_P2,
+    VGN_COUNT = 32
+};
+typedef struct VgCounters { u32 args[VGA_COUNT][4]; u32 n[VGN_COUNT]; } VgCounters;
+
+// Push constants of every cull kernel (48 B).
+typedef struct VgPush { u32 pass, in_region, out_region, view; u32 a[8]; } VgPush;
+
+// Instance rotation: smallest-three, 10 bits per component, index of the dropped one in the top 2.
+DG_INLINE u32 vg_quat_encode(const float q[4]) {
+    int big = 0;
+    for (int i = 1; i < 4; i++) if (fabsf(q[i]) > fabsf(q[big])) big = i;
+    float s = q[big] < 0 ? -1.0f : 1.0f;
+    u32 out = (u32)big << 30, k = 0;
+    for (int i = 0; i < 4; i++) {
+        if (i == big) continue;
+        float v = q[i] * s * 1.41421356f * 0.5f + 0.5f;
+        int iv = (int)lrintf(v * 1023.0f);
+        out |= (u32)(iv < 0 ? 0 : (iv > 1023 ? 1023 : iv)) << (k * 10);
+        k++;
+    }
+    return out;
+}
+DG_INLINE void vg_quat_decode(u32 e, float q[4]) {
+    u32 big = e >> 30;
+    float v[3];
+    for (int k = 0; k < 3; k++) v[k] = ((float)((e >> (k * 10)) & 1023u) / 1023.0f * 2.0f - 1.0f) * 0.70710678f;
+    float w = sqrtf(fmaxf(0.0f, 1.0f - v[0] * v[0] - v[1] * v[1] - v[2] * v[2]));
+    u32 k = 0;
+    for (u32 i = 0; i < 4; i++) q[i] = i == big ? w : v[k++];
+}
+
 _Static_assert(sizeof(VgNode) == 32, "VgNode");
 _Static_assert(sizeof(VgGroup) == 32, "VgGroup");
 _Static_assert(sizeof(VgMesh) == 64, "VgMesh");
@@ -115,6 +189,10 @@ _Static_assert(sizeof(VgCluster) == 64, "VgCluster");
 _Static_assert(sizeof(VgPageDesc) == 16, "VgPageDesc");
 _Static_assert(sizeof(VgDiscreteLod) == 32, "VgDiscreteLod");
 _Static_assert(sizeof(VgInstance) == 32, "VgInstance");
+_Static_assert(sizeof(VgCell) == 32, "VgCell");
+_Static_assert(sizeof(VgViewGpu) == 352, "VgViewGpu");
+_Static_assert(sizeof(VgCounters) == 256, "VgCounters");
+_Static_assert(sizeof(VgPush) == 48, "VgPush");
 _Static_assert(sizeof(VgFileHeader) == 112 + VGS_COUNT * 8, "VgFileHeader");
 
 #endif

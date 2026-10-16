@@ -18,7 +18,7 @@ void vgeo_gen_free(VgGenMesh *m);
 // Displaced rock: an icosahedron with `n` subdivisions per edge (20 n^2 triangles), radius r at c.
 void vgeo_gen_rock(VgGenMesh *m, u32 seed, u32 n, float r, const float c[3], float displace);
 // Torus (seg_u x seg_v x 2 triangles), lying in the xz plane at c.
-void vgeo_gen_torus(VgGenMesh *m, u32 seed, float R, float r, u32 seg_u, u32 seg_v, const float c[3], float displace);
+void vgeo_gen_torus(VgGenMesh *m, u32 seed, float ring_r, float r, u32 seg_u, u32 seg_v, const float c[3], float displace);
 // Many rocks on a grid (about `tris` triangles in all, disconnected closed shells).
 void vgeo_gen_rock_field(VgGenMesh *m, u32 seed, u64 tris);
 // A statue: a body sphere, a head and torus rings (about `tris` triangles).

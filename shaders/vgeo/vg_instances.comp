@@ -1,0 +1,22 @@
+#version 450
+// Instance culling (vg_instance). a[0] = 0: one workgroup per listed large cell (cell list region
+// in_region), its instances strided over the 64 threads; a[0] = 1: one thread per pass-1-occluded
+// instance. Survivors expand their BVH root into node queue region out_region.
+#extension GL_GOOGLE_include_directive : require
+#include "vgeo_common.glsl"
+#include "vg_expand.glsl"
+layout(local_size_x = 64) in;
+
+void main() {
+    if (pc.a[0] == 0u) {
+        uint wg = vg_flat_group();
+        uint ncell = min(ctr.n[pc.a[1]], V.caps1.x);   // a[1]: the list's counter
+        if (wg >= ncell) return;
+        VgCell c = cells[cell_list[pc.in_region * V.caps1.x + wg]];
+        for (uint i = gl_LocalInvocationID.x; i < c.count; i += 64u) vg_instance(c.first + i, pc.out_region);
+    } else {
+        uint i = vg_flat_group() * 64u + gl_LocalInvocationID.x;
+        if (i >= min(ctr.n[VGN_INST_OCC], V.caps1.y)) return;
+        vg_instance(inst_list[i], pc.out_region);
+    }
+}

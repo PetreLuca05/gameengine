@@ -146,8 +146,8 @@ file(GLOB DG_SHADER_SOURCES CONFIGURE_DEPENDS
   ${CMAKE_SOURCE_DIR}/shaders/*.vert ${CMAKE_SOURCE_DIR}/shaders/*.frag ${CMAKE_SOURCE_DIR}/shaders/*.comp
   ${CMAKE_SOURCE_DIR}/shaders/post/*.vert ${CMAKE_SOURCE_DIR}/shaders/post/*.frag ${CMAKE_SOURCE_DIR}/shaders/post/*.comp
   ${CMAKE_SOURCE_DIR}/shaders/sights/*.frag ${CMAKE_SOURCE_DIR}/shaders/sights/*.comp
-  ${CMAKE_SOURCE_DIR}/shaders/sky/*.comp)
-file(GLOB DG_SHADER_INCLUDES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/shaders/*.glsl ${CMAKE_SOURCE_DIR}/shaders/post/*.glsl ${CMAKE_SOURCE_DIR}/shaders/sights/*.glsl ${CMAKE_SOURCE_DIR}/shaders/sky/*.glsl ${CMAKE_SOURCE_DIR}/third_party/fsr/*.h
+  ${CMAKE_SOURCE_DIR}/shaders/sky/*.comp ${CMAKE_SOURCE_DIR}/shaders/vgeo/*.comp)
+file(GLOB DG_SHADER_INCLUDES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/shaders/*.glsl ${CMAKE_SOURCE_DIR}/shaders/post/*.glsl ${CMAKE_SOURCE_DIR}/shaders/sights/*.glsl ${CMAKE_SOURCE_DIR}/shaders/sky/*.glsl ${CMAKE_SOURCE_DIR}/shaders/vgeo/*.glsl ${CMAKE_SOURCE_DIR}/third_party/fsr/*.h
   ${CMAKE_SOURCE_DIR}/shaders/post/*.h)
 set(DG_SHADER_OUT ${CMAKE_BINARY_DIR}/bin/shaders)
 set(DG_SPV_FILES)
@@ -165,6 +165,9 @@ foreach(src ${DG_SHADER_SOURCES})
   if(dirname STREQUAL "sky")
     set(sub "sky/")
   endif()
+  if(dirname STREQUAL "vgeo")
+    set(sub "vgeo/")
+  endif()
   set(out ${DG_SHADER_OUT}/${sub}${name}.spv)
   if(DG_SHADER_COMPILER_KIND STREQUAL "glslc")
     set(cmd ${DG_SHADER_COMPILER} --target-env=vulkan1.3 -O -I ${CMAKE_SOURCE_DIR}/shaders -I ${CMAKE_SOURCE_DIR}/shaders/post -I ${CMAKE_SOURCE_DIR}/third_party/fsr -I ${CMAKE_SOURCE_DIR}/third_party/smaa -o ${out} ${src})
@@ -175,6 +178,7 @@ foreach(src ${DG_SHADER_SOURCES})
     COMMAND ${CMAKE_COMMAND} -E make_directory ${DG_SHADER_OUT}/post
     COMMAND ${CMAKE_COMMAND} -E make_directory ${DG_SHADER_OUT}/sights
     COMMAND ${CMAKE_COMMAND} -E make_directory ${DG_SHADER_OUT}/sky
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${DG_SHADER_OUT}/vgeo
     COMMAND ${cmd}
     DEPENDS ${src} ${DG_SHADER_INCLUDES}
     COMMENT "GLSL ${name}" VERBATIM)
@@ -267,6 +271,21 @@ target_link_libraries(dg_vgeo PUBLIC dg_animcore meshopt)
 if(MSVC)
   target_compile_options(dg_vgeo PRIVATE /W3 /wd4100 /wd4201 /utf-8)
 endif()
+
+# Virtualized geometry GPU module (culling / Hi-Z) on a VgContext: the game builds it through the src glob,
+# the harness tests and tools/bench_vgeo through this library.
+add_library(dg_vgeo_gpu STATIC src/render/vgeo/vgeo_ctx.c src/render/vgeo/vgeo_scene.c src/render/vgeo/vgeo_cull.c)
+set_target_properties(dg_vgeo_gpu PROPERTIES C_STANDARD 11)
+target_link_libraries(dg_vgeo_gpu PUBLIC dg_vgeo volk vma)
+if(MSVC)
+  target_compile_options(dg_vgeo_gpu PRIVATE /W3 /wd4100 /wd4201 /utf-8)
+endif()
+
+add_executable(bench_vgeo tools/bench_vgeo/bench_vgeo.c tests/vgeo_gpu_harness.c)
+set_target_properties(bench_vgeo PROPERTIES C_STANDARD 11)
+target_include_directories(bench_vgeo PRIVATE tests)
+target_link_libraries(bench_vgeo PRIVATE dg_vgeo_gpu)
+add_dependencies(bench_vgeo dg_shaders)
 
 add_executable(build_vgeo tools/build_vgeo/build_vgeo.c)
 set_target_properties(build_vgeo PROPERTIES C_STANDARD 11)
@@ -382,3 +401,17 @@ endif()
 add_test(NAME vgeo_build COMMAND test_vgeo_build WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
 add_test(NAME vgeo_build_long COMMAND test_vgeo_build --long WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
 set_tests_properties(vgeo_build_long PROPERTIES LABELS long TIMEOUT 600)
+
+# Virtualized geometry GPU culling on the window-less harness (needs a Vulkan 1.3 device; validation
+# when the portable layer is present).
+add_executable(test_vgeo_gpu tests/test_vgeo_gpu.c tests/vgeo_gpu_harness.c)
+set_target_properties(test_vgeo_gpu PROPERTIES C_STANDARD 11)
+target_link_libraries(test_vgeo_gpu PRIVATE dg_vgeo_gpu)
+add_dependencies(test_vgeo_gpu dg_shaders)
+if(MSVC)
+  target_compile_options(test_vgeo_gpu PRIVATE /W3 /wd4100 /wd4201 /utf-8)
+endif()
+add_test(NAME vgeo_gpu COMMAND test_vgeo_gpu --validation WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+if(EXISTS "${CMAKE_SOURCE_DIR}/.toolchain/vvl/install/bin")
+  set_tests_properties(vgeo_gpu PROPERTIES ENVIRONMENT "VK_ADD_LAYER_PATH=${CMAKE_SOURCE_DIR}/.toolchain/vvl/install/bin")
+endif()

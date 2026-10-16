@@ -1,0 +1,27 @@
+#version 450
+// Occlusion Hi-Z (farthest depth = MAX, depth 0 = near) at half resolution: mip 0 is the max of each
+// 2x2 depth block, every next mip the max of the 2x2 of the previous one, plus the odd edge row /
+// column (and corner), so a texel of mip m bounds every depth pixel of its 2^(m+1) footprint, the
+// last row / column also the odd tail. pc.mip = destination mip.
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(push_constant) uniform Push { uint mip; } pc;
+layout(set = 0, binding = 0) uniform sampler2D depth_tex;
+layout(set = 0, binding = 1, r32f) uniform readonly image2D src;
+layout(set = 0, binding = 2, r32f) uniform writeonly image2D dst;
+float load(ivec2 q, ivec2 ss) {
+    q = min(q, ss - 1);
+    return pc.mip == 0u ? texelFetch(depth_tex, q, 0).r : imageLoad(src, q).r;
+}
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 ds = imageSize(dst);
+    if (p.x >= ds.x || p.y >= ds.y) return;
+    ivec2 ss = pc.mip == 0u ? textureSize(depth_tex, 0) : imageSize(src);
+    ivec2 b = p * 2;
+    float d = max(max(load(b, ss), load(b + ivec2(1, 0), ss)), max(load(b + ivec2(0, 1), ss), load(b + ivec2(1, 1), ss)));
+    bool ox = p.x == ds.x - 1 && b.x + 2 < ss.x, oy = p.y == ds.y - 1 && b.y + 2 < ss.y;
+    if (ox) d = max(d, max(load(b + ivec2(2, 0), ss), load(b + ivec2(2, 1), ss)));
+    if (oy) d = max(d, max(load(b + ivec2(0, 2), ss), load(b + ivec2(1, 2), ss)));
+    if (ox && oy) d = max(d, load(b + ivec2(2, 2), ss));
+    imageStore(dst, p, vec4(d));
+}
