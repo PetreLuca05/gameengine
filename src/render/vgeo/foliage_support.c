@@ -68,7 +68,8 @@ float vgeo_project_size(const VgViewGpu *v, const float s[4]) {
 }
 
 bool vgeo_use_impostor(const VgViewGpu *v, const VgMesh *m, const float s[4]) {
-    return m->impostor != ~0u && v->foliage[3] > 0.0f && !(v->flags & VGV_ORTHO) && vgeo_project_size(v, s) < v->foliage[3];
+    float t[4] = { s[0], s[1], s[2], s[3] - m->max_wpo };   // the mesh's own size, as vg_use_impostor
+    return m->impostor != ~0u && v->foliage[3] > 0.0f && !(v->flags & VGV_ORTHO) && vgeo_project_size(v, t) < v->foliage[3];
 }
 
 void vgeo_foliage_instance(VgInstance *out, u32 mesh, const float pos[3], float yaw, float scale) {

@@ -1,6 +1,6 @@
 // bench_vgeo: virtualized geometry GPU benchmark on the window-less harness (docs/VGEO.md "Bench").
 //
-//   bench_vgeo [--instances N] [--meshes M] [--frames F] [--vertex-pulling] [--pool-mb P] [--validation] [--skinned N [--skinned-tris T]]
+//   bench_vgeo [--instances N] [--meshes M] [--frames F] [--vertex-pulling] [--pool-mb P] [--validation] [--skinned N [--skinned-tris T]] [--foliage N]
 //
 // Builds M procedural rocks (~79k triangles each), scatters N instances over a field, and times the
 // culling passes at 1920x1080 from 4 cameras with GPU timestamps (instances, traversal, clusters,
@@ -14,12 +14,19 @@
 // and the GPU ms of its copies + page-table scatter.
 // --skinned N [--skinned-tris T]: instead, a horde of N skinned
 // creatures animated every frame vs the same horde static (Phase 6).
+// --foliage N: instead, N masked foliage instances (the procedural tuft / bush, 90 / 10 %, WPO wind,
+// impostors past r_vgeo_impostor_px 12, fades, density 1) as placement chunks over a 320 m yard:
+// the main view in the renderer's order (cull pass 1 against last frame's Hi-Z, raster, this
+// frame's Hi-Z from the visibility buffer, pass 2, raster) plus the 3 sun cascade culls (Phase 7).
 #include "vgeo_gpu_harness.h"
 #include "render/vgeo/vgeo_procgen.h"
 #include "render/vgeo/vgeo_procgen_skinned.h"
 #include "render/vgeo/vgeo_raster.h"
 #include "render/vgeo/vgeo_stream.h"
 #include "render/vgeo/vgeo_skin.h"
+#include "render/vgeo/foliage_support.h"
+#include "render/vgeo/vgeo_impostor.h"
+#include "render/vgeo/vgeo_procgen_foliage.h"
 #include "core/engine.h"
 #include "core/dgmath.h"
 #include <SDL3/SDL.h>
@@ -176,8 +183,210 @@ static int bench_skinned(VgHarness *h, u32 n, u32 tris, u32 frames, bool vertex_
     return h->validation && g_vgh_vk_messages ? 1 : 0;
 }
 
+// ------------------------------------------------------------------ --foliage N (Phase 7)
+
+static u32 g_fmesh[VG_FOLIAGE_KINDS];
+static u32 fol_resolve(const char *name, void *u) {
+    (void)u;
+    for (int k = 0; k < VG_FOLIAGE_KINDS; k++)
+        if (!strcmp(name, vgeo_foliage_name(k))) return g_fmesh[k];
+    return ~0u;
+}
+
+static int bench_foliage(VgHarness *h, u32 n, u32 frames, bool vertex_pulling) {
+    VgScene s;
+    vgeo_scene_init(&s, &h->ctx);
+    VgCuller c;
+    VgCullCaps caps = { 1u << 20, 1u << 20, 1u << 21, 1u << 20, 4096 };
+    if (!vg_cull_init(&c, &h->ctx, &s, &caps)) return 1;
+    // content: meshes, masks, impostor atlases (as render_foliage_test_types)
+    const u32 msize = 256;
+    u32 levels;
+    size_t mb = vg_tex_mip_bytes(msize, msize, &levels);
+    u8 *mips = (u8 *)malloc(mb), *masks[2] = { (u8 *)malloc(msize * msize * 4), (u8 *)malloc(msize * msize * 4) };
+    for (int k = 0; k < VG_FOLIAGE_KINDS; k++) {
+        VgFoliageMesh fm;
+        vgeo_gen_foliage(&fm, k, 11 + (u32)k);
+        VgSource src;
+        vgeo_foliage_source(&fm, &src);
+        VgBuildOptions opt;
+        memset(&opt, 0, sizeof(opt));
+        VgBuilt b;
+        char err[256];
+        if (!vgeo_build(&src, &opt, &b, err, sizeof(err))) { printf("build failed: %s\n", err); return 1; }
+        vgeo_foliage_mesh_free(&fm);
+        VgMaterial mats[2];
+        u32 nm = vgeo_foliage_materials(k, mats);
+        for (u32 m = 0; m < nm; m++) {   // experiments: BENCH_NOMASK=1 opaque cards, BENCH_FADE=f scales the fade distances
+            if (getenv("BENCH_NOMASK")) mats[m].flags &= ~VGM_MASKED;
+            if (getenv("BENCH_FADE")) { mats[m].fade_start *= (float)atof(getenv("BENCH_FADE")); mats[m].fade_end *= (float)atof(getenv("BENCH_FADE")); }
+        }
+        const u8 *mk[2] = { NULL, NULL };
+        for (u32 m = 0; m < nm; m++) {
+            if (!vgeo_gen_foliage_mask(masks[m], msize, k, m, 5)) continue;
+            mk[m] = masks[m];
+            vg_tex_build_mips(masks[m], msize, msize, mips);
+            mats[m].mask_tex = mats[m].albedo_tex = vg_tex_create(&c.tex, msize, msize, levels, mips, true, true);
+        }
+        VgImpostorMaterial im[2];
+        vgeo_foliage_impostor_materials(k, mk, msize, im);
+        VgImpostorOptions io = { 1024, 8, im, 2 };
+        vgeo_impostor_bake(&b, &io);
+        g_fmesh[k] = vgeo_scene_add_mesh(&s, &b);
+        u32 base = 0;
+        for (u32 m = 0; m < nm; m++) {
+            u32 idx = vgeo_scene_add_material(&s, &mats[m]);
+            if (!m) base = idx;
+        }
+        vgeo_scene_set_mesh_materials(&s, g_fmesh[k], base);
+        vgeo_foliage_impostor_upload(&s, &c.tex, g_fmesh[k], &b);
+        vgeo_free(&b);
+    }
+    free(mips);
+    free(masks[0]);
+    free(masks[1]);
+    vgeo_scene_reserve_placements(&s, n + 65536, 8192);
+    vgeo_scene_commit(&s);
+    // the yard: 320 x 320 m from (60, 80), as in the devroom
+    VgScatter sc;
+    memset(&sc, 0, sizeof(sc));
+    sc.x0 = 60, sc.z0 = 80, sc.x1 = 380, sc.z1 = 400;
+    sc.density = (float)n / (320.0f * 320.0f);
+    sc.kinds = 2;
+    sc.weight[0] = 9, sc.weight[1] = 1;
+    sc.scale[0][0] = 0.8f, sc.scale[0][1] = 1.3f, sc.scale[1][0] = 0.8f, sc.scale[1][1] = 1.5f;
+    sc.seed = 1234;
+    static const char names[2][48] = { "test_tuft", "test_bush" };
+    VgInstance *tmp = (VgInstance *)malloc(sizeof(VgInstance) * 65536);
+    u32 total = 0;
+    for (int cz = 2; cz < 13; cz++)
+        for (int cx = 1; cx < 12; cx++) {
+            u32 k = vgeo_foliage_scatter_chunk(&sc, cx, cz, tmp, 65536);
+            if (!k) continue;
+            size_t size;
+            u8 *blob = vgp_write(cx, cz, names, 2, tmp, k, &size);
+            VgpView v;
+            if (blob && vgp_parse(blob, size, &v) && vgeo_foliage_chunk_load(&s, &v, fol_resolve, NULL, 0) != ~0u) total += k;
+            free(blob);
+        }
+    free(tmp);
+    VgRaster rast;
+    if (!vg_raster_init(&rast, &h->ctx, &c)) return 1;
+    rast.use_mesh = rast.use_mesh && !vertex_pulling;
+    vg_raster_resize(&rast, W, H);
+    printf("foliage: %u instances in %u placement chunks (%.2f per m2), %s HW path\n", total, s.pl.live_chunks, (double)sc.density, rast.use_mesh ? "mesh shader" : "vertex pulling");
+    VgHizImage hz[2];
+    vgh_hiz_create(h, &hz[0], W, H);
+    vgh_hiz_create(h, &hz[1], W, H);
+    VkQueryPool qp;
+    VkQueryPoolCreateInfo qi = { VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO };
+    qi.queryType = VK_QUERY_TYPE_TIMESTAMP;
+    qi.queryCount = 4;
+    vkCreateQueryPool(h->ctx.device, &qi, NULL, &qp);
+    const struct { const char *name; vec3 eye, target; } cams[4] = {
+        { "eye level, in the yard", { 220, 1.7f, 120 }, { 220, 0.8f, 400 } },
+        { "eye level, at the edge", { 70, 1.7f, 90 }, { 380, 0.5f, 400 } },
+        { "elevated 15 m", { 220, 15, 60 }, { 220, 0, 250 } },
+        { "in the grass, looking down", { 200, 1.2f, 200 }, { 203, 0.0f, 205 } },
+    };
+    const float sun[3] = { 0.45f, 0.8f, 0.3f };
+    printf("| camera | cull ms | raster HW / SW ms | Hi-Z ms | shadow cull ms | total ms | instances | impostors | faded | clusters HW / SW | tris |\n");
+    for (int ci = 0; ci < 4; ci++) {
+        mat4 view = mat4_look_at(cams[ci].eye, cams[ci].target, v3(0, 1, 0));
+        mat4 proj = mat4_perspective(FOV, (float)W / (float)H, 0.1f, 5000.0f);
+        mat4 vp = mat4_mul(proj, view);
+        float eye[3] = { cams[ci].eye.x, cams[ci].eye.y, cams[ci].eye.z };
+        float ps = (float)H / (2.0f * tanf(FOV * 0.5f));
+        float *t_cull = (float *)malloc(sizeof(float) * frames), *t_hw = (float *)malloc(sizeof(float) * frames), *t_sw = (float *)malloc(sizeof(float) * frames);
+        float *t_tot = (float *)malloc(sizeof(float) * frames), *t_sh = (float *)malloc(sizeof(float) * frames), *t_hiz = (float *)malloc(sizeof(float) * frames);
+        VgCounters ctr;
+        memset(&ctr, 0, sizeof(ctr));
+        u32 cur = 0;
+        for (u32 f = 0; f < frames + 3; f++) {
+            u32 fs = f & 1u;
+            VgViewGpu v;
+            vgeo_view_setup(&v, vp.m, vp.m, eye, ps, 0.1f, W, H, 1.0f, 32.0f, VGV_TWO_PASS);
+            float wind[4] = { 0.8f, 0.6f, 6.0f, 0.3f };
+            memcpy(v.wind, wind, 16);
+            memcpy(v.wind_prev, wind, 16);
+            v.foliage[0] = v.foliage[1] = 2.0f + (float)f / 60.0f;
+            v.foliage[2] = 1.0f;
+            v.foliage[3] = getenv("BENCH_IMP") ? (float)atof(getenv("BENCH_IMP")) : 12.0f;
+            v.frame_index = f;
+            VgHizRef prev = vgh_hiz_ref(&hz[cur ^ 1u]), now = vgh_hiz_ref(&hz[cur]);
+            VkCommandPool pool;
+            VkCommandBuffer cmd = vgc_begin_once(&h->ctx, &pool);
+            vgeo_scene_placement_record(&s, cmd, fs);
+            vkCmdResetQueryPool(cmd, qp, 0, 4);
+            vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, qp, 0);
+            vg_cull_record_pass1(&c, cmd, fs, 0, &v, f ? &prev : NULL, &now);
+            vg_raster_clear(&rast, cmd);
+            vg_raster_record(&rast, cmd, fs, 0, 1);
+            vgh_image_barrier(cmd, hz[cur].hiz, hz[cur].mips, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL);
+            vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, qp, 1);
+            vg_hiz_record(&c, cmd, fs, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_UNDEFINED, hz[cur].mip_views, hz[cur].mips, W, H);
+            vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, qp, 2);
+            vgh_image_barrier(cmd, hz[cur].hiz, hz[cur].mips, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+            vg_cull_record_pass2(&c, cmd, fs, 0);
+            vg_raster_record(&rast, cmd, fs, 0, 2);
+            vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, qp, 3);
+            // sun cascades (as vk_vgeo.c: ortho, frustum + LOD, no occlusion, the main camera's position)
+            for (int k = 0; k < 3; k++) {
+                float rad = k == 0 ? 10.0f : k == 1 ? 30.0f : 90.0f;
+                vec3 ctr3 = v3_add(cams[ci].eye, v3_scale(v3_norm(v3_sub(cams[ci].target, cams[ci].eye)), rad * 0.8f));
+                mat4 sv = mat4_look_at(v3_add(ctr3, v3(sun[0] * 200, sun[1] * 200, sun[2] * 200)), ctr3, v3(0, 1, 0));
+                mat4 so = mat4_ortho(-rad, rad, -rad, rad, 0.0f, 400.0f);
+                mat4 svp = mat4_mul(so, sv);
+                VgViewGpu sv2;
+                vgeo_view_setup(&sv2, svp.m, svp.m, eye, 1024.0f / (2.0f * rad), 0.0f, 1024, 1024, 2.0f, 0.0f, VGV_ORTHO | VGV_NO_OCCLUSION | VGV_NO_CONE | VGV_NO_SKINNED);
+                memcpy(sv2.wind, v.wind, 16);
+                memcpy(sv2.wind_prev, v.wind, 16);
+                memcpy(sv2.foliage, v.foliage, 16);
+                vg_cull_record(&c, cmd, fs, 1 + (u32)k, &sv2, NULL, NULL);
+            }
+            vgc_submit_wait(&h->ctx, pool, cmd);
+            if (f >= 3) {
+                u32 i = f - 3;
+                u64 ts[4];
+                vkGetQueryPoolResults(h->ctx.device, qp, 0, 4, sizeof(ts), ts, sizeof(u64), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
+                float k = h->ctx.timestamp_period * 1e-6f;
+                t_tot[i] = (float)(ts[3] - ts[0]) * k;
+                t_hiz[i] = (float)(ts[2] - ts[1]) * k;
+                float cm[4], r1[2] = { 0, 0 }, r2[2] = { 0, 0 };
+                vg_cull_timings(&c, fs, 0, true, cm);
+                vg_raster_timings(&rast, fs, 0, 1, true, r1);
+                vg_raster_timings(&rast, fs, 0, 2, true, r2);
+                t_cull[i] = cm[0] + cm[1] + cm[2] + (cm[3] - r1[0] - r1[1] - t_hiz[i]);   // pass 2's span: raster 1 + Hi-Z + pass 2
+                t_hw[i] = r1[0] + r2[0];
+                t_sw[i] = r1[1] + r2[1];
+                float sh = 0;
+                for (int q = 0; q < 3; q++) {
+                    float sm[4];
+                    if (vg_cull_timings(&c, fs, 1 + (u32)q, true, sm)) sh += sm[0] + sm[1] + sm[2] + sm[3];
+                }
+                t_sh[i] = sh;
+                vgh_read(h, &c.v[0].counters, 0, sizeof(ctr), &ctr);
+            }
+            cur ^= 1u;
+        }
+        double tot = median(t_tot, frames), sh = median(t_sh, frames);
+        printf("| %s | %.3f | %.3f / %.3f | %.3f | %.3f | %.3f (+ shadows %.3f) | %u + %u | %u | %u | %u / %u | %.2fM |\n", cams[ci].name, median(t_cull, frames),
+               median(t_hw, frames), median(t_sw, frames), median(t_hiz, frames), sh, tot, tot + sh, ctr.n[VGN_INST_VIS], ctr.n[VGN_INST_P2], ctr.n[VGN_IMPOSTORS],
+               ctr.n[VGN_INST_FADED], ctr.n[VGN_HW], ctr.n[VGN_SW], (double)ctr.n[VGN_TRIS] / 1e6);
+        free(t_cull), free(t_hw), free(t_sw), free(t_tot), free(t_sh), free(t_hiz);
+    }
+    printf("budget (docs/VGEO_PLAN.md section 9): 300k masked foliage instances incl. shadows <= 2.5 ms (the shadow cascade draws are measured in game: vgeo_bench 600 f.csv foliage)\n");
+    vkDestroyQueryPool(h->ctx.device, qp, NULL);
+    vgh_hiz_destroy(h, &hz[0]);
+    vgh_hiz_destroy(h, &hz[1]);
+    vg_raster_shutdown(&rast);
+    vg_cull_shutdown(&c);
+    vgeo_scene_free(&s);
+    return 0;
+}
+
 int main(int argc, char **argv) {
-    u32 instances = 100000, meshes = 8, frames = 60, pool_mb = 0, skinned = 0, skinned_tris = 30000;
+    u32 instances = 100000, meshes = 8, frames = 60, pool_mb = 0, skinned = 0, skinned_tris = 30000, foliage = 0;
     bool validation = false, vertex_pulling = false;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--instances") && i + 1 < argc) instances = (u32)atoi(argv[++i]);
@@ -188,9 +397,15 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--vertex-pulling")) vertex_pulling = true;
         else if (!strcmp(argv[i], "--skinned") && i + 1 < argc) skinned = (u32)atoi(argv[++i]);
         else if (!strcmp(argv[i], "--skinned-tris") && i + 1 < argc) skinned_tris = (u32)atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--foliage") && i + 1 < argc) foliage = (u32)atoi(argv[++i]);
     }
     VgHarness h;
     if (!vgh_init(&h, validation)) return 1;
+    if (foliage) {
+        int r = bench_foliage(&h, foliage, frames, vertex_pulling);
+        vgh_shutdown(&h);
+        return r;
+    }
     if (skinned) {
         int r = bench_skinned(&h, skinned, skinned_tris, frames, vertex_pulling);
         vgh_shutdown(&h);

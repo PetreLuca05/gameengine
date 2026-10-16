@@ -19,12 +19,29 @@ typedef struct ModelMesh {
     bool paint;          // material named "paint*": tinted with the owner's colour (vehicles)
 } ModelMesh;
 
+// Manifest "foliage": { ... } of a "vgeo": true model (docs/VGEO.md "Foliage support"): its vgeo
+// materials' flags and parameters; "colliders": "capsule" (on the model entry) gives every placement
+// instance a static trunk capsule.
+typedef struct ModelFoliage {
+    bool enabled;
+    bool masked, two_sided, dither;   // "masked", "two_sided", "dither" (default true)
+    float alpha_cutoff;               // "alpha_cutoff" (0.5)
+    int wpo;                          // "wpo": "none" | "grass" | "tree" (VgWpo)
+    bool displace;                    // "displace": the displacement buffer bends it (WPO_DISPLACE)
+    float wpo_params[4];              // "wpo_params"
+    float fade_start, fade_end;       // "fade": [start, end] (m)
+    float shadow_max_dist;            // "shadow_max_dist" (m, 0 = always)
+    bool capsule;                     // "colliders": "capsule"
+    float capsule_radius, capsule_height;   // "capsule": [radius, height] (m, at scale 1)
+} ModelFoliage;
+
 typedef struct Model {
     char name[32];
     ModelMesh meshes[MAX_MODEL_MESHES];
     int mesh_count;
     AABB bounds;
     struct VgBuilt *vgeo;    // manifest "vgeo": true: the virtualized-geometry build (docs/VGEO.md), else NULL
+    ModelFoliage foliage;
 } Model;
 
 bool assets_init(const char *manifest_path);

@@ -256,6 +256,8 @@ static void barrier(VkCommandBuffer cmd, VkImage img, u32 mips, VkImageLayout o,
     vkCmdPipelineBarrier2(cmd, &dep);
 }
 
+void vgh_image_barrier(VkCommandBuffer cmd, VkImage img, u32 mips, VkImageLayout from, VkImageLayout to) { barrier(cmd, img, mips, from, to); }
+
 bool vgh_hiz_create(VgHarness *h, VgHizImage *z, u32 w, u32 hh) {
     memset(z, 0, sizeof(*z));
     z->w = w;

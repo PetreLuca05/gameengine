@@ -8,6 +8,7 @@
 #include "gameplay/entities.h"
 #include "FastNoiseLite.h"
 #include <stdlib.h>
+#include <string.h>
 #include <math.h>
 
 #define MAX_CHUNKS 1024
@@ -23,6 +24,14 @@ typedef struct Chunk {
     BodyId body;
     float *heights;     // kept alive for the heightfield body's debug draw
     double needed_at;
+    // Foliage placement chunk (world_foliage_test; docs/VGEO.md "Foliage support"): the .vgp made by
+    // the job, loaded into the renderer with the chunk (trunk capsules into the chunk's statics),
+    // freed with it.
+    void *foliage;
+    size_t foliage_size;
+    int foliage_handle;
+    BodyId *fol_bodies;
+    int fol_body_count;
 } Chunk;
 
 typedef struct ChunkStreamer ChunkStreamer;
@@ -42,7 +51,7 @@ struct ChunkStreamer {
     double time;
 };
 
-typedef struct ChunkGlobals { Cvar *radius, *uploads, *debug, *lod_dist, *grid; } ChunkGlobals;
+typedef struct ChunkGlobals { Cvar *radius, *uploads, *debug, *lod_dist, *grid, *foliage; } ChunkGlobals;
 #define CG (g_engine.chunk_globals)
 
 static void ensure_globals(void) {
@@ -53,6 +62,7 @@ static void ensure_globals(void) {
     CG->debug = cvar_reg_bool("world_debug_chunks", false, 0, "draw chunk bounds and streaming state");
     CG->lod_dist = cvar_reg_float("world_lod_distance", 70.0f, 10.0f, 1000.0f, CVAR_ARCHIVE, "distance of the first terrain LOD switch (m)");
     CG->grid = cvar_reg_bool("world_terrain_grid", true, CVAR_ARCHIVE, "draw the unit grid on terrain");
+    CG->foliage = cvar_reg_bool("world_foliage_test", false, 0, "streamed terrain: procedural test foliage per chunk as vgeo placement chunks (set before the map)");
 }
 
 float chunks_relevance_radius(void) {
@@ -192,6 +202,47 @@ static MeshId build_lod_mesh(const ChunkData *d, int stride) {
     return id;
 }
 
+BodyId chunks_capsule_body(World *w, const RenderCapsule *caps, int n) {
+    if (n <= 0) return PHYS_INVALID_BODY;
+    vec3 *v = (vec3 *)malloc(sizeof(vec3) * 12 * (size_t)n);
+    u32 *ix = (u32 *)malloc(sizeof(u32) * 60 * (size_t)n), ni = 0;
+    for (int i = 0; i < n; i++) {
+        const RenderCapsule *c = &caps[i];
+        u32 b = (u32)i * 12;
+        for (int k = 0; k < 6; k++) {
+            float a = (float)k * 1.0471976f;
+            vec3 o = v3(cosf(a) * c->radius, 0, sinf(a) * c->radius);
+            v[b + (u32)k] = v3_add(c->a, o);
+            v[b + 6 + (u32)k] = v3_add(c->b, o);
+        }
+        for (u32 k = 0; k < 6; k++) {   // sides (outward, CCW), then the top fan
+            u32 k1 = (k + 1) % 6;
+            u32 q[6] = { b + k, b + 6 + k, b + 6 + k1, b + k, b + 6 + k1, b + k1 };
+            for (int e = 0; e < 6; e++) ix[ni++] = q[e];
+        }
+        for (u32 k = 1; k + 1 < 6; k++) {
+            ix[ni++] = b + 6;
+            ix[ni++] = b + 6 + k + 1;
+            ix[ni++] = b + 6 + k;
+        }
+    }
+    BodyDesc bd;
+    memset(&bd, 0, sizeof(bd));
+    bd.shape.kind = SHAPE_MESH;
+    bd.shape.verts = v;
+    bd.shape.vert_count = 12u * (u32)n;
+    bd.shape.indices = ix;
+    bd.shape.index_count = ni;
+    bd.rot = quat_identity();
+    bd.motion = PM_STATIC;
+    bd.layer = PL_STATIC;
+    bd.friction = 0.8f;
+    BodyId id = phys_add_body(w->phys, &bd);
+    free(v);
+    free(ix);
+    return id;
+}
+
 static void finalize_chunk(ChunkStreamer *s, Chunk *ch) {
     ChunkData *d = ch->data;
     for (int l = 0; l < LOD_COUNT; l++) ch->lod[l] = build_lod_mesh(d, 1 << l);
@@ -209,12 +260,30 @@ static void finalize_chunk(ChunkStreamer *s, Chunk *ch) {
     bd.layer = PL_STATIC;
     bd.friction = 0.9f;
     ch->body = phys_add_body(s->w->phys, &bd);
+    // foliage placements + trunk capsules
+    ch->foliage_handle = -1;
+    if (ch->foliage) {
+        ch->foliage_handle = render_foliage_chunk_load(ch->foliage, ch->foliage_size);
+        free(ch->foliage);
+        ch->foliage = NULL;
+        static RenderCapsule caps[4096];   // main thread
+        int n = ch->foliage_handle >= 0 ? render_foliage_chunk_capsules(ch->foliage_handle, caps, 4096) : 0;
+        BodyId b = chunks_capsule_body(s->w, caps, n);
+        if (b != PHYS_INVALID_BODY) {
+            ch->fol_bodies = (BodyId *)malloc(sizeof(BodyId));
+            ch->fol_bodies[ch->fol_body_count++] = b;
+        }
+    }
     ch->state = CS_LOADED;
 }
 
 static void release_chunk(ChunkStreamer *s, Chunk *ch) {
     for (int l = 0; l < LOD_COUNT; l++) render_mesh_destroy(ch->lod[l]);
     if (ch->body != PHYS_INVALID_BODY) phys_remove_body(s->w->phys, ch->body);
+    if (ch->state == CS_LOADED && ch->foliage_handle >= 0) render_foliage_chunk_unload(ch->foliage_handle);
+    for (int i = 0; i < ch->fol_body_count; i++) phys_remove_body(s->w->phys, ch->fol_bodies[i]);
+    free(ch->fol_bodies);
+    free(ch->foliage);
     free(ch->heights);
     free(ch->data);
     memset(ch, 0, sizeof(*ch));
@@ -224,10 +293,17 @@ static void release_chunk(ChunkStreamer *s, Chunk *ch) {
 
 // ------------------------------------------------------------------ jobs
 
+static float job_height(void *user, float x, float z) {
+    ChunkStreamer *s = (ChunkStreamer *)user;
+    return s->provider.height_at(s->provider.user, x, z);
+}
+
 static void job_generate(void *user) {
     ChunkJob *j = (ChunkJob *)user;
     Chunk *ch = &j->s->chunks[j->index];
     j->s->provider.generate(j->s->provider.user, j->c, ch->data);
+    if (CG->foliage->i)   // the chunk's placements (thread-safe): 1.5 instances per m2 on the terrain
+        ch->foliage = render_foliage_test_chunk(j->c.x, j->c.z, 1.5f, -1e9f, -1e9f, 1e9f, 1e9f, job_height, j->s, &ch->foliage_size);
 }
 
 static void job_done(void *user) {
@@ -257,6 +333,7 @@ static Chunk *request_chunk(ChunkStreamer *s, int cx, int cz, bool sync) {
     ch->data = (ChunkData *)calloc(1, sizeof(ChunkData));
     if (sync) {
         s->provider.generate(s->provider.user, ch->c, ch->data);
+        if (CG->foliage->i) ch->foliage = render_foliage_test_chunk(cx, cz, 1.5f, -1e9f, -1e9f, 1e9f, 1e9f, job_height, s, &ch->foliage_size);
         finalize_chunk(s, ch);
         return ch;
     }
@@ -306,6 +383,7 @@ bool chunks_create(World *w, ChunkProviderKind kind, u32 seed) {
     }
     w->chunks = s;
     w->streaming = true;
+    if (CG->foliage->i) render_foliage_test_types();   // before the first chunk resolves its mesh names
 
     LevelStatic *ls = &w->level;
     memset(ls, 0, sizeof(*ls));

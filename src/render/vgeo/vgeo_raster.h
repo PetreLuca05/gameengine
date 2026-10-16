@@ -25,6 +25,7 @@ typedef struct VgRaster {
     VkShaderStageFlags push_stages;
     VkPipeline p_args, p_sw, p_vert, p_mesh;
     VkPipeline p_vert2, p_mesh2;   // the same without back-face culling: two-sided materials (a second draw)
+    VkPipeline p_sw_masked, p_sw_imp;   // SW variants: masked / dithered clusters, impostor quads (vg_raster_sw.glsl)
     VgBuffer vis;                // u64[w * h]
     u32 w, h;
     bool use_mesh;               // HW path: mesh shader (default when available) or vertex pulling

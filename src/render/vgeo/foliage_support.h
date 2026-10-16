@@ -28,7 +28,8 @@ void vgeo_wpo_eval(u32 wpo, const float prm[4], const float p[3], const float ip
 
 // vg_foliage_alpha: fade alpha of an instance (flags_phase fp) at distance dist (0 culled).
 float vgeo_foliage_alpha(const VgMesh *m, u32 fp, float dist, float density);
-// vg_use_impostor for the view v and the instance's world sphere (WPO-inflated).
+// vg_use_impostor for the view v and the instance's world sphere (WPO-inflated, as the culling uses it;
+// the switch takes the margin off again).
 bool vgeo_use_impostor(const VgViewGpu *v, const VgMesh *m, const float sphere[4]);
 // vg_project_size (pixels across).
 float vgeo_project_size(const VgViewGpu *v, const float sphere[4]);

@@ -73,13 +73,18 @@ bool vg_raster_init(VgRaster *r, const VgContext *ctx, VgCuller *cull) {
     if (vkCreatePipelineLayout(ctx->device, &pi, NULL, &r->pl) != VK_SUCCESS) return false;
     r->p_args = vgc_compute_pipeline(ctx, r->pl, "vgeo/vg_raster_args.comp");
     r->p_sw = vgc_compute_pipeline(ctx, r->pl, "vgeo/vg_raster_sw.comp");
+    r->p_sw_masked = vgc_compute_pipeline(ctx, r->pl, "vgeo/vg_raster_sw_masked.comp");
+    r->p_sw_imp = vgc_compute_pipeline(ctx, r->pl, "vgeo/vg_raster_sw_impostor.comp");
     r->p_vert = graphics_pipeline(r, "vgeo/vg_raster_hw.vert", VK_SHADER_STAGE_VERTEX_BIT, "vgeo/vg_raster_hw.frag", false);
     r->p_vert2 = graphics_pipeline(r, "vgeo/vg_raster_hw.vert", VK_SHADER_STAGE_VERTEX_BIT, "vgeo/vg_raster_hw.frag", true);
     if (ctx->mesh_shader) {
         r->p_mesh = graphics_pipeline(r, "vgeo/vg_raster_hw.mesh", VK_SHADER_STAGE_MESH_BIT_EXT, "vgeo/vg_raster_mesh.frag", false);
         r->p_mesh2 = graphics_pipeline(r, "vgeo/vg_raster_hw.mesh", VK_SHADER_STAGE_MESH_BIT_EXT, "vgeo/vg_raster_mesh.frag", true);
     }
-    if (!r->p_args || !r->p_sw || !r->p_vert || !r->p_vert2 || (r->p_mesh && !r->p_mesh2)) { log_error("vgeo: raster pipelines failed"); return false; }
+    if (!r->p_args || !r->p_sw || !r->p_sw_masked || !r->p_sw_imp || !r->p_vert || !r->p_vert2 || (r->p_mesh && !r->p_mesh2)) {
+        log_error("vgeo: raster pipelines failed");
+        return false;
+    }
     r->use_mesh = r->p_mesh != VK_NULL_HANDLE;
     VkQueryPoolCreateInfo qi = { VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO };
     qi.queryType = VK_QUERY_TYPE_TIMESTAMP;
@@ -95,7 +100,7 @@ void vg_raster_shutdown(VgRaster *r) {
     vkDeviceWaitIdle(d);
     if (r->cull && r->cull->vis_buffer == r->vis.buffer) vg_cull_set_vis(r->cull, VK_NULL_HANDLE);
     vgc_buffer_free(r->ctx, &r->vis);
-    VkPipeline ps[] = { r->p_args, r->p_sw, r->p_vert, r->p_mesh, r->p_vert2, r->p_mesh2 };
+    VkPipeline ps[] = { r->p_args, r->p_sw, r->p_vert, r->p_mesh, r->p_vert2, r->p_mesh2, r->p_sw_masked, r->p_sw_imp };
     for (size_t i = 0; i < sizeof(ps) / sizeof(ps[0]); i++) if (ps[i]) vkDestroyPipeline(d, ps[i], NULL);
     if (r->qp) vkDestroyQueryPool(d, r->qp, NULL);
     if (r->pl) vkDestroyPipelineLayout(d, r->pl, NULL);
@@ -194,9 +199,18 @@ void vg_raster_record(VgRaster *r, VkCommandBuffer cmd, u32 frame, u32 slot, u32
         barrier(cmd, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                 VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
 
-    // SW
+    // SW: plain clusters, then (when the scene has them) masked clusters and impostor quads, each
+    // kernel over the whole range taking its own kind of entry
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, r->p_sw);
     vkCmdDispatchIndirect(cmd, counters, (VkDeviceSize)VGA_SW * 16);
+    if (c->scene->has_masked) {
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, r->p_sw_masked);
+        vkCmdDispatchIndirect(cmd, counters, (VkDeviceSize)VGA_SW * 16);
+    }
+    if (c->scene->has_impostors) {
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, r->p_sw_imp);
+        vkCmdDispatchIndirect(cmd, counters, (VkDeviceSize)VGA_SW * 16);
+    }
     stamp(r, cmd, q, VGR_SW);
     if (r->qp) r->qp_written[frame][slot][pass - 1] = true;
     // Visibility buffer to its readers; indirect args / list reads before the next writers (WAR).

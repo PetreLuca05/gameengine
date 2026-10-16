@@ -1043,6 +1043,7 @@ static void compute_matrices(FrameData *fd) {
         fd->wx2 = v4(wx->wind.x, wx->wind.z, ws, R->puddle_bound && R->puddle_bound != R->white_tex ? 1.0f : 0.0f);
         fd->wx3 = R->occl_info;
         fd->wx4 = v4(R->occl_range, (float)wx->precip_quality, wx->puddle_reflections ? 1.0f : 0.0f, 0);
+        fd->wx5 = v4(wx->gust, fmodf(wx->time * 0.7f, 6.2831853f), wx->time, atan2f(wx->wind.x, -wx->wind.z));
         fd->puddle_xf = wx->puddle_xform;
     }
 }

@@ -45,30 +45,49 @@ vec3 vg_impostor_corner(VgImpostorQuad q, uint k) {
 }
 uvec3 vg_impostor_tri(uint t) { return t == 0u ? uvec3(0u, 1u, 2u) : uvec3(0u, 2u, 3u); }
 
-// The atlas at world point p of the quad: rgb albedo (linear), a coverage; normal: mesh-space normal
-// (unnormalised blend). lod from the quad's projected size.
-vec4 vg_impostor_sample(VgXf x, VgMesh m, VgImpostorQuad q, vec3 p, bool want_normal, out vec3 normal) {
-    normal = vec3(0.0, 1.0, 0.0);
-    vec3 l = vg_qrot(vec4(-x.rot.xyz, x.rot.w), p - q.c) / max(x.pscale, 1e-8);   // mesh space, from the centre
+// The 3 frames nearest to the view direction (grid cells, blend weights), the atlas texture, LOD and
+// half-texel margin of a quad (one set per instance per frame: raster and resolve agree).
+struct VgImpostorFrames { vec2 fr[3]; vec3 w; uint ta, tn; float n, lod, hm, rad; };
+VgImpostorFrames vg_impostor_frames(VgXf x, VgMesh m, VgImpostorQuad q) {
+    VgImpostorFrames F;
     vec3 dl = vg_qrot(vec4(-x.rot.xyz, x.rot.w), V.cam_pos.xyz - q.c);
     uint n = max(m.impostor_grid, 2u);
     vec2 g = vg_hemi_oct_encode(dot(dl, dl) > 1e-12 ? normalize(dl) : vec3(0.0, 1.0, 0.0)) * float(n - 1u);
     vec2 i0 = clamp(floor(g), vec2(0.0), vec2(float(n) - 2.0)), f = g - i0;
-    vec2 fr[3];
-    vec3 w;
-    if (f.x + f.y < 1.0) { fr[0] = i0; fr[1] = i0 + vec2(1.0, 0.0); fr[2] = i0 + vec2(0.0, 1.0); w = vec3(1.0 - f.x - f.y, f.x, f.y); }
-    else { fr[0] = i0 + vec2(1.0); fr[1] = i0 + vec2(0.0, 1.0); fr[2] = i0 + vec2(1.0, 0.0); w = vec3(f.x + f.y - 1.0, 1.0 - f.x, 1.0 - f.y); }
-    uint ta = m.impostor & 0xFFFFu, tn = m.impostor >> 16;
-    float size = float(textureSize(vg_tex[nonuniformEXT(ta)], 0).x), tile = size / float(n);
+    if (f.x + f.y < 1.0) { F.fr[0] = i0; F.fr[1] = i0 + vec2(1.0, 0.0); F.fr[2] = i0 + vec2(0.0, 1.0); F.w = vec3(1.0 - f.x - f.y, f.x, f.y); }
+    else { F.fr[0] = i0 + vec2(1.0); F.fr[1] = i0 + vec2(0.0, 1.0); F.fr[2] = i0 + vec2(1.0, 0.0); F.w = vec3(f.x + f.y - 1.0, 1.0 - f.x, 1.0 - f.y); }
+    F.ta = m.impostor & 0xFFFFu;
+    F.tn = m.impostor >> 16;
+    F.n = float(n);
+    float tile = float(textureSize(vg_tex[nonuniformEXT(F.ta)], 0).x) / F.n;
     float dist = max(length(V.cam_pos.xyz - q.c), V.params.z);
-    float lod = max(log2(tile / max(2.0 * q.h * V.cam_pos.w / dist, 1e-4)), 0.0);
-    float rad = max(m.impostor_radius, 1e-8), hm = 0.5 / tile;
+    F.lod = max(log2(tile / max(2.0 * q.h * V.cam_pos.w / dist, 1e-4)), 0.0);
+    F.rad = max(m.impostor_radius, 1e-8);
+    F.hm = 0.5 / tile;
+    return F;
+}
+// Frame k's tile coordinates of mesh-space point l (from the frame centre).
+vec2 vg_impostor_tile_uv(VgImpostorFrames F, int k, vec3 l) {
+    vec3 fd = vg_hemi_oct_decode(F.fr[k] / (F.n - 1.0)), r, u;
+    vg_impostor_basis(fd, r, u);
+    return vec2(0.5 + 0.5 * dot(l, r) / F.rad, 0.5 - 0.5 * dot(l, u) / F.rad);
+}
+vec3 vg_impostor_local(VgXf x, VgImpostorQuad q, vec3 p) { return vg_qrot(vec4(-x.rot.xyz, x.rot.w), p - q.c) / max(x.pscale, 1e-8); }
+
+// The atlas at world point p of the quad: rgb albedo (linear), a coverage; normal: mesh-space normal
+// (unnormalised blend). lod from the quad's projected size.
+vec4 vg_impostor_sample(VgXf x, VgMesh m, VgImpostorQuad q, vec3 p, bool want_normal, out vec3 normal) {
+    normal = vec3(0.0, 1.0, 0.0);
+    vec3 l = vg_impostor_local(x, q, p);   // mesh space, from the centre
+    VgImpostorFrames F = vg_impostor_frames(x, m, q);
+    vec2 fr[3] = F.fr;
+    vec3 w = F.w;
+    uint ta = F.ta, tn = F.tn, n = uint(F.n);
+    float lod = F.lod, hm = F.hm;
     vec4 acc = vec4(0.0);
     vec3 nacc = vec3(0.0);
     for (int k = 0; k < 3; k++) {
-        vec3 fd = vg_hemi_oct_decode(fr[k] / float(n - 1u)), r, u;
-        vg_impostor_basis(fd, r, u);
-        vec2 t = vec2(0.5 + 0.5 * dot(l, r) / rad, 0.5 - 0.5 * dot(l, u) / rad);
+        vec2 t = vg_impostor_tile_uv(F, k, l);
         if (any(lessThan(t, vec2(0.0))) || any(greaterThan(t, vec2(1.0)))) continue;
         vec2 uv = (fr[k] + clamp(t, vec2(hm), vec2(1.0 - hm))) / float(n);
         vec4 a = textureLod(vg_tex[nonuniformEXT(ta)], uv, lod);

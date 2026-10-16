@@ -387,11 +387,11 @@ static float cpu_alpha(const VgViewGpu *v, const Px *p, u32 x, u32 y) {
         uv[j][0] = dec.uv[vi][0] * mt->tex_scale;
         uv[j][1] = dec.uv[vi][1] * mt->tex_scale;
     }
-    float pn[3][2] = { { ((float)x + 0.5f) / W * 2 - 1, ((float)y + 0.5f) / H * 2 - 1 } };
-    pn[1][0] = pn[0][0] + 2.0f / W, pn[1][1] = pn[0][1];
-    pn[2][0] = pn[0][0], pn[2][1] = pn[0][1] + 2.0f / H;
-    float u3[3][2];
-    for (int s = 0; s < 3; s++) {
+    // the mip LOD of the triangle: the pixel footprint at its screen centroid (vg_uv_plane_lod)
+    float cx = (c[0][0] / c[0][3] + c[1][0] / c[1][3] + c[2][0] / c[2][3]) / 3.0f, cy = (c[0][1] / c[0][3] + c[1][1] / c[1][3] + c[2][1] / c[2][3]) / 3.0f;
+    float pn[4][2] = { { cx, cy }, { cx + 2.0f / W, cy }, { cx, cy + 2.0f / H }, { ((float)x + 0.5f) / W * 2 - 1, ((float)y + 0.5f) / H * 2 - 1 } };
+    float u3[4][2];
+    for (int s = 0; s < 4; s++) {
         float b[3];
         bary(c, pn[s], b);
         u3[s][0] = uv[0][0] * b[0] + uv[1][0] * b[1] + uv[2][0] * b[2];
@@ -399,7 +399,7 @@ static float cpu_alpha(const VgViewGpu *v, const Px *p, u32 x, u32 y) {
     }
     float dx = hypotf((u3[1][0] - u3[0][0]) * MASK_SIZE, (u3[1][1] - u3[0][1]) * MASK_SIZE), dy = hypotf((u3[2][0] - u3[0][0]) * MASK_SIZE, (u3[2][1] - u3[0][1]) * MASK_SIZE);
     float lod = log2f(fmaxf(fmaxf(dx, dy), 1e-6f));
-    return alpha_tri(g_mask_mips[k][dec.material], u3[0][0], u3[0][1], lod);
+    return alpha_tri(g_mask_mips[k][dec.material], u3[3][0], u3[3][1], lod);
 }
 
 // Instance world sphere as the shaders compute it (WPO-inflated).
@@ -874,7 +874,7 @@ static void test_impostor_switch(void) {
     float p0[3] = { 0, 0, 0 }, s0[4];
     vgeo_foliage_instance(&probe, g_mesh[VG_FOLIAGE_BUSH], p0, 0.0f, 1.0f);
     inst_sphere(&probe, s0);
-    float rr = s0[3], dsw = 2.0f * rr * v.proj_scale / g_impostor_px + rr;
+    float rr = s0[3] - g_scene.meshes[g_mesh[VG_FOLIAGE_BUSH]].max_wpo, dsw = 2.0f * rr * v.proj_scale / g_impostor_px + rr;
     for (int k = -10; k <= 10; k++) {
         float d = dsw * (1.0f + (float)k * 1e-6f);
         float ox = s0[0], oy = s0[1] - cam.eye.y;
@@ -903,7 +903,9 @@ static void test_impostor_switch(void) {
         const VgInstance *in = vgeo_scene_instance(&g_scene, gi);
         float s[4];
         inst_sphere(in, s);
+        s[3] -= g_scene.meshes[in->mesh].max_wpo;
         float size = vgeo_project_size(&v, s);
+        s[3] += g_scene.meshes[in->mesh].max_wpo;
         bool cpu = vgeo_use_impostor(&v, &g_scene.meshes[in->mesh], s);
         both += imp[gi] && dag[gi];
         neither += !imp[gi] && !dag[gi];

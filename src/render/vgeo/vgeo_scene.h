@@ -81,6 +81,7 @@ typedef struct VgScene {
     u32 material_count, material_cap;
     u32 *mesh_mat_count;         // per mesh: material count (the commit derives the mesh's foliage fields from them)
     bool has_two_sided;          // a two-sided material is in use (the raster's second HW draw)
+    bool has_masked, has_impostors;   // masked / dithered materials, impostor atlases (the raster's SW variants)
     VgPlacements pl;
     VgBuffer b_meshes, b_nodes, b_groups, b_page_table, b_pool, b_instances, b_cells, b_materials;
     VgBuffer b_stamps;           // u32 per pool slot: last frame a leaf emitted one of its groups (binding 20)

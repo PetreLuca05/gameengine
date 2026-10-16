@@ -235,8 +235,9 @@ float vg_foliage_alpha(VgMesh m, uint fp, float dist) {
 }
 
 // The one impostor switch (both sides use it, so there is no gap and no overlap): an instance with an
-// impostor atlas whose (WPO-inflated) world sphere projects below r_vgeo_impostor_px across draws its
-// impostor quad, else its DAG cut. Never in orthographic (shadow) views. CPU mirror: vgeo_use_impostor.
+// impostor atlas whose world sphere (without the WPO margin) projects below r_vgeo_impostor_px across
+// draws its impostor quad, else its DAG cut. Never in orthographic (shadow) views. CPU mirror:
+// vgeo_use_impostor.
 bool vg_use_impostor(VgMesh m, vec4 s);
 
 // Animated culling sphere of a skinned cluster (instance space) from its bone set at pool word w
@@ -284,8 +285,8 @@ float vg_project_size(vec4 s) {
     return 2.0 * s.w * V.cam_pos.w / d;
 }
 
-bool vg_use_impostor(VgMesh m, vec4 s) {
-    return m.impostor != 0xFFFFFFFFu && V.foliage.w > 0.0 && (vg_flags() & VGV_ORTHO) == 0u && vg_project_size(s) < V.foliage.w;
+bool vg_use_impostor(VgMesh m, vec4 s) {   // s: the WPO-inflated sphere; the switch measures the mesh's own size
+    return m.impostor != 0xFFFFFFFFu && V.foliage.w > 0.0 && (vg_flags() & VGV_ORTHO) == 0u && vg_project_size(vec4(s.xyz, s.w - m.max_wpo)) < V.foliage.w;
 }
 
 // Per-pixel dither threshold in [0, 1) (interleaved gradient noise), rotated per frame for TAA.

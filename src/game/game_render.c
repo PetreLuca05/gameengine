@@ -205,6 +205,7 @@ void game_render_init(void) {
     sights_register();
     daynight_register();
     weather_register();
+    foliage_register();
     vehicles_register();
     flesh_range_register();
     phone_register();
@@ -770,6 +771,7 @@ void game_render(void) {
 
     vec3 fwd = dir_from_angles(cam.yaw, cam.pitch);
     vehicles_frame(w, cam.pos);
+    foliage_frame(w);
     game_render_world(w, G->mode == GM_HOST ? G->alpha : 1.0f, cam.pos, fwd);
 
     if (p && !dead) {

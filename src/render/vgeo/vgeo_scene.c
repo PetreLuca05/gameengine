@@ -278,7 +278,7 @@ static void world_sphere(const VgInstance *in, const VgMesh *m, const float c[3]
 
 // Mesh foliage fields from its materials (declared WPO bounds, fades, shadow distance, flags).
 static void mesh_foliage(VgScene *s) {
-    s->has_two_sided = false;
+    s->has_two_sided = s->has_masked = s->has_impostors = false;
     for (u32 i = 0; i < s->material_count; i++) {
         VgMaterial *mt = &s->materials[i];
         mt->wpo_max = mt->wpo != WPO_NONE ? vgeo_wpo_max(mt->wpo, mt->wpo_params) : 0.0f;
@@ -303,6 +303,8 @@ static void mesh_foliage(VgScene *s) {
         }
         if (unlimited_shadow) m->shadow_max_dist = 0;
         if (m->fflags & VGMF_TWO_SIDED) s->has_two_sided = true;
+        if (m->fflags & (VGMF_MASKED | VGMF_DITHER)) s->has_masked = true;
+        if (m->impostor != ~0u) s->has_impostors = true;
     }
 }
 

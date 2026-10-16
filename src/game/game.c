@@ -660,6 +660,7 @@ static void destroy_world(void) {
 }
 
 static bool load_map(World *w, const char *map) {
+    foliage_level_reset();   // test foliage placements of the previous map (its physics went with its world)
     if (!strcmp(map, "streaming") || !strcmp(map, "terrain") || !strcmp(map, "flat")) {
         render_vgeo_set_level(NULL, 0);
         return chunks_create(w, !strcmp(map, "flat") ? CHUNKS_FLAT : CHUNKS_NOISE, (u32)G->world_seed->i);
