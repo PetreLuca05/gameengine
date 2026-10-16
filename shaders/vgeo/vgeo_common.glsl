@@ -33,6 +33,7 @@ struct VgPaletteSlot { uint first, prev_first, bone_count, pad0; float max_scale
 #define VGV_NO_OCCLUSION 4u
 #define VGV_ORTHO 8u
 #define VGV_TWO_PASS 16u
+#define VGV_NO_SKINNED 32u
 #define VGN_LEAF 1u
 #define VGC_TWO_SIDED 1u
 #define VGC_NO_CONE 2u

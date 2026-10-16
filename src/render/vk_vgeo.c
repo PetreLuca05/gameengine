@@ -14,6 +14,7 @@
 #include "vgeo/vgeo_cull.h"
 #include "vgeo/vgeo_raster.h"
 #include "vgeo/vgeo_stream.h"
+#include "vgeo/vgeo_skin.h"
 #include "vgeo/vgeo_procgen.h"
 #include "vgeo/vgeo_import.h"
 #include "assets/assets.h"
@@ -35,6 +36,30 @@ static struct {
     VgRaster raster;
     VgStream stream;
     bool stream_ok;
+    // Skinned characters (docs/VGEO.md "Characters"): renderer skinned meshes built to vgeo on a worker,
+    // a pool of instances per mesh (one palette slot each), slots assigned to characters per frame.
+    VgPalettes pal;
+    bool pal_ok;
+    u32 slot_mat_base, slots_used;
+    struct SkinRec {
+        MeshId mesh;
+        int state;               // 0 free, 1 queued, 2 built (waiting to enter the scene), 3 in the scene, -1 failed
+        VgBuilt built;
+        u32 vmesh, first_slot, pool, want_pool, need;
+        float bones[VGEO_MAX_BONES][4];
+    } skin[128];
+    u32 skin_count;
+    struct SkinUse { u32 object_id; u16 rec; u16 pad; u32 frame; } uses[2048];   // slot -> character using it
+    SDL_Thread *worker;
+    SDL_Mutex *mutex;
+    SDL_Semaphore *sem;
+    int queued[128];
+    u32 queue_head, queue_tail;
+    bool quit;
+    VgMaterial slot_mat[2048];
+    u8 slot_mat_dirty[2048];
+    u32 route_frame;
+    Cvar *skinned;
     // vgeo_check_resolve: one frame's depth / velocity / visibility buffer read back and verified.
     struct {
         int state;               // 0 idle, 1 requested, 2 copied in frame slot `slot`
@@ -90,6 +115,10 @@ static struct {
 } G;
 
 static void fallback_register(u32 mesh, const VgBuilt *b, bool persistent);
+static void skin_init(void);
+static void skin_shutdown(void);
+static void skin_record(VkCommandBuffer cmd);
+static void skin_readd_pools(void);
 static void vkg_register_era(void);
 static void cmd_vgeo_bench(int argc, const char **argv);
 static void cmd_vgeo_check_resolve(int argc, const char **argv);
@@ -353,6 +382,7 @@ void vkg_init(void) {
     G.debug = cvar_reg_int("r_vgeo_debug", 0, 0, 8, 0, "vgeo debug view (Phase 3): 1 cluster, 2 triangle, 3 LOD, 4 error, 5 SW/HW, 6 residency, 7 overdraw, 8 instance");
     G.debug_spheres = cvar_reg_bool("r_vgeo_debug_spheres", false, 0, "vgeo: draw the culling spheres of up to 4096 visible clusters (HW green, SW cyan)");
     G.shadows = cvar_reg_bool("r_vgeo_shadows", true, CVAR_ARCHIVE, "vgeo: draw vgeo clusters into the sun shadow cascades");
+    G.skinned = cvar_reg_bool("r_vgeo_characters", true, CVAR_ARCHIVE, "vgeo: draw skinned characters (main view) through vgeo");
     G.pool_mb = cvar_reg_int("r_vgeo_pool_mb", 512, 16, 8192, CVAR_ARCHIVE, "vgeo: GPU page pool budget (MB of 128 KiB pages; applied on the next scene upload)");
     G.pages_per_frame = cvar_reg_int("r_vgeo_stream_pages_per_frame", 64, 1, 1024, CVAR_ARCHIVE, "vgeo: pages streamed in per frame");
     cmd_register("vgeo_stats", cmd_vgeo_stats, "virtualized geometry: scene, last frame's culling counters and pass timings");
@@ -394,6 +424,7 @@ void vkg_init(void) {
     vg_raster_resize(&G.raster, R->hdr.w, R->hdr.h);
     VgStreamConfig sc = { (u32)G.pool_mb->i, (u32)G.pages_per_frame->i };
     G.stream_ok = vg_stream_init(&G.stream, &G.scene, &G.cull, &sc);
+    skin_init();
     if (!create_gfx()) {
         log_error("vgeo: graphics pipelines unavailable");
         destroy_gfx();
@@ -412,6 +443,7 @@ void vkg_shutdown(void) {
     vgc_buffer_free(&G.ctx, &G.check.depth);
     vgc_buffer_free(&G.ctx, &G.check.vel);
     vgc_buffer_free(&G.ctx, &G.check.vis);
+    skin_shutdown();
     if (G.stream_ok) vg_stream_shutdown(&G.stream);
     G.stream_ok = false;
     vg_raster_shutdown(&G.raster);
@@ -487,6 +519,7 @@ static void exec_cull(VkCommandBuffer cmd, void *u) {
     // (and velocities) unjittered.
     mat4 rvp = mat4_mul(R->proj_j, R->view);
     memcpy(v.raster_view_proj, rvp.m, 64);
+    if (G.pal_ok) v.slot_material_base = G.slot_mat_base;
     bool hist = G.hiz != FG_NONE && fg_history_valid(G.hiz) && !R->camera_cut && G.occlusion->i > 0;
     VgHizRef prev = hist ? hiz_ref(G.hiz) : (VgHizRef){ 0 };
     VgHizRef cur = G.hiz_cur != FG_NONE ? hiz_ref(G.hiz_cur) : (VgHizRef){ 0 };
@@ -666,6 +699,7 @@ void vkg_graph_hiz(int depth_res, int velocity_res) {
 // frame slot (its fence has been waited), the visibility buffer size, page streaming.
 static void frame_begin(VkCommandBuffer cmd) {
     u32 frame = R->frame_slot;
+    vg_cull_prepare(&G.cull);   // after a commit (characters, level): before any of this frame's vgeo commands
     if (G.check.state == 2 && G.check.slot == frame) check_analyse();   // this slot's fence has been waited
     tex_update(frame);
     vg_cull_collect(&G.cull, frame);
@@ -676,6 +710,7 @@ static void frame_begin(VkCommandBuffer cmd) {
         vg_stream_set_config(&G.stream, &sc);
         vg_stream_update(&G.stream, cmd, frame);
     }
+    skin_record(cmd);
 }
 
 void vkg_record_shadow_cull(VkCommandBuffer cmd) {
@@ -697,7 +732,7 @@ void vkg_record_shadow_cull(VkCommandBuffer cmd) {
         float eye[3] = { R->cam.pos.x, R->cam.pos.y, R->cam.pos.z };
         VgViewGpu v;
         vgeo_view_setup(&v, vp.m, vp.m, eye, (float)tile / (2.0f * radius), 0.0f, tile, tile, G.shadow_error_px->f, 0.0f,
-                        VGV_ORTHO | VGV_NO_OCCLUSION | VGV_NO_CONE);
+                        VGV_ORTHO | VGV_NO_OCCLUSION | VGV_NO_CONE | VGV_NO_SKINNED);
         memcpy(v.raster_view_proj, R->shadow_vps[k].m, 64);
         vg_cull_record(&G.cull, cmd, frame, 1 + k, &v, NULL, NULL);
         VgPush pc;
@@ -819,6 +854,7 @@ static u32 level_mesh(const RenderVgeoPlacement *pl) {
 void render_vgeo_set_level(const RenderVgeoPlacement *p, int count) {
     if (!G.ok) return;
     vgeo_scene_clear_instances(&G.scene);
+    skin_readd_pools();
     u32 total = 0;
     for (int i = 0; i < count; i++) {
         const RenderVgeoPlacement *pl = &p[i];
@@ -1126,4 +1162,254 @@ u32 vkg_draw_local_shadow(VkCommandBuffer cmd, vec4 sphere, const vec4 planes[6]
         }
     }
     return n;
+}
+
+// ------------------------------------------------------------------ skinned characters
+
+#define SKIN_SLOTS 2048u
+#define SKIN_POOL0 4u
+
+// Worker: builds queued skinned meshes (SkinVertex copy -> VgSource with joints / weights).
+static int SDLCALL skin_worker(void *u) {
+    (void)u;
+    for (;;) {
+        SDL_WaitSemaphore(G.sem);
+        SDL_LockMutex(G.mutex);
+        if (G.quit) { SDL_UnlockMutex(G.mutex); return 0; }
+        int ri = G.queue_head != G.queue_tail ? G.queued[G.queue_head++ % 128] : -1;
+        SDL_UnlockMutex(G.mutex);
+        if (ri < 0) continue;
+        struct SkinRec *r = &G.skin[ri];
+        GpuMesh *gm = &R->meshes[r->mesh];
+        u32 vn = gm->vertex_count, in = gm->index_count;
+        float *pos = (float *)malloc(sizeof(float) * 3 * vn), *nrm = (float *)malloc(sizeof(float) * 3 * vn), *uv = (float *)malloc(sizeof(float) * 2 * vn);
+        u8 *jo = (u8 *)malloc(4u * vn), *we = (u8 *)malloc(4u * vn);
+        u32 *col = (u32 *)malloc(sizeof(u32) * vn);
+        bool bad = false;
+        for (u32 i = 0; i < vn; i++) {
+            const SkinVertex *v = &gm->cpu_verts[i];
+            memcpy(&pos[i * 3], &v->pos, 12);
+            memcpy(&nrm[i * 3], &v->normal, 12);
+            memcpy(&uv[i * 2], &v->uv, 8);
+            memcpy(&jo[i * 4], v->joints, 4);
+            memcpy(&we[i * 4], v->weights, 4);
+            col[i] = v->color;
+            for (int k = 0; k < 4; k++) bad |= v->joints[k] >= VGEO_MAX_BONES;
+        }
+        VgSource src;
+        memset(&src, 0, sizeof(src));
+        src.vertex_count = vn;
+        src.pos = pos;
+        src.normal = nrm;
+        src.uv = uv;
+        src.color = col;
+        src.index_count = in;
+        src.indices = gm->cpu_indices;
+        src.joints = jo;
+        src.weights_u8 = we;
+        VgBuildOptions opt;
+        memset(&opt, 0, sizeof(opt));
+        opt.threads = 2;
+        char err[128];
+        bool ok = !bad && vgeo_build(&src, &opt, &r->built, err, sizeof(err));
+        if (ok) vgeo_bone_bounds(&r->built, r->bones);
+        free(pos); free(nrm); free(uv); free(jo); free(we); free(col);
+        SDL_LockMutex(G.mutex);
+        r->state = ok ? 2 : -1;
+        SDL_UnlockMutex(G.mutex);
+    }
+}
+
+static void skin_init(void) {
+    if (!vg_palettes_init(&G.pal, &G.ctx, SKIN_SLOTS)) { log_warn("vgeo: palettes unavailable (characters stay legacy)"); return; }
+    vg_palettes_attach(&G.pal, &G.scene);
+    VgMaterial def;
+    memset(&def, 0, sizeof(def));
+    def.color[0] = def.color[1] = def.color[2] = def.color[3] = 1.0f;
+    def.roughness = 0.6f;
+    def.tex_scale = 1.0f;
+    for (u32 i = 0; i < SKIN_SLOTS; i++) {
+        u32 idx = vgeo_scene_add_material(&G.scene, &def);
+        if (i == 0) G.slot_mat_base = idx;
+        G.slot_mat[i] = def;
+    }
+    G.mutex = SDL_CreateMutex();
+    G.sem = SDL_CreateSemaphore(0);
+    G.worker = SDL_CreateThread(skin_worker, "vgeo_skin_build", NULL);
+    G.pal_ok = true;
+}
+
+static void skin_shutdown(void) {
+    if (!G.pal_ok) return;
+    SDL_LockMutex(G.mutex);
+    G.quit = true;
+    SDL_UnlockMutex(G.mutex);
+    SDL_SignalSemaphore(G.sem);
+    SDL_WaitThread(G.worker, NULL);
+    SDL_DestroySemaphore(G.sem);
+    SDL_DestroyMutex(G.mutex);
+    for (u32 i = 0; i < G.skin_count; i++)
+        if (G.skin[i].state == 2 || G.skin[i].state == 3) vgeo_free(&G.skin[i].built);
+    vg_palettes_shutdown(&G.pal);
+    G.pal_ok = false;
+}
+
+static int skin_rec_of(MeshId mesh, bool create) {
+    for (u32 i = 0; i < G.skin_count; i++)
+        if (G.skin[i].mesh == mesh) return (int)i;
+    if (!create || G.skin_count >= 128 || !R->meshes[mesh].cpu_verts) return -1;
+    int ri = (int)G.skin_count++;
+    struct SkinRec *r = &G.skin[ri];
+    memset(r, 0, sizeof(*r));
+    r->mesh = mesh;
+    r->state = 1;
+    SDL_LockMutex(G.mutex);
+    G.queued[G.queue_tail++ % 128] = ri;
+    SDL_UnlockMutex(G.mutex);
+    SDL_SignalSemaphore(G.sem);
+    return ri;
+}
+
+// Adds the pool instances of a mesh record (identity transform: the palette is world space).
+static void skin_add_pool(struct SkinRec *r) {
+    float pos[3] = { 0, 0, 0 }, rot[4] = { 0, 0, 0, 1 };
+    for (u32 k = 0; k < r->pool; k++) {
+        vgeo_scene_add_skinned_instance(&G.scene, r->vmesh, pos, rot, 1.0f, r->first_slot + k);
+        vg_palettes_set_bone_bounds(&G.pal, r->first_slot + k, (const float (*)[4])r->bones);
+        vg_palettes_clear(&G.pal, r->first_slot + k);
+    }
+}
+
+// Built meshes enter the scene; pools that ran out grow (both re-commit the scene: rare, load-time-ish).
+static void skin_integrate(void) {
+    bool commit = false;
+    for (u32 i = 0; i < G.skin_count; i++) {
+        struct SkinRec *r = &G.skin[i];
+        SDL_LockMutex(G.mutex);
+        int st = r->state;
+        SDL_UnlockMutex(G.mutex);
+        if (st == 2) {
+            u32 want = SKIN_POOL0;
+            if (G.slots_used + want > SKIN_SLOTS) { r->state = -1; continue; }
+            r->vmesh = vgeo_scene_add_mesh(&G.scene, &r->built);
+            vgeo_scene_set_mesh_materials(&G.scene, r->vmesh, G.slot_mat_base);   // overridden per slot
+            r->first_slot = G.slots_used;
+            r->pool = want;
+            for (u32 k = 0; k < want; k++) { G.uses[G.slots_used + k].rec = (u16)i; G.uses[G.slots_used + k].object_id = 0; }
+            G.slots_used += want;
+            skin_add_pool(r);
+            r->state = 3;
+            commit = true;
+            log_info("vgeo: character mesh %u: %u clusters, %u bones, pool of %u", r->mesh, r->built.hdr.cluster_count, r->built.hdr.bone_count, r->pool);
+        } else if (st == 3 && r->want_pool > r->pool && G.slots_used < SKIN_SLOTS) {
+            // grow: new slots at the end of the slot range (the old ones keep their characters)
+            u32 add = DG_MIN(r->want_pool - r->pool, SKIN_SLOTS - G.slots_used);
+            float pos[3] = { 0, 0, 0 }, rot[4] = { 0, 0, 0, 1 };
+            for (u32 k = 0; k < add; k++) {
+                u32 slot = G.slots_used + k;
+                vgeo_scene_add_skinned_instance(&G.scene, r->vmesh, pos, rot, 1.0f, slot);
+                vg_palettes_set_bone_bounds(&G.pal, slot, (const float (*)[4])r->bones);
+                vg_palettes_clear(&G.pal, slot);
+                G.uses[slot].rec = (u16)i;
+                G.uses[slot].object_id = 0;
+            }
+            G.slots_used += add;
+            r->pool += add;
+            commit = true;
+        }
+    }
+    if (commit && !vgeo_scene_commit(&G.scene)) log_error("vgeo: scene upload failed");
+}
+
+// Re-adds every character pool after the scene's instances were cleared (level change).
+static void skin_readd_pools(void) {
+    float pos[3] = { 0, 0, 0 }, rot[4] = { 0, 0, 0, 1 };
+    for (u32 slot = 0; slot < G.slots_used; slot++) {
+        const struct SkinRec *r = &G.skin[G.uses[slot].rec];
+        if (r->state == 3) vgeo_scene_add_skinned_instance(&G.scene, r->vmesh, pos, rot, 1.0f, slot);
+    }
+}
+
+// Per frame, before the legacy skinned passes are built (render.c): which skinned draws vgeo takes
+// (the main view only: shadows, scope / phone views keep the legacy path). routed[i] = 1 for those.
+// Per character: a stable slot of its mesh's pool (object id), this frame's palette and material.
+u32 vkg_route_skinned(const SkinnedDraw *draws, u32 n, const mat4 *bones, u8 *routed) {
+    memset(routed, 0, n);
+    if (!G.pal_ok || !G.ok) return 0;
+    if (!G.r_vgeo->i || !G.skinned->i) {   // off: no slot keeps drawing its last palette
+        bool any = false;
+        for (u32 s = 0; s < G.slots_used; s++) any |= G.uses[s].object_id != 0;
+        if (any) {
+            vg_palettes_begin(&G.pal, R->frame_slot);
+            for (u32 s = 0; s < G.slots_used; s++)
+                if (G.uses[s].object_id) { vg_palettes_clear(&G.pal, s); G.uses[s].object_id = 0; }
+        }
+        return 0;
+    }
+    for (u32 i = 0; i < n; i++)   // queue builds for meshes seen for the first time
+        if (!(draws[i].flags & MAT_VIEWMODEL)) skin_rec_of(draws[i].mesh, true);
+    skin_integrate();
+    if (!G.scene.instance_count) return 0;
+    const RenderSight *sg = &R->sight;
+    bool scope = sg->kind == RSIGHT_SCOPE_PIP && sg->ads_t >= 0.02f;
+    u32 frame_id = ++G.route_frame, routed_n = 0;
+    for (u32 k = 0; k < G.skin_count; k++) G.skin[k].need = 0;
+    vg_palettes_begin(&G.pal, R->frame_slot);
+    for (u32 i = 0; i < n && !scope; i++) {
+        const SkinnedDraw *d = &draws[i];
+        if ((d->flags & (MAT_VIEWMODEL | MAT_SHADOW_ONLY | MAT_HIGHLIGHT)) || d->fade != 0.0f || !d->object_id) continue;
+        u32 bc = d->bone_count >> 20, off = d->bone_count & 0xFFFFFu;
+        if (!bc || bc > VGEO_MAX_BONES) continue;
+        int ri = skin_rec_of(d->mesh, false);
+        if (ri < 0 || G.skin[ri].state != 3) continue;
+        struct SkinRec *r = &G.skin[ri];
+        r->need++;
+        // this character's slot: the one it had (stable: previous palette = velocity), else a free one
+        u32 slot = ~0u, free_slot = ~0u;
+        for (u32 q = 0; q < G.slots_used; q++) {
+            if (G.uses[q].rec != (u16)ri) continue;
+            if (G.uses[q].object_id == d->object_id) { slot = q; break; }
+            if (free_slot == ~0u && !G.uses[q].object_id) free_slot = q;
+        }
+        if (slot == ~0u) slot = free_slot;
+        if (slot == ~0u) { r->want_pool = DG_MAX(r->want_pool, r->pool * 2); r->want_pool = DG_MAX(r->want_pool, r->need * 2); continue; }   // pool exhausted: grows next frame
+        G.uses[slot].object_id = d->object_id;
+        G.uses[slot].rec = (u16)ri;
+        G.uses[slot].frame = frame_id;
+        vg_palettes_set(&G.pal, slot, &bones[off].m[0], bc);
+        VgMaterial m = G.slot_mat[slot];
+        m.color[0] = d->color.x;
+        m.color[1] = d->color.y;
+        m.color[2] = d->color.z;
+        m.color[3] = 1.0f;
+        m.roughness = d->roughness;
+        m.metallic = d->metallic;
+        m.emissive = d->emissive;
+        m.flags = d->flags & (MAT_TEXTURED | MAT_UNLIT);
+        m.albedo_tex = (d->flags & MAT_TEXTURED) && d->texture ? d->texture : 0;
+        if (m.albedo_tex) tex_use(m.albedo_tex);
+        if (memcmp(&m, &G.slot_mat[slot], sizeof(m))) { G.slot_mat[slot] = m; G.slot_mat_dirty[slot] = 1; }
+        routed[i] = 1;
+        routed_n++;
+    }
+    // slots no character took this frame stop drawing
+    for (u32 s = 0; s < G.slots_used; s++)
+        if (G.uses[s].frame != frame_id && G.uses[s].object_id) {
+            vg_palettes_clear(&G.pal, s);
+            if (G.uses[s].frame + 2 < frame_id) G.uses[s].object_id = 0;   // gone: the slot is free again
+        }
+    return routed_n;
+}
+
+// Inside frame_begin (recording): this frame's palettes and changed slot materials.
+static void skin_record(VkCommandBuffer cmd) {
+    if (!G.pal_ok) return;
+    for (u32 s = 0; s < G.slots_used; s++)
+        if (G.slot_mat_dirty[s]) {
+            G.scene.materials[G.slot_mat_base + s] = G.slot_mat[s];
+            if (G.scene.b_materials.buffer)
+                vkCmdUpdateBuffer(cmd, G.scene.b_materials.buffer, sizeof(VgMaterial) * (VkDeviceSize)(G.slot_mat_base + s), sizeof(VgMaterial), &G.slot_mat[s]);
+            G.slot_mat_dirty[s] = 0;
+        }
+    vg_palettes_record(&G.pal, cmd);
 }

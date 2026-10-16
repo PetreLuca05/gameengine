@@ -23,7 +23,7 @@ Simplification and clustering use meshoptimizer v0.22 (`simplifier.cpp`, `cluste
 | 3. Visibility buffer raster + resolve | **done** |
 | 4. Streaming | **done** |
 | 5. Integration, `r_era`, test scene, `bench_vgeo` | **done** |
-| 6. Skinned | module, shaders, tests **done** (characters glue: in progress) |
+| 6. Skinned | **done** (main view; shadows / scope / phone views keep the legacy skinned path) |
 | 7. Foliage support | — |
 
 ## Files
@@ -275,6 +275,24 @@ opaque         legacy forward lighting, then the vgeo lit resolve (vgeo_lit.frag
 - `map vgeo_test`, `vgeo_bench 300`, 96 MB pool (768 slots for 2599 pages): 695 pages loaded, 235 evicted, stream
   CPU 0.015 ms mean / 0.30 max per frame, the vgeo passes unchanged (worst frame 1.87 ms). 512 MB: everything
   needed fits (1056 resident).
+
+### Characters in the renderer (Phase 6 glue, `vk_vgeo.c` "skinned characters")
+
+- Every renderer skinned mesh drawn in the world is built to vgeo on a worker thread (`SkinVertex` joints /
+  weights straight from the mesh's CPU copy) and enters the scene with a **pool of instances** (identity
+  transform: the game's palettes are world space), one palette slot each, starting at 4 per mesh and doubling
+  to what a frame needs (each growth re-commits the scene; `vg_cull_prepare` then resizes the views before the
+  frame records anything).
+- Per frame `vkg_route_skinned` (render.c, before the legacy skinned passes are built) gives each eligible
+  draw (not viewmodel / shadow-only / highlighted / fading, has an object id, <= 128 bones) a stable slot of its
+  mesh's pool (by object id: the previous palette gives the velocity), uploads its palette (`vg_palettes_set`)
+  and its material (per-slot material entries: tint, roughness, the skin texture through the bindless array),
+  and removes it from the legacy main pass. Slots not used this frame are cleared (culled), freed after 2.
+- Not routed: the sun cascades (vgeo cascade views carry `VGV_NO_SKINNED`; characters cast their legacy shadows,
+  also into point / spot light tiles), the scope picture-in-picture (no routing while a PiP scope is up) and the
+  phone camera views. `r_vgeo_characters 0` switches it off.
+- devroom `spawn_horde 500`: 27 character meshes (parts x LODs), 1326 pool instances, 327 characters in view
+  drawn by vgeo, 0 validation messages; frame 11.7 ms with the horde AI / animation (CPU-bound).
 
 ### Resolve and lighting (`shaders/vgeo_gbuffer.frag`, `vgeo_lit.frag`, `vgeo/vg_resolve.glsl`)
 

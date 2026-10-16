@@ -147,6 +147,7 @@ enum VgViewFlags {
     VGV_NO_OCCLUSION = 1u << 2,
     VGV_ORTHO = 1u << 3,             // shadow cascades: error projects without distance
     VGV_TWO_PASS = 1u << 4,          // pass 2 re-tests pass 1 occluders against the current Hi-Z
+    VGV_NO_SKINNED = 1u << 5,        // skip skinned instances (the renderer's sun cascades: characters cast legacy shadows)
 };
 
 // Per-view constants (std430, binding 0). Planes are normalised (inside: dot(n, p) + d >= 0).

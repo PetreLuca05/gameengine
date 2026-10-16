@@ -624,8 +624,11 @@ typedef struct CpuSkin { VkDeviceSize offset; bool ok; } CpuSkin;
 
 // Skinned passes: 0 = main (world), 1 = shadow, 2 = viewmodel (first-person arms, after the depth
 // clear), 3 = phone cameras (the world + the local player's own body, MAT_SELF: selfies).
+static u8 g_skin_routed[MAX_SKIN_DRAWS];   // this frame's skinned draws vgeo takes (main view, vkg_route_skinned)
+
 static bool skin_in_pass(const SkinnedDraw *d, int pass) {
     bool vm = (d->flags & MAT_VIEWMODEL) != 0;
+    if (pass == 0 && g_skin_routed[d - R->skin_draws]) return false;
     if (pass == 1) return d->cast_shadow && !vm;
     if (pass == 2) return vm;
     if (pass == 3) return !vm && (!(d->flags & MAT_SHADOW_ONLY) || (d->flags & MAT_SELF));
@@ -1777,6 +1780,8 @@ void render_end_frame(void) {
     F.skin_phone = &skin_phone;
     for (u32 i = 0; i < R->skin_draw_count; i++) F.any_skin_vm |= (R->skin_draws[i].flags & MAT_VIEWMODEL) != 0;
     ArenaMark skin_mark = arena_mark(&g_engine.frame_arena);
+    memset(g_skin_routed, 0, R->skin_draw_count);
+    if (R->skin_draw_count && !cpu_skin) vkg_route_skinned(R->skin_draws, R->skin_draw_count, R->skin_bones, g_skin_routed);
     if (R->skin_draw_count) {
         if (cpu_skin) {
             F.cpu_skinned = ARENA_PUSH_N(&g_engine.frame_arena, CpuSkin, R->skin_draw_count);

@@ -44,6 +44,7 @@ void vg_expand(uint inst, VgXf x, VgMesh m, VgNode nd, uint out_region) {
 void vg_instance(uint inst, uint out_region) {
     VgXf x = vg_instance_xf(inst);
     if (!x.live) return;   // skinned instance of an empty palette slot
+    if (x.skin && (vg_flags() & VGV_NO_SKINNED) != 0u) return;
     VgMesh m = meshes[x.mesh];
     vec4 s = vg_world_sphere(x, m.sphere);
     if (!vg_frustum(s)) return;

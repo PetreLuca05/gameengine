@@ -86,6 +86,9 @@ void vg_hiz_record(VgCuller *c, VkCommandBuffer cmd, u32 frame, VkImageView dept
 // The visibility buffer bound at binding 18 of every set (Phase 3 raster / resolve share the cull
 // layout and sets: vg_cull_set after vg_cull_record of the same frame / slot).
 void vg_cull_set_vis(VgCuller *c, VkBuffer vis);
+// Re-sizes the allocated views' buffers for the scene now (may wait for the device): call after a
+// scene commit and before recording anything of the frame that references them.
+void vg_cull_prepare(VgCuller *c);
 VkDescriptorSet vg_cull_set(const VgCuller *c, u32 frame, u32 slot);
 
 // Counters of the last completed frame for a view (false before the first one).

@@ -195,6 +195,12 @@ static void ensure_view(VgCuller *c, VgViewRes *v) {
     v->allocated = true;
 }
 
+void vg_cull_prepare(VgCuller *c) {
+    if (!c->ok) return;
+    for (u32 i = 0; i < VG_MAX_VIEWS; i++)
+        if (c->v[i].allocated) ensure_view(c, &c->v[i]);
+}
+
 static void write_set(VgCuller *c, VgViewRes *v, u32 f, VkImageView prev, VkImageLayout prev_l, VkImageView cur, VkImageLayout cur_l) {
     const VgScene *s = c->scene;
     if (v->set_gen[f] == s->generation && v->set_prev[f] == prev && v->set_cur[f] == cur && v->set_vis[f] == c->vis_buffer) return;
