@@ -288,6 +288,8 @@ static int gpu_part_for(const CharPartOption *o, const BoneSet *hidden) {
 // at once (the host confirms it for everyone else).
 static void drawn_selection(const CharacterInst *c, int local_slot, u8 *sel) {
     memcpy(sel, c->parts, CSLOT_COUNT);
+    // The own player (not a spectated view slot): its cl_skin choice.
+    if (game()) local_slot = game()->local_slot;
     if (c->is_player && c->slot == local_slot && CG->skin_cvar && CG->skin_cvar->str[0]) {
         int o = character_find_option(c->def, CSLOT_BODY, CG->skin_cvar->str);
         if (o >= 0) sel[CSLOT_BODY] = (u8)(o + 1);
@@ -704,8 +706,8 @@ void chars_notify_attack(World *w, int slot, bool melee, bool first) {
         ev.tick = w->tick;
         ev.extra = (u8)c->rt.in.weapon_type;
         chars_push_event(w, &ev);
-    } else if (first && p->local) {
-        charrt_trigger(&c->rt, melee ? AP_T_MELEE : AP_T_FIRE);
+    } else if (first && (p->local || slot == game_view_slot())) {
+        charrt_trigger(&c->rt, melee ? AP_T_MELEE : AP_T_FIRE);   // the predicting owner, or its first-person spectator
     }
 
 }
@@ -1346,6 +1348,14 @@ static void post_one(World *w, CharacterInst *c, int i, float dt, vec3 cam_pos, 
             pi.hold_kick.ads_out = at / 1.3f;
         }
         pi.hp_bob_scale = wc->bob_scale ? wc->bob_scale->f : 0.0f;
+        // Players simulated on this machine (all on the host; the own / spectated one on a client):
+        // breathing and bob phases from their commands / movement, identical wherever they run.
+        if (c->is_player && c->slot >= 0 && c->slot < MAX_PLAYERS && w->players[c->slot].active && (w->authority || c->local)) {
+            const Player *pl = &w->players[c->slot];
+            pi.hp_phase_valid = true;
+            pi.hp_clock = (double)pl->last_cmd.seq * SIM_DT;
+            pi.hp_stride = pl->sim.move.stride;
+        }
     }
     if (c->rt.in.crouch) pi.crouch_drop = 0.38f;
     pi.first_person = c->local && cv(CG->fp_body);
@@ -2125,7 +2135,7 @@ static void sync_local_skin(World *w, int local_slot) {
 void chars_render(World *w, float alpha, vec3 cam_pos, int local_slot) {
     if (!w->chars || !LIB) return;
     ensure_gpu_meshes();
-    sync_local_skin(w, local_slot);
+    sync_local_skin(w, game() ? game()->local_slot : local_slot);   // own skin; local_slot here is the viewed player
     const Skeleton *s = &LIB->skel;
     static Xform pose[ANIM_MAX_BONES];
     for (int k = 0; k < MAX_CHARACTERS; k++) {

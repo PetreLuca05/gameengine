@@ -575,6 +575,7 @@ void phone_fill_cmd(UserCmd *c) {
     if (PH.front) f |= CHAR_PHONE_FRONT;
     c->phone_flags = f;
     c->phone_rot = PH.driven ? PH.rot_packed : 0;
+    c->phone_zoom = (u8)DG_CLAMP((int)lrintf(PH.zoom_target * 32.0f), 32, 255);   // spectators: the same lens
 }
 
 bool phone_wheel(int dir) {
@@ -710,9 +711,12 @@ void phone_frame(World *w, const RenderCamera *cam, const Player *lp) {
     if (!PH.init) return;
     float dt = (float)g_engine.frame_dt;
     // Held item.
+    // The viewed player's phone (docs/SPECTATE.md): a spectated player's lens, zoom, front camera and
+    // landscape come with its commands; only the own phone takes input, records and pairs.
     const ItemDef *it = NULL;
+    bool spec = game_view_slot() != game()->local_slot;
     if (w && lp && lp->sim.move.mode != MOVE_DEAD) {
-        const InvSlot *eq = weapon_equipped(w, game()->local_slot);
+        const InvSlot *eq = weapon_equipped(w, game_view_slot());
         const ItemDef *d = eq ? item_def(w->items, eq->item) : NULL;
         if (d && d->camera) it = d;
     }
@@ -736,8 +740,15 @@ void phone_frame(World *w, const RenderCamera *cam, const Player *lp) {
         if (PH.token_left <= 0 && PH.conn < 0 && PH.screen == PSCR_PAIR) PH.token[0] = 0;
     }
     update_orientation(dt);
+    if (spec) {
+        const UserCmd *vc = game_view_cmd();
+        if (vc->phone_zoom) PH.zoom_target = clampf((float)vc->phone_zoom / 32.0f, 1.0f, MAX_ZOOM);
+        PH.front = (vc->phone_flags & CHAR_PHONE_FRONT) != 0;
+        PH.landscape = (vc->phone_flags & CHAR_PHONE_LANDSCAPE) != 0;
+        if (PH.rec) record_stop();
+    }
     // Local input (in game, nothing on top).
-    bool focus = input_game_focus() && !game()->menu_open && !game()->inventory_open && !console_is_open();
+    bool focus = !spec && input_game_focus() && !game()->menu_open && !game()->inventory_open && !console_is_open();
     bool atk = input_down(ACT_ATTACK), rel = input_down(ACT_RELOAD), pair = input_down(ACT_PHONE_PAIR), gal = input_down(ACT_PHONE_GALLERY);
     bool selfie = input_down(ACT_PHONE_SELFIE);
     if (focus && PH.holding && selfie && !PH.prev_selfie) PH.front = !PH.front;

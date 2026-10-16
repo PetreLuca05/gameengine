@@ -129,6 +129,12 @@ typedef struct HoldPointInput {
     float rot_w;
     quat rot_cam;
     float dt;
+    // Deterministic phases (docs/SPECTATE.md): breathing from the player's command clock (s) and
+    // the movement bob from PlayerMove.stride, so the owner and its spectators sway in step. Unset
+    // (phase_valid false): free-running from creation (NPCs, editor).
+    bool phase_valid;
+    double clock;
+    float stride;
     float aim_yaw, aim_pitch;         // view angles (radians): look lag from their rate
     vec3 vel_cam;                     // velocity in camera space (m/s)
     bool grounded;

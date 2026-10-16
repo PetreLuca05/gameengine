@@ -497,7 +497,7 @@ void holdpoint_eval(HoldPointState *st, const HoldPointInput *in, HoldPointOutpu
     vec2 lag_t = v2(clampf(-wp * s->lag_rot, -s->lag_max, s->lag_max) * S, clampf(-wy * s->lag_rot, -s->lag_max, s->lag_max) * S);
     st->lag.x = spring1(st->lag.x, &st->lag_v.x, lag_t.x, s->lag_k, s->lag_d, dt);
     st->lag.y = spring1(st->lag.y, &st->lag_v.y, lag_t.y, s->lag_k, s->lag_d, dt);
-    st->t += dt;
+    st->t = in->phase_valid ? (float)fmod(in->clock, 3600.0) : st->t + dt;
     // Breathing: slow layered sines (figure-eight + breath), plus the extra wobble.
     float sw = s->sway_rot * S;
     vec3 breath_rot = v3(sinf(st->t * s->sway_freq * 2.0f * DG_PI) * sw * 0.6f + sinf(st->t * 0.37f * 2.0f * DG_PI + 1.7f) * sw * 0.25f,
@@ -510,7 +510,8 @@ void holdpoint_eval(HoldPointState *st, const HoldPointInput *in, HoldPointOutpu
     float speed = sqrtf(in->vel_cam.x * in->vel_cam.x + in->vel_cam.z * in->vel_cam.z);
     float bob_target = in->grounded ? clampf(speed / 6.0f, 0, 1) : 0.0f;
     st->bob_amt += (bob_target - st->bob_amt) * (1.0f - expf(-8.0f * dt));
-    st->bob_phase += dt * (4.5f + speed * 1.1f) * s->bob_freq;
+    if (in->phase_valid) st->bob_phase = in->stride * s->bob_freq;
+    else st->bob_phase += dt * (4.5f + speed * 1.1f) * s->bob_freq;
     float bob = st->bob_amt * S * (state == HP_SPRINT ? 1.4f : in->bob_scale);
     vec3 bob_pos = v3(sinf(st->bob_phase) * s->bob_pos * bob, -fabsf(cosf(st->bob_phase)) * s->bob_pos * 1.2f * bob, 0);
     vec3 bob_rot = v3(0, 0, sinf(st->bob_phase) * s->bob_rot * bob);

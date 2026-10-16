@@ -1431,13 +1431,16 @@ void vehicles_level_loaded(World *w, const char *map) {
 
 // ------------------------------------------------------------------ local input / camera
 
-static Vehicle *local_vehicle(World *w, int *seat) {
-    Player *lp = game_local_player();
+static Vehicle *player_vehicle(World *w, const Player *lp, int *seat) {
     if (!w || !lp || lp->sim.move.mode != MOVE_SEATED) return NULL;
     Vehicle *v = veh_of(w, lp->sim.move.vehicle);
     if (v && seat) *seat = DG_CLAMP(lp->sim.move.seat, 0, vdef(v)->seat_count - 1);
     return v;
 }
+
+static Vehicle *local_vehicle(World *w, int *seat) { return player_vehicle(w, game_local_player(), seat); }
+// The viewed player's vehicle (the local player's, or a spectated player's: camera / HUD).
+static Vehicle *view_vehicle(World *w, int *seat) { return player_vehicle(w, game_view_player(), seat); }
 
 // Frame input (before the hotbar): F enters / exits (it is the flashlight otherwise), 1-4 change
 // seats while seated, V vehicle camera, H headlights, Q horn.
@@ -1461,6 +1464,7 @@ void vehicles_fill_cmd(UserCmd *c) {
     if (VG.req_seat) { c->seat_req = VG.req_seat; VG.req_seat = 0; }
     if (VG.lights) c->buttons |= BTN_LIGHTS;
     if (input_down(ACT_HORN)) c->buttons |= BTN_HORN;
+    if (VG.cam_tp) c->buttons |= BTN_VEH_CAM;   // spectators follow the driver's camera choice
 }
 
 // The view turns with the vehicle (free look relative to it, limited per seat).
@@ -1504,13 +1508,15 @@ static bool cam_cast(PhysicsWorld *pw, vec3 from, vec3 to, BodyId ign, vec3 *out
 // third-person orbit behind the vehicle. Returns the camera mode (1 head, 3 third person) or 0.
 int vehicles_camera(World *w, RenderCamera *cam) {
     int seat = 0;
-    Vehicle *v = local_vehicle(w, &seat);
+    Vehicle *v = view_vehicle(w, &seat);
     if (!v) return 0;
     const VehicleDef *d = vdef(v);
     vec3 p;
     quat r;
     pose_render(w, v, &p, &r);
-    if (VG.cam_tp || cvar_find("cl_thirdperson")->i) {
+    bool own = game_view_slot() == G->local_slot;
+    bool cam_tp = own ? VG.cam_tp : (game_view_cmd()->buttons & BTN_VEH_CAM) != 0;
+    if (cam_tp || cvar_find("cl_thirdperson")->i) {
         chars_set_thirdperson(true);
         vec3 target = to_world(p, r, v3(0, d->camera_tp.y * 0.55f, 0));
         vec3 dir = dir_from_angles(cam->yaw, cam->pitch);
@@ -1524,7 +1530,7 @@ int vehicles_camera(World *w, RenderCamera *cam) {
     // it). A seated body animates standing still (no run cycle, no bob), so it is steady; the seat's
     // eye point is the fallback.
     Xform sock;
-    if (cvar_find("cl_camera_socket")->i && chars_fp_camera(w, G->alpha, G->local_slot, cam->yaw, cam->pitch, &sock)) cam->pos = sock.t;
+    if (cvar_find("cl_camera_socket")->i && chars_fp_camera(w, G->alpha, game_view_slot(), cam->yaw, cam->pitch, &sock)) cam->pos = sock.t;
     else cam->pos = to_world(p, r, v3_add(d->seats[seat].pos, d->seats[seat].eye));
     cam->roll = 0.0f;
     return 1;
@@ -1712,7 +1718,7 @@ static void place_occupants(World *w, Vehicle *v) {
         if (!v->occ[s]) continue;
         int slot = v->occ[s] - 1;
         Player *pl = &w->players[slot];
-        if (!pl->active || (pl->local && !w->authority)) continue;
+        if (!pl->active || ((pl->local || slot == game_view_slot()) && !w->authority)) continue;   // predicted here (own / spectated replica)
         vec3 eye = to_world(p, r, v3_add(d->seats[s].pos, d->seats[s].eye));
         vec3 feet = v3_sub(eye, v3(0, PLAYER_EYE_STAND, 0));
         if (!w->authority) {
@@ -1798,9 +1804,9 @@ void vehicles_draw_hud(void) {
     World *w = G ? G->world : NULL;
     if (!w || !w->vehicles) return;
     int seat = 0;
-    Vehicle *v = local_vehicle(w, &seat);
+    Vehicle *v = view_vehicle(w, &seat);
     // World labels for nearby vehicles (not the own one): name in caps, fuel / condition pills.
-    Player *lp = game_local_player();
+    Player *lp = game_view_player();
     VehicleSys *vs = (VehicleSys *)w->vehicles;
     for (int i = 0; lp && i < MAX_VEH; i++) {
         Vehicle *o = &vs->v[i];

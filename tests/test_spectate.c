@@ -291,7 +291,7 @@ static const Field k_fields[] = {
     F(sim.move.m_t), F(sim.move.m_dur), F(sim.move.m_end_crouched), F(sim.move.m_kind), F(sim.move.pad1), F(sim.move.hang_pos),
     F(sim.move.hang_normal), F(sim.move.ledge_point), F(sim.move.hang_time), F(sim.move.regrab_cooldown), F(sim.move.hand_anchor),
     F(sim.move.hand_anchor_valid), F(sim.move.pad2), F(sim.move.vehicle), F(sim.move.seat), F(sim.move.veh_onehand), F(sim.move.veh_raise),
-    F(sim.move.pad3), F(sim.move.veh_stun),
+    F(sim.move.pad3), F(sim.move.veh_stun), F(sim.move.stride),
     F(sim.wpn.slot), F(sim.wpn.prev_slot), F(sim.wpn.reloading), F(sim.wpn.swing_hit_done), F(sim.wpn.cooldown), F(sim.wpn.reload_t),
     F(sim.wpn.swing_t), F(sim.wpn.use_t), F(sim.wpn.equip_t), F(sim.wpn.shots), F(sim.wpn.recoil_kick), F(sim.wpn.mag), F(sim.wpn.fire_mode),
     F(sim.wpn.burst_left), F(sim.wpn.ads_t), F(sim.wpn.since_sprint), F(sim.wpn.breath), F(sim.wpn.breath_holding), F(sim.wpn.breath_exhausted),

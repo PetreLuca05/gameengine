@@ -476,7 +476,7 @@ static UserCmd build_cmd(void) {
     if (G->noclip_request) { c.buttons |= BTN_NOCLIP; G->noclip_request = false; }
     if (G->menu_open || G->inventory_open || G->container_open || G->bench_open || console_is_open()) {
         c.move_x = c.move_y = 0;
-        c.buttons &= (u16)(BTN_CROUCH | BTN_NOCLIP | BTN_FLASHLIGHT | BTN_PHONE);
+        c.buttons &= (u16)(BTN_CROUCH | BTN_NOCLIP | BTN_FLASHLIGHT | BTN_PHONE | BTN_VEH_CAM);
     }
     if (spectator_controls_input()) {
         // Spectating: the keys drive the spectator controls, the own (dead / dev) player stands still.

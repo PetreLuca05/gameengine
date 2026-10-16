@@ -40,6 +40,7 @@ bool spectator_view_interp(PlayerMove *out, float alpha);   // the watched playe
 bool spectator_view_angles(float alpha, float *yaw, float *pitch);
 const UserCmd *spectator_view_cmd(void);   // its latest command (ADS, use, sway time)
 vec2 spectator_frame_look(void);           // its view change this frame (hands look lag)
+bool spectator_take_use_press(void);       // its use press since the last frame (hands reach)
 bool spectator_free_camera(RenderCamera *cam);
 void spectator_blend_camera(RenderCamera *cam, float dt);   // inertialized target switches
 float spectator_delay_ms(void);            // estimated input -> screen delay of the watched player

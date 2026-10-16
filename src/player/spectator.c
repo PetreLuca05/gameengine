@@ -40,6 +40,7 @@ typedef struct Spectator {
     UserCmd view_cmd;            // last command simulated (real or extrapolated)
     PlayerMove prev_move;        // render interpolation: the state one tick ago
     float yaw[2], pitch[2];      // view angles one tick ago / now (command + recoil kick)
+    bool use_press;              // a use press of the watched player waiting for the hands (frame)
     vec2 kick;                   // recoil view kick of command kick_seq (game_sim_player)
     u32 kick_seq;
     vec3 error_offset;           // smoothed visual correction (rewinds / reconciliation)
@@ -282,6 +283,7 @@ static void host_tick(World *w) {
     vec2 k = SP.kick_seq == p->last_cmd.seq ? SP.kick : v2(0, 0);
     SP.yaw[1] = wrap_angle(p->last_cmd.yaw + k.x);
     SP.pitch[1] = clampf(p->last_cmd.pitch + k.y, -88.0f * DG_DEG2RAD, 88.0f * DG_DEG2RAD);
+    if ((p->last_cmd.buttons & BTN_USE) && !(SP.view_cmd.buttons & BTN_USE)) SP.use_press = true;
     SP.view_cmd = p->last_cmd;
     SP.delay_est_ms = (float)b.target_owd_ms + SIM_DT * 500.0f;
 }
@@ -310,6 +312,7 @@ void spectator_tick(World *w) {
         // Effects (shots, kicks, sounds) for the newest two only when catching up a backlog; the
         // animation steps once per command like on the target.
         bool first = s + 1 >= st.real_to;
+        if ((c->buttons & BTN_USE) && !(SP.last_real.buttons & BTN_USE)) SP.use_press = true;
         sim_one(w, slot, c, first, true);
         SP.last_real = *c;
         SP.real_yaw = SP.yaw[1];
@@ -501,6 +504,7 @@ bool spectator_view_interp(PlayerMove *out, float alpha) {
     }
     out->pos = v3_add(v3_lerp(SP.prev_move.pos, p->sim.move.pos, alpha), SP.error_offset);
     out->crouch_amount = lerpf(SP.prev_move.crouch_amount, p->sim.move.crouch_amount, alpha);
+    out->stride = lerpf(SP.prev_move.stride, p->sim.move.stride, alpha);
     return true;
 }
 
@@ -516,6 +520,12 @@ bool spectator_view_angles(float alpha, float *yaw, float *pitch) {
 
 const UserCmd *spectator_view_cmd(void) { return spectator_view_slot() >= 0 ? &SP.view_cmd : NULL; }
 vec2 spectator_frame_look(void) { return SP.frame_look; }
+
+bool spectator_take_use_press(void) {
+    bool p = SP.use_press;
+    SP.use_press = false;
+    return p;
+}
 
 bool spectator_free_camera(RenderCamera *cam) {
     if (SP.mode != SPEC_FREE || !SP.free_init) return false;
