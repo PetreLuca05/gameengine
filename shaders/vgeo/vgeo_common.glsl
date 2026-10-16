@@ -1,6 +1,7 @@
 // Virtualized geometry: GLSL mirror of src/render/vgeo/vgeo_gpu.h and the shared cull helpers.
 // Change a struct here and in vgeo_gpu.h together (sizes are asserted on the C side).
 #extension GL_EXT_scalar_block_layout : require
+#extension GL_EXT_nonuniform_qualifier : require
 #ifdef VG_VIS
 #extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
 #extension GL_EXT_shader_atomic_int64 : require
@@ -19,11 +20,22 @@ struct VgViewGpu {
     uvec4 caps0;             // nodes (per region), groups (per region), visible (per list), occluded
     uvec4 caps1;             // cells (per region), instances, requests, slot material base (skinned instances: materials[base + slot], ~0 none)
     mat4 raster_view_proj;   // the view the visible clusters are rasterised with (main view: jittered)
+    vec4 wind;               // foliage (Phase 7): direction x, z, strength (m/s), gust
+    vec4 wind_prev;          // last frame's (velocity)
+    vec4 foliage;            // time, previous time, r_foliage_density, r_vgeo_impostor_px
+    vec4 disp;               // displacement buffer: texel 0 world x, z, metres per texel, valid
+    uvec4 misc;              // x frame index (dither rotation), y displacement texture index
 };
-struct VgMaterial { vec4 color; float roughness, metallic, emissive, tex_scale; uint flags; uint albedo_tex; uint pad0, pad1, pad2, pad3, pad4, pad5; };
+struct VgMaterial {
+    vec4 color; float roughness, metallic, emissive, tex_scale; uint flags; uint albedo_tex; uint mask_tex; float alpha_cutoff;
+    uint wpo; float wpo_max, fade_start, fade_end; vec4 wpo_params; float shadow_max_dist; uint pad0, pad1, pad2;
+};
 struct VgNode { vec4 sphere; float max_parent_error; uint first; uint count_flags; uint pad; };
 struct VgGroup { vec4 lod; float parent_error; uint page; uint first_count; uint level; };
-struct VgMesh { vec4 sphere; uint root_node, node_base, group_base, page_base; uint page_count, flags, material_base, impostor; float max_wpo, q_step, pad0, pad1; };
+struct VgMesh {
+    vec4 sphere; uint root_node, node_base, group_base, page_base; uint page_count, flags, material_base, impostor;
+    float max_wpo, q_step, fade_start, fade_end; float shadow_max_dist; uint fflags, impostor_grid; float impostor_radius;
+};
 struct VgInstance { vec3 pos; uint rot; uint scale_mesh; uint flags_phase; uint extra; uint cell; };
 struct VgCell { vec3 mn; uint first; vec3 mx; uint count; };
 struct VgPaletteSlot { uint first, prev_first, bone_count, pad0; float max_scale, k0, k1, pad1; };
@@ -73,6 +85,28 @@ struct VgPaletteSlot { uint first, prev_first, bone_count, pad0; float max_scale
 #define VGN_INST_P2 20
 #define VGN_CL_P2 21
 #define VGN_CELLS_P2 22
+#define VGN_IMPOSTORS 23
+#define VGN_INST_FADED 24
+#define VG_IMPOSTOR_ENTRY 0xFFFFFFFFu
+// Foliage (Phase 7, vgeo_gpu.h): material flags, mesh flags, WPO snippets.
+#define VGM_MASKED (1u << 24)
+#define VGM_TWO_SIDED (1u << 25)
+#define VGM_DITHER_FADE (1u << 26)
+#define VGM_FOLIAGE (1u << 27)
+#define VGM_FLAGS (VGM_MASKED | VGM_TWO_SIDED | VGM_DITHER_FADE | VGM_FOLIAGE)
+#define VGMF_FOLIAGE 1u
+#define VGMF_MASKED 2u
+#define VGMF_TWO_SIDED 4u
+#define VGMF_DITHER 8u
+#define VGMF_WPO 16u
+#define WPO_NONE 0u
+#define WPO_GRASS 1u
+#define WPO_TREE 2u
+#define WPO_DISPLACE 256u
+#define VG_DISPLACE_MAX 0.6
+// Material / impostor / displacement textures (vgeo_tex.h): binding 23, renderer texture ids [0, 1024),
+// the vgeo module's own [1024, 1088).
+#define VG_TEX_COUNT 1088
 
 // Descriptor set of the vgeo bindings (the resolve passes put it after the renderer's sets) and the
 // push constants: VG_NO_PUSH for shaders with their own push block (the view is then VG_VIEW_INDEX).
@@ -107,6 +141,7 @@ layout(set = VG_SET, binding = 20) buffer PageStamps { uint page_stamp[]; };
 // Skinned instances (vgeo_skin.h): palettes (bind space -> instance space) and the slot table.
 layout(set = VG_SET, binding = 21) readonly buffer Palettes { mat4 palette[]; };
 layout(set = VG_SET, binding = 22, scalar) readonly buffer PaletteSlots { VgPaletteSlot palette_slots[]; };
+layout(set = VG_SET, binding = 23) uniform sampler2D vg_tex[VG_TEX_COUNT];
 // Visibility buffer (binding 18, see vgeo_gpu.h): define VG_VIS before including (needs int64).
 #ifdef VG_VIS
 layout(set = VG_SET, binding = 18) coherent buffer VisBuffer { uint64_t vis[]; };
@@ -135,8 +170,9 @@ vec3 vg_qrot(vec4 q, vec3 v) {
 }
 // scale: the error / bounds scale (skinned: instance scale x the slot's max bone scale); pscale: the
 // instance's own scale (positions). Skinned (skin): first / prev_first = the slot's palette regions,
-// root = palette[first] (bone 0), skin_s / skin_k: the sphere transform of vg_world_sphere.
-struct VgXf { vec3 pos; vec4 rot; float scale; uint mesh; float pscale; bool skin, live; uint first, prev_first; mat4 root; float skin_s, skin_k; uint slot; };
+// root = palette[first] (bone 0), skin_s / skin_k: the sphere transform of vg_world_sphere. wpo: the
+// mesh's max world-position offset (m, added to every world sphere); fp: VgInstance.flags_phase.
+struct VgXf { vec3 pos; vec4 rot; float scale; uint mesh; float pscale; bool skin, live; uint first, prev_first; mat4 root; float skin_s, skin_k; uint slot; float wpo; uint fp; };
 VgXf vg_instance_xf(uint i) {
     VgInstance in_ = instances[i];
     VgXf x;
@@ -145,6 +181,8 @@ VgXf vg_instance_xf(uint i) {
     x.pscale = unpackHalf2x16(in_.scale_mesh & 0xFFFFu).x;
     x.scale = x.pscale;
     x.mesh = in_.scale_mesh >> 16;
+    x.wpo = meshes[x.mesh].max_wpo;
+    x.fp = in_.flags_phase;
     x.skin = false;
     x.live = true;
     x.first = x.prev_first = 0u;
@@ -173,11 +211,33 @@ VgXf vg_instance_xf(uint i) {
 vec4 vg_instance_sphere(VgXf x, vec4 s) { return vec4(x.pos + vg_qrot(x.rot, s.xyz * x.pscale), s.w * x.pscale); }
 // Mesh-space sphere -> world. Skinned: (P_0 c, r max_scale + k) first, which contains the skinned
 // position of every bind-space point of the sphere (|P_b v - P_0 v| <= k for every bone b), and
-// keeps nested spheres nested (the DAG cut stays monotonic). CPU mirror: vgeo_xf_sphere.
+// keeps nested spheres nested (the DAG cut stays monotonic). Foliage: + the mesh's declared max
+// world-position offset (WPO), which keeps them nested too. CPU mirror: vgeo_xf_sphere.
 vec4 vg_world_sphere(VgXf x, vec4 s) {
     if (x.skin) s = vec4((x.root * vec4(s.xyz, 1.0)).xyz, s.w * x.skin_s + x.skin_k);
-    return vg_instance_sphere(x, s);
+    vec4 w = vg_instance_sphere(x, s);
+    w.w += x.wpo;
+    return w;
 }
+
+// ------------------------------------------------------------------ foliage instances (Phase 7)
+
+// Fade alpha of a foliage instance at distance dist from the camera: 0 = culled, 1 = opaque, in between
+// dithered (VGM_DITHER_FADE). Kept while its fixed density hash h < r_foliage_density x fade(dist), so
+// the kept set is stable for a static camera and shrinks monotonically with distance; the last 1/16
+// of the threshold is the dither band. Static meshes: 1. CPU mirror: vgeo_foliage_alpha.
+float vg_foliage_alpha(VgMesh m, uint fp, float dist) {
+    if ((m.fflags & VGMF_FOLIAGE) == 0u) return 1.0;
+    float t = V.foliage.z;
+    if (m.fade_end > m.fade_start) t *= clamp((m.fade_end - dist) / (m.fade_end - m.fade_start), 0.0, 1.0);
+    float h = (float((fp >> 8) & 0xFFu) + 0.5) * (0.9375 / 256.0);
+    return clamp((t - h) * 16.0, 0.0, 1.0);
+}
+
+// The one impostor switch (both sides use it, so there is no gap and no overlap): an instance with an
+// impostor atlas whose (WPO-inflated) world sphere projects below r_vgeo_impostor_px across draws its
+// impostor quad, else its DAG cut. Never in orthographic (shadow) views. CPU mirror: vgeo_use_impostor.
+bool vg_use_impostor(VgMesh m, vec4 s);
 
 // Animated culling sphere of a skinned cluster (instance space) from its bone set at pool word w
 // (vgeo_gpu.h): the box around the union over its bones of AABB(palette[b] * box_b), conservative for
@@ -222,6 +282,16 @@ float vg_project_size(vec4 s) {
     if ((vg_flags() & VGV_ORTHO) != 0u) return 2.0 * s.w * V.cam_pos.w;
     float d = max(length(s.xyz - V.cam_pos.xyz) - s.w, V.params.z);
     return 2.0 * s.w * V.cam_pos.w / d;
+}
+
+bool vg_use_impostor(VgMesh m, vec4 s) {
+    return m.impostor != 0xFFFFFFFFu && V.foliage.w > 0.0 && (vg_flags() & VGV_ORTHO) == 0u && vg_project_size(s) < V.foliage.w;
+}
+
+// Per-pixel dither threshold in [0, 1) (interleaved gradient noise), rotated per frame for TAA.
+float vg_dither(ivec2 px) {
+    vec2 p = vec2(px) + 5.588238 * float(V.misc.x & 63u);
+    return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715))));
 }
 
 // Hi-Z (MAX, depth 0 = near, half resolution: texture mip j covers 2^(j+1) depth pixels) occlusion of

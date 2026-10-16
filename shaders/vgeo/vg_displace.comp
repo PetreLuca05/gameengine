@@ -1,0 +1,33 @@
+#version 450
+// Foliage displacement buffer (foliage_support.c VgDisplace): 128 x 128 RG16F, horizontal push (m) per
+// 0.5 m texel around the camera, toroidal: texel t holds the world texel X = t (mod 128) of the window
+// [o, o + 128). One thread per texel: a texel whose world texel changed with the window (or the first
+// frame) starts from zero, then decays and takes this frame's pushes (away from each centre, falling
+// off to the radius), clamped to VG_DISPLACE_MAX.
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0, rg16f) uniform image2D disp;
+layout(set = 0, binding = 1) readonly buffer Pushes { vec4 pushes[]; };   // x, z, radius, strength (m / s)
+layout(push_constant) uniform Push { ivec2 o, po; float decay, dt, texel; uint npush, valid, tex, pad0, pad1; } pc;
+
+const float DISPLACE_MAX = 0.6;   // VG_DISPLACE_MAX
+
+ivec2 world_texel(ivec2 t, ivec2 o) { return o + ((t - o) % 128 + 128) % 128; }
+
+void main() {
+    ivec2 t = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 x = world_texel(t, pc.o);
+    vec2 v = imageLoad(disp, t).rg;
+    if (pc.valid == 0u || x != world_texel(t, pc.po)) v = vec2(0.0);
+    v *= pc.decay;
+    vec2 w = (vec2(x) + 0.5) * pc.texel;
+    for (uint i = 0u; i < pc.npush; i++) {
+        vec4 p = pushes[i];
+        vec2 d = w - p.xy;
+        float l = length(d);
+        if (l >= p.z) continue;
+        v += (l > 1e-4 ? d / l : vec2(0.0)) * p.w * pc.dt * (1.0 - l / p.z);
+    }
+    float l = length(v);
+    if (l > DISPLACE_MAX) v *= DISPLACE_MAX / l;
+    imageStore(disp, t, vec4(v, 0.0, 0.0));
+}

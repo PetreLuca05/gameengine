@@ -280,7 +280,7 @@ set_target_properties(fbx_textures PROPERTIES C_STANDARD 11)
 target_link_libraries(fbx_textures PRIVATE dg_animcore)
 
 # Virtualized geometry builder (pure C): the game compiles the same sources through the src glob.
-add_library(dg_vgeo STATIC src/render/vgeo/vgeo_build.c src/render/vgeo/vgeo_procgen.c src/render/vgeo/vgeo_procgen_building.c src/render/vgeo/vgeo_procgen_skinned.c src/render/vgeo/vgeo_import.c)
+add_library(dg_vgeo STATIC src/render/vgeo/vgeo_build.c src/render/vgeo/vgeo_procgen.c src/render/vgeo/vgeo_procgen_building.c src/render/vgeo/vgeo_procgen_skinned.c src/render/vgeo/vgeo_import.c src/render/vgeo/vgeo_impostor.c)
 set_target_properties(dg_vgeo PROPERTIES C_STANDARD 11)
 target_link_libraries(dg_vgeo PUBLIC dg_animcore meshopt)
 if(MSVC)
@@ -289,7 +289,7 @@ endif()
 
 # Virtualized geometry GPU module (culling / Hi-Z) on a VgContext: the game builds it through the src glob,
 # the harness tests and tools/bench_vgeo through this library.
-add_library(dg_vgeo_gpu STATIC src/render/vgeo/vgeo_ctx.c src/render/vgeo/vgeo_scene.c src/render/vgeo/vgeo_cull.c src/render/vgeo/vgeo_raster.c src/render/vgeo/vgeo_stream.c src/render/vgeo/vgeo_skin.c)
+add_library(dg_vgeo_gpu STATIC src/render/vgeo/vgeo_ctx.c src/render/vgeo/vgeo_scene.c src/render/vgeo/vgeo_cull.c src/render/vgeo/vgeo_raster.c src/render/vgeo/vgeo_stream.c src/render/vgeo/vgeo_skin.c src/render/vgeo/vgeo_tex.c src/render/vgeo/foliage_support.c)
 set_target_properties(dg_vgeo_gpu PROPERTIES C_STANDARD 11)
 target_link_libraries(dg_vgeo_gpu PUBLIC dg_vgeo volk vma)
 if(MSVC)

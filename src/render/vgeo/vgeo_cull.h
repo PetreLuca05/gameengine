@@ -12,6 +12,7 @@
 #define DG_VGEO_CULL_H
 
 #include "vgeo_scene.h"
+#include "vgeo_tex.h"
 
 #define VG_MAX_FRAMES 3
 
@@ -33,6 +34,8 @@ typedef struct VgViewRes {
     u32 set_gen[VG_MAX_FRAMES];
     VkImageView set_prev[VG_MAX_FRAMES], set_cur[VG_MAX_FRAMES];
     VkBuffer set_vis[VG_MAX_FRAMES];
+    u32 set_tex_gen[VG_MAX_FRAMES];   // VgTextures.gen binding 23 of the set was last written at
+    u32 *tex_seen[VG_MAX_FRAMES];     // per texture entry: the version the set holds
     bool two_pass, recording;    // between vg_cull_record_pass1 and _pass2
     VgCounters last;             // the most recent completed frame's counters
     bool last_valid;
@@ -60,6 +63,7 @@ typedef struct VgCuller {
     u32 dispatches;              // dispatches recorded by the last vg_cull_record
     VkBuffer vis_buffer;         // binding 18 (raster's visibility buffer; a dummy until set)
     VgBuffer dummy_buf;
+    VgTextures tex;              // binding 23 of every set (vgeo_tex.h)
     bool ok;
 } VgCuller;
 

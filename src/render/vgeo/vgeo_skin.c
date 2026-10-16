@@ -212,6 +212,7 @@ void vgeo_xf_decode(VgXfCpu *x, const VgInstance *in, const VgMesh *m, const VgP
     vgeo_instance_decode(in, x->pos, x->rot, &x->pscale);
     x->scale = x->pscale;
     x->active = true;
+    x->wpo = m->max_wpo;
     if (!((in->flags_phase >> 16) & VGI_SKINNED) || !(m->flags & VGF_SKINNED)) return;
     x->skinned = true;
     const VgPaletteSlot *s = p && in->extra < p->max_slots ? &p->cpu_slots[in->extra] : NULL;
@@ -233,10 +234,13 @@ void vgeo_xf_instance_sphere(const VgXfCpu *x, const float c[3], float r, float 
 }
 
 void vgeo_xf_sphere(const VgXfCpu *x, const float c[3], float r, float out[4]) {
-    if (!x->skinned) { vgeo_xf_instance_sphere(x, c, r, out); return; }
-    float cc[3];
-    vgeo_mat4_point(x->root, c, cc);
-    vgeo_xf_instance_sphere(x, cc, r * x->skin_s + x->skin_k, out);
+    if (!x->skinned) vgeo_xf_instance_sphere(x, c, r, out);
+    else {
+        float cc[3];
+        vgeo_mat4_point(x->root, c, cc);
+        vgeo_xf_instance_sphere(x, cc, r * x->skin_s + x->skin_k, out);
+    }
+    out[3] += x->wpo;
 }
 
 void vgeo_skin_cluster_sphere(const float *pal, const VgBoneBox *bx, u32 n, float out[4]) {

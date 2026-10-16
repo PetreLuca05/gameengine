@@ -24,6 +24,7 @@ typedef struct VgRaster {
     VkPipelineLayout pl;         // cull set layout + VgPush for every raster stage
     VkShaderStageFlags push_stages;
     VkPipeline p_args, p_sw, p_vert, p_mesh;
+    VkPipeline p_vert2, p_mesh2;   // the same without back-face culling: two-sided materials (a second draw)
     VgBuffer vis;                // u64[w * h]
     u32 w, h;
     bool use_mesh;               // HW path: mesh shader (default when available) or vertex pulling

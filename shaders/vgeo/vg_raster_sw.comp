@@ -1,9 +1,12 @@
 #version 450
 // SW raster: one workgroup per SW visible cluster of the pass range. The threads transform the
 // cluster's vertices once into shared memory (screen space, 16.8 fixed point), then one thread per
-// triangle: back-face cull (CCW front, as the HW pipelines), bounding box scan over the pixel centres
-// (x + 0.5, y + 0.5) with integer edge functions and the top-left fill rule (y down), depth from the
-// plane equation at the pixel centre, atomicMax into the visibility buffer (same packing as HW).
+// triangle: back-face cull (CCW front, as the HW pipelines; two-sided materials keep both faces),
+// bounding box scan over the pixel centres (x + 0.5, y + 0.5) with integer edge functions and the
+// top-left fill rule (y down), depth from the plane equation at the pixel centre, atomicMax into the
+// visibility buffer (same packing as HW). Masked / dithered clusters and impostor quads (entries
+// VG_IMPOSTOR_ENTRY: 4 vertices, 2 triangles, both faces) run the per-pixel test the HW fragment
+// stages run (vg_mask.glsl) before the atomic.
 //
 // SW clusters are small (< sw_px across) and never cross the near plane (vg_clusters.comp sends those
 // to HW), so there is no clipping: a vertex with w <= 0 or outside the +-16k px guard band drops its
@@ -14,6 +17,7 @@
 #include "vgeo_common.glsl"
 #include "vg_decode.glsl"
 #include "vg_raster.glsl"
+#include "vg_mask.glsl"
 layout(local_size_x = 128) in;
 
 shared ivec2 s_xy[128];   // 16.8 fixed point, framebuffer pixels (y down)
@@ -23,6 +27,12 @@ int64_t edge(ivec2 a, ivec2 b, ivec2 p) { return int64_t(b.x - a.x) * int64_t(p.
 // Top-left rule for the positive (screen-clockwise, y down) orientation: a top edge runs exactly
 // horizontal to the right, a left edge runs up. Pixel centres on other edges are excluded.
 int64_t bias(ivec2 a, ivec2 b) { ivec2 d = b - a; return (d.y < 0 || (d.y == 0 && d.x > 0)) ? int64_t(0) : int64_t(-1); }
+
+// Writes a covered pixel: the per-pixel test first when the cluster needs it.
+void sw_write(int x, int y, float z, uint payload, uint vi, uint tri, uint bits) {
+    if (bits != 0u && (vg_vis_loses(uint(x), uint(y), z, payload) || !vg_pixel_test(vi, tri, ivec2(x, y)))) return;
+    vg_vis_write(uint(x), uint(y), z, payload);
+}
 
 // Bounding box scan in integer type T: ra / rb / rd are the biased edge functions of the first pixel
 // centre (weights of a, b, d), stepped per pixel; z from the plane through the unbiased weights.
@@ -36,7 +46,7 @@ int64_t bias(ivec2 a, ivec2 b) { ivec2 d = b - a; return (d.y < 0 || (d.y == 0 &
             for (int x = x0; x <= x1; x++) {                                                            \
                 if ((wa | wb | wd) >= ZERO) {                                                           \
                     float z = za + (float(wb - bd) * dzb + float(wd - ba) * dzd) * inv;                 \
-                    if (z >= 0.0 && z <= 1.0) vg_vis_write(uint(x), uint(y), z, payload);               \
+                    if (z >= 0.0 && z <= 1.0) sw_write(x, y, z, payload, vi, t, bits);                 \
                 }                                                                                       \
                 wa += xa;                                                                               \
                 wb += xb;                                                                               \
@@ -54,29 +64,46 @@ void main() {
     if (k >= r.y) return;
     uint vi = V.caps0.z + k;   // SW entries follow the HW list
     uvec2 e = vg_visible_entry(vi);
-    VgClusterRef cr = vg_cluster_ref(e.y);
-    VgClusterData c = vg_cluster(cr.slot, cr.index);
+    VgXf x = vg_instance_xf(e.x);
+    VgMesh m = meshes[x.mesh];
+    bool imp = e.y == VG_IMPOSTOR_ENTRY;
+    VgClusterData c;
+    uint nv = 4u, nt = 2u, bits = 4u;
+    bool two = true;
+    if (!imp) {
+        VgClusterRef cr = vg_cluster_ref(e.y);
+        c = vg_cluster(cr.slot, cr.index);
+        VgMaterial mat = materials[m.material_base + c.material];
+        nv = c.vert_count;
+        nt = c.tri_count;
+        bits = vg_test_bits(m, mat);
+        two = (mat.flags & VGM_TWO_SIDED) != 0u;
+    }
     uint t = gl_LocalInvocationID.x;
-    if (t < c.vert_count) {
-        VgXf x = vg_instance_xf(e.x);
-        vec4 p = vg_raster_clip(x, c, meshes[x.mesh], t);
+    if (t < nv) {
+        vec4 p;
+        if (imp) p = V.raster_view_proj * vec4(vg_impostor_corner(vg_impostor_quad(x, m), t), 1.0);
+        else p = vg_raster_clip(x, c, m, t);
         vec2 s = (p.xy / p.w * 0.5 + 0.5) * V.viewport.xy;
         bool ok = p.w > 1e-6 && all(lessThan(abs(s), vec2(16384.0)));
         s_xy[t] = ok ? ivec2(floor(s * 256.0 + 0.5)) : ivec2(0);
         s_z[t] = ok ? p.z / p.w : -2.0;
     }
     barrier();
-    if (t >= c.tri_count) return;
-    uvec3 tri = vg_triangle(c, t);
+    if (t >= nt) return;
+    uvec3 tri = imp ? vg_impostor_tri(t) : vg_triangle(c, t);
     float za = s_z[tri.x], zb = s_z[tri.y], zd = s_z[tri.z];
     if (min(za, min(zb, zd)) < -1.5) return;
     ivec2 a = s_xy[tri.x], b = s_xy[tri.y], d = s_xy[tri.z];
-    // Vulkan's signed area is -cross (y down): CCW front faces have cross < 0. Swap to the positive order.
+    // Vulkan's signed area is -cross (y down): CCW front faces have cross < 0. Swap to the positive
+    // order; back faces (cross > 0) are already in it and only kept for two-sided materials.
     int64_t area = edge(a, b, d);
-    if (area >= 0) return;
-    ivec2 tb = b; b = d; d = tb;
-    float tz = zb; zb = zd; zd = tz;
-    area = -area;
+    if (area == 0 || (area > 0 && !two)) return;
+    if (area < 0) {
+        ivec2 tb = b; b = d; d = tb;
+        float tz = zb; zb = zd; zd = tz;
+        area = -area;
+    }
     ivec2 lo = min(min(a, b), d), hi = max(max(a, b), d);
     int x0 = max((lo.x + 127) >> 8, 0), x1 = min((hi.x - 128) >> 8, int(V.viewport.x) - 1);
     int y0 = max((lo.y + 127) >> 8, 0), y1 = min((hi.y - 128) >> 8, int(V.viewport.y) - 1);

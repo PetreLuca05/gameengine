@@ -12,7 +12,7 @@
 #include "vgeo/vg_decode.glsl"
 #include "vgeo/vg_resolve.glsl"
 #define GB_CUSTOM_INPUTS
-#define GB_FRONT_FACING true
+#define GB_FRONT_FACING g_front
 #define GB_FLAGS g_mat_flags
 #define GB_PARAMS g_mat_params
 #define GB_PRE_MAIN if (!vg_resolve_pixel()) discard; gl_FragDepth = g_depth;

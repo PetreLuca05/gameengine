@@ -38,9 +38,10 @@ void vg_expand(uint inst, VgXf x, VgMesh m, VgNode nd, uint out_region) {
     }
 }
 
-// Instance: frustum + Hi-Z on the mesh sphere (= the BVH root's), then the root's error test and
-// expansion (the traversal starts at the root's children). Pass 1 occluded instances are listed for
-// pass 2; out_region: node queue region of the children.
+// Instance: frustum on the mesh sphere (= the BVH root's), foliage density / distance fade / shadow
+// distance, Hi-Z, then either its impostor quad (vg_use_impostor: one SW list entry) or the root's
+// error test and expansion (the traversal starts at the root's children). Pass 1 occluded instances
+// are listed for pass 2; out_region: node queue region of the children.
 void vg_instance(uint inst, uint out_region) {
     VgXf x = vg_instance_xf(inst);
     if (!x.live) return;   // skinned instance of an empty palette slot
@@ -48,6 +49,14 @@ void vg_instance(uint inst, uint out_region) {
     VgMesh m = meshes[x.mesh];
     vec4 s = vg_world_sphere(x, m.sphere);
     if (!vg_frustum(s)) return;
+    if ((m.fflags & VGMF_FOLIAGE) != 0u || m.shadow_max_dist > 0.0) {
+        float dist = distance(x.pos, V.cam_pos.xyz);   // shadow views carry the main camera's position
+        bool shadow_far = (vg_flags() & VGV_ORTHO) != 0u && m.shadow_max_dist > 0.0 && dist > m.shadow_max_dist;
+        if (shadow_far || vg_foliage_alpha(m, x.fp, dist) <= 0.0) {
+            if (pc.pass == 1u) atomicAdd(ctr.n[VGN_INST_FADED], 1u);
+            return;
+        }
+    }
     if (vg_occluded(s)) {
         if (pc.pass == 1u) {
             uint k = vg_append(VGN_INST_OCC, V.caps1.y);
@@ -56,6 +65,14 @@ void vg_instance(uint inst, uint out_region) {
         return;
     }
     atomicAdd(ctr.n[pc.pass == 1u ? VGN_INST_VIS : VGN_INST_P2], 1u);
+    if (vg_use_impostor(m, s)) {
+        uint cap = V.caps0.z, k = vg_append(VGN_SW, cap);
+        if (k == 0xFFFFFFFFu) return;
+        visible[cap + k] = uvec2(inst, VG_IMPOSTOR_ENTRY);
+        atomicAdd(ctr.n[VGN_IMPOSTORS], 1u);
+        atomicAdd(ctr.n[VGN_TRIS], 2u);
+        return;
+    }
     VgNode root = nodes[m.node_base + m.root_node];
     if (!(vg_project_error(vg_world_sphere(x, root.sphere), root.max_parent_error * x.scale) > V.params.x)) return;
     atomicAdd(ctr.n[VGN_NODES_VISITED], 1u);

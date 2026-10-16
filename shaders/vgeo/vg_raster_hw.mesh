@@ -1,6 +1,7 @@
 #version 450
 // HW raster, VK_EXT_mesh_shader: one workgroup per HW visible cluster of the pass range, one thread per
-// vertex and per triangle (<= 128 / 128).
+// vertex and per triangle (<= 128 / 128). pc.a[0]: this draw's sidedness (0 one-sided, back faces
+// culled; 1 two-sided materials): clusters of the other kind emit nothing.
 #extension GL_GOOGLE_include_directive : require
 #extension GL_EXT_mesh_shader : require
 #include "vgeo_common.glsl"
@@ -10,6 +11,7 @@
 layout(local_size_x = 128) in;
 layout(triangles, max_vertices = 128, max_primitives = 128) out;
 layout(location = 0) perprimitiveEXT flat out uint o_payload[];
+layout(location = 1) perprimitiveEXT flat out uint o_bits[];
 
 void main() {
     uvec2 r = vg_raster_range(false);
@@ -21,14 +23,19 @@ void main() {
     uvec2 e = vg_visible_entry(k);
     VgClusterRef cr = vg_cluster_ref(e.y);
     VgClusterData c = vg_cluster(cr.slot, cr.index);
+    VgXf x = vg_instance_xf(e.x);
+    VgMesh m = meshes[x.mesh];
+    VgMaterial mat = materials[m.material_base + c.material];
+    if (((mat.flags & VGM_TWO_SIDED) != 0u) != (pc.a[0] == 1u)) {
+        SetMeshOutputsEXT(0u, 0u);
+        return;
+    }
     SetMeshOutputsEXT(c.vert_count, c.tri_count);
     uint t = gl_LocalInvocationID.x;
-    if (t < c.vert_count) {
-        VgXf x = vg_instance_xf(e.x);
-        gl_MeshVerticesEXT[t].gl_Position = vg_raster_clip(x, c, meshes[x.mesh], t);
-    }
+    if (t < c.vert_count) gl_MeshVerticesEXT[t].gl_Position = vg_raster_clip(x, c, m, t);
     if (t < c.tri_count) {
         gl_PrimitiveTriangleIndicesEXT[t] = vg_triangle(c, t);
         o_payload[t] = vg_vis_payload(k, t);
+        o_bits[t] = vg_test_bits(m, mat);
     }
 }

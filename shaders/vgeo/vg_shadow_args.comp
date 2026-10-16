@@ -1,7 +1,12 @@
 #version 450
-// Shadow cascade draw args: VkDrawIndirectCommand { 384, HW cluster count, 0, 0 } (vgeo_shadow.vert).
+// Shadow cascade draw args (vgeo_shadow*.vert): VGA_DRAW_HW = { 384, HW cluster count, 0, 0 } (opaque,
+// depth only), VGA_SW = { 384, masked cluster count, 0, cap } (orthographic views list their masked
+// clusters in the SW half: the alpha-tested draw).
 #extension GL_GOOGLE_include_directive : require
 #define VG_COMPUTE
 #include "vgeo_common.glsl"
 layout(local_size_x = 1) in;
-void main() { ctr.args[VGA_DRAW_HW] = uvec4(384u, min(ctr.n[VGN_HW], V.caps0.z), 0u, 0u); }
+void main() {
+    ctr.args[VGA_DRAW_HW] = uvec4(384u, min(ctr.n[VGN_HW], V.caps0.z), 0u, 0u);
+    ctr.args[VGA_SW] = uvec4(384u, min(ctr.n[VGN_SW], V.caps0.z), 0u, V.caps0.z);
+}

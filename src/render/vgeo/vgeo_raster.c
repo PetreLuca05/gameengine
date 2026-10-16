@@ -11,8 +11,8 @@ static VkPipelineShaderStageCreateInfo stage(VkShaderStageFlagBits s, VkShaderMo
 }
 
 // No attachments, no depth test: the fragment atomicMax is the depth test. CCW front faces, back faces
-// culled (as the legacy pipelines in vk_pipelines.c).
-static VkPipeline graphics_pipeline(VgRaster *r, const char *first, VkShaderStageFlagBits first_stage, const char *frag) {
+// culled (as the legacy pipelines in vk_pipelines.c), or no culling (two-sided materials).
+static VkPipeline graphics_pipeline(VgRaster *r, const char *first, VkShaderStageFlagBits first_stage, const char *frag, bool two_sided) {
     const VgContext *c = r->ctx;
     VkShaderModule m0 = c->load_shader(first), m1 = c->load_shader(frag);
     VkPipeline p = VK_NULL_HANDLE;
@@ -26,7 +26,7 @@ static VkPipeline graphics_pipeline(VgRaster *r, const char *first, VkShaderStag
         vp.viewportCount = vp.scissorCount = 1;
         VkPipelineRasterizationStateCreateInfo rs = { VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO };
         rs.polygonMode = VK_POLYGON_MODE_FILL;
-        rs.cullMode = VK_CULL_MODE_BACK_BIT;
+        rs.cullMode = two_sided ? VK_CULL_MODE_NONE : VK_CULL_MODE_BACK_BIT;
         rs.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
         rs.lineWidth = 1.0f;
         VkPipelineMultisampleStateCreateInfo ms = { VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO };
@@ -73,9 +73,13 @@ bool vg_raster_init(VgRaster *r, const VgContext *ctx, VgCuller *cull) {
     if (vkCreatePipelineLayout(ctx->device, &pi, NULL, &r->pl) != VK_SUCCESS) return false;
     r->p_args = vgc_compute_pipeline(ctx, r->pl, "vgeo/vg_raster_args.comp");
     r->p_sw = vgc_compute_pipeline(ctx, r->pl, "vgeo/vg_raster_sw.comp");
-    r->p_vert = graphics_pipeline(r, "vgeo/vg_raster_hw.vert", VK_SHADER_STAGE_VERTEX_BIT, "vgeo/vg_raster_hw.frag");
-    if (ctx->mesh_shader) r->p_mesh = graphics_pipeline(r, "vgeo/vg_raster_hw.mesh", VK_SHADER_STAGE_MESH_BIT_EXT, "vgeo/vg_raster_mesh.frag");
-    if (!r->p_args || !r->p_sw || !r->p_vert) { log_error("vgeo: raster pipelines failed"); return false; }
+    r->p_vert = graphics_pipeline(r, "vgeo/vg_raster_hw.vert", VK_SHADER_STAGE_VERTEX_BIT, "vgeo/vg_raster_hw.frag", false);
+    r->p_vert2 = graphics_pipeline(r, "vgeo/vg_raster_hw.vert", VK_SHADER_STAGE_VERTEX_BIT, "vgeo/vg_raster_hw.frag", true);
+    if (ctx->mesh_shader) {
+        r->p_mesh = graphics_pipeline(r, "vgeo/vg_raster_hw.mesh", VK_SHADER_STAGE_MESH_BIT_EXT, "vgeo/vg_raster_mesh.frag", false);
+        r->p_mesh2 = graphics_pipeline(r, "vgeo/vg_raster_hw.mesh", VK_SHADER_STAGE_MESH_BIT_EXT, "vgeo/vg_raster_mesh.frag", true);
+    }
+    if (!r->p_args || !r->p_sw || !r->p_vert || !r->p_vert2 || (r->p_mesh && !r->p_mesh2)) { log_error("vgeo: raster pipelines failed"); return false; }
     r->use_mesh = r->p_mesh != VK_NULL_HANDLE;
     VkQueryPoolCreateInfo qi = { VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO };
     qi.queryType = VK_QUERY_TYPE_TIMESTAMP;
@@ -91,7 +95,7 @@ void vg_raster_shutdown(VgRaster *r) {
     vkDeviceWaitIdle(d);
     if (r->cull && r->cull->vis_buffer == r->vis.buffer) vg_cull_set_vis(r->cull, VK_NULL_HANDLE);
     vgc_buffer_free(r->ctx, &r->vis);
-    VkPipeline ps[] = { r->p_args, r->p_sw, r->p_vert, r->p_mesh };
+    VkPipeline ps[] = { r->p_args, r->p_sw, r->p_vert, r->p_mesh, r->p_vert2, r->p_mesh2 };
     for (size_t i = 0; i < sizeof(ps) / sizeof(ps[0]); i++) if (ps[i]) vkDestroyPipeline(d, ps[i], NULL);
     if (r->qp) vkDestroyQueryPool(d, r->qp, NULL);
     if (r->pl) vkDestroyPipelineLayout(d, r->pl, NULL);
@@ -175,6 +179,15 @@ void vg_raster_record(VgRaster *r, VkCommandBuffer cmd, u32 frame, u32 slot, u32
     vkCmdSetScissor(cmd, 0, 1, &sc);
     if (mesh) vkCmdDrawMeshTasksIndirectEXT(cmd, counters, (VkDeviceSize)VGA_MESH * 16, 1, 16);
     else vkCmdDrawIndirect(cmd, counters, (VkDeviceSize)VGA_DRAW_HW * 16, 1, 16);
+    if (c->scene->has_two_sided) {   // the same list again without culling: only two-sided clusters draw
+        p.a[0] = 1;
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, mesh ? r->p_mesh2 : r->p_vert2);
+        vkCmdPushConstants(cmd, r->pl, r->push_stages, 0, sizeof(p), &p);
+        if (mesh) vkCmdDrawMeshTasksIndirectEXT(cmd, counters, (VkDeviceSize)VGA_MESH * 16, 1, 16);
+        else vkCmdDrawIndirect(cmd, counters, (VkDeviceSize)VGA_DRAW_HW * 16, 1, 16);
+        p.a[0] = 0;
+        vkCmdPushConstants(cmd, r->pl, r->push_stages, 0, sizeof(p), &p);
+    }
     vkCmdEndRendering(cmd);
     stamp(r, cmd, q, VGR_HW);
     if (r->serialize)

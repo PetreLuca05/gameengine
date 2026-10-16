@@ -1,0 +1,55 @@
+// Virtualized geometry textures (docs/VGEO.md "Foliage support"): one array of combined image samplers
+// at binding 23 of every cull set, so the cull kernels, both rasterisers (alpha masks), the shadow
+// passes and the resolve sample the same textures through the same index:
+//   [0, VG_TEX_GAME)            the renderer's texture ids (vk_vgeo.c writes the ones materials use)
+//   [VG_TEX_GAME, VG_TEX_COUNT) textures the vgeo module creates: impostor atlases, test masks, the
+//                                foliage displacement buffer
+// Every entry starts as a 1x1 white texture. vg_tex_set changes an entry; the change reaches a cull
+// set the next time that set is recorded (vg_cull_record writes it then: a frame slot's sets are not
+// in use while the slot records), so no descriptor is updated under a frame in flight.
+#ifndef DG_VGEO_TEX_H
+#define DG_VGEO_TEX_H
+
+#include "vgeo_ctx.h"
+
+#define VG_TEX_GAME 1024
+#define VG_TEX_OWN 64
+#define VG_TEX_COUNT (VG_TEX_GAME + VG_TEX_OWN)
+#define VG_TEX_BINDING 23
+
+typedef struct VgTexEntry { VkImageView view; VkSampler sampler; VkImageLayout layout; } VgTexEntry;
+typedef struct VgOwnTex { VkImage image; VmaAllocation alloc; VkImageView view; u32 w, h, mips; bool used; } VgOwnTex;
+
+typedef struct VgTextures {
+    const VgContext *ctx;
+    VgTexEntry e[VG_TEX_COUNT];  // current contents (view NULL = white)
+    u32 ver[VG_TEX_COUNT];       // bumps on every change of the entry
+    u32 gen;                     // bumps on every change of any entry
+    VgOwnTex own[VG_TEX_OWN];
+    VkImage white;
+    VmaAllocation white_alloc;
+    VkImageView white_view;
+    VkSampler clamp, repeat;     // trilinear, clamp to edge / repeat
+} VgTextures;
+
+bool vg_tex_init(VgTextures *t, const VgContext *ctx);
+void vg_tex_shutdown(VgTextures *t);
+// Entry `index` samples `view` (NULL: white again) with `sampler` (NULL: t->repeat) in `layout`.
+void vg_tex_set(VgTextures *t, u32 index, VkImageView view, VkSampler sampler, VkImageLayout layout);
+// An RGBA8 texture of the module (index >= VG_TEX_GAME, 0 when full): `levels` mips packed one after
+// the other (w x h, then w/2 x h/2, ...), uploaded now (load time: waits). srgb: albedo; repeat: wrap.
+u32 vg_tex_create(VgTextures *t, u32 w, u32 h, u32 levels, const u8 *rgba, bool srgb, bool repeat);
+// A module entry for an image created elsewhere (vg_tex_set it); vg_tex_release frees an entry and
+// the image vg_tex_create made for it.
+u32 vg_tex_alloc(VgTextures *t);
+void vg_tex_release(VgTextures *t, u32 index);
+// Full mip chain of an RGBA8 image (box filter; colour weighted by alpha so masked texels do not bleed
+// dark), returns the level count and writes every level packed into out (vg_tex_mip_bytes).
+u32 vg_tex_build_mips(const u8 *rgba, u32 w, u32 h, u8 *out);
+size_t vg_tex_mip_bytes(u32 w, u32 h, u32 *levels);
+
+// Writes the entries changed since this set last saw them (cull sets; the caller owns `seen`, one
+// version per entry, all ~0 at the start).
+void vg_tex_write_set(const VgTextures *t, VkDescriptorSet set, u32 *seen);
+
+#endif

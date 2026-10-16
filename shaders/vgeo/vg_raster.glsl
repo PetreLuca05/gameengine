@@ -11,6 +11,15 @@ uvec2 vg_raster_range(bool sw) {
     return pc.pass == 1u ? uvec2(0u, p1) : uvec2(p1, max(all, p1));
 }
 
+// Per-pixel test bits of a cluster (vg_mask.glsl; the vertex / mesh stages pass them flat to the
+// fragment stage): 1 alpha mask, 2 distance-fade dither. 0: every covered pixel is written.
+uint vg_test_bits(VgMesh m, VgMaterial mat) {
+    uint b = 0u;
+    if ((mat.flags & VGM_MASKED) != 0u) b |= 1u;
+    if ((mat.flags & VGM_DITHER_FADE) != 0u && (m.fflags & VGMF_FOLIAGE) != 0u) b |= 2u;
+    return b;
+}
+
 // Clip position of cluster vertex v with the raster view (skinned instances: skinned first).
 vec4 vg_raster_clip(VgXf x, VgClusterData c, VgMesh m, uint v) {
     return V.raster_view_proj * vec4(vg_vertex_world(x, c, m, v), 1.0);
