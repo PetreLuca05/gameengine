@@ -87,6 +87,40 @@ void vgeo_foliage_instance(VgInstance *out, u32 mesh, const float pos[3], float 
 
 // ------------------------------------------------------------------ placement chunks
 
+static u32 hash3(u32 a, u32 b, u32 c) {
+    u32 h = a * 0x8DA6B343u ^ b * 0xD8163841u ^ c * 0xCB1AB31Fu;
+    h ^= h >> 16;
+    h *= 0x7FEB352Du;
+    h ^= h >> 15;
+    h *= 0x846CA68Bu;
+    h ^= h >> 16;
+    return h;
+}
+
+u32 vgeo_foliage_scatter_chunk(const VgScatter *sc, i32 cx, i32 cz, VgInstance *out, u32 cap) {
+    if (sc->density <= 0 || !sc->kinds) return 0;
+    float step = 1.0f / sqrtf(sc->density), ox = (float)cx * VGP_CHUNK_SIZE, oz = (float)cz * VGP_CHUNK_SIZE;
+    int side = (int)ceilf(VGP_CHUNK_SIZE / step);
+    float wsum = 0;
+    for (u32 k = 0; k < sc->kinds && k < 8; k++) wsum += sc->weight[k];
+    u32 n = 0;
+    for (int j = 0; j < side; j++)
+        for (int i = 0; i < side && n < cap; i++) {
+            u32 h = hash3((u32)cx * 4096u + (u32)i, (u32)cz * 4096u + (u32)j, sc->seed);
+            float jx = (float)(h & 0xFFFu) / 4096.0f, jz = (float)((h >> 12) & 0xFFFu) / 4096.0f;
+            float x = ox + ((float)i + jx) * step, z = oz + ((float)j + jz) * step;
+            if (x >= ox + VGP_CHUNK_SIZE || z >= oz + VGP_CHUNK_SIZE || x < sc->x0 || z < sc->z0 || x >= sc->x1 || z >= sc->z1) continue;
+            u32 h2 = hash3(h, 0x9E3779B9u, sc->seed + 1);
+            float pick = (float)(h2 & 0xFFFFu) / 65536.0f * wsum;
+            u32 k = 0;
+            while (k + 1 < sc->kinds && pick >= sc->weight[k]) pick -= sc->weight[k++];
+            float t = (float)((h2 >> 16) & 0xFFFFu) / 65536.0f, yaw = (float)(hash3(h2, 7u, 3u) & 0xFFFFu) / 65536.0f * TAU;
+            float p[3] = { x, sc->height ? sc->height(sc->user, x, z) : 0.0f, z };
+            vgeo_foliage_instance(&out[n++], k, p, yaw, sc->scale[k][0] + (sc->scale[k][1] - sc->scale[k][0]) * t);
+        }
+    return n;
+}
+
 bool vgp_parse(const u8 *data, size_t size, VgpView *out) {
     memset(out, 0, sizeof(*out));
     if (size < sizeof(VgpHeader)) return false;

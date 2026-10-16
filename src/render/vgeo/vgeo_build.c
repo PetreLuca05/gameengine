@@ -820,6 +820,11 @@ static void group_job(void *ctx, u32 gi, int worker) {
             if (r2 <= tri.n * 3 / 4) { r = r2; e = e2; }
             else { memcpy(dst, lidx, sizeof(u32) * tri.n); r = tri.n; e = 0; }
         }
+        if (r == 0) {   // the subset collapsed entirely (tiny disconnected cards, foliage): carry it unchanged
+            memcpy(dst, lidx, sizeof(u32) * tri.n);
+            r = tri.n;
+            e = 0;
+        }
         serr = fmaxf(serr, e);
         o->tris_out += (u32)(r / 3);
         // Re-cluster (lod / error filled in after the group error is final).

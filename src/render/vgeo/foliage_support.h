@@ -61,6 +61,21 @@ bool vgp_parse(const u8 *data, size_t size, VgpView *out);
 // Returns the malloc'd file, size in *size; NULL when an instance lies outside the chunk.
 u8 *vgp_write(i32 cx, i32 cz, const char (*names)[48], u32 mesh_count, const VgInstance *inst, u32 n, size_t *size);
 
+// Test scatter (foliage_test_scatter, the streamed terrain test, tests): a jittered grid over an area,
+// deterministic per chunk (a chunk generates the same instances whenever it loads).
+typedef struct VgScatter {
+    float x0, z0, x1, z1;        // area (m)
+    float density;               // instances per m2
+    u32 kinds;                   // <= 8
+    float weight[8];             // per kind: relative frequency
+    float scale[8][2];           // per kind: scale range
+    float (*height)(void *user, float x, float z);   // ground height (NULL: 0)
+    void *user;
+    u32 seed;
+} VgScatter;
+// The instances of 32 m chunk (cx, cz) inside the area (mesh = kind). Returns the count (<= cap).
+u32 vgeo_foliage_scatter_chunk(const VgScatter *sc, i32 cx, i32 cz, VgInstance *out, u32 cap);
+
 // Loads a parsed chunk into the scene's placement region: names resolve to scene meshes (resolve
 // returns ~0 for unknown: those instances are dropped). Returns the chunk handle (~0: region full).
 u32 vgeo_foliage_chunk_load(VgScene *s, const VgpView *v, u32 (*resolve)(const char *name, void *user), void *user, u32 tag);

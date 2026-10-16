@@ -280,7 +280,7 @@ set_target_properties(fbx_textures PROPERTIES C_STANDARD 11)
 target_link_libraries(fbx_textures PRIVATE dg_animcore)
 
 # Virtualized geometry builder (pure C): the game compiles the same sources through the src glob.
-add_library(dg_vgeo STATIC src/render/vgeo/vgeo_build.c src/render/vgeo/vgeo_procgen.c src/render/vgeo/vgeo_procgen_building.c src/render/vgeo/vgeo_procgen_skinned.c src/render/vgeo/vgeo_import.c src/render/vgeo/vgeo_impostor.c)
+add_library(dg_vgeo STATIC src/render/vgeo/vgeo_build.c src/render/vgeo/vgeo_procgen.c src/render/vgeo/vgeo_procgen_building.c src/render/vgeo/vgeo_procgen_skinned.c src/render/vgeo/vgeo_import.c src/render/vgeo/vgeo_impostor.c src/render/vgeo/vgeo_procgen_foliage.c)
 set_target_properties(dg_vgeo PROPERTIES C_STANDARD 11)
 target_link_libraries(dg_vgeo PUBLIC dg_animcore meshopt)
 if(MSVC)
@@ -507,4 +507,18 @@ endif()
 add_test(NAME vgeo_skinned COMMAND test_vgeo_skinned --validation WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
 if(EXISTS "${CMAKE_SOURCE_DIR}/.toolchain/vvl/install/bin")
   set_tests_properties(vgeo_skinned PROPERTIES ENVIRONMENT "VK_ADD_LAYER_PATH=${CMAKE_SOURCE_DIR}/.toolchain/vvl/install/bin")
+endif()
+
+# Virtualized geometry foliage support (Phase 7): masked SW / HW agreement + CPU alpha reference, WPO
+# bounds, density hash, cell culling vs brute force, impostor switch, placement streaming, Hi-Z.
+add_executable(test_vgeo_foliage tests/test_vgeo_foliage.c tests/vgeo_gpu_harness.c)
+set_target_properties(test_vgeo_foliage PROPERTIES C_STANDARD 11)
+target_link_libraries(test_vgeo_foliage PRIVATE dg_vgeo_gpu)
+add_dependencies(test_vgeo_foliage dg_shaders)
+if(MSVC)
+  target_compile_options(test_vgeo_foliage PRIVATE /W3 /wd4100 /wd4201 /utf-8)
+endif()
+add_test(NAME vgeo_foliage COMMAND test_vgeo_foliage --validation WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+if(EXISTS "${CMAKE_SOURCE_DIR}/.toolchain/vvl/install/bin")
+  set_tests_properties(vgeo_foliage PROPERTIES ENVIRONMENT "VK_ADD_LAYER_PATH=${CMAKE_SOURCE_DIR}/.toolchain/vvl/install/bin")
 endif()

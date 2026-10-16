@@ -472,6 +472,31 @@ static VgCell gpu_cell(const VgScene *s, u32 c) {
 void vgeo_scene_placement_record(VgScene *s, VkCommandBuffer cmd, u32 frame) {
     VgPlacements *p = &s->pl;
     if ((!p->dirty_inst_n && !p->dirty_cells_n) || !s->b_instances.buffer || frame >= 3) return;
+    // dirty ranges sorted and merged, cells unique (a chunk freed and its space reused in one frame)
+    for (u32 i = 1; i < p->dirty_inst_n; i++)
+        for (u32 j = i; j > 0 && p->dirty_inst[j - 1].first > p->dirty_inst[j].first; j--) {
+            VgRange t = p->dirty_inst[j];
+            p->dirty_inst[j] = p->dirty_inst[j - 1];
+            p->dirty_inst[j - 1] = t;
+        }
+    u32 nr = 0;
+    for (u32 i = 0; i < p->dirty_inst_n; i++) {
+        VgRange r = p->dirty_inst[i];
+        if (nr && r.first <= p->dirty_inst[nr - 1].first + p->dirty_inst[nr - 1].count) {
+            VgRange *l = &p->dirty_inst[nr - 1];
+            u32 end = DG_MAX(l->first + l->count, r.first + r.count);
+            l->count = end - l->first;
+        } else p->dirty_inst[nr++] = r;
+    }
+    p->dirty_inst_n = nr;
+    u8 *seen = (u8 *)calloc(p->cell_cap + 1, 1);
+    u32 nc0 = 0;
+    for (u32 i = 0; i < p->dirty_cells_n; i++) {
+        u32 c = p->dirty_cells[i];
+        if (c < p->cell_cap && !seen[c]) { seen[c] = 1; p->dirty_cells[nc0++] = c; }
+    }
+    p->dirty_cells_n = nc0;
+    free(seen);
     // only what the committed buffers hold (a region grown since waits for the commit)
     VkDeviceSize bytes = 0;
     for (u32 i = 0; i < p->dirty_inst_n; i++) bytes += sizeof(VgInstance) * (VkDeviceSize)p->dirty_inst[i].count;
