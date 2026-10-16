@@ -24,7 +24,7 @@ Simplification and clustering use meshoptimizer v0.22 (`simplifier.cpp`, `cluste
 | 4. Streaming | **done** |
 | 5. Integration, `r_era`, test scene, `bench_vgeo` | **done** |
 | 6. Skinned | **done** (main view; shadows / scope / phone views keep the legacy skinned path) |
-| 7. Foliage support | — |
+| 7. Foliage support | **done** (masked / two-sided, WPO, placement chunks, impostors, displacement; budget slightly over: see "Bench") |
 
 ## Files
 
@@ -56,6 +56,15 @@ Simplification and clustering use meshoptimizer v0.22 (`simplifier.cpp`, `cluste
 | `src/render/vgeo/vgeo_procgen_skinned.{c,h}` | procedural skinned creature (body + tentacles, 31 bones) and its analytic animation |
 | `shaders/vgeo/vg_test_skin.comp` | test-only kernel: the shared skin helper on a vertex list |
 | `tests/test_vgeo_skinned.c` | ctest `vgeo_skinned` (`--validation`) |
+| `src/render/vgeo/vgeo_tex.{c,h}` | `VgTextures`: the texture table at binding 23 of every cull set (renderer ids + module textures) |
+| `src/render/vgeo/foliage_support.{c,h}` | WPO CPU mirror + declared bounds, fade / density / impostor mirrors, `.vgp` chunks, scatter, `foliage_query`, impostor upload, displacement buffer |
+| `src/render/vgeo/vgeo_impostor.{c,h}` | CPU hemi-octahedral impostor baker, file section |
+| `src/render/vgeo/vgeo_procgen_foliage.{c,h}` | test content: grass tuft, bush, alpha masks, their materials |
+| `shaders/vgeo/wpo.glsl`, `vg_mask.glsl`, `vg_impostor.glsl` | WPO snippets, the shared per-pixel mask test, impostor quads / atlas |
+| `shaders/vgeo/vg_raster_sw*.comp`, `vg_raster_hw*` | raster variants: plain / masked / impostor (SW), plain / masked (HW), bodies in `*.glsl` |
+| `shaders/vgeo/vg_displace.comp`, `vg_test_wpo.comp` | displacement buffer update; test-only WPO kernel |
+| `src/game/game_foliage.c` | `foliage_test_scatter`, trunk capsules, player pushes |
+| `tests/test_vgeo_foliage.c` | ctest `vgeo_foliage` (`--validation`) |
 
 The builder is pure C with no renderer dependency. It is compiled into the game (through the `src/` glob), the
 `dg_vgeo` static library (tool and tests), and nothing else. The GPU module is the `dg_vgeo_gpu` library (see
@@ -261,9 +270,9 @@ opaque         legacy forward lighting, then the vgeo lit resolve (vgeo_lit.frag
 - Active when `r_vgeo` is on and the scene has instances. Cvars: `r_vgeo` (1), `r_vgeo_error_px` (1.0),
   `r_vgeo_shadow_error_px` (2.0), `r_vgeo_sw_px` (32), `r_vgeo_occlusion` (0 off, 1 last frame's Hi-Z, 2 two-pass;
   default 2), `r_vgeo_freeze`, `r_vgeo_shadows` (1), `r_vgeo_debug_spheres`, `r_vgeo_lod_px` (fallback),
-  `r_foliage_density` (Phase 7), `r_era`.
+  `r_foliage_density` (1.0), `r_vgeo_impostor_px` (16), `r_era`.
 - Commands: `vgeo_stats`, `vgeo_test_scene [count] [spacing] [meshes]` (procedural rocks around the camera),
-  `vgeo_clear`, `vgeo_bench [frames=600] [csv]`.
+  `vgeo_clear`, `vgeo_bench [frames=600] [csv] [vgeo_test|foliage]`; foliage: see "Foliage support".
 
 ### Streaming in the renderer
 
@@ -825,6 +834,259 @@ renderer already binds as set 3.
 - **The palette upload** waits on every earlier shader read (one barrier). With 3 regions per slot it could
   overlap the previous frame.
 
+## Foliage support (Phase 7)
+
+Foliage is ordinary vgeo content plus a few material, instance and placement features. Culling, LOD,
+both rasterisers, the shadows and streaming are the core's. No foliage content ships; procedural test
+types exercise it.
+
+### Materials (`VgMaterial`, 96 B)
+
+| Field | Meaning |
+|---|---|
+| `flags` | `MAT_*` plus `VGM_MASKED`, `VGM_TWO_SIDED`, `VGM_DITHER_FADE`, `VGM_FOLIAGE` (bits 24-27) |
+| `mask_tex`, `alpha_cutoff` | alpha mask (0: `albedo_tex`), its threshold |
+| `wpo`, `wpo_params[4]`, `wpo_max` | snippet (`WPO_GRASS`, `WPO_TREE`, `\| WPO_DISPLACE`), parameters, declared bound (the commit computes it with `vgeo_wpo_max`) |
+| `fade_start`, `fade_end` | distance fade of `VGM_FOLIAGE` instances (m) |
+| `shadow_max_dist` | no sun-cascade shadow beyond this distance from the camera (m, 0 = always) |
+
+At commit every mesh gets its foliage fields from its materials (`VgMesh` 80 B: `max_wpo`, fades, shadow distance,
+`fflags`, impostor atlas). Model meshes take them from a `"foliage": {...}` block in `data/assets.json`
+(`masked`, `two_sided`, `dither`, `alpha_cutoff`, `wpo`, `displace`, `wpo_params`, `fade`, `shadow_max_dist`)
+and `"colliders": "capsule"`, `"capsule": [r, h]` on the model entry.
+
+### Textures
+
+One array of 1088 combined image samplers at binding 23 of the cull set (`vgeo_tex.h`). Entries 0-1023 are the
+renderer's texture ids, 1024-1087 the module's own (masks, impostor atlases, the displacement buffer).
+Every cull kernel, both rasterisers, the shadow passes and the resolve can sample it. A change reaches a cull
+set when that set is next recorded, so no descriptor changes under a frame in flight. The lit resolve's old
+set 4 is gone.
+
+### Masked / two-sided raster (the same pixels in SW and HW)
+
+- Per triangle, `vg_uv_plane` (`vg_raster.glsl`) turns the clip positions and UVs into a rational UV function of
+  the pixel: `uv(p) = (u·P, v·P) / (d·P)`. It also gives one mip LOD per triangle: the UV footprint of a pixel
+  at the triangle's screen centroid.
+- The mesh shader computes it from shared memory and passes it per primitive. Vertex pulling computes it in
+  every corner and passes it flat. The SW variant computes it per triangle thread.
+- Per pixel, `vg_mask_pass` evaluates the plane at the pixel centre and compares the mask's `textureLod`
+  alpha with the cutoff. The fade dither compares the instance's fade alpha with an interleaved-gradient
+  threshold, rotated per frame (TAA).
+- Both rasterisers call the same functions on the same values, so their results differ only at triangle
+  edges (test).
+- Two-sided: no cone culling. The HW list is drawn up to three times:
+  - plain clusters, back faces culled, Phase 3 shaders;
+  - two-sided clusters, no culling, masked variant;
+  - one-sided masked clusters, back faces culled, masked variant.
+
+  Each draw skips the clusters of the other kinds (`vg_hw_kind`). The SW rasteriser keeps the back faces of
+  two-sided triangles. The resolve flips the normal of back faces (screen-space winding).
+- The SW range is dispatched once per variant: plain, masked, impostor. Each kernel takes its kind of entry, so
+  the plain kernel keeps its registers and its Phase 3 speed.
+- Masked clusters go SW only below `sw_px · sqrt(tris / 128) / 2` across. Their few, large card triangles
+  rasterise better in HW.
+- WPO materials use the vertex colour as wind weights: the resolve does not multiply it into the albedo.
+
+### WPO (`shaders/vgeo/wpo.glsl`)
+
+- Snippets (pure functions; CPU mirror `vgeo_wpo_eval`):
+  - `WPO_GRASS`: bend along the wind by R, with the bent tip dropping.
+  - `WPO_TREE`: trunk sway (R), branch bounce (G), leaf flutter (B), per-instance phase.
+  - `WPO_DISPLACE`: adds the displacement buffer's push, weighted by R.
+- Every snippet clamps the wind to the full wind it was declared for (`prm.w`). So `vgeo_wpo_max` bounds it for
+  any weather:
+  - grass: `√2 · bend`;
+  - tree: `sway + branch + 1.5 · flutter`;
+  - displacement: `+ 1.118 · VG_DISPLACE_MAX` (0.6 m).
+- `vg_vertex_world` applies the snippet in every stage: both rasterisers, the shadows, the resolve, the test
+  kernel.
+- Every world sphere (`vg_world_sphere`) grows by the mesh's `max_wpo`: instance, BVH node, group and cluster
+  LOD spheres, culling spheres, and the cell bounds. The LOD distance therefore shrinks by it too. The error
+  itself is unchanged.
+- The SW/HW size test and the impostor switch use the size without that margin.
+- Velocity: the resolve evaluates the snippet with last frame's wind and time (`VgViewGpu.wind_prev`,
+  `foliage.y`). The game feeds the views from `RenderWeather` (wind, gust, time). `FrameData.wx5 = (gust, gust
+  phase, time, wind direction angle)`.
+
+### Instances: density, fade, shadow distance, impostors
+
+- The instance test (`vg_instance`, after the frustum):
+  - **Density / fade:** `vg_foliage_alpha` keeps a `VGMF_FOLIAGE` instance while its fixed hash
+    `h = (hash + 0.5) / 256 · 15/16 < r_foliage_density · fade(distance)`. The last 1/16 of that threshold
+    is the dither band. The hash is byte 1 of `flags_phase`, set from the position bits by
+    `vgeo_foliage_instance`, so it does not depend on load order.
+  - **Shadow distance:** cascade views (cam_pos = the camera) drop instances past `shadow_max_dist`.
+  - Instances culled these ways count in `VGN_INST_FADED`.
+  - **Impostor:** `vg_use_impostor` sends the instance down the impostor path when its mesh has an atlas and its
+    sphere projects below `r_vgeo_impostor_px` across. Never in cascades. The instance then appends one SW
+    entry `(instance, VG_IMPOSTOR_ENTRY)` instead of expanding its BVH. That single comparison decides both
+    sides, so there is no gap and no overlap.
+- **All-foliage cells** (`VG_CELL_FOLIAGE` in the GPU count) are culled whole once their nearest point is beyond
+  the largest foliage fade end (main view) or shadow distance (cascades).
+- CPU mirrors: `vgeo_foliage_alpha`, `vgeo_use_impostor`. `vgeo_scene_cpu_select` applies all of it.
+
+### Impostors (`vgeo_impostor.c`, `vg_impostor.glsl`)
+
+- **Bake.** `vgeo_impostor_bake` (CPU, deterministic) renders the leaf clusters of a built mesh:
+  - 8 × 8 hemi-octahedral directions;
+  - orthographic over the mesh sphere, 2× supersampled, masked materials alpha-tested;
+  - albedo (sRGB, coverage alpha) and mesh-space normals, empty texels dilated.
+
+  The result goes in the `.vgeo` impostor section (`VGF_HAS_IMPOSTOR`): `build_vgeo --impostor [size=1024]
+  [grid=8]`. `vgeo_foliage_impostor_upload` makes the two module textures (mips down to 4 px tiles).
+- **Runtime.** A quad faces the camera at the mesh sphere centre.
+  - **Raster:** SW impostor variant, 64 threads per triangle sharing its rows. Coverage is the 3 nearest frames'
+    alpha blended ≥ 0.5, each frame's tile coordinates a UV plane of the triangle.
+  - **Resolve:** the blended albedo and normals at the pixel's point on the quad.
+
+### Placement chunks (`.vgp`) and the placement region
+
+- **File.** `VgpHeader` (48 B: chunk x / z, counts, origin), mesh names (48 B each), ≤ 16 `VgCell`s (4 × 4 cells of
+  8 m), then 32 B `VgInstance`s grouped by cell, with mesh = name index.
+  - `vgp_write` bins a chunk's instances; `vgp_parse` validates.
+  - `vgeo_foliage_chunk_load` resolves the names to scene meshes; unknown ones are dropped.
+- **Region.** `vgeo_scene_reserve_placements(instances, cells)` puts a placement region after the committed
+  instance and cell tables. The game reserves 1M instances (32 MB) and 8192 cells on first use.
+  - `vgeo_scene_placement_add` sub-allocates a chunk: first-fit ranges, a free-cell stack. Bounds come from the
+    mesh spheres + max WPO + positions.
+  - `vgeo_scene_placement_remove` frees the cells first (no later frame sees the instances), then merges the
+    instance range back into the sorted free list.
+  - `vgeo_scene_placement_record` uploads the changed ranges and cells through a staging buffer per frame in
+    flight. A barrier after every earlier read orders it after the frames in flight on the same queue.
+  - A commit re-uploads the region whole (rebased past the static tables).
+  - `vgeo_scene_placement_audit` checks that live chunks plus free lists cover the region exactly once.
+- **Query.** `vgeo_foliage_query(pos, radius)` returns the placement instances within a horizontal radius,
+  nearest first.
+
+### Displacement buffer
+
+- `VgDisplace`: a 128 × 128 RG16F image of 0.5 m texels around the camera, with horizontal pushes in metres.
+  It is toroidal: texel `t` holds world texel `X ≡ t (mod 128)` of the window.
+- `vg_displace_record`, per frame before the culls (`vg_displace.comp`):
+  - clears texels whose world texel changed with the window;
+  - decays (1.5 s time constant);
+  - applies up to 64 queued pushes (`vg_displace_push(pos, radius, strength m/s)`, falling off to the radius);
+  - clamps to `VG_DISPLACE_MAX`.
+- `WPO_DISPLACE` samples it through the texture table.
+- Game hooks: `render_foliage_push`. Every grounded player pushes at its feet. `foliage_push_test` circles
+  pushes around the camera.
+
+### In the game (`vk_vgeo.c`, `game_foliage.c`, `chunks.c`)
+
+- **API (render.h):**
+  - `render_foliage_test_types`: builds the procedural tuft and bush, their masks and 1024 px impostors.
+  - `render_foliage_test_chunk` (thread-safe .vgp of a chunk), `render_foliage_chunk_load` / `_unload`,
+    `render_foliage_chunk_capsules`, `render_foliage_query`, `render_foliage_push`, `render_foliage_clear`.
+- **Devroom.** `foliage_test_scatter [count=300000]` fills the foliage yard (x 60..380, z 80..400): 90 % tufts, 10 %
+  bushes, 121 chunks. The bushes' trunk capsules become one static triangle-mesh body per chunk: hexagonal
+  prisms (`chunks_capsule_body`). A body per capsule would exhaust the physics world's 16k bodies.
+  `foliage_test_clear` removes it all; a map change clears the placements.
+- **Streamed terrain.** `world_foliage_test 1` makes the chunk jobs generate 1.5 instances per m² on the
+  heightfield. Chunk finalize loads them and their capsules; chunk release frees both.
+- **Occluders.** The Hi-Z of this frame (pass 2) merges the depth of the large static legacy draws
+  (`vgeo_occluders`, before `vgeo_hiz_cur`). Before that change, walls only occluded in pass 1 and pass 2 brought
+  everything behind them back.
+- **Shadows.** Cascade views list masked clusters in their (otherwise unused) SW half. `vgeo_shadow_masked.vert` /
+  `.frag` draws them alpha-tested, the HW half depth only. vgeo shadow cull and draw are timed:
+  `vgeo_stats`, `foliage_stats`, `vgeo_bench`.
+- **Fallback.** The 2015 / 2010 fallback and the local light shadows apply the same density / fade per
+  instance and skip masked meshes (the legacy pipelines have no alpha test).
+- **Commands:** `foliage_stats` (chunks, region, audit, last frame's counters), `foliage_query [r]`,
+  `foliage_push_test [s]`, `foliage_check` (scripted, below).
+
+### Test content (`vgeo_procgen_foliage.c`)
+
+- **Tuft:** 5 crossed cards, 60 triangles. Grass masks of 14 tapered, noisy blades. Masked, two-sided,
+  `WPO_GRASS | WPO_DISPLACE`. Fade 40-65 m, shadows to 15 m.
+- **Bush:** a 48-triangle tapered trunk plus 46 leaf cards, 600 triangles. Leaf-blob masks. `WPO_TREE`. Fade
+  100-150 m, shadows to 40 m, trunk capsule.
+- Vertex colours hold the wind weights. `build_vgeo --gen tuft|bush [--impostor]`.
+- The builder now carries a material subset that simplifies to nothing (tiny disconnected cards) through
+  unchanged, instead of meshletizing zero triangles. Earlier outputs are byte-identical.
+
+### Tests (`ctest -R vgeo_foliage`, runs `--validation`; 495 checks)
+
+- **Masked visibility.** 2880 masked, two-sided tufts and bushes in wind, 3 cameras at 1920 × 1080:
+  - all-HW vs all-SW: 1 / 2 / 11 differing pixels out of 1.3-2.0M covered, all on triangle edges;
+  - mesh shader vs vertex pulling: 0 / 0 / 0;
+  - **CPU reference** (sample pixels, no wind; the bush leaves still flutter, so the CPU applies the snippet
+    mirror; borderline ±0.06): 52k-78k masked winners, 0 failing the CPU alpha test; 32k-78k pixels whose
+    unmasked winner fails it, 0 still showing it; masking never brings a surface nearer.
+- **WPO bounds.** All vertices of all clusters of all levels of 8 instances, 96 states (max wind, 2 × max wind,
+  max wind + a saturated displacement buffer), 467 712 samples: 0 outside their cluster's or instance's
+  culling sphere (worst 6.4 cm inside). GPU snippet vs CPU mirror: 1.2e-6 m.
+- **Density hash.** 60k instances, LOD only, the GPU kept set equals the CPU mirror at densities 0.7 / 0.4 / 1.0
+  (11 540 / 6 629 / 15 778, 0 missing, 0 extra) and is monotonic (0.4 ⊂ 0.7 ⊂ 1.0). A static camera over 600
+  frames (alternating frame slots) keeps the identical set and counters every frame.
+- **Cell culling vs brute force.** 69k instances, 4 cameras: GPU visible instances = brute-force frustum + fade
+  count within the borderline (±2), 0 drawn instances failing the brute force test.
+- **Impostor switch.** Bushes on a line, 21 of them within ±1e-5 of the switch distance. Every instance draws
+  its impostor xor its DAG cut (0 both, 0 neither), exactly where `vgeo_use_impostor` says (except 3 within
+  f32 noise). Impostor quads rasterise (2650 px).
+- **Placement streaming.** A 2135 m winding flythrough, 7 × 7 chunks loaded around it: 688 loads / 639 unloads
+  through `.vgp` write / parse / load, up to 50k live instances.
+  - Allocator audit every step: 0 failures.
+  - 27 GPU checks of the tables against the CPU mirror and of the culled instance counts: 0 mismatches.
+  - At the end: 1 free range of the whole region, all 4096 cells free, 0 live chunks.
+- **Hi-Z.** A wall 3 m in front of the camera: 99.3 % of the 5277 in-frustum instances rejected.
+- 0 validation messages.
+
+In game (devroom, `--validation`: 0 messages):
+- `foliage_check` behind the foliage yard wall: 31 133 foliage instances in the frustum, 1 visible: **100 %
+  rejected**. The pass-1 Hi-Z alone did this before the occluder merge; pass 2 brought them back.
+- `foliage_check` density, occlusion off, 600 frames of a static camera: 0 frames differ.
+- **Streaming:** `map streaming` with `world_foliage_test 1`, a 2080 m noclip flight: 77 chunks / 118k instances
+  live, audit PASS; after `map devroom`: 0 chunks, 1 free range. The 21 validation messages of that run are
+  `map streaming`'s own: the base commit shows the same ones.
+
+### Bench (300k instances, RTX 3060 Ti, 1920 × 1080; the GPU was shared with other jobs during the run, so these
+are the least-contended of several runs)
+
+`bench_vgeo --foliage 300000`: main view in the renderer's order (pass 1 cull, raster, Hi-Z from the visibility buffer,
+pass 2) plus the 3 cascade culls, medians of 60 frames:
+
+| Camera | cull | raster HW / SW | Hi-Z | shadow cull | total | visible inst. | impostors | clusters HW / SW | tris |
+|---|---|---|---|---|---|---|---|---|---|
+| eye level, in the yard | 0.231 | 1.547 / 0.546 | 0.059 | 0.210 | **2.593** | 10 823 | 2 192 | 10 182 / 5 484 | 0.77M |
+| eye level, at the edge | 0.207 | 1.349 / 0.350 | 0.064 | 0.188 | **2.296** | 7 909 | 1 471 | 7 199 / 3 303 | 0.53M |
+| elevated 15 m | 0.205 | 0.654 / 0.757 | 0.053 | 0.167 | **2.205** | 9 277 | 2 402 | 8 605 / 8 367 | 0.76M |
+| in the grass, looking down | 0.210 | 0.990 / 0.291 | 0.065 | 0.196 | **1.970** | 9 731 | 1 817 | 7 588 / 2 127 | 0.48M |
+
+In game, `vgeo_bench 600 f.csv foliage` over the yard (frame-graph passes + the timed vgeo shadows, averages):
+- `vgeo_cull` 0.25, `vgeo_raster` 1.52, `vgeo_occluders` 0.04, `vgeo_hiz_cur` 0.09, `vgeo_pass2` 0.21, `vgeo_hiz`
+  0.04;
+- shadows: cascade cull 0.58, cascade draws 0.50;
+- about **3.2 ms** in all against the **2.5 ms** budget, before the shared prepass / opaque resolve.
+
+The harness total (main view + cascade culls) is 2.0-2.6 ms; adding the cascade draws puts every camera over
+the budget, by up to about 0.6-1 ms. What it costs:
+- the near grass's masked overdraw in HW (fill: each tuft is 5 cards of mostly transparent texels);
+- tufts being a single 60-triangle cluster, which the DAG cannot coarsen, so a tuft is 60 triangles until it
+  turns into an impostor;
+- the vertex-pulled masked shadow draws.
+
+How it got there, from 6-10 ms:
+- splitting the SW kernel into variants;
+- the HW plain / masked split;
+- the per-triangle UV plane and LOD;
+- sending masked cards to HW sooner;
+- whole-cell fade culling;
+- dropping the visibility-buffer pre-read;
+- the content's fade / shadow distances (grass 40-65 m / 15 m).
+
+### Simplifications (foliage)
+
+- **Mask LOD per triangle** (at its centroid), not per pixel. Identical in both rasterisers by construction.
+- **Impostor depth is the quad's plane.** No per-pixel depth offset. Impostors cast no shadows: cascades never
+  switch.
+- **Displacement velocity** uses this frame's buffer for the previous position too.
+- **WPO and the LOD error.** The WPO bound grows the spheres. The simplification error is not increased.
+- **Shadow distance and fades are per mesh** (the max over its materials), not per cluster.
+- **Fallback.** No masked foliage in the 2015 / 2010 fallback or in local light shadows.
+- **Capsules** are hexagonal prisms in one static mesh per chunk, not capsule shapes.
+- **Displacement format.** RG16F needs `shaderStorageImageExtendedFormats` (the game warns if missing).
+
 ## Simplifications vs Nanite
 
 - **Partitioner:** a greedy, shared-edge-weighted grower over a Morton order instead of METIS graph partitioning.
@@ -852,27 +1114,34 @@ renderer already binds as set 3.
 ## Adding a foliage system on top
 
 The vgeo core is built so that a foliage system is a content and placement layer, not a renderer fork. Phase 7
-lands the support pieces described in `VGEO_PLAN.md` §8; a foliage system then needs only:
+landed the support pieces ("Foliage support"); a foliage system then needs only:
 
-1. **Meshes.** Author or generate grass, bush and tree meshes as normal glTF with `"vgeo": true` and the material
-   flags `masked` / `two_sided`. Bake wind weights into vertex colour: R = trunk / bend, G = branch, B = leaf
-   flutter. The builder carries vertex colour when present (`VgSource.color`, 4 extra bytes per vertex). For far
-   trees, `build_vgeo --impostor` bakes an octahedral atlas.
-2. **Placement.** Write per-chunk placement files (`.vgp`): 16 cells of 8 m per 32 m chunk, each a list of 32 B
-   `VgInstance`s with a per-instance wind phase and density hash. Generate them from the heightfield and biome
-   masks with your own scatter rules (slope, altitude, distance to roads). The chunk job loads and frees them with
-   the heightfield; cells are the first culling level, so a chunk adds no per-instance CPU work.
-3. **Materials.** Pick a WPO snippet per material (`WPO_GRASS`, `WPO_TREE`, and `WPO_DISPLACE` for trampling) and
-   its parameters. The snippet's declared max displacement inflates every culling bound and the LOD error
-   automatically.
+1. **Meshes.** Author or generate grass, bush and tree meshes as normal glTF with `"vgeo": true` and a
+   `"foliage": { "masked": true, "two_sided": true, "wpo": "grass" | "tree", "wpo_params": [...], "fade": [s, e],
+   "shadow_max_dist": d }` block in `data/assets.json`. Bake wind weights into vertex colour: R = trunk / bend,
+   G = branch, B = leaf flutter (`VgSource.color`, 4 extra bytes per vertex; WPO materials do not use it as
+   albedo). For distant instances, `build_vgeo --impostor` bakes the hemi-octahedral atlas into the `.vgeo`,
+   `vgeo_foliage_impostor_upload` puts it on the GPU, and `r_vgeo_impostor_px` sets the switch.
+2. **Placement.** Write per-chunk placement files (`.vgp`, `vgp_write`): ≤ 16 cells of 8 m per 32 m chunk, 32 B
+   `VgInstance`s made with `vgeo_foliage_instance` (rotation, scale, and wind phase + density hash fixed by the
+   position). Generate them from the heightfield and biome masks with your own scatter rules (slope, altitude,
+   distance to roads; `vgeo_foliage_scatter_chunk` is the test example). Load and free them with the chunk
+   (`render_foliage_chunk_load` / `_unload`; `chunks.c` does it for `world_foliage_test`). Cells are the first
+   culling level, so a chunk adds no per-instance CPU work.
+3. **Materials.** Pick a WPO snippet per material (`WPO_GRASS`, `WPO_TREE`, `| WPO_DISPLACE` for trampling) and
+   its parameters, with `prm.w` the full wind. The declared bound (`vgeo_wpo_max`) inflates every culling
+   bound automatically. New snippets go in `wpo.glsl` with their bound in `vgeo_wpo_max` and the mirror in
+   `vgeo_wpo_eval` (the `vgeo_foliage` WPO test checks the bound).
 4. **Era scaling.** `r_foliage_density` (set by `r_era`: 1.0 / 0.7 / 0.4 / 0.2) thins instances by their fixed
-   hash, so the thinning is stable and monotonic with distance. Per-material `fade_start` / `fade_end` dither out
-   distant instances, and `shadow_max_dist` caps their shadow cost.
+   hash, so the thinning is stable and monotonic with distance. Per-material `fade_start` / `fade_end` thin and
+   dither out distant instances, all-foliage cells past the largest fade end are skipped whole, and
+   `shadow_max_dist` caps their shadow cost.
 5. **Gameplay hooks.**
-   - `foliage_query(pos, radius, out[])` serves footstep surfaces and crushing / burning.
-   - `foliage_push(pos, radius, strength)` writes the displacement buffer: players, vehicles and explosions
-     flatten grass.
-   - Trunks get physics capsules with `"colliders": "capsule"`.
+   - `render_foliage_query(pos, radius, out[])` serves footstep surfaces and crushing / burning.
+   - `render_foliage_push(pos, radius, strength)` writes the displacement buffer: players already do; vehicles
+     and explosions can.
+   - Trunks get static colliders with `"colliders": "capsule"` (`render_foliage_chunk_capsules`,
+     `chunks_capsule_body`).
 
 What stays out of the foliage system:
 - culling;
