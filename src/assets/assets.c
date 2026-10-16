@@ -3,6 +3,7 @@
 #include "core/log.h"
 #include "core/platform.h"
 #include "render/mesh_gen.h"
+#include "render/vgeo/vgeo_import.h"
 #include "stb_image.h"
 #include "cgltf.h"
 #include "cJSON.h"
@@ -177,6 +178,29 @@ bool model_load_gltf(const char *path, Model *out) {
     return out->mesh_count > 0;
 }
 
+// ------------------------------------------------------------------ virtualized geometry
+
+// Builds (or loads the cached build of) the model's clusters + DAG. Phase 1: the data is kept on the
+// model; the GPU path consumes it from Phase 2 on (docs/VGEO.md).
+static void model_load_vgeo(Model *m, const char *gltf_path) {
+    char cache[512];
+    platform_data_path("assets/cache/", cache, sizeof(cache));
+    VgBuildOptions opt;
+    memset(&opt, 0, sizeof(opt));
+    VgBuilt *b = (VgBuilt *)calloc(1, sizeof(VgBuilt));
+    bool cached = false;
+    char err[256] = "";
+    u64 t0 = SDL_GetTicksNS();
+    if (!vgeo_load_or_build(gltf_path, cache, &opt, b, &cached, err, sizeof(err))) {
+        log_error("vgeo: %s: %s", gltf_path, err);
+        free(b);
+        return;
+    }
+    m->vgeo = b;
+    log_info("vgeo: %s %s: %u clusters, %u groups, %u pages, %u levels, %u lods (%.1f ms)", m->name, cached ? "cached" : "built", b->hdr.cluster_count,
+             b->hdr.group_count, b->hdr.page_count, b->hdr.level_count, b->hdr.lod_count, (double)(SDL_GetTicksNS() - t0) / 1e6);
+}
+
 // ------------------------------------------------------------------ manifest
 
 bool assets_init(const char *manifest_path) {
@@ -204,6 +228,7 @@ bool assets_init(const char *manifest_path) {
         Model *m = &AS->models[AS->model_count];
         if (model_load_gltf(platform_data_path(cJSON_IsString(p) ? p->valuestring : "", buf, sizeof(buf)), m)) {
             dg_strcpy(m->name, sizeof(m->name), cJSON_IsString(n) ? n->valuestring : "");
+            if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(it, "vgeo"))) model_load_vgeo(m, buf);
         }
         AS->model_count++; // keep indices stable even if a model failed to load
     }
@@ -212,6 +237,9 @@ bool assets_init(const char *manifest_path) {
 }
 
 void assets_shutdown(void) {
+    if (!AS) return;
+    for (int i = 1; i < AS->model_count; i++)
+        if (AS->models[i].vgeo) { vgeo_free(AS->models[i].vgeo); free(AS->models[i].vgeo); }
     free(AS);
     AS = NULL;
 }

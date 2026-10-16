@@ -24,6 +24,7 @@ typedef struct Model {
     ModelMesh meshes[MAX_MODEL_MESHES];
     int mesh_count;
     AABB bounds;
+    struct VgBuilt *vgeo;    // manifest "vgeo": true: the virtualized-geometry build (docs/VGEO.md), else NULL
 } Model;
 
 bool assets_init(const char *manifest_path);

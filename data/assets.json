@@ -29,7 +29,8 @@
   "models": [
     {
       "name": "barrel",
-      "path": "assets/models/barrel.gltf"
+      "path": "assets/models/barrel.gltf",
+      "vgeo": true
     },
     {
       "name": "car_body",
