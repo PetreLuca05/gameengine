@@ -148,6 +148,13 @@ static void sources_at(const WindField *f, const float p[3], float out[3]) {
                 if (d > 1e-3f) { out[0] += dx / d * k; out[2] += dz / d * k; }
                 out[1] -= 0.5f * k;
             }
+        } else if (s->kind == WIND_SRC_GUST) {
+            // a band across dir whose centre travels at the front speed, fading in / out over its life
+            float sp = fmaxf(s->strength / 1.5f, 6.0f), front = s->age * sp;
+            float a = (dx * s->dir[0] + dz * s->dir[1]) - front;
+            float k = s->strength * expf(-(a * a) / (s->radius * s->radius)) * smoothstepf(0.0f, 0.08f, t) * smoothstepf(1.0f, 0.85f, t);
+            out[0] += s->dir[0] * k;
+            out[2] += s->dir[1] * k;
         } else {
             // wake: a 3-radius-long tail behind pos along -dir, Gaussian across it
             float a = -(dx * s->dir[0] + dz * s->dir[1]), b = -dx * s->dir[1] + dz * s->dir[0];
@@ -221,6 +228,19 @@ void wind_add_wake(WindField *f, const float pos[3], const float vel[3], float r
     s->strength = fminf(sp * 0.5f, 15.0f);
     s->life = 0.25f;   // vehicles re-add it every few frames while moving
     s->kind = WIND_SRC_WAKE;
+    s->used = 1;
+}
+
+void wind_add_gust(WindField *f, const float pos[3], float strength, float width, float range) {
+    WindSource *s = src_alloc(f);
+    memset(s, 0, sizeof(*s));
+    memcpy(s->pos, pos, 12);
+    s->dir[0] = f->dir[0];
+    s->dir[1] = f->dir[1];
+    s->radius = fmaxf(width * 0.5f, 2.0f);
+    s->strength = strength;
+    s->life = range / fmaxf(strength / 1.5f, 6.0f);
+    s->kind = WIND_SRC_GUST;
     s->used = 1;
 }
 

@@ -59,9 +59,14 @@ void vgeo_wind_unpack(const float wpo[4], const float wp[8], VgWindParams *p) {
 }
 
 void vgeo_wind_layer_max(const float wpo[4], const float wp[8], float out[3]) {
-    // main: |o| <= tan(max_bend) H (h clamped to 1); the length-preserving projection at most doubles it
-    // (x 1.15: the per-instance stiffness variation)
-    out[0] = 2.0f * fminf(fabsf(wpo[0]) * 1.15f * 1.0032f, wp[4]) * wp[0];
+    // main: the horizontal push |o| = |b| h^2 H <= |b| y <= |b| L (y the height above the pivot, L the
+    // distance to it), so the projection back onto the sphere of radius L moves the vertex along a chord
+    // of angle <= asin(|o| / L): <= 2 L sin(asin(q) / 2) <= f(|b|) |o| with f(q) = 2 sin(asin(q) / 2) / q
+    // (1 .. sqrt 2 for q <= 1; 2 beyond). |b| <= min(trunk x 1.15 (instance variation) x 1.0032 (sway
+    // across), tan(max_bend)), |o| <= |b| H.
+    float b = fminf(fabsf(wpo[0]) * 1.15f * 1.0032f, wp[4]);
+    float f = b <= 1e-4f ? 1.0f : b < 1.0f ? 2.0f * sinf(asinf(b) * 0.5f) / b : 2.0f;
+    out[0] = f * 1.0001f * b * wp[0];
     out[1] = 0.9220f * 1.15f * fabsf(wpo[1]);   // max over sy of |(0.4 + 0.3 sy, 0.6 sy)|
     out[2] = fabsf(wpo[2]);
 }

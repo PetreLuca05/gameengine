@@ -17,6 +17,7 @@
 //     step, GPU tables = CPU mirror, GPU instance counts = CPU, nothing leaked at the end
 //   - Hi-Z: >= 90 % of the in-frustum instances behind a wall are rejected (counters)
 //   - --validation: zero validation messages
+#include "world/wind.h"
 #include "vgeo_gpu_harness.h"
 #include "render/vgeo/vgeo_raster.h"
 #include "render/vgeo/foliage_support.h"
@@ -67,7 +68,7 @@ static u32 g_mat_base[VG_FOLIAGE_KINDS];
 // ------------------------------------------------------------------ views
 
 typedef struct Cam { vec3 eye, target; } Cam;
-static float g_wind[4] = { 0.8f, 0.6f, 6.0f, 0.3f }, g_time = 3.7f, g_density = 1.0f, g_impostor_px = 0.0f;
+static float g_wind[4] = { 4.8f, 3.6f, 4.8f, 3.6f }, g_time = 3.7f, g_density = 1.0f, g_impostor_px = 0.0f;
 
 static void view_for(const Cam *c, u32 flags, float sw_px, VgViewGpu *v) {
     mat4 view = mat4_look_at(c->eye, c->target, v3(0, 1, 0));
@@ -76,9 +77,10 @@ static void view_for(const Cam *c, u32 flags, float sw_px, VgViewGpu *v) {
     float ps = (float)H / (2.0f * tanf(FOV * 0.5f));
     float eye[3] = { c->eye.x, c->eye.y, c->eye.z };
     vgeo_view_setup(v, vp.m, vp.m, eye, ps, ZNEAR, W, H, 1.0f, sw_px, flags);
-    memcpy(v->wind, g_wind, 16);
+    memcpy(v->wind, g_wind, 16);   // the field outside its tile: instant x, z, settled x, z
     memcpy(v->wind_prev, g_wind, 16);
     v->foliage[0] = v->foliage[1] = g_time;
+    v->wind_layers = VGW_ALL;
     v->foliage[2] = g_density;
     v->foliage[3] = g_impostor_px;
 }
@@ -378,10 +380,18 @@ static float cpu_alpha(const VgViewGpu *v, const Px *p, u32 x, u32 y) {
         float l[3] = { dec.pos[vi][0] * sc, dec.pos[vi][1] * sc, dec.pos[vi][2] * sc }, w[3];
         qrot(q, l, w);
         for (int a = 0; a < 3; a++) w[a] += pos[a];
-        // the material's WPO (CPU mirror; the bush leaves flutter without wind)
+        // the material's WPO (CPU mirror; no wind: no offset)
         const u8 *vp = (const u8 *)ph + (cl->offsets & 0x7FFFu) * 4u + vi * vgeo_vertex_bytes(g_built[k].hdr.flags) + 12;
-        float col[4] = { vp[0] / 255.0f, vp[1] / 255.0f, vp[2] / 255.0f, vp[3] / 255.0f }, off[3];
-        vgeo_wpo_eval(mt->wpo, mt->wpo_params, w, pos, col, (float)VG_INST_PHASE(in->flags_phase) / 256.0f, v->wind, v->foliage[0], NULL, off);
+        VgWindVertex wv;
+        memset(&wv, 0, sizeof(wv));
+        memcpy(wv.p, w, 12);
+        memcpy(wv.ip, pos, 12);
+        wv.pscale = sc;
+        wv.n[1] = 1.0f;
+        for (int a = 0; a < 4; a++) wv.col[a] = vp[a] / 255.0f;
+        wv.phase = (float)VG_INST_PHASE(in->flags_phase) / 256.0f;
+        float off[3];
+        vgeo_wpo_eval(mt, &wv, v->wind, v->foliage[0], v->wind_layers, NULL, off, NULL);
         for (int a = 0; a < 3; a++) w[a] += off[a];
         for (int r = 0; r < 4; r++) c[j][r] = v->raster_view_proj[r] * w[0] + v->raster_view_proj[4 + r] * w[1] + v->raster_view_proj[8 + r] * w[2] + v->raster_view_proj[12 + r];
         uv[j][0] = dec.uv[vi][0] * mt->tex_scale;
@@ -460,8 +470,9 @@ static void test_masked(void) {
         }
         img_free(&b);
         // CPU alpha-tested reference (no wind: positions without WPO), against the unmasked image
-        float wsave = g_wind[2];
-        g_wind[2] = 0.0f;
+        float wsave[4];
+        memcpy(wsave, g_wind, 16);
+        memset(g_wind, 0, 16);
         view_for(&cams[ci], VGV_NO_OCCLUSION, 32.0f, &vh);
         Img m, u;
         render(&vh, NULL, true, true, &m);
@@ -472,7 +483,7 @@ static void test_masked(void) {
         for (int k = 0; k < VG_FOLIAGE_KINDS; k++)
             for (int j = 0; j < 2; j++) g_scene.materials[g_mat_base[k] + (u32)j].flags = g_mats[k][j].flags;
         upload_materials();
-        g_wind[2] = wsave;
+        memcpy(g_wind, wsave, 16);
         const float band = 0.06f;
         u32 kept = 0, kept_bad = 0, removed = 0, removed_bad = 0, nearer = 0, border = 0;
         for (u32 y = 2; y < H; y += 5)
@@ -546,7 +557,7 @@ static void test_wpo_bounds(void) {
     }
     const VgContext *c = &g_h.ctx;
     VgBuffer bin = vgc_buffer(c, 16ull * n, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT, VGM_DEVICE);
-    VgBuffer bout = vgc_buffer(c, 48ull * n, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VGM_DEVICE);
+    VgBuffer bout = vgc_buffer(c, 112ull * n, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VGM_DEVICE);
     vgc_upload(c, &bin, 0, items, 16ull * n);
     VkDescriptorSetLayoutBinding lb[2];
     memset(lb, 0, sizeof(lb));
@@ -611,15 +622,22 @@ static void test_wpo_bounds(void) {
         vg_displace_record(&disp, cmd, 0, cam, 0.1f);
         vgc_submit_wait(c, pool, cmd);
     }
-    float *o = (float *)malloc(48ull * n);
-    u32 outside_cl = 0, outside_in = 0, mirror_bad = 0, samples = 0;
-    double worst_excess = -1e9, worst_mirror = 0, max_disp = 0;
+    // the wind field's tile on the GPU (pass 3): two consecutive frames of a gusty field
+    static WindField wf, wf_prev;
+    VgWindTex wt;
+    CHECK(vg_wind_init(&wt, c, &g_cull.tex), "wind tile");
+    wind_init(&wf, 21);
+    float *o = (float *)malloc(112ull * n);
+    u32 outside_cl = 0, outside_in = 0, mirror_bad = 0, samples = 0, mv_bad = 0, n_bad = 0, wind_bad = 0, tile_samples = 0, tile_varied = 0;
+    double worst_excess = -1e9, worst_mirror = 0, max_disp = 0, worst_mv = 0, worst_n = 0, worst_wind = 0, max_mv = 0;
     const Cam cv = { { 4, 1.5f, 14 }, { 4, 0, 4 } };
-    for (int s = 0; s < 3 * 8 * 4; s++) {
-        int pass = s / 32;   // 0: max wind, no displacement; 1: 2x max wind; 2: max wind + displacement buffer
+    for (int s = 0; s < 4 * 8 * 4; s++) {
+        // 0: full wind, no displacement; 1: 3x the largest full wind; 2: full wind + displacement buffer;
+        // 3: the wind field's tile (gusts, turbulence), last frame's tile and time for the velocity
+        int pass = s / 32;
         float ang = (float)(s % 4) * 1.5707963f + 0.3f, t = (float)(s % 8) * 1.37f + 0.5f;
-        float wmax = 14.0f * (pass == 1 ? 2.0f : 1.0f);
-        float wnd[4] = { cosf(ang), sinf(ang), wmax, 1.0f };
+        float wmax = pass == 1 ? 66.0f : 22.0f;
+        float wnd[4] = { cosf(ang) * wmax, sinf(ang) * wmax, cosf(ang + 0.2f) * wmax * 1.1f, sinf(ang + 0.2f) * wmax * 1.1f };
         VgViewGpu v;
         memcpy(g_wind, wnd, 16);
         g_time = t;
@@ -627,6 +645,27 @@ static void test_wpo_bounds(void) {
         if (pass == 2) vg_displace_view(&disp, &v);
         VkCommandPool pool;
         VkCommandBuffer cmd = vgc_begin_once(c, &pool);
+        if (pass == 3) {
+            WindBase b = { ang * 57.29578f, 8.0f + (float)(s % 8) * 3.0f, 0.9f };
+            float wcam[3] = { 4.0f + (float)(s % 5) * 9.0f, 1.0f, 4.0f - (float)(s % 3) * 7.0f };
+            wind_set(&wf, &b, t - 1.0 / 60.0);
+            wind_tile_update(&wf, wcam, 1.0f / 60.0f);
+            VkCommandPool p0;   // last frame's upload: its own submit (one staging buffer per frame slot)
+            VkCommandBuffer c0 = vgc_begin_once(c, &p0);
+            vg_wind_record(&wt, c0, 0, wf.texels, wf.ox, wf.oz, WIND_TEXEL);
+            vgc_submit_wait(c, p0, c0);
+            memcpy(&wf_prev, &wf, sizeof(wf));
+            wcam[0] += 6.0f;   // the window moves between the frames
+            wind_set(&wf, &b, t);
+            wind_tile_update(&wf, wcam, 1.0f / 60.0f);
+            vg_wind_record(&wt, cmd, 0, wf.texels, wf.ox, wf.oz, WIND_TEXEL);
+            vg_wind_view(&wt, &v);
+            float g[4] = { wf.dir[0] * wf.base.speed, wf.dir[1] * wf.base.speed, wf.global_bend[0], wf.global_bend[1] };
+            float gp[4] = { wf_prev.dir[0] * wf_prev.base.speed, wf_prev.dir[1] * wf_prev.base.speed, wf_prev.global_bend[0], wf_prev.global_bend[1] };
+            memcpy(v.wind, g, 16);
+            memcpy(v.wind_prev, gp, 16);
+            v.foliage[1] = t - 1.0f / 60.0f;
+        }
         vgeo_scene_placement_record(&g_scene, cmd, 0);
         vg_cull_record(&g_cull, cmd, 0, 0, &v, NULL, NULL);   // uploads the view, writes the set
         VkDescriptorSet cs = vg_cull_set(&g_cull, 0, 0);
@@ -639,56 +678,102 @@ static void test_wpo_bounds(void) {
         vkCmdPushConstants(cmd, pl, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pp), &pp);
         vkCmdDispatch(cmd, (n + 63) / 64, 1, 1);
         vgc_submit_wait(c, pool, cmd);
-        vgh_read(&g_h, &bout, 0, 48ull * n, o);
+        vgh_read(&g_h, &bout, 0, 112ull * n, o);
         for (u32 i = 0; i < n; i++) {
-            const float *w = &o[i * 12], *cs4 = w + 4, *is = w + 8;
+            const float *w = &o[i * 28], *cs4 = w + 4, *is = w + 8, *pw = w + 12, *gw = w + 16, *gn = w + 20, *gwp = w + 24;
             double dc = sqrt((double)(w[0] - cs4[0]) * (w[0] - cs4[0]) + (double)(w[1] - cs4[1]) * (w[1] - cs4[1]) + (double)(w[2] - cs4[2]) * (w[2] - cs4[2]));
             double di = sqrt((double)(w[0] - is[0]) * (w[0] - is[0]) + (double)(w[1] - is[1]) * (w[1] - is[1]) + (double)(w[2] - is[2]) * (w[2] - is[2]));
             outside_cl += dc > cs4[3];
             outside_in += di > is[3];
             worst_excess = fmax(worst_excess, dc - cs4[3]);
             samples++;
-            // CPU mirror (no displacement buffer): the undisplaced position + vgeo_wpo_eval
-            if (pass != 2) {
-                const VgInstance *in = vgeo_scene_instance(&g_scene, items[i * 4]);
-                u32 k = find_kind(in->mesh);
-                static VgDecoded dec;
-                static u32 dec_key = ~0u, dec_kind = ~0u;
-                if (dec_key != items[i * 4 + 3] || dec_kind != k) {
-                    vgeo_decode_cluster(&g_built[k], items[i * 4 + 3] >> 16, items[i * 4 + 3] & 0xFFFFu, &dec);
-                    dec_key = items[i * 4 + 3];
-                    dec_kind = k;
+            if (pass == 2) continue;   // CPU mirror without the displacement buffer
+            const VgInstance *in = vgeo_scene_instance(&g_scene, items[i * 4]);
+            u32 k = find_kind(in->mesh);
+            static VgDecoded dec;
+            static u32 dec_key = ~0u, dec_kind = ~0u;
+            if (dec_key != items[i * 4 + 3] || dec_kind != k) {
+                vgeo_decode_cluster(&g_built[k], items[i * 4 + 3] >> 16, items[i * 4 + 3] & 0xFFFFu, &dec);
+                dec_key = items[i * 4 + 3];
+                dec_kind = k;
+            }
+            u32 vi = items[i * 4 + 2];
+            float pos[3], q[4], sc, l[3], wp[3], nw[3];
+            vgeo_instance_decode(in, pos, q, &sc);
+            for (int a = 0; a < 3; a++) l[a] = dec.pos[vi][a] * sc;
+            qrot(q, l, wp);
+            qrot(q, dec.normal[vi], nw);
+            for (int a = 0; a < 3; a++) wp[a] += pos[a];
+            // the vertex colour: decode it from the page (the CPU decode has none)
+            const VgPageHeader *ph = vgeo_page(&g_built[k], items[i * 4 + 3] >> 16);
+            const VgCluster *cl = vgeo_page_cluster(&g_built[k], items[i * 4 + 3] >> 16, items[i * 4 + 3] & 0xFFFFu);
+            const u8 *vp = (const u8 *)ph + (cl->offsets & 0x7FFFu) * 4u + vi * vgeo_vertex_bytes(g_built[k].hdr.flags) + 12;
+            VgWindVertex wv;
+            memset(&wv, 0, sizeof(wv));
+            memcpy(wv.p, wp, 12);
+            memcpy(wv.ip, pos, 12);
+            memcpy(wv.n, nw, 12);
+            wv.pscale = sc;
+            for (int a = 0; a < 4; a++) wv.col[a] = vp[a] / 255.0f;
+            wv.phase = (float)VG_INST_PHASE(in->flags_phase) / 256.0f;
+            const VgMaterial *mt = &g_mats[k][dec.material];
+            // the wind at the pivot: the view's (passes 0-1); pass 3: the GPU's tile sample feeds the
+            // mirror (the sample itself is checked against wind_tile_sample below)
+            float wcur[4], wprev[4], off[3], offp[3], nn[3];
+            memcpy(wcur, pass == 3 ? gw : wnd, 16);
+            memcpy(wprev, pass == 3 ? gwp : wnd, 16);
+            vgeo_wpo_eval(mt, &wv, wcur, v.foliage[0], VGW_ALL, NULL, off, nn);
+            vgeo_wpo_eval(mt, &wv, wprev, v.foliage[1], VGW_ALL, NULL, offp, NULL);
+            double e = 0, em = 0, en = 0, mv = 0;
+            for (int a = 0; a < 3; a++) {
+                e += (double)(wp[a] + off[a] - w[a]) * (wp[a] + off[a] - w[a]);
+                em += (double)(wp[a] + offp[a] - pw[a]) * (wp[a] + offp[a] - pw[a]);
+                en += (double)(nn[a] - gn[a]) * (nn[a] - gn[a]);
+                mv += (double)(w[a] - pw[a]) * (w[a] - pw[a]);
+            }
+            e = sqrt(e), em = sqrt(em), en = sqrt(en);
+            worst_mirror = fmax(worst_mirror, e);
+            mirror_bad += e > 2e-4;
+            worst_mv = fmax(worst_mv, em);
+            mv_bad += em > 2e-4;
+            max_mv = fmax(max_mv, sqrt(mv));
+            if (mt->wpo != WPO_NONE) {
+                worst_n = fmax(worst_n, en);
+                n_bad += en > 2e-3;
+            }
+            max_disp = fmax(max_disp, sqrt((double)off[0] * off[0] + (double)off[1] * off[1] + (double)off[2] * off[2]));
+            if (pass == 3) {   // shader tile sample vs the CPU's (half texels, 8-bit filter weights)
+                float cw[4], cwp[4];
+                wind_tile_sample(&wf, pos[0], pos[2], cw);
+                wind_tile_sample(&wf_prev, pos[0], pos[2], cwp);
+                for (int a = 0; a < 4; a++) {
+                    double d = fmax(fabs(cw[a] - gw[a]), fabs(cwp[a] - gwp[a]));
+                    worst_wind = fmax(worst_wind, d);
+                    wind_bad += d > 0.02 + 4e-3 * fabs(cw[a]);
                 }
-                u32 vi = items[i * 4 + 2];
-                float pos[3], q[4], sc, l[3], wp[3];
-                vgeo_instance_decode(in, pos, q, &sc);
-                for (int a = 0; a < 3; a++) l[a] = dec.pos[vi][a] * sc;
-                qrot(q, l, wp);
-                for (int a = 0; a < 3; a++) wp[a] += pos[a];
-                // the vertex colour: decode it from the page (the CPU decode has none)
-                const VgPageHeader *ph = vgeo_page(&g_built[k], items[i * 4 + 3] >> 16);
-                const VgCluster *cl = vgeo_page_cluster(&g_built[k], items[i * 4 + 3] >> 16, items[i * 4 + 3] & 0xFFFFu);
-                const u8 *vp = (const u8 *)ph + (cl->offsets & 0x7FFFu) * 4u + vi * vgeo_vertex_bytes(g_built[k].hdr.flags) + 12;
-                float col[4] = { vp[0] / 255.0f, vp[1] / 255.0f, vp[2] / 255.0f, vp[3] / 255.0f };
-                const VgMaterial *mt = &g_mats[k][dec.material];
-                float off[3];
-                vgeo_wpo_eval(mt->wpo, mt->wpo_params, wp, pos, col, (float)VG_INST_PHASE(in->flags_phase) / 256.0f, wnd, t, NULL, off);
-                double e = sqrt((double)(wp[0] + off[0] - w[0]) * (wp[0] + off[0] - w[0]) + (double)(wp[1] + off[1] - w[1]) * (wp[1] + off[1] - w[1]) +
-                                (double)(wp[2] + off[2] - w[2]) * (wp[2] + off[2] - w[2]));
-                worst_mirror = fmax(worst_mirror, e);
-                mirror_bad += e > 2e-4;
-                max_disp = fmax(max_disp, sqrt((double)off[0] * off[0] + (double)off[1] * off[1] + (double)off[2] * off[2]));
+                tile_samples++;
+                // the tile, not the fallback: gusts / turbulence differ from the mean wind
+                tile_varied += fabs(gw[0] - v.wind[0]) + fabs(gw[1] - v.wind[1]) > 0.1;
             }
         }
     }
-    printf("  %u vertex samples (8 instances, all clusters of all levels, 96 wind / time / displacement states): %u outside the cluster sphere, %u outside the "
-           "instance sphere (worst %.4f m inside), CPU mirror worst %.2e m (%u over 2e-4), largest wind offset %.3f m\n",
+    printf("  %u vertex samples (8 instances, all clusters of all levels, 128 wind / time / displacement / tile states): %u outside the cluster sphere, %u outside "
+           "the instance sphere (worst %.4f m inside), CPU mirror worst %.2e m (%u over 2e-4), largest wind offset %.3f m\n",
            samples, outside_cl, outside_in, -worst_excess, worst_mirror, mirror_bad, max_disp);
+    printf("  velocity: previous-frame position vs the CPU mirror with last frame's wind / time / tile: worst %.2e m (%u over 2e-4, largest motion %.3f m); "
+           "bent normals worst %.2e (%u over 2e-3); tile sample at the pivot vs wind_tile_sample: worst %.4f m/s over %u samples (%u out of tolerance)\n",
+           worst_mv, mv_bad, max_mv, worst_n, n_bad, worst_wind, tile_samples, wind_bad);
     CHECK(outside_cl == 0 && outside_in == 0, "WPO: %u / %u displaced vertices outside their bounds", outside_cl, outside_in);
     CHECK(mirror_bad == 0, "WPO: GPU snippet vs CPU mirror %.2e m", worst_mirror);
+    CHECK(mv_bad == 0, "WPO velocity: GPU previous position vs CPU %.2e m", worst_mv);
+    CHECK(n_bad == 0, "WPO normals: GPU vs CPU %.2e", worst_n);
+    CHECK(wind_bad == 0 && tile_samples > 0, "wind tile: GPU sample vs wind_tile_sample %.4f m/s", worst_wind);
+    CHECK(tile_varied > tile_samples / 4, "wind tile: %u / %u pivot samples differ from the mean wind (the tile was sampled)", tile_varied, tile_samples);
     CHECK(max_disp > 0.05, "WPO: the wind displaced at most %.3f m", max_disp);
+    CHECK(max_mv > 1e-3, "WPO velocity: the wind moved vertices by at most %.4f m between frames", max_mv);
+    vg_wind_shutdown(&wt);
     vg_displace_shutdown(&disp);
-    g_wind[0] = 0.8f, g_wind[1] = 0.6f, g_wind[2] = 6.0f, g_wind[3] = 0.3f;
+    g_wind[0] = 4.8f, g_wind[1] = 3.6f, g_wind[2] = 4.8f, g_wind[3] = 3.6f;
     g_time = 3.7f;
     vkDestroyPipeline(c->device, pipe, NULL);
     vkDestroyPipelineLayout(c->device, pl, NULL);
@@ -903,10 +988,10 @@ static void test_impostor_switch(void) {
         const VgInstance *in = vgeo_scene_instance(&g_scene, gi);
         float s[4];
         inst_sphere(in, s);
-        s[3] -= g_scene.meshes[in->mesh].max_wpo;
+        s[3] -= vg_wpo_margin(&g_scene.meshes[in->mesh], vgeo_half_to_float(in->scale_h));
         float size = vgeo_project_size(&v, s);
-        s[3] += g_scene.meshes[in->mesh].max_wpo;
-        bool cpu = vgeo_use_impostor(&v, &g_scene.meshes[in->mesh], s);
+        s[3] += vg_wpo_margin(&g_scene.meshes[in->mesh], vgeo_half_to_float(in->scale_h));
+        bool cpu = vgeo_use_impostor(&v, &g_scene.meshes[in->mesh], s, vg_wpo_margin(&g_scene.meshes[in->mesh], vgeo_half_to_float(in->scale_h)));
         both += imp[gi] && dag[gi];
         if (!imp[gi] && !dag[gi] && neither < 4)
             printf("  neither: instance %u at %.2f m, size %.3f px, cpu impostor %d, alpha %.3f\n", i, (double)inst_dist(in, &v), (double)vgeo_project_size(&v, s), cpu,

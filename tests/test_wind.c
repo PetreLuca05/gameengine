@@ -213,6 +213,23 @@ static void test_sources(void) {
     CHECK(w[2] > 3.0f, "wake pushes along the travel behind the vehicle (%.1f)", w[2]);
     wind_at(f, side, w);
     CHECK(fabsf(w[2]) < 0.5f, "wake is narrow (%.2f at 9 m to the side)", w[2]);
+    // a triggered gust front sweeps downwind at strength / 1.5 m/s
+    wind_init(f, 9);
+    field(f, 90.0f, 0.0f, 0.0f, 0.0);   // towards +X, calm
+    float start[3] = { -100, 0, 0 };
+    wind_add_gust(f, start, 15.0f, 20.0f, 300.0f);
+    float best_x[2] = { 0, 0 };
+    for (int k = 0; k < 2; k++) {
+        if (k) wind_sources_step(f, 4.0f);
+        else wind_sources_step(f, 1.0f);
+        float bw = 0;
+        for (int x = -100; x <= 200; x++) {
+            float q[3] = { (float)x, 0, 0 };
+            wind_at(f, q, w);
+            if (w[0] > bw) { bw = w[0]; best_x[k] = (float)x; }
+        }
+    }
+    CHECK(fabsf((best_x[1] - best_x[0]) / 4.0f - 10.0f) < 0.6f, "gust front moved %.1f m in 4 s (10 m/s)", best_x[1] - best_x[0]);
 }
 
 // ------------------------------------------------------------------ WPO model

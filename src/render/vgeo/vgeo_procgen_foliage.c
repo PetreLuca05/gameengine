@@ -1,4 +1,5 @@
 #include "vgeo_procgen_foliage.h"
+#include "foliage_wind.h"
 #include "vgeo_impostor.h"
 #include <math.h>
 #include <stdlib.h>
@@ -52,10 +53,19 @@ static void add_tri(VgFoliageMesh *m, u32 a, u32 b, u32 c, u16 mat) {
 // A card: 2 x 3 quads (12 triangles) spanning centre +- right * w/2, from base to base + up * h,
 // bent along `bend` (m at the top, quadratic), CCW seen from the front (normal side).
 typedef float (*WeightFn)(float u, float v, const float p[3]);
+static float g_card_phase;   // the card being added: its branch phase (G), from its base position
+static float pos_phase(const float p[3]) {
+    u32 h = (u32)(i32)floorf(p[0] * 7.0f) * 0x8DA6B343u ^ (u32)(i32)floorf(p[1] * 7.0f) * 0xD8163841u ^ (u32)(i32)floorf(p[2] * 7.0f) * 0xCB1AB31Fu;
+    h ^= h >> 15;
+    h *= 0x2C1B3C6Du;
+    h ^= h >> 12;
+    return (float)(h & 0xFFFFu) / 65536.0f;
+}
 static void add_card(VgFoliageMesh *m, const float base[3], const float right[3], const float up[3], float w, float h, const float bend[3],
                      const float nrm_blend[3], float blend, u16 mat, u32 (*color)(float u, float v, const float p[3])) {
     float n[3] = { right[1] * up[2] - right[2] * up[1], right[2] * up[0] - right[0] * up[2], right[0] * up[1] - right[1] * up[0] };
     u32 first = m->vertex_count;
+    g_card_phase = pos_phase(base);
     for (int j = 0; j <= 3; j++)
         for (int i = 0; i <= 2; i++) {
             float u = (float)i / 2.0f, v = (float)j / 3.0f, p[3], nn[3];
@@ -73,23 +83,25 @@ static void add_card(VgFoliageMesh *m, const float base[3], const float right[3]
         }
 }
 
+// Wind weights in the canonical layout (foliage_wind.h): R flutter (0 stem .. tip), G branch phase,
+// B branch bend weight (0 on the trunk). Trunk bending comes from the height (the material's H).
 static u32 tuft_color(float u, float v, const float p[3]) {
     (void)u;
     (void)p;
-    return rgba(powf(v, 1.5f), 0.0f, v, 1.0f);   // R bend (0 root, 1 tip), B flutter
+    return rgba(v, g_card_phase, 0.0f, 1.0f);   // blades: flutter towards the tip, no branches
 }
 
-static float g_bush_top;
 static u32 bush_trunk_color(float u, float v, const float p[3]) {
     (void)u;
     (void)v;
-    return rgba(p[1] / g_bush_top, 0.0f, 0.0f, 1.0f);   // trunk sway grows with height
+    (void)p;
+    return rgba(0.0f, 0.0f, 0.0f, 1.0f);   // the stem: main bending only
 }
 static u32 bush_leaf_color(float u, float v, const float p[3]) {
     (void)u;
     (void)v;
     float r = sqrtf(p[0] * p[0] + p[2] * p[2]);
-    return rgba(fminf(p[1] / g_bush_top, 1.0f), fminf(r / 0.7f, 1.0f), 1.0f, 1.0f);
+    return rgba(0.8f * v, g_card_phase, fminf(r / 0.7f, 1.0f), 1.0f);
 }
 
 static void gen_tuft(VgFoliageMesh *m) {
@@ -111,7 +123,6 @@ static void gen_bush(VgFoliageMesh *m) {
     // trunk: tapered tube, 6 sides x 4 rings (48 triangles), uv along it
     const int sides = 6, rings = 4;
     const float height = 0.8f;
-    g_bush_top = 1.6f;
     u32 first = m->vertex_count;
     for (int j = 0; j <= rings; j++)
         for (int i = 0; i <= sides; i++) {
@@ -161,13 +172,14 @@ static float g_tree_h = 1.0f, g_tree_r = 1.0f;
 static u32 tree_bark_color(float u, float v, const float p[3]) {
     (void)u;
     (void)v;
-    return rgba(fminf(fmaxf(p[1], 0.0f) / g_tree_h, 1.0f), 0.0f, 0.0f, 1.0f);   // trunk sway grows with height
+    float r = sqrtf(p[0] * p[0] + p[2] * p[2]);   // limbs bend with their distance from the trunk axis
+    return rgba(0.0f, 0.0f, fminf(r / g_tree_r, 1.0f), 1.0f);
 }
 static u32 tree_leaf_color(float u, float v, const float p[3]) {
     (void)u;
     (void)v;
     float r = sqrtf(p[0] * p[0] + p[2] * p[2]);
-    return rgba(fminf(fmaxf(p[1], 0.0f) / g_tree_h, 1.0f), fminf(r / g_tree_r, 1.0f), 1.0f, 1.0f);
+    return rgba(0.8f * v, g_card_phase, fminf(r / g_tree_r, 1.0f), 1.0f);
 }
 
 // Tapered tube from a to b (radius r0 -> r1), sides x rings, uv (around, along in m); CCW outwards.
@@ -367,12 +379,13 @@ u32 vgeo_foliage_materials(int kind, VgMaterial out[2]) {
         l->color[0] = l->color[1] = l->color[2] = 1.0f;
         l->flags = VGM_FOLIAGE | VGM_MASKED | VGM_TWO_SIDED | VGM_DITHER_FADE | MAT_TEXTURED_FLAG;
         l->alpha_cutoff = 0.5f;
+        VgWindParams w;
+        vgeo_wind_defaults(&w, VGWP_TREE, kind == VG_FOLIAGE_PINE ? 14.0f : kind == VG_FOLIAGE_BROADLEAF ? 11.0f : 9.0f);
+        if (kind == VG_FOLIAGE_DEAD) w.leaf_stiffness = 0.0f, w.branch_stiffness = 0.15f;   // bare: stiffer, nothing to flutter
+        if (kind == VG_FOLIAGE_PINE) w.branch_stiffness = 0.35f;   // long drooping branch cards
         for (int i = 0; i < 2; i++) {
             out[i].wpo = WPO_TREE;
-            out[i].wpo_params[0] = kind == VG_FOLIAGE_DEAD ? 0.06f : 0.12f;   // trunk sway (m at the top)
-            out[i].wpo_params[1] = kind == VG_FOLIAGE_DEAD ? 0.04f : 0.12f;   // branch bounce
-            out[i].wpo_params[2] = kind == VG_FOLIAGE_DEAD ? 0.0f : 0.03f;    // leaf flutter
-            out[i].wpo_params[3] = 14.0f;
+            vgeo_wind_pack(&w, out[i].wpo_params, out[i].wind_params);
             out[i].fade_start = 850.0f;
             out[i].fade_end = 1100.0f;
             out[i].shadow_max_dist = 70.0f;
@@ -387,12 +400,11 @@ u32 vgeo_foliage_materials(int kind, VgMaterial out[2]) {
         l->color[0] = l->color[1] = l->color[2] = 1.0f;   // the leaf texture carries the colour
         l->flags = VGM_FOLIAGE | VGM_MASKED | VGM_TWO_SIDED | VGM_DITHER_FADE | MAT_TEXTURED_FLAG;
         l->alpha_cutoff = 0.5f;
+        VgWindParams w;
+        vgeo_wind_defaults(&w, VGWP_BUSH, 1.6f);
         for (int i = 0; i < 2; i++) {
-            out[i].wpo = WPO_TREE;
-            out[i].wpo_params[0] = 0.05f;   // trunk sway (m)
-            out[i].wpo_params[1] = 0.06f;   // branch bounce
-            out[i].wpo_params[2] = 0.02f;   // leaf flutter
-            out[i].wpo_params[3] = 14.0f;   // full wind (m/s)
+            out[i].wpo = WPO_BUSH | WPO_DISPLACE;   // pushed through: the displacement buffer first, then the wind
+            vgeo_wind_pack(&w, out[i].wpo_params, out[i].wind_params);
             out[i].fade_start = 100.0f;
             out[i].fade_end = 150.0f;
             out[i].shadow_max_dist = 40.0f;
@@ -404,17 +416,14 @@ u32 vgeo_foliage_materials(int kind, VgMaterial out[2]) {
     g->flags = VGM_FOLIAGE | VGM_MASKED | VGM_TWO_SIDED | VGM_DITHER_FADE | MAT_TEXTURED_FLAG;
     g->alpha_cutoff = 0.5f;
     g->wpo = WPO_GRASS | WPO_DISPLACE;
-    g->wpo_params[0] = 0.15f;   // bend at full wind (m)
-    g->wpo_params[1] = 0.6f;    // blade height (m)
-    g->wpo_params[2] = 0.6f;    // sway (Hz)
-    g->wpo_params[3] = 12.0f;   // full wind (m/s)
+    VgWindParams w;
+    vgeo_wind_defaults(&w, VGWP_GRASS, kind == VG_FOLIAGE_CROP ? 1.45f : 0.65f);   // blade height (the main bend's H)
+    if (kind == VG_FOLIAGE_CROP) w.trunk_stiffness = 0.35f, w.main_freq = 0.28f, w.max_bend_deg = 25.0f;   // heavy ears: slower, stiffer
+    vgeo_wind_pack(&w, g->wpo_params, g->wind_params);
     g->fade_start = 40.0f;
     g->fade_end = 65.0f;
     g->shadow_max_dist = 15.0f;
     if (kind == VG_FOLIAGE_CROP) {
-        g->wpo_params[0] = 0.22f;
-        g->wpo_params[1] = 1.3f;
-        g->wpo_params[2] = 0.45f;
         g->fade_start = 60.0f;
         g->fade_end = 95.0f;
         g->shadow_max_dist = 20.0f;

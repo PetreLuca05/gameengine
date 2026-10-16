@@ -2,9 +2,11 @@
 // Test-only kernel (tests/test_vgeo_foliage.c): the shared vertex path of every raster / shadow /
 // resolve stage (vg_vertex_world: instance transform + the material's WPO snippet, wind / time / the
 // displacement buffer of the view) on a list of (instance, page slot << 12 | cluster, vertex):
-// out[3 i] displaced world position, [3 i + 1] the cluster's world culling sphere, [3 i + 2] the
-// instance's world mesh sphere (both WPO-inflated, vg_world_sphere), [3 i] w = the material's WPO id.
-// a[0] = item count.
+// out[7 i] displaced world position, [7 i + 1] the cluster's world culling sphere, [7 i + 2] the
+// instance's world mesh sphere (both WPO-inflated, vg_world_sphere), [7 i] w = the material's WPO id,
+// [7 i + 3] the previous frame's displaced position (velocity), [7 i + 4] / [7 i + 6] the wind field
+// at the pivot this frame / last frame (vg_wind_at: the tile sample), [7 i + 5] the wind-bent world
+// normal (vg_vertex_normal_world). a[0] = item count.
 #extension GL_GOOGLE_include_directive : require
 #define VG_COMPUTE
 #include "vgeo_common.glsl"
@@ -21,7 +23,11 @@ void main() {
     VgMesh m = meshes[x.mesh];
     VgClusterRef r = vg_cluster_ref(it.y);
     VgClusterData c = vg_cluster(r.slot, r.index);
-    outv[i * 3u] = vec4(vg_vertex_world(x, c, m, it.z), float(materials[m.material_base + c.material].wpo));
-    outv[i * 3u + 1u] = vg_world_sphere(x, c.sphere);
-    outv[i * 3u + 2u] = vg_world_sphere(x, m.sphere);
+    outv[i * 7u] = vec4(vg_vertex_world(x, c, m, it.z), float(materials[m.material_base + c.material].wpo));
+    outv[i * 7u + 1u] = vg_world_sphere(x, c.sphere);
+    outv[i * 7u + 2u] = vg_world_sphere(x, m.sphere);
+    outv[i * 7u + 3u] = vec4(vg_vertex_world_ex(x, c, m, it.z, true), 0.0);
+    outv[i * 7u + 4u] = vg_wind_at(x.pos.xz, false);
+    outv[i * 7u + 5u] = vec4(vg_vertex_normal_world(x, c, m, it.z), 0.0);
+    outv[i * 7u + 6u] = vg_wind_at(x.pos.xz, true);
 }

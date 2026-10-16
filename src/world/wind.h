@@ -30,6 +30,7 @@ typedef enum WindSourceKind {
     WIND_SRC_BLAST,                  // explosion: a ring blowing outwards, expanding and decaying
     WIND_SRC_DOWNWASH,               // helicopter (stub): steady radial push under it while alive
     WIND_SRC_WAKE,                   // vehicle wake: a push along dir in a capsule behind pos
+    WIND_SRC_GUST,                   // a triggered gust: a front band (radius = half width) sweeping along dir from pos at strength / 1.5 m/s
 } WindSourceKind;
 
 typedef struct WindSource {
@@ -80,6 +81,8 @@ float wind_gust_front(const WindField *f, const float pos[3], float *factor);
 void wind_add_blast(WindField *f, const float pos[3], float radius, float strength);
 void wind_add_downwash(WindField *f, const float pos[3], float radius, float strength, float life);
 void wind_add_wake(WindField *f, const float pos[3], const float vel[3], float radius);
+// A gust front starting at pos (put it upwind), sweeping along the wind for `range` m (tuning / tests).
+void wind_add_gust(WindField *f, const float pos[3], float strength, float width, float range);
 // Ages the sources (dt s) and drops the dead ones.
 void wind_sources_step(WindField *f, float dt);
 

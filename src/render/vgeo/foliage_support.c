@@ -1,5 +1,6 @@
 #include "foliage_support.h"
 #include "vgeo_impostor.h"
+#include "foliage_wind.h"
 #include "core/log.h"
 #include <float.h>
 #include <math.h>
@@ -12,42 +13,23 @@
 
 static float clamp01(float x) { return x < 0 ? 0 : (x > 1 ? 1 : x); }
 
-float vgeo_wpo_max(u32 wpo, const float prm[4]) {
+float vgeo_wpo_max(const VgMaterial *mt) {
     float m = 0;
-    if ((wpo & 0xFFu) == WPO_GRASS) m = 1.41421356f * fabsf(prm[0]);
-    else if ((wpo & 0xFFu) == WPO_TREE) m = fabsf(prm[0]) + fabsf(prm[1]) + 1.5f * fabsf(prm[2]);
-    if (wpo & WPO_DISPLACE) m += 1.1180340f * VG_DISPLACE_MAX;
+    u32 id = mt->wpo & 0xFFu;
+    if (id >= WPO_GRASS && id <= WPO_BUSH) {
+        float l[3];
+        vgeo_wind_layer_max(mt->wpo_params, mt->wind_params, l);
+        m = l[0] + l[1] + l[2];
+    }
+    if (mt->wpo & WPO_DISPLACE) m += 1.1180340f * VG_DISPLACE_MAX;
     return m > 0 ? m * 1.0001f + 1e-5f : 0.0f;   // f32 slack of the GPU evaluation
 }
 
-void vgeo_wpo_eval(u32 wpo, const float prm[4], const float p[3], const float ip[3], const float col[4], float phase, const float wind[4], float t,
-                   const float disp[2], float out[3]) {
+void vgeo_wpo_eval(const VgMaterial *mt, const VgWindVertex *v, const float wind[4], float t, u32 layers, const float disp[2], float out[3], float n_out[3]) {
     out[0] = out[1] = out[2] = 0;
-    float s = clamp01(wind[2] / fmaxf(prm[3], 1e-3f));
-    u32 id = wpo & 0xFFu;
-    if (id == WPO_GRASS) {
-        float osc = 0.65f + 0.35f * sinf(TAU * (prm[2] * t + phase) + ip[0] * 0.37f + ip[2] * 0.21f);
-        float b = prm[0] * clamp01(col[0]) * s * osc;
-        out[0] = wind[0] * b;
-        out[2] = wind[1] * b;
-        out[1] = -fminf(0.5f * b * b / fmaxf(prm[1], 0.05f), b);
-    } else if (id == WPO_TREE) {
-        float ph = TAU * phase;
-        float dir[3] = { wind[0], 0, wind[1] }, perp[3] = { -wind[1], 0, wind[0] };
-        float sway = prm[0] * clamp01(col[0]) * s * (0.6f + 0.4f * sinf(t * 0.9f + ph));
-        float branch = prm[1] * clamp01(col[1]) * s * sinf(t * 2.3f + ph * 1.7f + p[0] * 0.5f + p[1] * 0.3f + p[2] * 0.4f);
-        float fl[3] = { sinf(t * 7.1f + p[0] * 3.1f + ph), 0.5f * sinf(t * 8.3f + p[1] * 2.7f + ph), sinf(t * 6.7f + p[2] * 3.3f + ph) };
-        float flutter = prm[2] * clamp01(col[2]) * (0.25f + 0.75f * s);
-        for (int k = 0; k < 3; k++) out[k] = dir[k] * sway + (dir[k] * 0.6f + perp[k] * 0.8f) * branch + fl[k] * flutter;
-    }
-    if ((wpo & WPO_DISPLACE) && disp) {
-        float d[2] = { disp[0], disp[1] }, l = sqrtf(d[0] * d[0] + d[1] * d[1]);
-        if (l > VG_DISPLACE_MAX) { d[0] *= VG_DISPLACE_MAX / l; d[1] *= VG_DISPLACE_MAX / l; }
-        float w = clamp01(col[0]);
-        out[0] += d[0] * w;
-        out[1] += -0.5f * fminf(l, VG_DISPLACE_MAX) * w;
-        out[2] += d[1] * w;
-    }
+    if (n_out) memcpy(n_out, v->n, 12);
+    if (mt->wpo == WPO_NONE) return;
+    vgeo_wind_eval(mt->wpo_params, mt->wind_params, v, wind, t, layers, (mt->wpo & WPO_DISPLACE) ? disp : NULL, out, n_out);
 }
 
 // ------------------------------------------------------------------ instances
@@ -67,8 +49,8 @@ float vgeo_project_size(const VgViewGpu *v, const float s[4]) {
     return 2.0f * s[3] * v->proj_scale / d;
 }
 
-bool vgeo_use_impostor(const VgViewGpu *v, const VgMesh *m, const float s[4]) {
-    float t[4] = { s[0], s[1], s[2], s[3] - m->max_wpo };   // the mesh's own size, as vg_use_impostor
+bool vgeo_use_impostor(const VgViewGpu *v, const VgMesh *m, const float s[4], float wpo) {
+    float t[4] = { s[0], s[1], s[2], s[3] - wpo };   // the mesh's own size, as vg_use_impostor
     return m->impostor != ~0u && v->foliage[3] > 0.0f && !(v->flags & VGV_ORTHO) && vgeo_project_size(v, t) < v->foliage[3];
 }
 
@@ -460,4 +442,116 @@ void vg_displace_view(const VgDisplace *d, VgViewGpu *v) {
     v->disp[2] = VG_DISP_TEXEL;
     v->disp[3] = 1.0f;
     v->disp_tex = d->tex_index;
+}
+
+// ------------------------------------------------------------------ wind field tile
+
+bool vg_wind_init(VgWindTex *w, const VgContext *ctx, VgTextures *t) {
+    memset(w, 0, sizeof(*w));
+    w->ctx = ctx;
+    w->tex = t;
+    VkCommandPool pool;
+    VkCommandBuffer cmd = vgc_begin_once(ctx, &pool);
+    for (int k = 0; k < VG_WIND_RING; k++) {
+        VkImageCreateInfo ii = { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
+        ii.imageType = VK_IMAGE_TYPE_2D;
+        ii.format = VK_FORMAT_R16G16B16A16_SFLOAT;
+        ii.extent.width = ii.extent.height = VG_WIND_TEX;
+        ii.extent.depth = 1;
+        ii.mipLevels = ii.arrayLayers = 1;
+        ii.samples = VK_SAMPLE_COUNT_1_BIT;
+        ii.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+        VmaAllocationCreateInfo ai = { 0 };
+        ai.usage = VMA_MEMORY_USAGE_AUTO;
+        if (vmaCreateImage(ctx->vma, &ii, &ai, &w->image[k], &w->alloc[k], NULL) != VK_SUCCESS) { vgc_submit_wait(ctx, pool, cmd); return false; }
+        VkImageViewCreateInfo vi = { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+        vi.image = w->image[k];
+        vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        vi.format = ii.format;
+        vi.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        vi.subresourceRange.levelCount = vi.subresourceRange.layerCount = 1;
+        if (vkCreateImageView(ctx->device, &vi, NULL, &w->view[k]) != VK_SUCCESS) { vgc_submit_wait(ctx, pool, cmd); return false; }
+        VkImageMemoryBarrier2 b = { VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2 };
+        b.dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+        b.dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+        b.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        b.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+        b.srcQueueFamilyIndex = b.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        b.image = w->image[k];
+        b.subresourceRange = vi.subresourceRange;
+        VkDependencyInfo dep = { VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+        dep.imageMemoryBarrierCount = 1;
+        dep.pImageMemoryBarriers = &b;
+        vkCmdPipelineBarrier2(cmd, &dep);
+        VkClearColorValue zero = { { 0, 0, 0, 0 } };
+        vkCmdClearColorImage(cmd, w->image[k], VK_IMAGE_LAYOUT_GENERAL, &zero, 1, &vi.subresourceRange);
+        b.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+        b.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+        b.dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+        b.dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT;
+        b.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+        vkCmdPipelineBarrier2(cmd, &dep);
+        w->tex_index[k] = vg_tex_alloc(t);
+        if (!w->tex_index[k]) { vgc_submit_wait(ctx, pool, cmd); return false; }
+        vg_tex_set(t, w->tex_index[k], w->view[k], t->repeat, VK_IMAGE_LAYOUT_GENERAL);   // REPEAT: the toroidal window
+    }
+    vgc_submit_wait(ctx, pool, cmd);
+    for (u32 f = 0; f < ctx->frames; f++) w->staging[f] = vgc_buffer(ctx, VG_WIND_TEX * VG_WIND_TEX * 8, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VGM_UPLOAD);
+    w->ok = true;
+    return true;
+}
+
+void vg_wind_shutdown(VgWindTex *w) {
+    if (!w->ctx) return;
+    vkDeviceWaitIdle(w->ctx->device);
+    for (int k = 0; k < VG_WIND_RING; k++) {
+        if (w->tex_index[k]) vg_tex_release(w->tex, w->tex_index[k]);
+        if (w->view[k]) vkDestroyImageView(w->ctx->device, w->view[k], NULL);
+        if (w->image[k]) vmaDestroyImage(w->ctx->vma, w->image[k], w->alloc[k]);
+    }
+    for (u32 f = 0; f < VG_MAX_FRAMES; f++) vgc_buffer_free(w->ctx, &w->staging[f]);
+    memset(w, 0, sizeof(*w));
+}
+
+void vg_wind_record(VgWindTex *w, VkCommandBuffer cmd, u32 frame, const u16 *texels, i32 ox, i32 oz, float texel) {
+    if (!w->ok || frame >= w->ctx->frames) return;
+    memcpy(w->tile_prev, w->tile, 16);
+    if (!texels) { memset(w->tile, 0, 16); return; }
+    u32 k = (w->cur + 1) % VG_WIND_RING;
+    memcpy(w->staging[frame].mapped, texels, VG_WIND_TEX * VG_WIND_TEX * 8);
+    vmaFlushAllocation(w->ctx->vma, w->staging[frame].alloc, 0, VK_WHOLE_SIZE);
+    // ring[k] was last read 3 frames ago (finished: 2 in flight); order after any earlier access anyway
+    VkMemoryBarrier2 mb = { VK_STRUCTURE_TYPE_MEMORY_BARRIER_2 };
+    mb.srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+    mb.dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+    mb.dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+    VkDependencyInfo dep = { VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+    dep.memoryBarrierCount = 1;
+    dep.pMemoryBarriers = &mb;
+    vkCmdPipelineBarrier2(cmd, &dep);
+    VkBufferImageCopy r;
+    memset(&r, 0, sizeof(r));
+    r.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    r.imageSubresource.layerCount = 1;
+    r.imageExtent.width = r.imageExtent.height = VG_WIND_TEX;
+    r.imageExtent.depth = 1;
+    vkCmdCopyBufferToImage(cmd, w->staging[frame].buffer, w->image[k], VK_IMAGE_LAYOUT_GENERAL, 1, &r);
+    mb.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+    mb.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+    mb.dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+    mb.dstAccessMask = VK_ACCESS_2_SHADER_SAMPLED_READ_BIT;
+    vkCmdPipelineBarrier2(cmd, &dep);
+    w->cur = k;
+    w->tile[0] = (float)ox * texel;
+    w->tile[1] = (float)oz * texel;
+    w->tile[2] = texel;
+    w->tile[3] = 1.0f;
+}
+
+void vg_wind_view(const VgWindTex *w, VgViewGpu *v) {
+    if (!w->ok) return;
+    memcpy(v->wind_tile, w->tile, 16);
+    memcpy(v->wind_tile_prev, w->tile_prev, 16);
+    v->wind_tex = w->tex_index[w->cur];
+    v->wind_tex_prev = w->tex_index[(w->cur + VG_WIND_RING - 1) % VG_WIND_RING];
 }

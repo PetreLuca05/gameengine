@@ -1752,6 +1752,20 @@ void vehicles_frame(World *w, vec3 cam_pos) {
         place_occupants(w, v);
         present(w, v, cam_pos, dt, &spots);
     }
+    // wakes in the wind field (docs/FOLIAGE_WIND.md): grass and bushes bend behind a moving vehicle
+    static vec3 prev[MAX_VEH];
+    static bool have_prev[MAX_VEH];
+    static float wake_t;
+    wake_t += dt;
+    bool emit = wake_t >= 0.1f;
+    if (emit) wake_t = 0;
+    for (int i = 0; i < MAX_VEH; i++) {
+        if (!s->v[i].used || !ent_valid(w, s->v[i].ent)) { have_prev[i] = false; continue; }
+        vec3 p = w->xf[ENT_INDEX(s->v[i].ent)].pos;
+        if (have_prev[i] && emit && dt > 0 && v3_dist(p, cam_pos) < 150.0f) wind_game_wake(p, v3_scale(v3_sub(p, prev[i]), 1.0f / 0.1f), 2.5f);
+        if (emit || !have_prev[i]) prev[i] = p;
+        have_prev[i] = true;
+    }
 }
 
 // ------------------------------------------------------------------ HUD

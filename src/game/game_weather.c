@@ -140,7 +140,7 @@ WeatherLocal weather_at(World *w, vec3 pos) {
     l.exposed = weather_exposure(w, pos);
     l.rain = precip_rain(&WX.cur) * l.exposed;
     l.snow = precip_snow(&WX.cur) * l.exposed;
-    l.wind = v3_scale(WX.wind, 0.25f + 0.75f * l.exposed);
+    l.wind = v3_scale(wind_game_at(pos), 0.25f + 0.75f * l.exposed);
     l.temperature = WX.cur.v[WP_TEMPERATURE];
     l.wetness = w->weather.wetness * l.exposed;
     l.snow_cover = w->weather.snow * l.exposed;
@@ -398,6 +398,8 @@ static void lens_frame(World *w, const RenderCamera *cam, const Player *lp, floa
     vec3 flat = v3_norm(v3(fwd.x, 0, fwd.z));
     in.forward_speed = v3_dot(vel, flat);
     in.side_speed = v3_dot(vel, right_from_yaw(cam->yaw)) + (WX.lens_init ? (cam->yaw - WX.prev_yaw) / fmaxf(dt, 1e-3f) * -2.0f : 0.0f);
+    // the wind drives the drops sideways across the lens (its component along the camera's right)
+    in.side_speed += v3_dot(WX.wind, right_from_yaw(cam->yaw)) * 0.35f * WX.exposed_cam;
     in.side_speed = clampf(in.side_speed, -20.0f, 20.0f);
     in.temperature = WX.cur.v[WP_TEMPERATURE];
     in.wiped = !fp;
@@ -412,6 +414,7 @@ void weather_frame(World *w, const RenderCamera *cam, const Player *lp) {
     float dt = fminf((float)g_engine.frame_dt, 0.1f);
     if (!weather_active(w)) {
         WX.have = false;
+        wind_game_frame(NULL, now_tick(w) * SIM_DT, cam->pos, dt, &rw);   // foliage still moves: a light breeze
         render_set_weather(&rw);
         audio_loop_set("rain_loop", 0);
         audio_loop_set("wind_loop", 0);
@@ -443,8 +446,10 @@ void weather_frame(World *w, const RenderCamera *cam, const Player *lp) {
     WX.have = true;
     WX.rain = precip_rain(&WX.cur);
     WX.snowfall = precip_snow(&WX.cur);
+    // the wind field (game_wind.c, docs/FOLIAGE_WIND.md): gust fronts, turbulence, local sources
     WeatherWind wind = weather_wind(&WX.cur, tick * SIM_DT);
-    WX.wind = v3_scale(wind.dir, wind.strength);
+    wind_game_frame(&WX.cur, tick * SIM_DT, cam->pos, dt, &rw);
+    WX.wind = rw.wind;
     WX.gust = wind.gust;
     WX.exposed_cam = weather_exposure(w, cam->pos);
     update_events();
@@ -468,9 +473,7 @@ void weather_frame(World *w, const RenderCamera *cam, const Player *lp) {
     rw.rain = WX.rain;
     rw.snowfall = WX.snowfall;
     rw.lightning = WX.flash;
-    rw.wind = WX.wind;
     rw.gust = WX.gust;
-    rw.time = (float)fmod(tick * SIM_DT, 3600.0);
     rw.precip_quality = quality();
     rw.occlusion_update = upd;
     rw.occlusion_center = WX.occl_center;

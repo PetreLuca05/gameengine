@@ -207,6 +207,7 @@ void game_render_init(void) {
     sights_register();
     daynight_register();
     weather_register();
+    wind_game_register();
     foliage_register();
     vehicles_register();
     flesh_range_register();
@@ -778,7 +779,7 @@ void game_render(void) {
         env.fog_color = v3_scale(env.fog_color, 0.05f);
     }
     render_set_environment(&env);
-    vfx_game_set_environment(env.sun_intensity, v3(0.6f, 0.0f, 0.25f));
+    vfx_game_set_environment(env.sun_intensity, wind_game_at(cam.pos));   // particles drift with the local wind (gusts)
 
     vec3 fwd = dir_from_angles(cam.yaw, cam.pitch);
     vehicles_frame(w, cam.pos);
@@ -823,6 +824,7 @@ void game_render(void) {
     draw_debug(w, cam.pos);
     recoil_debug_draw(cam.pos);
     anim_debug_draw();
+    wind_game_draw_debug(cam.pos);
     vec3 right = right_from_yaw(cam.yaw);
     vec3 up = v3_cross(right, fwd);
     dbg_submit((float)g_engine.frame_dt, cam.pos, right, up);
@@ -834,6 +836,7 @@ void game_render(void) {
     daynight_draw();
     weather_draw();
     flesh_range_draw();
+    wind_game_draw_panel();
     scene_draw();
     game_post_draw_overlay();
     game_fidelity_draw();

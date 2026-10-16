@@ -65,7 +65,7 @@ void vg_instance(uint inst, uint out_region) {
         return;
     }
     atomicAdd(ctr.n[pc.pass == 1u ? VGN_INST_VIS : VGN_INST_P2], 1u);
-    if (vg_use_impostor(m, s)) {
+    if (vg_use_impostor(m, s, x.wpo)) {
         uint cap = V.caps0.z, k = vg_append(VGN_SW, cap);
         if (k == 0xFFFFFFFFu) return;
         visible[cap + k] = uvec2(inst, VG_IMPOSTOR_ENTRY);

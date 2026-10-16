@@ -22,6 +22,11 @@
 
 // Wind layers (VgViewGpu.wind_misc.z, from r_foliage_wind / the fidelity tier and the debug solo).
 enum VgWindLayer { VGW_MAIN = 1u << 0, VGW_DETAIL = 1u << 1, VGW_FLUTTER = 1u << 2, VGW_NORMALS = 1u << 3, VGW_ALL = 15u };
+// Debug views of the resolve (VgViewGpu.wind_debug): the canonical wind channels as the albedo, the
+// main bend amount (black .. red at max bend).
+enum VgWindDebug { VGWD_NONE, VGWD_CHANNELS, VGWD_BEND };
+// Fidelity tier (r_foliage_wind 0..3) -> layers: 0 none, 1 main, 2 + detail, 3 + flutter + normals.
+DG_INLINE u32 vgeo_wind_tier_layers(int tier) { return tier <= 0 ? 0u : tier == 1 ? VGW_MAIN : tier == 2 ? (VGW_MAIN | VGW_DETAIL) : VGW_ALL; }
 
 // Per-asset parameters (JSON "wind": {...}). The three *_stiffness values are each layer's gain
 // (linear in the displacement: the names follow the Crysis "stiffness" channels; higher = moves more).
