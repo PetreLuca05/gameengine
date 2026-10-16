@@ -20,6 +20,7 @@ void vg_expand(uint inst, VgXf x, VgMesh m, VgNode nd, uint out_region) {
                 if (k != 0xFFFFFFFFu) requests[k] = uvec2(m.page_base + gr.page, floatBitsToUint(min(px, 1e30)));
                 continue;
             }
+            page_stamp[slot] = V.counts.w;   // used this frame (streaming LRU; every writer stores the same value)
             uint n = gr.first_count >> 16;
             uint k0 = atomicAdd(ctr.n[VGN_GROUPS0 + greg], n);
             for (uint c = 0u; c < n; c++) {

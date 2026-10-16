@@ -3,7 +3,7 @@
 #include <stddef.h>
 #include <string.h>
 
-#define NBIND 20   // 0-15 buffers, 16-17 Hi-Z samplers, 18 visibility buffer, 19 materials
+#define NBIND 21   // 0-15 buffers, 16-17 Hi-Z samplers, 18 visibility buffer, 19 materials, 20 page stamps
 
 static const VkBufferUsageFlags SSBO = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
 
@@ -45,7 +45,7 @@ static bool create_layouts(VgCuller *c) {
     if (vkCreatePipelineLayout(d, &pi, NULL, &c->hiz_pl) != VK_SUCCESS) return false;
     u32 frames = c->ctx->frames;
     VkDescriptorPoolSize ps[3] = {
-        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 18 * VG_MAX_VIEWS * frames + 16 * frames },
+        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 19 * VG_MAX_VIEWS * frames + 16 * frames },
         { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2 * VG_MAX_VIEWS * frames + 16 * frames },
         { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 7 * 16 * frames },
     };
@@ -209,7 +209,8 @@ static void write_set(VgCuller *c, VgViewRes *v, u32 f, VkImageView prev, VkImag
         w[i].dstBinding = i;
         w[i].descriptorCount = 1;
         if (i < 16 || i >= 18) {
-            bi[i].buffer = i < 16 ? bufs[i]->buffer : i == 18 ? (c->vis_buffer ? c->vis_buffer : c->dummy_buf.buffer) : (s->b_materials.buffer ? s->b_materials.buffer : c->dummy_buf.buffer);
+            bi[i].buffer = i < 16 ? bufs[i]->buffer : i == 18 ? (c->vis_buffer ? c->vis_buffer : c->dummy_buf.buffer) : i == 19 ? (s->b_materials.buffer ? s->b_materials.buffer : c->dummy_buf.buffer)
+                                                                  : (s->b_stamps.buffer ? s->b_stamps.buffer : c->dummy_buf.buffer);
             bi[i].offset = 0;
             bi[i].range = VK_WHOLE_SIZE;
             w[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
@@ -322,6 +323,7 @@ void vg_cull_record_pass1(VgCuller *c, VkCommandBuffer cmd, u32 frame, u32 slot,
     g.cell_count = s->cell_count;
     g.instance_count = s->instance_count;
     g.max_depth = s->max_depth;
+    g.frame = s->stamp_frame;
     g.cap_nodes = c->caps.nodes;
     g.cap_groups = c->caps.groups;
     g.cap_visible = c->caps.visible;

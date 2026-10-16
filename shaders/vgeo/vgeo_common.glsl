@@ -15,7 +15,7 @@ struct VgViewGpu {
     vec4 viewport;           // w, h, 1 / w, 1 / h
     vec4 hiz_prev;           // w, h, mips, valid
     vec4 hiz_cur;
-    uvec4 counts;            // cell_count, instance_count, max_depth, -
+    uvec4 counts;            // cell_count, instance_count, max_depth, frame (streaming stamp)
     uvec4 caps0;             // nodes (per region), groups (per region), visible (per list), occluded
     uvec4 caps1;             // cells (per region), instances, requests, -
     mat4 raster_view_proj;   // the view the visible clusters are rasterised with (main view: jittered)
@@ -98,6 +98,8 @@ layout(set = VG_SET, binding = 15) buffer Requests { uvec2 requests[]; };
 layout(set = VG_SET, binding = 16) uniform sampler2D hiz_prev;
 layout(set = VG_SET, binding = 17) uniform sampler2D hiz_cur;
 layout(set = VG_SET, binding = 19, scalar) readonly buffer Materials { VgMaterial materials[]; };
+// Streaming: per pool slot, the last frame (counts.w) a leaf emitted one of its groups (LRU).
+layout(set = VG_SET, binding = 20) buffer PageStamps { uint page_stamp[]; };
 // Visibility buffer (binding 18, see vgeo_gpu.h): define VG_VIS before including (needs int64).
 #ifdef VG_VIS
 layout(set = VG_SET, binding = 18) coherent buffer VisBuffer { uint64_t vis[]; };

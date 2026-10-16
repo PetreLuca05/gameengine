@@ -136,7 +136,7 @@ typedef struct VgViewGpu {
     float viewport[4];               // w, h, 1 / w, 1 / h
     float hiz_prev[4];               // mip 0 w, h, mip count, valid
     float hiz_cur[4];
-    u32 cell_count, instance_count, max_depth, pad0;
+    u32 cell_count, instance_count, max_depth, frame;   // frame: streaming stamp (VgScene.stamp_frame)
     u32 cap_nodes, cap_groups, cap_visible, cap_occluded;
     u32 cap_cells, cap_instances, cap_requests, pad1;
     float raster_view_proj[16];      // the view the visible clusters are rasterised with (main view: jittered)
