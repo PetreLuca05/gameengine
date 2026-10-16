@@ -1033,7 +1033,7 @@ set 4 is gone.
 - 0 validation messages.
 
 In game (devroom, `--validation`: 0 messages):
-- `foliage_check` behind the foliage yard wall: 31 133 foliage instances in the frustum, 1 visible: **100 %
+- `foliage_check` behind the foliage yard wall: 11 790 foliage instances in the frustum, 1 visible: **99.99 %
   rejected**. The pass-1 Hi-Z alone did this before the occluder merge; pass 2 brought them back.
 - `foliage_check` density, occlusion off, 600 frames of a static camera: 0 frames differ.
 - **Streaming:** `map streaming` with `world_foliage_test 1`, a 2080 m noclip flight: 77 chunks / 118k instances
