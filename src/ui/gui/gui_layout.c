@@ -215,14 +215,37 @@ static void get_str(const cJSON *o, const char *key, char *dst, size_t size) {
     if (cJSON_IsString(v)) dg_strcpy(dst, size, v->valuestring);
 }
 
+static const LayoutToken *g_tokens;
+static int g_token_count;
+static char g_bad_token[40];   // the first unknown "@token" of the current parse
+
+void gui_layout_set_tokens(const LayoutToken *tokens, int count) {
+    g_tokens = tokens;
+    g_token_count = count;
+}
+
+bool gui_layout_token(const char *name, float *out) {
+    for (int i = 0; i < g_token_count; i++)
+        if (!strcmp(g_tokens[i].name, name)) { *out = g_tokens[i].value; return true; }
+    return false;
+}
+
+// A number, or "@token" (theme.json "layout").
 static float get_num(const cJSON *o, const char *key, float def) {
     const cJSON *v = cJSON_GetObjectItemCaseSensitive(o, key);
+    if (cJSON_IsString(v) && v->valuestring[0] == '@') {
+        float t;
+        if (gui_layout_token(v->valuestring + 1, &t)) return t;
+        if (!g_bad_token[0]) dg_strcpy(g_bad_token, sizeof(g_bad_token), v->valuestring);
+        return def;
+    }
     return cJSON_IsNumber(v) ? (float)v->valuedouble : def;
 }
 
 bool gui_layout_parse(const char *json, LayoutNode *out, int max, int *count, char *err, int err_size) {
     *count = 0;
     if (err && err_size) err[0] = 0;
+    g_bad_token[0] = 0;
     cJSON *root = cJSON_Parse(json);
     if (!root) { if (err) snprintf(err, (size_t)err_size, "JSON syntax error near: %.40s", cJSON_GetErrorPtr() ? cJSON_GetErrorPtr() : "?"); return false; }
     const cJSON *nodes = cJSON_GetObjectItemCaseSensitive(root, "nodes");
@@ -271,8 +294,16 @@ bool gui_layout_parse(const char *json, LayoutNode *out, int max, int *count, ch
         for (int k = 0; k < 4; k++) n->pad[k] = pd;
         const cJSON *pa = cJSON_GetObjectItemCaseSensitive(o, "pad");
         if (cJSON_IsArray(pa) && cJSON_GetArraySize(pa) == 4)
-            for (int k = 0; k < 4; k++) n->pad[k] = (float)cJSON_GetArrayItem(pa, k)->valuedouble;
+            for (int k = 0; k < 4; k++) {
+                const cJSON *pv = cJSON_GetArrayItem(pa, k);
+                float t = 0;
+                if (cJSON_IsString(pv) && pv->valuestring[0] == '@') {
+                    if (gui_layout_token(pv->valuestring + 1, &t)) n->pad[k] = t;
+                    else if (!g_bad_token[0]) dg_strcpy(g_bad_token, sizeof(g_bad_token), pv->valuestring);
+                } else n->pad[k] = (float)pv->valuedouble;
+            }
         n->safe = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(o, "safe"));
+        if (g_bad_token[0]) { if (err) snprintf(err, (size_t)err_size, "node '%s': unknown theme token '%s'", n->id, g_bad_token); ok = false; break; }
         (*count)++;
     }
     if (!cJSON_IsArray(nodes) && err) snprintf(err, (size_t)err_size, "missing \"nodes\" array");

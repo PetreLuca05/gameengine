@@ -1,0 +1,12 @@
+{
+  "_doc": "Loading screen: map thumbnail, name, progress bar (map load, then chunk streaming), a tip.",
+  "nodes": [
+    { "id": "root" },
+    { "id": "box", "parent": "root", "anchor": "center", "dir": "column", "align": "stretch", "w_pct": 0.6, "max_w": "@ld_w", "gap": "@mm_gap_lg" },
+    { "id": "thumb", "parent": "box", "aspect": 1.7778 },
+    { "id": "name", "parent": "box", "h": "@mm_title_h" },
+    { "id": "bar", "parent": "box", "h": "@ld_bar_h" },
+    { "id": "status", "parent": "box", "h": "@mm_row_h" },
+    { "id": "tip", "parent": "box", "h": "@ld_tip_h" }
+  ]
+}

@@ -1,0 +1,9 @@
+{
+  "_doc": "In-game chat (Enter): the log and the input line, bottom left above the HUD vitals.",
+  "nodes": [
+    { "id": "root", "safe": true },
+    { "id": "chat", "parent": "root", "anchor": "bottom_left", "y": "@chat_y", "w": "@chat_w", "h": "@chat_h", "dir": "column", "align": "stretch", "gap": "@mm_gap_sm" },
+    { "id": "log", "parent": "chat", "flex": 1 },
+    { "id": "input", "parent": "chat", "h": "@lb_input_h" }
+  ]
+}

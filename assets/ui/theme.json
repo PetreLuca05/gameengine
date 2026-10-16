@@ -35,7 +35,13 @@
     "type_key": [196, 120, 200, 255],
     "type_misc": [150, 150, 150, 255],
     "hud_panel": [10, 12, 14, 130],
-    "hud_text": [236, 236, 230, 255]
+    "hud_text": [236, 236, 230, 255],
+    "rarity_common": [170, 170, 166, 255],
+    "rarity_uncommon": [110, 196, 112, 255],
+    "rarity_rare": [110, 160, 226, 255],
+    "rarity_epic": [176, 112, 220, 255],
+    "rarity_legendary": [226, 140, 52, 255],
+    "chat_names": [[226, 140, 52, 255], [110, 160, 226, 255], [110, 196, 112, 255], [232, 190, 80, 255], [196, 120, 200, 255], [104, 186, 170, 255], [226, 110, 96, 255], [180, 180, 172, 255]]
   },
   "sizes": {
     "t_tiny": 12, "t_small": 14, "t_body": 17, "t_label": 13, "t_title": 26, "t_large": 30, "t_huge": 48,
@@ -43,6 +49,22 @@
     "button_h": 30, "row_h": 36, "radius": 3, "radius_panel": 6, "border": 1, "accent_bar": 3, "pad": 20, "gap": 8,
     "slot": 66, "slot_gap": 6, "modal_max_w_pct": 0.6, "scroll_speed": 60,
     "safe_frac": 0.035, "max_aspect": 2.39
+  },
+  "layout": {
+    "_doc": "Named design-px sizes: screen JSON uses them as \"@name\" (the main menu screens use nothing else), the screens' code through gui_tok().",
+    "zero": 0,
+    "tab_text": 17, "tab_gap": 34, "tab_pad": 8, "tab_underline": 2, "tab_hint_y": 4, "power_stroke": 2,
+    "mm_tabbar_h": 60, "mm_power": 34, "mm_footer_h": 66, "mm_status_w": 440, "mm_news_w": 380,
+    "mm_content_gap": 20, "mm_gap_sm": 2, "mm_gap": 8, "mm_gap_lg": 20,
+    "mm_side_w": 300, "mm_title_h": 48, "mm_item_h": 36, "mm_row_h": 34, "mm_button_h": 36, "mm_button_w": 130,
+    "mm_panel_w": 460, "mm_panel_max_h": 620,
+    "mm_source_h": 38, "mm_filter_h": 34, "mm_filter_w": 180, "mm_list_row_h": 50, "mm_detail_w": 380, "mm_detail_wide": 460,
+    "mm_info_w": 380, "mm_cat_w": 190, "mm_grid_w": 400, "mm_preview_bar_h": 44, "mm_list_w": 440, "mm_map_row_h": 72,
+    "mm_settings_min_w": 640, "mm_settings_max_w": 1160, "mm_credits_w": 820,
+    "mm_avatar": 40, "mm_avatar_sm": 26, "mm_splash_logo": 64, "mm_splash_time": 1.6,
+    "lb_side_w": 340, "lb_chat_w": 400, "lb_bar_h": 46, "lb_button_w": 170, "lb_player_h": 46, "lb_input_h": 36, "lb_icon": 14,
+    "ld_w": 900, "ld_bar_h": 4, "ld_tip_h": 40,
+    "chat_y": -150, "chat_w": 520, "chat_h": 260, "chat_fade": 8
   },
   "anim": { "menu_in": 0.15, "menu_stagger": 0.022, "hover": 0.08, "modal_in": 0.14, "shake": 0.35, "tooltip_delay": 0.35 },
   "backdrop": { "blur": 1, "dim": 0.35 },

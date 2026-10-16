@@ -6,6 +6,7 @@
 // renderer / sky / post / audio hooks, lens droplets, the debug overlay, the demo and the tests.
 #include "game_internal.h"
 #include "world/weather.h"
+#include "world/season.h"
 #include "render/render.h"
 #include "render/debug_draw.h"
 #include "render/post/post_settings.h"
@@ -33,6 +34,8 @@ typedef struct ProbeEntry { i32 x, y, z; u32 tick; float exposed; } ProbeEntry;
 static struct {
     WeatherLib lib;
     bool lib_loaded;
+    SeasonTable seasons;           // assets/world/seasons.json
+    int season;                    // active season (-1 = none: the plain Markov scheduler)
     Cvar *debug, *quality, *puddle_refl, *lens_cv, *lens_k, *cloud_shadows, *audio_vol;
     Cvar *on_rain_start, *on_rain_stop, *on_snow_start, *on_snow_stop, *on_storm_start, *on_storm_stop;
     // this frame (every machine)
@@ -88,6 +91,8 @@ bool weather_active(World *w) { return w && w->level.sky && w->weather.version !
 static void ensure_lib(void) {
     if (WX.lib_loaded) return;
     weather_lib_load(&WX.lib, "assets/world/weather");
+    seasons_load(&WX.seasons, "assets/world/seasons.json");
+    WX.season = -1;
     WX.lib_loaded = true;
 }
 
@@ -314,6 +319,7 @@ static void set_preset(World *w, const char *spec, float seconds) {
     WeatherParams tgt;
     float tr = 0;
     if (!weather_compose(&WX.lib, spec, &w->weather.to, &tgt, &tr)) { log_info("weather: unknown preset '%s'", spec); return; }
+    weather_seasonal_params(&WX.lib, &tgt);   // the season's temperature: winter precipitation is snow
     weather_set_target(&w->weather, &tgt, w->tick, seconds >= 0 ? seconds : tr);
     int idx = weather_find_preset(&WX.lib, spec);
     w->weather.preset = idx >= 0 ? (u8)idx : 255;
@@ -322,6 +328,69 @@ static void set_preset(World *w, const char *spec, float seconds) {
         float stay = p ? (p->min_stay + p->max_stay) * 0.5f : 300.0f;
         w->weather.next_change_tick = w->tick + (u32)((w->weather.transition + stay) * SIM_HZ);
     }
+}
+
+const SeasonTable *weather_seasons(void) { ensure_lib(); return &WX.seasons; }
+int weather_season(void) { ensure_lib(); return WX.season; }
+
+// Host: the season drives the weather from now on (docs/MENU_LOBBY.md "Time, season and weather"):
+// the scheduler's preset weights and temperature offset, the start weather (start "" = a weighted
+// pick of the season's presets) set at once, the ground's snow / wetness, dynamic = the scheduler on.
+void weather_apply_season(World *w, int season, const char *start, bool dynamic) {
+    ensure_lib();
+    if (season < 0 || season >= SEASON_COUNT) {
+        WX.season = -1;
+        weather_lib_set_bias(&WX.lib, NULL, 0);
+        return;
+    }
+    const SeasonDef *sd = &WX.seasons.s[season];
+    float bias[WEATHER_MAX_PRESETS];
+    season_weather_bias(sd, &WX.lib, bias);
+    weather_lib_set_bias(&WX.lib, bias, sd->temp_offset);
+    WX.season = season;
+    if (!w || !w->authority) return;
+    const char *spec = start && start[0] ? start : season_pick_weather(sd, w->level.seed ^ (u32)season * 977u ^ w->tick);
+    if (!spec[0]) spec = "clear";
+    WeatherParams base = w->weather.to, p;
+    float tr = 0;
+    if (!weather_compose(&WX.lib, spec, &base, &p, &tr)) p = base;
+    weather_seasonal_params(&WX.lib, &p);
+    u32 seed = w->weather.seed;
+    weather_state_init(&w->weather, &p, seed);
+    int idx = weather_find_preset(&WX.lib, spec);
+    w->weather.preset = idx >= 0 ? (u8)idx : 255;
+    w->weather.random = dynamic ? 1 : 0;
+    w->weather.snow = sd->snow;
+    w->weather.wetness = sd->wetness;
+    w->weather.puddles = sd->wetness * 0.6f;
+    if (dynamic && idx >= 0) {
+        const WeatherPreset *pr = &WX.lib.presets[idx];
+        w->weather.next_change_tick = w->tick + (u32)(((pr->min_stay + pr->max_stay) * 0.5f) * SIM_HZ);
+    }
+    w->weather.version++;
+    log_info("season %s: start weather %s, %+.0f C, %s weather", sd->id, spec, (double)sd->temp_offset, dynamic ? "dynamic" : "fixed");
+}
+
+// season [spring|summer|autumn|winter|off] [start preset] [static]: host test command.
+static void cmd_season(int argc, const char **argv) {
+    ensure_lib();
+    if (argc < 2) {
+        log_info("season: %s  (season <spring|summer|autumn|winter|off> [start preset] [static])", WX.season >= 0 ? WX.seasons.s[WX.season].id : "off");
+        for (int i = 0; i < SEASON_COUNT; i++) {
+            const SeasonDef *s = &WX.seasons.s[i];
+            char b[256] = "";
+            for (int k = 0; k < s->weather_count; k++) { size_t l = strlen(b); snprintf(b + l, sizeof(b) - l, " %s:%g", s->weather[k], (double)s->weight[k]); }
+            log_info("  %-7s day %3d  %+3.0f C  snow %.1f  weather%s", s->id, s->day_of_year, (double)s->temp_offset, (double)s->snow, b);
+        }
+        return;
+    }
+    World *w = G ? G->world : NULL;
+    if (!w || !w->authority) { log_info("season: host only"); return; }
+    int s = season_from_id(argv[1]);
+    if (s < 0 && strcmp(argv[1], "off")) { log_info("season: unknown '%s'", argv[1]); return; }
+    bool dynamic = !(argc > 3 && !strcmp(argv[3], "static"));
+    weather_apply_season(w, s, argc > 2 && strcmp(argv[2], "random") ? argv[2] : "", dynamic);
+    if (s >= 0) daynight_set_calendar(w, WX.seasons.s[s].day_of_year, -1.0f);
 }
 
 void weather_level_loaded(World *w, const char *map) {
@@ -818,6 +887,7 @@ void weather_register(void) {
     WX.on_storm_start = cvar_reg_string("weather_on_storm_start", "", 0, "console commands run when a storm starts");
     WX.on_storm_stop = cvar_reg_string("weather_on_storm_stop", "", 0, "console commands run when a storm ends");
     cmd_register("weather_set", cmd_weather_set, "weather_set <preset[+preset]> [seconds] (host)");
+    cmd_register("season", cmd_season, "season [spring|summer|autumn|winter|off] [start preset|random] [static]: the season drives the calendar day and the weather (host); no args: list");
     cmd_register("weather_lock", cmd_weather_lock, "weather_lock [0|1]: no random changes (host)");
     cmd_register("weather_random", cmd_weather_random, "weather_random on|off: Markov scheduler (host)");
     cmd_register("weather_params", cmd_weather_params, "weather_params [<name> <value> ... [time <s>]]: print / set parameters");

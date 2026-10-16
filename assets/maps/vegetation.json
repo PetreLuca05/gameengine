@@ -1,0 +1,13 @@
+{
+  "name": "Vegetation Valley",
+  "level": "vegetation",
+  "thumbnail": "assets/maps/thumbs/vegetation.png",
+  "size_m": 500,
+  "biome": "Forest",
+  "players": [1, 4],
+  "time_of_day": 17.5,
+  "season": "summer",
+  "weather": "cloudy",
+  "order": 20,
+  "description": "A 500 m valley with every kind of foliage: pine and broadleaf forest, a dead wood, a meadow, a wheat field and a pond."
+}

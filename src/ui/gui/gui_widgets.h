@@ -41,8 +41,21 @@ bool gw_dropdown_ex(GuiId id, GuiRect r, const char *const *items, int n, int *s
 void gw_disabled(bool on);
 bool gw_keybind(GuiId id, GuiRect r, const char *text, bool capturing);
 bool gw_textfield(GuiId id, GuiRect r, char *buf, int size, const char *placeholder);   // true = Enter
+void gw_textfield_activate(GuiId id);    // start editing (chat: Enter opens the line ready to type)
+bool gw_textfield_editing(GuiId id);
 // A settings row: label left, the control's rect returned (right part). hint: tooltip.
 GuiRect gw_setting_row(GuiCursor *c, const char *label, const char *hint, GuiId id);
+
+// Top tab bar (main menu; the pause menu can adopt it): small-caps labels spread from the left, the
+// active one with an animated accent underline over a full-width hairline, key hints ("1".."9")
+// while the keyboard / pad drives. enabled[i] false: faint, no input (reason[i]: tooltip). Returns the
+// clicked tab (or cur). Sizes / colours: theme tokens tab_*.
+// focusable false: the tabs switch with LB / RB, Q / E, 1-9 and the mouse only (a top bar).
+int gw_tabbar(GuiId id, GuiRect r, const char *const *labels, const bool *enabled, const char *const *reason, int n, int cur, bool focusable);
+// Power icon (quit): a ring with the stroke at the top; turns to the danger colour on hover.
+bool gw_power(GuiId id, GuiRect r, const char *tooltip);
+// Avatar: the image (tex != 0) in a rounded square, otherwise initials on a tinted circle.
+void gw_avatar(GuiRect r, TextureId tex, const char *name, u32 tint);
 
 // Inventory / hotbar slot (shared by the inventory grid and the HUD).
 typedef struct GuiSlotView {

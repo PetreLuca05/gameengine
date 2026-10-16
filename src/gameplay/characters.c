@@ -48,6 +48,8 @@ typedef struct CharGlobals {
     u32 part_gen;                   // bumped when the GPU parts are rebuilt (instances re-resolve)
     Cvar *skin_cvar;
     char skin_sent[32];             // cl_skin last requested from the host
+    Cvar *parts_cvar;               // cl_parts: equipped cosmetics ("head:helmet_olive torso:vest_tan")
+    char parts_sent[256];
     // First-person body: arm bone set (arm-only meshes for the viewmodel pass) and head bones.
     bool arm_bone[ANIM_MAX_BONES], head_bone[ANIM_MAX_BONES];
     Cvar *fp_body, *fp_debug;
@@ -113,6 +115,7 @@ void characters_register_cvars(void) {
     g->lod_force = cvar_reg_int("r_lod_force", -1, -1, 3, 0, "force a character LOD (-1 = automatic)");
     g->lod_bias = cvar_reg_float("r_lod_bias", 1.0f, 0.25f, 4.0f, CVAR_ARCHIVE, "character LOD bias (>1 = more detail)");
     g->skin_cvar = cvar_reg_string("cl_skin", "", CVAR_ARCHIVE, "your character skin (skins.json / assets/skins id; empty = the default), seen by everyone");
+    g->parts_cvar = cvar_reg_string("cl_parts", "", 0, "your equipped cosmetic parts: 'slot:option ...' (set by the Cosmetics tab from the profile), seen by everyone");
     cmd_register("character_set_part", cmd_set_part, "character_set_part <slot> <option id | none> [entity]: swap a modular part (host; default: the character you look at, else your own)");
     cmd_register("character_parts", cmd_parts, "list the part slots / options of the character you look at (or an entity id)");
     g->fp_body = cvar_reg_bool("cl_fp_body", true, CVAR_ARCHIVE, "first person: draw your own body; the player model's arms replace the placeholder hands");
@@ -286,11 +289,38 @@ static int gpu_part_for(const CharPartOption *o, const BoneSet *hidden) {
 
 // Part selection drawn for a character: the replicated one; the local player sees its cl_skin choice
 // at once (the host confirms it for everyone else).
+// cl_parts: the option chosen for a non-body slot ("head:helmet_olive torso:vest_tan"), -1 = none.
+static int local_part_option(const CharacterDef *def, int slot) {
+    const char *s = CG->parts_cvar ? CG->parts_cvar->str : "";
+    const char *name = char_slot_name(slot);
+    size_t n = strlen(name);
+    for (const char *p = s; *p;) {
+        while (*p == ' ') p++;
+        const char *end = p;
+        while (*end && *end != ' ') end++;
+        if ((size_t)(end - p) > n + 1 && !strncmp(p, name, n) && p[n] == ':') {
+            char id[64];
+            size_t len = DG_MIN((size_t)(end - p - (ptrdiff_t)n - 1), sizeof(id) - 1);
+            memcpy(id, p + n + 1, len);
+            id[len] = 0;
+            return character_find_option(def, slot, id);
+        }
+        p = end;
+    }
+    return -1;
+}
+
 static void drawn_selection(const CharacterInst *c, int local_slot, u8 *sel) {
     memcpy(sel, c->parts, CSLOT_COUNT);
-    if (c->is_player && c->slot == local_slot && CG->skin_cvar && CG->skin_cvar->str[0]) {
+    if (!c->is_player || c->slot != local_slot) return;
+    if (CG->skin_cvar && CG->skin_cvar->str[0]) {
         int o = character_find_option(c->def, CSLOT_BODY, CG->skin_cvar->str);
         if (o >= 0) sel[CSLOT_BODY] = (u8)(o + 1);
+    }
+    // Equipped cosmetics show at once (the host confirms them for everyone else).
+    for (int s = CSLOT_BODY + 1; s < CSLOT_COUNT; s++) {
+        int o = local_part_option(c->def, s);
+        sel[s] = (u8)(o < 0 ? CHAR_PART_NONE : o + 1);
     }
 }
 
@@ -314,6 +344,8 @@ static void resolve_parts(CharacterInst *c, const u8 *sel) {
 // Initial part selection: players wear the default player skin, everyone else a seeded variety pick.
 static void pick_parts(CharacterInst *c, u32 seed) {
     character_pick_parts(c->def, seed, c->parts);
+    // Players wear only the cosmetics they equip (cl_parts, RPC_SET_PART): the other slots start empty.
+    if (c->is_player) for (int s = CSLOT_BODY + 1; s < CSLOT_COUNT; s++) c->parts[s] = CHAR_PART_NONE;
     if (c->is_player && LIB->player_skin >= 0)
         for (int o = 0; o < c->def->slots[CSLOT_BODY].option_count; o++)
             if (c->def->slots[CSLOT_BODY].options[o].skin == LIB->player_skin) { c->parts[CSLOT_BODY] = (u8)(o + 1); break; }
@@ -2122,10 +2154,30 @@ static void sync_local_skin(World *w, int local_slot) {
     }
 }
 
+// cl_parts (equipped cosmetics) goes to the host the same way, one RPC_SET_PART per slot.
+static void sync_local_parts(World *w, int local_slot) {
+    static EntityId sent_ent;
+    for (int k = 0; k < MAX_CHARACTERS; k++) {
+        CharacterInst *c = w->chars->c[k];
+        if (!c || !c->is_player || c->slot != local_slot) continue;
+        const char *want = CG->parts_cvar ? CG->parts_cvar->str : "";
+        if (sent_ent == c->ent && !strcmp(CG->parts_sent, want)) return;
+        for (int s = CSLOT_BODY + 1; s < CSLOT_COUNT; s++) {
+            int o = local_part_option(c->def, s);
+            u8 cur = c->parts[s];
+            if (cur != (u8)(o < 0 ? CHAR_PART_NONE : o + 1)) game_rpc(RPC_SET_PART, s, o, 0);
+        }
+        dg_strcpy(CG->parts_sent, sizeof(CG->parts_sent), want);
+        sent_ent = c->ent;
+        return;
+    }
+}
+
 void chars_render(World *w, float alpha, vec3 cam_pos, int local_slot) {
     if (!w->chars || !LIB) return;
     ensure_gpu_meshes();
     sync_local_skin(w, local_slot);
+    sync_local_parts(w, local_slot);
     const Skeleton *s = &LIB->skel;
     static Xform pose[ANIM_MAX_BONES];
     for (int k = 0; k < MAX_CHARACTERS; k++) {

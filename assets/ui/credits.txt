@@ -1,0 +1,35 @@
+# Deadground
+
+## Made by
+The Deadground team
+
+## Third-party software
+Deadground uses these libraries; their licences apply to their code.
+
+AMD FidelityFX FSR: upscaling. Licence: MIT
+Barlow typeface (Jeremy Tribby): UI font. Licence: SIL Open Font License 1.1. Barlow Regular / Medium / SemiBold (SIL OFL 1.1, assets/ui/fonts/OFL.txt, github.com/jpt/barlow)
+cgltf: glTF loading. Licence: MIT
+cJSON: JSON. Licence: MIT
+ENet: LAN transport. Licence: MIT
+FastNoiseLite: procedural noise. Licence: MIT. FastNoiseLite commit 785f37a9ad76e283586a379675085f2063ae03f7
+Jolt Physics / joltc: physics. Licence: MIT
+mbedTLS: phone companion TLS. Licence: Apache-2.0. mbedTLS 3.6.4 LTS (Apache-2.0, FetchContent): TLS + self-signed certificates for the phone server
+meshoptimizer: LODs, clusters. Licence: MIT. meshoptimizer v0.22 (simplifier + allocator + clusterizer, github.com/zeux/meshoptimizer; all from the v0.22 tag)
+miniaudio: audio. Licence: public domain / MIT-0
+minih264: phone video encoder. Licence: CC0. minih264 commit b0baea7 (CC0): H.264 encoder for phone videos (src/gameplay/phone/phone_video.c)
+minimp4: MP4 muxer. Licence: CC0. minimp4 commit 2a3014a (CC0): MP4 muxer for phone videos
+Nuklear: developer editors and the console. Licence: public domain / MIT
+qrcodegen: phone pairing QR codes. Licence: MIT. qrcodegen (Project Nayuki QR-Code-generator, C) commit 3c6d0b3 (MIT): phone pairing QR codes
+quirc: QR decoding (tests). Licence: ISC. quirc commit 927d680 (ISC, tests only): QR decode round-trip in tests/test_phone.c
+SDL3: window, input, gamepads. Licence: zlib licence
+SMAA: anti-aliasing. Licence: MIT
+stb (image, image_write, truetype): images, fonts. Licence: public domain / MIT. stb commit 2c980bb59875b0d32144a71867fbdebb2f77cd20
+Steamworks SDK: Steam transport, lobbies, friends (optional). Licence: Valve Steamworks SDK licence
+ufbx: FBX import. Licence: MIT / public domain. ufbx v0.22.0 (github.com/ufbx/ufbx)
+volk: Vulkan loader. Licence: MIT
+Vulkan Memory Allocator: GPU memory. Licence: MIT
+Vulkan-Headers: Vulkan API headers. Licence: Apache-2.0 / MIT
+
+## Licence texts
+The full licence texts ship next to the libraries in third_party/ and assets/ui/fonts/OFL.txt.
+

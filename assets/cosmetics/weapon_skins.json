@@ -1,0 +1,8 @@
+{
+  "_doc": "Weapon skins: catalogue only (stub). The item renders unchanged until the weapon pipeline reads the skin.",
+  "items": [
+    { "id": "skin_desert", "name": "Desert Tan", "slot": "weapon_skin", "option": "desert", "rarity": "uncommon", "tint": [0.76, 0.64, 0.42] },
+    { "id": "skin_arctic", "name": "Arctic", "slot": "weapon_skin", "option": "arctic", "rarity": "rare", "unlock": "locked", "tint": [0.85, 0.88, 0.92] },
+    { "id": "skin_ember", "name": "Ember", "slot": "weapon_skin", "option": "ember", "rarity": "legendary", "unlock": "steam:2001", "tint": [0.85, 0.30, 0.08] }
+  ]
+}

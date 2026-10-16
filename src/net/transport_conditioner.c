@@ -81,6 +81,11 @@ static bool cond_stats(NetTransport *t, PeerId peer, float *rtt, float *loss) {
     return c->inner->peer_stats(c->inner, peer, rtt, loss);
 }
 
+static bool cond_address(NetTransport *t, PeerId peer, char *out, int size) {
+    CondImpl *c = t->impl;
+    return c->inner->peer_address && c->inner->peer_address(c->inner, peer, out, size);
+}
+
 static void cond_destroy(NetTransport *t) {
     CondImpl *c = (CondImpl *)t->impl;
     release_due(c, true);
@@ -107,6 +112,7 @@ NetTransport *transport_conditioner_wrap(NetTransport *inner) {
     t->disconnect = cond_disconnect;
     t->flush = cond_flush;
     t->peer_stats = cond_stats;
+    t->peer_address = cond_address;
     t->destroy = cond_destroy;
     return t;
 }
