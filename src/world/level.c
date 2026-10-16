@@ -428,6 +428,23 @@ static void spawn_entity(World *w, const cJSON *e) {
         if (vs == VIS_CYLINDER) half = v3(half.x, half.y, half.x);
         id = spawn_prop(w, v3_add(pos, v3(0, half.y, 0)), quat_yaw(yaw), vs, half, jcol(e, "color", rgba8(0.6f, 0.45f, 0.25f, 1)), jf(e, "mass", 20));
         w->vis[ENT_INDEX(id)].model = assets_model_id(js(e, "model", ""));
+    } else if (!strcmp(type, "vgeo")) {
+        if (w->level.vgeo_count >= MAX_LEVEL_VGEO) { log_warn("level: more than %d vgeo placements", MAX_LEVEL_VGEO); return; }
+        LevelVgeo *v = &w->level.vgeo[w->level.vgeo_count++];
+        memset(v, 0, sizeof(*v));
+        dg_strcpy(v->mesh, sizeof(v->mesh), js(e, "mesh", ""));
+        v->pos = pos;
+        v->yaw = yaw;
+        v->scale = jf(e, "scale", 1.0f);
+        v->scale_jitter = jf(e, "scale_jitter", 0.0f);
+        v->spacing = jf(e, "spacing", 4.0f);
+        v->color = jv3(e, "color", v3(0.6f, 0.6f, 0.6f));
+        v->roughness = jf(e, "roughness", 0.8f);
+        const cJSON *g = cJSON_GetObjectItemCaseSensitive(e, "grid");
+        v->grid[0] = cJSON_IsArray(g) && cJSON_GetArraySize(g) > 0 ? (u32)cJSON_GetArrayItem(g, 0)->valueint : 1;
+        v->grid[1] = cJSON_IsArray(g) && cJSON_GetArraySize(g) > 1 ? (u32)cJSON_GetArrayItem(g, 1)->valueint : 1;
+        v->seed = (u32)jf(e, "seed", 1);
+        return;
     } else if (!strcmp(type, "dummy")) {
         id = spawn_dummy(w, pos, yaw, jf(e, "hp", 200));
     } else if (!strcmp(type, "character")) {

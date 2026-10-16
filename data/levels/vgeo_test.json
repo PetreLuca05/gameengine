@@ -1,0 +1,16 @@
+{
+  "name": "VgeoTest",
+  "_comment": "Virtualized geometry test scene (docs/VGEO.md 'Test scene'): a 10M-triangle displaced rock field (north), 1024 instances of a 500k-triangle statue (south), a 2M-triangle brick building (east). The meshes are generated at build time by tools/build_vgeo into assets/vgeo/ (git-ignored). Load with: map vgeo_test.",
+  "env": {"sun_dir": [0.45, 0.8, 0.3], "sun_color": [1.0, 0.95, 0.88], "sun_intensity": 2.4, "sky": [0.55, 0.6, 0.7], "ground": [0.32, 0.3, 0.27], "fog": [0.55, 0.6, 0.68], "fog_density": 0.0, "sky_zenith": [0.22, 0.42, 0.78], "sky_horizon": [0.72, 0.8, 0.9], "clouds": 0.35},
+  "room": {"size": [40, 10, 40], "wall": 0.5, "floor_material": "concrete", "wall_material": "plaster", "floor_color": [0.5, 0.5, 0.48], "wall_color": [0.68, 0.68, 0.66], "walls": false, "ceiling": false, "floor_size": [2000, 0, 2000]},
+  "spawns": [
+    {"pos": [0, 0.05, 0], "yaw": 0},
+    {"pos": [2, 0.05, 0.5], "yaw": 0}
+  ],
+  "brushes": [],
+  "entities": [
+    {"type": "vgeo", "mesh": "assets/vgeo/rock_field.vgeo", "pos": [0, 0, -120], "color": [0.45, 0.42, 0.38], "roughness": 0.9},
+    {"type": "vgeo", "mesh": "assets/vgeo/statue.vgeo", "pos": [0, -0.35, 140], "grid": [32, 32], "spacing": 6, "scale_jitter": 0.15, "seed": 7, "color": [0.82, 0.8, 0.76], "roughness": 0.45},
+    {"type": "vgeo", "mesh": "assets/vgeo/building.vgeo", "pos": [90, 0, 0], "color": [0.62, 0.3, 0.22], "roughness": 0.85}
+  ]
+}

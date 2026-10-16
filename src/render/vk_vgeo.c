@@ -12,7 +12,10 @@
 #include "graph/fg.h"
 #include "debug_draw.h"
 #include "vgeo/vgeo_cull.h"
+#include "vgeo/vgeo_raster.h"
 #include "vgeo/vgeo_procgen.h"
+#include "assets/assets.h"
+#include "core/platform.h"
 #include <math.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -26,10 +29,34 @@ static struct {
     VgContext ctx;
     VgScene scene;
     VgCuller cull;
-    FgRes hiz, depth;
+    FgRes hiz, hiz_cur, depth;
+    VgRaster raster;
     VgViewGpu frozen;
     bool have_frozen;
     u32 test_meshes;             // procedural rocks registered by vgeo_test_scene
+    struct { char name[96]; u32 mesh; } named[64];   // level meshes loaded so far (by name)
+    u32 named_count;
+    // Era fallback (r_era 2015 / 2010): the exported discrete LODs per mesh, uploaded on first use
+    // and drawn through the legacy path with a CPU LOD pick per instance.
+    struct FallbackMesh {
+        VgDiscreteLod lods[VGEO_MAX_LODS];
+        u32 lod_count;
+        VgLodVertex *verts;
+        u32 *indices;
+        MeshId gpu[VGEO_MAX_LODS];
+        float radius;
+    } *fb;
+    u32 fb_cap;
+    bool applying_era;
+    // vgeo_bench: a fixed spline flythrough, per-frame pass timings to CSV + a summary.
+    struct {
+        int frame, frames;
+        FILE *csv;
+        double sum[24], worst_total, cpu_sum;
+        char names[24][32];
+        int npass;
+    } bench;
+    Cvar *era, *lod_px, *foliage_density;
     VgBuffer dbg_rb[FRAMES_IN_FLIGHT];
     u32 dbg_count[FRAMES_IN_FLIGHT];
     // Graphics (Phase 3): the renderer's sets 0-2 + push constants (layout_lit compatible), vgeo set 3.
@@ -39,6 +66,10 @@ static struct {
     bool shadow_culled;          // this frame's cascade views were culled (vkg_record_shadow_cull)
     Cvar *r_vgeo, *error_px, *shadow_error_px, *sw_px, *occlusion, *freeze, *debug, *debug_spheres, *shadows;
 } G;
+
+static void fallback_register(u32 mesh, const VgBuilt *b);
+static void vkg_register_era(void);
+static void cmd_vgeo_bench(int argc, const char **argv);
 
 // ------------------------------------------------------------------ graphics pipelines
 
@@ -182,7 +213,7 @@ static void cmd_vgeo_test_scene(int argc, const char **argv) {
         bool ok = vgeo_build(&src, &opt, &b, err, sizeof(err));
         vgeo_gen_free(&g);
         if (!ok) { log_error("vgeo: rock build failed: %s", err); return; }
-        vgeo_scene_add_mesh(&G.scene, &b);
+        fallback_register(vgeo_scene_add_mesh(&G.scene, &b), &b);
         vgeo_free(&b);
         G.test_meshes++;
     }
@@ -230,6 +261,8 @@ void vkg_init(void) {
     cmd_register("vgeo_stats", cmd_vgeo_stats, "virtualized geometry: scene, last frame's culling counters and pass timings");
     cmd_register("vgeo_test_scene", cmd_vgeo_test_scene, "vgeo_test_scene [count=20000] [spacing=6] [meshes=4]: procedural rock field around the camera");
     cmd_register("vgeo_clear", cmd_vgeo_clear, "remove every vgeo instance");
+    vkg_register_era();
+    cmd_register("vgeo_bench", cmd_vgeo_bench, "vgeo_bench [frames=600] [csv]: spline flythrough of map vgeo_test, per-pass GPU ms to CSV + summary");
     if (!R->vg_scalar || !R->vg_int64) {
         log_warn("vgeo: disabled (needs scalarBlockLayout + shaderBufferInt64Atomics; the 2015 / 2010 era LODs are used instead)");
         return;
@@ -255,6 +288,12 @@ void vkg_init(void) {
         return;
     }
     for (u32 f = 0; f < FRAMES_IN_FLIGHT; f++) G.dbg_rb[f] = vgc_buffer(c, 8ull * 2 * VKG_DEBUG_MAX + 16, VK_BUFFER_USAGE_TRANSFER_DST_BIT, VGM_READBACK);
+    if (!vg_raster_init(&G.raster, c, &G.cull)) {
+        log_error("vgeo: rasterisers unavailable");
+        vg_cull_shutdown(&G.cull);
+        return;
+    }
+    vg_raster_resize(&G.raster, R->hdr.w, R->hdr.h);
     if (!create_gfx()) {
         log_error("vgeo: graphics pipelines unavailable");
         destroy_gfx();
@@ -270,8 +309,13 @@ void vkg_shutdown(void) {
     for (u32 f = 0; f < FRAMES_IN_FLIGHT; f++) vgc_buffer_free(&G.ctx, &G.dbg_rb[f]);
     vkDeviceWaitIdle(R->device);
     destroy_gfx();
+    vg_raster_shutdown(&G.raster);
     vg_cull_shutdown(&G.cull);
     vgeo_scene_free(&G.scene);
+    for (u32 i = 0; i < G.fb_cap; i++) { free(G.fb[i].verts); free(G.fb[i].indices); }
+    free(G.fb);
+    G.fb = NULL;
+    G.fb_cap = 0;
     G.ok = false;
 }
 
@@ -302,31 +346,47 @@ static void debug_spheres(u32 frame) {
 
 // ------------------------------------------------------------------ frame graph
 
+static void full_barrier(VkCommandBuffer cmd) {
+    VkMemoryBarrier2 mb = { VK_STRUCTURE_TYPE_MEMORY_BARRIER_2 };
+    mb.srcStageMask = mb.dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+    mb.srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT;
+    mb.dstAccessMask = VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT;
+    VkDependencyInfo dep = { VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+    dep.memoryBarrierCount = 1;
+    dep.pMemoryBarriers = &mb;
+    vkCmdPipelineBarrier2(cmd, &dep);
+}
+
+static VgHizRef hiz_ref(FgRes r) {
+    VgHizRef h = { fg_view(r), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, R->hdr.w, R->hdr.h, fg_mips(r) };
+    return h;
+}
+
+// Pass 1: the main view against last frame's Hi-Z (its depth after the prepass: vgeo + legacy).
 static void exec_cull(VkCommandBuffer cmd, void *u) {
     (void)u;
     u32 frame = R->frame_slot;
     vg_cull_collect(&G.cull, frame);
     debug_spheres(frame);
+    vg_raster_resize(&G.raster, R->hdr.w, R->hdr.h);
     VgViewGpu v;
     float fov = R->cam.fov_deg * DG_DEG2RAD;
     float eye[3] = { R->cam.pos.x, R->cam.pos.y, R->cam.pos.z };
     u32 flags = 0;
     if (G.occlusion->i == 0) flags |= VGV_NO_OCCLUSION;
+    if (G.occlusion->i >= 2) flags |= VGV_TWO_PASS;
     vgeo_view_setup(&v, R->view_proj_nj.m, R->prev_view_proj_nj.m, eye, (float)R->hdr.h / (2.0f * tanf(fov * 0.5f)), R->cam.znear, R->hdr.w, R->hdr.h,
                     G.error_px->f, G.sw_px->f, flags);
     if (G.freeze->i && G.have_frozen) v = G.frozen;
     else { G.frozen = v; G.have_frozen = true; }
-    VgHizRef prev = { 0 };
+    // Rasterised with this frame's jittered projection (the legacy prepass matches it); culled
+    // (and velocities) unjittered.
+    mat4 rvp = mat4_mul(R->proj_j, R->view);
+    memcpy(v.raster_view_proj, rvp.m, 64);
     bool hist = G.hiz != FG_NONE && fg_history_valid(G.hiz) && !R->camera_cut && G.occlusion->i > 0;
-    if (hist) {
-        prev.view = fg_view(G.hiz);
-        prev.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        prev.w = R->hdr.w;
-        prev.h = R->hdr.h;
-        prev.mips = fg_mips(G.hiz);
-    }
-    // Pass 2 needs this frame's Hi-Z from the visibility buffer (Phase 3): until then one pass.
-    vg_cull_record(&G.cull, cmd, frame, 0, &v, hist ? &prev : NULL, NULL);
+    VgHizRef prev = hist ? hiz_ref(G.hiz) : (VgHizRef){ 0 };
+    VgHizRef cur = G.hiz_cur != FG_NONE ? hiz_ref(G.hiz_cur) : (VgHizRef){ 0 };
+    vg_cull_record_pass1(&G.cull, cmd, frame, 0, &v, hist ? &prev : NULL, G.hiz_cur != FG_NONE ? &cur : NULL);
     if (G.debug_spheres->i) {
         VgViewRes *r = &G.cull.v[0];
         VkBufferCopy cc = { offsetof(VgCounters, n) + VGN_HW * 4, 0, 8 };
@@ -337,26 +397,66 @@ static void exec_cull(VkCommandBuffer cmd, void *u) {
     }
 }
 
+static void exec_raster1(VkCommandBuffer cmd, void *u) {
+    (void)u;
+    full_barrier(cmd);
+    vg_raster_clear(&G.raster, cmd);
+    vg_raster_record(&G.raster, cmd, R->frame_slot, 0, 1);
+    G.raster_ok = true;
+}
+
+// This frame's Hi-Z from the pass 1 visibility buffer (pass 2 occlusion).
+static void exec_hiz_cur(VkCommandBuffer cmd, void *u) {
+    (void)u;
+    VkImageView mips[16];
+    u32 n = DG_MIN(fg_mips(G.hiz_cur), 16u);
+    for (u32 m = 0; m < n; m++) mips[m] = fg_mip_view(G.hiz_cur, m);
+    vg_hiz_record(&G.cull, cmd, R->frame_slot, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_UNDEFINED, mips, n, R->hdr.w, R->hdr.h);
+}
+
+// Pass 2: pass 1's occluders against this frame's Hi-Z, rasterised into the same buffer.
+static void exec_pass2(VkCommandBuffer cmd, void *u) {
+    (void)u;
+    full_barrier(cmd);
+    vg_cull_record_pass2(&G.cull, cmd, R->frame_slot, 0);
+    full_barrier(cmd);
+    if (G.hiz_cur != FG_NONE) vg_raster_record(&G.raster, cmd, R->frame_slot, 0, 2);
+    full_barrier(cmd);
+}
+
+// History for next frame's pass 1: this frame's depth after the prepass.
 static void exec_hiz(VkCommandBuffer cmd, void *u) {
     (void)u;
     VkImageView mips[16];
-    u32 n = fg_mips(G.hiz);
-    if (n > 16) n = 16;
+    u32 n = DG_MIN(fg_mips(G.hiz), 16u);
     for (u32 m = 0; m < n; m++) mips[m] = fg_mip_view(G.hiz, m);
     vg_hiz_record(&G.cull, cmd, R->frame_slot, fg_view(G.depth), VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL, mips, n, R->hdr.w, R->hdr.h);
 }
 
 void vkg_graph_cull(int depth_res) {
-    G.hiz = FG_NONE;
+    G.hiz = G.hiz_cur = FG_NONE;
     G.depth = depth_res;
+    G.raster_ok = false;
     if (!active()) return;
     u32 hw, hh, hm;
     vg_hiz_size(R->hdr.w, R->hdr.h, &hw, &hh, &hm);
     FgTexDesc d = { "vgeo_hiz", VK_FORMAT_R32_SFLOAT, FG_SIZE_ABS, hw, hh, 0, DG_MIN(hm, (u32)FG_MAX_MIPS), 0 };
     G.hiz = fg_history(&d);
+    if (G.occlusion->i >= 2) {
+        d.name = "vgeo_hiz_cur";
+        G.hiz_cur = fg_texture(&d);
+    }
     int p = fg_pass("vgeo_cull", exec_cull, NULL);
     if (p < 0) return;
     fg_read(p, G.hiz, FG_SAMPLED);
+    if (G.hiz_cur != FG_NONE) fg_read(p, G.hiz_cur, FG_SAMPLED);   // bound now, written below
+    p = fg_pass("vgeo_raster", exec_raster1, NULL);
+    if (G.hiz_cur != FG_NONE) {
+        p = fg_pass("vgeo_hiz_cur", exec_hiz_cur, NULL);
+        fg_write(p, G.hiz_cur, FG_STORAGE);
+    }
+    p = fg_pass("vgeo_pass2", exec_pass2, NULL);
+    if (G.hiz_cur != FG_NONE) fg_read(p, G.hiz_cur, FG_SAMPLED);
 }
 
 void vkg_graph_hiz(int depth_res) {
@@ -444,4 +544,316 @@ void vkg_draw_lit(VkCommandBuffer cmd) {
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, G.gfx_layout, 1, 1, &R->textures[R->white_tex].set, 0, NULL);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, G.gfx_layout, 3, 1, &set, 0, NULL);
     vkCmdDraw(cmd, 3, 1, 0, 0);
+}
+
+// ------------------------------------------------------------------ level placements
+
+static bool name_is_file(const char *n) {
+    size_t l = strlen(n);
+    return l > 5 && !strcmp(n + l - 5, ".vgeo");
+}
+
+// Mesh index of a placement's mesh (loaded on first use), ~0 when unavailable.
+static u32 level_mesh(const RenderVgeoPlacement *pl) {
+    for (u32 i = 0; i < G.named_count; i++)
+        if (!strcmp(G.named[i].name, pl->mesh)) return G.named[i].mesh;
+    if (G.named_count >= 64) return ~0u;
+    VgBuilt b;
+    bool owned = false;
+    const VgBuilt *src = NULL;
+    VgMaterial mat;
+    memset(&mat, 0, sizeof(mat));
+    mat.color[0] = pl->color.x;
+    mat.color[1] = pl->color.y;
+    mat.color[2] = pl->color.z;
+    mat.color[3] = 1.0f;
+    mat.roughness = pl->roughness;
+    mat.tex_scale = 1.0f;
+    const Model *model = NULL;
+    if (name_is_file(pl->mesh)) {
+        char path[512];
+        size_t size = 0;
+        u8 *data = (u8 *)platform_read_file(platform_data_path(pl->mesh, path, sizeof(path)), &size);
+        if (!data) { log_warn("vgeo: %s not found (generated at build time by tools/build_vgeo)", pl->mesh); return ~0u; }
+        owned = vgeo_deserialize(data, size, &b);
+        free(data);
+        if (!owned) { log_error("vgeo: %s is not a valid .vgeo file (rebuild it: version %d)", pl->mesh, VGEO_FILE_VERSION); return ~0u; }
+        src = &b;
+    } else {
+        model = assets_model(assets_model_id(pl->mesh));
+        if (!model || !model->vgeo) { log_warn("vgeo: model '%s' has no vgeo data (\"vgeo\": true in data/assets.json)", pl->mesh); return ~0u; }
+        src = model->vgeo;
+    }
+    u32 mesh = vgeo_scene_add_mesh(&G.scene, src);
+    fallback_register(mesh, src);
+    u32 nm = src->hdr.material_count ? src->hdr.material_count : 1, base = 0;
+    for (u32 k = 0; k < nm; k++) {
+        VgMaterial m = mat;
+        if (model && model->mesh_count) {
+            const Material *mm = &model->meshes[k < (u32)model->mesh_count ? k : (u32)model->mesh_count - 1].mat;
+            m.color[0] = mm->color.x;
+            m.color[1] = mm->color.y;
+            m.color[2] = mm->color.z;
+            m.roughness = mm->roughness;
+            m.metallic = mm->metallic;
+            m.emissive = mm->emissive;
+        }
+        u32 idx = vgeo_scene_add_material(&G.scene, &m);
+        if (k == 0) base = idx;
+    }
+    vgeo_scene_set_mesh_materials(&G.scene, mesh, base);
+    if (owned) vgeo_free(&b);
+    dg_strcpy(G.named[G.named_count].name, sizeof(G.named[0].name), pl->mesh);
+    G.named[G.named_count++].mesh = mesh;
+    log_info("vgeo: level mesh %s: %u clusters, %u pages", pl->mesh, src->hdr.cluster_count, src->hdr.page_count);
+    return mesh;
+}
+
+void render_vgeo_set_level(const RenderVgeoPlacement *p, int count) {
+    if (!G.ok) return;
+    vgeo_scene_clear_instances(&G.scene);
+    u32 total = 0;
+    for (int i = 0; i < count; i++) {
+        const RenderVgeoPlacement *pl = &p[i];
+        u32 mesh = level_mesh(pl);
+        if (mesh == ~0u) continue;
+        u32 nx = pl->grid[0] ? pl->grid[0] : 1, nz = pl->grid[1] ? pl->grid[1] : 1;
+        u32 h = pl->seed * 2654435761u + 1u;
+        for (u32 z = 0; z < nz; z++)
+            for (u32 x = 0; x < nx; x++) {
+                h ^= h << 13;
+                h ^= h >> 17;
+                h ^= h << 5;
+                float r0 = (float)(h & 0xFFFF) / 65535.0f, r1 = (float)(h >> 16) / 65535.0f;
+                bool grid = nx * nz > 1;
+                vec3 pos = v3_add(pl->pos, v3(((float)x - (float)(nx - 1) * 0.5f) * pl->spacing, 0, ((float)z - (float)(nz - 1) * 0.5f) * pl->spacing));
+                quat q = quat_yaw(pl->yaw + (grid ? r0 * 6.2831853f : 0.0f));
+                float sc = pl->scale * (1.0f + pl->scale_jitter * (r1 * 2.0f - 1.0f));
+                float pp[3] = { pos.x, pos.y, pos.z }, rr[4] = { q.x, q.y, q.z, q.w };
+                vgeo_scene_add_instance(&G.scene, mesh, pp, rr, sc);
+                total++;
+            }
+    }
+    if (!vgeo_scene_commit(&G.scene)) log_error("vgeo: scene upload failed");
+    if (count) log_info("vgeo: level: %u instances of %u meshes, %u cells", total, G.named_count, G.scene.cell_count);
+}
+
+// ------------------------------------------------------------------ era presets + discrete LOD fallback
+
+// r_era (docs/VGEO_PLAN.md section 6): every value is a plain cvar the preset sets; any other combination
+// reads back as Custom (4).
+typedef struct EraDef { int vgeo; float error_px, shadow_px, lod_px, foliage; } EraDef;
+static const EraDef k_eras[4] = {
+    { 1, 1.0f, 2.0f, 2.0f, 1.0f },   // modern: vgeo, 1 px
+    { 1, 2.0f, 4.0f, 3.0f, 0.7f },   // 2020: vgeo, 2 px
+    { 0, 1.0f, 2.0f, 4.0f, 0.4f },   // 2015: discrete DAG LODs (4), CPU LOD by screen size
+    { 0, 1.0f, 2.0f, 12.0f, 0.2f },  // 2010: 3 LODs, more aggressive distances
+};
+
+static int era_detect(void) {
+    for (int e = 0; e < 4; e++) {
+        const EraDef *d = &k_eras[e];
+        if (G.r_vgeo->i == d->vgeo && fabsf(G.error_px->f - d->error_px) < 1e-4f && fabsf(G.shadow_error_px->f - d->shadow_px) < 1e-4f &&
+            fabsf(G.lod_px->f - d->lod_px) < 1e-4f && fabsf(G.foliage_density->f - d->foliage) < 1e-4f)
+            return e;
+    }
+    return 4;
+}
+
+static void era_apply(int e) {
+    const EraDef *d = &k_eras[DG_CLAMP(e, 0, 3)];
+    G.applying_era = true;
+    cvar_set_int(G.r_vgeo, d->vgeo);
+    cvar_set_float(G.error_px, d->error_px);
+    cvar_set_float(G.shadow_error_px, d->shadow_px);
+    cvar_set_float(G.lod_px, d->lod_px);
+    cvar_set_float(G.foliage_density, d->foliage);
+    G.applying_era = false;
+}
+
+static void on_era(Cvar *c) {
+    if (G.applying_era) return;
+    if (c->i >= 0 && c->i <= 3 && era_detect() != c->i) era_apply(c->i);
+}
+
+static void on_era_value(Cvar *c) {
+    (void)c;
+    if (G.applying_era || !G.era) return;
+    int e = era_detect();
+    if (G.era->i != e) {
+        G.applying_era = true;
+        cvar_set_int(G.era, e);
+        G.applying_era = false;
+    }
+}
+
+static void vkg_register_era(void) {
+    G.lod_px = cvar_reg_float("r_vgeo_lod_px", 2.0f, 0.25f, 64.0f, CVAR_ARCHIVE, "vgeo fallback (r_vgeo 0): projected error of the discrete LOD pick (pixels)");
+    G.foliage_density = cvar_reg_float("r_foliage_density", 1.0f, 0.0f, 1.0f, CVAR_ARCHIVE, "foliage instance density (Phase 7)");
+    G.era = cvar_reg_int("r_era", 0, 0, 4, CVAR_ARCHIVE, "geometry era preset: 0 modern (vgeo 1 px), 1 2020 (vgeo 2 px), 2 2015 (4 discrete LODs), 3 2010 (3 LODs), 4 custom");
+    G.era->on_change = on_era;
+    Cvar *dep[5] = { G.r_vgeo, G.error_px, G.shadow_error_px, G.lod_px, G.foliage_density };
+    for (int i = 0; i < 5; i++) dep[i]->on_change = on_era_value;
+    on_era_value(NULL);
+}
+
+// Keeps a CPU copy of a mesh's exported LODs (the fallback uploads them when first drawn).
+static void fallback_register(u32 mesh, const VgBuilt *b) {
+    if (mesh >= G.fb_cap) {
+        u32 cap = G.fb_cap ? G.fb_cap : 16;
+        while (cap <= mesh) cap *= 2;
+        G.fb = (struct FallbackMesh *)realloc(G.fb, sizeof(*G.fb) * cap);
+        memset(G.fb + G.fb_cap, 0, sizeof(*G.fb) * (cap - G.fb_cap));
+        G.fb_cap = cap;
+    }
+    struct FallbackMesh *f = &G.fb[mesh];
+    f->lod_count = b->hdr.lod_count;
+    memcpy(f->lods, b->lods, sizeof(f->lods));
+    u32 nv = 0, ni = 0;
+    for (u32 k = 0; k < f->lod_count; k++) {
+        nv = DG_MAX(nv, b->lods[k].first_vertex + b->lods[k].vertex_count);
+        ni = DG_MAX(ni, b->lods[k].first_index + b->lods[k].index_count);
+    }
+    f->verts = (VgLodVertex *)malloc(sizeof(VgLodVertex) * (nv + 1));
+    f->indices = (u32 *)malloc(sizeof(u32) * (ni + 1));
+    memcpy(f->verts, b->lod_vertices, sizeof(VgLodVertex) * nv);
+    memcpy(f->indices, b->lod_indices, sizeof(u32) * ni);
+    f->radius = b->hdr.sphere[3];
+}
+
+static MeshId fallback_lod_mesh(struct FallbackMesh *f, u32 k) {
+    if (f->gpu[k]) return f->gpu[k];
+    const VgDiscreteLod *l = &f->lods[k];
+    Vertex *v = (Vertex *)malloc(sizeof(Vertex) * (l->vertex_count + 1));
+    for (u32 i = 0; i < l->vertex_count; i++) {
+        const VgLodVertex *s = &f->verts[l->first_vertex + i];
+        v[i].pos = v3(s->pos[0], s->pos[1], s->pos[2]);
+        v[i].normal = v3(s->normal[0], s->normal[1], s->normal[2]);
+        v[i].uv = v2(s->uv[0], s->uv[1]);
+        v[i].color = 0xFFFFFFFFu;
+    }
+    u32 *idx = (u32 *)malloc(sizeof(u32) * (l->index_count + 1));
+    for (u32 i = 0; i < l->index_count; i++) idx[i] = f->indices[l->first_index + i] - l->first_vertex;
+    f->gpu[k] = render_mesh_create(v, l->vertex_count, idx, l->index_count);
+    free(v);
+    free(idx);
+    return f->gpu[k];
+}
+
+// Era fallback, once per frame after the camera is set (render.c): the coarsest discrete LOD whose
+// projected error stays under r_vgeo_lod_px, per instance, through the legacy draw list. 2010 never
+// draws LOD 0. CPU work per instance here is the fallback's cost (the vgeo path has none).
+void vkg_submit_fallback(void) {
+    if (!G.ok || G.r_vgeo->i || !G.scene.instance_count || !G.fb) return;
+    bool era2010 = G.era && G.era->i == 3;
+    float ps = (float)R->hdr.h / (2.0f * tanf(R->cam.fov_deg * DG_DEG2RAD * 0.5f));
+    for (u32 i = 0; i < G.scene.instance_count; i++) {
+        const VgInstance *in = &G.scene.instances[i];
+        if (in->mesh >= G.fb_cap || !G.fb[in->mesh].lod_count) continue;
+        struct FallbackMesh *f = &G.fb[in->mesh];
+        float p[3], q[4], s;
+        vgeo_instance_decode(in, p, q, &s);
+        const VgMesh *m = &G.scene.meshes[in->mesh];
+        quat qq = { q[0], q[1], q[2], q[3] };
+        vec3 c = v3_add(v3(p[0], p[1], p[2]), quat_rotate(qq, v3(m->center[0] * s, m->center[1] * s, m->center[2] * s)));
+        float r = m->radius * s;
+        float d = fmaxf(v3_dist(c, R->cam.pos) - r, R->cam.znear);
+        u32 k = era2010 && f->lod_count > 1 ? 1 : 0;
+        while (k + 1 < f->lod_count && f->lods[k + 1].error * s * ps / d <= G.lod_px->f) k++;
+        MeshId mesh = fallback_lod_mesh(f, k);
+        if (!mesh) continue;
+        DrawItem di;
+        memset(&di, 0, sizeof(di));
+        di.mesh = mesh;
+        di.model = mat4_trs(v3(p[0], p[1], p[2]), qq, v3s(s));
+        const VgMaterial *vm = &G.scene.materials[m->material_base < G.scene.material_count ? m->material_base : 0];
+        di.mat.color = v4(vm->color[0], vm->color[1], vm->color[2], 1.0f);
+        di.mat.roughness = vm->roughness;
+        di.mat.metallic = vm->metallic;
+        di.mat.emissive = vm->emissive;
+        di.mat.tex_scale = vm->tex_scale;
+        render_draw(&di);
+    }
+}
+
+// ------------------------------------------------------------------ vgeo_bench (flythrough)
+
+// Fixed spline over the vgeo test scene (data/levels/vgeo_test.json): from the spawn north over the
+// rock field, east to the building, south over the statue field, back.
+static const float k_bench_path[][5] = {   // x, y, z, yaw (deg), pitch (deg)
+    { 0, 2, 10, 0, -5 }, { 0, 6, -60, 0, -12 }, { 30, 20, -150, 60, -20 }, { 90, 8, -40, 160, -8 },
+    { 110, 5, 0, 90, -5 }, { 60, 15, 80, 200, -15 }, { 0, 25, 160, 180, -25 }, { -60, 10, 120, 300, -10 }, { 0, 2, 10, 360, -5 },
+};
+
+static float catmull(float p0, float p1, float p2, float p3, float t) {
+    return 0.5f * ((2 * p1) + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t * t + (-p0 + 3 * p1 - 3 * p2 + p3) * t * t * t);
+}
+
+// Called by render_set_camera: replaces the camera while the bench runs.
+void vkg_bench_camera(RenderCamera *cam) {
+    if (G.bench.frames <= 0) return;
+    int n = (int)(sizeof(k_bench_path) / sizeof(k_bench_path[0]));
+    float u = (float)G.bench.frame / (float)G.bench.frames * (float)(n - 1);
+    int i = DG_CLAMP((int)u, 0, n - 2);
+    float t = u - (float)i;
+    float v[5];
+    for (int k = 0; k < 5; k++)
+        v[k] = catmull(k_bench_path[i > 0 ? i - 1 : 0][k], k_bench_path[i][k], k_bench_path[i + 1][k], k_bench_path[i + 2 < n ? i + 2 : n - 1][k], t);
+    cam->pos = v3(v[0], v[1], v[2]);
+    cam->yaw = -v[3] * DG_DEG2RAD;
+    cam->pitch = v[4] * DG_DEG2RAD;
+    cam->roll = 0;
+}
+
+// Once per frame (after fg_execute's timings of the previous frame are in).
+void vkg_bench_frame(void) {
+    if (G.bench.frames <= 0) return;
+    if (G.bench.frame == 0) {
+        G.bench.npass = 0;
+        fprintf(G.bench.csv, "frame,cpu_ms");
+        for (int i = 0; i < fg_pass_count() && G.bench.npass < 24; i++) {
+            const char *nm = fg_pass_name(i);
+            dg_strcpy(G.bench.names[G.bench.npass], 32, nm);
+            fprintf(G.bench.csv, ",%s", nm);
+            G.bench.npass++;
+        }
+        fprintf(G.bench.csv, ",vis_clusters,vis_tris\n");
+    }
+    VgCounters c;
+    bool hc = vg_cull_counters(&G.cull, 0, &c);
+    fprintf(G.bench.csv, "%d,%.3f", G.bench.frame, g_engine.frame_dt * 1000.0);
+    G.bench.cpu_sum += g_engine.frame_dt * 1000.0;
+    double total = 0;
+    for (int k = 0; k < G.bench.npass; k++) {
+        float ms = 0;
+        for (int i = 0; i < fg_pass_count(); i++)
+            if (!strcmp(fg_pass_name(i), G.bench.names[k])) ms = fg_pass_ms(i);
+        fprintf(G.bench.csv, ",%.4f", ms);
+        if (G.bench.frame >= 10) G.bench.sum[k] += ms;
+        if (!strncmp(G.bench.names[k], "vgeo_", 5) || !strcmp(G.bench.names[k], "prepass") || !strcmp(G.bench.names[k], "opaque")) total += ms;
+    }
+    fprintf(G.bench.csv, ",%u,%u\n", hc ? c.n[VGN_HW] + c.n[VGN_SW] : 0, hc ? c.n[VGN_TRIS] : 0);
+    if (G.bench.frame >= 10 && total > G.bench.worst_total) G.bench.worst_total = total;
+    if (++G.bench.frame >= G.bench.frames) {
+        int n = G.bench.frames - 10;
+        log_info("vgeo_bench: %d frames, CPU %.2f ms avg; GPU ms avg per pass (frames 10+):", G.bench.frames, G.bench.cpu_sum / G.bench.frames);
+        for (int k = 0; k < G.bench.npass; k++)
+            if (!strncmp(G.bench.names[k], "vgeo_", 5) || !strcmp(G.bench.names[k], "prepass") || !strcmp(G.bench.names[k], "opaque") || !strcmp(G.bench.names[k], "final"))
+                log_info("  %-16s %.3f", G.bench.names[k], G.bench.sum[k] / (n > 0 ? n : 1));
+        log_info("  worst vgeo + prepass + opaque frame: %.3f ms", G.bench.worst_total);
+        fclose(G.bench.csv);
+        G.bench.csv = NULL;
+        G.bench.frames = 0;
+    }
+}
+
+// vgeo_bench [frames=600] [csv=vgeo_bench.csv]
+static void cmd_vgeo_bench(int argc, const char **argv) {
+    if (G.bench.csv) fclose(G.bench.csv);
+    memset(&G.bench, 0, sizeof(G.bench));
+    const char *path = argc > 2 ? argv[2] : "vgeo_bench.csv";
+    G.bench.csv = fopen(path, "w");
+    if (!G.bench.csv) { log_error("vgeo_bench: cannot write %s", path); return; }
+    G.bench.frames = argc > 1 ? DG_MAX(atoi(argv[1]), 20) : 600;
+    log_info("vgeo_bench: %d frames -> %s", G.bench.frames, path);
 }

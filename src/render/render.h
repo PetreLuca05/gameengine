@@ -182,6 +182,16 @@ void render_add_light(const PointLight *light);
 // Spot lights (flashlights): cone from pos along dir, projected cookie (render_set_spot_cookie),
 // no shadows (a light at the eye needs none). Up to 4 per frame.
 typedef struct SpotLight { vec3 pos, dir; float range, inner_deg, outer_deg, intensity; vec3 color; u32 flags; } SpotLight;
+
+// Virtualized geometry placements of the loaded level (docs/VGEO.md "Levels"; mirrors LevelVgeo):
+// replaces every level vgeo instance (vgeo_test_scene instances are cleared too).
+typedef struct RenderVgeoPlacement {
+    const char *mesh;            // "assets/vgeo/x.vgeo" or a model name with "vgeo": true
+    vec3 pos, color;
+    float yaw, scale, scale_jitter, spacing, roughness;
+    u32 grid[2], seed;
+} RenderVgeoPlacement;
+void render_vgeo_set_level(const RenderVgeoPlacement *p, int count);
 void render_add_spot(const SpotLight *light);
 void render_set_spot_cookie(TextureId cookie);
 

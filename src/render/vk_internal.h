@@ -390,6 +390,9 @@ void vkg_record_shadow_cull(VkCommandBuffer cmd);   // before the shadow pass: c
 void vkg_draw_shadow(VkCommandBuffer cmd, u32 cascade);   // inside the shadow pass, per cascade tile
 void vkg_draw_gbuffer(VkCommandBuffer cmd);   // prepass, before the legacy draws
 void vkg_draw_lit(VkCommandBuffer cmd);       // opaque pass
+void vkg_bench_camera(RenderCamera *cam);     // vgeo_bench: spline camera override (render_set_camera)
+void vkg_bench_frame(void);                   // vgeo_bench: per-frame timings
+void vkg_submit_fallback(void);               // r_era 2015 / 2010: discrete LODs through the legacy draws (after compute_matrices)
 
 // vk_vfx.c: GPU particles, decals, distortion
 bool vkx_init(void);

@@ -280,7 +280,7 @@ set_target_properties(fbx_textures PROPERTIES C_STANDARD 11)
 target_link_libraries(fbx_textures PRIVATE dg_animcore)
 
 # Virtualized geometry builder (pure C): the game compiles the same sources through the src glob.
-add_library(dg_vgeo STATIC src/render/vgeo/vgeo_build.c src/render/vgeo/vgeo_procgen.c src/render/vgeo/vgeo_import.c)
+add_library(dg_vgeo STATIC src/render/vgeo/vgeo_build.c src/render/vgeo/vgeo_procgen.c src/render/vgeo/vgeo_procgen_building.c src/render/vgeo/vgeo_import.c)
 set_target_properties(dg_vgeo PROPERTIES C_STANDARD 11)
 target_link_libraries(dg_vgeo PUBLIC dg_animcore meshopt)
 if(MSVC)
@@ -305,6 +305,23 @@ add_dependencies(bench_vgeo dg_shaders)
 add_executable(build_vgeo tools/build_vgeo/build_vgeo.c)
 set_target_properties(build_vgeo PROPERTIES C_STANDARD 11)
 target_link_libraries(build_vgeo PRIVATE dg_vgeo)
+
+# vgeo test scene content (data/levels/vgeo_test.json): generated once into bin/assets/vgeo (never
+# committed). Only regenerated when missing: delete the files after a builder format change.
+set(DG_VGEO_OUT ${CMAKE_BINARY_DIR}/bin/assets/vgeo)
+set(DG_VGEO_CONTENT)
+foreach(item "rock_field;field;10000000" "statue;statue;500000" "building;building;2000000")
+  list(GET item 0 vg_name)
+  list(GET item 1 vg_gen)
+  list(GET item 2 vg_tris)
+  add_custom_command(OUTPUT ${DG_VGEO_OUT}/${vg_name}.vgeo
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${DG_VGEO_OUT}
+    COMMAND $<TARGET_FILE:build_vgeo> --gen ${vg_gen} --tris ${vg_tris} --out ${DG_VGEO_OUT}/${vg_name}.vgeo
+    COMMENT "vgeo content ${vg_name}.vgeo" VERBATIM)
+  list(APPEND DG_VGEO_CONTENT ${DG_VGEO_OUT}/${vg_name}.vgeo)
+endforeach()
+add_custom_target(dg_vgeo_content ALL DEPENDS ${DG_VGEO_CONTENT})
+add_dependencies(dg_vgeo_content build_vgeo)
 
 # Character pipeline (docs/CHARACTERS.md): Skeleton / SkeletalMesh bakes, part splitting, retargeting.
 foreach(tool bake_skeleton bake_mesh split_parts retarget)

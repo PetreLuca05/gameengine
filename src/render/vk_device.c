@@ -203,13 +203,32 @@ bool vkd_create_device(SDL_Window *window) {
         VkExtensionProperties *props = (VkExtensionProperties *)malloc(sizeof(VkExtensionProperties) * n);
         vkEnumerateDeviceExtensionProperties(R->gpu, NULL, &n, props);
         for (u32 i = 0; i < n; i++)
-            if (!strcmp(props[i].extensionName, VK_EXT_MESH_SHADER_EXTENSION_NAME)) R->vg_mesh_shader = true;   // Phase 3 (not enabled yet)
+            if (!strcmp(props[i].extensionName, VK_EXT_MESH_SHADER_EXTENSION_NAME)) R->vg_mesh_shader = true;
             else if (!strcmp(props[i].extensionName, VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME)) {
                 dev_exts[dev_ext_count++] = VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME;
                 R->has_push_descriptor = true;
             }
         free(props);
         if (!R->has_push_descriptor) log_error("vulkan: VK_KHR_push_descriptor missing - post-processing disabled");
+    }
+    // vgeo HW rasteriser (vgeo_raster.c): VK_EXT_mesh_shader without task shaders, maintenance4
+    // (glslang's LocalSizeId in mesh shaders); vertex pulling otherwise.
+    VkPhysicalDeviceMeshShaderFeaturesEXT mesh = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT };
+    if (R->vg_mesh_shader) {
+        VkPhysicalDeviceMeshShaderFeaturesEXT sm = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT };
+        VkPhysicalDeviceVulkan13Features s13 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES };
+        s13.pNext = &sm;
+        VkPhysicalDeviceFeatures2 s2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
+        s2.pNext = &s13;
+        vkGetPhysicalDeviceFeatures2(R->gpu, &s2);
+        R->vg_mesh_shader = sm.meshShader && s13.maintenance4;
+        if (R->vg_mesh_shader) {
+            mesh.meshShader = VK_TRUE;
+            f13.maintenance4 = VK_TRUE;
+            mesh.pNext = f13.pNext;
+            f13.pNext = &mesh;
+            dev_exts[dev_ext_count++] = VK_EXT_MESH_SHADER_EXTENSION_NAME;
+        }
     }
     VkDeviceCreateInfo dci = { VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
     dci.pNext = &f2;

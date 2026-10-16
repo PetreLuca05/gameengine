@@ -23,5 +23,8 @@ void vgeo_gen_torus(VgGenMesh *m, u32 seed, float ring_r, float r, u32 seg_u, u3
 void vgeo_gen_rock_field(VgGenMesh *m, u32 seed, u64 tris);
 // A statue: a body sphere, a head and torus rings (about `tris` triangles).
 void vgeo_gen_statue(VgGenMesh *m, u32 seed, u64 tris);
+// A building: four 16 x 8 m brick walls (continuous grids, bevelled brick relief), about `tris`
+// triangles (vgeo_procgen_building.c).
+void vgeo_gen_building(VgGenMesh *m, u32 seed, u64 tris);
 
 #endif

@@ -1,7 +1,7 @@
 // build_vgeo: offline virtualized-geometry build (docs/VGEO.md "Builder").
 //
 //   build_vgeo <mesh.gltf> [--out file.vgeo] [--stats] [--threads N]
-//   build_vgeo --gen rock|field|statue|torus [--tris N] [--seed S] [--out file.vgeo] [--stats] [--threads N]
+//   build_vgeo --gen rock|field|statue|torus|building [--tris N] [--seed S] [--out file.vgeo] [--stats] [--threads N]
 //
 // Prints the build report (levels, clusters, triangles, error ranges, pages, ms per stage) with
 // --stats, plus wall time and the process peak memory. Generated meshes are never committed: tests and
@@ -56,7 +56,7 @@ int main(int argc, char **argv) {
         else { fprintf(stderr, "unknown option %s\n", argv[i]); return 2; }
     }
     if (!in && !gen) {
-        fprintf(stderr, "usage: build_vgeo <mesh.gltf> | --gen rock|field|statue|torus [--tris N] [--seed S] [--out f] [--stats] [--threads N]\n");
+        fprintf(stderr, "usage: build_vgeo <mesh.gltf> | --gen rock|field|statue|torus|building [--tris N] [--seed S] [--out f] [--stats] [--threads N]\n");
         return 2;
     }
     VgBuildOptions opt;
@@ -74,6 +74,7 @@ int main(int argc, char **argv) {
         if (!strcmp(gen, "rock")) vgeo_gen_rock(&m, seed, (u32)SDL_sqrt((double)(tris ? tris : 80000) / 20.0), 1.0f, c, 0.3f);
         else if (!strcmp(gen, "field")) vgeo_gen_rock_field(&m, seed, tris ? tris : 10000000ull);
         else if (!strcmp(gen, "statue")) vgeo_gen_statue(&m, seed, tris ? tris : 500000ull);
+        else if (!strcmp(gen, "building")) vgeo_gen_building(&m, seed, tris ? tris : 2000000ull);
         else if (!strcmp(gen, "torus")) {
             u32 s = (u32)SDL_sqrt((double)(tris ? tris : 50000) / 2.0);
             vgeo_gen_torus(&m, seed, 1.0f, 0.3f, s * 2, s / 2 + 3, c, 0.2f);

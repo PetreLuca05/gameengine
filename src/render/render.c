@@ -326,6 +326,8 @@ bool render_begin_frame(void) {
 
 void render_set_camera(const RenderCamera *cam) {
     R->cam = *cam;
+    vkg_bench_camera(&R->cam);   // vgeo_bench flythrough
+    cam = &R->cam;
     float aspect = (float)R->swap_extent.width / (float)DG_MAX(1u, R->swap_extent.height);
     R->view = mat4_fps_view(cam->pos, cam->yaw, cam->pitch, cam->roll);
     R->proj = mat4_perspective(cam->fov_deg * DG_DEG2RAD, aspect, cam->znear, cam->zfar);
@@ -1741,6 +1743,8 @@ void render_end_frame(void) {
 
     FrameData *fd = (FrameData *)f->ubo.mapped;
     compute_matrices(fd);
+    vkg_submit_fallback();   // vgeo era fallback: discrete LOD draws (r_vgeo 0)
+    vkg_bench_frame();
     memset(&F, 0, sizeof(F));
     F.f = f;
 

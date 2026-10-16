@@ -661,11 +661,21 @@ static void destroy_world(void) {
 
 static bool load_map(World *w, const char *map) {
     if (!strcmp(map, "streaming") || !strcmp(map, "terrain") || !strcmp(map, "flat")) {
+        render_vgeo_set_level(NULL, 0);
         return chunks_create(w, !strcmp(map, "flat") ? CHUNKS_FLAT : CHUNKS_NOISE, (u32)G->world_seed->i);
     }
     char path[128];
     snprintf(path, sizeof(path), "data/levels/%s.json", map);
-    return level_load(w, path);
+    bool ok = level_load(w, path);
+    // Virtualized geometry placements go to the renderer (render-only, no collision).
+    RenderVgeoPlacement pl[MAX_LEVEL_VGEO];
+    int n = ok ? w->level.vgeo_count : 0;
+    for (int i = 0; i < n; i++) {
+        const LevelVgeo *v = &w->level.vgeo[i];
+        pl[i] = (RenderVgeoPlacement){ v->mesh, v->pos, v->color, v->yaw, v->scale, v->scale_jitter, v->spacing, v->roughness, { v->grid[0], v->grid[1] }, v->seed };
+    }
+    render_vgeo_set_level(pl, n);
+    return ok;
 }
 
 bool game_host(const char *map) {
