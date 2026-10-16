@@ -1,0 +1,7 @@
+#version 450
+// Shadow cascade draw args: VkDrawIndirectCommand { 384, HW cluster count, 0, 0 } (vgeo_shadow.vert).
+#extension GL_GOOGLE_include_directive : require
+#define VG_COMPUTE
+#include "vgeo_common.glsl"
+layout(local_size_x = 1) in;
+void main() { ctr.args[VGA_DRAW_HW] = uvec4(384u, min(ctr.n[VGN_HW], V.caps0.z), 0u, 0u); }

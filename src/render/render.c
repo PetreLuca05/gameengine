@@ -1139,6 +1139,7 @@ static void exec_prepass(VkCommandBuffer cmd, void *u) {
     bind_frame(cmd);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 1, 1, &R->textures[R->white_tex].set, 0, NULL);
     post_push_lit_inputs(cmd, NULL, false);
+    vkg_draw_gbuffer(cmd);   // vgeo surfaces first (depth export), the legacy draws test against them
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_PREPASS]);
     draw_items(cmd, R->draws, R->draw_count, false, R->r_culling->i != 0, 0);
     draw_skinned(cmd, 0, PIPE_PREPASS_SKIN, PIPE_PREPASS, F.skin_main);
@@ -1153,6 +1154,7 @@ static void exec_opaque(VkCommandBuffer cmd, void *u) {
     post_push_lit_inputs(cmd, &F.lit, false);
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[R->r_wireframe->i ? PIPE_LIT_WIRE : PIPE_LIT]);
     draw_items(cmd, R->draws, R->draw_count, false, R->r_culling->i != 0, 0);
+    vkg_draw_lit(cmd);   // vgeo pixels (depth equal to the exported depth)
     vkCmdEndRendering(cmd);
 }
 
@@ -1700,6 +1702,7 @@ void render_end_frame(void) {
     vkx_record_compute(cmd);
 
     // ---------------------------------------------------------- shadow pass
+    vkg_record_shadow_cull(cmd);   // vgeo cascade views (docs/VGEO.md)
     vkr_image_barrier(cmd, R->shadow.image, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
                       VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, 0,
                       VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
@@ -1731,6 +1734,8 @@ void render_end_frame(void) {
                 vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 0, 1, &f->frame_set, 0, NULL);
                 g_shadow_cascade = (u32)k;
                 draw_items(cmd, R->draws, R->draw_count, true, false, 0);
+                vkg_draw_shadow(cmd, (u32)k);
+                vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_SHADOW]);
                 if (F.cpu_skinned) draw_cpu_skinned(cmd, f, F.cpu_skinned, 1);
                 else if (skin_shadow.batch_count) {
                     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_SKIN_SHADOW]);

@@ -189,6 +189,7 @@ bool vkd_create_device(SDL_Window *window) {
     f2.features.shaderStorageImageWriteWithoutFormat = supported.shaderStorageImageWriteWithoutFormat;
     f2.features.independentBlend = supported.independentBlend;
     f2.features.fragmentStoresAndAtomics = supported.fragmentStoresAndAtomics;
+    f2.features.vertexPipelineStoresAndAtomics = supported.vertexPipelineStoresAndAtomics;   // vgeo vertex pulling (shared writable set)
     f2.features.shaderInt64 = supported.shaderInt64;
     f2.features.multiDrawIndirect = supported.multiDrawIndirect;
     f2.features.drawIndirectFirstInstance = supported.drawIndirectFirstInstance;
