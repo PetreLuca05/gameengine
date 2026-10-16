@@ -13,6 +13,7 @@
 #include "debug_draw.h"
 #include "vgeo/vgeo_cull.h"
 #include "vgeo/vgeo_raster.h"
+#include "vgeo/vgeo_stream.h"
 #include "vgeo/vgeo_procgen.h"
 #include "vgeo/vgeo_import.h"
 #include "assets/assets.h"
@@ -32,6 +33,9 @@ static struct {
     VgCuller cull;
     FgRes hiz, hiz_cur, depth;
     VgRaster raster;
+    VgStream stream;
+    bool stream_ok;
+    Cvar *pool_mb, *pages_per_frame;
     VgViewGpu frozen;
     bool have_frozen;
     u32 test_meshes;             // procedural rocks registered by vgeo_test_scene
@@ -177,8 +181,14 @@ static void cmd_vgeo_stats(int argc, const char **argv) {
     (void)argv;
     if (!G.ok) { log_info("vgeo: unavailable on this device"); return; }
     VgScene *s = &G.scene;
-    log_info("vgeo: %u meshes, %u instances, %u cells, %u pages resident (%.0f MB), BVH depth %u", s->mesh_count, s->instance_count, s->cell_count, s->page_count,
-             (double)s->page_count * VGEO_PAGE_SIZE / (1024.0 * 1024.0), s->max_depth);
+    log_info("vgeo: %u meshes, %u instances, %u cells, %u pages, pool %u slots (%.0f MB), BVH depth %u", s->mesh_count, s->instance_count, s->cell_count, s->page_count,
+             s->pool_slots, (double)s->pool_slots * VGEO_PAGE_SIZE / (1024.0 * 1024.0), s->max_depth);
+    if (G.stream_ok) {
+        const VgStreamStats *ss = vg_stream_stats(&G.stream);
+        log_info("vgeo: streaming: %u resident, %u free, requested %u, loaded %u / evicted %u last frame (%llu / %llu total), %u waiting, cpu %.3f ms, gpu %.3f ms",
+                 ss->resident, ss->free, ss->requested, ss->loaded, ss->evicted, (unsigned long long)ss->loaded_total, (unsigned long long)ss->evicted_total, ss->waiting,
+                 ss->cpu_ms, ss->gpu_ms);
+    }
     VgCounters c;
     if (!vg_cull_counters(&G.cull, 0, &c)) { log_info("vgeo: no culled frame yet"); return; }
     log_info("vgeo: pass 1: cells %u (+%u occluded), instances %u (+%u occluded), nodes %u (+%u occluded), clusters selected %u",
@@ -260,6 +270,8 @@ void vkg_init(void) {
     G.debug = cvar_reg_int("r_vgeo_debug", 0, 0, 8, 0, "vgeo debug view (Phase 3): 1 cluster, 2 triangle, 3 LOD, 4 error, 5 SW/HW, 6 residency, 7 overdraw, 8 instance");
     G.debug_spheres = cvar_reg_bool("r_vgeo_debug_spheres", false, 0, "vgeo: draw the culling spheres of up to 4096 visible clusters (HW green, SW cyan)");
     G.shadows = cvar_reg_bool("r_vgeo_shadows", true, CVAR_ARCHIVE, "vgeo: draw vgeo clusters into the sun shadow cascades");
+    G.pool_mb = cvar_reg_int("r_vgeo_pool_mb", 512, 16, 8192, CVAR_ARCHIVE, "vgeo: GPU page pool budget (MB of 128 KiB pages; applied on the next scene upload)");
+    G.pages_per_frame = cvar_reg_int("r_vgeo_stream_pages_per_frame", 64, 1, 1024, CVAR_ARCHIVE, "vgeo: pages streamed in per frame");
     cmd_register("vgeo_stats", cmd_vgeo_stats, "virtualized geometry: scene, last frame's culling counters and pass timings");
     cmd_register("vgeo_test_scene", cmd_vgeo_test_scene, "vgeo_test_scene [count=20000] [spacing=6] [meshes=4]: procedural rock field around the camera");
     cmd_register("vgeo_clear", cmd_vgeo_clear, "remove every vgeo instance");
@@ -296,6 +308,8 @@ void vkg_init(void) {
         return;
     }
     vg_raster_resize(&G.raster, R->hdr.w, R->hdr.h);
+    VgStreamConfig sc = { (u32)G.pool_mb->i, (u32)G.pages_per_frame->i };
+    G.stream_ok = vg_stream_init(&G.stream, &G.scene, &G.cull, &sc);
     if (!create_gfx()) {
         log_error("vgeo: graphics pipelines unavailable");
         destroy_gfx();
@@ -311,6 +325,8 @@ void vkg_shutdown(void) {
     for (u32 f = 0; f < FRAMES_IN_FLIGHT; f++) vgc_buffer_free(&G.ctx, &G.dbg_rb[f]);
     vkDeviceWaitIdle(R->device);
     destroy_gfx();
+    if (G.stream_ok) vg_stream_shutdown(&G.stream);
+    G.stream_ok = false;
     vg_raster_shutdown(&G.raster);
     vg_cull_shutdown(&G.cull);
     vgeo_scene_free(&G.scene);
@@ -370,9 +386,6 @@ static VgHizRef hiz_ref(FgRes r) {
 static void exec_cull(VkCommandBuffer cmd, void *u) {
     (void)u;
     u32 frame = R->frame_slot;
-    vg_cull_collect(&G.cull, frame);
-    debug_spheres(frame);
-    vg_raster_resize(&G.raster, R->hdr.w, R->hdr.h);
     VgViewGpu v;
     float fov = R->cam.fov_deg * DG_DEG2RAD;
     float eye[3] = { R->cam.pos.x, R->cam.pos.y, R->cam.pos.z };
@@ -475,9 +488,25 @@ void vkg_graph_hiz(int depth_res) {
 
 // Before the shadow pass (outside rendering): one orthographic vgeo view per cascade (slots 1-3),
 // frustum + LOD only, every cluster to the HW list, and its draw args.
+// Start of the frame's vgeo work (before every cull): last time's counters / debug readback of this
+// frame slot (its fence has been waited), the visibility buffer size, page streaming.
+static void frame_begin(VkCommandBuffer cmd) {
+    u32 frame = R->frame_slot;
+    vg_cull_collect(&G.cull, frame);
+    debug_spheres(frame);
+    vg_raster_resize(&G.raster, R->hdr.w, R->hdr.h);
+    if (G.stream_ok) {
+        VgStreamConfig sc = { (u32)G.pool_mb->i, (u32)G.pages_per_frame->i };
+        vg_stream_set_config(&G.stream, &sc);
+        vg_stream_update(&G.stream, cmd, frame);
+    }
+}
+
 void vkg_record_shadow_cull(VkCommandBuffer cmd) {
     G.shadow_culled = false;
-    if (!active() || !G.shadows->i || R->r_shadow_quality->i <= 0) return;
+    if (!active()) return;
+    frame_begin(cmd);
+    if (!G.shadows->i || R->r_shadow_quality->i <= 0) return;
     u32 frame = R->frame_slot;
     u32 tile = R->shadow_size / 2;
     for (u32 k = 0; k < 3; k++) {
@@ -563,6 +592,7 @@ static u32 level_mesh(const RenderVgeoPlacement *pl) {
         if (!strcmp(G.named[i].name, pl->mesh)) return G.named[i].mesh;
     if (G.named_count >= 64) return ~0u;
     const VgBuilt *src = NULL;
+    char file_path[512] = "";
     VgMaterial mat;
     memset(&mat, 0, sizeof(mat));
     mat.color[0] = pl->color.x;
@@ -573,15 +603,15 @@ static u32 level_mesh(const RenderVgeoPlacement *pl) {
     mat.tex_scale = 1.0f;
     const Model *model = NULL;
     if (name_is_file(pl->mesh)) {
-        char path[512];
-        src = vgeo_file_get(platform_data_path(pl->mesh, path, sizeof(path)));
+        src = vgeo_file_get(platform_data_path(pl->mesh, file_path, sizeof(file_path)));
         if (!src) { log_warn("vgeo: %s missing or invalid (generated at build time by tools/build_vgeo)", pl->mesh); return ~0u; }
     } else {
         model = assets_model(assets_model_id(pl->mesh));
         if (!model || !model->vgeo) { log_warn("vgeo: model '%s' has no vgeo data (\"vgeo\": true in data/assets.json)", pl->mesh); return ~0u; }
         src = model->vgeo;
     }
-    u32 mesh = vgeo_scene_add_mesh(&G.scene, src);
+    // .vgeo files stream their pages from the file (the pool holds what the views need)
+    u32 mesh = file_path[0] ? vgeo_scene_add_mesh_file(&G.scene, src, file_path) : vgeo_scene_add_mesh(&G.scene, src);
     fallback_register(mesh, src, true);
     u32 nm = src->hdr.material_count ? src->hdr.material_count : 1, base = 0;
     for (u32 k = 0; k < nm; k++) {
@@ -620,6 +650,10 @@ void render_vgeo_set_level(const RenderVgeoPlacement *p, int count) {
         for (u32 k = 0; k < n; k++) vgeo_scene_add_instance(&G.scene, mesh, xf[k].pos, xf[k].rot, xf[k].scale);
         total += n;
         free(xf);
+    }
+    if (G.stream_ok) {   // the pool budget applies at the upload
+        VgStreamConfig sc = { (u32)G.pool_mb->i, (u32)G.pages_per_frame->i };
+        vg_stream_set_config(&G.stream, &sc);
     }
     if (!vgeo_scene_commit(&G.scene)) log_error("vgeo: scene upload failed");
     if (count) log_info("vgeo: level: %u instances of %u meshes, %u cells", total, G.named_count, G.scene.cell_count);
@@ -812,7 +846,7 @@ void vkg_bench_frame(void) {
             fprintf(G.bench.csv, ",%s", nm);
             G.bench.npass++;
         }
-        fprintf(G.bench.csv, ",vis_clusters,vis_tris\n");
+        fprintf(G.bench.csv, ",vis_clusters,vis_tris,stream_cpu_ms,stream_loaded,stream_evicted,stream_waiting\n");
     }
     VgCounters c;
     bool hc = vg_cull_counters(&G.cull, 0, &c);
@@ -827,7 +861,9 @@ void vkg_bench_frame(void) {
         if (G.bench.frame >= 10) G.bench.sum[k] += ms;
         if (!strncmp(G.bench.names[k], "vgeo_", 5) || !strcmp(G.bench.names[k], "prepass") || !strcmp(G.bench.names[k], "opaque")) total += ms;
     }
-    fprintf(G.bench.csv, ",%u,%u\n", hc ? c.n[VGN_HW] + c.n[VGN_SW] : 0, hc ? c.n[VGN_TRIS] : 0);
+    fprintf(G.bench.csv, ",%u,%u", hc ? c.n[VGN_HW] + c.n[VGN_SW] : 0, hc ? c.n[VGN_TRIS] : 0);
+    const VgStreamStats *ss = G.stream_ok ? vg_stream_stats(&G.stream) : NULL;
+    fprintf(G.bench.csv, ",%.3f,%u,%u,%u\n", ss ? ss->cpu_ms : 0.0f, ss ? ss->loaded : 0, ss ? ss->evicted : 0, ss ? ss->waiting : 0);
     if (G.bench.frame >= 10 && total > G.bench.worst_total) G.bench.worst_total = total;
     if (++G.bench.frame >= G.bench.frames) {
         int n = G.bench.frames - 10;

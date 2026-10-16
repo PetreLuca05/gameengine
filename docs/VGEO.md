@@ -21,7 +21,7 @@ Simplification and clustering use meshoptimizer v0.22 (`simplifier.cpp`, `cluste
 | 1. Offline builder + DAG (CPU) | **done** |
 | 2. GPU culling / LOD selection / Hi-Z | **done** |
 | 3. Visibility buffer raster + resolve | **done** |
-| 4. Streaming | — |
+| 4. Streaming | **done** |
 | 5. Integration, `r_era`, test scene, `bench_vgeo` | **done** |
 | 6. Skinned | — |
 | 7. Foliage support | — |
@@ -260,6 +260,17 @@ opaque         legacy forward lighting, then the vgeo lit resolve (vgeo_lit.frag
   `r_foliage_density` (Phase 7), `r_era`.
 - Commands: `vgeo_stats`, `vgeo_test_scene [count] [spacing] [meshes]` (procedural rocks around the camera),
   `vgeo_clear`, `vgeo_bench [frames=600] [csv]`.
+
+### Streaming in the renderer
+
+- `vg_stream_init` after the culler (pool budget `r_vgeo_pool_mb`, default 512; `r_vgeo_stream_pages_per_frame`
+  64); every frame, before the first cull (the sun cascades), the frame slot's counters / debug readbacks are
+  collected and `vg_stream_update` runs; the budget applies at the next scene upload (`render_vgeo_set_level`
+  sets it first). Level `.vgeo` meshes stream their pages from the file (`vgeo_scene_add_mesh_file`);
+  procedural test meshes from memory. `vgeo_stats` prints resident / free / loaded / evicted / waiting.
+- `map vgeo_test`, `vgeo_bench 300`, 96 MB pool (768 slots for 2599 pages): 695 pages loaded, 235 evicted, stream
+  CPU 0.015 ms mean / 0.30 max per frame, the vgeo passes unchanged (worst frame 1.87 ms). 512 MB: everything
+  needed fits (1056 resident).
 
 ### Resolve and lighting (`shaders/vgeo_gbuffer.frag`, `vgeo_lit.frag`, `vgeo/vg_resolve.glsl`)
 
