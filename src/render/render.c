@@ -1632,7 +1632,7 @@ static void build_frame_graph(FrameData *fd) {
     fg_write(p, F.normal, FG_COLOR);
     fg_write(p, F.material, FG_COLOR);
     fg_write(p, F.velocity, FG_COLOR);
-    vkg_graph_hiz(F.depth);    // this frame's occlusion Hi-Z
+    vkg_graph_hiz(F.depth, F.velocity);    // this frame's occlusion Hi-Z
 
     post_screen_space(&F.lit);
     const PostSettings *ps = post_settings();

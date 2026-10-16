@@ -385,7 +385,7 @@ u32 render_draw_shadow_casters(VkCommandBuffer cmd, FrameResources *f, vec4 sphe
 void vkg_init(void);
 void vkg_shutdown(void);
 void vkg_graph_cull(int depth_res);    // frame graph, before the prepass: culling against last frame's Hi-Z
-void vkg_graph_hiz(int depth_res);     // frame graph, after the prepass: this frame's Hi-Z (next frame's history)
+void vkg_graph_hiz(int depth_res, int velocity_res);     // frame graph, after the prepass: this frame's Hi-Z (next frame's history)
 void vkg_record_shadow_cull(VkCommandBuffer cmd);   // before the shadow pass: cascade views
 void vkg_draw_shadow(VkCommandBuffer cmd, u32 cascade);   // inside the shadow pass, per cascade tile
 void vkg_draw_gbuffer(VkCommandBuffer cmd);   // prepass, before the legacy draws

@@ -321,9 +321,11 @@ opaque         legacy forward lighting, then the vgeo lit resolve (vgeo_lit.frag
   lights) and composite with the legacy scene (`docs` screenshots in the session log).
 - vgeo vs legacy (`tools/tests/vgeo_legacy_diff.sh`): the same rock scene through vgeo and through the
   fallback at LOD 0 detail: 0.95 % of the pixels differ by more than 24 / 255 (gate 1 %).
-- Not yet tested as specified: depth export vs raster depth and velocity vs a CPU reference are exact by
-  construction (the export writes the visibility buffer's depth; velocity uses the legacy prepass matrices) but
-  have no automated readback test.
+- `vgeo_check_resolve` (console; reads one frame back): every pixel the visibility buffer covers holds exactly
+  its depth or a nearer legacy depth, and its velocity equals the reprojection of that depth through the
+  current / previous unjittered views. During a slow `vgeo_test` flythrough with validation: 23 475 + 31 025 exact
+  pixels (4958 / 6274 under nearer legacy surfaces), 0 missing, velocity error max 7.0e-7 UV for a mean velocity of
+  2.5e-4 / 3.8e-4 UV, 0 validation messages.
 
 ### Tests (`ctest -R vgeo_gpu`, runs `--validation`)
 

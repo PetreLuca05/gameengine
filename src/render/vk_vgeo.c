@@ -35,6 +35,14 @@ static struct {
     VgRaster raster;
     VgStream stream;
     bool stream_ok;
+    // vgeo_check_resolve: one frame's depth / velocity / visibility buffer read back and verified.
+    struct {
+        int state;               // 0 idle, 1 requested, 2 copied in frame slot `slot`
+        u32 slot, w, h;
+        VgBuffer depth, vel, vis;
+        mat4 inv_raster_vp, vp_nj, prev_vp_nj;
+        FgRes velocity;
+    } check;
     Cvar *pool_mb, *pages_per_frame;
     VgViewGpu frozen;
     bool have_frozen;
@@ -76,6 +84,7 @@ static struct {
 static void fallback_register(u32 mesh, const VgBuilt *b, bool persistent);
 static void vkg_register_era(void);
 static void cmd_vgeo_bench(int argc, const char **argv);
+static void cmd_vgeo_check_resolve(int argc, const char **argv);
 
 // ------------------------------------------------------------------ graphics pipelines
 
@@ -275,6 +284,7 @@ void vkg_init(void) {
     cmd_register("vgeo_stats", cmd_vgeo_stats, "virtualized geometry: scene, last frame's culling counters and pass timings");
     cmd_register("vgeo_test_scene", cmd_vgeo_test_scene, "vgeo_test_scene [count=20000] [spacing=6] [meshes=4]: procedural rock field around the camera");
     cmd_register("vgeo_clear", cmd_vgeo_clear, "remove every vgeo instance");
+    cmd_register("vgeo_check_resolve", cmd_vgeo_check_resolve, "verify the next frame's vgeo depth export and velocity against the visibility buffer");
     vkg_register_era();
     cmd_register("vgeo_bench", cmd_vgeo_bench, "vgeo_bench [frames=600] [csv]: spline flythrough of map vgeo_test, per-pass GPU ms to CSV + summary");
     if (!R->vg_scalar || !R->vg_int64) {
@@ -325,6 +335,9 @@ void vkg_shutdown(void) {
     for (u32 f = 0; f < FRAMES_IN_FLIGHT; f++) vgc_buffer_free(&G.ctx, &G.dbg_rb[f]);
     vkDeviceWaitIdle(R->device);
     destroy_gfx();
+    vgc_buffer_free(&G.ctx, &G.check.depth);
+    vgc_buffer_free(&G.ctx, &G.check.vel);
+    vgc_buffer_free(&G.ctx, &G.check.vis);
     if (G.stream_ok) vg_stream_shutdown(&G.stream);
     G.stream_ok = false;
     vg_raster_shutdown(&G.raster);
@@ -476,7 +489,94 @@ void vkg_graph_cull(int depth_res) {
     if (G.hiz_cur != FG_NONE) fg_read(p, G.hiz_cur, FG_SAMPLED);
 }
 
-void vkg_graph_hiz(int depth_res) {
+static void exec_check(VkCommandBuffer cmd, void *u) {
+    (void)u;
+    u32 w = R->hdr.w, h = R->hdr.h;
+    VkDeviceSize n = (VkDeviceSize)w * h;
+    if (G.check.depth.size < n * 4) {
+        vgc_buffer_free(&G.ctx, &G.check.depth);
+        vgc_buffer_free(&G.ctx, &G.check.vel);
+        vgc_buffer_free(&G.ctx, &G.check.vis);
+        G.check.depth = vgc_buffer(&G.ctx, n * 4, VK_BUFFER_USAGE_TRANSFER_DST_BIT, VGM_READBACK);
+        G.check.vel = vgc_buffer(&G.ctx, n * 4, VK_BUFFER_USAGE_TRANSFER_DST_BIT, VGM_READBACK);
+        G.check.vis = vgc_buffer(&G.ctx, n * 8, VK_BUFFER_USAGE_TRANSFER_DST_BIT, VGM_READBACK);
+    }
+    VkBufferImageCopy r = { 0 };
+    r.imageSubresource.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+    r.imageSubresource.layerCount = 1;
+    r.imageExtent.width = w;
+    r.imageExtent.height = h;
+    r.imageExtent.depth = 1;
+    vkCmdCopyImageToBuffer(cmd, fg_image(G.depth), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, G.check.depth.buffer, 1, &r);
+    r.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    vkCmdCopyImageToBuffer(cmd, fg_image(G.check.velocity), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, G.check.vel.buffer, 1, &r);
+    VkBufferCopy bc = { 0, 0, n * 8 };
+    vkCmdCopyBuffer(cmd, G.raster.vis.buffer, G.check.vis.buffer, 1, &bc);
+    G.check.slot = R->frame_slot;
+    G.check.w = w;
+    G.check.h = h;
+    G.check.inv_raster_vp = mat4_inverse(mat4_mul(R->proj_j, R->view));
+    G.check.vp_nj = R->view_proj_nj;
+    G.check.prev_vp_nj = R->prev_view_proj_nj;
+    G.check.state = 2;
+}
+
+// Depth export: every pixel the visibility buffer covers holds exactly its depth (or a nearer legacy
+// one); velocity there equals the reprojection of that depth (current / previous unjittered views).
+static void check_analyse(void) {
+    vmaInvalidateAllocation(G.ctx.vma, G.check.depth.alloc, 0, VK_WHOLE_SIZE);
+    vmaInvalidateAllocation(G.ctx.vma, G.check.vel.alloc, 0, VK_WHOLE_SIZE);
+    vmaInvalidateAllocation(G.ctx.vma, G.check.vis.alloc, 0, VK_WHOLE_SIZE);
+    const float *dep = (const float *)G.check.depth.mapped;
+    const u16 *vel = (const u16 *)G.check.vel.mapped;
+    const u64 *vis = (const u64 *)G.check.vis.mapped;
+    u32 w = G.check.w, h = G.check.h, covered = 0, exact = 0, behind = 0, legacy = 0, vbad = 0;
+    double vmax = 0, vsum = 0, vmag = 0;
+    for (u32 y = 0; y < h; y++)
+        for (u32 x = 0; x < w; x++) {
+            u64 e = vis[(size_t)y * w + x];
+            if (!e) continue;
+            covered++;
+            u32 hi = (u32)(e >> 32);
+            float vd;
+            memcpy(&vd, &hi, 4);
+            vd = 1.0f - vd;
+            float d = dep[(size_t)y * w + x];
+            if (d > vd) { behind++; continue; }   // the export missed it
+            if (d < vd) { legacy++; continue; }   // a legacy draw is nearer
+            exact++;
+            vec4 ndc = v4(((float)x + 0.5f) / (float)w * 2.0f - 1.0f, ((float)y + 0.5f) / (float)h * 2.0f - 1.0f, d, 1.0f);
+            vec4 wp = mat4_mul_v4(G.check.inv_raster_vp, ndc);
+            vec3 p = v3(wp.x / wp.w, wp.y / wp.w, wp.z / wp.w);
+            vec4 c = mat4_mul_v4(G.check.vp_nj, v4(p.x, p.y, p.z, 1)), q = mat4_mul_v4(G.check.prev_vp_nj, v4(p.x, p.y, p.z, 1));
+            float ex = (c.x / c.w - q.x / q.w) * 0.5f, ey = (c.y / c.w - q.y / q.w) * 0.5f;
+            float gx = vgeo_half_to_float(vel[((size_t)y * w + x) * 2]), gy = vgeo_half_to_float(vel[((size_t)y * w + x) * 2 + 1]);
+            double err = sqrt((double)(gx - ex) * (gx - ex) + (double)(gy - ey) * (gy - ey));
+            vsum += err;
+            vmag += sqrt((double)ex * ex + (double)ey * ey);
+            if (err > vmax) vmax = err;
+            if (err > 1e-3 + 0.01 * sqrt((double)ex * ex + (double)ey * ey)) vbad++;
+        }
+    log_info("vgeo_check_resolve: %u covered pixels: %u exact depth, %u under a nearer legacy surface, %u MISSING (depth behind); velocity vs reprojection: "
+             "max %.2e, mean %.2e (UV; mean |velocity| %.2e), %u over tolerance -> %s",
+             covered, exact, legacy, behind, vmax, exact ? vsum / exact : 0.0, exact ? vmag / exact : 0.0, vbad, behind == 0 && vbad == 0 && exact > 0 ? "PASS" : "FAIL");
+    G.check.state = 0;
+}
+
+static void cmd_vgeo_check_resolve(int argc, const char **argv) {
+    (void)argc;
+    (void)argv;
+    if (!active()) { log_info("vgeo_check_resolve: vgeo inactive"); return; }
+    G.check.state = 1;
+}
+
+void vkg_graph_hiz(int depth_res, int velocity_res) {
+    if (active() && G.check.state == 1) {   // the raster runs in this graph (vgeo_raster)
+        G.check.velocity = velocity_res;
+        int c = fg_pass("vgeo_check", exec_check, NULL);
+        fg_read(c, depth_res, FG_TRANSFER_SRC);
+        fg_read(c, velocity_res, FG_TRANSFER_SRC);
+    }
     if (!active() || G.hiz == FG_NONE || G.occlusion->i == 0) return;
     int p = fg_pass("vgeo_hiz", exec_hiz, NULL);
     if (p < 0) return;
@@ -492,6 +592,7 @@ void vkg_graph_hiz(int depth_res) {
 // frame slot (its fence has been waited), the visibility buffer size, page streaming.
 static void frame_begin(VkCommandBuffer cmd) {
     u32 frame = R->frame_slot;
+    if (G.check.state == 2 && G.check.slot == frame) check_analyse();   // this slot's fence has been waited
     vg_cull_collect(&G.cull, frame);
     debug_spheres(frame);
     vg_raster_resize(&G.raster, R->hdr.w, R->hdr.h);
