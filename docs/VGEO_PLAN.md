@@ -1,6 +1,6 @@
 # Virtualized geometry (vgeo): plan and data layout
 
-Status: **Phases 1-2 are implemented**; `docs/VGEO.md` documents the built system, and *As built* notes below
+Status: **Phases 1-2 and the Phase 4 streaming module are implemented**; `docs/VGEO.md` documents the built system, and *As built* notes below
 mark where it deviates from this plan. Reference design: Karis et al., "A Deep Dive into
 Nanite Virtualized Geometry" (SIGGRAPH 2021), and the UE 5.5+ Nanite skinning and foliage designs. `docs/VGEO.md`
 also lists every deliberate simplification.
@@ -348,6 +348,27 @@ Two rasterisers write the same 64-bit value with `atomicMax`:
 - Never evict a page referenced by this frame's visible list (CPU audit of readback).
 - A pool that is too small degrades detail only (no missing geometry).
 - A cold start draws every mesh on frame 1 from root pages.
+
+*As built (Phase 4):* `src/render/vgeo/vgeo_stream.{c,h}` (`docs/VGEO.md` "Streaming"); the renderer glue and the
+cvars are left to `vk_vgeo.c`.
+- **Stamps at the leaves**, not in `vg_cull_clusters`: a slot is stamped (plain store of the frame,
+  `VgViewGpu.frame`, binding 20) for every group a leaf emits, the same test that makes requests. Requested and
+  used then mean the same thing, and a page whose clusters are all frustum / cone / Hi-Z culled this frame but
+  whose group is needed is not evicted and re-requested in a loop.
+- **Readback latency F + 1 frames, not F:** the request lists, counts and stamps are copied by the next frame's
+  update (before its culls) instead of a hook at the end of the cull, so `vgeo_cull.c` is unchanged apart from the
+  binding. Eviction uses `last_used < frame - (F + 1)` on that mirror.
+- **Page dependencies** (not in the plan): residency is closed under "Q holds parents of P's clusters". Without
+  it, a missing group with a resident descendant would draw both the coarse fallback and the finer clusters
+  (overlap; never a hole). Loads bring missing parents first; pages with resident dependents are not evicted.
+- **Quarantine:** evicted slots are reused F frames later, so no frame in flight sees a page change. The plan's
+  "never evict a slot stamped within F + 1 frames" alone cannot see the stamps of the frames still in flight.
+- **File reads** run on the streamer's own worker thread (the vgeo libraries do not link `jobs.c`) with
+  `platform_read_file_range`; a batch is copied by the next update (it waits if the read is late). Memory
+  sources (procedural / built meshes) load synchronously.
+- **Page table patch:** one compute scatter of (page, slot | ~0) pairs from the staging ring; the pool copies are
+  `vkCmdCopyBuffer` regions. A slot holds the compact page (no 128 KiB zero padding is uploaded).
+- `vgeo_scene` no longer keeps a CPU copy of the whole pool: page meta (header + clusters) plus the page source.
 
 ## 6. Phase 5: integration, era presets, test scene
 
