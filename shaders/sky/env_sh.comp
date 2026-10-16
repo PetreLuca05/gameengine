@@ -1,0 +1,65 @@
+#version 450
+// Irradiance SH9 of the environment. pc.u0.x = 0: project the next environment's 32 x 32 level
+// (solid angle weighted for the octahedral map) into sh[9..17]; 1: ease sh[0..8] towards it by
+// SK.env.x (pc.u0.y = 1: snap). sh[18].x = luminance of the DC term (readback / tests).
+#extension GL_GOOGLE_include_directive : require
+#include "sky_common.glsl"
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 4) uniform sampler2D env;
+layout(std430, set = 0, binding = 14) buffer SH { vec4 sh[20]; } O;
+shared vec3 s_sh[64][9];
+shared float s_w[64];
+
+void basis(vec3 d, out float y[9]) {
+    y[0] = 0.282095;
+    y[1] = 0.488603 * d.y; y[2] = 0.488603 * d.z; y[3] = 0.488603 * d.x;
+    y[4] = 1.092548 * d.x * d.y; y[5] = 1.092548 * d.y * d.z; y[6] = 0.315392 * (3.0 * d.z * d.z - 1.0);
+    y[7] = 1.092548 * d.x * d.z; y[8] = 0.546274 * (d.x * d.x - d.y * d.y);
+}
+
+void main() {
+    uint li = gl_LocalInvocationIndex;
+    if (pc.u0.x == 1u) {
+        if (li < 9u) {
+            float k = pc.u0.y == 1u ? 1.0 : clamp(SK.env.x, 0.0, 1.0);
+            O.sh[li] = vec4(mix(O.sh[li].rgb, O.sh[9u + li].rgb, k), 0.0);
+        }
+        barrier();
+        memoryBarrierBuffer();
+        if (li == 0u) O.sh[18] = vec4(dot(O.sh[0].rgb, vec3(0.2126, 0.7152, 0.0722)), dot(O.sh[9].rgb, vec3(0.2126, 0.7152, 0.0722)), O.sh[18].zw);
+        return;
+    }
+    vec3 acc[9];
+    for (int i = 0; i < 9; i++) acc[i] = vec3(0.0);
+    float wsum = 0.0;
+    uvec2 lp = gl_LocalInvocationID.xy;
+    for (uint j = 0u; j < 16u; j++) {
+        uvec2 t = lp * 4u + uvec2(j & 3u, j >> 2u);
+        vec2 uv = (vec2(t) + 0.5) / 32.0;
+        vec2 e = uv * 2.0 - 1.0;
+        vec3 q = vec3(e.x, 1.0 - abs(e.x) - abs(e.y), e.y);
+        if (q.y < 0.0) q.xz = (1.0 - abs(q.zx)) * vec2(q.x >= 0.0 ? 1.0 : -1.0, q.z >= 0.0 ? 1.0 : -1.0);
+        float l = length(q);
+        float w = 1.0 / (l * l * l);   // texel solid angle of the octahedral map (up to a constant)
+        vec3 d = oct_decode_dir(uv);
+        vec3 c = textureLod(env, uv, 2.0).rgb;
+        float y[9];
+        basis(d, y);
+        for (int i = 0; i < 9; i++) acc[i] += c * y[i] * w;
+        wsum += w;
+    }
+    for (int i = 0; i < 9; i++) s_sh[li][i] = acc[i];
+    s_w[li] = wsum;
+    barrier();
+    for (uint s = 32u; s > 0u; s >>= 1u) {
+        if (li < s) {
+            for (int i = 0; i < 9; i++) s_sh[li][i] += s_sh[li + s][i];
+            s_w[li] += s_w[li + s];
+        }
+        barrier();
+    }
+    if (li == 0u) {
+        float norm = 4.0 * PI / max(s_w[0], 1e-6);
+        for (int i = 0; i < 9; i++) O.sh[9 + i] = vec4(s_sh[0][i] * norm, 0.0);
+    }
+}

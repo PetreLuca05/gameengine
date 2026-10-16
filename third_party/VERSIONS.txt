@@ -1,0 +1,6 @@
+﻿stb commit 2c980bb59875b0d32144a71867fbdebb2f77cd20
+FastNoiseLite commit 785f37a9ad76e283586a379675085f2063ae03f7
+ufbx v0.22.0 (github.com/ufbx/ufbx)
+meshoptimizer v0.22 (simplifier + allocator only, github.com/zeux/meshoptimizer)
+stb_truetype v1.26 (public domain, game UI fonts: src/ui/gui/gui_draw.c)
+Barlow Regular / Medium / SemiBold (SIL OFL 1.1, assets/ui/fonts/OFL.txt, github.com/jpt/barlow)

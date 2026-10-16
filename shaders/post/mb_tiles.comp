@@ -1,0 +1,54 @@
+#version 450
+// Motion blur 1/3: per 16x16 tile the dominant (longest) velocity in output pixels, clamped by
+// the shutter. 8x8 threads per tile, each reduces a 2x2 block first. Mode 1 = camera only
+// (velocity reconstructed from depth + the camera motion), mode 2 = camera + objects (velocity
+// buffer). Viewmodel pixels never blur.
+#extension GL_GOOGLE_include_directive : require
+#include "post_common.glsl"
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0) uniform sampler2D velocity_tex;
+layout(set = 0, binding = 1) uniform sampler2D depth_tex;
+layout(set = 0, binding = 2) uniform sampler2D material_tex;
+layout(set = 0, binding = 8, rg16f) uniform writeonly image2D tiles;
+shared vec2 sv[64];
+shared float sl[64];
+
+vec2 pixel_velocity(ivec2 p) {
+    if ((gb_flags(texelFetch(material_tex, p, 0)) & GB_VIEWMODEL) != 0u) return vec2(0.0);
+    vec2 v;
+    if (U.s_mb.y >= 2.0) {
+        v = texelFetch(velocity_tex, p, 0).rg;
+    } else {
+        vec2 uv = (vec2(p) + 0.5) * U.screen.zw;
+        vec3 wp = world_pos(uv, texelFetch(depth_tex, p, 0).r);
+        vec4 c = U.prev_view_proj_nj * vec4(wp, 1.0);
+        vec4 n = U.view_proj_nj * vec4(wp, 1.0);
+        v = (n.xy / n.w - c.xy / c.w) * 0.5;
+    }
+    vec2 px = v * U.outsz.xy * U.s_mb.x / 0.5;   // shutter: 0.5 = 180 degrees = the full frame velocity
+    float l = length(px);
+    return l > U.s_mb.z ? px * (U.s_mb.z / l) : px;
+}
+
+void main() {
+    uint li = gl_LocalInvocationIndex;
+    ivec2 base = ivec2(gl_WorkGroupID.xy) * 16 + ivec2(gl_LocalInvocationID.xy) * 2;
+    ivec2 sz = ivec2(U.screen.xy);
+    vec2 best = vec2(0.0);
+    float bl = 0.0;
+    for (int k = 0; k < 4; k++) {
+        ivec2 p = base + ivec2(k & 1, k >> 1);
+        if (p.x >= sz.x || p.y >= sz.y) continue;
+        vec2 v = pixel_velocity(p);
+        float l = dot(v, v);
+        if (l > bl) { bl = l; best = v; }
+    }
+    sv[li] = best;
+    sl[li] = bl;
+    barrier();
+    for (uint s = 32u; s > 0u; s >>= 1u) {
+        if (li < s && sl[li + s] > sl[li]) { sl[li] = sl[li + s]; sv[li] = sv[li + s]; }
+        barrier();
+    }
+    if (li == 0u) imageStore(tiles, ivec2(gl_WorkGroupID.xy), vec4(sv[0], 0, 0));
+}

@@ -1,0 +1,16 @@
+#version 450
+// GPU sub-emitters: records written by vfx_update last frame (death / collision events).
+#extension GL_GOOGLE_include_directive : require
+#include "vfx_common.glsl"
+#include "vfx_spawn.glsl"
+layout(local_size_x = 64) in;
+void main() {
+    uint i = gl_GlobalInvocationID.x;
+    if (i >= ctr.sub_pending) return;
+    SubSpawn s = subs[i];
+    uint cur = vf.counts.w & 1u;
+    uint count = min(s.info.z, 16u);
+    for (uint k = 0u; k < count; k++)
+        spawn_particle(s.info.x, s.pos.xyz, vec4(0, 0, 0, 1), s.normal.xyz, -s.normal.xyz, s.pos.w, 1.0, 1.0, vec3(0), 0.0,
+                       s.info.y, 0xFFFu, 0u, 0xFFFFu, k, cur, vec3(1.0));
+}

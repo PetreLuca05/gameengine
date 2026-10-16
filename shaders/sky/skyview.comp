@@ -1,0 +1,59 @@
+#version 450
+// Sky-view LUT (192 x 108) every frame: single scattering of the sun and the moon (Rayleigh +
+// Cornette-Shanks Mie, planet shadow, transmittance LUT) plus the multiple scattering LUT term,
+// raymarched from the camera altitude. Absolute world azimuth, so both lights share one LUT.
+#extension GL_GOOGLE_include_directive : require
+#include "sky_common.glsl"
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0) uniform sampler2D trans_lut;
+layout(set = 0, binding = 1) uniform sampler2D ms_lut;
+layout(set = 0, binding = 8, rgba16f) uniform writeonly image2D out_lut;
+
+vec3 transmittance(float r, float mu) { return textureLod(trans_lut, trans_uv(r, mu), 0.0).rgb; }
+
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    if (p.x >= SKYVIEW_SIZE.x || p.y >= SKYVIEW_SIZE.y) return;
+    vec2 uv = (vec2(p) + 0.5) / vec2(SKYVIEW_SIZE);
+    vec3 ro = planet_pos();
+    float r = length(ro);
+    vec3 rd = skyview_dir(r, uv);
+    float t_ground = ray_sphere(ro, rd, R_BOTTOM);
+    float t_top = ray_sphere(ro, rd, R_TOP);
+    float t_max = t_ground > 0.0 ? t_ground : t_top;
+    vec3 L = vec3(0.0);
+    if (t_max > 0.0) {
+        vec3 ls[2] = vec3[2](normalize(SK.sun_dir.xyz), normalize(SK.moon_dir.xyz));
+        float le[2] = float[2](light_weight(0), light_weight(1));
+        float cph[2];
+        for (int k = 0; k < 2; k++) cph[k] = dot(rd, ls[k]);
+        const int N = 24;
+        // Non-uniform steps: denser near the camera (most of the in-scattering for low views).
+        vec3 thr = vec3(1.0);
+        float t_prev = 0.0;
+        for (int i = 0; i < N; i++) {
+            float f0 = float(i) / float(N), f1 = float(i + 1) / float(N);
+            float t0 = t_max * f0 * f0, t1 = t_max * f1 * f1;
+            float dt = t1 - t0;
+            vec3 x = ro + rd * (t0 + 0.3 * dt);
+            float h = length(x);
+            Medium m = medium(h - R_BOTTOM);
+            vec3 up = x / h;
+            vec3 S = vec3(0.0);
+            for (int k = 0; k < 2; k++) {
+                if (le[k] <= 0.0) continue;
+                float mu_l = dot(up, ls[k]);
+                float earth = ray_sphere(x, ls[k], R_BOTTOM) > 0.0 ? 0.0 : 1.0;
+                vec3 tl = transmittance(h, mu_l) * earth;
+                vec3 ms = textureLod(ms_lut, ms_uv(h, mu_l), 0.0).rgb;
+                S += le[k] * ((m.scat_ray * phase_rayleigh(cph[k]) + vec3(m.scat_mie) * phase_mie(cph[k])) * tl + ms * (m.scat_ray + vec3(m.scat_mie)));
+            }
+            vec3 st = exp(-m.ext * dt);
+            vec3 ext = max(m.ext, vec3(1e-7));
+            L += thr * (S - S * st) / ext;
+            thr *= st;
+            t_prev = t1;
+        }
+    }
+    imageStore(out_lut, p, vec4(sanitize(L), 1.0));
+}

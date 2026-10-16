@@ -1,0 +1,31 @@
+#version 450
+// Volumetric fog, step 2: front-to-back integration of every froxel column (energy-conserving
+// per-slice integration, Hillaire 2015). Output rgb = in-scattered light up to the far edge of the
+// slice, a = transmittance.
+#extension GL_GOOGLE_include_directive : require
+#include "post_common.glsl"
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0) uniform sampler3D scatter;
+layout(set = 0, binding = 8, rgba16f) uniform writeonly image3D dst;
+float slice_z(float s, float D) {
+    float n = 0.15, f = U.s_vol3.w;
+    return n * pow(f / n, s / D);
+}
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    ivec3 dim = ivec3(U.s_vol3.xyz);
+    if (p.x >= dim.x || p.y >= dim.y) return;
+    vec3 acc = vec3(0.0);
+    float T = 1.0;
+    float D = U.s_vol3.z;
+    for (int z = 0; z < dim.z; z++) {
+        vec4 s = texelFetch(scatter, ivec3(p, z), 0);
+        float ds = slice_z(float(z + 1), D) - slice_z(float(z), D);
+        float ext = max(s.a, 1e-6);
+        float ts = exp(-ext * ds);
+        vec3 sint = (s.rgb - s.rgb * ts) / ext;
+        acc += T * sint;
+        T *= ts;
+        imageStore(dst, ivec3(p, z), vec4(acc, T));
+    }
+}

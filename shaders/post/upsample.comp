@@ -1,0 +1,36 @@
+#version 450
+// Depth-aware bilateral 2x upsample (half -> full resolution) for AO / SSGI / SSR: the four
+// nearest low-res taps weighted by bilinear weight x depth similarity, so edges don't bleed.
+//   pc.u0.x channels (1 = r only)
+#extension GL_GOOGLE_include_directive : require
+#include "post_common.glsl"
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0) uniform sampler2D low_tex;
+layout(set = 0, binding = 1) uniform sampler2D depth_tex;
+layout(set = 0, binding = 8) uniform writeonly image2D dst;
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 sz = imageSize(dst);
+    if (p.x >= sz.x || p.y >= sz.y) return;
+    vec2 uv = (vec2(p) + 0.5) / vec2(sz);
+    vec2 ls = vec2(textureSize(low_tex, 0));
+    float z = linear_depth(texelFetch(depth_tex, p, 0).r);
+    vec2 lp = uv * ls - 0.5;
+    ivec2 b = ivec2(floor(lp));
+    vec2 f = lp - vec2(b);
+    vec4 acc = vec4(0.0);
+    float wsum = 0.0;
+    for (int k = 0; k < 4; k++) {
+        ivec2 o = ivec2(k & 1, k >> 1);
+        ivec2 q = clamp(b + o, ivec2(0), ivec2(ls) - 1);
+        vec2 quv = (vec2(q) + 0.5) / ls;
+        float qz = linear_depth(textureLod(depth_tex, quv, 0.0).r);
+        float bw = (o.x == 1 ? f.x : 1.0 - f.x) * (o.y == 1 ? f.y : 1.0 - f.y);
+        float dw = 1.0 / (1e-3 + abs(qz - z) / max(z, 1e-3) * 50.0);
+        float w = bw * dw + 1e-5;
+        acc += texelFetch(low_tex, q, 0) * w;
+        wsum += w;
+    }
+    vec4 r = acc / wsum;
+    imageStore(dst, p, pc.u0.x == 1u ? vec4(r.r) : r);
+}

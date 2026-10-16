@@ -1,0 +1,33 @@
+#version 450
+// Depth of field: half-resolution colour + CoC. The colour is averaged with a luminance-
+// weighted (Karis) 2x2 box so isolated highlights don't flicker; alpha keeps the CoC with the
+// largest magnitude of the 2x2 (in half-res pixels) so the near field doesn't shrink.
+#extension GL_GOOGLE_include_directive : require
+#include "post_common.glsl"
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0) uniform sampler2D color_tex;
+layout(set = 0, binding = 1) uniform sampler2D coc_tex;
+layout(set = 0, binding = 8, rgba16f) uniform writeonly image2D dst;
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 sz = imageSize(dst);
+    if (p.x >= sz.x || p.y >= sz.y) return;
+    ivec2 fsz = textureSize(coc_tex, 0);
+    vec2 cuv = (vec2(p) + 0.5) / vec2(sz);
+    vec3 sum = vec3(0.0);
+    float ws = 0.0, coc = 0.0, near = 0.0;
+    for (int i = 0; i < 4; i++) {
+        ivec2 q = min(p * 2 + ivec2(i & 1, i >> 1), fsz - 1);
+        vec2 uv = (vec2(q) + 0.5) / vec2(fsz);
+        vec3 c = textureLod(color_tex, uv, 0.0).rgb;
+        float w = 1.0 / (1.0 + luma(c));
+        sum += c * w;
+        ws += w;
+        float k = texelFetch(coc_tex, q, 0).r;
+        if (abs(k) > abs(coc)) coc = k;
+        near = min(near, k);
+    }
+    // Prefer the near CoC when any texel is in the near field (foreground spills outward).
+    if (near < -0.5) coc = near;
+    imageStore(dst, p, vec4(sum / ws, coc * 0.5));
+}

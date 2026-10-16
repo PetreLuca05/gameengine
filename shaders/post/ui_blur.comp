@@ -1,0 +1,23 @@
+#version 450
+// UI backdrop: separable Gaussian (9 bilinear taps = 17 texels), pc.u0.x = 0 horizontal, 1 vertical.
+#extension GL_GOOGLE_include_directive : require
+#include "post_common.glsl"
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0) uniform sampler2D src;
+layout(set = 0, binding = 8, rgba16f) uniform writeonly image2D dst;
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 sz = imageSize(dst);
+    if (p.x >= sz.x || p.y >= sz.y) return;
+    vec2 t = 1.0 / vec2(textureSize(src, 0));
+    vec2 dir = pc.u0.x == 0u ? vec2(t.x, 0.0) : vec2(0.0, t.y);
+    vec2 uv = (vec2(p) + 0.5) / vec2(sz);
+    const float w[5] = float[](0.1611803, 0.2656817, 0.1220170, 0.0322070, 0.0045335);
+    const float o[5] = float[](0.0, 1.4588, 3.4048, 5.3533, 7.3036);
+    vec3 c = textureLod(src, uv, 0.0).rgb * w[0];
+    for (int i = 1; i < 5; i++) {
+        c += textureLod(src, uv + dir * o[i], 0.0).rgb * w[i];
+        c += textureLod(src, uv - dir * o[i], 0.0).rgb * w[i];
+    }
+    imageStore(dst, p, vec4(c / (w[0] + 2.0 * (w[1] + w[2] + w[3] + w[4])), 1.0));
+}

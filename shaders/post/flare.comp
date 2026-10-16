@@ -1,0 +1,77 @@
+#version 450
+// Lens flare (quarter resolution, screen-space, from the bloom chain): thresholded on the exposed
+// colour, then ghosts mirrored through the centre with chromatic offsets, a halo ring and an
+// anamorphic horizontal streak. Written back in scene units (divided by the exposure) so the
+// tonemapper treats it like the bloom.
+//   s_lens.x flare intensity, s_lens.y anamorphic intensity.
+#extension GL_GOOGLE_include_directive : require
+#include "post_common.glsl"
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0) uniform sampler2D bloom_tex;   // a mid bloom mip (quarter res)
+layout(set = 0, binding = 8, rgba16f) uniform writeonly image2D dst;
+layout(std430, set = 0, binding = 13) readonly buffer Exposure { float e[16]; } X;
+layout(set = 0, binding = 1) uniform sampler2D soft_tex;    // a much lower bloom mip: ghost discs
+layout(set = 0, binding = 2) uniform sampler2D noise_tex;
+
+vec3 bright(vec2 uv, float expo) {
+    if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return vec3(0.0);
+    // Only intense sources flare (the sun, strong lamps): a high soft-knee threshold on the
+    // exposed colour, so sky, white walls and ordinary specular highlights stay clean.
+    vec3 c = textureLod(bloom_tex, uv, 0.0).rgb * expo;
+    float l = max(c.r, max(c.g, c.b));
+    float k = smoothstep(6.0, 24.0, l);
+    return c * k * 0.25;
+}
+vec3 chroma(vec2 uv, vec2 dir, float amt, float expo) {
+    return vec3(bright(uv + dir * amt, expo).r, bright(uv, expo).g, bright(uv - dir * amt, expo).b);
+}
+// A ghost is a soft disc, not a sharp copy of the light: sampled from a heavily blurred bloom mip
+// (the sun becomes a smooth blob several percent of the screen wide), with chromatic offsets.
+vec3 soft(vec2 uv, float expo) {
+    if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) return vec3(0.0);
+    vec3 c = textureLod(soft_tex, uv, 0.0).rgb * expo;
+    float l = max(c.r, max(c.g, c.b));
+    return c * smoothstep(2.0, 8.0, l) * 0.3;
+}
+vec3 ghost(vec2 uv, vec2 dir, float radius, float expo, float aspect) {
+    return vec3(soft(uv + dir, expo).r, soft(uv, expo).g, soft(uv - dir, expo).b);
+}
+
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 sz = imageSize(dst);
+    if (p.x >= sz.x || p.y >= sz.y) return;
+    vec2 uv = (vec2(p) + 0.5) / vec2(sz);
+    float expo = max(X.e[0], 1e-6);
+    vec3 r = vec3(0.0);
+    if (U.s_lens.x > 0.0) {
+        vec2 g = vec2(1.0) - uv;
+        vec2 dir = (vec2(0.5) - g) * 0.37;
+        float aspect = float(sz.x) / float(sz.y);
+        for (int i = 0; i < 5; i++) {
+            vec2 o = g + dir * float(i);
+            float w = pow(1.0 - clamp(length(vec2(0.5) - o) / 0.7071, 0.0, 1.0), 6.0);
+            vec3 tint = mix(vec3(1.0, 0.75, 0.55), vec3(0.55, 0.75, 1.0), float(i) / 4.0);
+            r += ghost(o, normalize(dir + 1e-5) * 0.004, 0.012 + 0.008 * float(i), expo, aspect) * w * tint;
+        }
+        vec2 hd = normalize(vec2(0.5) - g + 1e-5) * 0.45;
+        float hw = pow(1.0 - clamp(length(vec2(0.5) - fract(g + hd)) / 0.7071, 0.0, 1.0), 5.0);
+        vec2 hc = g + hd, hs = hd * 0.012;   // halo: soft source, small colour split (no rainbow slashes)
+        r += vec3(soft(hc + hs, expo).r, soft(hc, expo).g, soft(hc - hs, expo).b) * hw * 0.35;
+        r *= U.s_lens.x * 0.5;
+    }
+    if (U.s_lens.y > 0.0) {
+        // Dense taps (2 texels apart, jittered per pixel) so a small light makes a continuous
+        // streak instead of a row of dots; same total energy as the old 33-tap kernel.
+        vec3 a = bright(uv, expo);
+        float t = 1.0 / float(sz.x);
+        float j = texelFetch(noise_tex, p % textureSize(noise_tex, 0), 0).r;
+        for (int i = 1; i <= 48; i++) {
+            float x = (float(i) - j) * 2.0;
+            float w = exp(-x * 0.03);
+            a += (bright(uv + vec2(x * t, 0.0), expo) + bright(uv - vec2(x * t, 0.0), expo)) * w;
+        }
+        r += a * vec3(0.35, 0.55, 1.0) * (U.s_lens.y * 0.15 * 0.33);
+    }
+    imageStore(dst, p, vec4(r / expo, 1.0));
+}

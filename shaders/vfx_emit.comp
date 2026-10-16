@@ -1,0 +1,22 @@
+#version 450
+// CPU-queued spawn records: one thread per new particle (record found by binary search over the
+// prefix sums of the record counts).
+#extension GL_GOOGLE_include_directive : require
+#include "vfx_common.glsl"
+#include "vfx_spawn.glsl"
+layout(local_size_x = 64) in;
+void main() {
+    uint i = gl_GlobalInvocationID.x;
+    if (i >= vf.counts.x) return;
+    uint lo = 0u, hi = vf.counts.y;
+    while (hi - lo > 1u) {
+        uint mid = (lo + hi) / 2u;
+        if (spawn_first[mid] <= i) lo = mid; else hi = mid;
+    }
+    Spawn sp = spawns[lo];
+    uint k = i - spawn_first[lo];
+    uint cur = vf.counts.w & 1u;
+    spawn_particle(sp.info.x, sp.pos_scale.xyz, sp.rot, sp.normal_energy.xyz, sp.incoming_alpha.xyz, sp.pos_scale.w, sp.normal_energy.w,
+                   sp.incoming_alpha.w, sp.vel_time.xyz, sp.vel_time.w, sp.info.y, sp.info.w & 0xFFFu, (sp.info.w >> 12) & 0xFu,
+                   sp.info.w >> 16, k, cur, sp.tint.rgb);
+}

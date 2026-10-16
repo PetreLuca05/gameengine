@@ -1,0 +1,34 @@
+#version 450
+// Depth of field: signed circle of confusion in output pixels (thin lens):
+//   coc = A f (z - S) / (z (S - f)),  A = f / N,  converted from the sensor (mm) to pixels.
+// Negative = in front of the focus plane (near field). The viewmodel stays sharp. Mode 1 (ADS
+// only) fades the effect in with the ADS weight. ADS (aim complete): the world is sharp and only
+// the weapon gets the sight's near blur.
+#extension GL_GOOGLE_include_directive : require
+#include "post_common.glsl"
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0) uniform sampler2D depth_tex;
+layout(set = 0, binding = 1) uniform sampler2D material_tex;
+layout(set = 0, binding = 8, r16f) uniform writeonly image2D coc_out;
+layout(std430, set = 0, binding = 13) readonly buffer Exposure { float e[16]; } X;
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 sz = imageSize(coc_out);
+    if (p.x >= sz.x || p.y >= sz.y) return;
+    vec2 uv = (vec2(p) + 0.5) / vec2(sz);
+    float d = textureLod(depth_tex, uv, 0.0).r;
+    float z = linear_depth(d);
+    float S = max(X.e[2], 0.05);
+    float f = U.s_dof.z * 0.001;                 // focal length m
+    bool ads = pc.u0.x == 1u;                    // ADS mode: f-stop override, viewmodel near blur
+    float fstop = ads ? pc.p0.x : U.s_dof.y;
+    float A = f / max(fstop, 0.5);               // aperture diameter m
+    float coc_m = A * f * (z - S) / (z * max(S - f, 1e-3));
+    float px = coc_m / (U.s_dof2.w * 0.001) * float(sz.y);
+    float strength = (U.s_dof2.z >= 2.0 || ads) ? 1.0 : U.misc.z;
+    px *= strength;
+    // ADS: the world stays sharp, only the weapon (viewmodel) gets a slight near-field blur.
+    if (ads) px = 0.0;
+    if ((gb_flags(textureLod(material_tex, uv, 0.0)) & GB_VIEWMODEL) != 0u) px = ads ? -pc.p0.y : 0.0;
+    imageStore(coc_out, p, vec4(clamp(px, -U.s_dof.w, U.s_dof.w)));
+}

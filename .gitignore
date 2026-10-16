@@ -1,0 +1,39 @@
+/build/
+/build-*/
+/.toolchain/
+/out/
+*.spv
+/.vs/
+/.vscode/
+screenshots/
+build.log
+build-alt.log
+/assets/cache/
+
+# Local secrets (Higgsfield API token etc.) - never commit
+.env
+
+# vfxgen: downloaded generations (re-creatable from the cache key) and the API call log
+/tools/vfxgen/cache/
+/tools/vfxgen/logs/
+__pycache__/
+
+# Source art: character models and their textures (large, kept out of the repository)
+/assets/human/*.fbx
+/assets/human/textures/
+
+# Build output / binaries / IDE junk
+CMakeFiles/
+CMakeCache.txt
+*.exe
+*.pdb
+*.ilk
+*.obj
+*.lib
+*.exp
+*.log
+.idea/
+*.suo
+*.user
+Thumbs.db
+.DS_Store

@@ -1,0 +1,19 @@
+#version 450
+// Previous-frame colour pyramid for SSR / SSGI: mip 0 = this frame's HDR (after transparency),
+// then 2x2 box mips. pc.u0.x = destination mip (0 copies from the sampled source).
+#extension GL_GOOGLE_include_directive : require
+#include "post_common.glsl"
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0) uniform sampler2D src_tex;
+layout(set = 0, binding = 8, rgba16f) uniform readonly image2D src;
+layout(set = 0, binding = 9, rgba16f) uniform writeonly image2D dst;
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 ds = imageSize(dst);
+    if (p.x >= ds.x || p.y >= ds.y) return;
+    if (pc.u0.x == 0u) { imageStore(dst, p, vec4(min(sanitize(texelFetch(src_tex, p, 0).rgb), vec3(1024.0)), 1.0)); return; }
+    ivec2 ss = imageSize(src) - 1;
+    vec4 c = imageLoad(src, min(p * 2, ss)) + imageLoad(src, min(p * 2 + ivec2(1, 0), ss)) + imageLoad(src, min(p * 2 + ivec2(0, 1), ss)) +
+             imageLoad(src, min(p * 2 + ivec2(1, 1), ss));
+    imageStore(dst, p, c * 0.25);
+}

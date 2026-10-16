@@ -1,0 +1,22 @@
+#version 450
+// Cloud shadow map (256 x 256 over SK.cshadow.z metres around the camera, snapped to texels):
+// ground transmittance through the cloud layer along the key light (sun by day, moon at night).
+#extension GL_GOOGLE_include_directive : require
+#include "sky_common.glsl"
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 8, r32f) uniform writeonly image2D out_shadow;
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    if (p.x >= 256 || p.y >= 256) return;
+    vec2 xz = SK.cshadow.xy + (vec2(p) + 0.5) / 256.0 * SK.cshadow.z;
+    vec3 L = normalize(SK.key.xyz);
+    float t = 1.0;
+    if (L.y > 0.02) {
+        vec2 c = xz + L.xz / L.y * SK.clouds.y;
+        float d = cloud_density(c, 4) * SK.clouds2.x;
+        // Low light: longer paths through the layer, softer and weaker shadows.
+        float soft = smoothstep(0.02, 0.25, L.y);
+        t = 1.0 - d * SK.clouds2.w * soft;
+    }
+    imageStore(out_shadow, p, vec4(t));
+}

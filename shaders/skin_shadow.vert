@@ -1,0 +1,19 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+#include "common.glsl"
+
+layout(location = 0) in vec3 in_pos;
+layout(location = 4) in uvec4 in_joints;
+layout(location = 5) in vec4 in_weights;
+layout(push_constant) uniform Push {
+    mat4 model;
+    vec4 color;
+    vec4 params;
+    uvec4 flags;   // w = shadow cascade
+} pc;
+
+void main() {
+    SkinInstance si = skin_inst.inst[gl_InstanceIndex];
+    vec4 world = skin_matrix(si.info.x, in_joints, in_weights) * vec4(in_pos, 1.0);
+    gl_Position = (pc.flags.w == 3u ? frame.occl_vp : frame.shadow_vps[min(pc.flags.w, 2u)]) * world;
+}

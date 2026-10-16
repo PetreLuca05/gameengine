@@ -1,0 +1,83 @@
+#version 450
+// Volumetric fog, step 1: per froxel (camera frustum grid, exponential depth slices) density
+// (height fog + local fog volumes), in-scattering of the sun (shadow-map visibility, HG phase),
+// point lights and ambient; temporally reprojected into last frame's grid and blended.
+// Output rgb = scattering, a = extinction (per metre).
+#extension GL_GOOGLE_include_directive : require
+#include "post_common.glsl"
+layout(local_size_x = 4, local_size_y = 4, local_size_z = 4) in;
+layout(set = 0, binding = 0) uniform sampler3D history;
+layout(set = 0, binding = 1) uniform sampler2D noise_tex;
+layout(set = 0, binding = 7) uniform sampler2DShadow shadow_map;
+layout(set = 0, binding = 8, rgba16f) uniform writeonly image3D dst;
+
+float slice_z(float s, float D) {
+    float n = 0.15, f = U.s_vol3.w;
+    return n * pow(f / n, s / D);
+}
+
+float phase_hg(float c, float g) {
+    float g2 = g * g;
+    return (1.0 - g2) / (4.0 * PI * pow(max(1.0 + g2 - 2.0 * g * c, 1e-4), 1.5));
+}
+
+float sun_visibility(vec3 wp) {
+    if (U.sun_color.w < 0.5) return 1.0;
+    vec4 sc = U.shadow_vp * vec4(wp, 1.0);
+    vec3 s = sc.xyz / sc.w;
+    vec2 uv = s.xy * 0.5 + 0.5;
+    if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0))) || s.z > 1.0) return 1.0;
+    return texture(shadow_map, vec3(uv, s.z - 0.0006));   // the wide cascade reaches 3 km towards the sun (render.c)
+}
+
+void main() {
+    ivec3 p = ivec3(gl_GlobalInvocationID);
+    ivec3 dim = ivec3(U.s_vol3.xyz);
+    if (any(greaterThanEqual(p, dim))) return;
+    float D = U.s_vol3.z;
+    // Jittered position inside the froxel (blue noise + frame): the temporal blend removes banding.
+    vec4 nz = blue_noise(noise_tex, p.xy + ivec2(p.z * 17, p.z * 31));
+    vec2 uv = (vec2(p.xy) + 0.5) / vec2(dim.xy);
+    float z = slice_z(float(p.z) + nz.x, D);
+    vec4 vr = U.inv_proj * vec4(uv * 2.0 - 1.0, 0.0, 1.0);
+    vec3 vdir = vr.xyz / vr.w;
+    vdir /= -vdir.z;                              // view ray with z = -1
+    vec3 vpos = vdir * z;
+    vec3 wp = transpose(mat3(U.view)) * vpos + U.cam_pos.xyz;   // view is rigid
+    // Density: exponential height fog.
+    float dens = U.s_vol.x * exp(-max(0.0, wp.y - U.s_vol.y) * U.s_vol.z);
+    vec3 ray_w = normalize(wp - U.cam_pos.xyz);
+    vec3 L = normalize(U.sun_dir.xyz);
+    vec3 scat = vec3(0.0);
+    float vis = sun_visibility(wp);
+    scat += U.sun_color.rgb * U.sun_dir.w * vis * phase_hg(dot(ray_w, L), U.s_vol.w) * U.s_vol2.w;
+    // Sky ambient: a thin haze is mostly sun-lit; thick weather fog is lit by the whole (overcast)
+    // sky, which is what makes it read as fog instead of darkness (U.s_dbg.w, game_weather.c).
+    scat += U.sky.rgb * U.sky.w * mix(0.25 / PI, 1.1, clamp(U.s_dbg.w, 0.0, 1.0));
+    int nl = int(U.ground.w);
+    for (int i = 0; i < nl && i < MAX_POINT_LIGHTS; i++) {
+        vec3 lp = U.lights[i * 2].xyz;
+        float r = U.lights[i * 2].w;
+        vec3 dl = lp - wp;
+        float dist = length(dl);
+        if (dist > r) continue;
+        float att = clamp(1.0 - pow(dist / r, 4.0), 0.0, 1.0);
+        att = att * att / (dist * dist + 1.0);
+        scat += U.lights[i * 2 + 1].rgb * U.lights[i * 2 + 1].w * att * phase_hg(dot(ray_w, dl / max(dist, 1e-3)), U.s_vol.w * 0.5);
+    }
+    vec4 cur = vec4(scat * U.s_vol2.rgb * dens, dens);
+    // Temporal reprojection into last frame's froxel grid.
+    vec4 pc4 = U.prev_view_proj_nj * vec4(wp, 1.0);
+    vec4 res = cur;
+    if (pc.u0.x != 0u && U.misc.y < 0.5 && pc4.w > 0.0) {
+        vec2 puv = (pc4.xy / pc4.w) * 0.5 + 0.5;
+        float pz = pc4.w;   // view depth in the previous frame
+        float n = 0.15, f = U.s_vol3.w;
+        float ps = log(max(pz, n) / n) / log(f / n);
+        if (all(greaterThanEqual(puv, vec2(0.0))) && all(lessThanEqual(puv, vec2(1.0))) && ps >= 0.0 && ps <= 1.0) {
+            vec4 h = sanitize4(texture(history, vec3(puv, ps)));
+            res = mix(cur, h, 0.9);
+        }
+    }
+    imageStore(dst, p, res);
+}

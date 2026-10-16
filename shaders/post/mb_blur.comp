@@ -1,0 +1,70 @@
+#version 450
+// Motion blur 3/3: reconstruction filter (McGuire et al. 2012): samples along the neighbourhood
+// max velocity, each weighted by depth ordering and whether its own velocity covers the centre
+// (foreground blurs over background, background never over a sharp foreground). Blue-noise
+// jittered taps; viewmodel pixels stay sharp and are not gathered.
+#extension GL_GOOGLE_include_directive : require
+#include "post_common.glsl"
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0) uniform sampler2D color_tex;
+layout(set = 0, binding = 1) uniform sampler2D neighbor_tex;
+layout(set = 0, binding = 2) uniform sampler2D velocity_tex;
+layout(set = 0, binding = 3) uniform sampler2D depth_tex;
+layout(set = 0, binding = 4) uniform sampler2D material_tex;
+layout(set = 0, binding = 5) uniform sampler2D noise_tex;
+layout(set = 0, binding = 8, rgba16f) uniform writeonly image2D dst;
+
+vec2 vel_px(vec2 uv) {
+    if ((gb_flags(textureLod(material_tex, uv, 0.0)) & GB_VIEWMODEL) != 0u) return vec2(0.0);
+    vec2 v;
+    if (U.s_mb.y >= 2.0) v = textureLod(velocity_tex, uv, 0.0).rg;
+    else {
+        vec3 wp = world_pos(uv, textureLod(depth_tex, uv, 0.0).r);
+        vec4 c = U.prev_view_proj_nj * vec4(wp, 1.0);
+        vec4 n = U.view_proj_nj * vec4(wp, 1.0);
+        v = (n.xy / n.w - c.xy / c.w) * 0.5;
+    }
+    vec2 px = v * U.outsz.xy * U.s_mb.x / 0.5;
+    float l = length(px);
+    return l > U.s_mb.z ? px * (U.s_mb.z / l) : px;
+}
+
+float cone(float dist, float vlen) { return clamp(1.0 - dist / max(vlen, 1e-3), 0.0, 1.0); }
+float cylinder(float dist, float vlen) { return 1.0 - smoothstep(0.95 * vlen, 1.05 * vlen, dist); }
+float soft_depth(float za, float zb) { return clamp(1.0 - (za - zb) / (0.02 * max(za, 1.0)), 0.0, 1.0); }
+
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 sz = imageSize(dst);
+    if (p.x >= sz.x || p.y >= sz.y) return;
+    vec2 uv = (vec2(p) + 0.5) / vec2(sz);
+    vec4 center = texelFetch(color_tex, p, 0);
+    vec2 vmax = textureLod(neighbor_tex, uv, 0.0).rg;
+    float vmax_len = length(vmax);
+    bool vm = (gb_flags(texelFetch(material_tex, p, 0)) & GB_VIEWMODEL) != 0u;
+    if (vmax_len < 0.5 || vm) { imageStore(dst, p, center); return; }
+    vec2 vc = vel_px(uv);
+    float vc_len = max(length(vc), 0.5);
+    float zc = linear_depth(texelFetch(depth_tex, p, 0).r);
+    const int N = 12;
+    float jitter = blue_noise(noise_tex, p).r - 0.5;
+    float wsum = 1.0 / vc_len;
+    vec3 sum = center.rgb * wsum;
+    vec2 dirpx = vmax;
+    for (int i = 0; i < N; i++) {
+        float t = mix(-1.0, 1.0, (float(i) + jitter + 1.0) / float(N + 1));
+        vec2 off = dirpx * t * 0.5;
+        vec2 suv = uv + off / vec2(sz);
+        if (any(lessThan(suv, vec2(0.0))) || any(greaterThan(suv, vec2(1.0)))) continue;
+        float dist = length(off);
+        vec2 vs = vel_px(suv);
+        float vs_len = max(length(vs), 0.5);
+        float zs = linear_depth(textureLod(depth_tex, suv, 0.0).r);
+        float fg = soft_depth(zc, zs), bg = soft_depth(zs, zc);
+        float w = fg * cone(dist, vs_len) + bg * cone(dist, vc_len) + cylinder(dist, vs_len) * cylinder(dist, vc_len) * 2.0;
+        if ((gb_flags(textureLod(material_tex, suv, 0.0)) & GB_VIEWMODEL) != 0u) w = 0.0;
+        sum += textureLod(color_tex, suv, 0.0).rgb * w;
+        wsum += w;
+    }
+    imageStore(dst, p, vec4(sum / max(wsum, 1e-4), center.a));
+}

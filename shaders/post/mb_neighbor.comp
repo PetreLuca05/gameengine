@@ -1,0 +1,22 @@
+#version 450
+// Motion blur 2/3: neighbour max - the longest tile velocity in the 3x3 tile neighbourhood (so a
+// fast object blurs into the tiles next to it).
+#extension GL_GOOGLE_include_directive : require
+#include "post_common.glsl"
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0) uniform sampler2D tiles;
+layout(set = 0, binding = 8, rg16f) uniform writeonly image2D dst;
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 sz = imageSize(dst);
+    if (p.x >= sz.x || p.y >= sz.y) return;
+    vec2 best = vec2(0.0);
+    float bl = 0.0;
+    for (int y = -1; y <= 1; y++)
+        for (int x = -1; x <= 1; x++) {
+            vec2 v = texelFetch(tiles, clamp(p + ivec2(x, y), ivec2(0), sz - 1), 0).rg;
+            float l = dot(v, v);
+            if (l > bl) { bl = l; best = v; }
+        }
+    imageStore(dst, p, vec4(best, 0, 0));
+}

@@ -1,0 +1,34 @@
+#version 450
+// Auto exposure 1/2: 256-bin log2-luminance histogram (EV -12 .. +18) with centre-weighted
+// metering. The viewmodel and the far-saturated sky count less. 16x16 groups, every 2nd pixel
+// (the result is temporally smoothed anyway).
+#extension GL_GOOGLE_include_directive : require
+#include "post_common.glsl"
+layout(local_size_x = 16, local_size_y = 16) in;
+layout(set = 0, binding = 0) uniform sampler2D color_tex;
+layout(std430, set = 0, binding = 14) buffer Hist { uint bins[256]; } H;
+shared uint lh[256];
+const float LMIN = -12.0, LRANGE = 30.0;
+void main() {
+    uint li = gl_LocalInvocationIndex;
+    lh[li] = 0u;
+    barrier();
+    ivec2 sz = textureSize(color_tex, 0);
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy) * 2;
+    if (p.x < sz.x && p.y < sz.y) {
+        vec3 c = sanitize(texelFetch(color_tex, p, 0).rgb);
+        float l = luma(c);
+        vec2 uv = (vec2(p) + 0.5) / vec2(sz) - 0.5;
+        uv.x *= U.misc.w;
+        float w = mix(1.0, 0.25, smoothstep(0.1, 0.6, length(uv)));   // centre weighted
+        if (l > 1e-6) {
+            float t = clamp((log2(l) - LMIN) / LRANGE, 0.0, 1.0);
+            uint bin = uint(t * 254.0 + 1.0);
+            atomicAdd(lh[bin], uint(w * 16.0 + 0.5));
+        } else {
+            atomicAdd(lh[0], uint(w * 16.0 + 0.5));
+        }
+    }
+    barrier();
+    if (lh[li] != 0u) atomicAdd(H.bins[li], lh[li]);
+}

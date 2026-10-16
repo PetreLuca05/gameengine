@@ -1,0 +1,39 @@
+#version 450
+// Volumetric fog, step 3: applied to the lit opaque scene before transparency (particles sample
+// the same volume themselves): hdr = hdr * transmittance + in-scattering at the pixel depth.
+#extension GL_GOOGLE_include_directive : require
+#include "post_common.glsl"
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0) uniform sampler3D volume;
+layout(set = 0, binding = 1) uniform sampler2D depth_tex;
+layout(set = 0, binding = 2) uniform sampler3D ap_tex;     // time-of-day aerial perspective (src/render/sky)
+// pc.u0.x froxels valid, u0.y aerial perspective valid, p0.x its depth (m, quadratic slices)
+layout(set = 0, binding = 8, rgba16f) uniform image2D hdr;
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 sz = imageSize(hdr);
+    if (p.x >= sz.x || p.y >= sz.y) return;
+    vec2 uv = (vec2(p) + 0.5) / vec2(sz);
+    float d = texelFetch(depth_tex, p, 0).r;
+    float z = d >= 1.0 ? U.s_vol3.w : linear_depth(d);
+    float n = 0.15, f = U.s_vol3.w;
+    float w = clamp(log(max(z, n) / n) / log(f / n), 0.0, 1.0);
+    // The slice stores the integral up to its far edge: shift by half a slice.
+    w = clamp(w - 0.5 / U.s_vol3.z, 0.0, 1.0);
+    vec4 v = textureLod(volume, vec3(uv, w), 0.0);
+    // The procedural sky already contains its haze: only a fraction of the fog over it.
+    if (d >= 1.0) v = mix(vec4(0.0, 0.0, 0.0, 1.0), v, 0.3);
+    if (pc.u0.x == 0u) v = vec4(0.0, 0.0, 0.0, 1.0);
+    vec4 c = imageLoad(hdr, p);
+    // Aerial perspective on geometry (the sky already contains it): distance along the view ray.
+    if (pc.u0.y == 1u && d < 1.0) {
+        vec3 vp = view_pos(uv, d);
+        float dist = length(vp);
+        float w3 = sqrt(clamp(dist / max(pc.p0.x, 1.0), 0.0, 1.0));
+        vec4 ap = textureLod(ap_tex, vec3(uv, clamp(w3 - 0.5 / 32.0, 0.0, 1.0)), 0.0);
+        // Fade in over the first slice (no haze at arm's length).
+        float k = clamp(w3 * 32.0, 0.0, 1.0);
+        c.rgb = c.rgb * mix(1.0, ap.a, k) + ap.rgb * k;
+    }
+    imageStore(hdr, p, vec4(c.rgb * v.a + v.rgb, c.a));
+}

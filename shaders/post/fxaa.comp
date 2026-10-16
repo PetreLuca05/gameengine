@@ -1,0 +1,59 @@
+#version 450
+// FXAA (3.11-style quality preset, edge search along the dominant gradient), on HDR with a
+// tonemapped luma (the blend itself happens in linear HDR).
+#extension GL_GOOGLE_include_directive : require
+#include "post_common.glsl"
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0) uniform sampler2D color_tex;
+layout(set = 0, binding = 8, rgba16f) uniform writeonly image2D dst;
+
+float L(vec2 uv) { vec3 c = textureLod(color_tex, uv, 0.0).rgb; float l = luma(c); return sqrt(l / (1.0 + l)); }
+
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 sz = imageSize(dst);
+    if (p.x >= sz.x || p.y >= sz.y) return;
+    vec2 rcp = 1.0 / vec2(sz);
+    vec2 uv = (vec2(p) + 0.5) * rcp;
+    float lm = L(uv), ln = L(uv + vec2(0, -rcp.y)), ls = L(uv + vec2(0, rcp.y)), le = L(uv + vec2(rcp.x, 0)), lw = L(uv + vec2(-rcp.x, 0));
+    float lmax = max(lm, max(max(ln, ls), max(le, lw))), lmin = min(lm, min(min(ln, ls), min(le, lw)));
+    float range = lmax - lmin;
+    vec4 center = textureLod(color_tex, uv, 0.0);
+    if (range < max(0.0312, lmax * 0.125)) { imageStore(dst, p, center); return; }
+    float lne = L(uv + vec2(rcp.x, -rcp.y)), lnw = L(uv - rcp), lse = L(uv + rcp), lsw = L(uv + vec2(-rcp.x, rcp.y));
+    float edge_h = abs(-2.0 * lw + lnw + lsw) + abs(-2.0 * lm + ln + ls) * 2.0 + abs(-2.0 * le + lne + lse);
+    float edge_v = abs(-2.0 * ln + lnw + lne) + abs(-2.0 * lm + lw + le) * 2.0 + abs(-2.0 * ls + lsw + lse);
+    bool horz = edge_h >= edge_v;
+    float l1 = horz ? ln : lw, l2 = horz ? ls : le;
+    float g1 = l1 - lm, g2 = l2 - lm;
+    bool steep1 = abs(g1) >= abs(g2);
+    float grad = 0.25 * max(abs(g1), abs(g2));
+    float step_len = horz ? rcp.y : rcp.x;
+    float lavg;
+    if (steep1) { step_len = -step_len; lavg = 0.5 * (l1 + lm); } else lavg = 0.5 * (l2 + lm);
+    vec2 cuv = uv;
+    if (horz) cuv.y += step_len * 0.5; else cuv.x += step_len * 0.5;
+    vec2 off = horz ? vec2(rcp.x, 0) : vec2(0, rcp.y);
+    vec2 u1 = cuv - off, u2 = cuv + off;
+    float e1 = L(u1) - lavg, e2 = L(u2) - lavg;
+    bool r1 = abs(e1) >= grad, r2 = abs(e2) >= grad;
+    const float Q[10] = float[10](1.0, 1.0, 1.0, 1.5, 2.0, 2.0, 2.0, 2.0, 4.0, 8.0);
+    for (int i = 0; i < 10 && !(r1 && r2); i++) {
+        if (!r1) { u1 -= off * Q[i]; e1 = L(u1) - lavg; r1 = abs(e1) >= grad; }
+        if (!r2) { u2 += off * Q[i]; e2 = L(u2) - lavg; r2 = abs(e2) >= grad; }
+    }
+    float d1 = horz ? uv.x - u1.x : uv.y - u1.y, d2 = horz ? u2.x - uv.x : u2.y - uv.y;
+    bool dir1 = d1 < d2;
+    float dfin = min(d1, d2), elen = d1 + d2;
+    bool center_smaller = lm < lavg;
+    bool good = ((dir1 ? e1 : e2) < 0.0) != center_smaller;
+    float px_off = good ? 0.5 - dfin / elen : 0.0;
+    // Sub-pixel aliasing.
+    float lavg3 = (2.0 * (ln + ls + le + lw) + lne + lnw + lse + lsw) / 12.0;
+    float sub = clamp(abs(lavg3 - lm) / range, 0.0, 1.0);
+    sub = (-2.0 * sub + 3.0) * sub * sub;
+    px_off = max(px_off, sub * sub * 0.75);
+    vec2 fuv = uv;
+    if (horz) fuv.y += px_off * step_len; else fuv.x += px_off * step_len;
+    imageStore(dst, p, textureLod(color_tex, fuv, 0.0));
+}

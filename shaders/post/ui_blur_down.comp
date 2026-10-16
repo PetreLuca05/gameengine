@@ -1,0 +1,27 @@
+#version 450
+// UI backdrop (src/render/render_ui.c): the final image (display-linear, output resolution) to a
+// quarter resolution, display-encoded (sRGB / PQ, what the UI composites against), 4x4 box per texel.
+#extension GL_GOOGLE_include_directive : require
+#include "post_common.glsl"
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0) uniform sampler2D ldr_tex;
+layout(set = 0, binding = 8, rgba16f) uniform writeonly image2D dst;
+vec3 srgb_encode(vec3 c) { return mix(c * 12.92, 1.055 * pow(max(c, vec3(0.0)), vec3(1.0 / 2.4)) - 0.055, step(vec3(0.0031308), c)); }
+vec3 pq_encode(vec3 y) {
+    const float m1 = 0.1593017578125, m2 = 78.84375, c1 = 0.8359375, c2 = 18.8515625, c3 = 18.6875;
+    vec3 p = pow(clamp(y, 0.0, 1.0), vec3(m1));
+    return pow((c1 + c2 * p) / (1.0 + c3 * p), vec3(m2));
+}
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 sz = imageSize(dst);
+    if (p.x >= sz.x || p.y >= sz.y) return;
+    vec2 t = 1.0 / vec2(textureSize(ldr_tex, 0));
+    vec2 uv = (vec2(p) + 0.5) / vec2(sz);
+    vec3 c = textureLod(ldr_tex, uv + t * vec2(-1, -1), 0.0).rgb + textureLod(ldr_tex, uv + t * vec2(1, -1), 0.0).rgb +
+             textureLod(ldr_tex, uv + t * vec2(-1, 1), 0.0).rgb + textureLod(ldr_tex, uv + t * vec2(1, 1), 0.0).rgb;
+    c = sanitize(c * 0.25);
+    bool hdr = U.s_out.x > 0.5;
+    vec3 o = hdr ? pq_encode(c * (U.s_out.y / 10000.0)) : srgb_encode(clamp(c, 0.0, 1.0));
+    imageStore(dst, p, vec4(o, 1.0));
+}

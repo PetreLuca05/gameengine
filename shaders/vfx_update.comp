@@ -1,0 +1,138 @@
+#version 450
+// Per-particle update: age, forces (gravity, drag, wind, curl turbulence), velocity / size /
+// color / spin over life, depth-buffer collision (previous frame's scene depth), flipbook frame,
+// death + sub-emitters, then classification into the draw lists (additive, sorted alpha,
+// distortion). No CPU readback.
+#extension GL_GOOGLE_include_directive : require
+#include "vfx_common.glsl"
+layout(local_size_x = 64) in;
+
+float lin_depth(float d) {
+    float n = vf.depth_params.x, f = vf.depth_params.y;
+    return n * f / (f - d * (f - n));
+}
+
+void push_sub(Emitter e, uint which, vec3 pos, vec3 n, uint seed, float scale) {
+    uint on = e.sub.x & 255u;
+    if (on != which) return;
+    uint count = (e.sub.x >> 8) & 255u;
+    for (int k = 0; k < 3; k++) {
+        uint em = k == 0 ? e.sub.y : (k == 1 ? e.sub.z : e.sub.w);
+        if (em == 0u) continue;
+        uint i = atomicAdd(ctr.sub, 1u);
+        if (i >= 4096u) return;
+        subs[i].pos = vec4(pos, scale);
+        subs[i].normal = vec4(n, 0);
+        subs[i].info = uvec4(em - 1u, vfx_hash(seed + uint(k) * 77u), count, 0u);
+    }
+}
+
+void main() {
+    uint t = gl_GlobalInvocationID.x;
+    uint cur = vf.counts.w & 1u;
+    if (t >= ctr.alive[cur]) return;
+    uint idx = cur == 0u ? alive_a[t] : alive_b[t];
+    vec4 pa = p_pos_age[idx];
+    vec4 vl = p_vel_life[idx];
+    vec4 misc = p_misc[idx];
+    uvec4 info = p_info[idx];
+    uint emitter = info.x & 0xFFFFu;
+    uint pflags = info.x >> 16;
+    Emitter e = emitters[emitter];
+    float dt = vf.cam_right.w;
+    float age = pa.w + dt;
+    uint inst = info.w & 0xFFFFu;
+    bool local = inst != 0xFFFFu;
+    vec3 world_pos = pa.xyz;
+    vec4 iq = vec4(0, 0, 0, 1);
+    vec3 ip = vec3(0);
+    if (local) {
+        ip = inst_xf[inst * 2u].xyz;
+        iq = inst_xf[inst * 2u + 1u];
+        world_pos = ip + quat_rot(iq, pa.xyz);
+    }
+    if (age >= vl.w) {
+        push_sub(e, 1u, world_pos, vec3(0, 1, 0), info.y, misc.x);
+        uint d = atomicAdd(ctr.dead, 1u);
+        dead_list[d] = idx;
+        return;
+    }
+    float tl = age / vl.w;
+    uint row = e.modes.w;
+    vec3 v = vl.xyz;
+    // Forces (world space; local-space particles integrate in their socket frame without them).
+    if (!local) {
+        v.y -= 9.81 * e.phys0.x * dt;
+        if (e.phys0.z != 0.0) v += (vf.wind.xyz - v) * clamp(e.phys0.z * dt, 0.0, 1.0);
+        if (e.phys0.w > 0.0) {
+            vec3 q = pa.xyz * e.phys1.x + vec3(0.0, vf.cam_pos.w * e.phys1.y, vf.cam_pos.w * e.phys1.y * 0.7);
+            vec3 curl = texture(vfx_noise, q).xyz;
+            v += curl * e.phys0.w * dt;
+        }
+    }
+    if (e.phys0.y > 0.0) v *= exp(-e.phys0.y * dt);
+    float vmul = lut(row, LUT_VEL, tl).x;
+    vec3 p = pa.xyz + v * (vmul * dt);
+    // Depth-buffer collision against the previous frame's scene (world-space particles only).
+    uint collide = (e.modes.x >> 12) & 15u;
+    if (collide == 1u && !local && (pflags & SF_NO_COLLIDE) == 0u && vf.depth_params.z > 0.5 && (vf.caps.w & 2u) != 0u) {
+        vec4 c = vf.prev_view_proj * vec4(p, 1.0);
+        if (c.w > 0.05) {
+            vec3 ndc = c.xyz / c.w;
+            vec2 uv = ndc.xy * 0.5 + 0.5;
+            if (all(greaterThan(uv, vec2(0.002))) && all(lessThan(uv, vec2(0.998)))) {
+                float sd = textureLod(vfx_depth, uv, 0.0).r;
+                float scene_lin = lin_depth(sd), part_lin = c.w;
+                float thick = vf.depth_params.w;
+                if (part_lin > scene_lin && part_lin < scene_lin + thick) {
+                    // Surface normal from neighboring depth samples (reconstructed world positions).
+                    vec2 px = vf.screen.zw;
+                    vec4 a0 = vf.inv_view_proj * vec4(ndc.xy, sd, 1.0);
+                    float sx = textureLod(vfx_depth, uv + vec2(px.x, 0), 0.0).r;
+                    float sy = textureLod(vfx_depth, uv + vec2(0, px.y), 0.0).r;
+                    vec4 ax = vf.inv_view_proj * vec4(ndc.xy + vec2(2.0 * px.x, 0), sx, 1.0);
+                    vec4 ay = vf.inv_view_proj * vec4(ndc.xy + vec2(0, 2.0 * px.y), sy, 1.0);
+                    vec3 w0 = a0.xyz / a0.w, wx = ax.xyz / ax.w, wy = ay.xyz / ay.w;
+                    vec3 n = normalize(cross(wx - w0, wy - w0));
+                    if (dot(n, vf.cam_pos.xyz - w0) < 0.0) n = -n;
+                    float vn = dot(v, n);
+                    if (vn < 0.0) {
+                        vec3 vt = v - n * vn;
+                        v = vt * (1.0 - e.phys1.w) - n * vn * e.phys1.z;
+                        p = w0 + n * 0.01;
+                        if ((pflags & PF_COLLIDED) == 0u) push_sub(e, 2u, w0, n, info.y, misc.x);
+                        pflags |= PF_COLLIDED;
+                        if (((e.modes.x >> 16) & EF_KILL_ON_HIT) != 0u) age = vl.w;
+                    }
+                }
+            }
+        }
+    }
+    // Spin and flipbook.
+    misc.y += misc.z * lut(row, LUT_SPIN, tl).x * dt;
+    uint frames = max((e.modes.z >> 16) & 0xFFFFu, 1u);
+    if (((e.modes.x >> 16) & EF_FRAME_OVER_LIFE) != 0u) misc.w = min(tl * float(frames), float(frames) - 0.001);
+    else if (e.render1.w > 0.0) misc.w = mod(misc.w + e.render1.w * dt, float(frames));
+    p_pos_age[idx] = vec4(p, age);
+    p_vel_life[idx] = vec4(v, vl.w);
+    p_misc[idx] = misc;
+    p_info[idx].x = emitter | (pflags << 16);
+    uint o = atomicAdd(ctr.alive[1u - cur], 1u);
+    if (cur == 0u) alive_b[o] = idx; else alive_a[o] = idx;
+    // Draw lists.
+    uint rm = e.modes.x & 15u;
+    uint orient = (e.modes.x >> 4) & 15u;
+    vec3 wp = local ? ip + quat_rot(iq, p) : p;
+    if (rm == RM_ADD) {
+        uint i = atomicAdd(ctr.add, orient == OR_CROSS ? 2u : 1u);
+        if (i < vf.caps.x) list_add[i] = idx;
+        if (orient == OR_CROSS && i + 1u < vf.caps.x) list_add[i + 1u] = idx | 0x80000000u;
+    } else if (rm == RM_ALPHA) {
+        uint i = atomicAdd(ctr.alpha, 1u);
+        float dist = length(wp - vf.cam_pos.xyz);
+        if (i < vf.caps.y) sort_keys[i] = uvec2(floatBitsToUint(max(100000.0 - dist, 0.0)), idx);
+    } else if (rm == RM_DISTORT) {
+        uint i = atomicAdd(ctr.distort, 1u);
+        if (i < vf.caps.z) list_distort[i] = idx;
+    }
+}

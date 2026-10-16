@@ -1,0 +1,14 @@
+#version 450
+// Frame start: clear the output alive list and the draw lists; move last frame's sub-spawns to
+// the pending slot (consumed by vfx_emit_sub before vfx_update writes new ones).
+#extension GL_GOOGLE_include_directive : require
+#include "vfx_common.glsl"
+layout(local_size_x = 1) in;
+void main() {
+    uint cur = vf.counts.w & 1u;
+    ctr.alive[1u - cur] = 0u;
+    ctr.add = ctr.alpha = ctr.distort = 0u;
+    ctr.sub_pending = min(ctr.sub, 4096u);
+    ctr.sub = 0u;
+    ctr.emitted = uvec4(0);
+}

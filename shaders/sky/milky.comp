@@ -1,0 +1,26 @@
+#version 450
+// Milky way, baked once into a celestial equirectangular map (1024 x 512): u = right ascension,
+// v = polar angle from the north celestial pole. A band around the galactic plane, brighter
+// towards the galactic centre, with dust lanes. The sky shader samples it at night.
+#extension GL_GOOGLE_include_directive : require
+#include "sky_common.glsl"
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 8, rgba16f) uniform writeonly image2D out_map;
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    if (p.x >= 1024 || p.y >= 512) return;
+    vec2 uv = (vec2(p) + 0.5) / vec2(1024.0, 512.0);
+    float ra = (uv.x - 0.5) * 2.0 * PI, th = uv.y * PI;
+    vec3 c = vec3(sin(th) * cos(ra), sin(th) * sin(ra), cos(th));
+    // Galactic north pole RA 192.86, Dec 27.13; galactic centre RA 266.4, Dec -28.94.
+    const vec3 ngp = vec3(-0.8676, -0.1981, 0.4560);
+    const vec3 gc = vec3(-0.0548, -0.8734, -0.4838);
+    float b = dot(c, ngp);
+    float band = exp(-b * b / 0.018);
+    float core = pow(max(dot(c, gc), 0.0), 3.0);
+    vec2 pr = vec2(atan(dot(c, cross(ngp, gc)), dot(c, gc)), b) * vec2(6.0, 22.0);
+    float n = sk_fbm(pr + 3.0, 6);
+    float dust = smoothstep(0.35, 0.65, sk_fbm(pr * 1.7 + 11.0, 5));
+    vec3 col = vec3(0.8, 0.85, 1.0) * band * (0.35 + 0.65 * n) * (0.4 + 1.6 * core) * mix(1.0, 0.35, dust * band);
+    imageStore(out_map, p, vec4(col, 1.0));
+}

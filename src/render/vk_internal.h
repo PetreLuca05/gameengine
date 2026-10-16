@@ -1,0 +1,357 @@
+// Private renderer state shared by the render/*.c files.
+#ifndef DG_VK_INTERNAL_H
+#define DG_VK_INTERNAL_H
+
+#include "volk.h"
+#include "vk_mem_alloc.h"
+#include "render.h"
+#include "core/engine.h"
+#include "core/log.h"
+#include "core/cvar.h"
+
+#define FRAMES_IN_FLIGHT 2
+#define MAX_SWAP_IMAGES 8
+#define MAX_MESHES 16384
+#define MAX_TEXTURES 1024
+#define MAX_DRAWS 16384
+#define MAX_VM_DRAWS 512
+#define MAX_DEFERRED 4096
+#define MAX_UPLOADS 4096
+#define DYN_BUFFER_SIZE (16u << 20)
+#define MAX_SKIN_BONES 196608   // hordes: ~1000 characters x 65 bones + shadow draws
+#define MAX_SKIN_DRAWS 4096
+#define OBJ_SLOTS 16384                // power of two: object_id hash for previous transforms
+
+#define R (g_engine.render)
+
+// G-buffer formats (prepass).
+#define GB_NORMAL_FORMAT VK_FORMAT_R16G16_SNORM
+#define GB_MATERIAL_FORMAT VK_FORMAT_R8G8B8A8_UNORM
+#define GB_VELOCITY_FORMAT VK_FORMAT_R16G16_SFLOAT
+
+#define VK_CHECK(x) do { VkResult _r = (x); if (_r != VK_SUCCESS) log_fatal("Vulkan error %d at %s:%d (%s)", (int)_r, __FILE__, __LINE__, #x); } while (0)
+
+typedef struct GpuBuffer {
+    VkBuffer buffer;
+    VmaAllocation alloc;
+    void *mapped;
+    VkDeviceSize size;
+} GpuBuffer;
+
+typedef struct GpuMesh {
+    GpuBuffer vb, ib;
+    u32 vertex_count, index_count;
+    AABB bounds;
+    bool used;
+    bool skinned;
+    SkinVertex *cpu_verts;  // skinned meshes keep a CPU copy (r_cpu_skinning fallback)
+    u32 *cpu_indices;
+} GpuMesh;
+
+typedef struct GpuTexture {
+    VkImage image;
+    VmaAllocation alloc;
+    VkImageView view;
+    VkDescriptorSet set;
+    u32 w, h, mips;
+    VkFormat format;
+    bool used;
+    bool ready;       // upload recorded
+    bool wrapped;     // the image belongs to someone else (render_ui.c targets): only the set is ours
+} GpuTexture;
+
+typedef struct RenderTarget {
+    VkImage image;
+    VmaAllocation alloc;
+    VkImageView view;
+    VkFormat format;
+    u32 w, h;
+    VkImageLayout layout;
+} RenderTarget;
+
+typedef enum DeferredKind { DEFER_BUFFER, DEFER_IMAGE, DEFER_DESCRIPTOR } DeferredKind;
+typedef struct Deferred {
+    DeferredKind kind;
+    VkBuffer buffer;
+    VkImage image;
+    VkImageView view;
+    VmaAllocation alloc;
+    VkDescriptorSet set;
+} Deferred;
+
+typedef enum UploadKind { UPLOAD_BUFFER, UPLOAD_TEXTURE } UploadKind;
+typedef struct Upload {
+    UploadKind kind;
+    GpuBuffer staging;
+    VkBuffer dst;
+    VkDeviceSize size;
+    u32 texture;          // index into textures
+    int levels_in_data;   // >1 for raw uploads with explicit mips
+    size_t level_offsets[16];
+    bool gen_mips;
+} Upload;
+
+typedef struct FrameResources {
+    VkCommandPool pool;
+    VkCommandBuffer cmd;
+    VkFence fence;
+    VkSemaphore image_available;
+    GpuBuffer ubo;
+    VkDescriptorSet frame_set;
+    GpuBuffer ubo_pip;    // scope picture-in-picture camera (same layout as ubo)
+    VkDescriptorSet frame_set_pip;
+    GpuBuffer dyn;        // host-visible: lines, text, ui
+    GpuBuffer bones;      // host-visible SSBO: skinning palettes
+    GpuBuffer instances;  // host-visible SSBO: skinned instance data
+    GpuBuffer prev_models; // host-visible SSBO: previous model matrices of moving draws (velocity)
+    VkDeviceSize dyn_used;
+    Deferred deferred[MAX_DEFERRED];
+    int deferred_count;
+} FrameResources;
+
+// Must match shaders/common.glsl (std140).
+typedef struct GpuPointLight { vec4 pos_radius; vec4 color_intensity; } GpuPointLight;
+// Spot lights (flashlights): cookie projection, position + range, direction + cos(outer), colour + intensity, x cos(inner).
+typedef struct GpuSpotLight { mat4 vp; vec4 pos_range; vec4 dir_cos; vec4 color_intensity; vec4 params; } GpuSpotLight;
+#define MAX_SPOT_LIGHTS 4
+typedef struct FrameData {
+    mat4 view_proj, view, proj, vm_proj, shadow_vp;
+    mat4 view_proj_nj, prev_view_proj_nj, vm_view_proj_nj, prev_vm_view_proj_nj;
+    vec4 jitter, post_flags, post_params, post_fog;   // post_fog: x froxel fog on, y max distance (m)
+    vec4 camera_pos, sun_dir, sun_color, sky_ambient, ground_ambient, fog, params, screen;
+    vec4 fill_dir;        // xyz towards the fill (unshadowed) directional light, w intensity
+    vec4 fill_color;      // rgb
+    vec4 sky_flags;       // x environment + SH valid, y ambient scale, z environment mips, w cloud shadow valid
+    vec4 cshadow;         // xy cloud shadow origin (world xz), z 1 / size
+    mat4 shadow_vps[3];   // cascaded shadow maps: world -> atlas tile (2 x 2 atlas, tile 3 unused)
+    vec4 shadow_splits;   // x, y, z: cascade radii (m), w: cascade count
+    vec4 shadow_bias;     // x, y, z: per-cascade depth bias scale (constant bias in metres)
+    vec4 spot_info;       // x spot light count, y cookie valid
+    GpuSpotLight spots[MAX_SPOT_LIGHTS];
+    // Weather (shaders/weather.glsl)
+    mat4 occl_vp;         // world -> rain occlusion map clip (top-down ortho)
+    vec4 wx0;             // wetness, puddles, snow cover, lightning flash
+    vec4 wx1;             // rain, snowfall, time, occlusion map valid
+    vec4 wx2;             // wind x, z, wind strength, puddle mask valid
+    vec4 wx3;             // occlusion centre x, z, half extent, top y
+    vec4 wx4;             // occlusion depth range (m), precipitation quality, unused, unused
+    vec4 puddle_xf;       // origin x, z, 1 / size x, 1 / size z
+    GpuPointLight lights[MAX_POINT_LIGHTS];
+} FrameData;
+
+typedef struct PushLit {
+    mat4 model;
+    vec4 color;
+    vec4 params;
+    u32 flags[4];
+} PushLit;
+
+typedef enum PipelineId {
+    PIPE_LIT, PIPE_LIT_WIRE, PIPE_LIT_BLEND, PIPE_SHADOW, PIPE_LINES, PIPE_LINES_OVERLAY,
+    PIPE_TEXT, PIPE_PREPASS, PIPE_UI, PIPE_SKIN, PIPE_SKIN_WIRE, PIPE_SKIN_SHADOW, PIPE_PREPASS_SKIN, PIPE_UI3D, PIPE_PRECIP, PIPE_COUNT
+} PipelineId;
+
+// Must match SkinInstance in shaders/common.glsl (std430).
+typedef struct GpuSkinInstance { vec4 color; vec4 params; u32 info[4]; } GpuSkinInstance;
+
+typedef struct LineBatch { VkDeviceSize offset; u32 count; } LineBatch;
+
+typedef struct Renderer {
+    VkInstance instance;
+    VkDebugUtilsMessengerEXT messenger;
+    VkSurfaceKHR surface;
+    VkPhysicalDevice gpu;
+    VkPhysicalDeviceProperties gpu_props;
+    VkDevice device;
+    VkQueue queue;
+    u32 queue_family;
+    VmaAllocator vma;
+    bool validation;
+    bool has_wireframe;
+    bool has_push_descriptor, has_colorspace_ext;
+    bool hdr_supported, swap_hdr;
+    int hdr_output_applied;
+    float max_anisotropy;
+
+    // swapchain
+    VkSwapchainKHR swapchain;
+    VkFormat swap_format;
+    VkExtent2D swap_extent;
+    u32 swap_count;
+    VkImage swap_images[MAX_SWAP_IMAGES];
+    VkImageView swap_views[MAX_SWAP_IMAGES];
+    VkImageLayout swap_layouts[MAX_SWAP_IMAGES];
+    VkSemaphore render_done[MAX_SWAP_IMAGES];
+    bool swap_dirty;
+    bool vsync_applied;
+
+    // targets
+    RenderTarget hdr, depth, shadow, vm_depth;
+    u32 shadow_size;
+
+    // descriptors
+    VkDescriptorSetLayout frame_layout;   // set 0
+    VkDescriptorSetLayout tex_layout;     // set 1
+    VkDescriptorSetLayout lit_post_layout; // set 2 of layout_lit (push descriptor: AO, contact, SSR, SSGI)
+    VkDescriptorPool pool;
+    VkPipelineLayout layout_lit;          // set0 + set1 + push lit
+    VkPipelineLayout layout_ui;           // set1 + push (vertex + fragment: screen scale, 1 / size)
+    VkPipelineLayout layout_ui3d;         // push only (render_ui.c item views)
+    VkPipeline pipes[PIPE_COUNT];
+    VkSampler sampler_linear;   // material textures (aniso)
+    VkSampler sampler_clamp;    // post / ui
+    VkSampler sampler_shadow;   // compare
+
+    FrameResources frames[FRAMES_IN_FLIGHT];
+    u32 frame_slot;
+    u32 image_index;
+    bool frame_active;
+
+    GpuMesh meshes[MAX_MESHES];
+    u32 mesh_free_hint;
+    GpuTexture textures[MAX_TEXTURES];
+    TextureId white_tex;
+    TextureId text_atlas;
+
+    Upload uploads[MAX_UPLOADS];
+    int upload_count;
+
+    // per-frame queued work
+    DrawItem *draws;
+    u32 draw_count;
+    DrawItem *vm_draws;
+    u32 vm_draw_count;
+    SkinnedDraw *skin_draws;      // palette pointers rewritten to offsets into skin_bones
+    u32 skin_draw_count;
+    mat4 *skin_bones;
+    u32 skin_bone_count;
+    GpuPointLight lights[MAX_POINT_LIGHTS];
+    u32 light_count;
+    GpuSpotLight spots[MAX_SPOT_LIGHTS];
+    u32 spot_count;
+    RenderWeather weather;            // this frame (render_set_weather)
+    RenderTarget occl;                // top-down rain occlusion depth (render.c)
+    mat4 occl_vp;
+    vec4 occl_info;                   // centre x, z, half extent, top y
+    float occl_range;
+    bool occl_valid;
+    TextureId puddle_bound;           // puddle mask in frame set binding 10
+    bool weather_bindings;
+    TextureId spot_cookie, spot_cookie_bound;
+    LineVertex *line_cpu[2];   // [0] depth tested, [1] overlay
+    u32 line_count[2];
+    u32 line_cap;
+    TextVertex *text_cpu;
+    u32 text_count, text_cap;
+    UiVertex *ui_verts; u32 ui_vcount, ui_vcap;
+    u32 *ui_indices; u32 ui_icount, ui_icap;
+    UiDrawCmd *ui_cmds; u32 ui_ccount, ui_ccap;
+
+    RenderCamera cam;
+    RenderEnvironment env;
+    mat4 view, proj, view_proj, vm_proj, shadow_vp;   // shadow_vp: the widest cascade (volumetrics, particles, decals)
+    mat4 shadow_vps[3];
+    vec4 shadow_splits;
+    vec4 shadow_bias;
+    // temporal state (TAA / motion blur / velocity)
+    mat4 proj_j, vm_proj_j;                     // jittered projections (this frame)
+    mat4 view_proj_nj, prev_view_proj_nj, vm_view_proj_nj, prev_vm_view_proj_nj;
+    vec2 jitter, prev_jitter;                   // NDC
+    vec3 prev_cam_pos;
+    u32 frame_index;
+    bool have_prev, camera_cut;
+    bool fx_ads;
+    float fx_ads_focus;
+    RenderSight sight;                          // this frame's weapon sight (render_set_sight)
+    float pip_fov;                              // scope PiP camera FOV (deg)
+    mat4 *prev_models_cpu;                      // this frame's previous-model list (index = DrawItem.prev_slot - 1)
+    u32 prev_model_count;
+    struct ObjSlot *obj_slots;                  // object_id -> last model / palette (hash, OBJ_SLOTS)
+    mat4 *prev_bones;                           // last frame's bone palettes (copy of skin_bones)
+    u32 prev_bone_count;
+    float target_scale;                         // render resolution / output resolution
+    vec4 frustum[6];
+    float render_scale_applied;
+    char screenshot_path[512];
+    RenderStats stats, last_stats;
+
+    // shader hot reload
+    double next_shader_poll;
+    i64 shader_src_mtime;
+
+    // cvars
+    Cvar *r_vsync, *r_wireframe, *r_render_scale, *r_shadow_quality, *r_aniso, *r_texture_quality;
+    Cvar *r_aa, *r_brightness, *r_gamma, *r_grid, *r_vignette, *r_shader_hotreload, *r_culling;
+    Cvar *r_vm_fov, *r_cpu_skinning, *r_bloom, *r_bloom_intensity, *r_hdr_output;
+    float exposure_boost;
+    u32 aniso_mod, texq_mod;
+} Renderer;
+
+// render_ui.c (frame graph hooks)
+void render_ui_build(int ldr, u32 out_w, u32 out_h);   // before the final pass: backdrop blur, item views
+void render_ui_final_reads(int final_pass);
+bool render_ui_wants_wait(void);
+void render_ui_frame_done(void);
+void render_ui_shutdown(void);
+const RenderWeather *render_weather_state(void);   // this frame's weather (post passes)
+
+// vk_device.c
+bool vkd_create_device(struct SDL_Window *window);
+void vkd_destroy_device(void);
+bool vkd_create_swapchain(void);
+void vkd_destroy_swapchain(void);
+void vkd_create_targets(void);
+void vkd_destroy_targets(void);
+void vkd_create_shadow_map(u32 size);
+
+// vk_resources.c
+GpuBuffer vkr_buffer_create(VkDeviceSize size, VkBufferUsageFlags usage, bool host_visible);
+void vkr_buffer_destroy_now(GpuBuffer *b);
+GpuBuffer vkr_buffer_create_readback(VkDeviceSize size);
+void vkr_defer_buffer(GpuBuffer *b);
+void vkr_defer_image(VkImage image, VkImageView view, VmaAllocation alloc);
+void vkr_flush_deferred(FrameResources *f);
+void vkr_record_uploads(VkCommandBuffer cmd);
+void vkr_image_barrier(VkCommandBuffer cmd, VkImage image, VkImageAspectFlags aspect,
+                       VkImageLayout old_layout, VkImageLayout new_layout,
+                       VkPipelineStageFlags2 src_stage, VkAccessFlags2 src_access,
+                       VkPipelineStageFlags2 dst_stage, VkAccessFlags2 dst_access, u32 mips);
+RenderTarget vkr_target_create(u32 w, u32 h, VkFormat fmt, VkImageUsageFlags usage, VkImageAspectFlags aspect);
+void vkr_target_destroy(RenderTarget *t);
+void vkr_create_samplers(void);
+void vkr_destroy_samplers(void);
+VkDescriptorSet vkr_alloc_tex_set(VkImageView view, VkSampler sampler);
+void vkr_write_tex_set(VkDescriptorSet set, VkImageView view, VkSampler sampler);
+void vkr_rewrite_all_texture_sets(void);
+// A texture slot over an image owned elsewhere (UI render targets): sampled clamped by the UI.
+TextureId vkr_texture_wrap(VkImage image, VkImageView view, u32 w, u32 h, VkFormat fmt);
+void vkr_texture_rewrap(TextureId id, VkImage image, VkImageView view, u32 w, u32 h);
+void vkr_texture_unwrap(TextureId id);
+void vkr_destroy_all_resources(void);
+
+// vk_pipelines.c
+bool vkp_create_layouts(void);
+bool vkp_create_pipelines(void);
+void vkp_destroy_pipelines(void);
+void vkp_destroy_layouts(void);
+VkShaderModule vkp_load_shader(const char *name);
+void vkp_register_shader(const char *name);   // hot reload / recompile list ("post/taa.comp")
+
+// post/post_core.c: frame graph post-processing stack
+bool post_create_pipelines(void);
+
+// vk_vfx.c: GPU particles, decals, distortion
+bool vkx_init(void);
+void vkx_shutdown(void);
+bool vkx_create_pipelines(void);
+void vkx_targets_changed(void);               // after vkd_create_targets (depth / scene copy / bloom views)
+void vkx_record_compute(VkCommandBuffer cmd); // frame start, before the shadow pass
+void vkx_draw_decals(VkCommandBuffer cmd, bool dynamic);    // inside the scene pass, depth read-only
+void vkx_copy_scene(VkCommandBuffer cmd);     // outside rendering: HDR -> scene copy (distortion)
+void vkx_draw_particles(VkCommandBuffer cmd); // inside the scene pass, depth read-only
+void vkx_draw_particles_pip(VkCommandBuffer cmd, VkDescriptorSet frame_set);   // inside the scope picture-in-picture pass
+void vkx_timestamp(VkCommandBuffer cmd, int slot);
+RenderTarget *vkx_scene_copy(void);           // opaque HDR copy (distortion; TAA "hdr_opaque"), SHADER_READ_ONLY
+void vkx_begin_frame_queries(VkCommandBuffer cmd);
+
+#endif

@@ -1,0 +1,38 @@
+#version 450
+// Lens droplets -> height / normal map (half res). Each drop is a soft dome (an ellipse stretched
+// along its run direction: trail), the tallest drop at a pixel wins (drops merge by the game sim).
+//   out: xy height gradient, z height 0..1, w opacity
+#extension GL_GOOGLE_include_directive : require
+#include "post_common.glsl"
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 8, rgba16f) uniform writeonly image2D dst;
+struct Drop { vec4 pos_r; vec4 info; };
+layout(std430, set = 0, binding = 13) readonly buffer Drops { Drop drops[]; };
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 sz = imageSize(dst);
+    if (p.x >= sz.x || p.y >= sz.y) return;
+    vec2 uv = (vec2(p) + 0.5) / vec2(sz);
+    float aspect = float(sz.x) / float(sz.y);
+    float best = 0.0;
+    vec2 grad = vec2(0.0);
+    float alpha = 0.0;
+    uint n = pc.u0.x;
+    for (uint i = 0u; i < n; i++) {
+        Drop d = drops[i];
+        float r = d.pos_r.z;
+        vec2 dd = (uv - d.pos_r.xy) * vec2(aspect, 1.0);
+        // Stretched upwards (the trail above a running drop): y scaled down above the centre.
+        float st = max(d.pos_r.w, 1.0);
+        if (dd.y < 0.0) dd.y /= st;
+        float q = dot(dd, dd) / (r * r);
+        if (q >= 1.0) continue;
+        float h = sqrt(1.0 - q) * d.info.x;
+        if (h > best) {
+            best = h;
+            grad = dd / (r * max(sqrt(1.0 - q), 0.15));
+            alpha = d.info.x;
+        }
+    }
+    imageStore(dst, p, vec4(grad, best, alpha));
+}

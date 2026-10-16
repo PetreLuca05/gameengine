@@ -1,0 +1,65 @@
+#version 450
+// r_post_debug: visualise one intermediate (replaces the tonemapped image, display-linear out).
+// pc.u0.x = view (post_debug_names), u0.y = hi-z mip / froxel slice, p0.x = scale.
+#extension GL_GOOGLE_include_directive : require
+#include "post_common.glsl"
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0) uniform sampler2D src_tex;
+layout(set = 0, binding = 1) uniform sampler3D vol_tex;
+layout(set = 0, binding = 2) uniform sampler2D depth_tex;
+layout(set = 0, binding = 8, rgba16f) uniform writeonly image2D dst;
+layout(std430, set = 0, binding = 13) readonly buffer Exposure { float e[16]; } X;
+
+vec3 heat(float t) {
+    t = clamp(t, 0.0, 1.0);
+    return clamp(vec3(1.5 - abs(4.0 * t - 3.0), 1.5 - abs(4.0 * t - 2.0), 1.5 - abs(4.0 * t - 1.0)), 0.0, 1.0);
+}
+vec3 srgb_decode(vec3 c) { return pow(max(c, vec3(0.0)), vec3(2.2)); }
+
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 sz = imageSize(dst);
+    if (p.x >= sz.x || p.y >= sz.y) return;
+    vec2 uv = (vec2(p) + 0.5) / vec2(sz);
+    uint v = pc.u0.x;
+    float k = pc.p0.x > 0.0 ? pc.p0.x : 1.0;
+    vec4 s = (v == 13u) ? vec4(0.0) : textureLod(src_tex, uv, v == 9u ? float(pc.u0.y) : 0.0);
+    vec3 o;
+    switch (v) {
+    case 1u: case 2u: o = vec3(s.r); break;                                           // ao, contact
+    case 3u: o = s.rgb / (1.0 + s.rgb) + vec3(0.0, 0.0, 0.0) * s.a; break;           // ssr
+    case 4u: o = s.rgb * k / (1.0 + s.rgb * k); break;                                // ssgi
+    case 5u: o = vec3(abs(s.rg) * 40.0 * k, 0.0); break;                              // velocity
+    case 6u: o = oct_decode(s.rg) * 0.5 + 0.5; break;                                 // normal
+    case 7u: o = s.rgb; break;                                                        // material (rough, metal, flags)
+    case 8u: o = vec3(fract(linear_depth(s.r) / (10.0 * k))); break;                  // depth (10 m bands)
+    case 9u: o = vec3(fract(linear_depth(s.r) / (10.0 * k))); break;                  // hi-z mip
+    case 10u: o = s.r < 0.0 ? vec3(0.1, 0.3, 1.0) * min(-s.r / 8.0, 1.0) : vec3(1.0, 0.4, 0.1) * min(s.r / 8.0, 1.0); break;   // coc
+    case 11u: {                                                                       // luminance (EV false colour)
+        float l = luma(s.rgb) * max(X.e[0], 1e-6);
+        o = heat((log2(max(l, 1e-6) / 0.18) + 5.0) / 10.0);
+        break;
+    }
+    case 12u: o = heat(s.a); break;                                                   // taa history weight
+    case 13u: {                                                                       // froxel slice
+        float z = pc.u0.y >= 1000u ? 0.8 : (float(pc.u0.y) + 0.5) / float(textureSize(vol_tex, 0).z);   // default: ~25 m
+        vec4 f = textureLod(vol_tex, vec3(uv, z), 0.0);
+        o = f.rgb * 60.0 * k / (1.0 + f.rgb * 60.0 * k);   // in-scattering (scaled up: thin fog)
+        break;
+    }
+    case 14u: case 15u: o = s.rgb * k / (1.0 + s.rgb * k); break;                     // bloom, flare
+    case 16u: o = vec3(abs(s.rg) / 40.0, 0.0); break;                                 // motion blur tiles (px)
+    case 17u: {                                                                       // fog (froxel transmittance at the pixel depth)
+        float d = textureLod(depth_tex, uv, 0.0).r;
+        float zl = d >= 1.0 ? U.s_vol3.w : linear_depth(d);
+        float w = clamp(log(max(zl, 0.15) / 0.15) / log(max(U.s_vol3.w, 1.0) / 0.15), 0.0, 1.0);
+        vec4 f = textureLod(vol_tex, vec3(uv, w), 0.0);
+        float fog = 1.0 - f.a;                               // opacity of the fog up to the surface
+        o = vec3(sqrt(fog)) * 0.7 + f.rgb * 6.0 * k;
+        break;
+    }
+    default: o = s.rgb; break;
+    }
+    // Debug output is display-encoded already: decode so final.frag's sRGB encode is identity.
+    imageStore(dst, p, vec4(srgb_decode(clamp(o, 0.0, 1.0)), 1.0));
+}

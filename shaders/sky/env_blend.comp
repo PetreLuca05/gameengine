@@ -1,0 +1,17 @@
+#version 450
+// The environment the lit shaders sample eases towards the latest refilter every frame
+// (k = SK.env.x): no pop when a refilter completes. Both images bound at this mip level;
+// pc.u0.y = 1 snaps (first frame).
+#extension GL_GOOGLE_include_directive : require
+#include "sky_common.glsl"
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 8, rgba16f) uniform readonly image2D next_env;
+layout(set = 0, binding = 9, rgba16f) uniform image2D cur_env;
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 sz = imageSize(cur_env);
+    if (p.x >= sz.x || p.y >= sz.y) return;
+    vec4 n = imageLoad(next_env, p), c = imageLoad(cur_env, p);
+    float k = pc.u0.y == 1u ? 1.0 : clamp(SK.env.x, 0.0, 1.0);
+    imageStore(cur_env, p, vec4(sanitize(mix(c.rgb, n.rgb, k)), 1.0));
+}
