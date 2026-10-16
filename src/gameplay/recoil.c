@@ -23,7 +23,7 @@ void recoil_params_default(RecoilParams *p) {
     p->seed_per_mag = true;
     p->sprint_to_fire = 0.15f; p->after_sprint_kick = 1.3f;
     p->ads_time = 0.18f;
-    p->idle_sway = 0.08f; p->scope_sway = 0.0f; p->hold_breath_time = 4.0f;
+    p->idle_sway = 0.05f; p->scope_sway = 0.0f; p->hold_breath_time = 4.0f;   // one sway for every held item (no per-weapon overrides)
     // Neutral hip / ADS behaviour (the old model) until recoil_type_defaults / the JSON say otherwise.
     p->hip_aim_mult = 1.0f; p->hip_kick_mult = 1.0f; p->hip_spread_mult = 1.0f;
     p->hip_bloom_mult = 1.0f; p->hip_bloom_max_mult = 1.0f; p->hip_bloom_recovery_mult = 1.0f;

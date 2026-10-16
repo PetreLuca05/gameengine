@@ -144,6 +144,10 @@ The arms follow by IK, so the hands stay glued. Sway is cosmetic: it never moves
 * The scope eye-box shadow uses the optic's own axis, so it reacts to the residual sway. The
   picture follows the eye → sight line.
 
+**Same sway on every item:** no weapon sets its own `sway`, `idle_sway` or `scope_sway`; every held
+item uses the defaults above (idle sway 0.05). Only attachments still scale it (`sway_scale`). The
+keys still parse, so a weapon can override them again.
+
 **Aim sway:** the old aim sway that moved the reticle itself (`wpn_ads_sway`, `wpn_ads_bob`) is
 still available, but defaults to 0.
 
@@ -260,8 +264,8 @@ Prone is data-only until a prone stance exists.
 | `04_crossbow` | Projectile, simple kick, zero ADS cone |
 | `07_smg` | 900 rpm, low climb, jittery horizontal, best hip fire |
 | `08_lmg` | Heavy first shots that settle (`ramp_shots` 8); crouch steadies it a lot |
-| `09_dmr` | Semi, strong kick that recovers almost fully, scope sway + hold breath |
-| `10_sniper` | Bolt action, one huge fully recovered kick, heavy scope sway, 5 s breath hold |
+| `09_dmr` | Semi, strong kick that recovers almost fully, hold breath |
+| `10_sniper` | Bolt action, one huge fully recovered kick, 5 s breath hold |
 
 ## Verifying
 
