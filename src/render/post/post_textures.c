@@ -44,6 +44,69 @@ static void once_end(VkCommandPool pool, VkCommandBuffer cmd) {
 }
 
 // Creates a sampled image (2D or 3D) from host data and leaves it SHADER_READ_ONLY.
+// A 2D RGBA8 image with its full mip chain (box filtered on the CPU), `rgba` is level 0.
+static void make_image_mips(VkImage *img, VmaAllocation *alloc, VkImageView *view, VkFormat fmt, u32 w, u32 h, const u8 *rgba) {
+    u32 mips = 1;
+    while ((w >> mips) > 0 && (h >> mips) > 0) mips++;
+    size_t total = 0;
+    for (u32 m = 0; m < mips; m++) total += (size_t)(w >> m) * (h >> m) * 4;
+    GpuBuffer st = vkr_buffer_create(total, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, true);
+    u8 *dst = (u8 *)st.mapped;
+    memcpy(dst, rgba, (size_t)w * h * 4);
+    VkBufferImageCopy regions[16] = { 0 };
+    size_t off = 0;
+    for (u32 m = 0; m < mips && m < 16; m++) {
+        u32 mw = w >> m, mh = h >> m;
+        if (m > 0) {
+            const u8 *src = dst + off - (size_t)(w >> (m - 1)) * (h >> (m - 1)) * 4;
+            u32 sw = w >> (m - 1);
+            u8 *o = dst + off;
+            for (u32 y = 0; y < mh; y++)
+                for (u32 x = 0; x < mw; x++)
+                    for (u32 c = 0; c < 4; c++) {
+                        const u8 *s0 = src + ((size_t)(2 * y) * sw + 2 * x) * 4 + c, *s1 = s0 + (size_t)sw * 4;
+                        o[((size_t)y * mw + x) * 4 + c] = (u8)((s0[0] + s0[4] + s1[0] + s1[4] + 2) / 4);
+                    }
+        }
+        regions[m].bufferOffset = off;
+        regions[m].imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        regions[m].imageSubresource.mipLevel = m;
+        regions[m].imageSubresource.layerCount = 1;
+        regions[m].imageExtent = (VkExtent3D){ mw, mh, 1 };
+        off += (size_t)mw * mh * 4;
+    }
+    if (mips > 16) mips = 16;
+    VkImageCreateInfo ici = { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
+    ici.imageType = VK_IMAGE_TYPE_2D;
+    ici.format = fmt;
+    ici.extent = (VkExtent3D){ w, h, 1 };
+    ici.mipLevels = mips;
+    ici.arrayLayers = 1;
+    ici.samples = VK_SAMPLE_COUNT_1_BIT;
+    ici.tiling = VK_IMAGE_TILING_OPTIMAL;
+    ici.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    VmaAllocationCreateInfo aci = { 0 };
+    aci.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
+    VK_CHECK(vmaCreateImage(R->vma, &ici, &aci, img, alloc, NULL));
+    VkImageViewCreateInfo vci = { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+    vci.image = *img;
+    vci.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    vci.format = fmt;
+    vci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    vci.subresourceRange.levelCount = mips;
+    vci.subresourceRange.layerCount = 1;
+    VK_CHECK(vkCreateImageView(R->device, &vci, NULL, view));
+    VkCommandPool pool;
+    VkCommandBuffer cmd = once_begin(&pool);
+    vkr_image_barrier(cmd, *img, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_PIPELINE_STAGE_2_NONE, 0,
+                      VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT, mips);
+    vkCmdCopyBufferToImage(cmd, st.buffer, *img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, mips, regions);
+    vkr_image_barrier(cmd, *img, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                      VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_SHADER_READ_BIT, mips);
+    once_end(pool, cmd);
+    vkr_buffer_destroy_now(&st);
+}
+
 static void make_image(VkImage *img, VmaAllocation *alloc, VkImageView *view, VkFormat fmt, u32 w, u32 h, u32 d, const void *data, size_t bytes) {
     VkImageCreateInfo ici = { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
     ici.imageType = d > 1 ? VK_IMAGE_TYPE_3D : VK_IMAGE_TYPE_2D;
@@ -249,6 +312,17 @@ void post_textures_init(void) {
         free(wn);
     }
     if (noise) stbi_image_free(noise);
+    // The moon's albedo map (the sky pass samples it on the lunar sphere). Missing: a flat grey of
+    // the same mean, so the brightness normalisation of sky_render.comp still holds.
+    u8 *moon = stbi_load(platform_data_path("assets/textures/moon_albedo.jpg", buf, sizeof(buf)), &w, &h, &comp, 4);
+    if (moon && w >= 2 && h >= 2) {
+        make_image_mips(&P.moon_img, &P.moon_alloc, &P.moon, VK_FORMAT_R8G8B8A8_SRGB, (u32)w, (u32)h, moon);
+    } else {
+        log_warn("post: assets/textures/moon_albedo.jpg missing - flat moon");
+        u32 grey = 0xFFBBBBBBu;
+        make_image(&P.moon_img, &P.moon_alloc, &P.moon, VK_FORMAT_R8G8B8A8_SRGB, 1, 1, 1, &grey, 4);
+    }
+    if (moon) stbi_image_free(moon);
     identity_lut();
     make_dirt();
     make_image(&P.smaa_area_img, &P.smaa_area_alloc, &P.smaa_area, VK_FORMAT_R8G8_UNORM, AREATEX_WIDTH, AREATEX_HEIGHT, 1, areaTexBytes, AREATEX_SIZE);
@@ -260,6 +334,7 @@ void post_textures_shutdown(void) {
     destroy(&P.white_img, &P.white_alloc, &P.white);
     destroy(&P.black_img, &P.black_alloc, &P.black);
     destroy(&P.noise_img, &P.noise_alloc, &P.noise);
+    destroy(&P.moon_img, &P.moon_alloc, &P.moon);
     destroy(&P.lut_img, &P.lut_alloc, &P.lut);
     destroy(&P.dirt_img, &P.dirt_alloc, &P.dirt);
     destroy(&P.smaa_area_img, &P.smaa_area_alloc, &P.smaa_area);

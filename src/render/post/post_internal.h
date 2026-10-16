@@ -79,9 +79,10 @@ typedef struct PostCtx {
     GpuBuffer histogram_buf;          // 256 bins
     VkSampler linear, point, linear_repeat, shadow_cmp;
     // shared textures
-    VkImage white_img, black_img, noise_img, lut_img, dirt_img, smaa_area_img, smaa_search_img;
-    VmaAllocation white_alloc, black_alloc, noise_alloc, lut_alloc, dirt_alloc, smaa_area_alloc, smaa_search_alloc;
+    VkImage white_img, black_img, noise_img, lut_img, dirt_img, smaa_area_img, smaa_search_img, moon_img;
+    VmaAllocation white_alloc, black_alloc, noise_alloc, lut_alloc, dirt_alloc, smaa_area_alloc, smaa_search_alloc, moon_alloc;
     VkImageView white, black, noise, lut, dirt, smaa_area, smaa_search;
+    VkImageView moon;                 // lunar albedo, equirectangular, sRGB, mipmapped (assets/textures/moon_albedo.jpg)
     int lut_count;
     // per frame
     FgRes hiz, ao, contact, ssr, ssgi, froxels, color_prev, depth_prev, vol_history;

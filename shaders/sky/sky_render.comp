@@ -1,7 +1,8 @@
 #version 450
 // Sky on every pixel without geometry (depth = 1): the sky-view LUT, the sun disc (limb
-// darkening, through the transmittance), the moon (phase lit by the sun direction, procedural
-// maria / craters, earthshine), stars and the milky way on the celestial sphere (rotating with
+// darkening per colour, aureole; through the transmittance), the moon (a sphere with
+// the lunar albedo map, near side towards the earth, lunar-Lambert lit by the sun direction so the
+// phases follow, earthshine), stars and the milky way on the celestial sphere (rotating with
 // the sidereal time, fading with the sky brightness, extinguished near the horizon) and the 2D
 // cloud layer lit by the sun / moon (occludes them). Main view and the scope picture-in-picture.
 //   pc.p0..p3 inverse view-projection of the target, pc.u2.xyz camera (float bits), pc.u3.x 1 = PiP
@@ -17,6 +18,7 @@ layout(set = 0, binding = 5) uniform sampler2D clouds_tex;
 layout(set = 0, binding = 6) uniform sampler2D depth_tex;
 layout(set = 0, binding = 7) uniform sampler2D cshadow_tex;
 layout(set = 0, binding = 8, rgba16f) uniform image2D hdr;
+layout(set = 0, binding = 15) uniform sampler2D moon_tex;    // lunar albedo, equirectangular (longitude 0 at u = 0.5), sRGB, mipmapped
 
 vec3 transmittance(float r, float mu) { return textureLod(trans_lut, trans_uv(r, mu), 0.0).rgb; }
 
@@ -52,18 +54,21 @@ vec3 stars(vec3 c, float px) {
     return col;
 }
 
-// Moon albedo (maria + craters), uv in -1..1 on the disc.
-float moon_albedo(vec2 uv) {
-    float m = sk_fbm(uv * 2.2 + vec2(4.1, 1.3), 5);
-    float maria = smoothstep(0.45, 0.62, m);
-    float cr = 0.0;
-    for (int i = 0; i < 6; i++) {
-        vec2 c = vec2(sk_hash(vec2(i, 1.3)), sk_hash(vec2(2.7, i))) * 1.6 - 0.8;
-        float r = 0.06 + 0.12 * sk_hash(vec2(i, 9.1));
-        float d = length(uv - c) / r;
-        cr += smoothstep(1.0, 0.8, d) * smoothstep(0.55, 0.85, d) * 0.5 - smoothstep(0.75, 0.2, d) * 0.12;
-    }
-    return clamp(0.16 - 0.07 * maria + 0.03 * sk_fbm(uv * 9.0, 3) + cr * 0.05, 0.04, 0.3);
+// Linear mean of moon_albedo.jpg: the map is divided by it, so moon_disc.z stays the full moon.
+const float MOON_TEX_MEAN = 0.516;
+// Lunar east on screen: +1 east along rx (Mare Crisium towards rx).
+const float MOON_EAST = 1.0;
+// The disc at its true radiance (illuminance / solid angle) is ~100x the night exposure: one
+// clipped blob. Scaled down to the tonemapper range so the maria read (the lighting is not).
+const float MOON_DISC_GAIN = 0.008;
+
+// Moon albedo at the surface point n (moon frame: x east, y north, z towards the earth), relative
+// to the mean. The map is colour enhanced: mostly desaturated back to the moon's grey-brown.
+vec3 moon_albedo(vec3 n, float lod) {
+    vec2 uv = vec2(atan(n.x, n.z) / (2.0 * PI) + 0.5, 0.5 - asin(clamp(n.y, -1.0, 1.0)) / PI);
+    vec3 a = textureLod(moon_tex, uv, lod).rgb;
+    float l = dot(a, vec3(0.2126, 0.7152, 0.0722));
+    return mix(vec3(l), a, 0.35) * vec3(1.0, 0.97, 0.92) / MOON_TEX_MEAN;
 }
 
 vec3 sky_color(vec3 dir, float px, bool clouds_on) {
@@ -82,33 +87,49 @@ vec3 sky_color(vec3 dir, float px, bool clouds_on) {
         C += textureLod(milky_tex, muv, 0.0).rgb * SK.cel_y.w * 0.0022;
         C *= night * view_t;
     }
-    // Sun disc.
+    // Sun disc: power-law limb darkening per colour (redder, darker at the limb; normalised so the
+    // disc integrates to the sun's illuminance), and a small aureole around it.
     vec3 S = normalize(SK.sun_dir.xyz);
     float cs = dot(dir, S);
     float disc_sun = 0.0;
-    if (cs > SK.sun_disc.x - 1e-4) {
-        float a = acos(clamp(cs, -1.0, 1.0)) / max(SK.sun_disc.y, 1e-5);
-        float mu = sqrt(max(1.0 - a * a, 0.0));
-        float limb = 1.0 - SK.sun_disc.w * (1.0 - mu);
-        float edge = 1.0 - smoothstep(0.92, 1.0, a);
-        disc_sun = edge * limb;
-        C += SK.sun_dir.w * SK.sun_disc.z / (PI * SK.sun_disc.y * SK.sun_disc.y) * view_t * disc_sun;
+    float sun_r = max(SK.sun_disc.y, 1e-5);
+    if (cs > cos(sun_r * 6.0)) {
+        float a = acos(clamp(cs, -1.0, 1.0)) / sun_r;
+        float norm = SK.sun_dir.w * SK.sun_disc.z / (PI * sun_r * sun_r);
+        if (a < 1.0) {
+            float mu = sqrt(max(1.0 - a * a, 0.0));
+            const vec3 ALPHA = vec3(0.40, 0.52, 0.66);   // ~650 / 550 / 450 nm
+            vec3 limb = pow(vec3(max(mu, 1e-4)), ALPHA * (SK.sun_disc.w / 0.6)) * (ALPHA * (SK.sun_disc.w / 0.6) + 2.0) * 0.5;
+            float edge = 1.0 - smoothstep(0.96, 1.0, a);
+            disc_sun = edge * limb.g;
+            C += norm * view_t * limb * edge;
+        }
+        // Aureole: forward scattering just outside the disc (the sky-view LUT is too coarse for it).
+        float halo = exp(-max(a - 1.0, 0.0) * 2.2) * (1.0 - smoothstep(4.0, 6.0, a));
+        C += norm * view_t * halo * 0.0025 * vec3(1.0, 0.96, 0.9);
     }
-    // Moon disc: a sphere lit by the sun (phases follow), earthshine on the dark side.
+    // Moon: a sphere with the lunar albedo map, the near side towards the earth (north up the sky),
+    // lunar-Lambert lit by the sun (phases follow, the full moon is flat, not limb darkened),
+    // earthshine on the dark side. The disc hides the stars / milky way behind it.
     vec3 M = normalize(SK.moon_dir.xyz);
     float cm = dot(dir, M);
     if (cm > SK.moon_disc.x - 1e-4) {
         vec3 up = abs(M.y) > 0.9 ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 1.0, 0.0);
         vec3 rx = normalize(cross(up, M)), ry = cross(M, rx);
-        vec2 q = vec2(dot(dir, rx), dot(dir, ry)) / max(SK.moon_disc.y, 1e-5);
+        float moon_r = max(SK.moon_disc.y, 1e-5);
+        vec2 q = vec2(dot(dir, rx), dot(dir, ry)) / moon_r;
         float r2 = dot(q, q);
         if (r2 < 1.0) {
-            vec3 n = rx * q.x + ry * q.y - M * sqrt(1.0 - r2);
-            float lit = max(dot(n, S), 0.0);
-            float alb = moon_albedo(q);
-            float edge = 1.0 - smoothstep(0.9, 1.0, sqrt(r2));
-            vec3 moon = vec3(1.0, 0.97, 0.92) * alb / 0.12 * (lit + SK.moon_disc.w) * SK.moon_disc.z / (PI * SK.moon_disc.y * SK.moon_disc.y);
-            // The disc hides the stars / milky way behind it.
+            float mu = sqrt(1.0 - r2);
+            vec3 n = rx * q.x + ry * q.y - M * mu;
+            float mu0 = dot(n, S);
+            float lit = mu0 > 0.0 ? mix(mu0, 2.0 * mu0 / (mu0 + mu), 0.75) : 0.0;
+            // The map's footprint of one pixel: texels per radian of the moon's surface times the
+            // surface radians per pixel (foreshortened towards the limb).
+            float tex_px = float(textureSize(moon_tex, 0).x) / (2.0 * PI) * px / moon_r / max(mu, 0.15);
+            vec3 alb = moon_albedo(vec3(MOON_EAST * q.x, q.y, mu), log2(max(tex_px, 1.0)));
+            float edge = 1.0 - smoothstep(0.94, 1.0, sqrt(r2));
+            vec3 moon = alb * (lit + SK.moon_disc.w) * SK.moon_disc.z / (PI * moon_r * moon_r) * MOON_DISC_GAIN;
             C = mix(C, moon * view_t, edge);
         }
     }

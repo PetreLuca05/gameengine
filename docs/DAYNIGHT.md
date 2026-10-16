@@ -64,9 +64,16 @@ froxels.
 It draws every pixel without geometry, in the main view and in the scope picture-in-picture:
 
 - the sky-view LUT, plus the lit ground below the horizon;
-- the sun disc: limb darkening, through the transmittance, HDR so it blooms;
-- the moon: phase lit by the sun, procedural maria and craters, earthshine; it hides the stars
-  behind it;
+- the sun disc: power-law limb darkening per colour (redder at the limb, normalised to the
+  sun's illuminance), a small aureole, through the transmittance, HDR so it blooms;
+- the moon: a sphere with the lunar albedo map (`assets/textures/moon_albedo.jpg`,
+  equirectangular, longitude 0 at u = 0.5, mipmapped; LOD from the pixel footprint), near side
+  towards the earth with north up the sky. It is lunar-Lambert lit by the sun, so the phases
+  follow and the full moon is flat, with earthshine on the dark side. The disc radiance is scaled
+  by `MOON_DISC_GAIN` to the night exposure, otherwise it is a clipped blob. It hides the stars
+  behind it.
+- `sky_look sun|moon` aims the view at a body. `sky_disc_zoom N` enlarges both discs at the same
+  surface brightness, for inspection.
 - the stars: two layers of jittered points about a pixel wide, extinguished near the horizon,
   fading out as the sky brightens;
 - the milky way: baked once into a celestial equirectangular map;

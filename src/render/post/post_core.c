@@ -333,18 +333,19 @@ bool post_create_pipelines(void) {
 bool post_init(void) {
     memset(&P, 0, sizeof(P));
     if (!R->has_push_descriptor) { log_error("post: push descriptors unavailable, post stack disabled"); return false; }
-    VkDescriptorSetLayoutBinding b[15];
+    // 0-7 and 15 samplers, 8-11 storage images, 12 UBO, 13-14 storage buffers.
+    VkDescriptorSetLayoutBinding b[16];
     memset(b, 0, sizeof(b));
-    for (u32 i = 0; i < 15; i++) {
+    for (u32 i = 0; i < 16; i++) {
         b[i].binding = i;
         b[i].descriptorCount = 1;
         b[i].stageFlags = VK_SHADER_STAGE_ALL;
-        b[i].descriptorType = i < 8 ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
+        b[i].descriptorType = i < 8 || i == 15 ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
                                     : (i < 12 ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE : (i == 12 ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER : VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
     }
     VkDescriptorSetLayoutCreateInfo li = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
     li.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR;
-    li.bindingCount = 15;
+    li.bindingCount = 16;
     li.pBindings = b;
     VK_CHECK(vkCreateDescriptorSetLayout(R->device, &li, NULL, &P.layout));
     VkPushConstantRange pr = { VK_SHADER_STAGE_ALL, 0, 128 };

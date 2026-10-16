@@ -393,6 +393,7 @@ void sky_render_exec(VkCommandBuffer cmd, FgRes color, FgRes depth, mat4 inv_vp,
     pb_tex_fg(&b, 6, depth, P.point);
     pb_tex_general(&b, 7, SK.cshadow.view, P.linear);
     pb_img_fg(&b, 8, color);
+    pb_tex(&b, 15, P.moon, P.linear_repeat);
     bind(cmd, &b);
     struct { float p[16]; u32 u[16]; } pc;
     memset(&pc, 0, sizeof(pc));

@@ -66,6 +66,7 @@ static struct {
         int perf_frames;
         bool quit;
     } t;
+    Cvar *disc_zoom;
 } DN;
 
 static double now_tick(World *w) {
@@ -374,8 +375,11 @@ void daynight_environment(World *w, const RenderCamera *cam, RenderEnvironment *
     env->sun_illuminance = DN.cfg.sun_illuminance * loss;
     env->moon_illuminance = DN.cfg.moon_illuminance * s.moon_illum * loss;
     env->moon_full_illuminance = DN.cfg.moon_illuminance;
-    env->sun_size = tod_curve(&DN.cfg, TOD_SUN_SIZE, h);
-    env->moon_size = tod_curve(&DN.cfg, TOD_MOON_SIZE, h);
+    // sky_disc_zoom (inspection): bigger discs, the same surface brightness.
+    float zoom = DN.disc_zoom ? DN.disc_zoom->f : 1.0f;
+    env->sun_size = tod_curve(&DN.cfg, TOD_SUN_SIZE, h) * zoom;
+    env->moon_size = tod_curve(&DN.cfg, TOD_MOON_SIZE, h) * zoom;
+    env->moon_full_illuminance *= zoom * zoom;
     env->cel_x = s.cel_x;
     env->cel_y = s.cel_y;
     env->cel_z = s.cel_z;
@@ -510,6 +514,16 @@ static void cmd_tod_info(int argc, const char **argv) {
              (int)s.days, b, s.sun_elev * DG_RAD2DEG, s.sun_azim * DG_RAD2DEG, s.moon_elev * DG_RAD2DEG, s.moon_age, s.moon_illum, s.waxing ? "waxing" : "waning",
              tod_is_night(&s), game_local_player() ? world_light_level(w, game_local_player()->sim.move.pos) : -1.0f, w->authority ? "host" : "client",
              w->tod.day_length);
+}
+
+// sky_look sun|moon: aim the view at the body.
+static void cmd_sky_look(int argc, const char **argv) {
+    World *w = G ? G->world : NULL;
+    TodSky s;
+    if (!w || !sky_now(w, &s)) return;
+    vec3 d = argc > 1 && !strcmp(argv[1], "sun") ? s.sun_dir : s.moon_dir;
+    G->view.yaw = atan2f(-d.x, -d.z);
+    G->view.pitch = atan2f(d.y, sqrtf(d.x * d.x + d.z * d.z));
 }
 
 static void cmd_tod_editor(int argc, const char **argv) {
@@ -717,6 +731,7 @@ void daynight_register(void) {
     DN.on_sunrise = cvar_reg_string("tod_on_sunrise", "", 0, "console commands run at sunrise");
     DN.on_sunset = cvar_reg_string("tod_on_sunset", "", 0, "console commands run at sunset");
     DN.on_midnight = cvar_reg_string("tod_on_midnight", "", 0, "console commands run at midnight");
+    DN.disc_zoom = cvar_reg_float("sky_disc_zoom", 1.0f, 0.1f, 40.0f, 0, "sun / moon disc size multiplier (inspection; same surface brightness)");
     DN.on_noon = cvar_reg_string("tod_on_noon", "", 0, "console commands run at noon");
     DN.night_ambience = cvar_reg_string("tod_night_ambience", "", CVAR_ARCHIVE, "ambient track started at sunset (empty = keep)");
     DN.day_ambience = cvar_reg_string("tod_day_ambience", "", CVAR_ARCHIVE, "ambient track started at sunrise (empty = keep)");
@@ -726,6 +741,7 @@ void daynight_register(void) {
     cmd_register("time_days", cmd_time_days, "time_days <n>: skip days (moon phases, host)");
     cmd_register("tod_demo", cmd_tod_demo, "tod_demo [seconds|stop]: 24 h in 60 s (host)");
     cmd_register("sky_reload", cmd_sky_reload, "reload assets/world/daynight.json");
+    cmd_register("sky_look", cmd_sky_look, "sky_look sun|moon: aim the view at the sun / moon");
     cmd_register("tod_info", cmd_tod_info, "time of day, sun / moon, light level");
     cmd_register("tod_editor", cmd_tod_editor, "toggle the time-of-day editor");
     cmd_register("tod_test", cmd_tod_test, "tod_test cycle [quit]: exposure floor, IBL continuity, events, sky budget over 24 h in 60 s");
