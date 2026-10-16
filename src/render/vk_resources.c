@@ -40,7 +40,12 @@ void vkr_buffer_destroy_now(GpuBuffer *b) {
 }
 
 static Deferred *push_deferred(void) {
-    FrameResources *f = &R->frames[R->frame_slot];
+    // Inside a frame: this slot (freed after this frame's fence). Between frames (game ticks: chunk
+    // streaming, map changes) frame_slot already names the next slot, whose fence is the frame
+    // FRAMES_IN_FLIGHT ago: the most recent frame may still use the resource, so it goes to the slot
+    // of that most recent frame.
+    int slot = R->frame_active ? R->frame_slot : (R->frame_slot + FRAMES_IN_FLIGHT - 1) % FRAMES_IN_FLIGHT;
+    FrameResources *f = &R->frames[slot];
     if (f->deferred_count >= MAX_DEFERRED) {
         // Should never happen; fall back to a full idle so the queue can drain.
         vkDeviceWaitIdle(R->device);

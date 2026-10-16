@@ -511,11 +511,14 @@ void chunks_update(World *w, float dt) {
     for (int i = 0; i < MAX_CHUNKS && budget > 0; i++) {
         if (s->chunks[i].state == CS_READY) { finalize_chunk(s, &s->chunks[i]); budget--; }
     }
-    // Unload chunks nobody needed for a while (hysteresis avoids thrashing at the border).
-    for (int i = 0; i < MAX_CHUNKS; i++) {
+    // Unload chunks nobody needed for a while (hysteresis avoids thrashing at the border). A budget
+    // per frame: a teleport drops hundreds at once, and each frees 8 buffers through the renderer's
+    // per-frame deferred queue (an overflow there would stall and free buffers still in flight).
+    int unloads = 32;
+    for (int i = 0; i < MAX_CHUNKS && unloads > 0; i++) {
         Chunk *ch = &s->chunks[i];
         if (ch->state != CS_LOADED && ch->state != CS_READY) continue;
-        if (s->time - ch->needed_at > 2.0) release_chunk(s, ch);
+        if (s->time - ch->needed_at > 2.0) { release_chunk(s, ch); unloads--; }
     }
 }
 
