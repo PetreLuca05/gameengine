@@ -80,7 +80,8 @@ typedef struct VgCluster {
 // Palette slot table entry (binding 21, vgeo_skin.h): the slot's palettes are mat4 (column-major,
 // bind space -> instance space, `bone_world * inverse_bind`) at binding 20 [first + joint], last
 // frame's at [prev_first + joint]. max_scale bounds every bone's linear part (spectral norm); k0 / k1
-// bound how far any bone moves a point away from the root bone (0): |P_b v - P_0 v| <= k0 + k1 |v|.
+// bound how far a bone moves a vertex of the slot's meshes away from the root bone (0): |P_b v - P_0 v| <=
+// k0 + k1 |v| for every bone b weighting v (vgeo_skin.h vgeo_palette_bounds).
 typedef struct VgPaletteSlot {
     u32 first, prev_first, bone_count, pad0;   // bone_count 0: the slot's instances are culled
     float max_scale, k0, k1, pad1;

@@ -32,6 +32,8 @@ typedef struct VgPalettes {
     VgPaletteSlot *cpu_slots;    // CPU mirror of `slots`
     u8 *half;                    // per slot: region of the current palette
     u8 *set;                     // per slot: set this frame
+    float (*bone_bounds)[VGEO_MAX_BONES][4];   // per slot: bind-space bone influence spheres (has_bounds)
+    u8 *has_bounds;
     u32 frame;
     bool ok;
 } VgPalettes;
@@ -47,14 +49,23 @@ void vg_palettes_begin(VgPalettes *p, u32 frame);
 void vg_palettes_set(VgPalettes *p, u32 slot, const float *palette, u32 bone_count);
 // No palette: the slot's instances are culled (until the next set).
 void vg_palettes_clear(VgPalettes *p, u32 slot);
+// Optional, once per character (the slot's meshes): the union of their vgeo_bone_bounds
+// (vgeo_bone_bounds_merge). With them the slot's root-deviation bound is per bone (tight: the LOD /
+// instance spheres grow by about the largest bone displacement relative to the root); without
+// (NULL) it is the generic k0 + k1 |v|, valid for any mesh but loose for long limbs. Every mesh
+// drawn with the slot must be covered by the bounds given.
+void vg_palettes_set_bone_bounds(VgPalettes *p, u32 slot, const float (*bounds)[4]);
+void vgeo_bone_bounds_merge(float dst[VGEO_MAX_BONES][4], const float src[VGEO_MAX_BONES][4]);
 // Uploads this frame's palettes and slot table (before the frame's first vg_cull_record).
 void vg_palettes_record(VgPalettes *p, VkCommandBuffer cmd);
 
 // ------------------------------------------------------------------ CPU mirror (shared with the reference cut, tests)
 
-// Slot bounds of a palette (VgPaletteSlot.max_scale / k0 / k1): spectral-norm bounds
-// sqrt(|A^T A|_inf) of every bone's linear part A_b and of A_b - A_0, and max |t_b - t_0|.
-void vgeo_palette_bounds(const float *palette, u32 bone_count, float *max_scale, float *k0, float *k1);
+// Slot bounds of a palette (VgPaletteSlot.max_scale / k0 / k1), from spectral-norm bounds
+// sqrt(|A^T A|_inf) of every bone's linear part A_b and of A_b - A_0. Generic (bone_bounds NULL):
+// k0 = max |t_b - t_0|, k1 = max |A_b - A_0|. With bone influence spheres (c_b, r_b):
+// k0 = max_b |(P_b - P_0) c_b| + |A_b - A_0| r_b, k1 = 0.
+void vgeo_palette_bounds(const float *palette, u32 bone_count, const float (*bone_bounds)[4], float *max_scale, float *k0, float *k1);
 // Skin matrix of a vertex: sum_k (w_k / 255) palette[first + j_k] (same order as the shaders).
 void vgeo_skin_matrix(const float *palette, const u8 joints[4], const u8 weights[4], float out[16]);
 void vgeo_mat4_point(const float m[16], const float p[3], float out[3]);

@@ -22,6 +22,8 @@ bool vg_palettes_init(VgPalettes *p, const VgContext *ctx, u32 max_slots) {
     p->cpu_slots = (VgPaletteSlot *)calloc(p->max_slots, sizeof(VgPaletteSlot));
     p->half = (u8 *)calloc(p->max_slots, 1);
     p->set = (u8 *)calloc(p->max_slots, 1);
+    p->bone_bounds = calloc(p->max_slots, sizeof(*p->bone_bounds));
+    p->has_bounds = (u8 *)calloc(p->max_slots, 1);
     if (!p->bones.buffer || !p->slots.buffer || !p->cpu_bones) { log_error("vgeo: palette buffers failed"); return false; }
     for (u32 f = 0; f < ctx->frames; f++)
         if (!p->staging[f].buffer) return false;
@@ -40,6 +42,8 @@ void vg_palettes_shutdown(VgPalettes *p) {
     free(p->cpu_slots);
     free(p->half);
     free(p->set);
+    free(p->bone_bounds);
+    free(p->has_bounds);
     memset(p, 0, sizeof(*p));
 }
 
@@ -64,7 +68,7 @@ void vg_palettes_set(VgPalettes *p, u32 slot, const float *palette, u32 bone_cou
     if (!p->set[slot]) s->prev_first = live ? s->first : first;
     s->first = first;
     s->bone_count = bone_count;
-    vgeo_palette_bounds(palette, bone_count, &s->max_scale, &s->k0, &s->k1);
+    vgeo_palette_bounds(palette, bone_count, p->has_bounds[slot] ? (const float (*)[4])p->bone_bounds[slot] : NULL, &s->max_scale, &s->k0, &s->k1);
     p->half[slot] = (u8)h;
     p->set[slot] = 1;
 }
@@ -73,6 +77,26 @@ void vg_palettes_clear(VgPalettes *p, u32 slot) {
     if (!p->ok || slot >= p->max_slots) return;
     memset(&p->cpu_slots[slot], 0, sizeof(VgPaletteSlot));
     p->set[slot] = 0;
+}
+
+void vg_palettes_set_bone_bounds(VgPalettes *p, u32 slot, const float (*bounds)[4]) {
+    if (!p->ok || slot >= p->max_slots) return;
+    p->has_bounds[slot] = bounds != NULL;
+    if (bounds) memcpy(p->bone_bounds[slot], bounds, sizeof(p->bone_bounds[slot]));
+}
+
+void vgeo_bone_bounds_merge(float dst[VGEO_MAX_BONES][4], const float src[VGEO_MAX_BONES][4]) {
+    for (u32 b = 0; b < VGEO_MAX_BONES; b++) {
+        if (src[b][3] < 0) continue;
+        if (dst[b][3] < 0) { memcpy(dst[b], src[b], 16); continue; }
+        float d[3] = { src[b][0] - dst[b][0], src[b][1] - dst[b][1], src[b][2] - dst[b][2] };
+        float l = sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+        if (l + src[b][3] <= dst[b][3]) continue;
+        if (l + dst[b][3] <= src[b][3]) { memcpy(dst[b], src[b], 16); continue; }
+        float r = (l + dst[b][3] + src[b][3]) * 0.5f, k = (r - dst[b][3]) / l;
+        for (int i = 0; i < 3; i++) dst[b][i] += d[i] * k;
+        dst[b][3] = r * (1.0f + 1e-6f) + 1e-7f;
+    }
 }
 
 static void barrier(VkCommandBuffer cmd, VkPipelineStageFlags2 src, VkAccessFlags2 sa, VkPipelineStageFlags2 dst, VkAccessFlags2 da) {
@@ -128,8 +152,8 @@ static float norm_bound(const float a[9]) {
     return sqrtf(m);
 }
 
-void vgeo_palette_bounds(const float *pal, u32 n, float *max_scale, float *k0, float *k1) {
-    float s = 0, t = 0, d = 0;
+void vgeo_palette_bounds(const float *pal, u32 n, const float (*bb)[4], float *max_scale, float *k0, float *k1) {
+    float s = 0, t = 0, d = 0, kb = 0;
     const float *r = pal;
     for (u32 b = 0; b < n; b++) {
         const float *m = &pal[b * 16];
@@ -140,14 +164,25 @@ void vgeo_palette_bounds(const float *pal, u32 n, float *max_scale, float *k0, f
                 e[c * 3 + k] = m[c * 4 + k] - r[c * 4 + k];
             }
         s = fmaxf(s, norm_bound(a));
-        d = fmaxf(d, norm_bound(e));
+        float de = norm_bound(e);
+        d = fmaxf(d, de);
         float dx = m[12] - r[12], dy = m[13] - r[13], dz = m[14] - r[14];
         t = fmaxf(t, sqrtf(dx * dx + dy * dy + dz * dz));
+        if (bb && bb[b][3] >= 0) {   // |(P_b - P_0) v| <= |(P_b - P_0) c_b| + |A_b - A_0| r_b for v in the bone's sphere
+            float q[3];
+            for (int k = 0; k < 3; k++) q[k] = e[k] * bb[b][0] + e[3 + k] * bb[b][1] + e[6 + k] * bb[b][2] + (m[12 + k] - r[12 + k]);
+            kb = fmaxf(kb, sqrtf(q[0] * q[0] + q[1] * q[1] + q[2] * q[2]) + de * bb[b][3]);
+        }
     }
     // float slack: the bounds hold after the shaders' f32 rounding
     *max_scale = s * (1.0f + 1e-5f);
-    *k0 = t * (1.0f + 1e-5f) + 1e-5f;
-    *k1 = d * (1.0f + 1e-5f) + 1e-6f;
+    if (bb) {
+        *k0 = kb * (1.0f + 1e-5f) + 1e-5f;
+        *k1 = 0.0f;
+    } else {
+        *k0 = t * (1.0f + 1e-5f) + 1e-5f;
+        *k1 = d * (1.0f + 1e-5f) + 1e-6f;
+    }
 }
 
 void vgeo_skin_matrix(const float *pal, const u8 j[4], const u8 w[4], float out[16]) {

@@ -1573,6 +1573,36 @@ u32 vgeo_cluster_bones(const u8 *page, const VgCluster *c, VgBoneBox out[VGEO_MA
     return n;
 }
 
+void vgeo_bone_bounds(const VgBuilt *b, float out[VGEO_MAX_BONES][4]) {
+    float mn[VGEO_MAX_BONES][3], mx[VGEO_MAX_BONES][3];
+    for (u32 i = 0; i < VGEO_MAX_BONES; i++)
+        for (int k = 0; k < 3; k++) { mn[i][k] = FLT_MAX; mx[i][k] = -FLT_MAX; }
+    if (b->hdr.flags & VGF_SKINNED)
+        for (u32 p = 0; p < b->hdr.page_count; p++) {
+            const u8 *page = (const u8 *)vgeo_page(b, p);
+            for (u32 i = 0; i < ((const VgPageHeader *)page)->cluster_count; i++) {
+                const VgCluster *c = vgeo_page_cluster(b, p, i);
+                if (c->child_group != ~0u) continue;   // coarser clusters keep a subset of the leaves' vertices
+                VgBoneBox bx[VGEO_MAX_CLUSTER_BONES];
+                u32 n = vgeo_cluster_bones(page, c, bx);
+                for (u32 k = 0; k < n; k++)
+                    for (int a = 0; a < 3; a++) {
+                        mn[bx[k].bone][a] = fminf(mn[bx[k].bone][a], bx[k].min[a]);
+                        mx[bx[k].bone][a] = fmaxf(mx[bx[k].bone][a], bx[k].max[a]);
+                    }
+            }
+        }
+    for (u32 i = 0; i < VGEO_MAX_BONES; i++) {
+        if (mn[i][0] > mx[i][0]) { out[i][0] = out[i][1] = out[i][2] = 0; out[i][3] = -1.0f; continue; }
+        float h2 = 0;
+        for (int k = 0; k < 3; k++) {
+            out[i][k] = (mn[i][k] + mx[i][k]) * 0.5f;
+            h2 += (mx[i][k] - mn[i][k]) * (mx[i][k] - mn[i][k]) * 0.25f;
+        }
+        out[i][3] = sqrtf(h2) * (1.0f + 1e-5f) + 1e-6f;
+    }
+}
+
 u32 vgeo_cut(const VgBuilt *b, float t, VgCutRef *out, u32 cap) {
     u32 n = 0;
     for (u32 g = 0; g < b->hdr.group_count; g++) {

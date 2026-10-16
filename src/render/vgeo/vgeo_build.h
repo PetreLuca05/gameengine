@@ -116,6 +116,10 @@ DG_INLINE u32 vgeo_vertex_bytes(u32 flags) {
 // Skinned cluster bone set (vgeo_gpu.h) of a cluster of a page (page = its VgPageHeader). Returns the count.
 typedef struct VgBoneBox { u32 bone; float min[3], max[3]; } VgBoneBox;
 u32 vgeo_cluster_bones(const u8 *page, const VgCluster *c, VgBoneBox out[VGEO_MAX_CLUSTER_BONES]);
+// Bind-space influence sphere per bone of a skinned mesh (xyz, r; r < 0: no vertex weighted on it),
+// from its leaf clusters' bone boxes: every vertex with a non-zero weight on bone b lies in out[b].
+// The input of vg_palettes_set_bone_bounds (tight skinned LOD / instance bounds, vgeo_skin.h).
+void vgeo_bone_bounds(const VgBuilt *b, float out[VGEO_MAX_BONES][4]);
 
 // CPU reference cut at an object-space error: cluster c of group g is in the cut when
 // g.parent_error > t and c.error <= t (every page resident). Returns the count; out may be NULL.

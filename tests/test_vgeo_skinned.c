@@ -168,11 +168,12 @@ static void test_builder(void) {
 static VgPalettes g_cpu_pal;
 static VgPaletteSlot g_cpu_slot;
 static float *g_cpu_bones;
-static void cpu_slot(const float *pal) {
+static float g_bone_bounds[VGEO_MAX_BONES][4];   // vgeo_bone_bounds of the creature
+static void cpu_slot(const float *pal, bool tight) {
     memcpy(g_cpu_bones, pal, sizeof(float) * 16 * g_cr.bone_count);
     g_cpu_slot.first = g_cpu_slot.prev_first = 0;
     g_cpu_slot.bone_count = g_cr.bone_count;
-    vgeo_palette_bounds(pal, g_cr.bone_count, &g_cpu_slot.max_scale, &g_cpu_slot.k0, &g_cpu_slot.k1);
+    vgeo_palette_bounds(pal, g_cr.bone_count, tight ? (const float (*)[4])g_bone_bounds : NULL, &g_cpu_slot.max_scale, &g_cpu_slot.k0, &g_cpu_slot.k1);
 }
 
 static void cpu_xf(VgXfCpu *x, const float pos[3], const float rot[4], float scale) {
@@ -191,50 +192,64 @@ static void cpu_xf(VgXfCpu *x, const float pos[3], const float rot[4], float sca
     vgeo_xf_decode(x, &in, &m, &g_cpu_pal);
 }
 
+// Over 600 ticks, both slot bounds (generic, and per-bone with vgeo_bone_bounds): every skinned
+// vertex of every cluster of every level is inside its bone-box sphere, its transformed LOD and bind
+// spheres and the instance sphere.
 static void test_bounds(void) {
-    double t0 = now_s();
     float *pal = (float *)malloc(sizeof(float) * 16 * VGEO_MAX_BONES);
     const float pos[3] = { 0, 0, 0 }, rot[4] = { 0, 0, 0, 1 };
-    u64 tested = 0;
-    u32 out_bone = 0, out_lod = 0, out_cull = 0, out_inst = 0;
-    double worst_bone = 0, sum_ratio = 0, worst_lod = 0;
-    u64 nratio = 0;
     const VgNode *root = &g_b.nodes[g_b.hdr.root_node];
-    for (int tick = 0; tick < 600; tick++) {
-        vgeo_gen_creature_pose(&g_cr, (float)tick / 60.0f, 0.0f, pal);
-        cpu_slot(pal);
-        VgXfCpu x;
-        cpu_xf(&x, pos, rot, 1.0f);
-        float inst[4];
-        vgeo_xf_sphere(&x, root->center, root->radius, inst);
-        for (u32 i = 0; i < g_ndec; i++) {
-            const DecCluster *c = &g_dec[i];
-            float bs[4], ls[4], cs[4];
-            vgeo_skin_cluster_sphere(pal, c->bones, c->nb, bs);
-            vgeo_xf_sphere(&x, c->c->lod_center, c->c->lod_radius, ls);
-            vgeo_xf_sphere(&x, c->c->center, c->c->radius, cs);
-            sum_ratio += bs[3] / c->c->radius;
-            nratio++;
-            for (u32 v = 0; v < c->vc; v++) {
-                float p[3];
-                skin_vertex(pal, c, v, p);
-                tested++;
-                float db = dist3(p, bs), dl = dist3(p, ls);
-                worst_bone = fmax(worst_bone, db / bs[3]);
-                worst_lod = fmax(worst_lod, dl / ls[3]);
-                if (db > bs[3]) out_bone++;
-                if (dl > ls[3]) out_lod++;
-                if (dist3(p, cs) > cs[3]) out_cull++;
-                if (dist3(p, inst) > inst[3]) out_inst++;
+    vgeo_bone_bounds(&g_b, g_bone_bounds);
+    u32 used = 0;
+    for (u32 b = 0; b < VGEO_MAX_BONES; b++) used += g_bone_bounds[b][3] >= 0;
+    CHECK(used == g_cr.bone_count, "bone bounds: %u bones with vertices, %u in the rig", used, g_cr.bone_count);
+    for (int tight = 0; tight < 2; tight++) {
+        double t0 = now_s();
+        u64 tested = 0;
+        u32 out_bone = 0, out_lod = 0, out_cull = 0, out_inst = 0;
+        double worst_bone = 0, sum_ratio = 0, worst_lod = 0, lod_grow = 0, inst_r = 0;
+        u64 nratio = 0;
+        for (int tick = 0; tick < 600; tick++) {
+            vgeo_gen_creature_pose(&g_cr, (float)tick / 60.0f, 0.0f, pal);
+            cpu_slot(pal, tight != 0);
+            VgXfCpu x;
+            cpu_xf(&x, pos, rot, 1.0f);
+            float inst[4];
+            vgeo_xf_sphere(&x, root->center, root->radius, inst);
+            inst_r += inst[3];
+            lod_grow += x.skin_k;
+            for (u32 i = 0; i < g_ndec; i++) {
+                const DecCluster *c = &g_dec[i];
+                float bs[4], ls[4], cs[4];
+                vgeo_skin_cluster_sphere(pal, c->bones, c->nb, bs);
+                vgeo_xf_sphere(&x, c->c->lod_center, c->c->lod_radius, ls);
+                vgeo_xf_sphere(&x, c->c->center, c->c->radius, cs);
+                sum_ratio += bs[3] / c->c->radius;
+                nratio++;
+                for (u32 v = 0; v < c->vc; v++) {
+                    float p[3];
+                    skin_vertex(pal, c, v, p);
+                    tested++;
+                    float db = dist3(p, bs), dl = dist3(p, ls);
+                    worst_bone = fmax(worst_bone, db / bs[3]);
+                    worst_lod = fmax(worst_lod, dl / ls[3]);
+                    if (db > bs[3]) out_bone++;
+                    if (dl > ls[3]) out_lod++;
+                    if (dist3(p, cs) > cs[3]) out_cull++;
+                    if (dist3(p, inst) > inst[3]) out_inst++;
+                }
             }
         }
+        const char *mode = tight ? "per-bone slot bounds" : "generic slot bounds";
+        printf("bounds (%s): 600 ticks x %u clusters, %llu skinned vertices in %.1f s: worst |v - c| / r = %.4f (bone boxes), %.4f (LOD sphere); "
+               "bone-box sphere / bind sphere %.2f on average; LOD spheres grow by %.2f m, instance radius %.2f m (bind %.2f m)\n",
+               mode, g_ndec, (unsigned long long)tested, now_s() - t0, worst_bone, worst_lod, sum_ratio / (double)nratio, lod_grow / 600.0, inst_r / 600.0,
+               root->radius);
+        CHECK(out_bone == 0, "bounds (%s): %u skinned vertices outside their cluster's bone-box sphere", mode, out_bone);
+        CHECK(out_lod == 0, "bounds (%s): %u skinned vertices outside their cluster's transformed LOD sphere", mode, out_lod);
+        CHECK(out_cull == 0, "bounds (%s): %u skinned vertices outside their cluster's transformed bind sphere", mode, out_cull);
+        CHECK(out_inst == 0, "bounds (%s): %u skinned vertices outside the instance sphere", mode, out_inst);
     }
-    printf("bounds: 600 ticks x %u clusters, %llu skinned vertices in %.1f s: worst |v - c| / r = %.4f (bone boxes), %.4f (LOD sphere); "
-           "bone-box sphere / bind sphere = %.2f on average\n", g_ndec, (unsigned long long)tested, now_s() - t0, worst_bone, worst_lod, sum_ratio / (double)nratio);
-    CHECK(out_bone == 0, "bounds: %u skinned vertices outside their cluster's bone-box sphere", out_bone);
-    CHECK(out_lod == 0, "bounds: %u skinned vertices outside their cluster's transformed LOD sphere", out_lod);
-    CHECK(out_cull == 0, "bounds: %u skinned vertices outside their cluster's transformed bind sphere", out_cull);
-    CHECK(out_inst == 0, "bounds: %u skinned vertices outside the instance sphere", out_inst);
     free(pal);
 }
 
@@ -811,6 +826,7 @@ int main(int argc, char **argv) {
         if (!vg_cull_init(&g_cull, &g_h.ctx, &g_scene, &caps)) { printf("FAIL: cull init\n"); return 1; }
         if (!vg_palettes_init(&g_pal, &g_h.ctx, SLOTS)) { printf("FAIL: palettes init\n"); return 1; }
         vg_palettes_attach(&g_pal, &g_scene);
+        for (u32 sl = 0; sl < SLOTS; sl += 2) vg_palettes_set_bone_bounds(&g_pal, sl, (const float (*)[4])g_bone_bounds);
         if (!vg_raster_init(&g_rast, &g_h.ctx, &g_cull)) { printf("FAIL: raster init\n"); return 1; }
         vg_raster_resize(&g_rast, W, H);
         test_gpu_cut();
