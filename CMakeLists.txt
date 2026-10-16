@@ -67,7 +67,19 @@ FetchContent_Declare(enet
   GIT_TAG v1.3.18
   GIT_SHALLOW TRUE)
 
-FetchContent_MakeAvailable(SDL3 VulkanHeaders joltc enet)
+# ---------------------------------------------------------------- mbedTLS (phone companion server: TLS + certificates)
+# Release tarball (generated sources included, no Python / submodules needed). Apache-2.0.
+set(ENABLE_PROGRAMS OFF CACHE BOOL "" FORCE)
+set(ENABLE_TESTING OFF CACHE BOOL "" FORCE)
+set(MBEDTLS_FATAL_WARNINGS OFF CACHE BOOL "" FORCE)
+set(USE_SHARED_MBEDTLS_LIBRARY OFF CACHE BOOL "" FORCE)
+set(USE_STATIC_MBEDTLS_LIBRARY ON CACHE BOOL "" FORCE)
+set(GEN_FILES OFF CACHE BOOL "" FORCE)
+FetchContent_Declare(mbedtls
+  URL https://github.com/Mbed-TLS/mbedtls/releases/download/mbedtls-3.6.4/mbedtls-3.6.4.tar.bz2
+  DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+
+FetchContent_MakeAvailable(SDL3 VulkanHeaders joltc enet mbedtls)
 target_include_directories(enet PUBLIC ${enet_SOURCE_DIR}/include)
 
 # ---------------------------------------------------------------- vendored single-file libs
@@ -83,7 +95,8 @@ target_link_libraries(vma PUBLIC volk)
 add_library(dg_thirdparty STATIC
   third_party/impl/tp_stb.c third_party/impl/tp_cgltf.c third_party/impl/tp_miniaudio.c
   third_party/impl/tp_nuklear.c third_party/impl/tp_fastnoise.c
-  third_party/cjson/cJSON.c third_party/ufbx/ufbx.c)
+  third_party/cjson/cJSON.c third_party/ufbx/ufbx.c
+  third_party/impl/tp_video.c third_party/impl/tp_mp4.c third_party/qrcodegen/qrcodegen.c)
 set_target_properties(dg_thirdparty PROPERTIES C_STANDARD 11 C_EXTENSIONS ON)
 target_include_directories(dg_thirdparty PUBLIC
   third_party/stb third_party/cgltf third_party/miniaudio third_party/cjson
@@ -192,7 +205,7 @@ add_executable(deadground ${DG_SOURCES})
 set_target_properties(deadground PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
 add_dependencies(deadground dg_shaders)
 target_include_directories(deadground PRIVATE src third_party/smaa third_party/fsr)
-target_link_libraries(deadground PRIVATE SDL3::SDL3-static volk vma dg_thirdparty joltc jolt_shim enet meshopt)
+target_link_libraries(deadground PRIVATE SDL3::SDL3-static volk vma dg_thirdparty joltc jolt_shim enet meshopt mbedtls mbedx509 mbedcrypto)
 target_compile_definitions(deadground PRIVATE
   DG_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
   DG_SHADER_COMPILER="${DG_SHADER_COMPILER}"
@@ -206,7 +219,7 @@ if(DG_HAVE_STEAM)
     COMMAND ${CMAKE_COMMAND} -E echo 480 > $<TARGET_FILE_DIR:deadground>/steam_appid.txt)
 endif()
 if(WIN32)
-  target_link_libraries(deadground PRIVATE ws2_32 winmm dbghelp)
+  target_link_libraries(deadground PRIVATE ws2_32 winmm dbghelp iphlpapi)
   target_compile_definitions(deadground PRIVATE _CRT_SECURE_NO_WARNINGS WIN32_LEAN_AND_MEAN NOMINMAX)
 endif()
 if(MSVC)
@@ -220,7 +233,8 @@ endif()
 add_custom_target(dg_copy_data ALL
   COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different ${CMAKE_SOURCE_DIR}/data ${CMAKE_BINARY_DIR}/bin/data
   COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different ${CMAKE_SOURCE_DIR}/assets ${CMAKE_BINARY_DIR}/bin/assets
-  COMMENT "Mirroring data/ and assets/")
+  COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different ${CMAKE_SOURCE_DIR}/web ${CMAKE_BINARY_DIR}/bin/web
+  COMMENT "Mirroring data/, assets/ and web/")
 add_dependencies(deadground dg_copy_data)
 
 # ---------------------------------------------------------------- unit tests (ctest)
@@ -242,7 +256,7 @@ set(DG_ANIMCORE_SOURCES
   src/anim/anim.c src/anim/skeleton.c src/anim/retarget.c src/anim/anim_mesh.c src/anim/controller.c src/anim/procedural.c src/anim/turn.c src/anim/spine.c
   src/anim/weapon_hold.c src/anim/damage_additive.c src/anim/foot_ik.c src/anim/anim_net.c src/anim/ragdoll_def.c
   src/anim/anim_library.c src/anim/character_rt.c src/gameplay/hitboxes.c src/gameplay/items.c src/gameplay/attachments.c src/gameplay/recoil.c src/core/spring.c
-  src/world/time_of_day.c src/world/weather.c src/gameplay/vehicle_def.c src/vfx/vfx_curve.c src/vfx/vfx_library.c src/vfx/vfx_sim.c src/vfx/vfx_flesh.c src/vfx/vfx_atlas.c src/player/holdpoint.c src/player/camera_fp_math.c
+  src/world/time_of_day.c src/world/weather.c src/gameplay/vehicle_def.c src/vfx/vfx_curve.c src/vfx/vfx_library.c src/vfx/vfx_sim.c src/vfx/vfx_flesh.c src/vfx/vfx_atlas.c src/player/holdpoint.c src/player/camera_fp_math.c src/gameplay/phone/phone_orient.c
   src/assets/fbx_loader.c src/assets/anim_cache.c src/assets/character.c src/render/skeletal_mesh.c
   src/core/log.c src/core/platform.c)
 add_library(dg_animcore STATIC ${DG_ANIMCORE_SOURCES})
@@ -386,6 +400,23 @@ if(MSVC)
   target_compile_options(test_ui PRIVATE /W3 /wd4100 /wd4201 /utf-8)
 endif()
 add_test(NAME ui COMMAND test_ui WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+
+# Phone (docs/PHONE.md): QR round trip, pairing auth, HTTP / WebSocket, orientation math, filter +
+# reach clamp, JPEG pipeline at 30 fps, photo / video files + sidecars, headless client round trip, TLS.
+set(DG_PHONE_CORE_SOURCES
+  src/net/http_ws/hws_proto.c src/net/http_ws/hws_auth.c src/net/http_ws/hws_tls.c src/net/http_ws/hws_server.c
+  src/gameplay/phone/phone_stream.c src/gameplay/phone/phone_stream_ws.c
+  src/gameplay/phone/phone_video.c src/gameplay/phone/phone_capture.c src/gameplay/phone/phone_qr.c)
+file(GLOB DG_QUIRC_SOURCES third_party/quirc/*.c)
+add_executable(test_phone tests/test_phone.c ${DG_PHONE_CORE_SOURCES} ${DG_QUIRC_SOURCES} src/core/jobs.c)
+set_target_properties(test_phone PROPERTIES C_STANDARD 11)
+target_include_directories(test_phone PRIVATE third_party)
+target_link_libraries(test_phone PRIVATE dg_animcore mbedtls mbedx509 mbedcrypto)
+if(MSVC)
+  target_compile_options(test_phone PRIVATE /W3 /wd4100 /wd4201 /utf-8)
+  target_link_libraries(test_phone PRIVATE ws2_32 iphlpapi)
+endif()
+add_test(NAME phone COMMAND test_phone WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
 
 add_executable(anim_probe tools/anim_probe/anim_probe.c)
 set_target_properties(anim_probe PROPERTIES C_STANDARD 11)

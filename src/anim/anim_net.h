@@ -27,7 +27,8 @@ enum AnimNetFields {
     ANS_PITCH = 1 << 5, ANS_YAW = 1 << 6, ANS_BODY = 1 << 7, ANS_FLAGS = 1 << 8, ANS_LIMB = 1 << 9,
     ANS_WEAPON = 1 << 10, ANS_MANTLE = 1 << 11, ANS_CHAR = 1 << 12, ANS_DEATH = 1 << 13,
     ANS_PARTS = 1 << 14,   // modular part selection: u16 mask of non-empty slots + one u8 per such slot
-    ANS_ALL = 0x7FFF,
+    ANS_PHONE = 1 << 15,   // phone flags u8 + rotation u32 (docs/PHONE.md), only while in camera mode
+    ANS_ALL = 0xFFFF,
 };
 
 #define ANIM_NET_PART_SLOTS 10      // == CSLOT_COUNT (assets/character.h)
@@ -49,6 +50,8 @@ typedef struct AnimNetState {
     u8 parts[ANIM_NET_PART_SLOTS];   // part option per slot (CharSlot order; 0 = empty, k = option k - 1)
     u8 death_seed;
     u32 death_tick;
+    u8 phone_flags;   // CHAR_PHONE_* (character_rt.h)
+    u32 phone_rot;    // smallest-three packed rotation relative to the view yaw (driven only)
 } AnimNetState;
 
 // Quantization (documented error bounds, tested by tests/test_anim.c):

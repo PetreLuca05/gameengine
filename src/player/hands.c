@@ -1,3 +1,4 @@
+#include "gameplay/phone/phone.h"
 #include "gameplay/attachments.h"
 #include "hands.h"
 #include "core/engine.h"
@@ -622,6 +623,10 @@ static void draw_weapon(const WeaponDef *wd, vec3 pos, quat rot, bool viewmodel)
 }
 
 static void draw_held_item(const ItemDef *it, vec3 pos, quat rot, bool viewmodel) {
+    if (it->camera) {   // the phone: body + live screen (src/gameplay/phone)
+        phone_draw_held(it, pos, rot, viewmodel, viewmodel ? MAT_NO_SHADOW : s_world_item_flags);
+        return;
+    }
     // Pickup sizes are world-scale; held items are palm-sized (item_held_box, also the ground model).
     vec3 center, half;
     item_held_box(it, &center, &half);
@@ -651,6 +656,13 @@ bool hands_fp_targets(HandsFpTargets *out) {
 }
 
 void hands_set_body_arms(bool on) { if (H) H->body_arms = on; }
+
+bool hands_held_xform(vec3 *pos, quat *rot) {
+    if (!H || !H->initialized || H->weapon || !H->held_item) return false;
+    *pos = H->weapon_pos;
+    *rot = H->weapon_rot;
+    return true;
+}
 
 void hands_vm_kick(vec3 *pos, vec3 *rot) {
     *pos = H ? H->kick_pos : v3(0, 0, 0);

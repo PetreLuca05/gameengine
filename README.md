@@ -58,6 +58,10 @@ All other dependencies are fetched or vendored:
 | stb_image / stb_image_write / stb_vorbis | stb `2c980bb` | `third_party/stb` |
 | miniaudio | 0.11.25 | `third_party/miniaudio` |
 | cJSON | v1.7.19 | `third_party/cjson` |
+| mbedTLS | 3.6.4 LTS | FetchContent (phone companion server: TLS, certificates) |
+| qrcodegen (Nayuki) | `3c6d0b3` | `third_party/qrcodegen` |
+| minih264 / minimp4 | `b0baea7` / `2a3014a` | `third_party/minih264`, `third_party/minimp4` (phone videos) |
+| quirc | `927d680` | `third_party/quirc` (tests only) |
 | Nuklear | v4.13.3 | `third_party/nuklear` |
 | FastNoiseLite (C) | `785f37a` | `third_party/fastnoise` |
 | Steamworks SDK | your copy | `STEAM_SDK_DIR` (optional) |

@@ -4,3 +4,8 @@ ufbx v0.22.0 (github.com/ufbx/ufbx)
 meshoptimizer v0.22 (simplifier + allocator + clusterizer, github.com/zeux/meshoptimizer; all from the v0.22 tag)
 stb_truetype v1.26 (public domain, game UI fonts: src/ui/gui/gui_draw.c)
 Barlow Regular / Medium / SemiBold (SIL OFL 1.1, assets/ui/fonts/OFL.txt, github.com/jpt/barlow)
+qrcodegen (Project Nayuki QR-Code-generator, C) commit 3c6d0b3 (MIT): phone pairing QR codes
+quirc commit 927d680 (ISC, tests only): QR decode round-trip in tests/test_phone.c
+minih264 commit b0baea7 (CC0): H.264 encoder for phone videos (src/gameplay/phone/phone_video.c)
+minimp4 commit 2a3014a (CC0): MP4 muxer for phone videos
+mbedTLS 3.6.4 LTS (Apache-2.0, FetchContent): TLS + self-signed certificates for the phone server

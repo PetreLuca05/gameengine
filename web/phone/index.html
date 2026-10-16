@@ -1,0 +1,388 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#000000">
+<title>Deadground Phone</title>
+<!--
+  Deadground companion page (docs/PHONE.md). Served by the game (src/net/http_ws), no external
+  resources. Protocol: src/gameplay/phone/phone_proto.h (PHONE_PROTO_VERSION 1).
+    page -> game  binary orientation samples (16 bytes, 60 Hz) + JSON commands
+    game -> page  binary JPEG frames + photo blobs, JSON status / media / gallery
+-->
+<style>
+  :root { --fg: #fff; --dim: rgba(255,255,255,.65); --accent: #ffd60a; --rec: #ff3b30; --ok: #34c759; --panel: rgba(20,22,26,.86); }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { margin: 0; height: 100%; background: #000; color: var(--fg); font: 15px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; overflow: hidden; overscroll-behavior: none; touch-action: none; user-select: none; -webkit-user-select: none; }
+  #feed { position: fixed; inset: 0; width: 100vw; height: 100vh; height: 100dvh; display: block; background: #000; }
+  .bar { position: fixed; left: 0; right: 0; display: flex; align-items: center; padding: 0 14px; pointer-events: none; }
+  .bar > * { pointer-events: auto; }
+  #top { top: 0; padding-top: calc(env(safe-area-inset-top) + 8px); height: calc(env(safe-area-inset-top) + 52px); gap: 8px; background: linear-gradient(rgba(0,0,0,.55), transparent); }
+  .pill { padding: 5px 10px; border-radius: 999px; background: rgba(0,0,0,.45); font-size: 12.5px; font-weight: 600; letter-spacing: .02em; white-space: nowrap; }
+  .pill.ok { color: #0c2; } .pill.bad { color: #ff6b5a; } .pill.rec { background: var(--rec); color: #fff; display: none; }
+  .spacer { flex: 1; }
+  .icon { width: 40px; height: 40px; border-radius: 50%; border: 0; background: rgba(0,0,0,.45); color: #fff; font-size: 18px; display: grid; place-items: center; }
+  #bottom { bottom: 0; height: calc(env(safe-area-inset-bottom) + 150px); padding-bottom: env(safe-area-inset-bottom); justify-content: space-around; background: linear-gradient(transparent, rgba(0,0,0,.6)); }
+  #shutter { width: 78px; height: 78px; border-radius: 50%; border: 6px solid #fff; background: rgba(255,255,255,.9); }
+  #shutter:active { transform: scale(.94); background: #fff; }
+  #record { width: 56px; height: 56px; border-radius: 50%; border: 4px solid #fff; background: transparent; display: grid; place-items: center; }
+  #record i { width: 26px; height: 26px; border-radius: 50%; background: var(--rec); transition: all .15s; }
+  #record.on i { border-radius: 6px; width: 22px; height: 22px; }
+  #thumb { width: 54px; height: 54px; border-radius: 10px; border: 2px solid #fff; background: #222 center/cover no-repeat; }
+  #zoomchips { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(env(safe-area-inset-bottom) + 160px); display: flex; gap: 10px; }
+  .chip { min-width: 44px; height: 44px; border-radius: 22px; border: 0; background: rgba(0,0,0,.5); color: #fff; font-weight: 700; font-size: 13px; }
+  .chip.on { background: var(--accent); color: #111; }
+  #zoomval { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(env(safe-area-inset-bottom) + 214px); color: var(--accent); font-weight: 700; display: none; background: rgba(0,0,0,.5); padding: 4px 10px; border-radius: 12px; }
+  #zoomslider { position: fixed; right: 10px; top: 25%; height: 40%; width: 40px; }
+  #zoomslider input { writing-mode: vertical-lr; direction: rtl; width: 40px; height: 100%; accent-color: var(--accent); }
+  #toast { position: fixed; left: 50%; top: calc(env(safe-area-inset-top) + 70px); transform: translateX(-50%); background: var(--panel); padding: 9px 14px; border-radius: 14px; font-weight: 600; opacity: 0; transition: opacity .25s; pointer-events: none; max-width: 86vw; text-align: center; }
+  #flash { position: fixed; inset: 0; background: #fff; opacity: 0; pointer-events: none; transition: opacity .25s; }
+  .sheet { position: fixed; inset: 0; background: rgba(0,0,0,.92); display: none; flex-direction: column; padding: calc(env(safe-area-inset-top) + 16px) 18px calc(env(safe-area-inset-bottom) + 16px); overflow-y: auto; touch-action: pan-y; z-index: 5; }
+  .sheet.show { display: flex; }
+  .sheet h2 { margin: 6px 0 10px; font-size: 22px; }
+  .sheet p { color: var(--dim); margin: 6px 0; }
+  .btn { margin-top: 12px; padding: 14px 18px; border-radius: 14px; border: 0; font-size: 16px; font-weight: 700; background: #fff; color: #000; }
+  .btn.ghost { background: rgba(255,255,255,.12); color: #fff; }
+  .btn.danger { background: #3a1210; color: #ff6b5a; }
+  #grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 8px; }
+  #grid .cell { aspect-ratio: 9/16; border-radius: 8px; background: #222 center/cover no-repeat; position: relative; }
+  #grid .cell span { position: absolute; right: 6px; bottom: 6px; font-size: 12px; font-weight: 700; background: rgba(0,0,0,.6); padding: 2px 6px; border-radius: 8px; }
+  #viewer img, #viewer video { max-width: 100%; max-height: 70vh; border-radius: 10px; align-self: center; background: #111; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; }
+  .row .btn { flex: 1; }
+  code { background: rgba(255,255,255,.1); padding: 1px 6px; border-radius: 6px; }
+  @media (orientation: landscape) {
+    #bottom { top: 0; bottom: 0; right: 0; left: auto; width: calc(env(safe-area-inset-right) + 130px); height: auto; flex-direction: column; justify-content: space-around; padding: 20px 0; background: linear-gradient(90deg, transparent, rgba(0,0,0,.6)); }
+    #zoomchips { left: auto; right: calc(env(safe-area-inset-right) + 140px); bottom: 50%; transform: translateY(50%); flex-direction: column; }
+    #zoomval { left: auto; right: calc(env(safe-area-inset-right) + 196px); transform: none; bottom: 50%; }
+    #zoomslider { right: auto; left: 10px; }
+  }
+</style>
+</head>
+<body>
+<canvas id="feed"></canvas>
+<div id="top" class="bar">
+  <span id="link" class="pill bad">Connecting…</span>
+  <span id="rec" class="pill rec">● REC 0:00</span>
+  <span class="spacer"></span>
+  <span id="lat" class="pill">– ms</span>
+  <button id="flip" class="icon" title="Front / back camera">⟲</button>
+  <button id="menu" class="icon" title="Menu">⋯</button>
+</div>
+<div id="zoomval">1.0×</div>
+<div id="zoomchips"><button class="chip on" data-z="1">1×</button><button class="chip" data-z="2">2×</button><button class="chip" data-z="5">5×</button></div>
+<div id="zoomslider"><input id="zoom" type="range" min="0" max="1000" value="0" aria-label="Zoom"></div>
+<div id="bottom" class="bar">
+  <button id="thumb" title="Gallery"></button>
+  <button id="shutter" title="Photo"></button>
+  <button id="record" title="Record"><i></i></button>
+</div>
+<div id="flash"></div>
+<div id="toast"></div>
+
+<div id="start" class="sheet show">
+  <h2>Deadground phone</h2>
+  <p id="startmsg">Your phone becomes the in-game phone: tilt it to aim the camera, take photos and videos, and save them here.</p>
+  <p id="secure" style="display:none"></p>
+  <button id="go" class="btn">Start</button>
+  <p style="margin-top:18px">Hold the phone upright facing the screen's direction in the game, then tap <b>Calibrate</b> (or double-tap the picture to re-centre at any time).</p>
+</div>
+
+<div id="sheet" class="sheet">
+  <h2>Phone</h2>
+  <p id="info"></p>
+  <button id="calib" class="btn">Calibrate (hold upright, facing forward)</button>
+  <button id="gallerybtn" class="btn ghost">Gallery</button>
+  <div class="row"><button id="filter" class="btn ghost">Filter: none</button><button id="close" class="btn ghost">Back</button></div>
+  <button id="unpair" class="btn danger">Unpair this phone</button>
+  <p style="margin-top:18px">Motion sensors need this page over HTTPS. If you skipped the certificate warning, the connection is still encrypted, with a certificate made by your game (see docs/PHONE.md).</p>
+</div>
+
+<div id="gallery" class="sheet">
+  <div class="row" style="align-items:center"><h2 style="flex:1">Gallery</h2><button id="gclose" class="btn ghost" style="flex:0;margin:0">Done</button></div>
+  <div id="grid"></div>
+</div>
+
+<div id="viewer" class="sheet">
+  <div class="row" style="align-items:center"><h2 id="vtitle" style="flex:1;font-size:16px"></h2><button id="vclose" class="btn ghost" style="flex:0;margin:0">Close</button></div>
+  <div id="vbody" style="display:flex;justify-content:center;margin-top:8px"></div>
+  <div class="row"><a id="vdl" class="btn" style="text-align:center;text-decoration:none">Download</a><button id="vshare" class="btn ghost">Share / save</button></div>
+  <p id="vmeta"></p>
+</div>
+
+<script>
+'use strict';
+const PROTO = 1, MSG_ORIENT = 1, MSG_FRAME = 16, MSG_PHOTO = 17;
+const $ = (id) => document.getElementById(id);
+const qs = new URLSearchParams(location.search);
+let token = qs.get('t') || '';
+let session = sessionStorage.getItem('dg_session') || '';
+let ws = null, wsOpen = false, retry = 0, closedForGood = false;
+let status = {}, zoom = 1, maxZoom = 8, gallery = [], lastPhoto = null;
+let pingRtt = 0, framesShown = 0, fpsShown = 0, lastFpsT = performance.now();
+let sensorOk = false, sending = false, seq = 0, lastSample = null;
+
+// ------------------------------------------------------------------ helpers
+function toast(msg, ms = 2200) {
+  const t = $('toast'); t.textContent = msg; t.style.opacity = 1;
+  clearTimeout(toast.h); toast.h = setTimeout(() => t.style.opacity = 0, ms);
+}
+function send(obj) { if (wsOpen) ws.send(JSON.stringify(obj)); }
+function mmss(s) { s = Math.max(0, Math.floor(s)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }
+function mediaUrl(path, dl) { return path + (path.includes('?') ? '&' : '?') + 's=' + encodeURIComponent(session) + (dl ? '&dl=1' : ''); }
+
+// Quaternion helpers (x, y, z, w) mirroring src/core/dgmath.h.
+function qmul(a, b) {
+  return [a[3]*b[0] + a[0]*b[3] + a[1]*b[2] - a[2]*b[1],
+          a[3]*b[1] - a[0]*b[2] + a[1]*b[3] + a[2]*b[0],
+          a[3]*b[2] + a[0]*b[1] - a[1]*b[0] + a[2]*b[3],
+          a[3]*b[3] - a[0]*b[0] - a[1]*b[1] - a[2]*b[2]];
+}
+function qaxis(x, y, z, deg) { const h = deg * Math.PI / 360, s = Math.sin(h); return [x*s, y*s, z*s, Math.cos(h)]; }
+// W3C DeviceOrientation: device -> earth = Rz(alpha) Rx(beta) Ry(gamma) (phone_device_quat in C).
+function deviceQuat(a, b, g) { return qmul(qmul(qaxis(0, 0, 1, a), qaxis(1, 0, 0, b)), qaxis(0, 1, 0, g)); }
+
+// ------------------------------------------------------------------ connection
+function connect() {
+  if (closedForGood) return;
+  const q = session ? 's=' + encodeURIComponent(session) : 't=' + encodeURIComponent(token);
+  if (!session && !token) { showFatal('No pairing code', 'Scan the QR code shown in the game (press P while holding the phone).'); return; }
+  ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws?' + q);
+  ws.binaryType = 'arraybuffer';
+  ws.onopen = () => { wsOpen = true; retry = 0; setLink(true); send({ c: 'hello', v: PROTO, ua: navigator.userAgent.slice(0, 90) }); };
+  ws.onmessage = (e) => (typeof e.data === 'string' ? onText(e.data) : onBinary(e.data));
+  ws.onclose = (e) => {
+    wsOpen = false; setLink(false);
+    if (e.code === 4001) { forget(); showFatal('Unpaired', 'This phone was unpaired. Scan a new QR code in the game to pair again.'); return; }
+    if (e.code === 4000) { closedForGood = true; showFatal('Paired elsewhere', 'Another phone (or tab) took over. Reload to take it back.'); return; }
+    // A pairing code works once: after a failed first attempt only the session can resume.
+    if (!session && token) { showFatal('Pairing failed', 'The code expired or was already used. Press P in the game for a new QR code.'); return; }
+    setTimeout(connect, Math.min(5000, 400 * Math.pow(1.6, retry++)));
+  };
+}
+function forget() { session = ''; token = ''; sessionStorage.removeItem('dg_session'); }
+function setLink(on) {
+  const l = $('link');
+  l.textContent = on ? (status.driven ? 'Linked · gyro' : 'Linked') : 'Reconnecting…';
+  l.className = 'pill ' + (on ? 'ok' : 'bad');
+}
+function showFatal(title, msg) {
+  $('start').classList.add('show');
+  $('start').querySelector('h2').textContent = title;
+  $('startmsg').textContent = msg;
+  $('go').style.display = 'none';
+}
+
+function onText(s) {
+  let m; try { m = JSON.parse(s); } catch { return; }
+  switch (m.t) {
+    case 'session':
+      session = m.s; sessionStorage.setItem('dg_session', session);
+      token = '';
+      history.replaceState(null, '', location.pathname);   // the one-time code leaves the address bar
+      break;
+    case 'status': onStatus(m); break;
+    case 'pong': pingRtt = performance.now() - m.pt; break;
+    case 'gallery': gallery = m.items || []; renderGallery(); if (gallery[0]) setThumb(gallery[0]); break;
+    case 'media': gallery.unshift(m.item); renderGallery(); setThumb(m.item); toast(m.item.kind === 'video' ? 'Video saved in the game' : 'Photo saved in the game'); break;
+    case 'toast': toast(m.msg); break;
+    case 'unpaired': forget(); break;
+  }
+}
+
+function onStatus(m) {
+  status = m; maxZoom = m.max_zoom || 8;
+  if (!pinching && Math.abs((m.zoom || 1) - zoom) > 0.01 && performance.now() - zoomSentT > 600) setZoomUi(m.zoom);
+  $('record').classList.toggle('on', !!m.rec);
+  const r = $('rec'); r.style.display = m.rec ? 'inline-block' : 'none'; r.textContent = '● REC ' + mmss(m.rec_s || 0);
+  setLink(wsOpen);
+  $('filter').textContent = 'Filter: ' + (m.filter || 'none');
+  $('info').innerHTML = (m.holding ? (m.camera ? 'Camera raised' : 'Phone out (right mouse raises it)') : 'Take the phone out in the game (X)') +
+    '<br>' + (m.w ? m.w + '×' + m.h + ' · q' + m.q + ' · ' + (m.fps || 0).toFixed(0) + ' fps · ' + Math.round(m.kbps || 0) + ' kbit/s' : 'no stream yet') +
+    '<br>glass-to-glass ≈ ' + Math.round(m.glass || 0) + ' ms · encode ' + (m.encode || 0).toFixed(1) + ' ms · ping ' + Math.round(pingRtt) + ' ms' +
+    '<br>Game time Day ' + m.day + ' ' + m.clock + (m.calibrated ? ' · calibrated' : ' · not calibrated');
+}
+
+// ------------------------------------------------------------------ feed
+const canvas = $('feed'), ctx = canvas.getContext('2d', { alpha: false });
+let pending = null, decoding = false, lastBitmap = null, lastFrameId = 0;
+function resize() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = Math.round(innerWidth * dpr); canvas.height = Math.round(innerHeight * dpr);
+  if (lastBitmap) draw(lastBitmap);
+}
+addEventListener('resize', resize);
+function screenAngle() {
+  const a = (screen.orientation && typeof screen.orientation.angle === 'number') ? screen.orientation.angle : (window.orientation || 0);
+  return ((a % 360) + 360) % 360;
+}
+// Frames are portrait images from the in-game sensor, which rolls with this phone: rotate them by
+// the screen angle so they stay upright on a landscape screen too. Cover-fit.
+function draw(bmp) {
+  const W = canvas.width, H = canvas.height, ang = screenAngle() * Math.PI / 180;
+  const rot = Math.abs(Math.sin(ang)) > 0.5;
+  const iw = rot ? bmp.height : bmp.width, ih = rot ? bmp.width : bmp.height;
+  const s = Math.max(W / iw, H / ih);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.fillStyle = '#000'; ctx.fillRect(0, 0, W, H);
+  ctx.translate(W / 2, H / 2); ctx.rotate(-ang); ctx.scale(s, s);
+  ctx.drawImage(bmp, -bmp.width / 2, -bmp.height / 2);
+}
+function onBinary(buf) {
+  const v = new DataView(buf), type = v.getUint8(0);
+  if (type === MSG_FRAME) {
+    const id = v.getUint32(8, true);
+    pending = { id, blob: new Blob([new Uint8Array(buf, 24)], { type: 'image/jpeg' }) };   // newest wins
+    if (!decoding) decodeNext();
+  } else if (type === MSG_PHOTO) {
+    const id = v.getUint32(4, true);
+    lastPhoto = { id, blob: new Blob([new Uint8Array(buf, 8)], { type: 'image/jpeg' }) };
+    $('thumb').style.backgroundImage = 'url(' + URL.createObjectURL(lastPhoto.blob) + ')';
+  }
+}
+async function decodeNext() {
+  if (!pending) { decoding = false; return; }
+  decoding = true;
+  const f = pending; pending = null;
+  try {
+    const bmp = await createImageBitmap(f.blob);
+    if (lastBitmap && lastBitmap.close) lastBitmap.close();
+    lastBitmap = bmp; draw(bmp);
+    lastFrameId = f.id; framesShown++;
+    send({ c: 'ack', f: f.id });   // drives the game's rate control and the latency estimate
+  } catch (e) { /* a truncated frame: skip */ }
+  decodeNext();
+}
+
+// ------------------------------------------------------------------ orientation
+function onOrient(e) {
+  if (e.alpha === null && e.beta === null) return;
+  sensorOk = true;
+  lastSample = deviceQuat(e.alpha || 0, e.beta || 0, e.gamma || 0);
+}
+function sendOrientation() {
+  if (wsOpen && lastSample) {
+    const b = new ArrayBuffer(16), v = new DataView(b);
+    v.setUint8(0, MSG_ORIENT);
+    v.setUint8(1, Math.abs(Math.sin(screenAngle() * Math.PI / 180)) > 0.5 ? 1 : 0);
+    v.setUint16(2, (seq++) & 0xffff, true);
+    v.setUint32(4, Math.round(performance.now()) >>> 0, true);
+    for (let i = 0; i < 4; i++) v.setInt16(8 + i * 2, Math.round(Math.max(-1, Math.min(1, lastSample[i])) * 32767), true);
+    ws.send(b);
+  }
+}
+async function startSensors() {
+  try {
+    if (typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function') {
+      const r = await DeviceOrientationEvent.requestPermission();   // iOS 13+: must come from a tap
+      if (r !== 'granted') { toast('Motion access denied: Settings > Safari > Motion & Orientation Access', 5000); send({ c: 'perm', orientation: false }); return; }
+    }
+  } catch (e) { toast('Motion access unavailable: ' + e.message, 5000); }
+  addEventListener('deviceorientation', onOrient);
+  setInterval(sendOrientation, 1000 / 60);
+  setTimeout(() => {
+    send({ c: 'perm', orientation: sensorOk });
+    if (!sensorOk) toast(window.isSecureContext ? 'No motion sensor data from this browser' : 'Motion sensors need the HTTPS page (see docs)', 5000);
+  }, 1500);
+}
+async function keepAwake() {
+  try { if ('wakeLock' in navigator) { const l = await navigator.wakeLock.request('screen'); document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && navigator.wakeLock.request('screen').catch(() => {})); return l; } } catch {}
+}
+
+// ------------------------------------------------------------------ controls
+let zoomSentT = 0, pinching = false;
+function zoomToSlider(z) { return Math.round(Math.log(Math.max(1, z)) / Math.log(maxZoom) * 1000); }
+function sliderToZoom(v) { return Math.pow(maxZoom, v / 1000); }
+function setZoomUi(z) {
+  zoom = Math.max(1, Math.min(maxZoom, z));
+  $('zoom').value = zoomToSlider(zoom);
+  let preset = false;
+  document.querySelectorAll('.chip').forEach(c => { const on = Math.abs(+c.dataset.z - zoom) < 0.05; c.classList.toggle('on', on); preset ||= on; });
+  const zv = $('zoomval'); zv.style.display = preset ? 'none' : 'block'; zv.textContent = zoom.toFixed(1) + '×';
+}
+function sendZoom(z) { setZoomUi(z); const now = performance.now(); if (now - zoomSentT > 40) { send({ c: 'zoom', v: +zoom.toFixed(3) }); zoomSentT = now; } else { clearTimeout(sendZoom.h); sendZoom.h = setTimeout(() => { send({ c: 'zoom', v: +zoom.toFixed(3) }); zoomSentT = performance.now(); }, 45); } }
+$('zoom').addEventListener('input', (e) => sendZoom(sliderToZoom(+e.target.value)));
+document.querySelectorAll('.chip').forEach(c => c.addEventListener('click', () => sendZoom(+c.dataset.z)));
+$('shutter').addEventListener('click', () => { send({ c: 'shutter' }); const f = $('flash'); f.style.transition = 'none'; f.style.opacity = .8; requestAnimationFrame(() => { f.style.transition = 'opacity .25s'; f.style.opacity = 0; }); if (navigator.vibrate) navigator.vibrate(15); });
+$('record').addEventListener('click', () => { send({ c: 'record' }); if (navigator.vibrate) navigator.vibrate(25); });
+$('flip').addEventListener('click', () => send({ c: 'camera', v: status.front ? 'back' : 'front' }));
+$('menu').addEventListener('click', () => $('sheet').classList.add('show'));
+$('close').addEventListener('click', () => $('sheet').classList.remove('show'));
+$('calib').addEventListener('click', () => { send({ c: 'calibrate' }); toast('Calibrated'); $('sheet').classList.remove('show'); });
+$('unpair').addEventListener('click', () => { if (confirm('Unpair this phone?')) { send({ c: 'unpair' }); forget(); closedForGood = true; showFatal('Unpaired', 'Scan a new QR code in the game to pair again.'); } });
+const FILTERS = ['none', 'vivid', 'warm', 'cool', 'mono', 'noir'];
+$('filter').addEventListener('click', () => { const i = (FILTERS.indexOf(status.filter || 'none') + 1) % FILTERS.length; send({ c: 'filter', v: FILTERS[i] }); $('filter').textContent = 'Filter: ' + FILTERS[i]; });
+$('thumb').addEventListener('click', openGallery);
+$('gallerybtn').addEventListener('click', () => { $('sheet').classList.remove('show'); openGallery(); });
+$('gclose').addEventListener('click', () => $('gallery').classList.remove('show'));
+$('vclose').addEventListener('click', () => { $('viewer').classList.remove('show'); $('vbody').innerHTML = ''; });
+
+// Pinch to zoom + double tap to re-centre, on the picture.
+let pinch0 = 0, zoom0 = 1, lastTap = 0;
+canvas.addEventListener('touchstart', (e) => {
+  if (e.touches.length === 2) { pinching = true; pinch0 = dist(e.touches); zoom0 = zoom; }
+  else if (e.touches.length === 1) { const now = performance.now(); if (now - lastTap < 300) { send({ c: 'recenter' }); toast('Re-centred'); } lastTap = now; }
+}, { passive: true });
+canvas.addEventListener('touchmove', (e) => { if (pinching && e.touches.length === 2) sendZoom(zoom0 * dist(e.touches) / Math.max(pinch0, 1)); }, { passive: true });
+canvas.addEventListener('touchend', (e) => { if (e.touches.length < 2) pinching = false; }, { passive: true });
+canvas.addEventListener('dblclick', () => send({ c: 'recenter' }));
+function dist(t) { return Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY); }
+
+// ------------------------------------------------------------------ gallery
+function setThumb(it) { if (it && it.thumb) $('thumb').style.backgroundImage = 'url(' + mediaUrl(it.thumb) + ')'; }
+function openGallery() { send({ c: 'gallery' }); renderGallery(); $('gallery').classList.add('show'); }
+function renderGallery() {
+  const g = $('grid'); g.innerHTML = '';
+  if (!gallery.length) { g.innerHTML = '<p>No photos yet: take one with the shutter.</p>'; return; }
+  for (const it of gallery) {
+    const c = document.createElement('div'); c.className = 'cell';
+    if (it.thumb) c.style.backgroundImage = 'url(' + mediaUrl(it.thumb) + ')';
+    if (it.kind === 'video') { const s = document.createElement('span'); s.textContent = '▶ ' + mmss(it.seconds || 0); c.appendChild(s); }
+    c.addEventListener('click', () => openViewer(it));
+    g.appendChild(c);
+  }
+}
+function openViewer(it) {
+  const b = $('vbody'); b.innerHTML = '';
+  const el = document.createElement(it.kind === 'video' ? 'video' : 'img');
+  el.src = mediaUrl(it.url);
+  if (it.kind === 'video') { el.controls = true; el.playsInline = true; el.setAttribute('playsinline', ''); }
+  b.appendChild(el);
+  $('vtitle').textContent = it.name;
+  $('vdl').href = mediaUrl(it.url, true); $('vdl').setAttribute('download', it.name);
+  $('vmeta').textContent = (it.w ? it.w + '×' + it.h : '') + (it.seconds ? ' · ' + mmss(it.seconds) : '') + (it.time ? ' · ' + it.time.replace('T', ' ') : '');
+  $('vshare').onclick = async () => {
+    try {
+      const blob = (lastPhoto && lastPhoto.id === it.id) ? lastPhoto.blob : await (await fetch(mediaUrl(it.url))).blob();
+      const file = new File([blob], it.name, { type: blob.type });
+      if (navigator.canShare && navigator.canShare({ files: [file] })) await navigator.share({ files: [file], title: it.name });   // iOS: "Save Image" / "Save Video"
+      else { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = it.name; a.click(); }
+    } catch (e) { if (e.name !== 'AbortError') toast('Share failed: ' + e.message); }
+  };
+  $('viewer').classList.add('show');
+}
+
+// ------------------------------------------------------------------ start
+setInterval(() => { if (wsOpen) send({ c: 'ping', pt: performance.now(), rtt: Math.round(pingRtt) }); }, 1000);
+setInterval(() => {
+  const now = performance.now(); fpsShown = framesShown * 1000 / (now - lastFpsT); framesShown = 0; lastFpsT = now;
+  const g = status.glass ? Math.round(status.glass) : 0;
+  $('lat').textContent = (g ? g + ' ms' : Math.round(pingRtt) + ' ms ping') + ' · ' + fpsShown.toFixed(0) + ' fps';
+}, 1000);
+if (!window.isSecureContext) { const s = $('secure'); s.style.display = 'block'; s.textContent = 'This page is not on HTTPS: phone browsers only give motion sensors to secure pages. Photos, video and the live picture still work.'; }
+if (!token && session) $('startmsg').textContent = 'Reconnecting to your game…';
+$('go').addEventListener('click', async () => {
+  $('start').classList.remove('show');
+  resize();
+  await startSensors();
+  keepAwake();
+  try { if (screen.orientation && screen.orientation.unlock) screen.orientation.unlock(); } catch {}
+});
+resize();
+connect();
+</script>
+</body>
+</html>

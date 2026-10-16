@@ -1,3 +1,4 @@
+#include "gameplay/phone/phone.h"
 #include "stb_image.h"
 // Presentation: builds draw lists for the world, local view, hands, effects, HUD and menus.
 #include "gameplay/zombies/horde.h"
@@ -206,6 +207,7 @@ void game_render_init(void) {
     weather_register();
     vehicles_register();
     flesh_range_register();
+    phone_register();
     cmd_register("ads_sweep", cmd_ads_sweep, "ads_sweep start | report: sight socket distance / angle against the view axis while ADS");
     cmd_register("fp_pose", cmd_fp_pose, "print the first-person head position relative to the pelvis");
     cmd_register("fp_cam_test", cmd_fp_cam_test, "fp_cam_test start | report: first-person camera / body / hands invariants");
@@ -802,6 +804,8 @@ void game_render(void) {
     // Sights: lens / reticle / scope picture-in-picture from the item as it is drawn this frame.
     sights_frame(&cam, p && !dead && !cvar_find("cl_thirdperson")->i && GR->cam_mode != 3);
     sights_test_frame(&cam);
+    // Phone: lens view from the phone as drawn this frame, companion server, capture.
+    phone_frame(w, &cam, p);
     fx_render(cam.pos);
     draw_debug(w, cam.pos);
     recoil_debug_draw(cam.pos);
@@ -811,7 +815,7 @@ void game_render(void) {
     dbg_submit((float)g_engine.frame_dt, cam.pos, right, up);
     audio_update(cam.pos, fwd, up);
 
-    if (!game_post_photo_mode()) { hud_draw(); vehicles_draw_hud(); }
+    if (!game_post_photo_mode()) { hud_draw(); vehicles_draw_hud(); phone_draw(); }
     vehicles_draw();
     sights_draw();
     daynight_draw();

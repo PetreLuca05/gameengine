@@ -59,8 +59,19 @@ const char *fire_mode_name(FireMode m) {
     return m == FM_AUTO ? "AUTO" : (m == FM_BURST ? "BURST" : "SINGLE");
 }
 
+// The built-in phone as an equipped slot (per player: callers may keep the pointer for a tick).
+static InvSlot *phone_slot(const World *w, int slot) {
+    static InvSlot ps[MAX_PLAYERS];
+    InvSlot *s = &ps[DG_CLAMP(slot, 0, MAX_PLAYERS - 1)];
+    memset(s, 0, sizeof(*s));
+    s->item = w->items->builtin_phone;
+    s->count = s->item ? 1 : 0;
+    return s;
+}
+
 const InvSlot *weapon_equipped(const World *w, int slot) {
     const Player *p = &w->players[slot];
+    if (p->sim.wpn.slot == WPN_SLOT_PHONE) return w->items->builtin_phone ? phone_slot(w, slot) : NULL;
     int s = DG_CLAMP((int)p->sim.wpn.slot, 0, INV_HOTBAR - 1);
     return p->inv.slots[s].item ? &p->inv.slots[s] : NULL;
 }
@@ -634,6 +645,7 @@ void weapons_tick(World *w, int slot, PlayerSim *sim, const UserCmd *cmd, u16 pr
     if (sim->move.mode == MOVE_DEAD) return;
 
     u8 want = (u8)DG_CLAMP((int)cmd->slot, 0, INV_HOTBAR - 1);
+    if ((cmd->buttons & BTN_PHONE) && w->items->builtin_phone) want = WPN_SLOT_PHONE;   // the built-in phone, out over any slot
     bool equip_changed = want != ws->slot;
     if (equip_changed) {
         ws->prev_slot = ws->slot;
@@ -650,7 +662,7 @@ void weapons_tick(World *w, int slot, PlayerSim *sim, const UserCmd *cmd, u16 pr
     ws->equip_t += dt;
     ws->recoil_kick = fmaxf(0.0f, ws->recoil_kick - dt * 6.0f);
 
-    InvSlot *s = &p->inv.slots[ws->slot];
+    InvSlot *s = ws->slot == WPN_SLOT_PHONE ? phone_slot(w, slot) : &p->inv.slots[ws->slot];
     const ItemDef *idef = item_def(w->items, s->item);
     const WeaponDef *d = item_weapon(w->items, s->item);
     // Attachments: the host and the predicting client apply the same modifiers (same inventory).
@@ -721,7 +733,14 @@ void weapons_tick(World *w, int slot, PlayerSim *sim, const UserCmd *cmd, u16 pr
         return;
     }
     ws->use_t = -1;
-    if (!d) return;
+    if (!d) {
+        // Camera items (the phone, docs/PHONE.md): aiming raises it into camera mode, replicated
+        // like ADS. Other items never aim (a stale flag from the previous weapon is cleared).
+        bool aim = idef->camera && s->item && (cmd->buttons & BTN_AIM) && sim->move.mode == MOVE_WALK && ws->equip_t > 0.15f;
+        ws->ads_t = aim ? fminf(1.0f, ws->ads_t + dt / 0.22f) : fmaxf(0.0f, ws->ads_t - dt / 0.22f);
+        ws->ads_on = aim ? 1 : 0;
+        return;
+    }
 
     if (d->kind == WPN_MELEE) {
         if (ws->cooldown > 0) ws->cooldown -= dt;

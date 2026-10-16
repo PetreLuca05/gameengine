@@ -77,6 +77,8 @@ typedef struct HandsFpTargets {
     quat cam_rot;
 } HandsFpTargets;
 bool hands_fp_targets(HandsFpTargets *out);
+// The local player's held non-weapon item as drawn this frame (first person), e.g. the phone.
+bool hands_held_xform(vec3 *pos, quat *rot);
 // Last viewmodel recoil kick (camera space position m, +z back; rotation deg pitch / yaw / roll).
 void hands_vm_kick(vec3 *pos, vec3 *rot);
 // When the body model draws the first-person arms, hands_render skips the placeholder cubes

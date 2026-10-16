@@ -2,6 +2,7 @@
 // FBX load, rig validation, pose math, IK, hold styles + hand glue, body-part hitboxes and
 // damage multipliers, damage reactions, controller determinism, quantization, lag-comp
 // rewind and LOD hysteresis.
+#include "gameplay/phone/phone_orient.h"
 #include "player/camera_fp.h"
 #include "anim/anim.h"
 #include "anim/anim_library.h"
@@ -511,6 +512,62 @@ static void test_hold_and_glue(const ItemDB *db) {
     free(rt);
 }
 
+// Phone driven by a real phone (docs/PHONE.md): random device poses (and absurd ones) through the
+// reach cone clamp, portrait (one hand) and landscape (two hands): the right hand reaches the
+// phone, the left hand stays glued in landscape, the item never moves after the solve, and the
+// phone's camera-space rotation stays inside the reach cone.
+static void test_phone_hold(const ItemDB *db) {
+    const ItemDef *it = item_def(db, db->builtin_phone);
+    CHECK(db->builtin_phone && it->camera, "built-in phone item present");
+    if (!db->builtin_phone) return;
+    const CharacterDef *def = anim_lib_char_by_id(L, "player");
+    if (!def) return;
+    CharRuntime *rt = (CharRuntime *)malloc(sizeof(CharRuntime));
+    const float dt = 1.0f / 60.0f;
+    PhoneReach reach = phone_reach_default();
+    for (int land = 0; land < 2; land++) {
+        int style = proc_hold_style_index(&L->proc, land ? it->hold_style_alt : it->hold_style);
+        CHECK(style >= 0, "phone hold style %s", land ? it->hold_style_alt : it->hold_style);
+        if (style < 0) continue;
+        charrt_init(rt, L, def);
+        CharInputs in;
+        memset(&in, 0, sizeof(in));
+        in.grounded = true;
+        in.ads = true;
+        in.weapon_type = style;
+        in.weapon_id = db->builtin_phone;
+        GlueStats g = { 0 };
+        float worst_right = 0, worst_cone = 0;
+        Rng rg = rng_make(77 + (u64)land);
+        quat target = quat_identity();
+        for (int t = 0; t < 900; t++) {
+            // A new device pose every 0.25 s (smoothly approached, like filtered samples), some far
+            // outside the reach cone; the view pitch sweeps too.
+            if (t % 15 == 0) {
+                float k = (t / 15) % 4 == 3 ? 3.0f : 1.0f;
+                target = phone_from_ypr(v3(rng_range(&rg, -1.0f, 1.0f) * k, rng_range(&rg, -0.9f, 0.9f) * k, (land ? 1.57f : 0.0f) + rng_range(&rg, -0.4f, 0.4f) * k));
+            }
+            quat cur = t ? phone_quat_unpack(in.phone_rot) : quat_identity();
+            in.phone_rot = phone_quat_pack(quat_nlerp(cur, target, 0.2f));
+            in.phone_flags = (u8)(CHAR_PHONE_CAMERA | CHAR_PHONE_DRIVEN | (land ? CHAR_PHONE_LANDSCAPE : 0));
+            in.aim_pitch = 0.9f * sinf((float)t * 0.013f);
+            glue_step(rt, &it->sockets, &in, dt, v3(0, 0, 0), v3(0, 0, 0), &g, "phone", it->id);
+            if (t < 30) continue;   // the 0.3 s blend from the mouse aim
+            worst_right = fmaxf(worst_right, rt->proc.right_err_pos);
+            quat item_cam = quat_mul(quat_conj(rt->proc.cam_model.r), rt->proc.item_model.r);
+            vec3 a = v3_scale(phone_euler_ypr(item_cam), DG_RAD2DEG);
+            float over = fmaxf(fmaxf(fabsf(a.x) - reach.yaw, fabsf(a.z) - reach.roll), fmaxf(a.y - reach.pitch_up, -a.y - reach.pitch_down));
+            worst_cone = fmaxf(worst_cone, over);
+        }
+        printf("  phone %-9s right hand %.2f mm from the phone, left glue %.3f mm / %.3f deg, item drift %.2e, cone overshoot %.2f deg\n", land ? "landscape" : "portrait",
+               worst_right * 1000, g.max_pos * 1000, g.max_ang, g.max_item, worst_cone);
+        CHECK(worst_right < 0.01f, "phone %s: right hand %.1f mm from the driven phone", land ? "landscape" : "portrait", worst_right * 1000);
+        CHECK(g.max_item < 1e-4f, "phone %s: item moved %.6f after the right-hand solve", land ? "landscape" : "portrait", g.max_item);
+        if (land) CHECK(g.max_pos < 0.002f && g.max_ang < 1.0f, "phone landscape: left hand %.2f mm / %.2f deg off", g.max_pos * 1000, g.max_ang);
+        CHECK(worst_cone < 1.0f, "phone %s: camera-space rotation %.2f deg outside the reach cone", land ? "landscape" : "portrait", worst_cone);
+    }
+    free(rt);
+}
 
 // ------------------------------------------------------------------ hold point / first person camera
 
@@ -940,6 +997,7 @@ int main(int argc, char **argv) {
     test_pose_math();
     test_ik();
     test_hold_and_glue(db);
+    test_phone_hold(db);
     test_holdpoint(db);
     test_body_parts(db);
     test_damage_reaction();

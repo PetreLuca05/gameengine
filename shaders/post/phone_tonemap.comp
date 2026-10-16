@@ -1,0 +1,73 @@
+#version 450
+// Phone camera light post (src/render/phone_view.c, docs/PHONE.md): the lens view's linear HDR
+// -> exposure (the main view's auto exposure + the phone's bias) -> the user's tonemapper ->
+//   dst_scene   sRGB-encoded RGBA8: the clean camera image (stream, photos, video)
+//   dst_screen  display-linear RGBA8 with the phone UI overlay composited (the in-game screen)
+// No DoF / motion blur / bloom: a phone camera is a small sensor with everything in focus.
+#extension GL_GOOGLE_include_directive : require
+#include "post_common.glsl"
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0) uniform sampler2D color_tex;
+layout(set = 0, binding = 1) uniform sampler2D overlay_tex;
+layout(set = 0, binding = 8, rgba8) uniform writeonly image2D dst_scene;
+layout(set = 0, binding = 9, rgba8) uniform writeonly image2D dst_screen;
+layout(std430, set = 0, binding = 13) readonly buffer Exposure { float e[16]; } X;
+// pc.p0: x exposure bias (EV), y shutter flash 0..1, z vignette, w sharpen (stream: none)
+// pc.u0: x overlay present, y mirror the screen image (front camera preview)
+
+const mat3 ACES_IN = mat3(0.59719, 0.07600, 0.02840, 0.35458, 0.90834, 0.13383, 0.04823, 0.01566, 0.83777);
+const mat3 ACES_OUT = mat3(1.60475, -0.10208, -0.00327, -0.53108, 1.10813, -0.07276, -0.07367, -0.00605, 1.07602);
+vec3 aces_fit(vec3 v) {
+    v = ACES_IN * v;
+    vec3 a = v * (v + 0.0245786) - 0.000090537;
+    vec3 b = v * (0.983729 * v + 0.4329510) + 0.238081;
+    return clamp(ACES_OUT * (a / b), 0.0, 1.0);
+}
+vec3 pbr_neutral(vec3 c) {
+    const float start = 0.8 - 0.04, desat = 0.15;
+    float x = min(c.r, min(c.g, c.b));
+    float off = x < 0.08 ? x - 6.25 * x * x : 0.04;
+    c -= off;
+    float peak = max(c.r, max(c.g, c.b));
+    if (peak < start) return c;
+    const float d = 1.0 - start;
+    float np = 1.0 - d * d / (peak + d - start);
+    c *= np / peak;
+    float g = 1.0 - 1.0 / (desat * (peak - np) + 1.0);
+    return mix(c, vec3(np), g);
+}
+vec3 tonemap(vec3 c) {
+    // AgX (1) falls back to ACES here: the phone's look is a plain consumer camera curve.
+    return int(U.s_tm.x + 0.5) == 2 ? clamp(pbr_neutral(c), 0.0, 1.0) : aces_fit(c);
+}
+vec3 srgb_encode(vec3 c) { return mix(c * 12.92, 1.055 * pow(max(c, vec3(0.0)), vec3(1.0 / 2.4)) - 0.055, step(vec3(0.0031308), c)); }
+
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 sz = imageSize(dst_scene);
+    if (p.x >= sz.x || p.y >= sz.y) return;
+    vec2 uv = (vec2(p) + 0.5) / vec2(sz);
+    float expo = (X.e[0] > 0.0 ? X.e[0] : 1.0) * exp2(pc.p0.x);
+    vec3 c = max(textureLod(color_tex, uv, 0.0).rgb, vec3(0.0)) * expo;
+    if (any(isnan(c)) || any(isinf(c))) c = vec3(0.0);
+    vec2 d = (uv - 0.5) * vec2(float(sz.x) / float(sz.y), 1.0);
+    c *= 1.0 - pc.p0.z * 0.35 * smoothstep(0.2, 0.75, length(d));
+    vec3 t = tonemap(c);
+    imageStore(dst_scene, p, vec4(srgb_encode(t), 1.0));
+    // In-game screen: the phone UI over the image (overlay is sRGB, sampled linear), shutter flash.
+    vec3 s = t;
+    if (pc.u0.y != 0u) {
+        // Mirrored preview: this texel shows the mirrored scene texel (same exposure / curve).
+        vec2 muv = vec2(1.0 - uv.x, uv.y);
+        vec3 mc = max(textureLod(color_tex, muv, 0.0).rgb, vec3(0.0)) * expo;
+        if (any(isnan(mc)) || any(isinf(mc))) mc = vec3(0.0);
+        vec2 md = (muv - 0.5) * vec2(float(sz.x) / float(sz.y), 1.0);
+        s = tonemap(mc * (1.0 - pc.p0.z * 0.35 * smoothstep(0.2, 0.75, length(md))));
+    }
+    if (pc.u0.x != 0u) {
+        vec4 o = textureLod(overlay_tex, uv, 0.0);
+        s = mix(s, o.rgb, o.a);
+    }
+    s = mix(s, vec3(1.0), clamp(pc.p0.y, 0.0, 1.0));
+    imageStore(dst_screen, p, vec4(s, 1.0));
+}

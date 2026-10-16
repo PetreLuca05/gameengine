@@ -8,6 +8,7 @@
 // Per frame the CPU uploads one view and records a fixed number of dispatches; counters come back
 // through a per-frame readback (vgeo_stats). Test content: vgeo_test_scene.
 #include "vk_internal.h"
+#include <SDL3/SDL.h>
 #include "graph/fg.h"
 #include "debug_draw.h"
 #include "vgeo/vgeo_cull.h"

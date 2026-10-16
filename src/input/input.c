@@ -35,6 +35,7 @@ static const char *k_action_names[ACT_COUNT] = {
     "use", "attack", "aim", "reload", "drop", "inventory", "netstats",
     "slot1", "slot2", "slot3", "slot4", "slot5", "slot6", "slot7", "slot8", "slot9",
     "nextitem", "previtem", "firemode", "flashlight", "vehiclecam", "headlights", "horn",
+    "phonepair", "phonegallery", "phone", "phoneselfie",
 };
 
 static const char *k_action_labels[ACT_COUNT] = {
@@ -42,6 +43,7 @@ static const char *k_action_labels[ACT_COUNT] = {
     "Use / Interact", "Attack / Fire", "Aim Down Sights", "Reload", "Drop Item", "Inventory", "Net Stats",
     "Hotbar 1", "Hotbar 2", "Hotbar 3", "Hotbar 4", "Hotbar 5", "Hotbar 6", "Hotbar 7", "Hotbar 8", "Hotbar 9",
     "Next Item", "Previous Item", "Fire Mode", "Flashlight / Enter Vehicle", "Vehicle Camera", "Headlights", "Horn",
+    "Phone: Pair (QR)", "Phone: Gallery", "Phone: Take Out / Put Away", "Phone: Front / Back Camera",
 };
 
 const char *action_name(Action a) { return (a >= 0 && a < ACT_COUNT) ? k_action_names[a] : "?"; }
@@ -90,6 +92,11 @@ void input_reset_bindings(void) {
     IN->binds[ACT_VEHICLE_CAM][0] = key(SDL_SCANCODE_V);
     IN->binds[ACT_LIGHTS][0] = key(SDL_SCANCODE_H);
     IN->binds[ACT_HORN][0] = key(SDL_SCANCODE_Q);
+    IN->binds[ACT_PHONE_PAIR][0] = key(SDL_SCANCODE_P);
+    IN->binds[ACT_PHONE_GALLERY][0] = key(SDL_SCANCODE_J);
+    IN->binds[ACT_PHONE][0] = key(SDL_SCANCODE_X);
+    IN->binds[ACT_PHONE][1] = padb(SDL_GAMEPAD_BUTTON_DPAD_DOWN);
+    IN->binds[ACT_PHONE_SELFIE][0] = key(SDL_SCANCODE_T);
 }
 
 static bool binding_eq(Binding a, Binding b) { return a.type == b.type && a.code == b.code; }

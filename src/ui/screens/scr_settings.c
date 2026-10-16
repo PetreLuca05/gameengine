@@ -21,10 +21,10 @@
 #define TH (gui_theme())
 #define MAX_RES 48
 
-enum { TAB_GRAPHICS, TAB_CONTROLS, TAB_CROSSHAIR, TAB_AUDIO, TAB_CHARACTER, TAB_POST, TAB_COUNT };
-static const char *const k_tabs[TAB_COUNT] = { "Graphics", "Controls", "Crosshair", "Audio", "Character", "Post-processing" };
+enum { TAB_GRAPHICS, TAB_CONTROLS, TAB_CROSSHAIR, TAB_AUDIO, TAB_CHARACTER, TAB_POST, TAB_PHONE, TAB_COUNT };
+static const char *const k_tabs[TAB_COUNT] = { "Graphics", "Controls", "Crosshair", "Audio", "Character", "Post-processing", "Phone" };
 // Display order of the tabs.
-static const int k_order[TAB_COUNT] = { TAB_GRAPHICS, TAB_POST, TAB_CONTROLS, TAB_CROSSHAIR, TAB_AUDIO, TAB_CHARACTER };
+static const int k_order[TAB_COUNT] = { TAB_GRAPHICS, TAB_POST, TAB_CONTROLS, TAB_CROSSHAIR, TAB_AUDIO, TAB_CHARACTER, TAB_PHONE };
 
 typedef struct Display { int width, height, mode, vsync; } Display;
 
@@ -392,6 +392,36 @@ static void tab_character(GuiCursor *c) {
     row_toggle_cvar(c, "Show FPS", "cl_showfps", NULL);
 }
 
+// Phone companion (docs/PHONE.md): server, stream, orientation, capture.
+static void tab_phone(GuiCursor *c) {
+    static const char *const server[] = { "Off", "On", "Automatic" };
+    section(c, "Companion page");
+    row_combo_cvar(c, "Phone server", "phone_server", server, 3, "Automatic: starts the first time you take the phone out (X).");
+    row_toggle_cvar(c, "Allow pairing", "phone_pairing", "Scan the QR code (P while holding the phone) with your real phone.");
+    row_slider_cvar(c, "Server port", "phone_port", 1024, 65000, 1, "%.0f", "HTTPS port; the certificate helper uses the next one. Same Wi-Fi as the phone.");
+    row_toggle_cvar(c, "HTTPS", "phone_tls", "Browsers only give motion sensors to secure pages. Off: Android flags only.");
+    row_slider_cvar(c, "Pairing code lifetime", "phone_token_ttl", 10, 600, 10, "%.0f s", NULL);
+    section(c, "Stream");
+    row_slider_cvar(c, "Frame rate", "phone_fps", 5, 60, 1, "%.0f Hz", "Camera render and stream rate.");
+    row_slider_cvar(c, "Quality", "phone_quality", 30, 95, 1, "%.0f", "Maximum JPEG quality; lowered automatically on a slow network.");
+    row_slider_cvar(c, "Width", "phone_res_w", 128, 1440, 16, "%.0f px", NULL);
+    row_slider_cvar(c, "Height", "phone_res_h", 256, 2560, 16, "%.0f px", NULL);
+    section(c, "Orientation");
+    row_slider_cvar(c, "Smoothing", "phone_smoothing", 0, 1, 0.05f, "%.2f", "Higher: steadier but slower to follow the real phone.");
+    row_slider_cvar(c, "Sensitivity", "phone_sensitivity", 0.25f, 2, 0.05f, "%.2f", NULL);
+    row_toggle_cvar(c, "Invert yaw", "phone_invert_yaw", NULL);
+    row_toggle_cvar(c, "Invert pitch", "phone_invert_pitch", NULL);
+    row_toggle_cvar(c, "Invert roll", "phone_invert_roll", NULL);
+    section(c, "Camera");
+    static const char *const filters[] = { "None", "Vivid", "Warm", "Cool", "Mono", "Noir" };
+    row_combo_cvar(c, "Photo filter", "phone_filter", filters, 6, NULL);
+    row_toggle_cvar(c, "High resolution photos", "phone_photo_hires", "Re-renders the frame at 1080 x 1920.");
+    row_slider_cvar(c, "Exposure", "phone_exposure", -3, 3, 0.1f, "%.1f EV", NULL);
+    row_slider_cvar(c, "Screen brightness", "phone_screen_brightness", 0.1f, 2, 0.05f, "%.2f", NULL);
+    row_slider_cvar(c, "Video bitrate", "phone_video_kbps", 500, 20000, 500, "%.0f kbit/s", NULL);
+    row_slider_cvar(c, "Video max length", "phone_record_max", 2, 3600, 1, "%.0f s", NULL);
+}
+
 bool settings_draw(GuiRect r) {
     GuiRect content = screens_modal_frame(r, "Settings", NULL);
     // Tabs (LB / RB, Ctrl+Tab cycle).
@@ -417,6 +447,7 @@ bool settings_draw(GuiRect r) {
     case TAB_CROSSHAIR: tab_crosshair(&c); break;
     case TAB_AUDIO: tab_audio(&c); break;
     case TAB_CHARACTER: tab_character(&c); break;
+    case TAB_PHONE: tab_phone(&c); break;
     }
     gd_alpha_pop();
     gw_scroll_end(sc, gc_used(&c) + gui_s(16));

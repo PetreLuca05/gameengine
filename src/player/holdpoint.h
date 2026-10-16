@@ -20,7 +20,9 @@
 struct cJSON;
 
 typedef enum HoldState {
-    HP_HIP, HP_ADS, HP_SPRINT, HP_CROUCH, HP_PRONE, HP_EMPTY, HP_INSPECT, HP_VEHICLE_ONEHAND, HP_STATE_COUNT
+    HP_HIP, HP_ADS, HP_SPRINT, HP_CROUCH, HP_PRONE, HP_EMPTY, HP_INSPECT, HP_VEHICLE_ONEHAND,
+    HP_PHONE_PORTRAIT, HP_PHONE_LANDSCAPE,   // phone camera mode (docs/PHONE.md): pos / rot place the screen socket
+    HP_STATE_COUNT
 } HoldState;
 
 const char *holdpoint_state_name(int s);
@@ -120,6 +122,12 @@ typedef struct HoldPointInput {
     // requested state flags (priority: empty > inspect > sprint > ads > prone > crouch > hip)
     bool ads, sprint, crouch, prone, empty, inspect;
     bool vehicle_onehand;             // driving: the gun held out one-handed (aimed along the sight line)
+    u8 phone_mode;                    // phone camera mode: 1 portrait, 2 landscape (HP_PHONE_*), 0 = off
+    // Driven rotation (a phone held by a paired real phone): the item's camera-space rotation
+    // becomes rot_cam (blended by rot_w), turned about the sight socket (the screen) so it stays
+    // in front of the eye. Applied after the procedural layer, before the wall collision.
+    float rot_w;
+    quat rot_cam;
     float dt;
     float aim_yaw, aim_pitch;         // view angles (radians): look lag from their rate
     vec3 vel_cam;                     // velocity in camera space (m/s)

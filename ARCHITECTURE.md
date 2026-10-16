@@ -52,6 +52,8 @@ src/
               chunks (streaming, terrain LOD, heightfields, WorldGen)
   net/        net_transport.h + transport_lan (ENet) + transport_steam (shim) + conditioner (fake
               lag/loss), protocol, bitbuf, replication (snapshots, deltas, interpolation), net.c (session)
+              http_ws/ (phone companion: HTTPS + WebSocket server, pairing tokens, TLS certificates)
+  gameplay/phone/  in-game phone + companion page glue (docs/PHONE.md)
   ui/         ui (Nuklear + HUD batcher), font (baked atlas, world text), console, hud, menus,
               recoil_debug, anim_debug (controller panel + animation test stand)
   audio/      miniaudio engine, sound groups, 3D one-shots, music loop

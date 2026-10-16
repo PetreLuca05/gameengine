@@ -461,7 +461,8 @@ static void test_reconcile(void) {
     int a, b, cc;
     inv_op_pack(&o, &a, &b, &cc);
     inv_op_unpack(a, b, cc, &o2);
-    CHECK(!memcmp(&o, &o2, sizeof(o)), "intent pack / unpack");
+    // Field by field: InvOp has padding (uninitialized in o2), a memcmp depends on stack contents.
+    CHECK(o.type == o2.type && o.a == o2.a && o.b == o2.b && o.c == o2.c && o.count == o2.count && o.seq == o2.seq, "intent pack / unpack");
 }
 
 // ------------------------------------------------------------------ icons

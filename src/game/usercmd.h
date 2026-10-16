@@ -20,6 +20,7 @@ enum CmdButtons {
     BTN_VEHICLE = 1 << 11,    // enter / exit a vehicle (edge)
     BTN_LIGHTS  = 1 << 12,    // vehicle headlights on (state, driver)
     BTN_HORN    = 1 << 13,    // vehicle horn (state, driver)
+    BTN_PHONE   = 1 << 14,    // the built-in phone is out (state, docs/PHONE.md)
 };
 
 typedef struct UserCmd {
@@ -31,6 +32,8 @@ typedef struct UserCmd {
     u8 slot;           // selected hotbar slot
     u8 seat_req;       // vehicles: requested seat + 1 (keys 1-4 while seated), 0 = none
     u32 use_target;    // EntityId the client is focusing
+    u32 phone_rot;     // phone held by a paired real phone: packed rotation relative to the view yaw (docs/PHONE.md)
+    u8 phone_flags;    // CHAR_PHONE_* (anim/character_rt.h): landscape / driven / recording
 } UserCmd;
 
 #endif

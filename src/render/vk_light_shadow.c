@@ -6,6 +6,7 @@
 // scissored to the tile, culled against the light sphere and the face frustum. The lit shaders pick
 // the cube face from the light-to-point direction (common.glsl point_light_shadow).
 #include "vk_internal.h"
+#include <SDL3/SDL.h>
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>

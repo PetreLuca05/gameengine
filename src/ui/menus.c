@@ -456,6 +456,7 @@ static void cmd_menu(int argc, const char **argv) {
     else if (!strcmp(page, "crosshair")) { do_action("settings"); settings_open(2); }
     else if (!strcmp(page, "audio")) { do_action("settings"); settings_open(3); }
     else if (!strcmp(page, "skin") || !strcmp(page, "character")) { do_action("settings"); settings_open(4); }
+    else if (!strcmp(page, "phone")) { do_action("settings"); settings_open(6); }
     else if (!strcmp(page, "multiplayer")) do_action("multiplayer");
     else if (!strcmp(page, "inventory")) do_action("inventory");
     else if (!strcmp(page, "quit")) do_action("quit");
@@ -586,7 +587,7 @@ void menus_init(void) {
     icons_init();
     gd_register_commands();
     inventory_register_commands();
-    cmd_register("menu", cmd_menu, "open a menu: pause | settings | controls | crosshair | audio | character | multiplayer | inventory | close");
+    cmd_register("menu", cmd_menu, "open a menu: pause | settings | controls | crosshair | audio | character | phone | multiplayer | inventory | close");
     cmd_register("inventory", cmd_inventory, "toggle the inventory screen");
     cmd_register("ui_screen", cmd_ui_screen, "ui_screen <name>: open a UI screen (no args: list + current stack)");
     cmd_register("ui_reload", cmd_ui_reload, "reload the UI theme, fonts, screen layouts and icons");

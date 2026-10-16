@@ -1,3 +1,4 @@
+#include "gameplay/phone/phone.h"
 #include "gameplay/attachments.h"
 #include "game.h"
 #include "game_internal.h"
@@ -440,16 +441,18 @@ static UserCmd build_cmd(void) {
     if (input_consume_press(ACT_CROUCH)) c.buttons |= BTN_CROUCH;
     if (input_consume_press(ACT_FIREMODE)) c.buttons |= BTN_FIREMODE;
     if (G->flashlight) c.buttons |= BTN_FLASHLIGHT;
+    if (G->phone_out) c.buttons |= BTN_PHONE;
     vehicles_fill_cmd(&c);
     if (G->noclip_request) { c.buttons |= BTN_NOCLIP; G->noclip_request = false; }
     if (G->menu_open || G->inventory_open || G->container_open || G->bench_open || console_is_open()) {
         c.move_x = c.move_y = 0;
-        c.buttons &= (u16)(BTN_CROUCH | BTN_NOCLIP | BTN_FLASHLIGHT);
+        c.buttons &= (u16)(BTN_CROUCH | BTN_NOCLIP | BTN_FLASHLIGHT | BTN_PHONE);
     }
     if (G->magdump_ticks > 0) magdump_cmd(&c);
     c.slot = G->hotbar_slot;
     c.use_target = G->focus;
     c.view_tick = net_client_view_tick256();
+    phone_fill_cmd(&c);
     return c;
 }
 
@@ -577,10 +580,14 @@ static void handle_hotbar(void) {
     Player *p = game_local_player();
     if (!p) return;
     vehicles_input();   // F / 1-4 / V / H while seated or looking at a vehicle
+    // The built-in phone (docs/PHONE.md): X takes it out over whatever slot is selected and puts it
+    // away again; choosing a slot puts it away too.
+    if (input_consume_press(ACT_PHONE)) G->phone_out = !G->phone_out;
     for (int i = 0; i < 9; i++)
-        if (input_consume_press((Action)(ACT_SLOT1 + i))) G->hotbar_slot = (u8)i;
-    if (input_consume_press(ACT_NEXT_ITEM)) G->hotbar_slot = (u8)((G->hotbar_slot + 1) % INV_HOTBAR);
-    if (input_consume_press(ACT_PREV_ITEM)) G->hotbar_slot = (u8)((G->hotbar_slot + INV_HOTBAR - 1) % INV_HOTBAR);
+        if (input_consume_press((Action)(ACT_SLOT1 + i))) { G->hotbar_slot = (u8)i; G->phone_out = false; }
+    // Phone camera mode: the wheel zooms instead of switching items.
+    if (input_consume_press(ACT_NEXT_ITEM) && !phone_wheel(-1)) { G->hotbar_slot = (u8)((G->hotbar_slot + 1) % INV_HOTBAR); G->phone_out = false; }
+    if (input_consume_press(ACT_PREV_ITEM) && !phone_wheel(1)) { G->hotbar_slot = (u8)((G->hotbar_slot + INV_HOTBAR - 1) % INV_HOTBAR); G->phone_out = false; }
     if (input_consume_press(ACT_DROP)) game_rpc(RPC_INV_DROP, G->hotbar_slot, 0, 0);
     if (input_consume_press(ACT_FLASHLIGHT)) {
         G->flashlight = !G->flashlight;
@@ -911,7 +918,11 @@ static void cmd_setang(int argc, const char **argv) {
 }
 
 static void cmd_slot(int argc, const char **argv) {
-    if (argc > 1) G->hotbar_slot = (u8)DG_CLAMP(atoi(argv[1]) - 1, 0, 8);
+    if (argc > 1) { G->hotbar_slot = (u8)DG_CLAMP(atoi(argv[1]) - 1, 0, 8); G->phone_out = false; }
+}
+
+static void cmd_phone_out(int argc, const char **argv) {
+    G->phone_out = argc > 1 ? atoi(argv[1]) != 0 : !G->phone_out;
 }
 
 static void cmd_inv(int argc, const char **argv) {
@@ -1242,6 +1253,7 @@ void game_init(void) {
     cmd_register("getpos", cmd_getpos, "print position");
     cmd_register("setang", cmd_setang, "set view angles: setang yaw pitch");
     cmd_register("slot", cmd_slot, "select hotbar slot 1-9");
+    cmd_register("phone_out", cmd_phone_out, "phone_out [0|1]: take the built-in phone out / put it away (key X)");
     cmd_register("status", cmd_status, "print game status");
     cmd_register("inv", cmd_inv, "print local inventory");
     cmd_register("lookat", cmd_lookat, "aim the view at a world point: lookat x y z");
@@ -1300,6 +1312,7 @@ void game_init(void) {
 void game_shutdown(void) {
     if (!G) return;
     net_stop();
+    phone_shutdown();
     destroy_world();
     hands_shutdown();
     fx_shutdown();
