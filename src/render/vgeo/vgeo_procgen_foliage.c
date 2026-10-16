@@ -208,8 +208,8 @@ u32 vgeo_foliage_materials(int kind, VgMaterial out[2]) {
             out[i].wpo_params[1] = 0.06f;   // branch bounce
             out[i].wpo_params[2] = 0.02f;   // leaf flutter
             out[i].wpo_params[3] = 14.0f;   // full wind (m/s)
-            out[i].fade_start = 150.0f;
-            out[i].fade_end = 220.0f;
+            out[i].fade_start = 100.0f;
+            out[i].fade_end = 150.0f;
             out[i].shadow_max_dist = 60.0f;
         }
         return 2;
@@ -223,8 +223,8 @@ u32 vgeo_foliage_materials(int kind, VgMaterial out[2]) {
     g->wpo_params[1] = 0.6f;    // blade height (m)
     g->wpo_params[2] = 0.6f;    // sway (Hz)
     g->wpo_params[3] = 12.0f;   // full wind (m/s)
-    g->fade_start = 70.0f;
-    g->fade_end = 110.0f;
+    g->fade_start = 40.0f;
+    g->fade_end = 65.0f;
     g->shadow_max_dist = 25.0f;
     return 1;
 }

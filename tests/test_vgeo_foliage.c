@@ -857,14 +857,14 @@ static void test_cells(void) {
 static void test_impostor_switch(void) {
     printf("impostor switch\n");
     // bushes on a line away from the camera, some exactly at the switch distance
-    g_impostor_px = 24.0f;
+    g_impostor_px = 48.0f;   // the switch at ~65 m, inside the bush fade start
     const Cam cam = { { 0, 1.0f, 2.0f }, { 0, 1.0f, -100.0f } };
     VgViewGpu v;
     view_for(&cam, VGV_NO_FRUSTUM | VGV_NO_OCCLUSION, 32.0f, &v);
     const VgMesh *bm = &g_scene.meshes[g_mesh[VG_FOLIAGE_BUSH]];
     VgInstance inst[400];
     u32 n = 0;
-    for (u32 i = 0; i < 280; i++) {   // 0 .. 140 m (inside the bush's fade start)
+    for (u32 i = 0; i < 190; i++) {   // 0 .. 95 m (inside the bush fade start)
         float p[3] = { 0.0f, 0.0f, -(float)i * 0.5f };
         vgeo_foliage_instance(&inst[n++], g_mesh[VG_FOLIAGE_BUSH], p, (float)i * 0.7f, 1.0f);
     }
@@ -908,6 +908,9 @@ static void test_impostor_switch(void) {
         s[3] += g_scene.meshes[in->mesh].max_wpo;
         bool cpu = vgeo_use_impostor(&v, &g_scene.meshes[in->mesh], s);
         both += imp[gi] && dag[gi];
+        if (!imp[gi] && !dag[gi] && neither < 4)
+            printf("  neither: instance %u at %.2f m, size %.3f px, cpu impostor %d, alpha %.3f\n", i, (double)inst_dist(in, &v), (double)vgeo_project_size(&v, s), cpu,
+                   (double)vgeo_foliage_alpha(&g_scene.meshes[in->mesh], in->flags_phase, inst_dist(in, &v), v.foliage[2]));
         neither += !imp[gi] && !dag[gi];
         if (fabsf(size / g_impostor_px - 1.0f) < 2e-6f) { border++; continue; }
         exact += fabsf(size / g_impostor_px - 1.0f) < 1e-4f;
@@ -1071,7 +1074,7 @@ static void test_hiz(void) {
     double rej = r.in ? 1.0 - (double)vis / (double)r.in : 0.0;
     printf("  %u instances in the frustum, %u visible after Hi-Z (%u cells, %u instances occluded): %.1f %% rejected\n", r.in, vis, m.ctr.n[VGN_CELLS_OCC],
            m.ctr.n[VGN_INST_OCC], rej * 100.0);
-    CHECK(r.in > 10000 && rej >= 0.90, "Hi-Z rejected %.1f %% of %u instances behind the wall", rej * 100.0, r.in);
+    CHECK(r.in > 3000 && rej >= 0.90, "Hi-Z rejected %.1f %% of %u instances behind the wall", rej * 100.0, r.in);
     free(mark);
     vgh_hiz_destroy(&g_h, &z);
     unload_all();

@@ -311,7 +311,7 @@ static int bench_foliage(VgHarness *h, u32 n, u32 frames, bool vertex_pulling) {
             memcpy(v.wind_prev, wind, 16);
             v.foliage[0] = v.foliage[1] = 2.0f + (float)f / 60.0f;
             v.foliage[2] = 1.0f;
-            v.foliage[3] = getenv("BENCH_IMP") ? (float)atof(getenv("BENCH_IMP")) : 12.0f;
+            v.foliage[3] = getenv("BENCH_IMP") ? (float)atof(getenv("BENCH_IMP")) : 16.0f;
             v.frame_index = f;
             VgHizRef prev = vgh_hiz_ref(&hz[cur ^ 1u]), now = vgh_hiz_ref(&hz[cur]);
             VkCommandPool pool;

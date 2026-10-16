@@ -357,7 +357,7 @@ void vkg_init(void) {
     G.skinned = cvar_reg_bool("r_vgeo_characters", true, CVAR_ARCHIVE, "vgeo: draw skinned characters (main view) through vgeo");
     G.pool_mb = cvar_reg_int("r_vgeo_pool_mb", 512, 16, 8192, CVAR_ARCHIVE, "vgeo: GPU page pool budget (MB of 128 KiB pages; applied on the next scene upload)");
     G.pages_per_frame = cvar_reg_int("r_vgeo_stream_pages_per_frame", 64, 1, 1024, CVAR_ARCHIVE, "vgeo: pages streamed in per frame");
-    G.impostor_px = cvar_reg_float("r_vgeo_impostor_px", 12.0f, 0.0f, 256.0f, CVAR_ARCHIVE,
+    G.impostor_px = cvar_reg_float("r_vgeo_impostor_px", 16.0f, 0.0f, 256.0f, CVAR_ARCHIVE,
                                    "vgeo: instances with an impostor atlas draw it below this projected size (pixels across, 0 = never)");
     cmd_register("foliage_push_test", cmd_foliage_push_test, "foliage_push_test [seconds=10]: a ring of displacement-buffer pushes circling the camera");
     cmd_register("foliage_stats", cmd_foliage_stats, "foliage: placement chunks, region allocator audit, last frame's foliage counters");
