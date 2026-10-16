@@ -219,6 +219,8 @@ void vkls_record(VkCommandBuffer cmd, FrameResources *f) {
             VkRect2D sc = { { (int)((t % ATLAS_TILES_X) * tile), (int)((t / ATLAS_TILES_X) * tile) }, { tile, tile } };
             vkCmdSetScissor(cmd, 0, 1, &sc);
             R->lshadow_draws += render_draw_shadow_casters(cmd, f, R->local_sphere[t], R->local_planes[t], 4u + t);
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_SHADOW]);
+            R->lshadow_draws += vkg_draw_local_shadow(cmd, R->local_sphere[t], R->local_planes[t], 4u + t, tile);
         }
     }
     vkCmdEndRendering(cmd);

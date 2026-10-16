@@ -857,3 +857,61 @@ static void cmd_vgeo_bench(int argc, const char **argv) {
     G.bench.frames = argc > 1 ? DG_MAX(atoi(argv[1]), 20) : 600;
     log_info("vgeo_bench: %d frames -> %s", G.bench.frames, path);
 }
+
+// ------------------------------------------------------------------ point / spot light shadows
+
+static bool sphere_planes(const vec4 planes[6], vec3 c, float r) {
+    for (int k = 0; k < 6; k++)
+        if (planes[k].x * c.x + planes[k].y * c.y + planes[k].z * c.z + planes[k].w < -r) return false;
+    return true;
+}
+
+// Local light shadow tile (vk_light_shadow.c): the vgeo instances of the placement cells touching the
+// light's sphere and the tile frustum, as their discrete LOD meshes (picked by distance to the light,
+// ~2 texels of error at the tile's resolution). Inside the atlas pass, PIPE_SHADOW bound by the caller.
+u32 vkg_draw_local_shadow(VkCommandBuffer cmd, vec4 sphere, const vec4 planes[6], u32 cascade, u32 tile_px) {
+    if (!G.ok || !G.r_vgeo->i || !G.shadows->i || !G.scene.instance_count || !G.fb) return 0;
+    vec3 lc = v3(sphere.x, sphere.y, sphere.z);
+    float px_scale = (float)tile_px * 0.5f;   // 90 degree face: px per metre at distance 1
+    u32 n = 0, bound = 0;
+    for (u32 ci = 0; ci < G.scene.cell_count; ci++) {
+        const VgCell *cl = &G.scene.cells[ci];
+        vec3 mn = v3(cl->min[0], cl->min[1], cl->min[2]), mx = v3(cl->max[0], cl->max[1], cl->max[2]);
+        vec3 q = v3_max(mn, v3_min(lc, mx));
+        if (v3_len2(v3_sub(q, lc)) > sphere.w * sphere.w) continue;
+        for (u32 i = cl->first; i < cl->first + cl->count; i++) {
+            const VgInstance *in = &G.scene.instances[i];
+            if (in->mesh >= G.fb_cap || !G.fb[in->mesh].lod_count) continue;
+            struct FallbackMesh *f = &G.fb[in->mesh];
+            const VgMesh *m = &G.scene.meshes[in->mesh];
+            float p[3], qr[4], s;
+            vgeo_instance_decode(in, p, qr, &s);
+            quat qq = { qr[0], qr[1], qr[2], qr[3] };
+            vec3 c = v3_add(v3(p[0], p[1], p[2]), quat_rotate(qq, v3(m->center[0] * s, m->center[1] * s, m->center[2] * s)));
+            float r = m->radius * s;
+            if (v3_len2(v3_sub(c, lc)) > (r + sphere.w) * (r + sphere.w) || !sphere_planes(planes, c, r)) continue;
+            float d = fmaxf(v3_dist(c, lc) - r, 0.05f);
+            u32 k = 0;
+            while (k + 1 < f->lod_count && f->lods[k + 1].error * s * px_scale / d <= 2.0f) k++;
+            MeshId mesh = fallback_lod_mesh(f, k);
+            if (!mesh || !R->meshes[mesh].used) continue;
+            GpuMesh *gm = &R->meshes[mesh];
+            if (mesh != bound) {
+                VkDeviceSize zero = 0;
+                vkCmdBindVertexBuffers(cmd, 0, 1, &gm->vb.buffer, &zero);
+                vkCmdBindIndexBuffer(cmd, gm->ib.buffer, 0, VK_INDEX_TYPE_UINT32);
+                bound = mesh;
+            }
+            PushLit pc;
+            memset(&pc, 0, sizeof(pc));
+            pc.model = mat4_trs(v3(p[0], p[1], p[2]), qq, v3s(s));
+            pc.color = v4(1, 1, 1, 1);
+            pc.flags[3] = cascade;
+            vkCmdPushConstants(cmd, R->layout_lit, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushLit), &pc);
+            vkCmdDrawIndexed(cmd, gm->index_count, 1, 0, 0, 0);
+            R->stats.draw_calls++;
+            n++;
+        }
+    }
+    return n;
+}

@@ -392,7 +392,9 @@ void vkg_draw_gbuffer(VkCommandBuffer cmd);   // prepass, before the legacy draw
 void vkg_draw_lit(VkCommandBuffer cmd);       // opaque pass
 void vkg_bench_camera(RenderCamera *cam);     // vgeo_bench: spline camera override (render_set_camera)
 void vkg_bench_frame(void);                   // vgeo_bench: per-frame timings
-void vkg_submit_fallback(void);               // r_era 2015 / 2010: discrete LODs through the legacy draws (after compute_matrices)
+void vkg_submit_fallback(void);
+// Point / spot light shadow tile: vgeo instances near the light as discrete LOD meshes (PIPE_SHADOW bound).
+u32 vkg_draw_local_shadow(VkCommandBuffer cmd, vec4 sphere, const vec4 planes[6], u32 cascade, u32 tile_px);               // r_era 2015 / 2010: discrete LODs through the legacy draws (after compute_matrices)
 
 // vk_vfx.c: GPU particles, decals, distortion
 bool vkx_init(void);
