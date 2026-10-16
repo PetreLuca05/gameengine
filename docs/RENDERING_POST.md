@@ -96,8 +96,17 @@ yet); the development display has no HDR so the path is untested on hardware.
 
 `src/game/game_post.c` builds the `PostSettings` (`src/render/post/post_settings.h`) every frame
 from the cvars, the level's post volumes, gameplay feedback and photo mode, and passes them to
-`render_post_settings`. The **Graphics** menu (Settings → Graphics → Post-processing) edits the
-cvars directly (saved with the config).
+`render_post_settings`. The **Graphics** menu (Settings → Graphics → Post-processing & Effects)
+edits the cvars directly (saved with the config).
+
+**Engine Fidelity** (docs/ENGINE_FIDELITY.md) is the base layer: every cvar below is bounded by the
+level (`r_fidelity`, Off .. Modern), presets included (a preset the level doesn't allow is greyed).
+At **Off** `PostSettings.direct_output` is set and the stack schedules no pass at all: the final pass
+shows the lit HDR through `final_direct.frag` (fixed metered exposure, plain tonemap, sRGB). New
+tiers used by the levels: `r_dof_quality` (gather taps 16 / 32 / 48), `r_bloom_quality 0` (tiny,
+4 mips), `r_vol_local_lights` (lamp scattering in the froxels; off = fog only). Passes and their
+resources exist only with a reader (depth history, colour pyramid, G-buffer velocity); every graph
+is validated (`fidelity_check`).
 
 | preset | AA | AO | contact | SSR | SSGI | volumetrics | motion blur | DoF | bloom | flare |
 |---|---|---|---|---|---|---|---|---|---|---|

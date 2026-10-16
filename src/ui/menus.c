@@ -297,7 +297,7 @@ static void draw_confirm(bool top) {
     }
     GuiText b = { gui_s(TH->t_body), GW_REGULAR, TH->text_dim, GUI_LEFT, 0, false, false, 0 };
     gd_text_wrap(&b, r.x + pad, r.y + pad + gui_s(40), r.w - pad * 2, text, true);
-    float bw = gui_s(150), bh = gui_s(TH->button_h + 4);
+    float bw = gui_s(M->confirm_kind == CONFIRM_FIDELITY ? 200 : 150), bh = gui_s(TH->button_h + 4);
     GuiRect yes = { r.x + r.w - pad - bw, r.y + r.h - pad - bh, bw, bh };
     GuiRect no = { yes.x - bw - gui_s(10), yes.y, bw, bh };
     const char *yes_l = "Confirm", *no_l = "Cancel";

@@ -59,8 +59,7 @@
   },
   "eras": {
     "2010": {
-      "shadow_cascades": {"avail": "on", "default": 1, "max": 1, "note": "2010-era geometry (discrete LODs) is cheap: the one cascade reaches further"},
-      "shadow_distance": {"avail": "on", "default": 0.5, "max": 0.6}
+      "shadow_distance": {"avail": "on", "default": 0.6, "max": 0.6, "note": "2010-era geometry (discrete LODs) is cheap: the one cascade reaches further"}
     }
   }
 }

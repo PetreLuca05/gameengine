@@ -5,6 +5,15 @@
 
 #define TH (gui_theme())
 
+// Disabled widgets (Engine Fidelity bounds, docs/UI.md "Widgets"): drawn faint, no focus / input.
+static bool g_disabled;
+void gw_disabled(bool on) { g_disabled = on; }
+static GuiInteract interact(GuiId id, GuiRect r, u32 flags) {
+    if (g_disabled) { GuiInteract none; memset(&none, 0, sizeof(none)); return none; }
+    return gui_interact(id, r, flags);
+}
+#define DISABLED_ALPHA 0.38f
+
 GuiCursor gc_make(GuiRect area, float gap) {
     GuiCursor c = { area, area.y, gap };
     return c;
@@ -186,7 +195,7 @@ GuiRect gw_setting_row(GuiCursor *c, const char *label, const char *hint, GuiId 
     if (gui_focus_rect(&fr) && gui_nav_mode() && gui_rect_contains(r, fr.x + fr.w * 0.5f, fr.y + fr.h * 0.5f)) focus_here = true;
     float h = gui_tween(id ^ 0x3C3Du, in.hovered || focus_here ? 1.0f : 0.0f, TH->hover_t);
     if (h > 0.01f) gd_round(gui_rect(r.x - gui_s(10), r.y, r.w + gui_s(20), r.h), gui_s(TH->radius), gui_rgba_mul(TH->hover, h));
-    gw_label(a, label, gui_s(TH->t_body - 1), GW_REGULAR, gui_rgba_lerp(TH->text_dim, TH->text, h), GUI_LEFT);
+    gw_label(a, label, gui_s(TH->t_body - 1), GW_REGULAR, g_disabled ? TH->text_faint : gui_rgba_lerp(TH->text_dim, TH->text, h), GUI_LEFT);
     if (hint && in.hovered) gui_tooltip(id ^ 0x3C3Cu, hint);
     return b;
 }
@@ -195,24 +204,29 @@ bool gw_slider(GuiId id, GuiRect r, float *v, float lo, float hi, float step, co
     float old = *v;
     float vw = gui_s(64);
     GuiRect track = { r.x, r.y, r.w - vw - gui_s(12), r.h };
-    GuiInteract in = gui_interact(id, track, GUI_FOCUSABLE);
+    GuiInteract in = interact(id, track, GUI_FOCUSABLE);
+    gd_alpha_push(g_disabled ? DISABLED_ALPHA : 1.0f);
     if (in.pressed) gui_set_active(id);
-    if (gui_active() == id) {
+    bool user = false;   // only a drag / key press snaps and changes the value (drawing never does)
+    if (!g_disabled && gui_active() == id) {
         if (!gui_mouse_down(0)) gui_set_active(0);
         else {
             float f = saturate((gui_mouse().x - track.x) / fmaxf(1.0f, track.w));
             *v = lo + (hi - lo) * f;
+            user = true;
         }
     }
     if (in.focused) {
         float st = step > 0 ? step : (hi - lo) / 50.0f;
         if (gui_shift()) st *= 5;
-        if (gui_nav(NAV_LEFT)) { *v -= st; gui_nav_consume(NAV_LEFT); }
-        if (gui_nav(NAV_RIGHT)) { *v += st; gui_nav_consume(NAV_RIGHT); }
+        if (gui_nav(NAV_LEFT)) { *v -= st; gui_nav_consume(NAV_LEFT); user = true; }
+        if (gui_nav(NAV_RIGHT)) { *v += st; gui_nav_consume(NAV_RIGHT); user = true; }
     }
-    if (step > 0) *v = lo + roundf((*v - lo) / step) * step;
-    *v = clampf(*v, lo, hi);
-    float f = (hi > lo) ? (*v - lo) / (hi - lo) : 0;
+    if (user) {
+        if (step > 0) *v = lo + roundf((*v - lo) / step) * step;
+        *v = clampf(*v, lo, hi);
+    }
+    float f = (hi > lo) ? saturate((*v - lo) / (hi - lo)) : 0;
     float h = gui_tween(id ^ 0x51u, in.hot || gui_active() == id ? 1.0f : 0.0f, TH->hover_t);
     float th = gui_s(3), cy = track.y + track.h * 0.5f;
     gd_round(gui_rect(track.x, cy - th * 0.5f, track.w, th), th * 0.5f, UI_RGBA(255, 255, 255, 34));
@@ -224,13 +238,15 @@ bool gw_slider(GuiId id, GuiRect r, float *v, float lo, float hi, float step, co
     char buf[32];
     snprintf(buf, sizeof(buf), fmt ? fmt : "%.2f", *v);
     gw_label(gui_rect(r.x + r.w - vw, r.y, vw, r.h), buf, gui_s(TH->t_body - 1), GW_MEDIUM, TH->text, GUI_RIGHT);
-    return *v != old;
+    gd_alpha_pop();
+    return user && *v != old;
 }
 
 bool gw_toggle(GuiId id, GuiRect r, bool *v) {
     float w = gui_s(38), h = gui_s(20);
     GuiRect sw = { r.x, r.y + (r.h - h) * 0.5f, w, h };
-    GuiInteract in = gui_interact(id, gui_rect(r.x, r.y, fmaxf(w, r.w * 0.5f), r.h), GUI_FOCUSABLE);
+    GuiInteract in = interact(id, gui_rect(r.x, r.y, fmaxf(w, r.w * 0.5f), r.h), GUI_FOCUSABLE);
+    gd_alpha_push(g_disabled ? DISABLED_ALPHA : 1.0f);
     bool changed = false;
     if (in.clicked) { *v = !*v; changed = true; gui_sound(TH->snd_click); }
     if (in.focused && (gui_nav(NAV_LEFT) || gui_nav(NAV_RIGHT))) {
@@ -246,6 +262,7 @@ bool gw_toggle(GuiId id, GuiRect r, bool *v) {
     gd_circle(sw.x + h * 0.5f + (w - h) * k, sw.y + h * 0.5f, kr, gui_rgba_lerp(UI_RGBA(200, 200, 196, 255), UI_RGBA(255, 255, 255, 255), k));
     gw_label(gui_rect(sw.x + w + gui_s(12), r.y, gui_s(60), r.h), *v ? "On" : "Off", gui_s(TH->t_body - 1), GW_MEDIUM, *v ? TH->text : TH->text_faint, GUI_LEFT);
     if (in.focused) gw_focus_ring(sw, h * 0.5f, 1.0f);
+    gd_alpha_pop();
     return changed;
 }
 
@@ -253,12 +270,26 @@ bool gw_toggle(GuiId id, GuiRect r, bool *v) {
 static GuiId g_open_dropdown;
 static float g_dropdown_scroll;
 
-bool gw_dropdown(GuiId id, GuiRect r, const char *const *items, int n, int *sel) {
+bool gw_dropdown(GuiId id, GuiRect r, const char *const *items, int n, int *sel) { return gw_dropdown_ex(id, r, items, n, sel, NULL, NULL); }
+
+// enabled[i] false: the item is greyed (not selectable, skipped by left / right), notes[i] is shown
+// right-aligned in the list ("requires High").
+static int step_enabled(int from, int dir, int n, const bool *enabled) {
+    for (int k = 1; k <= n; k++) {
+        int i = ((from + dir * k) % n + n) % n;
+        if (!enabled || enabled[i]) return i;
+    }
+    return from;
+}
+
+bool gw_dropdown_ex(GuiId id, GuiRect r, const char *const *items, int n, int *sel, const bool *enabled, const char *const *notes) {
     if (n <= 0) return false;
     int old = *sel;
     *sel = DG_CLAMP(*sel, 0, n - 1);
+    if (g_disabled && g_open_dropdown == id) g_open_dropdown = 0;
     bool open = g_open_dropdown == id;
-    GuiInteract in = gui_interact(id, r, GUI_FOCUSABLE);
+    GuiInteract in = interact(id, r, GUI_FOCUSABLE);
+    gd_alpha_push(g_disabled ? DISABLED_ALPHA : 1.0f);
     if (in.clicked) {
         g_open_dropdown = open ? 0 : id;
         open = !open;
@@ -266,8 +297,8 @@ bool gw_dropdown(GuiId id, GuiRect r, const char *const *items, int n, int *sel)
         gui_sound(TH->snd_click);
     }
     if (in.focused && !open) {
-        if (gui_nav(NAV_LEFT)) { *sel = (*sel + n - 1) % n; gui_nav_consume(NAV_LEFT); gui_sound(TH->snd_click); }
-        if (gui_nav(NAV_RIGHT)) { *sel = (*sel + 1) % n; gui_nav_consume(NAV_RIGHT); gui_sound(TH->snd_click); }
+        if (gui_nav(NAV_LEFT)) { *sel = step_enabled(*sel, -1, n, enabled); gui_nav_consume(NAV_LEFT); gui_sound(TH->snd_click); }
+        if (gui_nav(NAV_RIGHT)) { *sel = step_enabled(*sel, 1, n, enabled); gui_nav_consume(NAV_RIGHT); gui_sound(TH->snd_click); }
     }
     float h = gui_tween(id ^ 0x51u, in.hot || open ? 1.0f : 0.0f, TH->hover_t);
     float rad = gui_s(TH->radius);
@@ -305,17 +336,20 @@ bool gw_dropdown(GuiId id, GuiRect r, const char *const *items, int n, int *sel)
             GuiRect ir = { lr.x + gui_s(4), lr.y + gui_s(4) + (float)i * ih - g_dropdown_scroll, lr.w - gui_s(8), ih };
             if (ir.y + ir.h < lr.y || ir.y > lr.y + lr.h) continue;
             GuiId iid = gui_idi("dd_item", (int)id + i);
-            GuiInteract ii = gui_interact(iid, ir, GUI_FOCUSABLE | (i == *sel ? GUI_DEFAULT_FOCUS : 0));
+            bool on = !enabled || enabled[i];
+            GuiInteract ii = gui_interact(iid, ir, on ? (GUI_FOCUSABLE | (i == *sel ? GUI_DEFAULT_FOCUS : 0)) : 0);
             if (ii.focused) {
                 float top = ir.y - (lr.y + gui_s(4)), bot = ir.y + ir.h - (lr.y + lr.h - gui_s(4));
                 if (top < 0) g_dropdown_scroll = clampf(g_dropdown_scroll + top, 0, max_scroll);
                 if (bot > 0) g_dropdown_scroll = clampf(g_dropdown_scroll + bot, 0, max_scroll);
             }
-            if (ii.hot) gd_round(ir, rad, TH->hover);
+            if (ii.hot && on) gd_round(ir, rad, TH->hover);
             if (i == *sel) gd_rect(gui_rect(ir.x, ir.y + ir.h * 0.25f, gui_s(2), ir.h * 0.5f), TH->accent);
             gw_label(gui_rect(ir.x + gui_s(10), ir.y, ir.w - gui_s(14), ir.h), items[i], gui_s(TH->t_body - 1), i == *sel ? GW_SEMIBOLD : GW_REGULAR,
-                     i == *sel ? TH->text : TH->text_dim, GUI_LEFT);
-            if (ii.clicked) { *sel = i; g_open_dropdown = 0; gui_sound(TH->snd_click); }
+                     !on ? TH->text_faint : (i == *sel ? TH->text : TH->text_dim), GUI_LEFT);
+            if (notes && notes[i] && notes[i][0])
+                gw_label(gui_rect(ir.x + gui_s(10), ir.y, ir.w - gui_s(20), ir.h), notes[i], gui_s(TH->t_small), GW_REGULAR, TH->text_faint, GUI_RIGHT);
+            if (ii.clicked && on) { *sel = i; g_open_dropdown = 0; gui_sound(TH->snd_click); }
         }
         gd_clip_pop();
         gd_clip_pop();
@@ -327,6 +361,7 @@ bool gw_dropdown(GuiId id, GuiRect r, const char *const *items, int n, int *sel)
             g_open_dropdown = 0;
         if (!g_open_dropdown) gui_set_focus(id);
     }
+    gd_alpha_pop();
     return *sel != old;
 }
 

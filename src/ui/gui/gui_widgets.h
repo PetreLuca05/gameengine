@@ -35,6 +35,10 @@ int gw_tabs(GuiId id, GuiRect r, const char *const *labels, int n, int cur);
 bool gw_slider(GuiId id, GuiRect r, float *v, float lo, float hi, float step, const char *fmt);
 bool gw_toggle(GuiId id, GuiRect r, bool *v);
 bool gw_dropdown(GuiId id, GuiRect r, const char *const *items, int n, int *sel);
+// Per-item availability (NULL = all) and right-aligned notes (NULL = none): greyed items can't be chosen.
+bool gw_dropdown_ex(GuiId id, GuiRect r, const char *const *items, int n, int *sel, const bool *enabled, const char *const *notes);
+// Following sliders / toggles / dropdowns / setting-row labels are drawn faint and take no input.
+void gw_disabled(bool on);
 bool gw_keybind(GuiId id, GuiRect r, const char *text, bool capturing);
 bool gw_textfield(GuiId id, GuiRect r, char *buf, int size, const char *placeholder);   // true = Enter
 // A settings row: label left, the control's rect returned (right part). hint: tooltip.

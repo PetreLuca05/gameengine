@@ -517,7 +517,7 @@ void game_fidelity_draw(void) {
     if (!F.overlay->i) return;
     int l = fid_level();
     float budget = fid_level_budget_ms(l), gpu = render_gpu_frame_ms(), cpu = (float)g_engine.frame_dt * 1000.0f;
-    float x = 16 * s, y = 70 * s, w = 300 * s, gh = 60 * s;
+    float x = 16 * s, y = 70 * s, w = 340 * s, gh = 60 * s;
     ui_rect(x - 8 * s, y - 6 * s, w + 16 * s, gh + 58 * s, UI_RGBA(0, 0, 0, 170));
     ui_textf(x, y, FONT_SMALL, UI_RGBA(255, 220, 140, 255), UI_ALIGN_LEFT, "%s  %.0f fps  CPU %.2f ms  GPU %.2f ms", fid_level_name(l), g_engine.fps_smoothed, cpu, gpu);
     u32 rw = 0, rh = 0;
