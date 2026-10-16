@@ -259,19 +259,51 @@ static void steer_frame(const VehicleDef *d, vec3 p, quat r, float steer, vec3 *
     *pivot = to_world(p, r, d->steer_pivot);
 }
 
+// Rotation whose columns are the orthonormal basis x, y, z.
+static quat quat_basis(vec3 x, vec3 y, vec3 z) {
+    float tr = x.x + y.y + z.z;
+    quat q;
+    if (tr > 0) {
+        float s = sqrtf(tr + 1.0f) * 2.0f;
+        q.w = 0.25f * s; q.x = (y.z - z.y) / s; q.y = (z.x - x.z) / s; q.z = (x.y - y.x) / s;
+    } else if (x.x > y.y && x.x > z.z) {
+        float s = sqrtf(1.0f + x.x - y.y - z.z) * 2.0f;
+        q.w = (y.z - z.y) / s; q.x = 0.25f * s; q.y = (y.x + x.y) / s; q.z = (z.x + x.z) / s;
+    } else if (y.y > z.z) {
+        float s = sqrtf(1.0f + y.y - x.x - z.z) * 2.0f;
+        q.w = (z.x - x.z) / s; q.x = (y.x + x.y) / s; q.y = 0.25f * s; q.z = (z.y + y.z) / s;
+    } else {
+        float s = sqrtf(1.0f + z.z - x.x - y.y) * 2.0f;
+        q.w = (x.y - y.x) / s; q.x = (z.x + x.z) / s; q.y = (z.y + y.z) / s; q.z = 0.25f * s;
+    }
+    return quat_norm(q);
+}
+
 static void grips_world(World *w, const Vehicle *v, vec3 out[2], quat rot[2]) {
     const VehicleDef *d = vdef(v);
     vec3 p, pv, x, y, z;
     quat r;
     pose_render(w, v, &p, &r);
     steer_frame(d, p, r, v->steer_vis, &pv, &x, &y, &z);
+    // Hand frame convention (as the ledge grabs): identity = palm down (-Y), fingers forward (-Z).
     for (int h = 0; h < 2; h++) {
         float s = h ? 1.0f : -1.0f;
-        out[h] = v3_madd(pv, x, s * d->steer_radius);
-        // Palm on the rim / grip: fingers forward-down around it, the hand turning with the wheel.
-        quat base = quat_mul(r, quat_axis_angle(v3(1, 0, 0), -0.55f));
-        float a = -v->steer_vis * front_steer_deg(d) * DG_DEG2RAD * d->steer_ratio;
-        rot[h] = quat_mul(quat_axis_angle(y, a), base);
+        vec3 u = v3_scale(x, s);   // pivot -> grip (turns with the wheel)
+        out[h] = v3_madd(pv, u, d->steer_radius);
+        vec3 ly, lz;
+        if (d->kind == VK_MOTO) {
+            // Handlebar: palms over the grips, fingers wrapping forward round the bar.
+            ly = y;                          // back of the hand up the fork axis
+            lz = v3_norm(v3_cross(x, ly));   // fingers along -lz: forward
+        } else {
+            // Steering wheel at 9 and 3: palms towards the hub, fingers wrapping forward round the
+            // rim (away from the driver), thumbs along the rim.
+            ly = u;                          // -ly = palm normal = towards the centre
+            lz = y;                          // the wheel axis points at the driver: fingers forward
+        }
+        vec3 lx = v3_norm(v3_cross(ly, lz));
+        lz = v3_cross(lx, ly);
+        rot[h] = quat_basis(lx, ly, lz);
     }
 }
 

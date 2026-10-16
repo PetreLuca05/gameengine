@@ -193,6 +193,8 @@ typedef struct ProcInput {
     // Seated (vehicles, docs/VEHICLES.md): the pelvis on the seat's hip point, thighs flexed, feet
     // IK'd to the pedals / pegs (world space). Foot IK and lean are off while seated.
     bool seated;
+    bool hand_anchor_rot_valid;   // hand_anchor_rot: the palms' world orientation (else palm down)
+    quat hand_anchor_rot[2];
     bool vehicle_onehand;      // hold point HP_VEHICLE_ONEHAND (driver aiming one-handed)
     u8 hand_anchor_skip;       // bit h: hand h is not anchored (one-handed driving: the gun hand)
     vec3 seat_hip;

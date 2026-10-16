@@ -74,11 +74,11 @@ void vehicle_def_defaults(VehicleDef *d, VehicleKind kind) {
         d->fuel_full_lph = 60.0f;
         d->hp = 1000.0f;
         d->seat_count = 4;
-        seat(&d->seats[0], v3(-0.36f, 0.72f, 0.05f), v3(-1.45f, 0.05f, 0.05f), true, false);
-        seat(&d->seats[1], v3(0.36f, 0.72f, 0.05f), v3(1.45f, 0.05f, 0.05f), false, true);
-        seat(&d->seats[2], v3(-0.38f, 0.74f, 0.95f), v3(-1.45f, 0.05f, 0.95f), false, true);
-        seat(&d->seats[3], v3(0.38f, 0.74f, 0.95f), v3(1.45f, 0.05f, 0.95f), false, true);
-        d->steer_pivot = v3(-0.36f, 1.04f, -0.40f);
+        seat(&d->seats[0], v3(-0.36f, 0.62f, 0.05f), v3(-1.45f, 0.05f, 0.05f), true, false);
+        seat(&d->seats[1], v3(0.36f, 0.62f, 0.05f), v3(1.45f, 0.05f, 0.05f), false, true);
+        seat(&d->seats[2], v3(-0.38f, 0.64f, 0.95f), v3(-1.45f, 0.05f, 0.95f), false, true);
+        seat(&d->seats[3], v3(0.38f, 0.64f, 0.95f), v3(1.45f, 0.05f, 0.95f), false, true);
+        d->steer_pivot = v3(-0.36f, 0.96f, -0.36f);
         d->steer_axis = v3_norm(v3(0, 0.45f, 0.89f));
         d->steer_ratio = 3.0f;
         d->steer_radius = 0.19f;

@@ -1331,6 +1331,9 @@ static void post_one(World *w, CharacterInst *c, int i, float dt, vec3 cam_pos, 
             if (g_vehicle_pose.seat_hands && g_vehicle_pose.seat_hands(w, c->slot, hp, hr, use)) {
                 pi.hand_anchor[0] = hp[0];
                 pi.hand_anchor[1] = hp[1];
+                pi.hand_anchor_rot[0] = hr[0];
+                pi.hand_anchor_rot[1] = hr[1];
+                pi.hand_anchor_rot_valid = true;
                 pi.hand_anchor_w = 1.0f;
                 pi.hand_anchor_skip = (u8)((use[0] ? 0 : 1) | (use[1] ? 0 : 2));
                 pi.vehicle_onehand = !use[1] && item != NULL;

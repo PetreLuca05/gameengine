@@ -234,7 +234,7 @@ def car_body():
     # Interior: floor, firewall / dash, seats.
     m.slab("plastic", (-W + 0.05, 0.42, -0.9), (W - 0.05, 0.42, -0.9), (W - 0.05, 0.42, 1.35), (-W + 0.05, 0.42, 1.35), 0.03)
     m.box("plastic", (0, 0.86, -0.78), (cw - 0.04, 0.12, 0.17))                 # dashboard
-    m.box("plastic", (-0.36, 0.95, -0.66), (0.14, 0.04, 0.06))                  # instrument binnacle
+    m.box("plastic", (-0.36, 0.9, -0.66), (0.14, 0.04, 0.06))                   # instrument binnacle
     m.box("plastic", (0, 0.62, -0.25), (0.1, 0.12, 0.45))                       # centre console
     for x, z in ((-0.36, 0.05), (0.36, 0.05), (-0.38, 0.95), (0.38, 0.95)):
         m.box("fabric", (x, 0.58, z - 0.02), (0.24, 0.07, 0.25))                # cushion

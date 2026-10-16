@@ -273,7 +273,8 @@ void proc_hand_anchors(ProcState *st, const ProcInput *in, Pose *pose, Xform *mo
         // Palm down on the ledge: back of the hand up, fingers forward.
         vec3 fwd = v3(0, 0, -1), up = v3(0, 1, 0), x = v3_cross(up, v3_neg(fwd));
         (void)x;
-        Xform palm = xf_make(target, quat_identity());
+        quat pr = in->hand_anchor_rot_valid ? quat_mul(inv_root.r, in->hand_anchor_rot[h]) : quat_identity();
+        Xform palm = xf_make(target, pr);
         Xform hand = proc_hand_for_socket(palm, in->hands->palm[h]);
         vec3 pole = v3(h ? 1.0f : -1.0f, -0.6f, 0.4f);
         anim_ik_two_bone_pose(s, pose, model, a, b, c, hand.t, &hand.r, pole, w);
