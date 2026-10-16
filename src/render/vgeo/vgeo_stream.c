@@ -493,7 +493,11 @@ void vg_stream_update(VgStream *st, VkCommandBuffer cmd, u32 frame) {
         vkCmdResetQueryPool(cmd, st->qp, frame * 2, 2);
         vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, st->qp, frame * 2);
     }
-    barrier(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT,
+    // Previous frames' stamps / requests / counters writes -> the readback copies; the page-table
+    // scatter also waits for every earlier reader of the table. The pool copies need nothing: a slot
+    // is only rewritten once the last frame that saw its old page has passed its fence.
+    VkPipelineStageFlags2 src = x.npatch ? VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT : VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+    barrier(cmd, src, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT,
             VK_PIPELINE_STAGE_2_TRANSFER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
             VK_ACCESS_2_TRANSFER_READ_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT | VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
     if (frame < c->frames) {

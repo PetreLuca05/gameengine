@@ -208,7 +208,9 @@ int main(int argc, char **argv) {
             vgeo_scene_commit(&s);
         }
         const u32 N = 600;
-        u32 max_load = 0, max_evict = 0, gpu_n = 0;
+        u32 max_load = 0, max_evict = 0, gpu_n = 0, quick = 0;
+        u32 *was = (u32 *)malloc(sizeof(u32) * s.page_count), *evicted_at = (u32 *)calloc(s.page_count, sizeof(u32));
+        memcpy(was, s.page_table, sizeof(u32) * s.page_count);
         double cpu_sum = 0, cpu_max = 0, gpu_sum = 0, gpu_max = 0, cull_sum = 0;
         for (u32 f = 0; f < N; f++) {
             float t = (float)f / (float)(N - 1);
@@ -226,6 +228,11 @@ int main(int argc, char **argv) {
             vg_cull_record(&c, cmd, slot, 0, &v, NULL, NULL);
             vgc_submit_wait(&h.ctx, pool, cmd);
             const VgStreamStats *ss = vg_stream_stats(&st);
+            for (u32 p = 0; p < s.page_count; p++) {   // reloads soon after an eviction (thrash)
+                if (was[p] != ~0u && s.page_table[p] == ~0u) evicted_at[p] = f + 1;
+                if (was[p] == ~0u && s.page_table[p] != ~0u && evicted_at[p] && f + 1 - evicted_at[p] < 30) quick++;
+                was[p] = s.page_table[p];
+            }
             max_load = DG_MAX(max_load, ss->loaded);
             max_evict = DG_MAX(max_evict, ss->evicted);
             cpu_sum += ss->cpu_ms;
@@ -241,8 +248,10 @@ int main(int argc, char **argv) {
         const VgStreamStats *ss = vg_stream_stats(&st);
         printf("\nstreaming flythrough (%u frames, pool %u slots / %.0f MB of %u pages, %u root, %u per frame):\n", N, s.pool_slots,
                (double)s.pool_slots * VGEO_PAGE_SIZE / (1024.0 * 1024.0), s.page_count, s.root_count, cfg.pages_per_frame);
-        printf("  loaded %llu (max %u / frame), evicted %llu (max %u / frame), resident at the end %u\n", (unsigned long long)ss->loaded_total, max_load,
-               (unsigned long long)ss->evicted_total, max_evict, ss->resident);
+        printf("  loaded %llu (max %u / frame), evicted %llu (max %u / frame), %u reloaded within 30 frames of their eviction, resident at the end %u\n",
+               (unsigned long long)ss->loaded_total, max_load, (unsigned long long)ss->evicted_total, max_evict, quick, ss->resident);
+        free(was);
+        free(evicted_at);
         printf("  stream cpu %.3f ms mean / %.3f max, gpu %.3f ms mean / %.3f max (budget 0.1 ms), cull %.3f ms mean\n", cpu_sum / N, cpu_max,
                gpu_n ? gpu_sum / gpu_n : 0.0, gpu_max, cull_sum / N);
         vg_stream_shutdown(&st);
