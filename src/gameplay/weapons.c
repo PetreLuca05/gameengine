@@ -30,9 +30,11 @@ void weapons_register_cvars(void) {
     WC.visual_scale = cvar_reg_float("wpn_visual_scale", 1.0f, 0.0f, 3.0f, CVAR_ARCHIVE, "camera + viewmodel kick multiplier (cosmetic)");
     WC.sway_scale = cvar_reg_float("wpn_sway_scale", 1.0f, 0.0f, 3.0f, CVAR_SERVER, "weapon sway: aim sway (moves the view + bullets), the item's look lag / idle sway / breathing / sprint bob");
     WC.kick_scale = cvar_reg_float("wpn_kick_scale", 1.0f, 0.0f, 3.0f, CVAR_ARCHIVE, "visual recoil kick of the held item on its hold point (aim recoil is separate)");
-    WC.ads_sway = cvar_reg_float("wpn_ads_sway", 4.0f, 0.0f, 10.0f, CVAR_SERVER, "aim sway of the sight while aimed (x the weapon's idle sway: a small visible drift on every sight; scope_sway weapons use their own value x 0.5; bullets follow the sight)");
-    WC.ads_bob = cvar_reg_float("wpn_ads_bob", 1.0f, 0.0f, 3.0f, CVAR_SERVER, "sight bob while walking aimed (bullets follow the sight)");
-    WC.bob_scale = cvar_reg_float("wpn_bob_scale", 0.0f, 0.0f, 3.0f, CVAR_ARCHIVE, "item bob while walking (0 = the item stays still; sprinting always bobs)");
+    WC.ads_sway = cvar_reg_float("wpn_ads_sway", 0.0f, 0.0f, 10.0f, CVAR_SERVER, "aim sway that moves the reticle off the screen centre while aimed (x the weapon's idle sway; 0 = the reticle stays centred, the gun sways about it)");
+    WC.sway_ads_scale = cvar_reg_float("wpn_sway_ads_scale", 1.0f, 0.0f, 3.0f, CVAR_SERVER, "ADS weapon sway: x the weapons' ADS sway multipliers (quick tuning)");
+    WC.sway_cosmetic = cvar_reg_float("cl_weapon_sway", 1.0f, 0.0f, 1.0f, CVAR_ARCHIVE, "weapon sway (cosmetic: breathing, look lag, bob, landing of the held weapon)");
+    WC.ads_bob = cvar_reg_float("wpn_ads_bob", 0.0f, 0.0f, 3.0f, CVAR_SERVER, "aim bob that moves the reticle while walking aimed (bullets follow it; 0 = the gun bobs about the reticle instead)");
+    WC.bob_scale = cvar_reg_float("wpn_bob_scale", 1.0f, 0.0f, 3.0f, CVAR_ARCHIVE, "item bob while walking / running (x the weapon sway bob; sprinting always bobs)");
     WC.recoil_debug = cvar_reg_int("wpn_recoil_debug", 0, 0, 2, 0, "recoil overlay: 1 = panel + cone, 2 = also log every shot");
     // Replicated so clients' predicted magazines agree with the host.
     WC.infinite_ammo = cvar_reg_bool("sv_infinite_ammo", false, CVAR_SERVER, "shots don't use ammo (host, replicated)");
@@ -110,11 +112,8 @@ vec2 weapon_sway_deg(const WeaponDef *d, const WeaponState *ws, float t) {
 
 vec2 weapon_aim_offset_deg(const WeaponDef *d, const WeaponState *ws, const PlayerMove *m, float t) {
     if (!d || d->kind == WPN_MELEE) return v2(0, 0);
-    // Irons, red dots and plain optics: the weapon's idle sway x wpn_ads_sway (rifle 0.05 x 4 =
-    // 0.2 deg, a few pixels at the sight FOV). Weapons with a tuned scope_sway (DMR, sniper, held
-    // breath steadies it) keep their own amplitude.
-    float k = d->recoil.scope_sway > 0 ? 0.5f : cv_f(WC.ads_sway, 1.0f);
-    vec2 o = v2_scale(weapon_sway_deg(d, ws, t), k);
+    // Off by default: the weapon sways about the reticle (hold point), the reticle stays centred.
+    vec2 o = v2_scale(weapon_sway_deg(d, ws, t), cv_f(WC.ads_sway, 0.0f));
     if (m) {
         // Walk bob of the sight: a figure-eight at the step rate, growing with speed.
         float speed = sqrtf(m->vel.x * m->vel.x + m->vel.z * m->vel.z);

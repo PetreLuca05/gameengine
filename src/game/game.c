@@ -1188,7 +1188,14 @@ void game_config_loaded(void) {
         Cvar *ps = cvar_find("r_scope_pip_scale");
         if (ps && ps->f < 0.99f) { cvar_reset(ps); log_info("config: scope picture resolution raised to %.2f", ps->f); }
     }
-    cvar_set_int(ver, 3);
+    if (ver->i < 4) {
+        // 4: weapon sway on (docs/RECOIL.md "Weapon sway"): walk bob and look lag back to their
+        // new defaults; the reticle-moving aim sway / bob off (the gun sways about the reticle).
+        const char *names[] = { "wpn_bob_scale", "wpn_look_lag" };
+        for (int i = 0; i < 2; i++) { Cvar *c = cvar_find(names[i]); if (c) cvar_reset(c); }
+        log_info("config: weapon sway enabled (bob, look lag reset to their defaults)");
+    }
+    cvar_set_int(ver, 4);
 }
 
 void game_init(void) {

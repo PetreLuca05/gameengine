@@ -30,6 +30,9 @@ void recoil_params_default(RecoilParams *p) {
     p->ads_aim_mult = 1.0f; p->ads_forward_push = 1.0f; p->ads_roll = 1.0f; p->ads_max_misalign_deg = 1.5f;
     p->anchor_hip = RA_PIVOT; p->anchor_ads = RA_SIGHT;
     p->sway_anchor_hip = RA_PIVOT; p->sway_anchor_ads = RA_SIGHT;
+    for (int i = 0; i < 4; i++) p->sway_hip[i] = 1.0f;
+    p->sway_ads[0] = 0.35f; p->sway_ads[1] = 0.25f; p->sway_ads[2] = 0.15f; p->sway_ads[3] = 0.5f;
+    p->hold_breath_mult = 0.1f;
 }
 
 void recoil_type_defaults(RecoilParams *p, RecoilType t) {

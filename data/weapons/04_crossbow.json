@@ -21,6 +21,8 @@
   "ads_fov": 45,
   "projectile_speed": 70,
   "projectile_gravity": 4,
+  "sway": { "hip": { "breathing": 1.0, "look_lag": 1.1, "bob": 1.0, "landing": 1.0 },
+            "ads": { "breathing": 0.35, "look_lag": 0.25, "bob": 0.15, "landing": 0.5 }, "hold_breath_mult": 0.1 },
   "recoil": {
     "vertical": { "first_shot": 1.5, "per_shot": 1.5, "min": 0.9, "max": 1.1 },
     "horizontal": { "per_shot": 0.2, "min": -0.3, "max": 0.3, "bias": 0.0 },

@@ -58,6 +58,9 @@ static struct {
     WeaponDef wd;              // effective equipped weapon (copy)
     bool have_wd;
     float ads_t, base_fov, sight_fov, main_fov, sens_scale;
+    bool sway_on;
+    int sway_n[2];
+    vec2 sway_min[2], sway_max[2];
     // Reticle vs aim (recoil / sway anchoring): pixels between the projected reticle centre and
     // the shot direction while fully aimed, this frame and worst since sight_test recoil.
     float reticle_err_px, reticle_err_max;
@@ -131,6 +134,19 @@ void sights_frame(const RenderCamera *cam, bool first_person) {
     if (have) {
         Xform item = xf_make(pos, rot);
         S.sight_world = xf_point(item, wd->sockets.sight);
+        if (S.sway_on && cam) {
+            // sight_test sway: the gun body's direction against the view (deg), hip vs fully aimed.
+            vec3 gf = quat_rotate(rot, v3(0, 0, -1));
+            vec3 cf = dir_from_angles(cam->yaw, cam->pitch), cr = right_from_yaw(cam->yaw), cu = v3_cross(cr, cf);
+            float yaw_d = atan2f(v3_dot(gf, cr), v3_dot(gf, cf)) * DG_RAD2DEG, pit_d = atan2f(v3_dot(gf, cu), v3_dot(gf, cf)) * DG_RAD2DEG;
+            int k = S.complete ? 1 : (S.ads_t <= 0.0f ? 0 : -1);
+            if (k >= 0) {
+                if (!S.sway_n[k]) { S.sway_min[k] = S.sway_max[k] = v2(yaw_d, pit_d); }
+                S.sway_min[k] = v2(fminf(S.sway_min[k].x, yaw_d), fminf(S.sway_min[k].y, pit_d));
+                S.sway_max[k] = v2(fmaxf(S.sway_max[k].x, yaw_d), fmaxf(S.sway_max[k].y, pit_d));
+                S.sway_n[k]++;
+            }
+        }
         S.sight_valid = true;
         Player *lp = game_local_player();
         Xform icm;
@@ -162,6 +178,9 @@ void sights_frame(const RenderCamera *cam, bool first_person) {
             rs->fwd = xf_dir(opt, v3(0, 0, -1));
             rs->up = xf_dir(opt, v3(0, 1, 0));
             rs->right = xf_dir(opt, v3(1, 0, 0));
+            rs->axis_fwd = rs->fwd;
+            rs->axis_up = rs->up;
+            rs->axis_right = rs->right;
             if (cam && S.complete) {
                 // Fully aimed: the optic looks along the eye -> sight line (an ideal optic). The gun
                 // turning about the reticle centre under recoil then never moves the scope picture or
@@ -309,6 +328,24 @@ static void cmd_sight_test(int argc, const char **argv) {
         S.reticle_err_max = 0;
         S.reticle_frames = 0;
         log_info("sight_test recoil: measuring the reticle centre against the aim while fully aimed");
+        return;
+    }
+    if (!strcmp(what, "sway")) {
+        S.sway_on = true;
+        memset(S.sway_n, 0, sizeof(S.sway_n));
+        log_info("sight_test sway: measuring the gun's sway range at the hip and fully aimed");
+        return;
+    }
+    if (!strcmp(what, "sway_report")) {
+        static const char *nm[2] = { "hip", "ADS" };
+        for (int k = 0; k < 2; k++)
+            log_info("sight_test sway: %s %d frames, gun direction range yaw %.3f deg, pitch %.3f deg", nm[k], S.sway_n[k],
+                     S.sway_n[k] ? S.sway_max[k].x - S.sway_min[k].x : 0.0f, S.sway_n[k] ? S.sway_max[k].y - S.sway_min[k].y : 0.0f);
+        {
+            Player *lp = game_local_player();
+            if (lp) log_info("sight_test sway: breath holding %d (used %.2f s), sprinting %d", lp->sim.wpn.breath_holding, lp->sim.wpn.breath, lp->sim.move.sprinting);
+        }
+        S.sway_on = false;
         return;
     }
     if (!strcmp(what, "recoil_report")) {
@@ -568,7 +605,7 @@ bool sights_dof_managed(void) { return S.ads_dof && S.ads_dof->i; }
 // ------------------------------------------------------------------ registration
 
 void sights_register(void) {
-    S.look_lag = cvar_reg_float("wpn_look_lag", 0.12f, 0.0f, 2.0f, CVAR_ARCHIVE, "how far the weapon trails mouse turns at the hip (x the hold style's look lag; 0 = locked to the view)");
+    S.look_lag = cvar_reg_float("wpn_look_lag", 0.5f, 0.0f, 2.0f, CVAR_ARCHIVE, "how far the weapon trails mouse turns at the hip (x the hold style's look lag; 0 = locked to the view)");
     S.relief_scale = cvar_reg_float("ads_eye_relief_scale", 0.5f, 0.2f, 1.5f, CVAR_ARCHIVE, "ADS: sight distance from the eye x this (1 = the stock weld / the scope eye relief)");
     S.scope_mode = cvar_reg_int("r_scope_mode", 0, 0, 1, CVAR_ARCHIVE, "scopes: 0 = picture-in-picture (second scene render at the scope FOV), 1 = full-screen FOV + vignette");
     S.pip_scale = cvar_reg_float("r_scope_pip_scale", 1.0f, 0.2f, 2.0f, CVAR_ARCHIVE, "scope picture-in-picture resolution (fraction of the render height; > 1 supersamples, max 2048 px)");

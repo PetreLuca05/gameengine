@@ -9,7 +9,7 @@
 #define MAX_CVARS 512
 #define MAX_CMDS 256
 #define MAX_WRITERS 8
-#define CBUF_SIZE 16384
+#define CBUF_SIZE (512 * 1024)   // long generated test scripts (tools/tests/weapon_sway.cfg)
 #define MAX_ARGS 32
 
 typedef struct Cmd { char name[CVAR_NAME_MAX]; char desc[CVAR_STR_MAX]; CmdFn fn; } Cmd;

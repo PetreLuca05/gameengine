@@ -262,6 +262,7 @@ typedef struct RenderSight {
     bool complete;                // ADS finished this frame (full-screen scope / ADS DoF switch)
     // Lens (red dot window / scope ocular) and the optic axis (fwd = towards the target).
     vec3 lens_pos, fwd, up, right;
+    vec3 axis_fwd, axis_up, axis_right;   // the optic's own axes (eye box: reacts to the gun's residual sway); zero = fwd / up / right
     float lens_radius;
     vec3 objective_pos;           // scopes: objective lens (world, for the PiP camera)
     float objective_radius;

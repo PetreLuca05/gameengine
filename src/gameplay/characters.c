@@ -1251,7 +1251,8 @@ static void post_one(World *w, CharacterInst *c, int i, float dt, vec3 cam_pos, 
         float kk = c->local ? 1.0f : (wc->kick_scale ? wc->kick_scale->f : 0.0f);   // the owner's springs are scaled in hands.c
         pi.item_kick_pos = v3_scale(pi.item_kick_pos, kk);
         pi.item_kick_rot = v3_scale(pi.item_kick_rot, kk);
-        pi.hp_sway_scale = wc->sway_scale ? wc->sway_scale->f : 0.0f;
+        // Item sway: wpn_sway_scale (host) x the player's cosmetic "Weapon sway" setting.
+        pi.hp_sway_scale = (wc->sway_scale ? wc->sway_scale->f : 0.0f) * (wc->sway_cosmetic ? wc->sway_cosmetic->f : 1.0f);
         if (c->item_weapon) {
             const RecoilParams *rp = &c->item_weapon->recoil;
             pi.hold_kick.set = true;
@@ -1263,6 +1264,25 @@ static void post_one(World *w, CharacterInst *c, int i, float dt, vec3 cam_pos, 
             pi.hold_kick.kick_ads = rp->anchor_ads;
             pi.hold_kick.sway_hip = rp->sway_anchor_hip;
             pi.hold_kick.sway_ads = rp->sway_anchor_ads;
+            // Weapon sway multipliers (docs/RECOIL.md "Weapon sway").
+            pi.hold_kick.sway_set = true;
+            float ak = wc->sway_ads_scale ? wc->sway_ads_scale->f : 1.0f;
+            for (int k = 0; k < 4; k++) { pi.hold_kick.sway_mh[k] = rp->sway_hip[k]; pi.hold_kick.sway_ma[k] = rp->sway_ads[k] * ak; }
+            const AttachmentDef *opt = attach_def(w->items, c->item_att[ATT_OPTIC]);
+            pi.hold_kick.optic_sway = opt && opt->sway_scale > 0 ? opt->sway_scale : 1.0f;
+            pi.hold_kick.stance = c->rt.in.prone ? 0.55f : (c->rt.in.crouch ? 0.75f : 1.0f);
+            pi.hold_kick.breath_k = 1.0f;
+            pi.hold_kick.wobble = 0.0f;
+            if (c->slot >= 0 && c->slot < MAX_PLAYERS && w->players[c->slot].active) {
+                const Player *pl = &w->players[c->slot];
+                const WeaponState *ws = &pl->sim.wpn;
+                if (ws->breath_holding) pi.hold_kick.breath_k = rp->hold_breath_mult;
+                // Extra wobble: low health, and aiming right after a sprint.
+                const Health *hh = &w->health[ENT_INDEX(pl->ent)];
+                float low = hh->max_hp > 0 ? saturate((0.35f - hh->hp / hh->max_hp) / 0.25f) : 0.0f;
+                float after = ws->ads_t > 0.0f ? saturate(1.0f - ws->since_sprint / 0.7f) : 0.0f;
+                pi.hold_kick.wobble = fmaxf(low * 0.7f, after * 0.6f);
+            }
             float at = c->item_ads_time > 0.0f ? c->item_ads_time : rp->ads_time;
             pi.hold_kick.ads_in = at;
             pi.hold_kick.ads_out = at / 1.3f;

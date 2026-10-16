@@ -113,6 +113,71 @@ Measured: `tools/tests/recoil_ads.cfg` (mag-dumps at `wpn_kick_scale 3`) with `s
 / `recoil_report`. The worst reticle-to-aim error was ≤ 0.81 px for irons, red dot, 4x, 8x and
 the pistol. Camera climb over the same burst: hip 3.9°, ADS 7.7°.
 
+## Weapon sway
+
+The held weapon sways on its hold point (`src/player/holdpoint.c`), applied before the recoil kick.
+The arms follow by IK, so the hands stay glued. Sway is cosmetic: it never moves the shots.
+
+**Components:**
+* **Breathing:** layered slow sines: a figure-eight, two slower drifts and a breath bob.
+* **Look lag:** the gun trails mouse turns on a spring, in proportion to the turn speed.
+* **Movement bob:** a walk / run cycle that grows with speed; sprinting bounces harder.
+* **Landing dip:** sized by the fall speed, settling on a spring.
+
+**Multipliers:**
+* Each component has a hip and an ADS multiplier. They are blended with the hold point's ADS
+  progress, so aiming mid-stride or mid-turn never pops.
+* Stance scales everything: crouch × 0.75, prone × 0.55.
+* An extra wobble is added at low health (below 35 %) and while aiming within 0.7 s of a sprint.
+
+| | Hip | ADS (default) |
+|---|---|---|
+| Anchor | the pivot socket (`sway.anchor.hip`) | the **reticle centre** (`sight` socket) |
+| Motion | rotation + translation | rotation about the sight only (translations become the equivalent rotation of a 0.35 m lever) |
+| Breathing / look lag / bob / landing | `sway.hip` (1 / 1 / 1 / 1) | `sway.ads` (0.35 / 0.25 / 0.15 / 0.5) |
+| Optic | – | × the optic's `sway_scale` (red dot 1.0, 4x 0.7, 8x 0.5) |
+| Hold breath (Shift while aimed) | – | × `hold_breath_mult` (0.1) for `hold_breath` seconds, then a short shaky overshoot |
+
+**In ADS:**
+* The sight point never leaves the view axis, so the reticle stays centred and the bullets land
+  there. The gun body breathes and lags around it.
+* The scope eye-box shadow uses the optic's own axis, so it reacts to the residual sway. The
+  picture follows the eye → sight line.
+
+**Aim sway:** the old aim sway that moved the reticle itself (`wpn_ads_sway`, `wpn_ads_bob`) is
+still available, but defaults to 0.
+
+```json
+"sway": { "hip": { "breathing": 1.0, "look_lag": 1.0, "bob": 1.0, "landing": 1.0 },
+          "ads": { "breathing": 0.35, "look_lag": 0.25, "bob": 0.15, "landing": 0.5 }, "hold_breath_mult": 0.1 },
+"hold_breath": 3.5
+```
+
+**Settings:**
+
+| Setting | Effect |
+|---|---|
+| `wpn_sway_scale` | master, host |
+| `wpn_sway_ads_scale` | × the ADS multipliers |
+| `cl_weapon_sway` | Settings › Crosshair › "Weapon sway" 0–1, cosmetic |
+| `wpn_look_lag` | the hip look lag, 0.5 |
+| `wpn_bob_scale` | the walk bob, 1 |
+
+**Measured** with `tools/tests/weapon_sway.cfg` (`sight_test sway` / `sway_report`, `sight_test
+recoil` / `recoil_report`); the reticle-to-aim error is over 600 ticks of ADS walking with mouse
+sweeps:
+
+| Sight | Hip range | ADS walking range | Reticle-to-aim error |
+|---|---|---|---|
+| Rifle irons | 1.1° | 0.45° | 0.58 px |
+| Red dot | 1.0° | 0.45° | 0.66 px |
+| 4x | 1.1° | 0.31° | 0.66 px |
+| 8x | 0.9° | 0.22° | 0.54 px |
+| Pistol | 1.1° | 0.46° | 0.47 px |
+
+Hold breath, standing aimed (rifle irons): 0.23° → 0.014°; the release overshoot is 0.68°.
+`sight_test align`: 26 combos PASS.
+
 ## Fire timing and modes
 
 * **Sub-tick RPM:** the cooldown carries its remainder across ticks (`recoil_fire_budget`), and

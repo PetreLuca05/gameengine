@@ -348,6 +348,7 @@ static void tab_crosshair(GuiCursor *c) {
     row_toggle_cvar(c, "Hit markers", "crosshair_hitmarker", NULL);
     row_toggle_cvar(c, "Follow camera kick", "crosshair_follow_kick", "Off: pinned to the screen centre.");
     row_slider_cvar(c, "Weapon kick (visual)", "wpn_visual_scale", 0, 2, 0.05f, "%.2f", NULL);
+    row_slider_cvar(c, "Weapon sway", "cl_weapon_sway", 0, 1, 0.05f, "%.2f", "Breathing, look lag, bob and landing of the held weapon (cosmetic: aiming stays exact).");
 }
 
 static void tab_audio(GuiCursor *c) {

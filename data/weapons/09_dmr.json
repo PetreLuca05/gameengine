@@ -20,6 +20,8 @@
   "impulse": 80,
   "headshot_mult": 2.2,
   "ads_fov": 35,
+  "sway": { "hip": { "breathing": 1.0, "look_lag": 1.1, "bob": 1.0, "landing": 1.0 },
+            "ads": { "breathing": 0.35, "look_lag": 0.25, "bob": 0.15, "landing": 0.5 }, "hold_breath_mult": 0.1 },
   "recoil": {
     "vertical": { "first_shot": 1.4, "per_shot": 1.25, "min": 0.9, "max": 1.1 },
     "horizontal": { "per_shot": 0.35, "min": -0.45, "max": 0.45, "bias": 0.0 },

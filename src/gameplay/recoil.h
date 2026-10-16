@@ -63,6 +63,11 @@ typedef struct RecoilParams {
     float ads_aim_mult, ads_forward_push, ads_roll, ads_max_misalign_deg;
     u8 anchor_hip, anchor_ads;          // RecoilAnchor: what the item kick turns about
     u8 sway_anchor_hip, sway_anchor_ads;
+    // Weapon sway of the held item (cosmetic, docs/RECOIL.md "Weapon sway"): per-component
+    // multipliers (breathing, look lag, movement bob, landing) at the hip and in ADS; in ADS the
+    // sway turns the gun about the reticle centre so the sight never leaves the view axis.
+    float sway_hip[4], sway_ads[4];
+    float hold_breath_mult;             // ADS sway while holding breath (x)
 } RecoilParams;
 
 typedef enum RecoilAnchor { RA_PIVOT, RA_HOLD_POINT, RA_SIGHT } RecoilAnchor;

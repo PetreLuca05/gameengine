@@ -7,6 +7,7 @@
 //   +<command> [args]     run a console command at startup (e.g. +map devroom +connect 127.0.0.1)
 //   --exec <file>         execute a config/script file
 //   --script <file>       queue a script into the command buffer (supports "wait N")
+//   --log <path>          write the log there (tests next to a running game)
 //   --frames <n>          quit after n frames;  --screenshot <path> saves the last frame
 //   --validation          enable Vulkan validation layers;  --nosound  disable audio
 //   --test                automated test mode: no config load/save, no audio, 60 fps cap
@@ -142,6 +143,8 @@ int main(int argc, char **argv) {
     char log_path[512];
     SDL_SetAppMetadata("Deadground", DG_VERSION, "com.deadground.game");
     snprintf(log_path, sizeof(log_path), "%sdeadground.log", platform_pref_dir());
+    // --log <path>: a separate log (scripted tests next to a running game).
+    for (int i = 1; i + 1 < argc; i++) if (!strcmp(argv[i], "--log")) snprintf(log_path, sizeof(log_path), "%s", argv[i + 1]);
     log_init(log_path);
     crash_install();
     log_info("Deadground %s starting (log: %s)", DG_VERSION, log_path);

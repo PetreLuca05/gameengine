@@ -445,73 +445,110 @@ void holdpoint_eval(HoldPointState *st, const HoldPointInput *in, HoldPointOutpu
     float ads_a = state == HP_ADS ? 1.0f - k : (st->ads_from == HP_ADS ? k : 0.0f);
     vec3 sight_c = xf_point(item, in->sight);   // the reticle centre (on the view axis once aimed)
 
-    // ---- procedural layer (around the pivot)
-    // In ADS the sight stays on the view axis: item lag / sway / bob fade out with the blend
-    // (ads_scale, 0 by default); scope sway comes from the aim sway, which moves the view itself.
-    float ads_w = state == HP_ADS ? s->ads_scale + (1.0f - s->ads_scale) * k : 1.0f;   // eases with the blend
-    if (in->static_pose) ads_w = 0.0f;
-    float ads_k = ads_w * in->sway_scale;
-    float lag_k = ads_w * in->sway_scale * g_look_lag_scale;
+    // ---- procedural layer: weapon sway (docs/RECOIL.md "Weapon sway") + kick
+    // Components: breathing (idle figure-eight + breath + extra wobble), look lag (trails mouse
+    // turns, settles on a spring), movement bob (walk / run cycle, sprint bounce), landing dip.
+    // Each has a hip and an ADS multiplier, blended with the ADS progress; ADS sway turns the gun
+    // about the reticle centre only (the sight stays on the view axis, see below).
+    float S = in->static_pose ? 0.0f : in->sway_scale;
+    float mh[4] = { 1, 1, 1, 1 }, ma[4] = { 0.35f, 0.25f, 0.15f, 0.5f };
+    float optic = 1.0f, breath_k = 1.0f, stance = 1.0f, wobble = 0.0f;
+    if (kp.sway_set) {
+        for (int c = 0; c < 4; c++) { mh[c] = kp.sway_mh[c]; ma[c] = kp.sway_ma[c]; }
+        optic = kp.optic_sway > 0 ? kp.optic_sway : 1.0f;
+        breath_k = kp.breath_k > 0 ? kp.breath_k : 1.0f;
+        stance = kp.stance > 0 ? kp.stance : 1.0f;
+        wobble = kp.wobble;
+    }
+    // Hold breath: steadies quickly; letting go (or running out) gives a short shaky overshoot.
+    if (st->breath_s <= 0.0f) st->breath_s = 1.0f;
+    if (st->breath_s < 0.5f && breath_k > 0.5f) st->shake = 1.0f;
+    st->breath_s += (breath_k - st->breath_s) * (1.0f - expf(-dt / 0.2f));
+    st->shake = fmaxf(0.0f, st->shake - dt / 0.9f);
     float wy = dt > 1e-6f ? wrap_angle(in->aim_yaw - st->prev_yaw) / dt : 0.0f;
     float wp = dt > 1e-6f ? (in->aim_pitch - st->prev_pitch) / dt : 0.0f;
     st->prev_yaw = in->aim_yaw;
     st->prev_pitch = in->aim_pitch;
-    // Look lag: the item trails the view rotation (muzzle behind the turn).
-    vec2 lag_t = v2(clampf(-wp * s->lag_rot, -s->lag_max, s->lag_max) * lag_k, clampf(-wy * s->lag_rot, -s->lag_max, s->lag_max) * lag_k);
+    // Look lag: the item trails the view rotation (muzzle behind the turn), grows with the mouse speed.
+    vec2 lag_t = v2(clampf(-wp * s->lag_rot, -s->lag_max, s->lag_max) * S, clampf(-wy * s->lag_rot, -s->lag_max, s->lag_max) * S);
     st->lag.x = spring1(st->lag.x, &st->lag_v.x, lag_t.x, s->lag_k, s->lag_d, dt);
     st->lag.y = spring1(st->lag.y, &st->lag_v.y, lag_t.y, s->lag_k, s->lag_d, dt);
     st->t += dt;
-    // Idle sway (figure-eight) + breathing.
-    float sw = s->sway_rot * ads_k * g_look_lag_scale * 2.0f;   // idle sway follows wpn_look_lag (0.12 -> a quarter)
-    vec3 sway_rot = v3(sinf(st->t * s->sway_freq * 2.0f * DG_PI) * sw * 0.6f, sinf(st->t * s->sway_freq * DG_PI) * sw, 0);
-    vec3 breath = v3(0, sinf(st->t * s->breath_freq * 2.0f * DG_PI) * s->breath_pos * ads_k, 0);
-    // Movement bob (the camera's own bob comes from the head animation).
+    // Breathing: slow layered sines (figure-eight + breath), plus the extra wobble.
+    float sw = s->sway_rot * S;
+    vec3 breath_rot = v3(sinf(st->t * s->sway_freq * 2.0f * DG_PI) * sw * 0.6f + sinf(st->t * 0.37f * 2.0f * DG_PI + 1.7f) * sw * 0.25f,
+                         sinf(st->t * s->sway_freq * DG_PI) * sw + sinf(st->t * 0.23f * 2.0f * DG_PI + 0.4f) * sw * 0.2f, 0);
+    float wob = (wobble + st->shake * 0.8f) * S;
+    breath_rot.x += (sinf(st->t * 2.3f * 2.0f * DG_PI) * 0.5f + sinf(st->t * 3.7f * 2.0f * DG_PI + 1.0f) * 0.35f) * wob;
+    breath_rot.y += (sinf(st->t * 2.9f * 2.0f * DG_PI + 0.5f) * 0.45f + sinf(st->t * 4.3f * 2.0f * DG_PI + 2.1f) * 0.3f) * wob;
+    vec3 breath_pos = v3(0, sinf(st->t * s->breath_freq * 2.0f * DG_PI) * s->breath_pos * S, 0);
+    // Movement bob, scaled with the speed (the camera's own bob comes from the head animation).
     float speed = sqrtf(in->vel_cam.x * in->vel_cam.x + in->vel_cam.z * in->vel_cam.z);
     float bob_target = in->grounded ? clampf(speed / 6.0f, 0, 1) : 0.0f;
     st->bob_amt += (bob_target - st->bob_amt) * (1.0f - expf(-8.0f * dt));
     st->bob_phase += dt * (4.5f + speed * 1.1f) * s->bob_freq;
-    // Walking leaves the item still (bob_scale, default 0); sprinting keeps its bob.
-    float bob = st->bob_amt * ads_w * (state == HP_SPRINT ? in->sway_scale : in->bob_scale);
+    float bob = st->bob_amt * S * (state == HP_SPRINT ? 1.4f : in->bob_scale);
     vec3 bob_pos = v3(sinf(st->bob_phase) * s->bob_pos * bob, -fabsf(cosf(st->bob_phase)) * s->bob_pos * 1.2f * bob, 0);
     vec3 bob_rot = v3(0, 0, sinf(st->bob_phase) * s->bob_rot * bob);
+    // Landing: a dip on touchdown, stronger for harder landings, settling on a spring.
+    float vy_world = quat_rotate(in->cam_world.r, in->vel_cam).y;
+    if (!in->grounded) st->air_vy = fminf(st->air_vy, vy_world);
+    if (in->grounded && !st->was_grounded && st->air_vy < -1.5f) st->land_v += clampf(-st->air_vy * 0.06f, 0.0f, 0.9f) * S;
+    if (in->grounded) st->air_vy = 0.0f;
+    st->was_grounded = in->grounded;
+    st->land = spring1(st->land, &st->land_v, 0.0f, 110.0f, 13.0f, dt);
+    vec3 land_pos = v3(0, -st->land, -st->land * 0.3f);
+    vec3 land_rot = v3(-st->land * 55.0f, 0, 0);
     // Recoil item spring (from the recoil system).
     vec3 kick_pos = v3_scale(in->kick_pos, s->kick_scale * (in->static_pose ? 0.0f : 1.0f));
     vec3 kick_rot = v3_scale(in->kick_rot, s->kick_scale * (in->static_pose ? 0.0f : 1.0f));
-    if (in->static_pose) { st->lag = v2(0, 0); st->lag_v = v2(0, 0); }
-    // Two contributions, blended by the ADS progress (no pop when aiming mid-burst):
-    //  hip: lag + sway + bob about their hip anchor, kick about its hip anchor, full translation;
+    if (in->static_pose) { st->lag = v2(0, 0); st->lag_v = v2(0, 0); st->land = st->land_v = 0; }
+    vec3 lag_rot = v3(st->lag.x, st->lag.y, 0);
+    vec3 lag_pos = v3(st->lag.y * s->lag_pos * 10.0f, st->lag.x * s->lag_pos * 10.0f, 0);
+    // Hip: everything about the hip anchor (look lag x the user's wpn_look_lag).
+    float gl = g_look_lag_scale;
+    vec3 hip_rot = v3_scale(v3_add(v3_add(v3_scale(breath_rot, mh[0]), v3_scale(lag_rot, mh[1] * gl)), v3_add(v3_scale(bob_rot, mh[2]), v3_scale(land_rot, mh[3]))), stance);
+    vec3 hip_pos = v3_scale(v3_add(v3_add(v3_scale(breath_pos, mh[0]), v3_scale(lag_pos, mh[1] * gl)), v3_add(v3_scale(bob_pos, mh[2]), v3_scale(land_pos, mh[3]))), stance);
+    // ADS: rotation only (about the sight), translations turned into the equivalent rotation of a
+    // 0.35 m lever; x the optic's steadiness and the hold-breath factor.
+    const float lever = 0.35f;
+    vec3 as_breath = v3_add(breath_rot, v3(-breath_pos.y / lever * DG_RAD2DEG, 0, 0));
+    vec3 as_bob = v3_add(bob_rot, v3(-bob_pos.y / lever * DG_RAD2DEG, bob_pos.x / lever * DG_RAD2DEG, 0));
+    vec3 as_land = v3_add(land_rot, v3(-land_pos.y / lever * DG_RAD2DEG * 0.5f, 0, 0));
+    float ads_k = optic * st->breath_s * stance * (1.0f + st->shake * 1.5f);
+    vec3 ads_sway = v3_scale(v3_add(v3_add(v3_scale(as_breath, ma[0]), v3_scale(lag_rot, ma[1])), v3_add(v3_scale(as_bob, ma[2]), v3_scale(as_land, ma[3]))), ads_k);
+    // Two contributions, blended by the ADS progress (no pop when aiming mid-burst / mid-stride):
+    //  hip: sway about its hip anchor, kick about its hip anchor, full translation;
     //  ADS: everything about the reticle centre, translation only along the view axis (+ roll),
     //       so the sight point stays on the view axis and the gun body moves around it.
-    vec3 sway_deg = v3(st->lag.x + sway_rot.x + bob_rot.x, st->lag.y + sway_rot.y + bob_rot.y, sway_rot.z + bob_rot.z);
     vec3 kick_deg = v3(kick_rot.x, -kick_rot.y, kick_rot.z);
-    vec3 sway_pos = v3_add(v3_add(breath, bob_pos), v3(st->lag.y * s->lag_pos * 10.0f, st->lag.x * s->lag_pos * 10.0f, 0));
     // Hip: sway first (about its anchor), then the kick (about its anchor).
     {
         vec3 sp = xf_point(item, hip_sway_item);
-        quat Rs = hp_euler_deg(v3_scale(sway_deg, 1.0f - ads_a));
+        quat Rs = hp_euler_deg(v3_scale(hip_rot, 1.0f - ads_a));
         item.r = quat_norm(quat_mul(Rs, item.r));
         item.t = v3_add(sp, quat_rotate(Rs, v3_sub(item.t, sp)));
         vec3 kpv = xf_point(item, hip_kick_item);
         quat Rk = hp_euler_deg(v3_scale(kick_deg, 1.0f - ads_a));
         item.r = quat_norm(quat_mul(Rk, item.r));
         item.t = v3_add(kpv, quat_rotate(Rk, v3_sub(item.t, kpv)));
-        item.t = v3_add(item.t, v3_scale(v3_add(sway_pos, kick_pos), 1.0f - ads_a));
+        item.t = v3_add(item.t, v3_scale(v3_add(hip_pos, kick_pos), 1.0f - ads_a));
     }
-    // ADS: about the sight point.
+    // ADS: about the sight point (sway before the kick, both anchored there).
     if (ads_a > 0.0f) {
-        vec3 ads_rot = v3_add(sway_deg, v3(kick_deg.x, kick_deg.y, kick_deg.z * kp.ads_roll));
+        vec3 ads_rot = v3_add(ads_sway, v3(kick_deg.x, kick_deg.y, kick_deg.z * kp.ads_roll));
         if (kp.ads_misalign_deg > 0.0f) {
             // Iron sights: keep the rear sight from covering the front post.
             float m = sqrtf(ads_rot.x * ads_rot.x + ads_rot.y * ads_rot.y);
             if (m > kp.ads_misalign_deg) { float f = kp.ads_misalign_deg / m; ads_rot.x *= f; ads_rot.y *= f; }
         }
-        vec3 S = xf_point(item, in->sight);
+        vec3 sc = xf_point(item, in->sight);
         quat Ra = hp_euler_deg(v3_scale(ads_rot, ads_a));
         item.r = quat_norm(quat_mul(Ra, item.r));
-        item.t = v3_add(S, quat_rotate(Ra, v3_sub(item.t, S)));
+        item.t = v3_add(sc, quat_rotate(Ra, v3_sub(item.t, sc)));
         // Push back along the view axis only (camera +z); no lateral / vertical translation. The
         // sight never comes closer than 5 cm to the eye (a hard kick would push the gun into the view).
-        float push = (kick_pos.z * kp.ads_push + sway_pos.z) * ads_a;
+        float push = (kick_pos.z * kp.ads_push) * ads_a;
         float sight_z = xf_point(item, in->sight).z;
         push = fminf(push, fmaxf(0.0f, -0.05f - sight_z));
         item.t.z += push;

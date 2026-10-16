@@ -78,6 +78,12 @@ typedef struct HoldPointState {
     float pull;                       // collision pull 0..1 (smoothed)
     float pitch_w;                    // soft pitch limit weight (0 in ADS)
     u8 ads_from;                      // the state the blend came from (ADS anchor blend out of ADS)
+    // weapon sway extras
+    float land, land_v;               // landing dip spring (m, +down)
+    float air_vy;                     // lowest vertical speed while airborne (landing strength)
+    bool was_grounded;
+    float breath_s;                   // smoothed hold-breath factor
+    float shake;                      // 0..1 after letting go of a held breath (shaky overshoot)
 } HoldPointState;
 
 typedef bool (*HoldPointRayFn)(void *ctx, vec3 origin, vec3 dir_len, float *fraction, vec3 *point, vec3 *normal);
@@ -92,6 +98,13 @@ typedef struct HoldKickParams {
     float ads_push, ads_roll, ads_misalign_deg;
     u8 kick_hip, kick_ads, sway_hip, sway_ads;
     float ads_in, ads_out;   // blend times into / out of ADS (s, > 0: the weapon's ADS time, so the gun and the zoom finish together)
+    // Weapon sway (docs/RECOIL.md "Weapon sway"): component multipliers [breathing, look lag, bob,
+    // landing] at the hip and in ADS (blended with the ADS progress), the optic's steadiness, the
+    // hold-breath factor (1 normal, hold_breath_mult while held), stance (crouch / prone < 1) and an
+    // extra wobble 0..1 (low health, aiming right after sprinting).
+    bool sway_set;
+    float sway_mh[4], sway_ma[4];
+    float optic_sway, breath_k, stance, wobble;
 } HoldKickParams;
 
 typedef struct HoldPointInput {

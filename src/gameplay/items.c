@@ -159,6 +159,19 @@ static RecoilType recoil_type_of(const cJSON *w) {
     return RT_RIFLE;
 }
 
+// "sway": { "hip": { breathing, look_lag, bob, landing }, "ads": { ... }, "hold_breath_mult" }
+// (in the weapon or its "recoil" block); missing values keep the defaults.
+static void parse_sway(RecoilParams *r, const cJSON *sw) {
+    if (!sw) return;
+    static const char *keys[4] = { "breathing", "look_lag", "bob", "landing" };
+    const cJSON *h = cJSON_GetObjectItemCaseSensitive(sw, "hip"), *a = cJSON_GetObjectItemCaseSensitive(sw, "ads");
+    for (int i = 0; i < 4; i++) {
+        if (h) r->sway_hip[i] = jnum(h, keys[i], r->sway_hip[i]);
+        if (a) r->sway_ads[i] = jnum(a, keys[i], r->sway_ads[i]);
+    }
+    r->hold_breath_mult = jnum(sw, "hold_breath_mult", r->hold_breath_mult);
+}
+
 static void parse_recoil(const cJSON *w, RecoilParams *r) {
     recoil_params_default(r);
     recoil_type_defaults(r, recoil_type_of(w));
@@ -271,6 +284,7 @@ static void parse_recoil(const cJSON *w, RecoilParams *r) {
     }
     {
         const cJSON *sw = jobj(rc, "sway");
+        parse_sway(r, sw);
         const cJSON *an = sw ? jobj(sw, "anchor") : NULL;
         if (an) {
             r->sway_anchor_hip = anchor_from(jstr(an, "hip", NULL), r->sway_anchor_hip);
@@ -460,6 +474,7 @@ static void parse_weapon(ItemDB *db, const cJSON *w, const char *file) {
         recoil_params_default(&d->recoil);
     } else {
         parse_recoil(w, &d->recoil);
+        parse_sway(&d->recoil, cJSON_GetObjectItemCaseSensitive(w, "sway"));
         d->fire_rate = d->recoil.rpm / 60.0f;
     }
     parse_hold(w, d->hold_style, &d->sockets, default_style_for(w, d->kind, d->id), d->support_offset, d->muzzle_offset, d->parts,

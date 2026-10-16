@@ -178,8 +178,12 @@ FgRes post_sights_build(FgRes color) {
     float k = fmaxf(s->zoom, 1.0f) * tan_main / fmaxf(tan_base, 1e-4f);
     float k_nom = fmaxf(s->zoom, 1.0f) / 1.15f;   // SFP: the reticle is fixed in the eyepiece (main view at the scope's main zoom)
     g->scope = v4(k, k_nom, fmaxf(s->eye_box, 1e-4f), fmaxf(s->eye_box_depth, 1e-4f));
+    // Eye box: the eye relative to the optic's own axis (the picture follows the eye -> sight line,
+    // the scope shadow reacts to the gun's residual sway about the reticle).
     vec3 e = v3_neg(lens);   // eye (view origin) relative to the lens
-    g->eye = v4(v3_dot(e, rt), v3_dot(e, up), v3_dot(e, v3_neg(fwd)) - s->eye_relief, s->illuminated ? 1.0f : 0.0f);
+    vec3 afwd = fwd, aup = up, art = rt;
+    if (v3_len2(s->axis_fwd) > 0.5f) { afwd = view_dir(s->axis_fwd); aup = view_dir(s->axis_up); art = view_dir(s->axis_right); }
+    g->eye = v4(v3_dot(e, art), v3_dot(e, aup), v3_dot(e, v3_neg(afwd)) - s->eye_relief, s->illuminated ? 1.0f : 0.0f);
     ray_basis(P.in.proj, &g->ray_main0, &g->ray_main_du, &g->ray_main_dv);
     ray_basis(SG.vm_proj, &g->ray_vm0, &g->ray_vm_du, &g->ray_vm_dv);
     g->vmdepth = v4(SG.vm_proj.m[10], SG.vm_proj.m[14], (float)s->debug, s->ffp ? 1.0f : 0.0f);
