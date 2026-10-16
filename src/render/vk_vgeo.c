@@ -219,7 +219,10 @@ static void tex_use(TextureId id) {
     if (id && id < MAX_TEXTURES) G.tex_wanted[id] = 1;
 }
 
-void vkg_samplers_changed(void) { memset(G.tex_entered, 0, sizeof(G.tex_entered)); }
+void vkg_samplers_changed(void) {
+    memset(G.tex_entered, 0, sizeof(G.tex_entered));
+    vkc_samplers_changed();
+}
 
 // Start of a frame: textures wanted and ready enter the table (the cull sets pick them up when recorded).
 static void tex_update(void) {
@@ -421,6 +424,7 @@ void vkg_init(void) {
     G.ok = true;
     log_info("vgeo: no-nanite build: r_vgeo forced to 0, no vgeo culling / raster passes; the classic instanced renderer draws the vgeo content");
     vkc_init();
+    vkc_set_textures(&G.cull.tex);
 }
 
 void vkg_shutdown(void) {
@@ -1517,7 +1521,6 @@ static void foliage_build_kinds(int k0, int k1, u32 atlas) {
             vg_tex_build_mips(q->masks[m], msize, msize, mips);
             u32 t = vg_tex_create(&G.cull.tex, msize, msize, levels, mips, true, true);
             q->mats[m].mask_tex = q->mats[m].albedo_tex = t;
-            vkc_set_module_texture(t, vkc_mask_texture(q->masks[m], msize));   // the classic renderer's copy
         }
         u32 mesh = vgeo_scene_add_mesh(&G.scene, &q->b);
         fallback_register(mesh, &q->b, false);

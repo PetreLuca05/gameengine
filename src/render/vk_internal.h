@@ -413,8 +413,9 @@ struct VgDisplace;
 void vkc_init(void);
 void vkc_shutdown(void);
 void vkc_register_mesh(u32 mesh, const struct VgBuilt *b, bool persistent);   // LOD chain + impostor textures
-TextureId vkc_mask_texture(const u8 *rgba, u32 size);                         // renderer copy of a procedural mask
-void vkc_set_module_texture(u32 vgeo_index, TextureId id);                     // vgeo module texture -> renderer texture
+struct VgTextures;
+void vkc_set_textures(const struct VgTextures *t);
+void vkc_samplers_changed(void);                              // the vgeo texture table (module-owned slots)
 void vkc_chunk_loaded(const struct VgScene *s, u32 handle);                    // placement chunk: per-cell distance limits
 void vkc_frame(const struct VgScene *s, const struct VgDisplace *disp, float density, float lod_px, float shadow_lod_px, float small_impostor_px, bool era2010,
                bool shadows);

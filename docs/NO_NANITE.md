@@ -26,7 +26,9 @@ Two branches compare renderers on identical content:
 Generic content: anything that enters the vgeo scene (procedural foliage kinds, `"vgeo": true` models with a
 `"foliage"` block, `.vgeo` level files, imported masked / two-sided meshes) goes through the same path: the
 material flags (`VGM_MASKED`, `VGM_TWO_SIDED`, `VGM_DITHER_FADE`, `VGM_FOLIAGE`, WPO) select the pipeline,
-renderer texture ids are used directly, vgeo module textures (procedural masks) map to renderer copies.
+renderer texture ids are used directly, vgeo module-owned texture slots (procedural masks, the shared
+Tree It leaf / bark textures with their coverage-preserving mips) are wrapped as renderer textures (same
+image and sampler, no copy), and the per-mesh impostor switch scale (`VgMesh.impostor_grid >> 16`) applies.
 
 `r_era` still works: the eras keep their LOD pixel errors and foliage densities, vgeo is off in all of them.
 `classic_stats` prints meshes, last frame's instances per view, batches, draws, triangles and the CPU cull time.

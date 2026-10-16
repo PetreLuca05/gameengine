@@ -78,7 +78,9 @@ static struct {
     bool ok;
     ClMesh *mesh;
     u32 mesh_cap;
-    TextureId modtex[VG_TEX_OWN];   // vgeo module texture -> renderer texture (procedural masks)
+    const VgTextures *vtex;         // the vgeo texture table (module-owned slots: masks, tree textures, atlases)
+    TextureId modtex[VG_TEX_OWN];   // vgeo module slot -> renderer texture wrapping its image (0 = not yet)
+    u32 modver[VG_TEX_OWN];         // the slot's version when wrapped
     VkDescriptorSetLayout set3_layout;
     VkPipelineLayout layout;
     VkPipeline pipe[CP_COUNT];
@@ -261,6 +263,7 @@ void vkc_shutdown(void) {
     vkDestroyPipelineLayout(R->device, C.layout, NULL);
     vkDestroyDescriptorSetLayout(R->device, C.set3_layout, NULL);
     for (u32 f = 0; f < FRAMES_IN_FLIGHT; f++) if (C.inst[f].buffer) vkr_buffer_destroy_now(&C.inst[f]);
+    for (u32 k = 0; k < VG_TEX_OWN; k++) if (C.modtex[k]) vkr_texture_unwrap(C.modtex[k]);   // the images are the module's
     for (u32 i = 0; i < C.mesh_cap; i++)
         if (C.mesh[i].own) { free((void *)C.mesh[i].verts); free((void *)C.mesh[i].indices); }
     for (int v = 0; v < CL_VIEWS; v++) free(C.view[v].batches);
@@ -370,10 +373,26 @@ static TextureId cl_texture_mips(const u8 *rgba, u32 size, u32 keep_levels, bool
     return id;
 }
 
-TextureId vkc_mask_texture(const u8 *rgba, u32 size) { return C.ok ? cl_texture_mips(rgba, size, 0, true) : 0; }
+void vkc_set_textures(const VgTextures *t) { C.vtex = t; }
+// The renderer rewrote every texture set (wrapped ones with its clamp sampler): re-apply the slots' samplers.
+void vkc_samplers_changed(void) { memset(C.modver, 0xFF, sizeof(C.modver)); }
 
-void vkc_set_module_texture(u32 index, TextureId id) {
-    if (index >= VG_TEX_GAME && index < VG_TEX_COUNT) C.modtex[index - VG_TEX_GAME] = id;
+// A vgeo module texture slot as a renderer texture: a wrap of the slot's own image and view, sampled
+// with the slot's sampler (repeat / clamp), rewritten when the slot changes. No copy.
+static TextureId module_texture(u32 index) {
+    if (!C.vtex || index < VG_TEX_GAME || index >= VG_TEX_COUNT) return 0;
+    u32 k = index - VG_TEX_GAME;
+    const VgOwnTex *o = &C.vtex->own[k];
+    const VgTexEntry *e = &C.vtex->e[index];
+    if (!o->used || !e->view) return 0;
+    if (C.modtex[k] && C.modver[k] == C.vtex->ver[index]) return C.modtex[k];
+    if (!C.modtex[k]) C.modtex[k] = vkr_texture_wrap(o->image, e->view, o->w, o->h, VK_FORMAT_R8G8B8A8_SRGB);
+    else vkr_texture_rewrap(C.modtex[k], o->image, e->view, o->w, o->h);
+    if (!C.modtex[k]) return 0;
+    vkr_write_tex_set(R->textures[C.modtex[k]].set, e->view, e->sampler ? e->sampler : R->sampler_linear);
+    R->textures[C.modtex[k]].mips = o->mips;
+    C.modver[k] = C.vtex->ver[index];
+    return C.modtex[k];
 }
 
 void vkc_register_mesh(u32 mesh, const VgBuilt *b, bool persistent) {
@@ -554,6 +573,8 @@ static void cull_instance(const ClCull *v, const VgScene *s, const VgInstance *i
     // Impostors: trees (coarsest LOD >= CL_IMPOSTOR_TRIS) below r_classic_impostor_px, small cover
     // (grass tufts: a few cards) only where vgeo switches (r_vgeo_impostor_px).
     float imp_px = cm->coarse_tris >= CL_IMPOSTOR_TRIS ? v->impostor_px : v->small_impostor_px;
+    u32 ks = m->impostor_grid >> 16;   // the mesh's switch scale (1/16 units, 0 = 1x), as vgeo_use_impostor
+    if (ks) imp_px *= (float)ks / 16.0f;
     if (!v->shadow && cm->imp_set && imp_px > 0 && 2.0f * m->radius * sc * v->px_scale / fmaxf(v3_dist(c, v->lod_eye), v->znear) < imp_px) {
         lod = CL_IMPOSTOR;
     } else {
@@ -777,11 +798,24 @@ void vkc_frame(const VgScene *s, const VgDisplace *disp, float density, float lo
 
 // ------------------------------------------------------------------ drawing
 
-static TextureId mat_texture(const VgMaterial *m) {
-    u32 t = m->albedo_tex;
-    if (t >= VG_TEX_GAME && t < VG_TEX_COUNT) t = C.modtex[t - VG_TEX_GAME];
+// Any texture a vgeo material references: renderer ids as they are, module-owned slots wrapped.
+static TextureId resolve_texture(u32 t) {
+    if (t >= VG_TEX_GAME) t = module_texture(t);
     if (!t || t >= MAX_TEXTURES || !R->textures[t].used || !R->textures[t].ready) return 0;
     return t;
+}
+
+// The texture of a material draw: its albedo; a masked material without one uses its mask (its alpha
+// is the cutout, its colour then tints nothing: white). A separate mask beside an albedo is not
+// supported here (one sampler per draw): the albedo's alpha is tested (warned once).
+static TextureId mat_texture(const VgMaterial *m) {
+    TextureId a = resolve_texture(m->albedo_tex);
+    if ((m->flags & VGM_MASKED) && m->mask_tex && m->mask_tex != m->albedo_tex) {
+        if (!a) return resolve_texture(m->mask_tex);
+        static bool warned;
+        if (!warned) { warned = true; log_warn("classic: a masked material has a separate mask texture: its albedo alpha is tested instead"); }
+    }
+    return a;
 }
 
 // Push constants of a material draw (shaders/classic_common.glsl).
