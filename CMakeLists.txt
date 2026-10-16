@@ -327,6 +327,19 @@ endforeach()
 add_custom_target(dg_vgeo_content ALL DEPENDS ${DG_VGEO_CONTENT})
 add_dependencies(dg_vgeo_content build_vgeo)
 
+# Open-world map generator (docs/ZOMBIE_MAP.md): the pure terrain / road / POI generator and loot
+# tables as a library for the preview tool and the unit tests (the game compiles the same sources).
+add_library(dg_mapgen STATIC src/world/mapgen.c src/world/mapgen_poi.c src/gameplay/loot.c)
+set_target_properties(dg_mapgen PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
+target_include_directories(dg_mapgen PUBLIC src)
+target_link_libraries(dg_mapgen PUBLIC dg_thirdparty)
+if(MSVC)
+  target_compile_options(dg_mapgen PRIVATE /W3 /wd4100 /wd4201 /utf-8)
+endif()
+add_executable(mapgen_preview tools/mapgen_preview/mapgen_preview.c)
+set_target_properties(mapgen_preview PROPERTIES C_STANDARD 11)
+target_link_libraries(mapgen_preview PRIVATE dg_mapgen)
+
 # Character pipeline (docs/CHARACTERS.md): Skeleton / SkeletalMesh bakes, part splitting, retargeting.
 foreach(tool bake_skeleton bake_mesh split_parts retarget)
   add_executable(${tool} tools/${tool}/${tool}.c)
