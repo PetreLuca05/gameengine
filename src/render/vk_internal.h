@@ -79,7 +79,7 @@ typedef struct Deferred {
     VkDescriptorSet set;
 } Deferred;
 
-typedef enum UploadKind { UPLOAD_BUFFER, UPLOAD_TEXTURE } UploadKind;
+typedef enum UploadKind { UPLOAD_BUFFER, UPLOAD_TEXTURE, UPLOAD_IMAGE } UploadKind;
 typedef struct Upload {
     UploadKind kind;
     GpuBuffer staging;
@@ -89,6 +89,10 @@ typedef struct Upload {
     int levels_in_data;   // >1 for raw uploads with explicit mips
     size_t level_offsets[16];
     bool gen_mips;
+    // UPLOAD_IMAGE (texture arrays outside the texture table, surface_tex.c): every mip of every layer
+    // in the staging buffer, level_offsets[mip] = its layer 0 (the layers follow, tightly packed).
+    VkImage image;
+    u32 w, h, layers;
 } Upload;
 
 typedef struct FrameResources {
@@ -155,6 +159,10 @@ typedef struct FrameData {
     mat4 local_vps[LOCAL_SHADOW_TILES];
     vec4 light_shadow[MAX_POINT_LIGHTS];   // x first tile (-1 unshadowed), y normal offset per metre
     vec4 local_shadow_info;                // x 1 / atlas size, y shadowed point lights
+    // Surface textures (surface_tex.c, docs/TEXTURES.md): terrain material map origin x, z,
+    // 1 / spacing, samples per side (0 = no map); y of surf_info: layers loaded (0 = untextured).
+    vec4 surf_map;
+    vec4 surf_info;
 } FrameData;
 
 typedef struct PushLit {
@@ -377,6 +385,16 @@ void vkp_register_shader(const char *name);   // hot reload / recompile list ("p
 
 // post/post_core.c: frame graph post-processing stack
 bool post_create_pipelines(void);
+
+// surface_tex.c: terrain / building surface texture arrays + the terrain material map (frame set
+// bindings 12-14, docs/TEXTURES.md)
+void vks_init(void);                       // 1-texel placeholders (the bindings are always valid)
+void vks_shutdown(void);
+void vks_write_bindings(void);             // before recording: rewrites the frame sets when they changed
+void vks_samplers_changed(void);           // the material sampler was recreated (r_aniso, r_texture_quality)
+void vks_frame_data(FrameData *fd);
+void vkr_upload_image(VkImage image, u32 w, u32 h, u32 mips, u32 layers, const void *data, const size_t *mip_offsets, size_t size);
+void vkr_cancel_image_upload(VkImage image);
 
 // vk_light_shadow.c: shadows of point / spot lights (docs/LIGHT_SHADOWS.md)
 void vkls_init(void);

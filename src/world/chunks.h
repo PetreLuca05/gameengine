@@ -33,6 +33,7 @@ typedef struct ChunkProvider {
     float bounds;                 // > 0: chunks only inside [-bounds, bounds)^2, streamed in whole far tiles
     bool static_collision;        // the map owns its terrain collision: no heightfield body per chunk
     bool no_grid;                 // never draw the unit grid on this terrain
+    bool surface_textures;        // MAT_TERRAIN: textured from the material map (render_surface_map)
     // Far terrain: height and colour at (x, z) for the coarse tiles drawn where chunks are not loaded.
     void (*sample)(void *user, float x, float z, float *h, u32 *color);
     // Thread-safe placement chunk (.vgp, malloc'd) of chunk (cx, cz) or NULL (grass, small plants).

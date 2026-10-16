@@ -1,0 +1,110 @@
+{
+  "_doc": "Surface textures (docs/TEXTURES.md). texgen.py: one Higgsfield image per recipe (cached), made tileable, albedo + normal/roughness/height derived. 'tile_m' = metres one tile covers in the game (informative; the shader scales live in src/render/surface_tex.c). 'period' marks structured patterns (rows / courses): their seam fix keeps the period.",
+  "style": "Seamless tileable texture, straight top-down orthographic photograph, flat even overcast daylight, no shadows, no perspective, no horizon, no objects, the surface fills the whole frame edge to edge, uniform density, sharp photographic detail, physically based albedo",
+  "recipes": [
+    {
+      "name": "grass",
+      "layer": 0,
+      "prompt": "short dense green wild grass lawn seen from directly above, mixed blades and small clover, slightly patchy natural color variation"
+    },
+    {
+      "name": "meadow",
+      "layer": 1,
+      "prompt": "dry late-summer meadow grass seen from directly above, straw yellow and olive green blades, tangled, some bare soil specks"
+    },
+    {
+      "name": "forest",
+      "layer": 2,
+      "prompt": "forest floor seen from directly above, brown pine needles, dead leaves, small twigs, moss patches, dark humus soil"
+    },
+    {
+      "name": "dirt",
+      "layer": 3,
+      "prompt": "bare brown earth soil seen from directly above, dry cracked dirt with small pebbles and tiny roots"
+    },
+    {
+      "name": "rock",
+      "layer": 4,
+      "prompt": "natural rough grey granite boulder surface close-up, irregular cracks, lichen spots and mineral grain, one continuous natural rock, no tiles, no slabs, no joints, no grid lines"
+    },
+    {
+      "name": "sand",
+      "layer": 5,
+      "prompt": "fine beige beach sand seen from directly above, subtle ripples, a few tiny shell fragments"
+    },
+    {
+      "name": "gravel",
+      "layer": 6,
+      "prompt": "loose grey gravel seen from directly above, small angular crushed stones of mixed size, dusty"
+    },
+    {
+      "name": "asphalt",
+      "layer": 7,
+      "prompt": "old weathered dark grey asphalt road surface seen from directly above, aggregate stones visible, small cracks, no road markings"
+    },
+    {
+      "name": "dirt_road",
+      "layer": 8,
+      "prompt": "flat lay photo of packed light brown earth ground with embedded small stones and grit, uniform, no tire tracks, no road edges"
+    },
+    {
+      "name": "concrete",
+      "layer": 9,
+      "prompt": "one continuous old weathered grey concrete surface, fine pores, faint stains and small cracks, no expansion joints, no slab lines, no tiles, no grid"
+    },
+    {
+      "name": "field",
+      "layer": 10,
+      "prompt": "harvested wheat field stubble seen from directly above, golden straw stalks and chaff on dry soil"
+    },
+    {
+      "name": "crop",
+      "layer": 11,
+      "prompt": "young green crop plants seen from directly above, dense leafy green seedlings covering dark soil, uniform"
+    },
+    {
+      "name": "plowed",
+      "layer": 12,
+      "prompt": "freshly plowed farmland soil seen from directly above, dark brown clods and furrow texture, uniform"
+    },
+    {
+      "name": "mud",
+      "layer": 13,
+      "prompt": "uniform wet dark brown mud ground, soft glossy sludge with small embedded stones and grit, no puddles, no footprints"
+    },
+    {
+      "name": "brick",
+      "layer": 14,
+      "period": true,
+      "prompt": "weathered red brick wall in running bond, straight horizontal courses, grey mortar joints, front-on orthographic view, about 12 courses"
+    },
+    {
+      "name": "plaster",
+      "layer": 15,
+      "prompt": "weathered off-white stucco plaster wall, front-on orthographic view, fine grain, subtle dirt streaks and stains"
+    },
+    {
+      "name": "wood",
+      "layer": 16,
+      "period": true,
+      "prompt": "weathered grey-brown wooden planks, vertical boards side by side, wood grain and knots, front-on orthographic view, about 8 boards"
+    },
+    {
+      "name": "metal",
+      "layer": 17,
+      "period": true,
+      "prompt": "painted corrugated sheet metal wall, vertical ribs, light grey paint with scratches and some rust spots, front-on orthographic view"
+    },
+    {
+      "name": "rust",
+      "layer": 18,
+      "prompt": "corroded steel surface with brown and orange rust patina, pitted metal, dark brown corrosion streaks, no paint, no rivets, no seams"
+    },
+    {
+      "name": "shingles",
+      "layer": 19,
+      "period": true,
+      "prompt": "asphalt roof shingles in straight horizontal rows, dark grey weathered tabs, front-on orthographic view, about 10 rows"
+    }
+  ]
+}

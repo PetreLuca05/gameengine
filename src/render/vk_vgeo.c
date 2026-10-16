@@ -25,6 +25,7 @@
 #include "assets/assets.h"
 #include "core/platform.h"
 #include "core/jobs.h"
+#include "stb_image.h"
 #include <math.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -1613,6 +1614,7 @@ typedef struct FoliageKindBuild {
     VgMaterial mats[2];
     u32 nm;
     u8 *masks[2];
+    u32 msz[2];             // mask size (px): the card textures load at their own size
     const u8 *mk[2];
     VgImpostorMaterial im[2];
     VgImpostorOptions io;
@@ -1626,6 +1628,24 @@ static void foliage_kind_job(void *ctx, int begin, int end) {
         kb[i].ok = vgeo_build(&kb[i].src, &opt, &kb[i].b, kb[i].err, sizeof(kb[i].err));
         if (kb[i].ok && kb[i].impostor) vgeo_impostor_bake(&kb[i].b, &kb[i].io);
     }
+}
+
+// Card textures drawn by tools/vfxgen/foliage_atlas.py (docs/TEXTURES.md) for the grass tuft and the
+// wheat clump: RGBA (sRGB colour, coverage alpha), square. NULL (procedural mask) when missing.
+static u8 *foliage_card_file(int kind, u32 material, u32 *size) {
+    const char *name = material ? NULL : (kind == VG_FOLIAGE_TUFT ? "grass_blades" : (kind == VG_FOLIAGE_CROP ? "wheat" : NULL));
+    if (!name) return NULL;
+    char rel[96], path[512];
+    snprintf(rel, sizeof(rel), "assets/textures/foliage/%s.png", name);
+    int w, h, comp;
+    u8 *px = stbi_load(platform_data_path(rel, path, sizeof(path)), &w, &h, &comp, 4);
+    if (!px) return NULL;
+    if (w != h || w < 16 || w > 2048) { stbi_image_free(px); return NULL; }
+    u8 *out = (u8 *)malloc((size_t)w * (size_t)h * 4);
+    memcpy(out, px, (size_t)w * (size_t)h * 4);
+    stbi_image_free(px);
+    *size = (u32)w;
+    return out;
 }
 
 // Builds procedural foliage kinds [k0, k1) (vgeo_procgen_foliage.c): mesh, masks, impostor atlas
@@ -1644,10 +1664,21 @@ static void foliage_build_kinds(int k0, int k1, u32 atlas) {
         vgeo_foliage_source(&q->fm, &q->src);
         q->nm = vgeo_foliage_materials(q->k, q->mats);
         for (u32 m = 0; m < q->nm; m++) {
+            u32 fs = 0;
+            u8 *card = foliage_card_file(q->k, m, &fs);
+            if (card) {   // grass blades / wheat drawn offline
+                q->masks[m] = card;
+                q->msz[m] = fs;
+                q->mk[m] = card;
+                continue;
+            }
             q->masks[m] = (u8 *)malloc((size_t)msize * msize * 4);
+            q->msz[m] = msize;
             if (vgeo_gen_foliage_mask(q->masks[m], msize, q->k, m, 5)) q->mk[m] = q->masks[m];
         }
         vgeo_foliage_impostor_materials(q->k, q->mk, msize, q->im);
+        for (u32 m = 0; m < q->nm; m++)
+            if (q->mk[m]) q->im[m].w = q->im[m].h = q->msz[m];
         q->io = (VgImpostorOptions){ atlas, 8, q->im, 2 };
         q->impostor = q->k != VG_FOLIAGE_CROP;   // crops fade out before an impostor would be used
     }
@@ -1659,8 +1690,12 @@ static void foliage_build_kinds(int k0, int k1, u32 atlas) {
         // alpha masks (module textures)
         for (u32 m = 0; m < q->nm; m++) {
             if (!q->mk[m]) continue;
-            vg_tex_build_mips(q->masks[m], msize, msize, mips);
-            u32 t = vg_tex_create(&G.cull.tex, msize, msize, levels, mips, true, true);
+            u32 sz = q->msz[m], lv = levels;
+            u8 *mp = mips;
+            if (sz != msize) mp = (u8 *)malloc(vg_tex_mip_bytes(sz, sz, &lv));
+            vg_tex_build_mips(q->masks[m], sz, sz, mp);
+            u32 t = vg_tex_create(&G.cull.tex, sz, sz, lv, mp, true, true);
+            if (mp != mips) free(mp);
             q->mats[m].mask_tex = q->mats[m].albedo_tex = t;
         }
         u32 mesh = vgeo_scene_add_mesh(&G.scene, &q->b);
