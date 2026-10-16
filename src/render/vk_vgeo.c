@@ -613,6 +613,7 @@ static u32 level_mesh(const RenderVgeoPlacement *pl) {
     // .vgeo files stream their pages from the file (the pool holds what the views need)
     u32 mesh = file_path[0] ? vgeo_scene_add_mesh_file(&G.scene, src, file_path) : vgeo_scene_add_mesh(&G.scene, src);
     fallback_register(mesh, src, true);
+    if (file_path[0]) vgeo_file_drop_pages(file_path);   // pages stream from the file from now on
     u32 nm = src->hdr.material_count ? src->hdr.material_count : 1, base = 0;
     for (u32 k = 0; k < nm; k++) {
         VgMaterial m = mat;

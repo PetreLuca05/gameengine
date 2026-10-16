@@ -218,3 +218,12 @@ u32 vgeo_placement_expand(const float pos[3], float yaw, float scale, float jitt
         }
     return n;
 }
+
+void vgeo_file_drop_pages(const char *path) {
+    for (int i = 0; i < g_file_count; i++)
+        if (!strcmp(g_files[i].path, path) && g_files[i].b) {
+            free(g_files[i].b->page_data);
+            g_files[i].b->page_data = NULL;
+            g_files[i].b->page_data_size = 0;
+        }
+}

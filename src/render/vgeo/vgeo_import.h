@@ -27,6 +27,9 @@ u32 vgeo_cache_key(const void *file, size_t size, const VgBuildOptions *opt);
 // file is missing / invalid. Kept until vgeo_file_release_all (shutdown).
 const VgBuilt *vgeo_file_get(const char *path);
 void vgeo_file_release_all(void);
+// Frees a cached file's page data once its pages stream from the file (the renderer registered it);
+// the tables and discrete LODs stay (collision, fallback).
+void vgeo_file_drop_pages(const char *path);
 
 // Instances of a level placement (LevelVgeo / RenderVgeoPlacement): nx x nz grid around pos at spacing,
 // a deterministic random yaw per grid instance (seed) and scale * (1 +- jitter). Returns the count.
