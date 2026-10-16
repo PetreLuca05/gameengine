@@ -293,6 +293,38 @@ static void cmd_bench(int argc, const char **argv) {
     memset(GP.bench_ms, 0, sizeof(GP.bench_ms));
 }
 
+// perf_stop [frames=300] [label]: whole-frame timings over N frames (tools/tests/perf_compare.cfg,
+// docs/NO_NANITE.md; run with r_maxfps 0 / r_vsync 0): avg / worst CPU frame (frame_dt), avg / worst
+// GPU frame (command buffer timestamps), draw calls and triangles per frame.
+static struct {
+    int left, frames;
+    char label[48];
+    double cpu_sum, cpu_max, gpu_sum, gpu_max, draws, tris;
+} PS;
+
+static void cmd_perf_stop(int argc, const char **argv) {
+    memset(&PS, 0, sizeof(PS));
+    PS.frames = PS.left = argc > 1 ? DG_MAX(1, atoi(argv[1])) : 300;
+    dg_strcpy(PS.label, sizeof(PS.label), argc > 2 ? argv[2] : "");
+}
+
+static void perf_stop_frame(void) {
+    if (PS.left <= 0) return;
+    double cpu = g_engine.frame_dt * 1000.0, gpu = render_gpu_frame_ms();
+    RenderStats st = render_stats();
+    PS.cpu_sum += cpu;
+    PS.gpu_sum += gpu;
+    PS.cpu_max = fmax(PS.cpu_max, cpu);
+    PS.gpu_max = fmax(PS.gpu_max, gpu);
+    PS.draws += st.draw_calls;
+    PS.tris += st.triangles;
+    if (--PS.left > 0) return;
+    double n = (double)PS.frames;
+    log_info("perf_stop %s: %d frames, render %ux%u: frame avg %.3f ms (%.1f fps), worst %.3f ms; GPU avg %.3f ms, worst %.3f ms; %.0f draws, %.2fM tris",
+             PS.label, PS.frames, (unsigned)render_width(), (unsigned)render_height(), PS.cpu_sum / n, 1000.0 * n / fmax(PS.cpu_sum, 1e-6), PS.cpu_max, PS.gpu_sum / n,
+             PS.gpu_max, PS.draws / n, PS.tris / n / 1e6);
+}
+
 static bool is_scene_pass(const char *n) {
     static const char *scene[] = { "prepass", "opaque", "decals", "opaque_dynamic", "scene_copy", "transparent", "vm_prepass", "viewmodel" };
     for (int i = 0; i < (int)ARRAY_COUNT(scene); i++) if (!strcmp(n, scene[i])) return true;
@@ -414,6 +446,7 @@ void game_post_init(void) {
     cmd_register("post_flash", cmd_flash, "post_flash [strength]: flashbang screen effect");
     cmd_register("nightvision", cmd_nightvision, "toggle the night vision effect");
     cmd_register("post_bench", cmd_bench, "post_bench [frames] [label]: average GPU ms per render pass");
+    cmd_register("perf_stop", cmd_perf_stop, "perf_stop [frames=300] [label]: avg / worst CPU and GPU frame time, draws, triangles over N frames");
     cmd_register("post_status", cmd_post_status, "print the active post settings");
     cmd_register("screenshot_hdr", cmd_screenshot_hdr, "screenshot_hdr [name]: PNG + linear EXR into screenshots/");
     cmd_register("photomode", cmd_photomode, "toggle photo mode (HUD hidden, camera / grade controls)");
@@ -557,6 +590,7 @@ void game_post_frame(const PostFrameInfo *fi) {
         for (int i = 0; i < GP.vol_count; i++)
             if (!GP.vols[i].global) dbg_aabb(GP.vols[i].mn, GP.vols[i].mx, volume_weight(&GP.vols[i], fi->cam_pos) > 0.99f ? DBG_GREEN : DBG_YELLOW, 0);
     bench_frame();
+    perf_stop_frame();
 }
 
 // ------------------------------------------------------------------ overlays
