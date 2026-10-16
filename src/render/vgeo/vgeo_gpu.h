@@ -64,7 +64,30 @@ typedef struct VgCluster {
 
 #define VGEO_VERTEX_BYTES 12     // u16x3 grid offset, oct normal 8+8, half2 uv
 #define VGEO_VERTEX_COLOR_BYTES 4
+#define VGEO_VERTEX_SKIN_BYTES 8 // VGF_SKINNED: u8x4 joints (canonical skeleton), u8x4 weights (unorm, sum 255)
 #define VGEO_TRI_BYTES 4         // u8x3 local indices + 8 spare bits (SW raster edge flags)
+
+// ------------------------------------------------------------------ skinned meshes (Phase 6)
+//
+// A skinned cluster's triangle data is followed by its bone set (still inside the page's triangle
+// block, so it needs no offset of its own): u32 count (<= VGEO_MAX_CLUSTER_BONES), then per bone
+// 4 words { u8 bone, u8 pad, half min.x | half min.y, half min.z | half max.x, half max.y | half max.z }:
+// the bind-space AABB of the cluster's vertices with a non-zero weight on that bone (rounded outwards).
+#define VGEO_MAX_BONES 128           // canonical skeleton (ANIM_MAX_BONES)
+#define VGEO_MAX_CLUSTER_BONES 16
+#define VGEO_BONE_BOX_BYTES 16
+
+// Palette slot table entry (binding 21, vgeo_skin.h): the slot's palettes are mat4 (column-major,
+// bind space -> instance space, `bone_world * inverse_bind`) at binding 20 [first + joint], last
+// frame's at [prev_first + joint]. max_scale bounds every bone's linear part (spectral norm); k0 / k1
+// bound how far any bone moves a point away from the root bone (0): |P_b v - P_0 v| <= k0 + k1 |v|.
+typedef struct VgPaletteSlot {
+    u32 first, prev_first, bone_count, pad0;   // bone_count 0: the slot's instances are culled
+    float max_scale, k0, k1, pad1;
+} VgPaletteSlot;
+
+// Instance flags (VgInstance.flags_phase >> 16).
+enum VgInstanceFlags { VGI_XFORM = 1u << 0, VGI_SKINNED = 1u << 1, VGI_CAST_SHADOW = 1u << 2 };
 
 typedef struct VgPageDesc {
     u32 file_offset, size;       // in the file's page data section
@@ -215,6 +238,7 @@ _Static_assert(sizeof(VgPageDesc) == 16, "VgPageDesc");
 _Static_assert(sizeof(VgDiscreteLod) == 32, "VgDiscreteLod");
 _Static_assert(sizeof(VgInstance) == 32, "VgInstance");
 _Static_assert(sizeof(VgCell) == 32, "VgCell");
+_Static_assert(sizeof(VgPaletteSlot) == 32, "VgPaletteSlot");
 _Static_assert(sizeof(VgViewGpu) == 416, "VgViewGpu");
 _Static_assert(sizeof(VgMaterial) == 64, "VgMaterial");
 _Static_assert(sizeof(VgCounters) == 256, "VgCounters");
