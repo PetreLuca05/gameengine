@@ -118,7 +118,7 @@ static struct {
     bool disp_ok;
     struct FoliageType { char name[48]; u32 mesh; bool capsule; float cap_r, cap_h; } ftype[32];
     u32 ftype_count;
-    bool test_types;
+    bool test_types, map_types;
     double disp_time;
     float push_test;             // foliage_push_test: seconds left
     bool need_commit;            // a placement chunk resolved a mesh the scene did not have
@@ -1552,10 +1552,11 @@ static int foliage_type_of_mesh(u32 mesh) {
     return -1;
 }
 
-// The placement region (1M instances = 32 MB, 8192 cells), reserved on first use.
+// The placement region (1M instances = 32 MB, 65536 cells: an open-world map's trees fill thousands
+// of chunks), reserved on first use.
 static void foliage_region(void) {
     if (G.scene.pl.inst_cap) return;
-    vgeo_scene_reserve_placements(&G.scene, 1u << 20, 8192);
+    vgeo_scene_reserve_placements(&G.scene, 1u << 20, 65536);
     G.need_commit = true;
 }
 
@@ -1565,15 +1566,14 @@ static void foliage_commit(void) {
     if (!vgeo_scene_commit(&G.scene)) log_error("vgeo: scene upload failed");
 }
 
-int render_foliage_test_types(void) {
-    if (!G.ok) return 0;
-    if (G.test_types) return VG_FOLIAGE_KINDS;
-    u64 t0 = SDL_GetTicksNS();
+// Builds procedural foliage kinds [k0, k1) (vgeo_procgen_foliage.c): mesh, masks, impostor atlas,
+// materials, the type table (trunk capsules).
+static void foliage_build_kinds(int k0, int k1) {
     const u32 msize = 256;
     u32 levels;
     size_t mb = vg_tex_mip_bytes(msize, msize, &levels);
     u8 *mips = (u8 *)malloc(mb), *masks[2] = { (u8 *)malloc((size_t)msize * msize * 4), (u8 *)malloc((size_t)msize * msize * 4) };
-    for (int k = 0; k < VG_FOLIAGE_KINDS && G.ftype_count < 32; k++) {
+    for (int k = k0; k < k1 && G.ftype_count < 32; k++) {
         VgFoliageMesh fm;
         vgeo_gen_foliage(&fm, k, 11 + (u32)k);
         VgSource src;
@@ -1599,7 +1599,8 @@ int render_foliage_test_types(void) {
         VgImpostorMaterial im[2];
         vgeo_foliage_impostor_materials(k, mk, msize, im);
         VgImpostorOptions io = { 1024, 8, im, 2 };
-        vgeo_impostor_bake(&b, &io);
+        bool impostor = k != VG_FOLIAGE_CROP;   // crops fade out before an impostor would be used
+        if (impostor) vgeo_impostor_bake(&b, &io);
         u32 mesh = vgeo_scene_add_mesh(&G.scene, &b);
         fallback_register(mesh, &b, false);
         u32 base = 0;
@@ -1608,13 +1609,11 @@ int render_foliage_test_types(void) {
             if (!m) base = idx;
         }
         vgeo_scene_set_mesh_materials(&G.scene, mesh, base);
-        vgeo_foliage_impostor_upload(&G.scene, &G.cull.tex, mesh, &b);
+        if (impostor) vgeo_foliage_impostor_upload(&G.scene, &G.cull.tex, mesh, &b);
         struct FoliageType *ft = &G.ftype[G.ftype_count++];
         dg_strcpy(ft->name, sizeof(ft->name), vgeo_foliage_name(k));
         ft->mesh = mesh;
-        ft->capsule = k == VG_FOLIAGE_BUSH;   // the bush trunk
-        ft->cap_r = 0.08f;
-        ft->cap_h = 0.8f;
+        ft->capsule = vgeo_foliage_capsule(k, &ft->cap_r, &ft->cap_h);   // the bush / tree trunks
         log_info("vgeo: foliage type %s: %u tris, %u clusters, %u levels, impostor %ux%u frames", ft->name, b.stats.input_tris, b.hdr.cluster_count, b.hdr.level_count,
                  io.grid, io.grid);
         vgeo_free(&b);
@@ -1622,6 +1621,27 @@ int render_foliage_test_types(void) {
     free(mips);
     free(masks[0]);
     free(masks[1]);
+}
+
+int render_foliage_map_types(void) {
+    if (!G.ok) return 0;
+    if (G.map_types) return VG_FOLIAGE_ALL_KINDS - VG_FOLIAGE_KINDS;
+    render_foliage_test_types();   // grass tufts and bushes are part of the maps' cover
+    u64 t0 = SDL_GetTicksNS();
+    foliage_build_kinds(VG_FOLIAGE_KINDS, VG_FOLIAGE_ALL_KINDS);
+    G.map_types = true;
+    foliage_region();
+    G.need_commit = true;
+    foliage_commit();
+    log_info("vgeo: foliage map types ready in %.0f ms", (double)(SDL_GetTicksNS() - t0) / 1e6);
+    return VG_FOLIAGE_ALL_KINDS - VG_FOLIAGE_KINDS;
+}
+
+int render_foliage_test_types(void) {
+    if (!G.ok) return 0;
+    if (G.test_types) return VG_FOLIAGE_KINDS;
+    u64 t0 = SDL_GetTicksNS();
+    foliage_build_kinds(0, VG_FOLIAGE_KINDS);
     G.test_types = true;
     foliage_region();
     G.need_commit = true;
@@ -1649,6 +1669,23 @@ void *render_foliage_test_chunk(int cx, int cz, float density, float x0, float z
     VgInstance *tmp = (VgInstance *)malloc(sizeof(VgInstance) * cap);
     u32 n = vgeo_foliage_scatter_chunk(&sc, cx, cz, tmp, cap);
     u8 *blob = n ? vgp_write(cx, cz, names, 2, tmp, n, size) : NULL;
+    free(tmp);
+    return blob;
+}
+
+void *render_foliage_make_chunk(int cx, int cz, const char (*names)[48], int name_count, const RenderFoliageInst *inst, int n, size_t *size) {
+    *size = 0;
+    if (n <= 0) return NULL;
+    VgInstance *tmp = (VgInstance *)malloc(sizeof(VgInstance) * (size_t)n);
+    float x0 = (float)cx * VGP_CHUNK_SIZE, z0 = (float)cz * VGP_CHUNK_SIZE;
+    int m = 0;
+    for (int i = 0; i < n; i++) {
+        const RenderFoliageInst *s = &inst[i];
+        if (s->pos.x < x0 || s->pos.z < z0 || s->pos.x >= x0 + VGP_CHUNK_SIZE || s->pos.z >= z0 + VGP_CHUNK_SIZE || s->kind >= name_count) continue;
+        float p[3] = { s->pos.x, s->pos.y, s->pos.z };
+        vgeo_foliage_instance(&tmp[m++], s->kind, p, s->yaw, s->scale);
+    }
+    u8 *blob = m ? vgp_write(cx, cz, names, (u32)name_count, tmp, (u32)m, size) : NULL;
     free(tmp);
     return blob;
 }
