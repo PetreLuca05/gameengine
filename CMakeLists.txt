@@ -235,7 +235,7 @@ add_test(NAME recoil COMMAND test_recoil)
 # ---------------------------------------------------------------- animation tools
 # Engine-free subset: anim core + FBX import + cache (+ log / platform helpers).
 set(DG_ANIMCORE_SOURCES
-  src/anim/anim.c src/anim/skeleton.c src/anim/anim_mesh.c src/anim/controller.c src/anim/procedural.c src/anim/turn.c src/anim/spine.c
+  src/anim/anim.c src/anim/skeleton.c src/anim/retarget.c src/anim/anim_mesh.c src/anim/controller.c src/anim/procedural.c src/anim/turn.c src/anim/spine.c
   src/anim/weapon_hold.c src/anim/damage_additive.c src/anim/foot_ik.c src/anim/anim_net.c src/anim/ragdoll_def.c
   src/anim/anim_library.c src/anim/character_rt.c src/gameplay/hitboxes.c src/gameplay/items.c src/gameplay/attachments.c src/gameplay/recoil.c src/core/spring.c
   src/world/time_of_day.c src/world/weather.c src/gameplay/vehicle_def.c src/vfx/vfx_curve.c src/vfx/vfx_library.c src/vfx/vfx_sim.c src/vfx/vfx_flesh.c src/vfx/vfx_atlas.c src/player/holdpoint.c src/player/camera_fp_math.c
@@ -259,6 +259,13 @@ target_link_libraries(bake_anim PRIVATE dg_animcore)
 add_executable(fbx_textures tools/fbx_textures/fbx_textures.c)
 set_target_properties(fbx_textures PROPERTIES C_STANDARD 11)
 target_link_libraries(fbx_textures PRIVATE dg_animcore)
+
+# Character pipeline (docs/CHARACTERS.md): Skeleton / SkeletalMesh bakes, part splitting, retargeting.
+foreach(tool bake_skeleton bake_mesh split_parts retarget)
+  add_executable(${tool} tools/${tool}/${tool}.c)
+  set_target_properties(${tool} PROPERTIES C_STANDARD 11)
+  target_link_libraries(${tool} PRIVATE dg_animcore)
+endforeach()
 
 add_executable(validate_rig tools/validate_rig/validate_rig.c)
 set_target_properties(validate_rig PROPERTIES C_STANDARD 11)
@@ -317,6 +324,14 @@ if(MSVC)
   target_compile_options(test_recoil_ads PRIVATE /W3 /wd4100 /wd4201 /utf-8)
 endif()
 add_test(NAME recoil_ads COMMAND test_recoil_ads WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+
+add_executable(test_characters tests/test_characters.c)
+set_target_properties(test_characters PROPERTIES C_STANDARD 11)
+target_link_libraries(test_characters PRIVATE dg_animcore)
+if(MSVC)
+  target_compile_options(test_characters PRIVATE /W3 /wd4100 /wd4201 /utf-8)
+endif()
+add_test(NAME characters COMMAND test_characters WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
 
 add_executable(test_anim tests/test_anim.c)
 set_target_properties(test_anim PROPERTIES C_STANDARD 11)

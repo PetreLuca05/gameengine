@@ -4,6 +4,7 @@
 #include "post/post.h"
 #include "sky/sky.h"
 #include "graph/fg.h"
+#include "skeletal_mesh.h"
 #include "core/platform.h"
 #include <SDL3/SDL.h>
 #include <stdlib.h>
@@ -603,11 +604,6 @@ typedef struct SkinBatch { u32 mesh, texture, first, count; } SkinBatch;
 typedef struct SkinPass { SkinBatch batches[MAX_SKIN_DRAWS]; u32 batch_count; } SkinPass;
 typedef struct CpuSkin { VkDeviceSize offset; bool ok; } CpuSkin;
 
-static int cmp_skin_mesh(const void *a, const void *b) {
-    u64 ma = ((const SortKey *)a)->key, mb = ((const SortKey *)b)->key;   // texture << 32 | mesh
-    return ma < mb ? -1 : (ma > mb ? 1 : 0);
-}
-
 // Skinned passes: 0 = main (world), 1 = shadow, 2 = viewmodel (first-person arms, after the depth clear).
 static bool skin_in_pass(const SkinnedDraw *d, int pass) {
     bool vm = (d->flags & MAT_VIEWMODEL) != 0;
@@ -622,21 +618,24 @@ static bool prev_palette(u32 id, u32 *off, u32 *count);
 static u32 build_skin_pass(FrameResources *f, int pass, u32 base, SkinPass *out) {
     bool shadow = pass == 1;
     ArenaMark mark = arena_mark(&g_engine.frame_arena);
-    SortKey *keys = ARENA_PUSH_N(&g_engine.frame_arena, SortKey, R->skin_draw_count + 1);
+    u64 *keys = ARENA_PUSH_N(&g_engine.frame_arena, u64, R->skin_draw_count + 1);
+    u32 *draw_of = ARENA_PUSH_N(&g_engine.frame_arena, u32, R->skin_draw_count + 1);
+    u32 *order = ARENA_PUSH_N(&g_engine.frame_arena, u32, R->skin_draw_count + 1);
+    SkinBatchRun *runs = ARENA_PUSH_N(&g_engine.frame_arena, SkinBatchRun, R->skin_draw_count + 1);
     u32 n = 0;
     for (u32 i = 0; i < R->skin_draw_count; i++) {
         const SkinnedDraw *d = &R->skin_draws[i];
         if (!skin_in_pass(d, pass)) continue;
         if (pass == 0 && R->r_culling->i && d->radius > 0 && !sphere_visible(R->frustum, d->center, d->radius)) { R->stats.culled++; continue; }
-        keys[n].key = ((u64)d->texture << 32) | d->mesh;
-        keys[n].index = i;
+        keys[n] = ((u64)d->texture << 32) | d->mesh;
+        draw_of[n] = i;
         n++;
     }
-    qsort(keys, n, sizeof(SortKey), cmp_skin_mesh);
+    // Instanced batches per (texture, mesh): modular characters sharing parts batch per (part, LOD).
+    u32 nb = skin_batch_build(keys, n, order, runs);
     GpuSkinInstance *inst = (GpuSkinInstance *)f->instances.mapped;
-    out->batch_count = 0;
     for (u32 k = 0; k < n; k++) {
-        const SkinnedDraw *d = &R->skin_draws[keys[k].index];
+        const SkinnedDraw *d = &R->skin_draws[draw_of[order[k]]];
         GpuSkinInstance *g = &inst[base + k];
         g->color = d->color;
         g->params = v4(d->roughness, d->metallic, d->emissive, d->fade);
@@ -649,10 +648,10 @@ static u32 build_skin_pass(FrameResources *f, int pass, u32 base, SkinPass *out)
             if (prev_palette(d->object_id, &off, &count) && count == (d->bone_count >> 20) && off + count <= R->prev_bone_count)
                 g->info[2] = R->skin_bone_count + off + 1;
         }
-        if (out->batch_count && out->batches[out->batch_count - 1].mesh == d->mesh && out->batches[out->batch_count - 1].texture == d->texture)
-            out->batches[out->batch_count - 1].count++;
-        else out->batches[out->batch_count++] = (SkinBatch){ d->mesh, d->texture, base + k, 1 };
     }
+    out->batch_count = nb;
+    for (u32 b = 0; b < nb; b++)
+        out->batches[b] = (SkinBatch){ (u32)(runs[b].key & 0xFFFFFFFFu), (u32)(runs[b].key >> 32), base + runs[b].first, runs[b].count };
     arena_pop_to(mark);
     return n;
 }

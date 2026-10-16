@@ -21,7 +21,7 @@
 #define LIB_MAX_SETS 8
 #define LIB_MAX_CHARS 24
 #define LIB_MAX_MESHES 64
-#define LIB_MAX_SKINS 32
+#define LIB_MAX_SKINS 31            // < CHAR_MAX_PART_OPTIONS: players wear any skin as their body part
 
 // Cosmetic full-body skin (assets/human/skins.json entries + every .fbx / .skm dropped into
 // assets/skins/, with an optional same-name .json sidecar: name, atlas, tiles, aliases, sockets).

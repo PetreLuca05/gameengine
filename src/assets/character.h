@@ -47,7 +47,7 @@ typedef enum CharSlot {
     CSLOT_GEAR_0, CSLOT_GEAR_1, CSLOT_GEAR_2, CSLOT_GEAR_3,
     CSLOT_COUNT
 } CharSlot;
-#define CHAR_MAX_PART_OPTIONS 16
+#define CHAR_MAX_PART_OPTIONS 32        // the body slot of players holds their own mesh + every skin
 #define CHAR_PART_NONE 0          // selection byte: 0 = slot empty, k = option k - 1
 #define CHAR_MAX_HIDE 4
 
@@ -133,6 +133,11 @@ int character_find_option(const CharacterDef *d, int slot, const char *name);
 const CharPartOption *character_part(const CharacterDef *d, const u8 *sel, int slot);
 // Skeleton bones the selected parts other than `slot` hide (slot -1 = all of them).
 void character_hidden_bones(const CharacterDef *d, const u8 *sel, int slot, BoneSet *out);
+// Material colours of a part as worn (the mesh's own, overridden by the option's tints by name).
+void character_part_tints(const CharPartOption *o, const SkinMeshData *m, vec4 *out);
+// Identity of a part's GPU meshes (render cache / instancing): characters wearing the same mesh with
+// the same tints, texture and hidden bones share one GPU part, so their draws batch.
+u32 character_part_key(int mesh, const vec4 *tints, int tint_count, u32 texture, const BoneSet *hidden);
 // Appends an option to a slot (false when full).
 bool character_add_option(CharacterDef *d, int slot, const CharPartOption *o);
 // World transform of a socket from bone world transforms (false if missing).

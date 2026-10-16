@@ -98,15 +98,16 @@ Character meshes must use the canonical rig or a compatible one (`rig_validate`)
 | Model rig | Result |
 |---|---|
 | identical | OK |
-| subset (missing bones) | OK: missing bones keep the canonical bind |
-| extra **leaf** bones | OK: not animated (they keep their bind pose) |
-| renamed / re-parented / missing role bones | **FAIL** (the report names the bones) |
+| subset (missing bones) | OK: the mesh simply doesn't skin them |
+| extra **leaf** bones | OK: mesh-only leaf bones riding on their parent (never in the Skeleton) |
+| renamed / re-parented / missing role bones | **FAIL** (the report names the bones); renames are fixed with an alias sidecar |
 | proportions differ by more than the tolerance | warning (animation is retargeted by rotation only) |
 
 Bone names match ignoring the namespace prefix (`mixamorig:`, `mixamorig1:`, `mixamorig8:` … depending
 on the Mixamo download). Skinned vertices are **retargeted** at import: each skin cluster's bind pose
 in the file is mapped onto the canonical bone's bind pose, so a character with other proportions keeps
-its shape on the shared skeleton (identity for `Dummy.fbx`).
+its shape on the shared skeleton (identity for `Dummy.fbx`). The full Skeleton / SkeletalMesh model
+(per-mesh bone lists, aliases, modular parts, tools) is in [CHARACTERS.md](CHARACTERS.md).
 
 ## Characters
 
@@ -122,6 +123,8 @@ its shape on the shared skeleton (identity for `Dummy.fbx`).
 ```
 
 `character_id` (1–255) is the network id. It's replicated in the animation state and must be unique.
+`"mesh"` is a single body part; `"parts"` makes a modular character (slots, weighted options, tints,
+hide masks), see [CHARACTERS.md](CHARACTERS.md).
 `kind` is `player`, `zombie` or `dummy`. Material colors override the FBX material colors by name.
 `lods` and `lod_bias` are optional per-character LOD overrides. Shipped definitions: `player` (1),
 `zombie_placeholder` (2), `zombie_brute` (3), `zombie_runner` (4), `target_dummy` (5).
@@ -132,8 +135,9 @@ A skin is a cosmetic mesh on the shared skeleton: same animation, hitboxes, ragd
 another look. `skins.json` lists them (`id`, `name`, `mesh`, optional texture `atlas` + `tiles`), the
 default for players (`"player"`) and one per non-player character type (`"npc"`: armed NPCs `player` →
 Officer, `target_dummy` → Athlete); zombies keep their own meshes. The local player picks with
-`cl_skin` or **Pause → Skin** (applies immediately, saved). Other players are shown with the default
-skin (skins aren't replicated yet).
+`cl_skin` or **Pause → Skin** (applies immediately, saved). The choice is the player's body part,
+sent to the host and replicated, so everyone sees it. Dropping an `.fbx` / `.skm` into `assets/skins/`
+adds a skin with no other edit (CHARACTERS.md).
 
 Textured skins: the FBX textures are extracted with `fbx_textures`
 (`build/bin/fbx_textures --out assets/human/textures assets/human/Ch42_nonPBR.fbx`), then

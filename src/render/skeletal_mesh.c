@@ -124,6 +124,18 @@ int skm_vertex_bone(const SkeletalMesh *m, const SkinVertex *v) {
     return skm_skeleton_bone(m, v->joints[best]);
 }
 
+int skm_triangle_bone(const SkeletalMesh *m, const SkinLod *L, u32 first_index) {
+    // The skeleton bone of the most rigidly bound vertex (largest single weight; first vertex on ties).
+    int best_w = -1, bone = 0;
+    for (int k = 0; k < 3; k++) {
+        const SkinVertex *v = &L->verts[L->indices[first_index + k]];
+        int j = 0;
+        for (int q = 1; q < 4; q++) if (v->weights[q] > v->weights[j]) j = q;
+        if (v->weights[j] > best_w) { best_w = v->weights[j]; bone = skm_skeleton_bone(m, v->joints[j]); }
+    }
+    return bone;
+}
+
 int skm_mesh_only_count(const SkeletalMesh *m) {
     int n = 0;
     for (int i = 0; i < m->bone_count; i++) n += m->bones[i].skel < 0;
@@ -274,21 +286,16 @@ bool skm_extract_region(const SkeletalMesh *src, const BoneSet *region, Skeletal
     for (int l = 0; l < src->data.lod_count; l++) {
         const SkinLod *a = &src->data.lods[l];
         u32 *remap = (u32 *)malloc(sizeof(u32) * DG_MAX(a->vcount, 1u));
-        u8 *in = (u8 *)malloc(DG_MAX(a->vcount, 1u));
-        for (u32 i = 0; i < a->vcount; i++) {
-            remap[i] = 0xFFFFFFFFu;
-            in[i] = (u8)boneset_has(region, skm_vertex_bone(src, &a->verts[i]));
-        }
+        for (u32 i = 0; i < a->vcount; i++) remap[i] = 0xFFFFFFFFu;
         SkinLod *b = &out->data.lods[out->data.lod_count];
         b->verts = (SkinVertex *)malloc(sizeof(SkinVertex) * DG_MAX(a->vcount, 1u));
         b->vmat = (u8 *)malloc(DG_MAX(a->vcount, 1u));
         b->indices = (u32 *)malloc(sizeof(u32) * DG_MAX(a->icount, 1u));
         b->generated = a->generated;
-        // A triangle belongs to the part most of its vertices follow (each triangle lands in exactly
-        // one part of a disjoint split, so the parts tile the body).
+        // Each triangle has one owner bone (whatever region is asked for), so disjoint regions tile
+        // the body exactly: no holes, no doubled triangles at the seams.
         for (u32 t = 0; t + 2 < a->icount; t += 3) {
-            int votes = in[a->indices[t]] + in[a->indices[t + 1]] + in[a->indices[t + 2]];
-            if (votes < 2) continue;
+            if (!boneset_has(region, skm_triangle_bone(src, a, t))) continue;
             for (int k = 0; k < 3; k++) {
                 u32 v = a->indices[t + k];
                 if (remap[v] == 0xFFFFFFFFu) {
@@ -301,7 +308,6 @@ bool skm_extract_region(const SkeletalMesh *src, const BoneSet *region, Skeletal
             }
         }
         free(remap);
-        free(in);
         if (!b->icount) { free(b->verts); free(b->vmat); free(b->indices); memset(b, 0, sizeof(*b)); continue; }
         out->data.lod_count++;
     }

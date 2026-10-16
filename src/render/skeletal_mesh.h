@@ -85,6 +85,8 @@ int skm_skeleton_bone(const SkeletalMesh *m, int mesh_bone);
 void skm_joint_map(const SkeletalMesh *m, i16 *out);
 // Skeleton bone a vertex mostly follows.
 int skm_vertex_bone(const SkeletalMesh *m, const SkinVertex *v);
+// Owner bone of a triangle (region cuts): the skeleton bone of its most rigidly bound vertex.
+int skm_triangle_bone(const SkeletalMesh *m, const SkinLod *L, u32 first_index);
 int skm_mesh_only_count(const SkeletalMesh *m);
 
 // After a bake / load: LOD2+ joints folded onto the Skeleton's reduced LOD bone set, the skinned set,
@@ -106,8 +108,8 @@ bool skm_socket_world(const SkeletalMesh *m, const SkeletonInstance *si, const c
 
 // ------------------------------------------------------------------ derived meshes (modular parts)
 
-// New mesh from the triangles whose vertices mostly follow skeleton bones in `region` (all LODs), bone
-// list compacted. Splits a full body into head / torso / legs / hands parts when the art isn't split.
+// New mesh from the triangles whose owner bone (skm_triangle_bone) is in `region` (all LODs), bone list
+// compacted: disjoint regions tile the source exactly. Splits a full body into head / torso / legs / hands parts when the art isn't split.
 bool skm_extract_region(const SkeletalMesh *src, const BoneSet *region, SkeletalMesh *out);
 // Placeholder variety: push vertices out along their normal by `inflate` meters and scale them by
 // `scale` about their dominant bone's bind position (shapes stay on the skeleton).

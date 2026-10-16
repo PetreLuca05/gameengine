@@ -289,6 +289,22 @@ int character_find_option(const CharacterDef *d, int slot, const char *name) {
     return -1;
 }
 
+void character_part_tints(const CharPartOption *o, const SkinMeshData *m, vec4 *out) {
+    for (int k = 0; k < m->material_count; k++) {
+        out[k] = m->material_colors[k];
+        for (int q = 0; q < o->material_count; q++)
+            if (!strcmp(o->material_names[q], m->material_names[k])) out[k] = o->material_colors[q];
+    }
+}
+
+u32 character_part_key(int mesh, const vec4 *tints, int tint_count, u32 texture, const BoneSet *hidden) {
+    u32 key = anim_hash(&mesh, sizeof(int), ANIM_HASH_SEED);
+    key = anim_hash(tints, sizeof(vec4) * (size_t)tint_count, key);
+    key = anim_hash(&texture, sizeof(texture), key);
+    if (hidden && !boneset_empty(hidden)) key = anim_hash(hidden, sizeof(*hidden), key);
+    return key;
+}
+
 const CharPartOption *character_part(const CharacterDef *d, const u8 *sel, int slot) {
     if (slot < 0 || slot >= CSLOT_COUNT || !sel || sel[slot] == CHAR_PART_NONE) return NULL;
     int i = sel[slot] - 1;

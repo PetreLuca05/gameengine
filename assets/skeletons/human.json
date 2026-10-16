@@ -19,6 +19,11 @@
     "VB head_in_spine2":   { "source": "Spine2", "target": "Head" }
   },
   "groups": {
-    "torso": { "chains": ["Spine"], "bones": ["Hips"], "exclude_chains": ["Neck", "LeftArm", "RightArm"] }
+    "torso": { "chains": ["Spine"], "bones": ["Hips"], "exclude_chains": ["Neck", "LeftArm", "RightArm"] },
+    "_parts": "Disjoint regions that tile the body, for cutting a full-body mesh into modular parts ('region' in a character part).",
+    "part_head":  { "chains": ["Neck"] },
+    "part_torso": { "chains": ["Spine"], "exclude_chains": ["Neck", "LeftHand", "RightHand"] },
+    "part_hands": { "chains": ["LeftHand", "RightHand"] },
+    "part_legs":  { "groups": ["lower_body"] }
   }
 }

@@ -254,30 +254,24 @@ static int gpu_part_for(const CharPartOption *o, const BoneSet *hidden) {
     const SkinMeshData *m = &sm->data;
     const CharSkinDef *skin = o->skin >= 0 && o->skin < LIB->skin_count ? &LIB->skins[o->skin] : NULL;
     // Material -> colour (part tints by name over the mesh's own) and atlas tile (textured materials are white).
+    vec4 tints[SKIN_MAX_MATERIALS];
     u32 colors[SKIN_MAX_MATERIALS];
     int tile[SKIN_MAX_MATERIALS];
     int tiles = 0;
     TextureId tex = 0;
-    for (int k = 0; k < m->material_count; k++) {
-        vec4 col = m->material_colors[k];
-        for (int q = 0; q < o->material_count; q++)
-            if (!strcmp(o->material_names[q], m->material_names[k])) col = o->material_colors[q];
-        colors[k] = rgba8v(col);
-        tile[k] = 0;
-    }
+    character_part_tints(o, m, tints);
+    for (int k = 0; k < m->material_count; k++) tile[k] = 0;
     if (skin && skin->tile_count && skin->atlas[0]) {
         tex = assets_texture(skin->atlas);
         if (tex) {
             tiles = skin->tile_count;
             for (int t = 0; t < skin->tile_count; t++)
                 for (int k = 0; k < m->material_count; k++)
-                    if (!strcmp(m->material_names[k], skin->tile_material[t])) { tile[k] = t; colors[k] = 0xFFFFFFFFu; }
+                    if (!strcmp(m->material_names[k], skin->tile_material[t])) { tile[k] = t; tints[k] = v4(1, 1, 1, 1); }
         }
     }
-    u32 key = anim_hash(&o->mesh, sizeof(int), ANIM_HASH_SEED);
-    key = anim_hash(colors, sizeof(u32) * (size_t)m->material_count, key);
-    key = anim_hash(&tex, sizeof(tex), key);
-    if (hidden) key = anim_hash(hidden, sizeof(*hidden), key);
+    for (int k = 0; k < m->material_count; k++) colors[k] = rgba8v(tints[k]);
+    u32 key = character_part_key(o->mesh, tints, m->material_count, (u32)tex, hidden);
     for (int k = 0; k < CG->part_count; k++) if (CG->parts[k].key == key && CG->parts[k].mesh == o->mesh) return k;
     if (CG->part_count >= MAX_GPU_PARTS) { log_warn("characters: more than %d GPU parts", MAX_GPU_PARTS); return -1; }
     GpuPart *gp = &CG->parts[CG->part_count];
