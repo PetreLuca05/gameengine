@@ -576,6 +576,11 @@ bool spectator_hud(SpectatorHud *o) {
 
 // ------------------------------------------------------------------ setup / commands
 
+// The re-simulated player is "owned" here: snapshot interpolation leaves its transform alone.
+static bool owned_hook(World *w, int i) {
+    return !w->authority && SP.sim_slot >= 0 && w->type[i] == ET_PLAYER && w->player_slot[i] == SP.sim_slot;
+}
+
 void spectator_reset(void) {
     Cvar *c[8] = { SP.death_cam_time, SP.show_delay, SP.extrap, SP.blend_time, SP.pop_warn, SP.free_speed, SP.free_collide, SP.dump };
     memset(&SP, 0, sizeof(SP));
@@ -640,5 +645,6 @@ void spectator_init(void) {
     SP.dump = cvar_reg_int("spec_dump", 0, 0, 1, 0, "log a per-tick state hash of the local / watched player (determinism test, tools/tests/spec_compare.py)");
     cmd_register("spectate", cmd_spectate, "spectate <player|next|prev|off|free|auto> [eye|third|free]: watch a player (host / sv_cheats while alive)");
     cmd_register("respawn", cmd_respawn, "respawn now when the server allows it (sv_respawn_mode 1)");
+    repl_set_owned_hook(owned_hook);
     spectator_reset();
 }

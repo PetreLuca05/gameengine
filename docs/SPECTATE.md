@@ -1,20 +1,44 @@
 # Spectating (first-person "in-eye" observer)
 
-Status: **design, not implemented yet**. This file holds the data flow, the latency budget and the
-determinism audit. The implementation plan at the end lists the code changes.
-
 Dead players (and `spectate` for dev / host) cycle through living players and see exactly what the
-target sees: their camera, hold point, ADS, scope PiP, recoil, sway, crosshair spread, HUD, hit
-markers, hurt markers, phone and vehicle view.
+target sees. That covers the target's:
+
+- camera and hold point;
+- ADS, scope PiP and phone lens;
+- recoil, sway and crosshair spread;
+- HUD (ammo, health, hotbar, reload / use / hold rings);
+- hit markers, hurt markers and damage flash;
+- vehicle view.
+
+The watched player is presented through the same pipeline as the local player: it becomes this
+machine's **view slot**. On a client it is re-simulated from its own relayed commands, not drawn
+from interpolated snapshots.
+
+Code:
+
+| Part | Files |
+|---|---|
+| Host | `src/net/spectate.c/.h`: observer table, rules, relay, death flow |
+| Pure core | `src/net/spectate_core.c`, tested by `tests/test_spectate.c` |
+| Observer client | `src/player/spectator.c/.h` |
+| View slot | `game_view_slot` / `game_view_player` / `game_view_cmd` in `src/game/game.c` |
+| Spectator bar | `src/ui/hud.c` |
+
+Status:
+
+- **Implemented.**
+- `test_spectate` passes.
+- The game build and the multi-process tests (`tools/tests/spec_net.sh`) have to be run on the
+  Windows toolchain. See "Verification" at the end.
 
 ## CS:GO in-eye vs this design
 
 | | CS:GO in-eye | Deadground |
 |---|---|---|
-| Target view source | Server snapshot of the target, interpolated (`cl_interp`) | The target's own **forwarded UserCmds**, run through the same prediction path the target runs (`game_sim_player`, `chars_local_predict`, hold point, recoil, sway, spread) |
-| "Local" data (ammo, angles, recoil, HUD) | Target's local-player props are also sent to observers | The same: the snapshot private block (`PlayerSim`, ack seq, hold progress, container) and the inventory go to the target's in-eye observers |
-| Correction | None needed (it is just a snapshot) | Reconciled against the host's `PlayerSim` exactly like the local player (`game_cl_reconcile`) |
-| Delay | L(T→H) + server tick + snapshot interval + L(H→O) + interp ≈ L1 + L2 + 130 ms | L(T→H) + L(H→O) + ≤ 1 tick (forwarded at receive time, no interp) |
+| Target view source | Server snapshot of the target, interpolated (`cl_interp`) | The target's own **relayed UserCmds**, run through the same prediction path the target runs (`game_sim_player`, `chars_local_predict`, hold point, recoil, sway, spread) |
+| "Local" data (ammo, angles, recoil, HUD) | The target's local-player props are also sent to observers | The same: the snapshot local data (`PlayerSim`, ack seq, hold progress) and the inventory go to the target's observers |
+| Correction | None needed (it is just a snapshot) | Reconciled against the host's `PlayerSim` exactly like the local player |
+| Delay | L(T→H) + server tick + snapshot interval + L(H→O) + interp ≈ L1 + L2 + 130 ms | L(T→H) + L(H→O) + ≤ 1 tick (relayed at receive time, no interp) |
 
 ## Data flow
 
@@ -22,70 +46,114 @@ markers, hurt markers, phone and vehicle view.
  target client T                    host H                                  observer client O
  ───────────────                    ──────                                  ─────────────────
  build_cmd (seq S) ──MSG_CMDS──▶ host_handle_cmds
- predict S locally               ├─ game_sv_receive_cmd (queue, as today)
-                                 └─ spectate_forward_cmds ──MSG_SPEC_CMDS──▶ spec ring[S] (unreliable,
-                                    (same net_update call, flushed          last 4 cmds, like MSG_CMDS)
-                                    at once, not on the tick)               │
-                                                                            ▼ each O tick:
-                                 host_tick: simulate S                      sim target S (first=true:
-                                 (authoritative)                            fx, recoil_vis kick, sounds)
-                                                                            or extrapolate (last cmd)
-                                 net_host_after_tick, per observer:         ▲
-                                   private block = TARGET's PlayerSim,      │ reconcile: restore PlayerSim@A,
-                                   ack = target's last_processed_seq A, ────┘ replay ring A+1..latest
-                                   hold_progress, open_container,
-                                   spec block (mode, target, flags,
-                                   respawn timer, delay stamp)
+ predict S locally   (+send_ms)  ├─ game_sv_receive_cmd (queue, as before)
+                                 └─ spectate_host_cmds ───MSG_SPEC_CMDS───▶ SpecCmdRing[S] (unreliable,
+                                    (same net_update, flushed at its end)   last 4 commands)
+                                                                            │
+                                                                            ▼ each O tick (spectator_tick):
+                                 host_tick: simulate S                      SpecClock: simulate S (first =
+                                 (authoritative)                            true: fx, recoil kick, sounds)
+                                                                            or extrapolate (last command)
+                                 net_host_after_tick, per client c:         ▲
+                                   src = spectate_source(c) (the target)    │ reconcile: restore PlayerSim@A,
+                                   local data of src (ack A = its last  ────┘ replay ring A+1..sim_seq
+                                   processed seq, PlayerSim, hold)
+                                   + spectator block (mode, target, flags,
+                                   respawn timer, target one-way delay)
                                    relevance centre = target position
-                                 MSG_INVENTORY(target's inventory, slot) ──▶ HUD ammo / hotbar
-                                 events with target == T (EV_HIT_CONFIRM,──▶ hit markers, hurt markers,
-                                   EV_HURT, EV_HINT ...) also go to O        damage flash, hints
+                                 MSG_INVENTORY{slot = src}  ───────────────▶ HUD ammo / hotbar of the target
+                                 events with target == T (hit confirm, ───▶ hit / hurt markers, hints
+                                   hurt, hint, sound, chat) also go to O
 ```
 
-- **Observer state (host, `src/net/spectate.c`)**: `SpecObserver { u8 mode (SPEC_IN_EYE / SPEC_THIRD /
-  SPEC_FREE / SPEC_OFF), target, flags; }` per slot, plus a derived `observers[target]` bitmask (u8,
-  `MAX_PLAYERS` ≤ 8). Every "send X to the owner of slot s" site becomes "send to `s` and to each
-  in-eye bit in `observers[s]`": the private snapshot block, `send_inventory`, the event filter,
-  forwarded commands. One extra recipient per field; the code that builds the data is not
-  duplicated.
-- **Requests (O → H)**: `RPC_SPECTATE {mode, target | -1 next | -2 prev}`. The host validates (below) and
-  answers in the snapshot's spec block. An illegal target is refused and the observer stays on its
-  current target.
-- **Switching target**: the host sends the target's current state at once, plus its last 32
-  commands. That is a full private block in the next snapshot (forced, not waiting for
-  `sv_snaprate`) and a `MSG_SPEC_CMDS` burst. The observer resets its replica from that state and
-  replays the burst, so the first frame already shows the target's predicted present. The camera is
-  inertialized over `spec_blend_time` (150 ms) from the previous view.
-- **Host's own player as target**: the host's local commands go into the same forward path from
-  `tick()`. `last_processed_seq` is set for the local player too; today only remote players set it.
-- **Host as observer (listen server)**: the host already simulates the target authoritatively, so it
-  only switches its *view slot*. There is no re-simulation, and the delay is L(T→H).
+### Observer table and requests (host)
+
+- Each slot has a `SpecObserver { mode, target, dev, killer, forced, seq, free_pos }`.
+  - `mode` is one of `SPEC_OFF`, `SPEC_IN_EYE`, `SPEC_THIRD`, `SPEC_FREE`.
+- Requests reach the host through `RPC_SPECTATE (mode, target | next | prev | auto | keep, dev)`.
+  `spectate_request` resolves and validates them. A refusal sends the reason to the player as a hint.
+
+### What a client receives about its spectated player
+
+- **One source per client.** `spectate_source(c)` is the slot whose local data, inventory and
+  relevance client `c` receives. It is the target in first or third person, else `c` itself. This
+  replaces "the client's own" with one extra recipient per field; no code is duplicated.
+- **Events.** `spec_event_delivers` routes events for remote clients and for the host's own
+  player:
+  - a client gets its own events, plus its target's HUD feedback (hit confirm, hurt, hint, sound,
+    chat);
+  - events the target predicted itself (`except == target`: its tracers, use animation) are
+    skipped, because the observer predicts them too;
+  - container and bench windows stay with the target.
+
+### Commands, switching and relevance
+
+- **Relay.** `host_handle_cmds` hands every arriving command to `spectate_host_cmds`. The host
+  relays the newest 4 to each observer of that player right away and flushes at the end of
+  `net_update`. It does not wait for the next tick or snapshot. The host's own player's commands
+  enter the same path from `tick()`.
+- **Switching target** (`seq` changes, `forced = 2`):
+  1. The next two snapshots go out at once, without waiting for `sv_snaprate`, and carry
+     `SPECF_FORCED`.
+  2. Each is followed by a relay burst of every command after that snapshot's ack (up to 32).
+  3. The observer starts its replica from the snapshot state and replays the burst, so it is at the
+     target's present within a tick or two.
+  4. The camera blends over `spec_blend_time` (150 ms) from the last rendered view.
+- **Relevance.** `spectate_relevance_center` is:
+  - the target's position in first or third person;
+  - the free-camera position, sent at 4 Hz by `RPC_SPEC_POS`;
+  - the observer's own position otherwise.
+
+  `repl_capture` and the horde rate limiter use it. Horde AI tiers keep using living players only,
+  so a spectator does not wake zombies.
 
 ### Observer client pipeline (`src/player/spectator.c`)
 
-- `G->local_slot` stays the observer's own (dead) player. A new `G->view_slot` is whose eyes are
-  rendered (`game_view_player()`).
-- Every presentation site listed in the audit switches from `local_slot` to `view_slot`. Command
-  building, focus, interaction, inventory UI and RPCs stay on `local_slot`.
-- The target slot gets a `PhysCharacter` on the observer (as the local player does in
-  `setup_replica`). It is excluded from `repl_interpolate` and `chars_client_tick`, and is driven by
-  `chars_local_predict`, i.e. treated as local.
-- Per observer tick:
-  1. If commands up to `next = sim_seq + 1` are present, restore the confirmed state if the last tick
-     was extrapolated, then simulate `next` with `first = true`. Shot fx, the `recoil_vis` kick and
-     sounds fire once per command, as on the target. A backlog over 2 is caught up 2 per tick (the
-     host's queue rule); a backlog over 16 is jumped.
-  2. Otherwise **extrapolate** with the last command: edge buttons cleared, `first = false`, so there
-     are no fx and no shots. This runs for up to `spec_extrap_ticks` (default 6 = 100 ms), then the
-     target holds.
-  3. When the real command arrives, it is rewound and re-simulated. The positional difference goes
-     into the view's `error_offset` (the local reconcile smoothing) and is logged as a pop if it is
-     over `spec_pop_warn` (5 cm).
-- Snapshot private block → `spectator_reconcile(sim, ack)`. This is `game_cl_reconcile` generalized to
-  (slot, cmd ring); the local path calls the same function with its own history.
-- Observer input drives only spectator controls: next / prev (mouse 1 / 2, LB / RB), 1-8, a mode
-  toggle (Space), the player-list click and `Esc` (pause menu). No `UserCmd` field of the observer
-  reaches the target.
+**View slot and its consumers.** `G->local_slot` stays the observer's own (dead) player.
+`game_view_slot()` is the watched player in first or third person. Every presentation site uses it:
+
+| Area | What uses the view slot |
+|---|---|
+| Camera | Eye interpolation, ADS, sway, head socket, death / third-person / free camera |
+| Body and items | Flashlight, hands and first-person body, sights, phone lens |
+| Overlays | Crosshair, HUD, post feedback |
+| Vehicles | Camera and HUD |
+| Weapon feel | Recoil camera kick (`on_shot`), crosshair spread, predicted shot effects (`local_view`), the fire animation trigger |
+
+Command building, focus, interaction, inventory UI, RPCs and the own skin stay on `local_slot`.
+
+**Promotion.** The target gets its own `PhysCharacter`, as the local player has. Its kinematic
+capsule is removed (`repl_player_body`). An owned-entity hook stops snapshot interpolation from
+touching it, and `chars_present_tick` treats it as local.
+
+**Per observer tick (`spectator_tick`):**
+
+1. `spec_clock_step` decides which relayed commands to simulate. A backlog over 2 catches up 2 per
+   tick (the host's queue rule); over 16 it jumps.
+2. A rewind restores the confirmed state, dropping the extrapolated ticks.
+3. Real commands are simulated with `first = true`.
+   - When catching up a backlog, only the newest two get effects.
+   - The animation steps once per command (`chars_local_predict`).
+4. The view angles after a command are the command's angles plus that command's recoil kick, which
+   `game_sim_player` reports through `spectator_note_kick`. That is what the target's view holds
+   after the same tick. Render interpolates them by `alpha`.
+5. Late commands are covered by extrapolation:
+   - the last command is repeated for up to `spec_extrap_ticks` (default 6), with its post-kick
+     angles and without presses (no shots, jumps or uses), and `first = false`;
+   - the target then holds;
+   - when the real command arrives, the extrapolated ticks are rewound;
+   - the position difference fades out through the view's error offset, the same smoothing as the
+     local reconcile (`cam_recon_smooth_time`);
+   - corrections above `spec_pop_warn` are counted.
+
+**Snapshot local data (`spectator_cl_local_data`):** restore the host's state at ack, replay the ring
+after it with `first = false`, re-extrapolate. This is exactly `game_cl_reconcile`.
+
+**Host as observer (listen server):** the host already simulates the target authoritatively. Only
+the view slot changes; there is no replica. The camera follows the commands the host processed.
+
+**Observer input** drives only the spectator controls. `build_cmd` sends the own (dead / dev)
+player no movement and no buttons. No field of the observer's `UserCmd` reaches the target.
 
 ## Latency budget (one way, target input → observer screen)
 
@@ -93,169 +161,214 @@ markers, hurt markers, phone and vehicle view.
 |---|---|---|
 | T: input → command | 0 | The same tick quantization the target itself sees, so it is not counted |
 | T → H transit | L1 | `net_client_send_cmds` flushes at once |
-| H: wait for `net_update` | 0 – 1 host frame (avg ½ frame) | Forwarded inside the receive handler and flushed there; it does **not** wait for the host tick or `sv_snaprate` |
+| H: wait for `net_update` | 0 – 1 host frame (avg ½) | Relayed inside the receive handler and flushed at the end of the same `net_update`; it does **not** wait for the host tick or `sv_snaprate` |
 | H → O transit | L2 | Unreliable channel, 4× redundancy |
 | O: wait for `net_update` + next tick | 0 – 1 tick (avg ½) | Simulated on the first observer tick after arrival; no interpolation buffer |
 | O: render | alpha interpolation inside the tick | The same as the local player |
 | **Floor** | **L1 + L2** | One hop each way, which no relay design can beat. The only way below it is a direct T→O peer link, which this host-authoritative P2P layer does not have |
-| **Expected** | L1 + L2 + ~1 tick (16.7 ms at 60 Hz) | |
-| Test bound (`net_fakelag 80` on T and H) | ≤ 2 × 80 + 16.7 ms | `tools/tests/spec_net.sh` |
+| **Expected** | L1 + L2 + ~1 tick (16.7 ms at 60 Hz) | Plus the frame quantization of the two `net_update` waits at the processes' frame rates |
+| Test bound (`net_fakelag 80` on every machine) | ≤ 2 × 80 + 16.7 ms | `tools/tests/spec_net.sh` → `spec_compare.py` |
 
-**`spec delay` readout.** The observer shows `spec delay: X ms`:
+**The `spec delay` readout:**
 
-- X = (target's one-way estimate, which the host puts in the spec block as RTT/2 in ms) + (observer's
-  `app_rtt_ms` / 2) + (backlog ticks × 16.7).
-- In the LAN test all processes share one clock (`platform_time`), so a debug field in
-  `MSG_SPEC_CMDS` carries the target's send time and the test logs the measured value next to the
-  estimate.
-- The tooltip text says: "Time from the player's input to your screen. Minimum is one network hop to
-  the host plus one hop to you."
+- The HUD shows X = (the target's one-way estimate, which the host puts in the spec block as its
+  ENet RTT / 2) + (the observer's `app_rtt_ms` / 2) + (backlog) + ½ tick.
+- In the LAN test all processes share one clock. Commands carry the target's send stamp
+  (`MSG_CMDS` `send_ms`, relayed with them), so the observer logs the **measured** delay next to
+  the estimate (`spec_stats`, `spec_dump 1`).
+- The settings tooltip and the HUD readout both state the floor: one hop to the host plus one hop
+  to you.
 
 ## Determinism audit
 
 Every system that changes what the target sees must be a pure function of (commands, replicated
-state, seeds, tick), or be marked cosmetic.
+state, seeds) or be marked cosmetic. "Changed" lists what this work did.
 
-- **Status: Pure.** No change.
-- **Status: Fix.** The change is listed.
-- **Status: Cosmetic.** It may differ by a converging filter or noise. The observer runs it with its
-  own state and settings.
-
-| System | Code | State | RNG / clock | Status | Change |
+| System | Code | State | RNG / clock | Status | Changed |
 |---|---|---|---|---|---|
-| Movement, mantle, hang, noclip | `player/movement.c` `player_move_tick` | `PlayerMove` | SIM_DT | Pure | none (already predicted + reconciled) |
-| Aim recoil, recovery, countered | `gameplay/recoil.c` | `RecoilState` in `WeaponState` | pattern RNG from `mag_seed` (`recoil_mag_seed(seq, slot)`) + `shot_index` | Pure | none |
-| Bloom / flinch | `weapons.c:144` `weapon_flinch` (host, on damage) | `rc.bloom` | — | Pure via reconcile | only from the replicated `PlayerSim` (host-only input) |
-| Spread / cone | `weapons.c:109` `weapon_current_spread`, `chars_limb_spread` | `PlayerSim` + limb status | — | Pure | limb status is replicated (`AnimNetState`) |
-| Shot directions | `weapons.c:609` `shot_seed(seq, slot, shots)` | — | seeded | Pure | none |
+| Movement, mantle, hang, noclip | `player/movement.c` `player_move_tick` | `PlayerMove` | SIM_DT | Pure | **Landing stamp** `land_tick` was the machine-local `w->tick` (it differed between owner and observer), now the command seq |
+| Aim recoil, recovery, countered | `gameplay/recoil.c` | `RecoilState` in `WeaponState` | pattern RNG from `mag_seed` (`recoil_mag_seed(seq, slot)`) + `shot_index` | Pure | none (`test_spectate`: 600 ticks bit-identical through snapshot + replay + extrapolate / rewind) |
+| Bloom / flinch | `weapons.c` `weapon_flinch` (host, on damage) | `rc.bloom` | — | Pure via reconcile | none (a host-only input: the observer gets it with the local data, like the owner) |
+| Spread / cone | `weapons.c` `weapon_current_spread`, `chars_limb_spread` | `PlayerSim` + limb status | — | Pure | none (limb status is replicated in `AnimNetState`) |
+| Shot directions | `weapons.c` `shot_seed(seq, slot, shots)` | — | seeded | Pure | none |
 | Fire timing, burst, fire mode, mag | `weapons.c` `recoil_fire_budget` | `WeaponState` | SIM_DT | Pure | none |
-| ADS progress, breath, sway_k | `weapons.c:619` `gun_feel_tick` | `WeaponState` | SIM_DT | Pure | none |
-| Gameplay aim sway / ADS bob | `weapon_aim_offset_deg`, `weapon_sway_time(seq)` | — | seq-based | Pure | callers take the seq of the **viewed** slot's last command, not `G->last_cmd` |
-| ADS blend (render) | `game.c` `G->ads_prev`, `game_ads_vis` | per local player | — | Fix | per view slot |
-| Visual recoil springs | `game.c` `on_shot` / `weapon_feel_tick`, `G->recoil_vis` | Game | kick seeded by the shot seed; stepped SIM_DT | Fix | kick when `ev->slot == view_slot` on the first simulation of a command; step with the view slot's weapon |
-| Crosshair spread | `game.c` `G->spread_prev/cur`, `ui/crosshair.c` | Game | — | Fix | view slot; `CH.ads_fade` is cosmetic |
-| Anim controller, variants | `anim/controller.c` | `CharacterInst` | `AP_SEED` from replicated anim events | Pure | `chars_local_predict` for the view slot; excluded from `chars_client_tick` |
-| Procedural hold / weapon_hold | `anim/weapon_hold.c`, `procedural.c` | `CharacterInst` | SIM_DT springs | Pure | the view slot forced to LOD 0 like the local one |
-| Hold point breathing / bob phase | `player/holdpoint.c:500,513` `st->t`, `st->bob_phase` | `HoldPointState` | free-running since character creation | **Fix** | `st->t = seq * SIM_DT`; bob phase from the replicated move phase or seq, so a late observer is in phase |
-| Hold point look lag | `holdpoint.c:492` | springs | aim from `player_inputs` | Fix | the view slot uses `player_inputs` (simulated `PlayerSim`), not `inputs_from_net` |
-| Item / viewmodel kick on the body | `characters.c:1300` `hands_vm_kick` | `hands` singleton, sampled at render alpha | frame | **Fix** | per-tick post pass samples `recoil_vis` at the tick, keyed on view slot (today it reads a frame-sampled value) |
-| Camera (eye smoothing, landing, FOV, roll) | `player/camera.c` `camera_update` | `ViewState` | frame dt | Cosmetic (converging) | observer uses its own `ViewState`; yaw / pitch = target command angles interpolated prev → cur by alpha (not mouse) |
-| Camera bob phase | `camera.c:63` | `ViewState.bob_phase` | free-running | Fix if `cam_bob_scale > 0` (default 0) | phase from seq |
-| Head stabilizer, camera collision | `camera_fp_math.c`, `camera_fp.c` `CamHeadStab` | Game | frame dt springs | Cosmetic (converging) | reset on target switch; collision from the viewed eye |
-| First-person body / camera socket | `characters.c` `chars_fp_camera`, `fp_prepare`, `chars_render_local_fp` | singleton `FP`, `g_fp_aim_off` | — | Fix | pass view slot (already a parameter); head collapse on the viewed character |
-| Hands rig (clip fades, interaction reach) | `player/hands.c` `hands_update` | singleton `H` | frame dt blends; reach from local `input_peek_press` + `G->focus` | Fix | reach from the forwarded cmd (`BTN_USE` edge + `use_target`); reset `H` on switch; fades cosmetic |
-| Scope PiP, lens, reticle | `game/game_sights.c` | — | — | Pure given ADS + item pose | view slot |
-| Hit markers, hurt markers, damage flash | `game_events.c`, `G->hitmarker_*`, `hurt[]` | Game | frame-dt decay | Fix (routing) | host also delivers `EV_HIT_CONFIRM` / `EV_HURT` / `EV_HINT` for the target to its in-eye observers; decay cosmetic |
+| ADS progress, breath, sway_k | `weapons.c` `gun_feel_tick` | `WeaponState` | SIM_DT | Pure | none |
+| Gameplay aim sway / ADS bob | `weapon_aim_offset_deg`, `weapon_sway_time(seq)` | — | seq-based | Pure | Render and crosshair take the seq of the **viewed** player's latest command (`game_view_cmd`) |
+| ADS blend (render) | `game.c` `G->ads_prev`, `game_ads_vis` | per view | — | Pure | View slot |
+| Visual recoil springs | `game.c` `on_shot` / `weapon_feel_tick`, `G->recoil_vis` | Game | kick seeded by the shot seed; stepped at SIM_DT | Pure | Kicked for the view slot's shots (first simulation of a command), stepped with its weapon; reset on a target switch |
+| Recoil view kick | `game_sim_player` `wo.view_kick` | — | — | Pure | Reported per command (`spectator_note_kick`); the observer's camera = command angles + kick |
+| Crosshair spread | `G->spread_*`, `ui/crosshair.c` | Game | — | Pure | View slot; `CH.ads_fade` is cosmetic |
+| Anim controller, variants | `anim/controller.c` | `CharacterInst` | `AP_SEED` from replicated anim events | Pure | `chars_local_predict` for the watched player (once per command); out of `chars_client_tick` / interpolation while watched |
+| Fire / melee animation trigger | `characters.c` `chars_notify_attack` | — | — | Pure | Also for the view slot (was the owner only) |
+| Procedural hold / weapon_hold | `anim/weapon_hold.c`, `procedural.c` | `CharacterInst` | SIM_DT springs | Pure | View slot forced to LOD 0 like the local one (`c->local`) |
+| Hold point breathing | `player/holdpoint.c` `st->t` | `HoldPointState` | was free-running since character creation | **Fixed** | `t = command seq × SIM_DT` for players simulated on this machine (`ProcInput.hp_clock`) |
+| Hold point / camera movement bob | `holdpoint.c` `st->bob_phase`, `camera.c` `bob_phase` | was per-machine accumulators | free-running | **Fixed** | New replicated `PlayerMove.stride` (walk-cycle phase stepped in `player_move_tick`), read by both |
+| Hold point look lag | `holdpoint.c` | springs | aim from `player_inputs` | Pure | The view slot uses `player_inputs` (its simulated `PlayerSim`), not `inputs_from_net` |
+| Item / viewmodel kick on the body | `characters.c` `hands_vm_kick` | `hands` singleton, sampled at render alpha | frame | Cosmetic (converging) | Follows the view slot's `recoil_vis`; frame-sampled as for the local player |
+| Camera (eye smoothing, landing dip, FOV, roll) | `player/camera.c` `camera_update` | `ViewState` | frame dt | Cosmetic (converging) | Reset on a target switch; yaw / pitch = the target's command angles (+kick) interpolated, not the mouse |
+| Head stabilizer, camera collision | `camera_fp_math.c`, `camera_fp.c` `CamHeadStab` | Game | frame-dt springs | Cosmetic (converging) | Reset on a switch; collision cast from the viewed player's capsule |
+| First-person body / camera socket | `characters.c` `chars_fp_camera`, `chars_render_local_fp` | `FP` singleton | — | Pure | View slot (already a parameter) |
+| Hands rig (clip fades, interaction reach) | `player/hands.c` `hands_update` | `H` singleton | frame-dt blends | Pure input / cosmetic fades | Reach from the target's commands (`BTN_USE` edge + `use_target`), look delta from its view change |
+| Scope PiP, lens, reticle | `game/game_sights.c` | — | — | Pure given ADS + item pose | Via `game_ads_vis` / the drawn item |
+| Hit markers, hurt markers, damage flash | `game_events.c`, `G->hitmarker_*`, `hurt[]` | Game | frame-dt decay | Routing fixed | Host delivers the target's `EV_HIT_CONFIRM` / `EV_HURT` / `EV_HINT` / `EV_SOUND` / `EV_CHAT` to its observers; decay is cosmetic |
 | Kill feed | `EV_KILL` to all | — | — | Pure | none |
-| Phone (landscape, rec, front cam, driven rotation) | `cmd.phone_flags`, `phone_rot` | UserCmd | — | Pure | none |
-| Phone zoom | `phone.c:582` `PH.zoom` | local | frame dt, not in the cmd | **Fix** | zoom (u8) into `UserCmd`; observer phone renders the view slot |
-| Vehicle seat, driving input | `PlayerMove` seat fields, vehicle block | replicated | — | Pure | none |
-| Vehicle FP camera | `game_vehicles.c` `vehicles_view_frame`, `vehicles_camera` | `VG.prev_veh_yaw` | frame | Fix | the slot is a parameter; the forwarded cmd yaw already holds the vehicle yaw (no `view_frame` on top) |
-| Vehicle 1st / 3rd person toggle | `VG.cam_tp` | local | — | Fix | bit in `UserCmd` (observer follows the target's choice) |
-| Post feedback (low health, death desat, sprint, flash) | `game_post.c:486` `apply_feedback` | `GP` | frame-dt smoothing | Cosmetic | reads the view slot's health / mode |
-| Lens droplets | `game_weather.c:388`, `weather.c:347` | own LCG seeded 0xBEEF | frame dt | Cosmetic | marked cosmetic (rain is weather-replicated; drop positions are noise) |
-| Film grain, chromatic, vignette, TAA jitter | `render/post` | — | per frame | Cosmetic | none |
-| Thunder audio delay | `game_weather.c:433` | — | `platform_time` | Cosmetic | none |
-| Bolt-cycle sound / shells | `game.c` `G->bolt_timer` | Game | SIM_DT | Cosmetic | view slot |
+| Phone (landscape, rec, front camera, driven rotation) | `cmd.phone_flags`, `phone_rot` | UserCmd | — | Pure | Observer's phone renders the view slot's lens |
+| Phone zoom | `phone.c` `PH.zoom` | was local only | frame dt | **Fixed** | `UserCmd.phone_zoom` (×32); the smoothing toward it is cosmetic |
+| Vehicle seat, driving input | `PlayerMove` seat fields | replicated | — | Pure | none |
+| Vehicle first-person / third-person camera choice | `VG.cam_tp` | was local only | — | **Fixed** | `BTN_VEH_CAM` in the command; the camera follows the view slot's vehicle |
+| Post feedback (low health, death desaturation, sprint, flash) | `game_post.c` `apply_feedback` | `GP` | frame-dt smoothing | Cosmetic | View slot's health / mode (none on the free camera) |
+| Lens droplets | `game_weather.c` `lens_frame`, `weather.c` | own LCG seeded 0xBEEF | frame dt | **Cosmetic** | none: rain amount is replicated weather, drop placement is noise |
+| Film grain, chromatic, vignette, TAA jitter | `render/post` | — | per frame | **Cosmetic** | none |
+| Thunder audio delay | `game_weather.c` | — | `platform_time` | **Cosmetic** | none |
+| Bolt-cycle sound / shells | `game.c` `G->bolt_timer` | Game | SIM_DT | Cosmetic | View slot |
 
-There is no wall clock (`platform_time`) in any first-person gameplay path. The *Fix* rows are
-(1) "local player" → "view slot" re-keying, and (2) three phase accumulators that run from creation
-instead of from the tick: hold point `t`, hold point `bob_phase`, camera `bob_phase`.
+There is no wall clock (`platform_time`) in any first-person gameplay path.
 
 ## Validation (host)
 
-- `spectate_validate(obs, mode, target)` (pure, unit-tested):
-  - A target must be `active`, not `EF_DEAD`, not the observer, and not itself spectating.
-  - The observer must be dead (`MOVE_DEAD`) or dev (`sv_cheats` / the host's local player via the
-    `spectate` command).
-  - `sv_spec_fp_enemies 0` refuses in-eye on another team. There are no teams yet, so `team_of()`
-    returns 0 for everyone and the rule is ready for PvP.
+`spec_validate` is pure and unit-tested. The rules:
+
+- **Target.** It must be active, not dead, not the observer, and not itself spectating.
+- **Observer.**
+  - It must be dead, or dev: the host's own player with the `spectate` command, or anyone with
+    `sv_cheats`.
   - `sv_spec_allowed 0` turns spectating off.
-  - There is no round system yet, so "no spectating pre-round" hooks in as `spectate_round_allows()`,
-    which is always true today.
-- A target that dies or leaves auto-advances observers to the next legal target. If there is none,
-  they go to the free camera.
-- The observer never affects the target. Spectator RPCs only change `SpecObserver`. The observer's
-  `MSG_CMDS` are still processed for its own dead player (it falls / lies dead) and the button bits
-  are ignored.
+- **Enemies.**
+  - `sv_spec_fp_enemies 0` refuses first person on another team. The request falls back to third
+    person (`SPECF_FP_DENIED`).
+  - There are no teams yet: everyone is team 0.
+- **Rounds.** There is no round system yet. "No spectating pre-round" hooks into
+  `SpecRules.round_allows`, which is always true today.
+- **Auto-advance** (`spectate_host_tick`). A target that dies, leaves or starts spectating moves its
+  observers to the next legal player. With nobody legal they go to the free camera. An observer
+  that comes back to life (respawn) stops spectating.
+- **Isolation.** The observer never affects the target. Spectator RPCs only change its
+  `SpecObserver`. Its own commands still drive its own dead player, and `build_cmd` strips them.
 
 ## Death flow
 
-1. On death, the existing ragdoll head camera (`camera_fp_death`) runs for `spec_death_cam_time`
-   (default 3 s).
-2. The observer then auto-enters in-eye on the killer (`EV_KILL ent2`) if that is a living player,
-   else on the nearest living player. With nobody alive it goes to the free camera (noclip,
-   `spec_free_collide` toggles collision).
-3. Respawn:
-   - `sv_respawn_time` (default 3 s, today's `PLAYER_RESPAWN_TIME`).
-   - `sv_respawn_mode`: 0 auto (today), 1 on request (the `Respawn` button once the timer runs out).
-   - With auto respawn at 3 s and a 3 s death cam, spectating only appears with mode 1 or longer
-     respawn times.
-   - The respawn timer is added to the spec block, so the HUD can count down.
-4. `sv_join_dead 1`: late joiners join dead and start in spectate (the host flags the player dead
-   right after `game_spawn_player`).
-5. `spectate <player|next|prev|off> [eye|third|free]`: dev / host, without dying.
+1. **On death** (`apply_damage` → `spectate_on_death`): the killer is remembered and the respawn
+   timer comes from `sv_respawn_time` (default 3 s, the old `PLAYER_RESPAWN_TIME`).
+2. **Death camera.** The existing ragdoll-head camera (`camera_fp_death`) runs for
+   `spec_death_cam_time` (default 3 s). Fire skips it.
+3. **Auto spectate.** The client then requests first person on the killer
+   (`SPEC_REQ_AUTO`: the killer if it is a living player, else the nearest living player). With
+   nobody alive it gets the free camera. This only happens when the respawn is more than 1.5 s
+   away, or manual. With the default 3 s respawn there is no spectating unless the respawn is
+   slower or `sv_respawn_mode` is 1.
+4. **Respawn rules.**
+   - `sv_respawn_mode 0` respawns automatically after `sv_respawn_time` (the old behaviour).
+   - `sv_respawn_mode 1` respawns on request: the `Respawn` key (reload) or the `respawn` command
+     once the timer has run out.
+   - The spectator block carries the timer, and the HUD counts it down.
+5. **Late joiners.** `sv_join_dead 1` makes them join dead and hidden while anyone is alive, and
+   they start in first person on someone.
+6. **Dev.** `spectate <player|next|prev|auto|free|off> [eye|third|free]` works without dying (host /
+   `sv_cheats`). `spectate` with no argument prints the state and the delay.
+
+## Controls (while spectating)
+
+| Key | Action |
+|---|---|
+| Fire / next item (RB) | next player |
+| Aim / previous item (LB) | previous player |
+| Use | first person → third person → free camera |
+| 1–8 | the n-th living player |
+| Move, jump / crouch, sprint | free camera (noclip; `spec_free_collide` slides along walls) |
+| Mouse | orbit (third person) / look (free camera) |
+| Reload | Respawn, when allowed |
+| Esc | pause menu |
 
 ## Relevance and bandwidth
 
-- `net_host_after_tick` captures for an in-eye or third-person observer from the target's position
-  (`repl_capture`, `repl_rate_limit` viewer). The free camera captures from the camera position, sent
-  in `MSG_CMDS` as the observer's `view_tick` sibling field.
-- `chunks_update` and the openworld spawner also take observer anchors. The observer's corpse no
-  longer anchors anything. Horde AI tiers keep using living players only, so an observer does not
-  wake zombies.
-- Cost per in-eye observer, at 60 Hz:
-  - Forwarded commands: 4 × 32 B × 60 Hz ≈ 7.7 kB/s, the same as the target's own upstream.
-  - Snapshot: the target's own snapshot size, since the private block and the relevance set are the
-    same.
-  - In total, about one extra client.
-- `net_snapstats` logs it per observer. No per-target observer cap unless measurements ask for one;
-  `sv_spec_max_per_target` is reserved.
+- **Snapshots.** In first or third person a snapshot is the target's own: the private block and the
+  relevance set are the same.
+- **Relay.** It costs about 4 × (36 B command + 4 B stamp) × 60 Hz ≈ 9.6 kB/s, the same as the target's own upstream.
+- **Inventory.** It is sent when the target's inventory changes.
+- **In total**, one observer costs about one extra client.
+- **Measurement.** `net_snapstats` prints per client the snapshot + relay bytes, the spectator relay
+  rate and the source slot (relevance follows the target).
+- **No cap.** There is no per-target observer cap; at 8 players at most 7 observers share one
+  target.
 
 ## Spectator HUD
 
-- **The target's own HUD**, drawn by the existing `hud_draw` with the view slot: vitals, ammo,
-  reload / use rings, hold ring, hotbar, crosshair with their spread, hit markers, hurt markers,
-  hints, kill feed and the vehicle HUD.
-- **Spectator bar** (new `SCR_SPECTATE` overlay in `menus.c`, layout in `assets/ui`):
-  - target name;
-  - "SPECTATING — first person" / third person / free;
-  - `<` `>` and the mode;
-  - `spec delay: X ms` (its tooltip states the floor);
-  - respawn countdown or `Respawn`;
-  - `Leave`.
-- Not in the game yet, so out of scope until they exist: weapon wheels, compass, pings, chat UI,
-  teams, rounds. They plug into the same view-slot rule when they are added.
+- **The target's own HUD** comes from the existing `hud_draw` with the view slot:
+  - vitals and ammo;
+  - reload / use rings and the hold ring;
+  - hotbar (their equipped slot);
+  - crosshair with their spread, sway and focus;
+  - hit markers, hurt markers, hints and kill feed;
+  - the vehicle HUD.
+- **Spectator bar** (top centre):
+  - "Spectating - first person / third person / free camera";
+  - the target's name with `<` / `>`;
+  - the controls;
+  - `Spec delay X ms | minimum = one hop to the host + one hop to you`.
+- **Bottom centre:** the respawn countdown or the `Respawn` key.
+- **During the death camera:** "Spectating in N s, Fire to skip".
+- **Settings → Character → Spectating:** death camera time, delay readout (its tooltip states the
+  floor), switch blend, free-camera collision.
+- **Not in the game yet:**
+  - weapon wheels, compass, pings, chat UI, a player list to click, teams and rounds;
+  - an X-ray / overhead view (the free camera covers overhead).
+
+  When they are added they draw from the view slot in the same way.
 
 ## Protocol (DG_PROTOCOL_VERSION 16)
 
-- `MSG_SPEC_CMDS` (host → observer, unreliable): `{target u8, sent_ms u16, count u8, UserCmd[count]}`.
-- The snapshot spec block: `{mode u8, target u8, flags u8, respawn_t u8 (0.1 s), target_owd_ms u16}`.
-- `MSG_INVENTORY` gains the slot it describes.
-- `UserCmd` gains `phone_zoom u8` and the `BTN2_VEH_TP` bit.
-- `RPC_SPECTATE`.
+- **`MSG_CMDS`** gains `send_ms` (u32, the sender's clock).
+- **`MSG_SPEC_CMDS`** (host → observer, unreliable): `{target u8, count u8, (UserCmd, send_ms u32)[count]}`.
+- **Snapshot:**
+  - the local data (`spec_write_local`: ack, `PlayerSim`, hold progress, open container) of the own
+    or spectated player;
+  - then the spectator block (`spec_write_block`: data slot, mode, target, flags, respawn 0.1 s,
+    killer, target one-way delay, switch seq).
+- **`MSG_INVENTORY`** gains the slot it describes.
+- **`UserCmd`** gains `phone_zoom` (u8, in the old padding) and `BTN_VEH_CAM`.
+- **`PlayerMove`** gains `stride`.
+- **RPCs:** `RPC_SPECTATE`, `RPC_RESPAWN`, `RPC_SPEC_POS`.
+
+## Settings (cvars)
+
+| Cvar | Default | |
+|---|---|---|
+| `spec_death_cam_time` | 3 | s on the own ragdoll before auto spectating |
+| `spec_show_delay` | 1 | delay readout |
+| `spec_extrap_ticks` | 6 | extrapolation budget for late commands |
+| `spec_blend_time` | 0.15 | camera blend on a switch (s) |
+| `spec_pop_warn` | 0.05 | corrections above this are counted / logged (m) |
+| `spec_free_speed`, `spec_free_collide` | 8, 1 | free camera |
+| `spec_dump` | 0 | per-tick state hash + `spec_stats` (tests) |
+| `sv_spec_allowed`, `sv_spec_fp_enemies` | 1, 1 | host rules |
+| `sv_respawn_time`, `sv_respawn_mode`, `sv_join_dead` | 3, 0, 0 | respawn rules |
 
 ## Tests
 
 | Test | Kind | Checks |
 |---|---|---|
-| `test_spectate` | unit (pure C, runs anywhere) | target validation matrix; observers mask; command ring: in-order / gaps / duplicates / backlog catch-up / extrapolation limit / rewind on late arrival; spec block encode / decode; coverage: every `PlayerSim` / local-data field round-trips (struct enumerated with offsets, `memcmp` after a poisoned buffer) |
-| `test_recoil` (extended) | unit | 600-tick recorded cmd stream through recoil + spread twice (separate state) → bit-identical |
-| `spec_determinism.sh` | two processes | target runs a recorded 600-tick stream (`cmd_record` / `cmd_play`); observer in-eye. Both log a per-tick hash of camera transform, bone palette of the viewed character, `RecoilState`, spread, HUD state (`spec_dump`); `tools/tests/spec_compare.py` diffs them by seq |
-| `spec_net.sh` | three processes, `net_fakelag 80 net_fakeloss 3` | measured delay ≤ 2 × lag + 1 tick; max pop < `spec_pop_warn`; ADS + scope PiP screenshot pair, mag dump, vehicle driving, phone out, reload / use rings |
-| `spec_rules.cfg` | host script | illegal targets refused; relevance centre follows the target (`net_snapstats`); observer buttons do not change the host state |
+| `test_spectate` (ctest `spectate`) | unit, runs anywhere | target rules matrix; event routing; command ring; observer clock under 80 + 80 ms lag + 3 % loss per hop (delay ≤ both hops + 1 tick, extrapolation bounded) and jitter / outages (hold, catch-up); the rewind contract (confirmed state equals the target's at every seq through extrapolation, rewinds and reconciles); every local-data field reaches the observer (field table + coverage of the struct, poisoned decode); spec block / relay round trip; 600-tick recoil + view + spread bit-identical between target and an observer started from a snapshot with extrapolate / rewind / reconcile |
+| `tools/tests/spec_net.sh` | three processes, `net_fakelag 80 net_fakeloss 3` | host kills the observer → death camera → auto spectate → `spectate 1`; target does ADS, a magazine dump, reload and use rings, the sniper scope (PiP), the phone camera, walking, driving. `spec_compare.py`: per-seq comparison of the target's `spec_dump local` and the observer's `spec_dump observer` (state hashes, eye, spread, ammo, health, timers, bone pose), ≥ 600 consecutive identical ticks, measured delay ≤ 2 × lag + 1 tick, largest correction ≤ `spec_pop_warn`. Screenshot pairs `spec_t_*.png` / `spec_o_*.png` |
+| `tools/tests/spec_rules.cfg` | host script | illegal targets refused with a reason (self, missing slot), dev spectating, free camera, `sv_spec_allowed 0` |
 
-## Implementation plan
+## Verification and known gaps
 
-1. View slot plumbing: `G->view_slot`, `game_view_player()`. Re-key every audit *Fix* row; nothing
-   changes while `view_slot == local_slot`.
-2. Tick-anchored phases: hold point `t` / `bob_phase`, camera `bob_phase`.
-3. `src/net/spectate.c/.h`: observer table, validation, forwarding, the snapshot spec block,
-   inventory and event routing, relevance anchor. `RPC_SPECTATE`, protocol bump.
-4. `src/player/spectator.c/.h`: command ring, simulate / extrapolate / rewind, reconcile
-   (`game_cl_reconcile` generalized), switching and inertialization, third-person and free camera,
-   controls.
-5. Death flow, `sv_respawn_*`, `sv_join_dead`, `spectate` command, settings (`spec_death_cam_time`,
-   `spec_show_delay`, `spec_extrap_ticks`).
-6. `SCR_SPECTATE` overlay.
-7. Tests above, then docs and the CLAUDE.md map row.
+**Verification in the implementing session (a Linux container without the Windows toolchain):**
+
+- `test_spectate` was built and run: all checks pass.
+- Every game source file was type-checked (`gcc -fsyntax-only` against the SDL3 / Vulkan / ENet /
+  joltc headers) with no new warnings.
+- The game itself, `spec_net.sh` and the screenshots were **not** run there. They need
+  `.toolchain/b.sh` + `tools/tests/spec_net.sh` on the Windows machine.
+
+**Known gaps:**
+
+- **The vehicle under a spectated driver** is not re-simulated. The owner predicts its own car
+  (`vehicles_client_tick`); the observer shows the car from snapshots at the interpolation delay,
+  and the seated replica follows that car. To bring it to the relay delay, the observer would run
+  `vehicles_client_tick` for the target's commands.
+- **The host as observer** shows the target at the host's command processing rate (0–2 commands per
+  host tick under jitter). Remote observers smooth this with their clock.
+- **Bone pose hashes** compare the post-pass pose. The first-person solve uses the frame camera, so
+  pose equality depends on equal frame timing. The state hashes (`sim`, `rc`, `move`, `wpn`) are
+  the strict check.

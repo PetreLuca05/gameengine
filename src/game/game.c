@@ -945,9 +945,15 @@ static void cmd_bench(int argc, const char **argv) {
 
 static void cmd_noclip(int argc, const char **argv) { G->noclip_request = true; }
 
+// kill [player slot]: suicide, or (host, tests) kill another player.
 static void cmd_kill(int argc, const char **argv) {
     if (G->mode != GM_HOST) return;
     Player *p = game_local_player();
+    if (argc > 1) {
+        int s = atoi(argv[1]);
+        p = s >= 0 && s < MAX_PLAYERS && G->world->players[s].active ? &G->world->players[s] : NULL;
+        if (!p) { log_warn("kill: no player in slot %d", s); return; }
+    }
     if (p) apply_damage(G->world, p->ent, 10000, DMG_GENERIC, p->ent, p->sim.move.pos, v3(0, 0, 0), false);
 }
 
@@ -1318,7 +1324,7 @@ void game_init(void) {
     cmd_register("bench", cmd_bench, "toggle the weapon bench (attachments) UI");
     cmd_register("attach", cmd_attach, "attach <slot> <attachment|none>: weapon attachments of the equipped weapon (no args: list)");
     cmd_register("noclip", cmd_noclip, "toggle noclip (sv_cheats)");
-    cmd_register("kill", cmd_kill, "suicide");
+    cmd_register("kill", cmd_kill, "kill [player slot]: suicide (host: or another player)");
     cmd_register("damage", cmd_damage, "damage <amount>: hurt yourself (testing)");
     cmd_register("setpos", cmd_setpos, "teleport: setpos x y z [yaw] [pitch]");
     cmd_register("getpos", cmd_getpos, "print position");
