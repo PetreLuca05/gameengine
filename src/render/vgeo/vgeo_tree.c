@@ -13,31 +13,47 @@
 
 #define MAT_TEXTURED_FLAG (1u << 6)   // render.h MAT_TEXTURED
 
-// The species (assets/treefbx, Tree It exports). Heights are the scale-1 instance heights (the
-// scatter varies them by 0.72-1.27); the files are 8-14 m trees in centimetres. Conifers replace the
-// conifer role, broadleaves the broadleaf role, the old rooted snag the dead role; juniper, bamboo and a
-// small acacia are the underbrush / meadow bushes, daisies the meadow flowers. Trees switch to their
-// impostor at 4x r_vgeo_impostor_px (64 px across by default, the atlas frames' own size: their cards
-// do not coarsen, a distant tree would stay thousands of triangles), bushes at 2x.
+// The species (assets/treefbx, Tree It exports: 0.85-14 m models in centimetres, docs/VGEO.md "Tree
+// models"). Each has a target height range in metres, from published mature heights (sources in the
+// doc): the mesh is scaled to the middle of the range (instance scale 1) and the scatter picks an
+// instance height in the range (vgeo_tree_scale_range). Forest trees sit in the lower-middle part of the
+// mature range (stands, not record trees). Conifers replace the conifer role, broadleaves the broadleaf
+// role, the old rooted snag the dead role; juniper, bamboo and a small acacia are the underbrush / meadow
+// bushes, daisies the meadow flowers. Trees switch to their impostor at 6x r_vgeo_impostor_px (96 px
+// across by default: their cards do not coarsen, a distant tree would stay thousands of triangles),
+// bushes at 2x.
 static const VgTreeSpecies k_species[] = {
-    //  name           file          role               w     h      sway  branch flutter fade      shadow atlas imp. cap
-    { "tree_pine",     "pine.fbx",   VG_TREE_CONIFER,   1.0f, 17.0f, 0.20f, 0.12f, 0.02f, 850, 1100, 70, 512, 6.0f, true },
-    { "tree_fir",      "fir.fbx",    VG_TREE_CONIFER,   1.0f, 15.0f, 0.18f, 0.12f, 0.02f, 850, 1100, 70, 512, 6.0f, true },
-    { "tree_spruce",   "spruce.fbx", VG_TREE_CONIFER,   1.0f, 18.0f, 0.20f, 0.12f, 0.02f, 850, 1100, 70, 512, 6.0f, true },
-    { "tree_oak",      "oak.fbx",    VG_TREE_BROADLEAF, 1.0f, 16.0f, 0.18f, 0.16f, 0.04f, 850, 1100, 70, 512, 6.0f, true },
-    { "tree_beech",    "beech.fbx",  VG_TREE_BROADLEAF, 1.0f, 17.0f, 0.22f, 0.16f, 0.04f, 850, 1100, 70, 512, 6.0f, true },
-    { "tree_birch",    "birch.fbx",  VG_TREE_BROADLEAF, 0.8f, 14.0f, 0.26f, 0.18f, 0.05f, 850, 1100, 70, 512, 6.0f, true },
-    { "tree_elm",      "elm.fbx",    VG_TREE_BROADLEAF, 0.8f, 15.0f, 0.22f, 0.16f, 0.04f, 850, 1100, 70, 512, 6.0f, true },
-    { "tree_maple",    "maple.fbx",  VG_TREE_BROADLEAF, 1.0f, 14.0f, 0.20f, 0.16f, 0.04f, 850, 1100, 70, 512, 6.0f, true },
-    { "tree_old",      "old.fbx",    VG_TREE_DEAD,      1.0f, 11.0f, 0.08f, 0.05f, 0.02f, 850, 1100, 70, 512, 1.0f, true },
-    { "bush_juniper",  "juniper.fbx", VG_TREE_BUSH,     1.0f, 3.2f,  0.05f, 0.05f, 0.02f, 150, 210, 40, 512, 2.0f, true },
-    { "bush_bamboo",   "bamboo.obj", VG_TREE_BUSH,      0.4f, 3.6f,  0.08f, 0.08f, 0.03f, 150, 210, 40, 512, 2.0f, true },
-    { "bush_acacia",   "tree1.obj",  VG_TREE_BUSH,      0.4f, 4.5f,  0.08f, 0.08f, 0.03f, 150, 210, 40, 512, 2.0f, true },
-    { "flower_daisy",  "daisy.fbx",  VG_TREE_FLOWER,    1.0f, 0.7f,  0.04f, 0.05f, 0.02f, 50, 80, 15, 0, 1.0f, false },
+    //  name           file          role               w     height (m)    sway  branch flutter fade      shadow atlas imp. cap
+    { "tree_pine",     "pine.fbx",   VG_TREE_CONIFER,   1.0f, 18.0f, 32.0f, 0.20f, 0.12f, 0.02f, 850, 1100, 70, 512, 6.0f, true },
+    { "tree_fir",      "fir.fbx",    VG_TREE_CONIFER,   1.0f, 20.0f, 36.0f, 0.18f, 0.12f, 0.02f, 850, 1100, 70, 512, 6.0f, true },
+    { "tree_spruce",   "spruce.fbx", VG_TREE_CONIFER,   1.0f, 20.0f, 36.0f, 0.20f, 0.12f, 0.02f, 850, 1100, 70, 512, 6.0f, true },
+    { "tree_oak",      "oak.fbx",    VG_TREE_BROADLEAF, 1.0f, 16.0f, 28.0f, 0.18f, 0.16f, 0.04f, 850, 1100, 70, 512, 6.0f, true },
+    { "tree_beech",    "beech.fbx",  VG_TREE_BROADLEAF, 1.0f, 20.0f, 34.0f, 0.22f, 0.16f, 0.04f, 850, 1100, 70, 512, 6.0f, true },
+    { "tree_birch",    "birch.fbx",  VG_TREE_BROADLEAF, 0.8f, 14.0f, 24.0f, 0.26f, 0.18f, 0.05f, 850, 1100, 70, 512, 6.0f, true },
+    { "tree_elm",      "elm.fbx",    VG_TREE_BROADLEAF, 0.8f, 16.0f, 27.0f, 0.22f, 0.16f, 0.04f, 850, 1100, 70, 512, 6.0f, true },
+    { "tree_maple",    "maple.fbx",  VG_TREE_BROADLEAF, 1.0f, 14.0f, 24.0f, 0.20f, 0.16f, 0.04f, 850, 1100, 70, 512, 6.0f, true },
+    { "tree_old",      "old.fbx",    VG_TREE_DEAD,      1.0f, 10.0f, 17.0f, 0.08f, 0.05f, 0.02f, 850, 1100, 70, 512, 1.0f, true },
+    { "bush_juniper",  "juniper.fbx", VG_TREE_BUSH,     1.0f, 3.0f,  7.0f,  0.05f, 0.05f, 0.02f, 150, 210, 40, 512, 2.0f, true },
+    { "bush_bamboo",   "bamboo.obj", VG_TREE_BUSH,      0.4f, 2.5f,  5.0f,  0.08f, 0.08f, 0.03f, 150, 210, 40, 512, 2.0f, true },
+    { "bush_acacia",   "tree1.obj",  VG_TREE_BUSH,      0.4f, 4.0f,  8.0f,  0.08f, 0.08f, 0.03f, 150, 210, 40, 512, 2.0f, true },
+    { "flower_daisy",  "daisy.fbx",  VG_TREE_FLOWER,    1.0f, 0.35f, 0.75f, 0.04f, 0.05f, 0.02f, 50, 80, 15, 0, 1.0f, false },
 };
 
 u32 vgeo_tree_species_count(void) { return (u32)(sizeof(k_species) / sizeof(k_species[0])); }
 const VgTreeSpecies *vgeo_tree_species(u32 i) { return i < vgeo_tree_species_count() ? &k_species[i] : NULL; }
+float vgeo_tree_height(const VgTreeSpecies *sp) { return 0.5f * (sp->height_min + sp->height_max); }
+
+bool vgeo_tree_scale_range(const char *name, float *lo, float *hi) {
+    for (u32 i = 0; i < vgeo_tree_species_count(); i++) {
+        const VgTreeSpecies *sp = &k_species[i];
+        if (strcmp(sp->name, name)) continue;
+        float h = vgeo_tree_height(sp);
+        *lo = sp->height_min / h;
+        *hi = sp->height_max / h;
+        return true;
+    }
+    return false;
+}
 
 // ------------------------------------------------------------------ textures
 
@@ -231,8 +247,9 @@ bool vgeo_tree_import(const VgTreeSpecies *sp, const char *dir, VgFoliageMesh *o
     // metres at the species height, ground (file y = 0) kept, the trunk base centred
     float ymax = -1e30f;
     for (size_t i = 0; i < nv; i++) ymax = DG_MAX(ymax, v[i].p[1]);
+    const float height = vgeo_tree_height(sp);
     meta->src_height = ymax;
-    meta->scale = ymax > 0 ? sp->height / ymax : 1.0f;
+    meta->scale = ymax > 0 ? height / ymax : 1.0f;
     for (size_t i = 0; i < nv; i++)
         for (int a = 0; a < 3; a++) v[i].p[a] *= meta->scale;
     double cx = 0, cz = 0, cn = 0;
@@ -251,13 +268,13 @@ bool vgeo_tree_import(const VgTreeSpecies *sp, const char *dir, VgFoliageMesh *o
     for (size_t i = 0; i < nv; i++) {
         float r = sqrtf(v[i].p[0] * v[i].p[0] + v[i].p[2] * v[i].p[2]);
         rmax = DG_MAX(rmax, r);
-        if (!meta->masked[tmat[i / 3]] && v[i].p[1] >= 0.4f * DG_MIN(1.0f, sp->height / 4.0f) && v[i].p[1] <= 1.6f * DG_MIN(1.0f, sp->height / 4.0f)) rs[nr++] = r;
+        if (!meta->masked[tmat[i / 3]] && v[i].p[1] >= 0.4f * DG_MIN(1.0f, height / 4.0f) && v[i].p[1] <= 1.6f * DG_MIN(1.0f, height / 4.0f)) rs[nr++] = r;
     }
     if (nr) {
         qsort(rs, nr, sizeof(float), cmp_float);
         meta->cap_r = DG_CLAMP(rs[nr / 4] * 1.1f, 0.05f, 1.0f);
     } else meta->cap_r = 0.1f;
-    meta->cap_h = DG_MIN(0.5f * sp->height, 5.0f);
+    meta->cap_h = DG_MIN(0.5f * height, 5.0f);
     free(rs);
     // deduplicate the corners
     ufbx_vertex_stream st = { v, nv, sizeof(TreeVert) };
@@ -282,8 +299,8 @@ bool vgeo_tree_import(const VgTreeSpecies *sp, const char *dir, VgFoliageMesh *o
         memcpy(out->normal + i * 3, v[i].n, 12);
         memcpy(out->uv + i * 2, v[i].uv, 8);
         float y = v[i].p[1], r = sqrtf(v[i].p[0] * v[i].p[0] + v[i].p[2] * v[i].p[2]);
-        float wr = powf(DG_CLAMP(y / sp->height, 0.0f, 1.0f), 1.5f);
-        float wg = powf(DG_CLAMP(r / rmax, 0.0f, 1.0f), 1.3f) * smooth01(y / (0.25f * sp->height));
+        float wr = powf(DG_CLAMP(y / height, 0.0f, 1.0f), 1.5f);
+        float wg = powf(DG_CLAMP(r / rmax, 0.0f, 1.0f), 1.3f) * smooth01(y / (0.25f * height));
         float wb = card[i] == 1 ? 1.0f : 0.0f;
         out->color[i] = (u32)(wr * 255.0f + 0.5f) | (u32)(wg * 255.0f + 0.5f) << 8 | (u32)(wb * 255.0f + 0.5f) << 16 | 0xFFu << 24;
     }
@@ -315,7 +332,8 @@ u32 vgeo_tree_key(const VgTreeSpecies *sp, const char *dir) {
     free(f);
     u32 v[4] = { VG_TREE_VERSION, VGEO_BUILD_VERSION, sp->atlas, VG_TREE_TEX_MAX };
     h = vgeo_fnv1a(v, sizeof(v), h);
-    h = vgeo_fnv1a(&sp->height, sizeof(float), h);
+    float hr[2] = { sp->height_min, sp->height_max };
+    h = vgeo_fnv1a(hr, sizeof(hr), h);
     return h ? h : 1;
 }
 

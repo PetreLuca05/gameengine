@@ -74,7 +74,7 @@ static int tree_thread(void *u) {
             snprintf(mats + strlen(mats), sizeof(mats) - strlen(mats), "%s%s%s", k ? ", " : "", t.tex[k], t.masked[k] ? " (masked)" : "");
         printf("%-14s %6u tris, %5u clusters, %2u levels, lod tris %u/%u/%u/%u, scale %.4f (%.1f -> %.1f m), capsule r %.2f h %.1f, %s; %.2f s\n", sp->name,
                t.b.stats.input_tris, t.b.stats.clusters, t.b.stats.levels, t.b.lods[0].tris, t.b.lods[1].tris, t.b.lods[2].tris, t.b.lods[3].tris, (double)t.scale,
-               (double)t.src_height, (double)sp->height, (double)t.cap_r, (double)t.cap_h, mats,
+               (double)t.src_height, (double)vgeo_tree_height(sp), (double)t.cap_r, (double)t.cap_h, mats,
                (double)SDL_GetPerformanceCounter() / (double)SDL_GetPerformanceFrequency() - t0);
         vgeo_tree_free(&t);
     }
