@@ -22,6 +22,7 @@
 #include "vgeo/vgeo_impostor.h"
 #include "assets/assets.h"
 #include "core/platform.h"
+#include "core/jobs.h"
 #include <math.h>
 #include <stddef.h>
 #include <stdio.h>
@@ -1568,59 +1569,91 @@ static void foliage_commit(void) {
 
 // Builds procedural foliage kinds [k0, k1) (vgeo_procgen_foliage.c): mesh, masks, impostor atlas,
 // materials, the type table (trunk capsules).
-static void foliage_build_kinds(int k0, int k1) {
+// One kind's CPU work: the mesh / masks (generated serially: the generators share a seed state),
+// then the cluster build and the impostor bake (the slow parts) in parallel on the job system.
+typedef struct FoliageKindBuild {
+    int k;
+    VgFoliageMesh fm;
+    VgSource src;
+    VgBuilt b;
+    bool ok, impostor;
+    char err[256];
+    VgMaterial mats[2];
+    u32 nm;
+    u8 *masks[2];
+    const u8 *mk[2];
+    VgImpostorMaterial im[2];
+    VgImpostorOptions io;
+} FoliageKindBuild;
+
+static void foliage_kind_job(void *ctx, int begin, int end) {
+    FoliageKindBuild *kb = (FoliageKindBuild *)ctx;
+    for (int i = begin; i < end; i++) {
+        VgBuildOptions opt;
+        memset(&opt, 0, sizeof(opt));
+        kb[i].ok = vgeo_build(&kb[i].src, &opt, &kb[i].b, kb[i].err, sizeof(kb[i].err));
+        if (kb[i].ok && kb[i].impostor) vgeo_impostor_bake(&kb[i].b, &kb[i].io);
+    }
+}
+
+// Builds procedural foliage kinds [k0, k1) (vgeo_procgen_foliage.c): mesh, masks, impostor atlas
+// (atlas px, 8 x 8 frames), materials, the type table (trunk capsules).
+static void foliage_build_kinds(int k0, int k1, u32 atlas) {
     const u32 msize = 256;
     u32 levels;
     size_t mb = vg_tex_mip_bytes(msize, msize, &levels);
-    u8 *mips = (u8 *)malloc(mb), *masks[2] = { (u8 *)malloc((size_t)msize * msize * 4), (u8 *)malloc((size_t)msize * msize * 4) };
-    for (int k = k0; k < k1 && G.ftype_count < 32; k++) {
-        VgFoliageMesh fm;
-        vgeo_gen_foliage(&fm, k, 11 + (u32)k);
-        VgSource src;
-        vgeo_foliage_source(&fm, &src);
-        VgBuildOptions opt;
-        memset(&opt, 0, sizeof(opt));
-        VgBuilt b;
-        char err[256];
-        bool ok = vgeo_build(&src, &opt, &b, err, sizeof(err));
-        vgeo_foliage_mesh_free(&fm);
-        if (!ok) { log_error("vgeo: %s build failed: %s", vgeo_foliage_name(k), err); continue; }
-        // alpha masks (module textures), the impostor atlas baked with them (1024 px, 8 x 8 frames)
-        VgMaterial mats[2];
-        u32 nm = vgeo_foliage_materials(k, mats);
-        const u8 *mk[2] = { NULL, NULL };
-        for (u32 m = 0; m < nm; m++) {
-            if (!vgeo_gen_foliage_mask(masks[m], msize, k, m, 5)) continue;
-            mk[m] = masks[m];
-            vg_tex_build_mips(masks[m], msize, msize, mips);
-            u32 t = vg_tex_create(&G.cull.tex, msize, msize, levels, mips, true, true);
-            mats[m].mask_tex = mats[m].albedo_tex = t;
+    u8 *mips = (u8 *)malloc(mb);
+    int n = k1 - k0;
+    FoliageKindBuild *kb = (FoliageKindBuild *)calloc((size_t)n, sizeof(FoliageKindBuild));
+    for (int i = 0; i < n; i++) {
+        FoliageKindBuild *q = &kb[i];
+        q->k = k0 + i;
+        vgeo_gen_foliage(&q->fm, q->k, 11 + (u32)q->k);
+        vgeo_foliage_source(&q->fm, &q->src);
+        q->nm = vgeo_foliage_materials(q->k, q->mats);
+        for (u32 m = 0; m < q->nm; m++) {
+            q->masks[m] = (u8 *)malloc((size_t)msize * msize * 4);
+            if (vgeo_gen_foliage_mask(q->masks[m], msize, q->k, m, 5)) q->mk[m] = q->masks[m];
         }
-        VgImpostorMaterial im[2];
-        vgeo_foliage_impostor_materials(k, mk, msize, im);
-        VgImpostorOptions io = { 1024, 8, im, 2 };
-        bool impostor = k != VG_FOLIAGE_CROP;   // crops fade out before an impostor would be used
-        if (impostor) vgeo_impostor_bake(&b, &io);
-        u32 mesh = vgeo_scene_add_mesh(&G.scene, &b);
-        fallback_register(mesh, &b, false);
+        vgeo_foliage_impostor_materials(q->k, q->mk, msize, q->im);
+        q->io = (VgImpostorOptions){ atlas, 8, q->im, 2 };
+        q->impostor = q->k != VG_FOLIAGE_CROP;   // crops fade out before an impostor would be used
+    }
+    jobs_parallel_for(n, 1, foliage_kind_job, kb);
+    for (int i = 0; i < n && G.ftype_count < 32; i++) {
+        FoliageKindBuild *q = &kb[i];
+        vgeo_foliage_mesh_free(&q->fm);
+        if (!q->ok) { log_error("vgeo: %s build failed: %s", vgeo_foliage_name(q->k), q->err); continue; }
+        // alpha masks (module textures)
+        for (u32 m = 0; m < q->nm; m++) {
+            if (!q->mk[m]) continue;
+            vg_tex_build_mips(q->masks[m], msize, msize, mips);
+            u32 t = vg_tex_create(&G.cull.tex, msize, msize, levels, mips, true, true);
+            q->mats[m].mask_tex = q->mats[m].albedo_tex = t;
+        }
+        u32 mesh = vgeo_scene_add_mesh(&G.scene, &q->b);
+        fallback_register(mesh, &q->b, false);
         u32 base = 0;
-        for (u32 m = 0; m < nm; m++) {
-            u32 idx = vgeo_scene_add_material(&G.scene, &mats[m]);
+        for (u32 m = 0; m < q->nm; m++) {
+            u32 idx = vgeo_scene_add_material(&G.scene, &q->mats[m]);
             if (!m) base = idx;
         }
         vgeo_scene_set_mesh_materials(&G.scene, mesh, base);
-        if (impostor) vgeo_foliage_impostor_upload(&G.scene, &G.cull.tex, mesh, &b);
+        if (q->impostor) vgeo_foliage_impostor_upload(&G.scene, &G.cull.tex, mesh, &q->b);
         struct FoliageType *ft = &G.ftype[G.ftype_count++];
-        dg_strcpy(ft->name, sizeof(ft->name), vgeo_foliage_name(k));
+        dg_strcpy(ft->name, sizeof(ft->name), vgeo_foliage_name(q->k));
         ft->mesh = mesh;
-        ft->capsule = vgeo_foliage_capsule(k, &ft->cap_r, &ft->cap_h);   // the bush / tree trunks
-        log_info("vgeo: foliage type %s: %u tris, %u clusters, %u levels, impostor %ux%u frames", ft->name, b.stats.input_tris, b.hdr.cluster_count, b.hdr.level_count,
-                 io.grid, io.grid);
-        vgeo_free(&b);
+        ft->capsule = vgeo_foliage_capsule(q->k, &ft->cap_r, &ft->cap_h);   // the bush / tree trunks
+        log_info("vgeo: foliage type %s: %u tris, %u clusters, %u levels, impostor %s", ft->name, q->b.stats.input_tris, q->b.hdr.cluster_count, q->b.hdr.level_count,
+                 q->impostor ? "8x8 frames" : "none");
+        vgeo_free(&q->b);
     }
+    for (int i = 0; i < n; i++) {
+        free(kb[i].masks[0]);
+        free(kb[i].masks[1]);
+    }
+    free(kb);
     free(mips);
-    free(masks[0]);
-    free(masks[1]);
 }
 
 int render_foliage_map_types(void) {
@@ -1628,7 +1661,7 @@ int render_foliage_map_types(void) {
     if (G.map_types) return VG_FOLIAGE_ALL_KINDS - VG_FOLIAGE_KINDS;
     render_foliage_test_types();   // grass tufts and bushes are part of the maps' cover
     u64 t0 = SDL_GetTicksNS();
-    foliage_build_kinds(VG_FOLIAGE_KINDS, VG_FOLIAGE_ALL_KINDS);
+    foliage_build_kinds(VG_FOLIAGE_KINDS, VG_FOLIAGE_ALL_KINDS, 512);   // distant trees: 64 px frames are plenty
     G.map_types = true;
     foliage_region();
     G.need_commit = true;
@@ -1641,7 +1674,7 @@ int render_foliage_test_types(void) {
     if (!G.ok) return 0;
     if (G.test_types) return VG_FOLIAGE_KINDS;
     u64 t0 = SDL_GetTicksNS();
-    foliage_build_kinds(0, VG_FOLIAGE_KINDS);
+    foliage_build_kinds(0, VG_FOLIAGE_KINDS, 1024);
     G.test_types = true;
     foliage_region();
     G.need_commit = true;
