@@ -622,6 +622,7 @@ void chunks_render(World *w, vec3 cam) {
     if (!s) return;
     float lod_d = CG->lod_dist->f;
     u32 grid = CG->grid->i && !s->provider.no_grid ? MAT_GRID : 0;
+    if (s->provider.surface_textures) grid |= MAT_TERRAIN;
     static u8 complete[FAR_MAX_TILES];
     for (int t = 0; s->far && t < s->far_n * s->far_n; t++) {
         FarTile *ft = &s->far[t];

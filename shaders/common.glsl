@@ -12,6 +12,8 @@
 #define MAT_GRID_FINE  256u
 #define MAT_SHADOW_ONLY 512u
 #define MAT_GRID_MOA   1024u
+#define MAT_TERRAIN    4096u
+#define MAT_LAYERED    8192u
 
 struct PointLight {
     vec4 pos_radius;
@@ -74,6 +76,8 @@ layout(set = 0, binding = 0) uniform FrameData {
     mat4 local_vps[LOCAL_SHADOW_TILES];
     vec4 light_shadow[MAX_POINT_LIGHTS];   // x first tile (-1 unshadowed), y normal offset per metre
     vec4 local_shadow_info;                // x 1 / atlas size, y shadowed point lights
+    vec4 surf_map;        // terrain material map: origin x, z, 1 / spacing, samples per side (0 = none)
+    vec4 surf_info;       // y: surface layers loaded (shaders/surfaces.glsl)
 } frame;
 
 layout(set = 0, binding = 1) uniform sampler2DShadow shadow_map;

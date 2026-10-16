@@ -195,6 +195,7 @@ bool render_init(SDL_Window *window) {
     if (!post_init()) { log_error("render: post-processing stack unavailable"); return false; }
     sky_init();
     write_sky_bindings();
+    vks_init();
 
     R->draws = (DrawItem *)malloc(sizeof(DrawItem) * MAX_DRAWS);
     R->vm_draws = (DrawItem *)malloc(sizeof(DrawItem) * MAX_VM_DRAWS);
@@ -254,6 +255,7 @@ void render_shutdown(void) {
         phone_view_shutdown();
         vkr_target_destroy(&R->occl);
         vkls_shutdown();
+        vks_shutdown();
         vkp_destroy_pipelines();
         vkr_destroy_all_resources();
         vkr_target_destroy(&R->shadow);
@@ -1095,6 +1097,7 @@ static void compute_matrices(FrameData *fd) {
         fd->wx5 = v4(wx->gust, fmodf(wx->time * 0.7f, 6.2831853f), wx->time, atan2f(wx->wind.x, -wx->wind.z));
         fd->puddle_xf = wx->puddle_xform;
     }
+    vks_frame_data(fd);
 }
 
 static void save_screenshot(GpuBuffer *buf, u32 w, u32 h) {
@@ -1825,6 +1828,7 @@ void render_end_frame(void) {
     if (!R->frame_active) return;
     write_cookie_binding();
     write_weather_bindings();
+    vks_write_bindings();
     FrameResources *f = &R->frames[R->frame_slot];
     VkCommandBuffer cmd = f->cmd;
     VK_CHECK(vkResetCommandBuffer(cmd, 0));

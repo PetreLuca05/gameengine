@@ -42,6 +42,7 @@ static void ow_free(World *w) {
     OpenWorld *o = ow_of(w);
     if (!o) return;
     ow_foliage_free(w, o);
+    render_surface_map(NULL, 0, 0, 0, 1);
     mapgen_raster_free(&o->raster);
     mappoi_free(&o->pois);
     mapgen_free(&o->gen);
@@ -75,7 +76,9 @@ static u32 ground_color(const OpenWorld *o, float x, float z, u8 mat, float slop
     if (mat == MGM_FIELD || mat == MGM_CROP || mat == MGM_PLOWED) v = v * 0.6f + 0.4f * (0.5f + 0.5f * sinf(x * 2.4f));
     vec3 c = mapgen_material_color(mat, v, slope);
     (void)o;
-    return rgba8(c.x, c.y, c.z, 1);
+    // rgb: the untextured colour (no surface textures); alpha: the variation the textured terrain
+    // (MAT_TERRAIN) applies to the material's base colour
+    return rgba8(c.x, c.y, c.z, DG_CLAMP(v, 0.0f, 1.0f));
 }
 
 static void prov_generate(void *user, ChunkCoord coord, ChunkData *out) {
@@ -218,6 +221,32 @@ static void fix_winding(const vec3 *pts, int np, u32 *tri, int ni) {
     }
 }
 
+// Surface texture layer of a prim (render.h SurfTexLayer, MAT_LAYERED draws) by shape and surface:
+// pitched roofs shingles, walls brick / plaster / wood, corrugated sheet metal, rusty steel,
+// concrete. Glass, lamps and glossy paint (car bodies) stay plain.
+static u32 prim_layer(const MpPrim *p) {
+    if (p->flags & (MPF_GLASS | MPF_EMISSIVE | MPF_GLOSS)) return STEX_NONE;
+    const char *s = p->surf ? p->surf : "";
+    if (p->shape == MPS_WEDGE && !strcmp(s, "wood")) return STEX_SHINGLES;
+    if (!strcmp(s, "brick")) return STEX_BRICK;
+    if (!strcmp(s, "plaster")) return STEX_PLASTER;
+    if (!strcmp(s, "wood")) return STEX_WOOD;
+    if (!strcmp(s, "metal_thin")) return STEX_METAL;
+    if (!strcmp(s, "metal_thick")) return STEX_RUST;
+    if (!strcmp(s, "asphalt")) return STEX_ASPHALT;
+    if (!strcmp(s, "gravel")) return STEX_GRAVEL;
+    if (!strcmp(s, "concrete") || !s[0]) return STEX_CONCRETE;
+    return STEX_NONE;   // cloth, glass, ...
+}
+
+// Face uv in metres (MAT_LAYERED): u along the face, v up it (walls: world height, so courses and
+// boards continue across wall pieces), along the prim's x on horizontal faces.
+static vec2 face_uv_m(vec3 wp, vec3 n, quat rot) {
+    vec3 t = fabsf(n.y) > 0.98f ? quat_rotate(rot, v3(1, 0, 0)) : v3_norm(v3_cross(v3(0, 1, 0), n));
+    vec3 bt = v3_cross(n, t);
+    return v2(v3_dot(wp, t), v3_dot(wp, bt));
+}
+
 static void emit_prim(GeoBuild *b, const MpPrim *p) {
     if (p->flags & MPF_FOOTPRINT) return;
     int seg = (p->flags & MPF_DETAIL) || p->half.x < 0.5f ? 8 : 14;
@@ -237,8 +266,11 @@ static void emit_prim(GeoBuild *b, const MpPrim *p) {
         else if (p->flags & MPF_NO_SHADOW) v = detail ? V_DETAIL_MARK : V_MARK;
         else v = detail ? V_DETAIL_PLAIN : V_PLAIN;
         MeshBuilder *mb = geo_bucket(b, tile, v);
+        u32 col = (p->color & 0x00FFFFFFu) | prim_layer(p) << 24;   // alpha: the surface layer
         if (p->shape == MPS_BOX) {
-            mb_box_transformed(mb, mat4_trs(p->pos, p->rot, v3s(1)), p->half, p->color);
+            u32 v0 = mb->vcount;
+            mb_box_transformed(mb, mat4_trs(p->pos, p->rot, v3s(1)), p->half, col);
+            for (u32 i = v0; i < mb->vcount; i++) mb->verts[i].uv = face_uv_m(mb->verts[i].pos, mb->verts[i].normal, p->rot);
         } else {
             // flat-shaded faces (cylinders: smooth sides)
             vec3 c = v3(0, 0, 0);
@@ -256,9 +288,9 @@ static void emit_prim(GeoBuild *b, const MpPrim *p) {
                         nn[k] = v3_norm(radial);
                     }
                 }
-                u32 i0 = mb_vertex(mb, a, nn[0], v2(a.x + a.y, a.z), p->color);
-                u32 i1 = mb_vertex(mb, bb, nn[1], v2(bb.x + bb.y, bb.z), p->color);
-                u32 i2 = mb_vertex(mb, d, nn[2], v2(d.x + d.y, d.z), p->color);
+                u32 i0 = mb_vertex(mb, a, nn[0], face_uv_m(a, fn, p->rot), col);
+                u32 i1 = mb_vertex(mb, bb, nn[1], face_uv_m(bb, fn, p->rot), col);
+                u32 i2 = mb_vertex(mb, d, nn[2], face_uv_m(d, fn, p->rot), col);
                 mb_tri(mb, i0, i1, i2);
             }
             (void)c;
@@ -285,6 +317,7 @@ static void build_road_ribbons(GeoBuild *b, const OpenWorld *o) {
     for (int r = 0; r < g->road_count; r++) {
         const MgRoad *rd = &g->roads[r];
         bool dirt = rd->cls == MGR_DIRT || rd->cls == MGR_TRAIL, runway = rd->cls == MGR_RUNWAY;
+        u32 layer = dirt ? STEX_DIRT_ROAD : (runway ? STEX_CONCRETE : STEX_ASPHALT);
         float lift = dirt ? 0.035f : (runway ? 0.045f : 0.05f);
         float hw = rd->width * 0.5f;
         MeshBuilder *mb = NULL;
@@ -318,7 +351,8 @@ static void build_road_ribbons(GeoBuild *b, const OpenWorld *o) {
                 if (dirt) c = v3_scale(v3(0.31f, 0.245f, 0.165f), 0.85f + 0.3f * v);
                 else if (runway) c = v3_scale(v3(0.31f, 0.31f, 0.29f), 0.85f + 0.25f * v);
                 else c = v3_scale(v3(0.075f, 0.075f, 0.08f), 0.8f + 0.5f * v + (v > 0.72f ? 0.6f : 0.0f));   // worn / patched spots
-                cur[k] = mb_vertex(mb, v3(p.x, mapgen_raster_height(&o->raster, p.x, p.y) + lift, p.y), v3(0, 1, 0), v2(p.x, p.y), rgba8(c.x, c.y, c.z, 1));
+                u32 rc = (rgba8(c.x, c.y, c.z, 1) & 0x00FFFFFFu) | layer << 24;
+                cur[k] = mb_vertex(mb, v3(p.x, mapgen_raster_height(&o->raster, p.x, p.y) + lift, p.y), v3(0, 1, 0), v2(p.x, p.y), rc);
             }
             // fix the colour of a joint row created above (it was written black)
             if (have_prev && mb->verts[prev[0]].color == 0)
@@ -359,6 +393,7 @@ static void add_draw(World *w, MeshBuilder *mb, int variant, vec3 center, float 
     case V_WATER: d->mat.color.w = 0.8f; d->mat.roughness = 0.06f; d->mat.flags = MAT_NO_SHADOW; break;
     default: break;
     }
+    if (variant != V_EMISSIVE && variant != V_GLASS && variant != V_WATER) d->mat.flags |= MAT_LAYERED;   // vertex alpha = surface layer
     d->model = mat4_identity();
     d->cull_center = center;
     d->cull_dist = cull;
@@ -656,7 +691,11 @@ bool openworld_load(World *w, const cJSON *root) {
     prov.bounds = o->gen.raster_half;
     prov.static_collision = true;
     prov.no_grid = true;
+    prov.surface_textures = true;
     prov.foliage_chunk = ow_foliage_chunk;
+    // terrain surface textures: the layers + this map's material raster (MgMaterial = SurfTexLayer ids)
+    render_surfaces_load();
+    render_surface_map(o->raster.mat, o->raster.n, o->raster.origin, o->raster.origin, o->raster.spacing);
     chunks_create_custom(w, &prov);
     horde_set_water(ow_water_fn, o);
     horde_set_sense(o->sense);

@@ -15,6 +15,9 @@ layout(location = 3) in vec4 v_color;
 #endif
 
 layout(set = 1, binding = 0) uniform sampler2D tex;
+#ifdef LIT_SURFACES
+#include "surfaces.glsl"
+#endif
 // Screen-space inputs from the post stack (push descriptor, render resolution): ambient occlusion
 // (indirect only), sun contact shadows, reflections (rgb + confidence), diffuse GI.
 layout(set = 2, binding = 0) uniform sampler2D post_ao;
@@ -220,6 +223,14 @@ void main() {
         }
         base *= t;
     }
+    float surf_rough = -1.0;   // >= 0: the surface textures' roughness replaces the material's
+#ifdef LIT_SURFACES
+    if (frame.surf_info.y > 0.5) {
+        if ((flags & MAT_TERRAIN) != 0u && frame.surf_map.w > 0.5) surf_terrain(v_world, n, base, 0.82 + 0.36 * v_color.a, surf_rough);
+        else if ((flags & MAT_LAYERED) != 0u) surf_layered(v_world, v_uv, v_color, n, base, surf_rough);
+    }
+    if ((flags & (MAT_TERRAIN | MAT_LAYERED)) != 0u) base.a = MAT_COLOR.a;   // the vertex alpha is a layer / variation
+#endif
     if ((flags & MAT_CHECKER) != 0u) {
         vec2 c = floor(v_world.xz * 0.25);
         float k = mod(c.x + c.y, 2.0);
@@ -234,7 +245,7 @@ void main() {
         color = base.rgb;
     } else {
         vec3 v = normalize(frame.camera_pos.xyz - v_world);
-        float rough = clamp(MAT_PARAMS.x, 0.04, 1.0);
+        float rough = clamp(surf_rough >= 0.0 ? surf_rough : MAT_PARAMS.x, 0.04, 1.0);
         float metal = clamp(MAT_PARAMS.y, 0.0, 1.0);
         vec3 albedo = base.rgb;
         // Screen-space inputs (never on the viewmodel: it is excluded from the screen-space passes).

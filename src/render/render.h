@@ -46,6 +46,11 @@ enum MaterialFlags {
     MAT_SHADOW_ONLY = 1u << 9, // casts shadows but is not drawn (the local player's own body)
     MAT_GRID_MOA = 1u << 10,  // sighting-in target: 1 MOA grid, spacing in tex_scale (m), bold every 5, red every 10
     MAT_SELF     = 1u << 11,  // with MAT_SHADOW_ONLY: the local player's own body, visible to phone cameras (selfies)
+    // Surface textures (docs/TEXTURES.md, legacy lit pipeline): MAT_TERRAIN blends the layers of the
+    // terrain material map (render_surface_map; vertex alpha = brightness variation), MAT_LAYERED
+    // textures each vertex with the layer in its colour's alpha (255 = none), tinted by its rgb.
+    MAT_TERRAIN  = 1u << 12,
+    MAT_LAYERED  = 1u << 13,
 };
 
 typedef struct Material {
@@ -152,6 +157,16 @@ TextureId render_texture_create(int w, int h, const void *rgba8, bool srgb, bool
 // Raw compressed or uncompressed upload (KTX2); levels are tightly packed in data.
 TextureId render_texture_create_raw(int w, int h, int levels, u32 vk_format, const void *data, const size_t *level_sizes);
 void render_texture_destroy(TextureId id);
+// Surface textures (docs/TEXTURES.md): the layer arrays (assets/textures/surfaces, loaded on first
+// use) and the terrain material map: n x n samples of SurfTexLayer ids (spacing m, min corner origin);
+// NULL removes it. The layer ids are the order of STEX_LAYER_NAMES.
+enum SurfTexLayer {
+    STEX_GRASS, STEX_MEADOW, STEX_FOREST, STEX_DIRT, STEX_ROCK, STEX_SAND, STEX_GRAVEL, STEX_ASPHALT, STEX_DIRT_ROAD, STEX_CONCRETE,
+    STEX_FIELD, STEX_CROP, STEX_PLOWED, STEX_MUD, STEX_BRICK, STEX_PLASTER, STEX_WOOD, STEX_METAL, STEX_RUST, STEX_SHINGLES,
+    STEX_LAYER_COUNT, STEX_NONE = 255
+};
+bool render_surfaces_load(void);
+void render_surface_map(const u8 *ids, int n, float origin_x, float origin_z, float spacing);
 
 // Frame
 bool render_begin_frame(void);
