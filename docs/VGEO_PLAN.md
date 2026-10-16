@@ -29,18 +29,24 @@ All GPU structs are std430, mirrored in `src/render/vgeo/vgeo_gpu.h` and `shader
 ### 1.1 `.vgeo` file (`assets/cache/<stem>.vgeo.<key %08x>.dgc`)
 
 ```
-VgFileHeader (64 B) { u32 magic 'VGEO', version, flags (SKINNED | FOLIAGE | HAS_COLOR | HAS_IMPOSTOR), key;
-                      u32 cluster_count, group_count, node_count, page_count, root_page_count, lod_count, material_count;
-                      u32 bone_count; f32 sphere[4]; f32 aabb_min[3], aabb_max[3]; }
-section table: { u32 offset, size } x N
+VgFileHeader (192 B) { u32 magic 'VGEO', version, flags (SKINNED | FOLIAGE | HAS_COLOR | HAS_IMPOSTOR), key;
+                       u32 cluster_count, group_count, node_count, page_count, root_page_count, lod_count, material_count;
+                       u32 bone_count; f32 sphere[4]; f32 aabb_min[3], q_step; f32 aabb_max[3]; u32 level_count;
+                       u32 root_node, pad[3];
+                       section table: { u32 offset, size } x VGS_COUNT (10) }   // 112 + 80
+sections are 16-byte aligned, in this order:
   [hierarchy]  VgNode[node_count]       always resident (CPU + GPU)
   [groups]     VgGroup[group_count]     always resident
   [pages]      VgPageDesc[page_count]   file offset, size, first group, dependency
   [materials]  VgMaterialRef[]          name + slot (resolved against the material table at load)
   [lods]       VgDiscreteLod[4]         exported discrete LODs for the 2015/2010 eras
+  [lod idx]    u32[]                    their index buffers
+  [lod verts]  VgLodVertex[]            their vertices (pos, normal, uv as f32: CPU-side, uploaded as-is)
   [impostor]   optional octahedral atlas (Phase 7)
-  [page data]  fixed 128 KiB pages, DAG order coarse → fine (root pages first)
-  [stats]      build report (per level: clusters, triangles, error min/max; build ms)
+  [page data]  pages of <= 128 KiB stored compactly (a page fills one 128 KiB pool slot at load), DAG order
+               coarse → fine; the root pages are a prefix
+  [stats]      build report (per level: clusters, triangles, error min/max); the per-stage ms and the thread
+               count are zeroed in the file so the bytes depend only on the input
 ```
 
 The key is FNV-1a over the source file, `VGEO_BUILD_VERSION` and the build options (same scheme as `anim_cache.c`).
@@ -64,7 +70,7 @@ typedef struct VgGroup {         // 32 B
     f32 parent_error;            // error of simplifying this group (>= every member error, enforced)
     u32 page;                    // all clusters of a group live in one page
     u16 first_cluster, cluster_count;  // index within the page
-    u32 pad;
+    u32 level;                   // DAG level (0 = leaves; debug views, stats)
 } VgGroup;
 
 typedef struct VgMesh {          // 64 B: the mesh table, one entry per loaded vgeo mesh
@@ -72,7 +78,8 @@ typedef struct VgMesh {          // 64 B: the mesh table, one entry per loaded v
     u32 root_node, node_base, group_base, page_base;   // offsets into the global tables
     u32 page_count, flags, material_base, impostor;    // impostor: atlas id or ~0
     f32 max_wpo;                 // m: max world-position-offset over its materials (0 = static)
-    f32 max_bone_scale_hint, pad[2];
+    f32 q_step;                  // position grid step (m), one grid per mesh (see VgCluster)
+    f32 pad[2];                  // (skinned bone-scale bounds live in the palette slot table, §1.4)
 } VgMesh;
 ```
 
@@ -83,16 +90,23 @@ typedef struct VgPageHeader { u32 cluster_count, vertex_bytes, index_bytes, skin
 
 typedef struct VgCluster {       // 64 B
     vec3 center; f32 radius;     // culling bounds (mesh space; skinned: bind pose, unused at runtime)
-    vec3 q_origin; f32 q_step;   // per-cluster quantisation: pos = q_origin + u16x3 * q_step
     vec3 lod_center; f32 lod_radius;   // sphere of the group this cluster was generated FROM
     f32 error;                   // that group's simplification error (0 at leaves)
     u32 cone;                    // oct axis 2 x 8 bit | cutoff snorm8 | flags 8 (TWO_SIDED, NO_CONE)
     u32 counts;                  // verts 8 | tris 8 | material 16
-    u32 vert_offset, index_offset, child_group;   // child_group: group this cluster was simplified from (~0 = leaf)
-    u32 skin_offset;             // per-bone bounds (skinned only)
-    u32 pad[2];
+    u32 offsets;                 // vertex data offset / 4 (15 bits) | triangle data offset / 4 (15 bits) << 15
+    u32 child_group;             // group this cluster was simplified from (~0 = leaf)
+    i32 base[3];                 // grid base: pos = (base + u16x3 offset) * VgMesh.q_step
 } VgCluster;                     // parent error / sphere come from VgGroup (the group the cluster belongs to)
 ```
+
+*As built (Phase 1):* the first draft of this struct (per-cluster `q_origin` / `q_step`, separate offsets,
+`skin_offset`) was 84 B and, worse, per-cluster float quantisation decodes a vertex shared by two clusters to
+different bits, which cracks the LOD boundaries the DAG is built to keep. Positions are instead on **one integer
+grid per mesh** (`q_step = extent / 65000`): the builder snaps every input vertex to it before welding, a cluster
+stores its integer `base`, each vertex a u16 offset, so shared vertices are bit-identical everywhere. The two data
+offsets are page-relative and pack into one word (a page is ≤ 128 KiB). The skinned bone-set block follows the
+cluster's triangle data, so it needs no offset of its own (§7).
 
 - **Vertex: 12 B static** = u16×3 position, oct-encoded normal 8+8 bits, half2 UV. **+4 B** with vertex colour
   (wind weights). **+8 B skinned** = u8×4 joints (canonical skeleton index, max 128 bones) and u8×4 weights (unorm,
@@ -125,7 +139,7 @@ Placement cells are 8 m, so a 32 m chunk holds 4×4 cells. Each cell is `{ AABB 
 Skinned instances use `extra` = palette slot. The slot table holds `{ u32 cur_first_bone, prev_first_bone,
 bone_count, max_scale_f32 }`. Previous-frame palettes are the existing `prev_bones` copy, addressed through the slot.
 
-### 1.5 Material table (resident, `VgMaterial`, 64 B)
+### 1.5 Material table (resident, `VgMaterial`, 72 B as listed; finalised with the resolve pass in Phase 3)
 
 `{ vec4 color; u32 albedo_tex, mask_tex /* bindless indices */; f32 roughness, metallic, emissive, tex_scale;
 u32 flags /* existing MaterialFlags + VG_MASKED | VG_TWO_SIDED | VG_DITHER_FADE */; u32 wpo /* snippet id 8 |
@@ -152,8 +166,11 @@ every AMD/NVIDIA desktop driver. The image variant would need `VK_EXT_shader_ima
 `src/render/vgeo/vgeo_build.{c,h}` is pure C with no renderer dependency, linked into the game (import), into
 `tools/build_vgeo` and into the tests.
 
-1. **Weld and preprocess:** `meshopt_generateVertexRemap` on position+normal+uv, then a position-only shadow index
-   buffer for adjacency.
+1. **Weld and preprocess:** snap positions to the mesh grid (§1.3), then a stable sort-based weld on
+   grid position + normal + uv + colour, then a position-only weld id for adjacency and locking; degenerate
+   triangles are dropped and missing normals smoothed. (*As built:* our own weld rather than
+   `meshopt_generateVertexRemap`, because it must weld on the snapped grid and the vendored meshoptimizer subset
+   does not include `indexgenerator.cpp`.)
 2. **Leaf clusters:** `meshopt_buildMeshlets` (max 128 tris, 128 verts, cone weight 0.25), then
    `meshopt_optimizeMeshlet`.
 3. **DAG loop** (per level, until one cluster remains):
@@ -169,8 +186,8 @@ every AMD/NVIDIA desktop driver. The image variant would need `VK_EXT_shader_ima
    - Error: `group_err = max(simplify_err, max member error)`. The lod sphere encloses the member lod spheres.
      **Monotonicity is enforced by construction and asserted.**
    - Re-cluster the simplified group into ≤ 128-tri clusters; their `error` and `lod_sphere` are the group's.
-4. **Pack:** order groups coarse → fine. Pack groups into pages (a group never spans pages) and mark root pages.
-   Quantise per cluster. Build the per-LOD-level BVH (4-wide, SAH-free median split on group centres) and merge the
+4. **Pack:** order groups coarse → fine. Pack groups into pages (a group never spans pages) and mark root pages:
+   the page prefix that holds every group of the top three levels (always resident). Quantise on the mesh grid. Build the per-LOD-level BVH (4-wide, SAH-free median split on group centres) and merge the
    levels under one root.
 5. **Discrete LOD export:** for the 2015/2010 eras, take the DAG cut at four fixed object-space errors
    (0, 0.25%, 1%, 4% of the radius), each as a normal index/vertex buffer.
@@ -187,7 +204,10 @@ in `assets.c`; a procedural mesh generator (displaced rock / sphere, N triangles
 - ≤ 128 tris and ≤ 128 verts per cluster.
 - Deterministic bytes across runs and thread counts.
 - Every cut at a sweep of thresholds is watertight on a closed input. The CPU reference cut is an Euler check plus
-  "no open edges".
+  "no open edges". *As built:* "no open edges" means every directed edge is matched by its reverse (crack- and
+  hole-free). Near the root, `meshopt_simplify` can occasionally pinch two sheets into a balanced 4-use edge. That
+  is still closed, and is allowed at coarse cuts only: ≤ 0.1% of edges, never in the five finest cuts. The Euler
+  check runs on the cuts with no pinch.
 - 10M-triangle build completes, with time and peak memory reported.
 
 **Gate:** 10M tris builds in < 3 min on 4 cores with < 6 GB peak memory, and the 500k statue builds in < 10 s.
