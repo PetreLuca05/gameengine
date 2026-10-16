@@ -46,7 +46,7 @@ typedef struct PostUBO {
     vec4 s_fb;           // damage, low health, flash, hitmarker
     vec4 s_fb2;          // sprint, underwater, night vision, desaturate
     vec4 s_fb_tint;      // rgb, w user gamma
-    vec4 s_dbg;          // view, split, debug channel scale, unused
+    vec4 s_dbg;          // view, split, debug channel scale, fog ambient (weather)
     vec4 lights[MAX_POINT_LIGHTS * 2];   // pos radius, color intensity
 } PostUBO;
 
@@ -119,6 +119,7 @@ FgRes post_aa_build(FgRes color);              // post_aa.c: TAA / TAA-U / FXAA 
 FgRes post_mb_build(FgRes color);              // post_camera.c: motion blur
 FgRes post_dof_build(FgRes color);             // post_camera.c: depth of field
 FgRes post_sights_build(FgRes color);          // post_sights.c: red dot / scope (after DoF, before bloom)
+FgRes post_lens_build(FgRes color);           // post_weather.c: lens droplets (after the sights)
 FgRes post_bloom_build(FgRes color);           // post_bloom.c (returns the bloom texture)
 void post_exposure_build(FgRes color);         // post_exposure.c
 FgRes post_flare_build(FgRes bloom);           // post_bloom.c

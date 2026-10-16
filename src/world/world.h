@@ -11,6 +11,7 @@
 #include "gameplay/items.h"
 #include "gameplay/inventory.h"
 #include "world/time_of_day.h"
+#include "world/weather.h"
 #include "player/player.h"
 #include "gameplay/events.h"
 
@@ -280,6 +281,7 @@ struct World {
     struct CharacterSystem *chars;          // skinned characters (players, zombies, dummies)
     float time;                // seconds of simulated time
     TimeState tod;             // time of day: host-authoritative, in every snapshot (world/time_of_day.h)
+    WeatherState weather;      // weather: host-authoritative, in snapshots on changes + every 10th (world/weather.h)
 };
 
 World *world_create(bool authority, const ItemDB *items);

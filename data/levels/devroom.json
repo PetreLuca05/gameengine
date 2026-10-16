@@ -173,8 +173,31 @@
     {"type": "box", "pos": [-27.25, 4, -17.35], "size": [5.5, 0.15, 1.4], "color": [0.5, 0.48, 0.45], "grid": false, "_post_corner": true},
     {"type": "box", "pos": [-6, 0, 29.95], "size": [0.4, 1.6, 0.3], "color": [0.45, 0.45, 0.47], "_open_room": true},
     {"type": "box", "pos": [-29.95, 0, 16], "size": [0.3, 1.6, 0.4], "color": [0.45, 0.45, 0.47], "_open_room": true},
-    {"type": "box", "pos": [-22.75, 0, -30.15], "size": [9.5, 3.0, 0.2], "color": [0.55, 0.55, 0.57], "_open_room": true}
+    {"type": "box", "pos": [-22.75, 0, -30.15], "size": [9.5, 3.0, 0.2], "color": [0.55, 0.55, 0.57], "_open_room": true},
+    {"_comment": "Weather yard (west, outside the room; docs/WEATHER.md): a roofed shelter (dry under it, no rain), an overhang on a wall (a dry strip), a sunken square (fills with water first), a placeholder car (dry underneath), authored puddle areas (top-level \"puddles\"). Try weather_demo, weather_set storm 5, weather_debug 1.", "type": "box", "pos": [-50, 0, 22], "size": [24, 0.02, 20], "color": [0.17, 0.17, 0.18], "grid": false, "material": "asphalt", "label": "weather yard: weather_demo | weather_set rain 5 | weather_debug 1", "label_size": 0.3},
+    {"type": "box", "pos": [-53.8, 0, 17.3], "size": [0.2, 3.0, 0.2], "color": [0.3, 0.3, 0.32], "material": "metal_thick"},
+    {"type": "box", "pos": [-46.2, 0, 17.3], "size": [0.2, 3.0, 0.2], "color": [0.3, 0.3, 0.32], "material": "metal_thick"},
+    {"type": "box", "pos": [-53.8, 0, 22.7], "size": [0.2, 3.0, 0.2], "color": [0.3, 0.3, 0.32], "material": "metal_thick"},
+    {"type": "box", "pos": [-46.2, 0, 22.7], "size": [0.2, 3.0, 0.2], "color": [0.3, 0.3, 0.32], "material": "metal_thick"},
+    {"type": "box", "pos": [-50, 3.0, 20], "size": [8, 0.15, 6], "color": [0.42, 0.4, 0.38], "grid": false, "material": "metal_thin", "label": "shelter: dry under the roof", "label_size": 0.2},
+    {"type": "box", "pos": [-40, 0, 11], "size": [6, 3.2, 0.3], "color": [0.55, 0.36, 0.3], "material": "brick"},
+    {"type": "box", "pos": [-40, 2.6, 12], "size": [6, 0.12, 2], "color": [0.4, 0.4, 0.42], "grid": false, "material": "metal_thin", "label": "overhang: dry strip by the wall", "label_size": 0.2},
+    {"type": "box", "pos": [-56, 0, 30.5], "size": [7, 0.1, 2], "color": [0.5, 0.5, 0.48], "grid": false, "material": "concrete"},
+    {"type": "box", "pos": [-56, 0, 25.5], "size": [7, 0.1, 2], "color": [0.5, 0.5, 0.48], "grid": false, "material": "concrete", "label": "dip: puddles fill here first", "label_size": 0.2},
+    {"type": "box", "pos": [-58.5, 0, 28], "size": [2, 0.1, 3], "color": [0.5, 0.5, 0.48], "grid": false, "material": "concrete"},
+    {"type": "box", "pos": [-53.5, 0, 28], "size": [2, 0.1, 3], "color": [0.5, 0.5, 0.48], "grid": false, "material": "concrete"},
+    {"type": "box", "pos": [-58, 0.35, 18], "size": [1.8, 0.7, 4.2], "color": [0.55, 0.1, 0.08], "grid": false, "material": "metal_thin", "label": "car (placeholder)", "label_size": 0.2},
+    {"type": "box", "pos": [-58, 1.05, 18.3], "size": [1.6, 0.55, 2.2], "color": [0.2, 0.25, 0.3], "grid": false, "material": "glass"},
+    {"type": "box", "pos": [-58.7, 0, 16.6], "size": [0.25, 0.35, 0.25], "color": [0.1, 0.1, 0.1], "grid": false, "material": "default"},
+    {"type": "box", "pos": [-57.3, 0, 16.6], "size": [0.25, 0.35, 0.25], "color": [0.1, 0.1, 0.1], "grid": false, "material": "default"},
+    {"type": "box", "pos": [-58.7, 0, 19.4], "size": [0.25, 0.35, 0.25], "color": [0.1, 0.1, 0.1], "grid": false, "material": "default"},
+    {"type": "box", "pos": [-57.3, 0, 19.4], "size": [0.25, 0.35, 0.25], "color": [0.1, 0.1, 0.1], "grid": false, "material": "default"}
   ],
+  "puddles": [
+    {"_comment": "Authored puddle areas (game_weather.c bake_puddles): pos [x, z], size [w, d], value 0..1 (1 fills first).", "pos": [-44, 26], "size": [5, 3], "value": 1.0},
+    {"pos": [-47, 30], "size": [2.5, 1.5], "value": 0.8}
+  ],
+  "weather": {"preset": "little_cloudy", "random": false},
   "labels": [
     {"pos": [0, 0, 47.5], "yaw": 0, "floor": true, "size": 0.3, "text": "horde yard: spawn_horde <count> [radius] [ring|random|cluster], horde_debug 1"},
     {"pos": [-10, 0, -34.9], "yaw": 0, "floor": true, "size": 0.25, "text": "5 m: player / zombie / helmet"},

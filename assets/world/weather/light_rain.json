@@ -1,0 +1,15 @@
+{
+  "_comment": "Drizzle. Any key left out keeps the current value when composed (overcast+rain).",
+  "cloud_cover": 0.85,
+  "cloud_density": 0.8,
+  "precipitation": 0.3,
+  "fog_density": 0.006,
+  "fog_height": 50,
+  "temperature": 11,
+  "wind": 5.0,
+  "gust": 0.3,
+  "lightning_rate": 0,
+  "transition": 120,
+  "min_stay": 150,
+  "max_stay": 360
+}

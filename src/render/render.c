@@ -212,6 +212,7 @@ void render_shutdown(void) {
         fg_shutdown();
         vkx_shutdown();
         render_ui_shutdown();
+        vkr_target_destroy(&R->occl);
         vkp_destroy_pipelines();
         vkr_destroy_all_resources();
         vkr_target_destroy(&R->shadow);
@@ -371,6 +372,49 @@ void render_add_spot(const SpotLight *l) {
 
 void render_set_spot_cookie(TextureId t) { R->spot_cookie = t; }
 
+static RenderLensDrop g_lens_drops[RENDER_LENS_DROPS];
+
+void render_set_weather(const RenderWeather *w) {
+    R->weather = *w;
+    int n = DG_CLAMP(w->drop_count, 0, RENDER_LENS_DROPS);
+    if (w->drops && n) memcpy(g_lens_drops, w->drops, sizeof(RenderLensDrop) * (size_t)n);
+    R->weather.drops = g_lens_drops;
+    R->weather.drop_count = w->drops ? n : 0;
+}
+
+const RenderWeather *render_weather_state(void) { return &R->weather; }
+
+// Frame set bindings 9 (rain occlusion depth) and 10 (puddle mask); rewritten when they change.
+static void write_weather_bindings(void) {
+    if (!R->occl.image) {
+        u32 n = 512;
+        R->occl = vkr_target_create(n, n, VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_IMAGE_ASPECT_DEPTH_BIT);
+    }
+    TextureId pm = R->weather.puddle_mask && R->textures[R->weather.puddle_mask].used && R->textures[R->weather.puddle_mask].ready ? R->weather.puddle_mask : R->white_tex;
+    if (R->weather_bindings && pm == R->puddle_bound) return;
+    if (R->weather_bindings) vkDeviceWaitIdle(R->device);
+    for (int i = 0; i < FRAMES_IN_FLIGHT; i++) {
+        VkDescriptorSet sets[2] = { R->frames[i].frame_set, R->frames[i].frame_set_pip };
+        for (int s = 0; s < 2; s++) {
+            if (!sets[s]) continue;
+            VkDescriptorImageInfo ii[2] = { { R->sampler_clamp, R->occl.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL },
+                                            { R->sampler_clamp, R->textures[pm].view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL } };
+            VkWriteDescriptorSet w[2];
+            for (int k = 0; k < 2; k++) {
+                w[k] = (VkWriteDescriptorSet){ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+                w[k].dstSet = sets[s];
+                w[k].dstBinding = (u32)(9 + k);
+                w[k].descriptorCount = 1;
+                w[k].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+                w[k].pImageInfo = &ii[k];
+            }
+            vkUpdateDescriptorSets(R->device, 2, w, 0, NULL);
+        }
+    }
+    R->puddle_bound = pm;
+    R->weather_bindings = true;
+}
+
 // Frame set binding 8: the spot cookie (white until one is set / uploaded).
 static void write_cookie_binding(void) {
     TextureId t = R->spot_cookie && R->textures[R->spot_cookie].used && R->textures[R->spot_cookie].ready ? R->spot_cookie : R->white_tex;
@@ -490,6 +534,7 @@ static VkDeviceSize dyn_push(FrameResources *f, const void *data, VkDeviceSize s
 
 static bool g_froxel_fog_draws;   // transparent pass: blended lit draws apply the froxel fog
 
+static void draw_precip(VkCommandBuffer cmd, VkDescriptorSet frame_set);
 static u32 g_shadow_cascade;   // shadow pass: the cascade being drawn (push constants flags.w)
 
 static void draw_items(VkCommandBuffer cmd, DrawItem *items, u32 count, bool shadow_pass, bool cull, int alpha_mode) {
@@ -866,6 +911,26 @@ static void compute_matrices(FrameData *fd) {
     memcpy(fd->lights, R->lights, sizeof(GpuPointLight) * R->light_count);
     memcpy(fd->spots, R->spots, sizeof(GpuSpotLight) * R->spot_count);
     fd->spot_info = v4((float)R->spot_count, R->spot_cookie_bound == R->spot_cookie && R->spot_cookie ? 1.0f : 0.0f, 0, 0);
+    {
+        const RenderWeather *wx = &R->weather;
+        if (wx->occlusion_update && wx->occlusion_extent > 1.0f) {
+            // Top-down ortho around the (snapped) centre: 60 m above it down to 60 m below.
+            float e = wx->occlusion_extent, top = wx->occlusion_center.y + 60.0f;
+            R->occl_range = 120.0f;
+            vec3 eye = v3(wx->occlusion_center.x, top, wx->occlusion_center.z);
+            mat4 view = mat4_look_at(eye, v3_add(eye, v3(0, -1, 0)), v3(0, 0, -1));
+            R->occl_vp = mat4_mul(mat4_ortho(-e, e, -e, e, 0.0f, R->occl_range), view);
+            R->occl_info = v4(eye.x, eye.z, e, top);
+        }
+        fd->occl_vp = R->occl_vp;
+        fd->wx0 = v4(wx->wetness, wx->puddles, wx->snow_cover, wx->lightning);
+        fd->wx1 = v4(wx->rain, wx->snowfall, wx->time, R->occl_valid ? 1.0f : 0.0f);
+        float ws = sqrtf(wx->wind.x * wx->wind.x + wx->wind.z * wx->wind.z);
+        fd->wx2 = v4(wx->wind.x, wx->wind.z, ws, R->puddle_bound && R->puddle_bound != R->white_tex ? 1.0f : 0.0f);
+        fd->wx3 = R->occl_info;
+        fd->wx4 = v4(R->occl_range, (float)wx->precip_quality, wx->puddle_reflections ? 1.0f : 0.0f, 0);
+        fd->puddle_xf = wx->puddle_xform;
+    }
 }
 
 static void save_screenshot(GpuBuffer *buf, u32 w, u32 h) {
@@ -1050,7 +1115,39 @@ static void exec_transparent(VkCommandBuffer cmd, void *u) {
         R->stats.draw_calls++;
     }
     vkx_draw_particles(cmd);
+    draw_precip(cmd, f->frame_set);
     vkCmdEndRendering(cmd);
+}
+
+// Precipitation (shaders/precip.vert): rain / snow streaks around the camera + splashes, after the
+// particles. Counts scale with the intensity and the quality.
+static void draw_precip(VkCommandBuffer cmd, VkDescriptorSet frame_set) {
+    const RenderWeather *wx = &R->weather;
+    float amount = fmaxf(wx->rain, wx->snowfall);
+    if (wx->precip_quality <= 0 || amount < 0.01f || !R->pipes[PIPE_PRECIP]) return;
+    static const u32 streaks[4] = { 0, 4000, 9000, 16000 }, splashes[4] = { 0, 300, 700, 1300 };
+    int q = DG_CLAMP(wx->precip_quality, 0, 3);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_PRECIP]);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 0, 1, &frame_set, 0, NULL);
+    PushLit pc;
+    memset(&pc, 0, sizeof(pc));
+    pc.model = mat4_identity();
+    float snow_frac = wx->rain + wx->snowfall > 1e-4f ? wx->snowfall / (wx->rain + wx->snowfall) : 0.0f;
+    pc.params = v4(snow_frac, amount, 14.0f, 16.0f);
+    u32 n = (u32)((float)streaks[q] * amount);
+    if (n) {
+        vkCmdPushConstants(cmd, R->layout_lit, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushLit), &pc);
+        vkCmdDraw(cmd, 6, n, 0, 0);
+        R->stats.draw_calls++;
+    }
+    u32 ns = (u32)((float)splashes[q] * wx->rain);
+    if (ns && R->occl_valid) {
+        pc.flags[0] = 1;
+        pc.params.y = wx->rain;
+        vkCmdPushConstants(cmd, R->layout_lit, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushLit), &pc);
+        vkCmdDraw(cmd, 6, ns, 0, 0);
+        R->stats.draw_calls++;
+    }
 }
 
 // Viewmodel G-buffer (own depth): marks first-person pixels (no SSR / motion blur / DoF) and
@@ -1154,6 +1251,7 @@ static void exec_scope_pip(VkCommandBuffer cmd, void *u) {
     draw_skinned(cmd, 0, PIPE_SKIN, PIPE_LIT, F.skin_main);
     // Particles (smoke, sparks, blood, muzzle flashes of others ...) through the scope camera.
     vkx_draw_particles_pip(cmd, F.f->frame_set_pip);
+    draw_precip(cmd, F.f->frame_set_pip);
     vkCmdEndRendering(cmd);
 }
 
@@ -1410,6 +1508,7 @@ static void build_frame_graph(FrameData *fd) {
 void render_end_frame(void) {
     if (!R->frame_active) return;
     write_cookie_binding();
+    write_weather_bindings();
     FrameResources *f = &R->frames[R->frame_slot];
     VkCommandBuffer cmd = f->cmd;
     VK_CHECK(vkResetCommandBuffer(cmd, 0));
@@ -1519,6 +1618,47 @@ void render_end_frame(void) {
                       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
                       VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                       VK_ACCESS_2_SHADER_SAMPLED_READ_BIT, 1);
+
+    // ---------------------------------------------------------- rain occlusion map (weather)
+    // Static + dynamic opaque draws from straight above, depth only (cascade 3 of the shadow
+    // shaders = frame.occl_vp). Re-rendered when the weather asks (the player moved / periodically).
+    if (!R->occl_valid && R->occl.image && R->occl.layout == VK_IMAGE_LAYOUT_UNDEFINED) {
+        vkr_image_barrier(cmd, R->occl.image, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                          VK_PIPELINE_STAGE_2_NONE, 0, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT,
+                          VK_ACCESS_2_SHADER_SAMPLED_READ_BIT, 1);
+        R->occl.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    }
+    if (R->weather.occlusion_update && R->occl.image && R->weather.occlusion_extent > 1.0f) {
+        vkr_image_barrier(cmd, R->occl.image, VK_IMAGE_ASPECT_DEPTH_BIT, R->occl.layout, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+                          VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+                          VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT, VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, 1);
+        VkRenderingAttachmentInfo da = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
+        da.imageView = R->occl.view;
+        da.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+        da.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        da.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        da.clearValue.depthStencil.depth = 1.0f;
+        VkRenderingInfo ri = { VK_STRUCTURE_TYPE_RENDERING_INFO };
+        ri.renderArea.extent.width = R->occl.w;
+        ri.renderArea.extent.height = R->occl.h;
+        ri.layerCount = 1;
+        ri.pDepthAttachment = &da;
+        vkCmdBeginRendering(cmd, &ri);
+        set_viewport(cmd, R->occl.w, R->occl.h);
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_SHADOW]);
+        vkCmdSetDepthBias(cmd, 0.0f, 0.0f, 0.0f);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 0, 1, &f->frame_set, 0, NULL);
+        g_shadow_cascade = 3;
+        draw_items(cmd, R->draws, R->draw_count, true, false, 0);
+        g_shadow_cascade = 0;
+        vkCmdEndRendering(cmd);
+        vkr_image_barrier(cmd, R->occl.image, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                          VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT, VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                          VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                          VK_ACCESS_2_SHADER_SAMPLED_READ_BIT, 1);
+        R->occl.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        R->occl_valid = true;
+    }
 
     // ---------------------------------------------------------- frame graph: scene + post + UI
     build_frame_graph(fd);

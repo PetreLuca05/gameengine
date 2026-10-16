@@ -24,6 +24,7 @@ layout(std430, set = 0, binding = 13) readonly buffer SkyParams {
     vec4 cshadow;       // xy origin (world xz), z size (m), w 1 / size
     vec4 env;           // x SH blend k, y env slice (0..3), z env mips, w debug view
     vec4 key;           // xyz key light direction (shadowed light), w moon is the key light
+    vec4 clouds3;       // x edge softness (weather), y darkness (storm), zw unused
 } SK;
 
 const float R_BOTTOM = 6360.0;
@@ -209,7 +210,8 @@ float cloud_density(vec2 xz, int oct) {
     if (cov <= 0.001) return 0.0;
     vec2 p = (xz + SK.clouds.zw) / max(SK.clouds2.z, 1.0);
     float n = sk_fbm(p, oct) * 0.7 + sk_fbm(p * 2.6 + vec2(3.1, 1.7), max(oct - 2, 1)) * 0.3;
-    return smoothstep(0.92 - cov * 0.75, 1.08 - cov * 0.75, n);
+    float soft = clamp(SK.clouds3.x, 0.0, 1.0) * 0.25;
+    return smoothstep(0.92 - cov * 0.75 - soft, 1.08 - cov * 0.75 + soft * 0.4, n);
 }
 // Where a world-space ray from the camera meets the cloud layer (flat layer, curvature ignored).
 bool cloud_hit(vec3 dir, out vec2 xz, out float dist) {

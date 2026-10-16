@@ -128,6 +128,14 @@ typedef struct FrameData {
     vec4 shadow_bias;     // x, y, z: per-cascade depth bias scale (constant bias in metres)
     vec4 spot_info;       // x spot light count, y cookie valid
     GpuSpotLight spots[MAX_SPOT_LIGHTS];
+    // Weather (shaders/weather.glsl)
+    mat4 occl_vp;         // world -> rain occlusion map clip (top-down ortho)
+    vec4 wx0;             // wetness, puddles, snow cover, lightning flash
+    vec4 wx1;             // rain, snowfall, time, occlusion map valid
+    vec4 wx2;             // wind x, z, wind strength, puddle mask valid
+    vec4 wx3;             // occlusion centre x, z, half extent, top y
+    vec4 wx4;             // occlusion depth range (m), precipitation quality, unused, unused
+    vec4 puddle_xf;       // origin x, z, 1 / size x, 1 / size z
     GpuPointLight lights[MAX_POINT_LIGHTS];
 } FrameData;
 
@@ -140,7 +148,7 @@ typedef struct PushLit {
 
 typedef enum PipelineId {
     PIPE_LIT, PIPE_LIT_WIRE, PIPE_LIT_BLEND, PIPE_SHADOW, PIPE_LINES, PIPE_LINES_OVERLAY,
-    PIPE_TEXT, PIPE_PREPASS, PIPE_UI, PIPE_SKIN, PIPE_SKIN_WIRE, PIPE_SKIN_SHADOW, PIPE_PREPASS_SKIN, PIPE_UI3D, PIPE_COUNT
+    PIPE_TEXT, PIPE_PREPASS, PIPE_UI, PIPE_SKIN, PIPE_SKIN_WIRE, PIPE_SKIN_SHADOW, PIPE_PREPASS_SKIN, PIPE_UI3D, PIPE_PRECIP, PIPE_COUNT
 } PipelineId;
 
 // Must match SkinInstance in shaders/common.glsl (std430).
@@ -221,6 +229,14 @@ typedef struct Renderer {
     u32 light_count;
     GpuSpotLight spots[MAX_SPOT_LIGHTS];
     u32 spot_count;
+    RenderWeather weather;            // this frame (render_set_weather)
+    RenderTarget occl;                // top-down rain occlusion depth (render.c)
+    mat4 occl_vp;
+    vec4 occl_info;                   // centre x, z, half extent, top y
+    float occl_range;
+    bool occl_valid;
+    TextureId puddle_bound;           // puddle mask in frame set binding 10
+    bool weather_bindings;
     TextureId spot_cookie, spot_cookie_bound;
     LineVertex *line_cpu[2];   // [0] depth tested, [1] overlay
     u32 line_count[2];
@@ -277,6 +293,7 @@ void render_ui_final_reads(int final_pass);
 bool render_ui_wants_wait(void);
 void render_ui_frame_done(void);
 void render_ui_shutdown(void);
+const RenderWeather *render_weather_state(void);   // this frame's weather (post passes)
 
 // vk_device.c
 bool vkd_create_device(struct SDL_Window *window);

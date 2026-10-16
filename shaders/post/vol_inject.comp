@@ -51,7 +51,9 @@ void main() {
     vec3 scat = vec3(0.0);
     float vis = sun_visibility(wp);
     scat += U.sun_color.rgb * U.sun_dir.w * vis * phase_hg(dot(ray_w, L), U.s_vol.w) * U.s_vol2.w;
-    scat += U.sky.rgb * U.sky.w * 0.25 / PI;
+    // Sky ambient: a thin haze is mostly sun-lit; thick weather fog is lit by the whole (overcast)
+    // sky, which is what makes it read as fog instead of darkness (U.s_dbg.w, game_weather.c).
+    scat += U.sky.rgb * U.sky.w * mix(0.25 / PI, 1.1, clamp(U.s_dbg.w, 0.0, 1.0));
     int nl = int(U.ground.w);
     for (int i = 0; i < nl && i < MAX_POINT_LIGHTS; i++) {
         vec3 lp = U.lights[i * 2].xyz;

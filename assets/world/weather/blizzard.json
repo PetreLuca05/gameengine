@@ -1,0 +1,15 @@
+{
+  "_comment": "Driving snow, low visibility. Any key left out keeps the current value when composed (overcast+rain).",
+  "cloud_cover": 1.0,
+  "cloud_density": 0.95,
+  "precipitation": 1.0,
+  "fog_density": 0.04,
+  "fog_height": 80,
+  "temperature": -12,
+  "wind": 16.0,
+  "gust": 0.9,
+  "lightning_rate": 0,
+  "transition": 120,
+  "min_stay": 90,
+  "max_stay": 240
+}

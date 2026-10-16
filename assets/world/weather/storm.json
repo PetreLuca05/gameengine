@@ -1,0 +1,15 @@
+{
+  "_comment": "Heavy rain, strong gusts, lightning. Any key left out keeps the current value when composed (overcast+rain).",
+  "cloud_cover": 1.0,
+  "cloud_density": 1.0,
+  "precipitation": 1.0,
+  "fog_density": 0.012,
+  "fog_height": 70,
+  "temperature": 9,
+  "wind": 13.0,
+  "gust": 0.8,
+  "lightning_rate": 4.0,
+  "transition": 90,
+  "min_stay": 90,
+  "max_stay": 240
+}

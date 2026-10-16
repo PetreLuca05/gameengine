@@ -30,6 +30,9 @@ typedef struct RemoteClient {
     SnapHistory history;
     u32 acked_tick;
     u32 cvar_revision;
+    u16 weather_version;           // last weather version sent
+    u8 weather_resend;             // snapshots left that carry the weather after a change
+    u32 weather_count;             // snapshots since the last periodic weather pack
     double connect_time;
     float view_tick;
     u8 zombie_age[MAX_ENTITIES];   // snapshots since each zombie was last updated (repl_rate_limit)
@@ -357,6 +360,18 @@ void net_host_after_tick(World *w) {
             u8 tw[20];
             tod_pack(&w->tod, tw);
             w_bytes(&wr, tw, sizeof(tw));
+            // Weather (120 bytes): a few snapshots after every change, then every 10th (late
+            // joiners: the first snapshot carries it, version 0 never matches).
+            if (c->weather_version != w->weather.version) { c->weather_version = w->weather.version; c->weather_resend = 3; }
+            bool send_wx = c->weather_resend > 0 || ++c->weather_count >= 10 || c->acked_tick == 0;
+            if (c->weather_resend > 0) c->weather_resend--;
+            if (send_wx) c->weather_count = 0;
+            w_u8(&wr, send_wx ? 1 : 0);
+            if (send_wx) {
+                u8 wx[WEATHER_PACK_SIZE];
+                weather_pack(&w->weather, wx);
+                w_bytes(&wr, wx, sizeof(wx));
+            }
         }
         repl_write_delta(&wr, base, cur);
         N->snap_bytes = N->snap_bytes * 0.9f + (float)wr.len * 0.1f;
@@ -390,8 +405,12 @@ static void client_handle_snapshot(Reader *r) {
     u32 open_container = r_u32(r);
     u8 tw[20];
     r_bytes(r, tw, sizeof(tw));
+    u8 has_wx = r_u8(r);
+    u8 wx[WEATHER_PACK_SIZE];
+    if (has_wx) r_bytes(r, wx, sizeof(wx));
     if (tick <= N->latest_snap) return; // old / duplicate (unreliable reordering)
     if (!r->overflow) tod_unpack(&w->tod, tw);
+    if (!r->overflow && has_wx) weather_unpack(&w->weather, wx);
     // Application-level stats: RTT via acked command, loss via snapshot tick gaps.
     {
         double sent = N->cmd_send_time[ack_seq % 128];

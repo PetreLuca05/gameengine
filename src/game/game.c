@@ -275,6 +275,7 @@ void game_sim_player(World *w, int slot, const UserCmd *cmd, float dt, bool firs
 static void host_tick(World *w, const UserCmd *local_cmd) {
     world_store_prev(w);
     daynight_host_tick(w);
+    weather_host_tick(w);
     for (int s = 0; s < MAX_PLAYERS; s++) {
         Player *p = &w->players[s];
         if (!p->active) continue;
@@ -661,6 +662,7 @@ bool game_host(const char *map) {
         if (!load_map(G->world, "devroom")) return false;
     }
     daynight_level_loaded(G->world);
+    weather_level_loaded(G->world, G->map);
     flesh_fx_clear();
     horde_level_reset();
     G->mode = GM_HOST;
@@ -683,6 +685,7 @@ void game_cl_welcome(int slot, const char *map, u32 seed, u32 server_tick) {
     cvar_set_int(G->world_seed, (int)seed);
     if (!load_map(G->world, map)) log_error("client: cannot load map '%s'", map);
     daynight_level_loaded(G->world);   // config; the time itself arrives with every snapshot
+    weather_level_loaded(G->world, map);   // puddle mask; the weather state arrives with the snapshots
     flesh_fx_clear();
     horde_level_reset();
     G->mode = GM_CLIENT;

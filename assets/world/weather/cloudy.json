@@ -1,0 +1,15 @@
+{
+  "_comment": "Broken cloud, the sun comes and goes. Any key left out keeps the current value when composed (overcast+rain).",
+  "cloud_cover": 0.6,
+  "cloud_density": 0.65,
+  "precipitation": 0.0,
+  "fog_density": 0.003,
+  "fog_height": 40,
+  "temperature": 14,
+  "wind": 4.5,
+  "gust": 0.3,
+  "lightning_rate": 0,
+  "transition": 240,
+  "min_stay": 180,
+  "max_stay": 420
+}

@@ -38,6 +38,18 @@ void sights_draw(void);
 // game_daynight.c: day / night cycle
 struct PostSettings;
 void daynight_register(void);
+void weather_register(void);                     // game_weather.c
+void weather_level_loaded(World *w, const char *map);
+void weather_host_tick(World *w);
+bool weather_active(World *w);
+bool weather_current(World *w, WeatherParams *out);
+void weather_frame(World *w, const RenderCamera *cam, const Player *lp);   // before daynight_environment
+void weather_environment(World *w, RenderEnvironment *env);               // sky hooks (daynight)
+void weather_post(struct PostSettings *s);
+float weather_cloud_cover(World *w, float fallback);
+float weather_fog_density(World *w, float fallback);
+float weather_lightning_flash(void);
+void weather_draw(void);
 void daynight_level_loaded(World *w);
 void daynight_host_tick(World *w);
 void daynight_handle_event(const GameEvent *ev);

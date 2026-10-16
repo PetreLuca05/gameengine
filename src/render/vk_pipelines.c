@@ -23,7 +23,7 @@ typedef struct PipeDesc {
 } PipeDesc;
 
 bool vkp_create_layouts(void) {
-    VkDescriptorSetLayoutBinding fb[9] = { 0 };
+    VkDescriptorSetLayoutBinding fb[11] = { 0 };
     fb[0].binding = 0;
     fb[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     fb[0].descriptorCount = 1;
@@ -50,8 +50,15 @@ bool vkp_create_layouts(void) {
     fb[8].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     fb[8].descriptorCount = 1;
     fb[8].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+    // 9 rain occlusion depth, 10 puddle mask (weather).
+    for (int i = 9; i < 11; i++) {
+        fb[i].binding = (u32)i;
+        fb[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        fb[i].descriptorCount = 1;
+        fb[i].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+    }
     VkDescriptorSetLayoutCreateInfo li = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
-    li.bindingCount = 9;
+    li.bindingCount = 11;
     li.pBindings = fb;
     VK_CHECK(vkCreateDescriptorSetLayout(R->device, &li, NULL, &R->frame_layout));
 
@@ -323,6 +330,8 @@ bool vkp_create_pipelines(void) {
     d[PIPE_PREPASS].extra_formats[1] = GB_VELOCITY_FORMAT;
     d[PIPE_UI] = (PipeDesc){ "ui.vert", "ui.frag", VL_UI, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, VK_POLYGON_MODE_FILL,
                              VK_CULL_MODE_NONE, false, false, true, R->swap_format, VK_FORMAT_UNDEFINED, false, R->layout_ui };
+    d[PIPE_PRECIP] = (PipeDesc){ "precip.vert", "precip.frag", VL_NONE, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, VK_POLYGON_MODE_FILL,
+                                 VK_CULL_MODE_NONE, true, false, true, hdr, depth, false, R->layout_lit };
     d[PIPE_UI3D] = (PipeDesc){ "ui3d.vert", "ui3d.frag", VL_MESH, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, VK_POLYGON_MODE_FILL,
                                VK_CULL_MODE_BACK_BIT, true, true, false, VK_FORMAT_R8G8B8A8_UNORM, depth, false, R->layout_ui3d };
 

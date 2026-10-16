@@ -43,6 +43,7 @@ void main() {
             vec3 col = (sun_c * beer * silver + moon_c * beer * 0.35) * 0.12 + amb * (0.55 + 0.45 * (1.0 - d));
             float hz = smoothstep(4000.0, 30000.0, dist);
             col = mix(col, sky_lut(normalize(vec3(dir.x, max(dir.y, 0.02), dir.z))), hz * 0.6);
+            col *= 1.0 - clamp(SK.clouds3.y, 0.0, 1.0) * (0.35 + 0.45 * d);   // storm: dark, thick bases
             o = vec4(col * d, d);
         }
     }

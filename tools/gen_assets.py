@@ -349,6 +349,50 @@ def barrel_gltf(radius=0.3, half_h=0.45, seg=24):
         json.dump(gltf, f, indent=1)
 
 
+def seamless(samples, fade):
+    """Crossfades the tail into the head so the sample loops without a click."""
+    n = int(fade * RATE)
+    out = samples[n:]
+    for i in range(n):
+        k = i / n
+        out[len(out) - n + i] = out[len(out) - n + i] * (1 - k) + samples[i] * k
+    return out
+
+
+def gen_weather_sounds():
+    """Weather (docs/WEATHER.md): rain and wind loops (seamless), thunder. Own RNG: running this
+    alone does not change the other generated assets."""
+    rng = random.Random(4711)
+    # Rain: pink-ish noise bed + dense random drop ticks.
+    lp1, lp2 = LowPass(0.18), LowPass(0.05)
+    drops = [0.0] * int(6.0 * RATE)
+    for _ in range(9000):
+        t0 = rng.randrange(len(drops) - 400)
+        a = rng.uniform(0.05, 0.25)
+        f = rng.uniform(1800, 5200)
+        for k in range(300):
+            drops[t0 + k] += a * math.sin(k / RATE * f * 2 * math.pi) * math.exp(-k / 40.0)
+    def rain(t, i):
+        n = rng.uniform(-1, 1)
+        return lp1(n) * 0.55 + lp2(n) * 0.5 + drops[i] * 0.5
+    write_wav("rain_loop", seamless(synth(6.0, rain), 0.5))
+    # Wind: low-passed noise with a slow swell (gusts) and a faint whistle.
+    lp3, lp4 = LowPass(0.012), LowPass(0.04)
+    def wind(t, i):
+        n = rng.uniform(-1, 1)
+        swell = 0.6 + 0.4 * math.sin(t * 2 * math.pi / 8.0) * math.sin(t * 2 * math.pi / 3.1 + 1.0)
+        return (lp3(n) * 3.2 + lp4(n) * 0.6) * swell + 0.02 * math.sin(t * 2 * math.pi * (620 + 60 * math.sin(t * 0.8))) * swell
+    write_wav("wind_loop", seamless(synth(8.0, wind), 1.0))
+    # Thunder: a crack, then a long rolling rumble.
+    lp5, lp6 = LowPass(0.02), LowPass(0.006)
+    def thunder(t, i):
+        n = rng.uniform(-1, 1)
+        crack = n * math.exp(-t / 0.08) * 0.6
+        roll = (lp5(n) * 2.5 + lp6(n) * 6.0) * env(t, 0.15, 1.6) * (0.7 + 0.3 * math.sin(t * 9.0) * math.sin(t * 2.3))
+        return crack + roll
+    write_wav("thunder", synth(5.0, thunder))
+
+
 if __name__ == "__main__":
     import sys
     if "--vfx-sounds" in sys.argv:
@@ -356,6 +400,7 @@ if __name__ == "__main__":
         print("vfx sounds generated")
         sys.exit(0)
     gen_sounds()
+    gen_weather_sounds()
     gen_vfx_sounds()
     crate_texture()
     ktx2_texture()

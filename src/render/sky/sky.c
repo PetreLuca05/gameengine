@@ -6,7 +6,7 @@
 
 // Must match SkyParams in shaders/sky/sky_common.glsl (std430).
 typedef struct SkyGpu {
-    vec4 sun_dir, moon_dir, sun_disc, moon_disc, cel_x, cel_y, cel_z, clouds, clouds2, cam, ground, ap, cshadow, env, key;
+    vec4 sun_dir, moon_dir, sun_disc, moon_disc, cel_x, cel_y, cel_z, clouds, clouds2, cam, ground, ap, cshadow, env, key, clouds3;
 } SkyGpu;
 
 typedef struct SkyImage {
@@ -350,7 +350,8 @@ void sky_build(void) {
     g->cel_y = v4f(e->cel_y, e->milky_way);
     g->cel_z = v4f(e->cel_z, e->night_floor);
     g->clouds = v4(e->cloud_cover, e->cloud_altitude, e->cloud_offset.x, e->cloud_offset.y);
-    g->clouds2 = v4(0.92f, P.in.time, e->cloud_scale > 1.0f ? e->cloud_scale : 3000.0f, e->cloud_shadow_strength);
+    g->clouds3 = v4(e->cloud_softness, e->cloud_darkness, 0.0f, 0.0f);
+    g->clouds2 = v4(e->cloud_density > 0.0f ? e->cloud_density : 0.92f, P.in.time, e->cloud_scale > 1.0f ? e->cloud_scale : 3000.0f, e->cloud_shadow_strength);
     vec3 cam = R->cam.pos;
     g->cam = v4(cam.x, cam.y, cam.z, fmaxf(cam.y * 0.001f, 0.0f) + 0.002f);
     g->ground = v4(0.25f, 0.24f, 0.22f, e->ambient_scale);

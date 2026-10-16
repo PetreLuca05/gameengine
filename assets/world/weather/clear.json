@@ -1,0 +1,15 @@
+{
+  "_comment": "Clear sky, light breeze. Any key left out keeps the current value when composed (overcast+rain).",
+  "cloud_cover": 0.05,
+  "cloud_density": 0.4,
+  "precipitation": 0.0,
+  "fog_density": 0.0015,
+  "fog_height": 30,
+  "temperature": 18,
+  "wind": 2.0,
+  "gust": 0.1,
+  "lightning_rate": 0,
+  "transition": 240,
+  "min_stay": 240,
+  "max_stay": 600
+}

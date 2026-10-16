@@ -14,6 +14,9 @@ void audio_update(vec3 listener_pos, vec3 listener_fwd, vec3 listener_up);
 void audio_play(const char *name, vec3 pos, float volume, SoundCategory cat);
 void audio_play_2d(const char *name, float volume, SoundCategory cat);
 void audio_play_music(const char *name);
+// Ambient loops (rain, wind ...): started on the first call with volume > 0, faded to the volume,
+// stopped at 0. Non-spatial, effects group.
+void audio_loop_set(const char *name, float volume);
 bool audio_available(void);
 
 #endif

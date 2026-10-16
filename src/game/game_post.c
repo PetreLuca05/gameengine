@@ -328,6 +328,7 @@ static void cmd_post_status(int argc, const char **argv) {
     log_info("post: preset %s aa %d up %d scale %.2f ao %d contact %d ssr %d ssgi %d vol %d mb %d dof %d bloom %d tm %d ev %.2f hdr %d/%d",
              game_post_preset_name(game_post_detect_preset()), s->aa, s->upscaler, s->render_scale, s->ao, s->contact_shadows, s->ssr, s->ssgi,
              s->volumetrics, s->motion_blur, s->dof, s->bloom, s->tonemapper, render_exposure_ev(), render_hdr_supported(), render_hdr_active());
+    log_info("post: fog density %.4f height %.1f falloff %.3f anisotropy %.2f shafts %.2f", s->fog_density, s->fog_height, s->fog_falloff, s->fog_anisotropy, s->sun_shafts);
 }
 
 // ------------------------------------------------------------------ init
@@ -511,6 +512,7 @@ void game_post_frame(const PostFrameInfo *fi) {
     PostSettings s;
     build_settings(&s, fi);
     daynight_post(&s);
+    weather_post(&s);
     apply_feedback(&s, fi, dt);
     apply_photo(&s);
     // With ADS DoF on (game_sights.c), aiming switches the DoF exactly when the aim completes;

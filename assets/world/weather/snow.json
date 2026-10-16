@@ -1,0 +1,15 @@
+{
+  "_comment": "Steady snow, it settles. Any key left out keeps the current value when composed (overcast+rain).",
+  "cloud_cover": 0.95,
+  "cloud_density": 0.85,
+  "precipitation": 0.7,
+  "fog_density": 0.012,
+  "fog_height": 60,
+  "temperature": -6,
+  "wind": 4.0,
+  "gust": 0.3,
+  "lightning_rate": 0,
+  "transition": 180,
+  "min_stay": 180,
+  "max_stay": 420
+}

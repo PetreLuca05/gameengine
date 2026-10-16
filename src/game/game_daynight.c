@@ -332,11 +332,16 @@ void daynight_environment(World *w, const RenderCamera *cam, RenderEnvironment *
     DN.frame_days = days;
     DN.have_sky = true;
     float h = s.hours;
-    float cover = DN.weather_clouds->f >= 0 ? DN.weather_clouds->f : tod_curve(&DN.cfg, TOD_CLOUD_COVER, h);
+    // Clouds / fog: the weather (game_weather.c) when the level has one, else the daynight.json
+    // curves; the weather_clouds / weather_fog cvars override both (debug).
+    float cover = DN.weather_clouds->f >= 0 ? DN.weather_clouds->f : weather_cloud_cover(w, tod_curve(&DN.cfg, TOD_CLOUD_COVER, h));
     DN.cloud_cover = saturate(cover);
-    float fog = tod_curve(&DN.cfg, TOD_FOG_DENSITY, h) * (DN.weather_fog->f >= 0 ? DN.weather_fog->f : 1.0f);
+    float fog = weather_fog_density(w, tod_curve(&DN.cfg, TOD_FOG_DENSITY, h)) * (DN.weather_fog->f >= 0 ? DN.weather_fog->f : 1.0f);
+    WeatherParams wxp;
+    float density = weather_current(w, &wxp) ? wxp.v[WP_CLOUD_DENSITY] : 0.6f;
     float mie = 1.0f + fmaxf(0.0f, fog - 0.005f) * 60.0f + DN.cloud_cover * 0.5f;   // dawn mist / overcast haze
-    float loss = 1.0f - DN.cfg.cloud_light_loss * DN.cloud_cover;
+    float loss = 1.0f - DN.cfg.cloud_light_loss * DN.cloud_cover * (0.6f + 0.6f * density);
+    loss = fmaxf(loss, 0.08f);
     vec3 sun = body_light(s.sun_elev, DN.cfg.sun_illuminance * loss, mie);
     vec3 moon = v3_mul(body_light(s.moon_elev, DN.cfg.moon_illuminance * s.moon_illum * loss, mie), v3(0.82f, 0.9f, 1.0f));
     float ls = fmaxf(sun.x, fmaxf(sun.y, sun.z)), lm = fmaxf(moon.x, fmaxf(moon.y, moon.z));
@@ -399,6 +404,7 @@ void daynight_environment(World *w, const RenderCamera *cam, RenderEnvironment *
     env->fog_color = v3_scale(side, 1.0f / DG_PI);
     env->fog_density = fog;
     env->shadow_center = v3_madd(cam->pos, dir_from_angles(cam->yaw, 0), 12.0f);
+    weather_environment(w, env);
 }
 
 void daynight_post(PostSettings *s) {
@@ -412,7 +418,7 @@ void daynight_post(PostSettings *s) {
     s->exposure_comp += tod_curve(&DN.cfg, TOD_EXPOSURE_COMP, h);
     s->exposure_manual = fmaxf(s->exposure_manual, DN.cfg.night_floor_ev);
     // Fog density by time (dawn mist), the volumetrics use the key light (sun / moon).
-    float fog = tod_curve(&DN.cfg, TOD_FOG_DENSITY, h) * (DN.weather_fog->f >= 0 ? DN.weather_fog->f : 1.0f);
+    float fog = weather_fog_density(w, tod_curve(&DN.cfg, TOD_FOG_DENSITY, h)) * (DN.weather_fog->f >= 0 ? DN.weather_fog->f : 1.0f);
     s->fog_density = fmaxf(fog * 1.5f, 0.001f);
 }
 

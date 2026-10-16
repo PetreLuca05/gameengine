@@ -6,6 +6,9 @@
 #include "miniaudio.h"
 #include <stdlib.h>
 #include <stdio.h>
+#include <math.h>
+
+static void audio_loops_shutdown(void);
 
 #define MAX_VOICES 48
 #define MAX_KNOWN 64
@@ -53,6 +56,7 @@ void audio_shutdown(void) {
     if (A->ok) {
         for (int i = 0; i < MAX_VOICES; i++) if (A->voices[i].used) ma_sound_uninit(&A->voices[i].sound);
         if (A->music_loaded) ma_sound_uninit(&A->music);
+        audio_loops_shutdown();
         for (int i = 0; i < 4; i++) ma_sound_group_uninit(&A->groups[i]);
         ma_engine_uninit(&A->engine);
     }
@@ -132,7 +136,49 @@ void audio_play_music(const char *name) {
     }
 }
 
+#define MAX_LOOPS 8
+typedef struct Loop { u32 hash; bool used; ma_sound sound; float vol, target; } Loop;
+static Loop g_loops[MAX_LOOPS];
+
+void audio_loop_set(const char *name, float volume) {
+    if (!audio_available()) return;
+    u32 h = dg_hash_str(name);
+    Loop *l = NULL;
+    for (int i = 0; i < MAX_LOOPS; i++) if (g_loops[i].used && g_loops[i].hash == h) l = &g_loops[i];
+    if (!l) {
+        if (volume <= 0.001f) return;
+        const char *path = resolve(name);
+        if (!path) return;
+        for (int i = 0; i < MAX_LOOPS && !l; i++) if (!g_loops[i].used) l = &g_loops[i];
+        if (!l) return;
+        if (ma_sound_init_from_file(&A->engine, path, MA_SOUND_FLAG_DECODE, group_for(SND_SFX), NULL, &l->sound) != MA_SUCCESS) return;
+        l->used = true;
+        l->hash = h;
+        l->vol = 0.0f;
+        ma_sound_set_looping(&l->sound, MA_TRUE);
+        ma_sound_set_spatialization_enabled(&l->sound, MA_FALSE);
+        ma_sound_set_volume(&l->sound, 0.0f);
+        ma_sound_start(&l->sound);
+    }
+    l->target = volume;
+}
+
+static void audio_loops_shutdown(void) {
+    for (int i = 0; i < MAX_LOOPS; i++) if (g_loops[i].used) { ma_sound_uninit(&g_loops[i].sound); g_loops[i].used = false; }
+}
+
+static void update_loops(float dt) {
+    for (int i = 0; i < MAX_LOOPS; i++) {
+        Loop *l = &g_loops[i];
+        if (!l->used) continue;
+        l->vol += (l->target - l->vol) * (1.0f - expf(-dt * 3.0f));
+        ma_sound_set_volume(&l->sound, l->vol);
+        if (l->target <= 0.001f && l->vol < 0.002f) { ma_sound_uninit(&l->sound); l->used = false; }
+    }
+}
+
 void audio_update(vec3 pos, vec3 fwd, vec3 up) {
+    if (audio_available()) update_loops(1.0f / 60.0f);
     if (!audio_available()) return;
     ma_engine_listener_set_position(&A->engine, 0, pos.x, pos.y, pos.z);
     ma_engine_listener_set_direction(&A->engine, 0, fwd.x, fwd.y, fwd.z);

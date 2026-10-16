@@ -59,6 +59,14 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 shadow_bias;     // x, y, z: per-cascade depth bias scale (constant bias in metres)
     vec4 spot_info;       // x spot light count, y cookie valid
     SpotLight spots[MAX_SPOT_LIGHTS];
+    // Weather (shaders/weather.glsl)
+    mat4 occl_vp;
+    vec4 wx0;             // wetness, puddles, snow cover, lightning flash
+    vec4 wx1;             // rain, snowfall, time, occlusion map valid
+    vec4 wx2;             // wind x, z, wind strength, puddle mask valid
+    vec4 wx3;             // occlusion centre x, z, half extent, top y
+    vec4 wx4;             // occlusion depth range (m), precipitation quality
+    vec4 puddle_xf;       // origin x, z, 1 / size x, 1 / size z
     PointLight lights[MAX_POINT_LIGHTS];
 } frame;
 
@@ -69,6 +77,9 @@ layout(std430, set = 0, binding = 6) readonly buffer SkySH { vec4 sh[20]; } sky_
 layout(set = 0, binding = 7) uniform sampler2D sky_cloud_shadow;
 // Spot light cookie (flashlight pattern), shared by every spot light.
 layout(set = 0, binding = 8) uniform sampler2D spot_cookie;
+// Weather: the top-down rain occlusion depth around the camera, the level's puddle mask.
+layout(set = 0, binding = 9) uniform sampler2D wx_occl;
+layout(set = 0, binding = 10) uniform sampler2D wx_puddles;
 
 // Spot light i at world position p: radiance scale (cone x cookie x distance falloff) and the
 // direction towards the light.

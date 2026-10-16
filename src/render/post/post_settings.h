@@ -28,6 +28,7 @@ typedef struct PostSettings {
     // volumetrics
     int volumetrics;               // 0 off, 1 low, 2 high, 3 ultra
     float fog_density, fog_height, fog_falloff, fog_anisotropy, sun_shafts;
+    float fog_ambient;             // 0 = thin haze (sun-lit) .. 1 = thick weather fog lit by the whole sky
     vec3 fog_albedo;
     // camera
     int motion_blur;               // 0 off, 1 camera, 2 camera + objects

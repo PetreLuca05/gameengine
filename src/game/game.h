@@ -140,6 +140,26 @@ float world_sun_elevation_deg(World *w);
 float world_light_level(World *w, vec3 pos);     // 0..1: sun / moon (visible from pos) + sky + lamps
 void daynight_add_listener(TodEventFn fn, void *user);   // sunrise / sunset / midnight / noon on every machine
 
+// Weather (game_weather.c, docs/WEATHER.md): queries on the replicated weather. Events fire on
+// every machine from the evaluated parameters (no network traffic of their own).
+typedef enum WeatherEvent { WEV_RAIN_START, WEV_RAIN_STOP, WEV_SNOW_START, WEV_SNOW_STOP, WEV_STORM_START, WEV_STORM_STOP, WEV_LIGHTNING, WEV_COUNT } WeatherEvent;
+typedef void (*WeatherEventFn)(WeatherEvent ev, void *user);
+typedef struct WeatherLocal {
+    float exposed;       // 0 under a roof .. 1 open sky
+    bool indoor;         // exposed < 0.3
+    float rain, snow;    // precipitation reaching pos 0..1
+    vec3 wind;           // m/s (sheltered spots get less)
+    float temperature;   // C
+    float wetness, snow_cover, fog;
+} WeatherLocal;
+WeatherLocal weather_at(World *w, vec3 pos);
+float weather_exposure(World *w, vec3 pos);      // cached upward casts (1 m cells, 5 s)
+float weather_grip(World *w, vec3 pos);          // ground grip multiplier 0.4..1 (wet / puddles / snow)
+float weather_hearing_scale(World *w);           // rain / wind mask sounds (AI hearing)
+float weather_puddle_mask_at(float x, float z);  // the baked puddle mask 0..1
+void weather_add_listener(WeatherEventFn fn, void *user);
+const char *weather_event_name(WeatherEvent e);
+
 enum RpcType { RPC_INV_MOVE = 1, RPC_INV_DROP, RPC_CONTAINER_TAKE, RPC_CONTAINER_PUT, RPC_CONTAINER_CLOSE, RPC_INV_USE, RPC_ATTACH, RPC_INV_OP };
 
 // Inventory intents (gameplay/inv_ops.h, docs/UI.md): applied at once on the host; a client predicts

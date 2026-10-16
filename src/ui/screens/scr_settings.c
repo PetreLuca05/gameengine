@@ -230,6 +230,19 @@ static void tab_graphics(GuiCursor *c, GuiRect content) {
     row_slider_cvar(c, "Scope picture resolution", "r_scope_pip_scale", 0.2f, 2.0f, 0.05f, "%.2f", "1 = the render height, above 1 supersamples (sharper, slower).");
     row_slider_cvar(c, "Red dot brightness", "sight_brightness", 0.0f, 3.0f, 0.05f, "%.2f", NULL);
     row_toggle_cvar(c, "Depth of field while aiming", "ads_dof", "A slight blur on the weapon while aimed.");
+    section(c, "Weather");
+    {
+        Cvar *pq = cv("r_precip_quality");
+        if (pq) {
+            static const char *const q[] = { "Auto (post preset)", "Off", "Low", "Medium", "High" };
+            int sel = pq->i + 1;
+            if (row_combo(c, "Rain / snow quality", q, 5, &sel, "Particle count of the rain / snow around you.")) cvar_set_int(pq, sel - 1);
+        }
+    }
+    row_toggle_cvar(c, "Puddle reflections", "r_puddle_reflections", "Mirror-smooth puddles (screen-space reflections).");
+    row_toggle_cvar(c, "Lens droplets", "r_lens_drops", "Rain drops on the camera in first person.");
+    if (cv("r_lens_drops") && cv("r_lens_drops")->i) row_slider_cvar(c, "Lens droplet intensity", "r_lens_drops_intensity", 0.0f, 1.0f, 0.05f, "%.2f", NULL);
+    row_toggle_cvar(c, "Cloud shadows", "r_cloud_shadows", NULL);
     (void)content;
 }
 

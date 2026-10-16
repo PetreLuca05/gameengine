@@ -1,0 +1,15 @@
+{
+  "_comment": "Light snowfall. Any key left out keeps the current value when composed (overcast+rain).",
+  "cloud_cover": 0.85,
+  "cloud_density": 0.75,
+  "precipitation": 0.3,
+  "fog_density": 0.008,
+  "fog_height": 50,
+  "temperature": -3,
+  "wind": 3.0,
+  "gust": 0.2,
+  "lightning_rate": 0,
+  "transition": 180,
+  "min_stay": 180,
+  "max_stay": 420
+}

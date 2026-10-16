@@ -114,6 +114,9 @@ typedef struct RenderEnvironment {
     float star_brightness, milky_way, night_floor;
     float cloud_cover, cloud_altitude, cloud_scale, cloud_shadow_strength;
     vec2 cloud_offset;                  // wind drift (m)
+    float cloud_density;                // weather: layer opacity 0..1 (0 = default 0.92)
+    float cloud_softness;               // weather: edge softness 0..1 (fog-like stratus vs crisp cumulus)
+    float cloud_darkness;               // weather: storm clouds darken 0..1
     float ambient_scale;                // environment (SH + specular) multiplier
     float aerial_scale;                 // world distance multiplier of the aerial perspective
     float aerial_max;                   // m covered by the aerial perspective froxels
@@ -178,6 +181,31 @@ void render_add_light(const PointLight *light);
 typedef struct SpotLight { vec3 pos, dir; float range, inner_deg, outer_deg, intensity; vec3 color; } SpotLight;
 void render_add_spot(const SpotLight *light);
 void render_set_spot_cookie(TextureId cookie);
+
+// Weather (src/game/game_weather.c, docs/WEATHER.md): surface terms (wetness, puddles, snow on
+// every lit material), precipitation (rain / snow streaks and splashes around the camera, occluded
+// by a top-down depth map), lens droplets.
+#define RENDER_LENS_DROPS 192
+typedef struct RenderLensDrop { vec4 pos_r;  /* x, y (0..1 screen), radius (fraction of height), stretch */ vec4 info; /* alpha, age, trail, unused */ } RenderLensDrop;
+typedef struct RenderWeather {
+    float wetness, puddles, snow_cover;   // 0..1 surface state
+    float rain, snowfall;                 // precipitation intensities 0..1
+    float lightning;                      // flash 0..1 this frame
+    vec3 wind;                            // m/s (world)
+    float time;                           // s (animation)
+    int precip_quality;                   // 0 off, 1 low, 2 medium, 3 high
+    bool occlusion_update;                // re-render the top-down occlusion map this frame
+    vec3 occlusion_center;                // map centre (snapped)
+    float occlusion_extent;               // half size (m)
+    TextureId puddle_mask;                // R8 low-point mask over the level (0 = none)
+    vec4 puddle_xform;                    // origin x, z, 1 / size x, 1 / size z
+    const RenderLensDrop *drops;          // lens droplets this frame (screen space)
+    int drop_count;
+    float lens_strength;                  // 0 = no lens pass
+    bool puddle_reflections;              // mirror-smooth puddles (SSR); off = glossy only
+} RenderWeather;
+void render_set_weather(const RenderWeather *w);   // every frame (zeroed = no weather)
+
 LineVertex *render_lines_alloc(u32 vertex_count, bool depth_test);
 TextVertex *render_text_alloc(u32 vertex_count); // triangle list, font atlas texture
 void render_set_text_atlas(TextureId atlas);

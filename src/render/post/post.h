@@ -54,6 +54,7 @@ void post_scope_sky(FgRes color, FgRes depth, mat4 inv_vp, vec3 cam);   // the s
 void post_set_sight(const RenderSight *s, FgRes pip, mat4 pip_from_view, mat4 vm_proj, float pip_fov);
 bool post_sights_ads_dof(float *focus, float *fstop, float *near_blur);   // ADS depth of field active (complete aim)
 void post_sights_shutdown(void);
+void post_weather_shutdown(void);
 void post_fog_apply(void);                         // after the lit opaque pass
 void post_capture_scene(FgRes hdr);                // after transparency: colour pyramid + depth history (next frame)
 FgRes post_resolve(void);                          // AA / upscale ... tonemap -> LDR (output res)

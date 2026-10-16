@@ -1,4 +1,5 @@
 // Shared lit shading (lit.frag, skin.frag). The includer defines MAT_COLOR, MAT_PARAMS, MAT_FLAGS.
+#include "weather.glsl"
 layout(location = 0) in vec3 v_world;
 layout(location = 1) in vec3 v_normal;
 layout(location = 2) in vec2 v_uv;
@@ -224,6 +225,8 @@ void main() {
         vec3 albedo = base.rgb;
         // Screen-space inputs (never on the viewmodel: it is excluded from the screen-space passes).
         bool vm = (flags & MAT_VIEWMODEL) != 0u;
+        // Weather: wet / puddles / snow (shaders/weather.glsl; the G-buffer applies the same terms).
+        float wx_snow = weather_surface(v_world, n, albedo, rough, metal, vm);
         vec2 suv = gl_FragCoord.xy * frame.screen.zw;
         float ao = (!vm && frame.post_flags.x > 0.5) ? mix(1.0, texture(post_ao, suv).r, frame.post_params.z) : 1.0;
         float contact = (!vm && frame.post_flags.y > 0.5) ? texture(post_contact, suv).r : 1.0;
@@ -252,6 +255,11 @@ void main() {
         vec3 l = normalize(frame.sun_dir.xyz);
         float sh = shadow_factor(v_world, n) * contact * cloud_shadow_at(v_world);
         color += brdf(n, v, l, albedo, rough, metal) * frame.sun_color.rgb * frame.sun_dir.w * sh;
+        // Snow sparkle: tiny glints facing the light.
+        if (wx_snow > 0.05) {
+            float g = step(0.9965, wx_hash(floor(v_world.xz * 90.0) + floor(dot(v, vec3(13.0, 7.0, 3.0)) * 8.0)));
+            color += vec3(g * wx_snow * 2.5) * frame.sun_color.rgb * frame.sun_dir.w * sh * max(dot(n, l), 0.0);
+        }
         // Fill: the other celestial light (the moon by day / the sun at twilight), unshadowed.
         if (frame.fill_dir.w > 0.0) color += brdf(n, v, normalize(frame.fill_dir.xyz), albedo, rough, metal) * frame.fill_color.rgb * frame.fill_dir.w;
         // spot lights (flashlights, cookie-projected)
