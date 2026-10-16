@@ -6,6 +6,7 @@
 #define DG_VGEO_PROCGEN_FOLIAGE_H
 
 #include "vgeo_build.h"
+#include "vgeo_impostor.h"
 
 enum VgFoliageKind { VG_FOLIAGE_TUFT, VG_FOLIAGE_BUSH, VG_FOLIAGE_KINDS };
 
