@@ -65,6 +65,8 @@ static void ensure_globals(void) {
     CG->foliage = cvar_reg_bool("world_foliage_test", false, 0, "streamed terrain: procedural test foliage per chunk as vgeo placement chunks (set before the map)");
 }
 
+void chunks_register_cvars(void) { ensure_globals(); }
+
 float chunks_relevance_radius(void) {
     ensure_globals();
     return ((float)CG->radius->i + 0.5f) * CHUNK_SIZE;

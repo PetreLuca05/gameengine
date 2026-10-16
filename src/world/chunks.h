@@ -53,5 +53,6 @@ vec3 chunks_spawn_point(World *w);
 int chunks_loaded_count(const World *w);
 bool chunks_is_loaded(const World *w, vec3 pos);
 float chunks_relevance_radius(void);
+void chunks_register_cvars(void);   // the world_* chunk cvars (before the first streamed map: world_foliage_test)
 
 #endif

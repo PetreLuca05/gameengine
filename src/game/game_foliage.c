@@ -89,6 +89,7 @@ static void cmd_foliage_test_clear(int argc, const char **argv) {
 }
 
 void foliage_register(void) {
+    chunks_register_cvars();   // world_foliage_test must exist before a streamed map loads
     cmd_register("foliage_test_scatter", cmd_foliage_test_scatter, "foliage_test_scatter [count=300000]: procedural grass + bushes over the devroom foliage yard (placement chunks)");
     cmd_register("foliage_test_clear", cmd_foliage_test_clear, "remove the foliage_test_scatter placements");
 }
