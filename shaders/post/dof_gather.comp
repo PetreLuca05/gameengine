@@ -1,5 +1,5 @@
 #version 450
-// Depth of field gather (half resolution, "scatter as gather"): a fixed kernel of 48 taps
+// Depth of field gather (half resolution, "scatter as gather"): a kernel of 16 / 32 / 48 taps (r_dof_quality)
 // (golden-angle disk, or a hexagon when s_dof2.y = 1) spanning the maximum CoC. A tap counts
 // when its own CoC covers the distance to the centre.
 //   far field:  limited by the centre's CoC as well, so blurred background never bleeds over a
@@ -13,7 +13,6 @@ layout(set = 0, binding = 1) uniform sampler2D noise_tex;
 layout(set = 0, binding = 8, rgba16f) uniform writeonly image2D far_out;
 layout(set = 0, binding = 9, rgba16f) uniform writeonly image2D near_out;
 
-const int N = 48;
 vec2 hexify(vec2 d) {
     // Map a unit-disk direction onto a hexagon of the same circumradius.
     float a = atan(d.y, d.x);
@@ -38,6 +37,7 @@ void main() {
     vec3 near_sum = vec3(0.0);
     float near_w = 0.0;
     bool hex = U.s_dof2.y > 0.5;
+    int N = pc.u0.x > 0u ? int(pc.u0.x) : 48;   // r_dof_quality: 16 gaussian-like disk, 32 hybrid, 48 bokeh
     for (int i = 0; i < N; i++) {
         float r = sqrt((float(i) + 0.5) / float(N));
         float a = float(i) * 2.39996323 + rot;

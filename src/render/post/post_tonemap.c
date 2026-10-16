@@ -116,6 +116,23 @@ FgRes post_resolve(void) {
     T.dbg_level = 0;
     T.exr_armed = false;
     memset(&T.exr_buf, 0, sizeof(T.exr_buf));
+    if (P.set.direct_output) {
+        // Engine Fidelity Off: no post pass at all. The weapon sights are gameplay (aiming) and stay;
+        // the final pass shows the lit HDR through final_direct.frag.
+        T.color = post_sights_build(P.in.hdr);
+        T.ldr = T.color;
+        if (P.exr_pending > 0 && P.exr_path[0]) {
+            T.exr_w = P.in.render_w;
+            T.exr_h = P.in.render_h;
+            T.exr_buf = vkr_buffer_create_readback((VkDeviceSize)T.exr_w * T.exr_h * 8);
+            T.exr_src = T.color;
+            int e = fg_pass("exr_capture", exec_exr_copy, NULL);
+            fg_read(e, T.color, FG_TRANSFER_SRC);
+            T.exr_armed = e >= 0;
+            P.exr_pending = 0;
+        }
+        return T.ldr;
+    }
     post_buffers_init_build();
     FgRes c = post_aa_build(P.in.hdr);
     FgRes aa_out = c;
@@ -298,6 +315,22 @@ void post_exr_finish(void) {
 // ------------------------------------------------------------------ final
 
 void post_final_draw(VkCommandBuffer cmd, FgRes ldr) {
+    if (P.set.direct_output) {
+        VkPipeline dp = post_graphics_pipe("final_direct", R->swap_format, 0);
+        if (!dp) return;
+        PostBind b = { 0 };
+        pb_ubo(&b);
+        pb_tex_fg(&b, 0, ldr, P.linear);   // render resolution: bilinear upscale
+        pb_tex(&b, 1, P.noise, P.point);
+        pb_push(cmd, &b, VK_PIPELINE_BIND_POINT_GRAPHICS);
+        struct { float p[16]; u32 u[16]; } pc;
+        memset(&pc, 0, sizeof(pc));
+        pc.p[0] = P.direct_exposure;
+        post_push_constants(cmd, &pc, 128);
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, dp);
+        vkCmdDraw(cmd, 3, 1, 0, 0);
+        return;
+    }
     VkPipeline p = post_graphics_pipe("final", R->swap_format, 0);
     if (!p) return;
     PostBind b = { 0 };

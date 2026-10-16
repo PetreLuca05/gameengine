@@ -1,0 +1,17 @@
+{
+  "notes": "Era capability matrix (r_era): what an era lacks is unavailable at every fidelity level (the level's entry is ignored); limits narrow every level's bounds. docs/ENGINE_FIDELITY.md",
+  "eras": {
+    "modern": { "lacks": [] },
+    "2020": { "lacks": [] },
+    "2015": { "lacks": ["vgeo", "vgeo_error_px", "vgeo_shadow_error_px", "ssgi"] },
+    "2010": {
+      "lacks": ["vgeo", "vgeo_error_px", "vgeo_shadow_error_px", "ssgi", "ssr", "puddle_reflections", "volumetrics", "vol_local_lights", "hdr_output"],
+      "limits": {
+        "aa": { "allowed": [0, 1, 2], "note": "no TAA: FXAA / SMAA" },
+        "upscaler": { "allowed": [0], "note": "no temporal / FSR upscalers" },
+        "motion_blur": { "max": 1 },
+        "dof_quality": { "max": 1 }
+      }
+    }
+  }
+}

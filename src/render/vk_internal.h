@@ -187,6 +187,7 @@ typedef struct Renderer {
     bool validation;
     bool has_wireframe;
     bool has_push_descriptor, has_colorspace_ext;
+    bool has_unused_attachments;   // VK_EXT_dynamic_rendering_unused_attachments: G-buffer without velocity
     bool hdr_supported, swap_hdr;
     bool vg_scalar, vg_int64, vg_indirect_count, vg_descriptor_indexing, vg_mesh_shader;   // vgeo device features
     int hdr_output_applied;
@@ -316,6 +317,8 @@ typedef struct Renderer {
     Cvar *r_vsync, *r_wireframe, *r_render_scale, *r_shadow_quality, *r_aniso, *r_texture_quality;
     Cvar *r_aa, *r_brightness, *r_gamma, *r_grid, *r_vignette, *r_shader_hotreload, *r_culling;
     Cvar *r_vm_fov, *r_cpu_skinning, *r_bloom, *r_bloom_intensity, *r_hdr_output;
+    Cvar *r_shadow_cascades, *r_shadow_distance, *r_shadow_filter, *r_shadow_min_radius;   // Engine Fidelity shadow tiers
+    Cvar *r_stretch;   // stretched resolution simulator (0 normal .. 1 extreme)
     float exposure_boost;
     u32 aniso_mod, texq_mod;
 } Renderer;
@@ -353,6 +356,8 @@ RenderTarget vkr_target_create(u32 w, u32 h, VkFormat fmt, VkImageUsageFlags usa
 void vkr_target_destroy(RenderTarget *t);
 void vkr_create_samplers(void);
 void vkr_destroy_samplers(void);
+void vkr_recreate_linear_sampler(void);   // anisotropy / texture quality change
+void vkg_samplers_changed(void);          // vk_vgeo.c: re-enter the texture table with the new material sampler
 VkDescriptorSet vkr_alloc_tex_set(VkImageView view, VkSampler sampler);
 void vkr_write_tex_set(VkDescriptorSet set, VkImageView view, VkSampler sampler);
 void vkr_rewrite_all_texture_sets(void);

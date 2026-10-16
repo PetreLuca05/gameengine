@@ -1331,6 +1331,7 @@ void game_init(void) {
     hands_init();
     game_render_init();
     handpose_system_startup();   // items, attachments, vehicles and interactables are registered now
+    game_fidelity_init();   // last: every graphics cvar is registered
 }
 
 void game_shutdown(void) {

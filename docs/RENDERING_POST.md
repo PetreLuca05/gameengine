@@ -96,8 +96,17 @@ yet); the development display has no HDR so the path is untested on hardware.
 
 `src/game/game_post.c` builds the `PostSettings` (`src/render/post/post_settings.h`) every frame
 from the cvars, the level's post volumes, gameplay feedback and photo mode, and passes them to
-`render_post_settings`. The **Graphics** menu (Settings → Graphics → Post-processing) edits the
-cvars directly (saved with the config).
+`render_post_settings`. The **Graphics** menu (Settings → Graphics → Post-processing & Effects)
+edits the cvars directly (saved with the config).
+
+**Engine Fidelity** (docs/ENGINE_FIDELITY.md) is the base layer: every cvar below is bounded by the
+level (`r_fidelity`, Off .. Modern), presets included (a preset the level doesn't allow is greyed).
+At **Off** `PostSettings.direct_output` is set and the stack schedules no pass at all: the final pass
+shows the lit HDR through `final_direct.frag` (fixed metered exposure, plain tonemap, sRGB). New
+tiers used by the levels: `r_dof_quality` (gather taps 16 / 32 / 48), `r_bloom_quality 0` (tiny,
+4 mips), `r_vol_local_lights` (lamp scattering in the froxels; off = fog only). Passes and their
+resources exist only with a reader (depth history, colour pyramid, G-buffer velocity); every graph
+is validated (`fidelity_check`).
 
 | preset | AA | AO | contact | SSR | SSGI | volumetrics | motion blur | DoF | bloom | flare |
 |---|---|---|---|---|---|---|---|---|---|---|
@@ -115,6 +124,13 @@ SMAA, 3 TAA), `r_upscaler` (0 off, 1 TAA-U, 2 FSR 1, 3 FSR 2 slot, 4 DLSS slot),
 `r_auto_exposure`, `r_exposure`, `r_lut` (.cube path, e.g. `assets/post/luts/teal_orange.cube`;
 samples from `tools/gen_luts.py`), `r_colorblind`, `r_brightness`, `r_gamma`,
 `r_post_feedback`, `r_hdr_output`, `r_hdr_paper_white`, `r_hdr_max_nits`, `r_render_scale`.
+
+**Stretched resolution simulator** (`r_stretch` 0 .. 1, Settings → Graphics → View): the
+competitive "4:3 stretched" look. The 3D view (world and viewmodel) is projected as if the screen
+were k = 1 + 1.5 × r_stretch times narrower at the same vertical FOV and fills the full width, so
+everything looks k times wider (0.25 ≈ 4:3 on a 16:9 display, 1 = 2.5x). Every projection-based
+pass and query (culling, `render_world_to_screen`, post, sights) uses the same matrices; the HUD
+and menus are not stretched. It is a look, not a cost setting: the render resolution is unchanged.
 
 **Budgets** (post passes = every pass except prepass / opaque / decals / opaque_dynamic /
 scene_copy / transparent / vm_prepass / viewmodel), RTX 3060 Ti, 1920×1080, dev-room test corner,

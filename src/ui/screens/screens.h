@@ -9,7 +9,7 @@ typedef enum ScreenId {
     SCR_NONE, SCR_PAUSE, SCR_SETTINGS, SCR_MULTIPLAYER, SCR_INVENTORY, SCR_BENCH, SCR_CONFIRM, SCR_COUNT
 } ScreenId;
 
-typedef enum ConfirmKind { CONFIRM_QUIT, CONFIRM_LEAVE, CONFIRM_DROP, CONFIRM_DISPLAY, CONFIRM_RESET_BINDS } ConfirmKind;
+typedef enum ConfirmKind { CONFIRM_QUIT, CONFIRM_LEAVE, CONFIRM_DROP, CONFIRM_DISPLAY, CONFIRM_RESET_BINDS, CONFIRM_FIDELITY } ConfirmKind;
 
 // Shared by the screens (menus.c)
 const char *screen_name(int id);

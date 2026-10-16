@@ -27,6 +27,7 @@ typedef struct PostSettings {
     float ssr_intensity, ssr_max_roughness;
     // volumetrics
     int volumetrics;               // 0 off, 1 low, 2 high, 3 ultra
+    bool vol_local_lights;         // point lights scatter in the froxels (off: fog-only, sun + sky)
     float fog_density, fog_height, fog_falloff, fog_anisotropy, sun_shafts;
     float fog_ambient;             // 0 = thin haze (sun-lit) .. 1 = thick weather fog lit by the whole sky
     vec3 fog_albedo;
@@ -36,8 +37,10 @@ typedef struct PostSettings {
     int dof;                       // 0 off, 1 ADS only, 2 full
     float dof_focus, dof_fstop, dof_focal_mm, dof_max_coc;
     int dof_autofocus, dof_bokeh;  // bokeh 0 circle, 1 hexagon
+    int dof_quality;               // gather taps: 0 16 (disk), 1 32 (hybrid), 2 48 (bokeh, hexagon allowed)
     // bloom / exposure / lens
     int bloom;                     // 0 off, 1 low, 2 high
+    int bloom_mips;                // 0 = by quality (5 low, 7 high); Engine Fidelity "tiny" = 4
     float bloom_intensity, bloom_dirt;
     int exposure_auto;
     float exposure_comp, exposure_manual, adapt_up, adapt_down, ev_min, ev_max, hist_low, hist_high;
@@ -51,6 +54,9 @@ typedef struct PostSettings {
     float lut_weight;
     int colorblind;                // 0 off, 1 protan, 2 deutan, 3 tritan (correction filter)
     float brightness, user_gamma;
+    // Engine Fidelity Off: no post-processing at all; the lit HDR goes straight to the swapchain
+    // (final_direct.frag: fixed exposure, plain tonemap, sRGB). Everything above is ignored.
+    bool direct_output;
     // output
     bool hdr_output;
     float paper_white, max_nits;

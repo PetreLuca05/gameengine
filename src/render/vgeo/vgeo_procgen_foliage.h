@@ -6,6 +6,7 @@
 #define DG_VGEO_PROCGEN_FOLIAGE_H
 
 #include "vgeo_build.h"
+#include "vgeo_impostor.h"
 
 // The test kinds (VG_FOLIAGE_KINDS: tuft, bush) and the open-world map kinds after them
 // (docs/ZOMBIE_MAP.md "Vegetation"): a conifer (~14 m: tapered trunk + drooping branch cards in

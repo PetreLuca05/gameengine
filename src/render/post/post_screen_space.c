@@ -201,11 +201,17 @@ void post_ss_build(PostLitInputs *out) {
     S.material = P.in.material;
     S.velocity = P.in.velocity;
     S.hiz = S.contact = S.ao = S.gi = S.ssr = FG_NONE;
-    // Last frame's colour pyramid / depth (written by post_capture_scene).
-    FgTexDesc cd = { "color_prev", VK_FORMAT_R16G16B16A16_SFLOAT, FG_SIZE_RENDER, 0, 0, 0, 6, 0 };
-    S.color_prev = fg_history(&cd);
-    FgTexDesc dd = { "depth_prev", VK_FORMAT_R32_SFLOAT, FG_SIZE_RENDER, 0, 0, 0, 1, 0 };
-    S.depth_prev = fg_history(&dd);
+    // Last frame's colour pyramid / depth (written by post_capture_scene), declared only when this
+    // frame has a reader (Engine Fidelity: nothing allocated that nobody uses).
+    S.color_prev = S.depth_prev = FG_NONE;
+    if (s->ssr || s->ssgi) {
+        FgTexDesc cd = { "color_prev", VK_FORMAT_R16G16B16A16_SFLOAT, FG_SIZE_RENDER, 0, 0, 0, 6, 0 };
+        S.color_prev = fg_history(&cd);
+    }
+    if (post_needs_depth_history()) {
+        FgTexDesc dd = { "depth_prev", VK_FORMAT_R32_SFLOAT, FG_SIZE_RENDER, 0, 0, 0, 1, 0 };
+        S.depth_prev = fg_history(&dd);
+    }
     P.color_prev = S.color_prev;
     P.depth_prev = S.depth_prev;
     bool parity = (P.in.frame & 1u) != 0;
@@ -341,20 +347,25 @@ static void exec_copy_depth(VkCommandBuffer cmd, void *u) {
 // Called after the world (opaque + fog + transparency), before the viewmodel: this frame's
 // colour / depth become next frame's SSR / SSGI / temporal inputs.
 void post_capture_scene(FgRes hdr) {
-    if (!P.ok) return;
+    if (!P.ok || P.set.direct_output) return;
     g_cap_src = hdr;
-    if (P.set.ssr || P.set.ssgi) {
+    if ((P.set.ssr || P.set.ssgi) && P.color_prev != FG_NONE) {
         int p = fg_pass("color_pyramid", exec_pyramid, NULL);
         fg_read(p, hdr, FG_SAMPLED);
         fg_write(p, P.color_prev, FG_STORAGE);
     }
+    if (P.depth_prev == FG_NONE) return;   // no temporal pass / TAA reads it next frame
     int d = fg_pass("depth_history", exec_copy_depth, NULL);
     fg_read(d, P.in.depth, FG_SAMPLED);
     fg_write(d, P.depth_prev, FG_STORAGE);
 }
 
 void post_screen_space(PostLitInputs *out) {
-    if (!P.ok) { memset(out, 0, sizeof(*out)); return; }
+    if (!P.ok || P.set.direct_output) {   // Engine Fidelity Off: no screen-space passes, no froxels
+        memset(out, 0, sizeof(*out));
+        out->ao = out->contact = out->ssr = out->ssgi = FG_NONE;
+        return;
+    }
     post_ss_build(out);
     post_vol_build();
 }

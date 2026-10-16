@@ -199,6 +199,7 @@ void cvar_set_cv(Cvar *cv, const char *value) {
     dg_strcpy(old, sizeof(old), cv->str);
     dg_strcpy(cv->str, sizeof(cv->str), value);
     parse_value(cv);
+    if (cv->bound) cv->bound(cv);
     if (strcmp(old, cv->str) != 0) {
         cv->modified++;
         if (cv->flags & CVAR_ARCHIVE) config_mark_dirty();
@@ -227,6 +228,10 @@ void cvar_set_int(Cvar *cv, int v) {
 }
 
 void cvar_reset(Cvar *cv) { cvar_set_cv(cv, cv->default_str); }
+void cvar_store(Cvar *cv, const char *value) {
+    dg_strcpy(cv->str, sizeof(cv->str), value);
+    parse_value(cv);
+}
 int cvar_count(void) { return s_cv.cvar_count; }
 Cvar *cvar_at(int index) { return (index >= 0 && index < s_cv.cvar_count) ? s_cv.cvars[index] : NULL; }
 

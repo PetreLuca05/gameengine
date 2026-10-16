@@ -107,5 +107,18 @@ int game_post_detect_preset(void);
 const char *game_post_preset_name(int p);
 void game_post_apply_preset(int p);
 float game_post_bench_post_ms(void);
+bool game_post_preset_allowed(int p, int *req_level);   // Engine Fidelity bounds allow every value of the preset
+
+// game_fidelity.c (docs/ENGINE_FIDELITY.md)
+void game_fidelity_init(void);
+void game_fidelity_frame(void);
+void game_fidelity_draw(void);
+int game_fidelity_level(void);
+void game_fidelity_set(int level);
+int game_fidelity_recommended(void);
+float game_fidelity_bench_ms(int level);
+bool game_fidelity_busy(void);
+void game_fidelity_detect(bool popup);
+void game_fidelity_apply_recommended(void);
 
 #endif

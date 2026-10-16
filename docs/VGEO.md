@@ -336,6 +336,8 @@ opaque         legacy forward lighting, then the vgeo lit resolve (vgeo_lit.frag
   28 MB — most of it the discrete LODs stored as f32 vertices (Phase 4 streaming loads pages on demand).
 - `r_era` (0 modern, 1 2020, 2 2015, 3 2010, 4 custom) sets `r_vgeo`, `r_vgeo_error_px`, `r_vgeo_shadow_error_px`,
   `r_vgeo_lod_px` and `r_foliage_density` (1.0 / 0.7 / 0.4 / 0.2); any other combination reads back as Custom.
+  Engine Fidelity (docs/ENGINE_FIDELITY.md) bounds these: its levels scale the era's error thresholds (Low x3)
+  and cap its foliage density; the detection compares against the bounded values, so the era still reads back.
 - **2015 / 2010 fallback** (`r_vgeo 0`): each mesh's exported discrete LODs are uploaded as legacy meshes on
   first use and drawn through the legacy draw list; the CPU picks per instance the coarsest LOD whose projected
   error is under `r_vgeo_lod_px` (4 px 2015, 12 px 2010; 2010 never draws LOD 0). This per-instance CPU work

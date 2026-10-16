@@ -68,7 +68,7 @@ FgRes post_bloom_build(FgRes color) {
     const PostSettings *s = &P.set;
     if (s->bloom <= 0 || s->bloom_intensity <= 0.0f) return FG_NONE;
     B.color = color;
-    B.mips = s->bloom >= 2 ? 7 : 5;
+    B.mips = s->bloom_mips > 0 ? (u32)DG_CLAMP(s->bloom_mips, 3, 7) : (s->bloom >= 2 ? 7 : 5);
     FgTexDesc d = { "bloom_down", VK_FORMAT_R16G16B16A16_SFLOAT, FG_SIZE_OUTPUT, 0, 0, 0, B.mips, 0.5f };
     B.down = fg_texture(&d);
     d.name = "bloom_up";

@@ -22,6 +22,7 @@ void post_settings_default(PostSettings *s) {
     s->ssr_intensity = 1.0f;
     s->ssr_max_roughness = 0.6f;
     s->volumetrics = 2;
+    s->vol_local_lights = true;
     s->fog_density = 0.012f;
     s->fog_height = 0.0f;
     s->fog_falloff = 0.08f;
@@ -36,6 +37,7 @@ void post_settings_default(PostSettings *s) {
     s->dof_focal_mm = 50.0f;
     s->dof_max_coc = 16.0f;
     s->dof_autofocus = 1;
+    s->dof_quality = 2;
     s->bloom = 2;
     s->bloom_intensity = 0.05f;
     s->bloom_dirt = 0.0f;
@@ -81,7 +83,37 @@ float post_halton(u32 index, u32 base) {
     return r;
 }
 
-bool post_wants_jitter(void) { return P.ok && (P.set.aa == POST_AA_TAA || P.set.upscaler == POST_UP_TAAU); }
+bool post_wants_jitter(void) { return P.ok && !P.set.direct_output && (P.set.aa == POST_AA_TAA || P.set.upscaler == POST_UP_TAAU); }
+
+bool post_direct(void) { return P.ok && P.set.direct_output; }
+
+// Asked while the graph is built, before post_begin_frame: this frame's settings are P.pending.
+static bool temporal_aa(const PostSettings *s) { return s->aa == POST_AA_TAA || s->upscaler == POST_UP_TAAU; }
+bool post_needs_depth_history(void) {
+    const PostSettings *s = &P.pending;
+    return P.ok && !s->direct_output && (s->ao || s->ssr || s->ssgi || temporal_aa(s));
+}
+bool post_needs_velocity(void) {
+    const PostSettings *s = &P.pending;
+    if (!P.ok || !R->has_unused_attachments) return true;   // no null attachments: always written
+    if (s->direct_output) return false;
+    return post_needs_depth_history() || s->motion_blur > 0 || s->debug_view == 5;
+}
+
+// Off has no histogram: a fixed exposure metered from the light (sun illuminance on the ground plus
+// the sky ambient) like a light meter, clamped to the day / night EV range. No adaptation.
+static float direct_exposure(const PostFrameIn *in, const PostSettings *s) {
+    float lum_sun = 0.2126f * in->sun_color.x + 0.7152f * in->sun_color.y + 0.0722f * in->sun_color.z;
+    float lum_sky = 0.2126f * in->sky.x + 0.7152f * in->sky.y + 0.0722f * in->sky.z;
+    float e = in->sun_intensity * fmaxf(in->sun_dir.y, 0.0f) * lum_sun + in->ambient * lum_sky;
+    float lavg = fmaxf(0.18f * e / 3.14159265f, 1e-6f);   // mid-grey lit by it
+    // +1.4 EV: the scene key (light surfaces, the sky in view) measured against the histogram exposure
+    // at noon / morning (docs/ENGINE_FIDELITY.md "Off exposure"); night sits on the floor either way.
+    float ev = log2f(lavg * 100.0f / 12.5f) + 1.4f;
+    ev = clampf(ev, s->ev_min, s->ev_max);
+    return 0.18f / (exp2f(ev) * 12.5f / 100.0f) * exp2f(s->exposure_comp);
+}
+float post_direct_exposure(void) { return P.direct_exposure; }
 
 vec2 post_jitter_pixels(u32 frame) {
     u32 i = (frame % 8) + 1;   // Halton(2,3), 8 phases
@@ -428,6 +460,7 @@ void post_begin_frame(const PostFrameIn *in) {
     float *rb = (float *)P.exposure_rb[R->frame_slot].mapped;
     if (rb && P.exposure_init) P.last_ev = rb[1];
     const PostSettings *s = &P.set;
+    P.direct_exposure = direct_exposure(in, s);
     PostUBO *u = (PostUBO *)P.ubo[R->frame_slot].mapped;
     u->view = in->view;
     u->proj = in->proj;
@@ -455,7 +488,7 @@ void post_begin_frame(const PostFrameIn *in) {
     u->s_vol2 = v4(s->fog_albedo.x, s->fog_albedo.y, s->fog_albedo.z, s->sun_shafts);
     u->s_mb = v4(s->mb_intensity, (float)s->motion_blur, 40.0f, 16.0f);
     u->s_dof = v4(s->dof_focus, s->dof_fstop, s->dof_focal_mm, s->dof_max_coc);
-    u->s_dof2 = v4((float)s->dof_autofocus, (float)s->dof_bokeh, (float)s->dof, 24.0f);
+    u->s_dof2 = v4((float)s->dof_autofocus, s->dof_quality >= 2 ? (float)s->dof_bokeh : 0.0f, (float)s->dof, 24.0f);
     u->s_bloom = v4(s->bloom_intensity, s->bloom_dirt, 6.0f, (float)s->bloom);
     u->s_exp = v4(s->exposure_comp, s->exposure_manual, s->adapt_up, s->adapt_down);
     u->s_exp2 = v4(s->ev_min, s->ev_max, s->hist_low, s->hist_high);

@@ -746,6 +746,7 @@ void game_render(void) {
         pfi.sprinting = p && p->sim.move.sprinting;
         pfi.level_fog = w->level.fog_density;
         game_post_frame(&pfi);
+        game_fidelity_frame();
     }
 
     LevelStatic *ls = &w->level;
@@ -835,6 +836,7 @@ void game_render(void) {
     flesh_range_draw();
     scene_draw();
     game_post_draw_overlay();
+    game_fidelity_draw();
     game_post_draw_photo_ui();
     menus_draw();
     console_draw();

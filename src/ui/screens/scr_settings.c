@@ -1,5 +1,6 @@
-// Settings modal (docs/UI.md "Settings"): Graphics, Post-processing, Controls, Crosshair, Audio,
-// Character. Display settings (resolution, window mode, vsync) wait for Apply and then ask to be
+// Settings modal (docs/UI.md "Settings"): Graphics (Engine Fidelity on top, then display,
+// resolution, post-processing & effects, shadows, geometry, effects, sights, weather), Controls,
+// Crosshair, Audio, Character, Phone. Display settings (resolution, window mode, vsync) wait for Apply and then ask to be
 // kept within 15 seconds (reverted otherwise); everything else applies immediately (cvars, saved
 // with the config when the modal closes).
 #include "screens.h"
@@ -13,6 +14,7 @@
 #include "input/input.h"
 #include "app/video.h"
 #include "render/render.h"
+#include "render/fidelity/fidelity.h"
 #include <SDL3/SDL.h>
 #include <math.h>
 #include <stdio.h>
@@ -23,8 +25,10 @@
 
 enum { TAB_GRAPHICS, TAB_CONTROLS, TAB_CROSSHAIR, TAB_AUDIO, TAB_CHARACTER, TAB_POST, TAB_PHONE, TAB_COUNT };
 static const char *const k_tabs[TAB_COUNT] = { "Graphics", "Controls", "Crosshair", "Audio", "Character", "Post-processing", "Phone" };
-// Display order of the tabs.
-static const int k_order[TAB_COUNT] = { TAB_GRAPHICS, TAB_POST, TAB_CONTROLS, TAB_CROSSHAIR, TAB_AUDIO, TAB_CHARACTER, TAB_PHONE };
+// Display order of the tabs. Post-processing lives in the Graphics tab (under Engine Fidelity);
+// TAB_POST stays as an index (settings_open by number) and opens Graphics.
+#define TAB_SHOWN (TAB_COUNT - 1)
+static const int k_order[TAB_SHOWN] = { TAB_GRAPHICS, TAB_CONTROLS, TAB_CROSSHAIR, TAB_AUDIO, TAB_CHARACTER, TAB_PHONE };
 
 typedef struct Display { int width, height, mode, vsync; } Display;
 
@@ -84,7 +88,7 @@ static void write_display(const Display *d) {
 }
 
 void settings_open(int tab) {
-    if (tab >= 0 && tab < TAB_COUNT) S.tab = tab;
+    if (tab >= 0 && tab < TAB_COUNT) S.tab = tab == TAB_POST ? TAB_GRAPHICS : tab;
     S.pending = read_display();
     collect_resolutions();
 }
@@ -154,7 +158,157 @@ static void section(GuiCursor *c, const char *title) {
 
 // ------------------------------------------------------------------ tabs
 
+// ------------------------------------------------------------------ Engine Fidelity bounds
+// Every graphics control below is bounded by the Engine Fidelity level (docs/ENGINE_FIDELITY.md):
+// options above the level are greyed with the level they need, a feature the level doesn't have is
+// locked with "Requires Engine Fidelity: <level>".
+
+// Lowest level (this era) at which the feature exists at all, -1 = the era doesn't have it.
+static int feature_level(int f) {
+    for (int l = 0; l < FID_LEVELS; l++) if (fid_bounds(l, fid_era(), f).avail != FID_UNAVAILABLE) return l;
+    return -1;
+}
+
+static bool feature_locked(int f, char *why, size_t n) {
+    if (!fid_loaded()) return false;
+    FidBounds b = fid_bounds(fid_level(), fid_era(), f);
+    if (b.avail != FID_UNAVAILABLE) return false;
+    int need = feature_level(f);
+    if (need < 0) snprintf(why, n, "Not in the %s era", fid_era_id(fid_era()));
+    else snprintf(why, n, "Requires Engine Fidelity: %s", fid_level_name(need));
+    return true;
+}
+
+static const char *value_note(int f, float v, char *buf, size_t n) {
+    buf[0] = 0;
+    if (!fid_loaded() || fid_value_allowed(fid_level(), fid_era(), f, v)) return buf;
+    int need = fid_min_level_for(fid_era(), f, v);
+    if (need < 0) snprintf(buf, n, "not in the %s era", fid_era_id(fid_era()));
+    else snprintf(buf, n, "requires %s", fid_level_name(need));
+    return buf;
+}
+
+// A locked row: the label faint, the reason where the control would be.
+static void row_locked(GuiCursor *c, const char *label, const char *why, const char *hint) {
+    gw_disabled(true);
+    GuiRect r = gw_setting_row(c, label, hint, rid(label));
+    gw_disabled(false);
+    gw_label(r, why, gui_s(TH->t_body - 2), GW_REGULAR, TH->text_faint, GUI_LEFT);
+}
+
+// values: the cvar value of each item (NULL = the item index).
+static void row_fid_combo(GuiCursor *c, const char *label, int f, const char *const *items, const int *values, int n, const char *hint) {
+    Cvar *v = cv(fid_feature(f)->cvar);
+    if (!v) return;
+    char why[96];
+    if (feature_locked(f, why, sizeof(why))) { row_locked(c, label, why, hint); return; }
+    bool en[16];
+    char notes[16][40];
+    const char *np[16];
+    int sel = 0;
+    n = DG_MIN(n, 16);
+    for (int i = 0; i < n; i++) {
+        int val = values ? values[i] : i;
+        value_note(f, (float)val, notes[i], sizeof(notes[i]));
+        en[i] = !notes[i][0];
+        np[i] = notes[i];
+        if (v->i == val) sel = i;
+    }
+    GuiRect r = gw_setting_row(c, label, hint, rid(fid_feature(f)->cvar));
+    r.y += gui_s(3);
+    r.h -= gui_s(6);
+    if (gw_dropdown_ex(rid(fid_feature(f)->cvar), r, items, n, &sel, en, np)) cvar_set_int(v, values ? values[sel] : sel);
+}
+
+static void row_fid_toggle(GuiCursor *c, const char *label, int f, const char *hint) {
+    char why[96];
+    if (feature_locked(f, why, sizeof(why))) { row_locked(c, label, why, hint); return; }
+    row_toggle_cvar(c, label, fid_feature(f)->cvar, hint);
+}
+
+// The slider spans the level's own range; the tooltip says where more is allowed.
+static void row_fid_slider(GuiCursor *c, const char *label, int f, float lo, float hi, float step, const char *fmt, const char *hint) {
+    Cvar *v = cv(fid_feature(f)->cvar);
+    if (!v) return;
+    char why[96];
+    if (feature_locked(f, why, sizeof(why))) { row_locked(c, label, why, hint); return; }
+    float blo = lo, bhi = hi;
+    char tip[200];
+    dg_strcpy(tip, sizeof(tip), hint ? hint : "");
+    if (fid_loaded()) {
+        FidBounds b = fid_bounds(fid_level(), fid_era(), f);
+        blo = fmaxf(lo, b.lo);
+        bhi = fminf(hi, b.hi);
+        if (bhi < hi - 1e-4f || blo > lo + 1e-4f) {
+            int need = fid_min_level_for(fid_era(), f, fid_feature(f)->cheaper_high ? lo : hi);
+            snprintf(tip + strlen(tip), sizeof(tip) - strlen(tip), "%s%s: %g .. %g at Engine Fidelity %s%s%s.", tip[0] ? " " : "", label, blo, bhi,
+                     fid_level_name(fid_level()), need > fid_level() ? "; more at " : "", need > fid_level() ? fid_level_name(need) : "");
+        }
+    }
+    if (bhi <= blo + 1e-4f) {   // a single value at this level
+        char val[64], fixed[96];
+        snprintf(val, sizeof(val), fmt, v->f);
+        snprintf(fixed, sizeof(fixed), "%s (fixed at Engine Fidelity %s)", val, fid_level_name(fid_level()));
+        row_locked(c, label, fixed, tip[0] ? tip : NULL);
+        return;
+    }
+    float f_val = v->f;
+    GuiRect r = gw_setting_row(c, label, tip[0] ? tip : NULL, rid(fid_feature(f)->cvar));
+    if (gw_slider(rid(fid_feature(f)->cvar), r, &f_val, blo, bhi, step, fmt)) cvar_set_float(v, f_val);
+}
+
+// ------------------------------------------------------------------ Engine Fidelity section
+
+static void fidelity_section(GuiCursor *c) {
+    if (!fid_loaded()) {
+        section(c, "Engine Fidelity");
+        gw_label(gc_row(c, gui_s(22)), "Fidelity tables missing (assets/render/fidelity): every setting is unbounded.", gui_s(TH->t_body - 2), GW_REGULAR, TH->text_faint, GUI_LEFT);
+        return;
+    }
+    c->y += gui_s(10);
+    float row = gui_s(TH->row_h), line = gui_s(22), bh = gui_s(TH->button_h + 4);
+    float card_h = gui_s(26) + row + line * 2 + bh + gui_s(30);
+    GuiRect card = { c->area.x - gui_s(10), c->y - gui_s(4), c->area.w + gui_s(20), card_h };
+    gd_round_border(card, gui_s(TH->radius_panel), 1, UI_RGBA(255, 255, 255, 10), gui_rgba_mul(TH->accent, 0.55f));
+    gw_section(gc_row(c, gui_s(26)), "Engine Fidelity");
+    int lvl = fid_level(), rec = game_fidelity_recommended();
+    const char *items[FID_LEVELS];
+    const char *notes[FID_LEVELS];
+    for (int l = 0; l < FID_LEVELS; l++) { items[l] = fid_level_name(l); notes[l] = l == rec ? "Recommended" : ""; }
+    int sel = lvl;
+    GuiRect r = gw_setting_row(c, "Engine Fidelity", "The base of every graphics setting: which systems the renderer runs and how far the settings below can go. Applied live.",
+                               rid("r_fidelity"));
+    r.y += gui_s(3);
+    r.h -= gui_s(6);
+    if (gw_dropdown_ex(rid("r_fidelity"), r, items, FID_LEVELS, &sel, NULL, notes) && sel != lvl) game_fidelity_set(sel);
+    gw_label(gc_row(c, line), fid_level_desc(lvl), gui_s(TH->t_body - 2), GW_REGULAR, TH->text_dim, GUI_LEFT);
+    char buf[200];
+    float ms = game_fidelity_bench_ms(lvl);
+    if (game_fidelity_busy()) snprintf(buf, sizeof(buf), "Measuring...");
+    else if (ms > 0) snprintf(buf, sizeof(buf), "Last benchmark: %.0f fps (%.1f ms GPU)  \xC2\xB7  budget %.0f ms at 1080p%s%s", 1000.0f / ms, ms, fid_level_budget_ms(lvl),
+                              rec >= 0 ? "  \xC2\xB7  recommended: " : "", rec >= 0 ? fid_level_name(rec) : "");
+    else snprintf(buf, sizeof(buf), "Not measured yet  \xC2\xB7  budget %.0f ms at 1080p", fid_level_budget_ms(lvl));
+    gw_label(gc_row(c, line), buf, gui_s(TH->t_body - 2), GW_REGULAR, TH->text_faint, GUI_LEFT);
+    GuiRect br = gc_row(c, bh);
+    float bw = gui_s(190), gap = gui_s(10);
+    GuiRect b1 = { br.x, br.y, bw, br.h }, b2 = { br.x + bw + gap, br.y, bw, br.h }, b3 = { br.x + (bw + gap) * 2, br.y, bw, br.h };
+    if (gw_button(rid("fid_detect"), b1, "Run benchmark", GB_SECONDARY, !game_fidelity_busy())) game_fidelity_detect(false);
+    if (gw_button(rid("fid_apply_rec"), b2, "Apply recommended", GB_PRIMARY, rec >= 0 && rec != lvl && !game_fidelity_busy())) game_fidelity_apply_recommended();
+    int custom = fid_custom_count();
+    char reset[48];
+    snprintf(reset, sizeof(reset), custom ? "Reset %d tweak%s" : "Level defaults", custom, custom == 1 ? "" : "s");
+    if (gw_button(rid("fid_reset"), b3, reset, GB_SECONDARY, custom > 0)) {
+        fid_custom_load("");
+        cvar_set("r_fidelity_custom", "");
+        fid_apply(lvl);
+    }
+    c->y = card.y + card.h + gui_s(6);
+}
+
+// ------------------------------------------------------------------ tabs
+
 static void tab_graphics(GuiCursor *c, GuiRect content) {
+    fidelity_section(c);
     section(c, "Display");
     int sel = 0;
     for (int i = 0; i < S.res_count; i++) if (S.res_w[i] == S.pending.width && S.res_h[i] == S.pending.height) sel = i;
@@ -185,6 +339,24 @@ static void tab_graphics(GuiCursor *c, GuiRect content) {
     section(c, "View");
     row_slider_cvar(c, "Field of view", "cl_fov", 50, 120, 1, "%.0f\xC2\xB0", "Vertical-equivalent camera FOV. Aiming down sights uses each sight's own FOV.");
     {
+        // Stretched resolution simulator: the slider and what it looks like on this display.
+        Cvar *st = cv("r_stretch");
+        if (st) {
+            float v = st->f * 100.0f;
+            GuiRect r = gw_setting_row(c, "Stretched resolution", "The \"4:3 stretched\" look: the 3D view is rendered for a narrower screen and stretched to fill it, so everything looks wider. The HUD and menus stay normal.",
+                                       rid("r_stretch"));
+            if (gw_slider(rid("r_stretch"), r, &v, 0, 100, 1, v < 0.5f ? "Normal" : "%.0f%%")) cvar_set_float(st, v / 100.0f);
+            if (st->f > 0.001f) {
+                float k = render_stretch_factor();
+                int ow = cv("r_width")->i, oh = cv("r_height")->i;
+                char buf[128];
+                snprintf(buf, sizeof(buf), "Looks like %d \xC3\x97 %d stretched to %d \xC3\x97 %d (%.2fx wider)", (int)((float)ow / k + 0.5f), oh, ow, oh, k);
+                GuiRect lr = gc_row(c, gui_s(20));
+                gw_label(gui_rect(lr.x + lr.w * 0.46f + gui_s(16), lr.y, lr.w * 0.54f, lr.h), buf, gui_s(TH->t_body - 2), GW_REGULAR, TH->text_faint, GUI_LEFT);
+            }
+        }
+    }
+    {
         Cvar *vm = cv("cam_weapon_fov");
         if (vm) {
             bool follow = vm->f < 1.0f;
@@ -204,98 +376,160 @@ static void tab_graphics(GuiCursor *c, GuiRect content) {
         }
     }
 
-    section(c, "Quality");
-    row_slider_cvar(c, "Render scale", "r_render_scale", 0.5f, 2.0f, 0.05f, "%.2fx", NULL);
-    static const char *const shadow[] = { "Off", "Low", "Medium", "High" };
-    row_combo_cvar(c, "Shadows", "r_shadow_quality", shadow, 4, NULL);
-    static const char *const texq[] = { "Low", "Medium", "High" };
-    row_combo_cvar(c, "Textures", "r_texture_quality", texq, 3, NULL);
-    static const char *const vfxq[] = { "Low", "Medium", "High", "Ultra" };
-    row_combo_cvar(c, "Effects (particles)", "vfx_quality", vfxq, 4, NULL);
-    static const char *const gore[] = { "Off", "Low", "High" };
-    row_combo_cvar(c, "Gore", "gore_level", gore, 3, NULL);
+    row_toggle_cvar(c, "Performance overlay", "r_perf_overlay", "FPS, CPU / GPU frame time and the Engine Fidelity budget.");
+
+    section(c, "Resolution & upscaling");
+    row_fid_slider(c, "Render scale", FF_RENDER_SCALE, 0.25f, 2.0f, 0.05f, "%.2fx", "3D resolution. Below 1 is upscaled to the display, above 1 supersamples.");
+    static const char *const up[] = { "Off (native)", "TAA-U", "FSR 1", "FSR 2 (uses FSR 1)", "DLSS (uses FSR 1)" };
+    row_fid_combo(c, "Upscaler", FF_UPSCALER, up, NULL, 5, NULL);
+    if (cv("r_upscaler") && cv("r_upscaler")->i) row_fid_slider(c, "Upscaler resolution", FF_UPSCALE_RATIO, 0.5f, 1.0f, 0.01f, "%.2fx", NULL);
+    static const char *const aa[] = { "Off", "FXAA", "SMAA 1x", "TAA" };
+    row_fid_combo(c, "Anti-aliasing", FF_AA, aa, NULL, 4, NULL);
+    row_fid_slider(c, "Sharpening", FF_SHARPEN, 0, 1, 0.05f, "%.2f", NULL);
+
+    section(c, "Post-processing & Effects");
+    if (!fid_level_post(fid_level()))
+        gw_label(gc_row(c, gui_s(22)), "Engine Fidelity Off: no post-processing. The scene goes straight to the screen.", gui_s(TH->t_body - 2), GW_REGULAR, TH->text_faint, GUI_LEFT);
     {
-        Cvar *an = cv("r_aniso");
-        if (an) {
-            static const char *const aniso[] = { "Off", "2x", "4x", "8x", "16x" };
-            static const int vals[] = { 1, 2, 4, 8, 16 };
-            int s = 0;
-            for (int i = 0; i < 5; i++) if (vals[i] == an->i) s = i;
-            if (row_combo(c, "Anisotropic filtering", aniso, 5, &s, NULL)) cvar_set_int(an, vals[s]);
+        static const char *const presets[] = { "Low", "Medium", "High", "Ultra", "Custom" };
+        bool en[5];
+        char notes[5][40];
+        const char *np[5];
+        for (int p = 0; p < 5; p++) {
+            int req = 0;
+            en[p] = p < 4 && game_post_preset_allowed(p, &req);
+            notes[p][0] = 0;
+            if (p < 4 && !en[p]) snprintf(notes[p], sizeof(notes[p]), req < 0 ? "not in this era" : "requires %s", req < 0 ? "" : fid_level_name(req));
+            np[p] = notes[p];
+        }
+        int sel = game_post_detect_preset();
+        bool any = false;
+        int need = -1;
+        for (int p = 0; p < 4; p++) {
+            any |= en[p];
+            int req = -1;
+            game_post_preset_allowed(p, &req);
+            if (req >= 0 && (need < 0 || req < need)) need = req;
+        }
+        char why[64];
+        snprintf(why, sizeof(why), need >= 0 ? "Requires Engine Fidelity: %s" : "Not in this era", need >= 0 ? fid_level_name(need) : "");
+        if (!any) row_locked(c, "Quality preset", why, NULL);
+        else {
+            GuiRect r = gw_setting_row(c, "Quality preset", "Sets the effects below at once, within the Engine Fidelity level.", rid("post_preset"));
+            r.y += gui_s(3);
+            r.h -= gui_s(6);
+            en[4] = sel == 4;
+            if (gw_dropdown_ex(rid("post_preset"), r, presets, 5, &sel, en, np) && sel < 4) game_post_apply_preset(sel);
         }
     }
+    static const char *const ao[] = { "Off", "Low", "High" };
+    row_fid_combo(c, "Ambient occlusion", FF_AO, ao, NULL, 3, NULL);
+    row_fid_combo(c, "Contact shadows", FF_CONTACT_SHADOWS, ao, NULL, 3, NULL);
+    static const char *const ssr[] = { "Off", "Half resolution", "Full resolution" };
+    row_fid_combo(c, "Screen-space reflections", FF_SSR, ssr, NULL, 3, "Without them: sky / probe reflections.");
+    row_fid_toggle(c, "Screen-space global illumination", FF_SSGI, NULL);
+    static const char *const vol[] = { "Off (distance fog)", "Low", "High", "Ultra" };
+    row_fid_combo(c, "Volumetric fog", FF_VOLUMETRICS, vol, NULL, 4, NULL);
+    if (cv("r_volumetrics") && cv("r_volumetrics")->i) row_fid_toggle(c, "Light scattering (lamps)", FF_VOL_LOCAL_LIGHTS, "Point lights glow in the fog; off: fog only.");
+    static const char *const mb[] = { "Off", "Camera", "Camera + objects" };
+    row_fid_combo(c, "Motion blur", FF_MOTION_BLUR, mb, NULL, 3, NULL);
+    if (cv("r_motion_blur") && cv("r_motion_blur")->i) row_slider_cvar(c, "Motion blur strength", "r_motion_blur_strength", 0.05f, 1, 0.05f, "%.2f", NULL);
+    static const char *const dof[] = { "Off", "When aiming", "Always" };
+    row_fid_combo(c, "Depth of field", FF_DOF, dof, NULL, 3, NULL);
+    static const char *const dofq[] = { "Gaussian (16 taps)", "Hybrid (32 taps)", "Bokeh (48 taps)" };
+    if (cv("r_dof") && cv("r_dof")->i) row_fid_combo(c, "Depth of field quality", FF_DOF_QUALITY, dofq, NULL, 3, NULL);
+    row_fid_toggle(c, "Bloom", FF_BLOOM, NULL);
+    static const char *const bq[] = { "Tiny", "Low", "High" };
+    if (cv("r_bloom") && cv("r_bloom")->i) {
+        row_fid_combo(c, "Bloom quality", FF_BLOOM_QUALITY, bq, NULL, 3, NULL);
+        row_slider_cvar(c, "Bloom intensity", "r_bloom_intensity", 0, 0.3f, 0.005f, "%.3f", NULL);
+    }
+    row_fid_slider(c, "Lens flare", FF_LENS_FLARE, 0, 2, 0.05f, "%.2f", NULL);
+    row_fid_slider(c, "Lens dirt", FF_LENS_DIRT, 0, 2, 0.05f, "%.2f", NULL);
+    row_fid_slider(c, "Chromatic aberration", FF_CHROMATIC, 0, 2, 0.05f, "%.2f", NULL);
+    row_fid_slider(c, "Lens distortion", FF_LENS_DISTORTION, -1, 1, 0.05f, "%.2f", NULL);
+    row_fid_toggle(c, "Lens droplets", FF_LENS_DROPS, "Rain drops on the camera in first person.");
+    if (cv("r_lens_drops") && cv("r_lens_drops")->i && fid_level() >= FID_HIGH) row_slider_cvar(c, "Lens droplet intensity", "r_lens_drops_intensity", 0.0f, 1.0f, 0.05f, "%.2f", NULL);
+    row_fid_slider(c, "Vignette", FF_VIGNETTE, 0, 1, 0.05f, "%.2f", NULL);
+    row_fid_slider(c, "Film grain", FF_FILM_GRAIN, 0, 1, 0.01f, "%.2f", NULL);
+    static const char *const tm[] = { "ACES (filmic)", "AgX", "PBR Neutral" };
+    row_fid_combo(c, "Tonemapper", FF_TONEMAPPER, tm, NULL, 3, NULL);
+    row_fid_toggle(c, "Auto exposure", FF_AUTO_EXPOSURE, "Off: fixed exposure.");
+    row_slider_cvar(c, "Exposure compensation", "r_exposure", -3, 3, 0.1f, "%+.1f EV", NULL);
+    if (render_hdr_supported()) {
+        row_fid_toggle(c, "HDR10 output", FF_HDR_OUTPUT, NULL);
+        if (cv("r_hdr_output") && cv("r_hdr_output")->i) {
+            row_slider_cvar(c, "HDR paper white", "r_hdr_paper_white", 80, 500, 10, "%.0f nits", NULL);
+            row_slider_cvar(c, "HDR peak brightness", "r_hdr_max_nits", 400, 4000, 50, "%.0f nits", NULL);
+        }
+    }
+
+    section(c, "Shadows & lighting");
+    static const char *const shadow[] = { "Off", "Low (1024)", "Medium (2048)", "High (4096)" };
+    row_fid_combo(c, "Shadows", FF_SHADOW_QUALITY, shadow, NULL, 4, NULL);
+    static const char *const casc[] = { "1", "2", "3" };
+    static const int casc_v[] = { 1, 2, 3 };
+    row_fid_combo(c, "Shadow cascades", FF_SHADOW_CASCADES, casc, casc_v, 3, NULL);
+    row_fid_slider(c, "Shadow distance", FF_SHADOW_DISTANCE, 0.25f, 1.0f, 0.05f, "%.2fx", NULL);
+    static const char *const filt[] = { "Hard", "Soft (PCF 3x3)", "Softer (PCF 5x5)" };
+    row_fid_combo(c, "Shadow softness", FF_SHADOW_FILTER, filt, NULL, 3, "Softer needs High shadow quality.");
+    row_fid_slider(c, "Skip shadows of props under", FF_SHADOW_MIN_RADIUS, 0, 4, 0.25f, "%.2f m", "Small props cast no sun shadow (cheaper).");
+    row_fid_toggle(c, "Lamp / flashlight shadows", FF_LIGHT_SHADOWS, NULL);
+    row_fid_toggle(c, "Cloud shadows", FF_CLOUD_SHADOWS, NULL);
+
+    section(c, "Geometry, textures & foliage");
+    {
+        Cvar *era = cv("r_era");
+        if (era) {
+            static const char *const eras[] = { "Modern", "2020", "2015", "2010", "Custom" };
+            int sel = DG_CLAMP(era->i, 0, 4);
+            if (row_combo(c, "Era look", eras, 5, &sel, "The geometry / foliage of an era (and the features it had). Engine Fidelity bounds its cost.") && sel < 4) cvar_set_int(era, sel);
+        }
+    }
+    static const char *const texq[] = { "Low (mips -2)", "Medium (mips -1)", "High" };
+    row_fid_combo(c, "Textures", FF_TEXTURE_QUALITY, texq, NULL, 3, NULL);
+    {
+        static const char *const aniso[] = { "Off", "2x", "4x", "8x", "16x" };
+        static const int vals[] = { 1, 2, 4, 8, 16 };
+        row_fid_combo(c, "Anisotropic filtering", FF_ANISO, aniso, vals, 5, NULL);
+    }
+    row_fid_slider(c, "Foliage density", FF_FOLIAGE_DENSITY, 0, 1, 0.05f, "%.2f", NULL);
+    row_fid_slider(c, "Impostors below", FF_IMPOSTOR_PX, 0, 128, 4, "%.0f px", "Distant foliage switches to impostor cards below this size (larger: earlier).");
+    row_fid_slider(c, "Character detail (LOD)", FF_LOD_BIAS, 0.25f, 4.0f, 0.05f, "%.2fx", NULL);
+    static const char *const chq[] = { "Low", "Medium", "High", "Ultra" };
+    row_fid_combo(c, "Character quality", FF_CHAR_QUALITY, chq, NULL, 4, NULL);
+
+    section(c, "Effects");
+    static const char *const vfxq[] = { "Low", "Medium", "High", "Ultra" };
+    row_fid_combo(c, "Particles", FF_VFX_QUALITY, vfxq, NULL, 4, NULL);
+    row_fid_toggle(c, "Lit particles", FF_VFX_LIGHTING, "Sun, shadows, lamps and 6-way lighting on smoke / dust; off: unlit soft particles.");
+    {
+        Cvar *dm = cv("vfx_decal_max");
+        if (dm && fid_loaded()) {
+            FidBounds b = fid_bounds(fid_level(), fid_era(), FF_DECAL_MAX);
+            row_fid_slider(c, "Impact decals", FF_DECAL_MAX, 0, fminf(b.hi, 1024.0f), 8, "%.0f", NULL);
+        }
+    }
+    static const char *const gore[] = { "Off", "Low", "High" };
+    row_combo_cvar(c, "Gore", "gore_level", gore, 3, NULL);
+    static const char *const cb[] = { "Off", "Protanopia", "Deuteranopia", "Tritanopia" };
+    row_combo_cvar(c, "Colour-blind filter", "r_colorblind", cb, 4, "Every Engine Fidelity level, Off included.");
+    row_slider_cvar(c, "Screen effects", "r_post_feedback", 0, 1, 0.05f, "%.2f", "Damage, flash and low-health effects.");
+
     section(c, "Sights");
     static const char *const scope[] = { "Picture-in-picture", "Full screen" };
     row_combo_cvar(c, "Scopes", "r_scope_mode", scope, 2, "Picture-in-picture keeps the world visible around the scope.");
-    row_slider_cvar(c, "Scope picture resolution", "r_scope_pip_scale", 0.2f, 2.0f, 0.05f, "%.2f", "1 = the render height, above 1 supersamples (sharper, slower).");
+    row_fid_slider(c, "Scope picture resolution", FF_SCOPE_PIP_SCALE, 0.2f, 2.0f, 0.05f, "%.2f", "1 = the render height, above 1 supersamples (sharper, slower).");
     row_slider_cvar(c, "Red dot brightness", "sight_brightness", 0.0f, 3.0f, 0.05f, "%.2f", NULL);
-    row_toggle_cvar(c, "Depth of field while aiming", "ads_dof", "A slight blur on the weapon while aimed.");
+    row_fid_toggle(c, "Depth of field while aiming", FF_ADS_DOF, "A slight blur on the weapon while aimed.");
     section(c, "Weather");
     {
-        Cvar *pq = cv("r_precip_quality");
-        if (pq) {
-            static const char *const q[] = { "Auto (post preset)", "Off", "Low", "Medium", "High" };
-            int sel = pq->i + 1;
-            if (row_combo(c, "Rain / snow quality", q, 5, &sel, "Particle count of the rain / snow around you.")) cvar_set_int(pq, sel - 1);
-        }
+        static const char *const q[] = { "Auto (post preset)", "Off", "Low", "Medium", "High" };
+        static const int qv[] = { -1, 0, 1, 2, 3 };
+        row_fid_combo(c, "Rain / snow quality", FF_PRECIP_QUALITY, q, qv, 5, "Particle count of the rain / snow around you.");
     }
-    row_toggle_cvar(c, "Puddle reflections", "r_puddle_reflections", "Mirror-smooth puddles (screen-space reflections).");
-    row_toggle_cvar(c, "Lens droplets", "r_lens_drops", "Rain drops on the camera in first person.");
-    if (cv("r_lens_drops") && cv("r_lens_drops")->i) row_slider_cvar(c, "Lens droplet intensity", "r_lens_drops_intensity", 0.0f, 1.0f, 0.05f, "%.2f", NULL);
-    row_toggle_cvar(c, "Cloud shadows", "r_cloud_shadows", NULL);
+    row_fid_toggle(c, "Puddle reflections", FF_PUDDLE_REFLECTIONS, "Mirror-smooth puddles (screen-space reflections).");
     (void)content;
-}
-
-static void tab_post(GuiCursor *c) {
-    section(c, "Preset");
-    int cur = game_post_detect_preset();
-    static const char *const presets[] = { "Low", "Medium", "High", "Ultra", "Custom" };
-    int sel = cur;
-    if (row_combo(c, "Quality preset", presets, 5, &sel, NULL) && sel < 4) game_post_apply_preset(sel);
-    section(c, "Anti-aliasing / upscaling");
-    static const char *const aa[] = { "Off", "FXAA", "SMAA 1x", "TAA" };
-    row_combo_cvar(c, "Anti-aliasing", "r_aa", aa, 4, NULL);
-    static const char *const up[] = { "Off (native)", "TAA-U", "FSR 1", "FSR 2 (uses FSR 1)", "DLSS (uses FSR 1)" };
-    row_combo_cvar(c, "Upscaler", "r_upscaler", up, 5, NULL);
-    if (cv("r_upscaler") && cv("r_upscaler")->i) row_slider_cvar(c, "Upscaler resolution", "r_upscale_ratio", 0.5f, 1.0f, 0.01f, "%.2fx", NULL);
-    row_slider_cvar(c, "Sharpening", "r_sharpen", 0, 1, 0.05f, "%.2f", NULL);
-    section(c, "Lighting");
-    static const char *const ao[] = { "Off", "Low", "High" };
-    row_combo_cvar(c, "Ambient occlusion", "r_ao", ao, 3, NULL);
-    row_combo_cvar(c, "Contact shadows", "r_contact_shadows", ao, 3, NULL);
-    static const char *const ssr[] = { "Off", "Half resolution", "Full resolution" };
-    row_combo_cvar(c, "Screen-space reflections", "r_ssr", ssr, 3, NULL);
-    row_toggle_cvar(c, "Screen-space global illumination", "r_ssgi", NULL);
-    static const char *const vol[] = { "Off", "Low", "High", "Ultra" };
-    row_combo_cvar(c, "Volumetric fog", "r_volumetrics", vol, 4, NULL);
-    section(c, "Camera");
-    static const char *const mb[] = { "Off", "Camera", "Camera + objects" };
-    row_combo_cvar(c, "Motion blur", "r_motion_blur", mb, 3, NULL);
-    if (cv("r_motion_blur") && cv("r_motion_blur")->i) row_slider_cvar(c, "Motion blur strength", "r_motion_blur_strength", 0.05f, 1, 0.05f, "%.2f", NULL);
-    static const char *const dof[] = { "Off", "When aiming", "Always" };
-    row_combo_cvar(c, "Depth of field", "r_dof", dof, 3, NULL);
-    row_toggle_cvar(c, "Bloom", "r_bloom", NULL);
-    static const char *const bq[] = { "-", "Low", "High" };
-    row_combo_cvar(c, "Bloom quality", "r_bloom_quality", bq, 3, NULL);
-    row_slider_cvar(c, "Bloom intensity", "r_bloom_intensity", 0, 0.3f, 0.005f, "%.3f", NULL);
-    row_slider_cvar(c, "Lens flare", "r_lens_flare", 0, 2, 0.05f, "%.2f", NULL);
-    row_slider_cvar(c, "Lens dirt", "r_lens_dirt", 0, 2, 0.05f, "%.2f", NULL);
-    row_slider_cvar(c, "Chromatic aberration", "r_chromatic", 0, 2, 0.05f, "%.2f", NULL);
-    row_slider_cvar(c, "Vignette", "r_vignette", 0, 1, 0.05f, "%.2f", NULL);
-    row_slider_cvar(c, "Film grain", "r_film_grain", 0, 1, 0.01f, "%.2f", NULL);
-    section(c, "Image");
-    static const char *const tm[] = { "ACES (filmic)", "AgX", "PBR Neutral" };
-    row_combo_cvar(c, "Tonemapper", "r_tonemapper", tm, 3, NULL);
-    row_toggle_cvar(c, "Auto exposure", "r_auto_exposure", NULL);
-    row_slider_cvar(c, "Exposure compensation", "r_exposure", -3, 3, 0.1f, "%+.1f EV", NULL);
-    static const char *const cb[] = { "Off", "Protanopia", "Deuteranopia", "Tritanopia" };
-    row_combo_cvar(c, "Colour-blind filter", "r_colorblind", cb, 4, NULL);
-    row_slider_cvar(c, "Screen effects", "r_post_feedback", 0, 1, 0.05f, "%.2f", "Damage, flash and low-health effects.");
-    if (render_hdr_supported()) {
-        row_toggle_cvar(c, "HDR10 output", "r_hdr_output", NULL);
-        row_slider_cvar(c, "HDR paper white", "r_hdr_paper_white", 80, 500, 10, "%.0f nits", NULL);
-        row_slider_cvar(c, "HDR peak brightness", "r_hdr_max_nits", 400, 4000, 50, "%.0f nits", NULL);
-    }
 }
 
 static void tab_controls(GuiCursor *c) {
@@ -425,13 +659,14 @@ static void tab_phone(GuiCursor *c) {
 bool settings_draw(GuiRect r) {
     GuiRect content = screens_modal_frame(r, "Settings", NULL);
     // Tabs (LB / RB, Ctrl+Tab cycle).
-    const char *labels[TAB_COUNT];
+    const char *labels[TAB_SHOWN];
     int cur = 0;
-    for (int i = 0; i < TAB_COUNT; i++) { labels[i] = k_tabs[k_order[i]]; if (k_order[i] == S.tab) cur = i; }
+    if (S.tab == TAB_POST) S.tab = TAB_GRAPHICS;
+    for (int i = 0; i < TAB_SHOWN; i++) { labels[i] = k_tabs[k_order[i]]; if (k_order[i] == S.tab) cur = i; }
     GuiRect tr = { content.x, content.y - gui_s(8), content.w, gui_s(34) };
-    int ni = gw_tabs(gui_id("settings_tabs"), tr, labels, TAB_COUNT, cur);
-    if (gui_nav(NAV_TAB_NEXT)) { ni = (cur + 1) % TAB_COUNT; gui_nav_consume(NAV_TAB_NEXT); gui_sound(TH->snd_tab); }
-    if (gui_nav(NAV_TAB_PREV)) { ni = (cur + TAB_COUNT - 1) % TAB_COUNT; gui_nav_consume(NAV_TAB_PREV); gui_sound(TH->snd_tab); }
+    int ni = gw_tabs(gui_id("settings_tabs"), tr, labels, TAB_SHOWN, cur);
+    if (gui_nav(NAV_TAB_NEXT)) { ni = (cur + 1) % TAB_SHOWN; gui_nav_consume(NAV_TAB_NEXT); gui_sound(TH->snd_tab); }
+    if (gui_nav(NAV_TAB_PREV)) { ni = (cur + TAB_SHOWN - 1) % TAB_SHOWN; gui_nav_consume(NAV_TAB_PREV); gui_sound(TH->snd_tab); }
     if (k_order[ni] != S.tab) { S.tab = k_order[ni]; gui_set_focus(0); gui_anim_restart(gui_id("settings_tab_in")); }
     float tin = gui_ease_out(gui_anim_t(gui_id("settings_tab_in")) / 0.15f);
     GuiRect view = { content.x, tr.y + tr.h + gui_s(10), content.w - gui_s(14), content.y + content.h - (tr.y + tr.h + gui_s(10)) - gui_s(24) };
@@ -442,7 +677,7 @@ bool settings_draw(GuiRect r) {
     GuiCursor c = gc_make(inner, gui_s(2));
     switch (S.tab) {
     case TAB_GRAPHICS: tab_graphics(&c, view); break;
-    case TAB_POST: tab_post(&c); break;
+    case TAB_POST: tab_graphics(&c, view); break;
     case TAB_CONTROLS: tab_controls(&c); break;
     case TAB_CROSSHAIR: tab_crosshair(&c); break;
     case TAB_AUDIO: tab_audio(&c); break;

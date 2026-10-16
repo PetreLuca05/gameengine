@@ -160,6 +160,11 @@ static void exec_dof_gather(VkCommandBuffer cmd, void *u) {
     pb_img_fg(&b, 8, C.far);
     pb_img_fg(&b, 9, C.near);
     pb_push(cmd, &b, VK_PIPELINE_BIND_POINT_COMPUTE);
+    struct { float p[16]; u32 u[16]; } pc;
+    memset(&pc, 0, sizeof(pc));
+    static const u32 taps[3] = { 16, 32, 48 };   // r_dof_quality (Engine Fidelity: Medium / High / Modern)
+    pc.u[0] = taps[DG_CLAMP(P.set.dof_quality, 0, 2)];
+    post_push_constants(cmd, &pc, 128);
     u32 w, h;
     fg_extent(C.far, &w, &h);
     post_dispatch(cmd, "dof_gather", w, h, 1, 8);

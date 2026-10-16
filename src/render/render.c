@@ -13,6 +13,21 @@
 #include "stb_image_write.h"
 
 static void on_render_cvar_changed(Cvar *cv) { (void)cv; }
+
+// Stretched resolution simulator (r_stretch): the competitive "4:3 stretched" look. The 3D view is
+// projected as if the screen were k times narrower (same vertical FOV) and fills the full width, so
+// everything is k times wider. 0.25 ~ 4:3 on 16:9 (k 1.33), 1 = k 2.5. The UI is not stretched.
+#define STRETCH_MAX 2.5f
+float render_stretch_factor(void) { return 1.0f + clampf(R->r_stretch ? R->r_stretch->f : 0.0f, 0.0f, 1.0f) * (STRETCH_MAX - 1.0f); }
+static float view_aspect(void) {
+    return (float)R->swap_extent.width / (float)DG_MAX(1u, R->swap_extent.height) / render_stretch_factor();
+}
+// Whole-frame GPU time (Engine Fidelity benchmark / overlay): a timestamp pair per frame slot.
+static VkQueryPool g_frame_qp;
+static bool g_frame_qp_written[FRAMES_IN_FLIGHT];
+static float g_gpu_frame_ms;
+static bool (*g_cam_override)(RenderCamera *cam);
+void render_set_camera_override(bool (*fn)(RenderCamera *cam)) { g_cam_override = fn; }
 static size_t obj_slot_size(void);
 
 void render_register_cvars(void) {
@@ -35,6 +50,12 @@ void render_register_cvars(void) {
     r->r_bloom = cvar_reg_bool("r_bloom", true, CVAR_ARCHIVE, "bloom (HDR mip chain)");
     r->r_hdr_output = cvar_reg_bool("r_hdr_output", false, CVAR_ARCHIVE, "HDR10 output (PQ) when the display supports it");
     r->r_bloom_intensity = cvar_reg_float("r_bloom_intensity", 0.05f, 0.0f, 0.5f, CVAR_ARCHIVE, "bloom strength (energy conserving mix)");
+    r->r_shadow_cascades = cvar_reg_int("r_shadow_cascades", 3, 1, 3, CVAR_ARCHIVE, "sun shadow cascades (1 .. 3)");
+    r->r_shadow_distance = cvar_reg_float("r_shadow_distance", 1.0f, 0.25f, 1.0f, CVAR_ARCHIVE, "sun shadow reach (scale of the far cascades)");
+    r->r_shadow_filter = cvar_reg_int("r_shadow_filter", 2, 0, 2, CVAR_ARCHIVE, "sun shadow softness: 0 hard (1 tap), 1 PCF 3x3, 2 PCF 5x5 (at High shadow quality)");
+    r->r_stretch = cvar_reg_float("r_stretch", 0.0f, 0.0f, 1.0f, CVAR_ARCHIVE,
+                                  "stretched resolution simulator: 0 normal .. 1 extreme (the 3D view squeezed into a narrower aspect, stretched to the screen)");
+    r->r_shadow_min_radius = cvar_reg_float("r_shadow_min_radius", 0.0f, 0.0f, 4.0f, CVAR_ARCHIVE, "props smaller than this radius (m) cast no sun shadow");
     r->r_vsync->on_change = on_render_cvar_changed;
 }
 
@@ -164,6 +185,12 @@ bool render_init(SDL_Window *window) {
     if (!vkp_create_pipelines()) { log_error("render: pipeline creation failed"); return false; }
     if (!vkx_init()) log_warn("render: VFX pipelines unavailable (particles disabled)");
     fg_init();
+    {
+        VkQueryPoolCreateInfo qi = { VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO };
+        qi.queryType = VK_QUERY_TYPE_TIMESTAMP;
+        qi.queryCount = 2 * FRAMES_IN_FLIGHT;
+        VK_CHECK(vkCreateQueryPool(R->device, &qi, NULL, &g_frame_qp));
+    }
     vkg_init();
     if (!post_init()) { log_error("render: post-processing stack unavailable"); return false; }
     sky_init();
@@ -216,6 +243,8 @@ void render_shutdown(void) {
     if (!R) return;
     if (R->device) {
         vkDeviceWaitIdle(R->device);
+        if (g_frame_qp) vkDestroyQueryPool(R->device, g_frame_qp, NULL);
+        g_frame_qp = VK_NULL_HANDLE;
         sky_shutdown();
         post_shutdown();
         vkg_shutdown();
@@ -288,10 +317,7 @@ static void apply_setting_changes(void) {
         R->aniso_mod = R->r_aniso->modified;
         R->texq_mod = R->r_texture_quality->modified;
         vkDeviceWaitIdle(R->device);
-        vkr_destroy_samplers();
-        vkr_create_samplers();
-        vkr_rewrite_all_texture_sets();
-        vkd_create_shadow_map(R->shadow_size);
+        vkr_recreate_linear_sampler();
     }
 }
 
@@ -327,8 +353,9 @@ bool render_begin_frame(void) {
 void render_set_camera(const RenderCamera *cam) {
     R->cam = *cam;
     vkg_bench_camera(&R->cam);   // vgeo_bench flythrough
+    if (g_cam_override) g_cam_override(&R->cam);   // bench_fidelity flythrough
     cam = &R->cam;
-    float aspect = (float)R->swap_extent.width / (float)DG_MAX(1u, R->swap_extent.height);
+    float aspect = view_aspect();
     R->view = mat4_fps_view(cam->pos, cam->yaw, cam->pitch, cam->roll);
     R->proj = mat4_perspective(cam->fov_deg * DG_DEG2RAD, aspect, cam->znear, cam->zfar);
     R->view_proj = mat4_mul(R->proj, R->view);
@@ -555,6 +582,7 @@ static bool g_froxel_fog_draws;   // transparent pass: blended lit draws apply t
 
 static void draw_precip(VkCommandBuffer cmd, VkDescriptorSet frame_set);
 static u32 g_shadow_cascade;   // shadow pass: the cascade being drawn (push constants flags.w)
+static float g_shadow_min_radius;   // sun cascades: smaller casters skipped (r_shadow_min_radius)
 
 static void draw_items(VkCommandBuffer cmd, DrawItem *items, u32 count, bool shadow_pass, bool cull, int alpha_mode) {
     // alpha_mode: 0 = opaque only, 1 = blended only, 2 = all
@@ -570,6 +598,11 @@ static void draw_items(VkCommandBuffer cmd, DrawItem *items, u32 count, bool sha
         if (alpha_mode == 1 && !blended) continue;
         if (shadow_pass && (d->mat.flags & MAT_NO_SHADOW)) continue;
         if (!shadow_pass && (d->mat.flags & MAT_SHADOW_ONLY)) continue;
+        if (shadow_pass && g_shadow_min_radius > 0.0f) {
+            vec3 c; float r;
+            item_bounds(d, &c, &r);
+            if (r < g_shadow_min_radius) continue;
+        }
         if (cull) {
             vec3 c; float r;
             item_bounds(d, &c, &r);
@@ -912,7 +945,7 @@ static bool prev_palette(u32 id, u32 *off, u32 *count) {
 // ------------------------------------------------------------------ frame matrices
 
 static void compute_matrices(FrameData *fd) {
-    float aspect = (float)R->swap_extent.width / (float)DG_MAX(1u, R->swap_extent.height);
+    float aspect = view_aspect();
     RenderCamera *c = &R->cam;
     R->view = mat4_fps_view(c->pos, c->yaw, c->pitch, c->roll);
     R->proj = mat4_perspective(c->fov_deg * DG_DEG2RAD, aspect, c->znear, c->zfar);
@@ -949,11 +982,19 @@ static void compute_matrices(FrameData *fd) {
     vec3 L = v3_norm(e->sun_dir);
     vec3 up = fabsf(L.y) > 0.99f ? v3(0, 0, 1) : v3(0, 1, 0);
     mat4 lview = mat4_look_at(v3(0, 0, 0), v3_neg(L), up);
-    float radii[3] = { 12.0f, fmaxf(ext * 1.1f, 36.0f), fmaxf(ext * 3.5f, 110.0f) };
+    // Engine Fidelity: fewer cascades (1: the middle one alone, 2: near + middle) and a shorter reach
+    // (r_shadow_distance scales the far cascades; the near one stays 12 m).
+    int ncasc = DG_CLAMP(R->r_shadow_cascades->i, 1, 3);
+    float reach_k = clampf(R->r_shadow_distance->f, 0.25f, 1.0f);
+    float all_radii[3] = { 12.0f, fmaxf(ext * 1.1f, 36.0f) * reach_k, fmaxf(ext * 3.5f, 110.0f) * reach_k };
+    all_radii[1] = fmaxf(all_radii[1], 16.0f);
+    all_radii[2] = fmaxf(all_radii[2], all_radii[1] * 1.5f);
+    float radii[3];
+    for (int k = 0; k < 3; k++) radii[k] = all_radii[ncasc == 1 ? 1 : k];
     vec3 fwd = v3_norm(v3(-sinf(c->yaw), 0, -cosf(c->yaw)));
     u32 tile = R->shadow_size / 2;
     float bias[3];
-    for (int k = 0; k < 3; k++) {
+    for (int k = 0; k < ncasc; k++) {
         float r = radii[k];
         vec3 center = v3_madd(c->pos, fwd, r * 0.35f);
         if (k == 2) center = v3_lerp(center, e->shadow_center, 0.5f);
@@ -977,8 +1018,16 @@ static void compute_matrices(FrameData *fd) {
         t.m[13] = (k >> 1) ? 0.5f : -0.5f;
         R->shadow_vps[k] = mat4_mul(t, mat4_mul(lproj, lview));
     }
-    R->shadow_splits = v4(radii[0], radii[1], radii[2], 3.0f);
-    R->shadow_bias = v4(bias[0], bias[1], bias[2], 0);
+    // Unused cascade slots repeat the last one (shadow_vp / bias.z users: decals, froxels, particles).
+    for (int k = ncasc; k < 3; k++) {
+        R->shadow_vps[k] = R->shadow_vps[ncasc - 1];
+        bias[k] = bias[ncasc - 1];
+        radii[k] = radii[ncasc - 1];
+    }
+    // A shortened reach fades the shadow out over the last 15 % of the last cascade (w = its radius).
+    bool fade = ncasc < 3 || reach_k < 0.999f;
+    R->shadow_splits = v4(radii[0], radii[1], radii[2], (float)ncasc);
+    R->shadow_bias = v4(bias[0], bias[1], bias[2], fade ? radii[ncasc - 1] : 0.0f);
     R->shadow_vp = R->shadow_vps[2];
 
     fd->view_proj = mat4_mul(R->proj_j, R->view);
@@ -1005,7 +1054,7 @@ static void compute_matrices(FrameData *fd) {
     // Volumetric fog replaces the analytic per-pixel fog of the lit shaders.
     bool vol = post_settings()->volumetrics > 0 && fg_pass_enabled("vol_inject");
     fd->fog = v4(e->fog_color.x, e->fog_color.y, e->fog_color.z, vol ? 0.0f : e->fog_density);
-    int pcf = R->r_shadow_quality->i >= 3 ? 2 : 1;
+    int pcf = DG_MIN(R->r_shadow_filter->i, R->r_shadow_quality->i >= 3 ? 2 : 1);   // 0 = hard (one bilinear compare)
     if (e->atmosphere && e->cloud_cover > 0.65f) pcf++;   // weather: overcast skies soften the shadows
     fd->params = v4(R->r_grid->i ? 1.0f : 0.0f, 1.0f / (float)R->shadow_size, (float)pcf, 0.0f);
     fd->screen = v4((float)R->hdr.w, (float)R->hdr.h, 1.0f / (float)R->hdr.w, 1.0f / (float)R->hdr.h);
@@ -1606,9 +1655,14 @@ static void build_frame_graph(FrameData *fd) {
     gd.name = "gb_material";
     gd.format = GB_MATERIAL_FORMAT;
     F.material = fg_texture(&gd);
-    gd.name = "gb_velocity";
-    gd.format = GB_VELOCITY_FORMAT;
-    F.velocity = fg_texture(&gd);
+    // Velocity only when something reads it (TAA / TAA-U, motion blur, temporal AO / SSR / SSGI):
+    // otherwise the G-buffer's third attachment is a null view and its writes are discarded.
+    F.velocity = FG_NONE;
+    if (post_needs_velocity()) {
+        gd.name = "gb_velocity";
+        gd.format = GB_VELOCITY_FORMAT;
+        F.velocity = fg_texture(&gd);
+    }
 
     PostFrameIn in;
     memset(&in, 0, sizeof(in));
@@ -1777,6 +1831,14 @@ void render_end_frame(void) {
     VkCommandBufferBeginInfo bi = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
     bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
     VK_CHECK(vkBeginCommandBuffer(cmd, &bi));
+    u32 slot = R->frame_slot;
+    if (g_frame_qp) {
+        u64 ts[2];
+        if (g_frame_qp_written[slot] && vkGetQueryPoolResults(R->device, g_frame_qp, slot * 2, 2, sizeof(ts), ts, sizeof(u64), VK_QUERY_RESULT_64_BIT) == VK_SUCCESS)
+            g_gpu_frame_ms = (float)(ts[1] - ts[0]) * R->gpu_props.limits.timestampPeriod * 1e-6f;
+        vkCmdResetQueryPool(cmd, g_frame_qp, slot * 2, 2);
+        vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, g_frame_qp, slot * 2);
+    }
 
     vkr_record_uploads(cmd);
 
@@ -1862,7 +1924,8 @@ void render_end_frame(void) {
             // One atlas tile per cascade (the cascade index rides in the push constants). The
             // cascade matrices already map into their tile: full viewport, scissored to the tile.
             u32 tile = R->shadow.w / 2;
-            for (int k = 0; k < 3; k++) {
+            g_shadow_min_radius = R->r_shadow_min_radius->f;
+            for (int k = 0; k < DG_CLAMP(R->r_shadow_cascades->i, 1, 3); k++) {
                 VkViewport vp = { 0.0f, 0.0f, (float)R->shadow.w, (float)R->shadow.h, 0.0f, 1.0f };
                 VkRect2D sc = { { (int)((k & 1) * tile), (int)((k >> 1) * tile) }, { tile, tile } };
                 vkCmdSetViewport(cmd, 0, 1, &vp);
@@ -1885,6 +1948,7 @@ void render_end_frame(void) {
                 }
             }
             g_shadow_cascade = 0;
+            g_shadow_min_radius = 0.0f;
         }
         vkCmdEndRendering(cmd);
     }
@@ -1974,6 +2038,10 @@ void render_end_frame(void) {
     }
 
     arena_pop_to(skin_mark);
+    if (g_frame_qp) {
+        vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, g_frame_qp, slot * 2 + 1);
+        g_frame_qp_written[slot] = true;
+    }
     VK_CHECK(vkEndCommandBuffer(cmd));
 
     VkSemaphoreSubmitInfo wait = { VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO };
@@ -2061,6 +2129,38 @@ int render_pass_count(void) { return fg_pass_count(); }
 const char *render_pass_name(int i) { return fg_pass_name(i); }
 float render_pass_ms(int i) { return fg_pass_ms(i); }
 u64 render_post_memory(void) { return fg_memory_bytes(); }
+float render_gpu_frame_ms(void) { return g_gpu_frame_ms; }
+float render_direct_exposure_ev(void) {
+    float e = post_direct_exposure();
+    return e > 0.0f ? log2f(0.18f / (e * 0.125f)) + post_settings()->exposure_comp : 0.0f;
+}
+u64 render_gpu_memory_bytes(void) {
+    VmaTotalStatistics st;
+    vmaCalculateStatistics(R->vma, &st);
+    return st.total.statistics.allocationBytes;
+}
+void render_graph_trim(void) {
+    fg_trim();
+    R->camera_cut = true;   // the histories were dropped with the pool's unused images
+}
+void render_graph_report(RenderGraphReport *out) {
+    const FgReport *r = fg_last_report();
+    memset(out, 0, sizeof(*out));
+    out->passes = r->passes;
+    out->post_passes = r->post_passes;
+    out->dead_passes = r->dead_passes;
+    out->unused_res = r->unused_res;
+    out->undefined_reads = r->undefined_reads;
+    out->pool_images = r->pool_images;
+    out->stale_images = r->stale_images;
+    out->pool_bytes = r->pool_bytes;
+    out->stale_bytes = r->stale_bytes;
+    for (int i = 0; i < r->passes && i < 96; i++) out->names[i] = r->names[i];
+    for (int i = 0; i < r->post_passes && i < 32; i++) out->post[i] = r->post[i];
+    for (int i = 0; i < r->dead_passes && i < 12; i++) out->dead[i] = r->dead[i];
+    for (int i = 0; i < r->unused_res && i < 12; i++) out->unused[i] = r->unused[i];
+    for (int i = 0; i < r->undefined_reads && i < 12; i++) out->undefined[i] = r->undefined[i];
+}
 float render_exposure_ev(void) { return post_exposure_ev(); }
 bool render_hdr_supported(void) { return R->hdr_supported; }
 bool render_hdr_active(void) { return R->swap_hdr; }

@@ -156,6 +156,7 @@ void render_texture_destroy(TextureId id);
 // Frame
 bool render_begin_frame(void);
 void render_set_camera(const RenderCamera *cam);
+void render_set_camera_override(bool (*fn)(RenderCamera *cam));   // replaces the camera while fn returns true (bench_fidelity flythrough)
 void render_set_environment(const RenderEnvironment *env);
 void render_draw(const DrawItem *item);
 
@@ -374,6 +375,18 @@ const char *render_pass_name(int i);
 float render_pass_ms(int i);
 u64 render_post_memory(void);
 float render_exposure_ev(void);
+// Engine Fidelity (docs/ENGINE_FIDELITY.md) diagnostics.
+float render_direct_exposure_ev(void);                        // Engine Fidelity Off: the fixed (metered) exposure as EV100
+float render_stretch_factor(void);                            // r_stretch: horizontal stretch of the 3D view (1 = none)
+float render_gpu_frame_ms(void);                              // whole command buffer, GPU timestamps (last completed frame)
+u64 render_gpu_memory_bytes(void);                            // every VMA allocation (images, buffers, pools)
+void render_graph_trim(void);                                 // drop pooled images the last graph didn't use (level switch)
+typedef struct RenderGraphReport {
+    int passes, post_passes, dead_passes, unused_res, undefined_reads, pool_images, stale_images;
+    u64 pool_bytes, stale_bytes;
+    const char *names[96], *post[32], *dead[12], *unused[12], *undefined[12];
+} RenderGraphReport;
+void render_graph_report(RenderGraphReport *out);             // the last executed frame graph
 bool render_hdr_supported(void);
 bool render_hdr_active(void);
 void render_render_size(u32 *w, u32 *h);                      // internal 3D resolution

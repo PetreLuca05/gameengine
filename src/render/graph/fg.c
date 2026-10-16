@@ -1,4 +1,6 @@
 #include "fg.h"
+#include "fg_check.h"
+#include "render/fidelity/fidelity.h"
 #include "core/cvar.h"
 #include <stdio.h>
 #include <string.h>
@@ -47,7 +49,7 @@ typedef struct FgResource {
     bool valid_at_begin;      // history: content was valid when the frame started
 } FgResource;
 
-typedef struct FgUse { FgRes res; FgAccess access; bool write; } FgUse;
+typedef struct FgUse { FgRes res; FgAccess access; bool write, ref; } FgUse;
 
 typedef struct FgPassRec {
     char name[32];
@@ -78,6 +80,7 @@ static struct {
     char last_names[FG_MAX_PASSES][32];
     int last_count;
     Cvar *disable;
+    FgReport report;          // the last executed graph (fg_check + pool state)
 } G;
 
 void fg_init(void) {
@@ -250,7 +253,7 @@ static void use(int pass, FgRes r, FgAccess a, bool write) {
     if (pass < 0 || r < 0 || pass >= G.pass_count) return;
     FgPassRec *p = &G.passes[pass];
     if (p->use_count >= 16) { log_error("fg: pass %s uses too many resources", p->name); return; }
-    p->uses[p->use_count++] = (FgUse){ r, a, write };
+    p->uses[p->use_count++] = (FgUse){ r, a, write, false };
     FgResource *res = &G.res[r];
     if (res->first < 0) res->first = pass;
     res->last = pass;
@@ -259,6 +262,10 @@ static void use(int pass, FgRes r, FgAccess a, bool write) {
 }
 void fg_read(int pass, FgRes r, FgAccess a) { use(pass, r, a, false); }
 void fg_write(int pass, FgRes r, FgAccess a) { use(pass, r, a, true); }
+void fg_reference(int pass, FgRes r, FgAccess a) {
+    use(pass, r, a, false);
+    if (pass >= 0 && r >= 0 && pass < G.pass_count && G.passes[pass].use_count > 0) G.passes[pass].uses[G.passes[pass].use_count - 1].ref = true;
+}
 
 // ------------------------------------------------------------------ physical images
 
@@ -477,8 +484,57 @@ static void pass_barriers(VkCommandBuffer cmd, FgPassRec *p) {
     }
 }
 
+// Validation of the graph just allocated (fg_check.h): dead passes, unused resources, undefined
+// reads, post-processing passes (Engine Fidelity Off schedules none), pool images this frame doesn't use.
+static void check_graph(void) {
+    static FgcUse uses[FG_MAX_PASSES][16];
+    FgcPass passes[FG_MAX_PASSES];
+    FgcRes res[FG_MAX_RES];
+    for (int i = 0; i < G.res_count; i++) res[i] = (FgcRes){ G.res[i].name, G.res[i].kind == FG_TRANSIENT ? FGC_TRANSIENT : (G.res[i].kind == FG_HISTORY ? FGC_HISTORY : FGC_IMPORT) };
+    FgReport *r = &G.report;
+    memset(r, 0, sizeof(*r));
+    for (int p = 0; p < G.pass_count; p++) {
+        FgPassRec *pr = &G.passes[p];
+        int nu = 0;
+        for (int u = 0; u < pr->use_count; u++)
+            if (!pr->uses[u].ref) uses[p][nu++] = (FgcUse){ pr->uses[u].res, pr->uses[u].write };
+        passes[p] = (FgcPass){ pr->name, uses[p], nu };
+        if (fid_pass_is_post(pr->name)) {
+            if (r->post_passes < FG_REPORT_NAMES) snprintf(r->post[r->post_passes], 32, "%s", pr->name);
+            r->post_passes++;
+        }
+        if (p < FG_MAX_PASSES) snprintf(r->names[p], 32, "%s", pr->name);
+    }
+    FgcReport c;
+    fgc_analyze(passes, G.pass_count, res, G.res_count, &c);
+    r->passes = G.pass_count;
+    r->dead_passes = c.dead_passes;
+    r->unused_res = c.unused_res;
+    r->undefined_reads = c.undefined_reads;
+    memcpy(r->dead, c.dead, sizeof(r->dead));
+    memcpy(r->unused, c.unused, sizeof(r->unused));
+    memcpy(r->undefined, c.undefined, sizeof(r->undefined));
+    for (int k = 0; k < FG_POOL_MAX; k++)
+        if (G.pool[k].used) {
+            r->pool_images++;
+            r->pool_bytes += G.pool[k].bytes;
+            if (G.pool[k].busy_until < 0) { r->stale_images++; r->stale_bytes += G.pool[k].bytes; }
+        }
+}
+
+const FgReport *fg_last_report(void) { return &G.report; }
+
+// Drops pooled images the last frame didn't use (a settings change: Engine Fidelity level switch)
+// instead of waiting for the 240-frame eviction. Deferred destruction (frames in flight).
+void fg_trim(void) {
+    if (!G.init) return;
+    for (int k = 0; k < FG_POOL_MAX; k++)
+        if (G.pool[k].used && G.pool[k].last_frame != G.frame) phys_destroy(&G.pool[k], false);
+}
+
 void fg_execute(VkCommandBuffer cmd) {
     allocate();
+    check_graph();
     int slot = (int)R->frame_slot;
     u32 qbase = (u32)(slot * FG_MAX_PASSES * 2);
     vkCmdResetQueryPool(cmd, G.qp, qbase, FG_MAX_PASSES * 2);

@@ -1,8 +1,11 @@
 #version 450
 // UI backdrop (src/render/render_ui.c): the final image (display-linear, output resolution) to a
 // quarter resolution, display-encoded (sRGB / PQ, what the UI composites against), 4x4 box per texel.
+// pc.u0.x = 1: the source is the lit HDR of Engine Fidelity Off (direct output transform, exposure
+// pc.p0.x), as final_direct.frag shows it.
 #extension GL_GOOGLE_include_directive : require
 #include "post_common.glsl"
+#include "post_direct.glsl"
 layout(local_size_x = 8, local_size_y = 8) in;
 layout(set = 0, binding = 0) uniform sampler2D ldr_tex;
 layout(set = 0, binding = 8, rgba16f) uniform writeonly image2D dst;
@@ -22,6 +25,8 @@ void main() {
              textureLod(ldr_tex, uv + t * vec2(-1, 1), 0.0).rgb + textureLod(ldr_tex, uv + t * vec2(1, 1), 0.0).rgb;
     c = sanitize(c * 0.25);
     bool hdr = U.s_out.x > 0.5;
+    if (pc.u0.x != 0u && !hdr) { imageStore(dst, p, vec4(direct_output_srgb(c, pc.p0.x), 1.0)); return; }
+    if (pc.u0.x != 0u) c = direct_tonemap(c * pc.p0.x);
     vec3 o = hdr ? pq_encode(c * (U.s_out.y / 10000.0)) : srgb_encode(clamp(c, 0.0, 1.0));
     imageStore(dst, p, vec4(o, 1.0));
 }

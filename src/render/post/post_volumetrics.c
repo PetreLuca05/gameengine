@@ -20,6 +20,7 @@ static void exec_inject(VkCommandBuffer cmd, void *u) {
     struct { float p[16]; u32 u[16]; } pc;
     memset(&pc, 0, sizeof(pc));
     pc.u[0] = fg_history_valid(V.hist_in) ? 1u : 0u;
+    pc.u[1] = P.set.vol_local_lights ? 1u : 0u;   // fog-only without (Engine Fidelity Medium)
     post_push_constants(cmd, &pc, 128);
     VkPipeline p = post_compute_pipe("vol_inject");
     if (!p) return;

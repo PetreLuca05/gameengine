@@ -70,6 +70,12 @@ VkImageView post_black_view(void);
 vec2 post_jitter_pixels(u32 frame);
 bool post_wants_jitter(void);
 float post_render_scale(void);
+// Engine Fidelity (docs/ENGINE_FIDELITY.md): Off = direct output (no post passes at all), and what
+// this frame's settings need from the scene passes (nothing scheduled that nobody reads).
+bool post_direct(void);
+bool post_needs_velocity(void);                    // G-buffer velocity: TAA / TAA-U, motion blur, temporal AO / SSR / SSGI
+bool post_needs_depth_history(void);               // last frame's depth: the temporal passes and TAA
+float post_direct_exposure(void);                  // Off: fixed exposure multiplier (CPU, from the sun / sky light)
 // Diagnostics (profiler overlay, tests)
 float post_exposure_ev(void);                      // last known exposure (EV100), host readback
 bool post_lut_load_cube(const char *path, int slot);   // NULL = identity
