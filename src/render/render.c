@@ -1152,6 +1152,8 @@ static void exec_scope_pip(VkCommandBuffer cmd, void *u) {
     draw_items(cmd, R->draws, R->draw_count, false, true, 0);
     memcpy(R->frustum, saved, sizeof(saved));
     draw_skinned(cmd, 0, PIPE_SKIN, PIPE_LIT, F.skin_main);
+    // Particles (smoke, sparks, blood, muzzle flashes of others ...) through the scope camera.
+    vkx_draw_particles_pip(cmd, F.f->frame_set_pip);
     vkCmdEndRendering(cmd);
 }
 

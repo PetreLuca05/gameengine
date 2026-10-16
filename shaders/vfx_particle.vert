@@ -156,6 +156,9 @@ void main() {
     vec3 wp = pos + right * corner.x * half_w + up * corner.y * half_h;
     bool vm = (flags & SF_VIEWMODEL) != 0u;
     gl_Position = frame.view_proj * vec4(wp, 1.0);
+    // Scope picture-in-picture (pc.pad0 = 1, the scope camera's frame set): no viewmodel-space
+    // particles (the shooter's own muzzle effects live in the eye's viewmodel space).
+    if (pc.pad0 == 1u && vm) gl_Position = vec4(0.0, 0.0, -2.0, 1.0);
     // Flipbook.
     vec2 uv = corner * 0.5 + 0.5;
     uv.y = 1.0 - uv.y;

@@ -8,6 +8,7 @@
 #define VFX_SET 1
 #include "vfx_common.glsl"
 
+layout(push_constant) uniform Push { uint mode; uint pad0, pad1, pad2; } pc;   // pad0 = 1: scope picture-in-picture
 layout(location = 0) in vec3 v_uv_a;
 layout(location = 1) in vec3 v_uv_b;
 layout(location = 2) in vec4 v_color;
@@ -65,7 +66,7 @@ void main() {
     // Soft particles + near fade.
     vec2 suv = gl_FragCoord.xy * vf.screen.zw;
     float fade = 1.0;
-    if (v_misc.z > 0.0) {
+    if (v_misc.z > 0.0 && pc.pad0 == 0u) {   // the soft fade reads the main view's depth (none in the scope picture)
         float scene = lin_depth(texture(vfx_depth, suv).r);
         fade *= clamp((scene - v_misc.y) / v_misc.z, 0.0, 1.0);
     }

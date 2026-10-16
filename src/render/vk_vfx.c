@@ -1051,6 +1051,34 @@ static void push_mode(VkCommandBuffer cmd, u32 mode) {
     vkCmdPushConstants(cmd, X.gfx_layout, VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pc), pc);
 }
 
+// The scope picture-in-picture (render.c exec_scope_pip): the same particles through the scope
+// camera's frame set; sorted alpha + additive (no distortion: it refracts the main view's image).
+void vkx_draw_particles_pip(VkCommandBuffer cmd, VkDescriptorSet frame_set) {
+    VfxFrameRes *f = &X.fr[R->frame_slot];
+    if (!X.ok) return;
+    VkDescriptorSet sets[2] = { frame_set, f->set };
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, X.gfx_layout, 0, 2, sets, 0, NULL);
+    u32 pc[4] = { 1, 1, 0, 0 };
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, X.g_alpha);
+    vkCmdPushConstants(cmd, X.gfx_layout, VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pc), pc);
+    vkCmdDrawIndirect(cmd, X.counters.buffer, offsetof(GpuCounters, draw_alpha), 1, 16);
+    if (f->sprite_alpha > 0) {
+        pc[0] = 3;
+        vkCmdPushConstants(cmd, X.gfx_layout, VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pc), pc);
+        vkCmdDraw(cmd, 6, (u32)f->sprite_alpha, 0, (u32)f->sprite_add);
+    }
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, X.g_add);
+    pc[0] = 0;
+    vkCmdPushConstants(cmd, X.gfx_layout, VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pc), pc);
+    vkCmdDrawIndirect(cmd, X.counters.buffer, offsetof(GpuCounters, draw_add), 1, 16);
+    if (f->sprite_add > 0) {
+        pc[0] = 3;
+        vkCmdPushConstants(cmd, X.gfx_layout, VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pc), pc);
+        vkCmdDraw(cmd, 6, (u32)f->sprite_add, 0, 0);
+    }
+    R->stats.draw_calls += 4;
+}
+
 // Static decals before the characters; the skinned ones (wounds, stains) after them, so they
 // project onto the character's own depth.
 void vkx_draw_decals(VkCommandBuffer cmd, bool dynamic) {

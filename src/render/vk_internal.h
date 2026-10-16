@@ -332,6 +332,7 @@ void vkx_record_compute(VkCommandBuffer cmd); // frame start, before the shadow 
 void vkx_draw_decals(VkCommandBuffer cmd, bool dynamic);    // inside the scene pass, depth read-only
 void vkx_copy_scene(VkCommandBuffer cmd);     // outside rendering: HDR -> scene copy (distortion)
 void vkx_draw_particles(VkCommandBuffer cmd); // inside the scene pass, depth read-only
+void vkx_draw_particles_pip(VkCommandBuffer cmd, VkDescriptorSet frame_set);   // inside the scope picture-in-picture pass
 void vkx_timestamp(VkCommandBuffer cmd, int slot);
 RenderTarget *vkx_scene_copy(void);           // opaque HDR copy (distortion; TAA "hdr_opaque"), SHADER_READ_ONLY
 void vkx_begin_frame_queries(VkCommandBuffer cmd);
