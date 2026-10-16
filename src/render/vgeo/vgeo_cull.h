@@ -32,6 +32,7 @@ typedef struct VgViewRes {
     VkDescriptorSet set[VG_MAX_FRAMES];
     u32 set_gen[VG_MAX_FRAMES];
     VkImageView set_prev[VG_MAX_FRAMES], set_cur[VG_MAX_FRAMES];
+    VkBuffer set_vis[VG_MAX_FRAMES];
     VgCounters last;             // the most recent completed frame's counters
     bool last_valid;
 } VgViewRes;
@@ -54,6 +55,8 @@ typedef struct VgCuller {
     VkQueryPool qp;              // VGT_COUNT timestamps per (frame, view)
     bool qp_written[VG_MAX_FRAMES][VG_MAX_VIEWS];
     u32 dispatches;              // dispatches recorded by the last vg_cull_record
+    VkBuffer vis_buffer;         // binding 18 (raster's visibility buffer; a dummy until set)
+    VgBuffer dummy_buf;
     bool ok;
 } VgCuller;
 
@@ -67,6 +70,11 @@ void vg_cull_record(VgCuller *c, VkCommandBuffer cmd, u32 frame, u32 slot, const
 // Builds a MAX Hi-Z (mip views of a half-resolution R32F image in GENERAL layout) from a w x h depth view.
 void vg_hiz_record(VgCuller *c, VkCommandBuffer cmd, u32 frame, VkImageView depth, VkImageLayout depth_layout, const VkImageView *mips, u32 mip_count,
                    u32 w, u32 h);
+
+// The visibility buffer bound at binding 18 of every set (Phase 3 raster / resolve share the cull
+// layout and sets: vg_cull_set after vg_cull_record of the same frame / slot).
+void vg_cull_set_vis(VgCuller *c, VkBuffer vis);
+VkDescriptorSet vg_cull_set(const VgCuller *c, u32 frame, u32 slot);
 
 // Counters of the last completed frame for a view (false before the first one).
 bool vg_cull_counters(const VgCuller *c, u32 slot, VgCounters *out);

@@ -139,10 +139,17 @@ typedef struct VgViewGpu {
     u32 cell_count, instance_count, max_depth, pad0;
     u32 cap_nodes, cap_groups, cap_visible, cap_occluded;
     u32 cap_cells, cap_instances, cap_requests, pad1;
+    float raster_view_proj[16];      // the view the visible clusters are rasterised with (main view: jittered)
 } VgViewGpu;
 
 // Counters (binding 8): indirect dispatch args first (x, y, z, unused), then counts.
-enum VgArgs { VGA_INST, VGA_NODE, VGA_GROUP, VGA_INSTLIST, VGA_OCCL, VGA_COUNT = 8 };
+enum VgArgs {
+    VGA_INST, VGA_NODE, VGA_GROUP, VGA_INSTLIST, VGA_OCCL,
+    VGA_DRAW_HW,                     // raster (Phase 3): VkDrawIndirectCommand of the HW range being drawn
+    VGA_SW,                          // raster: SW rasteriser dispatch (x, y, z)
+    VGA_MESH,                        // raster: vkCmdDrawMeshTasksIndirectEXT (x, y, z)
+    VGA_COUNT = 8
+};
 enum VgCount {
     VGN_CELLS_VIS, VGN_CELLS_OCC, VGN_INST_VIS, VGN_INST_OCC,
     VGN_NODEQ0, VGN_NODEQ1, VGN_NODEQ2,          // node queue regions (0 / 1 ping-pong, 2 = pass 2 seeds)
@@ -153,6 +160,24 @@ enum VgCount {
     VGN_COUNT = 32
 };
 typedef struct VgCounters { u32 args[VGA_COUNT][4]; u32 n[VGN_COUNT]; } VgCounters;
+
+// ------------------------------------------------------------------ visibility buffer (Phase 3)
+//
+// u64 per pixel at render resolution (row-major), cleared to 0 every frame; atomicMax keeps the nearest:
+//   hi 32 = floatBitsToUint(1 - depth)   depth = Vulkan NDC z in [0, 1] (0 near): positive floats order as uints
+//   lo 32 = visible index << 7 | triangle    visible index: HW list k -> k, SW list k -> cap_visible + k (25 bits)
+// 0 = empty (no vgeo surface).
+#define VG_VIS_TRI_BITS 7
+#define VG_VIS_INDEX_BITS 25
+
+// Material table (binding 19, VgScene): VgMesh.material_base + the cluster's material.
+typedef struct VgMaterial {
+    float color[4];                  // linear RGBA
+    float roughness, metallic, emissive, tex_scale;
+    u32 flags;                       // MaterialFlags (render.h MAT_*)
+    u32 albedo_tex;                  // bindless texture index (0 = white)
+    u32 pad[6];
+} VgMaterial;
 
 // Push constants of every cull kernel (48 B).
 typedef struct VgPush { u32 pass, in_region, out_region, view; u32 a[8]; } VgPush;
@@ -190,7 +215,8 @@ _Static_assert(sizeof(VgPageDesc) == 16, "VgPageDesc");
 _Static_assert(sizeof(VgDiscreteLod) == 32, "VgDiscreteLod");
 _Static_assert(sizeof(VgInstance) == 32, "VgInstance");
 _Static_assert(sizeof(VgCell) == 32, "VgCell");
-_Static_assert(sizeof(VgViewGpu) == 352, "VgViewGpu");
+_Static_assert(sizeof(VgViewGpu) == 416, "VgViewGpu");
+_Static_assert(sizeof(VgMaterial) == 64, "VgMaterial");
 _Static_assert(sizeof(VgCounters) == 256, "VgCounters");
 _Static_assert(sizeof(VgPush) == 48, "VgPush");
 _Static_assert(sizeof(VgFileHeader) == 112 + VGS_COUNT * 8, "VgFileHeader");

@@ -6,6 +6,7 @@
 // parent error projects above the threshold as group items (pass 1: region 0, pass 2: region 1) when
 // the group's page is resident, else a page request (priority = projected error).
 #extension GL_GOOGLE_include_directive : require
+#define VG_COMPUTE
 #include "vgeo_common.glsl"
 #include "vg_expand.glsl"
 layout(local_size_x = 64) in;

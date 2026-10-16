@@ -3,6 +3,7 @@
 // over y past 65535. a[0] divisor, a[1] counter to reset + 1, a[2] counter to copy from + 1, a[3]
 // copy destination, a[4] cap on the source count (0 = none).
 #extension GL_GOOGLE_include_directive : require
+#define VG_COMPUTE
 #include "vgeo_common.glsl"
 layout(local_size_x = 1) in;
 void main() {

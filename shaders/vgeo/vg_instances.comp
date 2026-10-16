@@ -3,6 +3,7 @@
 // in_region), its instances strided over the 64 threads; a[0] = 1: one thread per pass-1-occluded
 // instance. Survivors expand their BVH root into node queue region out_region.
 #extension GL_GOOGLE_include_directive : require
+#define VG_COMPUTE
 #include "vgeo_common.glsl"
 #include "vg_expand.glsl"
 layout(local_size_x = 64) in;

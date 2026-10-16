@@ -3,7 +3,7 @@
 #include <stddef.h>
 #include <string.h>
 
-#define NBIND 18
+#define NBIND 20   // 0-15 buffers, 16-17 Hi-Z samplers, 18 visibility buffer, 19 materials
 
 static const VkBufferUsageFlags SSBO = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
 
@@ -13,9 +13,9 @@ static bool create_layouts(VgCuller *c) {
     memset(b, 0, sizeof(b));
     for (u32 i = 0; i < NBIND; i++) {
         b[i].binding = i;
-        b[i].descriptorType = i >= 16 ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER : VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        b[i].descriptorType = (i == 16 || i == 17) ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER : VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
         b[i].descriptorCount = 1;
-        b[i].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+        b[i].stageFlags = VK_SHADER_STAGE_ALL;   // cull kernels, rasterisers (vertex / mesh / fragment / compute), resolve
     }
     VkDescriptorSetLayoutCreateInfo li = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
     li.bindingCount = NBIND;
@@ -44,7 +44,7 @@ static bool create_layouts(VgCuller *c) {
     if (vkCreatePipelineLayout(d, &pi, NULL, &c->hiz_pl) != VK_SUCCESS) return false;
     u32 frames = c->ctx->frames;
     VkDescriptorPoolSize ps[3] = {
-        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 16 * VG_MAX_VIEWS * frames },
+        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 18 * VG_MAX_VIEWS * frames },
         { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2 * VG_MAX_VIEWS * frames + 16 * frames },
         { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 2 * 16 * frames },
     };
@@ -124,6 +124,7 @@ bool vg_cull_init(VgCuller *c, const VgContext *ctx, VgScene *scene, const VgCul
     si.maxLod = 16.0f;
     if (vkCreateSampler(ctx->device, &si, NULL, &c->sampler) != VK_SUCCESS) return false;
     c->views = vgc_buffer(ctx, sizeof(VgViewGpu) * VG_MAX_VIEWS, SSBO, VGM_DEVICE);
+    c->dummy_buf = vgc_buffer(ctx, 64, SSBO, VGM_DEVICE);
     VkQueryPoolCreateInfo qi = { VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO };
     qi.queryType = VK_QUERY_TYPE_TIMESTAMP;
     qi.queryCount = VGT_COUNT * VG_MAX_VIEWS * ctx->frames;
@@ -152,6 +153,7 @@ void vg_cull_shutdown(VgCuller *c) {
     vkDeviceWaitIdle(d);
     for (u32 i = 0; i < VG_MAX_VIEWS; i++) free_view(c, &c->v[i]);
     vgc_buffer_free(c->ctx, &c->views);
+    vgc_buffer_free(c->ctx, &c->dummy_buf);
     VkPipeline ps[] = { c->p_args, c->p_cells, c->p_inst, c->p_trav, c->p_clus, c->p_hiz };
     for (size_t i = 0; i < sizeof(ps) / sizeof(ps[0]); i++) if (ps[i]) vkDestroyPipeline(d, ps[i], NULL);
     if (c->qp) vkDestroyQueryPool(d, c->qp, NULL);
@@ -193,10 +195,10 @@ static void ensure_view(VgCuller *c, VgViewRes *v) {
 
 static void write_set(VgCuller *c, VgViewRes *v, u32 f, VkImageView prev, VkImageLayout prev_l, VkImageView cur, VkImageLayout cur_l) {
     const VgScene *s = c->scene;
-    if (v->set_gen[f] == s->generation && v->set_prev[f] == prev && v->set_cur[f] == cur) return;
+    if (v->set_gen[f] == s->generation && v->set_prev[f] == prev && v->set_cur[f] == cur && v->set_vis[f] == c->vis_buffer) return;
     const VgBuffer *bufs[16] = { &c->views, &s->b_meshes, &s->b_nodes, &s->b_groups, &s->b_page_table, &s->b_pool, &s->b_instances, &s->b_cells,
                                  &v->counters, &v->cell_list, &v->inst_list, &v->node_queue, &v->group_items, &v->visible, &v->occluded, &v->requests };
-    VkDescriptorBufferInfo bi[16];
+    VkDescriptorBufferInfo bi[NBIND];
     VkDescriptorImageInfo ii[2] = { { c->sampler, prev, prev_l }, { c->sampler, cur, cur_l } };
     VkWriteDescriptorSet w[NBIND];
     memset(w, 0, sizeof(w));
@@ -205,8 +207,8 @@ static void write_set(VgCuller *c, VgViewRes *v, u32 f, VkImageView prev, VkImag
         w[i].dstSet = v->set[f];
         w[i].dstBinding = i;
         w[i].descriptorCount = 1;
-        if (i < 16) {
-            bi[i].buffer = bufs[i]->buffer;
+        if (i < 16 || i >= 18) {
+            bi[i].buffer = i < 16 ? bufs[i]->buffer : i == 18 ? (c->vis_buffer ? c->vis_buffer : c->dummy_buf.buffer) : (s->b_materials.buffer ? s->b_materials.buffer : c->dummy_buf.buffer);
             bi[i].offset = 0;
             bi[i].range = VK_WHOLE_SIZE;
             w[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
@@ -220,7 +222,12 @@ static void write_set(VgCuller *c, VgViewRes *v, u32 f, VkImageView prev, VkImag
     v->set_gen[f] = s->generation;
     v->set_prev[f] = prev;
     v->set_cur[f] = cur;
+    v->set_vis[f] = c->vis_buffer;
 }
+
+void vg_cull_set_vis(VgCuller *c, VkBuffer vis) { c->vis_buffer = vis; }
+
+VkDescriptorSet vg_cull_set(const VgCuller *c, u32 frame, u32 slot) { return c->v[slot].set[frame]; }
 
 void vg_cull_collect(VgCuller *c, u32 frame) {
     for (u32 i = 0; i < VG_MAX_VIEWS; i++) {

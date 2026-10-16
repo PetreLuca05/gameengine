@@ -14,7 +14,9 @@ struct VgViewGpu {
     uvec4 counts;            // cell_count, instance_count, max_depth, -
     uvec4 caps0;             // nodes (per region), groups (per region), visible (per list), occluded
     uvec4 caps1;             // cells (per region), instances, requests, -
+    mat4 raster_view_proj;   // the view the visible clusters are rasterised with (main view: jittered)
 };
+struct VgMaterial { vec4 color; float roughness, metallic, emissive, tex_scale; uint flags; uint albedo_tex; uint pad0, pad1, pad2, pad3, pad4, pad5; };
 struct VgNode { vec4 sphere; float max_parent_error; uint first; uint count_flags; uint pad; };
 struct VgGroup { vec4 lod; float parent_error; uint page; uint first_count; uint level; };
 struct VgMesh { vec4 sphere; uint root_node, node_base, group_base, page_base; uint page_count, flags, material_base, impostor; float max_wpo, q_step, pad0, pad1; };
@@ -38,6 +40,11 @@ struct VgCell { vec3 mn; uint first; vec3 mx; uint count; };
 #define VGA_GROUP 2
 #define VGA_INSTLIST 3
 #define VGA_OCCL 4
+#define VGA_DRAW_HW 5
+#define VGA_SW 6
+#define VGA_MESH 7
+#define VG_VIS_TRI_BITS 7u
+#define VGF_HAS_COLOR 4u
 #define VGN_CELLS_VIS 0
 #define VGN_CELLS_OCC 1
 #define VGN_INST_VIS 2
@@ -79,6 +86,13 @@ layout(set = 0, binding = 14) buffer Occluded { uvec2 occluded[]; };
 layout(set = 0, binding = 15) buffer Requests { uvec2 requests[]; };
 layout(set = 0, binding = 16) uniform sampler2D hiz_prev;
 layout(set = 0, binding = 17) uniform sampler2D hiz_cur;
+layout(set = 0, binding = 19, scalar) readonly buffer Materials { VgMaterial materials[]; };
+// Visibility buffer (binding 18, see vgeo_gpu.h): define VG_VIS before including (needs int64).
+#ifdef VG_VIS
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+#extension GL_EXT_shader_atomic_int64 : require
+layout(set = 0, binding = 18) coherent buffer VisBuffer { uint64_t vis[]; };
+#endif
 
 #define V views[pc.view]
 
@@ -180,4 +194,7 @@ uint vg_append(uint counter, uint cap) {
     return i;
 }
 
+// Compute kernels define VG_COMPUTE before including (graphics stages include this file too).
+#ifdef VG_COMPUTE
 uint vg_flat_group() { return gl_WorkGroupID.y * 65535u + gl_WorkGroupID.x; }
+#endif

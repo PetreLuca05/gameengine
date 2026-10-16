@@ -6,6 +6,7 @@
 // Then frustum, backface cone and Hi-Z on its culling sphere, and SW (< sw_px across) / HW
 // classification. a[0] = 1 (pass 2): re-tests pass 1's occluded clusters against this frame's Hi-Z.
 #extension GL_GOOGLE_include_directive : require
+#define VG_COMPUTE
 #include "vgeo_common.glsl"
 layout(local_size_x = 64) in;
 

@@ -3,6 +3,7 @@
 // instances test them inline (vg_instance), larger ones go to cell list region 0 (a workgroup each);
 // occluded cells go to region 1 (re-tested in pass 2).
 #extension GL_GOOGLE_include_directive : require
+#define VG_COMPUTE
 #include "vgeo_common.glsl"
 #include "vg_expand.glsl"
 layout(local_size_x = 64) in;

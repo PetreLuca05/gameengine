@@ -16,6 +16,23 @@
 void vgeo_scene_init(VgScene *s, const VgContext *ctx) {
     memset(s, 0, sizeof(*s));
     s->ctx = ctx;
+    VgMaterial def;
+    memset(&def, 0, sizeof(def));
+    def.color[0] = def.color[1] = def.color[2] = 0.6f;
+    def.color[3] = 1.0f;
+    def.roughness = 0.8f;
+    def.tex_scale = 1.0f;
+    vgeo_scene_add_material(s, &def);
+}
+
+u32 vgeo_scene_add_material(VgScene *s, const VgMaterial *m) {
+    GROW(s->materials, s->material_count, s->material_cap, 1);
+    s->materials[s->material_count] = *m;
+    return s->material_count++;
+}
+
+void vgeo_scene_set_mesh_materials(VgScene *s, u32 mesh, u32 material_base) {
+    if (mesh < s->mesh_count) s->meshes[mesh].material_base = material_base;
 }
 
 static void free_gpu(VgScene *s) {
@@ -27,6 +44,7 @@ static void free_gpu(VgScene *s) {
     vgc_buffer_free(s->ctx, &s->b_pool);
     vgc_buffer_free(s->ctx, &s->b_instances);
     vgc_buffer_free(s->ctx, &s->b_cells);
+    vgc_buffer_free(s->ctx, &s->b_materials);
 }
 
 void vgeo_scene_free(VgScene *s) {
@@ -40,6 +58,7 @@ void vgeo_scene_free(VgScene *s) {
     free(s->mesh_depth);
     free(s->instances);
     free(s->cells);
+    free(s->materials);
     memset(s, 0, sizeof(*s));
 }
 
@@ -193,6 +212,7 @@ bool vgeo_scene_commit(VgScene *s) {
         { &s->b_pool, s->pool, (VkDeviceSize)s->page_count * VGEO_PAGE_SIZE },
         { &s->b_instances, s->instances, sizeof(VgInstance) * (VkDeviceSize)s->instance_count },
         { &s->b_cells, s->cells, sizeof(VgCell) * (VkDeviceSize)s->cell_count },
+        { &s->b_materials, s->materials, sizeof(VgMaterial) * (VkDeviceSize)s->material_count },
     };
     for (size_t i = 0; i < sizeof(t) / sizeof(t[0]); i++) {
         *t[i].b = vgc_buffer(c, t[i].n ? t[i].n : 16, U, VGM_DEVICE);
@@ -302,4 +322,5 @@ void vgeo_view_setup(VgViewGpu *v, const float vp[16], const float prev_vp[16], 
     v->viewport[1] = (float)h;
     v->viewport[2] = 1.0f / (float)w;
     v->viewport[3] = 1.0f / (float)h;
+    memcpy(v->raster_view_proj, vp, 64);
 }

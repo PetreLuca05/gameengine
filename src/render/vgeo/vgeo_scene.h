@@ -27,7 +27,9 @@ typedef struct VgScene {
     u32 cell_count;
     u32 max_depth;               // deepest mesh BVH (traversal dispatches per pass)
     u64 cluster_count, tri_count;
-    VgBuffer b_meshes, b_nodes, b_groups, b_page_table, b_pool, b_instances, b_cells;
+    VgMaterial *materials;       // [0] = default grey
+    u32 material_count, material_cap;
+    VgBuffer b_meshes, b_nodes, b_groups, b_page_table, b_pool, b_instances, b_cells, b_materials;
     u32 generation;              // bumps on every commit (cullers rewrite their descriptor sets)
 } VgScene;
 
@@ -35,6 +37,9 @@ void vgeo_scene_init(VgScene *s, const VgContext *ctx);
 void vgeo_scene_free(VgScene *s);
 // Registers a built mesh (copies its tables and pages). Returns the mesh index.
 u32 vgeo_scene_add_mesh(VgScene *s, const VgBuilt *b);
+// Material table: returns the index; a mesh's clusters use materials material_base + cluster material.
+u32 vgeo_scene_add_material(VgScene *s, const VgMaterial *m);
+void vgeo_scene_set_mesh_materials(VgScene *s, u32 mesh, u32 material_base);
 void vgeo_scene_add_instance(VgScene *s, u32 mesh, const float pos[3], const float rot[4], float scale);
 void vgeo_scene_clear_instances(VgScene *s);
 // Bins instances into cells and uploads everything (load time: waits for the device to be idle).
