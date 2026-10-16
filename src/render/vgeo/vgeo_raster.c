@@ -75,13 +75,17 @@ bool vg_raster_init(VgRaster *r, const VgContext *ctx, VgCuller *cull) {
     r->p_sw = vgc_compute_pipeline(ctx, r->pl, "vgeo/vg_raster_sw.comp");
     r->p_sw_masked = vgc_compute_pipeline(ctx, r->pl, "vgeo/vg_raster_sw_masked.comp");
     r->p_sw_imp = vgc_compute_pipeline(ctx, r->pl, "vgeo/vg_raster_sw_impostor.comp");
+    // HW: the plain variant for one-sided unmasked clusters, the masked variant (per-pixel test) for
+    // two-sided (no culling) and one-sided masked clusters (vg_hw_kind)
     r->p_vert = graphics_pipeline(r, "vgeo/vg_raster_hw.vert", VK_SHADER_STAGE_VERTEX_BIT, "vgeo/vg_raster_hw.frag", false);
-    r->p_vert2 = graphics_pipeline(r, "vgeo/vg_raster_hw.vert", VK_SHADER_STAGE_VERTEX_BIT, "vgeo/vg_raster_hw.frag", true);
+    r->p_vert2 = graphics_pipeline(r, "vgeo/vg_raster_hw_masked.vert", VK_SHADER_STAGE_VERTEX_BIT, "vgeo/vg_raster_hw_masked.frag", true);
+    r->p_vert3 = graphics_pipeline(r, "vgeo/vg_raster_hw_masked.vert", VK_SHADER_STAGE_VERTEX_BIT, "vgeo/vg_raster_hw_masked.frag", false);
     if (ctx->mesh_shader) {
         r->p_mesh = graphics_pipeline(r, "vgeo/vg_raster_hw.mesh", VK_SHADER_STAGE_MESH_BIT_EXT, "vgeo/vg_raster_mesh.frag", false);
-        r->p_mesh2 = graphics_pipeline(r, "vgeo/vg_raster_hw.mesh", VK_SHADER_STAGE_MESH_BIT_EXT, "vgeo/vg_raster_mesh.frag", true);
+        r->p_mesh2 = graphics_pipeline(r, "vgeo/vg_raster_hw_masked.mesh", VK_SHADER_STAGE_MESH_BIT_EXT, "vgeo/vg_raster_mesh_masked.frag", true);
+        r->p_mesh3 = graphics_pipeline(r, "vgeo/vg_raster_hw_masked.mesh", VK_SHADER_STAGE_MESH_BIT_EXT, "vgeo/vg_raster_mesh_masked.frag", false);
     }
-    if (!r->p_args || !r->p_sw || !r->p_sw_masked || !r->p_sw_imp || !r->p_vert || !r->p_vert2 || (r->p_mesh && !r->p_mesh2)) {
+    if (!r->p_args || !r->p_sw || !r->p_sw_masked || !r->p_sw_imp || !r->p_vert || !r->p_vert2 || !r->p_vert3 || (r->p_mesh && (!r->p_mesh2 || !r->p_mesh3))) {
         log_error("vgeo: raster pipelines failed");
         return false;
     }
@@ -100,7 +104,7 @@ void vg_raster_shutdown(VgRaster *r) {
     vkDeviceWaitIdle(d);
     if (r->cull && r->cull->vis_buffer == r->vis.buffer) vg_cull_set_vis(r->cull, VK_NULL_HANDLE);
     vgc_buffer_free(r->ctx, &r->vis);
-    VkPipeline ps[] = { r->p_args, r->p_sw, r->p_vert, r->p_mesh, r->p_vert2, r->p_mesh2, r->p_sw_masked, r->p_sw_imp };
+    VkPipeline ps[] = { r->p_args, r->p_sw, r->p_vert, r->p_mesh, r->p_vert2, r->p_mesh2, r->p_vert3, r->p_mesh3, r->p_sw_masked, r->p_sw_imp };
     for (size_t i = 0; i < sizeof(ps) / sizeof(ps[0]); i++) if (ps[i]) vkDestroyPipeline(d, ps[i], NULL);
     if (r->qp) vkDestroyQueryPool(d, r->qp, NULL);
     if (r->pl) vkDestroyPipelineLayout(d, r->pl, NULL);
@@ -159,6 +163,7 @@ void vg_raster_record(VgRaster *r, VkCommandBuffer cmd, u32 frame, u32 slot, u32
     memset(&p, 0, sizeof(p));
     p.pass = pass;
     p.view = slot;
+    p.a[1] = !c->scene->has_two_sided && !c->scene->has_masked;   // every HW cluster is plain: no kind test
 
     // Args from the counters of this pass's range.
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, r->pl, 0, 1, &set, 0, NULL);
@@ -184,15 +189,17 @@ void vg_raster_record(VgRaster *r, VkCommandBuffer cmd, u32 frame, u32 slot, u32
     vkCmdSetScissor(cmd, 0, 1, &sc);
     if (mesh) vkCmdDrawMeshTasksIndirectEXT(cmd, counters, (VkDeviceSize)VGA_MESH * 16, 1, 16);
     else vkCmdDrawIndirect(cmd, counters, (VkDeviceSize)VGA_DRAW_HW * 16, 1, 16);
-    if (c->scene->has_two_sided) {   // the same list again without culling: only two-sided clusters draw
-        p.a[0] = 1;
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, mesh ? r->p_mesh2 : r->p_vert2);
+    // the same list again for the other kinds (vg_hw_kind): two-sided (no culling), one-sided masked
+    for (u32 kind = 1; kind <= 2; kind++) {
+        if (!(kind == 1 ? c->scene->has_two_sided : c->scene->has_masked)) continue;
+        p.a[0] = kind;
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, kind == 1 ? (mesh ? r->p_mesh2 : r->p_vert2) : (mesh ? r->p_mesh3 : r->p_vert3));
         vkCmdPushConstants(cmd, r->pl, r->push_stages, 0, sizeof(p), &p);
         if (mesh) vkCmdDrawMeshTasksIndirectEXT(cmd, counters, (VkDeviceSize)VGA_MESH * 16, 1, 16);
         else vkCmdDrawIndirect(cmd, counters, (VkDeviceSize)VGA_DRAW_HW * 16, 1, 16);
-        p.a[0] = 0;
-        vkCmdPushConstants(cmd, r->pl, r->push_stages, 0, sizeof(p), &p);
     }
+    p.a[0] = 0;
+    vkCmdPushConstants(cmd, r->pl, r->push_stages, 0, sizeof(p), &p);
     vkCmdEndRendering(cmd);
     stamp(r, cmd, q, VGR_HW);
     if (r->serialize)

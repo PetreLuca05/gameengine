@@ -20,6 +20,13 @@ uint vg_test_bits(VgMesh m, VgMaterial mat) {
     return b;
 }
 
+// Which HW draw takes a cluster (VgRaster: pc.a[0] of the draw): 0 plain one-sided (back faces culled,
+// no per-pixel test), 1 two-sided material (no culling), 2 one-sided masked / dithered.
+uint vg_hw_kind(VgMesh m, VgMaterial mat) {
+    if ((mat.flags & VGM_TWO_SIDED) != 0u) return 1u;
+    return vg_test_bits(m, mat) != 0u ? 2u : 0u;
+}
+
 // The per-cluster inputs of the pixel test: bits, mask texture, cutoff, the instance's fade alpha
 // (vg_foliage_alpha), the UV scale of the material (as the lit body's texture lookup).
 struct VgMaskInfo { uint bits, tex; float cutoff, fade, tex_scale; vec2 tsz; };

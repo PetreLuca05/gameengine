@@ -21,6 +21,8 @@
 #include "vg_decode.glsl"
 #include "vg_raster.glsl"
 #if VG_SW_KIND != 0
+#extension GL_KHR_shader_subgroup_ballot : require
+#define VG_MASK_UNIFORM_TEX
 #include "vg_mask.glsl"
 #endif
 layout(local_size_x = 128) in;
@@ -101,6 +103,7 @@ void main() {
         two = (mat.flags & VGM_TWO_SIDED) != 0u;
 #if VG_SW_KIND == 1
         g_mi = vg_mask_info(x, m, mat);
+        g_mi.tex = subgroupBroadcastFirst(g_mi.tex);   // one cluster per workgroup: dynamically uniform
 #endif
     }
     uint t = gl_LocalInvocationID.x;
@@ -133,6 +136,7 @@ void main() {
 #if VG_SW_KIND == 2
     uvec3 tri = vg_impostor_tri(t);
     g_it = vg_impostor_tri_setup(x, m, t);
+    g_it.F.ta = subgroupBroadcastFirst(g_it.F.ta);   // one quad per workgroup: dynamically uniform
 #else
     uvec3 tri = vg_triangle(c, t);
 #endif

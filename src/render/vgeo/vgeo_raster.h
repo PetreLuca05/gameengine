@@ -24,7 +24,8 @@ typedef struct VgRaster {
     VkPipelineLayout pl;         // cull set layout + VgPush for every raster stage
     VkShaderStageFlags push_stages;
     VkPipeline p_args, p_sw, p_vert, p_mesh;
-    VkPipeline p_vert2, p_mesh2;   // the same without back-face culling: two-sided materials (a second draw)
+    VkPipeline p_vert2, p_mesh2;   // masked variant without back-face culling: two-sided materials (a second draw)
+    VkPipeline p_vert3, p_mesh3;   // masked variant with back-face culling: one-sided masked / dithered (a third draw)
     VkPipeline p_sw_masked, p_sw_imp;   // SW variants: masked / dithered clusters, impostor quads (vg_raster_sw.glsl)
     VgBuffer vis;                // u64[w * h]
     u32 w, h;

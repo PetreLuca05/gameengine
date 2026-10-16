@@ -13,7 +13,11 @@ bool vg_mask_pass(uint bits, uint tex, float cutoff, float fade, float lod, VgUv
     if ((bits & 1u) == 0u) return true;
     vec3 p = vec3((vec2(px) + 0.5) * V.viewport.zw * 2.0 - 1.0, 1.0);
     vec2 uv = vec2(dot(pl.u, p), dot(pl.v, p)) / dot(pl.d, p);
+#ifdef VG_MASK_UNIFORM_TEX
+    return textureLod(vg_tex[tex], uv, lod).a >= cutoff;   // tex is the same for the whole workgroup (one cluster)
+#else
     return textureLod(vg_tex[nonuniformEXT(tex)], uv, lod).a >= cutoff;
+#endif
 }
 
 // Perspective-correct barycentrics of NDC point pn on the triangle with clip positions c0 c1 c2.
@@ -53,7 +57,11 @@ bool vg_impostor_pass(VgImpostorTri it, ivec2 px) {
         vec2 t = vec2(dot(it.pl[k].u, p), dot(it.pl[k].v, p)) / dot(it.pl[k].d, p);
         if (any(lessThan(t, vec2(0.0))) || any(greaterThan(t, vec2(1.0)))) continue;
         vec2 uv = (it.F.fr[k] + clamp(t, vec2(it.F.hm), vec2(1.0 - it.F.hm))) / it.F.n;
+#ifdef VG_MASK_UNIFORM_TEX
+        a += textureLod(vg_tex[it.F.ta], uv, it.F.lod).a * it.F.w[k];
+#else
         a += textureLod(vg_tex[nonuniformEXT(it.F.ta)], uv, it.F.lod).a * it.F.w[k];
+#endif
     }
     return a >= 0.5;
 }
