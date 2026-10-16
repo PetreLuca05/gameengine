@@ -86,6 +86,9 @@ void vg_hiz_size(u32 w, u32 h, u32 *hw, u32 *hh, u32 *mips);
 // view, or from the visibility buffer (binding 18) when depth is VK_NULL_HANDLE. 6 levels per dispatch.
 void vg_hiz_record(VgCuller *c, VkCommandBuffer cmd, u32 frame, VkImageView depth, VkImageLayout depth_layout, const VkImageView *mips, u32 mip_count,
                    u32 w, u32 h);
+// The same from the nearer of the depth view and the visibility buffer per pixel (both given).
+void vg_hiz_record_merged(VgCuller *c, VkCommandBuffer cmd, u32 frame, VkImageView depth, VkImageLayout depth_layout, const VkImageView *mips,
+                          u32 mip_count, u32 w, u32 h);
 
 // The visibility buffer bound at binding 18 of every set (Phase 3 raster / resolve share the cull
 // layout and sets: vg_cull_set after vg_cull_record of the same frame / slot).

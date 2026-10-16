@@ -128,6 +128,7 @@ static struct {
     bool sqp_written[FRAMES_IN_FLIGHT];
     float shadow_ms[2];          // cull, draw
     bool raster_ok;              // the visibility buffer is filled this frame (resolve / lit draws)
+    bool pass2_pending;          // vkg_graph_cull added pass 1: vkg_graph_cull_pass2 adds the rest
     bool shadow_culled;          // this frame's cascade views were culled (vkg_record_shadow_cull)
     Cvar *r_vgeo, *error_px, *shadow_error_px, *sw_px, *occlusion, *freeze, *debug, *debug_spheres, *shadows;
 } G;
@@ -554,13 +555,14 @@ static void exec_raster1(VkCommandBuffer cmd, void *u) {
     G.raster_ok = true;
 }
 
-// This frame's Hi-Z from the pass 1 visibility buffer (pass 2 occlusion).
+// This frame's Hi-Z from the pass 1 visibility buffer and the static legacy occluders' depth
+// (render.c vgeo_occluders: walls count in pass 2 too), for pass 2 occlusion.
 static void exec_hiz_cur(VkCommandBuffer cmd, void *u) {
     (void)u;
     VkImageView mips[16];
     u32 n = DG_MIN(fg_mips(G.hiz_cur), 16u);
     for (u32 m = 0; m < n; m++) mips[m] = fg_mip_view(G.hiz_cur, m);
-    vg_hiz_record(&G.cull, cmd, R->frame_slot, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_UNDEFINED, mips, n, R->hdr.w, R->hdr.h);
+    vg_hiz_record_merged(&G.cull, cmd, R->frame_slot, fg_view(G.depth), VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL, mips, n, R->hdr.w, R->hdr.h);
 }
 
 // Pass 2: pass 1's occluders against this frame's Hi-Z, rasterised into the same buffer.
@@ -586,6 +588,7 @@ void vkg_graph_cull(int depth_res) {
     G.hiz = G.hiz_cur = FG_NONE;
     G.depth = depth_res;
     G.raster_ok = false;
+    G.pass2_pending = false;
     if (!active()) return;
     u32 hw, hh, hm;
     vg_hiz_size(R->hdr.w, R->hdr.h, &hw, &hh, &hm);
@@ -600,8 +603,19 @@ void vkg_graph_cull(int depth_res) {
     fg_read(p, G.hiz, FG_SAMPLED);
     if (G.hiz_cur != FG_NONE) fg_read(p, G.hiz_cur, FG_SAMPLED);   // bound now, written below
     p = fg_pass("vgeo_raster", exec_raster1, NULL);
+    G.pass2_pending = true;
+}
+
+bool vkg_wants_occluders(void) { return active() && G.hiz_cur != FG_NONE && G.pass2_pending; }
+
+// After render.c's vgeo_occluders pass (static legacy depth in depth_res): this frame's Hi-Z, pass 2.
+void vkg_graph_cull_pass2(int depth_res) {
+    if (!G.pass2_pending) return;
+    G.pass2_pending = false;
+    int p;
     if (G.hiz_cur != FG_NONE) {
         p = fg_pass("vgeo_hiz_cur", exec_hiz_cur, NULL);
+        fg_read(p, depth_res, FG_SAMPLED);
         fg_write(p, G.hiz_cur, FG_STORAGE);
     }
     p = fg_pass("vgeo_pass2", exec_pass2, NULL);

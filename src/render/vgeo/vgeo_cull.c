@@ -448,8 +448,21 @@ void vg_hiz_size(u32 w, u32 h, u32 *hw, u32 *hh, u32 *mips) {
     *mips = m;
 }
 
+static void hiz_record(VgCuller *c, VkCommandBuffer cmd, u32 frame, VkImageView depth, VkImageLayout depth_layout, const VkImageView *mips, u32 mip_count,
+                       u32 w, u32 h, bool merged);
+
 void vg_hiz_record(VgCuller *c, VkCommandBuffer cmd, u32 frame, VkImageView depth, VkImageLayout depth_layout, const VkImageView *mips, u32 mip_count,
                    u32 w, u32 h) {
+    hiz_record(c, cmd, frame, depth, depth_layout, mips, mip_count, w, h, false);
+}
+
+void vg_hiz_record_merged(VgCuller *c, VkCommandBuffer cmd, u32 frame, VkImageView depth, VkImageLayout depth_layout, const VkImageView *mips,
+                          u32 mip_count, u32 w, u32 h) {
+    hiz_record(c, cmd, frame, depth, depth_layout, mips, mip_count, w, h, depth != VK_NULL_HANDLE);
+}
+
+static void hiz_record(VgCuller *c, VkCommandBuffer cmd, u32 frame, VkImageView depth, VkImageLayout depth_layout, const VkImageView *mips, u32 mip_count,
+                       u32 w, u32 h, bool merged) {
     if (!c->ok || !mip_count) return;
     if (mip_count > 16) mip_count = 16;
     u32 hw, hh, full;
@@ -483,7 +496,7 @@ void vg_hiz_record(VgCuller *c, VkCommandBuffer cmd, u32 frame, VkImageView dept
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, c->hiz_pl, 0, 1, &set, 0, NULL);
         u32 bw = hw >> base ? hw >> base : 1, bh = hh >> base ? hh >> base : 1;
         struct { u32 base, levels, src, pad; u32 src_w, src_h; u32 base_w, base_h; } pc = {
-            base, mip_count - base < 6 ? mip_count - base : 6, depth ? 0u : 1u, 0, base ? bw * 2 : w, base ? bh * 2 : h, bw, bh };
+            base, mip_count - base < 6 ? mip_count - base : 6, merged ? 2u : depth ? 0u : 1u, 0, base ? bw * 2 : w, base ? bh * 2 : h, bw, bh };
         if (base) {   // the previous level is power-of-two sized (clamped to 1)
             pc.src_w = hw >> (base - 1) ? hw >> (base - 1) : 1;
             pc.src_h = hh >> (base - 1) ? hh >> (base - 1) : 1;
