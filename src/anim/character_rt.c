@@ -166,6 +166,7 @@ void charrt_proc_input(const CharRuntime *r, ProcInput *in, Xform root, float dt
     in->skel = &r->lib->skel;
     in->params = &r->lib->proc;
     in->hands = &r->lib->hands;
+    in->handposes = &r->lib->handposes;
     in->root = root;
     in->dt = dt;
     in->body_yaw = r->in.body_yaw;

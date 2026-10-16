@@ -16,6 +16,7 @@
 #define DG_PROCEDURAL_H
 
 #include "anim.h"
+#include "handpose.h"
 #include "player/holdpoint.h"
 
 struct cJSON;
@@ -53,6 +54,11 @@ typedef struct ItemSockets {
     float length;              // item length (wall collision cast)
     bool has_left;
     HoldPointOverride hp;      // per item hold point override ("holdpoint" block)
+    // Hand poses (docs/HANDPOSE.md): the entry per hand (dg_hash_str of its id, 0 = the style
+    // only) and, for a socket defined in another space (an attachment grip), that space in item space.
+    u32 pose_id[2];
+    bool has_pose_space[2];
+    Xform pose_space[2];
 } ItemSockets;
 
 typedef struct DamagePreset {
@@ -107,11 +113,30 @@ float proc_grip_l_slide_max(const ItemSockets *k);
 typedef struct HandFrames {
     Xform palm[2];             // [0] left, [1] right: hand bone local -> palm frame
     vec3 curl_axis[2];         // finger curl axis in the palm frame
+    float thumb_side[2];       // sign of the thumb along the palm frame's x (finger spread direction)
 } HandFrames;
 void proc_hand_frames(const Skeleton *s, HandFrames *out);
 // Curls one hand's fingers (side 0 left, 1 right) by curl[5] degrees (thumb..pinky), scaled by weight.
 // Fingers never move the wrist. Model transforms of the finger chains are updated.
 void proc_curl_fingers(const Skeleton *s, Pose *pose, Xform *model, int side, const float *curl, const HandFrames *hf, float weight);
+
+// One hand's resolved hand pose on the held item (item space socket incl. the wrist offset, pole
+// hint, IK weight, fingers), inertialized when the entry / state / data changes.
+typedef struct HandHold {
+    bool init;
+    u32 key;                   // entry, base, state, data revision
+    float t, dur;              // blend since the last change (t >= dur: settled)
+    Xform sock;                // item space palm target (socket * wrist)
+    vec3 pole;
+    float ikw;
+    HandFingers j;
+    // decaying offsets captured at the change (current - new target)
+    vec3 off_t;
+    quat off_r;
+    vec3 off_pole;
+    float off_ikw;
+    HandFingers off_j;
+} HandHold;
 
 // Per-character procedural state (render side).
 typedef struct FootState {
@@ -159,6 +184,8 @@ typedef struct ProcState {
     // rotation (eases in on pairing, back to the mouse aim on disconnect) and the last rotation.
     float phone_w;
     quat phone_rot;
+    // Hand poses on the held item this evaluation ([0] left, [1] right; valid with has_item).
+    HandHold hand[2];
 } ProcState;
 
 // World raycast for foot IK and muzzle pull-back (local physics world, static geometry).
@@ -209,6 +236,12 @@ typedef struct ProcInput {
     quat phone_rot;
     vec3 seat_hip;
     vec3 seat_feet[2];
+    // Hand poses (docs/HANDPOSE.md). NULL = the hold styles' finger curls (the old tables).
+    const HandPoseDB *handposes;
+    bool no_fingers;           // editor / contact solver: leave the fingers at the clip pose
+    // World anchors (vehicle controls): the entry + state per hand, its socket an offset from the anchor.
+    u32 anchor_pose[2], anchor_pose_base[2];
+    u8 anchor_pose_state[2];
 } ProcInput;
 
 // Body yaw (simulation, host-owned, predicted locally): faces the aim while moving; while

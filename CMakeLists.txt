@@ -255,7 +255,7 @@ add_test(NAME recoil COMMAND test_recoil)
 # Engine-free subset: anim core + FBX import + cache (+ log / platform helpers).
 set(DG_ANIMCORE_SOURCES
   src/anim/anim.c src/anim/skeleton.c src/anim/retarget.c src/anim/anim_mesh.c src/anim/controller.c src/anim/procedural.c src/anim/turn.c src/anim/spine.c
-  src/anim/weapon_hold.c src/anim/damage_additive.c src/anim/foot_ik.c src/anim/anim_net.c src/anim/ragdoll_def.c
+  src/anim/weapon_hold.c src/anim/handpose.c src/editor/handpose/hp_discover.c src/anim/damage_additive.c src/anim/foot_ik.c src/anim/anim_net.c src/anim/ragdoll_def.c
   src/anim/anim_library.c src/anim/character_rt.c src/gameplay/hitboxes.c src/gameplay/items.c src/gameplay/attachments.c src/gameplay/recoil.c src/core/spring.c
   src/world/time_of_day.c src/world/weather.c src/gameplay/vehicle_def.c src/vfx/vfx_curve.c src/vfx/vfx_library.c src/vfx/vfx_sim.c src/vfx/vfx_flesh.c src/vfx/vfx_atlas.c src/player/holdpoint.c src/player/camera_fp_math.c src/gameplay/phone/phone_orient.c
   src/assets/fbx_loader.c src/assets/anim_cache.c src/assets/character.c src/render/skeletal_mesh.c
@@ -334,6 +334,11 @@ foreach(tool bake_skeleton bake_mesh split_parts retarget)
   target_link_libraries(${tool} PRIVATE dg_animcore)
 endforeach()
 
+# Hand poses (docs/HANDPOSE.md): unreviewed / auto-placed / orphaned entries, optional stub creation.
+add_executable(handpose_report tools/handpose_report/handpose_report.c)
+set_target_properties(handpose_report PROPERTIES C_STANDARD 11)
+target_link_libraries(handpose_report PRIVATE dg_animcore)
+
 add_executable(validate_rig tools/validate_rig/validate_rig.c)
 set_target_properties(validate_rig PROPERTIES C_STANDARD 11)
 target_link_libraries(validate_rig PRIVATE dg_animcore)
@@ -404,6 +409,13 @@ add_executable(test_anim tests/test_anim.c)
 set_target_properties(test_anim PROPERTIES C_STANDARD 11)
 target_link_libraries(test_anim PRIVATE dg_animcore)
 add_test(NAME anim COMMAND test_anim WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+
+# Hand poses (docs/HANDPOSE.md): defaults vs the old curl tables, inheritance, round trip, mirror,
+# limits, contact solver, glue with tweaked poses, discovery / auto-registration, editor == gameplay.
+add_executable(test_handpose tests/test_handpose.c)
+set_target_properties(test_handpose PROPERTIES C_STANDARD 11)
+target_link_libraries(test_handpose PRIVATE dg_animcore)
+add_test(NAME handpose COMMAND test_handpose WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
 
 # Ragdolls with real Jolt physics: joint limits over 10 s drops, rest / freeze.
 add_executable(test_ragdoll tests/test_ragdoll.c src/physics/physics.c src/physics/ragdoll.c)

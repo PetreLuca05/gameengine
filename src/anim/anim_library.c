@@ -9,7 +9,7 @@
 #include <stdlib.h>
 
 static const char *k_cat_names[AC_CATEGORY_COUNT] = { "skeleton", "clips", "controller", "hold_styles", "anim_sets", "hitboxes", "ragdoll",
-                                                      "characters" };
+                                                      "characters", "hand_poses" };
 const char *asset_category_name(int c) { return (c >= 0 && c < AC_CATEGORY_COUNT) ? k_cat_names[c] : "?"; }
 
 u32 anim_manifest_combined(const AnimManifest *m) { return anim_hash(m->hash, sizeof(m->hash), ANIM_HASH_SEED); }
@@ -503,6 +503,7 @@ bool anim_lib_load(AnimLibrary *lib, float rate) {
     apply_clip_meta(lib);
     load_controller(lib);
     proc_hand_frames(&lib->skel, &lib->hands);
+    anim_lib_reload_handposes(lib);
     load_sets(lib);
     // Canonical mesh first: its fitted radii shape the ragdoll and the hitboxes.
     int canon_mesh = anim_lib_load_mesh(lib, rig);
@@ -529,7 +530,17 @@ bool anim_lib_load(AnimLibrary *lib, float rate) {
     return true;
 }
 
+bool anim_lib_reload_handposes(AnimLibrary *lib) {
+    handpose_db_clear(&lib->handposes);
+    int files = handpose_db_load_dir(&lib->handposes, HANDPOSE_DIR);
+    handpose_add_style_defaults(&lib->handposes, &lib->proc);
+    lib->manifest.hash[AC_HAND_POSES] = lib->handposes.hash;
+    log_info("anim: %d hand pose files, %d entries (%08x)", files, lib->handposes.count, lib->handposes.hash);
+    return true;
+}
+
 void anim_lib_free(AnimLibrary *lib) {
+    handpose_db_free(&lib->handposes);
     for (int i = 0; i < lib->clip_count; i++) clip_free(&lib->clips[i]);
     for (int i = 0; i < lib->mesh_count; i++) skm_free(&lib->meshes[i]);
     lib->clip_count = lib->mesh_count = 0;
@@ -539,6 +550,8 @@ void anim_lib_free(AnimLibrary *lib) {
 bool anim_lib_reload_meta(AnimLibrary *lib) {
     apply_clip_meta(lib);
     bool ok = load_controller(lib);
+    handpose_add_style_defaults(&lib->handposes, &lib->proc);   // generated styles follow controller.json
+    lib->manifest.hash[AC_HAND_POSES] = lib->handposes.hash;
     load_sets(lib);
     for (int i = 0; i < lib->char_count; i++) {
         int s = anim_lib_find_set(lib, lib->chars[i].anim_set);

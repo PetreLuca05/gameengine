@@ -365,6 +365,12 @@ static bool seat_hands(World *w, int slot, vec3 pos[2], quat rot[2], bool use[2]
     return true;
 }
 
+static const char *seat_vehicle(World *w, int slot) {
+    int seat;
+    Vehicle *v = veh_of_slot(w, slot, &seat);
+    return v ? vdef(v)->name : NULL;
+}
+
 static bool vehicle_xform(World *w, int slot, Xform *out) {
     int seat;
     Vehicle *v = veh_of_slot(w, slot, &seat);
@@ -2492,6 +2498,7 @@ void vehicles_register(void) {
     g_vehicle_pose.holstered = holstered;
     g_vehicle_pose.vehicle_xform = vehicle_xform;
     g_vehicle_pose.vehicle_body = hook_ignore;
+    g_vehicle_pose.seat_vehicle = seat_vehicle;
     WeaponVehicleHooks h = { hook_can_shoot, hook_spread, hook_ignore, hook_ray_tires, hook_tire_hit, hook_use_item };
     weapons_set_vehicle_hooks(&h);
     entities_set_interact_def(ET_VEHICLE, &k_vehicle_def);

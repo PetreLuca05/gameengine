@@ -37,6 +37,7 @@ typedef struct CharSkinDef {
 
 typedef enum AssetCategory {
     AC_SKELETON, AC_CLIPS, AC_CONTROLLER, AC_HOLD_STYLES, AC_ANIM_SETS, AC_HITBOXES, AC_RAGDOLL, AC_CHARACTERS,
+    AC_HAND_POSES,             // assets/handposes (docs/HANDPOSE.md)
     AC_CATEGORY_COUNT
 } AssetCategory;
 
@@ -55,6 +56,7 @@ typedef struct AnimLibrary {
     ControllerDef ctrl;
     ProcParams proc;
     HandFrames hands;
+    HandPoseDB handposes;            // assets/handposes + generated style defaults (docs/HANDPOSE.md)
     AnimBinding sets[LIB_MAX_SETS];
     int set_count;
     RagdollDef ragdoll;
@@ -79,6 +81,8 @@ bool anim_lib_reload_meta(AnimLibrary *lib);     // anim sets, clips.json, contr
 bool anim_lib_rebake(AnimLibrary *lib);          // changed FBX files (cache by hash)
 bool anim_lib_reload_characters(AnimLibrary *lib);
 bool anim_lib_reload_hitboxes(AnimLibrary *lib);
+// Re-reads assets/handposes (entries discovered in memory are dropped: run discovery after).
+bool anim_lib_reload_handposes(AnimLibrary *lib);
 
 int anim_lib_find_set(const AnimLibrary *lib, const char *name);
 int anim_lib_find_clip(const AnimLibrary *lib, const char *name);

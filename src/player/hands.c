@@ -11,6 +11,7 @@
 #include "gameplay/weapons.h"
 #include "gameplay/characters.h"
 #include "gameplay/entities.h"
+#include "editor/handpose/hp_system.h"
 #include "cJSON.h"
 #include <stdlib.h>
 #include <math.h>
@@ -33,7 +34,7 @@ typedef struct HandClip {
     int key_count;
 } HandClip;
 
-typedef struct HandPose { vec3 pos[2]; quat rot[2]; u8 grip[2]; } HandPose;
+typedef struct HandClipPose { vec3 pos[2]; quat rot[2]; u8 grip[2]; } HandClipPose;
 
 typedef enum InteractPhase { IA_NONE, IA_REACH, IA_HOLD, IA_RETURN } InteractPhase;
 
@@ -54,6 +55,8 @@ typedef struct HandsSystem {
     vec3 ov_pos[2];
     quat ov_rot[2];
     u8 ov_grip[2];
+    u32 ov_pose[2];           // hand pose entry + state of the override (docs/HANDPOSE.md)
+    u8 ov_state[2];
 
     // interaction animation
     InteractPhase ia_phase;
@@ -155,8 +158,8 @@ static int find_clip(const char *name) {
 static quat euler_deg(vec3 e) { return quat_euler(e.y * DG_DEG2RAD, e.x * DG_DEG2RAD, e.z * DG_DEG2RAD); }
 
 // Samples a clip at normalized time u (0..1) into a camera-space pose.
-static HandPose sample_clip(int ci, float u) {
-    HandPose p;
+static HandClipPose sample_clip(int ci, float u) {
+    HandClipPose p;
     memset(&p, 0, sizeof(p));
     if (ci < 0 || ci >= H->clip_count || H->clips[ci].key_count == 0) {
         p.pos[0] = v3(-0.2f, -0.28f, -0.38f);
@@ -181,8 +184,8 @@ static HandPose sample_clip(int ci, float u) {
     return p;
 }
 
-static HandPose pose_lerp(const HandPose *a, const HandPose *b, float t) {
-    HandPose p;
+static HandClipPose pose_lerp(const HandClipPose *a, const HandClipPose *b, float t) {
+    HandClipPose p;
     for (int h = 0; h < 2; h++) {
         p.pos[h] = v3_lerp(a->pos[h], b->pos[h], t);
         p.rot[h] = quat_nlerp(a->rot[h], b->rot[h], t);
@@ -325,10 +328,10 @@ void hands_update(const HandsInput *in) {
         else H->clip_t = fminf(H->clip_t, dur);
     }
     H->fade = fminf(1.0f, H->fade + dt / 0.15f);
-    HandPose pose = sample_clip(H->clip, H->clip_t / dur);
+    HandClipPose pose = sample_clip(H->clip, H->clip_t / dur);
     if (H->fade < 1.0f && H->prev_clip >= 0) {
         float pd = fmaxf(0.01f, H->clips[H->prev_clip].duration);
-        HandPose prev = sample_clip(H->prev_clip, fminf(1.0f, H->prev_clip_t / pd));
+        HandClipPose prev = sample_clip(H->prev_clip, fminf(1.0f, H->prev_clip_t / pd));
         pose = pose_lerp(&prev, &pose, smoothstepf(0, 1, H->fade));
     }
 
@@ -385,6 +388,8 @@ void hands_update(const HandsInput *in) {
             // Palm down on the ledge, fingers pointing over the edge.
             H->ov_rot[h] = quat_mul(quat_yaw(in->yaw), quat_axis_angle(v3(1, 0, 0), -0.25f));
             H->ov_grip[h] = GRIP_PALM;
+            H->ov_pose[h] = 0;
+            H->ov_state[h] = HPS_DEFAULT;
         }
     }
 
@@ -393,6 +398,7 @@ void hands_update(const HandsInput *in) {
         vec3 sp[2];
         quat sr[2];
         bool use[2];
+        const char *vname = g_vehicle_pose.seat_vehicle ? g_vehicle_pose.seat_vehicle(w, in->player) : NULL;
         if (g_vehicle_pose.seat_hands(w, in->player, sp, sr, use))
             for (int h = 0; h < 2; h++) {
                 if (!use[h]) continue;
@@ -400,6 +406,8 @@ void hands_update(const HandsInput *in) {
                 H->ov_pos[h] = sp[h];
                 H->ov_rot[h] = sr[h];
                 H->ov_grip[h] = GRIP_GRAB;
+                H->ov_pose[h] = vname ? handpose_entry_hash(HPC_VEHICLE, vname) : 0;
+                H->ov_state[h] = use[0] && use[1] ? HPS_DRIVE : HPS_DRIVE_ONEHAND;
                 if (h == HAND_LEFT) weapon_two_handed = false;
             }
     }
@@ -408,7 +416,7 @@ void hands_update(const HandsInput *in) {
     if (in->use_pressed && ent_valid(w, in->focus) && H->ia_phase == IA_NONE) {
         int fi = (int)ENT_INDEX(in->focus);
         const InteractDef *def = w->inter[fi].def;
-        if (def && def->hand_target) {
+        if (handpose_interact_has_target(def)) {
             H->ia_phase = IA_REACH;
             H->ia_target = in->focus;
             H->ia_t = 0;
@@ -451,7 +459,7 @@ void hands_update(const HandsInput *in) {
             if (!uses_hand) continue;
             vec3 tp;
             quat tr;
-            if (valid && def->hand_target(w, H->ia_target, in->player, h, &tp, &tr)) {
+            if (valid && handpose_interact_target(w, H->ia_target, in->player, h, &tp, &tr)) {
                 H->ia_last_pos[h] = tp;
                 H->ia_last_rot[h] = tr;
             }
@@ -461,6 +469,8 @@ void hands_update(const HandsInput *in) {
                 H->ov_pos[h] = H->ia_last_pos[h];
                 H->ov_rot[h] = H->ia_last_rot[h];
                 H->ov_grip[h] = H->ia_mode == HANDS_POINT ? GRIP_POINT : GRIP_GRAB;
+                H->ov_pose[h] = def ? handpose_entry_hash(HPC_INTERACT, def->name) : 0;
+                H->ov_state[h] = def && def->hold_time > 0 ? HPS_HOLD : HPS_USE;
             }
             // A one-handed interaction releases the weapon support grip.
             if (h == free_hand && weapon_two_handed && wgt > 0) weapon_two_handed = false;
@@ -508,6 +518,8 @@ void hands_update(const HandsInput *in) {
             t->palm[h] = hand;
             t->ov_palm[h] = xf_make(H->ov_pos[h], H->ov_rot[h]);
             t->ov_w[h] = smoothstepf(0, 1, H->ov_w[h]);
+            t->ov_pose[h] = H->ov_pose[h];
+            t->ov_state[h] = H->ov_state[h];
             t->grip[h] = H->chain[h].grip;
             Xform sock;
             bool use = false;
@@ -729,7 +741,7 @@ void hands_render_remote(World *w, int slot, vec3 eye, float yaw, float pitch) {
     const char *name = "idle";
     if (wd) name = wd->kind == WPN_MELEE ? "melee" : (!strcmp(wd->pose, "rifle") ? "rifle" : "pistol");
     if (w->flags[ent_i] & EF_HANG) name = "hang";
-    HandPose pose = sample_clip(find_clip(name), 0);
+    HandClipPose pose = sample_clip(find_clip(name), 0);
     ArmChain c[2];
     vec3 tp[2];
     quat tr[2];

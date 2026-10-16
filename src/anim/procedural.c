@@ -273,6 +273,7 @@ void proc_hand_frames(const Skeleton *s, HandFrames *out) {
     for (int h = 0; h < 2; h++) {
         out->palm[h] = xf_identity();
         out->curl_axis[h] = v3(-1, 0, 0);
+        out->thumb_side[h] = 1.0f;
         if (hands[h] < 0) continue;
         Xform hb = s->bind_model[hands[h]];
         vec3 tip = mids[h] >= 0 ? s->bind_model[mids[h]].t : xf_point(hb, v3(0, 0.1f, 0));
@@ -287,6 +288,12 @@ void proc_hand_frames(const Skeleton *s, HandFrames *out) {
         palm.t = v3_sub(v3_madd(hb.t, f, len * 0.45f), v3_scale(b, 0.012f));
         palm.s = v3(1, 1, 1);
         out->palm[h] = xf_mul(xf_inverse(hb), palm);
+        int th = s->role[h ? BR_R_THUMB1 : BR_L_THUMB1];
+        out->thumb_side[h] = 1.0f;
+        if (th >= 0 && mids[h] >= 0) {
+            vec3 d = quat_rotate(quat_conj(palm.r), v3_sub(s->bind_model[th].t, s->bind_model[mids[h]].t));
+            out->thumb_side[h] = d.x >= 0 ? 1.0f : -1.0f;
+        }
     }
 }
 
