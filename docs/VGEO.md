@@ -20,9 +20,9 @@ Simplification and clustering use meshoptimizer v0.22 (`simplifier.cpp`, `cluste
 |---|---|
 | 1. Offline builder + DAG (CPU) | **done** |
 | 2. GPU culling / LOD selection / Hi-Z | **done** |
-| 3. Visibility buffer raster + resolve | rasterisers **done** (resolve, shadows: —) |
+| 3. Visibility buffer raster + resolve | **done** |
 | 4. Streaming | — |
-| 5. Integration, `r_era`, test scene, `bench_vgeo` | — |
+| 5. Integration, `r_era`, test scene, `bench_vgeo` | **done** (collision for vgeo placements: —) |
 | 6. Skinned | — |
 | 7. Foliage support | — |
 
@@ -198,10 +198,13 @@ pass 2
 
 ### Occlusion Hi-Z
 
-- MAX (farthest) R32F pyramid, depth 0 = near, at **half resolution**: mip 0 is the max of each 2×2 depth
-  block, each next mip the 2×2 max of the previous one. The last row / column of a mip also folds in the odd
-  tail, so texture mip `j` bounds every depth pixel of its 2^(j+1) footprint. `vg_hiz_record`: one 8×8 dispatch
-  per mip.
+- MAX (farthest) R32F pyramid, depth 0 = near, at **half resolution, power-of-two sized** (`vg_hiz_size`): mip 0
+  is the max of each 2×2 depth block, each next mip the 2×2 max of the previous one, so texel `x` of mip `j`
+  covers depth pixels `[x << (j+1), (x+1) << (j+1))` exactly; pixels off the screen count as 0 (never occlude).
+- `vg_hiz_record` writes 6 levels per dispatch (SPD-style: one 16×16 workgroup per 32×32 tile of the first
+  level, the rest through shared memory), so a 1080p chain is 2 dispatches; level 0 from the depth buffer uses
+  `textureGather`. The source is a depth view or the visibility buffer (depth = 1 - its high 32 bits; empty =
+  far) for this frame's pass 2 Hi-Z. 1080p: 0.055 ms per build (budget 0.1 ms for two: slightly over).
 - Test (`vg_occluded_vp`): the sphere's box corners are projected; a corner behind the camera plane or at
   depth ≤ 0 means visible. The screen rect (depth pixels) is grown by 1 px for TAA jitter (the matrices are the
   unjittered ones). The mip is chosen so the rect covers ≤ 2×2 texels; occluded when the nearest corner is behind
@@ -221,27 +224,81 @@ pass 2
 
 ### In the renderer (`src/render/vk_vgeo.c`)
 
-- Frame graph: `vgeo_cull` before the prepass (main view, slot 0, reads the `vgeo_hiz` history), `vgeo_hiz` after
-  the prepass (MAX Hi-Z of this frame's prepass depth, `FG_SIZE_HALF`, full chain; next frame's history). The
-  prepass depth holds the legacy geometry only: vgeo is not rasterised until Phase 3.
-- **One pass only until Phase 3:** pass 2 needs this frame's Hi-Z from the visibility buffer. `r_vgeo_occlusion
-  2` behaves as 1 until then.
-- Active when `r_vgeo` is on and the scene has instances.
-- Cvars:
-  - `r_vgeo` (1).
-  - `r_vgeo_error_px` (1.0).
-  - `r_vgeo_shadow_error_px` (2.0, Phase 3).
-  - `r_vgeo_sw_px` (32).
-  - `r_vgeo_occlusion` (0 off, 1 last frame's Hi-Z, 2 two-pass; default 2).
-  - `r_vgeo_freeze` (keeps the last view constants).
-  - `r_vgeo_debug` (registered; the views come with Phase 3).
-  - `r_vgeo_debug_spheres`: culling spheres of up to 4096 HW (green) + 4096 SW (cyan) visible clusters, read
-    back one frame slot later.
-- Commands:
-  - `vgeo_stats`: scene, last frame's counters, `vgeo_*` pass ms.
-  - `vgeo_test_scene [count=20000] [spacing=6] [meshes=4]`: procedural rocks scattered around the camera.
-  - `vgeo_clear`: removes every instance.
-- Registering `Model.vgeo` meshes and level / chunk placements comes with Phase 5.
+Per frame, main view (slot 0), all before the legacy prepass:
+
+```
+vgeo_cull      pass 1 cull against last frame's Hi-Z (vgeo_hiz history)    vg_cull_record_pass1
+vgeo_raster    clear the visibility buffer, rasterise pass 1                  vg_raster_record(pass 1)
+vgeo_hiz_cur   this frame's Hi-Z from the visibility buffer (r_vgeo_occlusion 2)
+vgeo_pass2     re-cull pass 1's occluders against it, rasterise them          vg_cull_record_pass2 + raster(pass 2)
+prepass        vgeo depth / G-buffer export first (vgeo_gbuffer.frag), then the legacy draws on top
+vgeo_hiz       next frame's history: MAX Hi-Z of the prepass depth (vgeo + legacy occluders)
+opaque         legacy forward lighting, then the vgeo lit resolve (vgeo_lit.frag, depth EQUAL)
+```
+
+- Rasterised with this frame's **jittered** projection (`VgViewGpu.raster_view_proj`, as the legacy prepass),
+  culled and velocities with the unjittered ones.
+- Sun shadow cascades: before the shadow pass, each cascade is a vgeo view (slots 1-3: `VGV_ORTHO`, frustum +
+  LOD only, `r_vgeo_shadow_error_px`, every cluster HW) culled with `vg_cull_record`; a 1-thread kernel writes
+  the draw args and `vgeo_shadow.vert` (vertex pulling, depth only) draws the cascade's HW list into its atlas
+  tile right after the legacy shadow draws. Point / spot light shadows (docs/LIGHT_SHADOWS.md) do not include
+  vgeo yet.
+- Active when `r_vgeo` is on and the scene has instances. Cvars: `r_vgeo` (1), `r_vgeo_error_px` (1.0),
+  `r_vgeo_shadow_error_px` (2.0), `r_vgeo_sw_px` (32), `r_vgeo_occlusion` (0 off, 1 last frame's Hi-Z, 2 two-pass;
+  default 2), `r_vgeo_freeze`, `r_vgeo_shadows` (1), `r_vgeo_debug_spheres`, `r_vgeo_lod_px` (fallback),
+  `r_foliage_density` (Phase 7), `r_era`.
+- Commands: `vgeo_stats`, `vgeo_test_scene [count] [spacing] [meshes]` (procedural rocks around the camera),
+  `vgeo_clear`, `vgeo_bench [frames=600] [csv]`.
+
+### Resolve and lighting (`shaders/vgeo_gbuffer.frag`, `vgeo_lit.frag`, `vgeo/vg_resolve.glsl`)
+
+- Both are full-screen triangles (`vgeo_fullscreen.vert`) that decode the pixel's visibility entry: visible list
+  entry → instance + cluster → triangle → its 3 vertices (`vg_decode.glsl`), transformed and projected with
+  `raster_view_proj`; perspective-correct barycentrics of the pixel centre interpolate world position, normal,
+  uv and colour. Depth is the visibility buffer's own (`gl_FragDepth = 1 - hi`), so the export, the Hi-Z and the
+  lit pass agree to the bit.
+- The **G-buffer export** runs the shared `gbuffer_body.glsl` and the **lit resolve** the shared `lit_body.glsl`
+  (`GB_CUSTOM_INPUTS` / `LIT_CUSTOM_INPUTS`: the includer supplies the varyings), so every lighting feature
+  (cascaded + local light shadows, sky SH / environment, SSR / GTAO / SSGI, weather, fog, grids) applies to vgeo
+  pixels unchanged. The lit pass tests depth EQUAL: pixels a legacy draw covered keep their forward shading.
+- Material: `VgMesh.material_base` + the cluster's material indexes the material table (binding 19): colour,
+  roughness, metallic, emissive, flags. Textures are not bound yet (bindless table with Phase 5 glTF content:
+  `MAT_TEXTURED` is masked off).
+- Velocity: current / previous unjittered view-projection of the reconstructed position (static instances).
+- The vgeo pipelines use the renderer's sets 0-2 and push range (compatible with `layout_lit`) plus the vgeo
+  set as set 3 (`VG_SET 3`, `VG_NO_PUSH`).
+
+### Levels, test scene and eras
+
+- Level entity `"vgeo"` (`src/world/level.c`, render only, no collision yet): `mesh` (a `.vgeo` file or a model
+  name with `"vgeo": true`), `pos`, `yaw`, `scale`, `scale_jitter`, `grid: [nx, nz]`, `spacing`, `color`,
+  `roughness`, `seed`. The game hands the placements to `render_vgeo_set_level` after the level loads.
+- `map vgeo_test` (`data/levels/vgeo_test.json`): the 10M-triangle rock field (north), 1024 instances of the
+  500k-triangle statue (south), the 2M-triangle building (east: four 16 × 8 m continuous walls with a bevelled
+  brick relief, `vgeo_gen_building`). The content is generated at build time by `build_vgeo --gen` into
+  `bin/assets/vgeo/` (only when missing; never committed). File sizes: rock field 575 MB, building 109 MB, statue
+  28 MB — most of it the discrete LODs stored as f32 vertices (Phase 4 streaming loads pages on demand).
+- `r_era` (0 modern, 1 2020, 2 2015, 3 2010, 4 custom) sets `r_vgeo`, `r_vgeo_error_px`, `r_vgeo_shadow_error_px`,
+  `r_vgeo_lod_px` and `r_foliage_density` (1.0 / 0.7 / 0.4 / 0.2); any other combination reads back as Custom.
+- **2015 / 2010 fallback** (`r_vgeo 0`): each mesh's exported discrete LODs are uploaded as legacy meshes on
+  first use and drawn through the legacy draw list; the CPU picks per instance the coarsest LOD whose projected
+  error is under `r_vgeo_lod_px` (4 px 2015, 12 px 2010; 2010 never draws LOD 0). This per-instance CPU work
+  exists only in the fallback.
+- `vgeo_bench [frames] [csv]`: a fixed Catmull-Rom flythrough of `vgeo_test` (camera override in
+  `render_set_camera`), CSV of every frame-graph pass's GPU ms + visible clusters / triangles, and a summary.
+
+### Phase 3 / 5 results in game (RTX 3060 Ti, 1600×900 window)
+
+- `map vgeo_test`, `vgeo_bench 600` (frames 10+, GPU ms per pass): vgeo_cull 0.220, vgeo_raster 0.114,
+  vgeo_hiz_cur 0.038, vgeo_pass2 0.149, vgeo_hiz 0.036; worst frame vgeo + prepass + opaque 1.83 ms; CPU 4.1 ms per
+  frame. 1026 instances, 2599 pages resident (325 MB).
+- devroom `vgeo_test_scene 400 8 2`, validation on: 0 messages; the rocks are lit, shadowed (sun + local
+  lights) and composite with the legacy scene (`docs` screenshots in the session log).
+- vgeo vs legacy (`tools/tests/vgeo_legacy_diff.sh`): the same rock scene through vgeo and through the
+  fallback at LOD 0 detail: 0.95 % of the pixels differ by more than 24 / 255 (gate 1 %).
+- Not yet tested as specified: depth export vs raster depth and velocity vs a CPU reference are exact by
+  construction (the export writes the visibility buffer's depth; velocity uses the legacy prepass matrices) but
+  have no automated readback test.
 
 ### Tests (`ctest -R vgeo_gpu`, runs `--validation`)
 

@@ -330,6 +330,20 @@ Two rasterisers write the same 64-bit value with `atomicMax`:
 - Headless devroom render with 0 validation messages, plus a screenshot diff of vgeo against the same meshes on
   the legacy path (≤ 1% pixels over threshold).
 
+*As built (Phase 3 / 5):*
+- **No `vg_albedo` target:** the lit resolve decodes the pixel's triangle and evaluates the material again
+  (`vgeo_lit.frag` = the shared `lit_body.glsl` on decoded inputs) instead of reading an albedo written by the
+  G-buffer export. One fewer target; the decode runs twice.
+- The export and the lit resolve are draws **inside** the existing `prepass` and `opaque` passes (before the
+  legacy draws / depth EQUAL), not separate frame-graph passes.
+- **No per-material tile classification** yet: one uber resolve (materials are parameters; textures not bound).
+- **Shadows:** every shadow cluster is HW (no SW `atomicMin` path into the atlas); `vgeo_shadow.vert` reads the
+  shared (writable) set, so the game enables `vertexPipelineStoresAndAtomics`.
+- Hi-Z: power-of-two half resolution, 6 levels per dispatch (see VGEO.md "Occlusion Hi-Z"); this frame's Hi-Z
+  for pass 2 is built from the visibility buffer only (legacy occluders enter through next frame's history).
+- Phase 5: placements are render-only (no collision); the 2015 / 2010 fallback picks discrete LODs on the CPU;
+  the bench writes per-pass ms from the frame graph (`vgeo_bench`), not a separate executable.
+
 ## 5. Phase 4: streaming
 
 - Page requests are appended in `vg_traverse` / `vg_cull_clusters` and read back `FRAMES_IN_FLIGHT` frames later.
