@@ -7,6 +7,7 @@
 #include "render/debug_draw.h"
 #include "gameplay/entities.h"
 #include "FastNoiseLite.h"
+#include <SDL3/SDL.h>
 #include <stdlib.h>
 #include <string.h>
 #include <math.h>
@@ -38,10 +39,21 @@ typedef struct ChunkStreamer ChunkStreamer;
 
 typedef struct ChunkJob { ChunkStreamer *s; int index; ChunkCoord c; } ChunkJob;
 
+#define FAR_LODS 2
+#define FAR_MAX_TILES 1024
+
+typedef struct FarTile { MeshId lod[FAR_LODS]; int cx0, cz0; } FarTile;   // first chunk of the tile
+
 struct ChunkStreamer {
     World *w;
     ChunkProviderKind kind;
     ChunkProvider provider;
+    // bounded maps: far tiles and a direct chunk lookup (index + 1, 0 = none)
+    FarTile *far;
+    int far_n;                    // tiles per side
+    int chunk_n;                  // chunks per side
+    int chunk_origin;             // chunk coordinate of the min corner
+    short *lookup;
     WorldGen gen;
     fnl_state noise_base, noise_ridge, noise_detail;
     Chunk chunks[MAX_CHUNKS];
@@ -252,6 +264,7 @@ static void finalize_chunk(ChunkStreamer *s, Chunk *ch) {
     memcpy(ch->heights, d->heights, sizeof(float) * CHUNK_SAMPLES * CHUNK_SAMPLES);
     BodyDesc bd;
     memset(&bd, 0, sizeof(bd));
+    if (s->provider.static_collision) goto foliage;
     bd.shape.kind = SHAPE_HEIGHTFIELD;
     bd.shape.heights = ch->heights;
     bd.shape.sample_count = CHUNK_SAMPLES;
@@ -262,6 +275,7 @@ static void finalize_chunk(ChunkStreamer *s, Chunk *ch) {
     bd.layer = PL_STATIC;
     bd.friction = 0.9f;
     ch->body = phys_add_body(s->w->phys, &bd);
+foliage:
     // foliage placements + trunk capsules
     ch->foliage_handle = -1;
     if (ch->foliage) {
@@ -279,7 +293,13 @@ static void finalize_chunk(ChunkStreamer *s, Chunk *ch) {
     ch->state = CS_LOADED;
 }
 
+static int lookup_index(const ChunkStreamer *s, int cx, int cz);
+
 static void release_chunk(ChunkStreamer *s, Chunk *ch) {
+    if (s->lookup && ch->state != CS_FREE) {
+        int li = lookup_index(s, ch->c.x, ch->c.z);
+        if (li >= 0) s->lookup[li] = 0;
+    }
     for (int l = 0; l < LOD_COUNT; l++) render_mesh_destroy(ch->lod[l]);
     if (ch->body != PHYS_INVALID_BODY) phys_remove_body(s->w->phys, ch->body);
     if (ch->state == CS_LOADED && ch->foliage_handle >= 0) render_foliage_chunk_unload(ch->foliage_handle);
@@ -304,7 +324,8 @@ static void job_generate(void *user) {
     ChunkJob *j = (ChunkJob *)user;
     Chunk *ch = &j->s->chunks[j->index];
     j->s->provider.generate(j->s->provider.user, j->c, ch->data);
-    if (CG->foliage->i)   // the chunk's placements (thread-safe): 1.5 instances per m2 on the terrain
+    if (j->s->provider.foliage_chunk) ch->foliage = j->s->provider.foliage_chunk(j->s->provider.user, j->c.x, j->c.z, &ch->foliage_size);
+    else if (CG->foliage->i)   // the chunk's placements (thread-safe): 1.5 instances per m2 on the terrain
         ch->foliage = render_foliage_test_chunk(j->c.x, j->c.z, 1.5f, -1e9f, -1e9f, 1e9f, 1e9f, job_height, j->s, &ch->foliage_size);
 }
 
@@ -314,7 +335,17 @@ static void job_done(void *user) {
     if (ch->state == CS_LOADING && ch->c.x == j->c.x && ch->c.z == j->c.z) ch->state = CS_READY;
 }
 
+static int lookup_index(const ChunkStreamer *s, int cx, int cz) {
+    int x = cx - s->chunk_origin, z = cz - s->chunk_origin;
+    if (x < 0 || z < 0 || x >= s->chunk_n || z >= s->chunk_n) return -1;
+    return z * s->chunk_n + x;
+}
+
 static Chunk *find_chunk(ChunkStreamer *s, int cx, int cz) {
+    if (s->lookup) {
+        int li = lookup_index(s, cx, cz);
+        return li >= 0 && s->lookup[li] ? &s->chunks[s->lookup[li] - 1] : NULL;
+    }
     for (int i = 0; i < MAX_CHUNKS; i++)
         if (s->chunks[i].state != CS_FREE && s->chunks[i].c.x == cx && s->chunks[i].c.z == cz) return &s->chunks[i];
     return NULL;
@@ -326,16 +357,19 @@ static Chunk *request_chunk(ChunkStreamer *s, int cx, int cz, bool sync) {
     int idx = -1;
     for (int i = 0; i < MAX_CHUNKS; i++) if (s->chunks[i].state == CS_FREE) { idx = i; break; }
     if (idx < 0) return NULL;
+    if (s->lookup && lookup_index(s, cx, cz) < 0) return NULL;   // outside the bounded map
     ch = &s->chunks[idx];
     memset(ch, 0, sizeof(*ch));
     ch->body = PHYS_INVALID_BODY;
     ch->c.x = cx;
     ch->c.z = cz;
+    if (s->lookup) s->lookup[lookup_index(s, cx, cz)] = (short)(idx + 1);
     ch->needed_at = s->time;
     ch->data = (ChunkData *)calloc(1, sizeof(ChunkData));
     if (sync) {
         s->provider.generate(s->provider.user, ch->c, ch->data);
-        if (CG->foliage->i) ch->foliage = render_foliage_test_chunk(cx, cz, 1.5f, -1e9f, -1e9f, 1e9f, 1e9f, job_height, s, &ch->foliage_size);
+        if (s->provider.foliage_chunk) ch->foliage = s->provider.foliage_chunk(s->provider.user, cx, cz, &ch->foliage_size);
+        else if (CG->foliage->i) ch->foliage = render_foliage_test_chunk(cx, cz, 1.5f, -1e9f, -1e9f, 1e9f, 1e9f, job_height, s, &ch->foliage_size);
         finalize_chunk(s, ch);
         return ch;
     }
@@ -429,6 +463,10 @@ void chunks_destroy(World *w) {
     jobs_wait(&s->counter);
     jobs_pump_completions(0);
     for (int i = 0; i < MAX_CHUNKS; i++) if (s->chunks[i].state != CS_FREE) release_chunk(s, &s->chunks[i]);
+    for (int t = 0; s->far && t < s->far_n * s->far_n; t++)
+        for (int l = 0; l < FAR_LODS; l++) render_mesh_destroy(s->far[t].lod[l]);
+    free(s->far);
+    free(s->lookup);
     free(s);
     w->chunks = NULL;
     w->streaming = false;
@@ -444,6 +482,20 @@ void chunks_update(World *w, float dt) {
         Player *pl = &w->players[p];
         if (!pl->active) continue;
         vec3 pos = pl->sim.move.pos;
+        if (s->far) {
+            // bounded maps stream whole far tiles (a far tile is drawn until all its chunks are in)
+            float rr = ((float)r + 0.5f) * CHUNK_SIZE;
+            int t0x = (int)floorf((pos.x - rr) / CHUNK_FAR_TILE), t1x = (int)floorf((pos.x + rr) / CHUNK_FAR_TILE);
+            int t0z = (int)floorf((pos.z - rr) / CHUNK_FAR_TILE), t1z = (int)floorf((pos.z + rr) / CHUNK_FAR_TILE);
+            int per = (int)(CHUNK_FAR_TILE / CHUNK_SIZE);
+            for (int tz = t0z; tz <= t1z; tz++)
+                for (int tx = t0x; tx <= t1x; tx++) {
+                    float nx = clampf(pos.x, (float)tx * CHUNK_FAR_TILE, (float)(tx + 1) * CHUNK_FAR_TILE), nz = clampf(pos.z, (float)tz * CHUNK_FAR_TILE, (float)(tz + 1) * CHUNK_FAR_TILE);
+                    if ((nx - pos.x) * (nx - pos.x) + (nz - pos.z) * (nz - pos.z) > rr * rr) continue;
+                    for (int k = 0; k < per * per; k++) request_chunk(s, tx * per + k % per, tz * per + k / per, false);
+                }
+            continue;
+        }
         int cx = (int)floorf(pos.x / CHUNK_SIZE), cz = (int)floorf(pos.z / CHUNK_SIZE);
         // Request nearest-first so the area under the player streams in first.
         for (int ring = 0; ring <= r; ring++)
@@ -467,13 +519,131 @@ void chunks_update(World *w, float dt) {
     }
 }
 
+// A far tile is complete when all its chunks are loaded (then they draw instead of it).
+static bool far_complete(ChunkStreamer *s, const FarTile *t) {
+    int per = (int)(CHUNK_FAR_TILE / CHUNK_SIZE);
+    for (int k = 0; k < per * per; k++) {
+        Chunk *ch = find_chunk(s, t->cx0 + k % per, t->cz0 + k / per);
+        if (!ch || ch->state != CS_LOADED) return false;
+    }
+    return true;
+}
+
+static MeshId build_far_mesh(ChunkStreamer *s, float x0, float z0, float spacing) {
+    int n = (int)(CHUNK_FAR_TILE / spacing) + 1;
+    MeshBuilder mb;
+    mb_init(&mb);
+    float *h = (float *)malloc(sizeof(float) * (size_t)(n + 2) * (size_t)(n + 2));
+    u32 *col = (u32 *)malloc(sizeof(u32) * (size_t)n * (size_t)n);
+    for (int z = -1; z <= n; z++)
+        for (int x = -1; x <= n; x++) {
+            u32 c;
+            float hh;
+            s->provider.sample(s->provider.user, x0 + (float)x * spacing, z0 + (float)z * spacing, &hh, &c);
+            h[(z + 1) * (n + 2) + x + 1] = hh;
+            if (x >= 0 && z >= 0 && x < n && z < n) col[z * n + x] = c;
+        }
+    for (int z = 0; z < n; z++)
+        for (int x = 0; x < n; x++) {
+            float hc = h[(z + 1) * (n + 2) + x + 1];
+            float dx = (h[(z + 1) * (n + 2) + x + 2] - h[(z + 1) * (n + 2) + x]) / (2 * spacing);
+            float dz = (h[(z + 2) * (n + 2) + x + 1] - h[z * (n + 2) + x + 1]) / (2 * spacing);
+            mb_vertex(&mb, v3((float)x * spacing, hc, (float)z * spacing), v3_norm(v3(-dx, 1.0f, -dz)), v2((float)x * spacing, (float)z * spacing), col[z * n + x]);
+        }
+    for (int z = 0; z < n - 1; z++)
+        for (int x = 0; x < n - 1; x++) {
+            u32 a = (u32)(z * n + x), b = a + 1, c = a + (u32)n, e = c + 1;
+            mb_tri(&mb, a, c, b);
+            mb_tri(&mb, b, c, e);
+        }
+    // skirts (below the neighbouring surfaces at tile borders)
+    float drop = 2.0f + spacing;
+    for (int edge = 0; edge < 4; edge++)
+        for (int k = 0; k < n - 1; k++) {
+            int xa, za, xb, zb;
+            switch (edge) {
+            case 0: xa = k; za = 0; xb = k + 1; zb = 0; break;
+            case 1: xa = n - 1; za = k; xb = n - 1; zb = k + 1; break;
+            case 2: xa = k + 1; za = n - 1; xb = k; zb = n - 1; break;
+            default: xa = 0; za = k + 1; xb = 0; zb = k; break;
+            }
+            u32 ia = (u32)(za * n + xa), ib = (u32)(zb * n + xb);
+            Vertex va = mb.verts[ia], vb = mb.verts[ib];
+            u32 ja = mb_vertex(&mb, v3_add(va.pos, v3(0, -drop, 0)), va.normal, va.uv, va.color);
+            u32 jb = mb_vertex(&mb, v3_add(vb.pos, v3(0, -drop, 0)), vb.normal, vb.uv, vb.color);
+            mb_tri(&mb, ia, ja, ib);
+            mb_tri(&mb, ib, ja, jb);
+        }
+    MeshId id = mb_upload(&mb);
+    mb_free(&mb);
+    free(h);
+    free(col);
+    return id;
+}
+
+bool chunks_create_custom(World *w, const ChunkProvider *provider) {
+    ensure_globals();
+    ChunkStreamer *s = (ChunkStreamer *)calloc(1, sizeof(ChunkStreamer));
+    s->w = w;
+    s->kind = CHUNKS_NOISE;
+    s->provider = *provider;
+    for (int i = 0; i < MAX_CHUNKS; i++) s->chunks[i].body = PHYS_INVALID_BODY;
+    w->chunks = s;
+    w->streaming = true;
+    if (provider->bounds > 0) {
+        s->chunk_n = (int)ceilf(2.0f * provider->bounds / CHUNK_SIZE);
+        s->chunk_origin = (int)floorf(-provider->bounds / CHUNK_SIZE);
+        s->lookup = (short *)calloc((size_t)s->chunk_n * (size_t)s->chunk_n, sizeof(short));
+    }
+    if (provider->bounds > 0 && provider->sample) {
+        u64 t0 = SDL_GetTicksNS();
+        s->far_n = DG_MIN((int)ceilf(2.0f * provider->bounds / CHUNK_FAR_TILE), 32);
+        s->far = (FarTile *)calloc((size_t)s->far_n * (size_t)s->far_n, sizeof(FarTile));
+        int per = (int)(CHUNK_FAR_TILE / CHUNK_SIZE);
+        for (int tz = 0; tz < s->far_n; tz++)
+            for (int tx = 0; tx < s->far_n; tx++) {
+                FarTile *t = &s->far[tz * s->far_n + tx];
+                float x0 = -provider->bounds + (float)tx * CHUNK_FAR_TILE, z0 = -provider->bounds + (float)tz * CHUNK_FAR_TILE;
+                t->cx0 = s->chunk_origin + tx * per;
+                t->cz0 = s->chunk_origin + tz * per;
+                t->lod[0] = build_far_mesh(s, x0, z0, 4.0f);
+                t->lod[1] = build_far_mesh(s, x0, z0, 16.0f);
+            }
+        log_info("chunks: %s: %d far tiles in %.0f ms", provider->name, s->far_n * s->far_n, (double)(SDL_GetTicksNS() - t0) / 1e6);
+    }
+    return true;
+}
+
 void chunks_render(World *w, vec3 cam) {
     ChunkStreamer *s = w->chunks;
     if (!s) return;
     float lod_d = CG->lod_dist->f;
+    u32 grid = CG->grid->i && !s->provider.no_grid ? MAT_GRID : 0;
+    static u8 complete[FAR_MAX_TILES];
+    for (int t = 0; s->far && t < s->far_n * s->far_n; t++) {
+        FarTile *ft = &s->far[t];
+        complete[t] = far_complete(s, ft);
+        if (complete[t]) continue;
+        vec3 origin = v3((float)ft->cx0 * CHUNK_SIZE, 0, (float)ft->cz0 * CHUNK_SIZE);
+        vec3 center = v3_add(origin, v3(CHUNK_FAR_TILE * 0.5f, 0, CHUNK_FAR_TILE * 0.5f));
+        float d = v3_len(v3_flat(v3_sub(center, cam)));
+        DrawItem di;
+        memset(&di, 0, sizeof(di));
+        di.mesh = ft->lod[d < 700.0f ? 0 : 1];
+        di.model = mat4_translate(origin);
+        di.mat = material_color(v4(1, 1, 1, 1));
+        di.mat.roughness = 0.95f;
+        di.mat.flags = grid;
+        render_draw(&di);
+    }
     for (int i = 0; i < MAX_CHUNKS; i++) {
         Chunk *ch = &s->chunks[i];
         if (ch->state == CS_FREE) continue;
+        if (s->far) {   // inside an incomplete far tile: the tile draws
+            int per = (int)(CHUNK_FAR_TILE / CHUNK_SIZE);
+            int tx = (ch->c.x - s->chunk_origin) / per, tz = (ch->c.z - s->chunk_origin) / per;
+            if (tx >= 0 && tz >= 0 && tx < s->far_n && tz < s->far_n && !complete[tz * s->far_n + tx]) continue;
+        }
         vec3 origin = v3((float)ch->c.x * CHUNK_SIZE, 0, (float)ch->c.z * CHUNK_SIZE);
         if (CG->debug->i) {
             u32 col = ch->state == CS_LOADED ? DBG_GREEN : (ch->state == CS_READY ? DBG_CYAN : DBG_YELLOW);
@@ -491,7 +661,7 @@ void chunks_render(World *w, vec3 cam) {
         di.model = mat4_translate(origin);
         di.mat = material_color(v4(1, 1, 1, 1));
         di.mat.roughness = 0.95f;
-        di.mat.flags = CG->grid->i ? MAT_GRID : 0;
+        di.mat.flags = grid;
         render_draw(&di);
     }
 }
@@ -506,7 +676,7 @@ int chunks_loaded_count(const World *w) {
 }
 
 bool chunks_is_loaded(const World *w, vec3 pos) {
-    if (!w->chunks) return true;
+    if (!w->chunks || w->chunks->provider.static_collision) return true;   // static collision everywhere
     Chunk *ch = find_chunk(w->chunks, (int)floorf(pos.x / CHUNK_SIZE), (int)floorf(pos.z / CHUNK_SIZE));
     return ch && ch->state == CS_LOADED;
 }
