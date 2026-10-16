@@ -409,7 +409,23 @@ static void plan_farms(Plan *pl) {
     float px = jnum(pl->j, "parcel_x", 95), pz = jnum(pl->j, "parcel_z", 70);
     int nx = (int)(2 * h.x / px), nz = (int)(2 * h.y / pz);
     float x0 = c.x - (float)nx * px * 0.5f, z0 = c.y - (float)nz * pz * 0.5f;
-    for (int i = 1; i < nx; i++) road2(g, MGR_DIRT, 4.0f, v2(x0 + (float)i * px, z0 + 4), v2(x0 + (float)i * px, z0 + (float)nz * pz - 4), "field track");
+    // field tracks between the parcel columns, interrupted at the farmsteads (yards / buildings)
+    for (int i = 1; i < nx; i++) {
+        float x = x0 + (float)i * px;
+        int run0 = -1;
+        for (int j = 0; j <= nz; j++) {
+            bool blocked = j == nz;
+            for (int k = 0; k < ns && !blocked; k++) {
+                float zc = z0 + ((float)j + 0.5f) * pz;
+                if (fabsf(x - steads[k].x) < 50.0f && fabsf(zc - steads[k].y) < pz * 0.5f + 32.0f) blocked = true;
+            }
+            if (!blocked && run0 < 0) run0 = j;
+            if (blocked && run0 >= 0) {
+                road2(g, MGR_DIRT, 4.0f, v2(x, z0 + (float)run0 * pz + 4), v2(x, z0 + (float)j * pz - 4), "field track");
+                run0 = -1;
+            }
+        }
+    }
     int mats[3] = { MGM_FIELD, MGM_CROP, MGM_PLOWED };
     for (int i = 0; i < nx; i++)
         for (int j = 0; j < nz; j++) {
@@ -489,7 +505,7 @@ static void plan_port(Plan *pl) {
     vec2 c = poi->center, h = poi->half;
     float yaw = poi->yaw;
     float level = jnum(pl->j, "level", 3.0f);
-    add_pad(g, c, v2(2 * h.x, 2 * h.y), yaw, 10, MGM_CONCRETE, level, false);
+    add_pad(g, c, v2(2 * h.x, 2 * h.y), yaw, 30, MGM_CONCRETE, level, false);
 #define AT(lx, lz) v2_add(c, rot2(v2((lx) * h.x, (lz) * h.y), yaw))
     // quay wall on the sea side (local -Z) and piers out into the sea
     keep_lot(pl, add_lot(pl->p, LK_QUAY, pl->poi, AT(0, -1.0f), v2(2 * h.x, 3), yaw, 1, 0, 41, ""), 1);
@@ -571,7 +587,11 @@ static void plan_lake(Plan *pl) {
     add_lot(pl->p, LK_BOAT, pl->poi, v2_add(dock, rot2(v2(4, 18), dyaw)), v2(2.2f, 5), dyaw + 0.15f, 1, 0, 82, "fishing");
     add_lot(pl->p, LK_BOAT, pl->poi, v2_add(dock, rot2(v2(-14, -4), dyaw)), v2(2.2f, 5), dyaw + 2.0f, 1, MPL_DAMAGED, 83, "");
     vec2 cab = v2_add(dock, rot2(v2(-12, -22), dyaw));
-    add_pad(g, cab, v2(30, 24), dyaw, 12, -1, 0, true);
+    // the cabin pad sits above the lake's water (the auto level would average the shore slope)
+    float level = 12.0f;
+    for (int i = 0; i < g->feature_count; i++)
+        if (g->features[i].kind == MGF_LAKE && v2_len(v2_sub(g->features[i].pos, poi->center)) < 200.0f) level = g->features[i].level;
+    add_pad(g, cab, v2(30, 24), dyaw, 14, -1, level + 1.8f, false);
     keep_lot(pl, add_lot(pl->p, LK_CABIN, pl->poi, cab, v2(8, 6), dyaw + DG_PI, 1, MPL_ENTERABLE, 84, "fishing"), 1);
     keep_lot(pl, add_lot(pl->p, LK_SHED, pl->poi, v2_add(cab, rot2(v2(9, 2), dyaw)), v2(4, 3), dyaw + DG_PI, 1, MPL_ENTERABLE, 85, "fishing"), 1);
     vec2 camp = jv2(pl->j, "campsite", v2_add(dock, rot2(v2(40, -18), dyaw)));
@@ -586,7 +606,7 @@ static void plan_camp(Plan *pl) {
     MapGen *g = pl->g;
     vec2 c = poi->center;
     float yaw = poi->yaw;
-    add_pad(g, c, v2(110, 80), yaw, 26, MGM_DIRT, 0, true);
+    add_pad(g, c, v2(110, 80), yaw, jnum(pl->j, "pad_blend", 26), MGM_DIRT, 0, true);
 #define AT(lx, lz) v2_add(c, rot2(v2(lx, lz), yaw))
     add_lot(pl->p, LK_CAMPFIRE, pl->poi, AT(0, 0), v2(3, 3), 0, 1, 0, 91, "");
     for (int k = 0; k < 6; k++) {
@@ -601,7 +621,10 @@ static void plan_camp(Plan *pl) {
     vec2 tower = jv2(pl->j, "tower", v2_add(c, v2(-60, 80)));
     add_pad(g, tower, v2(26, 22), 0, 14, MGM_GRAVEL, 0, true);
     keep_lot(pl, add_lot(pl->p, LK_RADIO_TOWER, pl->poi, tower, v2(7, 7), 0, 34, 0, 107, ""), 1);
-    keep_lot(pl, add_lot(pl->p, LK_CABIN, pl->poi, v2_add(tower, v2(8, -6)), v2(5, 4), DG_PI, 1, MPL_ENTERABLE, 108, "rare"), 1);
+    // the radio hut next to the tower, on the side away from the access track
+    vec2 hut = v2_add(tower, v2(8, -6));
+    for (int k = 0; k < 8 && road_clear(g, hut, v2(7, 6), DG_PI) < 3.0f; k++) hut = v2_add(tower, rot2(v2(9, 0), (float)k * 0.785f));
+    keep_lot(pl, add_lot(pl->p, LK_CABIN, pl->poi, hut, v2(5, 4), DG_PI, 1, MPL_ENTERABLE, 108, "rare"), 1);
     poi->enterable = 7;
 }
 
@@ -2048,14 +2071,14 @@ static void build_markings(Kit *k) {
             float yaw = yaw_facing(v2_sub(b->p, a->p));
             float pitch = atanf((b->h - a->h) / fmaxf(len, 0.1f));
             float hm = mapgen_raster_height(k->r, m.x, m.y);
-            Frame f = frame(v3(m.x, hm + 0.035f, m.y), yaw);
+            Frame f = frame(v3(m.x, hm + 0.075f, m.y), yaw);
             kbox_r(k, &f, v3(0, 0, 0), v3(wid, 0.015f, len * 0.5f), quat_axis_angle(v3(1, 0, 0), -pitch), col, MPF_NO_SHADOW | MPF_DETAIL, "asphalt");
         }
         if (runway) {   // threshold bars at both ends
             for (int e = 0; e < 2; e++) {
                 const MgRoadSample *s = &g->rs[rd->first + (e ? rd->count - 8 : 7)];
                 float yaw = yaw_facing(s->dir);
-                Frame f = frame(v3(s->p.x, mapgen_raster_height(k->r, s->p.x, s->p.y) + 0.035f, s->p.y), yaw);
+                Frame f = frame(v3(s->p.x, mapgen_raster_height(k->r, s->p.x, s->p.y) + 0.07f, s->p.y), yaw);
                 for (int bar = -6; bar <= 6; bar++) if (bar) kbox(k, &f, v3((float)bar * 2.8f, 0, 0), v3(0.7f, 0.015f, 15.0f), C(0.8f, 0.8f, 0.78f), MPF_NO_SHADOW, "asphalt");
             }
         }
@@ -2167,7 +2190,7 @@ static void build_city_streets(Kit *k, const MpLot *l) {
                     vec2 dir = a ? v2(1, 0) : v2(0, 1);
                     for (int sgn = -1; sgn <= 1; sgn += 2) {
                         vec2 c = v2_add(s->p, v2_scale(dir, (float)sgn * (rd->width * 0.5f + 2.5f)));
-                        Frame cf = frame(v3(c.x, ground(k, c) + 0.035f, c.y), yaw_facing(dir));
+                        Frame cf = frame(v3(c.x, ground(k, c) + 0.075f, c.y), yaw_facing(dir));
                         for (int st = -3; st <= 3; st++) kbox(k, &cf, v3((float)st * 1.1f, 0, 0), v3(0.3f, 0.015f, 1.4f), C(0.75f, 0.75f, 0.72f), MPF_NO_SHADOW | MPF_DETAIL, "asphalt");
                     }
                 }

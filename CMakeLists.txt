@@ -339,6 +339,11 @@ endif()
 add_executable(mapgen_preview tools/mapgen_preview/mapgen_preview.c)
 set_target_properties(mapgen_preview PROPERTIES C_STANDARD 11)
 target_link_libraries(mapgen_preview PRIVATE dg_mapgen)
+add_executable(test_mapgen tests/test_mapgen.c)
+set_target_properties(test_mapgen PROPERTIES C_STANDARD 11)
+target_link_libraries(test_mapgen PRIVATE dg_mapgen)
+add_dependencies(test_mapgen dg_copy_data)
+add_test(NAME mapgen COMMAND test_mapgen WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
 
 # Character pipeline (docs/CHARACTERS.md): Skeleton / SkeletalMesh bakes, part splitting, retargeting.
 foreach(tool bake_skeleton bake_mesh split_parts retarget)

@@ -115,7 +115,7 @@ void mapgen_init(MapGen *g, u32 seed) {
     g->n_ridge.noise_type = FNL_NOISE_OPENSIMPLEX2;
     g->n_ridge.fractal_type = FNL_FRACTAL_FBM;
     g->n_ridge.octaves = 4;
-    g->n_ridge.frequency = 0.0065f;
+    g->n_ridge.frequency = 0.004f;
     g->n_detail = fnlCreateState();
     g->n_detail.seed = (int)seed + 202;
     g->n_detail.frequency = 0.06f;
@@ -410,7 +410,7 @@ static float height_pre(const MapGen *g, float x, float z, u8 *mat_out) {
             float d = ellipse_d(p, f->pos, f->size, f->yaw);
             if (d >= 1.0f) continue;
             float t = 1.0f - d, bump = t * t * (3.0f - 2.0f * t);
-            float shape = f->kind == MGF_MOUNTAIN ? lerpf(1.0f, 0.45f + 0.75f * ridge, f->param) : 1.0f;
+            float shape = f->kind == MGF_MOUNTAIN ? lerpf(1.0f, 0.6f + 0.55f * ridge, f->param) : 1.0f;
             h += f->height * bump * shape;
         } else if (f->kind == MGF_RIM) {
             float best = 0;
@@ -427,7 +427,7 @@ static float height_pre(const MapGen *g, float x, float z, u8 *mat_out) {
                 float rm = smoothstepf(f->range.x - 120.0f, f->range.x, along) * (1.0f - smoothstepf(f->range.y, f->range.y + 120.0f, along));
                 best = fmaxf(best, t * t * (3.0f - 2.0f * t) * rm);
             }
-            h += f->height * best * (0.7f + 0.45f * ridge);
+            h += f->height * best * (0.82f + 0.3f * ridge);
         }
     }
     // sea: beaches down to the floor
@@ -468,6 +468,11 @@ static float height_pre(const MapGen *g, float x, float z, u8 *mat_out) {
             mat = frac > 0.72f && u < kt ? MGM_ROCK : MGM_GRAVEL;
         }
     }
+    for (int k = 0; k < fn; k++) {   // forest floor under the woods (before pads)
+        const MgFeature *f = &g->features[fl ? fl[k] : k];
+        if (f->kind != MGF_FOREST || (mat != MGM_GRASS && mat != MGM_MEADOW)) continue;
+        if (ellipse_d(p, f->pos, f->size, f->yaw) + noise2(&g->n_shore, x + 3000.0f, z) * 0.25f < 0.85f) mat = MGM_FOREST;
+    }
     for (int k = 0; k < fn; k++) {
         const MgFeature *f = &g->features[fl ? fl[k] : k];
         if (f->kind != MGF_PAD) continue;
@@ -500,7 +505,8 @@ static bool road_query(const MapGen *g, float x, float z, float extra, RoadHit *
         float t, d = seg_dist(p, a->p, b->p, &t);
         float hw = rd->width * 0.5f;
         if (d > hw + rd->shoulder + extra) continue;
-        float w = d <= hw ? 2.0f - (float)rd->cls * 0.01f : 1.0f - smoothstepf(hw, hw + rd->shoulder, d);
+        // on the carriageway the higher class wins, then the nearest segment (its own profile)
+        float w = d <= hw ? 2.0f - (float)rd->cls * 0.01f - d * 0.001f : 1.0f - smoothstepf(hw, hw + rd->shoulder, d);
         if (w > best_w) {
             best_w = w;
             out->sample = i;
@@ -1003,7 +1009,7 @@ vec3 mapgen_material_color(int mat, float v, float slope) {
         { 0.33f, 0.31f, 0.16f },   // meadow (dry)
         { 0.13f, 0.12f, 0.07f },   // forest floor
         { 0.29f, 0.22f, 0.14f },   // dirt
-        { 0.34f, 0.33f, 0.31f },   // rock
+        { 0.25f, 0.24f, 0.22f },   // rock
         { 0.58f, 0.52f, 0.38f },   // sand
         { 0.38f, 0.36f, 0.33f },   // gravel
         { 0.10f, 0.10f, 0.11f },   // asphalt

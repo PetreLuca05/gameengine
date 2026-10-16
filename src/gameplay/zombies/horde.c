@@ -244,6 +244,12 @@ void horde_set_sense(float radius) {
     if (H) H->sense = radius;
 }
 
+int horde_aggro_count(void) {
+    int n = 0;
+    for (int s = 0; H && s < H->n; s++) n += H->active[s] && H->alive[s] && (H->sense <= 0 || H->aggro[s]);
+    return n;
+}
+
 void horde_despawn(World *w) {
     if (!H || !w) return;
     for (int s = 0; s < H->n; s++) {

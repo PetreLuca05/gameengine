@@ -277,6 +277,64 @@ static void emit_prim(GeoBuild *b, const MpPrim *p) {
     }
 }
 
+// Road surfaces: ribbons draped on the terrain (crisp edges where the 1 m vertex colours blur), a few
+// cm above it, per tile; asphalt with worn patches, dirt, runway concrete. Bridge decks cover the
+// water spans.
+static void build_road_ribbons(GeoBuild *b, const OpenWorld *o) {
+    const MapGen *g = &o->gen;
+    for (int r = 0; r < g->road_count; r++) {
+        const MgRoad *rd = &g->roads[r];
+        bool dirt = rd->cls == MGR_DIRT || rd->cls == MGR_TRAIL, runway = rd->cls == MGR_RUNWAY;
+        float lift = dirt ? 0.035f : (runway ? 0.045f : 0.05f);
+        float hw = rd->width * 0.5f;
+        MeshBuilder *mb = NULL;
+        int tile = -1;
+        u32 prev[3] = { 0, 0, 0 };
+        bool have_prev = false;
+        for (int i = 0; i < rd->count; i++) {
+            const MgRoadSample *s = &g->rs[rd->first + i];
+            if (s->bridge) { have_prev = false; continue; }
+            int t = tile_of(b, v3(s->p.x, 0, s->p.y));
+            if (t != tile) {   // a new tile: restart the strip there (duplicating the joint row)
+                tile = t;
+                mb = geo_bucket(b, t, V_MARK);
+                if (have_prev && i > 0) {
+                    const MgRoadSample *q = &g->rs[rd->first + i - 1];
+                    vec2 qn = v2(q->dir.y, -q->dir.x);
+                    for (int k = 0; k < 3; k++) {
+                        float off = (float)(k - 1) * hw;
+                        vec2 p = v2_add(q->p, v2_scale(qn, off));
+                        prev[k] = mb_vertex(mb, v3(p.x, mapgen_raster_height(&o->raster, p.x, p.y) + lift, p.y), v3(0, 1, 0), v2(p.x, p.y), 0);
+                    }
+                }
+            }
+            vec2 nrm = v2(s->dir.y, -s->dir.x);
+            u32 cur[3];
+            for (int k = 0; k < 3; k++) {
+                float off = (float)(k - 1) * hw;
+                vec2 p = v2_add(s->p, v2_scale(nrm, off));
+                float v = vnoise(p.x * 0.17f, p.y * 0.17f) * 0.7f + vnoise(p.x * 0.9f, p.y * 0.9f) * 0.3f;
+                vec3 c;
+                if (dirt) c = v3_scale(v3(0.31f, 0.245f, 0.165f), 0.85f + 0.3f * v);
+                else if (runway) c = v3_scale(v3(0.31f, 0.31f, 0.29f), 0.85f + 0.25f * v);
+                else c = v3_scale(v3(0.075f, 0.075f, 0.08f), 0.8f + 0.5f * v + (v > 0.72f ? 0.6f : 0.0f));   // worn / patched spots
+                cur[k] = mb_vertex(mb, v3(p.x, mapgen_raster_height(&o->raster, p.x, p.y) + lift, p.y), v3(0, 1, 0), v2(p.x, p.y), rgba8(c.x, c.y, c.z, 1));
+            }
+            // fix the colour of a joint row created above (it was written black)
+            if (have_prev && mb->verts[prev[0]].color == 0)
+                for (int k = 0; k < 3; k++) mb->verts[prev[k]].color = mb->verts[cur[k]].color;
+            if (have_prev)
+                for (int k = 0; k < 2; k++) {
+                    mb_tri(mb, prev[k], cur[k], cur[k + 1]);
+                    mb_tri(mb, prev[k], cur[k + 1], prev[k + 1]);
+                }
+            memcpy(prev, cur, sizeof(prev));
+            have_prev = true;
+            b->tris += 4;
+        }
+    }
+}
+
 static void add_body(World *w, BodyDesc *d) {
     LevelStatic *ls = &w->level;
     if (ls->body_count >= MAX_STATIC_BODIES) { log_warn("openworld: too many static bodies"); return; }
@@ -315,6 +373,7 @@ static void build_geometry(World *w, OpenWorld *o) {
     b.gmap = (int *)calloc((size_t)tiles * V_COUNT, sizeof(int));
     b.cmap = (int *)calloc((size_t)tiles * SURF_COUNT, sizeof(int));
     for (int i = 0; i < o->pois.prim_count; i++) emit_prim(&b, &o->pois.prims[i]);
+    build_road_ribbons(&b, o);
     int draws0 = w->level.draw_count;
     for (int i = 0; i < b.gn; i++) {
         GeoBucket *g = &b.g[i];
@@ -764,8 +823,10 @@ static void cmd_ow_stats(int argc, const char **argv) {
     if (!o) { log_info("ow_stats: not an open-world map"); return; }
     int zombies = 0;
     ENT_FOREACH(w, i) if (w->type[i] == ET_ZOMBIE) zombies++;
-    log_info("openworld: %d zombies (spawned %d, culled %d), %d chunks loaded, %d static draws, %d bodies, %d foliage chunks", zombies, o->spawned, o->despawned,
-             chunks_loaded_count(w), w->level.draw_count, w->level.body_count, o->fol_loaded);
+    int aggro = horde_aggro_count();
+    log_info("openworld: %d zombies (%d chasing; spawned %d, culled %d), %d chunks loaded, %d static draws, %d bodies, %d foliage chunks (%d trees), frame %.2f ms",
+             zombies, aggro, o->spawned, o->despawned, chunks_loaded_count(w), w->level.draw_count, w->level.body_count, o->fol_loaded, o->tree_instances,
+             g_engine.fps_smoothed > 0 ? 1000.0 / g_engine.fps_smoothed : 0.0);
 }
 
 static void cmd_ow_where(int argc, const char **argv) {

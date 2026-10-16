@@ -18,13 +18,14 @@
       ]
     },
     "features": [
-      {"type": "rim", "edges": "W", "height": 150, "width": 170, "range": [-1200, 380]},
-      {"type": "rim", "edges": "N", "height": 115, "width": 150, "range": [-1200, 1200]},
-      {"type": "rim", "edges": "E", "height": 55, "width": 120, "range": [-1200, -190]},
+      {"type": "rim", "edges": "W", "height": 125, "width": 230, "range": [-1200, 380]},
+      {"type": "rim", "edges": "N", "height": 105, "width": 210, "range": [-1200, 1200]},
+      {"type": "rim", "edges": "E", "height": 50, "width": 150, "range": [-1200, -190]},
       {"type": "hill", "pos": [-985, 690], "radius": [130, 240], "height": 34},
-      {"type": "mountain", "pos": [-820, -820], "radius": [390, 340], "height": 190, "ridge": 0.8},
-      {"type": "mountain", "pos": [-500, -830], "radius": [240, 170], "height": 85, "ridge": 0.7},
-      {"type": "mountain", "pos": [260, -900], "radius": [260, 140], "height": 55, "ridge": 0.6},
+      {"type": "mountain", "pos": [-840, -840], "radius": [430, 380], "height": 170, "ridge": 0.55},
+      {"type": "mountain", "pos": [-500, -830], "radius": [240, 170], "height": 75, "ridge": 0.5},
+      {"type": "mountain", "pos": [260, -900], "radius": [260, 140], "height": 50, "ridge": 0.45},
+      {"type": "hill", "pos": [620, 690], "radius": [300, 200], "height": -10},
       {"type": "hill", "pos": [-260, 330], "radius": [180, 140], "height": 12},
       {"type": "hill", "pos": [-700, 800], "radius": [270, 230], "height": 24},
       {"type": "lake", "pos": [-100, -600], "radius": [175, 112], "yaw": -8, "level": 12.5, "depth": 7, "shore_noise": 26},
@@ -44,7 +45,7 @@
     ],
     "roads": [
       {"class": "main", "name": "Route 1 (city - farms)", "points": [[228, -50], [300, -52], [380, -36], [460, -14], [530, -6]]},
-      {"class": "main", "name": "Route 2 (city - factory)", "points": [[150, -288], [230, -352], [330, -440], [430, -520], [500, -575], [528, -600]]},
+      {"class": "main", "name": "Route 2 (city - factory)", "points": [[150, -288], [230, -352], [330, -440], [410, -530], [440, -600]]},
       {"class": "main", "name": "Route 3 (farms - port)", "points": [[612, 212], [618, 330], [628, 450], [622, 572]]},
       {"class": "main", "name": "Route 4 (farms - factory)", "points": [[648, -226], [664, -390], [650, -540]]},
       {"class": "secondary", "name": "Suburb road", "points": [[-228, -130], [-300, -138], [-372, -124]]},
@@ -64,7 +65,7 @@
   "pois": [
     {"id": "city", "name": "Main City", "kind": "city", "pos": [0, -100], "size": [460, 380], "loot": "household", "ambience": "urban", "zombies": {"density": 6.0, "max": 26, "indoor": 0.45}},
     {"id": "suburbs", "name": "Suburbs", "kind": "suburbs", "pos": [-550, -100], "size": [330, 340], "streets": 4, "loot": "household", "ambience": "residential", "zombies": {"density": 2.0, "max": 10, "indoor": 0.4}},
-    {"id": "camp", "name": "Mountain Camp", "kind": "camp", "pos": [-700, -640], "size": [150, 120], "tower": [-765, -735], "loot": "camping", "ambience": "mountain", "zombies": {"density": 1.2, "max": 6, "indoor": 0.3}},
+    {"id": "camp", "name": "Mountain Camp", "kind": "camp", "pos": [-700, -640], "size": [150, 120], "pad_blend": 75, "tower": [-765, -735], "loot": "camping", "ambience": "mountain", "zombies": {"density": 1.2, "max": 6, "indoor": 0.3}},
     {"id": "lake", "name": "Lake", "kind": "lake", "pos": [-100, -600], "size": [420, 300], "dock": [-62, -500], "dock_yaw": 180, "campsite": [-14, -474], "loot": "fishing", "ambience": "lake", "zombies": {"density": 0.8, "max": 5, "indoor": 0.2}},
     {"id": "factory", "name": "Factory", "kind": "factory", "pos": [600, -650], "size": [300, 220], "gate": [450, -600], "loot": "industrial", "ambience": "industrial", "zombies": {"density": 4.5, "max": 20, "indoor": 0.55}},
     {"id": "farms", "name": "Farms", "kind": "farms", "pos": [600, 0], "size": [460, 440], "farmsteads": [[530, -62], [700, 120], [720, -150]], "loot": "farm", "ambience": "rural", "zombies": {"density": 1.5, "max": 10, "indoor": 0.5}},
