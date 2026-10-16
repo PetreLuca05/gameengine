@@ -148,6 +148,7 @@ typedef struct FrameData {
     vec4 wx2;             // wind x, z, wind strength, puddle mask valid
     vec4 wx3;             // occlusion centre x, z, half extent, top y
     vec4 wx4;             // occlusion depth range (m), precipitation quality, unused, unused
+    vec4 wx5;             // foliage wind: gust factor, gust phase, time (s), wind direction angle (rad, atan2(x, -z))
     vec4 puddle_xf;       // origin x, z, 1 / size x, 1 / size z
     GpuPointLight lights[MAX_POINT_LIGHTS];
     // Local light shadows (vk_light_shadow.c): world -> atlas tile per cube face / spot.
@@ -384,7 +385,9 @@ u32 render_draw_shadow_casters(VkCommandBuffer cmd, FrameResources *f, vec4 sphe
 // vk_vgeo.c: virtualized geometry in the frame (docs/VGEO.md)
 void vkg_init(void);
 void vkg_shutdown(void);
-void vkg_graph_cull(int depth_res);    // frame graph, before the prepass: culling against last frame's Hi-Z
+void vkg_graph_cull(int depth_res);    // frame graph, before the prepass: culling against last frame's Hi-Z, raster pass 1
+bool vkg_wants_occluders(void);        // render.c adds vgeo_occluders (static legacy depth) between the two
+void vkg_graph_cull_pass2(int depth_res);   // this frame's Hi-Z (vgeo + static occluders), pass 2 cull + raster
 void vkg_graph_hiz(int depth_res, int velocity_res);     // frame graph, after the prepass: this frame's Hi-Z (next frame's history)
 void vkg_record_shadow_cull(VkCommandBuffer cmd);   // before the shadow pass: cascade views
 void vkg_draw_shadow(VkCommandBuffer cmd, u32 cascade);   // inside the shadow pass, per cascade tile

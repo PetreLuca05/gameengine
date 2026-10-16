@@ -1,8 +1,12 @@
 // build_vgeo: offline virtualized-geometry build (docs/VGEO.md "Builder").
 //
-//   build_vgeo <mesh.gltf> [--out file.vgeo] [--stats] [--threads N]
-//   build_vgeo --gen rock|field|statue|torus|building|creature [--tris N] [--seed S] [--out file.vgeo] [--stats] [--threads N]
+//   build_vgeo <mesh.gltf> [--out file.vgeo] [--stats] [--threads N] [--impostor [size] [grid]]
+//   build_vgeo --gen rock|field|statue|torus|building|creature|tuft|bush [--tris N] [--seed S] [--out file.vgeo] [--stats] [--threads N]
+//              [--impostor [size] [grid]]
 //
+// --impostor bakes the hemi-octahedral impostor atlas (grid x grid frames in a size^2 atlas, default
+// 1024 / 8) into the file on the CPU (vgeo_impostor.h): glTF and plain generated meshes in white,
+// the foliage generators (tuft, bush) with their materials and alpha masks.
 // Prints the build report (levels, clusters, triangles, error ranges, pages, ms per stage) with
 // --stats, plus wall time and the process peak memory. Generated meshes are never committed: tests and
 // the build produce them with this tool.
@@ -10,6 +14,8 @@
 #include "render/vgeo/vgeo_import.h"
 #include "render/vgeo/vgeo_procgen.h"
 #include "render/vgeo/vgeo_procgen_skinned.h"
+#include "render/vgeo/vgeo_procgen_foliage.h"
+#include "render/vgeo/vgeo_impostor.h"
 #include "core/engine.h"
 #include "core/platform.h"
 #include <SDL3/SDL.h>
@@ -45,9 +51,15 @@ int main(int argc, char **argv) {
     bool stats = false;
     int threads = 0;
     u64 tris = 0;
-    u32 seed = 1;
+    u32 seed = 1, imp_size = 0, imp_grid = 0;
+    bool impostor = false;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--out") && i + 1 < argc) out = argv[++i];
+        else if (!strcmp(argv[i], "--impostor")) {
+            impostor = true;
+            if (i + 1 < argc && argv[i + 1][0] != '-') imp_size = (u32)atoi(argv[++i]);
+            if (i + 1 < argc && argv[i + 1][0] != '-') imp_grid = (u32)atoi(argv[++i]);
+        }
         else if (!strcmp(argv[i], "--stats")) stats = true;
         else if (!strcmp(argv[i], "--threads") && i + 1 < argc) threads = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--gen") && i + 1 < argc) gen = argv[++i];
@@ -57,7 +69,8 @@ int main(int argc, char **argv) {
         else { fprintf(stderr, "unknown option %s\n", argv[i]); return 2; }
     }
     if (!in && !gen) {
-        fprintf(stderr, "usage: build_vgeo <mesh.gltf> | --gen rock|field|statue|torus|building|creature [--tris N] [--seed S] [--out f] [--stats] [--threads N]\n");
+        fprintf(stderr, "usage: build_vgeo <mesh.gltf> | --gen rock|field|statue|torus|building|creature|tuft|bush [--tris N] [--seed S] [--out f] [--stats] [--threads N] "
+                        "[--impostor [size] [grid]]\n");
         return 2;
     }
     VgBuildOptions opt;
@@ -68,7 +81,17 @@ int main(int argc, char **argv) {
     double t0 = (double)SDL_GetPerformanceCounter() / (double)SDL_GetPerformanceFrequency();
     bool ok;
     u32 key = 0;
-    if (gen) {
+    int foliage = gen && !strcmp(gen, "tuft") ? VG_FOLIAGE_TUFT : gen && !strcmp(gen, "bush") ? VG_FOLIAGE_BUSH : -1;
+    if (foliage >= 0) {
+        VgFoliageMesh fm;
+        vgeo_gen_foliage(&fm, foliage, seed);
+        VgSource src;
+        vgeo_foliage_source(&fm, &src);
+        printf("generated %s: %u triangles, %u vertices, %u materials\n", gen, fm.index_count / 3, fm.vertex_count, fm.material_count);
+        ok = vgeo_build(&src, &opt, &b, err, sizeof(err));
+        key = vgeo_fnv1a(gen, strlen(gen), seed);
+        vgeo_foliage_mesh_free(&fm);
+    } else if (gen) {
         VgGenMesh m;
         memset(&m, 0, sizeof(m));
         float c[3] = { 0, 0, 0 };
@@ -113,6 +136,31 @@ int main(int argc, char **argv) {
     }
     double t1 = (double)SDL_GetPerformanceCounter() / (double)SDL_GetPerformanceFrequency();
     if (!ok) { fprintf(stderr, "build failed: %s\n", err); return 1; }
+    if (impostor) {
+        VgImpostorOptions io;
+        memset(&io, 0, sizeof(io));
+        io.size = imp_size;
+        io.grid = imp_grid;
+        VgImpostorMaterial im[2];
+        u8 *masks[2] = { NULL, NULL };
+        const u32 msize = 256;
+        if (foliage >= 0) {
+            for (u32 k = 0; k < 2; k++) {
+                masks[k] = (u8 *)malloc(msize * msize * 4);
+                if (!vgeo_gen_foliage_mask(masks[k], msize, foliage, k, seed)) { free(masks[k]); masks[k] = NULL; }
+            }
+            vgeo_foliage_impostor_materials(foliage, (const u8 *const *)masks, msize, im);
+            io.materials = im;
+            io.material_count = 2;
+        }
+        double i0 = (double)SDL_GetPerformanceCounter() / (double)SDL_GetPerformanceFrequency();
+        if (!vgeo_impostor_bake(&b, &io)) { fprintf(stderr, "impostor bake failed (size must be a multiple of grid)\n"); return 1; }
+        const VgImpostorHeader *ih = vgeo_impostor(&b, NULL, NULL);
+        printf("impostor: %u x %u frames in a %u px atlas in %.2f s\n", ih->grid, ih->grid, ih->size,
+               (double)SDL_GetPerformanceCounter() / (double)SDL_GetPerformanceFrequency() - i0);
+        free(masks[0]);
+        free(masks[1]);
+    }
     if (stats) vgeo_print_stats(&b.stats, print_line);
     printf("build_vgeo: %u tris -> %u clusters, %u pages, %u levels in %.2f s (%d threads), peak memory %.0f MB\n", b.stats.input_tris, b.stats.clusters, b.stats.pages,
            b.stats.levels, t1 - t0, b.stats.threads, peak_mb());

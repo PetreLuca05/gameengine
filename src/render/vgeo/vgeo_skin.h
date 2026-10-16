@@ -78,10 +78,11 @@ typedef struct VgXfCpu {
     bool skinned, active;        // active: static, or skinned with a palette
     u32 first, prev_first;       // skinned: the slot's palette regions
     float root[16], skin_s, skin_k;   // skinned: P_0, max_scale, k0 + k1 (|mesh centre| + mesh radius)
+    float wpo;                   // the mesh's max world-position offset (added to every mesh-space sphere)
 } VgXfCpu;
 void vgeo_xf_decode(VgXfCpu *x, const VgInstance *in, const VgMesh *mesh, const VgPalettes *p);
 // Mesh-space sphere -> world (skinned: (P_0 c, r max_scale + k) in instance space first: contains the
-// skinned vertices of anything the bind-space sphere contains).
+// skinned vertices of anything the bind-space sphere contains), + the mesh's max WPO.
 void vgeo_xf_sphere(const VgXfCpu *x, const float c[3], float r, float out[4]);
 // Instance-space sphere -> world (the instance transform only).
 void vgeo_xf_instance_sphere(const VgXfCpu *x, const float c[3], float r, float out[4]);

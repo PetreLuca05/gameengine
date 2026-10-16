@@ -35,5 +35,7 @@ void vgh_hiz_build(VgHarness *h, VgCuller *c, VgHizImage *z, const float *depth)
 // Reads pyramid mip m back (vg_hiz_size >> m).
 void vgh_hiz_read(VgHarness *h, VgHizImage *z, u32 mip, float *out);
 VgHizRef vgh_hiz_ref(const VgHizImage *z);
+// Full memory barrier + layout transition of an image (mips levels).
+void vgh_image_barrier(VkCommandBuffer cmd, VkImage img, u32 mips, VkImageLayout from, VkImageLayout to);
 
 #endif

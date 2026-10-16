@@ -21,6 +21,8 @@ uint cluster_word(uint slot, uint ci) { return slot * VG_PAGE_WORDS + 4u + ci * 
 
 void emit(uint inst, VgXf x, uint slot, uint ci, bool retest) {
     uint w = cluster_word(slot, ci);
+    VgMesh m = meshes[x.mesh];
+    uint mflags = (m.fflags & (VGMF_MASKED | VGMF_TWO_SIDED)) != 0u ? materials[m.material_base + (pool[w + 10u] >> 16)].flags : 0u;
     vec4 cs = vg_world_sphere(x, uintBitsToFloat(uvec4(pool[w], pool[w + 1u], pool[w + 2u], pool[w + 3u])));
     // Skinned: the animated bone-box sphere (the bone set follows the cluster's triangles); the
     // builder marks skinned clusters NO_CONE.
@@ -29,7 +31,7 @@ void emit(uint inst, VgXf x, uint slot, uint ci, bool retest) {
         if (!vg_frustum(cs)) return;
         uint cone = pool[w + 9u];
         uint cflags = cone >> 24;
-        if ((cflags & (VGC_NO_CONE | VGC_TWO_SIDED)) == 0u && (vg_flags() & (VGV_NO_CONE | VGV_ORTHO)) == 0u) {
+        if ((cflags & (VGC_NO_CONE | VGC_TWO_SIDED)) == 0u && (mflags & VGM_TWO_SIDED) == 0u && (vg_flags() & (VGV_NO_CONE | VGV_ORTHO)) == 0u) {
             vec3 axis = vg_qrot(x.rot, oct8(cone & 0xFFFFu));
             float cutoff = float(int(cone << 8) >> 24) / 127.0 + 0.02;   // + margin for the 8-bit axis
             vec3 d = cs.xyz - V.cam_pos.xyz;
@@ -45,8 +47,15 @@ void emit(uint inst, VgXf x, uint slot, uint ci, bool retest) {
     }
     if (retest) atomicAdd(ctr.n[VGN_CL_P2], 1u);
     // SW never clips: a sphere within znear of the near plane (any vertex w < 2 znear) goes to HW.
+    // Orthographic (shadow) views have no SW raster: their "SW" list holds the masked clusters, which
+    // the shadow pass draws with the alpha test.
     bool near = (vg_flags() & VGV_ORTHO) == 0u && dot(V.planes[4].xyz, cs.xyz) + V.planes[4].w - cs.w < V.params.z;
-    bool sw = !near && vg_project_size(cs) < V.params.y;
+    // the SW / HW size test on the cluster's own size (the WPO margin only keeps the culling safe)
+    // Masked clusters are foliage cards: few, large triangles. SW scans one triangle per thread, so they
+    // go SW only once their triangles are small: below sw_px x sqrt(tris / 128) / 2 across.
+    float swpx = V.params.y;
+    if ((mflags & VGM_MASKED) != 0u) swpx *= 0.5 * sqrt(float((pool[w + 10u] >> 8) & 0xFFu) / 128.0);
+    bool sw = (vg_flags() & VGV_ORTHO) != 0u ? (mflags & VGM_MASKED) != 0u : !near && vg_project_size(vec4(cs.xyz, x.skin ? cs.w : cs.w - x.wpo)) < swpx;
     uint cap = V.caps0.z;
     uint k = vg_append(sw ? VGN_SW : VGN_HW, cap);
     if (k == 0xFFFFFFFFu) return;

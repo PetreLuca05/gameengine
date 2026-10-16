@@ -17,6 +17,9 @@
 #include "vgeo/vgeo_skin.h"
 #include "vgeo/vgeo_procgen.h"
 #include "vgeo/vgeo_import.h"
+#include "vgeo/foliage_support.h"
+#include "vgeo/vgeo_procgen_foliage.h"
+#include "vgeo/vgeo_impostor.h"
 #include "assets/assets.h"
 #include "core/platform.h"
 #include <math.h>
@@ -91,25 +94,41 @@ static struct {
     struct {
         int frame, frames;
         FILE *csv;
-        double sum[24], worst_total, cpu_sum;
+        double sum[24], worst_total, cpu_sum, shadow_sum[2], worst_foliage;
         char names[24][32];
         int npass;
+        int path;                // 0 map vgeo_test, 1 the devroom foliage yard
     } bench;
     Cvar *era, *lod_px, *foliage_density;
     VgBuffer dbg_rb[FRAMES_IN_FLIGHT];
     u32 dbg_count[FRAMES_IN_FLIGHT];
     // Graphics (Phase 3): the renderer's sets 0-2 + push constants (layout_lit compatible), vgeo set 3.
     VkPipelineLayout gfx_layout;
-    // Material textures (set 4 of the lit resolve): renderer texture ids index a 1024-entry array,
-    // one set per frame in flight, written lazily (white until a material needs the texture).
-    VkDescriptorSetLayout tex_layout;
-    VkDescriptorPool tex_pool;
-    VkDescriptorSet tex_sets[FRAMES_IN_FLIGHT];
+    // Material textures: renderer texture ids index the vgeo texture table (binding 23 of the cull
+    // sets, vgeo_tex.h), entered once a material needs the texture and it is ready (white until then).
     u8 tex_wanted[MAX_TEXTURES];
-    u8 tex_written[FRAMES_IN_FLIGHT][MAX_TEXTURES];
-    bool tex_filled[FRAMES_IN_FLIGHT];   // every entry written (white) once the white texture exists
-    VkPipeline p_gbuffer, p_lit, p_shadow, p_shadow_args;
+    u8 tex_entered[MAX_TEXTURES];
+    VkPipeline p_gbuffer, p_lit, p_shadow, p_shadow_args, p_shadow_masked;
+    // Foliage (docs/VGEO.md "Foliage support"): wind of the previous frame (velocity), the displacement
+    // buffer, foliage types by name (placement chunks resolve their mesh names here), the check.
+    Cvar *impostor_px;
+    float wind_cur[4], wind_prev[4], time_cur, time_prev;
+    bool wind_init;
+    VgDisplace disp;
+    bool disp_ok;
+    struct FoliageType { char name[48]; u32 mesh; bool capsule; float cap_r, cap_h; } ftype[32];
+    u32 ftype_count;
+    bool test_types;
+    double disp_time;
+    float push_test;             // foliage_push_test: seconds left
+    bool need_commit;            // a placement chunk resolved a mesh the scene did not have
+    // vgeo part of the sun shadows (outside the frame graph): timestamps around the cascade culls and
+    // the cascade draws, per frame in flight; ms of the last completed frame.
+    VkQueryPool sqp;
+    bool sqp_written[FRAMES_IN_FLIGHT];
+    float shadow_ms[2];          // cull, draw
     bool raster_ok;              // the visibility buffer is filled this frame (resolve / lit draws)
+    bool pass2_pending;          // vkg_graph_cull added pass 1: vkg_graph_cull_pass2 adds the rest
     bool shadow_culled;          // this frame's cascade views were culled (vkg_record_shadow_cull)
     Cvar *r_vgeo, *error_px, *shadow_error_px, *sw_px, *occlusion, *freeze, *debug, *debug_spheres, *shadows;
 } G;
@@ -122,6 +141,10 @@ static void skin_readd_pools(void);
 static void vkg_register_era(void);
 static void cmd_vgeo_bench(int argc, const char **argv);
 static void cmd_vgeo_check_resolve(int argc, const char **argv);
+static void cmd_foliage_push_test(int argc, const char **argv);
+static void cmd_foliage_stats(int argc, const char **argv);
+static void cmd_foliage_query(int argc, const char **argv);
+static void cmd_foliage_check(int argc, const char **argv);
 
 // ------------------------------------------------------------------ graphics pipelines
 
@@ -191,73 +214,25 @@ static VkPipeline gfx_pipeline(const char *vert, const char *frag, const VkForma
     return p;
 }
 
-static void tex_write(u32 frame, u32 id, TextureId tex) {
-    VkDescriptorImageInfo ii = { R->sampler_linear, R->textures[tex].view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
-    VkWriteDescriptorSet w = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-    w.dstSet = G.tex_sets[frame];
-    w.dstBinding = 0;
-    w.dstArrayElement = id;
-    w.descriptorCount = 1;
-    w.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    w.pImageInfo = &ii;
-    vkUpdateDescriptorSets(R->device, 1, &w, 0, NULL);
-}
-
-// A material uses texture `id` (vgeo_lit samples it from set 4).
+// A material uses texture `id` (the resolve samples it through the vgeo texture table).
 static void tex_use(TextureId id) {
     if (id && id < MAX_TEXTURES) G.tex_wanted[id] = 1;
 }
 
-// Start of a frame (its set is not in use): textures wanted and ready since this set was written.
-static void tex_update(u32 frame) {
-    if (!G.tex_filled[frame]) {
-        if (!R->white_tex || !R->textures[R->white_tex].view) return;
-        VkDescriptorImageInfo *ii = (VkDescriptorImageInfo *)malloc(sizeof(VkDescriptorImageInfo) * MAX_TEXTURES);
-        for (u32 i = 0; i < MAX_TEXTURES; i++) ii[i] = (VkDescriptorImageInfo){ R->sampler_linear, R->textures[R->white_tex].view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
-        VkWriteDescriptorSet w = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-        w.dstSet = G.tex_sets[frame];
-        w.descriptorCount = MAX_TEXTURES;
-        w.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-        w.pImageInfo = ii;
-        vkUpdateDescriptorSets(R->device, 1, &w, 0, NULL);
-        free(ii);
-        G.tex_filled[frame] = true;
-    }
+// Start of a frame: textures wanted and ready enter the table (the cull sets pick them up when recorded).
+static void tex_update(void) {
     for (u32 i = 1; i < MAX_TEXTURES; i++)
-        if (G.tex_wanted[i] && !G.tex_written[frame][i] && R->textures[i].used && R->textures[i].ready) {
-            tex_write(frame, i, (TextureId)i);
-            G.tex_written[frame][i] = 1;
+        if (G.tex_wanted[i] && !G.tex_entered[i] && R->textures[i].used && R->textures[i].ready) {
+            vg_tex_set(&G.cull.tex, i, R->textures[i].view, R->sampler_linear, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+            G.tex_entered[i] = 1;
         }
 }
 
-static bool create_tex_sets(void) {
-    VkDescriptorSetLayoutBinding b = { 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, MAX_TEXTURES, VK_SHADER_STAGE_FRAGMENT_BIT, NULL };
-    VkDescriptorSetLayoutCreateInfo li = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
-    li.bindingCount = 1;
-    li.pBindings = &b;
-    if (vkCreateDescriptorSetLayout(R->device, &li, NULL, &G.tex_layout) != VK_SUCCESS) return false;
-    VkDescriptorPoolSize ps = { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, MAX_TEXTURES * FRAMES_IN_FLIGHT };
-    VkDescriptorPoolCreateInfo pi = { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
-    pi.maxSets = FRAMES_IN_FLIGHT;
-    pi.poolSizeCount = 1;
-    pi.pPoolSizes = &ps;
-    if (vkCreateDescriptorPool(R->device, &pi, NULL, &G.tex_pool) != VK_SUCCESS) return false;
-    for (u32 f = 0; f < FRAMES_IN_FLIGHT; f++) {
-        VkDescriptorSetAllocateInfo ai = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
-        ai.descriptorPool = G.tex_pool;
-        ai.descriptorSetCount = 1;
-        ai.pSetLayouts = &G.tex_layout;
-        if (vkAllocateDescriptorSets(R->device, &ai, &G.tex_sets[f]) != VK_SUCCESS) return false;
-    }
-    return true;
-}
-
 static bool create_gfx(void) {
-    if (!create_tex_sets()) return false;
-    VkDescriptorSetLayout sets[5] = { R->frame_layout, R->tex_layout, R->lit_post_layout, G.cull.layout, G.tex_layout };
+    VkDescriptorSetLayout sets[4] = { R->frame_layout, R->tex_layout, R->lit_post_layout, G.cull.layout };
     VkPushConstantRange pr = { VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushLit) };
     VkPipelineLayoutCreateInfo pli = { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
-    pli.setLayoutCount = 5;
+    pli.setLayoutCount = 4;
     pli.pSetLayouts = sets;
     pli.pushConstantRangeCount = 1;
     pli.pPushConstantRanges = &pr;
@@ -266,19 +241,16 @@ static bool create_gfx(void) {
     G.p_gbuffer = gfx_pipeline("vgeo_fullscreen.vert", "vgeo_gbuffer.frag", gb, 3, true, true, VK_COMPARE_OP_LESS_OR_EQUAL, false);
     G.p_lit = gfx_pipeline("vgeo_fullscreen.vert", "vgeo_lit.frag", &hdr, 1, true, false, VK_COMPARE_OP_EQUAL, false);
     G.p_shadow = gfx_pipeline("vgeo_shadow.vert", NULL, NULL, 0, true, true, VK_COMPARE_OP_LESS_OR_EQUAL, true);
+    G.p_shadow_masked = gfx_pipeline("vgeo_shadow_masked.vert", "vgeo_shadow_masked.frag", NULL, 0, true, true, VK_COMPARE_OP_LESS_OR_EQUAL, true);
     G.p_shadow_args = vgc_compute_pipeline(&G.ctx, G.cull.pl, "vgeo/vg_shadow_args.comp");
-    return G.p_gbuffer && G.p_lit && G.p_shadow && G.p_shadow_args;
+    return G.p_gbuffer && G.p_lit && G.p_shadow && G.p_shadow_args && G.p_shadow_masked;
 }
 
 static void destroy_gfx(void) {
-    VkPipeline ps[] = { G.p_gbuffer, G.p_lit, G.p_shadow, G.p_shadow_args };
+    VkPipeline ps[] = { G.p_gbuffer, G.p_lit, G.p_shadow, G.p_shadow_args, G.p_shadow_masked };
     for (size_t i = 0; i < sizeof(ps) / sizeof(ps[0]); i++) if (ps[i]) vkDestroyPipeline(R->device, ps[i], NULL);
     if (G.gfx_layout) vkDestroyPipelineLayout(R->device, G.gfx_layout, NULL);
     G.gfx_layout = VK_NULL_HANDLE;
-    if (G.tex_pool) vkDestroyDescriptorPool(R->device, G.tex_pool, NULL);
-    if (G.tex_layout) vkDestroyDescriptorSetLayout(R->device, G.tex_layout, NULL);
-    G.tex_pool = VK_NULL_HANDLE;
-    G.tex_layout = VK_NULL_HANDLE;
 }
 
 static VgCullCaps game_caps(void) {
@@ -385,12 +357,18 @@ void vkg_init(void) {
     G.skinned = cvar_reg_bool("r_vgeo_characters", true, CVAR_ARCHIVE, "vgeo: draw skinned characters (main view) through vgeo");
     G.pool_mb = cvar_reg_int("r_vgeo_pool_mb", 512, 16, 8192, CVAR_ARCHIVE, "vgeo: GPU page pool budget (MB of 128 KiB pages; applied on the next scene upload)");
     G.pages_per_frame = cvar_reg_int("r_vgeo_stream_pages_per_frame", 64, 1, 1024, CVAR_ARCHIVE, "vgeo: pages streamed in per frame");
+    G.impostor_px = cvar_reg_float("r_vgeo_impostor_px", 16.0f, 0.0f, 256.0f, CVAR_ARCHIVE,
+                                   "vgeo: instances with an impostor atlas draw it below this projected size (pixels across, 0 = never)");
+    cmd_register("foliage_push_test", cmd_foliage_push_test, "foliage_push_test [seconds=10]: a ring of displacement-buffer pushes circling the camera");
+    cmd_register("foliage_stats", cmd_foliage_stats, "foliage: placement chunks, region allocator audit, last frame's foliage counters");
+    cmd_register("foliage_query", cmd_foliage_query, "foliage_query [radius=2]: placement instances around the camera (foliage_query API)");
+    cmd_register("foliage_check", cmd_foliage_check, "foliage_check: scripted checks (Hi-Z behind the foliage yard wall, density stability over 600 frames)");
     cmd_register("vgeo_stats", cmd_vgeo_stats, "virtualized geometry: scene, last frame's culling counters and pass timings");
     cmd_register("vgeo_test_scene", cmd_vgeo_test_scene, "vgeo_test_scene [count=20000] [spacing=6] [meshes=4]: procedural rock field around the camera");
     cmd_register("vgeo_clear", cmd_vgeo_clear, "remove every vgeo instance");
     cmd_register("vgeo_check_resolve", cmd_vgeo_check_resolve, "verify the next frame's vgeo depth export and velocity against the visibility buffer");
     vkg_register_era();
-    cmd_register("vgeo_bench", cmd_vgeo_bench, "vgeo_bench [frames=600] [csv]: spline flythrough of map vgeo_test, per-pass GPU ms to CSV + summary");
+    cmd_register("vgeo_bench", cmd_vgeo_bench, "vgeo_bench [frames=600] [csv] [vgeo_test|foliage]: spline flythrough of map vgeo_test (or the devroom foliage yard), per-pass GPU ms to CSV + summary");
     if (!R->vg_scalar || !R->vg_int64) {
         log_warn("vgeo: disabled (needs scalarBlockLayout + shaderBufferInt64Atomics; the 2015 / 2010 era LODs are used instead)");
         return;
@@ -424,6 +402,12 @@ void vkg_init(void) {
     vg_raster_resize(&G.raster, R->hdr.w, R->hdr.h);
     VgStreamConfig sc = { (u32)G.pool_mb->i, (u32)G.pages_per_frame->i };
     G.stream_ok = vg_stream_init(&G.stream, &G.scene, &G.cull, &sc);
+    G.disp_ok = vg_displace_init(&G.disp, c, &G.cull.tex);
+    if (!G.disp_ok) log_warn("vgeo: foliage displacement buffer unavailable");
+    VkQueryPoolCreateInfo sq = { VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO };
+    sq.queryType = VK_QUERY_TYPE_TIMESTAMP;
+    sq.queryCount = 8 * FRAMES_IN_FLIGHT;   // cull begin / end, 3 x draw begin / end
+    vkCreateQueryPool(R->device, &sq, NULL, &G.sqp);
     skin_init();
     if (!create_gfx()) {
         log_error("vgeo: graphics pipelines unavailable");
@@ -444,6 +428,10 @@ void vkg_shutdown(void) {
     vgc_buffer_free(&G.ctx, &G.check.vel);
     vgc_buffer_free(&G.ctx, &G.check.vis);
     skin_shutdown();
+    if (G.disp_ok) vg_displace_shutdown(&G.disp);
+    G.disp_ok = false;
+    if (G.sqp) vkDestroyQueryPool(R->device, G.sqp, NULL);
+    G.sqp = VK_NULL_HANDLE;
     if (G.stream_ok) vg_stream_shutdown(&G.stream);
     G.stream_ok = false;
     vg_raster_shutdown(&G.raster);
@@ -458,7 +446,30 @@ void vkg_shutdown(void) {
     G.ok = false;
 }
 
-static bool active(void) { return G.ok && G.r_vgeo->i && G.scene.instance_count > 0; }
+static bool active(void) { return G.ok && G.r_vgeo->i && (G.scene.instance_count > 0 || G.scene.pl.live_chunks > 0 || G.scene.pl.dirty_cells_n > 0); }
+
+// The foliage fields of a view (WPO wind / time this frame and last, density, impostor switch,
+// displacement buffer, dither rotation).
+static void foliage_wind_frame(void) {
+    const RenderWeather *wx = &R->weather;
+    float ws = sqrtf(wx->wind.x * wx->wind.x + wx->wind.z * wx->wind.z);
+    float w[4] = { ws > 1e-4f ? wx->wind.x / ws : 1.0f, ws > 1e-4f ? wx->wind.z / ws : 0.0f, ws, wx->gust };
+    memcpy(G.wind_prev, G.wind_init ? G.wind_cur : w, 16);
+    G.time_prev = G.wind_init ? G.time_cur : wx->time;
+    memcpy(G.wind_cur, w, 16);
+    G.time_cur = wx->time;
+    G.wind_init = true;
+}
+static void view_foliage(VgViewGpu *v) {
+    memcpy(v->wind, G.wind_cur, 16);
+    memcpy(v->wind_prev, G.wind_prev, 16);
+    v->foliage[0] = G.time_cur;
+    v->foliage[1] = G.time_prev;
+    v->foliage[2] = G.foliage_density->f;
+    v->foliage[3] = G.impostor_px->f;
+    v->frame_index = R->frame_index;
+    if (G.disp_ok) vg_displace_view(&G.disp, v);
+}
 
 // ------------------------------------------------------------------ debug spheres
 
@@ -473,10 +484,11 @@ static void debug_spheres(u32 frame) {
     for (u32 i = 0; i < hw + sw; i++) {
         const u32 *it = e + 4 + (i < hw ? i : VKG_DEBUG_MAX + (i - hw)) * 2;   // HW block, then SW block
         u32 inst = it[0], packed = it[1];
-        if (inst >= G.scene.instance_count || (packed >> VG_CLUSTER_BITS) >= G.scene.page_count) continue;
+        const VgInstance *vin = vgeo_scene_instance(&G.scene, inst);
+        if (!vin || (packed >> VG_CLUSTER_BITS) >= G.scene.page_count) continue;
         const VgCluster *cl = vgeo_scene_cluster(&G.scene, packed >> VG_CLUSTER_BITS, packed & ((1u << VG_CLUSTER_BITS) - 1));
         float p[3], q[4], s;
-        vgeo_instance_decode(&G.scene.instances[inst], p, q, &s);
+        vgeo_instance_decode(vin, p, q, &s);
         quat qq = { q[0], q[1], q[2], q[3] };
         vec3 c = v3_add(v3(p[0], p[1], p[2]), quat_rotate(qq, v3(cl->center[0] * s, cl->center[1] * s, cl->center[2] * s)));
         dbg_sphere(c, cl->radius * s, i < hw ? DBG_GREEN : DBG_CYAN, 0.0f);
@@ -520,6 +532,7 @@ static void exec_cull(VkCommandBuffer cmd, void *u) {
     mat4 rvp = mat4_mul(R->proj_j, R->view);
     memcpy(v.raster_view_proj, rvp.m, 64);
     if (G.pal_ok) v.slot_material_base = G.slot_mat_base;
+    view_foliage(&v);
     bool hist = G.hiz != FG_NONE && fg_history_valid(G.hiz) && !R->camera_cut && G.occlusion->i > 0;
     VgHizRef prev = hist ? hiz_ref(G.hiz) : (VgHizRef){ 0 };
     VgHizRef cur = G.hiz_cur != FG_NONE ? hiz_ref(G.hiz_cur) : (VgHizRef){ 0 };
@@ -542,13 +555,14 @@ static void exec_raster1(VkCommandBuffer cmd, void *u) {
     G.raster_ok = true;
 }
 
-// This frame's Hi-Z from the pass 1 visibility buffer (pass 2 occlusion).
+// This frame's Hi-Z from the pass 1 visibility buffer and the static legacy occluders' depth
+// (render.c vgeo_occluders: walls count in pass 2 too), for pass 2 occlusion.
 static void exec_hiz_cur(VkCommandBuffer cmd, void *u) {
     (void)u;
     VkImageView mips[16];
     u32 n = DG_MIN(fg_mips(G.hiz_cur), 16u);
     for (u32 m = 0; m < n; m++) mips[m] = fg_mip_view(G.hiz_cur, m);
-    vg_hiz_record(&G.cull, cmd, R->frame_slot, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_UNDEFINED, mips, n, R->hdr.w, R->hdr.h);
+    vg_hiz_record_merged(&G.cull, cmd, R->frame_slot, fg_view(G.depth), VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL, mips, n, R->hdr.w, R->hdr.h);
 }
 
 // Pass 2: pass 1's occluders against this frame's Hi-Z, rasterised into the same buffer.
@@ -574,6 +588,7 @@ void vkg_graph_cull(int depth_res) {
     G.hiz = G.hiz_cur = FG_NONE;
     G.depth = depth_res;
     G.raster_ok = false;
+    G.pass2_pending = false;
     if (!active()) return;
     u32 hw, hh, hm;
     vg_hiz_size(R->hdr.w, R->hdr.h, &hw, &hh, &hm);
@@ -588,8 +603,19 @@ void vkg_graph_cull(int depth_res) {
     fg_read(p, G.hiz, FG_SAMPLED);
     if (G.hiz_cur != FG_NONE) fg_read(p, G.hiz_cur, FG_SAMPLED);   // bound now, written below
     p = fg_pass("vgeo_raster", exec_raster1, NULL);
+    G.pass2_pending = true;
+}
+
+bool vkg_wants_occluders(void) { return active() && G.hiz_cur != FG_NONE && G.pass2_pending; }
+
+// After render.c's vgeo_occluders pass (static legacy depth in depth_res): this frame's Hi-Z, pass 2.
+void vkg_graph_cull_pass2(int depth_res) {
+    if (!G.pass2_pending) return;
+    G.pass2_pending = false;
+    int p;
     if (G.hiz_cur != FG_NONE) {
         p = fg_pass("vgeo_hiz_cur", exec_hiz_cur, NULL);
+        fg_read(p, depth_res, FG_SAMPLED);
         fg_write(p, G.hiz_cur, FG_STORAGE);
     }
     p = fg_pass("vgeo_pass2", exec_pass2, NULL);
@@ -700,8 +726,18 @@ void vkg_graph_hiz(int depth_res, int velocity_res) {
 static void frame_begin(VkCommandBuffer cmd) {
     u32 frame = R->frame_slot;
     vg_cull_prepare(&G.cull);   // after a commit (characters, level): before any of this frame's vgeo commands
+    foliage_wind_frame();
+    if (G.sqp && G.sqp_written[frame]) {   // this slot's fence has been waited: last time's shadow timings
+        u64 ts[8];
+        if (vkGetQueryPoolResults(R->device, G.sqp, frame * 8, 8, sizeof(ts), ts, sizeof(u64), VK_QUERY_RESULT_64_BIT) == VK_SUCCESS) {
+            float k = R->gpu_props.limits.timestampPeriod * 1e-6f;
+            G.shadow_ms[0] = (float)(ts[1] - ts[0]) * k;
+            G.shadow_ms[1] = (float)((ts[3] - ts[2]) + (ts[5] - ts[4]) + (ts[7] - ts[6])) * k;
+        }
+        G.sqp_written[frame] = false;
+    }
     if (G.check.state == 2 && G.check.slot == frame) check_analyse();   // this slot's fence has been waited
-    tex_update(frame);
+    tex_update();
     vg_cull_collect(&G.cull, frame);
     debug_spheres(frame);
     vg_raster_resize(&G.raster, R->hdr.w, R->hdr.h);
@@ -711,6 +747,23 @@ static void frame_begin(VkCommandBuffer cmd) {
         vg_stream_update(&G.stream, cmd, frame);
     }
     skin_record(cmd);
+    // foliage: placement chunk changes, the displacement buffer around the camera
+    vgeo_scene_placement_record(&G.scene, cmd, frame);
+    if (G.disp_ok) {
+        double now = (double)SDL_GetTicksNS() * 1e-9;
+        float dt = G.disp_time > 0 ? (float)fmin(now - G.disp_time, 0.1) : 0.0f;
+        G.disp_time = now;
+        if (G.push_test > 0) {   // foliage_push_test: 6 pushes on a 4 m ring circling the camera
+            G.push_test -= dt;
+            for (int k = 0; k < 6; k++) {
+                float a = (float)now * 1.3f + (float)k * 1.0471976f;
+                float p[3] = { R->cam.pos.x + cosf(a) * 4.0f, R->cam.pos.y, R->cam.pos.z + sinf(a) * 4.0f };
+                vg_displace_push(&G.disp, p, 1.5f, 3.0f);
+            }
+        }
+        float cam[3] = { R->cam.pos.x, R->cam.pos.y, R->cam.pos.z };
+        vg_displace_record(&G.disp, cmd, frame, cam, dt);
+    }
 }
 
 void vkg_record_shadow_cull(VkCommandBuffer cmd) {
@@ -720,6 +773,10 @@ void vkg_record_shadow_cull(VkCommandBuffer cmd) {
     if (!G.shadows->i || R->r_shadow_quality->i <= 0) return;
     u32 frame = R->frame_slot;
     u32 tile = R->shadow_size / 2;
+    if (G.sqp) {
+        vkCmdResetQueryPool(cmd, G.sqp, frame * 8, 8);
+        vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, G.sqp, frame * 8);
+    }
     for (u32 k = 0; k < 3; k++) {
         // untile: the cascade matrices map into their 2 x 2 atlas tile (render.c)
         mat4 t = mat4_identity();
@@ -734,6 +791,7 @@ void vkg_record_shadow_cull(VkCommandBuffer cmd) {
         vgeo_view_setup(&v, vp.m, vp.m, eye, (float)tile / (2.0f * radius), 0.0f, tile, tile, G.shadow_error_px->f, 0.0f,
                         VGV_ORTHO | VGV_NO_OCCLUSION | VGV_NO_CONE | VGV_NO_SKINNED);
         memcpy(v.raster_view_proj, R->shadow_vps[k].m, 64);
+        view_foliage(&v);   // the same WPO, density and fade as the main view (cam_pos is the camera)
         vg_cull_record(&G.cull, cmd, frame, 1 + k, &v, NULL, NULL);
         VgPush pc;
         memset(&pc, 0, sizeof(pc));
@@ -753,12 +811,14 @@ void vkg_record_shadow_cull(VkCommandBuffer cmd) {
     dep.memoryBarrierCount = 1;
     dep.pMemoryBarriers = &mb;
     vkCmdPipelineBarrier2(cmd, &dep);
+    if (G.sqp) vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, G.sqp, frame * 8 + 1);
     G.shadow_culled = true;
 }
 
 // Inside the shadow pass, cascade k (viewport / scissor / depth bias / frame set already set).
 void vkg_draw_shadow(VkCommandBuffer cmd, u32 k) {
     if (!G.shadow_culled) return;
+    if (G.sqp) vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, G.sqp, R->frame_slot * 8 + 2 + k * 2);
     VkDescriptorSet set = vg_cull_set(&G.cull, R->frame_slot, 1 + k);
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, G.p_shadow);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, G.gfx_layout, 3, 1, &set, 0, NULL);
@@ -767,6 +827,15 @@ void vkg_draw_shadow(VkCommandBuffer cmd, u32 k) {
     pc.flags[3] = k;
     vkCmdPushConstants(cmd, G.gfx_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushLit), &pc);
     vkCmdDrawIndirect(cmd, G.cull.v[1 + k].counters.buffer, VGA_DRAW_HW * 16, 1, 16);
+    // masked clusters (the cascade view's SW half): alpha-tested
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, G.p_shadow_masked);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, G.gfx_layout, 3, 1, &set, 0, NULL);
+    vkCmdPushConstants(cmd, G.gfx_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushLit), &pc);
+    vkCmdDrawIndirect(cmd, G.cull.v[1 + k].counters.buffer, VGA_SW * 16, 1, 16);
+    if (G.sqp) {
+        vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, G.sqp, R->frame_slot * 8 + 3 + k * 2);
+        if (k == 2) G.sqp_written[R->frame_slot] = true;
+    }
 }
 
 // ------------------------------------------------------------------ resolve
@@ -782,12 +851,11 @@ void vkg_draw_gbuffer(VkCommandBuffer cmd) {
 
 // Inside the opaque pass (HDR + depth, frame set + lit inputs bound): shades the vgeo pixels.
 void vkg_draw_lit(VkCommandBuffer cmd) {
-    if (!G.raster_ok || !G.tex_filled[R->frame_slot]) return;
+    if (!G.raster_ok) return;
     VkDescriptorSet set = vg_cull_set(&G.cull, R->frame_slot, 0);
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, G.p_lit);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, G.gfx_layout, 1, 1, &R->textures[R->white_tex].set, 0, NULL);
-    VkDescriptorSet s34[2] = { set, G.tex_sets[R->frame_slot] };
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, G.gfx_layout, 3, 2, s34, 0, NULL);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, G.gfx_layout, 3, 1, &set, 0, NULL);
     vkCmdDraw(cmd, 3, 1, 0, 0);
 }
 
@@ -840,6 +908,17 @@ static u32 level_mesh(const RenderVgeoPlacement *pl) {
             m.flags = mm->flags & (MAT_TEXTURED | MAT_TRIPLANAR | MAT_GRID | MAT_CHECKER);
             m.tex_scale = mm->tex_scale > 0 ? mm->tex_scale : 1.0f;
             if ((mm->flags & MAT_TEXTURED) && mm->texture) { m.albedo_tex = mm->texture; tex_use(mm->texture); }
+            const ModelFoliage *fo = &model->foliage;
+            if (fo->enabled) {   // manifest "foliage": the vgeo material flags and WPO parameters
+                m.flags |= VGM_FOLIAGE | (fo->masked ? VGM_MASKED : 0) | (fo->two_sided ? VGM_TWO_SIDED : 0) | (fo->dither ? VGM_DITHER_FADE : 0);
+                m.mask_tex = m.albedo_tex;
+                m.alpha_cutoff = fo->alpha_cutoff;
+                m.wpo = (u32)fo->wpo | (fo->displace ? WPO_DISPLACE : 0);
+                memcpy(m.wpo_params, fo->wpo_params, 16);
+                m.fade_start = fo->fade_start;
+                m.fade_end = fo->fade_end;
+                m.shadow_max_dist = fo->shadow_max_dist;
+            }
         }
         u32 idx = vgeo_scene_add_material(&G.scene, &m);
         if (k == 0) base = idx;
@@ -989,17 +1068,35 @@ static MeshId fallback_lod_mesh(struct FallbackMesh *f, u32 k) {
 // Era fallback, once per frame after the camera is set (render.c): the coarsest discrete LOD whose
 // projected error stays under r_vgeo_lod_px, per instance, through the legacy draw list. 2010 never
 // draws LOD 0. CPU work per instance here is the fallback's cost (the vgeo path has none).
+// Foliage in the fallback / local light shadows (CPU, per instance): drawn when its density / fade
+// keeps it (vgeo_foliage_alpha, the same hash and distances as the GPU); masked meshes are not (the
+// legacy pipelines have no alpha test).
+static bool fallback_keep(const VgInstance *in, const VgMesh *m) {
+    if (m->fflags & VGMF_MASKED) return false;
+    if (!(m->fflags & VGMF_FOLIAGE)) return true;
+    float dx = in->pos[0] - R->cam.pos.x, dy = in->pos[1] - R->cam.pos.y, dz = in->pos[2] - R->cam.pos.z;
+    return vgeo_foliage_alpha(m, in->flags_phase, sqrtf(dx * dx + dy * dy + dz * dz), G.foliage_density->f) > 0;
+}
+
 void vkg_submit_fallback(void) {
-    if (!G.ok || G.r_vgeo->i || !G.scene.instance_count || !G.fb) return;
+    if (!G.ok || G.r_vgeo->i || !vgeo_scene_gpu_instances(&G.scene) || !G.fb) return;
     bool era2010 = G.era && G.era->i == 3;
     float ps = (float)R->hdr.h / (2.0f * tanf(R->cam.fov_deg * DG_DEG2RAD * 0.5f));
-    for (u32 i = 0; i < G.scene.instance_count; i++) {
-        const VgInstance *in = &G.scene.instances[i];
+    u32 total = vgeo_scene_gpu_instances(&G.scene);
+    for (u32 i = 0; i < total; i++) {
+        const VgInstance *in = vgeo_scene_instance(&G.scene, i);
+        if (i >= G.scene.instance_count) {   // placement region: live instances only
+            u32 ri = i - G.scene.instance_count;
+            if (in->cell >= G.scene.pl.cell_cap) continue;
+            const VgCell *cl = &G.scene.pl.cells[in->cell];
+            if (!cl->count || ri < cl->first || ri >= cl->first + cl->count) continue;
+        }
         if (in->mesh >= G.fb_cap || !G.fb[in->mesh].lod_count) continue;
         struct FallbackMesh *f = &G.fb[in->mesh];
         float p[3], q[4], s;
         vgeo_instance_decode(in, p, q, &s);
         const VgMesh *m = &G.scene.meshes[in->mesh];
+        if (!fallback_keep(in, m)) continue;
         quat qq = { q[0], q[1], q[2], q[3] };
         vec3 c = v3_add(v3(p[0], p[1], p[2]), quat_rotate(qq, v3(m->center[0] * s, m->center[1] * s, m->center[2] * s)));
         float r = m->radius * s;
@@ -1031,28 +1128,41 @@ static const float k_bench_path[][5] = {   // x, y, z, yaw (deg), pitch (deg)
     { 110, 5, 0, 90, -5 }, { 60, 15, 80, 200, -15 }, { 0, 25, 160, 180, -25 }, { -60, 10, 120, 300, -10 }, { 0, 2, 10, 360, -5 },
 };
 
+// The devroom foliage yard (foliage_test_scatter, x 60..380, z 80..400): from the wall into the yard,
+// low over the grass, a turn at the far end, back higher up.
+static const float k_bench_foliage[][5] = {
+    { 220, 1.8f, 82, 180, -4 }, { 200, 1.8f, 160, 200, -6 }, { 150, 2.5f, 240, 250, -8 }, { 120, 6, 330, 160, -12 },
+    { 220, 3, 380, 90, -6 },    { 330, 2, 300, 20, -5 },     { 300, 12, 180, -30, -20 }, { 220, 4, 100, 0, -10 }, { 220, 1.8f, 82, 180, -4 },
+};
+
 static float catmull(float p0, float p1, float p2, float p3, float t) {
     return 0.5f * ((2 * p1) + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t * t + (-p0 + 3 * p1 - 3 * p2 + p3) * t * t * t);
 }
 
 // Called by render_set_camera: replaces the camera while the bench runs.
+static bool foliage_check_camera(RenderCamera *cam);
+
 void vkg_bench_camera(RenderCamera *cam) {
+    if (foliage_check_camera(cam)) return;
     if (G.bench.frames <= 0) return;
-    int n = (int)(sizeof(k_bench_path) / sizeof(k_bench_path[0]));
+    const float (*path)[5] = G.bench.path ? k_bench_foliage : k_bench_path;
+    int n = G.bench.path ? (int)(sizeof(k_bench_foliage) / sizeof(k_bench_foliage[0])) : (int)(sizeof(k_bench_path) / sizeof(k_bench_path[0]));
     float u = (float)G.bench.frame / (float)G.bench.frames * (float)(n - 1);
     int i = DG_CLAMP((int)u, 0, n - 2);
     float t = u - (float)i;
     float v[5];
-    for (int k = 0; k < 5; k++)
-        v[k] = catmull(k_bench_path[i > 0 ? i - 1 : 0][k], k_bench_path[i][k], k_bench_path[i + 1][k], k_bench_path[i + 2 < n ? i + 2 : n - 1][k], t);
+    for (int k = 0; k < 5; k++) v[k] = catmull(path[i > 0 ? i - 1 : 0][k], path[i][k], path[i + 1][k], path[i + 2 < n ? i + 2 : n - 1][k], t);
     cam->pos = v3(v[0], v[1], v[2]);
     cam->yaw = -v[3] * DG_DEG2RAD;
     cam->pitch = v[4] * DG_DEG2RAD;
     cam->roll = 0;
 }
 
+static void foliage_check_frame(void);
+
 // Once per frame (after fg_execute's timings of the previous frame are in).
 void vkg_bench_frame(void) {
+    foliage_check_frame();
     if (G.bench.frames <= 0) return;
     if (G.bench.frame == 0) {
         G.bench.npass = 0;
@@ -1063,7 +1173,7 @@ void vkg_bench_frame(void) {
             fprintf(G.bench.csv, ",%s", nm);
             G.bench.npass++;
         }
-        fprintf(G.bench.csv, ",vis_clusters,vis_tris,stream_cpu_ms,stream_loaded,stream_evicted,stream_waiting\n");
+        fprintf(G.bench.csv, ",vgeo_shadow_cull,vgeo_shadow_draw,vis_clusters,vis_tris,impostors,stream_cpu_ms,stream_loaded,stream_evicted,stream_waiting\n");
     }
     VgCounters c;
     bool hc = vg_cull_counters(&G.cull, 0, &c);
@@ -1078,7 +1188,20 @@ void vkg_bench_frame(void) {
         if (G.bench.frame >= 10) G.bench.sum[k] += ms;
         if (!strncmp(G.bench.names[k], "vgeo_", 5) || !strcmp(G.bench.names[k], "prepass") || !strcmp(G.bench.names[k], "opaque")) total += ms;
     }
-    fprintf(G.bench.csv, ",%u,%u", hc ? c.n[VGN_HW] + c.n[VGN_SW] : 0, hc ? c.n[VGN_TRIS] : 0);
+    // foliage budget view: every vgeo pass + the vgeo part of the sun shadows
+    double fol = 0;
+    for (int k = 0; k < G.bench.npass; k++)
+        if (!strncmp(G.bench.names[k], "vgeo_", 5)) {
+            for (int i = 0; i < fg_pass_count(); i++)
+                if (!strcmp(fg_pass_name(i), G.bench.names[k])) fol += fg_pass_ms(i);
+        }
+    fol += G.shadow_ms[0] + G.shadow_ms[1];
+    if (G.bench.frame >= 10) {
+        G.bench.shadow_sum[0] += G.shadow_ms[0];
+        G.bench.shadow_sum[1] += G.shadow_ms[1];
+        if (fol > G.bench.worst_foliage) G.bench.worst_foliage = fol;
+    }
+    fprintf(G.bench.csv, ",%.4f,%.4f,%u,%u,%u", G.shadow_ms[0], G.shadow_ms[1], hc ? c.n[VGN_HW] + c.n[VGN_SW] : 0, hc ? c.n[VGN_TRIS] : 0, hc ? c.n[VGN_IMPOSTORS] : 0);
     const VgStreamStats *ss = G.stream_ok ? vg_stream_stats(&G.stream) : NULL;
     fprintf(G.bench.csv, ",%.3f,%u,%u,%u\n", ss ? ss->cpu_ms : 0.0f, ss ? ss->loaded : 0, ss ? ss->evicted : 0, ss ? ss->waiting : 0);
     if (G.bench.frame >= 10 && total > G.bench.worst_total) G.bench.worst_total = total;
@@ -1088,17 +1211,20 @@ void vkg_bench_frame(void) {
         for (int k = 0; k < G.bench.npass; k++)
             if (!strncmp(G.bench.names[k], "vgeo_", 5) || !strcmp(G.bench.names[k], "prepass") || !strcmp(G.bench.names[k], "opaque") || !strcmp(G.bench.names[k], "final"))
                 log_info("  %-16s %.3f", G.bench.names[k], G.bench.sum[k] / (n > 0 ? n : 1));
-        log_info("  worst vgeo + prepass + opaque frame: %.3f ms", G.bench.worst_total);
+        log_info("  vgeo_shadow_cull %.3f, vgeo_shadow_draw %.3f (sun cascades, outside the frame graph)", G.bench.shadow_sum[0] / (n > 0 ? n : 1),
+                 G.bench.shadow_sum[1] / (n > 0 ? n : 1));
+        log_info("  worst vgeo + prepass + opaque frame: %.3f ms; worst vgeo passes + vgeo shadows: %.3f ms", G.bench.worst_total, G.bench.worst_foliage);
         fclose(G.bench.csv);
         G.bench.csv = NULL;
         G.bench.frames = 0;
     }
 }
 
-// vgeo_bench [frames=600] [csv=vgeo_bench.csv]
+// vgeo_bench [frames=600] [csv=vgeo_bench.csv] [vgeo_test|foliage]
 static void cmd_vgeo_bench(int argc, const char **argv) {
     if (G.bench.csv) fclose(G.bench.csv);
     memset(&G.bench, 0, sizeof(G.bench));
+    G.bench.path = argc > 3 && !strcmp(argv[3], "foliage");
     const char *path = argc > 2 ? argv[2] : "vgeo_bench.csv";
     G.bench.csv = fopen(path, "w");
     if (!G.bench.csv) { log_error("vgeo_bench: cannot write %s", path); return; }
@@ -1118,20 +1244,24 @@ static bool sphere_planes(const vec4 planes[6], vec3 c, float r) {
 // light's sphere and the tile frustum, as their discrete LOD meshes (picked by distance to the light,
 // ~2 texels of error at the tile's resolution). Inside the atlas pass, PIPE_SHADOW bound by the caller.
 u32 vkg_draw_local_shadow(VkCommandBuffer cmd, vec4 sphere, const vec4 planes[6], u32 cascade, u32 tile_px) {
-    if (!G.ok || !G.r_vgeo->i || !G.shadows->i || !G.scene.instance_count || !G.fb) return 0;
+    if (!G.ok || !G.r_vgeo->i || !G.shadows->i || !vgeo_scene_gpu_instances(&G.scene) || !G.fb) return 0;
     vec3 lc = v3(sphere.x, sphere.y, sphere.z);
     float px_scale = (float)tile_px * 0.5f;   // 90 degree face: px per metre at distance 1
     u32 n = 0, bound = 0;
-    for (u32 ci = 0; ci < G.scene.cell_count; ci++) {
-        const VgCell *cl = &G.scene.cells[ci];
+    u32 ncells = vgeo_scene_gpu_cells(&G.scene);
+    for (u32 ci = 0; ci < ncells; ci++) {
+        VgCell tmp;
+        const VgCell *cl = vgeo_scene_gpu_cell(&G.scene, ci, &tmp);
+        if (!cl || !cl->count) continue;
         vec3 mn = v3(cl->min[0], cl->min[1], cl->min[2]), mx = v3(cl->max[0], cl->max[1], cl->max[2]);
         vec3 q = v3_max(mn, v3_min(lc, mx));
         if (v3_len2(v3_sub(q, lc)) > sphere.w * sphere.w) continue;
         for (u32 i = cl->first; i < cl->first + cl->count; i++) {
-            const VgInstance *in = &G.scene.instances[i];
-            if (in->mesh >= G.fb_cap || !G.fb[in->mesh].lod_count) continue;
+            const VgInstance *in = vgeo_scene_instance(&G.scene, i);
+            if (!in || in->mesh >= G.fb_cap || !G.fb[in->mesh].lod_count) continue;
             struct FallbackMesh *f = &G.fb[in->mesh];
             const VgMesh *m = &G.scene.meshes[in->mesh];
+            if (!fallback_keep(in, m)) continue;
             float p[3], qr[4], s;
             vgeo_instance_decode(in, p, qr, &s);
             quat qq = { qr[0], qr[1], qr[2], qr[3] };
@@ -1412,4 +1542,316 @@ static void skin_record(VkCommandBuffer cmd) {
             G.slot_mat_dirty[s] = 0;
         }
     vg_palettes_record(&G.pal, cmd);
+}
+
+// ------------------------------------------------------------------ foliage (docs/VGEO.md "Foliage support")
+
+static int foliage_type_of_mesh(u32 mesh) {
+    for (u32 i = 0; i < G.ftype_count; i++)
+        if (G.ftype[i].mesh == mesh) return (int)i;
+    return -1;
+}
+
+// The placement region (1M instances = 32 MB, 8192 cells), reserved on first use.
+static void foliage_region(void) {
+    if (G.scene.pl.inst_cap) return;
+    vgeo_scene_reserve_placements(&G.scene, 1u << 20, 8192);
+    G.need_commit = true;
+}
+
+static void foliage_commit(void) {
+    if (!G.need_commit) return;
+    G.need_commit = false;
+    if (!vgeo_scene_commit(&G.scene)) log_error("vgeo: scene upload failed");
+}
+
+int render_foliage_test_types(void) {
+    if (!G.ok) return 0;
+    if (G.test_types) return VG_FOLIAGE_KINDS;
+    u64 t0 = SDL_GetTicksNS();
+    const u32 msize = 256;
+    u32 levels;
+    size_t mb = vg_tex_mip_bytes(msize, msize, &levels);
+    u8 *mips = (u8 *)malloc(mb), *masks[2] = { (u8 *)malloc((size_t)msize * msize * 4), (u8 *)malloc((size_t)msize * msize * 4) };
+    for (int k = 0; k < VG_FOLIAGE_KINDS && G.ftype_count < 32; k++) {
+        VgFoliageMesh fm;
+        vgeo_gen_foliage(&fm, k, 11 + (u32)k);
+        VgSource src;
+        vgeo_foliage_source(&fm, &src);
+        VgBuildOptions opt;
+        memset(&opt, 0, sizeof(opt));
+        VgBuilt b;
+        char err[256];
+        bool ok = vgeo_build(&src, &opt, &b, err, sizeof(err));
+        vgeo_foliage_mesh_free(&fm);
+        if (!ok) { log_error("vgeo: %s build failed: %s", vgeo_foliage_name(k), err); continue; }
+        // alpha masks (module textures), the impostor atlas baked with them (1024 px, 8 x 8 frames)
+        VgMaterial mats[2];
+        u32 nm = vgeo_foliage_materials(k, mats);
+        const u8 *mk[2] = { NULL, NULL };
+        for (u32 m = 0; m < nm; m++) {
+            if (!vgeo_gen_foliage_mask(masks[m], msize, k, m, 5)) continue;
+            mk[m] = masks[m];
+            vg_tex_build_mips(masks[m], msize, msize, mips);
+            u32 t = vg_tex_create(&G.cull.tex, msize, msize, levels, mips, true, true);
+            mats[m].mask_tex = mats[m].albedo_tex = t;
+        }
+        VgImpostorMaterial im[2];
+        vgeo_foliage_impostor_materials(k, mk, msize, im);
+        VgImpostorOptions io = { 1024, 8, im, 2 };
+        vgeo_impostor_bake(&b, &io);
+        u32 mesh = vgeo_scene_add_mesh(&G.scene, &b);
+        fallback_register(mesh, &b, false);
+        u32 base = 0;
+        for (u32 m = 0; m < nm; m++) {
+            u32 idx = vgeo_scene_add_material(&G.scene, &mats[m]);
+            if (!m) base = idx;
+        }
+        vgeo_scene_set_mesh_materials(&G.scene, mesh, base);
+        vgeo_foliage_impostor_upload(&G.scene, &G.cull.tex, mesh, &b);
+        struct FoliageType *ft = &G.ftype[G.ftype_count++];
+        dg_strcpy(ft->name, sizeof(ft->name), vgeo_foliage_name(k));
+        ft->mesh = mesh;
+        ft->capsule = k == VG_FOLIAGE_BUSH;   // the bush trunk
+        ft->cap_r = 0.08f;
+        ft->cap_h = 0.8f;
+        log_info("vgeo: foliage type %s: %u tris, %u clusters, %u levels, impostor %ux%u frames", ft->name, b.stats.input_tris, b.hdr.cluster_count, b.hdr.level_count,
+                 io.grid, io.grid);
+        vgeo_free(&b);
+    }
+    free(mips);
+    free(masks[0]);
+    free(masks[1]);
+    G.test_types = true;
+    foliage_region();
+    G.need_commit = true;
+    foliage_commit();
+    log_info("vgeo: foliage test types ready in %.0f ms", (double)(SDL_GetTicksNS() - t0) / 1e6);
+    return VG_FOLIAGE_KINDS;
+}
+
+void *render_foliage_test_chunk(int cx, int cz, float density, float x0, float z0, float x1, float z1, float (*height)(void *user, float x, float z), void *user,
+                                size_t *size) {
+    static const char names[2][48] = { "test_tuft", "test_bush" };
+    VgScatter sc;
+    memset(&sc, 0, sizeof(sc));
+    sc.x0 = x0, sc.z0 = z0, sc.x1 = x1, sc.z1 = z1;
+    sc.density = density;
+    sc.kinds = 2;
+    sc.weight[0] = 9.0f;
+    sc.weight[1] = 1.0f;
+    sc.scale[0][0] = 0.8f, sc.scale[0][1] = 1.3f;
+    sc.scale[1][0] = 0.8f, sc.scale[1][1] = 1.5f;
+    sc.height = height;
+    sc.user = user;
+    sc.seed = 1234;
+    u32 cap = (u32)(density * VGP_CHUNK_SIZE * VGP_CHUNK_SIZE * 1.3f) + 64;
+    VgInstance *tmp = (VgInstance *)malloc(sizeof(VgInstance) * cap);
+    u32 n = vgeo_foliage_scatter_chunk(&sc, cx, cz, tmp, cap);
+    u8 *blob = n ? vgp_write(cx, cz, names, 2, tmp, n, size) : NULL;
+    free(tmp);
+    return blob;
+}
+
+// A placement chunk's mesh name: a registered foliage type, else a model with "vgeo": true (its
+// "foliage" block sets the materials; registered as a type on first use).
+static u32 foliage_resolve(const char *name, void *u) {
+    (void)u;
+    for (u32 i = 0; i < G.ftype_count; i++)
+        if (!strcmp(G.ftype[i].name, name)) return G.ftype[i].mesh;
+    if (G.ftype_count >= 32) return ~0u;
+    const Model *model = assets_model(assets_model_id(name));
+    if (!model || !model->vgeo) return ~0u;
+    RenderVgeoPlacement pl;
+    memset(&pl, 0, sizeof(pl));
+    pl.mesh = name;
+    pl.color = v3(1, 1, 1);
+    pl.roughness = 0.8f;
+    u32 before = G.scene.mesh_count, mesh = level_mesh(&pl);
+    if (mesh == ~0u) return ~0u;
+    if (G.scene.mesh_count != before) G.need_commit = true;
+    struct FoliageType *ft = &G.ftype[G.ftype_count++];
+    dg_strcpy(ft->name, sizeof(ft->name), name);
+    ft->mesh = mesh;
+    ft->capsule = model->foliage.capsule;
+    ft->cap_r = model->foliage.capsule_radius;
+    ft->cap_h = model->foliage.capsule_height;
+    return mesh;
+}
+
+int render_foliage_chunk_load(const void *data, size_t size) {
+    if (!G.ok || !data) return -1;
+    VgpView v;
+    if (!vgp_parse((const u8 *)data, size, &v)) { log_warn("vgeo: invalid placement chunk (.vgp)"); return -1; }
+    foliage_region();
+    u32 h = vgeo_foliage_chunk_load(&G.scene, &v, foliage_resolve, NULL, (u32)(u16)(i16)v.hdr->chunk_x | (u32)(u16)(i16)v.hdr->chunk_z << 16);
+    foliage_commit();   // a new mesh / the region: load time
+    return h == ~0u ? -1 : (int)h;
+}
+
+void render_foliage_chunk_unload(int handle) {
+    if (G.ok && handle >= 0) vgeo_scene_placement_remove(&G.scene, (u32)handle);
+}
+
+int render_foliage_chunk_capsules(int handle, RenderCapsule *out, int max) {
+    if (!G.ok || handle < 0 || (u32)handle >= G.scene.pl.chunk_count || !G.scene.pl.chunks[handle].used) return 0;
+    const VgPlacementChunk *ch = &G.scene.pl.chunks[handle];
+    int n = 0;
+    for (u32 i = ch->first; i < ch->first + ch->count && n < max; i++) {
+        const VgInstance *in = &G.scene.pl.inst[i];
+        int t = foliage_type_of_mesh(in->mesh);
+        if (t < 0 || !G.ftype[t].capsule) continue;
+        float s = vgeo_half_to_float(in->scale_h);
+        out[n].a = v3(in->pos[0], in->pos[1], in->pos[2]);
+        out[n].b = v3(in->pos[0], in->pos[1] + G.ftype[t].cap_h * s, in->pos[2]);
+        out[n].radius = G.ftype[t].cap_r * s;
+        n++;
+    }
+    return n;
+}
+
+int render_foliage_query(vec3 pos, float radius, RenderFoliageHit *out, int max) {
+    if (!G.ok || max <= 0) return 0;
+    VgFoliageHit hits[256];
+    float p[3] = { pos.x, pos.y, pos.z };
+    u32 n = vgeo_foliage_query(&G.scene, p, radius, hits, (u32)DG_MIN(max, 256));
+    for (u32 i = 0; i < n; i++) {
+        out[i].pos = v3(hits[i].pos[0], hits[i].pos[1], hits[i].pos[2]);
+        out[i].scale = hits[i].scale;
+        out[i].dist = hits[i].dist;
+        out[i].instance = hits[i].instance;
+        int t = foliage_type_of_mesh(hits[i].mesh);
+        dg_strcpy(out[i].type, sizeof(out[i].type), t >= 0 ? G.ftype[t].name : "?");
+    }
+    return (int)n;
+}
+
+void render_foliage_push(vec3 pos, float radius, float strength) {
+    if (!G.disp_ok) return;
+    float p[3] = { pos.x, pos.y, pos.z };
+    vg_displace_push(&G.disp, p, radius, strength);
+}
+
+void render_foliage_clear(void) {
+    if (!G.ok) return;
+    for (u32 h = 0; h < G.scene.pl.chunk_count; h++)
+        if (G.scene.pl.chunks[h].used) vgeo_scene_placement_remove(&G.scene, h);
+}
+
+static void cmd_foliage_push_test(int argc, const char **argv) {
+    G.push_test = argc > 1 ? (float)atof(argv[1]) : 10.0f;
+    log_info("foliage_push_test: %.0f s of pushes circling the camera", (double)G.push_test);
+}
+
+static void cmd_foliage_stats(int argc, const char **argv) {
+    (void)argc;
+    (void)argv;
+    if (!G.ok) return;
+    const VgPlacements *p = &G.scene.pl;
+    char err[256] = "";
+    bool ok = vgeo_scene_placement_audit(&G.scene, err, sizeof(err));
+    log_info("foliage: %u types, %u placement chunks, %u instances (region %u instances / %u cells, %u cells free, %u free ranges), %llu uploads (%.1f MB), "
+             "allocator audit %s%s",
+             G.ftype_count, p->live_chunks, p->live_instances, p->inst_cap, p->cell_cap, p->free_cells_n, p->free_inst_n, (unsigned long long)p->uploads,
+             (double)p->upload_bytes / (1024.0 * 1024.0), ok ? "PASS" : "FAIL: ", ok ? "" : err);
+    VgCounters c;
+    if (vg_cull_counters(&G.cull, 0, &c))
+        log_info("foliage: last frame: %u + %u visible instances, %u faded (density / fade), %u impostors, %u HW + %u SW clusters, %u triangles; vgeo shadows %.3f + %.3f ms",
+                 c.n[VGN_INST_VIS], c.n[VGN_INST_P2], c.n[VGN_INST_FADED], c.n[VGN_IMPOSTORS], c.n[VGN_HW], c.n[VGN_SW], c.n[VGN_TRIS], G.shadow_ms[0], G.shadow_ms[1]);
+}
+
+static void cmd_foliage_query(int argc, const char **argv) {
+    float r = argc > 1 ? (float)atof(argv[1]) : 2.0f;
+    RenderFoliageHit h[16];
+    int n = render_foliage_query(R->cam.pos, r, h, 16);
+    log_info("foliage_query: %d instances within %.1f m of (%.1f, %.1f)", n, (double)r, (double)R->cam.pos.x, (double)R->cam.pos.z);
+    for (int i = 0; i < n; i++) log_info("  %s at (%.2f, %.2f, %.2f) scale %.2f, %.2f m", h[i].type, (double)h[i].pos.x, (double)h[i].pos.y, (double)h[i].pos.z, (double)h[i].scale, (double)h[i].dist);
+}
+
+// foliage_check (scripted, docs/VGEO.md "Foliage support"): the camera override runs
+//   phase 1, 60 frames: behind the foliage yard wall (devroom), facing the yard: the Hi-Z must reject
+//            >= 90 % of the foliage instances in the frustum (visible instances vs a CPU count)
+//   phase 2, 620 frames: a static camera in the yard, occlusion off: the culled counts (kept by the
+//            density hash and fades, impostors, clusters) identical in every frame
+static struct {
+    int phase, frame, occ_saved, changed, samples;
+    u32 sig0, in_frustum, vis;
+    double rej;
+} FC;
+
+static void cmd_foliage_check(int argc, const char **argv) {
+    (void)argc;
+    (void)argv;
+    if (!G.ok || !G.scene.pl.live_chunks) { log_warn("foliage_check: no placement chunks (foliage_test_scatter first)"); return; }
+    memset(&FC, 0, sizeof(FC));
+    FC.phase = 1;
+    FC.occ_saved = G.occlusion->i;
+    log_info("foliage_check: started");
+}
+
+static bool foliage_check_camera(RenderCamera *cam) {
+    if (!FC.phase) return false;
+    if (FC.phase == 1) cam->pos = v3(220.0f, 1.7f, 75.3f);   // 0.45 m from the 8 m wall at z = 76 (devroom foliage yard)
+    else cam->pos = v3(220.0f, 1.7f, 120.0f);
+    cam->yaw = -180.0f * DG_DEG2RAD;   // facing +z (south, into the yard)
+    cam->pitch = FC.phase == 1 ? 0.0f : -6.0f * DG_DEG2RAD;
+    cam->roll = 0;
+    return true;
+}
+
+static void foliage_check_frame(void) {
+    if (!FC.phase) return;
+    VgCounters c;
+    bool hc = vg_cull_counters(&G.cull, 0, &c);
+    if (FC.phase == 1 && FC.frame >= 40 && hc) {
+        // CPU: foliage instances in this view's frustum (the culling view: unjittered)
+        VgViewGpu v;
+        float eye[3] = { R->cam.pos.x, R->cam.pos.y, R->cam.pos.z };
+        vgeo_view_setup(&v, R->view_proj_nj.m, R->view_proj_nj.m, eye, 1, R->cam.znear, R->hdr.w, R->hdr.h, 1, 32, 0);
+        u32 in = 0;
+        const VgPlacements *p = &G.scene.pl;
+        for (u32 cc = 0; cc < p->cell_cap; cc++)
+            for (u32 i = p->cells[cc].first; i < p->cells[cc].first + p->cells[cc].count; i++) {
+                const VgInstance *ins = &p->inst[i];
+                const VgMesh *m = &G.scene.meshes[ins->mesh];
+                VgXfCpu x;
+                vgeo_xf_decode(&x, ins, m, NULL);
+                float s[4];
+                vgeo_xf_sphere(&x, m->center, m->radius, s);
+                bool inside = true;
+                for (int k = 0; k < 6 && inside; k++) inside = v.planes[k][0] * s[0] + v.planes[k][1] * s[1] + v.planes[k][2] * s[2] + v.planes[k][3] >= -s[3];
+                float dx = ins->pos[0] - eye[0], dy = ins->pos[1] - eye[1], dz = ins->pos[2] - eye[2];
+                if (inside && vgeo_foliage_alpha(m, ins->flags_phase, sqrtf(dx * dx + dy * dy + dz * dz), G.foliage_density->f) > 0) in++;
+            }
+        FC.in_frustum += in;
+        FC.vis += c.n[VGN_INST_VIS] + c.n[VGN_INST_P2];
+        FC.samples++;
+    }
+    if (FC.phase == 1 && ++FC.frame >= 60) {
+        FC.rej = FC.in_frustum ? 1.0 - (double)FC.vis / (double)FC.in_frustum : 0;
+        log_info("foliage_check hiz: %u foliage instances in the frustum, %u visible (behind the yard wall, %d frames): %.2f %% rejected -> %s", FC.in_frustum / DG_MAX(FC.samples, 1),
+                 FC.vis / DG_MAX(FC.samples, 1), FC.samples, FC.rej * 100.0, FC.rej >= 0.9 && FC.in_frustum ? "PASS" : "FAIL");
+        FC.phase = 2;
+        FC.frame = 0;
+        FC.samples = 0;
+        cvar_set_int(G.occlusion, 0);
+        return;
+    }
+    if (FC.phase == 2) {
+        if (FC.frame >= 20 && hc) {
+            u32 sig = c.n[VGN_INST_VIS] * 2654435761u ^ c.n[VGN_INST_FADED] * 40503u ^ c.n[VGN_IMPOSTORS] * 9973u ^ (c.n[VGN_HW] + c.n[VGN_SW]) * 31u ^ c.n[VGN_TRIS];
+            if (!FC.samples) {
+                FC.sig0 = sig;
+                FC.vis = c.n[VGN_INST_VIS];
+                FC.in_frustum = c.n[VGN_INST_FADED];
+            } else FC.changed += sig != FC.sig0;
+            FC.samples++;
+        }
+        if (++FC.frame >= 620) {
+            log_info("foliage_check density: %d frames of a static camera: %u instances kept, %u faded, %d frames differ -> %s", FC.samples, FC.vis, FC.in_frustum,
+                     FC.changed, FC.changed == 0 && FC.samples >= 600 && FC.vis > 0 ? "PASS" : "FAIL");
+            cvar_set_int(G.occlusion, FC.occ_saved);
+            FC.phase = 0;
+        }
+    }
 }

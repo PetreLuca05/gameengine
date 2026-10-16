@@ -16,6 +16,38 @@
 // (the page data section of a .vgeo file; VgPageDesc.file_offset is relative to it).
 typedef struct VgPageSource { u8 *data; char *path; u64 base; } VgPageSource;
 
+// Placement chunks (Phase 7, docs/VGEO.md "Foliage support"): a region of the instance and cell
+// buffers after the committed (static) ones, sub-allocated per chunk and patched in place, so loading
+// or freeing a chunk costs no commit. GPU instance index of region instance i = instance_count + i,
+// GPU cell of region cell j = cell_count + j. Free cells are empty (count 0, far away).
+typedef struct VgRange { u32 first, count; } VgRange;
+typedef struct VgPlacementChunk {
+    bool used;
+    u32 first, count;            // region instances
+    u32 cell_count;
+    u32 cells[16];               // region cells (an 8 m grid: 4 x 4 per 32 m chunk)
+    u32 user;                    // caller's tag (chunk coordinates, ...)
+} VgPlacementChunk;
+typedef struct VgPlacements {
+    u32 inst_cap, cell_cap;      // region capacity (vgeo_scene_reserve_placements; applied at the next commit)
+    VgInstance *inst;            // [inst_cap]
+    VgCell *cells;               // [cell_cap]: first relative to the region
+    u32 *cell_chunk;             // [cell_cap]: owning chunk, ~0 = free
+    VgRange *free_inst;          // free instance ranges, sorted, merged
+    u32 free_inst_n, free_inst_cap;
+    u32 *free_cells;             // stack of free cell indices
+    u32 free_cells_n;
+    VgPlacementChunk *chunks;
+    u32 chunk_count, chunk_cap, live_chunks, live_instances;
+    VgRange *dirty_inst;         // region ranges to upload at the next record
+    u32 dirty_inst_n, dirty_inst_cap;
+    u32 *dirty_cells;
+    u32 dirty_cells_n, dirty_cells_cap;
+    VgBuffer staging[3];         // per frame in flight (VG_MAX_FRAMES)
+    u32 gpu_inst_cap, gpu_cell_cap;   // the region the buffers hold since the last commit
+    u64 uploads, upload_bytes;   // stats
+} VgPlacements;
+
 typedef struct VgScene {
     const VgContext *ctx;
     VgMesh *meshes;
@@ -47,6 +79,11 @@ typedef struct VgScene {
     u64 cluster_count, tri_count;
     VgMaterial *materials;       // [0] = default grey
     u32 material_count, material_cap;
+    u32 *mesh_mat_count;         // per mesh: material count (the commit derives the mesh's foliage fields from them)
+    bool has_two_sided;          // a two-sided material is in use (the raster's second HW draw)
+    bool has_masked, has_impostors;   // masked / dithered materials, impostor atlases (the raster's SW variants)
+    float fol_fade_max, fol_shadow_max;   // largest foliage fade end / shadow distance (0: one is unlimited)
+    VgPlacements pl;
     VgBuffer b_meshes, b_nodes, b_groups, b_page_table, b_pool, b_instances, b_cells, b_materials;
     VgBuffer b_stamps;           // u32 per pool slot: last frame a leaf emitted one of its groups (binding 20)
     u32 generation;              // bumps on every commit (cullers rewrite their descriptor sets)
@@ -74,7 +111,32 @@ void vgeo_scene_add_instance(VgScene *s, u32 mesh, const float pos[3], const flo
 void vgeo_scene_add_skinned_instance(VgScene *s, u32 mesh, const float pos[3], const float rot[4], float scale, u32 slot);
 void vgeo_scene_clear_instances(VgScene *s);
 // Bins instances into cells and uploads everything (load time: waits for the device to be idle).
+// Also derives every mesh's foliage fields (VgMesh max_wpo / fade / shadow_max_dist / fflags) and
+// every material's declared wpo_max from the materials.
 bool vgeo_scene_commit(VgScene *s);
+
+// ------------------------------------------------------------------ placement chunks (Phase 7)
+
+// Capacity of the placement region (instances, cells); takes effect at the next commit. Chunks
+// loaded so far are kept when it grows.
+void vgeo_scene_reserve_placements(VgScene *s, u32 instances, u32 cells);
+// Adds a chunk: cells[ncells] (first / count relative to inst; bounds are recomputed from the
+// instance mesh spheres + max WPO) over inst[n] (mesh = scene mesh index). Returns the chunk handle,
+// ~0 when the region is full. Visible from the next vgeo_scene_placement_record.
+u32 vgeo_scene_placement_add(VgScene *s, const VgCell *cells, u32 ncells, const VgInstance *inst, u32 n, u32 user);
+void vgeo_scene_placement_remove(VgScene *s, u32 chunk);
+// Uploads the chunk changes since the last record (frame < VG_MAX_FRAMES: its staging buffer is free
+// again); before the frame's first cull. A barrier orders it after every earlier read.
+void vgeo_scene_placement_record(VgScene *s, VkCommandBuffer cmd, u32 frame);
+// Allocator audit: live chunks + free ranges cover the region exactly once, cells likewise. false +
+// message on the first violation.
+bool vgeo_scene_placement_audit(const VgScene *s, char *err, int err_size);
+// GPU tables: instances / cells including the placement region (what the views cull).
+DG_INLINE u32 vgeo_scene_gpu_instances(const VgScene *s) { return s->instance_count + s->pl.gpu_inst_cap; }
+DG_INLINE u32 vgeo_scene_gpu_cells(const VgScene *s) { return s->cell_count + s->pl.gpu_cell_cap; }
+// Instance i of the GPU table (static or placement region), NULL past the end.
+const VgInstance *vgeo_scene_instance(const VgScene *s, u32 i);
+const VgCell *vgeo_scene_gpu_cell(const VgScene *s, u32 i, VgCell *tmp);
 
 // ------------------------------------------------------------------ CPU reference (tests)
 

@@ -4,7 +4,9 @@
 // as 0 (never occlude), so there are no odd tails. One workgroup writes 6 levels of a 32 x 32 tile of
 // level pc.base (SPD-style, shared memory): a 1080p chain is 2 dispatches.
 //   pc.base == 0: level 0 from the source (pc.src 0: depth texture, 1: visibility buffer, depth =
-//                 1 - hi 32 bits as float, empty = far); pc.base > 0: from level base - 1 (src image).
+//                 1 - hi 32 bits as float, empty = far; 2: the nearer of both, the renderer's
+//                 this-frame Hi-Z over vgeo + the static legacy occluders); pc.base > 0: from level
+//                 base - 1 (src image).
 #extension GL_GOOGLE_include_directive : require
 #extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
 layout(local_size_x = 16, local_size_y = 16) in;
@@ -21,7 +23,8 @@ float src_at(ivec2 q) {
     if (pc.base > 0u) return imageLoad(src_img, q).r;
     if (pc.src == 0u) return texelFetch(depth_tex, q, 0).r;
     uint hi = uint(vis[uint(q.y) * pc.src_size.x + uint(q.x)] >> 32);
-    return 1.0 - uintBitsToFloat(hi);
+    float v = 1.0 - uintBitsToFloat(hi);
+    return pc.src == 2u ? min(v, texelFetch(depth_tex, q, 0).r) : v;
 }
 
 void store(uint l, ivec2 p, float v) {

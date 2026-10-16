@@ -201,6 +201,41 @@ static void model_load_vgeo(Model *m, const char *gltf_path) {
              b->hdr.group_count, b->hdr.page_count, b->hdr.level_count, b->hdr.lod_count, (double)(SDL_GetTicksNS() - t0) / 1e6);
 }
 
+// "foliage": { "masked", "two_sided", "alpha_cutoff", "wpo", "displace", "wpo_params", "fade",
+// "shadow_max_dist" } and "colliders": "capsule" + "capsule": [radius, height].
+static void model_parse_foliage(Model *m, const cJSON *it) {
+    ModelFoliage *f = &m->foliage;
+    memset(f, 0, sizeof(*f));
+    const cJSON *col = cJSON_GetObjectItemCaseSensitive(it, "colliders"), *cap = cJSON_GetObjectItemCaseSensitive(it, "capsule");
+    f->capsule = cJSON_IsString(col) && !strcmp(col->valuestring, "capsule");
+    f->capsule_radius = 0.15f;
+    f->capsule_height = 2.0f;
+    if (cJSON_IsArray(cap) && cJSON_GetArraySize(cap) >= 2) {
+        f->capsule_radius = (float)cJSON_GetArrayItem(cap, 0)->valuedouble;
+        f->capsule_height = (float)cJSON_GetArrayItem(cap, 1)->valuedouble;
+    }
+    const cJSON *o = cJSON_GetObjectItemCaseSensitive(it, "foliage");
+    if (!cJSON_IsObject(o)) return;
+    f->enabled = true;
+    f->masked = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(o, "masked"));
+    f->two_sided = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(o, "two_sided"));
+    f->dither = !cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(o, "dither"));
+    f->displace = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(o, "displace"));
+    const cJSON *v = cJSON_GetObjectItemCaseSensitive(o, "alpha_cutoff");
+    f->alpha_cutoff = cJSON_IsNumber(v) ? (float)v->valuedouble : 0.5f;
+    v = cJSON_GetObjectItemCaseSensitive(o, "wpo");
+    f->wpo = cJSON_IsString(v) ? (!strcmp(v->valuestring, "grass") ? 1 : !strcmp(v->valuestring, "tree") ? 2 : 0) : 0;
+    v = cJSON_GetObjectItemCaseSensitive(o, "wpo_params");
+    for (int k = 0; k < 4 && cJSON_IsArray(v) && k < cJSON_GetArraySize(v); k++) f->wpo_params[k] = (float)cJSON_GetArrayItem(v, k)->valuedouble;
+    v = cJSON_GetObjectItemCaseSensitive(o, "fade");
+    if (cJSON_IsArray(v) && cJSON_GetArraySize(v) >= 2) {
+        f->fade_start = (float)cJSON_GetArrayItem(v, 0)->valuedouble;
+        f->fade_end = (float)cJSON_GetArrayItem(v, 1)->valuedouble;
+    }
+    v = cJSON_GetObjectItemCaseSensitive(o, "shadow_max_dist");
+    f->shadow_max_dist = cJSON_IsNumber(v) ? (float)v->valuedouble : 0.0f;
+}
+
 // ------------------------------------------------------------------ manifest
 
 bool assets_init(const char *manifest_path) {
@@ -229,6 +264,7 @@ bool assets_init(const char *manifest_path) {
         if (model_load_gltf(platform_data_path(cJSON_IsString(p) ? p->valuestring : "", buf, sizeof(buf)), m)) {
             dg_strcpy(m->name, sizeof(m->name), cJSON_IsString(n) ? n->valuestring : "");
             if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(it, "vgeo"))) model_load_vgeo(m, buf);
+            model_parse_foliage(m, it);
         }
         AS->model_count++; // keep indices stable even if a model failed to load
     }

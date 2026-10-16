@@ -41,6 +41,10 @@ typedef struct WorldGen {
     float amplitude, base_height;
 } WorldGen;
 
+// Foliage trunk capsules (render_foliage_chunk_capsules) as one static body: hexagonal prisms in a
+// triangle mesh (a body per capsule would run out of bodies at 300k foliage instances).
+BodyId chunks_capsule_body(World *w, const RenderCapsule *caps, int n);
+
 bool chunks_create(World *w, ChunkProviderKind kind, u32 seed);
 void chunks_destroy(World *w);
 void chunks_update(World *w, float dt);
@@ -49,5 +53,6 @@ vec3 chunks_spawn_point(World *w);
 int chunks_loaded_count(const World *w);
 bool chunks_is_loaded(const World *w, vec3 pos);
 float chunks_relevance_radius(void);
+void chunks_register_cvars(void);   // the world_* chunk cvars (before the first streamed map: world_foliage_test)
 
 #endif

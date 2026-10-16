@@ -192,6 +192,27 @@ typedef struct RenderVgeoPlacement {
     u32 grid[2], seed;
 } RenderVgeoPlacement;
 void render_vgeo_set_level(const RenderVgeoPlacement *p, int count);
+
+// Foliage on vgeo (docs/VGEO.md "Foliage support"): placement chunks (.vgp, 32 m: 4 x 4 cells of 32 B
+// instances) loaded / freed with world chunks, over foliage meshes resolved by name (the procedural
+// test types "test_tuft" / "test_bush", or models with "vgeo": true and a "foliage" block).
+typedef struct RenderCapsule { vec3 a, b; float radius; } RenderCapsule;
+typedef struct RenderFoliageHit { vec3 pos; float scale, dist; u32 instance; char type[48]; } RenderFoliageHit;
+int render_foliage_test_types(void);            // registers the procedural test types (once, load time); returns their count
+// A .vgp chunk of test foliage for chunk (cx, cz): jittered grid at `density` per m2 (90 % tufts, 10 %
+// bushes), on height(user, x, z) (NULL: 0), inside [x0, x1) x [z0, z1). Thread-safe (job threads):
+// returns a malloc'd file (size in *size), NULL when the chunk gets nothing.
+void *render_foliage_test_chunk(int cx, int cz, float density, float x0, float z0, float x1, float z1, float (*height)(void *user, float x, float z), void *user,
+                                size_t *size);
+int render_foliage_chunk_load(const void *vgp, size_t size);   // handle, -1 on failure (unknown types are dropped)
+void render_foliage_chunk_unload(int handle);
+// Trunk capsules of a loaded chunk (types with "colliders": "capsule"): world segment + radius.
+int render_foliage_chunk_capsules(int handle, RenderCapsule *out, int max);
+// Placement instances within radius (horizontal) of pos, nearest first (footsteps, crushing, burning).
+int render_foliage_query(vec3 pos, float radius, RenderFoliageHit *out, int max);
+// Flattens grass: a push into the displacement buffer this frame (strength: m/s of displacement).
+void render_foliage_push(vec3 pos, float radius, float strength);
+void render_foliage_clear(void);                // unloads every chunk
 void render_add_spot(const SpotLight *light);
 void render_set_spot_cookie(TextureId cookie);
 
@@ -204,7 +225,8 @@ typedef struct RenderWeather {
     float wetness, puddles, snow_cover;   // 0..1 surface state
     float rain, snowfall;                 // precipitation intensities 0..1
     float lightning;                      // flash 0..1 this frame
-    vec3 wind;                            // m/s (world)
+    vec3 wind;                            // m/s (world), gusts included
+    float gust;                           // gust factor (WeatherWind.gust): foliage WPO, FrameData wx5
     float time;                           // s (animation)
     int precip_quality;                   // 0 off, 1 low, 2 medium, 3 high
     bool occlusion_update;                // re-render the top-down occlusion map this frame

@@ -40,6 +40,7 @@ static struct {
     bool have;
     float flash, rain, snowfall, exposed_cam;
     vec3 wind;
+    float gust;
     double last_frame_tick;
     // events
     bool raining, snowing, storm;
@@ -444,6 +445,7 @@ void weather_frame(World *w, const RenderCamera *cam, const Player *lp) {
     WX.snowfall = precip_snow(&WX.cur);
     WeatherWind wind = weather_wind(&WX.cur, tick * SIM_DT);
     WX.wind = v3_scale(wind.dir, wind.strength);
+    WX.gust = wind.gust;
     WX.exposed_cam = weather_exposure(w, cam->pos);
     update_events();
 
@@ -467,6 +469,7 @@ void weather_frame(World *w, const RenderCamera *cam, const Player *lp) {
     rw.snowfall = WX.snowfall;
     rw.lightning = WX.flash;
     rw.wind = WX.wind;
+    rw.gust = WX.gust;
     rw.time = (float)fmod(tick * SIM_DT, 3600.0);
     rw.precip_quality = quality();
     rw.occlusion_update = upd;

@@ -22,6 +22,12 @@ void main() {
     VgCell c = cells[i];
     vec4 s = vec4((c.mn + c.mx) * 0.5, length(c.mx - c.mn) * 0.5);
     if (!vg_frustum(s)) return;
+    if ((c.count & VG_CELL_FOLIAGE) != 0u) {   // all foliage: past every fade end / shadow distance, nothing in it draws
+        float lim = uintBitsToFloat((vg_flags() & VGV_ORTHO) != 0u ? V.misc.w : V.misc.z);
+        vec3 q = clamp(V.cam_pos.xyz, c.mn, c.mx);
+        if (lim > 0.0 && distance(q, V.cam_pos.xyz) > lim) return;
+    }
+    c.count &= VG_CELL_COUNT;
     if (vg_occluded(s)) {
         if (pc.pass == 1u) {
             uint k = vg_append(VGN_CELLS_OCC, cap);

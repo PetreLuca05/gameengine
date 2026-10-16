@@ -84,6 +84,8 @@ typedef struct VgBuilt {
     VgLodVertex *lod_vertices;
     u8 *page_data;
     u32 page_data_size;
+    u8 *impostor;                // VGS_IMPOSTOR section (vgeo_impostor.h), NULL = none
+    u32 impostor_size;
     VgBuildStats stats;
     VgDbg dbg;                   // only with keep_build_data
 } VgBuilt;

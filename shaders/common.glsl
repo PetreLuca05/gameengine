@@ -67,6 +67,7 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 wx2;             // wind x, z, wind strength, puddle mask valid
     vec4 wx3;             // occlusion centre x, z, half extent, top y
     vec4 wx4;             // occlusion depth range (m), precipitation quality
+    vec4 wx5;             // foliage wind: gust factor, gust phase, time (s), wind direction angle (rad)
     vec4 puddle_xf;       // origin x, z, 1 / size x, 1 / size z
     PointLight lights[MAX_POINT_LIGHTS];
     // Local light shadows (src/render/vk_light_shadow.c): world -> atlas tile per cube face / spot.

@@ -36,14 +36,21 @@ typedef struct VgGroup {
     u32 level;                   // DAG level (0 = leaves)
 } VgGroup;
 
+// Mesh-level foliage flags (VgMesh.fflags), derived from its materials at commit (Phase 7).
+enum VgMeshFoliage { VGMF_FOLIAGE = 1u << 0, VGMF_MASKED = 1u << 1, VGMF_TWO_SIDED = 1u << 2, VGMF_DITHER = 1u << 3, VGMF_WPO = 1u << 4 };
+
 // One loaded mesh in the global tables.
 typedef struct VgMesh {
     float center[3], radius;
     u32 root_node, node_base, group_base, page_base;   // offsets into the global tables
-    u32 page_count, flags, material_base, impostor;    // impostor: atlas id or ~0
-    float max_wpo;               // m: max world-position offset over its materials (0 = static)
+    u32 page_count, flags, material_base, impostor;    // impostor: albedo atlas texture | normal atlas texture << 16 (vgeo_tex.h), ~0 = none
+    float max_wpo;               // m: max world-position offset over its materials (0 = static): inflates every bound
     float q_step;                // position grid step (m): pos = (cluster.base + u16 offset) * q_step
-    float pad[2];
+    float fade_start, fade_end;  // m: instance distance fade + density thinning (VGMF_FOLIAGE; fade_end 0 = no fade)
+    float shadow_max_dist;       // m: not in the sun cascades beyond this distance from the camera (0 = always)
+    u32 fflags;                  // VgMeshFoliage
+    u32 impostor_grid;           // impostor atlas: frames per side (hemi-octahedral)
+    float impostor_radius;       // m: the atlas frames' half extent (mesh space; the billboard's half size)
 } VgMesh;
 
 // Page payload: VgPageHeader, VgCluster[cluster_count], vertex data, triangle data (16-byte aligned blocks).
@@ -87,8 +94,11 @@ typedef struct VgPaletteSlot {
     float max_scale, k0, k1, pad1;
 } VgPaletteSlot;
 
-// Instance flags (VgInstance.flags_phase >> 16).
+// Instance flags (VgInstance.flags_phase >> 16). Below them: bits 0-7 the wind phase (WPO), bits 8-15 the
+// density hash (foliage: kept while (hash + 0.5) / 256 < r_foliage_density x fade(distance)).
 enum VgInstanceFlags { VGI_XFORM = 1u << 0, VGI_SKINNED = 1u << 1, VGI_CAST_SHADOW = 1u << 2 };
+#define VG_INST_PHASE(fp) ((fp) & 0xFFu)
+#define VG_INST_HASH(fp) (((fp) >> 8) & 0xFFu)
 
 typedef struct VgPageDesc {
     u32 file_offset, size;       // in the file's page data section
@@ -133,8 +143,11 @@ typedef struct VgInstance {
 } VgInstance;
 
 // Placement cell (8 m): the first level of instance culling. Instances of a cell are contiguous.
+// The GPU copy's count carries VG_CELL_FOLIAGE when every instance is foliage (distance-culled whole).
 typedef struct VgCell { float min[3]; u32 first; float max[3]; u32 count; } VgCell;
 #define VGEO_CELL_SIZE 8.0f
+#define VG_CELL_FOLIAGE 0x80000000u
+#define VG_CELL_COUNT 0x7FFFFFFFu
 
 // ------------------------------------------------------------------ culling (Phase 2)
 
@@ -165,6 +178,14 @@ typedef struct VgViewGpu {
     u32 cap_nodes, cap_groups, cap_visible, cap_occluded;
     u32 cap_cells, cap_instances, cap_requests, slot_material_base;   // per-slot materials of skinned instances (~0: none)
     float raster_view_proj[16];      // the view the visible clusters are rasterised with (main view: jittered)
+    // Foliage (Phase 7): wind and time of the WPO snippets (shaders/vgeo/wpo.glsl), this frame's and
+    // the previous one's (velocity); density / impostor switch; the displacement buffer.
+    float wind[4];                   // direction x, z (unit), strength (m/s, gusts included), gust factor
+    float wind_prev[4];
+    float foliage[4];                // time (s), previous time, r_foliage_density, r_vgeo_impostor_px (0 = no impostors)
+    float disp[4];                   // displacement buffer: texel 0 world x, z (m), metres per texel, valid (1)
+    u32 frame_index, disp_tex;       // frame_index: dither rotation (TAA); disp_tex: its texture index
+    float fol_fade_max, fol_shadow_max;   // all-foliage cells (VG_CELL_FOLIAGE) farther than this are culled whole (0 = never)
 } VgViewGpu;
 
 // Counters (binding 8): indirect dispatch args first (x, y, z, unused), then counts.
@@ -182,8 +203,12 @@ enum VgCount {
     VGN_GROUPS0, VGN_GROUPS1,                    // group items, pass 1 / pass 2
     VGN_CLUSTERS_SELECTED, VGN_HW, VGN_SW, VGN_HW_P1, VGN_SW_P1,
     VGN_CL_OCC, VGN_PAGE_REQ, VGN_OVERFLOW, VGN_TRIS, VGN_INST_P2, VGN_CL_P2, VGN_CELLS_P2,
+    VGN_IMPOSTORS,                               // instances drawn as impostors (SW list entries VG_IMPOSTOR_ENTRY)
+    VGN_INST_FADED,                              // foliage instances culled by density / distance fade / shadow distance
     VGN_COUNT = 32
 };
+// Visible list entry (instance, VG_IMPOSTOR_ENTRY): the instance's impostor quad (2 triangles, SW list).
+#define VG_IMPOSTOR_ENTRY 0xFFFFFFFFu
 typedef struct VgCounters { u32 args[VGA_COUNT][4]; u32 n[VGN_COUNT]; } VgCounters;
 
 // ------------------------------------------------------------------ visibility buffer (Phase 3)
@@ -195,13 +220,33 @@ typedef struct VgCounters { u32 args[VGA_COUNT][4]; u32 n[VGN_COUNT]; } VgCounte
 #define VG_VIS_TRI_BITS 7
 #define VG_VIS_INDEX_BITS 25
 
+// Material flags above the renderer's MaterialFlags (render.h MAT_*, bits 0-11), Phase 7.
+enum VgMaterialFlags {
+    VGM_MASKED = 1u << 24,           // alpha mask: mask_tex alpha >= alpha_cutoff, the same test in every raster path
+    VGM_TWO_SIDED = 1u << 25,        // no back-face / cone culling, the resolve flips back-facing normals
+    VGM_DITHER_FADE = 1u << 26,      // the instance's fade dithers it out (blue-noise threshold rotated per frame)
+    VGM_FOLIAGE = 1u << 27,          // instances are thinned by the density hash (r_foliage_density) and fade_start / end
+};
+#define VGM_FLAGS (VGM_MASKED | VGM_TWO_SIDED | VGM_DITHER_FADE | VGM_FOLIAGE)
+
+// World-position-offset snippets (VgMaterial.wpo, shaders/vgeo/wpo.glsl): snippet id | WPO_DISPLACE.
+enum VgWpo { WPO_NONE = 0, WPO_GRASS = 1, WPO_TREE = 2, WPO_DISPLACE = 1u << 8 };
+#define VG_DISPLACE_MAX 0.6f         // m: the displacement buffer's largest push (WPO_DISPLACE bound)
+
 // Material table (binding 19, VgScene): VgMesh.material_base + the cluster's material.
 typedef struct VgMaterial {
     float color[4];                  // linear RGBA
     float roughness, metallic, emissive, tex_scale;
-    u32 flags;                       // MaterialFlags (render.h MAT_*)
-    u32 albedo_tex;                  // bindless texture index (0 = white)
-    u32 pad[6];
+    u32 flags;                       // MaterialFlags (render.h MAT_*) | VgMaterialFlags
+    u32 albedo_tex;                  // texture index (0 = white; vgeo_tex.h)
+    u32 mask_tex;                    // VGM_MASKED: texture whose alpha is the mask (0 = albedo_tex)
+    float alpha_cutoff;
+    u32 wpo;                         // VgWpo
+    float wpo_max;                   // m: declared max displacement (vgeo_wpo_max(wpo, wpo_params)), inflates every bound
+    float fade_start, fade_end;      // m: distance fade (VGM_FOLIAGE; fade_end 0 = none)
+    float wpo_params[4];             // snippet parameters (wpo.glsl)
+    float shadow_max_dist;           // m: sun cascades skip the mesh beyond this distance from the camera (0 = always)
+    u32 pad[3];
 } VgMaterial;
 
 // Push constants of every cull kernel (48 B).
@@ -233,7 +278,7 @@ DG_INLINE void vg_quat_decode(u32 e, float q[4]) {
 
 _Static_assert(sizeof(VgNode) == 32, "VgNode");
 _Static_assert(sizeof(VgGroup) == 32, "VgGroup");
-_Static_assert(sizeof(VgMesh) == 64, "VgMesh");
+_Static_assert(sizeof(VgMesh) == 80, "VgMesh");
 _Static_assert(sizeof(VgPageHeader) == 16, "VgPageHeader");
 _Static_assert(sizeof(VgCluster) == 64, "VgCluster");
 _Static_assert(sizeof(VgPageDesc) == 16, "VgPageDesc");
@@ -241,8 +286,8 @@ _Static_assert(sizeof(VgDiscreteLod) == 32, "VgDiscreteLod");
 _Static_assert(sizeof(VgInstance) == 32, "VgInstance");
 _Static_assert(sizeof(VgCell) == 32, "VgCell");
 _Static_assert(sizeof(VgPaletteSlot) == 32, "VgPaletteSlot");
-_Static_assert(sizeof(VgViewGpu) == 416, "VgViewGpu");
-_Static_assert(sizeof(VgMaterial) == 64, "VgMaterial");
+_Static_assert(sizeof(VgViewGpu) == 496, "VgViewGpu");
+_Static_assert(sizeof(VgMaterial) == 96, "VgMaterial");
 _Static_assert(sizeof(VgCounters) == 256, "VgCounters");
 _Static_assert(sizeof(VgPush) == 48, "VgPush");
 _Static_assert(sizeof(VgFileHeader) == 112 + VGS_COUNT * 8, "VgFileHeader");

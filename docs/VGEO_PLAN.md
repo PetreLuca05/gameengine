@@ -1,6 +1,6 @@
 # Virtualized geometry (vgeo): plan and data layout
 
-Status: **Phases 1-2 and the Phase 4 streaming module are implemented**; `docs/VGEO.md` documents the built system, and *As built* notes below
+Status: **Phases 1-7 are implemented**; `docs/VGEO.md` documents the built system, and *As built* notes below
 mark where it deviates from this plan. Reference design: Karis et al., "A Deep Dive into
 Nanite Virtualized Geometry" (SIGGRAPH 2021), and the UE 5.5+ Nanite skinning and foliage designs. `docs/VGEO.md`
 also lists every deliberate simplification.
@@ -528,6 +528,36 @@ cvars are left to `vk_vgeo.c`.
 - Impostor switch exactly at the threshold.
 - Placement load/unload leaks nothing over 2000 m of streaming flythrough.
 - Hi-Z rejects ≥ 90% of instances behind the dev-room walls (counter).
+
+*As built (Phase 7; details in `docs/VGEO.md` "Foliage support"):*
+- **Files.** The support code is `foliage_support.{c,h}`, plus `vgeo_tex` (the texture table), `vgeo_impostor`
+  (baker), `vgeo_procgen_foliage` (content) and `game_foliage.c`.
+- **Materials.** `VgMaterial` is 96 B: the planned fields plus 4 WPO parameters. `VgMesh` is 80 B and carries
+  the mesh-level fade, shadow distance and flags derived at commit.
+- **Mask agreement.** The SW / HW agreement comes from a per-triangle UV plane and one mip LOD per triangle,
+  computed by the same function in both rasterisers, rather than explicit LOD from per-pixel derivatives.
+  There is no alpha-to-coverage; the fade is a dither with a per-frame rotated interleaved-gradient threshold.
+- **Classification.** "Masked clusters always classified so SW and HW agree" needed no special rule: any split
+  agrees. Masked clusters go SW only once their triangles are small (a performance rule).
+- **Two-sided** is a material flag (not a cluster flag). The HW list is drawn in up to three kinds.
+- **Placement chunks** are as planned: header, ≤ 16 cells, 32 B instances, plus a mesh-name table. They live in a
+  region after the static tables, sub-allocated with a first-fit free list and patched without a commit. All
+  of it is checked over a 2135 m flythrough.
+- **Bounds.** The impostor switch and the SW / HW size use the sphere without the WPO margin. The WPO margin
+  is not added to the LOD error.
+- **Impostors** use 3 blended frames with per-frame projection of the quad point. They live only in the main
+  view (no shadows), are SW only, and have no depth offset.
+- **Displacement buffer** as planned (RG16F 128 × 128, 0.5 m, toroidal, decaying). The writer is real, not a
+  stub, and players push.
+- **Collision.** Trunk "capsules" are one static triangle-mesh body per chunk (hexagonal prisms): one body per
+  capsule exhausted the 16k-body physics world at 300k instances.
+- **Additions beyond the plan:**
+  - the frame's pass-2 Hi-Z merges the static legacy occluders (`vgeo_occluders`); walls were otherwise only
+    pass-1 occluders;
+  - whole all-foliage cells are culled past the fade / shadow distance.
+- **Budget.** 2.0-2.6 ms on the harness (main view + cascade culls); about 3.2 ms in game with the cascade
+  draws. That is over the 2.5 ms budget, mostly near-grass masked overdraw and single-cluster tufts (see
+  `docs/VGEO.md` "Bench").
 
 ## 9. GPU budgets (1080p, mid-range: RTX 3060 / RX 6600 class)
 

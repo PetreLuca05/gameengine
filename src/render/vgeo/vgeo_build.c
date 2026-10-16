@@ -820,6 +820,11 @@ static void group_job(void *ctx, u32 gi, int worker) {
             if (r2 <= tri.n * 3 / 4) { r = r2; e = e2; }
             else { memcpy(dst, lidx, sizeof(u32) * tri.n); r = tri.n; e = 0; }
         }
+        if (r == 0) {   // the subset collapsed entirely (tiny disconnected cards, foliage): carry it unchanged
+            memcpy(dst, lidx, sizeof(u32) * tri.n);
+            r = tri.n;
+            e = 0;
+        }
         serr = fmaxf(serr, e);
         o->tris_out += (u32)(r / 3);
         // Re-cluster (lod / error filled in after the group error is final).
@@ -1433,6 +1438,7 @@ void vgeo_free(VgBuilt *b) {
     free(b->lod_indices);
     free(b->lod_vertices);
     free(b->page_data);
+    free(b->impostor);
     free(b->dbg.pos);
     free(b->dbg.pos_id);
     free(b->dbg.clusters);
@@ -1457,7 +1463,7 @@ bool vgeo_serialize(const VgBuilt *b, u32 key, u8 **data, size_t *size) {
         { b->lods, h.lod_count * (u32)sizeof(VgDiscreteLod) },
         { b->lod_indices, 0 },
         { b->lod_vertices, 0 },
-        { NULL, 0 },
+        { b->impostor, b->impostor_size },   // vgeo_impostor.h (VGF_HAS_IMPOSTOR)
         { b->page_data, b->page_data_size },
         { &st, (u32)sizeof(VgBuildStats) },
     };
@@ -1498,6 +1504,10 @@ bool vgeo_deserialize(const u8 *data, size_t size, VgBuilt *out) {
     TAKE(out->lod_indices, VGS_LOD_INDICES);
     TAKE(out->lod_vertices, VGS_LOD_VERTICES);
     TAKE(out->page_data, VGS_PAGE_DATA);
+    if (h.sections[VGS_IMPOSTOR].size) {
+        TAKE(out->impostor, VGS_IMPOSTOR);
+        out->impostor_size = h.sections[VGS_IMPOSTOR].size;
+    }
     #undef TAKE
     memcpy(out->lods, data + h.sections[VGS_LODS].offset, DG_MIN(h.sections[VGS_LODS].size, (u32)sizeof(out->lods)));
     if (h.sections[VGS_STATS].size == sizeof(VgBuildStats)) memcpy(&out->stats, data + h.sections[VGS_STATS].offset, sizeof(VgBuildStats));

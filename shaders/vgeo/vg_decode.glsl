@@ -5,6 +5,7 @@
 // vertex block, triangle block. Vertex (12 B, +4 with VGF_HAS_COLOR): u16x3 grid offset, oct normal
 // 8 + 8, half2 uv [, RGBA8] [, VGF_SKINNED: joints u8x4, weights unorm8x4]. Triangle (4 B): u8 x3 local
 // indices + spare; skinned clusters' bone sets follow their triangles (vgeo_gpu.h).
+#include "vgeo/wpo.glsl"
 
 struct VgClusterRef { uint slot, index; };
 VgClusterRef vg_cluster_ref(uint packed) { return VgClusterRef(packed >> VG_CLUSTER_BITS, packed & ((1u << VG_CLUSTER_BITS) - 1u)); }
@@ -86,12 +87,34 @@ mat4 vg_vertex_skin_matrix(VgXf x, VgClusterData c, VgMesh m, uint v, bool prev)
     if (!x.skin) return mat4(1.0);
     return vg_skin_matrix(prev ? x.prev_first : x.first, vg_vertex_skin(c, m, v));
 }
-// World position of vertex v (skinned into instance space first).
-vec3 vg_vertex_world(VgXf x, VgClusterData c, VgMesh m, uint v) {
-    vec3 p = vg_vertex_pos(c, m, v);
-    if (x.skin) p = (vg_skin_matrix(x.first, vg_vertex_skin(c, m, v)) * vec4(p, 1.0)).xyz;
-    return vg_xf_point(x, p);
+// ------------------------------------------------------------------ world-position offset (Phase 7)
+
+// The material's WPO snippet (wpo.glsl) at world position w of vertex v: this frame's wind / time, or
+// the previous frame's (prev: velocity). WPO_DISPLACE adds the displacement buffer's push.
+vec3 vg_wpo(VgXf x, VgClusterData c, VgMesh m, uint v, vec3 w, bool prev) {
+    VgMaterial mat = materials[m.material_base + c.material];
+    if (mat.wpo == WPO_NONE) return vec3(0.0);
+    vec4 col = vg_vertex_color(c, m, v);
+    float phase = float(x.fp & 0xFFu) / 256.0;
+    vec3 d = wpo_offset(mat.wpo & 0xFFu, mat.wpo_params, w, x.pos, col, phase, prev ? V.wind_prev : V.wind, prev ? V.foliage.y : V.foliage.x);
+    if ((mat.wpo & WPO_DISPLACE) != 0u && V.disp.w > 0.5) {
+        vec2 rel = w.xz - V.disp.xy, ext = vec2(128.0 * V.disp.z);
+        if (all(greaterThanEqual(rel, vec2(0.0))) && all(lessThan(rel, ext)))   // toroidal: world texel = texel mod 128
+            d += wpo_displace(textureLod(vg_tex[nonuniformEXT(V.misc.y)], w.xz / ext, 0.0).rg, col);
+    }
+    return d;
 }
+
+// World position of vertex v (skinned into instance space first, then displaced by the material's
+// WPO): this frame's, or the previous frame's (prev: palette, wind, time) for velocity.
+vec3 vg_vertex_world_ex(VgXf x, VgClusterData c, VgMesh m, uint v, bool prev) {
+    vec3 p = vg_vertex_pos(c, m, v);
+    if (x.skin) p = (vg_skin_matrix(prev ? x.prev_first : x.first, vg_vertex_skin(c, m, v)) * vec4(p, 1.0)).xyz;
+    vec3 w = vg_xf_point(x, p);
+    if ((m.fflags & VGMF_WPO) != 0u) w += vg_wpo(x, c, m, v, w, prev);
+    return w;
+}
+vec3 vg_vertex_world(VgXf x, VgClusterData c, VgMesh m, uint v) { return vg_vertex_world_ex(x, c, m, v, false); }
 
 // Local vertex indices of triangle t.
 uvec3 vg_triangle(VgClusterData c, uint t) {

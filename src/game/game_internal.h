@@ -39,6 +39,11 @@ void sights_draw(void);
 struct PostSettings;
 void daynight_register(void);
 void weather_register(void);                     // game_weather.c
+// Foliage (game_foliage.c, docs/VGEO.md "Foliage support")
+void foliage_register(void);
+void foliage_frame(World *w);                     // players flatten grass
+void foliage_clear(void);                         // the test scatter placements + their capsules
+void foliage_level_reset(void);                   // map load: the placements (the old world took the capsules)
 // Vehicles (game_vehicles.c, docs/VEHICLES.md)
 struct Writer;
 struct Reader;

@@ -1,9 +1,11 @@
 #include "vgeo_scene.h"
 #include "vgeo_skin.h"
+#include "foliage_support.h"
 #include "core/log.h"
 #include "core/platform.h"
 #include <float.h>
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -50,6 +52,20 @@ static void free_gpu(VgScene *s) {
     vgc_buffer_free(s->ctx, &s->b_stamps);
 }
 
+static void free_placements(VgScene *s) {
+    VgPlacements *p = &s->pl;
+    for (int f = 0; f < 3; f++) if (s->ctx) vgc_buffer_free(s->ctx, &p->staging[f]);
+    free(p->inst);
+    free(p->cells);
+    free(p->cell_chunk);
+    free(p->free_inst);
+    free(p->free_cells);
+    free(p->chunks);
+    free(p->dirty_inst);
+    free(p->dirty_cells);
+    memset(p, 0, sizeof(*p));
+}
+
 void vgeo_scene_free(VgScene *s) {
     if (s->ctx && s->ctx->device) vkDeviceWaitIdle(s->ctx->device);
     free_gpu(s);
@@ -69,6 +85,8 @@ void vgeo_scene_free(VgScene *s) {
     free(s->instances);
     free(s->cells);
     free(s->materials);
+    free(s->mesh_mat_count);
+    free_placements(s);
     memset(s, 0, sizeof(*s));
 }
 
@@ -88,6 +106,8 @@ static u32 add_mesh(VgScene *s, const VgBuilt *b, const char *path) {
     u32 mi = s->mesh_count;
     GROW(s->meshes, s->mesh_count, s->mesh_cap, 1);
     s->mesh_depth = (u32 *)realloc(s->mesh_depth, sizeof(u32) * s->mesh_cap);
+    s->mesh_mat_count = (u32 *)realloc(s->mesh_mat_count, sizeof(u32) * s->mesh_cap);
+    s->mesh_mat_count[mi] = DG_MAX(h->material_count, 1u);
     s->sources = (VgPageSource *)realloc(s->sources, sizeof(VgPageSource) * s->mesh_cap);
     VgPageSource *src = &s->sources[mi];
     memset(src, 0, sizeof(*src));
@@ -244,7 +264,8 @@ static void qrot(const float q[4], const float v[3], float o[3]) {
     o[2] = v[2] + q[3] * t[2] + (q[0] * t[1] - q[1] * t[0]);
 }
 
-static void world_sphere(const VgInstance *in, const float c[3], float r, float out[4]) {
+// World sphere of a mesh-space sphere of a static instance (+ the mesh's max WPO, as vg_world_sphere).
+static void world_sphere(const VgInstance *in, const VgMesh *m, const float c[3], float r, float out[4]) {
     float p[3], q[4], s;
     vgeo_instance_decode(in, p, q, &s);
     float v[3] = { c[0] * s, c[1] * s, c[2] * s }, w[3];
@@ -252,7 +273,342 @@ static void world_sphere(const VgInstance *in, const float c[3], float r, float 
     out[0] = p[0] + w[0];
     out[1] = p[1] + w[1];
     out[2] = p[2] + w[2];
-    out[3] = r * s;
+    out[3] = r * s + m->max_wpo;
+}
+
+// Mesh foliage fields from its materials (declared WPO bounds, fades, shadow distance, flags).
+static void mesh_foliage(VgScene *s) {
+    s->has_two_sided = s->has_masked = s->has_impostors = false;
+    s->fol_fade_max = s->fol_shadow_max = 0;
+    bool fade_inf = false, shadow_inf = false;
+    for (u32 i = 0; i < s->material_count; i++) {
+        VgMaterial *mt = &s->materials[i];
+        mt->wpo_max = mt->wpo != WPO_NONE ? vgeo_wpo_max(mt->wpo, mt->wpo_params) : 0.0f;
+    }
+    for (u32 mi = 0; mi < s->mesh_count; mi++) {
+        VgMesh *m = &s->meshes[mi];
+        m->max_wpo = m->fade_start = m->fade_end = m->shadow_max_dist = 0;
+        m->fflags = 0;
+        bool unlimited_shadow = false;
+        for (u32 k = 0; k < s->mesh_mat_count[mi]; k++) {
+            u32 idx = m->material_base + k;
+            if (idx >= s->material_count) break;
+            const VgMaterial *mt = &s->materials[idx];
+            if (mt->flags & VGM_FOLIAGE) m->fflags |= VGMF_FOLIAGE;
+            if (mt->flags & VGM_MASKED) m->fflags |= VGMF_MASKED;
+            if (mt->flags & VGM_TWO_SIDED) m->fflags |= VGMF_TWO_SIDED;
+            if (mt->flags & VGM_DITHER_FADE) m->fflags |= VGMF_DITHER;
+            if (mt->wpo != WPO_NONE) { m->fflags |= VGMF_WPO; m->max_wpo = fmaxf(m->max_wpo, mt->wpo_max); }
+            if (mt->fade_end > m->fade_end) { m->fade_end = mt->fade_end; m->fade_start = mt->fade_start; }
+            if (mt->shadow_max_dist <= 0) unlimited_shadow = true;
+            else m->shadow_max_dist = fmaxf(m->shadow_max_dist, mt->shadow_max_dist);
+        }
+        if (unlimited_shadow) m->shadow_max_dist = 0;
+        if (m->fflags & VGMF_TWO_SIDED) s->has_two_sided = true;
+        if (m->fflags & (VGMF_MASKED | VGMF_DITHER)) s->has_masked = true;
+        if (m->impostor != ~0u) s->has_impostors = true;
+        if (m->fflags & VGMF_FOLIAGE) {
+            if (m->fade_end > m->fade_start) s->fol_fade_max = fmaxf(s->fol_fade_max, m->fade_end);
+            else fade_inf = true;
+            if (m->shadow_max_dist > 0) s->fol_shadow_max = fmaxf(s->fol_shadow_max, m->shadow_max_dist);
+            else shadow_inf = true;
+        }
+    }
+    if (fade_inf) s->fol_fade_max = 0;
+    if (shadow_inf) s->fol_shadow_max = 0;
+}
+
+// ------------------------------------------------------------------ placement chunks
+
+static const VgCell k_empty_cell = { { 1e30f, 1e30f, 1e30f }, 0, { 1e30f, 1e30f, 1e30f }, 0 };
+
+void vgeo_scene_reserve_placements(VgScene *s, u32 instances, u32 cells) {
+    VgPlacements *p = &s->pl;
+    if (instances <= p->inst_cap && cells <= p->cell_cap) return;
+    instances = DG_MAX(instances, p->inst_cap);
+    cells = DG_MAX(cells, p->cell_cap);
+    p->inst = (VgInstance *)realloc(p->inst, sizeof(VgInstance) * instances);
+    memset(p->inst + p->inst_cap, 0, sizeof(VgInstance) * (instances - p->inst_cap));
+    p->cells = (VgCell *)realloc(p->cells, sizeof(VgCell) * cells);
+    p->cell_chunk = (u32 *)realloc(p->cell_chunk, sizeof(u32) * cells);
+    p->free_cells = (u32 *)realloc(p->free_cells, sizeof(u32) * cells);
+    // new cells free (pushed so the lowest index is taken first)
+    u32 add = cells - p->cell_cap;
+    memmove(p->free_cells + add, p->free_cells, sizeof(u32) * p->free_cells_n);
+    for (u32 i = 0; i < add; i++) {
+        u32 c = cells - 1 - i;
+        p->cells[c] = k_empty_cell;
+        p->cell_chunk[c] = ~0u;
+        p->free_cells[i] = c;
+    }
+    p->free_cells_n += add;
+    // new instances: one free range (merged with a free tail)
+    if (instances > p->inst_cap) {
+        if (p->free_inst_n && p->free_inst[p->free_inst_n - 1].first + p->free_inst[p->free_inst_n - 1].count == p->inst_cap)
+            p->free_inst[p->free_inst_n - 1].count += instances - p->inst_cap;
+        else {
+            GROW(p->free_inst, p->free_inst_n, p->free_inst_cap, 1);
+            p->free_inst[p->free_inst_n++] = (VgRange){ p->inst_cap, instances - p->inst_cap };
+        }
+    }
+    p->inst_cap = instances;
+    p->cell_cap = cells;
+}
+
+static void dirty_range(VgPlacements *p, u32 first, u32 count) {
+    if (!count) return;
+    GROW(p->dirty_inst, p->dirty_inst_n, p->dirty_inst_cap, 1);
+    p->dirty_inst[p->dirty_inst_n++] = (VgRange){ first, count };
+}
+static void dirty_cell(VgPlacements *p, u32 c) {
+    GROW(p->dirty_cells, p->dirty_cells_n, p->dirty_cells_cap, 1);
+    p->dirty_cells[p->dirty_cells_n++] = c;
+}
+
+// Cell bounds = union of its instances' mesh spheres (+ max WPO) and positions (the fade / shadow
+// distances are measured from them), first relative to the region.
+static void cell_bounds(const VgScene *s, VgCell *c) {
+    for (int a = 0; a < 3; a++) { c->min[a] = FLT_MAX; c->max[a] = -FLT_MAX; }
+    for (u32 i = c->first; i < c->first + c->count; i++) {
+        const VgInstance *in = &s->pl.inst[i];
+        const VgMesh *m = &s->meshes[in->mesh < s->mesh_count ? in->mesh : 0];
+        float w[4];
+        world_sphere(in, m, m->center, m->radius, w);
+        for (int a = 0; a < 3; a++) {
+            c->min[a] = fminf(c->min[a], fminf(w[a] - w[3], in->pos[a]));
+            c->max[a] = fmaxf(c->max[a], fmaxf(w[a] + w[3], in->pos[a]));
+        }
+    }
+    if (!c->count) *c = k_empty_cell;
+}
+
+u32 vgeo_scene_placement_add(VgScene *s, const VgCell *cells, u32 ncells, const VgInstance *inst, u32 n, u32 user) {
+    VgPlacements *p = &s->pl;
+    if (ncells > 16 || ncells > p->free_cells_n || !n) return ~0u;
+    u32 fr = ~0u;   // first fit
+    for (u32 i = 0; i < p->free_inst_n; i++)
+        if (p->free_inst[i].count >= n) { fr = i; break; }
+    if (fr == ~0u) return ~0u;
+    u32 first = p->free_inst[fr].first;
+    p->free_inst[fr].first += n;
+    p->free_inst[fr].count -= n;
+    if (!p->free_inst[fr].count) {
+        memmove(&p->free_inst[fr], &p->free_inst[fr + 1], sizeof(VgRange) * (p->free_inst_n - fr - 1));
+        p->free_inst_n--;
+    }
+    u32 h = ~0u;
+    for (u32 i = 0; i < p->chunk_count; i++)
+        if (!p->chunks[i].used) { h = i; break; }
+    if (h == ~0u) {
+        GROW(p->chunks, p->chunk_count, p->chunk_cap, 1);
+        h = p->chunk_count++;
+    }
+    VgPlacementChunk *ch = &p->chunks[h];
+    memset(ch, 0, sizeof(*ch));
+    ch->used = true;
+    ch->first = first;
+    ch->count = n;
+    ch->user = user;
+    memcpy(&p->inst[first], inst, sizeof(VgInstance) * n);
+    for (u32 k = 0; k < ncells; k++) {
+        u32 c = p->free_cells[--p->free_cells_n];
+        ch->cells[ch->cell_count++] = c;
+        p->cell_chunk[c] = h;
+        VgCell *cl = &p->cells[c];
+        cl->first = first + DG_MIN(cells[k].first, n);
+        cl->count = DG_MIN(cells[k].count, n - DG_MIN(cells[k].first, n));
+        for (u32 i = cl->first; i < cl->first + cl->count; i++) p->inst[i].cell = c;
+        cell_bounds(s, cl);
+        dirty_cell(p, c);
+    }
+    dirty_range(p, first, n);
+    p->live_chunks++;
+    p->live_instances += n;
+    return h;
+}
+
+void vgeo_scene_placement_remove(VgScene *s, u32 h) {
+    VgPlacements *p = &s->pl;
+    if (h >= p->chunk_count || !p->chunks[h].used) return;
+    VgPlacementChunk *ch = &p->chunks[h];
+    for (u32 k = 0; k < ch->cell_count; k++) {   // cells first: no frame recorded after this sees the instances
+        u32 c = ch->cells[k];
+        p->cells[c] = k_empty_cell;
+        p->cell_chunk[c] = ~0u;
+        p->free_cells[p->free_cells_n++] = c;
+        dirty_cell(p, c);
+    }
+    // instance range back into the sorted free list, merged with its neighbours
+    u32 at = 0;
+    while (at < p->free_inst_n && p->free_inst[at].first < ch->first) at++;
+    GROW(p->free_inst, p->free_inst_n, p->free_inst_cap, 1);
+    memmove(&p->free_inst[at + 1], &p->free_inst[at], sizeof(VgRange) * (p->free_inst_n - at));
+    p->free_inst[at] = (VgRange){ ch->first, ch->count };
+    p->free_inst_n++;
+    if (at + 1 < p->free_inst_n && p->free_inst[at].first + p->free_inst[at].count == p->free_inst[at + 1].first) {
+        p->free_inst[at].count += p->free_inst[at + 1].count;
+        memmove(&p->free_inst[at + 1], &p->free_inst[at + 2], sizeof(VgRange) * (p->free_inst_n - at - 2));
+        p->free_inst_n--;
+    }
+    if (at > 0 && p->free_inst[at - 1].first + p->free_inst[at - 1].count == p->free_inst[at].first) {
+        p->free_inst[at - 1].count += p->free_inst[at].count;
+        memmove(&p->free_inst[at], &p->free_inst[at + 1], sizeof(VgRange) * (p->free_inst_n - at - 1));
+        p->free_inst_n--;
+    }
+    p->live_chunks--;
+    p->live_instances -= ch->count;
+    memset(ch, 0, sizeof(*ch));
+}
+
+const VgInstance *vgeo_scene_instance(const VgScene *s, u32 i) {
+    if (i < s->instance_count) return &s->instances[i];
+    i -= s->instance_count;
+    return i < s->pl.gpu_inst_cap && i < s->pl.inst_cap ? &s->pl.inst[i] : NULL;
+}
+
+const VgCell *vgeo_scene_gpu_cell(const VgScene *s, u32 i, VgCell *tmp) {
+    if (i < s->cell_count) return &s->cells[i];
+    i -= s->cell_count;
+    if (i >= s->pl.gpu_cell_cap || i >= s->pl.cell_cap) return NULL;
+    *tmp = s->pl.cells[i];
+    tmp->first += s->instance_count;
+    return tmp;
+}
+
+// GPU form of region cell c (first rebased past the static instances; VG_CELL_FOLIAGE when every
+// instance is foliage: the cull drops it whole past the fade / shadow distances).
+static VgCell gpu_cell(const VgScene *s, u32 c) {
+    VgCell g = s->pl.cells[c];
+    if (!g.count) return g;
+    bool all = true;
+    for (u32 i = g.first; i < g.first + g.count && all; i++) {
+        u32 m = s->pl.inst[i].mesh;
+        all = m < s->mesh_count && (s->meshes[m].fflags & VGMF_FOLIAGE);
+    }
+    g.first += s->instance_count;
+    if (all) g.count |= VG_CELL_FOLIAGE;
+    return g;
+}
+
+void vgeo_scene_placement_record(VgScene *s, VkCommandBuffer cmd, u32 frame) {
+    VgPlacements *p = &s->pl;
+    if ((!p->dirty_inst_n && !p->dirty_cells_n) || !s->b_instances.buffer || frame >= 3) return;
+    // dirty ranges sorted and merged, cells unique (a chunk freed and its space reused in one frame)
+    for (u32 i = 1; i < p->dirty_inst_n; i++)
+        for (u32 j = i; j > 0 && p->dirty_inst[j - 1].first > p->dirty_inst[j].first; j--) {
+            VgRange t = p->dirty_inst[j];
+            p->dirty_inst[j] = p->dirty_inst[j - 1];
+            p->dirty_inst[j - 1] = t;
+        }
+    u32 nr = 0;
+    for (u32 i = 0; i < p->dirty_inst_n; i++) {
+        VgRange r = p->dirty_inst[i];
+        if (nr && r.first <= p->dirty_inst[nr - 1].first + p->dirty_inst[nr - 1].count) {
+            VgRange *l = &p->dirty_inst[nr - 1];
+            u32 end = DG_MAX(l->first + l->count, r.first + r.count);
+            l->count = end - l->first;
+        } else p->dirty_inst[nr++] = r;
+    }
+    p->dirty_inst_n = nr;
+    u8 *seen = (u8 *)calloc(p->cell_cap + 1, 1);
+    u32 nc0 = 0;
+    for (u32 i = 0; i < p->dirty_cells_n; i++) {
+        u32 c = p->dirty_cells[i];
+        if (c < p->cell_cap && !seen[c]) { seen[c] = 1; p->dirty_cells[nc0++] = c; }
+    }
+    p->dirty_cells_n = nc0;
+    free(seen);
+    // only what the committed buffers hold (a region grown since waits for the commit)
+    VkDeviceSize bytes = 0;
+    for (u32 i = 0; i < p->dirty_inst_n; i++) bytes += sizeof(VgInstance) * (VkDeviceSize)p->dirty_inst[i].count;
+    bytes += sizeof(VgCell) * (VkDeviceSize)p->dirty_cells_n;
+    VgBuffer *st = &p->staging[frame];
+    if (st->size < bytes) {   // this frame slot's previous use has completed
+        vgc_buffer_free(s->ctx, st);
+        *st = vgc_buffer(s->ctx, DG_MAX(bytes, (VkDeviceSize)65536) * 2, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VGM_UPLOAD);
+        if (!st->buffer) return;
+    }
+    VkBufferCopy *ci = (VkBufferCopy *)malloc(sizeof(VkBufferCopy) * (p->dirty_inst_n + 1));
+    VkBufferCopy *cc = (VkBufferCopy *)malloc(sizeof(VkBufferCopy) * (p->dirty_cells_n + 1));
+    u32 ni = 0, nc = 0;
+    VkDeviceSize at = 0;
+    for (u32 i = 0; i < p->dirty_inst_n; i++) {
+        VgRange r = p->dirty_inst[i];
+        if (r.first >= p->gpu_inst_cap) continue;
+        r.count = DG_MIN(r.count, p->gpu_inst_cap - r.first);
+        memcpy((u8 *)st->mapped + at, &p->inst[r.first], sizeof(VgInstance) * r.count);
+        ci[ni++] = (VkBufferCopy){ at, sizeof(VgInstance) * (VkDeviceSize)(s->instance_count + r.first), sizeof(VgInstance) * (VkDeviceSize)r.count };
+        at += sizeof(VgInstance) * (VkDeviceSize)r.count;
+    }
+    for (u32 i = 0; i < p->dirty_cells_n; i++) {
+        u32 c = p->dirty_cells[i];
+        if (c >= p->gpu_cell_cap) continue;
+        VgCell g = gpu_cell(s, c);
+        memcpy((u8 *)st->mapped + at, &g, sizeof(VgCell));
+        cc[nc++] = (VkBufferCopy){ at, sizeof(VgCell) * (VkDeviceSize)(s->cell_count + c), sizeof(VgCell) };
+        at += sizeof(VgCell);
+    }
+    vmaFlushAllocation(s->ctx->vma, st->alloc, 0, at);
+    // after every earlier read of these ranges (frames in flight included: same queue), before the culls
+    VkMemoryBarrier2 mb = { VK_STRUCTURE_TYPE_MEMORY_BARRIER_2 };
+    mb.srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+    mb.dstStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+    mb.dstAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+    VkDependencyInfo dep = { VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+    dep.memoryBarrierCount = 1;
+    dep.pMemoryBarriers = &mb;
+    vkCmdPipelineBarrier2(cmd, &dep);
+    if (ni) vkCmdCopyBuffer(cmd, st->buffer, s->b_instances.buffer, ni, ci);
+    if (nc) vkCmdCopyBuffer(cmd, st->buffer, s->b_cells.buffer, nc, cc);
+    mb.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+    mb.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+    mb.dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+    mb.dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_TRANSFER_READ_BIT;
+    vkCmdPipelineBarrier2(cmd, &dep);
+    free(ci);
+    free(cc);
+    p->uploads++;
+    p->upload_bytes += at;
+    p->dirty_inst_n = p->dirty_cells_n = 0;
+}
+
+bool vgeo_scene_placement_audit(const VgScene *s, char *err, int err_size) {
+    const VgPlacements *p = &s->pl;
+    u8 *own = (u8 *)calloc(p->inst_cap + 1, 1);
+    bool ok = true;
+#define FAIL(...) do { if (ok) snprintf(err, (size_t)err_size, __VA_ARGS__); ok = false; } while (0)
+    u32 live = 0, live_inst = 0;
+    for (u32 h = 0; h < p->chunk_count; h++) {
+        const VgPlacementChunk *ch = &p->chunks[h];
+        if (!ch->used) continue;
+        live++;
+        live_inst += ch->count;
+        for (u32 i = ch->first; i < ch->first + ch->count && i < p->inst_cap; i++) {
+            if (own[i]) FAIL("instance %u owned twice (chunk %u)", i, h);
+            own[i] = 1;
+        }
+        for (u32 k = 0; k < ch->cell_count; k++)
+            if (p->cell_chunk[ch->cells[k]] != h) FAIL("cell %u of chunk %u owned by %u", ch->cells[k], h, p->cell_chunk[ch->cells[k]]);
+    }
+    for (u32 r = 0; r < p->free_inst_n; r++) {
+        const VgRange *fr = &p->free_inst[r];
+        if (r && fr->first <= p->free_inst[r - 1].first + p->free_inst[r - 1].count) FAIL("free ranges %u / %u not sorted and merged", r - 1, r);
+        for (u32 i = fr->first; i < fr->first + fr->count && i < p->inst_cap; i++) {
+            if (own[i]) FAIL("instance %u both free and owned", i);
+            own[i] = 2;
+        }
+    }
+    for (u32 i = 0; i < p->inst_cap; i++)
+        if (!own[i]) FAIL("instance %u leaked (neither free nor owned)", i);
+    u32 cells_owned = 0;
+    for (u32 c = 0; c < p->cell_cap; c++) cells_owned += p->cell_chunk[c] != ~0u;
+    if (cells_owned + p->free_cells_n != p->cell_cap) FAIL("cells: %u owned + %u free != %u", cells_owned, p->free_cells_n, p->cell_cap);
+    for (u32 k = 0; k < p->free_cells_n; k++)
+        if (p->cell_chunk[p->free_cells[k]] != ~0u || p->cells[p->free_cells[k]].count) FAIL("free cell %u in use", p->free_cells[k]);
+    if (live != p->live_chunks || live_inst != p->live_instances) FAIL("live counts %u / %u vs %u / %u", live, live_inst, p->live_chunks, p->live_instances);
+#undef FAIL
+    free(own);
+    return ok;
 }
 
 typedef struct CellKey { i32 x, z; u32 index; } CellKey;
@@ -265,6 +621,7 @@ static int cell_cmp(const void *a, const void *b) {
 
 bool vgeo_scene_commit(VgScene *s) {
     const VgContext *c = s->ctx;
+    mesh_foliage(s);
     // Bin instances into 8 m cells (x, z), stable within a cell.
     CellKey *k = (CellKey *)malloc(sizeof(CellKey) * (s->instance_count + 1));
     for (u32 i = 0; i < s->instance_count; i++) {
@@ -292,7 +649,7 @@ bool vgeo_scene_commit(VgScene *s) {
         sorted[i].cell = s->cell_count - 1;
         const VgMesh *m = &s->meshes[sorted[i].mesh];
         float w[4];
-        world_sphere(&sorted[i], m->center, m->radius, w);
+        world_sphere(&sorted[i], m, m->center, m->radius, w);
         if (skinned) w[0] = w[1] = w[2] = 0, w[3] = 1e18f;   // unbounded: the instance test uses the slot's bounds
         for (int a = 0; a < 3; a++) {
             cl->min[a] = fminf(cl->min[a], w[a] - w[3]);
@@ -303,26 +660,57 @@ bool vgeo_scene_commit(VgScene *s) {
     free(k);
     memcpy(s->instances, sorted, sizeof(VgInstance) * s->instance_count);
     free(sorted);
+    // placement region: after the static tables, at its reserved capacity; live cells re-bounded
+    // (mesh WPO bounds may have changed), uploaded whole below
+    VgPlacements *pp = &s->pl;
+    for (u32 cc = 0; cc < pp->cell_cap; cc++)
+        if (pp->cells[cc].count) cell_bounds(s, &pp->cells[cc]);
+    pp->gpu_inst_cap = pp->inst_cap;
+    pp->gpu_cell_cap = pp->cell_cap;
+    pp->dirty_inst_n = pp->dirty_cells_n = 0;
+    u32 n_inst = s->instance_count + pp->inst_cap, n_cells = s->cell_count + pp->cell_cap;
+    VgInstance *all_inst = s->instances;
+    VgCell *all_cells = s->cells;
+    if (pp->inst_cap || pp->cell_cap) {
+        all_inst = (VgInstance *)malloc(sizeof(VgInstance) * (n_inst + 1));
+        memcpy(all_inst, s->instances, sizeof(VgInstance) * s->instance_count);
+        memcpy(all_inst + s->instance_count, pp->inst, sizeof(VgInstance) * pp->inst_cap);
+        all_cells = (VgCell *)malloc(sizeof(VgCell) * (n_cells + 1));
+        memcpy(all_cells, s->cells, sizeof(VgCell) * s->cell_count);
+        for (u32 cc = 0; cc < pp->cell_cap; cc++) all_cells[s->cell_count + cc] = gpu_cell(s, cc);
+    }
     assign_pool(s);
-    if (!c || !c->device) return true;
+    if (!c || !c->device) {
+        if (all_inst != s->instances) free(all_inst);
+        if (all_cells != s->cells) free(all_cells);
+        return true;
+    }
     vkDeviceWaitIdle(c->device);
     free_gpu(s);
-    if (!upload_pool(s)) return false;
+    if (!upload_pool(s)) {
+        if (all_inst != s->instances) free(all_inst);
+        if (all_cells != s->cells) free(all_cells);
+        return false;
+    }
     const VkBufferUsageFlags U = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
     struct { VgBuffer *b; const void *p; VkDeviceSize n; } t[] = {
         { &s->b_meshes, s->meshes, sizeof(VgMesh) * (VkDeviceSize)s->mesh_count },
         { &s->b_nodes, s->nodes, sizeof(VgNode) * (VkDeviceSize)s->node_count },
         { &s->b_groups, s->groups, sizeof(VgGroup) * (VkDeviceSize)s->group_count },
         { &s->b_page_table, s->page_table, sizeof(u32) * (VkDeviceSize)s->page_count },
-        { &s->b_instances, s->instances, sizeof(VgInstance) * (VkDeviceSize)s->instance_count },
-        { &s->b_cells, s->cells, sizeof(VgCell) * (VkDeviceSize)s->cell_count },
+        { &s->b_instances, all_inst, sizeof(VgInstance) * (VkDeviceSize)n_inst },
+        { &s->b_cells, all_cells, sizeof(VgCell) * (VkDeviceSize)n_cells },
         { &s->b_materials, s->materials, sizeof(VgMaterial) * (VkDeviceSize)s->material_count },
     };
-    for (size_t i = 0; i < sizeof(t) / sizeof(t[0]); i++) {
+    bool ok = true;
+    for (size_t i = 0; i < sizeof(t) / sizeof(t[0]) && ok; i++) {
         *t[i].b = vgc_buffer(c, t[i].n ? t[i].n : 16, U, VGM_DEVICE);
-        if (!t[i].b->buffer) return false;
-        if (t[i].n) vgc_upload(c, t[i].b, 0, t[i].p, t[i].n);
+        if (!t[i].b->buffer) ok = false;
+        else if (t[i].n) vgc_upload(c, t[i].b, 0, t[i].p, t[i].n);
     }
+    if (all_inst != s->instances) free(all_inst);
+    if (all_cells != s->cells) free(all_cells);
+    if (!ok) return false;
     s->generation++;
     return true;
 }
@@ -361,12 +749,30 @@ u32 vgeo_scene_cpu_select(const VgScene *s, const VgViewGpu *v, VgRefCluster *ou
 u32 vgeo_scene_cpu_select_ex(const VgScene *s, const VgViewGpu *v, bool all_resident, VgRefCluster *out, u32 cap) {
     u32 n = 0;
     float t = v->error_px;
-    for (u32 i = 0; i < s->instance_count; i++) {
-        const VgInstance *in = &s->instances[i];
+    u32 total = vgeo_scene_gpu_instances(s);
+    for (u32 i = 0; i < total; i++) {
+        const VgInstance *in = vgeo_scene_instance(s, i);
+        if (i >= s->instance_count) {   // placement region: live only when its cell holds it
+            if (in->cell >= s->pl.cell_cap) continue;
+            const VgCell *cl = &s->pl.cells[in->cell];
+            u32 ri = i - s->instance_count;
+            if (!cl->count || ri < cl->first || ri >= cl->first + cl->count) continue;
+        }
         const VgMesh *m = &s->meshes[in->mesh];
         VgXfCpu x;   // the shaders' decode (skinned: slot sphere transform and error scale)
         vgeo_xf_decode(&x, in, m, s->palettes);
         if (!x.active) continue;
+        // foliage: density / fade / shadow distance, then the impostor switch (no clusters)
+        if ((m->fflags & VGMF_FOLIAGE) || m->shadow_max_dist > 0) {
+            float dx = in->pos[0] - v->cam_pos[0], dy = in->pos[1] - v->cam_pos[1], dz = in->pos[2] - v->cam_pos[2];
+            float dist = sqrtf(dx * dx + dy * dy + dz * dz);
+            if (((v->flags & VGV_ORTHO) && m->shadow_max_dist > 0 && dist > m->shadow_max_dist) || vgeo_foliage_alpha(m, in->flags_phase, dist, v->foliage[2]) <= 0) continue;
+        }
+        {
+            float ms[4];
+            vgeo_xf_sphere(&x, m->center, m->radius, ms);
+            if (vgeo_use_impostor(v, m, ms)) continue;
+        }
         float sc = x.scale;
         u32 ng = (u32)((in->mesh + 1 < s->mesh_count ? s->meshes[in->mesh + 1].group_base : s->group_count) - m->group_base);
         for (u32 gi = 0; gi < ng; gi++) {
@@ -456,4 +862,5 @@ void vgeo_view_setup(VgViewGpu *v, const float vp[16], const float prev_vp[16], 
     v->viewport[3] = 1.0f / (float)h;
     memcpy(v->raster_view_proj, vp, 64);
     v->slot_material_base = ~0u;
+    v->foliage[2] = 1.0f;   // r_foliage_density (no wind, no impostors, no displacement buffer)
 }

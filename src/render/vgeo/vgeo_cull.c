@@ -2,9 +2,10 @@
 #include "vgeo_skin.h"
 #include "core/log.h"
 #include <stddef.h>
+#include <stdlib.h>
 #include <string.h>
 
-#define NBIND 23   // 0-15 buffers, 16-17 Hi-Z samplers, 18 visibility buffer, 19 materials, 20 page stamps, 21-22 palettes + slots (vgeo_skin.h)
+#define NBIND 24   // 0-15 buffers, 16-17 Hi-Z samplers, 18 visibility buffer, 19 materials, 20 page stamps, 21-22 palettes + slots (vgeo_skin.h), 23 textures (vgeo_tex.h)
 
 static const VkBufferUsageFlags SSBO = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
 
@@ -14,8 +15,8 @@ static bool create_layouts(VgCuller *c) {
     memset(b, 0, sizeof(b));
     for (u32 i = 0; i < NBIND; i++) {
         b[i].binding = i;
-        b[i].descriptorType = (i == 16 || i == 17) ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER : VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        b[i].descriptorCount = 1;
+        b[i].descriptorType = (i == 16 || i == 17 || i == VG_TEX_BINDING) ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER : VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        b[i].descriptorCount = i == VG_TEX_BINDING ? VG_TEX_COUNT : 1;
         b[i].stageFlags = VK_SHADER_STAGE_ALL;   // cull kernels, rasterisers (vertex / mesh / fragment / compute), resolve
     }
     VkDescriptorSetLayoutCreateInfo li = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
@@ -47,7 +48,7 @@ static bool create_layouts(VgCuller *c) {
     u32 frames = c->ctx->frames;
     VkDescriptorPoolSize ps[3] = {
         { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 21 * VG_MAX_VIEWS * frames + 16 * frames },
-        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2 * VG_MAX_VIEWS * frames + 16 * frames },
+        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, (2 + VG_TEX_COUNT) * VG_MAX_VIEWS * frames + 16 * frames },
         { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 7 * 16 * frames },
     };
     VkDescriptorPoolCreateInfo dp = { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
@@ -111,7 +112,13 @@ bool vg_cull_init(VgCuller *c, const VgContext *ctx, VgScene *scene, const VgCul
     c->scene = scene;
     c->caps = *caps;
     if (ctx->frames > VG_MAX_FRAMES) { log_error("vgeo: %u frames in flight > %d", ctx->frames, VG_MAX_FRAMES); return false; }
-    if (!create_layouts(c) || !create_dummy(c)) { log_error("vgeo: cull layouts failed"); return false; }
+    if (!create_layouts(c) || !create_dummy(c) || !vg_tex_init(&c->tex, ctx)) { log_error("vgeo: cull layouts failed"); return false; }
+    for (u32 i = 0; i < VG_MAX_VIEWS; i++)
+        for (u32 f = 0; f < VG_MAX_FRAMES; f++) {
+            c->v[i].tex_seen[f] = (u32 *)malloc(sizeof(u32) * VG_TEX_COUNT);
+            memset(c->v[i].tex_seen[f], 0xFF, sizeof(u32) * VG_TEX_COUNT);
+            c->v[i].set_tex_gen[f] = ~0u;
+        }
     c->p_args = vgc_compute_pipeline(ctx, c->pl, "vgeo/vg_args.comp");
     c->p_cells = vgc_compute_pipeline(ctx, c->pl, "vgeo/vg_cells.comp");
     c->p_inst = vgc_compute_pipeline(ctx, c->pl, "vgeo/vg_instances.comp");
@@ -153,7 +160,11 @@ void vg_cull_shutdown(VgCuller *c) {
     if (!c->ctx) return;
     VkDevice d = c->ctx->device;
     vkDeviceWaitIdle(d);
-    for (u32 i = 0; i < VG_MAX_VIEWS; i++) free_view(c, &c->v[i]);
+    for (u32 i = 0; i < VG_MAX_VIEWS; i++) {
+        free_view(c, &c->v[i]);
+        for (u32 f = 0; f < VG_MAX_FRAMES; f++) free(c->v[i].tex_seen[f]);
+    }
+    vg_tex_shutdown(&c->tex);
     vgc_buffer_free(c->ctx, &c->views);
     vgc_buffer_free(c->ctx, &c->dummy_buf);
     VkPipeline ps[] = { c->p_args, c->p_cells, c->p_inst, c->p_trav, c->p_clus, c->p_hiz };
@@ -173,7 +184,8 @@ void vg_cull_shutdown(VgCuller *c) {
 // Per-view buffers, sized by the caps and the scene (cells / instances); re-made when the scene grows.
 static void ensure_view(VgCuller *c, VgViewRes *v) {
     const VgScene *s = c->scene;
-    u32 cells = s->cell_count ? s->cell_count : 1, insts = s->instance_count ? s->instance_count : 1;
+    u32 gc = vgeo_scene_gpu_cells(s), gi = vgeo_scene_gpu_instances(s);   // the placement region included
+    u32 cells = gc ? gc : 1, insts = gi ? gi : 1;
     if (v->allocated && v->cells_cap >= cells && v->inst_cap >= insts) return;
     if (v->allocated) { vkDeviceWaitIdle(c->ctx->device); free_view(c, v); }
     const VgContext *x = c->ctx;
@@ -203,6 +215,10 @@ void vg_cull_prepare(VgCuller *c) {
 
 static void write_set(VgCuller *c, VgViewRes *v, u32 f, VkImageView prev, VkImageLayout prev_l, VkImageView cur, VkImageLayout cur_l) {
     const VgScene *s = c->scene;
+    if (v->set_tex_gen[f] != c->tex.gen) {   // textures changed since this set was last recorded
+        vg_tex_write_set(&c->tex, v->set[f], v->tex_seen[f]);
+        v->set_tex_gen[f] = c->tex.gen;
+    }
     if (v->set_gen[f] == s->generation && v->set_prev[f] == prev && v->set_cur[f] == cur && v->set_vis[f] == c->vis_buffer) return;
     const VgBuffer *bufs[16] = { &c->views, &s->b_meshes, &s->b_nodes, &s->b_groups, &s->b_page_table, &s->b_pool, &s->b_instances, &s->b_cells,
                                  &v->counters, &v->cell_list, &v->inst_list, &v->node_queue, &v->group_items, &v->visible, &v->occluded, &v->requests };
@@ -210,7 +226,7 @@ static void write_set(VgCuller *c, VgViewRes *v, u32 f, VkImageView prev, VkImag
     VkDescriptorImageInfo ii[2] = { { c->sampler, prev, prev_l }, { c->sampler, cur, cur_l } };
     VkWriteDescriptorSet w[NBIND];
     memset(w, 0, sizeof(w));
-    for (u32 i = 0; i < NBIND; i++) {
+    for (u32 i = 0; i < VG_TEX_BINDING; i++) {
         w[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
         w[i].dstSet = v->set[f];
         w[i].dstBinding = i;
@@ -228,7 +244,7 @@ static void write_set(VgCuller *c, VgViewRes *v, u32 f, VkImageView prev, VkImag
             w[i].pImageInfo = &ii[i - 16];
         }
     }
-    vkUpdateDescriptorSets(c->ctx->device, NBIND, w, 0, NULL);
+    vkUpdateDescriptorSets(c->ctx->device, VG_TEX_BINDING, w, 0, NULL);
     v->set_gen[f] = s->generation;
     v->set_prev[f] = prev;
     v->set_cur[f] = cur;
@@ -321,15 +337,15 @@ void vg_cull_record_pass1(VgCuller *c, VkCommandBuffer cmd, u32 frame, u32 slot,
     VgScene *s = c->scene;
     c->dispatches = 0;
     if (slot < VG_MAX_VIEWS) c->v[slot].recording = false;
-    if (!c->ok || !s->instance_count || slot >= VG_MAX_VIEWS) return;
+    if (!c->ok || !vgeo_scene_gpu_instances(s) || slot >= VG_MAX_VIEWS) return;
     VgViewRes *v = &c->v[slot];
     ensure_view(c, v);
     bool prev_ok = prev && prev->view, cur_ok = cur && cur->view;
     write_set(c, v, frame, prev_ok ? prev->view : c->dummy_view, prev_ok ? prev->layout : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
               cur_ok ? cur->view : c->dummy_view, cur_ok ? cur->layout : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     VgViewGpu g = *view;
-    g.cell_count = s->cell_count;
-    g.instance_count = s->instance_count;
+    g.cell_count = vgeo_scene_gpu_cells(s);
+    g.instance_count = vgeo_scene_gpu_instances(s);
     g.max_depth = s->max_depth;
     g.frame = s->stamp_frame;
     g.cap_nodes = c->caps.nodes;
@@ -339,6 +355,8 @@ void vg_cull_record_pass1(VgCuller *c, VkCommandBuffer cmd, u32 frame, u32 slot,
     g.cap_cells = v->cells_cap;
     g.cap_instances = v->inst_cap;
     g.cap_requests = c->caps.requests;
+    g.fol_fade_max = s->fol_fade_max;
+    g.fol_shadow_max = s->fol_shadow_max;
     if (prev_ok) { g.hiz_prev[0] = (float)prev->w; g.hiz_prev[1] = (float)prev->h; g.hiz_prev[2] = (float)prev->mips; g.hiz_prev[3] = 1.0f; }
     if (cur_ok) { g.hiz_cur[0] = (float)cur->w; g.hiz_cur[1] = (float)cur->h; g.hiz_cur[2] = (float)cur->mips; g.hiz_cur[3] = 1.0f; }
     v->two_pass = (g.flags & VGV_TWO_PASS) && cur_ok && !(g.flags & VGV_NO_OCCLUSION);
@@ -353,7 +371,7 @@ void vg_cull_record_pass1(VgCuller *c, VkCommandBuffer cmd, u32 frame, u32 slot,
 
     // ---- pass 1
     push(&r, 1, 0, 0, NULL, 0);
-    dispatch(&r, c->p_cells, (s->cell_count + 63) / 64);
+    dispatch(&r, c->p_cells, (g.cell_count + 63) / 64);
     args(&r, VGN_CELLS_VIS, VGA_INST, 1, -1, v->cells_cap);
     u32 a0[1] = { 0 }, big1[2] = { 0, VGN_CELLS_VIS };
     push(&r, 1, 0, 0, big1, 2);
@@ -432,8 +450,21 @@ void vg_hiz_size(u32 w, u32 h, u32 *hw, u32 *hh, u32 *mips) {
     *mips = m;
 }
 
+static void hiz_record(VgCuller *c, VkCommandBuffer cmd, u32 frame, VkImageView depth, VkImageLayout depth_layout, const VkImageView *mips, u32 mip_count,
+                       u32 w, u32 h, bool merged);
+
 void vg_hiz_record(VgCuller *c, VkCommandBuffer cmd, u32 frame, VkImageView depth, VkImageLayout depth_layout, const VkImageView *mips, u32 mip_count,
                    u32 w, u32 h) {
+    hiz_record(c, cmd, frame, depth, depth_layout, mips, mip_count, w, h, false);
+}
+
+void vg_hiz_record_merged(VgCuller *c, VkCommandBuffer cmd, u32 frame, VkImageView depth, VkImageLayout depth_layout, const VkImageView *mips,
+                          u32 mip_count, u32 w, u32 h) {
+    hiz_record(c, cmd, frame, depth, depth_layout, mips, mip_count, w, h, depth != VK_NULL_HANDLE);
+}
+
+static void hiz_record(VgCuller *c, VkCommandBuffer cmd, u32 frame, VkImageView depth, VkImageLayout depth_layout, const VkImageView *mips, u32 mip_count,
+                       u32 w, u32 h, bool merged) {
     if (!c->ok || !mip_count) return;
     if (mip_count > 16) mip_count = 16;
     u32 hw, hh, full;
@@ -467,7 +498,7 @@ void vg_hiz_record(VgCuller *c, VkCommandBuffer cmd, u32 frame, VkImageView dept
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, c->hiz_pl, 0, 1, &set, 0, NULL);
         u32 bw = hw >> base ? hw >> base : 1, bh = hh >> base ? hh >> base : 1;
         struct { u32 base, levels, src, pad; u32 src_w, src_h; u32 base_w, base_h; } pc = {
-            base, mip_count - base < 6 ? mip_count - base : 6, depth ? 0u : 1u, 0, base ? bw * 2 : w, base ? bh * 2 : h, bw, bh };
+            base, mip_count - base < 6 ? mip_count - base : 6, merged ? 2u : depth ? 0u : 1u, 0, base ? bw * 2 : w, base ? bh * 2 : h, bw, bh };
         if (base) {   // the previous level is power-of-two sized (clamped to 1)
             pc.src_w = hw >> (base - 1) ? hw >> (base - 1) : 1;
             pc.src_h = hh >> (base - 1) ? hh >> (base - 1) : 1;
