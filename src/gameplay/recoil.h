@@ -56,7 +56,23 @@ typedef struct RecoilParams {
     float ads_time;                     // s to fully aim
     float idle_sway, scope_sway;        // degrees amplitude
     float hold_breath_time;             // s of breath hold capacity
+    // Hip-fire vs ADS (blended by the aim progress; docs/RECOIL.md "Hip vs ADS"). Hip: the camera
+    // climbs less (aim_mult) and the cone governs accuracy (spread / bloom multipliers). ADS:
+    // the aim recoil as configured (x ads.aim_mult), the gun kicks about the reticle centre.
+    float hip_aim_mult, hip_kick_mult, hip_spread_mult, hip_bloom_mult, hip_bloom_max_mult, hip_bloom_recovery_mult;
+    float ads_aim_mult, ads_forward_push, ads_roll, ads_max_misalign_deg;
+    u8 anchor_hip, anchor_ads;          // RecoilAnchor: what the item kick turns about
+    u8 sway_anchor_hip, sway_anchor_ads;
 } RecoilParams;
+
+typedef enum RecoilAnchor { RA_PIVOT, RA_HOLD_POINT, RA_SIGHT } RecoilAnchor;
+typedef enum RecoilType { RT_RIFLE, RT_PISTOL, RT_SMG, RT_LMG, RT_SHOTGUN, RT_SNIPER } RecoilType;
+// Hip / ADS defaults for a weapon type (before the JSON, which overrides them).
+void recoil_type_defaults(RecoilParams *p, RecoilType t);
+// 0..1 hip -> ADS blends of the multipliers above.
+float recoil_bloom_mult(const RecoilParams *p, float ads_t);
+float recoil_bloom_max(const RecoilParams *p, float ads_t);
+float recoil_kick_mult(const RecoilParams *p, float ads_t);   // item (viewmodel) kick
 
 typedef struct RecoilState {
     u32 mag_seed;
@@ -71,6 +87,7 @@ typedef struct RecoilState {
     float bloom;                        // extra cone degrees from firing / flinch
     float prev_cmd_pitch, prev_cmd_yaw; // last command view (deg, yaw + = right)
     float emitted_pitch, emitted_yaw;   // what the system applied to the view last tick
+    float ads_t;                        // aim progress this tick (bloom recovery hip / ADS), set by the caller
 } RecoilState;
 
 typedef struct RecoilMods {

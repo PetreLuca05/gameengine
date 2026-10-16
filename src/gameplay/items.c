@@ -86,8 +86,27 @@ static cJSON *load_json(const char *path) {
 
 // Gun feel: top-level fire keys + the "recoil" block (angles in degrees, see docs/RECOIL.md).
 // Missing keys keep recoil_params_default().
+static u8 anchor_from(const char *s, u8 def) {
+    if (!s) return def;
+    if (!strcmp(s, "sight")) return RA_SIGHT;
+    if (!strcmp(s, "hold_point")) return RA_HOLD_POINT;
+    if (!strcmp(s, "pivot_socket") || !strcmp(s, "pivot")) return RA_PIVOT;
+    return def;
+}
+
+static RecoilType recoil_type_of(const cJSON *w) {
+    const char *id = jstr(w, "id", "");
+    if (strstr(id, "lmg")) return RT_LMG;
+    if (strstr(id, "smg")) return RT_SMG;
+    if (strstr(id, "shotgun") || jnum(w, "pellets", 1) > 1) return RT_SHOTGUN;
+    if (strstr(id, "sniper") || strstr(id, "dmr")) return RT_SNIPER;
+    if (strstr(id, "pistol") || strstr(id, "crossbow")) return RT_PISTOL;
+    return RT_RIFLE;
+}
+
 static void parse_recoil(const cJSON *w, RecoilParams *r) {
     recoil_params_default(r);
+    recoil_type_defaults(r, recoil_type_of(w));
     r->rpm = fmaxf(1.0f, jnum(w, "rpm", jnum(w, "fire_rate", 10) * 60.0f));
     r->burst_rpm = jnum(w, "burst_rpm", r->rpm * 1.25f);
     r->burst_count = (int)jnum(w, "burst_count", 3);
@@ -174,6 +193,34 @@ static void parse_recoil(const cJSON *w, RecoilParams *r) {
         r->s_crouch = jnum(o, "crouch", r->s_crouch);
         r->s_prone = jnum(o, "prone", r->s_prone);
         r->s_air = jnum(o, "air", r->s_air);
+    }
+    // Hip vs ADS (docs/RECOIL.md "Hip vs ADS"): per-type defaults above, these override.
+    if ((o = jobj(rc, "hip"))) {
+        r->hip_aim_mult = jnum(o, "aim_mult", r->hip_aim_mult);
+        r->hip_kick_mult = jnum(o, "kick_mult", r->hip_kick_mult);
+        r->hip_spread_mult = jnum(o, "spread_mult", r->hip_spread_mult);
+        r->hip_bloom_mult = jnum(o, "bloom_mult", r->hip_bloom_mult);
+        r->hip_bloom_max_mult = jnum(o, "bloom_max_mult", r->hip_bloom_max_mult);
+        r->hip_bloom_recovery_mult = jnum(o, "bloom_recovery_mult", r->hip_bloom_recovery_mult);
+    }
+    if ((o = jobj(rc, "ads"))) {
+        r->ads_aim_mult = jnum(o, "aim_mult", r->ads_aim_mult);
+        r->vm_ads_scale = jnum(o, "kick_mult", r->vm_ads_scale);
+        r->ads_forward_push = jnum(o, "forward_push", r->ads_forward_push);
+        r->ads_roll = jnum(o, "roll", r->ads_roll);
+        r->ads_max_misalign_deg = jnum(o, "max_misalign_deg", r->ads_max_misalign_deg);
+    }
+    if ((o = jobj(rc, "anchor"))) {
+        r->anchor_hip = anchor_from(jstr(o, "hip", NULL), r->anchor_hip);
+        r->anchor_ads = anchor_from(jstr(o, "ads", NULL), r->anchor_ads);
+    }
+    {
+        const cJSON *sw = jobj(rc, "sway");
+        const cJSON *an = sw ? jobj(sw, "anchor") : NULL;
+        if (an) {
+            r->sway_anchor_hip = anchor_from(jstr(an, "hip", NULL), r->sway_anchor_hip);
+            r->sway_anchor_ads = anchor_from(jstr(an, "ads", NULL), r->sway_anchor_ads);
+        }
     }
     if ((o = jobj(rc, "modifiers"))) {
         r->ads_mult = jnum(o, "ads", r->ads_mult);

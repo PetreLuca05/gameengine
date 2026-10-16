@@ -58,6 +58,10 @@ static struct {
     WeaponDef wd;              // effective equipped weapon (copy)
     bool have_wd;
     float ads_t, base_fov, sight_fov, main_fov, sens_scale;
+    // Reticle vs aim (recoil / sway anchoring): pixels between the projected reticle centre and
+    // the shot direction while fully aimed, this frame and worst since sight_test recoil.
+    float reticle_err_px, reticle_err_max;
+    int reticle_frames;
     int kind;
     bool complete;
     RenderSight rs;
@@ -128,6 +132,25 @@ void sights_frame(const RenderCamera *cam, bool first_person) {
         Xform item = xf_make(pos, rot);
         S.sight_world = xf_point(item, wd->sockets.sight);
         S.sight_valid = true;
+        Player *lp = game_local_player();
+        Xform icm;
+        int hst = -1;
+        float hbl = 0;
+        bool held = chars_fp_item_cam(&icm, &hst, &hbl);
+        // Fully aimed means the hold point has finished blending into ADS too (it trails ads_t).
+        if (S.complete && lp && cam && held && hst == HP_ADS && hbl >= 0.999f) {
+            // Reticle centre as seen (viewmodel -> world mapping) vs the shot direction.
+            vec3 sw = render_viewmodel_to_world(chars_fp_sight_world());
+            vec3 to = v3_norm(v3_sub(sw, cam->pos));
+            vec2 off = weapon_aim_offset_deg(wd, &lp->sim.wpn, &lp->sim.move, weapon_sway_time(G->last_cmd.seq) + G->alpha * SIM_DT);
+            vec3 aim = dir_from_angles(G->view.yaw - off.x * DG_DEG2RAD, G->view.pitch + off.y * DG_DEG2RAD);
+            float ang = acosf(clampf(v3_dot(to, aim), -1.0f, 1.0f));
+            float px = tanf(ang) * (float)render_height() * 0.5f / tanf(cam->fov_deg * 0.5f * DG_DEG2RAD);
+            S.reticle_err_px = px;
+
+            if (px > S.reticle_err_max) S.reticle_err_max = px;
+            S.reticle_frames++;
+        }
         const AttachmentDef *a = attach_optic(&G->items, wd->att_applied);
         if (a) {
             Xform opt = xf_mul(item, attach_placement(wd, a));
@@ -139,10 +162,28 @@ void sights_frame(const RenderCamera *cam, bool first_person) {
             rs->fwd = xf_dir(opt, v3(0, 0, -1));
             rs->up = xf_dir(opt, v3(0, 1, 0));
             rs->right = xf_dir(opt, v3(1, 0, 0));
+            if (cam && S.complete) {
+                // Fully aimed: the optic looks along the eye -> sight line (an ideal optic). The gun
+                // turning about the reticle centre under recoil then never moves the scope picture or
+                // the dot off where the shots go.
+                vec3 f = v3_norm(v3_sub(render_viewmodel_to_world(chars_fp_sight_world()), cam->pos));
+                if (v3_dot(f, rs->fwd) > 0.9f) {
+                    rs->fwd = f;
+                    rs->right = v3_norm(v3_cross(f, rs->up));
+                    rs->up = v3_cross(rs->right, f);
+                }
+            }
             // Collimated dot: converges on the optic axis at the parallax-free distance.
             // Through the viewmodel -> world mapping like the lens, so the dot sits on the pixel the
             // optic axis points at (and the bullets go) whatever the viewmodel FOV.
-            rs->dot_point = render_viewmodel_to_world(v3_madd(rs->lens_pos, rs->fwd, fmaxf(a->parallax_m, 1.0f)));
+            // Ideal parallax-free dot: on the eye -> sight line, so the gun turning about the reticle
+            // centre (recoil / sway anchored at the sight) never moves the dot off the aim.
+            if (cam) {
+                vec3 sw = render_viewmodel_to_world(chars_fp_sight_world());
+                rs->dot_point = v3_madd(cam->pos, v3_norm(v3_sub(sw, cam->pos)), fmaxf(a->parallax_m, 1.0f));
+            } else {
+                rs->dot_point = render_viewmodel_to_world(v3_madd(rs->lens_pos, rs->fwd, fmaxf(a->parallax_m, 1.0f)));
+            }
             rs->reticle_moa = a->reticle.moa;
             rs->reticle_outer_moa = a->reticle.outer_moa;
             rs->reticle_shape = a->reticle.shape;
@@ -264,6 +305,17 @@ static void align_next(void) {
 static void cmd_sight_test(int argc, const char **argv) {
     SightTest *t = &S.t;
     const char *what = argc > 1 ? argv[1] : "";
+    if (!strcmp(what, "recoil")) {
+        S.reticle_err_max = 0;
+        S.reticle_frames = 0;
+        log_info("sight_test recoil: measuring the reticle centre against the aim while fully aimed");
+        return;
+    }
+    if (!strcmp(what, "recoil_report")) {
+        log_info("sight_test recoil: %d aimed frames, worst reticle-to-aim error %.2f px -> %s", S.reticle_frames, S.reticle_err_max,
+                 S.reticle_frames > 10 && S.reticle_err_max <= 1.0f ? "PASS" : "FAIL");
+        return;
+    }
     if (!strcmp(what, "align")) {
         memset(t, 0, sizeof(*t));
         // Every gun x (iron sights + every optic it accepts).

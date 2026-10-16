@@ -186,6 +186,7 @@ typedef struct ProcInput {
     int item_key;              // hold point blend key (changes when the held item changes)
     bool hp_static;            // hold point without its procedural layer (tests / editor)
     float hp_sway_scale;       // hold point look lag / sway / breathing / sprint bob (wpn_sway_scale, 0 = none)
+    HoldKickParams hold_kick;  // kick / sway anchors, ADS kick shaping (from the weapon's recoil data)
     float hp_bob_scale;        // hold point movement bob outside sprint (wpn_bob_scale)
     vec3 hand_anchor[2];       // world-space ledge anchors (mantle / hang), weight below
     float hand_anchor_w;

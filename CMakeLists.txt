@@ -297,6 +297,15 @@ if(MSVC)
 endif()
 add_test(NAME horde COMMAND test_horde WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
 
+# Hip vs ADS recoil: hip ratios, ADS kick anchored on the sight for every weapon x optic.
+add_executable(test_recoil_ads tests/test_recoil_ads.c)
+set_target_properties(test_recoil_ads PROPERTIES C_STANDARD 11)
+target_link_libraries(test_recoil_ads PRIVATE dg_animcore)
+if(MSVC)
+  target_compile_options(test_recoil_ads PRIVATE /W3 /wd4100 /wd4201 /utf-8)
+endif()
+add_test(NAME recoil_ads COMMAND test_recoil_ads WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+
 add_executable(test_anim tests/test_anim.c)
 set_target_properties(test_anim PROPERTIES C_STANDARD 11)
 target_link_libraries(test_anim PRIVATE dg_animcore)

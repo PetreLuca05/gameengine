@@ -130,6 +130,7 @@ void proc_hold(ProcState *st, const ProcInput *in, Pose *pose, Xform *model) {
     hi.static_pose = in->hp_static;
     hi.sway_scale = in->hp_sway_scale;
     hi.bob_scale = in->hp_bob_scale;
+    hi.kick_params = in->hold_kick;
     holdpoint_eval(&st->hp, &hi, &st->hp_out);
     st->item_cam = st->hp_out.item;
     Xform desired = xf_mul(cam, st->hp_out.item);

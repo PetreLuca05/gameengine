@@ -394,6 +394,7 @@ void holdpoint_eval(HoldPointState *st, const HoldPointInput *in, HoldPointOutpu
         float v0[6] = { st->base_vel.x, st->base_vel.y, st->base_vel.z, st->base_avel.x, st->base_avel.y, st->base_avel.z };
         for (int i = 0; i < 6; i++) inert_init(x0[i], v0[i], st->blend_dur, &st->ix0[i], &st->iv0[i], &st->iT[i]);
         st->blend_t = 0;
+        st->ads_from = (u8)st->state;
         st->state = state;
         st->style_key = in->style_key;
     }
@@ -431,7 +432,15 @@ void holdpoint_eval(HoldPointState *st, const HoldPointInput *in, HoldPointOutpu
         }
     }
     vec3 pivot_item = (o && o->any && o->has_pivot) ? o->pivot : in->pivot;
+    HoldKickParams kp = in->kick_params;
+    if (!kp.set) { kp.ads_push = 1.0f; kp.ads_roll = 1.0f; kp.ads_misalign_deg = 0.0f; kp.kick_hip = 0; kp.kick_ads = 2; kp.sway_hip = 0; kp.sway_ads = 2; }
+    // Hip anchors: the pivot socket or the hold point (the anchor socket).
+    vec3 hip_kick_item = kp.kick_hip == 1 ? in->anchor.t : pivot_item;
+    vec3 hip_sway_item = kp.sway_hip == 1 ? in->anchor.t : pivot_item;
     vec3 pivot = xf_point(item, pivot_item);
+    // ADS anchor blend: how far the item is into ADS (eased with the state blend, both ways).
+    float ads_a = state == HP_ADS ? 1.0f - k : (st->ads_from == HP_ADS ? k : 0.0f);
+    vec3 sight_c = xf_point(item, in->sight);   // the reticle centre (on the view axis once aimed)
 
     // ---- procedural layer (around the pivot)
     // In ADS the sight stays on the view axis: item lag / sway / bob fade out with the blend
@@ -466,12 +475,46 @@ void holdpoint_eval(HoldPointState *st, const HoldPointInput *in, HoldPointOutpu
     vec3 kick_pos = v3_scale(in->kick_pos, s->kick_scale * (in->static_pose ? 0.0f : 1.0f));
     vec3 kick_rot = v3_scale(in->kick_rot, s->kick_scale * (in->static_pose ? 0.0f : 1.0f));
     if (in->static_pose) { st->lag = v2(0, 0); st->lag_v = v2(0, 0); }
-    vec3 rot_deg = v3(st->lag.x + sway_rot.x + bob_rot.x + kick_rot.x, st->lag.y + sway_rot.y + bob_rot.y - kick_rot.y, sway_rot.z + bob_rot.z + kick_rot.z);
-    vec3 pos = v3_add(v3_add(breath, bob_pos), kick_pos);
-    pos = v3_add(pos, v3(st->lag.y * s->lag_pos * 10.0f, st->lag.x * s->lag_pos * 10.0f, 0));
-    quat R = hp_euler_deg(rot_deg);
-    item.r = quat_norm(quat_mul(R, item.r));
-    item.t = v3_add(v3_add(pivot, quat_rotate(R, v3_sub(item.t, pivot))), pos);
+    // Two contributions, blended by the ADS progress (no pop when aiming mid-burst):
+    //  hip: lag + sway + bob about their hip anchor, kick about its hip anchor, full translation;
+    //  ADS: everything about the reticle centre, translation only along the view axis (+ roll),
+    //       so the sight point stays on the view axis and the gun body moves around it.
+    vec3 sway_deg = v3(st->lag.x + sway_rot.x + bob_rot.x, st->lag.y + sway_rot.y + bob_rot.y, sway_rot.z + bob_rot.z);
+    vec3 kick_deg = v3(kick_rot.x, -kick_rot.y, kick_rot.z);
+    vec3 sway_pos = v3_add(v3_add(breath, bob_pos), v3(st->lag.y * s->lag_pos * 10.0f, st->lag.x * s->lag_pos * 10.0f, 0));
+    // Hip: sway first (about its anchor), then the kick (about its anchor).
+    {
+        vec3 sp = xf_point(item, hip_sway_item);
+        quat Rs = hp_euler_deg(v3_scale(sway_deg, 1.0f - ads_a));
+        item.r = quat_norm(quat_mul(Rs, item.r));
+        item.t = v3_add(sp, quat_rotate(Rs, v3_sub(item.t, sp)));
+        vec3 kpv = xf_point(item, hip_kick_item);
+        quat Rk = hp_euler_deg(v3_scale(kick_deg, 1.0f - ads_a));
+        item.r = quat_norm(quat_mul(Rk, item.r));
+        item.t = v3_add(kpv, quat_rotate(Rk, v3_sub(item.t, kpv)));
+        item.t = v3_add(item.t, v3_scale(v3_add(sway_pos, kick_pos), 1.0f - ads_a));
+    }
+    // ADS: about the sight point.
+    if (ads_a > 0.0f) {
+        vec3 ads_rot = v3_add(sway_deg, v3(kick_deg.x, kick_deg.y, kick_deg.z * kp.ads_roll));
+        if (kp.ads_misalign_deg > 0.0f) {
+            // Iron sights: keep the rear sight from covering the front post.
+            float m = sqrtf(ads_rot.x * ads_rot.x + ads_rot.y * ads_rot.y);
+            if (m > kp.ads_misalign_deg) { float f = kp.ads_misalign_deg / m; ads_rot.x *= f; ads_rot.y *= f; }
+        }
+        vec3 S = xf_point(item, in->sight);
+        quat Ra = hp_euler_deg(v3_scale(ads_rot, ads_a));
+        item.r = quat_norm(quat_mul(Ra, item.r));
+        item.t = v3_add(S, quat_rotate(Ra, v3_sub(item.t, S)));
+        // Push back along the view axis only (camera +z); no lateral / vertical translation. The
+        // sight never comes closer than 5 cm to the eye (a hard kick would push the gun into the view).
+        float push = (kick_pos.z * kp.ads_push + sway_pos.z) * ads_a;
+        float sight_z = xf_point(item, in->sight).z;
+        push = fminf(push, fmaxf(0.0f, -0.05f - sight_z));
+        item.t.z += push;
+    }
+    (void)sight_c;
+    (void)pivot;
 
     // ---- weapon collision: cast along the item from the hold point, pull back / up on hit
     float want = 0;

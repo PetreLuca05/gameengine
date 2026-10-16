@@ -70,6 +70,9 @@ typedef struct CharGlobals {
     float fp_hold_w;                 // hand IK weight of this frame's first-person hold (1 = the hold owns the hands)
     float fp_ads_pos, fp_ads_ang;
     vec3 fp_sight_cam;               // the rendered item's sight socket in camera space (ADS checks)
+    vec3 fp_sight_world;             // ... and in world space (viewmodel space: the reticle anchor)
+    int fp_hold_state;
+    float fp_hold_blend;
     float fp_reach_pull;             // this frame's first-person reach pull (m)
     Xform fp_cam;
     bool fp_cam_valid;
@@ -1246,6 +1249,18 @@ static void post_one(World *w, CharacterInst *c, int i, float dt, vec3 cam_pos, 
         pi.item_kick_pos = v3_scale(pi.item_kick_pos, kk);
         pi.item_kick_rot = v3_scale(pi.item_kick_rot, kk);
         pi.hp_sway_scale = wc->sway_scale ? wc->sway_scale->f : 0.0f;
+        if (c->item_weapon) {
+            const RecoilParams *rp = &c->item_weapon->recoil;
+            pi.hold_kick.set = true;
+            pi.hold_kick.ads_push = rp->ads_forward_push;
+            pi.hold_kick.ads_roll = rp->ads_roll;
+            // Optics are parallax-free: the misalignment clamp is for iron sights only.
+            pi.hold_kick.ads_misalign_deg = c->item_att[ATT_OPTIC] ? 0.0f : rp->ads_max_misalign_deg;
+            pi.hold_kick.kick_hip = rp->anchor_hip;
+            pi.hold_kick.kick_ads = rp->anchor_ads;
+            pi.hold_kick.sway_hip = rp->sway_anchor_hip;
+            pi.hold_kick.sway_ads = rp->sway_anchor_ads;
+        }
         pi.hp_bob_scale = wc->bob_scale ? wc->bob_scale->f : 0.0f;
     }
     if (c->rt.in.crouch) pi.crouch_drop = 0.38f;
@@ -1694,6 +1709,15 @@ void chars_render_local_fp(World *w, float alpha, int local_slot) {
         float it = saturate(((float)(w->chars->tick - c->last_eval) + alpha) / span);
         Xform icam = xf_lerp(c->item_cam_prev, c->item_cam_cur, it);
         icam.s = v3(1, 1, 1);
+        {
+            // Interpolate about the sight point (the ADS kick anchor): a plain transform lerp of two
+            // rotations about the sight would move the sight off the view axis between ticks.
+            const ItemSockets *hk = held_sockets(c);
+            if (hk) {
+                vec3 sp = xf_point(c->item_cam_prev, hk->sight), sc = xf_point(c->item_cam_cur, hk->sight);
+                icam.t = v3_sub(v3_lerp(sp, sc, it), quat_rotate(icam.r, hk->sight));
+            }
+        }
         icam = xf_mul(xf_make(v3(0, 0, 0), g_fp_aim_off), icam);   // sight sway / bob about the eye
         Xform cam_m = xf_mul(inv_root, CG->fp_cam);
         cam_m.s = v3(1, 1, 1);
@@ -1734,7 +1758,9 @@ void chars_render_local_fp(World *w, float alpha, int local_slot) {
                 // Along the item's own barrel axis first (sights stay on the view axis in ADS),
                 // towards the shoulder only when the barrel doesn't shorten the reach.
                 vec3 to_sh = v3_norm(v3_sub(model[la].t, hand_l.t));
-                vec3 back = quat_rotate(want.r, v3(0, 0, 1));
+                // ADS: along the view axis (the barrel may be turned by the kick about the sight;
+                // pulling along it would move the reticle centre off the aim).
+                vec3 back = ads_exact ? quat_rotate(cam_m.r, v3(0, 0, 1)) : quat_rotate(want.r, v3(0, 0, 1));
                 float gain = v3_dot(to_sh, back);
                 vec3 dir = gain >= 0.5f ? back : to_sh;
                 float d = (need - reach + 0.003f) / (gain >= 0.5f ? gain : 1.0f);
@@ -1757,8 +1783,11 @@ void chars_render_local_fp(World *w, float alpha, int local_slot) {
             }
             anim_ik_two_bone_pose(s, posep, model, ra, rf, rh, hand_r.t, &hand_r.r, quat_rotate(cam_rm, hs->elbow_r), ikw);
         }
+        // The item stays exactly on its hold point while the hands hold it (the arms follow by IK;
+        // a reach shortfall shows as a few mm at the hand, never as the sight leaving the aim).
+        // Clip-driven states (reload / equip: hand IK weight < 1) finalize it from the right hand.
         Xform item = want;
-        if (rh >= 0) item = xf_mul(xf_mul(model[rh], LIB->hands.palm[1]), xf_inverse(k->grip_r));
+        if (rh >= 0 && ikw < 0.99f) item = xf_mul(xf_mul(model[rh], LIB->hands.palm[1]), xf_inverse(k->grip_r));
         Xform palm_r = rh >= 0 ? xf_mul(model[rh], LIB->hands.palm[1]) : xf_identity();
         Xform sock_r = xf_mul(want, k->grip_r);
         CG->fp_glue_pos[1] = v3_dist(palm_r.t, sock_r.t);
@@ -1778,6 +1807,7 @@ void chars_render_local_fp(World *w, float alpha, int local_slot) {
         vec3 sight_c = xf_point(xf_mul(xf_inverse(cam_m), item), k->sight);
         CG->fp_ads_pos = sqrtf(sight_c.x * sight_c.x + sight_c.y * sight_c.y);
         CG->fp_sight_cam = sight_c;
+        CG->fp_sight_world = xf_point(root, xf_point(item, k->sight));
         CG->fp_ads_ang = quat_angle_between(xf_mul(xf_inverse(cam_m), item).r, quat_identity()) * DG_RAD2DEG;
         CG->fp_item_cam = xf_mul(xf_inverse(cam_m), item);
         CG->fp_item_target = c->rt.proc.hp_out.item;   // the hold point's item (before any reach pull)
@@ -1890,6 +1920,7 @@ bool chars_fp_item_cam(Xform *item_cam, int *state, float *blend) {
 }
 
 vec3 chars_fp_sight_cam(void) { ensure_globals(); return CG->fp_sight_cam; }
+vec3 chars_fp_sight_world(void) { ensure_globals(); return CG->fp_sight_world; }
 float chars_fp_reach_pull(void) { ensure_globals(); return CG->fp_reach_pull; }
 
 void chars_fp_diag(float *glue_pos, float *glue_ang, float *ads_pos, float *ads_ang) {

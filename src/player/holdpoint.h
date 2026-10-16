@@ -77,9 +77,21 @@ typedef struct HoldPointState {
     float bob_phase, bob_amt, t;
     float pull;                       // collision pull 0..1 (smoothed)
     float pitch_w;                    // soft pitch limit weight (0 in ADS)
+    u8 ads_from;                      // the state the blend came from (ADS anchor blend out of ADS)
 } HoldPointState;
 
 typedef bool (*HoldPointRayFn)(void *ctx, vec3 origin, vec3 dir_len, float *fraction, vec3 *point, vec3 *normal);
+
+// How the procedural layer moves the item (docs/RECOIL.md "Hip vs ADS"). Anchors: 0 the pivot
+// socket, 1 the hold point, 2 the sight (reticle centre). In ADS the kick (and look lag / sway)
+// turns the gun about the sight, translation only along the view axis (forward push) plus roll,
+// so the reticle centre never leaves the view axis. ads_misalign_deg > 0 (iron sights) clamps the
+// rotation so the rear sight doesn't cover the front post.
+typedef struct HoldKickParams {
+    bool set;
+    float ads_push, ads_roll, ads_misalign_deg;
+    u8 kick_hip, kick_ads, sway_hip, sway_ads;
+} HoldKickParams;
 
 typedef struct HoldPointInput {
     const HoldPointStyle *style;
@@ -104,6 +116,7 @@ typedef struct HoldPointInput {
     bool static_pose;                 // no procedural layer (alignment tests, editor)
     float sway_scale;                 // look lag, idle sway, breathing, sprint bob (wpn_sway_scale; 0 = none)
     float bob_scale;                  // movement bob outside sprint (wpn_bob_scale; 0 = the item stays still)
+    HoldKickParams kick_params;       // anchors / ADS kick shaping (unset = sight anchor, push 1, roll 1)
 } HoldPointInput;
 
 typedef struct HoldPointOutput {

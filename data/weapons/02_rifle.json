@@ -49,7 +49,11 @@
     "camera_kick": { "pitch": 0.7, "yaw": 0.2, "roll": 0.45, "back": 0.012, "stiffness": 200, "damping": 20 },
     "viewmodel_kick": { "back": 0.035, "up": 0.01, "pitch": 2.6, "yaw": 0.9, "roll": 1.4, "random": 0.3, "stiffness": 260, "damping": 22, "ads_scale": 0.45 },
     "spread": { "hip": 2.2, "ads": 0.12, "per_shot_bloom": 0.18, "bloom_max": 2.4, "bloom_recovery": 7, "move": 1.7, "crouch": 0.75, "prone": 0.55, "air": 3.0 },
-    "modifiers": { "ads": 0.7, "crouch": 0.82, "prone": 0.6, "moving": 1.2, "air": 1.6, "single": 0.9, "burst": 1.05, "auto": 1.0, "after_sprint": 1.25 }
+    "modifiers": { "ads": 0.7, "crouch": 0.82, "prone": 0.6, "moving": 1.2, "air": 1.6, "single": 0.9, "burst": 1.05, "auto": 1.0, "after_sprint": 1.25 },
+    "hip": { "aim_mult": 0.35, "kick_mult": 1.0, "spread_mult": 1.6, "bloom_mult": 2.0, "bloom_max_mult": 2.0, "bloom_recovery_mult": 0.5 },
+    "ads": { "aim_mult": 1.0, "kick_mult": 0.45, "forward_push": 1.0, "roll": 1.0, "max_misalign_deg": 1.5 },
+    "anchor": { "hip": "pivot_socket", "ads": "sight" },
+    "sway": { "anchor": { "hip": "pivot_socket", "ads": "sight" } }
   },
   "pose": "rifle",
   "sound_fire": "shot_rifle",

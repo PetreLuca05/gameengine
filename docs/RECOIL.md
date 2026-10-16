@@ -73,6 +73,46 @@ Shotguns (pellets > 1) draw the cone as a circle. `wpn_recoil_debug 1` draws the
 world at the aim distance, and with `wpn_magdump` every bullet is checked
 (`bullets checked / outside / max offset`).
 
+## Hip vs ADS
+
+Every multiplier blends with the aim progress (`ads_t`), so aiming mid-burst never pops.
+
+| | Hip-fire | ADS |
+|---|---|---|
+| Aim recoil (view climb) | × `hip.aim_mult` (rifle 0.35: the camera climbs much less) | × `modifiers.ads` × `ads.aim_mult` (the original values) |
+| Spread | `spread.hip` × `hip.spread_mult` | `spread.ads` |
+| Bloom per shot / max / recovery | × `hip.bloom_mult` / `hip.bloom_max_mult` / `hip.bloom_recovery_mult` (more, higher, slower) | as configured |
+| Item (gun) kick | × `hip.kick_mult` (1: the full animation) about the hip anchor | × `ads.kick_mult` about the **reticle centre** |
+| Camera visual kick | unchanged | unchanged; the gun counters it so the reticle keeps marking the aim |
+
+Hip accuracy is governed by the cone: the crosshair gap opens with the bloom on a mag-dump.
+
+**Reticle-anchored ADS kick** (`src/player/holdpoint.c`):
+
+- **Pivot:** in ADS the item kick, look lag and sway turn the gun about its `sight` socket, which
+  is the optic's sight point or the iron-sight socket. That socket is already on the view axis at
+  the eye relief.
+- **Translation** is limited to the view axis: a push back (`ads.forward_push`) plus roll about
+  the axis (`ads.roll`). The sight point therefore never leaves the screen centre; the rear of the
+  weapon moves instead.
+- **Eye clearance:** the push never brings the sight closer than 5 cm to the eye.
+- **Iron sights only:** `ads.max_misalign_deg` limits the rotation so the rear sight doesn't
+  cover the front post. Optics are parallax-free, so the limit doesn't apply.
+- **Hip-to-ADS blend:** the hip and ADS contributions blend with the hold point's own ADS
+  progress (pivot, rotation and translation), in both directions.
+- **Interpolation:** the first-person item is interpolated between ticks about its sight point,
+  and it stays exactly on the hold point while the hands hold it. The arms follow by IK; a reach
+  pull in ADS runs along the view axis.
+- **Optics:** a red dot draws its dot on the eye→sight line, and a picture-in-picture scope looks
+  along it, so neither drifts when the gun turns.
+- **Camera kick:** the visual camera kick turns the view but not the aim. While aimed, the first-
+  person weapon counters it (`chars_set_fp_aim_offset`), so the reticle shows exactly where the
+  shots go.
+
+Measured: `tools/tests/recoil_ads.cfg` (mag-dumps at `wpn_kick_scale 3`) with `sight_test recoil`
+/ `recoil_report`. The worst reticle-to-aim error was ≤ 0.81 px for irons, red dot, 4x, 8x and
+the pistol. Camera climb over the same burst: hip 3.9°, ADS 7.7°.
+
 ## Fire timing and modes
 
 * **Sub-tick RPM:** the cooldown carries its remainder across ticks (`recoil_fire_budget`), and
@@ -127,10 +167,19 @@ real barrel. Hitscan traces still start at the eye, so bullets go where the cros
     "spread":    { "hip": 2.2, "ads": 0.12, "per_shot_bloom": 0.18, "bloom_max": 2.4, "bloom_recovery": 7,
                    "move": 1.7, "crouch": 0.75, "prone": 0.55, "air": 3.0 },
     "modifiers": { "ads": 0.7, "crouch": 0.82, "prone": 0.6, "moving": 1.2, "air": 1.6,
-                   "single": 0.9, "burst": 1.05, "auto": 1.0, "after_sprint": 1.25 }
+                   "single": 0.9, "burst": 1.05, "auto": 1.0, "after_sprint": 1.25 },
+    "hip":    { "aim_mult": 0.35, "kick_mult": 1.0, "spread_mult": 1.6, "bloom_mult": 2.0,
+                "bloom_max_mult": 2.0, "bloom_recovery_mult": 0.5 },
+    "ads":    { "aim_mult": 1.0, "kick_mult": 0.45, "forward_push": 1.0, "roll": 1.0, "max_misalign_deg": 1.5 },
+    "anchor": { "hip": "pivot_socket", "ads": "sight" },          // pivot_socket | hold_point | sight
+    "sway":   { "anchor": { "hip": "pivot_socket", "ads": "sight" } }
   }
 }
 ```
+
+Missing `hip` values come from the weapon type (`recoil_type_defaults`: rifle, pistol / crossbow,
+SMG, LMG, shotgun, sniper / DMR), so a new weapon file gets sensible hip behaviour for free.
+`ads.kick_mult` is the same value as `viewmodel_kick.ads_scale`, whichever comes last wins.
 
 Files load sorted by name, and the weapon index is replicated, so keep the `nn_` prefixes stable.
 `weapon_reload` re-reads the values in place. Adding or removing weapons needs a restart.
@@ -154,6 +203,13 @@ Prone is data-only until a prone stance exists.
 * `ctest --test-dir build` (or `build/bin/test_recoil`): determinism, ramp and pattern, modifiers,
   recovery of the uncountered amount, countering, cancel-on-shot, the cone never exceeded
   (20k samples × 12 cases), exact RPM for 48–4800 rpm, and springs settling.
+* `build/bin/test_recoil_ads`:
+  * the hip multipliers give the configured ratios and blend smoothly;
+  * hip bloom exceeds ADS bloom and stays capped;
+  * 600 ticks of 3× ADS kick keep the sight exactly on the view axis and at least 5 cm from the
+    eye for all 26 weapon × optic combinations.
+* `tools/tests/recoil_ads.cfg`: hip and ADS mag-dumps; `sight_test recoil_report` checks the
+  reticle stays within 1 px of the aim.
 * `tools/tests/recoil.cfg`: mag dumps of every preset at the 10 / 25 / 50 m wall with
   `wpn_recoil_debug 2`. Each dump logs `PASS`.
 * `tools/tests/recoil_modes.cfg`: fire-mode cycling and measured RPM.

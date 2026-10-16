@@ -815,6 +815,7 @@ void weapons_tick(World *w, int slot, PlayerSim *sim, const UserCmd *cmd, u16 pr
         if (mode == FM_BURST && (*mag <= 0 || !ready)) ws->burst_left = 0;
     }
     // Recovery (and bloom decay) every tick; report everything applied to the view.
+    ws->rc.ads_t = saturate(ws->ads_t);   // bloom recovery: hip / ADS blend
     RecoilKick rec = recoil_tick(rp, &ws->rc, dt);
     tick_kick.pitch += rec.pitch;
     tick_kick.yaw += rec.yaw;
