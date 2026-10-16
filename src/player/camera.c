@@ -45,9 +45,14 @@ RenderCamera camera_update(ViewState *v, const PlayerMove *m, float dt, const Ca
         v->last_land_tick = m->land_tick;
         v->land_vel -= clampf(m->land_speed * 0.06f, 0.0f, 0.9f);
     }
-    float acc = -v->land_offset * 220.0f - v->land_vel * 24.0f;
-    v->land_vel += acc * dt;
-    v->land_offset += v->land_vel * dt;
+    // Sub-stepped (<= 1/120 s): explicit Euler with this stiffness diverges above ~40 ms frames.
+    int steps = (int)ceilf(dt * 120.0f);
+    float h = steps > 0 ? dt / (float)steps : 0.0f;
+    for (int i = 0; i < steps; i++) {
+        float acc = -v->land_offset * 220.0f - v->land_vel * 24.0f;
+        v->land_vel += acc * h;
+        v->land_offset += v->land_vel * h;
+    }
 
     // Head bob.
     float speed = v3_len(v3_flat(m->vel));

@@ -389,6 +389,24 @@ static void default_sockets(ItemSockets *k, const char *style, vec3 support, vec
     finish_sockets(k, NULL);
 }
 
+static void apply_sockets(ItemSockets *k, const cJSON *sk);
+
+// "camera": { "body": { "center", "half" }, "screen": { "pos", "half" }, "lens": [x, y, z], "fov" }
+static void parse_camera(ItemDef *d, const cJSON *c) {
+    d->camera = c != NULL;
+    if (!c) return;
+    const cJSON *b = cJSON_GetObjectItemCaseSensitive(c, "body");
+    d->cam.body_half = jvec3(b, "half", v3(0.036f, 0.075f, 0.004f));
+    d->cam.body_center = jvec3(b, "center", v3(-d->cam.body_half.x, d->cam.body_half.y - 0.02f, 0));
+    const cJSON *s = cJSON_GetObjectItemCaseSensitive(c, "screen");
+    vec3 sh = jvec3(s, "half", v3(d->cam.body_half.x - 0.003f, d->cam.body_half.y - 0.006f, 0));
+    d->cam.screen_half = v2(sh.x, sh.y);
+    d->cam.screen = xf_make(jvec3(s, "pos", v3_add(d->cam.body_center, v3(0, 0, d->cam.body_half.z + 0.0005f))), quat_identity());
+    vec3 lens = jvec3(c, "lens", v3_add(d->cam.body_center, v3(-d->cam.body_half.x + 0.012f, d->cam.body_half.y - 0.014f, -d->cam.body_half.z - 0.0005f)));
+    d->cam.lens = xf_make(lens, quat_identity());
+    d->cam.fov_deg = jnum(c, "fov", 68.0f);
+}
+
 static void parse_hold(const cJSON *w, char *style, ItemSockets *k, const char *def_style, vec3 support, vec3 muzzle,
                        const WeaponModelPart *parts, int part_count) {
     const cJSON *h = cJSON_GetObjectItemCaseSensitive(w, "hold");
@@ -396,7 +414,11 @@ static void parse_hold(const cJSON *w, char *style, ItemSockets *k, const char *
     default_sockets(k, style, support, muzzle, parts, part_count);
     holdpoint_override_parse(&k->hp, cJSON_GetObjectItemCaseSensitive(w, "holdpoint"));
     if (!h) return;
-    const cJSON *sk = cJSON_GetObjectItemCaseSensitive(h, "sockets");
+    apply_sockets(k, cJSON_GetObjectItemCaseSensitive(h, "sockets"));
+}
+
+// A "sockets" block over the defaults (weapons and held items).
+static void apply_sockets(ItemSockets *k, const cJSON *sk) {
     if (!sk) return;
     k->grip_r = socket_from_json(cJSON_GetObjectItemCaseSensitive(sk, "grip_r"), k->grip_r);
     const cJSON *gl = cJSON_GetObjectItemCaseSensitive(sk, "grip_l");
@@ -603,8 +625,23 @@ bool items_load(ItemDB *db, const char *items_path, const char *weapons_path) {
         WeaponModelPart part = { v3(0, d->size.y, -0.03f), d->size, d->color };
         default_sockets(&d->sockets, d->hold_style, v3(0, 0, 0), v3(0, 0, -d->size.z), &part, 1);
         holdpoint_override_parse(&d->sockets.hp, cJSON_GetObjectItemCaseSensitive(it, "holdpoint"));
+        const cJSON *hold = cJSON_GetObjectItemCaseSensitive(it, "hold");
+        dg_strcpy(d->hold_style_alt, sizeof(d->hold_style_alt), jstr(hold, "style_landscape", ""));
+        d->builtin = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(it, "builtin"));
+        parse_camera(d, cJSON_GetObjectItemCaseSensitive(it, "camera"));
+        const cJSON *sk = cJSON_GetObjectItemCaseSensitive(hold, "sockets");
+        apply_sockets(&d->sockets, sk);
+        if (d->camera) {
+            // The screen is the "sight" (camera mode holds it in front of the eye) unless the
+            // sockets name one; the item length is the phone's height (wall collision cast).
+            if (!cJSON_GetObjectItemCaseSensitive(sk, "sight")) d->sockets.sight = d->cam.screen.t;
+            d->sockets.sight_height = d->cam.body_center.y + d->cam.body_half.y;
+            d->sockets.length = d->cam.body_half.y * 2.0f;
+        }
     }
     cJSON_Delete(iroot);
+    for (int i = 1; i < db->item_count && !db->builtin_phone; i++)
+        if (db->items[i].builtin && db->items[i].camera) db->builtin_phone = (u16)i;
     attachments_load(db, "assets/attachments");
     bool ok = load_weapons(db, weapons_path);
     attachments_resolve(db);
@@ -644,6 +681,11 @@ u16 item_find(const ItemDB *db, const char *id) {
 }
 
 void item_held_box(const ItemDef *it, vec3 *center, vec3 *half) {
+    if (it->camera) {   // the phone body as authored (already palm-sized)
+        *center = it->cam.body_center;
+        *half = it->cam.body_half;
+        return;
+    }
     vec3 h = it->size;
     float m = fmaxf(h.x, fmaxf(h.y, h.z));
     float s = m > 0.07f ? 0.07f / m : 1.0f;

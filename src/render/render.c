@@ -1,5 +1,6 @@
 // Frame orchestration: particle compute -> shadow pass -> frame graph (G-buffer prepass,
 // screen-space lighting, lit scene, fog, transparency, viewmodel, post stack, final + UI) -> present.
+#include "render/phone_view.h"
 #include "vk_internal.h"
 #include "post/post.h"
 #include "sky/sky.h"
@@ -59,6 +60,7 @@ static void create_frames(void) {
         VK_CHECK(vkCreateSemaphore(R->device, &sci, NULL, &f->image_available));
         f->ubo = vkr_buffer_create(sizeof(FrameData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, true);
         f->ubo_pip = vkr_buffer_create(sizeof(FrameData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, true);
+        for (int k = 0; k < 2; k++) f->ubo_phone[k] = vkr_buffer_create(sizeof(FrameData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, true);
         f->dyn = vkr_buffer_create(DYN_BUFFER_SIZE, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, true);
         f->bones = vkr_buffer_create(sizeof(mat4) * MAX_SKIN_BONES * 2, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);   // + last frame's
         f->instances = vkr_buffer_create(sizeof(GpuSkinInstance) * MAX_SKIN_DRAWS * 2, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);
@@ -70,10 +72,12 @@ static void create_frames(void) {
         ai.pSetLayouts = &R->frame_layout;
         VK_CHECK(vkAllocateDescriptorSets(R->device, &ai, &f->frame_set));
         VK_CHECK(vkAllocateDescriptorSets(R->device, &ai, &f->frame_set_pip));
-        // The PiP set: its own frame UBO, the same skinning / previous-model buffers.
-        VkDescriptorSet sets[2] = { f->frame_set, f->frame_set_pip };
-        GpuBuffer *ubos[2] = { &f->ubo, &f->ubo_pip };
-        for (int s = 0; s < 2; s++) {
+        for (int k = 0; k < 2; k++) VK_CHECK(vkAllocateDescriptorSets(R->device, &ai, &f->frame_set_phone[k]));
+        // The PiP / phone sets: their own frame UBO, the same skinning / previous-model buffers.
+        VkDescriptorSet sets[FRAME_SET_COUNT];
+        frame_sets_of(f, sets);
+        GpuBuffer *ubos[FRAME_SET_COUNT] = { &f->ubo, &f->ubo_pip, &f->ubo_phone[0], &f->ubo_phone[1] };
+        for (int s = 0; s < FRAME_SET_COUNT; s++) {
             VkDescriptorBufferInfo bi = { ubos[s]->buffer, 0, sizeof(FrameData) };
             VkWriteDescriptorSet w = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
             w.dstSet = sets[s];
@@ -101,8 +105,9 @@ static void create_frames(void) {
 // Frame sets: the sky module's persistent environment / SH / cloud shadow (kept in GENERAL).
 static void write_sky_bindings(void) {
     for (int i = 0; i < FRAMES_IN_FLIGHT; i++) {
-        VkDescriptorSet sets[2] = { R->frames[i].frame_set, R->frames[i].frame_set_pip };
-        for (int s = 0; s < 2; s++) {
+        VkDescriptorSet sets[FRAME_SET_COUNT];
+        frame_sets_of(&R->frames[i], sets);
+        for (int s = 0; s < FRAME_SET_COUNT; s++) {
             if (!sets[s]) continue;
             VkDescriptorImageInfo env = { R->sampler_clamp, sky_env_view(), VK_IMAGE_LAYOUT_GENERAL };
             VkDescriptorImageInfo cs = env;
@@ -132,6 +137,7 @@ static void destroy_frames(void) {
         vkr_flush_deferred(f);
         vkr_buffer_destroy_now(&f->ubo);
         vkr_buffer_destroy_now(&f->ubo_pip);
+        for (int k = 0; k < 2; k++) vkr_buffer_destroy_now(&f->ubo_phone[k]);
         vkr_buffer_destroy_now(&f->dyn);
         vkr_buffer_destroy_now(&f->bones);
         vkr_buffer_destroy_now(&f->instances);
@@ -212,6 +218,7 @@ void render_shutdown(void) {
         fg_shutdown();
         vkx_shutdown();
         render_ui_shutdown();
+        phone_view_shutdown();
         vkr_target_destroy(&R->occl);
         vkp_destroy_pipelines();
         vkr_destroy_all_resources();
@@ -302,6 +309,7 @@ bool render_begin_frame(void) {
     VK_CHECK(vkWaitForFences(R->device, 1, &f->fence, VK_TRUE, UINT64_MAX));
     vkr_flush_deferred(f);
     f->dyn_used = 0;
+    phone_view_frame_begin(R->frame_slot);   // this slot's phone camera copies are complete
 
     VkResult res = vkAcquireNextImageKHR(R->device, R->swapchain, UINT64_MAX, f->image_available, VK_NULL_HANDLE, &R->image_index);
     if (res == VK_ERROR_OUT_OF_DATE_KHR) { R->swap_dirty = true; return false; }
@@ -394,8 +402,9 @@ static void write_weather_bindings(void) {
     if (R->weather_bindings && pm == R->puddle_bound) return;
     if (R->weather_bindings) vkDeviceWaitIdle(R->device);
     for (int i = 0; i < FRAMES_IN_FLIGHT; i++) {
-        VkDescriptorSet sets[2] = { R->frames[i].frame_set, R->frames[i].frame_set_pip };
-        for (int s = 0; s < 2; s++) {
+        VkDescriptorSet sets[FRAME_SET_COUNT];
+        frame_sets_of(&R->frames[i], sets);
+        for (int s = 0; s < FRAME_SET_COUNT; s++) {
             if (!sets[s]) continue;
             VkDescriptorImageInfo ii[2] = { { R->sampler_clamp, R->occl.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL },
                                             { R->sampler_clamp, R->textures[pm].view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL } };
@@ -421,8 +430,9 @@ static void write_cookie_binding(void) {
     if (t == R->spot_cookie_bound || !t) return;
     vkDeviceWaitIdle(R->device);   // rare: the cookie changes once
     for (int i = 0; i < FRAMES_IN_FLIGHT; i++) {
-        VkDescriptorSet sets[2] = { R->frames[i].frame_set, R->frames[i].frame_set_pip };
-        for (int s = 0; s < 2; s++) {
+        VkDescriptorSet sets[FRAME_SET_COUNT];
+        frame_sets_of(&R->frames[i], sets);
+        for (int s = 0; s < FRAME_SET_COUNT; s++) {
             if (!sets[s]) continue;
             VkDescriptorImageInfo ii = { R->sampler_clamp, R->textures[t].view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
             VkWriteDescriptorSet w = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
@@ -1255,6 +1265,84 @@ static void exec_scope_pip(VkCommandBuffer cmd, void *u) {
     vkCmdEndRendering(cmd);
 }
 
+// Phone camera views (src/render/phone_view.c): the scene from another camera into its own
+// target, drawn like the scope PiP (opaque static + characters + particles + rain, lit forward,
+// no screen-space inputs). The local player's phone, hands and held items are in the viewmodel
+// list and never drawn here.
+typedef struct AltScene { FgRes color, depth; u32 w, h; vec4 frustum[6]; int slot; } AltScene;
+static AltScene g_alt[2];
+
+static void exec_alt_scene(VkCommandBuffer cmd, void *u) {
+    const AltScene *a = (const AltScene *)u;
+    VkDescriptorSet set = F.f->frame_set_phone[a->slot];
+    VkRenderingAttachmentInfo ca = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
+    ca.imageView = fg_view(a->color);
+    ca.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    ca.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    ca.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    ca.clearValue.color.float32[0] = R->env.fog_color.x;
+    ca.clearValue.color.float32[1] = R->env.fog_color.y;
+    ca.clearValue.color.float32[2] = R->env.fog_color.z;
+    ca.clearValue.color.float32[3] = 1.0f;
+    VkRenderingAttachmentInfo da = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
+    da.imageView = fg_view(a->depth);
+    da.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+    da.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    da.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    da.clearValue.depthStencil.depth = 1.0f;
+    VkRenderingInfo ri = { VK_STRUCTURE_TYPE_RENDERING_INFO };
+    ri.renderArea.extent.width = a->w;
+    ri.renderArea.extent.height = a->h;
+    ri.layerCount = 1;
+    ri.colorAttachmentCount = 1;
+    ri.pColorAttachments = &ca;
+    ri.pDepthAttachment = &da;
+    vkCmdBeginRendering(cmd, &ri);
+    set_viewport(cmd, a->w, a->h);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 0, 1, &set, 0, NULL);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 1, 1, &R->textures[R->white_tex].set, 0, NULL);
+    post_push_lit_inputs(cmd, NULL, false);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_LIT]);
+    vec4 saved[6];
+    memcpy(saved, R->frustum, sizeof(saved));
+    memcpy(R->frustum, a->frustum, sizeof(saved));
+    draw_items(cmd, R->draws, R->draw_count, false, true, 0);
+    memcpy(R->frustum, saved, sizeof(saved));
+    draw_skinned(cmd, 0, PIPE_SKIN, PIPE_LIT, F.skin_main);
+    vkx_draw_particles_pip(cmd, set);
+    draw_precip(cmd, set);
+    vkCmdEndRendering(cmd);
+}
+
+// Registers a scene pass for phone view `slot` (its frame UBO = this frame's with the view's
+// camera). Returns the pass index (< 0 when disabled).
+int render_alt_scene_pass(int slot, const char *name, FgRes color, FgRes depth, u32 w, u32 h, mat4 view, mat4 proj, vec3 cam, FrameData *fd) {
+    AltScene *a = &g_alt[slot & 1];
+    a->color = color;
+    a->depth = depth;
+    a->w = w;
+    a->h = h;
+    a->slot = slot & 1;
+    mat4 vp = mat4_mul(proj, view);
+    extract_frustum(vp, a->frustum);
+    FrameData *pd = (FrameData *)F.f->ubo_phone[a->slot].mapped;
+    memcpy(pd, fd, sizeof(FrameData));
+    pd->view_proj = vp;
+    pd->view = view;
+    pd->proj = proj;
+    pd->view_proj_nj = pd->prev_view_proj_nj = vp;
+    pd->jitter = v4(0, 0, 0, 0);
+    pd->post_flags = v4(0, 0, 0, 0);
+    pd->post_fog = v4(0, 80, 0, 0);
+    pd->fog = v4(R->env.fog_color.x, R->env.fog_color.y, R->env.fog_color.z, R->env.fog_density);
+    pd->camera_pos = v4(cam.x, cam.y, cam.z, fd->camera_pos.w);
+    pd->screen = v4((float)w, (float)h, 1.0f / (float)w, 1.0f / (float)h);
+    int p = fg_pass(name, exec_alt_scene, a);
+    fg_write(p, color, FG_COLOR);
+    fg_write(p, depth, FG_DEPTH);
+    return p;
+}
+
 // PiP camera + its frame UBO; returns false when no PiP is needed this frame.
 static bool setup_scope_pip(FrameData *fd) {
     const RenderSight *s = &R->sight;
@@ -1491,6 +1579,7 @@ static void build_frame_graph(FrameData *fd) {
         }
     }
     post_set_sight(&R->sight, F.pip_color, F.pip_from_view, R->vm_proj, R->pip_fov);
+    phone_view_build(fd);   // phone camera views (sampled from the next frame on)
 
     F.ldr = post_resolve();
     render_ui_build(F.ldr, R->swap_extent.width, R->swap_extent.height);

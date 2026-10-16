@@ -1410,6 +1410,152 @@
 					0
 				]
 			}
+		},
+		"phone": {
+			"states": {
+				"hip": {
+					"pos": [
+						0.07,
+						-0.3,
+						0.3
+					],
+					"rot": [
+						-55,
+						8,
+						0
+					],
+					"blend": 0.22
+				},
+				"sprint": {
+					"pos": [
+						0.1,
+						-0.4,
+						0.2
+					],
+					"rot": [
+						-75,
+						10,
+						0
+					],
+					"blend": 0.24
+				},
+				"crouch": {
+					"pos": [
+						0.07,
+						-0.29,
+						0.3
+					],
+					"rot": [
+						-55,
+						8,
+						0
+					],
+					"blend": 0.2
+				},
+				"phone_portrait": {
+					"pos": [
+						0.03,
+						-0.05,
+						0.3
+					],
+					"rot": [
+						0,
+						0,
+						0
+					],
+					"blend": 0.22
+				},
+				"phone_landscape": {
+					"pos": [
+						0,
+						-0.05,
+						0.32
+					],
+					"rot": [
+						0,
+						0,
+						90
+					],
+					"blend": 0.22
+				}
+			},
+			"eye_relief": 0.3,
+			"reach_pull": 0.12,
+			"clavicle_gain": 30,
+			"_comment": "Phone (docs/PHONE.md): phone_portrait / phone_landscape (camera mode) place the screen socket, not the anchor; a paired real phone then drives the rotation about the screen."
+		},
+		"phone_landscape": {
+			"states": {
+				"hip": {
+					"pos": [
+						0.07,
+						-0.3,
+						0.3
+					],
+					"rot": [
+						-55,
+						8,
+						0
+					],
+					"blend": 0.22
+				},
+				"sprint": {
+					"pos": [
+						0.1,
+						-0.4,
+						0.2
+					],
+					"rot": [
+						-75,
+						10,
+						0
+					],
+					"blend": 0.24
+				},
+				"crouch": {
+					"pos": [
+						0.07,
+						-0.29,
+						0.3
+					],
+					"rot": [
+						-55,
+						8,
+						0
+					],
+					"blend": 0.2
+				},
+				"phone_portrait": {
+					"pos": [
+						0.03,
+						-0.05,
+						0.3
+					],
+					"rot": [
+						0,
+						0,
+						0
+					],
+					"blend": 0.22
+				},
+				"phone_landscape": {
+					"pos": [
+						0,
+						-0.05,
+						0.32
+					],
+					"rot": [
+						0,
+						0,
+						90
+					],
+					"blend": 0.22
+				}
+			},
+			"eye_relief": 0.3,
+			"reach_pull": 0.12,
+			"clavicle_gain": 30,
+			"_comment": "Two-handed landscape variant (hold style phone_landscape: both hands on the short edges)."
 		}
 	}
 }

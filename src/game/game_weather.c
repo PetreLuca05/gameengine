@@ -101,6 +101,13 @@ bool weather_current(World *w, WeatherParams *out) {
 
 float weather_lightning_flash(void) { return WX.have ? WX.flash : 0.0f; }
 
+const char *weather_name(World *w) {
+    if (!weather_active(w)) return w && w->level.sky ? "clear" : "indoor";
+    ensure_lib();
+    int p = w->weather.preset;
+    return p < WX.lib.count ? WX.lib.presets[p].name : "custom";
+}
+
 // ------------------------------------------------------------------ queries
 
 // Under the sky at p? 1 = open, 0 = a roof / overhang above. Cached per 1 m cell for 5 s.

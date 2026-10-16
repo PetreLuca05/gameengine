@@ -229,7 +229,8 @@ endif()
 add_custom_target(dg_copy_data ALL
   COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different ${CMAKE_SOURCE_DIR}/data ${CMAKE_BINARY_DIR}/bin/data
   COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different ${CMAKE_SOURCE_DIR}/assets ${CMAKE_BINARY_DIR}/bin/assets
-  COMMENT "Mirroring data/ and assets/")
+  COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different ${CMAKE_SOURCE_DIR}/web ${CMAKE_BINARY_DIR}/bin/web
+  COMMENT "Mirroring data/, assets/ and web/")
 add_dependencies(deadground dg_copy_data)
 
 # ---------------------------------------------------------------- unit tests (ctest)
@@ -251,7 +252,7 @@ set(DG_ANIMCORE_SOURCES
   src/anim/anim.c src/anim/anim_mesh.c src/anim/controller.c src/anim/procedural.c src/anim/turn.c src/anim/spine.c
   src/anim/weapon_hold.c src/anim/damage_additive.c src/anim/foot_ik.c src/anim/anim_net.c src/anim/ragdoll_def.c
   src/anim/anim_library.c src/anim/character_rt.c src/gameplay/hitboxes.c src/gameplay/items.c src/gameplay/attachments.c src/gameplay/recoil.c src/core/spring.c
-  src/world/time_of_day.c src/world/weather.c src/gameplay/vehicle_def.c src/vfx/vfx_curve.c src/vfx/vfx_library.c src/vfx/vfx_sim.c src/vfx/vfx_flesh.c src/vfx/vfx_atlas.c src/player/holdpoint.c src/player/camera_fp_math.c
+  src/world/time_of_day.c src/world/weather.c src/gameplay/vehicle_def.c src/vfx/vfx_curve.c src/vfx/vfx_library.c src/vfx/vfx_sim.c src/vfx/vfx_flesh.c src/vfx/vfx_atlas.c src/player/holdpoint.c src/player/camera_fp_math.c src/gameplay/phone/phone_orient.c
   src/assets/fbx_loader.c src/assets/anim_cache.c src/assets/character.c
   src/core/log.c src/core/platform.c)
 add_library(dg_animcore STATIC ${DG_ANIMCORE_SOURCES})
@@ -358,7 +359,7 @@ add_test(NAME ui COMMAND test_ui WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>
 # reach clamp, JPEG pipeline at 30 fps, photo / video files + sidecars, headless client round trip, TLS.
 set(DG_PHONE_CORE_SOURCES
   src/net/http_ws/hws_proto.c src/net/http_ws/hws_auth.c src/net/http_ws/hws_tls.c src/net/http_ws/hws_server.c
-  src/gameplay/phone/phone_orient.c src/gameplay/phone/phone_stream.c src/gameplay/phone/phone_stream_ws.c
+  src/gameplay/phone/phone_stream.c src/gameplay/phone/phone_stream_ws.c
   src/gameplay/phone/phone_video.c src/gameplay/phone/phone_capture.c src/gameplay/phone/phone_qr.c)
 file(GLOB DG_QUIRC_SOURCES third_party/quirc/*.c)
 add_executable(test_phone tests/test_phone.c ${DG_PHONE_CORE_SOURCES} ${DG_QUIRC_SOURCES} src/core/jobs.c)

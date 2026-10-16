@@ -20,11 +20,12 @@
 
 struct cJSON;
 
-#define HOLD_STYLE_MAX 12
+#define HOLD_STYLE_MAX 16
 #define DMG_PRESET_MAX 8
 
 typedef enum HoldStyleId {
     HOLD_NONE, HOLD_PISTOL, HOLD_RIFLE, HOLD_SHOTGUN, HOLD_SMG, HOLD_LMG, HOLD_MELEE_1H, HOLD_MELEE_2H, HOLD_ITEM_SMALL, HOLD_ITEM_LARGE,
+    HOLD_PHONE, HOLD_PHONE_LANDSCAPE,   // docs/PHONE.md: one-handed portrait, two-handed landscape
     HOLD_COUNT
 } HoldStyleId;
 
@@ -154,6 +155,10 @@ typedef struct ProcState {
     Xform cam_model;           // camera (head bone + eye socket, view rotation), model space
     Xform item_cam;            // item target in camera space (pre-IK; the owner re-solves per frame)
     u32 warned_styles;
+    // Phone driven by a paired real phone (docs/PHONE.md): blend weight towards the device
+    // rotation (eases in on pairing, back to the mouse aim on disconnect) and the last rotation.
+    float phone_w;
+    quat phone_rot;
 } ProcState;
 
 // World raycast for foot IK and muzzle pull-back (local physics world, static geometry).
@@ -197,6 +202,11 @@ typedef struct ProcInput {
     quat hand_anchor_rot[2];
     bool vehicle_onehand;      // hold point HP_VEHICLE_ONEHAND (driver aiming one-handed)
     u8 hand_anchor_skip;       // bit h: hand h is not anchored (one-handed driving: the gun hand)
+    // Phone (docs/PHONE.md): camera mode (1 portrait, 2 landscape; hold point HP_PHONE_*) and the
+    // device rotation relative to the view yaw while a real phone drives it.
+    u8 phone_mode;
+    bool phone_driven;
+    quat phone_rot;
     vec3 seat_hip;
     vec3 seat_feet[2];
 } ProcInput;

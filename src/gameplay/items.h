@@ -34,6 +34,18 @@ typedef struct ItemDef {
     char icon[64];         // UI icon override (assets path, "icon" in the item JSON); empty = baked icon
     u8 vehicle_use;        // VehicleUse: consumables used on a vehicle (docs/VEHICLES.md)
     float fuel;            // VUSE_FUEL: litres
+    // Camera items (the phone, docs/PHONE.md): aiming raises it into camera mode. Item space as
+    // for weapons (origin = grip_r, -Z = the lens direction, +Z = the screen side, +Y = top).
+    bool camera;
+    bool builtin;              // always carried, outside the inventory (taken out with its own key)
+    char hold_style_alt[16];   // "hold": { "style_landscape" }: two-handed landscape hold style
+    struct {
+        vec3 body_center, body_half;   // the phone body (box)
+        Xform screen;                  // screen centre, facing +Z of this frame
+        vec2 screen_half;              // half width / height (m)
+        Xform lens;                    // back camera: looks down -Z of this frame
+        float fov_deg;                 // 1x vertical FOV of the lens
+    } cam;
 } ItemDef;
 
 typedef enum VehicleUse { VUSE_NONE, VUSE_FUEL, VUSE_TIRE_REPAIR, VUSE_SPARE_TIRE } VehicleUse;
@@ -163,6 +175,7 @@ typedef struct ItemDB {
     int weapon_count;
     AttachmentDef attachments[MAX_ATTACHMENTS + 1];   // [0] unused (id 0 = none)
     int attachment_count;                             // highest valid id
+    u16 builtin_phone;     // the camera item every player always carries ("builtin": true), 0 = none
 } ItemDB;
 
 // weapons_path: a directory of per-weapon JSON files (loaded sorted by file name so weapon

@@ -66,6 +66,7 @@ typedef struct Game {
 
     // UI state
     bool menu_open;
+    bool phone_out;           // the built-in phone is taken out (X, BTN_PHONE)
     bool inventory_open;
     bool container_open;
     EntityId container_ent;
@@ -159,6 +160,7 @@ float weather_hearing_scale(World *w);           // rain / wind mask sounds (AI 
 float weather_puddle_mask_at(float x, float z);  // the baked puddle mask 0..1
 void weather_add_listener(WeatherEventFn fn, void *user);
 const char *weather_event_name(WeatherEvent e);
+const char *weather_name(World *w);              // the current preset ("clear", "light_rain" ...; photo sidecars)
 
 enum RpcType { RPC_INV_MOVE = 1, RPC_INV_DROP, RPC_CONTAINER_TAKE, RPC_CONTAINER_PUT, RPC_CONTAINER_CLOSE, RPC_INV_USE, RPC_ATTACH, RPC_INV_OP };
 

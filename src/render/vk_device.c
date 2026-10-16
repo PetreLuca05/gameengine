@@ -360,8 +360,9 @@ void vkd_create_shadow_map(u32 size) {
     for (int i = 0; i < FRAMES_IN_FLIGHT; i++) {
         if (!R->frames[i].frame_set) continue;
         VkDescriptorImageInfo ii = { R->sampler_shadow, R->shadow.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
-        VkDescriptorSet sets[2] = { R->frames[i].frame_set, R->frames[i].frame_set_pip };
-        for (int k = 0; k < 2; k++) {
+        VkDescriptorSet sets[FRAME_SET_COUNT];
+        frame_sets_of(&R->frames[i], sets);
+        for (int k = 0; k < FRAME_SET_COUNT; k++) {
             if (!sets[k]) continue;
             VkWriteDescriptorSet w = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
             w.dstSet = sets[k];

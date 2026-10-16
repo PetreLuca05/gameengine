@@ -100,6 +100,8 @@ typedef struct FrameResources {
     VkDescriptorSet frame_set;
     GpuBuffer ubo_pip;    // scope picture-in-picture camera (same layout as ubo)
     VkDescriptorSet frame_set_pip;
+    GpuBuffer ubo_phone[2];   // phone camera views (src/render/phone_view.c)
+    VkDescriptorSet frame_set_phone[2];
     GpuBuffer dyn;        // host-visible: lines, text, ui
     GpuBuffer bones;      // host-visible SSBO: skinning palettes
     GpuBuffer instances;  // host-visible SSBO: skinned instance data
@@ -108,6 +110,16 @@ typedef struct FrameResources {
     Deferred deferred[MAX_DEFERRED];
     int deferred_count;
 } FrameResources;
+
+// Every frame descriptor set of a frame slot (main, scope PiP, phone views): bindings shared by
+// all of them (shadow map, sky, weather, cookie) are written to each.
+#define FRAME_SET_COUNT 4
+DG_INLINE void frame_sets_of(const FrameResources *f, VkDescriptorSet *out) {
+    out[0] = f->frame_set;
+    out[1] = f->frame_set_pip;
+    out[2] = f->frame_set_phone[0];
+    out[3] = f->frame_set_phone[1];
+}
 
 // Must match shaders/common.glsl (std140).
 typedef struct GpuPointLight { vec4 pos_radius; vec4 color_intensity; } GpuPointLight;

@@ -17,7 +17,13 @@ typedef struct CharInputs {
     int weapon_id;
     float health;
     u8 limb_status;
+    // Phone (docs/PHONE.md): CHAR_PHONE_* flags and, while driven by a real phone, its rotation
+    // relative to the view yaw (phone_quat_pack). Replicated (ANS_PHONE).
+    u8 phone_flags;
+    u32 phone_rot;
 } CharInputs;
+
+enum CharPhoneFlags { CHAR_PHONE_CAMERA = 1 << 0, CHAR_PHONE_LANDSCAPE = 1 << 1, CHAR_PHONE_DRIVEN = 1 << 2, CHAR_PHONE_REC = 1 << 3 };
 
 typedef struct CharRuntime {
     const AnimLibrary *lib;

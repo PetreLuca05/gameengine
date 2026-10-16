@@ -5,7 +5,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-static const char *k_state_names[HP_STATE_COUNT] = { "hip", "ads", "sprint", "crouch", "prone", "empty", "inspect", "vehicle_onehand" };
+static const char *k_state_names[HP_STATE_COUNT] = { "hip", "ads", "sprint", "crouch", "prone", "empty", "inspect", "vehicle_onehand", "phone_portrait",
+                                                      "phone_landscape" };
 
 const char *holdpoint_state_name(int s) { return (s >= 0 && s < HP_STATE_COUNT) ? k_state_names[s] : "hip"; }
 int holdpoint_state_from_name(const char *s) {
@@ -33,6 +34,7 @@ void holdpoint_style_defaults(HoldPointStyle *s, const char *name) {
     bool small = !strcmp(s->name, "item_small") || !strcmp(s->name, "none");
     bool large = !strcmp(s->name, "item_large");
     bool lmg = !strcmp(s->name, "lmg");
+    bool phone = !strncmp(s->name, "phone", 5);
     // Hip: the anchor (right grip) in front of the right shoulder, below the eye line.
     if (pistol) {
         s->state[HP_HIP] = P(0.09f, -0.17f, 0.36f, 0, 2, 0);
@@ -47,6 +49,11 @@ void holdpoint_style_defaults(HoldPointStyle *s, const char *name) {
     } else if (small) {
         s->state[HP_HIP] = P(0.17f, -0.22f, 0.33f, -15, 0, 0);
         s->state[HP_SPRINT] = P(0.18f, -0.30f, 0.26f, -30, 0, 0);
+    } else if (phone) {
+        // Lowered at the chest, screen tilted up towards the eyes (lens down / forward).
+        s->state[HP_HIP] = P(0.07f, -0.30f, 0.30f, -55, 8, 0);
+        s->state[HP_SPRINT] = P(0.10f, -0.40f, 0.20f, -75, 10, 0);
+        s->eye_relief = 0.30f;
     } else if (large) {
         s->state[HP_HIP] = P(0.06f, -0.24f, 0.36f, 0, 0, 0);
         s->state[HP_SPRINT] = P(0.06f, -0.30f, 0.30f, -10, 0, 0);
@@ -69,11 +76,16 @@ void holdpoint_style_defaults(HoldPointStyle *s, const char *name) {
     // Driving one-handed (docs/VEHICLES.md): the ADS line (sights still on the aim), arm a little
     // more extended, the gun canted in towards the centre.
     s->state[HP_VEHICLE_ONEHAND] = s->state[HP_HIP];   // unused: the pose comes from the sight (state_hold)
+    // Phone camera mode: the screen (sight socket) held up in front of the face, a little low and
+    // right of the eye; landscape rolled 90 deg (top of the screen to the left), two-handed.
+    s->state[HP_PHONE_PORTRAIT] = P(0.03f, -0.05f, 0.30f, 0, 0, 0);
+    s->state[HP_PHONE_LANDSCAPE] = P(0.0f, -0.05f, 0.32f, 0, 0, 90);
     if (!s->eye_relief) s->eye_relief = 0.3f;
     for (int i = 0; i < HP_STATE_COUNT; i++) s->blend_in[i] = 0.2f;
     s->blend_in[HP_ADS] = 0.16f;
     s->blend_in[HP_SPRINT] = 0.24f;
     s->blend_in[HP_EMPTY] = 0.25f;
+    s->blend_in[HP_PHONE_PORTRAIT] = s->blend_in[HP_PHONE_LANDSCAPE] = 0.22f;
     s->ads_scale = 0.25f;
     s->lag_rot = 1.6f;                          // deg per rad/s of view rotation
     s->lag_pos = 0.004f;
@@ -95,12 +107,12 @@ void holdpoint_style_defaults(HoldPointStyle *s, const char *name) {
     s->col_in_speed = 14.0f;
     s->col_out_speed = 6.0f;
     s->col_radius = 0.025f;
-    s->clavicle_gain = melee1 || melee2 || small ? 30.0f : 45.0f;
+    s->clavicle_gain = melee1 || melee2 || small || phone ? 30.0f : 45.0f;
     // Bladed stance: the support shoulder comes forward so the off hand reaches the handguard.
-    s->twist = pistol ? 10.0f : (melee1 || small ? 0.0f : (melee2 ? 12.0f : 22.0f));
-    s->clav_l = (melee1 || small) ? v3(0, 0, 0) : v3(0, -22.0f, pistol ? 0.0f : -6.0f);
-    s->clav_r = (melee1 || small) ? v3(0, 0, 0) : v3(0, 6.0f, 0);
-    s->reach_pull = (melee1 || small) ? 0.12f : 0.25f;
+    s->twist = pistol ? 10.0f : (melee1 || small || phone ? 0.0f : (melee2 ? 12.0f : 22.0f));
+    s->clav_l = (melee1 || small || phone) ? v3(0, 0, 0) : v3(0, -22.0f, pistol ? 0.0f : -6.0f);
+    s->clav_r = (melee1 || small || phone) ? v3(0, 0, 0) : v3(0, 6.0f, 0);
+    s->reach_pull = (melee1 || small || phone) ? 0.12f : 0.25f;
     s->pitch_soft = 45.0f;
     s->pitch_follow = 0.35f;
     s->ads_pitch_soft = 65.0f;
@@ -273,6 +285,7 @@ int holdpoint_pick_state(const HoldPointInput *in) {
     if (in->vehicle_onehand) return HP_VEHICLE_ONEHAND;
     if (in->inspect) return HP_INSPECT;
     if (in->sprint && !in->ads) return HP_SPRINT;
+    if (in->phone_mode) return in->phone_mode == 2 ? HP_PHONE_LANDSCAPE : HP_PHONE_PORTRAIT;
     if (in->ads) return HP_ADS;
     if (in->prone) return HP_PRONE;
     if (in->crouch) return HP_CROUCH;
@@ -314,6 +327,12 @@ static Xform state_hold(const HoldPointStyle *s, const HoldPointOverride *o, int
         return xf_mul(out, ads);
     }
     HpPose p = pose_for(s, o, state);
+    if (state == HP_PHONE_PORTRAIT || state == HP_PHONE_LANDSCAPE) {
+        // The screen (sight socket) at pos, the phone turned by rot: item * sight = pos.
+        quat r = hp_euler_deg(p.rot);
+        Xform item = xf_make(v3_sub(hp_cam_pos(p.pos), quat_rotate(r, in->sight)), r);
+        return xf_mul(item, in->anchor);
+    }
     return xf_make(hp_cam_pos(p.pos), hp_euler_deg(p.rot));
 }
 
@@ -393,7 +412,7 @@ void holdpoint_eval(HoldPointState *st, const HoldPointInput *in, HoldPointOutpu
         st->off_rot = quat_identity();
         st->prev_yaw = in->aim_yaw;
         st->prev_pitch = in->aim_pitch;
-        st->pitch_w = (state == HP_ADS || state == HP_VEHICLE_ONEHAND) ? 0.0f : 1.0f;
+        st->pitch_w = (state == HP_ADS || state == HP_VEHICLE_ONEHAND || state >= HP_PHONE_PORTRAIT) ? 0.0f : 1.0f;
     }
     if (state != st->state || in->style_key != st->style_key) {
         // Offset (and its velocity) from the new target to where the hold point is now, decayed
@@ -433,7 +452,7 @@ void holdpoint_eval(HoldPointState *st, const HoldPointInput *in, HoldPointOutpu
     Xform item = xf_mul(base, inv_anchor);
     // Soft pitch limit: looking steeply up / down the item stops following the view fully (arms
     // stay in reach); none in ADS (the sight must stay on the view axis), eased with the blend.
-    float pw_target = (state == HP_ADS || state == HP_VEHICLE_ONEHAND) ? 0.0f : 1.0f;
+    float pw_target = (state == HP_ADS || state == HP_VEHICLE_ONEHAND || state == HP_PHONE_PORTRAIT || state == HP_PHONE_LANDSCAPE) ? 0.0f : 1.0f;
     st->pitch_w += (pw_target - st->pitch_w) * (1.0f - expf(-dt / fmaxf(0.02f, s->blend_in[state] * 0.35f)));
     {
         float pdeg = in->aim_pitch * DG_RAD2DEG, a = fabsf(pdeg);
@@ -566,6 +585,14 @@ void holdpoint_eval(HoldPointState *st, const HoldPointInput *in, HoldPointOutpu
     }
     (void)sight_c;
     (void)pivot;
+    // ---- driven rotation (phone): about the screen, so it stays where the hold point put it
+    if (in->rot_w > 1e-4f) {
+        vec3 sc = xf_point(item, in->sight);
+        quat q = quat_nlerp(item.r, quat_norm(in->rot_cam), saturate(in->rot_w));
+        quat d = quat_mul(q, quat_conj(item.r));
+        item.r = q;
+        item.t = v3_add(sc, quat_rotate(d, v3_sub(item.t, sc)));
+    }
 
     // ---- weapon collision: cast along the item from the hold point, pull back / up on hit
     float want = 0;

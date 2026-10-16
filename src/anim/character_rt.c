@@ -1,3 +1,4 @@
+#include "gameplay/phone/phone_orient.h"
 #include "character_rt.h"
 #include <math.h>
 
@@ -185,6 +186,9 @@ void charrt_proc_input(const CharRuntime *r, ProcInput *in, Xform root, float dt
     in->item_key = (int)r->in.weapon_id;
     in->empty_hands = r->in.hanging || r->in.mantling || r->in.vaulting;
     in->prone = r->in.prone;
+    if (r->in.phone_flags & CHAR_PHONE_CAMERA) in->phone_mode = (r->in.phone_flags & CHAR_PHONE_LANDSCAPE) ? 2 : 1;
+    in->phone_driven = (r->in.phone_flags & CHAR_PHONE_DRIVEN) != 0;
+    in->phone_rot = in->phone_driven ? phone_quat_unpack(r->in.phone_rot) : quat_identity();
 }
 
 void charrt_post(CharRuntime *r, ProcInput *in) {

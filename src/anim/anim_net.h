@@ -26,7 +26,8 @@ enum AnimNetFields {
     ANS_STATE = 1 << 0, ANS_PHASE = 1 << 1, ANS_START = 1 << 2, ANS_SPEED = 1 << 3, ANS_MOVE = 1 << 4,
     ANS_PITCH = 1 << 5, ANS_YAW = 1 << 6, ANS_BODY = 1 << 7, ANS_FLAGS = 1 << 8, ANS_LIMB = 1 << 9,
     ANS_WEAPON = 1 << 10, ANS_MANTLE = 1 << 11, ANS_CHAR = 1 << 12, ANS_DEATH = 1 << 13,
-    ANS_ALL = 0x3FFF,
+    ANS_PHONE = 1 << 14,   // phone flags u8 + rotation u32 (docs/PHONE.md), only while in camera mode
+    ANS_ALL = 0x7FFF,
 };
 
 typedef struct AnimNetState {
@@ -45,6 +46,8 @@ typedef struct AnimNetState {
     u8 character_id;
     u8 death_seed;
     u32 death_tick;
+    u8 phone_flags;   // CHAR_PHONE_* (character_rt.h)
+    u32 phone_rot;    // smallest-three packed rotation relative to the view yaw (driven only)
 } AnimNetState;
 
 // Quantization (documented error bounds, tested by tests/test_anim.c):

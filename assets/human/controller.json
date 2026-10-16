@@ -6,7 +6,7 @@
     { "name": "hit_clips", "type": "bool", "default": 0 }
   ],
 
-  "weapon_types": ["none", "pistol", "rifle", "shotgun", "smg", "lmg", "melee_1h", "melee_2h", "item_small", "item_large"],
+  "weapon_types": ["none", "pistol", "rifle", "shotgun", "smg", "lmg", "melee_1h", "melee_2h", "item_small", "item_large", "phone", "phone_landscape"],
 
   "masks": {
     "upper_body": { "include": [["Spine", 0.25, false], ["Spine1", 0.6, false], ["Spine2", 1.0]] },
@@ -164,7 +164,9 @@
     "melee_1h": { "left_hand": false, "hip_offset": [0.24, -0.28, -0.28], "hip_rot": [65, 0, 0] },
     "melee_2h": { "hip_offset": [0.16, -0.10, -0.20], "hip_rot": [22, 0, -12], "fp_hip": [0.17, -0.24, -0.46] },
     "item_small": { "left_hand": false, "hip_offset": [0.22, -0.22, -0.32], "hip_rot": [-20, 0, 0] },
-    "item_large": { "hip_offset": [0.05, -0.2, -0.35] }
+    "item_large": { "hip_offset": [0.05, -0.2, -0.35] },
+    "phone": { "left_hand": false, "elbow_r": [0.6, -1.0, 0.1], "curl_r": [20, 55, 60, 65, 70] },
+    "phone_landscape": { "left_hand": true, "elbow_r": [0.7, -1.0, 0.1], "elbow_l": [-0.7, -1.0, 0.1], "curl_r": [15, 35, 40, 45, 50], "curl_l": [15, 35, 40, 45, 50] }
   },
 
   "damage_reactions": {

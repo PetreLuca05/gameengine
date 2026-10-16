@@ -1,3 +1,4 @@
+#include "gameplay/phone/phone_orient.h"
 #include "gameplay/attachments.h"
 #include "characters.h"
 #include "net/net.h"
@@ -487,6 +488,12 @@ static int item_hold_style(const World *w, u16 item, const WeaponDef **wd_out, c
     return s >= 0 ? s : HOLD_ITEM_SMALL;
 }
 
+// The landscape hold style of a camera item ("hold": { "style_landscape" }), else the default.
+static int phone_alt_style(const ItemDef *it, int def) {
+    int s = it->hold_style_alt[0] && LIB ? proc_hold_style_index(&LIB->proc, it->hold_style_alt) : -1;
+    return s >= 0 ? s : def;
+}
+
 static vec2 local_move(vec3 vel, float body_yaw, float *speed) {
     vec3 h = v3_flat(vel);
     float sp = v3_len(h);
@@ -522,6 +529,13 @@ static void player_inputs(World *w, CharacterInst *c, const Player *p, CharInput
     u16 item = eq ? eq->item : 0;
     in->weapon_id = item;
     in->weapon_type = item_hold_style(w, item, &c->item_weapon, &c->item_def);
+    // Phone (docs/PHONE.md): camera mode = aiming with a camera item; landscape / driven rotation
+    // come with the player's command (the client's real phone), replicated only in camera mode.
+    if (c->item_def && c->item_def->camera && !c->item_weapon && in->ads) {
+        in->phone_flags = (u8)(CHAR_PHONE_CAMERA | (p->last_cmd.phone_flags & (CHAR_PHONE_LANDSCAPE | CHAR_PHONE_DRIVEN | CHAR_PHONE_REC)));
+        in->phone_rot = (in->phone_flags & CHAR_PHONE_DRIVEN) ? p->last_cmd.phone_rot : 0;
+        if (in->phone_flags & CHAR_PHONE_LANDSCAPE) in->weapon_type = phone_alt_style(c->item_def, in->weapon_type);
+    }
     static const u8 none[ATT_SLOTS];
     update_item_sockets(w, c, eq ? eq->att : none);   // players: straight from the (replicated) inventory
     in->health = w->health[ENT_INDEX(p->ent)].hp;
@@ -579,6 +593,8 @@ static void capture_net(World *w, CharacterInst *c) {
     n->character_id = c->def->net_id;
     if (in->dead) { n->death_tick = c->death_tick; n->death_seed = c->death_seed; }
     else { n->death_tick = 0; n->death_seed = 0; }
+    n->phone_flags = in->phone_flags;
+    n->phone_rot = in->phone_rot;
 }
 
 // Inputs reconstructed from replicated state (quantized exactly like the host sent them).
@@ -601,6 +617,9 @@ static void inputs_from_net(const World *w, CharacterInst *c, const AnimNetState
     in->limb_status = s->limb_status;
     in->weapon_id = s->weapon;
     in->weapon_type = item_hold_style(w, s->weapon, &c->item_weapon, &c->item_def);
+    in->phone_flags = s->phone_flags;
+    in->phone_rot = s->phone_rot;
+    if (c->item_def && (in->phone_flags & CHAR_PHONE_LANDSCAPE)) in->weapon_type = phone_alt_style(c->item_def, in->weapon_type);
     update_item_sockets(w, c, NULL);
 }
 
@@ -849,6 +868,8 @@ static bool net_at(const CharacterInst *c, double rt, AnimNetState *a_out, u32 *
     in->aim_yaw = lerp_angle(ia.aim_yaw, ib.aim_yaw, t);
     in->body_yaw = lerp_angle(ia.body_yaw, ib.body_yaw, t);
     in->mantle_t = lerpf(ia.mantle_t, ib.mantle_t, t);
+    if ((ia.phone_flags & ib.phone_flags & CHAR_PHONE_DRIVEN) && ia.phone_rot != ib.phone_rot)
+        in->phone_rot = phone_quat_pack(quat_nlerp(phone_quat_unpack(ia.phone_rot), phone_quat_unpack(ib.phone_rot), t));
     *a_out = a->s;
     *a_tick = a->tick;
     return true;

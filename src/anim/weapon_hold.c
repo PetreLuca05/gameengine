@@ -7,6 +7,7 @@
 //     the body (up to max_shift) until it reaches, and the style is reported once.
 #include "procedural_internal.h"
 #include "core/log.h"
+#include "gameplay/phone/phone_orient.h"
 #include <math.h>
 
 static HoldStyle blend_style(const HoldStyle *a, const HoldStyle *b, float t) {
@@ -116,6 +117,17 @@ void proc_hold(ProcState *st, const ProcInput *in, Pose *pose, Xform *model) {
     hi.inspect = in->inspect;
     hi.empty = in->empty_hands;
     hi.vehicle_onehand = in->vehicle_onehand;
+    hi.phone_mode = in->phone_mode;
+    // Phone driven by a real phone: its rotation relative to the view yaw, in camera space (the
+    // view pitch removed), clamped to the arm's reach cone; eased in / out over 0.3 s.
+    if (in->phone_driven) st->phone_rot = quat_norm(in->phone_rot);
+    if (st->phone_rot.w == 0 && st->phone_rot.x == 0 && st->phone_rot.y == 0 && st->phone_rot.z == 0) st->phone_rot = quat_identity();
+    st->phone_w = approachf(st->phone_w, in->phone_driven && in->phone_mode ? 1.0f : 0.0f, in->dt / 0.3f);
+    if (st->phone_w > 0.0f) {
+        PhoneReach reach = phone_reach_default();
+        hi.rot_cam = phone_clamp_reach(phone_to_camera(st->phone_rot, pitch), &reach);
+        hi.rot_w = smoothstepf(0.0f, 1.0f, st->phone_w);
+    }
     hi.dt = in->dt;
     hi.aim_yaw = in->aim_yaw;
     hi.aim_pitch = pitch;

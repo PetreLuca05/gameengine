@@ -30,7 +30,7 @@ vec3 and_dir(u16 q) {
 }
 
 u16 anim_net_diff(const AnimNetState *a, const AnimNetState *b) {
-    if (!a) return (u16)(ANS_ALL & ~(b->flags & ANF_DEAD ? 0 : ANS_DEATH));
+    if (!a) return (u16)(ANS_ALL & ~(b->flags & ANF_DEAD ? 0 : ANS_DEATH) & ~(b->phone_flags ? 0 : ANS_PHONE));
     u16 m = 0;
     if (a->state[0] != b->state[0] || a->state[1] != b->state[1]) m |= ANS_STATE;
     if (a->phase != b->phase) m |= ANS_PHASE;
@@ -46,6 +46,7 @@ u16 anim_net_diff(const AnimNetState *a, const AnimNetState *b) {
     if (a->mantle_t != b->mantle_t) m |= ANS_MANTLE;
     if (a->character_id != b->character_id) m |= ANS_CHAR;
     if (a->death_tick != b->death_tick || a->death_seed != b->death_seed) m |= ANS_DEATH;
+    if (a->phone_flags != b->phone_flags || a->phone_rot != b->phone_rot) m |= ANS_PHONE;
     return m;
 }
 
@@ -65,6 +66,7 @@ int anim_net_field_bytes(u16 f) {
     if (f & ANS_MANTLE) n += 1;
     if (f & ANS_CHAR) n += 1;
     if (f & ANS_DEATH) n += 5;
+    if (f & ANS_PHONE) n += 5;
     return n;
 }
 
@@ -84,6 +86,7 @@ void anim_net_write(Writer *w, const AnimNetState *s, u16 f) {
     if (f & ANS_MANTLE) w_u8(w, s->mantle_t);
     if (f & ANS_CHAR) w_u8(w, s->character_id);
     if (f & ANS_DEATH) { w_u32(w, s->death_tick); w_u8(w, s->death_seed); }
+    if (f & ANS_PHONE) { w_u8(w, s->phone_flags); w_u32(w, s->phone_rot); }
 }
 
 void anim_net_read(Reader *r, AnimNetState *s, u16 *fields) {
@@ -103,6 +106,7 @@ void anim_net_read(Reader *r, AnimNetState *s, u16 *fields) {
     if (f & ANS_MANTLE) s->mantle_t = r_u8(r);
     if (f & ANS_CHAR) s->character_id = r_u8(r);
     if (f & ANS_DEATH) { s->death_tick = r_u32(r); s->death_seed = r_u8(r); }
+    if (f & ANS_PHONE) { s->phone_flags = r_u8(r); s->phone_rot = r_u32(r); }
 }
 
 // Event layout: type u8 | ent u32 | tick u32 | seed u8 | [hit/die: part u8, dir u16, strength u8, dmg u8] | [land/fire: extra u8]
