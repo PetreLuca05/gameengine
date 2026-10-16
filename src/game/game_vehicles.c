@@ -29,6 +29,8 @@
 #include "ui/ui.h"
 #include "ui/gui/gui.h"
 #include "ui/gui/gui_draw.h"
+#include "ui/gui/gui_theme.h"
+#include "ui/gui/gui_layout.h"
 #include "core/log.h"
 #include "core/engine.h"
 #include "core/platform.h"
@@ -1698,11 +1700,42 @@ void vehicles_frame(World *w, vec3 cam_pos) {
 
 // ------------------------------------------------------------------ HUD
 
+// The game HUD's language (src/ui/hud.c): no boxes, soft shadows behind groups, small-caps labels in
+// text_dim, big semibold numbers in hud_text, pill bars, theme colours for states, key caps like the
+// interaction prompt. Bottom right, above the ammo block, inside the safe area.
+#define VTH (gui_theme())
+
+static void hud_caps(float x, float y, float size, u32 c, int align, const char *s) {
+    GuiText t = { size, GW_SEMIBOLD, c, align, VTH->tracking_caps * 1.3f, true, true, 0 };
+    gd_text(&t, x, y, s);
+}
+
+static void hud_bar(GuiRect r, float frac, u32 fill, u32 back) {
+    gd_round(r, r.h * 0.5f, back);
+    if (frac > 0.002f) gd_round(gui_rect(r.x, r.y, fmaxf(r.h, r.w * saturate(frac)), r.h), r.h * 0.5f, fill);
+}
+
+// A key cap ("F") and its action, right-aligned at x; returns the left edge.
+static float hud_key(float x, float y, Action a, const char *fallback, const char *what) {
+    char key[32];
+    binding_name(input_get_binding(a, 0), key, sizeof(key));
+    if (!key[0] || !strcmp(key, "?")) dg_strcpy(key, sizeof(key), fallback);
+    GuiText t = { gui_s(VTH->t_tiny), GW_SEMIBOLD, VTH->text_dim, GUI_RIGHT, VTH->tracking_caps * 1.3f, true, true, 0 };
+    float tw = gd_text_width(&t, what);
+    gd_text(&t, x, y + gui_s(3), what);
+    GuiText kt = { gui_s(VTH->t_tiny), GW_SEMIBOLD, VTH->text_dark, GUI_CENTER, 0, false, false, 0 };
+    float ks = gui_s(18), kw = fmaxf(ks, gd_text_width(&kt, key) + gui_s(8));
+    GuiRect kr = { x - tw - gui_s(6) - kw, y, kw, ks };
+    gd_round(kr, gui_s(3), UI_RGBA(236, 236, 230, 225));
+    gd_text(&kt, kr.x + kr.w * 0.5f, kr.y + (ks - gd_line_height(kt.size)) * 0.5f, key);
+    return kr.x - gui_s(14);
+}
+
 static u32 tire_color(const TireState *t) {
-    if (tire_on_rim(t)) return UI_RGBA(30, 30, 30, 230);
-    if (t->pressure < 0.35f || t->health < 0.3f) return UI_RGBA(220, 60, 50, 230);
-    if (t->pressure < 0.7f || t->health < 0.6f) return UI_RGBA(230, 180, 60, 230);
-    return UI_RGBA(110, 200, 110, 230);
+    if (tire_on_rim(t)) return VTH->text_faint;
+    if (t->pressure < 0.35f || t->health < 0.3f) return VTH->danger;
+    if (t->pressure < 0.7f || t->health < 0.6f) return VTH->warning;
+    return UI_RGBA(232, 232, 226, 220);
 }
 
 void vehicles_draw_hud(void) {
@@ -1710,8 +1743,7 @@ void vehicles_draw_hud(void) {
     if (!w || !w->vehicles) return;
     int seat = 0;
     Vehicle *v = local_vehicle(w, &seat);
-    float s = gui_s(1.0f);
-    // World labels for nearby vehicles (not the own one).
+    // World labels for nearby vehicles (not the own one): name in caps, fuel / condition pills.
     Player *lp = game_local_player();
     VehicleSys *vs = (VehicleSys *)w->vehicles;
     for (int i = 0; lp && i < MAX_VEH; i++) {
@@ -1729,81 +1761,100 @@ void vehicles_draw_hud(void) {
         if (!render_world_to_screen(to_world(p, r, v3(0, top + 0.45f, 0)), &px)) continue;
         int ei = (int)ENT_INDEX(o->ent);
         float hp = w->health[ei].max_hp > 0 ? w->health[ei].hp / w->health[ei].max_hp : 0;
-        u8 a = (u8)(230.0f * saturate((18.0f - d) / 6.0f));
-        char line[96];
-        snprintf(line, sizeof(line), "%s%s", df->display, o->wrecked ? "  (wrecked)" : "");
-        gd_text_simple(px.x, px.y, 15 * s, GW_SEMIBOLD, UI_RGBA(235, 235, 225, a), GUI_CENTER, line);
-        snprintf(line, sizeof(line), "fuel %.0f%%  hp %.0f%%", o->fuel / fmaxf(df->fuel_capacity, 1) * 100.0f, hp * 100.0f);
-        gd_text_simple(px.x, px.y + 17 * s, 12 * s, GW_REGULAR, UI_RGBA(200, 200, 190, a), GUI_CENTER, line);
+        float ff = df->fuel_capacity > 0 ? o->fuel / df->fuel_capacity : 0;
+        float a = saturate((18.0f - d) / 6.0f);
+        gd_alpha_push(a);
+        hud_caps(px.x, px.y, gui_s(VTH->t_label), o->wrecked ? VTH->danger : VTH->hud_text, GUI_CENTER, o->wrecked ? "Wrecked" : df->display);
+        float bw = gui_s(70), by = px.y + gui_s(20);
+        hud_bar(gui_rect(px.x - bw - gui_s(3), by, bw, gui_s(4)), ff, ff < 0.15f ? VTH->warning : UI_RGBA(232, 232, 226, 220), UI_RGBA(255, 255, 255, 30));
+        hud_bar(gui_rect(px.x + gui_s(3), by, bw, gui_s(4)), hp, hp < 0.3f ? VTH->danger : VTH->ok, UI_RGBA(255, 255, 255, 30));
+        hud_caps(px.x - gui_s(3), by + gui_s(7), gui_s(VTH->t_tiny), VTH->text_faint, GUI_RIGHT, "Fuel");
+        hud_caps(px.x + gui_s(3), by + gui_s(7), gui_s(VTH->t_tiny), VTH->text_faint, GUI_LEFT, "Condition");
+        gd_alpha_pop();
     }
     if (!v) return;
     const VehicleDef *d = vdef(v);
     int ei = (int)ENT_INDEX(v->ent);
-    float W = 320 * s, H = 168 * s;
-    GuiRect pr = { gui_w() - W - 24 * s, gui_h() - H - 110 * s, W, H };
-    gd_round(pr, 8 * s, UI_RGBA(14, 16, 18, 190));
-    float x = pr.x + 14 * s, y = pr.y + 12 * s;
-    char b[96];
+    LayoutParams lpar = gui_layout_params();
+    GuiRect safe = gui_layout_safe_rect(&lpar);
+    bool driver = d->seats[seat].driver;
+    // Above the ammo block (draw_ammo: safe bottom - 84 px .. bottom).
+    float x = safe.x + safe.w, y = safe.y + safe.h - gui_s(84) - gui_s(198);
+    float colw = gui_s(250);
+    gd_shadow(gui_rect(x - colw, y + gui_s(6), colw, gui_s(150)), 0, gui_s(34), UI_RGBA(0, 0, 0, 60));
+    char b[64];
+    // Name + seat, gear.
+    snprintf(b, sizeof(b), "%s  -  %s", d->display, driver ? "Driver" : "Passenger");
+    hud_caps(x, y, gui_s(VTH->t_label), VTH->text_dim, GUI_RIGHT, b);
+    // Speed (km/h along the vehicle) and gear.
     vec3 fwd = quat_rotate(w->xf[ei].rot, v3(0, 0, -1));
     float kmh = fabsf(v3_dot(v->vel, fwd)) * 3.6f;
+    GuiText unit = { gui_s(VTH->t_small), GW_MEDIUM, VTH->text_dim, GUI_RIGHT, 0, false, true, 0 };
+    float uw = gd_text(&unit, x, y + gui_s(40), "km/h");
     snprintf(b, sizeof(b), "%.0f", kmh);
-    gd_text_simple(x, y, 40 * s, GW_SEMIBOLD, UI_RGBA(240, 240, 235, 255), GUI_LEFT, b);
-    gd_text_simple(x + 84 * s, y + 22 * s, 13 * s, GW_MEDIUM, UI_RGBA(180, 180, 170, 255), GUI_LEFT, "km/h");
+    GuiText sp = { gui_s(VTH->t_huge), GW_SEMIBOLD, VTH->hud_text, GUI_RIGHT, 0, false, true, 0 };
+    float sw = gd_text(&sp, x - uw - gui_s(8), y + gui_s(16), b);
     const char *gear = v->gear < 0 ? "R" : (v->gear == 0 ? "N" : NULL);
-    if (!gear) { snprintf(b, sizeof(b), "%d", v->gear); gear = b; }
-    gd_text_simple(x + 140 * s, y + 8 * s, 28 * s, GW_SEMIBOLD, UI_RGBA(250, 210, 120, 255), GUI_LEFT, gear);
-    // RPM bar
+    char gb[8];
+    if (!gear) { snprintf(gb, sizeof(gb), "%d", v->gear); gear = gb; }
+    GuiText gt = { gui_s(26), GW_SEMIBOLD, VTH->accent, GUI_RIGHT, 0, false, true, 0 };
+    gd_text(&gt, x - uw - sw - gui_s(26), y + gui_s(26), gear);
+    hud_caps(x - uw - sw - gui_s(26), y + gui_s(56), gui_s(VTH->t_tiny), VTH->text_faint, GUI_RIGHT, "Gear");
+    // RPM pill.
     float rf = d->max_rpm > 0 ? saturate(v->rpm / d->max_rpm) : 0;
-    GuiRect rb = { x, y + 50 * s, 175 * s, 6 * s };   // (gd_text_simple: y = the text's top)
-    gd_rect(rb, UI_RGBA(50, 52, 55, 220));
-    rb.w *= rf;
-    gd_rect(rb, rf > 0.85f ? UI_RGBA(230, 80, 60, 240) : UI_RGBA(200, 200, 200, 240));
-    // Fuel / HP
+    float bx = x - colw, bwid = colw;
+    hud_bar(gui_rect(bx, y + gui_s(70), bwid, gui_s(5)), rf, rf > 0.85f ? VTH->warning : UI_RGBA(232, 232, 226, 220), UI_RGBA(255, 255, 255, 30));
+    // Fuel / condition rows: label left, value right, pill under.
     float ff = d->fuel_capacity > 0 ? saturate(v->fuel / d->fuel_capacity) : 0;
     float hp = w->health[ei].max_hp > 0 ? saturate(w->health[ei].hp / w->health[ei].max_hp) : 0;
-    struct { const char *l; float f; u32 c; } bars[2] = { { "FUEL", ff, ff < 0.15f ? UI_RGBA(230, 80, 60, 240) : UI_RGBA(230, 190, 80, 240) },
-                                                         { "HP", hp, hp < 0.3f ? UI_RGBA(230, 80, 60, 240) : UI_RGBA(110, 200, 120, 240) } };
-    for (int k = 0; k < 2; k++) {
-        float by = y + 66 * s + (float)k * 18 * s;
-        gd_text_simple(x, by - 2 * s, 11 * s, GW_MEDIUM, UI_RGBA(170, 170, 160, 255), GUI_LEFT, bars[k].l);
-        GuiRect br = { x + 38 * s, by, 137 * s, 9 * s };
-        gd_rect(br, UI_RGBA(50, 52, 55, 220));
-        br.w *= bars[k].f;
-        gd_rect(br, bars[k].c);
-    }
+    float ry = y + gui_s(84);
+    hud_caps(bx, ry, gui_s(VTH->t_tiny), VTH->text_dim, GUI_LEFT, "Fuel");
     snprintf(b, sizeof(b), "%.1f l", v->fuel);
-    gd_text_simple(x + 180 * s, y + 64 * s, 11 * s, GW_REGULAR, UI_RGBA(200, 200, 190, 255), GUI_LEFT, b);
-    // Tires (top view) and seats.
-    float tx = pr.x + W - 96 * s, ty = y + 2 * s;
-    GuiRect body = { tx + 18 * s, ty + 6 * s, 30 * s, d->kind == VK_MOTO ? 62 * s : 70 * s };
-    if (d->kind == VK_MOTO) { body.x += 9 * s; body.w = 12 * s; }
-    gd_round(body, 4 * s, UI_RGBA(70, 72, 76, 220));
+    GuiText val = { gui_s(VTH->t_small), GW_MEDIUM, ff < 0.15f ? VTH->warning : VTH->hud_text, GUI_RIGHT, 0, false, true, 0 };
+    gd_text(&val, x, ry - gui_s(2), b);
+    float low = ff < 0.1f ? 0.6f + 0.4f * sinf((float)gui_time() * 6.0f) : 1.0f;
+    hud_bar(gui_rect(bx, ry + gui_s(14), bwid, gui_s(6)), ff, gui_rgba_mul(ff < 0.15f ? VTH->warning : UI_RGBA(232, 232, 226, 235), low), UI_RGBA(255, 255, 255, 30));
+    ry += gui_s(28);
+    hud_caps(bx, ry, gui_s(VTH->t_tiny), VTH->text_dim, GUI_LEFT, "Condition");
+    snprintf(b, sizeof(b), "%.0f%%", hp * 100.0f);
+    val.color = hp < 0.3f ? VTH->danger : VTH->hud_text;
+    gd_text(&val, x, ry - gui_s(2), b);
+    hud_bar(gui_rect(bx, ry + gui_s(14), bwid, gui_s(6)), hp, hp < 0.3f ? VTH->danger : VTH->ok, UI_RGBA(255, 255, 255, 30));
+    // Tires (a small top view) and seats, left of the speed.
+    float tx = bx, ty = y + gui_s(18);
+    hud_caps(tx, y, gui_s(VTH->t_tiny), VTH->text_faint, GUI_LEFT, "Tires");
     for (int k = 0; k < d->wheel_count; k++) {
         const VehicleWheelDef *wd = &d->wheels[k];
-        float wx = d->kind == VK_MOTO ? body.x + 1 * s : (wd->pos.x < 0 ? body.x - 9 * s : body.x + body.w + 1 * s);
-        float wy = wd->pos.z < 0 ? body.y + 4 * s : body.y + body.h - 22 * s;
-        GuiRect tr = { wx, wy, d->kind == VK_MOTO ? 10 * s : 8 * s, 18 * s };
-        gd_round(tr, 2 * s, tire_color(&v->tire[k]));
+        float wx = d->kind == VK_MOTO ? tx + gui_s(9) : (wd->pos.x < 0 ? tx : tx + gui_s(20));
+        float wy = wd->pos.z < 0 ? ty + gui_s(4) : ty + gui_s(30);
+        gd_round(gui_rect(wx, wy, gui_s(8), gui_s(16)), gui_s(4), tire_color(&v->tire[k]));
     }
+    gd_round(gui_rect(tx + gui_s(9), ty + gui_s(8), gui_s(10), gui_s(34)), gui_s(5), UI_RGBA(255, 255, 255, 40));
+    float sx = tx + gui_s(40);
+    hud_caps(sx, y, gui_s(VTH->t_tiny), VTH->text_faint, GUI_LEFT, "Seats");
     for (int k = 0; k < d->seat_count; k++) {
-        float sx = body.x + body.w * 0.5f + (d->seats[k].pos.x > 0.05f ? 6 * s : d->seats[k].pos.x < -0.05f ? -6 * s : 0) - 4 * s;
-        float sy = body.y + body.h * 0.5f + d->seats[k].pos.z * 22 * s - 4 * s;
-        u32 c = k == seat ? UI_RGBA(250, 210, 120, 255) : (v->occ[k] ? UI_RGBA(200, 200, 200, 240) : UI_RGBA(40, 40, 42, 240));
-        gd_circle(sx + 4 * s, sy + 4 * s, 4 * s, c);
-        snprintf(b, sizeof(b), "%d", k + 1);
-        gd_text_simple(tx + 74 * s, ty + 6 * s + (float)k * 14 * s, 11 * s, k == seat ? GW_SEMIBOLD : GW_REGULAR, c, GUI_LEFT, b);
+        float cx = sx + gui_s(5) + (float)(k % 2) * gui_s(14), cy = ty + gui_s(10) + (float)(k / 2) * gui_s(16);
+        u32 c = k == seat ? VTH->accent : (v->occ[k] ? UI_RGBA(232, 232, 226, 220) : UI_RGBA(255, 255, 255, 40));
+        gd_circle(cx, cy, gui_s(4.5f), c);
     }
-    // Indicators
-    char ind[128] = "";
-    if (v->wrecked) dg_strcpy(ind, sizeof(ind), "WRECKED");
-    else if (v->fuel <= 0) dg_strcpy(ind, sizeof(ind), "NO FUEL");
-    else if (!v->engine && d->seats[seat].driver) dg_strcpy(ind, sizeof(ind), "ENGINE OFF");
-    if (v->lights) snprintf(ind + strlen(ind), sizeof(ind) - strlen(ind), "%sLIGHTS", ind[0] ? "  " : "");
-    if (v->handbrake) snprintf(ind + strlen(ind), sizeof(ind) - strlen(ind), "%sHANDBRAKE", ind[0] ? "  " : "");
-    if (game_local_player()->sim.move.veh_onehand) snprintf(ind + strlen(ind), sizeof(ind) - strlen(ind), "%sONE-HAND", ind[0] ? "  " : "");
-    gd_text_simple(x, pr.y + H - 40 * s, 11 * s, GW_SEMIBOLD, UI_RGBA(250, 170, 90, 255), GUI_LEFT, ind);
-    gd_text_simple(x, pr.y + H - 22 * s, 10 * s, GW_REGULAR, UI_RGBA(160, 160, 150, 230), GUI_LEFT,
-                   d->seats[seat].driver ? "[F] exit  [1-4] seat  [V] camera  [H] lights  [Q] horn  RMB one-hand" : "[F] exit  [1-4] seat  [V] camera");
+    // State line (only what matters right now).
+    char st[96] = "";
+    u32 sc = VTH->warning;
+    if (v->wrecked) { dg_strcpy(st, sizeof(st), "Wrecked"); sc = VTH->danger; }
+    else if (v->fuel <= 0) { dg_strcpy(st, sizeof(st), "No fuel"); sc = VTH->danger; }
+    else if (!v->engine && driver) dg_strcpy(st, sizeof(st), "Engine off");
+    else if (lp->sim.move.veh_onehand) { dg_strcpy(st, sizeof(st), "One-handed"); sc = VTH->accent; }
+    else if (v->handbrake && kmh > 1.0f) dg_strcpy(st, sizeof(st), "Handbrake");
+    if (st[0]) hud_caps(x, y + gui_s(142), gui_s(VTH->t_small), sc, GUI_RIGHT, st);
+    if (v->lights) hud_caps(bx, y + gui_s(142), gui_s(VTH->t_small), VTH->info, GUI_LEFT, "Lights");
+    // Key hints (actual bindings), one row under the cluster.
+    float kx = x, ky = y + gui_s(162);
+    kx = hud_key(kx, ky, ACT_FLASHLIGHT, "F", "Exit");
+    kx = hud_key(kx, ky, ACT_VEHICLE_CAM, "V", "Camera");
+    if (driver) {
+        kx = hud_key(kx, ky, ACT_LIGHTS, "H", "Lights");
+        hud_key(kx, ky, ACT_HORN, "Q", "Horn");
+    } else hud_key(kx, ky, ACT_SLOT1, "1-4", "Seat");
 }
 
 // ------------------------------------------------------------------ debug overlay
