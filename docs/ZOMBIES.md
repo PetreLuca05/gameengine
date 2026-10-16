@@ -64,6 +64,11 @@ The host tick (`horde_host_tick`, before `chars_host_tick`) runs these phases in
    others have it disabled. The near tier also keeps lag-compensation history.
 8. **Attacks:** a near zombie in range and facing its target swings (`chars_npc_melee`). The hit
    lands after `hit_time` if the target is still close, through `apply_damage`.
+9. **Facing / look:** chasing a player within `movement.face_target_dist` (4 m), or attacking, the
+   body faces the player instead of the motion (crowd separation and wall slides used to turn them
+   sideways, which also blocked the attack's facing check). Head and spine track the nearest living
+   player within 16 m and 120 deg of the body (`zombie_look` in characters.c, through the aim
+   inputs). Host and clients run the same rule from replicated positions, so nothing extra is sent.
 
 `chars_host_tick` then evaluates animation and hitboxes:
 

@@ -10,6 +10,7 @@ void horde_config_defaults(HordeConfig *c) {
     c->accel = 6.0f;
     c->turn_rate_deg = 220.0f;
     c->stop_dist = 0.9f;
+    c->face_dist = 4.0f;
     c->sep_radius = 0.85f;
     c->sep_weight = 2.2f;
     c->align_radius = 2.2f;
@@ -67,6 +68,7 @@ bool horde_config_parse(HordeConfig *c, const char *json, char *err, int err_siz
     c->accel = jf(m, "accel", c->accel);
     c->turn_rate_deg = jf(m, "turn_rate_deg", c->turn_rate_deg);
     c->stop_dist = jf(m, "stop_dist", c->stop_dist);
+    c->face_dist = jf(m, "face_target_dist", c->face_dist);
     c->sep_radius = jf(m, "separation_radius", c->sep_radius);
     c->sep_weight = jf(m, "separation_weight", c->sep_weight);
     c->align_radius = jf(m, "alignment_radius", c->align_radius);
@@ -194,10 +196,15 @@ void horde_steer_range(const HordeSteerIn *in, HordeSteerOut *out, int begin, in
         v = v3_add(v, dv);
         v.y = 0;
         out->vel[i] = v;
-        // Face the motion (or the target while busy / standing).
+        // Face the player when attacking or close to them (separation / wall slides would turn
+        // them sideways), otherwise the motion (or the target while standing).
         float sp = sqrtf(v.x * v.x + v.z * v.z);
         float face = in->yaw[i];
-        if (sp > 0.15f) face = atan2f(-v.x, -v.z);
+        vec3 tt = v3_sub(in->target[i], p);
+        float td2 = tt.x * tt.x + tt.z * tt.z;
+        bool chase = in->chase && in->chase[i] && in->has_target[i];
+        if (chase && (busy || td2 < c->face_dist * c->face_dist) && td2 > 1e-4f) face = atan2f(-tt.x, -tt.z);
+        else if (sp > 0.15f) face = atan2f(-v.x, -v.z);
         else if (in->has_target[i]) {
             vec3 to = v3_sub(in->target[i], p);
             if (to.x * to.x + to.z * to.z > 1e-4f) face = atan2f(-to.x, -to.z);

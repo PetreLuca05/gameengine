@@ -600,7 +600,38 @@ static void player_inputs(World *w, CharacterInst *c, const Player *p, CharInput
     in->limb_status = c->limb;
 }
 
-static void npc_inputs(World *w, CharacterInst *c, int i, CharInputs *in) {
+// Zombies look at the nearest living player within ZOMBIE_LOOK_DIST in front of them (head /
+// spine through the aim inputs): the same rule on the host and on clients, from replicated
+// positions only, so nothing extra goes on the wire.
+#define ZOMBIE_LOOK_DIST 16.0f
+static void zombie_look(const World *w, CharacterInst *c, int i, CharInputs *in, float dt) {
+    float want_yaw = 0, want_pitch = 0;
+    if (!in->dead) {
+        vec3 head = v3_add(feet_of(w, i), v3(0, 1.6f * c->def->scale, 0));
+        float best = ZOMBIE_LOOK_DIST * ZOMBIE_LOOK_DIST;
+        for (int s = 0; s < MAX_PLAYERS; s++) {
+            const Player *p = &w->players[s];
+            if (!p->active || !ent_valid(w, p->ent) || p->sim.move.mode == MOVE_DEAD) continue;
+            int pi = (int)ENT_INDEX(p->ent);
+            if (w->flags[pi] & EF_DEAD) continue;
+            vec3 to = v3_sub(v3_add(feet_of(w, pi), v3(0, 1.5f, 0)), head);
+            float h2 = to.x * to.x + to.z * to.z;
+            if (h2 >= best || h2 < 1e-4f) continue;
+            float rel = wrap_angle(atan2f(-to.x, -to.z) - in->body_yaw);
+            if (fabsf(rel) > 120.0f * DG_DEG2RAD) continue;   // behind it: no owl necks
+            best = h2;
+            want_yaw = rel;
+            want_pitch = atan2f(to.y, sqrtf(h2));
+        }
+    }
+    float k = 1.0f - expf(-dt * 6.0f);
+    c->look_yaw += (want_yaw - c->look_yaw) * k;
+    c->look_pitch += (want_pitch - c->look_pitch) * k;
+    in->aim_yaw = wrap_angle(in->body_yaw + c->look_yaw);
+    in->aim_pitch = c->look_pitch;
+}
+
+static void npc_inputs(World *w, CharacterInst *c, int i, CharInputs *in, float dt) {
     memset(in, 0, sizeof(*in));
     vec3 vel = v3_scale(v3_sub(w->xf[i].pos, w->xf[i].prev_pos), (float)SIM_HZ);
     if (w->type[i] == ET_ZOMBIE) vel = v3_scale(forward_from_yaw(c->ai.yaw), c->ai.speed);
@@ -617,6 +648,7 @@ static void npc_inputs(World *w, CharacterInst *c, int i, CharInputs *in) {
     if (w->item[i]) in->weapon_type = item_hold_style(w, w->item[i], &c->item_weapon, &c->item_def);
     update_item_sockets(w, c, NULL);
     in->weapon_id = w->item[i];
+    if (w->type[i] == ET_ZOMBIE) zombie_look(w, c, i, in, dt);
 }
 
 static void capture_net(World *w, CharacterInst *c) {
@@ -773,7 +805,7 @@ static void sim_pre(World *w, CharacterInst *c, int i) {
 static void sim_core(World *w, CharacterInst *c, int i, float dt) {
     CharInputs in;
     if (c->is_player && c->slot >= 0 && w->players[c->slot].active) player_inputs(w, c, &w->players[c->slot], &in);
-    else npc_inputs(w, c, i, &in);
+    else npc_inputs(w, c, i, &in, dt);
     c->body_yaw = in.body_yaw;
     charrt_set_inputs(&c->rt, &in);
     host_triggers(w, c, i);
@@ -958,6 +990,7 @@ static void client_one(World *w, CharacterInst *c, int i, double rt, float dt) {
         in.speed = c->cl_speed;
         in.move_local = c->cl_speed > 0.05f ? v2(0, 1) : v2(0, 0);
         in.body_yaw = in.aim_yaw = quat_get_yaw(w->xf[i].rot);
+        zombie_look(w, c, i, &in, dt);
     }
     c->body_yaw = in.body_yaw;
     charrt_set_inputs(&c->rt, &in);
