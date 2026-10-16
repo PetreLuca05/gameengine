@@ -264,6 +264,7 @@ void game_sim_player(World *w, int slot, const UserCmd *cmd, float dt, bool firs
     if (p->sim.wpn.reloading) f |= EF_RELOADING;
     if (c.buttons & BTN_AIM) f |= EF_ADS;
     if (p->sim.wpn.recoil_kick > 0.8f) f |= EF_FIRING;
+    if ((c.buttons & BTN_FLASHLIGHT) && m->mode != MOVE_DEAD) f |= EF_FLASHLIGHT;
     w->flags[i] = f;
     const InvSlot *eq = weapon_equipped(w, slot);
     w->item[i] = eq ? eq->item : 0;
@@ -430,10 +431,11 @@ static UserCmd build_cmd(void) {
     if (input_consume_press(ACT_RELOAD)) c.buttons |= BTN_RELOAD;
     if (input_consume_press(ACT_CROUCH)) c.buttons |= BTN_CROUCH;
     if (input_consume_press(ACT_FIREMODE)) c.buttons |= BTN_FIREMODE;
+    if (G->flashlight) c.buttons |= BTN_FLASHLIGHT;
     if (G->noclip_request) { c.buttons |= BTN_NOCLIP; G->noclip_request = false; }
     if (G->menu_open || G->inventory_open || G->container_open || G->bench_open || console_is_open()) {
         c.move_x = c.move_y = 0;
-        c.buttons &= (u16)(BTN_CROUCH | BTN_NOCLIP);
+        c.buttons &= (u16)(BTN_CROUCH | BTN_NOCLIP | BTN_FLASHLIGHT);
     }
     if (G->magdump_ticks > 0) magdump_cmd(&c);
     c.slot = G->hotbar_slot;
@@ -568,6 +570,10 @@ static void handle_hotbar(void) {
     if (input_consume_press(ACT_NEXT_ITEM)) G->hotbar_slot = (u8)((G->hotbar_slot + 1) % INV_HOTBAR);
     if (input_consume_press(ACT_PREV_ITEM)) G->hotbar_slot = (u8)((G->hotbar_slot + INV_HOTBAR - 1) % INV_HOTBAR);
     if (input_consume_press(ACT_DROP)) game_rpc(RPC_INV_DROP, G->hotbar_slot, 0, 0);
+    if (input_consume_press(ACT_FLASHLIGHT)) {
+        G->flashlight = !G->flashlight;
+        audio_play_2d("click", 0.5f, SND_SFX);
+    }
 }
 
 // ADS progress is simulated at the tick rate; the zoom and the sight presentation use it
@@ -753,6 +759,10 @@ static void cmd_map(int argc, const char **argv) {
     if (argc < 2) { log_info("usage: map <devroom|streaming|flat>"); return; }
     cvar_set_cv(G->g_map, argv[1]);
     game_host(argv[1]);
+}
+
+static void cmd_flashlight(int argc, const char **argv) {
+    G->flashlight = argc > 1 ? atoi(argv[1]) != 0 : !G->flashlight;
 }
 
 static void cmd_give(int argc, const char **argv) {
@@ -1198,6 +1208,7 @@ void game_init(void) {
     G->world_seed = cvar_reg_int("world_seed", 1337, 0, 999999999, CVAR_ARCHIVE, "procedural world seed");
     cmd_register("map", cmd_map, "host a new game on a map");
     cmd_register("give", cmd_give, "give <item> [count]");
+    cmd_register("flashlight", cmd_flashlight, "flashlight [0|1]: toggle / set the flashlight (key F)");
     cmd_register("bench", cmd_bench, "toggle the weapon bench (attachments) UI");
     cmd_register("attach", cmd_attach, "attach <slot> <attachment|none>: weapon attachments of the equipped weapon (no args: list)");
     cmd_register("noclip", cmd_noclip, "toggle noclip (sv_cheats)");

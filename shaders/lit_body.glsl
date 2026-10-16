@@ -254,6 +254,12 @@ void main() {
         color += brdf(n, v, l, albedo, rough, metal) * frame.sun_color.rgb * frame.sun_dir.w * sh;
         // Fill: the other celestial light (the moon by day / the sun at twilight), unshadowed.
         if (frame.fill_dir.w > 0.0) color += brdf(n, v, normalize(frame.fill_dir.xyz), albedo, rough, metal) * frame.fill_color.rgb * frame.fill_dir.w;
+        // spot lights (flashlights, cookie-projected)
+        for (int i = 0; i < int(frame.spot_info.x); i++) {
+            vec3 sl;
+            vec3 sc = spot_light(i, v_world, sl);
+            if (sc.r + sc.g + sc.b > 0.0) color += brdf(n, v, sl, albedo, rough, metal) * sc;
+        }
         // point lights
         int count = int(frame.ground_ambient.w);
         for (int i = 0; i < count; i++) {

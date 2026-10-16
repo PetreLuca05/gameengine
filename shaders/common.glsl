@@ -17,6 +17,14 @@ struct PointLight {
     vec4 pos_radius;
     vec4 color_intensity;
 };
+#define MAX_SPOT_LIGHTS 4
+struct SpotLight {
+    mat4 vp;              // world -> cookie clip space
+    vec4 pos_range;
+    vec4 dir_cos;         // xyz direction, w cos(outer half angle)
+    vec4 color_intensity;
+    vec4 params;          // x cos(inner half angle)
+};
 
 layout(set = 0, binding = 0) uniform FrameData {
     mat4 view_proj;
@@ -49,6 +57,8 @@ layout(set = 0, binding = 0) uniform FrameData {
     mat4 shadow_vps[3];   // cascaded shadow maps: world -> atlas tile (2 x 2 atlas)
     vec4 shadow_splits;   // x, y, z: cascade radii (m), w: cascade count
     vec4 shadow_bias;     // x, y, z: per-cascade depth bias scale (constant bias in metres)
+    vec4 spot_info;       // x spot light count, y cookie valid
+    SpotLight spots[MAX_SPOT_LIGHTS];
     PointLight lights[MAX_POINT_LIGHTS];
 } frame;
 
@@ -57,6 +67,29 @@ layout(set = 0, binding = 1) uniform sampler2DShadow shadow_map;
 layout(set = 0, binding = 5) uniform sampler2D sky_env;
 layout(std430, set = 0, binding = 6) readonly buffer SkySH { vec4 sh[20]; } sky_sh;
 layout(set = 0, binding = 7) uniform sampler2D sky_cloud_shadow;
+// Spot light cookie (flashlight pattern), shared by every spot light.
+layout(set = 0, binding = 8) uniform sampler2D spot_cookie;
+
+// Spot light i at world position p: radiance scale (cone x cookie x distance falloff) and the
+// direction towards the light.
+vec3 spot_light(int i, vec3 p, out vec3 ldir) {
+    vec3 dl = frame.spots[i].pos_range.xyz - p;
+    float dist = length(dl);
+    ldir = dl / max(dist, 1e-4);
+    float range = frame.spots[i].pos_range.w;
+    if (dist > range) return vec3(0.0);
+    float cd = dot(-ldir, frame.spots[i].dir_cos.xyz);
+    float cone = smoothstep(frame.spots[i].dir_cos.w, frame.spots[i].params.x, cd);
+    if (cone <= 0.0) return vec3(0.0);
+    vec3 cookie = vec3(1.0);
+    if (frame.spot_info.y > 0.5) {
+        vec4 c = frame.spots[i].vp * vec4(p, 1.0);
+        if (c.w > 1e-4) cookie = texture(spot_cookie, c.xy / c.w * 0.5 + 0.5).rgb;
+    }
+    float f = clamp(1.0 - pow(dist / range, 4.0), 0.0, 1.0);
+    f = f * f / (dist * dist + 1.0);
+    return frame.spots[i].color_intensity.rgb * frame.spots[i].color_intensity.w * cone * f * cookie;
+}
 // Previous-frame model matrices of moving draws (velocity), indexed by push flags.y - 1.
 layout(std430, set = 0, binding = 4) readonly buffer DrawPrev { mat4 prev_models[]; } draw_prev;
 

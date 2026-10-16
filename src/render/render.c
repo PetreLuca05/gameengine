@@ -285,6 +285,7 @@ static void apply_setting_changes(void) {
 bool render_begin_frame(void) {
     R->frame_active = false;
     R->draw_count = R->vm_draw_count = R->light_count = 0;
+    R->spot_count = 0;
     R->skin_draw_count = R->skin_bone_count = 0;
     R->line_count[0] = R->line_count[1] = 0;
     R->text_count = 0;
@@ -353,6 +354,43 @@ void render_add_light(const PointLight *l) {
     GpuPointLight *g = &R->lights[R->light_count++];
     g->pos_radius = v4(l->pos.x, l->pos.y, l->pos.z, l->radius);
     g->color_intensity = v4(l->color.x, l->color.y, l->color.z, l->intensity);
+}
+
+void render_add_spot(const SpotLight *l) {
+    if (R->spot_count >= MAX_SPOT_LIGHTS) return;
+    GpuSpotLight *g = &R->spots[R->spot_count++];
+    vec3 d = v3_norm(l->dir);
+    float outer = clampf(l->outer_deg, 1.0f, 85.0f) * DG_DEG2RAD, inner = clampf(l->inner_deg, 0.0f, l->outer_deg) * DG_DEG2RAD;
+    vec3 up = fabsf(d.y) > 0.95f ? v3(1, 0, 0) : v3(0, 1, 0);
+    g->vp = mat4_mul(mat4_perspective(2.0f * outer, 1.0f, 0.05f, fmaxf(l->range, 1.0f)), mat4_look_at(l->pos, v3_add(l->pos, d), up));
+    g->pos_range = v4(l->pos.x, l->pos.y, l->pos.z, l->range);
+    g->dir_cos = v4(d.x, d.y, d.z, cosf(outer));
+    g->color_intensity = v4(l->color.x, l->color.y, l->color.z, l->intensity);
+    g->params = v4(cosf(inner), 0, 0, 0);
+}
+
+void render_set_spot_cookie(TextureId t) { R->spot_cookie = t; }
+
+// Frame set binding 8: the spot cookie (white until one is set / uploaded).
+static void write_cookie_binding(void) {
+    TextureId t = R->spot_cookie && R->textures[R->spot_cookie].used && R->textures[R->spot_cookie].ready ? R->spot_cookie : R->white_tex;
+    if (t == R->spot_cookie_bound || !t) return;
+    vkDeviceWaitIdle(R->device);   // rare: the cookie changes once
+    for (int i = 0; i < FRAMES_IN_FLIGHT; i++) {
+        VkDescriptorSet sets[2] = { R->frames[i].frame_set, R->frames[i].frame_set_pip };
+        for (int s = 0; s < 2; s++) {
+            if (!sets[s]) continue;
+            VkDescriptorImageInfo ii = { R->sampler_clamp, R->textures[t].view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+            VkWriteDescriptorSet w = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+            w.dstSet = sets[s];
+            w.dstBinding = 8;
+            w.descriptorCount = 1;
+            w.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            w.pImageInfo = &ii;
+            vkUpdateDescriptorSets(R->device, 1, &w, 0, NULL);
+        }
+    }
+    R->spot_cookie_bound = t;
 }
 
 LineVertex *render_lines_alloc(u32 count, bool depth_test) {
@@ -826,6 +864,8 @@ static void compute_matrices(FrameData *fd) {
         fd->cshadow = v4(co.x, co.y, 1.0f / fmaxf(csz, 1.0f), 0.0f);
     }
     memcpy(fd->lights, R->lights, sizeof(GpuPointLight) * R->light_count);
+    memcpy(fd->spots, R->spots, sizeof(GpuSpotLight) * R->spot_count);
+    fd->spot_info = v4((float)R->spot_count, R->spot_cookie_bound == R->spot_cookie && R->spot_cookie ? 1.0f : 0.0f, 0, 0);
 }
 
 static void save_screenshot(GpuBuffer *buf, u32 w, u32 h) {
@@ -1367,6 +1407,7 @@ static void build_frame_graph(FrameData *fd) {
 
 void render_end_frame(void) {
     if (!R->frame_active) return;
+    write_cookie_binding();
     FrameResources *f = &R->frames[R->frame_slot];
     VkCommandBuffer cmd = f->cmd;
     VK_CHECK(vkResetCommandBuffer(cmd, 0));

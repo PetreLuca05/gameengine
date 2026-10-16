@@ -16,6 +16,7 @@ enum CmdButtons {
     BTN_WALK    = 1 << 7,
     BTN_NOCLIP  = 1 << 8,   // dev
     BTN_FIREMODE = 1 << 9,  // cycle fire mode (edge)
+    BTN_FLASHLIGHT = 1 << 10, // flashlight on (state, replicated as EF_FLASHLIGHT)
 };
 
 typedef struct UserCmd {

@@ -23,7 +23,7 @@ typedef struct PipeDesc {
 } PipeDesc;
 
 bool vkp_create_layouts(void) {
-    VkDescriptorSetLayoutBinding fb[8] = { 0 };
+    VkDescriptorSetLayoutBinding fb[9] = { 0 };
     fb[0].binding = 0;
     fb[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     fb[0].descriptorCount = 1;
@@ -45,8 +45,13 @@ bool vkp_create_layouts(void) {
         fb[i].descriptorCount = 1;
         fb[i].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
     }
+    // 8 spot light cookie (flashlights).
+    fb[8].binding = 8;
+    fb[8].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    fb[8].descriptorCount = 1;
+    fb[8].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
     VkDescriptorSetLayoutCreateInfo li = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
-    li.bindingCount = 8;
+    li.bindingCount = 9;
     li.pBindings = fb;
     VK_CHECK(vkCreateDescriptorSetLayout(R->device, &li, NULL, &R->frame_layout));
 

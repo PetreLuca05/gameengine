@@ -173,6 +173,11 @@ MeshId render_skinned_mesh_create(const SkinVertex *verts, u32 vcount, const u32
 void render_draw_skinned(const SkinnedDraw *d);
 void render_draw_viewmodel(const DrawItem *item);
 void render_add_light(const PointLight *light);
+// Spot lights (flashlights): cone from pos along dir, projected cookie (render_set_spot_cookie),
+// no shadows (a light at the eye needs none). Up to 4 per frame.
+typedef struct SpotLight { vec3 pos, dir; float range, inner_deg, outer_deg, intensity; vec3 color; } SpotLight;
+void render_add_spot(const SpotLight *light);
+void render_set_spot_cookie(TextureId cookie);
 LineVertex *render_lines_alloc(u32 vertex_count, bool depth_test);
 TextVertex *render_text_alloc(u32 vertex_count); // triangle list, font atlas texture
 void render_set_text_atlas(TextureId atlas);

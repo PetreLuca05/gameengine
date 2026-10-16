@@ -44,6 +44,7 @@ enum EntityFlags {
     EF_HANG      = 1 << 10,
     EF_MANTLE    = 1 << 11,
     EF_STATIC_BODY = 1 << 12,
+    EF_FLASHLIGHT = 1 << 13,  // players: flashlight on
 };
 
 enum ComponentBits {

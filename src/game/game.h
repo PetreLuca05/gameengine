@@ -78,6 +78,7 @@ typedef struct Game {
     int inv_pending_count;
     u32 inv_seq;
     bool paused;                 // single player / host alone: the pause menu stops the simulation
+    bool flashlight;             // local flashlight (F), sent as BTN_FLASHLIGHT
     float ads_prev;              // the local player's ADS progress before the last tick (render interpolation)
 
     // HUD state

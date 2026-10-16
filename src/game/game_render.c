@@ -1,3 +1,4 @@
+#include "stb_image.h"
 // Presentation: builds draw lists for the world, local view, hands, effects, HUD and menus.
 #include "gameplay/zombies/horde.h"
 #include "vfx/vfx.h"
@@ -6,6 +7,7 @@
 #include "core/engine.h"
 #include "core/cvar.h"
 #include "core/log.h"
+#include "core/platform.h"
 #include "render/render.h"
 #include "render/debug_draw.h"
 #include "world/level.h"
@@ -517,6 +519,55 @@ static void draw_debug(World *w, vec3 cam) {
     }
 }
 
+// Flashlights (F): a cookie-projected spot light. The local one
+// sits just ahead of the eye (in front of the held gun) along the view; other players' come from
+// their eye along the replicated aim (EF_FLASHLIGHT).
+static void flashlights_render(World *w, const RenderCamera *cam, const Player *lp, bool dead) {
+    static TextureId cookie;
+    static bool tried;
+    if (!tried) {
+        tried = true;
+        int cw, ch, cc;
+        char path[512];
+        snprintf(path, sizeof(path), "%sassets/textures/flashlight_cookie.png", platform_base_dir());
+        unsigned char *px = stbi_load(path, &cw, &ch, &cc, 4);
+        if (px) {
+            cookie = render_texture_create(cw, ch, px, true, false);
+            stbi_image_free(px);
+            render_set_spot_cookie(cookie);
+        } else {
+            log_warn("flashlight: cookie %s missing (plain cone)", path);
+        }
+    }
+    SpotLight s;
+    memset(&s, 0, sizeof(s));
+    s.range = 55.0f;
+    s.inner_deg = 7.0f;
+    s.outer_deg = 24.0f;
+    s.intensity = 140.0f;
+    s.color = v3(1.0f, 0.97f, 0.92f);
+    if (G->flashlight && lp && !dead) {
+        vec3 f = dir_from_angles(cam->yaw, cam->pitch), r = right_from_yaw(cam->yaw), u = v3_cross(r, f);
+        // Off-hand side, a little ahead of the eye: the held gun (to the right, mostly behind
+        // the light) isn't flooded, the beam still starts at the view.
+        s.pos = v3_add(v3_add(v3_madd(cam->pos, f, 0.28f), v3_scale(r, -0.12f)), v3_scale(u, -0.05f));
+        s.dir = f;
+        render_add_spot(&s);
+    }
+    for (int k = 0; k < MAX_PLAYERS; k++) {
+        const Player *op = &w->players[k];
+        if (!op->active || k == G->local_slot || !ent_valid(w, op->ent)) continue;
+        int i = (int)ENT_INDEX(op->ent);
+        if (!(w->flags[i] & EF_FLASHLIGHT) || (w->flags[i] & EF_DEAD)) continue;
+        float yaw = quat_get_yaw(w->xf[i].rot), pitch = w->anim[i];
+        vec3 f = dir_from_angles(yaw, pitch);
+        vec3 eye = v3_add(w->xf[i].pos, v3(0, (w->flags[i] & EF_CROUCHED) ? PLAYER_EYE_CROUCH : PLAYER_EYE_STAND, 0));
+        s.pos = v3_madd(eye, f, 0.4f);
+        s.dir = f;
+        render_add_spot(&s);
+    }
+}
+
 void game_render(void) {
     World *w = G->world;
     if (!w) {
@@ -661,6 +712,7 @@ void game_render(void) {
             if (cc->debug->i >= 2 && (g_engine.frame_index % 30) == 0) log_info("cam_debug: %s", GR->cam_text);
         }
     }
+    flashlights_render(w, &cam, p, dead);
     render_set_camera(&cam);
     // Time of day first: the post settings (exposure floor / curves, fog) follow this frame's sky.
     RenderEnvironment tod_env;

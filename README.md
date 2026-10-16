@@ -175,6 +175,7 @@ Steam friends list or via **Invite Friends** (the overlay invite dialog), or wit
 | Aim down sights | Mouse 2 |
 | Hold breath (while aiming) | Left Shift |
 | Fire mode (auto / burst / single) | B |
+| Flashlight | F |
 | Reload | R |
 | Drop held item | G |
 | Hotbar | 1–9, mouse wheel |

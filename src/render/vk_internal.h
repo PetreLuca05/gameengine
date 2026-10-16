@@ -111,6 +111,9 @@ typedef struct FrameResources {
 
 // Must match shaders/common.glsl (std140).
 typedef struct GpuPointLight { vec4 pos_radius; vec4 color_intensity; } GpuPointLight;
+// Spot lights (flashlights): cookie projection, position + range, direction + cos(outer), colour + intensity, x cos(inner).
+typedef struct GpuSpotLight { mat4 vp; vec4 pos_range; vec4 dir_cos; vec4 color_intensity; vec4 params; } GpuSpotLight;
+#define MAX_SPOT_LIGHTS 4
 typedef struct FrameData {
     mat4 view_proj, view, proj, vm_proj, shadow_vp;
     mat4 view_proj_nj, prev_view_proj_nj, vm_view_proj_nj, prev_vm_view_proj_nj;
@@ -123,6 +126,8 @@ typedef struct FrameData {
     mat4 shadow_vps[3];   // cascaded shadow maps: world -> atlas tile (2 x 2 atlas, tile 3 unused)
     vec4 shadow_splits;   // x, y, z: cascade radii (m), w: cascade count
     vec4 shadow_bias;     // x, y, z: per-cascade depth bias scale (constant bias in metres)
+    vec4 spot_info;       // x spot light count, y cookie valid
+    GpuSpotLight spots[MAX_SPOT_LIGHTS];
     GpuPointLight lights[MAX_POINT_LIGHTS];
 } FrameData;
 
@@ -214,6 +219,9 @@ typedef struct Renderer {
     u32 skin_bone_count;
     GpuPointLight lights[MAX_POINT_LIGHTS];
     u32 light_count;
+    GpuSpotLight spots[MAX_SPOT_LIGHTS];
+    u32 spot_count;
+    TextureId spot_cookie, spot_cookie_bound;
     LineVertex *line_cpu[2];   // [0] depth tested, [1] overlay
     u32 line_count[2];
     u32 line_cap;
