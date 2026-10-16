@@ -1,14 +1,17 @@
 // bench_vgeo: virtualized geometry GPU benchmark on the window-less harness (docs/VGEO.md "Bench").
 //
-//   bench_vgeo [--instances N] [--meshes M] [--frames F] [--validation]
+//   bench_vgeo [--instances N] [--meshes M] [--frames F] [--pool-mb P] [--validation]
 //
 // Builds M procedural rocks (~79k triangles each), scatters N instances over a field, and times the
 // culling passes at 1920x1080 from 4 cameras with GPU timestamps (instances, traversal, clusters,
 // pass 2), with occlusion off and with a synthetic Hi-Z (walls over 60 % of the screen, two passes),
 // plus the Hi-Z build. Prints ms per pass against the plan budget (docs/VGEO_PLAN.md §9) and the
-// counters (instances / nodes / clusters / triangles surviving).
+// counters (instances / nodes / clusters / triangles surviving). Then a 600 frame streaming
+// flythrough at eye level with a pool of half the streamable pages (or --pool-mb): pages loaded /
+// evicted per frame, the streamer's CPU ms and the GPU ms of its copies + page-table scatter.
 #include "vgeo_gpu_harness.h"
 #include "render/vgeo/vgeo_procgen.h"
+#include "render/vgeo/vgeo_stream.h"
 #include "core/engine.h"
 #include "core/dgmath.h"
 #include <SDL3/SDL.h>
@@ -29,12 +32,13 @@ static float rnd(void) {
 }
 
 int main(int argc, char **argv) {
-    u32 instances = 100000, meshes = 8, frames = 60;
+    u32 instances = 100000, meshes = 8, frames = 60, pool_mb = 0;
     bool validation = false;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--instances") && i + 1 < argc) instances = (u32)atoi(argv[++i]);
         else if (!strcmp(argv[i], "--meshes") && i + 1 < argc) meshes = (u32)atoi(argv[++i]);
         else if (!strcmp(argv[i], "--frames") && i + 1 < argc) frames = (u32)atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--pool-mb") && i + 1 < argc) pool_mb = (u32)atoi(argv[++i]);
         else if (!strcmp(argv[i], "--validation")) validation = true;
     }
     VgHarness h;
@@ -193,6 +197,56 @@ int main(int argc, char **argv) {
     printf("\nhi-z build 1920x1080 (%u mips): %.3f ms   (budget: 0.1 ms for two builds, Phase 3)\n", walls.mips, hiz_ms);
     printf("culling, worst camera: %.3f ms   (budget: 0.5 ms for cells + instances + traversal + clusters, both passes)\n", worst);
     printf("cpu: %u dispatches per view\n", c.dispatches);
+
+    // Streaming flythrough: eye level across the field, heading sweeping +-60 degrees.
+    {
+        VgStream st;
+        VgStreamConfig cfg = { pool_mb ? pool_mb : 1, 64 };
+        vg_stream_init(&st, &s, &c, &cfg);
+        if (!pool_mb) {
+            vgeo_scene_set_pool(&s, s.root_count + (s.page_count - s.root_count) / 2);
+            vgeo_scene_commit(&s);
+        }
+        const u32 N = 600;
+        u32 max_load = 0, max_evict = 0, gpu_n = 0;
+        double cpu_sum = 0, cpu_max = 0, gpu_sum = 0, gpu_max = 0, cull_sum = 0;
+        for (u32 f = 0; f < N; f++) {
+            float t = (float)f / (float)(N - 1);
+            vec3 eye = v3(-half * 0.9f + 1.8f * half * t, 1.7f, -half * 0.3f + 0.6f * half * t);
+            float yaw = sinf(t * 12.0f) * 1.05f;
+            vec3 target = v3(eye.x + 40.0f * cosf(yaw), 1.5f, eye.z + 40.0f * sinf(yaw));
+            mat4 vp = mat4_mul(proj, mat4_look_at(eye, target, v3(0, 1, 0)));
+            VgViewGpu v;
+            float e3[3] = { eye.x, eye.y, eye.z };
+            vgeo_view_setup(&v, vp.m, vp.m, e3, (float)H / (2.0f * tanf(FOV * 0.5f)), 0.1f, W, H, 1.0f, 32.0f, VGV_NO_OCCLUSION);
+            u32 slot = f % h.ctx.frames;
+            VkCommandPool pool;
+            VkCommandBuffer cmd = vgc_begin_once(&h.ctx, &pool);
+            vg_stream_update(&st, cmd, slot);
+            vg_cull_record(&c, cmd, slot, 0, &v, NULL, NULL);
+            vgc_submit_wait(&h.ctx, pool, cmd);
+            const VgStreamStats *ss = vg_stream_stats(&st);
+            max_load = DG_MAX(max_load, ss->loaded);
+            max_evict = DG_MAX(max_evict, ss->evicted);
+            cpu_sum += ss->cpu_ms;
+            cpu_max = ss->cpu_ms > cpu_max ? ss->cpu_ms : cpu_max;
+            if (f >= h.ctx.frames + 2) {
+                gpu_sum += ss->gpu_ms;
+                gpu_max = ss->gpu_ms > gpu_max ? ss->gpu_ms : gpu_max;
+                gpu_n++;
+            }
+            float ms[4];
+            if (vg_cull_timings(&c, slot, 0, true, ms)) cull_sum += ms[0] + ms[1] + ms[2] + ms[3];
+        }
+        const VgStreamStats *ss = vg_stream_stats(&st);
+        printf("\nstreaming flythrough (%u frames, pool %u slots / %.0f MB of %u pages, %u root, %u per frame):\n", N, s.pool_slots,
+               (double)s.pool_slots * VGEO_PAGE_SIZE / (1024.0 * 1024.0), s.page_count, s.root_count, cfg.pages_per_frame);
+        printf("  loaded %llu (max %u / frame), evicted %llu (max %u / frame), resident at the end %u\n", (unsigned long long)ss->loaded_total, max_load,
+               (unsigned long long)ss->evicted_total, max_evict, ss->resident);
+        printf("  stream cpu %.3f ms mean / %.3f max, gpu %.3f ms mean / %.3f max (budget 0.1 ms), cull %.3f ms mean\n", cpu_sum / N, cpu_max,
+               gpu_n ? gpu_sum / gpu_n : 0.0, gpu_max, cull_sum / N);
+        vg_stream_shutdown(&st);
+    }
     vgh_hiz_destroy(&h, &walls);
     vg_cull_shutdown(&c);
     vgeo_scene_free(&s);
