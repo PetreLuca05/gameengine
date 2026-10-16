@@ -23,7 +23,7 @@ typedef struct CharInputs {
     u32 phone_rot;
 } CharInputs;
 
-enum CharPhoneFlags { CHAR_PHONE_CAMERA = 1 << 0, CHAR_PHONE_LANDSCAPE = 1 << 1, CHAR_PHONE_DRIVEN = 1 << 2, CHAR_PHONE_REC = 1 << 3 };
+enum CharPhoneFlags { CHAR_PHONE_CAMERA = 1 << 0, CHAR_PHONE_LANDSCAPE = 1 << 1, CHAR_PHONE_DRIVEN = 1 << 2, CHAR_PHONE_REC = 1 << 3, CHAR_PHONE_FRONT = 1 << 4 };
 
 typedef struct CharRuntime {
     const AnimLibrary *lib;

@@ -112,6 +112,7 @@ static void exec_post(VkCommandBuffer cmd, void *u) {
     pc.p[1] = rq->flash;
     pc.p[2] = rq->vignette;
     pc.u[0] = ov ? 1u : 0u;
+    pc.u[1] = rq->mirror ? 1u : 0u;
     post_push_constants(cmd, &pc, 128);
     post_dispatch(cmd, "phone_tonemap", (u32)PV.t[v].w, (u32)PV.t[v].h, 1, 8);
 }
@@ -187,6 +188,13 @@ void phone_view_build(struct FrameData *fd) {
         fg_read(s, PV.screen_res[v], FG_SAMPLED);
         fg_read(s, PV.scene_res[v], FG_SAMPLED);
     }
+}
+
+bool phone_view_pending(void) {
+    if (!PV.init) return false;
+    for (int v = 0; v < RENDER_PHONE_VIEWS; v++)
+        if (PV.want[v]) return true;
+    return false;
 }
 
 void phone_view_frame_begin(int slot) {

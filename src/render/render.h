@@ -45,6 +45,7 @@ enum MaterialFlags {
     MAT_GRID_FINE = 1u << 8,  // 10 cm / 50 cm / 1 m measuring grid (recoil wall)
     MAT_SHADOW_ONLY = 1u << 9, // casts shadows but is not drawn (the local player's own body)
     MAT_GRID_MOA = 1u << 10,  // sighting-in target: 1 MOA grid, spacing in tex_scale (m), bold every 5, red every 10
+    MAT_SELF     = 1u << 11,  // with MAT_SHADOW_ONLY: the local player's own body, visible to phone cameras (selfies)
 };
 
 typedef struct Material {

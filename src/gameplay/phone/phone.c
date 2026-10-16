@@ -88,11 +88,11 @@ static void send_status(void) {
     snprintf(b, sizeof(b),
              "{\"t\":\"status\",\"v\":%d,\"holding\":%s,\"camera\":%s,\"zoom\":%.2f,\"max_zoom\":%.0f,\"rec\":%s,\"rec_s\":%.1f,\"rec_max\":%d,"
              "\"landscape\":%s,\"calibrated\":%s,\"driven\":%s,\"fps\":%.1f,\"kbps\":%.0f,\"q\":%d,\"w\":%d,\"h\":%d,\"glass\":%.0f,\"encode\":%.1f,"
-             "\"clock\":\"%s\",\"day\":%d,\"filter\":\"%s\",\"photos\":%d}",
+             "\"clock\":\"%s\",\"day\":%d,\"filter\":\"%s\",\"photos\":%d,\"front\":%s}",
              PHONE_PROTO_VERSION, PH.holding ? "true" : "false", PH.camera ? "true" : "false", PH.zoom, MAX_ZOOM, PH.rec ? "true" : "false",
              PH.rec ? phone_recorder_seconds(PH.rec) : 0.0, PH.cv.record_max->i, PH.landscape ? "true" : "false", PH.calibrated ? "true" : "false",
              PH.driven ? "true" : "false", st.fps, st.kbps, st.quality, st.width, st.height, st.glass_ms, st.encode_ms, clock, day,
-             phone_filter_name(PH.cv.filter->i), PH.gallery.count);
+             phone_filter_name(PH.cv.filter->i), PH.gallery.count, PH.front ? "true" : "false");
     send_text(b);
 }
 
@@ -483,6 +483,9 @@ static void handle_text(const char *s) {
         const cJSON *o = cJSON_GetObjectItemCaseSensitive(j, "orientation");
         PH.page_orientation = cJSON_IsTrue(o);
         if (!PH.page_orientation) toast("The phone browser denied motion access (see docs/PHONE.md)");
+    } else if (!strcmp(cmd, "camera")) {
+        const cJSON *v = cJSON_GetObjectItemCaseSensitive(j, "v");
+        PH.front = cJSON_IsString(v) ? !strcmp(v->valuestring, "front") : !PH.front;
     } else if (!strcmp(cmd, "filter")) {
         const cJSON *v = cJSON_GetObjectItemCaseSensitive(j, "v");
         if (cJSON_IsString(v)) cvar_set_int(PH.cv.filter, phone_filter_from_name(v->valuestring));
@@ -569,6 +572,7 @@ void phone_fill_cmd(UserCmd *c) {
     if (PH.landscape) f |= CHAR_PHONE_LANDSCAPE;
     if (PH.driven) f |= CHAR_PHONE_DRIVEN;
     if (PH.rec) f |= CHAR_PHONE_REC;
+    if (PH.front) f |= CHAR_PHONE_FRONT;
     c->phone_flags = f;
     c->phone_rot = PH.driven ? PH.rot_packed : 0;
 }
@@ -593,7 +597,7 @@ const char *phone_status_text(void) {
 }
 
 static float lens_fov(void) {
-    float f1 = PH.item ? PH.item->cam.fov_deg : 68.0f;
+    float f1 = PH.item ? (PH.front ? PH.item->cam.front_fov_deg : PH.item->cam.fov_deg) : 68.0f;
     return 2.0f * atanf(tanf(f1 * 0.5f * DG_DEG2RAD) / fmaxf(PH.zoom, 1.0f)) * DG_RAD2DEG;
 }
 
@@ -639,6 +643,7 @@ static void local_view(float dt) {
     v.flash = PH.flash;
     v.vignette = 0.3f;
     v.readback = PH.conn >= 0 || PH.photo_pending || PH.rec != NULL;
+    v.mirror = PH.front;
     render_phone_view(&v);
     // The copy of this frame arrives two frames later (after the one requested last frame).
     if (PH.photo_pending && PH.photo_wait == 0) PH.photo_wait = 2;
@@ -734,6 +739,9 @@ void phone_frame(World *w, const RenderCamera *cam, const Player *lp) {
     // Local input (in game, nothing on top).
     bool focus = input_game_focus() && !game()->menu_open && !game()->inventory_open && !console_is_open();
     bool atk = input_down(ACT_ATTACK), rel = input_down(ACT_RELOAD), pair = input_down(ACT_PHONE_PAIR), gal = input_down(ACT_PHONE_GALLERY);
+    bool selfie = input_down(ACT_PHONE_SELFIE);
+    if (focus && PH.holding && selfie && !PH.prev_selfie) PH.front = !PH.front;
+    PH.prev_selfie = selfie;
     if (focus && PH.holding) {
         if (PH.camera && atk && !PH.prev_attack) PH.photo_pending = true;
         if (PH.camera && rel && !PH.prev_reload) { if (PH.rec) record_stop(); else record_start(); }
@@ -754,8 +762,9 @@ void phone_frame(World *w, const RenderCamera *cam, const Player *lp) {
     vec3 ipos;
     quat irot;
     if (PH.holding && hands_held_xform(&ipos, &irot)) {
-        PH.lens_pos = v3_add(ipos, quat_rotate(irot, it->cam.lens.t));
-        PH.lens_rot = quat_norm(quat_mul(irot, it->cam.lens.r));
+        const Xform *lens = PH.front ? &it->cam.front : &it->cam.lens;
+        PH.lens_pos = v3_add(ipos, quat_rotate(irot, lens->t));
+        PH.lens_rot = quat_norm(quat_mul(irot, lens->r));
         PH.lens_valid = true;
     }
     if (PH.lens_valid && !(isfinite(PH.lens_pos.x) && isfinite(PH.lens_rot.w))) {
@@ -866,6 +875,11 @@ static void cmd_phone_landscape(int argc, const char **argv) {
     PH.landscape_manual = true;
 }
 
+static void cmd_phone_selfie(int argc, const char **argv) {
+    PH.front = argc > 1 ? atoi(argv[1]) != 0 : !PH.front;
+    log_info("phone_selfie: %s camera", PH.front ? "front" : "back");
+}
+
 static void cmd_phone_calibrate(int argc, const char **argv) {
     (void)argc;
     (void)argv;
@@ -908,6 +922,7 @@ void phone_register(void) {
     cmd_register("phone_zoom", cmd_phone_zoom, "phone_zoom <1..8>: phone camera zoom");
     cmd_register("phone_screen", cmd_phone_screen, "phone_screen camera | pair | gallery");
     cmd_register("phone_landscape", cmd_phone_landscape, "phone_landscape [0|1]: two-handed landscape hold (automatic with a paired phone)");
+    cmd_register("phone_selfie", cmd_phone_selfie, "phone_selfie [0|1]: front (selfie) / back camera (key T, or the page)");
     cmd_register("phone_calibrate", cmd_phone_calibrate, "re-centre the paired phone's orientation (the page has a button / double tap)");
     PH.conn = -1;
     PH.zoom = PH.zoom_target = 1.0f;

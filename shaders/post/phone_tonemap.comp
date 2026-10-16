@@ -13,7 +13,7 @@ layout(set = 0, binding = 8, rgba8) uniform writeonly image2D dst_scene;
 layout(set = 0, binding = 9, rgba8) uniform writeonly image2D dst_screen;
 layout(std430, set = 0, binding = 13) readonly buffer Exposure { float e[16]; } X;
 // pc.p0: x exposure bias (EV), y shutter flash 0..1, z vignette, w sharpen (stream: none)
-// pc.u0: x overlay present
+// pc.u0: x overlay present, y mirror the screen image (front camera preview)
 
 const mat3 ACES_IN = mat3(0.59719, 0.07600, 0.02840, 0.35458, 0.90834, 0.13383, 0.04823, 0.01566, 0.83777);
 const mat3 ACES_OUT = mat3(1.60475, -0.10208, -0.00327, -0.53108, 1.10813, -0.07276, -0.07367, -0.00605, 1.07602);
@@ -56,6 +56,14 @@ void main() {
     imageStore(dst_scene, p, vec4(srgb_encode(t), 1.0));
     // In-game screen: the phone UI over the image (overlay is sRGB, sampled linear), shutter flash.
     vec3 s = t;
+    if (pc.u0.y != 0u) {
+        // Mirrored preview: this texel shows the mirrored scene texel (same exposure / curve).
+        vec2 muv = vec2(1.0 - uv.x, uv.y);
+        vec3 mc = max(textureLod(color_tex, muv, 0.0).rgb, vec3(0.0)) * expo;
+        if (any(isnan(mc)) || any(isinf(mc))) mc = vec3(0.0);
+        vec2 md = (muv - 0.5) * vec2(float(sz.x) / float(sz.y), 1.0);
+        s = tonemap(mc * (1.0 - pc.p0.z * 0.35 * smoothstep(0.2, 0.75, length(md))));
+    }
     if (pc.u0.x != 0u) {
         vec4 o = textureLod(overlay_tex, uv, 0.0);
         s = mix(s, o.rgb, o.a);

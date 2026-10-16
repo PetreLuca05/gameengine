@@ -405,6 +405,9 @@ static void parse_camera(ItemDef *d, const cJSON *c) {
     vec3 lens = jvec3(c, "lens", v3_add(d->cam.body_center, v3(-d->cam.body_half.x + 0.012f, d->cam.body_half.y - 0.014f, -d->cam.body_half.z - 0.0005f)));
     d->cam.lens = xf_make(lens, quat_identity());
     d->cam.fov_deg = jnum(c, "fov", 68.0f);
+    vec3 fr = jvec3(c, "front_lens", v3_add(d->cam.screen.t, v3(0, d->cam.screen_half.y + 0.0035f, 0)));
+    d->cam.front = xf_make(fr, quat_axis_angle(v3(0, 1, 0), DG_PI));
+    d->cam.front_fov_deg = jnum(c, "front_fov", 80.0f);
 }
 
 static void parse_hold(const cJSON *w, char *style, ItemSockets *k, const char *def_style, vec3 support, vec3 muzzle,

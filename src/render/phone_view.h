@@ -23,6 +23,7 @@ typedef struct RenderPhoneView {
     float flash;              // shutter flash on the screen image 0..1
     float vignette;           // camera vignette 0..1 (the scene image too)
     bool readback;            // copy the scene image to the CPU this frame
+    bool mirror;              // front (selfie) camera: the screen preview is mirrored, the image is not
 } RenderPhoneView;
 
 void render_phone_view(const RenderPhoneView *v);   // this frame (call between begin / end frame)
@@ -37,5 +38,6 @@ struct FrameData;
 void phone_view_build(struct FrameData *fd);        // build_frame_graph: after the viewmodel / PiP
 void phone_view_frame_begin(int frame_slot);        // after the slot's fence: harvest readbacks
 void phone_view_shutdown(void);
+bool phone_view_pending(void);                      // a view was requested this frame
 
 #endif

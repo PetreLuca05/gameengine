@@ -29,7 +29,7 @@
       "hold": { "style": "phone", "style_landscape": "phone_landscape",
                 "sockets": { "grip_r": { "pos": [0, 0, 0], "fingers": [0.15, 1, -0.2], "back": [0.2, 0, -1] },
                              "grip_l": { "pos": [-0.01, 0.1, 0], "fingers": [-0.15, -1, -0.2], "back": [-0.2, 0, -1] } } },
-      "camera": { "body": { "center": [-0.008, 0.07, 0.024], "half": [0.036, 0.075, 0.004] }, "fov": 68 },
+      "camera": { "body": { "center": [-0.008, 0.085, 0.024], "half": [0.036, 0.075, 0.004] }, "fov": 68 },
       "desc": "Camera, gallery and a companion page for your real phone: hold right mouse to raise it, P to pair (docs/PHONE.md)." },
     {"id": "fuel_can", "name": "Fuel Can", "kind": "consumable", "stack": 1, "use_time": 3.0, "vehicle_use": "fuel", "fuel": 12, "color": [0.75, 0.12, 0.08], "size": [0.12, 0.17, 0.07], "hold": {"style": "item_large"}, "desc": "12 litres. Hold use next to a vehicle to refuel it."},
     {"id": "tire_repair", "name": "Tire Repair Kit", "kind": "consumable", "stack": 3, "use_time": 4.0, "vehicle_use": "tire_repair", "color": [0.2, 0.2, 0.22], "size": [0.1, 0.05, 0.07], "hold": {"style": "item_small"}, "desc": "Plugs a punctured tire and reinflates it to 85 %. Use next to the wheel."},

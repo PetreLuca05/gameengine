@@ -44,7 +44,9 @@ typedef struct ItemDef {
         Xform screen;                  // screen centre, facing +Z of this frame
         vec2 screen_half;              // half width / height (m)
         Xform lens;                    // back camera: looks down -Z of this frame
+        Xform front;                   // front (selfie) camera above the screen: looks towards +Z
         float fov_deg;                 // 1x vertical FOV of the lens
+        float front_fov_deg;
     } cam;
 } ItemDef;
 

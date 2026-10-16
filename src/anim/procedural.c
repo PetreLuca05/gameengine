@@ -26,7 +26,7 @@ static HoldStyle default_style(int id) {
     case HOLD_MELEE_2H: { float c[5] = { 60, 85, 90, 90, 90 }; memcpy(h.curl_r, c, sizeof(c)); memcpy(h.curl_l, c, sizeof(c)); } break;
     case HOLD_ITEM_SMALL: h.left_hand = false; { float c[5] = { 30, 45, 50, 55, 60 }; memcpy(h.curl_r, c, sizeof(c)); } break;
     // Phone: fingers wrap the back of the phone, the thumb stays on the screen side.
-    case HOLD_PHONE: h.left_hand = false; h.elbow_r = v3(0.6f, -1.0f, 0.1f); { float c[5] = { 15, 40, 45, 50, 55 }; memcpy(h.curl_r, c, sizeof(c)); } break;
+    case HOLD_PHONE: h.left_hand = false; h.elbow_r = v3(0.6f, -1.0f, 0.1f); { float c[5] = { 25, 8, 8, 10, 12 }; memcpy(h.curl_r, c, sizeof(c)); } break;
     case HOLD_PHONE_LANDSCAPE:
         h.elbow_r = v3(0.7f, -1.0f, 0.1f);
         h.elbow_l = v3(-0.7f, -1.0f, 0.1f);

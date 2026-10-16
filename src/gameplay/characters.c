@@ -532,7 +532,7 @@ static void player_inputs(World *w, CharacterInst *c, const Player *p, CharInput
     // Phone (docs/PHONE.md): camera mode = aiming with a camera item; landscape / driven rotation
     // come with the player's command (the client's real phone), replicated only in camera mode.
     if (c->item_def && c->item_def->camera && !c->item_weapon && in->ads) {
-        in->phone_flags = (u8)(CHAR_PHONE_CAMERA | (p->last_cmd.phone_flags & (CHAR_PHONE_LANDSCAPE | CHAR_PHONE_DRIVEN | CHAR_PHONE_REC)));
+        in->phone_flags = (u8)(CHAR_PHONE_CAMERA | (p->last_cmd.phone_flags & (CHAR_PHONE_LANDSCAPE | CHAR_PHONE_DRIVEN | CHAR_PHONE_REC | CHAR_PHONE_FRONT)));
         in->phone_rot = (in->phone_flags & CHAR_PHONE_DRIVEN) ? p->last_cmd.phone_rot : 0;
         if (in->phone_flags & CHAR_PHONE_LANDSCAPE) in->weapon_type = phone_alt_style(c->item_def, in->weapon_type);
     }
@@ -2078,7 +2078,7 @@ void chars_render(World *w, float alpha, vec3 cam_pos, int local_slot) {
             for (int b = 0; b < s->count; b++) pose[b] = xf_mul(sfix, xf_lerp(c->pose_prev[b], c->pose_cur[b], t));
         }
         bool local = c->is_player && c->slot == local_slot && !g_thirdperson;
-        u32 flags = local ? MAT_SHADOW_ONLY : 0;
+        u32 flags = local ? (MAT_SHADOW_ONLY | MAT_SELF) : 0;   // the owner's body: shadows + phone cameras (selfies)
         memcpy(c->pose_draw, pose, sizeof(Xform) * (size_t)s->count);
         c->pose_draw_frame = g_engine.frame_index;
         g_draw_skin = skin_for(w, c, local_slot);

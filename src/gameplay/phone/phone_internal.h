@@ -65,7 +65,8 @@ typedef struct PhoneState {
     quat lens_rot;
     bool lens_valid;
     PhoneScreen screen;
-    bool prev_attack, prev_reload, prev_pair, prev_gallery;
+    bool front;                  // selfie camera (front lens, mirrored preview)
+    bool prev_attack, prev_reload, prev_pair, prev_gallery, prev_selfie;
     // capture
     bool photo_pending;
     int photo_wait;              // frames until the requested readback is in

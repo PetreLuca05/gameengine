@@ -275,6 +275,15 @@ static void camera_ui(PhoneState *s, Canvas *c, float W, float H) {
     float t = logf(fmaxf(s->zoom, 1.0f)) / logf(8.0f);
     float ky = bot - t * (bot - top);
     c_circle(c, x, ky, 14, RGBA(255, 214, 10, 240), 0);
+    // Front camera chip + the camera switch (two arcs) next to the record button.
+    c_circle(c, W - 110, cy - 110, 26, RGBA(0, 0, 0, 120), 0);
+    c_circle(c, W - 110, cy - 110, 14, RGBA(255, 255, 255, 230), 3);
+    c_rect(c, W - 128, cy - 112, 8, 4, RGBA(255, 255, 255, 230));
+    c_rect(c, W - 100, cy - 112, 8, 4, RGBA(255, 255, 255, 230));
+    if (s->front) {
+        c_round(c, W * 0.5f - 54, 76, 108, 30, 15, RGBA(255, 214, 10, 220), 0);
+        c_text(c, 0, W * 0.5f, 98, 1, RGBA(20, 20, 20, 255), "SELFIE");
+    }
     // Orientation source.
     const char *src = s->fake ? "FAKE GYRO" : (s->driven ? "GYRO" : NULL);
     if (src) {
@@ -338,7 +347,7 @@ static void gallery_ui(PhoneState *s, Canvas *c, float W, float H) {
 u32 phone_ui_hash(const PhoneState *s) {
     World *w = game_world();
     u32 h = 2166136261u;
-    u32 v[16] = { (u32)s->screen, (u32)lrintf(s->zoom * 50.0f), s->rec ? (u32)phone_recorder_seconds(s->rec) + 1 : 0, (u32)(s->conn >= 0), (u32)s->token_left,
+    u32 v[16] = { (u32)s->screen + (s->front ? 16u : 0u), (u32)lrintf(s->zoom * 50.0f), s->rec ? (u32)phone_recorder_seconds(s->rec) + 1 : 0, (u32)(s->conn >= 0), (u32)s->token_left,
                   (u32)s->landscape, (u32)s->gallery.count, w ? (u32)(world_time_hours(w) * 60.0f) : 0, (u32)s->have_last_thumb, (u32)(s->server_err[0] != 0),
                   (u32)s->driven, (u32)s->fake, (u32)(s->token[0] != 0), 0, 0, 0 };
     for (int i = 0; i < 16; i++) { h ^= v[i]; h *= 16777619u; }
@@ -401,9 +410,11 @@ void phone_ui_hud(PhoneState *s) {
         x = key_hint(x, y, ACT_PHONE_GALLERY, "J", "Gallery");
         x = key_hint(x, y, ACT_RELOAD, "R", s->rec ? "Stop" : "Record");
         x = key_hint(x, y, ACT_ATTACK, "LMB", "Photo");
+        x = key_hint(x, y, ACT_PHONE_SELFIE, "T", s->front ? "Back camera" : "Selfie");
         GuiText t = { gui_s(th->t_tiny), GW_SEMIBOLD, th->text_dim, GUI_RIGHT, th->tracking_caps * 1.3f, true, true, 0 };
         gd_text(&t, x + gui_s(8), y + gui_s(3), "Wheel  Zoom");
     } else {
+        x = key_hint(x, y, ACT_PHONE, "X", "Put away");
         x = key_hint(x, y, ACT_PHONE_PAIR, "P", s->conn >= 0 ? "Phone linked" : "Pair phone");
         x = key_hint(x, y, ACT_AIM, "RMB", "Camera");
     }

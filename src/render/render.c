@@ -63,7 +63,7 @@ static void create_frames(void) {
         for (int k = 0; k < 2; k++) f->ubo_phone[k] = vkr_buffer_create(sizeof(FrameData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, true);
         f->dyn = vkr_buffer_create(DYN_BUFFER_SIZE, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, true);
         f->bones = vkr_buffer_create(sizeof(mat4) * MAX_SKIN_BONES * 2, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);   // + last frame's
-        f->instances = vkr_buffer_create(sizeof(GpuSkinInstance) * MAX_SKIN_DRAWS * 2, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);
+        f->instances = vkr_buffer_create(sizeof(GpuSkinInstance) * MAX_SKIN_DRAWS * 3, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);   // main + shadow / vm + phone
         f->prev_models = vkr_buffer_create(sizeof(mat4) * (MAX_DRAWS + MAX_VM_DRAWS), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);
 
         VkDescriptorSetAllocateInfo ai = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
@@ -618,11 +618,13 @@ static int cmp_skin_mesh(const void *a, const void *b) {
     return ma < mb ? -1 : (ma > mb ? 1 : 0);
 }
 
-// Skinned passes: 0 = main (world), 1 = shadow, 2 = viewmodel (first-person arms, after the depth clear).
+// Skinned passes: 0 = main (world), 1 = shadow, 2 = viewmodel (first-person arms, after the depth
+// clear), 3 = phone cameras (the world + the local player's own body, MAT_SELF: selfies).
 static bool skin_in_pass(const SkinnedDraw *d, int pass) {
     bool vm = (d->flags & MAT_VIEWMODEL) != 0;
     if (pass == 1) return d->cast_shadow && !vm;
     if (pass == 2) return vm;
+    if (pass == 3) return !vm && (!(d->flags & MAT_SHADOW_ONLY) || (d->flags & MAT_SELF));
     return !vm && (d->flags & MAT_SHADOW_ONLY) == 0;
 }
 
@@ -961,7 +963,7 @@ static VkImageLayout g_swap_layout;
 static struct {
     FrameResources *f;
     CpuSkin *cpu_skinned;
-    SkinPass *skin_main, *skin_vm;
+    SkinPass *skin_main, *skin_vm, *skin_phone;
     bool any_skin_vm;
     VkDeviceSize line_off[2], text_off, ui_voff, ui_ioff;
     FgRes hdr, depth, vm_depth, normal, material, velocity, swap, scene_copy, ldr;
@@ -1308,7 +1310,7 @@ static void exec_alt_scene(VkCommandBuffer cmd, void *u) {
     memcpy(R->frustum, a->frustum, sizeof(saved));
     draw_items(cmd, R->draws, R->draw_count, false, true, 0);
     memcpy(R->frustum, saved, sizeof(saved));
-    draw_skinned(cmd, 0, PIPE_SKIN, PIPE_LIT, F.skin_main);
+    draw_skinned(cmd, 3, PIPE_SKIN, PIPE_LIT, F.skin_phone);
     vkx_draw_particles_pip(cmd, set);
     draw_precip(cmd, set);
     vkCmdEndRendering(cmd);
@@ -1633,10 +1635,11 @@ void render_end_frame(void) {
     // Skinned characters: palettes + per-pass instance lists (GPU) or CPU-skinned vertices.
     // The bone SSBO holds this frame's palettes, then last frame's (previous-palette velocity).
     bool cpu_skin = R->r_cpu_skinning->i != 0;
-    static SkinPass skin_main, skin_shadow, skin_vm;
-    skin_main.batch_count = skin_shadow.batch_count = skin_vm.batch_count = 0;
+    static SkinPass skin_main, skin_shadow, skin_vm, skin_phone;
+    skin_main.batch_count = skin_shadow.batch_count = skin_vm.batch_count = skin_phone.batch_count = 0;
     F.skin_main = &skin_main;
     F.skin_vm = &skin_vm;
+    F.skin_phone = &skin_phone;
     for (u32 i = 0; i < R->skin_draw_count; i++) F.any_skin_vm |= (R->skin_draws[i].flags & MAT_VIEWMODEL) != 0;
     ArenaMark skin_mark = arena_mark(&g_engine.frame_arena);
     if (R->skin_draw_count) {
@@ -1649,7 +1652,8 @@ void render_end_frame(void) {
                 memcpy((mat4 *)f->bones.mapped + R->skin_bone_count, R->prev_bones, sizeof(mat4) * R->prev_bone_count);
             u32 used = build_skin_pass(f, 0, 0, &skin_main);
             used += build_skin_pass(f, 1, used, &skin_shadow);
-            build_skin_pass(f, 2, used, &skin_vm);
+            used += build_skin_pass(f, 2, used, &skin_vm);
+            if (phone_view_pending()) build_skin_pass(f, 3, used, &skin_phone);
         }
     }
 
