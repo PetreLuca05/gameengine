@@ -248,6 +248,10 @@ typedef struct ProcInput {
 // standing it only turns once the aim drifts past turn_threshold. Deterministic.
 float anim_body_yaw_step(float body_yaw, float aim_yaw, bool moving, const ProcParams *p, float dt, u8 *turning);
 
+// Forces a hold point state (hold point / hand pose editors): the procedural inputs that select it,
+// exactly as gameplay sets them for that state.
+void proc_force_hold_state(ProcInput *in, int hp_state);
+
 void proc_reset(ProcState *s);
 // Applies damage springs as additive rotations (call before proc_run). Advances springs by dt.
 void proc_damage_apply(ProcState *s, const ProcInput *in, Pose *pose, Xform *model);

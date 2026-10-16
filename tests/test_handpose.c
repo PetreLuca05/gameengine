@@ -6,6 +6,8 @@
 #include "anim/character_rt.h"
 #include "anim/handpose.h"
 #include "editor/handpose/hp_discover.h"
+#include "editor/handpose/hp_gizmo.h"
+#include "editor/handpose/hp_undo.h"
 #include "gameplay/items.h"
 #include "core/engine.h"
 #include "core/platform.h"
@@ -392,22 +394,39 @@ static void test_glue_tweaks(const ItemDB *idb) {
     const Skeleton *s = &L->skel;
     float worst = 0;
     int tested = 0;
-    for (int wi = 0; wi < idb->weapon_count; wi++) {
-        const WeaponDef *wd = &idb->weapons[wi];
-        int style = proc_hold_style_index(&L->proc, wd->hold_style);
+    // Every weapon and every held item (with its landscape style too: the phone's two-handed hold).
+    for (int n = 0; n < idb->weapon_count + idb->item_count; n++) {
+        const ItemSockets *k;
+        const char *id, *style_name;
+        int cat;
+        if (n < idb->weapon_count) {
+            k = &idb->weapons[n].sockets;
+            id = idb->weapons[n].id;
+            style_name = idb->weapons[n].hold_style;
+            cat = HPC_WEAPON;
+        } else {
+            const ItemDef *it = &idb->items[n - idb->weapon_count];
+            if (n - idb->weapon_count < 1 || !it->has_hold || it->weapon >= 0) continue;
+            k = &it->sockets;
+            id = it->id;
+            style_name = it->hold_style_alt[0] ? it->hold_style_alt : it->hold_style;
+            cat = HPC_ITEM;
+        }
+        int style = proc_hold_style_index(&L->proc, style_name);
         if (style < 0) continue;
-        int e = handpose_add(db, wd->id, HPC_WEAPON);
+        char eid[96];
+        handpose_entry_id(eid, sizeof(eid), cat, id);
+        int e = handpose_add(db, eid, cat);
         HandPoseEntry *en = &db->e[e];
         handpose_entry_clear_layers(en);
-        snprintf(en->inherits, sizeof(en->inherits), "style/%s", wd->hold_style);
+        snprintf(en->inherits, sizeof(en->inherits), "style/%s", style_name);
         for (int h = 0; h < 2; h++) {
             HandPoseLayer *l = &en->layer[h][HPS_DEFAULT];
             l->set = HPL_FINGERS_ALL | HPL_WRIST | (h == 0 ? HPL_SOCKET : 0);
             for (int f = 0; f < 5; f++)
-                for (int k = 0; k < 3; k++) l->j[f][k] = handpose_clamp_joint(f, k, (HandJoint){ frand(&r, 0, 90), frand(&r, -10, 10), frand(&r, -8, 8) });
+                for (int q = 0; q < 3; q++) l->j[f][q] = handpose_clamp_joint(f, q, (HandJoint){ frand(&r, 0, 90), frand(&r, -10, 10), frand(&r, -8, 8) });
             l->wrist = xf_make(v3(frand(&r, -0.005f, 0.005f), frand(&r, -0.005f, 0.005f), frand(&r, -0.005f, 0.005f)), handpose_euler_deg_to_quat(v3(frand(&r, -8, 8), frand(&r, -8, 8), frand(&r, -8, 8))));
-            Xform base = wd->sockets.grip_l;
-            l->socket = xf_mul(base, xf_make(v3(frand(&r, -0.01f, 0.01f), frand(&r, -0.01f, 0.01f), frand(&r, -0.02f, 0.02f)), handpose_euler_deg_to_quat(v3(frand(&r, -10, 10), frand(&r, -10, 10), 0))));
+            l->socket = xf_mul(k->grip_l, xf_make(v3(frand(&r, -0.01f, 0.01f), frand(&r, -0.01f, 0.01f), frand(&r, -0.02f, 0.02f)), handpose_euler_deg_to_quat(v3(frand(&r, -10, 10), frand(&r, -10, 10), 0))));
         }
         handpose_link(db);
         handpose_rehash(db);
@@ -425,21 +444,21 @@ static void test_glue_tweaks(const ItemDB *idb) {
                 charrt_eval_base(rt);
                 ProcInput pi;
                 charrt_proc_input(rt, &pi, xf_identity(), 1.0f / 60.0f);
-                pi.item = &wd->sockets;
+                pi.item = k;
                 pi.hand_ik_weight = 1.0f;
                 charrt_post(rt, &pi);
             }
             // Right hand: the item is finalized from it (exact by construction); left: on its socket.
             Xform palm_r = xf_mul(rt->final_model[s->role[BR_R_HAND]], L->hands.palm[1]);
             float er = v3_dist(xf_mul(palm_r, xf_inverse(rt->proc.hand[1].sock)).t, rt->proc.item_model.t);
-            CHECK(er < 1e-4f, "%s: item not finalized from the tweaked right socket (%.2f mm)", wd->id, er * 1000);
-            if (wd->sockets.has_left && proc_hold_style(&L->proc, style)->left_hand) {
+            CHECK(er < 1e-4f, "%s: item not finalized from the tweaked right socket (%.2f mm)", id, er * 1000);
+            if (k->has_left && proc_hold_style(&L->proc, style)->left_hand) {
                 Xform sock = rt->proc.hand[0].sock;
                 sock.t.z += rt->proc.grip_l_slide;
                 sock = xf_mul(rt->proc.item_model, sock);
                 Xform palm_l = xf_mul(rt->final_model[s->role[BR_L_HAND]], L->hands.palm[0]);
                 float pe = v3_dist(palm_l.t, sock.t), ae = quat_angle_between(palm_l.r, sock.r) * DG_RAD2DEG;
-                CHECK(pe < 0.002f && ae < 1.0f, "%s %s: left hand %.2f mm / %.2f deg off its tweaked socket", wd->id, ads ? "ADS" : "hip", pe * 1000, ae);
+                CHECK(pe < 0.002f && ae < 1.0f, "%s %s: left hand %.2f mm / %.2f deg off its tweaked socket", id, ads ? "ADS" : "hip", pe * 1000, ae);
                 worst = fmaxf(worst, pe);
             }
             tested++;
@@ -447,10 +466,9 @@ static void test_glue_tweaks(const ItemDB *idb) {
         handpose_entry_clear_layers(&db->e[e]);
     }
     anim_lib_reload_handposes(L);
-    printf("  glue with random pose tweaks: %d weapon x state runs, worst left hand %.3f mm\n", tested, worst * 1000);
+    printf("  glue with random pose tweaks: %d weapon / item x state runs, worst left hand %.3f mm\n", tested, worst * 1000);
     free(rt);
 }
-
 
 // ------------------------------------------------------------------ discovery
 
@@ -655,6 +673,174 @@ static void test_discovery(const ItemDB *idb) {
     SDL_RemovePath(tmp);
 }
 
+
+// ------------------------------------------------------------------ editor == gameplay
+
+// The editor poses the character with the gameplay pipeline; what it adds is the forced hold point
+// state (proc_force_hold_state). Forcing a state must give the same bones, bit for bit, as reaching
+// it through gameplay inputs - with edited hand pose data in both.
+static void test_editor_equals_gameplay(const ItemDB *idb) {
+    const CharacterDef *def = anim_lib_char_by_id(L, "player");
+    if (!def) return;
+    CharRuntime *a = (CharRuntime *)malloc(sizeof(CharRuntime)), *b = (CharRuntime *)malloc(sizeof(CharRuntime));
+    HandPoseDB *db = &L->handposes;
+    Rng r = { 5, 9 };
+    static const struct { int hp; bool ads, sprint, crouch; } states[] = { { HP_HIP, false, false, false }, { HP_ADS, true, false, false },
+                                                                          { HP_SPRINT, false, true, false }, { HP_CROUCH, false, false, true } };
+    int runs = 0, diffs = 0;
+    for (int wi = 0; wi < idb->weapon_count; wi++) {
+        const WeaponDef *wd = &idb->weapons[wi];
+        int style = proc_hold_style_index(&L->proc, wd->hold_style);
+        if (style < 0) continue;
+        // Edited data (as the editor leaves it): fingers + a wrist offset on both hands.
+        int e = handpose_add(db, wd->id, HPC_WEAPON);
+        snprintf(db->e[e].inherits, sizeof(db->e[e].inherits), "style/%s", wd->hold_style);
+        for (int h = 0; h < 2; h++) {
+            HandPoseLayer *l = &db->e[e].layer[h][HPS_DEFAULT];
+            l->set = HPL_FINGERS_ALL | HPL_WRIST;
+            for (int f = 0; f < 5; f++)
+                for (int k = 0; k < 3; k++) l->j[f][k] = handpose_clamp_joint(f, k, (HandJoint){ frand(&r, 0, 80), frand(&r, -5, 5), 0 });
+            l->wrist = xf_make(v3(0.002f, 0, 0), handpose_euler_deg_to_quat(v3(3, 0, 0)));
+        }
+        handpose_link(db);
+        handpose_rehash(db);
+        for (int si = 0; si < (int)ARRAY_COUNT(states); si++) {
+            charrt_init(a, L, def);
+            charrt_init(b, L, def);
+            CharInputs in;
+            memset(&in, 0, sizeof(in));
+            in.grounded = true;
+            in.weapon_type = style;
+            in.ads = states[si].ads;
+            in.sprint = states[si].sprint;
+            in.crouch = states[si].crouch;
+            for (int t = 0; t < 30; t++) {
+                CharRuntime *rt[2] = { a, b };
+                for (int k = 0; k < 2; k++) {
+                    charrt_set_inputs(rt[k], &in);
+                    charrt_tick(rt[k], 1.0f / 60.0f);
+                    charrt_eval_base(rt[k]);
+                    ProcInput pi;
+                    charrt_proc_input(rt[k], &pi, xf_identity(), 1.0f / 60.0f);
+                    pi.item = &wd->sockets;
+                    pi.hand_ik_weight = 1.0f;
+                    if (k == 1) proc_force_hold_state(&pi, states[si].hp);   // the editor's preview
+                    charrt_post(rt[k], &pi);
+                }
+            }
+            runs++;
+            bool same = !memcmp(a->final_model, b->final_model, sizeof(Xform) * (size_t)L->skel.count) &&
+                        !memcmp(&a->proc.item_model, &b->proc.item_model, sizeof(Xform));
+            if (!same) diffs++;
+            CHECK(same, "%s %s: editor-forced state differs from the gameplay pose", wd->id, holdpoint_state_name(states[si].hp));
+            CHECK(a->proc.hp_out.state == states[si].hp, "%s: gameplay inputs reached %s, not %s", wd->id, holdpoint_state_name(a->proc.hp_out.state),
+                  holdpoint_state_name(states[si].hp));
+        }
+        handpose_entry_clear_layers(&db->e[e]);
+    }
+    anim_lib_reload_handposes(L);
+    printf("  editor == gameplay: %d weapon x state runs, %d differ (bit-identical bones and item)\n", runs, diffs);
+    free(a);
+    free(b);
+}
+
+// ------------------------------------------------------------------ gizmo / undo / manifest
+
+static void test_gizmo(void) {
+    HpCamera c = { v3(0, 0, 1), quat_identity(), 60, 1280, 720 };
+    // Projection round trip.
+    for (int i = 0; i < 20; i++) {
+        vec3 p = v3(-0.3f + 0.03f * i, 0.2f - 0.02f * i, -0.5f - 0.05f * i);
+        vec2 px;
+        CHECK(hpg_project(&c, p, &px), "projection failed");
+        vec3 o, d;
+        hpg_ray(&c, px, &o, &d);
+        float t = v3_dot(v3_sub(p, o), d);
+        CHECK(v3_dist(v3_madd(o, d, t), p) < 1e-4f, "ray through the projected point misses it");
+    }
+    HpGizmo g;
+    hpg_init(&g);
+    g.local = false;
+    g.size = 0.1f;
+    Xform ed = xf_make(v3(0, 0, 0), quat_identity());
+    // Translate along X: mouse on the X axis, dragged to the projection of x = 0.05.
+    vec2 m0, m1;
+    hpg_project(&c, v3(0.06f, 0, 0), &m0);
+    CHECK(hpg_pick(&g, &c, hpg_frame(&g, ed), m0, 6) == HPG_X, "pick the X axis");
+    CHECK(hpg_begin(&g, &c, ed, HPG_X, m0), "begin X drag");
+    hpg_project(&c, v3(0.11f, 0.01f, 0), &m1);
+    Xform x = hpg_drag(&g, &c, m1);
+    CHECK(fabsf(x.t.x - 0.05f) < 1e-4f && fabsf(x.t.y) < 1e-6f && fabsf(x.t.z) < 1e-6f, "X drag moved to (%.4f %.4f %.4f), want (0.05 0 0)", x.t.x, x.t.y, x.t.z);
+    g.snap = true;
+    g.snap_move = 0.03f;   // 0.05 -> the 0.06 grid line
+    x = hpg_drag(&g, &c, m1);
+    CHECK(fabsf(x.t.x - 0.06f) < 1e-5f, "snapped X drag %.4f, want 0.06", x.t.x);
+    hpg_end(&g);
+    g.snap = false;
+    // Rotate about Z (the camera looks down -Z at the ring; the X / Y rings are edge-on lines
+    // through the centre, so grab the Z ring at 45 deg): a quarter turn of the mouse.
+    g.mode = HPG_ROTATE;
+    float r = g.size * 0.8f;
+    hpg_project(&c, v3(r * 0.7071f, r * 0.7071f, 0), &m0);
+    CHECK(hpg_pick(&g, &c, hpg_frame(&g, ed), m0, 6) == HPG_RZ, "pick the Z ring");
+    CHECK(hpg_begin(&g, &c, ed, HPG_RZ, m0), "begin Z rotation");
+    hpg_project(&c, v3(-r * 0.7071f, r * 0.7071f, 0), &m1);
+    x = hpg_drag(&g, &c, m1);
+    vec3 xa = quat_rotate(x.r, v3(1, 0, 0));
+    CHECK(fabsf(xa.y - 1.0f) < 1e-3f, "Z ring quarter turn: x axis -> (%.3f %.3f %.3f), want +Y", xa.x, xa.y, xa.z);
+    // Joint picking.
+    vec3 pts[3] = { v3(-0.1f, 0, 0), v3(0, 0, 0), v3(0.1f, 0, 0) };
+    vec2 mid;
+    hpg_project(&c, pts[2], &mid);
+    CHECK(hpg_pick_point(&c, pts, 3, mid, 10) == 2, "joint pick");
+    float t;
+    CHECK(hpg_ray_box(v3(0, 0, 1), v3(0, 0, -1), v3(0, 0, 0), quat_identity(), v3(0.1f, 0.1f, 0.1f), &t) && fabsf(t - 0.9f) < 1e-5f, "ray / box");
+}
+
+static void test_undo(void) {
+    HandPoseDB db;
+    handpose_db_init(&db);
+    int i = handpose_add(&db, "u_entry", HPC_ITEM);
+    HpUndo u = { 0 };
+    for (int k = 1; k <= 5; k++) {
+        hpu_push(&u, &db.e[i]);
+        db.e[i].layer[1][HPS_DEFAULT].set = HPL_IKW;
+        db.e[i].layer[1][HPS_DEFAULT].ik_weight = 0.1f * (float)k;
+    }
+    CHECK(hpu_undo_count(&u) == 5, "undo count");
+    for (int k = 4; k >= 0; k--) {
+        int r = hpu_undo(&u, &db);
+        const HandPoseLayer *l = &db.e[i].layer[1][HPS_DEFAULT];
+        bool ok = k ? fabsf(l->ik_weight - 0.1f * (float)k) < 1e-6f : l->set == 0;   // step 0: the untouched layer
+        CHECK(r == i && ok, "undo step %d: ik %.2f set %x", k, l->ik_weight, l->set);
+    }
+    CHECK(hpu_undo(&u, &db) < 0 && db.e[i].layer[1][HPS_DEFAULT].set == 0, "undo past the start");
+    for (int k = 1; k <= 5; k++) hpu_redo(&u, &db);
+    CHECK(fabsf(db.e[i].layer[1][HPS_DEFAULT].ik_weight - 0.5f) < 1e-6f && hpu_redo_count(&u) == 0, "redo to the end");
+    hpu_undo(&u, &db);
+    hpu_push(&u, &db.e[i]);
+    CHECK(hpu_redo_count(&u) == 0, "a new edit clears redo");
+    hpu_free(&u);
+    handpose_db_free(&db);
+}
+
+static void test_manifest(void) {
+    CHECK(L->manifest.hash[AC_HAND_POSES] == L->handposes.hash && L->handposes.hash != 0, "manifest hand_poses %08x vs DB %08x", L->manifest.hash[AC_HAND_POSES],
+          L->handposes.hash);
+    CHECK(!strcmp(asset_category_name(AC_HAND_POSES), "hand_poses"), "category name");
+    // Same files -> same hash (every client); a changed pose -> a different one.
+    u32 h0 = L->handposes.hash;
+    anim_lib_reload_handposes(L);
+    CHECK(L->handposes.hash == h0, "reload changed the hash");
+    int e = handpose_find(&L->handposes, "style/rifle");
+    if (e >= 0) {
+        L->handposes.e[e].layer[1][HPS_DEFAULT].j[HF_INDEX][0].curl += 1;
+        handpose_rehash(&L->handposes);
+        CHECK(L->handposes.hash != h0, "a pose edit didn't change the hash");
+        anim_lib_reload_handposes(L);
+    }
+}
+
 int main(int argc, char **argv) {
     (void)argc;
     (void)argv;
@@ -672,6 +858,10 @@ int main(int argc, char **argv) {
     test_contact();
     test_glue_tweaks(db);
     test_discovery(db);
+    test_editor_equals_gameplay(db);
+    test_gizmo();
+    test_undo();
+    test_manifest();
     printf("%d checks, %d failed\n", g_checks, g_fail);
     return g_fail ? 1 : 0;
 }

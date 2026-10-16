@@ -12,7 +12,7 @@ item that other players see. There is no separate viewmodel mesh.
 |---|---|---|
 | Hold point: states, blends, ADS, procedural layer, collision | `src/player/holdpoint.c/.h` (pure, unit tested) | `assets/human/holdpoint.json`, item `"holdpoint"` blocks |
 | Camera on the head: stabilizer, collision, death camera | `src/player/camera_fp.c/.h`, `camera_fp_math.c` (pure) | `cam_*` cvars |
-| Body solve (spine look → hold point → arm IK → fingers) | `src/anim/weapon_hold.c` (`proc_hold`) | `assets/human/controller.json` hold styles (elbows, curls, left hand) |
+| Body solve (spine look → hold point → arm IK → fingers) | `src/anim/weapon_hold.c` (`proc_hold`) | `assets/human/controller.json` hold styles (elbows, left hand); hand poses `assets/handposes` (docs/HANDPOSE.md) |
 | Owner per-frame re-solve, debug draw | `src/gameplay/characters.c` (`chars_render_local_fp`) | |
 | Camera integration | `src/game/game_render.c` | |
 | Commands, test driver, save | `src/game/game_holdpoint.c` | |
@@ -33,7 +33,7 @@ Each simulation tick, for every character, local or remote, through the same cod
 7. **Right-arm IK** onto `grip_r`. The item is finalized from the solved hand, so it's glued by
    construction.
 8. **Left-arm IK** onto `grip_l`. If out of reach, the hold point is pulled toward the shoulders first.
-9. **Finger curl.**
+9. **Fingers:** each hand's pose from `assets/handposes` (socket, wrist, pole, every finger joint; docs/HANDPOSE.md).
 10. **Foot IK.**
 
 Each rendered frame, for the owner only:

@@ -1357,15 +1357,7 @@ static void post_one(World *w, CharacterInst *c, int i, float dt, vec3 cam_pos, 
     if (c->rt.in.crouch) pi.crouch_drop = 0.38f;
     pi.first_person = c->local && cv(CG->fp_body);
     pi.hp_static = cv(CG->hp_static);
-    if (CG->hp_force_state && CG->hp_force_state->i >= 0) {
-        int fs = CG->hp_force_state->i;
-        pi.ads_t = fs == HP_ADS ? 1.0f : 0.0f;
-        pi.sprinting = fs == HP_SPRINT;
-        pi.crouched = fs == HP_CROUCH;
-        pi.prone = fs == HP_PRONE;
-        pi.empty_hands = fs == HP_EMPTY;
-        pi.inspect = fs == HP_INSPECT;
-    }
+    if (CG->hp_force_state && CG->hp_force_state->i >= 0) proc_force_hold_state(&pi, CG->hp_force_state->i);
     if (c->is_player && c->slot >= 0) {
         const PlayerMove *m = &w->players[c->slot].sim.move;
         if (m->hand_anchor_valid && (m->mode == MOVE_HANG || m->mode == MOVE_MANTLE || m->mode == MOVE_VAULT)) {

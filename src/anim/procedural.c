@@ -299,6 +299,15 @@ void proc_hand_frames(const Skeleton *s, HandFrames *out) {
 
 // ------------------------------------------------------------------ driver
 
+void proc_force_hold_state(ProcInput *in, int fs) {
+    in->ads_t = fs == HP_ADS ? 1.0f : 0.0f;
+    in->sprinting = fs == HP_SPRINT;
+    in->crouched = fs == HP_CROUCH;
+    in->prone = fs == HP_PRONE;
+    in->empty_hands = fs == HP_EMPTY;
+    in->inspect = fs == HP_INSPECT;
+}
+
 void proc_reset(ProcState *s) { memset(s, 0, sizeof(*s)); s->style = s->prev_style = -1; }
 
 void proc_rotate_bone(const Skeleton *s, Pose *p, Xform *model, int b, quat q) {
