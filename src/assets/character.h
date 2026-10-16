@@ -1,33 +1,33 @@
 // Character definitions (assets/characters/*.json) and rig validation against the shared,
-// canonical skeleton. Adding a model = one FBX + one JSON, no code:
+// canonical skeleton. A character = the Skeleton + one or more SkeletalMesh parts in slots + its anim
+// set / damage / ragdoll tuning. Adding a model = one FBX + one JSON line, no code:
 //
 //   { "id": "zombie_walker", "character_id": 3, "kind": "zombie",
 //     "mesh": "assets/human/Dummy.fbx", "materials": { "Alpha_Body_MAT": [0.4, 0.5, 0.35] },
 //     "anim_set": "zombie", "part_mult": { "head": 4.0, "limbs": 0.5 },
 //     "ragdoll_scale": 1.0, "scale": 1.0, "hp": 120, "move_speed": 1.2 }
+//
+// Modular (docs/CHARACTERS.md): "parts": { "<slot>": <mesh> | [<mesh>, ...] } with slots body, head, torso,
+// legs, hands, hair, gear_*; a <mesh> is a path (.fbx / .skm) or
+//   { "mesh": path, "id": "head_b", "weight": 2, "region": "head", "inflate": 0.01, "scale": [1, 1, 1],
+//     "materials": { ... }, "hide": ["hair"] }
+// "region" cuts the part out of a full-body mesh (skeleton bone group); "hide" removes those bone groups
+// from the character's OTHER parts (body under clothing). "mesh" alone = a single "body" part.
 #ifndef DG_CHARACTER_H
 #define DG_CHARACTER_H
 
 #include "anim/anim.h"
+#include "anim/skeleton.h"
 #include "anim/body_parts.h"
 #include "anim/anim_mesh.h"
+#include "render/skeletal_mesh.h"
 
 #define CHAR_LOD_FILES 4
-#define CHAR_MAX_SOCKETS 8
+#define CHAR_MAX_SOCKETS SKEL_MAX_SOCKETS
 
-// Named attach point parented to a bone (like an Unreal Engine skeletal mesh socket): relative
-// location / rotation in the bone's space. JSON:
-//   "sockets": { "camera": { "bone": "Head", "offset": [0, 0.10, -0.10], "rotation": [0, 0, 0], "space": "bind" } }
-// "space": "bone" = offset / rotation in the bone's local frame; "bind" (default) = model-space
-// offset at the bind pose (character faces -Z, +Y up), converted to the bone's frame at load.
-typedef struct CharSocket {
-    char name[24];
-    char bone_name[48];
-    int bone;                      // resolved skeleton index (-1 = unresolved)
-    vec3 offset, rotation_deg;
-    bool bind_space;
-    Xform rel;                     // bone space
-} CharSocket;
+// Sockets live on the Skeleton asset (assets/skeletons/human.json); a character may override or
+// add some ("sockets" / "eye_offset" in its JSON). character_resolve_sockets merges both.
+typedef SkelSocket CharSocket;
 
 typedef enum CharKind { CK_PLAYER, CK_ZOMBIE, CK_DUMMY } CharKind;
 
@@ -39,6 +39,54 @@ typedef enum CharSurface { CSURF_FLESH, CSURF_CLOTH, CSURF_ARMOR, CSURF_BONE, CS
 // "surface": { "torso": "cloth", "limbs": "cloth", "head": "flesh" }   (part names or groups)
 // "armor":   { "head": { "type": "helmet", "hits": 2 } }  sparks, no blood until it breaks
 typedef struct CharBlood { vec3 color; float darkness, amount, mist, decay; } CharBlood;
+
+// Part slots (one SkeletalMesh each, all skinned from the character's one SkeletonInstance). The order
+// is the wire order of the replicated part selection (one u8 per slot).
+typedef enum CharSlot {
+    CSLOT_BODY, CSLOT_HEAD, CSLOT_TORSO, CSLOT_LEGS, CSLOT_HANDS, CSLOT_HAIR,
+    CSLOT_GEAR_0, CSLOT_GEAR_1, CSLOT_GEAR_2, CSLOT_GEAR_3,
+    CSLOT_COUNT
+} CharSlot;
+#define CHAR_MAX_PART_OPTIONS 16
+#define CHAR_PART_NONE 0          // selection byte: 0 = slot empty, k = option k - 1
+#define CHAR_MAX_HIDE 4
+
+const char *char_slot_name(int slot);
+// "body", "head", ..., "gear_0".."gear_3"; -1 if unknown.
+int char_slot_from_name(const char *name);
+
+// Where a part's geometry comes from: a baked mesh, optionally cut / deformed (placeholder sets).
+typedef struct MeshRef {
+    char path[128];            // .fbx (baked through assets/cache) or .skm (tools/bake_mesh)
+    char region[24];           // skeleton bone group to cut out of the mesh ("" = whole mesh)
+    float inflate;             // m along the normals
+    vec3 scale;                // about each vertex's dominant bone
+} MeshRef;
+u32 mesh_ref_hash(const MeshRef *r);
+bool mesh_ref_is_plain(const MeshRef *r);
+// Parses a path string or a { "mesh", "region", "inflate", "scale" } object.
+bool mesh_ref_parse(MeshRef *r, const struct cJSON *e);
+void mesh_ref_describe(const MeshRef *r, char *out, size_t n);
+
+typedef struct CharPartOption {
+    char id[32];               // console / UI name ("head_b", the skin id, or the file stem)
+    MeshRef ref;
+    int mesh;                  // AnimLibrary mesh index (-1 = unavailable)
+    int skin;                  // AnimLibrary skin (texture atlas) or -1
+    float weight;              // random variety weight (0 = only when chosen explicitly)
+    bool is_default;           // picked instead of a random option (skins.json "player" / "npc")
+    int material_count;        // material tints for this part (falls back to the character's)
+    char material_names[SKIN_MAX_MATERIALS][48];
+    vec4 material_colors[SKIN_MAX_MATERIALS];
+    char hide_names[CHAR_MAX_HIDE][24];
+    int hide_count;
+    BoneSet hide;              // resolved: skeleton bones whose triangles the OTHER parts drop
+} CharPartOption;
+
+typedef struct CharPartSlot {
+    int option_count;
+    CharPartOption options[CHAR_MAX_PART_OPTIONS];
+} CharPartSlot;
 
 typedef struct CharacterDef {
     u32 hash;
@@ -64,13 +112,29 @@ typedef struct CharacterDef {
     float lod_bias;
     CharSocket sockets[CHAR_MAX_SOCKETS];
     int socket_count;
-    bool valid;                    // mesh bound + rig validated
+    CharPartSlot slots[CSLOT_COUNT];
+    int part_option_count;         // over all slots
+    bool valid;                    // at least one part mesh bound + rig validated
 } CharacterDef;
 
-// Resolves socket bones against the skeleton (after loading). Missing "camera" sockets on player
-// characters get the default eye socket on the Head bone.
-void character_resolve_sockets(CharacterDef *d, const Skeleton *s);
+// Resolves socket bones against the skeleton (after loading) and adds the skeleton's sockets the
+// character doesn't override. A missing "camera" socket gets the default eye socket on the Head bone.
+void character_resolve_sockets(CharacterDef *d, const SkeletonAsset *a);
 const CharSocket *character_socket(const CharacterDef *d, const char *name);
+
+// Parts --------------------------------------------------------------------
+// Resolves each option's "hide" groups against the skeleton.
+void character_resolve_parts(CharacterDef *d, const SkeletonAsset *a);
+// Deterministic part selection for a seed (entity id / spawn seed): default options win, otherwise a
+// weighted random pick among weight > 0 options. out[CSLOT_COUNT].
+void character_pick_parts(const CharacterDef *d, u32 seed, u8 *out);
+// Option index in a slot by id, mesh path or file stem (-1 if missing).
+int character_find_option(const CharacterDef *d, int slot, const char *name);
+const CharPartOption *character_part(const CharacterDef *d, const u8 *sel, int slot);
+// Skeleton bones the selected parts other than `slot` hide (slot -1 = all of them).
+void character_hidden_bones(const CharacterDef *d, const u8 *sel, int slot, BoneSet *out);
+// Appends an option to a slot (false when full).
+bool character_add_option(CharacterDef *d, int slot, const CharPartOption *o);
 // World transform of a socket from bone world transforms (false if missing).
 bool character_socket_world(const CharacterDef *d, const char *name, const Xform *bone_world, Xform *out);
 

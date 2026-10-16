@@ -118,37 +118,30 @@ bool anim_cache_skeleton(const char *fbx, Skeleton *out, char *err, int err_size
 
 // ------------------------------------------------------------------ mesh
 
-bool anim_cache_mesh(const char *fbx, const Skeleton *canon, SkinMeshData *out, char *err, int err_size) {
-    u32 key = entry_key(fbx, canon->hash);
+bool anim_cache_skm(const char *fbx, const SkeletonAsset *sk, const BoneAliasTable *aliases, SkeletalMesh *out, char *err, int err_size) {
+    u32 key = entry_key(fbx, sk->skel.hash ^ (skm_alias_hash(aliases) * 2654435761u));
     if (!key) { if (err) snprintf(err, (size_t)err_size, "cannot read %s", fbx); return false; }
     Buf b = { 0 };
     if (read_entry(fbx, KIND_MESH, key, &b)) {
-        get(&b, out, sizeof(*out));
-        for (int l = 0; l < out->lod_count && l < SKIN_MAX_LODS; l++) {
-            SkinLod *L = &out->lods[l];
-            L->verts = (SkinVertex *)get_alloc(&b, sizeof(SkinVertex) * L->vcount);
-            L->vmat = (u8 *)get_alloc(&b, L->vcount);
-            L->indices = (u32 *)get_alloc(&b, sizeof(u32) * L->icount);
-        }
-        bool ok = !b.bad;
+        bool ok = skm_deserialize(out, b.p + b.rd, b.n - b.rd, NULL, 0);
         free(b.p);
         if (ok) { AC.stats.hits++; return true; }
-        memset(out, 0, sizeof(*out));
     }
     AC.stats.misses++;
-    if (!fbx_load_skinned_mesh(fbx, canon, out, err, err_size)) return false;
-    skin_generate_lods(out);
+    if (!fbx_load_skeletal_mesh(fbx, sk, aliases, out, err, err_size)) return false;
+    out->source_hash = fbx_file_hash(fbx);
+    skin_generate_lods(&out->data);
+    skm_compact_bones(out);     // palettes carry only bones with weights
+    skm_finalize(out, sk);
     Buf w = { 0 };
-    SkinMeshData hdr = *out;
-    for (int l = 0; l < SKIN_MAX_LODS; l++) { hdr.lods[l].verts = NULL; hdr.lods[l].vmat = NULL; hdr.lods[l].indices = NULL; }
-    put(&w, &hdr, sizeof(hdr));
-    for (int l = 0; l < out->lod_count; l++) {
-        put(&w, out->lods[l].verts, sizeof(SkinVertex) * out->lods[l].vcount);
-        put(&w, out->lods[l].vmat, out->lods[l].vcount);
-        put(&w, out->lods[l].indices, sizeof(u32) * out->lods[l].icount);
+    u8 *data = NULL;
+    size_t n = 0;
+    if (skm_serialize(out, &data, &n)) {
+        w.p = data;
+        w.n = n;
+        write_entry(fbx, KIND_MESH, key, &w);
+        free(data);
     }
-    write_entry(fbx, KIND_MESH, key, &w);
-    free(w.p);
     return true;
 }
 

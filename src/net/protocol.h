@@ -8,7 +8,7 @@
 #ifndef DG_PROTOCOL_H
 #define DG_PROTOCOL_H
 
-#define DG_PROTOCOL_VERSION 12  // 12: PlayerMove.veh_raise; 11: vehicles (PlayerMove seat fields, vehicle block in snapshots, BTN_VEHICLE); 10: weather in snapshots; 9: inventory intents (RPC_INV_OP, MSG_INVENTORY ack); 8: 8: weapon attachments (InvSlot.att, NF_ATTACH), time of day in snapshots
+#define DG_PROTOCOL_VERSION 13  // 13: modular character parts (ANS_PARTS in the anim state, RPC_SET_PART); 12: PlayerMove.veh_raise; 11: vehicles (PlayerMove seat fields, vehicle block in snapshots, BTN_VEHICLE); 10: weather in snapshots; 9: inventory intents (RPC_INV_OP, MSG_INVENTORY ack); 8: 8: weapon attachments (InvSlot.att, NF_ATTACH), time of day in snapshots
 #define DG_DEFAULT_PORT 27015
 #define DG_DISCOVERY_PORT 27016
 

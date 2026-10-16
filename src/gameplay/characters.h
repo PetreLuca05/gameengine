@@ -102,6 +102,13 @@ typedef struct CharacterInst {
     bool is_player, local;
     int slot;
     u32 events_received[AEV_COUNT];
+    // Modular parts (docs/CHARACTERS.md): one SkeletonInstance (pose + shared palette) whatever the
+    // part count; each selected part is a SkeletalMesh skinned from it.
+    u8 parts[CSLOT_COUNT];            // part selection (host: authoritative; clients: replicated)
+    u16 part_gpu[CSLOT_COUNT];        // built GPU part + 1 per slot (render cache)
+    u8 part_gpu_sel[CSLOT_COUNT];     // selection the cache was built for
+    u32 part_gpu_gen;
+    SkeletonInstance *si;
 } CharacterInst;
 
 typedef struct CharacterSystem {
@@ -165,10 +172,24 @@ vec3 chars_eye_offset(float yaw, float pitch);
 // pose with the spine aimed at (yaw, pitch) and returns the "camera" socket's world transform.
 // The camera takes the position; its rotation stays the view (pawn control rotation).
 bool chars_fp_bone_world(int role, Xform *out);
-// Character skins (assets/human/skins.json): the local player picks one with cl_skin.
+// Character skins (assets/human/skins.json + assets/skins/): the local player picks one with cl_skin
+// (sent to the host as its body part, replicated to everyone).
 int chars_skin_count(void);
 const char *chars_skin_id(int i);
 const char *chars_skin_name(int i);
+// Modular parts: host sets a slot's option (index into the character's slot options, -1 = empty);
+// clients see it through the replicated part selection. Returns false if the option is invalid.
+bool chars_set_part(World *w, EntityId e, int slot, int option);
+// Host: a player's part request (RPC_SET_PART); players may only change their body to a skin
+// and their own optional slots.
+void chars_sv_player_part(World *w, int player_slot, int slot, int option);
+// Inspector / tests: built GPU parts and how many draws the last frame submitted per part.
+typedef struct CharPartInfo {
+    int slot, option, mesh, bones, mesh_only, tris_lod0, gpu;
+    const char *id;
+} CharPartInfo;
+int chars_part_info(World *w, EntityId e, CharPartInfo *out, int max);
+int chars_gpu_part_count(void);
 float chars_fp_hold_weight(void);
 vec3 chars_fp_sight_world(void);  // the rendered item's sight (reticle anchor) in world / viewmodel space
 vec3 chars_fp_sight_cam(void);    // rendered sight socket in camera space (ADS: (0, 0, -eye_relief))

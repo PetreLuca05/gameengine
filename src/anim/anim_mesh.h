@@ -7,7 +7,7 @@
 #define SKIN_MAX_LODS 4
 #define SKIN_MAX_MATERIALS 8
 
-// 44 bytes. joints index the canonical skeleton directly (validated at load).
+// 44 bytes. joints index the owning SkeletalMesh's bone list (render/skeletal_mesh.h).
 typedef struct SkinVertex {
     vec3 pos;
     vec3 normal;
@@ -43,7 +43,8 @@ typedef struct SkinMeshData {
 void skin_mesh_free(SkinMeshData *m);
 // Fits per-bone capsule radii from the vertices dominantly weighted to each bone
 // (used by ragdoll + hitboxes). radius[] gets the 75th percentile distance to the bone segment.
-void skin_fit_bone_radii(const SkinMeshData *m, int lod, const Skeleton *s, float *radius);
+// joint_map: vertex joint -> skeleton bone (SkeletalMesh bone lists; NULL = joints are skeleton bones).
+void skin_fit_bone_radii(const SkinMeshData *m, int lod, const Skeleton *s, const i16 *joint_map, float *radius);
 // Generates missing LODs (target ratios 1, .5, .25, .1) with meshoptimizer, preserving skin data.
 void skin_generate_lods(SkinMeshData *m);
 

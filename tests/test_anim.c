@@ -220,7 +220,7 @@ static void test_load(void) {
     float mass = 0;
     for (int i = 0; i < L->ragdoll.body_count; i++) mass += L->ragdoll.bodies[i].mass;
     CHECK(fabsf(mass - 80.0f) < 0.01f, "ragdoll mass %.2f", mass);
-    CHECK(L->meshes[0].lod_count == 4, "mesh LODs %d", L->meshes[0].lod_count);
+    CHECK(L->meshes[0].data.lod_count == 4, "mesh LODs %d", L->meshes[0].data.lod_count);
     for (int c = 0; c < AC_CATEGORY_COUNT; c++) CHECK(L->manifest.hash[c] != 0, "manifest %s hash 0", asset_category_name(c));
 }
 

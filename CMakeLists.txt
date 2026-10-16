@@ -235,11 +235,11 @@ add_test(NAME recoil COMMAND test_recoil)
 # ---------------------------------------------------------------- animation tools
 # Engine-free subset: anim core + FBX import + cache (+ log / platform helpers).
 set(DG_ANIMCORE_SOURCES
-  src/anim/anim.c src/anim/anim_mesh.c src/anim/controller.c src/anim/procedural.c src/anim/turn.c src/anim/spine.c
+  src/anim/anim.c src/anim/skeleton.c src/anim/anim_mesh.c src/anim/controller.c src/anim/procedural.c src/anim/turn.c src/anim/spine.c
   src/anim/weapon_hold.c src/anim/damage_additive.c src/anim/foot_ik.c src/anim/anim_net.c src/anim/ragdoll_def.c
   src/anim/anim_library.c src/anim/character_rt.c src/gameplay/hitboxes.c src/gameplay/items.c src/gameplay/attachments.c src/gameplay/recoil.c src/core/spring.c
   src/world/time_of_day.c src/world/weather.c src/gameplay/vehicle_def.c src/vfx/vfx_curve.c src/vfx/vfx_library.c src/vfx/vfx_sim.c src/vfx/vfx_flesh.c src/vfx/vfx_atlas.c src/player/holdpoint.c src/player/camera_fp_math.c
-  src/assets/fbx_loader.c src/assets/anim_cache.c src/assets/character.c
+  src/assets/fbx_loader.c src/assets/anim_cache.c src/assets/character.c src/render/skeletal_mesh.c
   src/core/log.c src/core/platform.c)
 add_library(dg_animcore STATIC ${DG_ANIMCORE_SOURCES})
 set_target_properties(dg_animcore PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)

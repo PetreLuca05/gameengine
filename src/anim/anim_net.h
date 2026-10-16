@@ -26,8 +26,11 @@ enum AnimNetFields {
     ANS_STATE = 1 << 0, ANS_PHASE = 1 << 1, ANS_START = 1 << 2, ANS_SPEED = 1 << 3, ANS_MOVE = 1 << 4,
     ANS_PITCH = 1 << 5, ANS_YAW = 1 << 6, ANS_BODY = 1 << 7, ANS_FLAGS = 1 << 8, ANS_LIMB = 1 << 9,
     ANS_WEAPON = 1 << 10, ANS_MANTLE = 1 << 11, ANS_CHAR = 1 << 12, ANS_DEATH = 1 << 13,
-    ANS_ALL = 0x3FFF,
+    ANS_PARTS = 1 << 14,   // modular part selection: u16 mask of non-empty slots + one u8 per such slot
+    ANS_ALL = 0x7FFF,
 };
+
+#define ANIM_NET_PART_SLOTS 10      // == CSLOT_COUNT (assets/character.h)
 
 typedef struct AnimNetState {
     u8 state[2];
@@ -43,6 +46,7 @@ typedef struct AnimNetState {
     u8 weapon;
     u8 mantle_t;
     u8 character_id;
+    u8 parts[ANIM_NET_PART_SLOTS];   // part option per slot (CharSlot order; 0 = empty, k = option k - 1)
     u8 death_seed;
     u32 death_tick;
 } AnimNetState;
@@ -74,7 +78,8 @@ vec3 and_dir(u16 q);
 u16 anim_net_diff(const AnimNetState *base, const AnimNetState *cur);   // base NULL = all fields
 void anim_net_write(struct Writer *w, const AnimNetState *s, u16 fields);
 void anim_net_read(struct Reader *r, AnimNetState *s, u16 *fields);
-int anim_net_field_bytes(u16 fields);    // payload size for a mask (excluding the mask itself)
+int anim_net_field_bytes(u16 fields);    // payload size for a mask (excluding the mask itself; ANS_PARTS counted at its largest)
+int anim_net_size(const AnimNetState *s, u16 fields);   // exact payload size of s for a mask (excluding the mask)
 
 // Reliable animation events --------------------------------------------------
 typedef enum AnimEventType {

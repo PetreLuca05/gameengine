@@ -217,50 +217,113 @@ static int lod_from_name(const char *name) {
     return 0;
 }
 
-static int canon_index(const Skeleton *canon, const ufbx_node *bone) {
-    for (const ufbx_node *b = bone; b; b = bone_parent(b)) {
-        int i = skel_find(canon, b->name.data);
-        if (i >= 0) return i;
+// Binding of a file's bones to the Skeleton asset: skeleton bones by (aliased) name, everything else
+// becomes a mesh-only leaf bone parented to its nearest bone ancestor (never enters the Skeleton).
+typedef struct BindCtx {
+    const ufbx_scene *sc;
+    Conv cv;
+    const SkeletonAsset *sk;
+    const BoneAliasTable *aliases;
+    SkeletalMesh *m;
+    const ufbx_node *node_of[SKM_MAX_BONES];   // file node of each mesh bone (NULL = not from a node)
+} BindCtx;
+
+// Bind pose of a bone node in model space: its skin cluster's bind matrix when it has one.
+static Xform node_bind_world(const BindCtx *c, const ufbx_node *n) {
+    for (size_t i = 0; i < c->sc->skin_clusters.count; i++) {
+        const ufbx_skin_cluster *cl = c->sc->skin_clusters.data[i];
+        if (cl->bone_node == n) return conv_matrix(&c->cv, &cl->bind_to_world);
     }
-    return 0;
+    return conv_matrix(&c->cv, &n->node_to_world);
 }
 
-bool fbx_load_skinned_mesh(const char *path, const Skeleton *canon, SkinMeshData *out, char *err, int err_size) {
-    memset(out, 0, sizeof(*out));
+static int bind_bone(BindCtx *c, const ufbx_node *bn, int depth) {
+    SkeletalMesh *m = c->m;
+    const Skeleton *s = &c->sk->skel;
+    if (!bn || depth > 64) return skm_add_skel_bone(m, s, 0);
+    for (int i = 0; i < m->bone_count; i++) if (c->node_of[i] == bn) return i;
+    const char *nm = skm_alias_resolve(c->aliases, bn->name.data);
+    int j = skel_find(s, nm);
+    if (j >= 0) {
+        int mi = skm_bone_of_skel(m, j);
+        if (mi < 0) {
+            mi = skm_add_skel_bone(m, s, j);
+            if (mi < 0) return 0;
+            if (nm != bn->name.data) m->aliased++;
+            // File bind vs the reference pose (report; the vertices are retargeted onto the reference).
+            Xform fb = node_bind_world(c, bn);
+            m->bones[mi].bind_delta = xf_mul(fb, xf_inverse(s->bind_model[j]));
+            m->bones[mi].bind_delta.s = v3(1, 1, 1);
+        }
+        c->node_of[mi] = bn;
+        return mi;
+    }
+    // Mesh-only leaf: rides on its parent with the file's relative bind transform.
+    const ufbx_node *pn = bone_parent(bn);
+    int pi = pn ? bind_bone(c, pn, depth + 1) : skm_add_skel_bone(m, s, 0);
+    if (m->bone_count >= SKM_MAX_BONES || pi < 0) return pi < 0 ? 0 : pi;
+    Xform fb = node_bind_world(c, bn);
+    Xform fp = pn ? node_bind_world(c, pn) : m->bones[pi].bind_model;
+    Xform local = xf_mul(xf_inverse(fp), fb);
+    local.s = v3(1, 1, 1);
+    int k = m->bone_count++;
+    SkmBone *b = &m->bones[k];
+    memset(b, 0, sizeof(*b));
+    dg_strcpy(b->name, sizeof(b->name), bn->name.data);
+    b->skel = -1;
+    b->parent = (i16)pi;
+    b->local = local;
+    b->bind_model = xf_mul(m->bones[pi].bind_model, local);
+    b->bind_model.s = v3(1, 1, 1);
+    b->bind_delta = xf_identity();
+    c->node_of[k] = bn;
+    m->extra++;
+    return k;
+}
+
+bool fbx_load_skeletal_mesh(const char *path, const SkeletonAsset *sk, const BoneAliasTable *aliases, SkeletalMesh *mesh, char *err, int err_size) {
+    memset(mesh, 0, sizeof(*mesh));
+    SkinMeshData *out = &mesh->data;
     ufbx_scene *sc = load_scene(path, err, err_size);
     if (!sc) return false;
     Conv cv = make_conv(sc);
+    static BindCtx bc;
+    memset(&bc, 0, sizeof(bc));
+    bc.sc = sc;
+    bc.cv = cv;
+    bc.sk = sk;
+    bc.aliases = aliases;
+    bc.m = mesh;
+    if (aliases) mesh->aliases = *aliases;
     LodBuild lods[SKIN_MAX_LODS];
     memset(lods, 0, sizeof(lods));
-    int remapped = 0;
     for (size_t ni = 0; ni < sc->nodes.count; ni++) {
         const ufbx_node *node = sc->nodes.data[ni];
         const ufbx_mesh *m = node->mesh;
         if (!m || node_is_bone(node)) continue;
         int lod = lod_from_name(node->name.data);
         const ufbx_skin_deformer *skin = m->skin_deformers.count ? m->skin_deformers.data[0] : NULL;
-        // Per-cluster canonical joint.
+        // Per-cluster mesh bone (skeleton bone or mesh-only leaf).
         int cluster_joint[512];
-        // Retarget: each cluster's bind pose in this file -> the canonical bone's bind pose, so a
-        // character with other proportions keeps its shape on the shared skeleton (identity for
-        // the canonical model itself).
+        // Retarget: each cluster's bind pose in this file -> the bone's pose on the Skeleton reference
+        // pose, so a character with other proportions keeps its shape on the shared skeleton (identity
+        // for the canonical model itself).
         static Xform cluster_retarget[512];
         int ncl = skin ? (int)DG_MIN(skin->clusters.count, 512) : 0;
         for (int c = 0; c < ncl; c++) {
             const ufbx_skin_cluster *cl = skin->clusters.data[c];
             const ufbx_node *bn = cl->bone_node;
-            int j = bn ? skel_find(canon, bn->name.data) : -1;
-            if (j < 0 && bn) { j = canon_index(canon, bn); remapped++; }
-            cluster_joint[c] = j < 0 ? 0 : j;
+            cluster_joint[c] = bind_bone(&bc, bn, 0);
             Xform mb = conv_matrix(&cv, &cl->bind_to_world);
-            cluster_retarget[c] = xf_mul(canon->bind_model[cluster_joint[c]], xf_inverse(mb));
+            cluster_retarget[c] = xf_mul(mesh->bones[cluster_joint[c]].bind_model, xf_inverse(mb));
             cluster_retarget[c].s = v3(1, 1, 1);
         }
         // Rigid (unskinned) meshes parented under a bone follow that bone.
         int rigid_joint = 0;
         if (!skin) {
+            rigid_joint = skm_add_skel_bone(mesh, &sk->skel, 0);
             for (const ufbx_node *p = node->parent; p; p = p->parent)
-                if (node_is_bone(p)) { rigid_joint = canon_index(canon, p); break; }
+                if (node_is_bone(p)) { rigid_joint = bind_bone(&bc, p, 0); break; }
         }
         // Materials -> global slots by name.
         int mat_slot[64];
@@ -378,9 +441,27 @@ bool fbx_load_skinned_mesh(const char *path, const Skeleton *canon, SkinMeshData
         for (u32 i = 0; i < b->vcount; i++) { bb.min = v3_min(bb.min, b->verts[i].pos); bb.max = v3_max(bb.max, b->verts[i].pos); }
     }
     out->bounds = bb;
-    out->skel_hash = canon->hash;
-    out->remapped_bones = remapped;
+    out->skel_hash = sk->skel.hash;
+    out->remapped_bones = mesh->extra;
     dg_strcpy(out->source, sizeof(out->source), path);
+    mesh->skeleton_hash = sk->skel.hash;
+    dg_strcpy(mesh->skeleton_id, sizeof(mesh->skeleton_id), sk->id);
+    // Report: skeleton bones the file doesn't have (simply not skinned), largest bind deltas.
+    for (int j = 0; j < sk->skel.count; j++) {
+        bool found = false;
+        for (size_t ni = 0; ni < sc->nodes.count && !found; ni++)
+            if (node_is_bone(sc->nodes.data[ni]) && skel_find(&sk->skel, skm_alias_resolve(aliases, sc->nodes.data[ni]->name.data)) == j) found = true;
+        mesh->missing += !found;
+    }
+    for (int i = 0; i < mesh->bone_count; i++) {
+        if (mesh->bones[i].skel < 0) continue;
+        Xform d = mesh->bones[i].bind_delta;
+        float ang = quat_angle_between(d.r, quat_identity()) * DG_RAD2DEG;
+        // Translation delta of the bone origin (rotation about the model origin excluded).
+        float dist = v3_dist(xf_point(d, sk->skel.bind_model[mesh->bones[i].skel].t), sk->skel.bind_model[mesh->bones[i].skel].t);
+        if (dist > mesh->max_bind_delta_m) mesh->max_bind_delta_m = dist;
+        if (ang > mesh->max_bind_delta_deg) mesh->max_bind_delta_deg = ang;
+    }
     if (!out->material_count) {
         out->material_count = 1;
         dg_strcpy(out->material_names[0], 48, "default");

@@ -56,19 +56,24 @@ int main(int argc, char **argv) {
     char err[512] = { 0 };
     if (!anim_cache_skeleton(skel_path, skel, err, sizeof(err))) { fprintf(stderr, "skeleton: %s\n", err); return 1; }
     printf("skeleton %s: %d bones, hash %08x, height %.3f m\n", skel_path, skel->count, skel->hash, skel->height);
-    SkinMeshData mesh;
-    if (anim_cache_mesh(skel_path, skel, &mesh, err, sizeof(err))) {
-        printf("mesh: %d LODs, %d materials, bounds (%.2f %.2f %.2f)..(%.2f %.2f %.2f)\n", mesh.lod_count, mesh.material_count, mesh.bounds.min.x,
-               mesh.bounds.min.y, mesh.bounds.min.z, mesh.bounds.max.x, mesh.bounds.max.y, mesh.bounds.max.z);
-        for (int l = 0; l < mesh.lod_count; l++)
-            printf("  LOD%d: %u verts, %u tris%s\n", l, mesh.lods[l].vcount, mesh.lods[l].icount / 3, mesh.lods[l].generated ? " (generated)" : "");
-        for (int m = 0; m < mesh.material_count; m++)
-            printf("  material %d '%s' (%.2f %.2f %.2f)\n", m, mesh.material_names[m], mesh.material_colors[m].x, mesh.material_colors[m].y,
-                   mesh.material_colors[m].z);
-        skin_mesh_free(&mesh);
+    SkeletonAsset *sk = (SkeletonAsset *)calloc(1, sizeof(SkeletonAsset));
+    skel_asset_from_skeleton(sk, skel, "human", skel_path, fbx_file_hash(skel_path));
+    SkeletalMesh *mesh = (SkeletalMesh *)calloc(1, sizeof(SkeletalMesh));
+    if (anim_cache_skm(skel_path, sk, NULL, mesh, err, sizeof(err))) {
+        const SkinMeshData *md = &mesh->data;
+        printf("mesh: %d LODs, %d bones, %d materials, bounds (%.2f %.2f %.2f)..(%.2f %.2f %.2f)\n", md->lod_count, mesh->bone_count, md->material_count,
+               md->bounds.min.x, md->bounds.min.y, md->bounds.min.z, md->bounds.max.x, md->bounds.max.y, md->bounds.max.z);
+        for (int l = 0; l < md->lod_count; l++)
+            printf("  LOD%d: %u verts, %u tris%s\n", l, md->lods[l].vcount, md->lods[l].icount / 3, md->lods[l].generated ? " (generated)" : "");
+        for (int m = 0; m < md->material_count; m++)
+            printf("  material %d '%s' (%.2f %.2f %.2f)\n", m, md->material_names[m], md->material_colors[m].x, md->material_colors[m].y,
+                   md->material_colors[m].z);
+        skm_free(mesh);
     } else {
         printf("mesh: %s\n", err);
     }
+    free(mesh);
+    free(sk);
     if (nin == 0) inputs[nin++] = "assets/human";
     for (int i = 0; i < nin; i++) {
         if (ends_with_ci(inputs[i], ".fbx")) { bake_file(inputs[i], skel, rate); continue; }
