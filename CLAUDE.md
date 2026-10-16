@@ -44,6 +44,7 @@ Windows, no admin; tools are portable, in `.toolchain/` (git-ignored).
 | Vehicles | VEHICLES.md | src/physics/phys_vehicle.c, src/gameplay/vehicle_def.c (pure), src/game/game_vehicles.c |
 | Light shadows | LIGHT_SHADOWS.md | src/render/vk_light_shadow.c, common.glsl point/spot_light_shadow |
 | Virtualized geometry | VGEO.md, VGEO_PLAN.md | src/render/vgeo, src/render/vk_vgeo.c, shaders/vgeo, tools/{build,bench}_vgeo |
+| no-nanite classic renderer (this branch: vgeo off) | NO_NANITE.md | src/render/vk_classic.c, shaders/classic_*, tools/tests/perf_compare.cfg |
 | Phone + companion page | PHONE.md | src/gameplay/phone, src/net/http_ws, src/render/phone_view.c, web/phone; e2e: tools/tests/phone_e2e.sh |
 | Hand poses + editor (`scene handpose`) | HANDPOSE.md | src/anim/handpose.c, src/editor/handpose, src/game/game_scene.c; test: tools/tests/hp_scene.cfg |
 | Open-world map (`map zombieland`) | ZOMBIE_MAP.md | src/world/{mapgen,mapgen_poi,openworld,openworld_foliage}.c, data/levels/zombieland.json, data/loot.json; tools/mapgen_preview, tools/tests/zl_*.cfg |

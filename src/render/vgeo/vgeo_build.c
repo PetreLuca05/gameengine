@@ -1545,6 +1545,8 @@ void vgeo_decode_cluster(const VgBuilt *b, u32 page, u32 index, VgDecoded *o) {
             memcpy(o->weights[v], base + voff + v * vb + skin_at + 4, 4);
         }
         const u8 *vp = base + voff + v * vb;
+        o->color[v] = 0xFFFFFFFFu;
+        if (b->hdr.flags & VGF_HAS_COLOR) memcpy(&o->color[v], vp + 12, 4);
         for (int k = 0; k < 3; k++) {
             u16 q;
             memcpy(&q, vp + k * 2, 2);
