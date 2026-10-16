@@ -1,8 +1,9 @@
 # Virtualized geometry (vgeo): plan and data layout
 
-Status: **plan for review. No code has been written yet.** Reference design: Karis et al., "A Deep Dive into
-Nanite Virtualized Geometry" (SIGGRAPH 2021), and the UE 5.5+ Nanite skinning and foliage designs. When the
-work ships, this file becomes `docs/VGEO.md`, which will list every deliberate simplification.
+Status: **Phases 1-2 are implemented**; `docs/VGEO.md` documents the built system, and *As built* notes below
+mark where it deviates from this plan. Reference design: Karis et al., "A Deep Dive into
+Nanite Virtualized Geometry" (SIGGRAPH 2021), and the UE 5.5+ Nanite skinning and foliage designs. `docs/VGEO.md`
+also lists every deliberate simplification.
 
 ## 0. Where the engine is today (what the plan is built on)
 
@@ -161,6 +162,10 @@ The 64-bit packing follows Nanite: the instance id is recovered through the visi
 stored per pixel. Buffer (not image) int64 atomics are used because they are core Vulkan 1.2 and available on
 every AMD/NVIDIA desktop driver. The image variant would need `VK_EXT_shader_image_atomic_int64`.
 
+*As built (Phase 2):* a visible entry packs `page slot << 12 | cluster` (12 bits, not 8): a 128 KiB page of small
+clusters can hold more than 256. The Hi-Z mip 0 is at half resolution (the 2×2 max of the depth buffer), about
+a quarter of the size listed.
+
 ## 2. Phase 1: offline cluster builder (CPU only)
 
 `src/render/vgeo/vgeo_build.{c,h}` is pure C with no renderer dependency, linked into the game (import), into
@@ -261,6 +266,25 @@ Cvars:
 
 **Gate:** zero CPU work per instance per frame (asserted by counting `render_draw` calls and timing the CPU vgeo
 update, which stays O(1) in instance count).
+
+*As built (Phase 2):*
+- **Queues:** the node queue has 3 regions (0 / 1 ping-pong, 2 = pass 2 seeds: nodes pass 1 found occluded, and
+  the children of pass 2 instances). Leaves emit **cluster candidates** `(instance, group << 4 | k)`, one per
+  cluster, instead of group items (16 lanes per group idled on the many 1-cluster groups near the root). This
+  assumes groups of ≤ 16 clusters, warned at registration. Cells with ≤ 32 instances are tested inline by the
+  cell kernel, and the instance step expands the BVH root, so traversal runs `max_depth - 1` levels.
+- **Hi-Z:** half resolution, mip 0 = 2×2 max of depth, odd tails folded into the last row / column. The test
+  reads ≤ 2×2 texels and keeps the item visible when the rect needs a mip beyond the chain. In game, Phase 2
+  builds it from the prepass depth after the prepass (legacy occluders, no vgeo yet), and only pass 1 runs.
+  The mid-frame build from the visibility buffer for pass 2 comes with Phase 3.
+- **Struct sizes:** `VgViewGpu` 352 B, `VgCounters` 256 B (8 indirect args + 32 counts), `VgPush` 48 B.
+- **Harness:** runs on the local GPU (discrete preferred), not lavapipe in a container. Timings come from the same
+  run (RTX 3060 Ti); no AMD run yet.
+- **Device features**, enabled when present: `scalarBlockLayout` (every vgeo shader uses scalar layout),
+  `shaderInt64` + `shaderBufferInt64Atomics`, `drawIndirectCount` + `multiDrawIndirect` (+
+  `drawIndirectFirstInstance`), descriptor indexing (runtime arrays, partially bound, non-uniform sampled image
+  indexing). Vgeo is off without scalar layout + int64 atomics. `VK_EXT_mesh_shader` is detected but not enabled
+  until Phase 3.
 
 ## 4. Phase 3: visibility buffer rasterisation and resolve
 

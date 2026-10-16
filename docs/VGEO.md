@@ -19,7 +19,7 @@ Simplification and clustering use meshoptimizer v0.22 (`simplifier.cpp`, `cluste
 | Phase | Status |
 |---|---|
 | 1. Offline builder + DAG (CPU) | **done** |
-| 2. GPU culling / LOD selection / Hi-Z | — |
+| 2. GPU culling / LOD selection / Hi-Z | **done** |
 | 3. Visibility buffer raster + resolve | — |
 | 4. Streaming | — |
 | 5. Integration, `r_era`, test scene, `bench_vgeo` | — |
@@ -36,9 +36,20 @@ Simplification and clustering use meshoptimizer v0.22 (`simplifier.cpp`, `cluste
 | `src/render/vgeo/vgeo_procgen.{c,h}` | procedural test meshes: displaced rock, torus, rock field, statue |
 | `tools/build_vgeo/build_vgeo.c` | offline tool |
 | `tests/test_vgeo_build.c` | ctest `vgeo_build` (+ `vgeo_build_long`, label `long`: the 10M gate) |
+| `src/render/vgeo/vgeo_ctx.{c,h}` | `VgContext` (device, VMA, shader loader, caps), buffers, uploads, one-shot commands |
+| `src/render/vgeo/vgeo_scene.{c,h}` | `VgScene`: global mesh / node / group / page / instance / cell tables, commit, CPU reference cut |
+| `src/render/vgeo/vgeo_cull.{c,h}` | `VgCuller`: per-view culling record, Hi-Z build, counters, timestamps |
+| `shaders/vgeo/vgeo_common.glsl` | GLSL mirror of `vgeo_gpu.h`, bindings, frustum / projection / Hi-Z helpers |
+| `shaders/vgeo/vg_expand.glsl` | instance test and node expansion (shared by cells / instances / traverse) |
+| `shaders/vgeo/vg_{args,cells,instances,traverse,clusters,hiz}.comp` | the cull kernels and the Hi-Z build |
+| `src/render/vk_vgeo.c` | game glue: context, frame graph passes, cvars, console commands |
+| `tests/vgeo_gpu_harness.{c,h}` | window-less Vulkan device + synthetic Hi-Z images |
+| `tests/test_vgeo_gpu.c` | ctest `vgeo_gpu` (`--validation`) |
+| `tools/bench_vgeo/bench_vgeo.c` | GPU timings of the cull passes and the Hi-Z build |
 
 The builder is pure C with no renderer dependency. It is compiled into the game (through the `src/` glob), the
-`dg_vgeo` static library (tool and tests), and nothing else.
+`dg_vgeo` static library (tool and tests), and nothing else. The GPU module is the `dg_vgeo_gpu` library (see
+"GPU module").
 
 ## Builder
 
@@ -81,7 +92,8 @@ build_vgeo --gen rock|field|statue|torus [--tris N] [--seed S] --stats
 ```
 
 In `data/assets.json`, `"vgeo": true` on a model builds it at load. A cache hit is about 0.1 ms. The build is kept
-on `Model.vgeo`, and the GPU path uses it from Phase 2.
+on `Model.vgeo`. Registering it with the GPU scene comes with Phase 5; until then the GPU content is
+`vgeo_test_scene`.
 
 Generated meshes are never committed. Tests and benches generate them at run time (deterministic for a seed).
 
@@ -115,6 +127,168 @@ single-threaded (one call per material) and is the obvious next speed-up if it i
 - glTF import + cache: build then hit, identical pages.
 - Gates: 500k statue < 10 s; `--long`: 10M on 4 threads < 3 min and < 6 GB.
 
+## GPU module
+
+The GPU side runs on a small `VgContext` (device, queue, VMA, frames in flight, a shader loader and the
+capability bits) and touches no renderer globals. The game fills it from its device (`src/render/vk_vgeo.c`);
+the window-less harness (`tests/vgeo_gpu_harness.c`: instance + device, no surface or swapchain, the same vgeo
+feature set as `vk_device.c`) fills it from its own, and so do `test_vgeo_gpu` and `bench_vgeo`. The module is the
+`dg_vgeo_gpu` static library (`vgeo_ctx.c`, `vgeo_scene.c`, `vgeo_cull.c`) for those two; the game compiles the
+same files through the `src/` glob.
+
+**Requirements.** `scalarBlockLayout` (every vgeo shader uses scalar layout) and `shaderInt64` +
+`shaderBufferInt64Atomics` (the Phase 3 visibility buffer). Without them vgeo is off and the 2015 / 2010 era LODs
+are used. `drawIndirectCount` + `multiDrawIndirect`, descriptor indexing and `VK_EXT_mesh_shader` are optional:
+the first two are enabled when present, the mesh shader extension is only detected until Phase 3.
+
+### Scene (`VgScene`)
+
+Global tables every view culls against, registered and uploaded at load time; nothing runs per frame.
+- `vgeo_scene_add_mesh` appends a built mesh: `VgMesh` (`node_base`, `group_base`, `page_base` into the global
+  tables), its BVH nodes, groups and pages. Groups with > 16 clusters are warned about (the cluster candidate
+  encoding has 4 bits for the cluster within the group).
+- `vgeo_scene_add_instance` appends a 32 B `VgInstance` (smallest-three rotation, half scale).
+- `vgeo_scene_commit` bins instances into **8 m cells** on x / z (stable sort, instances of a cell contiguous,
+  cell AABB = union of the instance mesh spheres), uploads every table and bumps `generation` so cullers rewrite
+  their descriptor sets.
+- **Page pool:** until streaming (Phase 4) every page is resident and **slot = global page index**. The page table
+  (global page → slot, `~0` = missing) is already read by the shaders, so Phase 4 only changes its contents.
+- The CPU copies stay for the CPU reference cut (`vgeo_scene_cpu_select`, tests) and re-commits.
+
+### Culling (`vg_cull_record`, `shaders/vgeo/*.comp`)
+
+Per view, in two passes. Pass 1 tests against last frame's Hi-Z, reprojected with `prev_view_proj`. Pass 2
+(`VGV_TWO_PASS`) re-tests whatever pass 1 found occluded against this frame's Hi-Z.
+
+```
+pass 1
+  vg_cells        1 thread per cell: frustum + Hi-Z on the cell sphere. <= 32 instances: tested inline
+                  (most cells); larger: cell list region 0; occluded: cell list region 1
+  vg_instances    1 workgroup per large cell, its instances strided over 64 lanes
+    vg_instance   (shared) frustum + Hi-Z on the mesh sphere; the root's error test and expansion inline,
+                  so traversal starts at the root's children; occluded: instance list
+  vg_traverse     x (max_depth - 1): one indirect dispatch per BVH level (level-synchronous), node queue
+                  region 0 <-> 1; visit = frustum, project(max_parent_error) > t, not Hi-Z occluded;
+                  occluded nodes: region 2 (pass 2 seeds). Leaves, per group with project(parent_error) > t:
+                  page resident -> one cluster candidate per cluster (instance, group << 4 | k),
+                  else a page request (priority = projected error)
+  vg_clusters     1 thread per candidate: the cut rule's other half (own error <= t, or the child group's
+                  page missing), then frustum, cone, Hi-Z; occluded: occluded list;
+                  SW if the projected diameter < r_vgeo_sw_px, else HW
+pass 2
+  occluded cells (region 1) -> inline / region 0 -> occluded instances -> traversal from region 2 ->
+  candidates (region 1) -> pass 1's occluded clusters (Hi-Z only: frustum and cone already passed)
+```
+
+- **Cut rule** as on the CPU: the group test (`parent_error`) is done at the leaf, the cluster test in
+  `vg_clusters`. Projection: `px = error * proj_scale / max(dist - radius, znear)`, ortho views
+  `error * proj_scale`.
+- **Cone:** 8-bit oct axis and snorm8 cutoff, plus a 0.02 margin for the axis quantisation. Skipped for
+  `TWO_SIDED` / `NO_CONE` clusters and for `VGV_NO_CONE` / `VGV_ORTHO` views.
+- **Visible lists:** one buffer, HW entries at `[0, cap)`, SW at `[cap, 2 cap)`, entry `(instance, page slot << 12 |
+  cluster)`. The pass 1 ends are copied to `VGN_HW_P1` / `VGN_SW_P1`, so pass 2's additions are the tail.
+- **Indirect args:** `vg_args` (one thread) turns a counter into dispatch args (split over y past 65535 groups),
+  clamps it to its cap and resets the next queue's counter.
+- **Buffers per view:** counters, cell list (2 regions), instance list, node queue (3 regions), cluster
+  candidates (2 regions), visible, occluded, page requests. Every append is bounded and counts `VGN_OVERFLOW`.
+  Game caps: 512k nodes per region, 1M candidates per region, 1M visible per list, 512k occluded, 4096 requests.
+
+### Occlusion Hi-Z
+
+- MAX (farthest) R32F pyramid, depth 0 = near, at **half resolution**: mip 0 is the max of each 2×2 depth
+  block, each next mip the 2×2 max of the previous one. The last row / column of a mip also folds in the odd
+  tail, so texture mip `j` bounds every depth pixel of its 2^(j+1) footprint. `vg_hiz_record`: one 8×8 dispatch
+  per mip.
+- Test (`vg_occluded_vp`): the sphere's box corners are projected; a corner behind the camera plane or at
+  depth ≤ 0 means visible. The screen rect (depth pixels) is grown by 1 px for TAA jitter (the matrices are the
+  unjittered ones). The mip is chosen so the rect covers ≤ 2×2 texels; occluded when the nearest corner is behind
+  the max of those texels. If the rect needs a mip beyond the chain, the test refuses (keeps it visible).
+- No history (first frame, camera cut, `r_vgeo_occlusion 0`): no occlusion in pass 1.
+
+### Counters and CPU cost
+
+- `VgCounters` (256 B) holds the indirect args and the counts (cells, instances, nodes visited / occluded,
+  candidates, selected, HW / SW, occluded clusters, triangles, page requests, overflow, pass 2 counts).
+- Nothing is read back in the frame. The counters are copied to a per-frame host buffer and collected
+  (`vg_cull_collect`) when that frame slot is recorded again. Timestamps: 5 per (frame, view), giving ms for
+  instances (cells + instances), traversal, clusters and pass 2.
+- The CPU uploads one `VgViewGpu` (`vkCmdUpdateBuffer`) and records a dispatch count that depends only on the
+  deepest BVH, never on the instance count: pass 1 is `5 + 2 (max_depth - 1)` dispatches (each level is args +
+  traverse), e.g. 15 for the test scenes (max_depth 6: 5 traversal levels); pass 2 adds `10 + 2 (max_depth - 1)` (35 in all).
+
+### In the renderer (`src/render/vk_vgeo.c`)
+
+- Frame graph: `vgeo_cull` before the prepass (main view, slot 0, reads the `vgeo_hiz` history), `vgeo_hiz` after
+  the prepass (MAX Hi-Z of this frame's prepass depth, `FG_SIZE_HALF`, full chain; next frame's history). The
+  prepass depth holds the legacy geometry only: vgeo is not rasterised until Phase 3.
+- **One pass only until Phase 3:** pass 2 needs this frame's Hi-Z from the visibility buffer. `r_vgeo_occlusion
+  2` behaves as 1 until then.
+- Active when `r_vgeo` is on and the scene has instances.
+- Cvars:
+  - `r_vgeo` (1).
+  - `r_vgeo_error_px` (1.0).
+  - `r_vgeo_shadow_error_px` (2.0, Phase 3).
+  - `r_vgeo_sw_px` (32).
+  - `r_vgeo_occlusion` (0 off, 1 last frame's Hi-Z, 2 two-pass; default 2).
+  - `r_vgeo_freeze` (keeps the last view constants).
+  - `r_vgeo_debug` (registered; the views come with Phase 3).
+  - `r_vgeo_debug_spheres`: culling spheres of up to 4096 HW (green) + 4096 SW (cyan) visible clusters, read
+    back one frame slot later.
+- Commands:
+  - `vgeo_stats`: scene, last frame's counters, `vgeo_*` pass ms.
+  - `vgeo_test_scene [count=20000] [spacing=6] [meshes=4]`: procedural rocks scattered around the camera.
+  - `vgeo_clear`: removes every instance.
+- Registering `Model.vgeo` meshes and level / chunk placements comes with Phase 5.
+
+### Tests (`ctest -R vgeo_gpu`, runs `--validation`)
+
+Scene: a rock, a two-material torus and a 60k statue, 400 instances.
+- **LOD cut:** for 8 cameras (LOD only), the GPU set equals `vgeo_scene_cpu_select`: nothing missing, extras only
+  within 1e-4 of the threshold.
+- **No cluster is drawn with a DAG ancestor** (walking `child_group` chains of the GPU list).
+- **Frustum:** no cluster inside is lost, none outside is kept (borderline band excluded); visible instance count
+  vs brute force.
+- **Occlusion:** a wall at 30 m over the left half of a synthetic depth buffer. Nothing in front of or beside it
+  may be culled, and most clusters behind it must be. Pass 2 against an empty current Hi-Z must restore exactly the
+  set without occlusion.
+- **Hi-Z:** on 333×217, every texel bounds its whole footprint (odd tails).
+- **CPU cost:** same dispatch count for 100 and 10 000 instances, record time does not grow.
+- Zero validation messages.
+
+### Phase 2 results (RTX 3060 Ti, 1920x1080)
+
+- `test_vgeo_gpu`: 65/65 checks, 0 validation messages.
+- GPU cut identical to the CPU reference on all 8 cameras (0 borderline, 0 extra).
+- Occlusion: all 998 must-stay clusters kept, all 597 clusters behind the wall culled. Two-pass restores the full
+  set exactly.
+
+`bench_vgeo` (8 rocks × 79k tris, 100k instances on a 1.9 km field, error 1 px; 2-pass = synthetic walls over 60 %
+of the screen, the same pyramid as both the previous and the current Hi-Z, so pass 2 measures the re-test cost):
+
+| Camera | Occlusion | inst ms | trav ms | clus ms | pass2 ms | total | instances | nodes | clusters | tris |
+|---|---|---|---|---|---|---|---|---|---|---|
+| eye level, across | off | 0.077 | 0.242 | 0.041 | — | 0.361 | 75132 | 228381 | 80585 | 6.41M |
+| eye level, across | 2-pass | 0.046 | 0.127 | 0.025 | 0.091 | 0.289 | 26444 | 81163 | 29764 | 2.44M |
+| eye level, inside | off | 0.045 | 0.127 | 0.029 | — | 0.201 | 28144 | 87587 | 33986 | 2.86M |
+| eye level, inside | 2-pass | 0.033 | 0.088 | 0.022 | 0.083 | 0.226 | 10177 | 32632 | 13903 | 1.24M |
+| elevated 60 m | off | 0.083 | 0.266 | 0.051 | — | 0.401 | 99848 | 300531 | 101162 | 7.79M |
+| elevated 60 m | 2-pass | 0.047 | 0.107 | 0.020 | 0.087 | 0.261 | 30375 | 91554 | 30601 | 2.36M |
+| top down 400 m | off | 0.032 | 0.065 | 0.015 | — | 0.113 | 15993 | 47979 | 15712 | 1.20M |
+| top down 400 m | 2-pass | 0.027 | 0.047 | 0.015 | 0.070 | 0.159 | 6507 | 19521 | 6321 | 0.48M |
+
+- Worst camera: 0.401 ms against the 0.5 ms culling budget.
+- Hi-Z build at 1080p: 0.079 ms per build. The Phase 3 budget is 0.1 ms for **two** builds, so the build must get
+  faster in Phase 3.
+- In game (devroom, 20k rocks from `vgeo_test_scene`): `vgeo_cull` 0.22 ms, `vgeo_hiz` 0.10 ms, 0 validation
+  messages.
+- Only NVIDIA hardware was available: there is no AMD run yet.
+
+How it got there (the first version's worst camera was 0.77 ms):
+- One workgroup per cell idled on cells of a few instances → small cells are processed inline.
+- The BVH root is expanded in the instance step, saving a traversal level.
+- Group items with 16 lanes idled on the 1-cluster root groups → one candidate per cluster.
+- Hi-Z mip 0 at half resolution.
+
 ## Simplifications vs Nanite
 
 - **Partitioner:** a greedy, shared-edge-weighted grower over a Morton order instead of METIS graph partitioning.
@@ -130,6 +304,11 @@ single-threaded (one call per material) and is the obvious next speed-up if it i
   group's outer boundary edges. This is simpler and slightly more conservative.
 - **Discrete LOD export** for the 2015 / 2010 era presets: plain cuts of the DAG at fixed errors (Nanite has no
   equivalent; its fallback mesh is a single coarse LOD).
+- **Level-synchronous traversal** instead of persistent threads: one indirect dispatch per BVH depth. It is
+  deterministic (the CPU-reference test depends on it) and assumes no forward progress between workgroups.
+- **8 m cell grid** instead of an instance BVH as the first culling level.
+- **Groups of ≤ 16 clusters** are assumed by the cluster candidate encoding (`group << 4 | k`); larger groups
+  are warned about at registration.
 
 ## Adding a foliage system on top
 
