@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "id": "use_container",
+  "label": "Interactable: container",
+  "category": "interactable",
+  "source": "interactable:container",
+  "inherits": "style/grip_grab",
+  "hands": ["left", "right"],
+  "states": ["default", "use", "hold"],
+  "relative": true,
+  "reviewed": false,
+  "auto_placed": false,
+  "left": {},
+  "right": {}
+}

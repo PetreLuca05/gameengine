@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "id": "use_fuel_pump",
+  "label": "Interactable: fuel_pump",
+  "category": "interactable",
+  "source": "interactable:fuel_pump",
+  "inherits": "style/grip_grab",
+  "hands": ["left", "right"],
+  "states": ["default", "use", "hold"],
+  "relative": true,
+  "reviewed": false,
+  "auto_placed": true,
+  "left": {
+    "default": {
+      "socket": { "pos": [0, 0.02, 0], "q": [0, 0, 0, 1] }
+    }
+  },
+  "right": {
+    "default": {
+      "socket": { "pos": [0, 0.02, 0], "q": [0, 0, 0, 1] }
+    }
+  }
+}
