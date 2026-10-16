@@ -255,7 +255,7 @@ add_test(NAME recoil COMMAND test_recoil)
 # Engine-free subset: anim core + FBX import + cache (+ log / platform helpers).
 set(DG_ANIMCORE_SOURCES
   src/anim/anim.c src/anim/skeleton.c src/anim/retarget.c src/anim/anim_mesh.c src/anim/controller.c src/anim/procedural.c src/anim/turn.c src/anim/spine.c
-  src/anim/weapon_hold.c src/anim/handpose.c src/editor/handpose/hp_discover.c src/anim/damage_additive.c src/anim/foot_ik.c src/anim/anim_net.c src/anim/ragdoll_def.c
+  src/anim/weapon_hold.c src/anim/handpose.c src/editor/handpose/hp_discover.c src/editor/handpose/hp_edit.c src/anim/damage_additive.c src/anim/foot_ik.c src/anim/anim_net.c src/anim/ragdoll_def.c
   src/anim/anim_library.c src/anim/character_rt.c src/gameplay/hitboxes.c src/gameplay/items.c src/gameplay/attachments.c src/gameplay/recoil.c src/core/spring.c
   src/world/time_of_day.c src/world/weather.c src/gameplay/vehicle_def.c src/vfx/vfx_curve.c src/vfx/vfx_library.c src/vfx/vfx_sim.c src/vfx/vfx_flesh.c src/vfx/vfx_atlas.c src/player/holdpoint.c src/player/camera_fp_math.c src/gameplay/phone/phone_orient.c
   src/assets/fbx_loader.c src/assets/anim_cache.c src/assets/character.c src/render/skeletal_mesh.c
@@ -416,6 +416,10 @@ add_executable(test_handpose tests/test_handpose.c)
 set_target_properties(test_handpose PROPERTIES C_STANDARD 11)
 target_link_libraries(test_handpose PRIVATE dg_animcore)
 add_test(NAME handpose COMMAND test_handpose WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+add_executable(test_hp_edit tests/test_hp_edit.c)
+set_target_properties(test_hp_edit PROPERTIES C_STANDARD 11)
+target_link_libraries(test_hp_edit PRIVATE dg_animcore)
+add_test(NAME hp_edit COMMAND test_hp_edit)
 
 # Ragdolls with real Jolt physics: joint limits over 10 s drops, rest / freeze.
 add_executable(test_ragdoll tests/test_ragdoll.c src/physics/physics.c src/physics/ragdoll.c)
