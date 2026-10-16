@@ -3,6 +3,8 @@
 #include "game.h"
 #include "game_internal.h"
 #include "editor/handpose/hp_system.h"
+#include "editor/handpose/hp_editor.h"
+#include "scene.h"
 #include "core/engine.h"
 #include "core/cvar.h"
 #include "core/log.h"
@@ -1295,6 +1297,8 @@ void game_init(void) {
     camera_fp_register_cvars();
     game_holdpoint_register();
     handpose_system_init();
+    scenes_init();
+    hp_editor_register();   // scene handpose
     game_post_init();
     player_register_cvars();
     // Animation assets (shared skeleton) before anything spawns characters.

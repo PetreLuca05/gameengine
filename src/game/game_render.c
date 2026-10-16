@@ -4,6 +4,7 @@
 #include "gameplay/zombies/horde.h"
 #include "vfx/vfx.h"
 #include "game_internal.h"
+#include "scene.h"
 #include "ui/recoil_debug.h"
 #include "core/engine.h"
 #include "core/cvar.h"
@@ -652,8 +653,14 @@ void game_render(void) {
         float fdt = (float)g_engine.frame_dt;
         chars_set_thirdperson(tp);
         GR->cam_mode = 0;
-        int vcam = lp ? vehicles_camera(w, &cam) : 0;
-        if (vcam) {
+        // A dev scene's camera (src/game/scene.h): third person, the body drawn whole.
+        bool scam = lp && scene_camera(w, &cam);
+        int vcam = lp && !scam ? vehicles_camera(w, &cam) : 0;
+        if (scam) {
+            chars_set_thirdperson(true);
+            G->view.eye = cam.pos;
+            GR->cam_mode = 3;
+        } else if (vcam) {
             G->view.eye = cam.pos;
             GR->cam_mode = vcam;
         } else if (tp && lp) {
@@ -817,12 +824,13 @@ void game_render(void) {
     dbg_submit((float)g_engine.frame_dt, cam.pos, right, up);
     audio_update(cam.pos, fwd, up);
 
-    if (!game_post_photo_mode()) { hud_draw(); vehicles_draw_hud(); phone_draw(); }
+    if (!game_post_photo_mode() && !scene_hides_hud()) { hud_draw(); vehicles_draw_hud(); phone_draw(); }
     vehicles_draw();
     sights_draw();
     daynight_draw();
     weather_draw();
     flesh_range_draw();
+    scene_draw();
     game_post_draw_overlay();
     game_post_draw_photo_ui();
     menus_draw();

@@ -171,6 +171,7 @@ void ui_handle_event(const SDL_Event *ev) {
         case SDLK_V: if (ctrl) nk_input_key(ctx, NK_KEY_PASTE, down); break;
         case SDLK_X: if (ctrl) nk_input_key(ctx, NK_KEY_CUT, down); break;
         case SDLK_Z: if (ctrl) nk_input_key(ctx, NK_KEY_TEXT_UNDO, down); break;
+        case SDLK_Y: if (ctrl) nk_input_key(ctx, NK_KEY_TEXT_REDO, down); break;
         default: break;
         }
         break;
