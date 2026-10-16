@@ -250,6 +250,15 @@ else()
   target_link_libraries(test_recoil PRIVATE m)
 endif()
 add_test(NAME recoil COMMAND test_recoil)
+add_executable(test_spectate tests/test_spectate.c src/net/spectate_core.c src/gameplay/recoil.c src/core/spring.c)
+set_target_properties(test_spectate PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
+target_include_directories(test_spectate PRIVATE src)
+if(MSVC)
+  target_compile_options(test_spectate PRIVATE /W3 /utf-8)
+else()
+  target_link_libraries(test_spectate PRIVATE m)
+endif()
+add_test(NAME spectate COMMAND test_spectate)
 
 # ---------------------------------------------------------------- animation tools
 # Engine-free subset: anim core + FBX import + cache (+ log / platform helpers).
