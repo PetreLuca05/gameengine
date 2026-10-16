@@ -159,7 +159,8 @@ file(GLOB DG_SHADER_SOURCES CONFIGURE_DEPENDS
   ${CMAKE_SOURCE_DIR}/shaders/*.vert ${CMAKE_SOURCE_DIR}/shaders/*.frag ${CMAKE_SOURCE_DIR}/shaders/*.comp
   ${CMAKE_SOURCE_DIR}/shaders/post/*.vert ${CMAKE_SOURCE_DIR}/shaders/post/*.frag ${CMAKE_SOURCE_DIR}/shaders/post/*.comp
   ${CMAKE_SOURCE_DIR}/shaders/sights/*.frag ${CMAKE_SOURCE_DIR}/shaders/sights/*.comp
-  ${CMAKE_SOURCE_DIR}/shaders/sky/*.comp ${CMAKE_SOURCE_DIR}/shaders/vgeo/*.comp)
+  ${CMAKE_SOURCE_DIR}/shaders/sky/*.comp ${CMAKE_SOURCE_DIR}/shaders/vgeo/*.comp
+  ${CMAKE_SOURCE_DIR}/shaders/vgeo/*.vert ${CMAKE_SOURCE_DIR}/shaders/vgeo/*.frag ${CMAKE_SOURCE_DIR}/shaders/vgeo/*.mesh)
 file(GLOB DG_SHADER_INCLUDES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/shaders/*.glsl ${CMAKE_SOURCE_DIR}/shaders/post/*.glsl ${CMAKE_SOURCE_DIR}/shaders/sights/*.glsl ${CMAKE_SOURCE_DIR}/shaders/sky/*.glsl ${CMAKE_SOURCE_DIR}/shaders/vgeo/*.glsl ${CMAKE_SOURCE_DIR}/third_party/fsr/*.h
   ${CMAKE_SOURCE_DIR}/shaders/post/*.h)
 set(DG_SHADER_OUT ${CMAKE_BINARY_DIR}/bin/shaders)
@@ -288,7 +289,7 @@ endif()
 
 # Virtualized geometry GPU module (culling / Hi-Z) on a VgContext: the game builds it through the src glob,
 # the harness tests and tools/bench_vgeo through this library.
-add_library(dg_vgeo_gpu STATIC src/render/vgeo/vgeo_ctx.c src/render/vgeo/vgeo_scene.c src/render/vgeo/vgeo_cull.c)
+add_library(dg_vgeo_gpu STATIC src/render/vgeo/vgeo_ctx.c src/render/vgeo/vgeo_scene.c src/render/vgeo/vgeo_cull.c src/render/vgeo/vgeo_raster.c)
 set_target_properties(dg_vgeo_gpu PROPERTIES C_STANDARD 11)
 target_link_libraries(dg_vgeo_gpu PUBLIC dg_vgeo volk vma)
 if(MSVC)
@@ -445,4 +446,17 @@ endif()
 add_test(NAME vgeo_gpu COMMAND test_vgeo_gpu --validation WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
 if(EXISTS "${CMAKE_SOURCE_DIR}/.toolchain/vvl/install/bin")
   set_tests_properties(vgeo_gpu PROPERTIES ENVIRONMENT "VK_ADD_LAYER_PATH=${CMAKE_SOURCE_DIR}/.toolchain/vvl/install/bin")
+endif()
+
+# Virtualized geometry rasterisers (HW mesh / vertex pulling vs SW compute) on the harness.
+add_executable(test_vgeo_raster tests/test_vgeo_raster.c tests/vgeo_gpu_harness.c)
+set_target_properties(test_vgeo_raster PROPERTIES C_STANDARD 11)
+target_link_libraries(test_vgeo_raster PRIVATE dg_vgeo_gpu)
+add_dependencies(test_vgeo_raster dg_shaders)
+if(MSVC)
+  target_compile_options(test_vgeo_raster PRIVATE /W3 /wd4100 /wd4201 /utf-8)
+endif()
+add_test(NAME vgeo_raster COMMAND test_vgeo_raster --validation WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+if(EXISTS "${CMAKE_SOURCE_DIR}/.toolchain/vvl/install/bin")
+  set_tests_properties(vgeo_raster PROPERTIES ENVIRONMENT "VK_ADD_LAYER_PATH=${CMAKE_SOURCE_DIR}/.toolchain/vvl/install/bin")
 endif()

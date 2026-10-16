@@ -1,14 +1,18 @@
 // bench_vgeo: virtualized geometry GPU benchmark on the window-less harness (docs/VGEO.md "Bench").
 //
-//   bench_vgeo [--instances N] [--meshes M] [--frames F] [--validation]
+//   bench_vgeo [--instances N] [--meshes M] [--frames F] [--vertex-pulling] [--validation]
 //
 // Builds M procedural rocks (~79k triangles each), scatters N instances over a field, and times the
 // culling passes at 1920x1080 from 4 cameras with GPU timestamps (instances, traversal, clusters,
 // pass 2), with occlusion off and with a synthetic Hi-Z (walls over 60 % of the screen, two passes),
-// plus the Hi-Z build. Prints ms per pass against the plan budget (docs/VGEO_PLAN.md §9) and the
-// counters (instances / nodes / clusters / triangles surviving).
+// plus the Hi-Z build. Then the visibility buffer clear + rasterisation of the same views (pass 1
+// only without occlusion, both passes with it): HW and SW ms per pass (serialised, so the split is
+// exact), triangles and the SW share. Prints ms against the plan budget (docs/VGEO_PLAN.md §9) and
+// the counters (instances / nodes / clusters / triangles surviving). --vertex-pulling: HW raster
+// without the mesh shader path.
 #include "vgeo_gpu_harness.h"
 #include "render/vgeo/vgeo_procgen.h"
+#include "render/vgeo/vgeo_raster.h"
 #include "core/engine.h"
 #include "core/dgmath.h"
 #include <SDL3/SDL.h>
@@ -22,6 +26,16 @@ Engine g_engine;
 #define H 1080
 #define FOV (70.0f * DG_DEG2RAD)
 
+static int float_cmp(const void *a, const void *b) {
+    float x = *(const float *)a, y = *(const float *)b;
+    return x < y ? -1 : x > y;
+}
+static double median(float *v, u32 n) {
+    if (!n) return 0.0;
+    qsort(v, n, sizeof(float), float_cmp);
+    return v[n / 2];
+}
+
 static u32 g_rng = 99;
 static float rnd(void) {
     g_rng = g_rng * 1664525u + 1013904223u;
@@ -30,12 +44,13 @@ static float rnd(void) {
 
 int main(int argc, char **argv) {
     u32 instances = 100000, meshes = 8, frames = 60;
-    bool validation = false;
+    bool validation = false, vertex_pulling = false;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--instances") && i + 1 < argc) instances = (u32)atoi(argv[++i]);
         else if (!strcmp(argv[i], "--meshes") && i + 1 < argc) meshes = (u32)atoi(argv[++i]);
         else if (!strcmp(argv[i], "--frames") && i + 1 < argc) frames = (u32)atoi(argv[++i]);
         else if (!strcmp(argv[i], "--validation")) validation = true;
+        else if (!strcmp(argv[i], "--vertex-pulling")) vertex_pulling = true;
     }
     VgHarness h;
     if (!vgh_init(&h, validation)) return 1;
@@ -78,6 +93,11 @@ int main(int argc, char **argv) {
     VgCuller c;
     VgCullCaps caps = { 1u << 20, 1u << 19, 1u << 21, 1u << 20, 4096 };
     if (!vg_cull_init(&c, &h.ctx, &s, &caps)) return 1;
+    VgRaster rast;
+    if (!vg_raster_init(&rast, &h.ctx, &c)) return 1;
+    rast.serialize = true;
+    rast.use_mesh = rast.use_mesh && !vertex_pulling;
+    vg_raster_resize(&rast, W, H);
 
     // Synthetic Hi-Z: buildings (walls at 40 m) over the left 60 % of the screen.
     VgHizImage walls;
@@ -142,7 +162,8 @@ int main(int argc, char **argv) {
     };
     printf("\n%-20s %-9s %8s %8s %8s %8s %8s | %8s %9s %9s %11s %6s\n", "camera", "occlusion", "inst ms", "trav ms", "clus ms", "pass2 ms", "total", "inst", "nodes",
            "clusters", "tris", "SW %");
-    double worst = 0;
+    double worst = 0, rworst = 0;
+    struct { double ms[4]; u32 tris, hw, sw; } rr[8];
     {
         // Warm-up: keep the GPU busy ~0.5 s so it runs at full clocks during the timed runs.
         mat4 view = mat4_look_at(cams[2].eye, cams[2].target, v3(0, 1, 0));
@@ -167,22 +188,42 @@ int main(int argc, char **argv) {
             vgeo_view_setup(&v, vp.m, vp.m, eye, (float)H / (2.0f * tanf(FOV * 0.5f)), 0.1f, W, H, 1.0f, 32.0f,
                             occ ? VGV_TWO_PASS : VGV_NO_OCCLUSION);
             double acc[4] = { 0 };
+            float *rs = (float *)malloc(sizeof(float) * 4 * frames);   // raster ms per frame (median: robust to a shared GPU)
             u32 n = 0;
             for (u32 f = 0; f < frames; f++) {
                 VkCommandPool pool;
                 VkCommandBuffer cmd = vgc_begin_once(&h.ctx, &pool);
                 vg_cull_record(&c, cmd, 0, 0, &v, occ ? &wr : NULL, occ ? &wr : NULL);
+                vg_raster_clear(&rast, cmd);
+                vg_raster_record(&rast, cmd, 0, 0, 1);
+                if (occ) vg_raster_record(&rast, cmd, 0, 0, 2);
                 vgc_submit_wait(&h.ctx, pool, cmd);
-                float ms[4];
-                if (f >= 2 && vg_cull_timings(&c, 0, 0, true, ms)) {
+                float ms[4], r1[2] = { 0, 0 }, r2[2] = { 0, 0 };
+                if (f >= 2 && vg_cull_timings(&c, 0, 0, true, ms) && vg_raster_timings(&rast, 0, 0, 1, true, r1) &&
+                    (!occ || vg_raster_timings(&rast, 0, 0, 2, true, r2))) {
                     for (int k = 0; k < 4; k++) acc[k] += ms[k];
+                    rs[0 * frames + n] = r1[0];
+                    rs[1 * frames + n] = r1[1];
+                    rs[2 * frames + n] = r2[0];
+                    rs[3 * frames + n] = r2[1];
                     n++;
                 }
             }
             vg_cull_collect(&c, 0);
             VgCounters ctr;
             vg_cull_counters(&c, 0, &ctr);
-            for (int k = 0; k < 4; k++) acc[k] /= n ? n : 1;
+            double racc[4];
+            for (int k = 0; k < 4; k++) {
+                acc[k] /= n ? n : 1;
+                racc[k] = median(rs + k * frames, n);
+                rr[ci * 2 + occ].ms[k] = racc[k];
+            }
+            free(rs);
+            rr[ci * 2 + occ].tris = ctr.n[VGN_TRIS];
+            rr[ci * 2 + occ].hw = ctr.n[VGN_HW];
+            rr[ci * 2 + occ].sw = ctr.n[VGN_SW];
+            double rtotal = racc[0] + racc[1] + racc[2] + racc[3];
+            if (rtotal > rworst) rworst = rtotal;
             double total = acc[0] + acc[1] + acc[2] + acc[3];
             if (total > worst) worst = total;
             u32 vis = ctr.n[VGN_HW] + ctr.n[VGN_SW];
@@ -190,9 +231,20 @@ int main(int argc, char **argv) {
                    ctr.n[VGN_INST_VIS] + ctr.n[VGN_INST_P2], ctr.n[VGN_NODES_VISITED], vis, ctr.n[VGN_TRIS], vis ? 100.0 * ctr.n[VGN_SW] / vis : 0.0,
                    ctr.n[VGN_OVERFLOW] ? " OVERFLOW" : "");
         }
+    printf("\nraster (%s, HW / SW serialised, median ms)\n%-20s %-9s %8s %8s %8s %8s %8s | %11s %9s %9s %6s\n", rast.use_mesh ? "mesh shader" : "vertex pulling", "camera",
+           "occlusion", "HW p1", "SW p1", "HW p2", "SW p2", "total", "tris", "HW cl", "SW cl", "SW %");
+    for (int ci = 0; ci < 4; ci++)
+        for (int occ = 0; occ < 2; occ++) {
+            const double *m = rr[ci * 2 + occ].ms;
+            u32 hw = rr[ci * 2 + occ].hw, sw = rr[ci * 2 + occ].sw;
+            printf("%-20s %-9s %8.3f %8.3f %8.3f %8.3f %8.3f | %11u %9u %9u %5.1f\n", cams[ci].name, occ ? "2-pass" : "off", m[0], m[1], m[2], m[3], m[0] + m[1] + m[2] + m[3],
+                   rr[ci * 2 + occ].tris, hw, sw, hw + sw ? 100.0 * sw / (hw + sw) : 0.0);
+        }
     printf("\nhi-z build 1920x1080 (%u mips): %.3f ms   (budget: 0.1 ms for two builds, Phase 3)\n", walls.mips, hiz_ms);
     printf("culling, worst camera: %.3f ms   (budget: 0.5 ms for cells + instances + traversal + clusters, both passes)\n", worst);
+    printf("raster, worst camera: %.3f ms   (budget: 1.2 ms for HW + SW raster, both passes)\n", rworst);
     printf("cpu: %u dispatches per view\n", c.dispatches);
+    vg_raster_shutdown(&rast);
     vgh_hiz_destroy(&h, &walls);
     vg_cull_shutdown(&c);
     vgeo_scene_free(&s);
