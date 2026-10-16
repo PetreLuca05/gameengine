@@ -1,0 +1,34 @@
+#version 450
+// HW raster, VK_EXT_mesh_shader: one workgroup per HW visible cluster of the pass range, one thread per
+// vertex and per triangle (<= 128 / 128).
+#extension GL_GOOGLE_include_directive : require
+#extension GL_EXT_mesh_shader : require
+#include "vgeo_common.glsl"
+#include "vg_decode.glsl"
+#include "vg_raster.glsl"
+
+layout(local_size_x = 128) in;
+layout(triangles, max_vertices = 128, max_primitives = 128) out;
+layout(location = 0) perprimitiveEXT flat out uint o_payload[];
+
+void main() {
+    uvec2 r = vg_raster_range(false);
+    uint k = r.x + gl_WorkGroupID.y * 65535u + gl_WorkGroupID.x;
+    if (k >= r.y) {
+        SetMeshOutputsEXT(0u, 0u);
+        return;
+    }
+    uvec2 e = vg_visible_entry(k);
+    VgClusterRef cr = vg_cluster_ref(e.y);
+    VgClusterData c = vg_cluster(cr.slot, cr.index);
+    SetMeshOutputsEXT(c.vert_count, c.tri_count);
+    uint t = gl_LocalInvocationID.x;
+    if (t < c.vert_count) {
+        VgXf x = vg_instance_xf(e.x);
+        gl_MeshVerticesEXT[t].gl_Position = vg_raster_clip(x, c, meshes[x.mesh], t);
+    }
+    if (t < c.tri_count) {
+        gl_PrimitiveTriangleIndicesEXT[t] = vg_triangle(c, t);
+        o_payload[t] = vg_vis_payload(k, t);
+    }
+}

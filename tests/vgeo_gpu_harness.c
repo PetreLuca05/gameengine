@@ -112,13 +112,22 @@ bool vgh_init(VgHarness *h, bool validation) {
     vkGetPhysicalDeviceProperties(c->gpu, &h->props);
     c->timestamp_period = h->props.limits.timestampPeriod;
     // Same vgeo feature set as vk_device.c.
+    bool mesh_ext = has_ext(c->gpu, VK_EXT_MESH_SHADER_EXTENSION_NAME);
+    VkPhysicalDeviceMeshShaderFeaturesEXT sm = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT };
     VkPhysicalDeviceVulkan12Features s12 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES };
+    s12.pNext = mesh_ext ? &sm : NULL;
     VkPhysicalDeviceFeatures2 s2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
     s2.pNext = &s12;
     vkGetPhysicalDeviceFeatures2(c->gpu, &s2);
+    // Raster (Phase 3): VK_EXT_mesh_shader + meshShader when present (the HW path falls back to vertex pulling).
+    bool mesh = mesh_ext && sm.meshShader;
+    VkPhysicalDeviceMeshShaderFeaturesEXT fm = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT };
+    fm.meshShader = VK_TRUE;
     VkPhysicalDeviceVulkan13Features f13 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES };
     f13.synchronization2 = VK_TRUE;
     f13.dynamicRendering = VK_TRUE;
+    f13.pNext = mesh ? &fm : NULL;
+    f13.maintenance4 = VK_TRUE;   // required by 1.3; glslang's mesh shaders use LocalSizeId
     VkPhysicalDeviceVulkan12Features f12 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES };
     f12.pNext = &f13;
     f12.scalarBlockLayout = s12.scalarBlockLayout;
@@ -131,6 +140,8 @@ bool vgh_init(VgHarness *h, bool validation) {
     f2.pNext = &f12;
     f2.features.shaderInt64 = s2.features.shaderInt64;
     f2.features.multiDrawIndirect = s2.features.multiDrawIndirect;
+    f2.features.drawIndirectFirstInstance = s2.features.drawIndirectFirstInstance;
+    f2.features.fragmentStoresAndAtomics = s2.features.fragmentStoresAndAtomics;
     f2.features.shaderStorageImageExtendedFormats = s2.features.shaderStorageImageExtendedFormats;
     if (!s12.scalarBlockLayout) { printf("harness: scalarBlockLayout missing\n"); return false; }
     float prio = 1.0f;
@@ -142,6 +153,9 @@ bool vgh_init(VgHarness *h, bool validation) {
     dci.pNext = &f2;
     dci.queueCreateInfoCount = 1;
     dci.pQueueCreateInfos = &qci;
+    const char *dev_exts[1] = { VK_EXT_MESH_SHADER_EXTENSION_NAME };
+    dci.enabledExtensionCount = mesh ? 1 : 0;
+    dci.ppEnabledExtensionNames = dev_exts;
     if (vkCreateDevice(c->gpu, &dci, NULL, &c->device) != VK_SUCCESS) { printf("harness: vkCreateDevice failed\n"); return false; }
     volkLoadDevice(c->device);
     vkGetDeviceQueue(c->device, family, 0, &c->queue);
@@ -160,7 +174,7 @@ bool vgh_init(VgHarness *h, bool validation) {
     c->int64_atomics = s12.shaderBufferInt64Atomics && s2.features.shaderInt64;
     c->draw_indirect_count = s12.drawIndirectCount;
     c->descriptor_indexing = s12.runtimeDescriptorArray && s12.descriptorBindingPartiallyBound;
-    c->mesh_shader = has_ext(c->gpu, "VK_EXT_mesh_shader");
+    c->mesh_shader = mesh;
     printf("harness: %s (api %u.%u), int64 atomics %d, indirect count %d, mesh shader %d, validation %d\n", h->props.deviceName,
            VK_API_VERSION_MAJOR(h->props.apiVersion), VK_API_VERSION_MINOR(h->props.apiVersion), c->int64_atomics, c->draw_indirect_count, c->mesh_shader,
            validation);
