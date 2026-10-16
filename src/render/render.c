@@ -1614,10 +1614,14 @@ bool render_world_to_screen(vec3 world, vec2 *out_px) {
 
 // A point placed in viewmodel space (drawn with the viewmodel FOV) -> the world point that
 // appears at the same pixel with the world FOV (same depth). Identity when the FOVs match.
-float render_vm_fov(void) {
-    if (R->r_vm_fov->f > 1.0f) return R->r_vm_fov->f;
-    return R->cam.vm_fov_deg > 1.0f ? R->cam.vm_fov_deg : R->cam.fov_deg;
+float render_vm_fov_for(const RenderCamera *c, float rvm) {
+    float hip = rvm > 1.0f ? rvm : (c->vm_fov_deg > 1.0f ? c->vm_fov_deg : c->fov_deg);
+    float t = clampf(c->ads_t, 0.0f, 1.0f);
+    t = t * t * (3.0f - 2.0f * t);
+    return hip + (c->fov_deg - hip) * t;
 }
+
+float render_vm_fov(void) { return render_vm_fov_for(&R->cam, R->r_vm_fov->f); }
 
 vec3 render_viewmodel_to_world(vec3 p) {
     float vm_fov = render_vm_fov();

@@ -450,7 +450,7 @@ void holdpoint_eval(HoldPointState *st, const HoldPointInput *in, HoldPointOutpu
     st->lag.y = spring1(st->lag.y, &st->lag_v.y, lag_t.y, s->lag_k, s->lag_d, dt);
     st->t += dt;
     // Idle sway (figure-eight) + breathing.
-    float sw = s->sway_rot * ads_k;
+    float sw = s->sway_rot * ads_k * g_look_lag_scale * 2.0f;   // idle sway follows wpn_look_lag (0.12 -> a quarter)
     vec3 sway_rot = v3(sinf(st->t * s->sway_freq * 2.0f * DG_PI) * sw * 0.6f, sinf(st->t * s->sway_freq * DG_PI) * sw, 0);
     vec3 breath = v3(0, sinf(st->t * s->breath_freq * 2.0f * DG_PI) * s->breath_pos * ads_k, 0);
     // Movement bob (the camera's own bob comes from the head animation).

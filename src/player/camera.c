@@ -88,6 +88,7 @@ RenderCamera camera_update(ViewState *v, const PlayerMove *m, float dt, const Ca
     cam.roll = v->roll + v->bob_roll;
     cam.fov_deg = v->fov;
     cam.vm_fov_deg = v->fov_hip;
+    cam.ads_t = (ca && ca->fov > 1.0f) ? ads_t : 0.0f;
     cam.znear = 0.04f;
     cam.zfar = 1500.0f;
     return cam;

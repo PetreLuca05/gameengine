@@ -558,7 +558,7 @@ void game_render(void) {
         // exactly on the bullets' line (weapon_aim_offset_deg is what the shots use).
         vec2 sway = weapon_aim_offset_deg(wd, &p->sim.wpn, &p->sim.move, weapon_sway_time(G->last_cmd.seq) + G->alpha * SIM_DT);
         Cvar *rvm = cvar_find("r_viewmodel_fov");
-        float vmf = rvm && rvm->f > 1.0f ? rvm->f : (cam.vm_fov_deg > 1.0f ? cam.vm_fov_deg : cam.fov_deg);
+        float vmf = render_vm_fov_for(&cam, rvm ? rvm->f : 0.0f);
         chars_set_fp_aim_offset(sway.x, sway.y, cam.pitch + kr.x * DG_DEG2RAD, cam.fov_deg, vmf);
         cam.pitch += kr.x * DG_DEG2RAD;
         cam.yaw -= kr.y * DG_DEG2RAD;

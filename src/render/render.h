@@ -77,8 +77,13 @@ typedef struct RenderCamera {
     float yaw, pitch, roll;
     float fov_deg;      // vertical FOV
     float znear, zfar;
-    float vm_fov_deg;   // arms / held item FOV when r_viewmodel_fov is 0 (the hip FOV: ADS zoom doesn't scale the weapon); 0 = fov_deg
+    float vm_fov_deg;   // arms / held item FOV when r_viewmodel_fov is 0 (the hip FOV); 0 = fov_deg
+    float ads_t;        // 0..1 aim progress: the weapon's FOV blends into fov_deg, so once aimed the
+                        // gun, sight and world share one projection (identical for any settings)
 } RenderCamera;
+// The weapon (viewmodel) FOV for a camera: hip value (r_viewmodel_fov / vm_fov_deg / fov_deg)
+// blended into the camera FOV with the aim progress.
+float render_vm_fov_for(const RenderCamera *c, float r_viewmodel_fov);
 
 typedef struct RenderEnvironment {
     vec3 sun_dir;       // direction towards the sun

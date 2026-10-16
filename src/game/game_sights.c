@@ -516,7 +516,7 @@ bool sights_dof_managed(void) { return S.ads_dof && S.ads_dof->i; }
 // ------------------------------------------------------------------ registration
 
 void sights_register(void) {
-    S.look_lag = cvar_reg_float("wpn_look_lag", 0.3f, 0.0f, 2.0f, CVAR_ARCHIVE, "how far the weapon trails mouse turns at the hip (x the hold style's look lag; 0 = locked to the view)");
+    S.look_lag = cvar_reg_float("wpn_look_lag", 0.12f, 0.0f, 2.0f, CVAR_ARCHIVE, "how far the weapon trails mouse turns at the hip (x the hold style's look lag; 0 = locked to the view)");
     S.relief_scale = cvar_reg_float("ads_eye_relief_scale", 0.5f, 0.2f, 1.5f, CVAR_ARCHIVE, "ADS: sight distance from the eye x this (1 = the stock weld / the scope eye relief)");
     S.scope_mode = cvar_reg_int("r_scope_mode", 0, 0, 1, CVAR_ARCHIVE, "scopes: 0 = picture-in-picture (second scene render at the scope FOV), 1 = full-screen FOV + vignette");
     S.pip_scale = cvar_reg_float("r_scope_pip_scale", 0.5f, 0.2f, 1.0f, CVAR_ARCHIVE, "scope picture-in-picture resolution (fraction of the render height)");
