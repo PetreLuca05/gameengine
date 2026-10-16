@@ -8,17 +8,8 @@
   "hands": ["left", "right"],
   "states": ["default", "hip", "sprint", "crouch", "prone", "empty", "inspect", "vehicle_onehand", "phone_portrait", "phone_landscape"],
   "relative": false,
-  "reviewed": true,
+  "reviewed": false,
   "auto_placed": false,
-  "left": {
-    "hip": {
-      "socket": { "pos": [-0.061799936, -0.04319986, 0.051199965], "q": [0, 0, 0.7071068, 0.7071068] }
-    }
-  },
-  "right": {
-    "hip": {
-      "socket": { "pos": [-0.019000001, -0.036599964, 0.04419996], "q": [0, 0, -0.7071068, 0.7071068] },
-      "wrist": { "pos": [-0.0009999989, 0, 0], "q": [0, 0, 0, 1] }
-    }
-  }
+  "left": {},
+  "right": {}
 }
