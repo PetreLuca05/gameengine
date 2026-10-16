@@ -42,3 +42,5 @@ Thumbs.db
 /assets/vgeo/
 *.vgeo
 /build-agent.log
+
+/.claude/worktrees/
