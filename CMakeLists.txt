@@ -319,3 +319,12 @@ if(MSVC)
   target_compile_options(test_ragdoll PRIVATE /W3 /wd4100 /wd4201 /utf-8)
 endif()
 add_test(NAME ragdoll COMMAND test_ragdoll WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+
+# Game UI: layout engine, inventory drag and drop / intents / reconcile, attachments, icons.
+add_executable(test_ui tests/test_ui.c src/ui/gui/gui_layout.c src/ui/inv_dragdrop.c src/gameplay/inv_ops.c src/gameplay/inventory.c)
+set_target_properties(test_ui PROPERTIES C_STANDARD 11)
+target_link_libraries(test_ui PRIVATE dg_animcore)
+if(MSVC)
+  target_compile_options(test_ui PRIVATE /W3 /wd4100 /wd4201 /utf-8)
+endif()
+add_test(NAME ui COMMAND test_ui WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)

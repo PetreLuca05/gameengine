@@ -8,7 +8,7 @@
 #ifndef DG_PROTOCOL_H
 #define DG_PROTOCOL_H
 
-#define DG_PROTOCOL_VERSION 8   // 8: weapon attachments (InvSlot.att, NF_ATTACH), time of day in snapshots
+#define DG_PROTOCOL_VERSION 9   // 9: inventory intents (RPC_INV_OP, MSG_INVENTORY ack); 8: 8: weapon attachments (InvSlot.att, NF_ATTACH), time of day in snapshots
 #define DG_DEFAULT_PORT 27015
 #define DG_DISCOVERY_PORT 27016
 

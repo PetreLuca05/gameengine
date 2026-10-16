@@ -5,6 +5,7 @@
 #include "gameplay/effects.h"
 #include "gameplay/flesh_fx.h"
 #include "gameplay/entities.h"
+#include "gameplay/health.h"
 #include "gameplay/characters.h"
 #include "net/net.h"
 #include "audio/audio.h"
@@ -140,6 +141,53 @@ void game_handle_event(const GameEvent *ev) {
 
 // ------------------------------------------------------------------ RPCs
 
+int game_inv_op(InvOp *op) {
+    if (!G || !G->world) return IOR_INVALID;
+    Player *p = game_local_player();
+    if (!p) return IOR_INVALID;
+    if (G->mode == GM_HOST) {
+        // Authoritative right away: the result is the real one.
+        Inventory before = p->inv;
+        InvOpEffect fx;
+        int r = inv_op_apply(&before, G->world->items, op, &fx);
+        int a, b, c;
+        op->seq = 0;
+        inv_op_pack(op, &a, &b, &c);
+        game_sv_handle_rpc(G->local_slot, RPC_INV_OP, a, b, c);
+        return r;
+    }
+    // Client: predict on the local copy, remember it until the host acknowledges it.
+    if (G->inv_pending_count >= (int)ARRAY_COUNT(G->inv_pending)) return IOR_INVALID;
+    op->seq = ++G->inv_seq;
+    InvOpEffect fx;
+    int r = inv_op_apply(&p->inv, G->world->items, op, &fx);
+    G->inv_pending[G->inv_pending_count++] = *op;
+    int a, b, c;
+    inv_op_pack(op, &a, &b, &c);
+    net_send_rpc(RPC_INV_OP, a, b, c);
+    return r;
+}
+
+int game_inv_pending(void) { return G ? G->inv_pending_count : 0; }
+
+// Client: the host's inventory (acknowledging intents up to ack_seq): take it, drop the
+// acknowledged intents and re-apply the rest on top (their predicted results).
+void game_cl_inventory(int slot, u32 revision, u32 ack_seq, const InvSlot *slots) {
+    World *w = G ? G->world : NULL;
+    if (!w || slot < 0 || slot >= MAX_PLAYERS) return;
+    Player *p = &w->players[slot];
+    memcpy(p->inv.slots, slots, sizeof(p->inv.slots));
+    p->inv.revision = revision;
+    int n = 0;
+    for (int i = 0; i < G->inv_pending_count; i++)
+        if (G->inv_pending[i].seq > ack_seq) G->inv_pending[n++] = G->inv_pending[i];
+    G->inv_pending_count = n;
+    for (int i = 0; i < n; i++) {
+        InvOpEffect fx;
+        inv_op_apply(&p->inv, w->items, &G->inv_pending[i], &fx);
+    }
+}
+
 void game_rpc(int type, int a, int b, int c) {
     if (!G || !G->world) return;
     if (G->mode == GM_HOST) game_sv_handle_rpc(G->local_slot, type, a, b, c);
@@ -157,6 +205,8 @@ static void send_container(World *w, int slot, EntityId cont) {
     ev_push(w, &ev);
 }
 
+static void spawn_dropped(World *w, int slot, InvSlot s);
+
 static void drop_item(World *w, int slot, int inv_slot) {
     Player *p = &w->players[slot];
     if (inv_slot < 0 || inv_slot >= INV_SLOTS) return;
@@ -164,6 +214,30 @@ static void drop_item(World *w, int slot, int inv_slot) {
     if (!s.item) return;
     memset(&p->inv.slots[inv_slot], 0, sizeof(InvSlot));
     p->inv.revision++;
+    spawn_dropped(w, slot, s);
+}
+
+// Host: an inventory intent (gameplay/inv_ops.c) plus its world effects. Every intent is
+// acknowledged with an inventory message (even a rejected one), so the client's prediction
+// always converges on the host's result.
+static void sv_inv_op(World *w, int slot, const InvOp *op) {
+    Player *p = &w->players[slot];
+    InvOpEffect fx;
+    int r = inv_op_apply(&p->inv, w->items, op, &fx);
+    if (op->seq > p->inv_ack_seq) p->inv_ack_seq = op->seq;
+    p->inv.revision++;
+    if (r != IOR_OK) return;
+    if (op->type == IOP_DROP && fx.dropped.item) spawn_dropped(w, slot, fx.dropped);
+    if (op->type == IOP_USE && fx.used_item) {
+        const ItemDef *d = item_def(w->items, fx.used_item);
+        heal(w, p->ent, d->heal, d->armor);
+        ev_hint(w, slot, "Used %s", d->name);
+        ev_sound(w, "heal", p->sim.move.pos, 0.8f, EVENT_ALL);
+    }
+}
+
+static void spawn_dropped(World *w, int slot, InvSlot s) {
+    Player *p = &w->players[slot];
     vec3 eye = player_eye_pos(&p->sim.move);
     vec3 fwd = forward_from_yaw(p->sim.move.yaw);
     // Let go at hand height in front of the player; the pickup falls onto whatever is below.
@@ -189,6 +263,12 @@ void game_sv_handle_rpc(int slot, int type, int a, int b, int c) {
     case RPC_INV_MOVE: inv_move(&p->inv, w->items, a, b); break;
     case RPC_INV_DROP: drop_item(w, slot, a); break;
     case RPC_ATTACH: game_sv_attach(w, slot, a, b, c); break;
+    case RPC_INV_OP: {
+        InvOp op;
+        inv_op_unpack(a, b, c, &op);
+        sv_inv_op(w, slot, &op);
+        break;
+    }
     case RPC_CONTAINER_TAKE: {
         EntityId ce = p->open_container;
         if (!ent_valid(w, ce) || w->type[ENT_INDEX(ce)] != ET_CONTAINER) return;

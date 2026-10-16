@@ -144,6 +144,7 @@ static void send_inventory(RemoteClient *c) {
     Writer wr = writer_make(N->buf, NET_BUF);
     w_u8(&wr, MSG_INVENTORY);
     w_u32(&wr, p->inv.revision);
+    w_u32(&wr, p->inv_ack_seq);
     w_bytes(&wr, p->inv.slots, sizeof(p->inv.slots));
     send_msg(c->peer, CH_RELIABLE, &wr);
     p->inv_sent_revision = p->inv.revision;
@@ -499,10 +500,11 @@ static void client_handle(const NetEvent *e) {
     case MSG_INVENTORY: {
         World *w = game_world();
         if (!w) break;
-        Player *p = &w->players[N->local_slot];
         u32 rev = r_u32(&r);
-        r_bytes(&r, p->inv.slots, sizeof(p->inv.slots));
-        p->inv.revision = rev;
+        u32 ack = r_u32(&r);
+        static InvSlot slots[INV_SLOTS];
+        r_bytes(&r, slots, sizeof(slots));
+        if (!r.overflow) game_cl_inventory(N->local_slot, rev, ack, slots);   // reconcile with the predicted intents
         break;
     }
     case MSG_CVARS: {

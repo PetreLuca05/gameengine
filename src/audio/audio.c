@@ -23,7 +23,7 @@ typedef struct AudioSystem {
     int known_count;
     ma_sound music;
     bool music_loaded;
-    Cvar *master, *music_vol, *sfx, *voice;
+    Cvar *master, *music_vol, *sfx, *voice, *ui;
 } AudioSystem;
 
 #define A (g_engine.audio)
@@ -34,6 +34,7 @@ bool audio_init(void) {
     A->music_vol = cvar_reg_float("snd_music", 0.4f, 0, 1, CVAR_ARCHIVE, "music volume");
     A->sfx = cvar_reg_float("snd_sfx", 0.9f, 0, 1, CVAR_ARCHIVE, "effects volume");
     A->voice = cvar_reg_float("snd_voice", 1.0f, 0, 1, CVAR_ARCHIVE, "voice chat volume (reserved)");
+    A->ui = cvar_reg_float("snd_ui", 0.8f, 0, 1, CVAR_ARCHIVE, "interface sounds volume");
     for (int i = 1; i < g_engine.argc; i++)
         if (!strcmp(g_engine.argv[i], "--nosound") || !strcmp(g_engine.argv[i], "--test")) { log_info("audio: disabled by --nosound"); return false; }
     ma_engine_config cfg = ma_engine_config_init();
@@ -140,7 +141,7 @@ void audio_update(vec3 pos, vec3 fwd, vec3 up) {
     ma_sound_group_set_volume(&A->groups[0], A->sfx->f);
     ma_sound_group_set_volume(&A->groups[1], A->music_vol->f);
     ma_sound_group_set_volume(&A->groups[2], A->voice->f);
-    ma_sound_group_set_volume(&A->groups[3], A->sfx->f);
+    ma_sound_group_set_volume(&A->groups[3], A->ui->f);
     // Recycle finished voices.
     for (int i = 0; i < MAX_VOICES; i++) {
         Voice *v = &A->voices[i];

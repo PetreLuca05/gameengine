@@ -245,6 +245,20 @@
         ["armor", 1]
       ]
     },
+    {
+      "_comment": "Attachment crate next to the weapon bench: inventory items to mount by drag and drop (docs/UI.md).",
+      "type": "container",
+      "pos": [7.2, 0, 27.6],
+      "yaw": 180,
+      "loot": [
+        ["att_red_dot", 1],
+        ["att_scope_4x", 1],
+        ["att_suppressor", 1],
+        ["att_compensator", 1],
+        ["att_vertical_grip", 1],
+        ["att_extended_mag", 1]
+      ]
+    },
     {"type": "gate", "name": "gate1", "pos": [20, 0, 24], "yaw": -90, "width": 2.96, "height": 2.98, "lift": 2.9},
     {"type": "lever", "pos": [18.6, 0, 21.4], "yaw": -90, "target": "gate1"},
     {"type": "pickup", "item": "shotgun", "pos": [25, 1.0, 26.5], "respawn": 10},

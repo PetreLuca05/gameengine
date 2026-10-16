@@ -222,8 +222,44 @@ VkDescriptorSet vkr_alloc_tex_set(VkImageView view, VkSampler sampler) {
 void vkr_rewrite_all_texture_sets(void) {
     for (u32 i = 1; i < MAX_TEXTURES; i++) {
         GpuTexture *t = &R->textures[i];
-        if (t->used) vkr_write_tex_set(t->set, t->view, R->sampler_linear);
+        if (t->used) vkr_write_tex_set(t->set, t->view, t->wrapped ? R->sampler_clamp : R->sampler_linear);
     }
+}
+
+static u32 alloc_texture_slot(void);
+
+TextureId vkr_texture_wrap(VkImage image, VkImageView view, u32 w, u32 h, VkFormat fmt) {
+    u32 slot = alloc_texture_slot();
+    if (!slot) return 0;
+    GpuTexture *t = &R->textures[slot];
+    memset(t, 0, sizeof(*t));
+    t->image = image;
+    t->view = view;
+    t->set = vkr_alloc_tex_set(view, R->sampler_clamp);
+    t->w = w;
+    t->h = h;
+    t->mips = 1;
+    t->format = fmt;
+    t->used = true;
+    t->ready = true;
+    t->wrapped = true;
+    return slot;
+}
+
+void vkr_texture_rewrap(TextureId id, VkImage image, VkImageView view, u32 w, u32 h) {
+    if (!id || id >= MAX_TEXTURES || !R->textures[id].used || !R->textures[id].wrapped) return;
+    GpuTexture *t = &R->textures[id];
+    t->image = image;
+    t->view = view;
+    t->w = w;
+    t->h = h;
+    vkr_write_tex_set(t->set, view, R->sampler_clamp);
+}
+
+void vkr_texture_unwrap(TextureId id) {
+    if (!id || id >= MAX_TEXTURES || !R->textures[id].used || !R->textures[id].wrapped) return;
+    defer_descriptor(R->textures[id].set);
+    memset(&R->textures[id], 0, sizeof(GpuTexture));
 }
 
 // ------------------------------------------------------------------ meshes
@@ -532,6 +568,7 @@ void vkr_destroy_all_resources(void) {
     for (u32 i = 1; i < MAX_TEXTURES; i++) {
         GpuTexture *t = &R->textures[i];
         if (!t->used) continue;
+        if (t->wrapped) { t->used = false; continue; }
         vkDestroyImageView(R->device, t->view, NULL);
         vmaDestroyImage(R->vma, t->image, t->alloc);
         t->used = false;

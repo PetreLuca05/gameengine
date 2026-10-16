@@ -63,5 +63,7 @@ void input_bind_missing_defaults(void);  // after loading a config saved before 
 // Rebind capture: the next pressed input becomes the binding. Escape cancels.
 void input_begin_capture(Action a, int slot);
 bool input_capturing(void);
+int input_capture_action(void);   // -1 when not capturing
+int input_capture_slot(void);
 
 #endif

@@ -1,0 +1,19 @@
+{
+  "_doc": "Pause screen layout (docs/UI.md 'Layout'). Sizes in design pixels at 1080p. Nodes with an action are the button stack entries; 'if' hides a node (steam, online, world; '!' negates). 'modal' is where sub-menus open; it avoids the stack on narrow screens.",
+  "nodes": [
+    { "id": "root", "safe": true },
+    { "id": "stack", "parent": "root", "anchor": "bottom_left", "dir": "column", "align": "stretch", "w": 250, "gap": 2 },
+    { "id": "title", "parent": "stack", "h": 44, "label": "Paused" },
+    { "id": "resume", "parent": "stack", "h": 34, "label": "Resume", "action": "resume" },
+    { "id": "inventory", "parent": "stack", "h": 34, "label": "Inventory", "action": "inventory", "if": "world" },
+    { "id": "settings", "parent": "stack", "h": 34, "label": "Settings", "action": "settings" },
+    { "id": "multiplayer", "parent": "stack", "h": 34, "label": "Multiplayer", "action": "multiplayer" },
+    { "id": "invite", "parent": "stack", "h": 34, "label": "Invite friends", "action": "invite", "if": "steam" },
+    { "id": "leave", "parent": "stack", "h": 34, "label": "Disconnect", "action": "leave", "if": "online" },
+    { "id": "spacer", "parent": "stack", "h": 14 },
+    { "id": "quit", "parent": "stack", "h": 34, "label": "Quit to desktop", "action": "quit" },
+    { "id": "brand", "parent": "root", "anchor": "bottom_right", "w": 460, "h": 110 },
+    { "id": "modal", "parent": "root", "anchor": "center", "w_pct": 0.6, "h_pct": 0.8, "min_w": 640, "max_w": 1160, "max_h": 860, "avoid": "stack" },
+    { "id": "dialog", "parent": "root", "anchor": "center", "w": 480, "h": 210 }
+  ]
+}

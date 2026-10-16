@@ -177,6 +177,32 @@ LineVertex *render_lines_alloc(u32 vertex_count, bool depth_test);
 TextVertex *render_text_alloc(u32 vertex_count); // triangle list, font atlas texture
 void render_set_text_atlas(TextureId atlas);
 void render_ui(const UiVertex *verts, u32 vcount, const u32 *indices, u32 icount, const UiDrawCmd *cmds, u32 ccount);
+
+// ------------------------------------------------------------------ UI extras (src/render/render_ui.c)
+// UI vertex uv ranges select the fragment mode (shaders/ui.frag): [0, 1] textured, +2 SDF text,
+// +4 soft SDF (shadow / glow), uv.x < -0.5 the blurred scene behind the UI (screen space).
+TextureId render_ui_backdrop(void);   // requests the blurred scene this frame; draw it with this texture
+// Offscreen item views (inventory preview, icons): parts are unit meshes scaled by 2 * half.
+typedef struct RenderUi3dPart {
+    vec3 center; quat rot; vec3 half;
+    vec4 color;               // linear albedo
+    u32 shape;                // 0 box, 1 cylinder (Y axis)
+    float emissive, metallic, highlight;
+} RenderUi3dPart;
+typedef struct RenderUi3dView {
+    TextureId target;         // render_ui3d_target_create
+    mat4 view, proj;
+    vec4 clear;               // display-encoded RGBA (a = 0: transparent)
+    const RenderUi3dPart *parts;
+    int part_count;
+    TextureId copy_to;        // optional: blit (scaled) into this texture's rect (icon atlas)
+    int copy_x, copy_y, copy_w, copy_h;
+    const char *png_path;     // optional: written after the frame, png_size square (downscaled)
+    int png_size;
+} RenderUi3dView;
+TextureId render_ui3d_target_create(int w, int h);
+void render_ui3d_target_destroy(TextureId t);
+void render_ui3d(const RenderUi3dView *v);   // this frame, before the UI
 void render_end_frame(void);
 
 // ------------------------------------------------------------------ VFX (src/render/vk_vfx.c)

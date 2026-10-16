@@ -1,813 +1,603 @@
-#include "gameplay/attachments.h"
-#include "player/camera.h"
+// Screen stack (docs/UI.md "Screen map"):
+//
+//   in game ── Esc / Start ──> PAUSE (button stack bottom left, logo + version bottom right)
+//     PAUSE ── Settings ─────> SETTINGS   (centred modal: tabs, scroll; the stack stays visible)
+//     PAUSE ── Multiplayer ──> MULTIPLAYER
+//     PAUSE ── Inventory ────> INVENTORY  (also Tab / I / pad Back straight from the game)
+//     PAUSE ── Disconnect / Quit ──> CONFIRM
+//     SETTINGS ── resolution / mode change ──> CONFIRM (keep? 15 s countdown, reverts)
+//     INVENTORY ── drop outside (non-stackable) ──> CONFIRM
+//     world: crate ──> INVENTORY + crate panel, weapon bench ──> BENCH
+//   Esc / B pops the top screen; popping the last one resumes. Only the top screen gets input.
+//
+// Single player (or a host without clients) pauses the simulation; in multiplayer the menu opens
+// without pausing. The HUD hides while a screen is open.
 #include "menus.h"
-#include "crosshair.h"
 #include "ui.h"
 #include "console.h"
+#include "icons.h"
+#include "screens/screens.h"
 #include "core/engine.h"
 #include "core/cvar.h"
 #include "core/log.h"
 #include "core/platform.h"
 #include "game/game.h"
+#include "game/game_internal.h"
 #include "input/input.h"
 #include "net/net.h"
 #include "app/video.h"
 #include "vfx_editor.h"
 #include "holdpoint_editor.h"
-#include "nuklear_config.h"
-#include "game/game_internal.h"
-#include "render/render.h"
-#include "gameplay/characters.h"
 #include <SDL3/SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
-typedef enum MenuPage { PAGE_NONE, PAGE_PAUSE, PAGE_SETTINGS, PAGE_MULTIPLAYER, PAGE_SKIN } MenuPage;
-typedef enum SettingsTab { TAB_GRAPHICS, TAB_CONTROLS, TAB_CROSSHAIR, TAB_AUDIO } SettingsTab;
-
-typedef struct GraphicsSettings {
-    int width, height, mode, vsync, shadow, texq, aniso, maxfps;
-    float fov, scale, brightness, gamma;
-    float vm_fov;          // 0 = follow the camera FOV
-    int vfxq, gore;
-} GraphicsSettings;
-
-#define MAX_RES 48
+#define MAX_STACK 8
 
 typedef struct Menus {
-    MenuPage page;
-    SettingsTab tab;
-    GraphicsSettings pending, applied_backup;
-    bool pending_valid;
-    float confirm_timer;     // > 0 while waiting for "keep settings?"
-    int res_w[MAX_RES], res_h[MAX_RES];
-    int res_count;
-    char connect_addr[64];
-    int connect_len;
-    int bind_scroll;
+    int stack[MAX_STACK];
+    int depth;
+    LayoutNode nodes[GUI_LAYOUT_MAX_NODES];
+    int node_count;
+    double open_time;
+    int confirm_kind, confirm_arg;
+    char confirm_title[64], confirm_text[256];
+    bool inited;
+    GuiId pause_focus;      // the stack entry that opened the current sub-menu (focus on return)
 } Menus;
 
 #define M (g_engine.menus)
+#define TH (gui_theme())
 
-static Cvar *cv(const char *n) { return cvar_find(n); }
+static const char *k_names[SCR_COUNT] = { "none", "pause", "settings", "multiplayer", "inventory", "bench", "confirm" };
+const char *screen_name(int id) { return id >= 0 && id < SCR_COUNT ? k_names[id] : "?"; }
 
-static void collect_resolutions(void) {
-    M->res_count = 0;
-    SDL_DisplayID d = SDL_GetDisplayForWindow(g_engine.window);
-    int count = 0;
-    SDL_DisplayMode **modes = SDL_GetFullscreenDisplayModes(d, &count);
-    for (int i = 0; i < count && M->res_count < MAX_RES; i++) {
-        bool dup = false;
-        for (int k = 0; k < M->res_count; k++) if (M->res_w[k] == modes[i]->w && M->res_h[k] == modes[i]->h) dup = true;
-        if (dup) continue;
-        M->res_w[M->res_count] = modes[i]->w;
-        M->res_h[M->res_count] = modes[i]->h;
-        M->res_count++;
-    }
-    SDL_free(modes);
-    static const int fallback[][2] = { { 1280, 720 }, { 1600, 900 }, { 1920, 1080 }, { 2560, 1440 } };
-    if (!M->res_count)
-        for (int i = 0; i < 4; i++) { M->res_w[i] = fallback[i][0]; M->res_h[i] = fallback[i][1]; M->res_count++; }
-}
-
-static GraphicsSettings read_graphics(void) {
-    GraphicsSettings g;
-    g.width = cv("r_width")->i;
-    g.height = cv("r_height")->i;
-    g.mode = cv("r_mode")->i;
-    g.vsync = cv("r_vsync")->i;
-    g.shadow = cv("r_shadow_quality")->i;
-    g.texq = cv("r_texture_quality")->i;
-    g.aniso = cv("r_aniso")->i;
-    g.maxfps = cv("r_maxfps")->i;
-    g.fov = cv("cl_fov")->f;
-    g.vm_fov = cv("cam_weapon_fov")->f;
-    g.scale = cv("r_render_scale")->f;
-    g.brightness = cv("r_brightness")->f;
-    g.gamma = cv("r_gamma")->f;
-    g.vfxq = cv("vfx_quality")->i;
-    g.gore = cv("gore_level")->i;
-    return g;
-}
-
-static void write_graphics(const GraphicsSettings *g) {
-    cvar_set_int(cv("r_width"), g->width);
-    cvar_set_int(cv("r_height"), g->height);
-    cvar_set_int(cv("r_mode"), g->mode);
-    cvar_set_int(cv("r_vsync"), g->vsync);
-    cvar_set_int(cv("r_shadow_quality"), g->shadow);
-    cvar_set_int(cv("r_texture_quality"), g->texq);
-    cvar_set_int(cv("r_aniso"), g->aniso);
-    cvar_set_int(cv("r_maxfps"), g->maxfps);
-    cvar_set_float(cv("cl_fov"), g->fov);
-    cvar_set_float(cv("cam_weapon_fov"), g->vm_fov);
-    cvar_set_float(cv("r_render_scale"), g->scale);
-    cvar_set_float(cv("r_brightness"), g->brightness);
-    cvar_set_float(cv("r_gamma"), g->gamma);
-    cvar_set_int(cv("vfx_quality"), g->vfxq);
-    cvar_set_int(cv("gore_level"), g->gore);
-    video_apply();
-}
-
-static void update_mouse_mode(void);
-
-static void cmd_menu(int argc, const char **argv) {
-    const char *page = argc > 1 ? argv[1] : "pause";
-    Game *g = game();
-    if (!strcmp(page, "close")) { menus_close_all(); return; }
-    M->page = PAGE_PAUSE;
-    if (!strcmp(page, "settings")) { M->page = PAGE_SETTINGS; M->pending = read_graphics(); collect_resolutions(); }
-    if (!strcmp(page, "controls")) { M->page = PAGE_SETTINGS; M->tab = TAB_CONTROLS; }
-    if (!strcmp(page, "audio")) { M->page = PAGE_SETTINGS; M->tab = TAB_AUDIO; }
-    if (!strcmp(page, "crosshair")) { M->page = PAGE_SETTINGS; M->tab = TAB_CROSSHAIR; }
-    if (!strcmp(page, "multiplayer")) { M->page = PAGE_MULTIPLAYER; net_lan_refresh(); }
-    if (!strcmp(page, "skin")) M->page = PAGE_SKIN;
-    if (g) g->menu_open = true;
-    update_mouse_mode();
-}
-
-static void cmd_inventory(int argc, const char **argv) { menus_toggle_inventory(); }
-
-void menus_init(void) {
-    M = (Menus *)calloc(1, sizeof(Menus));
-    cmd_register("menu", cmd_menu, "open a menu: pause | settings | controls | audio | multiplayer | close");
-    cmd_register("inventory", cmd_inventory, "toggle the inventory screen");
-    dg_strcpy(M->connect_addr, sizeof(M->connect_addr), "127.0.0.1:27015");
-    M->connect_len = (int)strlen(M->connect_addr);
+static bool load_layout(void) {
+    char path[512];
+    snprintf(path, sizeof(path), "%sassets/ui/screens/pause.json", platform_base_dir());
+    size_t size = 0;
+    char *text = platform_read_file(path, &size);
+    if (!text) { log_error("ui: %s missing", path); return false; }
+    char err[160];
+    int n = 0;
+    bool ok = gui_layout_parse(text, M->nodes, GUI_LAYOUT_MAX_NODES, &n, err, sizeof(err));
+    free(text);
+    if (!ok) { log_error("ui: pause.json: %s", err); return false; }
+    M->node_count = n;
+    return true;
 }
 
 static void update_mouse_mode(void) {
-    Game *g = game();
     bool free_cursor = menus_wants_mouse() || console_is_open();
     input_set_game_focus(!free_cursor && g_engine.has_focus);
-    (void)g;
 }
 
-bool menus_wants_mouse(void) {
+int screens_top(void) { return M->depth ? M->stack[M->depth - 1] : SCR_NONE; }
+
+bool screens_has(int id) {
+    for (int i = 0; i < M->depth; i++) if (M->stack[i] == id) return true;
+    return false;
+}
+
+static void on_close(int id) {
     Game *g = game();
-    return (M && M->page != PAGE_NONE) || (g && (g->inventory_open || g->container_open || g->bench_open)) || vfx_editor_open() || holdpoint_editor_open() || daynight_editor_open() || flesh_range_open();
+    if (id == SCR_INVENTORY) {
+        inventory_close();
+        if (g && g->container_open) { game_rpc(RPC_CONTAINER_CLOSE, 0, 0, 0); g->container_open = false; }
+        if (g) g->inventory_open = false;
+    }
+    if (id == SCR_BENCH && g) g->bench_open = false;
+    if (id == SCR_SETTINGS) config_save(video_config_path());
+}
+
+void screens_push(int id) {
+    if (M->depth >= MAX_STACK || screens_top() == id) return;
+    M->stack[M->depth++] = id;
+    gui_anim_restart(gui_idi("screen", id));
+    if (id == SCR_PAUSE) gui_anim_restart(gui_id("pause_open"));
+    if (id == SCR_INVENTORY) { inventory_open(); if (game()) game()->inventory_open = true; }
+    gui_set_focus(0);
+    gui_sound(TH->snd_open);
+    update_mouse_mode();
+}
+
+void screens_pop(void) {
+    if (!M->depth) return;
+    int id = M->stack[--M->depth];
+    on_close(id);
+    gui_set_focus(screens_top() == SCR_PAUSE ? M->pause_focus : 0);
+    gui_sound(TH->snd_back);
+    update_mouse_mode();
 }
 
 void menus_close_all(void) {
+    while (M->depth) {
+        int id = M->stack[--M->depth];
+        on_close(id);
+    }
     Game *g = game();
-    M->page = PAGE_NONE;
     if (g) {
         g->menu_open = false;
         if (g->container_open) game_rpc(RPC_CONTAINER_CLOSE, 0, 0, 0);
-        g->inventory_open = false;
-        g->container_open = false;
-        g->bench_open = false;
+        g->inventory_open = g->container_open = g->bench_open = false;
     }
     config_save(video_config_path());
     update_mouse_mode();
 }
 
-void menus_toggle_pause(void) {
-    Game *g = game();
-    if (g && (g->inventory_open || g->container_open || g->bench_open)) { menus_close_all(); return; }
-    if (M->page != PAGE_NONE) {
-        if (M->page == PAGE_PAUSE) menus_close_all();
-        else M->page = PAGE_PAUSE;
-    } else {
-        M->page = PAGE_PAUSE;
+void screens_confirm(int kind, const char *title, const char *text, int arg) {
+    M->confirm_kind = kind;
+    M->confirm_arg = arg;
+    dg_strcpy(M->confirm_title, sizeof(M->confirm_title), title);
+    dg_strcpy(M->confirm_text, sizeof(M->confirm_text), text);
+    screens_push(SCR_CONFIRM);
+}
+
+static GuiRect node_rect(const char *id) {
+    int i = gui_layout_find(M->nodes, M->node_count, id);
+    return i >= 0 ? M->nodes[i].rect : gui_rect(gui_w() * 0.2f, gui_h() * 0.15f, gui_w() * 0.6f, gui_h() * 0.7f);
+}
+
+GuiRect screens_modal_rect(void) { return node_rect("modal"); }
+GuiRect screens_dialog_rect(void) { return node_rect("dialog"); }
+
+// ------------------------------------------------------------------ conditions / layout
+
+static bool online(void) { return net_role() != NET_OFF; }
+
+static bool cond_true(const char *c) {
+    if (!c[0]) return true;
+    bool neg = c[0] == '!';
+    if (neg) c++;
+    bool v = true;
+    if (!strcmp(c, "steam")) v = net_steam_available();
+    else if (!strcmp(c, "online")) v = online();
+    else if (!strcmp(c, "world")) v = game_world() != NULL;
+    return neg ? !v : v;
+}
+
+static void solve_layout(void) {
+    for (int i = 0; i < M->node_count; i++) M->nodes[i].hidden = !cond_true(M->nodes[i].cond);
+    LayoutParams lp = gui_layout_params();
+    gui_layout_solve(M->nodes, M->node_count, &lp);
+    if (gui_debug())
+        for (int i = 0; i < M->node_count; i++)
+            if (!M->nodes[i].hidden) gui_debug_rect(M->nodes[i].rect, UI_RGBA(255, 120, 0, 160), M->nodes[i].id);
+}
+
+bool menus_can_pause(void) { return net_role() == NET_OFF || (net_role() == NET_HOST && net_host_client_count() == 0); }
+
+// ------------------------------------------------------------------ shared drawing
+
+GuiRect screens_modal_frame(GuiRect r, const char *title, const char *subtitle) {
+    gw_panel(r, true);
+    gui_block_rect(r);
+    float pad = gui_s(TH->pad + 6);
+    GuiText t = { gui_s(TH->t_title), GW_SEMIBOLD, TH->text, GUI_LEFT, 0.02f, true, false, 0 };
+    gd_text(&t, r.x + pad, r.y + gui_s(18), title);
+    if (subtitle && subtitle[0]) {
+        GuiText s = { gui_s(TH->t_small), GW_REGULAR, TH->text_faint, GUI_RIGHT, 0, false, false, r.w * 0.5f };
+        gd_text(&s, r.x + r.w - pad, r.y + gui_s(26), subtitle);
     }
-    if (g) g->menu_open = M->page != PAGE_NONE;
-    update_mouse_mode();
+    return gui_rect(r.x + pad, r.y + gui_s(64), r.w - pad * 2, r.h - gui_s(64) - pad * 0.75f);
+}
+
+void screens_footer_hint(GuiRect r, const char *text) {
+    GuiText t = { gui_s(TH->t_small), GW_REGULAR, TH->text_faint, GUI_RIGHT, 0, false, false, 0 };
+    gd_text(&t, r.x + r.w, r.y, text);
+}
+
+static void draw_brand(void) {
+    GuiRect r = node_rect("brand");
+    float a = gui_ease_out(gui_anim_t(gui_id("pause_open")) / 0.3f);
+    gd_alpha_push(a);
+    GuiText logo = { gui_s(40), GW_SEMIBOLD, TH->text, GUI_RIGHT, 0.16f, true, true, 0 };
+    float y = r.y + r.h - gui_s(84);
+    float w = gd_text(&logo, r.x + r.w, y, "Deadground");
+    gd_rect(gui_rect(r.x + r.w - w, y + gui_s(50), gui_s(46), gui_s(3)), TH->accent);
+    char line[160];
+    snprintf(line, sizeof(line), "v%s", DG_VERSION);
+    GuiText ver = { gui_s(TH->t_small), GW_MEDIUM, TH->text_faint, GUI_RIGHT, 0.04f, false, true, 0 };
+    gd_text(&ver, r.x + r.w, y + gui_s(58), line);
+    if (online()) {
+        NetStats st = net_stats();
+        Game *g = game();
+        if (net_role() == NET_CLIENT) snprintf(line, sizeof(line), "%s  ·  ping %.0f ms  ·  loss %.1f%%", st.transport, st.ping_ms, st.loss_pct);
+        else snprintf(line, sizeof(line), "Hosting via %s  ·  %d player%s", st.transport, net_host_client_count() + 1, net_host_client_count() ? "s" : "");
+        (void)g;
+        GuiText pl = { gui_s(TH->t_small), GW_REGULAR, TH->text_dim, GUI_RIGHT, 0, false, true, 0 };
+        gd_text(&pl, r.x + r.w, y + gui_s(78), line);
+    }
+    gd_alpha_pop();
+}
+
+static int sub_of(void) {
+    // The pause entry highlighted while its sub-menu is open.
+    for (int i = M->depth - 1; i >= 1; i--) {
+        int s = M->stack[i];
+        if (s == SCR_SETTINGS || s == SCR_MULTIPLAYER || s == SCR_INVENTORY) return s;
+    }
+    return SCR_NONE;
+}
+
+static void do_action(const char *action) {
+    if (!strcmp(action, "resume")) menus_close_all();
+    else if (!strcmp(action, "inventory")) { if (screens_top() != SCR_INVENTORY) { while (screens_top() != SCR_PAUSE && M->depth) screens_pop(); screens_push(SCR_INVENTORY); } }
+    else if (!strcmp(action, "settings")) { while (screens_top() != SCR_PAUSE && M->depth) screens_pop(); settings_open(-1); screens_push(SCR_SETTINGS); }
+    else if (!strcmp(action, "multiplayer")) { while (screens_top() != SCR_PAUSE && M->depth) screens_pop(); net_lan_refresh(); screens_push(SCR_MULTIPLAYER); }
+    else if (!strcmp(action, "invite")) net_steam_invite();
+    else if (!strcmp(action, "leave")) {
+        Game *g = game();
+        bool client = g && g->mode == GM_CLIENT;
+        screens_confirm(CONFIRM_LEAVE, client ? "Leave the game?" : "Stop hosting?",
+                        client ? "You will return to the local dev room." : "Connected players will be disconnected.", 0);
+    } else if (!strcmp(action, "quit")) screens_confirm(CONFIRM_QUIT, "Quit to desktop?", "Unsaved progress will be lost.", 0);
+}
+
+static void draw_pause(bool top) {
+    // Dim the scene a little behind the stack (a gradient from the left).
+    float a = gui_ease_out(gui_anim_t(gui_id("pause_open")) / TH->menu_in);
+    gd_rect_hgrad(gui_rect(0, 0, gui_w() * 0.55f, gui_h()), gui_rgba_mul(UI_RGBA(0, 0, 0, 200), a), UI_RGBA(0, 0, 0, 0));
+    gd_rect_grad(gui_rect(0, gui_h() * 0.45f, gui_w(), gui_h() * 0.55f), UI_RGBA(0, 0, 0, 0), gui_rgba_mul(UI_RGBA(0, 0, 0, 150), a));
+    int stack = gui_layout_find(M->nodes, M->node_count, "stack");
+    int sub = sub_of();
+    float t = gui_anim_t(gui_id("pause_open"));
+    int k = 0;
+    gui_push_input(top || sub != SCR_NONE);   // the stack stays usable next to a sub-menu
+    for (int i = 0; i < M->node_count; i++) {
+        LayoutNode *n = &M->nodes[i];
+        if (n->parent != stack || n->hidden) continue;
+        float appear = saturate((t - (float)k * TH->menu_stagger) / fmaxf(0.01f, TH->menu_in));
+        k++;
+        if (!n->action[0]) {
+            if (n->label[0]) {
+                gd_alpha_push(gui_ease_out(appear));
+                GuiText tt = { gui_s(TH->t_label + 1), GW_SEMIBOLD, TH->text_faint, GUI_LEFT, TH->tracking_caps * 1.6f, true, true, 0 };
+                gd_text(&tt, n->rect.x + gui_s(14), n->rect.y + n->rect.h - gd_line_height(tt.size) - gui_s(6), n->label);
+                gd_alpha_pop();
+            }
+            continue;
+        }
+        const char *label = n->label;
+        if (!strcmp(n->action, "leave")) {
+            Game *g = game();
+            label = g && g->mode == GM_CLIENT ? "Leave game" : "Stop hosting";
+        }
+        bool selected = (!strcmp(n->action, "settings") && sub == SCR_SETTINGS) || (!strcmp(n->action, "multiplayer") && sub == SCR_MULTIPLAYER) ||
+                        (!strcmp(n->action, "inventory") && sub == SCR_INVENTORY);
+        bool enabled = !(!strcmp(n->action, "inventory") && !game_local_player());
+        u32 flags_default = !strcmp(n->action, "resume");
+        (void)flags_default;
+        if (gw_menu_item(gui_id(n->id), n->rect, label, selected, appear, enabled)) {
+            M->pause_focus = gui_id(n->id);
+            do_action(n->action);
+        }
+    }
+    gui_pop_input();
+    draw_brand();
+}
+
+static void draw_confirm(bool top) {
+    GuiRect r = screens_dialog_rect();
+    float a = gui_ease_out(gui_anim_t(gui_idi("screen", SCR_CONFIRM)) / TH->modal_in);
+    gd_rect(gui_rect(0, 0, gui_w(), gui_h()), gui_rgba_mul(TH->scrim, a));
+    r.y += (1.0f - a) * gui_s(12);
+    gd_alpha_push(a);
+    gui_push_input(top);
+    gw_panel(r, true);
+    gui_block_rect(r);
+    float pad = gui_s(TH->pad + 4);
+    GuiText t = { gui_s(TH->t_title - 2), GW_SEMIBOLD, TH->text, GUI_LEFT, 0, false, false, r.w - pad * 2 };
+    gd_text(&t, r.x + pad, r.y + pad, M->confirm_title);
+    char text[288];
+    dg_strcpy(text, sizeof(text), M->confirm_text);
+    if (M->confirm_kind == CONFIRM_DISPLAY) {
+        snprintf(text, sizeof(text), "%s Reverting in %d s.", M->confirm_text, (int)ceilf(settings_confirm_left()));
+    }
+    GuiText b = { gui_s(TH->t_body), GW_REGULAR, TH->text_dim, GUI_LEFT, 0, false, false, 0 };
+    gd_text_wrap(&b, r.x + pad, r.y + pad + gui_s(40), r.w - pad * 2, text, true);
+    float bw = gui_s(150), bh = gui_s(TH->button_h + 4);
+    GuiRect yes = { r.x + r.w - pad - bw, r.y + r.h - pad - bh, bw, bh };
+    GuiRect no = { yes.x - bw - gui_s(10), yes.y, bw, bh };
+    const char *yes_l = "Confirm", *no_l = "Cancel";
+    int yes_kind = GB_PRIMARY;
+    switch (M->confirm_kind) {
+    case CONFIRM_QUIT: yes_l = "Quit"; yes_kind = GB_DANGER; break;
+    case CONFIRM_LEAVE: yes_l = "Leave"; yes_kind = GB_DANGER; break;
+    case CONFIRM_DROP: yes_l = "Drop"; break;
+    case CONFIRM_DISPLAY: yes_l = "Keep"; no_l = "Revert"; break;
+    case CONFIRM_RESET_BINDS: yes_l = "Reset"; yes_kind = GB_DANGER; break;
+    }
+    bool y = gw_button(gui_id("confirm_yes"), yes, yes_l, yes_kind, true);
+    bool n = gw_button(gui_id("confirm_no"), no, no_l, GB_SECONDARY, true);
+    if (top && !gui_focus()) gui_set_focus(gui_id("confirm_no"));
+    gui_focus_scope(r);
+    bool back = top && gui_nav(NAV_BACK);
+    if (back) gui_nav_consume(NAV_BACK);
+    gui_pop_input();
+    gd_alpha_pop();
+    if (!top) return;
+    if (y || n || back) {
+        int kind = M->confirm_kind;
+        bool yes_pressed = y;
+        screens_pop();
+        switch (kind) {
+        case CONFIRM_QUIT: if (yes_pressed) g_engine.quit = true; break;
+        case CONFIRM_LEAVE:
+            if (yes_pressed) { menus_close_all(); game_disconnect_to_local("left the session"); }
+            break;
+        case CONFIRM_DROP: inventory_confirm_drop(yes_pressed); break;
+        case CONFIRM_DISPLAY: settings_confirm_result(yes_pressed); break;
+        case CONFIRM_RESET_BINDS: if (yes_pressed) input_reset_bindings(); break;
+        }
+    }
+}
+
+// Called by the settings tick when the countdown runs out with the dialog still open.
+void screens_confirm_expired(void) {
+    if (screens_top() == SCR_CONFIRM && M->confirm_kind == CONFIRM_DISPLAY) {
+        M->depth--;
+        settings_confirm_result(false);
+    }
+}
+
+static void draw_modal(int id, bool top) {
+    GuiRect r = screens_modal_rect();
+    float a = gui_ease_out(gui_anim_t(gui_idi("screen", id)) / TH->modal_in);
+    r.y += (1.0f - a) * gui_s(14);
+    gd_alpha_push(a);
+    gui_push_input(top);
+    if (top) gui_focus_scope(r);
+    bool close = false;
+    switch (id) {
+    case SCR_SETTINGS: close = settings_draw(r); break;
+    case SCR_MULTIPLAYER: close = multiplayer_draw(r); break;
+    case SCR_BENCH: close = bench_draw(screens_dialog_rect().w > 0 ? r : r); break;
+    default: break;
+    }
+    gui_pop_input();
+    gd_alpha_pop();
+    if (close && top) screens_pop();
+}
+
+// ------------------------------------------------------------------ public API
+
+bool menus_wants_mouse(void) {
+    Game *g = game();
+    return (M && M->depth > 0) || (g && (g->inventory_open || g->container_open || g->bench_open)) || vfx_editor_open() || holdpoint_editor_open() ||
+           daynight_editor_open() || flesh_range_open();
+}
+
+bool menus_open(void) { return M && M->depth > 0; }
+bool menus_dev_tools_open(void) { return vfx_editor_open() || holdpoint_editor_open() || daynight_editor_open() || flesh_range_open(); }
+void menus_frame_end(void) { if (M && M->inited) gui_frame_end(); }
+bool menus_paused(void) { return M && M->depth > 0 && M->stack[0] == SCR_PAUSE && menus_can_pause(); }
+
+void menus_toggle_pause(void) {
+    if (!M->depth) { screens_push(SCR_PAUSE); return; }
+    // Esc with screens open: handled as "back" by the screens (gui NAV_BACK) - nothing here.
 }
 
 void menus_toggle_inventory(void) {
     Game *g = game();
-    if (!g || M->page != PAGE_NONE) return;
-    if (g->container_open) { menus_close_all(); return; }
-    g->inventory_open = !g->inventory_open;
-    g->inv_selected = -1;
-    update_mouse_mode();
+    if (!g || !g->world) return;
+    if (screens_top() == SCR_INVENTORY) { screens_pop(); return; }
+    if (M->depth) return;
+    screens_push(SCR_INVENTORY);
 }
 
 void menus_tick(float dt) {
-    if (M->confirm_timer > 0) {
-        M->confirm_timer -= dt;
-        if (M->confirm_timer <= 0) {
-            write_graphics(&M->applied_backup);
-            M->pending = M->applied_backup;
-            log_info("video: settings reverted (not confirmed)");
-        }
+    gui_frame_begin(dt);
+    Game *g = game();
+    // Gamepad Start: pause / resume. Tab / I / pad Back (or the inventory binding): inventory.
+    if (gui_nav(NAV_MENU)) {
+        gui_nav_consume(NAV_MENU);
+        if (!M->depth) screens_push(SCR_PAUSE);
+        else menus_close_all();
     }
-    // Keep the cursor state consistent with open UI (e.g. container opened by an event).
+    bool inv_key = gui_nav(NAV_VIEW) || (!M->depth && !console_is_open() && input_consume_press(ACT_INVENTORY));
+    if (inv_key && !console_is_open() && (!M->depth || screens_top() == SCR_INVENTORY) && inventory_wants_back()) {
+        gui_nav_consume(NAV_VIEW);
+        menus_toggle_inventory();
+    }
+    // World-driven screens.
+    if (g && g->container_open && !screens_has(SCR_INVENTORY)) screens_push(SCR_INVENTORY);
+    if (g && g->bench_open && !screens_has(SCR_BENCH)) screens_push(SCR_BENCH);
+    if (g && !g->world && screens_has(SCR_INVENTORY)) menus_close_all();
+    settings_tick(dt);
+    if (g) {
+        g->menu_open = M->depth > 0;
+        g->paused = menus_paused();
+    }
     update_mouse_mode();
 }
 
-// ------------------------------------------------------------------ widgets
-
-static float S(float v) { return v * ui_scale(); }
-
-static void label_value(struct nk_context *ctx, const char *label, const char *fmt, float v) {
-    char buf[64];
-    snprintf(buf, sizeof(buf), fmt, v);
-    nk_layout_row_begin(ctx, NK_DYNAMIC, S(24), 2);
-    nk_layout_row_push(ctx, 0.75f);
-    nk_label(ctx, label, NK_TEXT_LEFT);
-    nk_layout_row_push(ctx, 0.25f);
-    nk_label(ctx, buf, NK_TEXT_RIGHT);
-    nk_layout_row_end(ctx);
-}
-
-static bool slider_f(struct nk_context *ctx, const char *label, float *v, float lo, float hi, float step, const char *fmt) {
-    label_value(ctx, label, fmt, *v);
-    nk_layout_row_dynamic(ctx, S(22), 1);
-    float old = *v;
-    nk_slider_float(ctx, lo, v, hi, step);
-    return old != *v;
-}
-
-static void slider_cvar(struct nk_context *ctx, const char *label, const char *name, float lo, float hi, float step, const char *fmt) {
-    Cvar *c = cv(name);
-    if (!c) return;
-    float v = c->f;
-    if (slider_f(ctx, label, &v, lo, hi, step, fmt)) cvar_set_float(c, v);
-}
-
-static void check_cvar(struct nk_context *ctx, const char *label, const char *name) {
-    Cvar *c = cv(name);
-    if (!c) return;
-    nk_layout_row_dynamic(ctx, S(24), 1);
-    nk_bool v = c->i != 0;
-    if (nk_checkbox_label(ctx, label, &v) != 0 || (v != 0) != (c->i != 0)) cvar_set_int(c, v ? 1 : 0);
-}
-
-static int combo_row(struct nk_context *ctx, const char *label, const char **items, int count, int selected) {
-    nk_layout_row_begin(ctx, NK_DYNAMIC, S(26), 2);
-    nk_layout_row_push(ctx, 0.45f);
-    nk_label(ctx, label, NK_TEXT_LEFT);
-    nk_layout_row_push(ctx, 0.55f);
-    int r = nk_combo(ctx, items, count, selected, (int)S(24), nk_vec2(S(240), S(260)));
-    nk_layout_row_end(ctx);
-    return r;
-}
-
-// ------------------------------------------------------------------ pages
-
-static struct nk_rect centered(float w, float h) { return nk_rect((ui_width() - w) * 0.5f, (ui_height() - h) * 0.5f, w, h); }
-
-static void draw_pause(struct nk_context *ctx) {
-    Game *g = game();
-    if (nk_begin(ctx, "PAUSED", centered(S(320), S(450)), NK_WINDOW_BORDER | NK_WINDOW_TITLE | NK_WINDOW_NO_SCROLLBAR)) {
-        nk_layout_row_dynamic(ctx, S(40), 1);
-        if (nk_button_label(ctx, "Resume")) { menus_close_all(); nk_end(ctx); return; }
-        if (nk_button_label(ctx, "Skin")) M->page = PAGE_SKIN;
-        if (nk_button_label(ctx, "Settings")) { M->page = PAGE_SETTINGS; M->pending = read_graphics(); M->pending_valid = true; collect_resolutions(); }
-        if (nk_button_label(ctx, "Multiplayer")) { M->page = PAGE_MULTIPLAYER; net_lan_refresh(); }
-        bool steam = net_steam_available();
-        if (!steam) nk_widget_disable_begin(ctx);
-        if (nk_button_label(ctx, steam ? "Invite Friends (Steam)" : "Invite Friends (Steam unavailable)")) net_steam_invite();
-        if (!steam) nk_widget_disable_end(ctx);
-        bool can_disconnect = net_role() != NET_OFF;
-        if (!can_disconnect) nk_widget_disable_begin(ctx);
-        if (nk_button_label(ctx, g && g->mode == GM_CLIENT ? "Disconnect" : "Stop Hosting")) {
-            menus_close_all();
-            game_disconnect_to_local("left the session");
-        }
-        if (!can_disconnect) nk_widget_disable_end(ctx);
-        if (nk_button_label(ctx, "Quit")) g_engine.quit = true;
-    }
-    nk_end(ctx);
-}
-
-static void combo_cvar(struct nk_context *ctx, const char *label, const char *name, const char **items, int count) {
-    Cvar *c = cv(name);
-    if (!c) return;
-    int sel = combo_row(ctx, label, items, count, DG_CLAMP(c->i, 0, count - 1));
-    if (sel != c->i) cvar_set_int(c, sel);
-}
-
-static void section(struct nk_context *ctx, const char *title) {
-    nk_layout_row_dynamic(ctx, S(8), 1);
-    nk_layout_row_dynamic(ctx, S(24), 1);
-    nk_label_colored(ctx, title, NK_TEXT_LEFT, nk_rgb(240, 200, 140));
-}
-
-// Post-processing: applied immediately (cvars, saved with the config). The preset sets the
-// quality options; touching any of them shows "Custom".
-static void draw_post_settings(struct nk_context *ctx) {
-    section(ctx, "Post-processing");
-    int cur = game_post_detect_preset();
-    static const char *presets[] = { "Low", "Medium", "High", "Ultra", "Custom" };
-    int sel = combo_row(ctx, "Quality preset", presets, 5, cur);
-    if (sel != cur && sel < 4) game_post_apply_preset(sel);
-    static const char *aa[] = { "Off", "FXAA", "SMAA 1x", "TAA" };
-    combo_cvar(ctx, "Anti-aliasing", "r_aa", aa, 4);
-    static const char *up[] = { "Off (native)", "TAA-U", "FSR 1", "FSR 2 (not bundled: FSR 1)", "DLSS (not bundled: FSR 1)" };
-    combo_cvar(ctx, "Upscaler", "r_upscaler", up, 5);
-    if (cv("r_upscaler") && cv("r_upscaler")->i) slider_cvar(ctx, "Upscaler render resolution", "r_upscale_ratio", 0.5f, 1.0f, 0.01f, "%.2fx");
-    slider_cvar(ctx, "Sharpening (CAS)", "r_sharpen", 0, 1, 0.05f, "%.2f");
-    static const char *ao[] = { "Off", "Low", "High" };
-    combo_cvar(ctx, "Ambient occlusion (GTAO)", "r_ao", ao, 3);
-    static const char *cs[] = { "Off", "Low", "High" };
-    combo_cvar(ctx, "Contact shadows", "r_contact_shadows", cs, 3);
-    static const char *ssr[] = { "Off", "Half resolution", "Full resolution" };
-    combo_cvar(ctx, "Screen-space reflections", "r_ssr", ssr, 3);
-    check_cvar(ctx, "Screen-space global illumination", "r_ssgi");
-    static const char *vol[] = { "Off", "Low", "High", "Ultra" };
-    combo_cvar(ctx, "Volumetric fog / light shafts", "r_volumetrics", vol, 4);
-    static const char *mb[] = { "Off", "Camera", "Camera + objects" };
-    combo_cvar(ctx, "Motion blur", "r_motion_blur", mb, 3);
-    if (cv("r_motion_blur") && cv("r_motion_blur")->i) slider_cvar(ctx, "Motion blur strength", "r_motion_blur_strength", 0.05f, 1, 0.05f, "%.2f");
-    static const char *dof[] = { "Off", "When aiming", "Always" };
-    combo_cvar(ctx, "Depth of field", "r_dof", dof, 3);
-    check_cvar(ctx, "Bloom", "r_bloom");
-    static const char *bq[] = { "-", "Low", "High" };
-    combo_cvar(ctx, "Bloom quality", "r_bloom_quality", bq, 3);
-    slider_cvar(ctx, "Bloom intensity", "r_bloom_intensity", 0, 0.3f, 0.005f, "%.3f");
-    slider_cvar(ctx, "Lens flare", "r_lens_flare", 0, 2, 0.05f, "%.2f");
-    slider_cvar(ctx, "Lens dirt", "r_lens_dirt", 0, 2, 0.05f, "%.2f");
-    slider_cvar(ctx, "Chromatic aberration", "r_chromatic", 0, 2, 0.05f, "%.2f");
-    slider_cvar(ctx, "Vignette", "r_vignette", 0, 1, 0.05f, "%.2f");
-    slider_cvar(ctx, "Film grain", "r_film_grain", 0, 1, 0.01f, "%.2f");
-    section(ctx, "Image");
-    static const char *tm[] = { "ACES (filmic)", "AgX", "PBR Neutral" };
-    combo_cvar(ctx, "Tonemapper", "r_tonemapper", tm, 3);
-    check_cvar(ctx, "Auto exposure", "r_auto_exposure");
-    slider_cvar(ctx, "Exposure compensation (EV)", "r_exposure", -3, 3, 0.1f, "%+.1f");
-    static const char *cb[] = { "Off", "Protanopia", "Deuteranopia", "Tritanopia" };
-    combo_cvar(ctx, "Colour-blind filter", "r_colorblind", cb, 4);
-    slider_cvar(ctx, "Screen effects (damage, flash ...)", "r_post_feedback", 0, 1, 0.05f, "%.2f");
-    nk_layout_row_dynamic(ctx, S(24), 1);
-    if (render_hdr_supported()) {
-        check_cvar(ctx, "HDR10 output", "r_hdr_output");
-        slider_cvar(ctx, "HDR paper white (nits)", "r_hdr_paper_white", 80, 500, 10, "%.0f");
-        slider_cvar(ctx, "HDR peak brightness (nits)", "r_hdr_max_nits", 400, 4000, 50, "%.0f");
-    } else {
-        nk_label_colored(ctx, "HDR10 output: display not HDR capable", NK_TEXT_LEFT, nk_rgb(150, 150, 150));
-    }
-}
-
-static void draw_graphics(struct nk_context *ctx) {
-    GraphicsSettings *p = &M->pending;
-    // Resolution
-    char labels[MAX_RES][24];
-    const char *items[MAX_RES];
-    int sel = 0;
-    for (int i = 0; i < M->res_count; i++) {
-        snprintf(labels[i], sizeof(labels[i]), "%d x %d", M->res_w[i], M->res_h[i]);
-        items[i] = labels[i];
-        if (M->res_w[i] == p->width && M->res_h[i] == p->height) sel = i;
-    }
-    int r = combo_row(ctx, "Resolution", items, M->res_count, sel);
-    p->width = M->res_w[r];
-    p->height = M->res_h[r];
-    static const char *modes[] = { "Windowed", "Borderless", "Fullscreen" };
-    p->mode = combo_row(ctx, "Window mode", modes, 3, p->mode);
-    nk_layout_row_dynamic(ctx, S(24), 1);
-    nk_bool vs = p->vsync != 0;
-    nk_checkbox_label(ctx, "VSync", &vs);
-    p->vsync = vs ? 1 : 0;
-    slider_f(ctx, "Field of view (camera)", &p->fov, 50, 120, 1, "%.0f");
-    // Hands / weapon / first-person arms: own FOV, or follow the camera.
-    nk_layout_row_dynamic(ctx, S(24), 1);
-    nk_bool vm_follow = p->vm_fov < 1.0f;
-    nk_checkbox_label(ctx, "Hands FOV follows camera", &vm_follow);
-    if (vm_follow) p->vm_fov = 0;
-    else {
-        if (p->vm_fov < 1.0f) p->vm_fov = p->fov;
-        slider_f(ctx, "Field of view (hands / weapon)", &p->vm_fov, 40, 120, 1, "%.0f");
-    }
-    slider_f(ctx, "Render scale", &p->scale, 0.5f, 2.0f, 0.05f, "%.2fx");
-    static const char *shadow[] = { "Off", "Low", "Medium", "High" };
-    p->shadow = combo_row(ctx, "Shadow quality", shadow, 4, p->shadow);
-    static const char *texq[] = { "Low", "Medium", "High" };
-    p->texq = combo_row(ctx, "Texture quality", texq, 3, p->texq);
-    static const char *vfxq[] = { "Low", "Medium", "High", "Ultra" };
-    p->vfxq = combo_row(ctx, "Effects quality (particles)", vfxq, 4, p->vfxq);
-    static const char *gore[] = { "Off", "Low", "High" };
-    p->gore = combo_row(ctx, "Gore (blood, wounds)", gore, 3, p->gore);
-    static const char *aniso[] = { "Off", "2x", "4x", "8x", "16x" };
-    static const int aniso_v[] = { 1, 2, 4, 8, 16 };
-    int ai = 0;
-    for (int i = 0; i < 5; i++) if (aniso_v[i] == p->aniso) ai = i;
-    p->aniso = aniso_v[combo_row(ctx, "Anisotropic filtering", aniso, 5, ai)];
-    float fps = (float)p->maxfps;
-    slider_f(ctx, "Max FPS (0 = unlimited)", &fps, 0, 300, 10, "%.0f");
-    p->maxfps = (int)fps;
-    slider_f(ctx, "Brightness", &p->brightness, 0.5f, 2.0f, 0.05f, "%.2f");
-    slider_f(ctx, "Gamma", &p->gamma, 0.6f, 1.6f, 0.02f, "%.2f");
-
-    nk_layout_row_dynamic(ctx, S(34), 2);
-    if (nk_button_label(ctx, "Apply")) {
-        GraphicsSettings cur = read_graphics();
-        bool display_change = cur.width != p->width || cur.height != p->height || cur.mode != p->mode;
-        M->applied_backup = cur;
-        write_graphics(p);
-        if (display_change) M->confirm_timer = 15.0f;
-    }
-    if (nk_button_label(ctx, "Revert")) M->pending = read_graphics();
-    {
-        // Weapon sights.
-        Cvar *sm = cv("r_scope_mode");
-        if (sm) {
-            static const char *labels[2] = { "Picture-in-picture", "Full screen" };
-            int ns = combo_row(ctx, "Scopes", labels, 2, DG_CLAMP(sm->i, 0, 1));
-            if (ns != sm->i) cvar_set_int(sm, ns);
-        }
-        slider_cvar(ctx, "Scope picture resolution", "r_scope_pip_scale", 0.2f, 1.0f, 0.05f, "%.2f");
-        slider_cvar(ctx, "Red dot brightness", "sight_brightness", 0.0f, 3.0f, 0.05f, "%.2f");
-        check_cvar(ctx, "ADS depth of field", "ads_dof");
-    }
-    draw_post_settings(ctx);
-}
-
-static void draw_controls(struct nk_context *ctx) {
-    slider_cvar(ctx, "Mouse sensitivity X", "cl_sensitivity", 0.1f, 10, 0.05f, "%.2f");
-    slider_cvar(ctx, "Mouse sensitivity Y", "cl_sensitivity_y", 0.1f, 10, 0.05f, "%.2f");
-    slider_cvar(ctx, "ADS sensitivity multiplier", "cl_ads_sensitivity", 0.1f, 1.5f, 0.05f, "%.2f");
-    {
-        // Sight FOV scaling of the ADS sensitivity (game_sights.c): monitor distance / FOV ratio / off.
-        Cvar *m = cv("ads_sens_mode");
-        if (m) {
-            static const char *modes[3] = { "monitor_distance", "fov_ratio", "off" };
-            static const char *labels[3] = { "Monitor distance", "FOV ratio", "Off" };
-            int sel = 0;
-            for (int i = 0; i < 3; i++) if (!strcmp(m->str, modes[i])) sel = i;
-            int ns = combo_row(ctx, "ADS sensitivity scaling", labels, 3, sel);
-            if (ns != sel) cvar_set(m->name, modes[ns]);
-            slider_cvar(ctx, sel == 1 ? "ADS FOV ratio coefficient" : "ADS monitor distance coefficient", "ads_sens_coef", 0.0f, 2.0f, 0.01f, "%.2f");
-        }
-    }
-    check_cvar(ctx, "Invert Y", "cl_invert_y");
-    slider_cvar(ctx, "Gamepad sensitivity", "pad_sensitivity", 0.5f, 8, 0.1f, "%.1f");
-    slider_cvar(ctx, "Gamepad deadzone", "pad_deadzone", 0, 0.5f, 0.01f, "%.2f");
-    check_cvar(ctx, "Toggle crouch (instead of hold)", "cl_crouch_toggle");
-    check_cvar(ctx, "Toggle sprint (instead of hold)", "cl_sprint_toggle");
-    check_cvar(ctx, "Head bob", "cl_headbob");
-    nk_layout_row_dynamic(ctx, S(26), 1);
-    nk_label(ctx, input_capturing() ? "Press a key / button (Esc cancels)..." : "Key bindings (click to rebind):", NK_TEXT_LEFT);
-    for (int a = 0; a < ACT_COUNT; a++) {
-        nk_layout_row_begin(ctx, NK_DYNAMIC, S(24), 3);
-        nk_layout_row_push(ctx, 0.44f);
-        nk_label(ctx, action_label((Action)a), NK_TEXT_LEFT);
-        for (int s = 0; s < BINDS_PER_ACTION; s++) {
-            nk_layout_row_push(ctx, 0.28f);
-            char name[48];
-            binding_name(input_get_binding((Action)a, s), name, sizeof(name));
-            if (nk_button_label(ctx, name)) input_begin_capture((Action)a, s);
-        }
-        nk_layout_row_end(ctx);
-    }
-    nk_layout_row_dynamic(ctx, S(30), 1);
-    if (nk_button_label(ctx, "Reset bindings to defaults")) input_reset_bindings();
-}
-
-static void draw_crosshair_tab(struct nk_context *ctx) {
-    static const char *styles[] = { "Cross", "Cross + dot", "Dot", "Circle" };
-    Cvar *st = cv("crosshair_style");
-    if (st) {
-        int sel = combo_row(ctx, "Style", styles, 4, DG_CLAMP(st->i, 0, 3));
-        if (sel != st->i) cvar_set_int(st, sel);
-    }
-    Cvar *col = cv("crosshair_color");
-    if (col) {
-        const char *names[8];
-        int n = DG_MIN(crosshair_color_count(), 8);
-        for (int i = 0; i < n; i++) names[i] = crosshair_color_name(i);
-        int sel = combo_row(ctx, "Color", names, n, DG_CLAMP(col->i, 0, n - 1));
-        if (sel != col->i) cvar_set_int(col, sel);
-    }
-    slider_cvar(ctx, "Line length", "crosshair_length", 1, 40, 0.5f, "%.1f");
-    slider_cvar(ctx, "Line thickness", "crosshair_thickness", 1, 8, 0.5f, "%.1f");
-    slider_cvar(ctx, "Extra gap", "crosshair_gap", 0, 30, 0.5f, "%.1f");
-    slider_cvar(ctx, "Opacity", "crosshair_opacity", 0.1f, 1, 0.05f, "%.2f");
-    check_cvar(ctx, "Outline", "crosshair_outline");
-    check_cvar(ctx, "Tint over enemies / friendlies", "crosshair_target_color");
-    check_cvar(ctx, "Hit markers", "crosshair_hitmarker");
-    check_cvar(ctx, "Follow camera kick (pin to screen center)", "crosshair_follow_kick");
-    nk_layout_row_dynamic(ctx, S(10), 1);
-    slider_cvar(ctx, "Weapon kick (visual only)", "wpn_visual_scale", 0, 2, 0.05f, "%.2f");
-    nk_layout_row_dynamic(ctx, S(22), 1);
-    nk_label(ctx, "The gap shows the exact bullet spread cone. Palette: assets/ui/crosshair.json", NK_TEXT_LEFT);
-    nk_layout_row_dynamic(ctx, S(30), 1);
-    if (nk_button_label(ctx, "Reload crosshair style")) crosshair_reload();
-}
-
-static void draw_audio(struct nk_context *ctx) {
-    slider_cvar(ctx, "Master volume", "snd_master", 0, 1, 0.01f, "%.2f");
-    slider_cvar(ctx, "Music volume", "snd_music", 0, 1, 0.01f, "%.2f");
-    slider_cvar(ctx, "Effects volume", "snd_sfx", 0, 1, 0.01f, "%.2f");
-    slider_cvar(ctx, "Voice volume", "snd_voice", 0, 1, 0.01f, "%.2f");
-}
-
-static void draw_settings(struct nk_context *ctx) {
-    if (nk_begin(ctx, "SETTINGS", centered(S(620), S(640)), NK_WINDOW_BORDER | NK_WINDOW_TITLE)) {
-        nk_layout_row_dynamic(ctx, S(32), 5);
-        if (nk_button_label(ctx, M->tab == TAB_GRAPHICS ? "> Graphics" : "Graphics")) M->tab = TAB_GRAPHICS;
-        if (nk_button_label(ctx, M->tab == TAB_CONTROLS ? "> Controls" : "Controls")) M->tab = TAB_CONTROLS;
-        if (nk_button_label(ctx, M->tab == TAB_CROSSHAIR ? "> Crosshair" : "Crosshair")) M->tab = TAB_CROSSHAIR;
-        if (nk_button_label(ctx, M->tab == TAB_AUDIO ? "> Audio" : "Audio")) M->tab = TAB_AUDIO;
-        if (nk_button_label(ctx, "Back")) { config_save(video_config_path()); M->page = PAGE_PAUSE; }
-        switch (M->tab) {
-        case TAB_GRAPHICS: draw_graphics(ctx); break;
-        case TAB_CONTROLS: draw_controls(ctx); break;
-        case TAB_CROSSHAIR: draw_crosshair_tab(ctx); break;
-        case TAB_AUDIO: draw_audio(ctx); break;
-        }
-    }
-    nk_end(ctx);
-    if (M->confirm_timer > 0) {
-        if (nk_begin(ctx, "Confirm display settings", centered(S(380), S(150)), NK_WINDOW_BORDER | NK_WINDOW_TITLE | NK_WINDOW_NO_SCROLLBAR)) {
-            char buf[96];
-            snprintf(buf, sizeof(buf), "Keep these display settings? Reverting in %d s", (int)ceilf(M->confirm_timer));
-            nk_layout_row_dynamic(ctx, S(30), 1);
-            nk_label(ctx, buf, NK_TEXT_CENTERED);
-            nk_layout_row_dynamic(ctx, S(36), 2);
-            if (nk_button_label(ctx, "Keep")) { M->confirm_timer = 0; config_save(video_config_path()); }
-            if (nk_button_label(ctx, "Revert")) { M->confirm_timer = 0; write_graphics(&M->applied_backup); M->pending = M->applied_backup; }
-        }
-        nk_end(ctx);
-    }
-}
-
-// Skin picker: the character skins of assets/human/skins.json (cl_skin, saved with the
-// settings). Applies immediately; non-player characters and zombies keep their own looks.
-static void draw_skin(struct nk_context *ctx) {
-    if (nk_begin(ctx, "SKIN", centered(S(360), S(420)), NK_WINDOW_BORDER | NK_WINDOW_TITLE)) {
-        Cvar *cs = cv("cl_skin");
-        int n = chars_skin_count();
-        nk_layout_row_dynamic(ctx, S(22), 1);
-        nk_label_colored(ctx, "Your character (visible in third person / mirrors / shadow):", NK_TEXT_LEFT, nk_rgb(170, 170, 170));
-        nk_layout_row_dynamic(ctx, S(36), 1);
-        for (int i = 0; i < n; i++) {
-            bool cur = cs && !strcmp(cs->str, chars_skin_id(i));
-            char label[96];
-            snprintf(label, sizeof(label), "%s%s", cur ? "> " : "", chars_skin_name(i));
-            if (nk_button_label(ctx, label) && cs) cvar_set_cv(cs, chars_skin_id(i));
-        }
-        if (cs && !cs->str[0]) {
-            nk_layout_row_dynamic(ctx, S(22), 1);
-            nk_label(ctx, "(using the default skin)", NK_TEXT_LEFT);
-        }
-        nk_layout_row_dynamic(ctx, S(34), 2);
-        if (nk_button_label(ctx, "Third person preview")) {
-            Cvar *tp = cv("cl_thirdperson");
-            if (tp) cvar_set_int(tp, tp->i ? 0 : 1);
-        }
-        if (nk_button_label(ctx, "Back")) { config_save(video_config_path()); M->page = PAGE_PAUSE; }
-    }
-    nk_end(ctx);
-}
-
-static void draw_multiplayer(struct nk_context *ctx) {
-    if (nk_begin(ctx, "MULTIPLAYER", centered(S(560), S(520)), NK_WINDOW_BORDER | NK_WINDOW_TITLE)) {
-        NetRole role = net_role();
-        nk_layout_row_dynamic(ctx, S(24), 1);
-        char status[128];
-        snprintf(status, sizeof(status), "Status: %s (%s)", role == NET_HOST ? "hosting" : role == NET_CLIENT ? "connected" : "offline", net_transport_name());
-        nk_label(ctx, status, NK_TEXT_LEFT);
-        nk_layout_row_dynamic(ctx, S(34), 2);
-        if (nk_button_label(ctx, role == NET_HOST ? "LAN hosting active" : "Host LAN game")) {
-            if (role != NET_HOST) {
-                if (game()->mode != GM_HOST) game_host(game()->g_map->str);
-                net_host(TRANSPORT_LAN, (u16)cv("net_port")->i);
-            }
-        }
-        bool steam = net_steam_available();
-        if (!steam) nk_widget_disable_begin(ctx);
-        if (nk_button_label(ctx, steam ? "Host Steam lobby" : "Steam unavailable (LAN build)")) {
-            if (game()->mode != GM_HOST) game_host(game()->g_map->str);
-            net_host(TRANSPORT_STEAM, 0);
-        }
-        if (!steam) nk_widget_disable_end(ctx);
-
-        nk_layout_row_dynamic(ctx, S(24), 1);
-        nk_label(ctx, "Direct connect (ip:port):", NK_TEXT_LEFT);
-        nk_layout_row_begin(ctx, NK_DYNAMIC, S(30), 2);
-        nk_layout_row_push(ctx, 0.7f);
-        nk_edit_string(ctx, NK_EDIT_FIELD, M->connect_addr, &M->connect_len, (int)sizeof(M->connect_addr) - 1, nk_filter_ascii);
-        nk_layout_row_push(ctx, 0.3f);
-        if (nk_button_label(ctx, "Connect")) {
-            M->connect_addr[M->connect_len] = 0;
-            menus_close_all();
-            net_connect(TRANSPORT_LAN, M->connect_addr);
-        }
-        nk_layout_row_end(ctx);
-
-        nk_layout_row_dynamic(ctx, S(30), 2);
-        nk_label(ctx, "LAN games:", NK_TEXT_LEFT);
-        if (nk_button_label(ctx, "Refresh")) net_lan_refresh();
-        const LanServer *servers;
-        int n = net_lan_servers(&servers);
-        if (!n) {
-            nk_layout_row_dynamic(ctx, S(24), 1);
-            nk_label_colored(ctx, "No LAN games found (broadcast on port 27016)", NK_TEXT_LEFT, nk_rgb(150, 150, 150));
-        }
-        for (int i = 0; i < n; i++) {
-            char line[160];
-            snprintf(line, sizeof(line), "%s  [%s]  %d/%d  %s  %.0f ms", servers[i].name, servers[i].map, servers[i].players,
-                     servers[i].max_players, servers[i].address, servers[i].ping_ms);
-            nk_layout_row_begin(ctx, NK_DYNAMIC, S(28), 2);
-            nk_layout_row_push(ctx, 0.78f);
-            nk_label(ctx, line, NK_TEXT_LEFT);
-            nk_layout_row_push(ctx, 0.22f);
-            if (nk_button_label(ctx, "Join")) {
-                char addr[64];
-                dg_strcpy(addr, sizeof(addr), servers[i].address);
-                menus_close_all();
-                net_connect(TRANSPORT_LAN, addr);
-                nk_layout_row_end(ctx);
-                break;
-            }
-            nk_layout_row_end(ctx);
-        }
-        nk_layout_row_dynamic(ctx, S(34), 1);
-        if (nk_button_label(ctx, "Back")) M->page = PAGE_PAUSE;
-    }
-    nk_end(ctx);
-}
-
-// ------------------------------------------------------------------ inventory / container
-
-static void slot_button(struct nk_context *ctx, World *w, const InvSlot *s, int id, bool selected, bool *left, bool *right) {
-    char label[48];
-    const ItemDef *d = item_def(w->items, s->item);
-    if (!s->item) snprintf(label, sizeof(label), " ");
-    else if (s->count > 1) snprintf(label, sizeof(label), "%.10s x%d", d->name, s->count);
-    else if (item_weapon(w->items, s->item) && item_weapon(w->items, s->item)->mag_size) snprintf(label, sizeof(label), "%.10s [%d]", d->name, s->ammo);
-    else snprintf(label, sizeof(label), "%.12s", d->name);
-    struct nk_rect bounds = nk_widget_bounds(ctx);
-    struct nk_style_button style = ctx->style.button;
-    if (s->item) {
-        struct nk_color c = nk_rgba((nk_byte)(d->color.x * 120), (nk_byte)(d->color.y * 120), (nk_byte)(d->color.z * 120), 255);
-        style.normal = nk_style_item_color(c);
-    }
-    if (selected) style.border_color = nk_rgb(230, 140, 50), style.border = 3;
-    *left = nk_button_label_styled(ctx, &style, label) != 0;
-    *right = nk_input_is_mouse_click_in_rect(&ctx->input, NK_BUTTON_RIGHT, bounds) != 0;
-}
-
-static void draw_item_info(struct nk_context *ctx, World *w, const InvSlot *s) {
-    if (!s || !s->item) return;
-    const ItemDef *d = item_def(w->items, s->item);
-    nk_layout_row_dynamic(ctx, S(22), 1);
-    nk_label_colored(ctx, d->name, NK_TEXT_LEFT, nk_rgb(240, 200, 140));
-    nk_layout_row_dynamic(ctx, S(22), 1);
-    nk_label(ctx, d->desc, NK_TEXT_LEFT);
-}
-
-static void draw_inventory(struct nk_context *ctx, bool with_container) {
-    Game *g = game();
-    World *w = g->world;
-    Player *p = game_local_player();
-    if (!p) return;
-    float bw = S(92), bh = S(46);
-    float win_w = bw * INV_BACKPACK_W + S(60);
-    float x = with_container ? ui_width() * 0.5f - win_w - S(10) : (ui_width() - win_w) * 0.5f;
-    if (nk_begin(ctx, "INVENTORY", nk_rect(x, ui_height() * 0.15f, win_w, S(560)), NK_WINDOW_BORDER | NK_WINDOW_TITLE | NK_WINDOW_NO_SCROLLBAR)) {
-        nk_layout_row_dynamic(ctx, S(20), 1);
-        nk_label_colored(ctx, with_container ? "Click: put into crate   Right-click: drop" : "Click two slots to move/swap   Right-click: drop", NK_TEXT_LEFT, nk_rgb(150, 150, 150));
-        nk_layout_row_dynamic(ctx, S(20), 1);
-        nk_label(ctx, "Backpack", NK_TEXT_LEFT);
-        for (int row = 0; row < INV_BACKPACK_H; row++) {
-            nk_layout_row_static(ctx, bh, (int)bw - 4, INV_BACKPACK_W);
-            for (int c = 0; c < INV_BACKPACK_W; c++) {
-                int si = INV_HOTBAR + row * INV_BACKPACK_W + c;
-                bool l, r;
-                slot_button(ctx, w, &p->inv.slots[si], si, g->inv_selected == si, &l, &r);
-                if (r && p->inv.slots[si].item) game_rpc(RPC_INV_DROP, si, 0, 0);
-                else if (l) {
-                    if (with_container) { if (p->inv.slots[si].item) game_rpc(RPC_CONTAINER_PUT, si, 0, 0); }
-                    else if (g->inv_selected < 0) { if (p->inv.slots[si].item) g->inv_selected = si; }
-                    else { game_rpc(RPC_INV_MOVE, g->inv_selected, si, 0); g->inv_selected = -1; }
-                }
-            }
-        }
-        nk_layout_row_dynamic(ctx, S(20), 1);
-        nk_label(ctx, "Hotbar (1-9)", NK_TEXT_LEFT);
-        for (int row = 0; row < 2; row++) {
-            nk_layout_row_static(ctx, bh, (int)bw - 4, row == 0 ? 5 : 4);
-            for (int c = 0; c < (row == 0 ? 5 : 4); c++) {
-                int si = row * 5 + c;
-                bool l, r;
-                slot_button(ctx, w, &p->inv.slots[si], si, g->inv_selected == si, &l, &r);
-                if (r && p->inv.slots[si].item) game_rpc(RPC_INV_DROP, si, 0, 0);
-                else if (l) {
-                    if (with_container) { if (p->inv.slots[si].item) game_rpc(RPC_CONTAINER_PUT, si, 0, 0); }
-                    else if (g->inv_selected < 0) { if (p->inv.slots[si].item) g->inv_selected = si; }
-                    else { game_rpc(RPC_INV_MOVE, g->inv_selected, si, 0); g->inv_selected = -1; }
-                }
-            }
-        }
-        draw_item_info(ctx, w, g->inv_selected >= 0 ? &p->inv.slots[g->inv_selected] : &p->inv.slots[g->hotbar_slot]);
-    }
-    nk_end(ctx);
-
-    if (with_container) {
-        if (nk_begin(ctx, "CRATE", nk_rect(ui_width() * 0.5f + S(10), ui_height() * 0.15f, bw * 4 + S(50), S(360)), NK_WINDOW_BORDER | NK_WINDOW_TITLE | NK_WINDOW_NO_SCROLLBAR)) {
-            nk_layout_row_dynamic(ctx, S(20), 1);
-            nk_label_colored(ctx, "Click an item to take it", NK_TEXT_LEFT, nk_rgb(150, 150, 150));
-            for (int row = 0; row < 3; row++) {
-                nk_layout_row_static(ctx, bh, (int)bw - 4, 4);
-                for (int c = 0; c < 4; c++) {
-                    int si = row * 4 + c;
-                    bool l, r;
-                    slot_button(ctx, w, &g->container_slots[si], 500 + si, false, &l, &r);
-                    if ((l || r) && g->container_slots[si].item) game_rpc(RPC_CONTAINER_TAKE, si, 0, 0);
-                }
-            }
-            nk_layout_row_dynamic(ctx, S(34), 2);
-            if (nk_button_label(ctx, "Take all")) game_rpc(RPC_CONTAINER_TAKE, 255, 0, 0);
-            if (nk_button_label(ctx, "Close")) menus_close_all();
-        }
-        nk_end(ctx);
-    }
-}
-
-// Weapon bench: attachments of the equipped weapon, one row per slot (cycle with < >), and the
-// effective stats against the bare weapon. Changes are RPC_ATTACH (host validated).
-static void draw_bench(struct nk_context *ctx) {
-    Game *g = game();
-    World *w = g->world;
-    Player *p = game_local_player();
-    if (!p || !w) return;
-    // Walked away: close.
-    if (ent_valid(w, g->bench_ent) && v3_dist(p->sim.move.pos, w->xf[ENT_INDEX(g->bench_ent)].pos) > 3.5f) { menus_close_all(); return; }
-    int inv_slot = DG_CLAMP((int)p->sim.wpn.slot, 0, INV_HOTBAR - 1);
-    const InvSlot *s = &p->inv.slots[inv_slot];
-    const WeaponDef *wd = item_weapon(w->items, s->item);
-    float win_w = S(560), win_h = S(520);
-    if (nk_begin(ctx, "WEAPON BENCH", centered(win_w, win_h), NK_WINDOW_BORDER | NK_WINDOW_TITLE | NK_WINDOW_NO_SCROLLBAR)) {
-        nk_layout_row_dynamic(ctx, S(22), 1);
-        if (!wd || wd->kind == WPN_MELEE) {
-            nk_label_colored(ctx, "Equip a gun (1-9) to fit attachments.", NK_TEXT_LEFT, nk_rgb(220, 160, 120));
-        } else {
-            char line[160];
-            snprintf(line, sizeof(line), "%s", item_def(w->items, s->item)->name);
-            nk_label_colored(ctx, line, NK_TEXT_LEFT, nk_rgb(240, 200, 140));
-            for (int k = 0; k < ATT_SLOTS; k++) {
-                if (!wd->att_slots[k].present) continue;
-                // Options: none + every allowed attachment of this slot.
-                u8 opts[MAX_ATTACHMENTS + 1];
-                int n = 0, cur = 0;
-                opts[n++] = 0;
-                for (int i = 1; i <= w->items->attachment_count; i++) {
-                    const AttachmentDef *a = &w->items->attachments[i];
-                    if (a->slot == k && attach_allowed(wd, a)) {
-                        if (s->att[k] == i) cur = n;
-                        opts[n++] = (u8)i;
-                    }
-                }
-                const AttachmentDef *ca = attach_def(w->items, s->att[k]);
-                nk_layout_row_begin(ctx, NK_DYNAMIC, S(30), 4);
-                nk_layout_row_push(ctx, 0.22f);
-                nk_label(ctx, attach_slot_name(k), NK_TEXT_LEFT);
-                nk_layout_row_push(ctx, 0.12f);
-                bool prev = nk_button_label(ctx, "<") != 0;
-                nk_layout_row_push(ctx, 0.5f);
-                nk_label_colored(ctx, ca ? ca->name : "(none)", NK_TEXT_CENTERED, ca ? nk_rgb(160, 220, 160) : nk_rgb(150, 150, 150));
-                nk_layout_row_push(ctx, 0.12f);
-                bool next = nk_button_label(ctx, ">") != 0;
-                nk_layout_row_end(ctx);
-                if ((prev || next) && n > 1) {
-                    int ni = (cur + (next ? 1 : n - 1)) % n;
-                    game_rpc(RPC_ATTACH, inv_slot, k, opts[ni]);
-                }
-            }
-            // Effective stats.
-            WeaponDef eff;
-            attach_weapon_effective(w->items, wd, s->att, &eff);
-            const AttachmentDef *optic = attach_optic(w->items, s->att);
-            float base_fov = camera_base_fov();
-            nk_layout_row_dynamic(ctx, S(10), 1);
-            nk_layout_row_dynamic(ctx, S(20), 1);
-            snprintf(line, sizeof(line), "Sight: %s   zoom %.1fx   sight FOV %.1f deg", optic ? optic->name : "iron sights", optic ? optic->zoom : 75.0f / fmaxf(1, wd->ads_fov),
-                     attach_sight_fov(&eff, optic, base_fov));
-            nk_label(ctx, line, NK_TEXT_LEFT);
-            snprintf(line, sizeof(line), "Magazine %d (%d)   ADS time %.2f s (%.2f)   reload %.2f s", eff.mag_size, wd->mag_size, eff.recoil.ads_time, wd->recoil.ads_time, eff.reload_time);
-            nk_label(ctx, line, NK_TEXT_LEFT);
-            snprintf(line, sizeof(line), "Recoil vertical %.0f %%   horizontal %.0f %%   camera kick %.0f %%", 100.0f * eff.recoil.v_per / fmaxf(1e-4f, wd->recoil.v_per),
-                     100.0f * eff.recoil.h_per / fmaxf(1e-4f, wd->recoil.h_per), 100.0f * eff.recoil.cam_pitch / fmaxf(1e-4f, wd->recoil.cam_pitch));
-            nk_label(ctx, line, NK_TEXT_LEFT);
-            snprintf(line, sizeof(line), "Damage %.1f   range %.0f m   sway %.0f %%", eff.damage, eff.range,
-                     100.0f * (eff.recoil.idle_sway + eff.recoil.scope_sway) / fmaxf(1e-4f, wd->recoil.idle_sway + wd->recoil.scope_sway));
-            nk_label(ctx, line, NK_TEXT_LEFT);
-        }
-        nk_layout_row_dynamic(ctx, S(10), 1);
-        nk_layout_row_dynamic(ctx, S(20), 1);
-        nk_label_colored(ctx, "Also: console 'attach <slot> <attachment|none>'", NK_TEXT_LEFT, nk_rgb(150, 150, 150));
-        nk_layout_row_dynamic(ctx, S(34), 1);
-        if (nk_button_label(ctx, "Close")) menus_close_all();
-    }
-    nk_end(ctx);
-}
-
 void menus_draw(void) {
-    struct nk_context *ctx = ui_nk();
-    Game *g = game();
-    if (g && (g->inventory_open || g->container_open) && M->page == PAGE_NONE) draw_inventory(ctx, g->container_open);
-    if (g && g->bench_open && M->page == PAGE_NONE) draw_bench(ctx);
-    switch (M->page) {
-    case PAGE_PAUSE: draw_pause(ctx); break;
-    case PAGE_SETTINGS: draw_settings(ctx); break;
-    case PAGE_MULTIPLAYER: draw_multiplayer(ctx); break;
-    case PAGE_SKIN: draw_skin(ctx); break;
-    default: break;
+    if (!M->depth) { vfx_editor_draw(); holdpoint_editor_draw(); return; }
+    solve_layout();
+    int top = screens_top();
+    for (int i = 0; i < M->depth; i++) {
+        int id = M->stack[i];
+        bool is_top = i == M->depth - 1;
+        gd_set_layer(GL_BASE);
+        switch (id) {
+        case SCR_PAUSE: draw_pause(is_top); break;
+        case SCR_INVENTORY: {
+            bool as_modal = i > 0;
+            gui_push_input(is_top);
+            bool close = inventory_draw(as_modal ? screens_modal_rect() : gui_rect(0, 0, gui_w(), gui_h()), as_modal);
+            gui_pop_input();
+            if (close && is_top) screens_pop();
+            break;
+        }
+        case SCR_CONFIRM: draw_confirm(is_top); break;
+        default: draw_modal(id, is_top); break;
+        }
+    }
+    gd_set_layer(GL_BASE);
+    // Back (Esc / B) not taken by a widget: pop the top screen.
+    if (gui_nav(NAV_BACK) && M->depth && screens_top() == top) {
+        gui_nav_consume(NAV_BACK);
+        if (top != SCR_INVENTORY || inventory_wants_back()) screens_pop();
     }
     vfx_editor_draw();
     holdpoint_editor_draw();
+}
+
+// ------------------------------------------------------------------ commands
+
+static void cmd_menu(int argc, const char **argv) {
+    const char *page = argc > 1 ? argv[1] : "pause";
+    if (!strcmp(page, "close")) { menus_close_all(); return; }
+    if (!M->depth || M->stack[0] != SCR_PAUSE) { menus_close_all(); screens_push(SCR_PAUSE); }
+    if (!strcmp(page, "settings") || !strcmp(page, "graphics")) do_action("settings");
+    else if (!strcmp(page, "controls")) { do_action("settings"); settings_open(1); }
+    else if (!strcmp(page, "crosshair")) { do_action("settings"); settings_open(2); }
+    else if (!strcmp(page, "audio")) { do_action("settings"); settings_open(3); }
+    else if (!strcmp(page, "skin") || !strcmp(page, "character")) { do_action("settings"); settings_open(4); }
+    else if (!strcmp(page, "multiplayer")) do_action("multiplayer");
+    else if (!strcmp(page, "inventory")) do_action("inventory");
+    else if (!strcmp(page, "quit")) do_action("quit");
+    else if (!strcmp(page, "leave")) do_action("leave");
+}
+
+// ui_screen <name>: open a screen directly (tests, screenshots).
+static void cmd_ui_screen(int argc, const char **argv) {
+    if (argc < 2) {
+        char line[160] = "";
+        for (int i = 0; i < M->depth; i++) { strncat(line, " ", sizeof(line) - strlen(line) - 1); strncat(line, screen_name(M->stack[i]), sizeof(line) - strlen(line) - 1); }
+        log_info("ui_screen <pause|settings[:tab]|multiplayer|inventory|bench|confirm_quit|confirm_leave|close>  stack:%s", line[0] ? line : " (none)");
+        return;
+    }
+    const char *n = argv[1];
+    if (!strcmp(n, "close")) { menus_close_all(); return; }
+    if (!strcmp(n, "inventory") && (!M->depth)) { screens_push(SCR_INVENTORY); return; }
+    if (!strcmp(n, "bench")) { Game *g = game(); if (g) g->bench_open = true; screens_push(SCR_BENCH); return; }
+    if (!strncmp(n, "settings", 8)) {
+        if (!M->depth || M->stack[0] != SCR_PAUSE) { menus_close_all(); screens_push(SCR_PAUSE); }
+        do_action("settings");
+        if (n[8] == ':') settings_open(atoi(n + 9));
+        return;
+    }
+    if (!strcmp(n, "confirm_quit")) { if (!M->depth) screens_push(SCR_PAUSE); do_action("quit"); return; }
+    if (!strcmp(n, "confirm_leave")) { if (!M->depth) screens_push(SCR_PAUSE); do_action("leave"); return; }
+    const char *args[2] = { "menu", n };
+    cmd_menu(2, args);
+}
+
+// ui_nav <up|down|left|right|accept|back|tab_next|tab_prev|alt|alt2|menu|view>: synthetic
+// navigation input (scripted keyboard / gamepad tests).
+static void cmd_ui_nav(int argc, const char **argv) {
+    if (argc < 2) return;
+    static const struct { const char *n; SDL_Scancode k; int pad; } map[] = {
+        { "up", SDL_SCANCODE_UP, SDL_GAMEPAD_BUTTON_DPAD_UP }, { "down", SDL_SCANCODE_DOWN, SDL_GAMEPAD_BUTTON_DPAD_DOWN },
+        { "left", SDL_SCANCODE_LEFT, SDL_GAMEPAD_BUTTON_DPAD_LEFT }, { "right", SDL_SCANCODE_RIGHT, SDL_GAMEPAD_BUTTON_DPAD_RIGHT },
+        { "accept", SDL_SCANCODE_RETURN, SDL_GAMEPAD_BUTTON_SOUTH }, { "back", SDL_SCANCODE_ESCAPE, SDL_GAMEPAD_BUTTON_EAST },
+        { "tab_next", SDL_SCANCODE_UNKNOWN, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER }, { "tab_prev", SDL_SCANCODE_UNKNOWN, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER },
+        { "alt", SDL_SCANCODE_UNKNOWN, SDL_GAMEPAD_BUTTON_WEST }, { "alt2", SDL_SCANCODE_UNKNOWN, SDL_GAMEPAD_BUTTON_NORTH },
+        { "menu", SDL_SCANCODE_UNKNOWN, SDL_GAMEPAD_BUTTON_START }, { "view", SDL_SCANCODE_UNKNOWN, SDL_GAMEPAD_BUTTON_BACK },
+    };
+    bool pad = argc > 2 && !strcmp(argv[2], "pad");
+    for (int i = 0; i < (int)ARRAY_COUNT(map); i++) {
+        if (strcmp(argv[1], map[i].n)) continue;
+        SDL_Event ev;
+        memset(&ev, 0, sizeof(ev));
+        if (!pad && map[i].k != SDL_SCANCODE_UNKNOWN) {
+            ev.type = SDL_EVENT_KEY_DOWN;
+            ev.key.scancode = map[i].k;
+            if (map[i].k == SDL_SCANCODE_ESCAPE && !M->depth) { menus_toggle_pause(); return; }
+        } else {
+            ev.type = SDL_EVENT_GAMEPAD_BUTTON_DOWN;
+            ev.gbutton.button = (Uint8)map[i].pad;
+        }
+        gui_handle_event(&ev);
+        return;
+    }
+    log_warn("ui_nav: unknown '%s'", argv[1]);
+}
+
+// ui_mouse <x> <y> [down|up|click|rclick|dclick|wheel <n>] (fractions 0..1 of the window when <= 1)
+static void cmd_ui_mouse(int argc, const char **argv) {
+    if (argc < 3) return;
+    float x = (float)atof(argv[1]), y = (float)atof(argv[2]);
+    if (x <= 1.0f && y <= 1.0f) { x *= gui_w(); y *= gui_h(); }
+    float pd = g_engine.window ? SDL_GetWindowPixelDensity(g_engine.window) : 1.0f;
+    if (pd <= 0) pd = 1;
+    SDL_Event ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.type = SDL_EVENT_MOUSE_MOTION;
+    ev.motion.x = x / pd;
+    ev.motion.y = y / pd;
+    ev.motion.xrel = 4;
+    gui_handle_event(&ev);
+    const char *what = argc > 3 ? argv[3] : "";
+    bool right = !strcmp(what, "rclick") || !strcmp(what, "rdown") || !strcmp(what, "rup");
+    if (!strcmp(what, "wheel")) {
+        memset(&ev, 0, sizeof(ev));
+        ev.type = SDL_EVENT_MOUSE_WHEEL;
+        ev.wheel.y = argc > 4 ? (float)atof(argv[4]) : -1.0f;
+        gui_handle_event(&ev);
+        return;
+    }
+    bool down = !strcmp(what, "down") || !strcmp(what, "rdown") || !strcmp(what, "click") || !strcmp(what, "rclick") || !strcmp(what, "dclick");
+    bool up = !strcmp(what, "up") || !strcmp(what, "rup") || !strcmp(what, "click") || !strcmp(what, "rclick") || !strcmp(what, "dclick");
+    if (down) {
+        memset(&ev, 0, sizeof(ev));
+        ev.type = SDL_EVENT_MOUSE_BUTTON_DOWN;
+        ev.button.button = right ? SDL_BUTTON_RIGHT : SDL_BUTTON_LEFT;
+        ev.button.x = x / pd;
+        ev.button.y = y / pd;
+        ev.button.clicks = !strcmp(what, "dclick") ? 2 : 1;
+        gui_handle_event(&ev);
+    }
+    if (up) {
+        // Released next frame (a press and release in one frame is still a click).
+        memset(&ev, 0, sizeof(ev));
+        ev.type = SDL_EVENT_MOUSE_BUTTON_UP;
+        ev.button.button = right ? SDL_BUTTON_RIGHT : SDL_BUTTON_LEFT;
+        ev.button.x = x / pd;
+        ev.button.y = y / pd;
+        gui_handle_event(&ev);
+    }
+}
+
+static void cmd_ui_reload(int argc, const char **argv) {
+    (void)argc;
+    (void)argv;
+    gui_reload();
+    load_layout();
+    icons_reload();
+    log_info("ui: reloaded theme, fonts, screen layouts and icons");
+}
+
+static void cmd_inventory(int argc, const char **argv) {
+    (void)argc;
+    (void)argv;
+    menus_toggle_inventory();
+}
+
+void menus_init(void) {
+    M = (Menus *)calloc(1, sizeof(Menus));
+    gui_theme_load("assets/ui/theme.json");
+    gui_init();
+    if (!gd_init()) log_error("ui: draw layer init failed (fonts)");
+    load_layout();
+    icons_init();
+    gd_register_commands();
+    inventory_register_commands();
+    cmd_register("menu", cmd_menu, "open a menu: pause | settings | controls | crosshair | audio | character | multiplayer | inventory | close");
+    cmd_register("inventory", cmd_inventory, "toggle the inventory screen");
+    cmd_register("ui_screen", cmd_ui_screen, "ui_screen <name>: open a UI screen (no args: list + current stack)");
+    cmd_register("ui_reload", cmd_ui_reload, "reload the UI theme, fonts, screen layouts and icons");
+    cmd_register("ui_nav", cmd_ui_nav, "ui_nav <up|down|left|right|accept|back|tab_next|tab_prev|alt|alt2|menu|view> [pad]: synthetic UI navigation");
+    cmd_register("ui_mouse", cmd_ui_mouse, "ui_mouse <x> <y> [down|up|click|rclick|dclick|wheel n]: synthetic UI mouse (0..1 = window fraction)");
+    M->inited = true;
+}
+
+bool menus_handle_event(const SDL_Event *ev) {
+    if (!M || !M->inited) return false;
+    // Key capture (rebinding) owns the keyboard / pad: no navigation, no back.
+    if (input_capturing() && (ev->type == SDL_EVENT_KEY_DOWN || ev->type == SDL_EVENT_GAMEPAD_BUTTON_DOWN)) return false;
+    return gui_handle_event(ev);
 }

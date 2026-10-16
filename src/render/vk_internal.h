@@ -57,6 +57,7 @@ typedef struct GpuTexture {
     VkFormat format;
     bool used;
     bool ready;       // upload recorded
+    bool wrapped;     // the image belongs to someone else (render_ui.c targets): only the set is ours
 } GpuTexture;
 
 typedef struct RenderTarget {
@@ -134,7 +135,7 @@ typedef struct PushLit {
 
 typedef enum PipelineId {
     PIPE_LIT, PIPE_LIT_WIRE, PIPE_LIT_BLEND, PIPE_SHADOW, PIPE_LINES, PIPE_LINES_OVERLAY,
-    PIPE_TEXT, PIPE_PREPASS, PIPE_UI, PIPE_SKIN, PIPE_SKIN_WIRE, PIPE_SKIN_SHADOW, PIPE_PREPASS_SKIN, PIPE_COUNT
+    PIPE_TEXT, PIPE_PREPASS, PIPE_UI, PIPE_SKIN, PIPE_SKIN_WIRE, PIPE_SKIN_SHADOW, PIPE_PREPASS_SKIN, PIPE_UI3D, PIPE_COUNT
 } PipelineId;
 
 // Must match SkinInstance in shaders/common.glsl (std430).
@@ -181,7 +182,8 @@ typedef struct Renderer {
     VkDescriptorSetLayout lit_post_layout; // set 2 of layout_lit (push descriptor: AO, contact, SSR, SSGI)
     VkDescriptorPool pool;
     VkPipelineLayout layout_lit;          // set0 + set1 + push lit
-    VkPipelineLayout layout_ui;           // set1 + push
+    VkPipelineLayout layout_ui;           // set1 + push (vertex + fragment: screen scale, 1 / size)
+    VkPipelineLayout layout_ui3d;         // push only (render_ui.c item views)
     VkPipeline pipes[PIPE_COUNT];
     VkSampler sampler_linear;   // material textures (aniso)
     VkSampler sampler_clamp;    // post / ui
@@ -261,6 +263,13 @@ typedef struct Renderer {
     u32 aniso_mod, texq_mod;
 } Renderer;
 
+// render_ui.c (frame graph hooks)
+void render_ui_build(int ldr, u32 out_w, u32 out_h);   // before the final pass: backdrop blur, item views
+void render_ui_final_reads(int final_pass);
+bool render_ui_wants_wait(void);
+void render_ui_frame_done(void);
+void render_ui_shutdown(void);
+
 // vk_device.c
 bool vkd_create_device(struct SDL_Window *window);
 void vkd_destroy_device(void);
@@ -289,6 +298,10 @@ void vkr_destroy_samplers(void);
 VkDescriptorSet vkr_alloc_tex_set(VkImageView view, VkSampler sampler);
 void vkr_write_tex_set(VkDescriptorSet set, VkImageView view, VkSampler sampler);
 void vkr_rewrite_all_texture_sets(void);
+// A texture slot over an image owned elsewhere (UI render targets): sampled clamped by the UI.
+TextureId vkr_texture_wrap(VkImage image, VkImageView view, u32 w, u32 h, VkFormat fmt);
+void vkr_texture_rewrap(TextureId id, VkImage image, VkImageView view, u32 w, u32 h);
+void vkr_texture_unwrap(TextureId id);
 void vkr_destroy_all_resources(void);
 
 // vk_pipelines.c

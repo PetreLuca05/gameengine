@@ -591,6 +591,7 @@ void game_frame(float dt) {
     }
 
     G->accumulator += dt;
+    if (G->paused) G->accumulator = 0;   // the pause menu (single player / host alone) stops the simulation
     int steps = 0;
     while (G->accumulator >= SIM_DT && steps < 8) {
         tick();

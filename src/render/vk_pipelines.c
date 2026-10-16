@@ -99,15 +99,23 @@ bool vkp_create_layouts(void) {
     pli.setLayoutCount = 1;
     pli.pSetLayouts = &R->tex_layout;
 
-    VkPushConstantRange pu = { VK_SHADER_STAGE_VERTEX_BIT, 0, 16 };
+    VkPushConstantRange pu = { VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, 16 };
     pli.pPushConstantRanges = &pu;
     VK_CHECK(vkCreatePipelineLayout(R->device, &pli, NULL, &R->layout_ui));
+
+    // UI item views (inventory preview, icons): no sets, 128 bytes of push constants.
+    VkPushConstantRange p3 = { VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, 128 };
+    pli.setLayoutCount = 0;
+    pli.pSetLayouts = NULL;
+    pli.pPushConstantRanges = &p3;
+    VK_CHECK(vkCreatePipelineLayout(R->device, &pli, NULL, &R->layout_ui3d));
     return true;
 }
 
 void vkp_destroy_layouts(void) {
     vkDestroyPipelineLayout(R->device, R->layout_lit, NULL);
     vkDestroyPipelineLayout(R->device, R->layout_ui, NULL);
+    vkDestroyPipelineLayout(R->device, R->layout_ui3d, NULL);
     vkDestroyDescriptorPool(R->device, R->pool, NULL);
     vkDestroyDescriptorSetLayout(R->device, R->frame_layout, NULL);
     vkDestroyDescriptorSetLayout(R->device, R->tex_layout, NULL);
@@ -310,6 +318,8 @@ bool vkp_create_pipelines(void) {
     d[PIPE_PREPASS].extra_formats[1] = GB_VELOCITY_FORMAT;
     d[PIPE_UI] = (PipeDesc){ "ui.vert", "ui.frag", VL_UI, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, VK_POLYGON_MODE_FILL,
                              VK_CULL_MODE_NONE, false, false, true, R->swap_format, VK_FORMAT_UNDEFINED, false, R->layout_ui };
+    d[PIPE_UI3D] = (PipeDesc){ "ui3d.vert", "ui3d.frag", VL_MESH, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, VK_POLYGON_MODE_FILL,
+                               VK_CULL_MODE_BACK_BIT, true, true, false, VK_FORMAT_R8G8B8A8_UNORM, depth, false, R->layout_ui3d };
 
     d[PIPE_SKIN] = d[PIPE_LIT];
     d[PIPE_SKIN].vert = "skin.vert";

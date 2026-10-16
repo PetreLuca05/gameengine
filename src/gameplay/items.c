@@ -58,7 +58,62 @@ static ItemKind kind_from(const char *s) {
     if (!strcmp(s, "consumable")) return ITEM_CONSUMABLE;
     if (!strcmp(s, "weapon")) return ITEM_WEAPON;
     if (!strcmp(s, "key")) return ITEM_KEY;
+    if (!strcmp(s, "attachment")) return ITEM_ATTACHMENT;
     return ITEM_MISC;
+}
+
+const char *item_kind_name(ItemKind k) {
+    static const char *n[ITEM_KIND_COUNT] = { "Misc", "Ammo", "Consumable", "Weapon", "Key", "Attachment" };
+    return (int)k >= 0 && k < ITEM_KIND_COUNT ? n[k] : "Misc";
+}
+
+u16 item_for_attachment(const ItemDB *db, u8 att_id) {
+    if (!att_id) return ITEM_NONE;
+    for (int i = 1; i < db->item_count; i++)
+        if (db->items[i].kind == ITEM_ATTACHMENT && db->items[i].attachment == att_id) return (u16)i;
+    return ITEM_NONE;
+}
+
+static void default_sockets(ItemSockets *k, const char *style, vec3 support, vec3 muzzle, const WeaponModelPart *parts, int part_count);
+
+// One inventory item per attachment (unless items.json made one): name, a generated description,
+// colour / pickup size from the attachment's parts.
+static void attachment_items_create(ItemDB *db) {
+    for (int i = 1; i < db->item_count; i++) {
+        ItemDef *d = &db->items[i];
+        if (d->kind == ITEM_ATTACHMENT && !d->attachment && d->desc[0] == '@') {
+            d->attachment = attach_find(db, d->desc + 1);   // "attachment" key stashed by the parser
+            d->desc[0] = 0;
+        }
+    }
+    for (int a = 1; a <= db->attachment_count; a++) {
+        const AttachmentDef *ad = &db->attachments[a];
+        if (!ad->id[0] || item_for_attachment(db, (u8)a)) continue;
+        if (db->item_count >= MAX_ITEM_DEFS) { log_warn("items: no room for attachment items"); break; }
+        ItemDef *d = &db->items[db->item_count++];
+        memset(d, 0, sizeof(*d));
+        snprintf(d->id, sizeof(d->id), "att_%s", ad->id);
+        dg_strcpy(d->name, sizeof(d->name), ad->name);
+        d->kind = ITEM_ATTACHMENT;
+        d->max_stack = 1;
+        d->weapon = -1;
+        d->attachment = (u8)a;
+        d->shape = VIS_BOX;
+        vec3 mn = v3s(1e9f), mx = v3s(-1e9f);
+        for (int p = 0; p < ad->part_count; p++) {
+            mn = v3_min(mn, v3_sub(ad->parts[p].offset, ad->parts[p].half));
+            mx = v3_max(mx, v3_add(ad->parts[p].offset, ad->parts[p].half));
+        }
+        d->size = ad->part_count ? v3_max(v3_scale(v3_sub(mx, mn), 0.5f), v3s(0.015f)) : v3(0.04f, 0.03f, 0.06f);
+        d->color = ad->part_count ? ad->parts[0].color : v4(0.3f, 0.3f, 0.32f, 1);
+        static const char *what[ATT_SLOTS] = { "Optic", "Muzzle device", "Underbarrel", "Magazine", "Stock" };
+        if (ad->slot == ATT_OPTIC && ad->zoom > 1.01f) snprintf(d->desc, sizeof(d->desc), "%s, %.0fx magnification. Fits the optic rail.", what[ad->slot], ad->zoom);
+        else snprintf(d->desc, sizeof(d->desc), "%s attachment. Drag onto a weapon's %s slot.", what[DG_CLAMP(ad->slot, 0, ATT_SLOTS - 1)],
+                      attach_slot_name(ad->slot));
+        dg_strcpy(d->hold_style, sizeof(d->hold_style), "item_small");
+        WeaponModelPart part = { v3(0, d->size.y, -0.03f), d->size, d->color };
+        default_sockets(&d->sockets, d->hold_style, v3(0, 0, 0), v3(0, 0, -d->size.z), &part, 1);
+    }
 }
 
 static DamageType dmg_from(const char *s) {
@@ -515,6 +570,13 @@ bool items_load(ItemDB *db, const char *items_path, const char *weapons_path) {
         d->armor = jnum(it, "armor", 0);
         d->use_time = jnum(it, "use_time", 0);
         d->weapon = -1;
+        dg_strcpy(d->icon, sizeof(d->icon), jstr(it, "icon", ""));
+        if (d->kind == ITEM_ATTACHMENT) {
+            // Resolved after the attachments load (attachment_items_create).
+            const char *aid = jstr(it, "attachment", "");
+            if (aid[0] && !d->desc[0]) snprintf(d->desc, sizeof(d->desc), "@%s", aid);
+            else if (aid[0]) log_warn("items: %s: give the attachment item an empty desc or none (generated)", d->id);
+        }
         // Held non-weapon items: small by default, sockets from the pickup size.
         dg_strcpy(d->hold_style, sizeof(d->hold_style), jstr(cJSON_GetObjectItemCaseSensitive(it, "hold"), "style", "item_small"));
         WeaponModelPart part = { v3(0, d->size.y, -0.03f), d->size, d->color };
@@ -525,6 +587,7 @@ bool items_load(ItemDB *db, const char *items_path, const char *weapons_path) {
     attachments_load(db, "assets/attachments");
     bool ok = load_weapons(db, weapons_path);
     attachments_resolve(db);
+    attachment_items_create(db);
     log_info("items: %d item defs, %d weapon defs", db->item_count - 1, db->weapon_count);
     return ok;
 }

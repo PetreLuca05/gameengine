@@ -14,6 +14,7 @@
 #include "player/camera.h"
 #include "render/mesh_gen.h"
 #include "gameplay/items.h"
+#include "gameplay/inv_ops.h"
 #include "usercmd.h"
 
 typedef enum GameMode { GM_NONE, GM_HOST, GM_CLIENT } GameMode;
@@ -72,6 +73,11 @@ typedef struct Game {
     EntityId bench_ent;
     InvSlot container_slots[CONTAINER_SLOTS];
     int inv_selected;            // slot picked up for moving (-1 none)
+    // inventory intents (client prediction)
+    InvOp inv_pending[64];
+    int inv_pending_count;
+    u32 inv_seq;
+    bool paused;                 // single player / host alone: the pause menu stops the simulation
 
     // HUD state
     Hint hints[MAX_HINTS];
@@ -131,6 +137,13 @@ float world_sun_elevation_deg(World *w);
 float world_light_level(World *w, vec3 pos);     // 0..1: sun / moon (visible from pos) + sky + lamps
 void daynight_add_listener(TodEventFn fn, void *user);   // sunrise / sunset / midnight / noon on every machine
 
-enum RpcType { RPC_INV_MOVE = 1, RPC_INV_DROP, RPC_CONTAINER_TAKE, RPC_CONTAINER_PUT, RPC_CONTAINER_CLOSE, RPC_INV_USE, RPC_ATTACH };
+enum RpcType { RPC_INV_MOVE = 1, RPC_INV_DROP, RPC_CONTAINER_TAKE, RPC_CONTAINER_PUT, RPC_CONTAINER_CLOSE, RPC_INV_USE, RPC_ATTACH, RPC_INV_OP };
+
+// Inventory intents (gameplay/inv_ops.h, docs/UI.md): applied at once on the host; a client predicts
+// them on its copy and re-applies the unacknowledged ones on every inventory the host sends.
+struct InvOp;
+int game_inv_op(struct InvOp *op);   // returns the (predicted) InvOpResult
+void game_cl_inventory(int slot, u32 revision, u32 ack_seq, const InvSlot *slots);
+int game_inv_pending(void);          // client: intents not yet acknowledged
 
 #endif

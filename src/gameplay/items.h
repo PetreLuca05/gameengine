@@ -12,7 +12,7 @@
 #define MAX_WEAPON_DEFS 32
 #define ITEM_NONE 0
 
-typedef enum ItemKind { ITEM_MISC, ITEM_AMMO, ITEM_CONSUMABLE, ITEM_WEAPON, ITEM_KEY } ItemKind;
+typedef enum ItemKind { ITEM_MISC, ITEM_AMMO, ITEM_CONSUMABLE, ITEM_WEAPON, ITEM_KEY, ITEM_ATTACHMENT, ITEM_KIND_COUNT } ItemKind;
 typedef enum DamageType { DMG_GENERIC, DMG_BULLET, DMG_MELEE, DMG_EXPLOSIVE, DMG_FALL, DMG_COUNT } DamageType;
 typedef enum WeaponKind { WPN_MELEE, WPN_HITSCAN, WPN_PROJECTILE } WeaponKind;
 typedef enum VisShape { VIS_NONE, VIS_BOX, VIS_CYLINDER, VIS_SPHERE, VIS_CAPSULE } VisShape;
@@ -30,6 +30,8 @@ typedef struct ItemDef {
     int weapon;            // index into weapon defs (ITEM_WEAPON), -1 otherwise
     char hold_style[16];   // third-person hold style for non-weapon items ("item_small", "item_large")
     ItemSockets sockets;   // held-item sockets (non-weapons)
+    u8 attachment;         // ITEM_ATTACHMENT: the attachment id it mounts (gameplay/inv_ops.c)
+    char icon[64];         // UI icon override (assets path, "icon" in the item JSON); empty = baked icon
 } ItemDef;
 
 typedef struct WeaponModelPart { vec3 offset; vec3 half; vec4 color; } WeaponModelPart;
@@ -172,6 +174,10 @@ bool item_model_bounds(const ItemDB *db, u16 item, vec3 *mn, vec3 *mx);
 const ItemDef *item_def(const ItemDB *db, u16 item);
 const WeaponDef *item_weapon(const ItemDB *db, u16 item); // NULL if not a weapon
 const char *damage_type_name(DamageType t);
+const char *item_kind_name(ItemKind k);
+// Attachment items (ITEM_ATTACHMENT): one per attachment definition ("att_<id>"), created after
+// loading unless items.json defines one ("kind": "attachment", "attachment": "<id>").
+u16 item_for_attachment(const ItemDB *db, u8 att_id);
 // Palm frame from finger / back-of-hand directions (-Z = fingers, +Y = back), orthonormalized.
 quat item_palm_frame(vec3 fingers, vec3 back);
 

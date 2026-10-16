@@ -211,6 +211,7 @@ void render_shutdown(void) {
         post_shutdown();
         fg_shutdown();
         vkx_shutdown();
+        render_ui_shutdown();
         vkp_destroy_pipelines();
         vkr_destroy_all_resources();
         vkr_target_destroy(&R->shadow);
@@ -1170,8 +1171,9 @@ static void exec_final(VkCommandBuffer cmd, void *u) {
     post_final_draw(cmd, F.ldr);
     if (R->ui_ccount && F.ui_voff != (VkDeviceSize)-1 && F.ui_ioff != (VkDeviceSize)-1) {
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_UI]);
-        float scr[4] = { 2.0f / (float)R->swap_extent.width, 2.0f / (float)R->swap_extent.height, 0, 0 };
-        vkCmdPushConstants(cmd, R->layout_ui, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(scr), scr);
+        float scr[4] = { 2.0f / (float)R->swap_extent.width, 2.0f / (float)R->swap_extent.height, 1.0f / (float)R->swap_extent.width,
+                         1.0f / (float)R->swap_extent.height };
+        vkCmdPushConstants(cmd, R->layout_ui, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(scr), scr);
         vkCmdBindVertexBuffers(cmd, 0, 1, &f->dyn.buffer, &F.ui_voff);
         vkCmdBindIndexBuffer(cmd, f->dyn.buffer, F.ui_ioff, VK_INDEX_TYPE_UINT32);
         u32 bound = 0;
@@ -1351,9 +1353,11 @@ static void build_frame_graph(FrameData *fd) {
     post_set_sight(&R->sight, F.pip_color, F.pip_from_view, R->vm_proj, R->pip_fov);
 
     F.ldr = post_resolve();
+    render_ui_build(F.ldr, R->swap_extent.width, R->swap_extent.height);
 
     p = fg_pass("final", exec_final, NULL);
     fg_read(p, F.ldr, FG_SAMPLED);
+    render_ui_final_reads(p);
     fg_write(p, F.swap, FG_COLOR);
     if (p < 0) {
         static int warned;
@@ -1540,7 +1544,9 @@ void render_end_frame(void) {
     else if (pres != VK_SUCCESS) log_error("present failed %d", (int)pres);
 
     bool want_exr = post_exr_capture_armed();
-    if (want_shot || want_exr) VK_CHECK(vkWaitForFences(R->device, 1, &f->fence, VK_TRUE, UINT64_MAX));
+    bool want_ui = render_ui_wants_wait();
+    if (want_shot || want_exr || want_ui) VK_CHECK(vkWaitForFences(R->device, 1, &f->fence, VK_TRUE, UINT64_MAX));
+    render_ui_frame_done();
     if (want_shot) {
         vmaInvalidateAllocation(R->vma, shot.alloc, 0, VK_WHOLE_SIZE);
         save_screenshot(&shot, R->swap_extent.width, R->swap_extent.height);

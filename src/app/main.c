@@ -99,14 +99,12 @@ static void handle_event(const SDL_Event *ev) {
         if (ev->key.repeat) break;
         if (ev->key.scancode == SDL_SCANCODE_GRAVE) {
             console_toggle();
-            menus_tick(0);
             return;
         }
         if (ev->key.scancode == SDL_SCANCODE_ESCAPE && !input_capturing()) {
-            if (console_is_open()) console_set_open(false);
-            else menus_toggle_pause();
-            menus_tick(0);
-            return;
+            if (console_is_open()) { console_set_open(false); return; }
+            // No screen open: pause. Screens open: Esc is "back" for the UI (below).
+            if (!menus_open()) { menus_toggle_pause(); return; }
         }
         if (ev->key.scancode == SDL_SCANCODE_F7 && !console_is_open() && !input_capturing()) {
             vfx_editor_toggle();
@@ -129,7 +127,10 @@ static void handle_event(const SDL_Event *ev) {
         break;
     default: break;
     }
-    if (console_is_open() || menus_wants_mouse()) ui_handle_event(ev);
+    // Nuklear: the console and the developer editors. The game UI sees every event (it only acts
+    // on them while a screen is open, or for its global keys: Start, inventory).
+    if (console_is_open() || menus_dev_tools_open()) ui_handle_event(ev);
+    else menus_handle_event(ev);
     input_handle_event(ev);
 }
 
@@ -214,8 +215,6 @@ int main(int argc, char **argv) {
         while (SDL_PollEvent(&ev)) handle_event(&ev);
         ui_input_end();
         input_end_frame((float)dt);
-        if (!console_is_open() && !menus_wants_mouse() && input_consume_press(ACT_INVENTORY)) menus_toggle_inventory();
-        else if (menus_wants_mouse() && input_consume_press(ACT_INVENTORY)) menus_toggle_inventory();
         if (input_consume_press(ACT_NETSTATS)) game()->show_netstats = !game()->show_netstats;
 
         cbuf_execute();

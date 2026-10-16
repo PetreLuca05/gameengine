@@ -3,6 +3,7 @@
 #include "core/log.h"
 #include "core/cvar.h"
 #include "render/render.h"
+#include "menus.h"
 #include "nuklear_config.h"
 #include <SDL3/SDL.h>
 #include <stdlib.h>
@@ -254,6 +255,7 @@ void ui_render(void) {
         render_ui(U->hud_verts, U->hud_vcount, U->hud_indices, U->hud_icount, &cmd, 1);
     }
     U->hud_vcount = U->hud_icount = 0;
+    menus_frame_end();   // the game UI (src/ui/gui) between the HUD batch and Nuklear
 
     static const struct nk_draw_vertex_layout_element layout[] = {
         { NK_VERTEX_POSITION, NK_FORMAT_FLOAT, offsetof(UiVertex, pos) },
@@ -290,6 +292,7 @@ void ui_render(void) {
             if (!c->elem_count) continue;
             if (ccount < 1024) {
                 UiDrawCmd *d = &cmds[ccount++];
+                memset(d, 0, sizeof(*d));
                 d->index_offset = offset;
                 d->index_count = c->elem_count;
                 d->texture = (TextureId)c->texture.id;

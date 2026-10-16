@@ -414,4 +414,7 @@ void input_begin_capture(Action a, int slot) {
     IN->capture_slot = slot;
 }
 
+int input_capture_action(void) { return IN->capturing ? IN->capture_action : -1; }
+int input_capture_slot(void) { return IN->capturing ? IN->capture_slot : -1; }
+
 bool input_capturing(void) { return IN->capturing; }
