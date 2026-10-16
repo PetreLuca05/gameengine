@@ -21,3 +21,19 @@ __pycache__/
 # Source art: character models and their textures (large, kept out of the repository)
 /assets/human/*.fbx
 /assets/human/textures/
+
+# Build output / binaries / IDE junk
+CMakeFiles/
+CMakeCache.txt
+*.exe
+*.pdb
+*.ilk
+*.obj
+*.lib
+*.exp
+*.log
+.idea/
+*.suo
+*.user
+Thumbs.db
+.DS_Store

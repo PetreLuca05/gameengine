@@ -17,7 +17,21 @@ Zombie AI is still a test wander / attack behaviour. See [ARCHITECTURE.md](ARCHI
 
 ---
 
-## Requirements
+## Build requirements
+
+Exact build used for this repository (Windows, from a shell with `cl`, `cmake`, `ninja` and
+`glslangValidator` / `glslc` on `PATH`; `build.bat` sets this up from `.toolchain\env.bat` if present):
+
+```bat
+cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
+cmake --build build
+```
+
+Not vendored, install separately: a C/C++ compiler (MSVC 2019+ / clang-cl, or GCC / Clang on Linux),
+CMake 3.24+, Ninja, a GLSL compiler (`glslc` from the Vulkan SDK, or `glslang`), a Vulkan 1.3 driver.
+SDL3, Vulkan-Headers, Jolt / joltc and ENet are downloaded by CMake FetchContent at configure time
+(network needed on the first configure); everything else is vendored in `third_party/`.
+
 
 | | Windows | Linux |
 |---|---|---|
