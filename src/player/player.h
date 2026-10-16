@@ -41,7 +41,7 @@ typedef struct PlayerMove {
     float crouch_amount;// 0 = stand, 1 = crouched (smoothed, drives eye height)
     float air_time;
     float land_speed;   // vertical speed at last landing (camera dip)
-    u32 land_tick;
+    u32 land_tick;      // command seq of the last landing (a change = a landing)
     float fall_start_y;
     // mantle / vault (scripted traversal)
     vec3 m_start, m_mid, m_end;
@@ -66,6 +66,7 @@ typedef struct PlayerMove {
     u8 veh_raise;       // ticks the gun stays out after a shot (fire raises it by itself)
     u8 pad3;
     float veh_stun;     // s left after being thrown out at speed (no control)
+    float stride;       // walk-cycle phase (rad) for the item / camera bob (deterministic, spectators)
 } PlayerMove;
 
 typedef struct WeaponState {

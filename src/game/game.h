@@ -120,7 +120,12 @@ void game_disconnect_to_local(const char *reason);
 Game *game(void);
 World *game_world(void);
 Player *game_local_player(void);
-float game_ads_vis(void);       // the local ADS progress interpolated to this frame (zoom, sight presentation)
+float game_ads_vis(void);       // the viewed player's ADS progress interpolated to this frame (zoom, sight presentation)
+// Spectating (docs/SPECTATE.md): whose eyes the first-person presentation uses. The watched player
+// in first / third person, else the local player. Input, prediction and RPCs stay on local_slot.
+int game_view_slot(void);
+Player *game_view_player(void);
+const UserCmd *game_view_cmd(void);   // the viewed player's latest command (local: G->last_cmd)
 bool game_is_host(void);
 
 // Called by the net layer.
@@ -165,7 +170,12 @@ void weather_add_listener(WeatherEventFn fn, void *user);
 const char *weather_event_name(WeatherEvent e);
 const char *weather_name(World *w);              // the current preset ("clear", "light_rain" ...; photo sidecars)
 
-enum RpcType { RPC_INV_MOVE = 1, RPC_INV_DROP, RPC_CONTAINER_TAKE, RPC_CONTAINER_PUT, RPC_CONTAINER_CLOSE, RPC_INV_USE, RPC_ATTACH, RPC_INV_OP, RPC_SET_PART };
+enum RpcType {
+    RPC_INV_MOVE = 1, RPC_INV_DROP, RPC_CONTAINER_TAKE, RPC_CONTAINER_PUT, RPC_CONTAINER_CLOSE, RPC_INV_USE, RPC_ATTACH, RPC_INV_OP, RPC_SET_PART,
+    RPC_SPECTATE,    // a = SpecMode, b = target slot or SpecTargetReq, c = 1 dev (alive; host / sv_cheats)
+    RPC_RESPAWN,     // respawn request (sv_respawn_mode 1)
+    RPC_SPEC_POS,    // free camera position x 16 (relevance)
+};
 
 // Inventory intents (gameplay/inv_ops.h, docs/UI.md): applied at once on the host; a client predicts
 // them on its copy and re-applies the unacknowledged ones on every inventory the host sends.

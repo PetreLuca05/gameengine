@@ -58,6 +58,7 @@ double net_client_render_tick(void);    // fractional server tick being rendered
 int net_host_client_count(void);
 void net_host_send_anim_events(struct World *w);
 void net_send_rpc(int type, int a, int b, int c);
+u16 net_player_owd_ms(int slot);         // host: one-way delay estimate of a remote player (RTT / 2), 0 = local / none
 NetStats net_stats(void);
 
 // Lobby (src/net/lobby_net.c): raw reliable sends (host: to a peer; client: to the host; the data

@@ -1,7 +1,9 @@
 // HUD (docs/UI.md "HUD"): vitals bottom left, ammo bottom right, the hotbar (the inventory's slot
 // widget) bottom centre, the interaction prompt under the crosshair, hints, kill feed top right.
 // Everything sits in the UI safe area and hides while a game screen is open. The crosshair and
-// hit markers are crosshair.c; the developer overlays keep the small debug font.
+// hit markers are crosshair.c; the developer overlays keep the small debug font. All of it shows
+// the *viewed* player: a spectated player's HUD exactly as they see it, plus the spectator bar
+// (docs/SPECTATE.md "Spectator HUD").
 #include "hud.h"
 #include "crosshair.h"
 #include "menus.h"
@@ -18,6 +20,7 @@
 #include "vfx/vfx.h"
 #include "net/net.h"
 #include "input/input.h"
+#include "player/spectator.h"
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
@@ -42,9 +45,12 @@ static void bar(GuiRect r, float frac, u32 fill, u32 back) {
     if (frac > 0.002f) gd_round(gui_rect(r.x, r.y, fmaxf(r.h, r.w * saturate(frac)), r.h), r.h * 0.5f, fill);
 }
 
+// The player whose HUD is drawn: the local one, or the one spectated (none on the free camera).
+static Player *hud_player(void) { return spectator_mode() == SPEC_FREE ? NULL : game_view_player(); }
+
 static void draw_damage_indicators(Game *g) {
     float cx = gui_w() * 0.5f, cy = gui_h() * 0.5f;
-    Player *p = game_local_player();
+    Player *p = hud_player();
     if (!p) return;
     for (int i = 0; i < MAX_HURT_MARKERS; i++) {
         HurtMarker *h = &g->hurt[i];
@@ -72,7 +78,7 @@ static void draw_damage_indicators(Game *g) {
 }
 
 static void draw_vitals(World *w, GuiRect safe) {
-    Player *p = game_local_player();
+    Player *p = hud_player();
     if (!p) return;
     Health *h = &w->health[ENT_INDEX(p->ent)];
     float bw = gui_s(250), x = safe.x, y = safe.y + safe.h - gui_s(58);
@@ -98,9 +104,9 @@ static void draw_vitals(World *w, GuiRect safe) {
 static const char *hud_fire_mode_name(int m) { return m == FM_SINGLE ? "Single" : (m == FM_BURST ? "Burst" : "Auto"); }
 
 static void draw_ammo(Game *g, World *w, GuiRect safe) {
-    Player *p = game_local_player();
+    Player *p = hud_player();
     if (!p || p->sim.move.mode == MOVE_DEAD) return;
-    const InvSlot *slot = weapon_equipped(w, g->local_slot);
+    const InvSlot *slot = weapon_equipped(w, game_view_slot());
     if (!slot) return;
     const ItemDef *it = item_def(w->items, slot->item);
     const WeaponDef *wd = item_weapon(w->items, slot->item);
@@ -163,14 +169,16 @@ static void draw_ammo(Game *g, World *w, GuiRect safe) {
 }
 
 static void draw_hotbar(Game *g, World *w, GuiRect safe) {
-    Player *p = game_local_player();
+    Player *p = hud_player();
     if (!p) return;
+    // The selection: the local hotbar key, or what a spectated player has equipped.
+    int hot = p->local ? g->hotbar_slot : (p->sim.wpn.slot < INV_HOTBAR ? p->sim.wpn.slot : g->hotbar_slot);
     float sz = gui_s(TH->slot * 0.82f), gap = gui_s(TH->slot_gap);
     float total = INV_HOTBAR * sz + (INV_HOTBAR - 1) * gap;
     float x0 = gui_w() * 0.5f - total * 0.5f, y = safe.y + safe.h - sz;
     for (int i = 0; i < INV_HOTBAR; i++) {
         GuiRect r = { x0 + (float)i * (sz + gap), y, sz, sz };
-        bool sel = i == g->hotbar_slot;
+        bool sel = i == hot;
         float lift = gui_tween(gui_idi("hud_hot", i), sel ? 1.0f : 0.0f, 0.1f);
         r.y -= lift * gui_s(6);
         GuiSlotView v;
@@ -183,10 +191,10 @@ static void draw_hotbar(Game *g, World *w, GuiRect safe) {
         gd_alpha_pop();
     }
     // Name of the selected item, fading out after a switch.
-    const InvSlot *s = &p->inv.slots[g->hotbar_slot];
+    const InvSlot *s = &p->inv.slots[hot];
     static int last = -1;
     static double since;
-    if (last != g->hotbar_slot || !s->item) { last = g->hotbar_slot; since = gui_time(); }
+    if (last != hot || !s->item) { last = hot; since = gui_time(); }
     float a = 1.0f - saturate((float)(gui_time() - since - 1.2) / 0.4f);
     if (s->item && a > 0.01f) {
         gd_alpha_push(a);
@@ -196,6 +204,11 @@ static void draw_hotbar(Game *g, World *w, GuiRect safe) {
 }
 
 static void draw_prompt(Game *g) {
+    if (game_view_slot() != g->local_slot) {
+        // A spectated player's hold interaction: its progress ring (the prompt text is theirs).
+        if (g->hold_progress > 0.001f) gd_ring(gui_w() * 0.5f, gui_h() * 0.5f + gui_s(77), gui_s(22), gui_s(2.5f), g->hold_progress, TH->accent);
+        return;
+    }
     if (!g->focus_prompt[0]) return;
     float cx = gui_w() * 0.5f, y = gui_h() * 0.5f + gui_s(64);
     char key[32] = "";
@@ -250,6 +263,57 @@ static void draw_hints(Game *g, GuiRect safe) {
     }
 }
 
+static void key_name(Action a, char *out, int size) { binding_name(input_get_binding(a, 0), out, size); }
+
+// Spectator bar (top centre): who is watched and how, the delay readout, the controls; the respawn
+// countdown / Respawn bottom centre; the death camera countdown before spectating starts.
+static void draw_spectator(GuiRect safe) {
+    SpectatorHud sh;
+    if (!spectator_hud(&sh)) return;
+    float cx = gui_w() * 0.5f;
+    char k1[32], k2[32], k3[32], msg[160];
+    if (sh.mode != SPEC_OFF) {
+        static const char *modes[] = { "", "Spectating - first person", "Spectating - third person", "Spectating - free camera" };
+        float y = safe.y + gui_s(8);
+        float pw = gui_s(440), ph = gui_s(sh.show_delay ? 104 : 86);
+        GuiRect r = { cx - pw * 0.5f, y, pw, ph };
+        gd_shadow(r, gui_s(TH->radius), gui_s(30), UI_RGBA(0, 0, 0, 60));
+        gd_round(r, gui_s(TH->radius), TH->hud_panel);
+        caps(cx, y + gui_s(10), gui_s(TH->t_label), sh.first_person_denied ? TH->warning : TH->accent, GUI_CENTER, modes[DG_CLAMP(sh.mode, 0, 3)]);
+        GuiText nm = { gui_s(TH->t_body + 6), GW_SEMIBOLD, TH->hud_text, GUI_CENTER, 0, false, true, 0 };
+        gd_text(&nm, cx, y + gui_s(28), sh.mode == SPEC_FREE ? "Free camera" : (sh.name[0] ? sh.name : "..."));
+        GuiText ar = { gui_s(TH->t_body + 6), GW_SEMIBOLD, TH->text_dim, GUI_CENTER, 0, false, true, 0 };
+        gd_text(&ar, r.x + gui_s(24), y + gui_s(28), "<");
+        gd_text(&ar, r.x + r.w - gui_s(24), y + gui_s(28), ">");
+        key_name(ACT_AIM, k1, sizeof(k1));
+        key_name(ACT_ATTACK, k2, sizeof(k2));
+        key_name(ACT_USE, k3, sizeof(k3));
+        snprintf(msg, sizeof(msg), "%s Prev   %s Next   %s Mode   1-8 Player   Esc Menu", k1, k2, k3);
+        caps(cx, y + gui_s(62), gui_s(TH->t_tiny), TH->text_faint, GUI_CENTER, msg);
+        if (sh.show_delay) {
+            // Honest floor: the target's input crosses one hop to the host and one to here.
+            snprintf(msg, sizeof(msg), "Spec delay %.0f ms  |  minimum = one hop to the host + one hop to you", sh.delay_ms);
+            caps(cx, y + gui_s(80), gui_s(TH->t_tiny), sh.delay_ms > 200 ? TH->warning : TH->text_dim, GUI_CENTER, msg);
+        }
+    } else if (sh.dead && sh.death_cam_left > 0 && (sh.waiting_respawn || sh.respawn_s > 1.5f)) {
+        key_name(ACT_ATTACK, k1, sizeof(k1));
+        snprintf(msg, sizeof(msg), "Spectating in %.1f s   %s Skip", sh.death_cam_left, k1);
+        caps(cx, gui_h() * 0.36f + gui_s(56), gui_s(TH->t_small), TH->hud_text, GUI_CENTER, msg);
+    }
+    if (sh.dead) {
+        float y = safe.y + safe.h - gui_s(TH->slot * 0.82f) - gui_s(70);
+        if (sh.can_respawn) {
+            key_name(ACT_RELOAD, k1, sizeof(k1));
+            snprintf(msg, sizeof(msg), "%s  Respawn", k1);
+            caps(cx, y, gui_s(TH->t_body), TH->ok, GUI_CENTER, msg);
+        } else if (sh.respawn_s > 0) {
+            snprintf(msg, sizeof(msg), "Respawn in %.0f", ceilf(sh.respawn_s));
+            caps(cx, y, gui_s(TH->t_small), TH->text_dim, GUI_CENTER, msg);
+            bar(gui_rect(cx - gui_s(80), y + gui_s(22), gui_s(160), gui_s(4)), 1.0f - fminf(1.0f, sh.respawn_s / 30.0f), TH->accent, UI_RGBA(255, 255, 255, 30));
+        }
+    }
+}
+
 static void draw_world_bars(Game *g, World *w, float s) {
     // Floating health bars / names above characters: hidden unless cl_healthbars 1.
     static Cvar *show;
@@ -258,7 +322,7 @@ static void draw_world_bars(Game *g, World *w, float s) {
     vec3 cam = g->view.eye;
     ENT_FOREACH(w, i) {
         if (!(w->comps[i] & C_HEALTH)) continue;
-        if (w->type[i] == ET_PLAYER && w->player_slot[i] == g->local_slot) continue;
+        if (w->type[i] == ET_PLAYER && w->player_slot[i] == game_view_slot()) continue;
         vec3 top = w->type[i] == ET_DUMMY ? v3_add(w->xf[i].pos, v3(0, 1.15f, 0)) : v3_add(w->xf[i].pos, v3(0, 2.05f, 0));
         float d = v3_dist(top, cam);
         if (d > 40.0f) continue;
@@ -340,11 +404,12 @@ void hud_draw(void) {
     draw_ammo(g, w, safe);
     draw_hotbar(g, w, safe);
     draw_hints(g, safe);
-    Player *p = game_local_player();
-    if (p && p->sim.move.mode == MOVE_DEAD) {
+    Player *p = hud_player();
+    if (p && p->local && p->sim.move.mode == MOVE_DEAD && spectator_mode() == SPEC_OFF) {
         GuiText t = { gui_s(TH->t_huge * 1.2f), GW_SEMIBOLD, TH->danger, GUI_CENTER, 0.2f, true, true, 0 };
         gd_text(&t, gui_w() * 0.5f, gui_h() * 0.36f, "You died");
     }
+    draw_spectator(safe);
     if (p && p->sim.move.mode == MOVE_HANG) {
         char k1[32], k2[32], msg[96];
         binding_name(input_get_binding(ACT_JUMP, 0), k1, sizeof(k1));

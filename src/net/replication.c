@@ -472,22 +472,31 @@ static void setup_replica(World *w, const NetEnt *e, int local_slot) {
         }
     }
     entity_setup(w, e->id);
-    if (t == ET_PLAYER && e->slot != local_slot) {
-        // Body for the remote player (entity_setup gives players only a hitbox).
-        BodyDesc d;
-        memset(&d, 0, sizeof(d));
-        d.shape.kind = SHAPE_CAPSULE;
-        d.shape.radius = PLAYER_RADIUS * 0.95f;
-        d.shape.half_height = PLAYER_HEIGHT * 0.5f - PLAYER_RADIUS;
-        d.pos = v3_add(e->pos, v3(0, PLAYER_HEIGHT * 0.5f, 0));
-        d.rot = quat_identity();
-        d.motion = PM_KINEMATIC;
-        d.layer = PL_CHARACTER;
-        d.user = e->id;
-        w->body[i].body = phys_add_body(w->phys, &d);
-        w->body[i].motion = PM_KINEMATIC;
-        w->comps[i] |= C_BODY;
+    if (t == ET_PLAYER && e->slot != local_slot) repl_player_body(w, i, true);
+}
+
+void repl_player_body(World *w, int i, bool on) {
+    if (!on) {
+        if (w->body[i].body != PHYS_INVALID_BODY && (w->comps[i] & C_BODY)) phys_remove_body(w->phys, w->body[i].body);
+        w->body[i].body = PHYS_INVALID_BODY;
+        w->comps[i] &= ~(u32)C_BODY;
+        return;
     }
+    if ((w->comps[i] & C_BODY) && w->body[i].body != PHYS_INVALID_BODY) return;
+    // Body for the remote player (entity_setup gives players only a hitbox).
+    BodyDesc d;
+    memset(&d, 0, sizeof(d));
+    d.shape.kind = SHAPE_CAPSULE;
+    d.shape.radius = PLAYER_RADIUS * 0.95f;
+    d.shape.half_height = PLAYER_HEIGHT * 0.5f - PLAYER_RADIUS;
+    d.pos = v3_add(w->xf[i].pos, v3(0, PLAYER_HEIGHT * 0.5f, 0));
+    d.rot = quat_identity();
+    d.motion = PM_KINEMATIC;
+    d.layer = PL_CHARACTER;
+    d.user = ENT_MAKE(i, w->gen[i]);
+    w->body[i].body = phys_add_body(w->phys, &d);
+    w->body[i].motion = PM_KINEMATIC;
+    w->comps[i] |= C_BODY;
 }
 
 void repl_apply(World *w, const SnapFrame *f, int local_slot, InterpBuffer *interp) {
@@ -566,8 +575,17 @@ float repl_zombie_jitter(float *mean_speed) {
     return j;
 }
 
-static bool (*g_repl_owned)(World *w, int index);
-void repl_set_owned_hook(bool (*fn)(World *w, int index)) { g_repl_owned = fn; }
+static bool (*g_repl_owned[4])(World *w, int index);
+static int g_repl_owned_count;
+void repl_set_owned_hook(bool (*fn)(World *w, int index)) {
+    for (int k = 0; k < g_repl_owned_count; k++) if (g_repl_owned[k] == fn) return;
+    if (g_repl_owned_count < 4) g_repl_owned[g_repl_owned_count++] = fn;
+}
+
+static bool repl_owned(World *w, int i) {
+    for (int k = 0; k < g_repl_owned_count; k++) if (g_repl_owned[k](w, i)) return true;
+    return false;
+}
 
 void repl_interpolate(World *w, InterpBuffer *interp, double rt, int local_slot) {
     double frame_dt = (rt - g_zlast_rt) / (double)SIM_HZ;
@@ -575,7 +593,7 @@ void repl_interpolate(World *w, InterpBuffer *interp, double rt, int local_slot)
     for (int i = 1; i < w->max_used && i < CLIENT_ENTITY_BASE; i++) {
         if (!w->alive[i]) continue;
         if (w->type[i] == ET_PLAYER && w->player_slot[i] == local_slot) continue;
-        if (g_repl_owned && g_repl_owned(w, i)) continue;   // predicted locally (the driven vehicle)
+        if (repl_owned(w, i)) continue;   // predicted locally (the driven vehicle, the spectated player)
         InterpBuffer *b = &interp[i];
         if (!b->count || b->id != ENT_MAKE(i, w->gen[i])) continue;
         // Samples are in ring order; walk from oldest.
