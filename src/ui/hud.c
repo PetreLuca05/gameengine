@@ -95,7 +95,7 @@ static void draw_vitals(World *w, GuiRect safe) {
     }
 }
 
-static const char *fire_mode_name(int m) { return m == FM_SINGLE ? "Single" : (m == FM_BURST ? "Burst" : "Auto"); }
+static const char *hud_fire_mode_name(int m) { return m == FM_SINGLE ? "Single" : (m == FM_BURST ? "Burst" : "Auto"); }
 
 static void draw_ammo(Game *g, World *w, GuiRect safe) {
     Player *p = game_local_player();
@@ -133,7 +133,7 @@ static void draw_ammo(Game *g, World *w, GuiRect safe) {
             bar(gui_rect(x - gui_s(160), ty + gui_s(2), gui_s(160), gui_s(4)), lowf, UI_RGBA(232, 232, 226, 220), UI_RGBA(255, 255, 255, 30));
         }
         if (wd->recoil.fire_modes && (wd->recoil.fire_modes & (wd->recoil.fire_modes - 1)))
-            caps(x - gui_s(170), y, gui_s(TH->t_label), TH->accent, GUI_RIGHT, fire_mode_name(p->sim.wpn.fire_mode));
+            caps(x - gui_s(170), y, gui_s(TH->t_label), TH->accent, GUI_RIGHT, hud_fire_mode_name(p->sim.wpn.fire_mode));
         if (p->sim.wpn.reloading) {
             float frac = 1.0f - p->sim.wpn.reload_t / fmaxf(0.01f, eff.reload_time);
             gd_ring(cx, cy, gui_s(22), gui_s(2.5f), frac, gui_rgba_mul(TH->accent, 0.9f));
