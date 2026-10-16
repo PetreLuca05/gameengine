@@ -93,10 +93,10 @@ The motorcycle has two balance modes:
 
 **Driver hands:** both hands are IK'd to the steering wheel or handlebar grips and turn with it. The weapon is holstered.
 
-**One-handed shooting:**
-- Hold right mouse button with a `one_hand_capable` weapon. That flag is in the weapon JSON and is set on the pistol and the SMG.
-- The right hand takes the gun in the `HP_VEHICLE_ONEHAND` hold: the ADS sight line with the arm 8 cm further out and the gun canted 8°.
-- In first person only that arm gets the viewmodel treatment (own FOV, hold animation). The left arm stays on the wheel as world geometry.
+**One-handed shooting** (driver, with a `one_hand_capable` weapon: pistol, SMG):
+- **Right click** holds the gun out in the right hand, in exactly the on-foot hip hold (`HP_VEHICLE_ONEHAND` maps to `HP_HIP`). There is no aim-down-sights or zoom from it.
+- **Fire** raises the gun by itself and shoots at once. It stays out 1.5 s after the last shot (`PlayerMove.veh_raise`), then the hand returns to the wheel.
+- In first person only the gun arm gets the viewmodel treatment (own FOV, hold animation). The left arm stays on the wheel as world geometry.
 - Steering is clamped to `one_hand_steer_limit` (car 0.35, motorcycle 0.25).
 - Spread is multiplied by `one_hand_spread_mult` (1.6 / 1.8) and by a speed factor (up to ×1.4 at 25 m/s).
 - The flag is replicated in the vehicle block, so other players see the pose.
@@ -149,7 +149,7 @@ Each tire has `pressure` (0..1), `health` (0..1) and a `leak` rate.
 
 ## Networking
 
-- **Snapshots:** every snapshot carries a vehicle block, about 80 bytes per vehicle: entity, definition, fuel, tires, seat occupancy, steering, rpm, gear, suspension, flags (engine, lights, brake, wrecked, one-hand, handbrake), and the exact pose, velocity and angular velocity. Vehicles are always relevant. Seat state is also in `PlayerMove` (protocol 11).
+- **Snapshots:** every snapshot carries a vehicle block, about 80 bytes per vehicle: entity, definition, fuel, tires, seat occupancy, steering, rpm, gear, suspension, flags (engine, lights, brake, wrecked, one-hand, handbrake), and the exact pose, velocity and angular velocity. Vehicles are always relevant. Seat state is also in `PlayerMove` (protocol 12).
 - **Driving client:** creates its own `PhysVehicle` and simulates it from its own commands every tick, stepping the client's physics world. It records the predicted pose per command.
 - **Reconciliation:** when a snapshot acknowledges command N, the host's pose is compared with the prediction for N.
   - **Below 3 m:** 20 % of the position, rotation and velocity error is applied, and the drawn car glides through a decaying correction offset.

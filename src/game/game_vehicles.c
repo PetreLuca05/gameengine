@@ -749,8 +749,14 @@ void vehicles_player_cmd(World *w, int slot, const UserCmd *cmd, u16 pressed, bo
     if (!v) { m->veh_onehand = 0; return; }
     const VehicleDef *d = vdef(v);
     bool driver = d->seats[DG_CLAMP(m->seat, 0, d->seat_count - 1)].driver;
+    // Driver, one-hand-capable gun: right click holds it out (the on-foot hip hold), fire raises it by
+    // itself and shoots at once; it stays out 1.5 s after the last shot, then the hand returns.
     const WeaponDef *wd = weapon_equipped_def(w, slot);
-    m->veh_onehand = driver && (cmd->buttons & BTN_AIM) && wd && wd->one_hand_capable ? 1 : 0;
+    bool capable = driver && wd && wd->one_hand_capable;
+    if (capable && (cmd->buttons & BTN_ATTACK)) m->veh_raise = (u8)(1.5f * SIM_HZ);
+    else if (m->veh_raise) m->veh_raise--;
+    if (!capable) m->veh_raise = 0;
+    m->veh_onehand = capable && ((cmd->buttons & BTN_AIM) || m->veh_raise > 0) ? 1 : 0;
     if (driver && (w->authority || v->predicted) && !(VG.t.mode && v->ent == VG.t.veh)) {   // tests drive the vehicle themselves
         v->in_throttle = (float)cmd->move_y / 127.0f;
         v->in_steer = (float)cmd->move_x / 127.0f;
