@@ -35,6 +35,9 @@ struct Cvar {
     bool has_range;
     u32 modified;          // bumped on every change
     CvarChangeFn on_change;
+    // Called on every set before the change is compared / announced: may rewrite the value in place
+    // with cvar_store (Engine Fidelity bounds, src/render/fidelity). on_change sees the result.
+    CvarChangeFn bound;
 };
 
 typedef void (*CmdFn)(int argc, const char **argv);
@@ -54,6 +57,7 @@ void cvar_set_cv(Cvar *cv, const char *value);
 void cvar_set_float(Cvar *cv, float v);
 void cvar_set_int(Cvar *cv, int v);
 void cvar_reset(Cvar *cv);
+void cvar_store(Cvar *cv, const char *value);   // write + parse only (inside a bound callback)
 int cvar_count(void);
 Cvar *cvar_at(int index);
 

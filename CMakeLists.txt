@@ -423,6 +423,16 @@ if(MSVC)
 endif()
 add_test(NAME ui COMMAND test_ui WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
 
+# Engine Fidelity (docs/ENGINE_FIDELITY.md): tables, bounds, apply / clamp on the real cvar system, era
+# matrix, frame graph validation.
+add_executable(test_fidelity tests/test_fidelity.c src/render/fidelity/fidelity.c src/render/graph/fg_check.c src/core/cvar.c)
+set_target_properties(test_fidelity PROPERTIES C_STANDARD 11)
+target_link_libraries(test_fidelity PRIVATE dg_animcore)
+if(MSVC)
+  target_compile_options(test_fidelity PRIVATE /W3 /wd4100 /wd4201 /utf-8)
+endif()
+add_test(NAME fidelity COMMAND test_fidelity WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+
 # Phone (docs/PHONE.md): QR round trip, pairing auth, HTTP / WebSocket, orientation math, filter +
 # reach clamp, JPEG pipeline at 30 fps, photo / video files + sidecars, headless client round trip, TLS.
 set(DG_PHONE_CORE_SOURCES
