@@ -156,6 +156,27 @@ bool vkd_create_device(SDL_Window *window) {
     f13.shaderDemoteToHelperInvocation = VK_TRUE;
     VkPhysicalDeviceVulkan12Features f12 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES };
     f12.pNext = &f13;
+    // Virtualized geometry (docs/VGEO.md): scalar layouts, 64-bit buffer atomics (visibility buffer),
+    // indirect count draws, descriptor indexing. Enabled when present; vgeo stays off without them.
+    {
+        VkPhysicalDeviceVulkan12Features s12 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES };
+        VkPhysicalDeviceFeatures2 s2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
+        s2.pNext = &s12;
+        vkGetPhysicalDeviceFeatures2(R->gpu, &s2);
+        f12.scalarBlockLayout = s12.scalarBlockLayout;
+        f12.shaderBufferInt64Atomics = s12.shaderBufferInt64Atomics;
+        f12.drawIndirectCount = s12.drawIndirectCount;
+        f12.runtimeDescriptorArray = s12.runtimeDescriptorArray;
+        f12.descriptorBindingPartiallyBound = s12.descriptorBindingPartiallyBound;
+        f12.shaderSampledImageArrayNonUniformIndexing = s12.shaderSampledImageArrayNonUniformIndexing;
+        R->vg_scalar = s12.scalarBlockLayout;
+        R->vg_int64 = s12.shaderBufferInt64Atomics && s2.features.shaderInt64;
+        R->vg_indirect_count = s12.drawIndirectCount && s2.features.multiDrawIndirect;
+        R->vg_descriptor_indexing = s12.runtimeDescriptorArray && s12.descriptorBindingPartiallyBound;
+        supported.shaderInt64 = s2.features.shaderInt64;
+        supported.multiDrawIndirect = s2.features.multiDrawIndirect;
+        supported.drawIndirectFirstInstance = s2.features.drawIndirectFirstInstance;
+    }
     VkPhysicalDeviceFeatures2 f2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
     f2.pNext = &f12;
     f2.features.samplerAnisotropy = supported.samplerAnisotropy;
@@ -168,6 +189,9 @@ bool vkd_create_device(SDL_Window *window) {
     f2.features.shaderStorageImageWriteWithoutFormat = supported.shaderStorageImageWriteWithoutFormat;
     f2.features.independentBlend = supported.independentBlend;
     f2.features.fragmentStoresAndAtomics = supported.fragmentStoresAndAtomics;
+    f2.features.shaderInt64 = supported.shaderInt64;
+    f2.features.multiDrawIndirect = supported.multiDrawIndirect;
+    f2.features.drawIndirectFirstInstance = supported.drawIndirectFirstInstance;
     if (!supported.shaderStorageImageExtendedFormats) log_warn("vulkan: shaderStorageImageExtendedFormats missing - some post effects disabled");
 
     const char *dev_exts[4] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
@@ -178,7 +202,8 @@ bool vkd_create_device(SDL_Window *window) {
         VkExtensionProperties *props = (VkExtensionProperties *)malloc(sizeof(VkExtensionProperties) * n);
         vkEnumerateDeviceExtensionProperties(R->gpu, NULL, &n, props);
         for (u32 i = 0; i < n; i++)
-            if (!strcmp(props[i].extensionName, VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME)) {
+            if (!strcmp(props[i].extensionName, VK_EXT_MESH_SHADER_EXTENSION_NAME)) R->vg_mesh_shader = true;   // Phase 3 (not enabled yet)
+            else if (!strcmp(props[i].extensionName, VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME)) {
                 dev_exts[dev_ext_count++] = VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME;
                 R->has_push_descriptor = true;
             }

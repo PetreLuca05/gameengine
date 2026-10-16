@@ -170,6 +170,7 @@ typedef struct Renderer {
     bool has_wireframe;
     bool has_push_descriptor, has_colorspace_ext;
     bool hdr_supported, swap_hdr;
+    bool vg_scalar, vg_int64, vg_indirect_count, vg_descriptor_indexing, vg_mesh_shader;   // vgeo device features
     int hdr_output_applied;
     float max_anisotropy;
 
@@ -339,6 +340,12 @@ void vkp_register_shader(const char *name);   // hot reload / recompile list ("p
 
 // post/post_core.c: frame graph post-processing stack
 bool post_create_pipelines(void);
+
+// vk_vgeo.c: virtualized geometry in the frame (docs/VGEO.md)
+void vkg_init(void);
+void vkg_shutdown(void);
+void vkg_graph_cull(int depth_res);    // frame graph, before the prepass: culling against last frame's Hi-Z
+void vkg_graph_hiz(int depth_res);     // frame graph, after the prepass: this frame's Hi-Z (next frame's history)
 
 // vk_vfx.c: GPU particles, decals, distortion
 bool vkx_init(void);

@@ -157,6 +157,7 @@ bool render_init(SDL_Window *window) {
     if (!vkp_create_pipelines()) { log_error("render: pipeline creation failed"); return false; }
     if (!vkx_init()) log_warn("render: VFX pipelines unavailable (particles disabled)");
     fg_init();
+    vkg_init();
     if (!post_init()) { log_error("render: post-processing stack unavailable"); return false; }
     sky_init();
     write_sky_bindings();
@@ -210,6 +211,7 @@ void render_shutdown(void) {
         vkDeviceWaitIdle(R->device);
         sky_shutdown();
         post_shutdown();
+        vkg_shutdown();
         fg_shutdown();
         vkx_shutdown();
         render_ui_shutdown();
@@ -1408,11 +1410,13 @@ static void build_frame_graph(FrameData *fd) {
     post_begin_frame(&in);
     sky_build();   // atmosphere LUTs, sky view, aerial perspective, cloud shadow, environment refilter
 
+    vkg_graph_cull(F.depth);   // vgeo culling (docs/VGEO.md), against last frame's Hi-Z
     int p = fg_pass("prepass", exec_prepass, NULL);
     fg_write(p, F.depth, FG_DEPTH);
     fg_write(p, F.normal, FG_COLOR);
     fg_write(p, F.material, FG_COLOR);
     fg_write(p, F.velocity, FG_COLOR);
+    vkg_graph_hiz(F.depth);    // this frame's occlusion Hi-Z
 
     post_screen_space(&F.lit);
     const PostSettings *ps = post_settings();
