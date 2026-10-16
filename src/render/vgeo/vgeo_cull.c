@@ -308,9 +308,10 @@ static void traverse(Rec *r, u32 pass, u32 first_in, u32 depth) {
     }
 }
 
-void vg_cull_record(VgCuller *c, VkCommandBuffer cmd, u32 frame, u32 slot, const VgViewGpu *view, const VgHizRef *prev, const VgHizRef *cur) {
+void vg_cull_record_pass1(VgCuller *c, VkCommandBuffer cmd, u32 frame, u32 slot, const VgViewGpu *view, const VgHizRef *prev, const VgHizRef *cur) {
     VgScene *s = c->scene;
     c->dispatches = 0;
+    if (slot < VG_MAX_VIEWS) c->v[slot].recording = false;
     if (!c->ok || !s->instance_count || slot >= VG_MAX_VIEWS) return;
     VgViewRes *v = &c->v[slot];
     ensure_view(c, v);
@@ -330,7 +331,8 @@ void vg_cull_record(VgCuller *c, VkCommandBuffer cmd, u32 frame, u32 slot, const
     g.cap_requests = c->caps.requests;
     if (prev_ok) { g.hiz_prev[0] = (float)prev->w; g.hiz_prev[1] = (float)prev->h; g.hiz_prev[2] = (float)prev->mips; g.hiz_prev[3] = 1.0f; }
     if (cur_ok) { g.hiz_cur[0] = (float)cur->w; g.hiz_cur[1] = (float)cur->h; g.hiz_cur[2] = (float)cur->mips; g.hiz_cur[3] = 1.0f; }
-    bool two_pass = (g.flags & VGV_TWO_PASS) && cur_ok && !(g.flags & VGV_NO_OCCLUSION);
+    v->two_pass = (g.flags & VGV_TWO_PASS) && cur_ok && !(g.flags & VGV_NO_OCCLUSION);
+    v->recording = true;
     Rec r = { c, cmd, v, slot };
     if (c->qp) vkCmdResetQueryPool(cmd, c->qp, (frame * VG_MAX_VIEWS + slot) * VGT_COUNT, VGT_COUNT);
     vkCmdUpdateBuffer(cmd, c->views.buffer, sizeof(VgViewGpu) * slot, sizeof(VgViewGpu), &g);
@@ -358,9 +360,19 @@ void vg_cull_record(VgCuller *c, VkCommandBuffer cmd, u32 frame, u32 slot, const
     vkCmdCopyBuffer(cmd, v->counters.buffer, v->counters.buffer, 1, &bc);
     vgc_barrier(cmd);
     stamp(&r, frame, VGT_CLUSTERS);
+}
 
+void vg_cull_record_pass2(VgCuller *c, VkCommandBuffer cmd, u32 frame, u32 slot) {
+    if (slot >= VG_MAX_VIEWS || !c->v[slot].recording) return;
+    VgScene *s = c->scene;
+    VgViewRes *v = &c->v[slot];
+    v->recording = false;
+    Rec r = { c, cmd, v, slot };
+    u32 a0[1] = { 0 };
+    u32 depth = s->max_depth > 1 ? s->max_depth - 1 : 0;
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, c->pl, 0, 1, &v->set[frame], 0, NULL);
     // ---- pass 2: pass 1's occluders against this frame's Hi-Z
-    if (two_pass) {
+    if (v->two_pass) {
         u32 a1[1] = { 1 }, big2[2] = { 0, VGN_CELLS_P2 };
         args(&r, VGN_CELLS_OCC, VGA_INST, 64, -1, v->cells_cap);
         push(&r, 2, 0, 2, a1, 1);
@@ -393,6 +405,11 @@ void vg_cull_record(VgCuller *c, VkCommandBuffer cmd, u32 frame, u32 slot, const
     dep.pMemoryBarriers = &hb;
     vkCmdPipelineBarrier2(cmd, &dep);
     v->readback_valid[frame] = true;
+}
+
+void vg_cull_record(VgCuller *c, VkCommandBuffer cmd, u32 frame, u32 slot, const VgViewGpu *view, const VgHizRef *prev, const VgHizRef *cur) {
+    vg_cull_record_pass1(c, cmd, frame, slot, view, prev, cur);
+    vg_cull_record_pass2(c, cmd, frame, slot);   // keeps counting on pass 1's dispatches
 }
 
 void vg_hiz_size(u32 w, u32 h, u32 *hw, u32 *hh, u32 *mips) {

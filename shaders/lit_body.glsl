@@ -1,9 +1,14 @@
 // Shared lit shading (lit.frag, skin.frag). The includer defines MAT_COLOR, MAT_PARAMS, MAT_FLAGS.
 #include "weather.glsl"
+// LIT_CUSTOM_INPUTS: the includer provides v_world, v_normal, v_uv, v_color and LIT_FRONT_FACING
+// itself (the vgeo lit resolve decodes them per pixel, shaders/vg_lit.frag).
+#ifndef LIT_CUSTOM_INPUTS
 layout(location = 0) in vec3 v_world;
 layout(location = 1) in vec3 v_normal;
 layout(location = 2) in vec2 v_uv;
 layout(location = 3) in vec4 v_color;
+#define LIT_FRONT_FACING gl_FrontFacing
+#endif
 
 layout(set = 1, binding = 0) uniform sampler2D tex;
 // Screen-space inputs from the post stack (push descriptor, render resolution): ambient occlusion
@@ -191,7 +196,7 @@ void main() {
 #endif
     uint flags = MAT_FLAGS;
     vec3 n = normalize(v_normal);
-    if (!gl_FrontFacing) n = -n;
+    if (!LIT_FRONT_FACING) n = -n;
     vec4 base = MAT_COLOR * v_color;
 
     if ((flags & MAT_TEXTURED) != 0u) {

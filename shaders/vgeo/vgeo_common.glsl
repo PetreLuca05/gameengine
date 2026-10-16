@@ -1,6 +1,10 @@
 // Virtualized geometry: GLSL mirror of src/render/vgeo/vgeo_gpu.h and the shared cull helpers.
 // Change a struct here and in vgeo_gpu.h together (sizes are asserted on the C side).
 #extension GL_EXT_scalar_block_layout : require
+#ifdef VG_VIS
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+#extension GL_EXT_shader_atomic_int64 : require
+#endif
 
 struct VgViewGpu {
     mat4 view_proj;
@@ -66,35 +70,44 @@ struct VgCell { vec3 mn; uint first; vec3 mx; uint count; };
 #define VGN_CL_P2 21
 #define VGN_CELLS_P2 22
 
+// Descriptor set of the vgeo bindings (the resolve passes put it after the renderer's sets) and the
+// push constants: VG_NO_PUSH for shaders with their own push block (the view is then VG_VIEW_INDEX).
+#ifndef VG_SET
+#define VG_SET 0
+#endif
+#ifndef VG_NO_PUSH
 layout(push_constant, scalar) uniform Push { uint pass; uint in_region; uint out_region; uint view; uint a[8]; } pc;
-
-layout(set = 0, binding = 0, scalar) readonly buffer Views { VgViewGpu views[]; };
-layout(set = 0, binding = 1, scalar) readonly buffer Meshes { VgMesh meshes[]; };
-layout(set = 0, binding = 2, scalar) readonly buffer Nodes { VgNode nodes[]; };
-layout(set = 0, binding = 3, scalar) readonly buffer Groups { VgGroup groups[]; };
-layout(set = 0, binding = 4) readonly buffer PageTable { uint page_table[]; };
-layout(set = 0, binding = 5) readonly buffer Pool { uint pool[]; };
-layout(set = 0, binding = 6, scalar) readonly buffer Instances { VgInstance instances[]; };
-layout(set = 0, binding = 7, scalar) readonly buffer Cells { VgCell cells[]; };
-layout(set = 0, binding = 8) coherent buffer Counters { uvec4 args[8]; uint n[32]; } ctr;
-layout(set = 0, binding = 9) buffer CellList { uint cell_list[]; };
-layout(set = 0, binding = 10) buffer InstList { uint inst_list[]; };
-layout(set = 0, binding = 11) buffer NodeQueue { uvec2 node_queue[]; };
-layout(set = 0, binding = 12) buffer GroupItems { uvec2 group_items[]; };
-layout(set = 0, binding = 13) buffer Visible { uvec2 visible[]; };
-layout(set = 0, binding = 14) buffer Occluded { uvec2 occluded[]; };
-layout(set = 0, binding = 15) buffer Requests { uvec2 requests[]; };
-layout(set = 0, binding = 16) uniform sampler2D hiz_prev;
-layout(set = 0, binding = 17) uniform sampler2D hiz_cur;
-layout(set = 0, binding = 19, scalar) readonly buffer Materials { VgMaterial materials[]; };
-// Visibility buffer (binding 18, see vgeo_gpu.h): define VG_VIS before including (needs int64).
-#ifdef VG_VIS
-#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
-#extension GL_EXT_shader_atomic_int64 : require
-layout(set = 0, binding = 18) coherent buffer VisBuffer { uint64_t vis[]; };
 #endif
 
+layout(set = VG_SET, binding = 0, scalar) readonly buffer Views { VgViewGpu views[]; };
+layout(set = VG_SET, binding = 1, scalar) readonly buffer Meshes { VgMesh meshes[]; };
+layout(set = VG_SET, binding = 2, scalar) readonly buffer Nodes { VgNode nodes[]; };
+layout(set = VG_SET, binding = 3, scalar) readonly buffer Groups { VgGroup groups[]; };
+layout(set = VG_SET, binding = 4) readonly buffer PageTable { uint page_table[]; };
+layout(set = VG_SET, binding = 5) readonly buffer Pool { uint pool[]; };
+layout(set = VG_SET, binding = 6, scalar) readonly buffer Instances { VgInstance instances[]; };
+layout(set = VG_SET, binding = 7, scalar) readonly buffer Cells { VgCell cells[]; };
+layout(set = VG_SET, binding = 8) coherent buffer Counters { uvec4 args[8]; uint n[32]; } ctr;
+layout(set = VG_SET, binding = 9) buffer CellList { uint cell_list[]; };
+layout(set = VG_SET, binding = 10) buffer InstList { uint inst_list[]; };
+layout(set = VG_SET, binding = 11) buffer NodeQueue { uvec2 node_queue[]; };
+layout(set = VG_SET, binding = 12) buffer GroupItems { uvec2 group_items[]; };
+layout(set = VG_SET, binding = 13) buffer Visible { uvec2 visible[]; };
+layout(set = VG_SET, binding = 14) buffer Occluded { uvec2 occluded[]; };
+layout(set = VG_SET, binding = 15) buffer Requests { uvec2 requests[]; };
+layout(set = VG_SET, binding = 16) uniform sampler2D hiz_prev;
+layout(set = VG_SET, binding = 17) uniform sampler2D hiz_cur;
+layout(set = VG_SET, binding = 19, scalar) readonly buffer Materials { VgMaterial materials[]; };
+// Visibility buffer (binding 18, see vgeo_gpu.h): define VG_VIS before including (needs int64).
+#ifdef VG_VIS
+layout(set = VG_SET, binding = 18) coherent buffer VisBuffer { uint64_t vis[]; };
+#endif
+
+#ifndef VG_NO_PUSH
 #define V views[pc.view]
+#else
+#define V views[VG_VIEW_INDEX]
+#endif
 
 // ------------------------------------------------------------------ instances
 
@@ -178,11 +191,13 @@ bool vg_occluded_vp(vec4 s, mat4 vp, vec4 info, bool cur) {
     else z = max(max(texelFetch(hiz_prev, a, mip).r, texelFetch(hiz_prev, ivec2(b.x, a.y), mip).r), max(texelFetch(hiz_prev, ivec2(a.x, b.y), mip).r, texelFetch(hiz_prev, b, mip).r));
     return mn.z > z;
 }
+#ifndef VG_NO_PUSH
 // Pass 1 tests against last frame's Hi-Z (reprojected with its view); pass 2 against this frame's.
 bool vg_occluded(vec4 s) {
     if (pc.pass == 1u) return vg_occluded_vp(s, V.prev_view_proj, V.hiz_prev, false);
     return vg_occluded_vp(s, V.view_proj, V.hiz_cur, true);
 }
+#endif
 
 // Bounded append: returns the slot or ~0 (and counts the overflow).
 uint vg_append(uint counter, uint cap) {

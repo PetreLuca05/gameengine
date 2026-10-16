@@ -33,6 +33,7 @@ typedef struct VgViewRes {
     u32 set_gen[VG_MAX_FRAMES];
     VkImageView set_prev[VG_MAX_FRAMES], set_cur[VG_MAX_FRAMES];
     VkBuffer set_vis[VG_MAX_FRAMES];
+    bool two_pass, recording;    // between vg_cull_record_pass1 and _pass2
     VgCounters last;             // the most recent completed frame's counters
     bool last_valid;
 } VgViewRes;
@@ -68,6 +69,12 @@ void vg_cull_shutdown(VgCuller *c);
 // Records the culling of one view. `view` comes from vgeo_view_setup; counts, caps and Hi-Z info are
 // filled here. frame < ctx->frames selects the per-frame descriptor set / readback.
 void vg_cull_record(VgCuller *c, VkCommandBuffer cmd, u32 frame, u32 slot, const VgViewGpu *view, const VgHizRef *prev, const VgHizRef *cur);
+// The same in two halves, so the pass 1 raster and this frame's Hi-Z can go in between (the
+// renderer): pass1 uploads the view, culls pass 1 and binds `cur` for pass 2; pass2 re-tests the
+// occluders (VGV_TWO_PASS with a cur Hi-Z) and copies the counters out. Timestamp VGT_PASS2 then
+// also spans what was recorded in between.
+void vg_cull_record_pass1(VgCuller *c, VkCommandBuffer cmd, u32 frame, u32 slot, const VgViewGpu *view, const VgHizRef *prev, const VgHizRef *cur);
+void vg_cull_record_pass2(VgCuller *c, VkCommandBuffer cmd, u32 frame, u32 slot);
 
 // Hi-Z pyramid size for a w x h depth buffer: half resolution rounded up to powers of two, full chain.
 void vg_hiz_size(u32 w, u32 h, u32 *hw, u32 *hh, u32 *mips);

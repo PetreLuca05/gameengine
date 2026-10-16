@@ -9,12 +9,17 @@
 
 #include "weather.glsl"
 
+// GB_CUSTOM_INPUTS: the includer provides v_world ... v_prev_clip and GB_FRONT_FACING itself
+// (the vgeo resolve decodes them per pixel, shaders/vg_gbuffer.frag).
+#ifndef GB_CUSTOM_INPUTS
 layout(location = 0) in vec3 v_world;
 layout(location = 1) in vec3 v_normal;
 layout(location = 2) in vec2 v_uv;
 layout(location = 3) in vec4 v_color;
 layout(location = 7) in vec4 v_cur_clip;
 layout(location = 8) in vec4 v_prev_clip;
+#define GB_FRONT_FACING gl_FrontFacing
+#endif
 
 layout(location = 0) out vec2 o_normal;
 layout(location = 1) out vec4 o_material;
@@ -32,7 +37,7 @@ void main() {
 #endif
     uint flags = GB_FLAGS;
     vec3 n = normalize(v_normal);
-    if (!gl_FrontFacing) n = -n;
+    if (!GB_FRONT_FACING) n = -n;
     // Weather: the same wet / puddle / snow terms as the lit pass (SSR sees wet, rippled puddles).
     vec3 wx_alb = vec3(0.5);
     float wx_rough = clamp(GB_PARAMS.x, 0.04, 1.0);
