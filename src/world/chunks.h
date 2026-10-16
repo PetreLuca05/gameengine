@@ -29,7 +29,17 @@ typedef struct ChunkProvider {
     // Must be thread-safe: called from job threads.
     void (*generate)(void *user, ChunkCoord coord, ChunkData *out);
     float (*height_at)(void *user, float x, float z);
+    // Bounded maps (open-world levels, docs/ZOMBIE_MAP.md); all optional:
+    float bounds;                 // > 0: chunks only inside [-bounds, bounds)^2, streamed in whole far tiles
+    bool static_collision;        // the map owns its terrain collision: no heightfield body per chunk
+    bool no_grid;                 // never draw the unit grid on this terrain
+    // Far terrain: height and colour at (x, z) for the coarse tiles drawn where chunks are not loaded.
+    void (*sample)(void *user, float x, float z, float *h, u32 *color);
+    // Thread-safe placement chunk (.vgp, malloc'd) of chunk (cx, cz) or NULL (grass, small plants).
+    void *(*foliage_chunk)(void *user, int cx, int cz, size_t *size);
 } ChunkProvider;
+
+#define CHUNK_FAR_TILE 128.0f     // m: far terrain tile (4 x 4 chunks)
 
 // WorldGen: seeded procedural generation interface (noise height implemented; biomes/structures stubbed).
 typedef struct WorldGen {
@@ -46,6 +56,9 @@ typedef struct WorldGen {
 BodyId chunks_capsule_body(World *w, const RenderCapsule *caps, int n);
 
 bool chunks_create(World *w, ChunkProviderKind kind, u32 seed);
+// Streams a bounded custom provider (open-world levels): keeps w->level (the level owns spawns, env,
+// statics) and builds the far terrain tiles.
+bool chunks_create_custom(World *w, const ChunkProvider *provider);
 void chunks_destroy(World *w);
 void chunks_update(World *w, float dt);
 void chunks_render(World *w, vec3 cam_pos);

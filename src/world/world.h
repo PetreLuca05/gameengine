@@ -136,6 +136,8 @@ typedef struct Lever {
     u32 light_group;      // switches: light group toggled
 } Lever;
 
+// LightComp.group bit: the lamp casts no local shadow (open-world street lamps; replicated with the group).
+#define LIGHT_GROUP_NO_SHADOW (1u << 31)
 typedef struct LightComp {
     vec3 color;
     float radius, intensity;
@@ -208,14 +210,15 @@ typedef struct Player {
     EntityId open_container;
 } Player;
 
-typedef struct StaticDraw { MeshId mesh; Material mat; mat4 model; } StaticDraw;
+// cull_dist > 0: skipped beyond that distance from cull_center (open-world detail tiles).
+typedef struct StaticDraw { MeshId mesh; Material mat; mat4 model; vec3 cull_center; float cull_dist; } StaticDraw;
 typedef struct WorldLabel { vec3 pos, right, up; float size; u32 color; bool centered; char text[40]; } WorldLabel;
 typedef struct SpawnPoint { vec3 pos; float yaw; } SpawnPoint;
 
-#define MAX_STATIC_DRAWS 1024
+#define MAX_STATIC_DRAWS 4096
 #define MAX_LABELS 1024
 #define MAX_SPAWNS 16
-#define MAX_STATIC_BODIES 4096
+#define MAX_STATIC_BODIES 8192
 #define MAX_LEVEL_VGEO 64
 
 // Virtualized geometry placement (level entity "vgeo", docs/VGEO.md "Levels"): a mesh (a .vgeo file
@@ -291,6 +294,8 @@ struct World {
     LevelStatic level;
     bool streaming;            // chunk-streamed world instead of a fixed level
     struct ChunkStreamer *chunks;
+    void *openworld;           // open-world level state (src/world/openworld.c), freed by openworld_free
+    void (*openworld_free)(struct World *w);
 
     GameEvent events[MAX_PENDING_EVENTS];   // authority: produced this tick, drained by net/game
     int event_count;

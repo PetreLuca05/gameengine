@@ -12,6 +12,7 @@
 #include "vfx/vfx_library.h"
 #include "cJSON.h"
 #include "assets/assets.h"
+#include "openworld.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <math.h>
@@ -570,6 +571,12 @@ bool level_load(World *w, const char *path) {
     ls->sky_horizon = jv3(env, "sky_horizon", v3(0.72f, 0.8f, 0.9f));
     ls->clouds = jf(env, "clouds", 0.4f);
 
+    // Open-world levels: the generated terrain, POIs, water, trees and entities (docs/ZOMBIE_MAP.md).
+    if (cJSON_GetObjectItemCaseSensitive(root, "world") && !openworld_load(w, root)) {
+        cJSON_Delete(root);
+        return false;
+    }
+
     LevelBuild b;
     memset(&b, 0, sizeof(b));
     b.w = w;
@@ -629,6 +636,7 @@ bool level_load(World *w, const char *path) {
 void level_draw_static(const World *w, vec3 cam_pos, vec3 cam_fwd) {
     const LevelStatic *ls = &w->level;
     for (int i = 0; i < ls->draw_count; i++) {
+        if (ls->draws[i].cull_dist > 0 && v3_len2(v3_flat(v3_sub(ls->draws[i].cull_center, cam_pos))) > ls->draws[i].cull_dist * ls->draws[i].cull_dist) continue;
         DrawItem d;
         memset(&d, 0, sizeof(d));
         d.mesh = ls->draws[i].mesh;

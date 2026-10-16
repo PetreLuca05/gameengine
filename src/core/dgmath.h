@@ -33,6 +33,9 @@ DG_INLINE float approachf(float cur, float target, float delta) {
 // Frame-rate independent exponential smoothing factor.
 DG_INLINE float exp_decay(float rate, float dt) { return 1.0f - expf(-rate * dt); }
 DG_INLINE float wrap_angle(float a) {
+    // Huge or non-finite input (a teleport / degenerate spring) would never leave the loops below:
+    // reduce it first (ordinary angles keep the exact loop results).
+    if (!(a > -1e4f && a < 1e4f)) a = isfinite(a) ? fmodf(a, 2.0f * DG_PI) : 0.0f;
     while (a > DG_PI) a -= 2.0f * DG_PI;
     while (a < -DG_PI) a += 2.0f * DG_PI;
     return a;

@@ -199,6 +199,13 @@ void render_vgeo_set_level(const RenderVgeoPlacement *p, int count);
 typedef struct RenderCapsule { vec3 a, b; float radius; } RenderCapsule;
 typedef struct RenderFoliageHit { vec3 pos; float scale, dist; u32 instance; char type[48]; } RenderFoliageHit;
 int render_foliage_test_types(void);            // registers the procedural test types (once, load time); returns their count
+// The open-world map kinds (tree_pine, tree_broadleaf, tree_dead, crop_wheat; plus the test types),
+// once, load time; returns their count.
+int render_foliage_map_types(void);
+// A placement chunk (.vgp, malloc'd; thread-safe) from the caller's instances: kind = index into names
+// (registered type or vgeo model names). Instances outside chunk (cx, cz) are dropped. NULL when empty.
+typedef struct RenderFoliageInst { vec3 pos; float yaw, scale; u16 kind; } RenderFoliageInst;
+void *render_foliage_make_chunk(int cx, int cz, const char (*names)[48], int name_count, const RenderFoliageInst *inst, int n, size_t *size);
 // A .vgp chunk of test foliage for chunk (cx, cz): jittered grid at `density` per m2 (90 % tufts, 10 %
 // bushes), on height(user, x, z) (NULL: 0), inside [x0, x1) x [z0, z1). Thread-safe (job threads):
 // returns a malloc'd file (size in *size), NULL when the chunk gets nothing.

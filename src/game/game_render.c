@@ -29,6 +29,7 @@
 #include "audio/audio.h"
 #include "assets/assets.h"
 #include "net/net.h"
+#include "world/openworld.h"
 #include "input/input.h"
 #include <math.h>
 
@@ -389,6 +390,7 @@ static void render_entity(World *w, int i, float alpha, bool focused) {
                 k = 1.0f - w->light[i].flicker * (n > 0.82f ? 0.85f : n * 0.25f);
             }
             PointLight l = { v3_add(pos, v3(0, -0.15f, 0)), w->light[i].radius, w->light[i].color, w->light[i].intensity * k };
+            if (w->light[i].group & LIGHT_GROUP_NO_SHADOW) l.flags = LIGHT_NO_SHADOW;
             render_add_light(&l);
         }
         break;
@@ -492,7 +494,8 @@ static void render_entity(World *w, int i, float alpha, bool focused) {
 
 void game_render_world(World *w, float alpha, vec3 cam_pos, vec3 cam_fwd) {
     if (w->chunks) chunks_render(w, cam_pos);
-    else level_draw_static(w, cam_pos, cam_fwd);
+    if (!w->chunks || w->openworld) level_draw_static(w, cam_pos, cam_fwd);
+    openworld_frame(w, cam_pos);
     ENT_FOREACH(w, i) {
         if (!(w->comps[i] & C_VISUAL) && w->type[i] != ET_ZOMBIE) continue;
         if ((w->flags[i] & EF_HIDDEN) && w->type[i] != ET_PICKUP) continue;

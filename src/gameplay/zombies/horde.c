@@ -53,6 +53,13 @@ typedef struct Horde {
     vec3 dbg_ray_a[HMAX], dbg_ray_b[HMAX];
     u8 dbg_ray_hit[HMAX];
     u32 dbg_ray_tick[HMAX];
+    // open-world maps (horde_set_water / horde_set_sense): deep water stops zombies like an edge;
+    // beyond the sense radius a zombie idles until a player comes near or it gets hurt
+    float (*water)(void *user, float x, float z);
+    void *water_user;
+    float sense;
+    u8 aggro[HMAX], wander_set[HMAX];
+    vec3 wander[HMAX];
 } Horde;
 
 static Horde *H;
@@ -116,6 +123,8 @@ static void register_zombie(World *w, EntityId e, int s) {
     H->tier[s] = HT_MID;
     H->phys[s] = 1;
     H->has_target[s] = 0;
+    H->aggro[s] = 0;
+    H->wander_set[s] = 0;
     H->busy[s] = 0;
     H->target_slot[s] = -1;
     H->avoid[s] = H->wall_n[s] = v3(0, 0, 0);
@@ -214,6 +223,35 @@ int horde_spawn(World *w, vec3 center, int count, float radius, int mode, const 
     return queued;
 }
 
+bool horde_spawn_at(World *w, vec3 feet, float yaw, const char *character) {
+    if (!H || !w || !w->authority || H->q_count >= HMAX) return false;
+    RayHit rh;
+    if (!phys_raycast(w->phys, v3_add(feet, v3(0, 0.6f, 0)), v3(0, -1.6f, 0), PL_MASK(PL_STATIC), PHYS_INVALID_BODY, &rh)) return false;
+    if (phys_capsule_overlap(w->phys, v3_add(rh.point, v3(0, 0.08f, 0)), 0.32f, 1.7f, PL_MASK_WORLD, PHYS_INVALID_BODY)) return false;
+    PendingSpawn *p = &H->queue[(H->q_head + H->q_count) % HMAX];
+    p->feet = rh.point;
+    p->yaw = yaw;
+    p->cid = character_net_id(character, (int)(w->tick + (u32)H->q_count));
+    H->q_count++;
+    return true;
+}
+
+void horde_set_water(float (*fn)(void *user, float x, float z), void *user) {
+    if (!H) return;
+    H->water = fn;
+    H->water_user = user;
+}
+
+void horde_set_sense(float radius) {
+    if (H) H->sense = radius;
+}
+
+int horde_aggro_count(void) {
+    int n = 0;
+    for (int s = 0; H && s < H->n; s++) n += H->active[s] && H->alive[s] && (H->sense <= 0 || H->aggro[s]);
+    return n;
+}
+
 void horde_despawn(World *w) {
     if (!H || !w) return;
     for (int s = 0; s < H->n; s++) {
@@ -271,12 +309,14 @@ void horde_host_tick(World *w, float dt) {
     }
     // Players (targets).
     vec3 ppos[MAX_PLAYERS];
+    bool pfiring[MAX_PLAYERS];
     EntityId pent[MAX_PLAYERS];
     int pslot[MAX_PLAYERS], np = 0, np_count = 0;
     for (int s = 0; s < MAX_PLAYERS; s++) {
         Player *p = &w->players[s];
         if (!p->active || !ent_valid(w, p->ent) || p->sim.move.mode == MOVE_DEAD) continue;
         ppos[np] = p->sim.move.pos;
+        pfiring[np] = (w->flags[ENT_INDEX(p->ent)] & EF_FIRING) != 0;
         pent[np] = p->ent;
         pslot[np] = s;
         np++;
@@ -317,6 +357,24 @@ void horde_host_tick(World *w, float dt) {
             if (ts >= 0 && ts < MAX_PLAYERS && w->players[ts].active && w->players[ts].sim.move.mode != MOVE_DEAD) {
                 H->target[s] = w->players[ts].sim.move.pos;
                 H->has_target[s] = 1;
+            }
+            // Sense radius (open-world maps): chase once a player is near, shooting within 3x the
+            // radius or after being hurt; give up far away; otherwise wander around (a new point
+            // within 8 m every 6 s, staggered per zombie).
+            if (H->sense > 0 && H->target_mode == HTARGET_PLAYERS) {
+                bool shot = bi >= 0 && pfiring[bi] && H->dist[s] < H->sense * 3.0f;
+                if (H->dist[s] < H->sense || shot || w->health[i].hp < w->health[i].max_hp) H->aggro[s] = 1;
+                else if (H->dist[s] > H->sense * 2.5f) H->aggro[s] = 0;
+                if (!H->aggro[s]) {
+                    u32 slot_t = (w->tick + (u32)s * 37u) / 360u, hsh = hh((u32)s * 2654435761u ^ slot_t);
+                    float a = (float)(hsh & 1023u) / 1023.0f * 6.2831853f, r = (float)((hsh >> 10) & 1023u) / 1023.0f * 8.0f;
+                    if (((w->tick + (u32)s * 37u) % 360u) == 0 || H->wander_set[s] == 0) {
+                        H->wander[s] = v3_add(H->pos[s], v3(cosf(a) * r, 0, sinf(a) * r));
+                        H->wander_set[s] = 1;
+                    }
+                    H->target[s] = H->wander[s];
+                    H->has_target[s] = (hsh >> 20) % 3 != 0;   // a third of the time it just stands
+                }
             }
         }
         // Attacks keep the zombie standing.
@@ -436,6 +494,7 @@ void horde_host_tick(World *w, float dt) {
                 g = rh.point;
                 n = rh.normal;
                 bool step_ok = g.y - p.y <= cfg->step_height + 0.05f;
+                if (H->water && H->water(H->water_user, np.x, np.z) > g.y + 1.0f) step_ok = false;   // deep water: an edge
                 bool slope_ok = n.y >= cosf(cfg->max_slope_deg * DG_DEG2RAD);
                 if (step_ok && slope_ok) H->ground_y[s] = g.y;
                 else { np = p; H->vel[s] = v3_scale(v, -0.2f); }

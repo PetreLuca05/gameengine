@@ -38,6 +38,7 @@ void world_destroy(World *w) {
     if (!w) return;
     if (w->vehicles_free) w->vehicles_free(w);   // vehicle constraints before the bodies
     world_clear(w);
+    if (w->openworld_free) w->openworld_free(w);
     chars_system_destroy(w);
     phys_world_destroy(w->phys);
     free(w);
