@@ -3,8 +3,8 @@
 // (instance, group << 4 | cluster): cluster c of group g is selected when g's parent error projects
 // above the threshold (tested at the leaf) and c's own error does not, or c's child group is not
 // resident.
-// Then frustum, backface cone and Hi-Z on its culling sphere, and SW (< sw_px across) / HW
-// classification. a[0] = 1 (pass 2): re-tests pass 1's occluded clusters against this frame's Hi-Z.
+// Then frustum, backface cone and Hi-Z on its culling sphere, and SW (< sw_px across and clear of the
+// near plane) / HW classification. a[0] = 1 (pass 2): re-tests pass 1's occluded clusters against this frame's Hi-Z.
 #extension GL_GOOGLE_include_directive : require
 #define VG_COMPUTE
 #include "vgeo_common.glsl"
@@ -41,7 +41,9 @@ void emit(uint inst, VgXf x, uint slot, uint ci, bool retest) {
         return;
     }
     if (retest) atomicAdd(ctr.n[VGN_CL_P2], 1u);
-    bool sw = vg_project_size(cs) < V.params.y;
+    // SW never clips: a sphere within znear of the near plane (any vertex w < 2 znear) goes to HW.
+    bool near = (vg_flags() & VGV_ORTHO) == 0u && dot(V.planes[4].xyz, cs.xyz) + V.planes[4].w - cs.w < V.params.z;
+    bool sw = !near && vg_project_size(cs) < V.params.y;
     uint cap = V.caps0.z;
     uint k = vg_append(sw ? VGN_SW : VGN_HW, cap);
     if (k == 0xFFFFFFFFu) return;
