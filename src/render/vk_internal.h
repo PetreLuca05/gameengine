@@ -141,7 +141,7 @@ typedef struct FrameData {
     // Local light shadows (vk_light_shadow.c): world -> atlas tile per cube face / spot.
     mat4 local_vps[LOCAL_SHADOW_TILES];
     vec4 light_shadow[MAX_POINT_LIGHTS];   // x first tile (-1 unshadowed), y normal offset per metre
-    vec4 local_shadow_info;                // x 1 / atlas size, y shadowed lights, z spot normal offset per metre
+    vec4 local_shadow_info;                // x 1 / atlas size, y shadowed point lights
 } FrameData;
 
 typedef struct PushLit {

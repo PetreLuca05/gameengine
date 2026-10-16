@@ -729,15 +729,37 @@ static bool sphere_in_planes(const vec4 planes[6], vec3 c, float r) {
 u32 render_draw_shadow_casters(VkCommandBuffer cmd, FrameResources *f, vec4 sphere, const vec4 planes[6], u32 cascade) {
     (void)f;
     vec3 lc = v3(sphere.x, sphere.y, sphere.z);
+    // The 6 faces of a point light share its sphere: the casters touching it are found once
+    // (bounds kept), each face then only tests its frustum.
+    static u32 *cand;
+    static vec4 *cand_b;
+    static u32 cand_n, cand_cap, cand_frame = ~0u;
+    static vec4 cand_sphere;
+    if (cand_frame != R->frame_index || memcmp(&cand_sphere, &sphere, sizeof(vec4)) != 0) {
+        if (cand_cap < R->draw_count) {
+            cand_cap = R->draw_count + 256;
+            cand = (u32 *)realloc(cand, sizeof(u32) * cand_cap);
+            cand_b = (vec4 *)realloc(cand_b, sizeof(vec4) * cand_cap);
+        }
+        cand_n = 0;
+        for (u32 i = 0; i < R->draw_count; i++) {
+            DrawItem *d = &R->draws[i];
+            if (!R->meshes[d->mesh].used || (d->mat.flags & MAT_NO_SHADOW) || d->mat.color.w < 0.999f) continue;
+            vec3 c;
+            float r;
+            item_bounds(d, &c, &r);
+            if (v3_len2(v3_sub(c, lc)) > (r + sphere.w) * (r + sphere.w)) continue;
+            cand[cand_n] = i;
+            cand_b[cand_n++] = v4(c.x, c.y, c.z, r);
+        }
+        cand_frame = R->frame_index;
+        cand_sphere = sphere;
+    }
     u32 n = 0, bound_mesh = 0;
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_SHADOW]);
-    for (u32 i = 0; i < R->draw_count; i++) {
-        DrawItem *d = &R->draws[i];
-        if (!R->meshes[d->mesh].used || (d->mat.flags & MAT_NO_SHADOW) || d->mat.color.w < 0.999f) continue;
-        vec3 c;
-        float r;
-        item_bounds(d, &c, &r);
-        if (v3_len2(v3_sub(c, lc)) > (r + sphere.w) * (r + sphere.w) || !sphere_in_planes(planes, c, r)) continue;
+    for (u32 k = 0; k < cand_n; k++) {
+        DrawItem *d = &R->draws[cand[k]];
+        if (!sphere_in_planes(planes, v3(cand_b[k].x, cand_b[k].y, cand_b[k].z), cand_b[k].w)) continue;
         GpuMesh *m = &R->meshes[d->mesh];
         if (d->mesh != bound_mesh) {
             VkDeviceSize zero = 0;

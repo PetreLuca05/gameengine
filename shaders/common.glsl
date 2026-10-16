@@ -24,7 +24,7 @@ struct SpotLight {
     vec4 pos_range;
     vec4 dir_cos;         // xyz direction, w cos(outer half angle)
     vec4 color_intensity;
-    vec4 params;          // x cos(inner half angle), y shadow tile + 1 (0 = unshadowed)
+    vec4 params;          // x cos(inner half angle), y shadow tile + 1 (0 = unshadowed), z shadow normal offset per metre
 };
 
 layout(set = 0, binding = 0) uniform FrameData {
@@ -72,7 +72,7 @@ layout(set = 0, binding = 0) uniform FrameData {
     // Local light shadows (src/render/vk_light_shadow.c): world -> atlas tile per cube face / spot.
     mat4 local_vps[LOCAL_SHADOW_TILES];
     vec4 light_shadow[MAX_POINT_LIGHTS];   // x first tile (-1 unshadowed), y normal offset per metre
-    vec4 local_shadow_info;                // x 1 / atlas size, y shadowed lights, z spot normal offset per metre
+    vec4 local_shadow_info;                // x 1 / atlas size, y shadowed point lights
 } frame;
 
 layout(set = 0, binding = 1) uniform sampler2DShadow shadow_map;
@@ -123,7 +123,7 @@ float point_light_shadow(int i, vec3 p, vec3 n) {
 float spot_light_shadow(int i, vec3 p, vec3 n) {
     float tile = frame.spots[i].params.y - 1.0;
     if (tile < 0.0) return 1.0;
-    vec3 op = p + n * (length(p - frame.spots[i].pos_range.xyz) * frame.local_shadow_info.z);
+    vec3 op = p + n * (length(p - frame.spots[i].pos_range.xyz) * frame.spots[i].params.z);
     return local_shadow_tile(int(tile), op);
 }
 

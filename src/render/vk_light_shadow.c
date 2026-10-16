@@ -13,6 +13,7 @@
 #define ATLAS_TILES_X 8
 #define MAX_SHADOW_POINTS 10   // 60 tiles + 4 spots = the 64-tile atlas
 #define SHADOW_NEAR 0.05f
+#define SPOT_NEAR 0.6f         // flashlights / headlights: the holder's gun / own bodywork never shadows the beam
 
 static u32 tile_size_for(int quality) { return quality >= 2 ? 512u : 256u; }
 
@@ -42,6 +43,14 @@ static void create_atlas(u32 tile) {
     u32 size = tile * ATLAS_TILES_X;
     R->lshadow = vkr_target_create(size, size, VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
                                    VK_IMAGE_ASPECT_DEPTH_BIT);
+    if (!R->lshadow.image || !R->lshadow.view) {
+        // Binding 11 is statically used by the lit shaders: keep a 1 x 1 atlas (shadows off).
+        log_error("light shadows: cannot create a %ux%u atlas, light shadows off", size, size);
+        tile = 1;
+        size = ATLAS_TILES_X;
+        R->lshadow = vkr_target_create(size, size, VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                                       VK_IMAGE_ASPECT_DEPTH_BIT);
+    }
     R->lshadow.layout = VK_IMAGE_LAYOUT_UNDEFINED;
     R->lshadow_tile = tile;
     write_binding();
@@ -115,7 +124,8 @@ void vkls_select(FrameData *fd) {
     for (u32 i = 0; i < R->spot_count; i++) R->spots[i].params.y = 0.0f;
     u32 want_tile = tile_size_for(R->r_light_shadow_quality->i);
     if (want_tile != R->lshadow_tile) create_atlas(want_tile);
-    bool on = R->r_light_shadows->i && R->lshadow.image;
+    bool on = R->r_light_shadows->i && R->lshadow.image && R->lshadow_tile > 1;
+    if (!on) R->lshadow_prev_count = 0;
     float texel = 1.0f / (float)(R->lshadow_tile * ATLAS_TILES_X);
     // Normal offset: ~1.5 texels of the face at distance d (2 d tan(45) / tile per texel).
     float face_offset = 1.5f * 2.0f / (float)R->lshadow_tile;
@@ -161,21 +171,24 @@ void vkls_select(FrameData *fd) {
             GpuSpotLight *s = &R->spots[i];
             vec3 p = v3(s->pos_range.x, s->pos_range.y, s->pos_range.z), d = v3(s->dir_cos.x, s->dir_cos.y, s->dir_cos.z);
             float outer = acosf(clampf(s->dir_cos.w, -1.0f, 1.0f));
-            float sfov = fminf(2.0f * outer * 1.04f + 0.02f, 3.0f);
+            if (outer > 1.2f) continue;   // > ~70 degree half angle: too wide for one tile, unshadowed
+            float sfov = 2.0f * outer * 1.04f + 0.02f;
             vec3 up = fabsf(d.y) > 0.95f ? v3(1, 0, 0) : v3(0, 1, 0);
-            mat4 vp = mat4_mul(mat4_perspective(sfov, 1.0f, SHADOW_NEAR, fmaxf(s->pos_range.w, 1.0f)), mat4_look_at(p, v3_add(p, d), up));
+            mat4 vp = mat4_mul(mat4_perspective(sfov, 1.0f, SPOT_NEAR, fmaxf(s->pos_range.w, 1.0f)), mat4_look_at(p, v3_add(p, d), up));
             s->params.y = (float)R->local_tile_count + 1.0f;
+            s->params.z = 1.5f * 2.0f * tanf(sfov * 0.5f) / (float)R->lshadow_tile;   // normal offset per metre: ~1.5 texels
             add_tile(vp, v4(p.x, p.y, p.z, s->pos_range.w));
         }
     }
     memcpy(fd->local_vps, R->local_vps, sizeof(mat4) * R->local_tile_count);
     memcpy(fd->light_shadow, R->light_shadow, sizeof(fd->light_shadow));
-    float spot_offset = 1.5f * 2.0f / (float)R->lshadow_tile;   // ~ the flashlight cone (tan(24) ~ 0.45), conservative
-    fd->local_shadow_info = v4(texel, (float)R->lshadow_prev_count, spot_offset, 0);
+    fd->local_shadow_info = v4(texel, (float)R->lshadow_prev_count, 0, 0);
 }
 
 void vkls_record(VkCommandBuffer cmd, FrameResources *f) {
     if (!R->lshadow.image) return;
+    // Nothing shadowed and the atlas already readable: skip the 4096^2 clear (unused this frame).
+    if (!R->local_tile_count && R->lshadow.layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) { R->lshadow_draws = 0; R->lshadow_ms = 0; return; }
     u64 t0 = SDL_GetPerformanceCounter();
     vkr_image_barrier(cmd, R->lshadow.image, VK_IMAGE_ASPECT_DEPTH_BIT, R->lshadow.layout, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
                       VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT, 0,
