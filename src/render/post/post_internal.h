@@ -87,6 +87,7 @@ typedef struct PostCtx {
     // per frame
     FgRes hiz, ao, contact, ssr, ssgi, froxels, color_prev, depth_prev, vol_history;
     float last_ev;
+    float direct_exposure;            // Engine Fidelity Off: this frame's fixed exposure
     bool exposure_init;
     char exr_path[512];
     int exr_pending;

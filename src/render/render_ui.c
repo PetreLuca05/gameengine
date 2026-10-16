@@ -84,8 +84,14 @@ static void exec_blur(VkCommandBuffer cmd, void *u) {
     pb_tex_fg(&b, 0, UR.ldr, P.linear);
     pb_img(&b, 8, UR.blur.view);
     pb_push(cmd, &b, VK_PIPELINE_BIND_POINT_COMPUTE);
+    if (post_direct()) {   // Engine Fidelity Off: the source is the lit HDR (the same output transform)
+        pc.u[0] = 1;
+        pc.p[0] = post_direct_exposure();
+    }
     post_push_constants(cmd, &pc, 128);
     post_dispatch(cmd, "ui_blur_down", w, h, 1, 8);
+    pc.u[0] = 0;
+    pc.p[0] = 0.0f;
     // Two separable Gaussian iterations: blur -> tmp (H) -> blur (V), twice.
     for (int it = 0; it < 4; it++) {
         bool horiz = (it & 1) == 0;

@@ -58,6 +58,9 @@ FgRes fg_import(const char *name, VkImage image, VkImageView view, VkFormat form
 int fg_pass(const char *name, FgExecFn exec, void *user);
 void fg_read(int pass, FgRes r, FgAccess a);
 void fg_write(int pass, FgRes r, FgAccess a);
+// A binding that is not read by this pass (bound early, written / read later): keeps the image alive
+// and in state like fg_read, ignored by the frame graph validation (fg_check).
+void fg_reference(int pass, FgRes r, FgAccess a);
 void fg_execute(VkCommandBuffer cmd);
 
 // Inside exec callbacks (and after fg_execute for debug views).
@@ -79,5 +82,20 @@ float fg_pass_ms(int i);          // GPU time of the pass (last completed frame)
 bool fg_pass_enabled(const char *name);
 u64 fg_memory_bytes(void);        // pooled transient + history memory
 int fg_pool_images(void);
+
+// Validation of the last executed graph (fg_check.h, docs/ENGINE_FIDELITY.md "No dead passes").
+#define FG_REPORT_NAMES 32
+typedef struct FgReport {
+    int passes, post_passes, dead_passes, unused_res, undefined_reads;
+    int pool_images, stale_images;          // stale: pooled, not used by this graph (freed by fg_trim / eviction)
+    u64 pool_bytes, stale_bytes;
+    char names[FG_MAX_PASSES][32];
+    char post[FG_REPORT_NAMES][32];
+    char dead[12][32];
+    char unused[12][48];
+    char undefined[12][48];
+} FgReport;
+const FgReport *fg_last_report(void);
+void fg_trim(void);
 
 #endif

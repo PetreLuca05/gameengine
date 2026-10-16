@@ -20,6 +20,7 @@
 #include "vgeo/foliage_support.h"
 #include "vgeo/vgeo_procgen_foliage.h"
 #include "vgeo/vgeo_impostor.h"
+#include "fidelity/fidelity.h"
 #include "assets/assets.h"
 #include "core/platform.h"
 #include <math.h>
@@ -218,6 +219,8 @@ static VkPipeline gfx_pipeline(const char *vert, const char *frag, const VkForma
 static void tex_use(TextureId id) {
     if (id && id < MAX_TEXTURES) G.tex_wanted[id] = 1;
 }
+
+void vkg_samplers_changed(void) { memset(G.tex_entered, 0, sizeof(G.tex_entered)); }
 
 // Start of a frame: textures wanted and ready enter the table (the cull sets pick them up when recorded).
 static void tex_update(void) {
@@ -601,7 +604,7 @@ void vkg_graph_cull(int depth_res) {
     int p = fg_pass("vgeo_cull", exec_cull, NULL);
     if (p < 0) return;
     fg_read(p, G.hiz, FG_SAMPLED);
-    if (G.hiz_cur != FG_NONE) fg_read(p, G.hiz_cur, FG_SAMPLED);   // bound now, written below
+    if (G.hiz_cur != FG_NONE) fg_reference(p, G.hiz_cur, FG_SAMPLED);   // bound now, written below
     p = fg_pass("vgeo_raster", exec_raster1, NULL);
     G.pass2_pending = true;
 }
@@ -704,6 +707,10 @@ static void cmd_vgeo_check_resolve(int argc, const char **argv) {
 }
 
 void vkg_graph_hiz(int depth_res, int velocity_res) {
+    if (active() && G.check.state == 1 && velocity_res < 0) {
+        log_info("vgeo_check_resolve: no velocity target this frame (Engine Fidelity level without temporal passes): skipped");
+        G.check.state = 0;
+    }
     if (active() && G.check.state == 1) {   // the raster runs in this graph (vgeo_raster)
         G.check.velocity = velocity_res;
         int c = fg_pass("vgeo_check", exec_check, NULL);
@@ -777,7 +784,8 @@ void vkg_record_shadow_cull(VkCommandBuffer cmd) {
         vkCmdResetQueryPool(cmd, G.sqp, frame * 8, 8);
         vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, G.sqp, frame * 8);
     }
-    for (u32 k = 0; k < 3; k++) {
+    u32 ncasc = (u32)DG_CLAMP(R->r_shadow_cascades->i, 1, 3);   // Engine Fidelity: cascades drawn this frame
+    for (u32 k = 0; k < ncasc; k++) {
         // untile: the cascade matrices map into their 2 x 2 atlas tile (render.c)
         mat4 t = mat4_identity();
         t.m[0] = 0.5f;
@@ -812,6 +820,11 @@ void vkg_record_shadow_cull(VkCommandBuffer cmd) {
     dep.pMemoryBarriers = &mb;
     vkCmdPipelineBarrier2(cmd, &dep);
     if (G.sqp) vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, G.sqp, frame * 8 + 1);
+    // Cascades not drawn this frame: empty intervals keep the readback complete.
+    for (u32 k = ncasc; k < 3 && G.sqp; k++) {
+        vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, G.sqp, frame * 8 + 2 + k * 2);
+        vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, G.sqp, frame * 8 + 3 + k * 2);
+    }
     G.shadow_culled = true;
 }
 
@@ -967,11 +980,16 @@ static const EraDef k_eras[4] = {
     { 0, 1.0f, 2.0f, 12.0f, 0.2f },  // 2010: 3 LODs, more aggressive distances
 };
 
+// Compared after the Engine Fidelity bounds (docs/ENGINE_FIDELITY.md): Low scales the era's error
+// thresholds, caps its foliage; the era still reads back as itself.
+static bool era_eq(int f, float v, float era_v) { return fabsf(v - fid_clamp_current(f, era_v)) < 1e-4f; }
+
 static int era_detect(void) {
     for (int e = 0; e < 4; e++) {
         const EraDef *d = &k_eras[e];
-        if (G.r_vgeo->i == d->vgeo && fabsf(G.error_px->f - d->error_px) < 1e-4f && fabsf(G.shadow_error_px->f - d->shadow_px) < 1e-4f &&
-            fabsf(G.lod_px->f - d->lod_px) < 1e-4f && fabsf(G.foliage_density->f - d->foliage) < 1e-4f)
+        if (era_eq(FF_VGEO, (float)G.r_vgeo->i, (float)d->vgeo) && era_eq(FF_VGEO_ERROR_PX, G.error_px->f, d->error_px) &&
+            era_eq(FF_VGEO_SHADOW_ERROR_PX, G.shadow_error_px->f, d->shadow_px) && era_eq(FF_VGEO_LOD_PX, G.lod_px->f, d->lod_px) &&
+            era_eq(FF_FOLIAGE_DENSITY, G.foliage_density->f, d->foliage))
             return e;
     }
     return 4;
@@ -991,6 +1009,7 @@ static void era_apply(int e) {
 static void on_era(Cvar *c) {
     if (G.applying_era) return;
     if (c->i >= 0 && c->i <= 3 && era_detect() != c->i) era_apply(c->i);
+    fid_enforce_all();   // the era's capability matrix (what it lacks is unavailable at every level)
 }
 
 static void on_era_value(Cvar *c) {
@@ -1009,6 +1028,14 @@ static void vkg_register_era(void) {
     G.foliage_density = cvar_reg_float("r_foliage_density", 1.0f, 0.0f, 1.0f, CVAR_ARCHIVE, "foliage instance density (Phase 7)");
     G.era = cvar_reg_int("r_era", 0, 0, 4, CVAR_ARCHIVE, "geometry era preset: 0 modern (vgeo 1 px), 1 2020 (vgeo 2 px), 2 2015 (4 discrete LODs), 3 2010 (3 LODs), 4 custom");
     G.era->on_change = on_era;
+    // Era-owned Engine Fidelity features take their defaults from this table.
+    for (int e = 0; e < 4; e++) {
+        fid_set_era_value(e, FF_VGEO, (float)k_eras[e].vgeo);
+        fid_set_era_value(e, FF_VGEO_ERROR_PX, k_eras[e].error_px);
+        fid_set_era_value(e, FF_VGEO_SHADOW_ERROR_PX, k_eras[e].shadow_px);
+        fid_set_era_value(e, FF_VGEO_LOD_PX, k_eras[e].lod_px);
+        fid_set_era_value(e, FF_FOLIAGE_DENSITY, k_eras[e].foliage);
+    }
     Cvar *dep[5] = { G.r_vgeo, G.error_px, G.shadow_error_px, G.lod_px, G.foliage_density };
     for (int i = 0; i < 5; i++) dep[i]->on_change = on_era_value;
     on_era_value(NULL);

@@ -182,9 +182,11 @@ int main(int argc, char **argv) {
     for (int i = 1; i < argc; i++) if (!strcmp(argv[i], "--test")) opt.test = true;
     // Test runs never read or write the user's settings (they used to overwrite them on exit).
     config_set_enabled(!opt.test);
+    bool first_run = false;
     if (opt.test) cvar_set("r_maxfps", "60");
     else if (config_exec_file(video_config_path())) log_info("config loaded from %s", video_config_path());
-    else log_info("no config yet: settings will be saved to %s", video_config_path());
+    else { log_info("no config yet: settings will be saved to %s", video_config_path()); first_run = true; }
+    game_fidelity_settings_loaded(first_run);   // Engine Fidelity: saved level + user choices in force
     input_bind_missing_defaults();
     config_clear_dirty();   // loading the config is not a change
     if (!opt.test) game_config_loaded();   // migrations are changes: saved on exit

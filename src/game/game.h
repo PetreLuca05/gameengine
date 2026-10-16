@@ -108,6 +108,7 @@ typedef struct Game {
 
 void game_init(void);
 void game_config_loaded(void);   // after the config file: one-time settings migrations
+void game_fidelity_settings_loaded(bool first_run);   // Engine Fidelity: after the config, before scripts
 void game_shutdown(void);
 bool game_host(const char *map);
 void game_frame(float dt);

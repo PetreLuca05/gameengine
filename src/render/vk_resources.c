@@ -159,7 +159,7 @@ void vkr_target_destroy(RenderTarget *t) {
     memset(t, 0, sizeof(*t));
 }
 
-void vkr_create_samplers(void) {
+static void create_linear_sampler(void) {
     VkSamplerCreateInfo s = { VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
     s.magFilter = VK_FILTER_LINEAR;
     s.minFilter = VK_FILTER_LINEAR;
@@ -174,6 +174,20 @@ void vkr_create_samplers(void) {
     s.minLod = (float)DG_CLAMP(2 - R->r_texture_quality->i, 0, 2);
     s.maxLod = VK_LOD_CLAMP_NONE;
     VK_CHECK(vkCreateSampler(R->device, &s, NULL, &R->sampler_linear));
+}
+
+// r_aniso / r_texture_quality only shape the material sampler: recreate that one (the clamp /
+// shadow samplers stay, with every frame set, VFX and vgeo binding that holds them) and rewrite its
+// users: the material texture sets and the vgeo texture table. The caller waits for the device.
+void vkr_recreate_linear_sampler(void) {
+    vkDestroySampler(R->device, R->sampler_linear, NULL);
+    create_linear_sampler();
+    vkr_rewrite_all_texture_sets();
+    vkg_samplers_changed();
+}
+
+void vkr_create_samplers(void) {
+    create_linear_sampler();
 
     VkSamplerCreateInfo c = { VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
     c.magFilter = VK_FILTER_LINEAR;

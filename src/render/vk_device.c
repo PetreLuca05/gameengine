@@ -195,7 +195,8 @@ bool vkd_create_device(SDL_Window *window) {
     f2.features.drawIndirectFirstInstance = supported.drawIndirectFirstInstance;
     if (!supported.shaderStorageImageExtendedFormats) log_warn("vulkan: shaderStorageImageExtendedFormats missing - some post effects disabled");
 
-    const char *dev_exts[4] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
+    const char *dev_exts[6] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
+    bool unused_att = false;
     u32 dev_ext_count = 1;
     {
         u32 n = 0;
@@ -204,6 +205,7 @@ bool vkd_create_device(SDL_Window *window) {
         vkEnumerateDeviceExtensionProperties(R->gpu, NULL, &n, props);
         for (u32 i = 0; i < n; i++)
             if (!strcmp(props[i].extensionName, VK_EXT_MESH_SHADER_EXTENSION_NAME)) R->vg_mesh_shader = true;
+            else if (!strcmp(props[i].extensionName, VK_EXT_DYNAMIC_RENDERING_UNUSED_ATTACHMENTS_EXTENSION_NAME)) unused_att = true;
             else if (!strcmp(props[i].extensionName, VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME)) {
                 dev_exts[dev_ext_count++] = VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME;
                 R->has_push_descriptor = true;
@@ -230,6 +232,23 @@ bool vkd_create_device(SDL_Window *window) {
             dev_exts[dev_ext_count++] = VK_EXT_MESH_SHADER_EXTENSION_NAME;
         }
     }
+    // Engine Fidelity: levels without temporal passes render the G-buffer without its velocity target
+    // (a null attachment view under a pipeline that has the format): needs this extension.
+    VkPhysicalDeviceDynamicRenderingUnusedAttachmentsFeaturesEXT ua = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_UNUSED_ATTACHMENTS_FEATURES_EXT };
+    if (unused_att) {
+        VkPhysicalDeviceDynamicRenderingUnusedAttachmentsFeaturesEXT su = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_UNUSED_ATTACHMENTS_FEATURES_EXT };
+        VkPhysicalDeviceFeatures2 s2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
+        s2.pNext = &su;
+        vkGetPhysicalDeviceFeatures2(R->gpu, &s2);
+        if (su.dynamicRenderingUnusedAttachments) {
+            ua.dynamicRenderingUnusedAttachments = VK_TRUE;
+            ua.pNext = f13.pNext;
+            f13.pNext = &ua;
+            dev_exts[dev_ext_count++] = VK_EXT_DYNAMIC_RENDERING_UNUSED_ATTACHMENTS_EXTENSION_NAME;
+            R->has_unused_attachments = true;
+        }
+    }
+    if (!R->has_unused_attachments) log_info("vulkan: no VK_EXT_dynamic_rendering_unused_attachments: the G-buffer velocity is always written");
     VkDeviceCreateInfo dci = { VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
     dci.pNext = &f2;
     dci.queueCreateInfoCount = 1;

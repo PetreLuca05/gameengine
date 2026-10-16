@@ -308,6 +308,7 @@ static void draw_confirm(bool top) {
     case CONFIRM_DROP: yes_l = "Drop"; break;
     case CONFIRM_DISPLAY: yes_l = "Keep"; no_l = "Revert"; break;
     case CONFIRM_RESET_BINDS: yes_l = "Reset"; yes_kind = GB_DANGER; break;
+    case CONFIRM_FIDELITY: yes_l = "Apply recommended"; no_l = "Keep current"; break;
     }
     bool y = gw_button(gui_id("confirm_yes"), yes, yes_l, yes_kind, true);
     bool n = gw_button(gui_id("confirm_no"), no, no_l, GB_SECONDARY, true);
@@ -330,6 +331,7 @@ static void draw_confirm(bool top) {
         case CONFIRM_DROP: inventory_confirm_drop(yes_pressed); break;
         case CONFIRM_DISPLAY: settings_confirm_result(yes_pressed); break;
         case CONFIRM_RESET_BINDS: if (yes_pressed) input_reset_bindings(); break;
+        case CONFIRM_FIDELITY: if (yes_pressed) game_fidelity_apply_recommended(); break;
         }
     }
 }

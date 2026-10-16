@@ -148,20 +148,25 @@ float shadow_factor(vec3 p, vec3 n) {
     int count = int(frame.shadow_splits.w);
     if (count <= 1) {
         float s = shadow_cascade(0, p, n);
+        float fade_end = frame.shadow_bias.w;
+        if (s >= 0.0 && fade_end > 0.0) s = mix(s, 1.0, smoothstep(fade_end * 0.85, fade_end, length(p - frame.camera_pos.xyz)));
         return s < 0.0 ? 1.0 : s;
     }
     // Cascade by distance from the camera; the last 15 % of a cascade blends into the next one.
+    // Engine Fidelity: 1 .. 3 cascades (w); shadow_bias.w > 0 fades the last one out (shorter reach).
     float d = length(p - frame.camera_pos.xyz);
-    for (int c = 0; c < 3; c++) {
+    for (int c = 0; c < count; c++) {
         float radius = frame.shadow_splits[c];
-        if (d > radius && c < 2) continue;
+        if (d > radius && c < count - 1) continue;
         float s = shadow_cascade(c, p, n);
         if (s < 0.0) continue;
-        float blend = c < 2 ? smoothstep(radius * 0.85, radius, d) : 0.0;
+        float blend = c < count - 1 ? smoothstep(radius * 0.85, radius, d) : 0.0;
         if (blend > 0.0) {
             float s2 = shadow_cascade(c + 1, p, n);
             if (s2 >= 0.0) s = mix(s, s2, blend);
         }
+        float fade_end = frame.shadow_bias.w;
+        if (fade_end > 0.0) s = mix(s, 1.0, smoothstep(fade_end * 0.85, fade_end, d));
         return s;
     }
     return 1.0;

@@ -1318,6 +1318,7 @@ void game_init(void) {
     horde_init();
     hands_init();
     game_render_init();
+    game_fidelity_init();   // last: every graphics cvar is registered
 }
 
 void game_shutdown(void) {

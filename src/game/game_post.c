@@ -15,6 +15,7 @@
 #include "core/platform.h"
 #include "render/render.h"
 #include "render/debug_draw.h"
+#include "render/fidelity/fidelity.h"
 #include "ui/ui.h"
 #include "ui/crosshair.h"
 #include "cJSON.h"
@@ -49,7 +50,8 @@ typedef struct PostVolume {
 static struct {
     Cvar *preset, *aa, *upscaler, *upscale, *sharpen, *ao, *contact, *ssr, *ssgi, *vol, *mb, *mb_strength, *dof, *bloom, *bloom_q,
         *bloom_int, *flare, *chromatic, *vignette, *grain, *tonemap, *exp_comp, *auto_exp, *brightness, *gamma, *colorblind, *lut,
-        *debug, *compare, *paper, *maxnits, *feedback, *profile, *volumes_draw, *distortion, *underwater, *lens_dirt, *fog_scale;
+        *debug, *compare, *paper, *maxnits, *feedback, *profile, *volumes_draw, *distortion, *underwater, *lens_dirt, *fog_scale,
+        *dof_quality, *vol_lights;
     PostVolume vols[MAX_POST_VOLUMES];
     int vol_count;
     char vol_level[64];
@@ -99,14 +101,38 @@ static void apply_preset(int p) {
     cvar_set_int(GP.preset, p);
 }
 
+// Presets are applied through the Engine Fidelity bounds (docs/ENGINE_FIDELITY.md); one only reads
+// back when the level allows all of it (game_post_preset_allowed), otherwise Custom.
+static int pv(int f, int v) { return (int)lroundf(fid_clamp_current(f, (float)v)); }
 int game_post_detect_preset(void) {
     for (int p = 0; p < 4; p++) {
         const PresetDef *d = &k_presets[p];
-        if (GP.aa->i == d->aa && GP.ao->i == d->ao && GP.contact->i == d->contact && GP.ssr->i == d->ssr && GP.ssgi->i == d->ssgi &&
-            GP.vol->i == d->vol && GP.mb->i == d->mb && GP.dof->i == d->dof && GP.bloom_q->i == d->bloom_q && ((GP.flare->f > 0) == (d->flare != 0)))
+        if (!game_post_preset_allowed(p, NULL)) continue;
+        if (GP.aa->i == pv(FF_AA, d->aa) && GP.ao->i == pv(FF_AO, d->ao) && GP.contact->i == pv(FF_CONTACT_SHADOWS, d->contact) &&
+            GP.ssr->i == pv(FF_SSR, d->ssr) && GP.ssgi->i == pv(FF_SSGI, d->ssgi) && GP.vol->i == pv(FF_VOLUMETRICS, d->vol) &&
+            GP.mb->i == pv(FF_MOTION_BLUR, d->mb) && GP.dof->i == pv(FF_DOF, d->dof) && GP.bloom_q->i == pv(FF_BLOOM_QUALITY, d->bloom_q) &&
+            ((GP.flare->f > 0) == (d->flare != 0)))
             return p;
     }
     return 4;
+}
+
+// Whether the current Engine Fidelity level (and era) allows every value of a preset; else the
+// lowest level that does (*req, -1 = none in this era).
+bool game_post_preset_allowed(int p, int *req) {
+    if (p < 0 || p > 3) return false;
+    const PresetDef *d = &k_presets[p];
+    const int f[10] = { FF_AA, FF_AO, FF_CONTACT_SHADOWS, FF_SSR, FF_SSGI, FF_VOLUMETRICS, FF_MOTION_BLUR, FF_DOF, FF_BLOOM_QUALITY, FF_LENS_FLARE };
+    const float v[10] = { (float)d->aa, (float)d->ao, (float)d->contact, (float)d->ssr, (float)d->ssgi, (float)d->vol, (float)d->mb, (float)d->dof,
+                          (float)d->bloom_q, d->flare ? 0.6f : 0.0f };
+    int need = 0, era = fid_era();
+    for (int i = 0; i < 10; i++) {
+        int l = fid_min_level_for(era, f[i], v[i]);
+        if (l < 0) { need = -1; break; }
+        need = DG_MAX(need, l);
+    }
+    if (req) *req = need;
+    return need >= 0 && need <= fid_level();
 }
 const char *game_post_preset_name(int p) { return k_preset_names[DG_CLAMP(p, 0, 4)]; }
 void game_post_apply_preset(int p) { apply_preset(p); }
@@ -351,7 +377,7 @@ void game_post_init(void) {
     GP.mb_strength = cvar_reg_float("r_motion_blur_strength", 0.5f, 0.0f, 1.0f, A, "shutter fraction (0.5 = 180 degrees)");
     GP.dof = cvar_reg_int("r_dof", 1, 0, 2, A, "depth of field: 0 off, 1 aiming down sights, 2 always");
     GP.bloom = cvar_find("r_bloom");
-    GP.bloom_q = cvar_reg_int("r_bloom_quality", 2, 1, 2, A, "bloom mip chain: 1 low, 2 high");
+    GP.bloom_q = cvar_reg_int("r_bloom_quality", 2, 0, 2, A, "bloom mip chain: 0 tiny (4 mips), 1 low (5), 2 high (7)");
     GP.bloom_int = cvar_find("r_bloom_intensity");
     GP.flare = cvar_reg_float("r_lens_flare", 0.0f, 0.0f, 2.0f, A, "lens flare ghosts / halo");
     GP.lens_dirt = cvar_reg_float("r_lens_dirt", 0.0f, 0.0f, 2.0f, A, "lens dirt on bloom");
@@ -375,6 +401,8 @@ void game_post_init(void) {
     GP.volumes_draw = cvar_reg_bool("r_post_volumes_draw", false, 0, "draw the post volumes");
     GP.underwater = cvar_reg_float("r_fb_underwater", 0.0f, 0.0f, 1.0f, 0, "underwater screen effect (test hook)");
     GP.fog_scale = cvar_reg_float("r_fog_scale", 1.0f, 0.0f, 10.0f, A, "volumetric fog density multiplier");
+    GP.dof_quality = cvar_reg_int("r_dof_quality", 2, 0, 2, A, "depth of field gather: 0 16 taps (disk), 1 32 (hybrid), 2 48 (bokeh)");
+    GP.vol_lights = cvar_reg_bool("r_vol_local_lights", true, A, "point lights scatter in the volumetric fog (off: fog only)");
     GP.photo_focus = 5.0f;
     GP.photo_fstop = 2.8f;
     GP.photo_focal = 50.0f;
@@ -417,10 +445,15 @@ static void build_settings(PostSettings *s, const PostFrameInfo *fi) {
     s->ssr = GP.ssr->i;
     s->ssgi = GP.ssgi->i;
     s->volumetrics = GP.vol->i;
+    s->vol_local_lights = GP.vol_lights->i != 0;
+    s->dof_quality = GP.dof_quality->i;
+    // Engine Fidelity Off: no post-processing at all (the renderer's direct output path).
+    s->direct_output = fid_loaded() && !fid_level_post(fid_level());
     s->motion_blur = GP.mb->i;
     s->mb_intensity = GP.mb_strength->f;
     s->dof = GP.dof->i;
-    s->bloom = GP.bloom->i ? GP.bloom_q->i : 0;
+    s->bloom = GP.bloom->i ? DG_MAX(GP.bloom_q->i, 1) : 0;
+    s->bloom_mips = GP.bloom_q->i == 0 ? 4 : 0;   // tiny (Engine Fidelity Low)
     s->bloom_intensity = GP.bloom_int->f;
     s->bloom_dirt = GP.lens_dirt->f;
     s->flare = GP.flare->f;
