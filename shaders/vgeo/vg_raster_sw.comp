@@ -24,6 +24,30 @@ int64_t edge(ivec2 a, ivec2 b, ivec2 p) { return int64_t(b.x - a.x) * int64_t(p.
 // horizontal to the right, a left edge runs up. Pixel centres on other edges are excluded.
 int64_t bias(ivec2 a, ivec2 b) { ivec2 d = b - a; return (d.y < 0 || (d.y == 0 && d.x > 0)) ? int64_t(0) : int64_t(-1); }
 
+// Bounding box scan in integer type T: ra / rb / rd are the biased edge functions of the first pixel
+// centre (weights of a, b, d), stepped per pixel; z from the plane through the unbiased weights.
+#define SCAN(T, RA, RB, RD, ZERO)                                                                       \
+    {                                                                                                   \
+        T ra = RA, rb = RB, rd = RD;                                                                    \
+        T xa = T(b.y - d.y) * 256, xb = T(d.y - a.y) * 256, xd = T(a.y - b.y) * 256;                     \
+        T ya = T(d.x - b.x) * 256, yb = T(a.x - d.x) * 256, yd = T(b.x - a.x) * 256;                     \
+        for (int y = y0; y <= y1; y++) {                                                                \
+            T wa = ra, wb = rb, wd = rd;                                                                \
+            for (int x = x0; x <= x1; x++) {                                                            \
+                if ((wa | wb | wd) >= ZERO) {                                                           \
+                    float z = za + (float(wb - bd) * dzb + float(wd - ba) * dzd) * inv;                 \
+                    if (z >= 0.0 && z <= 1.0) vg_vis_write(uint(x), uint(y), z, payload);               \
+                }                                                                                       \
+                wa += xa;                                                                               \
+                wb += xb;                                                                               \
+                wd += xd;                                                                               \
+            }                                                                                           \
+            ra += ya;                                                                                   \
+            rb += yb;                                                                                   \
+            rd += yd;                                                                                   \
+        }                                                                                               \
+    }
+
 void main() {
     uvec2 r = vg_raster_range(true);
     uint k = r.x + vg_flat_group();
@@ -57,27 +81,16 @@ void main() {
     int x0 = max((lo.x + 127) >> 8, 0), x1 = min((hi.x - 128) >> 8, int(V.viewport.x) - 1);
     int y0 = max((lo.y + 127) >> 8, 0), y1 = min((hi.y - 128) >> 8, int(V.viewport.y) - 1);
     if (x0 > x1 || y0 > y1) return;
-    // Edge functions at the first pixel centre (biased: inside <=> all >= 0), steps per pixel.
+    // Edge functions at the first pixel centre (biased: inside <=> all >= 0), steps per pixel. 32-bit
+    // when the triangle spans < 128 px (|edge| < 2^31; every SW triangle in practice), else 64-bit.
     ivec2 p0 = ivec2(x0, y0) * 256 + 128;
-    int64_t bb = bias(b, d), bd = bias(d, a), ba = bias(a, b);
-    int64_t ra = edge(b, d, p0) + bb, rb = edge(d, a, p0) + bd, rd = edge(a, b, p0) + ba;   // weights of a, b, d
-    int64_t xa = int64_t(-(d.y - b.y)) * 256, xb = int64_t(-(a.y - d.y)) * 256, xd = int64_t(-(b.y - a.y)) * 256;
-    int64_t ya = int64_t(d.x - b.x) * 256, yb = int64_t(a.x - d.x) * 256, yd = int64_t(b.x - a.x) * 256;
     float inv = 1.0 / float(area), dzb = zb - za, dzd = zd - za;
     uint payload = vg_vis_payload(vi, t);
-    for (int y = y0; y <= y1; y++) {
-        int64_t wa = ra, wb = rb, wd = rd;
-        for (int x = x0; x <= x1; x++) {
-            if ((wa | wb | wd) >= 0) {
-                float z = za + (float(wb - bd) * dzb + float(wd - ba) * dzd) * inv;
-                if (z >= 0.0 && z <= 1.0) vg_vis_write(uint(x), uint(y), z, payload);
-            }
-            wa += xa;
-            wb += xb;
-            wd += xd;
-        }
-        ra += ya;
-        rb += yb;
-        rd += yd;
+    if (max(hi.x - lo.x, hi.y - lo.y) < 32768) {
+        int bb = int(bias(b, d)), bd = int(bias(d, a)), ba = int(bias(a, b));
+        SCAN(int, int(edge(b, d, p0)) + bb, int(edge(d, a, p0)) + bd, int(edge(a, b, p0)) + ba, 0)
+    } else {
+        int64_t bb = bias(b, d), bd = bias(d, a), ba = bias(a, b);
+        SCAN(int64_t, edge(b, d, p0) + bb, edge(d, a, p0) + bd, edge(a, b, p0) + ba, int64_t(0))
     }
 }

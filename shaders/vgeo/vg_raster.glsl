@@ -17,7 +17,8 @@ vec4 vg_raster_clip(VgXf x, VgClusterData c, VgMesh m, uint v) {
 }
 
 #ifdef VG_VIS
-// Visibility buffer write (vgeo_gpu.h): the nearest depth wins, ties go to the larger payload.
+// Visibility buffer write (vgeo_gpu.h): the nearest depth wins, ties go to the larger payload. (A plain
+// load skipping the atomic when it already loses measured no faster on the RTX 3060 Ti.)
 void vg_vis_write(uint x, uint y, float z, uint payload) {
     uint64_t v = uint64_t(floatBitsToUint(1.0 - z)) << 32 | uint64_t(payload);
     atomicMax(vis[y * uint(V.viewport.x) + x], v);
