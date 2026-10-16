@@ -91,6 +91,7 @@ typedef struct HoldKickParams {
     bool set;
     float ads_push, ads_roll, ads_misalign_deg;
     u8 kick_hip, kick_ads, sway_hip, sway_ads;
+    float ads_in, ads_out;   // blend times into / out of ADS (s, > 0: the weapon's ADS time, so the gun and the zoom finish together)
 } HoldKickParams;
 
 typedef struct HoldPointInput {

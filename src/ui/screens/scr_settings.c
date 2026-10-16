@@ -227,7 +227,7 @@ static void tab_graphics(GuiCursor *c, GuiRect content) {
     section(c, "Sights");
     static const char *const scope[] = { "Picture-in-picture", "Full screen" };
     row_combo_cvar(c, "Scopes", "r_scope_mode", scope, 2, "Picture-in-picture keeps the world visible around the scope.");
-    row_slider_cvar(c, "Scope picture resolution", "r_scope_pip_scale", 0.2f, 1.0f, 0.05f, "%.2f", NULL);
+    row_slider_cvar(c, "Scope picture resolution", "r_scope_pip_scale", 0.2f, 2.0f, 0.05f, "%.2f", "1 = the render height, above 1 supersamples (sharper, slower).");
     row_slider_cvar(c, "Red dot brightness", "sight_brightness", 0.0f, 3.0f, 0.05f, "%.2f", NULL);
     row_toggle_cvar(c, "Depth of field while aiming", "ads_dof", "A slight blur on the weapon while aimed.");
     (void)content;

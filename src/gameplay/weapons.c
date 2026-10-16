@@ -30,7 +30,7 @@ void weapons_register_cvars(void) {
     WC.visual_scale = cvar_reg_float("wpn_visual_scale", 1.0f, 0.0f, 3.0f, CVAR_ARCHIVE, "camera + viewmodel kick multiplier (cosmetic)");
     WC.sway_scale = cvar_reg_float("wpn_sway_scale", 1.0f, 0.0f, 3.0f, CVAR_SERVER, "weapon sway: aim sway (moves the view + bullets), the item's look lag / idle sway / breathing / sprint bob");
     WC.kick_scale = cvar_reg_float("wpn_kick_scale", 1.0f, 0.0f, 3.0f, CVAR_ARCHIVE, "visual recoil kick of the held item on its hold point (aim recoil is separate)");
-    WC.ads_sway = cvar_reg_float("wpn_ads_sway", 0.5f, 0.0f, 6.0f, CVAR_SERVER, "aim sway of the sight while aimed (x the weapon's idle sway; bullets follow the sight)");
+    WC.ads_sway = cvar_reg_float("wpn_ads_sway", 4.0f, 0.0f, 10.0f, CVAR_SERVER, "aim sway of the sight while aimed (x the weapon's idle sway: a small visible drift on every sight; scope_sway weapons use their own value x 0.5; bullets follow the sight)");
     WC.ads_bob = cvar_reg_float("wpn_ads_bob", 1.0f, 0.0f, 3.0f, CVAR_SERVER, "sight bob while walking aimed (bullets follow the sight)");
     WC.bob_scale = cvar_reg_float("wpn_bob_scale", 0.0f, 0.0f, 3.0f, CVAR_ARCHIVE, "item bob while walking (0 = the item stays still; sprinting always bobs)");
     WC.recoil_debug = cvar_reg_int("wpn_recoil_debug", 0, 0, 2, 0, "recoil overlay: 1 = panel + cone, 2 = also log every shot");
@@ -110,7 +110,11 @@ vec2 weapon_sway_deg(const WeaponDef *d, const WeaponState *ws, float t) {
 
 vec2 weapon_aim_offset_deg(const WeaponDef *d, const WeaponState *ws, const PlayerMove *m, float t) {
     if (!d || d->kind == WPN_MELEE) return v2(0, 0);
-    vec2 o = v2_scale(weapon_sway_deg(d, ws, t), cv_f(WC.ads_sway, 1.0f));
+    // Irons, red dots and plain optics: the weapon's idle sway x wpn_ads_sway (rifle 0.05 x 4 =
+    // 0.2 deg, a few pixels at the sight FOV). Weapons with a tuned scope_sway (DMR, sniper, held
+    // breath steadies it) keep their own amplitude.
+    float k = d->recoil.scope_sway > 0 ? 0.5f : cv_f(WC.ads_sway, 1.0f);
+    vec2 o = v2_scale(weapon_sway_deg(d, ws, t), k);
     if (m) {
         // Walk bob of the sight: a figure-eight at the step rate, growing with speed.
         float speed = sqrtf(m->vel.x * m->vel.x + m->vel.z * m->vel.z);
@@ -577,6 +581,7 @@ static void gun_feel_tick(WeaponState *ws, const PlayerSim *sim, const RecoilPar
     bool aim = (cmd->buttons & BTN_AIM) && sim->move.mode == MOVE_WALK && !ws->reloading && ws->equip_t > 0.15f;
     float rate = dt / fmaxf(0.02f, rp->ads_time);
     ws->ads_t = aim ? fminf(1.0f, ws->ads_t + rate) : fmaxf(0.0f, ws->ads_t - rate * 1.3f);
+    ws->ads_on = aim ? 1 : 0;
     ws->since_sprint = sim->move.sprinting ? 0.0f : fminf(ws->since_sprint + dt, 10.0f);
     // Hold breath: sprint key while aimed steadies the sway until the capacity runs out.
     bool want_hold = ws->ads_t > 0.8f && (cmd->buttons & BTN_SPRINT) && rp->hold_breath_time > 0;

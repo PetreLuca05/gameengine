@@ -93,7 +93,7 @@ void sights_camera(const Player *p, const WeaponDef *wd, CameraAds *out) {
     if (wd) S.wd = *wd;
     bool gun = wd && wd->kind != WPN_MELEE;
     S.optic = gun ? attach_optic(&G->items, wd->att_applied) : NULL;
-    S.ads_t = (p && gun) ? saturate(p->sim.wpn.ads_t) : 0.0f;
+    S.ads_t = (p && gun) ? game_ads_vis() : 0.0f;
     bool scope = S.optic && S.optic->sight == SIGHT_SCOPE;
     bool pip = scope && S.scope_mode->i == 0;
     S.kind = !S.optic ? RSIGHT_NONE : (scope ? (pip ? RSIGHT_SCOPE_PIP : RSIGHT_SCOPE_FULL) : RSIGHT_REDDOT);
@@ -571,7 +571,7 @@ void sights_register(void) {
     S.look_lag = cvar_reg_float("wpn_look_lag", 0.12f, 0.0f, 2.0f, CVAR_ARCHIVE, "how far the weapon trails mouse turns at the hip (x the hold style's look lag; 0 = locked to the view)");
     S.relief_scale = cvar_reg_float("ads_eye_relief_scale", 0.5f, 0.2f, 1.5f, CVAR_ARCHIVE, "ADS: sight distance from the eye x this (1 = the stock weld / the scope eye relief)");
     S.scope_mode = cvar_reg_int("r_scope_mode", 0, 0, 1, CVAR_ARCHIVE, "scopes: 0 = picture-in-picture (second scene render at the scope FOV), 1 = full-screen FOV + vignette");
-    S.pip_scale = cvar_reg_float("r_scope_pip_scale", 0.5f, 0.2f, 1.0f, CVAR_ARCHIVE, "scope picture-in-picture resolution (fraction of the render height)");
+    S.pip_scale = cvar_reg_float("r_scope_pip_scale", 1.0f, 0.2f, 2.0f, CVAR_ARCHIVE, "scope picture-in-picture resolution (fraction of the render height; > 1 supersamples, max 2048 px)");
     S.brightness = cvar_reg_float("sight_brightness", 1.0f, 0.0f, 4.0f, CVAR_ARCHIVE, "red dot / illuminated reticle brightness");
     S.ads_debug = cvar_reg_bool("ads_debug", false, 0, "ADS overlay: the sight socket projected against the exact screen centre, FOVs, sensitivity");
     S.sight_debug = cvar_reg_int("sight_debug", 0, 0, 6, 0, "sight shader views: 1 lens mask, 2 PiP raw, 3 eye box, 4 reticle only, 5 glass only");

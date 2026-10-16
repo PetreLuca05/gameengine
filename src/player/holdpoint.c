@@ -387,7 +387,10 @@ void holdpoint_eval(HoldPointState *st, const HoldPointInput *in, HoldPointOutpu
     if (state != st->state || in->style_key != st->style_key) {
         // Offset (and its velocity) from the new target to where the hold point is now, decayed
         // to zero: position and velocity stay continuous through any switch, even mid-blend.
-        st->blend_dur = fmaxf(0.01f, s->blend_in[state]);
+        float bd = s->blend_in[state];
+        if (in->kick_params.set && state == HP_ADS && in->kick_params.ads_in > 0.0f) bd = in->kick_params.ads_in;
+        else if (in->kick_params.set && st->state == HP_ADS && in->kick_params.ads_out > 0.0f) bd = in->kick_params.ads_out;
+        st->blend_dur = fmaxf(0.01f, bd);
         vec3 op = v3_sub(st->base.t, target.t);
         vec3 orv = rotvec(quat_mul(st->base.r, quat_conj(target.r)));
         float x0[6] = { op.x, op.y, op.z, orv.x, orv.y, orv.z };

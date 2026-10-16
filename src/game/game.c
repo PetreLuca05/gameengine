@@ -480,6 +480,8 @@ void game_cl_reconcile(const PlayerSim *server, u32 ack_seq) {
 }
 
 static void tick(void) {
+    Player *lp = game_local_player();
+    G->ads_prev = lp ? lp->sim.wpn.ads_t : 0.0f;
     UserCmd cmd = build_cmd();
     G->last_cmd = cmd;
     World *w = G->world;
@@ -566,6 +568,14 @@ static void handle_hotbar(void) {
     if (input_consume_press(ACT_NEXT_ITEM)) G->hotbar_slot = (u8)((G->hotbar_slot + 1) % INV_HOTBAR);
     if (input_consume_press(ACT_PREV_ITEM)) G->hotbar_slot = (u8)((G->hotbar_slot + INV_HOTBAR - 1) % INV_HOTBAR);
     if (input_consume_press(ACT_DROP)) game_rpc(RPC_INV_DROP, G->hotbar_slot, 0, 0);
+}
+
+// ADS progress is simulated at the tick rate; the zoom and the sight presentation use it
+// interpolated to the frame so aiming in and out is smooth at any frame rate.
+float game_ads_vis(void) {
+    Player *p = game_local_player();
+    if (!p) return 0.0f;
+    return saturate(lerpf(G->ads_prev, p->sim.wpn.ads_t, saturate(G->alpha)));
 }
 
 void game_frame(float dt) {
@@ -1163,7 +1173,12 @@ void game_config_loaded(void) {
         for (int i = 0; i < 2; i++) { Cvar *c = cvar_find(names[i]); if (c) cvar_reset(c); }
         log_info("config: weapon kick / camera kick reset to their defaults");
     }
-    cvar_set_int(ver, 2);
+    if (ver->i < 3) {
+        // 3: sharper scopes (the old default picture resolution 0.5 -> 1.0).
+        Cvar *ps = cvar_find("r_scope_pip_scale");
+        if (ps && ps->f < 0.99f) { cvar_reset(ps); log_info("config: scope picture resolution raised to %.2f", ps->f); }
+    }
+    cvar_set_int(ver, 3);
 }
 
 void game_init(void) {

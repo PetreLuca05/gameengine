@@ -467,6 +467,7 @@ static void update_item_sockets(const World *w, CharacterInst *c, const u8 *att)
     static WeaponDef eff;
     attach_weapon_effective(w->items, c->item_weapon, att, &eff);
     c->item_sock = eff.sockets;
+    c->item_ads_time = eff.recoil.ads_time;
 }
 
 static const ItemSockets *held_sockets(const CharacterInst *c) {
@@ -503,7 +504,9 @@ static void player_inputs(World *w, CharacterInst *c, const Player *p, CharInput
     in->grounded = m->on_ground != 0;
     in->crouch = m->crouch_amount > 0.5f;
     in->sprint = m->sprinting != 0;
-    in->ads = ws->ads_t > 0.5f;
+    // The aim request, not the progress: the gun starts towards the eye on the press, in step with
+    // the zoom (the hold point blends over the weapon's ADS time), and leaves on the release.
+    in->ads = ws->ads_on || ws->ads_t >= 0.999f;
     in->mantling = m->mode == MOVE_MANTLE;
     in->vaulting = m->mode == MOVE_VAULT;
     in->hanging = m->mode == MOVE_HANG;
@@ -1260,6 +1263,9 @@ static void post_one(World *w, CharacterInst *c, int i, float dt, vec3 cam_pos, 
             pi.hold_kick.kick_ads = rp->anchor_ads;
             pi.hold_kick.sway_hip = rp->sway_anchor_hip;
             pi.hold_kick.sway_ads = rp->sway_anchor_ads;
+            float at = c->item_ads_time > 0.0f ? c->item_ads_time : rp->ads_time;
+            pi.hold_kick.ads_in = at;
+            pi.hold_kick.ads_out = at / 1.3f;
         }
         pi.hp_bob_scale = wc->bob_scale ? wc->bob_scale->f : 0.0f;
     }

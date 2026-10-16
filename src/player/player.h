@@ -81,6 +81,7 @@ typedef struct WeaponState {
     float breath;       // breath hold used (s)
     u8 breath_holding;
     u8 breath_exhausted;
+    u8 ads_on;          // aim requested this tick (the hold point starts moving at once)
     u16 item;           // item in the equipped slot (a change counts as an equip)
     float sway_k;       // smoothed sway amplitude multiplier (hold breath)
     RecoilState rc;     // aim recoil + bloom (gameplay/recoil.h)

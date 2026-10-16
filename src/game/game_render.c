@@ -561,7 +561,7 @@ void game_render(void) {
         float vmf = render_vm_fov_for(&cam, rvm ? rvm->f : 0.0f);
         // The visual camera kick turns the view but not the aim: while aimed the weapon counters it,
         // so the reticle keeps marking exactly where the shots go (docs/RECOIL.md "Hip vs ADS").
-        float ads_a = wd ? saturate(p->sim.wpn.ads_t) : 0.0f;
+        float ads_a = wd ? game_ads_vis() : 0.0f;
         chars_set_fp_aim_offset(sway.x - kr.y * ads_a, sway.y - kr.x * ads_a, cam.pitch + kr.x * DG_DEG2RAD, cam.fov_deg, vmf);
         cam.pitch += kr.x * DG_DEG2RAD;
         cam.yaw -= kr.y * DG_DEG2RAD;

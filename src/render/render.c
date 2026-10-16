@@ -1130,7 +1130,7 @@ static bool setup_scope_pip(FrameData *fd) {
     float t_lens = (s->lens_radius / d) * tan_base / fmaxf(tan_vm, 1e-3f);
     float tan_half = clampf(1.15f * t_lens / fmaxf(s->zoom, 1.0f), tanf(0.25f * DG_DEG2RAD), tanf(30.0f * DG_DEG2RAD));
     R->pip_fov = 2.0f * atanf(tan_half) * DG_RAD2DEG;
-    u32 n = (u32)DG_CLAMP((int)lrintf((float)R->hdr.h * clampf(s->pip_scale, 0.2f, 1.0f)), 128, 1024);
+    u32 n = (u32)DG_CLAMP((int)lrintf((float)R->hdr.h * clampf(s->pip_scale, 0.2f, 2.0f)), 128, 2048);
     F.pip_size = n;
     mat4 view = mat4_look_at(s->objective_pos, v3_add(s->objective_pos, fwd), up);
     mat4 proj = mat4_perspective(2.0f * atanf(tan_half), 1.0f, 0.3f, R->cam.zfar);

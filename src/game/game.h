@@ -78,6 +78,7 @@ typedef struct Game {
     int inv_pending_count;
     u32 inv_seq;
     bool paused;                 // single player / host alone: the pause menu stops the simulation
+    float ads_prev;              // the local player's ADS progress before the last tick (render interpolation)
 
     // HUD state
     Hint hints[MAX_HINTS];
@@ -114,6 +115,7 @@ void game_disconnect_to_local(const char *reason);
 Game *game(void);
 World *game_world(void);
 Player *game_local_player(void);
+float game_ads_vis(void);       // the local ADS progress interpolated to this frame (zoom, sight presentation)
 bool game_is_host(void);
 
 // Called by the net layer.
