@@ -31,6 +31,7 @@ typedef struct VgScene {
     u32 material_count, material_cap;
     VgBuffer b_meshes, b_nodes, b_groups, b_page_table, b_pool, b_instances, b_cells, b_materials;
     u32 generation;              // bumps on every commit (cullers rewrite their descriptor sets)
+    const struct VgPalettes *palettes;   // skinned instances (vgeo_skin.h, vg_palettes_attach); NULL: none
 } VgScene;
 
 void vgeo_scene_init(VgScene *s, const VgContext *ctx);
@@ -41,6 +42,10 @@ u32 vgeo_scene_add_mesh(VgScene *s, const VgBuilt *b);
 u32 vgeo_scene_add_material(VgScene *s, const VgMaterial *m);
 void vgeo_scene_set_mesh_materials(VgScene *s, u32 mesh, u32 material_base);
 void vgeo_scene_add_instance(VgScene *s, u32 mesh, const float pos[3], const float rot[4], float scale);
+// A skinned instance of a VGF_SKINNED mesh, animated by palette slot `slot` (vgeo_skin.h): its
+// vertices are skinned into instance space, then transformed by pos / rot / scale. Skinned instances
+// are binned into cells of their own (<= 32 each, unbounded: they move); their bounds come from the slot.
+void vgeo_scene_add_skinned_instance(VgScene *s, u32 mesh, const float pos[3], const float rot[4], float scale, u32 slot);
 void vgeo_scene_clear_instances(VgScene *s);
 // Bins instances into cells and uploads everything (load time: waits for the device to be idle).
 bool vgeo_scene_commit(VgScene *s);
@@ -59,7 +64,9 @@ typedef struct VgRefCluster {
 } VgRefCluster;
 // LOD selection over every instance (no node pruning): cluster c of group g is selected when
 // px(g.parent_error, g.lod) > t and (px(c.error, c.lod) <= t or its child group's page is missing).
-// With frustum, the culling sphere is also classified against the view planes. Returns the count.
+// With frustum, the culling sphere is also classified against the view planes. Skinned instances
+// use the slot's current palettes as the shaders do (vgeo_skin.h: sphere transform, error scale,
+// bone-box culling spheres; empty slots select nothing). Returns the count.
 u32 vgeo_scene_cpu_select(const VgScene *s, const VgViewGpu *v, VgRefCluster *out, u32 cap);
 
 // View constants from a view-projection matrix (planes, viewport) and the error settings.

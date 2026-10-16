@@ -1,4 +1,5 @@
 #include "vgeo_scene.h"
+#include "vgeo_skin.h"
 #include "core/log.h"
 #include <float.h>
 #include <math.h>
@@ -129,6 +130,13 @@ void vgeo_scene_add_instance(VgScene *s, u32 mesh, const float pos[3], const flo
     in->mesh = (u16)mesh;
 }
 
+void vgeo_scene_add_skinned_instance(VgScene *s, u32 mesh, const float pos[3], const float rot[4], float scale, u32 slot) {
+    vgeo_scene_add_instance(s, mesh, pos, rot, scale);
+    VgInstance *in = &s->instances[s->instance_count - 1];
+    in->flags_phase |= (u32)VGI_SKINNED << 16;
+    in->extra = slot;
+}
+
 void vgeo_scene_clear_instances(VgScene *s) { s->instance_count = 0; }
 
 void vgeo_instance_decode(const VgInstance *in, float pos[3], float rot[4], float *scale) {
@@ -170,6 +178,7 @@ bool vgeo_scene_commit(VgScene *s) {
     for (u32 i = 0; i < s->instance_count; i++) {
         k[i].x = (i32)floorf(s->instances[i].pos[0] / VGEO_CELL_SIZE);
         k[i].z = (i32)floorf(s->instances[i].pos[2] / VGEO_CELL_SIZE);
+        if ((s->instances[i].flags_phase >> 16) & VGI_SKINNED) k[i].x = k[i].z = INT32_MAX;   // moving: cells of their own, last
         k[i].index = i;
     }
     qsort(k, s->instance_count, sizeof(CellKey), cell_cmp);
@@ -180,7 +189,8 @@ bool vgeo_scene_commit(VgScene *s) {
     s->tri_count = 0;
     for (u32 i = 0; i < s->instance_count; i++) {
         sorted[i] = s->instances[k[i].index];
-        if (i == 0 || k[i].x != k[i - 1].x || k[i].z != k[i - 1].z) {
+        bool skinned = k[i].x == INT32_MAX && k[i].z == INT32_MAX;
+        if (i == 0 || k[i].x != k[i - 1].x || k[i].z != k[i - 1].z || (skinned && s->cells[s->cell_count - 1].count == 32)) {
             VgCell *cl = &s->cells[s->cell_count++];
             for (int a = 0; a < 3; a++) { cl->min[a] = FLT_MAX; cl->max[a] = -FLT_MAX; }
             cl->first = i;
@@ -191,6 +201,7 @@ bool vgeo_scene_commit(VgScene *s) {
         const VgMesh *m = &s->meshes[sorted[i].mesh];
         float w[4];
         world_sphere(&sorted[i], m->center, m->radius, w);
+        if (skinned) w[0] = w[1] = w[2] = 0, w[3] = 1e18f;   // unbounded: the instance test uses the slot's bounds
         for (int a = 0; a < 3; a++) {
             cl->min[a] = fminf(cl->min[a], w[a] - w[3]);
             cl->max[a] = fmaxf(cl->max[a], w[a] + w[3]);
@@ -249,13 +260,15 @@ u32 vgeo_scene_cpu_select(const VgScene *s, const VgViewGpu *v, VgRefCluster *ou
     for (u32 i = 0; i < s->instance_count; i++) {
         const VgInstance *in = &s->instances[i];
         const VgMesh *m = &s->meshes[in->mesh];
-        float pos[3], q[4], sc;
-        vgeo_instance_decode(in, pos, q, &sc);
+        VgXfCpu x;   // the shaders' decode (skinned: slot sphere transform and error scale)
+        vgeo_xf_decode(&x, in, m, s->palettes);
+        if (!x.active) continue;
+        float sc = x.scale;
         u32 ng = (u32)((in->mesh + 1 < s->mesh_count ? s->meshes[in->mesh + 1].group_base : s->group_count) - m->group_base);
         for (u32 gi = 0; gi < ng; gi++) {
             const VgGroup *g = &s->groups[m->group_base + gi];
             float gs[4];
-            world_sphere(in, g->lod_center, g->lod_radius, gs);
+            vgeo_xf_sphere(&x, g->lod_center, g->lod_radius, gs);
             float gpx = project_error(v, gs, g->parent_error * sc);
             if (!(gpx > t)) continue;
             u32 slot = s->page_table[m->page_base + g->page];
@@ -263,7 +276,7 @@ u32 vgeo_scene_cpu_select(const VgScene *s, const VgViewGpu *v, VgRefCluster *ou
             for (u32 k = 0; k < g->cluster_count; k++) {
                 const VgCluster *cl = vgeo_scene_cluster(s, slot, g->first_cluster + k);
                 float cs[4];
-                world_sphere(in, cl->lod_center, cl->lod_radius, cs);
+                vgeo_xf_sphere(&x, cl->lod_center, cl->lod_radius, cs);
                 float cpx = project_error(v, cs, cl->error * sc);
                 bool child_missing = false;
                 if (cl->child_group != ~0u) child_missing = s->page_table[m->page_base + s->groups[m->group_base + cl->child_group].page] == ~0u;
@@ -274,7 +287,13 @@ u32 vgeo_scene_cpu_select(const VgScene *s, const VgViewGpu *v, VgRefCluster *ou
                     r->packed = slot << VG_CLUSTER_BITS | (g->first_cluster + k);
                     r->lod_margin = fminf(margin(gpx, t), child_missing ? FLT_MAX : margin(cpx, t));
                     float b[4];
-                    world_sphere(in, cl->center, cl->radius, b);
+                    if (x.skinned) {   // animated bone-box sphere (vg_skin_bounds)
+                        VgBoneBox bx[VGEO_MAX_CLUSTER_BONES];
+                        u32 nb = vgeo_cluster_bones(s->pool + (size_t)slot * VGEO_PAGE_SIZE, cl, bx);
+                        float is[4];
+                        vgeo_skin_cluster_sphere(&s->palettes->cpu_bones[(size_t)x.first * 16], bx, nb, is);
+                        vgeo_xf_instance_sphere(&x, is, is[3], b);
+                    } else vgeo_xf_sphere(&x, cl->center, cl->radius, b);
                     r->frustum = 1;
                     for (int p = 0; p < 6; p++) {
                         float d = v->planes[p][0] * b[0] + v->planes[p][1] * b[1] + v->planes[p][2] * b[2] + v->planes[p][3];

@@ -22,6 +22,9 @@ uint cluster_word(uint slot, uint ci) { return slot * VG_PAGE_WORDS + 4u + ci * 
 void emit(uint inst, VgXf x, uint slot, uint ci, bool retest) {
     uint w = cluster_word(slot, ci);
     vec4 cs = vg_world_sphere(x, uintBitsToFloat(uvec4(pool[w], pool[w + 1u], pool[w + 2u], pool[w + 3u])));
+    // Skinned: the animated bone-box sphere (the bone set follows the cluster's triangles); the
+    // builder marks skinned clusters NO_CONE.
+    if (x.skin) cs = vg_instance_sphere(x, vg_skin_bounds(x, slot * VG_PAGE_WORDS + ((pool[w + 11u] >> 15) & 0x7FFFu) + ((pool[w + 10u] >> 8) & 0xFFu)));
     if (!retest) {
         if (!vg_frustum(cs)) return;
         uint cone = pool[w + 9u];
