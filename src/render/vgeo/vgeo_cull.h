@@ -52,6 +52,8 @@ typedef struct VgCuller {
     VmaAllocation dummy_alloc;
     VkImageView dummy_view;
     VkDescriptorSet hiz_sets[VG_MAX_FRAMES][16];
+    u32 hiz_next[VG_MAX_FRAMES];   // rolling Hi-Z set index (a build takes ceil(mips / 6) sets)
+    u32 dispatches_hiz;
     VkQueryPool qp;              // VGT_COUNT timestamps per (frame, view)
     bool qp_written[VG_MAX_FRAMES][VG_MAX_VIEWS];
     u32 dispatches;              // dispatches recorded by the last vg_cull_record
@@ -67,7 +69,10 @@ void vg_cull_shutdown(VgCuller *c);
 // filled here. frame < ctx->frames selects the per-frame descriptor set / readback.
 void vg_cull_record(VgCuller *c, VkCommandBuffer cmd, u32 frame, u32 slot, const VgViewGpu *view, const VgHizRef *prev, const VgHizRef *cur);
 
-// Builds a MAX Hi-Z (mip views of a half-resolution R32F image in GENERAL layout) from a w x h depth view.
+// Hi-Z pyramid size for a w x h depth buffer: half resolution rounded up to powers of two, full chain.
+void vg_hiz_size(u32 w, u32 h, u32 *hw, u32 *hh, u32 *mips);
+// Builds the MAX Hi-Z (mip views of an R32F image of vg_hiz_size, GENERAL layout) from a w x h depth
+// view, or from the visibility buffer (binding 18) when depth is VK_NULL_HANDLE. 6 levels per dispatch.
 void vg_hiz_record(VgCuller *c, VkCommandBuffer cmd, u32 frame, VkImageView depth, VkImageLayout depth_layout, const VkImageView *mips, u32 mip_count,
                    u32 w, u32 h);
 

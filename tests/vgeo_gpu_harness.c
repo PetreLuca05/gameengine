@@ -246,9 +246,8 @@ bool vgh_hiz_create(VgHarness *h, VgHizImage *z, u32 w, u32 hh) {
     memset(z, 0, sizeof(*z));
     z->w = w;
     z->h = hh;
-    u32 hw = (w + 1) / 2, hh2 = (hh + 1) / 2;   // half resolution, rounded up (as FG_SIZE_HALF)
-    u32 m = 1, s = hw > hh2 ? hw : hh2;
-    while ((s >> m) && m < 16) m++;
+    u32 hw, hh2, m;
+    vg_hiz_size(w, hh, &hw, &hh2, &m);   // half resolution, power-of-two sized, full chain
     z->mips = m;
     z->depth = make_image(h, w, hh, 1, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT, &z->depth_alloc);
     z->hiz = make_image(h, hw, hh2, m, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT, &z->hiz_alloc);
@@ -299,8 +298,10 @@ void vgh_hiz_build(VgHarness *h, VgCuller *c, VgHizImage *z, const float *depth)
 }
 
 void vgh_hiz_read(VgHarness *h, VgHizImage *z, u32 mip, float *out) {
-    u32 w = (z->w + 1) / 2, hh = (z->h + 1) / 2;
-    for (u32 k = 0; k < mip; k++) { w = w > 1 ? w / 2 : 1; hh = hh > 1 ? hh / 2 : 1; }
+    u32 w, hh, m;
+    vg_hiz_size(z->w, z->h, &w, &hh, &m);
+    w = w >> mip ? w >> mip : 1;
+    hh = hh >> mip ? hh >> mip : 1;
     VgBuffer rb = vgc_buffer(&h->ctx, (VkDeviceSize)w * hh * 4, VK_BUFFER_USAGE_TRANSFER_DST_BIT, VGM_READBACK);
     VkCommandPool pool;
     VkCommandBuffer cmd = vgc_begin_once(&h->ctx, &pool);

@@ -143,6 +143,21 @@ int main(int argc, char **argv) {
     printf("\n%-20s %-9s %8s %8s %8s %8s %8s | %8s %9s %9s %11s %6s\n", "camera", "occlusion", "inst ms", "trav ms", "clus ms", "pass2 ms", "total", "inst", "nodes",
            "clusters", "tris", "SW %");
     double worst = 0;
+    {
+        // Warm-up: keep the GPU busy ~0.5 s so it runs at full clocks during the timed runs.
+        mat4 view = mat4_look_at(cams[2].eye, cams[2].target, v3(0, 1, 0));
+        mat4 vp = mat4_mul(proj, view);
+        VgViewGpu v;
+        float eye[3] = { cams[2].eye.x, cams[2].eye.y, cams[2].eye.z };
+        vgeo_view_setup(&v, vp.m, vp.m, eye, (float)H / (2.0f * tanf(FOV * 0.5f)), 0.1f, W, H, 1.0f, 32.0f, VGV_NO_OCCLUSION);
+        double t_end = (double)SDL_GetPerformanceCounter() / (double)SDL_GetPerformanceFrequency() + 0.5;
+        while ((double)SDL_GetPerformanceCounter() / (double)SDL_GetPerformanceFrequency() < t_end) {
+            VkCommandPool pool;
+            VkCommandBuffer cmd = vgc_begin_once(&h.ctx, &pool);
+            for (int k = 0; k < 20; k++) vg_cull_record(&c, cmd, 0, 0, &v, NULL, NULL);
+            vgc_submit_wait(&h.ctx, pool, cmd);
+        }
+    }
     for (int ci = 0; ci < 4; ci++)
         for (int occ = 0; occ < 2; occ++) {
             mat4 view = mat4_look_at(cams[ci].eye, cams[ci].target, v3(0, 1, 0));

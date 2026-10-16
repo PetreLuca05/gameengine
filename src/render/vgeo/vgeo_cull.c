@@ -21,15 +21,16 @@ static bool create_layouts(VgCuller *c) {
     li.bindingCount = NBIND;
     li.pBindings = b;
     if (vkCreateDescriptorSetLayout(d, &li, NULL, &c->layout) != VK_SUCCESS) return false;
-    VkDescriptorSetLayoutBinding h[3];
+    // Hi-Z builder: 0 depth (sampled), 1 previous level, 2 six destination levels, 3 visibility buffer.
+    VkDescriptorSetLayoutBinding h[4];
     memset(h, 0, sizeof(h));
-    for (u32 i = 0; i < 3; i++) {
+    for (u32 i = 0; i < 4; i++) {
         h[i].binding = i;
-        h[i].descriptorType = i == 0 ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER : VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-        h[i].descriptorCount = 1;
+        h[i].descriptorType = i == 0 ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER : i == 3 ? VK_DESCRIPTOR_TYPE_STORAGE_BUFFER : VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        h[i].descriptorCount = i == 2 ? 6 : 1;
         h[i].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
     }
-    li.bindingCount = 3;
+    li.bindingCount = 4;
     li.pBindings = h;
     if (vkCreateDescriptorSetLayout(d, &li, NULL, &c->hiz_layout) != VK_SUCCESS) return false;
     VkPushConstantRange pr = { VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(VgPush) };
@@ -39,14 +40,14 @@ static bool create_layouts(VgCuller *c) {
     pi.pushConstantRangeCount = 1;
     pi.pPushConstantRanges = &pr;
     if (vkCreatePipelineLayout(d, &pi, NULL, &c->pl) != VK_SUCCESS) return false;
-    pr.size = 4;
+    pr.size = 32;
     pi.pSetLayouts = &c->hiz_layout;
     if (vkCreatePipelineLayout(d, &pi, NULL, &c->hiz_pl) != VK_SUCCESS) return false;
     u32 frames = c->ctx->frames;
     VkDescriptorPoolSize ps[3] = {
-        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 18 * VG_MAX_VIEWS * frames },
+        { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 18 * VG_MAX_VIEWS * frames + 16 * frames },
         { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 2 * VG_MAX_VIEWS * frames + 16 * frames },
-        { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 2 * 16 * frames },
+        { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 7 * 16 * frames },
     };
     VkDescriptorPoolCreateInfo dp = { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
     dp.maxSets = VG_MAX_VIEWS * frames + 16 * frames;
@@ -394,32 +395,59 @@ void vg_cull_record(VgCuller *c, VkCommandBuffer cmd, u32 frame, u32 slot, const
     v->readback_valid[frame] = true;
 }
 
+void vg_hiz_size(u32 w, u32 h, u32 *hw, u32 *hh, u32 *mips) {
+    u32 x = 1, y = 1, m = 1;
+    while (x < (w + 1) / 2) x <<= 1;
+    while (y < (h + 1) / 2) y <<= 1;
+    while ((x > y ? x : y) >> m) m++;
+    *hw = x;
+    *hh = y;
+    *mips = m;
+}
+
 void vg_hiz_record(VgCuller *c, VkCommandBuffer cmd, u32 frame, VkImageView depth, VkImageLayout depth_layout, const VkImageView *mips, u32 mip_count,
                    u32 w, u32 h) {
-    if (!c->ok) return;
+    if (!c->ok || !mip_count) return;
     if (mip_count > 16) mip_count = 16;
+    u32 hw, hh, full;
+    vg_hiz_size(w, h, &hw, &hh, &full);
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, c->p_hiz);
-    for (u32 m = 0; m < mip_count; m++) {
-        VkDescriptorSet set = c->hiz_sets[frame][m];
-        VkDescriptorImageInfo ii[3] = { { c->sampler, depth, depth_layout }, { VK_NULL_HANDLE, mips[m ? m - 1 : 0], VK_IMAGE_LAYOUT_GENERAL },
-                                        { VK_NULL_HANDLE, mips[m], VK_IMAGE_LAYOUT_GENERAL } };
-        VkWriteDescriptorSet wr[3];
+    for (u32 base = 0; base < mip_count; base += 6) {
+        u32 si = c->hiz_next[frame]++ % 16;
+        VkDescriptorSet set = c->hiz_sets[frame][si];
+        VkDescriptorImageInfo ii[9];
+        ii[0] = (VkDescriptorImageInfo){ c->sampler, depth ? depth : c->dummy_view, depth ? depth_layout : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+        ii[1] = (VkDescriptorImageInfo){ VK_NULL_HANDLE, mips[base ? base - 1 : 0], VK_IMAGE_LAYOUT_GENERAL };
+        for (u32 l = 0; l < 6; l++) ii[2 + l] = (VkDescriptorImageInfo){ VK_NULL_HANDLE, mips[base + l < mip_count ? base + l : mip_count - 1], VK_IMAGE_LAYOUT_GENERAL };
+        VkDescriptorBufferInfo bi = { c->vis_buffer ? c->vis_buffer : c->dummy_buf.buffer, 0, VK_WHOLE_SIZE };
+        VkWriteDescriptorSet wr[4];
         memset(wr, 0, sizeof(wr));
-        for (int i = 0; i < 3; i++) {
+        for (int i = 0; i < 4; i++) {
             wr[i].sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
             wr[i].dstSet = set;
             wr[i].dstBinding = (u32)i;
-            wr[i].descriptorCount = 1;
-            wr[i].descriptorType = i == 0 ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER : VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-            wr[i].pImageInfo = &ii[i];
+            wr[i].descriptorCount = i == 2 ? 6 : 1;
         }
-        vkUpdateDescriptorSets(c->ctx->device, 3, wr, 0, NULL);
+        wr[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        wr[0].pImageInfo = &ii[0];
+        wr[1].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        wr[1].pImageInfo = &ii[1];
+        wr[2].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+        wr[2].pImageInfo = &ii[2];
+        wr[3].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        wr[3].pBufferInfo = &bi;
+        vkUpdateDescriptorSets(c->ctx->device, 4, wr, 0, NULL);
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, c->hiz_pl, 0, 1, &set, 0, NULL);
-        u32 mip = m;
-        vkCmdPushConstants(cmd, c->hiz_pl, VK_SHADER_STAGE_COMPUTE_BIT, 0, 4, &mip);
-        u32 mw = (w + 1) / 2, mh = (h + 1) / 2;
-        for (u32 k = 0; k < m; k++) { mw = mw > 1 ? mw / 2 : 1; mh = mh > 1 ? mh / 2 : 1; }
-        vkCmdDispatch(cmd, (mw + 7) / 8, (mh + 7) / 8, 1);
+        u32 bw = hw >> base ? hw >> base : 1, bh = hh >> base ? hh >> base : 1;
+        struct { u32 base, levels, src, pad; u32 src_w, src_h; u32 base_w, base_h; } pc = {
+            base, mip_count - base < 6 ? mip_count - base : 6, depth ? 0u : 1u, 0, base ? bw * 2 : w, base ? bh * 2 : h, bw, bh };
+        if (base) {   // the previous level is power-of-two sized (clamped to 1)
+            pc.src_w = hw >> (base - 1) ? hw >> (base - 1) : 1;
+            pc.src_h = hh >> (base - 1) ? hh >> (base - 1) : 1;
+        }
+        vkCmdPushConstants(cmd, c->hiz_pl, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(pc), &pc);
+        vkCmdDispatch(cmd, (bw + 31) / 32, (bh + 31) / 32, 1);
         vgc_barrier(cmd);
+        c->dispatches_hiz++;
     }
 }

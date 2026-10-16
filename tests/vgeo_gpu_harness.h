@@ -32,7 +32,7 @@ bool vgh_hiz_create(VgHarness *h, VgHizImage *z, u32 w, u32 h_);
 void vgh_hiz_destroy(VgHarness *h, VgHizImage *z);
 // Uploads depth (w * h floats, 0 near .. 1 far) and builds the pyramid with the culler's builder.
 void vgh_hiz_build(VgHarness *h, VgCuller *c, VgHizImage *z, const float *depth);
-// Reads pyramid mip m back (mip 0 = half the depth size rounded up, then halved, floor).
+// Reads pyramid mip m back (vg_hiz_size >> m).
 void vgh_hiz_read(VgHarness *h, VgHizImage *z, u32 mip, float *out);
 VgHizRef vgh_hiz_ref(const VgHizImage *z);
 

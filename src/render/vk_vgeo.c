@@ -243,7 +243,9 @@ void vkg_graph_cull(int depth_res) {
     G.hiz = FG_NONE;
     G.depth = depth_res;
     if (!active()) return;
-    FgTexDesc d = { "vgeo_hiz", VK_FORMAT_R32_SFLOAT, FG_SIZE_HALF, 0, 0, 0, FG_MAX_MIPS, 0 };
+    u32 hw, hh, hm;
+    vg_hiz_size(R->hdr.w, R->hdr.h, &hw, &hh, &hm);
+    FgTexDesc d = { "vgeo_hiz", VK_FORMAT_R32_SFLOAT, FG_SIZE_ABS, hw, hh, 0, DG_MIN(hm, (u32)FG_MAX_MIPS), 0 };
     G.hiz = fg_history(&d);
     int p = fg_pass("vgeo_cull", exec_cull, NULL);
     if (p < 0) return;

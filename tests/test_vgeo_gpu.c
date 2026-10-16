@@ -335,23 +335,25 @@ static void test_hiz(void) {
     vgh_hiz_build(&g_h, &g_cull, &z, d);
     u32 bad = 0;
     float *m = (float *)malloc(sizeof(float) * w * h);
-    u32 mw = (w + 1) / 2, mh = (h + 1) / 2;
+    u32 pw, ph, pm;
+    vg_hiz_size(w, h, &pw, &ph, &pm);
+    CHECK(pm == z.mips, "hiz mips %u vs %u", pm, z.mips);
+    float *m2 = (float *)malloc(sizeof(float) * pw * ph);
     for (u32 mip = 0; mip < z.mips; mip++) {
-        vgh_hiz_read(&g_h, &z, mip, m);
-        u32 sh = mip + 1;   // texture mip j covers 2^(j+1) depth pixels
+        vgh_hiz_read(&g_h, &z, mip, m2);
+        u32 mw = DG_MAX(1u, pw >> mip), mh = DG_MAX(1u, ph >> mip), sh = mip + 1;   // texel covers 2^(mip+1) pixels
         for (u32 y = 0; y < mh; y++)
             for (u32 x = 0; x < mw; x++) {
-                // footprint in the depth buffer; the last row / column also owns the tail
-                u32 x0 = x << sh, y0 = y << sh, x1 = x == mw - 1 ? w : DG_MIN(w, (x + 1) << sh), y1 = y == mh - 1 ? h : DG_MIN(h, (y + 1) << sh);
+                // exactly the max of its footprint (pixels off the screen count as 0)
+                u32 x0 = x << sh, y0 = y << sh, x1 = DG_MIN(w, (x + 1) << sh), y1 = DG_MIN(h, (y + 1) << sh);
                 float mx = 0;
                 for (u32 yy = y0; yy < y1; yy++)
                     for (u32 xx = x0; xx < x1; xx++) mx = fmaxf(mx, d[yy * w + xx]);
-                if (m[y * mw + x] < mx) bad++;
+                if (m2[y * mw + x] != mx) bad++;
             }
-        mw = DG_MAX(1u, mw / 2);
-        mh = DG_MAX(1u, mh / 2);
     }
-    CHECK(bad == 0, "hiz: %u texels do not bound their footprint", bad);
+    free(m2);
+    CHECK(bad == 0, "hiz: %u texels are not the max of their footprint", bad);
     free(m);
     free(d);
     vgh_hiz_destroy(&g_h, &z);
