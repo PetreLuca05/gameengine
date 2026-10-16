@@ -1,5 +1,5 @@
 {
-  "_comment": "Preset: bolt-action sniper. One huge kick per shot that fully recovers, bolt cycle hook, heavy scope sway.",
+  "_comment": "Preset: bolt-action sniper. One huge kick per shot that fully recovers, bolt cycle hook.",
   "id": "sniper",
   "vfx": { "muzzle": { "type": "sniper", "device": "bare" }, "caliber": "sniper" },
   "item": "sniper",
@@ -14,15 +14,11 @@
   "fire_modes": ["single"],
   "ads_time": 0.4,
   "sprint_to_fire": 0.45,
-  "idle_sway": 0.06,
-  "scope_sway": 0.45,
   "hold_breath": 5,
   "range": 800,
   "impulse": 140,
   "headshot_mult": 2.5,
   "ads_fov": 22,
-  "sway": { "hip": { "breathing": 1.0, "look_lag": 1.2, "bob": 1.0, "landing": 1.0 },
-            "ads": { "breathing": 0.4, "look_lag": 0.25, "bob": 0.15, "landing": 0.5 }, "hold_breath_mult": 0.1 },
   "recoil": {
     "vertical": { "first_shot": 4.0, "per_shot": 4.0, "min": 0.92, "max": 1.08 },
     "horizontal": { "per_shot": 0.6, "min": -0.8, "max": 0.8, "bias": 0.0 },
