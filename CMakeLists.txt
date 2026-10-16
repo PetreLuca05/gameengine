@@ -481,3 +481,17 @@ add_test(NAME vgeo_raster COMMAND test_vgeo_raster --validation WORKING_DIRECTOR
 if(EXISTS "${CMAKE_SOURCE_DIR}/.toolchain/vvl/install/bin")
   set_tests_properties(vgeo_raster PROPERTIES ENVIRONMENT "VK_ADD_LAYER_PATH=${CMAKE_SOURCE_DIR}/.toolchain/vvl/install/bin")
 endif()
+
+# Virtualized geometry skinned meshes (Phase 6): animated bounds, crack-free animated cuts, GPU cut vs
+# the CPU reference, HW vs SW raster and the shared skinning helper on the harness.
+add_executable(test_vgeo_skinned tests/test_vgeo_skinned.c tests/vgeo_gpu_harness.c)
+set_target_properties(test_vgeo_skinned PROPERTIES C_STANDARD 11)
+target_link_libraries(test_vgeo_skinned PRIVATE dg_vgeo_gpu)
+add_dependencies(test_vgeo_skinned dg_shaders)
+if(MSVC)
+  target_compile_options(test_vgeo_skinned PRIVATE /W3 /wd4100 /wd4201 /utf-8)
+endif()
+add_test(NAME vgeo_skinned COMMAND test_vgeo_skinned --validation WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+if(EXISTS "${CMAKE_SOURCE_DIR}/.toolchain/vvl/install/bin")
+  set_tests_properties(vgeo_skinned PROPERTIES ENVIRONMENT "VK_ADD_LAYER_PATH=${CMAKE_SOURCE_DIR}/.toolchain/vvl/install/bin")
+endif()
