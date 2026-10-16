@@ -41,3 +41,4 @@ Thumbs.db
 # vgeo: generated test meshes / builds (re-created by tools/build_vgeo and the tests)
 /assets/vgeo/
 *.vgeo
+/build-agent.log

@@ -154,6 +154,7 @@ bool render_init(SDL_Window *window) {
     R->target_scale = 1.0f;
     vkd_create_targets();
     vkd_create_shadow_map(shadow_size_for_quality(R->r_shadow_quality->i));
+    vkls_init();
     if (!vkp_create_pipelines()) { log_error("render: pipeline creation failed"); return false; }
     if (!vkx_init()) log_warn("render: VFX pipelines unavailable (particles disabled)");
     fg_init();
@@ -216,6 +217,7 @@ void render_shutdown(void) {
         vkx_shutdown();
         render_ui_shutdown();
         vkr_target_destroy(&R->occl);
+        vkls_shutdown();
         vkp_destroy_pipelines();
         vkr_destroy_all_resources();
         vkr_target_destroy(&R->shadow);
@@ -355,6 +357,7 @@ void render_draw_viewmodel(const DrawItem *item) {
 
 void render_add_light(const PointLight *l) {
     if (R->light_count >= MAX_POINT_LIGHTS) return;
+    R->light_flags[R->light_count] = l->flags;
     GpuPointLight *g = &R->lights[R->light_count++];
     g->pos_radius = v4(l->pos.x, l->pos.y, l->pos.z, l->radius);
     g->color_intensity = v4(l->color.x, l->color.y, l->color.z, l->intensity);
@@ -362,6 +365,7 @@ void render_add_light(const PointLight *l) {
 
 void render_add_spot(const SpotLight *l) {
     if (R->spot_count >= MAX_SPOT_LIGHTS) return;
+    R->spot_flags[R->spot_count] = l->flags;
     GpuSpotLight *g = &R->spots[R->spot_count++];
     vec3 d = v3_norm(l->dir);
     float outer = clampf(l->outer_deg, 1.0f, 85.0f) * DG_DEG2RAD, inner = clampf(l->inner_deg, 0.0f, l->outer_deg) * DG_DEG2RAD;
@@ -615,6 +619,8 @@ static bool skin_in_pass(const SkinnedDraw *d, int pass) {
 }
 
 static bool prev_palette(u32 id, u32 *off, u32 *count);
+static u32 g_skin_shadow_inst[MAX_SKIN_DRAWS];   // skinned draw -> its instance record in the shadow pass (~0: none)
+static bool g_skin_shadow_gpu;                   // this frame's shadow pass instances are valid (GPU skinning)
 
 // Writes instance records for one pass (culled, sorted by mesh) starting at `base`.
 static u32 build_skin_pass(FrameResources *f, int pass, u32 base, SkinPass *out) {
@@ -639,6 +645,7 @@ static u32 build_skin_pass(FrameResources *f, int pass, u32 base, SkinPass *out)
     for (u32 k = 0; k < n; k++) {
         const SkinnedDraw *d = &R->skin_draws[draw_of[order[k]]];
         GpuSkinInstance *g = &inst[base + k];
+        if (shadow) g_skin_shadow_inst[draw_of[order[k]]] = base + k;
         g->color = d->color;
         g->params = v4(d->roughness, d->metallic, d->emissive, d->fade);
         g->info[0] = d->bone_count & 0xFFFFFu;
@@ -709,6 +716,72 @@ static void cpu_skin_all(FrameResources *f, CpuSkin *out) {
         out[i].offset = off;
         out[i].ok = true;
     }
+}
+
+static bool sphere_in_planes(const vec4 planes[6], vec3 c, float r) {
+    for (int p = 0; p < 6; p++)
+        if (planes[p].x * c.x + planes[p].y * c.y + planes[p].z * c.z + planes[p].w < -r) return false;
+    return true;
+}
+
+// Local light shadow tiles (vk_light_shadow.c): every opaque shadow caster touching the light's
+// sphere and the tile's frustum, static then GPU-skinned (one instance of the shadow pass records).
+u32 render_draw_shadow_casters(VkCommandBuffer cmd, FrameResources *f, vec4 sphere, const vec4 planes[6], u32 cascade) {
+    (void)f;
+    vec3 lc = v3(sphere.x, sphere.y, sphere.z);
+    u32 n = 0, bound_mesh = 0;
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_SHADOW]);
+    for (u32 i = 0; i < R->draw_count; i++) {
+        DrawItem *d = &R->draws[i];
+        if (!R->meshes[d->mesh].used || (d->mat.flags & MAT_NO_SHADOW) || d->mat.color.w < 0.999f) continue;
+        vec3 c;
+        float r;
+        item_bounds(d, &c, &r);
+        if (v3_len2(v3_sub(c, lc)) > (r + sphere.w) * (r + sphere.w) || !sphere_in_planes(planes, c, r)) continue;
+        GpuMesh *m = &R->meshes[d->mesh];
+        if (d->mesh != bound_mesh) {
+            VkDeviceSize zero = 0;
+            vkCmdBindVertexBuffers(cmd, 0, 1, &m->vb.buffer, &zero);
+            vkCmdBindIndexBuffer(cmd, m->ib.buffer, 0, VK_INDEX_TYPE_UINT32);
+            bound_mesh = d->mesh;
+        }
+        PushLit pc;
+        memset(&pc, 0, sizeof(pc));
+        pc.model = d->model;
+        pc.color = d->mat.color;
+        pc.flags[0] = d->mat.flags;
+        pc.flags[3] = cascade;
+        vkCmdPushConstants(cmd, R->layout_lit, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushLit), &pc);
+        vkCmdDrawIndexed(cmd, m->index_count, 1, 0, 0, 0);
+        R->stats.draw_calls++;
+        R->stats.triangles += m->index_count / 3;
+        n++;
+    }
+    if (!g_skin_shadow_gpu) return n;
+    bool bound = false;
+    for (u32 i = 0; i < R->skin_draw_count; i++) {
+        const SkinnedDraw *d = &R->skin_draws[i];
+        if (g_skin_shadow_inst[i] == ~0u || d->radius <= 0) continue;
+        if (v3_len2(v3_sub(d->center, lc)) > (d->radius + sphere.w) * (d->radius + sphere.w) || !sphere_in_planes(planes, d->center, d->radius)) continue;
+        if (!bound) {
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_SKIN_SHADOW]);
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 1, 1, &R->textures[R->white_tex].set, 0, NULL);
+            PushLit pc;
+            memset(&pc, 0, sizeof(pc));
+            pc.flags[3] = cascade;
+            vkCmdPushConstants(cmd, R->layout_lit, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushLit), &pc);
+            bound = true;
+        }
+        GpuMesh *m = &R->meshes[d->mesh];
+        VkDeviceSize zero = 0;
+        vkCmdBindVertexBuffers(cmd, 0, 1, &m->vb.buffer, &zero);
+        vkCmdBindIndexBuffer(cmd, m->ib.buffer, 0, VK_INDEX_TYPE_UINT32);
+        vkCmdDrawIndexed(cmd, m->index_count, 1, 0, 0, g_skin_shadow_inst[i]);
+        R->stats.draw_calls++;
+        R->stats.triangles += m->index_count / 3;
+        n++;
+    }
+    return n;
 }
 
 static void draw_cpu_skinned(VkCommandBuffer cmd, FrameResources *f, const CpuSkin *cs, int pass) {
@@ -909,6 +982,7 @@ static void compute_matrices(FrameData *fd) {
         sky_cloud_shadow_region(&co, &csz);
         fd->cshadow = v4(co.x, co.y, 1.0f / fmaxf(csz, 1.0f), 0.0f);
     }
+    vkls_select(fd);   // shadowed point / spot lights (writes spots[].params.y before the copy)
     memcpy(fd->lights, R->lights, sizeof(GpuPointLight) * R->light_count);
     memcpy(fd->spots, R->spots, sizeof(GpuSpotLight) * R->spot_count);
     fd->spot_info = v4((float)R->spot_count, R->spot_cookie_bound == R->spot_cookie && R->spot_cookie ? 1.0f : 0.0f, 0, 0);
@@ -1547,6 +1621,7 @@ void render_end_frame(void) {
     // Skinned characters: palettes + per-pass instance lists (GPU) or CPU-skinned vertices.
     // The bone SSBO holds this frame's palettes, then last frame's (previous-palette velocity).
     bool cpu_skin = R->r_cpu_skinning->i != 0;
+    g_skin_shadow_gpu = false;
     static SkinPass skin_main, skin_shadow, skin_vm;
     skin_main.batch_count = skin_shadow.batch_count = skin_vm.batch_count = 0;
     F.skin_main = &skin_main;
@@ -1561,6 +1636,8 @@ void render_end_frame(void) {
             memcpy(f->bones.mapped, R->skin_bones, sizeof(mat4) * R->skin_bone_count);
             if (R->prev_bone_count && R->skin_bone_count + R->prev_bone_count <= MAX_SKIN_BONES * 2)
                 memcpy((mat4 *)f->bones.mapped + R->skin_bone_count, R->prev_bones, sizeof(mat4) * R->prev_bone_count);
+            memset(g_skin_shadow_inst, 0xFF, sizeof(u32) * R->skin_draw_count);
+            g_skin_shadow_gpu = true;
             u32 used = build_skin_pass(f, 0, 0, &skin_main);
             used += build_skin_pass(f, 1, used, &skin_shadow);
             build_skin_pass(f, 2, used, &skin_vm);
@@ -1621,6 +1698,9 @@ void render_end_frame(void) {
                       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
                       VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                       VK_ACCESS_2_SHADER_SAMPLED_READ_BIT, 1);
+
+    // ---------------------------------------------------------- point / spot light shadows
+    vkls_record(cmd, f);
 
     // ---------------------------------------------------------- rain occlusion map (weather)
     // Static + dynamic opaque draws from straight above, depth only (cascade 3 of the shadow

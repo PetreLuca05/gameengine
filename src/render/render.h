@@ -65,11 +65,13 @@ typedef struct DrawItem {
     u32 prev_slot;          // renderer internal
 } DrawItem;
 
+#define LIGHT_NO_SHADOW 1u   // PointLight / SpotLight flags: never shadowed (muzzle flashes)
 typedef struct PointLight {
     vec3 pos;
     float radius;
     vec3 color;
     float intensity;
+    u32 flags;          // LIGHT_*; lights cast shadows by default (docs/LIGHT_SHADOWS.md)
 } PointLight;
 
 typedef struct RenderCamera {
@@ -178,7 +180,7 @@ void render_draw_viewmodel(const DrawItem *item);
 void render_add_light(const PointLight *light);
 // Spot lights (flashlights): cone from pos along dir, projected cookie (render_set_spot_cookie),
 // no shadows (a light at the eye needs none). Up to 4 per frame.
-typedef struct SpotLight { vec3 pos, dir; float range, inner_deg, outer_deg, intensity; vec3 color; } SpotLight;
+typedef struct SpotLight { vec3 pos, dir; float range, inner_deg, outer_deg, intensity; vec3 color; u32 flags; } SpotLight;
 void render_add_spot(const SpotLight *light);
 void render_set_spot_cookie(TextureId cookie);
 

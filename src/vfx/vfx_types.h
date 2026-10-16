@@ -171,6 +171,7 @@ typedef struct VfxLightDef {
     float intensity, radius;
     float duration;          // s
     bool exposure_aware;
+    bool shadow;             // casts shadows (default; muzzle flashes opt out)
 } VfxLightDef;
 
 typedef struct VfxDecalDef {

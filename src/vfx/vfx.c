@@ -665,7 +665,7 @@ void vfx_game_render(vec3 cam) {
     VfxLight lights[24];
     int nl = vfx_sys_collect_lights(&V->sys, lights, V->quality->i >= 2 ? 24 : 8);
     for (int i = 0; i < nl; i++) {
-        PointLight l = { lights[i].pos, lights[i].radius, lights[i].color, lights[i].intensity };
+        PointLight l = { lights[i].pos, lights[i].radius, lights[i].color, lights[i].intensity, lights[i].shadow ? 0u : LIGHT_NO_SHADOW };
         render_add_light(&l);
     }
     if (V->debug->i) {

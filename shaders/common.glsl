@@ -18,12 +18,13 @@ struct PointLight {
     vec4 color_intensity;
 };
 #define MAX_SPOT_LIGHTS 4
+#define LOCAL_SHADOW_TILES 64
 struct SpotLight {
     mat4 vp;              // world -> cookie clip space
     vec4 pos_range;
     vec4 dir_cos;         // xyz direction, w cos(outer half angle)
     vec4 color_intensity;
-    vec4 params;          // x cos(inner half angle)
+    vec4 params;          // x cos(inner half angle), y shadow tile + 1 (0 = unshadowed)
 };
 
 layout(set = 0, binding = 0) uniform FrameData {
@@ -68,9 +69,14 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 wx4;             // occlusion depth range (m), precipitation quality
     vec4 puddle_xf;       // origin x, z, 1 / size x, 1 / size z
     PointLight lights[MAX_POINT_LIGHTS];
+    // Local light shadows (src/render/vk_light_shadow.c): world -> atlas tile per cube face / spot.
+    mat4 local_vps[LOCAL_SHADOW_TILES];
+    vec4 light_shadow[MAX_POINT_LIGHTS];   // x first tile (-1 unshadowed), y normal offset per metre
+    vec4 local_shadow_info;                // x 1 / atlas size, y shadowed lights, z spot normal offset per metre
 } frame;
 
 layout(set = 0, binding = 1) uniform sampler2DShadow shadow_map;
+layout(set = 0, binding = 11) uniform sampler2DShadow local_shadow;   // point / spot light shadow atlas
 // Time-of-day sky (src/render/sky): environment (octahedral), SH9 irradiance, cloud shadow.
 layout(set = 0, binding = 5) uniform sampler2D sky_env;
 layout(std430, set = 0, binding = 6) readonly buffer SkySH { vec4 sh[20]; } sky_sh;
@@ -80,6 +86,46 @@ layout(set = 0, binding = 8) uniform sampler2D spot_cookie;
 // Weather: the top-down rain occlusion depth around the camera, the level's puddle mask.
 layout(set = 0, binding = 9) uniform sampler2D wx_occl;
 layout(set = 0, binding = 10) uniform sampler2D wx_puddles;
+
+// Shadow passes (shadow.vert / skin_shadow.vert): flags.w selects the view: 0-2 sun cascades, 3 the
+// rain occlusion map, 4+ a local light atlas tile.
+mat4 shadow_pass_vp(uint idx) {
+    if (idx >= 4u) return frame.local_vps[min(idx - 4u, uint(LOCAL_SHADOW_TILES - 1))];
+    return idx == 3u ? frame.occl_vp : frame.shadow_vps[min(idx, 2u)];
+}
+
+// Local light shadow atlas: 2 x 2 hardware-PCF taps at p (world) in tile `tile`.
+float local_shadow_tile(int tile, vec3 p) {
+    vec4 sp = frame.local_vps[tile] * vec4(p, 1.0);
+    if (sp.w <= 1e-4) return 1.0;
+    vec3 c = sp.xyz / sp.w;
+    if (c.z >= 1.0) return 1.0;
+    vec2 uv = c.xy * 0.5 + 0.5;
+    float t = frame.local_shadow_info.x * 0.75;
+    float s = texture(local_shadow, vec3(uv + vec2(-t, -t), c.z));
+    s += texture(local_shadow, vec3(uv + vec2(t, -t), c.z));
+    s += texture(local_shadow, vec3(uv + vec2(-t, t), c.z));
+    s += texture(local_shadow, vec3(uv + vec2(t, t), c.z));
+    return s * 0.25;
+}
+
+// Point light i: the cube face of the (normal-offset) point's direction from the light.
+float point_light_shadow(int i, vec3 p, vec3 n) {
+    float tile = frame.light_shadow[i].x;
+    if (tile < 0.0) return 1.0;
+    vec3 lp = frame.lights[i].pos_radius.xyz;
+    vec3 op = p + n * (length(p - lp) * frame.light_shadow[i].y);
+    vec3 d = op - lp, a = abs(d);
+    int f = (a.x >= a.y && a.x >= a.z) ? (d.x > 0.0 ? 0 : 1) : (a.y >= a.z ? (d.y > 0.0 ? 2 : 3) : (d.z > 0.0 ? 4 : 5));
+    return local_shadow_tile(int(tile) + f, op);
+}
+
+float spot_light_shadow(int i, vec3 p, vec3 n) {
+    float tile = frame.spots[i].params.y - 1.0;
+    if (tile < 0.0) return 1.0;
+    vec3 op = p + n * (length(p - frame.spots[i].pos_range.xyz) * frame.local_shadow_info.z);
+    return local_shadow_tile(int(tile), op);
+}
 
 // Spot light i at world position p: radiance scale (cone x cookie x distance falloff) and the
 // direction towards the light.

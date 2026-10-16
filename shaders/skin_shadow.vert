@@ -15,5 +15,5 @@ layout(push_constant) uniform Push {
 void main() {
     SkinInstance si = skin_inst.inst[gl_InstanceIndex];
     vec4 world = skin_matrix(si.info.x, in_joints, in_weights) * vec4(in_pos, 1.0);
-    gl_Position = (pc.flags.w == 3u ? frame.occl_vp : frame.shadow_vps[min(pc.flags.w, 2u)]) * world;
+    gl_Position = shadow_pass_vp(pc.flags.w) * world;
 }

@@ -135,6 +135,7 @@ typedef struct VfxLight {
     float radius, intensity;
     int priority;
     float score;
+    bool shadow;            // casts shadows (effect "light": {"shadow": false} opts out: muzzle flashes)
 } VfxLight;
 
 // Gameplay callbacks (game layer: Jolt raycasts, sounds).

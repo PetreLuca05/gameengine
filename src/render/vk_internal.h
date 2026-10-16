@@ -114,6 +114,7 @@ typedef struct GpuPointLight { vec4 pos_radius; vec4 color_intensity; } GpuPoint
 // Spot lights (flashlights): cookie projection, position + range, direction + cos(outer), colour + intensity, x cos(inner).
 typedef struct GpuSpotLight { mat4 vp; vec4 pos_range; vec4 dir_cos; vec4 color_intensity; vec4 params; } GpuSpotLight;
 #define MAX_SPOT_LIGHTS 4
+#define LOCAL_SHADOW_TILES 64     // local light shadow atlas: 8 x 8 tiles (6 per point light, 1 per spot)
 typedef struct FrameData {
     mat4 view_proj, view, proj, vm_proj, shadow_vp;
     mat4 view_proj_nj, prev_view_proj_nj, vm_view_proj_nj, prev_vm_view_proj_nj;
@@ -137,6 +138,10 @@ typedef struct FrameData {
     vec4 wx4;             // occlusion depth range (m), precipitation quality, unused, unused
     vec4 puddle_xf;       // origin x, z, 1 / size x, 1 / size z
     GpuPointLight lights[MAX_POINT_LIGHTS];
+    // Local light shadows (vk_light_shadow.c): world -> atlas tile per cube face / spot.
+    mat4 local_vps[LOCAL_SHADOW_TILES];
+    vec4 light_shadow[MAX_POINT_LIGHTS];   // x first tile (-1 unshadowed), y normal offset per metre
+    vec4 local_shadow_info;                // x 1 / atlas size, y shadowed lights, z spot normal offset per metre
 } FrameData;
 
 typedef struct PushLit {
@@ -230,6 +235,20 @@ typedef struct Renderer {
     u32 light_count;
     GpuSpotLight spots[MAX_SPOT_LIGHTS];
     u32 spot_count;
+    u32 light_flags[MAX_POINT_LIGHTS], spot_flags[MAX_SPOT_LIGHTS];   // LIGHT_* (render.h)
+    // Local light shadows (vk_light_shadow.c)
+    RenderTarget lshadow;             // D32 atlas, LOCAL_SHADOW_TILES tiles
+    u32 lshadow_tile;                 // tile size (px)
+    mat4 local_vps[LOCAL_SHADOW_TILES];
+    vec4 local_planes[LOCAL_SHADOW_TILES][6];   // culling planes per tile (untiled frustum)
+    vec4 local_sphere[LOCAL_SHADOW_TILES];      // caster sphere per tile (light position, radius)
+    u32 local_tile_count;
+    vec4 light_shadow[MAX_POINT_LIGHTS];
+    vec3 lshadow_prev[16];            // last frame's shadowed point lights (selection hysteresis)
+    u32 lshadow_prev_count;
+    float lshadow_ms;                 // CPU record time of the local shadow pass
+    u32 lshadow_draws;
+    Cvar *r_light_shadows, *r_light_shadow_count, *r_light_shadow_quality;
     RenderWeather weather;            // this frame (render_set_weather)
     RenderTarget occl;                // top-down rain occlusion depth (render.c)
     mat4 occl_vp;
@@ -340,6 +359,15 @@ void vkp_register_shader(const char *name);   // hot reload / recompile list ("p
 
 // post/post_core.c: frame graph post-processing stack
 bool post_create_pipelines(void);
+
+// vk_light_shadow.c: shadows of point / spot lights (docs/LIGHT_SHADOWS.md)
+void vkls_init(void);
+void vkls_shutdown(void);
+void vkls_select(FrameData *fd);                         // this frame's shadowed lights, tiles, matrices -> frame data
+void vkls_record(VkCommandBuffer cmd, FrameResources *f); // renders the atlas tiles (after the sun shadow pass)
+// render.c: draws every shadow caster (static + GPU-skinned) touching sphere and inside planes,
+// with shadow cascade index `cascade` (push constants flags.w). Returns the draw count.
+u32 render_draw_shadow_casters(VkCommandBuffer cmd, FrameResources *f, vec4 sphere, const vec4 planes[6], u32 cascade);
 
 // vk_vgeo.c: virtualized geometry in the frame (docs/VGEO.md)
 void vkg_init(void);

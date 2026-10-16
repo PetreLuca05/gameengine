@@ -41,6 +41,8 @@ Windows, no admin; tools are portable, in `.toolchain/` (git-ignored).
 | Zombies | ZOMBIES.md | src/gameplay/zombies |
 | Weather | WEATHER.md | src/world/weather.c (pure), src/game/game_weather.c, shaders/weather.glsl |
 | Vehicles | VEHICLES.md | src/physics/phys_vehicle.c, src/gameplay/vehicle_def.c (pure), src/game/game_vehicles.c |
+| Light shadows | LIGHT_SHADOWS.md | src/render/vk_light_shadow.c, common.glsl point/spot_light_shadow |
+| Virtualized geometry | VGEO.md, VGEO_PLAN.md | src/render/vgeo, src/render/vk_vgeo.c, shaders/vgeo, tools/{build,bench}_vgeo |
 
 ## Dev room (data/levels/devroom.json)
 Hall at the origin. Other areas:

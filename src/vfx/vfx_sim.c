@@ -557,6 +557,7 @@ static void tick_instance(VfxSystem *s, VfxInstance *in, float dt) {
         l->radius = fx->light.radius * in->p.scale;
         l->intensity = fx->light.intensity * in->p.intensity;
         l->priority = fx->priority + (in->p.viewmodel ? 2 : 0);
+        l->shadow = fx->light.shadow;
     }
     in->age += dt;
 }
@@ -640,6 +641,7 @@ static void tick_cpu(VfxSystem *s, VfxCpuParticle *p, float dt) {
         l->radius = e->render.light_radius;
         l->intensity = e->render.light_intensity * fade;
         l->priority = 0;
+        l->shadow = true;
     }
 }
 

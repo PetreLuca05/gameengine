@@ -308,6 +308,7 @@ int vfx_lib_add_effect_json(VfxLibrary *lib, const char *json_text, const char *
     fx->light.radius = jf(li, "radius", 5.0f);
     fx->light.duration = jf(li, "duration", 1.5f / 60.0f);
     fx->light.exposure_aware = jb(li, "exposure_aware", true);
+    fx->light.shadow = jb(li, "shadow", true);   // muzzle flashes: false (too short-lived to shadow)
     const cJSON *dc = jget(root, "decal");
     fx->decal.enabled = dc != NULL;
     dg_strcpy(fx->decal.texture, sizeof(fx->decal.texture), js(dc, "texture", ""));
@@ -540,6 +541,7 @@ char *vfx_lib_effect_to_json(const VfxLibrary *lib, int idx) {
         cJSON_AddNumberToObject(l, "radius", fx->light.radius);
         cJSON_AddNumberToObject(l, "duration", fx->light.duration);
         cJSON_AddBoolToObject(l, "exposure_aware", fx->light.exposure_aware);
+        if (!fx->light.shadow) cJSON_AddBoolToObject(l, "shadow", false);
     }
     if (fx->decal.enabled) {
         cJSON *d = cJSON_AddObjectToObject(root, "decal");

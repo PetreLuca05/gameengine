@@ -214,7 +214,7 @@ void fx_render(vec3 cam) {
     for (int i = 0; i < MAX_FLASHES; i++) {
         Flash *f = &FX->flashes[i];
         if (f->age > 0.06f) continue;
-        PointLight l = { f->pos, 6.0f, v3(1.0f, 0.75f, 0.4f), 40.0f * (1.0f - f->age / 0.06f) };
+        PointLight l = { f->pos, 6.0f, v3(1.0f, 0.75f, 0.4f), 40.0f * (1.0f - f->age / 0.06f), LIGHT_NO_SHADOW };
         render_add_light(&l);
     }
 }

@@ -266,7 +266,7 @@ void main() {
         for (int i = 0; i < int(frame.spot_info.x); i++) {
             vec3 sl;
             vec3 sc = spot_light(i, v_world, sl);
-            if (sc.r + sc.g + sc.b > 0.0) color += brdf(n, v, sl, albedo, rough, metal) * sc;
+            if (sc.r + sc.g + sc.b > 0.0) color += brdf(n, v, sl, albedo, rough, metal) * sc * spot_light_shadow(i, v_world, n);
         }
         // point lights
         int count = int(frame.ground_ambient.w);
@@ -279,7 +279,8 @@ void main() {
             vec3 ldir = dl / max(dist, 1e-4);
             float falloff = clamp(1.0 - pow(dist / radius, 4.0), 0.0, 1.0);
             falloff = falloff * falloff / (dist * dist + 1.0);
-            color += brdf(n, v, ldir, albedo, rough, metal) * frame.lights[i].color_intensity.rgb * frame.lights[i].color_intensity.w * falloff;
+            float lsh = dot(n, ldir) > 0.0 ? point_light_shadow(i, v_world, n) : 1.0;
+            color += brdf(n, v, ldir, albedo, rough, metal) * frame.lights[i].color_intensity.rgb * frame.lights[i].color_intensity.w * falloff * lsh;
         }
     }
     color += base.rgb * MAT_PARAMS.z; // emissive
