@@ -1,0 +1,184 @@
+{
+  "_comment": "Animation controller for the shared human skeleton. Layers evaluate in order: base -> upper -> hit (additive) -> procedural post-pass (spine look, item placement, item-space hand solve, fingers, foot IK) -> ragdoll. Clip names here are SLOTS; anim_sets/*.json map slots to clips. Standard parameters (see src/anim/controller.h): speed, move_x, move_y, is_grounded, is_crouching, is_prone, is_sprinting, is_ads, is_mantling, mantle_t, is_hanging, is_vaulting, vertical_velocity, turn_angle, aim_pitch, aim_yaw, weapon_type, weapon_id, health, limb_status, is_dead, is_attacking; triggers jump, land, hit, fire, reload, melee, die, equip; payloads hit_part, hit_dir, hit_strength, seed.",
+
+  "params": [
+    { "name": "turn_clips", "type": "bool", "default": 0 },
+    { "name": "hit_clips", "type": "bool", "default": 0 }
+  ],
+
+  "weapon_types": ["none", "pistol", "rifle", "shotgun", "smg", "lmg", "melee_1h", "melee_2h", "item_small", "item_large"],
+
+  "masks": {
+    "upper_body": { "include": [["Spine", 0.25, false], ["Spine1", 0.6, false], ["Spine2", 1.0]] },
+    "arms": { "include": [["LeftShoulder", 1.0], ["RightShoulder", 1.0]] },
+    "full": { "include": [["Hips", 1.0]] }
+  },
+
+  "layers": [
+    {
+      "name": "base",
+      "default": "locomotion",
+      "states": [
+        { "name": "locomotion", "sync": true, "speed_match": true,
+          "tree": { "blend1d": "speed", "children": [
+            { "at": 0.0, "clip": "idle" },
+            { "at": 1.6, "tree": { "blend2d": ["move_x", "move_y"], "mode": "directional", "children": [
+              { "pos": [0, 1], "clip": "walk_f" }, { "pos": [0, -1], "clip": "walk_b" },
+              { "pos": [-1, 0], "clip": "walk_l" }, { "pos": [1, 0], "clip": "walk_r" },
+              { "pos": [-0.707, 0.707], "clip": "walk_fl" }, { "pos": [0.707, 0.707], "clip": "walk_fr" },
+              { "pos": [-0.707, -0.707], "clip": "walk_bl" }, { "pos": [0.707, -0.707], "clip": "walk_br" } ] } },
+            { "at": 4.2, "tree": { "blend2d": ["move_x", "move_y"], "mode": "directional", "children": [
+              { "pos": [0, 1], "clip": "run_f" }, { "pos": [0, -1], "clip": "run_b" },
+              { "pos": [-1, 0], "clip": "run_l" }, { "pos": [1, 0], "clip": "run_r" },
+              { "pos": [-0.707, 0.707], "clip": "run_fl" }, { "pos": [0.707, 0.707], "clip": "run_fr" },
+              { "pos": [-0.707, -0.707], "clip": "run_bl" }, { "pos": [0.707, -0.707], "clip": "run_br" } ] } },
+            { "at": 6.8, "clip": "sprint" } ] } },
+
+        { "name": "crouch", "sync": true, "speed_match": true,
+          "tree": { "blend1d": "speed", "children": [
+            { "at": 0.0, "clip": "crouch_idle" },
+            { "at": 1.4, "tree": { "blend2d": ["move_x", "move_y"], "mode": "directional", "children": [
+              { "pos": [0, 1], "clip": "crouch_f" }, { "pos": [0, -1], "clip": "crouch_b" },
+              { "pos": [-1, 0], "clip": "crouch_l" }, { "pos": [1, 0], "clip": "crouch_r" },
+              { "pos": [-0.707, 0.707], "clip": "crouch_fl" }, { "pos": [0.707, 0.707], "clip": "crouch_fr" },
+              { "pos": [-0.707, -0.707], "clip": "crouch_bl" }, { "pos": [0.707, -0.707], "clip": "crouch_br" } ] } } ] } },
+
+        { "name": "prone", "sync": true, "tree": { "blend1d": "speed", "children": [ { "at": 0.0, "clip": "prone_idle" }, { "at": 0.8, "clip": "prone_f" } ] } },
+
+        { "name": "jump_start", "clip": "jump_start", "loop": false },
+        { "name": "air", "clip": "jump_loop" },
+        { "name": "land", "clip": "jump_land", "loop": false },
+        { "name": "land_hard", "clip": "jump_land_hard", "loop": false },
+
+        { "name": "mantle_low", "clip": "mantle_low", "loop": false, "time_param": "mantle_t", "hand_ik": false },
+        { "name": "mantle_high", "clip": "mantle_high", "loop": false, "time_param": "mantle_t", "hand_ik": false },
+        { "name": "vault", "clip": "vault", "loop": false, "time_param": "mantle_t", "hand_ik": false },
+        { "name": "hang", "clip": "hang_idle", "hand_ik": false },
+
+        { "name": "turn_left", "clip": "turn_l90", "loop": false },
+        { "name": "turn_right", "clip": "turn_r90", "loop": false },
+
+        { "name": "attack", "clip": "attack_1", "loop": false, "variants": ["attack_2", "attack_3"] },
+
+        { "name": "death", "clip": "death_front", "loop": false, "hand_ik": false,
+          "variants": ["death_back", "death_left", "death_right"] }
+      ],
+      "transitions": [
+        { "from": "*", "to": "death", "when": [["die", "trigger"]], "duration": 0.15, "inertialize": true, "interruptible": false },
+        { "from": "death", "to": "locomotion", "when": [["is_dead", "false"]], "duration": 0.0 },
+
+        { "from": "*", "to": "hang", "when": [["is_hanging", "true"], ["is_dead", "false"]], "duration": 0.18 },
+        { "from": "hang", "to": "mantle_high", "when": [["is_mantling", "true"]], "duration": 0.12 },
+        { "from": "hang", "to": "air", "when": [["is_hanging", "false"], ["is_grounded", "false"]], "duration": 0.15 },
+        { "from": "hang", "to": "locomotion", "when": [["is_hanging", "false"]], "duration": 0.2 },
+        { "from": "*", "to": "vault", "when": [["is_vaulting", "true"], ["is_dead", "false"]], "duration": 0.1 },
+        { "from": "*", "to": "mantle_low", "when": [["is_mantling", "true"], ["is_vaulting", "false"], ["is_hanging", "false"], ["is_dead", "false"]], "duration": 0.12 },
+        { "from": "mantle_low", "to": "locomotion", "when": [["is_mantling", "false"]], "duration": 0.2, "inertialize": true },
+        { "from": "mantle_high", "to": "locomotion", "when": [["is_mantling", "false"]], "duration": 0.2, "inertialize": true },
+        { "from": "vault", "to": "locomotion", "when": [["is_vaulting", "false"]], "duration": 0.2, "inertialize": true },
+
+        { "from": "locomotion", "to": "jump_start", "when": [["jump", "trigger"]], "duration": 0.08 },
+        { "from": "crouch", "to": "jump_start", "when": [["jump", "trigger"]], "duration": 0.08 },
+        { "from": "jump_start", "to": "air", "when": [["is_grounded", "false"]], "exit_time": 0.9, "duration": 0.15 },
+        { "from": "jump_start", "to": "land", "when": [["land", "trigger"]], "duration": 0.08 },
+        { "from": "locomotion", "to": "air", "when": [["is_grounded", "false"], ["vertical_velocity", "<", -2.5]], "duration": 0.25 },
+        { "from": "air", "to": "land_hard", "when": [["land", "trigger"], ["vertical_velocity", "<", -7.0]], "duration": 0.06 },
+        { "from": "air", "to": "land", "when": [["land", "trigger"]], "duration": 0.08 },
+        { "from": "air", "to": "locomotion", "when": [["is_grounded", "true"]], "duration": 0.15 },
+        { "from": "land", "to": "locomotion", "when": [["speed", ">", 0.5]], "duration": 0.15 },
+        { "from": "land", "to": "locomotion", "exit_time": 0.7, "duration": 0.2 },
+        { "from": "land_hard", "to": "locomotion", "exit_time": 0.85, "duration": 0.25 },
+
+        { "from": "locomotion", "to": "crouch", "when": [["is_crouching", "true"]], "duration": 0.25 },
+        { "from": "crouch", "to": "locomotion", "when": [["is_crouching", "false"]], "duration": 0.25 },
+        { "from": "locomotion", "to": "prone", "when": [["is_prone", "true"]], "duration": 0.4 },
+        { "from": "prone", "to": "locomotion", "when": [["is_prone", "false"]], "duration": 0.4 },
+
+        { "from": "locomotion", "to": "turn_left", "when": [["turn_clips", "true"], ["speed", "<", 0.2], ["turn_angle", ">", 1.0]], "duration": 0.15 },
+        { "from": "locomotion", "to": "turn_right", "when": [["turn_clips", "true"], ["speed", "<", 0.2], ["turn_angle", "<", -1.0]], "duration": 0.15 },
+        { "from": "turn_left", "to": "locomotion", "exit_time": 0.85, "duration": 0.2 },
+        { "from": "turn_right", "to": "locomotion", "exit_time": 0.85, "duration": 0.2 },
+        { "from": "turn_left", "to": "locomotion", "when": [["speed", ">", 0.5]], "duration": 0.15 },
+        { "from": "turn_right", "to": "locomotion", "when": [["speed", ">", 0.5]], "duration": 0.15 },
+
+        { "from": "locomotion", "to": "attack", "when": [["melee", "trigger"], ["is_attacking", "true"]], "duration": 0.1 },
+        { "from": "attack", "to": "locomotion", "exit_time": 0.9, "duration": 0.2 }
+      ]
+    },
+    {
+      "name": "upper",
+      "mask": "upper_body",
+      "default": "none",
+      "states": [
+        { "name": "none", "empty": true },
+        { "name": "reload", "clip": "reload_{weapon}", "loop": false, "hand_ik": false },
+        { "name": "fire", "clip": "fire_{weapon}", "loop": false },
+        { "name": "melee", "clip": "melee_{weapon}", "loop": false, "hand_ik": false },
+        { "name": "equip", "clip": "equip_{weapon}", "loop": false, "hand_ik": false }
+      ],
+      "transitions": [
+        { "from": "*", "to": "reload", "when": [["reload", "trigger"]], "duration": 0.15 },
+        { "from": "*", "to": "melee", "when": [["melee", "trigger"]], "duration": 0.08 },
+        { "from": "none", "to": "fire", "when": [["fire", "trigger"]], "duration": 0.04 },
+        { "from": "fire", "to": "fire", "when": [["fire", "trigger"]], "duration": 0.03, "allow_self": true },
+        { "from": "*", "to": "equip", "when": [["equip", "trigger"]], "duration": 0.1 },
+        { "from": "reload", "to": "none", "exit_time": 0.95, "duration": 0.2 },
+        { "from": "melee", "to": "none", "exit_time": 0.9, "duration": 0.15 },
+        { "from": "fire", "to": "none", "exit_time": 0.9, "duration": 0.1 },
+        { "from": "equip", "to": "none", "exit_time": 0.95, "duration": 0.15 },
+        { "from": "*", "to": "none", "when": [["is_dead", "true"]], "duration": 0.1 }
+      ]
+    },
+    {
+      "name": "hit",
+      "blend": "additive",
+      "weight_param": "hit_clips",
+      "default": "none",
+      "states": [
+        { "name": "none", "empty": true },
+        { "name": "hit", "loop": false, "tree": { "blend1d": "hit_dir", "children": [
+          { "at": 0, "clip": "hit_front" }, { "at": 1, "clip": "hit_back" }, { "at": 2, "clip": "hit_left" }, { "at": 3, "clip": "hit_right" } ] } }
+      ],
+      "transitions": [
+        { "from": "*", "to": "hit", "when": [["hit", "trigger"]], "duration": 0.05, "allow_self": true },
+        { "from": "hit", "to": "none", "exit_time": 0.95, "duration": 0.15 }
+      ]
+    }
+  ],
+
+  "procedural": {
+    "spine": { "weights": [0.18, 0.22, 0.25, 0.15, 0.20], "weights_up": [0.0, 0.02, 0.05, 0.38, 0.55], "weights_ads_up": [0.40, 0.35, 0.25, 0.0, 0.0], "yaw_limit": 100, "pitch_limit": 80, "pitch_limit_up": 89 },
+    "turn": { "mode": "procedural", "threshold": 65, "speed": 260, "foot_lock_release": 0.22 },
+    "foot_ik": { "ray_up": 0.5, "ray_down": 0.6, "pelvis_max_drop": 0.35, "align": 0.8, "smooth": 18, "foot_height": 0.08 },
+    "lean": { "slope": 0.35, "accel": 0.012 }
+  },
+
+  "hold_styles": {
+    "blend_time": 0.2,
+    "_comment": "Aim space: x right, y up, -z forward, relative to the chest anchor (Spine2 + chest_offset). Rotations in degrees (pitch, yaw, roll). Item sockets come from each weapon's 'hold' block.",
+    "pistol": { "hip_offset": [0.08, 0.02, -0.40], "ads_distance": 0.36, "elbow_r": [0.7, -1.0, 0.3], "elbow_l": [-0.8, -1.0, 0.2] },
+    "rifle": { "hip_offset": [0.13, -0.11, -0.20], "ads_distance": 0.24, "elbow_r": [0.7, -1.0, 0.3], "elbow_l": [-0.6, -1.0, 0.0] },
+    "shotgun": { "hip_offset": [0.13, -0.12, -0.19], "ads_distance": 0.24 },
+    "smg": { "hip_offset": [0.12, -0.08, -0.24], "ads_distance": 0.24 },
+    "lmg": { "hip_offset": [0.16, -0.2, -0.16], "ads_distance": 0.26, "aim_pitch_scale": 0.85 },
+    "melee_1h": { "left_hand": false, "hip_offset": [0.24, -0.28, -0.28], "hip_rot": [65, 0, 0] },
+    "melee_2h": { "hip_offset": [0.16, -0.10, -0.20], "hip_rot": [22, 0, -12], "fp_hip": [0.17, -0.24, -0.46] },
+    "item_small": { "left_hand": false, "hip_offset": [0.22, -0.22, -0.32], "hip_rot": [-20, 0, 0] },
+    "item_large": { "hip_offset": [0.05, -0.2, -0.35] }
+  },
+
+  "damage_reactions": {
+    "hit_mode": "procedural",
+    "presets": {
+      "head": { "strength": 26, "falloff": 0.45, "chain_depth": 3, "stiffness": 240, "damping": 28 },
+      "torso": { "strength": 13, "falloff": 0.6, "chain_depth": 3, "stiffness": 150, "damping": 22, "translate": 0.04 },
+      "arm": { "strength": 32, "falloff": 0.5, "chain_depth": 3, "stiffness": 200, "damping": 25 },
+      "leg": { "strength": 16, "falloff": 0.5, "chain_depth": 2, "stiffness": 170, "damping": 23, "pelvis_drop": 0.09 }
+    },
+    "parts": {
+      "head": "head", "neck": "head", "chest": "torso", "stomach": "torso", "pelvis": "torso",
+      "upper_arm_l": "arm", "upper_arm_r": "arm", "lower_arm_l": "arm", "lower_arm_r": "arm", "hand_l": "arm", "hand_r": "arm",
+      "upper_leg_l": "leg", "upper_leg_r": "leg", "lower_leg_l": "leg", "lower_leg_r": "leg", "foot_l": "leg", "foot_r": "leg"
+    }
+  }
+}

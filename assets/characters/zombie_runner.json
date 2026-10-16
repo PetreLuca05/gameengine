@@ -1,0 +1,11 @@
+{
+  "id": "zombie_runner", "character_id": 4, "kind": "zombie",
+  "mesh": "assets/human/Dummy.fbx",
+  "materials": { "Alpha_Body_MAT": [0.55, 0.55, 0.50], "Alpha_Joints_MAT": [0.35, 0.10, 0.10], "Body 2": [0.55, 0.55, 0.50] },
+  "anim_set": "zombie",
+  "part_mult": { "head": 4.5, "limbs": 0.6 },
+  "blood": { "color": [0.22, 0.03, 0.02], "darkness": 0.65, "amount": 1.1, "mist": 0.75, "decay": 0.75 },
+  "surface": { "chest": "cloth", "legs": "cloth" },
+  "ragdoll_scale": 0.94, "scale": 0.94, "hp": 80, "move_speed": 3.2,
+  "eye_offset": [0, 0.10, -0.10]
+}

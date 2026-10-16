@@ -1,0 +1,191 @@
+{
+  "_comment": "Motorcycle (Jolt MotorcycleController: lean into turns). Wheel 0 front (steered), 1 rear (driven). Same socket convention as car.json; grips are the handlebar ends (steer_radius = half bar width).",
+  "name": "moto",
+  "display": "Motorcycle",
+  "kind": "motorcycle",
+  "mass": 230,
+  "color": [
+    0.1,
+    0.2,
+    0.45
+  ],
+  "max_lean": 45,
+  "body": [
+    {
+      "center": [
+        0,
+        0.62,
+        0
+      ],
+      "half": [
+        0.18,
+        0.24,
+        0.72
+      ]
+    },
+    {
+      "center": [
+        0,
+        0.93,
+        0.1
+      ],
+      "half": [
+        0.16,
+        0.09,
+        0.45
+      ]
+    }
+  ],
+  "com_offset": [
+    0,
+    -0.1,
+    0
+  ],
+  "wheels": [
+    {
+      "pos": [
+        0,
+        0.62,
+        -0.74
+      ],
+      "radius": 0.31,
+      "width": 0.12,
+      "max_steer": 30,
+      "driven": false,
+      "max_brake": 500,
+      "max_handbrake": 0,
+      "suspension_frequency": 2.0
+    },
+    {
+      "pos": [
+        0,
+        0.62,
+        0.72
+      ],
+      "radius": 0.31,
+      "width": 0.14,
+      "max_steer": 0,
+      "driven": true,
+      "max_brake": 250,
+      "max_handbrake": 300,
+      "suspension_frequency": 2.0
+    }
+  ],
+  "engine": {
+    "max_torque": 130,
+    "min_rpm": 1200,
+    "max_rpm": 9000,
+    "gears": [
+      2.6,
+      1.9,
+      1.5,
+      1.2,
+      1.0
+    ],
+    "reverse_ratio": -2.5,
+    "differential_ratio": 4.5
+  },
+  "fuel": {
+    "capacity": 14,
+    "idle_lph": 1.5,
+    "full_lph": 30.0
+  },
+  "damage": {
+    "hp": 400,
+    "impact_speed": 6.0,
+    "impact_scale": 25.0
+  },
+  "tires": {
+    "bullet_damage": 0.34,
+    "leak_per_hit": 0.04,
+    "burst_health": 0.05
+  },
+  "seats": [
+    {
+      "driver": true
+    },
+    {
+      "can_shoot": true
+    }
+  ],
+  "sockets": {
+    "seat_0": [
+      0,
+      0.9,
+      0.12
+    ],
+    "exit_0": [
+      -0.95,
+      0.05,
+      0.12
+    ],
+    "eye_0": [
+      0,
+      0.66,
+      -0.05
+    ],
+    "seat_1": [
+      0,
+      0.96,
+      0.52
+    ],
+    "exit_1": [
+      0.95,
+      0.05,
+      0.52
+    ],
+    "steer_pivot": [
+      0,
+      1.08,
+      -0.5
+    ],
+    "steer_axis": [
+      0,
+      0.9,
+      0.42
+    ],
+    "steer_radius": 0.33,
+    "steer_ratio": 1.0,
+    "pedal_l": [
+      -0.2,
+      0.38,
+      0.05
+    ],
+    "pedal_r": [
+      0.2,
+      0.38,
+      0.05
+    ],
+    "fuel_cap": [
+      0,
+      1.03,
+      -0.2
+    ],
+    "exhaust": [
+      0.2,
+      0.42,
+      0.95
+    ],
+    "headlight_l": [
+      0,
+      1.0,
+      -0.62
+    ],
+    "headlight_r": [
+      0,
+      1.0,
+      -0.62
+    ],
+    "camera_tp": [
+      0,
+      1.8,
+      4.6
+    ]
+  },
+  "handling": {
+    "one_hand_steer_limit": 0.25,
+    "one_hand_spread_mult": 1.8,
+    "passenger_spread_mult": 1.3,
+    "exit_ragdoll_speed": 5.0
+  }
+}

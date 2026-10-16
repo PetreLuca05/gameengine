@@ -1,0 +1,29 @@
+{
+  "duration": 0.05,
+  "priority": 0,
+  "max_instances": 64,
+  "emitters": [],
+  "decal": {
+    "texture": "blood_splatter",
+    "size": [
+      0.16,
+      0.42
+    ],
+    "lifetime": 240,
+    "depth": 0.12,
+    "variants": 16,
+    "tint": [
+      1,
+      1,
+      1,
+      1
+    ],
+    "roughness": 0.15,
+    "dry_time": 150,
+    "dry_darken": 0.55,
+    "pool": "blood",
+    "normal": "blood_splatter_n"
+  },
+  "name": "blood_splatter",
+  "_generated": "make_flesh_effects.py"
+}

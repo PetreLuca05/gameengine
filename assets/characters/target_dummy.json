@@ -1,0 +1,12 @@
+{
+  "id": "target_dummy", "character_id": 5, "kind": "dummy",
+  "_comment": "Dev-room target dummies: log body part x multiplier = damage per hit.",
+  "mesh": "assets/human/Dummy.fbx",
+  "materials": { "Alpha_Body_MAT": [0.82, 0.70, 0.52], "Alpha_Joints_MAT": [0.55, 0.15, 0.10], "Body 2": [0.82, 0.70, 0.52] },
+  "anim_set": "zombie",
+  "part_mult": { "head": 2.5, "neck": 1.5, "chest": 1.0, "stomach": 0.9, "pelvis": 0.9, "arms": 0.6, "hands": 0.5, "legs": 0.7, "feet": 0.5 },
+  "blood": { "color": [0.30, 0.02, 0.015], "darkness": 0.55, "amount": 1.0, "mist": 1.0, "decay": 1.0 },
+  "surface": { "torso": "cloth", "legs": "cloth" },
+  "ragdoll_scale": 1.0, "scale": 1.0, "hp": 150,
+  "eye_offset": [0, 0.10, -0.10]
+}

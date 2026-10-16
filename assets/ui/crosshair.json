@@ -1,0 +1,32 @@
+{
+  "_comment": "Crosshair style. Colors are RGBA 0-255. Player-facing options (style, size, color preset, ...) are the crosshair_* cvars in Settings > Crosshair; this file holds the palette and timing. 'crosshair_reload' re-reads it.",
+  "colors": [
+    { "name": "White",   "rgba": [240, 240, 236, 255] },
+    { "name": "Green",   "rgba": [90, 255, 110, 255] },
+    { "name": "Yellow",  "rgba": [255, 230, 70, 255] },
+    { "name": "Cyan",    "rgba": [80, 230, 255, 255] },
+    { "name": "Magenta", "rgba": [255, 90, 230, 255] }
+  ],
+  "enemy_color": [255, 70, 55, 255],
+  "friendly_color": [90, 170, 255, 255],
+  "outline_color": [0, 0, 0, 170],
+  "outline_width": 1.0,
+  "min_gap": 3.0,
+  "max_gap": 260.0,
+  "ads_fade_time": 0.12,
+  "ads_dot": true,
+  "ads_dot_size": 2.0,
+  "shotgun_circle": true,
+  "circle_segments": 48,
+  "enemy_check_range": 150.0,
+  "hitmarker": {
+    "time": 0.25,
+    "inner": 6.0,
+    "outer": 14.0,
+    "thickness": 2.5,
+    "color": [255, 255, 255, 255],
+    "head_color": [255, 200, 60, 255],
+    "kill_color": [255, 60, 40, 255],
+    "kill_scale": 1.35
+  }
+}

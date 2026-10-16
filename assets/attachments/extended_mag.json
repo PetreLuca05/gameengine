@@ -1,0 +1,18 @@
+{
+  "_comment": "Extended magazine: +50 % capacity, slower reload and aim.",
+  "id": "extended_mag",
+  "name": "Extended Magazine",
+  "slot": "magazine",
+  "mount": {
+    "pos": [0, 0, 0]
+  },
+  "modifiers": {
+    "mag_size": 1.5,
+    "reload_time": 1.12,
+    "ads_time": 1.05
+  },
+  "model": [
+      {"offset": [0, -0.085, 0.008], "half": [0.0135, 0.085, 0.028], "color": [0.09, 0.09, 0.09]},
+      {"offset": [0, -0.172, 0.01], "half": [0.016, 0.004, 0.031], "color": [0.06, 0.06, 0.06]}
+    ]
+}

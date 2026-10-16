@@ -1,0 +1,29 @@
+{
+  "duration": 0.05,
+  "priority": 0,
+  "max_instances": 64,
+  "emitters": [],
+  "decal": {
+    "texture": "blood_stain",
+    "size": [
+      0.06,
+      0.06
+    ],
+    "lifetime": 600,
+    "depth": 0.12,
+    "variants": 4,
+    "tint": [
+      1,
+      1,
+      1,
+      1
+    ],
+    "roughness": 0.3,
+    "dry_time": 120,
+    "dry_darken": 0.6,
+    "pool": "blood",
+    "normal": "blood_stain_n"
+  },
+  "name": "blood_stain",
+  "_generated": "make_flesh_effects.py"
+}

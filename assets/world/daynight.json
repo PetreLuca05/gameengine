@@ -1,0 +1,30 @@
+{
+  "_comment": "Day / night cycle (docs/DAYNIGHT.md). Times are \"HH:MM\" or hours. Curves: [hour, value] keys, piecewise linear, wrapping at 24 h. Hot reload: sky_reload (or save from tod_editor).",
+  "latitude": 47.0,
+  "axial_tilt": 23.44,
+  "day_of_year": 172,
+  "day_length_minutes": 24,
+  "start_time": "09:00",
+  "moon_age_days": 10.0,
+  "sun_illuminance": 3.0,
+  "moon_illuminance": 0.02,
+  "night_sky_floor": 0.0008,
+  "cloud_light_loss": 0.7,
+  "cloud_altitude_m": 1800,
+  "cloud_wind_mps": 8,
+  "cloud_wind_dir": 60,
+  "exposure": { "night_floor_ev": -1.5, "day_max_ev": 7.0 },
+  "light_schedule": { "on": "18:45", "off": "06:30", "jitter_minutes": 25, "flicker": 0.0 },
+  "curves": {
+    "fog_density":     [["00:00", 0.0015], ["03:30", 0.003], ["05:45", 0.030], ["07:30", 0.010], ["12:00", 0.004], ["18:00", 0.004], ["21:00", 0.0015]],
+    "exposure_comp":   [["00:00", -0.7], ["05:00", -0.5], ["07:00", 0.0], ["17:30", 0.0], ["19:30", 0.25], ["21:00", -0.4]],
+    "cloud_cover":     [["00:00", 0.35], ["12:00", 0.45], ["18:00", 0.40]],
+    "star_brightness": [["00:00", 1.0], ["04:30", 1.0], ["06:00", 0.0], ["19:30", 0.0], ["21:30", 1.0]],
+    "moon_size":       [["00:00", 1.8]],
+    "sun_size":        [["00:00", 1.6]],
+    "ambient_scale":   [["00:00", 1.6]]
+  },
+  "levels": {
+    "devroom": { "start_time": "16:45" }
+  }
+}

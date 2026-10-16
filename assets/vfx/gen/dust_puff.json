@@ -1,0 +1,46 @@
+{
+  "kind": "volume",
+  "grid": [
+    6,
+    6
+  ],
+  "frames": 36,
+  "cell": 128,
+  "fps": 30,
+  "motion_vectors": true,
+  "lighting": "sixway",
+  "placeholder": {
+    "type": "puff",
+    "seed": 22,
+    "grow": [
+      0.25,
+      1.0
+    ],
+    "density": 0.85,
+    "detail": 6.0,
+    "rise": 0.05,
+    "swirl": 1.0
+  },
+  "model": "kling-video/v2.5-turbo/pro/text-to-video",
+  "duration": 5,
+  "aspect_ratio": "1:1",
+  "cfg_scale": 0.6,
+  "negative_prompt": "camera movement, zoom, text, watermark, logo, people, hands, gun, background objects, ground, floor, colored background",
+  "prompt": "slow motion footage of a burst of fine pale dust powder exploding outward from the center and drifting apart into a soft cloud, static locked-off camera, the dust stays centered and fully inside the frame, evenly lit, pure black background",
+  "background": "black",
+  "alpha": {
+    "black": 0.04,
+    "white": 0.5,
+    "gamma": 1.0,
+    "albedo": [
+      1.0,
+      1.0,
+      1.0
+    ]
+  },
+  "trim": [
+    0.0,
+    0.85
+  ],
+  "name": "dust_puff"
+}

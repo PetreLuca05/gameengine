@@ -1,0 +1,15 @@
+{
+  "_comment": "Ground fog, still air. Any key left out keeps the current value when composed (overcast+rain).",
+  "cloud_cover": 0.7,
+  "cloud_density": 0.6,
+  "precipitation": 0.0,
+  "fog_density": 0.045,
+  "fog_height": 25,
+  "temperature": 9,
+  "wind": 0.8,
+  "gust": 0.05,
+  "lightning_rate": 0,
+  "transition": 90,
+  "min_stay": 120,
+  "max_stay": 300
+}

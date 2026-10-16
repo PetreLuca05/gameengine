@@ -1,0 +1,24 @@
+{
+  "kind": "sprite",
+  "grid": [
+    2,
+    2
+  ],
+  "variants": 4,
+  "cell": 64,
+  "placeholder": {
+    "type": "strand",
+    "seed": 73
+  },
+  "model": "higgsfield-ai/soul/standard",
+  "aspect_ratio": "1:1",
+  "resolution": "1080p",
+  "background": "green",
+  "alpha": {
+    "tol": 0.1,
+    "soft": 0.12
+  },
+  "api_variants": 1,
+  "prompt": "high speed macro photograph of a thin stretched strand of dark blood flying through the air, vertical, centered, isolated on a solid flat pure green (#00FF00) chroma key background, even soft lighting, no shadows, no text, forensic reference photograph, realistic, not cartoon",
+  "name": "blood_strand"
+}

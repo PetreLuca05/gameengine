@@ -1,0 +1,24 @@
+{
+  "kind": "sprite",
+  "grid": [
+    2,
+    2
+  ],
+  "variants": 4,
+  "cell": 64,
+  "placeholder": {
+    "type": "spark",
+    "seed": 83
+  },
+  "model": "higgsfield-ai/soul/standard",
+  "aspect_ratio": "1:1",
+  "resolution": "1080p",
+  "background": "black",
+  "alpha": {
+    "black": 0.05,
+    "white": 0.6
+  },
+  "api_variants": 1,
+  "prompt": "long exposure photograph of a single bright orange metal spark streak from a bullet ricochet, centered, pure black background, no text",
+  "name": "helmet_spark"
+}

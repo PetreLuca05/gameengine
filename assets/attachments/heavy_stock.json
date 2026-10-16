@@ -1,0 +1,20 @@
+{
+  "_comment": "Heavy stock: less recoil and sway, slower to aim.",
+  "id": "heavy_stock",
+  "name": "Heavy Stock",
+  "slot": "stock",
+  "mount": {
+    "pos": [0, 0, 0]
+  },
+  "modifiers": {
+    "recoil_vertical": 0.88,
+    "camera_kick": 0.8,
+    "sway_scale": 0.8,
+    "ads_time": 1.1
+  },
+  "model": [
+      {"offset": [0, 0.0, 0.12], "half": [0.023, 0.05, 0.12], "color": [0.12, 0.12, 0.11]},
+      {"offset": [0, -0.012, 0.245], "half": [0.026, 0.065, 0.008], "color": [0.06, 0.06, 0.06]},
+      {"offset": [0, 0.055, 0.14], "half": [0.012, 0.006, 0.06], "color": [0.08, 0.08, 0.08]}
+    ]
+}

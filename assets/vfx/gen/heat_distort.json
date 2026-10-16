@@ -1,0 +1,15 @@
+{
+  "kind": "distortion",
+  "grid": [
+    1,
+    1
+  ],
+  "cell": 128,
+  "raw": true,
+  "edge_fade": false,
+  "placeholder": {
+    "type": "heat_normal",
+    "seed": 25
+  },
+  "name": "heat_distort"
+}

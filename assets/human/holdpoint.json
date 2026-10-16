@@ -1,0 +1,1415 @@
+{
+	"_comment": "Hold points: camera space (pos = right, up, forward m; rot = pitch, yaw, roll deg). ADS is computed from each item's sight socket and eye_relief. Edited with holdpoint_editor (F8); see docs/CAMERA_HOLDPOINT.md.",
+	"styles": {
+		"none": {
+			"states": {
+				"hip": {
+					"pos": [
+						0.17,
+						-0.22,
+						0.33
+					],
+					"rot": [
+						-15,
+						0,
+						0
+					],
+					"blend": 0.2
+				},
+				"sprint": {
+					"pos": [
+						0.18,
+						-0.3,
+						0.26
+					],
+					"rot": [
+						-30,
+						0,
+						0
+					],
+					"blend": 0.24
+				},
+				"crouch": {
+					"pos": [
+						0.17,
+						-0.21,
+						0.315
+					],
+					"rot": [
+						-15,
+						0,
+						0
+					],
+					"blend": 0.2
+				},
+				"prone": {
+					"pos": [
+						0.17,
+						-0.19,
+						0.33
+					],
+					"rot": [
+						-15,
+						0,
+						0
+					],
+					"blend": 0.2
+				},
+				"empty": {
+					"pos": [
+						0.17,
+						-0.54,
+						0.25
+					],
+					"rot": [
+						-55,
+						0,
+						0
+					],
+					"blend": 0.25
+				},
+				"inspect": {
+					"pos": [
+						0.04,
+						-0.12,
+						0.34
+					],
+					"rot": [
+						10,
+						55,
+						35
+					],
+					"blend": 0.2
+				},
+				"ads": {
+					"blend": 0.16
+				}
+			},
+			"eye_relief": 0.3,
+			"ads_rot": [
+				0,
+				0,
+				0
+			],
+			"procedural": {
+				"ads_scale": 0.0,
+				"look_lag": {
+					"rot": 1.6,
+					"pos": 0.004,
+					"max": 5,
+					"stiffness": 140,
+					"damping": 18
+				},
+				"sway": {
+					"rot": 0.35,
+					"freq": 0.55,
+					"breath": 0.0025,
+					"breath_freq": 0.25
+				},
+				"bob": {
+					"pos": 0.012,
+					"rot": 1.2,
+					"freq": 1
+				},
+				"kick_scale": 1
+			},
+			"collision": {
+				"back": 0.22,
+				"up": 0.05,
+				"pitch": 28,
+				"curve": 1.4,
+				"in_speed": 14,
+				"out_speed": 6,
+				"radius": 0.025
+			},
+			"clavicle_gain": 30,
+			"reach_pull": 0.12,
+			"pitch_soft": 65,
+			"pitch_follow": 0.35,
+			"ads_pitch_soft": 89,
+			"ads_pitch_follow": 0.5,
+			"body": {
+				"twist": 0,
+				"clavicle_l": [
+					0,
+					0,
+					0
+				],
+				"clavicle_r": [
+					0,
+					0,
+					0
+				]
+			}
+		},
+		"pistol": {
+			"states": {
+				"hip": {
+					"pos": [
+						0.09,
+						-0.17,
+						0.36
+					],
+					"rot": [
+						0,
+						2,
+						0
+					],
+					"blend": 0.2
+				},
+				"sprint": {
+					"pos": [
+						0.1,
+						-0.32,
+						0.22
+					],
+					"rot": [
+						-45,
+						10,
+						15
+					],
+					"blend": 0.24
+				},
+				"crouch": {
+					"pos": [
+						0.09,
+						-0.16,
+						0.345
+					],
+					"rot": [
+						0,
+						2,
+						0
+					],
+					"blend": 0.2
+				},
+				"prone": {
+					"pos": [
+						0.09,
+						-0.14,
+						0.36
+					],
+					"rot": [
+						0,
+						2,
+						0
+					],
+					"blend": 0.2
+				},
+				"empty": {
+					"pos": [
+						0.09,
+						-0.49,
+						0.28
+					],
+					"rot": [
+						-40,
+						2,
+						0
+					],
+					"blend": 0.25
+				},
+				"inspect": {
+					"pos": [
+						0.04,
+						-0.12,
+						0.34
+					],
+					"rot": [
+						10,
+						55,
+						35
+					],
+					"blend": 0.2
+				},
+				"ads": {
+					"blend": 0.16
+				}
+			},
+			"eye_relief": 0.34,
+			"ads_rot": [
+				0,
+				0,
+				0
+			],
+			"procedural": {
+				"ads_scale": 0.0,
+				"look_lag": {
+					"rot": 1.6,
+					"pos": 0.004,
+					"max": 5,
+					"stiffness": 140,
+					"damping": 18
+				},
+				"sway": {
+					"rot": 0.35,
+					"freq": 0.55,
+					"breath": 0.0025,
+					"breath_freq": 0.25
+				},
+				"bob": {
+					"pos": 0.012,
+					"rot": 1.2,
+					"freq": 1
+				},
+				"kick_scale": 1
+			},
+			"collision": {
+				"back": 0.22,
+				"up": 0.05,
+				"pitch": 28,
+				"curve": 1.4,
+				"in_speed": 14,
+				"out_speed": 6,
+				"radius": 0.025
+			},
+			"clavicle_gain": 45,
+			"reach_pull": 0.25,
+			"pitch_soft": 65,
+			"pitch_follow": 0.35,
+			"ads_pitch_soft": 89,
+			"ads_pitch_follow": 0.5,
+			"body": {
+				"twist": 10,
+				"clavicle_l": [
+					0,
+					-22,
+					0
+				],
+				"clavicle_r": [
+					0,
+					6,
+					0
+				]
+			}
+		},
+		"rifle": {
+			"states": {
+				"hip": {
+					"pos": [
+						0.11,
+						-0.19,
+						0.12
+					],
+					"rot": [
+						0,
+						1.5,
+						0
+					],
+					"blend": 0.2
+				},
+				"sprint": {
+					"pos": [
+						0.1,
+						-0.25,
+						0.17
+					],
+					"rot": [
+						-22,
+						20,
+						15
+					],
+					"blend": 0.24
+				},
+				"crouch": {
+					"pos": [
+						0.11,
+						-0.18,
+						0.105
+					],
+					"rot": [
+						0,
+						1.5,
+						0
+					],
+					"blend": 0.2
+				},
+				"prone": {
+					"pos": [
+						0.11,
+						-0.16,
+						0.12
+					],
+					"rot": [
+						0,
+						1.5,
+						0
+					],
+					"blend": 0.2
+				},
+				"empty": {
+					"pos": [
+						0.11,
+						-0.51,
+						0.1
+					],
+					"rot": [
+						-40,
+						1.5,
+						0
+					],
+					"blend": 0.25
+				},
+				"inspect": {
+					"pos": [
+						0.04,
+						-0.12,
+						0.34
+					],
+					"rot": [
+						10,
+						55,
+						35
+					],
+					"blend": 0.2
+				},
+				"ads": {
+					"blend": 0.16
+				}
+			},
+			"eye_relief": 0.24,
+			"ads_rot": [
+				0,
+				0,
+				0
+			],
+			"procedural": {
+				"ads_scale": 0.0,
+				"look_lag": {
+					"rot": 1.6,
+					"pos": 0.004,
+					"max": 5,
+					"stiffness": 140,
+					"damping": 18
+				},
+				"sway": {
+					"rot": 0.35,
+					"freq": 0.55,
+					"breath": 0.0025,
+					"breath_freq": 0.25
+				},
+				"bob": {
+					"pos": 0.012,
+					"rot": 1.2,
+					"freq": 1
+				},
+				"kick_scale": 1
+			},
+			"collision": {
+				"back": 0.22,
+				"up": 0.05,
+				"pitch": 28,
+				"curve": 1.4,
+				"in_speed": 14,
+				"out_speed": 6,
+				"radius": 0.025
+			},
+			"clavicle_gain": 45,
+			"reach_pull": 0.25,
+			"pitch_soft": 65,
+			"pitch_follow": 0.35,
+			"ads_pitch_soft": 89,
+			"ads_pitch_follow": 0.5,
+			"body": {
+				"twist": 22,
+				"clavicle_l": [
+					0,
+					-22,
+					-6
+				],
+				"clavicle_r": [
+					0,
+					6,
+					0
+				]
+			}
+		},
+		"shotgun": {
+			"states": {
+				"hip": {
+					"pos": [
+						0.11,
+						-0.19,
+						0.12
+					],
+					"rot": [
+						0,
+						1.5,
+						0
+					],
+					"blend": 0.2
+				},
+				"sprint": {
+					"pos": [
+						0.1,
+						-0.25,
+						0.17
+					],
+					"rot": [
+						-22,
+						20,
+						15
+					],
+					"blend": 0.24
+				},
+				"crouch": {
+					"pos": [
+						0.11,
+						-0.18,
+						0.105
+					],
+					"rot": [
+						0,
+						1.5,
+						0
+					],
+					"blend": 0.2
+				},
+				"prone": {
+					"pos": [
+						0.11,
+						-0.16,
+						0.12
+					],
+					"rot": [
+						0,
+						1.5,
+						0
+					],
+					"blend": 0.2
+				},
+				"empty": {
+					"pos": [
+						0.11,
+						-0.51,
+						0.1
+					],
+					"rot": [
+						-40,
+						1.5,
+						0
+					],
+					"blend": 0.25
+				},
+				"inspect": {
+					"pos": [
+						0.04,
+						-0.12,
+						0.34
+					],
+					"rot": [
+						10,
+						55,
+						35
+					],
+					"blend": 0.2
+				},
+				"ads": {
+					"blend": 0.16
+				}
+			},
+			"eye_relief": 0.24,
+			"ads_rot": [
+				0,
+				0,
+				0
+			],
+			"procedural": {
+				"ads_scale": 0.0,
+				"look_lag": {
+					"rot": 1.6,
+					"pos": 0.004,
+					"max": 5,
+					"stiffness": 140,
+					"damping": 18
+				},
+				"sway": {
+					"rot": 0.35,
+					"freq": 0.55,
+					"breath": 0.0025,
+					"breath_freq": 0.25
+				},
+				"bob": {
+					"pos": 0.012,
+					"rot": 1.2,
+					"freq": 1
+				},
+				"kick_scale": 1
+			},
+			"collision": {
+				"back": 0.22,
+				"up": 0.05,
+				"pitch": 28,
+				"curve": 1.4,
+				"in_speed": 14,
+				"out_speed": 6,
+				"radius": 0.025
+			},
+			"clavicle_gain": 45,
+			"reach_pull": 0.25,
+			"pitch_soft": 65,
+			"pitch_follow": 0.35,
+			"ads_pitch_soft": 89,
+			"ads_pitch_follow": 0.5,
+			"body": {
+				"twist": 22,
+				"clavicle_l": [
+					0,
+					-22,
+					-6
+				],
+				"clavicle_r": [
+					0,
+					6,
+					0
+				]
+			}
+		},
+		"smg": {
+			"states": {
+				"hip": {
+					"pos": [
+						0.11,
+						-0.19,
+						0.12
+					],
+					"rot": [
+						0,
+						1.5,
+						0
+					],
+					"blend": 0.2
+				},
+				"sprint": {
+					"pos": [
+						0.1,
+						-0.25,
+						0.17
+					],
+					"rot": [
+						-22,
+						20,
+						15
+					],
+					"blend": 0.24
+				},
+				"crouch": {
+					"pos": [
+						0.11,
+						-0.18,
+						0.105
+					],
+					"rot": [
+						0,
+						1.5,
+						0
+					],
+					"blend": 0.2
+				},
+				"prone": {
+					"pos": [
+						0.11,
+						-0.16,
+						0.12
+					],
+					"rot": [
+						0,
+						1.5,
+						0
+					],
+					"blend": 0.2
+				},
+				"empty": {
+					"pos": [
+						0.11,
+						-0.51,
+						0.1
+					],
+					"rot": [
+						-40,
+						1.5,
+						0
+					],
+					"blend": 0.25
+				},
+				"inspect": {
+					"pos": [
+						0.04,
+						-0.12,
+						0.34
+					],
+					"rot": [
+						10,
+						55,
+						35
+					],
+					"blend": 0.2
+				},
+				"ads": {
+					"blend": 0.16
+				}
+			},
+			"eye_relief": 0.24,
+			"ads_rot": [
+				0,
+				0,
+				0
+			],
+			"procedural": {
+				"ads_scale": 0.0,
+				"look_lag": {
+					"rot": 1.6,
+					"pos": 0.004,
+					"max": 5,
+					"stiffness": 140,
+					"damping": 18
+				},
+				"sway": {
+					"rot": 0.35,
+					"freq": 0.55,
+					"breath": 0.0025,
+					"breath_freq": 0.25
+				},
+				"bob": {
+					"pos": 0.012,
+					"rot": 1.2,
+					"freq": 1
+				},
+				"kick_scale": 1
+			},
+			"collision": {
+				"back": 0.22,
+				"up": 0.05,
+				"pitch": 28,
+				"curve": 1.4,
+				"in_speed": 14,
+				"out_speed": 6,
+				"radius": 0.025
+			},
+			"clavicle_gain": 45,
+			"reach_pull": 0.25,
+			"pitch_soft": 65,
+			"pitch_follow": 0.35,
+			"ads_pitch_soft": 89,
+			"ads_pitch_follow": 0.5,
+			"body": {
+				"twist": 22,
+				"clavicle_l": [
+					0,
+					-22,
+					-6
+				],
+				"clavicle_r": [
+					0,
+					6,
+					0
+				]
+			}
+		},
+		"lmg": {
+			"states": {
+				"hip": {
+					"pos": [
+						0.11,
+						-0.22,
+						0.1
+					],
+					"rot": [
+						0,
+						1.5,
+						0
+					],
+					"blend": 0.2
+				},
+				"sprint": {
+					"pos": [
+						0.1,
+						-0.25,
+						0.17
+					],
+					"rot": [
+						-22,
+						20,
+						15
+					],
+					"blend": 0.24
+				},
+				"crouch": {
+					"pos": [
+						0.11,
+						-0.21,
+						0.085
+					],
+					"rot": [
+						0,
+						1.5,
+						0
+					],
+					"blend": 0.2
+				},
+				"prone": {
+					"pos": [
+						0.11,
+						-0.19,
+						0.1
+					],
+					"rot": [
+						0,
+						1.5,
+						0
+					],
+					"blend": 0.2
+				},
+				"empty": {
+					"pos": [
+						0.11,
+						-0.54,
+						0.08
+					],
+					"rot": [
+						-40,
+						1.5,
+						0
+					],
+					"blend": 0.25
+				},
+				"inspect": {
+					"pos": [
+						0.04,
+						-0.12,
+						0.34
+					],
+					"rot": [
+						10,
+						55,
+						35
+					],
+					"blend": 0.2
+				},
+				"ads": {
+					"blend": 0.16
+				}
+			},
+			"eye_relief": 0.26,
+			"ads_rot": [
+				0,
+				0,
+				0
+			],
+			"procedural": {
+				"ads_scale": 0.0,
+				"look_lag": {
+					"rot": 1.6,
+					"pos": 0.004,
+					"max": 5,
+					"stiffness": 140,
+					"damping": 18
+				},
+				"sway": {
+					"rot": 0.35,
+					"freq": 0.55,
+					"breath": 0.0025,
+					"breath_freq": 0.25
+				},
+				"bob": {
+					"pos": 0.012,
+					"rot": 1.2,
+					"freq": 1
+				},
+				"kick_scale": 1
+			},
+			"collision": {
+				"back": 0.22,
+				"up": 0.05,
+				"pitch": 28,
+				"curve": 1.4,
+				"in_speed": 14,
+				"out_speed": 6,
+				"radius": 0.025
+			},
+			"clavicle_gain": 45,
+			"reach_pull": 0.25,
+			"pitch_soft": 65,
+			"pitch_follow": 0.35,
+			"ads_pitch_soft": 89,
+			"ads_pitch_follow": 0.5,
+			"body": {
+				"twist": 22,
+				"clavicle_l": [
+					0,
+					-22,
+					-6
+				],
+				"clavicle_r": [
+					0,
+					6,
+					0
+				]
+			}
+		},
+		"melee_1h": {
+			"states": {
+				"hip": {
+					"pos": [
+						0.2,
+						-0.26,
+						0.32
+					],
+					"rot": [
+						55,
+						-10,
+						0
+					],
+					"blend": 0.2
+				},
+				"sprint": {
+					"pos": [
+						0.2,
+						-0.32,
+						0.24
+					],
+					"rot": [
+						30,
+						-10,
+						0
+					],
+					"blend": 0.24
+				},
+				"crouch": {
+					"pos": [
+						0.2,
+						-0.25,
+						0.305
+					],
+					"rot": [
+						55,
+						-10,
+						0
+					],
+					"blend": 0.2
+				},
+				"prone": {
+					"pos": [
+						0.2,
+						-0.23,
+						0.32
+					],
+					"rot": [
+						55,
+						-10,
+						0
+					],
+					"blend": 0.2
+				},
+				"empty": {
+					"pos": [
+						0.2,
+						-0.58,
+						0.24
+					],
+					"rot": [
+						15,
+						-10,
+						0
+					],
+					"blend": 0.25
+				},
+				"inspect": {
+					"pos": [
+						0.04,
+						-0.12,
+						0.34
+					],
+					"rot": [
+						10,
+						55,
+						35
+					],
+					"blend": 0.2
+				},
+				"ads": {
+					"blend": 0.16
+				}
+			},
+			"eye_relief": 0.3,
+			"ads_rot": [
+				0,
+				0,
+				0
+			],
+			"procedural": {
+				"ads_scale": 0.0,
+				"look_lag": {
+					"rot": 1.6,
+					"pos": 0.004,
+					"max": 5,
+					"stiffness": 140,
+					"damping": 18
+				},
+				"sway": {
+					"rot": 0.35,
+					"freq": 0.55,
+					"breath": 0.0025,
+					"breath_freq": 0.25
+				},
+				"bob": {
+					"pos": 0.012,
+					"rot": 1.2,
+					"freq": 1
+				},
+				"kick_scale": 1
+			},
+			"collision": {
+				"back": 0.22,
+				"up": 0.05,
+				"pitch": 28,
+				"curve": 1.4,
+				"in_speed": 14,
+				"out_speed": 6,
+				"radius": 0.025
+			},
+			"clavicle_gain": 30,
+			"reach_pull": 0.12,
+			"pitch_soft": 65,
+			"pitch_follow": 0.35,
+			"ads_pitch_soft": 89,
+			"ads_pitch_follow": 0.5,
+			"body": {
+				"twist": 0,
+				"clavicle_l": [
+					0,
+					0,
+					0
+				],
+				"clavicle_r": [
+					0,
+					0,
+					0
+				]
+			}
+		},
+		"melee_2h": {
+			"states": {
+				"hip": {
+					"pos": [
+						0.16,
+						-0.25,
+						0.3
+					],
+					"rot": [
+						25,
+						0,
+						-12
+					],
+					"blend": 0.2
+				},
+				"sprint": {
+					"pos": [
+						0.16,
+						-0.3,
+						0.24
+					],
+					"rot": [
+						10,
+						8,
+						-15
+					],
+					"blend": 0.24
+				},
+				"crouch": {
+					"pos": [
+						0.16,
+						-0.24,
+						0.285
+					],
+					"rot": [
+						25,
+						0,
+						-12
+					],
+					"blend": 0.2
+				},
+				"prone": {
+					"pos": [
+						0.16,
+						-0.22,
+						0.3
+					],
+					"rot": [
+						25,
+						0,
+						-12
+					],
+					"blend": 0.2
+				},
+				"empty": {
+					"pos": [
+						0.16,
+						-0.57,
+						0.28
+					],
+					"rot": [
+						-15,
+						0,
+						-12
+					],
+					"blend": 0.25
+				},
+				"inspect": {
+					"pos": [
+						0.04,
+						-0.12,
+						0.34
+					],
+					"rot": [
+						10,
+						55,
+						35
+					],
+					"blend": 0.2
+				},
+				"ads": {
+					"blend": 0.16
+				}
+			},
+			"eye_relief": 0.3,
+			"ads_rot": [
+				0,
+				0,
+				0
+			],
+			"procedural": {
+				"ads_scale": 0.0,
+				"look_lag": {
+					"rot": 1.6,
+					"pos": 0.004,
+					"max": 5,
+					"stiffness": 140,
+					"damping": 18
+				},
+				"sway": {
+					"rot": 0.35,
+					"freq": 0.55,
+					"breath": 0.0025,
+					"breath_freq": 0.25
+				},
+				"bob": {
+					"pos": 0.012,
+					"rot": 1.2,
+					"freq": 1
+				},
+				"kick_scale": 1
+			},
+			"collision": {
+				"back": 0.22,
+				"up": 0.05,
+				"pitch": 28,
+				"curve": 1.4,
+				"in_speed": 14,
+				"out_speed": 6,
+				"radius": 0.025
+			},
+			"clavicle_gain": 30,
+			"reach_pull": 0.25,
+			"pitch_soft": 65,
+			"pitch_follow": 0.35,
+			"ads_pitch_soft": 89,
+			"ads_pitch_follow": 0.5,
+			"body": {
+				"twist": 12,
+				"clavicle_l": [
+					0,
+					-22,
+					-6
+				],
+				"clavicle_r": [
+					0,
+					6,
+					0
+				]
+			}
+		},
+		"item_small": {
+			"states": {
+				"hip": {
+					"pos": [
+						0.17,
+						-0.22,
+						0.33
+					],
+					"rot": [
+						-15,
+						0,
+						0
+					],
+					"blend": 0.2
+				},
+				"sprint": {
+					"pos": [
+						0.18,
+						-0.3,
+						0.26
+					],
+					"rot": [
+						-30,
+						0,
+						0
+					],
+					"blend": 0.24
+				},
+				"crouch": {
+					"pos": [
+						0.17,
+						-0.21,
+						0.315
+					],
+					"rot": [
+						-15,
+						0,
+						0
+					],
+					"blend": 0.2
+				},
+				"prone": {
+					"pos": [
+						0.17,
+						-0.19,
+						0.33
+					],
+					"rot": [
+						-15,
+						0,
+						0
+					],
+					"blend": 0.2
+				},
+				"empty": {
+					"pos": [
+						0.17,
+						-0.54,
+						0.25
+					],
+					"rot": [
+						-55,
+						0,
+						0
+					],
+					"blend": 0.25
+				},
+				"inspect": {
+					"pos": [
+						0.04,
+						-0.12,
+						0.34
+					],
+					"rot": [
+						10,
+						55,
+						35
+					],
+					"blend": 0.2
+				},
+				"ads": {
+					"blend": 0.16
+				}
+			},
+			"eye_relief": 0.3,
+			"ads_rot": [
+				0,
+				0,
+				0
+			],
+			"procedural": {
+				"ads_scale": 0.0,
+				"look_lag": {
+					"rot": 1.6,
+					"pos": 0.004,
+					"max": 5,
+					"stiffness": 140,
+					"damping": 18
+				},
+				"sway": {
+					"rot": 0.35,
+					"freq": 0.55,
+					"breath": 0.0025,
+					"breath_freq": 0.25
+				},
+				"bob": {
+					"pos": 0.012,
+					"rot": 1.2,
+					"freq": 1
+				},
+				"kick_scale": 1
+			},
+			"collision": {
+				"back": 0.22,
+				"up": 0.05,
+				"pitch": 28,
+				"curve": 1.4,
+				"in_speed": 14,
+				"out_speed": 6,
+				"radius": 0.025
+			},
+			"clavicle_gain": 30,
+			"reach_pull": 0.12,
+			"pitch_soft": 65,
+			"pitch_follow": 0.35,
+			"ads_pitch_soft": 89,
+			"ads_pitch_follow": 0.5,
+			"body": {
+				"twist": 0,
+				"clavicle_l": [
+					0,
+					0,
+					0
+				],
+				"clavicle_r": [
+					0,
+					0,
+					0
+				]
+			}
+		},
+		"item_large": {
+			"states": {
+				"hip": {
+					"pos": [
+						0.06,
+						-0.24,
+						0.3
+					],
+					"rot": [
+						0,
+						0,
+						0
+					],
+					"blend": 0.2
+				},
+				"sprint": {
+					"pos": [
+						0.06,
+						-0.3,
+						0.3
+					],
+					"rot": [
+						-10,
+						0,
+						0
+					],
+					"blend": 0.24
+				},
+				"crouch": {
+					"pos": [
+						0.06,
+						-0.23,
+						0.285
+					],
+					"rot": [
+						0,
+						0,
+						0
+					],
+					"blend": 0.2
+				},
+				"prone": {
+					"pos": [
+						0.06,
+						-0.21,
+						0.3
+					],
+					"rot": [
+						0,
+						0,
+						0
+					],
+					"blend": 0.2
+				},
+				"empty": {
+					"pos": [
+						0.06,
+						-0.56,
+						0.28
+					],
+					"rot": [
+						-40,
+						0,
+						0
+					],
+					"blend": 0.25
+				},
+				"inspect": {
+					"pos": [
+						0.04,
+						-0.12,
+						0.34
+					],
+					"rot": [
+						10,
+						55,
+						35
+					],
+					"blend": 0.2
+				},
+				"ads": {
+					"blend": 0.16
+				}
+			},
+			"eye_relief": 0.3,
+			"ads_rot": [
+				0,
+				0,
+				0
+			],
+			"procedural": {
+				"ads_scale": 0.0,
+				"look_lag": {
+					"rot": 1.6,
+					"pos": 0.004,
+					"max": 5,
+					"stiffness": 140,
+					"damping": 18
+				},
+				"sway": {
+					"rot": 0.35,
+					"freq": 0.55,
+					"breath": 0.0025,
+					"breath_freq": 0.25
+				},
+				"bob": {
+					"pos": 0.012,
+					"rot": 1.2,
+					"freq": 1
+				},
+				"kick_scale": 1
+			},
+			"collision": {
+				"back": 0.22,
+				"up": 0.05,
+				"pitch": 28,
+				"curve": 1.4,
+				"in_speed": 14,
+				"out_speed": 6,
+				"radius": 0.025
+			},
+			"clavicle_gain": 45,
+			"reach_pull": 0.25,
+			"pitch_soft": 65,
+			"pitch_follow": 0.35,
+			"ads_pitch_soft": 89,
+			"ads_pitch_follow": 0.5,
+			"body": {
+				"twist": 22,
+				"clavicle_l": [
+					0,
+					-22,
+					-6
+				],
+				"clavicle_r": [
+					0,
+					6,
+					0
+				]
+			}
+		}
+	}
+}

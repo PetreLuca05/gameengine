@@ -1,0 +1,58 @@
+{
+  "_comment": "Per-clip metadata. Key = baked clip name (FBX file stem, or 'file:take'). Keys: name (alias used by anim sets), loop, speed, root_speed (m/s travel of an in-place clip: speed matching), root_motion, markers [left_plant, right_plant], events, blend_in, blend_out, additive, reference.",
+  "clips": {
+    "Animations:Armature|Idle": {
+      "name": "idle",
+      "loop": true
+    },
+    "Animations:Armature|Rifle Aiming Idle": {
+      "name": "idle_rifle",
+      "loop": true
+    },
+    "Animations:Armature|Happy Idle": {
+      "name": "idle_happy",
+      "loop": true
+    },
+    "Animations:Armature|Happy Idle Variant": {
+      "name": "idle_happy_2",
+      "loop": true
+    },
+    "Animations:Armature|Fighting Idle": {
+      "name": "idle_fight",
+      "loop": true
+    },
+    "Animations:Armature|Jog Forward": {
+      "name": "jog_forward",
+      "loop": true,
+      "root_speed": 3.2
+    },
+    "Animations:Armature|Jog Backward": {
+      "name": "jog_backward",
+      "loop": true,
+      "root_speed": 2.8
+    },
+    "Animations:Armature|Jog Strafe Left": {
+      "name": "jog_strafe_left",
+      "loop": true,
+      "root_speed": 2.8
+    },
+    "Animations:Armature|Sprint Cycle": {
+      "name": "sprint",
+      "loop": true,
+      "root_speed": 6.2
+    },
+    "Animations:Armature|mixamo.com": {
+      "name": "idle_dup",
+      "loop": true
+    },
+    "jump": {
+      "loop": false
+    },
+    "running": {
+      "loop": true
+    },
+    "Hanging Idle": {
+      "loop": true
+    }
+  }
+}

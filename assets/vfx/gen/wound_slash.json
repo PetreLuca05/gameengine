@@ -1,0 +1,28 @@
+{
+  "kind": "decal",
+  "grid": [
+    2,
+    2
+  ],
+  "variants": 4,
+  "cell": 128,
+  "normal_map": true,
+  "normal_strength": 8.0,
+  "placeholder": {
+    "type": "wound",
+    "seed": 79,
+    "kind": "slash"
+  },
+  "edge_margin": 0.04,
+  "model": "higgsfield-ai/soul/standard",
+  "aspect_ratio": "1:1",
+  "resolution": "1080p",
+  "background": "green",
+  "alpha": {
+    "tol": 0.1,
+    "soft": 0.12
+  },
+  "api_variants": 1,
+  "prompt": "medical reference photograph, close up of a straight horizontal laceration on skin with a little blood, centered, isolated on a solid flat pure green (#00FF00) chroma key background, even soft lighting, no shadows, no text, forensic reference photograph, realistic, not cartoon",
+  "name": "wound_slash"
+}

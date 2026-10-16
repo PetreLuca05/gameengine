@@ -1,0 +1,53 @@
+{
+  "_doc": "Game UI theme (docs/UI.md). Colours are RGBA 0-255, sizes are design pixels at 1080p (scaled by ui_scale / the resolution), times are seconds. Reload in game with ui_reload.",
+  "fonts": {
+    "regular": "assets/ui/fonts/Barlow-Regular.ttf",
+    "medium": "assets/ui/fonts/Barlow-Medium.ttf",
+    "semibold": "assets/ui/fonts/Barlow-SemiBold.ttf"
+  },
+  "colors": {
+    "accent": [226, 140, 52, 255],
+    "accent_dim": [226, 140, 52, 90],
+    "text": [232, 232, 226, 255],
+    "text_dim": [232, 232, 226, 150],
+    "text_faint": [232, 232, 226, 82],
+    "text_dark": [16, 16, 18, 255],
+    "panel": [12, 14, 16, 168],
+    "panel_hi": [28, 31, 35, 215],
+    "panel_border": [255, 255, 255, 22],
+    "panel_header": [255, 255, 255, 8],
+    "hover": [255, 255, 255, 14],
+    "press": [255, 255, 255, 26],
+    "focus": [226, 140, 52, 210],
+    "scrim": [4, 5, 6, 90],
+    "shadow": [0, 0, 0, 120],
+    "danger": [226, 72, 58, 255],
+    "warning": [232, 190, 80, 255],
+    "ok": [110, 196, 112, 255],
+    "info": [110, 160, 226, 255],
+    "slot_bg": [255, 255, 255, 10],
+    "slot_border": [255, 255, 255, 20],
+    "slot_hi": [255, 255, 255, 30],
+    "type_weapon": [200, 108, 74, 255],
+    "type_ammo": [204, 172, 84, 255],
+    "type_consumable": [104, 186, 120, 255],
+    "type_attachment": [104, 150, 214, 255],
+    "type_key": [196, 120, 200, 255],
+    "type_misc": [150, 150, 150, 255],
+    "hud_panel": [10, 12, 14, 130],
+    "hud_text": [236, 236, 230, 255]
+  },
+  "sizes": {
+    "t_tiny": 12, "t_small": 14, "t_body": 17, "t_label": 13, "t_title": 26, "t_large": 30, "t_huge": 48,
+    "tracking_caps": 0.09,
+    "button_h": 30, "row_h": 36, "radius": 3, "radius_panel": 6, "border": 1, "accent_bar": 3, "pad": 20, "gap": 8,
+    "slot": 66, "slot_gap": 6, "modal_max_w_pct": 0.6, "scroll_speed": 60,
+    "safe_frac": 0.035, "max_aspect": 2.39
+  },
+  "anim": { "menu_in": 0.15, "menu_stagger": 0.022, "hover": 0.08, "modal_in": 0.14, "shake": 0.35, "tooltip_delay": 0.35 },
+  "backdrop": { "blur": 1, "dim": 0.35 },
+  "sounds": {
+    "hover": "ui_hover", "click": "ui_click", "back": "ui_back", "open": "ui_open", "error": "ui_error",
+    "drop": "ui_drop", "equip": "ui_equip", "tab": "ui_tab", "volume": 0.6
+  }
+}

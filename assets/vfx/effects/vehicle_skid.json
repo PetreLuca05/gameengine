@@ -1,0 +1,25 @@
+{
+  "duration": 0.05,
+  "priority": 0,
+  "max_instances": 64,
+  "emitters": [],
+  "decal": {
+    "texture": "decal_skid",
+    "size": [
+      0.2,
+      0.2
+    ],
+    "lifetime": 120,
+    "depth": 0.15,
+    "variants": 1,
+    "tint": [
+      1,
+      1,
+      1,
+      1
+    ],
+    "roughness": 0.6
+  },
+  "name": "vehicle_skid",
+  "_generated": "docs/VEHICLES.md (hand-made)"
+}

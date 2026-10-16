@@ -1,0 +1,5 @@
+[   0.015] info  jobs: 11 worker threads
+[   0.164] info  vulkan: validation layer enabled
+[   0.165] info  vulkan: GPU 'NVIDIA GeForce RTX 3060 Ti' (api 1.4.312)
+[   0.395] info  swapchain: 1600x900, 3 images, present=fifo
+[   8.115] info  screenshot saved: C:/C/Game/build/shot0.png

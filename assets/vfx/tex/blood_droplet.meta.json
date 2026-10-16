@@ -1,0 +1,23 @@
+{
+  "file": "blood_droplet.png",
+  "width": 128,
+  "height": 128,
+  "grid": [
+    2,
+    2
+  ],
+  "frames": 3,
+  "variants": 3,
+  "fps": 30,
+  "loop": false,
+  "motion_vectors": false,
+  "lighting": "none",
+  "premultiplied": true,
+  "placeholder": true,
+  "kind": "sprite",
+  "source": "procedural",
+  "recipe": "assets/vfx/gen/blood_droplet.json",
+  "recipe_hash": "1127bdb8de782849572d420a",
+  "generated": "2026-10-15T22:46:17",
+  "tool_version": 3
+}

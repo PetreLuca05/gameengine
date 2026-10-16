@@ -1,0 +1,23 @@
+{
+  "file": "helmet_spark.png",
+  "width": 128,
+  "height": 128,
+  "grid": [
+    2,
+    2
+  ],
+  "frames": 4,
+  "variants": 4,
+  "fps": 30,
+  "loop": false,
+  "motion_vectors": false,
+  "lighting": "none",
+  "premultiplied": true,
+  "placeholder": true,
+  "kind": "sprite",
+  "source": "procedural",
+  "recipe": "assets/vfx/gen/helmet_spark.json",
+  "recipe_hash": "cc23f0d4b80ed280e06e67bd",
+  "generated": "2026-10-15T22:46:19",
+  "tool_version": 3
+}

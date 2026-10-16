@@ -1,0 +1,114 @@
+{
+  "duration": 0.1,
+  "priority": 1,
+  "max_instances": 48,
+  "cull_distance": 150,
+  "lod": [
+    [
+      25,
+      0.75
+    ],
+    [
+      60,
+      0.45
+    ],
+    [
+      110,
+      0.2
+    ]
+  ],
+  "emitters": [
+    {
+      "name": "dust",
+      "tier": "gpu",
+      "spawn": {
+        "mode": "burst",
+        "count": [
+          1,
+          2
+        ],
+        "life": [
+          0.6,
+          1.4
+        ],
+        "size": [
+          0.06,
+          0.12
+        ],
+        "speed": [
+          0.4,
+          1.5
+        ],
+        "dir": "normal",
+        "angle": 35,
+        "rotation": [
+          0,
+          360
+        ],
+        "spin": [
+          -30,
+          30
+        ],
+        "color": [
+          0.45,
+          0.42,
+          0.38,
+          0.4
+        ]
+      },
+      "update": {
+        "gravity": 0.03,
+        "drag": 3.5,
+        "wind": 0.4,
+        "size_curve": {
+          "type": "bezier",
+          "keys": [
+            [
+              0,
+              0.4
+            ],
+            [
+              0.2,
+              1.3
+            ],
+            [
+              1,
+              2.6
+            ]
+          ]
+        },
+        "alpha_curve": {
+          "type": "bezier",
+          "keys": [
+            [
+              0,
+              0
+            ],
+            [
+              0.06,
+              1
+            ],
+            [
+              0.45,
+              0.6
+            ],
+            [
+              1,
+              0
+            ]
+          ]
+        },
+        "frame_over_life": true
+      },
+      "render": {
+        "mode": "alpha",
+        "lighting": "sixway",
+        "texture": "dust_puff",
+        "soft": 0.3,
+        "near_fade": 0.25
+      }
+    }
+  ],
+  "name": "gore_dust",
+  "_generated": "make_flesh_effects.py"
+}

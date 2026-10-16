@@ -1,0 +1,23 @@
+{
+  "file": "bone_frag.png",
+  "width": 128,
+  "height": 128,
+  "grid": [
+    2,
+    2
+  ],
+  "frames": 4,
+  "variants": 4,
+  "fps": 30,
+  "loop": false,
+  "motion_vectors": false,
+  "lighting": "none",
+  "premultiplied": true,
+  "placeholder": true,
+  "kind": "sprite",
+  "source": "procedural",
+  "recipe": "assets/vfx/gen/bone_frag.json",
+  "recipe_hash": "0aea9d6c3635ce560317a5d0",
+  "generated": "2026-10-15T22:46:19",
+  "tool_version": 3
+}

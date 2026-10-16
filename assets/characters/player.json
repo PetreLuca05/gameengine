@@ -1,0 +1,14 @@
+{
+  "id": "player", "character_id": 1, "kind": "player",
+  "mesh": "assets/human/Dummy.fbx",
+  "materials": { "Alpha_Body_MAT": [0.62, 0.64, 0.68], "Alpha_Joints_MAT": [0.12, 0.13, 0.15], "Body 2": [0.62, 0.64, 0.68] },
+  "anim_set": "player",
+  "part_mult": { "head": 2.5, "neck": 1.5, "chest": 1.0, "stomach": 0.9, "pelvis": 0.9, "arms": 0.6, "hands": 0.5, "legs": 0.7, "feet": 0.5 },
+  "blood": { "color": [0.30, 0.02, 0.015], "darkness": 0.55, "amount": 1.0, "mist": 1.0, "decay": 1.0 },
+  "surface": { "torso": "cloth", "limbs": "cloth", "hands": "flesh", "head": "flesh" },
+  "ragdoll_scale": 1.0, "scale": 1.0, "hp": 100,
+  "eye_offset": [0, 0.10, -0.10],
+  "sockets": {
+    "camera": { "bone": "Head", "offset": [0, 0.10, -0.10], "space": "bind" }
+  }
+}

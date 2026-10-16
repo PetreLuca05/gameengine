@@ -1,0 +1,19 @@
+{
+  "kind": "sprite",
+  "grid": [
+    4,
+    4
+  ],
+  "variants": 16,
+  "cell": 64,
+  "placeholder": {
+    "type": "chunks",
+    "seed": 32,
+    "color": [
+      0.62,
+      0.32,
+      0.22
+    ]
+  },
+  "name": "debris_brick"
+}

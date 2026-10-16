@@ -1,0 +1,29 @@
+{
+  "duration": 0.05,
+  "priority": 0,
+  "max_instances": 64,
+  "emitters": [],
+  "decal": {
+    "texture": "wound_exit",
+    "size": [
+      0.07,
+      0.07
+    ],
+    "lifetime": 600,
+    "depth": 0.06,
+    "variants": 4,
+    "tint": [
+      1,
+      1,
+      1,
+      1
+    ],
+    "roughness": 0.25,
+    "dry_time": 90,
+    "dry_darken": 0.7,
+    "pool": "blood",
+    "normal": "wound_exit_n"
+  },
+  "name": "wound_exit",
+  "_generated": "make_flesh_effects.py"
+}

@@ -1,0 +1,29 @@
+{
+  "duration": 0.05,
+  "priority": 0,
+  "max_instances": 64,
+  "emitters": [],
+  "decal": {
+    "texture": "blood_drip",
+    "size": [
+      0.04,
+      0.06
+    ],
+    "lifetime": 240,
+    "depth": 0.08,
+    "variants": 4,
+    "tint": [
+      1,
+      1,
+      1,
+      1
+    ],
+    "roughness": 0.12,
+    "dry_time": 150,
+    "dry_darken": 0.55,
+    "pool": "blood",
+    "normal": "blood_drip_n"
+  },
+  "name": "blood_drip",
+  "_generated": "make_flesh_effects.py"
+}

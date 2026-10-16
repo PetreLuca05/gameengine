@@ -1,0 +1,23 @@
+{
+  "file": "blood_stain_cloth_n.png",
+  "width": 256,
+  "height": 256,
+  "grid": [
+    2,
+    2
+  ],
+  "frames": 4,
+  "variants": 4,
+  "fps": 30,
+  "loop": false,
+  "motion_vectors": false,
+  "lighting": "none",
+  "premultiplied": false,
+  "placeholder": true,
+  "kind": "normal",
+  "source": "procedural",
+  "recipe": "assets/vfx/gen/blood_stain_cloth.json",
+  "recipe_hash": "da22ac774855464e54fc60d7",
+  "generated": "2026-10-15T22:46:39",
+  "tool_version": 3
+}

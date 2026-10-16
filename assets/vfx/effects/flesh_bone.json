@@ -1,0 +1,138 @@
+{
+  "duration": 0.1,
+  "priority": 2,
+  "max_instances": 8,
+  "cull_distance": 150,
+  "lod": [
+    [
+      25,
+      0.75
+    ],
+    [
+      60,
+      0.45
+    ],
+    [
+      110,
+      0.2
+    ]
+  ],
+  "emitters": [
+    {
+      "name": "chunks",
+      "tier": "cpu",
+      "spawn": {
+        "mode": "burst",
+        "count": [
+          3,
+          6
+        ],
+        "life": [
+          2.0,
+          3.5
+        ],
+        "size": [
+          0.008,
+          0.02
+        ],
+        "speed": [
+          1.5,
+          4.0
+        ],
+        "dir": "incoming",
+        "angle": 35,
+        "spin": [
+          -900,
+          900
+        ],
+        "color": [
+          0.78,
+          0.72,
+          0.6,
+          1.0
+        ]
+      },
+      "update": {
+        "gravity": 1.0,
+        "drag": 0.25,
+        "collide": "physics",
+        "bounce": 0.25,
+        "friction": 0.6,
+        "alpha_curve": [
+          [
+            0,
+            1
+          ],
+          [
+            0.85,
+            1
+          ],
+          [
+            1,
+            0
+          ]
+        ]
+      },
+      "render": {
+        "mode": "mesh",
+        "mesh": "shard_bone"
+      }
+    },
+    {
+      "name": "bits",
+      "tier": "gpu",
+      "spawn": {
+        "mode": "burst",
+        "count": [
+          4,
+          8
+        ],
+        "life": [
+          0.5,
+          1.0
+        ],
+        "size": [
+          0.008,
+          0.016
+        ],
+        "speed": [
+          2.0,
+          5.0
+        ],
+        "dir": "incoming",
+        "angle": 30,
+        "rotation": [
+          0,
+          360
+        ],
+        "spin": [
+          -720,
+          720
+        ],
+        "frame_random": true,
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ]
+      },
+      "update": {
+        "gravity": 1.0,
+        "drag": 0.4,
+        "collide": "depth",
+        "bounce": 0.2,
+        "friction": 0.6
+      },
+      "render": {
+        "mode": "alpha",
+        "lighting": "simple",
+        "texture": "bone_frag",
+        "soft": 0.02,
+        "near_fade": 0.1
+      }
+    }
+  ],
+  "name": "flesh_bone",
+  "_generated": "make_flesh_effects.py"
+}

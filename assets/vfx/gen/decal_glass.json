@@ -1,0 +1,18 @@
+{
+  "kind": "decal",
+  "grid": [
+    2,
+    2
+  ],
+  "variants": 4,
+  "cell": 128,
+  "normal_map": true,
+  "normal_strength": 7.0,
+  "placeholder": {
+    "type": "decal_hole",
+    "seed": 56,
+    "kind": "glass"
+  },
+  "edge_margin": 0.04,
+  "name": "decal_glass"
+}

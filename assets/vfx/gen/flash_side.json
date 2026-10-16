@@ -1,0 +1,29 @@
+{
+  "kind": "emissive",
+  "grid": [
+    2,
+    2
+  ],
+  "variants": 4,
+  "cell": 256,
+  "placeholder": {
+    "type": "flash_side",
+    "seed": 12
+  },
+  "model": "higgsfield-ai/soul/standard",
+  "aspect_ratio": "1:1",
+  "resolution": "1080p",
+  "prompt": "high speed photograph of a gunshot flame jet seen from the side: a single narrow tongue of bright yellow-orange fire shooting straight upwards from the bottom center of the frame, tapered tip at the top, isolated on a pure black background, no gun visible, no smoke",
+  "background": "black",
+  "alpha": {
+    "black": 0.03,
+    "white": 0.55
+  },
+  "name": "flash_side",
+  "crop": [
+    0.0,
+    0.0,
+    1.0,
+    0.86
+  ]
+}

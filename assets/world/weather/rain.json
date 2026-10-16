@@ -1,0 +1,15 @@
+{
+  "_comment": "Steady rain, puddles form. Any key left out keeps the current value when composed (overcast+rain).",
+  "cloud_cover": 0.95,
+  "cloud_density": 0.9,
+  "precipitation": 0.7,
+  "fog_density": 0.009,
+  "fog_height": 60,
+  "temperature": 10,
+  "wind": 7.0,
+  "gust": 0.45,
+  "lightning_rate": 0,
+  "transition": 120,
+  "min_stay": 150,
+  "max_stay": 360
+}

@@ -1,0 +1,27 @@
+{
+  "kind": "decal",
+  "grid": [
+    2,
+    2
+  ],
+  "variants": 4,
+  "cell": 128,
+  "normal_map": true,
+  "normal_strength": 6.0,
+  "placeholder": {
+    "type": "drip_strip",
+    "seed": 75
+  },
+  "edge_margin": 0.03,
+  "model": "higgsfield-ai/soul/standard",
+  "aspect_ratio": "1:1",
+  "resolution": "1080p",
+  "background": "green",
+  "alpha": {
+    "tol": 0.1,
+    "soft": 0.12
+  },
+  "api_variants": 1,
+  "prompt": "photograph of a single run of dark blood dripping down a wall, the run goes horizontally from left to right with a drop at the end, centered, isolated on a solid flat pure green (#00FF00) chroma key background, even soft lighting, no shadows, no text, forensic reference photograph, realistic, not cartoon",
+  "name": "blood_drip"
+}

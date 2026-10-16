@@ -1,0 +1,20 @@
+{
+  "kind": "sprite",
+  "grid": [
+    4,
+    4
+  ],
+  "variants": 16,
+  "cell": 64,
+  "placeholder": {
+    "type": "chunks",
+    "seed": 37,
+    "color": [
+      0.8,
+      0.82,
+      0.84
+    ],
+    "roughness": 0.1
+  },
+  "name": "debris_tile"
+}

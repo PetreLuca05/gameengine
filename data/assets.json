@@ -1,0 +1,59 @@
+{
+  "_comment": "Asset manifest. Model ids are 1-based indices into 'models' (replicated over the network), keep the order stable.",
+  "textures": [
+    {
+      "name": "crate",
+      "path": "assets/textures/crate.png"
+    },
+    {
+      "name": "hazard",
+      "path": "assets/textures/hazard.ktx2"
+    },
+    {
+      "name": "skin_hazmat",
+      "path": "assets/human/textures/skin_hazmat.png"
+    },
+    {
+      "name": "skin_officer",
+      "path": "assets/human/textures/skin_officer.png"
+    },
+    {
+      "name": "skin_athlete",
+      "path": "assets/human/textures/skin_athlete.png"
+    },
+    {
+      "name": "skin_casual",
+      "path": "assets/human/textures/skin_casual.png"
+    }
+  ],
+  "models": [
+    {
+      "name": "barrel",
+      "path": "assets/models/barrel.gltf"
+    },
+    {
+      "name": "car_body",
+      "path": "assets/vehicles/car_body.gltf"
+    },
+    {
+      "name": "car_wheel",
+      "path": "assets/vehicles/car_wheel.gltf"
+    },
+    {
+      "name": "car_steering",
+      "path": "assets/vehicles/car_steering.gltf"
+    },
+    {
+      "name": "moto_body",
+      "path": "assets/vehicles/moto_body.gltf"
+    },
+    {
+      "name": "moto_wheel",
+      "path": "assets/vehicles/moto_wheel.gltf"
+    },
+    {
+      "name": "moto_bar",
+      "path": "assets/vehicles/moto_bar.gltf"
+    }
+  ]
+}

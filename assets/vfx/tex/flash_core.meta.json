@@ -1,0 +1,23 @@
+{
+  "file": "flash_core.png",
+  "width": 512,
+  "height": 512,
+  "grid": [
+    2,
+    2
+  ],
+  "frames": 4,
+  "variants": 4,
+  "fps": 30,
+  "loop": false,
+  "motion_vectors": false,
+  "lighting": "none",
+  "premultiplied": true,
+  "placeholder": false,
+  "kind": "emissive",
+  "source": "higgsfield-ai/soul/standard",
+  "recipe": "assets/vfx/gen/flash_core.json",
+  "recipe_hash": "3d55e51e03d9fc2367a4dd84",
+  "generated": "2026-10-15T16:12:35",
+  "tool_version": 3
+}

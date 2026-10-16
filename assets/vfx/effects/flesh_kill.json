@@ -1,0 +1,238 @@
+{
+  "duration": 0.1,
+  "priority": 2,
+  "max_instances": 24,
+  "cull_distance": 150,
+  "lod": [
+    [
+      25,
+      0.75
+    ],
+    [
+      60,
+      0.45
+    ],
+    [
+      110,
+      0.2
+    ]
+  ],
+  "emitters": [
+    {
+      "name": "mist",
+      "tier": "gpu",
+      "spawn": {
+        "mode": "burst",
+        "count": [
+          5,
+          8
+        ],
+        "life": [
+          0.4,
+          0.9
+        ],
+        "size": [
+          0.2,
+          0.42
+        ],
+        "speed": [
+          0.8,
+          2.6
+        ],
+        "dir": "incoming",
+        "angle": 28,
+        "rotation": [
+          0,
+          360
+        ],
+        "spin": [
+          -20,
+          20
+        ],
+        "color": [
+          0.16,
+          0.026,
+          0.026,
+          0.7
+        ],
+        "color2": [
+          0.1,
+          0.018,
+          0.018,
+          0.5599999999999999
+        ]
+      },
+      "update": {
+        "drag": 4.0,
+        "gravity": 0.05,
+        "wind": 0.0,
+        "size_curve": {
+          "type": "bezier",
+          "keys": [
+            [
+              0,
+              0.6
+            ],
+            [
+              0.2,
+              1.0
+            ],
+            [
+              1,
+              1.9
+            ]
+          ]
+        },
+        "alpha_curve": {
+          "type": "bezier",
+          "keys": [
+            [
+              0,
+              0.3
+            ],
+            [
+              0.04,
+              1
+            ],
+            [
+              0.5,
+              0.55
+            ],
+            [
+              1,
+              0
+            ]
+          ]
+        },
+        "frame_over_life": true,
+        "motion_vectors": true
+      },
+      "render": {
+        "mode": "alpha",
+        "lighting": "sixway",
+        "texture": "flesh_mist",
+        "soft": 0.2,
+        "near_fade": 0.35,
+        "scatter": 0.9
+      }
+    },
+    {
+      "name": "drops",
+      "tier": "cpu",
+      "spawn": {
+        "mode": "burst",
+        "count": [
+          10,
+          18
+        ],
+        "life": [
+          0.6,
+          1.2
+        ],
+        "size": [
+          0.01,
+          0.026
+        ],
+        "speed": [
+          2.0,
+          6.0
+        ],
+        "dir": "incoming",
+        "angle": 26,
+        "frame_random": true,
+        "color": [
+          0.26,
+          0.022,
+          0.018,
+          1.0
+        ],
+        "color2": [
+          0.17,
+          0.016,
+          0.013,
+          1.0
+        ]
+      },
+      "update": {
+        "gravity": 1.0,
+        "drag": 0.25,
+        "collide": "physics",
+        "kill_on_hit": true,
+        "sub_emitter": {
+          "on": "collision",
+          "effect": "blood_splat"
+        }
+      },
+      "render": {
+        "mode": "alpha",
+        "lighting": "simple",
+        "orient": "stretch",
+        "texture": "blood_droplet",
+        "stretch": 0.012,
+        "stretch_max": 4,
+        "near_fade": 0.45
+      }
+    },
+    {
+      "name": "strands",
+      "tier": "cpu",
+      "spawn": {
+        "mode": "burst",
+        "count": [
+          3,
+          6
+        ],
+        "life": [
+          0.25,
+          0.5
+        ],
+        "size": [
+          0.012,
+          0.025
+        ],
+        "speed": [
+          3.0,
+          7.0
+        ],
+        "dir": "incoming",
+        "angle": 26,
+        "frame_random": true,
+        "color": [
+          0.26,
+          0.022,
+          0.018,
+          0.95
+        ]
+      },
+      "update": {
+        "gravity": 0.8,
+        "drag": 1.2,
+        "alpha_curve": [
+          [
+            0,
+            1
+          ],
+          [
+            0.7,
+            0.8
+          ],
+          [
+            1,
+            0
+          ]
+        ]
+      },
+      "render": {
+        "mode": "alpha",
+        "lighting": "simple",
+        "orient": "stretch",
+        "texture": "blood_strand",
+        "stretch": 0.03,
+        "stretch_max": 9,
+        "near_fade": 0.5
+      }
+    }
+  ],
+  "name": "flesh_kill",
+  "_generated": "make_flesh_effects.py"
+}

@@ -1,0 +1,23 @@
+{
+  "file": "debris_tile.png",
+  "width": 256,
+  "height": 256,
+  "grid": [
+    4,
+    4
+  ],
+  "frames": 16,
+  "variants": 16,
+  "fps": 30,
+  "loop": false,
+  "motion_vectors": false,
+  "lighting": "none",
+  "premultiplied": true,
+  "placeholder": true,
+  "kind": "sprite",
+  "source": "procedural",
+  "recipe": "assets/vfx/gen/debris_tile.json",
+  "recipe_hash": "64cb0c78e332671c4774ff5d",
+  "generated": "2026-10-15T16:10:23",
+  "tool_version": 3
+}

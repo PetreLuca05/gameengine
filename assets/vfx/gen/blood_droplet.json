@@ -1,0 +1,29 @@
+{
+  "kind": "sprite",
+  "grid": [
+    2,
+    2
+  ],
+  "variants": 3,
+  "cell": 64,
+  "placeholder": {
+    "type": "drops",
+    "seed": 72,
+    "color": [
+      0.36,
+      0.03,
+      0.025
+    ]
+  },
+  "model": "higgsfield-ai/soul/standard",
+  "aspect_ratio": "1:1",
+  "resolution": "1080p",
+  "background": "green",
+  "alpha": {
+    "tol": 0.1,
+    "soft": 0.12
+  },
+  "api_variants": 1,
+  "prompt": "macro photograph of a single falling droplet of dark blood, slightly elongated, centered, isolated on a solid flat pure green (#00FF00) chroma key background, even soft lighting, no shadows, no text, forensic reference photograph, realistic, not cartoon",
+  "name": "blood_droplet"
+}

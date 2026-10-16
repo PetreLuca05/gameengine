@@ -1,0 +1,14 @@
+{
+  "kind": "sprite",
+  "grid": [
+    4,
+    4
+  ],
+  "variants": 16,
+  "cell": 64,
+  "placeholder": {
+    "type": "grass_bits",
+    "seed": 38
+  },
+  "name": "grass_bits"
+}

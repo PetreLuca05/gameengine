@@ -1,0 +1,175 @@
+{
+  "duration": 0.1,
+  "priority": 1,
+  "max_instances": 48,
+  "cull_distance": 160,
+  "lod": [
+    [
+      25,
+      0.7
+    ],
+    [
+      60,
+      0.4
+    ],
+    [
+      110,
+      0.2
+    ]
+  ],
+  "emitters": [
+    {
+      "name": "splash",
+      "tier": "gpu",
+      "spawn": {
+        "mode": "burst",
+        "count": 1,
+        "life": [
+          0.45,
+          0.6
+        ],
+        "size": [
+          0.35,
+          0.5
+        ],
+        "dir": "up",
+        "offset": 0.12,
+        "color": [
+          0.85,
+          0.9,
+          0.95,
+          0.9
+        ]
+      },
+      "update": {
+        "frame_over_life": true,
+        "motion_vectors": true,
+        "alpha_curve": [
+          [
+            0,
+            1
+          ],
+          [
+            0.7,
+            0.8
+          ],
+          [
+            1,
+            0
+          ]
+        ]
+      },
+      "render": {
+        "mode": "alpha",
+        "lighting": "simple",
+        "texture": "water_splash",
+        "soft": 0.1,
+        "near_fade": 0.2
+      }
+    },
+    {
+      "name": "droplets",
+      "tier": "gpu",
+      "spawn": {
+        "mode": "burst",
+        "count": [
+          10,
+          18
+        ],
+        "life": [
+          0.4,
+          0.8
+        ],
+        "size": [
+          0.008,
+          0.018
+        ],
+        "speed": [
+          1.5,
+          4.0
+        ],
+        "dir": "up",
+        "angle": 30,
+        "color": [
+          0.8,
+          0.88,
+          0.95,
+          0.8
+        ]
+      },
+      "update": {
+        "gravity": 1.0,
+        "drag": 0.3,
+        "collide": "depth",
+        "kill_on_hit": true
+      },
+      "render": {
+        "mode": "alpha",
+        "lighting": "simple",
+        "orient": "stretch",
+        "texture": "ember",
+        "stretch": 0.01,
+        "stretch_max": 4
+      }
+    },
+    {
+      "name": "ripple",
+      "tier": "gpu",
+      "spawn": {
+        "mode": "burst",
+        "count": 1,
+        "life": [
+          0.8,
+          1.1
+        ],
+        "size": [
+          0.15,
+          0.2
+        ],
+        "dir": "normal",
+        "speed": [
+          0.001,
+          0.001
+        ],
+        "offset": 0.005,
+        "color": [
+          0.9,
+          0.95,
+          1.0,
+          0.7
+        ]
+      },
+      "update": {
+        "size_curve": [
+          [
+            0,
+            0.4
+          ],
+          [
+            1,
+            3.0
+          ]
+        ],
+        "alpha_curve": [
+          [
+            0,
+            1
+          ],
+          [
+            1,
+            0
+          ]
+        ]
+      },
+      "render": {
+        "mode": "alpha",
+        "orient": "normal",
+        "texture": "water_ripple",
+        "soft": 0.0,
+        "near_fade": 0.1
+      }
+    }
+  ],
+  "name": "impact_water",
+  "_generated": "make_effects.py"
+}

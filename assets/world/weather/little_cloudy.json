@@ -1,0 +1,15 @@
+{
+  "_comment": "Scattered fair-weather cumulus. Any key left out keeps the current value when composed (overcast+rain).",
+  "cloud_cover": 0.3,
+  "cloud_density": 0.5,
+  "precipitation": 0.0,
+  "fog_density": 0.002,
+  "fog_height": 30,
+  "temperature": 16,
+  "wind": 3.0,
+  "gust": 0.2,
+  "lightning_rate": 0,
+  "transition": 240,
+  "min_stay": 180,
+  "max_stay": 480
+}

@@ -1,0 +1,23 @@
+{
+  "file": "smoke_puff.png",
+  "width": 1024,
+  "height": 1024,
+  "grid": [
+    8,
+    8
+  ],
+  "frames": 64,
+  "variants": 1,
+  "fps": 30,
+  "loop": false,
+  "motion_vectors": true,
+  "lighting": "sixway",
+  "premultiplied": true,
+  "placeholder": false,
+  "kind": "volume",
+  "source": "kling-video/v2.5-turbo/pro/text-to-video",
+  "recipe": "assets/vfx/gen/smoke_puff.json",
+  "recipe_hash": "1ed3af543f355352f46c815a",
+  "generated": "2026-10-15T16:14:53",
+  "tool_version": 3
+}

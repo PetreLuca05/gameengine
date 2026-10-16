@@ -1,0 +1,23 @@
+{
+  "file": "blood_strand.png",
+  "width": 128,
+  "height": 128,
+  "grid": [
+    2,
+    2
+  ],
+  "frames": 4,
+  "variants": 4,
+  "fps": 30,
+  "loop": false,
+  "motion_vectors": false,
+  "lighting": "none",
+  "premultiplied": true,
+  "placeholder": true,
+  "kind": "sprite",
+  "source": "procedural",
+  "recipe": "assets/vfx/gen/blood_strand.json",
+  "recipe_hash": "0e032f196b84c243756cf726",
+  "generated": "2026-10-15T22:46:39",
+  "tool_version": 3
+}

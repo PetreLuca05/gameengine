@@ -1,0 +1,73 @@
+{
+  "_comment": "Preset: pistol. Snappy semi-auto, big first-shot punch, fast full recovery.",
+  "id": "pistol",
+  "vfx": { "muzzle": { "type": "pistol", "device": "bare" }, "caliber": "pistol" },
+  "item": "pistol",
+  "kind": "hitscan",
+  "one_hand_capable": true,
+  "damage_type": "bullet",
+  "damage": 25,
+  "mag_size": 12,
+  "ammo": "ammo_9mm",
+  "reload_time": 1.4,
+  "rpm": 400,
+  "fire_modes": ["single"],
+  "ads_time": 0.13,
+  "sprint_to_fire": 0.1,
+  "idle_sway": 0.04,
+  "hold_breath": 3.5,
+  "range": 150,
+  "impulse": 60,
+  "headshot_mult": 2.0,
+  "ads_fov": 60,
+  "sway": { "hip": { "breathing": 1.0, "look_lag": 0.8, "bob": 1.0, "landing": 1.0 },
+            "ads": { "breathing": 0.35, "look_lag": 0.25, "bob": 0.15, "landing": 0.5 }, "hold_breath_mult": 0.1 },
+  "recoil": {
+    "vertical": { "first_shot": 1.25, "per_shot": 0.95, "min": 0.85, "max": 1.15 },
+    "horizontal": { "per_shot": 0.35, "min": -0.5, "max": 0.5, "bias": 0.0 },
+    "pattern_randomness": 0.6,
+    "ramp_shots": 1,
+    "randomize_seed_per_mag": true,
+    "recovery": { "delay": 0.06, "speed": 18, "fraction": 0.9, "stop_on_input": true },
+    "camera_kick": { "pitch": 1.1, "yaw": 0.3, "roll": 0.8, "back": 0.012, "stiffness": 260, "damping": 22 },
+    "viewmodel_kick": { "back": 0.045, "up": 0.02, "pitch": 6.0, "yaw": 1.5, "roll": 2.5, "random": 0.3, "stiffness": 300, "damping": 24, "ads_scale": 0.5 },
+    "spread": { "hip": 1.9, "ads": 0.2, "per_shot_bloom": 0.45, "bloom_max": 2.6, "bloom_recovery": 10, "move": 1.5, "crouch": 0.75, "prone": 0.6, "air": 2.5 },
+    "modifiers": { "ads": 0.75, "crouch": 0.85, "prone": 0.7, "moving": 1.15, "air": 1.6, "single": 1.0, "burst": 1.0, "auto": 1.0, "after_sprint": 1.2 },
+    "hip": { "aim_mult": 0.5, "kick_mult": 1.0, "spread_mult": 1.3, "bloom_mult": 1.6, "bloom_max_mult": 1.6, "bloom_recovery_mult": 0.6 },
+    "ads": { "aim_mult": 1.0, "kick_mult": 0.5, "forward_push": 1.0, "roll": 1.0, "max_misalign_deg": 1.5 },
+    "anchor": { "hip": "pivot_socket", "ads": "sight" },
+    "sway": { "anchor": { "hip": "pivot_socket", "ads": "sight" } }
+  },
+  "pose": "pistol",
+  "sound_fire": "shot_pistol",
+  "grip": [0, 0, 0],
+  "support": [-0.035, -0.03, 0.01],
+  "muzzle": [0, 0.075, -0.19],
+  "hold": {
+    "style": "pistol",
+    "attach": "RightHand",
+    "sockets": {
+      "grip_r": {
+        "pos": [0, 0, 0],
+        "fingers": [0, -0.5, -0.866],
+        "back": [1, 0, 0]
+      },
+      "grip_l": {
+        "fingers": [0, -0.5, -0.866],
+        "back": [-1, 0, 0],
+        "pos": [-0.035, -0.03, 0.01]
+      },
+      "muzzle": [0, 0.075, -0.19]
+    }
+  },
+  "falloff": { "start": 20, "end": 60, "min": 0.6 },
+  "attachment_slots": {
+    "optic": {"pos": [0, 0.077, -0.04], "allow": ["red_dot"]},
+    "muzzle": {"allow": ["suppressor", "compensator"]}
+  },
+  "model": [
+    { "offset": [0, 0.055, -0.07], "half": [0.016, 0.022, 0.11], "color": [0.15, 0.15, 0.17] },
+    { "offset": [0, -0.01, 0.0], "half": [0.015, 0.05, 0.025], "color": [0.12, 0.12, 0.12] },
+    { "offset": [0, 0.08, -0.17], "half": [0.004, 0.006, 0.004], "color": [0.9, 0.5, 0.1] }
+  ]
+}

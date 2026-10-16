@@ -1,0 +1,97 @@
+{
+  "_comment": "Preset: assault rifle (AR). Controllable climb with a learnable right-then-left drift.",
+  "id": "rifle",
+  "vfx": { "muzzle": { "type": "rifle", "device": "hider" }, "caliber": "rifle" },
+  "item": "rifle",
+  "kind": "hitscan",
+  "damage_type": "bullet",
+  "damage": 18,
+  "mag_size": 30,
+  "ammo": "ammo_rifle",
+  "reload_time": 2.1,
+  "rpm": 750,
+  "burst_rpm": 900,
+  "burst_count": 3,
+  "fire_modes": ["auto", "burst", "single"],
+  "ads_time": 0.2,
+  "sprint_to_fire": 0.2,
+  "idle_sway": 0.05,
+  "hold_breath": 3.5,
+  "range": 300,
+  "impulse": 50,
+  "headshot_mult": 2.0,
+  "ads_fov": 50,
+  "sway": { "hip": { "breathing": 1.0, "look_lag": 1.0, "bob": 1.0, "landing": 1.0 },
+            "ads": { "breathing": 0.35, "look_lag": 0.25, "bob": 0.15, "landing": 0.5 }, "hold_breath_mult": 0.1 },
+  "recoil": {
+    "vertical": { "first_shot": 0.75, "per_shot": 0.42, "min": 0.85, "max": 1.15 },
+    "horizontal": { "per_shot": 0.22, "min": -0.28, "max": 0.32, "bias": 0.02 },
+    "pattern": [
+      [0, 1],
+      [0.3, 1],
+      [0.6, 1],
+      [0.8, 1],
+      [0.5, 1],
+      [0, 1],
+      [-0.6, 1],
+      [-1, 1],
+      [-1.2, 0.95],
+      [-0.8, 0.95],
+      [0, 0.9],
+      [0.8, 0.9],
+      [1.2, 0.9],
+      [0.9, 0.9],
+      [0.2, 0.9],
+      [-0.5, 0.9]
+    ],
+    "pattern_randomness": 0.35,
+    "ramp_shots": 3,
+    "randomize_seed_per_mag": true,
+    "recovery": { "delay": 0.09, "speed": 10, "fraction": 0.85, "stop_on_input": true },
+    "camera_kick": { "pitch": 0.7, "yaw": 0.2, "roll": 0.45, "back": 0.012, "stiffness": 200, "damping": 20 },
+    "viewmodel_kick": { "back": 0.035, "up": 0.01, "pitch": 2.6, "yaw": 0.9, "roll": 1.4, "random": 0.3, "stiffness": 260, "damping": 22, "ads_scale": 0.45 },
+    "spread": { "hip": 2.2, "ads": 0.12, "per_shot_bloom": 0.18, "bloom_max": 2.4, "bloom_recovery": 7, "move": 1.7, "crouch": 0.75, "prone": 0.55, "air": 3.0 },
+    "modifiers": { "ads": 0.7, "crouch": 0.82, "prone": 0.6, "moving": 1.2, "air": 1.6, "single": 0.9, "burst": 1.05, "auto": 1.0, "after_sprint": 1.25 },
+    "hip": { "aim_mult": 0.35, "kick_mult": 1.0, "spread_mult": 1.6, "bloom_mult": 2.0, "bloom_max_mult": 2.0, "bloom_recovery_mult": 0.5 },
+    "ads": { "aim_mult": 1.0, "kick_mult": 0.45, "forward_push": 1.0, "roll": 1.0, "max_misalign_deg": 1.5 },
+    "anchor": { "hip": "pivot_socket", "ads": "sight" },
+    "sway": { "anchor": { "hip": "pivot_socket", "ads": "sight" } }
+  },
+  "pose": "rifle",
+  "sound_fire": "shot_rifle",
+  "grip": [0, 0, 0],
+  "support": [0, 0.02, -0.3],
+  "muzzle": [0, 0.06, -0.62],
+  "hold": {
+    "style": "rifle",
+    "attach": "RightHand",
+    "sockets": {
+      "grip_r": {
+        "pos": [0, 0, 0],
+        "fingers": [0, -0.5, -0.866],
+        "back": [1, 0, 0]
+      },
+      "grip_l": {
+        "fingers": [0.75, -0.45, -0.3],
+        "back": [-0.5, -0.85, 0],
+        "pos": [0, 0.02, -0.3]
+      },
+      "muzzle": [0, 0.06, -0.62]
+    }
+  },
+  "falloff": { "start": 40, "end": 120, "min": 0.75 },
+  "attachment_slots": {
+    "optic": {"pos": [0, 0.085, -0.02], "rail": [-0.06, 0.04], "allow": ["red_dot", "scope_4x", "scope_8x"], "hide_parts": [4]},
+    "muzzle": {"allow": ["suppressor", "compensator"]},
+    "underbarrel": {"pos": [0, 0.015, -0.3], "allow": ["vertical_grip"]},
+    "magazine": {"pos": [0, 0.03, -0.08], "allow": ["extended_mag"], "hide_parts": [3]},
+    "stock": {"pos": [0, 0.035, 0.08], "allow": ["heavy_stock"], "hide_parts": [2]}
+  },
+  "model": [
+    { "offset": [0, 0.05, -0.2], "half": [0.022, 0.035, 0.32], "color": [0.18, 0.19, 0.17] },
+    { "offset": [0, -0.02, 0.0], "half": [0.016, 0.05, 0.025], "color": [0.12, 0.12, 0.12] },
+    { "offset": [0, 0.035, 0.2], "half": [0.02, 0.045, 0.12], "color": [0.22, 0.2, 0.16] },
+    { "offset": [0, -0.03, -0.08], "half": [0.014, 0.06, 0.03], "color": [0.1, 0.1, 0.1] },
+    { "offset": [0, 0.095, -0.12], "half": [0.012, 0.012, 0.06], "color": [0.08, 0.08, 0.08] }
+  ]
+}

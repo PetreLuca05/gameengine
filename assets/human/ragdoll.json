@@ -1,0 +1,27 @@
+{
+  "_comment": "Ragdoll on the shared skeleton. Bodies are auto-fitted capsules (bone -> child bone, radius from the canonical mesh); override per body: radius, mass_frac, shape (capsule|box|sphere), half [x,y,z], friction, restitution. Joints: cone [normal, plane] deg + twist [min, max] deg for swing-twist, hinge [min, max] deg for knees / elbows (relative to the bind pose). Per-character size: 'ragdoll_scale' in assets/characters/*.json.",
+  "total_mass": 80,
+  "damping": [0.05, 0.6],
+  "friction": 0.8,
+  "motor": { "time": 0.3, "strength": 12 },
+  "sleep_time": 1.5,
+  "remove_time": 45,
+  "max_ragdolls": 24,
+  "bodies": {
+    "pelvis": { "radius": 0.12 },
+    "chest": { "radius": 0.12 },
+    "head": { "radius": 0.095 }
+  },
+  "joints": {
+    "neck": { "cone": [35, 35], "twist": [-35, 35] },
+    "head": { "cone": [35, 30], "twist": [-40, 40] },
+    "upper_arm_l": { "cone": [85, 70], "twist": [-60, 60] },
+    "upper_arm_r": { "cone": [85, 70], "twist": [-60, 60] },
+    "lower_arm_l": { "hinge": [-3, 145] },
+    "lower_arm_r": { "hinge": [-3, 145] },
+    "upper_leg_l": { "cone": [60, 40], "twist": [-25, 25] },
+    "upper_leg_r": { "cone": [60, 40], "twist": [-25, 25] },
+    "lower_leg_l": { "hinge": [-3, 150] },
+    "lower_leg_r": { "hinge": [-3, 150] }
+  }
+}

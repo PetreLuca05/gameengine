@@ -1,0 +1,12 @@
+{
+  "kind": "sprite",
+  "grid": [
+    1,
+    1
+  ],
+  "cell": 128,
+  "placeholder": {
+    "type": "ripple"
+  },
+  "name": "water_ripple"
+}
