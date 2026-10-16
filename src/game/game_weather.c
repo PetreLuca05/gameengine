@@ -489,7 +489,9 @@ void weather_frame(World *w, const RenderCamera *cam, const Player *lp) {
     // Ambience: rain loop (muffled under a roof), wind loop by strength.
     float v = WX.audio_vol->f;
     audio_loop_set("rain_loop", v * WX.rain * (0.35f + 0.65f * WX.exposed_cam));
-    audio_loop_set("wind_loop", v * clampf((v3_len(WX.wind) - 2.0f) / 14.0f, 0.0f, 1.0f) * (0.4f + 0.6f * WX.exposed_cam) + v * WX.snowfall * 0.2f);
+    // the wind loop follows the local wind (gusts sweep past), louder among trees (rustle)
+    float rustle = wind_game_rustle(cam->pos);
+    audio_loop_set("wind_loop", v * clampf((v3_len(WX.wind) - 2.0f) / 14.0f, 0.0f, 1.0f) * (0.4f + 0.6f * WX.exposed_cam) * (0.75f + 0.5f * rustle) + v * WX.snowfall * 0.2f);
 }
 
 // Sky hooks (daynight_environment): cloud cover / density / softness / darkness, light loss.

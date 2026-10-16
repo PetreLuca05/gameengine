@@ -44,11 +44,21 @@ vec3 wind_game_at(vec3 pos) {
 void wind_game_blast(vec3 pos, float radius, float strength) {
     float p[3] = { pos.x, pos.y, pos.z };
     wind_add_blast(&WG.f, p, radius, strength);
+    render_foliage_push(pos, radius * 0.4f, strength * 0.25f);   // the grass at the centre is flattened (displacement buffer)
 }
 
 void wind_game_wake(vec3 pos, vec3 vel, float radius) {
     float p[3] = { pos.x, pos.y, pos.z }, v[3] = { vel.x, vel.y, vel.z };
     wind_add_wake(&WG.f, p, v, radius);
+}
+
+// Foliage rustle 0..1 at pos (ambience): the local wind's strength x the foliage within 12 m.
+float wind_game_rustle(vec3 pos) {
+    vec3 w = wind_game_at(pos);
+    float s = sqrtf(w.x * w.x + w.z * w.z);
+    static RenderFoliageHit hits[32];
+    int n = render_foliage_query(pos, 12.0f, hits, 32);
+    return clampf_((s - 1.5f) / 12.0f, 0, 1) * clampf_((float)n / 16.0f, 0, 1);
 }
 
 float wind_game_leaf_rate(vec3 pos) {
@@ -135,7 +145,7 @@ void wind_game_draw_debug(vec3 cam) {
         float h = p.height * hits[i].scale;
         vec3 top = v3_add(hits[i].pos, v3(dx * sinf(a) * h, cosf(a) * h, dz * sinf(a) * h));
         dbg_line(hits[i].pos, top, deg > p.max_bend_deg * 0.8f ? DBG_RED : DBG_YELLOW, 0, false);
-        if (hits[i].dist < 12.0f) {
+        if (hits[i].dist > 4.0f && hits[i].dist < 14.0f) {   // labels: not on top of the camera
             char t[32];
             snprintf(t, sizeof(t), "%.1f deg", deg);
             dbg_text(top, t, DBG_YELLOW, 0.25f, 0);

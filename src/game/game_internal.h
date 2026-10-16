@@ -49,6 +49,7 @@ vec3 wind_game_at(vec3 pos);                        // instant wind (m/s): gusts
 void wind_game_blast(vec3 pos, float radius, float strength);   // an explosion's wind ring
 void wind_game_wake(vec3 pos, vec3 vel, float radius);         // a vehicle's wake (call every few frames while moving)
 float wind_game_leaf_rate(vec3 pos);                // leaves torn off per second per tree (leaf-shedding effects)
+float wind_game_rustle(vec3 pos);                   // foliage rustle 0..1: local wind x foliage nearby (ambience)
 const struct WindField *wind_game_field(void);
 void wind_game_draw_debug(vec3 cam);
 void wind_game_draw_panel(void);

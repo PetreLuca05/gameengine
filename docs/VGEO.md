@@ -57,7 +57,8 @@ Simplification and clustering use meshoptimizer v0.22 (`simplifier.cpp`, `cluste
 | `shaders/vgeo/vg_test_skin.comp` | test-only kernel: the shared skin helper on a vertex list |
 | `tests/test_vgeo_skinned.c` | ctest `vgeo_skinned` (`--validation`) |
 | `src/render/vgeo/vgeo_tex.{c,h}` | `VgTextures`: the texture table at binding 23 of every cull set (renderer ids + module textures) |
-| `src/render/vgeo/foliage_support.{c,h}` | WPO CPU mirror + declared bounds, fade / density / impostor mirrors, `.vgp` chunks, scatter, `foliage_query`, impostor upload, displacement buffer |
+| `src/render/vgeo/foliage_support.{c,h}` | WPO CPU mirror + declared bounds, fade / density / impostor mirrors, `.vgp` chunks, scatter, `foliage_query`, impostor upload, displacement buffer, wind field tile ring |
+| `src/render/vgeo/foliage_{wind,import,species}.{c,h}` | vegetation wind model (CPU), FBX / OBJ foliage import with wind channels, `data/foliage/species.json` (docs/FOLIAGE_WIND.md) |
 | `src/render/vgeo/vgeo_impostor.{c,h}` | CPU hemi-octahedral impostor baker, file section |
 | `src/render/vgeo/vgeo_procgen_foliage.{c,h}` | test content: grass tuft, bush, alpha masks, their materials |
 | `shaders/vgeo/wpo.glsl`, `vg_mask.glsl`, `vg_impostor.glsl` | WPO snippets, the shared per-pixel mask test, impostor quads / atlas |
@@ -839,16 +840,16 @@ renderer already binds as set 3.
 ## Foliage support (Phase 7)
 
 Foliage is ordinary vgeo content plus a few material, instance and placement features. Culling, LOD,
-both rasterisers, the shadows and streaming are the core's. No foliage content ships; procedural test
-types exercise it.
+both rasterisers, the shadows and streaming are the core's. Procedural test types exercise it; the
+Tree It species of `data/foliage/species.json` are imported content (docs/FOLIAGE_WIND.md).
 
-### Materials (`VgMaterial`, 96 B)
+### Materials (`VgMaterial`, 128 B)
 
 | Field | Meaning |
 |---|---|
 | `flags` | `MAT_*` plus `VGM_MASKED`, `VGM_TWO_SIDED`, `VGM_DITHER_FADE`, `VGM_FOLIAGE` (bits 24-27) |
 | `mask_tex`, `alpha_cutoff` | alpha mask (0: `albedo_tex`), its threshold |
-| `wpo`, `wpo_params[4]`, `wpo_max` | snippet (`WPO_GRASS`, `WPO_TREE`, `\| WPO_DISPLACE`), parameters, declared bound (the commit computes it with `vgeo_wpo_max`) |
+| `wpo`, `wpo_params[4]`, `wind_params[8]`, `wpo_max` | vegetation wind preset (`WPO_GRASS`, `WPO_BUSH`, `WPO_TREE`, `\| WPO_DISPLACE`), its parameters (docs/FOLIAGE_WIND.md), declared bound (the commit computes it with `vgeo_wpo_max`) |
 | `fade_start`, `fade_end` | distance fade of `VGM_FOLIAGE` instances (m) |
 | `shadow_max_dist` | no sun-cascade shadow beyond this distance from the camera (m, 0 = always) |
 
@@ -892,24 +893,24 @@ set 4 is gone.
 
 ### WPO (`shaders/vgeo/wpo.glsl`)
 
-- Snippets (pure functions; CPU mirror `vgeo_wpo_eval`):
-  - `WPO_GRASS`: bend along the wind by R, with the bent tip dropping.
-  - `WPO_TREE`: trunk sway (R), branch bounce (G), leaf flutter (B), per-instance phase.
-  - `WPO_DISPLACE`: adds the displacement buffer's push, weighted by R.
-- Every snippet clamps the wind to the full wind it was declared for (`prm.w`). So `vgeo_wpo_max` bounds it for
-  any weather:
-  - grass: `√2 · bend`;
-  - tree: `sway + branch + 1.5 · flutter`;
-  - displacement: `+ 1.118 · VG_DISPLACE_MAX` (0.6 m).
-- `vg_vertex_world` applies the snippet in every stage: both rasterisers, the shadows, the resolve, the test
-  kernel.
-- Every world sphere (`vg_world_sphere`) grows by the mesh's `max_wpo`: instance, BVH node, group and cluster
-  LOD spheres, culling spheres, and the cell bounds. The LOD distance therefore shrinks by it too. The error
-  itself is unchanged.
+- One vegetation model for every snippet (docs/FOLIAGE_WIND.md): the GPU Gems 3 chapter 16 (Crysis)
+  layers driven by the canonical wind channels of the vertex colour (R flutter, G branch phase, B
+  branch bend; trunk bending from the height), sampling the wind field's tile at the instance pivot.
+  CPU mirror `vgeo_wind_eval` / `vgeo_wpo_eval`.
+- `WPO_DISPLACE` adds the displacement buffer's push first (weighted by the height) and takes the wind
+  out of the pushed plant.
+- Bounds: `vgeo_wpo_max` sums the layers' declared maxima (`vgeo_wind_layer_max`) + `1.118 ·
+  VG_DISPLACE_MAX` (0.6 m) with the displacement buffer. Every world sphere (`vg_world_sphere`) grows by
+  the mesh's `max_wpo` x max(instance scale, 1) (`vg_wpo_margin`): instance, BVH node, group and
+  cluster LOD spheres, culling spheres, and the cell bounds. The LOD distance therefore shrinks by it
+  too. The error itself is unchanged.
+- `vg_vertex_world` applies the snippet in every stage: both rasterisers, the shadows, the resolve, the
+  test kernel. The resolve also bends / flutters the normals (High / Modern).
 - The SW/HW size test and the impostor switch use the size without that margin.
-- Velocity: the resolve evaluates the snippet with last frame's wind and time (`VgViewGpu.wind_prev`,
-  `foliage.y`). The game feeds the views from `RenderWeather` (wind, gust, time). `FrameData.wx5 = (gust, gust
-  phase, time, wind direction angle)`.
+- Velocity: the resolve evaluates the snippet with last frame's wind tile, fallback wind and time
+  (`VgViewGpu.wind_tile_prev`, `wind_prev`, `foliage.y`). The game feeds the views from `RenderWeather`
+  (the wind field's tile and fallback, the wind time). `FrameData.wx5 = (gust, gust phase, time, wind
+  direction angle)`.
 
 ### Instances: density, fade, shadow distance, impostors
 
