@@ -37,5 +37,11 @@ int horde_count(void);
 enum { HSPAWN_RING, HSPAWN_RANDOM, HSPAWN_CLUSTER };   // horde_spawn modes
 int horde_spawn(struct World *w, vec3 center, int count, float radius, int mode, const char *character);
 void horde_despawn(struct World *w);
+// One zombie at exactly these feet (indoor spots: no search from above); false when blocked.
+bool horde_spawn_at(struct World *w, vec3 feet, float yaw, const char *character);
+// Open-world maps: water surface lookup (deep water stops zombies; NULL = none) and the sense radius
+// (0 = always chase the nearest player, the horde default).
+void horde_set_water(float (*fn)(void *user, float x, float z), void *user);
+void horde_set_sense(float radius);
 
 #endif

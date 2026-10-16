@@ -19,6 +19,7 @@
 #include "ui/anim_debug.h"
 #include "gameplay/flesh_fx.h"
 #include "gameplay/zombies/horde.h"
+#include "world/openworld.h"
 #include "gameplay/effects.h"
 #include "player/hands.h"
 #include "render/render.h"
@@ -48,7 +49,7 @@ Player *game_local_player(void) {
 
 static vec3 pick_spawn(World *w, u32 *index, float *yaw) {
     LevelStatic *ls = &w->level;
-    if (w->streaming) {
+    if (w->streaming && !w->openworld) {
         *yaw = 0;
         return chunks_spawn_point(w);
     }
@@ -316,6 +317,7 @@ static void host_tick(World *w, const UserCmd *local_cmd) {
     chars_host_tick(w, SIM_DT);   // sim-only animation -> per-part hitboxes (before the lag-comp record)
     horde_post_tick(w);
     if (w->chunks) chunks_update(w, SIM_DT);
+    openworld_tick(w, SIM_DT);   // open-world maps: deep water, POI zombie spawner
     vehicles_host_tick(w);
     phys_step(w->phys, SIM_DT);
     vehicles_host_post(w);
@@ -1257,6 +1259,7 @@ void game_init(void) {
     G->interact_range = cvar_reg_float("cl_interact_range", 3.0f, 0.5f, 10.0f, 0, "interaction focus raycast length (m); each interactable also has its own range");
     G->world_seed = cvar_reg_int("world_seed", 1337, 0, 999999999, CVAR_ARCHIVE, "procedural world seed");
     cmd_register("map", cmd_map, "host a new game on a map");
+    openworld_register_commands();
     cmd_register("give", cmd_give, "give <item> [count]");
     cmd_register("flashlight", cmd_flashlight, "flashlight [0|1]: toggle / set the flashlight (key F)");
     cmd_register("bench", cmd_bench, "toggle the weapon bench (attachments) UI");

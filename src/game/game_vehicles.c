@@ -35,6 +35,8 @@
 #include "core/engine.h"
 #include "core/platform.h"
 #include "cJSON.h"
+#include "world/openworld.h"
+#include "world/mapgen_poi.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1412,6 +1414,16 @@ void vehicles_level_loaded(World *w, const char *map) {
             if (cJSON_GetArraySize(p) < 3) continue;
             vec3 pos = v3((float)cJSON_GetArrayItem(p, 0)->valuedouble, (float)cJSON_GetArrayItem(p, 1)->valuedouble, (float)cJSON_GetArrayItem(p, 2)->valuedouble);
             spawn_pump(w, pos, cJSON_IsNumber(y) ? (float)y->valuedouble * DG_DEG2RAD : 0.0f);
+        }
+        // open-world maps: the generator's vehicles (barns, fuel stations, hangars) and pumps
+        const MapPois *mp = openworld_pois(w);
+        for (int i = 0; mp && i < mp->ent_count; i++) {
+            const MpEnt *e = &mp->ents[i];
+            if (e->kind == MPE_PUMP) spawn_pump(w, e->pos, e->yaw);
+            if (e->kind != MPE_VEHICLE) continue;
+            EntityId id = vehicle_spawn(w, e->item, e->pos, e->yaw);
+            Vehicle *v = veh_of(w, id);
+            if (v) v->fuel = fminf(4.0f + (float)(i % 5) * 3.0f, vdef(v)->fuel_capacity);
         }
     }
     cJSON_Delete(root);

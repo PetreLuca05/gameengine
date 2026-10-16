@@ -28,6 +28,7 @@
 #include "audio/audio.h"
 #include "assets/assets.h"
 #include "net/net.h"
+#include "world/openworld.h"
 #include "input/input.h"
 #include <math.h>
 
@@ -491,7 +492,8 @@ static void render_entity(World *w, int i, float alpha, bool focused) {
 
 void game_render_world(World *w, float alpha, vec3 cam_pos, vec3 cam_fwd) {
     if (w->chunks) chunks_render(w, cam_pos);
-    else level_draw_static(w, cam_pos, cam_fwd);
+    if (!w->chunks || w->openworld) level_draw_static(w, cam_pos, cam_fwd);
+    openworld_frame(w, cam_pos);
     ENT_FOREACH(w, i) {
         if (!(w->comps[i] & C_VISUAL) && w->type[i] != ET_ZOMBIE) continue;
         if ((w->flags[i] & EF_HIDDEN) && w->type[i] != ET_PICKUP) continue;
