@@ -40,6 +40,7 @@ Windows, no admin; tools are portable, in `.toolchain/` (git-ignored).
 | Zombies | ZOMBIES.md | src/gameplay/zombies |
 | Weather | WEATHER.md | src/world/weather.c (pure), src/game/game_weather.c, shaders/weather.glsl |
 | Vehicles | VEHICLES.md | src/physics/phys_vehicle.c, src/gameplay/vehicle_def.c (pure), src/game/game_vehicles.c |
+| Phone + companion page | PHONE.md | src/gameplay/phone, src/net/http_ws, src/render/phone_view.c, web/phone; e2e: tools/tests/phone_e2e.sh |
 
 ## Dev room (data/levels/devroom.json)
 Hall at the origin. Other areas:
