@@ -10,13 +10,13 @@ shots = [
     ("zl_suburbs_air", -550, 80, 140, 0, -25, True),
     ("zl_suburbs_street", -600, 17, -60, -60, -3, False),
     ("zl_camp_air", -700, 150, -480, 0, -22, True),
-    ("zl_camp_ground", -690, 72, -615, 20, 0, False),
+    ("zl_camp_ground", -690, 95, -628, 10, -3, False),
     ("zl_lake_air", -100, 70, -380, 0, -18, True),
     ("zl_factory_air", 600, 90, -430, 0, -25, True),
     ("zl_farms_air", 600, 80, 260, 0, -22, True),
     ("zl_airfield_air", -650, 90, 230, 180, -24, True),
     ("zl_forest_air", -100, 70, 380, 180, -18, True),
-    ("zl_forest_ground", -150, 18, 600, 180, 0, False),
+    ("zl_forest_ground", -118, 24, 580, 175, 0, False),
     ("zl_port_air", 620, 90, 470, 180, -28, True),
     ("zl_quarry_air", -700, 95, 620, 180, -35, True),
     ("zl_bridge", 290, 22, -60, -95, -8, True),
@@ -34,6 +34,10 @@ for name, x, y, z, yaw, pitch, fly in shots:
     else:
         out += ["wait 120"]
     out += ["screenshot %s.png" % name, "wait 2"]
+# night: lamps on their dusk-to-dawn schedule
+out += ["time_set 22:40", "wait 30"]
+for name, x, y, z, yaw, pitch in [("zl_night_city", 40, 16.5, -135, -90, 0), ("zl_night_fuel", 190, 17, -200, 0, -4), ("zl_night_camp", -700, 75, -600, 0, -8)]:
+    out += ["// ---- " + name, "setpos %g %g %g %g %g" % (x, y, z, yaw, pitch), "wait 120", "screenshot %s.png" % name, "wait 2"]
 out += ["ow_stats", "quit"]
 open(r"C:\C\Game\.claude\worktrees\agent-aac08d7eccae5943a\tools\tests\zl_tour.cfg", "w", newline="\n").write("\n".join(out) + "\n")
 print(len(shots), "shots")

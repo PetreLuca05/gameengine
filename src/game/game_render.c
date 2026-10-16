@@ -389,6 +389,7 @@ static void render_entity(World *w, int i, float alpha, bool focused) {
                 k = 1.0f - w->light[i].flicker * (n > 0.82f ? 0.85f : n * 0.25f);
             }
             PointLight l = { v3_add(pos, v3(0, -0.15f, 0)), w->light[i].radius, w->light[i].color, w->light[i].intensity * k };
+            if (w->light[i].group & LIGHT_GROUP_NO_SHADOW) l.flags = LIGHT_NO_SHADOW;
             render_add_light(&l);
         }
         break;

@@ -136,6 +136,8 @@ typedef struct Lever {
     u32 light_group;      // switches: light group toggled
 } Lever;
 
+// LightComp.group bit: the lamp casts no local shadow (open-world street lamps; replicated with the group).
+#define LIGHT_GROUP_NO_SHADOW (1u << 31)
 typedef struct LightComp {
     vec3 color;
     float radius, intensity;

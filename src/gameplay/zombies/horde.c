@@ -58,7 +58,8 @@ typedef struct Horde {
     float (*water)(void *user, float x, float z);
     void *water_user;
     float sense;
-    u8 aggro[HMAX];
+    u8 aggro[HMAX], wander_set[HMAX];
+    vec3 wander[HMAX];
 } Horde;
 
 static Horde *H;
@@ -123,6 +124,7 @@ static void register_zombie(World *w, EntityId e, int s) {
     H->phys[s] = 1;
     H->has_target[s] = 0;
     H->aggro[s] = 0;
+    H->wander_set[s] = 0;
     H->busy[s] = 0;
     H->target_slot[s] = -1;
     H->avoid[s] = H->wall_n[s] = v3(0, 0, 0);
@@ -307,12 +309,14 @@ void horde_host_tick(World *w, float dt) {
     }
     // Players (targets).
     vec3 ppos[MAX_PLAYERS];
+    bool pfiring[MAX_PLAYERS];
     EntityId pent[MAX_PLAYERS];
     int pslot[MAX_PLAYERS], np = 0, np_count = 0;
     for (int s = 0; s < MAX_PLAYERS; s++) {
         Player *p = &w->players[s];
         if (!p->active || !ent_valid(w, p->ent) || p->sim.move.mode == MOVE_DEAD) continue;
         ppos[np] = p->sim.move.pos;
+        pfiring[np] = (w->flags[ENT_INDEX(p->ent)] & EF_FIRING) != 0;
         pent[np] = p->ent;
         pslot[np] = s;
         np++;
@@ -354,12 +358,23 @@ void horde_host_tick(World *w, float dt) {
                 H->target[s] = w->players[ts].sim.move.pos;
                 H->has_target[s] = 1;
             }
-            // Sense radius (open-world maps): chase once a player is near or after being hurt,
-            // give up far away; otherwise idle where it stands.
+            // Sense radius (open-world maps): chase once a player is near, shooting within 3x the
+            // radius or after being hurt; give up far away; otherwise wander around (a new point
+            // within 8 m every 6 s, staggered per zombie).
             if (H->sense > 0 && H->target_mode == HTARGET_PLAYERS) {
-                if (H->dist[s] < H->sense || w->health[i].hp < w->health[i].max_hp) H->aggro[s] = 1;
+                bool shot = bi >= 0 && pfiring[bi] && H->dist[s] < H->sense * 3.0f;
+                if (H->dist[s] < H->sense || shot || w->health[i].hp < w->health[i].max_hp) H->aggro[s] = 1;
                 else if (H->dist[s] > H->sense * 2.5f) H->aggro[s] = 0;
-                if (!H->aggro[s]) H->has_target[s] = 0;
+                if (!H->aggro[s]) {
+                    u32 slot_t = (w->tick + (u32)s * 37u) / 360u, hsh = hh((u32)s * 2654435761u ^ slot_t);
+                    float a = (float)(hsh & 1023u) / 1023.0f * 6.2831853f, r = (float)((hsh >> 10) & 1023u) / 1023.0f * 8.0f;
+                    if (((w->tick + (u32)s * 37u) % 360u) == 0 || H->wander_set[s] == 0) {
+                        H->wander[s] = v3_add(H->pos[s], v3(cosf(a) * r, 0, sinf(a) * r));
+                        H->wander_set[s] = 1;
+                    }
+                    H->target[s] = H->wander[s];
+                    H->has_target[s] = (hsh >> 20) % 3 != 0;   // a third of the time it just stands
+                }
             }
         }
         // Attacks keep the zombie standing.

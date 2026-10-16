@@ -60,7 +60,7 @@
       {"class": "trail", "name": "Forest trail (suburbs)", "points": [[-500, 92], [-380, 260], [-250, 440], [-160, 560]]},
       {"class": "dirt", "name": "Factory back road", "points": [[762, -690], [820, -600], [860, -420], [840, -250], [780, -200]]}
     ],
-    "zombies": {"wild_density": 0.5, "wild_max": 4, "cap": 120, "despawn": 190, "spawn_min": 40, "spawn_max": 95, "sense": 38}
+    "zombies": {"wild_density": 0.5, "wild_max": 4, "cap": 120, "despawn": 190, "spawn_min": 30, "spawn_max": 90, "sense": 38}
   },
   "pois": [
     {"id": "city", "name": "Main City", "kind": "city", "pos": [0, -100], "size": [460, 380], "loot": "household", "ambience": "urban", "zombies": {"density": 6.0, "max": 26, "indoor": 0.45}},

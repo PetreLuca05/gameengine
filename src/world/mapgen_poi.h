@@ -52,7 +52,7 @@ typedef enum MpEntKind {
 
 typedef struct MpEnt {
     u8 kind, poi;              // poi: index + 1 (0 = none)
-    bool locked, scheduled;
+    bool locked, scheduled, shadow;   // lights: on the dusk / dawn schedule, casting local shadows
     vec3 pos;
     float yaw, w, h, radius, intensity;
     vec3 color;

@@ -389,6 +389,7 @@ static void plan_factory(Plan *pl) {
     keep_lot(pl, add_lot(pl->p, LK_PIPES, pl->poi, AT(0.02f, 0.45f), v2(14, 56), yaw, 1, 0, 20, ""), 1);
     keep_lot(pl, add_lot(pl->p, LK_CONTAINERS, pl->poi, AT(-0.1f, 0.05f), v2(40, 30), yaw, 2, 0, 21, "industrial"), 1);
     add_lot(pl->p, LK_YARD_CLUTTER, pl->poi, AT(0.0f, -0.05f), v2(2 * h.x * 0.9f, 2 * h.y * 0.9f), yaw, 1, 0, 22, "industrial");
+    keep_lot(pl, add_lot(pl->p, LK_HUNT_STAND, pl->poi, AT(0.95f, 0.93f), v2(2.2f, 2.2f), yaw, 1, 0, 23, "police"), 1);   // watchtower
 #undef AT
     poi->enterable = 5;
 }
@@ -494,6 +495,9 @@ static void plan_airfield(Plan *pl) {
     add_lot(pl->p, LK_YARD_CLUTTER, pl->poi, AT(-len * 0.1f, 118), v2(60, 170), ryaw, 1, 0, 39, "rare");
     vec2 fc = AT(0, 60);
     plan_fence_rect(pl, fc, v2(320, len + 80), ryaw, jv2(pl->j, "gate", AT(0, 230)), 12, 0);
+    // watchtowers inside two fence corners
+    keep_lot(pl, add_lot(pl->p, LK_HUNT_STAND, pl->poi, AT(-len * 0.5f - 30, 210), v2(2.2f, 2.2f), ryaw, 1, 0, 301, "police"), 1);
+    keep_lot(pl, add_lot(pl->p, LK_HUNT_STAND, pl->poi, AT(len * 0.5f + 30, -90), v2(2.2f, 2.2f), ryaw + DG_PI, 1, 0, 302, "police"), 1);
 #undef AT
     poi->enterable = 7;
 }
@@ -538,6 +542,7 @@ static void plan_port(Plan *pl) {
     f->size.y = (ag.x * fd.x + ag.y * fd.y) / fl;
     f->tier[0] = 14;
     add_lot(pl->p, LK_CHECKPOINT, pl->poi, v2_add(gate, rot2(v2(9, -6), yaw)), v2(3, 3), yaw, 1, 0, 61, "police");
+    keep_lot(pl, add_lot(pl->p, LK_HUNT_STAND, pl->poi, AT(-0.95f, 0.9f), v2(2.2f, 2.2f), yaw, 1, 0, 62, "police"), 1);   // watchtower
 #undef AT
     poi->enterable = 5;
 }
@@ -775,9 +780,10 @@ static void kent(Kit *k, int kind, vec3 pos, float yaw, const char *tier_or_item
     }
 }
 static MpEnt *last_ent(Kit *k) { return &k->p->ents[k->p->ent_count - 1]; }
-static void klight(Kit *k, vec3 pos, vec3 color, float radius, float intensity, bool scheduled) {
+static void klight(Kit *k, vec3 pos, vec3 color, float radius, float intensity, bool scheduled, bool shadow) {
     kent(k, MPE_LIGHT, pos, 0, NULL);
     MpEnt *e = last_ent(k);
+    e->shadow = shadow;
     e->color = color;
     e->radius = radius;
     e->intensity = intensity;
@@ -1148,7 +1154,7 @@ static void kit_checkpoint(Kit *k, vec2 p, float yaw) {
     kblock(k, &f, 0, 0, 1.6f, 1.6f, 2.6f, 2.8f, C(0.3f, 0.3f, 0.3f), MPF_COLLIDE, "metal_thin");
     kit_sandbags(k, fp(&f, v3(0, 0, 2.6f)), yaw, 3.0f);
     kit_barrier(k, fp(&f, v3(-4.0f, 0, 1.0f)), yaw + 0.2f);
-    klight(k, fp(&f, v3(0, 3.4f, 0.5f)), v3(1.0f, 0.85f, 0.6f), 14, 30, true);
+    klight(k, fp(&f, v3(0, 3.4f, 0.5f)), v3(1.0f, 0.85f, 0.6f), 14, 30, true, false);
     kent(k, MPE_CONTAINER, fp(&f, v3(0, 0, -2.2f)), yaw, "police");
 }
 
@@ -1162,7 +1168,7 @@ static void kit_campfire(Kit *k, vec2 p) {
     kcyl(k, &f, v3(0, 0.15f, 0), 0.08f, 0.5f, 1.0f, quat_axis_angle(v3(1, 0, 0), 1.3f), C(0.1f, 0.07f, 0.05f), MPF_DETAIL, "wood");
     kcyl(k, &f, v3(0, 0.15f, 0), 0.08f, 0.5f, 1.0f, quat_mul(quat_yaw(1.6f), quat_axis_angle(v3(1, 0, 0), 1.3f)), C(0.1f, 0.07f, 0.05f), MPF_DETAIL, "wood");
     kblock(k, &f, 0, 0, 0.2f, 0.2f, 0.05f, 0.25f, C(1.0f, 0.45f, 0.1f), MPF_EMISSIVE | MPF_NO_SHADOW | MPF_DETAIL, "wood");
-    klight(k, fp(&f, v3(0, 0.8f, 0)), v3(1.0f, 0.55f, 0.25f), 10, 40, false);
+    klight(k, fp(&f, v3(0, 0.8f, 0)), v3(1.0f, 0.55f, 0.25f), 10, 40, false, true);
     for (int i = 0; i < 3; i++) {   // log benches
         float a = (float)i * 2.1f;
         Frame b = frame(fp(&f, v3(cosf(a) * 2.6f, 0, sinf(a) * 2.6f)), -a);
@@ -1482,7 +1488,7 @@ static void kit_pier(Kit *k, const MpLot *l) {
         kcyl(k, &f, v3(-hw + 0.6f, 3.35f, z), 0.25f, 0.35f, 1.0f, quat_identity(), C(0.2f, 0.2f, 0.2f), MPF_DETAIL | MPF_COLLIDE | MPF_METAL, "metal_thick");
         kblock(k, &f, hw + 0.2f, z, 0.2f, 0.8f, 0.5f, 2.6f, C(0.08f, 0.08f, 0.08f), MPF_DETAIL, "cloth");
     }
-    klight(k, fp(&f, v3(0, 9.0f, hl - 4.0f)), v3(1.0f, 0.8f, 0.55f), 22, 60, true);
+    klight(k, fp(&f, v3(0, 9.0f, hl - 4.0f)), v3(1.0f, 0.8f, 0.55f), 22, 60, true, false);
     kblock(k, &f, 0, hl - 4.0f, 0.15f, 0.15f, 3.0f, 9.0f, C(0.3f, 0.3f, 0.3f), MPF_COLLIDE | MPF_METAL, "metal_thin");
 }
 
@@ -1547,7 +1553,7 @@ static void kit_radio_tower(Kit *k, const MpLot *l) {
     kblock(k, &f, 0, 0, b + 0.5f, b + 0.5f, -0.5f, 0.3f, C(0.5f, 0.5f, 0.48f), MPF_COLLIDE, "concrete");
     // dish antennas
     kcyl(k, &f, v3(t + 0.6f, H * 0.7f, 0), 0.9f, 0.15f, 1.0f, quat_axis_angle(v3(0, 0, 1), DG_PI * 0.5f), C(0.85f, 0.85f, 0.85f), MPF_DETAIL | MPF_METAL, "metal_thin");
-    klight(k, fp(&f, v3(0, 2.5f, b + 2.0f)), v3(1.0f, 0.75f, 0.5f), 12, 25, true);
+    klight(k, fp(&f, v3(0, 2.5f, b + 2.0f)), v3(1.0f, 0.75f, 0.5f), 12, 25, true, false);
     kent(k, MPE_PICKUP, fp(&f, v3(1.5f, 0.35f, 0)), 0, "battery");
 }
 
@@ -1809,7 +1815,7 @@ static void kit_fuel_station(Kit *k, const MpLot *l) {
     b.loot = 3;
     b.sh = 3.6f;
     kit_building(k, shop.pos, l->yaw, &b);
-    klight(k, fp(&f, v3(0, 4.6f, hd * 0.3f)), v3(1.0f, 0.95f, 0.85f), 18, 50, true);
+    klight(k, fp(&f, v3(0, 4.6f, hd * 0.3f)), v3(1.0f, 0.95f, 0.85f), 18, 50, true, true);
     kit_car(k, fp(&f, v3(-4.0f, 0, hd * 0.3f - 3.0f)), l->yaw + 0.1f, 1);
     kent(k, MPE_VEHICLE, fp(&f, v3(4.0f, 0.4f, hd * 0.3f - 3.0f)), l->yaw, "car");
 }
@@ -2105,7 +2111,7 @@ static void build_bridges(Kit *k) {
             float bed = mapgen_raster_height(k->r, wp.x, wp.z);
             kblock(k, &f, 0, (float)p * len * 0.18f, hw - 1.0f, 0.8f, bed - br->h - 1.0f, -0.9f, C(0.42f, 0.41f, 0.39f), MPF_COLLIDE, "concrete");
         }
-        klight(k, fp(&f, v3(hw - 0.3f, 5.0f, 0)), v3(1.0f, 0.82f, 0.55f), 16, 35, true);
+        klight(k, fp(&f, v3(hw - 0.3f, 5.0f, 0)), v3(1.0f, 0.82f, 0.55f), 16, 35, true, false);
         kblock(k, &f, hw - 0.3f, 0, 0.08f, 0.08f, 1.0f, 5.0f, C(0.3f, 0.3f, 0.3f), MPF_DETAIL | MPF_METAL, "metal_thin");
     }
 }
@@ -2136,7 +2142,7 @@ static void build_city_streets(Kit *k, const MpLot *l) {
                 kblock(k, &f, 0, 0.8f, 0.06f, 0.8f, 7.45f, 7.55f, C(0.3f, 0.3f, 0.32f), MPF_DETAIL | MPF_METAL, "metal_thin");
                 bool broken = rng_float(&k->rng) < 0.4f;
                 kblock(k, &f, 0, 1.5f, 0.2f, 0.35f, 7.3f, 7.45f, broken ? C(0.2f, 0.2f, 0.2f) : C(1.0f, 0.9f, 0.7f), (broken ? 0 : MPF_EMISSIVE) | MPF_DETAIL | MPF_NO_SHADOW, "glass");
-                if (!broken && city && lights < 14 && rng_float(&k->rng) < 0.18f) { klight(k, fp(&f, v3(0, 7.0f, 1.5f)), v3(1.0f, 0.85f, 0.6f), 18, 40, true); lights++; }
+                if (!broken && city && lights < 14 && rng_float(&k->rng) < 0.18f) { klight(k, fp(&f, v3(0, 7.0f, 1.5f)), v3(1.0f, 0.85f, 0.6f), 18, 40, true, false); lights++; }
             }
             // wrecks
             if (rng_float(&k->rng) < (city ? 0.018f : 0.01f)) {

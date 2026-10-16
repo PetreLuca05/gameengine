@@ -21,7 +21,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define OW_TILE 128.0f            // static geometry / collision tile (m)
+#define OW_TILE 64.0f             // static geometry / collision tile (m): small enough for local-light / cascade caster culling
 #define OW_DETAIL_DIST 260.0f     // MPF_DETAIL draws beyond this are skipped
 
 static OpenWorld *ow_of(const World *w) { return w ? (OpenWorld *)w->openworld : NULL; }
@@ -572,7 +572,7 @@ static void spawn_entities(World *w, OpenWorld *o) {
             break;
         }
         case MPE_LIGHT:
-            id = spawn_light(w, e->pos, e->color, e->radius, e->intensity, 0, true);
+            id = spawn_light(w, e->pos, e->color, e->radius, e->intensity, e->shadow ? 0 : LIGHT_GROUP_NO_SHADOW, true);
             if (id && e->scheduled) {
                 LightComp *lc = &w->light[ENT_INDEX(id)];
                 lc->scheduled = true;
@@ -749,7 +749,9 @@ static void zombie_spawner(World *w, OpenWorld *o) {
                     spawned = horde_spawn_at(w, sp->pos, (float)(o->rng & 1023) * 0.006f, "mixed");
                 }
             }
-            if (!spawned) {
+            // outdoors: a ring point in the open (streets, yards, fields: not in a building
+            // footprint, where the drop from above would land on the roof, and not in water)
+            for (int t = 0; t < 6 && !spawned; t++) {
                 o->rng = o->rng * 1664525u + 1013904223u;
                 float a = (float)(o->rng >> 8) / 16777216.0f * 6.2831853f;
                 o->rng = o->rng * 1664525u + 1013904223u;
@@ -757,8 +759,8 @@ static void zombie_spawner(World *w, OpenWorld *o) {
                 float x = ppos[k].x + cosf(a) * dist, zz = ppos[k].z + sinf(a) * dist;
                 if (fabsf(x) > o->gen.half_size - 5 || fabsf(zz) > o->gen.half_size - 5) continue;
                 float gy = mapgen_raster_height(&o->raster, x, zz);
-                if (mapgen_water_level(&o->gen, x, zz) > gy - 0.3f) continue;
-                spawned = horde_spawn(w, v3(x, gy, zz), 1, 3.0f, HSPAWN_RANDOM, "mixed") > 0;
+                if (mapgen_water_level(&o->gen, x, zz) > gy - 0.3f || mapgen_in_keepout(&o->gen, x, zz, 1.0f)) continue;
+                spawned = horde_spawn(w, v3(x, gy, zz), 1, 2.0f, HSPAWN_RANDOM, "mixed") > 0;
             }
             if (spawned) { total++; o->spawned++; }
         }
@@ -842,7 +844,23 @@ static void cmd_ow_where(int argc, const char **argv) {
              mapgen_water_level(&o->gen, pos.x, pos.z), mapgen_material_name(mapgen_raster_mat(&o->raster, pos.x, pos.z)), poi >= 0 ? o->pois.pois[poi].name : "-");
 }
 
+static void cmd_ow_zombies(int argc, const char **argv) {
+    (void)argc;
+    (void)argv;
+    World *w = game()->world;
+    Player *p = game_local_player();
+    if (!w || !p) return;
+    int n = 0;
+    ENT_FOREACH(w, i) {
+        if (w->type[i] != ET_ZOMBIE || n >= 40) continue;
+        vec3 z = w->xf[i].pos;
+        log_info("  zombie %4d at (%7.1f, %5.1f, %7.1f) %5.1f m%s", i, z.x, z.y, z.z, v3_len(v3_sub(z, p->sim.move.pos)), (w->flags[i] & EF_DEAD) ? " dead" : "");
+        n++;
+    }
+}
+
 void openworld_register_commands(void) {
+    cmd_register("ow_zombie_list", cmd_ow_zombies, "open-world map: the zombies near the player (debug)");
     cvar_reg_bool("ow_zombies", true, 0, "open-world maps: the POI zombie spawner keeps zombies around the players");
     cmd_register("poi_list", cmd_poi_list, "open-world map: list the points of interest");
     cmd_register("poi_goto", cmd_poi_goto, "open-world map: teleport to a POI (poi_goto <id> [height])");

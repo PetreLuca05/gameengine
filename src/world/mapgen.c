@@ -638,10 +638,18 @@ float mapgen_tree_density(const MapGen *g, const MgRaster *r, float x, float z, 
         if (dd > dens) { dens = dd; pf = f->height; }
     }
     float h = mapgen_raster_height(r, x, z), slope = mapgen_raster_slope(r, x, z);
-    // scattered pines on the mountains, sparse trees on open grass
-    if (h > 34.0f && slope < 0.9f) { float m = 0.006f * (1.0f - smoothstepf(150.0f, 220.0f, h)); if (m > dens) { dens = m; pf = 0.95f; } }
     u8 mat = mapgen_raster_mat(r, x, z);
-    if (mat == MGM_GRASS && dens < 0.0007f) dens = 0.0007f * saturate(noise2(&g->n_hills, x * 4.0f, z * 4.0f) * 2.0f + 0.4f);
+    // pads (camp, farmsteads, cabins, lots) only keep trees an explicit forest gives them
+    bool pad = false;
+    for (int k = 0; k < fn && !pad; k++) {
+        const MgFeature *f = &g->features[fl ? fl[k] : k];
+        pad = f->kind == MGF_PAD && rect_dist(v2(x, z), f->pos, f->size, f->yaw) <= 2.0f;
+    }
+    if (!pad) {
+        // scattered pines on the mountains, sparse trees on open grass
+        if (h > 34.0f && slope < 0.9f) { float m = 0.006f * (1.0f - smoothstepf(150.0f, 220.0f, h)); if (m > dens) { dens = m; pf = 0.95f; } }
+        if (mat == MGM_GRASS && dens < 0.0007f) dens = 0.0007f * saturate(noise2(&g->n_hills, x * 4.0f, z * 4.0f) * 2.0f + 0.4f);
+    }
     if (pine) *pine = pf;
     if (dens <= 0) return 0;
     if (mat == MGM_ASPHALT || mat == MGM_CONCRETE || mat == MGM_DIRT_ROAD || mat == MGM_FIELD || mat == MGM_CROP || mat == MGM_PLOWED || mat == MGM_SAND ||
