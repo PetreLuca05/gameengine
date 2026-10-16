@@ -283,6 +283,8 @@ static HpPose pose_for(const HoldPointStyle *s, const HoldPointOverride *o, int 
 
 static float g_ads_relief_scale = 1.0f;
 void holdpoint_set_ads_relief_scale(float k) { g_ads_relief_scale = clampf(k, 0.2f, 1.5f); }
+static float g_look_lag_scale = 1.0f;
+void holdpoint_set_look_lag_scale(float k) { g_look_lag_scale = clampf(k, 0.0f, 2.0f); }
 float holdpoint_ads_relief(float relief) { return fmaxf(relief > 0.12f ? 0.10f : 0.055f, relief * g_ads_relief_scale); }
 
 Xform holdpoint_ads_item(const HoldPointStyle *s, const HoldPointOverride *o, vec3 sight) {
@@ -437,7 +439,7 @@ void holdpoint_eval(HoldPointState *st, const HoldPointInput *in, HoldPointOutpu
     float ads_w = state == HP_ADS ? s->ads_scale + (1.0f - s->ads_scale) * k : 1.0f;   // eases with the blend
     if (in->static_pose) ads_w = 0.0f;
     float ads_k = ads_w * in->sway_scale;
-    float lag_k = ads_w * in->sway_scale;
+    float lag_k = ads_w * in->sway_scale * g_look_lag_scale;
     float wy = dt > 1e-6f ? wrap_angle(in->aim_yaw - st->prev_yaw) / dt : 0.0f;
     float wp = dt > 1e-6f ? (in->aim_pitch - st->prev_pitch) / dt : 0.0f;
     st->prev_yaw = in->aim_yaw;

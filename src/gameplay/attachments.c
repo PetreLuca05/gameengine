@@ -365,17 +365,20 @@ void attach_weapon_effective(const ItemDB *db, const WeaponDef *base, const u8 *
     }
 }
 
-// The weapon's iron-sight ADS FOV (its "ads_fov" authored at a 75 deg base, scaled to the user's FOV).
+// ADS FOVs are absolute (the same whatever the hip FOV in the settings): the weapon's own
+// "ads_fov" for iron sights, scope magnification against a 75 deg reference view.
+#define ADS_REF_FOV 75.0f
 static float iron_fov(const WeaponDef *eff, float base_fov) {
-    return (eff && eff->ads_fov > 1.0f) ? eff->ads_fov * (base_fov / 75.0f) : base_fov;
+    (void)base_fov;
+    return (eff && eff->ads_fov > 1.0f) ? eff->ads_fov : ADS_REF_FOV * 0.8f;
 }
 static float zoom_fov(float fov, float zoom) { return 2.0f * atanf(tanf(fov * 0.5f * DG_DEG2RAD) / fmaxf(1.0f, zoom)) * DG_RAD2DEG; }
 
 // Optics zoom on top of the weapon's own ADS zoom: a red dot is never wider than the irons.
 float attach_sight_fov(const WeaponDef *eff, const AttachmentDef *optic, float base_fov) {
     if (optic) {
-        if (optic->ads_fov > 1.0f) return optic->ads_fov * (base_fov / 75.0f);
-        if (optic->sight == SIGHT_SCOPE) return zoom_fov(base_fov, optic->zoom);   // magnification of the scope picture
+        if (optic->ads_fov > 1.0f) return optic->ads_fov;
+        if (optic->sight == SIGHT_SCOPE) return zoom_fov(ADS_REF_FOV, optic->zoom);   // magnification of the scope picture
         return zoom_fov(iron_fov(eff, base_fov), optic->zoom);
     }
     return iron_fov(eff, base_fov);

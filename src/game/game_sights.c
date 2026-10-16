@@ -51,7 +51,7 @@ typedef struct SightTest {
 } SightTest;
 
 static struct {
-    Cvar *scope_mode, *pip_scale, *brightness, *ads_debug, *sight_debug, *sens_mode, *sens_coef, *relief_scale;
+    Cvar *scope_mode, *pip_scale, *brightness, *ads_debug, *sight_debug, *sens_mode, *sens_coef, *relief_scale, *look_lag;
     Cvar *ads_dof, *dof_focus, *dof_fstop, *iron_blur, *thirdperson;
     // this frame
     const AttachmentDef *optic;
@@ -84,6 +84,7 @@ void sights_camera(const Player *p, const WeaponDef *wd, CameraAds *out) {
     memset(out, 0, sizeof(*out));
     S.base_fov = camera_base_fov();
     holdpoint_set_ads_relief_scale(S.relief_scale ? S.relief_scale->f : 1.0f);
+    holdpoint_set_look_lag_scale(S.look_lag ? S.look_lag->f : 1.0f);
     S.have_wd = wd != NULL;
     if (wd) S.wd = *wd;
     bool gun = wd && wd->kind != WPN_MELEE;
@@ -96,7 +97,7 @@ void sights_camera(const Player *p, const WeaponDef *wd, CameraAds *out) {
     S.complete = gun && S.ads_t >= 1.0f;
     if (gun) {
         if (scope && !pip) {
-            out->fov = 2.0f * atanf(tanf(S.base_fov * 0.5f * DG_DEG2RAD) / S.optic->main_zoom) * DG_RAD2DEG;
+            out->fov = attach_main_ads_fov(wd, S.optic, S.base_fov, true);   // absolute, like every ADS FOV
             out->snap_fov = S.sight_fov;
         } else {
             out->fov = attach_main_ads_fov(wd, S.optic, S.base_fov, pip);
@@ -413,6 +414,7 @@ static void cmd_sight_test(int argc, const char **argv) {
             log_info("sight_test dump: %s slot %d %s item %s |%s", net_role() == NET_CLIENT ? "client" : "host", sl, p->local ? "(local)" : "(remote)",
                      w->item[i] ? item_def(&G->items, w->item[i])->id : "-", ids);
         }
+        log_info("sight_test dump: settings FOV %.1f, ADS %.2f, aimed FOV %.2f (sight picture %.2f), camera FOV now %.2f", S.base_fov, S.ads_t, S.main_fov, S.sight_fov, G->view.fov);
         return;
     }
     log_info("usage: sight_test align [weapon] | fov | parallax | aspect | net | dump");
@@ -514,6 +516,7 @@ bool sights_dof_managed(void) { return S.ads_dof && S.ads_dof->i; }
 // ------------------------------------------------------------------ registration
 
 void sights_register(void) {
+    S.look_lag = cvar_reg_float("wpn_look_lag", 0.3f, 0.0f, 2.0f, CVAR_ARCHIVE, "how far the weapon trails mouse turns at the hip (x the hold style's look lag; 0 = locked to the view)");
     S.relief_scale = cvar_reg_float("ads_eye_relief_scale", 0.5f, 0.2f, 1.5f, CVAR_ARCHIVE, "ADS: sight distance from the eye x this (1 = the stock weld / the scope eye relief)");
     S.scope_mode = cvar_reg_int("r_scope_mode", 0, 0, 1, CVAR_ARCHIVE, "scopes: 0 = picture-in-picture (second scene render at the scope FOV), 1 = full-screen FOV + vignette");
     S.pip_scale = cvar_reg_float("r_scope_pip_scale", 0.5f, 0.2f, 1.0f, CVAR_ARCHIVE, "scope picture-in-picture resolution (fraction of the render height)");

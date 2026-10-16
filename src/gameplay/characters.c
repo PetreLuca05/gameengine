@@ -2008,7 +2008,8 @@ EntityId spawn_zombie(World *w, vec3 feet, float yaw, u8 character_id) {
     const CharacterDef *def = LIB ? anim_lib_char_by_net(LIB, character_id) : NULL;
     w->char_id[i] = character_id;
     w->comps[i] |= C_HEALTH | C_HITBOX;
-    health_init(&w->health[i], def ? def->hp : 120.0f, 0);
+    // Zombie health stays within 75..150 whatever the character file says.
+    health_init(&w->health[i], clampf(def ? def->hp : 120.0f, 75.0f, 150.0f), 0);
     w->health[i].regen_delay = 0;
     ent_set_pos(w, e, feet, quat_yaw(yaw), true);
     entity_setup(w, e);

@@ -129,6 +129,7 @@ int holdpoint_pick_state(const HoldPointInput *in);
 // Exact ADS item transform: sight socket on the view axis at the eye relief, barrel along -Z.
 // ADS sight distance multiplier for weld-based sights (cvar ads_eye_relief_scale, game_sights.c).
 void holdpoint_set_ads_relief_scale(float k);
+void holdpoint_set_look_lag_scale(float k);   // wpn_look_lag (game_sights.c)
 float holdpoint_ads_relief(float relief);   // the eye relief actually used in ADS (scaled, floored)
 Xform holdpoint_ads_item(const HoldPointStyle *s, const HoldPointOverride *ovr, vec3 sight);
 void holdpoint_eval(HoldPointState *st, const HoldPointInput *in, HoldPointOutput *out);

@@ -7,6 +7,6 @@
   "blood": { "color": [0.17, 0.035, 0.022], "darkness": 0.75, "amount": 1.35, "mist": 0.6, "decay": 0.55 },
   "surface": { "torso": "cloth", "legs": "cloth" },
   "armor": { "head": { "type": "helmet", "hits": 2 } },
-  "ragdoll_scale": 1.0, "scale": 1.0, "hp": 160, "move_speed": 1.1,
+  "ragdoll_scale": 1.0, "scale": 1.0, "hp": 150, "move_speed": 1.1,
   "eye_offset": [0, 0.10, -0.10]
 }
