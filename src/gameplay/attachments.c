@@ -354,6 +354,10 @@ void attach_weapon_effective(const ItemDB *db, const WeaponDef *base, const u8 *
             Xform g = xf_mul(place, a->grip_l);
             out->sockets.grip_l = g;
             out->sockets.has_left = true;
+            // The left hand's pose is the grip's own (attachment space socket).
+            out->sockets.pose_id[0] = handpose_entry_hash(HPC_ATTACHMENT, a->id);
+            out->sockets.has_pose_space[0] = true;
+            out->sockets.pose_space[0] = place;
             out->support_offset = g.t;
         }
     }

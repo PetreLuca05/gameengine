@@ -71,6 +71,8 @@ typedef struct HandsFpTargets {
     bool on_weapon[2];        // palm is on the held item's socket (finger curl from the hold style)
     Xform ov_palm[2];         // interaction / ledge target palm (world)
     float ov_w[2];            // its weight (0 = the body's own hold / pose)
+    u32 ov_pose[2];           // its hand pose entry (docs/HANDPOSE.md: "use_<interactable>", "veh_<vehicle>"; 0 = the grip style)
+    u8 ov_state[2];           // HandPoseState (use / hold / drive / drive_onehand)
     const struct WeaponDef *weapon;
     const struct ItemDef *item;
     vec3 cam_pos;

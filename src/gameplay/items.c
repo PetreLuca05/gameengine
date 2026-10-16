@@ -505,6 +505,7 @@ static void parse_weapon(ItemDB *db, const cJSON *w, const char *file) {
     }
     parse_hold(w, d->hold_style, &d->sockets, default_style_for(w, d->kind, d->id), d->support_offset, d->muzzle_offset, d->parts,
                d->part_count);
+    d->sockets.pose_id[0] = d->sockets.pose_id[1] = handpose_entry_hash(HPC_WEAPON, d->id);
     {
         // VFX defaults from the weapon id / kind, overridable per weapon.
         const char *id = d->id;
@@ -634,6 +635,7 @@ bool items_load(ItemDB *db, const char *items_path, const char *weapons_path) {
         parse_camera(d, cJSON_GetObjectItemCaseSensitive(it, "camera"));
         const cJSON *sk = cJSON_GetObjectItemCaseSensitive(hold, "sockets");
         apply_sockets(&d->sockets, sk);
+        d->sockets.pose_id[0] = d->sockets.pose_id[1] = handpose_entry_hash(HPC_ITEM, d->id);
         if (d->camera) {
             // The screen is the "sight" (camera mode holds it in front of the eye) unless the
             // sockets name one; the item length is the phone's height (wall collision cast).

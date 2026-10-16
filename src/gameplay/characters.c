@@ -1386,6 +1386,13 @@ static void post_one(World *w, CharacterInst *c, int i, float dt, vec3 cam_pos, 
                 pi.hand_anchor_w = 1.0f;
                 pi.hand_anchor_skip = (u8)((use[0] ? 0 : 1) | (use[1] ? 0 : 2));
                 pi.vehicle_onehand = !use[1] && item != NULL;
+                // Hand poses on the controls (the first-person pass uses the same entry).
+                const char *vname = g_vehicle_pose.seat_vehicle ? g_vehicle_pose.seat_vehicle(w, c->slot) : NULL;
+                for (int h = 0; h < 2; h++) {
+                    pi.anchor_pose[h] = vname ? handpose_entry_hash(HPC_VEHICLE, vname) : 0;
+                    pi.anchor_pose_base[h] = handpose_grip_style_hash(GRIP_GRAB);
+                    pi.anchor_pose_state[h] = use[0] && use[1] ? HPS_DRIVE : HPS_DRIVE_ONEHAND;
+                }
             }
         }
     }
@@ -1420,7 +1427,7 @@ static void post_one(World *w, CharacterInst *c, int i, float dt, vec3 cam_pos, 
             pose_to_model(s, &c->rt.final, c->rt.final_model);
         }
         Xform palm_r = xf_mul(c->rt.final_model[s->role[BR_R_HAND]], LIB->hands.palm[1]);
-        c->rt.proc.item_model = xf_mul(palm_r, xf_inverse(item->grip_r));
+        c->rt.proc.item_model = xf_mul(palm_r, xf_inverse(c->rt.proc.hand[1].init ? c->rt.proc.hand[1].sock : item->grip_r));
         c->rt.proc.item_world = xf_mul(xf_make(c->root.t, quat_yaw(c->rt.proc.render_body_yaw)), c->rt.proc.item_model);
         c->rt.proc.has_item = true;
     }
@@ -1800,13 +1807,14 @@ static CharacterInst *local_fp_char(World *w, int local_slot) {
     return NULL;
 }
 
-// Finger curl per first-person grip (deg: thumb, index, middle, ring, pinky), added to the pose.
-static const float k_grip_curl[GRIP_COUNT][5] = {
-    [GRIP_RELAXED] = { 10, 15, 20, 25, 30 },  [GRIP_FIST] = { 50, 95, 100, 100, 100 },
-    [GRIP_POINT] = { 50, 0, 95, 95, 95 },     [GRIP_GRAB] = { 35, 50, 55, 60, 65 },
-    [GRIP_PISTOL] = { 40, 70, 80, 85, 90 },   [GRIP_RIFLE] = { 40, 70, 80, 85, 90 },
-    [GRIP_MELEE] = { 50, 85, 90, 90, 90 },    [GRIP_PALM] = { 0, 5, 5, 5, 5 },
-};
+// Hand h's palm target on the held item (item space, the hand pose's socket + wrist offset) and
+// its elbow pole, as the tick's hold resolved them (the item's own socket before the first hold).
+static Xform fp_hand_sock(const CharacterInst *c, const ItemSockets *k, int h) {
+    return c->rt.proc.hand[h].init ? c->rt.proc.hand[h].sock : (h ? k->grip_r : k->grip_l);
+}
+static vec3 fp_hand_pole(const CharacterInst *c, const HoldStyle *hs, int h) {
+    return c->rt.proc.hand[h].init ? c->rt.proc.hand[h].pole : (h ? hs->elbow_r : hs->elbow_l);
+}
 
 void chars_render_local_fp(World *w, float alpha, int local_slot) {
     CharacterInst *c = local_fp_char(w, local_slot);
@@ -1862,16 +1870,17 @@ void chars_render_local_fp(World *w, float alpha, int local_slot) {
         // Reach: this frame's spine (re-bent to the frame's view) can move the support shoulder
         // away from the tick's solve. If grip_l is out of reach, pull the hold point towards the
         // left shoulder by the shortfall (never stretch the arm); warn once per item.
-        Xform grip_l = k->grip_l;   // ADS: may slide back along the handguard (exact ADS kept)
+        const Xform sock_l0 = fp_hand_sock(c, k, 0), sock_r0 = fp_hand_sock(c, k, 1);
+        Xform grip_l = sock_l0;   // ADS: may slide back along the handguard (exact ADS kept)
         if (hs->left_hand && k->has_left && la >= 0 && lf >= 0 && lh >= 0 && ikw > 0.99f) {
             float reach = v3_dist(model[la].t, model[lf].t) + v3_dist(model[lf].t, model[lh].t);
             float pulled = 0;
             bool ads_exact = c->rt.proc.hp_out.state == HP_ADS;
-            float slide = 0, max_slide = ads_exact ? proc_grip_l_slide_max(k) : 0.0f;
+            float slide = 0, max_slide = ads_exact ? fmaxf(0.0f, -sock_l0.t.z - 0.08f) : 0.0f;
             // Shoulder first (clavicle), then the support hand along the handguard (ADS), then the hold point.
-            proc_clavicle_reach(s, posep, model, s->role[BR_L_SHOULDER], la, proc_hand_for_socket(xf_mul(want, k->grip_l), LIB->hands.palm[0]).t, reach, 0.004f, 75.0f);
+            proc_clavicle_reach(s, posep, model, s->role[BR_L_SHOULDER], la, proc_hand_for_socket(xf_mul(want, sock_l0), LIB->hands.palm[0]).t, reach, 0.004f, 75.0f);
             for (int iter = 0; iter < 8; iter++) {
-                grip_l = k->grip_l;
+                grip_l = sock_l0;
                 grip_l.t.z += slide;
                 Xform hand_l = proc_hand_for_socket(xf_mul(want, grip_l), LIB->hands.palm[0]);
                 float need = v3_dist(model[la].t, hand_l.t);
@@ -1906,20 +1915,20 @@ void chars_render_local_fp(World *w, float alpha, int local_slot) {
             }
         }
         if (ra >= 0 && rf >= 0 && rh >= 0) {
-            Xform hand_r = proc_hand_for_socket(xf_mul(want, k->grip_r), LIB->hands.palm[1]);
+            Xform hand_r = proc_hand_for_socket(xf_mul(want, sock_r0), LIB->hands.palm[1]);
             if (ikw > 0.99f) {
                 float reach_r = v3_dist(model[ra].t, model[rf].t) + v3_dist(model[rf].t, model[rh].t);
                 proc_clavicle_reach(s, posep, model, s->role[BR_R_SHOULDER], ra, hand_r.t, reach_r, 0.003f, 45.0f);
             }
-            anim_ik_two_bone_pose(s, posep, model, ra, rf, rh, hand_r.t, &hand_r.r, quat_rotate(cam_rm, hs->elbow_r), ikw);
+            anim_ik_two_bone_pose(s, posep, model, ra, rf, rh, hand_r.t, &hand_r.r, quat_rotate(cam_rm, fp_hand_pole(c, hs, 1)), ikw * c->rt.proc.hand[1].ikw);
         }
         // The item stays exactly on its hold point while the hands hold it (the arms follow by IK;
         // a reach shortfall shows as a few mm at the hand, never as the sight leaving the aim).
         // Clip-driven states (reload / equip: hand IK weight < 1) finalize it from the right hand.
         Xform item = want;
-        if (rh >= 0 && ikw < 0.99f) item = xf_mul(xf_mul(model[rh], LIB->hands.palm[1]), xf_inverse(k->grip_r));
+        if (rh >= 0 && ikw < 0.99f) item = xf_mul(xf_mul(model[rh], LIB->hands.palm[1]), xf_inverse(sock_r0));
         Xform palm_r = rh >= 0 ? xf_mul(model[rh], LIB->hands.palm[1]) : xf_identity();
-        Xform sock_r = xf_mul(want, k->grip_r);
+        Xform sock_r = xf_mul(want, sock_r0);
         CG->fp_glue_pos[1] = v3_dist(palm_r.t, sock_r.t);
         CG->fp_glue_ang[1] = quat_angle_between(palm_r.r, sock_r.r) * DG_RAD2DEG;
         CG->fp_glue_pos[0] = CG->fp_glue_ang[0] = 0;
@@ -1928,7 +1937,7 @@ void chars_render_local_fp(World *w, float alpha, int local_slot) {
         if (hs->left_hand && k->has_left && la >= 0 && lf >= 0 && lh >= 0 && ikw > 0.001f) {
             Xform sock_l = xf_mul(item, grip_l);
             Xform hand_l = proc_hand_for_socket(sock_l, LIB->hands.palm[0]);
-            anim_ik_two_bone_pose(s, posep, model, la, lf, lh, hand_l.t, &hand_l.r, quat_rotate(cam_rm, hs->elbow_l), ikw);
+            anim_ik_two_bone_pose(s, posep, model, la, lf, lh, hand_l.t, &hand_l.r, quat_rotate(cam_rm, fp_hand_pole(c, hs, 0)), ikw * c->rt.proc.hand[0].ikw);
             Xform palm_l = xf_mul(model[lh], LIB->hands.palm[0]);
             CG->fp_glue_pos[0] = v3_dist(palm_l.t, sock_l.t);
             CG->fp_glue_ang[0] = quat_angle_between(palm_l.r, sock_l.r) * DG_RAD2DEG;
@@ -1957,8 +1966,8 @@ void chars_render_local_fp(World *w, float alpha, int local_slot) {
             dbg_cross(xf_point(item_w, k->pivot), 0.015f, DBG_MAGENTA, 0);
             dbg_cross(xf_point(item_w, k->sight), 0.01f, DBG_CYAN, 0);
             dbg_cross(xf_point(item_w, k->muzzle), 0.012f, DBG_ORANGE, 0);
-            dbg_cross(xf_mul(item_w, k->grip_r).t, 0.012f, DBG_YELLOW, 0);
-            if (k->has_left) dbg_cross(xf_mul(item_w, k->grip_l).t, 0.012f, DBG_YELLOW, 0);
+            dbg_cross(xf_mul(item_w, sock_r0).t, 0.012f, DBG_YELLOW, 0);
+            if (k->has_left) dbg_cross(xf_mul(item_w, sock_l0).t, 0.012f, DBG_YELLOW, 0);
             const HoldPointOutput *ho = &c->rt.proc.hp_out;
             if (v3_len2(v3_sub(ho->cast_to, ho->cast_from)) > 0) dbg_line(ho->cast_from, ho->cast_to, ho->cast_hit ? DBG_RED : DBG_GREEN, 0, false);
         }
@@ -1975,12 +1984,20 @@ void chars_render_local_fp(World *w, float alpha, int local_slot) {
         if (t.ov_w[h] <= 0.001f) continue;
         int ua = s->role[h ? BR_R_ARM : BR_L_ARM], fa = s->role[h ? BR_R_FOREARM : BR_L_FOREARM], ha = s->role[h ? BR_R_HAND : BR_L_HAND];
         if (ua < 0 || fa < 0 || ha < 0) continue;
+        // Hand pose: the grip style with the interactable's / vehicle's entry on top; its socket
+        // is an offset from the gameplay target (docs/HANDPOSE.md).
+        HandPose hp;
+        const HandPoseDB *db = &LIB->handposes;
+        int base = handpose_find_hash(db, handpose_grip_style_hash(t.grip[h] < GRIP_COUNT ? t.grip[h] : GRIP_GRAB));
+        handpose_resolve_over(db, base, handpose_find_hash(db, t.ov_pose[h]), h, t.ov_state[h], &hp);
         Xform palm = xf_mul(inv_root, t.ov_palm[h]);
+        if (hp.has_socket) palm = xf_mul(palm, hp.socket);
+        palm = xf_mul(palm, hp.wrist);
         Xform hand = proc_hand_for_socket(palm, LIB->hands.palm[h]);
         float side = h ? 1.0f : -1.0f;
-        vec3 pole = quat_rotate(quat_conj(root.r), quat_rotate(t.cam_rot, v3(0.8f * side, -1.0f, 0.25f)));
-        anim_ik_two_bone_pose(s, posep, model, ua, fa, ha, hand.t, &hand.r, pole, t.ov_w[h]);
-        if (t.grip[h] < GRIP_COUNT) proc_curl_fingers(s, posep, model, h, k_grip_curl[t.grip[h]], &LIB->hands, t.ov_w[h]);
+        vec3 pole = quat_rotate(quat_conj(root.r), quat_rotate(t.cam_rot, hp.has_pole ? hp.pole : v3(0.8f * side, -1.0f, 0.25f)));
+        anim_ik_two_bone_pose(s, posep, model, ua, fa, ha, hand.t, &hand.r, pole, t.ov_w[h] * hp.ik_weight);
+        handpose_apply_fingers(s, posep, model, h, hp.j, &LIB->hands, t.ov_w[h]);
     }
     // Neck, head (and hair / eyes / end bones) collapsed: the camera sits inside the head
     // (owner's view only: other players and the shadow pass get the full body).
