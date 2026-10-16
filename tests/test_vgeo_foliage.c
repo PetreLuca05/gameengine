@@ -1015,6 +1015,7 @@ static void test_streaming(void) {
             for (u32 c = 0; c < p->cell_cap; c++) {
                 VgCell e = p->cells[c];
                 if (e.count) e.first += g_scene.instance_count;
+                gc[c].count &= VG_CELL_COUNT;   // the GPU copy flags all-foliage cells
                 gpu_bad += memcmp(&e, &gc[c], sizeof(VgCell)) != 0;
                 for (u32 i = p->cells[c].first; i < p->cells[c].first + p->cells[c].count; i++) gpu_bad += memcmp(&p->inst[i], &gi[i], sizeof(VgInstance)) != 0;
             }

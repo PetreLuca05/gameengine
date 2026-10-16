@@ -279,6 +279,8 @@ static void world_sphere(const VgInstance *in, const VgMesh *m, const float c[3]
 // Mesh foliage fields from its materials (declared WPO bounds, fades, shadow distance, flags).
 static void mesh_foliage(VgScene *s) {
     s->has_two_sided = s->has_masked = s->has_impostors = false;
+    s->fol_fade_max = s->fol_shadow_max = 0;
+    bool fade_inf = false, shadow_inf = false;
     for (u32 i = 0; i < s->material_count; i++) {
         VgMaterial *mt = &s->materials[i];
         mt->wpo_max = mt->wpo != WPO_NONE ? vgeo_wpo_max(mt->wpo, mt->wpo_params) : 0.0f;
@@ -305,7 +307,15 @@ static void mesh_foliage(VgScene *s) {
         if (m->fflags & VGMF_TWO_SIDED) s->has_two_sided = true;
         if (m->fflags & (VGMF_MASKED | VGMF_DITHER)) s->has_masked = true;
         if (m->impostor != ~0u) s->has_impostors = true;
+        if (m->fflags & VGMF_FOLIAGE) {
+            if (m->fade_end > m->fade_start) s->fol_fade_max = fmaxf(s->fol_fade_max, m->fade_end);
+            else fade_inf = true;
+            if (m->shadow_max_dist > 0) s->fol_shadow_max = fmaxf(s->fol_shadow_max, m->shadow_max_dist);
+            else shadow_inf = true;
+        }
     }
+    if (fade_inf) s->fol_fade_max = 0;
+    if (shadow_inf) s->fol_shadow_max = 0;
 }
 
 // ------------------------------------------------------------------ placement chunks
@@ -355,7 +365,8 @@ static void dirty_cell(VgPlacements *p, u32 c) {
     p->dirty_cells[p->dirty_cells_n++] = c;
 }
 
-// Cell bounds = union of its instances' mesh spheres (+ max WPO), first relative to the region.
+// Cell bounds = union of its instances' mesh spheres (+ max WPO) and positions (the fade / shadow
+// distances are measured from them), first relative to the region.
 static void cell_bounds(const VgScene *s, VgCell *c) {
     for (int a = 0; a < 3; a++) { c->min[a] = FLT_MAX; c->max[a] = -FLT_MAX; }
     for (u32 i = c->first; i < c->first + c->count; i++) {
@@ -364,8 +375,8 @@ static void cell_bounds(const VgScene *s, VgCell *c) {
         float w[4];
         world_sphere(in, m, m->center, m->radius, w);
         for (int a = 0; a < 3; a++) {
-            c->min[a] = fminf(c->min[a], w[a] - w[3]);
-            c->max[a] = fmaxf(c->max[a], w[a] + w[3]);
+            c->min[a] = fminf(c->min[a], fminf(w[a] - w[3], in->pos[a]));
+            c->max[a] = fmaxf(c->max[a], fmaxf(w[a] + w[3], in->pos[a]));
         }
     }
     if (!c->count) *c = k_empty_cell;
@@ -464,10 +475,18 @@ const VgCell *vgeo_scene_gpu_cell(const VgScene *s, u32 i, VgCell *tmp) {
     return tmp;
 }
 
-// GPU form of region cell c (first rebased past the static instances).
+// GPU form of region cell c (first rebased past the static instances; VG_CELL_FOLIAGE when every
+// instance is foliage: the cull drops it whole past the fade / shadow distances).
 static VgCell gpu_cell(const VgScene *s, u32 c) {
     VgCell g = s->pl.cells[c];
-    if (g.count) g.first += s->instance_count;
+    if (!g.count) return g;
+    bool all = true;
+    for (u32 i = g.first; i < g.first + g.count && all; i++) {
+        u32 m = s->pl.inst[i].mesh;
+        all = m < s->mesh_count && (s->meshes[m].fflags & VGMF_FOLIAGE);
+    }
+    g.first += s->instance_count;
+    if (all) g.count |= VG_CELL_FOLIAGE;
     return g;
 }
 

@@ -355,6 +355,8 @@ void vg_cull_record_pass1(VgCuller *c, VkCommandBuffer cmd, u32 frame, u32 slot,
     g.cap_cells = v->cells_cap;
     g.cap_instances = v->inst_cap;
     g.cap_requests = c->caps.requests;
+    g.fol_fade_max = s->fol_fade_max;
+    g.fol_shadow_max = s->fol_shadow_max;
     if (prev_ok) { g.hiz_prev[0] = (float)prev->w; g.hiz_prev[1] = (float)prev->h; g.hiz_prev[2] = (float)prev->mips; g.hiz_prev[3] = 1.0f; }
     if (cur_ok) { g.hiz_cur[0] = (float)cur->w; g.hiz_cur[1] = (float)cur->h; g.hiz_cur[2] = (float)cur->mips; g.hiz_cur[3] = 1.0f; }
     v->two_pass = (g.flags & VGV_TWO_PASS) && cur_ok && !(g.flags & VGV_NO_OCCLUSION);

@@ -14,7 +14,8 @@ void main() {
         uint ncell = min(ctr.n[pc.a[1]], V.caps1.x);   // a[1]: the list's counter
         if (wg >= ncell) return;
         VgCell c = cells[cell_list[pc.in_region * V.caps1.x + wg]];
-        for (uint i = gl_LocalInvocationID.x; i < c.count; i += 64u) vg_instance(c.first + i, pc.out_region);
+        uint n = c.count & VG_CELL_COUNT;
+        for (uint i = gl_LocalInvocationID.x; i < n; i += 64u) vg_instance(c.first + i, pc.out_region);
     } else {
         uint i = vg_flat_group() * 64u + gl_LocalInvocationID.x;
         if (i >= min(ctr.n[VGN_INST_OCC], V.caps1.y)) return;

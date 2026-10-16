@@ -24,7 +24,7 @@ struct VgViewGpu {
     vec4 wind_prev;          // last frame's (velocity)
     vec4 foliage;            // time, previous time, r_foliage_density, r_vgeo_impostor_px
     vec4 disp;               // displacement buffer: texel 0 world x, z, metres per texel, valid
-    uvec4 misc;              // x frame index (dither rotation), y displacement texture index
+    uvec4 misc;              // x frame index (dither rotation), y displacement texture index, z / w float bits: fol_fade_max, fol_shadow_max
 };
 struct VgMaterial {
     vec4 color; float roughness, metallic, emissive, tex_scale; uint flags; uint albedo_tex; uint mask_tex; float alpha_cutoff;
@@ -88,6 +88,8 @@ struct VgPaletteSlot { uint first, prev_first, bone_count, pad0; float max_scale
 #define VGN_IMPOSTORS 23
 #define VGN_INST_FADED 24
 #define VG_IMPOSTOR_ENTRY 0xFFFFFFFFu
+#define VG_CELL_FOLIAGE 0x80000000u
+#define VG_CELL_COUNT 0x7FFFFFFFu
 // Foliage (Phase 7, vgeo_gpu.h): material flags, mesh flags, WPO snippets.
 #define VGM_MASKED (1u << 24)
 #define VGM_TWO_SIDED (1u << 25)

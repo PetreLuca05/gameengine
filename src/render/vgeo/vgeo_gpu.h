@@ -143,8 +143,11 @@ typedef struct VgInstance {
 } VgInstance;
 
 // Placement cell (8 m): the first level of instance culling. Instances of a cell are contiguous.
+// The GPU copy's count carries VG_CELL_FOLIAGE when every instance is foliage (distance-culled whole).
 typedef struct VgCell { float min[3]; u32 first; float max[3]; u32 count; } VgCell;
 #define VGEO_CELL_SIZE 8.0f
+#define VG_CELL_FOLIAGE 0x80000000u
+#define VG_CELL_COUNT 0x7FFFFFFFu
 
 // ------------------------------------------------------------------ culling (Phase 2)
 
@@ -181,7 +184,8 @@ typedef struct VgViewGpu {
     float wind_prev[4];
     float foliage[4];                // time (s), previous time, r_foliage_density, r_vgeo_impostor_px (0 = no impostors)
     float disp[4];                   // displacement buffer: texel 0 world x, z (m), metres per texel, valid (1)
-    u32 frame_index, disp_tex, pad1[2];   // frame_index: dither rotation (TAA); disp_tex: its texture index
+    u32 frame_index, disp_tex;       // frame_index: dither rotation (TAA); disp_tex: its texture index
+    float fol_fade_max, fol_shadow_max;   // all-foliage cells (VG_CELL_FOLIAGE) farther than this are culled whole (0 = never)
 } VgViewGpu;
 
 // Counters (binding 8): indirect dispatch args first (x, y, z, unused), then counts.
