@@ -645,6 +645,7 @@ float mapgen_tree_density(const MapGen *g, const MgRaster *r, float x, float z, 
         const MgFeature *f = &g->features[fl ? fl[k] : k];
         pad = f->kind == MGF_PAD && rect_dist(v2(x, z), f->pos, f->size, f->yaw) <= 2.0f;
     }
+    if (pad && mat != MGM_GRASS) return 0;   // yards / lots stay clear (parks are painted grass)
     if (!pad) {
         // scattered pines on the mountains, sparse trees on open grass
         if (h > 34.0f && slope < 0.9f) { float m = 0.006f * (1.0f - smoothstepf(150.0f, 220.0f, h)); if (m > dens) { dens = m; pf = 0.95f; } }

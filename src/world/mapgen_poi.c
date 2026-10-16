@@ -926,6 +926,7 @@ static float kit_building(Kit *k, vec2 pos, float yaw, const BldSpec *b) {
     float top = b->sh * (float)b->storeys;
     // plinth down to the lowest ground (slopes)
     kblock(k, &f, 0, 0, hw + 0.25f, hd + 0.25f, lo - y0 - 0.8f, 0.0f, b->trim, MPF_COLLIDE, "concrete");
+    if (b->enterable) kblock(k, &f, 0, 0, hw - 0.3f, hd - 0.3f, -0.03f, 0.005f, C(0.34f, 0.28f, 0.22f), MPF_NO_SHADOW, "wood");   // floor finish
     if (!b->enterable) {
         kblock(k, &f, 0, 0, hw, hd, 0, top, b->wall, MPF_COLLIDE, b->surf);
         // window panes on every facade, door panel on the front
@@ -969,7 +970,7 @@ static float kit_building(Kit *k, vec2 pos, float yaw, const BldSpec *b) {
         float us[24];
         for (int s = 0; s < storeys; s++) {
             float fy = (float)s * sh;
-            if (s > 0) floor_slab(k, &f, iw, idp, fy, sx0 - 0.05f, sx0 + 2.65f, sz0 - 0.1f, sz0 + L + 0.1f, true, b->trim, "concrete");
+            if (s > 0) floor_slab(k, &f, iw, idp, fy, sx0 - 0.05f, sx0 + 2.65f, sz0 - 0.1f, sz0 + L + 0.1f, true, C(0.34f, 0.28f, 0.22f), "wood");
             for (int side = 0; side < 4; side++) {
                 float len = side < 2 ? b->w : b->d;
                 Opening op[26];

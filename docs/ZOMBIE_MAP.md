@@ -4,7 +4,7 @@
 [docs/reference/zombie_map/SPEC.md](reference/zombie_map/SPEC.md). Nothing is hand-modelled. A data file
 describes the world (`data/levels/zombieland.json`: terrain regions, sea, river, roads, ten points of
 interest). The generator turns it into terrain, roads, bridges, buildings, props, trees, loot and spawns
-at load time. This takes about 1.5 s plus about 4 s for the procedural foliage meshes and impostors on
+at load time. This takes about 1 s, plus about 1.6 s for the procedural foliage meshes and impostors on
 the first map load of a session.
 
 | Piece | Code |
@@ -155,8 +155,8 @@ All generation is deterministic for a description. Client and host build the sam
 
    Markings, bridges, city / suburb street furniture and roadside encounters are built here too.
 6. **Glue** (`openworld_load`):
-   - **Collision:** 16 × 16 static heightfield tiles (128 m, 1 m samples) and 4 invisible edge walls.
-   - **Geometry:** primitives batched into one mesh per 128 m tile and material variant (plain, gloss,
+   - **Collision:** 32 × 32 static heightfield tiles (64 m, 1 m samples) and 4 invisible edge walls.
+   - **Geometry:** primitives batched into one mesh per 64 m tile and material variant (plain, gloss,
      metal, emissive, glass, unshadowed; detail variants culled beyond 260 m). Road ribbons go on top.
      Collidable primitives become one triangle-mesh body per tile and surface (impact effects / sounds
      keep their material).
@@ -185,9 +185,13 @@ suburbs 2.0, farms 1.5, forest / camp / quarry 1.2, lake 0.8, wilderness 0.5.
 The horde normally chases the nearest player at any distance. On this map a **sense radius** (38 m)
 keeps zombies idle until one of these happens:
 - a player comes within the radius;
+- a player fires within 3 × the radius;
 - the zombie is hurt.
 
-A chasing zombie gives up beyond 2.5 × the radius. Deep water (more than 1 m) stops zombies like a ledge.
+Idle zombies wander: a new point within 8 m every 6 s, and a third of the time they just stand. A chasing
+zombie gives up beyond 2.5 × the radius. Deep water (more than 1 m) stops zombies like a ledge.
+
+Outdoor spawns skip building footprints, so a zombie never lands on a roof.
 
 **Loot.** `data/loot.json` defines the tiers, as weighted items with count ranges, item rolls and an empty
 chance:
@@ -231,6 +235,7 @@ pumps. Everything else on the roads is static wreck geometry.
 | `poi_goto <id> [height]` | teleport to a POI centre |
 | `ow_where` | ground, water level, material and POI at the player |
 | `ow_stats` | zombies (chasing / spawned / culled), chunks, draws, bodies, foliage, frame time |
+| `ow_zombie_list` | the zombies with positions and distances (debug) |
 | `ow_zombies 0/1` | the POI zombie spawner (cvar) |
 
 ## Tests
@@ -257,23 +262,48 @@ The script tests run from `build/bin`:
   the head-socket camera.
 - `zl_gameplay.cfg`: the clinic outside and inside, 15 s in the city with the spawner on (`ow_stats`,
   `horde_stats`), walking into the lake, the west edge, the police station.
-- `zl_perf.cfg`: `post_bench` at street level in the city and the suburbs, in the forest, over the city
-  and from the overview, uncapped.
+- `zl_perf.cfg`: `post_bench` uncapped at:
+  - street level in the city and the suburbs;
+  - in the forest;
+  - over the city, from the overview and from the mountain;
+  - in the city with the spawner on.
+- `zl_perf_night.cfg`: the city and the fuel station at night (lamps).
+- `zl_zombies.cfg`: lets the spawner fill the city, looks down from 30 m, fires a shot (noise aggro), and
+  spawns a ring of zombies on a suburb street.
+- `zl_net.sh`: a host and a client on zombieland. The client builds the same world, spawns in the suburbs
+  and sees the host's zombies. The port is `ZL_PORT` (27031) and the build dir is `DG_BUILD`.
 
-## Performance (RTX 3060 Ti, 1600 × 900, `zl_perf.cfg`)
+Set `DG_WATCHDOG=<seconds>` for scripted runs. If no frame finishes for that long, the main thread's stack
+goes to the log (`src/core/crash.c`).
 
-The frame-graph GPU passes total 2.8–3.4 ms at every spot. That includes about 0.2–0.5 ms of vgeo foliage
-raster.
+## Performance (RTX 3060 Ti, 1600 × 900, `zl_perf.cfg` / `zl_perf_night.cfg`)
 
-A script run uncapped averaged **7.3 ms per frame** (about 136 fps). Map content:
-- static geometry: about 500k triangles in 578 tile draws, frustum-culled per tile, detail tiles
-  distance-culled;
-- 16.6k trees and bushes, which LOD, fade (850–1100 m) and switch to impostors on the vgeo path;
-- grass and crops on the streamed chunks (fading at 65 / 95 m);
-- about 160 visual chunks and 256 far tiles.
+| Spot | Frame-graph GPU passes | Frame (smoothed) |
+|---|---|---|
+| city street, suburbs, forest, over the city, overview, mountain | 2.8–3.3 ms | 4.3–4.5 ms (about 230 fps) |
+| city with the spawner on (12 zombies) | 2.8 ms | 4.3 ms |
+| city at night | 2.9 ms | 6.1 ms |
+| fuel station at night (its canopy lamp casts shadows) | 3.2 ms | 9.4 ms |
 
-Load time is about 1.5 s for the generator and uploads, and about 4.3 s for building the procedural
-foliage kinds with their impostor atlases.
+The frame-graph figures include about 0.2–0.5 ms of vgeo foliage raster. The whole uncapped day script
+averaged 6.5 ms per frame, loads included.
+
+What the map holds:
+- **Static geometry:** about 500k triangles in 1359 draws (64 m tiles × material). The renderer
+  frustum-culls them per tile and detail tiles are distance-culled. Small tiles also keep the sun-cascade
+  and local-light caster lists short.
+- **Collision:** 2036 static bodies.
+- **Trees and bushes:** 16.6k. They LOD, fade (850–1100 m) and switch to impostors on the vgeo path.
+- **Grass and crops:** on the streamed chunks, fading at 65 / 95 m.
+- **Terrain:** about 160 visual chunks and 256 far tiles.
+
+**Lamps.** Most lamps cast no local shadow: street, pier, bridge and checkpoint lamps carry
+`LIGHT_GROUP_NO_SHADOW` (`world.h`, replicated with the light group). Campfires and the fuel canopy do
+cast. With every lamp shadowed, the night city took 36 ms a frame.
+
+**Load.** The generator, raster and uploads take about 1 s. Building the 6 procedural foliage kinds
+takes about 1.6 s: cluster builds and impostor bakes run in parallel, and the tree kinds use 512 px
+atlases. A client therefore joins well inside the 4 s ENet timeout.
 
 ## What is placeholder
 
@@ -292,3 +322,5 @@ foliage kinds with their impostor atlases.
 - **Unused assets.** The tree assets in `assets/trees` (TreeIt `.tre`, CC BY) are not used: the format is
   not loadable. The trees are procedural vgeo foliage instead.
 - **Static wrecks.** Abandoned cars on roads cannot be driven, searched or moved.
+- **Indoor light.** Interiors get the sky ambient through the open floor plan (no indoor occlusion beyond
+  GTAO), so floors read bluish. They are not much darker than outside, except at night.

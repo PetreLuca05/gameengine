@@ -112,6 +112,12 @@ int main(int argc, char **argv) {
            pois.poi_count, pois.prim_count, pois.ent_count);
     for (int b = 0; b < g.bridge_count; b++) printf("  bridge %d: road '%s' (%.0f, %.0f) - (%.0f, %.0f) deck %.1f m\n", b, g.roads[g.bridges[b].road].name, g.bridges[b].a.x, g.bridges[b].a.y, g.bridges[b].b.x, g.bridges[b].b.y, g.bridges[b].h);
     for (int i = 0; i < pois.poi_count; i++) printf("  poi %-12s %-16s (%5.0f, %5.0f) ground %.1f\n", pois.pois[i].id, pois.pois[i].name, pois.pois[i].center.x, pois.pois[i].center.y, mapgen_raster_height(&r, pois.pois[i].center.x, pois.pois[i].center.y));
+    if (argc > 4 && !strcmp(argv[4], "lots"))   // lot list: kind, POI, centre, size, yaw, flags
+        for (int i = 0; i < pois.lot_count; i++) {
+            const MpLot *l = &pois.lots[i];
+            printf("  lot %-14s %-9s (%7.1f, %7.1f) %5.1f x %5.1f yaw %6.1f storeys %2d%s ground %.1f\n", mappoi_lot_name(l->kind), l->poi ? pois.pois[l->poi - 1].id : "-", l->pos.x,
+                   l->pos.y, l->size.x, l->size.y, l->yaw * 57.29578f, l->storeys, (l->flags & MPL_ENTERABLE) ? " enterable" : "", mapgen_raster_height(&r, l->pos.x, l->pos.y));
+        }
     free(img);
     mapgen_raster_free(&r);
     mappoi_free(&pois);
