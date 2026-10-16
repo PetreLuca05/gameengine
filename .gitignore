@@ -44,3 +44,6 @@ Thumbs.db
 /build-agent.log
 
 /.claude/worktrees/
+
+# Packaged builds for playing / comparing (not source)
+/openable builds/
