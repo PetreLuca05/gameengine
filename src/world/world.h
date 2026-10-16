@@ -215,7 +215,7 @@ typedef struct SpawnPoint { vec3 pos; float yaw; } SpawnPoint;
 #define MAX_STATIC_DRAWS 1024
 #define MAX_LABELS 1024
 #define MAX_SPAWNS 16
-#define MAX_STATIC_BODIES 1024
+#define MAX_STATIC_BODIES 4096
 #define MAX_LEVEL_VGEO 64
 
 // Virtualized geometry placement (level entity "vgeo", docs/VGEO.md "Levels"): a mesh (a .vgeo file
@@ -226,7 +226,7 @@ typedef struct LevelVgeo {
     vec3 pos, color;
     float yaw, scale, scale_jitter, spacing, roughness;
     u32 grid[2], seed;
-} LevelVgeo;
+} LevelVgeo;   // collision: "collision": "mesh" (coarsest LOD, default for single placements), "sphere" (grids), "none"
 
 typedef struct LevelStatic {
     char name[32];

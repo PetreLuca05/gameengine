@@ -341,7 +341,7 @@ Two rasterisers write the same 64-bit value with `atomicMax`:
   shared (writable) set, so the game enables `vertexPipelineStoresAndAtomics`.
 - Hi-Z: power-of-two half resolution, 6 levels per dispatch (see VGEO.md "Occlusion Hi-Z"); this frame's Hi-Z
   for pass 2 is built from the visibility buffer only (legacy occluders enter through next frame's history).
-- Phase 5: placements are render-only (no collision); the 2015 / 2010 fallback picks discrete LODs on the CPU;
+- Phase 5: placement collision is the coarsest LOD mesh (single placements) or a sphere (grids); the 2015 / 2010 fallback picks discrete LODs on the CPU;
   the bench writes per-pass ms from the frame graph (`vgeo_bench`), not a separate executable.
 
 ## 5. Phase 4: streaming

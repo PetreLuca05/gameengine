@@ -23,4 +23,14 @@ void vgeo_imported_source(const VgImported *m, VgSource *src);
 bool vgeo_load_or_build(const char *gltf_path, const char *cache_dir, const VgBuildOptions *opt, VgBuilt *out, bool *from_cache, char *err, int err_size);
 u32 vgeo_cache_key(const void *file, size_t size, const VgBuildOptions *opt);
 
+// .vgeo files loaded once per process (level collision and the renderer share them): NULL when the
+// file is missing / invalid. Kept until vgeo_file_release_all (shutdown).
+const VgBuilt *vgeo_file_get(const char *path);
+void vgeo_file_release_all(void);
+
+// Instances of a level placement (LevelVgeo / RenderVgeoPlacement): nx x nz grid around pos at spacing,
+// a deterministic random yaw per grid instance (seed) and scale * (1 +- jitter). Returns the count.
+typedef struct VgPlacementXf { float pos[3], rot[4], scale; } VgPlacementXf;
+u32 vgeo_placement_expand(const float pos[3], float yaw, float scale, float jitter, float spacing, u32 nx, u32 nz, u32 seed, VgPlacementXf *out, u32 cap);
+
 #endif

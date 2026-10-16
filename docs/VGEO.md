@@ -22,7 +22,7 @@ Simplification and clustering use meshoptimizer v0.22 (`simplifier.cpp`, `cluste
 | 2. GPU culling / LOD selection / Hi-Z | **done** |
 | 3. Visibility buffer raster + resolve | **done** |
 | 4. Streaming | — |
-| 5. Integration, `r_era`, test scene, `bench_vgeo` | **done** (collision for vgeo placements: —) |
+| 5. Integration, `r_era`, test scene, `bench_vgeo` | **done** |
 | 6. Skinned | — |
 | 7. Foliage support | — |
 
@@ -270,9 +270,12 @@ opaque         legacy forward lighting, then the vgeo lit resolve (vgeo_lit.frag
 
 ### Levels, test scene and eras
 
-- Level entity `"vgeo"` (`src/world/level.c`, render only, no collision yet): `mesh` (a `.vgeo` file or a model
-  name with `"vgeo": true`), `pos`, `yaw`, `scale`, `scale_jitter`, `grid: [nx, nz]`, `spacing`, `color`,
-  `roughness`, `seed`. The game hands the placements to `render_vgeo_set_level` after the level loads.
+- Level entity `"vgeo"` (`src/world/level.c`): `mesh` (a `.vgeo` file or a model name with `"vgeo": true`), `pos`,
+  `yaw`, `scale`, `scale_jitter`, `grid: [nx, nz]`, `spacing`, `color`, `roughness`, `seed`, `collision`. The game
+  hands the placements to `render_vgeo_set_level` after the level loads; both sides expand grids with
+  `vgeo_placement_expand` (same instances) and share the loaded file (`vgeo_file_get`, once per process).
+- Collision (static, `.vgeo` files): `"mesh"` (default for single placements) = the coarsest discrete LOD as a
+  triangle mesh per instance; `"sphere"` (default for grids) = the bounding sphere x 0.8; `"none"`.
 - `map vgeo_test` (`data/levels/vgeo_test.json`): the 10M-triangle rock field (north), 1024 instances of the
   500k-triangle statue (south), the 2M-triangle building (east: four 16 × 8 m continuous walls with a bevelled
   brick relief, `vgeo_gen_building`). The content is generated at build time by `build_vgeo --gen` into

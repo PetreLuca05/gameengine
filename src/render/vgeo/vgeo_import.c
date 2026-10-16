@@ -3,6 +3,7 @@
 #include "core/platform.h"
 #include "cgltf.h"
 #include <SDL3/SDL.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -162,4 +163,58 @@ bool vgeo_load_or_build(const char *gltf_path, const char *cache_dir, const VgBu
         }
     }
     return true;
+}
+
+// ------------------------------------------------------------------ shared file cache, placements
+
+static struct { char path[512]; VgBuilt *b; } g_files[32];
+static int g_file_count;
+
+const VgBuilt *vgeo_file_get(const char *path) {
+    for (int i = 0; i < g_file_count; i++)
+        if (!strcmp(g_files[i].path, path)) return g_files[i].b;
+    if (g_file_count >= 32) return NULL;
+    size_t size = 0;
+    u8 *data = (u8 *)platform_read_file(path, &size);
+    VgBuilt *b = NULL;
+    if (data) {
+        b = (VgBuilt *)calloc(1, sizeof(VgBuilt));
+        if (!vgeo_deserialize(data, size, b)) { log_error("vgeo: %s is not a valid .vgeo file (version %d)", path, VGEO_FILE_VERSION); free(b); b = NULL; }
+        free(data);
+    }
+    dg_strcpy(g_files[g_file_count].path, sizeof(g_files[0].path), path);
+    g_files[g_file_count++].b = b;   // also caches a miss
+    return b;
+}
+
+void vgeo_file_release_all(void) {
+    for (int i = 0; i < g_file_count; i++)
+        if (g_files[i].b) { vgeo_free(g_files[i].b); free(g_files[i].b); }
+    g_file_count = 0;
+}
+
+u32 vgeo_placement_expand(const float pos[3], float yaw, float scale, float jitter, float spacing, u32 nx, u32 nz, u32 seed, VgPlacementXf *out, u32 cap) {
+    nx = nx ? nx : 1;
+    nz = nz ? nz : 1;
+    u32 h = seed * 2654435761u + 1u, n = 0;
+    bool grid = nx * nz > 1;
+    for (u32 z = 0; z < nz; z++)
+        for (u32 x = 0; x < nx; x++) {
+            h ^= h << 13;
+            h ^= h >> 17;
+            h ^= h << 5;
+            if (n >= cap) continue;
+            float r0 = (float)(h & 0xFFFF) / 65535.0f, r1 = (float)(h >> 16) / 65535.0f;
+            VgPlacementXf *o = &out[n++];
+            o->pos[0] = pos[0] + ((float)x - (float)(nx - 1) * 0.5f) * spacing;
+            o->pos[1] = pos[1];
+            o->pos[2] = pos[2] + ((float)z - (float)(nz - 1) * 0.5f) * spacing;
+            float a = (yaw + (grid ? r0 * 6.2831853f : 0.0f)) * 0.5f;
+            o->rot[0] = 0.0f;
+            o->rot[1] = sinf(a);
+            o->rot[2] = 0.0f;
+            o->rot[3] = cosf(a);
+            o->scale = scale * (1.0f + jitter * (r1 * 2.0f - 1.0f));
+        }
+    return n;
 }

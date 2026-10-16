@@ -1,5 +1,6 @@
 #include "gameplay/attachments.h"
 #include "level.h"
+#include "render/vgeo/vgeo_import.h"
 #include "core/engine.h"
 #include "core/log.h"
 #include "core/platform.h"
@@ -378,6 +379,52 @@ static void build_room(LevelBuild *b, const cJSON *room) {
     }
 }
 
+// Static collision of a vgeo placement (.vgeo files only): its coarsest discrete LOD as a triangle
+// mesh per instance, or the mesh's bounding sphere (cheap, for big grids).
+static void add_vgeo_collision(World *w, const LevelVgeo *v, const char *mode) {
+    size_t l = strlen(v->mesh);
+    if (!strcmp(mode, "none") || l < 6 || strcmp(v->mesh + l - 5, ".vgeo") || !w->phys) return;
+    char path[512];
+    const VgBuilt *b = vgeo_file_get(platform_data_path(v->mesh, path, sizeof(path)));
+    if (!b || !b->hdr.lod_count) return;
+    u32 cap = v->grid[0] * v->grid[1];
+    VgPlacementXf *xf = (VgPlacementXf *)malloc(sizeof(VgPlacementXf) * (cap ? cap : 1));
+    float pp[3] = { v->pos.x, v->pos.y, v->pos.z };
+    u32 n = vgeo_placement_expand(pp, v->yaw, v->scale, v->scale_jitter, v->spacing, v->grid[0], v->grid[1], v->seed, xf, cap);
+    const VgDiscreteLod *lod = &b->lods[b->hdr.lod_count - 1];
+    vec3 *verts = NULL;
+    if (!strcmp(mode, "mesh")) verts = (vec3 *)malloc(sizeof(vec3) * (lod->vertex_count + 1));
+    LevelStatic *ls = &w->level;
+    for (u32 k = 0; k < n && ls->body_count < MAX_STATIC_BODIES; k++) {
+        BodyDesc d;
+        memset(&d, 0, sizeof(d));
+        d.motion = PM_STATIC;
+        d.layer = PL_STATIC;
+        d.friction = 0.8f;
+        d.rot = (quat){ xf[k].rot[0], xf[k].rot[1], xf[k].rot[2], xf[k].rot[3] };
+        d.pos = v3(xf[k].pos[0], xf[k].pos[1], xf[k].pos[2]);
+        if (verts) {
+            for (u32 i = 0; i < lod->vertex_count; i++) {
+                const float *p = b->lod_vertices[lod->first_vertex + i].pos;
+                verts[i] = v3(p[0] * xf[k].scale, p[1] * xf[k].scale, p[2] * xf[k].scale);
+            }
+            d.shape.kind = SHAPE_MESH;
+            d.shape.verts = verts;
+            d.shape.vert_count = lod->vertex_count;
+            d.shape.indices = b->lod_indices + lod->first_index;
+            d.shape.index_count = lod->index_count;
+        } else {
+            d.shape.kind = SHAPE_SPHERE;
+            d.shape.radius = b->hdr.sphere[3] * xf[k].scale * 0.8f;
+            d.pos = v3_add(d.pos, quat_rotate(d.rot, v3(b->hdr.sphere[0] * xf[k].scale, b->hdr.sphere[1] * xf[k].scale, b->hdr.sphere[2] * xf[k].scale)));
+        }
+        BodyId id = phys_add_body(w->phys, &d);
+        if (id != PHYS_INVALID_BODY) ls->bodies[ls->body_count++] = id;
+    }
+    free(verts);
+    free(xf);
+}
+
 static void spawn_entity(World *w, const cJSON *e) {
     const char *type = js(e, "type", "");
     vec3 pos = jv3(e, "pos", v3(0, 0, 0));
@@ -444,6 +491,7 @@ static void spawn_entity(World *w, const cJSON *e) {
         v->grid[0] = cJSON_IsArray(g) && cJSON_GetArraySize(g) > 0 ? (u32)cJSON_GetArrayItem(g, 0)->valueint : 1;
         v->grid[1] = cJSON_IsArray(g) && cJSON_GetArraySize(g) > 1 ? (u32)cJSON_GetArrayItem(g, 1)->valueint : 1;
         v->seed = (u32)jf(e, "seed", 1);
+        add_vgeo_collision(w, v, js(e, "collision", v->grid[0] * v->grid[1] > 1 ? "sphere" : "mesh"));
         return;
     } else if (!strcmp(type, "dummy")) {
         id = spawn_dummy(w, pos, yaw, jf(e, "hp", 200));

@@ -14,6 +14,7 @@
 #include "vgeo/vgeo_cull.h"
 #include "vgeo/vgeo_raster.h"
 #include "vgeo/vgeo_procgen.h"
+#include "vgeo/vgeo_import.h"
 #include "assets/assets.h"
 #include "core/platform.h"
 #include <math.h>
@@ -41,8 +42,9 @@ static struct {
     struct FallbackMesh {
         VgDiscreteLod lods[VGEO_MAX_LODS];
         u32 lod_count;
-        VgLodVertex *verts;
-        u32 *indices;
+        const VgLodVertex *verts;
+        const u32 *indices;
+        bool own;                // verts / indices are copies (transient builds)
         MeshId gpu[VGEO_MAX_LODS];
         float radius;
     } *fb;
@@ -67,7 +69,7 @@ static struct {
     Cvar *r_vgeo, *error_px, *shadow_error_px, *sw_px, *occlusion, *freeze, *debug, *debug_spheres, *shadows;
 } G;
 
-static void fallback_register(u32 mesh, const VgBuilt *b);
+static void fallback_register(u32 mesh, const VgBuilt *b, bool persistent);
 static void vkg_register_era(void);
 static void cmd_vgeo_bench(int argc, const char **argv);
 
@@ -213,7 +215,7 @@ static void cmd_vgeo_test_scene(int argc, const char **argv) {
         bool ok = vgeo_build(&src, &opt, &b, err, sizeof(err));
         vgeo_gen_free(&g);
         if (!ok) { log_error("vgeo: rock build failed: %s", err); return; }
-        fallback_register(vgeo_scene_add_mesh(&G.scene, &b), &b);
+        fallback_register(vgeo_scene_add_mesh(&G.scene, &b), &b, false);
         vgeo_free(&b);
         G.test_meshes++;
     }
@@ -312,7 +314,9 @@ void vkg_shutdown(void) {
     vg_raster_shutdown(&G.raster);
     vg_cull_shutdown(&G.cull);
     vgeo_scene_free(&G.scene);
-    for (u32 i = 0; i < G.fb_cap; i++) { free(G.fb[i].verts); free(G.fb[i].indices); }
+    for (u32 i = 0; i < G.fb_cap; i++)
+        if (G.fb[i].own) { free((void *)G.fb[i].verts); free((void *)G.fb[i].indices); }
+    vgeo_file_release_all();
     free(G.fb);
     G.fb = NULL;
     G.fb_cap = 0;
@@ -558,8 +562,6 @@ static u32 level_mesh(const RenderVgeoPlacement *pl) {
     for (u32 i = 0; i < G.named_count; i++)
         if (!strcmp(G.named[i].name, pl->mesh)) return G.named[i].mesh;
     if (G.named_count >= 64) return ~0u;
-    VgBuilt b;
-    bool owned = false;
     const VgBuilt *src = NULL;
     VgMaterial mat;
     memset(&mat, 0, sizeof(mat));
@@ -572,20 +574,15 @@ static u32 level_mesh(const RenderVgeoPlacement *pl) {
     const Model *model = NULL;
     if (name_is_file(pl->mesh)) {
         char path[512];
-        size_t size = 0;
-        u8 *data = (u8 *)platform_read_file(platform_data_path(pl->mesh, path, sizeof(path)), &size);
-        if (!data) { log_warn("vgeo: %s not found (generated at build time by tools/build_vgeo)", pl->mesh); return ~0u; }
-        owned = vgeo_deserialize(data, size, &b);
-        free(data);
-        if (!owned) { log_error("vgeo: %s is not a valid .vgeo file (rebuild it: version %d)", pl->mesh, VGEO_FILE_VERSION); return ~0u; }
-        src = &b;
+        src = vgeo_file_get(platform_data_path(pl->mesh, path, sizeof(path)));
+        if (!src) { log_warn("vgeo: %s missing or invalid (generated at build time by tools/build_vgeo)", pl->mesh); return ~0u; }
     } else {
         model = assets_model(assets_model_id(pl->mesh));
         if (!model || !model->vgeo) { log_warn("vgeo: model '%s' has no vgeo data (\"vgeo\": true in data/assets.json)", pl->mesh); return ~0u; }
         src = model->vgeo;
     }
     u32 mesh = vgeo_scene_add_mesh(&G.scene, src);
-    fallback_register(mesh, src);
+    fallback_register(mesh, src, true);
     u32 nm = src->hdr.material_count ? src->hdr.material_count : 1, base = 0;
     for (u32 k = 0; k < nm; k++) {
         VgMaterial m = mat;
@@ -603,7 +600,6 @@ static u32 level_mesh(const RenderVgeoPlacement *pl) {
     }
     vgeo_scene_set_mesh_materials(&G.scene, mesh, base);
     log_info("vgeo: level mesh %s: %u clusters, %u pages, %u tris", pl->mesh, src->hdr.cluster_count, src->hdr.page_count, src->stats.input_tris);
-    if (owned) vgeo_free(&b);
     dg_strcpy(G.named[G.named_count].name, sizeof(G.named[0].name), pl->mesh);
     G.named[G.named_count++].mesh = mesh;
     return mesh;
@@ -617,22 +613,13 @@ void render_vgeo_set_level(const RenderVgeoPlacement *p, int count) {
         const RenderVgeoPlacement *pl = &p[i];
         u32 mesh = level_mesh(pl);
         if (mesh == ~0u) continue;
-        u32 nx = pl->grid[0] ? pl->grid[0] : 1, nz = pl->grid[1] ? pl->grid[1] : 1;
-        u32 h = pl->seed * 2654435761u + 1u;
-        for (u32 z = 0; z < nz; z++)
-            for (u32 x = 0; x < nx; x++) {
-                h ^= h << 13;
-                h ^= h >> 17;
-                h ^= h << 5;
-                float r0 = (float)(h & 0xFFFF) / 65535.0f, r1 = (float)(h >> 16) / 65535.0f;
-                bool grid = nx * nz > 1;
-                vec3 pos = v3_add(pl->pos, v3(((float)x - (float)(nx - 1) * 0.5f) * pl->spacing, 0, ((float)z - (float)(nz - 1) * 0.5f) * pl->spacing));
-                quat q = quat_yaw(pl->yaw + (grid ? r0 * 6.2831853f : 0.0f));
-                float sc = pl->scale * (1.0f + pl->scale_jitter * (r1 * 2.0f - 1.0f));
-                float pp[3] = { pos.x, pos.y, pos.z }, rr[4] = { q.x, q.y, q.z, q.w };
-                vgeo_scene_add_instance(&G.scene, mesh, pp, rr, sc);
-                total++;
-            }
+        u32 cap = (pl->grid[0] ? pl->grid[0] : 1) * (pl->grid[1] ? pl->grid[1] : 1);
+        VgPlacementXf *xf = (VgPlacementXf *)malloc(sizeof(VgPlacementXf) * cap);
+        float pp[3] = { pl->pos.x, pl->pos.y, pl->pos.z };
+        u32 n = vgeo_placement_expand(pp, pl->yaw, pl->scale, pl->scale_jitter, pl->spacing, pl->grid[0], pl->grid[1], pl->seed, xf, cap);
+        for (u32 k = 0; k < n; k++) vgeo_scene_add_instance(&G.scene, mesh, xf[k].pos, xf[k].rot, xf[k].scale);
+        total += n;
+        free(xf);
     }
     if (!vgeo_scene_commit(&G.scene)) log_error("vgeo: scene upload failed");
     if (count) log_info("vgeo: level: %u instances of %u meshes, %u cells", total, G.named_count, G.scene.cell_count);
@@ -698,7 +685,7 @@ static void vkg_register_era(void) {
 }
 
 // Keeps a CPU copy of a mesh's exported LODs (the fallback uploads them when first drawn).
-static void fallback_register(u32 mesh, const VgBuilt *b) {
+static void fallback_register(u32 mesh, const VgBuilt *b, bool persistent) {
     if (mesh >= G.fb_cap) {
         u32 cap = G.fb_cap ? G.fb_cap : 16;
         while (cap <= mesh) cap *= 2;
@@ -714,10 +701,18 @@ static void fallback_register(u32 mesh, const VgBuilt *b) {
         nv = DG_MAX(nv, b->lods[k].first_vertex + b->lods[k].vertex_count);
         ni = DG_MAX(ni, b->lods[k].first_index + b->lods[k].index_count);
     }
-    f->verts = (VgLodVertex *)malloc(sizeof(VgLodVertex) * (nv + 1));
-    f->indices = (u32 *)malloc(sizeof(u32) * (ni + 1));
-    memcpy(f->verts, b->lod_vertices, sizeof(VgLodVertex) * nv);
-    memcpy(f->indices, b->lod_indices, sizeof(u32) * ni);
+    f->own = !persistent;
+    if (persistent) {
+        f->verts = b->lod_vertices;
+        f->indices = b->lod_indices;
+    } else {
+        VgLodVertex *v = (VgLodVertex *)malloc(sizeof(VgLodVertex) * (nv + 1));
+        u32 *ix = (u32 *)malloc(sizeof(u32) * (ni + 1));
+        memcpy(v, b->lod_vertices, sizeof(VgLodVertex) * nv);
+        memcpy(ix, b->lod_indices, sizeof(u32) * ni);
+        f->verts = v;
+        f->indices = ix;
+    }
     f->radius = b->hdr.sphere[3];
 }
 
