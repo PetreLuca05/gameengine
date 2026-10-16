@@ -22,7 +22,8 @@ bool vg_resolve_pixel() {
     VgMesh m = meshes[x.mesh];
     VgClusterData c = vg_cluster(ref.slot, ref.index);
     uvec3 t = vg_triangle(c, lo & ((1u << VG_VIS_TRI_BITS) - 1u));
-    vec3 w0 = vg_xf_point(x, vg_vertex_pos(c, m, t.x)), w1 = vg_xf_point(x, vg_vertex_pos(c, m, t.y)), w2 = vg_xf_point(x, vg_vertex_pos(c, m, t.z));
+    // Positions exactly as the rasterisers (vg_vertex_world: skinned instances re-skinned per vertex).
+    vec3 w0 = vg_vertex_world(x, c, m, t.x), w1 = vg_vertex_world(x, c, m, t.y), w2 = vg_vertex_world(x, c, m, t.z);
     vec4 c0 = V.raster_view_proj * vec4(w0, 1.0), c1 = V.raster_view_proj * vec4(w1, 1.0), c2 = V.raster_view_proj * vec4(w2, 1.0);
     // screen-space barycentrics of the pixel centre, then perspective correction (1 / w)
     vec2 pn = gl_FragCoord.xy * V.viewport.zw * 2.0 - 1.0;
@@ -38,11 +39,24 @@ bool vg_resolve_pixel() {
         b /= b.x + b.y + b.z;
     }
     v_world = w0 * b.x + w1 * b.y + w2 * b.z;
-    v_normal = normalize(vg_xf_dir(x, vg_vertex_normal(c, m, t.x) * b.x + vg_vertex_normal(c, m, t.y) * b.y + vg_vertex_normal(c, m, t.z) * b.z));
+    vec3 n0 = vg_vertex_normal(c, m, t.x), n1 = vg_vertex_normal(c, m, t.y), n2 = vg_vertex_normal(c, m, t.z);
+    vec3 prev_world = v_world;
+    if (x.skin) {
+        // Skinned: normals through each vertex's skin matrix (as skin.vert), and the previous palette's
+        // positions with the same barycentrics for velocity.
+        n0 = mat3(vg_vertex_skin_matrix(x, c, m, t.x, false)) * n0;
+        n1 = mat3(vg_vertex_skin_matrix(x, c, m, t.y, false)) * n1;
+        n2 = mat3(vg_vertex_skin_matrix(x, c, m, t.z, false)) * n2;
+        vec3 p0 = (vg_vertex_skin_matrix(x, c, m, t.x, true) * vec4(vg_vertex_pos(c, m, t.x), 1.0)).xyz;
+        vec3 p1 = (vg_vertex_skin_matrix(x, c, m, t.y, true) * vec4(vg_vertex_pos(c, m, t.y), 1.0)).xyz;
+        vec3 p2 = (vg_vertex_skin_matrix(x, c, m, t.z, true) * vec4(vg_vertex_pos(c, m, t.z), 1.0)).xyz;
+        prev_world = vg_xf_point(x, p0) * b.x + vg_xf_point(x, p1) * b.y + vg_xf_point(x, p2) * b.z;
+    }
+    v_normal = normalize(vg_xf_dir(x, n0 * b.x + n1 * b.y + n2 * b.z));
     v_uv = vg_vertex_uv(c, m, t.x) * b.x + vg_vertex_uv(c, m, t.y) * b.y + vg_vertex_uv(c, m, t.z) * b.z;
     v_color = vg_vertex_color(c, m, t.x) * b.x + vg_vertex_color(c, m, t.y) * b.y + vg_vertex_color(c, m, t.z) * b.z;
-    v_cur_clip = V.view_proj * vec4(v_world, 1.0);        // unjittered (velocity); static instances
-    v_prev_clip = V.prev_view_proj * vec4(v_world, 1.0);
+    v_cur_clip = V.view_proj * vec4(v_world, 1.0);        // unjittered (velocity)
+    v_prev_clip = V.prev_view_proj * vec4(prev_world, 1.0);
     VgMaterial mat = materials[m.material_base + c.material];
     g_mat_color = mat.color;
     g_mat_params = vec4(mat.roughness, mat.metallic, mat.emissive, mat.tex_scale);
