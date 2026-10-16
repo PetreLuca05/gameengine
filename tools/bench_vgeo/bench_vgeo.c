@@ -1,6 +1,6 @@
 // bench_vgeo: virtualized geometry GPU benchmark on the window-less harness (docs/VGEO.md "Bench").
 //
-//   bench_vgeo [--instances N] [--meshes M] [--frames F] [--vertex-pulling] [--validation]
+//   bench_vgeo [--instances N] [--meshes M] [--frames F] [--vertex-pulling] [--validation] [--skinned N [--skinned-tris T]]
 //
 // Builds M procedural rocks (~79k triangles each), scatters N instances over a field, and times the
 // culling passes at 1920x1080 from 4 cameras with GPU timestamps (instances, traversal, clusters,
@@ -9,10 +9,13 @@
 // only without occlusion, both passes with it): HW and SW ms per pass (serialised, so the split is
 // exact), triangles and the SW share. Prints ms against the plan budget (docs/VGEO_PLAN.md §9) and
 // the counters (instances / nodes / clusters / triangles surviving). --vertex-pulling: HW raster
-// without the mesh shader path.
+// without the mesh shader path. --skinned N [--skinned-tris T]: instead, a horde of N skinned
+// creatures animated every frame vs the same horde static (Phase 6).
 #include "vgeo_gpu_harness.h"
 #include "render/vgeo/vgeo_procgen.h"
+#include "render/vgeo/vgeo_procgen_skinned.h"
 #include "render/vgeo/vgeo_raster.h"
+#include "render/vgeo/vgeo_skin.h"
 #include "core/engine.h"
 #include "core/dgmath.h"
 #include <SDL3/SDL.h>
@@ -42,8 +45,135 @@ static float rnd(void) {
     return (float)(g_rng >> 8) / 16777216.0f;
 }
 
+// ------------------------------------------------------------------ --skinned N (Phase 6)
+
+// A horde of N skinned creatures (vgeo_procgen_skinned.c, `tris` triangles, 31 bones), one palette
+// slot each, animated every frame (per-bone slot bounds from vgeo_bone_bounds, and the generic
+// bound), vs the same instances static (bind pose): CPU ms of the palette sets + record, GPU ms of
+// the palette upload, the cull and the raster.
+static int bench_skinned(VgHarness *h, u32 n, u32 tris, u32 frames, bool vertex_pulling) {
+    VgGenSkinned cr;
+    vgeo_gen_creature(&cr, 7, 5, 6, tris);
+    VgSource src;
+    memset(&src, 0, sizeof(src));
+    src.vertex_count = cr.mesh.vertex_count;
+    src.pos = cr.mesh.pos;
+    src.index_count = cr.mesh.index_count;
+    src.indices = cr.mesh.indices;
+    src.joints = cr.joints;
+    src.weights = cr.weights;
+    VgBuilt b;
+    char err[256];
+    if (!vgeo_build(&src, NULL, &b, err, sizeof(err))) { printf("build failed: %s\n", err); return 1; }
+    VgScene s;
+    vgeo_scene_init(&s, &h->ctx);
+    vgeo_scene_add_mesh(&s, &b);
+    u32 side = (u32)ceil(sqrt((double)n));
+    const float spacing = 3.0f;
+    VgCuller c;
+    VgCullCaps caps = { 1u << 20, 1u << 19, 1u << 21, 1u << 20, 4096 };
+    VgPalettes pal;
+    VgRaster rast;
+    float *pm = (float *)malloc(sizeof(float) * 16 * VGEO_MAX_BONES * n);   // this frame's palettes (animated before the timer)
+    float half = side * spacing * 0.5f;
+    mat4 proj = mat4_perspective(FOV, (float)W / (float)H, 0.1f, 5000.0f);
+    struct { const char *name; vec3 eye, target; } cams[3] = {
+        { "horde, in front", { 0, 1.7f, -half - 4.0f }, { 0, 1.0f, 0 } },
+        { "horde, inside", { 0.5f * spacing, 1.7f, 0.5f * spacing }, { half, 1.0f, half * 0.3f } },
+        { "horde, above 25 m", { 0, 25, -half - 10.0f }, { 0, 0, 0 } },
+    };
+    printf("skinned horde: %u creatures x %u tris (%u clusters, %u bones), %.0f m square, HW raster %s\n", n, b.stats.input_tris, b.hdr.cluster_count, b.hdr.bone_count,
+           side * spacing, vertex_pulling || !h->ctx.mesh_shader ? "vertex pulling" : "mesh shader");
+    printf("\n%-20s %-8s %8s %8s %8s %8s %8s %8s | %9s %11s %6s\n", "camera", "mode", "pal cpu", "pal gpu", "cull", "HW", "SW", "gpu", "clusters", "tris", "SW %");
+    VkQueryPool qp;
+    VkQueryPoolCreateInfo qi = { VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO };
+    qi.queryType = VK_QUERY_TYPE_TIMESTAMP;
+    qi.queryCount = 2;
+    vkCreateQueryPool(h->ctx.device, &qi, NULL, &qp);
+    float bb[VGEO_MAX_BONES][4];
+    vgeo_bone_bounds(&b, bb);
+    for (int mode = 2; mode >= 0; mode--) {   // skinned with per-bone slot bounds, skinned with the generic bound, static
+        bool skinned = mode > 0;
+        vgeo_scene_clear_instances(&s);
+        g_rng = 5;
+        for (u32 i = 0; i < n; i++) {
+            float p[3] = { ((float)(i % side) - (float)side * 0.5f) * spacing, 0.0f, ((float)(i / side) - (float)side * 0.5f) * spacing };
+            quat q = quat_yaw(rnd() * 6.2831853f);
+            float r[4] = { q.x, q.y, q.z, q.w };
+            if (skinned) vgeo_scene_add_skinned_instance(&s, 0, p, r, 1.0f, i);
+            else vgeo_scene_add_instance(&s, 0, p, r, 1.0f);
+        }
+        vgeo_scene_commit(&s);
+        if (!vg_cull_init(&c, &h->ctx, &s, &caps) || !vg_palettes_init(&pal, &h->ctx, n) || !vg_raster_init(&rast, &h->ctx, &c)) return 1;
+        vg_palettes_attach(&pal, &s);
+        for (u32 i = 0; mode == 2 && i < n; i++) vg_palettes_set_bone_bounds(&pal, i, (const float (*)[4])bb);
+        rast.serialize = true;
+        rast.use_mesh = rast.use_mesh && !vertex_pulling;
+        vg_raster_resize(&rast, W, H);
+        for (int ci = 0; ci < 3; ci++) {
+            mat4 view = mat4_look_at(cams[ci].eye, cams[ci].target, v3(0, 1, 0));
+            mat4 vp = mat4_mul(proj, view);
+            VgViewGpu v;
+            float eye[3] = { cams[ci].eye.x, cams[ci].eye.y, cams[ci].eye.z };
+            vgeo_view_setup(&v, vp.m, vp.m, eye, (float)H / (2.0f * tanf(FOV * 0.5f)), 0.1f, W, H, 1.0f, 32.0f, VGV_NO_OCCLUSION);
+            float *ms = (float *)malloc(sizeof(float) * 5 * frames);
+            u32 got = 0;
+            for (u32 f = 0; f < frames; f++) {
+                for (u32 i = 0; skinned && i < n; i++) vgeo_gen_creature_pose(&cr, (float)f / 60.0f, 0.37f * (float)i, &pm[(size_t)i * 16 * VGEO_MAX_BONES]);
+                double a = (double)SDL_GetPerformanceCounter() / (double)SDL_GetPerformanceFrequency();
+                VkCommandPool pool;
+                VkCommandBuffer cmd = vgc_begin_once(&h->ctx, &pool);
+                vkCmdResetQueryPool(cmd, qp, 0, 2);
+                vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, qp, 0);
+                if (skinned) {
+                    vg_palettes_begin(&pal, 0);
+                    for (u32 i = 0; i < n; i++) vg_palettes_set(&pal, i, &pm[(size_t)i * 16 * VGEO_MAX_BONES], cr.bone_count);
+                    vg_palettes_record(&pal, cmd);
+                }
+                double cpu = (double)SDL_GetPerformanceCounter() / (double)SDL_GetPerformanceFrequency() - a;
+                vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, qp, 1);
+                vg_cull_record(&c, cmd, 0, 0, &v, NULL, NULL);
+                vg_raster_clear(&rast, cmd);
+                vg_raster_record(&rast, cmd, 0, 0, 1);
+                vgc_submit_wait(&h->ctx, pool, cmd);
+                float cm[4], rm[2];
+                u64 ts[2];
+                vkGetQueryPoolResults(h->ctx.device, qp, 0, 2, sizeof(ts), ts, 8, VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WAIT_BIT);
+                if (f >= 2 && vg_cull_timings(&c, 0, 0, true, cm) && vg_raster_timings(&rast, 0, 0, 1, true, rm)) {
+                    ms[0 * frames + got] = (float)(cpu * 1000.0);
+                    ms[1 * frames + got] = (float)((double)(ts[1] - ts[0]) * h->ctx.timestamp_period * 1e-6);
+                    ms[2 * frames + got] = cm[0] + cm[1] + cm[2] + cm[3];
+                    ms[3 * frames + got] = rm[0];
+                    ms[4 * frames + got] = rm[1];
+                    got++;
+                }
+            }
+            vg_cull_collect(&c, 0);
+            VgCounters ctr;
+            vg_cull_counters(&c, 0, &ctr);
+            double m[5];
+            for (int k = 0; k < 5; k++) m[k] = median(ms + k * frames, got);
+            free(ms);
+            u32 vis = ctr.n[VGN_HW] + ctr.n[VGN_SW];
+            printf("%-20s %-8s %8.3f %8.3f %8.3f %8.3f %8.3f %8.3f | %9u %11u %5.1f%s\n", cams[ci].name, mode == 2 ? "sk bones" : mode ? "sk gen." : "static", m[0], m[1], m[2], m[3], m[4],
+                   m[1] + m[2] + m[3] + m[4], vis, ctr.n[VGN_TRIS], vis ? 100.0 * ctr.n[VGN_SW] / vis : 0.0, ctr.n[VGN_OVERFLOW] ? " OVERFLOW" : "");
+        }
+        vg_raster_shutdown(&rast);
+        vg_palettes_shutdown(&pal);
+        vg_cull_shutdown(&c);
+    }
+    printf("(ms, medians; pal cpu: %u vg_palettes_set (incl. the slot bounds) + the record on the CPU, the animation excluded; pal gpu: the upload copies; gpu = pal gpu + cull + HW + SW)\n", n);
+    vkDestroyQueryPool(h->ctx.device, qp, NULL);
+    free(pm);
+    vgeo_scene_free(&s);
+    vgeo_free(&b);
+    vgeo_gen_skinned_free(&cr);
+    if (h->validation) printf("validation messages: %d\n", g_vgh_vk_messages);
+    return h->validation && g_vgh_vk_messages ? 1 : 0;
+}
+
 int main(int argc, char **argv) {
-    u32 instances = 100000, meshes = 8, frames = 60;
+    u32 instances = 100000, meshes = 8, frames = 60, skinned = 0, skinned_tris = 30000;
     bool validation = false, vertex_pulling = false;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--instances") && i + 1 < argc) instances = (u32)atoi(argv[++i]);
@@ -51,9 +181,16 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--frames") && i + 1 < argc) frames = (u32)atoi(argv[++i]);
         else if (!strcmp(argv[i], "--validation")) validation = true;
         else if (!strcmp(argv[i], "--vertex-pulling")) vertex_pulling = true;
+        else if (!strcmp(argv[i], "--skinned") && i + 1 < argc) skinned = (u32)atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--skinned-tris") && i + 1 < argc) skinned_tris = (u32)atoi(argv[++i]);
     }
     VgHarness h;
     if (!vgh_init(&h, validation)) return 1;
+    if (skinned) {
+        int r = bench_skinned(&h, skinned, skinned_tris, frames, vertex_pulling);
+        vgh_shutdown(&h);
+        return r;
+    }
     VgScene s;
     vgeo_scene_init(&s, &h.ctx);
     double t0 = (double)SDL_GetPerformanceCounter() / (double)SDL_GetPerformanceFrequency();
