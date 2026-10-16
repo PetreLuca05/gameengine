@@ -7,6 +7,8 @@
 
 // Returns malloc'd, NUL-terminated contents (caller frees) or NULL.
 char *platform_read_file(const char *path, size_t *out_size);
+// Reads size bytes at offset into dst (false if the file is shorter). Thread-safe (own handle).
+bool platform_read_file_range(const char *path, u64 offset, void *dst, size_t size);
 bool platform_write_file(const char *path, const void *data, size_t size);
 bool platform_file_exists(const char *path);
 i64 platform_file_mtime(const char *path); // 0 if missing

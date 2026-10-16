@@ -39,6 +39,9 @@ Simplification and clustering use meshoptimizer v0.22 (`simplifier.cpp`, `cluste
 | `src/render/vgeo/vgeo_ctx.{c,h}` | `VgContext` (device, VMA, shader loader, caps), buffers, uploads, one-shot commands |
 | `src/render/vgeo/vgeo_scene.{c,h}` | `VgScene`: global mesh / node / group / page / instance / cell tables, commit, CPU reference cut |
 | `src/render/vgeo/vgeo_cull.{c,h}` | `VgCuller`: per-view culling record, Hi-Z build, counters, timestamps |
+| `src/render/vgeo/vgeo_stream.{c,h}` | `VgStream`: page streaming (request readback, loads, page-table scatter, LRU eviction) |
+| `shaders/vgeo/vg_stream_patch.comp` | page-table scatter |
+| `tests/test_vgeo_stream.c` | ctest `vgeo_stream` (`--validation`) |
 | `shaders/vgeo/vgeo_common.glsl` | GLSL mirror of `vgeo_gpu.h`, bindings, frustum / projection / Hi-Z helpers |
 | `shaders/vgeo/vg_expand.glsl` | instance test and node expansion (shared by cells / instances / traverse) |
 | `shaders/vgeo/vg_{args,cells,instances,traverse,clusters,hiz}.comp` | the cull kernels and the Hi-Z build |
@@ -136,7 +139,7 @@ The GPU side runs on a small `VgContext` (device, queue, VMA, frames in flight, 
 capability bits) and touches no renderer globals. The game fills it from its device (`src/render/vk_vgeo.c`);
 the window-less harness (`tests/vgeo_gpu_harness.c`: instance + device, no surface or swapchain, the same vgeo
 feature set as `vk_device.c`) fills it from its own, and so do `test_vgeo_gpu` and `bench_vgeo`. The module is the
-`dg_vgeo_gpu` static library (`vgeo_ctx.c`, `vgeo_scene.c`, `vgeo_cull.c`) for those two; the game compiles the
+`dg_vgeo_gpu` static library (`vgeo_ctx.c`, `vgeo_scene.c`, `vgeo_cull.c`, `vgeo_stream.c`) for those two; the game compiles the
 same files through the `src/` glob.
 
 **Requirements.** `scalarBlockLayout` (every vgeo shader uses scalar layout) and `shaderInt64` +
@@ -154,9 +157,17 @@ Global tables every view culls against, registered and uploaded at load time; no
 - `vgeo_scene_commit` bins instances into **8 m cells** on x / z (stable sort, instances of a cell contiguous,
   cell AABB = union of the instance mesh spheres), uploads every table and bumps `generation` so cullers rewrite
   their descriptor sets.
-- **Page pool:** until streaming (Phase 4) every page is resident and **slot = global page index**. The page table
-  (global page → slot, `~0` = missing) is already read by the shaders, so Phase 4 only changes its contents.
-- The CPU copies stay for the CPU reference cut (`vgeo_scene_cpu_select`, tests) and re-commits.
+- **Page pool:** without a budget every page is resident and **slot = global page index**. With one
+  (`vgeo_scene_set_pool`, set by the streamer) the pool has that many 128 KiB slots and a commit makes only the
+  **root pages** resident (the builder's root prefix per mesh, `VgFileHeader.root_page_count`); see "Streaming".
+  The page table (global page → slot, `~0` = missing, CPU mirror `page_table`) and `slot_page` (slot → page) are
+  the residency.
+- **Page sources:** `vgeo_scene_add_mesh` keeps a copy of the page data; `vgeo_scene_add_mesh_file` keeps only
+  the path of the `.vgeo` file (the `vgeo_deserialize` of it locates the page data section) and reads pages back
+  with `platform_read_file_range`. `vgeo_scene_read_page` reads either.
+- The CPU keeps every page's header and cluster records ("meta", ~5 % of the page bytes) for the CPU reference
+  cut (`vgeo_scene_cpu_select`, `_ex` with `all_resident`), `vgeo_scene_cluster` (by slot; a zeroed record for a
+  free slot) and the streamer's page dependencies.
 
 ### Culling (`vg_cull_record`, `shaders/vgeo/*.comp`)
 
@@ -173,8 +184,8 @@ pass 1
   vg_traverse     x (max_depth - 1): one indirect dispatch per BVH level (level-synchronous), node queue
                   region 0 <-> 1; visit = frustum, project(max_parent_error) > t, not Hi-Z occluded;
                   occluded nodes: region 2 (pass 2 seeds). Leaves, per group with project(parent_error) > t:
-                  page resident -> one cluster candidate per cluster (instance, group << 4 | k),
-                  else a page request (priority = projected error)
+                  page resident -> one cluster candidate per cluster (instance, group << 4 | k) and
+                  the slot's usage stamp, else a page request (priority = projected error)
   vg_clusters     1 thread per candidate: the cut rule's other half (own error <= t, or the child group's
                   page missing), then frustum, cone, Hi-Z; occluded: occluded list;
                   SW if the projected diameter < r_vgeo_sw_px, else HW
@@ -482,6 +493,89 @@ same view; HW and SW serialised; median of 300 frames):
 - **The cull record still runs both passes at once:** pass 2 culling needs this frame's Hi-Z built from the pass 1
   visibility buffer. The in-frame split (cull pass 1 → raster 1 → Hi-Z → cull pass 2 → raster 2) is part of the
   renderer integration. The raster API is already per pass.
+## Streaming (`src/render/vgeo/vgeo_stream.c`)
+
+The pool is a budget of 128 KiB slots (`VgStreamConfig.pool_mb`). Root pages are resident from the commit and
+pinned; every other page is loaded on demand and evicted LRU.
+
+```
+cull, frame N        leaves stamp page_stamp[slot] = N (binding 20, VgViewGpu.frame) for every group they emit,
+                     and append (page, projected error) for every group whose page is missing (4096 per view)
+update, frame N + 1  copies the stamps and every view's request count + list into the host buffer of its frame
+                     slot (the cull of N wrote them; the copy runs before this frame's culls)
+update, N + 1 + F    (F = frames in flight: that slot's fence has signalled) reads it back:
+                     stamps -> CPU mirror (last_used per slot), requests -> dedupe (highest priority), sort by
+                     priority (descending, then page)
+                     loads, up to pages_per_frame: a page's missing parent pages first (recursively), then a
+                     free slot; memory source: memcpy into the staging ring now; file source: read on the
+                     streamer's worker thread, copied by the next update
+                     staging -> pool slot copies, then a compute scatter of (page, slot | ~0) pairs patches the
+                     page table; barriers before the culls of the frame
+                     eviction, when requests are left and the free + quarantined slots cannot take them
+```
+
+- **Dependencies.** Page P depends on page Q when a cluster in Q was simplified from a group in P (Q holds coarser
+  parents of P's clusters). Residency is kept closed under it: a page is loaded only after (or with) its parents,
+  and a page with a resident / loading dependent is never evicted. A missing group's whole subtree is then missing,
+  so the cut's fallback (a cluster whose child group's page is missing is drawn) never overlaps finer geometry, and
+  the cut stays watertight (tested).
+- **Eviction (LRU).** Candidates: resident, not root, no dependents, `last_used < frame - (F + 1)`. The CPU
+  mirror is F + 1 frames behind, so this means "not used in the newest frame read back"; a slot's load frame
+  counts as a use. Oldest first, as many as the waiting requests need (capped at `pages_per_frame`). The page
+  table entry is cleared in the same frame, so no later frame can select it.
+- **Quarantine.** An evicted slot is reused F frames later at the earliest: by then every frame that could
+  reference the old page has passed its fence. The pool copies therefore need no barrier against earlier frames
+  (only the page-table scatter waits for all stages), and no frame in flight sees a page change under it.
+- **Pool full.** Requests wait; the coarser parents keep drawing. With a pool smaller than the working set the LRU
+  churns (bench: about 80 % of loads are reloads within 30 frames at half the working set, none once it fits).
+- **Staging ring.** `F + 1` regions of `pages_per_frame` pages plus the patch entries (`4 pages_per_frame + 16`);
+  a file batch lands within one frame (the next update waits for it if needed).
+- **Stats** (`vg_stream_stats`): pool slots, resident, free, requested (distinct missing pages read this frame),
+  loaded / evicted this frame and in total, waiting, pending reads, CPU ms of the update and GPU ms of its copies +
+  scatter (timestamps of the frame slot read back).
+- **CPU cost.** O(slots + requests) per frame; no per-instance work.
+
+### Renderer glue (to do in `src/render/vk_vgeo.c`)
+
+- Init: `vg_stream_init(&st, &scene, &cull, &(VgStreamConfig){ r_vgeo_pool_mb, r_vgeo_stream_pages_per_frame })`
+  after `vg_cull_init` (it sets the pool budget and re-commits the scene if it is already committed).
+- Every frame, once the frame slot's fence has been waited (where `vg_cull_collect` runs) and **before the first
+  `vg_cull_record` / `vg_cull_record_pass1` of the frame** (main view and shadow cascades):
+  `vg_stream_update(&st, cmd, frame_slot)`. Then the culls, raster and resolve as before.
+- Cvar changes: `vg_stream_set_config` (pages per frame now, pool size at the next commit).
+- `vg_stream_shutdown` before `vg_cull_shutdown` / `vgeo_scene_free`.
+- Cvars: `r_vgeo_pool_mb` (512 Modern / 256 2020), `r_vgeo_stream_pages_per_frame` (64); HUD / `vgeo_stats` line
+  from `vg_stream_stats`. The residency debug view (`r_vgeo_debug 6`) can read `slot_page` / `page_root`.
+
+### Tests (`ctest -R vgeo_stream`, runs `--validation`)
+
+Scene: a rock, a torus, a 120k statue and a rock streamed from a `.vgeo` file (51 pages, 4 root), 400 instances in
+5 × 5 patches of one mesh. Frames are recorded as the renderer does (update + cull, frame slot = frame mod 2).
+- **Cold start:** frame 1 selects only root-page clusters, equals the residency-aware CPU cut, draws all 400
+  instances (LOD only), and every instance inside the frustum (with culling).
+- **Convergence:** 3 fixed cameras converge in 11-13 frames to the all-resident CPU cut (0 missing, 0 extra).
+- **Small pool** (pool = root + 1/4 of the rest, camera changed every 15 frames, 60 frames): every instance draws
+  every frame, no cluster with a DAG ancestor, residency closed, 460 instance selections of closed meshes
+  watertight (every directed edge matched, decoded on the mesh grid), GPU = residency-aware CPU cut; pages evicted.
+- **Eviction audit** (200 frame flythrough, pool = root + 1/6 of the rest): every visible cluster's slot is mapped;
+  no page evicted in a frame is in that frame's visible list; no slot is rewritten within F frames of a frame that
+  referenced it; the GPU pool bytes of every referenced slot equal the CPU page data (memory and file source).
+- Zero validation messages.
+
+### Phase 4 results (RTX 3060 Ti)
+
+- `test_vgeo_stream`: 38/38 checks, 0 validation messages (~5 s).
+- `bench_vgeo` streaming flythrough (100k instances of 8 rocks, 136 pages, 8 root, eye level, 600 frames,
+  64 pages per frame):
+
+  | Pool | Loaded | Evicted | Quick reloads | Stream GPU ms mean / max | Stream CPU ms mean / max |
+  |---|---|---|---|---|---|
+  | 72 slots (9 MB) | 1584 | 1523 | 1259 | 0.017 / 0.383 | 0.061 / 1.05 |
+  | 96 slots (12 MB) | 778 | 692 | 490 | 0.012 / 0.167 | 0.033 / 1.05 |
+  | 112 slots (14 MB) | 313 | 209 | 118 | 0.008 / 0.166 | 0.016 / 1.06 |
+  | 136 slots (17 MB) | 128 | 0 | 0 | 0.006 / 0.166 | 0.009 / 1.10 |
+
+  The largest frames load 59 pages (7.4 MB, cold start); the mean is well inside the 0.1 ms budget.
 
 ## Simplifications vs Nanite
 
@@ -503,6 +597,9 @@ same view; HW and SW serialised; median of 300 frames):
 - **8 m cell grid** instead of an instance BVH as the first culling level.
 - **Groups of ≤ 16 clusters** are assumed by the cluster candidate encoding (`group << 4 | k`); larger groups
   are warned about at registration.
+- **Streaming:** whole 128 KiB pages are the only unit (no partial pages or separate fixup data), priorities are
+  the projected error of the requesting group (no distance or screen-area weighting), usage is stamped per group
+  emitted at a leaf (not per rendered cluster), and there is no eviction hysteresis.
 
 ## Adding a foliage system on top
 

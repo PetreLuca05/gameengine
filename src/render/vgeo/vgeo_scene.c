@@ -1,5 +1,6 @@
 #include "vgeo_scene.h"
 #include "core/log.h"
+#include "core/platform.h"
 #include <float.h>
 #include <math.h>
 #include <stdlib.h>
@@ -45,6 +46,7 @@ static void free_gpu(VgScene *s) {
     vgc_buffer_free(s->ctx, &s->b_instances);
     vgc_buffer_free(s->ctx, &s->b_cells);
     vgc_buffer_free(s->ctx, &s->b_materials);
+    vgc_buffer_free(s->ctx, &s->b_stamps);
 }
 
 void vgeo_scene_free(VgScene *s) {
@@ -53,8 +55,15 @@ void vgeo_scene_free(VgScene *s) {
     free(s->meshes);
     free(s->nodes);
     free(s->groups);
-    free(s->pool);
     free(s->page_table);
+    free(s->page_desc);
+    free(s->page_mesh);
+    free(s->page_root);
+    free(s->meta_off);
+    free(s->meta);
+    for (u32 m = 0; m < s->mesh_count; m++) { free(s->sources[m].data); free(s->sources[m].path); }
+    free(s->sources);
+    free(s->slot_page);
     free(s->mesh_depth);
     free(s->instances);
     free(s->cells);
@@ -73,11 +82,23 @@ static u32 bvh_depth(const VgNode *nodes, u32 n) {
     return d + 1;
 }
 
-u32 vgeo_scene_add_mesh(VgScene *s, const VgBuilt *b) {
+static u32 add_mesh(VgScene *s, const VgBuilt *b, const char *path) {
     const VgFileHeader *h = &b->hdr;
     u32 mi = s->mesh_count;
     GROW(s->meshes, s->mesh_count, s->mesh_cap, 1);
     s->mesh_depth = (u32 *)realloc(s->mesh_depth, sizeof(u32) * s->mesh_cap);
+    s->sources = (VgPageSource *)realloc(s->sources, sizeof(VgPageSource) * s->mesh_cap);
+    VgPageSource *src = &s->sources[mi];
+    memset(src, 0, sizeof(*src));
+    if (path) {
+        size_t n = strlen(path) + 1;
+        src->path = (char *)malloc(n);
+        memcpy(src->path, path, n);
+        src->base = h->sections[VGS_PAGE_DATA].offset;
+    } else {
+        src->data = (u8 *)malloc(b->page_data_size ? b->page_data_size : 1);
+        memcpy(src->data, b->page_data, b->page_data_size);
+    }
     VgMesh *m = &s->meshes[s->mesh_count++];
     memset(m, 0, sizeof(*m));
     const VgNode *root = &b->nodes[h->root_node];
@@ -97,18 +118,31 @@ u32 vgeo_scene_add_mesh(VgScene *s, const VgBuilt *b) {
     GROW(s->groups, s->group_count, s->group_cap, h->group_count);
     memcpy(&s->groups[s->group_count], b->groups, sizeof(VgGroup) * h->group_count);
     s->group_count += h->group_count;
-    u32 old_cap = s->page_cap;
     if (s->page_count + h->page_count > s->page_cap) {
         while (s->page_count + h->page_count > s->page_cap) s->page_cap = s->page_cap ? s->page_cap * 2 : 64;
-        s->pool = (u8 *)realloc(s->pool, (size_t)s->page_cap * VGEO_PAGE_SIZE);
         s->page_table = (u32 *)realloc(s->page_table, sizeof(u32) * s->page_cap);
+        s->page_desc = (VgPageDesc *)realloc(s->page_desc, sizeof(VgPageDesc) * s->page_cap);
+        s->page_mesh = (u32 *)realloc(s->page_mesh, sizeof(u32) * s->page_cap);
+        s->page_root = (u8 *)realloc(s->page_root, s->page_cap);
+        s->meta_off = (u32 *)realloc(s->meta_off, sizeof(u32) * s->page_cap);
     }
-    (void)old_cap;
+    // Page meta (header + cluster records) stays on the CPU for every page.
     for (u32 p = 0; p < h->page_count; p++) {
-        u8 *slot = s->pool + (size_t)(s->page_count + p) * VGEO_PAGE_SIZE;
-        memset(slot, 0, VGEO_PAGE_SIZE);
-        memcpy(slot, b->page_data + b->pages[p].file_offset, b->pages[p].size);
-        s->page_table[s->page_count + p] = s->page_count + p;
+        u32 g = s->page_count + p;
+        const VgPageHeader *ph = vgeo_page(b, p);
+        size_t n = sizeof(VgPageHeader) + sizeof(VgCluster) * (size_t)ph->cluster_count;
+        if (s->meta_size + n > s->meta_cap) {
+            while (s->meta_size + n > s->meta_cap) s->meta_cap = s->meta_cap ? s->meta_cap * 2 : 65536;
+            s->meta = (u8 *)realloc(s->meta, s->meta_cap);
+        }
+        memcpy(s->meta + s->meta_size, ph, n);
+        s->meta_off[g] = (u32)s->meta_size;
+        s->meta_size += n;
+        s->page_desc[g] = b->pages[p];
+        s->page_mesh[g] = mi;
+        s->page_root[g] = p < h->root_page_count;
+        s->page_table[g] = ~0u;
+        s->root_count += p < h->root_page_count;
     }
     s->page_count += h->page_count;
     s->mesh_depth[mi] = bvh_depth(b->nodes, h->root_node);
@@ -117,6 +151,64 @@ u32 vgeo_scene_add_mesh(VgScene *s, const VgBuilt *b) {
     for (u32 g = 0; g < h->group_count; g++)
         if (b->groups[g].cluster_count > 16) log_warn("vgeo: mesh %u group %u has %u clusters (> 16 lanes)", mi, g, b->groups[g].cluster_count);
     return mi;
+}
+
+u32 vgeo_scene_add_mesh(VgScene *s, const VgBuilt *b) { return add_mesh(s, b, NULL); }
+u32 vgeo_scene_add_mesh_file(VgScene *s, const VgBuilt *b, const char *path) { return add_mesh(s, b, path); }
+
+void vgeo_scene_set_pool(VgScene *s, u32 slots) { s->pool_budget = slots; }
+
+bool vgeo_scene_read_page(const VgScene *s, u32 page, void *dst) {
+    if (page >= s->page_count) return false;
+    const VgPageDesc *d = &s->page_desc[page];
+    const VgPageSource *src = &s->sources[s->page_mesh[page]];
+    if (src->data) { memcpy(dst, src->data + d->file_offset, d->size); return true; }
+    return platform_read_file_range(src->path, src->base + d->file_offset, dst, d->size);
+}
+
+// Initial residency: every page, or the root pages with a budget.
+static void assign_pool(VgScene *s) {
+    u32 slots = s->page_count;
+    if (s->pool_budget) slots = DG_MAX(s->root_count, DG_MIN(s->pool_budget, s->page_count));
+    if (s->pool_budget && s->pool_budget < s->root_count) log_warn("vgeo: pool of %u slots < %u root pages, grown", s->pool_budget, s->root_count);
+    s->pool_slots = slots;
+    free(s->slot_page);
+    s->slot_page = (u32 *)malloc(sizeof(u32) * (slots + 1));
+    memset(s->slot_page, 0xFF, sizeof(u32) * (slots + 1));
+    u32 used = 0;
+    for (u32 p = 0; p < s->page_count; p++) {
+        s->page_table[p] = ~0u;
+        if (s->pool_budget && !s->page_root[p]) continue;
+        s->page_table[p] = used;
+        s->slot_page[used++] = p;
+    }
+}
+
+static bool upload_pool(VgScene *s) {
+    const VgContext *c = s->ctx;
+    u32 slots = s->pool_slots, used = 0;
+    while (used < slots && s->slot_page[used] != ~0u) used++;
+    const VkBufferUsageFlags U = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    VkDeviceSize n_slots = slots ? slots : 1;
+    s->b_pool = vgc_buffer(c, n_slots * VGEO_PAGE_SIZE, U, VGM_DEVICE);
+    s->b_stamps = vgc_buffer(c, sizeof(u32) * n_slots, U, VGM_DEVICE);
+    if (!s->b_pool.buffer || !s->b_stamps.buffer) return false;
+    // Resident pages in chunks of 256 slots (32 MB).
+    const u32 chunk = 256;
+    u8 *tmp = (u8 *)malloc((size_t)DG_MIN(chunk, DG_MAX(used, 1u)) * VGEO_PAGE_SIZE);
+    bool ok = true;
+    for (u32 first = 0; first < used; first += chunk) {
+        u32 n = DG_MIN(chunk, used - first);
+        memset(tmp, 0, (size_t)n * VGEO_PAGE_SIZE);
+        for (u32 k = 0; k < n; k++) ok &= vgeo_scene_read_page(s, s->slot_page[first + k], tmp + (size_t)k * VGEO_PAGE_SIZE);
+        vgc_upload(c, &s->b_pool, (VkDeviceSize)first * VGEO_PAGE_SIZE, tmp, (VkDeviceSize)n * VGEO_PAGE_SIZE);
+    }
+    free(tmp);
+    u32 *zero = (u32 *)calloc((size_t)n_slots, sizeof(u32));
+    vgc_upload(c, &s->b_stamps, 0, zero, sizeof(u32) * n_slots);
+    free(zero);
+    if (!ok) log_error("vgeo: cannot read the resident pages");
+    return ok;
 }
 
 void vgeo_scene_add_instance(VgScene *s, u32 mesh, const float pos[3], const float rot[4], float scale) {
@@ -200,16 +292,17 @@ bool vgeo_scene_commit(VgScene *s) {
     free(k);
     memcpy(s->instances, sorted, sizeof(VgInstance) * s->instance_count);
     free(sorted);
+    assign_pool(s);
     if (!c || !c->device) return true;
     vkDeviceWaitIdle(c->device);
     free_gpu(s);
+    if (!upload_pool(s)) return false;
     const VkBufferUsageFlags U = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
     struct { VgBuffer *b; const void *p; VkDeviceSize n; } t[] = {
         { &s->b_meshes, s->meshes, sizeof(VgMesh) * (VkDeviceSize)s->mesh_count },
         { &s->b_nodes, s->nodes, sizeof(VgNode) * (VkDeviceSize)s->node_count },
         { &s->b_groups, s->groups, sizeof(VgGroup) * (VkDeviceSize)s->group_count },
         { &s->b_page_table, s->page_table, sizeof(u32) * (VkDeviceSize)s->page_count },
-        { &s->b_pool, s->pool, (VkDeviceSize)s->page_count * VGEO_PAGE_SIZE },
         { &s->b_instances, s->instances, sizeof(VgInstance) * (VkDeviceSize)s->instance_count },
         { &s->b_cells, s->cells, sizeof(VgCell) * (VkDeviceSize)s->cell_count },
         { &s->b_materials, s->materials, sizeof(VgMaterial) * (VkDeviceSize)s->material_count },
@@ -225,8 +318,17 @@ bool vgeo_scene_commit(VgScene *s) {
 
 // ------------------------------------------------------------------ CPU reference
 
+const VgPageHeader *vgeo_scene_page_header(const VgScene *s, u32 page) { return (const VgPageHeader *)(s->meta + s->meta_off[page]); }
+
+const VgCluster *vgeo_scene_page_cluster(const VgScene *s, u32 page, u32 index) {
+    return (const VgCluster *)(s->meta + s->meta_off[page] + sizeof(VgPageHeader) + (size_t)index * sizeof(VgCluster));
+}
+
 const VgCluster *vgeo_scene_cluster(const VgScene *s, u32 slot, u32 index) {
-    return (const VgCluster *)(s->pool + (size_t)slot * VGEO_PAGE_SIZE + sizeof(VgPageHeader) + (size_t)index * sizeof(VgCluster));
+    static const VgCluster none;
+    u32 page = slot < s->pool_slots ? s->slot_page[slot] : ~0u;
+    if (page == ~0u || index >= vgeo_scene_page_header(s, page)->cluster_count) return &none;
+    return vgeo_scene_page_cluster(s, page, index);
 }
 
 // Same formula as vg_project_error in shaders/vgeo/vgeo_common.glsl.
@@ -243,7 +345,9 @@ static float margin(float px, float t) {
     return fabsf(px - t) / t;
 }
 
-u32 vgeo_scene_cpu_select(const VgScene *s, const VgViewGpu *v, VgRefCluster *out, u32 cap) {
+u32 vgeo_scene_cpu_select(const VgScene *s, const VgViewGpu *v, VgRefCluster *out, u32 cap) { return vgeo_scene_cpu_select_ex(s, v, false, out, cap); }
+
+u32 vgeo_scene_cpu_select_ex(const VgScene *s, const VgViewGpu *v, bool all_resident, VgRefCluster *out, u32 cap) {
     u32 n = 0;
     float t = v->error_px;
     for (u32 i = 0; i < s->instance_count; i++) {
@@ -258,20 +362,21 @@ u32 vgeo_scene_cpu_select(const VgScene *s, const VgViewGpu *v, VgRefCluster *ou
             world_sphere(in, g->lod_center, g->lod_radius, gs);
             float gpx = project_error(v, gs, g->parent_error * sc);
             if (!(gpx > t)) continue;
-            u32 slot = s->page_table[m->page_base + g->page];
-            if (slot == ~0u) continue;
+            u32 page = m->page_base + g->page, slot = s->page_table[page];
+            if (slot == ~0u && !all_resident) continue;
             for (u32 k = 0; k < g->cluster_count; k++) {
-                const VgCluster *cl = vgeo_scene_cluster(s, slot, g->first_cluster + k);
+                const VgCluster *cl = vgeo_scene_page_cluster(s, page, g->first_cluster + k);
                 float cs[4];
                 world_sphere(in, cl->lod_center, cl->lod_radius, cs);
                 float cpx = project_error(v, cs, cl->error * sc);
                 bool child_missing = false;
-                if (cl->child_group != ~0u) child_missing = s->page_table[m->page_base + s->groups[m->group_base + cl->child_group].page] == ~0u;
+                if (cl->child_group != ~0u && !all_resident) child_missing = s->page_table[m->page_base + s->groups[m->group_base + cl->child_group].page] == ~0u;
                 if (!(cpx <= t || child_missing)) continue;
                 if (out && n < cap) {
                     VgRefCluster *r = &out[n];
                     r->instance = i;
                     r->packed = slot << VG_CLUSTER_BITS | (g->first_cluster + k);
+                    r->page = page;
                     r->lod_margin = fminf(margin(gpx, t), child_missing ? FLT_MAX : margin(cpx, t));
                     float b[4];
                     world_sphere(in, cl->center, cl->radius, b);

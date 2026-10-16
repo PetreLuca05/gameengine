@@ -210,11 +210,21 @@ static void qrot(const float q[4], const float v[3], float o[3]) {
     o[2] = v[2] + q[3] * t[2] + (q[0] * t[1] - q[1] * t[0]);
 }
 
+// The page in a pool slot (the scene keeps page sources, not a CPU pool copy).
+static const u32 *slot_words(u32 slot) {
+    static u32 buf[VGEO_PAGE_SIZE / 4], cached = ~0u;
+    if (cached != slot) {
+        vgeo_scene_read_page(&g_scene, g_scene.slot_page[slot], buf);
+        cached = slot;
+    }
+    return buf;
+}
+
 // Clip position of a cluster vertex (the shaders' decode: (base + offset) * q_step, instance transform).
 static void vertex_clip(u32 inst, u32 slot, const VgCluster *cl, u32 v, const float *vp, double clip[4]) {
     const VgInstance *in = &g_scene.instances[inst];
     const VgMesh *me = &g_scene.meshes[in->mesh];
-    const u32 *page = (const u32 *)(g_scene.pool + (size_t)slot * VGEO_PAGE_SIZE);
+    const u32 *page = slot_words(slot);
     u32 vw = (me->flags & VGF_HAS_COLOR) ? 4 : 3;
     const u32 *w = page + (cl->offsets & 0x7FFF) + v * vw;
     i32 g[3] = { cl->base[0] + (i32)(w[0] & 0xFFFF), cl->base[1] + (i32)(w[0] >> 16), cl->base[2] + (i32)(w[1] & 0xFFFF) };
@@ -234,7 +244,7 @@ static void check_depth(const char *what, const Img *img, const VgViewGpu *v) {
         if (p->inst == ~0u || seen++ % stride) continue;
         u32 slot = p->packed >> VG_CLUSTER_BITS, ci = p->packed & ((1u << VG_CLUSTER_BITS) - 1);
         const VgCluster *cl = vgeo_scene_cluster(&g_scene, slot, ci);
-        const u32 *page = (const u32 *)(g_scene.pool + (size_t)slot * VGEO_PAGE_SIZE);
+        const u32 *page = slot_words(slot);
         u32 t = page[((cl->offsets >> 15) & 0x7FFF) + p->tri];
         double sx[3], sy[3], sz[3];
         bool ok = true;

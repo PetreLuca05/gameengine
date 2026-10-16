@@ -18,6 +18,19 @@ char *platform_read_file(const char *path, size_t *out_size) {
     return data;
 }
 
+bool platform_read_file_range(const char *path, u64 offset, void *dst, size_t size) {
+    FILE *f = fopen(path, "rb");
+    if (!f) return false;
+#ifdef _WIN32
+    int r = _fseeki64(f, (long long)offset, SEEK_SET);
+#else
+    int r = fseeko(f, (off_t)offset, SEEK_SET);
+#endif
+    size_t got = r == 0 ? fread(dst, 1, size, f) : 0;
+    fclose(f);
+    return got == size;
+}
+
 bool platform_write_file(const char *path, const void *data, size_t size) {
     FILE *f = fopen(path, "wb");
     if (!f) return false;
