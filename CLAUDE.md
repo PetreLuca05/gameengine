@@ -44,6 +44,7 @@ Windows, no admin; tools are portable, in `.toolchain/` (git-ignored).
 | Light shadows | LIGHT_SHADOWS.md | src/render/vk_light_shadow.c, common.glsl point/spot_light_shadow |
 | Virtualized geometry | VGEO.md, VGEO_PLAN.md | src/render/vgeo, src/render/vk_vgeo.c, shaders/vgeo, tools/{build,bench}_vgeo |
 | Phone + companion page | PHONE.md | src/gameplay/phone, src/net/http_ws, src/render/phone_view.c, web/phone; e2e: tools/tests/phone_e2e.sh |
+| Hand poses + editor (`scene handpose`) | HANDPOSE.md | src/anim/handpose.c, src/editor/handpose, src/game/game_scene.c; test: tools/tests/hp_scene.cfg |
 
 ## Dev room (data/levels/devroom.json)
 Hall at the origin. Other areas:
