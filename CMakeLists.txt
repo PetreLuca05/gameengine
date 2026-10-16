@@ -288,7 +288,7 @@ endif()
 
 # Virtualized geometry GPU module (culling / Hi-Z) on a VgContext: the game builds it through the src glob,
 # the harness tests and tools/bench_vgeo through this library.
-add_library(dg_vgeo_gpu STATIC src/render/vgeo/vgeo_ctx.c src/render/vgeo/vgeo_scene.c src/render/vgeo/vgeo_cull.c)
+add_library(dg_vgeo_gpu STATIC src/render/vgeo/vgeo_ctx.c src/render/vgeo/vgeo_scene.c src/render/vgeo/vgeo_cull.c src/render/vgeo/vgeo_stream.c)
 set_target_properties(dg_vgeo_gpu PROPERTIES C_STANDARD 11)
 target_link_libraries(dg_vgeo_gpu PUBLIC dg_vgeo volk vma)
 if(MSVC)
@@ -445,4 +445,17 @@ endif()
 add_test(NAME vgeo_gpu COMMAND test_vgeo_gpu --validation WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
 if(EXISTS "${CMAKE_SOURCE_DIR}/.toolchain/vvl/install/bin")
   set_tests_properties(vgeo_gpu PROPERTIES ENVIRONMENT "VK_ADD_LAYER_PATH=${CMAKE_SOURCE_DIR}/.toolchain/vvl/install/bin")
+endif()
+
+# Virtualized geometry page streaming (cold start, convergence, small pool, eviction audit).
+add_executable(test_vgeo_stream tests/test_vgeo_stream.c tests/vgeo_gpu_harness.c)
+set_target_properties(test_vgeo_stream PROPERTIES C_STANDARD 11)
+target_link_libraries(test_vgeo_stream PRIVATE dg_vgeo_gpu)
+add_dependencies(test_vgeo_stream dg_shaders)
+if(MSVC)
+  target_compile_options(test_vgeo_stream PRIVATE /W3 /wd4100 /wd4201 /utf-8)
+endif()
+add_test(NAME vgeo_stream COMMAND test_vgeo_stream --validation WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+if(EXISTS "${CMAKE_SOURCE_DIR}/.toolchain/vvl/install/bin")
+  set_tests_properties(vgeo_stream PROPERTIES ENVIRONMENT "VK_ADD_LAYER_PATH=${CMAKE_SOURCE_DIR}/.toolchain/vvl/install/bin")
 endif()
