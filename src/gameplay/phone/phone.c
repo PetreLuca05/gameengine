@@ -90,7 +90,7 @@ static void send_status(void) {
              "\"landscape\":%s,\"calibrated\":%s,\"driven\":%s,\"fps\":%.1f,\"kbps\":%.0f,\"q\":%d,\"w\":%d,\"h\":%d,\"glass\":%.0f,\"encode\":%.1f,"
              "\"clock\":\"%s\",\"day\":%d,\"filter\":\"%s\",\"photos\":%d,\"front\":%s}",
              PHONE_PROTO_VERSION, PH.holding ? "true" : "false", PH.camera ? "true" : "false", PH.zoom, MAX_ZOOM, PH.rec ? "true" : "false",
-             PH.rec ? phone_recorder_seconds(PH.rec) : 0.0, PH.cv.record_max->i, PH.landscape ? "true" : "false", PH.calibrated ? "true" : "false",
+             PH.rec ? g_engine.real_time - PH.rec_start : 0.0, PH.cv.record_max->i, PH.landscape ? "true" : "false", PH.calibrated ? "true" : "false",
              PH.driven ? "true" : "false", st.fps, st.kbps, st.quality, st.width, st.height, st.glass_ms, st.encode_ms, clock, day,
              phone_filter_name(PH.cv.filter->i), PH.gallery.count, PH.front ? "true" : "false");
     send_text(b);
@@ -388,7 +388,7 @@ static void record_stop(void) {
     if (!PH.rec) return;
     double secs = 0;
     int frames = 0, dropped = 0;
-    bool ok = phone_recorder_stop(PH.rec, &secs, &frames, &dropped);
+    bool ok = phone_recorder_stop(PH.rec, (u32)((g_engine.real_time - PH.rec_start) * 1000.0), &secs, &frames, &dropped);
     PH.rec = NULL;
     if (!ok) { toast("Recording failed"); return; }
     char name[96];
@@ -674,7 +674,7 @@ static void consume_readback(void) {
         u32 t = (u32)((g_engine.real_time - PH.rec_start) * 1000.0);
         phone_recorder_push(PH.rec, px, w, h, t);
         if (!PH.rec_thumb_done) record_thumb(px, w, h);
-        if (phone_recorder_seconds(PH.rec) >= (double)PH.cv.record_max->i) record_stop();
+        if (g_engine.real_time - PH.rec_start >= (double)PH.cv.record_max->i) record_stop();
     }
 }
 

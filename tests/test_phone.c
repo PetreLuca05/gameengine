@@ -516,7 +516,7 @@ static void test_photo_video_files(const char *dir) {
     }
     double secs = 0;
     int frames = 0, dropped = 0;
-    CHECK(r && phone_recorder_stop(r, &secs, &frames, &dropped), "recorder stop");
+    CHECK(r && phone_recorder_stop(r, 2000, &secs, &frames, &dropped), "recorder stop");
     printf("  video: %d frames, %.2f s, dropped %d\n", frames, secs, dropped);
     CHECK(frames + dropped == 60 && frames >= 50, "frames recorded (%d, %d dropped)", frames, dropped);
     CHECK(fabs(secs - 2.0) < 0.1, "clip length %.2f s", secs);
@@ -815,7 +815,7 @@ static void test_server_roundtrip(const char *dir) {
     }
     double secs = 0;
     int frames = 0, dropped = 0;
-    CHECK(r && phone_recorder_stop(r, &secs, &frames, &dropped) && fabs(secs - 2.0) < 0.1, "2 s video (%.2f s)", secs);
+    CHECK(r && phone_recorder_stop(r, 2000, &secs, &frames, &dropped) && fabs(secs - 2.0) < 0.1, "2 s video (%.2f s)", secs);
     mid = hws_media_add(s, 0, clip, "roundtrip.mp4");
     snprintf(path, sizeof(path), "/media/%d/roundtrip.mp4?s=%s", mid, session);
     double dur = 0;

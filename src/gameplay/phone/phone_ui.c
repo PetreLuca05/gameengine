@@ -225,7 +225,7 @@ static void status_bar(PhoneState *s, Canvas *c, float W) {
         char t[24];
         c_round(c, W * 0.5f - 80, 16, 160, 32, 16, RGBA(220, 30, 30, 220), 0);
         c_circle(c, W * 0.5f - 58, 32, 7, RGBA(255, 255, 255, 255), 0);
-        c_text(c, 1, W * 0.5f + 8, 42, 1, RGBA(255, 255, 255, 255), mmss(phone_recorder_seconds(s->rec), t, sizeof(t)));
+        c_text(c, 1, W * 0.5f + 8, 42, 1, RGBA(255, 255, 255, 255), mmss((g_engine.real_time - s->rec_start), t, sizeof(t)));
     }
 }
 
@@ -347,7 +347,7 @@ static void gallery_ui(PhoneState *s, Canvas *c, float W, float H) {
 u32 phone_ui_hash(const PhoneState *s) {
     World *w = game_world();
     u32 h = 2166136261u;
-    u32 v[16] = { (u32)s->screen + (s->front ? 16u : 0u), (u32)lrintf(s->zoom * 50.0f), s->rec ? (u32)phone_recorder_seconds(s->rec) + 1 : 0, (u32)(s->conn >= 0), (u32)s->token_left,
+    u32 v[16] = { (u32)s->screen + (s->front ? 16u : 0u), (u32)lrintf(s->zoom * 50.0f), s->rec ? (u32)(g_engine.real_time - s->rec_start) + 1 : 0, (u32)(s->conn >= 0), (u32)s->token_left,
                   (u32)s->landscape, (u32)s->gallery.count, w ? (u32)(world_time_hours(w) * 60.0f) : 0, (u32)s->have_last_thumb, (u32)(s->server_err[0] != 0),
                   (u32)s->driven, (u32)s->fake, (u32)(s->token[0] != 0), 0, 0, 0 };
     for (int i = 0; i < 16; i++) { h ^= v[i]; h *= 16777619u; }
@@ -452,7 +452,7 @@ void phone_ui_hud(PhoneState *s) {
     // Recording.
     if (s->rec) {
         char t[32], tm[16];
-        snprintf(t, sizeof(t), "REC  %s", mmss(phone_recorder_seconds(s->rec), tm, sizeof(tm)));
+        snprintf(t, sizeof(t), "REC  %s", mmss((g_engine.real_time - s->rec_start), tm, sizeof(tm)));
         GuiText rt = { gui_s(th->t_small), GW_SEMIBOLD, UI_RGBA(255, 80, 70, 255), GUI_LEFT, th->tracking_caps, true, true, 0 };
         float blink = fmodf((float)g_engine.real_time, 1.0f) < 0.6f ? 1.0f : 0.25f;
         gd_circle(W * 0.5f - gui_s(48), gui_s(46), gui_s(7), gui_rgba_mul(UI_RGBA(255, 60, 50, 255), blink));

@@ -80,20 +80,20 @@ PhoneVideo *phone_video_open(const char *path, int w, int h, int kbps, char *err
     v->yuv = (u8 *)malloc((size_t)v->w * (size_t)v->h * 3 / 2);
     if (!v->enc || !v->scratch || !v->yuv || H264E_init(v->enc, &cp) != H264E_STATUS_SUCCESS) {
         snprintf(err, err_size, "encoder init failed");
-        phone_video_close(v, NULL, NULL);
+        phone_video_close(v, 0, NULL, NULL);
         return NULL;
     }
     v->f = fopen(path, "wb");
     if (!v->f) {
         snprintf(err, err_size, "cannot write %s", path);
-        phone_video_close(v, NULL, NULL);
+        phone_video_close(v, 0, NULL, NULL);
         return NULL;
     }
     // Non-fragmented, non-sequential: the moov index is written at close (fseek back).
     v->mux = MP4E_open(0, 0, v->f, mp4_write);
     if (!v->mux || mp4_h26x_write_init(&v->wr, v->mux, v->w, v->h, 0) != MP4E_STATUS_OK) {
         snprintf(err, err_size, "mp4 muxer init failed");
-        phone_video_close(v, NULL, NULL);
+        phone_video_close(v, 0, NULL, NULL);
         return NULL;
     }
     v->ok = true;
@@ -148,14 +148,14 @@ bool phone_video_frame(PhoneVideo *v, const u8 *rgba, u32 t_ms) {
     return true;
 }
 
-bool phone_video_close(PhoneVideo *v, double *seconds, int *frames) {
+bool phone_video_close(PhoneVideo *v, u32 end_ms, double *seconds, int *frames) {
     if (!v) return false;
     bool ok = v->ok;
-    if (v->ok && v->pending_len) {
-        u32 last = v->frames > 1 ? (v->prev_ms - v->first_ms) / (u32)(v->frames - 1) : 33u;
-        ok = flush_pending(v, DG_MAX(last, 1u));
-    }
-    if (seconds) *seconds = v->frames ? (double)(v->prev_ms - v->first_ms) / 1000.0 + 1.0 / 30.0 : 0.0;
+    u32 last = v->frames > 1 ? (v->prev_ms - v->first_ms) / (u32)(v->frames - 1) : 33u;
+    if (end_ms > v->prev_ms && v->frames) last = end_ms - v->prev_ms;   // the last frame shows until the stop
+    last = DG_CLAMP(last, 1u, 1000u);
+    if (v->ok && v->pending_len) ok = flush_pending(v, last);
+    if (seconds) *seconds = v->frames ? (double)(v->prev_ms - v->first_ms + last) / 1000.0 : 0.0;
     if (frames) *frames = v->frames;
     if (v->mux) {
         MP4E_close(v->mux);
@@ -253,12 +253,12 @@ bool phone_recorder_push(PhoneRecorder *r, const u8 *rgba, int w, int h, u32 t_m
 
 double phone_recorder_seconds(const PhoneRecorder *r) { return r && r->pushed ? (double)(r->last_ms - r->first_ms) / 1000.0 : 0.0; }
 
-bool phone_recorder_stop(PhoneRecorder *r, double *seconds, int *frames, int *dropped) {
+bool phone_recorder_stop(PhoneRecorder *r, u32 end_ms, double *seconds, int *frames, int *dropped) {
     if (!r) return false;
     jobs_wait(&r->jc);
     // A push racing the last job may have left frames behind: drain them here.
     rec_job(r);
-    bool ok = phone_video_close(r->v, seconds, frames);
+    bool ok = phone_video_close(r->v, end_ms, seconds, frames);
     if (dropped) *dropped = r->dropped;
     for (int i = 0; i < REC_QUEUE; i++) {
         free(r->spare[i]);
