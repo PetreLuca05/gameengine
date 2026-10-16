@@ -339,6 +339,24 @@ static void tab_graphics(GuiCursor *c, GuiRect content) {
     section(c, "View");
     row_slider_cvar(c, "Field of view", "cl_fov", 50, 120, 1, "%.0f\xC2\xB0", "Vertical-equivalent camera FOV. Aiming down sights uses each sight's own FOV.");
     {
+        // Stretched resolution simulator: the slider and what it looks like on this display.
+        Cvar *st = cv("r_stretch");
+        if (st) {
+            float v = st->f * 100.0f;
+            GuiRect r = gw_setting_row(c, "Stretched resolution", "The \"4:3 stretched\" look: the 3D view is rendered for a narrower screen and stretched to fill it, so everything looks wider. The HUD and menus stay normal.",
+                                       rid("r_stretch"));
+            if (gw_slider(rid("r_stretch"), r, &v, 0, 100, 1, v < 0.5f ? "Normal" : "%.0f%%")) cvar_set_float(st, v / 100.0f);
+            if (st->f > 0.001f) {
+                float k = render_stretch_factor();
+                int ow = cv("r_width")->i, oh = cv("r_height")->i;
+                char buf[128];
+                snprintf(buf, sizeof(buf), "Looks like %d \xC3\x97 %d stretched to %d \xC3\x97 %d (%.2fx wider)", (int)((float)ow / k + 0.5f), oh, ow, oh, k);
+                GuiRect lr = gc_row(c, gui_s(20));
+                gw_label(gui_rect(lr.x + lr.w * 0.46f + gui_s(16), lr.y, lr.w * 0.54f, lr.h), buf, gui_s(TH->t_body - 2), GW_REGULAR, TH->text_faint, GUI_LEFT);
+            }
+        }
+    }
+    {
         Cvar *vm = cv("cam_weapon_fov");
         if (vm) {
             bool follow = vm->f < 1.0f;

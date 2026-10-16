@@ -370,6 +370,7 @@ u64 render_post_memory(void);
 float render_exposure_ev(void);
 // Engine Fidelity (docs/ENGINE_FIDELITY.md) diagnostics.
 float render_direct_exposure_ev(void);                        // Engine Fidelity Off: the fixed (metered) exposure as EV100
+float render_stretch_factor(void);                            // r_stretch: horizontal stretch of the 3D view (1 = none)
 float render_gpu_frame_ms(void);                              // whole command buffer, GPU timestamps (last completed frame)
 u64 render_gpu_memory_bytes(void);                            // every VMA allocation (images, buffers, pools)
 void render_graph_trim(void);                                 // drop pooled images the last graph didn't use (level switch)

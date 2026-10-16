@@ -318,6 +318,7 @@ typedef struct Renderer {
     Cvar *r_aa, *r_brightness, *r_gamma, *r_grid, *r_vignette, *r_shader_hotreload, *r_culling;
     Cvar *r_vm_fov, *r_cpu_skinning, *r_bloom, *r_bloom_intensity, *r_hdr_output;
     Cvar *r_shadow_cascades, *r_shadow_distance, *r_shadow_filter, *r_shadow_min_radius;   // Engine Fidelity shadow tiers
+    Cvar *r_stretch;   // stretched resolution simulator (0 normal .. 1 extreme)
     float exposure_boost;
     u32 aniso_mod, texq_mod;
 } Renderer;

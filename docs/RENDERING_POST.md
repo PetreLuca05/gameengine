@@ -125,6 +125,13 @@ SMAA, 3 TAA), `r_upscaler` (0 off, 1 TAA-U, 2 FSR 1, 3 FSR 2 slot, 4 DLSS slot),
 samples from `tools/gen_luts.py`), `r_colorblind`, `r_brightness`, `r_gamma`,
 `r_post_feedback`, `r_hdr_output`, `r_hdr_paper_white`, `r_hdr_max_nits`, `r_render_scale`.
 
+**Stretched resolution simulator** (`r_stretch` 0 .. 1, Settings → Graphics → View): the
+competitive "4:3 stretched" look. The 3D view (world and viewmodel) is projected as if the screen
+were k = 1 + 1.5 × r_stretch times narrower at the same vertical FOV and fills the full width, so
+everything looks k times wider (0.25 ≈ 4:3 on a 16:9 display, 1 = 2.5x). Every projection-based
+pass and query (culling, `render_world_to_screen`, post, sights) uses the same matrices; the HUD
+and menus are not stretched. It is a look, not a cost setting: the render resolution is unchanged.
+
 **Budgets** (post passes = every pass except prepass / opaque / decals / opaque_dynamic /
 scene_copy / transparent / vm_prepass / viewmodel), RTX 3060 Ti, 1920×1080, dev-room test corner,
 `post_bench 240` (tools/tests/run_post_tests.py):

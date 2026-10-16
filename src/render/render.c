@@ -13,6 +13,15 @@
 #include "stb_image_write.h"
 
 static void on_render_cvar_changed(Cvar *cv) { (void)cv; }
+
+// Stretched resolution simulator (r_stretch): the competitive "4:3 stretched" look. The 3D view is
+// projected as if the screen were k times narrower (same vertical FOV) and fills the full width, so
+// everything is k times wider. 0.25 ~ 4:3 on 16:9 (k 1.33), 1 = k 2.5. The UI is not stretched.
+#define STRETCH_MAX 2.5f
+float render_stretch_factor(void) { return 1.0f + clampf(R->r_stretch ? R->r_stretch->f : 0.0f, 0.0f, 1.0f) * (STRETCH_MAX - 1.0f); }
+static float view_aspect(void) {
+    return (float)R->swap_extent.width / (float)DG_MAX(1u, R->swap_extent.height) / render_stretch_factor();
+}
 // Whole-frame GPU time (Engine Fidelity benchmark / overlay): a timestamp pair per frame slot.
 static VkQueryPool g_frame_qp;
 static bool g_frame_qp_written[FRAMES_IN_FLIGHT];
@@ -44,6 +53,8 @@ void render_register_cvars(void) {
     r->r_shadow_cascades = cvar_reg_int("r_shadow_cascades", 3, 1, 3, CVAR_ARCHIVE, "sun shadow cascades (1 .. 3)");
     r->r_shadow_distance = cvar_reg_float("r_shadow_distance", 1.0f, 0.25f, 1.0f, CVAR_ARCHIVE, "sun shadow reach (scale of the far cascades)");
     r->r_shadow_filter = cvar_reg_int("r_shadow_filter", 2, 0, 2, CVAR_ARCHIVE, "sun shadow softness: 0 hard (1 tap), 1 PCF 3x3, 2 PCF 5x5 (at High shadow quality)");
+    r->r_stretch = cvar_reg_float("r_stretch", 0.0f, 0.0f, 1.0f, CVAR_ARCHIVE,
+                                  "stretched resolution simulator: 0 normal .. 1 extreme (the 3D view squeezed into a narrower aspect, stretched to the screen)");
     r->r_shadow_min_radius = cvar_reg_float("r_shadow_min_radius", 0.0f, 0.0f, 4.0f, CVAR_ARCHIVE, "props smaller than this radius (m) cast no sun shadow");
     r->r_vsync->on_change = on_render_cvar_changed;
 }
@@ -344,7 +355,7 @@ void render_set_camera(const RenderCamera *cam) {
     vkg_bench_camera(&R->cam);   // vgeo_bench flythrough
     if (g_cam_override) g_cam_override(&R->cam);   // bench_fidelity flythrough
     cam = &R->cam;
-    float aspect = (float)R->swap_extent.width / (float)DG_MAX(1u, R->swap_extent.height);
+    float aspect = view_aspect();
     R->view = mat4_fps_view(cam->pos, cam->yaw, cam->pitch, cam->roll);
     R->proj = mat4_perspective(cam->fov_deg * DG_DEG2RAD, aspect, cam->znear, cam->zfar);
     R->view_proj = mat4_mul(R->proj, R->view);
@@ -934,7 +945,7 @@ static bool prev_palette(u32 id, u32 *off, u32 *count) {
 // ------------------------------------------------------------------ frame matrices
 
 static void compute_matrices(FrameData *fd) {
-    float aspect = (float)R->swap_extent.width / (float)DG_MAX(1u, R->swap_extent.height);
+    float aspect = view_aspect();
     RenderCamera *c = &R->cam;
     R->view = mat4_fps_view(c->pos, c->yaw, c->pitch, c->roll);
     R->proj = mat4_perspective(c->fov_deg * DG_DEG2RAD, aspect, c->znear, c->zfar);
