@@ -1,0 +1,29 @@
+{
+  "_comment": "The canonical human Skeleton asset (docs/CHARACTERS.md). Bones come from 'source' (baked to assets/skeletons/human.skel by tools/bake_skeleton, or through assets/cache). Sockets: named transforms on bones (space 'bind' = model-space offset at the bind pose, 'bone' = bone local). Virtual bones: a bone parented to 'source' that follows 'target' (IK targets; never in clips or on the wire). Groups extend / replace the built-ins (all, upper_body, lower_body, spine, head, arms, arm_l, arm_r, hands, fingers, legs, feet, hair, face). base_pose: retarget base pose rotation offsets (deg) from the bind.",
+  "source": "assets/human/Dummy.fbx",
+  "sockets": {
+    "camera":      { "bone": "Head", "offset": [0, 0.10, -0.10] },
+    "head_top":    { "bone": "Head", "offset": [0, 0.20, 0] },
+    "hand_r_grip": { "bone": "RightHand", "offset": [0, -0.08, 0], "space": "bone" },
+    "hand_l_grip": { "bone": "LeftHand", "offset": [0, -0.08, 0], "space": "bone" },
+    "back":        { "bone": "Spine2", "offset": [0, 0, 0.16] },
+    "hip_r":       { "bone": "Hips", "offset": [0.18, 0, 0] },
+    "hip_l":       { "bone": "Hips", "offset": [-0.18, 0, 0] },
+    "seat":        { "bone": "Hips", "offset": [0, -0.08, 0] }
+  },
+  "virtual_bones": {
+    "VB hand_l_in_hand_r": { "source": "RightHand", "target": "LeftHand" },
+    "VB hand_r_in_hand_l": { "source": "LeftHand", "target": "RightHand" },
+    "VB foot_l_in_hips":   { "source": "Hips", "target": "LeftFoot" },
+    "VB foot_r_in_hips":   { "source": "Hips", "target": "RightFoot" },
+    "VB head_in_spine2":   { "source": "Spine2", "target": "Head" }
+  },
+  "groups": {
+    "torso": { "chains": ["Spine"], "bones": ["Hips"], "exclude_chains": ["Neck", "LeftArm", "RightArm"] },
+    "_parts": "Disjoint regions that tile the body, for cutting a full-body mesh into modular parts ('region' in a character part).",
+    "part_head":  { "chains": ["Neck"] },
+    "part_torso": { "chains": ["Spine"], "exclude_chains": ["Neck", "LeftHand", "RightHand"] },
+    "part_hands": { "chains": ["LeftHand", "RightHand"] },
+    "part_legs":  { "groups": ["lower_body"] }
+  }
+}

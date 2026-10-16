@@ -234,6 +234,8 @@ void game_sim_player(World *w, int slot, const UserCmd *cmd, float dt, bool firs
     Cvar *cheats = cvar_find("sv_cheats");
     if (!cheats || !cheats->i) c.buttons &= (u16)~BTN_NOCLIP;
     vehicles_player_cmd(w, slot, &c, pressed, first);   // enter / exit / seats / driver input (host)
+    // A driver's right click holds the gun out at the hip: no aim-down-sights from it.
+    if (p->sim.move.mode == MOVE_SEATED && p->sim.move.veh_onehand) c.buttons &= (u16)~BTN_AIM;
     player_move_tick(w, slot, &p->sim, p->character, &c, dt, first);
     WeaponOutput wo;
     weapons_tick(w, slot, &p->sim, &c, pressed, dt, first, &wo);

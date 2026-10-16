@@ -8,12 +8,13 @@ static int cmp_float(const void *a, const void *b) {
     return x < y ? -1 : (x > y ? 1 : 0);
 }
 
-void skin_fit_bone_radii(const SkinMeshData *m, int lod, const Skeleton *s, float *radius) {
+void skin_fit_bone_radii(const SkinMeshData *m, int lod, const Skeleton *s, const i16 *joint_map, float *radius) {
     for (int b = 0; b < s->count; b++) radius[b] = 0;
     if (lod < 0 || lod >= m->lod_count) return;
     const SkinLod *L = &m->lods[lod];
     int *counts = (int *)calloc((size_t)s->count, sizeof(int));
-    for (u32 i = 0; i < L->vcount; i++) counts[L->verts[i].joints[0]]++;
+    #define JOINT0(v) (joint_map ? joint_map[(v).joints[0]] : (v).joints[0])
+    for (u32 i = 0; i < L->vcount; i++) counts[JOINT0(L->verts[i])]++;
     float **d = (float **)calloc((size_t)s->count, sizeof(float *));
     int *fill = (int *)calloc((size_t)s->count, sizeof(int));
     for (int b = 0; b < s->count; b++) if (counts[b]) d[b] = (float *)malloc(sizeof(float) * (size_t)counts[b]);
@@ -26,7 +27,7 @@ void skin_fit_bone_radii(const SkinMeshData *m, int lod, const Skeleton *s, floa
             if (s->parent[c] == b) { seg_b[b] = s->bind_model[c].t; break; }
     }
     for (u32 i = 0; i < L->vcount; i++) {
-        int j = L->verts[i].joints[0];
+        int j = JOINT0(L->verts[i]);
         vec3 p = L->verts[i].pos;
         vec3 q = closest_point_segment(p, seg_a[j], seg_b[j]);
         d[j][fill[j]++] = v3_dist(p, q);

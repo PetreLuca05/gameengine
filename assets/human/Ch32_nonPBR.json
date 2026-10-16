@@ -1,0 +1,17 @@
+{
+	"aliases":	{
+		"mixamorig8:HeadTop_End":	"mixamorig1:Head_end",
+		"mixamorig8:LeftHandThumb4":	"mixamorig1:LeftHandThumb3_end",
+		"mixamorig8:LeftHandIndex4":	"mixamorig1:LeftHandIndex3_end",
+		"mixamorig8:LeftHandMiddle4":	"mixamorig1:LeftHandMiddle3_end",
+		"mixamorig8:LeftHandRing4":	"mixamorig1:LeftHandRing3_end",
+		"mixamorig8:LeftHandPinky4":	"mixamorig1:LeftHandPinky3_end",
+		"mixamorig8:RightHandThumb4":	"mixamorig1:RightHandThumb3_end",
+		"mixamorig8:RightHandIndex4":	"mixamorig1:RightHandIndex3_end",
+		"mixamorig8:RightHandMiddle4":	"mixamorig1:RightHandMiddle3_end",
+		"mixamorig8:RightHandRing4":	"mixamorig1:RightHandRing3_end",
+		"mixamorig8:RightHandPinky4":	"mixamorig1:RightHandPinky3_end",
+		"mixamorig8:LeftToe_End":	"mixamorig1:LeftToeBase_end",
+		"mixamorig8:RightToe_End":	"mixamorig1:RightToeBase_end"
+	}
+}

@@ -9,6 +9,7 @@
 
 #include "anim/anim.h"
 #include "anim/anim_mesh.h"
+#include "render/skeletal_mesh.h"
 
 #define FBX_MAX_TAKES 16
 
@@ -20,10 +21,12 @@ typedef struct FbxBakeOptions {
 
 // Skeleton = every bone node of the file (topologically sorted). Returns false + err on failure.
 bool fbx_load_skeleton(const char *path, Skeleton *out, char *err, int err_size);
-// Skinned meshes of the file, bound to `canon` by bone name. Mesh nodes named *_LOD<n> become
-// LOD n (several nodes with the same LOD are merged). Bones missing from canon are folded onto
-// their nearest canonical ancestor.
-bool fbx_load_skinned_mesh(const char *path, const Skeleton *canon, SkinMeshData *out, char *err, int err_size);
+// Skinned meshes of the file as a SkeletalMesh bound to the Skeleton asset by bone name (after
+// `aliases`, may be NULL). Mesh nodes named *_LOD<n> become LOD n (several nodes with the same LOD are
+// merged). Joints index the mesh's own bone list: skeleton bones it skins + mesh-only leaf bones (bones
+// the Skeleton doesn't have, riding on their nearest bone ancestor). Vertices are retargeted onto the
+// Skeleton reference pose. Hierarchy compatibility is rig_validate's job (run it on fbx_load_skeleton).
+bool fbx_load_skeletal_mesh(const char *path, const SkeletonAsset *sk, const BoneAliasTable *aliases, SkeletalMesh *out, char *err, int err_size);
 // Bakes every take of the file against `canon`. Clip name = file stem, or "stem:take" when the
 // file has several takes. Returns the number of clips written to out (caller frees with clip_free).
 int fbx_bake_clips(const char *path, const Skeleton *canon, const FbxBakeOptions *opt, Clip *out, int max, char *err, int err_size);

@@ -412,6 +412,114 @@ static void draw_controller_panel(CharacterInst *c) {
     (void)y0;
 }
 
+// ------------------------------------------------------------------ character inspector
+
+// char_inspect 1: the modular parts of the character under the crosshair (or anim_target): each slot's
+// SkeletalMesh, its bone subset / mesh-only bones / triangles / shared GPU part, the skeleton's sockets
+// and virtual bones; the world overlay shows the selected part's bone subset (green), mesh-only bones
+// (magenta), sockets (yellow) and virtual bones (cyan). char_inspect_slot / char_inspect_swap edit it.
+static struct { Cvar *on; int slot; } I = { 0, -1 };
+
+static void cmd_inspect_slot(int argc, const char **argv) {
+    I.slot = argc > 1 ? char_slot_from_name(argv[1]) : -1;
+    log_info("char_inspect_slot: %s", I.slot >= 0 ? char_slot_name(I.slot) : "all parts");
+}
+
+static void cmd_inspect_swap(int argc, const char **argv) {
+    World *w = game_world();
+    CharacterInst *c = target();
+    if (!c) c = stand();
+    if (!w || !c || argc < 2) { log_info("char_inspect_swap <slot> [next|prev|none|<option id>] (aim at a character)"); return; }
+    int slot = char_slot_from_name(argv[1]);
+    if (slot < 0 || !c->def->slots[slot].option_count) { log_info("%s has no '%s' slot options", c->def->id, argv[1]); return; }
+    int n = c->def->slots[slot].option_count, cur = (int)c->parts[slot] - 1;
+    const char *how = argc > 2 ? argv[2] : "next";
+    int o = !strcmp(how, "next") ? (cur + 1) % n : !strcmp(how, "prev") ? (cur + n - 1) % n : !strcmp(how, "none") ? -1 : character_find_option(c->def, slot, how);
+    if (o < 0 && strcmp(how, "none")) { log_info("no option '%s'", how); return; }
+    if (w->authority) chars_set_part(w, c->ent, slot, o);
+    else if (c->ent == self_ent()) game_rpc(RPC_SET_PART, slot, o, 0);
+    else { log_info("char_inspect_swap: clients can only swap their own parts"); return; }
+    log_info("%s %s -> %s", c->def->id, char_slot_name(slot), o >= 0 ? c->def->slots[slot].options[o].id : "none");
+}
+
+static void draw_inspector(CharacterInst *c) {
+    World *w = game_world();
+    const AnimLibrary *L = g_engine.anim;
+    float s = scale_px();
+    float x = 20 * s, y = 70 * s;
+    ui_rect(x - 8 * s, y - 8 * s, 470 * s, 520 * s, PANEL_BG);
+    y = line(x, y, HOT, "CHARACTER  ent %u  %s  skeleton %s (%d bones, %08x)", c->ent, c->def->id, L->skeleton.id, L->skel.count, L->skel.hash);
+    y = line(x, y, DIM, "one SkeletonInstance: %u palettes built, pose v%u", c->si ? c->si->palette_builds : 0, c->si ? c->si->pose_version : 0);
+    y += 4 * s;
+    CharPartInfo info[CSLOT_COUNT];
+    int n = chars_part_info(w, c->ent, info, CSLOT_COUNT);
+    y = line(x, y, HOT, "parts (%d)          option            bones  leaf  tris   gpu", n);
+    for (int sl = 0; sl < CSLOT_COUNT; sl++) {
+        const CharPartSlot *ps = &c->def->slots[sl];
+        if (!ps->option_count) continue;
+        const CharPartInfo *p = NULL;
+        for (int k = 0; k < n; k++) if (info[k].slot == sl) p = &info[k];
+        u32 col = I.slot == sl ? HOT : (p ? TXT : DIM);
+        if (p) y = line(x, y, col, "  %-6s %d/%-2d %-20s %4d  %4d  %5d  #%d", char_slot_name(sl), p->option + 1, ps->option_count, p->id, p->bones, p->mesh_only, p->tris_lod0, p->gpu);
+        else y = line(x, y, col, "  %-6s -/%-2d (empty)", char_slot_name(sl), ps->option_count);
+        // Bone subset of the selected slot's mesh (skeleton bone names, mesh-only marked *).
+        if (p && I.slot == sl) {
+            const SkeletalMesh *m = &L->meshes[p->mesh];
+            char row[200] = "";
+            for (int b = 0; b < m->bone_count; b++) {
+                const char *nm = strrchr(m->bones[b].name, ':');
+                nm = nm ? nm + 1 : m->bones[b].name;
+                char item[48];
+                snprintf(item, sizeof(item), "%s%s ", m->bones[b].skel < 0 ? "*" : "", nm);
+                if (strlen(row) + strlen(item) > 70) { y = line(x + 16 * s, y, DIM, "%s", row); row[0] = 0; }
+                strncat(row, item, sizeof(row) - strlen(row) - 1);
+            }
+            if (row[0]) y = line(x + 16 * s, y, DIM, "%s", row);
+        }
+    }
+    y = line(x, y, DIM, "%d GPU parts built (shared by every character wearing them)", chars_gpu_part_count());
+    y += 4 * s;
+    y = line(x, y, HOT, "sockets (%d)  virtual bones (%d)", c->def->socket_count, L->skeleton.vbone_count);
+    for (int k = 0; k < c->def->socket_count && k < 10; k++) {
+        const CharSocket *so = &c->def->sockets[k];
+        y = line(x, y, TXT, "  %-12s on %s", so->name, so->bone >= 0 ? L->skel.names[so->bone] : "?");
+    }
+    for (int k = 0; k < L->skeleton.vbone_count; k++) y = line(x, y, TXT, "  %-22s %s -> %s", L->skeleton.vbones[k].name, L->skeleton.vbones[k].source_name, L->skeleton.vbones[k].target_name);
+    y += 4 * s;
+    y = line(x, y, DIM, "char_inspect_slot <slot> | char_inspect_swap <slot> [next|prev|none|id]");
+    y = line(x, y, DIM, "character_parts | character_set_part <slot> <id>");
+    // World overlay (drawn pose).
+    if (!c->si) return;
+    const SkeletonInstance *si = c->si;
+    for (int k = 0; k < c->def->socket_count; k++) {
+        const CharSocket *so = &c->def->sockets[k];
+        if (so->bone < 0) continue;
+        Xform t = skel_socket_world(so, si->world);
+        dbg_cross(t.t, 0.03f, DBG_YELLOW, 0);
+    }
+    for (int k = 0; k < L->skeleton.vbone_count; k++) {
+        const VirtualBone *v = &L->skeleton.vbones[k];
+        if (v->source < 0 || v->target < 0) continue;
+        dbg_line(si->world[v->source].t, skel_vbone_xform(v, si->world).t, DBG_CYAN, 0, false);
+    }
+    for (int k = 0; k < n; k++) {
+        if (I.slot >= 0 && info[k].slot != I.slot) continue;
+        const SkeletalMesh *m = &L->meshes[info[k].mesh];
+        for (int b = 0; b < m->bone_count; b++) {
+            Xform bw = skm_bone_world(m, si, b);
+            if (m->bones[b].skel < 0) {
+                dbg_sphere(bw.t, 0.012f, DBG_MAGENTA, 0);
+                Xform pw = skm_bone_world(m, si, m->bones[b].parent);
+                dbg_line(pw.t, bw.t, DBG_MAGENTA, 0, false);
+            } else if (I.slot >= 0) {
+                int p = L->skel.parent[m->bones[b].skel];
+                if (p >= 0) dbg_line(si->world[p].t, bw.t, DBG_GREEN, 0, false);
+                dbg_cross(bw.t, 0.015f, DBG_GREEN, 0);
+            }
+        }
+    }
+}
+
 static void stand_tick(void) {
     CharacterInst *c = stand();
     const AnimLibrary *L = g_engine.anim;
@@ -445,13 +553,20 @@ void anim_debug_init(void) {
     cmd_register("anim_stand_hit", cmd_stand_hit, "anim_stand_hit <part|all> [damage]: hit the stand on a body part (host)");
     cmd_register("anim_stand_drop", cmd_stand_drop, "ragdoll the stand character");
     cmd_register("anim_stand_push", cmd_stand_push, "anim_stand_push [N]: push the stand ragdoll along the view");
+    I.on = cvar_reg_bool("char_inspect", false, 0, "character inspector: modular parts, bone subsets, mesh-only bones, sockets, virtual bones");
+    cmd_register("char_inspect_slot", cmd_inspect_slot, "char_inspect_slot <slot|all>: highlight one part's bone subset in the character inspector");
+    cmd_register("char_inspect_swap", cmd_inspect_swap, "char_inspect_swap <slot> [next|prev|none|id]: swap a part of the inspected character");
 }
 
 void anim_debug_draw(void) {
     if (!S.debug) S.debug = cvar_find("anim_debug");
     stand_tick();
-    if (!S.debug || !S.debug->i || !game_world() || !g_engine.anim) return;
+    bool inspect = I.on && I.on->i;
+    if ((!S.debug || !S.debug->i) && !inspect) return;
+    if (!game_world() || !g_engine.anim) return;
     CharacterInst *c = target();
     if (!c) c = stand();
-    if (c) draw_controller_panel(c);
+    if (!c) return;
+    if (S.debug && S.debug->i) draw_controller_panel(c);
+    if (inspect) draw_inspector(c);
 }

@@ -1,4 +1,5 @@
 // validate_rig: checks model FBX skeletons against the canonical rig (assets/human/Dummy.fbx).
+// Superseded by tools/bake_mesh (aliases, suggested aliases, bind deltas, .skm output); kept for scripts.
 //
 //   validate_rig [--canon <rig.fbx>] [--tolerance 0.25] <model.fbx | dir>...
 //

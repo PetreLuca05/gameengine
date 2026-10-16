@@ -160,7 +160,7 @@ float weather_puddle_mask_at(float x, float z);  // the baked puddle mask 0..1
 void weather_add_listener(WeatherEventFn fn, void *user);
 const char *weather_event_name(WeatherEvent e);
 
-enum RpcType { RPC_INV_MOVE = 1, RPC_INV_DROP, RPC_CONTAINER_TAKE, RPC_CONTAINER_PUT, RPC_CONTAINER_CLOSE, RPC_INV_USE, RPC_ATTACH, RPC_INV_OP };
+enum RpcType { RPC_INV_MOVE = 1, RPC_INV_DROP, RPC_CONTAINER_TAKE, RPC_CONTAINER_PUT, RPC_CONTAINER_CLOSE, RPC_INV_USE, RPC_ATTACH, RPC_INV_OP, RPC_SET_PART };
 
 // Inventory intents (gameplay/inv_ops.h, docs/UI.md): applied at once on the host; a client predicts
 // them on its copy and re-applies the unacknowledged ones on every inventory the host sends.

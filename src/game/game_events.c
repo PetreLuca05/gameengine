@@ -264,6 +264,7 @@ void game_sv_handle_rpc(int slot, int type, int a, int b, int c) {
     case RPC_INV_MOVE: inv_move(&p->inv, w->items, a, b); break;
     case RPC_INV_DROP: drop_item(w, slot, a); break;
     case RPC_ATTACH: game_sv_attach(w, slot, a, b, c); break;
+    case RPC_SET_PART: chars_sv_player_part(w, slot, a, b); break;
     case RPC_INV_OP: {
         InvOp op;
         inv_op_unpack(a, b, c, &op);

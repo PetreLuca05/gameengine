@@ -594,7 +594,7 @@ void game_render(void) {
         memset(&interp, 0, sizeof(interp));
         interp.pos = v3(0, 2, 10);
     }
-    bool ads = p && (G->last_cmd.buttons & BTN_AIM) && (p->sim.move.mode == MOVE_WALK || p->sim.move.mode == MOVE_SEATED);
+    bool ads = p && (G->last_cmd.buttons & BTN_AIM) && (p->sim.move.mode == MOVE_WALK || (p->sim.move.mode == MOVE_SEATED && !p->sim.move.veh_onehand));
     const WeaponDef *wd = p ? weapon_equipped_def(w, G->local_slot) : NULL;
     if (wd && wd->kind == WPN_MELEE) ads = false;
     input_set_ads(ads);

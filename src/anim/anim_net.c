@@ -46,6 +46,7 @@ u16 anim_net_diff(const AnimNetState *a, const AnimNetState *b) {
     if (a->mantle_t != b->mantle_t) m |= ANS_MANTLE;
     if (a->character_id != b->character_id) m |= ANS_CHAR;
     if (a->death_tick != b->death_tick || a->death_seed != b->death_seed) m |= ANS_DEATH;
+    if (memcmp(a->parts, b->parts, sizeof(a->parts))) m |= ANS_PARTS;
     return m;
 }
 
@@ -65,6 +66,22 @@ int anim_net_field_bytes(u16 f) {
     if (f & ANS_MANTLE) n += 1;
     if (f & ANS_CHAR) n += 1;
     if (f & ANS_DEATH) n += 5;
+    if (f & ANS_PARTS) n += 2 + ANIM_NET_PART_SLOTS;
+    return n;
+}
+
+static u16 parts_mask(const AnimNetState *s) {
+    u16 m = 0;
+    for (int i = 0; i < ANIM_NET_PART_SLOTS; i++) if (s->parts[i]) m |= (u16)(1u << i);
+    return m;
+}
+
+int anim_net_size(const AnimNetState *s, u16 f) {
+    int n = anim_net_field_bytes(f & ~ANS_PARTS);
+    if (f & ANS_PARTS) {
+        n += 2;
+        for (u16 m = parts_mask(s); m; m &= (u16)(m - 1)) n++;
+    }
     return n;
 }
 
@@ -84,6 +101,11 @@ void anim_net_write(Writer *w, const AnimNetState *s, u16 f) {
     if (f & ANS_MANTLE) w_u8(w, s->mantle_t);
     if (f & ANS_CHAR) w_u8(w, s->character_id);
     if (f & ANS_DEATH) { w_u32(w, s->death_tick); w_u8(w, s->death_seed); }
+    if (f & ANS_PARTS) {
+        u16 m = parts_mask(s);
+        w_u16(w, m);
+        for (int i = 0; i < ANIM_NET_PART_SLOTS; i++) if (m & (1u << i)) w_u8(w, s->parts[i]);
+    }
 }
 
 void anim_net_read(Reader *r, AnimNetState *s, u16 *fields) {
@@ -103,6 +125,10 @@ void anim_net_read(Reader *r, AnimNetState *s, u16 *fields) {
     if (f & ANS_MANTLE) s->mantle_t = r_u8(r);
     if (f & ANS_CHAR) s->character_id = r_u8(r);
     if (f & ANS_DEATH) { s->death_tick = r_u32(r); s->death_seed = r_u8(r); }
+    if (f & ANS_PARTS) {
+        u16 m = r_u16(r);
+        for (int i = 0; i < ANIM_NET_PART_SLOTS; i++) s->parts[i] = (m & (1u << i)) ? r_u8(r) : 0;
+    }
 }
 
 // Event layout: type u8 | ent u32 | tick u32 | seed u8 | [hit/die: part u8, dir u16, strength u8, dmg u8] | [land/fire: extra u8]

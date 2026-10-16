@@ -1,5 +1,5 @@
 {
-  "_comment": "Cosmetic character skins: another mesh on the shared skeleton (same animation, hitboxes, ragdoll). 'atlas' = the material diffuse textures side by side (tools/gen_skin_atlas.py from the textures extracted by fbx_textures); 'tiles' lists the materials in atlas order. 'player' = the default for players (the local player picks with cl_skin / Pause > Skin); 'npc' = per character type for non-player characters (zombies keep their own look).",
+  "_comment": "Cosmetic character skins: another mesh on the shared skeleton (same animation, hitboxes, ragdoll). Any .fbx / .skm dropped into assets/skins/ is a skin too (docs/CHARACTERS.md); players wear them as their body part, replicated. 'atlas' = the material diffuse textures side by side (tools/gen_skin_atlas.py from the textures extracted by fbx_textures); 'tiles' lists the materials in atlas order. 'player' = the default for players (the local player picks with cl_skin / Pause > Skin); 'npc' = per character type for non-player characters (zombies keep their own look).",
   "skins": [
     { "id": "dummy", "name": "Dummy (original)", "mesh": "assets/human/Dummy.fbx" },
     { "id": "hazmat", "name": "Hazmat Suit", "mesh": "assets/human/Ch32_nonPBR.fbx", "atlas": "skin_hazmat",

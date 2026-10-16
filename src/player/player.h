@@ -62,8 +62,9 @@ typedef struct PlayerMove {
     // vehicles (MOVE_SEATED, src/game/game_vehicles.c): host-owned, predicted positions only
     u32 vehicle;        // EntityId of the vehicle
     u8 seat;            // seat index
-    u8 veh_onehand;     // driver aiming one-handed (hold point HP_VEHICLE_ONEHAND, steering clamp)
-    u8 pad3[2];
+    u8 veh_onehand;     // driver holding the gun out one-handed (hold point HP_VEHICLE_ONEHAND, steering clamp)
+    u8 veh_raise;       // ticks the gun stays out after a shot (fire raises it by itself)
+    u8 pad3;
     float veh_stun;     // s left after being thrown out at speed (no control)
 } PlayerMove;
 

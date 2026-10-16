@@ -191,34 +191,229 @@ bool anim_lib_reload_hitboxes(AnimLibrary *lib) {
     return ok;
 }
 
-static int load_mesh(AnimLibrary *lib, const char *rel_path) {
-    for (int i = 0; i < lib->mesh_count; i++) if (!strcmp(lib->mesh_paths[i], rel_path)) return i;
-    if (lib->mesh_count >= LIB_MAX_MESHES) return -1;
+static bool ends_with_ci(const char *s, const char *suffix) {
+    size_t a = strlen(s), b = strlen(suffix);
+    return a >= b && SDL_strcasecmp(s + a - b, suffix) == 0;
+}
+
+// Same-name .json next to a mesh (drag-and-drop metadata: aliases, sockets, skin name / atlas).
+static cJSON *read_sidecar(const char *rel_path) {
+    char side[300];
+    dg_strcpy(side, sizeof(side), rel_path);
+    char *dot = strrchr(side, '.');
+    if (!dot) return NULL;
+    dg_strcpy(dot, sizeof(side) - (size_t)(dot - side), ".json");
+    char *text = read_text(side);
+    cJSON *root = text ? cJSON_Parse(text) : NULL;
+    if (text && !root) log_error("%s: JSON parse error", side);
+    free(text);
+    return root;
+}
+
+static void parse_mesh_sockets(SkeletalMesh *m, const cJSON *obj) {
+    const cJSON *e;
+    cJSON_ArrayForEach(e, obj) {
+        if (!cJSON_IsObject(e) || m->socket_count >= SKM_MAX_SOCKETS) continue;
+        SkelSocket *k = &m->sockets[m->socket_count++];
+        memset(k, 0, sizeof(*k));
+        dg_strcpy(k->name, sizeof(k->name), e->string);
+        const cJSON *v = cJSON_GetObjectItemCaseSensitive(e, "bone");
+        dg_strcpy(k->bone_name, sizeof(k->bone_name), cJSON_IsString(v) ? v->valuestring : "Spine2");
+        const cJSON *o = cJSON_GetObjectItemCaseSensitive(e, "offset"), *r = cJSON_GetObjectItemCaseSensitive(e, "rotation");
+        if (cJSON_GetArraySize(o) >= 3) k->offset = v3((float)cJSON_GetArrayItem(o, 0)->valuedouble, (float)cJSON_GetArrayItem(o, 1)->valuedouble, (float)cJSON_GetArrayItem(o, 2)->valuedouble);
+        if (cJSON_GetArraySize(r) >= 3) k->rotation_deg = v3((float)cJSON_GetArrayItem(r, 0)->valuedouble, (float)cJSON_GetArrayItem(r, 1)->valuedouble, (float)cJSON_GetArrayItem(r, 2)->valuedouble);
+        v = cJSON_GetObjectItemCaseSensitive(e, "space");
+        k->bind_space = !(cJSON_IsString(v) && !strcmp(v->valuestring, "bone"));
+        k->bone = -1;
+    }
+}
+
+// A plain mesh file bound to the skeleton: .skm as baked, .fbx through rig validation + the cache.
+static bool load_mesh_file(AnimLibrary *lib, const char *rel_path, SkeletalMesh *out) {
     char buf[512], err[512] = { 0 };
     const char *full = platform_data_path(rel_path, buf, sizeof(buf));
-    // Rig validation first: the model's own skeleton against the canonical one.
-    Skeleton *ms = (Skeleton *)malloc(sizeof(Skeleton));
-    if (!anim_cache_skeleton(full, ms, err, sizeof(err))) { log_error("character mesh %s: %s", rel_path, err); free(ms); return -1; }
-    RigReport *rep = (RigReport *)malloc(sizeof(RigReport));
-    bool ok = rig_validate(&lib->skel, ms, 0.05f, rep);
-    if (!ok || !rep->identical) log_info("rig %s:\n%s", rel_path, rep->text);
-    free(rep);
-    free(ms);
-    if (!ok) { log_error("character mesh %s: rig rejected (see report above)", rel_path); return -1; }
+    cJSON *side = read_sidecar(rel_path);
+    BoneAliasTable *aliases = (BoneAliasTable *)calloc(1, sizeof(BoneAliasTable));
+    if (side) skm_alias_parse(aliases, cJSON_GetObjectItemCaseSensitive(side, "aliases"));
+    bool ok = false;
+    if (ends_with_ci(rel_path, ".skm")) {
+        ok = skm_read(out, full, err, sizeof(err));
+        if (ok && out->skeleton_hash != lib->skel.hash) {
+            snprintf(err, sizeof(err), "baked against skeleton %08x, this skeleton is %08x: re-run tools/bake_mesh", out->skeleton_hash, lib->skel.hash);
+            skm_free(out);
+            ok = false;
+        }
+    } else {
+        // Rig validation first: the model's own skeleton (aliases applied) against the Skeleton asset.
+        Skeleton *ms = (Skeleton *)malloc(sizeof(Skeleton));
+        RigReport *rep = (RigReport *)malloc(sizeof(RigReport));
+        if (anim_cache_skeleton(full, ms, err, sizeof(err))) {
+            skm_alias_apply_skeleton(aliases, ms);
+            ok = rig_validate(&lib->skel, ms, 0.05f, rep);
+            if (!ok || !rep->identical) log_info("rig %s:\n%s", rel_path, rep->text);
+            if (!ok) snprintf(err, sizeof(err), "rig rejected (see report above; a same-name .json sidecar with \"aliases\" fixes renamed bones)");
+        }
+        free(rep);
+        free(ms);
+        if (ok) ok = anim_cache_skm(full, &lib->skeleton, aliases, out, err, sizeof(err));
+    }
+    if (ok && side) {
+        parse_mesh_sockets(out, cJSON_GetObjectItemCaseSensitive(side, "sockets"));
+        skm_finalize(out, &lib->skeleton);
+    }
+    if (!ok) log_error("character mesh %s: %s", rel_path, err);
+    cJSON_Delete(side);
+    free(aliases);
+    return ok;
+}
+
+int anim_lib_load_mesh_ref(AnimLibrary *lib, const MeshRef *ref) {
+    u32 h = mesh_ref_hash(ref);
+    for (int i = 0; i < lib->mesh_count; i++)
+        if (mesh_ref_hash(&lib->mesh_refs[i]) == h && !strcmp(lib->mesh_refs[i].path, ref->path) && !strcmp(lib->mesh_refs[i].region, ref->region)) return i;
+    if (!mesh_ref_is_plain(ref)) {
+        // Derived part: cut out of / deformed from the plain mesh (placeholder modular sets).
+        MeshRef base;
+        memset(&base, 0, sizeof(base));
+        dg_strcpy(base.path, sizeof(base.path), ref->path);
+        base.scale = v3(1, 1, 1);
+        int b = anim_lib_load_mesh_ref(lib, &base);
+        if (b < 0 || lib->mesh_count >= LIB_MAX_MESHES) return -1;
+        SkeletalMesh *dst = &lib->meshes[lib->mesh_count];
+        if (ref->region[0]) {
+            int g = skel_asset_find_group(&lib->skeleton, ref->region);
+            if (g < 0) { log_error("character mesh %s: unknown region (bone group) '%s'", ref->path, ref->region); return -1; }
+            if (!skm_extract_region(&lib->meshes[b], &lib->skeleton.groups[g].bones, dst)) {
+                log_error("character mesh %s: region '%s' has no triangles", ref->path, ref->region);
+                return -1;
+            }
+        } else {
+            skm_copy(dst, &lib->meshes[b]);
+        }
+        if (ref->inflate != 0.0f || ref->scale.x != 1.0f || ref->scale.y != 1.0f || ref->scale.z != 1.0f) skm_deform(dst, ref->inflate, ref->scale);
+        skm_finalize(dst, &lib->skeleton);
+        lib->mesh_refs[lib->mesh_count] = *ref;
+        return lib->mesh_count++;
+    }
+    if (lib->mesh_count >= LIB_MAX_MESHES) { log_error("character mesh %s: more than %d meshes", ref->path, LIB_MAX_MESHES); return -1; }
     int i = lib->mesh_count;
-    if (!anim_cache_mesh(full, &lib->skel, &lib->meshes[i], err, sizeof(err))) { log_error("character mesh %s: %s", rel_path, err); return -1; }
-    dg_strcpy(lib->mesh_paths[i], 128, rel_path);
+    if (!load_mesh_file(lib, ref->path, &lib->meshes[i])) return -1;
+    lib->mesh_refs[i] = *ref;
     lib->mesh_count++;
     return i;
 }
 
-int anim_lib_load_mesh(AnimLibrary *lib, const char *rel_path) { return load_mesh(lib, rel_path); }
+int anim_lib_load_mesh(AnimLibrary *lib, const char *rel_path) {
+    MeshRef r;
+    memset(&r, 0, sizeof(r));
+    dg_strcpy(r.path, sizeof(r.path), rel_path);
+    r.scale = v3(1, 1, 1);
+    return anim_lib_load_mesh_ref(lib, &r);
+}
+
+int anim_lib_find_skin(const AnimLibrary *lib, const char *id) {
+    for (int k = 0; k < lib->skin_count; k++) if (!strcmp(lib->skins[k].id, id)) return k;
+    return -1;
+}
+
+static void skin_meta(CharSkinDef *sk, const cJSON *e) {
+    const cJSON *v = cJSON_GetObjectItemCaseSensitive(e, "name");
+    if (cJSON_IsString(v)) dg_strcpy(sk->name, sizeof(sk->name), v->valuestring);
+    v = cJSON_GetObjectItemCaseSensitive(e, "atlas");
+    if (cJSON_IsString(v)) dg_strcpy(sk->atlas, sizeof(sk->atlas), v->valuestring);
+    const cJSON *t;
+    cJSON_ArrayForEach(t, cJSON_GetObjectItemCaseSensitive(e, "tiles")) {
+        const cJSON *mat = cJSON_GetObjectItemCaseSensitive(t, "material");
+        if (sk->tile_count < SKIN_MAX_MATERIALS) dg_strcpy(sk->tile_material[sk->tile_count++], 48, cJSON_IsString(mat) ? mat->valuestring : "");
+    }
+}
+
+// Skins: skins.json entries, then every mesh dropped into assets/skins/ (sorted, so every machine
+// numbers them alike). Returns the content hash (part of the characters manifest).
+static u32 load_skins(AnimLibrary *lib, char npc_def[][32], int *npc_skin, int *npc_count) {
+    lib->skin_count = 0;
+    lib->player_skin = -1;
+    *npc_count = 0;
+    u32 h = ANIM_HASH_SEED;
+    char rel[300];
+    snprintf(rel, sizeof(rel), "%s/skins.json", lib->human_dir);
+    char *text = read_text(rel);
+    cJSON *root = text ? cJSON_Parse(text) : NULL;
+    if (text) h = anim_hash_str(text, h);
+    free(text);
+    const cJSON *e;
+    cJSON_ArrayForEach(e, cJSON_GetObjectItemCaseSensitive(root, "skins")) {
+        if (lib->skin_count >= LIB_MAX_SKINS) break;
+        const cJSON *id = cJSON_GetObjectItemCaseSensitive(e, "id");
+        CharSkinDef *sk = &lib->skins[lib->skin_count];
+        memset(sk, 0, sizeof(*sk));
+        if (!cJSON_IsString(id) || !mesh_ref_parse(&sk->ref, cJSON_GetObjectItemCaseSensitive(e, "mesh"))) continue;
+        dg_strcpy(sk->id, sizeof(sk->id), id->valuestring);
+        dg_strcpy(sk->name, sizeof(sk->name), id->valuestring);
+        skin_meta(sk, e);
+        sk->mesh = anim_lib_load_mesh_ref(lib, &sk->ref);
+        if (sk->mesh < 0) { log_warn("skin %s: mesh %s unavailable", sk->id, sk->ref.path); continue; }
+        lib->skin_count++;
+    }
+    // Drag and drop: assets/skins/<Name>.fbx (+ optional <Name>.json) is a skin with no other edit.
+    static const char *const pats[] = { "*.fbx", "*.skm" };
+    for (int p = 0; p < 2; p++) {
+        int n = 0;
+        char **files = list_files("assets/skins", pats[p], &n);
+        for (int i = 0; i < n && lib->skin_count < LIB_MAX_SKINS; i++) {
+            CharSkinDef *sk = &lib->skins[lib->skin_count];
+            memset(sk, 0, sizeof(*sk));
+            snprintf(sk->ref.path, sizeof(sk->ref.path), "assets/skins/%s", files[i]);
+            sk->ref.scale = v3(1, 1, 1);
+            fbx_file_stem(files[i], sk->name, sizeof(sk->name));
+            for (int c = 0; sk->name[c] && c < (int)sizeof(sk->id) - 1; c++) {
+                char ch = sk->name[c];
+                sk->id[c] = (char)((ch == ' ' || ch == '-') ? '_' : (ch >= 'A' && ch <= 'Z' ? ch - 'A' + 'a' : ch));
+            }
+            if (anim_lib_find_skin(lib, sk->id) >= 0) continue;   // listed in skins.json already
+            cJSON *side = read_sidecar(sk->ref.path);
+            if (side) skin_meta(sk, side);
+            cJSON_Delete(side);
+            h = anim_hash_str(sk->ref.path, h);
+            sk->mesh = anim_lib_load_mesh_ref(lib, &sk->ref);
+            if (sk->mesh < 0) { log_warn("skin %s: %s unusable (see above)", sk->id, sk->ref.path); continue; }
+            log_info("skin %s: %s (dropped in assets/skins)", sk->id, sk->ref.path);
+            lib->skin_count++;
+        }
+        SDL_free(files);
+    }
+    const cJSON *pl = cJSON_GetObjectItemCaseSensitive(root, "player");
+    if (cJSON_IsString(pl)) lib->player_skin = anim_lib_find_skin(lib, pl->valuestring);
+    cJSON_ArrayForEach(e, cJSON_GetObjectItemCaseSensitive(root, "npc")) {
+        if (*npc_count >= LIB_MAX_CHARS || !cJSON_IsString(e)) continue;
+        dg_strcpy(npc_def[*npc_count], 32, e->string);
+        npc_skin[*npc_count] = anim_lib_find_skin(lib, e->valuestring);
+        (*npc_count)++;
+    }
+    cJSON_Delete(root);
+    for (int k = 0; k < lib->skin_count; k++) h = anim_hash_str(lib->skins[k].id, h);
+    return h;
+}
+
+static CharPartOption skin_option(const AnimLibrary *lib, int k) {
+    CharPartOption o;
+    memset(&o, 0, sizeof(o));
+    const CharSkinDef *sk = &lib->skins[k];
+    dg_strcpy(o.id, sizeof(o.id), sk->id);
+    o.ref = sk->ref;
+    o.mesh = sk->mesh;
+    o.skin = k;
+    o.weight = 0;   // only by choice (cl_skin / skins.json defaults)
+    return o;
+}
 
 bool anim_lib_reload_characters(AnimLibrary *lib) {
+    char npc_def[LIB_MAX_CHARS][32];
+    int npc_skin[LIB_MAX_CHARS], npc_count = 0;
+    u32 h = load_skins(lib, npc_def, npc_skin, &npc_count);
     int n = 0;
     char **files = list_files("assets/characters", "*.json", &n);
     lib->char_count = 0;
-    u32 h = ANIM_HASH_SEED;
     for (int i = 0; i < n && lib->char_count < LIB_MAX_CHARS; i++) {
         if (strstr(files[i], "_template")) continue;
         char path[400];
@@ -230,11 +425,28 @@ bool anim_lib_reload_characters(AnimLibrary *lib) {
         if (!character_def_parse(d, text, path, err, sizeof(err))) { log_error("%s", err); free(text); continue; }
         free(text);
         if (!d->net_id) d->net_id = (u8)(lib->char_count + 1);
-        d->mesh = load_mesh(lib, d->mesh_path);
+        // Parts: every option's SkeletalMesh (deduplicated across characters).
+        d->mesh = -1;
+        for (int sl = 0; sl < CSLOT_COUNT; sl++)
+            for (int o = 0; o < d->slots[sl].option_count; o++) {
+                CharPartOption *po = &d->slots[sl].options[o];
+                po->mesh = anim_lib_load_mesh_ref(lib, &po->ref);
+                if (d->mesh < 0) d->mesh = po->mesh;
+            }
+        // Skins: players can wear any of them (body slot); skins.json "npc" sets a character's default.
+        for (int k = 0; k < lib->skin_count; k++) {
+            bool npc_default = false;
+            for (int q = 0; q < npc_count; q++) if (npc_skin[q] == k && !strcmp(npc_def[q], d->id)) npc_default = true;
+            if (d->kind != CK_PLAYER && !npc_default) continue;
+            CharPartOption so = skin_option(lib, k);
+            so.is_default = npc_default;
+            if (!character_add_option(d, CSLOT_BODY, &so)) log_warn("character %s: too many body options, skin %s skipped", d->id, so.id);
+        }
         d->anim_set_index = anim_lib_find_set(lib, d->anim_set);
         if (d->anim_set_index < 0) { log_warn("character %s: anim set '%s' not found, using '%s'", d->id, d->anim_set, lib->sets[0].name); d->anim_set_index = 0; }
         d->valid = d->mesh >= 0;
-        character_resolve_sockets(d, &lib->skel);
+        character_resolve_sockets(d, &lib->skeleton);
+        character_resolve_parts(d, &lib->skeleton);
         h = anim_hash(&d->hash, sizeof(u32), h);
         lib->char_count++;
     }
@@ -283,17 +495,22 @@ bool anim_lib_load(AnimLibrary *lib, float rate) {
     if (!anim_cache_dir()[0]) anim_cache_set_dir(platform_data_path("assets/cache/", buf, sizeof(buf)));
     double t0 = platform_time();
     char rig[300], err[512] = { 0 };
-    if (!find_canonical(lib, rig, sizeof(rig))) { log_error("anim: canonical rig assets/human/dummy.fbx not found"); return false; }
-    if (!anim_cache_skeleton(platform_data_path(rig, buf, sizeof(buf)), &lib->skel, err, sizeof(err))) { log_error("anim: %s", err); return false; }
-    lib->manifest.hash[AC_SKELETON] = lib->skel.hash;
+    if (!find_canonical(lib, rig, sizeof(rig))) dg_strcpy(rig, sizeof(rig), "assets/human/Dummy.fbx");   // a baked .skel may still exist
+    if (!skel_asset_load(&lib->skeleton, "human", rig, err, sizeof(err))) { log_error("anim: %s", err); return false; }
+    dg_strcpy(rig, sizeof(rig), lib->skeleton.source);
+    lib->manifest.hash[AC_SKELETON] = skel_asset_hash(&lib->skeleton);
     load_clips(lib);
     apply_clip_meta(lib);
     load_controller(lib);
     proc_hand_frames(&lib->skel, &lib->hands);
     load_sets(lib);
     // Canonical mesh first: its fitted radii shape the ragdoll and the hitboxes.
-    int canon_mesh = load_mesh(lib, rig);
-    if (canon_mesh >= 0) skin_fit_bone_radii(&lib->meshes[canon_mesh], 0, &lib->skel, lib->bone_radius);
+    int canon_mesh = anim_lib_load_mesh(lib, rig);
+    if (canon_mesh >= 0) {
+        i16 jmap[SKM_MAX_BONES];
+        skm_joint_map(&lib->meshes[canon_mesh], jmap);
+        skin_fit_bone_radii(&lib->meshes[canon_mesh].data, 0, &lib->skel, jmap, lib->bone_radius);
+    }
     load_physics_defs(lib);
     anim_lib_reload_characters(lib);
     if (!anim_cache_dir()[0] || 1) {
@@ -314,7 +531,7 @@ bool anim_lib_load(AnimLibrary *lib, float rate) {
 
 void anim_lib_free(AnimLibrary *lib) {
     for (int i = 0; i < lib->clip_count; i++) clip_free(&lib->clips[i]);
-    for (int i = 0; i < lib->mesh_count; i++) skin_mesh_free(&lib->meshes[i]);
+    for (int i = 0; i < lib->mesh_count; i++) skm_free(&lib->meshes[i]);
     lib->clip_count = lib->mesh_count = 0;
     lib->loaded = false;
 }

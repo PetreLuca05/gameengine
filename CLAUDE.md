@@ -32,6 +32,7 @@ Windows, no admin; tools are portable, in `.toolchain/` (git-ignored).
 | Area | Doc | Main code |
 |---|---|---|
 | Animation / net / damage | ANIMATION*.md, DAMAGE.md | src/anim, src/gameplay/characters.c |
+| Skeleton / meshes / modular characters | CHARACTERS.md | src/anim/skeleton.c, src/render/skeletal_mesh.c, src/assets/character.c, tools/bake_* |
 | FP camera, hold point | CAMERA_HOLDPOINT.md | src/player/{holdpoint,hands,camera_fp}.c |
 | Weapons, recoil, sway | RECOIL.md, ATTACHMENTS.md | src/gameplay/{weapons,recoil,items}.c, data/weapons |
 | Render post / sky / time | RENDERING_POST.md, DAYNIGHT.md | src/render/{post,sky,graph}, game_post.c, game_daynight.c |
