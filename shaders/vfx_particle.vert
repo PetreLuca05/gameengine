@@ -26,6 +26,7 @@ layout(location = 11) out vec3 v_amb;
 layout(location = 12) out vec2 v_local;     // quad coordinates (-1..1)
 layout(location = 13) out vec2 v_mv_a;      // motion vector uv (frame a) / page in z of uv_b
 layout(location = 14) out vec2 v_mv_b;
+layout(location = 15) out vec4 v_fog;         // xyz world position, w 1 = fogged (not viewmodel space)
 
 float shadow_at(vec3 wp) {
     if (frame.sun_color.w < 0.5) return 1.0;
@@ -178,6 +179,7 @@ void main() {
     v_info = uvec4(emitter, flags, lighting, pc.mode == 3u ? (e.modes.x & 15u) : pc.mode);
     float view_depth = dot(wp - vf.cam_pos.xyz, vf.cam_fwd.xyz);
     v_misc = vec4(fract(frame_f), view_depth, e.render0.z, vm ? 0.0 : e.render1.x);
+    v_fog = vec4(wp, vm ? 0.0 : 1.0);
     // Lighting (per particle).
     v_l0 = v_l1 = v_l2 = v_l3 = v_l4 = v_l5 = vec3(0);
     v_amb = vec3(0);

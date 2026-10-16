@@ -1346,7 +1346,33 @@ static void exec_scope_pip(VkCommandBuffer cmd, void *u) {
     draw_items(cmd, R->draws, R->draw_count, false, true, 0);
     memcpy(R->frustum, saved, sizeof(saved));
     draw_skinned(cmd, 0, PIPE_SKIN, PIPE_LIT, F.skin_main);
-    // Particles (smoke, sparks, blood, muzzle flashes of others ...) through the scope camera.
+    vkCmdEndRendering(cmd);
+}
+
+// Scope PiP transparency after its sky / fog (post_scope_sky): particles (smoke, sparks, blood,
+// muzzle flashes of others ...) and precipitation through the scope camera, depth read-only, so
+// they composite over the sky.
+static void exec_scope_pip_fx(VkCommandBuffer cmd, void *u) {
+    (void)u;
+    VkRenderingAttachmentInfo ca = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
+    ca.imageView = fg_view(F.pip_color);
+    ca.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    ca.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+    ca.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    VkRenderingAttachmentInfo da = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
+    da.imageView = fg_view(F.pip_depth);
+    da.imageLayout = VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL;
+    da.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+    da.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    VkRenderingInfo ri = { VK_STRUCTURE_TYPE_RENDERING_INFO };
+    ri.renderArea.extent.width = F.pip_size;
+    ri.renderArea.extent.height = F.pip_size;
+    ri.layerCount = 1;
+    ri.colorAttachmentCount = 1;
+    ri.pColorAttachments = &ca;
+    ri.pDepthAttachment = &da;
+    vkCmdBeginRendering(cmd, &ri);
+    set_viewport(cmd, F.pip_size, F.pip_size);
     vkx_draw_particles_pip(cmd, F.f->frame_set_pip);
     draw_precip(cmd, F.f->frame_set_pip);
     vkCmdEndRendering(cmd);
@@ -1587,6 +1613,9 @@ static void build_frame_graph(FrameData *fd) {
             mat4 view = mat4_look_at(R->sight.objective_pos, v3_add(R->sight.objective_pos, v3_norm(R->sight.fwd)), v3_norm(R->sight.up));
             mat4 proj = mat4_perspective(R->pip_fov * DG_DEG2RAD, 1.0f, 0.3f, R->cam.zfar);
             post_scope_sky(F.pip_color, F.pip_depth, mat4_inverse(mat4_mul(proj, view)), R->sight.objective_pos);
+            p = fg_pass("scope_pip_fx", exec_scope_pip_fx, NULL);
+            fg_write(p, F.pip_color, FG_COLOR);
+            fg_read(p, F.pip_depth, FG_DEPTH_READ);
         }
     }
     post_set_sight(&R->sight, F.pip_color, F.pip_from_view, R->vm_proj, R->pip_fov);

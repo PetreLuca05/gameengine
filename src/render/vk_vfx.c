@@ -6,6 +6,7 @@
 // sizing only.
 #include "vk_internal.h"
 #include "graph/fg.h"
+#include "post/post.h"
 #include "core/platform.h"
 #include "vfx/vfx_sim.h"
 #include "vfx/vfx_atlas.h"
@@ -57,6 +58,7 @@ static struct {
     bool ok;
     u32 max_particles;
     VkDescriptorSetLayout layout;
+    VkDescriptorSetLayout fog_layout;   // set 2 of the draws (push descriptor): the froxel fog volume
     VkDescriptorPool pool;
     VkPipelineLayout comp_layout, gfx_layout;
     VkPipeline c_reset, c_begin, c_emit, c_emit_sub, c_args, c_update, c_draw_args, c_sort;
@@ -755,8 +757,14 @@ bool vkx_init(void) {
     pli.pushConstantRangeCount = 1;
     pli.pPushConstantRanges = &pr;
     VK_CHECK(vkCreatePipelineLayout(R->device, &pli, NULL, &X.comp_layout));
-    VkDescriptorSetLayout gl[2] = { R->frame_layout, X.layout };
-    pli.setLayoutCount = 2;
+    VkDescriptorSetLayoutBinding fb = { 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, NULL };
+    VkDescriptorSetLayoutCreateInfo fli = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+    fli.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR;
+    fli.bindingCount = 1;
+    fli.pBindings = &fb;
+    VK_CHECK(vkCreateDescriptorSetLayout(R->device, &fli, NULL, &X.fog_layout));
+    VkDescriptorSetLayout gl[3] = { R->frame_layout, X.layout, X.fog_layout };
+    pli.setLayoutCount = 3;
     pli.pSetLayouts = gl;
     VK_CHECK(vkCreatePipelineLayout(R->device, &pli, NULL, &X.gfx_layout));
 
@@ -847,6 +855,7 @@ void vkx_shutdown(void) {
     vkDestroyPipelineLayout(R->device, X.gfx_layout, NULL);
     vkDestroyDescriptorPool(R->device, X.pool, NULL);
     vkDestroyDescriptorSetLayout(R->device, X.layout, NULL);
+    vkDestroyDescriptorSetLayout(R->device, X.fog_layout, NULL);
     memset(&X, 0, sizeof(X));
 }
 
@@ -1041,6 +1050,19 @@ void vkx_record_compute(VkCommandBuffer cmd) {
     vkx_timestamp(cmd, 1);
 }
 
+// Set 2: the froxel fog volume of the main view (the transparent pass reads it), else any 3D view
+// (the shader then uses the frame's analytic fog: frame.post_fog.x / frame.fog).
+static void push_fog(VkCommandBuffer cmd, bool main_view) {
+    VkDescriptorImageInfo img;
+    post_froxel_image(main_view, &img);
+    VkWriteDescriptorSet w = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+    w.dstBinding = 0;
+    w.descriptorCount = 1;
+    w.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    w.pImageInfo = &img;
+    vkCmdPushDescriptorSetKHR(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, X.gfx_layout, 2, 1, &w);
+}
+
 static void bind_gfx(VkCommandBuffer cmd) {
     VkDescriptorSet sets[2] = { R->frames[R->frame_slot].frame_set, X.fr[R->frame_slot].set };
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, X.gfx_layout, 0, 2, sets, 0, NULL);
@@ -1058,6 +1080,7 @@ void vkx_draw_particles_pip(VkCommandBuffer cmd, VkDescriptorSet frame_set) {
     if (!X.ok) return;
     VkDescriptorSet sets[2] = { frame_set, f->set };
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, X.gfx_layout, 0, 2, sets, 0, NULL);
+    push_fog(cmd, false);   // the scope camera's frame: analytic fog only
     u32 pc[4] = { 1, 1, 0, 0 };
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, X.g_alpha);
     vkCmdPushConstants(cmd, X.gfx_layout, VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pc), pc);
@@ -1128,6 +1151,7 @@ void vkx_draw_particles(VkCommandBuffer cmd) {
     VfxFrameRes *f = &X.fr[R->frame_slot];
     if (X.ok) {
         bind_gfx(cmd);
+        push_fog(cmd, true);
         // Distortion first (refracts the scene copy), then sorted alpha (GPU, then CPU sprites),
         // then additive (order-independent).
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, X.g_distort);

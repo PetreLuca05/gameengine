@@ -2,7 +2,9 @@
 // Particle shading. Atlas textures are premultiplied. Additive: rgb * color * emissive.
 // Alpha (premultiplied blend): albedo lit by the per-particle light (simple or 6-way maps) plus an
 // emissive term. Distortion: refracts the scene copy by the normal sprite. All paths fade with soft
-// particles (scene depth), near-camera fade and flipbook motion-vector blending.
+// particles (scene depth), near-camera fade and flipbook motion-vector blending. Fog: drawn after
+// fog_apply (the opaque scene and the sky are already fogged), so each particle fogs its own
+// contribution like the blended lit draws: the froxel volume up to its depth, or the analytic fog.
 #extension GL_GOOGLE_include_directive : require
 #include "common.glsl"
 #define VFX_SET 1
@@ -24,12 +26,29 @@ layout(location = 11) in vec3 v_amb;
 layout(location = 12) in vec2 v_local;
 layout(location = 13) in vec2 v_mv_a;
 layout(location = 14) in vec2 v_mv_b;
+layout(location = 15) in vec4 v_fog;    // xyz world position, w 1 = fogged
+layout(set = 2, binding = 0) uniform sampler3D vfx_froxel;   // integrated volumetric fog (frame.post_fog.x)
 
 layout(location = 0) out vec4 out_color;
 
 float lin_depth(float d) {
     float n = vf.depth_params.x, f = vf.depth_params.y;
     return n * f / (f - d * (f - n));
+}
+
+// Fog between the camera and this fragment: rgb in-scattering, a transmittance.
+vec4 particle_fog(vec2 suv) {
+    if (v_fog.w < 0.5) return vec4(0.0, 0.0, 0.0, 1.0);
+    vec3 d = v_fog.xyz - frame.camera_pos.xyz;
+    if (frame.post_fog.x > 0.5) {
+        float vz = max(dot(d, -vec3(frame.view[0][2], frame.view[1][2], frame.view[2][2])), 0.15);
+        float w = clamp(log(vz / 0.15) / log(frame.post_fog.y / 0.15), 0.0, 1.0);
+        // The slice stores the integral up to its far edge (as in fog_apply): half a slice back.
+        w = clamp(w - 0.5 / float(textureSize(vfx_froxel, 0).z), 0.0, 1.0);
+        return textureLod(vfx_froxel, vec3(suv, w), 0.0);
+    }
+    float f = clamp(1.0 - exp(-length(d) * frame.fog.w), 0.0, 1.0);
+    return vec4(frame.fog.rgb * f, 1.0 - f);
 }
 
 vec4 sample_flip(Emitter e, out vec4 lm0, out vec4 lm1) {
@@ -98,7 +117,8 @@ void main() {
     }
     if (mode == RM_ADD) {
         float a = v_color.a * fade;
-        out_color = vec4(tex.rgb * v_color.rgb * emissive * a, 0.0);
+        // Additive light is attenuated by the fog in front of it (adds no in-scattering).
+        out_color = vec4(tex.rgb * v_color.rgb * emissive * a * particle_fog(suv).a, 0.0);
         return;
     }
     // Alpha blended (premultiplied).
@@ -119,5 +139,7 @@ void main() {
     // Thin, backlit parts of the volume glow (forward scattering): blood mist against the sun.
     if (e.render1.y > 0.0) light += v_l4 * e.render1.y * (1.0 - clamp(alpha, 0.0, 1.0) * 0.6) * 1.6;
     vec3 c = albedo * v_color.rgb * light + albedo * v_color.rgb * emissive;
+    vec4 fog = particle_fog(suv);
+    c = c * fog.a + fog.rgb;
     out_color = vec4(c * alpha, alpha);
 }

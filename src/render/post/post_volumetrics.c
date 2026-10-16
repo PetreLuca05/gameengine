@@ -70,6 +70,19 @@ void post_vol_build(void) {
 
 FgRes post_froxels(void) { return P.froxels; }
 
+// Fog targets: the main HDR (froxels, aerial perspective, analytic sky fog without froxels) or
+// the scope picture-in-picture (analytic sky fog: its geometry is fogged by the lit shaders).
+typedef struct FogTarget { FgRes color, depth; mat4 inv_vp; vec3 cam; bool vol, ap, analytic; } FogTarget;
+static FogTarget g_fog_main, g_fog_pip;
+
+// The lit shaders' analytic fog (render.c: frame.fog) is on when the volumetrics are off.
+static bool analytic_fog(bool pip) {
+    if (R->env.fog_density <= 0.0f || (!P.in.sky_on && !sky_active())) return false;
+    return pip || !(P.set.volumetrics > 0 && fg_pass_enabled("vol_inject"));
+}
+
+static void exec_fog_apply(VkCommandBuffer cmd, void *u);
+
 // Sky targets: the main HDR (+ depth) or the scope picture-in-picture.
 typedef struct SkyTarget { FgRes color, depth; mat4 inv_vp; vec3 cam; } SkyTarget;
 static SkyTarget g_sky_main, g_sky_pip;
@@ -115,34 +128,58 @@ void post_scope_sky(FgRes color, FgRes depth, mat4 inv_vp, vec3 cam) {
     int p = fg_pass("scope_pip_sky", exec_sky, &g_sky_pip);
     fg_read(p, depth, FG_SAMPLED);
     fg_write(p, color, FG_STORAGE);
+    // The scope's geometry has the analytic fog of the lit shaders: the same over its sky.
+    if (!analytic_fog(true)) return;
+    g_fog_pip = (FogTarget){ color, depth, inv_vp, cam, false, false, true };
+    p = fg_pass("scope_pip_fog", exec_fog_apply, &g_fog_pip);
+    fg_read(p, depth, FG_SAMPLED);
+    fg_write(p, color, FG_STORAGE);
 }
 
 static void exec_fog_apply(VkCommandBuffer cmd, void *u) {
-    (void)u;
+    const FogTarget *t = (const FogTarget *)u;
     PostBind b = { 0 };
     pb_ubo(&b);
-    bool vol = P.froxels != FG_NONE, ap = sky_active();
-    // Binding 0 must be a 3D view either way: the aerial perspective stands in without froxels.
-    if (vol) pb_tex_fg(&b, 0, P.froxels, P.linear);
-    else sky_bind_aerial(&b, 0);
-    pb_tex_fg(&b, 1, P.in.depth, P.point);
-    if (ap) sky_bind_aerial(&b, 2);
-    else if (vol) pb_tex_fg(&b, 2, P.froxels, P.linear);
-    pb_img_fg(&b, 8, P.in.hdr);
+    // Bindings 0 / 2 must be 3D views either way (the colour grading LUT stands in).
+    if (t->vol) pb_tex_fg(&b, 0, P.froxels, P.linear);
+    else pb_tex(&b, 0, P.lut, P.linear);
+    pb_tex_fg(&b, 1, t->depth, P.point);
+    if (t->ap) sky_bind_aerial(&b, 2);
+    else pb_tex(&b, 2, P.lut, P.linear);
+    pb_img_fg(&b, 8, t->color);
     pb_push(cmd, &b, VK_PIPELINE_BIND_POINT_COMPUTE);
     struct { float p[16]; u32 u[16]; } pc;
     memset(&pc, 0, sizeof(pc));
-    pc.u[0] = vol ? 1u : 0u;
-    pc.u[1] = ap ? 1u : 0u;
-    pc.p[0] = R->env.aerial_max > 10.0f ? R->env.aerial_max : 3000.0f;
+    memcpy(pc.p, t->inv_vp.m, sizeof(float) * 16);
+    pc.u[0] = t->vol ? 1u : 0u;
+    pc.u[1] = t->ap ? 1u : 0u;
+    pc.u[2] = t->analytic ? 1u : 0u;
+    float f1[4] = { R->env.aerial_max > 10.0f ? R->env.aerial_max : 3000.0f, P.in.zfar, R->env.fog_density, 0.0f };
+    float col[3] = { R->env.fog_color.x, R->env.fog_color.y, R->env.fog_color.z };
+    float cam[3] = { t->cam.x, t->cam.y, t->cam.z };
+    memcpy(&pc.u[4], f1, 16);
+    memcpy(&pc.u[8], col, 12);
+    memcpy(&pc.u[12], cam, 12);
     post_push_constants(cmd, &pc, 128);
-    post_dispatch(cmd, "fog_apply", P.in.render_w, P.in.render_h, 1, 8);
+    u32 w, h;
+    fg_extent(t->color, &w, &h);
+    post_dispatch(cmd, "fog_apply", w, h, 1, 8);
 }
 
 void post_fog_apply(void) {
-    if (!P.ok || (P.froxels == FG_NONE && !sky_active())) return;
-    int p = fg_pass("fog_apply", exec_fog_apply, NULL);
-    if (P.froxels != FG_NONE) fg_read(p, P.froxels, FG_SAMPLED);
+    if (!P.ok) return;
+    FogTarget *t = &g_fog_main;
+    *t = (FogTarget){ P.in.hdr, P.in.depth, P.in.inv_view_proj, P.in.cam_pos, P.froxels != FG_NONE, sky_active(), analytic_fog(false) };
+    if (!t->vol && !t->ap && !t->analytic) return;
+    int p = fg_pass("fog_apply", exec_fog_apply, t);
+    if (t->vol) fg_read(p, P.froxels, FG_SAMPLED);
     fg_read(p, P.in.depth, FG_SAMPLED);
     fg_write(p, P.in.hdr, FG_STORAGE);
+}
+
+// Particles / blended draws after fog_apply: the froxel volume (any 3D view when there is none).
+bool post_froxel_image(bool use, VkDescriptorImageInfo *out) {
+    bool ok = use && P.ok && P.froxels != FG_NONE && fg_valid(P.froxels);
+    *out = (VkDescriptorImageInfo){ P.linear, ok ? fg_view(P.froxels) : P.lut, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+    return ok;
 }
