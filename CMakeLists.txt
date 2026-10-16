@@ -95,8 +95,8 @@ else()
   target_link_libraries(dg_thirdparty PUBLIC m dl pthread)
 endif()
 
-# meshoptimizer (simplifier only): generated character LODs.
-add_library(meshopt STATIC third_party/meshoptimizer/simplifier.cpp third_party/meshoptimizer/allocator.cpp)
+# meshoptimizer v0.22: simplifier (character LODs, vgeo DAG) + clusterizer (vgeo clusters).
+add_library(meshopt STATIC third_party/meshoptimizer/simplifier.cpp third_party/meshoptimizer/allocator.cpp third_party/meshoptimizer/clusterizer.cpp)
 target_include_directories(meshopt PUBLIC third_party/meshoptimizer)
 if(MSVC)
   target_compile_options(meshopt PRIVATE /W0)
@@ -260,6 +260,18 @@ add_executable(fbx_textures tools/fbx_textures/fbx_textures.c)
 set_target_properties(fbx_textures PROPERTIES C_STANDARD 11)
 target_link_libraries(fbx_textures PRIVATE dg_animcore)
 
+# Virtualized geometry builder (pure C): the game compiles the same sources through the src glob.
+add_library(dg_vgeo STATIC src/render/vgeo/vgeo_build.c src/render/vgeo/vgeo_procgen.c src/render/vgeo/vgeo_import.c)
+set_target_properties(dg_vgeo PROPERTIES C_STANDARD 11)
+target_link_libraries(dg_vgeo PUBLIC dg_animcore meshopt)
+if(MSVC)
+  target_compile_options(dg_vgeo PRIVATE /W3 /wd4100 /wd4201 /utf-8)
+endif()
+
+add_executable(build_vgeo tools/build_vgeo/build_vgeo.c)
+set_target_properties(build_vgeo PROPERTIES C_STANDARD 11)
+target_link_libraries(build_vgeo PRIVATE dg_vgeo)
+
 add_executable(validate_rig tools/validate_rig/validate_rig.c)
 set_target_properties(validate_rig PROPERTIES C_STANDARD 11)
 target_link_libraries(validate_rig PRIVATE dg_animcore)
@@ -344,3 +356,14 @@ add_test(NAME ui COMMAND test_ui WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>
 add_executable(anim_probe tools/anim_probe/anim_probe.c)
 set_target_properties(anim_probe PROPERTIES C_STANDARD 11)
 target_link_libraries(anim_probe PRIVATE dg_animcore)
+
+# Virtualized geometry builder (docs/VGEO.md): structure, crack-free cuts, determinism, gates.
+add_executable(test_vgeo_build tests/test_vgeo_build.c)
+set_target_properties(test_vgeo_build PROPERTIES C_STANDARD 11)
+target_link_libraries(test_vgeo_build PRIVATE dg_vgeo)
+if(MSVC)
+  target_compile_options(test_vgeo_build PRIVATE /W3 /wd4100 /wd4201 /utf-8)
+endif()
+add_test(NAME vgeo_build COMMAND test_vgeo_build WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+add_test(NAME vgeo_build_long COMMAND test_vgeo_build --long WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+set_tests_properties(vgeo_build_long PROPERTIES LABELS long TIMEOUT 600)
