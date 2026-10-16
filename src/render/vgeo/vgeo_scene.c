@@ -455,4 +455,5 @@ void vgeo_view_setup(VgViewGpu *v, const float vp[16], const float prev_vp[16], 
     v->viewport[2] = 1.0f / (float)w;
     v->viewport[3] = 1.0f / (float)h;
     memcpy(v->raster_view_proj, vp, 64);
+    v->slot_material_base = ~0u;
 }

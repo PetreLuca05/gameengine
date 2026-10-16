@@ -9,6 +9,10 @@ layout(location = 2) in vec2 v_uv;
 layout(location = 3) in vec4 v_color;
 #define LIT_FRONT_FACING gl_FrontFacing
 #endif
+// The material texture (the vgeo lit resolve samples a bindless array instead).
+#ifndef LIT_TEX
+#define LIT_TEX(uv) texture(tex, (uv))
+#endif
 
 layout(set = 1, binding = 0) uniform sampler2D tex;
 // Screen-space inputs from the post stack (push descriptor, render resolution): ambient occlusion
@@ -205,9 +209,9 @@ void main() {
             float s = MAT_PARAMS.w;
             vec3 w = abs(n);
             w /= (w.x + w.y + w.z);
-            t = texture(tex, v_world.zy * s) * w.x + texture(tex, v_world.xz * s) * w.y + texture(tex, v_world.xy * s) * w.z;
+            t = LIT_TEX(v_world.zy * s) * w.x + LIT_TEX(v_world.xz * s) * w.y + LIT_TEX(v_world.xy * s) * w.z;
         } else {
-            t = texture(tex, v_uv * max(MAT_PARAMS.w, 1e-3));
+            t = LIT_TEX(v_uv * max(MAT_PARAMS.w, 1e-3));
         }
         base *= t;
     }

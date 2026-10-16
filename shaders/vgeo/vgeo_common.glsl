@@ -17,7 +17,7 @@ struct VgViewGpu {
     vec4 hiz_cur;
     uvec4 counts;            // cell_count, instance_count, max_depth, frame (streaming stamp)
     uvec4 caps0;             // nodes (per region), groups (per region), visible (per list), occluded
-    uvec4 caps1;             // cells (per region), instances, requests, -
+    uvec4 caps1;             // cells (per region), instances, requests, slot material base (skinned instances: materials[base + slot], ~0 none)
     mat4 raster_view_proj;   // the view the visible clusters are rasterised with (main view: jittered)
 };
 struct VgMaterial { vec4 color; float roughness, metallic, emissive, tex_scale; uint flags; uint albedo_tex; uint pad0, pad1, pad2, pad3, pad4, pad5; };
@@ -135,7 +135,7 @@ vec3 vg_qrot(vec4 q, vec3 v) {
 // scale: the error / bounds scale (skinned: instance scale x the slot's max bone scale); pscale: the
 // instance's own scale (positions). Skinned (skin): first / prev_first = the slot's palette regions,
 // root = palette[first] (bone 0), skin_s / skin_k: the sphere transform of vg_world_sphere.
-struct VgXf { vec3 pos; vec4 rot; float scale; uint mesh; float pscale; bool skin, live; uint first, prev_first; mat4 root; float skin_s, skin_k; };
+struct VgXf { vec3 pos; vec4 rot; float scale; uint mesh; float pscale; bool skin, live; uint first, prev_first; mat4 root; float skin_s, skin_k; uint slot; };
 VgXf vg_instance_xf(uint i) {
     VgInstance in_ = instances[i];
     VgXf x;
@@ -150,7 +150,9 @@ VgXf vg_instance_xf(uint i) {
     x.root = mat4(1.0);
     x.skin_s = 1.0;
     x.skin_k = 0.0;
+    x.slot = 0xFFFFFFFFu;
     if ((in_.flags_phase >> 16 & VGI_SKINNED) != 0u) {
+        x.slot = in_.extra;
         VgMesh m = meshes[x.mesh];
         if ((m.flags & VGF_SKINNED) != 0u) {
             VgPaletteSlot s = palette_slots[in_.extra];

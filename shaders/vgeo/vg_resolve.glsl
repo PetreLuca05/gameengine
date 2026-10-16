@@ -7,6 +7,7 @@ vec2 v_uv;
 vec4 v_color, v_cur_clip, v_prev_clip;
 vec4 g_mat_color, g_mat_params;
 uint g_mat_flags;
+uint g_tex;                 // bindless texture index of the material (VG_TEXTURES), 0 = none
 float g_depth;
 
 bool vg_resolve_pixel() {
@@ -57,9 +58,17 @@ bool vg_resolve_pixel() {
     v_color = vg_vertex_color(c, m, t.x) * b.x + vg_vertex_color(c, m, t.y) * b.y + vg_vertex_color(c, m, t.z) * b.z;
     v_cur_clip = V.view_proj * vec4(v_world, 1.0);        // unjittered (velocity)
     v_prev_clip = V.prev_view_proj * vec4(prev_world, 1.0);
-    VgMaterial mat = materials[m.material_base + c.material];
+    // Skinned instances use their slot's material (per character: tint, skin texture), when set.
+    uint mi = m.material_base + c.material;
+    if (x.slot != 0xFFFFFFFFu && V.caps1.w != 0xFFFFFFFFu) mi = V.caps1.w + x.slot;
+    VgMaterial mat = materials[mi];
     g_mat_color = mat.color;
     g_mat_params = vec4(mat.roughness, mat.metallic, mat.emissive, mat.tex_scale);
-    g_mat_flags = mat.flags & ~MAT_TEXTURED;   // bindless material textures: Phase 5
+    g_tex = mat.albedo_tex;
+#ifdef VG_TEXTURES
+    g_mat_flags = g_tex != 0u ? mat.flags : (mat.flags & ~MAT_TEXTURED);
+#else
+    g_mat_flags = mat.flags & ~MAT_TEXTURED;
+#endif
     return true;
 }

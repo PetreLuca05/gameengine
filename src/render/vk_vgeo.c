@@ -75,6 +75,14 @@ static struct {
     u32 dbg_count[FRAMES_IN_FLIGHT];
     // Graphics (Phase 3): the renderer's sets 0-2 + push constants (layout_lit compatible), vgeo set 3.
     VkPipelineLayout gfx_layout;
+    // Material textures (set 4 of the lit resolve): renderer texture ids index a 1024-entry array,
+    // one set per frame in flight, written lazily (white until a material needs the texture).
+    VkDescriptorSetLayout tex_layout;
+    VkDescriptorPool tex_pool;
+    VkDescriptorSet tex_sets[FRAMES_IN_FLIGHT];
+    u8 tex_wanted[MAX_TEXTURES];
+    u8 tex_written[FRAMES_IN_FLIGHT][MAX_TEXTURES];
+    bool tex_filled[FRAMES_IN_FLIGHT];   // every entry written (white) once the white texture exists
     VkPipeline p_gbuffer, p_lit, p_shadow, p_shadow_args;
     bool raster_ok;              // the visibility buffer is filled this frame (resolve / lit draws)
     bool shadow_culled;          // this frame's cascade views were culled (vkg_record_shadow_cull)
@@ -154,11 +162,73 @@ static VkPipeline gfx_pipeline(const char *vert, const char *frag, const VkForma
     return p;
 }
 
+static void tex_write(u32 frame, u32 id, TextureId tex) {
+    VkDescriptorImageInfo ii = { R->sampler_linear, R->textures[tex].view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+    VkWriteDescriptorSet w = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+    w.dstSet = G.tex_sets[frame];
+    w.dstBinding = 0;
+    w.dstArrayElement = id;
+    w.descriptorCount = 1;
+    w.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    w.pImageInfo = &ii;
+    vkUpdateDescriptorSets(R->device, 1, &w, 0, NULL);
+}
+
+// A material uses texture `id` (vgeo_lit samples it from set 4).
+static void tex_use(TextureId id) {
+    if (id && id < MAX_TEXTURES) G.tex_wanted[id] = 1;
+}
+
+// Start of a frame (its set is not in use): textures wanted and ready since this set was written.
+static void tex_update(u32 frame) {
+    if (!G.tex_filled[frame]) {
+        if (!R->white_tex || !R->textures[R->white_tex].view) return;
+        VkDescriptorImageInfo *ii = (VkDescriptorImageInfo *)malloc(sizeof(VkDescriptorImageInfo) * MAX_TEXTURES);
+        for (u32 i = 0; i < MAX_TEXTURES; i++) ii[i] = (VkDescriptorImageInfo){ R->sampler_linear, R->textures[R->white_tex].view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+        VkWriteDescriptorSet w = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+        w.dstSet = G.tex_sets[frame];
+        w.descriptorCount = MAX_TEXTURES;
+        w.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        w.pImageInfo = ii;
+        vkUpdateDescriptorSets(R->device, 1, &w, 0, NULL);
+        free(ii);
+        G.tex_filled[frame] = true;
+    }
+    for (u32 i = 1; i < MAX_TEXTURES; i++)
+        if (G.tex_wanted[i] && !G.tex_written[frame][i] && R->textures[i].used && R->textures[i].ready) {
+            tex_write(frame, i, (TextureId)i);
+            G.tex_written[frame][i] = 1;
+        }
+}
+
+static bool create_tex_sets(void) {
+    VkDescriptorSetLayoutBinding b = { 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, MAX_TEXTURES, VK_SHADER_STAGE_FRAGMENT_BIT, NULL };
+    VkDescriptorSetLayoutCreateInfo li = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
+    li.bindingCount = 1;
+    li.pBindings = &b;
+    if (vkCreateDescriptorSetLayout(R->device, &li, NULL, &G.tex_layout) != VK_SUCCESS) return false;
+    VkDescriptorPoolSize ps = { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, MAX_TEXTURES * FRAMES_IN_FLIGHT };
+    VkDescriptorPoolCreateInfo pi = { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
+    pi.maxSets = FRAMES_IN_FLIGHT;
+    pi.poolSizeCount = 1;
+    pi.pPoolSizes = &ps;
+    if (vkCreateDescriptorPool(R->device, &pi, NULL, &G.tex_pool) != VK_SUCCESS) return false;
+    for (u32 f = 0; f < FRAMES_IN_FLIGHT; f++) {
+        VkDescriptorSetAllocateInfo ai = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+        ai.descriptorPool = G.tex_pool;
+        ai.descriptorSetCount = 1;
+        ai.pSetLayouts = &G.tex_layout;
+        if (vkAllocateDescriptorSets(R->device, &ai, &G.tex_sets[f]) != VK_SUCCESS) return false;
+    }
+    return true;
+}
+
 static bool create_gfx(void) {
-    VkDescriptorSetLayout sets[4] = { R->frame_layout, R->tex_layout, R->lit_post_layout, G.cull.layout };
+    if (!create_tex_sets()) return false;
+    VkDescriptorSetLayout sets[5] = { R->frame_layout, R->tex_layout, R->lit_post_layout, G.cull.layout, G.tex_layout };
     VkPushConstantRange pr = { VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushLit) };
     VkPipelineLayoutCreateInfo pli = { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
-    pli.setLayoutCount = 4;
+    pli.setLayoutCount = 5;
     pli.pSetLayouts = sets;
     pli.pushConstantRangeCount = 1;
     pli.pPushConstantRanges = &pr;
@@ -176,6 +246,10 @@ static void destroy_gfx(void) {
     for (size_t i = 0; i < sizeof(ps) / sizeof(ps[0]); i++) if (ps[i]) vkDestroyPipeline(R->device, ps[i], NULL);
     if (G.gfx_layout) vkDestroyPipelineLayout(R->device, G.gfx_layout, NULL);
     G.gfx_layout = VK_NULL_HANDLE;
+    if (G.tex_pool) vkDestroyDescriptorPool(R->device, G.tex_pool, NULL);
+    if (G.tex_layout) vkDestroyDescriptorSetLayout(R->device, G.tex_layout, NULL);
+    G.tex_pool = VK_NULL_HANDLE;
+    G.tex_layout = VK_NULL_HANDLE;
 }
 
 static VgCullCaps game_caps(void) {
@@ -593,6 +667,7 @@ void vkg_graph_hiz(int depth_res, int velocity_res) {
 static void frame_begin(VkCommandBuffer cmd) {
     u32 frame = R->frame_slot;
     if (G.check.state == 2 && G.check.slot == frame) check_analyse();   // this slot's fence has been waited
+    tex_update(frame);
     vg_cull_collect(&G.cull, frame);
     debug_spheres(frame);
     vg_raster_resize(&G.raster, R->hdr.w, R->hdr.h);
@@ -672,11 +747,12 @@ void vkg_draw_gbuffer(VkCommandBuffer cmd) {
 
 // Inside the opaque pass (HDR + depth, frame set + lit inputs bound): shades the vgeo pixels.
 void vkg_draw_lit(VkCommandBuffer cmd) {
-    if (!G.raster_ok) return;
+    if (!G.raster_ok || !G.tex_filled[R->frame_slot]) return;
     VkDescriptorSet set = vg_cull_set(&G.cull, R->frame_slot, 0);
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, G.p_lit);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, G.gfx_layout, 1, 1, &R->textures[R->white_tex].set, 0, NULL);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, G.gfx_layout, 3, 1, &set, 0, NULL);
+    VkDescriptorSet s34[2] = { set, G.tex_sets[R->frame_slot] };
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, G.gfx_layout, 3, 2, s34, 0, NULL);
     vkCmdDraw(cmd, 3, 1, 0, 0);
 }
 
@@ -726,6 +802,9 @@ static u32 level_mesh(const RenderVgeoPlacement *pl) {
             m.roughness = mm->roughness;
             m.metallic = mm->metallic;
             m.emissive = mm->emissive;
+            m.flags = mm->flags & (MAT_TEXTURED | MAT_TRIPLANAR | MAT_GRID | MAT_CHECKER);
+            m.tex_scale = mm->tex_scale > 0 ? mm->tex_scale : 1.0f;
+            if ((mm->flags & MAT_TEXTURED) && mm->texture) { m.albedo_tex = mm->texture; tex_use(mm->texture); }
         }
         u32 idx = vgeo_scene_add_material(&G.scene, &m);
         if (k == 0) base = idx;
