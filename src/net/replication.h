@@ -68,7 +68,11 @@ void repl_apply(World *w, const SnapFrame *f, int local_slot, InterpBuffer *inte
 void repl_interpolate(World *w, InterpBuffer *interp, double render_tick, int local_slot);
 float repl_zombie_jitter(float *mean_speed);   // client: zombie motion smoothness since the last call
 
-// Entities whose transform this client predicts itself (vehicles it drives): not interpolated.
+// Entities whose transform this client predicts itself (vehicles it drives, the player it
+// spectates in first person): not interpolated. Several hooks may be added.
 void repl_set_owned_hook(bool (*fn)(World *w, int index));
+// A remote player's kinematic capsule (collision for the local player). Off while the player is
+// re-simulated with its own character controller (spectating).
+void repl_player_body(World *w, int index, bool on);
 
 #endif

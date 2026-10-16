@@ -7,6 +7,8 @@
 #include "protocol.h"
 #include "bitbuf.h"
 #include "replication.h"
+#include "spectate.h"
+#include "player/spectator.h"
 #include "gameplay/zombies/horde.h"
 #include "core/engine.h"
 #include "core/cvar.h"
@@ -38,6 +40,8 @@ typedef struct RemoteClient {
     u8 zombie_age[MAX_ENTITIES];   // snapshots since each zombie was last updated (repl_rate_limit)
     int zombies_held;
     u64 bytes_sent;
+    int spec_inv_slot;             // spectated player whose inventory was sent last (-1 none)
+    u32 spec_inv_rev;
 } RemoteClient;
 
 typedef struct Discovery {
@@ -141,17 +145,22 @@ static void send_cvars(RemoteClient *c) {
     send_msg(c->peer, CH_RELIABLE, &w);
 }
 
-static void send_inventory(RemoteClient *c) {
+// MSG_INVENTORY of player `slot`: the client's own, or the player it spectates (HUD ammo / hotbar).
+static void send_inventory_of(RemoteClient *c, int slot) {
     World *w = game_world();
-    Player *p = &w->players[c->slot];
+    Player *p = &w->players[slot];
     Writer wr = writer_make(N->buf, NET_BUF);
     w_u8(&wr, MSG_INVENTORY);
+    w_u8(&wr, (u8)slot);
     w_u32(&wr, p->inv.revision);
     w_u32(&wr, p->inv_ack_seq);
     w_bytes(&wr, p->inv.slots, sizeof(p->inv.slots));
     send_msg(c->peer, CH_RELIABLE, &wr);
-    p->inv_sent_revision = p->inv.revision;
+    if (slot == c->slot) p->inv_sent_revision = p->inv.revision;
+    else { c->spec_inv_slot = slot; c->spec_inv_rev = p->inv.revision; }
 }
+
+static void send_inventory(RemoteClient *c) { send_inventory_of(c, c->slot); }
 
 static void host_handle_hello(PeerId peer, Reader *r) {
     u16 version = r_u16(r);
@@ -207,6 +216,7 @@ static void host_handle_hello(PeerId peer, Reader *r) {
     c->welcomed = true;
     c->peer = peer;
     c->slot = slot;
+    c->spec_inv_slot = -1;
     c->connect_time = platform_time();
     snap_history_init(&c->history);
     World *w = game_world();
@@ -227,15 +237,42 @@ static void host_handle_hello(PeerId peer, Reader *r) {
 static void host_handle_cmds(RemoteClient *c, Reader *r) {
     u32 ack = r_u32(r);
     float view_tick = r_f32(r);
+    u32 send_ms = r_u32(r);
     u8 count = r_u8(r);
     if (ack > c->acked_tick) c->acked_tick = ack;
     c->view_tick = view_tick;
+    UserCmd cmds[CMDS_PER_PACKET];
+    int n = 0;
     for (int i = 0; i < count && i < CMDS_PER_PACKET; i++) {
-        UserCmd cmd;
-        r_bytes(r, &cmd, sizeof(cmd));
+        r_bytes(r, &cmds[n], sizeof(UserCmd));
         if (r->overflow) break;
-        game_sv_receive_cmd(c->slot, &cmd);
+        game_sv_receive_cmd(c->slot, &cmds[n]);
+        n++;
     }
+    // Relayed to this player's in-eye observers right here (flushed at the end of net_update).
+    if (n && game_world()) spectate_host_cmds(game_world(), c->slot, cmds, n, send_ms);
+}
+
+// MSG_SPEC_CMDS: target's commands from .. to for the observer in slot obs (spectate.c decides).
+static void spec_send(int obs, int target, u32 from, u32 to) {
+    RemoteClient *c = &N->clients[obs];
+    const SpecCmdRing *ring = spectate_host_ring(target);
+    if (!c->active || !c->welcomed || !ring || !N->t) return;
+    Writer wr = writer_make(N->buf, NET_BUF);
+    w_u8(&wr, MSG_SPEC_CMDS);
+    spec_write_cmds(&wr, (u8)target, ring, from, to);
+    spectate_count_relay_bytes(obs, wr.len);
+    c->bytes_sent += wr.len;
+    send_msg(c->peer, CH_UNRELIABLE, &wr);
+}
+
+// One-way delay estimate from a player to the host (spectator delay readout).
+u16 net_player_owd_ms(int slot) {
+    if (slot < 0 || slot >= MAX_PLAYERS || !N->t) return 0;
+    RemoteClient *c = &N->clients[slot];
+    float rtt, loss;
+    if (!c->active || !N->t->peer_stats(N->t, c->peer, &rtt, &loss)) return 0;   // the host's own player: 0
+    return (u16)DG_CLAMP((int)(rtt * 0.5f), 0, 65535);
 }
 
 static void host_disconnect_client(PeerId peer) {
@@ -306,8 +343,8 @@ void net_host_send_events(World *w) {
         for (int s = 0; s < MAX_PLAYERS; s++) {
             RemoteClient *c = &N->clients[s];
             if (!c->active || !c->welcomed) continue;
-            if (ev->target != EVENT_ALL && ev->target != s) continue;
-            if (ev->except == s) continue;
+            // Own events, plus the HUD feedback of the player this client spectates (spectate_core.c).
+            if (!spec_event_delivers(ev->target, ev->except, ev->type, s, spectate_event_target(s))) continue;
             Writer wr = writer_make(N->buf, NET_BUF);
             w_u8(&wr, MSG_EVENT);
             w_bytes(&wr, ev, sizeof(GameEvent));
@@ -333,28 +370,41 @@ void net_host_after_tick(World *w) {
         if (!p->active) continue;
         if (p->inv.revision != p->inv_sent_revision) send_inventory(c);
         if (c->cvar_revision != rev) { send_cvars(c); c->cvar_revision = rev; }
-        if (w->tick % (u32)interval) continue;
+        // Spectating: the target's local data, inventory and relevance (docs/SPECTATE.md).
+        int src = spectate_source(w, c->slot);
+        Player *sp = &w->players[src];
+        if (src != c->slot && (c->spec_inv_slot != src || c->spec_inv_rev != sp->inv.revision)) send_inventory_of(c, src);
+        SpecBlock sb;
+        spectate_fill_block(w, c->slot, &sb);
+        bool forced = (sb.flags & SPECF_FORCED) != 0;
+        if ((w->tick % (u32)interval) && !forced) continue;
+        sb.target_owd_ms = net_player_owd_ms(src);
+        vec3 center = spectate_relevance_center(w, c->slot);
 
         SnapFrame *cur = snap_history_slot(&c->history, w->tick);
         cur->tick = w->tick;
-        repl_capture(w, p->sim.move.pos, relevance_radius(w), cur);
+        repl_capture(w, center, relevance_radius(w), cur);
         SnapFrame *base = snap_history_find(&c->history, c->acked_tick);
         if (base == cur) base = NULL;
         {
             const HordeConfig *hc = horde_config();
             int budget = hc ? hc->net_budget / DG_MAX(1, rate) : 0;
-            c->zombies_held = repl_rate_limit(base, cur, p->sim.move.pos, w->tick / (u32)interval, c->zombie_age, budget);
+            c->zombies_held = repl_rate_limit(base, cur, center, w->tick / (u32)interval, c->zombie_age, budget);
         }
 
         Writer wr = writer_make(N->buf, NET_BUF);
         w_u8(&wr, MSG_SNAPSHOT);
         w_u32(&wr, w->tick);
         w_u32(&wr, base ? base->tick : 0);
-        w_u32(&wr, p->last_processed_seq);
-        // Private state for the owning client (prediction / reconciliation).
-        w_bytes(&wr, &p->sim, sizeof(PlayerSim));
-        w_f32(&wr, p->hold_progress);
-        w_u32(&wr, p->open_container);
+        // Local data (prediction / reconciliation) of the client's player, or of the player it
+        // spectates (the observer runs it through the same pipeline), then the spectator block.
+        SpecLocalData ld;
+        ld.ack_seq = sp->last_processed_seq;
+        ld.sim = sp->sim;
+        ld.hold_progress = sp->hold_progress;
+        ld.open_container = src == c->slot ? sp->open_container : ENT_NONE;
+        spec_write_local(&wr, &ld);
+        spec_write_block(&wr, &sb);
         {
             // World time (every snapshot: 20 bytes, late joiners are in sync at once).
             u8 tw[20];
@@ -378,6 +428,12 @@ void net_host_after_tick(World *w) {
         N->snap_bytes = N->snap_bytes * 0.9f + (float)wr.len * 0.1f;
         c->bytes_sent += wr.len;
         send_msg(c->peer, CH_UNRELIABLE, &wr);
+        if (forced) {
+            // Target switch: the commands the target sent since this state go right after it, so the
+            // observer replays from the snapshot to the target's present at once (no pop, no wait).
+            const SpecCmdRing *ring = spectate_host_ring(src);
+            if (ring && ring->newest > sp->last_processed_seq) spec_send(c->slot, src, sp->last_processed_seq + 1, ring->newest);
+        }
     }
     N->t->flush(N->t);
 }
@@ -399,11 +455,12 @@ static void client_handle_snapshot(Reader *r) {
     if (!w || !N->welcomed) return;
     u32 tick = r_u32(r);
     u32 base_tick = r_u32(r);
-    u32 ack_seq = r_u32(r);
-    PlayerSim sim;
-    r_bytes(r, &sim, sizeof(sim));
-    float hold = r_f32(r);
-    u32 open_container = r_u32(r);
+    SpecLocalData ld;
+    spec_read_local(r, &ld);
+    SpecBlock sb;
+    spec_read_block(r, &sb);
+    bool own = sb.data_slot == N->local_slot;   // else the spectated player's (docs/SPECTATE.md)
+    u32 ack_seq = own ? ld.ack_seq : 0;
     u8 tw[20];
     r_bytes(r, tw, sizeof(tw));
     u8 has_wx = r_u8(r);
@@ -450,11 +507,14 @@ static void client_handle_snapshot(Reader *r) {
     else N->server_time_offset = N->server_time_offset * 0.98 + offset * 0.02;            // drift slowly back
 
     repl_apply(w, out, N->local_slot, N->interp);
+    spectator_cl_block(w, &sb, tick);
     Player *p = &w->players[N->local_slot];
-    if (p->active && p->character) {
-        game_cl_reconcile(&sim, ack_seq);
-        p->hold_progress = hold;
-        p->open_container = open_container;
+    if (own && p->active && p->character) {
+        game_cl_reconcile(&ld.sim, ack_seq);
+        p->hold_progress = ld.hold_progress;
+        p->open_container = ld.open_container;
+    } else if (!own) {
+        spectator_cl_local_data(w, sb.data_slot, &ld, &sb);
     }
     w->tick = DG_MAX(w->tick, tick);
 }
@@ -521,11 +581,19 @@ static void client_handle(const NetEvent *e) {
     case MSG_INVENTORY: {
         World *w = game_world();
         if (!w) break;
+        int slot = r_u8(&r);
         u32 rev = r_u32(&r);
         u32 ack = r_u32(&r);
         static InvSlot slots[INV_SLOTS];
         r_bytes(&r, slots, sizeof(slots));
-        if (!r.overflow) game_cl_inventory(N->local_slot, rev, ack, slots);   // reconcile with the predicted intents
+        if (r.overflow || slot >= MAX_PLAYERS) break;
+        if (slot == N->local_slot) game_cl_inventory(N->local_slot, rev, ack, slots);   // reconcile with the predicted intents
+        else spectator_cl_inventory(w, slot, rev, slots);                              // the spectated player's (HUD)
+        break;
+    }
+    case MSG_SPEC_CMDS: {
+        World *w = game_world();
+        if (w) spectator_cl_cmds(w, &r);
         break;
     }
     case MSG_CVARS: {
@@ -555,6 +623,7 @@ void net_client_send_cmds(const UserCmd *history, int size, u32 latest) {
     w_u8(&w, MSG_CMDS);
     w_u32(&w, N->latest_snap);
     w_f32(&w, (float)N->render_tick);
+    w_u32(&w, (u32)(platform_time() * 1000.0));   // send stamp: relayed to observers (spectator delay)
     int count = (int)DG_MIN((u32)CMDS_PER_PACKET, latest);
     w_u8(&w, (u8)count);
     for (u32 s = latest - (u32)count + 1; s <= latest; s++) w_bytes(&w, &history[s % (u32)size], sizeof(UserCmd));
@@ -788,6 +857,7 @@ void net_update(float dt) {
             client_handle(&events[i]);
         }
     }
+    if (N->role == NET_HOST && N->t) N->t->flush(N->t);   // relayed spectator commands leave in this frame
     if (N->role == NET_CLIENT && !N->welcomed && platform_time() - N->connect_started > 10.0) {
         net_stop();
         game_cl_disconnected("connection timed out");
@@ -876,7 +946,9 @@ static void cmd_snapstats(int argc, const char **argv) {
     for (int s = 0; s < MAX_PLAYERS; s++) {
         RemoteClient *c = &N->clients[s];
         if (!c->active) continue;
-        log_info("net_snapstats: client %d: %.1f kB/s snapshots (%.1f s), %d zombie updates held last snapshot", s, (double)c->bytes_sent / 1024.0 / span, span, c->zombies_held);
+        u32 relay = spectate_take_relay_bytes(s);
+        log_info("net_snapstats: client %d: %.1f kB/s snapshots + relays (%.1f s), %d zombie updates held last snapshot; spectator relay %.1f kB/s (source slot %d)", s,
+                 (double)c->bytes_sent / 1024.0 / span, span, c->zombies_held, (double)relay / 1024.0 / span, game_world() ? spectate_source(game_world(), c->slot) : -1);
         c->bytes_sent = 0;
     }
     void repl_debug_dump(void);
@@ -893,6 +965,9 @@ bool net_init(void) {
     N->showstats = cvar_reg_bool("net_showstats", false, CVAR_ARCHIVE, "show network statistics overlay");
     N->relevance = cvar_reg_float("sv_relevance", 120.0f, 10.0f, 2000.0f, CVAR_ARCHIVE, "entity relevance distance (m)");
     N->interp = (InterpBuffer *)calloc(MAX_ENTITIES, sizeof(InterpBuffer));
+    spectate_register();
+    spectate_reset();
+    spectate_set_sender(spec_send);
     snap_history_init(&N->cl_history);
     N->stats_time = platform_time();
     cmd_register("net_snapstats", cmd_snapstats, "host: per-client snapshot kB/s since the last call, held zombie updates");

@@ -8,6 +8,8 @@
 #include "gameplay/health.h"
 #include "gameplay/characters.h"
 #include "net/net.h"
+#include "net/spectate.h"
+#include "core/cvar.h"
 #include "audio/audio.h"
 #include "anim/body_parts.h"
 #include "ui/crosshair.h"
@@ -37,8 +39,9 @@ void game_hud_tick(float dt) {
     G->damage_flash = fmaxf(0.0f, G->damage_flash - dt * 1.5f);
     fx_update(dt);
     flesh_fx_update(G->world, dt);
-    // Hold-interaction progress for the HUD: authoritative value (host) or replicated (client).
-    Player *p = game_local_player();
+    // Hold-interaction progress for the HUD: authoritative value (host) or replicated (client), of
+    // the viewed player (a spectated player's comes with its local data).
+    Player *p = game_view_player();
     G->hold_progress = p ? p->hold_progress : 0;
 }
 
@@ -66,7 +69,7 @@ void game_handle_event(const GameEvent *ev) {
         break;
     }
     case EV_IMPACT: {
-        bool predicted = ev->ent2 && (int)ev->ent2 - 1 == G->local_slot && fx_predict_impacts();
+        bool predicted = ev->ent2 && (int)ev->ent2 - 1 == game_view_slot() && fx_predict_impacts();   // the viewed player's shots were predicted here
         if (ev->ent && (((ev->id >> 12) & 0xF) & FX_IMPACT_FLESH)) {
             // Character hit: flesh effects (the shooter predicted only the entry burst).
             FleshHit fh;
@@ -302,6 +305,15 @@ void game_sv_handle_rpc(int slot, int type, int a, int b, int c) {
         break;
     }
     case RPC_CONTAINER_CLOSE: p->open_container = ENT_NONE; break;
+    case RPC_SPECTATE: {
+        // Dev spectating (alive): the host's own player, or anyone with sv_cheats.
+        Cvar *cheats = cvar_find("sv_cheats");
+        bool dev = c && (p->local || (cheats && cheats->i));
+        spectate_request(w, slot, a, b, dev);
+        break;
+    }
+    case RPC_RESPAWN: spectate_request_respawn(slot); break;
+    case RPC_SPEC_POS: spectate_free_pos(slot, v3((float)a / 16.0f, (float)b / 16.0f, (float)c / 16.0f)); break;
     default: break;
     }
     (void)c;

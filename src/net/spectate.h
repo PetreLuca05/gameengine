@@ -165,7 +165,6 @@ typedef struct SpecObserver {
     u32 seq;              // switches
     vec3 free_pos;        // free camera position (relevance)
     bool free_pos_valid;
-    float dead_time;      // s since death (death cam, then auto spectate)
 } SpecObserver;
 
 void spectate_register(void);
@@ -176,7 +175,10 @@ void spectate_host_cmds(struct World *w, int slot, const UserCmd *cmds, int coun
 // Host request handling (RPC_SPECTATE / the spectate command). a = mode, b = target request.
 SpecResult spectate_request(struct World *w, int obs, int mode, int target_req, bool dev);
 void spectate_free_pos(int obs, vec3 pos);
-void spectate_on_death(struct World *w, int victim, int killer);
+void spectate_on_death(struct World *w, int victim, int killer);   // sets the respawn timer (sv_respawn_time)
+void spectate_request_respawn(int slot);                           // RPC_RESPAWN (sv_respawn_mode 1)
+bool spectate_respawn_ready(struct World *w, int slot);            // timer passed (and requested in mode 1)
+bool spectate_join_dead(struct World *w);                          // a joining player starts dead (sv_join_dead)
 void spectate_on_respawn(int slot);
 void spectate_player_left(int slot);
 const SpecObserver *spectate_observer(int slot);
