@@ -20,7 +20,7 @@ Simplification and clustering use meshoptimizer v0.22 (`simplifier.cpp`, `cluste
 |---|---|
 | 1. Offline builder + DAG (CPU) | **done** |
 | 2. GPU culling / LOD selection / Hi-Z | **done** |
-| 3. Visibility buffer raster + resolve | — |
+| 3. Visibility buffer raster + resolve | rasterisers **done** (resolve, shadows: —) |
 | 4. Streaming | — |
 | 5. Integration, `r_era`, test scene, `bench_vgeo` | — |
 | 6. Skinned | — |
@@ -45,7 +45,10 @@ Simplification and clustering use meshoptimizer v0.22 (`simplifier.cpp`, `cluste
 | `src/render/vk_vgeo.c` | game glue: context, frame graph passes, cvars, console commands |
 | `tests/vgeo_gpu_harness.{c,h}` | window-less Vulkan device + synthetic Hi-Z images |
 | `tests/test_vgeo_gpu.c` | ctest `vgeo_gpu` (`--validation`) |
-| `tools/bench_vgeo/bench_vgeo.c` | GPU timings of the cull passes and the Hi-Z build |
+| `tools/bench_vgeo/bench_vgeo.c` | GPU timings of the cull passes, the Hi-Z build and the rasterisers |
+| `src/render/vgeo/vgeo_raster.{c,h}` | `VgRaster`: visibility buffer, HW / SW raster per pass, timestamps |
+| `shaders/vgeo/vg_raster*.{glsl,comp,vert,mesh,frag}` | raster args, HW mesh / vertex pulling + fragment, SW compute |
+| `tests/test_vgeo_raster.c` | ctest `vgeo_raster` (`--validation`) |
 
 The builder is pure C with no renderer dependency. It is compiled into the game (through the `src/` glob), the
 `dg_vgeo` static library (tool and tests), and nothing else. The GPU module is the `dg_vgeo_gpu` library (see
@@ -288,6 +291,137 @@ How it got there (the first version's worst camera was 0.77 ms):
 - The BVH root is expanded in the instance step, saving a traversal level.
 - Group items with 16 lanes idled on the 1-cluster root groups → one candidate per cluster.
 - Hi-Z mip 0 at half resolution.
+
+## Rasterisation (Phase 3, `vgeo_raster.c`)
+
+Two rasterisers write the same 64-bit value per pixel into the visibility buffer, an SSBO `u64[w * h]` (binding 18
+of the cull set, cleared to 0 every frame):
+
+```
+hi 32  floatBitsToUint(1 - z)          z = Vulkan NDC depth at the pixel centre (0 near): atomicMax keeps the nearest
+lo 32  visible index << 7 | triangle   visible index: HW list k -> k, SW list k -> cap_visible + k (25 bits)
+```
+
+- **Per pass.** `vg_raster_record(r, cmd, frame, slot, pass)` draws the pass range of both lists: pass 1 the entries
+  `[0, *_P1)`, pass 2 `[*_P1, total)`. `vg_raster_args` (one thread) turns the counters into the indirect args
+  (`VGA_DRAW_HW`, `VGA_MESH`, `VGA_SW`). The raster shares the culler's descriptor sets (it uses its own pipeline
+  layout: same set layout, `VgPush` for vertex / mesh / fragment / compute). Timestamps: HW and SW ms per (frame,
+  view, pass) (`vg_raster_timings`). `serialize` puts a barrier between HW and SW for exact per-rasteriser
+  timings; by default they overlap.
+- **HW** (clusters ≥ `sw_px` across, or near the camera): no attachments, no depth test (the atomic is the depth
+  test), dynamic rendering over the view size, back faces culled with CCW front faces (as `vk_pipelines.c`).
+  - `VK_EXT_mesh_shader`: one 128-thread mesh workgroup per cluster (≤ 128 vertices / 128 triangles), the payload
+    as a per-primitive output, `vkCmdDrawMeshTasksIndirectEXT`.
+  - Fallback: vertex pulling. One `vkCmdDrawIndirect` of 384 vertices per instance; `firstInstance` = the pass
+    range start, so `gl_InstanceIndex` is the visible index. Triangles past the cluster's count collapse outside
+    the frustum.
+  - The fragment shader does the `atomicMax` at `gl_FragCoord`.
+- **SW** (compute, one 128-thread workgroup per cluster):
+  - The threads transform the cluster's vertices once into shared memory: screen space in 16.8 fixed point
+    (`floor(x * 256 + 0.5)`, the HW's 8 sub-pixel bits) and NDC depth.
+  - Then one thread per triangle: back-face cull with the HW convention (Vulkan's signed area is `-cross` with y
+    down), bounding box scan over the pixel centres `(x + 0.5, y + 0.5)` with integer edge functions. 32-bit when
+    the triangle spans < 128 px (every real SW triangle), 64-bit otherwise.
+  - **Fill rule:** top-left, as D3D / Vulkan hardware (y down): with the vertices in screen-clockwise order, a top
+    edge runs exactly horizontal to the right and a left edge runs up. Pixel centres exactly on any other edge are
+    excluded (bias -1 on the integer edge function).
+  - Depth from the plane through the snapped vertices at the pixel centre (unbiased barycentrics), outside
+    [0, 1] discarded.
+- **Near plane.** The SW path never clips: `vg_clusters` sends a cluster to HW when its culling sphere comes
+  within `znear` of the near plane (every vertex then has w ≥ 2 znear in SW). The plane is `planes[4]`, the view
+  depth, not the Euclidean distance, which does not bound w.
+- **Winding.** The procedural meshes (rock, torus, statue) are CCW outward for this convention (positive signed
+  volume, checked by the test), so the generator was left as it was.
+
+### Device features (game device: `vk_device.c`)
+
+On top of the Phase 2 set, the rasterisers need:
+- `fragmentStoresAndAtomics` (the HW fragment atomic; already enabled by `vk_device.c`);
+- `drawIndirectFirstInstance` (vertex pulling; already enabled when present);
+- for the mesh shader path, when present: the device extension `VK_EXT_mesh_shader`, its feature
+  `VkPhysicalDeviceMeshShaderFeaturesEXT::meshShader` (task shaders are not used), and the Vulkan 1.3 feature
+  `maintenance4`: glslang emits `LocalSizeId` for mesh shaders. Then set `VgContext.mesh_shader`.
+
+`vertexPipelineStoresAndAtomics` is **not** needed: the vertex shader reads the visible list through a read-only
+alias of binding 13.
+
+### Tests (`ctest -R vgeo_raster`, runs `--validation`)
+
+Same scene as `vgeo_gpu` (rock, two-material torus, 60k statue, 400 instances), 1920×1080, 4 cameras. The last one
+is 0.15 m from a rock's surface, so the near plane cuts clusters.
+- **Winding:** positive signed volume of every procedural mesh.
+- **HW vs SW:** the same view all-HW (`sw_px` 0) and all-SW (`sw_px` 1e9, near-plane clusters still go to HW).
+  The decoded (instance, cluster, triangle) per pixel is compared: ≤ 0.5 % of the covered pixels may differ, and
+  every differing pixel must have a 3×3 neighbour of another triangle.
+- **Mesh shader vs vertex pulling:** the same tolerance.
+- **Depth:** about 3000 pixels per image against a CPU recomputation. The CPU decodes the triangle, transforms it
+  with `raster_view_proj` in f64, snaps it to 1/256 px and evaluates the plane at the pixel centre. It must agree
+  within 1e-5 relative, plus one snapping step of the depth slope (an f32 vertex can round to the other side of a
+  1/256 step than the f64 reference).
+- **Mixed (`sw_px` 32) vs all-HW:** no holes between the two rasterisers, same tolerance.
+- **Two-pass:** pass 1 is occluded by a synthetic wall, pass 2 against an empty Hi-Z. Passes 1 + 2 rasterise the
+  identical image to one pass.
+- Zero validation messages.
+
+### Phase 3 raster results (RTX 3060 Ti, 1920×1080)
+
+`test_vgeo_raster`: 118/118 checks, 0 validation messages, 1.0 s.
+
+| Camera | Covered px | HW vs SW differing | mixed vs HW | mesh vs vertex pulling | depth worst rel. error |
+|---|---|---|---|---|---|
+| edge of the field | 500 540 | 17 (0.003 %), all on edges | 1 | 0 | 9.5e-7 |
+| eye level, inside | 335 371 | 23 (0.007 %) | 2 | 0 | 1.6e-7 |
+| close to instances | 631 639 | 27 (0.004 %) | 0 | 0 | 2.7e-7 |
+| 0.15 m from a surface (5 near-plane HW clusters) | 1 821 598 | 3 (0.000 %) | 0 | 0 | 3.2e-5 (4 samples over 1e-5, all within one snapping step) |
+
+Two-pass: 902 HW + 95 SW clusters in pass 1, 516 + 103 in pass 2, identical to one pass (0 pixels differ).
+
+The 3.2e-5 on the last camera comes from the vertex transform, not the rasteriser: HW and SW agree to the bit
+there. The shaders transform world-space positions with an f32 `raster_view_proj`. Near the camera (0.3 m) this
+costs about 1e-5 m, and 100 m from the origin it alone reaches ~5e-5 relative depth, which is why that camera
+uses the rock nearest the origin. A camera-relative raster matrix (translation applied in f64 on the CPU) would
+remove it. That is a `VgViewGpu` change for the integration.
+
+`bench_vgeo` (scene and cameras as in Phase 2: 100k instances of 8 rocks; clear + raster after the cull of the
+same view; HW and SW serialised; median of 300 frames):
+
+| Camera | Occlusion | HW p1 | SW p1 | HW p2 | SW p2 | total ms | tris | HW / SW clusters |
+|---|---|---|---|---|---|---|---|---|
+| eye level, across | off | 0.068 | 0.669 | — | — | 0.736 | 6.41M | 3230 / 77355 |
+| eye level, across | 2-pass | 0.058 | 0.177 | 0.002 | 0.003 | 0.241 | 2.44M | 2512 / 27252 |
+| eye level, inside | off | 0.092 | 0.226 | — | — | 0.318 | 2.86M | 3566 / 30420 |
+| eye level, inside | 2-pass | 0.083 | 0.101 | 0.002 | 0.003 | 0.189 | 1.24M | 2856 / 11047 |
+| elevated 60 m | off | 0.011 | 0.654 | — | — | 0.666 | 7.79M | 102 / 101060 |
+| elevated 60 m | 2-pass | 0.009 | 0.179 | 0.002 | 0.003 | 0.194 | 2.36M | 20 / 30581 |
+| top down 400 m | off | 0.002 | 0.122 | — | — | 0.124 | 1.20M | 0 / 15712 |
+| top down 400 m | 2-pass | 0.002 | 0.055 | 0.002 | 0.003 | 0.062 | 0.48M | 0 / 6321 |
+
+- Worst camera: 0.736 ms, without any occlusion (6.4M triangles), against the 1.2 ms budget for HW + SW raster in
+  both passes. With occlusion the worst is 0.24 ms.
+- The bench's pass 2 is nearly empty: the synthetic pyramid serves as both the previous and the current Hi-Z.
+- Vertex pulling (`--vertex-pulling`) measures within noise of the mesh shader here: HW is fill-bound on these
+  scenes.
+- The GPU was shared with other work during development. Single runs varied up to 3×, hence the medians; the
+  numbers above are a clean run, reproduced on three runs within 5 %.
+- The SW raster went from 1.4 ms to 0.67 ms on the worst camera by using 32-bit edge functions.
+- A plain load that skips a losing `atomicMax` measured no faster, and was dropped.
+
+### Simplifications (raster)
+
+- **Bounding box scan only:** no scanline path for larger triangles. SW triangles are a few pixels, and the bbox
+  loop is per thread (a large triangle only stalls its own warp). Triangles of any size are still correct (64-bit
+  path), just slow.
+- **No clipping in SW:** the near-plane classification guarantees w ≥ 2 znear. A vertex outside a ±16k px guard
+  band drops its triangles; the classification never produces one.
+- **One thread per triangle** in SW (Nanite's SW raster is the same); there is no work redistribution for long
+  triangles.
+- **The fill rule is assumed to be the HW's:** top-left with y down. Exact ties are rare at 8 sub-pixel bits, and
+  measured mismatches stay on edges.
+- **Equal-depth ties** go to the larger payload, so which of two coplanar triangles wins depends on the visible
+  index. It is stable within a frame, but not across HW / SW reclassification.
+- **The cull record still runs both passes at once:** pass 2 culling needs this frame's Hi-Z built from the pass 1
+  visibility buffer. The in-frame split (cull pass 1 → raster 1 → Hi-Z → cull pass 2 → raster 2) is part of the
+  renderer integration. The raster API is already per pass.
 
 ## Simplifications vs Nanite
 
