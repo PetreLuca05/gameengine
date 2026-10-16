@@ -233,6 +233,7 @@ void game_sim_player(World *w, int slot, const UserCmd *cmd, float dt, bool firs
     UserCmd c = *cmd;
     Cvar *cheats = cvar_find("sv_cheats");
     if (!cheats || !cheats->i) c.buttons &= (u16)~BTN_NOCLIP;
+    vehicles_player_cmd(w, slot, &c, pressed, first);   // enter / exit / seats / driver input (host)
     player_move_tick(w, slot, &p->sim, p->character, &c, dt, first);
     WeaponOutput wo;
     weapons_tick(w, slot, &p->sim, &c, pressed, dt, first, &wo);
@@ -260,6 +261,7 @@ void game_sim_player(World *w, int slot, const UserCmd *cmd, float dt, bool firs
     if (m->crouched) f |= EF_CROUCHED;
     if (m->sprinting) f |= EF_SPRINT;
     if (m->mode == MOVE_HANG) f |= EF_HANG;
+    if (m->mode == MOVE_SEATED) f |= EF_SEATED;
     if (m->mode == MOVE_MANTLE || m->mode == MOVE_VAULT) f |= EF_MANTLE;
     if (p->sim.wpn.reloading) f |= EF_RELOADING;
     if (c.buttons & BTN_AIM) f |= EF_ADS;
@@ -310,7 +312,10 @@ static void host_tick(World *w, const UserCmd *local_cmd) {
     chars_host_tick(w, SIM_DT);   // sim-only animation -> per-part hitboxes (before the lag-comp record)
     horde_post_tick(w);
     if (w->chunks) chunks_update(w, SIM_DT);
+    vehicles_host_tick(w);
     phys_step(w->phys, SIM_DT);
+    vehicles_host_post(w);
+    vehicles_test_tick(w);
     // Props moved by physics: pull their new transforms.
     ENT_FOREACH(w, i) {
         if (w->type[i] == ET_PROP) ent_sync_from_body(w, ENT_MAKE(i, w->gen[i]));
@@ -433,6 +438,7 @@ static UserCmd build_cmd(void) {
     if (input_consume_press(ACT_CROUCH)) c.buttons |= BTN_CROUCH;
     if (input_consume_press(ACT_FIREMODE)) c.buttons |= BTN_FIREMODE;
     if (G->flashlight) c.buttons |= BTN_FLASHLIGHT;
+    vehicles_fill_cmd(&c);
     if (G->noclip_request) { c.buttons |= BTN_NOCLIP; G->noclip_request = false; }
     if (G->menu_open || G->inventory_open || G->container_open || G->bench_open || console_is_open()) {
         c.move_x = c.move_y = 0;
@@ -501,7 +507,9 @@ static void tick(void) {
             game_sim_player(w, G->local_slot, &cmd, SIM_DT, true);
             chars_local_predict(w, G->local_slot, true);
         }
+        g_chars_force_phys_step = vehicles_client_tick(w, &cmd);
         chars_client_tick(w, net_client_render_tick(), SIM_DT);
+        vehicles_client_post(w, cmd.seq);
         if (w->chunks) chunks_update(w, SIM_DT);
         w->tick++;
     }
@@ -517,7 +525,7 @@ static void update_focus(void) {
     Player *p = game_local_player();
     G->focus = ENT_NONE;
     G->focus_prompt[0] = 0;
-    if (!p || p->sim.move.mode == MOVE_DEAD) return;
+    if (!p || p->sim.move.mode == MOVE_DEAD || p->sim.move.mode == MOVE_SEATED) return;   // seated: F / 1-4 drive the vehicle
     vec3 eye = G->view.eye;
     vec3 dir = dir_from_angles(G->view.yaw, G->view.pitch);
     float range = G->interact_range->f;
@@ -566,6 +574,7 @@ static void update_focus(void) {
 static void handle_hotbar(void) {
     Player *p = game_local_player();
     if (!p) return;
+    vehicles_input();   // F / 1-4 / V / H while seated or looking at a vehicle
     for (int i = 0; i < 9; i++)
         if (input_consume_press((Action)(ACT_SLOT1 + i))) G->hotbar_slot = (u8)i;
     if (input_consume_press(ACT_NEXT_ITEM)) G->hotbar_slot = (u8)((G->hotbar_slot + 1) % INV_HOTBAR);
@@ -591,6 +600,7 @@ void game_frame(float dt) {
     InputFrame f = input_frame();
     G->frame_look = ui_blocking ? v2(0, 0) : f.look_delta;
     camera_apply_look(&G->view, G->frame_look);
+    vehicles_view_frame(&G->view);
     if (!ui_blocking) handle_hotbar();
     G->use_pressed_frame = !ui_blocking && input_peek_press(ACT_USE);
     // The interaction may finish inside this frame's tick (pickups vanish): remember its target
@@ -663,6 +673,7 @@ bool game_host(const char *map) {
     }
     daynight_level_loaded(G->world);
     weather_level_loaded(G->world, G->map);
+    vehicles_level_loaded(G->world, G->map);
     flesh_fx_clear();
     horde_level_reset();
     G->mode = GM_HOST;
@@ -686,6 +697,7 @@ void game_cl_welcome(int slot, const char *map, u32 seed, u32 server_tick) {
     if (!load_map(G->world, map)) log_error("client: cannot load map '%s'", map);
     daynight_level_loaded(G->world);   // config; the time itself arrives with every snapshot
     weather_level_loaded(G->world, map);   // puddle mask; the weather state arrives with the snapshots
+    vehicles_level_loaded(G->world, map);   // spike zones; vehicles replicate
     flesh_fx_clear();
     horde_level_reset();
     G->mode = GM_CLIENT;

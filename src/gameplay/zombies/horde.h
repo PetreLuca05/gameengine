@@ -34,6 +34,7 @@ const HordeConfig *horde_config(void);
 int horde_count(void);
 // Spawn: count zombies around center (radius, ring / random / cluster), character id string or
 // "mixed". Queued, spawned over the next ticks. Returns how many were queued.
+enum { HSPAWN_RING, HSPAWN_RANDOM, HSPAWN_CLUSTER };   // horde_spawn modes
 int horde_spawn(struct World *w, vec3 center, int count, float radius, int mode, const char *character);
 void horde_despawn(struct World *w);
 

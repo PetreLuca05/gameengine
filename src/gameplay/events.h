@@ -27,7 +27,8 @@ typedef enum EventType {
     EV_USE_ANIM,       // ent = user player entity, ent2 = target (for remote hand animation)
     EV_CHAT,           // text
     EV_BENCH,          // to the user: ent = weapon bench (opens the attachment UI)
-    EV_TOD,            // time of day: id = TodEvent bits (sunrise / sunset / midnight / noon), value = hours
+    EV_TOD,
+    EV_VEHICLE,        // vehicles: id 1 = ejected at speed (ent = player, dir = velocity, value = stun s)            // time of day: id = TodEvent bits (sunrise / sunset / midnight / noon), value = hours
 } EventType;
 
 typedef struct GameEvent {

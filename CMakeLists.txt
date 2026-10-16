@@ -238,7 +238,7 @@ set(DG_ANIMCORE_SOURCES
   src/anim/anim.c src/anim/anim_mesh.c src/anim/controller.c src/anim/procedural.c src/anim/turn.c src/anim/spine.c
   src/anim/weapon_hold.c src/anim/damage_additive.c src/anim/foot_ik.c src/anim/anim_net.c src/anim/ragdoll_def.c
   src/anim/anim_library.c src/anim/character_rt.c src/gameplay/hitboxes.c src/gameplay/items.c src/gameplay/attachments.c src/gameplay/recoil.c src/core/spring.c
-  src/world/time_of_day.c src/world/weather.c src/vfx/vfx_curve.c src/vfx/vfx_library.c src/vfx/vfx_sim.c src/vfx/vfx_flesh.c src/vfx/vfx_atlas.c src/player/holdpoint.c src/player/camera_fp_math.c
+  src/world/time_of_day.c src/world/weather.c src/gameplay/vehicle_def.c src/vfx/vfx_curve.c src/vfx/vfx_library.c src/vfx/vfx_sim.c src/vfx/vfx_flesh.c src/vfx/vfx_atlas.c src/player/holdpoint.c src/player/camera_fp_math.c
   src/assets/fbx_loader.c src/assets/anim_cache.c src/assets/character.c
   src/core/log.c src/core/platform.c)
 add_library(dg_animcore STATIC ${DG_ANIMCORE_SOURCES})
@@ -284,6 +284,12 @@ add_executable(test_weather tests/test_weather.c)
 set_target_properties(test_weather PROPERTIES C_STANDARD 11)
 target_link_libraries(test_weather PRIVATE dg_animcore)
 add_test(NAME weather COMMAND test_weather WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+
+# Vehicles: definitions, fuel curve, tire model, steering clamp / smoothing, quantization.
+add_executable(test_vehicles tests/test_vehicles.c)
+set_target_properties(test_vehicles PROPERTIES C_STANDARD 11)
+target_link_libraries(test_vehicles PRIVATE dg_animcore)
+add_test(NAME vehicles COMMAND test_vehicles WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
 
 # Flesh impacts: exit rules / thickness, splatter placement, skinned decal budgets, gore off.
 add_executable(test_flesh tests/test_flesh.c)

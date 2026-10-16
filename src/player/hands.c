@@ -8,6 +8,7 @@
 #include "render/debug_draw.h"
 #include "render/mesh_gen.h"
 #include "gameplay/weapons.h"
+#include "gameplay/characters.h"
 #include "gameplay/entities.h"
 #include "cJSON.h"
 #include <stdlib.h>
@@ -355,6 +356,7 @@ void hands_update(const HandsInput *in) {
 
     // Weapon attaches to the right hand's grip frame; the left hand supports it.
     const InvSlot *slot = weapon_equipped(w, in->player);
+    if (g_vehicle_pose.holstered && g_vehicle_pose.holstered(w, in->player)) slot = NULL;   // driving: both hands on the wheel
     H->weapon = slot ? item_weapon(w->items, slot->item) : NULL;
     H->db = w->items;
     if (H->weapon) {
@@ -383,6 +385,22 @@ void hands_update(const HandsInput *in) {
             H->ov_rot[h] = quat_mul(quat_yaw(in->yaw), quat_axis_angle(v3(1, 0, 0), -0.25f));
             H->ov_grip[h] = GRIP_PALM;
         }
+    }
+
+    // Seated: hands on the steering wheel / handlebar (a free hand holds the one-handed gun).
+    if (m->mode == MOVE_SEATED && g_vehicle_pose.seat_hands) {
+        vec3 sp[2];
+        quat sr[2];
+        bool use[2];
+        if (g_vehicle_pose.seat_hands(w, in->player, sp, sr, use))
+            for (int h = 0; h < 2; h++) {
+                if (!use[h]) continue;
+                ov_target[h] = 1.0f;
+                H->ov_pos[h] = sp[h];
+                H->ov_rot[h] = sr[h];
+                H->ov_grip[h] = GRIP_GRAB;
+                if (h == HAND_LEFT) weapon_two_handed = false;
+            }
     }
 
     // Interaction reach (local prediction: starts on the use press).

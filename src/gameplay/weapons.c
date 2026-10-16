@@ -92,12 +92,17 @@ static RecoilMods make_mods(const PlayerSim *sim, float scale) {
     return m;
 }
 
+static WeaponVehicleHooks g_vh;
+void weapons_set_vehicle_hooks(const WeaponVehicleHooks *h) { g_vh = *h; }
+
 float weapon_current_spread(const World *w, int slot) {
     const WeaponDef *d = weapon_equipped_def(w, slot);
     const Player *p = &w->players[slot];
     if (!d || d->kind == WPN_MELEE) return 0;
     RecoilMods m = make_mods(&p->sim, cv_f(WC.spread_scale, 1));
-    return recoil_spread(&d->recoil, &p->sim.wpn.rc, &m) + chars_limb_spread(w, p->ent);
+    float sp = recoil_spread(&d->recoil, &p->sim.wpn.rc, &m) + chars_limb_spread(w, p->ent);
+    if (p->sim.move.mode == MOVE_SEATED && g_vh.spread_mult) sp *= g_vh.spread_mult((World *)w, slot);
+    return sp;
 }
 
 vec2 weapon_sway_deg(const WeaponDef *d, const WeaponState *ws, float t) {
@@ -163,14 +168,17 @@ typedef struct HitResult {
     int part;          // BodyPart for character hitboxes, -1 otherwise
     bool character;
     int material;      // SurfaceMaterial (flesh for hitboxes)
+    int tire;          // vehicle wheel hit (-1 none)
 } HitResult;
 
 // Lag-compensated hitscan: world geometry via Jolt, hitbox capsules rewound to view_tick.
 static HitResult trace_shot(World *w, int shooter, vec3 origin, vec3 dir, float range, u32 view_tick256) {
     HitResult r;
     memset(&r, 0, sizeof(r));
+    r.tire = -1;
     Player *sp = &w->players[shooter];
     BodyId self = sp->character ? phys_character_inner_body(sp->character) : PHYS_INVALID_BODY;
+    if (sp->sim.move.mode == MOVE_SEATED && g_vh.ignore_body) self = g_vh.ignore_body(w, shooter);   // not the own vehicle
     RayHit rh;
     if (phys_raycast(w->phys, origin, v3_scale(dir, range), PL_MASK_WORLD, self, &rh)) {
         r.hit = true;
@@ -184,6 +192,23 @@ static HitResult trace_shot(World *w, int shooter, vec3 origin, vec3 dir, float 
     float best = r.hit ? r.dist : range;
     u32 view_tick = view_tick256 >> 8;
     r.part = -1;
+    // Tires (not physics shapes: the wheel volume is tested analytically).
+    if (g_vh.ray_tires) {
+        EntityId veh = ENT_NONE;
+        float tt = 0;
+        int wheel = g_vh.ray_tires(w, origin, dir, best, w->authority ? view_tick : 0, &veh, &tt);
+        if (wheel >= 0 && tt < best) {
+            best = tt;
+            r.hit = true;
+            r.dist = tt;
+            r.point = v3_madd(origin, dir, tt);
+            r.normal = v3_neg(dir);
+            r.ent = veh;
+            r.body = PHYS_INVALID_BODY;
+            r.material = SURF_CLOTH;
+            r.tire = wheel;
+        }
+    }
     ENT_FOREACH(w, i) {
         if (!(w->comps[i] & C_HITBOX) || (w->flags[i] & EF_DEAD)) continue;
         EntityId e = ENT_MAKE(i, w->gen[i]);
@@ -258,6 +283,10 @@ static void apply_hit(World *w, int shooter, const WeaponDef *d, const HitResult
     if (h->hitbox) {
         float dmg = d->damage * damage_scale * (h->headshot ? d->headshot_mult : 1.0f);
         apply_damage(w, h->ent, dmg, d->damage_type, sp->ent, h->point, dir, h->headshot);
+        return;
+    }
+    if (h->tire >= 0) {
+        if (g_vh.tire_hit) g_vh.tire_hit(w, h->ent, h->tire, h->point, dir);
         return;
     }
     if (h->body != PHYS_INVALID_BODY) phys_add_impulse(w->phys, h->body, v3_scale(dir, d->impulse * damage_scale), h->point);
@@ -662,6 +691,7 @@ void weapons_tick(World *w, int slot, PlayerSim *sim, const UserCmd *cmd, u16 pr
     i16 *mag = w->authority ? &s->ammo : &ws->mag;
     bool attack = (cmd->buttons & BTN_ATTACK) != 0;
     bool busy = sim->move.mode != MOVE_WALK;
+    if (sim->move.mode == MOVE_SEATED) busy = !(g_vh.can_shoot && g_vh.can_shoot(w, slot, sim, d));   // passengers, one-handed drivers
 
     // Consumables: hold attack for use_time.
     if (idef->kind == ITEM_CONSUMABLE && s->item) {
@@ -670,12 +700,18 @@ void weapons_tick(World *w, int slot, PlayerSim *sim, const UserCmd *cmd, u16 pr
             ws->use_t += dt;
             if (ws->use_t >= idef->use_time) {
                 if (w->authority) {
-                    heal(w, p->ent, idef->heal, idef->armor);
-                    ev_hint(w, slot, "Used %s", idef->name);
-                    ev_sound(w, "heal", sim->move.pos, 0.8f, EVENT_ALL);
-                    s->count--;
-                    if (s->count == 0) memset(s, 0, sizeof(*s));
-                    p->inv.revision++;
+                    bool used = true;
+                    if (idef->vehicle_use) used = g_vh.use_item && g_vh.use_item(w, slot, idef);   // fuel can, tire kit, spare tire
+                    else {
+                        heal(w, p->ent, idef->heal, idef->armor);
+                        ev_hint(w, slot, "Used %s", idef->name);
+                        ev_sound(w, "heal", sim->move.pos, 0.8f, EVENT_ALL);
+                    }
+                    if (used) {
+                        s->count--;
+                        if (s->count == 0) memset(s, 0, sizeof(*s));
+                        p->inv.revision++;
+                    }
                 }
                 ws->use_t = -100.0f; // wait for release
             }
@@ -779,6 +815,7 @@ void weapons_tick(World *w, int slot, PlayerSim *sim, const UserCmd *cmd, u16 pr
             vec3 dir = dir_from_angles(yaw, pitch);
             RecoilMods sm = make_mods(sim, sscale);
             float cone = recoil_spread(rp, &ws->rc, &sm) + chars_limb_spread(w, p->ent);
+            if (sim->move.mode == MOVE_SEATED && g_vh.spread_mult) cone *= g_vh.spread_mult(w, slot);
             u32 seed = shot_seed(cmd, slot, ws->shots);
             if (!WC.infinite_ammo->i) (*mag)--;
             if (w->authority) ws->mag = s->ammo;

@@ -60,6 +60,8 @@ typedef struct CharacterInst {
     u64 pose_draw_frame;              // engine frame of pose_draw (0 = never drawn)
     u8 armor_left[BP_COUNT];          // cosmetic (each machine): hits until the part's armour breaks
     Xform item_prev, item_cur;
+    Xform veh_prev, veh_cur;   // seated: the vehicle transform at the two evaluated poses (re-attached when drawn)
+    bool veh_valid;
     Xform item_cam_prev, item_cam_cur;   // hold point item in camera space (owner re-places per frame)
     bool item_valid;
     const struct WeaponDef *item_weapon;
@@ -125,6 +127,7 @@ CharacterInst *char_get(const World *w, EntityId e);
 bool chars_item_muzzle(World *w, EntityId e, vec3 *pos, vec3 *dir);
 // Eye (camera socket) of a character's current pose, ragdoll included (death camera).
 bool chars_head_world(World *w, EntityId e, float alpha, vec3 *out);
+bool chars_palm_world(World *w, EntityId e, int hand, vec3 *out);   // latest pose, world space
 // First person: this frame's final camera (the held item is placed relative to it).
 void chars_set_fp_camera(vec3 pos, quat rot, bool valid);
 // Aim offset of the held item (degrees right / up of the view, the view pitch in radians): the
@@ -203,5 +206,18 @@ bool chars_ragdoll_release(World *w, EntityId e);   // stands a tool ragdoll bac
 int chars_count(const World *w);
 void chars_budget_stats(int *evals, int *deferred);   // last present tick: post-passes run / deferred by anim_eval_budget
 const LodConfig *chars_lod_config(void);
+
+// Vehicles (src/game/game_vehicles.c): seated pose for players (every machine: from the replicated
+// seat occupancy), hands glued to the steering wheel / handlebar, weapons holstered while driving.
+typedef struct VehiclePoseHooks {
+    bool (*seat_pose)(World *w, int slot, vec3 *hip, vec3 feet[2], float *body_yaw);
+    // Hands on the controls (world): use[h] false = that hand is free (one-handed shooting).
+    bool (*seat_hands)(World *w, int slot, vec3 pos[2], quat rot[2], bool use[2]);
+    bool (*holstered)(World *w, int slot);   // driving with both hands: nothing held
+    bool (*vehicle_xform)(World *w, int slot, Xform *out);   // the seat's vehicle as drawn this frame
+    BodyId (*vehicle_body)(World *w, int slot);              // its physics body (ignored by the hold point's wall check)
+} VehiclePoseHooks;
+extern VehiclePoseHooks g_vehicle_pose;
+extern bool g_chars_force_phys_step;   // client: step physics this tick (vehicle prediction)
 
 #endif

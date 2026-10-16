@@ -66,4 +66,16 @@ void weapons_debug_reset(void);
 // First hitbox hit along a ray, ENT_NONE if world geometry is closer (crosshair target tint).
 EntityId weapon_trace_target(World *w, int shooter, vec3 origin, vec3 dir, float range);
 
+// Vehicles (src/game/game_vehicles.c): seated shooting, tire hits, vehicle consumables.
+typedef struct WeaponVehicleHooks {
+    bool (*can_shoot)(World *w, int slot, const PlayerSim *sim, const WeaponDef *d);   // seated: allowed?
+    float (*spread_mult)(World *w, int slot);                                         // 1 = none
+    BodyId (*ignore_body)(World *w, int slot);                                        // own vehicle
+    // Ray vs wheel cylinders (lag compensated on the host): wheel index or -1, t along dir.
+    int (*ray_tires)(World *w, vec3 origin, vec3 dir, float max_t, u32 view_tick, EntityId *veh, float *t);
+    void (*tire_hit)(World *w, EntityId veh, int wheel, vec3 point, vec3 dir);
+    bool (*use_item)(World *w, int slot, const ItemDef *it);                          // host: consumed?
+} WeaponVehicleHooks;
+void weapons_set_vehicle_hooks(const WeaponVehicleHooks *h);
+
 #endif

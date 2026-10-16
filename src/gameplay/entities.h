@@ -28,5 +28,6 @@ void entities_client_sync(World *w);
 void entities_link(World *w);
 
 const InteractDef *interact_def_for(EntityType t);
+void entities_set_interact_def(EntityType t, const InteractDef *def);
 
 #endif

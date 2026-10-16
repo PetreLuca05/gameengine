@@ -28,7 +28,7 @@ typedef u32 EntityId;
 
 typedef enum EntityType {
     ET_NONE, ET_PLAYER, ET_PROP, ET_DOOR, ET_GATE, ET_LEVER, ET_SWITCH, ET_LIGHT,
-    ET_CONTAINER, ET_PICKUP, ET_DUMMY, ET_PROJECTILE, ET_MARKER, ET_ZOMBIE, ET_BENCH, ET_COUNT
+    ET_CONTAINER, ET_PICKUP, ET_DUMMY, ET_PROJECTILE, ET_MARKER, ET_ZOMBIE, ET_BENCH, ET_VEHICLE, ET_FUEL_PUMP, ET_COUNT
 } EntityType;
 
 enum EntityFlags {
@@ -46,6 +46,11 @@ enum EntityFlags {
     EF_MANTLE    = 1 << 11,
     EF_STATIC_BODY = 1 << 12,
     EF_FLASHLIGHT = 1 << 13,  // players: flashlight on
+    EF_SEATED    = 1 << 14,   // players: in a vehicle seat (game_vehicles.c)
+    EF_HEADLIGHTS = 1 << 15,  // vehicles: headlights on
+    EF_BRAKING   = 1 << 16,   // vehicles: brake lights
+    EF_WRECKED   = 1 << 17,   // vehicles: destroyed (no engine)
+    EF_ENGINE    = 1 << 18,   // vehicles: engine running
 };
 
 enum ComponentBits {
@@ -281,6 +286,8 @@ struct World {
     struct CharacterSystem *chars;          // skinned characters (players, zombies, dummies)
     float time;                // seconds of simulated time
     TimeState tod;             // time of day: host-authoritative, in every snapshot (world/time_of_day.h)
+    void *vehicles;            // vehicle system (src/game/game_vehicles.c), freed by vehicles_free
+    void (*vehicles_free)(struct World *w);
     WeatherState weather;      // weather: host-authoritative, in snapshots on changes + every 10th (world/weather.h)
 };
 

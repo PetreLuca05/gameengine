@@ -16,6 +16,7 @@ typedef struct ModelMesh {
     MeshId mesh;
     Material mat;
     mat4 local;          // node transform within the model
+    bool paint;          // material named "paint*": tinted with the owner's colour (vehicles)
 } ModelMesh;
 
 typedef struct Model {

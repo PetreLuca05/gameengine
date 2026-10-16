@@ -5,7 +5,7 @@
 #include <stdlib.h>
 
 static const char *k_type_names[ET_COUNT] = { "none", "player", "prop", "door", "gate", "lever", "switch", "light",
-                                              "container", "pickup", "dummy", "projectile", "marker", "zombie" };
+                                              "container", "pickup", "dummy", "projectile", "marker", "zombie", "bench", "vehicle", "fuel_pump" };
 
 const char *ent_type_name(EntityType t) { return (t >= 0 && t < ET_COUNT) ? k_type_names[t] : "?"; }
 
@@ -36,6 +36,7 @@ void world_clear(World *w) {
 
 void world_destroy(World *w) {
     if (!w) return;
+    if (w->vehicles_free) w->vehicles_free(w);   // vehicle constraints before the bodies
     world_clear(w);
     chars_system_destroy(w);
     phys_world_destroy(w->phys);

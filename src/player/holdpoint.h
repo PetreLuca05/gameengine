@@ -20,7 +20,7 @@
 struct cJSON;
 
 typedef enum HoldState {
-    HP_HIP, HP_ADS, HP_SPRINT, HP_CROUCH, HP_PRONE, HP_EMPTY, HP_INSPECT, HP_STATE_COUNT
+    HP_HIP, HP_ADS, HP_SPRINT, HP_CROUCH, HP_PRONE, HP_EMPTY, HP_INSPECT, HP_VEHICLE_ONEHAND, HP_STATE_COUNT
 } HoldState;
 
 const char *holdpoint_state_name(int s);
@@ -119,6 +119,7 @@ typedef struct HoldPointInput {
     bool has_item;
     // requested state flags (priority: empty > inspect > sprint > ads > prone > crouch > hip)
     bool ads, sprint, crouch, prone, empty, inspect;
+    bool vehicle_onehand;             // driving: the gun held out one-handed (aimed along the sight line)
     float dt;
     float aim_yaw, aim_pitch;         // view angles (radians): look lag from their rate
     vec3 vel_cam;                     // velocity in camera space (m/s)

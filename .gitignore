@@ -17,3 +17,7 @@ build-alt.log
 /tools/vfxgen/cache/
 /tools/vfxgen/logs/
 __pycache__/
+
+# Source art: character models and their textures (large, kept out of the repository)
+/assets/human/*.fbx
+/assets/human/textures/

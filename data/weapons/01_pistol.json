@@ -4,6 +4,7 @@
   "vfx": { "muzzle": { "type": "pistol", "device": "bare" }, "caliber": "pistol" },
   "item": "pistol",
   "kind": "hitscan",
+  "one_hand_capable": true,
   "damage_type": "bullet",
   "damage": 25,
   "mag_size": 12,

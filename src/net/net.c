@@ -372,6 +372,7 @@ void net_host_after_tick(World *w) {
                 weather_pack(&w->weather, wx);
                 w_bytes(&wr, wx, sizeof(wx));
             }
+            vehicles_net_write(w, &wr);   // every snapshot: pose, velocity, fuel, tires, seats
         }
         repl_write_delta(&wr, base, cur);
         N->snap_bytes = N->snap_bytes * 0.9f + (float)wr.len * 0.1f;
@@ -408,6 +409,7 @@ static void client_handle_snapshot(Reader *r) {
     u8 has_wx = r_u8(r);
     u8 wx[WEATHER_PACK_SIZE];
     if (has_wx) r_bytes(r, wx, sizeof(wx));
+    vehicles_net_read(w, r, tick > N->latest_snap, ack_seq);
     if (tick <= N->latest_snap) return; // old / duplicate (unreliable reordering)
     if (!r->overflow) tod_unpack(&w->tod, tw);
     if (!r->overflow && has_wx) weather_unpack(&w->weather, wx);

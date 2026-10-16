@@ -289,6 +289,9 @@ static vec3 accelerate(vec3 vel, vec3 wish_dir, float wish_speed, float accel, f
     return v3_madd(vel, wish_dir, a);
 }
 
+static SeatPoseFn g_seat_pose;
+void movement_set_seat_pose(SeatPoseFn fn) { g_seat_pose = fn; }
+
 void player_move_tick(World *w, int slot, PlayerSim *sim, PhysCharacter *ch, const UserCmd *cmd, float dt, bool first) {
     PlayerMove *m = &sim->move;
     PhysicsWorld *pw = w->phys;
@@ -319,6 +322,40 @@ void player_move_tick(World *w, int slot, PlayerSim *sim, PhysCharacter *ch, con
     if ((pressed & BTN_NOCLIP)) {
         m->mode = m->mode == MOVE_NOCLIP ? MOVE_WALK : MOVE_NOCLIP;
         m->vel = v3(0, 0, 0);
+    }
+
+    // ---- seated in a vehicle: follow the seat (the vehicle owns the motion)
+    if (m->mode == MOVE_SEATED) {
+        vec3 feet, vel;
+        if (g_seat_pose && g_seat_pose(w, m->vehicle, m->seat, &feet, &vel)) {
+            m->pos = feet;
+            (void)vel;
+            m->vel = v3(0, 0, 0);   // the player is still relative to the seat: no walk bob / sway / run cycle
+            phys_character_set_pos(ch, feet);
+            phys_character_set_vel(ch, v3(0, 0, 0));
+        }
+        m->on_ground = 1;
+        m->sprinting = 0;
+        m->air_time = 0;
+        m->fall_start_y = m->pos.y;
+        m->coyote = 0;
+        sim->last_buttons = buttons;
+        return;
+    }
+    // ---- thrown out of a vehicle: tumbling, no control until the stun ends
+    if (m->veh_stun > 0.0f) {
+        m->veh_stun -= dt;
+        float k = phys_character_ground(ch) == GROUND_ON ? expf(-4.0f * dt) : 1.0f;
+        m->vel.x *= k;
+        m->vel.z *= k;
+        m->vel.y -= T->gravity->f * dt;
+        CharacterMoveParams mp = { 0.3f, 0.2f, true, true };
+        phys_character_update(pw, ch, dt, m->vel, &mp);
+        m->pos = phys_character_pos(ch);
+        m->vel = phys_character_vel(ch);
+        if (phys_character_ground(ch) == GROUND_ON && m->vel.y < 0) m->vel.y = 0;
+        sim->last_buttons = buttons;
+        return;
     }
 
     // ---- dead: just fall

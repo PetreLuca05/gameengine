@@ -500,7 +500,14 @@ EntityId spawn_bench(World *w, vec3 pos, float yaw) {
 
 // ------------------------------------------------------------------ setup / tick
 
+// Interactions defined outside this file (vehicles, fuel pumps: src/game/game_vehicles.c).
+static const InteractDef *g_extra_defs[ET_COUNT];
+void entities_set_interact_def(EntityType t, const InteractDef *def) {
+    if (t > ET_NONE && t < ET_COUNT) g_extra_defs[t] = def;
+}
+
 const InteractDef *interact_def_for(EntityType t) {
+    if (t > ET_NONE && t < ET_COUNT && g_extra_defs[t]) return g_extra_defs[t];
     switch (t) {
     case ET_DOOR: return &k_door_def;
     case ET_LEVER: return &k_lever_def;
@@ -553,6 +560,9 @@ void entity_setup(World *w, EntityId e) {
         break;
     case ET_MARKER:
         if (w->flags[i] & EF_STATIC_BODY) ent_create_body(w, e, PM_STATIC, PL_STATIC, 0);
+        break;
+    case ET_FUEL_PUMP:
+        ent_create_body(w, e, PM_STATIC, PL_STATIC, 0);
         break;
     case ET_PLAYER:
         w->comps[i] |= C_HITBOX;

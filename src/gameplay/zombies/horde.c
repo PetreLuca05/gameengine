@@ -20,7 +20,6 @@
 #define HMAX 2048
 #define STEER_CHUNK 256
 
-enum { HSPAWN_RING, HSPAWN_RANDOM, HSPAWN_CLUSTER };
 enum { HTARGET_PLAYERS, HTARGET_PLAYER, HTARGET_POINT, HTARGET_NONE };
 
 typedef struct PendingSpawn { vec3 feet; float yaw; u8 cid; } PendingSpawn;

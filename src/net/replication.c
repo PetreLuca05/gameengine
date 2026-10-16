@@ -31,7 +31,7 @@ SnapFrame *snap_history_find(SnapHistory *h, u32 tick) {
 
 // ------------------------------------------------------------------ capture
 
-static bool always_relevant(EntityType t) { return t == ET_LIGHT || t == ET_GATE || t == ET_PLAYER; }
+static bool always_relevant(EntityType t) { return t == ET_LIGHT || t == ET_GATE || t == ET_PLAYER || t == ET_VEHICLE; }
 
 static void capture_one(World *w, int i, NetEnt *e) {
     memset(e, 0, sizeof(*e));
@@ -566,12 +566,16 @@ float repl_zombie_jitter(float *mean_speed) {
     return j;
 }
 
+static bool (*g_repl_owned)(World *w, int index);
+void repl_set_owned_hook(bool (*fn)(World *w, int index)) { g_repl_owned = fn; }
+
 void repl_interpolate(World *w, InterpBuffer *interp, double rt, int local_slot) {
     double frame_dt = (rt - g_zlast_rt) / (double)SIM_HZ;
     g_zlast_rt = rt;
     for (int i = 1; i < w->max_used && i < CLIENT_ENTITY_BASE; i++) {
         if (!w->alive[i]) continue;
         if (w->type[i] == ET_PLAYER && w->player_slot[i] == local_slot) continue;
+        if (g_repl_owned && g_repl_owned(w, i)) continue;   // predicted locally (the driven vehicle)
         InterpBuffer *b = &interp[i];
         if (!b->count || b->id != ENT_MAKE(i, w->gen[i])) continue;
         // Samples are in ring order; walk from oldest.

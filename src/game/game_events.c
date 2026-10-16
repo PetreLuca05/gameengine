@@ -122,6 +122,7 @@ void game_handle_event(const GameEvent *ev) {
         break;
     case EV_CONTAINER_CLOSE: G->container_open = false; break;
     case EV_TOD: daynight_handle_event(ev); break;
+    case EV_VEHICLE: vehicles_handle_event(ev); break;
     case EV_BENCH:
         G->bench_open = true;
         G->bench_ent = ev->ent;

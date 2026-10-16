@@ -32,7 +32,11 @@ typedef struct ItemDef {
     ItemSockets sockets;   // held-item sockets (non-weapons)
     u8 attachment;         // ITEM_ATTACHMENT: the attachment id it mounts (gameplay/inv_ops.c)
     char icon[64];         // UI icon override (assets path, "icon" in the item JSON); empty = baked icon
+    u8 vehicle_use;        // VehicleUse: consumables used on a vehicle (docs/VEHICLES.md)
+    float fuel;            // VUSE_FUEL: litres
 } ItemDef;
+
+typedef enum VehicleUse { VUSE_NONE, VUSE_FUEL, VUSE_TIRE_REPAIR, VUSE_SPARE_TIRE } VehicleUse;
 
 typedef struct WeaponModelPart { vec3 offset; vec3 half; vec4 color; } WeaponModelPart;
 
@@ -134,6 +138,7 @@ typedef struct WeaponDef {
     vec3 support_offset;      // where the left hand supports it (model space)
     vec3 muzzle_offset;
     bool bolt_action;         // cycles the bolt after each shot (shot-event hook)
+    bool one_hand_capable;    // can be fired one-handed while driving (pistols, SMGs: docs/VEHICLES.md)
     // VFX ("vfx" block): muzzle flash type x device, impact caliber (src/vfx/vfx_library.h enums).
     int vfx_muzzle_type, vfx_muzzle_device, vfx_caliber;
     RecoilParams recoil;      // guns: recoil, spread, fire modes, ADS/sway feel ("recoil" block)

@@ -5,7 +5,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-static const char *k_state_names[HP_STATE_COUNT] = { "hip", "ads", "sprint", "crouch", "prone", "empty", "inspect" };
+static const char *k_state_names[HP_STATE_COUNT] = { "hip", "ads", "sprint", "crouch", "prone", "empty", "inspect", "vehicle_onehand" };
 
 const char *holdpoint_state_name(int s) { return (s >= 0 && s < HP_STATE_COUNT) ? k_state_names[s] : "hip"; }
 int holdpoint_state_from_name(const char *s) {
@@ -66,6 +66,9 @@ void holdpoint_style_defaults(HoldPointStyle *s, const char *name) {
     s->state[HP_EMPTY].pos.z -= 0.08f;
     s->state[HP_EMPTY].rot.x -= 40.0f;
     s->state[HP_INSPECT] = P(0.04f, -0.12f, 0.34f, 10, 55, 35);
+    // Driving one-handed (docs/VEHICLES.md): the ADS line (sights still on the aim), arm a little
+    // more extended, the gun canted in towards the centre.
+    s->state[HP_VEHICLE_ONEHAND] = s->state[HP_HIP];   // unused: the pose comes from the sight (state_hold)
     if (!s->eye_relief) s->eye_relief = 0.3f;
     for (int i = 0; i < HP_STATE_COUNT; i++) s->blend_in[i] = 0.2f;
     s->blend_in[HP_ADS] = 0.16f;
@@ -267,6 +270,7 @@ void holdpoint_reset(HoldPointState *st) {
 
 int holdpoint_pick_state(const HoldPointInput *in) {
     if (in->empty || !in->has_item) return HP_EMPTY;
+    if (in->vehicle_onehand) return HP_VEHICLE_ONEHAND;
     if (in->inspect) return HP_INSPECT;
     if (in->sprint && !in->ads) return HP_SPRINT;
     if (in->ads) return HP_ADS;
@@ -302,6 +306,13 @@ Xform holdpoint_ads_item(const HoldPointStyle *s, const HoldPointOverride *o, ve
 
 static Xform state_hold(const HoldPointStyle *s, const HoldPointOverride *o, int state, const HoldPointInput *in) {
     if (state == HP_ADS) return xf_mul(holdpoint_ads_item(s, o, in->sight), in->anchor);
+    if (state == HP_VEHICLE_ONEHAND) {
+        // Driving one-handed: the ADS hold (sights on the aim line) with the arm further out and the
+        // gun canted in (docs/VEHICLES.md).
+        Xform ads = xf_mul(holdpoint_ads_item(s, o, in->sight), in->anchor);
+        Xform out = xf_make(v3(0, 0, -0.08f), quat_axis_angle(v3(0, 0, 1), -8.0f * DG_DEG2RAD));
+        return xf_mul(out, ads);
+    }
     HpPose p = pose_for(s, o, state);
     return xf_make(hp_cam_pos(p.pos), hp_euler_deg(p.rot));
 }
@@ -382,7 +393,7 @@ void holdpoint_eval(HoldPointState *st, const HoldPointInput *in, HoldPointOutpu
         st->off_rot = quat_identity();
         st->prev_yaw = in->aim_yaw;
         st->prev_pitch = in->aim_pitch;
-        st->pitch_w = state == HP_ADS ? 0.0f : 1.0f;
+        st->pitch_w = (state == HP_ADS || state == HP_VEHICLE_ONEHAND) ? 0.0f : 1.0f;
     }
     if (state != st->state || in->style_key != st->style_key) {
         // Offset (and its velocity) from the new target to where the hold point is now, decayed
@@ -422,7 +433,7 @@ void holdpoint_eval(HoldPointState *st, const HoldPointInput *in, HoldPointOutpu
     Xform item = xf_mul(base, inv_anchor);
     // Soft pitch limit: looking steeply up / down the item stops following the view fully (arms
     // stay in reach); none in ADS (the sight must stay on the view axis), eased with the blend.
-    float pw_target = state == HP_ADS ? 0.0f : 1.0f;
+    float pw_target = (state == HP_ADS || state == HP_VEHICLE_ONEHAND) ? 0.0f : 1.0f;
     st->pitch_w += (pw_target - st->pitch_w) * (1.0f - expf(-dt / fmaxf(0.02f, s->blend_in[state] * 0.35f)));
     {
         float pdeg = in->aim_pitch * DG_RAD2DEG, a = fabsf(pdeg);

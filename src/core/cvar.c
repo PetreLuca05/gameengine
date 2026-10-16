@@ -7,7 +7,7 @@
 #include <ctype.h>
 
 #define MAX_CVARS 512
-#define MAX_CMDS 256
+#define MAX_CMDS 1024
 #define MAX_WRITERS 8
 #define CBUF_SIZE (512 * 1024)   // long generated test scripts (tools/tests/weapon_sway.cfg)
 #define MAX_ARGS 32
@@ -80,6 +80,24 @@ static void cmd_cmdlist(int argc, const char **argv) {
     for (int i = 0; i < s_cv.cmd_count; i++) log_info("  %-20s %s", s_cv.cmds[i].name, s_cv.cmds[i].desc);
 }
 
+// help [filter]: every command (alphabetical) with its description; a filter matches names and
+// descriptions ("help weather", "help vehicle").
+static int cmd_name_cmp(const void *a, const void *b) { return SDL_strcasecmp((*(const Cmd *const *)a)->name, (*(const Cmd *const *)b)->name); }
+static void cmd_help(int argc, const char **argv) {
+    const char *f = argc > 1 ? argv[1] : NULL;
+    static const Cmd *list[MAX_CMDS];
+    int n = 0;
+    for (int i = 0; i < s_cv.cmd_count; i++) {
+        const Cmd *c = &s_cv.cmds[i];
+        if (f && !SDL_strcasestr(c->name, f) && !SDL_strcasestr(c->desc, f)) continue;
+        list[n++] = c;
+    }
+    qsort(list, (size_t)n, sizeof(list[0]), cmd_name_cmp);
+    if (f) log_info("help: %d commands matching '%s' (help without a filter lists all %d; cvarlist [filter] lists the settings)", n, f, s_cv.cmd_count);
+    else log_info("help: %d commands (help <word> filters, cvarlist [filter] lists the settings)", n);
+    for (int i = 0; i < n; i++) log_info("  %-22s %s", list[i]->name, list[i]->desc);
+}
+
 static void cmd_echo(int argc, const char **argv) {
     char buf[512] = { 0 };
     for (int i = 1; i < argc; i++) {
@@ -111,6 +129,7 @@ void cvar_system_init(void) {
     cmd_register("set", cmd_set, "set a cvar");
     cmd_register("cvarlist", cmd_cvarlist, "list cvars [filter]");
     cmd_register("cmdlist", cmd_cmdlist, "list commands");
+    cmd_register("help", cmd_help, "help [filter]: list commands (sorted, filtered by name / description)");
     cmd_register("echo", cmd_echo, "print text");
     cmd_register("exec", cmd_exec, "execute a config file");
     cmd_register("reset", cmd_reset, "reset cvar to default");

@@ -19,7 +19,7 @@ struct PhysCharacter;
 #define PLAYER_EYE_STAND 1.65f
 #define PLAYER_EYE_CROUCH 0.98f
 
-typedef enum MoveMode { MOVE_WALK, MOVE_MANTLE, MOVE_VAULT, MOVE_HANG, MOVE_NOCLIP, MOVE_DEAD } MoveMode;
+typedef enum MoveMode { MOVE_WALK, MOVE_MANTLE, MOVE_VAULT, MOVE_HANG, MOVE_NOCLIP, MOVE_DEAD, MOVE_SEATED } MoveMode;
 
 typedef struct PlayerMove {
     vec3 pos;           // feet
@@ -59,6 +59,12 @@ typedef struct PlayerMove {
     vec3 hand_anchor[2];
     u8 hand_anchor_valid;
     u8 pad2[3];
+    // vehicles (MOVE_SEATED, src/game/game_vehicles.c): host-owned, predicted positions only
+    u32 vehicle;        // EntityId of the vehicle
+    u8 seat;            // seat index
+    u8 veh_onehand;     // driver aiming one-handed (hold point HP_VEHICLE_ONEHAND, steering clamp)
+    u8 pad3[2];
+    float veh_stun;     // s left after being thrown out at speed (no control)
 } PlayerMove;
 
 typedef struct WeaponState {
@@ -115,6 +121,10 @@ float player_eye_height(const PlayerMove *m);
 vec3 player_eye_pos(const PlayerMove *m);
 // Spine-bend eye offset (set by the animation system; zero without it).
 void movement_set_eye_offset(vec3 (*fn)(float yaw, float pitch));
+// Seated players follow their seat (game_vehicles.c): feet position (so the standing eye height
+// lands on the seat's eye) and the vehicle velocity. False = the vehicle is gone.
+typedef bool (*SeatPoseFn)(struct World *w, u32 vehicle, int seat, vec3 *feet, vec3 *vel);
+void movement_set_seat_pose(SeatPoseFn fn);
 vec3 player_eye_offset(float yaw, float pitch);
 
 #endif

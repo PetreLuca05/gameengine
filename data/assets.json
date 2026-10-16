@@ -30,6 +30,30 @@
     {
       "name": "barrel",
       "path": "assets/models/barrel.gltf"
+    },
+    {
+      "name": "car_body",
+      "path": "assets/vehicles/car_body.gltf"
+    },
+    {
+      "name": "car_wheel",
+      "path": "assets/vehicles/car_wheel.gltf"
+    },
+    {
+      "name": "car_steering",
+      "path": "assets/vehicles/car_steering.gltf"
+    },
+    {
+      "name": "moto_body",
+      "path": "assets/vehicles/moto_body.gltf"
+    },
+    {
+      "name": "moto_wheel",
+      "path": "assets/vehicles/moto_wheel.gltf"
+    },
+    {
+      "name": "moto_bar",
+      "path": "assets/vehicles/moto_bar.gltf"
     }
   ]
 }

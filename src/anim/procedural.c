@@ -317,6 +317,30 @@ float proc_clavicle_reach(const Skeleton *s, Pose *p, Xform *model, int clav, in
     return fmaxf(0.0f, v3_dist(model[arm].t, target) - (reach - margin));
 }
 
+// Seated pose without a clip: pelvis onto the seat, thighs flexed forward, knees bent, feet IK'd
+// to the pedals (knees forward and a little out).
+void proc_seated(ProcState *st, const ProcInput *in, Pose *pose, Xform *model) {
+    (void)st;
+    const Skeleton *s = in->skel;
+    Xform inv = xf_inverse(in->root);
+    int hips = s->role[BR_HIPS];
+    if (hips < 0) return;
+    Xform n = model[hips];
+    n.t = xf_point(inv, in->seat_hip);
+    pose_set_model(s, pose, model, hips, n);
+    pose_update_children(s, pose, model, hips);
+    static const BoneRole leg[2][3] = { { BR_L_UPLEG, BR_L_LEG, BR_L_FOOT }, { BR_R_UPLEG, BR_R_LEG, BR_R_FOOT } };
+    for (int k = 0; k < 2; k++) {
+        int a = s->role[leg[k][0]], b = s->role[leg[k][1]], c = s->role[leg[k][2]];
+        if (a < 0 || b < 0 || c < 0) continue;
+        // Hip flexion first (the IK then only bends the knee towards the pedal).
+        proc_rotate_bone(s, pose, model, a, quat_axis_angle(v3(1, 0, 0), 80.0f * DG_DEG2RAD));
+        vec3 target = xf_point(inv, in->seat_feet[k]);
+        quat foot = model[c].r;
+        anim_ik_two_bone_pose(s, pose, model, a, b, c, target, &foot, v3(k ? 0.25f : -0.25f, 0.4f, -1.0f), 1.0f);
+    }
+}
+
 void proc_run(ProcState *st, const ProcInput *in0, Pose *pose, Xform *model) {
     ProcInput in = *in0;
     if (!st->init) {
@@ -326,8 +350,14 @@ void proc_run(ProcState *st, const ProcInput *in0, Pose *pose, Xform *model) {
         st->style = st->prev_style = in.hold_style;
         st->style_t = 1;
     }
-    proc_turn(st, &in);
+    if (in.seated) {
+        // The body faces the vehicle (no turn-in-place lag), no ground feet, no lean.
+        st->render_body_yaw = in.body_yaw;
+        in.foot_ik = false;
+        in.lean = false;
+    } else proc_turn(st, &in);
     in.root.r = quat_yaw(st->render_body_yaw);
+    if (in.seated) proc_seated(st, &in, pose, model);
     float foot_off[2] = { 0, 0 };
     vec3 anim_foot[2] = { { 0 }, { 0 } };
     if (in.foot_ik) proc_foot_pelvis(st, &in, pose, model, foot_off, anim_foot);

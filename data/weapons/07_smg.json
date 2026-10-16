@@ -4,6 +4,7 @@
   "vfx": { "muzzle": { "type": "smg", "device": "bare" }, "caliber": "smg" },
   "item": "smg",
   "kind": "hitscan",
+  "one_hand_capable": true,
   "damage_type": "bullet",
   "damage": 15,
   "mag_size": 32,

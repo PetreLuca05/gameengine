@@ -39,6 +39,28 @@ void sights_draw(void);
 struct PostSettings;
 void daynight_register(void);
 void weather_register(void);                     // game_weather.c
+// Vehicles (game_vehicles.c, docs/VEHICLES.md)
+struct Writer;
+struct Reader;
+void vehicles_register(void);
+void vehicles_level_loaded(World *w, const char *map);
+void vehicles_player_cmd(World *w, int slot, const UserCmd *cmd, u16 pressed, bool first);
+void vehicles_host_tick(World *w);                // before the physics step
+void vehicles_host_post(World *w);                // after it
+void vehicles_test_tick(World *w);
+bool vehicles_client_tick(World *w, const UserCmd *cmd);   // true: the client steps physics (prediction)
+void vehicles_client_post(World *w, u32 seq);
+void vehicles_net_write(World *w, struct Writer *wr);
+void vehicles_net_read(World *w, struct Reader *rd, bool apply, u32 ack_seq);
+void vehicles_handle_event(const GameEvent *ev);
+void vehicles_input(void);
+void vehicles_fill_cmd(UserCmd *c);
+void vehicles_view_frame(ViewState *view);
+int vehicles_camera(World *w, RenderCamera *cam);
+void vehicles_frame(World *w, vec3 cam_pos);
+void vehicles_draw_hud(void);
+void vehicles_draw(void);
+EntityId vehicle_spawn(World *w, const char *def, vec3 pos, float yaw);
 void weather_level_loaded(World *w, const char *map);
 void weather_host_tick(World *w);
 bool weather_active(World *w);

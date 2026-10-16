@@ -136,31 +136,56 @@ void audio_play_music(const char *name) {
     }
 }
 
-#define MAX_LOOPS 8
-typedef struct Loop { u32 hash; bool used; ma_sound sound; float vol, target; } Loop;
+#define MAX_LOOPS 24
+// Looping sounds: 2D ambience (audio_loop_set) and positional loops (audio_loop3d: engines, tire
+// screech) that fade out on their own once nobody refreshes them.
+typedef struct Loop { u32 hash; bool used, spatial; ma_sound sound; float vol, target, pitch; int idle; } Loop;
 static Loop g_loops[MAX_LOOPS];
+
+static Loop *loop_get(u32 h, const char *name, float volume, bool spatial) {
+    Loop *l = NULL;
+    for (int i = 0; i < MAX_LOOPS; i++) if (g_loops[i].used && g_loops[i].hash == h) l = &g_loops[i];
+    if (l || volume <= 0.001f) return l;
+    const char *path = resolve(name);
+    if (!path) return NULL;
+    for (int i = 0; i < MAX_LOOPS && !l; i++) if (!g_loops[i].used) l = &g_loops[i];
+    if (!l) return NULL;
+    if (ma_sound_init_from_file(&A->engine, path, MA_SOUND_FLAG_DECODE, group_for(SND_SFX), NULL, &l->sound) != MA_SUCCESS) return NULL;
+    l->used = true;
+    l->hash = h;
+    l->vol = 0.0f;
+    l->pitch = 1.0f;
+    l->spatial = spatial;
+    l->idle = 0;
+    ma_sound_set_looping(&l->sound, MA_TRUE);
+    ma_sound_set_spatialization_enabled(&l->sound, spatial ? MA_TRUE : MA_FALSE);
+    if (spatial) {
+        ma_sound_set_min_distance(&l->sound, 3.0f);
+        ma_sound_set_max_distance(&l->sound, 120.0f);
+    }
+    ma_sound_set_volume(&l->sound, 0.0f);
+    ma_sound_seek_to_pcm_frame(&l->sound, (ma_uint64)(h % 20000u));   // engines of the same model do not phase
+    ma_sound_start(&l->sound);
+    return l;
+}
 
 void audio_loop_set(const char *name, float volume) {
     if (!audio_available()) return;
-    u32 h = dg_hash_str(name);
-    Loop *l = NULL;
-    for (int i = 0; i < MAX_LOOPS; i++) if (g_loops[i].used && g_loops[i].hash == h) l = &g_loops[i];
-    if (!l) {
-        if (volume <= 0.001f) return;
-        const char *path = resolve(name);
-        if (!path) return;
-        for (int i = 0; i < MAX_LOOPS && !l; i++) if (!g_loops[i].used) l = &g_loops[i];
-        if (!l) return;
-        if (ma_sound_init_from_file(&A->engine, path, MA_SOUND_FLAG_DECODE, group_for(SND_SFX), NULL, &l->sound) != MA_SUCCESS) return;
-        l->used = true;
-        l->hash = h;
-        l->vol = 0.0f;
-        ma_sound_set_looping(&l->sound, MA_TRUE);
-        ma_sound_set_spatialization_enabled(&l->sound, MA_FALSE);
-        ma_sound_set_volume(&l->sound, 0.0f);
-        ma_sound_start(&l->sound);
-    }
+    Loop *l = loop_get(dg_hash_str(name), name, volume, false);
+    if (!l) return;
     l->target = volume;
+    l->idle = -1000000;   // 2D loops never time out
+}
+
+void audio_loop3d(u32 key, const char *name, vec3 pos, float volume, float pitch) {
+    if (!audio_available()) return;
+    Loop *l = loop_get(dg_hash_str(name) ^ (key * 2654435761u) ^ 0x51ED27u, name, volume, true);
+    if (!l) return;
+    l->target = volume;
+    l->idle = 0;
+    l->pitch = pitch;
+    ma_sound_set_position(&l->sound, pos.x, pos.y, pos.z);
+    ma_sound_set_pitch(&l->sound, fmaxf(pitch, 0.05f));
 }
 
 static void audio_loops_shutdown(void) {
@@ -171,7 +196,8 @@ static void update_loops(float dt) {
     for (int i = 0; i < MAX_LOOPS; i++) {
         Loop *l = &g_loops[i];
         if (!l->used) continue;
-        l->vol += (l->target - l->vol) * (1.0f - expf(-dt * 3.0f));
+        if (l->spatial && ++l->idle > 6) l->target = 0.0f;   // not refreshed: fade out
+        l->vol += (l->target - l->vol) * (1.0f - expf(-dt * (l->spatial ? 10.0f : 3.0f)));
         ma_sound_set_volume(&l->sound, l->vol);
         if (l->target <= 0.001f && l->vol < 0.002f) { ma_sound_uninit(&l->sound); l->used = false; }
     }

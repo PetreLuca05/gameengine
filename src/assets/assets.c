@@ -145,6 +145,14 @@ bool model_load_gltf(const char *path, Model *out) {
             mm->mesh = mb_upload(&mb);
             mm->local = xf;
             mm->mat = material_color(v4(1, 1, 1, 1));
+            mm->paint = prim->material && prim->material->name && !strncmp(prim->material->name, "paint", 5);
+            if (prim->material) {
+                // Emissive (lights): the factor's brightest channel x KHR_materials_emissive_strength.
+                const float *ef = prim->material->emissive_factor;
+                float e = fmaxf(ef[0], fmaxf(ef[1], ef[2]));
+                if (prim->material->has_emissive_strength) e *= prim->material->emissive_strength.emissive_strength;
+                mm->mat.emissive = e;
+            }
             if (prim->material && prim->material->has_pbr_metallic_roughness) {
                 const cgltf_pbr_metallic_roughness *pbr = &prim->material->pbr_metallic_roughness;
                 mm->mat.color = v4(pbr->base_color_factor[0], pbr->base_color_factor[1], pbr->base_color_factor[2], pbr->base_color_factor[3]);

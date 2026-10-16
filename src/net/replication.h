@@ -68,4 +68,7 @@ void repl_apply(World *w, const SnapFrame *f, int local_slot, InterpBuffer *inte
 void repl_interpolate(World *w, InterpBuffer *interp, double render_tick, int local_slot);
 float repl_zombie_jitter(float *mean_speed);   // client: zombie motion smoothness since the last call
 
+// Entities whose transform this client predicts itself (vehicles it drives): not interpolated.
+void repl_set_owned_hook(bool (*fn)(World *w, int index));
+
 #endif

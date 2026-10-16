@@ -502,6 +502,7 @@ static void player_inputs(World *w, CharacterInst *c, const Player *p, CharInput
     memset(in, 0, sizeof(*in));
     in->move_local = local_move(m->vel, m->body_yaw, &in->speed);
     in->grounded = m->on_ground != 0;
+    if (m->mode == MOVE_SEATED) { in->speed = 0; in->move_local = v2(0, 1); in->grounded = true; }   // sitting still
     in->crouch = m->crouch_amount > 0.5f;
     in->sprint = m->sprinting != 0;
     // The aim request, not the progress: the gun starts towards the eye on the press, in step with
@@ -517,6 +518,7 @@ static void player_inputs(World *w, CharacterInst *c, const Player *p, CharInput
     in->aim_yaw = m->yaw;
     in->body_yaw = m->body_yaw;
     const InvSlot *eq = weapon_equipped(w, c->slot);
+    if (g_vehicle_pose.holstered && g_vehicle_pose.holstered(w, c->slot)) eq = NULL;   // both hands on the wheel
     u16 item = eq ? eq->item : 0;
     in->weapon_id = item;
     in->weapon_type = item_hold_style(w, item, &c->item_weapon, &c->item_def);
@@ -1163,9 +1165,13 @@ bool chars_sweep(World *w, EntityId ignore, vec3 a, vec3 b, float radius, Entity
 
 // ------------------------------------------------------------------ presentation
 
+// Body the post-pass casts ignore (a seated player's own vehicle: the hold point's wall check
+// must not pull the gun back from the windshield / dashboard around it).
+static BodyId g_ray_ignore = PHYS_INVALID_BODY;
+
 static bool ray_cb(void *ctx, vec3 o, vec3 d, float *frac, vec3 *point, vec3 *normal) {
     RayHit rh;
-    if (!phys_raycast((PhysicsWorld *)ctx, o, d, PL_MASK_WORLD, PHYS_INVALID_BODY, &rh)) return false;
+    if (!phys_raycast((PhysicsWorld *)ctx, o, d, PL_MASK_WORLD, g_ray_ignore, &rh)) return false;
     *frac = rh.fraction;
     *point = rh.point;
     *normal = rh.normal;
@@ -1213,6 +1219,9 @@ static void settled_pose(CharacterInst *c) {
 }
 
 static int systems_for_lod(int lod) { return lod; }
+
+VehiclePoseHooks g_vehicle_pose;
+bool g_chars_force_phys_step;
 
 static void post_one(World *w, CharacterInst *c, int i, float dt, vec3 cam_pos, int local_slot) {
     (void)cam_pos;
@@ -1308,8 +1317,29 @@ static void post_one(World *w, CharacterInst *c, int i, float dt, vec3 cam_pos, 
             pi.hand_anchor[1] = m->hand_anchor[1];
             pi.hand_anchor_w = 1.0f;
         }
+        // Seated in a vehicle: pelvis on the seat, feet on the pedals, hands on the controls.
+        float yaw;
+        if (g_vehicle_pose.seat_pose && g_vehicle_pose.seat_pose(w, c->slot, &pi.seat_hip, pi.seat_feet, &yaw)) {
+            pi.seated = true;
+            pi.body_yaw = yaw;
+            pi.foot_ik = false;
+            pi.turn = false;
+            pi.lean = false;
+            vec3 hp[2];
+            quat hr[2];
+            bool use[2];
+            if (g_vehicle_pose.seat_hands && g_vehicle_pose.seat_hands(w, c->slot, hp, hr, use)) {
+                pi.hand_anchor[0] = hp[0];
+                pi.hand_anchor[1] = hp[1];
+                pi.hand_anchor_w = 1.0f;
+                pi.hand_anchor_skip = (u8)((use[0] ? 0 : 1) | (use[1] ? 0 : 2));
+                pi.vehicle_onehand = !use[1] && item != NULL;
+            }
+        }
     }
+    g_ray_ignore = (pi.seated && g_vehicle_pose.vehicle_body) ? g_vehicle_pose.vehicle_body(w, c->slot) : PHYS_INVALID_BODY;
     charrt_post(&c->rt, &pi);
+    g_ray_ignore = PHYS_INVALID_BODY;
     // Aim of this post-pass (the first-person pass corrects the spine to the frame's view).
     c->fp_pitch[0] = c->fp_pitch[1];
     c->fp_yaw[0] = c->fp_yaw[1];
@@ -1357,6 +1387,16 @@ static void post_one(World *w, CharacterInst *c, int i, float dt, vec3 cam_pos, 
     // World transforms: rendered root uses the smoothed body yaw.
     Xform root = xf_make(c->root.t, quat_yaw(c->rt.proc.render_body_yaw));
     memcpy(c->pose_prev, c->pose_cur, sizeof(Xform) * (size_t)s->count);
+    // Seated: remember the vehicle pose this body was solved against (see seat_fix).
+    {
+        Xform vx;
+        bool seated = c->is_player && c->slot >= 0 && g_vehicle_pose.vehicle_xform && g_vehicle_pose.vehicle_xform(w, c->slot, &vx);
+        if (seated) {
+            c->veh_prev = c->veh_valid ? c->veh_cur : vx;
+            c->veh_cur = vx;
+        }
+        c->veh_valid = seated;
+    }
     c->item_prev = c->item_cur;
     c->item_cam_prev = c->item_cam_cur;
     if (c->rt.proc.has_item) c->item_cam_cur = c->rt.proc.item_cam;
@@ -1473,10 +1513,10 @@ void chars_present_tick(World *w, vec3 cam_pos, float fov_deg, float screen_h, f
     }
     g->last_evals = evals;
     g->last_deferred = due_count - evals;
-    // Clients step their replica physics only for cosmetic ragdolls (the host steps its own world).
+    // Clients step their replica physics for cosmetic ragdolls and a locally predicted vehicle.
     // Ragdolls simulating: 2 collision substeps (joint limits + floor contacts hold on hard impacts).
     phys_set_collision_steps(w->phys, w->chars->ragdolls > 0 ? 2 : 1);
-    if (step_phys && !w->authority) phys_step(w->phys, dt);
+    if ((step_phys || g_chars_force_phys_step) && !w->authority) phys_step(w->phys, dt);
 }
 
 static mat4 g_palette[ANIM_MAX_BONES];
@@ -1578,15 +1618,26 @@ static struct {
 
 static float lerp_angle_fp(float a, float b, float t) { return wrap_angle(a + wrap_angle(b - a) * t); }
 
+// A seated body is solved at tick rate against the vehicle as it was then: drawn this frame it is
+// re-attached to the vehicle as drawn now (no lag behind a fast car). Identity when not seated.
+static Xform seat_fix(World *w, const CharacterInst *c, float t) {
+    Xform now;
+    if (!c->veh_valid || !g_vehicle_pose.vehicle_xform || !g_vehicle_pose.vehicle_xform(w, c->slot, &now)) return xf_identity();
+    Xform then = xf_lerp(c->veh_prev, c->veh_cur, t);
+    then.s = now.s = v3(1, 1, 1);
+    return xf_mul(now, xf_inverse(then));
+}
+
 static void fp_prepare(World *w, CharacterInst *c, float alpha, float yaw, float pitch) {
     const Skeleton *s = &LIB->skel;
     const ProcParams *pp = &LIB->proc;
     float span = (float)DG_MAX(1, c->interval);
     float it = saturate(((float)(w->chars->tick - c->last_eval) + alpha) / span);
-    for (int b = 0; b < s->count; b++) FP.world[b] = xf_lerp(c->pose_prev[b], c->pose_cur[b], it);
+    Xform sfix = seat_fix(w, c, it);
+    for (int b = 0; b < s->count; b++) FP.world[b] = xf_mul(sfix, xf_lerp(c->pose_prev[b], c->pose_cur[b], it));
     // Model space = the rendered body frame (feet + smoothed body yaw), as the post-pass used.
     float body_yaw = lerp_angle_fp(c->fp_body_yaw[0], c->fp_body_yaw[1], it);
-    FP.root = xf_make(c->root.t, quat_yaw(body_yaw));
+    FP.root = xf_mul(sfix, xf_make(c->root.t, quat_yaw(body_yaw)));
     FP.root.s = v3s(c->def->scale);
     Xform inv_root = xf_inverse(FP.root);
     FP.pose.count = s->count;
@@ -1865,7 +1916,7 @@ void chars_render_local_fp(World *w, float alpha, int local_slot) {
     } else if (c->item_valid) {
         float span = (float)DG_MAX(1, c->interval);
         float it = saturate(((float)(w->chars->tick - c->last_eval) + alpha) / span);
-        Xform item = xf_lerp(c->item_prev, c->item_cur, it);
+        Xform item = xf_mul(seat_fix(w, c, it), xf_lerp(c->item_prev, c->item_cur, it));
         item.s = v3(1, 1, 1);
         hands_fp_set_item(item.t, item.r);
     }
@@ -1895,7 +1946,25 @@ void chars_render_local_fp(World *w, float alpha, int local_slot) {
     MeshId noarm = g_draw_skin >= 0 ? CG->skins[g_draw_skin].noarm : CG->noarm_mesh[c->def_index];
     MeshId body = arm && noarm ? noarm : char_lod_mesh(c, 0);
     draw_char_mesh(body, c, world, 0, false);
-    draw_char_mesh(arm, c, world, MAT_VIEWMODEL, false);
+    // Driving (docs/VEHICLES.md): the hands on the controls are world geometry (the wheel is drawn
+    // with the world FOV); only a right hand holding the one-handed gun keeps the viewmodel
+    // treatment (own FOV, hold point). Each arm is drawn alone by collapsing the other one.
+    vec3 sp[2];
+    quat sr[2];
+    bool use[2];
+    bool driving = arm && g_vehicle_pose.seat_hands && g_vehicle_pose.seat_hands(w, c->slot, sp, sr, use);
+    if (driving) {
+        static Xform wl[ANIM_MAX_BONES], wr[ANIM_MAX_BONES];
+        memcpy(wl, world, sizeof(Xform) * (size_t)s->count);
+        memcpy(wr, world, sizeof(Xform) * (size_t)s->count);
+        int ls = s->role[BR_L_SHOULDER], rs = s->role[BR_R_SHOULDER];
+        for (int b = 0; b < s->count; b++) {
+            if (rs >= 0 && (b == rs || skel_is_descendant(s, b, rs))) wl[b].s = v3s(1e-4f);   // left arm only
+            if (ls >= 0 && (b == ls || skel_is_descendant(s, b, ls))) wr[b].s = v3s(1e-4f);   // right arm only
+        }
+        draw_char_mesh(arm, c, wl, 0, false);
+        draw_char_mesh(arm, c, wr, use[1] ? 0 : MAT_VIEWMODEL, false);
+    } else draw_char_mesh(arm, c, world, MAT_VIEWMODEL, false);
     hands_set_body_arms(arm != 0);
     g_draw_skin = -1;
     if (cv(CG->fp_debug))
@@ -1981,7 +2050,8 @@ void chars_render(World *w, float alpha, vec3 cam_pos, int local_slot) {
         } else {
             float span = (float)DG_MAX(1, c->interval);
             float t = saturate(((float)(w->chars->tick - c->last_eval) + alpha) / span);
-            for (int b = 0; b < s->count; b++) pose[b] = xf_lerp(c->pose_prev[b], c->pose_cur[b], t);
+            Xform sfix = seat_fix(w, c, t);
+            for (int b = 0; b < s->count; b++) pose[b] = xf_mul(sfix, xf_lerp(c->pose_prev[b], c->pose_cur[b], t));
         }
         bool local = c->is_player && c->slot == local_slot && !g_thirdperson;
         u32 flags = local ? MAT_SHADOW_ONLY : 0;
@@ -2004,7 +2074,7 @@ void chars_render(World *w, float alpha, vec3 cam_pos, int local_slot) {
         if (c->item_valid && !c->dead && (c->item_weapon || c->item_def)) {
             float span = (float)DG_MAX(1, c->interval);
             float t = saturate(((float)(w->chars->tick - c->last_eval) + alpha) / span);
-            Xform it = xf_lerp(c->item_prev, c->item_cur, t);
+            Xform it = xf_mul(seat_fix(w, c, t), xf_lerp(c->item_prev, c->item_cur, t));
             hands_draw_held_att(c->item_weapon, c->item_weapon ? NULL : c->item_def, c->item_att, it.t, it.r, local ? (MAT_SHADOW_ONLY) : 0);
         }
         (void)dist;
@@ -2030,6 +2100,18 @@ bool chars_item_muzzle(World *w, EntityId e, vec3 *pos, vec3 *dir) {
     const ItemSockets *k = held_sockets(c);
     *pos = xf_point(c->item_cur, k->muzzle);
     *dir = quat_rotate(c->item_cur.r, v3(0, 0, -1));
+    return true;
+}
+
+// World palm point of a hand (0 left, 1 right) in the latest evaluated pose (vehicle grip test).
+bool chars_palm_world(World *w, EntityId e, int hand, vec3 *out) {
+    CharacterInst *c = char_get(w, e);
+    if (!c || !c->have_pose || !LIB || hand < 0 || hand > 1) return false;
+    const Skeleton *s = &LIB->skel;
+    int b = s->role[hand ? BR_R_HAND : BR_L_HAND];
+    if (b < 0) return false;
+    Xform palm = xf_mul(c->pose_cur[b], LIB->hands.palm[hand]);
+    *out = palm.t;
     return true;
 }
 

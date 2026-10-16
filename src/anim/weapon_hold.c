@@ -115,6 +115,7 @@ void proc_hold(ProcState *st, const ProcInput *in, Pose *pose, Xform *model) {
     hi.prone = in->prone;
     hi.inspect = in->inspect;
     hi.empty = in->empty_hands;
+    hi.vehicle_onehand = in->vehicle_onehand;
     hi.dt = in->dt;
     hi.aim_yaw = in->aim_yaw;
     hi.aim_pitch = pitch;
@@ -267,7 +268,7 @@ void proc_hand_anchors(ProcState *st, const ProcInput *in, Pose *pose, Xform *mo
     static const BoneRole chain[2][3] = { { BR_L_ARM, BR_L_FOREARM, BR_L_HAND }, { BR_R_ARM, BR_R_FOREARM, BR_R_HAND } };
     for (int h = 0; h < 2; h++) {
         int a = s->role[chain[h][0]], b = s->role[chain[h][1]], c = s->role[chain[h][2]];
-        if (a < 0 || b < 0 || c < 0) continue;
+        if (a < 0 || b < 0 || c < 0 || (in->hand_anchor_skip & (1u << h))) continue;
         vec3 target = xf_point(inv_root, in->hand_anchor[h]);
         // Palm down on the ledge: back of the hand up, fingers forward.
         vec3 fwd = v3(0, 0, -1), up = v3(0, 1, 0), x = v3_cross(up, v3_neg(fwd));

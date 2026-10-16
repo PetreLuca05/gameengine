@@ -294,10 +294,10 @@ static void draw_dev(Game *g, World *w, float s) {
         Player *p = game_local_player();
         if (p) {
             const PlayerMove *m = &p->sim.move;
-            static const char *modes[] = { "walk", "mantle", "vault", "hang", "noclip", "dead" };
+            static const char *modes[] = { "walk", "mantle", "vault", "hang", "noclip", "dead", "seated" };
             ui_textf(10 * s, y, FONT_SMALL, UI_RGBA(220, 220, 255, 220), UI_ALIGN_LEFT,
                      "pos %.2f %.2f %.2f  speed %.2f m/s  %s%s%s  %s  map %s  %s",
-                     m->pos.x, m->pos.y, m->pos.z, v3_len(v3_flat(m->vel)), modes[DG_MIN(m->mode, 5)],
+                     m->pos.x, m->pos.y, m->pos.z, v3_len(v3_flat(m->vel)), modes[DG_MIN(m->mode, 6)],
                      m->on_ground ? " ground" : " air", m->crouched ? " crouch" : "", m->sprinting ? "sprint" : "",
                      g->map, g->mode == GM_HOST ? (net_role() == NET_HOST ? "host (LAN open)" : "host") : "client");
             y += 16 * s;

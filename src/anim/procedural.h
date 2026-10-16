@@ -190,6 +190,13 @@ typedef struct ProcInput {
     float hp_bob_scale;        // hold point movement bob outside sprint (wpn_bob_scale)
     vec3 hand_anchor[2];       // world-space ledge anchors (mantle / hang), weight below
     float hand_anchor_w;
+    // Seated (vehicles, docs/VEHICLES.md): the pelvis on the seat's hip point, thighs flexed, feet
+    // IK'd to the pedals / pegs (world space). Foot IK and lean are off while seated.
+    bool seated;
+    bool vehicle_onehand;      // hold point HP_VEHICLE_ONEHAND (driver aiming one-handed)
+    u8 hand_anchor_skip;       // bit h: hand h is not anchored (one-handed driving: the gun hand)
+    vec3 seat_hip;
+    vec3 seat_feet[2];
 } ProcInput;
 
 // Body yaw (simulation, host-owned, predicted locally): faces the aim while moving; while

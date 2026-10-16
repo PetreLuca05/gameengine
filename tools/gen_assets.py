@@ -393,6 +393,46 @@ def gen_weather_sounds():
     write_wav("thunder", synth(5.0, thunder))
 
 
+def gen_vehicle_sounds():
+    """Vehicles (docs/VEHICLES.md): engine loop (pitched by rpm at runtime), tire skid loop, horn,
+    crash, door, tire burst, engine start / stall. Own RNG like gen_weather_sounds."""
+    rng = random.Random(9001)
+    # Engine: a 4-cylinder-ish buzz at 45 Hz (idle) with harmonics and firing pulses; the game
+    # pitches it 0.8x .. 3.5x with rpm. Length a whole number of cycles: seamless without a fade.
+    f0 = 45.0
+    dur = 120 / f0
+    lp = LowPass(0.25)
+    def engine(t, i):
+        ph = t * f0 * 2 * math.pi
+        pulse = max(0.0, math.sin(ph * 2)) ** 3
+        tone = 0.45 * math.sin(ph) + 0.3 * math.sin(ph * 2 + 0.4) + 0.18 * math.sin(ph * 3 + 1.1) + 0.12 * math.sin(ph * 4 + 2.0)
+        return lp(tone * 0.6 + pulse * 0.5 + rng.uniform(-0.08, 0.08))
+    write_wav("engine_loop", synth(dur, engine))
+    # Tire skid: band-passed noise with a wobbling squeal.
+    lpa, lpb = LowPass(0.5), LowPass(0.12)
+    def skid(t, i):
+        n = rng.uniform(-1, 1)
+        band = lpa(n) - lpb(n)
+        sq = math.sin(t * 2 * math.pi * (1150 + 90 * math.sin(t * 11.0))) * 0.35
+        return band * 0.7 + sq * (0.6 + 0.4 * math.sin(t * 7.0))
+    write_wav("tire_skid", seamless(synth(2.0, skid), 0.25))
+    # Horn: two detuned square-ish tones.
+    def horn(t, i):
+        s = 0.0
+        for f in (415.0, 523.0):
+            s += math.tanh(3.0 * math.sin(t * 2 * math.pi * f)) * 0.22
+        return s * env(t, 0.02, 0.35) if t > 0.45 else s * min(1.0, t / 0.02)
+    write_wav("horn", synth(0.55, horn))
+    write_wav("vehicle_crash", concat(thud(55, 0.35, 1.0, 0.7), crunch(0.4, 0.4, 0.8, 0.06, 18), tink([3100, 4600, 6200], 0.3, 0.3, 0.05)))
+    write_wav("vehicle_door", concat(click(500, 0.03, 0.5), thud(85, 0.2, 0.8, 0.45), gap=0.05))
+    lph = LowPass(0.6)
+    def hiss(t, i):
+        return lph(rng.uniform(-1, 1)) * env(t, 0.005, 0.5) * 0.6
+    write_wav("tire_burst", concat(thud(70, 0.12, 1.0, 0.9), synth(0.9, hiss)))
+    write_wav("engine_start", concat(sweep(30, 90, 0.5, 0.5, 0.3, 0.2), sweep(60, 45, 0.3, 0.4, 0.2, 0.1)))
+    write_wav("engine_stall", sweep(60, 18, 0.7, 0.5, 0.25, 0.3))
+
+
 if __name__ == "__main__":
     import sys
     if "--vfx-sounds" in sys.argv:
@@ -401,6 +441,7 @@ if __name__ == "__main__":
         sys.exit(0)
     gen_sounds()
     gen_weather_sounds()
+    gen_vehicle_sounds()
     gen_vfx_sounds()
     crate_texture()
     ktx2_texture()

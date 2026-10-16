@@ -204,6 +204,7 @@ void game_render_init(void) {
     sights_register();
     daynight_register();
     weather_register();
+    vehicles_register();
     flesh_range_register();
     cmd_register("ads_sweep", cmd_ads_sweep, "ads_sweep start | report: sight socket distance / angle against the view axis while ADS");
     cmd_register("fp_pose", cmd_fp_pose, "print the first-person head position relative to the pelvis");
@@ -593,7 +594,7 @@ void game_render(void) {
         memset(&interp, 0, sizeof(interp));
         interp.pos = v3(0, 2, 10);
     }
-    bool ads = p && (G->last_cmd.buttons & BTN_AIM) && p->sim.move.mode == MOVE_WALK;
+    bool ads = p && (G->last_cmd.buttons & BTN_AIM) && (p->sim.move.mode == MOVE_WALK || p->sim.move.mode == MOVE_SEATED);
     const WeaponDef *wd = p ? weapon_equipped_def(w, G->local_slot) : NULL;
     if (wd && wd->kind == WPN_MELEE) ads = false;
     input_set_ads(ads);
@@ -648,7 +649,11 @@ void game_render(void) {
         float fdt = (float)g_engine.frame_dt;
         chars_set_thirdperson(tp);
         GR->cam_mode = 0;
-        if (tp && lp) {
+        int vcam = lp ? vehicles_camera(w, &cam) : 0;
+        if (vcam) {
+            G->view.eye = cam.pos;
+            GR->cam_mode = vcam;
+        } else if (tp && lp) {
             vec3 head = v3_add(interp.pos, v3(0, 1.6f, 0));
             cam.pos = v3_madd(head, dir_from_angles(cam.yaw, cam.pitch), -cvar_find("cl_thirdperson_dist")->f);
             cam.pos = v3_add(cam.pos, v3_scale(right_from_yaw(cam.yaw), 0.4f));
@@ -762,6 +767,7 @@ void game_render(void) {
     vfx_game_set_environment(env.sun_intensity, v3(0.6f, 0.0f, 0.25f));
 
     vec3 fwd = dir_from_angles(cam.yaw, cam.pitch);
+    vehicles_frame(w, cam.pos);
     game_render_world(w, G->mode == GM_HOST ? G->alpha : 1.0f, cam.pos, fwd);
 
     if (p && !dead) {
@@ -785,12 +791,13 @@ void game_render(void) {
         hi.vm_kick_pos = spring_vec3_sample(&G->recoil_vis.vm_pos, G->alpha);
         hi.vm_kick_rot = spring_vec3_sample(&G->recoil_vis.vm_rot, G->alpha);
         hands_update(&hi);
-        if (!cvar_find("cl_thirdperson")->i) {
+        bool tpv = cvar_find("cl_thirdperson")->i || GR->cam_mode == 3;   // incl. the third-person vehicle camera
+        if (!tpv) {
             chars_render_local_fp(w, G->alpha, G->local_slot);
             fp_cam_test_hands();
             ads_sweep_frame();
         }
-        if (!cvar_find("cl_thirdperson")->i) hands_render();
+        if (!tpv) hands_render();
     }
     // Sights: lens / reticle / scope picture-in-picture from the item as it is drawn this frame.
     sights_frame(&cam, p && !dead && !cvar_find("cl_thirdperson")->i && GR->cam_mode != 3);
@@ -804,7 +811,8 @@ void game_render(void) {
     dbg_submit((float)g_engine.frame_dt, cam.pos, right, up);
     audio_update(cam.pos, fwd, up);
 
-    if (!game_post_photo_mode()) hud_draw();
+    if (!game_post_photo_mode()) { hud_draw(); vehicles_draw_hud(); }
+    vehicles_draw();
     sights_draw();
     daynight_draw();
     weather_draw();

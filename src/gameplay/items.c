@@ -446,6 +446,7 @@ static void parse_weapon(ItemDB *db, const cJSON *w, const char *file) {
     d->swing_arc = jnum(w, "swing_arc", 90);
     d->ads_fov = jnum(w, "ads_fov", 0);
     d->bolt_action = jbool(w, "bolt_action", false);
+    d->one_hand_capable = jbool(w, "one_hand_capable", false);
     dg_strcpy(d->pose, sizeof(d->pose), jstr(w, "pose", "pistol"));
     dg_strcpy(d->sound_fire, sizeof(d->sound_fire), jstr(w, "sound_fire", "shot"));
     dg_strcpy(d->sound_reload, sizeof(d->sound_reload), jstr(w, "sound_reload", "reload"));
@@ -584,6 +585,11 @@ bool items_load(ItemDB *db, const char *items_path, const char *weapons_path) {
         d->heal = jnum(it, "heal", 0);
         d->armor = jnum(it, "armor", 0);
         d->use_time = jnum(it, "use_time", 0);
+        {
+            const char *vu = jstr(it, "vehicle_use", "");
+            d->vehicle_use = !strcmp(vu, "fuel") ? VUSE_FUEL : !strcmp(vu, "tire_repair") ? VUSE_TIRE_REPAIR : !strcmp(vu, "spare_tire") ? VUSE_SPARE_TIRE : VUSE_NONE;
+            d->fuel = jnum(it, "fuel", 0);
+        }
         d->weapon = -1;
         dg_strcpy(d->icon, sizeof(d->icon), jstr(it, "icon", ""));
         if (d->kind == ITEM_ATTACHMENT) {

@@ -169,6 +169,72 @@ void phys_group_filter_disable(void *filter, int sub_a, int sub_b);
 void phys_group_filter_destroy(void *filter);
 vec3 phys_get_angular_velocity(PhysicsWorld *w, BodyId id);
 
+// Vehicles (src/physics/phys_vehicle.c: Jolt VehicleConstraint + WheeledVehicleController /
+// MotorcycleController): a dynamic body (static compound of boxes, centre of mass offset) with
+// shape-cast wheels, engine, automatic transmission, differentials, anti-roll bars.
+// Local axes: forward -Z, up +Y, right +X. Wheel order for four-wheelers: FL, FR, RL, RR.
+#define PHYS_VEHICLE_MAX_WHEELS 4
+#define PHYS_VEHICLE_MAX_BOXES 4
+typedef struct PhysVehicle PhysVehicle;
+typedef struct PhysWheelDesc {
+    vec3 pos;                       // attachment point (body space, top of the suspension travel)
+    float radius, width;
+    float susp_min, susp_max;       // suspension travel (m)
+    float susp_freq, susp_damp;     // spring frequency (Hz) / damping ratio
+    float max_steer_deg;
+    float max_brake, max_handbrake; // Nm
+    float inertia;                  // 0 = default
+} PhysWheelDesc;
+typedef struct PhysVehicleDesc {
+    int kind;                       // 0 four-wheeled, 1 motorcycle (lean controller)
+    vec3 pos;
+    quat rot;
+    float mass;
+    int box_count;
+    vec3 box_center[PHYS_VEHICLE_MAX_BOXES], box_half[PHYS_VEHICLE_MAX_BOXES];
+    vec3 com_offset;
+    int wheel_count;
+    PhysWheelDesc wheels[PHYS_VEHICLE_MAX_WHEELS];
+    int diff_left[2], diff_right[2]; // driven axles (wheel indices; -1 = none)
+    float diff_ratio;
+    float max_torque, min_rpm, max_rpm;
+    float gear_ratios[8];
+    int gear_count;
+    float reverse_ratio;
+    float max_lean_deg;             // motorcycle
+    float lean_spring;              // motorcycle lean spring constant (0 = 900; damping 0.14 x)
+    float max_pitch_roll_deg;       // 0 = unlimited
+    u64 user;
+    u8 material;
+} PhysVehicleDesc;
+typedef struct PhysWheelState {
+    float rotation, angular_velocity, steer, suspension;
+    bool contact;
+    vec3 contact_pos, contact_normal;
+    BodyId contact_body;
+    float slip_long, slip_lat;
+} PhysWheelState;
+typedef struct PhysVehicleState {
+    float rpm, clutch;
+    int gear;                       // -1 reverse, 0 neutral, 1.. forward
+    int wheel_count;
+    PhysWheelState wheel[PHYS_VEHICLE_MAX_WHEELS];
+} PhysVehicleState;
+PhysVehicle *phys_vehicle_create(PhysicsWorld *w, const PhysVehicleDesc *d);
+void phys_vehicle_destroy(PhysicsWorld *w, PhysVehicle *v);
+BodyId phys_vehicle_body(const PhysVehicle *v);
+int phys_vehicle_wheel_count(const PhysVehicle *v);
+// forward -1..1 (negative = reverse), right -1..1, brake / handbrake 0..1.
+void phys_vehicle_input(PhysicsWorld *w, PhysVehicle *v, float forward, float right, float brake, float handbrake);
+// Per-wheel grip multipliers (tires, surface, weather) on the friction impulses.
+void phys_vehicle_set_grip(PhysVehicle *v, int wheel, float longitudinal, float lateral);
+void phys_vehicle_state(PhysVehicle *v, PhysVehicleState *s);
+void phys_vehicle_set_wheel_state(PhysVehicle *v, int wheel, float rotation, float angular_velocity);
+void phys_vehicle_set_engine(PhysVehicle *v, float rpm, int gear);
+mat4 phys_vehicle_wheel_transform(PhysVehicle *v, int wheel);
+// Motorcycles: lean controller at speed, upright assist when slow / parked (call every tick).
+void phys_vehicle_moto_lean(PhysicsWorld *w, PhysVehicle *v, float speed, float dt);
+
 // Debug: draw collision shapes via debug lines.
 void phys_debug_draw(PhysicsWorld *w, vec3 around, float radius);
 int phys_body_count(PhysicsWorld *w);

@@ -191,13 +191,34 @@
     {"type": "box", "pos": [-58.7, 0, 16.6], "size": [0.25, 0.35, 0.25], "color": [0.1, 0.1, 0.1], "grid": false, "material": "default"},
     {"type": "box", "pos": [-57.3, 0, 16.6], "size": [0.25, 0.35, 0.25], "color": [0.1, 0.1, 0.1], "grid": false, "material": "default"},
     {"type": "box", "pos": [-58.7, 0, 19.4], "size": [0.25, 0.35, 0.25], "color": [0.1, 0.1, 0.1], "grid": false, "material": "default"},
-    {"type": "box", "pos": [-57.3, 0, 19.4], "size": [0.25, 0.35, 0.25], "color": [0.1, 0.1, 0.1], "grid": false, "material": "default"}
+    {"type": "box", "pos": [-57.3, 0, 19.4], "size": [0.25, 0.35, 0.25], "color": [0.1, 0.1, 0.1], "grid": false, "material": "default"},
+    {"_comment": "Vehicle yard (far west; docs/VEHICLES.md): a 60 x 40 m loop road, a jump ramp in the infield, a slalom on the north straight, a spike strip on the east straight (level \"vehicle_spikes\"), a fuel pump (level \"fuel_pumps\"), two cars and a motorcycle (level \"vehicles\"). F / E to get in, vehicle_debug 1.", "type": "box", "pos": [-140, 0, -20], "size": [66, 0.03, 7], "color": [0.15, 0.15, 0.16], "grid": false, "material": "asphalt", "label": "vehicle yard: F drive | V camera | H lights | spawn_vehicle car|moto", "label_size": 0.35},
+    {"type": "box", "pos": [-140, 0, 20], "size": [66, 0.03, 7], "color": [0.15, 0.15, 0.16], "grid": false, "material": "asphalt"},
+    {"type": "box", "pos": [-170, 0, 0], "size": [7, 0.03, 33], "color": [0.15, 0.15, 0.16], "grid": false, "material": "asphalt"},
+    {"type": "box", "pos": [-110, 0, 0], "size": [7, 0.03, 33], "color": [0.15, 0.15, 0.16], "grid": false, "material": "asphalt"},
+    {"type": "box", "pos": [-160.0, 0.03, -21.6], "size": [0.35, 0.6, 0.35], "color": [0.95, 0.45, 0.08], "grid": false, "material": "default", "label": "slalom", "label_size": 0.25},
+    {"type": "box", "pos": [-154.0, 0.03, -18.4], "size": [0.35, 0.6, 0.35], "color": [0.95, 0.45, 0.08], "grid": false, "material": "default"},
+    {"type": "box", "pos": [-148.0, 0.03, -21.6], "size": [0.35, 0.6, 0.35], "color": [0.95, 0.45, 0.08], "grid": false, "material": "default"},
+    {"type": "box", "pos": [-142.0, 0.03, -18.4], "size": [0.35, 0.6, 0.35], "color": [0.95, 0.45, 0.08], "grid": false, "material": "default"},
+    {"type": "box", "pos": [-136.0, 0.03, -21.6], "size": [0.35, 0.6, 0.35], "color": [0.95, 0.45, 0.08], "grid": false, "material": "default"},
+    {"type": "box", "pos": [-130.0, 0.03, -18.4], "size": [0.35, 0.6, 0.35], "color": [0.95, 0.45, 0.08], "grid": false, "material": "default"},
+    {"type": "box", "pos": [-124.0, 0.03, -21.6], "size": [0.35, 0.6, 0.35], "color": [0.95, 0.45, 0.08], "grid": false, "material": "default"},
+    {"type": "ramp", "pos": [-140, 0, 4], "yaw": 0, "width": 4, "length": 7, "angle": 11, "color": [0.55, 0.5, 0.42], "material": "wood", "label": "jump ramp", "label_size": 0.25},
+    {"type": "box", "pos": [-110, 0.03, 8], "size": [7, 0.04, 0.5], "color": [0.08, 0.08, 0.08], "grid": false, "material": "metal_thin", "label": "spike strip", "label_size": 0.22},
+    {"type": "box", "pos": [-104.5, 0, -12], "size": [2.6, 0.12, 4], "color": [0.5, 0.5, 0.48], "grid": false, "material": "concrete", "label": "fuel pump: hold E", "label_size": 0.22}
   ],
   "puddles": [
     {"_comment": "Authored puddle areas (game_weather.c bake_puddles): pos [x, z], size [w, d], value 0..1 (1 fills first).", "pos": [-44, 26], "size": [5, 3], "value": 1.0},
     {"pos": [-47, 30], "size": [2.5, 1.5], "value": 0.8}
   ],
   "weather": {"preset": "little_cloudy", "random": false},
+  "vehicles": [
+    {"def": "car", "pos": [-114, 0.3, -6], "yaw": 0, "fuel": 30},
+    {"def": "car", "pos": [-118, 0.3, -6], "yaw": 0, "fuel": 8},
+    {"def": "moto", "pos": [-114, 0.3, 4], "yaw": 0, "fuel": 10}
+  ],
+  "fuel_pumps": [{"pos": [-104.5, 0.12, -12], "yaw": 90}],
+  "vehicle_spikes": [{"pos": [-110, 8], "size": [7, 0.5]}],
   "labels": [
     {"pos": [0, 0, 47.5], "yaw": 0, "floor": true, "size": 0.3, "text": "horde yard: spawn_horde <count> [radius] [ring|random|cluster], horde_debug 1"},
     {"pos": [-10, 0, -34.9], "yaw": 0, "floor": true, "size": 0.25, "text": "5 m: player / zombie / helmet"},
