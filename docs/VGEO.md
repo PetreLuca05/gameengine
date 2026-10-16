@@ -23,7 +23,7 @@ Simplification and clustering use meshoptimizer v0.22 (`simplifier.cpp`, `cluste
 | 3. Visibility buffer raster + resolve | rasterisers **done** (resolve, shadows: —) |
 | 4. Streaming | — |
 | 5. Integration, `r_era`, test scene, `bench_vgeo` | — |
-| 6. Skinned | — |
+| 6. Skinned | module, shaders, tests **done** (renderer / characters glue: —) |
 | 7. Foliage support | — |
 
 ## Files
@@ -49,6 +49,10 @@ Simplification and clustering use meshoptimizer v0.22 (`simplifier.cpp`, `cluste
 | `src/render/vgeo/vgeo_raster.{c,h}` | `VgRaster`: visibility buffer, HW / SW raster per pass, timestamps |
 | `shaders/vgeo/vg_raster*.{glsl,comp,vert,mesh,frag}` | raster args, HW mesh / vertex pulling + fragment, SW compute |
 | `tests/test_vgeo_raster.c` | ctest `vgeo_raster` (`--validation`) |
+| `src/render/vgeo/vgeo_skin.{c,h}` | `VgPalettes` (palette slots, per-frame upload), CPU mirror of the skinned bounds / skinning |
+| `src/render/vgeo/vgeo_procgen_skinned.{c,h}` | procedural skinned creature (body + tentacles, 31 bones) and its analytic animation |
+| `shaders/vgeo/vg_test_skin.comp` | test-only kernel: the shared skin helper on a vertex list |
+| `tests/test_vgeo_skinned.c` | ctest `vgeo_skinned` (`--validation`) |
 
 The builder is pure C with no renderer dependency. It is compiled into the game (through the `src/` glob), the
 `dg_vgeo` static library (tool and tests), and nothing else. The GPU module is the `dg_vgeo_gpu` library (see
@@ -422,6 +426,219 @@ same view; HW and SW serialised; median of 300 frames):
 - **The cull record still runs both passes at once:** pass 2 culling needs this frame's Hi-Z built from the pass 1
   visibility buffer. The in-frame split (cull pass 1 → raster 1 → Hi-Z → cull pass 2 → raster 2) is part of the
   renderer integration. The raster API is already per pass.
+
+## Skinned meshes (Phase 6, `vgeo_skin.c`)
+
+Skinned meshes use the same DAG, pages, culling and rasterisers as static ones. A skinned instance points at a
+**palette slot**: one character's palette (mat4 per canonical-skeleton bone) plus last frame's. The cut is selected
+and the clusters are culled against the animated pose. Both rasterisers, the shadow pass and the resolve skin 4
+influences per vertex with one shared GLSL helper.
+
+### Builder
+
+- **Input.** `VgSource.joints` (u8×4, canonical skeleton index < 128), plus `weights_u8` (u8×4) or `weights`
+  (float×4). With `joints == NULL` the mesh is static. The build runs in the bind pose.
+- **Skin per position.** Each source vertex's skin is normalised once: duplicate joints merged, ≤ 4 influences
+  sorted by weight (ties: lower joint), quantised to u8 summing to 255 (largest remainder). Unused slots repeat the
+  dominant joint with weight 0, so joint 0 is the dominant bone. Every welded vertex at one grid position takes
+  the skin of the first (lowest index) source vertex there. A vertex shared by two clusters therefore skins to
+  the same bits in both, and animated cuts stay crack-free exactly as bind-pose ones.
+- **Simplification.**
+  - The 4 sorted weights are attributes of `meshopt_simplifyWithAttributes`, at the UV weight.
+  - **Bone-set penalty, kept simple:** a vertex whose dominant bone differs from that of every one of its
+    neighbours is locked, so a lone tip vertex is not dragged across a bone boundary. This applies **only to
+    the first simplification** (the source mesh). Applied at every level, it also locked vertices that earlier
+    collapses had isolated, which pinched the thin tentacles: 90 pinched cut edges on the test creature, against
+    0 now.
+  - The simplifier only collapses onto existing vertices, so every output vertex keeps its normalised source
+    skin. No re-normalisation is needed after simplification.
+- **≤ 16 bones per cluster.** Each meshlet (leaf, or re-clustered after a group simplification) is split into
+  runs of triangles, in meshlet order, that touch ≤ 16 bones with a non-zero weight. A coarse cluster can
+  therefore have fewer than 128 triangles. The test creature has 31 bones and still ends in a single 28-triangle
+  root cluster.
+- **Flags.** `VGF_SKINNED`, header `bone_count` (max weighted joint + 1). `VGC_NO_CONE` is set on every skinned
+  cluster.
+- **Versions.** `VGEO_BUILD_VERSION` 2 (the cache key). `VGEO_FILE_VERSION` stays 1: static meshes are
+  **byte-identical** to the previous builder (`build_vgeo --gen statue / torus` compared with `cmp`), and the
+  skinned layout is flagged by `VGF_SKINNED`.
+- **Discrete LODs** (`VgLodVertex`) carry no skin data. Characters keep their legacy discrete LODs in the
+  2015 / 2010 eras.
+
+### Page data
+
+| | static | skinned |
+|---|---|---|
+| vertex | 12 B (+4 colour) | + 8 B after the colour: joints u8×4, weights unorm8×4 (sum 255) |
+| triangle block, per cluster | triangles (4 B each), 16-byte aligned | triangles, then the **bone set**, 16-byte aligned |
+| bone set | — | `u32 count` (≤ 16), then 16 B per bone: `{ u8 bone, u8 pad, half3 min, half3 max }`, ascending bone ids |
+| `VgPageHeader.skin_bytes` | 0 | bone-set bytes, included in `index_bytes` |
+
+The bone box is the bind-space AABB of the cluster's vertices with a non-zero weight on that bone. It is rounded
+outwards to half precision, after a 1e-6 relative margin (the GPU's f32 position decode can differ from the CPU's
+by an ulp). The bone set needs no offset: its word is `tri_word + tri_count`. `vgeo_cluster_bones` decodes it.
+`vgeo_bone_bounds` unions the leaf clusters' boxes into one bind-space influence sphere per bone; coarser clusters
+only keep a subset of the leaf vertices, so those spheres cover them too.
+
+### Palette slots (`VgPalettes`)
+
+- **Buffers.** Binding 20 of the cull set holds the `mat4` palettes (column-major, bind space → instance space).
+  Binding 21 holds the slot table `VgPaletteSlot { first, prev_first, bone_count, -; max_scale, k0, k1, - }`. The
+  palettes come from the game's `bone_world * inverse_bind`. With an identity instance at the origin, the
+  game's world-space palette is used as-is.
+- **Regions.** Slot `s` owns two regions of 128 matrices, at `(2s + h) × 128`. Each `vg_palettes_set` writes the
+  region the previous frame did not use; `prev_first` keeps pointing at last frame's region. A slot not set in a
+  frame keeps its palette, with previous = current (no motion).
+- **Per frame.**
+  - `vg_palettes_begin(frame)`.
+  - `vg_palettes_set(slot, palette, n)` for each animated slot. This copies into the host staging buffer of
+    that frame in flight and the CPU mirror, and computes the slot bounds.
+  - `vg_palettes_record(cmd)` before the frame's first cull: a barrier against every earlier shader read (the
+    previous frame may still read the region or table being overwritten), one copy per set slot plus the slot
+    table, then a barrier to all shader stages.
+- **Memory.** 16 KiB device + 8 KiB staging per frame in flight + 2 KiB of bone bounds per slot.
+- **Empty slots.** `vg_palettes_clear(slot)`, or a slot that was never set, culls its instances. A pool of
+  instances can be registered once and switched on and off per frame.
+- **Slot bounds (`vgeo_palette_bounds`).** `max_scale` = max over bones of `sqrt(|AᵀA|∞)` (≥ the spectral norm of
+  the linear part, exact for rotation × uniform scale). `k0` / `k1` bound how far a bone moves a vertex away from
+  the root bone's transform, `|P_b v − P_0 v| ≤ k0 + k1 |v|`:
+  - **generic:** `k0 = max |t_b − t_0|`, `k1 = max |A_b − A_0|`. Valid for any mesh, but loose for long limbs
+    (the test creature's LOD spheres grow by 5.0 m on average).
+  - **per bone** (`vg_palettes_set_bone_bounds(slot, vgeo_bone_bounds of the slot's meshes)`):
+    `k0 = max_b |(P_b − P_0) c_b| + |A_b − A_0| r_b`, `k1 = 0` (1.3 m on the creature). Every mesh drawn with
+    the slot must be covered (`vgeo_bone_bounds_merge`).
+
+### Instances and culling
+
+- **Registration.** `vgeo_scene_add_skinned_instance(scene, mesh, pos, rot, scale, slot)` sets
+  `VGI_SKINNED << 16` in `flags_phase` and `extra = slot`. The vertices are skinned into instance space, then
+  transformed by the instance. The mesh must be `VGF_SKINNED` (otherwise the instance draws static).
+- **Cells.** Skinned instances move, so `vgeo_scene_commit` bins them into cells of their own (≤ 32, the inline
+  path of `vg_cells`) with an unbounded AABB. Their test is the instance test, on the slot's bounds.
+- **Sphere transform.** `vg_world_sphere` of a skinned instance first maps a mesh-space sphere to
+  `(P_0 c, r · max_scale + k)` in instance space, with `k = k0 + k1 (|mesh centre| + mesh radius)`. This
+  transform is used for:
+  - the instance (mesh sphere);
+  - the BVH nodes;
+  - the group and cluster LOD spheres.
+
+  Because `|v' − P_0 v| ≤ k` for every skinned vertex `v'` (a convex combination of the `P_b v`), the result
+  contains the skinned geometry of anything the bind-space sphere contains. It is also the same function of
+  the sphere wherever that sphere is tested, and it keeps nested spheres nested. The DAG cut therefore stays
+  consistent and monotonic, and the "never an ancestor and a descendant" property holds. CPU mirror:
+  `vgeo_xf_sphere`.
+- **Error scale.** Errors are scaled by `instance scale × max_scale` (`VgXf.scale`). `VgXf.pscale` is the
+  instance's own scale, for positions.
+- **Cluster culling sphere.** Frustum, Hi-Z, SW / HW size and the near plane test the box around
+  `∪_b AABB(palette[b] · box_b)`, from the cluster's bone set (`vg_skin_bounds`, mirror
+  `vgeo_skin_cluster_sphere`). This is conservative for linear blend skinning: a skinned vertex is a convex
+  combination of points that each lie in one of the transformed boxes.
+- **Cone culling** is off (`VGC_NO_CONE` from the builder).
+- **CPU reference.** `vgeo_scene_cpu_select` does all of the above with the slot's CPU mirror (`VgXfCpu`).
+
+### Raster, resolve, shadows
+
+`vg_decode.glsl` holds the only skinning code:
+- `vg_vertex_skin`: the joint and weight words.
+- `vg_skin_matrix`: `Σ (w_k / 255) palette[first + j_k]`, as the game's `skin_matrix`.
+- `vg_vertex_skin_matrix`: the current or previous palette.
+- `vg_vertex_world`: skin, then the instance transform.
+
+Its users:
+- **Rasterisers.** `vg_raster_clip` uses it, so the HW mesh / vertex-pulling and SW paths see bit-identical
+  clip positions.
+- **Shadows.** The shadow vertex pulling (`vgeo_shadow.vert`) uses it.
+- **Resolve.** `vg_resolve.glsl` re-skins the 3 vertices for the barycentrics (positions exactly as rasterised),
+  skins the normals with each vertex's `mat3(skin matrix)`, and interpolates the previous palette's skinned
+  positions with the same barycentrics into `v_prev_clip` (per-bone velocity). Static instances take the
+  unchanged path.
+
+### Tests (`ctest -R vgeo_skinned`, runs `--validation`)
+
+The test mesh is the procedural creature: a body sphere plus 5 tapered tentacles of 6 bones (31 bones, 29k
+triangles, 6 closed shells). It is built into 470 clusters over 11 levels, with up to 16 bones per cluster.
+- **Builder.** `VGF_SKINNED` and the bone count; ≤ 16 bones per cluster; sorted bone sets; every weighted
+  joint is in its cluster's set and its bind box contains the vertex; weights sum to 255; `NO_CONE`.
+- **Animated bounds.** Over 600 ticks of the analytic animation (root motion, per-bone swing, pulsing scale),
+  with both slot bounds, every skinned vertex of every cluster of every level must lie inside:
+  - its bone-box sphere;
+  - its transformed LOD and bind spheres;
+  - the instance sphere.
+
+  That is 24M vertex tests per bound: 0 outside.
+- **Crack-free animated cuts.** 25 errors × 3 poses. The CPU cut plus the CPU skin, with edges keyed by the
+  skinned float bits: no open edge. The topology is identical to the bind-pose cut (edges, pinched edges, Euler
+  characteristic): 0 pinched edges, Euler 12 while the error is below the tentacles' size.
+- **GPU cut vs the CPU reference.** 25 skinned creatures (one rotated and scaled 1.4), one on an empty slot, and
+  40 static rocks; per-bone bounds on even slots, generic bounds on odd ones. For 3 poses × 4 cameras, LOD only
+  and then with the frustum: the GPU set equals `vgeo_scene_cpu_select` (0 missing, 0 extra, 0 borderline). No
+  cluster is lost inside or kept outside the frustum, and the empty slot draws nothing.
+- **Raster.** On the animated herd at 1920×1080, 3 cameras:
+  - all-HW vs all-SW: 10 / 21 / 16 pixels differ (≤ 0.012 %), all on triangle edges;
+  - mixed vs HW: ≤ 2 pixels;
+  - mesh shader vs vertex pulling: ≤ 1 pixel.
+- **Skin helper.** `vg_test_skin.comp` runs the helper on 52k vertices of 4 instances. Against the CPU skin it is
+  within 2.0e-6 m (current palette) and 2.1e-6 m (previous palette, motion up to 0.049 m); normals within
+  1 − cos = 2.4e-7, raster clip within 2.4e-7.
+- 0 validation messages. The run takes 812/812 checks, 2.4 s.
+
+### Bench (`bench_vgeo --skinned 500`, RTX 3060 Ti, 1920×1080, medians of 200 frames)
+
+The scene is 500 creatures (29k tris, 468 clusters, 31 bones each) on a 69 m square, one slot each, animated
+every frame. It is compared with the same instances static. The mode column is the slot bound: per-bone or
+generic, or the static instances.
+
+| Camera | Mode | pal CPU ms | pal GPU ms | cull ms | HW ms | SW ms | GPU total | clusters | tris |
+|---|---|---|---|---|---|---|---|---|---|
+| in front | per-bone | 1.674 | 0.115 | 0.176 | 0.077 | 0.026 | 0.394 | 1776 | 171k |
+| in front | generic | 1.900 | 0.115 | 0.267 | 0.116 | 0.042 | 0.539 | 2523 | 267k |
+| in front | static | — | — | 0.133 | 0.067 | 0.061 | 0.262 | 1354 | 114k |
+| inside | per-bone | 1.669 | 0.112 | 0.173 | 0.075 | 0.003 | 0.363 | 1047 | 123k |
+| inside | static | — | — | 0.129 | 0.055 | 0.065 | 0.250 | 766 | 84k |
+| above 25 m | per-bone | 1.643 | 0.111 | 0.157 | 0.030 | 0.030 | 0.328 | 1126 | 71k |
+| above 25 m | static | — | — | 0.109 | 0.030 | 0.043 | 0.182 | 1041 | 57k |
+
+- **pal CPU** is 500 `vg_palettes_set` (slot bounds included) plus the record, with the animation excluded:
+  about 3.3 µs per slot.
+- **pal GPU** is the upload copies.
+- **Overhead.** A skinned horde costs about 1.4× the static GPU time with per-bone bounds. The extra
+  triangles come from the conservative LOD spheres, which grow by the bones' displacement from the root.
+  Vertex pulling measures within noise of the mesh shader.
+
+### For the renderer glue (characters)
+
+1. **Init.**
+   - `vg_palettes_init(&pal, ctx, max_slots)`, then `vg_palettes_attach(&pal, scene)`.
+   - Build each character mesh with `VgSource.joints` / `weights_u8`. `SkinVertex.joints` index the
+     `SkeletalMesh`'s own bone list (`skm_gather_palette` order), so there are two options:
+     - **Simplest:** one slot per part mesh, with the raw joints and the `skm_gather_palette` output
+       (≤ 128 bones per mesh).
+     - **One slot per character** (the plan): remap the joints through `SkmBone.skel` to the canonical
+       skeleton and upload `si->skin[]`. Mesh-only leaf bones (`skel == -1`) then need indices of their own
+       after the skeleton's (≤ 128 in all), filled with their `skm_gather_palette` matrices.
+2. **Per character.**
+   - Take a slot. For each part mesh, `vgeo_scene_add_skinned_instance(scene, mesh, pos, rot, 1, slot)`
+     (simplest: identity at the origin, with the world-space palette).
+   - `vgeo_bone_bounds` of each part, merged (`vgeo_bone_bounds_merge`), then
+     `vg_palettes_set_bone_bounds(slot, merged)`.
+   - Commit at load or spawn time, or keep a pool and use `vg_palettes_clear`.
+3. **Per frame.** Before the vgeo cull: `vg_palettes_begin(frame)`, then `vg_palettes_set(slot, palette,
+   ANIM_MAX_BONES or the bones used)` with the same `bone_world * inverse_bind` the legacy path uploads, then
+   `vg_palettes_record(cmd)`.
+
+Nothing else changes: the cull, raster, shadow and resolve passes read bindings 20 / 21 from the cull set the
+renderer already binds as set 3.
+
+### Simplifications (skinned)
+
+- **The LOD spheres** use the root bone's transform plus a slot-wide deviation bound, not a per-cluster pose.
+  This is conservative (finer near the camera) and consistent across the DAG. A per-group bone set would be
+  tighter but needs more data.
+- **No dual-quaternion skinning:** linear blend only (`r_vgeo_dqs` of the plan is not implemented).
+- **One reference bone** (bone 0, the canonical root) for the sphere transform.
+- **The bone-set penalty** is the lone-vertex lock on the source mesh plus the weight attributes. There is no
+  collapse-cost scaling inside meshoptimizer.
+- **The palette upload** waits on every earlier shader read (one barrier). With 3 regions per slot it could
+  overlap the previous frame.
 
 ## Simplifications vs Nanite
 

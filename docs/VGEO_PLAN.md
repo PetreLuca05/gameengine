@@ -408,6 +408,39 @@ Two rasterisers write the same 64-bit value with `atomicMax`:
 - 500-zombie horde headless render, 0 validation messages, and no LOD popping: the per-frame image delta while
   moving slowly stays below the threshold.
 
+*As built (Phase 6; module, shaders and tests; the renderer / `characters.c` glue is separate; details in
+`docs/VGEO.md` "Skinned meshes"):*
+- **Bone set layout.** `u32 count` (not u8: it keeps the 16-byte entries word-aligned for the shaders), then 16 B
+  per bone as planned. It is stored after the cluster's triangles inside the triangle block;
+  `VgPageHeader.skin_bytes` counts it. Static pages are byte-identical; `VGEO_BUILD_VERSION` is 2 and
+  `VGEO_FILE_VERSION` stays 1.
+- **Skin per grid position.** The first source vertex at a welded position defines the skin of every vertex
+  there, so animated cuts are crack-free bit for bit.
+- **Bone-set penalty.** The lone-dominant-bone lock applies **only to the source mesh**. At every level it
+  pinched thin limbs (90 pinched cut edges vs 0 on the test creature). Weights are attributes at the UV weight.
+  After simplification no re-normalisation is needed: meshoptimizer collapses onto existing vertices, which keep
+  their normalised skin.
+- **Slot table.** `{ first, prev_first, bone_count, -, max_scale, k0, k1, - }` (32 B). Palettes are **two
+  regions per slot** in a vgeo-owned buffer (bindings 20 / 21), not the renderer's `prev_bones` copy. The glue
+  uploads the palette once per character per frame (`vg_palettes_set`).
+- **LOD and instance bounds.** Every mesh-space sphere of a skinned instance (instance, BVH node, group /
+  cluster LOD sphere) goes through `(P_0 c, r · max_scale + k)`. This is conservative and keeps the DAG cut
+  consistent and monotonic. `k` bounds the bones' deviation from the root:
+  - generic `k0 + k1 |v|`;
+  - per bone with `vgeo_bone_bounds` (`vg_palettes_set_bone_bounds`), 4× tighter on the test creature.
+- **Not built:**
+  - DQS (`r_vgeo_dqs`): linear blend only;
+  - the `MAT_VIEWMODEL` `vm_proj` path and the held-item `XFORM` instance (integration);
+  - skin data in the exported discrete LODs.
+- **Tests as planned:**
+  - animated bounds: 600 ticks of the procedural creature, all clusters of all levels, both slot bounds;
+  - crack-free animated cuts;
+  - the skin helper vs the CPU (≤ 2.1e-6 m, previous palette included, which covers the velocity input);
+  - plus GPU cut == CPU reference and HW vs SW on animated instances.
+
+  The 500-zombie headless render and the popping test belong to the integration. `bench_vgeo --skinned 500`:
+  0.33-0.39 ms GPU per frame (upload + cull + raster) against 0.18-0.26 ms for the same horde static.
+
 ## 8. Phase 7: foliage support (no content)
 
 `src/render/vgeo/foliage_support.{c,h}`:
