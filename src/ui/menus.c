@@ -28,6 +28,7 @@
 #include "app/video.h"
 #include "vfx_editor.h"
 #include "holdpoint_editor.h"
+#include "editor/handpose/hp_editor.h"
 #include <SDL3/SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -227,6 +228,7 @@ static void do_action(const char *action) {
     else if (!strcmp(action, "settings")) { while (screens_top() != SCR_PAUSE && M->depth) screens_pop(); settings_open(-1); screens_push(SCR_SETTINGS); }
     else if (!strcmp(action, "multiplayer")) { while (screens_top() != SCR_PAUSE && M->depth) screens_pop(); net_lan_refresh(); screens_push(SCR_MULTIPLAYER); }
     else if (!strcmp(action, "invite")) net_steam_invite();
+    else if (!strcmp(action, "scene_handpose")) { menus_close_all(); cmd_execute_line("scene handpose"); }
     else if (!strcmp(action, "leave")) {
         Game *g = game();
         bool client = g && g->mode == GM_CLIENT;
@@ -366,11 +368,11 @@ static void draw_modal(int id, bool top) {
 bool menus_wants_mouse(void) {
     Game *g = game();
     return (M && M->depth > 0) || (g && (g->inventory_open || g->container_open || g->bench_open)) || vfx_editor_open() || holdpoint_editor_open() ||
-           daynight_editor_open() || flesh_range_open();
+           daynight_editor_open() || flesh_range_open() || hp_editor_open();
 }
 
 bool menus_open(void) { return M && M->depth > 0; }
-bool menus_dev_tools_open(void) { return vfx_editor_open() || holdpoint_editor_open() || daynight_editor_open() || flesh_range_open(); }
+bool menus_dev_tools_open(void) { return vfx_editor_open() || holdpoint_editor_open() || daynight_editor_open() || flesh_range_open() || hp_editor_open(); }
 void menus_frame_end(void) { if (M && M->inited) gui_frame_end(); }
 bool menus_paused(void) { return M && M->depth > 0 && M->stack[0] == SCR_PAUSE && menus_can_pause(); }
 
@@ -414,7 +416,7 @@ void menus_tick(float dt) {
 }
 
 void menus_draw(void) {
-    if (!M->depth) { vfx_editor_draw(); holdpoint_editor_draw(); return; }
+    if (!M->depth) { vfx_editor_draw(); holdpoint_editor_draw(); hp_editor_draw(); return; }
     solve_layout();
     int top = screens_top();
     for (int i = 0; i < M->depth; i++) {
@@ -443,6 +445,7 @@ void menus_draw(void) {
     }
     vfx_editor_draw();
     holdpoint_editor_draw();
+    hp_editor_draw();
 }
 
 // ------------------------------------------------------------------ commands

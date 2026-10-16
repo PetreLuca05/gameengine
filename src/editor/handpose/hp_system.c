@@ -20,6 +20,7 @@ static struct {
     bool has_src;
     u64 signature;             // file count + mtimes of the hand pose files (external edit detection)
     double next_poll;
+    bool unsaved, external;    // the editor holds edits / files changed under it
     Cvar *autoreg, *watch;
 } HS;
 
@@ -142,8 +143,21 @@ void handpose_system_poll(void) {
     HS.next_poll = now + 1.0;
     u64 s = signature();
     if (s == HS.signature) return;
+    if (HS.unsaved) {
+        if (!HS.external) log_warn("handpose: assets/handposes changed on disk while the editor has unsaved edits (not reloaded)");
+        HS.external = true;
+        HS.signature = s;
+        return;
+    }
     log_info("handpose: assets/handposes changed on disk, reloading");
     handpose_system_reload();
+}
+
+void handpose_system_set_unsaved(bool unsaved) { HS.unsaved = unsaved; }
+bool handpose_system_external_pending(void) { return HS.external; }
+void handpose_system_external_resolve(bool reload) {
+    HS.external = false;
+    if (reload) handpose_system_reload();
 }
 
 // ------------------------------------------------------------------ interactables

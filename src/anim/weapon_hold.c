@@ -371,7 +371,7 @@ void proc_hand_anchors(ProcState *st, const ProcInput *in, Pose *pose, Xform *mo
         }
         Xform hand = proc_hand_for_socket(palm, in->hands->palm[h]);
         vec3 pole = v3(h ? 1.0f : -1.0f, -0.6f, 0.4f);
-        if (posed && hp.has_pole) pole = hp.pole;
+        if (posed && hp.has_pole) pole = quat_rotate(quat_yaw(wrap_angle(in->aim_yaw - st->render_body_yaw)), hp.pole);   // aim space, like the styles' poles
         anim_ik_two_bone_pose(s, pose, model, a, b, c, hand.t, &hand.r, pole, w * (posed ? hp.ik_weight : 1.0f));
         if (posed && !in->no_fingers) handpose_apply_fingers(s, pose, model, h, hp.j, in->hands, w);
     }

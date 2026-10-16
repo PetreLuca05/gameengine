@@ -421,60 +421,40 @@ HandContactResult handpose_contact_solve(const Skeleton *s, const Pose *pose, co
                                          const HandFrames *hf, const HandBox *boxes, int box_count, const vec3 *target, float radius, float tol) {
     HandContactResult r = { 0 };
     SolveCtx c = { s, pose, model, hf, boxes, box_count, side, finger, { { 0 } }, radius };
+    // Close from the open finger (curl 0, its spread / twist kept): t degrees split over the joints
+    // like the presets, up to the first joint's curl limit.
     memcpy(c.base, j[finger], sizeof(c.base));
-    // Range: from where the first joint reaches its lower curl limit (opening) to where the first
-    // reaches its upper one (closing); all three joints move together.
-    float t_min = -1e9f, t_max = 1e9f;
+    for (int k = 0; k < 3; k++) c.base[k].curl = 0;
+    float t_max = 1e9f;
     for (int k = 0; k < 3; k++) {
         HandJoint lo, hi;
         handpose_joint_limits(finger, k, &lo, &hi);
-        float share = k_split[k] * (finger == HF_THUMB ? THUMB_SCALE : 1.0f);
-        t_max = fminf(t_max, (hi.curl - c.base[k].curl) / share);
-        t_min = fmaxf(t_min, (lo.curl - c.base[k].curl) / share);
+        t_max = fminf(t_max, hi.curl / (k_split[k] * (finger == HF_THUMB ? THUMB_SCALE : 1.0f)));
     }
-    t_max = fmaxf(t_max, 0.0f);
-    t_min = fminf(t_min, 0.0f);
-    const float step = 2.0f;
     vec3 tip;
     float d0 = solve_eval(&c, 0, &tip);
-    float best_t = 0, best_target = target ? v3_dist(tip, *target) : 0;
-    // Bracket [t_free, t_hit]: the finger is clear at t_free and touching at t_hit (adjacent steps).
-    float t_free = 0, t_hit = 0;
-    bool bracket = false;
     if (d0 < 0) {
-        // Already inside: open step by step until clear.
-        t_hit = 0;
-        for (float t = -step; t >= t_min - step * 0.5f; t -= step) {
-            float tt = fmaxf(t, t_min);
-            float d = solve_eval(&c, tt, &tip);
-            r.steps++;
-            if (d >= 0) { t_free = tt; bracket = true; break; }
-            t_hit = tt;
-            if (tt <= t_min) break;
+        // Inside the item even when open (the hand socket is in the geometry): nothing to close.
+        r.blocked = true;
+        r.tip_dist = d0;
+        return r;
+    }
+    const float step = 2.0f;
+    float best_t = 0, best_target = target ? v3_dist(tip, *target) : 0, t_free = 0, t_hit = -1;
+    for (float t = step; t <= t_max + step * 0.5f; t += step) {
+        float tt = fminf(t, t_max);
+        float d = solve_eval(&c, tt, &tip);
+        r.steps++;
+        if (d < 0) { t_hit = tt; break; }
+        t_free = tt;
+        if (target) {
+            float dt = v3_dist(tip, *target);
+            if (dt < best_target) { best_target = dt; best_t = tt; }
         }
-        if (!bracket) {
-            // Fully open and still inside: report it, leave the finger open.
-            r.tip_dist = solve_eval(&c, t_min, &tip);
-            solve_joints(&c, t_min, j[finger]);
-            r.curl_add = t_min;
-            return r;
-        }
-    } else {
-        for (float t = step; t <= t_max + step * 0.5f; t += step) {
-            float tt = fminf(t, t_max);
-            float d = solve_eval(&c, tt, &tip);
-            r.steps++;
-            if (d < 0) { t_hit = tt; bracket = true; break; }
-            t_free = tt;
-            if (target) {
-                float dt = v3_dist(tip, *target);
-                if (dt < best_target) { best_target = dt; best_t = tt; }
-            }
-            if (tt >= t_max) break;
-        }
+        if (tt >= t_max) break;
     }
     float t_final;
-    if (bracket) {
+    if (t_hit >= 0) {
         // Bisect the clear / touching bracket until the surface gap is inside the tolerance.
         float lo = t_free, hi = t_hit;
         float d = solve_eval(&c, lo, &tip);

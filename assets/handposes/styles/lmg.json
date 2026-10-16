@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "id": "style/lmg",
+  "label": "Hold style: lmg",
+  "category": "style",
+  "source": "generated",
+  "inherits": "",
+  "hands": ["left", "right"],
+  "states": ["default", "hip", "sprint", "crouch", "prone", "empty", "inspect", "vehicle_onehand", "phone_portrait", "phone_landscape"],
+  "relative": false,
+  "reviewed": true,
+  "auto_placed": false,
+  "left": {
+    "default": {
+      "fingers": {
+        "thumb": [[7.2000003, 0, 0], [9.12, 0, 0], [7.68, 0, 0]],
+        "index": [[15.000001, 0, 0], [19, 0, 0], [16, 0, 0]],
+        "middle": [[16.5, 0, 0], [20.9, 0, 0], [17.6, 0, 0]],
+        "ring": [[18, 0, 0], [22.8, 0, 0], [19.199999, 0, 0]],
+        "pinky": [[19.5, 0, 0], [24.699999, 0, 0], [20.8, 0, 0]]
+      }
+    }
+  },
+  "right": {
+    "default": {
+      "fingers": {
+        "thumb": [[3.6000001, 0, 0], [4.56, 0, 0], [3.84, 0, 0]],
+        "index": [[7.5000005, 0, 0], [9.5, 0, 0], [8, 0, 0]],
+        "middle": [[21, 0, 0], [26.6, 0, 0], [22.4, 0, 0]],
+        "ring": [[22.5, 0, 0], [28.5, 0, 0], [24, 0, 0]],
+        "pinky": [[24, 0, 0], [30.4, 0, 0], [25.599998, 0, 0]]
+      }
+    }
+  }
+}

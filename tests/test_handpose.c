@@ -347,7 +347,7 @@ static void test_contact(void) {
             CHECK(r.tip_dist >= 0 && r.tip_dist <= 0.001f, "contact %s %s: stopped %.2f mm from the surface", side ? "R" : "L", handpose_finger_name(f), r.tip_dist * 1000);
             CHECK(j[f][0].curl > 0, "contact: finger didn't close");
             if (r.tip_dist > worst) { worst = r.tip_dist; worst_f = f; }
-            // Inside from the start (25 deg past the contact): opens until clear, ends on the surface.
+            // Curled 25 deg past the contact: the solver starts from open again and ends on the surface.
             HandFingers k;
             memcpy(k, j, sizeof(k));
             for (int q = 0; q < 3; q++) k[f][q].curl = fminf(k[f][q].curl + 25.0f * (q == 0 ? 0.30f : q == 1 ? 0.38f : 0.32f), 90.0f);
@@ -355,10 +355,20 @@ static void test_contact(void) {
             memcpy(probe, k, sizeof(probe));
             HandContactResult in0 = handpose_contact_solve(s, &g_pa, g_ma, side, f, probe, &L->hands, &box, 1, NULL, 0.008f, 0.0005f);
             r = in0;
-            CHECK(r.touched && r.curl_add < 0, "contact from inside %s %s: didn't open (%.1f deg)", side ? "R" : "L", handpose_finger_name(f), r.curl_add);
+            CHECK(r.touched && !r.blocked, "contact from a curled finger %s %s: no contact", side ? "R" : "L", handpose_finger_name(f));
             CHECK(r.tip_dist >= 0 && r.tip_dist <= 0.001f, "contact from inside %s %s: %.2f mm", side ? "R" : "L", handpose_finger_name(f), r.tip_dist * 1000);
         }
     printf("  contact solver: worst surface gap %.3f mm (%s)\n", worst * 1000, handpose_finger_name(worst_f));
+    // Inside the geometry even when open: blocked, joints untouched.
+    {
+        Xform palm = xf_mul(g_ma[s->role[BR_R_HAND]], L->hands.palm[1]);
+        HandBox inside = { palm.t, v3(0.2f, 0.2f, 0.2f), palm.r };
+        HandFingers j0;
+        memset(j0, 0, sizeof(j0));
+        j0[HF_INDEX][1].curl = 33;
+        HandContactResult rb = handpose_contact_solve(s, &g_pa, g_ma, 1, HF_INDEX, j0, &L->hands, &inside, 1, NULL, 0.008f, 0.0005f);
+        CHECK(rb.blocked && !rb.touched && j0[HF_INDEX][1].curl == 33, "finger inside the item when open: blocked, unchanged");
+    }
     // Nothing to touch + a target: the closest curl to the target.
     HandFingers j;
     memset(j, 0, sizeof(j));

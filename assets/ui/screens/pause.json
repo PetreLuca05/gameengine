@@ -10,6 +10,7 @@
     { "id": "multiplayer", "parent": "stack", "h": 34, "label": "Multiplayer", "action": "multiplayer" },
     { "id": "invite", "parent": "stack", "h": 34, "label": "Invite friends", "action": "invite", "if": "steam" },
     { "id": "leave", "parent": "stack", "h": 34, "label": "Disconnect", "action": "leave", "if": "online" },
+    { "id": "handpose", "parent": "stack", "h": 34, "label": "Hand pose editor", "action": "scene_handpose", "if": "world" },
     { "id": "spacer", "parent": "stack", "h": 14 },
     { "id": "quit", "parent": "stack", "h": 34, "label": "Quit to desktop", "action": "quit" },
     { "id": "brand", "parent": "root", "anchor": "bottom_right", "w": 460, "h": 110 },

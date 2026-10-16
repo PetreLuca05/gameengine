@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "id": "style/melee_1h",
+  "label": "Hold style: melee_1h",
+  "category": "style",
+  "source": "generated",
+  "inherits": "",
+  "hands": ["right"],
+  "states": ["default", "hip", "sprint", "crouch", "prone", "empty", "inspect", "vehicle_onehand", "phone_portrait", "phone_landscape"],
+  "relative": false,
+  "reviewed": true,
+  "auto_placed": false,
+  "left": {
+    "default": {
+      "fingers": {
+        "thumb": [[7.2000003, 0, 0], [9.12, 0, 0], [7.68, 0, 0]],
+        "index": [[15.000001, 0, 0], [19, 0, 0], [16, 0, 0]],
+        "middle": [[16.5, 0, 0], [20.9, 0, 0], [17.6, 0, 0]],
+        "ring": [[18, 0, 0], [22.8, 0, 0], [19.199999, 0, 0]],
+        "pinky": [[19.5, 0, 0], [24.699999, 0, 0], [20.8, 0, 0]]
+      }
+    }
+  },
+  "right": {
+    "default": {
+      "fingers": {
+        "thumb": [[10.8, 0, 0], [13.68, 0, 0], [11.5199995, 0, 0]],
+        "index": [[25.500002, 0, 0], [32.3, 0, 0], [27.199999, 0, 0]],
+        "middle": [[27.000002, 0, 0], [34.2, 0, 0], [28.8, 0, 0]],
+        "ring": [[27.000002, 0, 0], [34.2, 0, 0], [28.8, 0, 0]],
+        "pinky": [[27.000002, 0, 0], [34.2, 0, 0], [28.8, 0, 0]]
+      }
+    }
+  }
+}

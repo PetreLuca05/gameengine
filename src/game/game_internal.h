@@ -57,6 +57,7 @@ void vehicles_input(void);
 void vehicles_fill_cmd(UserCmd *c);
 void vehicles_view_frame(ViewState *view);
 int vehicles_camera(World *w, RenderCamera *cam);
+const char *vehicles_def_name_of(World *w, EntityId e);   // a vehicle entity's definition name (hand pose editor)
 void vehicles_frame(World *w, vec3 cam_pos);
 void vehicles_draw_hud(void);
 void vehicles_draw(void);

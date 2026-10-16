@@ -4,6 +4,7 @@
 #include "gameplay/zombies/horde.h"
 #include "vfx/vfx.h"
 #include "game_internal.h"
+#include "editor/handpose/hp_editor.h"
 #include "ui/recoil_debug.h"
 #include "core/engine.h"
 #include "core/cvar.h"
@@ -649,10 +650,18 @@ void game_render(void) {
         const CamFpCvars *cc = camera_fp_cvars();
         bool tp = cvar_find("cl_thirdperson")->i != 0 || (cc->third && cc->third->i);
         float fdt = (float)g_engine.frame_dt;
+        // Hand pose editor (docs/HANDPOSE.md): its orbit / framing camera, the body drawn whole.
+        RenderCamera ecam = cam;
+        bool hpe = lp && hp_editor_camera(&ecam);
+        if (hpe) tp = true;
         chars_set_thirdperson(tp);
         GR->cam_mode = 0;
-        int vcam = lp ? vehicles_camera(w, &cam) : 0;
-        if (vcam) {
+        int vcam = lp && !hpe ? vehicles_camera(w, &cam) : 0;
+        if (hpe) {
+            cam = ecam;
+            G->view.eye = cam.pos;
+            GR->cam_mode = 3;
+        } else if (vcam) {
             G->view.eye = cam.pos;
             GR->cam_mode = vcam;
         } else if (tp && lp) {
@@ -722,6 +731,7 @@ void game_render(void) {
     }
     flashlights_render(w, &cam, p, dead);
     render_set_camera(&cam);
+    hp_editor_rendered_camera(&cam);   // hand pose editor picking
     // Time of day first: the post settings (exposure floor / curves, fog) follow this frame's sky.
     RenderEnvironment tod_env;
     memset(&tod_env, 0, sizeof(tod_env));

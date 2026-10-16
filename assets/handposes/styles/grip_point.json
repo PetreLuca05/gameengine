@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "id": "style/grip_point",
+  "label": "Grip: point",
+  "category": "style",
+  "source": "generated",
+  "inherits": "",
+  "hands": ["left", "right"],
+  "states": ["default", "use", "hold", "drive", "drive_onehand"],
+  "relative": false,
+  "reviewed": true,
+  "auto_placed": false,
+  "left": {
+    "default": {
+      "fingers": {
+        "thumb": [[9.000001, 0, 0], [11.400001, 0, 0], [9.6, 0, 0]],
+        "index": [[0, 0, 0], [0, 0, 0], [0, 0, 0]],
+        "middle": [[28.500002, 0, 0], [36.1, 0, 0], [30.4, 0, 0]],
+        "ring": [[28.500002, 0, 0], [36.1, 0, 0], [30.4, 0, 0]],
+        "pinky": [[28.500002, 0, 0], [36.1, 0, 0], [30.4, 0, 0]]
+      }
+    }
+  },
+  "right": {
+    "default": {
+      "fingers": {
+        "thumb": [[9.000001, 0, 0], [11.400001, 0, 0], [9.6, 0, 0]],
+        "index": [[0, 0, 0], [0, 0, 0], [0, 0, 0]],
+        "middle": [[28.500002, 0, 0], [36.1, 0, 0], [30.4, 0, 0]],
+        "ring": [[28.500002, 0, 0], [36.1, 0, 0], [30.4, 0, 0]],
+        "pinky": [[28.500002, 0, 0], [36.1, 0, 0], [30.4, 0, 0]]
+      }
+    }
+  }
+}

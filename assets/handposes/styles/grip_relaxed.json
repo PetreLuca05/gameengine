@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "id": "style/grip_relaxed",
+  "label": "Grip: relaxed",
+  "category": "style",
+  "source": "generated",
+  "inherits": "",
+  "hands": ["left", "right"],
+  "states": ["default", "use", "hold", "drive", "drive_onehand"],
+  "relative": false,
+  "reviewed": true,
+  "auto_placed": false,
+  "left": {
+    "default": {
+      "fingers": {
+        "thumb": [[1.8000001, 0, 0], [2.28, 0, 0], [1.92, 0, 0]],
+        "index": [[4.5, 0, 0], [5.7, 0, 0], [4.7999997, 0, 0]],
+        "middle": [[6, 0, 0], [7.6, 0, 0], [6.3999996, 0, 0]],
+        "ring": [[7.5000005, 0, 0], [9.5, 0, 0], [8, 0, 0]],
+        "pinky": [[9, 0, 0], [11.4, 0, 0], [9.599999, 0, 0]]
+      }
+    }
+  },
+  "right": {
+    "default": {
+      "fingers": {
+        "thumb": [[1.8000001, 0, 0], [2.28, 0, 0], [1.92, 0, 0]],
+        "index": [[4.5, 0, 0], [5.7, 0, 0], [4.7999997, 0, 0]],
+        "middle": [[6, 0, 0], [7.6, 0, 0], [6.3999996, 0, 0]],
+        "ring": [[7.5000005, 0, 0], [9.5, 0, 0], [8, 0, 0]],
+        "pinky": [[9, 0, 0], [11.4, 0, 0], [9.599999, 0, 0]]
+      }
+    }
+  }
+}

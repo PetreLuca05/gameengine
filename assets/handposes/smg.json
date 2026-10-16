@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "id": "smg",
+  "label": "SMG",
+  "category": "weapon",
+  "source": "data/weapons/07_smg.json",
+  "inherits": "style/smg",
+  "hands": ["left", "right"],
+  "states": ["default", "hip", "sprint", "crouch", "prone", "empty", "inspect", "vehicle_onehand", "phone_portrait", "phone_landscape"],
+  "relative": false,
+  "reviewed": false,
+  "auto_placed": false,
+  "left": {},
+  "right": {}
+}

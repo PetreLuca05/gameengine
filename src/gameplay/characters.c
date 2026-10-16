@@ -527,6 +527,8 @@ static vec2 local_move(vec3 vel, float body_yaw, float *speed) {
     return v2(v3_dot(h, r) / sp, v3_dot(h, f) / sp);
 }
 
+static void preview_inputs(CharacterInst *c, CharInputs *in);   // hand pose editor (below)
+
 static void player_inputs(World *w, CharacterInst *c, const Player *p, CharInputs *in) {
     const PlayerMove *m = &p->sim.move;
     const WeaponState *ws = &p->sim.wpn;
@@ -738,8 +740,12 @@ static void sim_pre(World *w, CharacterInst *c, int i) {
 // transform and read-only shared data); players run it on the main thread.
 static void sim_core(World *w, CharacterInst *c, int i, float dt) {
     CharInputs in;
-    if (c->is_player && c->slot >= 0 && w->players[c->slot].active) player_inputs(w, c, &w->players[c->slot], &in);
-    else npc_inputs(w, c, i, &in);
+    if (c->is_player && c->slot >= 0 && w->players[c->slot].active) {
+        player_inputs(w, c, &w->players[c->slot], &in);
+        preview_inputs(c, &in);
+    } else {
+        npc_inputs(w, c, i, &in);
+    }
     c->body_yaw = in.body_yaw;
     charrt_set_inputs(&c->rt, &in);
     host_triggers(w, c, i);
@@ -1001,6 +1007,7 @@ void chars_local_predict(World *w, int slot, bool first) {
     c->local = true;
     CharInputs in;
     player_inputs(w, c, p, &in);
+    preview_inputs(c, &in);
     c->body_yaw = in.body_yaw;
     charrt_set_inputs(&c->rt, &in);
     if (c->was_grounded && !in.grounded && p->sim.move.vel.y > 1.5f) charrt_trigger(&c->rt, AP_T_JUMP);
@@ -1393,7 +1400,31 @@ static void post_one(World *w, CharacterInst *c, int i, float dt, vec3 cam_pos, 
                     pi.anchor_pose_base[h] = handpose_grip_style_hash(GRIP_GRAB);
                     pi.anchor_pose_state[h] = use[0] && use[1] ? HPS_DRIVE : HPS_DRIVE_ONEHAND;
                 }
+                // Hand pose editor: preview a controls state (one-handed: the right hand lets go).
+                if (g_handpose_preview.active && c->local && g_handpose_preview.vehicle_state >= 0) {
+                    for (int h = 0; h < 2; h++) pi.anchor_pose_state[h] = (u8)g_handpose_preview.vehicle_state;
+                    if (g_handpose_preview.vehicle_state == HPS_DRIVE_ONEHAND) pi.hand_anchor_skip |= 2;
+                }
             }
+        }
+    }
+    // Hand pose editor: an interaction held on its target (the same anchors as the vehicle controls).
+    if (g_handpose_preview.active && c->local) {
+        const HandPosePreview *pv = &g_handpose_preview;
+        bool any = false;
+        for (int h = 0; h < 2; h++) {
+            if (!pv->anchor_on[h]) continue;
+            pi.hand_anchor[h] = pv->anchor_pos[h];
+            pi.hand_anchor_rot[h] = pv->anchor_rot[h];
+            pi.anchor_pose[h] = pv->anchor_pose[h];
+            pi.anchor_pose_base[h] = pv->anchor_base[h];
+            pi.anchor_pose_state[h] = pv->anchor_state[h];
+            any = true;
+        }
+        if (any) {
+            pi.hand_anchor_w = 1.0f;
+            pi.hand_anchor_rot_valid = true;
+            pi.hand_anchor_skip = (u8)((pv->anchor_on[0] ? 0 : 1) | (pv->anchor_on[1] ? 0 : 2));
         }
     }
     g_ray_ignore = (pi.seated && g_vehicle_pose.vehicle_body) ? g_vehicle_pose.vehicle_body(w, c->slot) : PHYS_INVALID_BODY;
@@ -1460,6 +1491,8 @@ static void post_one(World *w, CharacterInst *c, int i, float dt, vec3 cam_pos, 
     c->item_cam_prev = c->item_cam_cur;
     if (c->rt.proc.has_item) c->item_cam_cur = c->rt.proc.item_cam;
     charrt_to_world(&c->rt, c->rt.final_model, root, c->def->scale, c->pose_cur);
+    c->post_root = root;
+    c->post_root.s = v3s(c->def->scale);
     c->item_cur = c->rt.proc.has_item ? xf_mul(xf_make(root.t, root.r), xf_make(v3_scale(c->rt.proc.item_model.t, c->def->scale), c->rt.proc.item_model.r)) : c->item_cur;
     bool had_item = c->item_valid;
     c->item_valid = c->rt.proc.has_item;
@@ -2122,6 +2155,41 @@ static void sync_local_skin(World *w, int local_slot) {
     }
 }
 
+HandPosePreview g_handpose_preview = { .clip = -1, .vehicle_state = -1 };
+
+bool chars_handpose_view(World *w, int slot, HandPoseView *out) {
+    if (!w || !w->chars || !LIB || slot < 0) return false;
+    CharacterInst *c = char_get(w, w->players[slot].ent);
+    if (!c || !c->have_pose) return false;
+    memset(out, 0, sizeof(*out));
+    out->skel = &LIB->skel;
+    out->hands = &LIB->hands;
+    out->root = c->post_root;
+    out->model = c->rt.final_model;
+    out->final_pose = &c->rt.final;
+    out->base_pose = &c->rt.base;
+    out->proc = &c->rt.proc;
+    out->has_item = c->rt.proc.has_item && c->item_valid;
+    out->item_model = c->rt.proc.item_model;
+    out->weapon = c->item_weapon;
+    out->item = c->item_def;
+    out->att = c->item_att;
+    out->sockets = (c->item_weapon || c->item_def) ? held_sockets(c) : NULL;
+    return true;
+}
+
+// Editor preview: the local character's cosmetic input overrides (walk, clip scrub).
+static void preview_inputs(CharacterInst *c, CharInputs *in) {
+    const HandPosePreview *pv = &g_handpose_preview;
+    if (!pv->active || !c->local) { if (c->local) c->rt.override_clip = -1; return; }
+    if (pv->walk_speed > 0) {
+        in->speed = pv->walk_speed;
+        in->move_local = v2(0, 1);
+    }
+    c->rt.override_clip = pv->clip;
+    c->rt.override_time = pv->clip_time;
+}
+
 void chars_render(World *w, float alpha, vec3 cam_pos, int local_slot) {
     if (!w->chars || !LIB) return;
     ensure_gpu_meshes();
@@ -2149,6 +2217,18 @@ void chars_render(World *w, float alpha, vec3 cam_pos, int local_slot) {
         }
         bool local = c->is_player && c->slot == local_slot && !g_thirdperson;
         u32 flags = local ? (MAT_SHADOW_ONLY | MAT_SELF) : 0;   // the owner's body: shadows + phone cameras (selfies)
+        bool editor_char = g_handpose_preview.active && c->is_player && c->slot == local_slot;
+        if (editor_char && g_handpose_preview.hands_only) {
+            // Arms only: every other bone collapsed into the chest (its skin vanishes there, the
+            // shoulders' blended skin stays short).
+            int arms[2] = { s->role[BR_L_ARM], s->role[BR_R_ARM] };
+            vec3 chest = s->role[BR_SPINE2] >= 0 ? pose[s->role[BR_SPINE2]].t : pose[0].t;
+            for (int b = 0; b < s->count; b++)
+                if (!(arms[0] >= 0 && (b == arms[0] || skel_is_descendant(s, b, arms[0]))) && !(arms[1] >= 0 && (b == arms[1] || skel_is_descendant(s, b, arms[1])))) {
+                    pose[b].t = chest;
+                    pose[b].s = v3s(1e-4f);
+                }
+        }
         memcpy(c->pose_draw, pose, sizeof(Xform) * (size_t)s->count);
         c->pose_draw_frame = g_engine.frame_index;
         // One pose, one palette: every part skins from c->si.
@@ -2168,7 +2248,7 @@ void chars_render(World *w, float alpha, vec3 cam_pos, int local_slot) {
         // Shadows: one LOD coarser than the main draw.
         if (shadow) draw_char(w, c, DG_MIN(lod + 1, CHAR_LOD_COUNT - 1), 0, MAT_SHADOW_ONLY, true);
         // Held item (glued to the right hand).
-        if (c->item_valid && !c->dead && (c->item_weapon || c->item_def)) {
+        if (c->item_valid && !c->dead && (c->item_weapon || c->item_def) && !(editor_char && g_handpose_preview.hide_item)) {
             float span = (float)DG_MAX(1, c->interval);
             float t = saturate(((float)(w->chars->tick - c->last_eval) + alpha) / span);
             Xform it = xf_mul(seat_fix(w, c, t), xf_lerp(c->item_prev, c->item_cur, t));

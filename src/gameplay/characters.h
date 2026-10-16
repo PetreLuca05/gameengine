@@ -60,6 +60,7 @@ typedef struct CharacterInst {
     u64 pose_draw_frame;              // engine frame of pose_draw (0 = never drawn)
     u8 armor_left[BP_COUNT];          // cosmetic (each machine): hits until the part's armour breaks
     Xform item_prev, item_cur;
+    Xform post_root;                  // world root of the last post-pass (model -> world, incl. the character scale)
     Xform veh_prev, veh_cur;   // seated: the vehicle transform at the two evaluated poses (re-attached when drawn)
     bool veh_valid;
     Xform item_cam_prev, item_cam_cur;   // hold point item in camera space (owner re-places per frame)
@@ -240,6 +241,41 @@ typedef struct VehiclePoseHooks {
     const char *(*seat_vehicle)(World *w, int slot);         // the seat's vehicle definition name ("car"): its hand pose entry
 } VehiclePoseHooks;
 extern VehiclePoseHooks g_vehicle_pose;
+
+// Hand pose editor preview (src/editor/handpose, docs/HANDPOSE.md): cosmetic, local overrides of
+// the local player's character. The pose itself is the gameplay pipeline's.
+typedef struct HandPosePreview {
+    bool active;
+    bool hands_only;                 // draw the arms only (other bones collapsed)
+    bool hide_item;                  // x-ray: the editor draws the item as a wireframe instead
+    float walk_speed;                // > 0: locomotion preview (forward, m/s)
+    i16 clip;                        // >= 0: this clip at clip_time instead of the controller (scrub)
+    float clip_time;
+    bool anchor_on[2];               // interaction preview: hand h held on a world target
+    vec3 anchor_pos[2];
+    quat anchor_rot[2];
+    u32 anchor_pose[2], anchor_base[2];
+    u8 anchor_state[2];
+    i8 vehicle_state;                // >= 0: the controls' hand pose state while seated (drive / drive_onehand)
+} HandPosePreview;
+extern HandPosePreview g_handpose_preview;
+
+// Editor read-back of a player's character (the latest post-pass).
+typedef struct HandPoseView {
+    const Skeleton *skel;
+    const HandFrames *hands;
+    Xform root;                      // model -> world (scale = the character scale)
+    const Xform *model;              // final model-space pose
+    const Pose *final_pose, *base_pose;
+    const ProcState *proc;
+    bool has_item;
+    Xform item_model;                // held item, model space
+    const struct WeaponDef *weapon;
+    const struct ItemDef *item;
+    const u8 *att;
+    const ItemSockets *sockets;      // the held item's sockets (attachments applied), NULL if none
+} HandPoseView;
+bool chars_handpose_view(World *w, int slot, HandPoseView *out);
 extern bool g_chars_force_phys_step;   // client: step physics this tick (vehicle prediction)
 
 #endif

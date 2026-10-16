@@ -96,5 +96,8 @@ bool hands_muzzle(vec3 *pos, vec3 *fwd);
 // (attachments applied). False when no weapon is held.
 bool hands_fp_item(vec3 *pos, quat *rot, const struct WeaponDef **wd);
 void hands_reload_poses(void);
+// The boxes the held item / weapon is drawn with, in item space (weapon parts + mounted attachments;
+// db may be NULL for no attachments). Returns the count.
+int hands_held_boxes(const struct ItemDB *db, const struct WeaponDef *wd, const struct ItemDef *it, const u8 *att, vec3 *center, quat *rot, vec3 *half, int max);
 
 #endif

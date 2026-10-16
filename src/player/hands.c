@@ -634,6 +634,33 @@ static void draw_weapon(const WeaponDef *wd, vec3 pos, quat rot, bool viewmodel)
         draw_box(v3_add(pos, quat_rotate(rot, parts[i].center)), quat_mul(rot, parts[i].rot), parts[i].half, parts[i].color, viewmodel);
 }
 
+// The boxes a held item / weapon is drawn with (item space): hand pose editor wireframe and contact
+// solver (docs/HANDPOSE.md). Same parts as draw_weapon / draw_held_item.
+int hands_held_boxes(const ItemDB *db, const WeaponDef *wd, const ItemDef *it, const u8 *att, vec3 *center, quat *rot, vec3 *half, int max) {
+    int n = 0;
+    if (wd) {
+        static WeaponDef eff;
+        u8 none[ATT_SLOTS] = { 0 };
+        if (db) attach_weapon_effective(db, wd, att ? att : none, &eff);
+        else eff = *wd;
+        for (int i = 0; i < eff.part_count && n < max; i++, n++) { center[n] = eff.parts[i].offset; rot[n] = quat_identity(); half[n] = eff.parts[i].half; }
+        if (!db) return n;
+        AttachDrawPart parts[ATT_SLOTS * ATT_MAX_PARTS];
+        int pc = attach_draw_parts(db, &eff, eff.att_applied, parts, ARRAY_COUNT(parts));
+        for (int i = 0; i < pc && n < max; i++, n++) { center[n] = parts[i].center; rot[n] = parts[i].rot; half[n] = parts[i].half; }
+        return n;
+    }
+    if (!it || max < 1) return 0;
+    if (it->camera) {
+        center[0] = it->cam.body_center;
+        half[0] = it->cam.body_half;
+    } else {
+        item_held_box(it, &center[0], &half[0]);
+    }
+    rot[0] = quat_identity();
+    return 1;
+}
+
 static void draw_held_item(const ItemDef *it, vec3 pos, quat rot, bool viewmodel) {
     if (it->camera) {   // the phone: body + live screen (src/gameplay/phone)
         phone_draw_held(it, pos, rot, viewmodel, viewmodel ? MAT_NO_SHADOW : s_world_item_flags);

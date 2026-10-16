@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "id": "lmg",
+  "label": "LMG",
+  "category": "weapon",
+  "source": "data/weapons/08_lmg.json",
+  "inherits": "style/lmg",
+  "hands": ["left", "right"],
+  "states": ["default", "hip", "sprint", "crouch", "prone", "empty", "inspect", "vehicle_onehand", "phone_portrait", "phone_landscape"],
+  "relative": false,
+  "reviewed": false,
+  "auto_placed": false,
+  "left": {},
+  "right": {}
+}

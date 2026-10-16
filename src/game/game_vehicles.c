@@ -365,6 +365,12 @@ static bool seat_hands(World *w, int slot, vec3 pos[2], quat rot[2], bool use[2]
     return true;
 }
 
+const char *vehicles_def_name_of(World *w, EntityId e) {
+    if (!ent_valid(w, e) || w->type[ENT_INDEX(e)] != ET_VEHICLE || VG.lib.count <= 0) return NULL;
+    int di = DG_CLAMP((int)w->item[ENT_INDEX(e)], 0, VG.lib.count - 1);
+    return VG.lib.defs[di].name;
+}
+
 static const char *seat_vehicle(World *w, int slot) {
     int seat;
     Vehicle *v = veh_of_slot(w, slot, &seat);

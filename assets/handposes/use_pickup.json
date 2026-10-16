@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "id": "use_pickup",
+  "label": "Interactable: pickup",
+  "category": "interactable",
+  "source": "interactable:pickup",
+  "inherits": "style/grip_grab",
+  "hands": ["left", "right"],
+  "states": ["default", "use"],
+  "relative": true,
+  "reviewed": false,
+  "auto_placed": false,
+  "left": {},
+  "right": {}
+}

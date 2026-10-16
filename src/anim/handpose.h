@@ -96,6 +96,7 @@ typedef struct HandPoseEntry {
     bool orphan;                   // the source asset is gone (listed for removal, never deleted silently)
     bool on_disk;                  // loaded from / saved to a file
     bool seen;                     // discovery found its source this scan
+    bool dirty;                    // edited since the last save / load (editor; never written)
     HandPoseLayer layer[2][HPS_COUNT];   // [hand 0 left, 1 right][state]
 } HandPoseEntry;
 
@@ -162,12 +163,14 @@ void handpose_apply_fingers(const Skeleton *s, Pose *pose, Xform *model, int sid
 // Fingertip (model space) of finger f of the hand: the end of the distal joint.
 vec3 handpose_fingertip(const Skeleton *s, const Xform *model, int side, int finger);
 
-// Contact solver: closes finger f (all three joints, proportionally) from its current curl until
-// the finger touches one of the boxes (model space OBBs: center, half extents, rotation) or its
-// curl limit; the tip ends on the surface within `tol` (m). With a target point (non-NULL) it
-// stops at the curl closest to the target instead when nothing is touched. Returns the joints.
+// Contact solver: closes finger f from open (curl 0, spread / twist kept; the curl split over the
+// joints like the presets) until its middle / distal segments (spheres of `radius`) touch one of
+// the boxes (model space OBBs) or the curl limit; the finger ends on the surface within `tol` (m).
+// With a target point (non-NULL) and no contact it stops at the curl closest to the target.
+// `pose` / `model`: the hand before its finger pose. blocked = the open finger is already inside
+// the geometry (the socket is in the item): the joints are left unchanged.
 typedef struct HandBox { vec3 center, half; quat rot; } HandBox;
-typedef struct HandContactResult { bool touched; float tip_dist; float curl_add; int steps; } HandContactResult;
+typedef struct HandContactResult { bool touched, blocked; float tip_dist; float curl_add; int steps; } HandContactResult;
 HandContactResult handpose_contact_solve(const Skeleton *s, const Pose *pose, const Xform *model, int side, int finger, HandFingers j,
                                          const struct HandFrames *hf, const HandBox *boxes, int box_count, const vec3 *target, float radius, float tol);
 float handpose_box_signed_dist(const HandBox *b, vec3 p);   // < 0 inside

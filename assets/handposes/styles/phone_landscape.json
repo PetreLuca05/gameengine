@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "id": "style/phone_landscape",
+  "label": "Hold style: phone_landscape",
+  "category": "style",
+  "source": "generated",
+  "inherits": "",
+  "hands": ["left", "right"],
+  "states": ["default", "hip", "sprint", "crouch", "prone", "empty", "inspect", "vehicle_onehand", "phone_portrait", "phone_landscape"],
+  "relative": false,
+  "reviewed": true,
+  "auto_placed": false,
+  "left": {
+    "default": {
+      "fingers": {
+        "thumb": [[2.7, 0, 0], [3.42, 0, 0], [2.8799999, 0, 0]],
+        "index": [[10.5, 0, 0], [13.3, 0, 0], [11.2, 0, 0]],
+        "middle": [[12, 0, 0], [15.2, 0, 0], [12.799999, 0, 0]],
+        "ring": [[13.500001, 0, 0], [17.1, 0, 0], [14.4, 0, 0]],
+        "pinky": [[15.000001, 0, 0], [19, 0, 0], [16, 0, 0]]
+      }
+    }
+  },
+  "right": {
+    "default": {
+      "fingers": {
+        "thumb": [[2.7, 0, 0], [3.42, 0, 0], [2.8799999, 0, 0]],
+        "index": [[10.5, 0, 0], [13.3, 0, 0], [11.2, 0, 0]],
+        "middle": [[12, 0, 0], [15.2, 0, 0], [12.799999, 0, 0]],
+        "ring": [[13.500001, 0, 0], [17.1, 0, 0], [14.4, 0, 0]],
+        "pinky": [[15.000001, 0, 0], [19, 0, 0], [16, 0, 0]]
+      }
+    }
+  }
+}

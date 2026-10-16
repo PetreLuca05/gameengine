@@ -19,6 +19,11 @@ const char *handpose_system_rt_dir(void);
 // Saves one entry (both dirs) and re-reads nothing (the DB is the source of truth while editing).
 bool handpose_system_save(int entry);
 void handpose_system_note_own_write(void);    // don't treat our own saves as external edits
+// While the editor holds unsaved edits an external change isn't reloaded: it's flagged instead and
+// the editor asks (reload = discard the edits, or keep them and save over the files).
+void handpose_system_set_unsaved(bool unsaved);
+bool handpose_system_external_pending(void);
+void handpose_system_external_resolve(bool reload);
 
 // Interactables: the code's hand target, or - for an auto-placed entry a person reviewed - the top
 // of the entity's bounds facing the user (the entry's relative socket refines it).
