@@ -602,10 +602,10 @@ static u32 level_mesh(const RenderVgeoPlacement *pl) {
         if (k == 0) base = idx;
     }
     vgeo_scene_set_mesh_materials(&G.scene, mesh, base);
+    log_info("vgeo: level mesh %s: %u clusters, %u pages, %u tris", pl->mesh, src->hdr.cluster_count, src->hdr.page_count, src->stats.input_tris);
     if (owned) vgeo_free(&b);
     dg_strcpy(G.named[G.named_count].name, sizeof(G.named[0].name), pl->mesh);
     G.named[G.named_count++].mesh = mesh;
-    log_info("vgeo: level mesh %s: %u clusters, %u pages", pl->mesh, src->hdr.cluster_count, src->hdr.page_count);
     return mesh;
 }
 
@@ -733,7 +733,7 @@ static MeshId fallback_lod_mesh(struct FallbackMesh *f, u32 k) {
         v[i].color = 0xFFFFFFFFu;
     }
     u32 *idx = (u32 *)malloc(sizeof(u32) * (l->index_count + 1));
-    for (u32 i = 0; i < l->index_count; i++) idx[i] = f->indices[l->first_index + i] - l->first_vertex;
+    for (u32 i = 0; i < l->index_count; i++) idx[i] = f->indices[l->first_index + i];   // local to the LOD's vertices
     f->gpu[k] = render_mesh_create(v, l->vertex_count, idx, l->index_count);
     free(v);
     free(idx);

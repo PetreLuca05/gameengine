@@ -302,6 +302,10 @@ target_include_directories(bench_vgeo PRIVATE tests)
 target_link_libraries(bench_vgeo PRIVATE dg_vgeo_gpu)
 add_dependencies(bench_vgeo dg_shaders)
 
+add_executable(img_diff tools/img_diff/img_diff.c)
+set_target_properties(img_diff PROPERTIES C_STANDARD 11)
+target_link_libraries(img_diff PRIVATE dg_thirdparty)
+
 add_executable(build_vgeo tools/build_vgeo/build_vgeo.c)
 set_target_properties(build_vgeo PROPERTIES C_STANDARD 11)
 target_link_libraries(build_vgeo PRIVATE dg_vgeo)
