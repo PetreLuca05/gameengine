@@ -1,0 +1,39 @@
+{
+  "schema": 2,
+  "id": "phone_portrait",
+  "label": "Phone: portrait",
+  "kind": "item",
+  "bind": "item:phone:portrait",
+  "source": "data/items.json",
+  "inherits": "style/phone",
+  "hands": [
+    "right"
+  ],
+  "reviewed": false,
+  "auto_placed": false,
+  "setup": {
+    "item": "phone",
+    "hold_state": "phone_portrait",
+    "distance": 0.75
+  },
+  "anchor": {
+    "pos": [
+      0,
+      0,
+      0
+    ],
+    "q": [
+      0,
+      0,
+      0,
+      1
+    ]
+  },
+  "duration": 0.76,
+  "markers": {
+    "contact": 0.16,
+    "use": 0.312,
+    "release": 0.54
+  },
+  "keys": []
+}

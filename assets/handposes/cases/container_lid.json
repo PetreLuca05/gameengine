@@ -1,0 +1,39 @@
+{
+  "schema": 2,
+  "id": "container_lid",
+  "label": "Container: lid",
+  "kind": "interact",
+  "bind": "interactable:container",
+  "source": "interactable:container",
+  "inherits": "style/grip_grab",
+  "hands": [
+    "left",
+    "right"
+  ],
+  "reviewed": false,
+  "auto_placed": false,
+  "setup": {
+    "prop": "container",
+    "distance": 0.4
+  },
+  "anchor": {
+    "pos": [
+      0,
+      0,
+      0
+    ],
+    "q": [
+      0,
+      0,
+      0,
+      1
+    ]
+  },
+  "duration": 1.63,
+  "markers": {
+    "contact": 0.16,
+    "use": 0.785,
+    "release": 1.41
+  },
+  "keys": []
+}

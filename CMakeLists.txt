@@ -264,7 +264,7 @@ add_test(NAME spectate COMMAND test_spectate)
 # Engine-free subset: anim core + FBX import + cache (+ log / platform helpers).
 set(DG_ANIMCORE_SOURCES
   src/anim/anim.c src/anim/skeleton.c src/anim/retarget.c src/anim/anim_mesh.c src/anim/controller.c src/anim/procedural.c src/anim/turn.c src/anim/spine.c
-  src/anim/weapon_hold.c src/anim/handpose.c src/editor/handpose/hp_discover.c src/editor/handpose/hp_edit.c src/anim/damage_additive.c src/anim/foot_ik.c src/anim/anim_net.c src/anim/ragdoll_def.c
+  src/anim/weapon_hold.c src/anim/handpose.c src/editor/handpose/hp_discover.c src/editor/handpose/hp_edit.c src/editor/handpose/hp_rig.c src/editor/handpose/hp_xform.c src/anim/damage_additive.c src/anim/foot_ik.c src/anim/anim_net.c src/anim/ragdoll_def.c
   src/anim/anim_library.c src/anim/character_rt.c src/gameplay/hitboxes.c src/gameplay/items.c src/gameplay/attachments.c src/gameplay/recoil.c src/core/spring.c
   src/world/time_of_day.c src/world/weather.c src/world/wind.c src/gameplay/vehicle_def.c src/vfx/vfx_curve.c src/vfx/vfx_library.c src/vfx/vfx_sim.c src/vfx/vfx_flesh.c src/vfx/vfx_atlas.c src/player/holdpoint.c src/player/camera_fp_math.c src/gameplay/phone/phone_orient.c
   src/assets/fbx_loader.c src/assets/anim_cache.c src/assets/character.c src/render/skeletal_mesh.c
@@ -377,6 +377,10 @@ endforeach()
 add_executable(handpose_report tools/handpose_report/handpose_report.c)
 set_target_properties(handpose_report PROPERTIES C_STANDARD 11)
 target_link_libraries(handpose_report PRIVATE dg_animcore)
+# Schema 1 (per state) -> universal grips + cases, with a report of the dropped differences.
+add_executable(handpose_migrate tools/handpose_migrate/handpose_migrate.c)
+set_target_properties(handpose_migrate PROPERTIES C_STANDARD 11)
+target_link_libraries(handpose_migrate PRIVATE dg_animcore)
 
 add_executable(validate_rig tools/validate_rig/validate_rig.c)
 set_target_properties(validate_rig PROPERTIES C_STANDARD 11)
@@ -467,6 +471,10 @@ add_executable(test_hp_edit tests/test_hp_edit.c)
 set_target_properties(test_hp_edit PROPERTIES C_STANDARD 11)
 target_link_libraries(test_hp_edit PRIVATE dg_animcore)
 add_test(NAME hp_edit COMMAND test_hp_edit)
+add_executable(test_handpose_rig tests/test_handpose_rig.c)
+set_target_properties(test_handpose_rig PROPERTIES C_STANDARD 11)
+target_link_libraries(test_handpose_rig PRIVATE dg_animcore)
+add_test(NAME handpose_rig COMMAND test_handpose_rig)
 
 # Ragdolls with real Jolt physics: joint limits over 10 s drops, rest / freeze.
 add_executable(test_ragdoll tests/test_ragdoll.c src/physics/physics.c src/physics/ragdoll.c)

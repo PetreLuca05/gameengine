@@ -37,6 +37,7 @@
 #include "cJSON.h"
 #include "world/openworld.h"
 #include "world/mapgen_poi.h"
+#include "editor/handpose/hp_system.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -129,6 +130,8 @@ static struct {
 } VG;
 
 static void free_sys(World *w);
+static bool vehicle_enter(World *w, int slot, struct Vehicle *v, int seat);
+static bool vehicle_exit(World *w, int slot, bool force);
 
 static VehicleSys *sys(World *w) {
     if (!w) return NULL;
@@ -248,17 +251,21 @@ static float front_steer_deg(const VehicleDef *d) {
 }
 
 // Steering wheel / handlebar frame: Y = steering axis, X = the vehicle's right (orthogonalized),
-// rotated about the axis by the steering angle (clockwise for the driver when turning right).
+// rotated about the axis by the steering angle (clockwise for the driver when turning right). The
+// driver case's anchor (docs/HANDPOSE.md, vehicle_<def>_driver) moves the whole frame: the drawn
+// wheel / handlebar and both grips on it follow.
 static void steer_frame(const VehicleDef *d, vec3 p, quat r, float steer, vec3 *pivot, vec3 *x, vec3 *y, vec3 *z) {
-    vec3 axis = v3_norm(quat_rotate(r, d->steer_axis));
-    vec3 xr = quat_rotate(r, v3(1, 0, 0));
+    Xform an = handpose_seat_anchor(d->name, true);
+    quat ar = quat_mul(quat_mul(r, an.r), quat_conj(r));   // the anchor rotation, world space
+    vec3 axis = v3_norm(quat_rotate(ar, quat_rotate(r, d->steer_axis)));
+    vec3 xr = quat_rotate(ar, quat_rotate(r, v3(1, 0, 0)));
     xr = v3_norm(v3_sub(xr, v3_scale(axis, v3_dot(xr, axis))));
     float a = -steer * front_steer_deg(d) * DG_DEG2RAD * d->steer_ratio;
     quat q = quat_axis_angle(axis, a);
     *x = quat_rotate(q, xr);
     *y = axis;
     *z = v3_cross(*x, axis);
-    *pivot = to_world(p, r, d->steer_pivot);
+    *pivot = to_world(p, r, v3_add(d->steer_pivot, an.t));
 }
 
 // Rotation whose columns are the orthonormal basis x, y, z.
@@ -357,7 +364,25 @@ static bool slot_onehand(World *w, int slot, const Vehicle *v) {
 static bool seat_hands(World *w, int slot, vec3 pos[2], quat rot[2], bool use[2]) {
     int seat;
     Vehicle *v = veh_of_slot(w, slot, &seat);
-    if (!v || !vdef(v)->seats[seat].driver) return false;
+    if (!v) return false;
+    if (!vdef(v)->seats[seat].driver) {
+        // Passengers: hands rest on the thighs, only once the passenger case has a pose (its anchor
+        // and keys place them relative to these points).
+        u32 pc = handpose_seat_case(w, slot);
+        const HandPoseCase *c = handpose_case_by_hash(pc);
+        if (!c || !c->key_count) return false;
+        vec3 p;
+        quat r;
+        pose_render(w, v, &p, &r);
+        const VehicleSeatDef *sd = &vdef(v)->seats[seat];
+        for (int h = 0; h < 2; h++) {
+            // One base point (the lap) for both hands: the case's anchor and keys place each hand.
+            pos[h] = to_world(p, r, v3_add(sd->pos, v3(0, 0.06f, -0.28f)));
+            rot[h] = r;   // palm down, fingers forward
+            use[h] = true;
+        }
+        return true;
+    }
     grips_world(w, v, pos, rot);
     // Both hands on the controls; only the gun hand (right) lets go, and only with a gun in it.
     const WeaponDef *wd = weapon_equipped_def(w, slot);
@@ -365,6 +390,43 @@ static bool seat_hands(World *w, int slot, vec3 pos[2], quat rot[2], bool use[2]
     use[0] = true;
     use[1] = !(gun && slot_onehand(w, slot, v));
     return true;
+}
+
+// ------------------------------------------------------------------ hand pose editor (simulated vehicle cases)
+
+bool vehicles_editor_seat(World *w, EntityId veh, int slot, int seat) {
+    Vehicle *v = veh_of(w, veh);
+    return v && vehicle_enter(w, slot, v, seat);
+}
+
+void vehicles_editor_unseat(World *w, int slot) { vehicle_exit(w, slot, true); }
+
+bool vehicles_steer_base(World *w, int slot, Xform *base) {
+    int seat;
+    Vehicle *v = veh_of_slot(w, slot, &seat);
+    if (!v) return false;
+    vec3 p;
+    quat r;
+    pose_render(w, v, &p, &r);
+    *base = xf_make(to_world(p, r, vdef(v)->steer_pivot), r);
+    return true;
+}
+
+bool vehicles_seat_frame(World *w, int slot, Xform *out) {
+    int seat;
+    Vehicle *v = veh_of_slot(w, slot, &seat);
+    if (!v) return false;
+    vec3 p;
+    quat r;
+    pose_render(w, v, &p, &r);
+    *out = xf_make(to_world(p, r, v3_add(vdef(v)->seats[seat].pos, v3(0, 0.06f, -0.28f))), r);
+    return true;
+}
+
+static bool seat_driver(World *w, int slot) {
+    int seat;
+    Vehicle *v = veh_of_slot(w, slot, &seat);
+    return v && vdef(v)->seats[seat].driver;
 }
 
 static const char *seat_vehicle(World *w, int slot) {
@@ -2531,6 +2593,7 @@ void vehicles_register(void) {
     g_vehicle_pose.vehicle_xform = vehicle_xform;
     g_vehicle_pose.vehicle_body = hook_ignore;
     g_vehicle_pose.seat_vehicle = seat_vehicle;
+    g_vehicle_pose.seat_driver = seat_driver;
     WeaponVehicleHooks h = { hook_can_shoot, hook_spread, hook_ignore, hook_ray_tires, hook_tire_hit, hook_use_item };
     weapons_set_vehicle_hooks(&h);
     entities_set_interact_def(ET_VEHICLE, &k_vehicle_def);

@@ -6,6 +6,7 @@
 #include "core/log.h"
 #include "core/platform.h"
 #include "game/game.h"
+#include "gameplay/characters.h"
 #include "gameplay/entities.h"
 #include "gameplay/items.h"
 #include "net/net.h"
@@ -21,6 +22,8 @@ static struct {
     u64 signature;             // file count + mtimes of the hand pose files (external edit detection)
     double next_poll;
     Cvar *autoreg, *watch;
+    u32 preview_case;          // editor: a seat / ledge case previewed at preview_t
+    float preview_t;
 } HS;
 
 static HandPoseDB *db(void) { return g_engine.anim ? &g_engine.anim->handposes : NULL; }
@@ -40,8 +43,8 @@ const HandPoseScanReport *handpose_system_report(void) { return &HS.last; }
 
 static u64 dir_signature(const char *dir) {
     u64 h = 1469598103934665603ull;
-    const char *subs[2] = { "", "/styles" };
-    for (int s = 0; s < 2; s++) {
+    const char *subs[4] = { "", "/styles", "/items", "/cases" };
+    for (int s = 0; s < 4; s++) {
         char d[700];
         snprintf(d, sizeof(d), "%s%s", dir, subs[s]);
         int count = 0;
@@ -74,12 +77,16 @@ static void collect(HandPoseSourceList *l, World *w) {
         snprintf(src, sizeof(src), "interactable:%s", def->name);
         hp_source_from_interactable(l, def->name, (int)def->hands, def->hold_time, def->hand_target != NULL, src);
     }
+    hp_sources_builtin(l);
     // Interactables placed in the current level: their source names the level too.
     if (w) {
         ENT_FOREACH(w, i) {
             const InteractDef *def = (w->comps[i] & C_INTERACT) ? w->inter[i].def : NULL;
             if (!def || !def->name) continue;
-            HandPoseSource *s = hp_sources_add(l, HPC_INTERACT, def->name);
+            char bind[64];
+            snprintf(bind, sizeof(bind), "interactable:%s", def->name);
+            HandPoseSource *s = NULL;
+            for (int k = 0; k < l->count && !s; k++) if (l->v[k].is_case && !strcmp(l->v[k].bind, bind)) s = &l->v[k];
             if (s && !strstr(s->source, "level:")) {
                 char add[160];
                 snprintf(add, sizeof(add), "%s (level:%s)", s->source, w->level.name[0] ? w->level.name : "?");
@@ -135,6 +142,119 @@ bool handpose_system_save(int entry) {
     return ok;
 }
 
+bool handpose_system_save_case(int ci) {
+    HandPoseDB *d = db();
+    if (!d || ci < 0 || ci >= d->case_count) return false;
+    dirs();
+    bool ok = hp_write_case(&d->c[ci], HS.has_src ? HS.src_dir : HS.rt_dir, HS.rt_dir);
+    if (ok) d->c[ci].on_disk = true;
+    handpose_system_note_own_write();
+    g_engine.anim->manifest.hash[AC_HAND_POSES] = d->hash;
+    return ok;
+}
+
+// ------------------------------------------------------------------ runtime case lookup
+
+const HandPoseCase *handpose_case_by_hash(u32 hash) {
+    const HandPoseDB *d = db();
+    int i = d ? handpose_case_find_hash(d, hash) : -1;
+    return i >= 0 ? &d->c[i] : NULL;
+}
+
+static u32 case_for_bind(const char *bind) {
+    const HandPoseDB *d = db();
+    int i = d ? handpose_case_find_bind(d, bind) : -1;
+    return i >= 0 ? d->c[i].hash : 0;
+}
+
+u32 handpose_interact_case_name(const char *name, bool open) {
+    if (!name) return 0;
+    char bind[80];
+    if (open) {
+        snprintf(bind, sizeof(bind), "interactable:%s/open", name);
+        u32 h = case_for_bind(bind);
+        if (h) return h;
+    }
+    snprintf(bind, sizeof(bind), "interactable:%s", name);
+    return case_for_bind(bind);
+}
+
+u32 handpose_interact_case(World *w, EntityId e) {
+    if (!ent_valid(w, e)) return 0;
+    int i = (int)ENT_INDEX(e);
+    const InteractDef *def = w->inter[i].def;
+    return def ? handpose_interact_case_name(def->name, (w->flags[i] & EF_OPEN) != 0) : 0;
+}
+
+u32 handpose_seat_case(World *w, int slot) {
+    const char *v = g_vehicle_pose.seat_vehicle ? g_vehicle_pose.seat_vehicle(w, slot) : NULL;
+    if (!v) return 0;
+    bool driver = !g_vehicle_pose.seat_driver || g_vehicle_pose.seat_driver(w, slot);
+    char bind[80];
+    if (driver) snprintf(bind, sizeof(bind), "vehicle:%s:driver", v);
+    else snprintf(bind, sizeof(bind), "vehicle:passenger");
+    return case_for_bind(bind);
+}
+
+void handpose_case_preview(u32 case_hash, float t) {
+    HS.preview_case = case_hash;
+    HS.preview_t = t;
+}
+
+float handpose_seat_case_time(u32 h) {
+    if (h && h == HS.preview_case) return HS.preview_t;
+    const HandPoseCase *c = handpose_case_by_hash(h);
+    return c ? c->use : 0.0f;
+}
+
+float handpose_seat_case_weight(u32 h) {
+    if (!h || h != HS.preview_case) return 1.0f;
+    // The editor's timeline: reach in over [0, contact], hold, let go over [release, duration].
+    const HandPoseCase *c = handpose_case_by_hash(h);
+    int ph;
+    float u;
+    handpose_case_phase(c, HS.preview_t, &ph, &u);
+    return ph == HCP_REACH ? smoothstepf(0, 1, u) : ph == HCP_HOLD ? 1.0f : 1.0f - smoothstepf(0, 1, u);
+}
+
+u32 handpose_mantle_case(void) {
+    u32 h = case_for_bind("mantle");
+    const HandPoseCase *c = handpose_case_by_hash(h);
+    return c && (c->key_count || h == HS.preview_case) ? h : 0;
+}
+
+float handpose_mantle_case_time(float progress) {
+    u32 h = case_for_bind("mantle");
+    if (h && h == HS.preview_case) return HS.preview_t;
+    const HandPoseCase *c = handpose_case_by_hash(h);
+    if (!c) return 0.0f;
+    return progress < 0 ? c->use : saturate(progress) * c->duration;
+}
+
+float handpose_reload_ik_weight(const char *weapon, float elapsed, float total) {
+    if (!weapon) return -1.0f;
+    char bind[80];
+    snprintf(bind, sizeof(bind), "reload:%s", weapon);
+    u32 h = case_for_bind(bind);
+    const HandPoseCase *c = handpose_case_by_hash(h);
+    if (!c || !(c->reviewed || h == HS.preview_case)) return -1.0f;   // a stub: the controller's transitions as before
+    float t = total > 0 ? saturate(elapsed / total) * c->duration : 0.0f;
+    // Hand-off: the IK lets go over [0, contact] (the clip takes the hands), takes them back over
+    // [release, duration].
+    if (t < c->contact) return 1.0f - smoothstepf(0.0f, fmaxf(c->contact, 1e-3f), t);
+    if (t < c->release) return 0.0f;
+    return smoothstepf(c->release, fmaxf(c->duration, c->release + 1e-3f), t);
+}
+
+Xform handpose_seat_anchor(const char *vehicle, bool driver) {
+    if (!vehicle) return xf_identity();
+    char bind[80];
+    if (driver) snprintf(bind, sizeof(bind), "vehicle:%s:driver", vehicle);
+    else snprintf(bind, sizeof(bind), "vehicle:passenger");
+    const HandPoseCase *c = handpose_case_by_hash(case_for_bind(bind));
+    return c ? c->anchor : xf_identity();
+}
+
 void handpose_system_poll(void) {
     if (!HS.init || !g_engine.anim || (HS.watch && !HS.watch->i)) return;
     double now = platform_time();
@@ -151,8 +271,11 @@ void handpose_system_poll(void) {
 static int auto_entry(const InteractDef *def) {
     const HandPoseDB *d = db();
     if (!d || !def || !def->name) return -1;
-    int i = handpose_find_hash(d, handpose_entry_hash(HPC_INTERACT, def->name));
-    return i >= 0 && d->e[i].reviewed ? i : -1;   // auto-placed sockets act once a person reviewed them
+    char bind[80];
+    snprintf(bind, sizeof(bind), "interactable:%s", def->name);
+    int i = handpose_case_find_bind(d, bind);
+    // Auto-placed anchors act once a person reviewed them (or while the editor previews the case).
+    return i >= 0 && (d->c[i].reviewed || (HS.preview_case && d->c[i].hash == HS.preview_case)) ? i : -1;
 }
 
 bool handpose_interact_has_target(const InteractDef *def) { return def && (def->hand_target || auto_entry(def) >= 0); }
@@ -200,26 +323,15 @@ static void cmd_report(int argc, const char **argv) {
     free(buf);
 }
 
-// Writes every generated style default (no file yet) to assets/handposes/styles.
-static void cmd_gen_styles(int argc, const char **argv) {
-    (void)argc;
-    (void)argv;
-    HandPoseDB *d = db();
-    if (!d) return;
-    int n = 0;
-    for (int i = 0; i < d->count; i++)
-        if (d->e[i].category == HPC_STYLE && !d->e[i].on_disk) n += handpose_system_save(i) ? 1 : 0;
-    log_info("handpose_gen_styles: wrote %d style defaults to %s/styles", n, HS.has_src ? HS.src_dir : HS.rt_dir);
-}
 
 void handpose_system_init(void) {
     dirs();
     HS.autoreg = cvar_reg_bool("handpose_autoreg", true, 0, "dev builds: write a stub assets/handposes/<id>.json for every new holdable / interactable");
     HS.watch = cvar_reg_bool("handpose_watch", true, 0, "reload assets/handposes when its files change on disk");
     cmd_register("handpose_reload", cmd_reload, "re-read assets/handposes and rescan for new entries (docs/HANDPOSE.md)");
-    cmd_register("handpose_scan", cmd_scan, "scan items, attachments, vehicles and interactables for new hand pose entries");
-    cmd_register("handpose_report", cmd_report, "list unreviewed, auto-placed and orphaned hand pose entries");
-    cmd_register("handpose_gen_styles", cmd_gen_styles, "write the generated hold style / grip defaults to assets/handposes/styles");
+    cmd_register("handpose_scan", cmd_scan, "scan items, attachments, vehicles and interactables for new grips / cases");
+    cmd_register("handpose_report", cmd_report, "list unreviewed, auto-placed and orphaned grips and cases");
+
     HS.init = true;
 }
 

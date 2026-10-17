@@ -1,7 +1,9 @@
 // Procedural weapon holding: hold style -> desired item transform -> right-arm IK -> item
 // finalized from the solved right hand -> left hand IK onto grip_l (position + rotation) ->
-// fingers. Each hand's socket, wrist offset, pole hint, IK weight and finger joints come from its
-// hand pose (src/anim/handpose.c, docs/HANDPOSE.md). Hands stay glued to the item by construction:
+// fingers. The item's universal grip (src/anim/handpose.c, docs/HANDPOSE.md) gives the root
+// alignment of the item in its hold frame and each hand's IK target, pole hint, IK weight and
+// finger joints - the same in every hold point state (states only move the hold frame). Hands
+// stay glued to the item by construction:
 //   * the item is parented to the right hand (its transform is derived from the solved hand),
 //   * the left-hand target is computed from that final item transform, this tick,
 //   * the left arm never stretches: if grip_l is out of reach the item / right arm move towards
@@ -18,44 +20,48 @@ static HoldStyle blend_style(const HoldStyle *a, const HoldStyle *b, float t) {
     h.elbow_l = v3_lerp(a->elbow_l, b->elbow_l, t);
     h.shoulder_r = v3_lerp(a->shoulder_r, b->shoulder_r, t);
     h.shoulder_l = v3_lerp(a->shoulder_l, b->shoulder_l, t);
-    for (int i = 0; i < 5; i++) { h.curl_r[i] = lerpf(a->curl_r[i], b->curl_r[i], t); h.curl_l[i] = lerpf(a->curl_l[i], b->curl_l[i], t); }
     return h;
-}
-
-void proc_curl_fingers(const Skeleton *s, Pose *pose, Xform *model, int side, const float *curl, const HandFrames *hf, float weight) {
-    HandFingers j;
-    handpose_from_curl(curl, j);
-    handpose_apply_fingers(s, pose, model, side, j, hf, weight);
 }
 
 // ------------------------------------------------------------------ hand poses on the item
 
 static bool xf_is_identity(Xform x) { return x.t.x == 0 && x.t.y == 0 && x.t.z == 0 && x.r.x == 0 && x.r.y == 0 && x.r.z == 0 && x.r.w == 1; }
 
-// One hand's target this tick: the hold style's pose (base) with the item's entry on top. The
-// socket is the item's own (grip_r / grip_l) unless the pose overrides it; the wrist offset is
-// folded in so the IK, the glue check and the item finalization all use the same palm target.
-static u32 hand_target(const ProcInput *in, const HoldStyle *hs, const ItemSockets *it, int hand, int state, HandHold *o) {
+Xform proc_item_root(const ProcInput *in, const ItemSockets *it) {
+    const HandPoseDB *db = in->handposes;
+    return db && it ? handpose_root(db, handpose_find_hash(db, it->pose_id[1])) : xf_identity();
+}
+
+void proc_hand_grip(const HandPoseDB *db, const HoldStyle *hs, const ItemSockets *it, int hand, float root_scale, HandHold *o) {
     memset(o, 0, sizeof(*o));
     o->sock = hand ? it->grip_r : it->grip_l;
     o->pole = hand ? hs->elbow_r : hs->elbow_l;
     o->ikw = 1.0f;
-    const HandPoseDB *db = in->handposes;
     int base = db ? handpose_find_hash(db, handpose_style_hash(hs->name)) : -1;
     int entry = db ? handpose_find_hash(db, it->pose_id[hand]) : -1;
-    if (base < 0 && entry < 0) {
-        handpose_from_curl(hand ? hs->curl_r : hs->curl_l, o->j);   // no data: the style's curl
-        return dg_hash_u32(hs->hash ^ (u32)hand);
-    }
     HandPose p;
-    handpose_resolve_over(db, base, entry, hand, state, &p);
+    handpose_resolve_over(db, base, entry, hand, &p);   // no data: an open hand on the item's sockets
     if (p.has_socket) o->sock = it->has_pose_space[hand] ? xf_mul(it->pose_space[hand], p.socket) : p.socket;
     if (!xf_is_identity(p.wrist)) o->sock = xf_mul(o->sock, p.wrist);
+    // The item frame is scaled by the root's calibration scale: the IK targets scale with it.
+    o->sock.t = v3_scale(o->sock.t, root_scale);
+    o->sock.s = v3(1, 1, 1);
     if (p.has_pole) o->pole = p.pole;
     o->ikw = p.ik_weight;
     memcpy(o->j, p.j, sizeof(o->j));
-    // Edits to the data apply at once (the editor drags them); entry / style / state changes blend.
-    return dg_hash_u32((u32)(base + 1) * 2654435761u ^ (u32)(entry + 1) * 40503u ^ (u32)state * 97u ^ (u32)hand);
+}
+
+// One hand's target this tick: the hold style's pose (base) with the item's grip on top. The
+// socket is the item's own (grip_r / grip_l) unless the grip sets its IK target; the wrist offset
+// is folded in so the IK, the glue check and the item finalization all use the same palm target.
+// The grip never depends on the hold point state.
+static u32 hand_target(const ProcInput *in, const HoldStyle *hs, const ItemSockets *it, int hand, float root_scale, HandHold *o) {
+    proc_hand_grip(in->handposes, hs, it, hand, root_scale, o);
+    const HandPoseDB *db = in->handposes;
+    int base = db ? handpose_find_hash(db, handpose_style_hash(hs->name)) : -1;
+    int entry = db ? handpose_find_hash(db, it->pose_id[hand]) : -1;
+    // Edits to the data apply at once (the editor drags them); entry / style changes blend.
+    return dg_hash_u32((u32)(base + 1) * 2654435761u ^ (u32)(entry + 1) * 40503u ^ (u32)hand);
 }
 
 static float decay5(float x) {
@@ -169,10 +175,16 @@ void proc_hold(ProcState *st, const ProcInput *in, Pose *pose, Xform *model) {
     hi.style = &proc_hold_style(p, st->style)->hp;
     hi.ovr = &it->hp;
     hi.style_key = in->item_key * 64 + st->style;
+    // The grip's root: the item relative to its hold frame (the hold point places the frame; the
+    // anchor stays a hold frame point, the sight / pivot are the item's, moved by the root, so
+    // ADS still puts the real sight on the view axis).
+    Xform root = proc_item_root(in, it);
+    float rs = root.s.x;
+    root.s = v3(1, 1, 1);
     hi.anchor = xf_make(it->anchor.t, quat_identity());   // the anchor is a point: the hold point's rotation orients the item
-    hi.sight = it->sight;
-    hi.pivot = it->pivot;
-    hi.length = it->length;
+    hi.sight = xf_point(root, v3_scale(it->sight, rs));
+    hi.pivot = xf_point(root, v3_scale(it->pivot, rs));
+    hi.length = it->length * rs;
     hi.has_item = true;
     hi.ads = in->ads_t > 0.5f;
     hi.sprint = in->sprinting;
@@ -210,14 +222,16 @@ void proc_hold(ProcState *st, const ProcInput *in, Pose *pose, Xform *model) {
     hi.kick_params = in->hold_kick;
     holdpoint_eval(&st->hp, &hi, &st->hp_out);
     st->item_cam = st->hp_out.item;
-    // Hand poses for this state (sockets in item space incl. the wrist offset, poles, fingers).
+    // The universal grip (sockets in item space incl. the wrist offset and the root scale, poles,
+    // fingers): one per item, whatever the state.
     for (int h = 0; h < 2; h++) {
         HandHold tg;
-        u32 key = hand_target(in, &hs, it, h, HPS_FROM_HOLD(st->hp_out.state), &tg);
+        u32 key = hand_target(in, &hs, it, h, rs, &tg);
         hand_hold_update(&st->hand[h], &tg, key, in->dt, fmaxf(0.01f, p->style_blend_time));
     }
     const Xform sock_r = st->hand[1].sock, sock_l0 = st->hand[0].sock;
-    Xform desired = xf_mul(cam, st->hp_out.item);
+    Xform desired = xf_mul(xf_mul(cam, st->hp_out.item), root);
+    st->item_scale = rs;
     // Upper body follows the hold point: clavicle additive from its offset to the hip pose.
     vec3 off = st->hp_out.offset;
     float cg = hs.hp.clavicle_gain;
@@ -360,15 +374,15 @@ void proc_hand_anchors(ProcState *st, const ProcInput *in, Pose *pose, Xform *mo
         (void)x;
         quat pr = in->hand_anchor_rot_valid ? quat_mul(inv_root.r, in->hand_anchor_rot[h]) : quat_identity();
         Xform palm = xf_make(target, pr);
-        // Vehicle controls: the hand pose's socket is an offset from the anchor (relative entry).
+        // Cases (vehicle controls, ledges): the case pose at its timeline time; its socket (anchor *
+        // key IK target) is an offset from the gameplay anchor.
         HandPose hp;
         bool posed = false;
-        if (in->handposes && (in->anchor_pose[h] || in->anchor_pose_base[h])) {
-            int base = handpose_find_hash(in->handposes, in->anchor_pose_base[h]), entry = handpose_find_hash(in->handposes, in->anchor_pose[h]);
-            if (base >= 0 || entry >= 0) {
-                handpose_resolve_over(in->handposes, base, entry, h, in->anchor_pose_state[h], &hp);
-                if (hp.has_socket) palm = xf_mul(palm, hp.socket);
-                palm = xf_mul(palm, hp.wrist);
+        if (in->handposes && (in->anchor_case[h] || in->anchor_pose_base[h])) {
+            int base = handpose_find_hash(in->handposes, in->anchor_pose_base[h]), ci = handpose_case_find_hash(in->handposes, in->anchor_case[h]);
+            if (base >= 0 || ci >= 0) {
+                handpose_case_eval(in->handposes, ci, base, h, in->anchor_case_t[h], &hp);
+                palm = xf_mul(palm, hp.socket);
                 posed = true;
             }
         }

@@ -1,0 +1,13 @@
+{
+  "schema": 2,
+  "id": "bat",
+  "label": "Baseball Bat",
+  "category": "weapon",
+  "source": "data/weapons/05_bat.json",
+  "inherits": "style/melee_2h",
+  "hands": ["left", "right"],
+  "reviewed": false,
+  "auto_placed": false,
+  "left": {},
+  "right": {}
+}

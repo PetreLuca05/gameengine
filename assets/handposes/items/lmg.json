@@ -1,0 +1,13 @@
+{
+  "schema": 2,
+  "id": "lmg",
+  "label": "LMG",
+  "category": "weapon",
+  "source": "data/weapons/08_lmg.json",
+  "inherits": "style/lmg",
+  "hands": ["left", "right"],
+  "reviewed": false,
+  "auto_placed": false,
+  "left": {},
+  "right": {}
+}

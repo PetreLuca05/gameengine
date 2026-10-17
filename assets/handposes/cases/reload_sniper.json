@@ -1,0 +1,17 @@
+{
+  "schema": 2,
+  "id": "reload_sniper",
+  "label": "Reload: Bolt Sniper",
+  "kind": "reload",
+  "bind": "reload:sniper",
+  "source": "data/weapons/10_sniper.json",
+  "inherits": "style/rifle",
+  "hands": ["left", "right"],
+  "reviewed": false,
+  "auto_placed": false,
+  "setup": { "item": "sniper", "distance": 0.75 },
+  "anchor": { "pos": [0, 0, 0], "q": [0, 0, 0, 1] },
+  "duration": 3.2,
+  "markers": { "contact": 0.15, "use": 1.575, "release": 3 },
+  "keys": []
+}

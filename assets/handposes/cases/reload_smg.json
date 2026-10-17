@@ -1,0 +1,17 @@
+{
+  "schema": 2,
+  "id": "reload_smg",
+  "label": "Reload: SMG",
+  "kind": "reload",
+  "bind": "reload:smg",
+  "source": "data/weapons/07_smg.json",
+  "inherits": "style/smg",
+  "hands": ["left", "right"],
+  "reviewed": false,
+  "auto_placed": false,
+  "setup": { "item": "smg", "distance": 0.75 },
+  "anchor": { "pos": [0, 0, 0], "q": [0, 0, 0, 1] },
+  "duration": 1.9,
+  "markers": { "contact": 0.15, "use": 0.92499995, "release": 1.6999999 },
+  "keys": []
+}

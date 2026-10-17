@@ -1,0 +1,13 @@
+{
+  "schema": 2,
+  "id": "sniper",
+  "label": "Bolt Sniper",
+  "category": "weapon",
+  "source": "data/weapons/10_sniper.json",
+  "inherits": "style/rifle",
+  "hands": ["left", "right"],
+  "reviewed": false,
+  "auto_placed": false,
+  "left": {},
+  "right": {}
+}

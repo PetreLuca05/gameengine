@@ -1,0 +1,17 @@
+{
+  "schema": 2,
+  "id": "reload_shotgun",
+  "label": "Reload: Shotgun",
+  "kind": "reload",
+  "bind": "reload:shotgun",
+  "source": "data/weapons/03_shotgun.json",
+  "inherits": "style/shotgun",
+  "hands": ["left", "right"],
+  "reviewed": false,
+  "auto_placed": false,
+  "setup": { "item": "shotgun", "distance": 0.75 },
+  "anchor": { "pos": [0, 0, 0], "q": [0, 0, 0, 1] },
+  "duration": 2.6,
+  "markers": { "contact": 0.15, "use": 1.275, "release": 2.3999999 },
+  "keys": []
+}
