@@ -194,12 +194,12 @@ ActResult act_step(ActionState *a, const ActInput *in) {
         // Hold through the end: a new action needs a fresh press.
         if (!in->use_down) {
             a->phase = ACTP_IDLE;
-            a->kind = ACT_NONE;
+            a->kind = RACT_NONE;
             a->target = 0;
         }
         return ACTR_NONE;
     case ACTP_IDLE:
-        if (in->use_pressed && in->afford != ACT_NONE && in->target && in->target_ok && in->dur > 0) {
+        if (in->use_pressed && in->afford != RACT_NONE && in->target && in->target_ok && in->dur > 0) {
             a->kind = (u8)in->afford;
             a->phase = ACTP_RUNNING;
             a->cancel = ACTC_NONE;
@@ -240,7 +240,7 @@ void act_cancel(ActionState *a, ActCancel why) {
 
 const char *act_kind_name(ActKind k) {
     static const char *n[] = { "none", "revive", "extract", "insert", "self_revive" };
-    return (unsigned)k < ACT_COUNT ? n[k] : "?";
+    return (unsigned)k < RACT_COUNT ? n[k] : "?";
 }
 
 const char *act_cancel_name(ActCancel c) {
@@ -397,6 +397,13 @@ FabEvent fab_step(FabMachine *f, const ReviveRules *r, u32 tick) {
     default:
         return FABE_NONE;
     }
+}
+
+void fab_abort(FabMachine *f, u32 tick) {
+    if (f->state != FAB_RECONSTRUCTING) return;
+    f->current = 0;
+    f->state = FAB_COOLDOWN;
+    f->state_tick = tick;
 }
 
 int fab_set_power(FabMachine *f, const ReviveRules *r, bool on, u32 tick, u8 *out, int out_cap) {

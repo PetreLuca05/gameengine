@@ -139,7 +139,7 @@ static void test_actions(void) {
     ReviveRules r;
     revive_rules_defaults(&r);
     struct { ActKind k; float s; int ticks; } cases[] = {
-        { ACT_EXTRACT, r.extract_time, 180 }, { ACT_INSERT, r.insert_time, 300 }, { ACT_REVIVE, r.revive_time, 360 },
+        { RACT_EXTRACT, r.extract_time, 180 }, { RACT_INSERT, r.insert_time, 300 }, { RACT_REVIVE, r.revive_time, 360 },
     };
     for (int c = 0; c < 3; c++) {
         ActionState a;
@@ -160,7 +160,7 @@ static void test_actions(void) {
     for (int k = 0; k < 4; k++) {
         ActionState a;
         memset(&a, 0, sizeof(a));
-        ActInput in = hold(5, ACT_EXTRACT, 180);
+        ActInput in = hold(5, RACT_EXTRACT, 180);
         in.use_pressed = true;
         act_step(&a, &in);
         in.use_pressed = false;
@@ -176,7 +176,7 @@ static void test_actions(void) {
     {
         ActionState a;
         memset(&a, 0, sizeof(a));
-        ActInput in = hold(5, ACT_EXTRACT, 180);
+        ActInput in = hold(5, RACT_EXTRACT, 180);
         in.pos = v3(0, 0, 0);
         in.use_pressed = true;
         act_step(&a, &in);
@@ -188,17 +188,17 @@ static void test_actions(void) {
     {
         ActionState a;
         memset(&a, 0, sizeof(a));
-        ActInput in = hold(5, ACT_NONE, 180);
+        ActInput in = hold(5, RACT_NONE, 180);
         in.use_pressed = true;
         CHECK(act_step(&a, &in) == ACTR_NONE, "nothing affordable");
-        in = hold(5, ACT_EXTRACT, 180);
+        in = hold(5, RACT_EXTRACT, 180);
         CHECK(act_step(&a, &in) == ACTR_NONE, "needs a fresh press");
     }
     // Host cancel (sample gone, target revived by someone else).
     {
         ActionState a;
         memset(&a, 0, sizeof(a));
-        ActInput in = hold(5, ACT_REVIVE, 360);
+        ActInput in = hold(5, RACT_REVIVE, 360);
         in.use_pressed = true;
         act_step(&a, &in);
         act_cancel(&a, ACTC_HOST);
@@ -215,7 +215,7 @@ static void test_reconcile(void) {
     memset(&client, 0, sizeof(client));
     ActInput inputs[200];
     for (int t = 0; t < 200; t++) {
-        inputs[t] = hold(9, ACT_EXTRACT, 180);
+        inputs[t] = hold(9, RACT_EXTRACT, 180);
         inputs[t].use_pressed = t == 0;
     }
     for (int t = 0; t < 120; t++) act_step(&client, &inputs[t]);   // client predicted 120 ticks
@@ -340,13 +340,13 @@ static void test_full_loop(void) {
     corpse_init(&c, &r, 1, (u32)t);
     ActionState a;
     memset(&a, 0, sizeof(a));
-    CHECK(run_until_done(&a, hold(99, ACT_EXTRACT, revive_ticks(r.extract_time)), 400) == 180, "extracted");
+    CHECK(run_until_done(&a, hold(99, RACT_EXTRACT, revive_ticks(r.extract_time)), 400) == 180, "extracted");
     CHECK(corpse_extract(&c, 0, (u32)t + 180), "corpse sample");
     DnaRegistry g;
     dna_reset(&g);
     int id = dna_alloc(&g, 1, "Bo", 0, 0, 99);
     memset(&a, 0, sizeof(a));
-    CHECK(run_until_done(&a, hold(50, ACT_INSERT, revive_ticks(r.insert_time)), 400) == 300, "inserted");
+    CHECK(run_until_done(&a, hold(50, RACT_INSERT, revive_ticks(r.insert_time)), 400) == 300, "inserted");
     FabMachine f;
     fab_init(&f, true);
     CHECK(fab_enqueue(&f, &r, id), "queued");

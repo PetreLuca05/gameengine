@@ -31,7 +31,8 @@ SnapFrame *snap_history_find(SnapHistory *h, u32 tick) {
 
 // ------------------------------------------------------------------ capture
 
-static bool always_relevant(EntityType t) { return t == ET_LIGHT || t == ET_GATE || t == ET_PLAYER || t == ET_VEHICLE; }
+// Corpses and fabricators too: a dead player anywhere follows the recovery of its body (docs/REVIVE.md).
+static bool always_relevant(EntityType t) { return t == ET_LIGHT || t == ET_GATE || t == ET_PLAYER || t == ET_VEHICLE || t == ET_CORPSE || t == ET_FABRICATOR; }
 
 static void capture_one(World *w, int i, NetEnt *e) {
     memset(e, 0, sizeof(*e));
@@ -45,6 +46,7 @@ static void capture_one(World *w, int i, NetEnt *e) {
     e->item = w->item[i];
     memcpy(e->attach, w->attach[i], sizeof(e->attach));
     if (w->type[i] == ET_PICKUP) e->count = w->pickup[i].count;
+    if (w->type[i] == ET_CORPSE || w->type[i] == ET_FABRICATOR) { e->count = w->aux_count[i]; e->extra = w->aux_extra[i]; }
     if (w->comps[i] & C_HEALTH) {
         e->hp = w->health[i].hp;
         e->max_hp = w->health[i].max_hp;
@@ -446,6 +448,12 @@ static void setup_replica(World *w, const NetEnt *e, int local_slot) {
     if (t == ET_PICKUP) w->comps[i] |= C_PICKUP;
     if (t == ET_CONTAINER) w->comps[i] |= C_CONTAINER;
     if (t == ET_DOOR) w->door[i].knob_local = e->extra;
+    if (t == ET_CORPSE || t == ET_FABRICATOR) {
+        // entity_setup reads these (the corpse's player, the fabricator's queue).
+        w->item[i] = e->item;
+        w->aux_count[i] = e->count;
+        w->aux_extra[i] = e->extra;
+    }
     if (t == ET_PLAYER) {
         int slot = e->slot;
         w->player_slot[i] = (u8)slot;
@@ -530,6 +538,7 @@ void repl_apply(World *w, const SnapFrame *f, int local_slot, InterpBuffer *inte
         if (e->type == ET_PICKUP) memcpy(w->pickup[i].att, e->attach, sizeof(w->pickup[i].att));
         if (e->type == ET_PICKUP) { w->pickup[i].item = e->item; w->pickup[i].count = e->count; }
         if (e->type == ET_DOOR) w->door[i].key_item = e->item;
+        if (e->type == ET_CORPSE || e->type == ET_FABRICATOR) { w->aux_count[i] = e->count; w->aux_extra[i] = e->extra; }
         if (w->comps[i] & C_HEALTH) {
             w->health[i].hp = e->hp;
             w->health[i].max_hp = e->max_hp;

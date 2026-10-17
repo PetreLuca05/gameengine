@@ -31,6 +31,8 @@ typedef enum EventType {
     EV_VEHICLE,        // vehicles: id 1 = ejected at speed (ent = player, dir = velocity, value = stun s)
     EV_PING,           // pings (gameplay/ping.h): id = uid, ent = owner slot, ent2 = type, pos, value = lifetime (< 0: removed), text = owner name
     EV_EXPLOSION,      // throwables: pos, value = radius, id = item
+    EV_REVIVE,         // revive loop (gameplay/revive/revive.h ReviveEvent): id = kind, ent = subject, ent2 = other, value, pos, text = names
+    EV_DNA,            // DNA registry entry (gameplay/revive): id = sample id, data = DnaSample (status DNA_FREE = removed)
 } EventType;
 
 // EV_KILL payload (data): names as shown in the kill feed and the killer's weapon item.

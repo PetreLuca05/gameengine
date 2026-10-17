@@ -90,6 +90,12 @@ static void broadcast(World *w, u32 uid, int slot, int type, vec3 pos, float lif
     ev_push(w, &ev);
 }
 
+// Host: a ping on a player's behalf (auto "Need help" when downed / dead): no rate limit, the usual cap.
+void game_sv_auto_ping(World *w, int slot, int type, vec3 pos) {
+    if (slot < 0 || slot >= MAX_PLAYERS || !w->players[slot].active || type < 0 || type >= PING_TYPES) return;
+    broadcast(w, ++G->ping_uid, slot, type, pos, game_ping_types()->t[type].lifetime);
+}
+
 // Host: RPC_PING from a player.
 void game_sv_ping(World *w, int slot, int a, int b, int c) {
     int type;

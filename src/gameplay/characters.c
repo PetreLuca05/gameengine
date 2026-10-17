@@ -18,6 +18,7 @@
 #include "core/jobs.h"
 #include "assets/assets.h"
 #include "game/game.h"
+#include "gameplay/revive/revive.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -585,6 +586,8 @@ static void player_inputs(World *w, CharacterInst *c, const Player *p, CharInput
     const InvSlot *eq = weapon_equipped(w, c->slot);
     if (g_vehicle_pose.holstered && g_vehicle_pose.holstered(w, c->slot)) eq = NULL;   // both hands on the wheel
     u16 item = eq ? eq->item : 0;
+    u16 shown = revive_held_override(w, c->slot);   // syringe / DNA vial during a timed action (docs/REVIVE.md)
+    if (shown) { item = shown; eq = NULL; }
     in->weapon_id = item;
     in->weapon_type = item_hold_style(w, item, &c->item_weapon, &c->item_def);
     // Phone (docs/PHONE.md): camera mode = aiming with a camera item; landscape / driven rotation
@@ -784,8 +787,16 @@ static void update_limbs(CharacterInst *c, float dt) {
 
 static void zombie_ai(World *w, CharacterInst *c, int i, float dt);
 
+static CharacterInst *corpse_for_slot(World *w, int slot);
+static void corpse_adopt(World *w, CharacterInst *corpse, CharacterInst *c);
+
 static void revive(World *w, CharacterInst *c) {
     if (c->dead && g_life_hook) g_life_hook(w, c, false);
+    // A player coming back leaves its body behind: the corpse entity takes the ragdoll / pose.
+    if (c->dead && c->is_player && !c->tool_rag && c->have_pose) {
+        CharacterInst *body = corpse_for_slot(w, c->slot);
+        if (body) corpse_adopt(w, body, c);
+    }
     memcpy(c->armor_left, c->def->armor_hits, sizeof(c->armor_left));
     c->dead = c->rag_pending = c->settled = c->tool_rag = false;
     if (c->rag.active) { ragdoll_destroy(&c->rag, w->phys); w->chars->ragdolls--; }
@@ -894,6 +905,7 @@ void chars_host_tick(World *w, float dt) {
             else shift_hitboxes(w, c, i);
             continue;
         }
+        if (c->corpse) continue;   // bodies never animate
         if (w->type[i] == ET_ZOMBIE) zombie_ai(w, c, i, dt);
         if (w->type[i] == ET_ZOMBIE && !c->history) chars_ensure_history(c);
         sim_one(w, c, i, dt);
@@ -1055,7 +1067,7 @@ void chars_client_tick(World *w, double rt, float dt) {
     cs->pending_count = keep;
     for (int k = 0; k < MAX_CHARACTERS; k++) {
         CharacterInst *c = w->chars->c[k];
-        if (!c || !ent_valid(w, c->ent) || c->local) continue;
+        if (!c || !ent_valid(w, c->ent) || c->local || c->corpse) continue;
         client_one(w, c, (int)ENT_INDEX(c->ent), rt, dt);
     }
 }
@@ -1087,7 +1099,7 @@ void chars_local_predict(World *w, int slot, bool first) {
 
 const AnimNetState *chars_net_state(const World *w, int i) {
     CharacterInst *c = char_get_index(w, i);
-    return c ? &c->net : NULL;
+    return c && !c->corpse ? &c->net : NULL;
 }
 
 // ------------------------------------------------------------------ events
@@ -2325,6 +2337,101 @@ bool chars_head_world(World *w, EntityId e, float alpha, vec3 *out) {
     int head = s->role[BR_HEAD];
     if (head < 0) return false;
     *out = pose[head].t;
+    return true;
+}
+
+// ------------------------------------------------------------------ corpses (docs/REVIVE.md)
+
+static CharacterInst *corpse_for_slot(World *w, int slot) {
+    CharacterInst *best = NULL;
+    for (int k = 0; k < MAX_CHARACTERS; k++) {
+        CharacterInst *o = w->chars->c[k];
+        if (!o || !o->corpse || o->adopted || !ent_valid(w, o->ent)) continue;
+        if ((int)w->item[ENT_INDEX(o->ent)] != slot) continue;
+        if (!best || ENT_INDEX(o->ent) > ENT_INDEX(best->ent)) best = o;
+    }
+    return best;
+}
+
+static void corpse_adopt(World *w, CharacterInst *body, CharacterInst *c) {
+    (void)w;
+    Xform *t;
+    t = body->pose_cur; body->pose_cur = c->pose_cur; c->pose_cur = t;
+    t = body->pose_prev; body->pose_prev = c->pose_prev; c->pose_prev = t;
+    free(body->settled_pose);
+    body->settled_pose = c->settled_pose;
+    c->settled_pose = NULL;
+    body->rag = c->rag;   // the physics bodies keep simulating under the corpse
+    memset(&c->rag, 0, sizeof(c->rag));
+    memcpy(body->parts, c->parts, sizeof(body->parts));
+    body->root = c->root;
+    body->body_yaw = c->body_yaw;
+    body->death_tick = c->death_tick;
+    body->death_seed = c->death_seed;
+    body->dead = true;
+    body->settled = c->settled || !body->rag.active;
+    body->rag_pending = false;
+    body->have_pose = true;
+    body->adopted = true;
+    body->lod = c->lod;
+}
+
+CharacterInst *chars_attach_corpse(World *w, EntityId corpse, int owner_slot) {
+    if (!w->chars || !LIB) return NULL;
+    int i = (int)ENT_INDEX(corpse);
+    u8 id = w->char_id[i];
+    const Player *p = owner_slot >= 0 && owner_slot < MAX_PLAYERS ? &w->players[owner_slot] : NULL;
+    if (!id && p && p->active && ent_valid(w, p->ent)) id = w->char_id[ENT_INDEX(p->ent)];
+    if (!id) {
+        const CharacterDef *cd = anim_lib_char_by_id(LIB, "player");
+        if (cd) id = cd->net_id;
+    }
+    CharacterInst *c = id ? char_attach(w, corpse, id) : NULL;
+    if (!c) return NULL;
+    c->corpse = true;
+    c->is_player = false;
+    c->slot = -1;
+    c->dead = true;
+    c->rag_pending = false;
+    c->death_seed = (u8)(dg_hash_u32(corpse) & 0xFF);
+    CharacterInst *pc = p && p->active ? char_get(w, p->ent) : NULL;
+    if (pc) memcpy(c->parts, pc->parts, sizeof(c->parts));
+    // The player is already back (late join, spawn_corpse): a seeded lying pose at the corpse.
+    bool owner_dead = p && p->active && (p->sim.move.mode == MOVE_DEAD || (w->flags[ENT_INDEX(p->ent)] & EF_DEAD));
+    if (!owner_dead) c->settled = true;
+    return c;
+}
+
+static const Xform *current_pose(World *w, CharacterInst *c) {
+    static Xform pose[ANIM_MAX_BONES];
+    if (!c->have_pose) return NULL;
+    if (c->rag.active) ragdoll_read_pose(&c->rag, w->phys, &LIB->ragdoll, &LIB->skel, pose);
+    else if (c->dead && c->settled_pose) memcpy(pose, c->settled_pose, sizeof(Xform) * (size_t)LIB->skel.count);
+    else memcpy(pose, c->pose_cur, sizeof(Xform) * (size_t)LIB->skel.count);
+    return pose;
+}
+
+bool chars_body_axis(World *w, EntityId e, vec3 *pelvis, vec3 *head) {
+    CharacterInst *c = char_get(w, e);
+    if (!c || !LIB) return false;
+    const Xform *pose = current_pose(w, c);
+    int hb = LIB->skel.role[BR_HIPS], hd = LIB->skel.role[BR_HEAD];
+    if (!pose || hb < 0 || hd < 0) return false;
+    *pelvis = pose[hb].t;
+    *head = pose[hd].t;
+    return true;
+}
+
+bool chars_extract_points(World *w, EntityId e, vec3 out[2]) {
+    CharacterInst *c = char_get(w, e);
+    if (!c || !LIB) return false;
+    const Xform *pose = current_pose(w, c);
+    const Skeleton *s = &LIB->skel;
+    int chest = s->role[BR_SPINE2], arm = s->role[BR_L_FOREARM], neck = s->role[BR_NECK];
+    if (!pose || chest < 0) return false;
+    out[0] = pose[chest].t;
+    // The needle: the forearm (inner elbow) when it is reachable, else the neck.
+    out[1] = arm >= 0 ? v3_lerp(pose[arm].t, pose[s->role[BR_L_ARM] >= 0 ? s->role[BR_L_ARM] : arm].t, 0.15f) : (neck >= 0 ? pose[neck].t : pose[chest].t);
     return true;
 }
 

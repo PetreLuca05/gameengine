@@ -104,7 +104,7 @@ DG_INLINE float down_bleed_frac(const DownState *d) { return d->bleed_total ? (f
 
 // ------------------------------------------------------------------ timed actions (predicted)
 
-typedef enum ActKind { ACT_NONE, ACT_REVIVE, ACT_EXTRACT, ACT_INSERT, ACT_SELF_REVIVE, ACT_COUNT } ActKind;
+typedef enum ActKind { RACT_NONE, RACT_REVIVE, RACT_EXTRACT, RACT_INSERT, RACT_SELF_REVIVE, RACT_COUNT } ActKind;
 typedef enum ActPhase { ACTP_IDLE, ACTP_RUNNING, ACTP_DONE, ACTP_CANCELLED } ActPhase;
 typedef enum ActCancel { ACTC_NONE, ACTC_RELEASE, ACTC_MOVE, ACTC_DAMAGE, ACTC_RANGE, ACTC_TARGET, ACTC_HOST } ActCancel;
 
@@ -121,7 +121,7 @@ typedef struct ActionState {
 typedef struct ActInput {
     bool use_down, use_pressed;
     u32 target;                 // the focused entity this tick
-    ActKind afford;             // what the focused target offers right now (caller decides), ACT_NONE = nothing
+    ActKind afford;             // what the focused target offers right now (caller decides), RACT_NONE = nothing
     bool target_ok;             // the locked target is still valid + in range (caller)
     bool damaged;               // took damage this tick (host only; clients get it back by reconcile)
     vec3 pos;                   // feet
@@ -206,6 +206,8 @@ void fab_init(FabMachine *f, bool powered);
 bool fab_enqueue(FabMachine *f, const ReviveRules *r, int sample_id);
 bool fab_remove(FabMachine *f, int sample_id);   // drop from the queue (sample invalid)
 FabEvent fab_step(FabMachine *f, const ReviveRules *r, u32 tick);
+// The player being reconstructed came back another way (timed respawn) or left: skip to the cooldown.
+void fab_abort(FabMachine *f, u32 tick);
 // Power change: when it goes off mid-cycle the current + queued samples are ejected (rule).
 // Returns the number of ejected sample ids written to out.
 int fab_set_power(FabMachine *f, const ReviveRules *r, bool on, u32 tick, u8 *out, int out_cap);
