@@ -11,6 +11,7 @@
 #include "gameplay/weapons.h"
 #include "gameplay/characters.h"
 #include "gameplay/entities.h"
+#include "gameplay/revive/revive.h"
 #include "editor/handpose/hp_system.h"
 #include "cJSON.h"
 #include <stdlib.h>
@@ -368,6 +369,9 @@ void hands_update(const HandsInput *in) {
         H->weapon = &H->weff;
     }
     H->held_item = slot ? item_def(w->items, slot->item) : NULL;
+    // Timed actions show their tool: the syringe while extracting, the vial while inserting (docs/REVIVE.md).
+    u16 tool = revive_held_override(w, in->player);
+    if (tool) { H->weapon = NULL; H->held_item = item_def(w->items, tool); }
     bool weapon_two_handed = false;
     if (H->weapon && H->weapon->kind != WPN_MELEE && !sim->wpn.reloading) {
         vec3 support = v3_add(target_pos[HAND_RIGHT], quat_rotate(target_rot[HAND_RIGHT], H->weapon->support_offset));
@@ -439,11 +443,16 @@ void hands_update(const HandsInput *in) {
         float reach_time = 0.16f;
         float hold_time = def ? (def->hold_time > 0 ? def->hold_time + 0.25f : 0.38f) : (H->ia_target == ENT_NONE ? 0.12f : 0.0f);
         if (H->ia_phase == IA_REACH && H->ia_t >= reach_time) { H->ia_phase = IA_HOLD; H->ia_t = 0; }
+        // Timed actions (revive_assist / extract_blood / fabricator_insert) hold while the predicted action runs.
+        bool timed = def && def->action;
+        const ActionState *act = &w->players[in->player].sim.act;
+        bool acting = timed && act->phase == ACTP_RUNNING && act->target == H->ia_target;
         if (H->ia_phase == IA_HOLD) {
             bool hold_interaction = def && def->hold_time > 0;
             bool released = hold_interaction && !in->use_held && H->ia_t < def->hold_time;
             bool gone = !valid && H->ia_target != ENT_NONE;
-            if (gone || released || H->ia_t >= hold_time) { H->ia_phase = IA_RETURN; H->ia_t = 0; }
+            if (timed) { if (!acting && H->ia_t > 0.1f) { H->ia_phase = IA_RETURN; H->ia_t = 0; } }
+            else if (gone || released || H->ia_t >= hold_time) { H->ia_phase = IA_RETURN; H->ia_t = 0; }
         }
         if (H->ia_phase == IA_RETURN && H->ia_t >= 0.22f) H->ia_phase = IA_NONE;
 
@@ -455,7 +464,7 @@ void hands_update(const HandsInput *in) {
         bool holding = H->weapon || H->held_item;
         int free_hand = holding ? HAND_LEFT : HAND_RIGHT;
         for (int h = 0; h < 2; h++) {
-            bool uses_hand = (H->ia_mode == HANDS_BOTH && !holding) || h == free_hand;
+            bool uses_hand = (H->ia_mode == HANDS_BOTH && (!holding || timed)) || h == free_hand;   // the tool hand reaches too
             if (!uses_hand) continue;
             vec3 tp;
             quat tr;
@@ -470,7 +479,7 @@ void hands_update(const HandsInput *in) {
                 H->ov_rot[h] = H->ia_last_rot[h];
                 H->ov_grip[h] = H->ia_mode == HANDS_POINT ? GRIP_POINT : GRIP_GRAB;
                 H->ov_pose[h] = def ? handpose_entry_hash(HPC_INTERACT, def->name) : 0;
-                H->ov_state[h] = def && def->hold_time > 0 ? HPS_HOLD : HPS_USE;
+                H->ov_state[h] = def && (def->hold_time > 0 || timed) ? HPS_HOLD : HPS_USE;
             }
             // A one-handed interaction releases the weapon support grip.
             if (h == free_hand && weapon_two_handed && wgt > 0) weapon_two_handed = false;

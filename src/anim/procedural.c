@@ -356,6 +356,68 @@ void proc_seated(ProcState *st, const ProcInput *in, Pose *pose, Xform *model) {
     }
 }
 
+// Knocked down (docs/REVIVE.md): no kneel clips ship, so the crouch pose is bent into a kneel.
+// The hips drop to kneeling height, the thighs hang near vertical with the knees on the ground a
+// little ahead, the shins lie back along the floor and the torso straightens over the hips (the
+// spine / hold passes then aim the head and a sidearm as usual).
+static void proc_kneel(ProcState *st, const ProcInput *in, Pose *pose, Xform *model) {
+    float k = 1.0f - expf(-in->dt * 6.0f);
+    st->kneel_w = lerpf(st->kneel_w, in->kneel, in->dt > 0 ? k : 1.0f);
+    float w = smoothstepf(0.0f, 1.0f, st->kneel_w);
+    if (w < 0.01f) return;
+    const Skeleton *s = in->skel;
+    int hips = s->role[BR_HIPS], spine = s->role[BR_SPINE], neck = s->role[BR_NECK];
+    if (hips < 0) return;
+    static const BoneRole leg[2][4] = { { BR_L_UPLEG, BR_L_LEG, BR_L_FOOT, BR_L_TOE }, { BR_R_UPLEG, BR_R_LEG, BR_R_FOOT, BR_R_TOE } };
+    // Model forward from the feet (heel -> toe), robust to the skeleton's axis convention.
+    vec3 fwd = v3(0, 0, 0);
+    for (int f = 0; f < 2; f++) {
+        int fb = s->role[leg[f][2]], tb = s->role[leg[f][3]];
+        if (fb >= 0 && tb >= 0) fwd = v3_add(fwd, v3_sub(model[tb].t, model[fb].t));
+    }
+    fwd.y = 0;
+    if (v3_len2(fwd) < 1e-6f) fwd = v3(0, 0, 1);
+    fwd = v3_norm(fwd);
+    float leg_len = 0.0f;
+    {
+        int a = s->role[leg[0][0]], b = s->role[leg[0][1]], c = s->role[leg[0][2]];
+        if (a >= 0 && b >= 0 && c >= 0) leg_len = v3_dist(model[a].t, model[b].t);
+    }
+    if (leg_len < 0.2f) leg_len = 0.45f;
+    // Hips: kneeling upright puts them about a thigh above the knees, slightly back.
+    Xform h = model[hips];
+    float kneel_y = leg_len * 0.95f + 0.06f;
+    h.t.y = lerpf(h.t.y, fminf(h.t.y, kneel_y), w);
+    h.t = v3_madd(h.t, fwd, -0.06f * w);
+    pose_set_model(s, pose, model, hips, h);
+    pose_update_children(s, pose, model, hips);
+    // Torso up: rotate the spine so the neck sits over the hips.
+    if (spine >= 0 && neck >= 0) {
+        vec3 cur = v3_norm(v3_sub(model[neck].t, model[spine].t));
+        vec3 want = v3_norm(v3_lerp(cur, v3_add(v3(0, 1, 0), v3_scale(fwd, 0.12f)), 0.8f * w));
+        vec3 ax = v3_cross(cur, want);
+        float sn = v3_len(ax);
+        if (sn > 1e-4f) proc_rotate_bone(s, pose, model, spine, quat_axis_angle(v3_scale(ax, 1.0f / sn), asinf(fminf(sn, 1.0f))));
+    }
+    // Legs: knees on the floor ahead of the hips, feet back along the floor.
+    for (int f = 0; f < 2; f++) {
+        int a = s->role[leg[f][0]], b = s->role[leg[f][1]], c = s->role[leg[f][2]];
+        if (a < 0 || b < 0 || c < 0) continue;
+        vec3 hip = model[a].t;
+        vec3 knee = v3_madd(v3(hip.x, 0.07f, hip.z), fwd, 0.10f);
+        float shin = v3_dist(model[b].t, model[c].t);
+        vec3 foot = v3_madd(knee, fwd, -fmaxf(shin, 0.3f) * 0.92f);
+        foot.y = 0.1f;
+        vec3 foot_t = v3_lerp(model[c].t, foot, w);
+        vec3 pole = v3_add(v3_scale(fwd, 1.0f), v3(0, -0.6f, 0));
+        quat fr = model[c].r;
+        anim_ik_two_bone_pose(s, pose, model, a, b, c, foot_t, &fr, pole, 1.0f);
+        // The instep rests on the floor: point the toes back.
+        quat flat = quat_axis_angle(v3_norm(v3_cross(fwd, v3(0, 1, 0))), -1.1f * w);
+        proc_rotate_bone(s, pose, model, c, flat);
+    }
+}
+
 void proc_run(ProcState *st, const ProcInput *in0, Pose *pose, Xform *model) {
     ProcInput in = *in0;
     if (!st->init) {
@@ -373,6 +435,10 @@ void proc_run(ProcState *st, const ProcInput *in0, Pose *pose, Xform *model) {
     } else proc_turn(st, &in);
     in.root.r = quat_yaw(st->render_body_yaw);
     if (in.seated) proc_seated(st, &in, pose, model);
+    if (in.kneel > 0 || st->kneel_w > 0.01f) {
+        proc_kneel(st, &in, pose, model);
+        if (st->kneel_w > 0.3f) { in.foot_ik = false; in.lean = false; }   // the kneel owns the legs
+    }
     float foot_off[2] = { 0, 0 };
     vec3 anim_foot[2] = { { 0 }, { 0 } };
     if (in.foot_ik) proc_foot_pelvis(st, &in, pose, model, foot_off, anim_foot);

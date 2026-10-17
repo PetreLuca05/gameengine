@@ -5,8 +5,15 @@
   "category": "interactable",
   "source": "interactable:extract_blood",
   "inherits": "style/grip_grab",
-  "hands": ["left", "right"],
-  "states": ["default", "use"],
+  "hands": [
+    "left",
+    "right"
+  ],
+  "states": [
+    "default",
+    "use",
+    "hold"
+  ],
   "relative": true,
   "reviewed": false,
   "auto_placed": false,

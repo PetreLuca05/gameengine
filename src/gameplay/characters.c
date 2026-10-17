@@ -578,6 +578,8 @@ static void player_inputs(World *w, CharacterInst *c, const Player *p, CharInput
     in->vaulting = m->mode == MOVE_VAULT;
     in->hanging = m->mode == MOVE_HANG;
     in->dead = m->mode == MOVE_DEAD || (w->flags[ENT_INDEX(p->ent)] & EF_DEAD);
+    in->downed = p->sim.down.downed || (w->flags[ENT_INDEX(p->ent)] & EF_DOWNED);   // knocked down (docs/REVIVE.md)
+    if (in->downed) in->crouch = true;
     in->mantle_t = m->m_t;
     in->vertical_vel = m->vel.y;
     in->aim_pitch = m->pitch;
@@ -704,6 +706,8 @@ static void inputs_from_net(const World *w, CharacterInst *c, const AnimNetState
     in->mantling = (s->flags & ANF_MANTLE) != 0;
     in->hanging = (s->flags & ANF_HANG) != 0;
     in->dead = (s->flags & ANF_DEAD) != 0;
+    in->downed = (w->flags[ENT_INDEX(c->ent)] & EF_DOWNED) != 0;   // replicated entity flag (no anim-state bit)
+    if (in->downed) in->crouch = true;
     in->mantle_t = (float)s->mantle_t / 255.0f;
     in->aim_pitch = and_pitch(s->aim_pitch);
     in->aim_yaw = and_angle(s->aim_yaw);

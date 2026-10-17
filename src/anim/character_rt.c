@@ -79,6 +79,8 @@ void charrt_set_inputs(CharRuntime *r, const CharInputs *in) {
     ctrl_set(c, AP_ATTACKING, in->attacking ? 1.0f : 0.0f);
     int tc = ctrl_param_index(c->def, "turn_clips");
     if (tc >= 0) ctrl_set(c, tc, r->lib->proc.turn_mode == 1 ? 1.0f : 0.0f);
+    int dn = ctrl_param_index(c->def, "is_downed");
+    if (dn >= 0) ctrl_set(c, dn, in->downed && !in->dead ? 1.0f : 0.0f);
     int hc = ctrl_param_index(c->def, "hit_clips");
     if (hc >= 0) ctrl_set(c, hc, r->lib->proc.hit_mode != 0 ? 1.0f : 0.0f);
 }
@@ -187,6 +189,7 @@ void charrt_proc_input(const CharRuntime *r, ProcInput *in, Xform root, float dt
     in->item_key = (int)r->in.weapon_id;
     in->empty_hands = r->in.hanging || r->in.mantling || r->in.vaulting;
     in->prone = r->in.prone;
+    in->kneel = r->in.downed && !r->in.dead ? 1.0f : 0.0f;
     if (r->in.phone_flags & CHAR_PHONE_CAMERA) in->phone_mode = (r->in.phone_flags & CHAR_PHONE_LANDSCAPE) ? 2 : 1;
     in->phone_driven = (r->in.phone_flags & CHAR_PHONE_DRIVEN) != 0;
     in->phone_rot = in->phone_driven ? phone_quat_unpack(r->in.phone_rot) : quat_identity();

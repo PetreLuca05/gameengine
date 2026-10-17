@@ -4,9 +4,16 @@
   "label": "Interactable: revive_assist",
   "category": "interactable",
   "source": "interactable:revive_assist",
-  "inherits": "style/grip_grab",
-  "hands": ["left", "right"],
-  "states": ["default", "use"],
+  "inherits": "style/grip_palm",
+  "hands": [
+    "left",
+    "right"
+  ],
+  "states": [
+    "default",
+    "use",
+    "hold"
+  ],
   "relative": true,
   "reviewed": false,
   "auto_placed": false,

@@ -2,6 +2,7 @@
   "_comment": "Animation controller for the shared human skeleton. Layers evaluate in order: base -> upper -> hit (additive) -> procedural post-pass (spine look, item placement, item-space hand solve, fingers, foot IK) -> ragdoll. Clip names here are SLOTS; anim_sets/*.json map slots to clips. Standard parameters (see src/anim/controller.h): speed, move_x, move_y, is_grounded, is_crouching, is_prone, is_sprinting, is_ads, is_mantling, mantle_t, is_hanging, is_vaulting, vertical_velocity, turn_angle, aim_pitch, aim_yaw, weapon_type, weapon_id, health, limb_status, is_dead, is_attacking; triggers jump, land, hit, fire, reload, melee, die, equip; payloads hit_part, hit_dir, hit_strength, seed.",
 
   "params": [
+    { "name": "is_downed", "type": "bool", "default": 0 },
     { "name": "turn_clips", "type": "bool", "default": 0 },
     { "name": "hit_clips", "type": "bool", "default": 0 }
   ],
@@ -44,6 +45,7 @@
               { "pos": [-0.707, -0.707], "clip": "crouch_bl" }, { "pos": [0.707, -0.707], "clip": "crouch_br" } ] } } ] } },
 
         { "name": "prone", "sync": true, "tree": { "blend1d": "speed", "children": [ { "at": 0.0, "clip": "prone_idle" }, { "at": 0.8, "clip": "prone_f" } ] } },
+        {"name": "downed", "sync": true, "_doc": "knocked down (docs/REVIVE.md): the crouch set; the procedural kneel (proc_kneel) puts the knees on the ground", "tree": {"blend1d": "speed", "children": [{"at": 0.0, "clip": "crouch_idle"}, {"at": 1.4, "clip": "crouch_f"}]}},
 
         { "name": "jump_start", "clip": "jump_start", "loop": false },
         { "name": "air", "clip": "jump_loop" },
@@ -93,6 +95,8 @@
         { "from": "crouch", "to": "locomotion", "when": [["is_crouching", "false"]], "duration": 0.25 },
         { "from": "locomotion", "to": "prone", "when": [["is_prone", "true"]], "duration": 0.4 },
         { "from": "prone", "to": "locomotion", "when": [["is_prone", "false"]], "duration": 0.4 },
+        {"from": "*", "to": "downed", "when": [["is_downed", "true"], ["is_dead", "false"]], "duration": 0.35},
+        {"from": "downed", "to": "locomotion", "when": [["is_downed", "false"]], "duration": 0.45},
 
         { "from": "locomotion", "to": "turn_left", "when": [["turn_clips", "true"], ["speed", "<", 0.2], ["turn_angle", ">", 1.0]], "duration": 0.15 },
         { "from": "locomotion", "to": "turn_right", "when": [["turn_clips", "true"], ["speed", "<", 0.2], ["turn_angle", "<", -1.0]], "duration": 0.15 },
