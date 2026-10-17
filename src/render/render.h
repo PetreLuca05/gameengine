@@ -486,6 +486,11 @@ u32 render_sky_refilters(void);
 void render_camera_cut(void);                                 // teleport / respawn: reset temporal history
 bool render_capture_hdr(const char *exr_path);                // next frame: linear HDR EXR
 bool render_load_lut(const char *cube_path);                  // grading LUT (.cube); NULL / "" = neutral
+// Looks (docs/LOOKS.md): rebake every look's LUT before the next frame (look_tune, Engine Fidelity
+// changes); the Settings preview strip of this frame (tiles side by side, LookId order; 0 until the
+// first strip is graded).
+void render_looks_invalidate(void);
+TextureId render_look_preview(int *tiles, float *tile_aspect);
 int render_pass_count(void);                                  // frame graph passes (last completed frame)
 const char *render_pass_name(int i);
 float render_pass_ms(int i);

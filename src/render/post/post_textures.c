@@ -166,17 +166,24 @@ static u16 f2h(float f) {
     return (u16)(sign | ((u32)e << 10) | (m >> 13));
 }
 
-static void upload_lut(const float *rgb) {
-    destroy(&P.lut_img, &P.lut_alloc, &P.lut);
-    u16 *px = (u16 *)malloc(sizeof(u16) * 4 * LUT_N * LUT_N * LUT_N);
-    for (int i = 0; i < LUT_N * LUT_N * LUT_N; i++) {
+void post_lut3d_create(VkImage *img, VmaAllocation *alloc, VkImageView *view, const float *rgb, u32 n) {
+    size_t count = (size_t)n * n * n;
+    u16 *px = (u16 *)malloc(sizeof(u16) * 4 * count);
+    for (size_t i = 0; i < count; i++) {
         px[i * 4 + 0] = f2h(rgb[i * 3 + 0]);
         px[i * 4 + 1] = f2h(rgb[i * 3 + 1]);
         px[i * 4 + 2] = f2h(rgb[i * 3 + 2]);
         px[i * 4 + 3] = f2h(1.0f);
     }
-    make_image(&P.lut_img, &P.lut_alloc, &P.lut, VK_FORMAT_R16G16B16A16_SFLOAT, LUT_N, LUT_N, LUT_N, px, sizeof(u16) * 4 * LUT_N * LUT_N * LUT_N);
+    make_image(img, alloc, view, VK_FORMAT_R16G16B16A16_SFLOAT, n, n, n, px, sizeof(u16) * 4 * count);
     free(px);
+}
+
+void post_image_destroy(VkImage *img, VmaAllocation *alloc, VkImageView *view) { destroy(img, alloc, view); }
+
+static void upload_lut(const float *rgb) {
+    destroy(&P.lut_img, &P.lut_alloc, &P.lut);
+    post_lut3d_create(&P.lut_img, &P.lut_alloc, &P.lut, rgb, LUT_N);
 }
 
 // The baked default: identity (the look lives in the tonemapper + lift / gamma / gain); a .cube

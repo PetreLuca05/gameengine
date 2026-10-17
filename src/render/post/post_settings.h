@@ -54,6 +54,11 @@ typedef struct PostSettings {
     int lut;                       // 0 = baked default, 1.. = loaded .cube files
     float lut_weight;
     int colorblind;                // 0 off, 1 protan, 2 deutan, 3 tritan (correction filter)
+    // Look (docs/LOOKS.md): look_lut = the baked grade replacing the tonemapper (-1 = the plain
+    // tonemapper above); its finish (bloom threshold / tint, halation, letterbox aspect, 0 = none).
+    int look_lut;
+    float bloom_threshold, halation, letterbox;
+    vec3 bloom_tint;
     float brightness, user_gamma;
     // Engine Fidelity Off: no post-processing at all; the lit HDR goes straight to the swapchain
     // (final_direct.frag: fixed exposure, plain tonemap, sRGB). Everything above is ignored.
@@ -64,6 +69,7 @@ typedef struct PostSettings {
     // gameplay feedback (0..1 weights, blended in by game_post.c)
     float fb_damage, fb_lowhealth, fb_flash, fb_hitmarker, fb_sprint, fb_underwater, fb_nightvision;
     vec3 fb_tint;
+    vec3 fb_damage_color, fb_lowhealth_color;   // the look's damage edge tint / low-health vignette colour
     float fb_desaturate;
     float fb_black, fb_blur;       // death sequence (docs/REVIVE.md): black cut, mild screen blur
     // debug

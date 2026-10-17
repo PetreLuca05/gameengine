@@ -402,6 +402,7 @@ void render_ui_build(FgRes ldr, u32 out_w, u32 out_h) {
 // The final (UI) pass samples the backdrop and every item view.
 void render_ui_final_reads(int pass) {
     if (UR.blur_res != FG_NONE) fg_read(pass, UR.blur_res, FG_SAMPLED);
+    post_look_final_reads(pass);
     for (int i = 0; i < UI3D_MAX_TARGETS; i++)
         if (UR.targets[i].used && UR.targets[i].res != FG_NONE) fg_read(pass, UR.targets[i].res, FG_SAMPLED);
 }

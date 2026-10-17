@@ -216,7 +216,9 @@ target_compile_definitions(deadground PRIVATE
   DG_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
   DG_SHADER_COMPILER="${DG_SHADER_COMPILER}"
   DG_SHADER_COMPILER_KIND="${DG_SHADER_COMPILER_KIND}"
-  DG_VERSION="${PROJECT_VERSION}")
+  DG_VERSION="${PROJECT_VERSION}"
+  # Looks (docs/LOOKS.md): the live tuning tools (look_tune / look_dump) exist in dev builds only.
+  $<$<NOT:$<CONFIG:Release>>:DG_LOOK_TUNE=1>)
 if(DG_HAVE_STEAM)
   target_compile_definitions(deadground PRIVATE DG_HAVE_STEAM=1)
   target_link_libraries(deadground PRIVATE steam_shim)
@@ -623,7 +625,26 @@ find_package(Python3 COMPONENTS Interpreter QUIET)
 if(Python3_Interpreter_FOUND)
   add_test(NAME lint_commands COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/tests/lint_commands.py)
   add_test(NAME aim_sockets COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/tests/aim_sockets.py)
+  add_test(NAME lint_looks COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/tests/lint_looks.py)
 endif()
+# Post-processing Looks (docs/LOOKS.md): five fixed looks, the analytic grade vs the baked LUT, Realism
+# identity, PUBG-style / Cinematic / Vibrant / Gritty character, field isolation, fidelity caps,
+# modulators. Built twice: dev (look_tune compiled in) and release (compiled out).
+add_executable(test_looks tests/test_looks.c src/render/post/look.c src/render/post/looks.c)
+add_executable(test_looks_release tests/test_looks.c src/render/post/look.c src/render/post/looks.c)
+target_compile_definitions(test_looks PRIVATE DG_LOOK_TUNE=1)
+target_compile_definitions(test_looks_release PRIVATE DG_LOOK_TUNE=0)
+foreach(t test_looks test_looks_release)
+  set_target_properties(${t} PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
+  target_include_directories(${t} PRIVATE src)
+  if(MSVC)
+    target_compile_options(${t} PRIVATE /W3 /wd4100 /wd4201 /utf-8)
+  else()
+    target_link_libraries(${t} PRIVATE m)
+  endif()
+endforeach()
+add_test(NAME looks COMMAND test_looks)
+add_test(NAME looks_release COMMAND test_looks_release)
 # Engine Fidelity (docs/ENGINE_FIDELITY.md): tables, bounds, apply / clamp on the real cvar system, era
 # matrix, frame graph validation.
 add_executable(test_fidelity tests/test_fidelity.c src/render/fidelity/fidelity.c src/render/graph/fg_check.c src/core/cvar.c)

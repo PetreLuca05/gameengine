@@ -175,6 +175,18 @@ typedef struct PostFrameInfo {
     float level_fog;
 } PostFrameInfo;
 void game_post_init(void);
+// game_look.c: the post-processing Look (docs/LOOKS.md): r_look, its finish / modulators in the frame's
+// PostSettings, the Settings A/B, dev look_tune / look_dump.
+struct PostSettings;
+void game_look_init(void);
+void game_look_frame(void);                              // per frame, before the settings are built
+void game_look_apply(struct PostSettings *s);            // the look + its finish (after the cvars, before post volumes)
+void game_look_modulate(struct PostSettings *s);         // time of day / weather (after daynight / weather)
+int game_look_selected(void);                            // r_look
+int game_look_current(void);                             // what renders (Realism while the A/B is held)
+void game_look_set(int id);
+void game_look_compare_hold(bool held);                  // Settings: hold to compare with Realism (per UI frame)
+bool game_look_comparing(void);
 // Fire animation (src/game/game_fire.c, docs/FIRE_ANIM.md): the viewed player's gun-driven fire motion.
 struct FireAnimOut;
 struct ShotEvent;

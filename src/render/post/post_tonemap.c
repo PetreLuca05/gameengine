@@ -31,6 +31,7 @@ static void exec_tonemap(VkCommandBuffer cmd, void *u) {
     pb_tex(&b, 4, P.lut, P.linear);
     pb_tex(&b, 5, P.noise, P.point);
     pb_tex_fg(&b, 6, T.compare, P.linear);
+    pb_tex(&b, 7, post_look_view(P.set.look_lut), P.linear);
     pb_img_fg(&b, 8, T.ldr);
     pb_buf(&b, 13, P.exposure_buf.buffer, 64, false);
     pb_push(cmd, &b, VK_PIPELINE_BIND_POINT_COMPUTE);
@@ -121,6 +122,7 @@ FgRes post_resolve(void) {
         // the final pass shows the lit HDR through final_direct.frag.
         T.color = post_sights_build(P.in.hdr);
         T.ldr = T.color;
+        post_look_preview_build(T.color, true);
         if (P.exr_pending > 0 && P.exr_path[0]) {
             T.exr_w = P.in.render_w;
             T.exr_h = P.in.render_h;
@@ -142,6 +144,7 @@ FgRes post_resolve(void) {
     c = post_lens_build(c);
     T.color = c;
     post_exposure_build(c);
+    post_look_preview_build(c, false);   // Settings > Look: the scene under every look (when asked)
     T.bloom = post_bloom_build(c);
     T.flare = post_flare_build(T.bloom);
     T.compare = P.set.compare_split ? P.in.hdr : FG_NONE;
@@ -322,6 +325,7 @@ void post_final_draw(VkCommandBuffer cmd, FgRes ldr) {
         pb_ubo(&b);
         pb_tex_fg(&b, 0, ldr, P.linear);   // render resolution: bilinear upscale
         pb_tex(&b, 1, P.noise, P.point);
+        pb_tex(&b, 2, post_look_view(P.set.look_lut), P.linear);   // the look's grade survives Fidelity Off
         pb_push(cmd, &b, VK_PIPELINE_BIND_POINT_GRAPHICS);
         struct { float p[16]; u32 u[16]; } pc;
         memset(&pc, 0, sizeof(pc));
