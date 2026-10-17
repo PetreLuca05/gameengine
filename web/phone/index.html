@@ -5,113 +5,194 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="theme-color" content="#000000">
+<meta name="theme-color" content="#ffffff">
 <title>Deadground Phone</title>
 <!--
   Deadground companion page (docs/PHONE.md). Served by the game (src/net/http_ws), no external
   resources. Protocol: src/gameplay/phone/phone_proto.h (PHONE_PROTO_VERSION 1).
     page -> game  binary orientation samples (16 bytes, 60 Hz) + JSON commands
     game -> page  binary JPEG frames + photo blobs, JSON status / media / gallery
+  The phone OS here (Connect portal, home screen, Camera, Gallery) mirrors the in-game screen
+  (src/gameplay/phone/phone_ui.c): the game injects the same assets below (assets/phone/theme.json,
+  apps.json and the icon atlas), and both sides keep the current app in sync ({"c":"app"} /
+  status "app").
 -->
+<script>/*DG_PHONE_DATA*/</script>
 <style>
-  :root { --fg: #fff; --dim: rgba(255,255,255,.65); --accent: #ffd60a; --rec: #ff3b30; --ok: #34c759; --panel: rgba(20,22,26,.86); }
+  :root { --bg: #fff; --surface: #f2f3f6; --surface-hi: #e2e5eb; --text: #14161a; --text-dim: #606670; --text-faint: #a0a6b0;
+          --accent: #0a7aff; --accent-text: #fff; --ok: #28aa50; --warning: #e68c14; --danger: #e2342c; --home-bar: rgba(20,22,26,.8);
+          --cam: rgba(255,255,255,.94); --cam-accent: #ffd60a; --rec: #ff3b30; }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-  html, body { margin: 0; height: 100%; background: #000; color: var(--fg); font: 15px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; overflow: hidden; overscroll-behavior: none; touch-action: none; user-select: none; -webkit-user-select: none; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 15px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+               overflow: hidden; overscroll-behavior: none; touch-action: none; user-select: none; -webkit-user-select: none; }
+  button { font: inherit; color: inherit; }
+  .screen { position: fixed; inset: 0; display: none; flex-direction: column; padding: calc(env(safe-area-inset-top) + 44px) 20px calc(env(safe-area-inset-bottom) + 40px); background: var(--bg); }
+  .screen.show { display: flex; }
+  .screen.dark { background: #000; color: #fff; padding: 0; }
+  /* status bar (home, gallery, portal) */
+  #status { position: fixed; top: 0; left: 0; right: 0; height: calc(env(safe-area-inset-top) + 34px); padding: env(safe-area-inset-top) 20px 0; display: flex; align-items: center; gap: 8px;
+            font-weight: 600; font-size: 14px; z-index: 4; pointer-events: none; }
+  #status.dark { color: #fff; background: linear-gradient(rgba(0,0,0,.5), transparent); }
+  #status .spacer { flex: 1; }
+  .sig { display: inline-flex; gap: 2px; align-items: flex-end; height: 11px; }
+  .sig i { width: 3px; background: currentColor; border-radius: 1px; }
+  .bat { width: 24px; height: 12px; border: 1.6px solid currentColor; border-radius: 3.5px; padding: 1.4px; position: relative; opacity: .9; }
+  .bat::after { content: ''; position: absolute; right: -4px; top: 3px; width: 2px; height: 4px; background: currentColor; border-radius: 1px; }
+  .bat b { display: block; height: 100%; background: currentColor; border-radius: 1.5px; }
+  .pill { padding: 3px 9px; border-radius: 999px; font-size: 12px; font-weight: 700; letter-spacing: .02em; white-space: nowrap; }
+  .pill.ok { background: var(--ok); color: #fff; } .pill.bad { background: var(--danger); color: #fff; }
+  /* home bar */
+  #homebar { position: fixed; left: 50%; bottom: calc(env(safe-area-inset-bottom) + 8px); width: 134px; height: 22px; transform: translateX(-50%); z-index: 6; border: 0; background: transparent; padding: 0; }
+  #homebar::before { content: ''; position: absolute; left: 0; right: 0; top: 9px; height: 5px; border-radius: 3px; background: var(--home-bar); }
+  #homebar.light::before { background: rgba(255,255,255,.85); }
+  /* portal */
+  #s-portal { align-items: center; text-align: center; justify-content: center; gap: 10px; }
+  #s-portal h1 { margin: 0; font-size: 26px; font-weight: 700; }
+  #s-portal p { margin: 0; color: var(--text-dim); max-width: 320px; }
+  .badge { width: 92px; height: 92px; border-radius: 50%; display: grid; place-items: center; background: var(--surface); margin-bottom: 8px; }
+  .badge.ok { background: var(--ok); }
+  .badge svg { width: 46px; height: 46px; }
+  .spin { width: 40px; height: 40px; border-radius: 50%; border: 4px solid var(--surface-hi); border-top-color: var(--accent); animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .btn { width: 100%; max-width: 340px; margin-top: 10px; padding: 15px 18px; border-radius: 999px; border: 0; font-size: 16px; font-weight: 700; background: var(--accent); color: var(--accent-text); }
+  .btn.ghost { background: var(--surface-hi); color: var(--text); }
+  .btn.plain { background: transparent; color: var(--accent); }
+  .btn.danger { background: var(--danger); color: #fff; }
+  /* home */
+  #s-home { align-items: center; }
+  #hclock { font-size: 84px; font-weight: 300; letter-spacing: -.02em; margin-top: 7vh; line-height: 1; }
+  #hday { color: var(--text-dim); font-size: 17px; margin-top: 8px; }
+  #hwx { display: flex; align-items: center; gap: 8px; color: var(--text-dim); margin-top: 10px; font-size: 16px; }
+  .glyph { width: 28px; height: 28px; background: var(--text-dim); -webkit-mask-repeat: no-repeat; mask-repeat: no-repeat; }
+  #apps { display: grid; grid-template-columns: repeat(var(--cols, 4), 1fr); gap: 22px 8px; width: 100%; margin-top: 8vh; }
+  .app { display: flex; flex-direction: column; align-items: center; gap: 7px; border: 0; background: transparent; padding: 0; font-size: 13px; }
+  .app i { width: 64px; height: 64px; border-radius: 16px; background-repeat: no-repeat; display: block; }
+  .app:active i { transform: scale(.93); filter: brightness(.9); }
+  #banner { margin-top: auto; margin-bottom: 26px; color: var(--text-dim); text-align: center; font-size: 14px; display: none; }
+  /* camera */
   #feed { position: fixed; inset: 0; width: 100vw; height: 100vh; height: 100dvh; display: block; background: #000; }
-  .bar { position: fixed; left: 0; right: 0; display: flex; align-items: center; padding: 0 14px; pointer-events: none; }
+  .bar { position: fixed; left: 0; right: 0; display: flex; align-items: center; padding: 0 14px; pointer-events: none; z-index: 2; }
   .bar > * { pointer-events: auto; }
-  #top { top: 0; padding-top: calc(env(safe-area-inset-top) + 8px); height: calc(env(safe-area-inset-top) + 52px); gap: 8px; background: linear-gradient(rgba(0,0,0,.55), transparent); }
-  .pill { padding: 5px 10px; border-radius: 999px; background: rgba(0,0,0,.45); font-size: 12.5px; font-weight: 600; letter-spacing: .02em; white-space: nowrap; }
-  .pill.ok { color: #0c2; } .pill.bad { color: #ff6b5a; } .pill.rec { background: var(--rec); color: #fff; display: none; }
-  .spacer { flex: 1; }
+  #ctop { top: calc(env(safe-area-inset-top) + 34px); height: 48px; gap: 8px; }
+  #ctop .spacer { flex: 1; }
+  .cpill { padding: 5px 10px; border-radius: 999px; background: rgba(0,0,0,.45); color: #fff; font-size: 12.5px; font-weight: 600; white-space: nowrap; }
+  .cpill.rec { background: var(--rec); display: none; }
   .icon { width: 40px; height: 40px; border-radius: 50%; border: 0; background: rgba(0,0,0,.45); color: #fff; font-size: 18px; display: grid; place-items: center; }
-  #bottom { bottom: 0; height: calc(env(safe-area-inset-bottom) + 150px); padding-bottom: env(safe-area-inset-bottom); justify-content: space-around; background: linear-gradient(transparent, rgba(0,0,0,.6)); }
-  #shutter { width: 78px; height: 78px; border-radius: 50%; border: 6px solid #fff; background: rgba(255,255,255,.9); }
+  #cbottom { bottom: 0; height: calc(env(safe-area-inset-bottom) + 160px); padding-bottom: calc(env(safe-area-inset-bottom) + 20px); justify-content: space-around; background: linear-gradient(transparent, rgba(0,0,0,.6)); }
+  #shutter { width: 78px; height: 78px; border-radius: 50%; border: 6px solid var(--cam); background: rgba(255,255,255,.9); }
   #shutter:active { transform: scale(.94); background: #fff; }
-  #record { width: 56px; height: 56px; border-radius: 50%; border: 4px solid #fff; background: transparent; display: grid; place-items: center; }
+  #record { width: 56px; height: 56px; border-radius: 50%; border: 4px solid var(--cam); background: transparent; display: grid; place-items: center; }
   #record i { width: 26px; height: 26px; border-radius: 50%; background: var(--rec); transition: all .15s; }
   #record.on i { border-radius: 6px; width: 22px; height: 22px; }
-  #thumb { width: 54px; height: 54px; border-radius: 10px; border: 2px solid #fff; background: #222 center/cover no-repeat; }
-  #zoomchips { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(env(safe-area-inset-bottom) + 160px); display: flex; gap: 10px; }
+  #thumb { width: 54px; height: 54px; border-radius: 10px; border: 2px solid var(--cam); background: #222 center/cover no-repeat; }
+  #zoomchips { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(env(safe-area-inset-bottom) + 172px); display: flex; gap: 10px; z-index: 2; }
   .chip { min-width: 44px; height: 44px; border-radius: 22px; border: 0; background: rgba(0,0,0,.5); color: #fff; font-weight: 700; font-size: 13px; }
-  .chip.on { background: var(--accent); color: #111; }
-  #zoomval { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(env(safe-area-inset-bottom) + 214px); color: var(--accent); font-weight: 700; display: none; background: rgba(0,0,0,.5); padding: 4px 10px; border-radius: 12px; }
-  #zoomslider { position: fixed; right: 10px; top: 25%; height: 40%; width: 40px; }
-  #zoomslider input { writing-mode: vertical-lr; direction: rtl; width: 40px; height: 100%; accent-color: var(--accent); }
-  #toast { position: fixed; left: 50%; top: calc(env(safe-area-inset-top) + 70px); transform: translateX(-50%); background: var(--panel); padding: 9px 14px; border-radius: 14px; font-weight: 600; opacity: 0; transition: opacity .25s; pointer-events: none; max-width: 86vw; text-align: center; }
-  #flash { position: fixed; inset: 0; background: #fff; opacity: 0; pointer-events: none; transition: opacity .25s; }
-  .sheet { position: fixed; inset: 0; background: rgba(0,0,0,.92); display: none; flex-direction: column; padding: calc(env(safe-area-inset-top) + 16px) 18px calc(env(safe-area-inset-bottom) + 16px); overflow-y: auto; touch-action: pan-y; z-index: 5; }
+  .chip.on { background: var(--cam-accent); color: #111; }
+  #zoomval { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(env(safe-area-inset-bottom) + 226px); color: var(--cam-accent); font-weight: 700; display: none; background: rgba(0,0,0,.5); padding: 4px 10px; border-radius: 12px; z-index: 2; }
+  #zoomslider { position: fixed; right: 10px; top: 25%; height: 40%; width: 40px; z-index: 2; }
+  #zoomslider input { writing-mode: vertical-lr; direction: rtl; width: 40px; height: 100%; accent-color: var(--cam-accent); }
+  #flash { position: fixed; inset: 0; background: #fff; opacity: 0; pointer-events: none; transition: opacity .25s; z-index: 3; }
+  /* gallery */
+  .head { display: flex; align-items: center; gap: 8px; margin-bottom: 12px; }
+  .head h2 { flex: 1; margin: 0; font-size: 22px; text-align: center; }
+  .back { border: 0; background: transparent; color: var(--accent); font-size: 17px; font-weight: 600; padding: 6px 2px; min-width: 76px; text-align: left; }
+  .count { min-width: 76px; text-align: right; color: var(--text-dim); font-size: 14px; }
+  #grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; overflow-y: auto; touch-action: pan-y; padding-bottom: 20px; }
+  #grid .cell { aspect-ratio: 4/5; border-radius: 4px; background: var(--surface-hi) center/cover no-repeat; position: relative; }
+  #grid .cell span { position: absolute; right: 5px; bottom: 5px; font-size: 12px; font-weight: 700; color: #fff; background: rgba(0,0,0,.55); padding: 2px 6px; border-radius: 8px; }
+  #grid p { grid-column: 1 / -1; text-align: center; color: var(--text-dim); margin-top: 30vh; }
+  #viewer { position: fixed; inset: 0; background: var(--bg); display: none; flex-direction: column; padding: calc(env(safe-area-inset-top) + 44px) 16px calc(env(safe-area-inset-bottom) + 44px); z-index: 5; }
+  #viewer.show { display: flex; }
+  #vbody { flex: 1; display: flex; align-items: center; justify-content: center; overflow: hidden; background: var(--surface); border-radius: 12px; position: relative; touch-action: none; }
+  #vbody img, #vbody video { max-width: 100%; max-height: 100%; transform-origin: center; }
+  .nav { position: absolute; top: 50%; transform: translateY(-50%); width: 40px; height: 40px; border-radius: 50%; border: 0; background: rgba(255,255,255,.85); font-size: 22px; font-weight: 700; color: var(--text); z-index: 1; }
+  #vprev { left: 8px; } #vnext { right: 8px; }
+  #vmeta { color: var(--text-dim); text-align: center; font-size: 13px; margin: 8px 0; }
+  .row { display: flex; gap: 8px; }
+  .row .btn { flex: 1; margin-top: 0; padding: 13px 10px; font-size: 15px; }
+  /* sheets */
+  .sheet { position: fixed; inset: 0; background: rgba(255,255,255,.97); display: none; flex-direction: column; padding: calc(env(safe-area-inset-top) + 48px) 20px calc(env(safe-area-inset-bottom) + 30px); overflow-y: auto; touch-action: pan-y; z-index: 8; }
   .sheet.show { display: flex; }
   .sheet h2 { margin: 6px 0 10px; font-size: 22px; }
-  .sheet p { color: var(--dim); margin: 6px 0; }
-  .btn { margin-top: 12px; padding: 14px 18px; border-radius: 14px; border: 0; font-size: 16px; font-weight: 700; background: #fff; color: #000; }
-  .btn.ghost { background: rgba(255,255,255,.12); color: #fff; }
-  .btn.danger { background: #3a1210; color: #ff6b5a; }
-  #grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-top: 8px; }
-  #grid .cell { aspect-ratio: 9/16; border-radius: 8px; background: #222 center/cover no-repeat; position: relative; }
-  #grid .cell span { position: absolute; right: 6px; bottom: 6px; font-size: 12px; font-weight: 700; background: rgba(0,0,0,.6); padding: 2px 6px; border-radius: 8px; }
-  #viewer img, #viewer video { max-width: 100%; max-height: 70vh; border-radius: 10px; align-self: center; background: #111; }
-  .row { display: flex; gap: 10px; flex-wrap: wrap; }
-  .row .btn { flex: 1; }
-  code { background: rgba(255,255,255,.1); padding: 1px 6px; border-radius: 6px; }
+  .sheet p { color: var(--text-dim); margin: 6px 0; }
+  .sheet .btn { max-width: none; }
+  #toast { position: fixed; left: 50%; top: calc(env(safe-area-inset-top) + 90px); transform: translateX(-50%); background: rgba(20,22,26,.88); color: #fff; padding: 9px 14px; border-radius: 14px; font-weight: 600; opacity: 0; transition: opacity .25s; pointer-events: none; max-width: 86vw; text-align: center; z-index: 9; }
+  code { background: var(--surface); padding: 1px 6px; border-radius: 6px; }
   @media (orientation: landscape) {
-    #bottom { top: 0; bottom: 0; right: 0; left: auto; width: calc(env(safe-area-inset-right) + 130px); height: auto; flex-direction: column; justify-content: space-around; padding: 20px 0; background: linear-gradient(90deg, transparent, rgba(0,0,0,.6)); }
+    #cbottom { top: 0; bottom: 0; right: 0; left: auto; width: calc(env(safe-area-inset-right) + 130px); height: auto; flex-direction: column; justify-content: space-around; padding: 20px 0; background: linear-gradient(90deg, transparent, rgba(0,0,0,.6)); }
     #zoomchips { left: auto; right: calc(env(safe-area-inset-right) + 140px); bottom: 50%; transform: translateY(50%); flex-direction: column; }
     #zoomval { left: auto; right: calc(env(safe-area-inset-right) + 196px); transform: none; bottom: 50%; }
     #zoomslider { right: auto; left: 10px; }
+    #hclock { margin-top: 2vh; font-size: 64px; } #apps { margin-top: 4vh; }
   }
 </style>
 </head>
 <body>
-<canvas id="feed"></canvas>
-<div id="top" class="bar">
-  <span id="link" class="pill bad">Connecting…</span>
-  <span id="rec" class="pill rec">● REC 0:00</span>
-  <span class="spacer"></span>
-  <span id="lat" class="pill">– ms</span>
-  <button id="flip" class="icon" title="Front / back camera">⟲</button>
-  <button id="menu" class="icon" title="Menu">⋯</button>
-</div>
-<div id="zoomval">1.0×</div>
-<div id="zoomchips"><button class="chip on" data-z="1">1×</button><button class="chip" data-z="2">2×</button><button class="chip" data-z="5">5×</button></div>
-<div id="zoomslider"><input id="zoom" type="range" min="0" max="1000" value="0" aria-label="Zoom"></div>
-<div id="bottom" class="bar">
-  <button id="thumb" title="Gallery"></button>
-  <button id="shutter" title="Photo"></button>
-  <button id="record" title="Record"><i></i></button>
-</div>
-<div id="flash"></div>
-<div id="toast"></div>
+<div id="status"><span id="sclock">--:--</span><span id="slink" class="pill ok" style="display:none">LINK</span><span class="spacer"></span>
+  <span class="sig"><i style="height:4px"></i><i style="height:6px"></i><i style="height:8px"></i><i style="height:11px;opacity:.35"></i></span><span id="spct">86%</span><span class="bat"><b id="sbat" style="width:86%"></b></span></div>
 
-<div id="start" class="sheet show">
-  <h2>Deadground phone</h2>
-  <p id="startmsg">Your phone becomes the in-game phone: tilt it to aim the camera, take photos and videos, and save them here.</p>
+<!-- Connect portal: the page side of pairing (permissions, then "Connected"). -->
+<section id="s-portal" class="screen show">
+  <div class="badge" id="pbadge"><div class="spin"></div></div>
+  <h1 id="ptitle">Connecting…</h1>
+  <p id="pmsg">Linking this phone to your game on the same Wi-Fi.</p>
   <p id="secure" style="display:none"></p>
-  <button id="go" class="btn">Start</button>
-  <p style="margin-top:18px">Hold the phone upright facing the screen's direction in the game, then tap <b>Calibrate</b> (or double-tap the picture to re-centre at any time).</p>
+  <button id="go" class="btn" style="display:none">Allow motion &amp; continue</button>
+  <p style="margin-top:14px;font-size:13px">Your phone becomes the in-game phone: tilt it to aim the camera, take photos and videos, and save them here.</p>
+</section>
+
+<section id="s-home" class="screen">
+  <div id="hclock">--:--</div>
+  <div id="hday">Day 1</div>
+  <div id="hwx"><i class="glyph" id="hglyph"></i><span id="hwxl">Clear</span></div>
+  <div id="apps"></div>
+  <div id="banner">Take the phone out in the game (X) to use the camera.</div>
+</section>
+
+<section id="s-camera" class="screen dark">
+  <canvas id="feed"></canvas>
+  <div id="ctop" class="bar">
+    <span id="link" class="cpill">Connecting…</span>
+    <span id="rec" class="cpill rec">● REC 0:00</span>
+    <span class="spacer"></span>
+    <span id="lat" class="cpill">– ms</span>
+    <button id="flip" class="icon" title="Front / back camera">⟲</button>
+    <button id="menu" class="icon" title="Menu">⋯</button>
+  </div>
+  <div id="zoomval">1.0×</div>
+  <div id="zoomchips"><button class="chip on" data-z="1">1×</button><button class="chip" data-z="2">2×</button><button class="chip" data-z="5">5×</button></div>
+  <div id="zoomslider"><input id="zoom" type="range" min="0" max="1000" value="0" aria-label="Zoom"></div>
+  <div id="cbottom" class="bar">
+    <button id="thumb" title="Gallery"></button>
+    <button id="shutter" title="Photo"></button>
+    <button id="record" title="Record"><i></i></button>
+  </div>
+  <div id="flash"></div>
+</section>
+
+<section id="s-gallery" class="screen">
+  <div class="head"><button id="gclose" class="back">‹ Home</button><h2>Gallery</h2><span id="gcount" class="count"></span></div>
+  <div id="grid"></div>
+</section>
+
+<div id="viewer">
+  <div class="head"><button id="vclose" class="back">‹ Gallery</button><h2 id="vtitle" style="font-size:15px"></h2><span class="count"></span></div>
+  <div id="vbody"><button id="vprev" class="nav">‹</button><button id="vnext" class="nav">›</button></div>
+  <p id="vmeta"></p>
+  <div class="row"><a id="vdl" class="btn" style="text-align:center;text-decoration:none">Download</a><button id="vshare" class="btn ghost">Share / save</button><button id="vdel" class="btn danger">Delete</button></div>
 </div>
+
+<button id="homebar" aria-label="Home"></button>
 
 <div id="sheet" class="sheet">
   <h2>Phone</h2>
   <p id="info"></p>
   <button id="calib" class="btn">Calibrate (hold upright, facing forward)</button>
-  <button id="gallerybtn" class="btn ghost">Gallery</button>
-  <div class="row"><button id="filter" class="btn ghost">Filter: none</button><button id="close" class="btn ghost">Back</button></div>
+  <div class="row" style="margin-top:10px"><button id="filter" class="btn ghost">Filter: none</button><button id="close" class="btn ghost">Back</button></div>
   <button id="unpair" class="btn danger">Unpair this phone</button>
   <p style="margin-top:18px">Motion sensors need this page over HTTPS. If you skipped the certificate warning, the connection is still encrypted, with a certificate made by your game (see docs/PHONE.md).</p>
 </div>
-
-<div id="gallery" class="sheet">
-  <div class="row" style="align-items:center"><h2 style="flex:1">Gallery</h2><button id="gclose" class="btn ghost" style="flex:0;margin:0">Done</button></div>
-  <div id="grid"></div>
-</div>
-
-<div id="viewer" class="sheet">
-  <div class="row" style="align-items:center"><h2 id="vtitle" style="flex:1;font-size:16px"></h2><button id="vclose" class="btn ghost" style="flex:0;margin:0">Close</button></div>
-  <div id="vbody" style="display:flex;justify-content:center;margin-top:8px"></div>
-  <div class="row"><a id="vdl" class="btn" style="text-align:center;text-decoration:none">Download</a><button id="vshare" class="btn ghost">Share / save</button></div>
-  <p id="vmeta"></p>
-</div>
+<div id="toast"></div>
 
 <script>
 'use strict';
@@ -123,7 +204,44 @@ let session = sessionStorage.getItem('dg_session') || '';
 let ws = null, wsOpen = false, retry = 0, closedForGood = false;
 let status = {}, zoom = 1, maxZoom = 8, gallery = [], lastPhoto = null;
 let pingRtt = 0, framesShown = 0, fpsShown = 0, lastFpsT = performance.now();
-let sensorOk = false, sending = false, seq = 0, lastSample = null;
+let sensorOk = false, seq = 0, lastSample = null, started = false;
+let app = 'portal', appSetT = 0, viewerIdx = -1;
+
+// ------------------------------------------------------------------ theme + assets (from the game)
+const TH = window.DG_THEME || null, APPS = window.DG_APPS || null, ICONS = window.DG_ICONS || null;
+function css(c) { return 'rgba(' + c[0] + ',' + c[1] + ',' + c[2] + ',' + ((c[3] === undefined ? 255 : c[3]) / 255).toFixed(3) + ')'; }
+if (TH && TH.colors) {
+  const map = { bg: 'bg', surface: 'surface', surface_hi: 'surface-hi', text: 'text', text_dim: 'text-dim', text_faint: 'text-faint', accent: 'accent',
+                accent_text: 'accent-text', ok: 'ok', warning: 'warning', danger: 'danger', home_bar: 'home-bar', camera_ui: 'cam', camera_accent: 'cam-accent' };
+  for (const k in map) if (TH.colors[k]) document.documentElement.style.setProperty('--' + map[k], css(TH.colors[k]));
+}
+const tiles = (APPS && APPS.icons && APPS.icons.tiles) || [];
+function tileStyle(el, name, mask) {
+  const i = tiles.indexOf(name);
+  if (!ICONS || i < 0) return;
+  const n = tiles.length, pos = (n > 1 ? i / (n - 1) * 100 : 0) + '% 0', size = (n * 100) + '% 100%';
+  if (mask) { el.style.webkitMaskImage = el.style.maskImage = 'url(' + ICONS + ')'; el.style.webkitMaskSize = el.style.maskSize = size; el.style.webkitMaskPosition = el.style.maskPosition = pos; }
+  else { el.style.backgroundImage = 'url(' + ICONS + ')'; el.style.backgroundSize = size; el.style.backgroundPosition = pos; }
+}
+const appList = (APPS && APPS.apps) || [{ id: 'camera', label: 'Camera', icon: 'camera', app: 'camera' }, { id: 'gallery', label: 'Gallery', icon: 'gallery', app: 'gallery' }];
+(function buildHome() {
+  const g = $('apps');
+  g.style.setProperty('--cols', (APPS && APPS.home_columns) || 4);
+  for (const a of appList) {
+    const b = document.createElement('button'); b.className = 'app'; b.dataset.app = a.app || ''; b.id = 'app-' + a.id;
+    const i = document.createElement('i'); tileStyle(i, a.icon, false); if (!ICONS) i.style.background = 'var(--surface-hi)';
+    b.appendChild(i); b.appendChild(document.createTextNode(a.label));
+    b.addEventListener('click', () => { if (a.app === 'camera' || a.app === 'gallery') showApp(a.app); else toast(a.label + ': coming soon'); });
+    g.appendChild(b);
+  }
+})();
+const WX = { clear: 'Clear', little_cloudy: 'Partly cloudy', cloudy: 'Cloudy', overcast: 'Overcast', fog: 'Fog', light_rain: 'Light rain', rain: 'Rain', storm: 'Storm',
+             light_snow: 'Light snow', snow: 'Snow', blizzard: 'Blizzard', indoor: 'Indoors' };
+function weatherTile(w, night) {
+  let t = (APPS && APPS.weather_icons && APPS.weather_icons[w]) || 'w_partly';
+  if (night && t === 'w_clear') t = 'w_night';
+  return t;
+}
 
 // ------------------------------------------------------------------ helpers
 function toast(msg, ms = 2200) {
@@ -132,6 +250,8 @@ function toast(msg, ms = 2200) {
 }
 function send(obj) { if (wsOpen) ws.send(JSON.stringify(obj)); }
 function mmss(s) { s = Math.max(0, Math.floor(s)); return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0'); }
+function hhmm(h) { h = ((h % 24) + 24) % 24; const m = Math.floor((h - Math.floor(h)) * 60); return String(Math.floor(h)).padStart(2, '0') + ':' + String(m).padStart(2, '0'); }
+function daypart(h) { return h < 5 ? 'Night' : h < 12 ? 'Morning' : h < 17 ? 'Afternoon' : h < 21 ? 'Evening' : 'Night'; }
 function mediaUrl(path, dl) { return path + (path.includes('?') ? '&' : '?') + 's=' + encodeURIComponent(session) + (dl ? '&dl=1' : ''); }
 
 // Quaternion helpers (x, y, z, w) mirroring src/core/dgmath.h.
@@ -145,21 +265,68 @@ function qaxis(x, y, z, deg) { const h = deg * Math.PI / 360, s = Math.sin(h); r
 // W3C DeviceOrientation: device -> earth = Rz(alpha) Rx(beta) Ry(gamma) (phone_device_quat in C).
 function deviceQuat(a, b, g) { return qmul(qmul(qaxis(0, 0, 1, a), qaxis(1, 0, 0, b)), qaxis(0, 1, 0, g)); }
 
+// ------------------------------------------------------------------ apps (mirrors the in-game screen)
+function showApp(name, fromGame) {
+  if (!started && name !== 'portal') return;
+  if (name === 'off') name = 'home';
+  if (!['portal', 'home', 'camera', 'gallery'].includes(name)) return;
+  const prev = app;
+  app = name;
+  for (const s of ['portal', 'home', 'camera', 'gallery']) $('s-' + s).classList.toggle('show', s === name);
+  if (name !== 'gallery') closeViewer();
+  $('status').classList.toggle('dark', name === 'camera');
+  $('homebar').classList.toggle('light', name === 'camera');
+  $('homebar').style.display = name === 'portal' ? 'none' : 'block';
+  if (name === 'camera') resize();
+  if (name === 'gallery') { send({ c: 'gallery' }); renderGallery(); }
+  if (!fromGame && prev !== name && name !== 'portal') { appSetT = performance.now(); send({ c: 'app', v: name }); }
+}
+function goBack() {
+  if (viewerIdx >= 0) { closeViewer(); return; }
+  if (app === 'camera' || app === 'gallery') showApp('home');
+}
+$('homebar').addEventListener('click', () => showApp('home'));
+$('gclose').addEventListener('click', () => showApp('home'));
+// Gestures: swipe up from the bottom edge = home, swipe right from the left edge = back.
+let sw = null;
+addEventListener('touchstart', (e) => { if (e.touches.length === 1) { const t = e.touches[0]; sw = { x: t.clientX, y: t.clientY, t: performance.now() }; } }, { passive: true });
+addEventListener('touchend', (e) => {
+  if (!sw || !e.changedTouches.length) return;
+  const t = e.changedTouches[0], dx = t.clientX - sw.x, dy = t.clientY - sw.y, fast = performance.now() - sw.t < 600;
+  if (fast && sw.y > innerHeight - 48 && dy < -60) showApp('home');
+  else if (fast && sw.x < 28 && dx > 70 && Math.abs(dy) < 60) goBack();
+  else if (fast && viewerIdx >= 0 && !vpinch && Math.abs(dx) > 60 && Math.abs(dy) < 50 && vscale <= 1.01) stepViewer(dx < 0 ? 1 : -1);
+  sw = null;
+}, { passive: true });
+
+// ------------------------------------------------------------------ portal
+function portal(state) {
+  const b = $('pbadge');
+  if (state === 'connecting') { b.className = 'badge'; b.innerHTML = '<div class="spin"></div>'; $('ptitle').textContent = 'Connecting…'; $('go').style.display = 'none'; }
+  else if (state === 'connected') {
+    b.className = 'badge ok';
+    b.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
+    $('ptitle').textContent = 'Connected';
+    $('pmsg').textContent = 'Allow motion access: your phone then moves the in-game phone. (The page never uses this phone’s camera or microphone.)';
+    $('go').style.display = started ? 'none' : 'block';
+  }
+}
+
 // ------------------------------------------------------------------ connection
 function connect() {
   if (closedForGood) return;
   const q = session ? 's=' + encodeURIComponent(session) : 't=' + encodeURIComponent(token);
-  if (!session && !token) { showFatal('No pairing code', 'Scan the QR code shown in the game (press P while holding the phone).'); return; }
+  if (!session && !token) { showFatal('No pairing code', 'Scan the QR code on the Connect portal in the game (take the phone out).'); return; }
   ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws?' + q);
   ws.binaryType = 'arraybuffer';
-  ws.onopen = () => { wsOpen = true; retry = 0; setLink(true); send({ c: 'hello', v: PROTO, ua: navigator.userAgent.slice(0, 90) }); };
+  ws.onopen = () => { wsOpen = true; retry = 0; setLink(true); portal('connected'); send({ c: 'hello', v: PROTO, ua: navigator.userAgent.slice(0, 90) }); };
   ws.onmessage = (e) => (typeof e.data === 'string' ? onText(e.data) : onBinary(e.data));
   ws.onclose = (e) => {
     wsOpen = false; setLink(false);
     if (e.code === 4001) { forget(); showFatal('Unpaired', 'This phone was unpaired. Scan a new QR code in the game to pair again.'); return; }
     if (e.code === 4000) { closedForGood = true; showFatal('Paired elsewhere', 'Another phone (or tab) took over. Reload to take it back.'); return; }
     // A pairing code works once: after a failed first attempt only the session can resume.
-    if (!session && token) { showFatal('Pairing failed', 'The code expired or was already used. Press P in the game for a new QR code.'); return; }
+    if (!session && token) { showFatal('Pairing failed', 'The code expired or was already used. Press Reconnect on the Connect portal in the game for a new QR code.'); return; }
     setTimeout(connect, Math.min(5000, 400 * Math.pow(1.6, retry++)));
   };
 }
@@ -167,12 +334,15 @@ function forget() { session = ''; token = ''; sessionStorage.removeItem('dg_sess
 function setLink(on) {
   const l = $('link');
   l.textContent = on ? (status.driven ? 'Linked · gyro' : 'Linked') : 'Reconnecting…';
-  l.className = 'pill ' + (on ? 'ok' : 'bad');
+  $('slink').style.display = on ? 'inline-block' : 'none';
+  $('slink').textContent = on ? 'LINK' : '';
 }
 function showFatal(title, msg) {
-  $('start').classList.add('show');
-  $('start').querySelector('h2').textContent = title;
-  $('startmsg').textContent = msg;
+  started = false;
+  showApp('portal');
+  const b = $('pbadge'); b.className = 'badge'; b.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="var(--danger)" stroke-width="3" stroke-linecap="round"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+  $('ptitle').textContent = title;
+  $('pmsg').textContent = msg;
   $('go').style.display = 'none';
 }
 
@@ -186,7 +356,7 @@ function onText(s) {
       break;
     case 'status': onStatus(m); break;
     case 'pong': pingRtt = performance.now() - m.pt; break;
-    case 'gallery': gallery = m.items || []; renderGallery(); if (gallery[0]) setThumb(gallery[0]); break;
+    case 'gallery': gallery = m.items || []; renderGallery(); if (gallery[0]) setThumb(gallery[0]); else $('thumb').style.backgroundImage = ''; break;
     case 'media': gallery.unshift(m.item); renderGallery(); setThumb(m.item); toast(m.item.kind === 'video' ? 'Video saved in the game' : 'Photo saved in the game'); break;
     case 'toast': toast(m.msg); break;
     case 'unpaired': forget(); break;
@@ -200,13 +370,23 @@ function onStatus(m) {
   const r = $('rec'); r.style.display = m.rec ? 'inline-block' : 'none'; r.textContent = '● REC ' + mmss(m.rec_s || 0);
   setLink(wsOpen);
   $('filter').textContent = 'Filter: ' + (m.filter || 'none');
-  $('info').innerHTML = (m.holding ? (m.camera ? 'Camera raised' : 'Phone out (right mouse raises it)') : 'Take the phone out in the game (X)') +
-    '<br>' + (m.w ? m.w + '×' + m.h + ' · q' + m.q + ' · ' + (m.fps || 0).toFixed(0) + ' fps · ' + Math.round(m.kbps || 0) + ' kbit/s' : 'no stream yet') +
+  // Home screen + status bar: the game's clock, day, weather and (cosmetic) battery.
+  const h = typeof m.hours === 'number' ? m.hours : 12;
+  $('sclock').textContent = $('hclock').textContent = hhmm(h);
+  $('hday').textContent = 'Day ' + (m.day || 1) + ' · ' + daypart(h);
+  $('hwxl').textContent = WX[m.weather] || m.weather || '';
+  tileStyle($('hglyph'), weatherTile(m.weather, !!m.night), true);
+  const bat = Math.round((m.battery || 0) * 100); $('spct').textContent = bat + '%'; $('sbat').style.width = bat + '%';
+  $('banner').style.display = m.holding ? 'none' : 'block';
+  // The in-game phone's app (keys / mouse in the game): follow it unless this page just changed it.
+  if (started && m.app && m.app !== app && performance.now() - appSetT > 900) showApp(m.app, true);
+  $('info').innerHTML = (m.holding ? 'Phone out · ' + (m.app || '') : 'Take the phone out in the game (X)') +
+    '<br>' + (m.w ? m.w + '×' + m.h + ' · q' + m.q + ' · ' + (m.fps || 0).toFixed(0) + ' fps · ' + Math.round(m.kbps || 0) + ' kbit/s' : 'no stream (camera closed)') +
     '<br>glass-to-glass ≈ ' + Math.round(m.glass || 0) + ' ms · encode ' + (m.encode || 0).toFixed(1) + ' ms · ping ' + Math.round(pingRtt) + ' ms' +
     '<br>Game time Day ' + m.day + ' ' + m.clock + (m.calibrated ? ' · calibrated' : ' · not calibrated');
 }
 
-// ------------------------------------------------------------------ feed
+// ------------------------------------------------------------------ camera feed
 const canvas = $('feed'), ctx = canvas.getContext('2d', { alpha: false });
 let pending = null, decoding = false, lastBitmap = null, lastFrameId = 0;
 function resize() {
@@ -250,7 +430,7 @@ async function decodeNext() {
   try {
     const bmp = await createImageBitmap(f.blob);
     if (lastBitmap && lastBitmap.close) lastBitmap.close();
-    lastBitmap = bmp; draw(bmp);
+    lastBitmap = bmp; if (app === 'camera') draw(bmp);
     lastFrameId = f.id; framesShown++;
     send({ c: 'ack', f: f.id });   // drives the game's rate control and the latency estimate
   } catch (e) { /* a truncated frame: skip */ }
@@ -292,7 +472,7 @@ async function keepAwake() {
   try { if ('wakeLock' in navigator) { const l = await navigator.wakeLock.request('screen'); document.addEventListener('visibilitychange', () => document.visibilityState === 'visible' && navigator.wakeLock.request('screen').catch(() => {})); return l; } } catch {}
 }
 
-// ------------------------------------------------------------------ controls
+// ------------------------------------------------------------------ camera controls
 let zoomSentT = 0, pinching = false;
 function zoomToSlider(z) { return Math.round(Math.log(Math.max(1, z)) / Math.log(maxZoom) * 1000); }
 function sliderToZoom(v) { return Math.pow(maxZoom, v / 1000); }
@@ -312,13 +492,10 @@ $('flip').addEventListener('click', () => send({ c: 'camera', v: status.front ? 
 $('menu').addEventListener('click', () => $('sheet').classList.add('show'));
 $('close').addEventListener('click', () => $('sheet').classList.remove('show'));
 $('calib').addEventListener('click', () => { send({ c: 'calibrate' }); toast('Calibrated'); $('sheet').classList.remove('show'); });
-$('unpair').addEventListener('click', () => { if (confirm('Unpair this phone?')) { send({ c: 'unpair' }); forget(); closedForGood = true; showFatal('Unpaired', 'Scan a new QR code in the game to pair again.'); } });
+$('unpair').addEventListener('click', () => { if (confirm('Unpair this phone?')) { send({ c: 'unpair' }); forget(); closedForGood = true; $('sheet').classList.remove('show'); showFatal('Unpaired', 'Scan a new QR code in the game to pair again.'); } });
 const FILTERS = ['none', 'vivid', 'warm', 'cool', 'mono', 'noir'];
 $('filter').addEventListener('click', () => { const i = (FILTERS.indexOf(status.filter || 'none') + 1) % FILTERS.length; send({ c: 'filter', v: FILTERS[i] }); $('filter').textContent = 'Filter: ' + FILTERS[i]; });
-$('thumb').addEventListener('click', openGallery);
-$('gallerybtn').addEventListener('click', () => { $('sheet').classList.remove('show'); openGallery(); });
-$('gclose').addEventListener('click', () => $('gallery').classList.remove('show'));
-$('vclose').addEventListener('click', () => { $('viewer').classList.remove('show'); $('vbody').innerHTML = ''; });
+$('thumb').addEventListener('click', () => { showApp('gallery'); if (gallery.length) openViewer(0); });
 
 // Pinch to zoom + double tap to re-centre, on the picture.
 let pinch0 = 0, zoom0 = 1, lastTap = 0;
@@ -333,24 +510,32 @@ function dist(t) { return Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY -
 
 // ------------------------------------------------------------------ gallery
 function setThumb(it) { if (it && it.thumb) $('thumb').style.backgroundImage = 'url(' + mediaUrl(it.thumb) + ')'; }
-function openGallery() { send({ c: 'gallery' }); renderGallery(); $('gallery').classList.add('show'); }
 function renderGallery() {
   const g = $('grid'); g.innerHTML = '';
-  if (!gallery.length) { g.innerHTML = '<p>No photos yet: take one with the shutter.</p>'; return; }
-  for (const it of gallery) {
+  $('gcount').textContent = gallery.length + (gallery.length === 1 ? ' item' : ' items');
+  if (!gallery.length) { g.innerHTML = '<p>No photos yet</p>'; return; }
+  gallery.forEach((it, i) => {
     const c = document.createElement('div'); c.className = 'cell';
     if (it.thumb) c.style.backgroundImage = 'url(' + mediaUrl(it.thumb) + ')';
     if (it.kind === 'video') { const s = document.createElement('span'); s.textContent = '▶ ' + mmss(it.seconds || 0); c.appendChild(s); }
-    c.addEventListener('click', () => openViewer(it));
+    c.addEventListener('click', () => openViewer(i));
     g.appendChild(c);
-  }
+  });
+  if (viewerIdx >= gallery.length) closeViewer();
 }
-function openViewer(it) {
-  const b = $('vbody'); b.innerHTML = '';
+let vscale = 1, vpinch = false, vp0 = 0, vs0 = 1;
+function openViewer(i) {
+  if (i < 0 || i >= gallery.length) return;
+  viewerIdx = i;
+  const it = gallery[i], b = $('vbody');
+  b.querySelectorAll('img,video').forEach(e => e.remove());
   const el = document.createElement(it.kind === 'video' ? 'video' : 'img');
   el.src = mediaUrl(it.url);
   if (it.kind === 'video') { el.controls = true; el.playsInline = true; el.setAttribute('playsinline', ''); }
   b.appendChild(el);
+  vscale = 1; el.style.transform = '';
+  $('vprev').style.visibility = i > 0 ? 'visible' : 'hidden';
+  $('vnext').style.visibility = i + 1 < gallery.length ? 'visible' : 'hidden';
   $('vtitle').textContent = it.name;
   $('vdl').href = mediaUrl(it.url, true); $('vdl').setAttribute('download', it.name);
   $('vmeta').textContent = (it.w ? it.w + '×' + it.h : '') + (it.seconds ? ' · ' + mmss(it.seconds) : '') + (it.time ? ' · ' + it.time.replace('T', ' ') : '');
@@ -362,8 +547,22 @@ function openViewer(it) {
       else { const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = it.name; a.click(); }
     } catch (e) { if (e.name !== 'AbortError') toast('Share failed: ' + e.message); }
   };
+  $('vdel').onclick = () => { if (confirm('Delete ' + it.name + '?')) { send({ c: 'delete', id: it.id }); closeViewer(); } };
   $('viewer').classList.add('show');
 }
+function closeViewer() { viewerIdx = -1; $('viewer').classList.remove('show'); $('vbody').querySelectorAll('img,video').forEach(e => e.remove()); }
+function stepViewer(d) { if (viewerIdx >= 0) openViewer(Math.max(0, Math.min(gallery.length - 1, viewerIdx + d))); }
+$('vclose').addEventListener('click', closeViewer);
+$('vprev').addEventListener('click', () => stepViewer(-1));
+$('vnext').addEventListener('click', () => stepViewer(1));
+$('vbody').addEventListener('touchstart', (e) => { if (e.touches.length === 2) { vpinch = true; vp0 = dist(e.touches); vs0 = vscale; } }, { passive: true });
+$('vbody').addEventListener('touchmove', (e) => {
+  if (!vpinch || e.touches.length !== 2) return;
+  vscale = Math.max(1, Math.min(4, vs0 * dist(e.touches) / Math.max(vp0, 1)));
+  const el = $('vbody').querySelector('img'); if (el) el.style.transform = 'scale(' + vscale + ')';
+}, { passive: true });
+$('vbody').addEventListener('touchend', (e) => { if (e.touches.length < 2) setTimeout(() => vpinch = false, 50); }, { passive: true });
+$('vbody').addEventListener('dblclick', () => { vscale = vscale > 1 ? 1 : 2.5; const el = $('vbody').querySelector('img'); if (el) el.style.transform = 'scale(' + vscale + ')'; });
 
 // ------------------------------------------------------------------ start
 setInterval(() => { if (wsOpen) send({ c: 'ping', pt: performance.now(), rtt: Math.round(pingRtt) }); }, 1000);
@@ -373,10 +572,13 @@ setInterval(() => {
   $('lat').textContent = (g ? g + ' ms' : Math.round(pingRtt) + ' ms ping') + ' · ' + fpsShown.toFixed(0) + ' fps';
 }, 1000);
 if (!window.isSecureContext) { const s = $('secure'); s.style.display = 'block'; s.textContent = 'This page is not on HTTPS: phone browsers only give motion sensors to secure pages. Photos, video and the live picture still work.'; }
-if (!token && session) $('startmsg').textContent = 'Reconnecting to your game…';
+if (!token && session) $('pmsg').textContent = 'Reconnecting to your game…';
+$('homebar').style.display = 'none';
 $('go').addEventListener('click', async () => {
-  $('start').classList.remove('show');
-  resize();
+  started = true;
+  $('go').style.display = 'none';
+  showApp(status.app && status.app !== 'portal' && status.app !== 'off' ? status.app : 'home', true);
+  if (app === 'home' && status.app !== 'home') send({ c: 'app', v: 'home' });
   await startSensors();
   keepAwake();
   try { if (screen.orientation && screen.orientation.unlock) screen.orientation.unlock(); } catch {}

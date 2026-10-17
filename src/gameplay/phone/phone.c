@@ -979,13 +979,14 @@ static void remote_view(vec3 cam_pos) {
     render_phone_view(&v);
 }
 
-// The screen's emissive: a display of phone_screen_emissive x 250 nits, shown at
-// clamp(L x exposure, phone_screen_min, phone_screen_max): white but never blown out by day, a
-// mild glow (bloom) at night.
+// The screen's emissive: a display of luminance L = phone_screen_emissive x 2.4 (scene units:
+// about the daylight scene average), shown at clamp(L x exposure, phone_screen_min,
+// phone_screen_max): white but never blown out by day, a mild glow (bloom) at night, when the
+// exposure opens up.
 static void screen_level(void) {
     float ev = render_exposure_ev();
     float e = 0.18f / fmaxf(exp2f(ev) * 0.125f, 1e-6f);   // the main view's exposure (EV100 -> multiplier)
-    float L = 250.0f * PH.cv.screen_emissive->f;
+    float L = 2.4f * PH.cv.screen_emissive->f;
     float lo = PH.cv.screen_min->f, hi = fmaxf(PH.cv.screen_max->f, lo);
     PH.screen_level = clampf(L * e, lo, hi);
     PH.screen_k = PH.screen_level / e;
@@ -1275,6 +1276,21 @@ static void cmd_phone_back(int argc, const char **argv) {
     phone_os_back(&PH.os);
 }
 
+// phone_wait <flow|app> [frames]: hold the script until the phone's flow or app is that (tests:
+// a real / simulated device connects or leaves at its own pace).
+static void cmd_phone_wait(int argc, const char **argv) {
+    if (argc < 2) { log_info("phone_wait <idle|pairing|local|paired|lost|portal|home|camera|gallery|off> [frames]"); return; }
+    int left = argc > 2 ? atoi(argv[2]) : 3600;
+    bool ok = !strcmp(argv[1], phone_flow_name(PH.os.flow)) || !strcmp(argv[1], phone_app_name(PH.os.app));
+    if (ok || left <= 0) {
+        log_info("phone_wait: %s %s", argv[1], ok ? "reached" : "TIMEOUT");
+        return;
+    }
+    char line[96];
+    snprintf(line, sizeof(line), "phone_wait %s %d", argv[1], left - 1);
+    cbuf_retry(line);
+}
+
 static void cmd_phone_ui(int argc, const char **argv) {
     set_capture(argc > 1 ? atoi(argv[1]) != 0 && PH.panel_on : !PH.ui_capture && PH.panel_on);
     log_info("phone_ui: cursor %s", PH.ui_capture ? "on the phone" : "in the game");
@@ -1305,10 +1321,10 @@ void phone_register(void) {
     c->filter = cvar_reg_int("phone_filter", 0, 0, PHONE_FILTER_COUNT - 1, CVAR_ARCHIVE, "photo filter: 0 none, 1 vivid, 2 warm, 3 cool, 4 mono, 5 noir");
     c->remote_range = cvar_reg_float("phone_remote_range", 4.0f, 0.0f, 20.0f, CVAR_ARCHIVE, "other players' phone screens render live within this distance (m)");
     c->remote_fps = cvar_reg_int("phone_remote_fps", 8, 1, 30, CVAR_ARCHIVE, "other players' phone screens: render rate (Hz)");
-    c->screen_emissive = cvar_reg_float("phone_screen_emissive", 1.0f, 0.0f, 4.0f, CVAR_ARCHIVE, "phone screen luminance (x 250 nits): glows more at night through the exposure");
-    c->screen_min = cvar_reg_float("phone_screen_min", 1.1f, 0.2f, 4.0f, CVAR_ARCHIVE, "phone screen: lowest displayed level (daylight; white, no bloom)");
-    c->screen_max = cvar_reg_float("phone_screen_max", 2.6f, 0.5f, 8.0f, CVAR_ARCHIVE, "phone screen: highest displayed level (night; caps the bloom)");
-    c->screen_light = cvar_reg_float("phone_screen_light", 0.35f, 0.0f, 4.0f, CVAR_ARCHIVE, "the phone screen's light on the hands / face (point light intensity, 0 = off)");
+    c->screen_emissive = cvar_reg_float("phone_screen_emissive", 1.0f, 0.0f, 4.0f, CVAR_ARCHIVE, "phone screen luminance (x 2.4, about the daylight scene average): glows more at night through the exposure");
+    c->screen_min = cvar_reg_float("phone_screen_min", 1.15f, 0.2f, 4.0f, CVAR_ARCHIVE, "phone screen: lowest displayed level (daylight; white, no bloom)");
+    c->screen_max = cvar_reg_float("phone_screen_max", 2.4f, 0.5f, 8.0f, CVAR_ARCHIVE, "phone screen: highest displayed level (night; caps the bloom)");
+    c->screen_light = cvar_reg_float("phone_screen_light", 0.25f, 0.0f, 4.0f, CVAR_ARCHIVE, "the phone screen's light on the hands / face (point light intensity, 0 = off)");
     c->battery_drain = cvar_reg_float("phone_battery_drain", 0.5f, 0.0f, 100.0f, CVAR_ARCHIVE, "cosmetic phone battery drain while equipped (% per minute)");
     c->hud_size = cvar_reg_float("hud_phone_size", 0.22f, 0.12f, 0.4f, CVAR_ARCHIVE, "HUD: phone panel height (fraction of the screen height)");
     c->hud_corner = cvar_reg_int("hud_phone_corner", 0, 0, 3, CVAR_ARCHIVE, "HUD: phone panel corner: 0 bottom right, 1 bottom left, 2 top right, 3 top left");
@@ -1331,6 +1347,7 @@ void phone_register(void) {
     cmd_register("phone_tap", cmd_phone_tap, "phone_tap <x> <y>: tap the phone screen at design px (640 x 1136)");
     cmd_register("phone_decline", cmd_phone_decline, "Connect portal: use the in-game phone instead");
     cmd_register("phone_back", cmd_phone_back, "phone: back (viewer -> gallery -> home)");
+    cmd_register("phone_wait", cmd_phone_wait, "phone_wait <flow|app> [frames]: scripts wait until the phone gets there (tests)");
     cmd_register("phone_ui", cmd_phone_ui, "phone_ui [0|1]: free the cursor for the HUD phone panel (key Alt)");
     PH.conn = -1;
     PH.zoom = PH.zoom_target = 1.0f;

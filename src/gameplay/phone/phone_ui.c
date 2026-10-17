@@ -703,15 +703,12 @@ void phone_ui_hud(PhoneState *s) {
     draw_panel(s);
     // Key hints (the camera app with the mouse in the game), above the panel or bottom right.
     PhoneApp app = s->os.app;
-    float x = W - gui_s(36), y = H - gui_s(130);
-    if (s->panel_t > 0.5f) {
-        PhoneRect r;
-        if (phone_ui_panel_rect(s, &r)) {
-            bool bottom = s->cv.hud_corner->i <= 1;
-            y = bottom ? r.y - gui_s(s->theme.panel.bezel) - gui_s(s->theme.panel.hint_gap) - gui_s(48) : H - gui_s(130);
-            x = (s->cv.hud_corner->i == 0 || s->cv.hud_corner->i == 2) ? r.x + r.w + gui_s(s->theme.panel.bezel) : W - gui_s(36);
-        }
-    }
+    // Bottom right, above the item readout (the panel's bottom edge when it is shown).
+    LayoutParams lp = gui_layout_params();
+    GuiRect safe = gui_layout_safe_rect(&lp);
+    float x = safe.x + safe.w, y = safe.y + safe.h - gui_s(s->theme.panel.readout_gap) - gui_s(18);
+    PhoneRect r;
+    if (s->panel_t > 0.5f && phone_ui_panel_rect(s, &r) && s->cv.hud_corner->i == 0) y = r.y - gui_s(s->theme.panel.bezel) - gui_s(s->theme.panel.hint_gap) - gui_s(48);
     if (!s->ui_capture && !s->spec) {
         if (app == PAPP_CAMERA) {
             x = key_hint(x, y, ACT_RELOAD, "R", s->rec ? "Stop" : "Record");
@@ -835,7 +832,9 @@ void phone_draw_held(const ItemDef *it, vec3 pos, quat rot, bool viewmodel, u32 
         PointLight l;
         memset(&l, 0, sizeof(l));
         vec3 nrm = quat_rotate(sr, v3(0, 0, 1));
-        l.pos = v3_add(sp, v3_scale(nrm, 0.04f));   // viewmodel geometry is lit at its own (world) positions
+        // Just in front of the glass: the hands / face get it, the glass itself almost none (no
+        // highlight of the light on the screen). Viewmodel geometry is lit at its own positions.
+        l.pos = v3_add(sp, v3_scale(nrm, 0.003f));
         l.radius = 1.6f;
         l.color = app == PAPP_CAMERA ? v3(0.85f, 0.9f, 1.0f) : v3(0.95f, 0.97f, 1.0f);
         l.intensity = s->cv.screen_light->f;
