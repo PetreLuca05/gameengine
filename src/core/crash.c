@@ -42,7 +42,13 @@ static void log_stack(HANDLE thread, CONTEXT ctx) {
 static LONG WINAPI crash_filter(EXCEPTION_POINTERS *ep) {
     SymSetOptions(SYMOPT_LOAD_LINES | SYMOPT_UNDNAME | SYMOPT_DEFERRED_LOADS);
     SymInitialize(GetCurrentProcess(), NULL, TRUE);
-    log_error("CRASH: exception 0x%08lx at %p", ep->ExceptionRecord->ExceptionCode, ep->ExceptionRecord->ExceptionAddress);
+    const EXCEPTION_RECORD *er = ep->ExceptionRecord;
+    log_error("CRASH: exception 0x%08lx at %p (exe+0x%llx)", er->ExceptionCode, er->ExceptionAddress,
+              (unsigned long long)((const char *)er->ExceptionAddress - (const char *)GetModuleHandleW(NULL)));
+    // Access violations: what was touched (a near-null address means an unchecked failed allocation).
+    if (er->ExceptionCode == EXCEPTION_ACCESS_VIOLATION && er->NumberParameters >= 2)
+        log_error("CRASH: %s of address %p", er->ExceptionInformation[0] == 1 ? "write" : er->ExceptionInformation[0] == 8 ? "execute" : "read",
+                  (void *)er->ExceptionInformation[1]);
     log_stack(GetCurrentThread(), *ep->ContextRecord);
     return EXCEPTION_EXECUTE_HANDLER;
 }
