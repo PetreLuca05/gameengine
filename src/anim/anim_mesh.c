@@ -8,6 +8,36 @@ static int cmp_float(const void *a, const void *b) {
     return x < y ? -1 : (x > y ? 1 : 0);
 }
 
+void skin_quantize_weights(const float *w, int n, u8 out[4]) {
+    float sum = 0;
+    n = DG_CLAMP(n, 0, 4);
+    for (int k = 0; k < n; k++) sum += w[k] > 0 ? w[k] : 0;
+    out[0] = out[1] = out[2] = out[3] = 0;
+    if (!(sum > 0)) { out[0] = 255; return; }
+    int q[4] = { 0, 0, 0, 0 }, total = 0;
+    float rem[4] = { -1, -1, -1, -1 };
+    for (int k = 0; k < n; k++) {
+        float x = (w[k] > 0 ? w[k] : 0) / sum * 255.0f;
+        q[k] = DG_CLAMP((int)floorf(x), 0, 255);
+        rem[k] = x - (float)q[k];
+        total += q[k];
+    }
+    while (total < 255) {
+        int best = 0;
+        for (int k = 1; k < n; k++) if (rem[k] > rem[best]) best = k;
+        q[best]++;
+        rem[best] = -1.0f;
+        total++;
+    }
+    while (total > 255) {   // float rounding only
+        int best = 0;
+        for (int k = 1; k < n; k++) if (q[k] > q[best]) best = k;
+        q[best]--;
+        total--;
+    }
+    for (int k = 0; k < n; k++) out[k] = (u8)q[k];
+}
+
 void skin_fit_bone_radii(const SkinMeshData *m, int lod, const Skeleton *s, const i16 *joint_map, float *radius) {
     for (int b = 0; b < s->count; b++) radius[b] = 0;
     if (lod < 0 || lod >= m->lod_count) return;

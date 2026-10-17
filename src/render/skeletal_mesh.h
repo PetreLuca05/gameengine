@@ -28,7 +28,7 @@ struct cJSON;
 #define SKM_MAX_BONES ANIM_MAX_BONES
 #define SKM_MAX_ALIASES 32
 #define SKM_MAX_SOCKETS 8
-#define SKM_FILE_VERSION 1
+#define SKM_FILE_VERSION 2   // 2: vertices may stay in the file's bind space (SkmBone.bind_fix)
 
 typedef struct BoneAlias { char from[48], to[48]; } BoneAlias;
 typedef struct BoneAliasTable { BoneAlias a[SKM_MAX_ALIASES]; int count; } BoneAliasTable;
@@ -39,7 +39,13 @@ typedef struct SkmBone {
     i16 parent;             // mesh-only: parent entry in this list (always earlier); skeleton bones: -1
     Xform local;            // mesh-only: bind transform relative to the parent (reference pose space)
     Xform bind_model;       // bind pose on the Skeleton reference pose (model space)
-    Xform bind_delta;       // file bind vs the Skeleton reference pose (model space; identity = same bind)
+    Xform bind_delta;       // file bind vs the Skeleton reference pose: file bind = bind_delta * bind_model
+    // Per-bone retarget (has_fix): the mesh's vertices are in the file's bind space and this bone's
+    // palette entry is the skeleton's `world * inverse(bind_model)` times bind_fix = inverse(bind_delta),
+    // i.e. `world * inverse(file bind)`: every influence moves the vertex rigidly from its own bind
+    // (Unreal's per-mesh inverse bind matrices). Without it the vertices were retargeted at bake.
+    mat4 bind_fix;
+    bool has_fix;
 } SkmBone;
 
 typedef struct SkeletalMesh {
@@ -56,6 +62,10 @@ typedef struct SkeletalMesh {
     // Bake report summary (the full text comes from tools/bake_mesh).
     int missing, extra, aliased;
     float max_bind_delta_m, max_bind_delta_deg;
+    // Largest distance between a vertex's blended bake-time retarget and one of its influences' own
+    // retarget (the error bound of baking the retarget into the vertices; above 0.1 mm the mesh keeps
+    // its file bind and the palette retargets per bone instead, SkmBone.bind_fix).
+    float retarget_blend_err_m;
 } SkeletalMesh;
 
 void skm_free(SkeletalMesh *m);

@@ -208,9 +208,9 @@ static void build_part_meshes(const SkeletalMesh *sm, const u32 *colors, const i
                     u32 src = L->indices[t + k];
                     if (remap[src] == 0xFFFFFFFFu) {
                         SkinVertex sv = v[src];
-                        int sum = 0;
-                        for (int j = 0; j < 4; j++) { if (!CG->arm_bone[jmap[sv.joints[j]]]) sv.weights[j] = 0; sum += sv.weights[j]; }
-                        for (int j = 0; j < 4; j++) sv.weights[j] = (u8)(sum ? (sv.weights[j] * 255 + sum / 2) / sum : 0);
+                        float aw[4];
+                        for (int j = 0; j < 4; j++) aw[j] = CG->arm_bone[jmap[sv.joints[j]]] ? (float)sv.weights[j] : 0.0f;
+                        skin_quantize_weights(aw, 4, sv.weights);   // exactly 255 (the shader never renormalises)
                         remap[src] = avc;
                         av[avc++] = sv;
                     }
