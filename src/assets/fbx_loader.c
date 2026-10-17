@@ -275,7 +275,9 @@ static int bind_bone(BindCtx *c, const ufbx_node *bn, int depth) {
     b->local = local;
     b->bind_model = xf_mul(m->bones[pi].bind_model, local);
     b->bind_model.s = v3(1, 1, 1);
-    b->bind_delta = xf_identity();
+    b->bind_delta = xf_mul(fb, xf_inverse(b->bind_model));   // file bind = bind_delta * bind_model
+    b->bind_delta.s = v3(1, 1, 1);
+    b->bind_fix = mat4_identity();
     c->node_of[k] = bn;
     m->extra++;
     return k;
@@ -297,6 +299,52 @@ bool fbx_load_skeletal_mesh(const char *path, const SkeletonAsset *sk, const Bon
     if (aliases) mesh->aliases = *aliases;
     LodBuild lods[SKIN_MAX_LODS];
     memset(lods, 0, sizeof(lods));
+    // Retarget mode (docs/CHARACTERS.md "Proportions"). Each influence retargets a vertex rigidly from
+    // the file's bind of its bone to that bone on the Skeleton reference pose. Baking that into the
+    // vertex blends the influences' retargets, which is exact only while they agree: once the bones
+    // bend apart, a vertex skinned with bone A's motion carries bone B's retarget (Mixamo skins on the
+    // Dummy rig: up to 8 cm off at knees / shoulders). Bound of that error over every pose: the
+    // weighted distance between a vertex's blend and each influence's own retarget. Above 0.1 mm the
+    // vertices stay in the file's bind space and the palette retargets per bone (SkmBone.bind_fix).
+    static Xform cluster_retarget[512];
+    float blend_err = 0;
+    for (size_t ni = 0; ni < sc->nodes.count; ni++) {
+        const ufbx_node *node = sc->nodes.data[ni];
+        const ufbx_mesh *m = node->mesh;
+        if (!m || node_is_bone(node) || !m->skin_deformers.count) continue;
+        const ufbx_skin_deformer *skin = m->skin_deformers.data[0];
+        int ncl = (int)DG_MIN(skin->clusters.count, 512);
+        for (int c = 0; c < ncl; c++) {
+            const ufbx_skin_cluster *cl = skin->clusters.data[c];
+            int j = bind_bone(&bc, cl->bone_node, 0);
+            cluster_retarget[c] = xf_mul(mesh->bones[j].bind_model, xf_inverse(conv_matrix(&cv, &cl->bind_to_world)));
+            cluster_retarget[c].s = v3(1, 1, 1);
+        }
+        for (size_t vid = 0; vid < skin->vertices.count && vid < m->vertices.count; vid++) {
+            ufbx_skin_vertex sv = skin->vertices.data[vid];
+            if (sv.num_weights < 2) continue;
+            vec3 p = conv_point(&cv, ufbx_transform_position(&node->geometry_to_world, m->vertices.data[vid]));
+            vec3 rp = v3(0, 0, 0);
+            float rw = 0;
+            for (u32 k = 0; k < sv.num_weights; k++) {
+                ufbx_skin_weight sw = skin->weights.data[sv.weight_begin + k];
+                if ((int)sw.cluster_index >= ncl || sw.weight <= 0) continue;
+                rp = v3_madd(rp, xf_point(cluster_retarget[sw.cluster_index], p), (float)sw.weight);
+                rw += (float)sw.weight;
+            }
+            if (rw <= 1e-6f) continue;
+            rp = v3_scale(rp, 1.0f / rw);
+            float e = 0;
+            for (u32 k = 0; k < sv.num_weights; k++) {
+                ufbx_skin_weight sw = skin->weights.data[sv.weight_begin + k];
+                if ((int)sw.cluster_index >= ncl || sw.weight <= 0) continue;
+                e += (float)sw.weight / rw * v3_dist(rp, xf_point(cluster_retarget[sw.cluster_index], p));
+            }
+            blend_err = fmaxf(blend_err, e);
+        }
+    }
+    bool per_bone = blend_err > 1e-4f;
+    mesh->retarget_blend_err_m = blend_err;
     for (size_t ni = 0; ni < sc->nodes.count; ni++) {
         const ufbx_node *node = sc->nodes.data[ni];
         const ufbx_mesh *m = node->mesh;
@@ -305,17 +353,20 @@ bool fbx_load_skeletal_mesh(const char *path, const SkeletonAsset *sk, const Bon
         const ufbx_skin_deformer *skin = m->skin_deformers.count ? m->skin_deformers.data[0] : NULL;
         // Per-cluster mesh bone (skeleton bone or mesh-only leaf).
         int cluster_joint[512];
-        // Retarget: each cluster's bind pose in this file -> the bone's pose on the Skeleton reference
-        // pose, so a character with other proportions keeps its shape on the shared skeleton (identity
-        // for the canonical model itself).
-        static Xform cluster_retarget[512];
+        // Retarget of each cluster's bind pose in this file. Baked (per_bone false): onto the bone's pose
+        // on the Skeleton reference pose, so a character with other proportions keeps its shape on the
+        // shared skeleton (identity for the canonical model itself). Per bone: onto the bone's file bind
+        // (identity unless this mesh was bound in another pose than the first mesh using the bone); the
+        // palette then does the reference-pose retarget per bone.
         int ncl = skin ? (int)DG_MIN(skin->clusters.count, 512) : 0;
         for (int c = 0; c < ncl; c++) {
             const ufbx_skin_cluster *cl = skin->clusters.data[c];
             const ufbx_node *bn = cl->bone_node;
             cluster_joint[c] = bind_bone(&bc, bn, 0);
             Xform mb = conv_matrix(&cv, &cl->bind_to_world);
-            cluster_retarget[c] = xf_mul(mesh->bones[cluster_joint[c]].bind_model, xf_inverse(mb));
+            const SkmBone *jb = &mesh->bones[cluster_joint[c]];
+            Xform target = per_bone ? xf_mul(jb->bind_delta, jb->bind_model) : jb->bind_model;
+            cluster_retarget[c] = xf_mul(target, xf_inverse(mb));
             cluster_retarget[c].s = v3(1, 1, 1);
         }
         // Rigid (unskinned) meshes parented under a bone follow that bone.
@@ -407,15 +458,9 @@ bool fbx_load_skeletal_mesh(const char *path, const SkeletonAsset *sk, const Bon
                     for (int q = 0; q < cnt; q++) sum += ws[q];
                     if (cnt == 0 || sum <= 0) { v.joints[0] = (u8)rigid_joint; v.weights[0] = 255; }
                     else {
-                        int acc = 0;
-                        for (int q = 0; q < cnt; q++) {
-                            v.joints[q] = (u8)js[q];
-                            int w8 = (int)lrintf(ws[q] / sum * 255.0f);
-                            if (q == cnt - 1) w8 = 255 - acc;
-                            w8 = DG_CLAMP(w8, 0, 255);
-                            v.weights[q] = (u8)w8;
-                            acc += w8;
-                        }
+                        // Exactly 255 in all (the old round-each-then-remainder could reach 256).
+                        skin_quantize_weights(ws, cnt, v.weights);
+                        for (int q = 0; q < cnt; q++) v.joints[q] = (u8)js[q];
                     }
                 } else {
                     v.joints[0] = (u8)rigid_joint;
@@ -446,6 +491,14 @@ bool fbx_load_skeletal_mesh(const char *path, const SkeletonAsset *sk, const Bon
     dg_strcpy(out->source, sizeof(out->source), path);
     mesh->skeleton_hash = sk->skel.hash;
     dg_strcpy(mesh->skeleton_id, sizeof(mesh->skeleton_id), sk->id);
+    // Per-bone retarget: palette entry = skeleton palette * inverse(bind_delta) (= world * inverse(file bind)).
+    for (int i = 0; i < mesh->bone_count; i++) {
+        SkmBone *b = &mesh->bones[i];
+        Xform fix = xf_inverse(b->bind_delta);
+        b->has_fix = per_bone && (v3_len(fix.t) > 1e-6f || quat_angle_between(fix.r, quat_identity()) > 1e-5f);
+        b->bind_fix = b->has_fix ? xf_to_mat4(fix) : mat4_identity();
+    }
+    if (per_bone) log_info("fbx: %s: per-bone retarget (baked retarget would be off by up to %.1f mm)", path, blend_err * 1000.0f);
     // Report: skeleton bones the file doesn't have (simply not skinned), largest bind deltas.
     for (int j = 0; j < sk->skel.count; j++) {
         bool found = false;

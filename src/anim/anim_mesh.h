@@ -41,6 +41,10 @@ typedef struct SkinMeshData {
 } SkinMeshData;
 
 void skin_mesh_free(SkinMeshData *m);
+// n (<= 4) non-negative weights -> unorm8 summing to exactly 255 (largest remainder; ties: the earlier
+// slot). Skinning never renormalises (skin_matrix sums w / 255), so a sum of 254 or 256 would scale the
+// vertex about the world origin (decimetres at 100 m). An all-zero input gives 255 to slot 0.
+void skin_quantize_weights(const float *w, int n, u8 out[4]);
 // Fits per-bone capsule radii from the vertices dominantly weighted to each bone
 // (used by ragdoll + hitboxes). radius[] gets the 75th percentile distance to the bone segment.
 // joint_map: vertex joint -> skeleton bone (SkeletalMesh bone lists; NULL = joints are skeleton bones).
