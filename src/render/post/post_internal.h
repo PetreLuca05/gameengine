@@ -10,6 +10,7 @@
 #include "post.h"
 
 #define POST_MAX_PIPES 96
+#define POST_LOOKS 5        // LOOK_COUNT (src/render/post/look.h)
 
 // Must match shaders/post/post_common.glsl (std140).
 typedef struct PostUBO {
@@ -48,6 +49,10 @@ typedef struct PostUBO {
     vec4 s_fb_tint;      // rgb, w user gamma
     vec4 s_dbg;          // view, split, debug channel scale, fog ambient (weather)
     vec4 s_fb3;          // death sequence: black, blur (docs/REVIVE.md)
+    vec4 s_look;         // Look (docs/LOOKS.md): LUT active, bloom threshold, halation, letterbox aspect (0 = none)
+    vec4 s_look2;        // bloom tint rgb, w unused
+    vec4 s_look3;        // damage edge tint rgb, w unused
+    vec4 s_look4;        // low-health vignette colour rgb, w unused
     vec4 lights[MAX_POINT_LIGHTS * 2];   // pos radius, color intensity
 } PostUBO;
 
@@ -85,6 +90,11 @@ typedef struct PostCtx {
     VkImageView white, black, noise, lut, dirt, smaa_area, smaa_search;
     VkImageView moon;                 // lunar albedo, equirectangular, sRGB, mipmapped (assets/textures/moon_albedo.jpg)
     int lut_count;
+    // Looks (post_look.c): one baked LUT per look (src/render/post/look.h)
+    VkImage look_img[POST_LOOKS];
+    VmaAllocation look_alloc[POST_LOOKS];
+    VkImageView look_lut[POST_LOOKS];
+    bool looks_dirty;
     // per frame
     FgRes hiz, ao, contact, ssr, ssgi, froxels, color_prev, depth_prev, vol_history;
     float last_ev;
@@ -134,5 +144,16 @@ void post_buffers_init_build(void);            // post_exposure.c: zero the expo
 void post_textures_init(void);                 // post_textures.c: noise, LUT, dirt, SMAA tables
 void post_textures_shutdown(void);
 bool post_lut_load_cube(const char *path, int slot);
+// A 3D RGBA16F LUT of n^3 rgb floats (r fastest), sampled from every stage; destroy with post_image_destroy.
+void post_lut3d_create(VkImage *img, VmaAllocation *alloc, VkImageView *view, const float *rgb, u32 n);
+void post_image_destroy(VkImage *img, VmaAllocation *alloc, VkImageView *view);
+// Looks (post_look.c, docs/LOOKS.md): the baked LUTs, rebaked before the frame when invalidated;
+// the Settings preview strip (the scene under every look).
+void post_looks_init(void);
+void post_looks_shutdown(void);
+void post_looks_update(void);                  // post_begin_frame: rebake if invalidated
+VkImageView post_look_view(int look);          // any valid 3D view for look < 0
+void post_look_preview_build(FgRes color, bool direct);   // post_resolve: when the UI asked this frame
+void post_look_final_reads(int pass);          // the UI pass samples the strip
 
 #endif
