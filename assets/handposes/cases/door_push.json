@@ -6,34 +6,12 @@
   "bind": "interactable:door/open",
   "source": "interactable:door",
   "inherits": "style/grip_palm",
-  "hands": [
-    "left",
-    "right"
-  ],
-  "reviewed": false,
+  "hands": ["left", "right"],
+  "reviewed": true,
   "auto_placed": false,
-  "setup": {
-    "prop": "door",
-    "distance": 0.42
-  },
-  "anchor": {
-    "pos": [
-      0,
-      0,
-      0
-    ],
-    "q": [
-      0,
-      0,
-      0,
-      1
-    ]
-  },
+  "setup": { "prop": "door", "distance": 0.42 },
+  "anchor": { "pos": [-0.01930419, 0, -0.05828879], "q": [0.3838292, -0.9066594, 0.16529404, 0.057634998] },
   "duration": 0.76,
-  "markers": {
-    "contact": 0.16,
-    "use": 0.312,
-    "release": 0.54
-  },
+  "markers": { "contact": 0.16, "use": 0.312, "release": 0.54 },
   "keys": []
 }

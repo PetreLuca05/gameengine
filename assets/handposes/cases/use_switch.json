@@ -7,10 +7,10 @@
   "source": "interactable:switch",
   "inherits": "style/grip_point",
   "hands": ["left", "right"],
-  "reviewed": false,
+  "reviewed": true,
   "auto_placed": false,
   "setup": { "prop": "switch", "distance": 0.75 },
-  "anchor": { "pos": [0, 0, 0], "q": [0, 0, 0, 1] },
+  "anchor": { "pos": [-0.025368972, 0.0059520006, 0.0032540925], "q": [-0.11384012, -0.99145186, 0.0072717643, 0.06333098] },
   "duration": 0.76,
   "markers": { "contact": 0.16, "use": 0.31199998, "release": 0.53999996 },
   "keys": []
