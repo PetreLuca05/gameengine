@@ -1,0 +1,124 @@
+{
+  "duration": 0.05,
+  "priority": 0,
+  "max_instances": 256,
+  "cull_distance": 600,
+  "lod": [
+    [
+      40,
+      0.8
+    ],
+    [
+      120,
+      0.5
+    ],
+    [
+      250,
+      0.3
+    ]
+  ],
+  "emitters": [
+    {
+      "name": "wake",
+      "tier": "gpu",
+      "spawn": {
+        "mode": "burst",
+        "count": 1,
+        "life": [
+          0.25,
+          0.5
+        ],
+        "size": [
+          0.08,
+          0.14
+        ],
+        "speed": [
+          0.0,
+          0.2
+        ],
+        "angle": 18,
+        "inherit": 0.0,
+        "rotation": [
+          0,
+          360
+        ],
+        "spin": [
+          -40,
+          40
+        ],
+        "color": [
+          0.9,
+          0.9,
+          0.92,
+          0.1
+        ],
+        "color2": [
+          0.81,
+          0.81,
+          0.8280000000000001,
+          0.06999999999999999
+        ]
+      },
+      "update": {
+        "gravity": -0.0,
+        "drag": 3.0,
+        "wind": 0.6,
+        "turbulence": {
+          "strength": 0.5,
+          "freq": 1.6,
+          "speed": 0.4
+        },
+        "size_curve": {
+          "type": "bezier",
+          "keys": [
+            [
+              0,
+              0.45
+            ],
+            [
+              0.25,
+              1.1
+            ],
+            [
+              1,
+              2.0
+            ]
+          ]
+        },
+        "alpha_curve": {
+          "type": "bezier",
+          "keys": [
+            [
+              0,
+              0
+            ],
+            [
+              0.1,
+              1
+            ],
+            [
+              0.5,
+              0.5
+            ],
+            [
+              1,
+              0
+            ]
+          ]
+        },
+        "frame_over_life": true,
+        "motion_vectors": true
+      },
+      "render": {
+        "mode": "alpha",
+        "orient": "billboard",
+        "lighting": "sixway",
+        "texture": "smoke_puff",
+        "soft": 0.25,
+        "near_fade": 0.15
+      }
+    }
+  ],
+  "name": "bullet_vapor",
+  "_generated": "make_ballistic_effects.py"
+}

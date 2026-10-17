@@ -45,6 +45,7 @@ typedef struct VfxSpawnParams {
     bool viewmodel;
     int socket;             // > 0: parented, the owner updates the transform via vfx_set_transform
     vec4 tint;              // w > 0: rgb multiplies particle and decal colours (per-character blood)
+    float decal_scale;      // decal size multiplier on top of scale (0 = 1)
 } VfxSpawnParams;
 
 typedef struct VfxInstance {

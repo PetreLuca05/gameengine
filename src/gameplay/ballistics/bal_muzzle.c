@@ -18,14 +18,14 @@ vec3 bal_blackbody_rgb(float kelvin) {
     return v3((float)(v[0] / mx), (float)(v[1] / mx), (float)(v[2] / mx));
 }
 
-float bal_flash_exposure_gain(float ev, float ev_night, float ev_day) {
-    float t = smoothstepf(ev_night + 0.5f, ev_night + 0.75f * (ev_day - ev_night), ev);
-    float g = lerpf(1.0f, BAL_FLASH_DAY_RATIO, t);
-    return exp2f(ev - ev_night) * g;
+float bal_flash_exposure_gain(float ev, float ev_night, float daylight) {
+    // Undo the camera's adaptation relative to night (the tonemapper scales by 2^-EV), then apply
+    // the eye's: an adapted daylight eye sees the same flash at ~0.15x.
+    return exp2f(ev - ev_night) * lerpf(1.0f, BAL_FLASH_DAY_RATIO, saturate(daylight));
 }
 
-float bal_flash_perceived(float ev, float ev_night, float ev_day) {
-    return bal_flash_exposure_gain(ev, ev_night, ev_day) * exp2f(-(ev - ev_night));
+float bal_flash_perceived(float ev, float ev_night, float daylight) {
+    return bal_flash_exposure_gain(ev, ev_night, daylight) * exp2f(-(ev - ev_night));
 }
 
 static BalFlashParams comp(float size, float dist, float life, float intensity, vec3 rgb) {
@@ -79,7 +79,8 @@ void bal_muzzle_compose(const BalMuzzleIn *in, BalMuzzleOut *out) {
     out->c[BFC_BLAST] = comp(0.12f * cbrtf(pm / 10.0f), 0.05f, (2.0f + (pm > 50.0f ? 1.0f : 0.0f)) / 60.0f, 1.0f, v3(1, 1, 1));
     // Flash light.
     float li = 6.0f * cq * cq * (0.3f + u);
-    out->c[BFC_LIGHT] = comp(0.0f, 0.1f, (1.0f + (u > 0.4f ? 1.0f : 0.0f)) / 60.0f, li * gain, bal_blackbody_rgb(2200.0f));
+    // The light is physical (it lights the scene, which the camera exposes): no exposure gain.
+    out->c[BFC_LIGHT] = comp(0.0f, 0.1f, (1.0f + (u > 0.4f ? 1.0f : 0.0f)) / 60.0f, li, bal_blackbody_rgb(2200.0f));
     out->light_radius = 3.0f + 2.0f * cq;
 
     // The device.
@@ -88,7 +89,7 @@ void bal_muzzle_compose(const BalMuzzleIn *in, BalMuzzleOut *out) {
         // Oxygen in a cold can burns with the first round's gas.
         out->c[BFC_SECONDARY].intensity = in->dev->pop_flash * gain;
         out->c[BFC_SECONDARY].dist = 0.03f;
-        out->c[BFC_LIGHT].intensity = fmaxf(out->c[BFC_LIGHT].intensity, 0.6f * li * gain);
+        out->c[BFC_LIGHT].intensity = fmaxf(out->c[BFC_LIGHT].intensity, 0.6f * li);
     }
     // Dust kicked up by the blast when the muzzle is near the ground / a wall.
     out->dust = in->near_surface && d->mul[BFC_BLAST] > 0.05f;

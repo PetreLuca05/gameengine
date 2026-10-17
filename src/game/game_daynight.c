@@ -40,6 +40,7 @@ static struct {
     TodSky sky;                  // this frame
     double frame_days;
     bool have_sky;
+    float daylight;            // 0 night .. 1 full sun (daynight_daylight)
     double host_last_days;
     bool host_init;
     vec3 key_dir;                // shadowed light direction (stable steps)
@@ -368,6 +369,8 @@ void daynight_environment(World *w, const RenderCamera *cam, RenderEnvironment *
     env->sun_dir = kd;
     env->sun_color = kmax > 1e-6f ? v3_scale(key, 1.0f / kmax) : v3(1, 1, 1);
     env->sun_intensity = kmax;
+    // How much the eye is daylight-adapted (exposure-aware flashes): the sun's share of full noon.
+    DN.daylight = smoothstepf(0.0f, 1.0f, ls / fmaxf(DN.cfg.sun_illuminance * 0.35f, 1e-6f));
     env->fill_dir = fill_dir.y > 0.02f ? fill_dir : v3_norm(v3(fill_dir.x, 0.02f, fill_dir.z));
     env->fill_color = fmax_ > 1e-6f ? v3_scale(fill, 1.0f / fmax_) : v3(1, 1, 1);
     env->fill_intensity = fill_dir.y > -0.01f ? fmax_ : 0.0f;
@@ -412,6 +415,14 @@ void daynight_environment(World *w, const RenderCamera *cam, RenderEnvironment *
     env->fog_density = fog;
     env->shadow_center = v3_madd(cam->pos, dir_from_angles(cam->yaw, 0), 12.0f);
     weather_environment(w, env);
+}
+
+float daynight_daylight(void) { return DN.have_sky ? DN.daylight : 1.0f; }
+
+void daynight_ev_range(float *night, float *day) {
+    *night = DN.cfg.night_floor_ev;
+    *day = DN.cfg.day_max_ev;
+    if (*day <= *night + 1.0f) { *night = -1.5f; *day = 7.0f; }
 }
 
 void daynight_post(PostSettings *s) {

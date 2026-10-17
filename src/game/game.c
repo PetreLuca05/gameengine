@@ -18,6 +18,8 @@
 #include "gameplay/revive/revive.h"
 #include "game_revive.h"
 #include "gameplay/weapons.h"
+#include "gameplay/ballistics/bal_world.h"
+#include "gameplay/ballistics/bal_fx.h"
 #include "gameplay/characters.h"
 #include "anim/anim_library.h"
 #include "assets/anim_cache.h"
@@ -363,6 +365,7 @@ static void host_tick(World *w, const UserCmd *local_cmd) {
         horde_host_tick(w, SIM_DT);   // horde zombies: tiers, steering, mover, attacks (before their animation)
     }
     chars_host_tick(w, SIM_DT);   // sim-only animation -> per-part hitboxes (before the lag-comp record)
+    if (!frozen) bal_world_tick(w, SIM_DT);   // bullets in flight against this tick's (and rewound) hitboxes
     if (!frozen) horde_post_tick(w);
     if (w->chunks) chunks_update(w, SIM_DT);
     if (!frozen) {
@@ -567,6 +570,7 @@ static void tick(void) {
         spectator_tick(w);   // the watched player: relayed commands through the same path
         g_chars_force_phys_step = vehicles_client_tick(w, &cmd);
         chars_client_tick(w, net_client_render_tick(), SIM_DT);
+        bal_world_tick(w, SIM_DT);   // own predicted bullets + replays of the others' shots
         vehicles_client_post(w, cmd.seq);
         if (w->chunks) chunks_update(w, SIM_DT);
         w->tick++;
@@ -690,7 +694,7 @@ void game_frame(float dt) {
         }
     }
 
-    G->accumulator += dt * wheels_timescale() * game_fire_timescale();   // x the fire tuner's slow motion   // slowed while a radial wheel is open (single player)
+    G->accumulator += dt * wheels_timescale() * game_fire_timescale() * (G->host_timescale ? G->host_timescale->f : 1.0f);   // slowed while a radial wheel is open (single player), x the fire tuner's slow motion, x host_timescale
     if (G->paused) G->accumulator = 0;   // the pause menu (single player / host alone) stops the simulation
     int steps = 0;
     while (G->accumulator >= SIM_DT && steps < 8) {
@@ -768,6 +772,8 @@ bool game_host_ex(const char *map, u32 flags) {
     vehicles_level_loaded(G->world, G->map);
     handpose_system_scan(G->world, false);   // interactables placed in this level
     flesh_fx_clear();
+    bal_world_clear();
+    bal_fx_clear();
     horde_level_reset();
     spectate_reset();
     spectator_reset();
@@ -797,6 +803,8 @@ void game_cl_welcome(int slot, const char *map, u32 seed, u32 server_tick) {
     vehicles_level_loaded(G->world, map);   // spike zones; vehicles replicate
     handpose_system_scan(G->world, false);   // interactables placed in this level
     flesh_fx_clear();
+    bal_world_clear();
+    bal_fx_clear();
     horde_level_reset();
     spectator_reset();
     game_hud_reset();
@@ -1377,6 +1385,7 @@ void game_init(void) {
     G->r_drawcollision = cvar_reg_bool("r_drawcollision", false, 0, "draw physics collision shapes");
     G->cl_showfps = cvar_reg_bool("cl_showfps", true, CVAR_ARCHIVE, "show FPS counter");
     G->net_autohost = cvar_reg_bool("net_autohost", true, CVAR_ARCHIVE, "accept LAN connections when hosting");
+    G->host_timescale = cvar_reg_float("host_timescale", 1.0f, 0.01f, 4.0f, CVAR_CHEAT, "simulation speed (slow motion for the ballistics range / screenshots; single player or hosting alone)");
     G->interact_range = cvar_reg_float("cl_interact_range", 3.0f, 0.5f, 10.0f, 0, "interaction focus raycast length (m); each interactable also has its own range");
     G->world_seed = cvar_reg_int("world_seed", 1337, 0, 999999999, CVAR_ARCHIVE, "procedural world seed");
     cmd_register("map", cmd_map, "host a new game on a map");
@@ -1418,6 +1427,7 @@ void game_init(void) {
     cmd_register("wpn_magdump", cmd_magdump, "wpn_magdump [weapon] [10|25|50] [ads]: empty a magazine at the recoil wall");
     cmd_register("weapon_reload", cmd_weapon_reload, "re-read data/weapons/*.json (live recoil tuning)");
     weapons_register_cvars();
+    bal_world_register();
     weapons_add_shot_hook(on_shot, NULL);
     game_fire_init();
     crosshair_init();
@@ -1450,6 +1460,7 @@ void game_init(void) {
     if (g_engine.anim) movement_set_eye_offset(chars_eye_offset);
     if (g_engine.anim) attach_set_hold_params(&g_engine.anim->proc);   // scope rail positions use the styles' eye relief
     if (!items_load(&G->items, "data/items.json", "data/weapons")) log_error("game: item data failed to load");
+    bal_world_load();
     g_engine.items = &G->items;
     basic_meshes_create(&G->meshes);
     fx_init(&G->meshes);

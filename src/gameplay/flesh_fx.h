@@ -19,6 +19,8 @@ enum FleshHitFlags {
     FLESH_MELEE = 1u << 2,
     FLESH_ENTRY_ONLY = 1u << 3,   // shooter's prediction: entry burst only
     FLESH_NO_ENTRY = 1u << 4,     // the confirmation of a predicted hit: everything but the entry
+    FLESH_BALLISTIC = 1u << 5,    // a simulated bullet decided the exit and the cavity (gameplay/ballistics)
+    FLESH_EXITS = 1u << 6,        // FLESH_BALLISTIC: the bullet came out the far side
 };
 
 typedef struct FleshHit {
@@ -29,6 +31,7 @@ typedef struct FleshHit {
     float damage, dist;           // dealt damage, shooter distance (m)
     u32 flags;
     u32 seed;                     // same on every machine for the same hit (exit decision)
+    float cavity;                 // FLESH_BALLISTIC: temporary-cavity scale (energy deposited, fragmentation, yaw)
 } FleshHit;
 
 typedef struct FleshStats {

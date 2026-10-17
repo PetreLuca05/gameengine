@@ -1,4 +1,5 @@
 #include "effects.h"
+#include "ballistics/bal_fx.h"
 #include "core/engine.h"
 #include "core/cvar.h"
 #include "render/render.h"
@@ -10,6 +11,7 @@
 #include "ui/vfx_editor.h"
 #include "vfx/vfx_library.h"
 #include "player/hands.h"
+#include "game/game.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <math.h>
@@ -51,6 +53,7 @@ void fx_init(const BasicMeshes *meshes) {
     FX->dev_damage_numbers = cvar_reg_bool("dev_damage_numbers", true, CVAR_ARCHIVE, "show floating damage numbers");
     FX->fx_tracers = cvar_reg_bool("fx_tracers", true, CVAR_ARCHIVE, "draw bullet tracers");
     vfx_game_init(meshes);
+    bal_fx_init();
     vfx_editor_init();
 }
 
@@ -168,6 +171,7 @@ void fx_render(vec3 cam) {
     vec3 mp, mf;
     bool mv = hands_muzzle(&mp, &mf);
     vfx_game_set_local_muzzle(v3_madd(mp, mf, 0.015f), mf, mv);
+    bal_fx_frame(game_world(), cam, (float)g_engine.frame_dt);   // tracers: sprites / lights for this frame
     vfx_game_render(cam);
     // Decals: thin dark quads slightly off the surface.
     for (int i = 0; i < FX->decal_count; i++) {

@@ -456,9 +456,13 @@ static void test_muzzle(void) {
     CHECK(pis.c[BFC_SPARKS].count > lng.c[BFC_SPARKS].count, "pistol sparks %.2f > rifle %.2f", pis.c[BFC_SPARKS].count, lng.c[BFC_SPARKS].count);
     CHECK(bare.c[BFC_MACH].rgb.z > compose("9x19_fmj", "bare", 0.102f, false).c[BFC_MACH].rgb.z, "high-velocity blue tinge");
     // Exposure: the perceived daylight flash ≤ 0.2x night.
-    float night = bal_flash_perceived(-1.5f, -1.5f, 7.0f), day = bal_flash_perceived(7.0f, -1.5f, 7.0f);
-    CHECK(day <= 0.2f * night, "day %.3f vs night %.3f", day, night);
-    CHECK(bal_flash_perceived(0.0f, -1.5f, 7.0f) > day, "dusk in between");
+    // Night (EV at the night floor, no daylight) vs full sun at a few day exposures.
+    float night = bal_flash_perceived(-1.5f, -1.5f, 0.0f);
+    for (float ev = 0.5f; ev <= 7.0f; ev += 1.5f) {
+        float day = bal_flash_perceived(ev, -1.5f, 1.0f);
+        CHECK(day <= 0.2f * night, "day (EV %.1f) %.3f vs night %.3f", ev, day, night);
+    }
+    CHECK(bal_flash_perceived(0.0f, -1.5f, 0.5f) > bal_flash_perceived(0.0f, -1.5f, 1.0f), "dusk in between");
     vec3 bb = bal_blackbody_rgb(2500);
     CHECK(bb.x == 1.0f && bb.z < bb.y && bb.y < bb.x, "2500 K is yellow-orange (%.2f %.2f %.2f)", bb.x, bb.y, bb.z);
     // First-round pop: once per cold suppressor, again after it has cooled.

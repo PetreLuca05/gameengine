@@ -549,7 +549,85 @@ def strand(cell, variants, seed, **_):
         out.append(rgba(_BLOOD_WET * 0.9, a))
     return out
 
+
+def flash_petal(cell, variants, seed, **_):
+    """Secondary flash seen from the side (axis / cross quads): the fireball blooms out of the bore
+    line at the bottom of the image, a petal / cone of flame with ragged orange edges towards the
+    top. 16 shapes so consecutive shots never repeat (docs/BALLISTICS.md "Muzzle flash")."""
+    out = []
+    rng = np.random.default_rng(seed)
+    u, v = grid(cell)
+    t = (1 - v) * 0.5          # 0 at the muzzle (bottom) .. 1 at the far end (top)
+    for i in range(variants):
+        start = rng.uniform(0.04, 0.16)         # visible gap to the shock bottle
+        peak = rng.uniform(0.35, 0.6)           # where the ball is widest
+        width = rng.uniform(0.32, 0.55)
+        lobes = int(rng.integers(2, 5))
+        phase = rng.uniform(0, 2 * math.pi)
+        prof = np.clip((t - start) / max(peak - start, 1e-3), 0, 1) ** 0.6 * np.clip((1.0 - t) / max(1.0 - peak, 1e-3), 0, 1) ** 0.8
+        lobe = 1.0 + 0.25 * np.sin(t * lobes * math.pi + phase)
+        n = fbm(u * 5 + i * 3.7, t * 7 - i * 1.3, 0.0, 4, seed + i * 11)
+        w = width * prof * lobe + 1e-3
+        edge = np.abs(u) / np.maximum(w * (0.75 + 0.5 * n), 1e-3)
+        body = smooth(1.0, 0.25, edge) * smooth(start - 0.02, start + 0.05, t)
+        heat = np.clip(body * (0.55 + 0.6 * n) * (1.25 - 0.55 * t), 0, 1)
+        out.append(rgba(heat_ramp(heat * 0.95), np.clip(heat * 1.6, 0, 1)))
+    return out
+
+
+def flash_mach(cell, variants, seed, **_):
+    """Intermediate flash: the bright disc behind the Mach disk of the gas jet (a white-yellow core
+    with a few short radial streaks), seen on a cross quad."""
+    out = []
+    rng = np.random.default_rng(seed)
+    u, v = grid(cell)
+    r = np.sqrt(u * u + v * v)
+    ang = np.arctan2(v, u)
+    for i in range(variants):
+        n = int(rng.integers(6, 11))
+        ph = rng.uniform(0, 2 * math.pi)
+        streak = np.zeros_like(r)
+        for k in range(n):
+            d = np.angle(np.exp(1j * (ang - ph - k * 2 * math.pi / n - rng.uniform(-0.2, 0.2))))
+            streak = np.maximum(streak, np.exp(-(d * d) / 0.004) * smooth(rng.uniform(0.5, 0.9), 0.1, r))
+        core = np.exp(-(r * r) / 0.05)
+        heat = np.clip(core * 1.2 + streak * 0.5, 0, 1)
+        out.append(rgba(heat_ramp(0.55 + 0.45 * heat), np.clip(heat * 1.3, 0, 1) * smooth(1.0, 0.8, r)))
+    return out
+
+
+def flash_prong(cell, variants, seed, **_):
+    """Flash hider remnant: thin dim spikes of flame from between the prongs (axis quads)."""
+    out = []
+    rng = np.random.default_rng(seed)
+    u, v = grid(cell)
+    t = (1 - v) * 0.5
+    for i in range(variants):
+        length = rng.uniform(0.55, 0.95)
+        w = 0.06 * (1 - t / length).clip(0, 1) + 0.005
+        n = fbm(u * 6 + i, t * 9, 0.0, 3, seed + i * 3)
+        body = smooth(1.0, 0.3, np.abs(u) / (w * (0.8 + 0.4 * n))) * smooth(length, length * 0.6, t)
+        heat = np.clip(body * (0.6 + 0.4 * n), 0, 1)
+        out.append(rgba(heat_ramp(heat * 0.85), np.clip(heat * 1.4, 0, 1)))
+    return out
+
+
+def tracer_head(cell, variants=1, seed=0, **_):
+    """Tracer head along the image vertical (stretched): a white-hot core fading into the
+    compound's colour (tinted per round) towards the tail at the bottom."""
+    u, v = grid(cell)
+    t = (1 - v) * 0.5          # 0 tail .. 1 head
+    core = np.exp(-(u * u) / 0.006) * smooth(0.0, 0.85, t) * smooth(1.0, 0.92, t)
+    glow = np.exp(-(u * u) / 0.06) * smooth(0.0, 0.9, t) * smooth(1.0, 0.85, t) * 0.5
+    a = np.clip(core + glow, 0, 1)
+    col = np.where((core > 0.6)[..., None], np.array([1, 1, 1], np.float32), np.array([1, 1, 1], np.float32) * 0.9)
+    return [rgba(col, a)]
+
 GENERATORS = {
+    "flash_petal": flash_petal,
+    "flash_mach": flash_mach,
+    "flash_prong": flash_prong,
+    "tracer_head": tracer_head,
     "flash_core": flash_core,
     "flash_side": flash_side,
     "flash_suppressed": flash_suppressed,

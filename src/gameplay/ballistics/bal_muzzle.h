@@ -41,12 +41,14 @@ typedef struct BalMuzzleOut {
 
 void bal_muzzle_compose(const BalMuzzleIn *in, BalMuzzleOut *out);
 
-// Exposure awareness. The flash has a fixed physical brightness, so after auto exposure it is
-// faint in daylight and dominant at night. The tonemapper scales by 2^-EV; this gain keeps the
-// night look as authored and lets the perceived daylight brightness fall to day_ratio (0.15).
-float bal_flash_exposure_gain(float ev, float ev_night, float ev_day);
+// Exposure awareness. A flash has a fixed physical brightness; what changes between night and day
+// is the adaptation. The tonemapper scales by 2^-EV (the engine's EV range is compressed, so that
+// alone is not enough); this gain cancels it relative to the night exposure and applies the
+// eye's adaptation from the daylight level (0 night .. 1 full sun): the night look as authored,
+// ~0.15x perceived in full daylight.
+float bal_flash_exposure_gain(float ev, float ev_night, float daylight);
 // Perceived brightness relative to night (gain × 2^-(ev-ev_night)); used by the tests / debug.
-float bal_flash_perceived(float ev, float ev_night, float ev_day);
+float bal_flash_perceived(float ev, float ev_night, float daylight);
 #define BAL_FLASH_DAY_RATIO 0.15f
 
 // Normalized linear RGB of a blackbody (Planck sampled at 610 / 550 / 465 nm, max = 1).
