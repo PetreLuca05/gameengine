@@ -14,7 +14,12 @@ static void audio_loops_shutdown(void);
 #define MAX_VOICES 48
 #define MAX_KNOWN 64
 
-typedef struct Voice { ma_sound sound; bool used; bool lpf_on; ma_lpf_node lpf; } Voice;
+typedef struct Voice { ma_sound sound; bool used; bool lpf_on; ma_lpf_node lpf; u32 hash; double start; float volume; } Voice;
+// Stacking guard: the same sound starting again within SND_REPEAT_S, or more than SND_MAX_SAME copies
+// playing, is folded into the one already playing (a burst of gore particles / pellets / hit confirms
+// in one frame otherwise piles up into one loud, distorted sound).
+#define SND_REPEAT_S 0.03
+#define SND_MAX_SAME 6
 #define MAX_SCHEDULED 96
 // Sounds that start later (gunfire travelling at the speed of sound): played by audio_update.
 typedef struct Scheduled { double at; char name[32]; vec3 pos; float volume; SoundCategory cat; AudioFx fx; } Scheduled;
@@ -179,6 +184,20 @@ static void play(const char *name, vec3 pos, float volume, SoundCategory cat, bo
     if (!audio_available()) return;
     const char *path = resolve(name);
     if (!path) return;
+    u32 h = dg_hash_str(name);
+    double now = platform_time();
+    int same = 0;
+    for (int i = 0; i < MAX_VOICES; i++) {
+        Voice *o = &A->voices[i];
+        if (!o->used || o->hash != h || !ma_sound_is_playing(&o->sound)) continue;
+        if (now - o->start < SND_REPEAT_S) {
+            // Started a moment ago: the louder of the two, not both on top of each other.
+            if (volume > o->volume) { o->volume = volume; ma_sound_set_volume(&o->sound, volume); }
+            return;
+        }
+        same++;
+    }
+    if (same >= SND_MAX_SAME) return;
     Voice *v = &A->voices[A->next_voice];
     A->next_voice = (A->next_voice + 1) % MAX_VOICES;
     if (v->used) ma_sound_uninit(&v->sound);
@@ -186,6 +205,9 @@ static void play(const char *name, vec3 pos, float volume, SoundCategory cat, bo
     // MA_SOUND_FLAG_DECODE caches decoded data in the resource manager, so repeats are cheap.
     if (ma_sound_init_from_file(&A->engine, path, MA_SOUND_FLAG_DECODE, group_for(cat), NULL, &v->sound) != MA_SUCCESS) return;
     v->used = true;
+    v->hash = h;
+    v->start = now;
+    v->volume = volume;
     ma_sound_set_volume(&v->sound, volume);
     if (spatial) {
         ma_sound_set_position(&v->sound, pos.x, pos.y, pos.z);

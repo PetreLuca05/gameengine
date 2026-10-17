@@ -47,7 +47,7 @@ vec3 camera_fp_death(CamHeadStab *s, vec3 head, float dt) {
         s->dead = true;
         s->death_t = 0;
         s->death_vel = v3(0, 0, 0);
-        if (!s->init || v3_len2(s->death_pos) < 1e-8f) s->death_pos = head;
+        s->death_pos = head;   // every death starts on the head (a later death kept the previous death's spot)
     }
     s->death_t += dt;
     vec3 target = head;

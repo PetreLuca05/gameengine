@@ -93,8 +93,9 @@ void game_death_frame(float dt) {
         vec3 pos[2];
         float speed[2], clear[2];
         if (chars_ragdoll_probe(w, p->ent, pos, speed, clear)) {
-            bool contact = fminf(clear[0], clear[1]) < D.P.impact_contact_dist;
-            ImpactReason why = death_impact_detect(&D.S, &D.P, speed[0], speed[1], contact);
+            // The cut comes when the HEAD hits the ground (its clearance / its own velocity drop), not the chest.
+            bool contact = clear[0] < D.P.impact_contact_dist;
+            ImpactReason why = death_impact_detect(&D.S, &D.P, speed[0], speed[0], contact);
             if (why != IMPACT_NONE && D.impact_debug->i)
                 log_info("death_impact: %s at %.3f s (head %.2f m/s clear %.3f m, chest %.2f m/s clear %.3f m)", why == IMPACT_CONTACT ? "contact" : "velocity drop",
                          D.S.t, speed[0], clear[0], speed[1], clear[1]);
