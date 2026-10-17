@@ -11,6 +11,11 @@
 #include "common.glsl"
 #include "vgeo/vg_decode.glsl"
 #include "vgeo/vg_resolve.glsl"
+// glTF maps (shaders/pbr_maps.glsl): the material's texture table entries, the triangle's tangent frame.
+#define PBR_MAPS
+#define PBR_TEX(slot, uv) texture(vg_tex[nonuniformEXT(g_pbr_tex[slot])], (uv))
+#define PBR_PARAMS g_pbr
+#define PBR_TANGENT_FRAME(n) vg_tangent_frame(n)
 #define GB_CUSTOM_INPUTS
 #define GB_FRONT_FACING g_front
 #define GB_FLAGS g_mat_flags

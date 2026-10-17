@@ -1,0 +1,256 @@
+{
+ "asset": {
+  "version": "2.0",
+  "generator": "deadground gen_pbr_test.py"
+ },
+ "scene": 0,
+ "scenes": [
+  {
+   "nodes": [
+    0,
+    1
+   ]
+  }
+ ],
+ "nodes": [
+  {
+   "name": "grille",
+   "mesh": 0,
+   "translation": [
+    0,
+    0,
+    0
+   ]
+  },
+  {
+   "name": "stand",
+   "mesh": 1,
+   "translation": [
+    0,
+    0,
+    0
+   ]
+  }
+ ],
+ "meshes": [
+  {
+   "name": "grille",
+   "primitives": [
+    {
+     "attributes": {
+      "POSITION": 0,
+      "NORMAL": 1,
+      "TEXCOORD_0": 2
+     },
+     "indices": 3,
+     "material": 0
+    }
+   ]
+  },
+  {
+   "name": "stand",
+   "primitives": [
+    {
+     "attributes": {
+      "POSITION": 4,
+      "NORMAL": 5,
+      "TEXCOORD_0": 6
+     },
+     "indices": 7,
+     "material": 1
+    }
+   ]
+  }
+ ],
+ "materials": [
+  {
+   "name": "grille",
+   "alphaMode": "MASK",
+   "alphaCutoff": 0.5,
+   "doubleSided": true,
+   "pbrMetallicRoughness": {
+    "baseColorTexture": {
+     "index": 0
+    },
+    "metallicFactor": 0.0,
+    "roughnessFactor": 0.6
+   }
+  },
+  {
+   "name": "stand",
+   "pbrMetallicRoughness": {
+    "baseColorFactor": [
+     0.2,
+     0.2,
+     0.22,
+     1
+    ],
+    "metallicFactor": 1.0,
+    "roughnessFactor": 0.4
+   }
+  }
+ ],
+ "accessors": [
+  {
+   "componentType": 5126,
+   "count": 4,
+   "type": "VEC3",
+   "bufferView": 0,
+   "min": [
+    -0.3,
+    0.05,
+    0
+   ],
+   "max": [
+    0.3,
+    0.65,
+    0
+   ]
+  },
+  {
+   "componentType": 5126,
+   "count": 4,
+   "type": "VEC3",
+   "bufferView": 1,
+   "min": [
+    0,
+    0,
+    1
+   ],
+   "max": [
+    0,
+    0,
+    1
+   ]
+  },
+  {
+   "componentType": 5126,
+   "count": 4,
+   "type": "VEC2",
+   "bufferView": 2
+  },
+  {
+   "componentType": 5125,
+   "count": 6,
+   "type": "SCALAR",
+   "bufferView": 3
+  },
+  {
+   "componentType": 5126,
+   "count": 24,
+   "type": "VEC3",
+   "bufferView": 4,
+   "min": [
+    -0.25,
+    0.0,
+    -0.1
+   ],
+   "max": [
+    0.25,
+    0.05,
+    0.1
+   ]
+  },
+  {
+   "componentType": 5126,
+   "count": 24,
+   "type": "VEC3",
+   "bufferView": 5,
+   "min": [
+    -1,
+    -1,
+    -1
+   ],
+   "max": [
+    1,
+    1,
+    1
+   ]
+  },
+  {
+   "componentType": 5126,
+   "count": 24,
+   "type": "VEC2",
+   "bufferView": 6
+  },
+  {
+   "componentType": 5125,
+   "count": 36,
+   "type": "SCALAR",
+   "bufferView": 7
+  }
+ ],
+ "bufferViews": [
+  {
+   "buffer": 0,
+   "byteOffset": 0,
+   "byteLength": 48,
+   "target": 34962
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 48,
+   "byteLength": 48,
+   "target": 34962
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 96,
+   "byteLength": 32,
+   "target": 34962
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 128,
+   "byteLength": 24,
+   "target": 34963
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 152,
+   "byteLength": 288,
+   "target": 34962
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 440,
+   "byteLength": 288,
+   "target": 34962
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 728,
+   "byteLength": 192,
+   "target": 34962
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 920,
+   "byteLength": 144,
+   "target": 34963
+  }
+ ],
+ "samplers": [
+  {
+   "magFilter": 9729,
+   "minFilter": 9987
+  }
+ ],
+ "images": [
+  {
+   "uri": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAYAAADDPmHLAAAByUlEQVR42u3csRGAMAxDUW1Mx3TsBhNQBGzfcbxCtbj4N8SKsh/bSf9VHAIAHAQACAAEgAXlRlMfzr/IPwWmU4fBv8E/TebVh8C/yT+N5lWHwL/RP83mbw+Bf7N/BsyfHgL/AX8AAMAAANBvvnoI/If8AQAAAwCAAQDAAABgAADwG+Y30AAAYAAAsIyxDLKOtQ4WyBAIEckSCRPKFAolsXACAAGAAEAAIAAQAAgABADSD+AqVj+AZYx+AOtY/QACGfoBRLL0AwhlSgUbAAAMQD+Ap1neBhoAAAwAAAYAAAMAgAHoB/Ab5h7AAABgAPoBLGP0A1jH6gcQyNAPwF8/AH/9AORdAAGAAEAAIAAQAAgABAACAOkH4K8fgL9+AP76AfjrB+CvH4C/VDB/APDXD8Df20D+AOAPAP4A4A8A/voB+LsH4A8A/voB+OsH4K8fgL9IGH+hUP5i4QQAAgABgABAACAAEAAIAAQAALiKdRVsGWMZZB1rHSyQIRAikiUSJpQpFGoAADAA/QCeZnkbaAAAMAAAGAAADAAABqAfwG+YewADAIAB6AewjNEPYB2rH0AgQz+ASJZ+AKFM/QDkXQABgABAAKBv6QIsBCBxqe57ZAAAAABJRU5ErkJggg=="
+  }
+ ],
+ "textures": [
+  {
+   "sampler": 0,
+   "source": 0
+  }
+ ],
+ "buffers": [
+  {
+   "byteLength": 1064,
+   "uri": "data:application/octet-stream;base64,mpmZvmZmJj8AAAAAmpmZvs3MTD0AAAAAmpmZPs3MTD0AAAAAmpmZPmZmJj8AAAAAAAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAAAAAACAPwAAgD8AAIA/AACAPwAAAAAAAAAAAQAAAAIAAAAAAAAAAgAAAAMAAAAAAIA+AAAAAM3MzD0AAIA+AAAAAM3MzL0AAIA+zcxMPc3MzL0AAIA+zcxMPc3MzD0AAIC+AAAAAM3MzL0AAIC+AAAAAM3MzD0AAIC+zcxMPc3MzD0AAIC+zcxMPc3MzL0AAIC+zcxMPc3MzD0AAIA+zcxMPc3MzD0AAIA+zcxMPc3MzL0AAIC+zcxMPc3MzL0AAIC+AAAAAM3MzL0AAIA+AAAAAM3MzL0AAIA+AAAAAM3MzD0AAIC+AAAAAM3MzD0AAIC+AAAAAM3MzD0AAIA+AAAAAM3MzD0AAIA+zcxMPc3MzD0AAIC+zcxMPc3MzD0AAIA+AAAAAM3MzL0AAIC+AAAAAM3MzL0AAIC+zcxMPc3MzL0AAIA+zcxMPc3MzL0AAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIA/AAAAAAAAAAAAAIC/AAAAAAAAAAAAAIC/AAAAAAAAAAAAAIC/AAAAAAAAAAAAAIC/AAAAAAAAAAAAAAAAAACAPwAAAAAAAAAAAACAPwAAAAAAAAAAAACAPwAAAAAAAAAAAACAPwAAAAAAAAAAAACAvwAAAAAAAAAAAACAvwAAAAAAAAAAAACAvwAAAAAAAAAAAACAvwAAAAAAAAAAAAAAAAAAgD8AAAAAAAAAAAAAgD8AAAAAAAAAAAAAgD8AAAAAAAAAAAAAgD8AAAAAAAAAAAAAgL8AAAAAAAAAAAAAgL8AAAAAAAAAAAAAgL8AAAAAAAAAAAAAgL8AAAAAAACAPwAAgD8AAIA/AACAPwAAAAAAAAAAAAAAAAAAAAAAAIA/AACAPwAAgD8AAIA/AAAAAAAAAAAAAAAAAAAAAAAAgD8AAIA/AACAPwAAgD8AAAAAAAAAAAAAAAAAAAAAAACAPwAAgD8AAIA/AACAPwAAAAAAAAAAAAAAAAAAAAAAAIA/AACAPwAAgD8AAIA/AAAAAAAAAAAAAAAAAAAAAAAAgD8AAIA/AACAPwAAgD8AAAAAAAAAAAAAAAAAAAAAAQAAAAIAAAAAAAAAAgAAAAMAAAAEAAAABQAAAAYAAAAEAAAABgAAAAcAAAAIAAAACQAAAAoAAAAIAAAACgAAAAsAAAAMAAAADQAAAA4AAAAMAAAADgAAAA8AAAAQAAAAEQAAABIAAAAQAAAAEgAAABMAAAAUAAAAFQAAABYAAAAUAAAAFgAAABcAAAA="
+  }
+ ]
+}
