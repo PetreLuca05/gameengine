@@ -1,0 +1,35 @@
+{
+  "kind": "terrain_layer",
+  "model": "higgsfield-ai/soul/standard",
+  "resolution": "1080p",
+  "aspect_ratio": "1:1",
+  "style": "ground",
+  "prompt": "Dry dark brown farm field soil seen from directly above: small clods, scattered straw stubble and chaff",
+  "avoid": "standing grass blades, plants growing upward, flowers, footprints, tyre tracks, puddles, people, animals, objects, horizon, sky, perspective, vignette, strong shadows, text, watermark, saturated green",
+  "target_mean": "#4d3a26",
+  "color_match": 0.9,
+  "tile_m": 3.0,
+  "bump": 5.0,
+  "rough": 0.9,
+  "size": 2048,
+  "macro": {
+    "scale_m": 40,
+    "val": 0.12,
+    "accent": "#5a4428",
+    "accent_amount": 0.3,
+    "seed": 15
+  },
+  "placeholder": {
+    "type": "field",
+    "accent": [
+      "#3e2e1e",
+      "#8a7048"
+    ],
+    "pebbles": 30,
+    "blades": 300,
+    "seed": 115
+  },
+  "replaces": 10,
+  "doc_ref": "r2 soil under the wheat #483623",
+  "ref_region": "r2_wheat_ground"
+}

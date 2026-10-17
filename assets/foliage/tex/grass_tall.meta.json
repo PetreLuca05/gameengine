@@ -1,0 +1,64 @@
+{
+ "grid": [
+  2,
+  2
+ ],
+ "size": 2048,
+ "cells": [
+  {
+   "coverage": 0.065,
+   "bottom": 0.081,
+   "height": 0.934,
+   "root": "#6f6442",
+   "mid": "#786d48",
+   "tip": "#877c55",
+   "residue": 0.0,
+   "source": "placeholder",
+   "fails": []
+  },
+  {
+   "coverage": 0.051,
+   "bottom": 0.062,
+   "height": 0.923,
+   "root": "#615a39",
+   "mid": "#6d6640",
+   "tip": "#7d734d",
+   "residue": 0.0,
+   "source": "placeholder",
+   "fails": []
+  },
+  {
+   "coverage": 0.046,
+   "bottom": 0.048,
+   "height": 1.0,
+   "root": "#605a38",
+   "mid": "#6b643f",
+   "tip": "#8c8263",
+   "residue": 0.0,
+   "source": "placeholder",
+   "fails": []
+  },
+  {
+   "coverage": 0.058,
+   "bottom": 0.068,
+   "height": 1.0,
+   "root": "#7e6f4c",
+   "mid": "#897955",
+   "tip": "#988962",
+   "residue": 0.0,
+   "source": "placeholder",
+   "fails": []
+  }
+ ],
+ "name": "grass_tall",
+ "kind": "blade_atlas",
+ "tool_version": 1,
+ "recipe": "assets/foliage/gen/grass_tall.json",
+ "card": {
+  "height_m": [
+   0.45,
+   0.8
+  ],
+  "width_m": 0.4
+ }
+}

@@ -1,0 +1,122 @@
+{
+  "_doc": "Broad flat meadow grass blades (reference b1 / b2: r1 foreground). docs/GROUND_REFERENCE.md 1, 7.1.",
+  "kind": "blade_atlas",
+  "model": "higgsfield-ai/soul/standard",
+  "resolution": "1080p",
+  "aspect_ratio": "1:1",
+  "style": "blade",
+  "background": "magenta",
+  "grid": [
+    2,
+    2
+  ],
+  "size": 2048,
+  "fill": 0.94,
+  "color_match": 0.85,
+  "target": {
+    "root": "#4a5030",
+    "mid": "#5c6435",
+    "tip": "#6f7340",
+    "dry_root": "#7d7650",
+    "dry_mid": "#948660",
+    "dry_tip": "#a8986c"
+  },
+  "avoid": "soil, roots, pot, vase, hands, shadows on the background, gradient background, blur, bokeh, depth of field, cartoon, illustration, saturated emerald or blue-green colour, pink or purple tint on the leaves, frame, border, text, watermark",
+  "checks": {
+    "coverage": [
+      0.05,
+      0.5
+    ],
+    "bottom": 0.01,
+    "residue": 0.03
+  },
+  "cells": [
+    {
+      "prompt": "Seven long flat broad grass leaf blades of a wild meadow grass, olive yellow-green, rising together from one point at the bottom, straight in the lower half and gently arching over to one side near the top, long acute pointed tips, darker olive at the base, slightly paler yellow-green towards the tips, a faint pale midrib on each blade",
+      "placeholder": {
+        "blades": [
+          6,
+          9
+        ],
+        "height": [
+          0.72,
+          0.95
+        ],
+        "width": 0.024,
+        "arch": 0.42,
+        "fan": 18,
+        "dry": 0.05,
+        "rib": 0.07,
+        "seed": 11
+      }
+    },
+    {
+      "prompt": "Eight long flat grass leaf blades of a wild meadow grass, olive green, rising from the bottom and crossing each other, two of the blades folded over halfway and drooping, pointed tips, darker at the base and lighter yellow-green at the tips",
+      "placeholder": {
+        "blades": [
+          7,
+          9
+        ],
+        "height": [
+          0.7,
+          0.95
+        ],
+        "width": 0.022,
+        "arch": 0.6,
+        "fan": 22,
+        "dry": 0.08,
+        "rib": 0.06,
+        "seed": 12
+      }
+    },
+    {
+      "prompt": "Seven flat broad grass leaf blades of a wild meadow grass, olive green, three of them with dried straw-yellow tips, rising from the bottom and arching gently, pointed tips",
+      "placeholder": {
+        "blades": [
+          6,
+          8
+        ],
+        "height": [
+          0.7,
+          0.92
+        ],
+        "width": 0.023,
+        "arch": 0.45,
+        "fan": 20,
+        "dry": 0.3,
+        "rib": 0.06,
+        "seed": 13
+      }
+    },
+    {
+      "prompt": "A young clump of nine broad flat grass leaves fanning out from a single base at the bottom, olive yellow-green, arching outward to both sides, long pointed tips, darker at the base",
+      "placeholder": {
+        "blades": [
+          8,
+          10
+        ],
+        "height": [
+          0.6,
+          0.85
+        ],
+        "width": 0.021,
+        "arch": 0.5,
+        "fan": 35,
+        "dry": 0.1,
+        "rib": 0.06,
+        "seed": 14
+      }
+    }
+  ],
+  "card": {
+    "height_m": [
+      0.25,
+      0.45
+    ],
+    "width_m": 0.45
+  },
+  "ref_region": "r1_blade_green_near",
+  "ref_blades": [
+    "b1_broad_green_clump"
+  ]
+}

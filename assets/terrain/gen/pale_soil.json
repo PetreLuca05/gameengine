@@ -1,0 +1,35 @@
+{
+  "kind": "terrain_layer",
+  "model": "higgsfield-ai/soul/standard",
+  "resolution": "1080p",
+  "aspect_ratio": "1:1",
+  "style": "ground",
+  "prompt": "Pale chalky dry soil seen from directly above, mottled pale grey and beige, small white chalk stones, dusty",
+  "avoid": "standing grass blades, plants growing upward, flowers, footprints, tyre tracks, puddles, people, animals, objects, horizon, sky, perspective, vignette, strong shadows, text, watermark, saturated green",
+  "target_mean": "#77735c",
+  "color_match": 0.9,
+  "tile_m": 3.0,
+  "bump": 3.5,
+  "rough": 0.95,
+  "size": 2048,
+  "macro": {
+    "scale_m": 40,
+    "val": 0.1,
+    "accent": "#8a8670",
+    "accent_amount": 0.3,
+    "seed": 18
+  },
+  "placeholder": {
+    "type": "pale",
+    "accent": [
+      "#66624e",
+      "#b0aa98"
+    ],
+    "pebbles": 50,
+    "cracks": 0.3,
+    "seed": 118
+  },
+  "layer": 14,
+  "doc_ref": "r3 pale ground #5e5c49 (overcast)",
+  "ref_region": "r3_pale_ground"
+}

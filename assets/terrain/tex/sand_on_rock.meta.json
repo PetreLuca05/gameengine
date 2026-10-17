@@ -1,0 +1,17 @@
+{
+ "size": 2048,
+ "source": "placeholder",
+ "mean": "#8e8672",
+ "target_mean": "#8e8672",
+ "mean_delta": 0.0,
+ "seam": 0.7395,
+ "tile_m": 4.0,
+ "name": "sand_on_rock",
+ "kind": "transition",
+ "tool_version": 1,
+ "recipe": "assets/terrain/gen/sand_on_rock.json",
+ "pair": [
+  "sand",
+  "rock"
+ ]
+}

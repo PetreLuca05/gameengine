@@ -1,0 +1,37 @@
+{
+  "kind": "terrain_layer",
+  "model": "higgsfield-ai/soul/standard",
+  "resolution": "1080p",
+  "aspect_ratio": "1:1",
+  "style": "ground",
+  "prompt": "Low moss and lichen mat on the ground seen from directly above: yellow-green and olive moss cushions, grey-green lichen patches, a few small dead leaves",
+  "avoid": "standing grass blades, plants growing upward, flowers, footprints, tyre tracks, puddles, people, animals, objects, horizon, sky, perspective, vignette, strong shadows, text, watermark, saturated green",
+  "target_mean": "#6b6236",
+  "color_match": 0.9,
+  "tile_m": 2.5,
+  "bump": 4.5,
+  "rough": 0.85,
+  "size": 2048,
+  "macro": {
+    "scale_m": 30,
+    "val": 0.12,
+    "accent": "#7a7a3a",
+    "accent_amount": 0.35,
+    "seed": 3
+  },
+  "placeholder": {
+    "type": "moss",
+    "accent": [
+      "#5a6a2a",
+      "#8a7a40",
+      "#7e7a68"
+    ],
+    "leaves": 300,
+    "twigs": 5,
+    "blades": 100,
+    "seed": 103
+  },
+  "variant_of": "ground_litter",
+  "doc_ref": "r4 / r5 moss #75692f",
+  "ref_region": "r4_moss_ground"
+}

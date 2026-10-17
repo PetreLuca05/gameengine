@@ -1,0 +1,36 @@
+{
+  "kind": "transition",
+  "model": "higgsfield-ai/soul/standard",
+  "resolution": "1080p",
+  "aspect_ratio": "1:1",
+  "style": "ground",
+  "prompt": "Dense layer of small grey and brown pebbles and rock chips on dry earth seen from directly above",
+  "avoid": "puddles, people, objects, horizon, sky, perspective, vignette, strong shadows, text, watermark, saturated green",
+  "target_mean": "#6e685a",
+  "color_match": 0.9,
+  "tile_m": 2.0,
+  "bump": 6.5,
+  "rough": 0.9,
+  "size": 2048,
+  "macro": {
+    "scale_m": 30,
+    "val": 0.1,
+    "accent": "#6a6050",
+    "accent_amount": 0.3,
+    "seed": 51
+  },
+  "placeholder": {
+    "type": "pebble_band",
+    "accent": [
+      "#5a5448",
+      "#8a8478"
+    ],
+    "pebbles": 500,
+    "pebble_max": 0.025,
+    "seed": 203
+  },
+  "pair": [
+    "dirt",
+    "rock"
+  ]
+}

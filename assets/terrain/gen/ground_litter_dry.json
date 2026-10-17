@@ -1,0 +1,36 @@
+{
+  "kind": "terrain_layer",
+  "model": "higgsfield-ai/soul/standard",
+  "resolution": "1080p",
+  "aspect_ratio": "1:1",
+  "style": "ground",
+  "prompt": "Dry sun-bleached meadow ground seen from directly above: pale olive-tan dusty soil, crumbled dry grass bits, small dry leaves and seeds",
+  "avoid": "standing grass blades, plants growing upward, flowers, footprints, tyre tracks, puddles, people, animals, objects, horizon, sky, perspective, vignette, strong shadows, text, watermark, saturated green",
+  "target_mean": "#6e6440",
+  "color_match": 0.9,
+  "tile_m": 2.5,
+  "bump": 4.0,
+  "rough": 0.92,
+  "size": 2048,
+  "macro": {
+    "scale_m": 40,
+    "val": 0.1,
+    "accent": "#857a4a",
+    "accent_amount": 0.3,
+    "seed": 2
+  },
+  "placeholder": {
+    "type": "litter",
+    "accent": [
+      "#5a5236",
+      "#8a7a50",
+      "#9a8a5a"
+    ],
+    "leaves": 700,
+    "twigs": 15,
+    "blades": 500,
+    "pebbles": 25,
+    "seed": 102
+  },
+  "variant_of": "ground_litter"
+}

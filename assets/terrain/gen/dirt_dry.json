@@ -1,0 +1,35 @@
+{
+  "kind": "terrain_layer",
+  "model": "higgsfield-ai/soul/standard",
+  "resolution": "1080p",
+  "aspect_ratio": "1:1",
+  "style": "ground",
+  "prompt": "Dry crusted pale grey-brown soil seen from directly above: fine cracks, dust, a few small stones",
+  "avoid": "standing grass blades, plants growing upward, flowers, footprints, tyre tracks, puddles, people, animals, objects, horizon, sky, perspective, vignette, strong shadows, text, watermark, saturated green",
+  "target_mean": "#8c7f5c",
+  "color_match": 0.9,
+  "tile_m": 2.5,
+  "bump": 4.0,
+  "rough": 0.95,
+  "size": 2048,
+  "macro": {
+    "scale_m": 30,
+    "val": 0.1,
+    "accent": "#9a8a62",
+    "accent_amount": 0.3,
+    "seed": 9
+  },
+  "placeholder": {
+    "type": "dirt_dry",
+    "accent": [
+      "#7a6e50",
+      "#c0b498"
+    ],
+    "pebbles": 40,
+    "cracks": 1.0,
+    "seed": 109
+  },
+  "variant_of": "dirt",
+  "doc_ref": "r1 crater rim #998b65 (lit)",
+  "ref_region": "r1_dirt_crater_rim"
+}

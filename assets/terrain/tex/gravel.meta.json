@@ -1,0 +1,14 @@
+{
+ "size": 2048,
+ "source": "placeholder",
+ "mean": "#77716a",
+ "target_mean": "#77716a",
+ "mean_delta": 0.0,
+ "seam": 1.0194,
+ "tile_m": 2.0,
+ "name": "gravel",
+ "kind": "terrain_layer",
+ "tool_version": 1,
+ "recipe": "assets/terrain/gen/gravel.json",
+ "replaces": 6
+}

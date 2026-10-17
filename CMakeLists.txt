@@ -604,6 +604,10 @@ add_test(NAME revive COMMAND test_revive WORKING_DIRECTORY $<TARGET_FILE_DIR:dea
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if(Python3_Interpreter_FOUND)
   add_test(NAME lint_commands COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/tests/lint_commands.py)
+  # Ground textures (docs/GROUND_REFERENCE.md): the recipes validate, the generated / placeholder sets
+  # meet their colour, coverage, gradient, silhouette and seam checks (needs numpy + Pillow).
+  add_test(NAME ground_recipes COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/vfxgen/groundgen.py --validate)
+  add_test(NAME ground_textures COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/tests/ground_tex_check.py)
 endif()
 # Engine Fidelity (docs/ENGINE_FIDELITY.md): tables, bounds, apply / clamp on the real cvar system, era
 # matrix, frame graph validation.

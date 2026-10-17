@@ -1,0 +1,17 @@
+{
+ "size": 2048,
+ "source": "placeholder",
+ "mean": "#625a40",
+ "target_mean": "#625a40",
+ "mean_delta": 0.0,
+ "seam": 0.681,
+ "tile_m": 3.0,
+ "name": "path_worn_edge",
+ "kind": "transition",
+ "tool_version": 1,
+ "recipe": "assets/terrain/gen/path_worn_edge.json",
+ "pair": [
+  "ground_litter",
+  "path"
+ ]
+}

@@ -1,0 +1,32 @@
+{
+  "kind": "terrain_layer",
+  "model": "higgsfield-ai/soul/standard",
+  "resolution": "1080p",
+  "aspect_ratio": "1:1",
+  "style": "ground",
+  "prompt": "Fine pale beige sand seen from directly above, subtle wind ripples, a few small pebbles",
+  "avoid": "standing grass blades, plants growing upward, flowers, footprints, tyre tracks, puddles, people, animals, objects, horizon, sky, perspective, vignette, strong shadows, text, watermark, saturated green",
+  "target_mean": "#a59a7a",
+  "color_match": 0.9,
+  "tile_m": 4.0,
+  "bump": 2.0,
+  "rough": 0.92,
+  "size": 2048,
+  "macro": {
+    "scale_m": 50,
+    "val": 0.08,
+    "accent": "#b0a080",
+    "accent_amount": 0.3,
+    "seed": 12
+  },
+  "placeholder": {
+    "type": "sand",
+    "accent": [
+      "#958a6a",
+      "#b8ae90"
+    ],
+    "pebbles": 8,
+    "seed": 112
+  },
+  "replaces": 5
+}

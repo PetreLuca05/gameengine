@@ -1,0 +1,32 @@
+{
+  "kind": "terrain_layer",
+  "model": "higgsfield-ai/soul/standard",
+  "resolution": "1080p",
+  "aspect_ratio": "1:1",
+  "style": "ground",
+  "prompt": "Wet dark brown mud seen from directly above, small stones, smooth wet sheen in places",
+  "avoid": "standing grass blades, plants growing upward, flowers, footprints, tyre tracks, puddles, people, animals, objects, horizon, sky, perspective, vignette, strong shadows, text, watermark, saturated green",
+  "target_mean": "#3d3326",
+  "color_match": 0.9,
+  "tile_m": 3.0,
+  "bump": 2.5,
+  "rough": 0.45,
+  "size": 2048,
+  "macro": {
+    "scale_m": 30,
+    "val": 0.12,
+    "accent": "#4a3e2c",
+    "accent_amount": 0.3,
+    "seed": 17
+  },
+  "placeholder": {
+    "type": "mud",
+    "accent": [
+      "#30281e",
+      "#5a4a38"
+    ],
+    "pebbles": 20,
+    "seed": 117
+  },
+  "replaces": 13
+}
