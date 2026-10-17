@@ -2,6 +2,7 @@
 #include "weapons.h"
 #include "characters.h"
 #include "net/spectate.h"
+#include "kill_stats.h"
 #include <stdio.h>
 
 void health_init(Health *h, float hp, float armor) {
@@ -11,6 +12,10 @@ void health_init(Health *h, float hp, float armor) {
     h->max_armor = 100.0f;
     for (int i = 0; i < DMG_COUNT; i++) h->resist[i] = 1.0f;
 }
+
+// The item doing the damage when it isn't the attacker's held one (thrown grenades): the kill feed icon.
+static u16 s_source_item;
+void health_set_source_item(u16 item) { s_source_item = item; }
 
 float apply_damage(World *w, EntityId target, float amount, DamageType type, EntityId attacker, vec3 point, vec3 dir, bool headshot) {
     return apply_damage_part(w, target, amount, type, attacker, point, dir, headshot ? BP_HEAD : -1, 0.0f);
@@ -85,6 +90,21 @@ float apply_damage_part(World *w, EntityId target, float amount, DamageType type
         const char *vname = victim_player >= 0 ? w->players[victim_player].name : ent_type_name((EntityType)w->type[i]);
         const char *aname = attacker_player >= 0 ? w->players[attacker_player].name : "the world";
         snprintf(ev.text, sizeof(ev.text), "%s killed %s (%s)", aname, vname, damage_type_name(type));
+        // Structured for the kill counter / feed (docs/UI_WHEELS_HUD.md).
+        ev.id = (headshot ? KILLF_HEADSHOT : 0u) | (victim_player >= 0 ? KILLF_VICTIM_PLAYER : 0u) |
+                (w->type[i] == ET_ZOMBIE ? KILLF_VICTIM_ZOMBIE : 0u) | (attacker_player >= 0 ? KILLF_KILLER_PLAYER : 0u) |
+                (attacker_player >= 0 && attacker_player == victim_player ? KILLF_SELF : 0u);
+        ev.value = (float)type;
+        KillEventData kd;
+        memset(&kd, 0, sizeof(kd));
+        dg_strcpy(kd.killer, sizeof(kd.killer), attacker_player >= 0 ? aname : (ent_valid(w, attacker) ? ent_type_name((EntityType)w->type[ENT_INDEX(attacker)]) : ""));
+        dg_strcpy(kd.victim, sizeof(kd.victim), vname);
+        if (victim_player < 0 && kd.victim[0] >= 'a' && kd.victim[0] <= 'z') kd.victim[0] = (char)(kd.victim[0] - 32);   // "Zombie"
+        if (attacker_player < 0 && kd.killer[0] >= 'a' && kd.killer[0] <= 'z') kd.killer[0] = (char)(kd.killer[0] - 32);
+        kd.weapon = s_source_item ? s_source_item : (ent_valid(w, attacker) ? w->item[ENT_INDEX(attacker)] : 0);
+        // Only weapons and throwables show as the weapon (a medkit in hand is not what killed it).
+        if (kd.weapon && item_def(w->items, kd.weapon)->kind != ITEM_WEAPON && item_def(w->items, kd.weapon)->kind != ITEM_THROWABLE) kd.weapon = 0;
+        memcpy(ev.data, &kd, sizeof(kd));
         ev_push(w, &ev);
         if (victim_player >= 0) {
             Player *p = &w->players[victim_player];

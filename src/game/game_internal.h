@@ -14,6 +14,39 @@ void game_create_player_character(World *w, int slot, vec3 feet);
 // game_events.c
 void game_add_hint(const char *text);
 void game_hud_tick(float dt);
+void game_hud_reset(void);   // new map / session: kill stats, feed, pings, wheels
+
+// game_pings.c: pings (docs/UI_WHEELS_HUD.md "Pings")
+void game_pings_register(void);
+bool game_ping_target(vec3 *pos, int *kind);    // the crosshair's point + contextual kind
+bool game_ping_request(int type);               // type < 0: contextual
+void game_sv_ping(World *w, int slot, int a, int b, int c);
+void game_pings_event(const GameEvent *ev);
+void game_pings_tick(float dt);
+void game_pings_reset(void);
+
+// game_peek.c: door peek through the visor
+struct PostSettings;
+void peek_register(void);
+bool peek_active(void);
+float peek_amount(void);
+const char *peek_block_reason(EntityId door);
+bool peek_start(EntityId door);
+void peek_stop(void);
+bool peek_frame(float dt, vec2 look, bool ui_blocking);
+void peek_on_hurt(void);
+bool peek_camera(World *w, RenderCamera *cam);
+void peek_post(struct PostSettings *s);
+void peek_draw(void);
+
+// game_wheels.c: radial wheels (healing, throwables, ping, door), the HUD timed ring
+void wheels_register(void);
+bool wheels_frame(float dt, bool ui_blocking);  // before the look: true = the look is the wheel's
+void wheels_filter_cmd(UserCmd *c);             // build_cmd: E tap / hold on doors, auto-use
+float wheels_timescale(void);                   // simulation time scale while a wheel is open
+bool wheels_open(void);
+void wheels_on_hurt(void);
+void wheels_reset(void);
 
 // game_render.c
 void game_render_init(void);

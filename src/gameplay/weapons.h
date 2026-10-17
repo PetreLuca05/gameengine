@@ -41,6 +41,8 @@ const WeaponCvars *weapons_cvars(void);
 
 void weapons_tick(World *w, int slot, PlayerSim *sim, const UserCmd *cmd, u16 pressed, float dt, bool first_predict, WeaponOutput *out);
 void projectiles_tick(World *w, float dt);
+// The shot trace (world, tires, hitboxes) without damage: pings, aim queries. False = nothing.
+bool weapon_trace(World *w, int shooter, vec3 origin, vec3 dir, float range, vec3 *point, EntityId *ent);
 // Equipped slot contents (or NULL when empty).
 // WeaponState.slot of the built-in phone (taken out with its own key, docs/PHONE.md): not an
 // inventory slot; weapon_equipped returns a virtual slot holding ItemDB.builtin_phone.

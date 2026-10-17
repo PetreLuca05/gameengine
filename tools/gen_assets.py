@@ -150,6 +150,36 @@ def gen_vfx_sounds():
     write_wav("shard_glass", tink([5200, 6900, 8800], 0.08, 0.25, 0.015))
 
 
+def explosion(length=1.6):
+    """Grenade: a sharp crack, a deep body and a long rumbling tail."""
+    lp, lp2 = LowPass(0.25), LowPass(0.03)
+    def s(t, i):
+        crack = lp(random.uniform(-1, 1)) * math.exp(-t / 0.05)
+        body = math.sin(2 * math.pi * 48 * t * (1.0 - t * 0.3)) * math.exp(-t / 0.35)
+        tail = lp2(random.uniform(-1, 1)) * 6.0 * math.exp(-t / 0.6)
+        return (crack * 1.3 + body * 0.9 + tail) * env(t, 0.002, 0.9) * 0.9
+    return synth(length, s)
+
+
+def fire_burst(length=1.4):
+    """Molotov: glass, then the whoosh of the fire catching."""
+    lp = LowPass(0.06)
+    def s(t, i):
+        whoosh = lp(random.uniform(-1, 1)) * 5.0 * math.sin(min(1.0, t / 0.25) * math.pi * 0.5) * math.exp(-max(0.0, t - 0.25) / 0.6)
+        return whoosh * 0.7
+    return [a + b for a, b in zip(concat(tink([3200, 4700, 6100], 0.2, 0.45, 0.04), [0.0] * int(length * RATE))[:int(length * RATE)], synth(length, s))]
+
+
+def gen_hud_sounds():
+    """Wheels / pings / throwables / doors (docs/UI_WHEELS_HUD.md)."""
+    write_wav("ping", concat(tink([1320, 1980], 0.18, 0.4, 0.06), tink([1760, 2640], 0.22, 0.35, 0.08), gap=0.04))
+    write_wav("ping_alert", concat(tink([1760, 2640], 0.12, 0.45, 0.04), tink([1760, 2640], 0.12, 0.45, 0.04), tink([2200, 3300], 0.2, 0.4, 0.07), gap=0.03))
+    write_wav("door_slam", concat(click(260, 0.03, 0.9), thud(60, 0.45, 1.0, 0.55), crunch(0.2, 0.2, 0.4, 0.03, 4)))
+    write_wav("pin", concat(tink([3100, 4300], 0.06, 0.45, 0.015), click(1800, 0.03, 0.4), gap=0.05))
+    write_wav("explosion", explosion())
+    write_wav("molotov", fire_burst())
+
+
 def gen_sounds():
     write_wav("shot_pistol", gunshot(0.35, 140, 0.75, 0.06))
     write_wav("shot_rifle", gunshot(0.3, 110, 0.8, 0.05, 0.45))
@@ -435,6 +465,10 @@ def gen_vehicle_sounds():
 
 if __name__ == "__main__":
     import sys
+    if "--hud-sounds" in sys.argv:
+        gen_hud_sounds()
+        print("hud sounds generated")
+        sys.exit(0)
     if "--vfx-sounds" in sys.argv:
         gen_vfx_sounds()
         print("vfx sounds generated")
@@ -443,6 +477,7 @@ if __name__ == "__main__":
     gen_weather_sounds()
     gen_vehicle_sounds()
     gen_vfx_sounds()
+    gen_hud_sounds()
     crate_texture()
     ktx2_texture()
     barrel_gltf()

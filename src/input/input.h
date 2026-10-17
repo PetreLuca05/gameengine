@@ -16,6 +16,7 @@ typedef enum Action {
     ACT_NEXT_ITEM, ACT_PREV_ITEM, ACT_FIREMODE, ACT_FLASHLIGHT,
     ACT_VEHICLE_CAM, ACT_LIGHTS, ACT_HORN,
     ACT_PHONE_PAIR, ACT_PHONE_GALLERY, ACT_PHONE, ACT_PHONE_SELFIE,   // docs/PHONE.md
+    ACT_HEAL_WHEEL, ACT_PING,                                         // docs/UI_WHEELS_HUD.md
     ACT_COUNT
 } Action;
 
@@ -31,6 +32,8 @@ typedef struct Binding {
 typedef struct InputFrame {
     vec2 look_delta;   // radians this frame (already scaled by sensitivity, invert applied)
     vec2 move;         // -1..1 (x right, y forward)
+    vec2 mouse_px;     // raw relative mouse motion this frame (pixels; radial wheels)
+    vec2 rstick;       // right stick -1..1 (deadzoned; radial wheels)
 } InputFrame;
 
 void input_init(void);

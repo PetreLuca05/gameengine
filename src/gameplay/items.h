@@ -12,7 +12,9 @@
 #define MAX_WEAPON_DEFS 32
 #define ITEM_NONE 0
 
-typedef enum ItemKind { ITEM_MISC, ITEM_AMMO, ITEM_CONSUMABLE, ITEM_WEAPON, ITEM_KEY, ITEM_ATTACHMENT, ITEM_KIND_COUNT } ItemKind;
+typedef enum ItemKind { ITEM_MISC, ITEM_AMMO, ITEM_CONSUMABLE, ITEM_WEAPON, ITEM_KEY, ITEM_ATTACHMENT, ITEM_THROWABLE, ITEM_KIND_COUNT } ItemKind;
+// Throwables (docs/UI_WHEELS_HUD.md "Throwables"): hold attack to cook / charge, release to throw.
+typedef enum ThrowKind { THROW_GRENADE, THROW_FLARE, THROW_MOLOTOV } ThrowKind;
 typedef enum DamageType { DMG_GENERIC, DMG_BULLET, DMG_MELEE, DMG_EXPLOSIVE, DMG_FALL, DMG_COUNT } DamageType;
 typedef enum WeaponKind { WPN_MELEE, WPN_HITSCAN, WPN_PROJECTILE } WeaponKind;
 typedef enum VisShape { VIS_NONE, VIS_BOX, VIS_CYLINDER, VIS_SPHERE, VIS_CAPSULE } VisShape;
@@ -27,6 +29,17 @@ typedef struct ItemDef {
     VisShape shape;        // pickup visual
     vec3 size;             // half extents
     float heal, armor, use_time;
+    bool interrupt_on_damage;   // consumables: taking damage cancels the use (bandages, medkits)
+    struct {
+        int kind;               // ThrowKind
+        float fuse;             // s from the pin (cooking counts); molotovs burst on impact
+        float radius, damage;   // explosion / fire
+        float speed_min, speed_max;   // m/s: a tap / a full charge
+        float charge_time;      // s to full throw strength
+        float bounce;           // velocity kept per bounce
+        float light_time;       // flares: burn time (s)
+        vec3 light_color;
+    } thr;
     int weapon;            // index into weapon defs (ITEM_WEAPON), -1 otherwise
     char hold_style[16];   // third-person hold style for non-weapon items ("item_small", "item_large")
     ItemSockets sockets;   // held-item sockets (non-weapons)

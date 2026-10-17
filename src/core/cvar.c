@@ -245,6 +245,14 @@ void cmd_register(const char *name, CmdFn fn, const char *desc) {
     c->fn = fn;
 }
 
+int cmd_count(void) { return s_cv.cmd_count; }
+const char *cmd_name_at(int index) { return index >= 0 && index < s_cv.cmd_count ? s_cv.cmds[index].name : ""; }
+const char *cmd_desc_at(int index) { return index >= 0 && index < s_cv.cmd_count ? s_cv.cmds[index].desc : ""; }
+const char *cmd_desc(const char *name) {
+    for (int i = 0; i < s_cv.cmd_count; i++) if (!SDL_strcasecmp(s_cv.cmds[i].name, name)) return s_cv.cmds[i].desc;
+    return NULL;
+}
+
 bool cmd_exists(const char *name) {
     for (int i = 0; i < s_cv.cmd_count; i++)
         if (SDL_strcasecmp(s_cv.cmds[i].name, name) == 0) return true;

@@ -205,6 +205,7 @@ static u32 type_color(const ItemDef *d) {
     case ITEM_WEAPON: return TH->type_weapon;
     case ITEM_AMMO: return TH->type_ammo;
     case ITEM_CONSUMABLE: return TH->type_consumable;
+    case ITEM_THROWABLE: return TH->type_weapon;
     case ITEM_ATTACHMENT: return TH->type_attachment;
     case ITEM_KEY: return TH->type_key;
     default: return TH->type_misc;

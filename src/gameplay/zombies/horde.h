@@ -43,6 +43,9 @@ bool horde_spawn_at(struct World *w, vec3 feet, float yaw, const char *character
 // (0 = always chase the nearest player, the horde default).
 void horde_set_water(float (*fn)(void *user, float x, float z), void *user);
 void horde_set_sense(float radius);
-int horde_aggro_count(void);                     // zombies chasing (sense radius on)
+int horde_aggro_count(void);
+// A loud noise (slammed doors, explosions): zombies within radius chase (sense radius on) for a
+// second's worth of ticks after it.
+void horde_noise(vec3 pos, float radius);                     // zombies chasing (sense radius on)
 
 #endif

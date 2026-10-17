@@ -34,6 +34,7 @@
 #include "ui/console.h"
 #include "ui/crosshair.h"
 #include "ui/recoil_debug.h"
+#include "ui/hud/hud_internal.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
@@ -475,6 +476,7 @@ static UserCmd build_cmd(void) {
     if (G->phone_out) c.buttons |= BTN_PHONE;
     vehicles_fill_cmd(&c);
     if (G->noclip_request) { c.buttons |= BTN_NOCLIP; G->noclip_request = false; }
+    wheels_filter_cmd(&c);   // E tap / hold on doors, the healing wheel's auto-use, open wheels (game_wheels.c)
     if (G->menu_open || G->inventory_open || G->container_open || G->bench_open || console_is_open()) {
         c.move_x = c.move_y = 0;
         c.buttons &= (u16)(BTN_CROUCH | BTN_NOCLIP | BTN_FLASHLIGHT | BTN_PHONE | BTN_VEH_CAM);
@@ -629,7 +631,7 @@ static void handle_hotbar(void) {
     // Phone camera mode: the wheel zooms instead of switching items.
     if (input_consume_press(ACT_NEXT_ITEM) && !phone_wheel(-1)) { G->hotbar_slot = (u8)((G->hotbar_slot + 1) % INV_HOTBAR); G->phone_out = false; }
     if (input_consume_press(ACT_PREV_ITEM) && !phone_wheel(1)) { G->hotbar_slot = (u8)((G->hotbar_slot + INV_HOTBAR - 1) % INV_HOTBAR); G->phone_out = false; }
-    if (input_consume_press(ACT_DROP)) game_rpc(RPC_INV_DROP, G->hotbar_slot, 0, 0);
+    // Drop (G) is a tap of the throwables wheel key (game_wheels.c).
     if (input_consume_press(ACT_FLASHLIGHT)) {
         G->flashlight = !G->flashlight;
         audio_play_2d("click", 0.5f, SND_SFX);
@@ -649,7 +651,10 @@ void game_frame(float dt) {
     if (!G->world) return;
     bool ui_blocking = G->menu_open || G->inventory_open || G->container_open || G->bench_open || console_is_open();
     InputFrame f = input_frame();
-    G->frame_look = ui_blocking ? v2(0, 0) : f.look_delta;
+    // The door peek and an open radial wheel take the look (game_peek.c, game_wheels.c).
+    bool peek_look = peek_frame(dt, f.look_delta, ui_blocking);
+    bool wheel_look = wheels_frame(dt, ui_blocking);
+    G->frame_look = ui_blocking || peek_look || wheel_look ? v2(0, 0) : f.look_delta;
     camera_apply_look(&G->view, G->frame_look);
     vehicles_view_frame(&G->view);
     if (!ui_blocking && !spectator_controls_input()) handle_hotbar();
@@ -669,7 +674,7 @@ void game_frame(float dt) {
         }
     }
 
-    G->accumulator += dt;
+    G->accumulator += dt * wheels_timescale();   // slowed while a radial wheel is open (single player)
     if (G->paused) G->accumulator = 0;   // the pause menu (single player / host alone) stops the simulation
     int steps = 0;
     while (G->accumulator >= SIM_DT && steps < 8) {
@@ -746,6 +751,7 @@ bool game_host_ex(const char *map, u32 flags) {
     horde_level_reset();
     spectate_reset();
     spectator_reset();
+    game_hud_reset();
     G->mode = GM_HOST;
     G->local_slot = 0;
     G->client_seq = 0;
@@ -772,6 +778,7 @@ void game_cl_welcome(int slot, const char *map, u32 seed, u32 server_tick) {
     flesh_fx_clear();
     horde_level_reset();
     spectator_reset();
+    game_hud_reset();
     G->mode = GM_CLIENT;
     G->local_slot = slot;
     G->client_seq = 0;
@@ -1115,6 +1122,28 @@ static void cmd_zombie_spawn(int argc, const char **argv) {
 
 static void cmd_zombie_attack(int argc, const char **argv) { if (G->world) zombies_attack(G->world); }
 
+// zombie_kill_nearest [count] [head]: lethal hits from the local player on the nearest zombies (host;
+// kill counter / feed tests, docs/UI_WHEELS_HUD.md).
+static void cmd_zombie_kill_nearest(int argc, const char **argv) {
+    World *w = G->world;
+    Player *p = game_local_player();
+    if (!w || !p || !w->authority) return;
+    int n = argc > 1 ? atoi(argv[1]) : 1;
+    bool head = argc > 2 && !strcmp(argv[2], "head");
+    for (int k = 0; k < n; k++) {
+        int best = -1;
+        float bd = 1e9f;
+        ENT_FOREACH(w, i) {
+            if (w->type[i] != ET_ZOMBIE || (w->flags[i] & EF_DEAD) || !(w->comps[i] & C_HEALTH)) continue;
+            float d = v3_dist(w->xf[i].pos, p->sim.move.pos);
+            if (d < bd) { bd = d; best = i; }
+        }
+        if (best < 0) { log_info("zombie_kill_nearest: no zombie left"); return; }
+        vec3 at = v3_add(w->xf[best].pos, v3(0, head ? 1.65f : 1.1f, 0));
+        apply_damage_part(w, ENT_MAKE(best, w->gen[best]), 10000.0f, DMG_BULLET, p->ent, at, v3_norm(v3_sub(at, player_eye_pos(&p->sim.move))), head ? BP_HEAD : BP_CHEST, 1.0f);
+    }
+}
+
 static void cmd_zombie_clear(int argc, const char **argv) {
     World *w = G->world;
     if (!w || G->mode != GM_HOST) return;
@@ -1329,6 +1358,9 @@ void game_init(void) {
     G->interact_range = cvar_reg_float("cl_interact_range", 3.0f, 0.5f, 10.0f, 0, "interaction focus raycast length (m); each interactable also has its own range");
     G->world_seed = cvar_reg_int("world_seed", 1337, 0, 999999999, CVAR_ARCHIVE, "procedural world seed");
     cmd_register("map", cmd_map, "host a new game on a map");
+    wheels_register();
+    game_pings_register();
+    hud_register();
     openworld_register_commands();
     cmd_register("give", cmd_give, "give <item> [count]");
     cmd_register("flashlight", cmd_flashlight, "flashlight [0|1]: toggle / set the flashlight (key F)");
@@ -1347,6 +1379,7 @@ void game_init(void) {
     cmd_register("lookat", cmd_lookat, "aim the view at a world point: lookat x y z");
     cmd_register("zombie_spawn", cmd_zombie_spawn, "zombie_spawn [count] [character_id|id] [radius]: spawn test zombies in front of you");
     cmd_register("zombie_attack", cmd_zombie_attack, "all zombies play an attack");
+    cmd_register("zombie_kill_nearest", cmd_zombie_kill_nearest, "zombie_kill_nearest [count] [head]: kill the nearest zombies as the local player (HUD tests)");
     cmd_register("zombie_clear", cmd_zombie_clear, "remove all zombies");
     cmd_register("anim_reload", cmd_anim_reload, "reload anim sets, clips.json, controller.json (hold styles, presets)");
     cmd_register("anim_rebake", cmd_anim_rebake, "re-bake changed FBX clips (cache keyed by file hash)");

@@ -15,13 +15,14 @@
 #include "render/mesh_gen.h"
 #include "gameplay/items.h"
 #include "gameplay/inv_ops.h"
+#include "gameplay/kill_stats.h"
+#include "gameplay/ping.h"
 #include "usercmd.h"
 
 typedef enum GameMode { GM_NONE, GM_HOST, GM_CLIENT } GameMode;
 
 #define CMD_HISTORY 128
 #define MAX_HINTS 6
-#define MAX_KILLFEED 5
 #define MAX_HURT_MARKERS 8
 
 typedef struct Hint { char text[64]; float time; } Hint;
@@ -84,7 +85,12 @@ typedef struct Game {
 
     // HUD state
     Hint hints[MAX_HINTS];
-    Hint killfeed[MAX_KILLFEED];
+    KillStats kill_stats;        // the local player's kills (docs/UI_WHEELS_HUD.md "Kill counter")
+    KillFeed kill_feed;
+    PingList pings;              // live pings (gameplay/ping.h), from EV_PING on every machine
+    u32 ping_uid;                // host: the next ping uid
+    PingLimiter ping_limit;      // host: per-player rate limit
+    float hud_time;              // HUD clock (seconds since the map loaded; pings, streaks)
     HurtMarker hurt[MAX_HURT_MARKERS];
     float hitmarker_time;
     bool hitmarker_kill, hitmarker_head;
@@ -136,6 +142,8 @@ void game_cl_welcome(int slot, const char *map, u32 seed, u32 server_tick);
 void game_cl_disconnected(const char *reason);
 void game_handle_event(const GameEvent *ev);   // client-side event handling
 void game_rpc(int type, int a, int b, int c);   // client -> host request (inventory, containers)
+const PingTypes *game_ping_types(void);         // assets/ui/wheels/ping.json (game_pings.c)
+void wheels_draw(void);                         // radial wheels + the HUD timed ring (game_wheels.c)
 void game_sv_handle_rpc(int slot, int type, int a, int b, int c);
 // Host: weapon attachment change (validated; RPC_ATTACH / the attach command / the weapon bench).
 bool game_sv_attach(World *w, int slot, int inv_slot, int aslot, int att);
@@ -175,6 +183,8 @@ enum RpcType {
     RPC_SPECTATE,    // a = SpecMode, b = target slot or SpecTargetReq, c = 1 dev (alive; host / sv_cheats)
     RPC_RESPAWN,     // respawn request (sv_respawn_mode 1)
     RPC_SPEC_POS,    // free camera position x 16 (relevance)
+    RPC_DOOR_ACTION, // a = door entity, b = DoorAction (docs/UI_WHEELS_HUD.md "Door wheel")
+    RPC_PING,        // a / b / c = ping_pack (gameplay/ping.h)
 };
 
 // Inventory intents (gameplay/inv_ops.h, docs/UI.md): applied at once on the host; a client predicts

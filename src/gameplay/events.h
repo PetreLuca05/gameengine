@@ -20,16 +20,25 @@ typedef enum EventType {
     EV_IMPACT,         // pos, dir = normal, id = surface kind
     EV_TRACER,         // pos = from, dir = to
     EV_MUZZLE,         // ent = shooter
-    EV_KILL,           // ent = victim, ent2 = killer, text = message
+    EV_KILL,           // ent = victim, ent2 = killer, text = message, id = KILLF_* (kill_stats.h), data = KillEventData
     EV_CONTAINER,      // ent = container, data = InvSlot[CONTAINER_SLOTS]
     EV_CONTAINER_CLOSE,
     EV_RESPAWN,        // ent = player entity
     EV_USE_ANIM,       // ent = user player entity, ent2 = target (for remote hand animation)
     EV_CHAT,           // text
     EV_BENCH,          // to the user: ent = weapon bench (opens the attachment UI)
-    EV_TOD,
-    EV_VEHICLE,        // vehicles: id 1 = ejected at speed (ent = player, dir = velocity, value = stun s)            // time of day: id = TodEvent bits (sunrise / sunset / midnight / noon), value = hours
+    EV_TOD,            // time of day: id = TodEvent bits (sunrise / sunset / midnight / noon), value = hours
+    EV_VEHICLE,        // vehicles: id 1 = ejected at speed (ent = player, dir = velocity, value = stun s)
+    EV_PING,           // pings (gameplay/ping.h): id = uid, ent = owner slot, ent2 = type, pos, value = lifetime (< 0: removed), text = owner name
+    EV_EXPLOSION,      // throwables: pos, value = radius, id = item
 } EventType;
+
+// EV_KILL payload (data): names as shown in the kill feed and the killer's weapon item.
+typedef struct KillEventData {
+    char killer[32];
+    char victim[32];
+    u16 weapon;
+} KillEventData;
 
 typedef struct GameEvent {
     u8 type;

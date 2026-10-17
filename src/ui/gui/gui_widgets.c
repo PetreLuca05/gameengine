@@ -576,7 +576,7 @@ void gw_slot(GuiRect r, const GuiSlotView *v) {
     if (v->hot) bg = gui_rgba_lerp(bg, TH->slot_hi, 0.8f);
     if (v->drop_state == 1) bg = gui_rgba_lerp(bg, TH->accent, 0.18f);
     if (v->drop_state == 2) bg = gui_rgba_lerp(bg, TH->danger, 0.25f);
-    u32 border = v->selected ? TH->accent : (v->drop_state == 1 ? gui_rgba_mul(TH->accent, 0.8f) : (v->drop_state == 2 ? TH->danger : TH->slot_border));
+    u32 border = v->selected ? TH->select : (v->drop_state == 1 ? gui_rgba_mul(TH->accent, 0.8f) : (v->drop_state == 2 ? TH->danger : TH->slot_border));
     gd_alpha_push(v->dim ? 0.4f : 1.0f);
     gd_round_border(r, rad, v->selected ? fmaxf(1.0f, gui_s(1.5f)) : 1.0f, bg, border);
     if (!v->empty) {
@@ -613,7 +613,7 @@ void gw_slot(GuiRect r, const GuiSlotView *v) {
     if (v->hotkey > 0) {
         char b[4];
         snprintf(b, sizeof(b), "%d", v->hotkey);
-        GuiText t = { fmaxf(gui_s(TH->t_tiny), r.h * 0.17f), GW_SEMIBOLD, v->selected ? TH->accent : TH->text_faint, GUI_LEFT, 0, false, false, 0 };
+        GuiText t = { fmaxf(gui_s(TH->t_tiny), r.h * 0.17f), GW_SEMIBOLD, v->selected ? TH->select : TH->text_faint, GUI_LEFT, 0, false, false, 0 };
         gd_text(&t, r.x + gui_s(5), r.y + gui_s(2), b);
     }
     gd_alpha_pop();

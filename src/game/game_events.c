@@ -13,6 +13,7 @@
 #include "audio/audio.h"
 #include "anim/body_parts.h"
 #include "ui/crosshair.h"
+#include "gameplay/throwables.h"
 #include <stdio.h>
 #include <math.h>
 
@@ -25,15 +26,33 @@ void game_add_hint(const char *text) {
     G->hints[0].time = 4.0f;
 }
 
-static void add_kill(const char *text) {
-    memmove(&G->killfeed[1], &G->killfeed[0], sizeof(Hint) * (MAX_KILLFEED - 1));
-    dg_strcpy(G->killfeed[0].text, sizeof(G->killfeed[0].text), text);
-    G->killfeed[0].time = 6.0f;
+// New map / session: kills, the feed, pings, wheels.
+void game_hud_reset(void) {
+    kill_stats_reset(&G->kill_stats);
+    memset(&G->kill_feed, 0, sizeof(G->kill_feed));
+    game_pings_reset();
+    wheels_reset();
+    G->hud_time = 0;
+}
+
+// EV_KILL: the kill feed on every machine, the counter for the local player's own kills.
+static void add_kill(const GameEvent *ev) {
+    KillEventData kd;
+    memcpy(&kd, ev->data, sizeof(kd));
+    kd.killer[sizeof(kd.killer) - 1] = kd.victim[sizeof(kd.victim) - 1] = 0;
+    Player *lp = game_local_player();
+    bool mine = lp && ev->ent2 == lp->ent && !(ev->id & KILLF_SELF);
+    bool me_victim = lp && ev->ent == lp->ent;
+    killfeed_push(&G->kill_feed, kd.killer, kd.victim, kd.weapon, ev->id, mine, me_victim);
+    if (mine) kill_stats_add(&G->kill_stats, ev->id, G->hud_time);
 }
 
 void game_hud_tick(float dt) {
     for (int i = 0; i < MAX_HINTS; i++) if (G->hints[i].time > 0) G->hints[i].time -= dt;
-    for (int i = 0; i < MAX_KILLFEED; i++) if (G->killfeed[i].time > 0) G->killfeed[i].time -= dt;
+    G->hud_time += dt;
+    killfeed_tick(&G->kill_feed, dt);
+    kill_stats_tick(&G->kill_stats, G->hud_time, dt);
+    game_pings_tick(dt);
     for (int i = 0; i < MAX_HURT_MARKERS; i++) if (G->hurt[i].time > 0) G->hurt[i].time -= dt;
     if (G->hitmarker_time > 0) G->hitmarker_time -= dt;
     G->damage_flash = fmaxf(0.0f, G->damage_flash - dt * 1.5f);
@@ -66,6 +85,7 @@ void game_handle_event(const GameEvent *ev) {
         }
         G->damage_flash = fminf(1.0f, G->damage_flash + ev->value / 40.0f);
         audio_play_2d("hurt", 0.7f, SND_SFX);
+        wheels_on_hurt();   // ends a door peek, stops auto-use of interruptible items
         break;
     }
     case EV_IMPACT: {
@@ -116,7 +136,9 @@ void game_handle_event(const GameEvent *ev) {
             fx_muzzle(v3_madd(eye, forward_from_yaw(yaw), 0.6f), forward_from_yaw(yaw));
         }
         break;
-    case EV_KILL: add_kill(ev->text); break;
+    case EV_KILL: add_kill(ev); break;
+    case EV_PING: game_pings_event(ev); break;
+    case EV_EXPLOSION: throwables_event(ev); break;
     case EV_CONTAINER:
         G->container_open = true;
         G->container_ent = ev->ent;
@@ -268,6 +290,8 @@ void game_sv_handle_rpc(int slot, int type, int a, int b, int c) {
     case RPC_INV_DROP: drop_item(w, slot, a); break;
     case RPC_ATTACH: game_sv_attach(w, slot, a, b, c); break;
     case RPC_SET_PART: chars_sv_player_part(w, slot, a, b); break;
+    case RPC_DOOR_ACTION: door_action(w, (EntityId)(u32)a, slot, b); break;
+    case RPC_PING: game_sv_ping(w, slot, a, b, c); break;
     case RPC_INV_OP: {
         InvOp op;
         inv_op_unpack(a, b, c, &op);

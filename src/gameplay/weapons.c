@@ -3,6 +3,7 @@
 #include "health.h"
 #include "effects.h"
 #include "flesh_fx.h"
+#include "throwables.h"
 #include "core/log.h"
 #include "core/engine.h"
 #include "core/cvar.h"
@@ -705,11 +706,23 @@ void weapons_tick(World *w, int slot, PlayerSim *sim, const UserCmd *cmd, u16 pr
     bool busy = sim->move.mode != MOVE_WALK;
     if (sim->move.mode == MOVE_SEATED) busy = !(g_vh.can_shoot && g_vh.can_shoot(w, slot, sim, d));   // passengers, one-handed drivers
 
+    // Throwables: hold to cook / charge, release to throw (gameplay/throwables.c).
+    if (idef->kind == ITEM_THROWABLE && s->item) {
+        throwables_held_tick(w, slot, sim, idef, s, attack, busy, dt, first);
+        return;
+    }
     // Consumables: hold attack for use_time.
     if (idef->kind == ITEM_CONSUMABLE && s->item) {
         if (attack && !busy) {
+            if (ws->use_t < -50.0f) return;   // finished / interrupted: wait for the release
             if (ws->use_t < 0) ws->use_t = 0;
             ws->use_t += dt;
+            // Taking damage interrupts bandaging / medkits (host; the client gets the state back).
+            if (idef->interrupt_on_damage && w->authority && ws->use_t > dt && w->health[ENT_INDEX(p->ent)].last_damage_time >= w->time - dt * 0.5f) {
+                ws->use_t = -100.0f;
+                ev_hint(w, slot, "%s interrupted", idef->name);
+                return;
+            }
             if (ws->use_t >= idef->use_time) {
                 if (w->authority) {
                     bool used = true;
@@ -886,6 +899,7 @@ void weapons_tick(World *w, int slot, PlayerSim *sim, const UserCmd *cmd, u16 pr
 void projectiles_tick(World *w, float dt) {
     ENT_FOREACH(w, i) {
         if (w->type[i] != ET_PROJECTILE) continue;
+        if (w->proj[i].item) { throwable_projectile_tick(w, i, dt); continue; }
         EntityId e = ENT_MAKE(i, w->gen[i]);
         Projectile *pr = &w->proj[i];
         pr->life -= dt;
@@ -927,4 +941,13 @@ void projectiles_tick(World *w, float dt) {
         w->xf[i].pos = to;
         w->xf[i].rot = quat_euler(yaw, pitch, 0);
     }
+}
+
+bool weapon_trace(World *w, int shooter, vec3 origin, vec3 dir, float range, vec3 *point, EntityId *ent) {
+    if (shooter < 0 || shooter >= MAX_PLAYERS) return false;
+    HitResult h = trace_shot(w, shooter, origin, dir, range, 0);
+    if (!h.hit) return false;
+    *point = h.point;
+    *ent = h.ent;
+    return true;
 }

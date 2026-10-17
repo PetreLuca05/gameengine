@@ -6,6 +6,8 @@
 // clouds, stars, IBL scale), exposure / fog curves, the gameplay API, the clock HUD, the
 // time-of-day editor and the tests.
 #include "game_internal.h"
+#include "ui/hud.h"
+#include "ui/menus.h"
 #include "scene.h"
 #include "world/time_of_day.h"
 #include "render/render.h"
@@ -635,11 +637,14 @@ static void draw_clock(void) {
     float speed = w->tod.day_length > 0 ? DN.cfg.day_length_minutes * 60.0f / w->tod.day_length : 0.0f;
     snprintf(line, sizeof(line), "Day %d  %s  %s", (int)DN.frame_days + 1, b, phase);
     float s = ui_scale();
-    float x = ui_width() - 12 * s;
-    ui_text_shadow(x, 40 * s, FONT_UI, UI_RGBA(235, 230, 215, 240), UI_ALIGN_RIGHT, line);
+    // Under the compass (top centre): the top right belongs to the kill counter (docs/UI_WHEELS_HUD.md).
+    float x = ui_width() * 0.5f, y = fmaxf(10 * s, hud_compass_bottom() + 6 * s);
+    if (menus_open()) y = 10 * s;
+    ui_text_shadow(x, y, FONT_UI, UI_RGBA(235, 230, 215, 240), UI_ALIGN_CENTER, line);
+    if (!G->dev_mode->i) return;
     snprintf(line, sizeof(line), "sun %.1f deg  moon %.0f %%  clouds %.0f %%  EV %.2f  %s", e, DN.sky.moon_illum * 100.0f, DN.cloud_cover * 100.0f,
              render_exposure_ev(), speed <= 0 ? "paused" : (speed > 1.01f ? "fast" : ""));
-    ui_text_shadow(x, 58 * s, FONT_SMALL, UI_RGBA(200, 200, 190, 220), UI_ALIGN_RIGHT, line);
+    ui_text_shadow(x, y + 18 * s, FONT_SMALL, UI_RGBA(200, 200, 190, 220), UI_ALIGN_CENTER, line);
 }
 
 static void draw_editor(void) {
