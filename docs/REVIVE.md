@@ -314,7 +314,7 @@ The dev room has a fabricator at (8.5, 0, 23) facing the spawn and a syringe on 
 | `fab_power <0\|1> [entity]` | Powers fabricators on or off. |
 | `revive_dump` | Logs players, corpses, fabricators and samples. |
 | `revive_approach corpse\|fab\|downed` | Stands in reach of a timed action and looks at it. |
-| `revive_wait players <n> \| <slot> alive\|dead\|downed\|reconstructing [timeout]` | Script sync. |
+| `revive_wait players <n> \| fab <progress> \| <slot> alive\|dead\|downed\|reconstructing\|acted [timeout]` | Script sync. `acted`: the held timed action finished or was cancelled; `fab`: a reconstruction at that progress. Scripts wait on these, never on frame counts (a frame is one tick on a GPU, ~30 on lavapipe). |
 
 All commands are in the "Revive & Death" category (`assets/ui/command_categories.json`).
 
