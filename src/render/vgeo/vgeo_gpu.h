@@ -44,7 +44,8 @@ typedef struct VgMesh {
     float center[3], radius;
     u32 root_node, node_base, group_base, page_base;   // offsets into the global tables
     u32 page_count, flags, material_base, impostor;    // impostor: albedo atlas texture | normal atlas texture << 16 (vgeo_tex.h), ~0 = none
-    float max_wpo;               // m: max world-position offset over its materials (0 = static): inflates every bound
+    float max_wpo;               // m: max world-position offset over its materials at instance scale 1 (0 = static): inflates
+                                 // every bound by max_wpo x max(instance scale, 1) (vg_wpo_margin: the wind scales with the plant)
     float q_step;                // position grid step (m): pos = (cluster.base + u16 offset) * q_step
     float fade_start, fade_end;  // m: instance distance fade + density thinning (VGMF_FOLIAGE; fade_end 0 = no fade)
     float shadow_max_dist;       // m: not in the sun cascades beyond this distance from the camera (0 = always)
@@ -53,6 +54,8 @@ typedef struct VgMesh {
                                  // switch size in 1/16 of the view's (VgViewGpu.foliage[3]; 0 = 1x, vgeo_impostor_scale)
     float impostor_radius;       // m: the atlas frames' half extent (mesh space; the billboard's half size)
 } VgMesh;
+
+DG_INLINE float vg_wpo_margin(const VgMesh *m, float pscale) { return m->max_wpo * (pscale > 1.0f ? pscale : 1.0f); }
 
 // Page payload: VgPageHeader, VgCluster[cluster_count], vertex data, triangle data (16-byte aligned blocks).
 typedef struct VgPageHeader { u32 cluster_count, vertex_bytes, index_bytes, skin_bytes; } VgPageHeader;
@@ -181,12 +184,18 @@ typedef struct VgViewGpu {
     float raster_view_proj[16];      // the view the visible clusters are rasterised with (main view: jittered)
     // Foliage (Phase 7): wind and time of the WPO snippets (shaders/vgeo/wpo.glsl), this frame's and
     // the previous one's (velocity); density / impostor switch; the displacement buffer.
-    float wind[4];                   // direction x, z (unit), strength (m/s, gusts included), gust factor
+    float wind[4];                   // the wind field outside its tile (docs/FOLIAGE_WIND.md): instant x, z, settled bend x, z (m/s)
     float wind_prev[4];
     float foliage[4];                // time (s), previous time, r_foliage_density, r_vgeo_impostor_px (0 = no impostors)
     float disp[4];                   // displacement buffer: texel 0 world x, z (m), metres per texel, valid (1)
     u32 frame_index, disp_tex;       // frame_index: dither rotation (TAA); disp_tex: its texture index
     float fol_fade_max, fol_shadow_max;   // all-foliage cells (VG_CELL_FOLIAGE) farther than this are culled whole (0 = never)
+    // Wind field tile (src/world/wind.h, vg_wind_*): window texel 0 world x, z (m), metres per texel,
+    // valid; the previous frame's (velocity); their texture indices, the layers (VgWindLayer, the
+    // fidelity tier and the debug solo) and the debug view (VgWindDebug).
+    float wind_tile[4];
+    float wind_tile_prev[4];
+    u32 wind_tex, wind_tex_prev, wind_layers, wind_debug;
 } VgViewGpu;
 
 // Counters (binding 8): indirect dispatch args first (x, y, z, unused), then counts.
@@ -231,7 +240,9 @@ enum VgMaterialFlags {
 #define VGM_FLAGS (VGM_MASKED | VGM_TWO_SIDED | VGM_DITHER_FADE | VGM_FOLIAGE)
 
 // World-position-offset snippets (VgMaterial.wpo, shaders/vgeo/wpo.glsl): snippet id | WPO_DISPLACE.
-enum VgWpo { WPO_NONE = 0, WPO_GRASS = 1, WPO_TREE = 2, WPO_DISPLACE = 1u << 8 };
+// Every snippet is the vegetation model of docs/FOLIAGE_WIND.md (wpo_veg) with its parameters; the id
+// says which preset the parameters came from (VgWindPreset + 1).
+enum VgWpo { WPO_NONE = 0, WPO_GRASS = 1, WPO_TREE = 2, WPO_BUSH = 3, WPO_DISPLACE = 1u << 8 };
 #define VG_DISPLACE_MAX 0.6f         // m: the displacement buffer's largest push (WPO_DISPLACE bound)
 
 // Material table (binding 19, VgScene): VgMesh.material_base + the cluster's material.
@@ -245,13 +256,14 @@ typedef struct VgMaterial {
     u32 wpo;                         // VgWpo
     float wpo_max;                   // m: declared max displacement (vgeo_wpo_max(wpo, wpo_params)), inflates every bound
     float fade_start, fade_end;      // m: distance fade (VGM_FOLIAGE; fade_end 0 = none)
-    float wpo_params[4];             // snippet parameters (wpo.glsl)
+    float wpo_params[4];             // snippet parameters (wpo.glsl; foliage_wind.h vgeo_wind_pack)
     float shadow_max_dist;           // m: sun cascades skip the mesh beyond this distance from the camera (0 = always)
     // glTF PBR maps (docs/PBR.md, shaders/pbr_maps.glsl): texture indices (0 = none; the MAT_*_TEX flags
     // say which are meant), normal_scale, occlusion_strength, emissive colour RGBA8 (with MAT_EMISSIVE_TEX).
     u32 mr_tex, normal_tex, occlusion_tex, emissive_tex;
     float normal_scale, occlusion_strength;
     u32 emissive_rgb;
+    float wind_params[8];            // vegetation wind parameters, second half (foliage_wind.h vgeo_wind_pack)
 } VgMaterial;
 
 // Push constants of every cull kernel (48 B).
@@ -291,8 +303,8 @@ _Static_assert(sizeof(VgDiscreteLod) == 32, "VgDiscreteLod");
 _Static_assert(sizeof(VgInstance) == 32, "VgInstance");
 _Static_assert(sizeof(VgCell) == 32, "VgCell");
 _Static_assert(sizeof(VgPaletteSlot) == 32, "VgPaletteSlot");
-_Static_assert(sizeof(VgViewGpu) == 496, "VgViewGpu");
-_Static_assert(sizeof(VgMaterial) == 112, "VgMaterial");
+_Static_assert(sizeof(VgViewGpu) == 544, "VgViewGpu");
+_Static_assert(sizeof(VgMaterial) == 144, "VgMaterial");
 _Static_assert(sizeof(VgCounters) == 256, "VgCounters");
 _Static_assert(sizeof(VgPush) == 48, "VgPush");
 _Static_assert(sizeof(VgFileHeader) == 112 + VGS_COUNT * 8, "VgFileHeader");

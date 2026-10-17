@@ -1,0 +1,10 @@
+{
+  "_doc": "Cosmetics (docs/MENU_LOBBY.md 'Adding a cosmetic'). slot: body | head | torso | legs | hands | hair | gear_0..gear_3 | weapon_skin. option: the part option id in assets/characters/player.json 'parts' (body: a skin id from assets/human/skins.json). rarity: common | uncommon | rare | epic | legendary. unlock: default (everyone) | locked (profile unlocks) | steam:<itemdef> (Steam Inventory, stub). tint: the placeholder icon colour when there is no 'icon' png.",
+  "items": [
+    { "id": "outfit_dummy", "name": "Test Dummy", "slot": "body", "option": "dummy", "rarity": "common", "tint": [0.62, 0.64, 0.68], "description": "The original grey rig." },
+    { "id": "outfit_hazmat", "name": "Hazmat Suit", "slot": "body", "option": "hazmat", "rarity": "common", "tint": [0.86, 0.74, 0.22], "description": "Standard issue. Keeps the worst of it out." },
+    { "id": "outfit_officer", "name": "Officer", "slot": "body", "option": "officer", "rarity": "uncommon", "tint": [0.22, 0.27, 0.40], "description": "Still wearing the badge." },
+    { "id": "outfit_athlete", "name": "Athlete", "slot": "body", "option": "athlete", "rarity": "rare", "tint": [0.20, 0.55, 0.62], "description": "Built for running away." },
+    { "id": "outfit_casual", "name": "Casual", "slot": "body", "option": "casual", "rarity": "uncommon", "tint": [0.55, 0.36, 0.30], "description": "It was supposed to be a normal day." }
+  ]
+}

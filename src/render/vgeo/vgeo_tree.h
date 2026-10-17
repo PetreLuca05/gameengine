@@ -4,8 +4,9 @@
 //
 //   source mesh (ufbx) -> per texture material (bark opaque; leaf / branch cards alpha-masked and
 //   two-sided when the texture has a cut-out alpha) -> metres, ground at y = 0, the trunk base at
-//   x = z = 0, scaled to the species height -> wind weights in the vertex colour (R trunk sway by
-//   height, G branch bounce by distance from the trunk, B leaf flutter on the cards) -> vgeo build
+//   x = z = 0, scaled to the species height -> wind weights in the vertex colour, the canonical layout
+//   of foliage_wind.h (docs/FOLIAGE_WIND.md): Tree It's own (R leaf flutter, G branch phase, B branch
+//   bend, normalised to 1), inferred from the geometry when the file has none -> vgeo build
 //   (its DAG is the LOD chain: the files' own LODs are not used) -> impostor bake with the textures
 //   -> trunk capsule from the bark near the ground.
 // Results are cached (VgTreeCacheHeader + the .vgeo bytes): the build writes them to
@@ -16,8 +17,9 @@
 
 #include "vgeo_build.h"
 #include "vgeo_procgen_foliage.h"
+#include "foliage_wind.h"
 
-#define VG_TREE_VERSION 2        // bump when the import's output changes (cache key)
+#define VG_TREE_VERSION 4        // bump when the import's output changes (cache key)
 #define VG_TREE_MAX_MATERIALS 4
 #define VG_TREE_TEX_MAX 512      // textures are box-filtered down to this side (GPU memory, impostor bake)
 
@@ -29,16 +31,24 @@ typedef struct VgTreeSpecies {
     const char *file;            // source mesh in the tree directory
     u8 role;                     // VgTreeRole
     float weight;                // relative pick weight within the role
-    float height;                // m: ground to top at instance scale 1
-    float sway, branch, flutter; // WPO_TREE amplitudes (m at full wind, weight 1)
+    float height_min, height_max;   // m: ground to top, the instance range (scale 1 = the middle)
     float fade_start, fade_end, shadow_max;   // m
     u32 atlas;                   // impostor atlas px (8 x 8 frames; 0 = none)
     float impostor_scale;        // switch size x r_vgeo_impostor_px (vgeo_impostor_scale)
     bool capsule;                // trunk collider
+    bool infer_wind;             // ignore the file's vertex colours: wind weights from the geometry (tests)
 } VgTreeSpecies;
 
 u32 vgeo_tree_species_count(void);
 const VgTreeSpecies *vgeo_tree_species(u32 i);
+// The mesh height at instance scale 1 (m): the middle of the species range.
+float vgeo_tree_height(const VgTreeSpecies *sp);
+// The instance scale range of a species by foliage type name (height_min / max over the scale-1
+// height); false for a type that is not a tree species.
+bool vgeo_tree_scale_range(const char *name, float *lo, float *hi);
+// The species' wind parameters (docs/FOLIAGE_WIND.md "Parameters"): the preset of its role (flowers
+// grass, the rest tree) for its scale-1 height, with the species' tuning on top.
+void vgeo_tree_wind(const VgTreeSpecies *sp, VgWindParams *out);
 
 // An RGBA8 texture (sRGB colour, linear alpha), box-filtered down to <= max_side.
 typedef struct VgTreeTexture { u8 *rgba; u32 w, h; } VgTreeTexture;
@@ -58,11 +68,30 @@ typedef struct VgTree {
     float cap_r, cap_h;          // trunk capsule (m at scale 1)
     float src_height;            // source mesh height (file units), the scale applied
     float scale;
+    float branch_scale;          // the branch channel's normalisation (1 / its max in the file)
+    bool wind_inferred;          // the file had no vertex colours: weights from the geometry
     bool from_cache;
 } VgTree;
 
 // Source mesh -> foliage mesh in metres with wind weights (meta: materials, capsule, scale).
 bool vgeo_tree_import(const VgTreeSpecies *sp, const char *dir, VgFoliageMesh *out, VgTree *meta, char *err, int err_size);
+// Channel detection from the data alone (docs/FOLIAGE_WIND.md "Tree It vertex colours"), on the
+// species' source colours:
+//   phase    the channel most constant per connected piece over bark and cards, >= 3 distinct values
+//   flutter  of the others, ~0 on the bark and ~0 at one end of most cards (the stem end)
+//   branch   the remaining one (reported: its correlation with the distance to the trunk axis on bark)
+typedef struct VgTreeChannelReport {
+    bool has_color;
+    int flutter, phase, branch;      // source channel indices (0..3), -1 = undecided
+    float flutter_bark_max;          // the flutter channel's max on bark parts
+    float flutter_uv_corr;           // its correlation with the card uv v (Tree It: + towards the tip)
+    float flutter_card_zero;         // fraction of cards whose min is ~0
+    float phase_const;               // 1 - pooled within-piece variance fraction of the phase channel
+    float branch_radial_corr;        // branch channel vs distance from the trunk axis, bark parts
+    float branch_max;
+    char note[128];
+} VgTreeChannelReport;
+bool vgeo_tree_detect_channels(const VgTreeSpecies *sp, const char *dir, VgTreeChannelReport *r, char *err, int err_size);
 // The cache key of a species (source file bytes, species shape parameters, versions); 0 = unreadable.
 u32 vgeo_tree_key(const VgTreeSpecies *sp, const char *dir);
 // Loads the species from built_dir (<name>.dgtree) or cache_dir (<name>.tree.<key>.dgc) when the key
@@ -71,7 +100,7 @@ u32 vgeo_tree_key(const VgTreeSpecies *sp, const char *dir);
 bool vgeo_tree_load_or_build(const VgTreeSpecies *sp, const char *dir, const char *built_dir, const char *cache_dir, VgTree *out, char *err, int err_size);
 // Writes the cache file of a built tree.
 bool vgeo_tree_write(const VgTree *t, u32 key, const char *path);
-// The species' vgeo materials (flags, WPO, fades; albedo_tex / mask_tex left 0 for the caller).
+// The species' vgeo materials (flags, wind (vgeo_tree_wind), fades; albedo_tex / mask_tex left 0 for the caller).
 void vgeo_tree_materials(const VgTree *t, VgMaterial out[VG_TREE_MAX_MATERIALS]);
 void vgeo_tree_free(VgTree *t);
 

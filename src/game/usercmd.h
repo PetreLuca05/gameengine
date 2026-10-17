@@ -21,6 +21,7 @@ enum CmdButtons {
     BTN_LIGHTS  = 1 << 12,    // vehicle headlights on (state, driver)
     BTN_HORN    = 1 << 13,    // vehicle horn (state, driver)
     BTN_PHONE   = 1 << 14,    // the built-in phone is out (state, docs/PHONE.md)
+    BTN_VEH_CAM = 1 << 15,    // vehicle third-person camera chosen (state; spectators follow it)
 };
 
 typedef struct UserCmd {
@@ -34,6 +35,7 @@ typedef struct UserCmd {
     u32 use_target;    // EntityId the client is focusing
     u32 phone_rot;     // phone held by a paired real phone: packed rotation relative to the view yaw (docs/PHONE.md)
     u8 phone_flags;    // CHAR_PHONE_* (anim/character_rt.h): landscape / driven / recording
+    u8 phone_zoom;     // phone camera zoom x 32 (spectators see the same lens)
 } UserCmd;
 
 #endif

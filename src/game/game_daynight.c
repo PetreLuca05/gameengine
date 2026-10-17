@@ -6,6 +6,7 @@
 // clouds, stars, IBL scale), exposure / fog curves, the gameplay API, the clock HUD, the
 // time-of-day editor and the tests.
 #include "game_internal.h"
+#include "scene.h"
 #include "world/time_of_day.h"
 #include "render/render.h"
 #include "render/post/post_settings.h"
@@ -434,6 +435,16 @@ static World *host_world(const char *cmd) {
     return w;
 }
 
+void daynight_set_calendar(World *w, int day_of_year, float hours) {
+    if (!w || !w->authority) return;
+    DN.cfg.day_of_year = DG_CLAMP(day_of_year, 1, 365);
+    w->tod.day_of_year = (u16)DN.cfg.day_of_year;
+    float h = hours >= 0 ? hours : tod_hours(&w->tod, (double)w->tick);
+    tod_set_time(&w->tod, (double)w->tick, h);   // re-anchors and bumps the version (replicated)
+    DN.host_last_days = tod_days(&w->tod, w->tick);
+    DN.key_init = false;
+}
+
 static void cmd_time_set(int argc, const char **argv) {
     World *w = host_world("time_set");
     if (!w) return;
@@ -616,7 +627,7 @@ static void test_frame(void) {
 
 static void draw_clock(void) {
     World *w = G ? G->world : NULL;
-    if (!DN.clock->i || !DN.have_sky || !w) return;
+    if (!DN.clock->i || !DN.have_sky || !w || scene_hides_hud()) return;   // dev scenes and the main menu background hide it
     char b[16], line[160];
     tod_format_hours(DN.sky.hours, b, sizeof(b));
     float e = DN.sky.sun_elev * DG_RAD2DEG;

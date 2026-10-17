@@ -30,7 +30,8 @@
 #define GB_MATERIAL_FORMAT VK_FORMAT_R8G8B8A8_UNORM
 #define GB_VELOCITY_FORMAT VK_FORMAT_R16G16_SFLOAT
 
-#define VK_CHECK(x) do { VkResult _r = (x); if (_r != VK_SUCCESS) log_fatal("Vulkan error %d at %s:%d (%s)", (int)_r, __FILE__, __LINE__, #x); } while (0)
+void vkr_check_failed(VkResult r, const char *file, int line, const char *expr);   // logs the device fault (lost device), then fatal
+#define VK_CHECK(x) do { VkResult _r = (x); if (_r != VK_SUCCESS) vkr_check_failed(_r, __FILE__, __LINE__, #x); } while (0)
 
 typedef struct GpuBuffer {
     VkBuffer buffer;
@@ -200,6 +201,7 @@ typedef struct Renderer {
     bool validation;
     bool has_wireframe;
     bool has_push_descriptor, has_colorspace_ext;
+    bool has_device_fault;         // VK_EXT_device_fault: fault addresses / vendor info on a lost device
     bool has_unused_attachments;   // VK_EXT_dynamic_rendering_unused_attachments: G-buffer without velocity
     bool hdr_supported, swap_hdr;
     bool vg_scalar, vg_int64, vg_indirect_count, vg_descriptor_indexing, vg_mesh_shader;   // vgeo device features

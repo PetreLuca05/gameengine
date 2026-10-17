@@ -15,6 +15,7 @@ typedef enum HordeTier { HT_NEAR, HT_MID, HT_FAR, HT_DORMANT, HT_COUNT } HordeTi
 typedef struct HordeConfig {
     // movement
     float speed_mult, accel, turn_rate_deg, stop_dist;
+    float face_dist;   // chasing a player within this: face them (not the crowd / wall shove)
     float sep_radius, sep_weight, align_radius, align_weight, avoid_weight, seek_weight;
     float speed_jitter;                 // +- fraction per zombie
     // attack
@@ -54,6 +55,7 @@ typedef struct HordeSteerIn {
     const float *yaw, *speed_max;
     const vec3 *target;         // where to go (feet)
     const u8 *has_target, *tier, *active, *busy;   // busy: attacking / staggered (stands)
+    const u8 *chase;   // the target is a player (not a wander point / rally point)
     const vec3 *avoid;          // wall avoidance push from the last casts (XZ)
     const HordeGrid *grid;
     const HordeConfig *cfg;

@@ -30,6 +30,8 @@ struct NetTransport {
     void (*disconnect)(NetTransport *t, PeerId peer);
     void (*flush)(NetTransport *t);
     bool (*peer_stats)(NetTransport *t, PeerId peer, float *rtt_ms, float *loss_pct);
+    // Who a peer is: "ip" (LAN) or the SteamID64 (Steam). Lobby kick bans and host migration.
+    bool (*peer_address)(NetTransport *t, PeerId peer, char *out, int size);
     void (*destroy)(NetTransport *t);
 };
 

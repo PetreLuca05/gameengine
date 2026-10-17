@@ -1,0 +1,15 @@
+{
+  "_doc": "Main menu map catalogue (docs/MENU_LOBBY.md 'Adding a map'): the file stem is the map id. level: what game_host loads (data/levels/<level>.json or a procedural map). season (spring | summer | autumn | winter, assets/world/seasons.json), time_of_day 0..24 and weather (start preset, empty = a pick of the season's presets) are the lobby's defaults and the menu background's look.",
+  "name": "Dev Room",
+  "level": "devroom",
+  "thumbnail": "assets/maps/thumbs/devroom.png",
+  "size_m": 320,
+  "biome": "Test facility",
+  "players": [1, 8],
+  "time_of_day": 12,
+  "season": "summer",
+  "weather": "clear",
+  "dev": true,
+  "order": 90,
+  "description": "The engine's test hall and yards: horde yard, weather yard, vehicle yard, sighting lane, flesh range and the post-processing corner."
+}

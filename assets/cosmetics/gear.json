@@ -1,0 +1,16 @@
+{
+  "items": [
+    { "id": "helmet_olive", "name": "Olive Helmet", "slot": "head", "option": "helmet_olive", "rarity": "common", "tint": [0.30, 0.34, 0.22] },
+    { "id": "helmet_black", "name": "Black Helmet", "slot": "head", "option": "helmet_black", "rarity": "rare", "tint": [0.09, 0.10, 0.11] },
+    { "id": "cap_red", "name": "Red Cap", "slot": "head", "option": "cap_red", "rarity": "uncommon", "tint": [0.55, 0.12, 0.10] },
+    { "id": "vest_tan", "name": "Tan Vest", "slot": "torso", "option": "vest_tan", "rarity": "common", "tint": [0.52, 0.45, 0.32] },
+    { "id": "vest_black", "name": "Black Plate Carrier", "slot": "torso", "option": "vest_black", "rarity": "epic", "tint": [0.10, 0.11, 0.12] },
+    { "id": "jacket_orange", "name": "Hunter Jacket", "slot": "torso", "option": "jacket_orange", "rarity": "uncommon", "tint": [0.80, 0.38, 0.10] },
+    { "id": "pads_olive", "name": "Olive Knee Pads", "slot": "legs", "option": "pads_olive", "rarity": "common", "tint": [0.28, 0.31, 0.21] },
+    { "id": "pads_grey", "name": "Urban Trousers", "slot": "legs", "option": "pads_grey", "rarity": "uncommon", "tint": [0.36, 0.37, 0.38] },
+    { "id": "gloves_black", "name": "Black Gloves", "slot": "hands", "option": "gloves_black", "rarity": "common", "tint": [0.07, 0.07, 0.08] },
+    { "id": "gloves_tan", "name": "Work Gloves", "slot": "hands", "option": "gloves_tan", "rarity": "common", "tint": [0.55, 0.45, 0.30] },
+    { "id": "hood_grey", "name": "Grey Hood", "slot": "hair", "option": "hood_grey", "rarity": "rare", "unlock": "locked", "tint": [0.30, 0.31, 0.33], "description": "Unlocked by surviving a night (not yet awarded)." },
+    { "id": "rig_olive", "name": "Chest Rig", "slot": "gear_0", "option": "rig_olive", "rarity": "epic", "unlock": "steam:1001", "tint": [0.24, 0.27, 0.18], "description": "Steam Inventory item (hook stub)." }
+  ]
+}

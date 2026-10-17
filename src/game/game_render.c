@@ -31,6 +31,8 @@
 #include "net/net.h"
 #include "world/openworld.h"
 #include "input/input.h"
+#include "player/spectator.h"
+#include "editor/handpose/hp_system.h"
 #include <math.h>
 
 #define G (g_engine.game)
@@ -207,6 +209,7 @@ void game_render_init(void) {
     sights_register();
     daynight_register();
     weather_register();
+    wind_game_register();
     foliage_register();
     vehicles_register();
     flesh_range_register();
@@ -448,7 +451,7 @@ static void render_entity(World *w, int i, float alpha, bool focused) {
         break;   // characters.c
     case ET_PLAYER: {
         int slot = w->player_slot[i];
-        if (slot == G->local_slot) break; // first person: drawn as hands
+        if (slot == game_view_slot()) break; // first person (own or spectated): drawn as hands
         if (char_get_index(w, i)) break;  // skinned character (characters.c)
         bool dead = (w->flags[i] & EF_DEAD) != 0;
         bool crouch = (w->flags[i] & EF_CROUCHED) != 0;
@@ -502,7 +505,7 @@ void game_render_world(World *w, float alpha, vec3 cam_pos, vec3 cam_fwd) {
         render_entity(w, i, alpha, ENT_MAKE(i, w->gen[i]) == G->focus);
     }
     g_obj_base = 0;
-    chars_render(w, G->alpha, cam_pos, G->local_slot);
+    chars_render(w, G->alpha, cam_pos, game_view_slot());   // the viewed player's body: first-person treatment
 }
 
 static void draw_debug(World *w, vec3 cam) {
@@ -531,7 +534,7 @@ static void draw_debug(World *w, vec3 cam) {
 // Flashlights (F): a cookie-projected spot light. The local one
 // sits just ahead of the eye (in front of the held gun) along the view; other players' come from
 // their eye along the replicated aim (EF_FLASHLIGHT).
-static void flashlights_render(World *w, const RenderCamera *cam, const Player *lp, bool dead) {
+static void flashlights_render(World *w, const RenderCamera *cam, const Player *lp, bool dead, int view_slot) {
     static TextureId cookie;
     static bool tried;
     if (!tried) {
@@ -555,7 +558,9 @@ static void flashlights_render(World *w, const RenderCamera *cam, const Player *
     s.outer_deg = 24.0f;
     s.intensity = 140.0f;
     s.color = v3(1.0f, 0.97f, 0.92f);
-    if (G->flashlight && lp && !dead) {
+    // The viewed player's light rides the camera: the local toggle, or a spectated player's replicated one.
+    bool own_on = view_slot == G->local_slot ? G->flashlight : (lp && (w->flags[ENT_INDEX(lp->ent)] & EF_FLASHLIGHT));
+    if (own_on && lp && !dead) {
         vec3 f = dir_from_angles(cam->yaw, cam->pitch), r = right_from_yaw(cam->yaw), u = v3_cross(r, f);
         // Off-hand side, a little ahead of the eye: the held gun (to the right, mostly behind
         // the light) isn't flooded, the beam still starts at the view.
@@ -565,7 +570,7 @@ static void flashlights_render(World *w, const RenderCamera *cam, const Player *
     }
     for (int k = 0; k < MAX_PLAYERS; k++) {
         const Player *op = &w->players[k];
-        if (!op->active || k == G->local_slot || !ent_valid(w, op->ent)) continue;
+        if (!op->active || k == view_slot || !ent_valid(w, op->ent)) continue;
         int i = (int)ENT_INDEX(op->ent);
         if (!(w->flags[i] & EF_FLASHLIGHT) || (w->flags[i] & EF_DEAD)) continue;
         float yaw = quat_get_yaw(w->xf[i].rot), pitch = w->anim[i];
@@ -586,9 +591,17 @@ void game_render(void) {
         console_draw();
         return;
     }
-    Player *p = game_local_player();
+    // The viewed player: the local one, or the one spectated in first / third person (its own
+    // re-simulated state, presented exactly like the local player's, docs/SPECTATE.md).
+    Player *p = game_view_player();
+    int vs = game_view_slot();
+    bool spec = vs != G->local_slot;
+    const UserCmd *vcmd = game_view_cmd();
+    if (spectator_first_person()) spectator_view_angles(G->alpha, &G->view.yaw, &G->view.pitch);
     PlayerMove interp;
-    if (p) {
+    if (p && spec && spectator_view_interp(&interp, G->alpha)) {
+        // (render state from spectator.c)
+    } else if (p) {
         interp = p->sim.move;
         PlayerMove prev = (G->mode == GM_CLIENT) ? G->predicted_prev : p->sim.move;
         if (G->mode == GM_HOST) {
@@ -597,14 +610,15 @@ void game_render(void) {
         }
         interp.pos = v3_add(v3_lerp(prev.pos, p->sim.move.pos, G->alpha), G->error_offset);
         interp.crouch_amount = lerpf(prev.crouch_amount, p->sim.move.crouch_amount, G->alpha);
+        interp.stride = lerpf(prev.stride, p->sim.move.stride, G->alpha);
     } else {
         memset(&interp, 0, sizeof(interp));
         interp.pos = v3(0, 2, 10);
     }
-    bool ads = p && (G->last_cmd.buttons & BTN_AIM) && (p->sim.move.mode == MOVE_WALK || (p->sim.move.mode == MOVE_SEATED && !p->sim.move.veh_onehand));
-    const WeaponDef *wd = p ? weapon_equipped_def(w, G->local_slot) : NULL;
+    bool ads = p && (vcmd->buttons & BTN_AIM) && (p->sim.move.mode == MOVE_WALK || (p->sim.move.mode == MOVE_SEATED && !p->sim.move.veh_onehand));
+    const WeaponDef *wd = p ? weapon_equipped_def(w, vs) : NULL;
     if (wd && wd->kind == WPN_MELEE) ads = false;
-    input_set_ads(ads);
+    input_set_ads(ads && !spec);   // ADS look sensitivity is for the own mouse
     bool dead = p && p->sim.move.mode == MOVE_DEAD;
     CameraAds cads;
     sights_camera(p, wd, &cads);
@@ -616,7 +630,7 @@ void game_render(void) {
         float kb = spring_f32_sample(&G->recoil_vis.cam_back, G->alpha) * ck;
         // Sway and ADS bob move the weapon (about the eye), not the camera: the sight centre stays
         // exactly on the bullets' line (weapon_aim_offset_deg is what the shots use).
-        vec2 sway = weapon_aim_offset_deg(wd, &p->sim.wpn, &p->sim.move, weapon_sway_time(G->last_cmd.seq) + G->alpha * SIM_DT);
+        vec2 sway = weapon_aim_offset_deg(wd, &p->sim.wpn, &p->sim.move, weapon_sway_time(vcmd->seq) + G->alpha * SIM_DT);
         Cvar *rvm = cvar_find("r_viewmodel_fov");
         float vmf = render_vm_fov_for(&cam, rvm ? rvm->f : 0.0f);
         // The visual camera kick turns the view but not the aim: while aimed the weapon counters it,
@@ -650,16 +664,22 @@ void game_render(void) {
     // Rotation is always the view angles; position is the head eye.
     {
         Xform sock;
-        Player *lp = game_local_player();
+        Player *lp = p;   // the viewed player
         const CamFpCvars *cc = camera_fp_cvars();
-        bool tp = cvar_find("cl_thirdperson")->i != 0 || (cc->third && cc->third->i);
+        bool tp = cvar_find("cl_thirdperson")->i != 0 || (cc->third && cc->third->i) || (spec && spectator_mode() == SPEC_THIRD);
         float fdt = (float)g_engine.frame_dt;
         chars_set_thirdperson(tp);
         GR->cam_mode = 0;
+        // Spectator free camera (noclip): no body, no hands.
+        bool fcam = spectator_free_camera(&cam);
         // A dev scene's camera (src/game/scene.h): third person, the body drawn whole.
-        bool scam = lp && scene_camera(w, &cam);
-        int vcam = lp && !scam ? vehicles_camera(w, &cam) : 0;
-        if (scam) {
+        bool scam = !fcam && lp && scene_camera(w, &cam);
+        int vcam = lp && !scam && !fcam ? vehicles_camera(w, &cam) : 0;
+        if (fcam) {
+            chars_set_thirdperson(true);
+            G->view.eye = cam.pos;
+            GR->cam_mode = 3;
+        } else if (scam) {
             chars_set_thirdperson(true);
             G->view.eye = cam.pos;
             GR->cam_mode = 3;
@@ -679,7 +699,7 @@ void game_render(void) {
                 G->view.eye = cam.pos;
                 GR->cam_mode = 2;
             }
-        } else if (lp && cvar_find("cl_camera_socket")->i && chars_fp_camera(w, G->alpha, G->local_slot, cam.yaw, cam.pitch, &sock)) {
+        } else if (lp && cvar_find("cl_camera_socket")->i && chars_fp_camera(w, G->alpha, vs, cam.yaw, cam.pitch, &sock)) {
             // Camera = the head eye: Head bone x the "camera" socket (assets/characters/player.json),
             // read after this frame's spine / head look solve. The old capsule-based stabilizer (an
             // "ideal" capsule eye followed by a clamped spring, which left the camera up to 45 cm
@@ -708,6 +728,10 @@ void game_render(void) {
         } else if (!dead) {
             cam.pos = v3_add(cam.pos, player_eye_offset(cam.yaw, cam.pitch));
         }
+        // Spectator target switches (and entering / leaving spectating) blend the camera over
+        // spec_blend_time; everything below (hold point, hands, sights) follows the blended camera.
+        spectator_blend_camera(&cam, fdt);
+        if (GR->cam_mode != 0) G->view.eye = cam.pos;
         chars_set_fp_camera(cam.pos, quat_euler(cam.yaw, cam.pitch, cam.roll), GR->cam_mode == 1);
         if (GR->cam_mode == 1) fp_cam_test_frame(cam.pos, dir_from_angles(cam.yaw, cam.pitch));
         // cam_debug: eye / head / ideal markers + the stats line (HUD).
@@ -721,7 +745,7 @@ void game_render(void) {
                      "cam %s  head-ideal %.0f %.0f %.0f mm  cam-head %.0f mm  disp %.1f %.1f %.1f mm (max %.1f, clamp %.0f)  wall %.0f mm | hands R %.2f mm %.2f deg  L %.2f mm %.2f deg | sight %.2f mm %.2f deg | %s",
                      modes[GR->cam_mode], G->cam_stab.last_raw.x * 1000, G->cam_stab.last_raw.y * 1000, G->cam_stab.last_raw.z * 1000,
                      v3_len(v3_sub(cam.pos, GR->head_eye)) * 1000, d.x * 1000, d.y * 1000, d.z * 1000, G->cam_stab.max_seen * 1000, cc->clamp->f * 1000, G->cam_stab.col_push * 1000,
-                     gp[1] * 1000, ga[1], gp[0] * 1000, ga[0], ap * 1000, aa, chars_holdpoint_text(w, G->local_slot));
+                     gp[1] * 1000, ga[1], gp[0] * 1000, ga[0], ap * 1000, aa, chars_holdpoint_text(w, vs));
             if (GR->cam_mode == 1) {
                 vec3 f = dir_from_angles(cam.yaw, cam.pitch);
                 dbg_cross(v3_madd(GR->head_eye, f, 0.3f), 0.01f, DBG_RED, 0);       // head eye (shown 30 cm ahead)
@@ -731,7 +755,7 @@ void game_render(void) {
             if (cc->debug->i >= 2 && (g_engine.frame_index % 30) == 0) log_info("cam_debug: %s", GR->cam_text);
         }
     }
-    flashlights_render(w, &cam, p, dead);
+    flashlights_render(w, &cam, p, dead, vs);
     render_set_camera(&cam);
     // Time of day first: the post settings (exposure floor / curves, fog) follow this frame's sky.
     RenderEnvironment tod_env;
@@ -778,7 +802,7 @@ void game_render(void) {
         env.fog_color = v3_scale(env.fog_color, 0.05f);
     }
     render_set_environment(&env);
-    vfx_game_set_environment(env.sun_intensity, v3(0.6f, 0.0f, 0.25f));
+    vfx_game_set_environment(env.sun_intensity, wind_game_at(cam.pos));   // particles drift with the local wind (gusts)
 
     vec3 fwd = dir_from_angles(cam.yaw, cam.pitch);
     vehicles_frame(w, cam.pos);
@@ -789,26 +813,42 @@ void game_render(void) {
         HandsInput hi;
         memset(&hi, 0, sizeof(hi));
         hi.world = w;
-        hi.player = G->local_slot;
+        hi.player = vs;
         hi.eye = cam.pos;
         hi.yaw = cam.yaw;
         hi.pitch = cam.pitch;
         hi.roll = cam.roll;
-        hi.look_delta = G->frame_look;
+        hi.look_delta = spec ? spectator_frame_look() : G->frame_look;
         hi.dt = (float)g_engine.frame_dt;
-        hi.focus = G->use_pressed_frame && G->use_focus ? G->use_focus : G->focus;
-        hi.use_target_valid = G->use_pressed_frame && G->use_focus_hands >= 0;
-        hi.use_target = G->use_focus_point;
-        hi.use_target_hands = G->use_focus_hands;
-        hi.use_pressed = G->use_pressed_frame;
-        hi.use_held = (G->last_cmd.buttons & BTN_USE) != 0;
+        if (spec) {
+            // A spectated player's reach / interaction comes with its commands (focus = use_target).
+            hi.focus = (EntityId)vcmd->use_target;
+            hi.use_pressed = spectator_take_use_press();
+            hi.use_held = (vcmd->buttons & BTN_USE) != 0;
+            hi.use_target_hands = -1;
+            if (hi.use_pressed && ent_valid(w, hi.focus)) {
+                const InteractDef *def = w->inter[ENT_INDEX(hi.focus)].def;
+                if (handpose_interact_has_target(def)) {
+                    hi.use_target_valid = true;
+                    hi.use_target = ent_focus_point(w, hi.focus);
+                    hi.use_target_hands = (int)def->hands;
+                }
+            }
+        } else {
+            hi.focus = G->use_pressed_frame && G->use_focus ? G->use_focus : G->focus;
+            hi.use_target_valid = G->use_pressed_frame && G->use_focus_hands >= 0;
+            hi.use_target = G->use_focus_point;
+            hi.use_target_hands = G->use_focus_hands;
+            hi.use_pressed = G->use_pressed_frame;
+            hi.use_held = (G->last_cmd.buttons & BTN_USE) != 0;
+        }
         hi.ads = ads;
         hi.vm_kick_pos = spring_vec3_sample(&G->recoil_vis.vm_pos, G->alpha);
         hi.vm_kick_rot = spring_vec3_sample(&G->recoil_vis.vm_rot, G->alpha);
         hands_update(&hi);
         bool tpv = cvar_find("cl_thirdperson")->i || GR->cam_mode == 3;   // incl. the third-person vehicle camera
         if (!tpv) {
-            chars_render_local_fp(w, G->alpha, G->local_slot);
+            chars_render_local_fp(w, G->alpha, vs);
             fp_cam_test_hands();
             ads_sweep_frame();
         }
@@ -823,6 +863,7 @@ void game_render(void) {
     draw_debug(w, cam.pos);
     recoil_debug_draw(cam.pos);
     anim_debug_draw();
+    wind_game_draw_debug(cam.pos);
     vec3 right = right_from_yaw(cam.yaw);
     vec3 up = v3_cross(right, fwd);
     dbg_submit((float)g_engine.frame_dt, cam.pos, right, up);
@@ -834,6 +875,7 @@ void game_render(void) {
     daynight_draw();
     weather_draw();
     flesh_range_draw();
+    wind_game_draw_panel();
     scene_draw();
     game_post_draw_overlay();
     game_fidelity_draw();

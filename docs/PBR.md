@@ -59,11 +59,19 @@ G-buffer layout is unchanged.
 - Pipelines `PIPE_LIT_2S` / `PIPE_PREPASS_2S` (doubleSided) and `PIPE_LIT_MASK` / `PIPE_PREPASS_MASK`
   (MASK, discard, two-sided): `draw_items` switches to them per draw and back, so the common pipelines
   keep early depth.
-- vgeo: `VgMaterial` grew to 112 bytes (`mr_tex`, `normal_tex`, `occlusion_tex`, `emissive_tex`,
+- vgeo: `VgMaterial` grew by 28 bytes (144 B with the wind parameters) (`mr_tex`, `normal_tex`, `occlusion_tex`, `emissive_tex`,
   `normal_scale`, `occlusion_strength`, `emissive_rgb`). The map indices are renderer texture ids in the
   vgeo texture table (binding 23), entered like the albedo (`tex_use`). MASK maps to `VGM_MASKED`
   (mask = albedo alpha) and doubleSided to `VGM_TWO_SIDED`, so every vgeo raster path and the shadows
   respect them. The era fallback draws the maps through the legacy path.
+
+## Robustness
+
+The vgeo resolve bounds every texture-table index it takes from a material record (albedo and the
+four maps) to `VG_TEX_COUNT`, so a pixel that decodes a record that is not a real material can at
+worst sample white, never index past the table. On `VK_ERROR_DEVICE_LOST`, `VK_CHECK` logs
+`VK_EXT_device_fault` data (description, fault addresses, vendor records) before the fatal error.
+`--test` runs (or `DG_NO_FATAL_DIALOG=1`) abort without the fatal message box.
 
 ## Limits
 

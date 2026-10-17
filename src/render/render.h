@@ -266,9 +266,16 @@ typedef struct RenderWeather {
     float wetness, puddles, snow_cover;   // 0..1 surface state
     float rain, snowfall;                 // precipitation intensities 0..1
     float lightning;                      // flash 0..1 this frame
-    vec3 wind;                            // m/s (world), gusts included
-    float gust;                           // gust factor (WeatherWind.gust): foliage WPO, FrameData wx5
-    float time;                           // s (animation)
+    vec3 wind;                            // m/s (world) at the camera, gusts included (wind_at)
+    float gust;                           // gust factor (WeatherWind.gust): FrameData wx5
+    float time;                           // s (animation; the foliage wind's time, slow motion included)
+    // Wind field (src/world/wind.h, docs/FOLIAGE_WIND.md): this frame's render tile and the field outside it.
+    const u16 *wind_texels;               // 64 x 64 RGBA16F (instant x, z, settled bend x, z), row = world texel z mod 64; NULL = none
+    int wind_ox, wind_oz;                 // window origin (texels)
+    float wind_texel;                     // m per texel
+    vec4 wind_global;                     // outside the tile: instant x, z, settled bend x, z (m/s)
+    int wind_view;                        // foliage debug view: 0 none, 1 wind channels as colours, 2 bend amount
+    int wind_solo;                        // 0 every layer, 1 main bending, 2 detail bending, 3 edge flutter
     int precip_quality;                   // 0 off, 1 low, 2 medium, 3 high
     bool occlusion_update;                // re-render the top-down occlusion map this frame
     vec3 occlusion_center;                // map centre (snapped)
@@ -281,6 +288,17 @@ typedef struct RenderWeather {
     bool puddle_reflections;              // mirror-smooth puddles (SSR); off = glossy only
 } RenderWeather;
 void render_set_weather(const RenderWeather *w);   // every frame (zeroed = no weather)
+
+// Per-foliage-type wind parameters (docs/FOLIAGE_WIND.md; the vgeo materials' VgWindParams, same order).
+typedef struct RenderFoliageWind {
+    float trunk_stiffness, branch_stiffness, leaf_stiffness, full_wind;
+    float main_freq, detail_freq, flutter_freq, max_bend_deg, settle_time, response, height, pad;
+} RenderFoliageWind;
+// The registered foliage types (names; the wind panel's type picker).
+int render_foliage_type_count(void);
+const char *render_foliage_type_name(int i);
+bool render_foliage_wind_get(const char *type, RenderFoliageWind *out);
+bool render_foliage_wind_set(const char *type, const RenderFoliageWind *w);   // live tuning: every material of the type, bounds re-derived
 
 LineVertex *render_lines_alloc(u32 vertex_count, bool depth_test);
 TextVertex *render_text_alloc(u32 vertex_count); // triangle list, font atlas texture

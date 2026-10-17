@@ -50,6 +50,11 @@ typedef struct WeatherPreset {
 typedef struct WeatherLib {
     WeatherPreset presets[WEATHER_MAX_PRESETS];
     int count;
+    // Season (src/world/season.h; host only, not replicated): scheduler weights per preset (0 =
+    // never) and a temperature offset added to every scheduled target.
+    bool bias_on;
+    float bias[WEATHER_MAX_PRESETS];
+    float temp_offset;
 } WeatherLib;
 
 // Wind as the weather sees it. The weather writes defaults; a later wind system can override.
@@ -92,6 +97,13 @@ float weather_lightning(const WeatherState *s, const WeatherParams *cur, u32 tic
 WeatherWind weather_wind(const WeatherParams *cur, double time_s);
 // Scheduler (host): returns true when it picked a new target this tick.
 bool weather_schedule(WeatherState *s, const WeatherLib *lib, u32 tick, float tick_dt);
+// Season bias (NULL = off): the scheduler mixes the Markov step with the season's own distribution
+// (autumn: mostly rain, winter: mostly snow) and never picks a preset weighted 0.
+void weather_lib_set_bias(WeatherLib *lib, const float *bias, float temp_offset);
+// The preset the scheduler picks next from cur for a random value r (exposed for the tests).
+int weather_pick_next(const WeatherLib *lib, int cur, u32 r);
+// A preset's parameters with the season's temperature offset (clamped to -30..45 C).
+void weather_seasonal_params(const WeatherLib *lib, WeatherParams *p);
 
 void weather_pack(const WeatherState *s, u8 out[WEATHER_PACK_SIZE]);
 void weather_unpack(WeatherState *s, const u8 in[WEATHER_PACK_SIZE]);

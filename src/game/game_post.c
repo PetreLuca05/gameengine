@@ -9,6 +9,7 @@
 // and handed to the renderer with render_post_settings. Also: the debug / profiling commands
 // (post_bench, post_volumes, screenshot_hdr) and the post profiler overlay (r_post_profile).
 #include "game_internal.h"
+#include "player/spectator.h"
 #include "core/engine.h"
 #include "core/cvar.h"
 #include "core/log.h"
@@ -519,7 +520,10 @@ static void build_settings(PostSettings *s, const PostFrameInfo *fi) {
 static void apply_feedback(PostSettings *s, const PostFrameInfo *fi, float dt) {
     float k = GP.feedback->f;
     Game *g = G;
-    Player *p = game_local_player();
+    // The viewed player's health / death (a spectated player's in first person); the free camera
+    // of a dead spectator is not "dead".
+    Player *p = game_view_player();
+    if (spectator_mode() == SPEC_FREE) p = NULL;
     float hp_frac = 1.0f, dead = 0.0f;
     if (p && g && g->world) {
         Health *h = &g->world->health[ENT_INDEX(p->ent)];

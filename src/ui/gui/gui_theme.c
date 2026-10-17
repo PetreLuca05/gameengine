@@ -43,6 +43,12 @@ static void defaults(GuiTheme *t) {
     t->type_misc = RGBA(150, 150, 150, 255);
     t->hud_panel = RGBA(10, 12, 14, 130);
     t->hud_text = RGBA(236, 236, 230, 255);
+    t->rarity[0] = RGBA(170, 170, 166, 255);
+    t->rarity[1] = RGBA(110, 196, 112, 255);
+    t->rarity[2] = RGBA(110, 160, 226, 255);
+    t->rarity[3] = RGBA(176, 112, 220, 255);
+    t->rarity[4] = RGBA(226, 140, 52, 255);
+    for (int i = 0; i < 8; i++) t->chat_name[i] = t->text;
     t->t_tiny = 12;
     t->t_small = 14;
     t->t_body = 17;
@@ -107,6 +113,25 @@ u32 gui_rgba_lerp(u32 a, u32 b, float t) {
     return r;
 }
 
+float gui_tok(const char *name) {
+    float v;
+    if (gui_layout_token(name, &v)) return v;
+    static u32 warned[16];
+    u32 h = dg_hash_str(name);
+    for (int i = 0; i < 16; i++) {
+        if (warned[i] == h) return 0.0f;
+        if (!warned[i]) { warned[i] = h; log_warn("ui: theme.json has no layout token '%s'", name); break; }
+    }
+    return 0.0f;
+}
+
+static void col_item(const cJSON *v, u32 *dst) {
+    if (!cJSON_IsArray(v) || cJSON_GetArraySize(v) < 3) return;
+    int c[4] = { 255, 255, 255, 255 };
+    for (int i = 0; i < 4 && i < cJSON_GetArraySize(v); i++) c[i] = DG_CLAMP((int)cJSON_GetArrayItem(v, i)->valuedouble, 0, 255);
+    *dst = RGBA(c[0], c[1], c[2], c[3]);
+}
+
 static void col(const cJSON *o, const char *k, u32 *dst) {
     const cJSON *v = cJSON_GetObjectItemCaseSensitive(o, k);
     if (!cJSON_IsArray(v) || cJSON_GetArraySize(v) < 3) return;
@@ -147,6 +172,17 @@ bool gui_theme_load(const char *path) {
         C(type_weapon); C(type_ammo); C(type_consumable); C(type_attachment); C(type_key); C(type_misc);
         C(hud_panel); C(hud_text);
 #undef C
+        static const char *const rn[5] = { "rarity_common", "rarity_uncommon", "rarity_rare", "rarity_epic", "rarity_legendary" };
+        for (int i = 0; i < 5; i++) col(c, rn[i], &t.rarity[i]);
+        const cJSON *cn = cJSON_GetObjectItemCaseSensitive(c, "chat_names");
+        for (int i = 0; i < 8 && cJSON_IsArray(cn) && cJSON_GetArraySize(cn) > 0; i++) col_item(cJSON_GetArrayItem(cn, i % cJSON_GetArraySize(cn)), &t.chat_name[i]);
+    }
+    const cJSON *lay = cJSON_GetObjectItemCaseSensitive(root, "layout");
+    const cJSON *le;
+    cJSON_ArrayForEach(le, lay) {
+        if (!cJSON_IsNumber(le) || t.layout_count >= GUI_THEME_MAX_TOKENS) continue;
+        dg_strcpy(t.layout[t.layout_count].name, sizeof(t.layout[0].name), le->string);
+        t.layout[t.layout_count++].value = (float)le->valuedouble;
     }
     const cJSON *s = cJSON_GetObjectItemCaseSensitive(root, "sizes");
     if (s) {
@@ -188,5 +224,6 @@ bool gui_theme_load(const char *path) {
     cJSON_Delete(root);
     T = t;
     g_init = true;
+    gui_layout_set_tokens(T.layout, T.layout_count);
     return true;
 }

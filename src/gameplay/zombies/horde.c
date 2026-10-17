@@ -58,7 +58,7 @@ typedef struct Horde {
     float (*water)(void *user, float x, float z);
     void *water_user;
     float sense;
-    u8 aggro[HMAX], wander_set[HMAX];
+    u8 aggro[HMAX], wander_set[HMAX], chase[HMAX];
     vec3 wander[HMAX];
 } Horde;
 
@@ -348,6 +348,7 @@ void horde_host_tick(World *w, float dt) {
         // Targets: the nearest player, re-picked every retarget_ticks (staggered).
         if (((w->tick + (u32)s) % (u32)cfg->retarget_ticks) == 0 || H->target_slot[s] < 0) H->target_slot[s] = (i8)(bi >= 0 ? pslot[bi] : -1);
         H->has_target[s] = 0;
+        H->chase[s] = 0;
         if (H->target_mode == HTARGET_NONE) {
         } else if (H->target_mode == HTARGET_POINT) {
             H->target[s] = H->target_point;
@@ -357,6 +358,7 @@ void horde_host_tick(World *w, float dt) {
             if (ts >= 0 && ts < MAX_PLAYERS && w->players[ts].active && w->players[ts].sim.move.mode != MOVE_DEAD) {
                 H->target[s] = w->players[ts].sim.move.pos;
                 H->has_target[s] = 1;
+                H->chase[s] = 1;
             }
             // Sense radius (open-world maps): chase once a player is near, shooting within 3x the
             // radius or after being hurt; give up far away; otherwise wander around (a new point
@@ -374,6 +376,7 @@ void horde_host_tick(World *w, float dt) {
                     }
                     H->target[s] = H->wander[s];
                     H->has_target[s] = (hsh >> 20) % 3 != 0;   // a third of the time it just stands
+                    H->chase[s] = 0;
                 }
             }
         }
@@ -400,6 +403,7 @@ void horde_host_tick(World *w, float dt) {
         in.speed_max = H->speed_max;
         in.target = H->target;
         in.has_target = H->has_target;
+        in.chase = H->chase;
         in.tier = H->tier;
         in.active = H->due;
         in.busy = H->busy;

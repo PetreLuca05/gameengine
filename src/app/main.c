@@ -31,6 +31,8 @@
 #include "ui/holdpoint_editor.h"
 #include "game/game.h"
 #include "net/net.h"
+#include "net/lobby_net.h"
+#include "ui/mainmenu/mainmenu.h"
 #include "app/video.h"
 #include "assets/assets.h"
 #include <SDL3/SDL.h>
@@ -78,13 +80,16 @@ static void parse_args(int argc, char **argv, AppOptions *o) {
                 strncat(line, " ", sizeof(line) - strlen(line) - 1);
                 strncat(line, argv[++i], sizeof(line) - strlen(line) - 1);
             }
-            cbuf_add(line);
+            // +set applies at once: before the boot map hosts (e.g. +set net_port for parallel tests).
+            if (!strncmp(line, "set ", 4)) cmd_execute_line(line);
+            else cbuf_add(line);
         }
     }
 }
 
 static bool boot_commands_connect(int argc, char **argv) {
-    for (int i = 1; i < argc; i++) if (!strcmp(argv[i], "+connect") || !strcmp(argv[i], "+map")) return true;
+    for (int i = 1; i < argc; i++)
+        if (!strcmp(argv[i], "+connect") || !strcmp(argv[i], "+map") || !strcmp(argv[i], "+connect_lobby") || !strcmp(argv[i], "+lobby_join") || !strcmp(argv[i], "+lobby_host")) return true;
     return false;
 }
 
@@ -177,6 +182,8 @@ int main(int argc, char **argv) {
     assets_init("data/assets.json");
     for (int i = 1; i < argc; i++) if (!strcmp(argv[i], "--rebuild-cache")) anim_cache_set_rebuild(true);   // before the anim library loads
     game_init();
+    lobby_net_init();    // maps, cosmetics, profile (docs/MENU_LOBBY.md)
+    mainmenu_init();
 
     // Persistent settings, then the command line (overrides).
     for (int i = 1; i < argc; i++) if (!strcmp(argv[i], "--test")) opt.test = true;
@@ -192,9 +199,13 @@ int main(int argc, char **argv) {
     if (!opt.test) game_config_loaded();   // migrations are changes: saved on exit
     if (cvar_find("r_mode")->i != 0 || cw->i != 1600 || ch->i != 900) video_apply();
     parse_args(argc, argv, &opt);
-    if (!boot_commands_connect(argc, argv)) game_host(game()->g_map->str);
+    // Players start in the main menu (a +connect_lobby from a Steam invite then joins from it);
+    // --test runs (scripts) boot straight into the boot map as before.
+    if (mainmenu_enabled()) mainmenu_boot();
+    else if (!boot_commands_connect(argc, argv)) game_host(game()->g_map->str);
     cbuf_execute();
     if (!game_world() && net_role() != NET_CLIENT) game_host("devroom");
+    lobby_profile_changed();   // equipped cosmetics onto the character (cl_skin / cl_parts)
 
     g_engine.has_focus = true;
     input_set_game_focus(true);
@@ -226,6 +237,7 @@ int main(int argc, char **argv) {
         config_autosave(video_config_path());
         menus_tick((float)dt);
         net_update((float)dt);
+        lobby_net_update((float)dt);
         game_frame((float)dt);
         jobs_pump_completions(8);
         render_poll_shader_hot_reload();
@@ -255,9 +267,10 @@ int main(int argc, char **argv) {
     log_info("shutting down");
     if (config_save_if_dirty(video_config_path())) log_info("settings saved to %s", video_config_path());
     render_wait_idle();
+    lobby_net_shutdown();   // leaves the lobby (others migrate), saves the profile
     game_shutdown();
     assets_shutdown();
-    net_shutdown();
+    net_shutdown();         // Steam shut down here
     audio_shutdown();
     input_shutdown();
     console_shutdown();

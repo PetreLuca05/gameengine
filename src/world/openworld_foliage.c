@@ -12,6 +12,7 @@
 #include "core/jobs.h"
 #include "core/log.h"
 #include "render/render.h"
+#include "render/vgeo/vgeo_tree.h"
 #include <SDL3/SDL.h>
 #include <math.h>
 #include <stdlib.h>
@@ -22,15 +23,19 @@
 // chunk jobs run.
 //   tree chunks:  names = the conifer, broadleaf, dead and bush species, a role = a range of them
 //   cover chunks: names = test_tuft, crop_wheat, the bush species, the flower species
+// A species' instance scale range comes from its height range (vgeo_tree_scale_range: real mature
+// heights, docs/VGEO.md "Tree models").
 #define OW_MAX_TYPES 40
 typedef struct OwRole { int first, count; float wsum; } OwRole;
 static struct {
     char tree_names[OW_MAX_TYPES][48];
     float tree_w[OW_MAX_TYPES];
+    float tree_scale[OW_MAX_TYPES][2];
     int tree_count;
     OwRole role[RENDER_TREE_ROLES];       // T_* ranges in tree_names
     char cover_names[OW_MAX_TYPES][48];
     float cover_w[OW_MAX_TYPES];
+    float cover_scale[OW_MAX_TYPES][2];
     int cover_count;
     OwRole cover_bush, cover_flower;
 } OT;
@@ -44,6 +49,12 @@ static void role_add(char (*names)[48], float *w, int *count, OwRole *r, int rol
     *count += r->count;
 }
 
+// Instance scales of the types: the species height range, else lo..hi.
+static void type_scales(char (*names)[48], float (*scale)[2], int count, float lo, float hi) {
+    for (int i = 0; i < count; i++)
+        if (!vgeo_tree_scale_range(names[i], &scale[i][0], &scale[i][1])) scale[i][0] = lo, scale[i][1] = hi;
+}
+
 static void ow_types(void) {
     memset(&OT, 0, sizeof(OT));
     for (int r = RENDER_TREE_CONIFER; r <= RENDER_TREE_BUSH; r++) role_add(OT.tree_names, OT.tree_w, &OT.tree_count, &OT.role[r], r);
@@ -52,7 +63,11 @@ static void ow_types(void) {
     OT.cover_count = 2;
     role_add(OT.cover_names, OT.cover_w, &OT.cover_count, &OT.cover_bush, RENDER_TREE_BUSH);
     role_add(OT.cover_names, OT.cover_w, &OT.cover_count, &OT.cover_flower, RENDER_TREE_FLOWER);
+    type_scales(OT.tree_names, OT.tree_scale, OT.tree_count, 0.72f, 1.27f);
+    type_scales(OT.cover_names, OT.cover_scale, OT.cover_count, 0.75f, 1.35f);
 }
+
+static float type_scale(const float s[2], float u) { return s[0] + (s[1] - s[0]) * u; }
 
 // The weighted type of a role for u in [0, 1); -1 when the role has none.
 static int role_pick(const OwRole *r, const float *w, float u) {
@@ -110,13 +125,13 @@ static int tree_chunk(const OpenWorld *o, int cx, int cz, RenderFoliageInst *out
                 int kind = role_pick(&OT.role[role], OT.tree_w, species);
                 if (kind < 0) continue;
                 t->kind = (u16)kind;
-                t->scale = 0.72f + 0.55f * h01(h2 >> 5);
+                t->scale = type_scale(OT.tree_scale[kind], h01(h2 >> 5));
                 n++;
             } else if (d > 0.006f && pick < d * cell * cell * 1.6f) {   // forest underbrush
                 int kind = role_pick(&OT.role[RENDER_TREE_BUSH], OT.tree_w, species);
                 if (kind < 0) continue;
                 t->kind = (u16)kind;
-                t->scale = 0.65f + 0.5f * h01(h2 >> 5);
+                t->scale = type_scale(OT.tree_scale[kind], h01(h2 >> 5));
                 n++;
             }
         }
@@ -242,10 +257,9 @@ void *ow_foliage_chunk(void *user, int cx, int cz, size_t *size) {
             float pick = h01(hash3(ix, iz, o->gen.seed + 202u));
             if (pick >= dens) continue;
             float species = h01(hash3(ix, iz, o->gen.seed + 303u));
-            bool bush = false;
             if (mat == MGM_MEADOW && pick < 0.012f) {
                 int k = role_pick(&OT.cover_bush, OT.cover_w, species);
-                if (k >= 0) kind = k, bush = true;
+                if (k >= 0) kind = k;
             } else if ((mat == MGM_MEADOW && pick < 0.05f) || (mat == MGM_GRASS && pick < 0.012f)) {
                 int k = role_pick(&OT.cover_flower, OT.cover_w, species);
                 if (k >= 0) kind = k;
@@ -258,8 +272,7 @@ void *ow_foliage_chunk(void *user, int cx, int cz, size_t *size) {
             t->pos = v3(x, y - 0.03f, z);
             t->yaw = h01(h >> 5) * 6.2831853f;
             t->kind = (u16)kind;
-            t->scale = kind == C_CROP ? 0.85f + 0.3f * h01(h >> 3)
-                                      : bush ? 0.6f + 0.45f * h01(h >> 3) : 0.75f + 0.6f * h01(h >> 3);
+            t->scale = kind == C_CROP ? 0.85f + 0.3f * h01(h >> 3) : type_scale(OT.cover_scale[kind], h01(h >> 3));
             // crops twice as dense (a second stalk clump in the cell)
             if (kind == C_CROP) {
                 RenderFoliageInst *t2 = &tmp[n++];

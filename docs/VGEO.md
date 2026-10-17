@@ -57,7 +57,8 @@ Simplification and clustering use meshoptimizer v0.22 (`simplifier.cpp`, `cluste
 | `shaders/vgeo/vg_test_skin.comp` | test-only kernel: the shared skin helper on a vertex list |
 | `tests/test_vgeo_skinned.c` | ctest `vgeo_skinned` (`--validation`) |
 | `src/render/vgeo/vgeo_tex.{c,h}` | `VgTextures`: the texture table at binding 23 of every cull set (renderer ids + module textures) |
-| `src/render/vgeo/foliage_support.{c,h}` | WPO CPU mirror + declared bounds, fade / density / impostor mirrors, `.vgp` chunks, scatter, `foliage_query`, impostor upload, displacement buffer |
+| `src/render/vgeo/foliage_support.{c,h}` | WPO CPU mirror + declared bounds, fade / density / impostor mirrors, `.vgp` chunks, scatter, `foliage_query`, impostor upload, displacement buffer, wind field tile ring |
+| `src/render/vgeo/foliage_wind.{c,h}` | vegetation wind model, CPU mirror of `wpo_veg` (docs/FOLIAGE_WIND.md) |
 | `src/render/vgeo/vgeo_impostor.{c,h}` | CPU hemi-octahedral impostor baker, file section |
 | `src/render/vgeo/vgeo_procgen_foliage.{c,h}` | grass tuft, wheat, the test bush, alpha masks, their materials |
 | `src/render/vgeo/vgeo_tree.{c,h}` | imported tree models: species table, FBX / OBJ import, wind weights, capsules, cache, coverage mips |
@@ -842,14 +843,15 @@ renderer already binds as set 3.
 Foliage is ordinary vgeo content plus a few material, instance and placement features. Culling, LOD,
 both rasterisers, the shadows and streaming are the core's. The content is the imported tree models
 ("Tree models") plus procedural grass tufts and wheat; procedural test types exercise the GPU paths.
+The wind that moves all of it is docs/FOLIAGE_WIND.md.
 
-### Materials (`VgMaterial`, 112 B)
+### Materials (`VgMaterial`, 144 B)
 
 | Field | Meaning |
 |---|---|
 | `flags` | `MAT_*` plus `VGM_MASKED`, `VGM_TWO_SIDED`, `VGM_DITHER_FADE`, `VGM_FOLIAGE` (bits 24-27) |
 | `mask_tex`, `alpha_cutoff` | alpha mask (0: `albedo_tex`), its threshold |
-| `wpo`, `wpo_params[4]`, `wpo_max` | snippet (`WPO_GRASS`, `WPO_TREE`, `\| WPO_DISPLACE`), parameters, declared bound (the commit computes it with `vgeo_wpo_max`) |
+| `wpo`, `wpo_params[4]`, `wind_params[8]`, `wpo_max` | vegetation wind preset (`WPO_GRASS`, `WPO_BUSH`, `WPO_TREE`, `\| WPO_DISPLACE`), its parameters (docs/FOLIAGE_WIND.md), declared bound (the commit computes it with `vgeo_wpo_max`) |
 | `fade_start`, `fade_end` | distance fade of `VGM_FOLIAGE` instances (m) |
 | `shadow_max_dist` | no sun-cascade shadow beyond this distance from the camera (m, 0 = always) |
 | `mr_tex`, `normal_tex`, `occlusion_tex`, `emissive_tex`, `normal_scale`, `occlusion_strength`, `emissive_rgb` | glTF maps (docs/PBR.md): texture table indices (0 = none, with the `MAT_*_TEX` flags), the resolve shades them with the triangle's tangent frame |
@@ -894,24 +896,24 @@ set 4 is gone.
 
 ### WPO (`shaders/vgeo/wpo.glsl`)
 
-- Snippets (pure functions; CPU mirror `vgeo_wpo_eval`):
-  - `WPO_GRASS`: bend along the wind by R, with the bent tip dropping.
-  - `WPO_TREE`: trunk sway (R), branch bounce (G), leaf flutter (B), per-instance phase.
-  - `WPO_DISPLACE`: adds the displacement buffer's push, weighted by R.
-- Every snippet clamps the wind to the full wind it was declared for (`prm.w`). So `vgeo_wpo_max` bounds it for
-  any weather:
-  - grass: `√2 · bend`;
-  - tree: `sway + branch + 1.5 · flutter`;
-  - displacement: `+ 1.118 · VG_DISPLACE_MAX` (0.6 m).
-- `vg_vertex_world` applies the snippet in every stage: both rasterisers, the shadows, the resolve, the test
-  kernel.
-- Every world sphere (`vg_world_sphere`) grows by the mesh's `max_wpo`: instance, BVH node, group and cluster
-  LOD spheres, culling spheres, and the cell bounds. The LOD distance therefore shrinks by it too. The error
-  itself is unchanged.
+- One vegetation model for every snippet (docs/FOLIAGE_WIND.md): the GPU Gems 3 chapter 16 (Crysis)
+  layers driven by the canonical wind channels of the vertex colour (R flutter, G branch phase, B
+  branch bend; trunk bending from the height), sampling the wind field's tile at the instance pivot.
+  CPU mirror `vgeo_wind_eval` / `vgeo_wpo_eval`.
+- `WPO_DISPLACE` adds the displacement buffer's push first (weighted by the height) and takes the wind
+  out of the pushed plant.
+- Bounds: `vgeo_wpo_max` sums the layers' declared maxima (`vgeo_wind_layer_max`) + `1.118 ·
+  VG_DISPLACE_MAX` (0.6 m) with the displacement buffer. Every world sphere (`vg_world_sphere`) grows by
+  the mesh's `max_wpo` x max(instance scale, 1) (`vg_wpo_margin`): instance, BVH node, group and
+  cluster LOD spheres, culling spheres, and the cell bounds. The LOD distance therefore shrinks by it
+  too. The error itself is unchanged.
+- `vg_vertex_world` applies the snippet in every stage: both rasterisers, the shadows, the resolve, the
+  test kernel. The resolve also bends / flutters the normals (High / Modern).
 - The SW/HW size test and the impostor switch use the size without that margin.
-- Velocity: the resolve evaluates the snippet with last frame's wind and time (`VgViewGpu.wind_prev`,
-  `foliage.y`). The game feeds the views from `RenderWeather` (wind, gust, time). `FrameData.wx5 = (gust, gust
-  phase, time, wind direction angle)`.
+- Velocity: the resolve evaluates the snippet with last frame's wind tile, fallback wind and time
+  (`VgViewGpu.wind_tile_prev`, `wind_prev`, `foliage.y`). The game feeds the views from `RenderWeather`
+  (the wind field's tile and fallback, the wind time). `FrameData.wx5 = (gust, gust phase, time, wind
+  direction angle)`.
 
 ### Instances: density, fade, shadow distance, impostors
 
@@ -1011,21 +1013,21 @@ bush is GPU test / bench content only (`vgeo_foliage`, `bench_vgeo`, `build_vgeo
   per texture (the FBX model name or the OBJ `usemtl` minus Tree It's `_N` suffix, + `.png`).
   - A material whose texture cuts out (> 2 % of the texels below half alpha) is a masked, two-sided card
     with the albedo alpha as the mask (cutoff 0.5). Bark, stumps and stems are opaque.
-  - The files are centimetres, Y up, ground at y = 0. The mesh is scaled to the species height and
-    re-centred on its trunk base (the bark between 0 and 1.5 m).
+  - The files are centimetres, Y up, ground at y = 0. The mesh is scaled to the middle of the species
+    height range ("Heights" below) and re-centred on its trunk base (the bark between 0 and 1.5 m).
   - Tree It card normals point up / outwards whatever the winding (and are not unit length). Each card
     triangle is re-wound towards its normal, so the front face is the lit side (the resolve flips only
     back faces). Without this, half of the leaves turned black.
-  - Wind weights in the vertex colour: R = (y / H)^1.5 (trunk sway), G = (r / crown radius)^1.3,
-    faded in over the lowest quarter of the height (branch bounce), B = 1 on card-only vertices (flutter).
-    Shared positions get the same R / G, so bark and cards bend together.
+  - Wind weights in the vertex colour: Tree It's own channels, which are the canonical layout of
+    docs/FOLIAGE_WIND.md (R leaf flutter, G branch phase, B branch bend, normalised to a maximum of 1 per
+    tree; trunk bending comes from the height). Without colours they are inferred from the geometry.
   - Trunk capsule: the 25th percentile of the bark's distance from the axis between 0.4 and 1.6 m
     (scaled down for bushes), + 10 %; height min(H / 2, 5 m).
 - **Build.** The ordinary vgeo builder: its DAG is the LOD chain (the files' own `_LODn` meshes are not
   used). Card-only groups do not coarsen (see "Test content"), so a tree's coarsest cut stays at about
   30-90 % of its triangles. Hence the impostors.
 - **Impostors.** 512 px atlas, 8 × 8 frames, baked with the textures. Trees switch at
-  `impostor_scale` × `r_vgeo_impostor_px`: 6× (96 px across, about 120 m for a 17 m tree) for the
+  `impostor_scale` × `r_vgeo_impostor_px`: 6× (96 px across, about 180 m for a 25 m tree) for the
   leafy trees, 2× for bushes, 1× for the bare old tree (its twigs thin out in a 64 px frame).
   The per-mesh scale lives in the high 16 bits of `VgMesh.impostor_grid` (`vgeo_impostor_scale`, 1/16
   steps, 0 = 1×), mirrored by `vgeo_use_impostor`.
@@ -1037,32 +1039,64 @@ bush is GPU test / bench content only (`vgeo_foliage`, `bench_vgeo`, `build_vgeo
   textures, so `VG_TEX_OWN` is now 128 (the table holds 1152 entries).
 - **Cache.** `build_vgeo --trees <dir/> <out/>` builds every species in parallel at build time (CMake
   `dg_vgeo_content`, about 1.4 s) into `bin/assets/vgeo/trees/<name>.dgtree`: a `VgTreeCacheHeader`
-  (key, materials, masks, capsule, scale) + the `.vgeo` bytes. The key hashes the source file, the
-  species height and atlas size, `VG_TREE_VERSION` and `VGEO_BUILD_VERSION`. When a file is missing or
+  (key, materials, masks, capsule, scale) + the `.vgeo` bytes. The scale is baked into the meshes, the
+  capsule and the impostor. The key hashes the source file, the species height range and atlas size, `VG_TREE_VERSION` and `VGEO_BUILD_VERSION`. When a file is missing or
   stale the game builds the species on the job system (about 1.1 s for all) and writes
   `assets/cache/<name>.tree.<key>.dgc`. Texture edits do not change the key: bump `VG_TREE_VERSION`.
 - **Registration** (`foliage_build_trees` in `vk_vgeo.c`): `render_foliage_test_types` loads the bushes
   and flowers, `render_foliage_map_types` the trees. Each species is a foliage type with a role
   (`render_foliage_role_types(role, names, weights, max)`), in table order on every machine.
 
-| Species (type) | File | Role | Height | Triangles (leaf / coarsest cut) | Materials |
+| Species (type) | File | Role | Height range | Triangles (leaf / coarsest cut) | Materials |
 |---|---|---|---|---|---|
-| `tree_pine` | pine.fbx | conifer | 17 m | 7 027 / 1 628 | bark09, stump01, pine branch (masked) |
-| `tree_fir` | fir.fbx | conifer | 15 m | 4 973 / 3 925 | bark07, fir branch |
-| `tree_spruce` | spruce.fbx | conifer | 18 m | 9 010 / 5 642 | bark08, spruce branch, branch06 |
-| `tree_oak` | oak.fbx | broadleaf | 16 m | 8 990 / 6 072 | mossybark02, stump03, oak leaf |
-| `tree_beech` | beech.fbx | broadleaf | 17 m | 10 584 / 9 755 | bark01, beech leaf |
-| `tree_birch` | birch.fbx | broadleaf (0.8) | 14 m | 6 944 / 2 579 | bark11, birch leaf |
-| `tree_elm` | elm.fbx | broadleaf (0.8) | 15 m | 4 013 / 1 508 | bark07, elm leaf |
-| `tree_maple` | maple.fbx | broadleaf | 14 m | 17 962 / 4 043 | bark02, leaf maple |
-| `tree_old` | old.fbx | dead | 11 m | 5 873 / 2 606 | bark04, stump01, branch06 (a rooted snag with a few twig cards) |
-| `bush_juniper` | juniper.fbx | bush | 3.2 m | 2 906 / 1 944 | bark05, juniper branch |
-| `bush_bamboo` | bamboo.obj | bush (0.4) | 3.6 m | 3 324 / 827 | plant02, bamboo branch |
-| `bush_acacia` | tree1.obj | bush (0.4) | 4.5 m | 8 957 / 4 082 | bark05, acacia branch |
-| `flower_daisy` | daisy.fbx | flower | 0.7 m | 632 / 632 | plant05, flower daisy, daisy leaf (no impostor) |
+| `tree_pine` | pine.fbx | conifer | 18-32 m | 7 027 / 2 265 | bark09, stump01, pine branch (masked) |
+| `tree_fir` | fir.fbx | conifer | 20-36 m | 4 973 / 3 697 | bark07, fir branch |
+| `tree_spruce` | spruce.fbx | conifer | 20-36 m | 9 010 / 5 641 | bark08, spruce branch, branch06 |
+| `tree_oak` | oak.fbx | broadleaf | 16-28 m | 8 990 / 5 570 | mossybark02, stump03, oak leaf |
+| `tree_beech` | beech.fbx | broadleaf | 20-34 m | 10 584 / 9 755 | bark01, beech leaf |
+| `tree_birch` | birch.fbx | broadleaf (0.8) | 14-24 m | 6 944 / 2 683 | bark11, birch leaf |
+| `tree_elm` | elm.fbx | broadleaf (0.8) | 16-27 m | 4 013 / 984 | bark07, elm leaf |
+| `tree_maple` | maple.fbx | broadleaf | 14-24 m | 17 962 / 4 071 | bark02, leaf maple |
+| `tree_old` | old.fbx | dead | 10-17 m | 5 873 / 2 597 | bark04, stump01, branch06 (a rooted snag with a few twig cards) |
+| `bush_juniper` | juniper.fbx | bush | 3-7 m | 2 906 / 1 752 | bark05, juniper branch |
+| `bush_bamboo` | bamboo.obj | bush (0.4) | 2.5-5 m | 3 324 / 1 660 | plant02, bamboo branch |
+| `bush_acacia` | tree1.obj | bush (0.4) | 4-8 m | 8 957 / 4 088 | bark05, acacia branch |
+| `flower_daisy` | daisy.fbx | flower | 0.35-0.75 m | 632 / 632 | plant05, flower daisy, daisy leaf (no impostor) |
 
-Wind (m at full wind, sway / branch / flutter): conifers 0.18-0.2 / 0.12 / 0.02, broadleaves
-0.18-0.26 / 0.16-0.18 / 0.04-0.05, the old tree 0.08 / 0.05 / 0.02, bushes 0.05-0.08. Trees fade at
+**Heights.** Each species has a target height range (`height_min` / `height_max` in the `vgeo_tree.c`
+table). The mesh is scaled to the middle of the range (instance scale 1), and the open-world scatter
+picks every instance height uniformly in the range (`vgeo_tree_scale_range`, `openworld_foliage.c`;
+the forest underbrush and the meadow bushes use the same range). Trunk capsules (radius and height),
+cell / shadow bounds and impostor switch distances all follow the mesh and the instance scale. The
+ranges come from published mature heights. Forest trees sit in the lower-middle part of the mature
+range: a stand, not record trees, and the crowns stay readable at the forest densities
+(docs/ZOMBIE_MAP.md, up to 3.6 trees / 100 m², 280-360 stems / ha, typical for mature stands, so the
+densities were kept).
+
+| Species | Native model height (file) | Old in-game range | Published mature height | Source |
+|---|---|---|---|---|
+| Scots pine | 11.9 m | 12.2-21.6 m | 15-25 m (nursery), up to 35-36 m (Scotland) | [Forestry and Land Scotland](https://forestryandland.gov.scot/learn/trees/scots-pine), [Westmuir](https://westmuir.org.uk/woodland/flora/scots-pine/) |
+| Silver fir | 10.6 m | 10.8-19.1 m | 30-50 m, to 45 m (RHS) | [RHS](https://www.rhs.org.uk/plants/11/Abies-alba/Details), [van den Berk](https://www.vdberk.co.uk/trees/abies-alba/) |
+| Norway spruce | 10.6 m | 13.0-22.9 m | 30-40 m (native range) | [dimensions.com](https://dimensions.com/element/norway-spruce-picea-abies), [KPU plant database](https://plantdatabase.kpu.ca/PlantPrint/piab) |
+| English oak | 14.3 m | 11.5-20.3 m | 20-40 m | [Woodland Trust shop](https://shop.woodlandtrust.org.uk/english-oak), [Ashridge](https://www.ashridgetrees.co.uk/p/garden-trees/oak-quercus/robur-common-native) |
+| Common beech | 9.7 m | 12.2-21.6 m | over 40 m (UK record 45 m) | [Woodland Trust](https://www.woodlandtrust.org.uk/trees-woods-and-wildlife/british-trees/a-z-of-british-trees/common-beech), [Deepdale Trees](https://www.deepdale-trees.co.uk/trees/2016/12-Fagus-sylvatica.html) (to 30 m) |
+| Silver birch | 7.8 m | 10.1-17.8 m | 25 m, up to 30 m | [Woodland Trust shop](https://shop.woodlandtrust.org.uk/silver-birch), [Nature's Calendar](https://naturescalendar.woodlandtrust.org.uk/what-we-record-and-why/species-we-record/trees/silver-birch/) |
+| Field elm | 8.5 m | 10.8-19.1 m | 20-30 m | [RHS](https://www.rhs.org.uk/plants/164598/wd/details), [van den Berk](https://www.vdberk.co.uk/trees/ulmus-minor/) |
+| Norway maple | 9.1 m | 10.1-17.8 m | 15-25 m | [Gedling tree trail](https://www.gedling.gov.uk/resident/parksandgreenspaces/digbyarboretum/treetrail/10norwaymaple), [Ashridge](https://ashridgetrees.co.uk/p/garden-trees/maple-acer/platanoides-norway) |
+| Old snag | 8.9 m | 7.9-14.0 m | a retrenched veteran: e.g. the Rumskulla oak, 14 m | [woodlands.co.uk](https://www.woodlands.co.uk/?p=38655) |
+| Common juniper | 8.6 m | 1.9-3.7 m | 4-8 m (RHS), prostrate shrub forms lower | [RHS](https://rhs.org.uk/plants/9557/juniperus-communis/details), [Naturblick](https://naturblick.museumfuernaturkunde.berlin/species/portrait/204?lang=en) |
+| Bamboo (Phyllostachys) | 4.8 m | 2.2-4.1 m | clumps 2.5-4 m (P. aurea, P. nigra), 4-8 m vigorous | [RHS P. aurea](https://www.rhs.org.uk/plants/75274/phyllostachys-aurea/details), [RHS P. nigra](https://www.rhs.org.uk/plants/12869/wd/details) |
+| Umbrella thorn acacia | 7.9 m | 2.7-5.2 m | 5-20 m wild, 3-5 m cultivated | [SANBI](https://pza.sanbi.org/node/9642), [Wikipedia](https://en.wikipedia.org/wiki/Vachellia_tortilis) |
+| Oxeye daisy | 0.85 m | 0.53-0.95 m | 25-70 cm (60-80 cm typical) | [Naturblick](https://naturblick.museumfuernaturkunde.berlin/species/portrait/383?lang=en), [Burren flora](https://flora-burren.linnaeus.naturalis.nl/linnaeus_ng/app/views/species/taxon.php?id=38130) |
+
+The old ranges came from one fixed height per species (8-18 m trees) times a shared scatter scale
+(0.72-1.27 for trees, 0.65-1.15 / 0.6-1.05 for forest / meadow bushes, 0.75-1.35 for flowers): about
+half the real heights, and the columnar juniper and the acacia tree read as miniature trees. Native
+heights are logged by `build_vgeo --trees` (`scale ... (<file units> -> <m>)`); `tools/tests/tree_scale.cfg`
+takes the scale screenshots (third-person player beside each forest, a zombieland forest, r_vgeo 0).
+
+Wind: per-species tuning of the vegetation model (`k_wind`, docs/FOLIAGE_WIND.md "Parameters"); the
+main bend's height is the species' scale-1 height. Trees fade at
 850-1100 m with shadows to 70 m; bushes 150-210 m / 40 m; daisies 50-80 m / 15 m.
 
 **Budget.** 13 species, 91k source triangles, 2.2k clusters; .dgtree files 40 MB on disk (mostly the
@@ -1196,8 +1230,8 @@ landed the support pieces ("Foliage support"); a foliage system then needs only:
 
 1. **Meshes.** Author or generate grass, bush and tree meshes as normal glTF with `"vgeo": true` and a
    `"foliage": { "masked": true, "two_sided": true, "wpo": "grass" | "tree", "wpo_params": [...], "fade": [s, e],
-   "shadow_max_dist": d }` block in `data/assets.json`. Bake wind weights into vertex colour: R = trunk / bend,
-   G = branch, B = leaf flutter (`VgSource.color`, 4 extra bytes per vertex; WPO materials do not use it as
+   "shadow_max_dist": d }` block in `data/assets.json`. Bake wind weights into vertex colour in the canonical
+   layout of docs/FOLIAGE_WIND.md: R = leaf flutter, G = branch phase, B = branch bend (`VgSource.color`, 4 extra bytes per vertex; WPO materials do not use it as
    albedo). For distant instances, `build_vgeo --impostor` bakes the hemi-octahedral atlas into the `.vgeo`,
    `vgeo_foliage_impostor_upload` puts it on the GPU, and `r_vgeo_impostor_px` sets the switch.
 2. **Placement.** Write per-chunk placement files (`.vgp`, `vgp_write`): ≤ 16 cells of 8 m per 32 m chunk, 32 B

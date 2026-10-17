@@ -81,4 +81,18 @@ double platform_time(void) {
     return (double)(SDL_GetPerformanceCounter() - start) / (double)freq;
 }
 
+u32 platform_wall_ms(void) {
+    // The wall clock at start plus the performance counter: steady within the process, and the
+    // same time base in every process (platform_time starts at each process's own launch).
+    static double base_ms;
+    static bool init;
+    if (!init) {
+        SDL_Time now = 0;
+        SDL_GetCurrentTime(&now);
+        base_ms = (double)now / 1e6 - platform_time() * 1000.0;
+        init = true;
+    }
+    return (u32)(u64)(base_ms + platform_time() * 1000.0);
+}
+
 void platform_sleep_ms(u32 ms) { SDL_Delay(ms); }

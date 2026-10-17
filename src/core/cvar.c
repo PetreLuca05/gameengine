@@ -302,6 +302,17 @@ void cbuf_add(const char *text) {
     s_cv.cbuf[s_cv.cbuf_len] = 0;
 }
 
+void cbuf_retry(const char *line) {
+    int n = (int)strlen(line);
+    if (s_cv.cbuf_len + n + 2 >= CBUF_SIZE) { log_warn("command buffer overflow"); return; }
+    memmove(s_cv.cbuf + n + 1, s_cv.cbuf, (size_t)s_cv.cbuf_len);
+    memcpy(s_cv.cbuf, line, (size_t)n);
+    s_cv.cbuf[n] = '\n';
+    s_cv.cbuf_len += n + 1;
+    s_cv.cbuf[s_cv.cbuf_len] = 0;
+    s_cv.wait_frames = 1;
+}
+
 void cbuf_execute(void) {
     if (s_cv.wait_frames > 0) { s_cv.wait_frames--; return; }
     int guard = 0;
@@ -334,6 +345,7 @@ void cbuf_execute(void) {
             return;
         }
         cmd_execute_line(line);
+        if (s_cv.wait_frames > 0) return;   // the command retries (cbuf_retry)
     }
 }
 

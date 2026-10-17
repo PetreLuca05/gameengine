@@ -2,6 +2,45 @@
   "id": "player", "character_id": 1, "kind": "player",
   "mesh": "assets/human/Dummy.fbx",
   "materials": { "Alpha_Body_MAT": [0.62, 0.64, 0.68], "Alpha_Joints_MAT": [0.12, 0.13, 0.15], "Body 2": [0.62, 0.64, 0.68] },
+  "_parts": "Cosmetic options (assets/cosmetics/*.json, docs/MENU_LOBBY.md): placeholder shells cut out of the dummy mesh (regions part_head / part_torso / part_legs / part_hands, inflated and tinted) until real art exists. Players wear only what they equip (non-body slots start empty); the body slot holds the skins (skins.json).",
+  "parts": {
+    "head": [
+      { "id": "helmet_olive", "mesh": "assets/human/Dummy.fbx", "region": "part_head", "inflate": 0.016, "scale": [1.14, 1.06, 1.14], "weight": 0,
+        "materials": { "Alpha_Body_MAT": [0.30, 0.34, 0.22], "Alpha_Joints_MAT": [0.17, 0.19, 0.12], "Body 2": [0.30, 0.34, 0.22] } },
+      { "id": "helmet_black", "mesh": "assets/human/Dummy.fbx", "region": "part_head", "inflate": 0.016, "scale": [1.14, 1.06, 1.14], "weight": 0,
+        "materials": { "Alpha_Body_MAT": [0.09, 0.10, 0.11], "Alpha_Joints_MAT": [0.05, 0.06, 0.06], "Body 2": [0.09, 0.10, 0.11] } },
+      { "id": "cap_red", "mesh": "assets/human/Dummy.fbx", "region": "part_head", "inflate": 0.01, "scale": [1.06, 0.90, 1.08], "weight": 0,
+        "materials": { "Alpha_Body_MAT": [0.55, 0.12, 0.10], "Alpha_Joints_MAT": [0.30, 0.07, 0.06], "Body 2": [0.55, 0.12, 0.10] } }
+    ],
+    "torso": [
+      { "id": "vest_tan", "mesh": "assets/human/Dummy.fbx", "region": "part_torso", "inflate": 0.022, "weight": 0,
+        "materials": { "Alpha_Body_MAT": [0.52, 0.45, 0.32], "Alpha_Joints_MAT": [0.29, 0.25, 0.18], "Body 2": [0.52, 0.45, 0.32] } },
+      { "id": "vest_black", "mesh": "assets/human/Dummy.fbx", "region": "part_torso", "inflate": 0.022, "weight": 0,
+        "materials": { "Alpha_Body_MAT": [0.10, 0.11, 0.12], "Alpha_Joints_MAT": [0.06, 0.06, 0.07], "Body 2": [0.10, 0.11, 0.12] } },
+      { "id": "jacket_orange", "mesh": "assets/human/Dummy.fbx", "region": "part_torso", "inflate": 0.014, "weight": 0,
+        "materials": { "Alpha_Body_MAT": [0.80, 0.38, 0.10], "Alpha_Joints_MAT": [0.44, 0.21, 0.06], "Body 2": [0.80, 0.38, 0.10] } }
+    ],
+    "legs": [
+      { "id": "pads_olive", "mesh": "assets/human/Dummy.fbx", "region": "part_legs", "inflate": 0.012, "weight": 0,
+        "materials": { "Alpha_Body_MAT": [0.28, 0.31, 0.21], "Alpha_Joints_MAT": [0.15, 0.17, 0.12], "Body 2": [0.28, 0.31, 0.21] } },
+      { "id": "pads_grey", "mesh": "assets/human/Dummy.fbx", "region": "part_legs", "inflate": 0.012, "weight": 0,
+        "materials": { "Alpha_Body_MAT": [0.36, 0.37, 0.38], "Alpha_Joints_MAT": [0.20, 0.20, 0.21], "Body 2": [0.36, 0.37, 0.38] } }
+    ],
+    "hands": [
+      { "id": "gloves_black", "mesh": "assets/human/Dummy.fbx", "region": "part_hands", "inflate": 0.005, "weight": 0,
+        "materials": { "Alpha_Body_MAT": [0.07, 0.07, 0.08], "Alpha_Joints_MAT": [0.04, 0.04, 0.04], "Body 2": [0.07, 0.07, 0.08] } },
+      { "id": "gloves_tan", "mesh": "assets/human/Dummy.fbx", "region": "part_hands", "inflate": 0.005, "weight": 0,
+        "materials": { "Alpha_Body_MAT": [0.55, 0.45, 0.30], "Alpha_Joints_MAT": [0.30, 0.25, 0.17], "Body 2": [0.55, 0.45, 0.30] } }
+    ],
+    "hair": [
+      { "id": "hood_grey", "mesh": "assets/human/Dummy.fbx", "region": "part_head", "inflate": 0.024, "scale": [1.08, 1.10, 1.10], "weight": 0,
+        "materials": { "Alpha_Body_MAT": [0.30, 0.31, 0.33], "Alpha_Joints_MAT": [0.17, 0.17, 0.18], "Body 2": [0.30, 0.31, 0.33] } }
+    ],
+    "gear_0": [
+      { "id": "rig_olive", "mesh": "assets/human/Dummy.fbx", "region": "part_torso", "inflate": 0.036, "scale": [1.00, 0.62, 1.00], "weight": 0,
+        "materials": { "Alpha_Body_MAT": [0.24, 0.27, 0.18], "Alpha_Joints_MAT": [0.13, 0.15, 0.10], "Body 2": [0.24, 0.27, 0.18] } }
+    ]
+  },
   "anim_set": "player",
   "part_mult": { "head": 2.5, "neck": 1.5, "chest": 1.0, "stomach": 0.9, "pelvis": 0.9, "arms": 0.6, "hands": 0.5, "legs": 0.7, "feet": 0.5 },
   "blood": { "color": [0.30, 0.02, 0.015], "darkness": 0.55, "amount": 1.0, "mist": 1.0, "decay": 1.0 },

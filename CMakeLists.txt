@@ -250,6 +250,15 @@ else()
   target_link_libraries(test_recoil PRIVATE m)
 endif()
 add_test(NAME recoil COMMAND test_recoil)
+add_executable(test_spectate tests/test_spectate.c src/net/spectate_core.c src/gameplay/recoil.c src/core/spring.c)
+set_target_properties(test_spectate PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
+target_include_directories(test_spectate PRIVATE src)
+if(MSVC)
+  target_compile_options(test_spectate PRIVATE /W3 /utf-8)
+else()
+  target_link_libraries(test_spectate PRIVATE m)
+endif()
+add_test(NAME spectate COMMAND test_spectate)
 
 # ---------------------------------------------------------------- animation tools
 # Engine-free subset: anim core + FBX import + cache (+ log / platform helpers).
@@ -257,7 +266,7 @@ set(DG_ANIMCORE_SOURCES
   src/anim/anim.c src/anim/skeleton.c src/anim/retarget.c src/anim/anim_mesh.c src/anim/controller.c src/anim/procedural.c src/anim/turn.c src/anim/spine.c
   src/anim/weapon_hold.c src/anim/handpose.c src/editor/handpose/hp_discover.c src/editor/handpose/hp_edit.c src/anim/damage_additive.c src/anim/foot_ik.c src/anim/anim_net.c src/anim/ragdoll_def.c
   src/anim/anim_library.c src/anim/character_rt.c src/gameplay/hitboxes.c src/gameplay/items.c src/gameplay/attachments.c src/gameplay/recoil.c src/core/spring.c
-  src/world/time_of_day.c src/world/weather.c src/gameplay/vehicle_def.c src/vfx/vfx_curve.c src/vfx/vfx_library.c src/vfx/vfx_sim.c src/vfx/vfx_flesh.c src/vfx/vfx_atlas.c src/player/holdpoint.c src/player/camera_fp_math.c src/gameplay/phone/phone_orient.c
+  src/world/time_of_day.c src/world/weather.c src/world/wind.c src/gameplay/vehicle_def.c src/vfx/vfx_curve.c src/vfx/vfx_library.c src/vfx/vfx_sim.c src/vfx/vfx_flesh.c src/vfx/vfx_atlas.c src/player/holdpoint.c src/player/camera_fp_math.c src/gameplay/phone/phone_orient.c
   src/assets/fbx_loader.c src/assets/anim_cache.c src/assets/character.c src/render/skeletal_mesh.c
   src/core/log.c src/core/platform.c)
 add_library(dg_animcore STATIC ${DG_ANIMCORE_SOURCES})
@@ -280,7 +289,8 @@ set_target_properties(fbx_textures PROPERTIES C_STANDARD 11)
 target_link_libraries(fbx_textures PRIVATE dg_animcore)
 
 # Virtualized geometry builder (pure C): the game compiles the same sources through the src glob.
-add_library(dg_vgeo STATIC src/render/vgeo/vgeo_build.c src/render/vgeo/vgeo_procgen.c src/render/vgeo/vgeo_procgen_building.c src/render/vgeo/vgeo_procgen_skinned.c src/render/vgeo/vgeo_import.c src/render/vgeo/vgeo_impostor.c src/render/vgeo/vgeo_procgen_foliage.c src/render/vgeo/vgeo_tree.c)
+add_library(dg_vgeo STATIC src/render/vgeo/vgeo_build.c src/render/vgeo/vgeo_procgen.c src/render/vgeo/vgeo_procgen_building.c src/render/vgeo/vgeo_procgen_skinned.c src/render/vgeo/vgeo_import.c src/render/vgeo/vgeo_impostor.c src/render/vgeo/vgeo_procgen_foliage.c src/render/vgeo/vgeo_tree.c
+  src/render/vgeo/foliage_wind.c)
 set_target_properties(dg_vgeo PROPERTIES C_STANDARD 11)
 target_link_libraries(dg_vgeo PUBLIC dg_animcore meshopt)
 if(MSVC)
@@ -393,6 +403,14 @@ set_target_properties(test_weather PROPERTIES C_STANDARD 11)
 target_link_libraries(test_weather PRIVATE dg_animcore)
 add_test(NAME weather COMMAND test_weather WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
 
+# Foliage wind (docs/FOLIAGE_WIND.md): the wind field (gust fronts, tile, springs, sources), the Crysis
+# vegetation WPO CPU mirror (trunk length, layer linearity, phase decorrelation, bounds), the Tree It
+# vertex-colour channel detection over assets/treefbx.
+add_executable(test_wind tests/test_wind.c)
+set_target_properties(test_wind PROPERTIES C_STANDARD 11)
+target_link_libraries(test_wind PRIVATE dg_vgeo)
+add_test(NAME wind COMMAND test_wind WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+
 # Vehicles: definitions, fuel curve, tire model, steering clamp / smoothing, quantization.
 add_executable(test_vehicles tests/test_vehicles.c)
 set_target_properties(test_vehicles PROPERTIES C_STANDARD 11)
@@ -468,6 +486,16 @@ if(MSVC)
 endif()
 add_test(NAME ui COMMAND test_ui WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
 
+# Main menu + lobby (docs/MENU_LOBBY.md): lobby state machine, membership / kick / ready / start,
+# chat, version check, wire, maps, cosmetics round trip, profile, seasons + weather bias, screen lint.
+add_executable(test_lobby tests/test_lobby.c src/net/lobby.c src/world/maplist.c src/world/season.c src/gameplay/cosmetics.c src/game/profile.c src/ui/gui/gui_layout.c src/core/cvar.c)
+set_target_properties(test_lobby PROPERTIES C_STANDARD 11)
+target_link_libraries(test_lobby PRIVATE dg_animcore)
+if(MSVC)
+  target_compile_options(test_lobby PRIVATE /W3 /wd4100 /wd4201 /utf-8)
+endif()
+add_dependencies(test_lobby dg_copy_data)
+add_test(NAME lobby COMMAND test_lobby WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
 # Engine Fidelity (docs/ENGINE_FIDELITY.md): tables, bounds, apply / clamp on the real cvar system, era
 # matrix, frame graph validation.
 add_executable(test_fidelity tests/test_fidelity.c src/render/fidelity/fidelity.c src/render/graph/fg_check.c src/core/cvar.c)

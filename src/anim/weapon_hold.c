@@ -163,6 +163,9 @@ void proc_hold(ProcState *st, const ProcInput *in, Pose *pose, Xform *model) {
     // kick around the pivot, wall collision).
     HoldPointInput hi;
     memset(&hi, 0, sizeof(hi));
+    hi.phase_valid = in->hp_phase_valid;
+    hi.clock = in->hp_clock;
+    hi.stride = in->hp_stride;
     hi.style = &proc_hold_style(p, st->style)->hp;
     hi.ovr = &it->hp;
     hi.style_key = in->item_key * 64 + st->style;
