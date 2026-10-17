@@ -400,9 +400,9 @@ static bool exists_cb(const char *path, void *user) {
 static void test_maps(void) {
     MapList ml;
     int n = maplist_load(&ml, "assets/maps");
-    CHECK(n >= 4, "maps loaded (%d)", n);
+    CHECK(n >= 3, "maps loaded (%d)", n);
     CHECK(maplist_find(&ml, "devroom") != NULL, "dev room listed");
-    CHECK(maplist_find(&ml, "zombieland") != NULL, "open world listed");
+    CHECK(maplist_find(&ml, "vegetation") != NULL, "open world listed");
     // Every file parses (nothing skipped), thumbnails exist, levels exist (or are procedural).
     char dir[512];
     platform_data_path("assets/maps", dir, sizeof(dir));

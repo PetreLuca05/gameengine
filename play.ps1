@@ -1,11 +1,11 @@
 # Launch Deadground from a terminal (VS Code: PowerShell). Uses the one build in "openable builds\Deadground".
 #   .\play.ps1                          nanite (r_vgeo 1), main menu
 #   .\play.ps1 -NoNanite                classic renderer (r_vgeo 0), main menu
-#   .\play.ps1 -Map zombieland          straight into a map (no splash / menu)
+#   .\play.ps1 -Map vegetation          straight into a map (no splash / menu)
 #   .\play.ps1 -Scene handpose          straight into a scene (hand-pose editor)
 #   .\play.ps1 -NoNanite -Map vegetation
 #   .\play.ps1 -Dev                     the dev build (build\bin) instead
-# Maps: devroom, zombieland, vegetation, wateryard, vgeo_test. Scenes: handpose.
+# Maps: devroom, vegetation, wateryard, vgeo_test. Scenes: handpose.
 param(
     [switch]$NoNanite,
     [string]$Map = "",

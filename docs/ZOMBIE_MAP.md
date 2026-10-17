@@ -1,5 +1,7 @@
 # Zombieland: the 2 km open-world map
 
+> The Zombieland map itself (data/levels/zombieland.json, its reference images in docs/reference/zombie_map and the zl_* test scripts) moved to branch `zombieland`. The generator described here stays on main and builds `map vegetation` and `map wateryard`.
+
 `map zombieland` loads a 2 km × 2 km zombie-survival world built from
 [docs/reference/zombie_map/SPEC.md](reference/zombie_map/SPEC.md). Nothing is hand-modelled. A data file
 describes the world (`data/levels/zombieland.json`: terrain regions, sea, river, roads, ten points of

@@ -1,5 +1,7 @@
 // Open-world generator unit tests (src/world/mapgen*.c, src/gameplay/loot.c, docs/ZOMBIE_MAP.md),
-// on data/levels/zombieland.json (run from the exe folder, where data/ is mirrored):
+// on an open-world level (run from the exe folder, where data/ is mirrored; default
+// data/levels/vegetation.json: determinism only). On the Zombieland map (branch zombieland,
+// `test_mapgen data/levels/zombieland.json`) also the map's own checks:
 // determinism of the raster; roads flatten the terrain to their profile and respect the class grade;
 // bridges where roads cross the river, decks above the water; the river flows downhill; water levels
 // (sea, lake, river, dry land); the ten POIs of the spec with enterable buildings; building lots clear
@@ -269,7 +271,7 @@ static void test_loot(const Map *m) {
 }
 
 int main(int argc, char **argv) {
-    const char *path = argc > 1 ? argv[1] : "data/levels/zombieland.json";
+    const char *path = argc > 1 ? argv[1] : "data/levels/vegetation.json";
     char *text = read_file(path);
     if (!text) { printf("cannot read %s (run from the exe folder)\n", path); return 1; }
     cJSON *root = cJSON_Parse(text);
@@ -280,9 +282,15 @@ int main(int argc, char **argv) {
     CHECK(raster_hash(&a.r) == raster_hash(&b.r), "raster not deterministic");
     CHECK(a.p.prim_count == b.p.prim_count && a.p.ent_count == b.p.ent_count, "POI build not deterministic");
     destroy(&b);
-    test_terrain_roads(&a);
-    test_pois(&a);
-    test_loot(&a);
+    // The terrain / road / POI / loot checks are written against the Zombieland map's layout.
+    const cJSON *nm = cJSON_GetObjectItemCaseSensitive(root, "name");
+    if (cJSON_IsString(nm) && !strcmp(nm->valuestring, "Zombieland")) {
+        test_terrain_roads(&a);
+        test_pois(&a);
+        test_loot(&a);
+    } else {
+        CHECK(a.p.prim_count >= 0 && raster_hash(&a.r) != 0, "%s: raster built", path);
+    }
     destroy(&a);
     cJSON_Delete(root);
     printf("%d checks, %d failed\n", g_checks, g_fail);

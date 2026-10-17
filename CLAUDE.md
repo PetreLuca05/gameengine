@@ -57,7 +57,7 @@ Windows, no admin; tools are portable, in `.toolchain/` (git-ignored).
 | Spectating (first-person in-eye, `spectate`) | SPECTATE.md | src/net/spectate{,_core}.c, src/player/spectator.c, game_view_slot (game.c); tests: test_spectate, tools/tests/spec_net.sh |
 | Radial wheels (heal / throw / ping / door), timed ring, door peek, throwables, kill counter + feed, compass, pings, HUD settings, pause Commands tab | UI_WHEELS_HUD.md | src/ui/widgets, src/ui/hud, src/ui/pause, src/game/{game_wheels,game_pings,game_peek}.c, src/gameplay/{ping,throwables}.c, assets/ui/wheels, assets/ui/command_categories.json; tests: test_hud, tools/tests/lint_commands.py, tools/tests/hud_{wheels,commands}.cfg |
 | Downed / revive, death sequence, corpses + DNA syringe, Fabricator reconstruction (`spawn_teammate`, `down`, `die`, `reconstruction_preview`) | REVIVE.md | src/gameplay/revive (revive_core / death_seq pure), src/game/{game_death,game_revive}.c, shaders/recon.glsl, src/audio/death_synth.c, assets/gameplay/revive_rules.json; tests: test_revive, tools/tests/revive_loop.cfg, revive_net.sh |
-| Open-world map (`map zombieland`) | ZOMBIE_MAP.md | src/world/{mapgen,mapgen_poi,openworld,openworld_foliage}.c, data/levels/zombieland.json, data/loot.json; tools/mapgen_preview, tools/tests/zl_*.cfg |
+| Open-world generator (`map vegetation`, `map wateryard`; the Zombieland map lives on branch `zombieland`) | ZOMBIE_MAP.md | src/world/{mapgen,mapgen_poi,openworld,openworld_foliage}.c, data/levels/{vegetation,wateryard}.json, data/loot.json; tools/mapgen_preview |
 
 ## Dev room (data/levels/devroom.json)
 Hall at the origin. Other areas:
