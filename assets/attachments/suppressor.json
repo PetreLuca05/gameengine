@@ -3,6 +3,7 @@
   "id": "suppressor",
   "name": "Suppressor",
   "slot": "muzzle",
+  "fire": { "mass": 0.45, "impulse": { "pitch": 0.85 }, "settle_mult": 1.3, "droop": 1.2, "fov_punch": 0.8, "screen_kick": 0.9 },
   "mount": {
     "pos": [0, 0, 0]
   },

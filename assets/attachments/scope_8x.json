@@ -3,6 +3,7 @@
   "id": "scope_8x",
   "name": "8x Scope",
   "slot": "optic",
+  "fire": { "mass": 0.6, "yaw_lag": 1.3 },
   "sight": "scope",
   "mount": {
     "pos": [0, 0, 0]

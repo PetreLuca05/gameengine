@@ -34,6 +34,7 @@ typedef struct PostSettings {
     // camera
     int motion_blur;               // 0 off, 1 camera, 2 camera + objects
     float mb_intensity;            // shutter fraction (0.5 = 180 deg)
+    float mb_viewmodel;            // fire animation blur spike on the viewmodel (0 = sharp; set per frame by game_post.c)
     int dof;                       // 0 off, 1 ADS only, 2 full
     float dof_focus, dof_fstop, dof_focal_mm, dof_max_coc;
     int dof_autofocus, dof_bokeh;  // bokeh 0 circle, 1 hexagon

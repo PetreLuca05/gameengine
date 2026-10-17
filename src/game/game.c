@@ -386,13 +386,9 @@ static void dispatch_events(World *w) {
 static void on_shot(const ShotEvent *ev, void *user) {
     (void)user;
     if (!G || ev->slot != game_view_slot()) return;   // the viewed player's shots (local, or spectated)
-    const WeaponCvars *wc = weapons_cvars();
-    recoil_visual_kick(&ev->def->recoil, &G->recoil_vis, wc->visual_scale->f, ev->ads_t, ev->seed);
-    // Shell casing out of the right side (bolt / pump guns eject when cycling instead).
-    if (ev->def->kind == WPN_HITSCAN && !ev->def->bolt_action) {
-        vec3 right = v3_norm(v3_cross(ev->dir, v3(0, 1, 0)));
-        fx_shell_ex(v3_madd(ev->muzzle, ev->dir, -0.12f), v3_add(v3_scale(right, 2.2f), v3(0, 1.4f, 0)), ev->def->vfx_caliber);
-    }
+    // The gun-driven fire animation (docs/FIRE_ANIM.md): the gun, hands, body, camera and punches.
+    // The casing leaves when the slide / bolt comes back (game_fire_tick), not on the shot.
+    game_fire_on_shot(ev);
     // Bolt / pump cycle after the shot (if rounds are left).
     if (ev->def->bolt_action && ev->mag_left > 0) G->bolt_timer = fmaxf(0.25f, 60.0f / fmaxf(1.0f, ev->def->recoil.rpm) * 0.35f);
 }
@@ -401,20 +397,11 @@ static void weapon_feel_tick(void) {
     Player *p = game_view_player();
     int vs = game_view_slot();
     const WeaponDef *d = p ? weapon_equipped_def(G->world, vs) : NULL;
-    static RecoilParams fallback;
-    if (!fallback.rpm) recoil_params_default(&fallback);
-    recoil_visual_step(d && d->kind != WPN_MELEE ? &d->recoil : &fallback, &G->recoil_vis, SIM_DT);
     G->spread_prev = G->spread_cur;
     G->spread_cur = p ? weapon_current_spread(G->world, vs) : 0;
     if (G->bolt_timer > 0) {
         G->bolt_timer -= SIM_DT;
-        if (G->bolt_timer <= 0 && p && d && d->bolt_action) {
-            vec3 eye = player_eye_pos(&p->sim.move);
-            fx_sound("bolt_cycle", eye, 0.7f);
-            vec3 r = right_from_yaw(p->sim.move.yaw);
-            fx_shell_ex(v3_add(eye, v3_add(v3_scale(r, 0.12f), dir_from_angles(p->sim.move.yaw, p->sim.move.pitch))),
-                     v3_add(v3_scale(r, 2.0f), v3(0, 1.5f, 0)), d->vfx_caliber);
-        }
+        if (G->bolt_timer <= 0 && p && d && d->bolt_action) fx_sound("bolt_cycle", player_eye_pos(&p->sim.move), 0.7f);   // the casing: game_fire_tick
     }
     // wpn_magdump: stop once the magazine is empty (or after 20 s).
     if (G->magdump_ticks > 0) {
@@ -566,6 +553,8 @@ static void tick(void) {
         if (w->chunks) chunks_update(w, SIM_DT);
         w->tick++;
     }
+    // Fire animation before the hold point is evaluated: the kick lands on the shot's own tick.
+    game_fire_tick();
     // Render-side character work at tick rate (LOD-scaled post-pass, ragdolls).
     chars_present_tick(w, G->view.eye, G->view.fov > 1 ? G->view.fov : 75.0f, (float)render_height(), SIM_DT, game_view_slot());
     weapon_feel_tick();
@@ -656,6 +645,7 @@ float game_ads_vis(void) {
 void game_frame(float dt) {
     handpose_system_poll();
     if (!G->world) return;
+    game_fire_frame();   // fire_compare driver
     bool ui_blocking = G->menu_open || G->inventory_open || G->container_open || G->bench_open || console_is_open();
     InputFrame f = input_frame();
     // The door peek and an open radial wheel take the look (game_peek.c, game_wheels.c).
@@ -1402,6 +1392,7 @@ void game_init(void) {
     cmd_register("weapon_reload", cmd_weapon_reload, "re-read data/weapons/*.json (live recoil tuning)");
     weapons_register_cvars();
     weapons_add_shot_hook(on_shot, NULL);
+    game_fire_init();
     crosshair_init();
     recoil_debug_init();
     camera_register_cvars();

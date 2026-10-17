@@ -160,17 +160,59 @@ static RecoilType recoil_type_of(const cJSON *w) {
     return RT_RIFLE;
 }
 
-// "sway": { "hip": { breathing, look_lag, bob, landing }, "ads": { ... }, "hold_breath_mult" }
-// (in the weapon or its "recoil" block); missing values keep the defaults.
-static void parse_sway(RecoilParams *r, const cJSON *sw) {
-    if (!sw) return;
-    static const char *keys[4] = { "breathing", "look_lag", "bob", "landing" };
-    const cJSON *h = cJSON_GetObjectItemCaseSensitive(sw, "hip"), *a = cJSON_GetObjectItemCaseSensitive(sw, "ads");
-    for (int i = 0; i < 4; i++) {
-        if (h) r->sway_hip[i] = jnum(h, keys[i], r->sway_hip[i]);
-        if (a) r->sway_ads[i] = jnum(a, keys[i], r->sway_ads[i]);
+// Sway is global (assets/weapons/sway_global.json, src/player/sway.c): a weapon's "sway",
+// "idle_sway" or "scope_sway" keys are ignored (only the "anchor" of its "recoil.sway" block is read).
+static void warn_sway_keys(const cJSON *w, const char *id) {
+    const cJSON *rc = cJSON_GetObjectItemCaseSensitive(w, "recoil");
+    const cJSON *rs = rc ? cJSON_GetObjectItemCaseSensitive(rc, "sway") : NULL;
+    if (cJSON_GetObjectItemCaseSensitive(w, "sway") || cJSON_GetObjectItemCaseSensitive(w, "idle_sway") || cJSON_GetObjectItemCaseSensitive(w, "scope_sway") ||
+        (rs && (cJSON_GetObjectItemCaseSensitive(rs, "hip") || cJSON_GetObjectItemCaseSensitive(rs, "ads"))))
+        log_warn("items: weapon '%s' sets its own sway: ignored (sway is one global profile, assets/weapons/sway_global.json)", id);
+}
+
+// Fire animation class files (assets/weapons/fire_poses/<class>.json) over the built-in defaults,
+// read once per weapon load.
+static FireAnimDef g_fire_class[FC_COUNT];
+static bool g_fire_class_loaded[FC_COUNT];
+static const FireAnimDef *fire_class_def(int cls) {
+    cls = DG_CLAMP(cls, 0, FC_COUNT - 1);
+    if (!g_fire_class_loaded[cls]) {
+        g_fire_class_loaded[cls] = true;
+        fire_anim_class_defaults(&g_fire_class[cls], cls);
+        char path[160];
+        snprintf(path, sizeof(path), "assets/weapons/fire_poses/%s.json", fire_class_name(cls));
+        cJSON *j = load_json(path);
+        if (j) {
+            fire_anim_parse(&g_fire_class[cls], j);
+            fire_anim_resolve(&g_fire_class[cls]);
+            cJSON_Delete(j);
+        }
     }
-    r->hold_breath_mult = jnum(sw, "hold_breath_mult", r->hold_breath_mult);
+    return &g_fire_class[cls];
+}
+void items_fire_classes_reload(void) { memset(g_fire_class_loaded, 0, sizeof(g_fire_class_loaded)); }
+
+static int fire_class_of(const cJSON *w, const char *id, int pellets) {
+    const cJSON *fa = cJSON_GetObjectItemCaseSensitive(w, "fire_anim");
+    int c = fire_class_from_name(jstr(fa, "class", NULL));
+    if (c >= 0) return c;
+    if (strstr(id, "lmg")) return FC_LMG;
+    if (strstr(id, "smg")) return FC_SMG;
+    if (strstr(id, "shotgun") || pellets > 1) return FC_SHOTGUN;
+    if (strstr(id, "sniper")) return FC_SNIPER;
+    if (strstr(id, "dmr")) return FC_DMR;
+    if (strstr(id, "crossbow")) return FC_CROSSBOW;
+    if (strstr(id, "pistol")) return FC_PISTOL;
+    return FC_RIFLE;
+}
+
+static u8 mech_from(const char *s) {
+    if (!s) return MECH_NONE;
+    if (!strcmp(s, "slide")) return MECH_SLIDE;
+    if (!strcmp(s, "bolt")) return MECH_BOLT;
+    if (!strcmp(s, "pump")) return MECH_PUMP;
+    if (!strcmp(s, "mag")) return MECH_MAG;
+    return MECH_NONE;
 }
 
 static void parse_recoil(const cJSON *w, RecoilParams *r) {
@@ -181,8 +223,6 @@ static void parse_recoil(const cJSON *w, RecoilParams *r) {
     r->burst_count = (int)jnum(w, "burst_count", 3);
     r->ads_time = jnum(w, "ads_time", r->ads_time);
     r->sprint_to_fire = jnum(w, "sprint_to_fire", r->sprint_to_fire);
-    r->idle_sway = jnum(w, "idle_sway", r->idle_sway);
-    r->scope_sway = jnum(w, "scope_sway", r->scope_sway);
     r->hold_breath_time = jnum(w, "hold_breath", r->hold_breath_time);
     const cJSON *fm = cJSON_GetObjectItemCaseSensitive(w, "fire_modes");
     if (cJSON_IsArray(fm)) {
@@ -285,7 +325,6 @@ static void parse_recoil(const cJSON *w, RecoilParams *r) {
     }
     {
         const cJSON *sw = jobj(rc, "sway");
-        parse_sway(r, sw);
         const cJSON *an = sw ? jobj(sw, "anchor") : NULL;
         if (an) {
             r->sway_anchor_hip = anchor_from(jstr(an, "hip", NULL), r->sway_anchor_hip);
@@ -486,6 +525,7 @@ static void parse_weapon(ItemDB *db, const cJSON *w, const char *file) {
         mp->offset = jvec3(p, "offset", v3(0, 0, 0));
         mp->half = jvec3(p, "half", v3(0.02f, 0.02f, 0.1f));
         mp->color = jcolor(p, "color", v4(0.2f, 0.2f, 0.22f, 1));
+        mp->mech = mech_from(jstr(p, "mech", NULL));
     }
     if (d->kind != WPN_MELEE && d->part_count > 0 && !cJSON_GetObjectItemCaseSensitive(w, "muzzle_override")) {
         // Muzzle = front face of the forward-most model part (the barrel tip), so flashes and
@@ -501,8 +541,12 @@ static void parse_weapon(ItemDB *db, const cJSON *w, const char *file) {
         recoil_params_default(&d->recoil);
     } else {
         parse_recoil(w, &d->recoil);
-        parse_sway(&d->recoil, cJSON_GetObjectItemCaseSensitive(w, "sway"));
+        warn_sway_keys(w, d->id);
         d->fire_rate = d->recoil.rpm / 60.0f;
+        // Fire animation: the class pose + springs, the weapon's own mass / moment / overrides.
+        d->fire = *fire_class_def(fire_class_of(w, d->id, d->pellets));
+        fire_anim_parse(&d->fire, cJSON_GetObjectItemCaseSensitive(w, "fire_anim"));
+        fire_anim_resolve(&d->fire);
     }
     parse_hold(w, d->hold_style, &d->sockets, default_style_for(w, d->kind, d->id), d->support_offset, d->muzzle_offset, d->parts,
                d->part_count);
@@ -556,6 +600,7 @@ static void parse_weapon_root(ItemDB *db, const cJSON *root, const char *file) {
 static int cmp_str(const void *a, const void *b) { return strcmp(*(const char *const *)a, *(const char *const *)b); }
 
 static bool load_weapons(ItemDB *db, const char *weapons_path) {
+    items_fire_classes_reload();   // live tuning: class files are re-read with the weapons
     for (int i = 0; i < db->item_count; i++) db->items[i].weapon = -1;
     db->weapon_count = 0;
     size_t n = strlen(weapons_path);

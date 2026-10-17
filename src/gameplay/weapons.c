@@ -1,4 +1,5 @@
 #include "weapons.h"
+#include "player/sway.h"
 #include "attachments.h"
 #include "health.h"
 #include "effects.h"
@@ -120,7 +121,7 @@ float weapon_current_spread(const World *w, int slot) {
 vec2 weapon_sway_deg(const WeaponDef *d, const WeaponState *ws, float t) {
     if (!d || d->kind == WPN_MELEE) return v2(0, 0);
     const RecoilParams *rp = &d->recoil;
-    float amp = (rp->scope_sway > 0 ? rp->scope_sway : rp->idle_sway) * saturate(ws->ads_t) * ws->sway_k * cv_f(WC.sway_scale, 1.0f);
+    float amp = sway_global()->aim_sway * rp->sway_optic * saturate(ws->ads_t) * ws->sway_k * cv_f(WC.sway_scale, 1.0f);
     // Slow figure-eight, roughly breathing pace.
     float x = sinf(t * 0.83f) * 0.7f + sinf(t * 1.97f + 1.1f) * 0.3f;
     float y = sinf(t * 1.31f + 0.4f) * 0.6f + sinf(t * 2.63f + 2.0f) * 0.4f;
@@ -386,6 +387,9 @@ static vec3 muzzle_world(const PlayerMove *m, const WeaponDef *d, bool local_vie
     return v3_add(eye, v3_add(v3_scale(f, 0.45f - d->muzzle_offset.z * 0.5f), v3_add(v3_scale(r, 0.14f), v3_scale(u, -0.1f))));
 }
 
+static LocalFlashFn g_local_flash;
+void weapons_set_local_flash(LocalFlashFn fn) { g_local_flash = fn; }
+
 static WeaponDebugStats g_dbg_stats;
 const WeaponDebugStats *weapons_debug_stats(void) { return &g_dbg_stats; }
 void weapons_debug_reset(void) { memset(&g_dbg_stats, 0, sizeof(g_dbg_stats)); }
@@ -419,7 +423,11 @@ static void fire(World *w, int slot, PlayerSim *sim, const WeaponDef *d, const U
     vec3 muzzle = muzzle_world(m, d, local_view);
     int dbg = WC.recoil_debug ? WC.recoil_debug->i : 0;
     if (local_view && first) {
-        fx_muzzle_ex(muzzle, dir, d->vfx_muzzle_type, d->vfx_muzzle_device, true);
+        // The flash is parented to the gun's final transform of this tick (after the fire animation's
+        // kick, docs/FIRE_ANIM.md): the game spawns it once the first-person item is placed. The
+        // sound's transient is this tick, the same tick as the gun's peak displacement.
+        if (g_local_flash) g_local_flash(dir, d->vfx_muzzle_type, d->vfx_muzzle_device);
+        else fx_muzzle_ex(muzzle, dir, d->vfx_muzzle_type, d->vfx_muzzle_device, true);
         fx_sound(d->sound_fire, eye, 1.0f);
     }
     if (d->kind == WPN_PROJECTILE) {
@@ -838,6 +846,7 @@ void weapons_tick(World *w, int slot, PlayerSim *sim, const UserCmd *cmd, u16 pr
         }
         cap = DG_MIN(cap, (int)*mag);
         int n = recoil_fire_budget(&ws->cooldown, interval, dt, trigger && ready && cap > 0, DG_MAX(cap, 0));
+        float cooldown_after = ws->cooldown;
         PlayerMove *m = &sim->move;
         vec3 eye = player_eye_pos(m);
         vec2 sway = weapon_aim_offset_deg(d, ws, m, weapon_sway_time(cmd->seq));
@@ -881,6 +890,11 @@ void weapons_tick(World *w, int slot, PlayerSim *sim, const UserCmd *cmd, u16 pr
                 ev.mode = mode;
                 ev.ads_t = ws->ads_t;
                 ev.seed = seed;
+                // Exact fire time inside this tick (the cooldown carries the remainder): shot k of n was
+                // due (n - k) intervals before the cooldown that is left.
+                float due = cooldown_after - (float)(n - k) * interval;
+                ev.sub_tick = saturate((dt + due) / fmaxf(dt, 1e-6f));
+                ev.interval = mode == FM_SINGLE ? 0.0f : interval;
                 for (int h = 0; h < g_hook_count; h++) g_hooks[h].fn(&ev, g_hooks[h].user);
             }
         }

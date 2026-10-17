@@ -486,7 +486,7 @@ void post_begin_frame(const PostFrameIn *in) {
     u->s_gi = v4(s->ssgi_intensity, (float)s->ssgi, 0.35f, s->contact_shadows >= 2 ? 14.0f : 8.0f);   // contact steps by quality
     u->s_vol = v4(s->fog_density, s->fog_height, s->fog_falloff, s->fog_anisotropy);
     u->s_vol2 = v4(s->fog_albedo.x, s->fog_albedo.y, s->fog_albedo.z, s->sun_shafts);
-    u->s_mb = v4(s->mb_intensity, (float)s->motion_blur, 40.0f, 16.0f);
+    u->s_mb = v4(s->mb_intensity, (float)s->motion_blur, 40.0f, s->mb_viewmodel);   // w: fire blur spike on the viewmodel
     u->s_dof = v4(s->dof_focus, s->dof_fstop, s->dof_focal_mm, s->dof_max_coc);
     u->s_dof2 = v4((float)s->dof_autofocus, s->dof_quality >= 2 ? (float)s->dof_bokeh : 0.0f, (float)s->dof, 24.0f);
     u->s_bloom = v4(s->bloom_intensity, s->bloom_dirt, 6.0f, (float)s->bloom);

@@ -543,6 +543,15 @@ static void apply_feedback(PostSettings *s, const PostFrameInfo *fi, float dt) {
     s->fb_lowhealth = GP.lowhealth * k;
     s->fb_flash = GP.flash * k;
     s->fb_hitmarker = hm * k;
+    // Fire animation (docs/FIRE_ANIM.md layer 5): the 1-2 tick blur spike on the viewmodel and the
+    // chromatic / vignette tick of heavy weapons (already 0 at Low fidelity).
+    {
+        float blur = 0.0f, chroma = 0.0f;
+        game_fire_post(&blur, &chroma);
+        s->mb_viewmodel = blur * 0.5f;
+        s->chromatic += chroma * 0.6f;
+        s->vignette += chroma * 0.12f;
+    }
     s->fb_sprint = GP.sprint * 0.6f * k;
     s->fb_underwater = GP.underwater->f;
     s->fb_nightvision = GP.nightvision_w;

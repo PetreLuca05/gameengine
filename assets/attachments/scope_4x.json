@@ -3,6 +3,7 @@
   "id": "scope_4x",
   "name": "4x Scope",
   "slot": "optic",
+  "fire": { "mass": 0.35, "yaw_lag": 1.15 },
   "sight": "scope",
   "mount": {
     "pos": [0, 0, 0]

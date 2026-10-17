@@ -13,6 +13,7 @@
 #include "anim/character_rt.h"
 #include "anim/anim_net.h"
 #include "anim/anim_lod.h"
+#include "anim/fire_anim.h"
 #include "gameplay/hitboxes.h"
 #include "physics/ragdoll.h"
 
@@ -77,7 +78,11 @@ typedef struct CharacterInst {
     u32 last_eval;
     int interval;
     bool culled;
-    vec3 kick_x, kick_v;              // remote recoil kick on the item (cosmetic)
+    // Third-person fire animation (docs/FIRE_ANIM.md): layers 1, 2 and 4 at a reduced scale, driven
+    // by the fire events with a deterministic seed, so everyone sees the kick and the slide.
+    FireAnimState tp_fire;
+    FireAnimOut tp_fire_out;
+    u32 tp_fire_shots;
     // death / ragdoll
     Ragdoll rag;
     bool dead, rag_pending, settled;
@@ -144,6 +149,13 @@ void chars_set_fp_camera(vec3 pos, quat rot, bool valid);
 // Aim offset of the held item (degrees right / up of the view, the view pitch in radians): the
 // first-person item turns about the eye so its sight points where the shots go.
 void chars_set_fp_aim_offset(float right_deg, float up_deg, float view_pitch, float world_fov_deg, float vm_fov_deg);
+// Fire animation of the first-person weapon (docs/FIRE_ANIM.md): tick = this tick's output (the
+// gun kick on the hold point, evaluated per tick), frame = this frame's interpolated output (hand
+// lag, trigger, slide, attachment wobble at render). NULL keeps the previous one; both NULL clears.
+Xform chars_fp_item_cam_raw(void);   // the rendered first-person item in camera space (this frame)
+struct FireAnimOut;
+void chars_set_fp_fire(const struct FireAnimOut *tick, const struct FireAnimOut *frame);
+void chars_set_fp_fire_snap(bool snap);   // a shot landed this tick: no item interpolation until the next one
 // Last first-person frame: hand <-> socket error ([0] left, [1] right; m / deg) and ADS sight error.
 void chars_fp_diag(float glue_pos[2], float glue_ang[2], float *ads_pos, float *ads_ang);
 const char *chars_holdpoint_text(World *w, int local_slot);   // "hold <state> <blend>% pull .. reach .."

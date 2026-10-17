@@ -122,7 +122,7 @@ static bool promote(World *w, int slot) {
 static void reset_presentation(void) {
     G->view.smooth_init = false;
     memset(&G->cam_stab, 0, sizeof(G->cam_stab));
-    memset(&G->recoil_vis, 0, sizeof(G->recoil_vis));
+    game_fire_reset();
     G->spread_prev = G->spread_cur = 0;
     G->hitmarker_time = 0;
     G->damage_flash = 0;
