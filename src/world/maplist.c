@@ -61,6 +61,7 @@ bool maplist_parse(const char *json, const char *id, MapInfo *out, MapFileExists
         get_f(root, "order", &order);
         out->order = (int)order;
         out->dev = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "dev"));
+        get_s(root, "scene", out->scene, sizeof(out->scene));
     }
     if (!bad && file_exists && !file_exists(out->thumbnail, user)) bad = "thumbnail file missing";
     cJSON_Delete(root);
@@ -123,6 +124,6 @@ void maplist_size_text(const MapInfo *m, char *out, int size) {
 
 u32 maplist_hash(const MapList *ml) {
     u32 h = 0x9E3779B9u;
-    for (int i = 0; i < ml->count; i++) h = dg_hash_u32(h ^ dg_hash_str(ml->maps[i].id) ^ (dg_hash_str(ml->maps[i].level) * 31u));
+    for (int i = 0; i < ml->count; i++) h = dg_hash_u32(h ^ dg_hash_str(ml->maps[i].id) ^ (dg_hash_str(ml->maps[i].level) * 31u) ^ (dg_hash_str(ml->maps[i].scene) * 131u));
     return h;
 }

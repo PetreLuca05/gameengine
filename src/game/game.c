@@ -7,6 +7,9 @@
 #include "editor/handpose/hp_system.h"
 #include "editor/handpose/hp_editor.h"
 #include "scene.h"
+#include "net/lobby_net.h"
+#include "world/maplist.h"
+#include <SDL3/SDL.h>
 #include "core/engine.h"
 #include "core/cvar.h"
 #include "core/log.h"
@@ -933,11 +936,41 @@ void game_sv_receive_cmd(int slot, const UserCmd *cmd) {
 
 // ------------------------------------------------------------------ console commands
 
+// map: every level (data/levels/*.json), the procedural maps, the main menu's catalogue (assets/maps, with
+// its scene entries) and the dev scenes.
+static void map_list(void) {
+    char dir[512];
+    int n = 0;
+    char **files = SDL_GlobDirectory(platform_data_path("data/levels", dir, sizeof(dir)), "*.json", 0, &n);
+    log_info("map <name>: levels (data/levels):");
+    for (int i = 0; files && i < n; i++) {
+        char id[64];
+        dg_strcpy(id, sizeof(id), files[i]);
+        char *dot = strrchr(id, '.');
+        if (dot) *dot = 0;
+        const MapInfo *mi = lobby_maps() ? maplist_find(lobby_maps(), id) : NULL;
+        log_info("  %-14s %s", id, mi ? mi->name : "");
+    }
+    SDL_free(files);
+    log_info("  %-14s procedural noise terrain (streamed)", "streaming");
+    log_info("  %-14s procedural flat ground", "flat");
+    const MapList *ml = lobby_maps();
+    log_info("main menu entries (map <id> works too):");
+    for (int i = 0; ml && i < ml->count; i++) {
+        const MapInfo *m = &ml->maps[i];
+        log_info("  %-14s %-24s level %s%s%s%s", m->id, m->name, m->level, m->scene[0] ? " + scene " : "", m->scene, m->dev ? "  (test)" : "");
+    }
+    log_info("scenes: scene <name> (scene lists them)");
+}
+
 static void cmd_map(int argc, const char **argv) {
-    if (argc < 2) { log_info("usage: map <devroom|streaming|flat>"); return; }
-    cvar_set_cv(G->g_map, argv[1]);
+    if (argc < 2) { map_list(); return; }
+    // A main menu id (e.g. "handpose": the dev room + the hand-pose scene) resolves to its level / scene.
+    const MapInfo *mi = lobby_maps() ? maplist_find(lobby_maps(), argv[1]) : NULL;
+    const char *level = mi ? mi->level : argv[1];
+    cvar_set_cv(G->g_map, level);
     if (mainmenu_active()) mainmenu_session_started();   // map from the console: the menu closes
-    game_host(argv[1]);
+    if (game_host(level) && mi && mi->scene[0]) scene_enter(mi->scene);
 }
 
 static void cmd_flashlight(int argc, const char **argv) {
@@ -1574,7 +1607,7 @@ void game_init(void) {
     G->host_timescale = cvar_reg_float("host_timescale", 1.0f, 0.01f, 4.0f, CVAR_CHEAT, "simulation speed (slow motion for the ballistics range / screenshots; single player or hosting alone)");
     G->interact_range = cvar_reg_float("cl_interact_range", 3.0f, 0.5f, 10.0f, 0, "interaction focus raycast length (m); each interactable also has its own range");
     G->world_seed = cvar_reg_int("world_seed", 1337, 0, 999999999, CVAR_ARCHIVE, "procedural world seed");
-    cmd_register("map", cmd_map, "host a new game on a map");
+    cmd_register("map", cmd_map, "map <name>: host a new game on a level / menu entry; map: list every level, menu entry and scene");
     wheels_register();
     revive_register();
     game_death_register();

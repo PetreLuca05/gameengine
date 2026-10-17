@@ -1,0 +1,17 @@
+{
+  "name": "Terrain Yard",
+  "level": "terrain_yard",
+  "thumbnail": "assets/maps/thumbs/terrain_yard.png",
+  "size_m": 128,
+  "biome": "Terrain test",
+  "players": [
+    1,
+    4
+  ],
+  "time_of_day": 13,
+  "season": "summer",
+  "weather": "",
+  "dev": true,
+  "order": 60,
+  "description": "Transition test strip: one straight border per terrain material pair (grass, dirt, rock, mud, sand, field, meadow, asphalt, gravel), rows 10 m apart. r_terrain_debug 7 / 11 / 1 show the bands, border distance and weights."
+}

@@ -22,6 +22,7 @@ typedef struct MapInfo {
     float size_m;             // playable extent (m, one side); 0 = unbounded
     int players_min, players_max;   // recommended
     bool dev;                 // developer / test map (filtered out unless "show dev maps")
+    char scene[32];           // optional dev scene opened once the level is up ("handpose"; "" = none)
     int order;                // list order
 } MapInfo;
 

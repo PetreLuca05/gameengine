@@ -5,7 +5,7 @@
 #   .\play.ps1 -Scene handpose          straight into a scene (hand-pose editor)
 #   .\play.ps1 -NoNanite -Map vegetation
 #   .\play.ps1 -Dev                     the dev build (build\bin) instead
-# Maps: devroom, vegetation, wateryard, vgeo_test. Scenes: handpose.
+# Maps: devroom, vegetation, terrain_yard, wateryard, vgeo_test, streaming, flat (console: map lists them). Scenes: handpose.
 param(
     [switch]$NoNanite,
     [string]$Map = "",

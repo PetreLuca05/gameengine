@@ -176,8 +176,10 @@ Console: `season [spring|summer|autumn|winter|off] [start preset|random] [static
      "weather": "", "order": 30, "description": "..." }
    ```
    `level` is what `game_host` loads (`data/levels/<level>.json`, or `streaming` / `flat`);
-   `weather` "" = the season's pick; `"dev": true` hides it behind "Show test maps"; `size_m` 0 =
-   unbounded.
+   `weather` "" = the season's pick; `"dev": true` marks a test map ("Show test maps", on by default,
+   hides them when turned off); `"scene": "handpose"` opens that dev scene once the level is up (the
+   Hand Pose Editor entry); `size_m` 0 = unbounded. The console's `map` (no argument) lists every level,
+   menu entry and scene; `map <menu id>` resolves an entry to its level / scene.
 2. A 384 × 216 thumbnail: `python tools/gen_map_thumbs.py` (brush levels are drawn top-down;
    open-world levels: `mapgen_preview data/levels/<level>.json x.png 8` then
    `--preview <id>=x.png`), or any PNG.

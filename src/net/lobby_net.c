@@ -17,6 +17,7 @@
 #include "core/platform.h"
 #include "game/game.h"
 #include "game/game_internal.h"
+#include "game/scene.h"
 #include "world/chunks.h"
 #include "world/season.h"
 #include "ui/mainmenu/mainmenu.h"
@@ -88,7 +89,7 @@ bool lobby_is_host(void) { return S && S->L.is_host && lobby_state_in_session(S-
 bool lobby_active(void) { return S && lobby_state_in_session(S->L.state); }
 const char *lobby_closed_reason(void) { return S->L.close_reason; }
 TransportKind lobby_transport(void) { return S->kind; }
-const MapList *lobby_maps(void) { return &S->maps; }
+const MapList *lobby_maps(void) { return S ? &S->maps : NULL; }
 const MapInfo *lobby_map_info(const char *id) { return maplist_find(&S->maps, id); }
 const CosmeticDB *lobby_cosmetics(void) { return &S->cos; }
 Profile *lobby_profile(void) { return &S->prof; }
@@ -682,6 +683,7 @@ static void host_load_map(void) {
     mainmenu_leave_scene();
     if (!game_host_ex(level, GH_KEEP_NET)) { net_stop(); close_with(LE_TRANSPORT_FAIL, "The map failed to load"); go_menu(NULL); return; }
     lobby_apply_environment(game_world(), &S->L.settings);
+    if (mi && mi->scene[0]) scene_enter(mi->scene);   // a scene entry ("handpose"): its level, then the scene
     // Everyone in the lobby joins the game now.
     for (int i = 0; i < LOBBY_MAX_MEMBERS; i++) {
         LobbyMember *m = &S->L.members[i];

@@ -486,6 +486,7 @@ static void cmd_mm_dump(int argc, const char **argv) {
 
 void mainmenu_init(void) {
     memset(M, 0, sizeof(*M));
+    M->show_dev_maps = true;   // every map and scene is listed (the toggle hides the test ones)
     M->inited = true;
     // The flow is on for players; --test runs (scripts, screenshots) boot straight into the dev room
     // unless they ask for it (--menu); --nomenu skips splash + menu for a normal run too (straight into

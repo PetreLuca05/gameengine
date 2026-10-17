@@ -1,0 +1,17 @@
+{
+  "name": "Water Yard",
+  "level": "wateryard",
+  "thumbnail": "assets/maps/thumbs/wateryard.png",
+  "size_m": 512,
+  "biome": "Coast and lake",
+  "players": [
+    1,
+    4
+  ],
+  "time_of_day": 12,
+  "season": "summer",
+  "weather": "little_cloudy",
+  "dev": true,
+  "order": 70,
+  "description": "Water test map: a sea with a beach and surf, a lake with a dock and a car to drive in, a 14 m diving pit and floating props. water_debug 1, spawn_float <density>, wind_set <m/s>."
+}

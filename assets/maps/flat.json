@@ -1,0 +1,17 @@
+{
+  "name": "Flat Ground",
+  "level": "flat",
+  "thumbnail": "assets/maps/thumbs/flat.png",
+  "size_m": 0,
+  "biome": "Procedural flat",
+  "players": [
+    1,
+    8
+  ],
+  "time_of_day": 12,
+  "season": "summer",
+  "weather": "",
+  "dev": true,
+  "order": 96,
+  "description": "Endless flat procedural ground: an empty canvas for movement, vehicle and network tests."
+}
