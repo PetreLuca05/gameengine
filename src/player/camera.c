@@ -18,7 +18,7 @@ void camera_register_cvars(void) {
     c->sv_fov_max = cvar_reg_float("sv_fov_max", 0.0f, 0.0f, 120.0f, CVAR_SERVER, "host cap of the players' cl_fov (vertical deg, replicated; 0 = no cap)");
     c->max_aspect = cvar_reg_float("sv_fov_max_aspect", 16.0f / 9.0f, 0.0f, 4.0f, CVAR_SERVER,
                                    "widest aspect that sees more to the sides; wider screens keep its horizontal FOV (0 = unlimited Hor+)");
-    c->ads_world_zoom = cvar_reg_float("cl_ads_world_zoom", 1.1f, 1.0f, 1.5f, CVAR_ARCHIVE,
+    c->ads_world_zoom = cvar_reg_float("cl_ads_world_zoom", 1.5f, 1.0f, 1.5f, 0,
                                        "ADS: the world camera narrows by this (tangent ratio) when fully aimed, on top of the hands / weapon zoom (1 = off; a sight's \"world_zoom\" overrides it)");
     c->headbob = cvar_reg_bool("cl_headbob", true, CVAR_ARCHIVE, "camera head bob");
     c->bob_amount = cvar_reg_float("cl_headbob_amount", 1.0f, 0.0f, 3.0f, CVAR_ARCHIVE, "head bob strength");
@@ -101,7 +101,7 @@ RenderCamera camera_update(ViewState *v, const PlayerMove *m, float dt, const Ca
     v->eye = eye;
 
     // FOV: the player's base (cl_fov / the host's sv_fov), sprint widens it (smoothed). ADS narrows
-    // the world a little (the sight's world zoom, ~1.1x, along smoothstep(ads_t): exact the frame
+    // the world (the sight's world zoom, cl_ads_world_zoom 1.5x, along smoothstep(ads_t): exact the frame
     // ADS completes); the arms / weapon projection narrows by its own, stronger vm_ads_zoom and a
     // scope magnifies inside its lens.
     float hip = camera_base_fov();

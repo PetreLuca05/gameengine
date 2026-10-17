@@ -192,13 +192,14 @@ per-frame re-solve. The barrel pull is used only if the slide isn't enough.
   `sv_fov_max` (0 = no cap), both replicated, for servers that want no FOV advantage. Screens up to
   `sv_fov_max_aspect` (16:9) see more to the sides (Hor+); wider screens keep the 16:9 horizontal
   FOV. Sprint widening (`cl_sprint_fov`) and the fire FOV punch still apply.
-- **ADS zooms the world slightly.** The world camera narrows by the sight's world zoom (a tangent
-  ratio: `cl_ads_world_zoom`, default 1.1 = 75° → 69.8°, Settings "Aim zoom"; a sight's
+- **ADS zooms the world.** The world camera narrows by the sight's world zoom (a tangent
+  ratio: `cl_ads_world_zoom`, fixed 1.5 = 75° → 54.2°, no Settings slider and not saved; a sight's
   `world_zoom` / a weapon's `ads_world_zoom` overrides it) along `smoothstep(ads_t)`, exactly the aimed
   value the frame ADS completes (`camera_ads_fov`).
-- **ADS zooms the hands and the weapon more.** Their projection narrows by `attach_ads_vm_zoom`
-  (a tangent ratio) along `smoothstep(ads_t)`, exactly the aimed value the moment `ads_t`
-  reaches 1. Iron sights use the weapon's `ads_fov`, a red dot its own `ads_fov` / `zoom` on top,
+- **ADS puts the hands and the weapon at one fixed FOV.** Aimed, their projection is the sight's own
+  FOV, `2·atan(tan(75°/2) / attach_ads_vm_zoom)` (`RENDER_ADS_REF_FOV`), whatever `cl_fov` and the
+  hip hands FOV are: the same sight picture for every player. It blends from the hip hands FOV along
+  `smoothstep(ads_t)`, exactly the aimed value the moment `ads_t` reaches 1. Iron sights use the weapon's `ads_fov`, a red dot its own `ads_fov` / `zoom` on top,
   a scope `main_zoom`; each as a FOV against a 75° view, so the gun and sight look as they did
   when this zoomed the whole view. The default irons are `75 · 0.8` = 60° against 75°, the
   1.25x ADS hands zoom. The hip value is `RenderCamera.vm_fov_deg` (the hip FOV) or
@@ -218,7 +219,7 @@ per-frame re-solve. The barrel pull is used only if the slide isn't enough.
 
 Sensitivity while aiming is `cl_ads_sensitivity` times the sight FOV factor. The sight FOV is the
 FOV the world is seen at: irons and red dots the aimed world FOV (the base FOV at the ADS world zoom,
-~1.1x), a 4x scope `2·atan(tan(base/2)/4)` (its lens magnification).
+1.5x), a 4x scope `2·atan(tan(base/2)/4)` (its lens magnification).
 `ads_sens_mode` sets the factor:
 
 | Mode | Factor |
@@ -322,7 +323,7 @@ ADS DoF switches on exactly while the aim is complete (`ads_dof`):
 | `ads_debug 1` | The sight socket projected against the exact screen centre (px, mm off axis, degrees, eye relief), world / hands FOV, sight zoom, PiP FOV, sensitivity, DoF mode |
 | `sight_debug 1..6` | 1 lens mask, 2 raw PiP, 3 eye box, 4 reticle only, 5 glass only, 6 lens hit / occlusion |
 | `cl_fov` | World camera vertical FOV (50..120, default 75; Settings "Field of view") |
-| `cl_ads_world_zoom` | ADS world zoom (tangent ratio 1..1.5, default 1.1; Settings "Aim zoom"); sights override it with `world_zoom` |
+| `cl_ads_world_zoom` | ADS world zoom (tangent ratio 1..1.5, default 1.5, not saved, no Settings slider); sights override it with `world_zoom` |
 | `sv_fov`, `sv_fov_max`, `sv_fov_max_aspect` | Host override of every player's FOV (0 = off), cap of `cl_fov` (0 = none), the widest Hor+ aspect (16:9; 0 = unlimited); replicated |
 | `fov_report` | cl_fov / sv_fov / base / current world and hands FOV |
 | `r_scope_pip_scale` | PiP resolution (fraction of the render height) |

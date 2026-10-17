@@ -1,7 +1,7 @@
 // Weapon sights at runtime (docs/ATTACHMENTS.md): the ADS arms / weapon zoom per sight,
 // sensitivity scaling, the sight hand-off to the renderer (red dot / scope lens geometry, reticle,
 // picture-in-picture camera, ADS depth of field), the ads_debug overlay and the sight tests.
-// ADS narrows the world camera a little (cl_ads_world_zoom / the sight's world_zoom, ~1.1x) and the
+// ADS narrows the world camera a little (cl_ads_world_zoom / the sight's world_zoom, 1.5x) and the
 // arms / weapon projection more (the sight's authored ADS zoom); a scope's magnification exists only
 // inside its lens.
 //
@@ -588,7 +588,7 @@ static void fov_frame(const RenderCamera *cam) {
     RenderCamera hip_cam = *cam;
     hip_cam.ads_t = 0;
     float vm_hip = render_vm_fov_for(&hip_cam, rvm ? rvm->f : 0.0f);
-    float vm_target = 2.0f * atanf(tanf(vm_hip * 0.5f * DG_DEG2RAD) / fmaxf(S.vm_zoom, 1.0f)) * DG_RAD2DEG;
+    float vm_target = S.vm_zoom > 1.0f ? 2.0f * atanf(tanf(RENDER_ADS_REF_FOV * 0.5f * DG_DEG2RAD) / S.vm_zoom) * DG_RAD2DEG : vm_hip;   // absolute (render_vm_fov_for)
     bool complete = S.complete;
     bool was = t->prev_t >= 1.0f;
     float hip = cam->vm_fov_deg > 1.0f ? cam->vm_fov_deg : cam->fov_deg;   // the hip FOV (sprint included)
@@ -609,7 +609,7 @@ static void fov_frame(const RenderCamera *cam) {
         log_info("sight_test fov: ADS complete -> world FOV %.3f (hip %.3f, world zoom %.3f: target %.3f), hands FOV %.3f (target %.3f) ADS DoF %d -> %s", cam->fov_deg,
                  t->hip_fov, S.world_zoom, world_aimed, vm, vm_target, S.rs.ads_dof, ok ? "ok" : "FAIL");
     } else if (!complete && was) {
-        bool ok = !S.rs.ads_dof && (S.vm_zoom <= 1.0f || vm > vm_target + 1e-5f) && fabsf(cam->fov_deg - world_now) < 1e-3f;   // back on the ADS curve below 1 (flat at the top: no fixed margin)
+        bool ok = !S.rs.ads_dof && (S.vm_zoom <= 1.0f || fabsf(vm - vm_target) > 1e-5f || fabsf(vm_hip - vm_target) < 1e-3f)   /* off the aimed FOV (unless hip = aimed) */ && fabsf(cam->fov_deg - world_now) < 1e-3f;   // back on the ADS curve below 1 (flat at the top: no fixed margin)
         t->fov_checks++;
         if (!ok) t->fov_fail++;
         log_info("sight_test fov: ADS left -> world FOV %.3f, hands FOV %.3f ADS DoF %d (user mode restored) -> %s", cam->fov_deg, vm, S.rs.ads_dof, ok ? "ok" : "FAIL");

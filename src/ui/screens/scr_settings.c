@@ -437,7 +437,6 @@ static void tab_graphics(GuiCursor *c, GuiRect content) {
                             svm && svm->f >= 1.0f ? "Vertical camera FOV (this server caps it). Aiming zooms the world slightly and your hands / weapon more; scopes magnify inside the scope."
                                                   : "Vertical camera FOV (75 = 107\xC2\xB0 horizontal at 16:9). Aiming zooms the world slightly and your hands / weapon more; scopes magnify inside the scope.");
         }
-        row_slider_cvar(c, "Aim zoom", "cl_ads_world_zoom", 1.0f, 1.5f, 0.01f, "%.2fx", "How much the world zooms in when you aim down sights (1 = none). Sights may set their own.");
     }
     {
         // Stretched resolution simulator: the slider and what it looks like on this display.

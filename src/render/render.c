@@ -2773,8 +2773,9 @@ bool render_world_to_screen(vec3 world, vec2 *out_px) {
 float render_vm_fov_for(const RenderCamera *c, float rvm) {
     float hip = rvm > 1.0f ? rvm : (c->vm_fov_deg > 1.0f ? c->vm_fov_deg : c->fov_deg);
     if (c->vm_ads_zoom <= 1.0f) return hip;
-    // ADS narrows only the arms / weapon: exactly hip / vm_ads_zoom (tan) once aimed.
-    float aimed = 2.0f * atanf(tanf(hip * 0.5f * DG_DEG2RAD) / c->vm_ads_zoom) * DG_RAD2DEG;
+    // Aimed, the arms / weapon are always seen at the sight's own FOV (the reference narrowed by
+    // vm_ads_zoom), independent of the main camera's and the hip hands FOV.
+    float aimed = 2.0f * atanf(tanf(RENDER_ADS_REF_FOV * 0.5f * DG_DEG2RAD) / c->vm_ads_zoom) * DG_RAD2DEG;
     float t = clampf(c->ads_t, 0.0f, 1.0f);
     t = t * t * (3.0f - 2.0f * t);
     return hip + (aimed - hip) * t;

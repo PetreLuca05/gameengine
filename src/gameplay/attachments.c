@@ -385,7 +385,7 @@ void attach_weapon_effective(const ItemDB *db, const WeaponDef *base, const u8 *
 // The authored ADS FOVs ("ads_fov" of weapons and optics) are degrees against a 75 deg
 // reference view. They no longer zoom the world: they set how much the arms / weapon
 // projection narrows (attach_ads_vm_zoom), and a scope's magnification inside its lens.
-#define ADS_REF_FOV 75.0f
+#define ADS_REF_FOV 75.0f   // = RENDER_ADS_REF_FOV (render.h)
 static float iron_fov(const WeaponDef *eff) { return (eff && eff->ads_fov > 1.0f) ? eff->ads_fov : ADS_REF_FOV * 0.8f; }
 static float zoom_fov(float fov, float zoom) { return 2.0f * atanf(tanf(fov * 0.5f * DG_DEG2RAD) / fmaxf(1.0f, zoom)) * DG_RAD2DEG; }
 static float fov_zoom(float fov) { return tanf(ADS_REF_FOV * 0.5f * DG_DEG2RAD) / tanf(clampf(fov, 1.0f, 170.0f) * 0.5f * DG_DEG2RAD); }
