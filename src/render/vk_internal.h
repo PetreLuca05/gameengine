@@ -460,6 +460,28 @@ bool vkw_create_pipelines(void);
 // Frame graph, after the opaque scene is fogged and before the scene copy: snapshot, ripple sim,
 // surface pass (writes hdr, depth, velocity).
 void vkw_build_graph(int hdr, int depth, int velocity);
+// vk_classic.c: the classic instanced renderer of the vgeo scene content (r_vgeo 0, docs/CLASSIC_RENDERER.md)
+struct VgScene;
+struct VgBuilt;
+struct VgDisplace;
+void vkc_init(void);
+void vkc_shutdown(void);
+void vkc_register_mesh(u32 mesh, const struct VgBuilt *b, bool persistent);   // LOD chain + impostor textures
+struct VgTextures;
+void vkc_set_textures(const struct VgTextures *t);
+void vkc_samplers_changed(void);                              // the vgeo texture table (module-owned slots)
+void vkc_chunk_loaded(const struct VgScene *s, u32 handle);                    // placement chunk: per-cell distance limits
+// views: r_vgeo 0 (main view + sun cascade batches); false: the scene for the local light tiles only.
+void vkc_frame(const struct VgScene *s, const struct VgDisplace *disp, float density, float lod_px, float shadow_lod_px, float small_impostor_px, bool era2010,
+               bool shadows, bool views);
+struct VgViewGpu;
+struct VgWindTex;
+void vkc_wind_frame(const struct VgViewGpu *v, const struct VgWindTex *w);   // after the wind tile upload: the frame's wind (set 4)
+void vkc_draw_gbuffer(VkCommandBuffer cmd);   // inside the prepass (frame set bound)
+void vkc_draw_lit(VkCommandBuffer cmd);       // inside the opaque pass (depth EQUAL)
+void vkc_draw_shadow(VkCommandBuffer cmd, u32 cascade);   // inside the sun shadow pass
+u32 vkc_draw_local_shadow(VkCommandBuffer cmd, vec4 sphere, const vec4 planes[6], u32 view, u32 tile_px);
+void vkc_stats(void);
 
 // vk_vfx.c: GPU particles, decals, distortion
 bool vkx_init(void);

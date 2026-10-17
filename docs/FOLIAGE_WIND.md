@@ -344,7 +344,8 @@ The `vgeo_uv_plane_lod` fix (below) keeps the `vgeo_foliage` masked-raster check
 First written on Mesa llvmpipe (Vulkan 1.4, software) in a Linux container; merged onto the tree
 import and run on Windows (RTX 3060 Ti): every ctest passes, `wind.cfg` and `map vegetation` in a
 24 m/s wind with `--validation` give 0 messages, `tools/tests/tex_veg.cfg` / `tree_scale.cfg` keep the
-tree sizes and textures, `r_vgeo 0` is unchanged (the classic path draws no foliage).
+tree sizes and textures. `r_vgeo 0` (the classic renderer, docs/CLASSIC_RENDERER.md) runs the same
+`wpo_veg` in its vertex shader.
 
 **Cost** (`map vegetation`, 1600 x 900, the same cameras, `r_foliage_wind 0` vs `3` in one run,
 `post_bench` "all passes" minus "post"): about +0.4 ms (broadleaf edge 1.55 -> 2.0 ms, pine edge 1.45

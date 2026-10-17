@@ -185,48 +185,6 @@ static void test_decal_budget(void) {
     free(lib);
 }
 
-static void test_flash_per_shot(VfxLibrary *lib, const char *effect_name) {
-    int fx = vfx_lib_find_effect(lib, effect_name);
-    CHECK(fx >= 0, "%s exists", effect_name);
-    if (fx < 0) return;
-    VfxSystem *s = (VfxSystem *)calloc(1, sizeof(VfxSystem));
-    vfx_sys_init(s, lib);
-    s->cfg.camera = v3(0, 1.6f, 0);
-    // 1200 RPM = 20 shots / s = one shot every 3 ticks.
-    int shots = 0, max_alive = 0, repeats = 0, core_k = -1;
-    const VfxEffectDef *e = &lib->effects[fx];
-    for (int k = 0; k < e->emitter_count; k++) if (!strcmp(lib->emitters[e->emitters[k]].name, "core")) core_k = k;
-    CHECK(core_k >= 0, "%s has a core emitter", effect_name);
-    int last_variant = -2;
-    u32 records_core = 0;
-    for (int t = 0; t < 600; t++) {
-        s->spawn_count = 0;
-        if (t % 3 == 0) {
-            VfxSpawnParams p = vfx_spawn_params(v3(0, 1.5f, 0));
-            p.viewmodel = true;
-            vfx_sys_spawn(s, fx, &p);
-            shots++;
-        }
-        vfx_sys_tick(s, 1.0f / 60.0f);
-        int alive = 0;
-        for (int i = 0; i < VFX_MAX_INSTANCES; i++) alive += s->inst[i].active && s->inst[i].effect == fx;
-        if (alive > max_alive) max_alive = alive;
-        for (int i = 0; i < s->spawn_count; i++) {
-            const VfxGpuSpawn *g = &s->spawns[i];
-            if ((int)g->info[0] != lib->effects[fx].emitters[core_k]) continue;
-            records_core++;
-            int v = (int)(g->info[3] & 0xFFF);
-            if (v == last_variant) repeats++;
-            last_variant = v;
-        }
-    }
-    CHECK(s->stats.flashes_spawned == (u32)shots, "%s: one core flash per shot (%u flashes, %d shots)", effect_name, s->stats.flashes_spawned, shots);
-    CHECK(records_core == (u32)shots, "%s: one GPU core record per shot (%u)", effect_name, records_core);
-    CHECK(repeats == 0, "%s: never the same variant twice in a row (%d repeats)", effect_name, repeats);
-    CHECK(max_alive <= 4, "%s: no piling (max %d live instances at 1200 RPM)", effect_name, max_alive);
-    free(s);
-}
-
 static void test_assets(void) {
     VfxLibrary *lib = (VfxLibrary *)calloc(1, sizeof(VfxLibrary));
     bool ok = vfx_lib_load(lib, "assets/vfx");
@@ -242,14 +200,10 @@ static void test_assets(void) {
     }
     int hs = vfx_lib_impact_effect(lib, SURF_FLESH, true);
     CHECK(hs >= 0 && !strcmp(lib->effects[hs].name, "impact_flesh_head"), "headshot variant");
-    // Every weapon type x device has a muzzle effect named for it.
-    for (int t = 0; t < VFX_MUZZLE_TYPE_COUNT; t++)
-        for (int d = 0; d < VFX_DEV_COUNT; d++) {
-            int e = vfx_lib_muzzle_effect(lib, t, d);
-            char want[64];
-            snprintf(want, sizeof(want), "muzzle_%s_%s", vfx_muzzle_type_name(t), vfx_muzzle_device_name(d));
-            CHECK(e >= 0 && !strcmp(lib->effects[e].name, want), "muzzle %s (got %s)", want, e >= 0 ? lib->effects[e].name : "none");
-        }
+    // Muzzle flashes are composed per shot from parts (docs/BALLISTICS.md, gameplay/ballistics/bal_fx.c);
+    // the old per weapon type x device effects are gone.
+    static const char *parts[] = { "muzzle_primary", "muzzle_secondary_1", "muzzle_light", "muzzle_blast", "muzzle_haze" };
+    for (int k = 0; k < (int)(sizeof(parts) / sizeof(parts[0])); k++) CHECK(vfx_lib_find_effect(lib, parts[k]) >= 0, "muzzle part %s", parts[k]);
     // Every texture an emitter or decal names exists.
     for (int i = 0; i < lib->emitter_count; i++) {
         const VfxEmitterDef *e = &lib->emitters[i];
@@ -275,11 +229,6 @@ static void test_assets(void) {
             }
         free(l2);
         free(txt);
-    }
-    for (int t = 0; t < VFX_MUZZLE_TYPE_COUNT; t++) {
-        char n[64];
-        snprintf(n, sizeof(n), "muzzle_%s_bare", vfx_muzzle_type_name(t));
-        test_flash_per_shot(lib, n);
     }
     free(lib);
 }

@@ -271,7 +271,7 @@ opaque         legacy forward lighting, then the vgeo lit resolve (vgeo_lit.frag
   vgeo yet.
 - Active when `r_vgeo` is on and the scene has instances. Cvars: `r_vgeo` (1), `r_vgeo_error_px` (1.0),
   `r_vgeo_shadow_error_px` (2.0), `r_vgeo_sw_px` (32), `r_vgeo_occlusion` (0 off, 1 last frame's Hi-Z, 2 two-pass;
-  default 2), `r_vgeo_freeze`, `r_vgeo_shadows` (1), `r_vgeo_debug_spheres`, `r_vgeo_lod_px` (fallback),
+  default 2), `r_vgeo_freeze`, `r_vgeo_shadows` (1), `r_vgeo_debug_spheres`, `r_vgeo_lod_px` (classic renderer),
   `r_foliage_density` (1.0), `r_vgeo_impostor_px` (16), `r_era`.
 - Commands: `vgeo_stats`, `vgeo_test_scene [count] [spacing] [meshes]` (procedural rocks around the camera),
   `vgeo_clear`, `vgeo_bench [frames=600] [csv] [vgeo_test|foliage]`; foliage: see "Foliage support".
@@ -344,10 +344,13 @@ opaque         legacy forward lighting, then the vgeo lit resolve (vgeo_lit.frag
   `r_vgeo_lod_px` and `r_foliage_density` (1.0 / 0.7 / 0.4 / 0.2); any other combination reads back as Custom.
   Engine Fidelity (docs/ENGINE_FIDELITY.md) bounds these: its levels scale the era's error thresholds (Low x3)
   and cap its foliage density; the detection compares against the bounded values, so the era still reads back.
-- **2015 / 2010 fallback** (`r_vgeo 0`): each mesh's exported discrete LODs are uploaded as legacy meshes on
-  first use and drawn through the legacy draw list; the CPU picks per instance the coarsest LOD whose projected
-  error is under `r_vgeo_lod_px` (4 px 2015, 12 px 2010; 2010 never draws LOD 0). This per-instance CPU work
-  exists only in the fallback.
+- **`r_vgeo 0`: the classic instanced renderer** (docs/CLASSIC_RENDERER.md, `src/render/vk_classic.c`), in the
+  same exe: the 2015 / 2010 eras use it, and `r_vgeo` switches between the two at run time (console, Settings >
+  Graphics "Virtualized geometry", Engine Fidelity, eras). Per mesh a discrete LOD chain, CPU culling over the
+  placement cells, instanced batches; the CPU picks per instance the coarsest LOD whose projected error is under
+  `r_vgeo_lod_px` (2 / 3 px modern / 2020, 4 px 2015, 12 px 2010; 2010 never draws LOD 0). Masked / two-sided /
+  WPO foliage, impostors, masked shadows and glTF maps as on vgeo. It replaced the old discrete-LOD fallback
+  (which skipped masked foliage).
 - `vgeo_bench [frames] [csv]`: a fixed Catmull-Rom flythrough of `vgeo_test` (camera override in
   `render_set_camera`), CSV of every frame-graph pass's GPU ms + visible clusters / triangles, and a summary.
 
@@ -1002,8 +1005,9 @@ set 4 is gone.
 - **Shadows.** Cascade views list masked clusters in their (otherwise unused) SW half. `vgeo_shadow_masked.vert` /
   `.frag` draws them alpha-tested, the HW half depth only. vgeo shadow cull and draw are timed:
   `vgeo_stats`, `foliage_stats`, `vgeo_bench`.
-- **Fallback.** The 2015 / 2010 fallback and the local light shadows apply the same density / fade per
-  instance and skip masked meshes (the legacy pipelines have no alpha test).
+- **`r_vgeo 0` / local light shadows.** The classic renderer (docs/CLASSIC_RENDERER.md) draws masked /
+  two-sided / WPO foliage, impostors and masked shadows with the same density / fade per instance; it also
+  draws the point / spot light shadow tiles of the vgeo content with `r_vgeo 1` (alpha-tested).
 - **Commands:** `foliage_stats` (chunks, region, audit, last frame's counters), `foliage_query [r]`,
   `foliage_push_test [s]`, `foliage_check` (scripted, below).
 
@@ -1048,7 +1052,7 @@ bush is GPU test / bench content only (`vgeo_foliage`, `bench_vgeo`, `build_vgeo
   roughness factor 1 (the ORM's g is the roughness), occlusion strength 0.8; `foliage_build_trees` enters
   `normal_tex` and `mr_tex = occlusion_tex` (the same ORM). The vgeo resolve shades them with the
   triangle's tangent frame (docs/PBR.md). Cards (leaves, needles, branches) stay albedo-only, impostors
-  keep their baked albedo / normal, and the r_vgeo 0 fallback never draws trees (masked meshes).
+  keep their baked albedo / normal; the classic renderer (`r_vgeo 0`) samples the same bark maps.
   Missing files: logged, the material stays albedo-only. Generator `tools/vfxgen/tree_pbr.py` (local,
   deterministic): Tree It's own `_normal` (its DirectX y flipped to the glTF convention: every bark map
   correlates at −0.7 .. −0.8 with the albedo relief in y, +0.7 .. +0.85 in x) and `_roughness` maps, box-
@@ -1215,7 +1219,7 @@ How it got there, from 6-10 ms:
 - **Displacement velocity** uses this frame's buffer for the previous position too.
 - **WPO and the LOD error.** The WPO bound grows the spheres. The simplification error is not increased.
 - **Shadow distance and fades are per mesh** (the max over its materials), not per cluster.
-- **Fallback.** No masked foliage in the 2015 / 2010 fallback or in local light shadows.
+- **Classic renderer** (`r_vgeo 0`): LOD and impostor switches pop, no occlusion culling (docs/CLASSIC_RENDERER.md).
 - **Capsules** are hexagonal prisms in one static mesh per chunk, not capsule shapes.
 - **Displacement format.** RG16F needs `shaderStorageImageExtendedFormats` (the game warns if missing).
 

@@ -84,7 +84,7 @@ era preset (`r_era`): `era x3` = three times the era's own error threshold, also
 | `moon_shadows` | - | - | off | on | on |
 | `texture_quality` | 0, max 0 | 0, max 0 | 1, max 1 | 2, max 2 | 2, max 2 |
 | `aniso` | 1, {1,2} | 2, {1,2,4} | 4, {1,2,4,8} | 8, {1,2,4,8,16} | 8, {1,2,4,8,16} |
-| `vgeo` | on | on | on | on | on |
+| `vgeo` (off: the classic renderer, docs/CLASSIC_RENDERER.md) | on | on | on | on | on |
 | `vgeo_error_px` | era x4 | era x3 | era x2 | era x1.41 | era x1 |
 | `vgeo_shadow_error_px` | era x4 | era x3 | era x2 | era x1.41 | era x1 |
 | `vgeo_lod_px` | era x8 | era x4 | era x2 | era x1.41 | era x1 |

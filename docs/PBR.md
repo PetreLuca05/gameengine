@@ -2,8 +2,8 @@
 
 The lighting was already PBR (GGX / Schlick / Smith in `shaders/lit_body.glsl` `brdf()`, sky environment
 reflections, SSR, AO). glTF materials now bring their maps too, on every static mesh path: the legacy
-lit / G-buffer draws (`render.c` `draw_items`), the vgeo resolve (`shaders/vgeo/vg_resolve.glsl`) and the vgeo
-era fallback (`r_vgeo 0`). A material without maps renders exactly as before.
+lit / G-buffer draws (`render.c` `draw_items`), the vgeo resolve (`shaders/vgeo/vg_resolve.glsl`) and the classic
+renderer (`r_vgeo 0`, docs/CLASSIC_RENDERER.md). A material without maps renders exactly as before.
 
 ## What is imported (`src/assets/assets.c` `gltf_material`)
 
@@ -27,7 +27,7 @@ one texture).
 
 - Legacy path: the cotangent frame from screen derivatives of world position and uv (`cotangent_frame`
   in `common.glsl`, shared with the surface textures). Exact for any uv layout (mirrored uvs included),
-  costs a few ALU ops and works for every mesh source (glTF, procedural, vgeo fallback LODs).
+  costs a few ALU ops and works for every mesh source (glTF, procedural, the classic renderer's LODs).
 - vgeo resolve: a full-screen pass, so neighbouring pixels can belong to other triangles or instances and
   screen derivatives would break at every edge. The resolve already fetches the triangle's three
   vertices, so it computes the triangle's dP/du, dP/dv (`g_tangent`, `g_bitangent`) and
@@ -63,7 +63,8 @@ G-buffer layout is unchanged.
   `normal_scale`, `occlusion_strength`, `emissive_rgb`). The map indices are renderer texture ids in the
   vgeo texture table (binding 23), entered like the albedo (`tex_use`). MASK maps to `VGM_MASKED`
   (mask = albedo alpha) and doubleSided to `VGM_TWO_SIDED`, so every vgeo raster path and the shadows
-  respect them. The era fallback draws the maps through the legacy path.
+  respect them. With `r_vgeo 0` the classic renderer samples them in its own prepass / lit shaders
+  (docs/CLASSIC_RENDERER.md).
 
 ## Robustness
 
@@ -84,9 +85,8 @@ characters fill the screen with resolve work). On `VK_ERROR_DEVICE_LOST`, `VK_CH
 - **Tree bark** (docs/VGEO.md "Tree models", "Bark maps"): the imported trees' opaque materials carry a
   normal map and an ORM map (r AO, g roughness, b metallic 0) as vgeo module textures
   (`assets/treepbr`, `tools/vfxgen/tree_pbr.py`), through the same `MAT_NORMAL_TEX` / `MAT_MR_TEX` /
-  `MAT_OCCLUSION_TEX` path of the vgeo resolve. Module textures (index >= `VG_TEX_GAME`) are not legacy
-  renderer textures, so the r_vgeo 0 fallback draws a material's maps only when every index is a
-  renderer id.
+  `MAT_OCCLUSION_TEX` path of the vgeo resolve. Module textures (index >= `VG_TEX_GAME`) are wrapped as
+  renderer textures by the classic renderer (`r_vgeo 0`), so it draws them too.
 - **Surface layers** (docs/TEXTURES.md "Ambient occlusion", "Metal"): the baked layer AO multiplies the
   SSAO exactly like `pbr_occlusion` (`ao *= surf_ao` in `lit_body.glsl`), and the metal layers replace the
   material metallic (`surf_metal`).
