@@ -33,19 +33,6 @@
       "vgeo": true
     },
     {
-      "name": "pbr_ball",
-      "path": "assets/models/pbr/pbr_ball.gltf",
-      "vgeo": true
-    },
-    {
-      "name": "pbr_swatches",
-      "path": "assets/models/pbr/pbr_swatches.gltf"
-    },
-    {
-      "name": "pbr_mask",
-      "path": "assets/models/pbr/pbr_mask.gltf"
-    },
-    {
       "name": "car_body",
       "path": "assets/vehicles/car_body.gltf"
     },

@@ -1,6 +1,4 @@
-// Shared G-buffer output (gbuffer.frag, gbuffer_skin.frag). PBR_MAPS: the glTF material maps
-// (shaders/pbr_maps.glsl: normal, metallic-roughness, emissive) as the lit pass applies them;
-// GB_ALPHA_MASK (an expression: the albedo alpha) discards below the alphaMode MASK cutoff.
+// Shared G-buffer output (gbuffer.frag, gbuffer_skin.frag).
 //   normal   RG16_SNORM  octahedral world normal
 //   material RGBA8       r roughness, g metallic, b flags / 255 (1 viewmodel, 2 dynamic, 4 unlit), a emissive (0..1 of 8)
 //   velocity RG16F       current - previous position in UV units (unjittered)
@@ -10,9 +8,6 @@
 #define GB_DYNAMIC_FLAG 0x80000000u
 
 #include "weather.glsl"
-#ifdef PBR_MAPS
-#include "pbr_maps.glsl"
-#endif
 
 // GB_CUSTOM_INPUTS: the includer provides v_world ... v_prev_clip and GB_FRONT_FACING itself
 // (the vgeo resolve decodes them per pixel, shaders/vg_gbuffer.frag).
@@ -41,32 +36,18 @@ void main() {
     GB_PRE_MAIN
 #endif
     uint flags = GB_FLAGS;
-#ifdef GB_ALPHA_MASK
-    if (GB_ALPHA_MASK < pbr_alpha_cutoff()) discard;
-#endif
     vec3 n = normalize(v_normal);
     if (!GB_FRONT_FACING) n = -n;
-    float rough = clamp(GB_PARAMS.x, 0.04, 1.0), metal = clamp(GB_PARAMS.y, 0.0, 1.0), emissive = GB_PARAMS.z;
-#ifdef PBR_MAPS
-    vec2 map_uv = v_uv * max(GB_PARAMS.w, 1e-3);
-    n = pbr_normal(flags, map_uv, v_world, n);
-    pbr_metal_rough(flags, map_uv, rough, metal);
-    rough = max(rough, 0.04);
-    if ((flags & MAT_EMISSIVE_TEX) != 0u) {
-        vec3 e = pbr_emissive(map_uv);
-        emissive *= max(e.r, max(e.g, e.b));
-    }
-#endif
     // Weather: the same wet / puddle / snow terms as the lit pass (SSR sees wet, rippled puddles).
     vec3 wx_alb = vec3(0.5);
-    float wx_rough = rough;
-    weather_surface(v_world, n, wx_alb, wx_rough, metal, (flags & MAT_VIEWMODEL) != 0u);
+    float wx_rough = clamp(GB_PARAMS.x, 0.04, 1.0);
+    weather_surface(v_world, n, wx_alb, wx_rough, clamp(GB_PARAMS.y, 0.0, 1.0), (flags & MAT_VIEWMODEL) != 0u);
     o_normal = oct_encode(n);
     uint gf = 0u;
     if ((flags & MAT_VIEWMODEL) != 0u) gf |= GB_VIEWMODEL;
     if ((flags & GB_DYNAMIC_FLAG) != 0u || (flags & MAT_HIGHLIGHT) != 0u) gf |= GB_DYNAMIC;
     if ((flags & MAT_UNLIT) != 0u) gf |= GB_UNLIT;
-    o_material = vec4(wx_rough, metal, float(gf) / 255.0, clamp(emissive / 8.0, 0.0, 1.0));
+    o_material = vec4(wx_rough, clamp(GB_PARAMS.y, 0.0, 1.0), float(gf) / 255.0, clamp(GB_PARAMS.z / 8.0, 0.0, 1.0));
     vec2 cur = v_cur_clip.xy / v_cur_clip.w, prev = v_prev_clip.xy / v_prev_clip.w;
     o_velocity = (cur - prev) * 0.5;   // NDC -> UV
 }

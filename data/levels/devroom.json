@@ -172,7 +172,6 @@
     {"type": "box", "pos": [-27.25, 4, -20.55], "size": [5.5, 0.15, 1.6], "color": [0.5, 0.48, 0.45], "grid": false, "_post_corner": true},
     {"type": "box", "pos": [-27.25, 4, -18.9], "size": [5.5, 0.15, 1.1], "color": [0.5, 0.48, 0.45], "grid": false, "_post_corner": true},
     {"type": "box", "pos": [-27.25, 4, -17.35], "size": [5.5, 0.15, 1.4], "color": [0.5, 0.48, 0.45], "grid": false, "_post_corner": true},
-    {"_comment": "PBR shelf (docs/PBR.md, tools/gen_pbr_test.py): glTF material maps. Left to right: gold metal / red plastic swatches (roughness 0.05 .. 1), the fully mapped ball on the legacy path (prop), the same ball through vgeo, an alphaMode MASK doubleSided grille. Stand at (-19, 0, -13.8) facing north; a lamp on the light schedule for the night.", "type": "box", "pos": [-19, 0, -17], "size": [6, 0.8, 1.2], "color": [0.22, 0.22, 0.23], "grid": false, "material": "metal_thick", "label": "PBR shelf: glTF maps (docs/PBR.md)", "label_size": 0.12, "_pbr_shelf": true},
     {"type": "box", "pos": [-6, 0, 29.95], "size": [0.4, 1.6, 0.3], "color": [0.45, 0.45, 0.47], "_open_room": true},
     {"type": "box", "pos": [-29.95, 0, 16], "size": [0.3, 1.6, 0.4], "color": [0.45, 0.45, 0.47], "_open_room": true},
     {"type": "box", "pos": [-22.75, 0, -30.15], "size": [9.5, 3.0, 0.2], "color": [0.55, 0.55, 0.57], "_open_room": true},
@@ -348,12 +347,7 @@
     {"type": "dummy", "pos": [-26, 0, 25], "yaw": -90, "hp": 300},
     {"type": "light", "pos": [-25, 2.05, -29.4], "color": [1.0, 0.3, 0.12], "radius": 5, "intensity": 5, "_post_corner": true},
     {"type": "light", "pos": [-20.5, 2.05, -29.4], "color": [0.25, 0.6, 1.0], "radius": 5, "intensity": 5, "_post_corner": true},
-    {"type": "light", "pos": [-12.5, 2.35, -27.75], "color": [1.0, 0.7, 0.4], "radius": 3, "intensity": 1.2, "_post_corner": true},
-    {"type": "prop", "shape": "box", "size": [2.02, 0.76, 0.34], "pos": [-20.8, 0.8, -17.0], "mass": 200, "color": [0.83, 0.43, 0.2], "model": "pbr_swatches", "_pbr_shelf": true},
-    {"type": "prop", "shape": "box", "size": [0.7, 0.7, 0.7], "pos": [-19.1, 0.8, -17.0], "yaw": 180, "mass": 200, "color": [1.0, 1.0, 1.0], "model": "pbr_ball", "_pbr_shelf": true},
-    {"type": "vgeo", "mesh": "pbr_ball", "pos": [-18.0, 1.15, -17.0], "yaw": 180, "_pbr_shelf": true},
-    {"type": "prop", "shape": "box", "size": [0.6, 0.65, 0.2], "pos": [-16.8, 0.8, -17.0], "mass": 200, "color": [0.5, 0.5, 0.5], "model": "pbr_mask", "_pbr_shelf": true},
-    {"type": "light", "pos": [-19, 2.6, -15.4], "color": [1.0, 0.85, 0.7], "radius": 7, "intensity": 6, "schedule": true, "_pbr_shelf": true}
+    {"type": "light", "pos": [-12.5, 2.35, -27.75], "color": [1.0, 0.7, 0.4], "radius": 3, "intensity": 1.2, "_post_corner": true}
   ],
   "post": {},
   "post_volumes": [

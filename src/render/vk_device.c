@@ -195,7 +195,7 @@ bool vkd_create_device(SDL_Window *window) {
     f2.features.drawIndirectFirstInstance = supported.drawIndirectFirstInstance;
     if (!supported.shaderStorageImageExtendedFormats) log_warn("vulkan: shaderStorageImageExtendedFormats missing - some post effects disabled");
 
-    const char *dev_exts[8] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
+    const char *dev_exts[6] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
     bool unused_att = false;
     u32 dev_ext_count = 1;
     {
@@ -206,7 +206,6 @@ bool vkd_create_device(SDL_Window *window) {
         for (u32 i = 0; i < n; i++)
             if (!strcmp(props[i].extensionName, VK_EXT_MESH_SHADER_EXTENSION_NAME)) R->vg_mesh_shader = true;
             else if (!strcmp(props[i].extensionName, VK_EXT_DYNAMIC_RENDERING_UNUSED_ATTACHMENTS_EXTENSION_NAME)) unused_att = true;
-            else if (!strcmp(props[i].extensionName, VK_EXT_DEVICE_FAULT_EXTENSION_NAME)) R->has_device_fault = true;
             else if (!strcmp(props[i].extensionName, VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME)) {
                 dev_exts[dev_ext_count++] = VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME;
                 R->has_push_descriptor = true;
@@ -250,23 +249,6 @@ bool vkd_create_device(SDL_Window *window) {
         }
     }
     if (!R->has_unused_attachments) log_info("vulkan: no VK_EXT_dynamic_rendering_unused_attachments: the G-buffer velocity is always written");
-    // VK_EXT_device_fault: on VK_ERROR_DEVICE_LOST the log gets the faulting addresses and the vendor's
-    // description (vkr_check_failed).
-    VkPhysicalDeviceFaultFeaturesEXT fault = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FAULT_FEATURES_EXT };
-    if (R->has_device_fault) {
-        VkPhysicalDeviceFaultFeaturesEXT sf = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FAULT_FEATURES_EXT };
-        VkPhysicalDeviceFeatures2 s2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
-        s2.pNext = &sf;
-        vkGetPhysicalDeviceFeatures2(R->gpu, &s2);
-        R->has_device_fault = sf.deviceFault;
-        if (R->has_device_fault) {
-            fault.deviceFault = VK_TRUE;
-            fault.deviceFaultVendorBinary = VK_FALSE;
-            fault.pNext = f13.pNext;
-            f13.pNext = &fault;
-            dev_exts[dev_ext_count++] = VK_EXT_DEVICE_FAULT_EXTENSION_NAME;
-        }
-    }
     VkDeviceCreateInfo dci = { VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
     dci.pNext = &f2;
     dci.queueCreateInfoCount = 1;
@@ -455,32 +437,4 @@ void vkd_create_shadow_map(u32 size) {
             vkUpdateDescriptorSets(R->device, 1, &w, 0, NULL);
         }
     }
-}
-
-// VK_CHECK failure: a lost device first logs what VK_EXT_device_fault knows (addresses, vendor codes).
-void vkr_check_failed(VkResult r, const char *file, int line, const char *expr) {
-    if (r == VK_ERROR_DEVICE_LOST && R->device && R->has_device_fault && vkGetDeviceFaultInfoEXT) {
-        VkDeviceFaultCountsEXT c = { VK_STRUCTURE_TYPE_DEVICE_FAULT_COUNTS_EXT };
-        VkResult cr = vkGetDeviceFaultInfoEXT(R->device, &c, NULL);
-        if (cr != VK_SUCCESS) log_error("device fault: no information (%d)", (int)cr);
-        else {
-            VkDeviceFaultAddressInfoEXT addr[16];
-            VkDeviceFaultVendorInfoEXT vend[16];
-            if (c.addressInfoCount > 16) c.addressInfoCount = 16;
-            if (c.vendorInfoCount > 16) c.vendorInfoCount = 16;
-            c.vendorBinarySize = 0;
-            VkDeviceFaultInfoEXT fi = { VK_STRUCTURE_TYPE_DEVICE_FAULT_INFO_EXT };
-            fi.pAddressInfos = addr;
-            fi.pVendorInfos = vend;
-            VkResult fr = vkGetDeviceFaultInfoEXT(R->device, &c, &fi);
-            log_error("device fault (%d): %s; %u addresses, %u vendor records", (int)fr, fi.description, c.addressInfoCount, c.vendorInfoCount);
-            for (u32 i = 0; i < c.addressInfoCount; i++)
-                log_error("  address type %d at 0x%llx (precision 0x%llx)", (int)addr[i].addressType, (unsigned long long)addr[i].reportedAddress,
-                          (unsigned long long)addr[i].addressPrecision);
-            for (u32 i = 0; i < c.vendorInfoCount; i++)
-                log_error("  vendor: %s (code 0x%llx, data 0x%llx)", vend[i].description, (unsigned long long)vend[i].vendorFaultCode,
-                          (unsigned long long)vend[i].vendorFaultData);
-        }
-    }
-    log_fatal("Vulkan error %d at %s:%d (%s)", (int)r, file, line, expr);
 }

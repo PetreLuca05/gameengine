@@ -14,11 +14,6 @@
 #include "vgeo/vg_resolve.glsl"
 // Material textures: the vgeo texture table (binding 23 of set 3, vgeo_tex.h; unused entries white).
 #define LIT_TEX(uv) texture(vg_tex[nonuniformEXT(g_tex)], (uv))
-// glTF maps (shaders/pbr_maps.glsl): the material's texture table entries, the triangle's tangent frame.
-#define PBR_MAPS
-#define PBR_TEX(slot, uv) texture(vg_tex[nonuniformEXT(g_pbr_tex[slot])], (uv))
-#define PBR_PARAMS g_pbr
-#define PBR_TANGENT_FRAME(n) vg_tangent_frame(n)
 #define LIT_CUSTOM_INPUTS
 #define LIT_FRONT_FACING g_front
 #define MAT_COLOR g_mat_color

@@ -31,8 +31,7 @@ struct VgViewGpu {
 };
 struct VgMaterial {
     vec4 color; float roughness, metallic, emissive, tex_scale; uint flags; uint albedo_tex; uint mask_tex; float alpha_cutoff;
-    uint wpo; float wpo_max, fade_start, fade_end; vec4 wpo_params; float shadow_max_dist;
-    uint mr_tex, normal_tex, occlusion_tex, emissive_tex; float normal_scale, occlusion_strength; uint emissive_rgb;   // glTF maps (shaders/pbr_maps.glsl)
+    uint wpo; float wpo_max, fade_start, fade_end; vec4 wpo_params; float shadow_max_dist; uint pad0, pad1, pad2;
     vec4 wind_a, wind_b;     // wind_params[8]: height, main / detail / flutter Hz | tan(max bend), settle mix, response, 0
 };
 struct VgNode { vec4 sphere; float max_parent_error; uint first; uint count_flags; uint pad; };

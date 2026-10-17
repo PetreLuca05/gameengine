@@ -14,13 +14,6 @@
 #define MAT_GRID_MOA   1024u
 #define MAT_TERRAIN    4096u
 #define MAT_LAYERED    8192u
-// glTF PBR materials (render.h, shaders/pbr_maps.glsl)
-#define MAT_ALPHA_MASK    16384u
-#define MAT_TWO_SIDED     32768u
-#define MAT_MR_TEX        65536u
-#define MAT_NORMAL_TEX    131072u
-#define MAT_OCCLUSION_TEX 262144u
-#define MAT_EMISSIVE_TEX  524288u
 
 struct PointLight {
     vec4 pos_radius;
@@ -176,14 +169,4 @@ layout(std430, set = 0, binding = 3) readonly buffer SkinInstances { SkinInstanc
 mat4 skin_matrix(uint first, uvec4 j, vec4 w) {
     return skin_bones.bones[first + j.x] * w.x + skin_bones.bones[first + j.y] * w.y +
            skin_bones.bones[first + j.z] * w.z + skin_bones.bones[first + j.w] * w.w;
-}
-
-// Cotangent frame of a surface's uv without a tangent attribute (surface textures, glTF normal maps):
-// T along +u, B along +v from the screen derivatives of position and uv, N the shading normal.
-mat3 cotangent_frame(vec3 N, vec3 dpx, vec3 dpy, vec2 dux, vec2 duy) {
-    vec3 dp2perp = cross(dpy, N), dp1perp = cross(N, dpx);
-    vec3 T = dp2perp * dux.x + dp1perp * duy.x;
-    vec3 B = dp2perp * dux.y + dp1perp * duy.y;
-    float invmax = inversesqrt(max(max(dot(T, T), dot(B, B)), 1e-20));
-    return mat3(T * invmax, B * invmax, N);
 }

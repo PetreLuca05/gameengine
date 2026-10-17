@@ -94,122 +94,6 @@ static void read_accessor_vec(const cgltf_accessor *a, u32 i, float *out, int n)
     cgltf_accessor_read_float(a, i, out, (cgltf_size)n);
 }
 
-static TextureId texture_load_memory(const void *data, size_t size, bool srgb, const char *what) {
-    int w, h, comp;
-    stbi_uc *px = stbi_load_from_memory((const stbi_uc *)data, (int)size, &w, &h, &comp, 4);
-    if (!px) { log_error("texture: cannot decode %s (%s)", what, stbi_failure_reason()); return 0; }
-    TextureId id = render_texture_create(w, h, px, srgb, true);
-    stbi_image_free(px);
-    log_info("texture: %s (%dx%d, embedded)", what, w, h);
-    return id;
-}
-
-// glTF material textures (docs/PBR.md): files next to the .gltf (percent-decoded uri), embedded
-// buffer views (.glb) and base64 data: uris. Each image is loaded once per file and colour space
-// (one image as occlusion + metallic-roughness is common).
-typedef struct GltfTexCache { const cgltf_image *img; bool srgb; TextureId id; } GltfTexCache;
-typedef struct GltfTexLoad { const char *path; GltfTexCache c[32]; int n; } GltfTexLoad;
-
-static TextureId gltf_texture(GltfTexLoad *L, const cgltf_texture_view *tv, bool srgb, const char *what) {
-    const cgltf_image *img = tv->texture ? tv->texture->image : NULL;
-    if (!img) return 0;
-    for (int i = 0; i < L->n; i++)
-        if (L->c[i].img == img && L->c[i].srgb == srgb) return L->c[i].id;
-    if (tv->texcoord != 0) log_warn("gltf: %s: %s texture uses TEXCOORD_%d, only TEXCOORD_0 is imported", L->path, what, tv->texcoord);
-    char name[512];
-    snprintf(name, sizeof(name), "%s %s", L->path, what);
-    TextureId id = 0;
-    if (img->buffer_view) {
-        const u8 *data = cgltf_buffer_view_data(img->buffer_view);
-        if (data) id = texture_load_memory(data, img->buffer_view->size, srgb, name);
-    } else if (img->uri && !strncmp(img->uri, "data:", 5)) {
-        const char *comma = strchr(img->uri, ',');
-        if (comma && comma - img->uri >= 7 && !strncmp(comma - 7, ";base64", 7)) {
-            size_t n = strlen(comma + 1), pad = n >= 2 && comma[n] == '=' ? (comma[n - 1] == '=' ? 2 : 1) : 0;
-            cgltf_options o;
-            memset(&o, 0, sizeof(o));
-            void *data = NULL;
-            if (n >= 4 && cgltf_load_buffer_base64(&o, n / 4 * 3 - pad, comma + 1, &data) == cgltf_result_success) {
-                id = texture_load_memory(data, n / 4 * 3 - pad, srgb, name);
-                free(data);
-            }
-        }
-    } else if (img->uri) {
-        char tpath[512];
-        const char *slash = strrchr(L->path, '/');
-        const char *bslash = strrchr(L->path, '\\');
-        if (bslash > slash) slash = bslash;
-        int dir_len = slash ? (int)(slash - L->path + 1) : 0;
-        snprintf(tpath, sizeof(tpath), "%.*s%s", dir_len, L->path, img->uri);
-        cgltf_decode_uri(tpath + dir_len);
-        id = texture_load_file(tpath, srgb);
-    }
-    if (!id) log_warn("gltf: %s: %s texture not loaded", L->path, what);
-    if (L->n < (int)(sizeof(L->c) / sizeof(L->c[0]))) L->c[L->n++] = (GltfTexCache){ img, srgb, id };
-    return id;
-}
-
-// KHR_texture_transform: one uv for every map, so only a uniform scale without offset / rotation on
-// the base colour is honoured (as tex_scale); anything else is reported and ignored.
-static float gltf_uv_scale(const char *path, const cgltf_texture_view *tv) {
-    if (!tv->texture || !tv->has_transform) return 1.0f;
-    const cgltf_texture_transform *t = &tv->transform;
-    if (t->offset[0] == 0 && t->offset[1] == 0 && t->rotation == 0 && t->scale[0] == t->scale[1] && t->scale[0] > 0) return t->scale[0];
-    log_warn("gltf: %s: KHR_texture_transform with offset / rotation / non-uniform scale is not supported (ignored)", path);
-    return 1.0f;
-}
-
-// The glTF material of a primitive (docs/PBR.md): factors, the base colour / metallic-roughness /
-// normal / occlusion / emissive textures, alphaMode MASK + alphaCutoff, doubleSided. Missing maps
-// leave the factors alone (unchanged look for content without them).
-static void gltf_material(GltfTexLoad *L, const cgltf_material *gm, Material *mat) {
-    // Emissive (lights): the factor's brightest channel x KHR_materials_emissive_strength. An emissive
-    // texture keeps the factor's colour too; without one the emission stays albedo-tinted (as before).
-    const float *ef = gm->emissive_factor;
-    float e = fmaxf(ef[0], fmaxf(ef[1], ef[2]));
-    float es = gm->has_emissive_strength ? gm->emissive_strength.emissive_strength : 1.0f;
-    mat->emissive = e * es;
-    if (gm->emissive_texture.texture && e > 0) {
-        mat->emissive_tex = gltf_texture(L, &gm->emissive_texture, true, "emissive");
-        if (mat->emissive_tex) {
-            mat->flags |= MAT_EMISSIVE_TEX;
-            mat->emissive_rgb = rgba8(ef[0] / e, ef[1] / e, ef[2] / e, 1.0f);
-        }
-    }
-    if (gm->has_pbr_metallic_roughness) {
-        const cgltf_pbr_metallic_roughness *pbr = &gm->pbr_metallic_roughness;
-        mat->color = v4(pbr->base_color_factor[0], pbr->base_color_factor[1], pbr->base_color_factor[2], pbr->base_color_factor[3]);
-        mat->metallic = pbr->metallic_factor;
-        mat->roughness = pbr->roughness_factor;
-        if (pbr->base_color_texture.texture) {
-            mat->texture = gltf_texture(L, &pbr->base_color_texture, true, "base colour");
-            if (mat->texture) mat->flags |= MAT_TEXTURED;
-            mat->tex_scale = gltf_uv_scale(L->path, &pbr->base_color_texture);
-        }
-        if (pbr->metallic_roughness_texture.texture) {
-            mat->mr_tex = gltf_texture(L, &pbr->metallic_roughness_texture, false, "metallic-roughness");
-            if (mat->mr_tex) mat->flags |= MAT_MR_TEX;
-        }
-    }
-    if (gm->normal_texture.texture) {
-        mat->normal_tex = gltf_texture(L, &gm->normal_texture, false, "normal");
-        mat->normal_scale = gm->normal_texture.scale;
-        if (mat->normal_tex) mat->flags |= MAT_NORMAL_TEX;
-    }
-    if (gm->occlusion_texture.texture) {
-        mat->occlusion_tex = gltf_texture(L, &gm->occlusion_texture, false, "occlusion");
-        mat->occlusion_strength = gm->occlusion_texture.scale;   // cgltf keeps occlusionTexture.strength in scale
-        if (mat->occlusion_tex) mat->flags |= MAT_OCCLUSION_TEX;
-    }
-    if (gm->alpha_mode == cgltf_alpha_mode_mask) {
-        mat->flags |= MAT_ALPHA_MASK;
-        mat->alpha_cutoff = gm->alpha_cutoff;
-    } else if (gm->alpha_mode == cgltf_alpha_mode_blend && mat->color.w >= 0.999f) {
-        log_warn("gltf: %s: alphaMode BLEND with an opaque base colour factor is drawn opaque", L->path);
-    }
-    if (gm->double_sided) mat->flags |= MAT_TWO_SIDED;
-}
-
 bool model_load_gltf(const char *path, Model *out) {
     cgltf_options opt;
     memset(&opt, 0, sizeof(opt));
@@ -218,9 +102,6 @@ bool model_load_gltf(const char *path, Model *out) {
     if (cgltf_load_buffers(&opt, data, path) != cgltf_result_success) { log_error("gltf: cannot load buffers for %s", path); cgltf_free(data); return false; }
     memset(out, 0, sizeof(*out));
     bool first_vertex = true;
-    GltfTexLoad tl;
-    memset(&tl, 0, sizeof(tl));
-    tl.path = path;
     for (cgltf_size ni = 0; ni < data->nodes_count; ni++) {
         cgltf_node *node = &data->nodes[ni];
         if (!node->mesh) continue;
@@ -266,7 +147,29 @@ bool model_load_gltf(const char *path, Model *out) {
             mm->local = xf;
             mm->mat = material_color(v4(1, 1, 1, 1));
             mm->paint = prim->material && prim->material->name && !strncmp(prim->material->name, "paint", 5);
-            if (prim->material) gltf_material(&tl, prim->material, &mm->mat);
+            if (prim->material) {
+                // Emissive (lights): the factor's brightest channel x KHR_materials_emissive_strength.
+                const float *ef = prim->material->emissive_factor;
+                float e = fmaxf(ef[0], fmaxf(ef[1], ef[2]));
+                if (prim->material->has_emissive_strength) e *= prim->material->emissive_strength.emissive_strength;
+                mm->mat.emissive = e;
+            }
+            if (prim->material && prim->material->has_pbr_metallic_roughness) {
+                const cgltf_pbr_metallic_roughness *pbr = &prim->material->pbr_metallic_roughness;
+                mm->mat.color = v4(pbr->base_color_factor[0], pbr->base_color_factor[1], pbr->base_color_factor[2], pbr->base_color_factor[3]);
+                mm->mat.metallic = pbr->metallic_factor;
+                mm->mat.roughness = pbr->roughness_factor;
+                const cgltf_texture *tex = pbr->base_color_texture.texture;
+                if (tex && tex->image && tex->image->uri && strncmp(tex->image->uri, "data:", 5) != 0) {
+                    char tpath[512];
+                    const char *slash = strrchr(path, '/');
+                    if (!slash) slash = strrchr(path, '\\');
+                    int dir_len = slash ? (int)(slash - path + 1) : 0;
+                    snprintf(tpath, sizeof(tpath), "%.*s%s", dir_len, path, tex->image->uri);
+                    mm->mat.texture = texture_load_file(tpath, true);
+                    if (mm->mat.texture) mm->mat.flags |= MAT_TEXTURED;
+                }
+            }
             mb_free(&mb);
         }
     }

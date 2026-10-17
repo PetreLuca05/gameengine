@@ -845,7 +845,7 @@ both rasterisers, the shadows and streaming are the core's. The content is the i
 ("Tree models") plus procedural grass tufts and wheat; procedural test types exercise the GPU paths.
 The wind that moves all of it is docs/FOLIAGE_WIND.md.
 
-### Materials (`VgMaterial`, 144 B)
+### Materials (`VgMaterial`, 128 B)
 
 | Field | Meaning |
 |---|---|
@@ -854,7 +854,6 @@ The wind that moves all of it is docs/FOLIAGE_WIND.md.
 | `wpo`, `wpo_params[4]`, `wind_params[8]`, `wpo_max` | vegetation wind preset (`WPO_GRASS`, `WPO_BUSH`, `WPO_TREE`, `\| WPO_DISPLACE`), its parameters (docs/FOLIAGE_WIND.md), declared bound (the commit computes it with `vgeo_wpo_max`) |
 | `fade_start`, `fade_end` | distance fade of `VGM_FOLIAGE` instances (m) |
 | `shadow_max_dist` | no sun-cascade shadow beyond this distance from the camera (m, 0 = always) |
-| `mr_tex`, `normal_tex`, `occlusion_tex`, `emissive_tex`, `normal_scale`, `occlusion_strength`, `emissive_rgb` | glTF maps (docs/PBR.md): texture table indices (0 = none, with the `MAT_*_TEX` flags), the resolve shades them with the triangle's tangent frame |
 
 At commit every mesh gets its foliage fields from its materials (`VgMesh` 80 B: `max_wpo`, fades, shadow distance,
 `fflags`, impostor atlas). Model meshes take them from a `"foliage": {...}` block in `data/assets.json`

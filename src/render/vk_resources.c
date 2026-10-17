@@ -239,76 +239,10 @@ VkDescriptorSet vkr_alloc_tex_set(VkImageView view, VkSampler sampler) {
     return set;
 }
 
-static void write_mat_set(const struct MatSet *ms) {
-    VkDescriptorImageInfo ii[4];
-    for (int k = 0; k < 4; k++) ii[k] = (VkDescriptorImageInfo){ R->sampler_linear, R->textures[ms->tex[k]].view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
-    VkWriteDescriptorSet w = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-    w.dstSet = ms->set;
-    w.dstBinding = 0;
-    w.descriptorCount = 4;
-    w.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    w.pImageInfo = ii;
-    vkUpdateDescriptorSets(R->device, 1, &w, 0, NULL);
-}
-
 void vkr_rewrite_all_texture_sets(void) {
     for (u32 i = 1; i < MAX_TEXTURES; i++) {
         GpuTexture *t = &R->textures[i];
         if (t->used) vkr_write_tex_set(t->set, t->view, t->wrapped ? R->sampler_clamp : R->sampler_linear);
-    }
-    for (u32 i = 0; i < R->mat_set_count; i++) write_mat_set(&R->mat_sets[i]);
-}
-
-// glTF PBR maps (docs/PBR.md): the set of the four map textures a material samples, created on first
-// use. A map that is missing or still uploading is white (the normal map flat); once it is ready the
-// material gets its own set. Entries go when one of their textures is destroyed.
-static TextureId mat_tex(const Material *m, u32 flag, TextureId id, TextureId fallback) {
-    return (m->flags & flag) && id && id < MAX_TEXTURES && R->textures[id].used && R->textures[id].ready ? id : fallback;
-}
-
-u32 vkr_material_set(const Material *m) {
-    if (!R->mat_set_count) {   // [0]: no maps
-        VkDescriptorSetAllocateInfo ai = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
-        ai.descriptorPool = R->pool;
-        ai.descriptorSetCount = 1;
-        ai.pSetLayouts = &R->mat_layout;
-        struct MatSet *ms = &R->mat_sets[0];
-        VK_CHECK(vkAllocateDescriptorSets(R->device, &ai, &ms->set));
-        for (int k = 0; k < 4; k++) ms->tex[k] = R->white_tex;
-        write_mat_set(ms);
-        R->mat_set_count = 1;
-    }
-    if (!(m->flags & MAT_PBR_MAPS)) return 0;
-    TextureId t[4] = { mat_tex(m, MAT_MR_TEX, m->mr_tex, R->white_tex), mat_tex(m, MAT_NORMAL_TEX, m->normal_tex, R->flat_normal_tex),
-                       mat_tex(m, MAT_OCCLUSION_TEX, m->occlusion_tex, R->white_tex), mat_tex(m, MAT_EMISSIVE_TEX, m->emissive_tex, R->white_tex) };
-    for (u32 i = 1; i < R->mat_set_count; i++)
-        if (!memcmp(R->mat_sets[i].tex, t, sizeof(t))) return i;
-    if (R->mat_set_count >= MAX_MAT_SETS) {
-        static bool warned;
-        if (!warned) { warned = true; log_warn("render: more than %d glTF map combinations, the rest draw without maps", MAX_MAT_SETS); }
-        return 0;
-    }
-    VkDescriptorSetAllocateInfo ai = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
-    ai.descriptorPool = R->pool;
-    ai.descriptorSetCount = 1;
-    ai.pSetLayouts = &R->mat_layout;
-    struct MatSet *ms = &R->mat_sets[R->mat_set_count];
-    if (vkAllocateDescriptorSets(R->device, &ai, &ms->set) != VK_SUCCESS) return 0;
-    memcpy(ms->tex, t, sizeof(t));
-    write_mat_set(ms);
-    return R->mat_set_count++;
-}
-
-// A texture goes away: drop the map sets that sample it (freed once the frames using them are done).
-static void mat_sets_forget(TextureId id) {
-    for (u32 i = 1; i < R->mat_set_count;) {
-        struct MatSet *ms = &R->mat_sets[i];
-        if (ms->tex[0] == id || ms->tex[1] == id || ms->tex[2] == id || ms->tex[3] == id) {
-            defer_descriptor(ms->set);
-            *ms = R->mat_sets[--R->mat_set_count];
-        } else {
-            i++;
-        }
     }
 }
 
@@ -536,7 +470,6 @@ TextureId render_texture_create_raw(int w, int h, int levels, u32 vk_format, con
 void render_texture_destroy(TextureId id) {
     if (!id || id >= MAX_TEXTURES || !R->textures[id].used) return;
     GpuTexture *t = &R->textures[id];
-    mat_sets_forget(id);
     defer_descriptor(t->set);
     vkr_defer_image(t->image, t->view, t->alloc);
     t->used = false;

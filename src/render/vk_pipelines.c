@@ -84,21 +84,14 @@ bool vkp_create_layouts(void) {
     li.pBindings = &tb;
     VK_CHECK(vkCreateDescriptorSetLayout(R->device, &li, NULL, &R->tex_layout));
 
-    // Set 3: the glTF PBR maps of a material (docs/PBR.md): 0 metallic-roughness, 1 normal,
-    // 2 occlusion, 3 emissive (one array binding; vkr_material_set).
-    VkDescriptorSetLayoutBinding mb = tb;
-    mb.descriptorCount = 4;
-    li.pBindings = &mb;
-    VK_CHECK(vkCreateDescriptorSetLayout(R->device, &li, NULL, &R->mat_layout));
-
     VkDescriptorPoolSize sizes[3] = {
         { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 16 },
-        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, MAX_TEXTURES + 128 + MAX_MAT_SETS * 4 },
+        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, MAX_TEXTURES + 128 },
         { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 64 },
     };
     VkDescriptorPoolCreateInfo pi = { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
     pi.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-    pi.maxSets = MAX_TEXTURES + 64 + MAX_MAT_SETS;
+    pi.maxSets = MAX_TEXTURES + 64;
     pi.poolSizeCount = 3;
     pi.pPoolSizes = sizes;
     VK_CHECK(vkCreateDescriptorPool(R->device, &pi, NULL, &R->pool));
@@ -119,10 +112,10 @@ bool vkp_create_layouts(void) {
     pli2.pBindings = pb;
     VK_CHECK(vkCreateDescriptorSetLayout(R->device, &pli2, NULL, &R->lit_post_layout));
 
-    VkDescriptorSetLayout sets[4] = { R->frame_layout, R->tex_layout, R->lit_post_layout, R->mat_layout };
+    VkDescriptorSetLayout sets[3] = { R->frame_layout, R->tex_layout, R->lit_post_layout };
     VkPushConstantRange pr = { VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushLit) };
     VkPipelineLayoutCreateInfo pli = { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
-    pli.setLayoutCount = 4;
+    pli.setLayoutCount = 3;
     pli.pSetLayouts = sets;
     pli.pushConstantRangeCount = 1;
     pli.pPushConstantRanges = &pr;
@@ -152,7 +145,6 @@ void vkp_destroy_layouts(void) {
     vkDestroyDescriptorSetLayout(R->device, R->frame_layout, NULL);
     vkDestroyDescriptorSetLayout(R->device, R->tex_layout, NULL);
     vkDestroyDescriptorSetLayout(R->device, R->lit_post_layout, NULL);
-    vkDestroyDescriptorSetLayout(R->device, R->mat_layout, NULL);
 }
 
 VkShaderModule vkp_load_shader(const char *name) {
@@ -349,16 +341,6 @@ bool vkp_create_pipelines(void) {
     d[PIPE_PREPASS].extra_colors = 2;
     d[PIPE_PREPASS].extra_formats[0] = GB_MATERIAL_FORMAT;
     d[PIPE_PREPASS].extra_formats[1] = GB_VELOCITY_FORMAT;
-    // glTF materials (docs/PBR.md): doubleSided without culling; alphaMode MASK discards (own shaders,
-    // so the common pipelines keep early depth) and is drawn two-sided.
-    d[PIPE_LIT_2S] = d[PIPE_LIT];
-    d[PIPE_LIT_2S].cull = VK_CULL_MODE_NONE;
-    d[PIPE_LIT_MASK] = d[PIPE_LIT_2S];
-    d[PIPE_LIT_MASK].frag = "lit_mask.frag";
-    d[PIPE_PREPASS_2S] = d[PIPE_PREPASS];
-    d[PIPE_PREPASS_2S].cull = VK_CULL_MODE_NONE;
-    d[PIPE_PREPASS_MASK] = d[PIPE_PREPASS_2S];
-    d[PIPE_PREPASS_MASK].frag = "gbuffer_mask.frag";
     d[PIPE_UI] = (PipeDesc){ "ui.vert", "ui.frag", VL_UI, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, VK_POLYGON_MODE_FILL,
                              VK_CULL_MODE_NONE, false, false, true, R->swap_format, VK_FORMAT_UNDEFINED, false, R->layout_ui };
     d[PIPE_PRECIP] = (PipeDesc){ "precip.vert", "precip.frag", VL_NONE, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, VK_POLYGON_MODE_FILL,
