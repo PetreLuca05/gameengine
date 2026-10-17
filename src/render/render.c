@@ -1280,6 +1280,9 @@ static void compute_matrices(FrameData *fd) {
     fd->post_flags = v4(0, 0, 0, 0);
     fd->post_params = v4(1, 1, 1, 1);
     fd->post_fog = v4(0, 80, 0, 0);
+    fd->ss_view_proj = mat4_mul(R->proj_j, R->view);   // used only by a second camera (ss_info.x, the scope PiP)
+    fd->ss_view = R->view;
+    fd->ss_info = v4(0, 0, 0, 0);
     fd->camera_pos = v4(c->pos.x, c->pos.y, c->pos.z, (float)g_engine.real_time);
     fd->sun_dir = v4(L.x, L.y, L.z, e->sun_intensity);
     fd->sun_color = v4(e->sun_color.x, e->sun_color.y, e->sun_color.z, R->r_shadow_quality->i > 0 ? 1.0f : 0.0f);
@@ -1359,6 +1362,7 @@ static struct {
     u32 pip_size;
     vec4 pip_frustum[6];
     mat4 pip_from_view;     // main view space -> PiP clip
+    mat4 pip_view, pip_proj, pip_vp;   // the PiP camera
 } F;
 
 static void begin_pass(VkCommandBuffer cmd, VkImageView color, bool clear_color, VkImageView depth, VkImageLayout depth_layout, bool clear_depth) {
@@ -1640,10 +1644,11 @@ static void exec_viewmodel(VkCommandBuffer cmd, void *u) {
     vkCmdEndRendering(cmd);
 }
 
-// Scope picture-in-picture: the opaque scene (static + characters, lit forward like the main
-// opaque pass, no screen-space inputs) from the objective lens at the scope FOV into a square
-// target; the sky is filled in by post_scope_sky. The local player's own weapon is in the
-// viewmodel list and never drawn here; the near plane skips the rest of the body.
+// Scope picture-in-picture: the opaque scene (static + characters + the classic / vgeo content,
+// lit forward like the main opaque pass, with the main view's AO / contact / SSR / SSGI through its
+// projection) from the objective lens at the scope FOV into a square target; then its decals, the
+// sky and fog (post_scope_sky) and its transparency (scope_pip_fx). The local player's own weapon
+// is in the viewmodel list and never drawn here; the near plane skips the rest of the body.
 static void exec_scope_pip(VkCommandBuffer cmd, void *u) {
     (void)u;
     VkRenderingAttachmentInfo ca = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
@@ -1672,7 +1677,7 @@ static void exec_scope_pip(VkCommandBuffer cmd, void *u) {
     set_viewport(cmd, F.pip_size, F.pip_size);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 0, 1, &F.f->frame_set_pip, 0, NULL);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 1, 1, &R->textures[R->white_tex].set, 0, NULL);
-    post_push_lit_inputs(cmd, NULL, false);
+    post_push_lit_inputs(cmd, &F.lit, false);   // the main view's (frame.ss_info: sampled through its projection)
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_LIT]);
     vec4 saved[6];
     memcpy(saved, R->frustum, sizeof(saved));
@@ -1684,9 +1689,36 @@ static void exec_scope_pip(VkCommandBuffer cmd, void *u) {
     vkCmdEndRendering(cmd);
 }
 
-// Scope PiP transparency after its sky / fog (post_scope_sky): particles (smoke, sparks, blood,
-// muzzle flashes of others ...) and precipitation through the scope camera, depth read-only, so
-// they composite over the sky.
+// Scope PiP decals (bullet holes, blood, scorch; skinned wounds): projected onto the PiP depth.
+static void exec_scope_pip_decals(VkCommandBuffer cmd, void *u) {
+    (void)u;
+    VkRenderingAttachmentInfo ca = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
+    ca.imageView = fg_view(F.pip_color);
+    ca.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    ca.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+    ca.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    VkRenderingAttachmentInfo da = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
+    da.imageView = fg_view(F.pip_depth);
+    da.imageLayout = VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL;
+    da.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+    da.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    VkRenderingInfo ri = { VK_STRUCTURE_TYPE_RENDERING_INFO };
+    ri.renderArea.extent.width = F.pip_size;
+    ri.renderArea.extent.height = F.pip_size;
+    ri.layerCount = 1;
+    ri.colorAttachmentCount = 1;
+    ri.pColorAttachments = &ca;
+    ri.pDepthAttachment = &da;
+    vkCmdBeginRendering(cmd, &ri);
+    set_viewport(cmd, F.pip_size, F.pip_size);
+    vkx_draw_decals_pip(cmd, F.f->frame_set_pip, fg_view(F.pip_depth), F.pip_vp, F.pip_view, F.pip_proj, R->sight.objective_pos, F.pip_size, F.pip_size);
+    vkCmdEndRendering(cmd);
+}
+
+// Scope PiP transparency after its sky / fog (post_scope_sky), as the main transparent pass:
+// blended surfaces (glass, ...) with the froxel fog, particles (smoke, sparks, blood, muzzle
+// flashes of others ...; soft against the main view's depth, fogged by its froxels) and
+// precipitation through the scope camera, depth read-only, so they composite over the sky.
 static void exec_scope_pip_fx(VkCommandBuffer cmd, void *u) {
     (void)u;
     VkRenderingAttachmentInfo ca = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
@@ -1708,6 +1740,19 @@ static void exec_scope_pip_fx(VkCommandBuffer cmd, void *u) {
     ri.pDepthAttachment = &da;
     vkCmdBeginRendering(cmd, &ri);
     set_viewport(cmd, F.pip_size, F.pip_size);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 0, 1, &F.f->frame_set_pip, 0, NULL);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 1, 1, &R->textures[R->white_tex].set, 0, NULL);
+    post_push_lit_inputs(cmd, NULL, true);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_LIT_BLEND]);
+    {
+        vec4 saved[6];
+        memcpy(saved, R->frustum, sizeof(saved));
+        memcpy(R->frustum, F.pip_frustum, sizeof(saved));
+        g_froxel_fog_draws = true;
+        draw_items(cmd, R->draws, R->draw_count, false, true, 1, PIPE_LIT_BLEND);
+        g_froxel_fog_draws = false;
+        memcpy(R->frustum, saved, sizeof(saved));
+    }
     vkx_draw_particles_pip(cmd, F.f->frame_set_pip);
     draw_precip(cmd, F.f->frame_set_pip);
     vkCmdEndRendering(cmd);
@@ -1826,7 +1871,11 @@ static bool setup_scope_pip(FrameData *fd) {
     float tan_vm = tanf(render_vm_fov() * 0.5f * DG_DEG2RAD);
     float tan_main = tanf(fmaxf(R->cam.fov_deg, 10.0f) * 0.5f * DG_DEG2RAD);
     float t_lens = (s->lens_radius / d) * tan_main / fmaxf(tan_vm, 1e-3f);   // the lens (weapon projection) in main-view tangents
-    float tan_half = clampf(1.15f * t_lens / fmaxf(s->zoom, 1.0f), tanf(0.25f * DG_DEG2RAD), tanf(30.0f * DG_DEG2RAD));
+    // Shown magnified by k against the main view (post_sights.c): the zoom is against the base FOV, the
+    // main view may already be narrowed by the ADS world zoom.
+    float tan_base = tanf(fmaxf(s->base_fov > 1.0f ? s->base_fov : R->cam.fov_deg, 10.0f) * 0.5f * DG_DEG2RAD);
+    float k = fmaxf(s->zoom, 1.0f) * tan_main / fmaxf(tan_base, 1e-4f);
+    float tan_half = clampf(1.15f * t_lens / fmaxf(k, 1.0f), tanf(0.25f * DG_DEG2RAD), tanf(30.0f * DG_DEG2RAD));
     R->pip_fov = 2.0f * atanf(tan_half) * DG_RAD2DEG;
     u32 n = (u32)DG_CLAMP((int)lrintf((float)R->hdr.h * clampf(s->pip_scale, 0.2f, 2.0f)), 128, 2048);
     F.pip_size = n;
@@ -1841,6 +1890,11 @@ static bool setup_scope_pip(FrameData *fd) {
     g_scope_lod.fwd = fwd;
     g_scope_lod.tan_half = tan_half;
     g_scope_lod.size = (float)n;
+    // The scope sees the world exactly like the main view (docs/ATTACHMENTS.md "The PiP pass"): the
+    // same lighting, weather, shadows and fog settings (frame.fog, post_fog: the froxels when the main
+    // view has them), and the main view's screen-space inputs (AO, contact shadows, SSR, SSGI) and
+    // froxel volume looked up through the main projection (ss_info). Only the camera and the target
+    // differ.
     FrameData *pd = (FrameData *)F.f->ubo_pip.mapped;
     memcpy(pd, fd, sizeof(FrameData));
     pd->view_proj = vp;
@@ -1848,11 +1902,14 @@ static bool setup_scope_pip(FrameData *fd) {
     pd->proj = proj;
     pd->view_proj_nj = pd->prev_view_proj_nj = vp;
     pd->jitter = v4(0, 0, 0, 0);
-    pd->post_flags = v4(0, 0, 0, 0);
-    pd->post_fog = v4(0, 80, 0, 0);
-    pd->fog = v4(R->env.fog_color.x, R->env.fog_color.y, R->env.fog_color.z, R->env.fog_density);
+    pd->ss_view_proj = mat4_mul(R->proj_j, R->view);
+    pd->ss_view = R->view;
+    pd->ss_info = v4(1, 0, 0, 0);
     pd->camera_pos = v4(s->objective_pos.x, s->objective_pos.y, s->objective_pos.z, fd->camera_pos.w);
     pd->screen = v4((float)n, (float)n, 1.0f / (float)n, 1.0f / (float)n);
+    F.pip_view = view;
+    F.pip_proj = proj;
+    F.pip_vp = vp;
     return true;
 }
 
@@ -2065,14 +2122,23 @@ static void build_frame_graph(FrameData *fd) {
         p = fg_pass("scope_pip", exec_scope_pip, NULL);
         fg_write(p, F.pip_color, FG_COLOR);
         fg_write(p, F.pip_depth, FG_DEPTH);
+        // The main view's screen-space inputs (kept alive until here).
+        if (F.lit.ao_on) fg_read(p, F.lit.ao, FG_SAMPLED);
+        if (F.lit.contact_on) fg_read(p, F.lit.contact, FG_SAMPLED);
+        if (F.lit.ssr_on) fg_read(p, F.lit.ssr, FG_SAMPLED);
+        if (F.lit.ssgi_on) fg_read(p, F.lit.ssgi, FG_SAMPLED);
         if (p < 0) F.pip_color = FG_NONE;
         else {
-            mat4 view = mat4_look_at(R->sight.objective_pos, v3_add(R->sight.objective_pos, v3_norm(R->sight.fwd)), v3_norm(R->sight.up));
-            mat4 proj = mat4_perspective(R->pip_fov * DG_DEG2RAD, 1.0f, 0.3f, R->cam.zfar);
-            post_scope_sky(F.pip_color, F.pip_depth, mat4_inverse(mat4_mul(proj, view)), R->sight.objective_pos);
+            p = fg_pass("scope_pip_decals", exec_scope_pip_decals, NULL);
+            fg_write(p, F.pip_color, FG_COLOR);
+            fg_read(p, F.pip_depth, FG_DEPTH_READ);
+            post_scope_sky(F.pip_color, F.pip_depth, mat4_inverse(F.pip_vp), R->sight.objective_pos);
+            vkw_build_graph_pip(F.pip_color, F.pip_depth, F.pip_vp);   // water, after the fog (as the main view)
             p = fg_pass("scope_pip_fx", exec_scope_pip_fx, NULL);
             fg_write(p, F.pip_color, FG_COLOR);
             fg_read(p, F.pip_depth, FG_DEPTH_READ);
+            fg_read(p, F.depth, FG_SAMPLED);               // soft particles: the main view's depth
+            fg_read(p, post_froxels(), FG_SAMPLED);        // blended surfaces / particles: its froxels
         }
     }
     post_set_sight(&R->sight, F.pip_color, F.pip_from_view, R->vm_proj, R->pip_fov);

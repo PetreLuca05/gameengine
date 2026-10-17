@@ -256,9 +256,9 @@ void main() {
     float fog = 1.0 - exp(-dist * frame.fog.w);
     color = mix(color, frame.fog.rgb, clamp(fog, 0.0, 1.0));
     if (frame.post_fog.x > 0.5) {
-        float vz = max(dot(v_world - eye, -vec3(frame.view[0][2], frame.view[1][2], frame.view[2][2])), 0.15);
+        float vz = max(ss_main_depth(v_world), 0.15);   // the scope PiP: the main view's volume (common.glsl)
         float w = clamp(log(vz / 0.15) / log(frame.post_fog.y / 0.15), 0.0, 1.0);
-        vec4 fv = textureLod(froxel, vec3(suv, w), 0.0);
+        vec4 fv = textureLod(froxel, vec3(ss_main_uv(v_world, suv), w), 0.0);
         color = color * fv.a + fv.rgb;
     }
 

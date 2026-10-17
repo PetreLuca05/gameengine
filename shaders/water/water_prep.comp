@@ -12,7 +12,7 @@ layout(set = 0, binding = 9, r32f) uniform writeonly image2D out_depth;
 
 void main() {
     ivec2 p = ivec2(gl_GlobalInvocationID.xy);
-    if (p.x >= int(U.screen.x) || p.y >= int(U.screen.y)) return;
+    if (any(greaterThanEqual(p, imageSize(out_color)))) return;   // the main view or the scope PiP
     imageStore(out_color, p, vec4(sanitize(texelFetch(in_hdr, p, 0).rgb), 1.0));
     imageStore(out_depth, p, vec4(texelFetch(in_depth, p, 0).r));
 }

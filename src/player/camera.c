@@ -3,20 +3,23 @@
 #include "core/cvar.h"
 #include <math.h>
 
-typedef struct CameraCvars { Cvar *fov, *max_aspect, *legacy_fov, *headbob, *sprint_fov, *bob_amount; } CameraCvars;
+typedef struct CameraCvars { Cvar *fov, *sv_fov, *sv_fov_max, *max_aspect, *ads_world_zoom, *headbob, *sprint_fov, *bob_amount; } CameraCvars;
 
 static CameraCvars *cc(void) { return g_engine.camera_cvars; }
 
 void camera_register_cvars(void) {
     CameraCvars *c = ARENA_PUSH(&g_engine.perm_arena, CameraCvars);
     g_engine.camera_cvars = c;
-    // The world camera FOV is the host's, the same for every player (no FOV advantage): vertical
-    // degrees, Hor+ up to sv_fov_max_aspect, wider screens keep that aspect's horizontal FOV.
-    c->fov = cvar_reg_float("sv_fov", 75.0f, 60.0f, 100.0f, CVAR_SERVER, "world camera vertical FOV for every player (deg; host, replicated; 75 = 107 deg horizontal at 16:9)");
+    // The world camera FOV is the player's (Settings -> Graphics -> View): vertical degrees, Hor+ up
+    // to sv_fov_max_aspect, wider screens keep that aspect's horizontal FOV. A host may force one FOV
+    // for everyone (sv_fov) or cap it (sv_fov_max). Hands / weapon FOV: cam_weapon_fov.
+    c->fov = cvar_reg_float("cl_fov", 75.0f, 50.0f, 120.0f, CVAR_ARCHIVE, "world camera vertical FOV (deg; 75 = 107 deg horizontal at 16:9)");
+    c->sv_fov = cvar_reg_float("sv_fov", 0.0f, 0.0f, 120.0f, CVAR_SERVER, "host override of every player's world FOV (vertical deg, replicated; 0 = each player's cl_fov)");
+    c->sv_fov_max = cvar_reg_float("sv_fov_max", 0.0f, 0.0f, 120.0f, CVAR_SERVER, "host cap of the players' cl_fov (vertical deg, replicated; 0 = no cap)");
     c->max_aspect = cvar_reg_float("sv_fov_max_aspect", 16.0f / 9.0f, 0.0f, 4.0f, CVAR_SERVER,
                                    "widest aspect that sees more to the sides; wider screens keep its horizontal FOV (0 = unlimited Hor+)");
-    // Old configs: cl_fov is accepted and ignored (not saved again). Hands FOV: cam_weapon_fov.
-    c->legacy_fov = cvar_reg_float("cl_fov", 75.0f, 1.0f, 179.0f, 0, "deprecated, ignored: the world FOV is the server's sv_fov (hands / weapon FOV: cam_weapon_fov)");
+    c->ads_world_zoom = cvar_reg_float("cl_ads_world_zoom", 1.1f, 1.0f, 1.5f, CVAR_ARCHIVE,
+                                       "ADS: the world camera narrows by this (tangent ratio) when fully aimed, on top of the hands / weapon zoom (1 = off; a sight's \"world_zoom\" overrides it)");
     c->headbob = cvar_reg_bool("cl_headbob", true, CVAR_ARCHIVE, "camera head bob");
     c->bob_amount = cvar_reg_float("cl_headbob_amount", 1.0f, 0.0f, 3.0f, CVAR_ARCHIVE, "head bob strength");
     c->sprint_fov = cvar_reg_float("cl_sprint_fov", 7.0f, 0.0f, 20.0f, CVAR_ARCHIVE, "extra FOV while sprinting (deg)");
@@ -27,10 +30,22 @@ float camera_fov_for_aspect(float fov_v, float max_aspect, float aspect) {
     return 2.0f * atanf(tanf(fov_v * 0.5f * DG_DEG2RAD) * max_aspect / aspect) * DG_RAD2DEG;
 }
 
+float camera_fov_setting(float cl_fov, float sv_fov, float sv_fov_max) {
+    if (sv_fov >= 1.0f) return sv_fov;
+    return sv_fov_max >= 1.0f ? fminf(cl_fov, sv_fov_max) : cl_fov;
+}
+
 float camera_base_fov(void) {
     int w = render_width(), h = render_height();
     float aspect = (w > 0 && h > 0) ? (float)w / (float)h / render_stretch_factor() : 16.0f / 9.0f;
-    return camera_fov_for_aspect(cc()->fov->f, cc()->max_aspect->f, aspect);
+    return camera_fov_for_aspect(camera_fov_setting(cc()->fov->f, cc()->sv_fov->f, cc()->sv_fov_max->f), cc()->max_aspect->f, aspect);
+}
+
+float camera_ads_world_zoom_default(void) { return cc()->ads_world_zoom->f; }
+
+float camera_ads_fov(float hip_fov, float world_zoom, float ads_t) {
+    float k = 1.0f + (fmaxf(world_zoom, 1.0f) - 1.0f) * smoothstepf(0.0f, 1.0f, saturate(ads_t));
+    return 2.0f * atanf(tanf(hip_fov * 0.5f * DG_DEG2RAD) / k) * DG_RAD2DEG;
 }
 
 void camera_apply_look(ViewState *v, vec2 d) {
@@ -85,13 +100,15 @@ RenderCamera camera_update(ViewState *v, const PlayerMove *m, float dt, const Ca
     eye = v3_madd(eye, right, bob_x);
     v->eye = eye;
 
-    // FOV: the server's base (sv_fov), sprint widens it (smoothed). ADS never changes it: aiming
-    // only narrows the arms / weapon projection (vm_ads_zoom), a scope magnifies inside its lens.
+    // FOV: the player's base (cl_fov / the host's sv_fov), sprint widens it (smoothed). ADS narrows
+    // the world a little (the sight's world zoom, ~1.1x, along smoothstep(ads_t): exact the frame
+    // ADS completes); the arms / weapon projection narrows by its own, stronger vm_ads_zoom and a
+    // scope magnifies inside its lens.
     float hip = camera_base_fov();
     if (m->sprinting && grounded && ads_t <= 0.0f) hip += c->sprint_fov->f * saturate(speed / 6.0f);
     if (v->fov_hip <= 1.0f) v->fov_hip = hip;
     v->fov_hip = lerpf(v->fov_hip, hip, exp_decay(8.0f, dt));
-    v->fov = v->fov_hip;
+    v->fov = (ca && ca->world_zoom > 1.0f && ads_t > 0.0f) ? camera_ads_fov(v->fov_hip, ca->world_zoom, ads_t) : v->fov_hip;
 
     // Slight roll while hanging, pitch nudge during mantle.
     float roll_target = m->mode == MOVE_HANG ? 0.03f : 0.0f;

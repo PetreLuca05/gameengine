@@ -72,14 +72,16 @@ void post_vol_build(void) {
 FgRes post_froxels(void) { return P.froxels; }
 
 // Fog targets: the main HDR (froxels, aerial perspective, analytic sky fog without froxels) or
-// the scope picture-in-picture (analytic sky fog: its geometry is fogged by the lit shaders).
-typedef struct FogTarget { FgRes color, depth; mat4 inv_vp; vec3 cam; bool vol, ap, analytic; } FogTarget;
+// the scope picture-in-picture, which gets exactly the main view's fog: the same froxel volume and
+// aerial perspective, looked up through the main projection for each PiP pixel's world point
+// (reproject), and the same analytic sky fog when the main view has it.
+typedef struct FogTarget { FgRes color, depth; mat4 inv_vp; vec3 cam; bool vol, ap, analytic, reproject; } FogTarget;
 static FogTarget g_fog_main, g_fog_pip;
 
 // The lit shaders' analytic fog (render.c: frame.fog) is on when the volumetrics are off.
-static bool analytic_fog(bool pip) {
+static bool analytic_fog(void) {
     if (R->env.fog_density <= 0.0f || (!P.in.sky_on && !sky_active())) return false;
-    return pip || !(P.set.volumetrics > 0 && fg_pass_enabled("vol_inject"));
+    return !(P.set.volumetrics > 0 && fg_pass_enabled("vol_inject"));
 }
 
 static void exec_fog_apply(VkCommandBuffer cmd, void *u);
@@ -129,10 +131,12 @@ void post_scope_sky(FgRes color, FgRes depth, mat4 inv_vp, vec3 cam) {
     int p = fg_pass("scope_pip_sky", exec_sky, &g_sky_pip);
     fg_read(p, depth, FG_SAMPLED);
     fg_write(p, color, FG_STORAGE);
-    // The scope's geometry has the analytic fog of the lit shaders: the same over its sky.
-    if (!analytic_fog(true)) return;
-    g_fog_pip = (FogTarget){ color, depth, inv_vp, cam, false, false, true };
+    // The main view's fog (post_fog_apply ran for it this frame): froxels / aerial perspective
+    // through its projection, its analytic sky fog (the lit shaders fogged the geometry alike).
+    g_fog_pip = (FogTarget){ color, depth, inv_vp, cam, P.froxels != FG_NONE, sky_active(), analytic_fog(), true };
+    if (!g_fog_pip.vol && !g_fog_pip.ap && !g_fog_pip.analytic) return;
     p = fg_pass("scope_pip_fog", exec_fog_apply, &g_fog_pip);
+    if (g_fog_pip.vol) fg_read(p, P.froxels, FG_SAMPLED);
     fg_read(p, depth, FG_SAMPLED);
     fg_write(p, color, FG_STORAGE);
 }
@@ -165,6 +169,7 @@ static void exec_fog_apply(VkCommandBuffer cmd, void *u) {
     pc.u[0] = t->vol ? 1u : 0u;
     pc.u[1] = t->ap ? 1u : 0u;
     pc.u[2] = t->analytic ? 1u : 0u;
+    pc.u[3] = t->reproject ? 1u : 0u;
     float f1[4] = { R->env.aerial_max > 10.0f ? R->env.aerial_max : 3000.0f, P.in.zfar, R->env.fog_density, 0.0f };
     float col[3] = { R->env.fog_color.x, R->env.fog_color.y, R->env.fog_color.z };
     float cam[3] = { t->cam.x, t->cam.y, t->cam.z };
@@ -180,7 +185,7 @@ static void exec_fog_apply(VkCommandBuffer cmd, void *u) {
 void post_fog_apply(void) {
     if (!P.ok) return;
     FogTarget *t = &g_fog_main;
-    *t = (FogTarget){ P.in.hdr, P.in.depth, P.in.inv_view_proj, P.in.cam_pos, P.froxels != FG_NONE, sky_active(), analytic_fog(false) };
+    *t = (FogTarget){ P.in.hdr, P.in.depth, P.in.inv_view_proj, P.in.cam_pos, P.froxels != FG_NONE, sky_active(), analytic_fog(), false };
     if (!t->vol && !t->ap && !t->analytic) return;
     int p = fg_pass("fog_apply", exec_fog_apply, t);
     if (t->vol) fg_read(p, P.froxels, FG_SAMPLED);

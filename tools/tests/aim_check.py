@@ -8,7 +8,7 @@ import sys
 CASE = re.compile(r"aim_case (\S+)")
 REP = re.compile(r"aim_report: class (\S+) P .*?\(\S+, ([\d.]+) m\) muzzle .*? origin ([-\d. ]+?)( \(recovered\))? Q .*?\(([\d.]+) m\) dir .*? "
                  r"Q screen ([-\d.]+) ([-\d.]+)( \(behind\))? render (\d+)x(\d+)")
-POS = re.compile(r"crosshair_pos: ([-\d.]+) ([-\d.]+) \((\w+)\) obstruction (\S+) ([\d.]+) offset .*? ui (\d+)x(\d+)")
+POS = re.compile(r"crosshair_pos: ([-\d.]+) ([-\d.]+) \((\w+)\) obstruction (\S+) ([\d.]+) offset .*? ui (\d+)x(\d+)(?: target ([-\d.]+) ([-\d.]+))?")
 STATS = re.compile(r"aim_stats: .*?(\d+) trigger pulls blocked")
 
 # Expected class per case (any of).
@@ -42,6 +42,13 @@ def main():
                 kx = float(m.group(6)) / float(rep.group(9))
                 ky = float(m.group(7)) / float(rep.group(10))
                 qx, qy = float(rep.group(6)) * kx, float(rep.group(7)) * ky
+                # aim_report solves at the console's moment, the crosshair at its frame's: a Q at point
+                # blank moves a few px with the weapon's idle sway between the two. Compare with the
+                # target of the same frame (Q's projection as the HUD drew it) when the log has it.
+                if m.group(8):
+                    tx, ty = float(m.group(8)), float(m.group(9))
+                    print("%-14s aim_report Q vs the frame's target %.1f px" % (case, ((tx - qx) ** 2 + (ty - qy) ** 2) ** 0.5))
+                    qx, qy = tx, ty
                 err = ((float(m.group(1)) - qx) ** 2 + (float(m.group(2)) - qy) ** 2) ** 0.5
                 if err > 1.0 and case != "thin_wall":
                     fails.append("%s: crosshair %.1f px from Q" % (case, err))

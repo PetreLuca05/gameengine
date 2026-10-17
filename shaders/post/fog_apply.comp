@@ -5,8 +5,9 @@
 // same as the geometry beyond it, so the horizon has no seam and fog / haze reads over the sky.
 // Without froxels the analytic fog of the lit shaders (frame.fog) is put over the sky instead,
 // through the height fog layer up to the far plane (the zenith sees the layer, not a white-out).
-// Also run on the scope picture-in-picture (analytic sky fog only: the froxels / aerial
-// perspective belong to the main camera).
+// Also run on the scope picture-in-picture (pc.u0.w = 1): each PiP pixel's world point is looked up
+// in the main camera's froxels / aerial perspective through the main projection (U is the main
+// view's), so the scope shows exactly the fog the main view has along the same line of sight.
 #extension GL_GOOGLE_include_directive : require
 #include "post_common.glsl"
 layout(local_size_x = 8, local_size_y = 8) in;
@@ -14,7 +15,7 @@ layout(set = 0, binding = 0) uniform sampler3D volume;
 layout(set = 0, binding = 1) uniform sampler2D depth_tex;
 layout(set = 0, binding = 2) uniform sampler3D ap_tex;     // time-of-day aerial perspective (src/render/sky)
 // pc.p0..p3 inverse view-projection of the target
-// pc.u0.x froxels valid, u0.y aerial perspective valid, u0.z analytic sky fog
+// pc.u0.x froxels valid, u0.y aerial perspective valid, u0.z analytic sky fog, u0.w reproject (PiP)
 // pc.u1 (float bits) x aerial perspective depth (m, quadratic slices), y far plane (m), z analytic
 // fog density (1/m); pc.u2.xyz analytic fog colour, pc.u3.xyz target camera position
 layout(set = 0, binding = 8, rgba16f) uniform image2D hdr;
@@ -39,21 +40,39 @@ void main() {
     float d = texelFetch(depth_tex, p, 0).r;
     vec4 c = imageLoad(hdr, p);
     vec4 v = vec4(0.0, 0.0, 0.0, 1.0);
+    // The main view's coordinates of this pixel: its uv, view depth and distance (the PiP: of the
+    // pixel's world point, through the main view's projection; sky pixels: far along the ray).
+    vec2 muv = uv;
+    float mz = d >= 1.0 ? U.s_vol3.w : 0.0, mdist = 0.0;
+    if (pc.u0.w == 1u) {
+        mat4 inv_vp = mat4(pc.p0, pc.p1, pc.p2, pc.p3);
+        vec4 wh = inv_vp * vec4(uv * 2.0 - 1.0, d >= 1.0 ? 0.5 : d, 1.0);
+        vec3 wp = wh.xyz / wh.w;
+        if (d >= 1.0) wp = U.cam_pos.xyz + normalize(wp - uintBitsToFloat(pc.u3.xyz)) * 1000.0;
+        vec4 mc = U.view_proj * vec4(wp, 1.0);
+        muv = clamp(mc.xy / max(mc.w, 1e-4) * 0.5 + 0.5, vec2(0.0), vec2(1.0));
+        if (d < 1.0) {
+            mz = -(U.view * vec4(wp, 1.0)).z;
+            mdist = length(wp - U.cam_pos.xyz);
+        }
+    } else if (d < 1.0) {
+        mz = linear_depth(d);
+        mdist = length(view_pos(uv, d));
+    }
     if (pc.u0.x == 1u) {
-        float z = d >= 1.0 ? U.s_vol3.w : linear_depth(d);
+        float z = mz;
         float n = 0.15, f = U.s_vol3.w;
         float w = clamp(log(max(z, n) / n) / log(f / n), 0.0, 1.0);
         // The slice stores the integral up to its far edge: shift by half a slice.
         w = clamp(w - 0.5 / U.s_vol3.z, 0.0, 1.0);
-        v = textureLod(volume, vec3(uv, w), 0.0);
+        v = textureLod(volume, vec3(muv, w), 0.0);
     }
     // Aerial perspective on geometry (the sky already contains it): distance along the view ray.
     if (pc.u0.y == 1u && d < 1.0) {
-        vec3 vp = view_pos(uv, d);
-        float dist = length(vp);
+        float dist = mdist;
         float ap_max = uintBitsToFloat(pc.u1.x);
         float w3 = sqrt(clamp(dist / max(ap_max, 1.0), 0.0, 1.0));
-        vec4 ap = textureLod(ap_tex, vec3(uv, clamp(w3 - 0.5 / 32.0, 0.0, 1.0)), 0.0);
+        vec4 ap = textureLod(ap_tex, vec3(muv, clamp(w3 - 0.5 / 32.0, 0.0, 1.0)), 0.0);
         // Fade in over the first slice (no haze at arm's length).
         float k = clamp(w3 * 32.0, 0.0, 1.0);
         c.rgb = c.rgb * mix(1.0, ap.a, k) + ap.rgb * k;

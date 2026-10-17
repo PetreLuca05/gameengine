@@ -387,12 +387,19 @@ static void tab_graphics(GuiCursor *c, GuiRect content) {
 
     section(c, "View");
     {
-        // The world FOV is the server's (the same for everyone); only the hands / weapon FOV is yours.
-        GuiRect r = gw_setting_row(c, "Field of view", "FOV is fixed by the server, the same for every player. Aiming zooms only your hands and weapon; scopes magnify inside the scope.",
-                                   rid("fov_fixed"));
-        char buf[64];
-        snprintf(buf, sizeof(buf), "%.0f\xC2\xB0 (server)", camera_base_fov());
-        gw_label(r, buf, gui_s(TH->t_body), GW_REGULAR, TH->text_faint, GUI_LEFT);
+        // The world camera FOV is the player's, unless the host forces one (sv_fov) or caps it (sv_fov_max).
+        Cvar *svf = cv("sv_fov"), *svm = cv("sv_fov_max");
+        if (svf && svf->f >= 1.0f) {
+            GuiRect r = gw_setting_row(c, "Field of view", "This server sets the same FOV for every player.", rid("fov_fixed"));
+            char buf[64];
+            snprintf(buf, sizeof(buf), "%.0f\xC2\xB0 (server)", camera_base_fov());
+            gw_label(r, buf, gui_s(TH->t_body), GW_REGULAR, TH->text_faint, GUI_LEFT);
+        } else {
+            row_slider_cvar(c, "Field of view", "cl_fov", 50, 120, 1, "%.0f\xC2\xB0",
+                            svm && svm->f >= 1.0f ? "Vertical camera FOV (this server caps it). Aiming zooms the world slightly and your hands / weapon more; scopes magnify inside the scope."
+                                                  : "Vertical camera FOV (75 = 107\xC2\xB0 horizontal at 16:9). Aiming zooms the world slightly and your hands / weapon more; scopes magnify inside the scope.");
+        }
+        row_slider_cvar(c, "Aim zoom", "cl_ads_world_zoom", 1.0f, 1.5f, 0.01f, "%.2fx", "How much the world zooms in when you aim down sights (1 = none). Sights may set their own.");
     }
     {
         // Stretched resolution simulator: the slider and what it looks like on this display.

@@ -511,6 +511,7 @@ static void parse_weapon(ItemDB *db, const cJSON *w, const char *file) {
     d->knockback = jnum(w, "knockback", 200);
     d->swing_arc = jnum(w, "swing_arc", 90);
     d->ads_fov = jnum(w, "ads_fov", 0);
+    d->ads_world_zoom = jnum(w, "ads_world_zoom", 0);
     d->bolt_action = jbool(w, "bolt_action", false);
     d->one_hand_capable = jbool(w, "one_hand_capable", false);
     dg_strcpy(d->pose, sizeof(d->pose), jstr(w, "pose", "pistol"));

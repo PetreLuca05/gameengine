@@ -177,7 +177,7 @@ void main() {
         bool vm = (flags & MAT_VIEWMODEL) != 0u;
         // Weather: wet / puddles / snow (shaders/weather.glsl; the G-buffer applies the same terms).
         float wx_snow = weather_surface(v_world, n, albedo, rough, metal, vm);
-        vec2 suv = gl_FragCoord.xy * frame.screen.zw;
+        vec2 suv = ss_main_uv(v_world, gl_FragCoord.xy * frame.screen.zw);
         float ao = (!vm && frame.post_flags.x > 0.5) ? mix(1.0, texture(post_ao, suv).r, frame.post_params.z) : 1.0;
 #ifdef PBR_MAPS
         ao *= pbr_occlusion(flags, map_uv);   // material AO x SSAO (indirect diffuse + specular occlusion)
@@ -263,8 +263,8 @@ void main() {
     // Blended surfaces are drawn after the volumetric fog pass: fog their own contribution with
     // the froxel volume (in-scattering + transmittance up to this depth).
     if (LIT_FROXEL_FOG && frame.post_fog.x > 0.5) {
-        vec2 fuv = gl_FragCoord.xy * frame.screen.zw;
-        float vz = max(dot(v_world - frame.camera_pos.xyz, -vec3(frame.view[0][2], frame.view[1][2], frame.view[2][2])), 0.15);
+        vec2 fuv = ss_main_uv(v_world, gl_FragCoord.xy * frame.screen.zw);
+        float vz = max(ss_main_depth(v_world), 0.15);
         float w = clamp(log(vz / 0.15) / log(frame.post_fog.y / 0.15), 0.0, 1.0);
         vec4 fv = textureLod(post_froxel, vec3(fuv, w), 0.0);
         color = color * fv.a + fv.rgb;

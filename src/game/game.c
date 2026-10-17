@@ -527,6 +527,7 @@ static UserCmd build_cmd(void) {
         Player *lp = game_local_player();
         vec3 mc;
         if (lp && chars_muzzle_cam(G->world, lp->ent, &mc, NULL)) aim_claim_pack(mc, c.muzzle_cam);
+        if (lp && chars_eye_cam(G->world, lp->ent, &mc, NULL)) aim_claim_pack(mc, c.eye_cam);
     }
     return c;
 }
@@ -1138,7 +1139,15 @@ static void cmd_inv(int argc, const char **argv) {
 static void cmd_lookat(int argc, const char **argv) {
     if (argc < 4) return;
     vec3 target = v3((float)atof(argv[1]), (float)atof(argv[2]), (float)atof(argv[3]));
-    vec3 d = v3_sub(target, G->view.eye);
+    vec3 eye = G->view.eye;
+    // Teleported since the last frame (setpos just before): the eye the player will have there, the
+    // simulated eye + the first-person camera's offset (docs/AIM.md), not last frame's camera.
+    Player *lp = game_local_player();
+    if (lp && G->world) {
+        vec3 se = player_eye_pos(&lp->sim.move), ec;
+        if (v3_dist(se, eye) > 1.0f) eye = chars_eye_cam(G->world, lp->ent, &ec, NULL) ? aim_cam_to_world(se, G->view.yaw, G->view.pitch, ec) : se;
+    }
+    vec3 d = v3_sub(target, eye);
     G->view.yaw = atan2f(-d.x, -d.z);
     G->view.pitch = atan2f(d.y, sqrtf(d.x * d.x + d.z * d.z));
 }

@@ -39,6 +39,7 @@ static struct {
     float obs_w;       // 0 = clear, 1 = obstructed (smoothed)
     int obs_cls;       // last obstruction class (kept while fading out)
     vec2 last_pos;     // where the crosshair was drawn (tests: aim_report / crosshair_pos)
+    vec2 last_target;  // where it was heading that frame (Q's projection when obstructed, else P's)
     bool last_valid;
 } CH;
 
@@ -143,8 +144,9 @@ static void cmd_reload(int argc, const char **argv) {
 
 static void cmd_pos(int argc, const char **argv) {
     (void)argc; (void)argv;
-    log_info("crosshair_pos: %.1f %.1f (%s) obstruction %s %.2f offset %.1f %.1f ui %.0fx%.0f", CH.last_pos.x, CH.last_pos.y,
-             CH.last_valid ? "drawn" : "hidden", aim_class_name(CH.obs_cls), CH.obs_w, CH.obs_off.x, CH.obs_off.y, ui_width(), ui_height());
+    log_info("crosshair_pos: %.1f %.1f (%s) obstruction %s %.2f offset %.1f %.1f ui %.0fx%.0f target %.1f %.1f", CH.last_pos.x, CH.last_pos.y,
+             CH.last_valid ? "drawn" : "hidden", aim_class_name(CH.obs_cls), CH.obs_w, CH.obs_off.x, CH.obs_off.y, ui_width(), ui_height(), CH.last_target.x,
+             CH.last_target.y);
 }
 
 void crosshair_init(void) {
@@ -282,9 +284,15 @@ void crosshair_draw(float dt) {
     {
         float k = aim_lerp_k(dt, CH.obstruct_lerp->f);
         vec2 want = obstructed ? v2(qpx.x - cx, qpx.y - cy) : v2(0, 0);
-        CH.obs_off.x += (want.x - CH.obs_off.x) * k;
-        CH.obs_off.y += (want.y - CH.obs_off.y) * k;
+        // Settled on an obstruction: follow Q exactly (a Q at point blank moves a few px with the
+        // weapon's idle sway every frame; easing it would leave the crosshair behind the impact).
+        // The ease is for the moves to and from it.
+        float dx = want.x - CH.obs_off.x, dy = want.y - CH.obs_off.y;
+        if (obstructed && CH.obs_w > 0.98f && dx * dx + dy * dy < 64.0f) k = 1.0f;
+        CH.obs_off.x += dx * k;
+        CH.obs_off.y += dy * k;
         CH.obs_w += ((obstructed ? 1.0f : 0.0f) - CH.obs_w) * k;
+        CH.last_target = obstructed ? qpx : v2(cx, cy);
         if (obstructed) CH.obs_cls = as.cls;
         if (!gun || !CH.obstruct->i) { CH.obs_off = v2(0, 0); CH.obs_w = 0.0f; }
     }

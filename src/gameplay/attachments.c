@@ -95,6 +95,7 @@ static void parse_attachment(AttachmentDef *a, const cJSON *j, const char *file)
     a->zoom = fmaxf(1.0f, jnum(j, "zoom", 1.0f));
     a->ads_fov = jnum(j, "ads_fov", 0.0f);
     a->main_zoom = fmaxf(1.0f, jnum(j, "main_zoom", 1.15f));
+    a->world_zoom = jnum(j, "world_zoom", 0.0f);
     a->rail_offset = jnum(j, "rail_offset", 0.0f);
     const cJSON *ro = cJSON_GetObjectItemCaseSensitive(j, "rail_offset");
     a->rail_auto = (cJSON_IsString(ro) && !strcmp(ro->valuestring, "auto")) || (!ro && a->sight == SIGHT_SCOPE);
@@ -403,6 +404,13 @@ float attach_ads_vm_zoom(const WeaponDef *eff, const AttachmentDef *optic) {
     if (optic && optic->sight == SIGHT_SCOPE) fov = zoom_fov(fov, optic->main_zoom);
     else if (optic) fov = optic->ads_fov > 1.0f ? optic->ads_fov : zoom_fov(fov, optic->zoom);
     return fmaxf(1.0f, fov_zoom(fov));
+}
+
+float attach_ads_world_zoom(const WeaponDef *eff, const AttachmentDef *optic, float def) {
+    float z = def;
+    if (optic && optic->world_zoom > 0.0f) z = optic->world_zoom;
+    else if (!optic && eff && eff->ads_world_zoom > 0.0f) z = eff->ads_world_zoom;
+    return clampf(z, 1.0f, 1.5f);
 }
 
 int attach_draw_parts(const ItemDB *db, const WeaponDef *base, const u8 *att, AttachDrawPart *out, int max) {

@@ -111,8 +111,8 @@ typedef struct RenderCamera {
     float fov_deg;      // vertical FOV
     float znear, zfar;
     float vm_fov_deg;   // arms / held item FOV when r_viewmodel_fov is 0 (the hip FOV); 0 = fov_deg
-    float ads_t;        // 0..1 aim progress: the weapon's FOV narrows by vm_ads_zoom (the world FOV
-                        // never changes with ADS; the sight stays on the view axis = screen centre)
+    float ads_t;        // 0..1 aim progress: the weapon's FOV narrows by vm_ads_zoom (fov_deg already has
+                        // the mild ADS world zoom; the sight stays on the view axis = screen centre)
     float vm_ads_zoom;  // arms / weapon magnification once aimed (tan ratio; <= 1 = none)
 } RenderCamera;
 // The weapon (viewmodel) FOV for a camera: hip value (r_viewmodel_fov / vm_fov_deg / fov_deg)
