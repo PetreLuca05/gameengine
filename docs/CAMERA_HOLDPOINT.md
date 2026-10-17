@@ -194,8 +194,9 @@ Nothing new goes on the wire. Remote players already replicate aim yaw and pitch
 and ADS / sprint / crouch flags. Each client runs the same hold point and IK code for them, with the
 camera at their head bone plus eye socket. `test_holdpoint` checks that an owner pose and a remote
 pose solved from the same inputs are **bit-identical**; `first_person` changes nothing. The host's
-hit traces use the camera / aim ray. Tracers and flashes start at the visible muzzle derived from the
-hold point.
+shots leave the muzzle socket of that pose and converge on the camera ray's aim point (docs/AIM.md):
+the shooter claims its muzzle in camera space in the `UserCmd` (`muzzle_cam`), the host checks it
+against its own solve of the same pose.
 
 ## Tuning and debug
 

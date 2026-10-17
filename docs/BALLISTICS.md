@@ -65,12 +65,12 @@ The original planning notes, with the survey of the old code, are in `BALLISTICS
 - A few cm at 500 m. Off with `bal_spin_drift 0`.
 
 **Launch**
-- From the eye, along the aim plus the spread cone (`recoil_cone_dir`, unchanged).
+- From the weapon's muzzle socket, towards the aim point of the camera ray (convergence, docs/AIM.md), plus the spread cone (`recoil_cone_dir`, unchanged).
 - Pitched up by the zero elevation, solved by bisection on the same sim (standard atmosphere, no wind) for `zero_distance`:
   - pistol 25 m, SMG 50 m, rifle / LMG 100 m, DMR 200 m, sniper 300 m.
 - Plus the device's point-of-impact shift (`poi_moa`).
 - Speed: `mv_curve(barrel_length) × device.velocity_mul`.
-- The visible tracer and smoke start at the muzzle socket and blend onto the true path over the first 15 m.
+- The visible tracer and smoke are the true path: it starts at the muzzle (the old 15 m blend from the visible muzzle onto an eye-origin path is gone). `EV_SHOT.pos` is the muzzle origin, so replays start there too.
 
 **Determinism**
 - float32 in a fixed operation order. `-ffp-contract=off` / `/fp:precise` on `src/gameplay/ballistics` (CMake).

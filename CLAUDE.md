@@ -36,6 +36,7 @@ Windows, no admin; tools are portable, in `.toolchain/` (git-ignored).
 | FP camera, hold point | CAMERA_HOLDPOINT.md | src/player/{holdpoint,hands,camera_fp}.c |
 | Weapons, recoil, sway | RECOIL.md, ATTACHMENTS.md | src/gameplay/{weapons,recoil,items}.c, data/weapons |
 | Fire animation (gun-driven kick, mass model, hands / camera lag, punches; ONE global sway) | FIRE_ANIM.md | src/anim/fire_anim.c (pure), src/game/game_fire.c, src/player/sway.c, src/ui/fire_tuner.c, assets/weapons/{fire_poses,sway_global.json}; tests: test_fire_anim, tools/tests/fire_anim.cfg, sway_check / fire_compare / fire_bench |
+| Aim model: shots leave the muzzle socket, converge on the camera ray's aim point P; obstruction Q moves the crosshair (`aim_debug`, `crosshair_obstruct`, `block_fire_when_barrel_blocked`, dev room aim stand (104..128, 0, 40)) | AIM.md | src/gameplay/aim.c (pure), weapons.c weapon_aim_solve, src/ui/crosshair.c, UserCmd muzzle_cam; tests: test_aim, tools/tests/aim_sockets.py, aim_obstruct.cfg + aim_check.py |
 | Ballistics (projectiles, drag / wind / ricochet / penetration, crack / report timing, composed muzzle flash, tracers, energy impacts, range `bal_range`) | BALLISTICS.md | src/gameplay/ballistics (bal_sim / bal_surface / bal_acoustics / bal_muzzle / bal_tracer pure; bal_world, bal_fx), assets/ballistics, attachment `muzzle_device` blocks; tests: test_ballistics, tools/ballistics_ref.py, tools/tests/bal_range.cfg |
 | Render post / sky / time | RENDERING_POST.md, DAYNIGHT.md | src/render/{post,sky,graph}, game_post.c, game_daynight.c |
 | glTF PBR maps (metal-rough, normal, AO, emissive, MASK, doubleSided) | PBR.md | src/assets/assets.c gltf_material, shaders/pbr_maps.glsl, render.c draw_items (set 3), vg_resolve.glsl; test: tools/gen_pbr_test.py, tools/tests/pbr_shelf.cfg |
@@ -68,5 +69,6 @@ Hall at the origin. Other areas:
 - Flesh range: north.
 - Post corner: south-west.
 - Shadow reference corner: (−50, 0, −11), switches jump to `shadow_preset`s.
+- Aim stand (corners and frames): x 104..128, z 40 (wall edge, window, car, low wall, thin wall).
 
 Console: `help [filter]` lists commands, `cvarlist [filter]` lists cvars. New commands / cvars need a description and a category (assets/ui/command_categories.json; tools/tests/lint_commands.py).

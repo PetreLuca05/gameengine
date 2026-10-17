@@ -11,6 +11,7 @@ typedef struct WeaponOutput {
     bool fired;
     bool swung;
     bool mode_changed;   // fire mode switched this tick
+    bool barrel_blocked; // block_fire_when_barrel_blocked held the trigger this tick
     int shots;           // shots fired this tick (sub-tick RPM can fire several)
 } WeaponOutput;
 
@@ -41,6 +42,7 @@ void weapons_set_local_flash(LocalFlashFn fn);
 
 typedef struct WeaponCvars {
     struct Cvar *recoil_scale, *visual_scale, *spread_scale, *recoil_debug, *infinite_ammo, *sway_scale, *kick_scale, *bob_scale, *ads_sway, *ads_bob, *sway_ads_scale, *sway_cosmetic;
+    struct Cvar *block_barrel, *muzzle_tolerance, *aim_debug;
 } WeaponCvars;
 void weapons_register_cvars(void);
 const WeaponCvars *weapons_cvars(void);
@@ -71,6 +73,48 @@ BodyId weapon_shooter_ignore_body(World *w, int shooter);
 // Lag-compensated legacy C_HITBOX entities (not characters) along a ray: true and *h filled when
 // one is closer than h->dist (or than range when !h->hit).
 bool weapon_trace_legacy_hitboxes(World *w, int shooter, vec3 origin, vec3 dir, float range, u32 view_tick256, HitResult *h);
+
+// Aim model (docs/AIM.md, gameplay/aim.h): a shot leaves the muzzle socket and converges on the
+// aim point P of the camera ray; whatever is between the muzzle and P is hit first (Q).
+typedef struct AimQuery {
+    vec3 eye;                 // camera ray origin (the simulated eye)
+    float yaw, pitch;         // the view the muzzle claim is relative to (command angles)
+    vec3 cam_dir;             // aim direction (view + recoil + sight offset), before the spread cone
+    bool have_claim;
+    vec3 claim;               // the shooter's camera-space muzzle (UserCmd.muzzle_cam)
+    bool hand;                // thrown items: the hand socket; no claim / pose = a point beside the eye
+    float max_range;          // camera ray length (no hit: P = eye + cam_dir * max_range)
+    float obstruct_near;      // obstruction closer than this to the muzzle = barrel blocked
+    u32 view_tick256;         // host lag compensation of the traces (0 = the present world)
+} AimQuery;
+typedef struct AimSolve {
+    vec3 eye, cam_dir;
+    vec3 p;                   // aim point
+    bool p_hit;
+    vec3 muzzle;              // the (validated) muzzle socket
+    vec3 origin;              // where the bullet starts: the muzzle, or the last free point when it is inside geometry
+    bool recovered;           // the muzzle was inside geometry (origin pulled back towards the eye)
+    vec3 dir;                 // bullet direction (origin -> P), before the spread cone
+    int cls;                  // AimClass (clear / partial / barrel / friendly)
+    vec3 q;                   // where the bullet lands when obstructed (= P when clear)
+    float q_dist;             // |Q - origin|
+    EntityId q_ent;
+    float claim_error;        // |claim - the host's reconstruction| (m; 0 = not checked)
+    bool claim_clamped;       // out of tolerance: moved onto the host's tolerance sphere
+} AimSolve;
+AimQuery weapon_aim_query(World *w, int slot, const PlayerMove *m, const UserCmd *cmd, vec3 cam_dir, float max_range, float obstruct_near, u32 view_tick256);
+void weapon_aim_solve(World *w, int slot, const AimQuery *q, AimSolve *out);
+// The viewed player's aim this frame (crosshair, aim_debug): view angles + sight offset of the frame.
+bool weapon_aim_preview(World *w, int slot, vec3 eye, float yaw, float pitch, const UserCmd *cmd, AimSolve *out);
+// Client: the aim point distance of this tick's first predicted shot (cm, 0 = none), for the
+// command's aim_dist (host discrepancy log). Reading it clears it.
+u16 weapons_take_aim_claim(void);
+// aim_debug: draws the viewed player's aim of this frame (per frame, from the game's debug pass).
+void weapons_aim_debug_frame(World *w);
+// Host aim checks (aim_stats): shots, claims clamped, worst claim error (m), aim point mismatches.
+typedef struct AimStats { u32 shots, checked, clamped, p_checked, p_mismatch, recovered, blocked; float max_error, max_p_error; } AimStats;
+const AimStats *weapons_aim_stats(void);
+void weapons_aim_stats_reset(void);
 
 void weapons_tick(World *w, int slot, PlayerSim *sim, const UserCmd *cmd, u16 pressed, float dt, bool first_predict, WeaponOutput *out);
 void projectiles_tick(World *w, float dt);
