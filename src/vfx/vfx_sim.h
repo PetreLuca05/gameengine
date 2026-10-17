@@ -152,6 +152,10 @@ typedef struct VfxConfig {
     vec3 camera;
     vec3 wind;
     bool lighting;
+    // docs/LOD.md: spawn LOD distances x lod_dist_scale, the multiplier interpolated between the steps
+    // (log distance) instead of stepping (lod_smooth; 0 / false: as before)
+    float lod_dist_scale;
+    bool lod_smooth;
 } VfxConfig;
 
 typedef struct VfxStats {
