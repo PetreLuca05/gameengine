@@ -1127,7 +1127,8 @@ static void cmd_revive_approach(int argc, const char **argv) {
 // revive_wait players <n> | <slot> alive|dead|downed|reconstructing [timeout frames, default 3000]
 static bool wait_done(int argc, const char **argv) {
     World *w = game_world();
-    if (!w || argc < 3) return true;
+    if (argc < 3) return true;
+    if (!w || (strcmp(argv[1], "players") && !game_local_player())) return false;   // not connected yet
     if (!strcmp(argv[1], "players")) {
         int n = 0;
         for (int s = 0; s < MAX_PLAYERS; s++) n += w->players[s].active ? 1 : 0;
