@@ -88,6 +88,31 @@ static void cmd_set(int argc, const char **argv) {
     log_info("terrain_set: unknown field / index");
 }
 
+// terrain_pair <name|index> <a..e> <0..3> <value> | terrain_pair <name> modes <bits>: a transition's
+// parameters live (the test strip's toggles; terrain_params.h TerPairGpu, TerPairMode bits).
+static void cmd_pair(int argc, const char **argv) {
+    const TerrainParams *p = terrain_world_params();
+    if (!p || argc < 4) {
+        log_info("usage: terrain_pair <name|index> <a|b|c|d|e> <0..3> <value>  |  terrain_pair <name> modes <bits> (1 height 2 noise 4 crumbs 8 set 16 scatter 32 directional 64 slope 128 wear 256 moisture 512 rim)");
+        if (p)
+            for (int i = 0; i < p->pair_count; i++) log_info("  %2d %-14s width %.2f m modes %u", i, p->pair_name[i], p->gpu.pair[i].a[0], (u32)p->gpu.pair[i].b[3]);
+        return;
+    }
+    int k = -1;
+    for (int i = 0; i < p->pair_count; i++)
+        if (!strcmp(p->pair_name[i], argv[1])) k = i;
+    if (k < 0 && argv[1][0] >= '0' && argv[1][0] <= '9') k = atoi(argv[1]);
+    if (k < 0 || k >= p->pair_count) { log_info("terrain_pair: no pair %s", argv[1]); return; }
+    TerrainParams *mp = (TerrainParams *)p;
+    if (!strcmp(argv[2], "modes")) mp->gpu.pair[k].b[3] = (float)atoi(argv[3]);
+    else {
+        if (argc < 5 || argv[2][0] < 'a' || argv[2][0] > 'e' || atoi(argv[3]) < 0 || atoi(argv[3]) > 3) { log_info("terrain_pair: field a..e, index 0..3"); return; }
+        ((float *)&mp->gpu.pair[k])[(argv[2][0] - 'a') * 4 + atoi(argv[3])] = (float)atof(argv[4]);
+    }
+    render_terrain_params(&mp->gpu, sizeof(mp->gpu));
+    log_info("terrain_pair: %s updated (live; edit assets/terrain/transitions to keep it)", p->pair_name[k]);
+}
+
 void terrain_game_register(void) {
     TG.debug = cvar_reg_int("r_terrain_debug", 0, 0, 11, 0,
                             "terrain debug view: 1 weights, 2 bombing cells, 3 macro field, 4 curvature, 5 moisture, 6 variants, 7 transition band, 8 tiling frequency, 9 scatter, 10 grass term, 11 border distance");
@@ -96,6 +121,7 @@ void terrain_game_register(void) {
     cmd_register("terrain_status", cmd_status, "terrain shading: level, slots, textures, pairs");
     cmd_register("terrain_paint", cmd_paint, "terrain_paint <tint_r|tint_g|tint_b|tint|variant|wear|moisture> <value> [radius] [strength]: paint brush at the camera");
     cmd_register("terrain_paint_save", cmd_paint_save, "terrain_paint_save [file.png]: write the painted map (tint rgb, variant mask)");
+    cmd_register("terrain_pair", cmd_pair, "terrain_pair <name|index> <a..e> <i> <value> | <name> modes <bits>: live edit of a transition (test strip toggles)");
     cmd_register("terrain_set", cmd_set, "terrain_set <slot> <field> <index> <value>: live edit of a terrain layer parameter");
 }
 
