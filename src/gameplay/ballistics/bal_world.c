@@ -462,9 +462,9 @@ static float measure_thickness(World *w, const SegHit *s, vec3 dir, float reach)
         float left = reach - travelled;
         if (left <= 1e-4f || !phys_raycast(w->phys, from, v3_scale(dir, -left), PL_MASK_WORLD, PHYS_INVALID_BODY, &rh)) return -1.0f;
         if (rh.body == s->h.body) {
-            // From inside a solid the ray reports the entry face: the far point is still inside the
-            // body, so it is thicker than the bullet can defeat.
-            if (rh.distance >= left - 0.004f) return reach * 2.0f;
+            // A ray starting inside a convex solid hits at 0 (thickness = reach: not defeated); one
+            // starting inside a mesh sees the entry face from behind, right at the entry point.
+            if (rh.distance >= left - 0.0005f) return reach * 2.0f;
             return fmaxf(reach - travelled - rh.distance, 0.0f);
         }
         // Another body between: step past it and look again.
@@ -600,6 +600,13 @@ static void listen_step(BalLive *l, const BalEnv *env, vec3 from, float dt) {
         fx.min_dist = 2.0f;
         fx.max_dist = 400.0f;
         if (delay > -0.1f) audio_play_fx(name, v3_lerp(from, l->b.pos, 0.5f), bal_crack_gain(miss), SND_SFX, &fx);
+        if (B.debug && B.debug->i) {
+            // The supersonic radius around the path where it passed, and when the crack is heard.
+            char txt[64];
+            snprintf(txt, sizeof(txt), "crack +%.2f s (%.0f m)", arrival, miss);
+            dbg_circle(v3_lerp(from, l->b.pos, 0.5f), v3_norm(v3_sub(l->b.pos, from)), miss, DBG_RED, 4.0f);
+            dbg_text(v3_add(B.listener, v3(0, 0.4f, 0)), txt, DBG_RED, 0.05f, 4.0f);
+        }
         if (B.debug && B.debug->i >= 2) log_info("ballistics: crack shot %04x miss %.1f m, heard in %.3f s (flight %.3f s)", l->shot_id, miss, delay, arrival);
     } else {
         if (!bal_whizz_segment(from, l->b.pos, t0, speed, env->sound_speed, B.listener, &arrival, &miss) || miss > 8.0f) return;
@@ -636,6 +643,11 @@ static void play_report(const char *sound, const BalDevice *dev, vec3 muzzle, ve
     fx.max_dist = 2500.0f;
     fx.rolloff = 0.6f;
     audio_play_fx(distant ? name : sound, muzzle, bal_db_gain(db), SND_SFX, &fx);
+    if (B.debug && B.debug->i) {
+        char txt[64];
+        snprintf(txt, sizeof(txt), "report +%.2f s (%.0f m)", fx.delay, d);
+        dbg_text(v3_add(L, v3(0, 0.3f, 0)), txt, DBG_YELLOW, 0.05f, 4.0f);
+    }
     if (B.debug && B.debug->i >= 2) log_info("ballistics: report %s at %.0f m, heard in %.3f s (%+.0f dB)", distant ? name : sound, d, fx.delay, db);
 }
 
