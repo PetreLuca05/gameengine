@@ -327,7 +327,10 @@ level and the switches.
   have no global scale; "shorter fade / short grass / grass off" is approximated by the density cap
   (Off 0.1) and earlier impostors.
 * **LOD bias.** Characters: `r_lod_bias` = 2^-bias (+0.5 → 0.71, +1 → 0.5, +2 / +3 → 0.25, the
-  cvar's minimum); vgeo error x1.41 / x2 / x3 / x4, discrete LODs x1.41 / x2 / x4 / x8.
+  cvar's minimum); vgeo error x1.41 / x2 / x3 / x4, discrete LODs x1.41 / x2 / x4 / x8. With `r_vgeo 0`
+  the classic renderer and the shared systems take their ranges from `assets/render/lod.json` x its tier
+  multipliers (Off 0.3, Low 0.4, Medium 0.6, High 0.85, Modern 1) instead, `r_lod_bias` against the
+  level's default as the user's bias (docs/LOD.md).
 * **Medium AA.** There is no separate "TAA-low": Medium defaults to TAA, FXAA / SMAA selectable.
 * **DoF.** "Gaussian" / "hybrid" / "bokeh" are the gather's 16 / 32 / 48 taps (hexagonal bokeh only
   at 48).

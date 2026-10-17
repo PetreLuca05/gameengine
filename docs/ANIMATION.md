@@ -314,7 +314,11 @@ The local player sees their own, undistorted body, Unreal "true first person" st
 
 `lod_select` picks a LOD from the projected height in pixels, with hysteresis 0.15, moving one
 boundary per tick. Thresholds are 260 / 120 / 50 px. `r_lod_bias` and per-character `lod_bias`
-scale them, and `r_lod_force` overrides the choice.
+scale them, and `r_lod_force` overrides the choice. With `r_vgeo 0` the ranges and transitions of
+docs/LOD.md apply instead: 140 / 60 / 25 px (`assets/render/lod.json` x the fidelity tier), a 0.35 s
+cross-fade that always completes (`LodFade`), shadows cross-faded and faded out below 20 px, update rates
+eased one octave per 1.5 s, foot IK / lean / turn weighted over a pixel band below the LOD0 threshold, and
+inside a scope the magnified PiP pixel size. The table below is the legacy (`r_vgeo 1`) behaviour.
 
 | LOD | Mesh | Update | Procedural | Ragdoll | Shadow |
 |---|---|---|---|---|---|
@@ -331,7 +335,7 @@ scale them, and `r_lod_force` overrides the choice.
   the local player goes first, then the largest on screen, weighted by how overdue they are. The
   rest keep their last pose for a tick. `char_list` prints the last tick's post-passes and deferrals,
   and `tools/tests/anim_budget.cfg` runs the DevRoom with a budget of 4.
-* `anim_lod_lineup` (host) spawns a player dummy and a zombie at 5 / 15 / 30 / 60 / 120 m along the
+* `anim_lod_lineup` (host) spawns a player dummy and a zombie at 5 / 15 / 30 / 60 / 120 / 240 m along the
   view. With `r_lod_debug 1` each character shows its LOD, pixel height, update interval and active
   systems. `tools/tests/anim_lod.cfg` runs this on the flat map.
 
