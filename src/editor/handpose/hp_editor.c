@@ -1084,6 +1084,93 @@ static void handle_mouse(struct nk_context *ctx) {
     }
 }
 
+// ------------------------------------------------------------------ contact solver (grips)
+
+// Item boxes (model space) for the contact solver: weapon parts + mounted attachments, or the
+// held item's box (scaled by the grip root).
+static int item_boxes(const CharacterInst *c, HandBox *out, int max) {
+    Game *g = game();
+    Player *p = game_local_player();
+    if (!p || !c->rt.proc.has_item) return 0;
+    Xform im = c->rt.proc.item_model;
+    float k = c->rt.proc.item_scale > 0 ? c->rt.proc.item_scale : 1.0f;
+    im.s = v3(1, 1, 1);
+    const InvSlot *slot = &p->inv.slots[g->hotbar_slot < INV_SLOTS ? g->hotbar_slot : 0];
+    const WeaponDef *wd = item_weapon(&g->items, slot->item);
+    int n = 0;
+    if (wd && wd->part_count) {
+        for (int i = 0; i < wd->part_count && n < max; i++, n++) out[n] = (HandBox){ xf_point(im, v3_scale(wd->parts[i].offset, k)), v3_scale(wd->parts[i].half, k), im.r };
+        AttachDrawPart parts[16];
+        int na = attach_draw_parts(&g->items, wd, slot->att, parts, 16);
+        for (int i = 0; i < na && n < max; i++, n++) out[n] = (HandBox){ xf_point(im, v3_scale(parts[i].center, k)), v3_scale(parts[i].half, k), quat_mul(im.r, parts[i].rot) };
+        return n;
+    }
+    vec3 ctr, half;
+    item_held_box(item_def(&g->items, slot->item), &ctr, &half);
+    out[0] = (HandBox){ xf_point(im, v3_scale(ctr, k)), v3_scale(half, k), im.r };
+    return 1;
+}
+
+// Closes the fingers of a hand onto the held item: fingers with a contact point stop at the curl
+// closest to it (or where they touch), with all = true the others close until they touch. The
+// solve starts from the body's pose this tick with the fingers back at the animation pose.
+static int solve_contacts(int hand, bool all) {
+    HandPoseDB *d = db();
+    HpTarget t = target();
+    CharacterInst *c = local_char();
+    if (t.entry < 0 || !c || !c->rt.proc.has_item) { status("contact solve: grips only, with the item in hand"); return 0; }
+    const AnimLibrary *lib = g_engine.anim;
+    const Skeleton *s = &lib->skel;
+    static Pose pose;
+    static Xform model[ANIM_MAX_BONES];
+    pose_copy(&pose, &c->rt.final);
+    int hb = s->role[hand ? BR_R_HAND : BR_L_HAND];
+    for (int b = 0; b < s->count; b++)
+        if (b != hb && skel_is_descendant(s, b, hb)) pose.local[b] = c->rt.base.local[b];
+    pose_to_model(s, &pose, model);
+    HandBox boxes[24];
+    int nb = item_boxes(c, boxes, 24);
+    Xform ef = c->rt.proc.item_model;
+    ef.s = v3(1, 1, 1);
+    HandPose p;
+    hp_target_resolve(d, t, hand, &p);
+    HandFingers j;
+    memcpy(j, p.j, sizeof(j));
+    begin_edit(t, 0);
+    int solved = 0;
+    float worst = 0;
+    for (int f = 0; f < HAND_FINGERS; f++) {
+        vec3 tgt;
+        bool has = false;
+        for (int k = 0; k < p.contact_count; k++)
+            if (p.contacts[k].finger == f) { tgt = xf_point(ef, p.contacts[k].point); has = true; }
+        if (!has && !all) continue;
+        HandContactResult r = handpose_contact_solve(s, &pose, model, hand, f, j, &lib->hands, boxes, nb, has ? &tgt : NULL, 0.008f, 0.0005f);
+        HandPoseLayer *l = hp_edit_touch(d, t, hand, (u16)HPL_FINGER(f), NULL);
+        if (l) memcpy(l->j[f], j[f], sizeof(l->j[f]));
+        worst = fmaxf(worst, r.tip_dist);
+        solved++;
+    }
+    end_edit(t);
+    status("contact solve: %d finger(s) on %d box(es), largest surface gap %.1f mm", solved, nb, worst * 1000.0f);
+    return solved;
+}
+
+static bool add_contact_at_tip(int hand, int finger) {
+    HandPoseDB *d = db();
+    HpTarget t = target();
+    CharacterInst *c = local_char();
+    if (t.entry < 0 || !c || !c->rt.proc.has_item) { status("add contact: grips only, with the item in hand"); return false; }
+    Xform ef = c->rt.proc.item_model;
+    ef.s = v3(1, 1, 1);
+    vec3 tip = handpose_fingertip(&g_engine.anim->skel, c->rt.final_model, hand, finger);
+    begin_edit(t, 0);
+    bool ok = hp_edit_add_contact(d, t, hand, finger, xf_point(xf_inverse(ef), tip));
+    end_edit(t);
+    if (!ok) status("add contact: the list is full (%d)", HANDPOSE_CONTACTS);
+    return ok;
+}
+
 // ------------------------------------------------------------------ save / keys
 
 static float glue_error(int hand) {
@@ -1515,6 +1602,17 @@ static void draw_npanel(struct nk_context *ctx) {
                 hp_edit_mirror(d, wt, hand);
                 end_edit(wt);
             }
+            if (t.entry >= 0) {
+                // Fingers onto the item: the contact points (a fingertip target each) and the solver.
+                static int cf = HF_INDEX;
+                static const char *fn[HAND_FINGERS];
+                for (int f = 0; f < HAND_FINGERS; f++) fn[f] = handpose_finger_name(f);
+                nk_layout_row_dynamic(ctx, S(24), 2);
+                cf = nk_combo(ctx, fn, HAND_FINGERS, cf, (int)S(20), nk_vec2(S(140), S(140)));
+                if (nk_button_label(ctx, "contact at fingertip")) add_contact_at_tip(hand, cf);
+                if (nk_button_label(ctx, "solve contacts")) solve_contacts(hand, false);
+                if (nk_button_label(ctx, "close all fingers")) solve_contacts(hand, true);
+            }
             if (hp_target_has_layers(d, t)) {
                 HandPose p;
                 hp_target_resolve(d, t, hand, &p);
@@ -1777,7 +1875,7 @@ static void cmd_hpe(int argc, const char **argv) {
     if (!d || argc < 2) {
         log_info("hpe select <grip> | case <id> | ctrl <name> [add] | key <name>... | xform move|rotate|scale [x|y|z|-x|...] <value> | local <loc|rot|scale> x [y z] | "
                  "clear g|r|s | time <s> | play | stop | keyframe | mirror on|off | tool <name> | orient <name> | pivot <name> | light neutral|world | save | undo | redo | "
-                 "view orbit|fp|root|ctrl|<yaw> <pitch> <dist> | freeze begin|check | dump");
+                 "view orbit|fp|root|ctrl|<yaw> <pitch> <dist> | freeze begin|check | solve [all] | contact <finger> | dump");
         return;
     }
     const char *c = argv[1];
@@ -1877,6 +1975,16 @@ static void cmd_hpe(int argc, const char **argv) {
         return;
     }
     if (!strcmp(c, "freeze") && argc > 2) { freeze_snapshot(!strcmp(argv[2], "check")); return; }
+    if (!strcmp(c, "solve")) {
+        const HpCtrl *ac = E.active >= 0 ? hp_rig_ctrl(E.active) : NULL;
+        solve_contacts(ac && ac->hand >= 0 ? ac->hand : 1, argc > 2 && !strcmp(argv[2], "all"));
+        return;
+    }
+    if (!strcmp(c, "contact") && argc > 2) {
+        const HpCtrl *ac = E.active >= 0 ? hp_rig_ctrl(E.active) : NULL;
+        add_contact_at_tip(ac && ac->hand >= 0 ? ac->hand : 1, DG_MAX(0, handpose_finger_from_name(argv[2])));
+        return;
+    }
     if (!strcmp(c, "clear") && argc > 2) {
         int ch = argv[2][0] == 'g' ? HPA_T : argv[2][0] == 'r' ? HPA_R : HPA_S;
         HpTarget t = target();
