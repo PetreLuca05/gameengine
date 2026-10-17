@@ -14,7 +14,10 @@
 //   moon       the sun owns the cascades while its disc is up; the moon takes them over with a
 //              continuous fade, the configured hardness, and leaves them as the dawn sky brightens
 //   clouds     the drift moves at the weather wind x wind_aloft
-//   tiers      wide mode (cascade 0 weight) with hysteresis, PCF steps, the 2010 fixed hardness
+//   tiers      wide mode (cascade 0 weight) with hysteresis; one continuous filter: a tier change
+//              (Engine Fidelity) glides the PCSS weight and the max width, the effective penumbra
+//              never jumps between frames; cloud sweeps 0 -> 1 -> 0 on every tier toggle the cutoff
+//              at most once per half sweep; the 2010 fixed hardness
 //   TAA        a slowly softening edge, rotated kernel per frame + an exponential history: the
 //              resolved frame-to-frame change stays small
 #include "render/shadow_sky.h"
@@ -96,7 +99,9 @@ static void test_config(void) {
         for (float x = 0; x <= 1.0f; x += 0.05f) CHECK(fabsf(ssky_curve(&d.veil_tau, x) - ssky_curve(&j.veil_tau, x)) < 1e-4f, "veil_tau(%g)", x);
         for (float x = 0; x <= 4.0f; x += 0.2f) CHECK(fabsf(ssky_curve(&d.aureole_haze, x) - ssky_curve(&j.aureole_haze, x)) < 1e-4f, "haze(%g)", x);
         for (float x = 0; x <= 1.0f; x += 0.1f) CHECK(fabsf(ssky_curve(&d.exposure_cover, x) - ssky_curve(&j.exposure_cover, x)) < 1e-4f, "exposure(%g)", x);
-        CHECK(fabsf(d.pcss_max_texels[2] - j.pcss_max_texels[2]) < 1e-6f, "pcss max");
+        for (int t = 0; t < 3; t++) CHECK(fabsf(d.pcss_max_texels[t] - j.pcss_max_texels[t]) < 1e-6f, "pcss max %d", t);
+        CHECK(fabsf(d.pcf_ref_m - j.pcf_ref_m) < 1e-6f && fabsf(d.min_texels - j.min_texels) < 1e-6f && fabsf(d.era_pcf - j.era_pcf) < 1e-6f && fabsf(d.mode_s - j.mode_s) < 1e-6f,
+              "filter: pcf_ref_m / min_texels / era_pcf / mode_s");
     }
     ShadowSkyConfig b = d;
     CHECK(!ssky_config_parse(&b, "{\"clouds\":{\"veil_tau\":[[0,0],[0,1]]}}", err, sizeof(err)), "non-increasing curve accepted");
@@ -204,25 +209,29 @@ static void vogel(int i, int n, float rot, float *x, float *y) {
     *y = r * sinf(t);
 }
 
-// pcss_tile (lit_body.glsl): blocker search over search_m x tan(r), filter half width =
-// blocker distance x tan(r), both in texels: the filter in [0.5, max_tex], the search in
-// [1, 1.5 max_tex] (blockers at the edge of the search still count fully). Every tap
-// compares against the receiver's plane at the tap (depth gradient ga, gb in m per m of the map):
-// a wide kernel on a surface sloped to the light does not shadow itself.
-static float pcss(float a, float b, float z, float tan_r, float max_tex, float search_m, int nb, int nf, float rot) {
-    float search = clampf(search_m * tan_r / g_mpt, 1.0f, max_tex * 1.5f);
-    float sum = 0, cnt = 0;
-    for (int i = 0; i < nb; i++) {
-        float ox, oy;
-        vogel(i, nb, rot, &ox, &oy);
-        float da = ox * search * g_mpt, db = oy * search * g_mpt;
-        float zt = z + g_ga * da + g_gb * db;
-        float d = map_fetch(a + da, b + db);
-        if (d < zt) { sum += zt - d; cnt += 1; }
+// sh_filter (lighting.glsl): blocker search over search_m x tan(r) (weight pcss_w), filter half
+// width = d x tan(r) with d = mix(d_ref, measured, pcss_w), both in texels: the filter in
+// [min_tex, max_tex], the search in [1, 1.5 max_tex] (blockers at the edge of the search still
+// count fully). Every tap compares against the receiver's plane at the tap (depth gradient ga, gb
+// in m per m of the map): a wide kernel on a surface sloped to the light does not shadow itself.
+static float g_min_tex = 1.0f;   // the config's min_texels (main)
+static float shfilter(float a, float b, float z, float tan_r, float max_tex, float search_m, int nb, int nf, float rot, float pcss_w, float d_ref) {
+    float dblock = d_ref;
+    if (pcss_w > 0.0f) {
+        float search = clampf(search_m * tan_r / g_mpt, 1.0f, max_tex * 1.5f);
+        float sum = 0, cnt = 0;
+        for (int i = 0; i < nb; i++) {
+            float ox, oy;
+            vogel(i, nb, rot, &ox, &oy);
+            float da = ox * search * g_mpt, db = oy * search * g_mpt;
+            float zt = z + g_ga * da + g_gb * db;
+            float d = map_fetch(a + da, b + db);
+            if (d < zt) { sum += zt - d; cnt += 1; }
+        }
+        if (cnt == 0) return 1.0f;
+        dblock = d_ref + (sum / cnt - d_ref) * pcss_w;
     }
-    if (cnt == 0) return 1.0f;
-    float dblock = sum / cnt;
-    float w = clampf(dblock * tan_r / g_mpt, 0.5f, max_tex);
+    float w = clampf(dblock * tan_r / g_mpt, g_min_tex, fmaxf(max_tex, g_min_tex));
     float s = 0;
     for (int i = 0; i < nf; i++) {
         float ox, oy;
@@ -231,6 +240,9 @@ static float pcss(float a, float b, float z, float tan_r, float max_tex, float s
         s += map_compare(a + da, b + db, z + g_ga * da + g_gb * db);
     }
     return s / nf;
+}
+static float pcss(float a, float b, float z, float tan_r, float max_tex, float search_m, int nb, int nf, float rot) {
+    return shfilter(a, b, z, tan_r, max_tex, search_m, nb, nf, rot, 1.0f, 2.0f);
 }
 
 // Visibility across the shadow edge of a half-plane occluder for a uniform disc of radius R:
@@ -496,7 +508,7 @@ static void test_moon(const ShadowSkyConfig *c) {
 // ------------------------------------------------------------------ clouds, tiers, exposure
 
 static void test_clouds_tiers(const ShadowSkyConfig *c) {
-    printf("shadow_sky: cloud drift, wide mode, PCF steps, exposure, ground\n");
+    printf("shadow_sky: cloud drift, wide mode, continuous filter tiers, cloud sweeps, exposure, ground\n");
     ShadowSkyState s;
     ssky_state_reset(&s);
     ShadowSkyInput in;
@@ -537,29 +549,63 @@ static void test_clouds_tiers(const ShadowSkyConfig *c) {
     ssky_state_reset(&s);
     ssky_update(&s, c, &in, &o);
     CHECK(o.near_weight == 1.0f && o.pcss_max_texels == c->pcss_max_texels[1], "limited tier");
-    // PCF steps: clear 0, hazy 1, light cloud 2, with hysteresis.
-    const Cond *cs[3] = { &C_CLEAR, &C_HAZY, &C_LIGHT };
-    for (int i = 0; i < 3; i++) {
-        make_input(c, cs[i], &in);
-        in.softness = 0;
+    // One filter: the PCSS tier measures the blocker, the PCF tiers assume pcf_ref_m; nothing else differs.
+    for (int soft = 0; soft < 3; soft++) {
+        make_input(c, &C_HAZY, &in);
+        in.softness = soft;
         in.dt = 0;
         ssky_state_reset(&s);
         ssky_update(&s, c, &in, &o);
-        CHECK(fabsf(o.pcf_radius - (float)i) < 1e-3f, "%s: PCF %.2f", cs[i]->name, o.pcf_radius);
+        CHECK(o.pcss_weight == (soft == 2 ? 1.0f : 0.0f) && o.pcss_max_texels == c->pcss_max_texels[soft] && o.filter_model == soft, "tier %d: pcss %.2f max %.1f model %d", soft,
+              o.pcss_weight, o.pcss_max_texels, o.filter_model);
+        CHECK(o.pcf_ref_m == c->pcf_ref_m && o.min_texels == c->min_texels && o.fixed_texels == 0.0f, "tier %d: filter units", soft);
     }
-    // Hysteresis: radius wobbling around the first step does not flip the step back and forth.
+    // Tier changes (Engine Fidelity presets) every 0.4 s: the effective penumbra half width of a
+    // blocker 1 m away (texels of a 1.2 cm cascade 0) glides, the PCSS search runs while it fades.
     ssky_state_reset(&s);
-    int flips = 0, ps = -1;
-    for (int f = 0; f < 2000; f++) {
-        make_input(c, &C_CLEAR, &in);
-        in.softness = 0;
-        in.mie_scale = 1.0f + 0.5f + 0.06f * sinf(f * 0.3f);   // around 0.6 deg (just over the 0.5 step)
-        in.dt = f ? DT : 0;
-        ssky_update(&s, c, &in, &o);
-        if (ps >= 0 && s.pcf_step != ps) flips++;
-        ps = s.pcf_step;
+    {
+        const int seq[] = { 2, 0, 1, 2, 1, 0, 2 };
+        float prev_w = -1, worst = 0;
+        bool search_ok = true;
+        for (int f = 0; f < 7 * 24; f++) {
+            make_input(c, &C_HAZY, &in);
+            in.softness = seq[f / 24];
+            in.dt = f ? DT : 0;
+            ssky_update(&s, c, &in, &o);
+            float mpt0 = 0.012f, d = o.pcf_ref_m + (1.0f - o.pcf_ref_m) * o.pcss_weight;
+            float w = clampf(d * tanf(o.key.radius_deg * DG_DEG2RAD) / mpt0, o.min_texels, fmaxf(o.pcss_max_texels, o.min_texels));
+            if (prev_w >= 0) worst = fmaxf(worst, fabsf(w - prev_w) / fmaxf(prev_w, 1.0f));
+            prev_w = w;
+            if (o.pcss_weight > 0.0f && o.filter_model < 2) search_ok = false;
+        }
+        CHECK(worst < 0.15f, "tier change: the penumbra jumped %.0f %% in one frame", worst * 100.0f);
+        CHECK(search_ok, "PCSS weight > 0 without the blocker search");
     }
-    CHECK(flips <= 1, "PCF step flipped %d times", flips);
+    // Cloud sweeps 0 -> 1 -> 0 on every tier (60 s each half): the cutoff toggles at most once per
+    // half, the fade never steps more than 2 % per frame, and the cast state ends where it began.
+    for (int soft = 0; soft < 3; soft++) {
+        ssky_state_reset(&s);
+        int toggles[2] = { 0, 0 };
+        bool prev_cast = true;
+        float prev_fade = -1, worst = 0;
+        for (int f = 0; f < 7200; f++) {
+            float u = (float)f / 3600.0f;
+            Cond k = C_CLEAR;
+            k.cover = u < 1.0f ? u : 2.0f - u;
+            k.density = 0.3f + 0.6f * k.cover;
+            make_input(c, &k, &in);
+            in.softness = soft;
+            in.dt = f ? DT : 0;
+            ssky_update(&s, c, &in, &o);
+            if (f && o.key.cast != prev_cast) toggles[u < 1.0f ? 0 : 1]++;
+            if (prev_fade >= 0) worst = fmaxf(worst, fabsf(o.key.fade - prev_fade));
+            prev_cast = o.key.cast;
+            prev_fade = o.key.fade;
+        }
+        CHECK(toggles[0] <= 1 && toggles[1] <= 1, "tier %d cloud sweep: cutoff toggled %d / %d times", soft, toggles[0], toggles[1]);
+        CHECK(worst < 0.02f, "tier %d cloud sweep: fade stepped %.3f in a frame", soft, worst);
+        CHECK(o.key.cast && o.key.fade > 0.99f, "tier %d: shadows back after the sweep (fade %.2f)", soft, o.key.fade);
+    }
     // Era 2010: fixed hardness whatever the sky, the contrast unchanged.
     make_input(c, &C_LIGHT, &in);
     in.fixed_hardness = true;
@@ -573,7 +619,7 @@ static void test_clouds_tiers(const ShadowSkyConfig *c) {
     ShadowSkyState s2;
     ssky_state_reset(&s2);
     ssky_update(&s2, c, &in2, &o2);
-    CHECK(o.pcf_radius == c->era_pcf && o.near_weight == 1.0f, "era: PCF %.2f", o.pcf_radius);
+    CHECK(o.fixed_texels == c->era_pcf && o.pcss_weight == 0.0f && o.near_weight == 1.0f, "era: fixed %.2f pcss %.2f", o.fixed_texels, o.pcss_weight);
     CHECK(fabsf(o.key.fade - o2.key.fade) < 1e-6f && fabsf(o.key.contrast - o2.key.contrast) < 1e-6f, "era changed the contrast");
     // Exposure: clear 0, overcast > hazy, snow adds.
     float ev[3];
@@ -642,6 +688,7 @@ static void test_taa(const ShadowSkyConfig *c) {
 int main(void) {
     ShadowSkyConfig c;
     ssky_config_default(&c);
+    g_min_tex = c.min_texels;
     test_config();
     test_source(&c);
     test_penumbra(&c);

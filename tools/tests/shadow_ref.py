@@ -5,7 +5,7 @@
   penumbra  linear EXR captures (screenshot_hdr) looking down on the 20 m fin's east / west shadow
             edges: the 10-90 % edge width at 1 / 5 / 20 m from the caster vs the uniform-disc
             source of half width d x tan(r) (r from shadow_info), clear and hazy; within 15 % where
-            the half width is >= 3 shadow texels (Modern, 4096 atlas: 1.17 cm), under 2 texels +
+            the half width is >= 3 shadow texels (Modern, 4096 tiles: 6 mm), under 2 texels +
             the analytic width below that. The image scale comes from the fin's 2 m shadow width.
   contrast  lit / shaded ground luminance next to the fin = shadow_info's prediction (1 + C sin e,
             fade) within 20 %; clear >> hazy > light cloud > overcast ~ 1 (< 1.05); the shade is
@@ -32,7 +32,7 @@ import sys
 import numpy as np
 
 ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
-args = [a for a in sys.argv[1:] if not a.startswith('--')]
+args = [a for i, a in enumerate(sys.argv[1:], 1) if not a.startswith('--') and sys.argv[i - 1] != '--only']
 BUILD = os.path.abspath(args[0] if args else os.path.join(ROOT, 'build'))
 BIN = os.path.join(BUILD, 'bin')
 EXE = os.path.join(BIN, 'deadground.exe' if os.name == 'nt' else 'deadground')
@@ -48,7 +48,7 @@ EYE_Y = 7.0            # setpos feet height (noclip): the eye ~ 8.6 m over the g
 EYE_H = EYE_Y + 1.6    # eye height over the ground (approx.: only the 2 deg tilt offset uses it)
 PITCH = -88.0          # the view pitch limit: 2 deg off straight down
 TILT_DZ = EYE_H * math.tan(math.radians(90.0 + PITCH))   # the view centre lands this far north (-z) of the eye
-TEXEL = 24.0 / 2048.0  # cascade 0 texel at shadow quality 3 (4096 atlas)
+TEXEL = 1.0 / 167.0    # cascade 0 texel at shadow quality 3 (4096 tiles, 16:9; tests/test_shadow_csm.c prints the layout)
 
 report = []
 failures = 0
@@ -131,7 +131,7 @@ def lum(img):
 # ------------------------------------------------------------------ shadow_info
 
 INFO = re.compile(r'shadows: key (sun|moon) ([-\d.]+) deg \| direct ([\d.]+)\s+sky ([\d.]+)\s+C ([\d.]+) \| lit/shade \(ground\) ([\d.]+)')
-INFO2 = re.compile(r'source ([\d.]+) deg \| ([^|]+?)\s+fade ([\d.]+)\s+cascade0 ([\d.]+)\s+pcf ([\d.]+)')
+INFO2 = re.compile(r'source ([\d.]+) deg \| ([^|]+?)\s+fade ([\d.]+)\s+cascade0 ([\d.]+)\s+pcss ([\d.]+)')
 
 
 def infos(text):
@@ -141,7 +141,7 @@ def infos(text):
     for i in range(min(len(a), len(b))):
         out.append({'key': a[i][0], 'elev': float(a[i][1]), 'direct': float(a[i][2]), 'sky': float(a[i][3]), 'C': float(a[i][4]),
                     'ratio': float(a[i][5]), 'radius': float(b[i][0]), 'mode': b[i][1].strip(), 'fade': float(b[i][2]),
-                    'near': float(b[i][3]), 'pcf': float(b[i][4])})
+                    'near': float(b[i][3]), 'pcss': float(b[i][4])})
     return out
 
 
@@ -359,7 +359,7 @@ def tiers():
             a = np.asarray(Image.open(p).convert('L'), dtype=np.float32) / 255.0
             check(a.mean() > 0.05 and a.std() > 0.03, 'tiers: %s plausible (mean %.2f std %.2f)' % (nm, a.mean(), a.std()))
         if i < len(info) and era == 3:
-            check(info[i]['near'] >= 0.999 and 'wide' not in info[i]['mode'], 'tiers: %s fixed hardness (pcf %.2f, %s)' % (nm, info[i]['pcf'], info[i]['mode']))
+            check(info[i]['near'] >= 0.999 and info[i]['pcss'] == 0.0 and info[i]['mode'].startswith('fixed'), 'tiers: %s fixed hardness (pcss %.2f, %s)' % (nm, info[i]['pcss'], info[i]['mode']))
     if VALIDATION:
         n = vuids(text)
         check(n == 0, 'tiers: %d validation messages' % n)

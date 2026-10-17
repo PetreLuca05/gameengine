@@ -28,14 +28,15 @@
     "smooth_s": 1.0
   },
   "filter": {
-    "_comment": "wide_deg: past this radius (full PCSS tier) cascade 0 fades out and the wide blur samples cascade 1. pcf_step_deg: the Off / Low tiers' 1 tap -> 3x3 -> 5x5 thresholds. era_pcf: the 2010 era's fixed PCF radius. pcss_max_texels: max filter half width per softness tier (PCF / limited / full).",
+    "_comment": "One filter on every tier: half width = d x tan(source radius) in metres, d measured by the blocker search (PCSS tier) or pcf_ref_m (PCF tiers), clamped to [min_texels, pcss_max_texels] texels of the cascade. wide_deg: past this radius (PCSS tier) cascade 0 fades out and the wide blur samples cascade 1. era_pcf: the 2010 era's fixed half width (cascade 0 texels, kept in metres on every cascade). mode_s: time constant of a tier change (PCSS weight, max width). pcss_max_texels: max half width per softness tier (PCF 12 taps / PCF 16 taps / PCSS).",
     "wide_deg": 2.0,
     "wide_hyst": 0.15,
-    "pcf_step_deg": [0.5, 1.5],
-    "pcf_hyst": 0.15,
-    "era_pcf": 1.0,
+    "pcf_ref_m": 2.0,
+    "min_texels": 1.0,
+    "era_pcf": 1.5,
+    "mode_s": 0.12,
     "pcss_search_m": 30.0,
-    "pcss_max_texels": [2.0, 6.0, 32.0],
+    "pcss_max_texels": [4.0, 8.0, 32.0],
     "contact_px": 1.5
   },
   "exposure": {

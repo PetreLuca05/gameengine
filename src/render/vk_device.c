@@ -462,6 +462,35 @@ void vkd_create_shadow_map(u32 size) {
     }
 }
 
+// The viewmodel shadow tile (docs/SHADOWS.md): its own D32 map, bindings 16 (compare) / 17 (raw).
+// Always allocated (8 x 8 with shadows off) so every frame set binds a valid image.
+void vkd_create_vm_shadow_map(u32 size) {
+    if (R->vm_shadow.image) vkr_target_destroy(&R->vm_shadow);
+    R->vm_shadow = vkr_target_create(size, size, VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                                     VK_IMAGE_ASPECT_DEPTH_BIT);
+    R->vm_shadow_size = size;
+    for (int i = 0; i < FRAMES_IN_FLIGHT; i++) {
+        if (!R->frames[i].frame_set) continue;
+        VkDescriptorImageInfo ii[2] = { { R->sampler_shadow, R->vm_shadow.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL },
+                                        { R->sampler_depth, R->vm_shadow.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL } };
+        VkDescriptorSet sets[FRAME_SET_COUNT];
+        frame_sets_of(&R->frames[i], sets);
+        for (int k = 0; k < FRAME_SET_COUNT; k++) {
+            if (!sets[k]) continue;
+            VkWriteDescriptorSet w[2];
+            for (int b = 0; b < 2; b++) {
+                w[b] = (VkWriteDescriptorSet){ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+                w[b].dstSet = sets[k];
+                w[b].dstBinding = 16u + (u32)b;
+                w[b].descriptorCount = 1;
+                w[b].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+                w[b].pImageInfo = &ii[b];
+            }
+            vkUpdateDescriptorSets(R->device, 2, w, 0, NULL);
+        }
+    }
+}
+
 // VK_CHECK failure: a lost device first logs what VK_EXT_device_fault knows (addresses, vendor codes).
 void vkr_check_failed(VkResult r, const char *file, int line, const char *expr) {
     if (r == VK_ERROR_DEVICE_LOST && R->device && R->has_device_fault && vkGetDeviceFaultInfoEXT) {
