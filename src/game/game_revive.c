@@ -6,7 +6,11 @@
 #include "gameplay/characters.h"
 #include "vfx/vfx.h"
 #include "core/cvar.h"
+#include "core/log.h"
+#include "core/platform.h"
+#include "cJSON.h"
 #include <math.h>
+#include <stdlib.h>
 
 static void draw_cyl(vec3 pos, quat rot, vec3 local, float r, float half_h, Material m) {
     DrawItem d;
@@ -54,6 +58,42 @@ typedef struct Phantom {
 static Phantom g_ph[MAX_PHANTOMS];
 static World *g_ph_world;
 static Rng g_rng;
+
+// assets/vfx/effects/reconstruction.json "reconstruction" block.
+static struct ReconParams {
+    float float_height, bob_amp, bob_hz, mote_life, mote_rate[4], bubble_rate, mist_rate, front_jitter, shake, shake_radius;
+    bool loaded;
+} RP = { 0.18f, 0.025f, 0.2f, 0.55f, { 0, 30, 80, 110 }, 14.0f, 3.0f, 0.7f, 0.5f, 8.0f, false };
+
+static float rjf(const cJSON *o, const char *k, float def) {
+    const cJSON *v = o ? cJSON_GetObjectItemCaseSensitive(o, k) : NULL;
+    return cJSON_IsNumber(v) ? (float)v->valuedouble : def;
+}
+
+static void load_recon_params(void) {
+    RP.loaded = true;
+    size_t n = 0;
+    char *text = platform_read_file("assets/vfx/effects/reconstruction.json", &n);
+    cJSON *root = text ? cJSON_Parse(text) : NULL;
+    const cJSON *r = root ? cJSON_GetObjectItemCaseSensitive(root, "reconstruction") : NULL;
+    if (!r) log_warn("reconstruction: assets/vfx/effects/reconstruction.json missing or invalid, defaults");
+    RP.float_height = rjf(r, "float_height", RP.float_height);
+    RP.bob_amp = rjf(r, "bob_amplitude", RP.bob_amp);
+    RP.bob_hz = rjf(r, "bob_hz", RP.bob_hz);
+    RP.mote_life = fmaxf(rjf(r, "mote_life", RP.mote_life), 0.05f);
+    const cJSON *mr = r ? cJSON_GetObjectItemCaseSensitive(r, "mote_rate") : NULL;
+    for (int k = 0; k < 4 && cJSON_IsArray(mr); k++) {
+        const cJSON *v = cJSON_GetArrayItem(mr, k);
+        if (cJSON_IsNumber(v)) RP.mote_rate[k] = (float)v->valuedouble;
+    }
+    RP.bubble_rate = rjf(r, "bubble_rate", RP.bubble_rate);
+    RP.mist_rate = rjf(r, "mist_rate", RP.mist_rate);
+    RP.front_jitter = rjf(r, "front_jitter", RP.front_jitter);
+    RP.shake = rjf(r, "complete_shake", RP.shake);
+    RP.shake_radius = rjf(r, "complete_shake_radius", RP.shake_radius);
+    cJSON_Delete(root);
+    free(text);
+}
 
 float game_revive_display_progress(World *w, EntityId fab, int *player_slot) {
     FabView fv;
@@ -115,6 +155,7 @@ void game_revive_frame(World *w, float dt) {
         g_rng = rng_make(0x5EC0u);
     }
     if (!w) return;
+    if (!RP.loaded) load_recon_params();
     Cvar *vq = cvar_find("vfx_quality");
     int quality = vq ? vq->i : 2;   // Low (0): the dissolve only
     // Drop bodies of fabricators that are gone.
@@ -135,7 +176,7 @@ void game_revive_frame(World *w, float dt) {
         if (ph && ph->last_state == FAB_RECONSTRUCTING && fv.m.state == FAB_OPENING) {
             if (quality > 0) spawn_fx("recon_complete", chamber, rot, 1.0f);
             Game *g = game();
-            if (g && v3_dist(g->view.eye, chamber) < 8.0f) g->view.land_vel -= 0.5f;
+            if (g && v3_dist(g->view.eye, chamber) < RP.shake_radius) g->view.land_vel -= RP.shake;
         }
         if (ph) ph->last_state = fv.m.state;
         if (p < 0.0f || slot < 0 || slot >= MAX_PLAYERS) {
@@ -148,7 +189,7 @@ void game_revive_frame(World *w, float dt) {
         }
         // The body floats a little above the chamber floor, breathing up and down.
         float t = (float)g_engine.real_time;
-        vec3 feet = v3_add(spawn, v3(0, 0.18f + 0.025f * sinf(t * 1.3f), 0));
+        vec3 feet = v3_add(spawn, v3(0, RP.float_height + RP.bob_amp * sinf(t * RP.bob_hz * 6.2831853f), 0));
         if (!ent_valid(w, ph->ent) || ph->slot != slot) {
             if (ent_valid(w, ph->ent)) ent_destroy(w, ph->ent);
             ph->ent = ent_spawn_local(w, ET_MARKER);
@@ -171,22 +212,22 @@ void game_revive_frame(World *w, float dt) {
         if (quality <= 0 || p >= 1.0f) continue;
         // Motes from the glass converging on the dissolve front (aimed, life-timed: no attractor needed).
         float front_y = feet.y + 1.8f * saturate(p * 1.75f / 0.95f);
-        ph->mote_acc += dt * (30.0f + 50.0f * (quality - 1));
+        ph->mote_acc += dt * RP.mote_rate[DG_CLAMP(quality, 0, 3)];
         while (ph->mote_acc >= 1.0f) {
             ph->mote_acc -= 1.0f;
             float a = frand() * 6.2831853f;
-            vec3 from = v3(chamber.x + cosf(a) * 0.5f, front_y + (frand() - 0.5f) * 0.7f, chamber.z + sinf(a) * 0.5f);
+            vec3 from = v3(chamber.x + cosf(a) * 0.5f, front_y + (frand() - 0.5f) * RP.front_jitter, chamber.z + sinf(a) * 0.5f);
             vec3 to = v3(feet.x + (frand() - 0.5f) * 0.25f, front_y + (frand() - 0.5f) * 0.12f, feet.z + (frand() - 0.5f) * 0.25f);
             vec3 d = v3_sub(to, from);
-            spawn_fx("recon_mote", from, look_rot(d), v3_len(d) / 0.55f);   // arrives at the end of its 0.55 s life
+            spawn_fx("reconstruction", from, look_rot(d), v3_len(d) / RP.mote_life);   // arrives at the end of its life
         }
-        ph->bubble_acc += dt * 14.0f;
+        ph->bubble_acc += dt * RP.bubble_rate;
         while (ph->bubble_acc >= 1.0f) {
             ph->bubble_acc -= 1.0f;
             float a = frand() * 6.2831853f, r = sqrtf(frand()) * 0.45f;
             spawn_fx("recon_bubble", v3(chamber.x + cosf(a) * r, spawn.y + 0.16f, chamber.z + sinf(a) * r), quat_identity(), 1.0f);
         }
-        ph->mist_acc += dt * 3.0f;
+        ph->mist_acc += dt * RP.mist_rate;
         while (ph->mist_acc >= 1.0f) {
             ph->mist_acc -= 1.0f;
             spawn_fx("recon_mist", v3(chamber.x, spawn.y + 0.2f, chamber.z), quat_identity(), 1.0f);

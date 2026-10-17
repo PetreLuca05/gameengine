@@ -15,9 +15,15 @@
         { "id": "vehicles", "label": "Vehicles", "prefixes": ["vehicle", "veh_"] },
         { "id": "network", "label": "Network", "prefixes": ["net_", "sv_", "lobby", "connect", "host", "disconnect", "lan_"] },
         { "id": "audio", "label": "Audio", "prefixes": ["snd_", "s_", "audio_"] },
-        { "id": "phone", "label": "Phone", "prefixes": ["phone"] }
+        { "id": "phone", "label": "Phone", "prefixes": ["phone"] },
+        { "id": "revive", "label": "Revive & Death", "prefixes": ["revive", "death_", "fab_", "reconstruction_"] }
     ],
     "names": {
+        "down": "revive",
+        "die": "revive",
+        "spawn_corpse": "revive",
+        "spawn_fabricator": "revive",
+        "spawn_teammate": "revive",
         "sv_cheats": "system",
         "cl_name": "network",
         "cl_fov": "camera",
@@ -44,6 +50,6 @@
         "cl_crouch_toggle": "input",
         "cl_sprint_toggle": "input"
     },
-    "destructive": ["quit", "map", "disconnect", "kill", "zombie_clear", "horde_despawn", "despawn_horde", "unbindall", "writeconfig", "cfg_reset", "lobby_leave", "host", "connect", "vid_restart"],
+    "destructive": ["quit", "map", "disconnect", "kill", "die", "zombie_clear", "horde_despawn", "despawn_horde", "unbindall", "writeconfig", "cfg_reset", "lobby_leave", "host", "connect", "vid_restart"],
     "favorites": ["noclip", "give", "setpos", "time_set", "weather", "map", "ping", "copypos"]
 }
