@@ -1253,6 +1253,7 @@ static void exec_prepass(VkCommandBuffer cmd, void *u) {
     vkg_draw_gbuffer(cmd);   // vgeo surfaces first (depth export), the legacy draws test against them
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_PREPASS]);
     draw_items(cmd, R->draws, R->draw_count, false, R->r_culling->i != 0, 0, PIPE_PREPASS);
+    vkc_draw_gbuffer(cmd);   // classic instanced vgeo content (r_vgeo 0)
     draw_skinned(cmd, 0, PIPE_PREPASS_SKIN, PIPE_PREPASS, F.skin_main);
     vkCmdEndRendering(cmd);
 }
@@ -1291,6 +1292,7 @@ static void exec_opaque(VkCommandBuffer cmd, void *u) {
     post_push_lit_inputs(cmd, &F.lit, false);
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[R->r_wireframe->i ? PIPE_LIT_WIRE : PIPE_LIT]);
     draw_items(cmd, R->draws, R->draw_count, false, R->r_culling->i != 0, 0, R->r_wireframe->i ? PIPE_LIT_WIRE : PIPE_LIT);
+    vkc_draw_lit(cmd);   // classic instanced vgeo content (depth EQUAL to its prepass)
     vkg_draw_lit(cmd);   // vgeo pixels (depth equal to the exported depth)
     vkCmdEndRendering(cmd);
 }
@@ -1889,7 +1891,7 @@ void render_end_frame(void) {
 
     FrameData *fd = (FrameData *)f->ubo.mapped;
     compute_matrices(fd);
-    vkg_submit_fallback();   // vgeo era fallback: discrete LOD draws (r_vgeo 0)
+    vkg_submit_fallback();   // the classic renderer's culling / LOD / instance batches (r_vgeo 0; r_vgeo 1: local light tiles only)
     vkg_bench_frame();
     memset(&F, 0, sizeof(F));
     F.f = f;
@@ -1981,6 +1983,7 @@ void render_end_frame(void) {
                 g_shadow_cascade = (u32)k;
                 draw_items(cmd, R->draws, R->draw_count, true, false, 0, PIPE_SHADOW);
                 vkg_draw_shadow(cmd, (u32)k);
+                vkc_draw_shadow(cmd, (u32)k);
                 vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_SHADOW]);
                 if (F.cpu_skinned) draw_cpu_skinned(cmd, f, F.cpu_skinned, 1);
                 else if (skin_shadow.batch_count) {

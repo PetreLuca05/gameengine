@@ -486,6 +486,8 @@ static void tab_graphics(GuiCursor *c, GuiRect content) {
             if (row_combo(c, "Era look", eras, 5, &sel, "The geometry / foliage of an era (and the features it had). Engine Fidelity bounds its cost.") && sel < 4) cvar_set_int(era, sel);
         }
     }
+    row_fid_toggle(c, "Virtualized geometry (Nanite)", FF_VGEO,
+                   "On: GPU cluster culling, continuous LOD, occlusion culling. Off: the classic instanced renderer (discrete LODs, impostors; often faster on foliage). Applies at once.");
     static const char *const texq[] = { "Low (mips -2)", "Medium (mips -1)", "High" };
     row_fid_combo(c, "Textures", FF_TEXTURE_QUALITY, texq, NULL, 3, NULL);
     {

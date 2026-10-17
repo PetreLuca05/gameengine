@@ -108,6 +108,7 @@ typedef struct VgDecoded {
     float uv[VGEO_MAX_CLUSTER_VERTS][2];
     u8 tri[VGEO_MAX_CLUSTER_TRIS][3];
     u8 joints[VGEO_MAX_CLUSTER_VERTS][4], weights[VGEO_MAX_CLUSTER_VERTS][4];   // VGF_SKINNED (else 0)
+    u32 color[VGEO_MAX_CLUSTER_VERTS];     // RGBA8 (VGF_HAS_COLOR; else 0xFFFFFFFF)
 } VgDecoded;
 void vgeo_decode_cluster(const VgBuilt *b, u32 page, u32 index, VgDecoded *out);
 

@@ -21,7 +21,7 @@ Glass, lamps, glossy paint (car bodies) and cloth stay plain (layer 255).
 
 Not textured (by design or out of scope): the devroom grid materials, water (translucent, SSR), vgeo
 test content (rock / torus / statue), glTF models without images (vehicles, barrel), characters, the
-`map noise` / `map flat` test terrains, the r_vgeo 0 fallback's foliage (it skips masked meshes).
+`map noise` / `map flat` test terrains.
 
 ## Layers (`enum SurfTexLayer`, render.h)
 
