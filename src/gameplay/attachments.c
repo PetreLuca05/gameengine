@@ -380,28 +380,29 @@ void attach_weapon_effective(const ItemDB *db, const WeaponDef *base, const u8 *
     }
 }
 
-// ADS FOVs are absolute (the same whatever the hip FOV in the settings): the weapon's own
-// "ads_fov" for iron sights, scope magnification against a 75 deg reference view.
+// The authored ADS FOVs ("ads_fov" of weapons and optics) are degrees against a 75 deg
+// reference view. They no longer zoom the world: they set how much the arms / weapon
+// projection narrows (attach_ads_vm_zoom), and a scope's magnification inside its lens.
 #define ADS_REF_FOV 75.0f
-static float iron_fov(const WeaponDef *eff, float base_fov) {
-    (void)base_fov;
-    return (eff && eff->ads_fov > 1.0f) ? eff->ads_fov : ADS_REF_FOV * 0.8f;
-}
+static float iron_fov(const WeaponDef *eff) { return (eff && eff->ads_fov > 1.0f) ? eff->ads_fov : ADS_REF_FOV * 0.8f; }
 static float zoom_fov(float fov, float zoom) { return 2.0f * atanf(tanf(fov * 0.5f * DG_DEG2RAD) / fmaxf(1.0f, zoom)) * DG_RAD2DEG; }
+static float fov_zoom(float fov) { return tanf(ADS_REF_FOV * 0.5f * DG_DEG2RAD) / tanf(clampf(fov, 1.0f, 170.0f) * 0.5f * DG_DEG2RAD); }
 
-// Optics zoom on top of the weapon's own ADS zoom: a red dot is never wider than the irons.
-float attach_sight_fov(const WeaponDef *eff, const AttachmentDef *optic, float base_fov) {
-    if (optic) {
-        if (optic->ads_fov > 1.0f) return optic->ads_fov;
-        if (optic->sight == SIGHT_SCOPE) return zoom_fov(ADS_REF_FOV, optic->zoom);   // magnification of the scope picture
-        return zoom_fov(iron_fov(eff, base_fov), optic->zoom);
-    }
-    return iron_fov(eff, base_fov);
+float attach_sight_zoom(const AttachmentDef *optic) {
+    if (!optic || optic->sight != SIGHT_SCOPE) return 1.0f;   // irons, red dots: 1x
+    return fmaxf(1.0f, optic->ads_fov > 1.0f ? fov_zoom(optic->ads_fov) : optic->zoom);
 }
 
-float attach_main_ads_fov(const WeaponDef *eff, const AttachmentDef *optic, float base_fov, bool pip) {
-    if (optic && optic->sight == SIGHT_SCOPE && pip) return zoom_fov(iron_fov(eff, base_fov), optic->main_zoom);   // around the PiP lens
-    return attach_sight_fov(eff, optic, base_fov);
+float attach_sight_fov(const AttachmentDef *optic, float base_fov) { return zoom_fov(base_fov, attach_sight_zoom(optic)); }
+
+// The weapon's own ADS zoom (irons), a red dot's on top (never wider than the irons), a scope
+// the mild main_zoom around its ocular: the gun and sight look as they did when this zoomed the
+// whole view, the world around them stays at the base FOV.
+float attach_ads_vm_zoom(const WeaponDef *eff, const AttachmentDef *optic) {
+    float fov = iron_fov(eff);
+    if (optic && optic->sight == SIGHT_SCOPE) fov = zoom_fov(fov, optic->main_zoom);
+    else if (optic) fov = optic->ads_fov > 1.0f ? optic->ads_fov : zoom_fov(fov, optic->zoom);
+    return fmaxf(1.0f, fov_zoom(fov));
 }
 
 int attach_draw_parts(const ItemDB *db, const WeaponDef *base, const u8 *att, AttachDrawPart *out, int max) {

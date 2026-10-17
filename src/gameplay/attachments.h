@@ -42,12 +42,13 @@ const AttachmentDef *attach_optic(const ItemDB *db, const u8 *att);
 // Default ids for a new instance of weapon wd (all 0 for non-weapons).
 void attach_defaults(const WeaponDef *wd, u8 out[ATT_SLOTS]);
 
-// Sight FOVs (degrees) for base camera FOV base_fov:
-//   sight FOV: what the sight shows (sensitivity scaling, full-screen scope mode)
-//   main FOV:  the main camera while aimed (iron / red dot = the sight FOV; picture-in-picture
-//              scopes keep a mild zoom around the scope)
-float attach_sight_fov(const WeaponDef *eff, const AttachmentDef *optic, float base_fov);
-float attach_main_ads_fov(const WeaponDef *eff, const AttachmentDef *optic, float base_fov, bool pip);
+// ADS never changes the world camera FOV (docs/ATTACHMENTS.md "FOV and sensitivity"):
+//   sight zoom:  magnification the sight shows, only inside a scope's lens (irons / red dots 1)
+//   sight FOV:   the base FOV at that zoom (sensitivity scaling)
+//   ADS vm zoom: how much the arms / weapon projection narrows once aimed (tan ratio, >= 1)
+float attach_sight_zoom(const AttachmentDef *optic);
+float attach_sight_fov(const AttachmentDef *optic, float base_fov);
+float attach_ads_vm_zoom(const WeaponDef *eff, const AttachmentDef *optic);
 
 // Visual: every mounted attachment's parts (item space boxes), for drawing.
 typedef struct AttachDrawPart { vec3 center; quat rot; vec3 half; vec4 color; u8 slot; } AttachDrawPart;

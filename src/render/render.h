@@ -108,11 +108,12 @@ typedef struct RenderCamera {
     float fov_deg;      // vertical FOV
     float znear, zfar;
     float vm_fov_deg;   // arms / held item FOV when r_viewmodel_fov is 0 (the hip FOV); 0 = fov_deg
-    float ads_t;        // 0..1 aim progress: the weapon's FOV blends into fov_deg, so once aimed the
-                        // gun, sight and world share one projection (identical for any settings)
+    float ads_t;        // 0..1 aim progress: the weapon's FOV narrows by vm_ads_zoom (the world FOV
+                        // never changes with ADS; the sight stays on the view axis = screen centre)
+    float vm_ads_zoom;  // arms / weapon magnification once aimed (tan ratio; <= 1 = none)
 } RenderCamera;
 // The weapon (viewmodel) FOV for a camera: hip value (r_viewmodel_fov / vm_fov_deg / fov_deg)
-// blended into the camera FOV with the aim progress.
+// blended into hip / vm_ads_zoom with the aim progress.
 float render_vm_fov_for(const RenderCamera *c, float r_viewmodel_fov);
 
 typedef struct RenderEnvironment {
@@ -433,7 +434,7 @@ void render_set_camera_fx(bool ads, float ads_focus_dist);   // depth of field A
 // Weapon sights (game_sights.c -> post_sights.c + the scope picture-in-picture pass). Positions
 // and axes are in viewmodel world space (the space the held item is drawn in), the PiP camera in
 // true world space. One sight per frame: the local player's mounted optic.
-typedef enum RenderSightKind { RSIGHT_NONE, RSIGHT_REDDOT, RSIGHT_SCOPE_PIP, RSIGHT_SCOPE_FULL } RenderSightKind;
+typedef enum RenderSightKind { RSIGHT_NONE, RSIGHT_REDDOT, RSIGHT_SCOPE_PIP } RenderSightKind;
 typedef struct RenderSight {
     int kind;                     // RenderSightKind
     float ads_t;                  // 0 hip .. 1 aimed
@@ -455,15 +456,14 @@ typedef struct RenderSight {
     vec3 tint;
     float dust, fresnel, chromatic;
     // Scopes
-    float zoom;                   // magnification (relative to the base FOV)
-    float base_fov;               // cl_fov: the zoom reference
-    float sight_fov;              // full-screen scope FOV
+    float zoom;                   // magnification inside the lens (relative to the base FOV)
+    float base_fov;               // the world camera's base FOV (sv_fov): the zoom reference
+    float sight_fov;              // the base FOV at the sight's magnification (ads_debug)
     float eye_box, eye_box_depth, eye_relief;
     float pip_scale;              // PiP resolution / render height
     // ADS depth of field (complete only): fixed far focus, near-field (weapon) blur.
     bool ads_dof;
     float dof_focus, dof_fstop, dof_near_blur;
-    bool hide_viewmodel;          // full-screen scope: no weapon / arms
     int debug;                    // sight_debug view
 } RenderSight;
 void render_set_sight(const RenderSight *s);   // every frame (kind NONE = no sight)
