@@ -467,6 +467,7 @@ static void render_entity(World *w, int i, float alpha, bool focused) {
             }
             PointLight l = { v3_add(pos, v3(0, -0.15f, 0)), w->light[i].radius, w->light[i].color, w->light[i].intensity * k };
             if (w->light[i].group & LIGHT_GROUP_NO_SHADOW) l.flags = LIGHT_NO_SHADOW;
+            if (w->light[i].shadow_given) l.shadow = &w->light[i].shadow;   // Unity-style per-light settings
             render_add_light(&l);
         }
         break;

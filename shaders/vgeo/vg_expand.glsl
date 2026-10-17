@@ -46,6 +46,12 @@ void vg_instance(uint inst, uint out_region) {
     VgXf x = vg_instance_xf(inst);
     if (!x.live) return;   // skinned instance of an empty palette slot
     if (x.skin && (vg_flags() & VGV_NO_SKINNED) != 0u) return;
+    // Cast Shadows Off / Shadows Only, the light's culling mask (shadow views are the ortho ones)
+    uint iflags = x.fp >> 16;
+    bool shadow_view = (vg_flags() & VGV_ORTHO) != 0u;
+    if (shadow_view && (iflags & VGI_NO_CAST) != 0u) return;
+    if (!shadow_view && (iflags & VGI_SHADOWS_ONLY) != 0u) return;
+    if (shadow_view && V.shadow_misc.x != 0u && ((V.shadow_misc.x >> ((iflags >> 6u) & 7u)) & 1u) == 0u) return;
     VgMesh m = meshes[x.mesh];
     vec4 s = vg_world_sphere(x, m.sphere);
     if (!vg_frustum(s)) return;

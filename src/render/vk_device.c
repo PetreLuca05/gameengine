@@ -491,6 +491,34 @@ void vkd_create_vm_shadow_map(u32 size) {
     }
 }
 
+// The moon's map: D32, bindings 18 (compare) / 19 (raw). Always allocated (16 x 16 when unused).
+void vkd_create_moon_shadow_map(u32 size) {
+    if (R->moon_shadow.image) vkr_target_destroy(&R->moon_shadow);
+    R->moon_shadow = vkr_target_create(size, size, VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                                       VK_IMAGE_ASPECT_DEPTH_BIT);
+    R->moon_shadow_size = size;
+    for (int i = 0; i < FRAMES_IN_FLIGHT; i++) {
+        if (!R->frames[i].frame_set) continue;
+        VkDescriptorImageInfo ii[2] = { { R->sampler_shadow, R->moon_shadow.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL },
+                                        { R->sampler_depth, R->moon_shadow.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL } };
+        VkDescriptorSet sets[FRAME_SET_COUNT];
+        frame_sets_of(&R->frames[i], sets);
+        for (int k = 0; k < FRAME_SET_COUNT; k++) {
+            if (!sets[k]) continue;
+            VkWriteDescriptorSet w[2];
+            for (int b = 0; b < 2; b++) {
+                w[b] = (VkWriteDescriptorSet){ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+                w[b].dstSet = sets[k];
+                w[b].dstBinding = 18u + (u32)b;
+                w[b].descriptorCount = 1;
+                w[b].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+                w[b].pImageInfo = &ii[b];
+            }
+            vkUpdateDescriptorSets(R->device, 2, w, 0, NULL);
+        }
+    }
+}
+
 // VK_CHECK failure: a lost device first logs what VK_EXT_device_fault knows (addresses, vendor codes).
 void vkr_check_failed(VkResult r, const char *file, int line, const char *expr) {
     if (r == VK_ERROR_DEVICE_LOST && R->device && R->has_device_fault && vkGetDeviceFaultInfoEXT) {

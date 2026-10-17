@@ -33,10 +33,12 @@
     "auto_exposure": {"avail": "no"},
     "tonemapper": {"avail": "no"},
     "hdr_output": {"avail": "no"},
-    "shadow_quality": {"avail": "on", "default": 1, "max": 1},
-    "shadow_cascades": {"avail": "on", "default": 1, "max": 1},
-    "shadow_distance": {"avail": "on", "default": 0.5, "max": 0.5},
-    "shadow_filter": {"avail": "on", "default": 0, "max": 0},
+    "shadows": {"avail": "on", "default": 0, "max": 1},
+    "shadow_resolution": {"avail": "on", "default": 0, "max": 0},
+    "shadow_projection": {"avail": "on", "default": 1, "allowed": [0, 1]},
+    "shadow_cascades": {"avail": "on", "default": 1, "allowed": [1]},
+    "shadow_distance": {"avail": "on", "default": 50, "max": 50},
+    "soft_shadow_quality": {"avail": "on", "default": 0, "max": 0},
     "shadow_min_radius": {"avail": "on", "default": 1.0, "min": 1.0},
     "light_shadows": {"avail": "no"},
     "light_shadow_quality": {"avail": "on", "default": 1, "max": 1},
@@ -62,7 +64,7 @@
   },
   "eras": {
     "2010": {
-      "shadow_distance": {"avail": "on", "default": 0.6, "max": 0.6, "note": "2010-era geometry (discrete LODs) is cheap: the one cascade reaches further"}
+      "shadow_distance": {"avail": "on", "default": 70, "max": 70, "note": "2010-era geometry (discrete LODs) is cheap: the one cascade reaches further"}
     }
   }
 }

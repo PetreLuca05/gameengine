@@ -33,7 +33,7 @@
 
 #define CL_MATS 8
 #define CL_IMPOSTOR 7u              // key LOD slot of the impostor bucket
-#define CL_VIEWS 4                  // main view + 3 sun cascades
+#define CL_VIEWS 5                  // main view + 4 sun cascades
 #define CL_IMPOSTOR_TRIS 256        // meshes this heavy (coarsest LOD) use r_classic_impostor_px
 
 typedef struct ClSection { u32 first_index, index_count, material; } ClSection;
@@ -603,11 +603,16 @@ typedef struct ClCull {
     float px_scale, lod_px, impostor_px, small_impostor_px, density, znear;
     bool ortho, shadow, era2010;
     vec4 sphere;                    // local light shadows: casters must touch it (w > 0)
+    u32 layers;                     // shadow views: the light's culling mask (0 = every layer)
 } ClCull;
 
 // One instance against a view: appends to out / key at *n when kept (thread-safe: reads only).
 static void cull_instance(const ClCull *v, const VgScene *s, const VgInstance *in, ClInst *out, u16 *key, u32 *n) {
-    if ((in->flags_phase >> 16) & VGI_SKINNED) return;
+    u32 iflags = in->flags_phase >> 16;
+    if (iflags & VGI_SKINNED) return;
+    // Unity-style Cast Shadows Off / Shadows Only, the light's culling mask (docs/SHADOWS_UNITY_MODEL.md)
+    if (v->shadow ? (iflags & VGI_NO_CAST) != 0 : (iflags & VGI_SHADOWS_ONLY) != 0) return;
+    if (v->shadow && v->layers && !((v->layers >> VGI_LAYER(iflags)) & 1u)) return;
     if (in->mesh >= C.mesh_cap || !C.mesh[in->mesh].used || in->mesh >= s->mesh_count) return;
     const ClMesh *cm = &C.mesh[in->mesh];
     const VgMesh *m = &s->meshes[in->mesh];
@@ -824,8 +829,8 @@ void vkc_frame(const VgScene *s, const VgDisplace *disp, float density, float lo
     cull_cells(&v, s);
     emit_view(&C.view[0]);
     // sun cascades: orthographic, LOD by the cascade's texel size, shadow distance, no impostors
-    if (shadows && R->r_shadow_quality->i > 0) {
-        C.ncasc = (u32)DG_CLAMP(R->r_shadow_cascades->i, 1, 3);
+    if (shadows && (R->shadow_active[0] || R->shadow_active[1] || R->shadow_active[2] || R->shadow_active[3])) {
+        C.ncasc = (u32)DG_CLAMP((int)R->shq.cascades, 1, 4);
         u32 tile = R->shadow_size / 2;
         for (u32 k = 0; k < C.ncasc; k++) {
             mat4 t = mat4_identity();
@@ -833,8 +838,10 @@ void vkc_frame(const VgScene *s, const VgDisplace *disp, float density, float lo
             t.m[5] = 0.5f;
             t.m[12] = (k & 1) ? 0.5f : -0.5f;
             t.m[13] = (k >> 1) ? 0.5f : -0.5f;
-            planes_of(mat4_mul(mat4_inverse(t), R->shadow_vps[k]), v.planes);
+            planes_of(R->shadow_vp_ndc[k], v.planes);   // the untiled matrix (render.c)
+            (void)t;
             v.ortho = v.shadow = true;
+            v.layers = R->sun_shadow.culling_mask == SHADOW_LAYERS_ALL ? 0u : (R->sun_shadow.culling_mask | 0x100u);
             v.px_scale = (float)tile / (2.0f * R->shadow_radius[k]);   // the tile's half extent (render.c)
             v.lod_px = shadow_lod_px;
             v.era2010 = false;
@@ -1074,7 +1081,7 @@ void vkc_draw_shadow(VkCommandBuffer cmd, u32 cascade) {
 // Point / spot light shadow tile: the instances touching the light's sphere and the tile frustum, LOD
 // by distance to the light (~2 texels of error at the tile's resolution), instanced, masked
 // materials alpha-tested. Inside the atlas pass (frame set bound); returns the draw count.
-u32 vkc_draw_local_shadow(VkCommandBuffer cmd, vec4 sphere, const vec4 planes[6], u32 view, u32 tile_px) {
+u32 vkc_draw_local_shadow(VkCommandBuffer cmd, vec4 sphere, const vec4 planes[6], u32 view, u32 tile_px, u32 layers) {
     if (!C.scene) return 0;
     static ClView lv;
     ClCull v;
@@ -1088,6 +1095,7 @@ u32 vkc_draw_local_shadow(VkCommandBuffer cmd, vec4 sphere, const vec4 planes[6]
     v.density = C.density;
     v.znear = 0.05f;
     v.shadow = true;
+    v.layers = (layers & SHADOW_LAYERS_ALL) == SHADOW_LAYERS_ALL ? 0u : (layers | 0x100u);
     C.tmp_n = 0;
     cull_cells(&v, C.scene);
     emit_view(&lv);

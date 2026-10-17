@@ -34,10 +34,10 @@ float shadow_at(vec3 wp) {
     vec3 s = sc.xyz / sc.w;
     vec2 uv = s.xy * 0.5 + 0.5;
     // shadow_vp is the last cascade: its own atlas tile only (no samples of the neighbouring tiles)
-    int c = clamp(int(frame.shadow_splits.w) - 1, 0, 2);
+    int c = clamp(int(frame.shadow_cfg3.x) - 1, 0, 3);
     vec2 lo = vec2(c & 1, c >> 1) * 0.5;
     if (any(lessThan(uv, lo)) || any(greaterThan(uv, lo + 0.5))) return 1.0;
-    return mix(1.0, texture(shadow_map, vec3(uv, s.z - 4.0 * frame.shadow_bias.z)), frame.ssky0.y);   // the sky cutoff fade (docs/SHADOWS.md)
+    return mix(1.0, texture(shadow_map, vec3(uv, s.z - 4.0 * frame.shadow_bias.w)), frame.ssky0.y);   // the sky cutoff fade (docs/SHADOWS.md)
 }
 
 void accumulate(vec3 L, vec3 col, vec3 R, vec3 U, vec3 F) {

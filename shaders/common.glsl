@@ -26,6 +26,8 @@
 #define MAT_RECON_FX   2097152u
 #define MAT_GLASS      4194304u
 #define MAT_CAUSTICS   8388608u
+#define MAT_NO_RECEIVE       16777216u   // Receive Shadows off (docs/SHADOWS_UNITY_MODEL.md)
+#define MAT_SHADOW_TWO_SIDED 33554432u
 
 struct PointLight {
     vec4 pos_radius;
@@ -69,9 +71,9 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 fill_color;      // rgb
     vec4 sky_flags;       // x environment + SH valid, y ambient scale, z environment mips, w cloud shadow valid
     vec4 cshadow;         // xy cloud shadow origin (world xz), z 1 / size
-    mat4 shadow_vps[3];   // cascaded shadow maps: world -> atlas tile (2 x 2 atlas)
-    vec4 shadow_splits;   // x, y, z: cascade selection distances (m from the camera), w: cascade count
-    vec4 shadow_bias;     // x, y, z: constant depth bias per cascade (NDC, from its texel size), w the moon tile
+    mat4 shadow_vps[4];   // cascaded shadow maps: world -> atlas tile (2 x 2 atlas, up to 4 cascades)
+    vec4 shadow_splits;   // cascade selection distances (m from the camera; Close Fit: view depth), cascades 0..3
+    vec4 shadow_bias;     // constant depth bias per cascade (NDC, from its texel size and the sun's Bias)
     vec4 spot_info;       // x spot light count, y cookie valid
     SpotLight spots[MAX_SPOT_LIGHTS];
     // Weather (shaders/weather.glsl)
@@ -91,25 +93,34 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 surf_map;        // terrain material map: origin x, z, 1 / spacing, samples per side (0 = none)
     vec4 surf_info;       // y: surface layers loaded (shaders/surfaces.glsl)
     // Sky-driven shadows (src/render/shadow_sky.c, docs/SHADOWS.md)
-    mat4 shadow_vp_moon;  // world -> atlas tile 3 (the moon while the sun owns the cascades)
+    mat4 shadow_vp_moon;  // world -> the moon map (bindings 18 / 19; the moon while the sun owns the cascades)
     vec4 ssky0;           // x tan(key source radius), y cast fade, z cascade 0 weight (0: wide mode), w tap budget (0 PCF 12, 1 PCF 16, 2 PCSS 16 + 16)
     vec4 ssky1;           // x unused, y max filter half width (texels), z blocker search (m), w moon tile fade (0 = off)
     vec4 ssky2;           // x tan(moon source radius), y r_shadow_debug view, z contact shadow length scale, w moon tile fade-out radius (m)
-    vec4 shadow_mpt;      // metres per texel: cascades 0..2, w the moon tile
-    vec4 shadow_span;     // metres of light-space depth per NDC unit: cascades 0..2, w the moon tile
+    vec4 shadow_mpt;      // metres per texel: cascades 0..3
+    vec4 shadow_span;     // metres of light-space depth per NDC unit: cascades 0..3
     // Cascade fit, bias, filter state, the viewmodel tile (src/render/shadow_csm.c, docs/SHADOWS.md)
     mat4 shadow_vp_vm;    // world -> the viewmodel shadow map (bindings 16 / 17)
-    vec4 shadow_nbias;    // normal offset (m) per cascade 0..2, w the moon tile
+    vec4 shadow_nbias;    // normal offset (m) per cascade 0..3
     vec4 shadow_cfg;      // x kernel rotation per frame (TAA on), y PCSS weight, z PCF blocker distance (m), w smallest half width (texels)
     vec4 shadow_cfg2;     // x fixed half width (m, era 2010; 0 = from the sky), y low-sun factor (1 .. 3), z shadow distance (m), w viewmodel FOV scale
     vec4 shadow_vm;       // x metres per texel, y metres per NDC depth, z on (0 = off), w normal offset (m)
     vec4 shadow_vm2;      // x 1 / map size, y constant bias (NDC), z world-cascade skip (m), w PCSS weight of the viewmodel tile
+    // Unity-style controls (src/render/shadow_settings.c, docs/SHADOWS_UNITY_MODEL.md)
+    vec4 shadow_cfg3;     // x cascade count, y projection (0 Close Fit: select by view depth, 1 Stable Fit), z cascade border, w the sun's Strength
+    vec4 shadow_cfg4;     // x the sun's filter (0 none, 1 hard, 2 tent, 3 PCSS), y tent base (texels)
+    vec4 shadow_moon;     // moon map: x metres per texel, y metres per NDC depth, z constant bias (NDC), w normal offset (m)
+    vec4 shadow_moon2;    // x 1 / map size
+    vec4 local_rect[LOCAL_SHADOW_TILES];   // local light atlas squares: xy uv origin, z uv size
+    vec4 local_cfg;       // x tent base of Soft local lights (texels), y Hard Only cap
 } frame;
 
 layout(set = 0, binding = 1) uniform sampler2DShadow shadow_map;
 layout(set = 0, binding = 15) uniform sampler2D shadow_depth;          // the same atlas, raw depth (PCSS blocker search)
 layout(set = 0, binding = 16) uniform sampler2DShadow shadow_vm_map;  // the viewmodel tile (first-person rig)
 layout(set = 0, binding = 17) uniform sampler2D shadow_vm_depth;       // the same, raw depth
+layout(set = 0, binding = 18) uniform sampler2DShadow shadow_moon_map; // the moon's map
+layout(set = 0, binding = 19) uniform sampler2D shadow_moon_depth;
 layout(set = 0, binding = 11) uniform sampler2DShadow local_shadow;   // point / spot light shadow atlas
 // Time-of-day sky (src/render/sky): environment (octahedral), SH9 irradiance, cloud shadow.
 layout(set = 0, binding = 5) uniform sampler2D sky_env;
@@ -121,49 +132,90 @@ layout(set = 0, binding = 8) uniform sampler2D spot_cookie;
 layout(set = 0, binding = 9) uniform sampler2D wx_occl;
 layout(set = 0, binding = 10) uniform sampler2D wx_puddles;
 
-// Shadow passes (shadow.vert / skin_shadow.vert): flags.w selects the view: 0-2 sun cascades, 3 the
-// rain occlusion map, 4+ a local light atlas tile, SHADOW_PASS_MOON the moon tile, SHADOW_PASS_VM
-// the viewmodel tile.
+// Shadow passes (shadow.vert / skin_shadow.vert): flags.w selects the view: 0-3 sun cascades, 4+ a
+// local light atlas square, SHADOW_PASS_MOON the moon map, SHADOW_PASS_VM the viewmodel tile,
+// SHADOW_PASS_OCCL the rain occlusion map.
 #define SHADOW_PASS_MOON 0x10000u
 #define SHADOW_PASS_VM 0x20000u
+#define SHADOW_PASS_OCCL 0x40000u
 mat4 shadow_pass_vp(uint idx) {
     if (idx == SHADOW_PASS_MOON) return frame.shadow_vp_moon;
     if (idx == SHADOW_PASS_VM) return frame.shadow_vp_vm;
+    if (idx == SHADOW_PASS_OCCL) return frame.occl_vp;
     if (idx >= 4u) return frame.local_vps[min(idx - 4u, uint(LOCAL_SHADOW_TILES - 1))];
-    return idx == 3u ? frame.occl_vp : frame.shadow_vps[min(idx, 2u)];
+    return frame.shadow_vps[idx];
 }
 
-// Local light shadow atlas: 2 x 2 hardware-PCF taps at p (world) in tile `tile`.
-float local_shadow_tile(int tile, vec3 p) {
+// One axis of a tent filter of base n texels centred at c (texel space; texel i covers [i, i + 1]):
+// bilinear fetch k at pos[k] (texel space) with weight w[k]; returns the fetch count (<= 4).
+// shadow_settings.c shs_tent_axis is the same code (tests/test_shadow_settings.c).
+float sh_tent_cdf(float x, float n) {
+    float h = n * 0.5;
+    if (x <= -h) return 0.0;
+    if (x >= h) return 1.0;
+    if (x < 0.0) { float t = x + h; return 0.5 * t * t / (h * h); }
+    float t = h - x;
+    return 1.0 - 0.5 * t * t / (h * h);
+}
+int sh_tent_axis(float c, float n, out vec4 pos, out vec4 w) {
+    int nf = clamp(int(ceil((n + 1.0) * 0.5 - 1e-4)), 1, 4);
+    float i0 = floor(c - n * 0.5);
+    pos = vec4(0.0);
+    w = vec4(0.0);
+    for (int k = 0; k < nf; k++) {
+        float a = i0 + 2.0 * float(k);
+        float wa = sh_tent_cdf(a + 1.0 - c, n) - sh_tent_cdf(a - c, n);
+        float wb = sh_tent_cdf(a + 2.0 - c, n) - sh_tent_cdf(a + 1.0 - c, n);
+        w[k] = wa + wb;
+        pos[k] = a + 0.5 + (w[k] > 1e-8 ? wb / w[k] : 0.0);
+    }
+    return nf;
+}
+
+// Local light atlas square `tile`: Hard (mode 1) = one bilinear compare fetch, Soft (mode 2) = the
+// quality's tent (URP 3 x 3 / 5 x 5 / 7 x 7), clamped inside the square.
+float local_shadow_tile(int tile, vec3 p, float mode) {
     vec4 sp = frame.local_vps[tile] * vec4(p, 1.0);
     if (sp.w <= 1e-4) return 1.0;
     vec3 c = sp.xyz / sp.w;
     if (c.z >= 1.0) return 1.0;
     vec2 uv = c.xy * 0.5 + 0.5;
-    float t = frame.local_shadow_info.x * 0.75;
-    float s = texture(local_shadow, vec3(uv + vec2(-t, -t), c.z));
-    s += texture(local_shadow, vec3(uv + vec2(t, -t), c.z));
-    s += texture(local_shadow, vec3(uv + vec2(-t, t), c.z));
-    s += texture(local_shadow, vec3(uv + vec2(t, t), c.z));
-    return s * 0.25;
+    float texel = frame.local_shadow_info.x;
+    vec4 r = frame.local_rect[tile];
+    vec2 lo = r.xy + texel * 0.5, hi = r.xy + r.z - texel * 0.5;
+    if (mode < 1.5) return texture(local_shadow, vec3(clamp(uv, lo, hi), c.z));
+    vec2 tc = uv / texel;
+    vec4 pu, wu, pv, wv;
+    int nu = sh_tent_axis(tc.x, frame.local_cfg.x, pu, wu);
+    int nv = sh_tent_axis(tc.y, frame.local_cfg.x, pv, wv);
+    float s = 0.0;
+    for (int j = 0; j < nv; j++)
+        for (int i = 0; i < nu; i++) s += wu[i] * wv[j] * texture(local_shadow, vec3(clamp(vec2(pu[i], pv[j]) * texel, lo, hi), c.z));
+    return s;
 }
 
-// Point light i: the cube face of the (normal-offset) point's direction from the light.
+// Point light i: the cube face of the (normal-offset) point's direction from the light; the light's
+// Strength blends the result towards lit.
 float point_light_shadow(int i, vec3 p, vec3 n) {
-    float tile = frame.light_shadow[i].x;
-    if (tile < 0.0) return 1.0;
+    vec4 ls = frame.light_shadow[i];
+    if (ls.x < 0.0) return 1.0;
     vec3 lp = frame.lights[i].pos_radius.xyz;
-    vec3 op = p + n * (length(p - lp) * frame.light_shadow[i].y);
+    vec3 op = p + n * (length(p - lp) * ls.y);
     vec3 d = op - lp, a = abs(d);
     int f = (a.x >= a.y && a.x >= a.z) ? (d.x > 0.0 ? 0 : 1) : (a.y >= a.z ? (d.y > 0.0 ? 2 : 3) : (d.z > 0.0 ? 4 : 5));
-    return local_shadow_tile(int(tile) + f, op);
+    float s = local_shadow_tile(int(ls.x) + f, op, ls.z);
+    return 1.0 - ls.w * (1.0 - s);
 }
 
+// Spot light i (params.w = filter mode x 2 + Strength).
 float spot_light_shadow(int i, vec3 p, vec3 n) {
     float tile = frame.spots[i].params.y - 1.0;
     if (tile < 0.0) return 1.0;
     vec3 op = p + n * (length(p - frame.spots[i].pos_range.xyz) * frame.spots[i].params.z);
-    return local_shadow_tile(int(tile), op);
+    float pw = frame.spots[i].params.w;
+    float mode = floor(pw * 0.5), strength = pw - 2.0 * mode;
+    float s = local_shadow_tile(int(tile), op, mode);
+    return 1.0 - strength * (1.0 - s);
 }
 
 // Spot light i at world position p: radiance scale (cone x cookie x distance falloff) and the

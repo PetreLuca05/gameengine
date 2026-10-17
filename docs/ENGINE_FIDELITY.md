@@ -73,10 +73,12 @@ era preset (`r_era`): `era x3` = three times the era's own error threshold, also
 | `auto_exposure` | - | on | on | on | on |
 | `tonemapper` | - | 0, {0,2} | 1 | 1 | 1 |
 | `hdr_output` | - | - | - | off | off |
-| `shadow_quality` | 1, max 1 | 1, max 1 | 1, max 2 | 2, max 3 | 2, max 3 |
-| `shadow_cascades` | 1, max 1 | 2, max 2 | 3, max 3 | 3, max 3 | 3, max 3 |
-| `shadow_distance` | 0.5, max 0.5 | 0.5, max 0.6 | 0.75, max 0.85 | 0.75, max 1 | 1, max 1 |
-| `shadow_filter` | 0, max 0 | 0, max 0 | 1, max 1 | 2, max 2 | 2, max 2 |
+| `shadows` (0 Disable, 1 Hard Only, 2 Hard and Soft) | 0, max 1 | 1, max 1 | 2, max 2 | 2, max 2 | 2, max 2 |
+| `shadow_resolution` (0 Low .. 3 Very High) | 0, max 0 | 0, max 1 | 1, max 2 | 2, max 3 | 3, max 3 |
+| `shadow_projection` (0 Close, 1 Stable Fit) | 1, {0,1} | 1, {0,1} | 1, {0,1} | 1, {0,1} | 1, {0,1} |
+| `shadow_cascades` | 1, {1} | 2, {1,2} | 2, {1,2,4} | 4, {1,2,4} | 4, {1,2,4} |
+| `shadow_distance` (m) | 50, max 50 | 50, max 80 | 100, max 150 | 200, max 300 | 300, max 1000 |
+| `soft_shadow_quality` (0 Low .. 3 Ultra) | 0, max 0 | 0, max 0 | 0, max 1 | 1, max 3 | 3, max 3 |
 | `shadow_min_radius` | 1, min 1 | 0.5, min 0.5 | 0.25, min 0 | 0, min 0 | 0, min 0 |
 | `light_shadows` | - | off | on | on | on |
 | `light_shadow_quality` | 1, max 1 | 1, max 1 | 1, max 1 | 2, max 2 | 2, max 2 |
@@ -129,10 +131,10 @@ Budgets (1080p, mid-range GPU): Off 3 ms, Low 5 ms, Medium 8 ms, High 12 ms, Mod
 
 | feature | cvar | | feature | cvar |
 |---|---|---|---|---|
-| aa | `r_aa` (0 off, 1 FXAA, 2 SMAA, 3 TAA) | | shadow_quality | `r_shadow_quality` (0 off, 1 1024, 2 2048, 3 4096 per cascade) |
-| upscaler | `r_upscaler` (0 off, 1 TAA-U, 2 FSR 1, 3 / 4 slots) | | shadow_cascades | `r_shadow_cascades` (1 .. 3) **new** |
-| upscale_ratio | `r_upscale_ratio` | | shadow_distance | `r_shadow_distance` (shadow distance: scale of the level's full reach) **new** |
-| render_scale | `r_render_scale` | | shadow_filter | `r_shadow_filter` (tap budget of the one sky-driven filter: 0 PCF 12 taps, 1 PCF 16 taps, 2 PCSS + wide mode; docs/SHADOWS.md) |
+| aa | `r_aa` (0 off, 1 FXAA, 2 SMAA, 3 TAA) | | shadows / shadow_resolution | `r_shadows` / `r_shadow_resolution` (512 .. 4096 per cascade; docs/SHADOWS_UNITY_MODEL.md) |
+| upscaler | `r_upscaler` (0 off, 1 TAA-U, 2 FSR 1, 3 / 4 slots) | | shadow_cascades / shadow_projection | `r_shadow_cascades` (1 / 2 / 4) / `r_shadow_projection` |
+| upscale_ratio | `r_upscale_ratio` | | shadow_distance | `r_shadow_max_distance` (m) |
+| render_scale | `r_render_scale` | | soft_shadow_quality | `r_soft_shadow_quality` (tent 3 / 5 / 7, 3 Ultra = PCSS) |
 | sharpen | `r_sharpen` | | shadow_min_radius | `r_shadow_min_radius` (m) **new** |
 | ao / contact_shadows | `r_ao` / `r_contact_shadows` | | light_shadows / _quality | `r_light_shadows` / `r_light_shadow_quality` |
 | ssr / ssgi | `r_ssr` / `r_ssgi` | | cloud_shadows / moon_shadows | `r_cloud_shadows` / `r_moon_shadows` **new** |
@@ -249,14 +251,17 @@ extension velocity is always written and the log says so).
 ## Shadows
 
 Every preset's shadow entries follow one formula (docs/SHADOWS.md "Per-preset tables",
-`tests/test_shadow_csm.c` asserts it): `r_shadow_quality` is the tile size per cascade (1024 / 2048 /
-4096, the atlas is 2 x 2 tiles), `r_shadow_cascades` 1 .. 3 practical splits up to the shadow
-distance (the unused atlas tiles aren't drawn, vgeo doesn't cull them), `r_shadow_distance` scales
-the level's full reach and is where the last cascade ends (always fading over its last 10 %),
-`r_shadow_filter` is the tap budget of the one sky-driven filter (0 PCF 12 taps, 1 PCF 16 taps,
-2 PCSS + wide mode; a change crossfades), `r_moon_shadows` gives the moon atlas tile 3 while the sun
-still owns the cascades, `r_shadow_min_radius` skips sun shadow casters smaller than the radius,
-`r_vm_shadow` the first-person rig's own tile (1024 at shadow quality 1, else 2048). The 2010 era
+`tests/test_shadow_csm.c` asserts it). The knobs are Unity's Quality > Shadows
+(docs/SHADOWS_UNITY_MODEL.md; `shs_quality_for_tier` mirrors the JSON and the tests check it):
+- `r_shadows`: Disable / Hard Only / Hard and Soft.
+- `r_shadow_resolution`: the tile size per cascade, 512 .. 4096 (the atlas is 2 x 2 tiles).
+- `r_shadow_cascades`: 1 / 2 / 4 at Unity's split percentages up to the shadow distance. Unused
+  tiles aren't drawn and vgeo doesn't cull them.
+- `r_shadow_max_distance`: metres; the last cascade ends there and fades over the cascade border.
+- `r_soft_shadow_quality`: tent 3 / 5 / 7, or Ultra = PCSS + wide mode.
+- `r_moon_shadows`: the moon's own map while the sun still owns the cascades.
+- `r_shadow_min_radius`: skips sun shadow casters smaller than the radius.
+- `r_vm_shadow`: the first-person rig's own tile (1024 .. 2048, following the sun's resolution). The 2010 era
 keeps a fixed-hardness kernel; its shadows still lighten and vanish with the sky.
 
 ## Era axis

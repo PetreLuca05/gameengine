@@ -1,5 +1,6 @@
 {
   "_comment": "Sky-driven shadows (docs/SHADOWS.md, src/render/shadow_sky.c). Curves are [[x, y], ...] with increasing x, clamped at both ends. Hot reload: saved changes apply within a second (shadows_sky_reload forces it). No shadow strength lives here: darkness = direct vs sky irradiance.",
+  "sun_shadow": {"_comment": "The directional light's Unity-style shadow settings (docs/SHADOWS_UNITY_MODEL.md): type none | hard | soft, resolution use_quality | low | medium | high | very_high, strength 0..1 (blends towards lit), bias, normal_bias, culling_mask. A level's own \"sun_shadow\" overrides; the sun_shadow command edits it live.", "type": "soft", "resolution": "use_quality", "strength": 1, "bias": 1, "normal_bias": 1, "culling_mask": 255},
   "source": {
     "_comment": "Effective source angular radius = sqrt(disc^2 + haze^2 + veil^2 + fog^2 + precip^2) in degrees, capped at max_radius_deg.",
     "sun_radius_deg": 0.265,

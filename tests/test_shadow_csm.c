@@ -15,6 +15,7 @@
 //              a penumbra in metres is the same on every cascade until a clamp applies
 //   viewmodel  the rig's tile: sub-millimetre texels at 2048, snapped, the rig inside
 #include "render/shadow_csm.h"
+#include "render/shadow_settings.h"
 #include "cJSON.h"
 #include <math.h>
 #include <stdio.h>
@@ -77,22 +78,29 @@ static float feat(const cJSON *feats, const char *name, const char *key, float f
     return cJSON_IsNumber(v) ? (float)v->valuedouble : fallback;
 }
 
-static void check_table(const char *level, const char *variant, int q, int casc, float dist_k, float min_tpm) {
-    CsmParams p = { casc, csm_tile_texels(q), REACH_FULL * dist_k, 70.0f, 16.0f / 9.0f };
+static void check_table(const char *level, const char *variant, int res, int casc, float dist, float min_tpm) {
+    QualityShadowSettings q;
+    shs_quality_default(&q);
+    q.cascades = casc;
+    q.distance = dist;
+    shs_quality_sanitize(&q);
+    float splits[4];
+    int n = shs_cascade_splits(&q, splits);
+    CsmParams p = { n, shs_res_texels(res, SHADOW_LIGHT_DIRECTIONAL), q.distance, 70.0f, 16.0f / 9.0f, splits };
     char err[256];
     bool ok = csm_validate(&p, min_tpm, 6.0f, err, sizeof(err));
     CsmLayout l;
     csm_layout(&p, &l);
-    printf("  %-7s %-12s q%d (%4u) x%d %5.1f m: c0 %.1f m %5.1f tx/m", level, variant, q, p.tile, casc, p.distance, l.split[0], 1.0f / l.texel_m[0]);
+    printf("  %-7s %-12s %4u x%d %5.0f m: c0 %.1f m %5.1f tx/m", level, variant, p.tile, n, p.distance, l.split[0], 1.0f / l.texel_m[0]);
     for (int k = 1; k < l.count; k++) printf(" | c%d %.1f m %5.1f tx/m", k, l.split[k], 1.0f / l.texel_m[k]);
     printf("\n");
     CHECK(ok, "%s %s: %s", level, variant, err);
 }
 
 static void test_tables(void) {
-    printf("shadow_csm: preset tables (one formula)\n");
+    printf("shadow_csm: preset tables (Unity knobs, one formula)\n");
     static const char *levels[5] = { "off", "low", "medium", "high", "modern" };
-    static const float min_tpm[5] = { 6.0f, 30.0f, 40.0f, 80.0f, 80.0f };   // texels per metre in cascade 0 (docs/SHADOWS.md)
+    static const float min_tpm[5] = { 3.5f, 12.0f, 12.0f, 60.0f, 80.0f };   // texels per metre in cascade 0 (docs/SHADOWS_UNITY_MODEL.md)
     for (int i = 0; i < 5; i++) {
         char path[256];
         snprintf(path, sizeof(path), "assets/render/fidelity/%s.json", levels[i]);
@@ -102,15 +110,21 @@ static void test_tables(void) {
         cJSON *r = cJSON_Parse(txt);
         free(txt);
         const cJSON *f = cJSON_GetObjectItemCaseSensitive(r, "features");
-        int q = (int)feat(f, "shadow_quality", "default", 2), qmax = (int)feat(f, "shadow_quality", "max", (float)q);
-        int c = (int)feat(f, "shadow_cascades", "default", 3), cmax = (int)feat(f, "shadow_cascades", "max", (float)c);
-        float d = feat(f, "shadow_distance", "default", 1.0f), dmax = feat(f, "shadow_distance", "max", d);
+        int q = (int)feat(f, "shadow_resolution", "default", 2), qmax = (int)feat(f, "shadow_resolution", "max", (float)q);
+        int c = (int)feat(f, "shadow_cascades", "default", 4);
+        float d = feat(f, "shadow_distance", "default", 100.0f), dmax = feat(f, "shadow_distance", "max", d);
         check_table(levels[i], "default", q, c, d, min_tpm[i]);
-        check_table(levels[i], "max", qmax, cmax, dmax, min_tpm[i]);
+        check_table(levels[i], "max", qmax, c, dmax, min_tpm[i] * 0.4f);   // max distance at the max resolution
+        // The pure tier table (shadow_settings.c) equals the JSON defaults.
+        QualityShadowSettings t;
+        shs_quality_for_tier(&t, i);
+        CHECK(t.mode == (ShadowsMode)(int)feat(f, "shadows", "default", -1) && (int)t.resolution == q && t.cascades == c && fabsf(t.distance - d) < 1e-3f &&
+                  (int)t.soft_quality == (int)feat(f, "soft_shadow_quality", "default", -1) && (int)t.projection == (int)feat(f, "shadow_projection", "default", -1),
+              "%s: shs_quality_for_tier differs from the JSON defaults", levels[i]);
         // era overrides of the shadow entries
         const cJSON *eras = cJSON_GetObjectItemCaseSensitive(r, "eras");
         for (const cJSON *e = eras ? eras->child : NULL; e; e = e->next) {
-            int eq = (int)feat(e, "shadow_quality", "default", (float)q), ec = (int)feat(e, "shadow_cascades", "default", (float)c);
+            int eq = (int)feat(e, "shadow_resolution", "default", (float)q), ec = (int)feat(e, "shadow_cascades", "default", (float)c);
             float ed = feat(e, "shadow_distance", "default", d);
             char v[32];
             snprintf(v, sizeof(v), "era %s", e->string);
@@ -118,9 +132,8 @@ static void test_tables(void) {
         }
         cJSON_Delete(r);
     }
-    // The tile sizes the quality steps name (Settings > Graphics labels).
-    CHECK(csm_tile_texels(1) == 1024 && csm_tile_texels(2) == 2048 && csm_tile_texels(3) == 4096, "tile texels");
-    CHECK(csm_vm_texels(1) == 1024 && csm_vm_texels(2) == 2048 && csm_vm_texels(3) == 2048, "viewmodel texels");
+    CHECK(shs_res_texels(0, SHADOW_LIGHT_DIRECTIONAL) == 512 && shs_res_texels(3, SHADOW_LIGHT_DIRECTIONAL) == 4096, "directional tiers 512 .. 4096");
+    CHECK(csm_vm_texels(512) == 1024 && csm_vm_texels(2048) == 2048 && csm_vm_texels(4096) == 2048, "viewmodel texels follow the sun within 1024 .. 2048");
 }
 
 // ------------------------------------------------------------------ fit
@@ -133,7 +146,7 @@ static void test_fit(void) {
     bool r_same = true;
     for (int fi = 0; fi < 3; fi++)
         for (int ai = 0; ai < 3; ai++) {
-            CsmParams p = { 3, 2048, 105.0f, fovs[fi], aspects[ai] };
+            CsmParams p = { 3, 2048, 105.0f, fovs[fi], aspects[ai], NULL };
             CsmLayout l;
             csm_layout(&p, &l);
             float tv = tanf(fovs[fi] * 0.5f * DG_DEG2RAD), th = tv * aspects[ai];
@@ -348,6 +361,43 @@ static void test_viewmodel(void) {
     CHECK(worst < 0.02f, "viewmodel tile swims %.4f texel", worst);
 }
 
+// Close Fit (Unity): denser than a Stable Fit sphere over the same receivers, but the tile follows the camera rotation, so a
+// fixed point's fractional texel position drifts while turning (swimming); Stable Fit does not.
+static void test_close_fit(void) {
+    printf("shadow_csm: Close Fit vs Stable Fit\n");
+    float splits[4] = { 13.4f, 40.0f, 93.4f, 200.0f };
+    CsmParams p = { 4, 2048, 200.0f, 70.0f, 16.0f / 9.0f, splits };
+    CsmLayout l;
+    csm_layout(&p, &l);
+    mat4 lv = csm_light_view(v3_norm(v3(0.3f, 0.8f, -0.4f)));
+    vec3 cam = v3(5.0f, 1.7f, -3.0f), f, r, u;
+    float tv = tanf(35.0f * DG_DEG2RAD), th = tv * 16.0f / 9.0f;
+    float dense = 0.0f, drift_close = 0.0f, drift_stable = 0.0f;
+    vec3 P = v3(9.0f, 0.0f, -7.0f);
+    float fx0c = 0, fy0c = 0, fx0s = 0, fy0s = 0;
+    for (int fr = 0; fr < 10; fr++) {
+        cam_basis(0.6f + fr * 0.3f * DG_DEG2RAD, -0.2f, &f, &r, &u);
+        CsmTile tc, ts;
+        csm_fit_close(&lv, cam, f, r, u, tv, th, 0.0f, splits[0], p.tile, CSM_REACH, &tc);
+        // Stable Fit holding the same receivers: the sector sphere around the depth slice's corners
+        // (Close Fit selects by view depth, Stable Fit by distance)
+        float sa, sr, tcn = sqrtf(tv * tv + th * th);
+        csm_sector_sphere(splits[0] * sqrtf(1.0f + tcn * tcn), tcn, &sa, &sr);
+        csm_fit(&lv, v3_madd(cam, f, sa), sr, p.tile, sr + 2.0f, &ts);
+        if (fr == 0) dense = ts.texel_m / tc.texel_m;
+        float fyc, fxc = frac_texel(&tc, P, p.tile, &fyc), fys, fxs = frac_texel(&ts, P, p.tile, &fys);
+        if (fr == 0) { fx0c = fxc; fy0c = fyc; fx0s = fxs; fy0s = fys; continue; }
+        float a = fabsf(fxc - fx0c), b = fabsf(fyc - fy0c);
+        drift_close = fmaxf(drift_close, fmaxf(fminf(a, 1 - a), fminf(b, 1 - b)));
+        a = fabsf(fxs - fx0s); b = fabsf(fys - fy0s);
+        drift_stable = fmaxf(drift_stable, fmaxf(fminf(a, 1 - a), fminf(b, 1 - b)));
+    }
+    printf("  cascade 0: Close Fit %.2fx the texel density of Stable Fit; drift while turning: close %.3f, stable %.4f texel\n", dense, drift_close, drift_stable);
+    CHECK(dense > 1.02f, "Close Fit not denser (%.2fx)", dense);
+    CHECK(drift_close > 0.05f, "Close Fit did not swim (%.3f)", drift_close);
+    CHECK(drift_stable < 0.02f, "Stable Fit swims (%.4f)", drift_stable);
+}
+
 int main(void) {
     test_tables();
     test_fit();
@@ -356,6 +406,7 @@ int main(void) {
     test_selection();
     test_bias_kernel();
     test_viewmodel();
+    test_close_fit();
     printf("test_shadow_csm: %d checks, %d failures\n", g_checks, g_fail);
     return g_fail ? 1 : 0;
 }

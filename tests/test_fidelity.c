@@ -172,14 +172,14 @@ static void test_lower_raise(void) {
     // Explicitly lower values survive both ways.
     set(FF_MOTION_BLUR, 0);
     set(FF_FILM_GRAIN, 0);
-    set(FF_SHADOW_QUALITY, 1);
+    set(FF_SHADOW_RESOLUTION, 1);
     fid_apply(FID_HIGH);
-    CHECK(val(FF_MOTION_BLUR) == 0 && val(FF_FILM_GRAIN) == 0 && val(FF_SHADOW_QUALITY) == 1, "High keeps the explicitly lower values");
+    CHECK(val(FF_MOTION_BLUR) == 0 && val(FF_FILM_GRAIN) == 0 && val(FF_SHADOW_RESOLUTION) == 1, "High keeps the explicitly lower values");
     CHECK(val(FF_SSR) == 1, "High: SSR half res (default) %g", val(FF_SSR));
     fid_apply(FID_MEDIUM);
-    CHECK(val(FF_MOTION_BLUR) == 0 && val(FF_SHADOW_QUALITY) == 1, "Medium keeps them");
+    CHECK(val(FF_MOTION_BLUR) == 0 && val(FF_SHADOW_RESOLUTION) == 1, "Medium keeps them");
     fid_apply(FID_MODERN);
-    CHECK(val(FF_MOTION_BLUR) == 0 && val(FF_FILM_GRAIN) == 0 && val(FF_SHADOW_QUALITY) == 1, "back to Modern: still lower");
+    CHECK(val(FF_MOTION_BLUR) == 0 && val(FF_FILM_GRAIN) == 0 && val(FF_SHADOW_RESOLUTION) == 1, "back to Modern: still lower");
     CHECK(fid_custom_count() == 3, "three custom values (%d)", fid_custom_count());
     // Higher than the default at a level is not "explicitly lower": the next level's default wins.
     set(FF_VOLUMETRICS, 3);
@@ -223,7 +223,7 @@ static void test_levels(void) {
         CHECK(fid_bounds(FID_OFF, 0, post[i]).avail == FID_UNAVAILABLE, "Off: %s locked", fid_feature(post[i])->id);
     }
     CHECK(fid_bounds(FID_OFF, 0, FF_TONEMAPPER).avail == FID_UNAVAILABLE, "Off: tonemapper locked (direct output)");
-    CHECK(val(FF_SHADOW_CASCADES) == 1 && val(FF_RENDER_SCALE) >= 0.5f && val(FF_RENDER_SCALE) <= 0.66f + 1e-4f, "Off: 1 cascade, 0.5-0.66 scale");
+    CHECK(val(FF_SHADOWS) == 0 && val(FF_SHADOW_CASCADES) == 1 && val(FF_RENDER_SCALE) >= 0.5f && val(FF_RENDER_SCALE) <= 0.66f + 1e-4f, "Off: shadows Disable, 0.5-0.66 scale");
     CHECK(fabsf(val(FF_VGEO_ERROR_PX) - 4.0f) < 1e-4f, "Off: vgeo error x4");
     // Internal consistency: TAA (and TAA-U) only where the level has TAA; HDR output only High / Modern.
     for (int e = 0; e < FID_ERAS; e++)
@@ -237,7 +237,7 @@ static void test_levels(void) {
         }
     // The spec's per-level points.
     fid_apply(FID_LOW);
-    CHECK(val(FF_AA) == 1 && val(FF_SHADOW_CASCADES) == 2 && val(FF_SHADOW_FILTER) == 0 && fabsf(val(FF_RENDER_SCALE) - 0.66f) < 1e-3f, "Low: FXAA, 2 hard cascades, 0.66");
+    CHECK(val(FF_AA) == 1 && val(FF_SHADOW_CASCADES) == 2 && val(FF_SHADOWS) == 1 && val(FF_SHADOW_RESOLUTION) == 0 && fabsf(val(FF_SHADOW_DISTANCE) - 50.0f) < 1e-3f && fabsf(val(FF_RENDER_SCALE) - 0.66f) < 1e-3f, "Low: FXAA, Hard Only, Low resolution, 2 cascades, 50 m, 0.66");
     CHECK(fabsf(val(FF_FOLIAGE_DENSITY) - 0.25f) < 1e-4f && fabsf(val(FF_VGEO_ERROR_PX) - 3.0f) < 1e-4f && val(FF_TEXTURE_QUALITY) == 0, "Low: foliage 0.25, vgeo x3, mips -2");
     fid_apply(FID_MEDIUM);
     CHECK(val(FF_SSR) == 0 && val(FF_MOTION_BLUR) == 1 && val(FF_DOF) == 1 && val(FF_UPSCALER) == 2 && fabsf(val(FF_UPSCALE_RATIO) - 0.75f) < 1e-4f, "Medium: no SSR, camera MB, ADS DoF, FSR 1 0.75");
@@ -245,7 +245,7 @@ static void test_levels(void) {
     CHECK(!fid_value_allowed(FID_MEDIUM, 0, FF_CHROMATIC, 0.5f) && !fid_value_allowed(FID_MEDIUM, 0, FF_LENS_FLARE, 0.5f), "Medium: CA / flare greyed");
     fid_apply(FID_HIGH);
     CHECK(val(FF_SSR) == 1 && val(FF_SSGI) == 0 && !fid_value_allowed(FID_HIGH, 0, FF_SSGI, 1) && val(FF_BLOOM_QUALITY) == 1 && val(FF_DOF_QUALITY) == 1, "High: SSR half, SSGI greyed, fewer bloom mips, hybrid DoF");
-    CHECK(fabsf(val(FF_SHADOW_DISTANCE) - 0.75f) < 1e-4f && fabsf(val(FF_FOLIAGE_DENSITY) - 0.8f) < 1e-4f, "High: shadow distance -25 %%, foliage 0.8");
+    CHECK(fabsf(val(FF_SHADOW_DISTANCE) - 200.0f) < 1e-3f && val(FF_SHADOW_CASCADES) == 4 && val(FF_SOFT_SHADOW_QUALITY) == 1 && fabsf(val(FF_FOLIAGE_DENSITY) - 0.8f) < 1e-4f, "High: 200 m, 4 cascades, soft Medium, foliage 0.8");
     fid_apply(FID_MODERN);
     for (int f = 0; f < fid_feature_count(); f++)
         if (f != FF_HDR_OUTPUT) CHECK(fid_bounds(FID_MODERN, 0, f).avail != FID_UNAVAILABLE, "Modern: %s unlocked", fid_feature(f)->id);
@@ -260,7 +260,7 @@ static void test_eras(void) {
     cvar_set("r_aa", "3");
     CHECK(val(FF_AA) != 3, "2010: TAA greyed");
     fid_apply(FID_LOW);
-    CHECK(val(FF_AA) == 2 && val(FF_SHADOW_FILTER) == 1, "2010-era Low differs from modern-era Low (SMAA, soft shadows)");
+    CHECK(val(FF_AA) == 2 && val(FF_SHADOWS) == 2, "2010-era Low differs from modern-era Low (SMAA, soft shadows)");
     CHECK(fabsf(val(FF_VGEO_LOD_PX) - 48.0f) < 1e-3f, "2010-era Low: discrete LOD error 12 px x4 = %g", val(FF_VGEO_LOD_PX));
     CHECK(fabsf(val(FF_FOLIAGE_DENSITY) - 0.2f) < 1e-4f, "2010-era Low: the era's foliage (0.2) under the cap (0.25): %g", val(FF_FOLIAGE_DENSITY));
     set_era(FID_ERA_2020);

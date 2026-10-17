@@ -23,7 +23,7 @@ typedef struct PipeDesc {
 } PipeDesc;
 
 bool vkp_create_layouts(void) {
-    VkDescriptorSetLayoutBinding fb[18] = { 0 };
+    VkDescriptorSetLayoutBinding fb[20] = { 0 };
     fb[0].binding = 0;
     fb[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     fb[0].descriptorCount = 1;
@@ -75,15 +75,15 @@ bool vkp_create_layouts(void) {
     fb[15].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     fb[15].descriptorCount = 1;
     fb[15].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-    // 16 the viewmodel shadow tile (compare), 17 the same, raw depth (docs/SHADOWS.md).
-    for (int i = 16; i < 18; i++) {
+    // 16 the viewmodel shadow tile (compare), 17 the same, raw depth (docs/SHADOWS.md); 18 / 19 the moon map.
+    for (int i = 16; i < 20; i++) {
         fb[i].binding = (u32)i;
         fb[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
         fb[i].descriptorCount = 1;
         fb[i].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
     }
     VkDescriptorSetLayoutCreateInfo li = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
-    li.bindingCount = 18;
+    li.bindingCount = 20;
     li.pBindings = fb;
     VK_CHECK(vkCreateDescriptorSetLayout(R->device, &li, NULL, &R->frame_layout));
 
@@ -105,7 +105,7 @@ bool vkp_create_layouts(void) {
 
     VkDescriptorPoolSize sizes[3] = {
         { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 16 },
-        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, MAX_TEXTURES + 192 + MAX_MAT_SETS * 4 },
+        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, MAX_TEXTURES + 256 + MAX_MAT_SETS * 4 },
         { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 64 },
     };
     VkDescriptorPoolCreateInfo pi = { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
@@ -346,8 +346,10 @@ bool vkp_create_pipelines(void) {
     d[PIPE_LIT_BLEND].blend = true;
     d[PIPE_LIT_BLEND].depth_write = false;
     d[PIPE_LIT_BLEND].cull = VK_CULL_MODE_NONE;
+    // Shadow casters (docs/SHADOWS_UNITY_MODEL.md "Cast Shadows"): On culls back faces as the
+    // material does, Two Sided (PIPE_SHADOW_2S) and two-sided materials don't.
     d[PIPE_SHADOW] = (PipeDesc){ "shadow.vert", NULL, VL_MESH_POS_ONLY, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, VK_POLYGON_MODE_FILL,
-                                 VK_CULL_MODE_NONE, true, true, false, VK_FORMAT_UNDEFINED, depth, true, R->layout_lit };
+                                 VK_CULL_MODE_BACK_BIT, true, true, false, VK_FORMAT_UNDEFINED, depth, true, R->layout_lit };
     d[PIPE_LINES] = (PipeDesc){ "lines.vert", "lines.frag", VL_LINE, VK_PRIMITIVE_TOPOLOGY_LINE_LIST, VK_POLYGON_MODE_FILL,
                                 VK_CULL_MODE_NONE, true, false, true, hdr, depth, false, R->layout_lit };
     d[PIPE_LINES_OVERLAY] = d[PIPE_LINES];
@@ -392,7 +394,11 @@ bool vkp_create_pipelines(void) {
     d[PIPE_SKIN_SHADOW] = d[PIPE_SHADOW];
     d[PIPE_SKIN_SHADOW].vert = "skin_shadow.vert";
     d[PIPE_SKIN_SHADOW].vl = VL_SKIN_SHADOW;
+    d[PIPE_SKIN_SHADOW].cull = VK_CULL_MODE_NONE;   // characters: cards (hair, cloth edges) cast from both sides
+    d[PIPE_SHADOW_2S] = d[PIPE_SHADOW];
+    d[PIPE_SHADOW_2S].cull = VK_CULL_MODE_NONE;
     d[PIPE_SHADOW_MASK] = d[PIPE_SHADOW];
+    d[PIPE_SHADOW_MASK].cull = VK_CULL_MODE_NONE;
     d[PIPE_SHADOW_MASK].vert = "shadow_mask.vert";
     d[PIPE_SHADOW_MASK].frag = "shadow_mask.frag";
     d[PIPE_SHADOW_MASK].vl = VL_MESH;

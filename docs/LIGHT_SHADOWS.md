@@ -45,7 +45,13 @@ Everything else casts shadows:
 |---|---|---|
 | `r_light_shadows` | 1 | point / spot light shadows on |
 | `r_light_shadow_count` | 10 | shadowed point lights per frame (0–10) |
-| `r_light_shadow_quality` | 2 | tile size: 1 = 256 px, 2 = 512 px |
+| `r_light_shadow_quality` | 2 | atlas: 8 x the tile (1 = 2048², 2 = 4096²) |
+
+Per light (Unity's Light > Shadows; docs/SHADOWS_UNITY_MODEL.md): level JSON `"shadow": {...}` or
+`light_shadow <all|nearest|index> type hard|soft|none ...`. These set the type (Hard = one bilinear
+fetch, Soft = the quality's tent), resolution (URP tiers 256 .. 2048 per tile / cube face, packed
+by screen-size priority), strength, bias / normal bias, near plane, culling mask and distance. A
+light that does not fit the atlas, even downgraded, is unshadowed that frame.
 
 ## Cost
 
