@@ -211,7 +211,7 @@ int main(int argc, char **argv) {
     lobby_profile_changed();   // equipped cosmetics onto the character (cl_skin / cl_parts)
 
     g_engine.has_focus = true;
-    input_set_game_focus(true);
+    input_set_game_focus(!menus_wants_mouse() && !console_is_open());   // the main menu keeps the cursor
     audio_play_music("ambient");
 
     double last = platform_time();
@@ -232,6 +232,8 @@ int main(int argc, char **argv) {
         ui_input_begin();
         SDL_Event ev;
         while (SDL_PollEvent(&ev)) handle_event(&ev);
+        // A screen that wants the cursor never runs with the mouse captured (whoever grabbed it).
+        if (input_game_focus() && (menus_wants_mouse() || console_is_open())) input_set_game_focus(false);
         ui_input_end();
         input_end_frame((float)dt);
         if (input_consume_press(ACT_NETSTATS)) game()->show_netstats = !game()->show_netstats;
