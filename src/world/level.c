@@ -343,15 +343,15 @@ static void build_room(LevelBuild *b, const cJSON *room) {
     }
 
     World *w = b->w;
-    u32 lc = rgba8(0.15f, 0.15f, 0.18f, 1);
+    u32 lc = rgba8(0.15f, 0.15f, 0.15f, 1);
     // Floor meter labels along both axes (every meter) and a coarse 5 m grid of coordinates.
     int ext = (int)fminf(hx, hz) - 1;
     char buf[32];
     for (int m = -ext; m <= ext; m++) {
         if (m == 0) continue;
         snprintf(buf, sizeof(buf), "%d", m);
-        add_label(w, v3((float)m + 0.05f, 0.005f, 0.42f), v3(1, 0, 0), v3(0, 0, -1), 0.22f, rgba8(0.6f, 0.1f, 0.1f, 1), buf);
-        add_label(w, v3(0.08f, 0.005f, (float)m + 0.12f), v3(1, 0, 0), v3(0, 0, -1), 0.22f, rgba8(0.1f, 0.15f, 0.6f, 1), buf);
+        add_label(w, v3((float)m + 0.05f, 0.005f, 0.42f), v3(1, 0, 0), v3(0, 0, -1), 0.22f, rgba8(0.08f, 0.08f, 0.08f, 1), buf);   // X axis: black (greys only)
+        add_label(w, v3(0.08f, 0.005f, (float)m + 0.12f), v3(1, 0, 0), v3(0, 0, -1), 0.22f, rgba8(0.3f, 0.3f, 0.3f, 1), buf);    // Z axis: dark grey
     }
     for (int x = -ext / 5 * 5; x <= ext; x += 5)
         for (int z = -ext / 5 * 5; z <= ext; z += 5) {

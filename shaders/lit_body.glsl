@@ -57,13 +57,13 @@ vec3 apply_grid(vec3 base, vec3 p, vec3 n) {
     vec3 col = base;
     col = mix(col, col * 0.72, minor * 0.6);
     col = mix(col, col * 0.35, major);
-    col = mix(col, vec3(0.9, 0.55, 0.1) * 0.5, big * 0.6);
-    // Highlight the world origin axes on floors: X red, Z blue.
+    col = mix(col, col * 0.18, big * 0.6);
+    // The world origin axes on floors (greys only): X near black, Z near white.
     if (an.y > 0.9) {
         float ax = grid_line(p.z, 1000.0, 2.5) * step(abs(p.z), 0.5);
         float az = grid_line(p.x, 1000.0, 2.5) * step(abs(p.x), 0.5);
-        col = mix(col, vec3(0.8, 0.1, 0.1), ax);
-        col = mix(col, vec3(0.1, 0.2, 0.9), az);
+        col = mix(col, vec3(0.04), ax);
+        col = mix(col, vec3(0.9), az);
     }
     return col;
 }
@@ -80,12 +80,12 @@ vec3 apply_fine_grid(vec3 base, vec3 p, vec3 n) {
     float meter = max(grid_line(c.x, 1.0, 2.0), grid_line(c.y, 1.0, 2.0));
     vec3 col = base;
     col = mix(col, col * 0.62, minor * 0.7);
-    col = mix(col, vec3(0.1, 0.3, 0.6), half_m * 0.8);
-    col = mix(col, vec3(0.75, 0.15, 0.1), meter);
+    col = mix(col, vec3(0.32), half_m * 0.8);
+    col = mix(col, vec3(0.06), meter);
     return col;
 }
 
-// Sighting-in target: 1 MOA squares at its distance (spacing s in metres), 5 MOA bold, 10 MOA red
+// Sighting-in target: 1 MOA squares at its distance (spacing s in metres), 5 MOA bold, 10 MOA black
 // (level.c snaps the target centre onto a 10 MOA crossing; the aim square is its own box).
 vec3 apply_moa_grid(vec3 base, vec3 p, vec3 n, float s) {
     vec3 an = abs(n);
@@ -103,8 +103,8 @@ vec3 apply_moa_grid(vec3 base, vec3 p, vec3 n, float s) {
     float ten = max(grid_line(c.x, s * 10.0, 1.6), grid_line(c.y, s * 10.0, 1.6)) * f10;
     vec3 col = base;
     col = mix(col, col * 0.55, minor * 0.8);
-    col = mix(col, vec3(0.08, 0.1, 0.12), five * 0.85);
-    col = mix(col, vec3(0.8, 0.08, 0.05), ten);
+    col = mix(col, vec3(0.25), five * 0.85);
+    col = mix(col, vec3(0.03), ten);
     return col;
 }
 
