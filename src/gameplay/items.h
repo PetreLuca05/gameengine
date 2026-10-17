@@ -102,7 +102,8 @@ typedef struct AttachmentDef {
     float eye_relief;         // m from the eye to sight_pt; <= 0 = keep the weapon's stock weld
     float zoom;               // magnification (1 = none)
     float ads_fov;            // explicit sight FOV (deg against a 75 deg view); 0 = 2 atan(tan(base / 2) / zoom)
-    float main_zoom;          // scopes: zoom of the arms / weapon projection around the scope (the world stays)
+    float main_zoom;          // scopes: zoom of the arms / weapon projection around the scope
+    float world_zoom;         // ADS world camera zoom with this sight (tan ratio; 0 = cl_ads_world_zoom)
     float rail_offset;        // m along the rail, + = towards the stock (clamped to the slot's rail)
     bool rail_auto;           // scopes: slide on the rail so the stock weld gives exactly eye_relief
     Reticle reticle;
@@ -163,7 +164,8 @@ typedef struct WeaponDef {
     float range, impulse, headshot_mult;
     float projectile_speed, projectile_gravity;
     float swing_time, active_start, active_end, reach, sweep_radius, knockback, swing_arc;
-    float ads_fov;            // ADS zoom of the arms / weapon, as a FOV against a 75 deg view (the world FOV stays)
+    float ads_fov;            // ADS zoom of the arms / weapon, as a FOV against a 75 deg view
+    float ads_world_zoom;     // iron sights: ADS world camera zoom (tan ratio; 0 = cl_ads_world_zoom)
     char pose[32];            // hand pose clip
     char sound_fire[32], sound_reload[32];
     WeaponModelPart parts[6];

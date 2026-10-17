@@ -179,7 +179,7 @@ is kept.
 
 ## 4. Scopes (picture-in-picture)
 
-The world camera's FOV is fixed (sv_fov); scopes magnify only inside the PiP lens (`exec_scope_pip`).
+The world camera narrows only slightly when aiming (`cl_ads_world_zoom`); scopes magnify inside the PiP lens (`exec_scope_pip`).
 Before this change the PiP pass drew the legacy draw list and the skinned characters with the main view's
 LOD choice, and **no vgeo scene content at all on either path** (no trees, bushes or grass in the scope;
 the vgeo culling has no PiP view, its per-view error metric never sees the PiP projection).

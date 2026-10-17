@@ -328,9 +328,10 @@ The local player sees their own, undistorted body, Unreal "true first person" st
   tick still get a reach.
 * **Passes.** The world pass draws the body without its arm triangles. The arms are drawn once,
   in the viewmodel pass, with the weapon and its own FOV.
-* **FOV.** The camera FOV is the server's `sv_fov`, the same for every player (Settings → Graphics
-  shows it); the hands / weapon FOV (`cam_weapon_fov` / `r_viewmodel_fov`, 0 = follow the camera)
-  is a slider. ADS narrows only the hands / weapon projection.
+* **FOV.** The camera FOV is the player's `cl_fov` (Settings → Graphics → View; a host may force
+  `sv_fov` or cap `sv_fov_max`); the hands / weapon FOV (`cam_weapon_fov` / `r_viewmodel_fov`, 0 =
+  follow the camera) is a slider. ADS narrows the world a little (`cl_ads_world_zoom`) and the hands /
+  weapon projection more (docs/ATTACHMENTS.md "FOV and sensitivity").
 * **Debug.** `cl_fp_debug 1` draws targets; `2` shows the raw body pose. `cl_fp_body 0` brings back
   the cube hands.
 

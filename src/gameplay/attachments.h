@@ -49,6 +49,9 @@ void attach_defaults(const WeaponDef *wd, u8 out[ATT_SLOTS]);
 float attach_sight_zoom(const AttachmentDef *optic);
 float attach_sight_fov(const AttachmentDef *optic, float base_fov);
 float attach_ads_vm_zoom(const WeaponDef *eff, const AttachmentDef *optic);
+// The mild ADS zoom of the world camera (tan ratio, 1..1.5): the optic's "world_zoom", the weapon's
+// "ads_world_zoom" (iron sights), else def (cl_ads_world_zoom).
+float attach_ads_world_zoom(const WeaponDef *eff, const AttachmentDef *optic, float def);
 
 // Visual: every mounted attachment's parts (item space boxes), for drawing.
 typedef struct AttachDrawPart { vec3 center; quat rot; vec3 half; vec4 color; u8 slot; } AttachDrawPart;
