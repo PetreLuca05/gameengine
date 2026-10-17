@@ -30,7 +30,7 @@ float apply_damage_part(World *w, EntityId target, float amount, DamageType type
     float dmg = amount * h->resist[type];
     if (dmg <= 0) return 0;
     // Armor soaks a share of the damage until it runs out.
-    if (h->armor > 0 && type != DMG_FALL) {
+    if (h->armor > 0 && type != DMG_FALL && type != DMG_DROWN) {
         float soak = fminf(h->armor, dmg * ARMOR_ABSORB);
         h->armor -= soak;
         dmg -= soak;

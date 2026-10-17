@@ -122,11 +122,12 @@ static DamageType dmg_from(const char *s) {
     if (!strcmp(s, "melee")) return DMG_MELEE;
     if (!strcmp(s, "explosive")) return DMG_EXPLOSIVE;
     if (!strcmp(s, "fall")) return DMG_FALL;
+    if (!strcmp(s, "drown")) return DMG_DROWN;
     return DMG_GENERIC;
 }
 
 const char *damage_type_name(DamageType t) {
-    static const char *n[DMG_COUNT] = { "generic", "bullet", "melee", "explosive", "fall" };
+    static const char *n[DMG_COUNT] = { "generic", "bullet", "melee", "explosive", "fall", "drown" };
     return (t >= 0 && t < DMG_COUNT) ? n[t] : "?";
 }
 

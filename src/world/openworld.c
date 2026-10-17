@@ -706,35 +706,9 @@ bool openworld_load(World *w, const cJSON *root) {
     return true;
 }
 
-// ------------------------------------------------------------------ host rules: water, zombies
+// ------------------------------------------------------------------ host rules: zombies (water: game_water.c, swimming)
 
 float ow_water_fn(void *user, float x, float z) { return mapgen_water_level(&((OpenWorld *)user)->gen, x, z); }
-
-static void teleport(Player *p, vec3 pos) {
-    p->sim.move.pos = pos;
-    p->sim.move.vel = v3(0, 0, 0);
-    if (p->character) { phys_character_set_pos(p->character, pos); phys_character_set_vel(p->character, v3(0, 0, 0)); }
-}
-
-static void water_rule(World *w, OpenWorld *o) {
-    for (int s = 0; s < MAX_PLAYERS; s++) {
-        Player *p = &w->players[s];
-        if (!p->active) continue;
-        int mode = p->sim.move.mode;
-        if (mode == MOVE_NOCLIP || mode == MOVE_DEAD || mode == MOVE_SEATED) { o->have_dry[s] = false; continue; }
-        vec3 pos = p->sim.move.pos;
-        float wl = mapgen_water_level(&o->gen, pos.x, pos.z);
-        float depth = wl - pos.y;
-        if (wl > -1e8f && depth > 1.3f) {
-            vec3 back = o->have_dry[s] ? o->last_dry[s] : v3(pos.x, mapgen_raster_height(&o->raster, pos.x, pos.z) + 2.0f, pos.z);
-            teleport(p, v3_add(back, v3(0, 0.1f, 0)));
-            ev_hint(w, s, "Too deep - you can't swim");
-        } else if (p->sim.move.on_ground && (wl < -1e8f || depth < 0.3f)) {
-            o->last_dry[s] = pos;
-            o->have_dry[s] = true;
-        }
-    }
-}
 
 static float poi_density(const OpenWorld *o, int poi, float *indoor, int *max) {
     if (poi < 0) { *indoor = 0; *max = o->wild_max; return o->wild_density; }
@@ -809,7 +783,6 @@ static void zombie_spawner(World *w, OpenWorld *o) {
 void openworld_tick(World *w, float dt) {
     OpenWorld *o = ow_of(w);
     if (!o || !w->authority) return;
-    water_rule(w, o);
     o->spawn_timer -= dt;
     if (o->spawn_timer <= 0) {
         o->spawn_timer = 1.0f;

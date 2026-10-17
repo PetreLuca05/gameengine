@@ -15,7 +15,7 @@
 typedef enum ItemKind { ITEM_MISC, ITEM_AMMO, ITEM_CONSUMABLE, ITEM_WEAPON, ITEM_KEY, ITEM_ATTACHMENT, ITEM_THROWABLE, ITEM_KIND_COUNT } ItemKind;
 // Throwables (docs/UI_WHEELS_HUD.md "Throwables"): hold attack to cook / charge, release to throw.
 typedef enum ThrowKind { THROW_GRENADE, THROW_FLARE, THROW_MOLOTOV } ThrowKind;
-typedef enum DamageType { DMG_GENERIC, DMG_BULLET, DMG_MELEE, DMG_EXPLOSIVE, DMG_FALL, DMG_COUNT } DamageType;
+typedef enum DamageType { DMG_GENERIC, DMG_BULLET, DMG_MELEE, DMG_EXPLOSIVE, DMG_FALL, DMG_DROWN, DMG_COUNT } DamageType;
 typedef enum WeaponKind { WPN_MELEE, WPN_HITSCAN, WPN_PROJECTILE } WeaponKind;
 typedef enum VisShape { VIS_NONE, VIS_BOX, VIS_CYLINDER, VIS_SPHERE, VIS_CAPSULE } VisShape;
 

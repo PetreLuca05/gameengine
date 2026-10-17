@@ -12,6 +12,8 @@ void water_register(void);
 void water_level_loaded(World *w, const char *map);   // host and clients: same bodies from the same level
 void water_tick(World *w);                            // every sim tick (host: buoyancy before phys_step)
 void water_frame(World *w, vec3 cam);                 // every frame (clients' wind, debug view)
+struct UserCmd;
+void water_test_cmd(struct UserCmd *c);               // water_test: scripted input for the local player
 
 const WaterWorld *game_water(void);
 WaterWorld *game_water_mut(void);

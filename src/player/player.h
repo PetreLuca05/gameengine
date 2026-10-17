@@ -19,7 +19,15 @@ struct PhysCharacter;
 #define PLAYER_EYE_STAND 1.65f
 #define PLAYER_EYE_CROUCH 0.98f
 
-typedef enum MoveMode { MOVE_WALK, MOVE_MANTLE, MOVE_VAULT, MOVE_HANG, MOVE_NOCLIP, MOVE_DEAD, MOVE_SEATED } MoveMode;
+typedef enum MoveMode { MOVE_WALK, MOVE_MANTLE, MOVE_VAULT, MOVE_HANG, MOVE_NOCLIP, MOVE_DEAD, MOVE_SEATED, MOVE_SWIM } MoveMode;
+
+// Water state of a player (docs/WATER.md "Swimming"): set every tick from the water at the feet.
+typedef enum WaterState {
+    WATER_DRY,          // no water at the feet
+    WATER_WADE,         // walking in water (slowed by depth)
+    WATER_SURFACE,      // MOVE_SWIM at the surface (head above water)
+    WATER_UNDER,        // MOVE_SWIM diving (head under water: oxygen runs down)
+} WaterState;
 
 typedef struct PlayerMove {
     vec3 pos;           // feet
@@ -67,6 +75,19 @@ typedef struct PlayerMove {
     u8 pad3;
     float veh_stun;     // s left after being thrown out at speed (no control)
     float stride;       // walk-cycle phase (rad) for the item / camera bob (deterministic, spectators)
+    // water (docs/WATER.md "Swimming"): predicted like the rest; oxygen / drowning are host-authoritative
+    // through reconciliation (the damage itself is dealt by the host only)
+    u8 water;           // WaterState
+    u8 head_under;      // the eye is under the surface
+    u8 swim_sprint;     // fast swim (drains stamina)
+    u8 pad4;
+    float water_depth;  // surface - feet (m), 0 when dry
+    float water_surface;// surface height at the player (valid when water != WATER_DRY)
+    float water_column; // surface - bottom at the player (m)
+    float oxygen;       // s of breath left (pl_swim_breath at most)
+    float stamina;      // 0..1 for the fast swim
+    float wet;          // 0..1 character wetness (shading, drips): soaks in water, dries over time
+    float swim_phase;   // stroke cycle (rad): procedural swim animation, deterministic
 } PlayerMove;
 
 typedef struct WeaponState {
@@ -110,6 +131,9 @@ typedef struct PlayerTuning {
     struct Cvar *mantle_min, *mantle_max, *hang_max, *air_mantle_max, *vault_max, *mantle_reach, *mantle_speed, *vault_speed;
     struct Cvar *debug_mantle, *debug_melee, *noclip_speed;
     struct Cvar *crouch_toggle, *sprint_toggle;
+    // water (pl_swim_*)
+    struct Cvar *swim_speed, *swim_sprint_speed, *swim_dive_speed, *swim_accel, *swim_enter, *swim_exit, *swim_eye;
+    struct Cvar *swim_spring, *swim_breath, *swim_stamina, *swim_rise, *wade_slow, *wade_crouch_max, *wade_sprint_max;
 } PlayerTuning;
 
 void player_register_cvars(void);
@@ -127,6 +151,15 @@ void movement_set_eye_offset(vec3 (*fn)(float yaw, float pitch));
 // lands on the seat's eye) and the vehicle velocity. False = the vehicle is gone.
 typedef bool (*SeatPoseFn)(struct World *w, u32 vehicle, int seat, vec3 *feet, vec3 *vel);
 void movement_set_seat_pose(SeatPoseFn fn);
+// Water at (x, z) at server tick `tick` (the command's view tick: identical on the host and the
+// predicting client): surface height, water column depth (surface - bottom), flow velocity. False =
+// no water. Set by the game (game_water.c); without it nobody swims.
+typedef bool (*MoveWaterFn)(struct World *w, float x, float z, double tick, float *surface, float *column, vec3 *flow);
+void movement_set_water(MoveWaterFn fn);
+// Fall damage multiplier for a landing in water of `depth` m (1 on land, 0 from ~2.5 m down): the
+// hook for a future player fall damage rule (there is none yet).
+float player_fall_water_scale(float depth);
+float player_breath_max(void);
 vec3 player_eye_offset(float yaw, float pitch);
 
 #endif

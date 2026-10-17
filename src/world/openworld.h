@@ -7,7 +7,8 @@
 //   - trees: placement chunks for the whole map (vgeo foliage, impostors), trunk collision per tile;
 //   - entities (host): loot containers rolled from data/loot.json, doors, lamps, pickups; vehicles and
 //     fuel pumps (game_vehicles.c); player spawns;
-//   - gameplay rules (host tick): deep water pushes players back to the shore, the map edge is walled,
+//   - water bodies (sea, lakes, rivers: game_water.c, swimming in movement.c); gameplay rules (host
+//     tick): the map edge is walled,
 //     and a POI zombie spawner keeps each region's density around the players (and culls far ones).
 #ifndef DG_OPENWORLD_H
 #define DG_OPENWORLD_H

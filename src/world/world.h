@@ -51,6 +51,9 @@ enum EntityFlags {
     EF_BRAKING   = 1 << 16,   // vehicles: brake lights
     EF_WRECKED   = 1 << 17,   // vehicles: destroyed (no engine)
     EF_ENGINE    = 1 << 18,   // vehicles: engine running
+    EF_SWIM      = 1 << 19,   // players: swimming (MOVE_SWIM)
+    EF_UNDERWATER = 1 << 20,  // players: diving (head under water)
+    EF_WADE      = 1 << 21,   // players: walking in water
 };
 
 enum ComponentBits {

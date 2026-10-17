@@ -1,6 +1,7 @@
 // First-person movement on top of Jolt CharacterVirtual: walk/sprint/crouch, acceleration +
-// friction, air control, coyote time, jump buffering, stairs/slopes, and ledge traversal
-// (mantle, sprint-vault, ledge hang with pull-up / drop).
+// friction, air control, coyote time, jump buffering, stairs/slopes, ledge traversal
+// (mantle, sprint-vault, ledge hang with pull-up / drop), and water: wading, swimming at the
+// surface, diving, climbing out through the mantle (docs/WATER.md "Swimming").
 #include "player.h"
 #include "anim/anim_library.h"
 #include "world/world.h"
@@ -42,6 +43,20 @@ void player_register_cvars(void) {
     t->debug_mantle = cvar_reg_bool("pl_debug_mantle", false, 0, "draw mantle/vault/hang shape casts");
     t->debug_melee = cvar_reg_bool("wpn_debug_melee", false, 0, "draw melee sweep rays");
     t->noclip_speed = cvar_reg_float("pl_noclip_speed", 10.0f, 1.0f, 100, 0, "noclip fly speed");
+    t->swim_speed = cvar_reg_float("pl_swim_speed", 1.7f, 0.2f, 10, CVAR_SERVER, "swim speed at the surface (m/s)");
+    t->swim_sprint_speed = cvar_reg_float("pl_swim_sprint_speed", 2.7f, 0.2f, 10, CVAR_SERVER, "fast swim speed (m/s, drains stamina)");
+    t->swim_dive_speed = cvar_reg_float("pl_swim_dive_speed", 1.9f, 0.2f, 10, CVAR_SERVER, "swim speed under water (m/s)");
+    t->swim_accel = cvar_reg_float("pl_swim_accel", 2.6f, 0.1f, 20, CVAR_SERVER, "swim acceleration rate (1/s): water drag towards the wished velocity");
+    t->swim_enter = cvar_reg_float("pl_swim_depth", 1.35f, 0.5f, 3, CVAR_SERVER, "water depth at which wading becomes swimming (m)");
+    t->swim_exit = cvar_reg_float("pl_swim_exit_depth", 1.15f, 0.3f, 3, CVAR_SERVER, "water depth below which a swimmer stands up (m)");
+    t->swim_eye = cvar_reg_float("pl_swim_eye", 0.16f, -0.2f, 0.6f, CVAR_SERVER, "eye height above the surface while swimming (m)");
+    t->swim_spring = cvar_reg_float("pl_swim_spring", 30.0f, 1.0f, 200, CVAR_SERVER, "stiffness holding a swimmer at the surface (1/s^2)");
+    t->swim_breath = cvar_reg_float("pl_swim_breath", 45.0f, 1.0f, 600, CVAR_SERVER, "breath under water (s) before drowning damage");
+    t->swim_stamina = cvar_reg_float("pl_swim_stamina", 14.0f, 1.0f, 120, CVAR_SERVER, "fast swim stamina (s)");
+    t->swim_rise = cvar_reg_float("pl_swim_rise", 0.6f, 0.0f, 5, CVAR_SERVER, "rising speed of an idle diver (m/s): air in the lungs");
+    t->wade_slow = cvar_reg_float("pl_wade_slow", 0.45f, 0.05f, 1, CVAR_SERVER, "walk speed multiplier in water at swimming depth (wading curve end)");
+    t->wade_crouch_max = cvar_reg_float("pl_wade_crouch_max", 0.55f, 0.0f, 2, CVAR_SERVER, "deepest water (m) a player can crouch in");
+    t->wade_sprint_max = cvar_reg_float("pl_wade_sprint_max", 0.8f, 0.0f, 2, CVAR_SERVER, "deepest water (m) a player can sprint in");
     t->crouch_toggle = cvar_reg_bool("cl_crouch_toggle", false, CVAR_ARCHIVE, "crouch: toggle instead of hold");
     t->sprint_toggle = cvar_reg_bool("cl_sprint_toggle", false, CVAR_ARCHIVE, "sprint: toggle instead of hold");
 }
@@ -67,7 +82,13 @@ void player_move_reset(PlayerSim *sim, vec3 feet, float yaw) {
     sim->move.body_yaw = yaw;
     sim->move.mode = MOVE_WALK;
     sim->move.fall_start_y = feet.y;
+    sim->move.oxygen = player_breath_max();
+    sim->move.stamina = 1.0f;
 }
+
+float player_breath_max(void) { return T ? T->swim_breath->f : 45.0f; }
+
+float player_fall_water_scale(float depth) { return 1.0f - smoothstepf(0.0f, 2.5f, depth); }
 
 // ------------------------------------------------------------------ ledge detection
 
@@ -292,6 +313,139 @@ static vec3 accelerate(vec3 vel, vec3 wish_dir, float wish_speed, float accel, f
 static SeatPoseFn g_seat_pose;
 void movement_set_seat_pose(SeatPoseFn fn) { g_seat_pose = fn; }
 
+static MoveWaterFn g_water;
+void movement_set_water(MoveWaterFn fn) { g_water = fn; }
+
+// The water at the player: depth at the feet, the state, oxygen, wetness (every mode but noclip).
+typedef struct WaterHere { bool in; float surface, column; vec3 flow; } WaterHere;
+
+static WaterHere water_here(World *w, const PlayerMove *m, const UserCmd *cmd) {
+    WaterHere h;
+    memset(&h, 0, sizeof(h));
+    // The command's view tick (identical on the host and the predicting client); the host's own
+    // commands carry none: its current tick.
+    double tick = cmd->view_tick ? (double)cmd->view_tick / 256.0 : (double)w->tick;
+    if (g_water) h.in = g_water(w, m->pos.x, m->pos.z, tick, &h.surface, &h.column, &h.flow);
+    if (h.in && h.surface <= m->pos.y) h.in = false;
+    return h;
+}
+
+static void water_update(PlayerMove *m, const WaterHere *h, float dt) {
+    float eye = m->pos.y + player_eye_height(m);
+    m->water_depth = h->in ? fmaxf(h->surface - m->pos.y, 0.0f) : 0.0f;
+    m->water_surface = h->in ? h->surface : 0.0f;
+    m->water_column = h->in ? h->column : 0.0f;
+    m->head_under = (u8)(h->in && eye < h->surface - 0.02f);
+    if (m->mode != MOVE_SWIM) m->water = (u8)(m->water_depth > 0.05f ? WATER_WADE : WATER_DRY);
+    // Breath: runs down with the head under, comes back four times as fast in the air.
+    float bmax = T->swim_breath->f;
+    m->oxygen = m->head_under ? fmaxf(m->oxygen - dt, 0.0f) : fminf(m->oxygen + dt * 4.0f, bmax);
+    // Wetness: soaks up to the waterline's share of the body, dries over ~90 s.
+    float soak = saturate(m->water_depth / 1.6f);
+    if (m->head_under || m->mode == MOVE_SWIM) soak = 1.0f;
+    m->wet = soak > m->wet ? fminf(m->wet + dt * 2.0f, soak) : fmaxf(m->wet - dt / 90.0f, 0.0f);
+}
+
+// MOVE_SWIM: at the surface a spring holds the eye pl_swim_eye above the (moving) surface; diving
+// moves freely along the view, an idle diver rises slowly. Water drag pulls the velocity relative to
+// the flow towards the wished one (quadratic at high speed: a fall into deep water stops within a
+// couple of metres). Forward + jump at a wall climbs out through the mantle.
+static void swim_tick(World *w, PlayerSim *sim, PhysCharacter *ch, u16 buttons, u16 pressed, vec2 mv, const WaterHere *h, float dt, bool dbg) {
+    PlayerMove *m = &sim->move;
+    PhysicsWorld *pw = w->phys;
+    BodyId self = phys_character_inner_body(ch);
+    m->on_ground = 0;
+    m->coyote = 0;
+    m->air_time = 0;
+    m->sprinting = 0;
+    m->fall_start_y = m->pos.y;
+    float eye_h = PLAYER_EYE_STAND;
+    float float_feet = h->surface - (eye_h - T->swim_eye->f);
+    float eye_y = m->pos.y + eye_h;
+    bool down = (buttons & BTN_CROUCH) != 0, up = (buttons & BTN_JUMP) != 0;
+    bool dive = m->water == WATER_UNDER;
+    // surface -> dive: crouch, or swimming forward looking well down; dive -> surface: the head is
+    // back at the surface and nothing pushes it down.
+    if (!dive && (down || (mv.y > 0.3f && m->pitch < -0.6f))) dive = true;
+    else if (dive && eye_y > h->surface - 0.12f && !down && !(mv.y > 0.3f && m->pitch < -0.3f) && m->vel.y > -0.5f) dive = false;
+    // Fast swim on stamina (surface only).
+    bool fast = !dive && (buttons & BTN_SPRINT) && mv.y > 0.3f && m->stamina > 0.0f;
+    m->stamina = fast ? fmaxf(m->stamina - dt / T->swim_stamina->f, 0.0f) : fminf(m->stamina + dt / (T->swim_stamina->f * 0.6f), 1.0f);
+    m->swim_sprint = (u8)fast;
+
+    vec3 fwd = forward_from_yaw(m->yaw), right = right_from_yaw(m->yaw);
+    vec3 rel = v3_sub(m->vel, h->flow);
+    float k = fminf(1.0f, T->swim_accel->f * dt);
+    if (!dive) {
+        float sp = fast ? T->swim_sprint_speed->f : T->swim_speed->f;
+        vec3 wish = v3_add(v3_scale(right, mv.x), v3_scale(fwd, mv.y));
+        float wl = v3_len(wish);
+        if (wl > 1.0f) wish = v3_scale(wish, 1.0f / wl);
+        rel.x += (wish.x * sp - rel.x) * k;
+        rel.z += (wish.z * sp - rel.z) * k;
+        // Held at the surface: a damped spring on the feet height (bobs with the waves).
+        float ks = T->swim_spring->f, c = 2.0f * sqrtf(ks) * 0.75f;
+        rel.y += (ks * (float_feet - m->pos.y) - c * rel.y) * dt;
+    } else {
+        vec3 look = dir_from_angles(m->yaw, m->pitch);
+        vec3 wish = v3_add(v3_scale(right, mv.x), v3_scale(look, mv.y));
+        if (up) wish.y += 1.0f;
+        if (down) wish.y -= 1.0f;
+        float wl = v3_len(wish);
+        if (wl > 1.0f) wish = v3_scale(wish, 1.0f / wl);
+        vec3 target = v3_scale(wish, T->swim_dive_speed->f);
+        if (!down) target.y += T->swim_rise->f;   // the lungs' air lifts an idle diver
+        rel = v3_add(rel, v3_scale(v3_sub(target, rel), k));
+        // Never pop out of the water from below: the surface spring takes over at the top.
+        if (m->pos.y > float_feet && rel.y > 0.0f) rel.y *= 0.5f;
+    }
+    // Quadratic drag: a dive from height loses its speed within a couple of metres.
+    float rs = v3_len(rel);
+    rel = v3_scale(rel, 1.0f / (1.0f + 0.6f * rs * dt));
+    vec3 vel = v3_add(rel, v3(h->flow.x, 0.0f, h->flow.z));
+
+    // Climb out: forward + jump against a ledge, from the surface (the mantle from a swimming pose).
+    if (!dive && mv.y > 0.2f && (up || m->jump_buffer > 0.0f) && m->regrab_cooldown <= 0.0f) {
+        LedgeResult lr = detect_ledge(pw, m->pos, m->pos.y, m->yaw, self, false, true, dbg);
+        if (lr.kind == LEDGE_MANTLE) {
+            start_mantle(m, &lr, m->pos);
+            m->jump_buffer = 0;
+            m->water = WATER_SURFACE;
+            return;
+        }
+        if (lr.kind == LEDGE_HANG) {
+            m->mode = MOVE_HANG;
+            m->hang_pos = lr.hang_pos;
+            m->hang_normal = lr.wall_normal;
+            m->ledge_point = lr.top;
+            m->hang_time = 0;
+            m->vel = v3(0, 0, 0);
+            set_hand_anchors(m, lr.wall_point, lr.wall_normal, lr.top.y);
+            phys_character_set_pos(ch, lr.hang_pos);
+            m->pos = lr.hang_pos;
+            m->jump_buffer = 0;
+            return;
+        }
+    }
+
+    CharacterMoveParams mp = { 0.0f, 0.0f, false, false };
+    phys_character_update(pw, ch, dt, vel, &mp);
+    m->pos = phys_character_pos(ch);
+    m->vel = phys_character_vel(ch);
+    m->water = (u8)(dive ? WATER_UNDER : WATER_SURFACE);
+    // Stroke cycle: faster with speed, a slow scull when idle.
+    float hs = v3_len(v3_flat(v3_sub(m->vel, h->flow)));
+    m->swim_phase = fmodf(m->swim_phase + dt * (1.6f + hs * 1.9f), 2.0f * DG_PI * 1024.0f);
+
+    // Out of the water: stand up where the water is shallow and the feet are near the bottom.
+    float bottom = h->surface - h->column;
+    if (!h->in || (h->column < T->swim_exit->f && m->pos.y - bottom < 0.35f)) {
+        m->mode = MOVE_WALK;
+        m->water = WATER_WADE;
+        m->fall_start_y = m->pos.y;
+    }
+}
+
 void player_move_tick(World *w, int slot, PlayerSim *sim, PhysCharacter *ch, const UserCmd *cmd, float dt, bool first) {
     PlayerMove *m = &sim->move;
     PhysicsWorld *pw = w->phys;
@@ -375,6 +529,23 @@ void player_move_tick(World *w, int slot, PlayerSim *sim, PhysCharacter *ch, con
         return;
     }
 
+    // ---- water: depth, state, breath; deep enough water turns walking into swimming
+    WaterHere wh = water_here(w, m, cmd);
+    if (m->mode != MOVE_NOCLIP) water_update(m, &wh, dt);
+    if (m->mode == MOVE_WALK && wh.in && wh.column >= T->swim_enter->f && m->water_depth >= T->swim_enter->f - 0.1f) {
+        m->mode = MOVE_SWIM;
+        m->water = m->head_under ? WATER_UNDER : WATER_SURFACE;
+        if (m->crouched && phys_character_set_crouched(pw, ch, false)) m->crouched = 0;
+        m->crouch_toggled = 0;
+        m->sprint_toggled = 0;
+    }
+    if (m->mode == MOVE_SWIM) {
+        m->crouch_amount = approachf(m->crouch_amount, 0.0f, dt / 0.16f);
+        swim_tick(w, sim, ch, buttons, pressed, mv, &wh, dt, dbg);
+        sim->last_buttons = buttons;
+        return;
+    }
+
     // ---- noclip
     if (m->mode == MOVE_NOCLIP) {
         vec3 look = dir_from_angles(m->yaw, m->pitch);
@@ -398,6 +569,7 @@ void player_move_tick(World *w, int slot, PlayerSim *sim, PhysCharacter *ch, con
     } else {
         want_crouch = (buttons & BTN_CROUCH) != 0;
     }
+    if (m->water_depth > T->wade_crouch_max->f) want_crouch = false;   // the head would go under
     if (m->mode == MOVE_WALK) {
         if (want_crouch && !m->crouched) {
             if (phys_character_set_crouched(pw, ch, true)) m->crouched = 1;
@@ -416,7 +588,7 @@ void player_move_tick(World *w, int slot, PlayerSim *sim, PhysCharacter *ch, con
     } else {
         sprint_input = (buttons & BTN_SPRINT) != 0;
     }
-    m->sprinting = (u8)(sprint_input && mv.y > 0.3f && !m->crouched && !(buttons & BTN_AIM));
+    m->sprinting = (u8)(sprint_input && mv.y > 0.3f && !m->crouched && !(buttons & BTN_AIM) && m->water_depth <= T->wade_sprint_max->f);
 
     // ---- scripted traversal (mantle / vault)
     if (m->mode == MOVE_MANTLE || m->mode == MOVE_VAULT) {
@@ -485,6 +657,8 @@ void player_move_tick(World *w, int slot, PlayerSim *sim, PhysCharacter *ch, con
                 : m->sprinting ? T->sprint_speed->f
                 : (buttons & BTN_WALK) ? T->walk_slow_speed->f : T->walk_speed->f;
     if (buttons & BTN_AIM) speed = fminf(speed, T->walk_speed->f * 0.7f);
+    // Wading: slower with depth (knee deep barely, chest deep pl_wade_slow).
+    if (m->water_depth > 0.05f) speed *= lerpf(1.0f, T->wade_slow->f, smoothstepf(0.15f, T->swim_enter->f, m->water_depth));
 
     // Ledge traversal triggers (before jumping so a jump press at a ledge mantles instead).
     bool moving_fwd = mv.y > 0.2f;
@@ -555,7 +729,7 @@ void player_move_tick(World *w, int slot, PlayerSim *sim, PhysCharacter *ch, con
     // Jump (buffered, with coyote time). Standing up first if crouched and possible.
     bool jumped = false;
     if (jump_wanted && (on_ground || m->coyote > 0.0f)) {
-        vel.y = T->jump_speed->f * (m->crouched ? 0.8f : 1.0f);
+        vel.y = T->jump_speed->f * (m->crouched ? 0.8f : 1.0f) * lerpf(1.0f, 0.55f, saturate(m->water_depth / 1.2f));
         m->jump_buffer = 0;
         m->coyote = 0;
         jumped = true;

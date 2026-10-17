@@ -264,6 +264,7 @@ void game_sim_player(World *w, int slot, const UserCmd *cmd, float dt, bool firs
     vehicles_player_cmd(w, slot, &c, pressed, first);   // enter / exit / seats / driver input (host)
     // A driver's right click holds the gun out at the hip: no aim-down-sights from it.
     if (p->sim.move.mode == MOVE_SEATED && p->sim.move.veh_onehand) c.buttons &= (u16)~BTN_AIM;
+    if (p->sim.move.mode == MOVE_SWIM) c.buttons &= (u16)~BTN_AIM;
     player_move_tick(w, slot, &p->sim, p->character, &c, dt, first);
     WeaponOutput wo;
     weapons_tick(w, slot, &p->sim, &c, pressed, dt, first, &wo);
@@ -293,6 +294,8 @@ void game_sim_player(World *w, int slot, const UserCmd *cmd, float dt, bool firs
     if (m->sprinting) f |= EF_SPRINT;
     if (m->mode == MOVE_HANG) f |= EF_HANG;
     if (m->mode == MOVE_SEATED) f |= EF_SEATED;
+    if (m->mode == MOVE_SWIM) f |= m->water == WATER_UNDER ? (EF_SWIM | EF_UNDERWATER) : EF_SWIM;
+    else if (m->water == WATER_WADE && m->water_depth > 0.3f) f |= EF_WADE;
     if (m->mode == MOVE_MANTLE || m->mode == MOVE_VAULT) f |= EF_MANTLE;
     if (p->sim.wpn.reloading) f |= EF_RELOADING;
     if (c.buttons & BTN_AIM) f |= EF_ADS;
@@ -495,6 +498,7 @@ static UserCmd build_cmd(void) {
         c.buttons &= (u16)(BTN_CROUCH | BTN_NOCLIP);
     }
     if (G->magdump_ticks > 0) magdump_cmd(&c);
+    water_test_cmd(&c);   // water_test swim drives the local player
     c.slot = G->hotbar_slot;
     c.use_target = G->focus;
     c.view_tick = net_client_view_tick256();

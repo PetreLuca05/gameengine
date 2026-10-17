@@ -14,6 +14,8 @@
 #include "core/log.h"
 #include "core/platform.h"
 #include "gameplay/entities.h"
+#include "gameplay/health.h"
+#include "player/player.h"
 #include "net/net.h"
 #include "physics/buoyancy.h"
 #include "render/debug_draw.h"
@@ -22,6 +24,7 @@
 #include "world/weather.h"
 #include "cJSON.h"
 #include <math.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -49,12 +52,19 @@ static struct {
     EntityId buoy_ent[BUOY_MAX_BODIES];
     i16 buoy_of[MAX_ENTITIES];      // entity index -> buoy item + 1
     u32 wind_tick;                  // tick the wind was last sampled at (quantized to 1 s)
-    Cvar *debug, *wave_scale;
+    Cvar *debug, *wave_scale, *drown_dps;
+    float drown_acc[MAX_PLAYERS];   // host: s until the next drowning hit
     // water_test (in-game checks, logged as "water_test <mode> -> ok / FAIL")
-    struct { int mode; int ticks; bool quit; } t;
+    struct {
+        int mode, ticks, frame, fails, checks;
+        bool quit;
+        UserCmd cmd;      // scripted input (swim)
+        bool drive;
+        float hp0, hp_prev;
+    } t;
 } GW;
 
-enum { WT_NONE, WT_PROPS };
+enum { WT_NONE, WT_PROPS, WT_SWIM };
 
 const WaterWorld *game_water(void) { return &GW.world; }
 WaterWorld *game_water_mut(void) { return &GW.world; }
@@ -340,10 +350,39 @@ static void sync_buoyant(World *w) {
 
 static void test_tick(World *w);
 
+// Movement's water query (movement.c): the surface, the column and the water velocity (flow +
+// orbital) at the command's tick.
+static bool move_water(World *w, float x, float z, double tick, float *surface, float *column, vec3 *flow) {
+    (void)w;
+    if (!GW.world.count) return false;
+    WaterSample s;
+    if (!water_sample(&GW.world, x, z, game_water_time(tick), &s)) return false;
+    *surface = s.height;
+    *column = s.depth;
+    *flow = v3(s.vel[0], 0.0f, s.vel[2]);
+    return true;
+}
+
+// Host: out of breath -> water_drown_dps damage, the first hit at once, then every second.
+static void drowning(World *w) {
+    for (int sl = 0; sl < MAX_PLAYERS; sl++) {
+        Player *p = &w->players[sl];
+        if (!p->active || !p->character || p->sim.move.mode == MOVE_DEAD || p->sim.move.oxygen > 0.0f) {
+            GW.drown_acc[sl] = 0.0f;
+            continue;
+        }
+        GW.drown_acc[sl] -= SIM_DT;
+        if (GW.drown_acc[sl] > 0.0f) continue;
+        GW.drown_acc[sl] += 1.0f;
+        apply_damage(w, p->ent, GW.drown_dps->f, DMG_DROWN, p->ent, p->sim.move.pos, v3(0, 1, 0), false);
+    }
+}
+
 void water_tick(World *w) {
     if (!GW.loaded || !w) return;
     update_wind(w);
     if (!w->authority || !GW.world.count || !w->phys) return;
+    drowning(w);
     sync_buoyant(w);
     float t = waves_time(w->tick, 0.0f, SIM_HZ);
     BuoyWater water = { buoy_plane, &t, 9.81f };
@@ -374,9 +413,130 @@ static void test_props(World *w) {
     log_info("water_test props -> %s (%d bodies, %d off)", n > 0 && !bad ? "ok" : "FAIL", n, bad);
 }
 
+static void test_check(bool ok, const char *fmt, ...) {
+    char b[256];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(b, sizeof(b), fmt, ap);
+    va_end(ap);
+    GW.t.checks++;
+    if (!ok) GW.t.fails++;
+    log_info("  %s %s", ok ? "ok  " : "FAIL", b);
+}
+
+static void test_end(void) {
+    if (GW.t.mode == WT_SWIM) log_info("water_test swim -> %s (%d checks, %d failed)", GW.t.fails ? "FAIL" : "ok", GW.t.checks, GW.t.fails);
+    GW.t.mode = WT_NONE;
+    GW.t.drive = false;
+    if (GW.t.quit) cmd_execute_line("quit");
+}
+
+void water_test_cmd(UserCmd *c) {
+    if (!GW.t.drive) return;
+    c->move_x = GW.t.cmd.move_x;
+    c->move_y = GW.t.cmd.move_y;
+    c->buttons = (u16)((c->buttons & (u16)~(BTN_JUMP | BTN_CROUCH | BTN_SPRINT | BTN_AIM | BTN_ATTACK)) | GW.t.cmd.buttons);
+    c->yaw = GW.t.cmd.yaw;
+    c->pitch = GW.t.cmd.pitch;
+    G->view.yaw = c->yaw;
+    G->view.pitch = c->pitch;
+}
+
+static void teleport_local(World *w, vec3 feet, float yaw) {
+    Player *p = game_local_player();
+    if (!p || !p->character) return;
+    p->sim.move.pos = feet;
+    p->sim.move.vel = v3(0, 0, 0);
+    p->sim.move.mode = MOVE_WALK;
+    p->sim.move.yaw = yaw;
+    phys_character_set_pos(p->character, feet);
+    phys_character_set_vel(p->character, v3(0, 0, 0));
+    (void)w;
+}
+
+static void set_input(float fwd, u16 buttons, float yaw, float pitch) {
+    GW.t.cmd.move_x = 0;
+    GW.t.cmd.move_y = (i8)(fwd * 127.0f);
+    GW.t.cmd.buttons = buttons;
+    GW.t.cmd.yaw = yaw;
+    GW.t.cmd.pitch = pitch;
+}
+
+// water_test swim (dev room pool, water at 2.6 m on a floor at 0, south wall inner face at z -76):
+// float up from the bottom, dive, resurface, breath / drowning damage timing, swim to the wall and
+// climb out onto the rim.
+static void test_swim(World *w) {
+    Player *p = game_local_player();
+    if (!p) { test_check(false, "local player"); test_end(); return; }
+    PlayerMove *m = &p->sim.move;
+    int f = ++GW.t.frame;
+    const float yaw_south = DG_PI;     // yaw 0 faces -Z: pi faces +Z (the south wall)
+    float surface = 2.6f;
+    int hi = (int)ENT_INDEX(p->ent);
+    if (f == 1) {
+        GW.t.drive = true;
+        set_input(0, 0, yaw_south, 0);
+        teleport_local(w, v3(80.0f, 0.05f, -82.0f), yaw_south);
+        m->oxygen = player_breath_max();
+        w->health[hi].hp = w->health[hi].max_hp;
+    }
+    if (f == 6 * SIM_HZ) {
+        float eye = m->pos.y + player_eye_height(m);
+        test_check(m->mode == MOVE_SWIM && m->water == WATER_SURFACE, "deep water: swimming at the surface (mode %d, water %d)", m->mode, m->water);
+        test_check(fabsf(eye - (surface + 0.16f)) < 0.12f, "eye held above the surface: %.3f (surface %.2f)", eye, surface);
+        set_input(0, BTN_CROUCH, yaw_south, 0);   // dive
+    }
+    if (f == 8 * SIM_HZ) {
+        test_check(m->water == WATER_UNDER && m->head_under, "crouch dives (water %d, head under %d)", m->water, m->head_under);
+        test_check(m->oxygen < player_breath_max() - 1.0f, "breath runs down under water (%.2f s left)", m->oxygen);
+        set_input(0, 0, yaw_south, 0);            // let go: rise
+    }
+    if (f == 14 * SIM_HZ) {
+        test_check(m->water == WATER_SURFACE && !m->head_under, "idle diver rises back to the surface (water %d)", m->water);
+        test_check(m->oxygen > player_breath_max() - 0.01f, "breath restored at the surface (%.2f)", m->oxygen);
+        // Drowning: 2 s of breath left, hold under.
+        m->oxygen = 2.0f;
+        GW.t.hp0 = w->health[hi].hp;
+        GW.t.ticks = 0;
+        set_input(0, BTN_CROUCH, yaw_south, 0);
+    }
+    // Drowning timing, from the tick the breath ran out (the dive takes a moment to get the head under).
+    if (f > 14 * SIM_HZ && f < 24 * SIM_HZ) {
+        if (!GW.t.ticks && m->oxygen <= 0.0f) {
+            GW.t.ticks = f;
+            test_check(GW.t.hp_prev == GW.t.hp0, "no damage while the breath lasted (hp %.0f the tick before)", GW.t.hp_prev);
+        }
+        GW.t.hp_prev = w->health[hi].hp;
+        int since = GW.t.ticks ? f - GW.t.ticks : -1;
+        if (since == SIM_HZ / 2) {
+            float lost = GW.t.hp0 - w->health[hi].hp;
+            test_check(fabsf(lost - GW.drown_dps->f) < 0.01f, "first drowning hit at once (%.0f hp lost, expected %.0f)", lost, GW.drown_dps->f);
+        }
+        if (since == 2 * SIM_HZ + SIM_HZ / 2) {
+            float lost = GW.t.hp0 - w->health[hi].hp;
+            test_check(fabsf(lost - 3.0f * GW.drown_dps->f) < 0.01f, "then one hit per second (%.0f hp lost after 2.5 s, expected %.0f)", lost, 3.0f * GW.drown_dps->f);
+            w->health[hi].hp = w->health[hi].max_hp;
+            set_input(0, 0, yaw_south, 0);
+        }
+    }
+    if (f == 24 * SIM_HZ) {
+        test_check(m->water == WATER_SURFACE, "back at the surface");
+        set_input(1.0f, 0, yaw_south, 0);         // swim to the south wall
+    }
+    if (f > 24 * SIM_HZ && f < 34 * SIM_HZ && m->mode == MOVE_SWIM && m->pos.z > -77.0f) set_input(1.0f, BTN_JUMP, yaw_south, 0);
+    if (f > 24 * SIM_HZ && m->mode == MOVE_MANTLE) set_input(0, 0, yaw_south, 0);   // stay on the rim
+    if (f == 34 * SIM_HZ) {
+        test_check(m->mode == MOVE_WALK && m->pos.y > 2.9f && m->water == WATER_DRY, "climbed out onto the rim (mode %d, feet %.2f)", m->mode, m->pos.y);
+        test_check(m->wet > 0.9f, "wet after swimming (%.2f)", m->wet);
+        test_end();
+    }
+}
+
 static void test_tick(World *w) {
+    if (GW.t.mode == WT_SWIM) { test_swim(w); return; }
     if (--GW.t.ticks > 0) return;
     if (GW.t.mode == WT_PROPS) test_props(w);
+    log_info("water_test done");
     GW.t.mode = WT_NONE;
     if (GW.t.quit) cmd_execute_line("quit");
 }
@@ -527,11 +687,13 @@ static void cmd_water_info(int argc, const char **argv) {
 
 // water_test props [seconds] [quit]
 static void cmd_water_test(int argc, const char **argv) {
-    if (argc < 2) { log_info("usage: water_test props [seconds] [quit]"); return; }
+    if (argc < 2) { log_info("usage: water_test props|swim [seconds] [quit]"); return; }
     if (!host_world("water_test")) return;
     GW.t.quit = argc > 2 && !strcmp(argv[argc - 1], "quit");
     float sec = argc > 2 && strcmp(argv[2], "quit") ? (float)atof(argv[2]) : 15.0f;
+    GW.t.frame = GW.t.fails = GW.t.checks = 0;
     if (!strcmp(argv[1], "props")) GW.t.mode = WT_PROPS;
+    else if (!strcmp(argv[1], "swim")) GW.t.mode = WT_SWIM;
     else { log_info("water_test: unknown mode '%s'", argv[1]); return; }
     GW.t.ticks = (int)(sec * SIM_HZ);
     log_info("water_test %s: checking in %.0f s", argv[1], sec);
@@ -539,10 +701,12 @@ static void cmd_water_test(int argc, const char **argv) {
 
 void water_register(void) {
     GW.debug = cvar_reg_int("water_debug", 0, 0, 2, 0, "Water debug view: 1 bodies + buoyancy probes / forces, 2 + surface samples");
+    GW.drown_dps = cvar_reg_float("water_drown_damage", 10.0f, 0.0f, 1000.0f, CVAR_SERVER, "Drowning damage per second once a player's breath runs out");
+    movement_set_water(move_water);
     GW.wave_scale = cvar_reg_float("water_wave_wind_scale", 1.0f, 0.0f, 4.0f, CVAR_CHEAT, "Multiplier on the weather wind fed to the ocean swell (tests)");
     cmd_register("water_level", cmd_water_level, "water_level [<body|index> <level>]: list the water bodies / move one's surface (host)");
     cmd_register("wind_set", cmd_wind_set, "wind_set <m/s> [dir_deg] [seconds]: set the weather wind (waves, foliage, rain) (host)");
     cmd_register("spawn_float", cmd_spawn_float, "spawn_float <density> [size] [box|plank|sphere|barrel]: buoyant prop in front of you (host)");
-    cmd_register("water_test", cmd_water_test, "water_test props [seconds] [quit]: in-game water checks (logs ok / FAIL)");
+    cmd_register("water_test", cmd_water_test, "water_test props|swim [seconds] [quit]: in-game water checks (logs ok / FAIL)");
     cmd_register("water_info", cmd_water_info, "water_info: bodies, wind, swell, buoyancy cost, the water at the player");
 }

@@ -437,6 +437,7 @@ if(MSVC)
   target_compile_options(test_water PRIVATE /W3 /wd4100 /wd4201 /utf-8)
 endif()
 add_test(NAME water COMMAND test_water WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+set_tests_properties(water PROPERTIES RUN_SERIAL TRUE)   # the 200-body CPU budget needs the cores
 add_test(NAME water_determinism COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:test_water> -P ${CMAKE_SOURCE_DIR}/tools/tests/water_determinism.cmake)
 
 # Vehicles: definitions, fuel curve, tire model, steering clamp / smoothing, quantization.
