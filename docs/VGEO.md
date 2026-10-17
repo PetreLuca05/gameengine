@@ -1035,12 +1035,28 @@ bush is GPU test / bench content only (`vgeo_foliage`, `bench_vgeo`, `build_vgeo
   leafy trees, 2× for bushes, 1× for the bare old tree (its twigs thin out in a 64 px frame).
   The per-mesh scale lives in the high 16 bits of `VgMesh.impostor_grid` (`vgeo_impostor_scale`, 1/16
   steps, 0 = 1×), mirrored by `vgeo_use_impostor`.
-- **Textures.** Albedo only (RGBA8, sRGB). Normal, roughness and transmission maps are not used: the
-  vgeo vertex format has no tangents. Loaded with stb_image and box-filtered (alpha-weighted) to 512 px.
-  Masked textures get coverage-preserving mips (`vgeo_tree_mip_coverage`: each level's alpha is scaled so
-  the share of texels above the cutoff matches level 0); with plain box mips, cards thinned out and
-  distant crowns turned into bare sticks. Shared by file across species (27 textures). They are module
-  textures, so `VG_TEX_OWN` is now 128 (the table holds 1152 entries).
+- **Textures.** Albedo (RGBA8, sRGB) for every material. Loaded with stb_image and box-filtered
+  (alpha-weighted) to 512 px. Masked textures get coverage-preserving mips (`vgeo_tree_mip_coverage`: each
+  level's alpha is scaled so the share of texels above the cutoff matches level 0); with plain box mips,
+  cards thinned out and distant crowns turned into bare sticks. Shared by file across species (27
+  textures). They are module textures, so `VG_TEX_OWN` is now 128 (the table holds 1152 entries; 84 used
+  on zombieland).
+- **Bark maps.** The opaque materials (bark, stumps, the bamboo / daisy stems: 13 textures) also get a
+  tangent normal and an ORM map from `assets/treepbr/<texture>_n.png` / `_orm.png` (linear module
+  textures; `tree_load_maps`, after the cache read or the build, so they are not part of the cache and
+  `VG_TREE_VERSION` stays). `vgeo_tree_materials` sets `MAT_NORMAL_TEX | MAT_MR_TEX | MAT_OCCLUSION_TEX`,
+  roughness factor 1 (the ORM's g is the roughness), occlusion strength 0.8; `foliage_build_trees` enters
+  `normal_tex` and `mr_tex = occlusion_tex` (the same ORM). The vgeo resolve shades them with the
+  triangle's tangent frame (docs/PBR.md). Cards (leaves, needles, branches) stay albedo-only, impostors
+  keep their baked albedo / normal, and the r_vgeo 0 fallback never draws trees (masked meshes).
+  Missing files: logged, the material stays albedo-only. Generator `tools/vfxgen/tree_pbr.py` (local,
+  deterministic): Tree It's own `_normal` (its DirectX y flipped to the glTF convention: every bark map
+  correlates at −0.7 .. −0.8 with the albedo relief in y, +0.7 .. +0.85 in x) and `_roughness` maps, box-
+  halved to the albedo's game size; AO = horizon AO (`surface_pbr.horizon_ao`) of the height
+  integrated from the normal map (Frankot-Chellappa, ~8 texels relief) at half size. `Stump03_normal.png`
+  (two iCCP chunks) is read without its ancillary chunks. Memory: normals 16 MB, ORM 4 MB (the 27 albedo
+  textures ≈ 35 MB). Cost (`tools/tests/pbr_perf.cfg`, opaque pass, maps on vs off): +0.10 ms at a pine
+  trunk close-up, +0.07 ms broadleaf, +0.06 ms zombieland forest.
 - **Cache.** `build_vgeo --trees <dir/> <out/>` builds every species in parallel at build time (CMake
   `dg_vgeo_content`, about 1.4 s) into `bin/assets/vgeo/trees/<name>.dgtree`: a `VgTreeCacheHeader`
   (key, materials, masks, capsule, scale) + the `.vgeo` bytes. The scale is baked into the meshes, the
@@ -1103,7 +1119,7 @@ Wind: per-species tuning of the vegetation model (`k_wind`, docs/FOLIAGE_WIND.md
 main bend's height is the species' scale-1 height. Trees fade at
 850-1100 m with shadows to 70 m; bushes 150-210 m / 40 m; daisies 50-80 m / 15 m.
 
-**Budget.** 13 species, 91k source triangles, 2.2k clusters; .dgtree files 40 MB on disk (mostly the
+**Budget** (+ 20 MB GPU for the bark maps, above). 13 species, 91k source triangles, 2.2k clusters; .dgtree files 40 MB on disk (mostly the
 impostor atlases and the pages). GPU: 27 textures at ≤ 512 px with mips ≈ 35 MB, 12 impostor atlas
 pairs ≈ 34 MB, cluster pages a few MB.
 

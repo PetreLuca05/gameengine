@@ -89,12 +89,14 @@ Each entry is either:
 Vertex `joints[]` index that list, so a head part skins with 2 bones instead of 65.
 
 - Bones without weights are compacted away at bake.
-- Per-bone `bind_delta` records how the file's bind differs from the Skeleton's reference pose.
+- Per-bone `bind_delta` records how the file's bind differs from the Skeleton's reference pose
+  (file bind = `bind_delta * bind_model`).
 - Mesh-local `sockets` resolve against the mesh's own bones, e.g. a backpack attach on one specific
   jacket (`skm_socket_world`).
 
 **Palette gather.** `skm_gather_palette(mesh, skeleton_instance, leaf_local, out)` copies one matrix
-per skeleton bone from the shared palette and composes one transform per mesh-only bone.
+per skeleton bone from the shared palette and composes one transform per mesh-only bone. Bones with
+`has_fix` (meshes kept in their file bind, see Proportions) multiply by `bind_fix` = `inverse(bind_delta)`.
 `leaf_local` is the hook for a future secondary-motion layer: it overrides mesh-only locals, and
 NULL means rigid.
 
@@ -111,8 +113,19 @@ NULL means rigid.
 
 Proportions:
 
-- At bake, vertices are retargeted onto the Skeleton reference pose per bone, so a mesh keeps its
-  shape on the shared skeleton.
+- Every influence moves a vertex rigidly from the file's bind of its bone to that bone on the Skeleton
+  (`world * inverse(file bind)`, Unreal's per-mesh inverse binds), so a mesh keeps its shape on the shared
+  skeleton.
+- Two ways to get there, picked per mesh at bake (`fbx_load_skeletal_mesh`):
+  - **Baked:** the per-bone retarget is blended into the vertices and the palette is the plain skeleton
+    one. Exact only while a vertex's influences retarget alike. The bake bounds the error over every pose
+    (weighted distance between the blend and each influence's own retarget, `retarget_blend_err_m`).
+  - **Per bone** (bound > 0.1 mm): the vertices stay in the file's bind space and the palette retargets
+    per bone (`SkmBone.bind_fix`). The Dummy stays baked (bound 0.00 mm, gather is a plain copy); the
+    Mixamo skins (knees 57-112 deg, shoulders ~18 deg off the Dummy bind) go per bone: baking it was off by
+    up to 65-97 mm in strong bends (mean 1.5-4.3 mm), now 0.01 mm against the file's own skin.
+- Weights are quantised to u8 summing to exactly 255 (`skin_quantize_weights`): the shaders never
+  renormalise, so 256 scaled a vertex about the world origin (1.66 m off at 300 m).
 - Bone-length differences above the tolerance are reported as warnings.
 - IK, the ragdoll and hitboxes read bone lengths from the Skeleton and scale by the character's
   `scale` / `ragdoll_scale`.
@@ -295,6 +308,12 @@ character's `parts`.
 - 200 modular zombies batch within parts × LODs;
 - part selection replication is small and deterministic;
 - mesh-local and skeleton sockets.
+
+`tests/test_skin_reference.c` (ctest `skin_reference`) re-reads every character FBX with ufbx and skins it
+on the CPU with the file's own weights (all influences) and inverse binds on 36 strong-bend poses, then
+compares per vertex: the legacy data (baked vertices x `skm_gather_palette`), the same with the file's
+binds (retarget only: < 0.5 mm), the vgeo build of the vertices (weld + skin per position: < 2.5 mm off the
+legacy skin), weight sums, and a pose 300 m from the origin.
 
 The hand glue, ragdoll and hitbox suites (`anim`, `ragdoll`, `flesh`) cover the rest and are
 unchanged by this refactor.

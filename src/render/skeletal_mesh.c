@@ -103,6 +103,8 @@ int skm_add_skel_bone(SkeletalMesh *m, const Skeleton *s, int skel_bone) {
     b->local = xf_identity();
     b->bind_model = s->bind_model[skel_bone];
     b->bind_delta = xf_identity();
+    b->bind_fix = mat4_identity();
+    b->has_fix = false;
     return m->bone_count++;
 }
 
@@ -236,9 +238,10 @@ int skm_gather_palette(const SkeletalMesh *m, const SkeletonInstance *si, const 
     Xform mo[SKM_MAX_BONES];
     for (int j = 0; j < m->bone_count; j++) {
         const SkmBone *b = &m->bones[j];
-        if (b->skel >= 0 && b->skel < si->count) { out[j] = si->skin[b->skel]; continue; }
+        if (b->skel >= 0 && b->skel < si->count) { out[j] = b->has_fix ? mat4_mul(si->skin[b->skel], b->bind_fix) : si->skin[b->skel]; continue; }
         mo[j] = mesh_only_world(m, si, leaf_local, mo, j);
         out[j] = mat4_mul(xf_to_mat4(mo[j]), xf_to_mat4(xf_inverse(b->bind_model)));
+        if (b->has_fix) out[j] = mat4_mul(out[j], b->bind_fix);
     }
     return m->bone_count;
 }
@@ -324,7 +327,8 @@ void skm_deform(SkeletalMesh *m, float inflate, vec3 scale) {
             SkinVertex *v = &L->verts[i];
             int best = 0;
             for (int k = 1; k < 4; k++) if (v->weights[k] > v->weights[best]) best = k;
-            vec3 pivot = m->bones[DG_MIN((int)v->joints[best], m->bone_count - 1)].bind_model.t;
+            const SkmBone *pb = &m->bones[DG_MIN((int)v->joints[best], m->bone_count - 1)];
+            vec3 pivot = pb->has_fix ? xf_mul(pb->bind_delta, pb->bind_model).t : pb->bind_model.t;   // the vertices' bind space
             vec3 d = v3_sub(v->pos, pivot);
             v->pos = v3_add(v3_add(pivot, v3(d.x * scale.x, d.y * scale.y, d.z * scale.z)), v3_scale(v->normal, inflate));
         }

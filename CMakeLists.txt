@@ -456,6 +456,16 @@ if(MSVC)
 endif()
 add_test(NAME characters COMMAND test_characters WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
 
+# Character skinning vs the source FBX (file weights + inverse binds on the shared skeleton's pose):
+# legacy baked vertices / palette and the vgeo build of them, per mesh, over strong-bend clips.
+add_executable(test_skin_reference tests/test_skin_reference.c)
+set_target_properties(test_skin_reference PROPERTIES C_STANDARD 11)
+target_link_libraries(test_skin_reference PRIVATE dg_vgeo)
+if(MSVC)
+  target_compile_options(test_skin_reference PRIVATE /W3 /wd4100 /wd4201 /utf-8)
+endif()
+add_test(NAME skin_reference COMMAND test_skin_reference WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+
 add_executable(test_anim tests/test_anim.c)
 set_target_properties(test_anim PROPERTIES C_STANDARD 11)
 target_link_libraries(test_anim PRIVATE dg_animcore)
