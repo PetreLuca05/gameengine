@@ -10,7 +10,7 @@ come from our own Higgsfield recipes (`tools/vfxgen`), our geometry from our pro
 | References | `docs/reference/ground/ref{1..5}_*.{webp,png}` (reference only, never loaded by the game) |
 | Regions / blade crops | `docs/reference/ground/regions.json` |
 | Sampler | `py tools/ground_ref.py [--print]` → `stats.json`, `blade_sheet.png` |
-| Status | analysis + target spec (this file). Implementation plan at the end; nothing generated yet |
+| Status | implemented with procedural placeholder textures (grass: docs/FOLIAGE_GRASS.md, terrain: docs/TERRAIN_SHADING.md); the Higgsfield set is generated with `groundgen.bat` on a machine with the key (section 12) |
 
 | Ref | Image | Light | What it shows best |
 |---|---|---|---|
@@ -324,3 +324,33 @@ transitions → secondary plants. Every step commits on its own.
 Tree safety: trees keep their materials and pipeline; every new term is gated on `WPO_GRASS` +
 `VGM_GROUND_COVER` or on `MAT_TERRAIN`; a tree regression snapshot (vegetation map tree close-ups,
 impostor distance) is captured before step 3 and compared bit-exactly after each step.
+
+## 12. Generating, comparing, reporting
+
+**Generation** (`tools/vfxgen/groundgen.py`, `groundgen.bat`): 33 recipes / 54 images (about $10 at $0.19,
+`--dry-run` lists them). Blade atlases are photographed blades on magenta, keyed (despilled, specks
+opened away), anchored to each cell's bottom, colour-matched band by band to the recipe's root -> mid -> tip
+(green and dry blades separately, by hue), with derived normal / thickness / AO; a cell that fails its checks
+(coverage, reaching the bottom, backdrop residue) is re-rolled (`--iterate`). Surfaces are made tileable by
+self-quilting, mean-matched to `target_mean`, with nrh / AO / macro maps. Raw images are mirrored to
+`tools/vfxgen/ground_raw` (committed) so processing reruns anywhere; missing cells fall back to the
+procedural placeholders (`ground_placeholder.py`), which is what the repository holds until the key run.
+
+**In the game** (`src/game/game_ground_ref.c`):
+
+| Command | |
+|---|---|
+| `ground_ref <r1..r5> [side\|overlay\|flip] [alpha]` | the reference beside the frame (right half), over it, or alternating every second |
+| `ground_ref_cam <r1..r5>` | map, pose, FOV, time of day and weather that frame the ground like the shot (`docs/reference/ground/views.json`) |
+| `ground_sample <x0> <y0> <x1> <y1> [label]` | mean / spread HSV of a screen box of the next frame |
+
+**Offline** (`tools/ground_match.py`):
+
+| | |
+|---|---|
+| `blades` | `docs/ground_match/blade_compare_<atlas>.png`: the reference crop with its traced blades, our cells with their fan envelope over the reference's (IoU per cell), root -> tip value and hue profiles |
+| `terrain` | `docs/ground_match/terrain_compare.png`: reference ground regions beside our layers at the same scale, mean swatches, hue / saturation / value deltas |
+| `cfg`, `report <dir>` | `tools/tests/ground_match.cfg` captures the presets; `report` writes `docs/ground_match/report.md` (region deltas against the reference, tolerances hue 8 deg / saturation 0.08 / value 0.12) and `compare_<r>.jpg` side by sides |
+
+Snapshots: `docs/ground_match/before_veg_spawn.jpg` (before), `grass_stage1_veg.jpg`, `terrain_stage1_veg.jpg`,
+`terrain_strip.jpg`, `compare_r*.jpg`.

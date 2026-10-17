@@ -1,0 +1,33 @@
+{
+  "kind": "terrain_layer",
+  "model": "higgsfield-ai/soul/standard",
+  "resolution": "1080p",
+  "aspect_ratio": "1:1",
+  "style": "ground",
+  "prompt": "Loose grey and brown gravel and small angular stones seen from directly above",
+  "avoid": "standing grass blades, plants growing upward, flowers, footprints, tyre tracks, puddles, people, animals, objects, horizon, sky, perspective, vignette, strong shadows, text, watermark, saturated green",
+  "target_mean": "#77716a",
+  "color_match": 0.9,
+  "tile_m": 2.0,
+  "bump": 6.0,
+  "rough": 0.85,
+  "size": 2048,
+  "macro": {
+    "scale_m": 30,
+    "val": 0.1,
+    "accent": "#6a645a",
+    "accent_amount": 0.3,
+    "seed": 13
+  },
+  "placeholder": {
+    "type": "gravel",
+    "accent": [
+      "#5a5650",
+      "#9a948a"
+    ],
+    "pebbles": 400,
+    "pebble_max": 0.015,
+    "seed": 113
+  },
+  "replaces": 6
+}

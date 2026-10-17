@@ -1,0 +1,69 @@
+{
+  "_doc": "Terrain layer (docs/TERRAIN_SHADING.md); keys: src/world/terrain/terrain_params.c parse_layer.",
+  "texture": "dirt",
+  "tile_m": 2.5,
+  "macro_scale_m": 30,
+  "hsv_jitter": {
+    "hue_deg": 3,
+    "sat": 0.06,
+    "val": 0.08,
+    "scale_m": 7
+  },
+  "blend": {
+    "height_contrast": 1.2,
+    "sharpness": 0.15
+  },
+  "porosity": 0.75,
+  "curvature": {
+    "cavity": 0.3,
+    "ridge": 0.2
+  },
+  "moisture": {
+    "tint": [
+      0.75,
+      0.72,
+      0.68
+    ],
+    "amount": 0.45,
+    "darken": 0.35
+  },
+  "slope_tint": {
+    "tint": [
+      1.05,
+      1.0,
+      0.95
+    ],
+    "amount": 0.3
+  },
+  "ao": 0.9,
+  "variants": [
+    {
+      "texture": "dirt_dry",
+      "mask": "curvature",
+      "lo": 0.55,
+      "hi": 0.7
+    }
+  ],
+  "variant_noise": {
+    "scale_m": 9,
+    "weight": 0.5
+  },
+  "detail": {
+    "parallax_m": 0.04,
+    "detail_normal": 0.6,
+    "micro_roughness": 0.06
+  },
+  "snow": {
+    "accumulation": 1.0
+  },
+  "scatter": {
+    "per_m2": 1.2,
+    "cell_m": 0.5,
+    "sprites": [
+      0,
+      1
+    ],
+    "size_m": 0.08
+  },
+  "roughness": 0.9
+}

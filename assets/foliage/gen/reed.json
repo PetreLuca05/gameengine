@@ -1,0 +1,78 @@
+{
+  "_doc": "Reeds / sedges for wet ground (not in the references).",
+  "kind": "blade_atlas",
+  "model": "higgsfield-ai/soul/standard",
+  "resolution": "1080p",
+  "aspect_ratio": "1:1",
+  "style": "blade",
+  "background": "magenta",
+  "grid": [
+    2,
+    1
+  ],
+  "size": 2048,
+  "fill": 0.94,
+  "color_match": 0.85,
+  "target": {
+    "root": "#4c5030",
+    "mid": "#5e623a",
+    "tip": "#77704a",
+    "dry_root": "#8a7a55",
+    "dry_mid": "#9a8a62",
+    "dry_tip": "#a89870"
+  },
+  "avoid": "soil, roots, pot, vase, hands, shadows on the background, gradient background, blur, bokeh, depth of field, cartoon, illustration, saturated emerald or blue-green colour, pink or purple tint on the leaves, frame, border, text, watermark",
+  "checks": {
+    "coverage": [
+      0.05,
+      0.5
+    ],
+    "bottom": 0.01,
+    "residue": 0.03
+  },
+  "cells": [
+    {
+      "prompt": "A clump of tall common reed stems with long narrow leaves, olive green stems with dry beige tips, rising straight from the bottom",
+      "placeholder": {
+        "blades": [
+          8,
+          11
+        ],
+        "height": [
+          0.85,
+          0.98
+        ],
+        "width": 0.012,
+        "arch": 0.2,
+        "fan": 10,
+        "dry": 0.35,
+        "seed": 81
+      }
+    },
+    {
+      "prompt": "A clump of tall sedge leaves, long narrow arching blades, olive green with straw tips, rising from the bottom",
+      "placeholder": {
+        "blades": [
+          10,
+          14
+        ],
+        "height": [
+          0.8,
+          0.98
+        ],
+        "width": 0.014,
+        "arch": 0.4,
+        "fan": 20,
+        "dry": 0.3,
+        "seed": 82
+      }
+    }
+  ],
+  "card": {
+    "height_m": [
+      0.8,
+      1.6
+    ],
+    "width_m": 0.5
+  }
+}

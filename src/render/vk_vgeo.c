@@ -25,6 +25,8 @@
 #include "vgeo/vgeo_procgen_foliage.h"
 #include "vgeo/vgeo_impostor.h"
 #include "vgeo/vgeo_tree.h"
+#include "vgeo/grass_asset.h"
+#include "core/cvar.h"
 #include "fidelity/fidelity.h"
 #include "assets/assets.h"
 #include "core/platform.h"
@@ -35,6 +37,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+#define FOLIAGE_TYPES 64       // registered foliage types: grass variants, trees, bushes, flowers, crops
 
 #define VKG_DEBUG_MAX 4096u   // visible clusters drawn by r_vgeo_debug_spheres
 
@@ -116,7 +120,7 @@ static struct {
     VgDisplace disp;
     bool disp_ok;
     // role / weight: the scatter role of a tree type (RENDER_TREE_*, -1 none) and its pick weight
-    struct FoliageType { char name[48]; u32 mesh; bool capsule; float cap_r, cap_h; int role; float weight; } ftype[32];
+    struct FoliageType { char name[48]; u32 mesh; bool capsule; float cap_r, cap_h; int role; float weight; } ftype[FOLIAGE_TYPES];
     u32 ftype_count;
     bool test_types, map_types;
     u32 tree_roles;              // roles whose imported species were loaded (bits of VgTreeRole)
@@ -136,6 +140,16 @@ static struct {
     bool shadow_culled;          // this frame's cascade views were culled (vkg_record_shadow_cull)
     Cvar *r_vgeo, *error_px, *shadow_error_px, *sw_px, *occlusion, *freeze, *debug, *debug_spheres, *shadows;
 } G;
+
+// Grass assets (the grass section below).
+static struct {
+    GrassAsset a[GRASS_MAX_ASSETS];
+    int n;
+    u32 mat[GRASS_MAX_ASSETS];       // scene material index (~0: the asset's atlas is missing)
+    int tier;
+    bool built;
+    Cvar *r_grass_tex;
+} GR;
 
 static void fallback_register(u32 mesh, const VgBuilt *b, bool persistent);
 static void skin_init(void);
@@ -1106,6 +1120,7 @@ static void on_era_value(Cvar *c) {
 static void vkg_register_era(void) {
     G.lod_px = cvar_reg_float("r_vgeo_lod_px", 2.0f, 0.25f, 64.0f, CVAR_ARCHIVE, "classic renderer (r_vgeo 0): projected error of the discrete LOD pick (pixels)");
     G.foliage_density = cvar_reg_float("r_foliage_density", 1.0f, 0.0f, 1.0f, CVAR_ARCHIVE, "foliage instance density (Phase 7)");
+    GR.r_grass_tex = cvar_reg_int("r_grass_tex", 0, 0, 1, CVAR_ARCHIVE, "grass atlases at full size (1: 2048 px, about 4x the memory; 0: half, at the next map load)");
     G.era = cvar_reg_int("r_era", 0, 0, 4, CVAR_ARCHIVE, "geometry era preset: 0 modern (vgeo 1 px), 1 2020 (vgeo 2 px), 2 2015 (4 discrete LODs), 3 2010 (3 LODs), 4 custom");
     G.era->on_change = on_era;
     // Era-owned Engine Fidelity features take their defaults from this table.
@@ -1681,7 +1696,7 @@ static void foliage_build_kinds(int k0, int k1, u32 atlas) {
         q->impostor = q->k != VG_FOLIAGE_CROP;   // crops fade out before an impostor would be used
     }
     jobs_parallel_for(n, 1, foliage_kind_job, kb);
-    for (int i = 0; i < n && G.ftype_count < 32; i++) {
+    for (int i = 0; i < n && G.ftype_count < FOLIAGE_TYPES; i++) {
         FoliageKindBuild *q = &kb[i];
         vgeo_foliage_mesh_free(&q->fm);
         if (!q->ok) { log_error("vgeo: %s build failed: %s", vgeo_foliage_name(q->k), q->err); continue; }
@@ -1721,6 +1736,197 @@ static void foliage_build_kinds(int k0, int k1, u32 atlas) {
     }
     free(kb);
     free(mips);
+}
+
+// ------------------------------------------------------------------ grass assets (grass_asset.h, docs/FOLIAGE_GRASS.md)
+
+// Every assets/foliage/grass asset: its atlas + nta map (module textures), one material (shared by its
+// mesh variants; MAT_COVER with the asset's cover id), `variants` clump meshes registered as foliage types
+// "<asset>_v<k>" (the placement uses the same names), an impostor each (not for the fields' wheat).
+// The material's fades / shadow distance follow the fidelity level (grass_update_tier).
+
+typedef struct GrassBuild {
+    int asset;
+    u32 variant;
+    VgFoliageMesh fm;
+    VgSource src;
+    VgBuilt b;
+    bool ok, impostor;
+    char err[256];
+    VgImpostorMaterial im;
+    VgImpostorOptions io;
+} GrassBuild;
+
+static void grass_job(void *ctx, int begin, int end) {
+    GrassBuild *gb = (GrassBuild *)ctx;
+    for (int i = begin; i < end; i++) {
+        VgBuildOptions opt;
+        memset(&opt, 0, sizeof(opt));
+        gb[i].ok = vgeo_build(&gb[i].src, &opt, &gb[i].b, gb[i].err, sizeof(gb[i].err));
+        if (gb[i].ok && gb[i].impostor) vgeo_impostor_bake(&gb[i].b, &gb[i].io);
+    }
+}
+
+// assets/foliage/tex/<atlas>_<suffix>.png, box-downsampled by div (a power of two). NULL when missing.
+static u8 *grass_tex_load(const char *atlas, const char *suffix, u32 div, u32 *w, u32 *h) {
+    char rel[160], path[512];
+    snprintf(rel, sizeof(rel), "assets/foliage/tex/%s_%s.png", atlas, suffix);
+    int iw, ih, comp;
+    u8 *px = stbi_load(platform_data_path(rel, path, sizeof(path)), &iw, &ih, &comp, 4);
+    if (!px) return NULL;
+    u32 ow = DG_MAX((u32)iw / div, 1u), oh = DG_MAX((u32)ih / div, 1u);
+    u8 *out = (u8 *)malloc((size_t)ow * oh * 4);
+    for (u32 y = 0; y < oh; y++)
+        for (u32 x = 0; x < ow; x++)
+            for (int c = 0; c < 4; c++) {
+                u32 acc = 0;
+                for (u32 dy = 0; dy < div; dy++)
+                    for (u32 dx = 0; dx < div; dx++) acc += px[(((size_t)(y * div + dy)) * (u32)iw + x * div + dx) * 4 + c];
+                out[((size_t)y * ow + x) * 4 + c] = (u8)((acc + div * div / 2) / (div * div));
+            }
+    stbi_image_free(px);
+    *w = ow;
+    *h = oh;
+    return out;
+}
+
+static u32 grass_tex_upload(const u8 *px, u32 w, u32 h, bool srgb) {
+    u32 levels;
+    u8 *mips = (u8 *)malloc(vg_tex_mip_bytes(w, h, &levels));
+    vg_tex_build_mips(px, w, h, mips);
+    u32 t = vg_tex_create(&G.cull.tex, w, h, levels, mips, srgb, true);
+    free(mips);
+    return t;
+}
+
+static int grass_fidelity_tier(void) {
+    Cvar *c = cvar_find("r_fidelity");
+    return c ? DG_CLAMP(c->i, 0, GRASS_TIERS - 1) : GRASS_TIERS - 1;
+}
+
+// Ground colour tables (render_ground_*): the grass tops' colour and coverage per terrain material,
+// density-weighted over the assets that grow there.
+static void grass_ground_tops(void) {
+    for (int m = 0; m < GRASS_MAX_MATERIALS; m++) {
+        float w = 0, c[3] = { 0, 0, 0 }, cov = 0;
+        for (int i = 0; i < GR.n; i++) {
+            float d = GR.a[i].density[m];
+            if (d <= 0 || GR.mat[i] == ~0u) continue;
+            for (int k = 0; k < 3; k++) c[k] += GR.a[i].top_color[k] * d;
+            cov += d * GR.a[i].coverage;
+            w += d;
+        }
+        if (w > 0) {
+            for (int k = 0; k < 3; k++) c[k] /= w;
+            render_ground_set_top(m, c, DG_MIN(cov / 2.5f, 1.0f));   // 2.5 clumps / m2 of an asset cover its share fully
+        } else render_ground_set_top(m, NULL, 0.0f);
+    }
+}
+
+static void foliage_build_grass(void) {
+    if (GR.built) return;
+    GR.built = true;
+    u64 t0 = SDL_GetTicksNS();
+    GR.n = grass_assets_load_dir(GR.a, GRASS_MAX_ASSETS);
+    GR.tier = grass_fidelity_tier();
+    u32 div = GR.r_grass_tex && GR.r_grass_tex->i ? 1u : 2u;
+    int total = 0;
+    for (int i = 0; i < GR.n; i++) total += GR.a[i].variants;
+    GrassBuild *gb = (GrassBuild *)calloc((size_t)DG_MAX(total, 1), sizeof(GrassBuild));
+    u8 *alb[GRASS_MAX_ASSETS] = { 0 };
+    u32 aw[GRASS_MAX_ASSETS] = { 0 }, ah[GRASS_MAX_ASSETS] = { 0 };
+    int nb = 0;
+    for (int i = 0; i < GR.n; i++) {
+        const GrassAsset *a = &GR.a[i];
+        GR.mat[i] = ~0u;
+        u32 nw = 0, nh = 0;
+        alb[i] = grass_tex_load(a->atlas, "albedo", div, &aw[i], &ah[i]);
+        u8 *nta = grass_tex_load(a->atlas, "nta", div * 2, &nw, &nh);
+        if (!alb[i]) { log_warn("grass: %s: atlas %s missing (tools/vfxgen/groundgen.py)", a->name, a->atlas); free(nta); continue; }
+        VgMaterial mt;
+        grass_material(a, GR.tier, (u32)i, &mt);
+        mt.albedo_tex = mt.mask_tex = grass_tex_upload(alb[i], aw[i], ah[i], true);
+        if (nta) mt.mr_tex = grass_tex_upload(nta, nw, nh, false);   // the cover nta map rides in the mr slot (no MAT_MR_TEX)
+        free(nta);
+        GR.mat[i] = vgeo_scene_add_material(&G.scene, &mt);
+        float p[12];
+        grass_cover_params(a, p);
+        render_ground_set_cover(i, p);
+        for (int v = 0; v < a->variants; v++, nb++) {
+            GrassBuild *q = &gb[nb];
+            q->asset = i;
+            q->variant = (u32)v;
+            grass_gen_mesh(&q->fm, a, (u32)v);
+            vgeo_foliage_source(&q->fm, &q->src);
+            q->im = (VgImpostorMaterial){ { 1, 1, 1, 1 }, alb[i], aw[i], ah[i], 1.0f, true, a->alpha_cutoff };
+            q->io = (VgImpostorOptions){ 512, 8, &q->im, 1 };
+            q->impostor = a->tier[GRASS_TIERS - 1].end_m < 80.0f;   // tall crops fade before an impostor would show
+        }
+    }
+    render_ground_set_cover_count(GR.n);
+    jobs_parallel_for(nb, 1, grass_job, gb);
+    for (int k = 0; k < nb; k++) {
+        GrassBuild *q = &gb[k];
+        vgeo_foliage_mesh_free(&q->fm);
+        if (!q->ok) { log_error("grass: %s variant %u: build failed: %s", GR.a[q->asset].name, q->variant, q->err); continue; }
+        if (G.ftype_count < FOLIAGE_TYPES) {
+            u32 mesh = vgeo_scene_add_mesh(&G.scene, &q->b);
+            fallback_register(mesh, &q->b, false);
+            vgeo_scene_set_mesh_materials(&G.scene, mesh, GR.mat[q->asset]);
+            if (q->impostor) vgeo_foliage_impostor_upload(&G.scene, &G.cull.tex, mesh, &q->b);
+            struct FoliageType *ft = &G.ftype[G.ftype_count++];
+            snprintf(ft->name, sizeof(ft->name), "%s_v%u", GR.a[q->asset].name, q->variant);
+            ft->mesh = mesh;
+            ft->capsule = false;
+            ft->role = -1;
+            ft->weight = 0;
+        }
+        vgeo_free(&q->b);
+    }
+    for (int i = 0; i < GR.n; i++) free(alb[i]);
+    free(gb);
+    grass_ground_tops();
+    log_info("grass: %d assets, %d meshes, level %d, atlases %s in %.0f ms", GR.n, nb, GR.tier, div == 1 ? "full" : "half", (double)(SDL_GetTicksNS() - t0) / 1e6);
+}
+
+bool render_grass_fade(int level, float *start, float *end) {
+    float fs = 0, fe = 0;
+    for (int i = 0; i < GR.n; i++) {
+        const GrassAsset *a = &GR.a[i];
+        if (GR.mat[i] == ~0u || (a->density[0] <= 0 && a->density[1] <= 0)) continue;   // grass / meadow cover only
+        const GrassTier *t = &a->tier[DG_CLAMP(level, 0, GRASS_TIERS - 1)];
+        fs = fmaxf(fs, t->full_m + 0.4f * (t->end_m - t->full_m));
+        fe = fmaxf(fe, t->end_m);
+    }
+    if (fe <= 0) return false;
+    *start = fs;
+    *end = fe;
+    return true;
+}
+
+static void grass_update_tier(void);
+void vkg_frame_update(void) {
+    if (G.ok) grass_update_tier();
+}
+
+// The fidelity level changed: every grass material's fades and shadow distance (mesh bounds and the
+// cells' fade limits follow at the commit).
+static void grass_update_tier(void) {
+    if (!GR.built || !GR.n) return;
+    int t = grass_fidelity_tier();
+    if (t == GR.tier) return;
+    GR.tier = t;
+    for (int i = 0; i < GR.n; i++) {
+        if (GR.mat[i] == ~0u || GR.mat[i] >= G.scene.material_count) continue;
+        VgMaterial *mt = &G.scene.materials[GR.mat[i]], nm;
+        grass_material(&GR.a[i], t, (u32)i, &nm);
+        mt->fade_start = nm.fade_start;
+        mt->fade_end = nm.fade_end;
+        mt->shadow_max_dist = nm.shadow_max_dist;
+    }
+    G.need_commit = true;
+    foliage_commit();
+    log_info("grass: fidelity level %d (fades / shadows)", t);
 }
 
 // Imported trees (vgeo_tree.h, docs/VGEO.md "Tree models"): the species of the roles in role_mask not
@@ -1778,7 +1984,7 @@ static int foliage_build_trees(u32 role_mask) {
     for (int i = 0; i < n; i++) {
         TreeBuild *q = &tb[i];
         if (!q->ok) { log_error("vgeo: tree %s: %s", q->sp->name, q->err); continue; }
-        if (G.ftype_count >= 32) { vgeo_tree_free(&q->t); continue; }
+        if (G.ftype_count >= FOLIAGE_TYPES) { vgeo_tree_free(&q->t); continue; }
         VgMaterial mats[VG_TREE_MAX_MATERIALS];
         vgeo_tree_materials(&q->t, mats);
         u32 mesh = vgeo_scene_add_mesh(&G.scene, &q->t.b);
@@ -1826,6 +2032,7 @@ int render_foliage_map_types(void) {
     u64 t0 = SDL_GetTicksNS();
     foliage_build_trees((1u << VG_TREE_CONIFER) | (1u << VG_TREE_BROADLEAF) | (1u << VG_TREE_DEAD));
     foliage_build_kinds(VG_FOLIAGE_CROP, VG_FOLIAGE_CROP + 1, 512);
+    foliage_build_grass();
     G.map_types = true;
     foliage_region();
     G.need_commit = true;
@@ -1907,7 +2114,7 @@ static u32 foliage_resolve(const char *name, void *u) {
     (void)u;
     for (u32 i = 0; i < G.ftype_count; i++)
         if (!strcmp(G.ftype[i].name, name)) return G.ftype[i].mesh;
-    if (G.ftype_count >= 32) return ~0u;
+    if (G.ftype_count >= FOLIAGE_TYPES) return ~0u;
     const Model *model = assets_model(assets_model_id(name));
     if (!model || !model->vgeo) return ~0u;
     RenderVgeoPlacement pl;

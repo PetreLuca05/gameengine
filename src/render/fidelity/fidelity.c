@@ -61,6 +61,7 @@ static const FidFeatureDef k_features[FF_COUNT] = {
     [FF_FOLIAGE_DENSITY] = { "foliage_density", "r_foliage_density", F, false, 0, 0, 1, false, true, "Foliage density" },
     [FF_FOLIAGE_WIND] = { "foliage_wind", "r_foliage_wind", I, true, 0, 0, 3, false, false, "Foliage wind" },
     [FF_IMPOSTOR_PX] = { "impostor_px", "r_vgeo_impostor_px", F, false, 0, 0, 256, true, false, "Impostor distance" },
+    [FF_TERRAIN_QUALITY] = { "terrain_quality", "r_terrain_quality", I, false, 0, 0, 4, false, false, "Terrain detail" },
     [FF_LOD_BIAS] = { "lod_bias", "r_lod_bias", F, false, 0, 0.25f, 4, false, false, "Character LOD detail" },
     [FF_CHAR_QUALITY] = { "char_quality", "r_char_quality", I, false, 0, 0, 3, false, false, "Character detail" },
     [FF_SCOPE_PIP_SCALE] = { "scope_pip_scale", "r_scope_pip_scale", F, false, 0, 0.2f, 2, false, false, "Scope picture resolution" },

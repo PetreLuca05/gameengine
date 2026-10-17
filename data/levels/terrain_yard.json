@@ -1,0 +1,390 @@
+{
+  "name": "Terrain yard",
+  "comment": "Transition test strip (docs/TERRAIN_SHADING.md 'Test strip'): one straight 64 m border per material pair, west | east of x = 0, rows 10 m apart on a grass base; the rock rows sit on a low hill (slope-aware borders). r_terrain_debug 7 (band) / 11 (border distance) / 1 (weights). Rows: z -55: grass | dirt; z -45: grass | dirt_road; z -35: meadow | dirt; z -25: rock | dirt; z -15: rock | grass; z -5: mud | dirt; z 5: sand | rock; z 15: sand | grass; z 25: grass | field; z 35: meadow | grass; z 45: asphalt | grass; z 55: gravel | dirt",
+  "env": {
+    "sun_dir": [
+      0.45,
+      0.8,
+      0.35
+    ],
+    "sun_color": [
+      1.0,
+      0.95,
+      0.86
+    ],
+    "sun_intensity": 3.0,
+    "sky": [
+      0.45,
+      0.55,
+      0.72
+    ],
+    "ground": [
+      0.28,
+      0.27,
+      0.22
+    ],
+    "fog": [
+      0.62,
+      0.68,
+      0.75
+    ],
+    "fog_density": 0.0012,
+    "sky_zenith": [
+      0.24,
+      0.42,
+      0.72
+    ],
+    "sky_horizon": [
+      0.7,
+      0.76,
+      0.84
+    ],
+    "clouds": 0.35
+  },
+  "weather": "clear",
+  "world": {
+    "seed": 777,
+    "half_size": 90,
+    "raster_half": 96,
+    "terrain": {
+      "base": 10,
+      "hill_amp": 0.3,
+      "hill_freq": 0.01
+    },
+    "features": [
+      {
+        "type": "hill",
+        "pos": [
+          0,
+          -25
+        ],
+        "radius": [
+          22,
+          8
+        ],
+        "height": 3.0
+      },
+      {
+        "type": "paint",
+        "pos": [
+          0,
+          0
+        ],
+        "size": [
+          170,
+          170
+        ],
+        "material": "grass"
+      },
+      {
+        "type": "paint",
+        "pos": [
+          -16,
+          -55
+        ],
+        "size": [
+          32,
+          6
+        ],
+        "material": "grass"
+      },
+      {
+        "type": "paint",
+        "pos": [
+          16,
+          -55
+        ],
+        "size": [
+          32,
+          6
+        ],
+        "material": "dirt"
+      },
+      {
+        "type": "paint",
+        "pos": [
+          -16,
+          -45
+        ],
+        "size": [
+          32,
+          6
+        ],
+        "material": "grass"
+      },
+      {
+        "type": "paint",
+        "pos": [
+          16,
+          -45
+        ],
+        "size": [
+          32,
+          6
+        ],
+        "material": "dirt_road"
+      },
+      {
+        "type": "paint",
+        "pos": [
+          -16,
+          -35
+        ],
+        "size": [
+          32,
+          6
+        ],
+        "material": "meadow"
+      },
+      {
+        "type": "paint",
+        "pos": [
+          16,
+          -35
+        ],
+        "size": [
+          32,
+          6
+        ],
+        "material": "dirt"
+      },
+      {
+        "type": "paint",
+        "pos": [
+          -16,
+          -25
+        ],
+        "size": [
+          32,
+          6
+        ],
+        "material": "rock"
+      },
+      {
+        "type": "paint",
+        "pos": [
+          16,
+          -25
+        ],
+        "size": [
+          32,
+          6
+        ],
+        "material": "dirt"
+      },
+      {
+        "type": "paint",
+        "pos": [
+          -16,
+          -15
+        ],
+        "size": [
+          32,
+          6
+        ],
+        "material": "rock"
+      },
+      {
+        "type": "paint",
+        "pos": [
+          16,
+          -15
+        ],
+        "size": [
+          32,
+          6
+        ],
+        "material": "grass"
+      },
+      {
+        "type": "paint",
+        "pos": [
+          -16,
+          -5
+        ],
+        "size": [
+          32,
+          6
+        ],
+        "material": "mud"
+      },
+      {
+        "type": "paint",
+        "pos": [
+          16,
+          -5
+        ],
+        "size": [
+          32,
+          6
+        ],
+        "material": "dirt"
+      },
+      {
+        "type": "paint",
+        "pos": [
+          -16,
+          5
+        ],
+        "size": [
+          32,
+          6
+        ],
+        "material": "sand"
+      },
+      {
+        "type": "paint",
+        "pos": [
+          16,
+          5
+        ],
+        "size": [
+          32,
+          6
+        ],
+        "material": "rock"
+      },
+      {
+        "type": "paint",
+        "pos": [
+          -16,
+          15
+        ],
+        "size": [
+          32,
+          6
+        ],
+        "material": "sand"
+      },
+      {
+        "type": "paint",
+        "pos": [
+          16,
+          15
+        ],
+        "size": [
+          32,
+          6
+        ],
+        "material": "grass"
+      },
+      {
+        "type": "paint",
+        "pos": [
+          -16,
+          25
+        ],
+        "size": [
+          32,
+          6
+        ],
+        "material": "grass"
+      },
+      {
+        "type": "paint",
+        "pos": [
+          16,
+          25
+        ],
+        "size": [
+          32,
+          6
+        ],
+        "material": "field"
+      },
+      {
+        "type": "paint",
+        "pos": [
+          -16,
+          35
+        ],
+        "size": [
+          32,
+          6
+        ],
+        "material": "meadow"
+      },
+      {
+        "type": "paint",
+        "pos": [
+          16,
+          35
+        ],
+        "size": [
+          32,
+          6
+        ],
+        "material": "grass"
+      },
+      {
+        "type": "paint",
+        "pos": [
+          -16,
+          45
+        ],
+        "size": [
+          32,
+          6
+        ],
+        "material": "asphalt"
+      },
+      {
+        "type": "paint",
+        "pos": [
+          16,
+          45
+        ],
+        "size": [
+          32,
+          6
+        ],
+        "material": "grass"
+      },
+      {
+        "type": "paint",
+        "pos": [
+          -16,
+          55
+        ],
+        "size": [
+          32,
+          6
+        ],
+        "material": "gravel"
+      },
+      {
+        "type": "paint",
+        "pos": [
+          16,
+          55
+        ],
+        "size": [
+          32,
+          6
+        ],
+        "material": "dirt"
+      }
+    ],
+    "roads": [],
+    "zombies": {
+      "wild_density": 0,
+      "wild_max": 0,
+      "cap": 0,
+      "despawn": 190,
+      "spawn_min": 40,
+      "spawn_max": 95,
+      "sense": 38
+    }
+  },
+  "pois": [],
+  "spawns": [
+    {
+      "pos": [
+        0,
+        12,
+        -72
+      ],
+      "yaw": 180
+    }
+  ]
+}

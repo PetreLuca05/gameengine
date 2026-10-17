@@ -208,6 +208,8 @@ bool render_init(SDL_Window *window) {
     sky_init();
     write_sky_bindings();
     vks_init();
+    vkgr_init();
+    vkt_init();
 
     R->draws = (DrawItem *)malloc(sizeof(DrawItem) * MAX_DRAWS);
     R->vm_draws = (DrawItem *)malloc(sizeof(DrawItem) * MAX_VM_DRAWS);
@@ -271,6 +273,7 @@ void render_shutdown(void) {
         vkr_target_destroy(&R->occl);
         vkls_shutdown();
         vks_shutdown();
+        vkt_shutdown();
         vkp_destroy_pipelines();
         vkr_destroy_all_resources();
         vkr_target_destroy(&R->shadow);
@@ -377,6 +380,7 @@ bool render_begin_frame(void) {
 void render_set_camera(const RenderCamera *cam) {
     R->cam = *cam;
     vkg_bench_camera(&R->cam);   // vgeo_bench flythrough
+    vkg_frame_update();          // grass fades / shadows follow the fidelity level (outside the frame's recording)
     if (g_cam_override) g_cam_override(&R->cam);   // bench_fidelity flythrough
     cam = &R->cam;
     float aspect = view_aspect();
@@ -1354,6 +1358,8 @@ static void compute_matrices(FrameData *fd) {
         fd->puddle_xf = wx->puddle_xform;
     }
     vks_frame_data(fd);
+    vkgr_frame_data(fd);   // ground cover table, ground colours, macro variation (ground.c)
+    vkt_frame_data(fd, (int)R->frame_slot);   // terrain parameters into this slot's buffer (terrain_tex.c)
 }
 
 static void save_screenshot(GpuBuffer *buf, u32 w, u32 h) {
@@ -2184,6 +2190,7 @@ void render_end_frame(void) {
     write_cookie_binding();
     write_weather_bindings();
     vks_write_bindings();
+    vkt_write_bindings();
     FrameResources *f = &R->frames[R->frame_slot];
     VkCommandBuffer cmd = f->cmd;
     VK_CHECK(vkResetCommandBuffer(cmd, 0));

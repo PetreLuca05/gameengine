@@ -1,0 +1,24 @@
+{
+  "name": "sand_rock",
+  "a": [
+    "sand"
+  ],
+  "b": [
+    "rock"
+  ],
+  "width_m": 0.8,
+  "edge_noise_scale_m": 2.0,
+  "edge_noise_strength_m": 0.4,
+  "crumbs": 0.1,
+  "modes": [
+    "height",
+    "noise",
+    "set",
+    "directional"
+  ],
+  "set": "sand_on_rock",
+  "set_strength": 0.85,
+  "set_tile_m": 4.0,
+  "direction": "wind",
+  "direction_m": 1.2
+}

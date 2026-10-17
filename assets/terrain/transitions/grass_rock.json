@@ -1,0 +1,27 @@
+{
+  "name": "grass_rock",
+  "a": [
+    "rock"
+  ],
+  "b": [
+    "grass",
+    "meadow",
+    "forest"
+  ],
+  "width_m": 0.5,
+  "edge_noise_scale_m": 1.2,
+  "edge_noise_strength_m": 0.6,
+  "crumbs": 0.25,
+  "modes": [
+    "height",
+    "noise",
+    "crumbs",
+    "set",
+    "slope"
+  ],
+  "set": "rock_moss_edge",
+  "set_strength": 0.8,
+  "set_tile_m": 4.0,
+  "slope_bias_m": 0.5,
+  "snow_bias": -0.2
+}

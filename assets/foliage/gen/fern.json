@@ -1,0 +1,75 @@
+{
+  "_doc": "Fern fronds for forest floors (not in the references; low priority, same colour family).",
+  "kind": "blade_atlas",
+  "model": "higgsfield-ai/soul/standard",
+  "resolution": "1080p",
+  "aspect_ratio": "1:1",
+  "style": "card",
+  "background": "magenta",
+  "grid": [
+    2,
+    1
+  ],
+  "size": 2048,
+  "fill": 0.94,
+  "color_match": 0.85,
+  "target": {
+    "root": "#44522c",
+    "mid": "#526434",
+    "tip": "#5e703c"
+  },
+  "avoid": "soil, pot, vase, hands, flowers, berries, shadows on the background, gradient background, blur, bokeh, cartoon, illustration, frame, text, watermark",
+  "checks": {
+    "coverage": [
+      0.08,
+      0.7
+    ],
+    "bottom": 0.005,
+    "residue": 0.03
+  },
+  "cells": [
+    {
+      "prompt": "A single bracken fern frond with finely divided leaflets, mid green, the stem rising from the bottom and the frond arching over",
+      "placeholder": {
+        "blades": [
+          3,
+          4
+        ],
+        "height": [
+          0.75,
+          0.95
+        ],
+        "width": 0.06,
+        "arch": 0.5,
+        "fan": 20,
+        "dry": 0.0,
+        "seed": 71
+      }
+    },
+    {
+      "prompt": "Three young fern fronds rising from the bottom, finely divided leaflets, fresh green with slightly yellow tips, arching outward",
+      "placeholder": {
+        "blades": [
+          3,
+          4
+        ],
+        "height": [
+          0.7,
+          0.9
+        ],
+        "width": 0.05,
+        "arch": 0.45,
+        "fan": 35,
+        "dry": 0.1,
+        "seed": 72
+      }
+    }
+  ],
+  "card": {
+    "height_m": [
+      0.4,
+      0.8
+    ],
+    "width_m": 0.7
+  }
+}

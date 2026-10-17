@@ -1,41 +1,642 @@
 {
-  "_doc": "Ground reference regions (docs/GROUND_REFERENCE.md). Boxes are [x0, y0, x1, y1] in the source image's pixels. 'mask' picks pixels inside the box: all | green | dry | dark (see tools/ground_ref.py). Used by the colour table, the blade sheet and ground_match_report.",
-  "images": {
-    "r1": { "file": "ref1_crater_meadow.webp", "note": "1920x1080 promo still, low sun from the right, clear sky; the cleanest blade detail" },
-    "r2": { "file": "ref2_wheat.webp",         "note": "1280x720 gameplay, overcast, letterboxed (rows 88-630 are the picture)" },
-    "r3": { "file": "ref3_snowfield.webp",     "note": "739x415 gameplay, overcast, pale ground patches (frost / chalk)" },
-    "r4": { "file": "ref4_hillside.webp",      "note": "739x415 gameplay, overcast, dry hillside" },
-    "r5": { "file": "ref5_meadow_path.png",    "note": "620x300 gameplay, sunny, flowers + worn path" }
+ "_doc": "Ground reference regions (docs/GROUND_REFERENCE.md). Boxes are [x0, y0, x1, y1] in the source image's pixels. 'mask' picks pixels inside the box: all | green | dry | dark (see tools/ground_ref.py). Used by the colour table, the blade sheet and ground_match_report. 'traced' on a blade crop: hand-traced blade centre lines (image px, root first) with the base width (px); the blade tapers to a point over its last 35 %. They are the silhouette reference (the colour masks include ground).",
+ "images": {
+  "r1": {
+   "file": "ref1_crater_meadow.webp",
+   "note": "1920x1080 promo still, low sun from the right, clear sky; the cleanest blade detail"
   },
-  "regions": [
-    { "id": "r1_blade_green_near", "image": "r1", "box": [0, 760, 700, 1080],    "mask": "green", "class": "blade_green" },
-    { "id": "r1_blade_dry_mid",    "image": "r1", "box": [820, 400, 1300, 520],  "mask": "dry",   "class": "blade_dry" },
-    { "id": "r1_blade_dry_right",  "image": "r1", "box": [1400, 380, 1920, 600], "mask": "dry",   "class": "blade_dry" },
-    { "id": "r1_ground_under",     "image": "r1", "box": [80, 700, 520, 820],    "mask": "dark",  "class": "ground_grass" },
-    { "id": "r1_dirt_crater_wall", "image": "r1", "box": [1080, 560, 1360, 760], "mask": "all",   "class": "dirt" },
-    { "id": "r1_dirt_crater_rim",  "image": "r1", "box": [600, 800, 1000, 860],  "mask": "all",   "class": "dirt_dry" },
-    { "id": "r1_field_far",        "image": "r1", "box": [560, 270, 1200, 330],  "mask": "all",   "class": "field_far" },
-    { "id": "r1_bush_leaves",      "image": "r1", "box": [1100, 700, 1500, 900], "mask": "green", "class": "shrub" },
-    { "id": "r2_wheat_ears",       "image": "r2", "box": [0, 260, 1280, 480],    "mask": "dry",   "class": "wheat" },
-    { "id": "r2_wheat_ground",     "image": "r2", "box": [60, 470, 420, 600],    "mask": "dark",  "class": "dirt_field" },
-    { "id": "r3_grass_mid",        "image": "r3", "box": [0, 200, 600, 330],     "mask": "green", "class": "blade_green_overcast" },
-    { "id": "r3_pale_ground",      "image": "r3", "box": [560, 140, 739, 230],   "mask": "all",   "class": "ground_pale" },
-    { "id": "r4_grass_hill",       "image": "r4", "box": [380, 250, 739, 380],   "mask": "all",   "class": "blade_mixed_overcast" },
-    { "id": "r4_dirt_patch",       "image": "r4", "box": [170, 320, 330, 380],   "mask": "all",   "class": "dirt_patch" },
-    { "id": "r4_moss_ground",      "image": "r4", "box": [330, 330, 420, 390],   "mask": "all",   "class": "ground_moss" },
-    { "id": "r5_meadow",           "image": "r5", "box": [0, 160, 620, 250],     "mask": "all",   "class": "meadow_sunny" },
-    { "id": "r5_path",             "image": "r5", "box": [390, 252, 500, 298],   "mask": "all",   "class": "path_worn" },
-    { "id": "r5_ground_moss",      "image": "r5", "box": [500, 178, 580, 205],   "mask": "all",   "class": "ground_moss_sunny" }
-  ],
-  "blades": [
-    { "id": "b1_broad_green_clump",  "image": "r1", "box": [150, 820, 330, 1075],  "type": "broad_green" },
-    { "id": "b2_broad_green_arch",   "image": "r1", "box": [380, 830, 480, 1000],  "type": "broad_green" },
-    { "id": "b3_ribbon_tussock",     "image": "r1", "box": [1400, 455, 1525, 595], "type": "ribbon_variegated" },
-    { "id": "b4_ribbon_tussock_2",   "image": "r1", "box": [1270, 470, 1400, 595], "type": "ribbon_variegated" },
-    { "id": "b5_dark_fountain",      "image": "r1", "box": [1650, 630, 1760, 702], "type": "dark_fountain" },
-    { "id": "b6_dry_straw",          "image": "r4", "box": [0, 280, 150, 415],   "type": "dry_straw" },
-    { "id": "b7_seed_plume",         "image": "r3", "box": [430, 190, 600, 330],   "type": "seed_plume" },
-    { "id": "b8_wheat",              "image": "r2", "box": [20, 330, 300, 620],   "type": "wheat" },
-    { "id": "b9_meadow_tuft",        "image": "r5", "box": [30, 170, 225, 298],   "type": "meadow_tuft" }
-  ]
+  "r2": {
+   "file": "ref2_wheat.webp",
+   "note": "1280x720 gameplay, overcast, letterboxed (rows 88-630 are the picture)"
+  },
+  "r3": {
+   "file": "ref3_snowfield.webp",
+   "note": "739x415 gameplay, overcast, pale ground patches (frost / chalk)"
+  },
+  "r4": {
+   "file": "ref4_hillside.webp",
+   "note": "739x415 gameplay, overcast, dry hillside"
+  },
+  "r5": {
+   "file": "ref5_meadow_path.png",
+   "note": "620x300 gameplay, sunny, flowers + worn path"
+  }
+ },
+ "regions": [
+  {
+   "id": "r1_blade_green_near",
+   "image": "r1",
+   "box": [
+    0,
+    760,
+    700,
+    1080
+   ],
+   "mask": "green",
+   "class": "blade_green"
+  },
+  {
+   "id": "r1_blade_dry_mid",
+   "image": "r1",
+   "box": [
+    820,
+    400,
+    1300,
+    520
+   ],
+   "mask": "dry",
+   "class": "blade_dry"
+  },
+  {
+   "id": "r1_blade_dry_right",
+   "image": "r1",
+   "box": [
+    1400,
+    380,
+    1920,
+    600
+   ],
+   "mask": "dry",
+   "class": "blade_dry"
+  },
+  {
+   "id": "r1_ground_under",
+   "image": "r1",
+   "box": [
+    80,
+    700,
+    520,
+    820
+   ],
+   "mask": "dark",
+   "class": "ground_grass"
+  },
+  {
+   "id": "r1_dirt_crater_wall",
+   "image": "r1",
+   "box": [
+    1080,
+    560,
+    1360,
+    760
+   ],
+   "mask": "all",
+   "class": "dirt"
+  },
+  {
+   "id": "r1_dirt_crater_rim",
+   "image": "r1",
+   "box": [
+    600,
+    800,
+    1000,
+    860
+   ],
+   "mask": "all",
+   "class": "dirt_dry"
+  },
+  {
+   "id": "r1_field_far",
+   "image": "r1",
+   "box": [
+    560,
+    270,
+    1200,
+    330
+   ],
+   "mask": "all",
+   "class": "field_far"
+  },
+  {
+   "id": "r1_bush_leaves",
+   "image": "r1",
+   "box": [
+    1100,
+    700,
+    1500,
+    900
+   ],
+   "mask": "green",
+   "class": "shrub"
+  },
+  {
+   "id": "r2_wheat_ears",
+   "image": "r2",
+   "box": [
+    0,
+    260,
+    1280,
+    480
+   ],
+   "mask": "dry",
+   "class": "wheat"
+  },
+  {
+   "id": "r2_wheat_ground",
+   "image": "r2",
+   "box": [
+    60,
+    470,
+    420,
+    600
+   ],
+   "mask": "dark",
+   "class": "dirt_field"
+  },
+  {
+   "id": "r3_grass_mid",
+   "image": "r3",
+   "box": [
+    0,
+    200,
+    600,
+    330
+   ],
+   "mask": "green",
+   "class": "blade_green_overcast"
+  },
+  {
+   "id": "r3_pale_ground",
+   "image": "r3",
+   "box": [
+    560,
+    140,
+    739,
+    230
+   ],
+   "mask": "all",
+   "class": "ground_pale"
+  },
+  {
+   "id": "r4_grass_hill",
+   "image": "r4",
+   "box": [
+    380,
+    250,
+    739,
+    380
+   ],
+   "mask": "all",
+   "class": "blade_mixed_overcast"
+  },
+  {
+   "id": "r4_dirt_patch",
+   "image": "r4",
+   "box": [
+    170,
+    320,
+    330,
+    380
+   ],
+   "mask": "all",
+   "class": "dirt_patch"
+  },
+  {
+   "id": "r4_moss_ground",
+   "image": "r4",
+   "box": [
+    330,
+    330,
+    420,
+    390
+   ],
+   "mask": "all",
+   "class": "ground_moss"
+  },
+  {
+   "id": "r5_meadow",
+   "image": "r5",
+   "box": [
+    0,
+    160,
+    620,
+    250
+   ],
+   "mask": "all",
+   "class": "meadow_sunny"
+  },
+  {
+   "id": "r5_path",
+   "image": "r5",
+   "box": [
+    390,
+    252,
+    500,
+    298
+   ],
+   "mask": "all",
+   "class": "path_worn"
+  },
+  {
+   "id": "r5_ground_moss",
+   "image": "r5",
+   "box": [
+    500,
+    178,
+    580,
+    205
+   ],
+   "mask": "all",
+   "class": "ground_moss_sunny"
+  }
+ ],
+ "blades": [
+  {
+   "id": "b1_broad_green_clump",
+   "image": "r1",
+   "box": [
+    150,
+    820,
+    330,
+    1075
+   ],
+   "type": "broad_green",
+   "traced": [
+    {
+     "pts": [
+      [
+       300,
+       1072
+      ],
+      [
+       275,
+       1030
+      ],
+      [
+       250,
+       995
+      ],
+      [
+       220,
+       965
+      ],
+      [
+       195,
+       948
+      ]
+     ],
+     "w": 11
+    },
+    {
+     "pts": [
+      [
+       197,
+       1072
+      ],
+      [
+       200,
+       1000
+      ],
+      [
+       206,
+       940
+      ],
+      [
+       214,
+       880
+      ],
+      [
+       226,
+       835
+      ]
+     ],
+     "w": 6
+    },
+    {
+     "pts": [
+      [
+       168,
+       1072
+      ],
+      [
+       170,
+       1010
+      ],
+      [
+       174,
+       950
+      ],
+      [
+       182,
+       890
+      ]
+     ],
+     "w": 5
+    },
+    {
+     "pts": [
+      [
+       300,
+       1072
+      ],
+      [
+       293,
+       1000
+      ],
+      [
+       288,
+       930
+      ],
+      [
+       287,
+       870
+      ],
+      [
+       292,
+       830
+      ]
+     ],
+     "w": 5
+    },
+    {
+     "pts": [
+      [
+       245,
+       1072
+      ],
+      [
+       262,
+       1020
+      ],
+      [
+       285,
+       975
+      ],
+      [
+       318,
+       948
+      ]
+     ],
+     "w": 7
+    },
+    {
+     "pts": [
+      [
+       180,
+       1072
+      ],
+      [
+       160,
+       1020
+      ],
+      [
+       152,
+       980
+      ]
+     ],
+     "w": 6
+    }
+   ]
+  },
+  {
+   "id": "b2_broad_green_arch",
+   "image": "r1",
+   "box": [
+    380,
+    830,
+    480,
+    1000
+   ],
+   "type": "broad_green"
+  },
+  {
+   "id": "b3_ribbon_tussock",
+   "image": "r1",
+   "box": [
+    1400,
+    455,
+    1525,
+    595
+   ],
+   "type": "ribbon_variegated",
+   "traced": [
+    {
+     "pts": [
+      [
+       1455,
+       590
+      ],
+      [
+       1440,
+       560
+      ],
+      [
+       1425,
+       530
+      ],
+      [
+       1405,
+       505
+      ]
+     ],
+     "w": 4
+    },
+    {
+     "pts": [
+      [
+       1456,
+       590
+      ],
+      [
+       1448,
+       550
+      ],
+      [
+       1446,
+       510
+      ],
+      [
+       1448,
+       470
+      ]
+     ],
+     "w": 4
+    },
+    {
+     "pts": [
+      [
+       1458,
+       590
+      ],
+      [
+       1458,
+       540
+      ],
+      [
+       1462,
+       500
+      ],
+      [
+       1470,
+       465
+      ]
+     ],
+     "w": 3
+    },
+    {
+     "pts": [
+      [
+       1462,
+       590
+      ],
+      [
+       1480,
+       560
+      ],
+      [
+       1500,
+       540
+      ],
+      [
+       1520,
+       525
+      ]
+     ],
+     "w": 4
+    },
+    {
+     "pts": [
+      [
+       1460,
+       590
+      ],
+      [
+       1470,
+       550
+      ],
+      [
+       1490,
+       515
+      ],
+      [
+       1508,
+       500
+      ]
+     ],
+     "w": 3
+    },
+    {
+     "pts": [
+      [
+       1452,
+       590
+      ],
+      [
+       1430,
+       575
+      ],
+      [
+       1405,
+       565
+      ]
+     ],
+     "w": 3
+    },
+    {
+     "pts": [
+      [
+       1465,
+       590
+      ],
+      [
+       1490,
+       580
+      ],
+      [
+       1520,
+       570
+      ]
+     ],
+     "w": 3
+    },
+    {
+     "pts": [
+      [
+       1452,
+       590
+      ],
+      [
+       1438,
+       545
+      ],
+      [
+       1420,
+       500
+      ],
+      [
+       1412,
+       465
+      ]
+     ],
+     "w": 3
+    }
+   ]
+  },
+  {
+   "id": "b4_ribbon_tussock_2",
+   "image": "r1",
+   "box": [
+    1270,
+    470,
+    1400,
+    595
+   ],
+   "type": "ribbon_variegated"
+  },
+  {
+   "id": "b5_dark_fountain",
+   "image": "r1",
+   "box": [
+    1650,
+    630,
+    1760,
+    702
+   ],
+   "type": "dark_fountain"
+  },
+  {
+   "id": "b6_dry_straw",
+   "image": "r4",
+   "box": [
+    0,
+    280,
+    150,
+    415
+   ],
+   "type": "dry_straw"
+  },
+  {
+   "id": "b7_seed_plume",
+   "image": "r3",
+   "box": [
+    430,
+    190,
+    600,
+    330
+   ],
+   "type": "seed_plume"
+  },
+  {
+   "id": "b8_wheat",
+   "image": "r2",
+   "box": [
+    20,
+    330,
+    300,
+    620
+   ],
+   "type": "wheat"
+  },
+  {
+   "id": "b9_meadow_tuft",
+   "image": "r5",
+   "box": [
+    30,
+    170,
+    225,
+    298
+   ],
+   "type": "meadow_tuft"
+  }
+ ]
 }

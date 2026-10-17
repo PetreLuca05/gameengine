@@ -1,0 +1,25 @@
+{
+  "name": "grass_field",
+  "a": [
+    "grass",
+    "meadow"
+  ],
+  "b": [
+    "field",
+    "crop",
+    "plowed"
+  ],
+  "width_m": 0.3,
+  "edge_noise_scale_m": 0.6,
+  "edge_noise_strength_m": 0.15,
+  "crumbs": 0.0,
+  "modes": [
+    "height",
+    "noise",
+    "scatter"
+  ],
+  "scatter_sprites": [
+    4
+  ],
+  "scatter_per_m2": 2.0
+}

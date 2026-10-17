@@ -1,0 +1,64 @@
+{
+ "grid": [
+  2,
+  2
+ ],
+ "size": 2048,
+ "cells": [
+  {
+   "coverage": 0.089,
+   "bottom": 0.098,
+   "height": 0.902,
+   "root": "#595c37",
+   "mid": "#63673b",
+   "tip": "#777648",
+   "residue": 0.0,
+   "source": "placeholder",
+   "fails": []
+  },
+  {
+   "coverage": 0.09,
+   "bottom": 0.12,
+   "height": 0.841,
+   "root": "#60613c",
+   "mid": "#6e6e44",
+   "tip": "#878055",
+   "residue": 0.0,
+   "source": "placeholder",
+   "fails": []
+  },
+  {
+   "coverage": 0.095,
+   "bottom": 0.139,
+   "height": 0.861,
+   "root": "#5c5e3a",
+   "mid": "#65683d",
+   "tip": "#79774a",
+   "residue": 0.0,
+   "source": "placeholder",
+   "fails": []
+  },
+  {
+   "coverage": 0.094,
+   "bottom": 0.151,
+   "height": 0.75,
+   "root": "#505631",
+   "mid": "#5c6335",
+   "tip": "#666c3b",
+   "residue": 0.0,
+   "source": "placeholder",
+   "fails": []
+  }
+ ],
+ "name": "grass_broad",
+ "kind": "blade_atlas",
+ "tool_version": 1,
+ "recipe": "assets/foliage/gen/grass_broad.json",
+ "card": {
+  "height_m": [
+   0.25,
+   0.45
+  ],
+  "width_m": 0.45
+ }
+}

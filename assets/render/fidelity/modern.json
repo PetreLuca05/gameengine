@@ -51,6 +51,7 @@
     "foliage_density": {"avail": "on", "max": 1.0},
     "foliage_wind": {"avail": "on", "default": 3, "max": 3},
     "impostor_px": {"avail": "on", "default": 16, "min": 0},
+    "terrain_quality": {"avail": "on", "default": 4, "max": 4},
     "lod_bias": {"avail": "on", "default": 1.0, "max": 4.0},
     "char_quality": {"avail": "on", "default": 2, "max": 3},
     "scope_pip_scale": {"avail": "on", "default": 1.0, "max": 2.0},

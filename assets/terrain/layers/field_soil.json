@@ -1,0 +1,39 @@
+{
+  "_doc": "Terrain layer (docs/TERRAIN_SHADING.md); keys: src/world/terrain/terrain_params.c parse_layer.",
+  "texture": "field_soil",
+  "tile_m": 3.0,
+  "macro_scale_m": 40,
+  "blend": {
+    "height_contrast": 0.8,
+    "sharpness": 0.2
+  },
+  "porosity": 0.8,
+  "moisture": {
+    "tint": [
+      0.8,
+      0.76,
+      0.7
+    ],
+    "amount": 0.35,
+    "darken": 0.3
+  },
+  "ao": 0.8,
+  "variants": [
+    {
+      "texture": "field_straw",
+      "mask": "noise",
+      "lo": 0.45,
+      "hi": 0.65
+    }
+  ],
+  "variant_noise": {
+    "scale_m": 20,
+    "weight": 0.8
+  },
+  "detail": {
+    "parallax_m": 0.025,
+    "detail_normal": 0.5,
+    "micro_roughness": 0.05
+  },
+  "roughness": 0.9
+}

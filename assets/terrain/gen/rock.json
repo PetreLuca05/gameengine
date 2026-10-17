@@ -1,0 +1,31 @@
+{
+  "kind": "terrain_layer",
+  "model": "higgsfield-ai/soul/standard",
+  "resolution": "1080p",
+  "aspect_ratio": "1:1",
+  "style": "ground",
+  "prompt": "Natural rough weathered grey stone surface close-up, low saturation grey with faint warm brown, small lichen spots, fine cracks, one continuous natural rock, no tiles, no slabs, no joints",
+  "avoid": "standing grass blades, plants growing upward, flowers, footprints, tyre tracks, puddles, people, animals, objects, horizon, sky, perspective, vignette, strong shadows, text, watermark, saturated green",
+  "target_mean": "#7a756b",
+  "color_match": 0.9,
+  "tile_m": 6.0,
+  "bump": 6.0,
+  "rough": 0.78,
+  "size": 2048,
+  "macro": {
+    "scale_m": 60,
+    "val": 0.15,
+    "accent": "#6a6050",
+    "accent_amount": 0.3,
+    "seed": 10
+  },
+  "placeholder": {
+    "type": "rock",
+    "accent": [
+      "#6a665e",
+      "#8a867a"
+    ],
+    "seed": 110
+  },
+  "replaces": 4
+}

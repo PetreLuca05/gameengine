@@ -1,0 +1,35 @@
+{
+  "kind": "transition",
+  "model": "higgsfield-ai/soul/standard",
+  "resolution": "1080p",
+  "aspect_ratio": "1:1",
+  "style": "ground",
+  "prompt": "Damp dark earth seen from directly above, partly wet and partly drying, crumbly drying mud with small stones",
+  "avoid": "puddles, people, objects, horizon, sky, perspective, vignette, strong shadows, text, watermark, saturated green",
+  "target_mean": "#4a3f2e",
+  "color_match": 0.9,
+  "tile_m": 3.0,
+  "bump": 3.5,
+  "rough": 0.9,
+  "size": 2048,
+  "macro": {
+    "scale_m": 30,
+    "val": 0.1,
+    "accent": "#4a3e2c",
+    "accent_amount": 0.3,
+    "seed": 93
+  },
+  "placeholder": {
+    "type": "wet_edge",
+    "accent": [
+      "#3a3024",
+      "#6a5a44"
+    ],
+    "pebbles": 40,
+    "seed": 204
+  },
+  "pair": [
+    "dirt",
+    "mud"
+  ]
+}

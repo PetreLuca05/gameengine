@@ -156,6 +156,11 @@ def main():
             d.text((x, 4), name, fill=(230, 230, 230))
             x += crop.width + 8
         sheet.save(os.path.join(REF, "blade_sheet.png"))
+    # JPEG copies for the in-game reference viewer (ground_ref: stb_image reads no WebP)
+    for k, v in cfg["images"].items():
+        out = os.path.join(REF, "view", k + ".jpg")
+        os.makedirs(os.path.dirname(out), exist_ok=True)
+        Image.open(os.path.join(REF, v["file"])).convert("RGB").save(out, quality=92)
     with open(os.path.join(REF, "stats.json"), "w", newline="\n") as f:
         json.dump(res, f, indent=1)
         f.write("\n")

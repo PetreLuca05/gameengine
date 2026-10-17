@@ -1,0 +1,38 @@
+{
+  "kind": "transition",
+  "model": "higgsfield-ai/soul/standard",
+  "resolution": "1080p",
+  "aspect_ratio": "1:1",
+  "style": "ground",
+  "prompt": "The worn edge of a footpath seen from directly above: compacted grey-brown earth with sparse flattened grass, moss bits and small pebbles",
+  "avoid": "puddles, people, objects, horizon, sky, perspective, vignette, strong shadows, text, watermark, saturated green",
+  "target_mean": "#625a40",
+  "color_match": 0.9,
+  "tile_m": 3.0,
+  "bump": 4.0,
+  "rough": 0.9,
+  "size": 2048,
+  "macro": {
+    "scale_m": 30,
+    "val": 0.1,
+    "accent": "#6a6440",
+    "accent_amount": 0.3,
+    "seed": 23
+  },
+  "placeholder": {
+    "type": "sparse_grass",
+    "accent": [
+      "#5a5240",
+      "#6b6236",
+      "#9a9280"
+    ],
+    "pebbles": 50,
+    "blades": 400,
+    "leaves": 150,
+    "seed": 202
+  },
+  "pair": [
+    "ground_litter",
+    "path"
+  ]
+}

@@ -1,0 +1,36 @@
+{
+  "kind": "terrain_layer",
+  "model": "higgsfield-ai/soul/standard",
+  "resolution": "1080p",
+  "aspect_ratio": "1:1",
+  "style": "ground",
+  "prompt": "Dry late-summer meadow ground seen from directly above: olive and tan dry grass thatch lying flat on dusty soil, small dry leaves and seeds, some bare soil specks",
+  "avoid": "standing grass blades, plants growing upward, flowers, footprints, tyre tracks, puddles, people, animals, objects, horizon, sky, perspective, vignette, strong shadows, text, watermark, saturated green",
+  "target_mean": "#6b6236",
+  "color_match": 0.9,
+  "tile_m": 3.0,
+  "bump": 3.5,
+  "rough": 0.9,
+  "size": 2048,
+  "macro": {
+    "scale_m": 40,
+    "val": 0.12,
+    "accent": "#857a44",
+    "accent_amount": 0.4,
+    "seed": 4
+  },
+  "placeholder": {
+    "type": "litter",
+    "accent": [
+      "#5a5432",
+      "#8a7a48",
+      "#9a8a58"
+    ],
+    "leaves": 500,
+    "twigs": 10,
+    "blades": 900,
+    "pebbles": 10,
+    "seed": 104
+  },
+  "replaces": 1
+}

@@ -1,0 +1,35 @@
+{
+  "kind": "terrain_layer",
+  "model": "higgsfield-ai/soul/standard",
+  "resolution": "1080p",
+  "aspect_ratio": "1:1",
+  "style": "ground",
+  "prompt": "Dense carpet of dry brown pine needles on the forest floor seen from directly above, a few small twigs",
+  "avoid": "standing grass blades, plants growing upward, flowers, footprints, tyre tracks, puddles, people, animals, objects, horizon, sky, perspective, vignette, strong shadows, text, watermark, saturated green",
+  "target_mean": "#5a4530",
+  "color_match": 0.9,
+  "tile_m": 3.0,
+  "bump": 4.0,
+  "rough": 0.9,
+  "size": 2048,
+  "macro": {
+    "scale_m": 30,
+    "val": 0.1,
+    "accent": "#6a5030",
+    "accent_amount": 0.3,
+    "seed": 7
+  },
+  "placeholder": {
+    "type": "needles",
+    "accent": [
+      "#4a3826",
+      "#7a5a3a",
+      "#6a5030"
+    ],
+    "leaves": 100,
+    "twigs": 30,
+    "blades": 1500,
+    "seed": 107
+  },
+  "variant_of": "forest_floor"
+}

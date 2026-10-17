@@ -68,7 +68,13 @@ enum MaterialFlags {
     // procedural animated caustic light (emissive) on the liquid and the chamber floor.
     MAT_GLASS    = 1u << 22,
     MAT_CAUSTICS = 1u << 23,
+    // (bits 24..27: the vgeo material flags VGM_*, vgeo_gpu.h)
+    // Ground cover (docs/FOLIAGE_GRASS.md, grass_asset.h): root -> tip shading, colour variation, ground
+    // colour matching, translucency; the asset's parameters are frame cover table entry MAT_COVER_ID.
+    MAT_COVER    = 1u << 28,
 };
+#define MAT_COVER_ID_SHIFT 29u
+#define MAT_COVER_ID(flags) (((flags) >> MAT_COVER_ID_SHIFT) & 7u)
 #define MAT_PBR_MAPS (MAT_MR_TEX | MAT_NORMAL_TEX | MAT_OCCLUSION_TEX | MAT_EMISSIVE_TEX)
 // Terrain chunk geomorph (docs/LOD.md, chunks.c): uv.x = height delta to the next coarser LOD, uv.y = its
 // normal (12 + 12 bit x / z), tex_scale = chunk LOD + 8 x LOD distance (m); lit.vert / shadow_morph.vert.
@@ -263,6 +269,28 @@ int render_foliage_test_types(void);            // registers the tufts, imported
 // The open-world map kinds (the imported tree species of docs/VGEO.md "Tree models", crop_wheat; plus
 // the tufts and the imported bushes / flowers), once, load time; returns the type count.
 int render_foliage_map_types(void);
+// Ground colour tables (src/render/ground.c, docs/FOLIAGE_GRASS.md): the ground cover table entry of a
+// grass asset (grass_cover_params, 12 floats), how many there are, the grass tops' colour (linear, NULL
+// none) and coverage per terrain material, a material's mean albedo (linear), the macro variation
+// (1 / scale 1, 1 / scale 2 (m), hue swing (rad), value swing, saturation swing, strength).
+void render_ground_set_cover(int id, const float p[12]);
+void render_ground_set_cover_count(int n);
+void render_ground_set_top(int mat, const float rgb[3], float coverage);
+void render_ground_set_color(int mat, const float rgb[3]);
+void render_ground_set_macro(const float m[6]);
+// Terrain shading (src/render/terrain_tex.c, docs/TERRAIN_SHADING.md): the layer textures (names as in
+// TerrainParams.tex), the baked maps (terrain_maps.h; the material map's grid), the parameter block
+// (TerrainGpu), the terrain tool's brush (channel 0..2 tint, 3 variant mask, 4 wear, 5 moisture; map_xf =
+// origin x, z, 1 / spacing, n), the painted map for saving, whether the shading is on.
+bool render_terrain_load(const char (*tex)[48], int count, const char *scatter_atlas);
+void render_terrain_maps(const u8 *blend, const u8 *attr, int n, float origin_x, float origin_z, float spacing);
+void render_terrain_params(const void *gpu, size_t size);
+void render_terrain_paint(float x, float z, float radius, int ch, float value, float strength, const float map_xf[4]);
+const u8 *render_terrain_paint_data(int *n);
+bool render_terrain_active(void);
+// The grass assets' fade at fidelity level `level` (grass / meadow cover): where the terrain's grass term
+// starts (the thinning begins) and ends. false (outputs untouched) without grass assets.
+bool render_grass_fade(int level, float *start, float *end);
 // Scatter roles of the tree types (the order of vgeo_tree.h VgTreeRole).
 enum { RENDER_TREE_CONIFER, RENDER_TREE_BROADLEAF, RENDER_TREE_DEAD, RENDER_TREE_BUSH, RENDER_TREE_FLOWER, RENDER_TREE_ROLES };
 // The registered types of a role (names, pick weights; registration order: the same on every machine

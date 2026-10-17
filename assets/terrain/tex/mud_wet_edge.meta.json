@@ -1,0 +1,17 @@
+{
+ "size": 2048,
+ "source": "placeholder",
+ "mean": "#4a3f2e",
+ "target_mean": "#4a3f2e",
+ "mean_delta": 0.0,
+ "seam": 0.4273,
+ "tile_m": 3.0,
+ "name": "mud_wet_edge",
+ "kind": "transition",
+ "tool_version": 1,
+ "recipe": "assets/terrain/gen/mud_wet_edge.json",
+ "pair": [
+  "dirt",
+  "mud"
+ ]
+}

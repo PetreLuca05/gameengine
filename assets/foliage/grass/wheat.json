@@ -1,0 +1,98 @@
+{
+  "_doc": "Wheat (reference b8): 6 crossed cards, 0.8-1.0 m, on fields.",
+  "atlas": "wheat",
+  "grid": [
+    2,
+    1
+  ],
+  "variants": 3,
+  "clump": {
+    "cards": 5,
+    "segments": 3,
+    "height_m": [
+      0.8,
+      1.0
+    ],
+    "width_m": [
+      0.55,
+      0.7
+    ],
+    "fan_deg": 4,
+    "lean": 0.06,
+    "bend_m": 0.08,
+    "base_jitter_m": 0.1,
+    "normal_dome": 0.4,
+    "mirror": 0.5
+  },
+  "placement": {
+    "density": {
+      "field": 2.4,
+      "crop": 1.8
+    },
+    "clump_scale_m": 20,
+    "clump_amount": 0.15,
+    "bare": 0.1,
+    "scale": [
+      0.85,
+      1.15
+    ],
+    "slope_max": 1.0
+  },
+  "shading": {
+    "roughness": 0.8,
+    "specular": 0.3,
+    "sss": 0.3,
+    "sss_wrap": 0.5,
+    "alpha_cutoff": 0.45,
+    "root_dark": 0.8,
+    "root_extent": 0.2,
+    "ground_match": 0.15,
+    "ground_extent": 0.2,
+    "var_hue_deg": 3,
+    "var_sat": 0.06,
+    "var_val": 0.06,
+    "macro": 0.7,
+    "ao_root": 0.6
+  },
+  "terrain": {
+    "top_color": "#957a55",
+    "coverage": 0.8
+  },
+  "tiers": {
+    "off": {
+      "full_m": 15,
+      "end_m": 30,
+      "shadow_m": 0,
+      "density": 0.4
+    },
+    "low": {
+      "full_m": 25,
+      "end_m": 45,
+      "shadow_m": 0,
+      "density": 0.55
+    },
+    "medium": {
+      "full_m": 40,
+      "end_m": 70,
+      "shadow_m": 12,
+      "density": 0.75
+    },
+    "high": {
+      "full_m": 55,
+      "end_m": 85,
+      "shadow_m": 20,
+      "density": 0.9
+    },
+    "modern": {
+      "full_m": 60,
+      "end_m": 95,
+      "shadow_m": 20,
+      "density": 1.0
+    }
+  },
+  "wind": {
+    "main": 0.9,
+    "detail": 1.0,
+    "flutter": 0.8
+  }
+}

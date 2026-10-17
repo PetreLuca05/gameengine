@@ -1,0 +1,14 @@
+{
+ "size": 2048,
+ "source": "placeholder",
+ "mean": "#3d3326",
+ "target_mean": "#3d3326",
+ "mean_delta": 0.0,
+ "seam": 0.153,
+ "tile_m": 3.0,
+ "name": "mud",
+ "kind": "terrain_layer",
+ "tool_version": 1,
+ "recipe": "assets/terrain/gen/mud.json",
+ "replaces": 13
+}

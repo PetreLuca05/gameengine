@@ -1,0 +1,83 @@
+{
+  "_doc": "Wheat stalks with bearded ears (reference b8: r2). Warmer than the old card (h 34 vs 46).",
+  "kind": "blade_atlas",
+  "model": "higgsfield-ai/soul/standard",
+  "resolution": "1080p",
+  "aspect_ratio": "1:1",
+  "style": "blade",
+  "background": "magenta",
+  "grid": [
+    2,
+    1
+  ],
+  "size": 2048,
+  "fill": 0.94,
+  "color_match": 0.85,
+  "target": {
+    "root": "#7a6a48",
+    "mid": "#8d7250",
+    "tip": "#957a55",
+    "dry_root": "#7a6a48",
+    "dry_mid": "#8d7250",
+    "dry_tip": "#957a55"
+  },
+  "avoid": "soil, roots, pot, vase, hands, shadows on the background, gradient background, blur, bokeh, depth of field, cartoon, illustration, saturated emerald or blue-green colour, pink or purple tint on the leaves, frame, border, text, watermark",
+  "checks": {
+    "coverage": [
+      0.03,
+      0.5
+    ],
+    "bottom": 0.01,
+    "residue": 0.03
+  },
+  "cells": [
+    {
+      "prompt": "A bunch of about ten ripe golden wheat stalks with full bearded ears and long awns, warm golden tan straw, a few thin dry leaves low on the stalks",
+      "placeholder": {
+        "blades": [
+          9,
+          11
+        ],
+        "height": [
+          0.85,
+          0.98
+        ],
+        "width": 0.008,
+        "arch": 0.08,
+        "fan": 8,
+        "dry": 1.0,
+        "plume": 0.9,
+        "plume_col": "#a4845a",
+        "seed": 51
+      }
+    },
+    {
+      "prompt": "About eight ripe wheat stalks with bearded ears, slightly bent, warm golden straw colour, thin dry leaves",
+      "placeholder": {
+        "blades": [
+          7,
+          9
+        ],
+        "height": [
+          0.82,
+          0.98
+        ],
+        "width": 0.008,
+        "arch": 0.15,
+        "fan": 10,
+        "dry": 1.0,
+        "plume": 0.9,
+        "plume_col": "#a4845a",
+        "seed": 52
+      }
+    }
+  ],
+  "card": {
+    "height_m": [
+      0.8,
+      1.0
+    ],
+    "width_m": 0.65
+  },
+  "ref_region": "r2_wheat_ears"
+}

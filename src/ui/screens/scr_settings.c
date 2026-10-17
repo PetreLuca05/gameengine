@@ -561,6 +561,9 @@ static void tab_graphics(GuiCursor *c, GuiRect content) {
     }
     row_fid_slider(c, "Foliage density", FF_FOLIAGE_DENSITY, 0, 1, 0.05f, "%.2f", NULL);
     row_fid_slider(c, "Impostors below", FF_IMPOSTOR_PX, 0, 128, 4, "%.0f px", "Distant foliage switches to impostor cards below this size (larger: earlier).");
+    static const char *const terrain[] = { "Minimal", "Low", "Medium", "High", "Ultra" };
+    row_fid_combo(c, "Terrain detail", FF_TERRAIN_QUALITY, terrain, NULL, 5,
+                  "Ground texturing: tiling breakers, colour variation, transitions, parallax, scatter (docs/TERRAIN_SHADING.md).");
     row_fid_slider(c, "Character detail (LOD)", FF_LOD_BIAS, 0.25f, 4.0f, 0.05f, "%.2fx", NULL);
     static const char *const chq[] = { "Low", "Medium", "High", "Ultra" };
     row_fid_combo(c, "Character quality", FF_CHAR_QUALITY, chq, NULL, 4, NULL);

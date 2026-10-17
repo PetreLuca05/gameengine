@@ -1,0 +1,75 @@
+{
+  "_doc": "Leafy shrub sprigs, pinnate leaflets (reference r1 right: h 80, bluer than the grass).",
+  "kind": "blade_atlas",
+  "model": "higgsfield-ai/soul/standard",
+  "resolution": "1080p",
+  "aspect_ratio": "1:1",
+  "style": "card",
+  "background": "magenta",
+  "grid": [
+    2,
+    1
+  ],
+  "size": 2048,
+  "fill": 0.94,
+  "color_match": 0.85,
+  "target": {
+    "root": "#4a5a30",
+    "mid": "#55693a",
+    "tip": "#62763f"
+  },
+  "avoid": "soil, pot, vase, hands, flowers, berries, shadows on the background, gradient background, blur, bokeh, cartoon, illustration, frame, text, watermark",
+  "checks": {
+    "coverage": [
+      0.08,
+      0.7
+    ],
+    "bottom": 0.005,
+    "residue": 0.03
+  },
+  "cells": [
+    {
+      "prompt": "A small leafy sprig of a wild shrub with pinnate compound leaves of many small oval leaflets, fresh mid green, the stem rising from the bottom and branching",
+      "placeholder": {
+        "blades": [
+          5,
+          7
+        ],
+        "height": [
+          0.6,
+          0.9
+        ],
+        "width": 0.05,
+        "arch": 0.2,
+        "fan": 35,
+        "dry": 0.0,
+        "seed": 61
+      }
+    },
+    {
+      "prompt": "A leafy twig of a low wild shrub with small oval leaflets in pairs along thin stems, mid green with lighter young leaves, rising from the bottom",
+      "placeholder": {
+        "blades": [
+          5,
+          7
+        ],
+        "height": [
+          0.6,
+          0.9
+        ],
+        "width": 0.05,
+        "arch": 0.25,
+        "fan": 40,
+        "dry": 0.0,
+        "seed": 62
+      }
+    }
+  ],
+  "card": {
+    "height_m": [
+      0.3,
+      0.7
+    ],
+    "width_m": 0.6
+  }
+}

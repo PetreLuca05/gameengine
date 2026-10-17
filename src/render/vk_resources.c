@@ -190,6 +190,7 @@ void vkr_recreate_linear_sampler(void) {
     vkr_rewrite_all_texture_sets();
     vkg_samplers_changed();
     vks_samplers_changed();
+    vkt_samplers_changed();
 }
 
 void vkr_create_samplers(void) {

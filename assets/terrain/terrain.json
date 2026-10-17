@@ -1,0 +1,61 @@
+{
+  "_doc": "Terrain shading (docs/TERRAIN_SHADING.md, src/world/terrain/terrain_params.h). slots: terrain material (mapgen MgMaterial name) -> layer (layers/<name>.json). Hot reloaded (terrain_reload, automatic while r_terrain_watch is on).",
+  "slots": {
+    "grass": "ground_litter",
+    "meadow": "meadow_ground",
+    "forest": "forest_floor",
+    "dirt": "dirt",
+    "rock": "rock",
+    "sand": "sand",
+    "gravel": "gravel",
+    "asphalt": "asphalt",
+    "dirt_road": "path",
+    "concrete": "concrete",
+    "field": "field_soil",
+    "crop": "crop",
+    "plowed": "plowed",
+    "mud": "mud"
+  },
+  "blend_radius_m": 3.0,
+  "distances": {
+    "hex_far_m": 160,
+    "parallax_m": 10,
+    "scatter_m": 35,
+    "detail_m": 18
+  },
+  "macro": {
+    "scale1_m": 220,
+    "scale2_m": 65,
+    "hue_deg": 7,
+    "val": 0.08,
+    "sat": 0.1,
+    "strength": 1.0,
+    "texture_strength": 1.0
+  },
+  "crumb_m": 0.18,
+  "slope_tint_strength": 1.0,
+  "curvature_strength": 1.0,
+  "snow": {
+    "line_m": 120,
+    "band_m": 40,
+    "noise_m": 15,
+    "per_degree_m": 25
+  },
+  "grass_term": {
+    "strength": 1.0
+  },
+  "scatter": {
+    "atlas": "scatter_ground",
+    "grid": [
+      3,
+      2
+    ]
+  },
+  "quality_by_level": [
+    0,
+    1,
+    2,
+    3,
+    4
+  ]
+}

@@ -1,0 +1,14 @@
+{
+ "size": 2048,
+ "source": "placeholder",
+ "mean": "#a59a7a",
+ "target_mean": "#a59a7a",
+ "mean_delta": 0.0,
+ "seam": 0.6808,
+ "tile_m": 4.0,
+ "name": "sand",
+ "kind": "terrain_layer",
+ "tool_version": 1,
+ "recipe": "assets/terrain/gen/sand.json",
+ "replaces": 5
+}

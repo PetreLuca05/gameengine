@@ -1,0 +1,7 @@
+{
+  "_doc": "Shared prompt tails for assets/foliage/gen recipes (tools/vfxgen/groundgen.py). Magenta backdrop: no plant colour is near it, so the key is clean on green and straw blades.",
+  "styles": {
+    "blade": "Botanical studio reference photograph, the plant isolated on a solid flat pure magenta (#FF00FF) background that fills the rest of the frame, the stems enter from the bottom edge of the frame and the whole plant is in view, front view, even soft diffuse daylight, no cast shadows, sharp focus over the whole plant, natural realistic colours, photorealistic, high detail",
+    "card": "Botanical studio reference photograph, the plant part isolated on a solid flat pure magenta (#FF00FF) background, the stem enters from the bottom edge of the frame, the whole sprig in view, front view, even soft diffuse daylight, no cast shadows, sharp focus, natural realistic colours, photorealistic, high detail"
+  }
+}

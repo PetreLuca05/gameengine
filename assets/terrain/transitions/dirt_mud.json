@@ -1,0 +1,29 @@
+{
+  "name": "dirt_mud",
+  "a": [
+    "mud"
+  ],
+  "b": [
+    "dirt",
+    "grass",
+    "meadow",
+    "dirt_road",
+    "field",
+    "plowed"
+  ],
+  "width_m": 1.0,
+  "edge_noise_scale_m": 2.5,
+  "edge_noise_strength_m": 0.5,
+  "crumbs": 0.1,
+  "modes": [
+    "noise",
+    "crumbs",
+    "set",
+    "moisture"
+  ],
+  "set": "mud_wet_edge",
+  "set_strength": 0.9,
+  "set_tile_m": 3.0,
+  "moisture_bias_m": 0.8,
+  "puddle_bias": 1.0
+}

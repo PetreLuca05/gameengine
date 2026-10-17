@@ -1,0 +1,14 @@
+{
+ "size": 2048,
+ "source": "placeholder",
+ "mean": "#6b6236",
+ "target_mean": "#6b6236",
+ "mean_delta": 0.0,
+ "seam": 1.4363,
+ "tile_m": 2.5,
+ "name": "ground_moss",
+ "kind": "terrain_layer",
+ "tool_version": 1,
+ "recipe": "assets/terrain/gen/ground_moss.json",
+ "variant_of": "ground_litter"
+}

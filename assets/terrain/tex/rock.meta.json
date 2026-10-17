@@ -1,0 +1,14 @@
+{
+ "size": 2048,
+ "source": "placeholder",
+ "mean": "#7a756b",
+ "target_mean": "#7a756b",
+ "mean_delta": 0.0,
+ "seam": 0.089,
+ "tile_m": 6.0,
+ "name": "rock",
+ "kind": "terrain_layer",
+ "tool_version": 1,
+ "recipe": "assets/terrain/gen/rock.json",
+ "replaces": 4
+}
