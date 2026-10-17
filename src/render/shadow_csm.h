@@ -24,7 +24,7 @@
 #include "core/base.h"
 #include "core/dgmath.h"
 
-#define CSM_MAX 3
+#define CSM_MAX 4
 #define CSM_NEAR 1.0f          // split scheme near distance (m)
 #define CSM_LAMBDA 0.8f        // log / uniform blend of the split scheme
 #define CSM_BLEND 0.12f        // cascade k blends into k + 1 over its last 12 %
@@ -37,16 +37,16 @@
 #define CSM_VM_NORMAL_M 0.004f // viewmodel tile bias floors (m): normal offset, constant
 #define CSM_VM_CONST_M 0.002f
 
-// Texels per cascade tile by r_shadow_quality (the atlas is 2 x 2 tiles). Viewmodel tile size.
-u32 csm_tile_texels(int quality);
-u32 csm_vm_texels(int quality);
+// The viewmodel tile follows the sun's cascade resolution, within 1024 .. 2048.
+u32 csm_vm_texels(u32 sun_tile);
 
 typedef struct CsmParams {
-    int cascades;           // 1 .. 3
+    int cascades;           // 1 .. 4
     u32 tile;               // texels per tile
     float distance;         // m: shadow distance (the last split)
     float fov_y_deg;        // camera vertical field of view (the fit uses at least CSM_FIT_FOV_MIN)
     float aspect;           // width / height
+    const float *splits;    // explicit selection distances (m, Unity's split percentages x distance); NULL: practical scheme
 } CsmParams;
 
 typedef struct CsmLayout {
@@ -73,6 +73,8 @@ mat4 csm_light_view(vec3 to_light);
 // Square tile of `texels` around (center, radius) seen from the light; `back` m of depth behind the
 // sphere centre, CSM_REACH towards the light.
 void csm_fit(const mat4 *lview, vec3 center, float radius, u32 texels, float back, CsmTile *out);
+// The same with the light-side reach given (Unity's Shadow Near Plane Offset, docs/SHADOWS_UNITY_MODEL.md).
+void csm_fit_reach(const mat4 *lview, vec3 center, float radius, u32 texels, float back, float reach, CsmTile *out);
 
 // Bias in metres from the texel size (one formula; the shader applies it per cascade).
 //   normal_m   receiver moved along its normal by normal_m x sin(n, l)
@@ -92,6 +94,12 @@ float csm_kernel_texels(float pen_m, float texel_m, float min_tex, float max_tex
 // Selection the shader makes (lighting.glsl shadow_factor): the cascade for a receiver at distance d,
 // the blend weight into the next one, the distance fade (1 = full shadow).
 int csm_select(const CsmLayout *l, float d, int first, float *blend, float *fade);
+
+// Close Fit (Unity "Close Fit"): a square tile around the light-space bounds of the view slice
+// between view depths d0 and d1 (the frustum corners): tighter than the sphere, but its size and
+// position follow the camera rotation, so edges swim. tan_v / tan_h: the camera's half-FOV tangents.
+void csm_fit_close(const mat4 *lview, vec3 cam, vec3 fwd, vec3 right, vec3 up, float tan_v, float tan_h, float d0, float d1, u32 texels, float reach,
+                   CsmTile *out);
 
 // Viewmodel tile: around the rig's bounds centre (world), fixed radius.
 void csm_fit_vm(const mat4 *lview, vec3 rig_center, u32 texels, CsmTile *out);

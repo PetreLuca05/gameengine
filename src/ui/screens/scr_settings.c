@@ -571,15 +571,57 @@ static void tab_graphics(GuiCursor *c, GuiRect content) {
         }
     }
 
+    // Unity-style Quality > Shadows (docs/SHADOWS_UNITY_MODEL.md), bounded by Engine Fidelity.
     section(c, "Shadows & lighting");
-    static const char *const shadow[] = { "Off", "Low (1024 / cascade)", "Medium (2048 / cascade)", "High (4096 / cascade)" };
-    row_fid_combo(c, "Shadows", FF_SHADOW_QUALITY, shadow, NULL, 4, NULL);
-    static const char *const casc[] = { "1", "2", "3" };
-    static const int casc_v[] = { 1, 2, 3 };
+    static const char *const shmode[] = { "Disable", "Hard Only", "Hard and Soft" };
+    row_fid_combo(c, "Shadows", FF_SHADOWS, shmode, NULL, 3, "Hard Only renders lights set to Soft with hard edges.");
+    static const char *const shres[] = { "Low", "Medium", "High", "Very High" };
+    row_fid_combo(c, "Shadow resolution", FF_SHADOW_RESOLUTION, shres, NULL, 4, "For lights on 'Use Quality Settings': sun cascades 512 .. 4096, lamps / flashlights 256 .. 2048.");
+    static const char *const shproj[] = { "Close Fit", "Stable Fit" };
+    row_fid_combo(c, "Shadow projection", FF_SHADOW_PROJECTION, shproj, NULL, 2, "Close Fit: sharper, edges swim as you turn. Stable Fit: edges never swim.");
+    row_fid_slider(c, "Shadow distance", FF_SHADOW_DISTANCE, 10.0f, 1000.0f, 5.0f, "%.0f m", "The last cascade ends here and fades over the cascade border.");
+    static const char *const casc[] = { "No Cascades", "Two Cascades", "Four Cascades" };
+    static const int casc_v[] = { 1, 2, 4 };
     row_fid_combo(c, "Shadow cascades", FF_SHADOW_CASCADES, casc, casc_v, 3, NULL);
-    row_fid_slider(c, "Shadow distance", FF_SHADOW_DISTANCE, 0.25f, 1.0f, 0.05f, "%.2fx", NULL);
-    static const char *const filt[] = { "PCF (12 taps)", "PCF (16 taps)", "Contact-hardening (PCSS)" };
-    row_fid_combo(c, "Shadow softness", FF_SHADOW_FILTER, filt, NULL, 3, "Softness follows the sky: crisp under the sun, soft in haze, none under overcast.");
+    {
+        // Cascade splits (Unity: percentages of the shadow distance) and the live split bar.
+        Cvar *cc = cv("r_shadow_cascades");
+        int nc = cc ? (cc->i >= 3 ? 4 : cc->i) : 4;
+        if (nc == 2) row_slider_cvar(c, "Cascade split", "r_shadow_split2", 1, 99, 0.5f, "%.1f %%", "Where cascade 1 starts (% of the shadow distance).");
+        if (nc == 4) {
+            row_slider_cvar(c, "Cascade split 1", "r_shadow_split4_1", 1, 97, 0.5f, "%.1f %%", NULL);
+            row_slider_cvar(c, "Cascade split 2", "r_shadow_split4_2", 2, 98, 0.5f, "%.1f %%", NULL);
+            row_slider_cvar(c, "Cascade split 3", "r_shadow_split4_3", 3, 99, 0.5f, "%.1f %%", NULL);
+        }
+        float pct[4] = { 100, 100, 100, 100 };
+        if (nc == 2 && cv("r_shadow_split2")) pct[0] = cv("r_shadow_split2")->f;
+        if (nc == 4) {
+            const char *k[3] = { "r_shadow_split4_1", "r_shadow_split4_2", "r_shadow_split4_3" };
+            for (int i = 0; i < 3; i++) pct[i] = cv(k[i]) ? cv(k[i])->f : 100.0f;
+        }
+        GuiRect r = gw_setting_row(c, "Cascade bar", "Each cascade's share of the shadow distance (the colours of r_shadow_debug 4).", rid("shadow_split_bar"));
+        r.y += gui_s(5);
+        r.h -= gui_s(10);
+        static const u32 col[4] = { UI_RGBA(230, 70, 60, 255), UI_RGBA(70, 220, 90, 255), UI_RGBA(80, 110, 240, 255), UI_RGBA(240, 210, 60, 255) };
+        float x0 = r.x, prev = 0.0f;
+        for (int i = 0; i < nc; i++) {
+            float p = i == nc - 1 ? 100.0f : fminf(fmaxf(pct[i], prev), 100.0f);
+            float x1 = r.x + r.w * p * 0.01f;
+            gd_rect((GuiRect){ x0, r.y, fmaxf(x1 - x0, 1.0f), r.h }, col[i]);
+            char t[16];
+            snprintf(t, sizeof(t), "%.1f%%", p - prev);
+            gd_text_simple(x0 + gui_s(4), r.y + r.h * 0.5f - gui_s(7), gui_s(12), GW_REGULAR, UI_RGBA(20, 20, 20, 255), GUI_LEFT, t);
+            x0 = x1;
+            prev = p;
+        }
+        gd_border(r, 1.0f, UI_RGBA(235, 235, 220, 200));
+        row_slider_cvar(c, "Cascade border", "r_shadow_cascade_border", 0, 50, 1, "%.0f %%", "Blend band at the end of each cascade, and the fade at the shadow distance.");
+    }
+    static const char *const soft[] = { "Low (tent 3x3)", "Medium (tent 5x5)", "High (tent 7x7)", "Ultra (contact hardening)" };
+    row_fid_combo(c, "Soft shadow quality", FF_SOFT_SHADOW_QUALITY, soft, NULL, 4, "Softness also follows the sky: crisp under the sun, soft in haze, none under overcast.");
+    row_slider_cvar(c, "Shadow near plane offset", "r_shadow_near_offset", 2, 5000, 10, "%.0f m", "How far each cascade reaches towards the sun for casters outside the view.");
+    static const char *const smask[] = { "Shadowmask", "Distance Shadowmask" };
+    row_combo_cvar(c, "Shadowmask mode", "r_shadowmask_mode", smask, 2, "Reserved for baked lighting (no baked data yet).");
     row_fid_slider(c, "Skip shadows of props under", FF_SHADOW_MIN_RADIUS, 0, 4, 0.25f, "%.2f m", "Small props cast no sun shadow (cheaper).");
     row_fid_toggle(c, "Lamp / flashlight shadows", FF_LIGHT_SHADOWS, NULL);
     row_fid_toggle(c, "Cloud shadows", FF_CLOUD_SHADOWS, NULL);

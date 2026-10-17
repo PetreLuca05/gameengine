@@ -81,7 +81,9 @@ static void capture_one(World *w, int i, NetEnt *e) {
         }
     }
     if (w->type[i] == ET_SWITCH) e->extra.x = (float)w->lever[i].light_group;
-    if (w->type[i] == ET_LIGHT) e->extra = v3(w->light[i].flicker, w->light[i].scheduled ? 1.0f : 0.0f, 0.0f);
+    // z: the Unity-style Shadow Type and Strength (0 = engine default; else 1 + type x 2 + strength)
+    if (w->type[i] == ET_LIGHT)
+        e->extra = v3(w->light[i].flicker, w->light[i].scheduled ? 1.0f : 0.0f, w->light[i].shadow_given ? 1.0f + 2.0f * (float)w->light[i].shadow.type + w->light[i].shadow.strength : 0.0f);
 }
 
 void repl_capture(World *w, vec3 center, float radius, SnapFrame *out) {
@@ -552,6 +554,17 @@ void repl_apply(World *w, const SnapFrame *f, int local_slot, InterpBuffer *inte
             w->light[i].group = e->light_group;
             w->light[i].flicker = e->extra.x;
             w->light[i].scheduled = e->extra.y > 0.5f;
+            if (!w->authority) {
+                bool given = e->extra.z > 0.5f;
+                if (given && !w->light[i].shadow_given) shs_light_default(&w->light[i].shadow, SHADOW_LIGHT_POINT);
+                w->light[i].shadow_given = given;
+                if (given) {
+                    float v = e->extra.z - 1.0f;
+                    int t = DG_CLAMP((int)floorf(v * 0.5f), 0, SHADOW_TYPE_COUNT - 1);
+                    w->light[i].shadow.type = (ShadowType)t;
+                    w->light[i].shadow.strength = clampf(v - 2.0f * (float)t, 0.0f, 1.0f);
+                }
+            }
         }
         if (e->type == ET_CONTAINER) w->cont[i].opened = (e->flags & EF_OPEN) != 0;
         if (w->comps[i] & C_INTERACT) w->inter[i].enabled = !(e->flags & EF_HIDDEN);

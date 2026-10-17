@@ -42,6 +42,7 @@ vec3 vg_resolve_bary(vec4 c0, vec4 c1, vec4 c2, vec2 pn, out float area) {
     return b / (b.x + b.y + b.z);
 }
 
+uint g_vg_iflags = 0u;   // the resolved instance's flags (VGI_*): Receive Shadows off -> MAT_NO_RECEIVE
 void vg_resolve_material(VgMaterial mat) {
     g_mat_color = mat.color;
     g_mat_params = vec4(mat.roughness, mat.metallic, mat.emissive, mat.tex_scale);
@@ -57,6 +58,7 @@ void vg_resolve_material(VgMaterial mat) {
     g_mat_flags = mat.flags & ~MAT_TEXTURED;
 #endif
     g_mat_flags &= ~VGM_FLAGS;
+    if ((g_vg_iflags & VGI_NO_RECEIVE) != 0u) g_mat_flags |= MAT_NO_RECEIVE;
     if (g_pbr_tex.x == 0u) g_mat_flags &= ~MAT_MR_TEX;
     if (g_pbr_tex.y == 0u) g_mat_flags &= ~MAT_NORMAL_TEX;
     if (g_pbr_tex.z == 0u) g_mat_flags &= ~MAT_OCCLUSION_TEX;
@@ -96,6 +98,7 @@ bool vg_resolve_pixel() {
     g_depth = 1.0 - uintBitsToFloat(hi);
     uvec2 ent = visible[lo >> VG_VIS_TRI_BITS];
     VgXf x = vg_instance_xf(ent.x);
+    g_vg_iflags = x.fp >> 16;
     VgMesh m = meshes[x.mesh];
     vec2 pn = gl_FragCoord.xy * V.viewport.zw * 2.0 - 1.0;
     float area;

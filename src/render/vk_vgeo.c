@@ -833,39 +833,36 @@ void vkg_record_shadow_cull(VkCommandBuffer cmd) {
     if (!active()) return;
     frame_begin(cmd);
     classic_wind();   // the classic renderer draws the local light shadow tiles on both paths
-    if (!G.shadows->i || R->r_shadow_quality->i <= 0) return;
+    if (!G.shadows->i || !(R->shadow_active[0] || R->shadow_active[1] || R->shadow_active[2] || R->shadow_active[3] || R->moon_active)) return;
     u32 frame = R->frame_slot;
     u32 tile = R->shadow_size / 2;
     if (G.sqp) {
         vkCmdResetQueryPool(cmd, G.sqp, frame * 8, 8);
         vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, G.sqp, frame * 8);
     }
-    u32 ncasc = (u32)DG_CLAMP(R->r_shadow_cascades->i, 1, 3);   // Engine Fidelity: cascades drawn this frame
-    // Tiles the sky does not need (render.c shadow_active: the cutoff, wide mode's cascade 0) are
-    // not culled; tile 3 is the moon's (view 4, no timings).
-    for (u32 k = 0; k < 4; k++) {
-        if (k < 3 && (k >= ncasc || !R->shadow_active[k])) {
-            if (G.sqp && k < ncasc) {   // empty intervals keep the readback complete
+    u32 ncasc = (u32)DG_CLAMP((int)R->shq.cascades, 1, 4);   // cascades this frame (Unity's Shadow Cascades)
+    // Tiles the sky does not need (render.c shadow_active: the sun's type, the cutoff, wide mode's
+    // cascade 0) are not culled; view 5 is the moon map (k = 4). Timings: cascades 0..2.
+    for (u32 k = 0; k < 5; k++) {
+        bool on = k < 4 ? (k < ncasc && R->shadow_active[k]) : R->moon_active;
+        if (!on) {
+            if (G.sqp && k < 3 && k < ncasc) {   // empty intervals keep the readback complete
                 vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, G.sqp, frame * 8 + 2 + k * 2);
                 vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, G.sqp, frame * 8 + 3 + k * 2);
             }
             continue;
         }
-        if (k == 3 && !R->shadow_active[3]) continue;
-        // untile: the cascade matrices map into their 2 x 2 atlas tile (render.c)
-        mat4 t = mat4_identity();
-        t.m[0] = 0.5f;
-        t.m[5] = 0.5f;
-        t.m[12] = (k & 1) ? 0.5f : -0.5f;
-        t.m[13] = (k >> 1) ? 0.5f : -0.5f;
-        const mat4 *tile_vp = k == 3 ? &R->shadow_vp_moon : &R->shadow_vps[k];
-        mat4 vp = mat4_mul(mat4_inverse(t), *tile_vp);
-        float radius = R->shadow_radius[k];   // the tile's half extent (render.c: the cascade's sphere; k = 3 the moon tile)
+        // the untiled matrices (render.c shadow_vp_ndc: cascades 0..3, 4 the moon map)
+        mat4 vp = R->shadow_vp_ndc[k];
+        const mat4 *tile_vp = k == 4 ? &R->shadow_vp_moon : &R->shadow_vps[k];
+        u32 px = k == 4 ? R->moon_shadow_size : tile;
+        float radius = R->shadow_radius[k];   // the tile's half extent (render.c)
         float eye[3] = { R->cam.pos.x, R->cam.pos.y, R->cam.pos.z };
         VgViewGpu v;
-        vgeo_view_setup(&v, vp.m, vp.m, eye, (float)tile / (2.0f * radius), 0.0f, tile, tile, G.shadow_error_px->f, 0.0f,
+        vgeo_view_setup(&v, vp.m, vp.m, eye, (float)px / (2.0f * radius), 0.0f, px, px, G.shadow_error_px->f, 0.0f,
                         VGV_ORTHO | VGV_NO_OCCLUSION | VGV_NO_CONE | VGV_NO_SKINNED);
         memcpy(v.raster_view_proj, tile_vp->m, 64);
+        v.cast_layers = R->sun_shadow.culling_mask == SHADOW_LAYERS_ALL ? 0u : (R->sun_shadow.culling_mask | 0x100u);   // 0x100: never 0
         view_foliage(&v);   // the same WPO, density and fade as the main view (cam_pos is the camera)
         vg_cull_record(&G.cull, cmd, frame, 1 + k, &v, NULL, NULL);
         VgPush pc;
@@ -898,8 +895,9 @@ void vkg_record_shadow_cull(VkCommandBuffer cmd) {
 // Inside the shadow pass, cascade k (viewport / scissor / depth bias / frame set already set).
 void vkg_draw_shadow(VkCommandBuffer cmd, u32 k) {
     if (!G.shadow_culled) return;
-    bool moon = k == 3;   // the moon tile: view 4, its own matrix, no timings
-    if (G.sqp && !moon) vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, G.sqp, R->frame_slot * 8 + 2 + k * 2);
+    bool moon = k == 4;   // the moon map: view 5, its own matrix, no timings
+    bool timed = k < 3;
+    if (G.sqp && timed) vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, G.sqp, R->frame_slot * 8 + 2 + k * 2);
     VkDescriptorSet set = vg_cull_set(&G.cull, R->frame_slot, 1 + k);
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, G.p_shadow);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, G.gfx_layout, 3, 1, &set, 0, NULL);
@@ -913,7 +911,7 @@ void vkg_draw_shadow(VkCommandBuffer cmd, u32 k) {
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, G.gfx_layout, 3, 1, &set, 0, NULL);
     vkCmdPushConstants(cmd, G.gfx_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushLit), &pc);
     vkCmdDrawIndirect(cmd, G.cull.v[1 + k].counters.buffer, VGA_SW * 16, 1, 16);
-    if (G.sqp && !moon) {
+    if (G.sqp && timed) {
         vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, G.sqp, R->frame_slot * 8 + 3 + k * 2);
         if (k == 2) G.sqp_written[R->frame_slot] = true;
     }
@@ -1036,7 +1034,10 @@ void render_vgeo_set_level(const RenderVgeoPlacement *p, int count) {
         VgPlacementXf *xf = (VgPlacementXf *)malloc(sizeof(VgPlacementXf) * cap);
         float pp[3] = { pl->pos.x, pl->pos.y, pl->pos.z };
         u32 n = vgeo_placement_expand(pp, pl->yaw, pl->scale, pl->scale_jitter, pl->spacing, pl->grid[0], pl->grid[1], pl->seed, xf, cap);
-        for (u32 k = 0; k < n; k++) vgeo_scene_add_instance(&G.scene, mesh, xf[k].pos, xf[k].rot, xf[k].scale);
+        for (u32 k = 0; k < n; k++) {
+            vgeo_scene_add_instance(&G.scene, mesh, xf[k].pos, xf[k].rot, xf[k].scale);
+            G.scene.instances[G.scene.instance_count - 1].flags_phase |= (pl->shadow_flags & 0xFFFFu) << 16;   // Cast / Receive / layer
+        }
         total += n;
         free(xf);
     }
@@ -1251,9 +1252,9 @@ static void cmd_vgeo_bench(int argc, const char **argv) {
 
 // Local light shadow tile (vk_light_shadow.c): the classic renderer's instances near the light.
 // Inside the atlas pass, PIPE_SHADOW bound by the caller.
-u32 vkg_draw_local_shadow(VkCommandBuffer cmd, vec4 sphere, const vec4 planes[6], u32 cascade, u32 tile_px) {
+u32 vkg_draw_local_shadow(VkCommandBuffer cmd, vec4 sphere, const vec4 planes[6], u32 cascade, u32 tile_px, u32 layers) {
     if (!G.ok || !G.shadows->i) return 0;
-    return vkc_draw_local_shadow(cmd, sphere, planes, cascade, tile_px);
+    return vkc_draw_local_shadow(cmd, sphere, planes, cascade, tile_px, layers);
 }
 
 // ------------------------------------------------------------------ skinned characters

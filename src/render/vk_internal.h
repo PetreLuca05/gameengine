@@ -136,6 +136,7 @@ typedef struct GpuSpotLight { mat4 vp; vec4 pos_range; vec4 dir_cos; vec4 color_
 #define LOCAL_SHADOW_TILES 64     // local light shadow atlas: 8 x 8 tiles (6 per point light, 1 per spot)
 #define SHADOW_PASS_MOON 0x10000u // shadow pass view index of the moon tile (shaders/common.glsl)
 #define SHADOW_PASS_VM 0x20000u   // shadow pass view index of the viewmodel tile (shaders/common.glsl)
+#define SHADOW_PASS_OCCL 0x40000u // shadow pass view index of the rain occlusion map (0 .. 3 are the sun cascades)
 typedef struct FrameData {
     mat4 view_proj, view, proj, vm_proj, shadow_vp;
     mat4 view_proj_nj, prev_view_proj_nj, vm_view_proj_nj, prev_vm_view_proj_nj;
@@ -145,9 +146,9 @@ typedef struct FrameData {
     vec4 fill_color;      // rgb
     vec4 sky_flags;       // x environment + SH valid, y ambient scale, z environment mips, w cloud shadow valid
     vec4 cshadow;         // xy cloud shadow origin (world xz), z 1 / size
-    mat4 shadow_vps[3];   // cascaded shadow maps: world -> atlas tile (2 x 2 atlas, tile 3: the moon, shadow_vp_moon)
-    vec4 shadow_splits;   // x, y, z: cascade selection distances (m from the camera), w: cascade count
-    vec4 shadow_bias;     // x, y, z: constant depth bias per cascade (NDC, from its texel size), w the moon tile
+    mat4 shadow_vps[4];   // cascaded shadow maps: world -> atlas tile (2 x 2 atlas, up to 4 cascades)
+    vec4 shadow_splits;   // cascade selection distances (m from the camera; Close Fit: view depth), cascades 0..3
+    vec4 shadow_bias;     // constant depth bias per cascade (NDC, from its texel size and the sun's Bias)
     vec4 spot_info;       // x spot light count, y cookie valid
     GpuSpotLight spots[MAX_SPOT_LIGHTS];
     // Weather (shaders/weather.glsl)
@@ -169,12 +170,12 @@ typedef struct FrameData {
     vec4 surf_map;
     vec4 surf_info;
     // Sky-driven shadows (shadow_sky.c, docs/SHADOWS.md).
-    mat4 shadow_vp_moon;  // world -> atlas tile 3 (the moon while the sun owns the cascades)
+    mat4 shadow_vp_moon;  // world -> the moon map (bindings 18 / 19; the moon while the sun owns the cascades)
     vec4 ssky0;           // x tan(key source radius), y cast fade, z cascade 0 weight (0: wide mode), w tap budget (0 PCF 12, 1 PCF 16, 2 PCSS 16 + 16)
     vec4 ssky1;           // x unused, y max filter half width (texels), z blocker search (m), w moon tile fade (0 = off)
     vec4 ssky2;           // x tan(moon source radius), y r_shadow_debug view, z contact shadow length scale, w moon tile fade-out radius (m)
-    vec4 shadow_mpt;      // metres per texel: cascades 0..2, w the moon tile
-    vec4 shadow_span;     // metres of light-space depth per NDC unit: cascades 0..2, w the moon tile
+    vec4 shadow_mpt;      // metres per texel: cascades 0..3
+    vec4 shadow_span;     // metres of light-space depth per NDC unit: cascades 0..3
     // LOD cross-fades (docs/LOD.md, shaders/lod_fade.glsl): x dither frame (0..63, 0 = static), y debug bits
     // (1 r_lod_fade_debug, 2 r_lod_debug 2 level colours), z 1 = the new LOD fades (0 = legacy), w terrain
     // surface detail range scale; lod_terrain: x geomorph band (octaves), y chunk diagonal (m).
@@ -182,7 +183,7 @@ typedef struct FrameData {
     vec4 lod_terrain;
     // Cascade fit, bias, filter state, the viewmodel tile (shadow_csm.c, docs/SHADOWS.md).
     mat4 shadow_vp_vm;    // world -> the viewmodel shadow map (bindings 16 / 17)
-    vec4 shadow_nbias;    // normal offset (m) per cascade 0..2, w the moon tile
+    vec4 shadow_nbias;    // normal offset (m) per cascade 0..3
     vec4 shadow_cfg;      // x kernel rotation per frame (TAA on), y PCSS weight, z PCF blocker distance (m), w smallest half width (texels)
     vec4 shadow_cfg2;     // x fixed half width (m, era 2010; 0 = from the sky), y low-sun factor (1 .. 3), z shadow distance (m), w viewmodel FOV scale
     vec4 shadow_vm;       // x metres per texel, y metres per NDC depth, z on (0 = off), w normal offset (m)
@@ -193,6 +194,13 @@ typedef struct FrameData {
     mat4 ss_view_proj;    // world -> the main view's jittered clip (what the screen-space passes saw)
     mat4 ss_view;         // world -> the main view (froxel depth)
     vec4 ss_info;
+    // Unity-style controls (shadow_settings.c, docs/SHADOWS_UNITY_MODEL.md)
+    vec4 shadow_cfg3;     // x cascade count, y projection (0 Close Fit: select by view depth, 1 Stable Fit), z cascade border, w the sun's Strength
+    vec4 shadow_cfg4;     // x the sun's filter (0 none, 1 hard, 2 tent, 3 PCSS), y tent base (texels)
+    vec4 shadow_moon;     // moon map: x metres per texel, y metres per NDC depth, z constant bias (NDC), w normal offset (m)
+    vec4 shadow_moon2;    // x 1 / map size
+    vec4 local_rect[LOCAL_SHADOW_TILES];   // local light atlas tiles: xy uv origin, z uv size (variable sizes)
+    vec4 local_cfg;       // x tent base of Soft local lights (texels), y Hard Only cap (1)
 } FrameData;
 
 typedef struct PushLit {
@@ -210,6 +218,8 @@ typedef enum PipelineId {
     // glTF material variants of PIPE_LIT / PIPE_PREPASS (docs/PBR.md): doubleSided (no culling), alphaMode MASK (discard, no culling)
     PIPE_LIT_2S, PIPE_LIT_MASK, PIPE_PREPASS_2S, PIPE_PREPASS_MASK,
     PIPE_SHADOW_MASK,   // shadow passes: alpha-masked casters (glTF MASK: foliage cards, fences)
+    PIPE_SHADOW_2S,     // shadow passes: Cast Shadows Two Sided / two-sided materials (PIPE_SHADOW culls back faces)
+    PIPE_SHADOW_MORPH_2S,   // the same for terrain geomorph casters (PIPE_SHADOW_MORPH culls back faces)
     PIPE_COUNT
 } PipelineId;
 
@@ -255,6 +265,8 @@ typedef struct Renderer {
     u32 shadow_size;
     RenderTarget vm_shadow;   // the viewmodel shadow tile (first-person rig, docs/SHADOWS.md)
     u32 vm_shadow_size;
+    RenderTarget moon_shadow; // the moon's map (bindings 18 / 19)
+    u32 moon_shadow_size;
 
     // descriptors
     VkDescriptorSetLayout frame_layout;   // set 0
@@ -304,6 +316,10 @@ typedef struct Renderer {
     GpuSpotLight spots[MAX_SPOT_LIGHTS];
     u32 spot_count;
     u32 light_flags[MAX_POINT_LIGHTS], spot_flags[MAX_SPOT_LIGHTS];   // LIGHT_* (render.h)
+    // Unity-style per-light shadow settings (docs/SHADOWS_UNITY_MODEL.md); has_*: given explicitly
+    // (otherwise the engine defaults: points 0.05 m near plane, spots 0.6 m).
+    LightShadowSettings light_set[MAX_POINT_LIGHTS], spot_set[MAX_SPOT_LIGHTS];
+    bool light_set_given[MAX_POINT_LIGHTS], spot_set_given[MAX_SPOT_LIGHTS];
     // Local light shadows (vk_light_shadow.c)
     RenderTarget lshadow;             // D32 atlas, LOCAL_SHADOW_TILES tiles
     u32 lshadow_tile;                 // tile size (px)
@@ -311,6 +327,10 @@ typedef struct Renderer {
     vec4 local_planes[LOCAL_SHADOW_TILES][6];   // culling planes per tile (untiled frustum)
     vec4 local_sphere[LOCAL_SHADOW_TILES];      // caster sphere per tile (light position, radius)
     u32 local_tile_count;
+    vec4 local_rect[LOCAL_SHADOW_TILES];        // uv origin xy, uv size z
+    u32 local_px[LOCAL_SHADOW_TILES][3];        // atlas texels: x, y, size
+    float local_bias[LOCAL_SHADOW_TILES];       // the light's Bias (hardware depth bias scale)
+    u32 local_layers[LOCAL_SHADOW_TILES];       // the light's culling mask
     vec4 light_shadow[MAX_POINT_LIGHTS];
     vec3 lshadow_prev[16];            // last frame's shadowed point lights (selection hysteresis)
     u32 lshadow_prev_count;
@@ -338,23 +358,30 @@ typedef struct Renderer {
     RenderCamera cam;
     RenderEnvironment env;
     mat4 view, proj, view_proj, vm_proj, shadow_vp;   // shadow_vp: the widest cascade (volumetrics, particles, decals)
-    mat4 shadow_vps[3];
+    mat4 shadow_vps[4];
     vec4 shadow_splits;
     vec4 shadow_bias;
-    mat4 shadow_vp_moon;                        // atlas tile 3 (shadow_active[3])
-    bool shadow_active[4];                      // shadow atlas tiles drawn this frame: cascades 0..2, the moon tile
+    mat4 shadow_vp_moon;                        // the moon map (moon_active)
+    bool shadow_active[4];                      // shadow atlas tiles drawn this frame: cascades 0..3
+    bool moon_active;
+    // Unity-style controls (docs/SHADOWS_UNITY_MODEL.md): this frame's quality knobs, the
+    // directional light's settings, its effective type / filter.
+    QualityShadowSettings shq;
+    LightShadowSettings sun_shadow;
+    ShadowType sun_type;
+    ShadowFilter sun_filter;
     // Cascade fit (shadow_csm.c): layout, per tile the untiled matrix (caster culling), sphere radius /
     // snapped centre (vgeo / classic LOD, r_shadow_debug 8); the viewmodel tile; filter / check state.
     CsmLayout csm;
-    mat4 shadow_vp_ndc[4];
-    float shadow_radius[4];
-    vec3 shadow_center[4];
+    mat4 shadow_vp_ndc[5];                      // cascades 0..3, 4 the moon map
+    float shadow_radius[5];
+    vec3 shadow_center[5];
     float shadow_dist;                          // m: the smoothed shadow distance (r_shadow_distance x level reach)
     CsmTile shadow_vm_tile;
     bool shadow_vm_active, shadow_taa;
     float shadow_vm_pcss;                       // viewmodel tile PCSS weight (crossfades on a tier change)
     float shadow_dbg_bias_m;                    // cascade 0 constant bias (m), readout
-    u32 shadow_drawn;                           // tiles rendered this frame: bits 0..3 atlas, 4 viewmodel
+    u32 shadow_drawn;                           // tiles rendered this frame: bits 0..3 atlas, 4 viewmodel, 5 moon
     u32 shadow_unrendered;                      // frames that sampled an unrendered tile (must stay 0)
     // temporal state (TAA / motion blur / velocity)
     mat4 proj_j, vm_proj_j;                     // jittered projections (this frame)
@@ -383,10 +410,13 @@ typedef struct Renderer {
     i64 shader_src_mtime;
 
     // cvars
-    Cvar *r_vsync, *r_wireframe, *r_render_scale, *r_shadow_quality, *r_aniso, *r_texture_quality;
+    Cvar *r_vsync, *r_wireframe, *r_render_scale, *r_aniso, *r_texture_quality;
     Cvar *r_aa, *r_brightness, *r_gamma, *r_grid, *r_vignette, *r_shader_hotreload, *r_culling;
     Cvar *r_vm_fov, *r_cpu_skinning, *r_bloom, *r_bloom_intensity, *r_hdr_output;
-    Cvar *r_shadow_cascades, *r_shadow_distance, *r_shadow_filter, *r_shadow_min_radius;   // Engine Fidelity shadow tiers
+    // Unity-style shadow quality (docs/SHADOWS_UNITY_MODEL.md)
+    Cvar *r_shadows, *r_shadow_resolution, *r_shadow_projection, *r_shadow_cascades, *r_shadow_max_distance, *r_soft_shadow_quality;
+    Cvar *r_shadow_split2, *r_shadow_split4[3], *r_shadow_border, *r_shadow_near_offset, *r_shadowmask_mode, *r_shadowmask_distance;
+    Cvar *r_shadow_min_radius;
     Cvar *r_shadow_debug;       // sky-driven shadow views (docs/SHADOWS.md)
     Cvar *r_vm_shadow;          // the viewmodel shadow tile
     float contact_scale;        // contact shadow ray length scale (penumbra-limited, compute_matrices)
@@ -412,6 +442,7 @@ void vkd_create_targets(void);
 void vkd_destroy_targets(void);
 void vkd_create_shadow_map(u32 size);
 void vkd_create_vm_shadow_map(u32 size);   // the viewmodel tile (bindings 16 / 17)
+void vkd_create_moon_shadow_map(u32 size); // the moon map (bindings 18 / 19)
 
 // vk_resources.c
 GpuBuffer vkr_buffer_create(VkDeviceSize size, VkBufferUsageFlags usage, bool host_visible);
@@ -471,7 +502,7 @@ void vkls_select(FrameData *fd);                         // this frame's shadowe
 void vkls_record(VkCommandBuffer cmd, FrameResources *f); // renders the atlas tiles (after the sun shadow pass)
 // render.c: draws every shadow caster (static + GPU-skinned) touching sphere and inside planes,
 // with shadow cascade index `cascade` (push constants flags.w). Returns the draw count.
-u32 render_draw_shadow_casters(VkCommandBuffer cmd, FrameResources *f, vec4 sphere, const vec4 planes[6], u32 cascade);
+u32 render_draw_shadow_casters(VkCommandBuffer cmd, FrameResources *f, vec4 sphere, const vec4 planes[6], u32 cascade, u32 layers);
 
 // vk_vgeo.c: virtualized geometry in the frame (docs/VGEO.md)
 void vkg_init(void);
@@ -490,7 +521,7 @@ void vkg_submit_fallback(void);
 // Skinned draws vgeo takes this frame (main view): routed[i] = 1; returns their count.
 u32 vkg_route_skinned(const SkinnedDraw *draws, u32 n, const mat4 *bones, u8 *routed);
 // Point / spot light shadow tile: vgeo instances near the light as discrete LOD meshes (PIPE_SHADOW bound).
-u32 vkg_draw_local_shadow(VkCommandBuffer cmd, vec4 sphere, const vec4 planes[6], u32 cascade, u32 tile_px);               // r_era 2015 / 2010: discrete LODs through the legacy draws (after compute_matrices)
+u32 vkg_draw_local_shadow(VkCommandBuffer cmd, vec4 sphere, const vec4 planes[6], u32 cascade, u32 tile_px, u32 layers);               // r_era 2015 / 2010: discrete LODs through the legacy draws (after compute_matrices)
 
 // vk_water.c: water surfaces (docs/WATER.md "Rendering")
 void vkw_init(void);
@@ -523,7 +554,7 @@ void vkc_draw_pip(VkCommandBuffer cmd);       // inside the scope PiP pass (own 
 // The scope PiP view of this frame (setup_scope_pip): view-projection, eye, pixels per unit tangent; false: none.
 bool render_scope_cull(mat4 *vp, vec3 *eye, float *px_scale);
 void vkc_draw_shadow(VkCommandBuffer cmd, u32 cascade);   // inside the sun shadow pass
-u32 vkc_draw_local_shadow(VkCommandBuffer cmd, vec4 sphere, const vec4 planes[6], u32 view, u32 tile_px);
+u32 vkc_draw_local_shadow(VkCommandBuffer cmd, vec4 sphere, const vec4 planes[6], u32 view, u32 tile_px, u32 layers);
 void vkc_stats(void);
 
 // vk_vfx.c: GPU particles, decals, distortion

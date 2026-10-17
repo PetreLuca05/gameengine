@@ -778,7 +778,7 @@ static bool load_map(World *w, const char *map) {
     int n = ok ? w->level.vgeo_count : 0;
     for (int i = 0; i < n; i++) {
         const LevelVgeo *v = &w->level.vgeo[i];
-        pl[i] = (RenderVgeoPlacement){ v->mesh, v->pos, v->color, v->yaw, v->scale, v->scale_jitter, v->spacing, v->roughness, { v->grid[0], v->grid[1] }, v->seed };
+        pl[i] = (RenderVgeoPlacement){ v->mesh, v->pos, v->color, v->yaw, v->scale, v->scale_jitter, v->spacing, v->roughness, { v->grid[0], v->grid[1] }, v->seed, v->shadow_flags };
     }
     render_vgeo_set_level(pl, n);
     return ok;

@@ -485,7 +485,7 @@ void post_begin_frame(const PostFrameIn *in) {
     u->sun_dir = v4(in->sun_dir.x, in->sun_dir.y, in->sun_dir.z, in->sun_intensity);
     // w: sun shadows on x the sky cutoff fade (shadow_sky.c; the volumetrics' shafts fade with the cast shadows)
     float shadow_w = R->env.shadow_sky_valid ? R->env.shadow_sky.key.fade : 1.0f;
-    u->sun_color = v4(in->sun_color.x, in->sun_color.y, in->sun_color.z, R->r_shadow_quality->i > 0 ? shadow_w : 0.0f);
+    u->sun_color = v4(in->sun_color.x, in->sun_color.y, in->sun_color.z, (R->shadow_active[0] || R->shadow_active[1]) ? shadow_w : 0.0f);
     u->sky = v4(in->sky.x, in->sky.y, in->sky.z, in->ambient);
     u->ground = v4(in->ground.x, in->ground.y, in->ground.z, (float)R->light_count);
     u->misc = v4(in->dt, in->camera_cut ? 1.0f : 0.0f, in->ads ? 1.0f : 0.0f, (float)in->output_w / (float)DG_MAX(1u, in->output_h));

@@ -1,6 +1,8 @@
-// Sky-driven shadows, game side (docs/SHADOWS.md): assets/render/shadows_sky.json (hot reload),
+// Sky-driven shadows, game side (docs/SHADOWS.md, docs/SHADOWS_UNITY_MODEL.md): the Unity-style
+// light controls (the sun's settings from shadows_sky.json "sun_shadow" / the level's "sun_shadow",
+// sun_shadow and light_shadow commands, shadow_settings readout), assets/render/shadows_sky.json (hot reload),
 // the driver's state (src/render/shadow_sky.c) stepped once per frame from daynight_environment,
-// the fidelity inputs (r_shadow_filter = softness model, r_moon_shadows, the 2010 era's fixed
+// the fidelity inputs (r_shadows / r_soft_shadow_quality = the softness model, r_moon_shadows, the 2010 era's fixed
 // hardness), the reference presets (shadow_preset: time + weather for the dev room's shadow
 // corner), the readout (r_shadow_debug: sun vs sky irradiance, contrast, source radius, mode, the
 // predicted lit / shade ratio of the reference surface, the cascades, bias, filter and jitter state;
@@ -18,6 +20,7 @@
 #include "core/log.h"
 #include "core/engine.h"
 #include "core/platform.h"
+#include "cJSON.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -33,8 +36,20 @@ static struct {
     bool loaded, have;
     i64 mtime;
     double next_poll;
-    Cvar *moon_shadows, *debug, *filter, *era;
+    Cvar *moon_shadows, *debug, *era, *mode, *soft;
+    LightShadowSettings sun_json;   // shadows_sky.json "sun_shadow" (the default of every level)
 } SS;
+
+// "sun_shadow": {"type": ..., "strength": ...} -> settings (unknown keys warned, the rest kept).
+static void parse_light_shadow(const cJSON *o, LightShadowSettings *ls, const char *where) {
+    for (const cJSON *k = o ? o->child : NULL; k; k = k->next) {
+        char v[32], err[160];
+        if (cJSON_IsString(k)) dg_strcpy(v, sizeof(v), k->valuestring);
+        else if (cJSON_IsNumber(k)) snprintf(v, sizeof(v), "%g", k->valuedouble);
+        else continue;
+        if (k->string[0] != '_' && !shs_light_set(ls, k->string, v, err, sizeof(err))) log_warn("%s: sun_shadow: %s", where, err);
+    }
+}
 
 static void load(void) {
     ShadowSkyConfig c = SS.cfg;
@@ -43,6 +58,14 @@ static void load(void) {
     platform_data_path(SSKY_PATH, p, sizeof(p));
     if (ssky_config_load(&c, p, err, sizeof(err))) SS.cfg = c;
     else log_warn("shadows_sky: %s (keeping the previous values)", err);
+    // The directional light's Unity-style shadow settings (the default of every level).
+    shs_light_default(&SS.sun_json, SHADOW_LIGHT_DIRECTIONAL);
+    char *txt = platform_read_file(p, NULL);
+    cJSON *root = txt ? cJSON_Parse(txt) : NULL;
+    free(txt);
+    if (root) parse_light_shadow(cJSON_GetObjectItemCaseSensitive(root, "sun_shadow"), &SS.sun_json, SSKY_PATH);
+    if (root) cJSON_Delete(root);
+    if (!SS.loaded) render_set_sun_shadow(&SS.sun_json);
     if (!SS.loaded) SS.cfg = c;
     SS.loaded = true;
     SS.mtime = platform_file_mtime(p);
@@ -70,8 +93,13 @@ static void orbit_frame(void);
 
 void shadow_sky_frame(ShadowSkyInput *in, ShadowSkyOut *out, float tod_cloud_wind) {
     poll_reload();
-    Cvar *f = find(&SS.filter, "r_shadow_filter"), *e = find(&SS.era, "r_era");
-    in->softness = f ? DG_CLAMP(f->i, 0, 2) : 2;
+    // The Unity knobs pick the sky driver's softness model: Ultra (PCSS + wide mode), the tent
+    // tiers (the sky widens the tent), Hard (no sky softness). The sky never changes the type.
+    Cvar *e = find(&SS.era, "r_era"), *mode = find(&SS.mode, "r_shadows"), *soft = find(&SS.soft, "r_soft_shadow_quality");
+    LightShadowSettings sun;
+    render_get_sun_shadow(&sun);
+    ShadowType t = shs_effective_type(sun.type, mode ? (ShadowsMode)mode->i : SHADOWS_HARD_AND_SOFT);
+    in->softness = t != SHADOW_SOFT ? 0 : (soft && soft->i >= SOFT_ULTRA ? 2 : 1);
     in->moon_shadows = SS.moon_shadows && SS.moon_shadows->i;
     in->fixed_hardness = e && e->i == FID_ERA_2010;
     // daynight.json's cloud wind is the speed at the layer already.
@@ -89,6 +117,19 @@ float shadow_sky_exposure(void) { return SS.have ? SS.out.exposure_comp : 0.0f; 
 void shadow_sky_level_loaded(void) {
     ssky_state_reset(&SS.st);   // snap: no fade from the previous level's sky
     SS.have = false;
+    // The sun's settings: shadows_sky.json's, then the level's "sun_shadow" (docs/SHADOWS_UNITY_MODEL.md).
+    if (!SS.loaded) load();
+    LightShadowSettings ls = SS.sun_json;
+    if (G && G->map[0]) {
+        char rel[160], buf[512];
+        snprintf(rel, sizeof(rel), "data/levels/%s.json", G->map);
+        char *text = platform_read_file(platform_data_path(rel, buf, sizeof(buf)), NULL);
+        cJSON *root = text ? cJSON_Parse(text) : NULL;
+        free(text);
+        if (root) parse_light_shadow(cJSON_GetObjectItemCaseSensitive(root, "sun_shadow"), &ls, rel);
+        if (root) cJSON_Delete(root);
+    }
+    render_set_sun_shadow(&ls);
 }
 
 // ------------------------------------------------------------------ readout
@@ -109,28 +150,37 @@ static float ref_ratio(const ShadowSkyOut *o, float elev) {
     return shd > 1e-9f ? lit / shd : 1.0f;
 }
 
-#define INFO_LINES 6
-static void info_lines(char lines[][160], int *n) {
+#define INFO_LINES 9
+static void info_lines(char lines[][224], int *n) {
     const ShadowSkyOut *o = &SS.out;
     const ShadowSkyInput *in = &SS.in;
     float elev = o->key_is_moon ? in->moon_elev : in->sun_elev;
     RenderShadowInfo ri;
     render_shadow_info(&ri);
     int k = 0;
-    snprintf(lines[k++], 160, "shadows: key %s %.1f deg | direct %.4f  sky %.4f  C %.2f | lit/shade (ground) %.2f", o->key_is_moon ? "moon" : "sun", elev * DG_RAD2DEG,
+    snprintf(lines[k++], 224, "shadows: key %s %.1f deg | direct %.4f  sky %.4f  C %.2f | lit/shade (ground) %.2f", o->key_is_moon ? "moon" : "sun", elev * DG_RAD2DEG,
              o->key.intensity, o->sky_e, o->key.contrast, ref_ratio(o, elev));
-    snprintf(lines[k++], 160, "source %.2f deg | %s  fade %.2f  cascade0 %.2f  pcss %.2f  max %.1f tx | veil tau %.2f (T %.2f)  cumulus tau %.1f", o->key.radius_deg, mode_name(o),
+    snprintf(lines[k++], 224, "source %.2f deg | %s  fade %.2f  cascade0 %.2f  pcss %.2f  max %.1f tx | veil tau %.2f (T %.2f)  cumulus tau %.1f", o->key.radius_deg, mode_name(o),
              o->key.fade, o->near_weight, o->pcss_weight, o->pcss_max_texels, o->veil_tau, o->veil_t, o->cumulus_tau);
-    snprintf(lines[k++], 160, "moon tile %s (direct %.4f C %.2f fade %.2f) | clouds drift %.1f m/s | EV %+.2f | ground %.2f %.2f %.2f",
+    snprintf(lines[k++], 224, "moon tile %s (direct %.4f C %.2f fade %.2f) | clouds drift %.1f m/s | EV %+.2f | ground %.2f %.2f %.2f",
              o->second_shadowed ? "on" : "off", o->second.intensity, o->second.contrast, o->second.fade, sqrtf(o->cloud_vel.x * o->cloud_vel.x + o->cloud_vel.y * o->cloud_vel.y),
              o->exposure_comp, o->ground_albedo.x, o->ground_albedo.y, o->ground_albedo.z);
-    char cs[3][48] = { "", "", "" };
-    for (int c = 0; c < ri.cascades && c < 3; c++)
-        snprintf(cs[c], sizeof(cs[c]), " c%d %.1f m r %.1f %.1f cm", c, ri.split[c], ri.radius[c], ri.texel_m[c] * 100.0f);
-    snprintf(lines[k++], 160, "cascades %d x %u | distance %.0f m |%s%s%s", ri.cascades, ri.tile, ri.distance, cs[0], cs[1], cs[2]);
-    snprintf(lines[k++], 160, "bias c0 const %.1f mm normal %.1f mm (low sun x%.2f) | kernel %.1f .. %.1f tx | jitter %s (kernel %s)", ri.bias_m[0] * 1000.0f,
+    char cs[4][40] = { "", "", "", "" };
+    for (int c = 0; c < ri.cascades && c < 4; c++)
+        snprintf(cs[c], sizeof(cs[c]), " c%d %.0f m %.1f cm", c, ri.split[c], ri.texel_m[c] * 100.0f);
+    snprintf(lines[k++], 224, "cascades %d x %u %s | distance %.0f m |%s%s%s%s", ri.cascades, ri.tile, shs_projection_name(ri.projection), ri.distance, cs[0], cs[1], cs[2], cs[3]);
+    // Unity-style quality + the sun's Light settings
+    snprintf(lines[k++], 224, "quality: shadows %s | resolution %s | soft %s | border %.0f%% | near offset %.0f m | shadowmask %s %.0f m (stub)", shs_mode_name(ri.mode),
+             shs_res_name(ri.resolution), shs_soft_name(ri.soft_quality), ri.border * 100.0f, ri.near_offset, ri.shadowmask ? "distance" : "shadowmask", ri.shadowmask_distance);
+    {
+        char d[160];
+        shs_light_describe(&ri.sun, d, sizeof(d));
+        snprintf(lines[k++], 224, "sun: %s -> %s (%s %.0f tx)", d, shs_type_name(ri.sun_type), ri.filter_mode == SHF_PCSS ? "PCSS" : ri.filter_mode == SHF_TENT ? "tent" : ri.filter_mode == SHF_HARD ? "hard" : "none", ri.filter_tent);
+    }
+    snprintf(lines[k++], 224, "local lights: %u shadowed, %u atlas squares (%u px atlas) | strength sun %.2f", ri.local_lights, ri.local_tiles, ri.local_atlas, ri.sun.strength);
+    snprintf(lines[k++], 224, "bias c0 const %.1f mm normal %.1f mm (low sun x%.2f) | kernel %.1f .. %.1f tx | jitter %s (kernel %s)", ri.bias_m[0] * 1000.0f,
              ri.nbias_m[0] * 1000.0f, ri.low_sun, o->min_texels, o->pcss_max_texels, ri.taa ? "TAA" : "off", ri.taa ? "rotates" : "fixed");
-    snprintf(lines[k++], 160, "viewmodel tile %s %u (%.2f mm, r %.2f m, pcss %.2f) | unrendered samples %u", ri.vm_active ? "on" : "off", ri.vm_tile, ri.vm_texel_m * 1000.0f,
+    snprintf(lines[k++], 224, "viewmodel tile %s %u (%.2f mm, r %.2f m, pcss %.2f) | unrendered samples %u", ri.vm_active ? "on" : "off", ri.vm_tile, ri.vm_texel_m * 1000.0f,
              ri.vm_radius, ri.vm_pcss, ri.unrendered);
     *n = k;
 }
@@ -140,13 +190,13 @@ static void info_lines(char lines[][160], int *n) {
 static void draw_fit(void) {
     RenderShadowInfo ri;
     render_shadow_info(&ri);
-    static const u32 col[4] = { 0xFF3333FFu, 0xFF33FF33u, 0xFFFF5533u, 0xFF999999u };
+    static const u32 col[5] = { 0xFF3333FFu, 0xFF33FF33u, 0xFFFF5533u, 0xFF33D8F0u, 0xFF999999u };
     vec3 L = ri.light_dir;
     vec3 up = fabsf(L.y) > 0.99f ? v3(0, 0, 1) : v3(0, 1, 0);
     vec3 ax = v3_norm(v3_cross(up, L)), ay = v3_cross(L, ax);
-    for (int c = 0; c < 4; c++) {
-        if (!ri.active[c] || (c < 3 && c >= ri.cascades)) continue;
-        float r = c < 3 ? ri.radius[c] : ri.moon_radius;
+    for (int c = 0; c < 5; c++) {
+        if (c < 4 ? (!ri.active[c] || c >= ri.cascades) : !ri.moon_active) continue;
+        float r = c < 4 ? ri.radius[c] : ri.moon_radius;
         vec3 o = ri.center[c];
         dbg_sphere(o, r, col[c], 0.0f);
         // the tile's square, and its edges towards the light
@@ -160,11 +210,33 @@ static void draw_fit(void) {
     if (ri.vm_active) dbg_sphere(ri.vm_center, ri.vm_radius, 0xFFFF33FFu, 0.0f);
 }
 
+// The cascade split bar (Unity's Quality panel bar): the shadow distance as one bar, each cascade's
+// share in its debug colour, the percentages written in. Also drawn by Settings > Graphics.
+void shadow_split_bar(float x, float y, float w, float h) {
+    RenderShadowInfo ri;
+    render_shadow_info(&ri);
+    static const u32 col[4] = { UI_RGBA(230, 70, 60, 230), UI_RGBA(70, 220, 90, 230), UI_RGBA(80, 110, 240, 230), UI_RGBA(240, 210, 60, 230) };
+    float x0 = x, D = fmaxf(ri.distance, 1.0f);
+    for (int c = 0; c < ri.cascades && c < 4; c++) {
+        float x1 = x + w * fminf(ri.split[c] / D, 1.0f);
+        ui_rect(x0, y, fmaxf(x1 - x0, 1.0f), h, col[c]);
+        char t[24];
+        snprintf(t, sizeof(t), "%d: %.1f%%", c, (ri.split[c] - (c ? ri.split[c - 1] : 0.0f)) / D * 100.0f);
+        ui_text_shadow(x0 + 4.0f, y + h * 0.5f - 7.0f, FONT_SMALL, UI_RGBA(15, 15, 15, 255), UI_ALIGN_LEFT, t);
+        x0 = x1;
+    }
+    ui_rect_outline(x, y, w, h, 1.0f, UI_RGBA(235, 235, 220, 200));
+}
+
 void shadow_sky_draw(void) {
     Cvar *dbg = find(&SS.debug, "r_shadow_debug");   // the renderer's (render.c)
     if (!dbg || !dbg->i || !SS.have || scene_hides_hud()) return;
     if (dbg->i == 8) draw_fit();
-    char lines[INFO_LINES][160];
+    {
+        float sc = ui_scale();
+        shadow_split_bar(12 * sc, ui_height() - 40.0f * sc, 360.0f * sc, 18.0f * sc);
+    }
+    char lines[INFO_LINES][224];
     int n;
     info_lines(lines, &n);
     float s = ui_scale(), y = ui_height() - (18.0f * n + 70.0f) * s;
@@ -184,7 +256,7 @@ static void cmd_info(int argc, const char **argv) {
     (void)argc;
     (void)argv;
     if (!SS.have) { log_info("shadow_info: no time-of-day sky on this level"); return; }
-    char lines[INFO_LINES][160];
+    char lines[INFO_LINES][224];
     int n;
     info_lines(lines, &n);
     for (int i = 0; i < n; i++) log_info("%s", lines[i]);
@@ -409,8 +481,85 @@ static void cmd_orbit(int argc, const char **argv) {
     log_info("shadow_orbit: %s (%.1f deg/s)", OR.on ? "on" : "off", OR.rate);
 }
 
+// ------------------------------------------------------------------ Unity-style light settings
+
+// sun_shadow [<key> <value> ...]: the directional light's settings (docs/SHADOWS_UNITY_MODEL.md).
+static void cmd_sun_shadow(int argc, const char **argv) {
+    LightShadowSettings ls;
+    render_get_sun_shadow(&ls);
+    for (int i = 1; i + 1 < argc; i += 2) {
+        char err[160];
+        if (!shs_light_set(&ls, argv[i], argv[i + 1], err, sizeof(err))) { log_info("sun_shadow: %s", err); return; }
+    }
+    if (argc > 1) render_set_sun_shadow(&ls);
+    char d[200];
+    shs_light_describe(&ls, d, sizeof(d));
+    log_info("sun_shadow: %s", d);
+}
+
+// The lights light_shadow addresses: "all", "nearest" (to the camera), or an entity index.
+static int light_targets(World *w, const char *sel, int *out, int cap) {
+    int n = 0, best = -1;
+    float bd = 1e30f;
+    Player *lp = game_local_player();
+    vec3 cam = lp ? lp->sim.move.pos : v3(0, 0, 0);
+    ENT_FOREACH(w, i) {
+        if (w->type[i] != ET_LIGHT) continue;
+        if (!strcmp(sel, "all")) { if (n < cap) out[n++] = i; continue; }
+        if (!strcmp(sel, "nearest")) {
+            float d = v3_len2(v3_sub(w->xf[i].pos, cam));
+            if (d < bd) { bd = d; best = i; }
+            continue;
+        }
+        if (atoi(sel) == i && n < cap) out[n++] = i;
+    }
+    if (best >= 0 && n < cap) out[n++] = best;
+    return n;
+}
+
+// light_shadow list | <all|nearest|index> [<key> <value> ...]: point lights' Unity-style shadow
+// settings (host; Type and Strength replicate to clients). Keys: type none|hard|soft, resolution
+// use_quality|low|medium|high|very_high, strength, bias, normal_bias, near_plane, culling_mask, distance.
+static void cmd_light_shadow(int argc, const char **argv) {
+    World *w = G ? G->world : NULL;
+    if (!w) return;
+    if (argc < 2 || !strcmp(argv[1], "list")) {
+        int shown = 0;
+        ENT_FOREACH(w, i) {
+            if (w->type[i] != ET_LIGHT) continue;
+            char d[200];
+            LightShadowSettings ls = w->light[i].shadow;
+            if (!w->light[i].shadow_given) shs_light_default(&ls, SHADOW_LIGHT_POINT);
+            shs_light_describe(&ls, d, sizeof(d));
+            vec3 p = w->xf[i].pos;
+            log_info("light_shadow %d (%.1f %.1f %.1f r %.0f)%s: %s", i, p.x, p.y, p.z, w->light[i].radius, w->light[i].shadow_given ? "" : " default", d);
+            shown++;
+        }
+        if (!shown) log_info("light_shadow: no lights on this level");
+        return;
+    }
+    if (!w->authority) { log_info("light_shadow: host only"); return; }
+    int idx[256];
+    int n = light_targets(w, argv[1], idx, 256);
+    if (!n) { log_info("light_shadow: no light '%s' (list | all | nearest | <index>)", argv[1]); return; }
+    for (int k = 0; k < n; k++) {
+        LightComp *lc = &w->light[idx[k]];
+        if (!lc->shadow_given) shs_light_default(&lc->shadow, SHADOW_LIGHT_POINT);
+        LightShadowSettings ls = lc->shadow;
+        for (int i = 2; i + 1 < argc; i += 2) {
+            char err[160];
+            if (!shs_light_set(&ls, argv[i], argv[i + 1], err, sizeof(err))) { log_info("light_shadow: %s", err); return; }
+        }
+        lc->shadow = ls;
+        lc->shadow_given = true;
+        char d[200];
+        shs_light_describe(&ls, d, sizeof(d));
+        log_info("light_shadow %d: %s", idx[k], d);
+    }
+}
+
 void shadow_sky_register(void) {
-    SS.moon_shadows = cvar_reg_bool("r_moon_shadows", true, CVAR_ARCHIVE, "moon shadows while the sun still owns the cascades (atlas tile 3; Engine Fidelity High / Modern)");
+    SS.moon_shadows = cvar_reg_bool("r_moon_shadows", true, CVAR_ARCHIVE, "moon shadows while the sun still owns the cascades (the moon's own map; Engine Fidelity High / Modern)");
     cmd_register("shadows_sky_reload", cmd_reload, "reload assets/render/shadows_sky.json (also automatic on save)");
     cmd_register("shadow_info", cmd_info, "sky-driven shadows: key light, direct vs sky irradiance, contrast, source radius, mode, moon tile");
     cmd_register("shadow_preset", cmd_preset,
@@ -418,4 +567,8 @@ void shadow_sky_register(void) {
     cmd_register("shadow_switch_stress", cmd_stress,
                  "shadow_switch_stress [sweep s] [quit]: cycle the Engine Fidelity presets, then sweep cloud cover 0 -> 1 -> 0 on each; a reference shadow edge is measured every frame (host)");
     cmd_register("shadow_orbit", cmd_orbit, "shadow_orbit [deg/s | stop]: turn the view slowly to show shadow swimming (default 6 deg/s)");
+    cmd_register("sun_shadow", cmd_sun_shadow,
+                 "sun_shadow [<key> <value> ...]: the directional light's Unity-style shadow settings: type none|hard|soft, resolution use_quality|low..very_high, strength, bias, normal_bias, culling_mask");
+    cmd_register("light_shadow", cmd_light_shadow,
+                 "light_shadow list | <all|nearest|index> [<key> <value> ...]: a point light's Unity-style shadow settings (type, resolution, strength, bias, normal_bias, near_plane, culling_mask, distance; host)");
 }

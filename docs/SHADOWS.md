@@ -3,8 +3,15 @@
 Sun and moon shadows follow the sky: crisp and dark under a clear sun, soft and faint in haze,
 gone under overcast, bluish from the skylight, with a penumbra that widens with the distance from
 the caster. Nobody sets a shadow strength or softness. Both come from the sky and weather state
-every frame. One filter and one bias formula serve every preset and every sky: there is no
-discrete "shadow type" to switch between (see [The continuous model](#the-continuous-model)).
+every frame. One filter and one bias formula serve every preset and every sky (see
+[The continuous model](#the-continuous-model)).
+
+The user-facing knobs are Unity's (docs/SHADOWS_UNITY_MODEL.md). Each light has a Shadow Type
+(None / Hard / Soft), resolution, strength, bias and culling mask. The quality settings add Disable /
+Hard Only / Hard and Soft, cascades 1 / 2 / 4 with split percentages, Close / Stable Fit, and Soft
+Shadow Quality (tent 3 / 5 / 7, Ultra = PCSS). Everything below is what "Soft" means on the sun: the
+sky sets how wide the penumbra opens and how dark the shadow is. Hard is one bilinear compare fetch
+with the same texel-scaled bias.
 
 | File | Role |
 |---|---|
@@ -155,11 +162,12 @@ pipeline runs with continuous parameters:
 | bias | normal offset / constant / slope, from the texel size | `csm_bias` (texel, sun elevation) | follows the texel size; the low-sun factor is smooth |
 | distance | where the last cascade ends | `r_shadow_distance` × the level reach | glides over ~0.2 s |
 
-The tier (`r_shadow_filter`) only sets the tap budget: 12 taps (PCF), 16 taps (PCF), 16 + 16 (PCSS,
-the blocker search runs while its weight is above 0). The 2010 era fixes the half width
+Soft Shadow Quality (`r_soft_shadow_quality`) sets the kernel: URP tents of 3 / 5 / 7 texels
+(Low / Medium / High; their width follows the sky up to the tier's max) or PCSS (Ultra, the blocker
+search runs while its weight is above 0). The 2010 era fixes the half width
 (`era_pcf` cascade-0 texels, kept in metres on every cascade) and keeps everything else physical.
 
-What still changes in one frame, by design: the shadow resolution (`r_shadow_quality`, reallocated
+What still changes in one frame, by design: the shadow resolution (`r_shadow_resolution`, reallocated
 on the frame boundary and rendered before anything samples it) and the cascade count. The bias
 and the kernel follow the new texel size in that same frame, so the change is one of detail only
 (no bias or softness jump), and `shadow_switch_stress` allows one texel of slack on those frames.
@@ -206,7 +214,8 @@ on sloped receivers do not shadow themselves.
 
 ### Per-preset tables
 
-One formula for all: tiles of `csm_tile_texels(r_shadow_quality)`, the splits above, the sphere
+One formula for all: tiles of `shs_res_texels(r_shadow_resolution)` (512 .. 4096), the Unity split
+percentages of `r_shadow_cascades` 1 / 2 / 4 (docs/SHADOWS_UNITY_MODEL.md), the sphere
 radii (16:9). `tests/test_shadow_csm.c` checks every preset's default and max values and its era
 overrides: the splits end at D, cascade 0 has at least the preset's texels per metre (Off 6, Low 30,
 Medium 40, High / Modern 80; eras 80 % of that), neighbouring cascades within 6× of each other, the
@@ -330,15 +339,18 @@ from the screen-space passes; its sub-millimetre tile covers its contact detail.
 
 ### Tiers and eras
 
-`r_shadow_filter` is the tap budget of the one filter:
+The tiers set the Unity quality knobs (table in docs/SHADOWS_UNITY_MODEL.md):
 
-| Level | Taps | Max half width | Blocker distance |
+| Level | Shadows | Soft quality | Blocker distance |
 |---|---|---|---|
-| Off / Low (0) | 12 | 4 texels | assumed (`pcf_ref_m` 2 m) |
-| Medium (1) | 16 | 8 texels | assumed |
-| High / Modern (2) | 16 + 16 | 32 texels | measured (PCSS) + wide mode |
+| Off | Disable | - | - |
+| Low | Hard Only | (Low) | - |
+| Medium | Hard and Soft | Low (tent 3) | assumed (`pcf_ref_m` 2 m) |
+| High | Hard and Soft | Medium (tent 5) | assumed |
+| Modern | Hard and Soft | Ultra (PCSS) | measured + wide mode |
 
-- `r_moon_shadows` (High / Modern) gives the moon tile 3 (PCF, a twilight fill).
+- `r_moon_shadows` (High / Modern) gives the moon its own map (bindings 18 / 19, a twilight fill),
+  so all four atlas tiles are sun cascades.
 - Cloud shadows: Medium and up.
 - The 2010 era (`r_era 3`) keeps a fixed half width (`era_pcf`). Its contrast and cutoff are still
   physical, so 2010 shadows lighten and vanish with the weather.
@@ -423,7 +435,7 @@ key does this; nothing else runs from level data. The preset sets the weather (l
 - **Softness:** `source.aureole_*`. Keep the disc radii physical.
 - **When overcast kills the shadows:** `clouds.veil_tau` (the cover at which tau passes ~3 is where
   shadows start fading), and `cutoff.off` / `on`.
-- **Cost against quality:** `filter.wide_deg`, `pcss_max_texels`, `r_shadow_quality`.
+- **Cost against quality:** `filter.wide_deg`, `pcss_max_texels`, `r_shadow_resolution`, `r_soft_shadow_quality`.
 - **PCF tiers:** `filter.pcf_ref_m` (the assumed blocker distance), `min_texels`.
 - **Tier crossfade:** `filter.mode_s`.
 - **Drift speed:** `clouds.wind_aloft`.

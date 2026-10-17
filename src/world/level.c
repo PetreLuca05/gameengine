@@ -171,6 +171,24 @@ static void add_ramp(LevelBuild *b, vec3 base, float yaw, float width, float len
     add_static_body(b, &bd);
 }
 
+// Unity-style renderer shadow flags of a brush / placement (docs/SHADOWS_UNITY_MODEL.md):
+// "cast_shadows": "off" | "on" | "two_sided" | "shadows_only", "receive_shadows": bool, "layer": 0..7
+// (light culling masks). The legacy "shadow": false = "cast_shadows": "off".
+#define LEVEL_LAYER_SHIFT 28   // the brush layer rides in the bucket flags above every MAT_* bit
+static u32 level_shadow_flags(const cJSON *e) {
+    u32 f = 0;
+    if (!jb(e, "shadow", true)) f |= MAT_NO_SHADOW;
+    const char *cs = js(e, "cast_shadows", NULL);
+    int c = cs ? shs_cast_from_name(cs) : -1;
+    if (cs && c < 0) log_warn("level: cast_shadows '%s' (off | on | two_sided | shadows_only)", cs);
+    if (c == CAST_SHADOWS_OFF) f |= MAT_NO_SHADOW;
+    else if (c == CAST_SHADOWS_TWO_SIDED) f |= MAT_SHADOW_TWO_SIDED;
+    else if (c == CAST_SHADOWS_ONLY) f |= MAT_SHADOW_ONLY;
+    if (!jb(e, "receive_shadows", true)) f |= MAT_NO_RECEIVE;
+    return f;
+}
+static u32 level_layer(const cJSON *e) { return (u32)DG_CLAMP((int)jf(e, "layer", 0), 0, SHADOW_LAYERS - 1); }
+
 static void build_brush(LevelBuild *b, const cJSON *br) {
     const char *type = js(br, "type", "box");
     vec3 pos = jv3(br, "pos", v3(0, 0, 0));
@@ -178,7 +196,7 @@ static void build_brush(LevelBuild *b, const cJSON *br) {
     u32 color = jcol(br, "color", rgba8(0.6f, 0.6f, 0.62f, 1));
     u32 flags = jb(br, "grid", true) ? MAT_GRID : 0;
     if (jb(br, "fine_grid", false)) flags = MAT_GRID_FINE;
-    if (!jb(br, "shadow", true)) flags |= MAT_NO_SHADOW;
+    flags |= level_shadow_flags(br) | level_layer(br) << LEVEL_LAYER_SHIFT;
     World *w = b->w;
     u32 label_col = rgba8(0.08f, 0.08f, 0.1f, 1);
     const char *label = js(br, "label", NULL);
@@ -443,6 +461,21 @@ static void spawn_entity(World *w, const cJSON *e) {
         if (id && preset[0]) dg_strcpy(w->lever[ENT_INDEX(id)].target_name, sizeof(w->lever[ENT_INDEX(id)].target_name), preset);
     } else if (!strcmp(type, "light")) {
         id = spawn_light(w, pos, jv3(e, "color", v3(1, 0.95f, 0.85f)), jf(e, "radius", 12), jf(e, "intensity", 20), (u32)jf(e, "group", 0), jb(e, "on", true));
+        // "shadow": {"type": "hard", "resolution": "high", "strength": 0.8, "bias": 1, "normal_bias": 1,
+        // "near_plane": 0.2, "culling_mask": 255, "distance": 0} (docs/SHADOWS_UNITY_MODEL.md)
+        const cJSON *sh = cJSON_GetObjectItemCaseSensitive(e, "shadow");
+        if (id && cJSON_IsObject(sh)) {
+            LightComp *lc = &w->light[ENT_INDEX(id)];
+            shs_light_default(&lc->shadow, SHADOW_LIGHT_POINT);
+            lc->shadow_given = true;
+            for (const cJSON *k = sh->child; k; k = k->next) {
+                char v[32], err[128];
+                if (cJSON_IsString(k)) dg_strcpy(v, sizeof(v), k->valuestring);
+                else if (cJSON_IsNumber(k)) snprintf(v, sizeof(v), "%g", k->valuedouble);
+                else continue;
+                if (!shs_light_set(&lc->shadow, k->string, v, err, sizeof(err))) log_warn("level: light shadow: %s", err);
+            }
+        }
         if (id && jb(e, "schedule", false)) {
             // light_schedule: on at dusk / off at dawn (assets/world/daynight.json), off until then.
             LightComp *lc = &w->light[ENT_INDEX(id)];
@@ -497,6 +530,11 @@ static void spawn_entity(World *w, const cJSON *e) {
         v->grid[0] = cJSON_IsArray(g) && cJSON_GetArraySize(g) > 0 ? (u32)cJSON_GetArrayItem(g, 0)->valueint : 1;
         v->grid[1] = cJSON_IsArray(g) && cJSON_GetArraySize(g) > 1 ? (u32)cJSON_GetArrayItem(g, 1)->valueint : 1;
         v->seed = (u32)jf(e, "seed", 1);
+        {
+            // Cast / Receive / layer as vgeo instance flags (vgeo_gpu.h VGI_*)
+            u32 mf = level_shadow_flags(e);
+            v->shadow_flags = ((mf & MAT_NO_SHADOW) ? 8u : 0u) | ((mf & MAT_SHADOW_ONLY) ? 16u : 0u) | ((mf & MAT_NO_RECEIVE) ? 32u : 0u) | level_layer(e) << 6;
+        }
         add_vgeo_collision(w, v, js(e, "collision", v->grid[0] * v->grid[1] > 1 ? "sphere" : "mesh"));
         return;
     } else if (!strcmp(type, "dummy")) {
@@ -626,7 +664,8 @@ bool level_load(World *w, const char *path) {
         StaticDraw *d = &ls->draws[ls->draw_count++];
         d->mesh = mb_upload(&b.buckets[i]);
         d->mat = material_color(v4(1, 1, 1, 1));
-        d->mat.flags = b.bucket_flags[i];
+        d->mat.flags = b.bucket_flags[i] & ~(7u << LEVEL_LAYER_SHIFT);
+        d->layer = (u8)((b.bucket_flags[i] >> LEVEL_LAYER_SHIFT) & 7u);
         d->mat.roughness = b.bucket_surf[i].x;
         d->mat.metallic = b.bucket_surf[i].y;
         d->mat.emissive = b.bucket_surf[i].z;
@@ -649,6 +688,7 @@ void level_draw_static(const World *w, vec3 cam_pos, vec3 cam_fwd) {
         d.mesh = ls->draws[i].mesh;
         d.model = ls->draws[i].model;
         d.mat = ls->draws[i].mat;
+        d.layer = ls->draws[i].layer;
         render_draw(&d);
     }
     for (int i = 0; i < ls->label_count; i++) {

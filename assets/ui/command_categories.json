@@ -8,7 +8,7 @@
         { "id": "weapons", "label": "Weapons", "prefixes": ["wpn_", "weapon_", "ads_", "sight_", "crosshair_", "attach", "bench", "recoil_", "fire_", "sway_", "bal_", "ballistics", "shutter_preview", "muzzle_preview", "aim_", "block_fire_"] },
         { "id": "hud", "label": "HUD & Menus", "prefixes": ["ui_", "hud_", "wheel_", "ping", "peek", "mm_", "menu", "mainmenu", "inventory", "cos_", "kill_stats", "commands"] },
         { "id": "world", "label": "World", "prefixes": ["map", "world_", "time_", "tod_", "weather", "season", "sky_", "env_", "foliage_", "wind_", "water_", "swim_", "buoy_", "ow_", "poi_", "scene", "despawn", "spawn"] },
-        { "id": "rendering", "label": "Rendering", "prefixes": ["r_", "post_", "look", "fidelity", "vgeo_", "screenshot", "photomode", "nightvision", "bake_", "perf_", "shadow_", "shadows_", "classic_", "lod_"] },
+        { "id": "rendering", "label": "Rendering", "prefixes": ["r_", "post_", "look", "fidelity", "vgeo_", "screenshot", "photomode", "nightvision", "bake_", "perf_", "shadow_", "shadows_", "sun_shadow", "light_shadow", "classic_", "lod_"] },
         { "id": "vfx", "label": "Effects", "prefixes": ["vfx_", "fx_", "gore_", "flesh_"] },
         { "id": "animation", "label": "Animation", "prefixes": ["anim_", "char_", "character_", "hitbox_", "ragdoll"] },
         { "id": "zombies", "label": "Zombies", "prefixes": ["horde_", "zombie_"] },

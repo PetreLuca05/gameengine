@@ -156,6 +156,10 @@ typedef struct LightComp {
     bool scheduled;       // light_schedule: on at dusk / off at dawn (time of day), per-light offset
     float flicker;        // 0..1 cosmetic flicker (replicated in NetEnt.extra.x)
     bool sched_state;     // host: last scheduled state (a switch may override until the next change)
+    // Unity-style shadow settings (docs/SHADOWS_UNITY_MODEL.md): level JSON "shadow": {...}, the
+    // light_shadow command. Type and Strength replicate (NetEnt extra.z); the rest is the host's.
+    LightShadowSettings shadow;
+    bool shadow_given;
 } LightComp;
 
 typedef struct Container {
@@ -227,7 +231,7 @@ typedef struct Player {
 } Player;
 
 // cull_dist > 0: skipped beyond that distance from cull_center (open-world detail tiles).
-typedef struct StaticDraw { MeshId mesh; Material mat; mat4 model; vec3 cull_center; float cull_dist; } StaticDraw;
+typedef struct StaticDraw { MeshId mesh; Material mat; mat4 model; vec3 cull_center; float cull_dist; u8 layer; } StaticDraw;
 typedef struct WorldLabel { vec3 pos, right, up; float size; u32 color; bool centered; char text[40]; } WorldLabel;
 typedef struct SpawnPoint { vec3 pos; float yaw; } SpawnPoint;
 
@@ -245,6 +249,7 @@ typedef struct LevelVgeo {
     vec3 pos, color;
     float yaw, scale, scale_jitter, spacing, roughness;
     u32 grid[2], seed;
+    u32 shadow_flags;      // VGI_NO_CAST / VGI_SHADOWS_ONLY / VGI_NO_RECEIVE | layer << VGI_LAYER_SHIFT ("cast_shadows", "receive_shadows", "layer")
 } LevelVgeo;   // collision: "collision": "mesh" (coarsest LOD, default for single placements), "sphere" (grids), "none"
 
 typedef struct LevelStatic {
