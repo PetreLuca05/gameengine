@@ -138,6 +138,7 @@ static void test_placement(void) {
         float got = placed_density(mats[m], GRASS_TIERS - 1, 100.0f, -300.0f, 96.0f, per_asset);
         float want = 0;
         for (int i = 0; i < g_n; i++) want += grass_expected_density(&g_a[i], mats[m], GRASS_TIERS - 1);
+        printf("material %d: %.2f clumps / m2 (expected %.2f)\n", mats[m], got, want);
         CHECK(want > 0 && fabsf(got - want) / want < 0.05f, "material %d: %.2f clumps / m2 placed, %.2f expected (5 %%)", mats[m], got, want);
         if (mats[m] == 1) CHECK(got >= 2.0f && got <= 6.0f, "meadow: %.2f clumps / m2 inside the spec 2 .. 6", got);
         for (int i = 0; i < g_n; i++) {

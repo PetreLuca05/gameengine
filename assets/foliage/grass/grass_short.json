@@ -26,8 +26,8 @@
   },
   "placement": {
     "density": {
-      "grass": 1.1,
-      "meadow": 1.0,
+      "grass": 2.0,
+      "meadow": 1.5,
       "dirt": 0.35,
       "dirt_road": 0.08,
       "forest": 0.2,
@@ -36,7 +36,7 @@
     },
     "clump_scale_m": 4,
     "clump_amount": 0.5,
-    "bare": 0.25,
+    "bare": 0.2,
     "scale": [
       0.8,
       1.2

@@ -41,12 +41,13 @@ float ter_variant_mask(TerLayer L, vec4 var, vec2 xz, vec3 attr, vec4 paint, vec
     return smoothstep(var.z, var.w, v);
 }
 
-// One layer's tap with its variants mixed in (High+).
-TerTap ter_layer_tap(TerLayer L, vec2 xz, vec3 dpx, vec3 dpy, int level, float dist, vec3 attr, vec4 paint, vec3 ng, out float vmask) {
+// One layer's tap with its variant mixed in (High+, the top two layers: the first variant whose mask is
+// on here; bounds the worst case at one extra bombed tap per layer).
+TerTap ter_layer_tap(TerLayer L, vec2 xz, vec3 dpx, vec3 dpy, int level, float dist, vec3 attr, vec4 paint, vec3 ng, bool variants, out float vmask) {
     vec2 uv = xz * L.tex.z, gx = dpx.xz * L.tex.z, gy = dpy.xz * L.tex.z;
     TerTap t = ter_sample(L, L.tex.x, uv, gx, gy, level, dist, xz);
     vmask = 0.0;
-    if (level >= 3) {
+    if (level >= 3 && variants) {
         for (int k = 0; k < 2; k++) {
             vec4 var = k == 0 ? L.var0 : L.var1;
             if (var.x < 0.0) continue;
@@ -56,6 +57,7 @@ TerTap ter_layer_tap(TerLayer L, vec2 xz, vec3 dpx, vec3 dpy, int level, float d
             t.alb = mix(t.alb, v.alb, m);
             t.nrh = mix(t.nrh, v.nrh, m);
             vmask = max(vmask, m * (k == 0 ? 0.5 : 1.0));
+            break;
         }
     }
     return t;
@@ -231,7 +233,7 @@ void terrain_shade(vec3 p, inout vec3 n, inout vec4 base, float variation, out f
         if (L.tex.x < 0.0) {   // untextured slot: its mean colour, flat
             taps[i] = TerTap(vec4(L.mean.rgb, 1.0), vec4(0.5, 0.5, L.mean.w, 0.5));
         } else {
-            taps[i] = ter_layer_tap(L, xz, dpx, dpy, level, dist, attr, paint, ng, vm[i]);
+            taps[i] = ter_layer_tap(L, xz, dpx, dpy, level, dist, attr, paint, ng, i < 2, vm[i]);
         }
         cols[i] = ter_layer_color(L, taps[i].alb.rgb, p, ng, attr, paint, field, level);
         H[i] = taps[i].nrh.a * L.blend.x + L.blend.z;
