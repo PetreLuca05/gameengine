@@ -815,7 +815,14 @@ static void displace_frame(VkCommandBuffer cmd) {
 
 void vkg_record_shadow_cull(VkCommandBuffer cmd) {
     G.shadow_culled = false;
-    if (G.ok && !active()) displace_frame(cmd);   // no-nanite: the classic renderer's grass reads it
+    if (G.ok && !active()) {   // no-nanite: the classic renderer's foliage reads the wind, its tile and the displacement buffer
+        foliage_wind_frame();
+        displace_frame(cmd);
+        VgViewGpu v;
+        memset(&v, 0, sizeof(v));
+        view_foliage(&v);
+        vkc_wind_frame(&v, G.wind_ok ? &G.wind : NULL);
+    }
     if (!active()) return;
     frame_begin(cmd);
     if (!G.shadows->i || R->r_shadow_quality->i <= 0) return;

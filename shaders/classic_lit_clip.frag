@@ -7,8 +7,8 @@
 #include "classic_common.glsl"
 #include "classic_mask.glsl"
 layout(location = 9) flat in float v_fade;
-#define MAT_COLOR pc.color
+#define MAT_COLOR CL_MAT_COLOR
 #define MAT_PARAMS pc.params
-#define MAT_FLAGS pc.flags.x
+#define MAT_FLAGS CL_MAT_FLAGS
 #define LIT_PRE_MAIN if (cl_faded(v_fade, gl_FragCoord.xy) || (pc.model[3].y > 0.0 && cl_mask_alpha(tex, v_uv * max(pc.params.w, 1e-3)) < pc.model[3].y)) discard;
 #include "lit_body.glsl"

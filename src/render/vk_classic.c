@@ -16,6 +16,9 @@
 //            (shaders/vgeo/wpo.glsl, the same snippets) and the grass displacement buffer run in
 //            the vertex shader (shaders/classic_vert.glsl); impostors are camera-facing quads that
 //            blend the 3 nearest atlas frames (shaders/classic_impostor.glsl).
+//   wind     the vgeo path's foliage wind (docs/FOLIAGE_WIND.md): wpo_veg with the material's wind
+//            parameters (push constants), the wind field (fallback + tile ring, this frame's and last
+//            frame's for velocity, layers, debug view) in a per-frame-slot uniform buffer (set 4)
 #include "vk_internal.h"
 #include "vgeo/vgeo_scene.h"
 #include "vgeo/foliage_support.h"
@@ -59,6 +62,11 @@ typedef struct ClMesh {
 
 // Per-instance vertex stream (binding 1): position + scale, rotation, wind phase / fade alpha.
 typedef struct ClInst { float pos[4], rot[4], misc[4]; } ClInst;
+// Set 4 binding 0 (shaders/classic_common.glsl ClWind): the VgViewGpu wind fields of the frame.
+typedef struct ClWindGpu {
+    float wind[4], wind_prev[4], tile[4], tile_prev[4], disp[4], time[4];
+    u32 ring, ring_prev, layers, debug;
+} ClWindGpu;
 typedef struct ClBatch { u32 key, first, count; } ClBatch;   // key = mesh << 3 | LOD (CL_IMPOSTOR)
 typedef struct ClView {
     ClBatch *batches;
@@ -81,7 +89,11 @@ static struct {
     const VgTextures *vtex;         // the vgeo texture table (module-owned slots: masks, tree textures, atlases)
     TextureId modtex[VG_TEX_OWN];   // vgeo module slot -> renderer texture wrapping its image (0 = not yet)
     u32 modver[VG_TEX_OWN];         // the slot's version when wrapped
-    VkDescriptorSetLayout set3_layout;
+    VkDescriptorSetLayout set3_layout, set4_layout;
+    VkDescriptorPool set4_pool;
+    VkDescriptorSet set4[FRAMES_IN_FLIGHT];
+    GpuBuffer wind_ubo[FRAMES_IN_FLIGHT];
+    VkImageView set4_views[FRAMES_IN_FLIGHT][VG_WIND_RING];   // the tile images the slot's set samples (NULL: white)
     VkPipelineLayout layout;
     VkPipeline pipe[CP_COUNT];
     VkDescriptorSet set_default, set_disp;
@@ -98,13 +110,11 @@ static struct {
     float cell_fade[1 << 16], cell_shadow[1 << 16];   // placement cells: largest foliage fade end / shadow distance (0 = unlimited)
     struct ClChunk { float min[3], max[3], fade, shadow; } *chunk;   // per placement chunk: bounds and the max of its cells' limits
     u32 chunk_cap;
-    float wind_prev[4], time_prev, wind_cur[4], time_cur;
-    bool wind_init;
     float disp[4];
     u32 ncasc;
     float density;
     float cpu_ms;
-    u32 draws, tris, local_instances;
+    u32 draws, tris, tris_shadow, local_instances;
     Cvar *impostor_px;
 } C;
 
@@ -229,10 +239,47 @@ void vkc_init(void) {
     li.bindingCount = 2;
     li.pBindings = b;
     VK_CHECK(vkCreateDescriptorSetLayout(R->device, &li, NULL, &C.set3_layout));
-    VkDescriptorSetLayout sets[4] = { R->frame_layout, R->tex_layout, R->lit_post_layout, C.set3_layout };
+    // set 4: the frame's wind (uniform buffer) and the wind tile ring, one set per frame slot
+    VkDescriptorSetLayoutBinding b4[2];
+    memset(b4, 0, sizeof(b4));
+    b4[0].binding = 0;
+    b4[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    b4[0].descriptorCount = 1;
+    b4[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+    b4[1].binding = 1;
+    b4[1].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    b4[1].descriptorCount = VG_WIND_RING;
+    b4[1].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+    li.bindingCount = 2;
+    li.pBindings = b4;
+    VK_CHECK(vkCreateDescriptorSetLayout(R->device, &li, NULL, &C.set4_layout));
+    VkDescriptorPoolSize ps[2] = { { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, FRAMES_IN_FLIGHT }, { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, FRAMES_IN_FLIGHT * VG_WIND_RING } };
+    VkDescriptorPoolCreateInfo pci = { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
+    pci.maxSets = FRAMES_IN_FLIGHT;
+    pci.poolSizeCount = 2;
+    pci.pPoolSizes = ps;
+    VK_CHECK(vkCreateDescriptorPool(R->device, &pci, NULL, &C.set4_pool));
+    for (u32 f = 0; f < FRAMES_IN_FLIGHT; f++) {
+        VkDescriptorSetAllocateInfo ai = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+        ai.descriptorPool = C.set4_pool;
+        ai.descriptorSetCount = 1;
+        ai.pSetLayouts = &C.set4_layout;
+        VK_CHECK(vkAllocateDescriptorSets(R->device, &ai, &C.set4[f]));
+        C.wind_ubo[f] = vkr_buffer_create(sizeof(ClWindGpu), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, true);
+        memset(C.wind_ubo[f].mapped, 0, sizeof(ClWindGpu));
+        VkDescriptorBufferInfo bi = { C.wind_ubo[f].buffer, 0, sizeof(ClWindGpu) };
+        VkWriteDescriptorSet w = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+        w.dstSet = C.set4[f];
+        w.dstBinding = 0;
+        w.descriptorCount = 1;
+        w.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+        w.pBufferInfo = &bi;
+        vkUpdateDescriptorSets(R->device, 1, &w, 0, NULL);   // the ring (binding 1) at the slot's first frame
+    }
+    VkDescriptorSetLayout sets[5] = { R->frame_layout, R->tex_layout, R->lit_post_layout, C.set3_layout, C.set4_layout };
     VkPushConstantRange pr = { VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushLit) };
     VkPipelineLayoutCreateInfo pli = { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
-    pli.setLayoutCount = 4;
+    pli.setLayoutCount = 5;
     pli.pSetLayouts = sets;
     pli.pushConstantRangeCount = 1;
     pli.pPushConstantRanges = &pr;
@@ -262,6 +309,9 @@ void vkc_shutdown(void) {
     for (int i = 0; i < CP_COUNT; i++) if (C.pipe[i]) vkDestroyPipeline(R->device, C.pipe[i], NULL);
     vkDestroyPipelineLayout(R->device, C.layout, NULL);
     vkDestroyDescriptorSetLayout(R->device, C.set3_layout, NULL);
+    if (C.set4_layout) vkDestroyDescriptorSetLayout(R->device, C.set4_layout, NULL);
+    if (C.set4_pool) vkDestroyDescriptorPool(R->device, C.set4_pool, NULL);
+    for (u32 f = 0; f < FRAMES_IN_FLIGHT; f++) if (C.wind_ubo[f].buffer) vkr_buffer_destroy_now(&C.wind_ubo[f]);
     for (u32 f = 0; f < FRAMES_IN_FLIGHT; f++) if (C.inst[f].buffer) vkr_buffer_destroy_now(&C.inst[f]);
     for (u32 k = 0; k < VG_TEX_OWN; k++) if (C.modtex[k]) vkr_texture_unwrap(C.modtex[k]);   // the images are the module's
     for (u32 i = 0; i < C.mesh_cap; i++)
@@ -558,7 +608,7 @@ static void cull_instance(const ClCull *v, const VgScene *s, const VgInstance *i
     vgeo_instance_decode(in, p, q, &sc);
     quat qq = { q[0], q[1], q[2], q[3] };
     vec3 c = v3_add(v3(p[0], p[1], p[2]), quat_rotate(qq, v3(m->center[0] * sc, m->center[1] * sc, m->center[2] * sc)));
-    float r = m->radius * sc + m->max_wpo;
+    float r = m->radius * sc + m->max_wpo * fmaxf(sc, 1.0f);   // vg_wpo_margin
     if (v->sphere.w > 0) {
         float rr = r + v->sphere.w;
         if (v3_len2(v3_sub(c, v3(v->sphere.x, v->sphere.y, v->sphere.z))) > rr * rr) return;
@@ -723,7 +773,7 @@ static void build_lods(const ClView *v) {
 void vkc_frame(const VgScene *s, const VgDisplace *disp, float density, float lod_px, float shadow_lod_px, float small_impostor_px, bool era2010, bool shadows) {
     C.scene = NULL;
     C.inst_used = 0;
-    C.draws = C.tris = C.local_instances = 0;
+    C.draws = C.tris = C.tris_shadow = C.local_instances = 0;
     for (int v = 0; v < CL_VIEWS; v++) C.view[v].batch_count = C.view[v].instances = 0;
     if (!C.ok || !s || !C.mesh_cap) return;
     if (!C.set_default) {
@@ -736,15 +786,6 @@ void vkc_frame(const VgScene *s, const VgDisplace *disp, float density, float lo
     C.density = density;
     // the GPU copy of the placement region is not used here: drop its upload queue
     ((VgScene *)s)->pl.dirty_inst_n = ((VgScene *)s)->pl.dirty_cells_n = 0;
-    // wind (as the vgeo views: this frame's and last frame's, for velocity)
-    const RenderWeather *wx = &R->weather;
-    float ws = sqrtf(wx->wind.x * wx->wind.x + wx->wind.z * wx->wind.z);
-    float w[4] = { ws > 1e-4f ? wx->wind.x / ws : 1.0f, ws > 1e-4f ? wx->wind.z / ws : 0.0f, ws, wx->gust };
-    memcpy(C.wind_prev, C.wind_init ? C.wind_cur : w, 16);
-    C.time_prev = C.wind_init ? C.time_cur : wx->time;
-    memcpy(C.wind_cur, w, 16);
-    C.time_cur = wx->time;
-    C.wind_init = true;
     memset(C.disp, 0, sizeof(C.disp));
     if (disp && disp->ok && disp->valid) {
         VgViewGpu tv;
@@ -796,6 +837,47 @@ void vkc_frame(const VgScene *s, const VgDisplace *disp, float density, float lo
     C.cpu_ms = (float)((double)(SDL_GetPerformanceCounter() - t0) / (double)SDL_GetPerformanceFrequency() * 1000.0);
 }
 
+// The frame's wind (after its tile upload, before any classic draw): the foliage fields of a vgeo
+// view (wind outside the tile, this frame's and last frame's; time; layers; debug view; displacement
+// buffer) and the tile ring (w NULL: no tile) into this frame slot's set 4.
+void vkc_wind_frame(const VgViewGpu *v, const VgWindTex *w) {
+    if (!C.ok) return;
+    u32 f = R->frame_slot;
+    ClWindGpu *g = (ClWindGpu *)C.wind_ubo[f].mapped;
+    memcpy(g->wind, v->wind, 16);
+    memcpy(g->wind_prev, v->wind_prev, 16);
+    memcpy(g->tile, v->wind_tile, 16);
+    memcpy(g->tile_prev, v->wind_tile_prev, 16);
+    memcpy(g->disp, v->disp, 16);
+    g->time[0] = v->foliage[0];
+    g->time[1] = v->foliage[1];
+    g->time[2] = g->time[3] = 0;
+    g->layers = v->wind_layers;
+    g->debug = v->wind_debug;
+    bool ring = w && w->ok;
+    g->ring = ring ? w->cur : 0;
+    g->ring_prev = ring ? (w->cur + VG_WIND_RING - 1) % VG_WIND_RING : 0;
+    if (!ring) g->tile[3] = g->tile_prev[3] = 0;
+    // the ring's images (fixed): written once per slot (its last use has finished), white until the tile exists
+    VkDescriptorImageInfo im[VG_WIND_RING];
+    bool changed = false;
+    for (u32 k = 0; k < VG_WIND_RING; k++) {
+        VkImageView view = ring ? w->view[k] : R->textures[R->white_tex].view;
+        if (view != C.set4_views[f][k]) changed = true;
+        im[k] = (VkDescriptorImageInfo){ ring ? C.vtex->repeat : R->sampler_linear, view, ring ? VK_IMAGE_LAYOUT_GENERAL : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+    }
+    if (changed && im[0].imageView && (!ring || C.vtex)) {
+        VkWriteDescriptorSet wr = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+        wr.dstSet = C.set4[f];
+        wr.dstBinding = 1;
+        wr.descriptorCount = VG_WIND_RING;
+        wr.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+        wr.pImageInfo = im;
+        vkUpdateDescriptorSets(R->device, 1, &wr, 0, NULL);
+        for (u32 k = 0; k < VG_WIND_RING; k++) C.set4_views[f][k] = im[k].imageView;
+    }
+}
+
 // ------------------------------------------------------------------ drawing
 
 // Any texture a vgeo material references: renderer ids as they are, module-owned slots wrapped.
@@ -822,9 +904,7 @@ static TextureId mat_texture(const VgMaterial *m) {
 static void mat_push(PushLit *pc, const VgMaterial *m, TextureId tex, u32 shadow_view) {
     memset(pc, 0, sizeof(*pc));
     memcpy(&pc->model.m[0], m->wpo_params, 16);
-    memcpy(&pc->model.m[4], C.wind_prev, 16);
-    memcpy(&pc->model.m[8], C.disp, 16);
-    pc->model.m[12] = C.time_prev;
+    memcpy(&pc->model.m[4], m->wind_params, 32);   // model[1], model[2]
     pc->model.m[13] = (m->flags & VGM_MASKED) && tex ? m->alpha_cutoff : 0.0f;
     pc->model.m[14] = (float)(R->frame_index & 63u);
     pc->model.m[15] = (m->flags & VGM_DITHER_FADE) ? 1.0f : 0.0f;
@@ -843,6 +923,8 @@ static void draw_view(VkCommandBuffer cmd, const ClView *v, int pass, u32 shadow
     const VgScene *s = C.scene;
     VkDescriptorSet bound3 = C.set_default;
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, C.layout, 3, 1, &C.set_default, 0, NULL);
+    if (!C.set4_views[R->frame_slot][0]) return;   // the frame's wind was never written (no draw before vkc_wind_frame)
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, C.layout, 4, 1, &C.set4[R->frame_slot], 0, NULL);
     VkDeviceSize zero = 0;
     vkCmdBindVertexBuffers(cmd, 1, 1, &C.inst[R->frame_slot].buffer, &zero);
     // pipeline groups: plain one-sided first (early-z), then two-sided, then clipped
@@ -899,6 +981,7 @@ static void draw_view(VkCommandBuffer cmd, const ClView *v, int pass, u32 shadow
                 R->stats.triangles += sec->index_count / 3 * bt->count;
                 C.draws++;
                 C.tris += sec->index_count / 3 * bt->count;
+                if (pass == 2) C.tris_shadow += sec->index_count / 3 * bt->count;
             }
         }
     }
@@ -979,8 +1062,8 @@ void vkc_stats(void) {
         meshes += C.mesh[i].used;
         imp += C.mesh[i].imp_set != VK_NULL_HANDLE;
     }
-    log_info("classic: %u meshes (%u with impostors); last frame: main %u instances in %u batches, cascades %u / %u / %u instances, local shadows %u; %u draws, %.2fM tris, "
+    log_info("classic: %u meshes (%u with impostors); last frame: main %u instances in %u batches, cascades %u / %u / %u instances, local shadows %u; %u draws, %.2fM tris (%.2fM in shadow views), "
              "CPU cull %.3f ms",
              meshes, imp, C.view[0].instances, C.view[0].batch_count, C.view[1].instances, C.view[2].instances, C.view[3].instances, C.local_instances, C.draws,
-             (double)C.tris / 1e6, (double)C.cpu_ms);
+             (double)C.tris / 1e6, (double)C.tris_shadow / 1e6, (double)C.cpu_ms);
 }

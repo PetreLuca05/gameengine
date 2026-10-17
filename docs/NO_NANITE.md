@@ -19,7 +19,7 @@ Two branches compare renderers on identical content:
 | Batching | Instances bucketed per (mesh, LOD) into a per-frame host-visible instance stream (48 B: position + scale, quaternion, wind phase + fade). One `vkCmdDrawIndexed` per bucket and material, instanced; no per-instance draws. |
 | Prepass | G-buffer with the shared `gbuffer_body.glsl`. Opaque materials: no discard (early-z). Masked materials: alpha test on the material texture (isotropic mip, like the vgeo per-triangle LOD); dithered fade (`VGM_DITHER_FADE`, same interleaved-gradient threshold rotated per frame); two-sided materials without back-face culling, normal flipped on back faces. |
 | Lit | Shared `lit_body.glsl` at depth EQUAL. Masked / dithered materials and impostors repeat their test (distant cards of neighbouring trees can share a depth value). |
-| WPO | `shaders/vgeo/wpo.glsl` included as is (`WPO_GRASS`, `WPO_TREE`) in the vertex shader, wind / time from the frame (previous frame's in push constants for velocity), `WPO_DISPLACE` from the vgeo displacement buffer (its 128 x 128 compute update still runs: the only vgeo-module GPU work per frame). |
+| WPO | The foliage wind of docs/FOLIAGE_WIND.md, the same model and inputs as vgeo: `shaders/vgeo/wpo.glsl` (`wpo_veg`) included as is in the vertex shader (`classic_vert.glsl`). Per draw (push constants): the material's `wpo_params` and `wind_params`. Per frame slot (set 4, `ClWindGpu` uniform buffer, filled by `vkc_wind_frame` after the tile upload): the field outside the tile, the tile window, time, this frame's and last frame's (velocity), the `r_foliage_wind` layers / `wind_solo`, the `wind_view` debug view, the displacement buffer window; set 4 binding 1 is the 3-image wind tile ring (`vg_wind_*`, written once per slot). Per instance: pivot, scale, phase (`VG_INST_PHASE / 256`). Bent / fluttering normals (`VGW_NORMALS`) come from the vertex shader (vgeo: the resolve); shadows displace the same way. `WPO_DISPLACE` reads the vgeo displacement buffer. The wind tile upload and the displacement compute are the only vgeo-module GPU work per frame. Impostors have no wind (as on vgeo). Culling spheres grow by `max_wpo * max(scale, 1)` (`vg_wpo_margin`). |
 | Shadows | Sun cascades and point / spot light tiles: instanced, depth only, masked materials alpha-tested (vgeo's local light shadows skipped masked meshes). |
 | Characters | The legacy GPU-skinned path (`vkg_route_skinned` routes nothing with `r_vgeo 0`). |
 
@@ -49,6 +49,18 @@ it is used per frame.
 - Scope picture-in-picture, phone views and the rain occlusion map do not show vgeo content (as on `nanite`).
 - A multi-material model mesh whose page data is not in memory falls back to the exported LODs with its
   first material only (no such content today).
+
+### Dense forest cost (after the realistic tree heights)
+
+`tree_scale.cfg`'s zombieland forest stop (`setpos -100 120 600 0 6`, third person, 1600 x 900, uncapped,
+RTX 3060 Ti; after the wind port): frame 10.7-11.5 ms (87-93 fps), GPU 10.3-11.0 ms, 10.6M triangles of
+which the classic path draws 7.55M (3.9M of them in the sun cascades, 3017 main-view instances). The ~14 fps
+seen once before the port did not reproduce. Knobs tried at that stop (GPU avg): baseline 10.34 ms;
+`r_classic_impostor_px 128` 9.50 ms (softer trees from ~100 m); `r_vgeo_lod_px 4` 9.55 ms (-0.1M tris:
+the tree LOD chains barely reduce, e.g. beech 10.6k -> 9.8k triangles at the coarsest cut, the DAG of
+cutout cards cannot simplify); `r_vgeo_shadow_error_px 4` 10.02 ms; no sun shadows 7.05 ms. The LOD pick
+and the impostor switch already use the instance scale; defaults unchanged. `classic_stats` now also
+prints the triangles of the shadow views.
 
 ## How to compare
 

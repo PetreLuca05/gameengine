@@ -437,6 +437,9 @@ void vkc_samplers_changed(void);                              // the vgeo textur
 void vkc_chunk_loaded(const struct VgScene *s, u32 handle);                    // placement chunk: per-cell distance limits
 void vkc_frame(const struct VgScene *s, const struct VgDisplace *disp, float density, float lod_px, float shadow_lod_px, float small_impostor_px, bool era2010,
                bool shadows);
+struct VgViewGpu;
+struct VgWindTex;
+void vkc_wind_frame(const struct VgViewGpu *v, const struct VgWindTex *w);   // after the wind tile upload: the frame's wind (set 4)
 void vkc_draw_gbuffer(VkCommandBuffer cmd);   // inside the prepass (frame set bound)
 void vkc_draw_lit(VkCommandBuffer cmd);       // inside the opaque pass (depth EQUAL)
 void vkc_draw_shadow(VkCommandBuffer cmd, u32 cascade);   // inside the sun shadow pass
