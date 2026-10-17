@@ -36,6 +36,7 @@ typedef struct UserCmd {
     u32 phone_rot;     // phone held by a paired real phone: packed rotation relative to the view yaw (docs/PHONE.md)
     u8 phone_flags;    // CHAR_PHONE_* (anim/character_rt.h): landscape / driven / recording
     u8 phone_zoom;     // phone camera zoom x 32 (spectators see the same lens)
+    u8 phone_app;      // PhoneApp on the phone's screen (gameplay/phone/phone_os.h): others draw the same screen
 } UserCmd;
 
 #endif

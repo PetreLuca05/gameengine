@@ -665,7 +665,9 @@ static void tab_phone(GuiCursor *c) {
     static const char *const server[] = { "Off", "On", "Automatic" };
     section(c, "Companion page");
     row_combo_cvar(c, "Phone server", "phone_server", server, 3, "Automatic: starts the first time you take the phone out (X).");
-    row_toggle_cvar(c, "Allow pairing", "phone_pairing", "Scan the QR code (P while holding the phone) with your real phone.");
+    row_toggle_cvar(c, "Allow pairing", "phone_pairing", "Scan the QR code on the Connect portal with your real phone.");
+    row_toggle_cvar(c, "Pair on equip", "phone_auto_pair", "Equipping the phone opens the Connect portal at once. Off: the in-game phone.");
+    row_slider_cvar(c, "Pairing timeout", "phone_pair_timeout", 0, 300, 5, "%.0f s", "No device by then: the in-game phone (0 = keep waiting).");
     row_slider_cvar(c, "Server port", "phone_port", 1024, 65000, 1, "%.0f", "HTTPS port; the certificate helper uses the next one. Same Wi-Fi as the phone.");
     row_toggle_cvar(c, "HTTPS", "phone_tls", "Browsers only give motion sensors to secure pages. Off: Android flags only.");
     row_slider_cvar(c, "Pairing code lifetime", "phone_token_ttl", 10, 600, 10, "%.0f s", NULL);
@@ -685,7 +687,8 @@ static void tab_phone(GuiCursor *c) {
     row_combo_cvar(c, "Photo filter", "phone_filter", filters, 6, NULL);
     row_toggle_cvar(c, "High resolution photos", "phone_photo_hires", "Re-renders the frame at 1080 x 1920.");
     row_slider_cvar(c, "Exposure", "phone_exposure", -3, 3, 0.1f, "%.1f EV", NULL);
-    row_slider_cvar(c, "Screen brightness", "phone_screen_brightness", 0.1f, 2, 0.05f, "%.2f", NULL);
+    row_slider_cvar(c, "Screen glow", "phone_screen_emissive", 0, 4, 0.05f, "%.2f", "White screen luminance: a mild glow at night, never blown out by day.");
+    row_slider_cvar(c, "Screen light", "phone_screen_light", 0, 2, 0.05f, "%.2f", "The screen lights your hands and face in the dark.");
     row_slider_cvar(c, "Video bitrate", "phone_video_kbps", 500, 20000, 500, "%.0f kbit/s", NULL);
     row_slider_cvar(c, "Video max length", "phone_record_max", 2, 3600, 1, "%.0f s", NULL);
 }

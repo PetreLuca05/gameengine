@@ -62,5 +62,9 @@ typedef struct PhoneGallery { PhoneGalleryItem items[PHONE_GALLERY_MAX]; int cou
 int phone_gallery_scan(PhoneGallery *g, const char *base);
 // Inserts a new item at the front (dropping the oldest when full). Returns it.
 PhoneGalleryItem *phone_gallery_add(PhoneGallery *g, const char *path, bool video, const PhoneShotMeta *meta);
+// Deletes item i: the media file, its .json sidecar and a video's .thumb.jpg, then the entry.
+// Returns false when i is out of range (the files are removed best effort).
+bool phone_gallery_delete(PhoneGallery *g, int i);
+int phone_gallery_find_server_id(const PhoneGallery *g, int server_id);   // -1 none
 
 #endif

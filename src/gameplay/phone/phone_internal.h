@@ -5,6 +5,7 @@
 #include "phone.h"
 #include "phone_capture.h"
 #include "phone_orient.h"
+#include "phone_os.h"
 #include "phone_qr.h"
 #include "phone_stream.h"
 #include "phone_video.h"
@@ -12,8 +13,6 @@
 #include "render/render.h"
 
 struct HwsServer;
-
-typedef enum PhoneScreen { PSCR_CAMERA, PSCR_PAIR, PSCR_GALLERY } PhoneScreen;
 
 #define PHONE_THUMB_W 72
 #define PHONE_THUMB_H 128
@@ -23,8 +22,19 @@ typedef struct PhoneThumb { char path[260]; bool loaded, video; u8 px[PHONE_THUM
 
 typedef struct PhoneCvars {
     Cvar *server, *port, *tls, *bind, *pairing, *res_w, *res_h, *fps, *quality, *smoothing, *sensitivity, *invert_yaw, *invert_pitch, *invert_roll,
-        *record_max, *video_kbps, *photo_hires, *filter, *remote_range, *remote_fps, *screen_brightness, *exposure, *token_ttl;
+        *record_max, *video_kbps, *photo_hires, *filter, *remote_range, *remote_fps, *exposure, *token_ttl,
+        *auto_pair, *pair_timeout, *screen_emissive, *screen_min, *screen_max, *screen_light, *battery_drain, *hud_size, *hud_corner;
 } PhoneCvars;
+
+// What one phone screen shows: the own phone (local / spectated) or a remote one from its
+// replicated state (remote: no QR code, no private photos).
+typedef struct PhoneScreenView {
+    PhoneApp app;
+    PhoneFlow flow;
+    int viewer, scroll, hover;   // hover: the highlighted hit (HUD panel), -1 none
+    float zoom;
+    bool rec, front, landscape, landscape_neg, driven, fake, remote;
+} PhoneScreenView;
 
 typedef struct PhoneState {
     bool init;
@@ -64,9 +74,34 @@ typedef struct PhoneState {
     vec3 lens_pos;
     quat lens_rot;
     bool lens_valid;
-    PhoneScreen screen;
+    // phone OS (phone_os.h): flow + apps, assets
+    PhoneOs os;
+    PhoneApps apps;
+    PhoneTheme theme;
+    bool assets_loaded;
+    u8 *icons_px;
+    int icons_w, icons_h;
+    bool spec;                   // showing a spectated player's phone
+    PhoneApp spec_app;
+    u8 spec_flags;
+    bool raised;                 // the hold point is in the phone pose (always while equipped)
+    PhoneApp sent_app;           // last app / flow logged and sent to the page
+    PhoneFlow sent_flow;
+    // HUD panel (the simulated phone screen)
+    float panel_t;               // 0 hidden .. 1 shown (slide + fade)
+    bool panel_on;
+    bool ui_capture;             // the cursor is free for the panel (phoneui, Alt)
+    bool nav_hold;               // gamepad: phonenav held, the panel has the focus
+    int hover, nav;              // hovered / focused hit (-1 none)
+    bool slider_drag;
+    float px_x, px_y, px_w, px_h; // the panel's screen rect (pixels), last drawn
+    bool prev_ui, prev_nav, prev_click;
+    // gallery viewer image (decoded on open)
+    char viewer_path[260];
+    u8 *viewer_px;
+    int viewer_w, viewer_h;
     bool front;                  // selfie camera (front lens, mirrored preview)
-    bool prev_attack, prev_reload, prev_pair, prev_gallery, prev_selfie;
+    bool prev_attack, prev_reload, prev_gallery, prev_selfie;
     // capture
     bool photo_pending;
     int photo_wait;              // frames until the requested readback is in
@@ -94,22 +129,33 @@ typedef struct PhoneState {
     u32 overlay_hash;
     double overlay_t;
     // remote phones seen this frame (drawn as world items) -> view 1
-    struct { vec3 pos; quat rot; const struct ItemDef *it; } remote[8];
+    struct { vec3 pos; quat rot; const struct ItemDef *it; u8 app, flags, zoom; } remote[8];
+    u8 draw_app, draw_flags, draw_zoom;   // the character being drawn (phone_set_draw_state)
+    int remote_best;
+    TextureId overlay_remote;
+    u8 *remote_px;
+    u32 remote_hash;
+    double remote_overlay_t;
+    int lights_added;            // screen lights this frame (local + remote phones)
     int remote_count;
     vec3 remote_lens;
     bool remote_valid;
     double remote_t;
-    float screen_k;              // emissive multiplier of the screen (exposure compensated)
+    float screen_k;              // emissive multiplier of the screen this frame (scene units)
+    float screen_level;          // the screen's displayed level (emissive x exposure; tests)
     MeshId quad, cube;
 } PhoneState;
 
 PhoneState *phone_state(void);
 
 // phone_ui.c
-void phone_ui_build_screen(PhoneState *s, u8 *rgba, int w, int h);   // the in-game screen UI (transparent where the camera image shows)
+void phone_ui_build_screen(PhoneState *s, const PhoneScreenView *v, u8 *rgba, int w, int h);   // the screen UI (transparent where the camera image shows)
 void phone_ui_hud(PhoneState *s);
+PhoneScreenView phone_view_own(const PhoneState *s);            // the own / spectated phone's screen
+bool phone_ui_panel_rect(PhoneState *s, PhoneRect *out);       // the HUD panel's screen rect (pixels)
+void phone_ui_load_assets(PhoneState *s);
 void phone_ui_thumb(const u8 *rgba, int w, int h, int stride, u8 *out);   // -> PHONE_THUMB_W x PHONE_THUMB_H
 void phone_ui_shutdown(void);
-u32 phone_ui_hash(const PhoneState *s);   // changes when the screen UI must be redrawn
+u32 phone_ui_hash(const PhoneState *s, const PhoneScreenView *v);   // changes when the screen UI must be redrawn
 
 #endif

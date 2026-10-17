@@ -19,6 +19,8 @@
 #include "player/hands.h"
 #include "audio/audio.h"
 #include "ui/console.h"
+#include "ui/menus.h"
+#include "ui/gui/gui.h"
 #include "render/phone_view.h"
 #include "cJSON.h"
 #include "stb_image_write.h"
@@ -84,15 +86,20 @@ static void send_status(void) {
     char clock[16];
     int day;
     game_clock(clock, sizeof(clock), &day, NULL);
-    char b[640];
+    float hours = 12.0f;
+    game_clock(clock, sizeof(clock), &day, &hours);
+    World *w = game_world();
+    char b[900];
     snprintf(b, sizeof(b),
              "{\"t\":\"status\",\"v\":%d,\"holding\":%s,\"camera\":%s,\"zoom\":%.2f,\"max_zoom\":%.0f,\"rec\":%s,\"rec_s\":%.1f,\"rec_max\":%d,"
              "\"landscape\":%s,\"calibrated\":%s,\"driven\":%s,\"fps\":%.1f,\"kbps\":%.0f,\"q\":%d,\"w\":%d,\"h\":%d,\"glass\":%.0f,\"encode\":%.1f,"
-             "\"clock\":\"%s\",\"day\":%d,\"filter\":\"%s\",\"photos\":%d,\"front\":%s}",
+             "\"clock\":\"%s\",\"day\":%d,\"hours\":%.3f,\"filter\":\"%s\",\"photos\":%d,\"front\":%s,\"app\":\"%s\",\"flow\":\"%s\",\"battery\":%.3f,"
+             "\"weather\":\"%s\",\"night\":%s}",
              PHONE_PROTO_VERSION, PH.holding ? "true" : "false", PH.camera ? "true" : "false", PH.zoom, MAX_ZOOM, PH.rec ? "true" : "false",
              PH.rec ? g_engine.real_time - PH.rec_start : 0.0, PH.cv.record_max->i, PH.landscape ? "true" : "false", PH.calibrated ? "true" : "false",
-             PH.driven ? "true" : "false", st.fps, st.kbps, st.quality, st.width, st.height, st.glass_ms, st.encode_ms, clock, day,
-             phone_filter_name(PH.cv.filter->i), PH.gallery.count, PH.front ? "true" : "false");
+             PH.driven ? "true" : "false", st.fps, st.kbps, st.quality, st.width, st.height, st.glass_ms, st.encode_ms, clock, day, hours,
+             phone_filter_name(PH.cv.filter->i), PH.gallery.count, PH.front ? "true" : "false", phone_app_name(PH.os.app), phone_flow_name(PH.os.flow),
+             PH.os.battery, w ? weather_name(w) : "clear", (hours < 6.0f || hours > 19.5f) ? "true" : "false");
     send_text(b);
 }
 
@@ -143,12 +150,27 @@ static void send_media(PhoneGalleryItem *it) {
 
 // ------------------------------------------------------------------ server
 
+static char *read_rel(const char *rel, size_t *n) {
+    char p[512];
+    platform_data_path(rel, p, sizeof(p));
+    *n = 0;
+    return platform_read_file(p, n);
+}
+
+// The page with the phone OS assets injected (assets/phone/theme.json, apps.json, the icon atlas):
+// the web UI and the in-game screen share one theme, one app list and one set of icons.
 static bool load_page(void) {
     if (PH.page) return true;
-    char p[512];
-    platform_data_path("web/phone/index.html", p, sizeof(p));
-    PH.page = (u8 *)platform_read_file(p, &PH.page_len);
-    if (!PH.page) log_warn("phone: companion page %s missing", p);
+    size_t n, tn, an, pn;
+    char *tmpl = read_rel("web/phone/index.html", &n);
+    if (!tmpl) { log_warn("phone: companion page web/phone/index.html missing"); return false; }
+    char *theme = read_rel("assets/phone/theme.json", &tn), *apps = read_rel("assets/phone/apps.json", &an);
+    u8 *png = (u8 *)read_rel(PH.apps.atlas[0] ? PH.apps.atlas : "assets/phone/icons.png", &pn);
+    PH.page = (u8 *)phone_page_build(tmpl, n, theme, apps, png, pn, &PH.page_len);
+    free(tmpl);
+    free(theme);
+    free(apps);
+    free(png);
     return PH.page != NULL;
 }
 
@@ -203,10 +225,13 @@ static bool server_start(void) {
     return true;
 }
 
-static void pair_begin(void) {
-    if (!PH.cv.pairing->i) { toast("Pairing is disabled (Settings > Phone)"); return; }
-    if (!server_start()) { toast("Phone server: %s", PH.server_err); return; }
-    if (!hws_issue_token(PH.server, 0, PH.token)) { toast("Pairing: no random source"); return; }
+// A new one-time pairing code + QR (the Connect portal). False: no server / pairing off.
+static bool pair_begin(void) {
+    PH.token[0] = 0;
+    if (!PH.cv.pairing->i) { snprintf(PH.server_err, sizeof(PH.server_err), "Pairing is disabled (Settings > Phone)"); return false; }
+    if (!PH.cv.server->i) { snprintf(PH.server_err, sizeof(PH.server_err), "The phone server is off (Settings > Phone)"); return false; }
+    if (!server_start()) return false;
+    if (!hws_issue_token(PH.server, 0, PH.token)) { snprintf(PH.server_err, sizeof(PH.server_err), "no random source"); return false; }
     hws_url(PH.server, PH.token, PH.url, sizeof(PH.url));
     phone_qr_encode(PH.url, &PH.qr);
     if (PH.qr_tex) render_texture_destroy(PH.qr_tex);
@@ -217,12 +242,21 @@ static void pair_begin(void) {
         PH.qr_tex = render_texture_create(qw, qw, px, false, false);
         free(px);
     }
-    PH.screen = PSCR_PAIR;
-    log_info("phone: pair: %s  (expires in %.0f s)", PH.url, PH.cv.token_ttl->f);
+    PH.token_left = PH.cv.token_ttl->f;
+    log_info("phone_pair: open %s on the phone (or scan the QR code). Fallback address: %s  (expires in %.0f s)", PH.url, PH.ip_text, PH.cv.token_ttl->f);
+    return true;
+}
+
+// The flow wants a pairing code: start the server and issue one, or fall back to the in-game phone.
+static void flow_pair(void) {
+    if (pair_begin()) return;
+    phone_os_server_failed(&PH.os, PH.server_err);
+    toast("In-game phone: %s", PH.server_err[0] ? PH.server_err : "no server");
 }
 
 static void unpair(void) {
     if (PH.server) hws_unpair(PH.server, 0);
+    if (PH.conn >= 0) phone_os_disconnected(&PH.os);
     PH.conn = -1;
     PH.calibrated = false;
     if (PH.sink) phone_stream_ws_set_conn(PH.sink, -1);
@@ -435,6 +469,22 @@ static void record_thumb(const u8 *rgba, int w, int h) {
     PH.have_last_thumb = true;
 }
 
+// Gallery delete (in-game viewer or the page): the files, the entry, its thumbnail, the page.
+static void delete_item(int i) {
+    if (i < 0 || i >= PH.gallery.count) return;
+    PhoneGalleryItem *it = &PH.gallery.items[i];
+    if (PH.server && it->server_id) hws_media_remove(PH.server, it->server_id);
+    for (int k = 0; k < PHONE_GALLERY_THUMBS; k++)
+        if (PH.thumbs[k].path[0] && !strcmp(PH.thumbs[k].path, it->path)) memset(&PH.thumbs[k], 0, sizeof(PhoneThumb));
+    if (PH.viewer_path[0] && (!strcmp(PH.viewer_path, it->path) || !strcmp(PH.viewer_path, it->thumb))) PH.viewer_path[0] = 0;
+    log_info("phone: deleted %s", it->path);
+    phone_gallery_delete(&PH.gallery, i);
+    if (PH.os.viewer >= PH.gallery.count) PH.os.viewer = PH.gallery.count - 1;
+    if (!PH.gallery.count) PH.have_last_thumb = false;
+    toast("Deleted");
+    send_gallery();
+}
+
 // ------------------------------------------------------------------ events from the page
 
 static void calibrate(void) {
@@ -453,7 +503,10 @@ static void handle_text(const char *s) {
         send_status();
         send_gallery();
     } else if (!strcmp(cmd, "shutter")) {
-        if (PH.holding) PH.photo_pending = true;
+        if (PH.holding) {
+            phone_os_open(&PH.os, PAPP_CAMERA);   // the lens renders in the camera app
+            PH.photo_pending = true;
+        }
     } else if (!strcmp(cmd, "record")) {
         if (PH.rec) record_stop();
         else if (PH.holding) record_start();
@@ -486,6 +539,20 @@ static void handle_text(const char *s) {
     } else if (!strcmp(cmd, "camera")) {
         const cJSON *v = cJSON_GetObjectItemCaseSensitive(j, "v");
         PH.front = cJSON_IsString(v) ? !strcmp(v->valuestring, "front") : !PH.front;
+    } else if (!strcmp(cmd, "app")) {
+        // The page's current app: the in-game screen mirrors it (other players see it too).
+        const cJSON *v = cJSON_GetObjectItemCaseSensitive(j, "v");
+        int a = cJSON_IsString(v) ? phone_app_from_name(v->valuestring) : -1;
+        if (a > PAPP_PORTAL) {
+            if (PH.rec && a != PAPP_CAMERA) record_stop();
+            phone_os_open(&PH.os, (PhoneApp)a);
+        }
+    } else if (!strcmp(cmd, "back")) {
+        phone_os_back(&PH.os);
+    } else if (!strcmp(cmd, "delete")) {
+        const cJSON *v = cJSON_GetObjectItemCaseSensitive(j, "id");
+        int i = cJSON_IsNumber(v) ? phone_gallery_find_server_id(&PH.gallery, v->valueint) : -1;
+        if (i >= 0) delete_item(i);
     } else if (!strcmp(cmd, "filter")) {
         const cJSON *v = cJSON_GetObjectItemCaseSensitive(j, "v");
         if (cJSON_IsString(v)) cvar_set_int(PH.cv.filter, phone_filter_from_name(v->valuestring));
@@ -511,7 +578,8 @@ static void poll_server(void) {
             if (!PH.sink) PH.sink = phone_stream_ws_create(PH.server, ev.conn, (float)PH.cv.fps->i, PH.cv.quality->i);
             phone_stream_ws_set_conn(PH.sink, ev.conn);
             PH.calibrated = false;
-            PH.screen = PSCR_CAMERA;
+            phone_os_connected(&PH.os);
+            PH.token[0] = 0;   // used
             char ip[20];
             hws_ipv4_format(ev.peer_ip, ip, sizeof(ip));
             toast("Phone %s (%s)", ev.resumed ? "reconnected" : "paired", ip);
@@ -520,6 +588,8 @@ static void poll_server(void) {
             if (ev.conn == PH.conn) {
                 PH.conn = -1;
                 if (PH.sink) phone_stream_ws_set_conn(PH.sink, -1);
+                phone_os_disconnected(&PH.os);
+                if (PH.rec) record_stop();
                 toast("Phone disconnected");
             }
             break;
@@ -564,10 +634,142 @@ static void update_orientation(float dt) {
     else if (PH.landscape && roll < 35.0f) PH.landscape = false;
 }
 
+// ------------------------------------------------------------------ phone OS: input + actions
+
+static void open_app(PhoneApp a) {
+    if (PH.rec && a != PAPP_CAMERA) record_stop();
+    phone_os_open(&PH.os, a);
+}
+
+static void put_away(void) {
+    Game *g = game();
+    if (g) g->phone_out = false;
+}
+
+static void set_capture(bool on) {
+    if (PH.ui_capture == on) return;
+    PH.ui_capture = on;
+    PH.slider_drag = false;
+    input_set_game_focus(!menus_wants_mouse() && !console_is_open() && g_engine.has_focus);
+}
+
+static PhoneLayoutIn layout_in(void) {
+    PhoneLayoutIn li = { PH.os.app, PH.os.flow, PH.os.viewer, PH.os.scroll, PH.apps.count, PH.apps.columns, PH.gallery.count };
+    return li;
+}
+
+// One button of the phone OS (mouse on the HUD panel, the gamepad, phone_tap / phone_button).
+// y: the design-px position inside the button (the zoom slider).
+static void activate(int id, int index, float y, const PhoneRect *r) {
+    switch (id) {
+    case PB_DECLINE:
+        phone_os_decline(&PH.os);
+        PH.token[0] = 0;
+        toast("Using the in-game phone");
+        break;
+    case PB_CANCEL:
+        phone_os_cancel(&PH.os);
+        PH.token[0] = 0;
+        put_away();
+        break;
+    case PB_RECONNECT:
+    case PB_CONNECT:
+        if (phone_os_reconnect(&PH.os)) flow_pair();
+        break;
+    case PB_APP:
+        if (index >= 0 && index < PH.apps.count) {
+            if (PH.apps.apps[index].app > PAPP_HOME) open_app((PhoneApp)PH.apps.apps[index].app);
+            else toast("%s: coming soon", PH.apps.apps[index].label);
+        }
+        break;
+    case PB_HOME: open_app(PAPP_HOME); break;
+    case PB_BACK: phone_os_back(&PH.os); break;
+    case PB_SHUTTER: PH.photo_pending = true; break;
+    case PB_RECORD: if (PH.rec) record_stop(); else record_start(); break;
+    case PB_THUMB:
+        open_app(PAPP_GALLERY);
+        if (PH.gallery.count) PH.os.viewer = 0;
+        break;
+    case PB_FLIP: PH.front = !PH.front; break;
+    case PB_ZOOM_CHIP: { static const float z[3] = { 1, 2, 5 }; PH.zoom_target = z[DG_CLAMP(index, 0, 2)]; } break;
+    case PB_ZOOM_SLIDER: if (r) PH.zoom_target = clampf(phone_zoom_from_slider(y, *r, MAX_ZOOM), 1.0f, MAX_ZOOM); break;
+    case PB_CELL: PH.os.viewer = index; PH.os.viewer_zoom = 1.0f; break;
+    case PB_PREV: if (PH.os.viewer > 0) { PH.os.viewer--; PH.os.viewer_zoom = 1.0f; } break;
+    case PB_NEXT: if (PH.os.viewer + 1 < PH.gallery.count) { PH.os.viewer++; PH.os.viewer_zoom = 1.0f; } break;
+    case PB_DELETE: delete_item(PH.os.viewer); break;
+    default: break;
+    }
+}
+
+// Spatial navigation (gamepad): the nearest hit in the pressed direction.
+static int nav_move(const PhoneHit *h, int n, int cur, int dx, int dy) {
+    if (cur < 0 || cur >= n) return n ? 0 : -1;
+    float cx = h[cur].r.x + h[cur].r.w * 0.5f, cy = h[cur].r.y + h[cur].r.h * 0.5f;
+    int best = cur;
+    float bd = 1e9f;
+    for (int i = 0; i < n; i++) {
+        if (i == cur) continue;
+        float x = h[i].r.x + h[i].r.w * 0.5f - cx, y = h[i].r.y + h[i].r.h * 0.5f - cy;
+        float along = x * (float)dx + y * (float)dy, across = fabsf(x * (float)dy) + fabsf(y * (float)dx);
+        if (along <= 1.0f) continue;
+        float d = along + across * 2.0f;
+        if (d < bd) { bd = d; best = i; }
+    }
+    return best;
+}
+
+static void panel_input(void) {
+    PhoneLayoutIn li = layout_in();
+    PhoneHit hits[PHONE_MAX_HITS];
+    int n = phone_os_layout(&li, hits, PHONE_MAX_HITS);
+    bool blocked = game()->menu_open || game()->inventory_open || console_is_open();
+    bool ui = input_down(ACT_PHONE_UI) && !blocked;
+    if (ui && !PH.prev_ui && PH.panel_on) set_capture(!PH.ui_capture);
+    PH.prev_ui = ui;
+    if ((!PH.panel_on || blocked) && PH.ui_capture) set_capture(false);
+    PH.hover = -1;
+    if (PH.ui_capture && PH.panel_t > 0.9f && PH.px_w > 1) {
+        vec2 m = gui_mouse();
+        float dx = (m.x - PH.px_x) / PH.px_w * PHONE_DESIGN_W, dy = (m.y - PH.px_y) / PH.px_h * PHONE_DESIGN_H;
+        bool inside = dx >= 0 && dy >= 0 && dx < PHONE_DESIGN_W && dy < PHONE_DESIGN_H;
+        if (inside) PH.hover = phone_os_hit(hits, n, dx, dy);
+        if (gui_mouse_pressed(0)) {
+            if (!inside) set_capture(false);   // a click in the world goes back to mouse look
+            else if (PH.hover >= 0) {
+                const PhoneHit *h = &hits[PH.hover];
+                PH.slider_drag = h->id == PB_ZOOM_SLIDER;
+                activate(h->id, h->index, dy, &h->r);
+            }
+        }
+        if (PH.slider_drag) {
+            const PhoneHit *s = phone_os_find(hits, n, PB_ZOOM_SLIDER, 0);
+            if (s && gui_mouse_down(0)) activate(PB_ZOOM_SLIDER, 0, dy, &s->r);
+            else PH.slider_drag = false;
+        }
+    }
+    // Gamepad: hold phonenav, the d-pad / stick moves the focus, A presses, B goes back.
+    bool nav = input_down(ACT_PHONE_NAV) && PH.panel_on && !blocked;
+    if (nav && !PH.nav_hold) PH.nav = n ? 0 : -1;
+    PH.nav_hold = nav;
+    if (nav) {
+        if (PH.nav >= n) PH.nav = n - 1;
+        static const int dirs[4][3] = { { NAV_UP, 0, -1 }, { NAV_DOWN, 0, 1 }, { NAV_LEFT, -1, 0 }, { NAV_RIGHT, 1, 0 } };
+        for (int i = 0; i < 4; i++)
+            if (gui_nav(dirs[i][0])) { PH.nav = nav_move(hits, n, PH.nav, dirs[i][1], dirs[i][2]); gui_nav_consume(dirs[i][0]); }
+        if (gui_nav(NAV_ACCEPT) && PH.nav >= 0 && PH.nav < n) {
+            gui_nav_consume(NAV_ACCEPT);
+            const PhoneHit *h = &hits[PH.nav];
+            activate(h->id, h->index, h->r.y + h->r.h * 0.5f, &h->r);
+        }
+        if (gui_nav(NAV_BACK)) { gui_nav_consume(NAV_BACK); phone_os_back(&PH.os); }
+        PH.hover = PH.nav;
+    }
+}
+
 // ------------------------------------------------------------------ public
 
 void phone_fill_cmd(UserCmd *c) {
-    if (!PH.init || !PH.holding) return;
+    if (!PH.init || !PH.holding || PH.spec) return;
     u8 f = 0;
     if (PH.landscape) f |= CHAR_PHONE_LANDSCAPE;
     if (PH.driven) f |= CHAR_PHONE_DRIVEN;
@@ -576,17 +778,53 @@ void phone_fill_cmd(UserCmd *c) {
     c->phone_flags = f;
     c->phone_rot = PH.driven ? PH.rot_packed : 0;
     c->phone_zoom = (u8)DG_CLAMP((int)lrintf(PH.zoom_target * 32.0f), 32, 255);   // spectators: the same lens
+    c->phone_app = (u8)PH.os.app;
 }
 
 bool phone_wheel(int dir) {
-    if (!PH.init || !PH.camera) return false;
-    PH.zoom_target = clampf(PH.zoom_target * (dir > 0 ? 1.25f : 0.8f), 1.0f, MAX_ZOOM);
-    return true;
+    if (!PH.init || !PH.holding || PH.spec) return false;
+    bool over = PH.ui_capture && PH.hover >= 0;
+    if (over && PH.os.app == PAPP_GALLERY) {
+        if (PH.os.viewer >= 0) PH.os.viewer_zoom = clampf(PH.os.viewer_zoom * (dir > 0 ? 1.25f : 0.8f), 1.0f, 4.0f);
+        else PH.os.scroll = DG_CLAMP(PH.os.scroll + (dir < 0 ? 1 : -1), 0, DG_MAX(0, (PH.gallery.count - 1) / PHONE_GALLERY_COLS - 2));
+        return true;
+    }
+    if (PH.os.app == PAPP_CAMERA) {
+        PH.zoom_target = clampf(PH.zoom_target * (dir > 0 ? 1.25f : 0.8f), 1.0f, MAX_ZOOM);
+        return true;
+    }
+    return PH.ui_capture;   // the cursor is out for the phone: the wheel never switches items
 }
 
 bool phone_holding(void) { return PH.holding; }
 bool phone_camera_mode(void) { return PH.camera; }
 bool phone_paired(void) { return PH.conn >= 0; }
+bool phone_ui_wants_mouse(void) { return PH.init && PH.ui_capture; }
+bool phone_ui_blocks_game(void) { return PH.init && PH.nav_hold; }
+bool phone_ui_escape(void) {
+    if (!PH.init || !PH.ui_capture) return false;
+    if (!phone_os_back(&PH.os)) set_capture(false);
+    return true;
+}
+
+PhoneScreenView phone_view_own(const PhoneState *s) {
+    PhoneScreenView v;
+    memset(&v, 0, sizeof(v));
+    v.app = s->spec ? s->spec_app : s->os.app;
+    v.flow = s->spec ? PFLOW_LOCAL : s->os.flow;
+    v.viewer = s->spec ? -1 : s->os.viewer;
+    v.scroll = s->spec ? 0 : s->os.scroll;
+    v.hover = s->spec ? -1 : s->hover;
+    v.zoom = s->zoom;
+    v.rec = s->spec ? (s->spec_flags & CHAR_PHONE_REC) != 0 : s->rec != NULL;
+    v.front = s->front;
+    v.landscape = s->landscape;
+    v.driven = s->driven;
+    v.landscape_neg = s->driven && phone_euler_ypr(s->rel).z < 0;
+    v.fake = s->fake;
+    v.remote = s->spec;
+    return v;
+}
 
 const char *phone_status_text(void) {
     static char b[160];
@@ -602,40 +840,49 @@ static float lens_fov(void) {
     return 2.0f * atanf(tanf(f1 * 0.5f * DG_DEG2RAD) / fmaxf(PH.zoom, 1.0f)) * DG_RAD2DEG;
 }
 
-static void update_overlay(void) {
-    int w = PH.cv.res_w->i, h = PH.cv.res_h->i;
-    u32 hash = phone_ui_hash(&PH);
-    bool due = g_engine.real_time - PH.overlay_t > 0.5;
-    if (PH.overlay && hash == PH.overlay_hash && !due && w == PH.overlay_w && h == PH.overlay_h) return;
-    if (w != PH.overlay_w || h != PH.overlay_h || !PH.overlay_px) {
-        free(PH.overlay_px);
-        PH.overlay_px = (u8 *)malloc((size_t)w * (size_t)h * 4);
-        PH.overlay_w = w;
-        PH.overlay_h = h;
+// A screen canvas -> texture (a new texture per change, a few per second at most: the previous one
+// may still be in use by frames in flight, render_texture_destroy defers the release).
+static bool rebuild_overlay(TextureId *tex, u8 **px, u32 *hash, double *t, const PhoneScreenView *v, int w, int h, bool size_changed) {
+    u32 hh = phone_ui_hash(&PH, v);
+    bool due = g_engine.real_time - *t > 0.5;
+    if (*tex && hh == *hash && !due && !size_changed) return false;
+    if (size_changed || !*px) {
+        free(*px);
+        *px = (u8 *)malloc((size_t)w * (size_t)h * 4);
     }
-    if (!PH.overlay_px) return;
-    phone_ui_build_screen(&PH, PH.overlay_px, w, h);
-    // A new texture per change (a few per second at most): the previous one may still be in use
-    // by frames in flight, render_texture_destroy defers the release.
-    if (PH.overlay) render_texture_destroy(PH.overlay);
-    PH.overlay = render_texture_create(w, h, PH.overlay_px, true, false);
-    PH.overlay_hash = hash;
-    PH.overlay_t = g_engine.real_time;
+    if (!*px) return false;
+    phone_ui_build_screen(&PH, v, *px, w, h);
+    if (*tex) render_texture_destroy(*tex);
+    *tex = render_texture_create(w, h, *px, true, false);
+    *hash = hh;
+    *t = g_engine.real_time;
+    return true;
 }
 
-static void local_view(float dt) {
-    if (!PH.lens_valid) return;
+static bool update_overlay(void) {
+    int w = PH.cv.res_w->i, h = PH.cv.res_h->i;
+    bool resized = w != PH.overlay_w || h != PH.overlay_h;
+    PH.overlay_w = w;
+    PH.overlay_h = h;
+    PhoneScreenView v = phone_view_own(&PH);
+    return rebuild_overlay(&PH.overlay, &PH.overlay_px, &PH.overlay_hash, &PH.overlay_t, &v, w, h, resized);
+}
+
+static void local_view(bool overlay_changed) {
+    PhoneApp app = PH.spec ? PH.spec_app : PH.os.app;
+    bool ui_only = phone_os_ui_only(app);
+    if (!ui_only && !PH.lens_valid) return;
     double now = g_engine.real_time;
     float fps = (float)DG_CLAMP(PH.cv.fps->i, 5, 60);
     bool due = now - PH.last_render_t >= 1.0 / fps - 0.002;
-    if (!due) return;
+    if (!due && !(ui_only && overlay_changed)) return;
     PH.last_render_t = now;
-    bool want_hires = PH.photo_pending && PH.cv.photo_hires->i;
+    bool want_hires = PH.photo_pending && PH.cv.photo_hires->i && !ui_only;
     RenderPhoneView v;
     memset(&v, 0, sizeof(v));
     v.view = 0;
     v.pos = PH.lens_pos;
-    v.rot = PH.lens_rot;
+    v.rot = PH.lens_valid ? PH.lens_rot : quat_identity();
     v.fov_deg = lens_fov();
     v.width = want_hires ? 1080 : PH.cv.res_w->i;
     v.height = want_hires ? 1920 : PH.cv.res_h->i;
@@ -643,12 +890,18 @@ static void local_view(float dt) {
     v.exposure_bias = PH.cv.exposure->f;
     v.flash = PH.flash;
     v.vignette = 0.3f;
-    v.readback = PH.conn >= 0 || PH.photo_pending || PH.rec != NULL;
+    v.readback = !ui_only && ((PH.conn >= 0 && !PH.spec) || PH.photo_pending || PH.rec != NULL);
     v.mirror = PH.front;
+    v.ui_only = ui_only;
+    PhoneRect pr;
+    if ((PH.panel_on || PH.panel_t > 0) && phone_ui_panel_rect(&PH, &pr)) {
+        v.panel_w = (int)lrintf(pr.w);
+        v.panel_h = (int)lrintf(pr.h);
+        v.panel_radius = gui_s(PH.theme.panel.radius);
+    }
     render_phone_view(&v);
     // The copy of this frame arrives two frames later (after the one requested last frame).
-    if (PH.photo_pending && PH.photo_wait == 0) PH.photo_wait = 2;
-    (void)dt;
+    if (PH.photo_pending && PH.photo_wait == 0 && !ui_only) PH.photo_wait = 2;
 }
 
 static void consume_readback(void) {
@@ -679,8 +932,9 @@ static void consume_readback(void) {
     }
 }
 
+// The nearest other phone within range (drawn this frame as a world item) gets view 1: its screen
+// from its replicated state (app, zoom, flags), the lens only in its camera app.
 static void remote_view(vec3 cam_pos) {
-    // The nearest other phone within range (drawn this frame as a world item) gets view 1.
     PH.remote_valid = false;
     float best = PH.cv.remote_range->f;
     int bi = -1;
@@ -696,23 +950,54 @@ static void remote_view(vec3 cam_pos) {
     double now = g_engine.real_time;
     if (now - PH.remote_t < 1.0 / (double)DG_CLAMP(PH.cv.remote_fps->i, 1, 30)) return;
     PH.remote_t = now;
+    PhoneScreenView sv;
+    memset(&sv, 0, sizeof(sv));
+    sv.app = PH.remote[bi].app < PAPP_COUNT ? (PhoneApp)PH.remote[bi].app : PAPP_OFF;
+    sv.flow = PFLOW_LOCAL;
+    sv.viewer = -1;
+    sv.hover = -1;
+    sv.zoom = PH.remote[bi].zoom ? (float)PH.remote[bi].zoom / 32.0f : 1.0f;
+    sv.rec = (PH.remote[bi].flags & CHAR_PHONE_REC) != 0;
+    sv.front = (PH.remote[bi].flags & CHAR_PHONE_FRONT) != 0;
+    sv.landscape = (PH.remote[bi].flags & CHAR_PHONE_LANDSCAPE) != 0;
+    sv.driven = (PH.remote[bi].flags & CHAR_PHONE_DRIVEN) != 0;
+    sv.remote = true;
+    static u8 *px;
+    rebuild_overlay(&PH.overlay_remote, &px, &PH.remote_hash, &PH.remote_overlay_t, &sv, 270, 480, false);
+    PH.remote_px = px;
     RenderPhoneView v;
     memset(&v, 0, sizeof(v));
     v.view = 1;
     v.pos = lens;
     v.rot = PH.remote[bi].rot;
-    v.fov_deg = it->cam.fov_deg;
+    v.fov_deg = 2.0f * atanf(tanf(it->cam.fov_deg * 0.5f * DG_DEG2RAD) / fmaxf(sv.zoom, 1.0f)) * DG_RAD2DEG;
     v.width = 270;
     v.height = 480;
+    v.overlay = PH.overlay_remote;
+    v.ui_only = phone_os_ui_only(sv.app);
+    v.vignette = 0.3f;
     render_phone_view(&v);
+}
+
+// The screen's emissive: a display of phone_screen_emissive x 250 nits, shown at
+// clamp(L x exposure, phone_screen_min, phone_screen_max): white but never blown out by day, a
+// mild glow (bloom) at night.
+static void screen_level(void) {
+    float ev = render_exposure_ev();
+    float e = 0.18f / fmaxf(exp2f(ev) * 0.125f, 1e-6f);   // the main view's exposure (EV100 -> multiplier)
+    float L = 250.0f * PH.cv.screen_emissive->f;
+    float lo = PH.cv.screen_min->f, hi = fmaxf(PH.cv.screen_max->f, lo);
+    PH.screen_level = clampf(L * e, lo, hi);
+    PH.screen_k = PH.screen_level / e;
 }
 
 void phone_frame(World *w, const RenderCamera *cam, const Player *lp) {
     if (!PH.init) return;
     float dt = (float)g_engine.frame_dt;
-    // Held item.
-    // The viewed player's phone (docs/SPECTATE.md): a spectated player's lens, zoom, front camera and
-    // landscape come with its commands; only the own phone takes input, records and pairs.
+    phone_ui_load_assets(&PH);
+    // Held item. The viewed player's phone (docs/SPECTATE.md): a spectated player's app, lens, zoom,
+    // front camera and landscape come with its commands; only the own phone takes input, records
+    // and pairs.
     const ItemDef *it = NULL;
     bool spec = game_view_slot() != game()->local_slot;
     if (w && lp && lp->sim.move.mode != MOVE_DEAD) {
@@ -723,21 +1008,43 @@ void phone_frame(World *w, const RenderCamera *cam, const Player *lp) {
     bool was_holding = PH.holding;
     PH.holding = it != NULL;
     PH.item = it;
-    PH.camera = PH.holding && lp && lp->sim.wpn.ads_on;
+    PH.spec = spec && PH.holding;
+    PH.raised = PH.holding && lp && lp->sim.wpn.ads_on;
     if (!PH.holding && PH.rec) record_stop();
     if (!PH.holding && PH.photo_pending) PH.photo_pending = false;
     if (PH.holding && !was_holding && !PH.gallery_scanned) {
         phone_gallery_scan(&PH.gallery, platform_pref_dir());
         PH.gallery_scanned = true;
     }
-    // Server: 0 off, 1 on, 2 automatic (starts with the first phone in hand, then stays up).
+    // Server: 0 off, 1 on, 2 automatic (starts when the phone is equipped, then stays up).
     int sv = PH.cv.server->i;
     if (sv == 0 && PH.server) server_stop();
-    if ((sv == 1 || (sv == 2 && PH.holding)) && !PH.server && !PH.server_err[0]) server_start();
+    if (sv == 1 && !PH.server && !PH.server_err[0]) server_start();
+    // The flow (phone_os.c): equipping starts pairing at once (server + code + portal).
+    bool own = PH.holding && !spec;
+    if (own && !PH.os.equipped) {
+        PH.server_err[0] = 0;
+        if (phone_os_equip(&PH.os, PH.cv.auto_pair->i != 0, PH.conn >= 0)) flow_pair();
+        log_info("phone: equipped -> %s / %s (server %s)", phone_flow_name(PH.os.flow), phone_app_name(PH.os.app), PH.server ? PH.ip_text : "off");
+    } else if (!own && PH.os.equipped) {
+        phone_os_unequip(&PH.os);
+        PH.token[0] = 0;
+        set_capture(false);
+    }
     poll_server();
     if (PH.server && PH.token[0]) {
         PH.token_left = hws_token_remaining(PH.server, 0);
-        if (PH.token_left <= 0 && PH.conn < 0 && PH.screen == PSCR_PAIR) PH.token[0] = 0;
+        // An expired code on an open portal is replaced (the pairing timeout decides when to give up).
+        if (PH.token_left <= 0 && PH.conn < 0) {
+            PH.token[0] = 0;
+            if (PH.os.app == PAPP_PORTAL && PH.os.flow == PFLOW_PAIRING) pair_begin();
+        }
+    }
+    PhoneFlow before = PH.os.flow;
+    phone_os_tick(&PH.os, dt, PH.cv.pair_timeout->f, PH.cv.battery_drain->f / 6000.0f);
+    if (before == PFLOW_PAIRING && PH.os.flow == PFLOW_LOCAL) {
+        PH.token[0] = 0;
+        toast("No phone connected: using the in-game phone");
     }
     update_orientation(dt);
     if (spec) {
@@ -745,32 +1052,38 @@ void phone_frame(World *w, const RenderCamera *cam, const Player *lp) {
         if (vc->phone_zoom) PH.zoom_target = clampf((float)vc->phone_zoom / 32.0f, 1.0f, MAX_ZOOM);
         PH.front = (vc->phone_flags & CHAR_PHONE_FRONT) != 0;
         PH.landscape = (vc->phone_flags & CHAR_PHONE_LANDSCAPE) != 0;
+        PH.spec_flags = vc->phone_flags;
+        PH.spec_app = vc->phone_app < PAPP_COUNT && vc->phone_app != PAPP_OFF ? (PhoneApp)vc->phone_app : PAPP_HOME;
         if (PH.rec) record_stop();
     }
-    // Local input (in game, nothing on top).
+    PhoneApp app = PH.spec ? PH.spec_app : PH.os.app;
+    PH.camera = PH.holding && app == PAPP_CAMERA;
+    // Local input (in game, nothing on top). The camera app's keys work with the mouse in the game;
+    // the HUD panel takes the cursor with phoneui (Alt) or the gamepad with phonenav.
+    PH.panel_on = own && phone_os_panel(&PH.os);
     bool focus = !spec && input_game_focus() && !game()->menu_open && !game()->inventory_open && !console_is_open();
-    bool atk = input_down(ACT_ATTACK), rel = input_down(ACT_RELOAD), pair = input_down(ACT_PHONE_PAIR), gal = input_down(ACT_PHONE_GALLERY);
+    bool atk = input_down(ACT_ATTACK), rel = input_down(ACT_RELOAD), gal = input_down(ACT_PHONE_GALLERY);
     bool selfie = input_down(ACT_PHONE_SELFIE);
-    if (focus && PH.holding && selfie && !PH.prev_selfie) PH.front = !PH.front;
+    if (focus && own && PH.camera && selfie && !PH.prev_selfie) PH.front = !PH.front;
     PH.prev_selfie = selfie;
-    if (focus && PH.holding) {
+    if (focus && own) {
         if (PH.camera && atk && !PH.prev_attack) PH.photo_pending = true;
         if (PH.camera && rel && !PH.prev_reload) { if (PH.rec) record_stop(); else record_start(); }
-        if (pair && !PH.prev_pair) { if (PH.screen == PSCR_PAIR) PH.screen = PSCR_CAMERA; else pair_begin(); }
-        if (gal && !PH.prev_gallery) PH.screen = PH.screen == PSCR_GALLERY ? PSCR_CAMERA : PSCR_GALLERY;
+        if (gal && !PH.prev_gallery && PH.os.app != PAPP_PORTAL) open_app(PH.os.app == PAPP_GALLERY ? PAPP_HOME : PAPP_GALLERY);
     }
     PH.prev_attack = atk;
     PH.prev_reload = rel;
-    PH.prev_pair = pair;
     PH.prev_gallery = gal;
-    if (PH.camera && PH.screen == PSCR_GALLERY) PH.screen = PSCR_CAMERA;
+    if (own) panel_input();
+    else { PH.hover = -1; PH.nav_hold = false; }
+    if (!PH.camera && PH.photo_pending && !spec) PH.photo_pending = false;   // photos come from the camera app only
     // Zoom (smoothed), shutter flash.
     PH.zoom += (PH.zoom_target - PH.zoom) * exp_decay(12.0f, dt);
     if (fabsf(PH.zoom - PH.zoom_target) < 0.005f) PH.zoom = PH.zoom_target;
     PH.flash = fmaxf(0.0f, PH.flash - dt / 0.25f);
     // Lens from the phone as drawn this frame (first person: the hands' item transform).
     PH.lens_valid = false;
-    vec3 ipos;
+    vec3 ipos = v3(0, 0, 0);
     quat irot;
     if (PH.holding && hands_held_xform(&ipos, &irot)) {
         const Xform *lens = PH.front ? &it->cam.front : &it->cam.lens;
@@ -783,21 +1096,26 @@ void phone_frame(World *w, const RenderCamera *cam, const Player *lp) {
         if (!warned++) log_warn("phone: non-finite lens transform (held item %.2f %.2f %.2f)", ipos.x, ipos.y, ipos.z);
         PH.lens_valid = false;
     }
-    // Screen brightness: a lit display under this frame's exposure (EV100 -> 1 / exposure).
-    float ev = render_exposure_ev();
-    PH.screen_k = exp2f(ev) * 0.125f / 0.18f * PH.cv.screen_brightness->f;
-    if (PH.holding) {
-        update_overlay();
-        local_view(dt);
-    }
+    screen_level();
+    if (PH.holding) local_view(update_overlay());
     consume_readback();
     if (PH.sink) PH.sink->update(PH.sink, now_ms());
     remote_view(cam->pos);
     PH.remote_count = 0;
-    // Status to the page (4 Hz).
-    if (PH.conn >= 0 && g_engine.real_time - PH.last_status_t > 0.25) {
+    PH.lights_added = 0;
+    // The HUD panel slides in / out.
+    float slide = fmaxf(0.05f, PH.theme.panel.slide);
+    PH.panel_t = approachf(PH.panel_t, PH.panel_on ? 1.0f : 0.0f, dt / slide);
+    // Status to the page (4 Hz, and at once when the app or the flow changes).
+    bool changed = PH.os.app != PH.sent_app || PH.os.flow != PH.sent_flow;
+    if (PH.conn >= 0 && (changed || g_engine.real_time - PH.last_status_t > 0.25)) {
         PH.last_status_t = g_engine.real_time;
         send_status();
+    }
+    if (PH.os.app != PH.sent_app || PH.os.flow != PH.sent_flow) {
+        log_info("phone: %s / %s%s", phone_flow_name(PH.os.flow), phone_app_name(PH.os.app), PH.os.reason[0] && PH.os.flow == PFLOW_LOCAL ? PH.os.reason : "");
+        PH.sent_app = PH.os.app;
+        PH.sent_flow = PH.os.flow;
     }
 }
 
@@ -818,8 +1136,11 @@ static void cmd_phone_pair(int argc, const char **argv) {
     (void)argc;
     (void)argv;
     PH.server_err[0] = 0;
-    pair_begin();
-    if (PH.url[0]) log_info("phone_pair: open %s on the phone (or scan the QR code). Fallback address: %s", PH.url, PH.ip_text);
+    if (PH.os.equipped) {
+        if (phone_os_reconnect(&PH.os)) flow_pair();
+    } else if (!pair_begin()) {
+        log_info("phone_pair: %s", PH.server_err);
+    }
 }
 
 static void cmd_phone_unpair(int argc, const char **argv) {
@@ -857,10 +1178,22 @@ static void cmd_phone_stats(int argc, const char **argv) {
              PH.fake ? "fake" : (PH.driven ? "device" : "mouse"), PH.samples, (g_engine.real_time - PH.sample_t) * 1000.0, PH.calibrated, PH.landscape, PH.zoom);
 }
 
+// One line for the script tests (tools/tests/phone_flow*.cfg).
+static void cmd_phone_status(int argc, const char **argv) {
+    (void)argc;
+    (void)argv;
+    log_info("phone_status: flow=%s app=%s panel=%d panel_t=%.2f server=%d token=%d paired=%d raised=%d camera=%d capture=%d driven=%d samples=%u "
+             "level=%.3f ev=%.2f viewer=%d gallery=%d spec=%d spec_app=%s reason=\"%s\"",
+             phone_flow_name(PH.os.flow), phone_app_name(PH.os.app), PH.panel_on, PH.panel_t, PH.server != NULL, PH.token[0] != 0, PH.conn >= 0, PH.raised,
+             PH.camera, PH.ui_capture, PH.driven, PH.samples, PH.screen_level, render_exposure_ev(), PH.os.viewer, PH.gallery.count, PH.spec,
+             phone_app_name(PH.spec_app), PH.os.reason);
+}
+
 static void cmd_phone_photo(int argc, const char **argv) {
     (void)argc;
     (void)argv;
     if (!PH.holding) { log_info("phone_photo: not holding a phone"); return; }
+    open_app(PAPP_CAMERA);
     PH.photo_pending = true;
 }
 
@@ -868,7 +1201,7 @@ static void cmd_phone_record(int argc, const char **argv) {
     (void)argc;
     (void)argv;
     if (PH.rec) record_stop();
-    else if (PH.holding) record_start();
+    else if (PH.holding) { open_app(PAPP_CAMERA); record_start(); }
     else log_info("phone_record: not holding a phone");
 }
 
@@ -878,7 +1211,10 @@ static void cmd_phone_zoom(int argc, const char **argv) {
 }
 
 static void cmd_phone_screen(int argc, const char **argv) {
-    if (argc > 1) PH.screen = !strcmp(argv[1], "gallery") ? PSCR_GALLERY : (!strcmp(argv[1], "pair") ? PSCR_PAIR : PSCR_CAMERA);
+    if (argc < 2) { log_info("phone_screen home | camera | gallery | pair: %s", phone_app_name(PH.os.app)); return; }
+    if (!strcmp(argv[1], "pair") || !strcmp(argv[1], "portal")) { cmd_phone_pair(1, argv); return; }
+    int a = phone_app_from_name(argv[1]);
+    if (a > PAPP_PORTAL) open_app((PhoneApp)a);
 }
 
 static void cmd_phone_landscape(int argc, const char **argv) {
@@ -897,6 +1233,53 @@ static void cmd_phone_calibrate(int argc, const char **argv) {
     calibrate();
 }
 
+static const char *k_buttons[PB_COUNT] = { "none", "decline", "cancel", "reconnect", "connect", "app", "home", "back", "shutter", "record", "thumb",
+                                           "flip", "zoom", "slider", "cell", "prev", "next", "delete" };
+
+// phone_button <name> [index]: press a phone OS button (the same path as a click on the panel).
+static void cmd_phone_button(int argc, const char **argv) {
+    if (argc < 2) { log_info("phone_button <decline|cancel|reconnect|connect|app|home|back|shutter|record|thumb|flip|zoom|slider|cell|prev|next|delete> [index]"); return; }
+    int id = -1, index = argc > 2 ? atoi(argv[2]) : 0;
+    for (int i = 1; i < PB_COUNT; i++)
+        if (!strcmp(argv[1], k_buttons[i])) id = i;
+    PhoneLayoutIn li = layout_in();
+    PhoneHit hits[PHONE_MAX_HITS];
+    int n = phone_os_layout(&li, hits, PHONE_MAX_HITS);
+    const PhoneHit *h = id > 0 ? phone_os_find(hits, n, id, index) : NULL;
+    if (!h) { log_info("phone_button: %s %d is not on the %s screen", argv[1], index, phone_app_name(PH.os.app)); return; }
+    log_info("phone_button: %s %d", argv[1], index);
+    activate(h->id, h->index, h->r.y + h->r.h * 0.5f, &h->r);
+}
+
+// phone_tap <x> <y>: a click at design px (640 x 1136) on the phone screen.
+static void cmd_phone_tap(int argc, const char **argv) {
+    if (argc < 3) { log_info("phone_tap <x> <y>  (design px, 640 x 1136)"); return; }
+    float x = (float)atof(argv[1]), y = (float)atof(argv[2]);
+    PhoneLayoutIn li = layout_in();
+    PhoneHit hits[PHONE_MAX_HITS];
+    int n = phone_os_layout(&li, hits, PHONE_MAX_HITS);
+    int i = phone_os_hit(hits, n, x, y);
+    log_info("phone_tap: %.0f %.0f -> %s %d", x, y, i >= 0 ? k_buttons[hits[i].id] : "nothing", i >= 0 ? hits[i].index : 0);
+    if (i >= 0) activate(hits[i].id, hits[i].index, y, &hits[i].r);
+}
+
+static void cmd_phone_decline(int argc, const char **argv) {
+    (void)argc;
+    (void)argv;
+    activate(PB_DECLINE, 0, 0, NULL);
+}
+
+static void cmd_phone_back(int argc, const char **argv) {
+    (void)argc;
+    (void)argv;
+    phone_os_back(&PH.os);
+}
+
+static void cmd_phone_ui(int argc, const char **argv) {
+    set_capture(argc > 1 ? atoi(argv[1]) != 0 && PH.panel_on : !PH.ui_capture && PH.panel_on);
+    log_info("phone_ui: cursor %s", PH.ui_capture ? "on the phone" : "in the game");
+}
+
 void phone_register(void) {
     memset(&PH, 0, sizeof(PH));
     PhoneCvars *c = &PH.cv;
@@ -905,6 +1288,8 @@ void phone_register(void) {
     c->tls = cvar_reg_bool("phone_tls", true, CVAR_ARCHIVE, "phone server over HTTPS (needed for motion sensors on iOS / Android, docs/PHONE.md)");
     c->bind = cvar_reg_string("phone_bind", "auto", CVAR_ARCHIVE, "phone server address: auto (the LAN interface), any, or an IPv4 address");
     c->pairing = cvar_reg_bool("phone_pairing", true, CVAR_ARCHIVE, "allow pairing a phone");
+    c->auto_pair = cvar_reg_bool("phone_auto_pair", true, CVAR_ARCHIVE, "equipping the phone starts pairing at once (the Connect portal); off: straight to the in-game phone");
+    c->pair_timeout = cvar_reg_float("phone_pair_timeout", 60.0f, 0.0f, 600.0f, CVAR_ARCHIVE, "seconds on the Connect portal before falling back to the in-game phone (0 = wait)");
     c->res_w = cvar_reg_int("phone_res_w", 640, 128, 1440, CVAR_ARCHIVE, "phone camera / stream width (portrait)");
     c->res_h = cvar_reg_int("phone_res_h", 1136, 256, 2560, CVAR_ARCHIVE, "phone camera / stream height (portrait)");
     c->fps = cvar_reg_int("phone_fps", 30, 5, 60, CVAR_ARCHIVE, "phone camera render / stream rate (Hz)");
@@ -920,24 +1305,39 @@ void phone_register(void) {
     c->filter = cvar_reg_int("phone_filter", 0, 0, PHONE_FILTER_COUNT - 1, CVAR_ARCHIVE, "photo filter: 0 none, 1 vivid, 2 warm, 3 cool, 4 mono, 5 noir");
     c->remote_range = cvar_reg_float("phone_remote_range", 4.0f, 0.0f, 20.0f, CVAR_ARCHIVE, "other players' phone screens render live within this distance (m)");
     c->remote_fps = cvar_reg_int("phone_remote_fps", 8, 1, 30, CVAR_ARCHIVE, "other players' phone screens: render rate (Hz)");
-    c->screen_brightness = cvar_reg_float("phone_screen_brightness", 0.85f, 0.1f, 2.0f, CVAR_ARCHIVE, "in-game phone screen brightness");
+    c->screen_emissive = cvar_reg_float("phone_screen_emissive", 1.0f, 0.0f, 4.0f, CVAR_ARCHIVE, "phone screen luminance (x 250 nits): glows more at night through the exposure");
+    c->screen_min = cvar_reg_float("phone_screen_min", 1.1f, 0.2f, 4.0f, CVAR_ARCHIVE, "phone screen: lowest displayed level (daylight; white, no bloom)");
+    c->screen_max = cvar_reg_float("phone_screen_max", 2.6f, 0.5f, 8.0f, CVAR_ARCHIVE, "phone screen: highest displayed level (night; caps the bloom)");
+    c->screen_light = cvar_reg_float("phone_screen_light", 0.35f, 0.0f, 4.0f, CVAR_ARCHIVE, "the phone screen's light on the hands / face (point light intensity, 0 = off)");
+    c->battery_drain = cvar_reg_float("phone_battery_drain", 0.5f, 0.0f, 100.0f, CVAR_ARCHIVE, "cosmetic phone battery drain while equipped (% per minute)");
+    c->hud_size = cvar_reg_float("hud_phone_size", 0.22f, 0.12f, 0.4f, CVAR_ARCHIVE, "HUD: phone panel height (fraction of the screen height)");
+    c->hud_corner = cvar_reg_int("hud_phone_corner", 0, 0, 3, CVAR_ARCHIVE, "HUD: phone panel corner: 0 bottom right, 1 bottom left, 2 top right, 3 top left");
     c->exposure = cvar_reg_float("phone_exposure", 0.0f, -3.0f, 3.0f, CVAR_ARCHIVE, "phone camera exposure bias (EV)");
     c->token_ttl = cvar_reg_float("phone_token_ttl", 120.0f, 10.0f, 600.0f, 0, "pairing token lifetime (s)");
     cmd_register("phone_server", cmd_phone_server, "phone_server on | off: the phone companion server");
-    cmd_register("phone_pair", cmd_phone_pair, "show the pairing QR code and print the URL");
+    cmd_register("phone_pair", cmd_phone_pair, "new pairing code: the Connect portal on the phone + HUD panel, URL printed to the console");
     cmd_register("phone_unpair", cmd_phone_unpair, "disconnect the paired phone");
     cmd_register("phone_fake_orientation", cmd_phone_fake, "phone_fake_orientation <pitch> <yaw> <roll> | off: drive the phone without a device");
     cmd_register("phone_stream_stats", cmd_phone_stats, "phone stream / server / orientation statistics");
-    cmd_register("phone_photo", cmd_phone_photo, "take a photo with the held phone");
+    cmd_register("phone_status", cmd_phone_status, "phone flow / app / HUD panel / screen level (one log line)");
+    cmd_register("phone_photo", cmd_phone_photo, "take a photo with the held phone (opens the camera app)");
     cmd_register("phone_record", cmd_phone_record, "start / stop recording a phone video");
     cmd_register("phone_zoom", cmd_phone_zoom, "phone_zoom <1..8>: phone camera zoom");
-    cmd_register("phone_screen", cmd_phone_screen, "phone_screen camera | pair | gallery");
+    cmd_register("phone_screen", cmd_phone_screen, "phone_screen home | camera | gallery | pair: open a phone app (pair: the Connect portal)");
     cmd_register("phone_landscape", cmd_phone_landscape, "phone_landscape [0|1]: two-handed landscape hold (automatic with a paired phone)");
     cmd_register("phone_selfie", cmd_phone_selfie, "phone_selfie [0|1]: front (selfie) / back camera (key T, or the page)");
     cmd_register("phone_calibrate", cmd_phone_calibrate, "re-centre the paired phone's orientation (the page has a button / double tap)");
+    cmd_register("phone_button", cmd_phone_button, "phone_button <name> [index]: press a phone screen button (decline, home, app 0, cell 2 ...)");
+    cmd_register("phone_tap", cmd_phone_tap, "phone_tap <x> <y>: tap the phone screen at design px (640 x 1136)");
+    cmd_register("phone_decline", cmd_phone_decline, "Connect portal: use the in-game phone instead");
+    cmd_register("phone_back", cmd_phone_back, "phone: back (viewer -> gallery -> home)");
+    cmd_register("phone_ui", cmd_phone_ui, "phone_ui [0|1]: free the cursor for the HUD phone panel (key Alt)");
     PH.conn = -1;
     PH.zoom = PH.zoom_target = 1.0f;
     PH.rel = quat_identity();
+    PH.hover = PH.nav = -1;
+    phone_os_init(&PH.os);
+    PH.sent_app = PAPP_OFF;
     PH.init = true;
 }
 

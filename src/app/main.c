@@ -29,6 +29,7 @@
 #include "ui/menus.h"
 #include "ui/vfx_editor.h"
 #include "ui/holdpoint_editor.h"
+#include "gameplay/phone/phone.h"
 #include "game/game.h"
 #include "net/net.h"
 #include "net/lobby_net.h"
@@ -109,6 +110,8 @@ static void handle_event(const SDL_Event *ev) {
         }
         if (ev->key.scancode == SDL_SCANCODE_ESCAPE && !input_capturing()) {
             if (console_is_open()) { console_set_open(false); return; }
+            // The cursor on the HUD phone panel: Esc is the phone's back (docs/PHONE.md).
+            if (!menus_open() && phone_ui_escape()) return;
             // No screen open: pause. Screens open: Esc is "back" for the UI (below).
             if (!menus_open()) { menus_toggle_pause(); return; }
         }

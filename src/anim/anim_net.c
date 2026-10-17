@@ -47,7 +47,7 @@ u16 anim_net_diff(const AnimNetState *a, const AnimNetState *b) {
     if (a->character_id != b->character_id) m |= ANS_CHAR;
     if (a->death_tick != b->death_tick || a->death_seed != b->death_seed) m |= ANS_DEATH;
     if (memcmp(a->parts, b->parts, sizeof(a->parts))) m |= ANS_PARTS;
-    if (a->phone_flags != b->phone_flags || a->phone_rot != b->phone_rot) m |= ANS_PHONE;
+    if (a->phone_flags != b->phone_flags || a->phone_rot != b->phone_rot || a->phone_app != b->phone_app || a->phone_zoom != b->phone_zoom) m |= ANS_PHONE;
     return m;
 }
 
@@ -67,7 +67,7 @@ int anim_net_field_bytes(u16 f) {
     if (f & ANS_MANTLE) n += 1;
     if (f & ANS_CHAR) n += 1;
     if (f & ANS_DEATH) n += 5;
-    if (f & ANS_PHONE) n += 5;
+    if (f & ANS_PHONE) n += 7;
     if (f & ANS_PARTS) n += 2 + ANIM_NET_PART_SLOTS;
     return n;
 }
@@ -108,7 +108,7 @@ void anim_net_write(Writer *w, const AnimNetState *s, u16 f) {
         w_u16(w, m);
         for (int i = 0; i < ANIM_NET_PART_SLOTS; i++) if (m & (1u << i)) w_u8(w, s->parts[i]);
     }
-    if (f & ANS_PHONE) { w_u8(w, s->phone_flags); w_u32(w, s->phone_rot); }
+    if (f & ANS_PHONE) { w_u8(w, s->phone_flags); w_u32(w, s->phone_rot); w_u8(w, s->phone_app); w_u8(w, s->phone_zoom); }
 }
 
 void anim_net_read(Reader *r, AnimNetState *s, u16 *fields) {
@@ -132,7 +132,7 @@ void anim_net_read(Reader *r, AnimNetState *s, u16 *fields) {
         u16 m = r_u16(r);
         for (int i = 0; i < ANIM_NET_PART_SLOTS; i++) s->parts[i] = (m & (1u << i)) ? r_u8(r) : 0;
     }
-    if (f & ANS_PHONE) { s->phone_flags = r_u8(r); s->phone_rot = r_u32(r); }
+    if (f & ANS_PHONE) { s->phone_flags = r_u8(r); s->phone_rot = r_u32(r); s->phone_app = r_u8(r); s->phone_zoom = r_u8(r); }
 }
 
 // Event layout: type u8 | ent u32 | tick u32 | seed u8 | [hit/die: part u8, dir u16, strength u8, dmg u8] | [land/fire: extra u8]

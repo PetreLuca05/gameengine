@@ -747,9 +747,10 @@ void weapons_tick(World *w, int slot, PlayerSim *sim, const UserCmd *cmd, u16 pr
     }
     ws->use_t = -1;
     if (!d) {
-        // Camera items (the phone, docs/PHONE.md): aiming raises it into camera mode, replicated
-        // like ADS. Other items never aim (a stale flag from the previous weapon is cleared).
-        bool aim = idef->camera && s->item && (cmd->buttons & BTN_AIM) && sim->move.mode == MOVE_WALK && ws->equip_t > 0.15f;
+        // Camera items (the phone, docs/PHONE.md): always raised into the focused (camera-ready)
+        // pose while equipped, replicated like ADS; no aim button. Other items never aim (a stale
+        // flag from the previous weapon is cleared).
+        bool aim = idef->camera && s->item && sim->move.mode == MOVE_WALK && ws->equip_t > 0.15f;
         ws->ads_t = aim ? fminf(1.0f, ws->ads_t + dt / 0.22f) : fmaxf(0.0f, ws->ads_t - dt / 0.22f);
         ws->ads_on = aim ? 1 : 0;
         return;
