@@ -366,6 +366,14 @@ bool ctrl_bind(AnimBinding *b, const ControllerDef *def, const char *set_json, c
             if (!br) continue;
             snprintf(name, sizeof(name), "%.*s%s%s", (int)(br - nd->slot_pattern), nd->slot_pattern, def->weapon_types[w], br + 8);
             const cJSON *v = cJSON_GetObjectItemCaseSensitive(slots, name);
+            if (!cJSON_IsString(v) || !v->valuestring[0]) {
+                // Unbound for this weapon type: the plain slot ("run_f_{weapon}" -> "run_f"), so a
+                // set only lists the weapon variants it has (zombies, unarmed keep their clips).
+                char base[64];
+                const char *cut = br > nd->slot_pattern && br[-1] == '_' ? br - 1 : br;
+                snprintf(base, sizeof(base), "%.*s%s", (int)(cut - nd->slot_pattern), nd->slot_pattern, br + 8);
+                v = cJSON_GetObjectItemCaseSensitive(slots, base);
+            }
             if (cJSON_IsString(v) && v->valuestring[0]) {
                 SlotBinding sb = parse_binding(cl, v->valuestring);
                 // Encoded as -(clip + 2) so it never collides with a slot index.
