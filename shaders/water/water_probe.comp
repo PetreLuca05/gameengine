@@ -1,0 +1,16 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+// Water test probe (water_test waves): the GPU swell height at given points, for the CPU == GPU check
+// against water_height_at (src/render/vk_water.c render_water_gpu_heights).
+#include "post_common.glsl"
+#include "water/water_common.glsl"
+
+layout(local_size_x = 64) in;
+layout(std430, set = 0, binding = 14) buffer Probe { vec4 p[]; } probe;   // in: x, z, t; out: .w = height
+
+void main() {
+    uint i = gl_GlobalInvocationID.x;
+    if (i >= pc.u0.x) return;
+    vec4 q = probe.p[i];
+    probe.p[i].w = wv_height(q.xy, q.z);
+}

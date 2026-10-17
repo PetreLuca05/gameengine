@@ -453,6 +453,14 @@ u32 vkg_route_skinned(const SkinnedDraw *draws, u32 n, const mat4 *bones, u8 *ro
 // Point / spot light shadow tile: vgeo instances near the light as discrete LOD meshes (PIPE_SHADOW bound).
 u32 vkg_draw_local_shadow(VkCommandBuffer cmd, vec4 sphere, const vec4 planes[6], u32 cascade, u32 tile_px);               // r_era 2015 / 2010: discrete LODs through the legacy draws (after compute_matrices)
 
+// vk_water.c: water surfaces (docs/WATER.md "Rendering")
+void vkw_init(void);
+void vkw_shutdown(void);
+bool vkw_create_pipelines(void);
+// Frame graph, after the opaque scene is fogged and before the scene copy: snapshot, ripple sim,
+// surface pass (writes hdr, depth, velocity).
+void vkw_build_graph(int hdr, int depth, int velocity);
+
 // vk_vfx.c: GPU particles, decals, distortion
 bool vkx_init(void);
 void vkx_shutdown(void);

@@ -411,6 +411,46 @@ vec3 phys_get_angular_velocity(PhysicsWorld *w, BodyId id) {
     return v3(v.x, v.y, v.z);
 }
 
+bool phys_body_shape(PhysicsWorld *w, BodyId id, ShapeDesc *out) {
+    if (id == PHYS_INVALID_BODY) return false;
+    const BodyRecord *r = &w->records[BODY_INDEX(id)];
+    if (!r->used || r->id != id) return false;
+    *out = r->shape;
+    return true;
+}
+
+float phys_body_mass(PhysicsWorld *w, BodyId id) {
+    if (id == PHYS_INVALID_BODY) return 0.0f;
+    const BodyRecord *r = &w->records[BODY_INDEX(id)];
+    if (!r->used || r->id != id || r->motion != PM_DYNAMIC) return 0.0f;
+    JPH_BodyLockRead lock;
+    JPH_BodyLockInterface_LockRead(w->locks, id, &lock);
+    float mass = 0.0f;
+    if (lock.body) {
+        JPH_MotionProperties *mp = JPH_Body_GetMotionProperties((JPH_Body *)lock.body);
+        float inv = mp ? JPH_MotionProperties_GetInverseMassUnchecked(mp) : 0.0f;
+        mass = inv > 0.0f ? 1.0f / inv : 0.0f;
+    }
+    JPH_BodyLockInterface_UnlockRead(w->locks, &lock);
+    return mass;
+}
+
+vec3 phys_body_com(PhysicsWorld *w, BodyId id) {
+    JPH_RVec3 p;
+    JPH_BodyInterface_GetCenterOfMassPosition(w->bi, id, &p);
+    return v3(p.x, p.y, p.z);
+}
+
+void phys_add_impulse_com(PhysicsWorld *w, BodyId id, vec3 impulse, vec3 angular_impulse) {
+    if (id == PHYS_INVALID_BODY) return;
+    BodyRecord *r = &w->records[BODY_INDEX(id)];
+    if (!r->used || r->motion != PM_DYNAMIC) return;
+    JPH_Vec3 i = { impulse.x, impulse.y, impulse.z }, a = { angular_impulse.x, angular_impulse.y, angular_impulse.z };
+    JPH_BodyInterface_ActivateBody(w->bi, id);
+    JPH_BodyInterface_AddImpulse(w->bi, id, &i);
+    JPH_BodyInterface_AddAngularImpulse(w->bi, id, &a);
+}
+
 // ------------------------------------------------------------------ queries
 
 static vec3 surface_normal(PhysicsWorld *w, BodyId body, JPH_SubShapeID sub, vec3 point) {

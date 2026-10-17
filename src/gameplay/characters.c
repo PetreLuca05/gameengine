@@ -21,6 +21,7 @@
 #include "assets/assets.h"
 #include "game/game.h"
 #include "gameplay/revive/revive.h"
+#include "game/game_water.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1525,6 +1526,28 @@ static void post_one(World *w, CharacterInst *c, int i, float dt, vec3 cam_pos, 
                 pi.anchor_case_t[h] = handpose_mantle_case_time(m->mode == MOVE_HANG ? -1.0f : m->m_t);
             }
         }
+        // Swimming (docs/WATER.md "Swim animation"): the replicated flags (every machine), the
+        // simulation's stroke phase where this machine simulates the player.
+        u32 ef = w->flags[ENT_INDEX(c->ent)];
+        float soak = (ef & (EF_SWIM | EF_UNDERWATER)) ? 1.0f : ((ef & EF_WADE) ? 0.45f : 0.0f);
+        if (m->water != WATER_DRY) soak = fmaxf(soak, m->wet);
+        c->wet = soak > c->wet ? fminf(c->wet + pi.dt * 2.0f, soak) : fmaxf(c->wet - pi.dt / 90.0f, 0.0f);
+        if (ef & (EF_SWIM | EF_UNDERWATER)) {
+            pi.swim = (ef & EF_UNDERWATER) ? 2 : 1;
+            pi.swim_speed = c->rt.in.speed;
+            pi.water_y = m->water != WATER_DRY ? m->water_surface : game_water_height(c->root.t.x, c->root.t.z, w->authority ? (double)w->tick : net_client_render_tick());
+            if (pi.water_y <= -1e8f) pi.water_y = c->root.t.y + 1.5f;
+            pi.swim_phase_valid = w->authority || c->local;
+            pi.swim_phase = m->swim_phase;
+            if (pi.swim == 2) item = NULL;   // stowed under water
+            else if (item) {
+                pi.vehicle_onehand = true;   // a one-handed sidearm at the surface (the hold point's one-hand state)
+                pi.swim_hold_mask = 2;
+            }
+            pi.item = item;
+            pi.foot_ik = false;
+            pi.lean = false;
+        }
         // Seated in a vehicle: pelvis on the seat, feet on the pedals, hands on the controls.
         float yaw;
         if (g_vehicle_pose.seat_pose && g_vehicle_pose.seat_pose(w, c->slot, &pi.seat_hip, pi.seat_feet, &yaw)) {
@@ -1774,8 +1797,10 @@ static void draw_part(const CharacterInst *c, const SkeletonInstance *si, const 
     d.mesh = mesh;
     d.palette = g_palette;
     d.bone_count = (u32)skm_gather_palette(&LIB->meshes[gp->mesh], si, NULL, g_palette);
-    d.color = v4(1, 1, 1, 1);
-    d.roughness = 0.75f;
+    // Wet (docs/WATER.md): darker, glossier skin and clothes after the water.
+    float wk = c->wet;
+    d.color = v4(1.0f - 0.42f * wk, 1.0f - 0.42f * wk, 1.0f - 0.38f * wk, 1);
+    d.roughness = lerpf(0.75f, 0.28f, wk);
     d.flags = flags;
     d.fade = fade;
     d.cast_shadow = shadow;

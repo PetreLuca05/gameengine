@@ -184,6 +184,8 @@ typedef struct ProcState {
     quat phone_rot;
     // Hand poses on the held item this evaluation ([0] left, [1] right; valid with has_item).
     HandHold hand[2];
+    // Swimming (swim.c): blend weight, smoothed body tilt (deg), stroke phase.
+    float swim_w, swim_tilt, swim_phase;
 } ProcState;
 
 // World raycast for foot IK and muzzle pull-back (local physics world, static geometry).
@@ -245,6 +247,14 @@ typedef struct ProcInput {
     // style under it, per hand; the case socket is an offset from the anchor.
     u32 anchor_case[2], anchor_pose_base[2];
     float anchor_case_t[2];
+    // Swimming (docs/WATER.md "Swim animation", swim.c): 0 no, 1 at the surface, 2 under water; the
+    // swim speed (m/s), the surface height (world, -1e9 unknown), the simulation's stroke phase when
+    // this machine simulates the player (else a local one), hands holding the item (bit h: skip
+    // the stroke on hand h).
+    u8 swim;
+    u8 swim_hold_mask;
+    bool swim_phase_valid;
+    float swim_speed, swim_phase, water_y;
 } ProcInput;
 
 // Body yaw (simulation, host-owned, predicted locally): faces the aim while moving; while

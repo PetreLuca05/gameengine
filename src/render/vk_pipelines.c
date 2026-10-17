@@ -447,7 +447,7 @@ static i64 shader_sources_mtime(void) {
         i64 t = platform_file_mtime(path);
         if (t > newest) newest = t;
     }
-    static const char *incs[] = { "common.glsl", "vfx_common.glsl", "vfx_spawn.glsl", "lit_body.glsl", "post/post_common.glsl" };
+    static const char *incs[] = { "common.glsl", "vfx_common.glsl", "vfx_spawn.glsl", "lit_body.glsl", "lighting.glsl", "weather.glsl", "post/post_common.glsl", "water/water_waves.glsl", "water/water_common.glsl" };
     for (int i = 0; i < ARRAY_COUNT(incs); i++) {
         snprintf(path, sizeof(path), "%s/shaders/%s", DG_SOURCE_DIR, incs[i]);
         i64 t = platform_file_mtime(path);
@@ -493,6 +493,7 @@ bool render_reload_shaders(void) {
     bool ok = vkp_create_pipelines();
     if (ok) ok = vkx_create_pipelines();
     if (ok) ok = post_create_pipelines();
+    if (ok) ok = vkw_create_pipelines();
     log_info(ok ? "shaders: reloaded" : "shaders: reload failed, keeping old pipelines");
     return ok;
 }

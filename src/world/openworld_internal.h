@@ -20,8 +20,6 @@ typedef struct OpenWorld {
     OwSpot *spots;               // indoor zombie spots
     int spot_count;
     // rules
-    vec3 last_dry[MAX_PLAYERS];
-    bool have_dry[MAX_PLAYERS];
     float spawn_timer;
     float wild_density, despawn_dist, spawn_min, spawn_max, sense;
     int wild_max, zombie_cap;

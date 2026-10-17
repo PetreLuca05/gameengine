@@ -785,6 +785,8 @@ void weapons_tick(World *w, int slot, PlayerSim *sim, const UserCmd *cmd, u16 pr
     bool attack = (cmd->buttons & BTN_ATTACK) != 0;
     bool busy = sim->move.mode != MOVE_WALK;
     if (sim->move.mode == MOVE_SEATED) busy = !(g_vh.can_shoot && g_vh.can_shoot(w, slot, sim, d));   // passengers, one-handed drivers
+    // Swimming: a one-handed weapon (sidearm) at the surface only; under water everything is stowed.
+    if (sim->move.mode == MOVE_SWIM) busy = !(sim->move.water == WATER_SURFACE && d && d->one_hand_capable);
 
     // Throwables: hold to cook / charge, release to throw (gameplay/throwables.c).
     if (idef->kind == ITEM_THROWABLE && s->item) {

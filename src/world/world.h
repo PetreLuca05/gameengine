@@ -55,6 +55,9 @@ enum EntityFlags {
     EF_ENGINE    = 1 << 18,   // vehicles: engine running
     EF_DOWNED    = 1 << 19,   // players: knocked down (docs/REVIVE.md)
     EF_DNA       = 1 << 20,   // corpses: a DNA sample can still be extracted
+    EF_SWIM      = 1 << 21,   // players: swimming (MOVE_SWIM)
+    EF_UNDERWATER = 1 << 22,  // players: diving (head under water)
+    EF_WADE      = 1 << 23,   // players: walking in water
 };
 
 enum ComponentBits {
@@ -84,6 +87,7 @@ typedef struct BodyComp {
     BodyId body;
     PhysMotion motion;
     float mass;
+    float density;   // kg/m3 for buoyancy (0 = mass / shape volume); host only, level JSON "density"
 } BodyComp;
 
 typedef struct Health {

@@ -479,6 +479,7 @@ static void spawn_entity(World *w, const cJSON *e) {
         vec3 half = v3_scale(jv3(e, "size", v3(0.8f, 0.8f, 0.8f)), 0.5f);
         if (vs == VIS_CYLINDER) half = v3(half.x, half.y, half.x);
         id = spawn_prop(w, v3_add(pos, v3(0, half.y, 0)), quat_yaw(yaw), vs, half, jcol(e, "color", rgba8(0.6f, 0.45f, 0.25f, 1)), jf(e, "mass", 20));
+        w->body[ENT_INDEX(id)].density = jf(e, "density", 0);   // buoyancy (docs/WATER.md)
         w->vis[ENT_INDEX(id)].model = assets_model_id(js(e, "model", ""));
     } else if (!strcmp(type, "vgeo")) {
         if (w->level.vgeo_count >= MAX_LEVEL_VGEO) { log_warn("level: more than %d vgeo placements", MAX_LEVEL_VGEO); return; }

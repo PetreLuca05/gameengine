@@ -56,6 +56,7 @@ typedef struct CharacterInst {
     bool was_grounded, was_reloading;
     float last_equip_t;
     float fp_pitch[2], fp_yaw[2], fp_body_yaw[2];   // aim used by the last two post-passes (prev, cur)
+    float wet;                        // 0..1 soaked (docs/WATER.md): from the swim / wade flags, dries over ~90 s
     // render (any machine that draws)
     Xform *pose_prev, *pose_cur;      // post-IK bone world transforms
     Xform *pose_draw;                 // the pose drawn this frame (interpolated / ragdoll): skinned decals

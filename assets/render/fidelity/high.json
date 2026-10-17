@@ -57,7 +57,8 @@
     "vfx_quality": {"avail": "on", "default": 2, "max": 2},
     "vfx_lighting": {"avail": "on"},
     "decal_max": {"avail": "on", "default": 256, "max": 512},
-    "precip_quality": {"avail": "on", "default": -1, "allowed": [-1, 0, 1, 2, 3]}
+    "precip_quality": {"avail": "on", "default": -1, "allowed": [-1, 0, 1, 2, 3]},
+    "water": {"avail": "on", "default": 2, "max": 2}
   },
   "eras": {
     "2010": {

@@ -305,7 +305,13 @@
     {"type": "box", "pos": [-43.115, 0.56, -16.175], "size": [0.2, 0.2, 0.01], "color": [0.3515, 0.3515, 0.3515], "grid": false, "roughness": 0.9, "metallic": 0, "collide": false},
     {"type": "box", "pos": [-42.885, 0.56, -16.175], "size": [0.2, 0.2, 0.01], "color": [0.1946, 0.1946, 0.1912], "grid": false, "roughness": 0.9, "metallic": 0, "collide": false},
     {"type": "box", "pos": [-42.655, 0.56, -16.175], "size": [0.2, 0.2, 0.01], "color": [0.0908, 0.0908, 0.0908], "grid": false, "roughness": 0.9, "metallic": 0, "collide": false},
-    {"type": "box", "pos": [-42.425, 0.56, -16.175], "size": [0.2, 0.2, 0.01], "color": [0.0343, 0.0343, 0.0343], "grid": false, "roughness": 0.9, "metallic": 0, "collide": false}
+    {"type": "box", "pos": [-42.425, 0.56, -16.175], "size": [0.2, 0.2, 0.01], "color": [0.0343, 0.0343, 0.0343], "grid": false, "roughness": 0.9, "metallic": 0, "collide": false},
+    {"_comment": "Water pool (docs/WATER.md dev content): a raised tank 16 x 12 m, walls 3 m, water at 2.6 m (rim 0.4 m above it: mantle out). Ramp up from the south. spawn_float <density>, water_debug 1.", "type": "box", "pos": [80, 0, -88.25], "size": [17, 3, 0.5], "color": [0.62, 0.64, 0.66], "material": "concrete", "label": "water pool: water_debug 1, spawn_float 500", "label_size": 0.3},
+    {"type": "box", "pos": [80, 0, -75.75], "size": [17, 3, 0.5], "color": [0.62, 0.64, 0.66], "material": "concrete"},
+    {"type": "box", "pos": [71.75, 0, -82], "size": [0.5, 3, 12], "color": [0.62, 0.64, 0.66], "material": "concrete"},
+    {"type": "box", "pos": [88.25, 0, -82], "size": [0.5, 3, 12], "color": [0.62, 0.64, 0.66], "material": "concrete"},
+    {"type": "box", "pos": [80, 0, -82], "size": [16, 0.02, 12], "color": [0.35, 0.6, 0.7], "material": "concrete", "grid": true},
+    {"type": "ramp", "pos": [80, 0, -69.88], "width": 2.5, "length": 8.24, "angle": 20, "platform": 1.5, "color": [0.5, 0.58, 0.68], "label": "pool ramp"}
   ],
   "puddles": [
     {"_comment": "Authored puddle areas (game_weather.c bake_puddles): pos [x, z], size [w, d], value 0..1 (1 fills first).", "pos": [-44, 26], "size": [5, 3], "value": 1.0},
@@ -319,6 +325,9 @@
   ],
   "fuel_pumps": [{"pos": [-104.5, 0.12, -12], "yaw": 90}],
   "vehicle_spikes": [{"pos": [-110, 8], "size": [7, 0.5]}],
+  "water": [
+    {"type": "lake", "name": "devpool", "preset": "pool", "level": 2.6, "box": {"center": [80, -82], "half": [8, 6]}}
+  ],
   "labels": [
     {"pos": [33.5, 0, -42.0], "yaw": -90, "floor": true, "size": 0.18, "text": "ballistics range: ballistics_debug 1, fire_tracers_only 1, bal_wind <m/s>, shutter_preview, muzzle_preview <weapon> <device>"},
     {"pos": [33.5, 0, -57.5], "yaw": -90, "floor": true, "size": 0.18, "text": "penetration: steel / pine / sandbag / brick / plaster, witness panels behind"},
@@ -467,7 +476,13 @@
     {"type": "switch", "pos": [-40, 1.35, -4.1], "yaw": 180, "preset": "sunset"},
     {"type": "switch", "pos": [-40, 1.55, -4.1], "yaw": 180, "preset": "night_moon"},
     {"type": "switch", "pos": [-40, 1.75, -4.1], "yaw": 180, "preset": "fog"},
-    {"type": "switch", "pos": [-40, 1.95, -4.1], "yaw": 180, "preset": "rain"}
+    {"type": "switch", "pos": [-40, 1.95, -4.1], "yaw": 180, "preset": "rain"},
+    {"type": "prop", "shape": "box", "size": [0.8, 0.8, 0.8], "pos": [74.0, 3.2, -82], "mass": 102.4, "density": 200, "color": [0.75, 0.55, 0.3]},
+    {"type": "prop", "shape": "box", "size": [0.8, 0.8, 0.8], "pos": [76.4, 3.2, -82], "mass": 256.0, "density": 500, "color": [0.75, 0.55, 0.3]},
+    {"type": "prop", "shape": "box", "size": [0.8, 0.8, 0.8], "pos": [78.8, 3.2, -82], "mass": 409.6, "density": 800, "color": [0.75, 0.55, 0.3]},
+    {"type": "prop", "shape": "box", "size": [0.6, 0.6, 0.6], "pos": [81.2, 3.2, -82], "mass": 324.0, "density": 1500, "color": [0.45, 0.45, 0.5]},
+    {"type": "prop", "shape": "box", "size": [2.0, 0.16, 0.5], "pos": [83.6, 3.2, -82], "mass": 72.0, "density": 450, "color": [0.75, 0.55, 0.3]},
+    {"type": "prop", "shape": "cylinder", "size": [0.6, 0.9, 0.6], "pos": [86.0, 3.2, -82], "mass": 152.7, "density": 600, "color": [0.75, 0.55, 0.3]}
   ],
   "post": {},
   "post_volumes": [

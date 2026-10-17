@@ -4,6 +4,7 @@
 #include "gameplay/zombies/horde.h"
 #include "vfx/vfx.h"
 #include "game_internal.h"
+#include "game_water.h"
 #include "scene.h"
 #include "ui/recoil_debug.h"
 #include "core/engine.h"
@@ -213,6 +214,7 @@ void game_render_init(void) {
     daynight_register();
     shadow_sky_register();
     weather_register();
+    water_register();
     wind_game_register();
     foliage_register();
     vehicles_register();
@@ -578,6 +580,7 @@ void game_render_world(World *w, float alpha, vec3 cam_pos, vec3 cam_fwd) {
     if (w->chunks) chunks_render(w, cam_pos);
     if (!w->chunks || w->openworld) level_draw_static(w, cam_pos, cam_fwd);
     openworld_frame(w, cam_pos);
+    water_frame(w, cam_pos);
     ENT_FOREACH(w, i) {
         if (!(w->comps[i] & C_VISUAL) && w->type[i] != ET_ZOMBIE) continue;
         if ((w->flags[i] & EF_HIDDEN) && w->type[i] != ET_PICKUP) continue;

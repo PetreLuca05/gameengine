@@ -306,6 +306,45 @@ typedef struct RenderWeather {
 } RenderWeather;
 void render_set_weather(const RenderWeather *w);   // every frame (zeroed = no weather)
 
+// Water surfaces (src/render/vk_water.c, docs/WATER.md "Rendering"): the static meshes of the
+// level's lakes / rivers / pools (world space, flat at their level), the ocean grid around the
+// camera (displaced by the swell), the per-body look, the swell's components, the ripple sim and its
+// sources. Tiers (r_water): 0 flat + sky reflection, 1 + SSR + refraction, 2 + ripple sim + caustics,
+// 3 + every detail.
+#define RENDER_WATER_BODIES 64
+#define RENDER_WATER_WAVES 32
+#define RENDER_WATER_RIPPLES 64
+typedef struct RenderWaterVertex { float pos[3]; u32 body; } RenderWaterVertex;
+typedef struct RenderWaterBody {
+    vec4 absorb;      // rgb 1/m, w turbidity
+    vec4 scatter;     // rgb 1/m, w roughness
+    vec4 params;      // x level, y kind (0 puddle, 1 lake, 2 ocean, 3 river), z ripple / wave scale, w foam
+    vec4 flow;        // xy flow (m/s), z wind coupling, w unused
+} RenderWaterBody;
+typedef struct RenderWaterRipple { vec4 pos_radius_strength; vec4 vel; } RenderWaterRipple;   // x, z, radius (m), push (m); vx, vz
+typedef struct RenderWater {
+    bool enabled;
+    int body_count;
+    RenderWaterBody body[RENDER_WATER_BODIES];
+    int wave_count;
+    vec4 waves[RENDER_WATER_WAVES * 2];   // WaveActive: (dx, dz, k, omega), (amp, qa, phase, 0)
+    float wave_time;                      // s (waves_time of the render tick)
+    vec2 wind_dir;                        // unit heading
+    float wind;                           // m/s
+    float rain;                           // 0..1 on open water
+    int ocean_body;                       // -1: no ocean grid
+    float ocean_level;
+    vec3 ripple_center;                   // the ripple sim window follows this point (the camera)
+    int ripple_count;
+    RenderWaterRipple ripples[RENDER_WATER_RIPPLES];
+    int tier;                             // r_water
+} RenderWater;
+void render_water_mesh(const RenderWaterVertex *v, u32 vcount, const u32 *idx, u32 icount);   // NULL / 0: none
+void render_set_water(const RenderWater *w);   // every frame (enabled = false: no water pass)
+// Tests (water_test waves): the GPU swell height (shaders/water/water_waves.glsl) at n points of the
+// current render water's waves; xzt = (x, z, wave time) per point. Blocking (waits for the GPU).
+bool render_water_gpu_heights(const float *xzt, int n, float *out);
+
 // Per-foliage-type wind parameters (docs/FOLIAGE_WIND.md; the vgeo materials' VgWindParams, same order).
 typedef struct RenderFoliageWind {
     float trunk_stiffness, branch_stiffness, leaf_stiffness, full_wind;

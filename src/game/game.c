@@ -3,6 +3,7 @@
 #include "game.h"
 #include "ui/mainmenu/mainmenu.h"
 #include "game_internal.h"
+#include "game_water.h"
 #include "editor/handpose/hp_system.h"
 #include "editor/handpose/hp_editor.h"
 #include "scene.h"
@@ -279,6 +280,7 @@ void game_sim_player(World *w, int slot, const UserCmd *cmd, float dt, bool firs
     vehicles_player_cmd(w, slot, &c, pressed, first);   // enter / exit / seats / driver input (host)
     // A driver's right click holds the gun out at the hip: no aim-down-sights from it.
     if (p->sim.move.mode == MOVE_SEATED && p->sim.move.veh_onehand) c.buttons &= (u16)~BTN_AIM;
+    if (p->sim.move.mode == MOVE_SWIM) c.buttons &= (u16)~BTN_AIM;
     player_move_tick(w, slot, &p->sim, p->character, &c, dt, first);
     WeaponOutput wo;
     weapons_tick(w, slot, &p->sim, &c, pressed, dt, first, &wo);
@@ -308,6 +310,8 @@ void game_sim_player(World *w, int slot, const UserCmd *cmd, float dt, bool firs
     if (m->sprinting) f |= EF_SPRINT;
     if (m->mode == MOVE_HANG) f |= EF_HANG;
     if (m->mode == MOVE_SEATED) f |= EF_SEATED;
+    if (m->mode == MOVE_SWIM) f |= m->water == WATER_UNDER ? (EF_SWIM | EF_UNDERWATER) : EF_SWIM;
+    else if (m->water == WATER_WADE && m->water_depth > 0.3f) f |= EF_WADE;
     if (m->mode == MOVE_MANTLE || m->mode == MOVE_VAULT) f |= EF_MANTLE;
     if (p->sim.wpn.reloading) f |= EF_RELOADING;
     if (c.buttons & BTN_AIM) f |= EF_ADS;
@@ -371,6 +375,7 @@ static void host_tick(World *w, const UserCmd *local_cmd) {
     if (!frozen) {
         openworld_tick(w, SIM_DT);   // open-world maps: deep water, POI zombie spawner
         vehicles_host_tick(w);
+        water_tick(w);   // swell wind, buoyancy impulses on props (before the step)
         phys_step(w->phys, SIM_DT);
         vehicles_host_post(w);
         vehicles_test_tick(w);
@@ -501,6 +506,7 @@ static UserCmd build_cmd(void) {
         c.buttons &= (u16)(BTN_CROUCH | BTN_NOCLIP);
     }
     if (G->magdump_ticks > 0) magdump_cmd(&c);
+    water_test_cmd(&c);   // water_test swim drives the local player
     c.slot = G->hotbar_slot;
     c.use_target = G->focus;
     c.view_tick = net_client_view_tick256();
@@ -573,6 +579,7 @@ static void tick(void) {
         bal_world_tick(w, SIM_DT);   // own predicted bullets + replays of the others' shots
         vehicles_client_post(w, cmd.seq);
         if (w->chunks) chunks_update(w, SIM_DT);
+        water_tick(w);   // the swell's wind from the replicated weather
         w->tick++;
     }
     revive_frame(w);   // downed players are interactable (revive prompt)
@@ -769,6 +776,7 @@ bool game_host_ex(const char *map, u32 flags) {
     }
     daynight_level_loaded(G->world);
     weather_level_loaded(G->world, G->map);
+    water_level_loaded(G->world, G->map);
     vehicles_level_loaded(G->world, G->map);
     handpose_system_scan(G->world, false);   // interactables placed in this level
     flesh_fx_clear();
@@ -800,6 +808,7 @@ void game_cl_welcome(int slot, const char *map, u32 seed, u32 server_tick) {
     if (!load_map(G->world, map)) log_error("client: cannot load map '%s'", map);
     daynight_level_loaded(G->world);   // config; the time itself arrives with every snapshot
     weather_level_loaded(G->world, map);   // puddle mask; the weather state arrives with the snapshots
+    water_level_loaded(G->world, map);     // the same bodies as the host (nothing replicated)
     vehicles_level_loaded(G->world, map);   // spike zones; vehicles replicate
     handpose_system_scan(G->world, false);   // interactables placed in this level
     flesh_fx_clear();

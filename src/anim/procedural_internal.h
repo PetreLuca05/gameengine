@@ -22,6 +22,7 @@ void proc_spine(ProcState *st, const ProcInput *in, Pose *pose, Xform *model);
 void proc_hold(ProcState *st, const ProcInput *in, Pose *pose, Xform *model);
 void proc_hand_anchors(ProcState *st, const ProcInput *in, Pose *pose, Xform *model);
 void proc_seated(ProcState *st, const ProcInput *in, Pose *pose, Xform *model);
+void proc_swim(ProcState *st, const ProcInput *in, Pose *pose, Xform *model);
 void proc_foot_legs(ProcState *st, const ProcInput *in, Pose *pose, Xform *model, const float foot_offset[2], const vec3 anim_foot[2]);
 
 #endif

@@ -1,0 +1,41 @@
+{
+  "name": "WaterYard",
+  "_comment": "Water dev level (docs/WATER.md 'Dev content'): an open-world map 512 m across. South: the sea and a sandy beach (waves, shoreline, wading into the surf). North-west: a lake with a dock (climb out onto it), a car parked on the shore to drive in (flooding). North-east: a diving pit 14 m deep with depth markers. Floating props of every density on the lake. Commands: water_debug 1|2, wind_set <m/s> [dir], spawn_float <density>, water_level <body> <m>, water_test props|swim|waves.",
+  "env": {"sun_dir": [0.45, 0.8, 0.35], "sun_color": [1.0, 0.95, 0.86], "sun_intensity": 3.0, "sky": [0.45, 0.55, 0.72], "ground": [0.28, 0.27, 0.22], "fog": [0.62, 0.68, 0.75], "fog_density": 0.0008, "sky_zenith": [0.24, 0.42, 0.72], "sky_horizon": [0.7, 0.76, 0.84], "clouds": 0.35},
+  "weather": "little_cloudy",
+  "world": {
+    "seed": 4242, "half_size": 256, "raster_half": 320,
+    "terrain": {"base": 4.0, "hill_amp": 1.2, "hill_freq": 0.004},
+    "sea": {"floor": -14, "beach": 45, "noise": 6, "polygon": [[-500, 110], [500, 110], [500, 600], [-500, 600]]},
+    "features": [
+      {"type": "lake", "pos": [-100, -70], "radius": [48, 34], "yaw": 0, "level": 3.4, "depth": 5, "shore_noise": 3},
+      {"type": "lake", "pos": [80, -80], "radius": [9, 9], "yaw": 0, "level": 3.4, "depth": 14, "shore_noise": 0},
+      {"type": "paint", "pos": [0, 70], "size": [420, 30], "yaw": 0, "material": "sand"},
+      {"type": "pad", "pos": [80, -64], "size": [16, 6], "yaw": 0, "level": 4.0, "blend": 3, "material": "concrete"}
+    ],
+    "rivers": [],
+    "roads": [{"class": "dirt", "points": [[0, 40], [-40, 0], [-100, -28]], "width": 4.5}],
+    "zombies": {"wild_density": 0.0, "wild_max": 0, "cap": 0, "despawn": 190, "spawn_min": 40, "spawn_max": 95, "sense": 38}
+  },
+  "pois": [
+    {"id": "lake", "name": "Test Lake", "kind": "lake", "pos": [-100, -70], "size": [110, 80], "dock": [-100, -30], "dock_yaw": 180, "campsite": [-40, -20], "zombies": {"density": 0, "max": 0, "indoor": 0}}
+  ],
+  "spawns": [{"pos": [0, 6, 60], "yaw": 180}],
+  "vehicles": [{"def": "car", "pos": [-80, 4.5, -32], "yaw": 200, "fuel": 30}, {"def": "moto", "pos": [-74, 4.5, -30], "yaw": 200, "fuel": 10}],
+  "labels": [
+    {"pos": [0, 5, 66], "yaw": 180, "floor": false, "size": 0.35, "text": "sea + beach: wind_set 12, water_test waves"},
+    {"pos": [-100, 5, -24], "yaw": 180, "floor": false, "size": 0.35, "text": "lake + dock: climb out (forward + jump)"},
+    {"pos": [80, 5, -63], "yaw": 0, "floor": false, "size": 0.35, "text": "diving pit 14 m"}
+  ],
+  "entities": [
+    {"type": "prop", "shape": "box", "size": [0.8, 0.8, 0.8], "pos": [-110, 4.0, -80], "mass": 102.4, "density": 200},
+    {"type": "prop", "shape": "box", "size": [0.8, 0.8, 0.8], "pos": [-106, 4.0, -80], "mass": 256, "density": 500},
+    {"type": "prop", "shape": "box", "size": [0.8, 0.8, 0.8], "pos": [-102, 4.0, -80], "mass": 409.6, "density": 800},
+    {"type": "prop", "shape": "box", "size": [0.6, 0.6, 0.6], "pos": [-98, 4.0, -80], "mass": 324, "density": 1500, "color": [0.45, 0.45, 0.5]},
+    {"type": "prop", "shape": "box", "size": [2.0, 0.16, 0.5], "pos": [-94, 4.0, -80], "mass": 72, "density": 450},
+    {"type": "prop", "shape": "cylinder", "size": [0.6, 0.9, 0.6], "pos": [-90, 4.0, -80], "mass": 152.7, "density": 600},
+    {"type": "prop", "shape": "box", "size": [1.0, 1.0, 1.0], "pos": [0, 2.0, 150], "mass": 350, "density": 350},
+    {"type": "prop", "shape": "box", "size": [2.4, 0.2, 0.6], "pos": [6, 2.0, 155], "mass": 130, "density": 450},
+    {"type": "prop", "shape": "cylinder", "size": [0.6, 0.9, 0.6], "pos": [-6, 2.0, 152], "mass": 127, "density": 500}
+  ]
+}

@@ -155,6 +155,11 @@ float mapgen_height_base(const MapGen *g, float x, float z);
 float mapgen_height(const MapGen *g, float x, float z, u8 *mat);
 // Water surface at (x, z) (sea 0, lake level, river profile), or -1e9 where there is no water body.
 float mapgen_water_level(const MapGen *g, float x, float z);
+// The parts of mapgen_water_level, for the water bodies (src/game/game_water.c): inside the sea
+// (beach included), inside lake feature `feature`, on a river (its water level and flow direction).
+bool mapgen_in_sea(const MapGen *g, float x, float z);
+bool mapgen_in_lake(const MapGen *g, int feature, float x, float z);
+bool mapgen_river_water(const MapGen *g, float x, float z, float *level, vec2 *dir);
 // Nearest road sample within max_dist of (x, z) (-1 none); *dist = distance to its centreline.
 int mapgen_nearest_road(const MapGen *g, float x, float z, float max_dist, float *dist);
 bool mapgen_in_keepout(const MapGen *g, float x, float z, float margin);

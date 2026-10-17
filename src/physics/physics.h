@@ -168,6 +168,13 @@ void *phys_group_filter_create(int sub_groups);
 void phys_group_filter_disable(void *filter, int sub_a, int sub_b);
 void phys_group_filter_destroy(void *filter);
 vec3 phys_get_angular_velocity(PhysicsWorld *w, BodyId id);
+// Body introspection (buoyancy probes): the shape it was created with (vehicles: only a box), the
+// dynamic mass (0 for static / kinematic), the world centre of mass.
+bool phys_body_shape(PhysicsWorld *w, BodyId id, ShapeDesc *out);
+float phys_body_mass(PhysicsWorld *w, BodyId id);
+vec3 phys_body_com(PhysicsWorld *w, BodyId id);
+// Linear impulse at the centre of mass + angular impulse (world): dynamic bodies only, wakes them.
+void phys_add_impulse_com(PhysicsWorld *w, BodyId id, vec3 impulse, vec3 angular_impulse);
 
 // Vehicles (src/physics/phys_vehicle.c: Jolt VehicleConstraint + WheeledVehicleController /
 // MotorcycleController): a dynamic body (static compound of boxes, centre of mass offset) with

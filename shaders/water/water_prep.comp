@@ -1,0 +1,18 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+// Water: snapshot of the lit scene before the water is drawn (refraction / screen-space reflection
+// source) and of its depth (the water pass writes depth, so it cannot sample the attachment).
+#include "post_common.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0) uniform sampler2D in_hdr;
+layout(set = 0, binding = 1) uniform sampler2D in_depth;
+layout(set = 0, binding = 8, rgba16f) uniform writeonly image2D out_color;
+layout(set = 0, binding = 9, r32f) uniform writeonly image2D out_depth;
+
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    if (p.x >= int(U.screen.x) || p.y >= int(U.screen.y)) return;
+    imageStore(out_color, p, vec4(sanitize(texelFetch(in_hdr, p, 0).rgb), 1.0));
+    imageStore(out_depth, p, vec4(texelFetch(in_depth, p, 0).r));
+}
