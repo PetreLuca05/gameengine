@@ -659,7 +659,7 @@ void net_client_send_cmds(const UserCmd *history, int size, u32 latest) {
     w_u8(&w, MSG_CMDS);
     w_u32(&w, N->latest_snap);
     w_f32(&w, (float)N->render_tick);
-    w_u32(&w, (u32)(platform_time() * 1000.0));   // send stamp: relayed to observers (spectator delay)
+    w_u32(&w, platform_wall_ms());   // send stamp: relayed to observers (spectator delay, same machine)
     int count = (int)DG_MIN((u32)CMDS_PER_PACKET, latest);
     w_u8(&w, (u8)count);
     for (u32 s = latest - (u32)count + 1; s <= latest; s++) w_bytes(&w, &history[s % (u32)size], sizeof(UserCmd));

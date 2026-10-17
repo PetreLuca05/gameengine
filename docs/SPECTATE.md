@@ -348,7 +348,7 @@ There is no wall clock (`platform_time`) in any first-person gameplay path.
 | Test | Kind | Checks |
 |---|---|---|
 | `test_spectate` (ctest `spectate`) | unit, runs anywhere | target rules matrix; event routing; command ring; observer clock under 80 + 80 ms lag + 3 % loss per hop (delay ≤ both hops + 1 tick, extrapolation bounded) and jitter / outages (hold, catch-up); the rewind contract (confirmed state equals the target's at every seq through extrapolation, rewinds and reconciles); every local-data field reaches the observer (field table + coverage of the struct, poisoned decode); spec block / relay round trip; 600-tick recoil + view + spread bit-identical between target and an observer started from a snapshot with extrapolate / rewind / reconcile |
-| `tools/tests/spec_net.sh` | three processes, `net_fakelag 80 net_fakeloss 3` | host kills the observer → death camera → auto spectate → `spectate 1`; target does ADS, a magazine dump, reload and use rings, the sniper scope (PiP), the phone camera, walking, driving. `spec_compare.py`: per-seq comparison of the target's `spec_dump local` and the observer's `spec_dump observer` (state hashes, eye, spread, ammo, health, timers, bone pose), ≥ 600 consecutive identical ticks, measured delay ≤ 2 × lag + 1 tick, largest correction ≤ `spec_pop_warn`. Screenshot pairs `spec_t_*.png` / `spec_o_*.png` |
+| `tools/tests/spec_net.sh` | three processes, `net_fakelag 80 net_fakeloss 3` | host kills the observer → death camera → auto spectate → `spectate 1`; target does ADS, a magazine dump, reload and use rings, the sniper scope (PiP), the phone camera, walking, driving. `spec_compare.py`: per-seq comparison of the target's `spec_dump local` and the observer's `spec_dump observer` (state hashes, eye, spread, ammo, health, timers; the bone pose is reported only), ≥ 600 consecutive identical ticks, measured delay ≤ 2 × lag + 4 frames + 1 tick (per hop the conditioner releases on the sender's next frame and the receiver polls once a frame), largest correction ≤ `spec_pop_warn` (host teleports > 10 m and a seated target are not counted). Send stamps use `platform_wall_ms` (one time base for every process on the machine). `DG_PORT=27115` runs it on another LAN port. Screenshot pairs `spec_t_*.png` / `spec_o_*.png` |
 | `tools/tests/spec_rules.cfg` | host script | illegal targets refused with a reason (self, missing slot), dev spectating, free camera, `sv_spec_allowed 0` |
 
 ## Verification and known gaps
@@ -371,4 +371,15 @@ There is no wall clock (`platform_time`) in any first-person gameplay path.
   host tick under jitter). Remote observers smooth this with their clock.
 - **Bone pose hashes** compare the post-pass pose. The first-person solve uses the frame camera, so
   pose equality depends on equal frame timing. The state hashes (`sim`, `rc`, `move`, `wpn`) are
-  the strict check.
+  the strict check; `spec_compare.py` reports the pose without requiring it.
+- **Host-side inputs** (`setpos`, `vehicle_put`, damage) reach the target's prediction one round trip
+  late: around them the target's `spec_dump local` (its prediction) and the observer's confirmed
+  replica differ for a few ticks by design.
+- **Extrapolation corrections:** the clock rides the earliest arrival, so under real frame jitter
+  the observer extrapolates 1-6 ticks much of the time. An input change in that window (the walk
+  start / jump in `spec_net.sh`) is corrected by 0.1-0.4 m: `spec_net.sh` fails the 0.05 m
+  correction check on some runs on a loaded machine. A small adaptive jitter buffer would trade
+  ~2-4 ticks of delay for it.
+- **Observer health of a re-spectated target:** after switching away and back to the same target
+  (the cycle step of `spec_net.sh`), the observer's copy of the target's health read 0 / 0 on many
+  ticks (`hp` in `spec_compare.py`) while seated; not yet traced (snapshot baseline vs the replica).

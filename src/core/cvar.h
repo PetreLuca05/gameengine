@@ -67,6 +67,9 @@ bool cmd_exists(const char *name);
 // Command buffer: text is split on ';' and newlines. "wait [n]" pauses n frames.
 void cbuf_add(const char *text);
 void cbuf_execute(void);         // call once per frame
+// Scripts: a command polling a condition puts itself back at the front and waits a frame
+// (e.g. lobby_wait); the rest of the script runs once it stops retrying.
+void cbuf_retry(const char *line);
 void cmd_execute_line(const char *line);
 
 // Tab completion: fills up to max names starting with prefix, returns count.

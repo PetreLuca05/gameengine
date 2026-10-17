@@ -1,6 +1,7 @@
 // LAN / direct-IP transport over ENet (reliable + unreliable channels, fragmentation).
 #include "net_transport.h"
 #include "core/log.h"
+#include "core/cvar.h"
 #include <enet/enet.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -38,7 +39,9 @@ static bool lan_connect(NetTransport *t, const char *address) {
     LanImpl *l = (LanImpl *)t->impl;
     char host[128];
     dg_strcpy(host, sizeof(host), address);
-    u16 port = 27015;
+    // No port given: our own net_port (the same port both ends listen on by default).
+    const Cvar *pc = cvar_find("net_port");
+    u16 port = pc && pc->i > 0 ? (u16)pc->i : 27015;
     char *colon = strrchr(host, ':');
     if (colon) { *colon = 0; port = (u16)atoi(colon + 1); }
     ENetAddress addr;

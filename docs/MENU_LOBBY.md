@@ -237,7 +237,11 @@ menu screen linted and solved at 1920×1080, 2560×1080, 1024×768, 1280×720, 3
   Back; the quit prompt cancelled; screenshots.
 * `mm_resolutions.cfg`: the menu at 1280×720, 1920×1080, 2560×1080, 1024×768.
 * `lobby_lan.sh`: two instances on one machine (LAN): host, discovery, join, chat both ways, ready,
-  map / season change, kick + rejoin refused, host leaves → promotion, start → both load.
+  map / season change, kick + rejoin refused, host leaves → promotion, start → both load. The
+  scripts sync on `lobby_wait players <n> | ready <n> | state <name> | host [timeout frames]` (the
+  two processes boot at different speeds; fixed waits raced). `DG_PORT=27115` uses another LAN port
+  (`+set net_port` applies before the boot map hosts; `connect` / `lobby_join` without a port use
+  `net_port`).
 
 **Not run here** (needs Steam / two accounts): the Steam lobby list, invites through the friends list
 and the overlay, `+connect_lobby` from a cold start, avatars, relay ping, Steam host migration.

@@ -2,19 +2,21 @@
 # Two instances on one machine over the LAN transport (docs/MENU_LOBBY.md "Verification").
 #   lobby_lan.sh [flow|kick|migrate]     (default flow)
 # Run from the build output directory (build/bin). Logs: lobby_<mode>_host.log / _client.log.
+# DG_PORT=27115: another LAN port (other games / tests on this machine hold the default 27015).
 MODE=${1:-flow}
 EXE=./deadground; [ -x ./deadground.exe ] && EXE=./deadground.exe
 T=${T:-../../tools/tests}
+PORTARG=; [ -n "$DG_PORT" ] && PORTARG="+set net_port $DG_PORT"
 case "$MODE" in
   flow) H=lobby_lan_host.cfg; C=lobby_lan_client.cfg ;;
   kick) H=lobby_kick_host.cfg; C=lobby_kick_client.cfg ;;
   migrate) H=lobby_migrate_host.cfg; C=lobby_migrate_client.cfg ;;
   *) echo "usage: lobby_lan.sh [flow|kick|migrate]"; exit 2 ;;
 esac
-"$EXE" --test --menu --nosound --log lobby_${MODE}_host.log --script $T/$H > /dev/null 2>&1 &
+"$EXE" --test --menu --nosound --log lobby_${MODE}_host.log $PORTARG --script $T/$H > /dev/null 2>&1 &
 HOST=$!
 sleep ${CLIENT_DELAY:-4}
-"$EXE" --test --menu --nosound --log lobby_${MODE}_client.log --script $T/$C > /dev/null 2>&1
+"$EXE" --test --menu --nosound --log lobby_${MODE}_client.log $PORTARG --script $T/$C > /dev/null 2>&1
 wait $HOST
 H=lobby_${MODE}_host.log; C=lobby_${MODE}_client.log
 grep -h "lobby: \|lobby_status\|^.*  #\|mm_dump\|season \|net: " $H $C | sed 's/^\[ *[0-9.]*\] //' | head -80

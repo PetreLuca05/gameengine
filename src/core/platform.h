@@ -20,6 +20,7 @@ const char *platform_pref_dir(void);   // writable user dir, ends with separator
 const char *platform_base_dir(void);   // exe dir, ends with separator
 
 double platform_time(void);            // seconds since start, high resolution
+u32 platform_wall_ms(void);            // wall clock in ms (wraps): comparable between processes on one machine
 void platform_sleep_ms(u32 ms);
 
 #endif
