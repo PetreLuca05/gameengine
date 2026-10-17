@@ -1124,7 +1124,9 @@ static void cmd_revive_approach(int argc, const char **argv) {
 }
 
 // Script sync (two-instance tests): hold the script until a condition is true (or the timeout).
-// revive_wait players <n> | <slot> alive|dead|downed|reconstructing [timeout frames, default 3000]
+// revive_wait players <n> | fab <progress 0..1> | <slot> alive|dead|downed|reconstructing|acted
+// [timeout frames, default 3000]. Frames per tick differ by far between a GPU and lavapipe: the
+// scripts wait on the state, never on a frame count for a timed action.
 static bool wait_done(int argc, const char **argv) {
     World *w = game_world();
     if (argc < 3) return true;
@@ -1134,6 +1136,16 @@ static bool wait_done(int argc, const char **argv) {
         for (int s = 0; s < MAX_PLAYERS; s++) n += w->players[s].active ? 1 : 0;
         return n >= atoi(argv[2]);
     }
+    if (!strcmp(argv[1], "fab")) {
+        // Any fabricator's reconstruction at this progress (or already past it: opening).
+        float at = (float)atof(argv[2]);
+        ENT_FOREACH(w, i) {
+            FabView fv;
+            if (w->type[i] != ET_FABRICATOR || !revive_fab_view(w, ENT_MAKE(i, w->gen[i]), &fv)) continue;
+            if ((fv.m.state == FAB_RECONSTRUCTING && fv.progress >= at) || fv.m.state == FAB_OPENING) return true;
+        }
+        return false;
+    }
     int s = atoi(argv[1]);
     if (s < 0 || s >= MAX_PLAYERS || !w->players[s].active) return false;
     const Player *p = &w->players[s];
@@ -1142,6 +1154,8 @@ static bool wait_done(int argc, const char **argv) {
     if (!strcmp(argv[2], "alive")) return !dead && !downed;
     if (!strcmp(argv[2], "dead")) return dead;
     if (!strcmp(argv[2], "downed")) return downed;
+    // The timed action (use still held) finished or was cancelled.
+    if (!strcmp(argv[2], "acted")) return p->sim.act.phase == ACTP_DONE || p->sim.act.phase == ACTP_CANCELLED;
     if (!strcmp(argv[2], "reconstructing")) {
         RecoveryStatus rs;
         return revive_recovery_status(w, s, &rs) && rs.stage == REC_RECONSTRUCTING;
@@ -1235,7 +1249,7 @@ void revive_register(void) {
     cmd_register("spawn_fabricator", cmd_spawn_fabricator, "spawn_fabricator [distance] [powered 0|1]: a reconstruction fabricator in front of you (host)");
     cmd_register("spawn_teammate", cmd_spawn_teammate, "spawn_teammate [name] [distance]: a client-less teammate in front of you (host, revive loop tests)");
     cmd_register("revive_approach", cmd_revive_approach, "revive_approach corpse|fab|downed [offset]: stand in reach of a timed action and look at it (tests)");
-    cmd_register("revive_wait", cmd_revive_wait, "revive_wait players <n> | <slot> alive|dead|downed|reconstructing [timeout]: hold the script until true (tests)");
+    cmd_register("revive_wait", cmd_revive_wait, "revive_wait players <n> | fab <progress> | <slot> alive|dead|downed|reconstructing|acted [timeout]: hold the script until true (tests)");
     cmd_register("fab_power", cmd_fab_power, "fab_power <0|1> [entity]: power fabricators on / off (ejects samples mid-cycle)");
     cmd_register("revive_dump", cmd_revive_dump, "log downed / action / corpse / fabricator / DNA state (tests)");
     cmd_register("revive_rules_reload", cmd_reload_rules, "reload assets/gameplay/revive_rules.json");
