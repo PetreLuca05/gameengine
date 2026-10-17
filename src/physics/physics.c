@@ -3,11 +3,14 @@
 #include "core/log.h"
 #include "render/debug_draw.h"
 #include "joltc.h"
+#include "jolt_shim.h"
 #include <stdlib.h>
 #include <math.h>
 #include <SDL3/SDL.h>
 
 #define MAX_LAYER_FILTERS 32
+#define MAX_BODY_PAIRS 65536
+#define MAX_CONTACT_CONSTRAINTS 32768
 
 struct PhysCharacter {
     JPH_CharacterVirtual *cv;
@@ -18,6 +21,9 @@ struct PhysCharacter {
 
 typedef struct PhysicsGlobal {
     JPH_JobSystem *jobs;
+    JPH_TempAllocator *temp;   // PhysicsSystem::Update scratch, sized once (see phys_global_init)
+    u32 update_errors;         // JPH_PhysicsUpdateError bits already logged
+    bool temp_fallback_logged;
     JPH_ObjectLayerFilter *layer_filters[MAX_LAYER_FILTERS];
     u32 layer_filter_masks[MAX_LAYER_FILTERS];
     int layer_filter_count;
@@ -53,13 +59,21 @@ void phys_global_init(void) {
     jc.maxBarriers = 8;
     jc.numThreads = -1;
     pg->jobs = JPH_JobSystemThreadPool_Create(&jc);
+    // Every step takes maxContactConstraints worst-case constraints (15 MB at 32768) from the temp
+    // allocator, plus body pairs, CCD and island scratch. joltc's built-in allocator is 8 MB, so that
+    // buffer went to malloc + free on every step; Jolt never checks the result, and once the machine
+    // ran out of commit the null buffer crashed in ContactConstraintManager::CreateConstraint. One
+    // fixed block, committed at startup, covers it (malloc fallback only past the 8 MB headroom).
+    u32 temp_bytes = (u32)MAX_CONTACT_CONSTRAINTS * dgj_contact_constraint_bytes() + 8u * 1024 * 1024;
+    pg->temp = dgj_temp_allocator_create(temp_bytes);
+    if (!pg->temp) log_fatal("physics: cannot allocate %u MB of Jolt temp memory", temp_bytes >> 20);
 
     // joltc keeps the procs pointer, so the tables must have static storage (immutable).
     static const JPH_ObjectLayerFilter_Procs olp = { layer_filter_cb };
     static const JPH_BodyFilter_Procs bfp = { body_filter_cb, body_filter_locked_cb };
     JPH_ObjectLayerFilter_SetProcs(&olp);
     JPH_BodyFilter_SetProcs(&bfp);
-    log_info("physics: Jolt initialized (%d job threads)", (int)(SDL_GetNumLogicalCPUCores() - 1));
+    log_info("physics: Jolt initialized (%d job threads, %u MB step memory)", (int)(SDL_GetNumLogicalCPUCores() - 1), temp_bytes >> 20);
 }
 
 void phys_global_shutdown(void) {
@@ -67,6 +81,7 @@ void phys_global_shutdown(void) {
     if (!pg) return;
     for (int i = 0; i < pg->layer_filter_count; i++) JPH_ObjectLayerFilter_Destroy(pg->layer_filters[i]);
     JPH_JobSystem_Destroy(pg->jobs);
+    dgj_temp_allocator_destroy(pg->temp);
     free(pg);
     g_engine.physics = NULL;
     JPH_Shutdown();
@@ -112,8 +127,8 @@ PhysicsWorld *phys_world_create(void) {
     JPH_ObjectVsBroadPhaseLayerFilter *ovb = JPH_ObjectVsBroadPhaseLayerFilterTable_Create(bp, 2, pairs, PL_COUNT);
     JPH_PhysicsSystemSettings s = { 0 };
     s.maxBodies = MAX_BODIES;
-    s.maxBodyPairs = 65536;
-    s.maxContactConstraints = 32768;
+    s.maxBodyPairs = MAX_BODY_PAIRS;
+    s.maxContactConstraints = MAX_CONTACT_CONSTRAINTS;
     s.broadPhaseLayerInterface = bp;
     s.objectLayerPairFilter = pairs;
     s.objectVsBroadPhaseLayerFilter = ovb;
@@ -137,7 +152,25 @@ void phys_world_destroy(PhysicsWorld *w) {
     free(w);
 }
 
-void phys_step(PhysicsWorld *w, float dt) { JPH_PhysicsSystem_Update(w->system, dt, w->collision_steps > 0 ? w->collision_steps : 1, PG->jobs); }
+void phys_step(PhysicsWorld *w, float dt) {
+    PhysicsGlobal *pg = PG;
+    u32 err = (u32)JPH_PhysicsSystem_Update2(w->system, dt, w->collision_steps > 0 ? w->collision_steps : 1, pg->temp, pg->jobs);
+    // Full caches drop contacts (bodies sink / tunnel) rather than crash: log each kind once.
+    u32 fresh = err & ~pg->update_errors;
+    if (fresh) {
+        pg->update_errors |= fresh;
+        log_warn("physics: step overflow:%s%s%s (%u bodies, %u active; limits %d pairs, %d contacts)",
+                 (fresh & JPH_PhysicsUpdateError_ManifoldCacheFull) ? " manifold cache full" : "",
+                 (fresh & JPH_PhysicsUpdateError_BodyPairCacheFull) ? " body pair cache full" : "",
+                 (fresh & JPH_PhysicsUpdateError_ContactConstraintsFull) ? " contact constraints full" : "",
+                 JPH_PhysicsSystem_GetNumBodies(w->system), JPH_PhysicsSystem_GetNumActiveBodies(w->system, JPH_BodyType_Rigid),
+                 MAX_BODY_PAIRS, MAX_CONTACT_CONSTRAINTS);
+    }
+    if (!pg->temp_fallback_logged && dgj_temp_allocator_fallbacks(pg->temp)) {
+        pg->temp_fallback_logged = true;
+        log_warn("physics: step scratch outgrew its fixed block (malloc per step from now on)");
+    }
+}
 void phys_set_collision_steps(PhysicsWorld *w, int steps) { w->collision_steps = DG_CLAMP(steps, 1, 4); }
 void phys_optimize(PhysicsWorld *w) { JPH_PhysicsSystem_OptimizeBroadPhase(w->system); }
 
