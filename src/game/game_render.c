@@ -211,6 +211,7 @@ static void fp_cam_test_hands(void) {
 void game_render_init(void) {
     sights_register();
     daynight_register();
+    shadow_sky_register();
     weather_register();
     wind_game_register();
     foliage_register();
@@ -961,6 +962,7 @@ void game_render(void) {
     vehicles_draw();
     sights_draw();
     daynight_draw();
+    shadow_sky_draw();
     weather_draw();
     flesh_range_draw();
     wind_game_draw_panel();

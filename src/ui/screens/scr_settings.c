@@ -471,11 +471,12 @@ static void tab_graphics(GuiCursor *c, GuiRect content) {
     static const int casc_v[] = { 1, 2, 3 };
     row_fid_combo(c, "Shadow cascades", FF_SHADOW_CASCADES, casc, casc_v, 3, NULL);
     row_fid_slider(c, "Shadow distance", FF_SHADOW_DISTANCE, 0.25f, 1.0f, 0.05f, "%.2fx", NULL);
-    static const char *const filt[] = { "Hard", "Soft (PCF 3x3)", "Softer (PCF 5x5)" };
-    row_fid_combo(c, "Shadow softness", FF_SHADOW_FILTER, filt, NULL, 3, "Softer needs High shadow quality.");
+    static const char *const filt[] = { "Basic (3 steps)", "Contact-hardening", "Full (sky-driven)" };
+    row_fid_combo(c, "Shadow softness", FF_SHADOW_FILTER, filt, NULL, 3, "Softness follows the sky: crisp under the sun, soft in haze, none under overcast.");
     row_fid_slider(c, "Skip shadows of props under", FF_SHADOW_MIN_RADIUS, 0, 4, 0.25f, "%.2f m", "Small props cast no sun shadow (cheaper).");
     row_fid_toggle(c, "Lamp / flashlight shadows", FF_LIGHT_SHADOWS, NULL);
     row_fid_toggle(c, "Cloud shadows", FF_CLOUD_SHADOWS, NULL);
+    row_fid_toggle(c, "Moon shadows at twilight", FF_MOON_SHADOWS, "The moon casts its own shadows while the sun is still up.");
 
     section(c, "Geometry, textures & foliage");
     {

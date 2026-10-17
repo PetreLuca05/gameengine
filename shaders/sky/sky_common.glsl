@@ -17,7 +17,7 @@ layout(std430, set = 0, binding = 13) readonly buffer SkyParams {
     vec4 cel_y;         // row Y, w milky way brightness
     vec4 cel_z;         // row Z (north celestial pole), w night sky floor
     vec4 clouds;        // x coverage 0..1, y altitude m, zw wind offset (m)
-    vec4 clouds2;       // x opacity, y time, z feature scale (m), w shadow strength
+    vec4 clouds2;       // x opacity, y time, z feature scale (m), w cloud shadow optical depth (Beer-Lambert)
     vec4 cam;           // xyz camera (world m), w camera altitude (km, >= 1 m)
     vec4 ground;        // rgb ground albedo, w ambient scale
     vec4 ap;            // x aerial perspective max distance (m), y world -> atmosphere distance scale, z mie density scale, w frame

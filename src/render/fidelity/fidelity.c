@@ -51,6 +51,7 @@ static const FidFeatureDef k_features[FF_COUNT] = {
     [FF_LIGHT_SHADOWS] = { "light_shadows", "r_light_shadows", B, true, 0, 0, 1, false, false, "Point / spot light shadows" },
     [FF_LIGHT_SHADOW_QUALITY] = { "light_shadow_quality", "r_light_shadow_quality", I, false, 0, 1, 2, false, false, "Light shadow quality" },
     [FF_CLOUD_SHADOWS] = { "cloud_shadows", "r_cloud_shadows", B, true, 0, 0, 1, false, false, "Cloud shadows" },
+    [FF_MOON_SHADOWS] = { "moon_shadows", "r_moon_shadows", B, true, 0, 0, 1, false, false, "Moon shadows at twilight" },
     [FF_TEXTURE_QUALITY] = { "texture_quality", "r_texture_quality", I, false, 0, 0, 2, false, false, "Textures" },
     [FF_ANISO] = { "aniso", "r_aniso", I, false, 0, 1, 16, false, false, "Anisotropic filtering" },
     [FF_VGEO] = { "vgeo", "r_vgeo", B, true, 0, 0, 1, false, true, "Virtualized geometry" },

@@ -47,6 +47,7 @@ Windows, no admin; tools are portable, in `.toolchain/` (git-ignored).
 | Foliage wind (Crysis vegetation WPO, wind field, gust tile, fidelity tiers) | FOLIAGE_WIND.md | src/world/wind.c (pure), src/render/vgeo/foliage_wind.c, shaders/vgeo/wpo.glsl, src/game/game_wind.c, Tree It wind channels in src/render/vgeo/vgeo_tree.c; tests: test_wind, vgeo_foliage, tools/tests/wind.cfg |
 | Vehicles | VEHICLES.md | src/physics/phys_vehicle.c, src/gameplay/vehicle_def.c (pure), src/game/game_vehicles.c |
 | Light shadows | LIGHT_SHADOWS.md | src/render/vk_light_shadow.c, common.glsl point/spot_light_shadow |
+| Sun / moon shadows driven by the sky (softness, contrast, overcast cutoff, PCSS, cloud shadows, moon tile) | SHADOWS.md | src/render/shadow_sky.c (pure), src/game/game_shadow_sky.c, lit_body.glsl sh_tile, assets/render/shadows_sky.json; tests: test_shadow_sky, tools/tests/shadow_ref.py (dev room corner (-50, 0, -11)) |
 | Virtualized geometry | VGEO.md, VGEO_PLAN.md | src/render/vgeo, src/render/vk_vgeo.c, shaders/vgeo, tools/{build,bench}_vgeo |
 | Phone (equip = pairing, HUD phone panel, phone OS: portal / home / camera / gallery; the model shows no screen) | PHONE.md | src/gameplay/phone (phone_os.c pure), src/net/http_ws, src/render/phone_view.c, web/phone, assets/phone; tests: test_phone, tools/tests/phone_{flow,ws,screen}.py, phone_e2e.sh, phone_net.sh |
 | Hand poses: universal grips + cases, rig editor (`scene handpose`, frozen world) | HANDPOSE.md | src/anim/{handpose,weapon_hold}.c, src/editor/handpose (hp_rig, hp_xform, hp_case, hp_editor), src/game/game_freeze.c, assets/handposes/{items,cases,styles}; tools/handpose_migrate; tests: test_handpose(_rig), test_hp_edit, tools/tests/hp_scene.cfg, hp_gameplay.cfg |
@@ -65,5 +66,6 @@ Hall at the origin. Other areas:
 - Sighting lane: east of the hall.
 - Flesh range: north.
 - Post corner: south-west.
+- Shadow reference corner: (−50, 0, −11), switches jump to `shadow_preset`s.
 
 Console: `help [filter]` lists commands, `cvarlist [filter]` lists cvars. New commands / cvars need a description and a category (assets/ui/command_categories.json; tools/tests/lint_commands.py).

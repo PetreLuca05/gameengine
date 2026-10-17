@@ -438,6 +438,9 @@ static void spawn_entity(World *w, const cJSON *e) {
         id = spawn_lever(w, pos, yaw, js(e, "target", ""));
     } else if (!strcmp(type, "switch")) {
         id = spawn_switch(w, pos, yaw, (u32)jf(e, "group", 1));
+        // "preset": a shadow reference condition (shadow_preset) instead of a light group
+        const char *preset = js(e, "preset", "");
+        if (id && preset[0]) dg_strcpy(w->lever[ENT_INDEX(id)].target_name, sizeof(w->lever[ENT_INDEX(id)].target_name), preset);
     } else if (!strcmp(type, "light")) {
         id = spawn_light(w, pos, jv3(e, "color", v3(1, 0.95f, 0.85f)), jf(e, "radius", 12), jf(e, "intensity", 20), (u32)jf(e, "group", 0), jb(e, "on", true));
         if (id && jb(e, "schedule", false)) {

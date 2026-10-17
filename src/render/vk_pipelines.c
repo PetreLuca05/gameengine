@@ -23,7 +23,7 @@ typedef struct PipeDesc {
 } PipeDesc;
 
 bool vkp_create_layouts(void) {
-    VkDescriptorSetLayoutBinding fb[15] = { 0 };
+    VkDescriptorSetLayoutBinding fb[16] = { 0 };
     fb[0].binding = 0;
     fb[0].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
     fb[0].descriptorCount = 1;
@@ -70,8 +70,13 @@ bool vkp_create_layouts(void) {
         fb[i].descriptorCount = 1;
         fb[i].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
     }
+    // 15 the sun shadow atlas again, raw depth (PCSS blocker search, docs/SHADOWS.md).
+    fb[15].binding = 15;
+    fb[15].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    fb[15].descriptorCount = 1;
+    fb[15].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
     VkDescriptorSetLayoutCreateInfo li = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
-    li.bindingCount = 15;
+    li.bindingCount = 16;
     li.pBindings = fb;
     VK_CHECK(vkCreateDescriptorSetLayout(R->device, &li, NULL, &R->frame_layout));
 

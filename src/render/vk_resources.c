@@ -209,12 +209,18 @@ void vkr_create_samplers(void) {
     sh.addressModeU = sh.addressModeV = sh.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
     sh.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
     VK_CHECK(vkCreateSampler(R->device, &sh, NULL, &R->sampler_shadow));
+
+    // Raw shadow depth (PCSS blocker search): nearest, no compare (D32 linear filtering is optional).
+    VkSamplerCreateInfo dp = c;
+    dp.magFilter = dp.minFilter = VK_FILTER_NEAREST;
+    VK_CHECK(vkCreateSampler(R->device, &dp, NULL, &R->sampler_depth));
 }
 
 void vkr_destroy_samplers(void) {
     vkDestroySampler(R->device, R->sampler_linear, NULL);
     vkDestroySampler(R->device, R->sampler_clamp, NULL);
     vkDestroySampler(R->device, R->sampler_shadow, NULL);
+    vkDestroySampler(R->device, R->sampler_depth, NULL);
 }
 
 void vkr_write_tex_set(VkDescriptorSet set, VkImageView view, VkSampler sampler) {

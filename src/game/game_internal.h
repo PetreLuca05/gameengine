@@ -151,6 +151,15 @@ void daynight_handle_event(const GameEvent *ev);
 bool daynight_active(World *w);
 void daynight_environment(World *w, const RenderCamera *cam, RenderEnvironment *env);
 void daynight_post(struct PostSettings *s);
+bool daynight_preset_time(World *w, float elev_deg, bool moon_full);   // shadow presets: evening sun elevation / full moon midnight
+// game_shadow_sky.c: sky-driven shadows (docs/SHADOWS.md)
+struct ShadowSkyInput;
+struct ShadowSkyOut;
+void shadow_sky_register(void);
+void shadow_sky_frame(struct ShadowSkyInput *in, struct ShadowSkyOut *out, float tod_cloud_wind);   // fidelity inputs + one driver step
+float shadow_sky_exposure(void);                 // EV compensation of the current conditions
+void shadow_sky_level_loaded(void);
+void shadow_sky_draw(void);
 void daynight_draw(void);
 bool daynight_editor_open(void);
 // game_flesh_range.c: flesh impact range panel / tests (dev room)

@@ -89,8 +89,9 @@ It draws every pixel without geometry, in the main view and in the scope picture
   are lit by the sun and the moon through the atmosphere (earth shadow, a short march towards
   the light, silver lining) plus sky ambient, and hazed with distance.
 - **Cloud shadow map** (`cloud_shadow.comp`): 256² over 2 km around the camera, snapped to its
-  texels. It is transmittance through the layer along the key light, and multiplies the key light
-  in the lit shaders.
+  texels. It is the Beer-Lambert transmittance through the layer along the key light
+  (`exp(-density x tau / mu)`, tau from `assets/render/shadows_sky.json`), and multiplies the key
+  light in the lit shaders. It drifts with the weather wind at the layer (docs/SHADOWS.md).
 - Hooks are in place for volumetric clouds later: the cloud functions in `sky_common.glsl` and the
   cloud map interface.
 
@@ -103,16 +104,18 @@ astronomical twilight, then night).
 
 ## Lighting follows the sky
 
-### Key and fill lights
+### Key and second lights
 
 - Each body's light at the ground is its illuminance × the atmosphere transmittance at its
   elevation. The transmittance is computed on the CPU with the same medium as the shaders, not a
   hand-painted gradient.
-- Both are dimmed by the cloud cover (`cloud_light_loss`) and fade in over the disc around the
-  horizon.
-- The brighter one is the **key light**: shadowed, used by the volumetrics. The other is an
-  unshadowed **fill**: moonlight by day, the last sun at dusk. They hand over when both are weak,
-  so there is no visible switch.
+- The direct light is attenuated by the cloud sheet's optical depth (`exp(-tau / mu)`, no floor:
+  gone under a thick deck); `cloud_light_loss` dims only the sky (and the clouds' own light).
+  Both fade in over the disc around the horizon.
+- The sun is the **key light** (the cascades, the volumetrics) while any of its disc is up, then
+  the moon. While the sun owns the cascades the moon is the **second light**, shadowed in atlas
+  tile 3 on the tiers with moon shadows. There is no unshadowed fill light any more (it lit
+  through roofs and filled every shadow). docs/SHADOWS.md has the handover.
 
 ### Stable shadows
 
@@ -122,7 +125,8 @@ astronomical twilight, then night).
 - **Sun movement.** The light direction moves in sub-texel steps: 0.04° by day, 0.25° at night,
   where it updates less often.
 - **Single-matrix users.** The volumetrics, particles and decals use the widest cascade.
-- **Weather.** An overcast sky widens the PCF kernel (softer shadows).
+- **Weather.** Softness, contrast and the overcast cutoff follow the sky and the weather
+  (docs/SHADOWS.md: PCSS with the source's angular radius).
 
 ### IBL
 
@@ -130,7 +134,9 @@ astronomical twilight, then night).
   frames (amortized). After each cycle, its mips and an SH9 irradiance projection are rebuilt.
 - **Easing.** The map and the SH the lit shaders use ease towards each refilter, with
   k = 1 − exp(−dt / 0.35 s), so a refilter never pops. Diffuse ambient is E(n) / π from the SH;
-  specular samples the environment by roughness. Both are multiplied by the `ambient_scale` curve.
+  specular samples the environment by roughness. Both are multiplied by the `ambient_scale` curve,
+  1.0 (physical: sun and sky come from one atmosphere, so shadow darkness is the real direct vs
+  sky ratio; it was 1.6, which lifted every shadow). Keep it 1 unless a look needs it.
 - **What the environment contains.** It holds the sky, the clouds and the lit ground, but not the
   sun or moon discs (the analytic lights cover those).
 - **Reflection probes.** There are no local reflection probes yet; SSR stays the local term. A
@@ -168,9 +174,10 @@ cover and the aerosols drive:
 
 | What | How |
 |---|---|
-| Sun / moon intensity | `cloud_light_loss` |
-| Shadow softness | Wider PCF kernel when overcast |
-| Cloud shadow strength | The cloud cover |
+| Sky brightness | `cloud_light_loss` |
+| Sun / moon direct light | The cloud sheet's optical depth (shadows_sky.json `veil_tau`) |
+| Shadow softness / cutoff | The source's angular radius / the direct vs sky contrast (docs/SHADOWS.md) |
+| Cloud shadow strength | Beer-Lambert through the patches (`cumulus_tau`) |
 | Sky LUTs | Aerosols |
 | Fog | The fog density |
 | Star visibility | Dimmed by the cloud cover |

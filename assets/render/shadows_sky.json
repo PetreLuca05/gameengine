@@ -1,0 +1,52 @@
+{
+  "_comment": "Sky-driven shadows (docs/SHADOWS.md, src/render/shadow_sky.c). Curves are [[x, y], ...] with increasing x, clamped at both ends. Hot reload: saved changes apply within a second (shadows_sky_reload forces it). No shadow strength lives here: darkness = direct vs sky irradiance.",
+  "source": {
+    "_comment": "Effective source angular radius = sqrt(disc^2 + haze^2 + veil^2 + fog^2 + precip^2) in degrees, capped at max_radius_deg.",
+    "sun_radius_deg": 0.265,
+    "moon_radius_deg": 0.26,
+    "max_radius_deg": 12.0,
+    "aureole_haze":   [[0.0, 0.0], [0.5, 0.6], [1.5, 1.4], [4.0, 3.0]],
+    "aureole_veil":   [[0.0, 0.0], [0.3, 1.5], [1.0, 3.5], [3.0, 8.0]],
+    "aureole_fog":    [[0.0, 0.0], [0.005, 0.4], [0.02, 2.0], [0.08, 6.0]],
+    "aureole_precip": [[0.0, 0.0], [0.3, 1.5], [1.0, 5.0]]
+  },
+  "clouds": {
+    "_comment": "veil_tau: cloud cover -> optical depth of the uniform sheet (direct x exp(-tau / mu)), scaled by (1 - k + k x density). cumulus_tau: a full texel of the cloud shadow map. Cloud drift = weather wind x wind_aloft (m/s, at least wind_min).",
+    "veil_tau": [[0.0, 0.0], [0.4, 0.05], [0.65, 0.4], [0.8, 1.5], [0.9, 5.0], [1.0, 14.0]],
+    "veil_density_k": 0.6,
+    "cumulus_tau": 3.0,
+    "min_mu": 0.08,
+    "wind_aloft": 2.5,
+    "wind_min": 2.0
+  },
+  "cutoff": {
+    "_comment": "Contrast C = direct / sky irradiance. The cast shadow fades from 1 at 'on' to 0 at 'off'; under 'off' the passes stop and come back above off x (1 + reenable). smooth_s: time constant of radius / fade changes.",
+    "off": 0.08,
+    "on": 0.15,
+    "reenable": 0.25,
+    "moon_min_direct": 0.0005,
+    "smooth_s": 1.0
+  },
+  "filter": {
+    "_comment": "wide_deg: past this radius (full PCSS tier) cascade 0 fades out and the wide blur samples cascade 1. pcf_step_deg: the Off / Low tiers' 1 tap -> 3x3 -> 5x5 thresholds. era_pcf: the 2010 era's fixed PCF radius. pcss_max_texels: max filter half width per softness tier (PCF / limited / full).",
+    "wide_deg": 2.0,
+    "wide_hyst": 0.15,
+    "pcf_step_deg": [0.5, 1.5],
+    "pcf_hyst": 0.15,
+    "era_pcf": 1.0,
+    "pcss_search_m": 30.0,
+    "pcss_max_texels": [2.0, 6.0, 32.0],
+    "contact_px": 1.5
+  },
+  "exposure": {
+    "_comment": "EV compensation added to the auto exposure: effective cloud cover, snow cover (summed).",
+    "cover": [[0.0, 0.0], [0.5, 0.1], [0.9, 0.3], [1.0, 0.3]],
+    "snow": [[0.0, 0.0], [1.0, 0.6]]
+  },
+  "ground": {
+    "_comment": "Albedo of the ground half of the sky probe (bounce light into shadows).",
+    "albedo": [0.25, 0.24, 0.22],
+    "snow_albedo": [0.86, 0.89, 0.93],
+    "wet_darken": 0.35
+  }
+}

@@ -155,7 +155,7 @@ typedef struct VgCell { float min[3]; u32 first; float max[3]; u32 count; } VgCe
 
 // ------------------------------------------------------------------ culling (Phase 2)
 
-#define VG_MAX_VIEWS 4               // main camera + 3 shadow cascades
+#define VG_MAX_VIEWS 5               // main camera + 3 shadow cascades + the moon tile (docs/SHADOWS.md)
 #define VG_PAGE_WORDS (VGEO_PAGE_SIZE / 4u)
 #define VG_CLUSTER_BITS 12           // visible entry: page slot << 12 | cluster within the page
 enum VgViewFlags {

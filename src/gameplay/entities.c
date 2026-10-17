@@ -7,6 +7,7 @@
 #include "zombies/horde.h"
 #include "revive/revive.h"
 #include "core/log.h"
+#include "core/cvar.h"
 #include <stdio.h>
 #include <math.h>
 
@@ -233,13 +234,23 @@ EntityId spawn_lever(World *w, vec3 base, float yaw, const char *target) {
 
 // ------------------------------------------------------------------ switch + lights
 
+// A switch with a "preset" (level JSON, kept in target_name) jumps to a shadow reference condition
+// (shadow_preset, docs/SHADOWS.md) instead of toggling lights; nothing else runs from level data.
 static void switch_focus(World *w, EntityId self, int player, char *prompt, int size) {
     int i = (int)ENT_INDEX(self);
+    if (w->lever[i].target_name[0]) { snprintf(prompt, (size_t)size, "Shadows: %s", w->lever[i].target_name); return; }
     snprintf(prompt, (size_t)size, (w->flags[i] & EF_ON) ? "Turn Lights Off" : "Turn Lights On");
 }
 
 static void switch_use(World *w, EntityId self, int player) {
     int i = (int)ENT_INDEX(self);
+    if (w->lever[i].target_name[0]) {
+        char cmd[64];
+        snprintf(cmd, sizeof(cmd), "shadow_preset %s", w->lever[i].target_name);
+        if (w->authority) cbuf_add(cmd);
+        ev_sound(w, "click", w->xf[i].pos, 0.8f, EVENT_ALL);
+        return;
+    }
     w->flags[i] ^= EF_ON;
     bool on = (w->flags[i] & EF_ON) != 0;
     u32 group = w->lever[i].light_group;

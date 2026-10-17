@@ -603,7 +603,7 @@ void weather_environment(World *w, RenderEnvironment *env) {
     env->cloud_density = clampf(0.55f + 0.45f * p->v[WP_CLOUD_DENSITY], 0.05f, 1.0f);
     env->cloud_softness = clampf(p->v[WP_FOG] * 20.0f + (1.0f - p->v[WP_CLOUD_DENSITY]) * 0.3f, 0.0f, 1.0f);
     env->cloud_darkness = clampf(p->v[WP_PRECIP] * 0.6f + (p->v[WP_CLOUD_DENSITY] - 0.7f) * 0.8f, 0.0f, 0.9f);
-    if (!WX.cloud_shadows->i) env->cloud_shadow_strength = 0.0f;
+    if (!WX.cloud_shadows->i) env->cloud_shadow_tau = 0.0f;
     // Lightning lights everything (ambient) for a few frames.
     env->ambient_scale *= 1.0f + WX.flash * 8.0f;
 }
