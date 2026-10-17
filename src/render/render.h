@@ -263,6 +263,19 @@ void render_ground_set_cover_count(int n);
 void render_ground_set_top(int mat, const float rgb[3], float coverage);
 void render_ground_set_color(int mat, const float rgb[3]);
 void render_ground_set_macro(const float m[6]);
+// Terrain shading (src/render/terrain_tex.c, docs/TERRAIN_SHADING.md): the layer textures (names as in
+// TerrainParams.tex), the baked maps (terrain_maps.h; the material map's grid), the parameter block
+// (TerrainGpu), the terrain tool's brush (channel 0..2 tint, 3 variant mask, 4 wear, 5 moisture; map_xf =
+// origin x, z, 1 / spacing, n), the painted map for saving, whether the shading is on.
+bool render_terrain_load(const char (*tex)[48], int count, const char *scatter_atlas);
+void render_terrain_maps(const u8 *blend, const u8 *attr, int n, float origin_x, float origin_z, float spacing);
+void render_terrain_params(const void *gpu, size_t size);
+void render_terrain_paint(float x, float z, float radius, int ch, float value, float strength, const float map_xf[4]);
+const u8 *render_terrain_paint_data(int *n);
+bool render_terrain_active(void);
+// The grass assets' fade at fidelity level `level` (grass / meadow cover): where the terrain's grass term
+// starts (the thinning begins) and ends. false (outputs untouched) without grass assets.
+bool render_grass_fade(int level, float *start, float *end);
 // Scatter roles of the tree types (the order of vgeo_tree.h VgTreeRole).
 enum { RENDER_TREE_CONIFER, RENDER_TREE_BROADLEAF, RENDER_TREE_DEAD, RENDER_TREE_BUSH, RENDER_TREE_FLOWER, RENDER_TREE_ROLES };
 // The registered types of a role (names, pick weights; registration order: the same on every machine

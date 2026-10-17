@@ -1,0 +1,22 @@
+{
+  "_doc": "Terrain layer (docs/TERRAIN_SHADING.md); keys: src/world/terrain/terrain_params.c parse_layer.",
+  "texture": "mud",
+  "tile_m": 3.0,
+  "macro_scale_m": 30,
+  "blend": {
+    "height_contrast": 0.4,
+    "sharpness": 0.25,
+    "height_offset": -0.1
+  },
+  "porosity": 0.95,
+  "ao": 0.5,
+  "detail": {
+    "parallax_m": 0.015,
+    "detail_normal": 0.3,
+    "micro_roughness": 0.02
+  },
+  "snow": {
+    "accumulation": 0.7
+  },
+  "roughness": 0.45
+}

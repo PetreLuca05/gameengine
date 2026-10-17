@@ -1,0 +1,33 @@
+{
+  "name": "grass_path",
+  "a": [
+    "grass",
+    "meadow",
+    "forest"
+  ],
+  "b": [
+    "dirt_road"
+  ],
+  "width_m": 0.8,
+  "edge_noise_scale_m": 2.0,
+  "edge_noise_strength_m": 0.35,
+  "crumbs": 0.1,
+  "modes": [
+    "height",
+    "noise",
+    "crumbs",
+    "set",
+    "scatter",
+    "wear"
+  ],
+  "set": "path_worn_edge",
+  "set_strength": 0.9,
+  "set_tile_m": 3.0,
+  "wear_bias_m": 0.6,
+  "scatter_sprites": [
+    0,
+    4
+  ],
+  "scatter_per_m2": 2.0,
+  "puddle_bias": 0.6
+}

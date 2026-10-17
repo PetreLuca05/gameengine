@@ -12,7 +12,7 @@ bool terrain_map_gather(vec2 xz, out ivec4 ids, out vec4 w) {
     ids = ivec4(0);
     w = vec4(1.0, 0.0, 0.0, 0.0);
     if (frame.surf_map.w < 0.5) return false;
-    vec2 g = (xz - frame.surf_map.xy) * frame.surf_map.z - 0.5;
+    vec2 g = (xz - frame.surf_map.xy) * frame.surf_map.z;   // sample k sits at origin + k spacing
     vec2 gf = floor(g), fr = g - gf;
     int n = int(frame.surf_map.w);
     for (int k = 0; k < 4; k++) {

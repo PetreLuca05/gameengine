@@ -152,6 +152,9 @@ bool daynight_active(World *w);
 void daynight_environment(World *w, const RenderCamera *cam, RenderEnvironment *env);
 void daynight_post(struct PostSettings *s);
 bool daynight_preset_time(World *w, float elev_deg, bool moon_full);   // shadow presets: evening sun elevation / full moon midnight
+// game_terrain.c: terrain shading level / debug / reload / paint tool (docs/TERRAIN_SHADING.md)
+void terrain_game_register(void);
+void terrain_game_frame(vec3 cam);
 // game_shadow_sky.c: sky-driven shadows (docs/SHADOWS.md)
 struct ShadowSkyInput;
 struct ShadowSkyOut;

@@ -459,6 +459,18 @@ set_target_properties(test_wind PROPERTIES C_STANDARD 11)
 target_link_libraries(test_wind PRIVATE dg_vgeo)
 add_test(NAME wind COMMAND test_wind WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
 
+# Terrain shading (docs/TERRAIN_SHADING.md): pure modules (parameters, baked maps, the CPU mirror of the
+# shader's blending / tiling) and their test: assets/terrain parses, maps vs CPU references, border
+# distance / band width / height blend / noise borders / biases, hex bombing autocorrelation + histogram.
+add_library(dg_terrain STATIC src/world/terrain/terrain_params.c src/world/terrain/terrain_maps.c src/world/terrain/terrain_blend.c)
+set_target_properties(dg_terrain PROPERTIES C_STANDARD 11)
+target_link_libraries(dg_terrain PUBLIC dg_animcore)
+add_executable(test_terrain tests/test_terrain.c)
+set_target_properties(test_terrain PROPERTIES C_STANDARD 11)
+target_link_libraries(test_terrain PRIVATE dg_terrain)
+add_dependencies(test_terrain dg_copy_data)
+add_test(NAME terrain COMMAND test_terrain WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+
 # Grass assets (docs/FOLIAGE_GRASS.md): the JSON assets against the target spec, clump meshes (extent,
 # cells, root -> tip), the placement rule's clumps per m2, materials per fidelity level.
 add_executable(test_grass tests/test_grass.c)

@@ -1,0 +1,18 @@
+{
+  "_doc": "Terrain layer (docs/TERRAIN_SHADING.md); keys: src/world/terrain/terrain_params.c parse_layer.",
+  "texture": "surf:asphalt",
+  "tile_m": 4.0,
+  "tiling": {
+    "mode": "hex",
+    "cell": 1.0,
+    "scale_jitter": 0.05,
+    "rotation": 1.0
+  },
+  "blend": {
+    "height_contrast": 0.3,
+    "sharpness": 0.2
+  },
+  "porosity": 0.35,
+  "ao": 0.7,
+  "roughness": 0.8
+}

@@ -213,6 +213,7 @@ void game_render_init(void) {
     sights_register();
     daynight_register();
     shadow_sky_register();
+    terrain_game_register();
     weather_register();
     water_register();
     wind_game_register();
@@ -843,6 +844,7 @@ void game_render(void) {
         }
     }
     flashlights_render(w, &cam, p, dead, vs);
+    terrain_game_frame(cam.pos);   // terrain level / debug / reload (before the frame's parameters)
     render_set_camera(&cam);
     // Time of day first: the post settings (exposure floor / curves, fog) follow this frame's sky.
     RenderEnvironment tod_env;

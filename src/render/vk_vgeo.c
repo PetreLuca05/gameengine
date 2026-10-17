@@ -1877,6 +1877,21 @@ static void foliage_build_grass(void) {
     log_info("grass: %d assets, %d meshes, level %d, atlases %s in %.0f ms", GR.n, nb, GR.tier, div == 1 ? "full" : "half", (double)(SDL_GetTicksNS() - t0) / 1e6);
 }
 
+bool render_grass_fade(int level, float *start, float *end) {
+    float fs = 0, fe = 0;
+    for (int i = 0; i < GR.n; i++) {
+        const GrassAsset *a = &GR.a[i];
+        if (GR.mat[i] == ~0u || (a->density[0] <= 0 && a->density[1] <= 0)) continue;   // grass / meadow cover only
+        const GrassTier *t = &a->tier[DG_CLAMP(level, 0, GRASS_TIERS - 1)];
+        fs = fmaxf(fs, t->full_m + 0.4f * (t->end_m - t->full_m));
+        fe = fmaxf(fe, t->end_m);
+    }
+    if (fe <= 0) return false;
+    *start = fs;
+    *end = fe;
+    return true;
+}
+
 static void grass_update_tier(void);
 void vkg_frame_update(void) {
     if (G.ok) grass_update_tier();

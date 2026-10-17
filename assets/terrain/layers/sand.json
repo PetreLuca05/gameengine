@@ -1,0 +1,33 @@
+{
+  "_doc": "Terrain layer (docs/TERRAIN_SHADING.md); keys: src/world/terrain/terrain_params.c parse_layer.",
+  "texture": "sand",
+  "tile_m": 4.0,
+  "macro_scale_m": 50,
+  "hsv_jitter": {
+    "hue_deg": 2,
+    "sat": 0.05,
+    "val": 0.06,
+    "scale_m": 12
+  },
+  "blend": {
+    "height_contrast": 0.4,
+    "sharpness": 0.3
+  },
+  "porosity": 0.5,
+  "moisture": {
+    "tint": [
+      0.8,
+      0.78,
+      0.74
+    ],
+    "amount": 0.4,
+    "darken": 0.35
+  },
+  "ao": 0.5,
+  "detail": {
+    "parallax_m": 0.01,
+    "detail_normal": 0.3,
+    "micro_roughness": 0.03
+  },
+  "roughness": 0.92
+}

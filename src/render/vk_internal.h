@@ -437,6 +437,12 @@ void vks_frame_data(FrameData *fd);
 // Ground cover table, ground colours and macro variation (ground.c, docs/FOLIAGE_GRASS.md).
 void vkgr_init(void);
 void vkgr_frame_data(FrameData *fd);
+// Terrain shading resources (terrain_tex.c, docs/TERRAIN_SHADING.md): frame set bindings 16..24.
+void vkt_init(void);
+void vkt_shutdown(void);
+void vkt_write_bindings(void);
+void vkt_samplers_changed(void);
+void vkt_frame_data(FrameData *fd, int slot);
 void vkr_upload_image(VkImage image, u32 w, u32 h, u32 mips, u32 layers, const void *data, const size_t *mip_offsets, size_t size);
 void vkr_cancel_image_upload(VkImage image);
 

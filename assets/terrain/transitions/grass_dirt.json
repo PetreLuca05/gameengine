@@ -1,0 +1,37 @@
+{
+  "name": "grass_dirt",
+  "a": [
+    "grass",
+    "meadow",
+    "forest"
+  ],
+  "b": [
+    "dirt",
+    "plowed"
+  ],
+  "width_m": 0.6,
+  "edge_noise_scale_m": 1.6,
+  "edge_noise_strength_m": 0.55,
+  "crumbs": 0.2,
+  "modes": [
+    "height",
+    "noise",
+    "crumbs",
+    "set",
+    "scatter",
+    "rim"
+  ],
+  "set": "grass_sparse_on_dirt",
+  "set_strength": 0.85,
+  "set_tile_m": 2.5,
+  "rim": "dirt_dry",
+  "rim_width_m": 0.25,
+  "scatter_sprites": [
+    4,
+    0
+  ],
+  "scatter_per_m2": 3.0,
+  "puddle_bias": 0.5,
+  "snow_bias": 0.3,
+  "tint_by_weight": 0.2
+}
