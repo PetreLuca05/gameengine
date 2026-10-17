@@ -1,0 +1,13 @@
+{
+  "kind": "emissive",
+  "grid": [
+    4,
+    4
+  ],
+  "variants": 16,
+  "cell": 128,
+  "placeholder": {
+    "type": "flash_petal",
+    "seed": 71
+  }
+}

@@ -45,6 +45,33 @@ typedef struct WeaponCvars {
 void weapons_register_cvars(void);
 const WeaponCvars *weapons_cvars(void);
 
+// One hit of a shot (hitscan trace or a ballistic segment, gameplay/ballistics/bal_world.c).
+typedef struct HitResult {
+    bool hit;
+    float dist;        // along the trace; ballistics: the bullet's path length (damage falloff)
+    vec3 point, normal;
+    EntityId ent;
+    BodyId body;
+    bool hitbox;
+    bool headshot;
+    int part;          // BodyPart for character hitboxes, -1 otherwise
+    bool character;
+    int material;      // SurfaceMaterial (flesh for hitboxes)
+    int tire;          // vehicle wheel hit (-1 none)
+} HitResult;
+// Host: damage / impulse of a hit (damage_scale: e.g. the energy left after a penetration).
+void weapon_apply_hit(World *w, int shooter, const WeaponDef *d, const HitResult *h, vec3 dir, float damage_scale);
+// Host: the EV_IMPACT event of a hit (every machine; the shooter skips it when it predicted it).
+// extra: bits 16..31 of the event id (ballistic energy / outcome, gameplay/ballistics/bal_world.h).
+void weapon_push_impact(World *w, int shooter, const WeaponDef *d, const HitResult *h, vec3 dir, bool killed, u32 extra);
+// The shooter's own predicted impact effects (flesh entry burst or surface impact).
+void weapon_local_impact(World *w, const WeaponDef *d, const HitResult *h, vec3 dir, u32 extra);
+// The shooter's vehicle body to ignore (seated) or its character body.
+BodyId weapon_shooter_ignore_body(World *w, int shooter);
+// Lag-compensated legacy C_HITBOX entities (not characters) along a ray: true and *h filled when
+// one is closer than h->dist (or than range when !h->hit).
+bool weapon_trace_legacy_hitboxes(World *w, int shooter, vec3 origin, vec3 dir, float range, u32 view_tick256, HitResult *h);
+
 void weapons_tick(World *w, int slot, PlayerSim *sim, const UserCmd *cmd, u16 pressed, float dt, bool first_predict, WeaponOutput *out);
 void projectiles_tick(World *w, float dt);
 // The shot trace (world, tires, hitboxes) without damage: pings, aim queries. False = nothing.
@@ -76,6 +103,8 @@ const WeaponDebugStats *weapons_debug_stats(void);
 void weapons_debug_reset(void);
 // First hitbox hit along a ray, ENT_NONE if world geometry is closer (crosshair target tint).
 EntityId weapon_trace_target(World *w, int shooter, vec3 origin, vec3 dir, float range);
+
+const struct WeaponVehicleHooks *weapons_vehicle_hooks(void);
 
 // Vehicles (src/game/game_vehicles.c): seated shooting, tire hits, vehicle consumables.
 typedef struct WeaponVehicleHooks {

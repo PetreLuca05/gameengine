@@ -218,7 +218,7 @@ u32 vfx_sys_spawn(VfxSystem *s, int effect, const VfxSpawnParams *p) {
         ds.pos = p->pos;
         ds.normal = p->normal;
         u32 st2 = st;
-        ds.size = vfx_range(fx->decal.size, &st2) * p->scale;
+        ds.size = vfx_range(fx->decal.size, &st2) * p->scale * (p->decal_scale > 0.0f ? p->decal_scale : 1.0f);
         ds.tint = p->tint;
         vfx_sys_add_decal_ex(s, &fx->decal, &ds, st);
     }

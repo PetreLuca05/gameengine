@@ -1,0 +1,79 @@
+{
+  "duration": 0.05,
+  "priority": 1,
+  "max_instances": 64,
+  "cull_distance": 600,
+  "lod": [
+    [
+      40,
+      0.8
+    ],
+    [
+      120,
+      0.5
+    ],
+    [
+      250,
+      0.3
+    ]
+  ],
+  "emitters": [
+    {
+      "name": "ripple",
+      "tier": "gpu",
+      "spawn": {
+        "mode": "burst",
+        "count": 1,
+        "life": [
+          0.12,
+          0.25
+        ],
+        "size": [
+          0.06,
+          0.09
+        ],
+        "speed": [
+          0.0,
+          0.1
+        ],
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ]
+      },
+      "update": {
+        "size_curve": [
+          [
+            0,
+            0.6
+          ],
+          [
+            1,
+            1.4
+          ]
+        ],
+        "alpha_curve": [
+          [
+            0,
+            1
+          ],
+          [
+            1,
+            0
+          ]
+        ]
+      },
+      "render": {
+        "mode": "distort",
+        "texture": "heat_distort",
+        "distortion": 0.012,
+        "soft": 0.1,
+        "near_fade": 0.1
+      }
+    }
+  ],
+  "name": "bullet_trace",
+  "_generated": "make_ballistic_effects.py"
+}

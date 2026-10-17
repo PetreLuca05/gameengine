@@ -1,0 +1,13 @@
+{
+  "kind": "emissive",
+  "grid": [
+    1,
+    1
+  ],
+  "variants": 1,
+  "cell": 128,
+  "placeholder": {
+    "type": "tracer_head",
+    "seed": 74
+  }
+}

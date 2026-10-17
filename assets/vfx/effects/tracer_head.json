@@ -1,0 +1,102 @@
+{
+  "duration": 0.01,
+  "priority": 3,
+  "max_instances": 1,
+  "cull_distance": 3000,
+  "lod": [
+    [
+      40,
+      0.8
+    ],
+    [
+      120,
+      0.5
+    ],
+    [
+      250,
+      0.3
+    ]
+  ],
+  "emitters": [
+    {
+      "name": "head",
+      "tier": "cpu",
+      "spawn": {
+        "mode": "burst",
+        "count": 0,
+        "life": [
+          0.1,
+          0.1
+        ],
+        "size": [
+          1.0,
+          1.0
+        ],
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "color2": [
+          1,
+          1,
+          1,
+          1
+        ]
+      },
+      "update": {},
+      "render": {
+        "mode": "add",
+        "orient": "segment",
+        "texture": "tracer_head",
+        "emissive": 14.0,
+        "exposure_aware": true,
+        "aspect": 1.0,
+        "soft": 0.0,
+        "near_fade": 0.5
+      }
+    },
+    {
+      "name": "tail",
+      "tier": "cpu",
+      "spawn": {
+        "mode": "burst",
+        "count": 0,
+        "life": [
+          0.1,
+          0.1
+        ],
+        "size": [
+          1.0,
+          1.0
+        ],
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ],
+        "color2": [
+          1,
+          1,
+          1,
+          1
+        ]
+      },
+      "update": {},
+      "render": {
+        "mode": "add",
+        "orient": "segment",
+        "texture": "glow",
+        "emissive": 5.0,
+        "exposure_aware": true,
+        "aspect": 1.0,
+        "soft": 0.0,
+        "near_fade": 0.5
+      }
+    }
+  ],
+  "name": "tracer_head",
+  "_generated": "make_ballistic_effects.py"
+}

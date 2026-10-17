@@ -1,0 +1,88 @@
+{
+  "duration": 0.1,
+  "priority": 3,
+  "max_instances": 16,
+  "cull_distance": 600,
+  "lod": [
+    [
+      40,
+      0.8
+    ],
+    [
+      120,
+      0.5
+    ],
+    [
+      250,
+      0.3
+    ]
+  ],
+  "emitters": [
+    {
+      "name": "grains",
+      "tier": "gpu",
+      "spawn": {
+        "mode": "burst",
+        "count": [
+          10,
+          14
+        ],
+        "life": [
+          0.004,
+          0.011
+        ],
+        "size": [
+          0.004,
+          0.008
+        ],
+        "speed": [
+          8.0,
+          20.0
+        ],
+        "angle": 12,
+        "inherit": 0.5,
+        "color": [
+          1.0,
+          0.75,
+          0.4,
+          1.0
+        ],
+        "color2": [
+          1.0,
+          0.55,
+          0.2,
+          1.0
+        ]
+      },
+      "update": {
+        "drag": 2.0,
+        "alpha_curve": [
+          [
+            0,
+            1
+          ],
+          [
+            0.6,
+            0.8
+          ],
+          [
+            1,
+            0
+          ]
+        ]
+      },
+      "render": {
+        "mode": "add",
+        "orient": "stretch",
+        "texture": "spark",
+        "emissive": 6.0,
+        "exposure_aware": true,
+        "stretch": 0.01,
+        "stretch_max": 8.0,
+        "near_fade": 0.02
+      }
+    }
+  ],
+  "name": "muzzle_sparks",
+  "_generated": "make_ballistic_effects.py"
+}
