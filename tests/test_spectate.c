@@ -219,6 +219,7 @@ static void test_clock_delay(void) {
 // SpecStep contract (rewind, real commands, extrapolation, reconcile replays), must land on the
 // exact state the target had for every confirmed seq.
 typedef struct Toy { u64 h; u32 n; } Toy;
+static bool toy_eq(const Toy *a, const Toy *b) { return a->h == b->h && a->n == b->n; }   // not memcmp: the struct has padding
 static void toy_step(Toy *s, const UserCmd *c) { s->h = s->h * 1099511628211ull ^ (u64)(c->seq * 31u + (u32)(c->move_y + 128) + c->buttons); s->n++; }
 
 static void test_clock_rewind(void) {
@@ -248,7 +249,7 @@ static void test_clock_rewind(void) {
         for (u32 s = st.real_from; s <= st.real_to; s++) toy_step(&cur, spec_ring_get(&ring, s));
         if (st.real_to >= st.real_from) {
             confirmed = cur;
-            if (memcmp(&confirmed, &truth[clk.sim_seq], sizeof(Toy))) mismatches++;
+            if (!toy_eq(&confirmed, &truth[clk.sim_seq])) mismatches++;
         }
         for (int k = 0; k < st.extrap_ticks; k++) {
             UserCmd e = spec_extrap_cmd(spec_ring_get(&ring, clk.sim_seq) ? spec_ring_get(&ring, clk.sim_seq) : &cmds[1]);
@@ -262,7 +263,7 @@ static void test_clock_rewind(void) {
             cur = truth[ack];   // restore the host's state
             for (u32 s = rc.real_from; s <= rc.real_to; s++) toy_step(&cur, spec_ring_get(&ring, s));
             confirmed = cur;
-            if (memcmp(&confirmed, &truth[clk.sim_seq], sizeof(Toy))) mismatches++;
+            if (!toy_eq(&confirmed, &truth[clk.sim_seq])) mismatches++;
             for (int k = 0; k < rc.extrap_ticks; k++) { UserCmd e = spec_extrap_cmd(spec_ring_get(&ring, clk.sim_seq)); toy_step(&cur, &e); }
         }
     }
