@@ -320,8 +320,15 @@ The local player sees their own, undistorted body, Unreal "true first person" st
 * **Same pose everyone sees.** The weapon is the body's procedural hold, with both hands glued, as
   other players see it. The owner gets a raised hip pose (`fp_hip` per hold style, eye space) so
   the weapon sits in view. Only the head is hidden.
-* **Static arms.** While an item is held, the arms (clavicles down) don't play the locomotion clip.
+* **Static arms.** While an item is held, the arms (upper arms down) don't play the locomotion clip.
   They take a fixed relaxed pose under the hold IK, in third person and on other players too.
+* **Clavicles keep the clip.** `LeftShoulder` / `RightShoulder` keep the playing clip's local
+  rotation through every procedural layer: the relaxed held-arm pose, damage reactions (the chain
+  skips them), spine, hold point, hand IK and reach (the arm chain starts at the upper arm; an out
+  of reach grip pulls the item instead), the first-person re-solve and the LOD2+ baked arms.
+  `proc_run` restores them before the hand solve as a guard. Only `anim_ik_shoulders 1` lets the
+  hand IK turn them. Checks: `test_anim` (rifle / pistol, hip / ADS, stand / run, arm hits) and
+  `anim_clavicle_check` (tools/tests/clavicle_check.cfg, every line `-> PASS`).
 * **Interactions.** Door knobs, levers, switches, pickups and ledge grabs are IK'd on top of the
   body pose, blended by weight. While holding an item, the free (left) hand does them and the item
   stays in the right. The target is captured at the use press, so pickups that vanish in the same

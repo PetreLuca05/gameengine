@@ -29,6 +29,8 @@
 
 static void cmd_fp_eye_check(int argc, const char **argv);
 static void cmd_fp_shadow_check(int argc, const char **argv);
+static void cmd_clavicle_check(int argc, const char **argv);
+static CharacterInst *cmd_target(World *w, int argc, const char **argv, int arg);
 static void cmd_set_part(int argc, const char **argv);
 static void cmd_parts(int argc, const char **argv);
 
@@ -90,6 +92,7 @@ typedef struct CharGlobals {
     int fp_hold_state;
     float fp_hold_blend;
     float fp_reach_pull;             // this frame's first-person reach pull (m)
+    float fp_clav_err;               // this frame's first-person clavicle turn by the hold / IK (deg, -1 = no pass)
     Xform fp_cam;
     bool fp_cam_valid;
 } CharGlobals;
@@ -123,6 +126,7 @@ void characters_register_cvars(void) {
     g->hold_debug = cvar_reg_bool("anim_hold_debug", false, 0, "draw hold sockets / wrists and print the left-hand glue error");
     cmd_register("fp_eye_check", cmd_fp_eye_check, "print where the first-person camera socket sits on each character's head (bind pose)");
     cmd_register("fp_shadow_check", cmd_fp_shadow_check, "first person: the drawn body's pelvis / feet against the owner's shadow copy (world, mm apart)");
+    cmd_register("anim_clavicle_check", cmd_clavicle_check, "clavicle local rotation after the hold / IK against the clip (third person + first person, deg; PASS / FAIL)");
     g->hold_assert = cvar_reg_bool("anim_hold_assert", false, 0, "log any left hand <-> grip_l error above 2 mm / 1 deg");
     g->hitbox_debug = cvar_reg_bool("hitbox_debug", false, 0, "draw per-part hitboxes with their multipliers");
     g->lod_debug = cvar_reg_int("r_lod_debug", 0, 0, 2, 0, "LOD debug (docs/LOD.md): 1 per-character LOD / fade / pixel size / update rate / systems, 2 + classic LOD levels as colours");
@@ -1666,10 +1670,11 @@ static void post_one(World *w, CharacterInst *c, int i, float dt, vec3 cam_pos, 
         c->fp_yaw[0] = c->fp_yaw[1];
         c->fp_body_yaw[0] = c->fp_body_yaw[1];
     }
-    // LOD2+: baked per-style arm pose, item pinned to the right hand.
+    // LOD2+: baked per-style arm pose (upper arms down: the clavicles keep this tick's clip), item
+    // pinned to the right hand.
     const Skeleton *s = &LIB->skel;
     int style = DG_CLAMP(c->rt.in.weapon_type, 0, HOLD_STYLE_MAX - 1);
-    int arm_roots[2] = { s->role[BR_L_SHOULDER], s->role[BR_R_SHOULDER] };
+    int arm_roots[2] = { s->role[BR_L_ARM], s->role[BR_R_ARM] };
     if (pi.hold && item && c->rt.proc.has_item && c->rt.proc.glue_err_pos < 0.002f) {
         for (int b = 0; b < s->count; b++)
             if (skel_is_descendant(s, b, arm_roots[0]) || skel_is_descendant(s, b, arm_roots[1])) CG->style_arms[style][b] = c->rt.final.local[b];
@@ -2145,6 +2150,33 @@ static void cmd_fp_shadow_check(int argc, const char **argv) {
     }
 }
 
+// anim_clavicle_check [entity]: the clavicles keep the animation clip's local rotation after every
+// procedural layer (hold, hand IK, reach, damage): third person = the post-pass pose against the
+// controller's clip pose; first person = this frame's hold / IK pass against the pose it started from.
+static void cmd_clavicle_check(int argc, const char **argv) {
+    ensure_globals();
+    World *w = game_world();
+    CharacterInst *c = cmd_target(w, argc, argv, 1);
+    if (!c || !LIB || !c->rt.base_valid) { log_info("anim_clavicle_check: no character"); return; }
+    const Skeleton *s = &LIB->skel;
+    const int roles[2] = { BR_L_SHOULDER, BR_R_SHOULDER };
+    float worst = 0;
+    for (int k = 0; k < 2; k++) {
+        int b = s->role[roles[k]];
+        if (b < 0) continue;
+        float d = quat_angle_between(c->rt.final.local[b].r, c->rt.base.local[b].r) * DG_RAD2DEG;
+        worst = fmaxf(worst, d);
+        log_info("anim_clavicle_check: %s %s third person %.4f deg from the clip", s->names[b], k ? "(right)" : "(left)", d);
+    }
+    bool fp = FP.frame + 1 >= g_engine.frame_index && FP.ent == c->ent && CG->fp_clav_err >= 0;
+    if (fp) {
+        worst = fmaxf(worst, CG->fp_clav_err);
+        log_info("anim_clavicle_check: first person hold / IK turned the clavicles %.4f deg", CG->fp_clav_err);
+    }
+    log_info("anim_clavicle_check: item %s ads %d, worst %.4f deg%s -> %s", c->item_valid ? "held" : "none", c->rt.in.ads ? 1 : 0, worst,
+             fp ? "" : " (no first-person pass)", worst < 0.01f || g_anim_ik_shoulders ? "PASS" : "FAIL");
+}
+
 bool chars_fp_camera(World *w, float alpha, int local_slot, float yaw, float pitch, Xform *socket_world) {
     CharacterInst *c = local_fp_char(w, local_slot);
     if (!c) return false;
@@ -2176,6 +2208,7 @@ void chars_render_local_fp(World *w, float alpha, int local_slot) {
     ensure_globals();
     CG->fp_hold_w = 0;
     CG->fp_glue_pos[0] = CG->fp_glue_pos[1] = -1;   // no hold this frame
+    CG->fp_clav_err = -1;
     if (!c || !hands_fp_targets(&t)) return;
     const Skeleton *s = &LIB->skel;
     // This frame's pose (prepared by the camera socket; otherwise aimed at the hands' camera).
@@ -2189,6 +2222,9 @@ void chars_render_local_fp(World *w, float alpha, int local_slot) {
     Xform *world = FP.world, *model = FP.model;
     Pose *posep = &FP.pose;
     Xform root = FP.root;
+    const int clav[2] = { s->role[BR_L_SHOULDER], s->role[BR_R_SHOULDER] };
+    quat clav0[2];
+    for (int k = 0; k < 2; k++) clav0[k] = clav[k] >= 0 ? posep->local[clav[k]].r : quat_identity();
     Xform inv_root = xf_inverse(root);
     bool raw = CG->fp_debug && CG->fp_debug->i >= 2;
     // Hold point (true first person): the item is a child of this frame's camera; both arms are
@@ -2371,6 +2407,10 @@ void chars_render_local_fp(World *w, float alpha, int local_slot) {
         anim_ik_arm_pose(s, posep, model, ua, fa, ha, hand.t, &hand.r, pole, t.ov_w[h] * hp.ik_weight);
         handpose_apply_fingers(s, posep, model, h, hp.j, &LIB->hands, t.ov_w[h]);
     }
+    // The hold / IK above never turns the clavicles (anim_clavicle_check).
+    CG->fp_clav_err = 0;
+    for (int k = 0; k < 2; k++)
+        if (clav[k] >= 0) CG->fp_clav_err = fmaxf(CG->fp_clav_err, quat_angle_between(posep->local[clav[k]].r, clav0[k]) * DG_RAD2DEG);
     // Neck, head (and hair / eyes / end bones) collapsed: the camera sits inside the head
     // (owner's view only: other players and the shadow pass get the full body).
     for (int b = 0; b < s->count; b++) {

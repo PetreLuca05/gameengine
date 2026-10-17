@@ -138,8 +138,9 @@ void charrt_eval_base(CharRuntime *r) {
     } else {
         ctrl_evaluate(&r->ctrl, &r->lib->skel, &r->lib->lookup, &r->base);
         apply_leg_yaw(r);
-        // Holding an item: the arms (clavicles down) don't play the locomotion clip - they take a
-        // fixed relaxed pose (first frame of idle) and the procedural hold places the hands.
+        // Holding an item: the arms (upper arms down) don't play the locomotion clip - they take a
+        // fixed relaxed pose (first frame of idle) and the procedural hold places the hands. The
+        // clavicles keep the playing clip's rotation (never the relaxed pose, never IK).
         float hw = 0;
         const Skeleton *s = &r->lib->skel;
         int idle = r->ctrl.bind ? r->ctrl.bind->fallback_clip : -1;
@@ -148,7 +149,8 @@ void charrt_eval_base(CharRuntime *r) {
             clip_sample(&r->lib->clips[idle], 0.0f, &still);
             int roots[2] = { s->role[BR_L_SHOULDER], s->role[BR_R_SHOULDER] };
             for (int b = 0; b < s->count; b++)
-                if ((roots[0] >= 0 && skel_is_descendant(s, b, roots[0])) || (roots[1] >= 0 && skel_is_descendant(s, b, roots[1])))
+                if (b != roots[0] && b != roots[1] &&
+                    ((roots[0] >= 0 && skel_is_descendant(s, b, roots[0])) || (roots[1] >= 0 && skel_is_descendant(s, b, roots[1]))))
                     r->base.local[b] = xf_lerp(r->base.local[b], still.local[b], hw);
         }
     }

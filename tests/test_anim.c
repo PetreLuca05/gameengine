@@ -19,6 +19,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 Engine g_engine;
 static int g_fail, g_checks;
@@ -599,6 +600,77 @@ static void hp_step(CharRuntime *rt, const ItemSockets *k, CharInputs *in, float
     charrt_post(rt, &pi);
 }
 
+// The clavicles (LeftShoulder / RightShoulder) keep the animation clip's local rotation after
+// every procedural layer: the relaxed held-arm pose, damage reactions, spine, the hold point and
+// the hand IK (anim_ik_shoulders off). Rifle and pistol, hip and ADS, standing and running, with
+// an arm hit mid-way; the hands still reach their grips.
+static void test_clavicles_keep_clip(const ItemDB *db) {
+    const float dt = 1.0f / 60.0f;
+    const CharacterDef *def = anim_lib_char_by_id(L, "player");
+    if (!def) return;
+    const Skeleton *s = &L->skel;
+    const int clav[2] = { s->role[BR_L_SHOULDER], s->role[BR_R_SHOULDER] };
+    CHECK(clav[0] >= 0 && clav[1] >= 0, "rig has no LeftShoulder / RightShoulder roles");
+    if (clav[0] < 0 || clav[1] < 0) return;
+    CharRuntime *rt = (CharRuntime *)malloc(sizeof(CharRuntime));
+    ControllerInst *cc = (ControllerInst *)malloc(sizeof(ControllerInst));
+    static Pose clip;
+    static const char *guns[2] = { "pistol", "rifle" };
+    for (int g = 0; g < 2; g++) {
+        int wi = -1;
+        for (int i = 0; i < db->weapon_count; i++) if (!strcmp(db->weapons[i].id, guns[g])) wi = i;
+        CHECK(wi >= 0, "no weapon '%s'", guns[g]);
+        if (wi < 0) continue;
+        const WeaponDef *wd = &db->weapons[wi];
+        int style = proc_hold_style_index(&L->proc, wd->hold_style);
+        for (int mode = 0; mode < 4; mode++) {
+            bool ads = mode & 1, run = mode & 2;
+            charrt_init(rt, L, def);
+            CharInputs in;
+            memset(&in, 0, sizeof(in));
+            in.grounded = true;
+            in.weapon_type = style;
+            in.weapon_id = (u16)(wi + 1);
+            in.ads = ads;
+            in.speed = run ? 3.0f : 0.0f;
+            in.move_local = v2(0, 1);
+            float worst = 0, worst_glue = 0, moved = 0;
+            for (int t = 0; t < 120; t++) {
+                in.aim_pitch = 0.5f * sinf((float)t * 0.05f);
+                in.aim_yaw = 0.3f * sinf((float)t * 0.03f);
+                charrt_set_inputs(rt, &in);
+                charrt_tick(rt, dt);
+                // The clip pose this tick: the controller's own output (a copy: evaluating advances
+                // the inertialization state).
+                *cc = rt->ctrl;
+                ctrl_evaluate(cc, s, &L->lookup, &clip);
+                charrt_eval_base(rt);
+                ProcInput pi;
+                charrt_proc_input(rt, &pi, root_at(v3(0, 0, 0), in.body_yaw), dt);
+                pi.item = &wd->sockets;
+                pi.hand_ik_weight = 1.0f;
+                if (t == 40) proc_damage_hit(&rt->proc, &L->proc, s, 0, s->role[BR_L_FOREARM], v3(0.3f, 0, -1), 2.0f);
+                if (t == 70) proc_damage_hit(&rt->proc, &L->proc, s, 0, s->role[BR_R_ARM], v3(-0.3f, 0, -1), 2.0f);
+                charrt_post(rt, &pi);
+                if (t < 30) continue;   // style / ADS blends settle
+                for (int k = 0; k < 2; k++) {
+                    float d = quat_angle_between(rt->final.local[clav[k]].r, clip.local[clav[k]].r) * DG_RAD2DEG;
+                    worst = fmaxf(worst, d);
+                    // The clavicle model rotation does change (the spine turns it): the check is local.
+                    moved = fmaxf(moved, quat_angle_between(rt->final_model[clav[k]].r, rt->base_model[clav[k]].r) * DG_RAD2DEG);
+                }
+                if (proc_hold_style(&L->proc, style)->left_hand && wd->sockets.has_left) worst_glue = fmaxf(worst_glue, rt->proc.glue_err_pos);
+            }
+            printf("  clavicles %-6s %-3s %-5s local %.5f deg from the clip (model turned up to %.1f deg by the spine), left glue %.3f mm\n", guns[g],
+                   ads ? "ads" : "hip", run ? "run" : "stand", worst, moved, worst_glue * 1000);
+            CHECK(worst < 0.01f, "%s %s %s: clavicle local rotation %.4f deg off the clip", guns[g], ads ? "ads" : "hip", run ? "run" : "stand", worst);
+            CHECK(worst_glue < 0.002f, "%s %s %s: left hand %.2f mm off grip_l", guns[g], ads ? "ads" : "hip", run ? "run" : "stand", worst_glue * 1000);
+        }
+    }
+    free(cc);
+    free(rt);
+}
+
 static void test_holdpoint(const ItemDB *db) {
     const float dt = 1.0f / 60.0f;
     const CharacterDef *def = anim_lib_char_by_id(L, "player");
@@ -1012,6 +1084,7 @@ int main(int argc, char **argv) {
     test_hold_and_glue(db);
     test_phone_hold(db);
     test_holdpoint(db);
+    test_clavicles_keep_clip(db);
     test_body_parts(db);
     test_damage_reaction();
     test_clip_facing();

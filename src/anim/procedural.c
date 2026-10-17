@@ -411,8 +411,24 @@ static void proc_kneel(ProcState *st, const ProcInput *in, Pose *pose, Xform *mo
     }
 }
 
+// The clavicles keep the animation clip's local rotation through every procedural layer (unless
+// anim_ik_shoulders): put back the clip's local transform, children follow (their locals kept).
+static void keep_clavicles(const Skeleton *s, Pose *pose, Xform *model, const int clav[2], const Xform clip[2]) {
+    if (g_anim_ik_shoulders) return;
+    for (int k = 0; k < 2; k++) {
+        int b = clav[k];
+        if (b < 0) continue;
+        pose->local[b] = clip[k];
+        model[b] = s->parent[b] >= 0 ? xf_mul(model[s->parent[b]], clip[k]) : clip[k];
+        pose_update_children(s, pose, model, b);
+    }
+}
+
 void proc_run(ProcState *st, const ProcInput *in0, Pose *pose, Xform *model) {
     ProcInput in = *in0;
+    const int clav[2] = { in.skel->role[BR_L_SHOULDER], in.skel->role[BR_R_SHOULDER] };
+    Xform clav_clip[2];
+    for (int k = 0; k < 2; k++) clav_clip[k] = clav[k] >= 0 ? pose->local[clav[k]] : xf_identity();
     if (!st->init) {
         st->init = true;
         st->render_body_yaw = in.body_yaw;
@@ -445,6 +461,8 @@ void proc_run(ProcState *st, const ProcInput *in0, Pose *pose, Xform *model) {
     if (in.foot_ik) proc_foot_pelvis(st, &in, pose, model, foot_off, anim_foot);
     if (in.lean) proc_lean(st, &in, pose, model);
     if (in.spine) proc_spine(st, &in, pose, model);
+    // Before the hand solve: whatever moved above, the arm chains start from the clip's shoulders.
+    keep_clavicles(in.skel, pose, model, clav, clav_clip);
     if (in.hold && in.item) proc_hold(st, &in, pose, model);
     else st->has_item = false;
     if (in.hand_anchor_w > 0) proc_hand_anchors(st, &in, pose, model);
