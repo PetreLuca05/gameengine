@@ -3,6 +3,7 @@
 #include "game.h"
 #include "ui/mainmenu/mainmenu.h"
 #include "game_internal.h"
+#include "game_water.h"
 #include "editor/handpose/hp_system.h"
 #include "editor/handpose/hp_editor.h"
 #include "scene.h"
@@ -351,6 +352,7 @@ static void host_tick(World *w, const UserCmd *local_cmd) {
     if (!frozen) {
         openworld_tick(w, SIM_DT);   // open-world maps: deep water, POI zombie spawner
         vehicles_host_tick(w);
+        water_tick(w);   // swell wind, buoyancy impulses on props (before the step)
         phys_step(w->phys, SIM_DT);
         vehicles_host_post(w);
         vehicles_test_tick(w);
@@ -564,6 +566,7 @@ static void tick(void) {
         chars_client_tick(w, net_client_render_tick(), SIM_DT);
         vehicles_client_post(w, cmd.seq);
         if (w->chunks) chunks_update(w, SIM_DT);
+        water_tick(w);   // the swell's wind from the replicated weather
         w->tick++;
     }
     // Render-side character work at tick rate (LOD-scaled post-pass, ragdolls).
@@ -752,6 +755,7 @@ bool game_host_ex(const char *map, u32 flags) {
     }
     daynight_level_loaded(G->world);
     weather_level_loaded(G->world, G->map);
+    water_level_loaded(G->world, G->map);
     vehicles_level_loaded(G->world, G->map);
     handpose_system_scan(G->world, false);   // interactables placed in this level
     flesh_fx_clear();
@@ -780,6 +784,7 @@ void game_cl_welcome(int slot, const char *map, u32 seed, u32 server_tick) {
     if (!load_map(G->world, map)) log_error("client: cannot load map '%s'", map);
     daynight_level_loaded(G->world);   // config; the time itself arrives with every snapshot
     weather_level_loaded(G->world, map);   // puddle mask; the weather state arrives with the snapshots
+    water_level_loaded(G->world, map);     // the same bodies as the host (nothing replicated)
     vehicles_level_loaded(G->world, map);   // spike zones; vehicles replicate
     handpose_system_scan(G->world, false);   // interactables placed in this level
     flesh_fx_clear();

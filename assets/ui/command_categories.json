@@ -7,7 +7,7 @@
         { "id": "camera", "label": "Camera", "prefixes": ["cam_", "fp_", "hands_", "holdpoint", "handpose", "hpe"] },
         { "id": "weapons", "label": "Weapons", "prefixes": ["wpn_", "weapon_", "ads_", "sight_", "crosshair_", "attach", "bench", "recoil_"] },
         { "id": "hud", "label": "HUD & Menus", "prefixes": ["ui_", "hud_", "wheel_", "ping", "peek", "mm_", "menu", "mainmenu", "inventory", "cos_", "kill_stats", "commands"] },
-        { "id": "world", "label": "World", "prefixes": ["map", "world_", "time_", "tod_", "weather", "season", "sky_", "env_", "foliage_", "wind_", "ow_", "poi_", "scene", "despawn", "spawn"] },
+        { "id": "world", "label": "World", "prefixes": ["map", "world_", "time_", "tod_", "weather", "season", "sky_", "env_", "foliage_", "wind_", "water_", "swim_", "buoy_", "ow_", "poi_", "scene", "despawn", "spawn"] },
         { "id": "rendering", "label": "Rendering", "prefixes": ["r_", "post_", "fidelity", "vgeo_", "screenshot", "photomode", "nightvision", "bake_", "perf_"] },
         { "id": "vfx", "label": "Effects", "prefixes": ["vfx_", "fx_", "gore_", "flesh_"] },
         { "id": "animation", "label": "Animation", "prefixes": ["anim_", "char_", "character_", "hitbox_", "ragdoll"] },

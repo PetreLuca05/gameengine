@@ -1,0 +1,13 @@
+{
+  "kind": "lake",
+  "_comment": "Clear fresh lake: flat surface, wind ripples (wave_scale = ripple strength).",
+  "absorb": [0.45, 0.09, 0.06],
+  "scatter": [0.004, 0.012, 0.016],
+  "turbidity": 0.25,
+  "roughness": 0.04,
+  "wave_scale": 0.35,
+  "wind_coupling": 1.0,
+  "foam": 0.4,
+  "temperature": 14,
+  "density": 1000
+}

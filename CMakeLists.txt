@@ -160,8 +160,9 @@ file(GLOB DG_SHADER_SOURCES CONFIGURE_DEPENDS
   ${CMAKE_SOURCE_DIR}/shaders/post/*.vert ${CMAKE_SOURCE_DIR}/shaders/post/*.frag ${CMAKE_SOURCE_DIR}/shaders/post/*.comp
   ${CMAKE_SOURCE_DIR}/shaders/sights/*.frag ${CMAKE_SOURCE_DIR}/shaders/sights/*.comp
   ${CMAKE_SOURCE_DIR}/shaders/sky/*.comp ${CMAKE_SOURCE_DIR}/shaders/vgeo/*.comp
-  ${CMAKE_SOURCE_DIR}/shaders/vgeo/*.vert ${CMAKE_SOURCE_DIR}/shaders/vgeo/*.frag ${CMAKE_SOURCE_DIR}/shaders/vgeo/*.mesh)
-file(GLOB DG_SHADER_INCLUDES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/shaders/*.glsl ${CMAKE_SOURCE_DIR}/shaders/post/*.glsl ${CMAKE_SOURCE_DIR}/shaders/sights/*.glsl ${CMAKE_SOURCE_DIR}/shaders/sky/*.glsl ${CMAKE_SOURCE_DIR}/shaders/vgeo/*.glsl ${CMAKE_SOURCE_DIR}/third_party/fsr/*.h
+  ${CMAKE_SOURCE_DIR}/shaders/vgeo/*.vert ${CMAKE_SOURCE_DIR}/shaders/vgeo/*.frag ${CMAKE_SOURCE_DIR}/shaders/vgeo/*.mesh
+  ${CMAKE_SOURCE_DIR}/shaders/water/*.vert ${CMAKE_SOURCE_DIR}/shaders/water/*.frag ${CMAKE_SOURCE_DIR}/shaders/water/*.comp)
+file(GLOB DG_SHADER_INCLUDES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/shaders/*.glsl ${CMAKE_SOURCE_DIR}/shaders/post/*.glsl ${CMAKE_SOURCE_DIR}/shaders/sights/*.glsl ${CMAKE_SOURCE_DIR}/shaders/sky/*.glsl ${CMAKE_SOURCE_DIR}/shaders/vgeo/*.glsl ${CMAKE_SOURCE_DIR}/shaders/water/*.glsl ${CMAKE_SOURCE_DIR}/third_party/fsr/*.h
   ${CMAKE_SOURCE_DIR}/shaders/post/*.h)
 set(DG_SHADER_OUT ${CMAKE_BINARY_DIR}/bin/shaders)
 set(DG_SPV_FILES)
@@ -182,17 +183,21 @@ foreach(src ${DG_SHADER_SOURCES})
   if(dirname STREQUAL "vgeo")
     set(sub "vgeo/")
   endif()
+  if(dirname STREQUAL "water")
+    set(sub "water/")
+  endif()
   set(out ${DG_SHADER_OUT}/${sub}${name}.spv)
   if(DG_SHADER_COMPILER_KIND STREQUAL "glslc")
-    set(cmd ${DG_SHADER_COMPILER} --target-env=vulkan1.3 -O -I ${CMAKE_SOURCE_DIR}/shaders -I ${CMAKE_SOURCE_DIR}/shaders/post -I ${CMAKE_SOURCE_DIR}/third_party/fsr -I ${CMAKE_SOURCE_DIR}/third_party/smaa -o ${out} ${src})
+    set(cmd ${DG_SHADER_COMPILER} --target-env=vulkan1.3 -O -I ${CMAKE_SOURCE_DIR}/shaders -I ${CMAKE_SOURCE_DIR}/shaders/post -I ${CMAKE_SOURCE_DIR}/shaders/water -I ${CMAKE_SOURCE_DIR}/third_party/fsr -I ${CMAKE_SOURCE_DIR}/third_party/smaa -o ${out} ${src})
   else()
-    set(cmd ${DG_SHADER_COMPILER} -V --target-env vulkan1.3 -I${CMAKE_SOURCE_DIR}/shaders -I${CMAKE_SOURCE_DIR}/shaders/post -I${CMAKE_SOURCE_DIR}/third_party/fsr -I${CMAKE_SOURCE_DIR}/third_party/smaa -o ${out} ${src})
+    set(cmd ${DG_SHADER_COMPILER} -V --target-env vulkan1.3 -I${CMAKE_SOURCE_DIR}/shaders -I${CMAKE_SOURCE_DIR}/shaders/post -I${CMAKE_SOURCE_DIR}/shaders/water -I${CMAKE_SOURCE_DIR}/third_party/fsr -I${CMAKE_SOURCE_DIR}/third_party/smaa -o ${out} ${src})
   endif()
   add_custom_command(OUTPUT ${out}
     COMMAND ${CMAKE_COMMAND} -E make_directory ${DG_SHADER_OUT}/post
     COMMAND ${CMAKE_COMMAND} -E make_directory ${DG_SHADER_OUT}/sights
     COMMAND ${CMAKE_COMMAND} -E make_directory ${DG_SHADER_OUT}/sky
     COMMAND ${CMAKE_COMMAND} -E make_directory ${DG_SHADER_OUT}/vgeo
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${DG_SHADER_OUT}/water
     COMMAND ${cmd}
     DEPENDS ${src} ${DG_SHADER_INCLUDES}
     COMMENT "GLSL ${name}" VERBATIM)
@@ -266,10 +271,17 @@ set(DG_ANIMCORE_SOURCES
   src/anim/anim.c src/anim/skeleton.c src/anim/retarget.c src/anim/anim_mesh.c src/anim/controller.c src/anim/procedural.c src/anim/turn.c src/anim/spine.c
   src/anim/weapon_hold.c src/anim/handpose.c src/editor/handpose/hp_discover.c src/editor/handpose/hp_edit.c src/editor/handpose/hp_rig.c src/editor/handpose/hp_xform.c src/anim/damage_additive.c src/anim/foot_ik.c src/anim/anim_net.c src/anim/ragdoll_def.c
   src/anim/anim_library.c src/anim/character_rt.c src/gameplay/hitboxes.c src/gameplay/items.c src/gameplay/attachments.c src/gameplay/recoil.c src/core/spring.c
-  src/world/time_of_day.c src/world/weather.c src/world/wind.c src/gameplay/vehicle_def.c src/vfx/vfx_curve.c src/vfx/vfx_library.c src/vfx/vfx_sim.c src/vfx/vfx_flesh.c src/vfx/vfx_atlas.c src/player/holdpoint.c src/player/camera_fp_math.c src/gameplay/phone/phone_orient.c
+  src/world/time_of_day.c src/world/weather.c src/world/wind.c src/world/water/water.c src/world/water/water_waves.c src/gameplay/vehicle_def.c src/vfx/vfx_curve.c src/vfx/vfx_library.c src/vfx/vfx_sim.c src/vfx/vfx_flesh.c src/vfx/vfx_atlas.c src/player/holdpoint.c src/player/camera_fp_math.c src/gameplay/phone/phone_orient.c
   src/assets/fbx_loader.c src/assets/anim_cache.c src/assets/character.c src/render/skeletal_mesh.c
   src/core/log.c src/core/platform.c)
 add_library(dg_animcore STATIC ${DG_ANIMCORE_SOURCES})
+# Water swell / queries must be bit-identical on every machine (docs/WATER.md "Determinism").
+set(DG_WATER_DETERMINISTIC src/world/water/water.c src/world/water/water_waves.c)
+if(MSVC)
+  set_source_files_properties(${DG_WATER_DETERMINISTIC} PROPERTIES COMPILE_OPTIONS "/fp:precise")
+else()
+  set_source_files_properties(${DG_WATER_DETERMINISTIC} PROPERTIES COMPILE_OPTIONS "-ffp-contract=off")
+endif()
 set_target_properties(dg_animcore PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
 target_include_directories(dg_animcore PUBLIC src)
 target_link_libraries(dg_animcore PUBLIC dg_thirdparty meshopt SDL3::SDL3-static)
@@ -414,6 +426,18 @@ add_executable(test_wind tests/test_wind.c)
 set_target_properties(test_wind PROPERTIES C_STANDARD 11)
 target_link_libraries(test_wind PRIVATE dg_vgeo)
 add_test(NAME wind COMMAND test_wind WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+
+# Water (docs/WATER.md): deterministic polynomials, swell spectrum / continuity / determinism, body
+# shapes and queries, buoyancy (analytic, Jolt half-submersion / drag / sinking, 200-body budget).
+# water_determinism runs the wave fingerprint in two processes and compares them.
+add_executable(test_water tests/test_water.c src/physics/physics.c src/physics/buoyancy.c src/core/jobs.c)
+set_target_properties(test_water PROPERTIES C_STANDARD 11)
+target_link_libraries(test_water PRIVATE dg_animcore joltc jolt_shim)
+if(MSVC)
+  target_compile_options(test_water PRIVATE /W3 /wd4100 /wd4201 /utf-8)
+endif()
+add_test(NAME water COMMAND test_water WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+add_test(NAME water_determinism COMMAND ${CMAKE_COMMAND} -DEXE=$<TARGET_FILE:test_water> -P ${CMAKE_SOURCE_DIR}/tools/tests/water_determinism.cmake)
 
 # Vehicles: definitions, fuel curve, tire model, steering clamp / smoothing, quantization.
 add_executable(test_vehicles tests/test_vehicles.c)

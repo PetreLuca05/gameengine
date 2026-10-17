@@ -1,0 +1,12 @@
+{
+  "kind": "lake",
+  "_comment": "Muddy pond: brown-green, visibility ~2 m.",
+  "absorb": [0.9, 0.7, 0.9],
+  "scatter": [0.05, 0.05, 0.03],
+  "turbidity": 0.8,
+  "roughness": 0.05,
+  "wave_scale": 0.25,
+  "foam": 0.3,
+  "temperature": 12,
+  "density": 1000
+}

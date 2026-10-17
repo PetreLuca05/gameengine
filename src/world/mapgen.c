@@ -600,6 +600,23 @@ float mapgen_water_level(const MapGen *g, float x, float z) {
     return best;
 }
 
+bool mapgen_in_sea(const MapGen *g, float x, float z) { return g->sea_count >= 3 && mapgen_sea_distance(g, x, z) > -g->beach_width; }
+
+bool mapgen_in_lake(const MapGen *g, int feature, float x, float z) {
+    if (feature < 0 || feature >= g->feature_count || g->features[feature].kind != MGF_LAKE) return false;
+    return lake_d(g, &g->features[feature], x, z) < 1.15f;
+}
+
+bool mapgen_river_water(const MapGen *g, float x, float z, float *level, vec2 *dir) {
+    RiverHit vh;
+    if (!g->vs_count || !river_query(g, x, z, &vh)) return false;
+    const MgRiver *rv = &g->rivers[g->vs[vh.sample].river];
+    if (vh.dist >= rv->width * 0.5f + rv->bank * 0.5f) return false;
+    *level = vh.water;
+    if (dir) *dir = g->vs[vh.sample].dir;
+    return true;
+}
+
 int mapgen_nearest_road(const MapGen *g, float x, float z, float max_dist, float *dist) {
     int c = grid_cell(&g->road_grid, x, z);
     if (c < 0 || !g->rs_count) return -1;

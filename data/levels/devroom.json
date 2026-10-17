@@ -207,7 +207,13 @@
     {"type": "box", "pos": [-124.0, 0.03, -21.6], "size": [0.35, 0.6, 0.35], "color": [0.95, 0.45, 0.08], "grid": false, "material": "default"},
     {"type": "ramp", "pos": [-140, 0, 4], "yaw": 0, "width": 4, "length": 7, "angle": 11, "color": [0.55, 0.5, 0.42], "material": "wood", "label": "jump ramp", "label_size": 0.25},
     {"type": "box", "pos": [-110, 0.03, 8], "size": [7, 0.04, 0.5], "color": [0.08, 0.08, 0.08], "grid": false, "material": "metal_thin", "label": "spike strip", "label_size": 0.22},
-    {"type": "box", "pos": [-104.5, 0, -12], "size": [2.6, 0.12, 4], "color": [0.5, 0.5, 0.48], "grid": false, "material": "concrete", "label": "fuel pump: hold E", "label_size": 0.22}
+    {"type": "box", "pos": [-104.5, 0, -12], "size": [2.6, 0.12, 4], "color": [0.5, 0.5, 0.48], "grid": false, "material": "concrete", "label": "fuel pump: hold E", "label_size": 0.22},
+    {"_comment": "Water pool (docs/WATER.md dev content): a raised tank 16 x 12 m, walls 3 m, water at 2.6 m (rim 0.4 m above it: mantle out). Ramp up from the south. spawn_float <density>, water_debug 1.", "type": "box", "pos": [80, 0, -88.25], "size": [17, 3, 0.5], "color": [0.62, 0.64, 0.66], "material": "concrete", "label": "water pool: water_debug 1, spawn_float 500", "label_size": 0.3},
+    {"type": "box", "pos": [80, 0, -75.75], "size": [17, 3, 0.5], "color": [0.62, 0.64, 0.66], "material": "concrete"},
+    {"type": "box", "pos": [71.75, 0, -82], "size": [0.5, 3, 12], "color": [0.62, 0.64, 0.66], "material": "concrete"},
+    {"type": "box", "pos": [88.25, 0, -82], "size": [0.5, 3, 12], "color": [0.62, 0.64, 0.66], "material": "concrete"},
+    {"type": "box", "pos": [80, 0, -82], "size": [16, 0.02, 12], "color": [0.35, 0.6, 0.7], "material": "concrete", "grid": true},
+    {"type": "ramp", "pos": [80, 0, -65.76], "width": 2.5, "length": 8.24, "angle": 20, "platform": 1.5, "color": [0.5, 0.58, 0.68], "label": "pool ramp"}
   ],
   "puddles": [
     {"_comment": "Authored puddle areas (game_weather.c bake_puddles): pos [x, z], size [w, d], value 0..1 (1 fills first).", "pos": [-44, 26], "size": [5, 3], "value": 1.0},
@@ -221,6 +227,9 @@
   ],
   "fuel_pumps": [{"pos": [-104.5, 0.12, -12], "yaw": 90}],
   "vehicle_spikes": [{"pos": [-110, 8], "size": [7, 0.5]}],
+  "water": [
+    {"type": "lake", "name": "devpool", "preset": "pool", "level": 2.6, "box": {"center": [80, -82], "half": [8, 6]}}
+  ],
   "labels": [
     {"pos": [0, 0, 47.5], "yaw": 0, "floor": true, "size": 0.3, "text": "horde yard: spawn_horde <count> [radius] [ring|random|cluster], horde_debug 1"},
     {"pos": [-10, 0, -34.9], "yaw": 0, "floor": true, "size": 0.25, "text": "5 m: player / zombie / helmet"},
@@ -353,7 +362,13 @@
     {"type": "prop", "shape": "box", "size": [0.7, 0.7, 0.7], "pos": [-19.1, 0.8, -17.0], "yaw": 180, "mass": 200, "color": [1.0, 1.0, 1.0], "model": "pbr_ball", "_pbr_shelf": true},
     {"type": "vgeo", "mesh": "pbr_ball", "pos": [-18.0, 1.15, -17.0], "yaw": 180, "_pbr_shelf": true},
     {"type": "prop", "shape": "box", "size": [0.6, 0.65, 0.2], "pos": [-16.8, 0.8, -17.0], "mass": 200, "color": [0.5, 0.5, 0.5], "model": "pbr_mask", "_pbr_shelf": true},
-    {"type": "light", "pos": [-19, 2.6, -15.4], "color": [1.0, 0.85, 0.7], "radius": 7, "intensity": 6, "schedule": true, "_pbr_shelf": true}
+    {"type": "light", "pos": [-19, 2.6, -15.4], "color": [1.0, 0.85, 0.7], "radius": 7, "intensity": 6, "schedule": true, "_pbr_shelf": true},
+    {"type": "prop", "shape": "box", "size": [0.8, 0.8, 0.8], "pos": [74.0, 3.2, -82], "mass": 102.4, "density": 200, "color": [0.75, 0.55, 0.3]},
+    {"type": "prop", "shape": "box", "size": [0.8, 0.8, 0.8], "pos": [76.4, 3.2, -82], "mass": 256.0, "density": 500, "color": [0.75, 0.55, 0.3]},
+    {"type": "prop", "shape": "box", "size": [0.8, 0.8, 0.8], "pos": [78.8, 3.2, -82], "mass": 409.6, "density": 800, "color": [0.75, 0.55, 0.3]},
+    {"type": "prop", "shape": "box", "size": [0.6, 0.6, 0.6], "pos": [81.2, 3.2, -82], "mass": 324.0, "density": 1500, "color": [0.45, 0.45, 0.5]},
+    {"type": "prop", "shape": "box", "size": [2.0, 0.16, 0.5], "pos": [83.6, 3.2, -82], "mass": 72.0, "density": 450, "color": [0.75, 0.55, 0.3]},
+    {"type": "prop", "shape": "cylinder", "size": [0.6, 0.9, 0.6], "pos": [86.0, 3.2, -82], "mass": 152.7, "density": 600, "color": [0.75, 0.55, 0.3]}
   ],
   "post": {},
   "post_volumes": [

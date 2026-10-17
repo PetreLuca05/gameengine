@@ -80,6 +80,7 @@ typedef struct BodyComp {
     BodyId body;
     PhysMotion motion;
     float mass;
+    float density;   // kg/m3 for buoyancy (0 = mass / shape volume); host only, level JSON "density"
 } BodyComp;
 
 typedef struct Health {
