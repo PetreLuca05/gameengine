@@ -283,9 +283,9 @@ connection; all maps are embedded PNGs, FBX "Video" content):
 
 | Model | Material | DiffuseColor | NormalMap / Bump | ShininessExponent | SpecularColor |
 |---|---|---|---|---|---|
-| Ch32 (hazmat) | Ch32_body | 1001_Diffuse 4096Â² | NormalMap 1001_Normal | 1001_Glossiness (L) | 1001_Specular |
-| Ch33 (officer), Ch38 (athlete) | ChNN_body | 1001_Diffuse 4096Â² | NormalMap 1001_Normal | 1001_Glossiness | 1001_Specular |
-| | ChNN_hair | 1002_Diffuse 2048Â² RGBA (also TransparentColor) | Bump = 1002_Normal (a normal map) | none | none |
+| Ch32 (hazmat) | Ch32_body | 1001_Diffuse 4096² | NormalMap 1001_Normal | 1001_Glossiness (L) | 1001_Specular |
+| Ch33 (officer), Ch38 (athlete) | ChNN_body | 1001_Diffuse 4096² | NormalMap 1001_Normal | 1001_Glossiness | 1001_Specular |
+| | ChNN_hair | 1002_Diffuse 2048² RGBA (also TransparentColor) | Bump = 1002_Normal (a normal map) | none | none |
 | Ch42 (casual) | Ch42_Body | 1001_Diffuse | NormalMap 1001_Normal | 1001_Glossiness | 1001_Specular |
 | | Ch42_Hair | 1002_Diffuse RGBA | Bump = 1001_Normal: the body's map (export error, ignored) | none | none |
 
@@ -297,7 +297,7 @@ buckles / zips / rings (hazmat up to sRGB 141).
 
 1. `build/bin/fbx_textures --out assets/human/textures assets/human/Ch*_nonPBR.fbx` extracts the PNGs and
    writes `<model>.maps.json` (material -> FBX property -> file).
-2. `python tools/gen_skin_atlas.py` writes, per skin, tiled like the albedo (1024Â² per material, `--tile`):
+2. `python tools/gen_skin_atlas.py` writes, per skin, tiled like the albedo (1024² per material, `--tile`):
    - `<atlas>.png` albedo (sRGB);
    - `<atlas>_normal.png` (linear): NormalMap, else Bump when that image is a normal map; a map of another
      UDIM tile than the material's diffuse is dropped (flat);
