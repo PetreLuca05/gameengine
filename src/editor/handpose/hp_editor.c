@@ -716,7 +716,7 @@ static void draw_rig(void) {
                 dbg_cross(E.world[fi].t, E.sel[fi] || fi == E.hover ? 0.007f : 0.004f, fc, 0);
             }
     }
-    if (E.active >= 0) dbg_text(v3_add(E.world[E.active].t, v3(0, 0.035f, 0)), hp_rig_ctrl(E.active)->name, DBG_WHITE, 0.03f, 0);
+    if (E.active >= 0) dbg_text(v3_add(E.world[E.active].t, v3(0, 0.035f, 0)), hp_rig_ctrl(E.active)->name, DBG_WHITE, 0.008f, 0);
     dbg_set_shape_depth(true);
 }
 
@@ -1093,7 +1093,18 @@ static float glue_error(int hand) {
 
 static bool hand_used(int h) {
     HpTarget t = target();
-    if (t.entry >= 0) return (db()->e[t.entry].hands >> h) & 1;
+    if (t.entry >= 0) {
+        if (!((db()->e[t.entry].hands >> h) & 1)) return false;
+        if (h == 1) return true;
+        // The support hand only where the hold style in use puts it on the item (the phone's
+        // portrait style is one-handed, its landscape one two-handed).
+        CharacterInst *ch = local_char();
+        const HandPoseEntry *owner;
+        const ItemSockets *k = held_sockets(&owner);
+        if (!ch || !k || !k->has_left) return false;
+        const HoldStyle *hs = proc_hold_style(&g_engine.anim->proc, ch->rt.proc.style);
+        return hs && hs->left_hand;
+    }
     const HandPoseCase *c = sel_case();
     if (!c || !((c->hands >> h) & 1)) return false;
     if (c->kind == HCK_INTERACT) {
@@ -1110,7 +1121,9 @@ static void save_target(void) {
     if (!hp_target_valid(d, t)) { status("nothing to save"); return; }
     // Hand glue: refuse a grip / key whose IK targets the arms can't reach.
     const HandPoseCase *c = sel_case();
-    bool check = E.ctx_valid && (t.entry >= 0 || (c && c->kind != HCK_STUB && t.key >= 0));
+    // Grips and the cases whose hands the runtime solves onto the anchor (interactions, seats);
+    // the ledge depends on the hang clip, the stubs have no runtime yet: warned only.
+    bool check = E.ctx_valid && (t.entry >= 0 || (c && (c->kind == HCK_INTERACT || c->kind == HCK_VEHICLE) && t.key >= 0));
     for (int h = 0; h < 2 && check; h++) {
         if (!hand_used(h)) continue;
         float g = glue_error(h);
