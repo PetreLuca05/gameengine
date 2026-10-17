@@ -23,12 +23,12 @@
 #define TH (gui_theme())
 #define MAX_RES 48
 
-enum { TAB_GRAPHICS, TAB_CONTROLS, TAB_CROSSHAIR, TAB_AUDIO, TAB_CHARACTER, TAB_POST, TAB_PHONE, TAB_COUNT };
-static const char *const k_tabs[TAB_COUNT] = { "Graphics", "Controls", "Crosshair", "Audio", "Character", "Post-processing", "Phone" };
+enum { TAB_GRAPHICS, TAB_CONTROLS, TAB_CROSSHAIR, TAB_AUDIO, TAB_CHARACTER, TAB_POST, TAB_PHONE, TAB_HUD, TAB_COUNT };
+static const char *const k_tabs[TAB_COUNT] = { "Graphics", "Controls", "Crosshair", "Audio", "Character", "Post-processing", "Phone", "HUD" };
 // Display order of the tabs. Post-processing lives in the Graphics tab (under Engine Fidelity);
 // TAB_POST stays as an index (settings_open by number) and opens Graphics.
 #define TAB_SHOWN (TAB_COUNT - 1)
-static const int k_order[TAB_SHOWN] = { TAB_GRAPHICS, TAB_CONTROLS, TAB_CROSSHAIR, TAB_AUDIO, TAB_CHARACTER, TAB_PHONE };
+static const int k_order[TAB_SHOWN] = { TAB_GRAPHICS, TAB_CONTROLS, TAB_CROSSHAIR, TAB_HUD, TAB_AUDIO, TAB_CHARACTER, TAB_PHONE };
 
 typedef struct Display { int width, height, mode, vsync; } Display;
 
@@ -627,6 +627,32 @@ static void tab_character(GuiCursor *c) {
 }
 
 // Phone companion (docs/PHONE.md): server, stream, orientation, capture.
+// HUD (docs/UI_WHEELS_HUD.md "Settings"): the compass, kill counter / feed, pings and wheels.
+static void tab_hud(GuiCursor *c) {
+    section(c, "Layout");
+    row_slider_cvar(c, "HUD opacity", "hud_opacity", 0.2f, 1, 0.05f, "%.2f", "Compass, kill counter, kill feed and ping markers.");
+    row_slider_cvar(c, "Compass and marker size", "hud_scale", 0.75f, 1.5f, 0.05f, "%.2f", NULL);
+    section(c, "Compass");
+    row_toggle_cvar(c, "Compass", "hud_compass", NULL);
+    row_toggle_cvar(c, "Coordinates", "hud_coords", "X, Z and height under the compass. Copy them from the pause menu.");
+    row_toggle_cvar(c, "Pings and teammates on the compass", "hud_ping_compass", NULL);
+    section(c, "Kills");
+    row_toggle_cvar(c, "Kill counter", "hud_killcount", NULL);
+    row_toggle_cvar(c, "Always show zombies / players", "hud_killcount_split", "Otherwise on hover and for a moment after each kill.");
+    row_toggle_cvar(c, "Kill feed", "hud_killfeed", NULL);
+    section(c, "Pings");
+    row_toggle_cvar(c, "Ping markers in the world", "hud_ping_markers", NULL);
+    row_toggle_cvar(c, "Show other players' pings", "ping_enable", NULL);
+    row_toggle_cvar(c, "Ping chat lines", "ping_chat", NULL);
+    row_toggle_cvar(c, "Ping sounds", "ping_sound", NULL);
+    section(c, "Radial wheels");
+    row_toggle_cvar(c, "Hold to open wheels", "wheel_enable", "Off: the keys only do their tap action (quick heal, drop, ping, use).");
+    row_slider_cvar(c, "Hold time", "wheel_hold_time", 0.1f, 0.6f, 0.01f, "%.2f s", "How long a key is held before its wheel opens.");
+    row_slider_cvar(c, "Slow motion while open", "wheel_timescale", 0.05f, 1, 0.05f, "%.2f", "Single player and hosting alone only.");
+    row_toggle_cvar(c, "Use healing items at once", "wheel_heal_auto_use", NULL);
+    row_toggle_cvar(c, "Timed action ring", "hud_timed_ring", "The ring for healing, cooking grenades and hold interactions.");
+}
+
 static void tab_phone(GuiCursor *c) {
     static const char *const server[] = { "Off", "On", "Automatic" };
     section(c, "Companion page");
@@ -683,6 +709,7 @@ bool settings_draw(GuiRect r) {
     case TAB_AUDIO: tab_audio(&c); break;
     case TAB_CHARACTER: tab_character(&c); break;
     case TAB_PHONE: tab_phone(&c); break;
+    case TAB_HUD: tab_hud(&c); break;
     }
     gd_alpha_pop();
     gw_scroll_end(sc, gc_used(&c) + gui_s(16));

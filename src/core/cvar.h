@@ -63,6 +63,11 @@ Cvar *cvar_at(int index);
 
 void cmd_register(const char *name, CmdFn fn, const char *desc);
 bool cmd_exists(const char *name);
+// The registry, in registration order (the Commands tab, the lint).
+int cmd_count(void);
+const char *cmd_name_at(int index);
+const char *cmd_desc_at(int index);
+const char *cmd_desc(const char *name);   // NULL: no such command
 
 // Command buffer: text is split on ';' and newlines. "wait [n]" pauses n frames.
 void cbuf_add(const char *text);

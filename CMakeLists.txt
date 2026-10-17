@@ -467,6 +467,21 @@ if(MSVC)
 endif()
 add_dependencies(test_lobby dg_copy_data)
 add_test(NAME lobby COMMAND test_lobby WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+# HUD (docs/UI_WHEELS_HUD.md): radial wheel math + JSON, timed ring, pings, kill stats, compass, the
+# console registry categories; the registry lint (descriptions + categories of every registration).
+add_executable(test_hud tests/test_hud.c src/ui/widgets/radial_math.c src/ui/widgets/wheel_def.c src/gameplay/ping.c src/core/cmd_registry.c)
+set_target_properties(test_hud PROPERTIES C_STANDARD 11)
+target_compile_definitions(test_hud PRIVATE DG_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_link_libraries(test_hud PRIVATE dg_animcore)
+if(MSVC)
+  target_compile_options(test_hud PRIVATE /W3 /wd4100 /wd4201 /utf-8)
+endif()
+add_dependencies(test_hud dg_copy_data)
+add_test(NAME hud COMMAND test_hud WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_Interpreter_FOUND)
+  add_test(NAME lint_commands COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/tests/lint_commands.py)
+endif()
 # Engine Fidelity (docs/ENGINE_FIDELITY.md): tables, bounds, apply / clamp on the real cvar system, era
 # matrix, frame graph validation.
 add_executable(test_fidelity tests/test_fidelity.c src/render/fidelity/fidelity.c src/render/graph/fg_check.c src/core/cvar.c)

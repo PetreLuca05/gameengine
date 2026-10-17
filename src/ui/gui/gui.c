@@ -274,6 +274,10 @@ bool gui_text_mode(void) { return G.text_mode; }
 
 bool gui_key_pressed(int scancode) {
     if (G.text_mode) return false;
+    return gui_key_pressed_raw(scancode);
+}
+
+bool gui_key_pressed_raw(int scancode) {
     for (int i = 0; i < G.key_count; i++) if (G.keys[i] == scancode) return true;
     return false;
 }

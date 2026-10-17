@@ -47,6 +47,7 @@ Windows, no admin; tools are portable, in `.toolchain/` (git-ignored).
 | Phone + companion page | PHONE.md | src/gameplay/phone, src/net/http_ws, src/render/phone_view.c, web/phone; e2e: tools/tests/phone_e2e.sh |
 | Hand poses + editor (`scene handpose`) | HANDPOSE.md | src/anim/handpose.c, src/editor/handpose, src/game/game_scene.c; test: tools/tests/hp_scene.cfg |
 | Main menu, lobby, seasons, cosmetics, profile (`--menu` in `--test` runs) | MENU_LOBBY.md | src/ui/mainmenu, src/net/{lobby,lobby_net}.c, src/world/{maplist,season}.c, src/gameplay/cosmetics.c, src/game/profile.c, assets/{maps,cosmetics}, assets/world/seasons.json; tests: test_lobby, tools/tests/mm_nav.cfg, lobby_lan.sh |
+| Radial wheels (heal / throw / ping / door), timed ring, door peek, throwables, kill counter + feed, compass, pings, HUD settings, pause Commands tab | UI_WHEELS_HUD.md | src/ui/widgets, src/ui/hud, src/ui/pause, src/game/{game_wheels,game_pings,game_peek}.c, src/gameplay/{ping,throwables}.c, assets/ui/wheels, assets/ui/command_categories.json; tests: test_hud, tools/tests/lint_commands.py, tools/tests/hud_{wheels,commands}.cfg |
 | Open-world map (`map zombieland`) | ZOMBIE_MAP.md | src/world/{mapgen,mapgen_poi,openworld,openworld_foliage}.c, data/levels/zombieland.json, data/loot.json; tools/mapgen_preview, tools/tests/zl_*.cfg |
 
 ## Dev room (data/levels/devroom.json)
@@ -58,4 +59,4 @@ Hall at the origin. Other areas:
 - Flesh range: north.
 - Post corner: south-west.
 
-Console: `help [filter]` lists commands, `cvarlist [filter]` lists cvars.
+Console: `help [filter]` lists commands, `cvarlist [filter]` lists cvars. New commands / cvars need a description and a category (assets/ui/command_categories.json; tools/tests/lint_commands.py).

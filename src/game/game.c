@@ -1310,7 +1310,7 @@ void game_init(void) {
     cmd_register("bench", cmd_bench, "toggle the weapon bench (attachments) UI");
     cmd_register("attach", cmd_attach, "attach <slot> <attachment|none>: weapon attachments of the equipped weapon (no args: list)");
     cmd_register("noclip", cmd_noclip, "toggle noclip (sv_cheats)");
-    cmd_register("kill", cmd_kill, "suicide");
+    cmd_register("kill", cmd_kill, "kill yourself (you respawn)");
     cmd_register("damage", cmd_damage, "damage <amount>: hurt yourself (testing)");
     cmd_register("setpos", cmd_setpos, "teleport: setpos x y z [yaw] [pitch]");
     cmd_register("getpos", cmd_getpos, "print position");
