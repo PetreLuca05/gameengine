@@ -488,13 +488,15 @@ void mainmenu_init(void) {
     memset(M, 0, sizeof(*M));
     M->inited = true;
     // The flow is on for players; --test runs (scripts, screenshots) boot straight into the dev room
-    // unless they ask for it (--menu).
-    bool test = false, menu = false;
+    // unless they ask for it (--menu); --nomenu skips splash + menu for a normal run too (straight into
+    // +map / +scene, or the boot map), with the player's config.
+    bool test = false, menu = false, nomenu = false;
     for (int i = 1; i < g_engine.argc; i++) {
         if (!strcmp(g_engine.argv[i], "--test")) test = true;
         if (!strcmp(g_engine.argv[i], "--menu")) menu = true;
+        if (!strcmp(g_engine.argv[i], "--nomenu")) nomenu = true;
     }
-    M->enabled = menu || !test;
+    M->enabled = menu || (!test && !nomenu);
     M->orbit_yaw = 0.35f;
     M->orbit_pitch = -0.05f;
     M->orbit_zoom = 1.0f;
