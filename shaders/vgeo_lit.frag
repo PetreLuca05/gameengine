@@ -24,5 +24,10 @@
 #define MAT_COLOR g_mat_color
 #define MAT_PARAMS g_mat_params
 #define MAT_FLAGS g_mat_flags
+// Ground cover (shaders/cover.glsl): the resolve's wind weights / instance, the nta map in the mr slot.
+#define LIT_COVER
+#define LIT_COVER_IN g_cover
+#define LIT_COVER_PIVOT g_cover_pivot
+#define COVER_TEX(uv) texture(vg_tex[nonuniformEXT(g_pbr_tex.x)], (uv))
 #define LIT_PRE_MAIN if (!vg_resolve_pixel()) discard; gl_FragDepth = g_depth;
 #include "lit_body.glsl"

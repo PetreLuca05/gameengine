@@ -1,0 +1,100 @@
+{
+  "_doc": "Fountain tussocks, mostly dry cream / straw ribbon blades (reference b3 / b4 / b5): 4 fanned cards, 0.3-0.5 m.",
+  "atlas": "grass_tussock",
+  "grid": [
+    2,
+    2
+  ],
+  "variants": 4,
+  "clump": {
+    "cards": 4,
+    "segments": 3,
+    "height_m": [
+      0.3,
+      0.5
+    ],
+    "width_m": [
+      0.45,
+      0.62
+    ],
+    "fan_deg": 22,
+    "lean": 0.08,
+    "bend_m": 0.06,
+    "base_jitter_m": 0.04,
+    "normal_dome": 0.6,
+    "mirror": 0.5
+  },
+  "placement": {
+    "density": {
+      "grass": 0.5,
+      "meadow": 1.4,
+      "dirt": 0.12,
+      "forest": 0.05
+    },
+    "clump_scale_m": 9,
+    "clump_amount": 0.7,
+    "bare": 0.35,
+    "scale": [
+      0.8,
+      1.25
+    ],
+    "slope_max": 1.0
+  },
+  "shading": {
+    "roughness": 0.75,
+    "specular": 0.3,
+    "sss": 0.3,
+    "sss_wrap": 0.5,
+    "alpha_cutoff": 0.45,
+    "root_dark": 0.75,
+    "root_extent": 0.22,
+    "ground_match": 0.25,
+    "ground_extent": 0.3,
+    "var_hue_deg": 4,
+    "var_sat": 0.1,
+    "var_val": 0.07,
+    "macro": 1.0,
+    "ao_root": 0.5
+  },
+  "terrain": {
+    "top_color": "#9a8e62",
+    "coverage": 0.5
+  },
+  "tiers": {
+    "off": {
+      "full_m": 8,
+      "end_m": 18,
+      "shadow_m": 0,
+      "density": 0.35
+    },
+    "low": {
+      "full_m": 12,
+      "end_m": 30,
+      "shadow_m": 0,
+      "density": 0.5
+    },
+    "medium": {
+      "full_m": 20,
+      "end_m": 45,
+      "shadow_m": 10,
+      "density": 0.75
+    },
+    "high": {
+      "full_m": 25,
+      "end_m": 60,
+      "shadow_m": 20,
+      "density": 0.9
+    },
+    "modern": {
+      "full_m": 30,
+      "end_m": 70,
+      "shadow_m": 20,
+      "density": 1.0
+    }
+  },
+  "wind": {
+    "main": 1.0,
+    "detail": 1.1,
+    "flutter": 1.1
+  }
+}

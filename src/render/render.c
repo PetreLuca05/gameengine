@@ -200,6 +200,7 @@ bool render_init(SDL_Window *window) {
     sky_init();
     write_sky_bindings();
     vks_init();
+    vkgr_init();
 
     R->draws = (DrawItem *)malloc(sizeof(DrawItem) * MAX_DRAWS);
     R->vm_draws = (DrawItem *)malloc(sizeof(DrawItem) * MAX_VM_DRAWS);
@@ -362,6 +363,7 @@ bool render_begin_frame(void) {
 void render_set_camera(const RenderCamera *cam) {
     R->cam = *cam;
     vkg_bench_camera(&R->cam);   // vgeo_bench flythrough
+    vkg_frame_update();          // grass fades / shadows follow the fidelity level (outside the frame's recording)
     if (g_cam_override) g_cam_override(&R->cam);   // bench_fidelity flythrough
     cam = &R->cam;
     float aspect = view_aspect();
@@ -1189,6 +1191,7 @@ static void compute_matrices(FrameData *fd) {
         fd->puddle_xf = wx->puddle_xform;
     }
     vks_frame_data(fd);
+    vkgr_frame_data(fd);   // ground cover table, ground colours, macro variation (ground.c)
 }
 
 static void save_screenshot(GpuBuffer *buf, u32 w, u32 h) {

@@ -109,6 +109,11 @@ vec3 apply_moa_grid(vec3 base, vec3 p, vec3 n, float s) {
 }
 
 #include "lighting.glsl"
+// LIT_COVER: ground cover shading (MAT_COVER materials only; the includer defines LIT_COVER_IN,
+// LIT_COVER_PIVOT and COVER_TEX, shaders/cover.glsl).
+#ifdef LIT_COVER
+#include "cover.glsl"
+#endif
 
 void main() {
 #ifdef LIT_PRE_MAIN
@@ -136,6 +141,13 @@ void main() {
     base.a = 1.0;
 #endif
     vec2 map_uv = v_uv * max(MAT_PARAMS.w, 1e-3);   // the albedo's uv (glTF maps share it)
+#ifdef LIT_COVER
+    if ((flags & MAT_COVER) != 0u) {
+        cover_base(flags, LIT_COVER_IN, LIT_COVER_PIVOT, map_uv, base.rgb);
+        // the back-face flip also turned the clump dome downward: blades are lit from above on both sides
+        n = normalize(vec3(n.x, abs(n.y), n.z));
+    }
+#endif
 #ifdef PBR_MAPS
     n = pbr_normal(flags, map_uv, v_world, n);
 #endif
@@ -183,6 +195,12 @@ void main() {
         ao *= pbr_occlusion(flags, map_uv);   // material AO x SSAO (indirect diffuse + specular occlusion)
 #endif
         ao *= surf_ao;                        // the surface layers' baked AO, the same way
+#ifdef LIT_COVER
+        if (g_cv.on) {
+            ao *= g_cv.ao;                    // clump AO (indirect only, as the material AO)
+            g_spec_scale = g_cv.spec;
+        }
+#endif
         float contact = (!vm && frame.post_flags.y > 0.5) ? texture(post_contact, suv).r : 1.0;
         contact = mix(1.0, contact, frame.ssky0.y);   // contact shadows leave with the cast shadows (sky cutoff)
         // hemispheric ambient (indirect diffuse): AO only darkens indirect light
@@ -205,11 +223,14 @@ void main() {
             spec_ind = mix(env, ssr.rgb, clamp(ssr.a * frame.post_params.x, 0.0, 1.0));
         }
         float spec_occ = clamp(pow(ndv0 + ao, exp2(-16.0 * rough - 1.0)) - 1.0 + ao, 0.0, 1.0);
-        color += spec_ind * fr * frame.post_params.w * spec_occ;
+        color += spec_ind * fr * frame.post_params.w * spec_occ * g_spec_scale;
         // sun
         vec3 l = normalize(frame.sun_dir.xyz);
         float sh = shadow_factor(v_world, n) * contact * cloud_shadow_at(v_world);
         color += brdf(n, v, l, albedo, rough, metal) * frame.sun_color.rgb * frame.sun_dir.w * sh;
+#ifdef LIT_COVER
+        color += cover_translucency(n, v, l, albedo) * frame.sun_color.rgb * frame.sun_dir.w * sh;
+#endif
         // Snow sparkle: tiny glints facing the light.
         if (wx_snow > 0.05) {
             float g = step(0.9965, wx_hash(floor(v_world.xz * 90.0) + floor(dot(v, vec3(13.0, 7.0, 3.0)) * 8.0)));

@@ -13,6 +13,8 @@
 #include "core/log.h"
 #include "render/render.h"
 #include "render/vgeo/vgeo_tree.h"
+#include "render/vgeo/grass_asset.h"
+#include "core/cvar.h"
 #include <SDL3/SDL.h>
 #include <math.h>
 #include <stdlib.h>
@@ -22,10 +24,11 @@
 // on every machine, so the hash picks below place the same species everywhere). Read-only while the
 // chunk jobs run.
 //   tree chunks:  names = the conifer, broadleaf, dead and bush species, a role = a range of them
-//   cover chunks: names = test_tuft, crop_wheat, the bush species, the flower species
+//   cover chunks: names = test_tuft, crop_wheat, the bush species, the flower species, then every grass
+//                 asset's variants (<asset>_v<k>, assets/foliage/grass: docs/FOLIAGE_GRASS.md)
 // A species' instance scale range comes from its height range (vgeo_tree_scale_range: real mature
 // heights, docs/VGEO.md "Tree models").
-#define OW_MAX_TYPES 40
+#define OW_MAX_TYPES 64
 typedef struct OwRole { int first, count; float wsum; } OwRole;
 static struct {
     char tree_names[OW_MAX_TYPES][48];
@@ -38,6 +41,9 @@ static struct {
     float cover_scale[OW_MAX_TYPES][2];
     int cover_count;
     OwRole cover_bush, cover_flower;
+    GrassAsset grass[GRASS_MAX_ASSETS];
+    int grass_n, grass_first[GRASS_MAX_ASSETS];   // the asset's first variant in cover_names
+    bool grass_crops;                             // an asset grows on fields: crop_wheat is not placed
 } OT;
 enum { C_TUFT, C_CROP };
 
@@ -63,6 +69,13 @@ static void ow_types(void) {
     OT.cover_count = 2;
     role_add(OT.cover_names, OT.cover_w, &OT.cover_count, &OT.cover_bush, RENDER_TREE_BUSH);
     role_add(OT.cover_names, OT.cover_w, &OT.cover_count, &OT.cover_flower, RENDER_TREE_FLOWER);
+    OT.grass_n = grass_assets_load_dir(OT.grass, GRASS_MAX_ASSETS);
+    for (int i = 0; i < OT.grass_n; i++) {
+        OT.grass_first[i] = OT.cover_count;
+        for (int v = 0; v < OT.grass[i].variants && OT.cover_count < OW_MAX_TYPES; v++)
+            snprintf(OT.cover_names[OT.cover_count++], 48, "%s_v%d", OT.grass[i].name, v);
+        if (OT.grass[i].density[MGM_FIELD] > 0 || OT.grass[i].density[MGM_CROP] > 0) OT.grass_crops = true;
+    }
     type_scales(OT.tree_names, OT.tree_scale, OT.tree_count, 0.72f, 1.27f);
     type_scales(OT.cover_names, OT.cover_scale, OT.cover_count, 0.75f, 1.35f);
 }
@@ -224,17 +237,70 @@ void ow_foliage_frame(World *w, OpenWorld *o, vec3 cam) {
     (void)cam;
 }
 
-// Ground cover of a streamed chunk: tufts on grass / meadow / forest floor, wheat on fields, a few
-// bushes on meadows, daisies on meadows and grass; nothing on roads, lots, sand, rock, water or inside
-// keep-outs.
+// Where ground cover may stand at (x, z): ground height out; false on steep ground (slope_max), under
+// water or inside a keep-out.
+static bool cover_spot(const OpenWorld *o, float x, float z, float slope_max, float *y) {
+    *y = mapgen_raster_height(&o->raster, x, z);
+    if (mapgen_raster_slope(&o->raster, x, z) > slope_max) return false;
+    if (mapgen_water_level(&o->gen, x, z) > *y - 0.15f) return false;
+    return !mapgen_in_keepout(&o->gen, x, z, 0.2f);
+}
+
+// Grass assets (docs/FOLIAGE_GRASS.md): a jittered 0.35 m grid; a cell holds a clump with probability
+// sum_i density_i(material) x clumping keep_i(x, z) x the level's density x cell area, the asset picked
+// in proportion. Clumps per m2 thus follow the assets' tables exactly (tests/test_grass.c).
+#define GRASS_CELL 0.35f
+static int grass_cover(const OpenWorld *o, int cx, int cz, RenderFoliageInst *out, int cap) {
+    if (!OT.grass_n) return 0;
+    Cvar *fid = cvar_find("r_fidelity");
+    int tier = fid ? DG_CLAMP(fid->i, 0, GRASS_TIERS - 1) : GRASS_TIERS - 1;
+    const int per = (int)(CHUNK_SIZE / GRASS_CELL);
+    const float area = (CHUNK_SIZE / (float)per) * (CHUNK_SIZE / (float)per);
+    float x0 = (float)cx * CHUNK_SIZE, z0 = (float)cz * CHUNK_SIZE;
+    int n = 0;
+    for (int gz = 0; gz < per; gz++)
+        for (int gx = 0; gx < per && n < cap; gx++) {
+            int ix = cx * per + gx, iz = cz * per + gz;
+            u32 h = hash3(ix, iz, o->gen.seed + 707u);
+            float x = x0 + ((float)gx + h01(h)) * (CHUNK_SIZE / (float)per), z = z0 + ((float)gz + h01(h >> 9 ^ 0x51u)) * (CHUNK_SIZE / (float)per);
+            u8 mat = mapgen_raster_mat(&o->raster, x, z);
+            if (mat >= GRASS_MAX_MATERIALS) continue;
+            float w[GRASS_MAX_ASSETS], sum = 0;
+            for (int i = 0; i < OT.grass_n; i++) {
+                const GrassAsset *a = &OT.grass[i];
+                w[i] = a->density[mat] > 0 ? a->density[mat] * a->tier[tier].density * grass_clump_keep(a, x, z, o->gen.seed + (u32)i * 31u) : 0.0f;
+                sum += w[i];
+            }
+            float pick = h01(hash3(ix, iz, o->gen.seed + 808u));
+            if (pick >= sum * area) continue;
+            float t = pick / area;
+            int k = 0;
+            while (k < OT.grass_n - 1 && t >= w[k]) t -= w[k++];
+            const GrassAsset *a = &OT.grass[k];
+            float y;
+            if (!cover_spot(o, x, z, a->slope_max, &y)) continue;
+            RenderFoliageInst *ins = &out[n++];
+            ins->pos = v3(x, y - 0.02f, z);
+            ins->yaw = h01(h >> 5) * 6.2831853f;
+            ins->kind = (u16)(OT.grass_first[k] + (int)(h01(h >> 11) * (float)a->variants) % a->variants);
+            ins->scale = a->scale[0] + (a->scale[1] - a->scale[0]) * h01(h >> 3);
+        }
+    return n;
+}
+
+// Ground cover of a streamed chunk: the grass assets (grass_cover), then on the 1.1 m grid a few bushes on
+// meadows and daisies on meadows and grass (and without grass assets the old tufts / wheat); nothing on
+// roads, lots, sand, rock, water or inside keep-outs.
 void *ow_foliage_chunk(void *user, int cx, int cz, size_t *size) {
     const OpenWorld *o = (const OpenWorld *)user;
     *size = 0;
     if (!o->fol_types) return NULL;
     const float cell = 1.1f;
     const int per = (int)(CHUNK_SIZE / cell);
-    RenderFoliageInst *tmp = (RenderFoliageInst *)malloc(sizeof(RenderFoliageInst) * (size_t)(per * per * 2 + 16));
-    int n = 0;
+    const int gper = (int)(CHUNK_SIZE / GRASS_CELL);
+    int cap = per * per * 2 + gper * gper + 16;
+    RenderFoliageInst *tmp = (RenderFoliageInst *)malloc(sizeof(RenderFoliageInst) * (size_t)cap);
+    int n = grass_cover(o, cx, cz, tmp, gper * gper);
     float x0 = (float)cx * CHUNK_SIZE, z0 = (float)cz * CHUNK_SIZE;
     for (int gz = 0; gz < per; gz++)
         for (int gx = 0; gx < per; gx++) {
@@ -257,17 +323,18 @@ void *ow_foliage_chunk(void *user, int cx, int cz, size_t *size) {
             float pick = h01(hash3(ix, iz, o->gen.seed + 202u));
             if (pick >= dens) continue;
             float species = h01(hash3(ix, iz, o->gen.seed + 303u));
+            bool special = false;
             if (mat == MGM_MEADOW && pick < 0.012f) {
                 int k = role_pick(&OT.cover_bush, OT.cover_w, species);
-                if (k >= 0) kind = k;
+                if (k >= 0) kind = k, special = true;
             } else if ((mat == MGM_MEADOW && pick < 0.05f) || (mat == MGM_GRASS && pick < 0.012f)) {
                 int k = role_pick(&OT.cover_flower, OT.cover_w, species);
-                if (k >= 0) kind = k;
+                if (k >= 0) kind = k, special = true;
             }
-            float y = mapgen_raster_height(&o->raster, x, z);
-            if (mapgen_raster_slope(&o->raster, x, z) > 1.0f) continue;
-            if (mapgen_water_level(&o->gen, x, z) > y - 0.15f) continue;
-            if (mapgen_in_keepout(&o->gen, x, z, 0.2f)) continue;
+            // with grass assets only the bushes / flowers come from this grid (and the crops, without a field asset)
+            if (OT.grass_n && !special && !(kind == C_CROP && !OT.grass_crops)) continue;
+            float y;
+            if (!cover_spot(o, x, z, 1.0f, &y)) continue;
             RenderFoliageInst *t = &tmp[n++];
             t->pos = v3(x, y - 0.03f, z);
             t->yaw = h01(h >> 5) * 6.2831853f;

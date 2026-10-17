@@ -26,6 +26,9 @@
 #define MAT_RECON_FX   2097152u
 #define MAT_GLASS      4194304u
 #define MAT_CAUSTICS   8388608u
+// Ground cover (render.h MAT_COVER, MAT_COVER_ID)
+#define MAT_COVER      268435456u
+#define MAT_COVER_ID(f) (((f) >> 29u) & 7u)
 
 struct PointLight {
     vec4 pos_radius;
@@ -97,6 +100,12 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 ssky2;           // x tan(moon source radius), y r_shadow_debug view, z contact shadow length scale, w moon tile fade-out radius (m)
     vec4 shadow_mpt;      // metres per texel: cascades 0..2, w the moon tile
     vec4 shadow_span;     // metres of light-space depth per NDC unit: cascades 0..2, w the moon tile
+    vec4 cover[24];       // ground cover table: 3 per MAT_COVER id (grass_asset.h grass_cover_params)
+    vec4 cover_info;      // x assets, y grass level, z translucency on, w r_grass_debug
+    vec4 ground_color[16];   // per terrain material: mean albedo (linear), w grass top coverage
+    vec4 ground_top[16];     // per terrain material: grass tops' colour (linear)
+    vec4 ground_macro;    // x, y 1 / scales (m), z hue swing (rad), w value swing
+    vec4 ground_macro2;   // x saturation swing, y strength (0 off)
 } frame;
 
 layout(set = 0, binding = 1) uniform sampler2DShadow shadow_map;

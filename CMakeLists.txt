@@ -162,7 +162,7 @@ file(GLOB DG_SHADER_SOURCES CONFIGURE_DEPENDS
   ${CMAKE_SOURCE_DIR}/shaders/sky/*.comp ${CMAKE_SOURCE_DIR}/shaders/vgeo/*.comp
   ${CMAKE_SOURCE_DIR}/shaders/vgeo/*.vert ${CMAKE_SOURCE_DIR}/shaders/vgeo/*.frag ${CMAKE_SOURCE_DIR}/shaders/vgeo/*.mesh
   ${CMAKE_SOURCE_DIR}/shaders/water/*.vert ${CMAKE_SOURCE_DIR}/shaders/water/*.frag ${CMAKE_SOURCE_DIR}/shaders/water/*.comp)
-file(GLOB DG_SHADER_INCLUDES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/shaders/*.glsl ${CMAKE_SOURCE_DIR}/shaders/post/*.glsl ${CMAKE_SOURCE_DIR}/shaders/sights/*.glsl ${CMAKE_SOURCE_DIR}/shaders/sky/*.glsl ${CMAKE_SOURCE_DIR}/shaders/vgeo/*.glsl ${CMAKE_SOURCE_DIR}/shaders/water/*.glsl ${CMAKE_SOURCE_DIR}/third_party/fsr/*.h
+file(GLOB DG_SHADER_INCLUDES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/shaders/*.glsl ${CMAKE_SOURCE_DIR}/shaders/post/*.glsl ${CMAKE_SOURCE_DIR}/shaders/sights/*.glsl ${CMAKE_SOURCE_DIR}/shaders/sky/*.glsl ${CMAKE_SOURCE_DIR}/shaders/vgeo/*.glsl ${CMAKE_SOURCE_DIR}/shaders/terrain/*.glsl ${CMAKE_SOURCE_DIR}/shaders/water/*.glsl ${CMAKE_SOURCE_DIR}/third_party/fsr/*.h
   ${CMAKE_SOURCE_DIR}/shaders/post/*.h)
 set(DG_SHADER_OUT ${CMAKE_BINARY_DIR}/bin/shaders)
 set(DG_SPV_FILES)
@@ -323,7 +323,7 @@ target_link_libraries(fbx_textures PRIVATE dg_animcore)
 
 # Virtualized geometry builder (pure C): the game compiles the same sources through the src glob.
 add_library(dg_vgeo STATIC src/render/vgeo/vgeo_build.c src/render/vgeo/vgeo_procgen.c src/render/vgeo/vgeo_procgen_building.c src/render/vgeo/vgeo_procgen_skinned.c src/render/vgeo/vgeo_import.c src/render/vgeo/vgeo_impostor.c src/render/vgeo/vgeo_procgen_foliage.c src/render/vgeo/vgeo_tree.c
-  src/render/vgeo/foliage_wind.c)
+  src/render/vgeo/foliage_wind.c src/render/vgeo/grass_asset.c)
 set_target_properties(dg_vgeo PROPERTIES C_STANDARD 11)
 target_link_libraries(dg_vgeo PUBLIC dg_animcore meshopt)
 if(MSVC)
@@ -458,6 +458,14 @@ add_executable(test_wind tests/test_wind.c)
 set_target_properties(test_wind PROPERTIES C_STANDARD 11)
 target_link_libraries(test_wind PRIVATE dg_vgeo)
 add_test(NAME wind COMMAND test_wind WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+
+# Grass assets (docs/FOLIAGE_GRASS.md): the JSON assets against the target spec, clump meshes (extent,
+# cells, root -> tip), the placement rule's clumps per m2, materials per fidelity level.
+add_executable(test_grass tests/test_grass.c)
+set_target_properties(test_grass PROPERTIES C_STANDARD 11)
+target_link_libraries(test_grass PRIVATE dg_vgeo)
+add_dependencies(test_grass dg_copy_data)
+add_test(NAME grass COMMAND test_grass WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
 
 # Water (docs/WATER.md): deterministic polynomials, swell spectrum / continuity / determinism, body
 # shapes and queries, buoyancy (analytic, Jolt half-submersion / drag / sinking, 200-body budget).

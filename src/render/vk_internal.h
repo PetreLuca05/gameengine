@@ -173,6 +173,18 @@ typedef struct FrameData {
     vec4 ssky2;           // x tan(moon source radius), y r_shadow_debug view, z contact shadow length scale, w moon tile fade-out radius (m)
     vec4 shadow_mpt;      // metres per texel: cascades 0..2, w the moon tile
     vec4 shadow_span;     // metres of light-space depth per NDC unit: cascades 0..2, w the moon tile
+    // Ground cover (MAT_COVER, docs/FOLIAGE_GRASS.md): 3 vec4 per cover id (grass_cover_params), x of
+    // cover_info the asset count, y the grass fidelity level, z translucency on, w r_grass_debug view.
+    vec4 cover[24];
+    vec4 cover_info;
+    // Ground colour (shaders/terrain/terrain_ground.glsl): per terrain material (raster id) the mean
+    // albedo (linear rgb) and w the grass tops' coverage; ground_top: the grass tops' colour per material.
+    vec4 ground_color[16];
+    vec4 ground_top[16];
+    // Shared macro variation (grass + terrain, terrain_macro.glsl): x, y 1 / scales (m), z hue swing
+    // (rad), w value swing; ground_macro2: x saturation swing, y strength (0 off).
+    vec4 ground_macro;
+    vec4 ground_macro2;
 } FrameData;
 
 typedef struct PushLit {
@@ -422,6 +434,9 @@ void vks_shutdown(void);
 void vks_write_bindings(void);             // before recording: rewrites the frame sets when they changed
 void vks_samplers_changed(void);           // the material sampler was recreated (r_aniso, r_texture_quality)
 void vks_frame_data(FrameData *fd);
+// Ground cover table, ground colours and macro variation (ground.c, docs/FOLIAGE_GRASS.md).
+void vkgr_init(void);
+void vkgr_frame_data(FrameData *fd);
 void vkr_upload_image(VkImage image, u32 w, u32 h, u32 mips, u32 layers, const void *data, const size_t *mip_offsets, size_t size);
 void vkr_cancel_image_upload(VkImage image);
 
@@ -445,6 +460,7 @@ void vkg_record_shadow_cull(VkCommandBuffer cmd);   // before the shadow pass: c
 void vkg_draw_shadow(VkCommandBuffer cmd, u32 cascade);   // inside the shadow pass, per cascade tile (3 = the moon tile)
 void vkg_draw_gbuffer(VkCommandBuffer cmd);   // prepass, before the legacy draws
 void vkg_draw_lit(VkCommandBuffer cmd);       // opaque pass
+void vkg_frame_update(void);                  // per frame before recording (render_set_camera): grass fidelity level
 void vkg_bench_camera(RenderCamera *cam);     // vgeo_bench: spline camera override (render_set_camera)
 void vkg_bench_frame(void);                   // vgeo_bench: per-frame timings
 void vkg_submit_fallback(void);

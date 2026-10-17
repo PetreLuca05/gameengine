@@ -6,9 +6,7 @@
 //   surf_matmap  terrain material map, one layer id / 255 per raster sample (frame.surf_map)
 // Outputs besides colour / normal: roughness, metallic (layered prims of metal layers) and the
 // material AO, which the lit body multiplies with the SSAO (indirect diffuse + specular occlusion).
-layout(set = 0, binding = 12) uniform sampler2DArray surf_albedo;
-layout(set = 0, binding = 13) uniform sampler2DArray surf_nrh;
-layout(set = 0, binding = 14) uniform sampler2D surf_matmap;
+#include "surf_bindings.glsl"
 
 #define SURF_LAYERS 20
 #define SURF_TERRAIN_LAYERS 14
