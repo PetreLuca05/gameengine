@@ -44,12 +44,13 @@ void main() {
     gl_Position = vec4(0.0, 0.0, -2.0, 1.0);   // collapsed unless placed below
     v_uv = corner * 0.5 + 0.5;
     if (pc.flags.x == 1u) {
-        // Splash: a random spot near the camera per time slot, on the top-most surface.
+        // Splash: a random spot near the camera per time slot, on the top-most surface. Uniform
+        // over a ring from 1.5 m out: none at the player's feet (they read as footstep splashes).
         float rate = 2.2 + h.w * 1.5;
         float slot = floor(t * rate + h.z * 7.0);
         vec4 h2 = hash4(inst * 2654435761u + uint(slot) * 97u);
         float age = fract(t * rate + h.z * 7.0);
-        float r = sqrt(h2.x) * 14.0, a = h2.y * 6.2831853;
+        float r = sqrt(mix(1.5 * 1.5, 14.0 * 14.0, h2.x)), a = h2.y * 6.2831853;
         vec3 p = vec3(cam.x + cos(a) * r, 0.0, cam.z + sin(a) * r);
         if (frame.wx1.w < 0.5) return;
         // Height from the occlusion map: its top surface (centre top y - depth x range).

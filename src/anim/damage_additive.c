@@ -99,8 +99,10 @@ void proc_damage_apply(ProcState *s, const ProcInput *in, Pose *pose, Xform *mod
         if (spring_moving(s->springs[i].x, s->springs[i].v)) s->springs[m++] = s->springs[i];
     s->spring_count = m;
     if (!in->damage) return;
-    // Apply parents first (bone indices are topologically sorted).
+    // Apply parents first (bone indices are topologically sorted). The clavicles keep the clip's
+    // rotation: an arm hit's chain bends the arm and the chest, never the shoulders.
     for (int pass = 0; pass < sk->count && s->spring_count; pass++) {
+        if (pass == sk->role[BR_L_SHOULDER] || pass == sk->role[BR_R_SHOULDER]) continue;
         for (int i = 0; i < s->spring_count; i++) {
             if (s->springs[i].bone != pass) continue;
             proc_rotate_bone(sk, pose, model, pass, quat_from_scaled_axis(s->springs[i].x));
