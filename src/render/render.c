@@ -1493,7 +1493,7 @@ static void exec_vm_prepass(VkCommandBuffer cmd, void *u) {
     ri.pDepthAttachment = &da;
     vkCmdBeginRendering(cmd, &ri);
     set_viewport(cmd, R->hdr.w, R->hdr.h);
-    if ((R->vm_draw_count || F.any_skin_vm) && !R->sight.hide_viewmodel) {
+    if (R->vm_draw_count || F.any_skin_vm) {
         bind_frame(cmd);
         post_push_lit_inputs(cmd, NULL, false);
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_PREPASS]);
@@ -1509,7 +1509,7 @@ static void exec_viewmodel(VkCommandBuffer cmd, void *u) {
     begin_pass(cmd, R->hdr.view, false, R->vm_depth.view, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, false);
     bind_frame(cmd);
     post_push_lit_inputs(cmd, NULL, false);
-    if ((R->vm_draw_count || F.any_skin_vm) && !R->sight.hide_viewmodel) {
+    if (R->vm_draw_count || F.any_skin_vm) {
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[R->r_wireframe->i ? PIPE_LIT_WIRE : PIPE_LIT]);
         draw_items(cmd, R->vm_draws, R->vm_draw_count, false, false, 2, R->r_wireframe->i ? PIPE_LIT_WIRE : PIPE_LIT);
         // First-person arms (body model), same depth as the viewmodel weapon.
@@ -1685,8 +1685,8 @@ static bool setup_scope_pip(FrameData *fd) {
     // can show (plus a margin for the chromatic aberration / eye box shift).
     float d = fmaxf(v3_dist(s->lens_pos, R->cam.pos), 0.02f);
     float tan_vm = tanf(render_vm_fov() * 0.5f * DG_DEG2RAD);
-    float tan_base = tanf(fmaxf(s->base_fov, 10.0f) * 0.5f * DG_DEG2RAD);
-    float t_lens = (s->lens_radius / d) * tan_base / fmaxf(tan_vm, 1e-3f);
+    float tan_main = tanf(fmaxf(R->cam.fov_deg, 10.0f) * 0.5f * DG_DEG2RAD);
+    float t_lens = (s->lens_radius / d) * tan_main / fmaxf(tan_vm, 1e-3f);   // the lens (weapon projection) in main-view tangents
     float tan_half = clampf(1.15f * t_lens / fmaxf(s->zoom, 1.0f), tanf(0.25f * DG_DEG2RAD), tanf(30.0f * DG_DEG2RAD));
     R->pip_fov = 2.0f * atanf(tan_half) * DG_RAD2DEG;
     u32 n = (u32)DG_CLAMP((int)lrintf((float)R->hdr.h * clampf(s->pip_scale, 0.2f, 2.0f)), 128, 2048);
@@ -2318,9 +2318,12 @@ bool render_world_to_screen(vec3 world, vec2 *out_px) {
 // appears at the same pixel with the world FOV (same depth). Identity when the FOVs match.
 float render_vm_fov_for(const RenderCamera *c, float rvm) {
     float hip = rvm > 1.0f ? rvm : (c->vm_fov_deg > 1.0f ? c->vm_fov_deg : c->fov_deg);
+    if (c->vm_ads_zoom <= 1.0f) return hip;
+    // ADS narrows only the arms / weapon: exactly hip / vm_ads_zoom (tan) once aimed.
+    float aimed = 2.0f * atanf(tanf(hip * 0.5f * DG_DEG2RAD) / c->vm_ads_zoom) * DG_RAD2DEG;
     float t = clampf(c->ads_t, 0.0f, 1.0f);
     t = t * t * (3.0f - 2.0f * t);
-    return hip + (c->fov_deg - hip) * t;
+    return hip + (aimed - hip) * t;
 }
 
 float render_vm_fov(void) { return render_vm_fov_for(&R->cam, R->r_vm_fov->f); }

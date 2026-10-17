@@ -66,7 +66,6 @@ typedef struct BalLive {
     vec3 trail[BAL_TRAIL]; // last tick positions (newest first): curved tracer tails
     u8 trail_count;
     u8 crack_done;         // this machine's listener already heard the crack / whizz
-    vec3 visual_offset;    // tracer start: muzzle - launch, blended out over the first metres
     vec3 prev_pos;         // position at the start of the last step (render interpolation)
 } BalLive;
 
@@ -80,13 +79,14 @@ int bal_weapon_cartridge(const WeaponDef *d);
 int bal_weapon_device(const WeaponDef *d);
 
 // A gun shot (weapons.c fire()): host spawns the authoritative bullets and the EV_SHOT event; a
-// predicting client spawns its own visuals. aim = before the spread cone.
+// predicting client spawns its own visuals. The bullets start at origin (the muzzle, docs/AIM.md)
+// along aim (muzzle -> the camera ray's aim point, before the spread cone).
 typedef struct BalFireIn {
     int slot;
     const WeaponDef *def;    // effective (attachments applied)
     int weapon_index;        // base definition index
     const u8 *att;           // InvSlot.att
-    vec3 eye, aim, muzzle;
+    vec3 eye, origin, aim;   // eye: the shooter's report
     float spread;            // full cone deg
     u32 seed;
     u32 view_tick256;
@@ -97,7 +97,7 @@ typedef struct BalFireIn {
 } BalFireIn;
 void bal_fire(World *w, const BalFireIn *in);
 // EV_SHOT (other players' shots): the report (delayed / filtered by distance) and, on clients, the
-// replay of the bullets. muzzle: the shooter's visible barrel.
+// replay of the bullets from the shot's origin (ev->pos). muzzle: the shooter's visible barrel (report).
 void bal_on_shot_event(World *w, const GameEvent *ev, vec3 muzzle);
 // The shooter's own report (immediate; a suppressor's level and tone).
 void bal_shooter_report(const WeaponDef *d, vec3 eye);

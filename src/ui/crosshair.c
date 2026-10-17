@@ -7,6 +7,9 @@
 #include "game/game.h"
 #include "player/spectator.h"
 #include "gameplay/weapons.h"
+#include "gameplay/aim.h"
+#include "gameplay/attachments.h"
+#include "gui/gui_theme.h"
 #include "render/render.h"
 #include "cJSON.h"
 #include <math.h>
@@ -29,7 +32,14 @@ typedef struct CrossStyle {
 static struct {
     CrossStyle st;
     Cvar *style, *length, *thickness, *gap, *opacity, *color, *outline, *follow_kick, *hitmarker, *target_color;
+    Cvar *obstruct, *obstruct_lerp;
     float ads_fade;    // 0 = shown, 1 = hidden (ADS)
+    // Aim model (docs/AIM.md): the crosshair's offset from the aim point to the obstruction (smoothed).
+    vec2 obs_off;
+    float obs_w;       // 0 = clear, 1 = obstructed (smoothed)
+    int obs_cls;       // last obstruction class (kept while fading out)
+    vec2 last_pos;     // where the crosshair was drawn (tests: aim_report / crosshair_pos)
+    bool last_valid;
 } CH;
 
 static u32 rgba_arr(const cJSON *o, const char *k, u32 def) {
@@ -131,6 +141,12 @@ static void cmd_reload(int argc, const char **argv) {
     if (crosshair_reload()) log_info("crosshair: style reloaded (%d colors)", CH.st.color_count);
 }
 
+static void cmd_pos(int argc, const char **argv) {
+    (void)argc; (void)argv;
+    log_info("crosshair_pos: %.1f %.1f (%s) obstruction %s %.2f offset %.1f %.1f ui %.0fx%.0f", CH.last_pos.x, CH.last_pos.y,
+             CH.last_valid ? "drawn" : "hidden", aim_class_name(CH.obs_cls), CH.obs_w, CH.obs_off.x, CH.obs_off.y, ui_width(), ui_height());
+}
+
 void crosshair_init(void) {
     CH.style = cvar_reg_int("crosshair_style", 0, 0, 3, CVAR_ARCHIVE, "0 cross, 1 cross + dot, 2 dot, 3 circle");
     CH.length = cvar_reg_float("crosshair_length", 8, 1, 40, CVAR_ARCHIVE, "crosshair line length (px at 1080p)");
@@ -142,7 +158,10 @@ void crosshair_init(void) {
     CH.follow_kick = cvar_reg_bool("crosshair_follow_kick", false, CVAR_ARCHIVE, "pin the crosshair to the screen center (follows the camera kick) instead of the true aim point");
     CH.hitmarker = cvar_reg_bool("crosshair_hitmarker", true, CVAR_ARCHIVE, "show hit markers");
     CH.target_color = cvar_reg_bool("crosshair_target_color", true, CVAR_ARCHIVE, "tint the crosshair over enemies / friendlies");
+    CH.obstruct = cvar_reg_bool("crosshair_obstruct", true, CVAR_ARCHIVE, "move the crosshair to where the bullet will land when something is between the muzzle and the aim point (docs/AIM.md)");
+    CH.obstruct_lerp = cvar_reg_float("crosshair_obstruct_lerp", 0.1f, 0.0f, 1.0f, CVAR_ARCHIVE, "time constant (s) of the crosshair's move to and from an obstruction");
     cmd_register("crosshair_reload", cmd_reload, "re-read assets/ui/crosshair.json");
+    cmd_register("crosshair_pos", cmd_pos, "crosshair_pos: where the crosshair was drawn last frame (UI px) and its obstruction state (tests)");
     crosshair_reload();
 }
 
@@ -181,6 +200,42 @@ static void draw_hitmarker(Game *g, float cx, float cy, float s) {
     ui_line(cx + in, cy + in, cx + out, cy + out, th, c);
 }
 
+// World point -> UI px (false: behind the camera).
+static bool project_ui(vec3 p, vec2 *out) {
+    vec2 px;
+    if (!render_world_to_screen(p, &px)) return false;
+    out->x = px.x * ui_width() / (float)DG_MAX(1, render_width());
+    out->y = px.y * ui_height() / (float)DG_MAX(1, render_height());
+    return true;
+}
+
+// "Barrel blocked": a barrel line ending on a hatched wall.
+static void glyph_barrel(float cx, float cy, float s, u32 c) {
+    float th = fmaxf(1.0f, 2.0f * s);
+    ui_line(cx - 12 * s, cy, cx - 1 * s, cy, th * 1.5f, c);
+    ui_line(cx + 1 * s, cy - 8 * s, cx + 1 * s, cy + 8 * s, th, c);
+    for (int i = -1; i <= 1; i++) ui_line(cx + 1 * s, cy + (float)i * 5 * s, cx + 6 * s, cy + (float)i * 5 * s - 4 * s, th * 0.75f, c);
+}
+
+// "Friendly in the line of fire": a head-and-shoulders figure.
+static void glyph_friendly(float cx, float cy, float s, u32 c) {
+    float th = fmaxf(1.0f, 2.0f * s);
+    circle(cx, cy - 4 * s, 3.5f * s, th, 16, c);
+    ui_line(cx - 7 * s, cy + 8 * s, cx - 4 * s, cy + 2 * s, th, c);
+    ui_line(cx - 4 * s, cy + 2 * s, cx + 4 * s, cy + 2 * s, th, c);
+    ui_line(cx + 4 * s, cy + 2 * s, cx + 7 * s, cy + 8 * s, th, c);
+}
+
+// Through a magnified optic: a faint red frame around the screen edge while obstructed.
+static void red_edge(float w, float h, float a, float s) {
+    float e = 10.0f * s;
+    u32 c = UI_RGBA(220, 40, 30, (int)(110.0f * saturate(a)));
+    ui_rect(0, 0, w, e, c);
+    ui_rect(0, h - e, w, e, c);
+    ui_rect(0, e, e, h - 2 * e, c);
+    ui_rect(w - e, e, e, h - 2 * e, c);
+}
+
 void crosshair_draw(float dt) {
     Game *g = game();
     World *w = game_world();
@@ -188,6 +243,7 @@ void crosshair_draw(float dt) {
     // spread, sway and focus). Third person / free camera spectating: none.
     Player *p = game_view_player();
     int vs = game_view_slot();
+    CH.last_valid = false;
     if (!g || !w || !p || p->sim.move.mode == MOVE_DEAD || g->menu_open || g->inventory_open || g->container_open) return;
     if (spectator_mode() != SPEC_OFF && !spectator_first_person()) return;
     const UserCmd *vcmd = game_view_cmd();
@@ -206,13 +262,41 @@ void crosshair_draw(float dt) {
     float cx = scr_w * 0.5f, cy = scr_h * 0.5f;
     vec2 sway = gun ? weapon_aim_offset_deg(wd, &p->sim.wpn, &p->sim.move, weapon_sway_time(vcmd->seq) + g->alpha * SIM_DT) : v2(0, 0);
     vec3 aim = dir_from_angles(g->view.yaw - sway.x * DG_DEG2RAD, g->view.pitch + sway.y * DG_DEG2RAD);
+    // Aim model (docs/AIM.md): the reticle is the aim point P of the camera ray; the bullet leaves the
+    // muzzle towards it and lands on Q when something is in between. The viewed player's solve (a
+    // spectator gets the target's from its forwarded commands: the muzzle claim and the view).
+    AimSolve as;
+    bool have_aim = gun && weapon_aim_preview(w, vs, player_eye_pos(&p->sim.move), g->view.yaw, g->view.pitch, vcmd, &as);
     if (!CH.follow_kick->i) {
         vec2 px;
-        if (render_world_to_screen(v3_madd(g->view.eye, aim, 50.0f), &px)) {
-            float kx = scr_w / (float)DG_MAX(1, render_width()), ky = scr_h / (float)DG_MAX(1, render_height());
-            cx = px.x * kx;
-            cy = px.y * ky;
+        if (project_ui(have_aim ? as.p : v3_madd(g->view.eye, aim, 50.0f), &px)) {
+            cx = px.x;
+            cy = px.y;
         }
+    }
+    float ccx = cx, ccy = cy;   // the unobstructed crosshair (ghost while obstructed)
+    bool obstructed = have_aim && CH.obstruct->i && as.cls != AIM_CLEAR;
+    vec2 qpx = v2(cx, cy);
+    if (obstructed && !project_ui(as.q, &qpx)) obstructed = false;
+    {
+        float k = aim_lerp_k(dt, CH.obstruct_lerp->f);
+        vec2 want = obstructed ? v2(qpx.x - cx, qpx.y - cy) : v2(0, 0);
+        CH.obs_off.x += (want.x - CH.obs_off.x) * k;
+        CH.obs_off.y += (want.y - CH.obs_off.y) * k;
+        CH.obs_w += ((obstructed ? 1.0f : 0.0f) - CH.obs_w) * k;
+        if (obstructed) CH.obs_cls = as.cls;
+        if (!gun || !CH.obstruct->i) { CH.obs_off = v2(0, 0); CH.obs_w = 0.0f; }
+    }
+    // Through a magnified optic the reticle cannot move: the impact marker moves instead.
+    bool scoped = false;
+    if (ads && game_ads_vis() > 0.9f) {
+        const InvSlot *es = weapon_equipped(w, vs);
+        const AttachmentDef *o = es ? attach_optic(w->items, es->att) : NULL;
+        scoped = o && o->zoom >= 3.0f;
+    }
+    if (!scoped) {
+        cx += CH.obs_off.x;
+        cy += CH.obs_off.y;
     }
 
     // Target tint: hitbox along the aim ray (enemies red, other players blue).
@@ -225,6 +309,11 @@ void crosshair_draw(float dt) {
         }
     }
     float alpha = CH.opacity->f;
+    float ow_k = CH.obs_w;
+    if (ow_k > 0.01f) {
+        const GuiTheme *th = gui_theme();
+        base = gui_rgba_lerp(base, CH.obs_cls == AIM_FRIENDLY ? th->crosshair_friendly : th->crosshair_obstructed, saturate(ow_k));
+    }
     u32 col = with_alpha(base, alpha);
     u32 ocol = CH.outline->i ? with_alpha(st->outline, alpha * ((st->outline >> 24) & 0xFF) / 255.0f) : 0;
     float ow = CH.outline->i ? st->outline_w * fmaxf(1.0f, s) : 0.0f;
@@ -242,9 +331,36 @@ void crosshair_draw(float dt) {
     float spread = lerpf(g->spread_prev, g->spread_cur, g->alpha);
     float fov_v = (g->view.fov > 1 ? g->view.fov : 75.0f) * DG_DEG2RAD;
     float gap = tanf(spread * 0.5f * DG_DEG2RAD) * (scr_h * 0.5f) / tanf(fov_v * 0.5f);
+    // Obstructed: the cone where it actually ends (radius at |Q - muzzle|, seen from the camera).
+    if (obstructed || ow_k > 0.01f) {
+        float gq = obstructed ? aim_spread_px(spread, as.q_dist, v3_dist(g->view.eye, as.q), fov_v, scr_h) : gap;
+        gap = lerpf(gap, gq, saturate(ow_k));
+    }
     float gap_draw = fminf(fmaxf(gap, st->min_gap * s) + CH.gap->f * s, st->max_gap * s);
 
-    float vis = 1.0f - CH.ads_fade;
+    if (ow_k > 0.01f) {
+        // The normal aim point as a faint ghost; the glyph of the obstruction under the crosshair.
+        const GuiTheme *th = gui_theme();
+        u32 gc = with_alpha(st->colors[DG_CLAMP(CH.color->i, 0, st->color_count - 1)], 0.35f * alpha * saturate(ow_k));
+        float d = 3.0f * fmaxf(1.0f, s);
+        if (!scoped) rect_ol(ccx - d * 0.5f, ccy - d * 0.5f, d, d, gc, 0, 0);
+        u32 kc = with_alpha(CH.obs_cls == AIM_FRIENDLY ? th->crosshair_friendly : th->crosshair_obstructed, alpha * saturate(ow_k));
+        float gy = (scoped ? ccy : cy) + gap_draw + CH.length->f * s + 16.0f * s;
+        float gx = scoped ? ccx : cx;
+        if (CH.obs_cls == AIM_BARREL) glyph_barrel(gx, gy, s, kc);
+        else if (CH.obs_cls == AIM_FRIENDLY) glyph_friendly(gx, gy, s, kc);
+        if (scoped) {
+            // The reticle stays: the impact marker sits where Q projects, inside the scope view.
+            float r = 6.0f * s;
+            vec2 m = v2(ccx + CH.obs_off.x, ccy + CH.obs_off.y);
+            ui_line(m.x - r, m.y - r, m.x + r, m.y + r, fmaxf(1.0f, 2.0f * s), kc);
+            ui_line(m.x - r, m.y + r, m.x + r, m.y - r, fmaxf(1.0f, 2.0f * s), kc);
+            red_edge(scr_w, scr_h, ow_k, s);
+        }
+    }
+
+    // Red dots / iron sights: the moved crosshair shows over the sight while obstructed.
+    float vis = fmaxf(1.0f - CH.ads_fade, scoped ? 0.0f : saturate(ow_k));
     if (vis > 0.01f) {
         u32 c = with_alpha(col, vis * ((col >> 24) & 0xFF) / 255.0f);
         u32 oc = with_alpha(ocol, vis * ((ocol >> 24) & 0xFF) / 255.0f);
@@ -274,5 +390,7 @@ void crosshair_draw(float dt) {
         u32 oc = with_alpha(ocol, CH.ads_fade * ((ocol >> 24) & 0xFF) / 255.0f);
         rect_ol(cx - d * 0.5f, cy - d * 0.5f, d, d, c, oc, ow);
     }
+    CH.last_pos = v2(cx, cy);
+    CH.last_valid = true;
     draw_hitmarker(g, cx, cy, s);
 }

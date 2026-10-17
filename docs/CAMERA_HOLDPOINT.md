@@ -58,7 +58,8 @@ Input never depends on output: angles → spine → head → camera → hold poi
 | `cam_collision_radius` | 0.11 | sphere cast from the capsule to the eye; pulls in instantly, releases smoothly |
 | `cam_recon_smooth_time` | 0.1 | prediction-correction smoothing |
 | `cam_death_follow`, `cam_death_spectate` | 6, 0 | damped follow of the ragdoll's eye socket; seconds before lifting into a spectator view (0 = stay) |
-| `cam_weapon_fov` | 0 | arms + item projection FOV (0 = camera FOV); also the Settings "Hands FOV" |
+| `sv_fov`, `sv_fov_max_aspect` | 75, 16:9 | world camera vertical FOV, the host's, the same for every player (Hor+ up to the max aspect); ADS never changes it (docs/ATTACHMENTS.md "FOV and sensitivity"). `cl_fov` is ignored |
+| `cam_weapon_fov` | 0 | arms + item projection FOV (0 = camera FOV); also the Settings "Hands FOV". ADS narrows this projection only |
 | `cam_third` (or `cl_thirdperson`) | 0 | third-person debug camera, same body / hold point math |
 | `cam_debug` | 0 | 1: draws (head eye red, ideal green, camera white, hold point axes, pivot magenta, sight cyan, muzzle orange, grips yellow, collision cast) and a stats line; 2: also logs it |
 
@@ -193,8 +194,9 @@ Nothing new goes on the wire. Remote players already replicate aim yaw and pitch
 and ADS / sprint / crouch flags. Each client runs the same hold point and IK code for them, with the
 camera at their head bone plus eye socket. `test_holdpoint` checks that an owner pose and a remote
 pose solved from the same inputs are **bit-identical**; `first_person` changes nothing. The host's
-hit traces use the camera / aim ray. Tracers and flashes start at the visible muzzle derived from the
-hold point.
+shots leave the muzzle socket of that pose and converge on the camera ray's aim point (docs/AIM.md):
+the shooter claims its muzzle in camera space in the `UserCmd` (`muzzle_cam`), the host checks it
+against its own solve of the same pose.
 
 ## Tuning and debug
 

@@ -1,5 +1,6 @@
 #include "gameplay/phone/phone_orient.h"
 #include "gameplay/attachments.h"
+#include "gameplay/aim.h"
 #include "characters.h"
 #include "net/net.h"
 #include "health.h"
@@ -1686,6 +1687,15 @@ static void post_one(World *w, CharacterInst *c, int i, float dt, vec3 cam_pos, 
     c->item_cur = c->rt.proc.has_item ? xf_mul(xf_make(root.t, root.r), xf_make(v3_scale(c->rt.proc.item_model.t, c->def->scale), c->rt.proc.item_model.r)) : c->item_cur;
     bool had_item = c->item_valid;
     c->item_valid = c->rt.proc.has_item;
+    // Aim model (docs/AIM.md): where the muzzle is relative to the simulated eye and view of this tick
+    // (the shooter's UserCmd claim; the host's reconstruction of it).
+    c->muzzle_cam_valid = false;
+    if (c->item_valid && c->item_weapon && c->item_weapon->kind != WPN_MELEE && c->is_player && c->slot >= 0 && c->slot < MAX_PLAYERS) {
+        const PlayerMove *pm = &w->players[c->slot].sim.move;
+        c->muzzle_cam = aim_world_to_cam(player_eye_pos(pm), pm->yaw, pm->pitch, xf_point(c->item_cur, held_sockets(c)->muzzle));
+        c->muzzle_cam_valid = true;
+        c->muzzle_cam_tick = w->chars->tick;
+    }
     // First pose: nothing to interpolate from. A newly held item: snap only its own transforms (the
     // body keeps interpolating - snapping it whenever the hands were empty made the head, and the
     // first-person camera on it, move in tick-sized steps with no item selected).
@@ -2553,6 +2563,14 @@ bool chars_ragdoll_now(World *w, EntityId e, vec3 impulse) {
     c->death_part = BP_CHEST;
     c->death_tick = w->chars->tick;
     c->rag_pending = true;
+    return true;
+}
+
+bool chars_muzzle_cam(World *w, EntityId e, vec3 *cam, int *age_ticks) {
+    CharacterInst *c = char_get(w, e);
+    if (!c || !c->muzzle_cam_valid || !c->item_valid || c->dead) return false;
+    *cam = c->muzzle_cam;
+    if (age_ticks) *age_ticks = (int)(w->chars->tick - c->muzzle_cam_tick);
     return true;
 }
 
