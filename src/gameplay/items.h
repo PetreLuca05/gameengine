@@ -71,6 +71,7 @@ typedef enum VehicleUse { VUSE_NONE, VUSE_FUEL, VUSE_TIRE_REPAIR, VUSE_SPARE_TIR
 // with the slide / bolt / pump, or wobbles a tick behind the receiver (magazine).
 typedef enum PartMech { MECH_NONE, MECH_SLIDE, MECH_BOLT, MECH_PUMP, MECH_MAG } PartMech;
 typedef struct WeaponModelPart { vec3 offset; vec3 half; vec4 color; u8 mech; } WeaponModelPart;
+#define WPN_MAX_PARTS 16   // per weapon ("model" + "iron_sights"); hide masks are u16
 
 // ------------------------------------------------------------------ attachments
 // assets/attachments/*.json (docs/ATTACHMENTS.md). Ids are 1-based u8 indices (0 = none), loaded
@@ -146,7 +147,7 @@ typedef struct WeaponAttachSlot {
     float rail_min, rail_max;
     char allow[8][32];
     int allow_count;
-    u8 hide_parts;            // bit mask over WeaponDef.parts
+    u16 hide_parts;           // bit mask over WeaponDef.parts
     char def_id[32];          // default attachment (new weapons spawn with it)
 } WeaponAttachSlot;
 
@@ -168,7 +169,7 @@ typedef struct WeaponDef {
     float ads_world_zoom;     // iron sights: ADS world camera zoom (tan ratio; 0 = cl_ads_world_zoom)
     char pose[32];            // hand pose clip
     char sound_fire[32], sound_reload[32];
-    WeaponModelPart parts[6];
+    WeaponModelPart parts[WPN_MAX_PARTS];   // "model" boxes, then the generated iron sights
     int part_count;
     vec3 grip_offset;         // where the right hand holds it (model space)
     vec3 support_offset;      // where the left hand supports it (model space)
@@ -198,6 +199,7 @@ typedef struct WeaponDef {
     // Attachments: slots + the iron sight (the default sight, sockets.sight / its eye relief).
     WeaponAttachSlot att_slots[ATT_SLOTS];
     vec3 iron_sight;          // the iron sight socket (sockets.sight before any optic)
+    u16 iron_parts;           // "iron_sights" parts (folded: hidden while an optic is mounted)
     u8 att_default[ATT_SLOTS];  // default attachment per slot (ids, resolved after loading)
     u8 att_applied[ATT_SLOTS];  // effective copies (attach_weapon_effective): what was applied
     char file[64];            // source file (data/weapons/*.json)

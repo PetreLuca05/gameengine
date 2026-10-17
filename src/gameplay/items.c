@@ -432,6 +432,55 @@ static void default_sockets(ItemSockets *k, const char *style, vec3 support, vec
 
 static void apply_sockets(ItemSockets *k, const cJSON *sk);
 
+static void iron_box(WeaponDef *d, float x0, float x1, float y0, float y1, float z, float hz, vec4 col, u8 mech) {
+    if (d->part_count >= WPN_MAX_PARTS || x1 <= x0 || y1 <= y0) return;
+    d->iron_parts |= (u16)(1u << d->part_count);
+    d->parts[d->part_count++] = (WeaponModelPart){ v3((x0 + x1) * 0.5f, (y0 + y1) * 0.5f, z), v3((x1 - x0) * 0.5f, (y1 - y0) * 0.5f, hz), col, mech };
+}
+
+// "iron_sights": { "type": "aperture" | "notch", "line", "rear_z", "front_z", "rear_base", "front_base",
+// "aperture", "ring", "notch", "notch_depth", "post", "rear_half", "wings", "mech", "color" } (docs/ATTACHMENTS.md). Builds the
+// rear sight and front post as model parts and puts the ADS sight socket on their line: the top of the
+// post sits exactly in the notch / the aperture centre, on the view axis.
+static void parse_iron_sights(WeaponDef *d, const cJSON *is) {
+    if (!is) return;
+    bool aperture = !strcmp(jstr(is, "type", "aperture"), "aperture");
+    float line = jnum(is, "line", d->sockets.sight.y);
+    float rz = jnum(is, "rear_z", 0.0f), fz = jnum(is, "front_z", -0.3f);
+    float rb = jnum(is, "rear_base", line - 0.02f), fb = jnum(is, "front_base", rb);
+    float post = jnum(is, "post", 0.0026f) * 0.5f;
+    float rh = jnum(is, "rear_half", 0.011f);   // notch blade half width
+    vec4 col = jcolor(is, "color", v4(0.05f, 0.05f, 0.055f, 1));
+    u8 mech = mech_from(jstr(is, "mech", NULL));
+    const float hz = 0.003f;
+    if (aperture) {
+        // Thin ghost ring around the hole (top, bottom, sides) on a narrow stem down to the base.
+        float a = jnum(is, "aperture", 0.007f) * 0.5f, t = jnum(is, "ring", 0.0016f);
+        iron_box(d, -a - t, a + t, line + a, line + a + t, rz, hz, col, mech);
+        iron_box(d, -a - t, a + t, line - a - t, line - a, rz, hz, col, mech);
+        iron_box(d, -a - t, -a, line - a, line + a, rz, hz, col, mech);
+        iron_box(d, a, a + t, line - a, line + a, rz, hz, col, mech);
+        iron_box(d, -0.0025f, 0.0025f, rb, line - a - t, rz, hz, col, mech);
+    } else {
+        // Blade with a square notch: the post's top level with the blade's top, centred in the notch.
+        float n = jnum(is, "notch", 0.0046f) * 0.5f;
+        iron_box(d, -rh, -n, rb, line, rz, hz, col, mech);
+        iron_box(d, n, rh, rb, line, rz, hz, col, mech);
+        iron_box(d, -n, n, rb, line - jnum(is, "notch_depth", 0.004f), rz, hz, col, mech);
+    }
+    iron_box(d, -post, post, fb, line, fz, hz * 0.8f, col, mech);
+    float wing = jnum(is, "wings", aperture ? 0.008f : 0.0f);   // front sight wings (half spacing)
+    if (wing > 0) {
+        iron_box(d, -wing - 0.0018f, -wing, fb, line + 0.004f, fz, hz, col, mech);
+        iron_box(d, wing, wing + 0.0018f, fb, line + 0.004f, fz, hz, col, mech);
+        iron_box(d, -wing - 0.0018f, wing + 0.0018f, fb, fb + 0.004f, fz, hz, col, mech);
+    }
+    // The stock weld (eye -> grip) stays where the derived sight put it: only the gun's height in the
+    // view changes, and the rear sight's z sets how far it is from the eye (red dots / scopes keep the weld).
+    d->sockets.hp.eye_relief_add += d->sockets.sight.z - rz;
+    d->sockets.sight = v3(0, line, rz);
+}
+
 // "camera": { "body": { "center", "half" }, "screen": { "pos", "half" }, "lens": [x, y, z], "fov" }
 static void parse_camera(ItemDef *d, const cJSON *c) {
     d->camera = c != NULL;
@@ -522,7 +571,7 @@ static void parse_weapon(ItemDB *db, const cJSON *w, const char *file) {
     d->muzzle_offset = jvec3(w, "muzzle", v3(0, 0.05f, -0.2f));
     const cJSON *p;
     cJSON_ArrayForEach(p, cJSON_GetObjectItemCaseSensitive(w, "model")) {
-        if (d->part_count >= 6) break;
+        if (d->part_count >= WPN_MAX_PARTS) break;
         WeaponModelPart *mp = &d->parts[d->part_count++];
         mp->offset = jvec3(p, "offset", v3(0, 0, 0));
         mp->half = jvec3(p, "half", v3(0.02f, 0.02f, 0.1f));
@@ -590,6 +639,7 @@ static void parse_weapon(ItemDB *db, const cJSON *w, const char *file) {
         int dv = DG_CLAMP(d->vfx_muzzle_device, 0, 3);
         dg_strcpy(d->muzzle_device_id, sizeof(d->muzzle_device_id), im ? im : k_integral[dv]);
     }
+    parse_iron_sights(d, cJSON_GetObjectItemCaseSensitive(w, "iron_sights"));
     d->iron_sight = d->sockets.sight;
     attachments_parse_weapon_slots(d, w);
     part_mult_defaults(d->part_mult);

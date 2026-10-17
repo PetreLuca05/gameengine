@@ -51,6 +51,7 @@ typedef struct AnimLibrary {
     // so everything authored against the bones keeps using a plain Skeleton.
     union { SkeletonAsset skeleton; Skeleton skel; };
     Clip clips[LIB_MAX_CLIPS];
+    float clip_yaw[LIB_MAX_CLIPS];                // clips.json "yaw" applied to the clip's root (degrees)
     int clip_count;
     ClipLookup lookup;
     ControllerDef ctrl;

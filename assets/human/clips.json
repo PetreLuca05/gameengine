@@ -1,5 +1,5 @@
 {
-  "_comment": "Per-clip metadata. Key = baked clip name (FBX file stem, or 'file:take'). Keys: name (alias used by anim sets), loop, speed, root_speed (m/s travel of an in-place clip: speed matching), root_motion, markers [left_plant, right_plant], events, blend_in, blend_out, additive, reference.",
+  "_comment": "Per-clip metadata. Key = baked clip name (FBX file stem, or 'file:take'). Keys: name (alias used by anim sets), loop, speed, root_speed (m/s travel of an in-place clip: speed matching), root_motion, markers [left_plant, right_plant], events, blend_in, blend_out, additive, reference, yaw (degrees about +Y, negative = turn the body to the right).",
   "clips": {
     "Animations:Armature|Idle": {
       "name": "idle",
@@ -56,19 +56,23 @@
     },
     "Pistol Idle": {
       "name": "pistol_idle",
-      "loop": true
+      "loop": true,
+      "yaw": -45
     },
     "Pistol Run": {
       "name": "pistol_run",
-      "loop": true
+      "loop": true,
+      "yaw": -45
     },
     "Rifle Aiming Idle (1)": {
       "name": "rifle_idle",
-      "loop": true
+      "loop": true,
+      "yaw": -45
     },
     "Rifle Run (1)": {
       "name": "rifle_run",
-      "loop": true
+      "loop": true,
+      "yaw": -45
     },
     "Zombie Attack (1)": {
       "name": "zombie_swipe",

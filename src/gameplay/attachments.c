@@ -208,7 +208,7 @@ void attachments_parse_weapon_slots(WeaponDef *d, const cJSON *w) {
             if (cJSON_IsString(a) && ws->allow_count < 8) dg_strcpy(ws->allow[ws->allow_count++], 32, a->valuestring);
         }
         cJSON_ArrayForEach(a, cJSON_GetObjectItemCaseSensitive(s, "hide_parts")) {
-            if (cJSON_IsNumber(a) && a->valueint >= 0 && a->valueint < 8) ws->hide_parts |= (u8)(1u << a->valueint);
+            if (cJSON_IsNumber(a) && a->valueint >= 0 && a->valueint < WPN_MAX_PARTS) ws->hide_parts |= (u16)(1u << a->valueint);
         }
         dg_strcpy(ws->def_id, sizeof(ws->def_id), jstr(s, "default", ""));
     }
@@ -268,7 +268,7 @@ static float rail_position(const WeaponDef *wd, const AttachmentDef *a) {
     // Scopes slide on the rail like a real mounting: the cheek weld (eye -> grip distance of the
     // iron sights) and the scope's eye relief fix where its sight point must be.
     const WeaponAttachSlot *s = &wd->att_slots[a->slot];
-    float weld = iron_relief(wd) + wd->iron_sight.z;          // eye -> grip along the view axis
+    float weld = iron_relief(wd) + wd->sockets.hp.eye_relief_add + wd->iron_sight.z;   // eye -> grip along the view axis
     Xform at0 = xf_mul(s->socket, xf_inverse(a->mount));
     float z0 = xf_point(at0, a->sight_pt).z;                  // sight point z with no offset
     return (weld - a->eye_relief) - z0;
@@ -299,12 +299,13 @@ void attach_weapon_effective(const ItemDB *db, const WeaponDef *base, const u8 *
     if (out != base) *out = *base;
     memset(out->att_applied, 0, sizeof(out->att_applied));
     if (!att) return;
-    u8 hide = 0;
+    u16 hide = 0;
     for (int k = 0; k < ATT_SLOTS; k++) {
         const AttachmentDef *a = attach_def(db, att[k]);
         if (!a || a->slot != k || !attach_allowed(base, a)) continue;
         out->att_applied[k] = att[k];
         hide |= base->att_slots[k].hide_parts;
+        if (k == ATT_OPTIC) hide |= base->iron_parts;   // the irons fold down under an optic
         Xform place = attach_placement(base, a);
         RecoilParams *r = &out->recoil;
         r->v_first *= a->recoil_v;

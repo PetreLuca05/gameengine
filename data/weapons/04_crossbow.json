@@ -63,6 +63,7 @@
   "attachment_slots": {
     "optic": {"pos": [0, 0.075, 0.0], "rail": [-0.05, 0.05], "allow": ["red_dot", "scope_4x"]}
   },
+  "iron_sights": { "type": "notch", "line": 0.093, "rear_z": -0.06, "front_z": -0.43, "rear_base": 0.075, "post": 0.003, "rear_half": 0.008 },
   "model": [
     { "offset": [0, 0.05, -0.15], "half": [0.02, 0.025, 0.3], "color": [0.4, 0.3, 0.2] },
     { "offset": [0, 0.06, -0.38], "half": [0.22, 0.012, 0.015], "color": [0.2, 0.2, 0.2] },

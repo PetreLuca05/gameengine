@@ -71,6 +71,7 @@
     "magazine": {"pos": [0, 0.018, -0.1], "allow": ["extended_mag"], "hide_parts": [2]},
     "stock": {"pos": [0, 0.04, 0.06], "allow": ["heavy_stock"], "hide_parts": [3]}
   },
+  "iron_sights": { "type": "aperture", "line": 0.104, "rear_z": 0, "front_z": -0.29, "rear_base": 0.082 },
   "model": [
     { "offset": [0, 0.05, -0.12], "half": [0.02, 0.032, 0.2], "color": [0.14, 0.14, 0.15] },
     { "offset": [0, -0.02, 0.0], "half": [0.015, 0.05, 0.022], "color": [0.1, 0.1, 0.1] },

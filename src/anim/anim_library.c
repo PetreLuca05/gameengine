@@ -53,8 +53,23 @@ const CharacterDef *anim_lib_char_by_id(const AnimLibrary *lib, const char *id) 
 
 // ------------------------------------------------------------------ pieces
 
+// Turns a clip's root bones (and extracted travel) about +Y by deg (positive = to the left).
+static void clip_turn(const Skeleton *s, Clip *c, float deg) {
+    quat q = quat_axis_angle(v3(0, 1, 0), deg * DG_DEG2RAD);
+    for (int f = 0; f < c->frames; f++) {
+        for (int b = 0; b < c->bones && b < s->count; b++) {
+            if (s->parent[b] >= 0) continue;
+            Xform *x = &c->data[(size_t)f * (size_t)c->bones + (size_t)b];
+            x->r = quat_norm(quat_mul(q, x->r));
+            x->t = quat_rotate(q, x->t);
+        }
+        if (c->root_t) c->root_t[f] = quat_rotate(q, c->root_t[f]);
+    }
+}
+
 static void apply_clip_meta(AnimLibrary *lib) {
     char rel[300];
+    float yaw[LIB_MAX_CLIPS] = { 0 };
     snprintf(rel, sizeof(rel), "%s/clips.json", lib->human_dir);
     char *text = read_text(rel);
     u32 h = ANIM_HASH_SEED;
@@ -80,6 +95,9 @@ static void apply_clip_meta(AnimLibrary *lib) {
             if (cJSON_IsNumber(v = cJSON_GetObjectItemCaseSensitive(e, "speed"))) c->speed = (float)v->valuedouble;
             if (cJSON_IsNumber(v = cJSON_GetObjectItemCaseSensitive(e, "blend_in"))) c->blend_in = (float)v->valuedouble;
             if (cJSON_IsNumber(v = cJSON_GetObjectItemCaseSensitive(e, "blend_out"))) c->blend_out = (float)v->valuedouble;
+            // "yaw": the clip's body turned about the vertical (degrees, negative = to the right), for
+            // clips authored facing off the forward axis.
+            if (cJSON_IsNumber(v = cJSON_GetObjectItemCaseSensitive(e, "yaw"))) yaw[ci] = (float)v->valuedouble;
             if (cJSON_IsString(v = cJSON_GetObjectItemCaseSensitive(e, "reference"))) c->additive_ref = anim_lib_find_clip(lib, v->valuestring);
             v = cJSON_GetObjectItemCaseSensitive(e, "markers");
             if (cJSON_IsArray(v) && cJSON_GetArraySize(v) >= 2) {
@@ -103,6 +121,11 @@ static void apply_clip_meta(AnimLibrary *lib) {
         }
         cJSON_Delete(root);
         free(text);
+    }
+    // Only the change since the last apply (meta reloads keep the baked data).
+    for (int i = 0; i < lib->clip_count; i++) {
+        if (fabsf(yaw[i] - lib->clip_yaw[i]) > 1e-4f) clip_turn(&lib->skel, &lib->clips[i], yaw[i] - lib->clip_yaw[i]);
+        lib->clip_yaw[i] = yaw[i];
     }
     lib->manifest.hash[AC_CLIPS] = h;
 }
@@ -463,6 +486,7 @@ bool anim_lib_reload_characters(AnimLibrary *lib) {
 static bool load_clips(AnimLibrary *lib) {
     for (int i = 0; i < lib->clip_count; i++) clip_free(&lib->clips[i]);
     lib->clip_count = 0;
+    memset(lib->clip_yaw, 0, sizeof(lib->clip_yaw));
     int n = 0;
     char **files = list_files(lib->human_dir, "*.fbx", &n);
     for (int i = 0; i < n && lib->clip_count < LIB_MAX_CLIPS; i++) {
