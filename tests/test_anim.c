@@ -343,6 +343,18 @@ typedef struct GlueStats { float max_pos, max_ang, max_item; int ticks; int wors
 
 static Xform root_at(vec3 pos, float yaw) { return xf_make(pos, quat_yaw(yaw)); }
 
+// A hand's grip-resolved palm target in item space: the IK target of the item's universal grip
+// (assets/handposes/items, in item space, root scale applied) or the item's own grip_r / grip_l
+// when the grip leaves it unset. This is what the runtime solves onto, what the editor draws as
+// IK_hand_L / IK_hand_R and what its save-time glue check measures (docs/HANDPOSE.md).
+static Xform grip_target(const ItemSockets *k, int style, int hand) {
+    const HandPoseDB *db = &L->handposes;
+    float rs = handpose_root(db, handpose_find_hash(db, k->pose_id[1])).s.x;
+    HandHold hh;
+    proc_hand_grip(db, proc_hold_style(&L->proc, style), k, hand, rs, &hh);
+    return hh.sock;
+}
+
 static void glue_step(CharRuntime *rt, const ItemSockets *k, CharInputs *in, float dt, vec3 kick_pos, vec3 kick_rot, GlueStats *g, const char *what,
                       const char *weapon) {
     charrt_set_inputs(rt, in);
@@ -356,16 +368,17 @@ static void glue_step(CharRuntime *rt, const ItemSockets *k, CharInputs *in, flo
     pi.hand_ik_weight = 1.0f;
     charrt_post(rt, &pi);
     const Skeleton *s = &L->skel;
-    // Item never moves between the right-hand solve and the end of the frame.
+    // Item never moves between the right-hand solve and the end of the frame (the item hangs off
+    // the right palm through the grip's right IK target).
     Xform palm_r = xf_mul(rt->final_model[s->role[BR_R_HAND]], L->hands.palm[1]);
-    Xform item_now = xf_mul(palm_r, xf_inverse(k->grip_r));
+    Xform item_now = xf_mul(palm_r, xf_inverse(grip_target(k, in->weapon_type, 1)));
     float item_move = v3_dist(item_now.t, rt->proc.item_model.t) + quat_angle_between(item_now.r, rt->proc.item_model.r);
     g->max_item = fmaxf(g->max_item, item_move);
     if (k->has_left && proc_hold_style(&L->proc, in->weapon_type)->left_hand) {
-        // Left palm <-> grip_l from the FINAL pose.
+        // Left palm <-> its grip target from the FINAL pose.
         Xform palm_l = xf_mul(rt->final_model[s->role[BR_L_HAND]], L->hands.palm[0]);
         // ADS may slide the support hand back along the handguard (keeps the exact ADS transform).
-        Xform gl = k->grip_l;
+        Xform gl = grip_target(k, in->weapon_type, 0);
         gl.t.z += rt->proc.grip_l_slide;
         Xform sock = xf_mul(rt->proc.item_model, gl);
         float pe = v3_dist(palm_l.t, sock.t), ae = quat_angle_between(palm_l.r, sock.r) * DG_RAD2DEG;
@@ -416,7 +429,7 @@ static void test_hold_and_glue(const ItemDB *db) {
         int style = proc_hold_style_index(&L->proc, wd->hold_style);
         CHECK(style >= 0, "weapon %s: unknown hold style %s", wd->id, wd->hold_style);
         if (style < 0) continue;
-        // 1) Static hip / ADS placement: both hands within 1 cm of their sockets.
+        // 1) Static hip / ADS placement: both hands within 1 cm of their grip targets.
         for (int ads = 0; ads < 2; ads++) {
             charrt_init(rt, L, def);
             CharInputs in;
@@ -428,12 +441,12 @@ static void test_hold_and_glue(const ItemDB *db) {
             for (int t = 0; t < 20; t++) glue_step(rt, &wd->sockets, &in, dt, v3(0, 0, 0), v3(0, 0, 0), &g, ads ? "ads" : "hip", wd->id);
             const Skeleton *s = &L->skel;
             Xform palm_r = xf_mul(rt->final_model[s->role[BR_R_HAND]], L->hands.palm[1]);
-            Xform want_r = xf_mul(rt->proc.item_model, wd->sockets.grip_r);
-            CHECK(v3_dist(palm_r.t, want_r.t) < 0.01f, "%s %s: right hand %.1f mm off grip_r", wd->id, ads ? "ADS" : "hip", v3_dist(palm_r.t, want_r.t) * 1000);
+            Xform want_r = xf_mul(rt->proc.item_model, grip_target(&wd->sockets, style, 1));
+            CHECK(v3_dist(palm_r.t, want_r.t) < 0.01f, "%s %s: right hand %.1f mm off its grip target", wd->id, ads ? "ADS" : "hip", v3_dist(palm_r.t, want_r.t) * 1000);
             CHECK(rt->proc.right_err_pos < 0.01f, "%s %s: right hand could not reach the desired item placement (%.1f mm)", wd->id,
                   ads ? "ADS" : "hip", rt->proc.right_err_pos * 1000);
             if (wd->sockets.has_left && proc_hold_style(&L->proc, style)->left_hand)
-                CHECK(g.max_pos < 0.01f, "%s %s: left hand %.1f mm off grip_l", wd->id, ads ? "ADS" : "hip", g.max_pos * 1000);
+                CHECK(g.max_pos < 0.01f, "%s %s: left hand %.1f mm off its grip target", wd->id, ads ? "ADS" : "hip", g.max_pos * 1000);
         }
         // 2) Glue: 600 ticks through locomotion states, ADS/hip/sprint, a recoil mag dump, every body-part hit, a full turn in place.
         charrt_init(rt, L, def);
