@@ -248,6 +248,113 @@ static void add_mapgen_bodies(World *w) {
     }
 }
 
+// ------------------------------------------------------------------ surface meshes (renderer)
+
+typedef struct MeshOut { RenderWaterVertex *v; u32 *idx; u32 vn, in, vcap, icap; } MeshOut;
+
+static u32 mo_vertex(MeshOut *m, float x, float y, float z, u32 body) {
+    if (m->vn == m->vcap) {
+        m->vcap = m->vcap ? m->vcap * 2 : 4096;
+        m->v = (RenderWaterVertex *)realloc(m->v, sizeof(RenderWaterVertex) * m->vcap);
+    }
+    RenderWaterVertex *o = &m->v[m->vn];
+    o->pos[0] = x; o->pos[1] = y; o->pos[2] = z;
+    o->body = body;
+    return m->vn++;
+}
+static void mo_tri(MeshOut *m, u32 a, u32 b, u32 c) {
+    if (m->in + 3 > m->icap) {
+        m->icap = m->icap ? m->icap * 2 : 8192;
+        m->idx = (u32 *)realloc(m->idx, sizeof(u32) * m->icap);
+    }
+    m->idx[m->in++] = a; m->idx[m->in++] = b; m->idx[m->in++] = c;
+}
+
+// Pools / lakes with an explicit footprint: a grid whose cells are kept when their centre is in the
+// body (the walls / banks hide the cell-sized edge).
+static void mesh_grid_body(MeshOut *m, const WaterWorld *ww, int bi) {
+    const WaterBody *b = &ww->body[bi];
+    float ex = b->bmax[0] - b->bmin[0], ez = b->bmax[1] - b->bmin[1];
+    float cell = fmaxf(0.5f, fmaxf(ex, ez) / 256.0f);
+    int nx = (int)ceilf(ex / cell), nz = (int)ceilf(ez / cell);
+    u32 *row = (u32 *)malloc(sizeof(u32) * (size_t)(nx + 1) * (size_t)(nz + 1));
+    for (size_t i = 0; i < (size_t)(nx + 1) * (size_t)(nz + 1); i++) row[i] = 0xFFFFFFFFu;
+    for (int z = 0; z < nz; z++)
+        for (int x = 0; x < nx; x++) {
+            float cx = b->bmin[0] + ((float)x + 0.5f) * cell, cz = b->bmin[1] + ((float)z + 0.5f) * cell;
+            float lv, fl[2];
+            if (water_body_at(ww, cx, cz, &lv, fl) != bi) continue;
+            u32 q[4];
+            for (int k = 0; k < 4; k++) {
+                int vx = x + (k & 1), vz = z + (k >> 1);
+                u32 *slot = &row[vz * (nx + 1) + vx];
+                if (*slot == 0xFFFFFFFFu) *slot = mo_vertex(m, b->bmin[0] + (float)vx * cell, b->level, b->bmin[1] + (float)vz * cell, (u32)bi);
+                q[k] = *slot;
+            }
+            mo_tri(m, q[0], q[2], q[1]);
+            mo_tri(m, q[1], q[2], q[3]);
+        }
+    free(row);
+}
+
+// Open-world lake: a disc over 1.4 x its radii (the terrain hides what lies past the shore).
+static void mesh_lake_disc(MeshOut *m, const MgFeature *f, int bi) {
+    const int rings = 12, segs = 96;
+    u32 c0 = mo_vertex(m, f->pos.x, f->level, f->pos.y, (u32)bi);
+    float cs = cosf(f->yaw), sn = sinf(f->yaw);
+    for (int r = 1; r <= rings; r++)
+        for (int s = 0; s < segs; s++) {
+            float a = (float)s / (float)segs * 6.2831853f, rr = 1.4f * (float)r / (float)rings;
+            vec2 l = v2(cosf(a) * f->size.x * rr, sinf(a) * f->size.y * rr);
+            mo_vertex(m, f->pos.x + l.x * cs + l.y * sn, f->level, f->pos.y - l.x * sn + l.y * cs, (u32)bi);
+        }
+    for (int s = 0; s < segs; s++) mo_tri(m, c0, c0 + 1 + (u32)((s + 1) % segs), c0 + 1 + (u32)s);
+    for (int r = 1; r < rings; r++)
+        for (int s = 0; s < segs; s++) {
+            u32 a = c0 + 1 + (u32)((r - 1) * segs + s), b = c0 + 1 + (u32)((r - 1) * segs + (s + 1) % segs);
+            u32 c = a + (u32)segs, d = b + (u32)segs;
+            mo_tri(m, a, b, d);
+            mo_tri(m, a, d, c);
+        }
+}
+
+// Open-world rivers: ribbons along the samples at their water profile.
+static void mesh_rivers(MeshOut *m, const MapGen *g, int bi) {
+    for (int r = 0; r < g->river_count; r++) {
+        const MgRiver *rv = &g->rivers[r];
+        float hw = rv->width * 0.5f + rv->bank * 0.6f;
+        u32 base = m->vn;
+        for (int i = 0; i < rv->count; i++) {
+            const MgRiverSample *s = &g->vs[rv->first + i];
+            vec2 nrm = v2(s->dir.y, -s->dir.x);
+            mo_vertex(m, s->p.x + nrm.x * hw, s->water, s->p.y + nrm.y * hw, (u32)bi);
+            mo_vertex(m, s->p.x - nrm.x * hw, s->water, s->p.y - nrm.y * hw, (u32)bi);
+        }
+        for (int i = 0; i + 1 < rv->count; i++) {
+            u32 a = base + (u32)(i * 2), b = a + 1, c = a + 2, d = a + 3;
+            mo_tri(m, a, c, b);
+            mo_tri(m, b, c, d);
+        }
+    }
+}
+
+static void build_meshes(World *w) {
+    MeshOut m;
+    memset(&m, 0, sizeof(m));
+    const MapGen *g = openworld_active(w) ? openworld_gen(w) : NULL;
+    for (int i = 0; i < GW.world.count; i++) {
+        const WaterBody *b = &GW.world.body[i];
+        if (b->kind == WATER_OCEAN) continue;   // the renderer's camera grid
+        if (b->shape == WSHAPE_POLYGON || b->shape == WSHAPE_ELLIPSE) mesh_grid_body(&m, &GW.world, i);
+        else if (b->shape == WSHAPE_CALLBACK && g && b->kind == WATER_LAKE) mesh_lake_disc(&m, &g->features[b->user_index], i);
+        else if (b->shape == WSHAPE_CALLBACK && g && b->kind == WATER_RIVER) mesh_rivers(&m, g, i);
+    }
+    render_water_mesh(m.v, m.vn, m.idx, m.in);
+    if (m.vn) log_info("water: surface meshes %u vertices, %u triangles", m.vn, m.in / 3);
+    free(m.v);
+    free(m.idx);
+}
+
 // ------------------------------------------------------------------ level
 
 void water_level_loaded(World *w, const char *map) {
@@ -288,6 +395,7 @@ void water_level_loaded(World *w, const char *map) {
         water_set_ground(&GW.world, ground_baked, NULL);
     }
     if (GW.world.count) log_info("water: %d bodies on '%s'", GW.world.count, map ? map : "");
+    build_meshes(w);
 }
 
 // ------------------------------------------------------------------ tick
@@ -591,9 +699,72 @@ static void debug_frame(World *w, vec3 cam) {
     }
 }
 
+// The renderer's water for this frame: the bodies' look, the swell, wind, rain, ripple sources.
+static void render_frame(World *w, vec3 cam) {
+    static RenderWater rw;
+    memset(&rw, 0, sizeof(rw));
+    rw.enabled = GW.world.count > 0;
+    rw.ocean_body = GW.world.ocean;
+    rw.tier = -1;
+    if (!rw.enabled) { render_set_water(&rw); return; }
+    double tick = w->authority ? (double)w->tick + (double)G->alpha : net_client_render_tick();
+    rw.wave_time = game_water_time(tick);
+    rw.body_count = DG_MIN(GW.world.count, RENDER_WATER_BODIES);
+    for (int i = 0; i < rw.body_count; i++) {
+        const WaterBody *b = &GW.world.body[i];
+        RenderWaterBody *o = &rw.body[i];
+        o->absorb = v4(b->p.absorb[0], b->p.absorb[1], b->p.absorb[2], b->p.turbidity);
+        o->scatter = v4(b->p.scatter[0], b->p.scatter[1], b->p.scatter[2], b->p.roughness);
+        o->params = v4(b->level, (float)b->kind, b->p.wave_scale, b->p.foam);
+        o->flow = v4(b->flow[0], b->flow[1], b->p.wind_coupling, 0.0f);
+    }
+    if (GW.world.ocean >= 0) rw.ocean_level = GW.world.body[GW.world.ocean].level;
+    const WaveModel *m = &GW.world.waves;
+    rw.wave_count = GW.world.ocean >= 0 ? DG_MIN(m->active_n, RENDER_WATER_WAVES) : 0;
+    for (int i = 0; i < rw.wave_count; i++) {
+        const WaveActive *a = &m->act[i];
+        rw.waves[2 * i] = v4(a->dx, a->dz, a->k, a->omega);
+        rw.waves[2 * i + 1] = v4(a->amp, a->qa, a->phase, 0.0f);
+    }
+    float th = GW.world.wind_dir_deg * DG_DEG2RAD;
+    rw.wind_dir = v2(sinf(th), -cosf(th));
+    rw.wind = GW.world.wind;
+    WeatherParams wp;
+    if (weather_current(w, &wp)) rw.rain = wp.v[WP_PRECIP] * (1.0f - weather_precip_type(wp.v[WP_TEMPERATURE]));
+    rw.ripple_center = cam;
+    // Ripple sources: players in water (wading legs, swimmers), buoyant props at the surface.
+    for (int s = 0; s < MAX_PLAYERS && rw.ripple_count < RENDER_WATER_RIPPLES; s++) {
+        const Player *p = &w->players[s];
+        if (!p->active || p->sim.move.water == WATER_DRY || p->sim.move.mode == MOVE_DEAD) continue;
+        const PlayerMove *pm = &p->sim.move;
+        if (pm->head_under && pm->water == WATER_UNDER && pm->water_surface - (pm->pos.y + 1.8f) > 0.6f) continue;   // deep diver
+        float speed = v3_len(v3_flat(pm->vel));
+        float push = 0.0015f + speed * 0.0025f;
+        RenderWaterRipple *r = &rw.ripples[rw.ripple_count++];
+        r->pos_radius_strength = v4(pm->pos.x, pm->pos.z, pm->mode == MOVE_SWIM ? 0.55f : 0.35f, push);
+        r->vel = v4(pm->vel.x, pm->vel.z, 0, 0);
+    }
+    if (w->authority)
+        for (int k = 0; k < GW.buoy.count && rw.ripple_count < RENDER_WATER_RIPPLES; k++) {
+            const Buoyancy *b = &GW.buoy.item[k];
+            if (!b->in_water || b->submerged > 0.98f) continue;
+            vec3 pos;
+            phys_get_transform(w->phys, b->body, &pos, NULL);
+            if (v3_dist(pos, cam) > 40.0f) continue;
+            vec3 vel = phys_get_velocity(w->phys, b->body);
+            float push = fminf(0.02f, fabsf(vel.y) * 0.01f + v3_len(v3_flat(vel)) * 0.003f);
+            if (push < 2e-4f) continue;
+            RenderWaterRipple *r = &rw.ripples[rw.ripple_count++];
+            r->pos_radius_strength = v4(pos.x, pos.z, fminf(b->extent, 1.5f), push);
+            r->vel = v4(vel.x, vel.z, 0, 0);
+        }
+    render_set_water(&rw);
+}
+
 void water_frame(World *w, vec3 cam) {
     if (!GW.loaded || !w) return;
     if (!w->authority) update_wind(w);
+    render_frame(w, cam);
     debug_frame(w, cam);
 }
 

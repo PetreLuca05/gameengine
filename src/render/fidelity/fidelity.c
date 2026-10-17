@@ -67,6 +67,7 @@ static const FidFeatureDef k_features[FF_COUNT] = {
     [FF_VFX_LIGHTING] = { "vfx_lighting", "vfx_lighting", B, true, 0, 0, 1, false, false, "Lit particles" },
     [FF_DECAL_MAX] = { "decal_max", "vfx_decal_max", I, false, 0, 0, 4096, false, false, "Impact decals" },
     [FF_PRECIP_QUALITY] = { "precip_quality", "r_precip_quality", I, false, 0, -1, 3, false, false, "Rain / snow quality" },
+    [FF_WATER] = { "water", "r_water", I, false, 0, 0, 3, false, false, "Water quality" },
 };
 #undef B
 #undef I

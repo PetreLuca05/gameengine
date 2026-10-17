@@ -529,6 +529,10 @@ static void tab_graphics(GuiCursor *c, GuiRect content) {
         row_fid_combo(c, "Rain / snow quality", FF_PRECIP_QUALITY, q, qv, 5, "Particle count of the rain / snow around you.");
     }
     row_fid_toggle(c, "Puddle reflections", FF_PUDDLE_REFLECTIONS, "Mirror-smooth puddles (screen-space reflections).");
+    {
+        static const char *const wq[] = { "Low (sky reflection)", "Medium (+ reflections, refraction)", "High (+ ripples, caustics, waves)", "Ultra (+ every detail)" };
+        row_fid_combo(c, "Water", FF_WATER, wq, NULL, 4, "Lakes, rivers and the sea: reflections, refraction, ripples, caustics, ocean waves.");
+    }
     (void)content;
 }
 

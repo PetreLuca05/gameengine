@@ -3,7 +3,7 @@
 //   - the terrain: a 1 m raster, static heightfield collision tiles (128 m), streamed visual chunks
 //     with LODs plus far tiles (chunks.c, custom provider), grass / crops per streamed chunk;
 //   - static geometry: the POI primitives batched into meshes per 128 m tile and material, with
-//     collision meshes per tile and surface; water surfaces (sea, lakes, rivers);
+//     collision meshes per tile and surface;
 //   - trees: placement chunks for the whole map (vgeo foliage, impostors), trunk collision per tile;
 //   - entities (host): loot containers rolled from data/loot.json, doors, lamps, pickups; vehicles and
 //     fuel pumps (game_vehicles.c); player spawns;

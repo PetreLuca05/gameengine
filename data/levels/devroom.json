@@ -213,7 +213,7 @@
     {"type": "box", "pos": [71.75, 0, -82], "size": [0.5, 3, 12], "color": [0.62, 0.64, 0.66], "material": "concrete"},
     {"type": "box", "pos": [88.25, 0, -82], "size": [0.5, 3, 12], "color": [0.62, 0.64, 0.66], "material": "concrete"},
     {"type": "box", "pos": [80, 0, -82], "size": [16, 0.02, 12], "color": [0.35, 0.6, 0.7], "material": "concrete", "grid": true},
-    {"type": "ramp", "pos": [80, 0, -65.76], "width": 2.5, "length": 8.24, "angle": 20, "platform": 1.5, "color": [0.5, 0.58, 0.68], "label": "pool ramp"}
+    {"type": "ramp", "pos": [80, 0, -69.88], "width": 2.5, "length": 8.24, "angle": 20, "platform": 1.5, "color": [0.5, 0.58, 0.68], "label": "pool ramp"}
   ],
   "puddles": [
     {"_comment": "Authored puddle areas (game_weather.c bake_puddles): pos [x, z], size [w, d], value 0..1 (1 fills first).", "pos": [-44, 26], "size": [5, 3], "value": 1.0},

@@ -193,6 +193,7 @@ bool render_init(SDL_Window *window) {
     }
     vkg_init();
     if (!post_init()) { log_error("render: post-processing stack unavailable"); return false; }
+    vkw_init();   // after the post stack (its descriptor layout, samplers)
     sky_init();
     write_sky_bindings();
     vks_init();
@@ -253,6 +254,7 @@ void render_shutdown(void) {
         vkg_shutdown();
         fg_shutdown();
         vkx_shutdown();
+        vkw_shutdown();
         render_ui_shutdown();
         phone_view_shutdown();
         vkr_target_destroy(&R->occl);
@@ -1802,6 +1804,8 @@ static void build_frame_graph(FrameData *fd) {
 
     post_sky();
     post_fog_apply();
+
+    vkw_build_graph(F.hdr, F.depth, F.velocity);   // water surfaces (part of the opaque scene for TAA / particles)
 
     if (F.scene_copy != FG_NONE) {
         p = fg_pass("scene_copy", exec_scene_copy, NULL);

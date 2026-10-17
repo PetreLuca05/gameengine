@@ -110,7 +110,7 @@ static void prov_sample(void *user, float x, float z, float *h, u32 *color) {
 
 // ------------------------------------------------------------------ static geometry
 
-enum { V_PLAIN, V_GLOSS, V_METAL, V_EMISSIVE, V_GLASS, V_MARK, V_DETAIL_PLAIN, V_DETAIL_GLOSS, V_DETAIL_METAL, V_DETAIL_MARK, V_WATER, V_COUNT };
+enum { V_PLAIN, V_GLOSS, V_METAL, V_EMISSIVE, V_GLASS, V_MARK, V_DETAIL_PLAIN, V_DETAIL_GLOSS, V_DETAIL_METAL, V_DETAIL_MARK, V_COUNT };   // water: game_water.c / vk_water.c
 
 typedef struct GeoBucket { int tile, variant; MeshBuilder mb; } GeoBucket;
 typedef struct CollBucket { int tile, surf; vec3 *v; u32 *ix; int nv, ni, cv, ci; } CollBucket;
@@ -390,10 +390,9 @@ static void add_draw(World *w, MeshBuilder *mb, int variant, vec3 center, float 
     case V_EMISSIVE: d->mat.emissive = 2.5f; d->mat.flags = MAT_NO_SHADOW; break;
     case V_GLASS: d->mat.color.w = 0.55f; d->mat.roughness = 0.15f; d->mat.flags = MAT_NO_SHADOW; break;
     case V_MARK: case V_DETAIL_MARK: d->mat.roughness = 0.9f; d->mat.flags = MAT_NO_SHADOW; break;
-    case V_WATER: d->mat.color.w = 0.8f; d->mat.roughness = 0.06f; d->mat.flags = MAT_NO_SHADOW; break;
     default: break;
     }
-    if (variant != V_EMISSIVE && variant != V_GLASS && variant != V_WATER) d->mat.flags |= MAT_LAYERED;   // vertex alpha = surface layer
+    if (variant != V_EMISSIVE && variant != V_GLASS) d->mat.flags |= MAT_LAYERED;   // vertex alpha = surface layer
     d->model = mat4_identity();
     d->cull_center = center;
     d->cull_dist = cull;
@@ -481,75 +480,6 @@ static void build_terrain_collision(World *w, OpenWorld *o) {
         d.layer = PL_STATIC;
         d.friction = 0.1f;
         add_body(w, &d);
-    }
-}
-
-// Water surfaces: the sea plane, lake discs, river ribbons (translucent, unshadowed).
-static void build_water(World *w, OpenWorld *o) {
-    const MapGen *g = &o->gen;
-    u32 col = rgba8(0.035f, 0.085f, 0.1f, 1);
-    vec3 up = v3(0, 1, 0);
-    if (g->sea_count >= 3) {
-        MeshBuilder mb;
-        mb_init(&mb);
-        const int n = 24;
-        const float ext = 3200.0f, step = 2.0f * ext / (float)n;
-        for (int z = 0; z <= n; z++)
-            for (int x = 0; x <= n; x++) mb_vertex(&mb, v3(-ext + (float)x * step, 0, -ext + (float)z * step), up, v2(0, 0), col);
-        for (int z = 0; z < n; z++)
-            for (int x = 0; x < n; x++) {
-                u32 a = (u32)(z * (n + 1) + x), b = a + 1, c = a + (u32)(n + 1), d = c + 1;
-                mb_tri(&mb, a, c, b);
-                mb_tri(&mb, b, c, d);
-            }
-        add_draw(w, &mb, V_WATER, v3(0, 0, 0), 0);
-        mb_free(&mb);
-    }
-    for (int i = 0; i < g->feature_count; i++) {
-        const MgFeature *f = &g->features[i];
-        if (f->kind != MGF_LAKE) continue;
-        MeshBuilder mb;
-        mb_init(&mb);
-        const int rings = 8, segs = 64;
-        u32 c0 = mb_vertex(&mb, v3(f->pos.x, f->level, f->pos.y), up, v2(0, 0), col);
-        for (int r = 1; r <= rings; r++)
-            for (int s = 0; s < segs; s++) {
-                float a = (float)s / (float)segs * 6.2831853f, rr = 1.4f * (float)r / (float)rings;
-                vec2 l = v2(cosf(a) * f->size.x * rr, sinf(a) * f->size.y * rr);
-                float cs = cosf(f->yaw), sn = sinf(f->yaw);
-                vec2 wp = v2(f->pos.x + l.x * cs + l.y * sn, f->pos.y - l.x * sn + l.y * cs);
-                mb_vertex(&mb, v3(wp.x, f->level, wp.y), up, v2(0, 0), col);
-            }
-        for (int s = 0; s < segs; s++) mb_tri(&mb, c0, c0 + 1 + (u32)((s + 1) % segs), c0 + 1 + (u32)s);
-        for (int r = 1; r < rings; r++)
-            for (int s = 0; s < segs; s++) {
-                u32 a = c0 + 1 + (u32)((r - 1) * segs + s), b = c0 + 1 + (u32)((r - 1) * segs + (s + 1) % segs);
-                u32 c = a + (u32)segs, d = b + (u32)segs;
-                mb_tri(&mb, a, b, d);
-                mb_tri(&mb, a, d, c);
-            }
-        add_draw(w, &mb, V_WATER, v3(f->pos.x, f->level, f->pos.y), 0);
-        mb_free(&mb);
-    }
-    for (int r = 0; r < g->river_count; r++) {
-        const MgRiver *rv = &g->rivers[r];
-        MeshBuilder mb;
-        mb_init(&mb);
-        float hw = rv->width * 0.5f + rv->bank * 0.6f;
-        for (int i = 0; i < rv->count; i++) {
-            const MgRiverSample *s = &g->vs[rv->first + i];
-            vec2 nrm = v2(s->dir.y, -s->dir.x);
-            mb_vertex(&mb, v3(s->p.x + nrm.x * hw, s->water, s->p.y + nrm.y * hw), up, v2(0, 0), col);
-            mb_vertex(&mb, v3(s->p.x - nrm.x * hw, s->water, s->p.y - nrm.y * hw), up, v2(0, 0), col);
-        }
-        for (int i = 0; i + 1 < rv->count; i++) {
-            u32 a = (u32)(i * 2), b = a + 1, c = a + 2, d = a + 3;
-            mb_tri(&mb, a, c, b);
-            mb_tri(&mb, b, c, d);
-        }
-        const MgRiverSample *m = &g->vs[rv->first + rv->count / 2];
-        add_draw(w, &mb, V_WATER, v3(m->p.x, m->water, m->p.y), 0);
-        mb_free(&mb);
     }
 }
 
@@ -677,7 +607,6 @@ bool openworld_load(World *w, const cJSON *root) {
 
     build_terrain_collision(w, o);
     build_geometry(w, o);
-    build_water(w, o);
     spawn_entities(w, o);
     ow_foliage_load(w, o);
     u64 t4 = SDL_GetTicksNS();

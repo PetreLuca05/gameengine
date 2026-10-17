@@ -1,0 +1,60 @@
+#version 450
+#extension GL_GOOGLE_include_directive : require
+// Interactive ripples (docs/WATER.md "Ripple sim"): a damped 2D wave equation on a toroidal window
+// around the camera (texel (i, j) holds world texel i, j mod N, so the window follows the camera
+// without copying; texels that enter the window are cleared). R = height now, G = height one step
+// ago. Sources (swimmers, wading legs, props, bullets, splashes) push the surface down; rain drops
+// are random impulses.
+#include "post_common.glsl"
+#include "water/water_common.glsl"
+
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0) uniform sampler2D prev_sim;
+layout(set = 0, binding = 8, rg16f) uniform writeonly image2D out_sim;
+
+float hash(uvec3 v) {
+    v = v * 1664525u + 1013904223u;
+    v.x += v.y * v.z; v.y += v.z * v.x; v.z += v.x * v.y;
+    v ^= v >> 16u;
+    v.x += v.y * v.z;
+    return float(v.x & 0xFFFFFFu) / 16777216.0;
+}
+
+void main() {
+    int n = int(W.ripple.w);
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    if (p.x >= n || p.y >= n) return;
+    float texel = W.ripple.z;
+    // The world texel this storage texel holds now, and whether it was in last frame's window.
+    ivec2 o = ivec2(floor(W.ripple.xy / texel + 0.5)), po = ivec2(floor(W.ripple2.xy / texel + 0.5));
+    ivec2 wt = o + ((p - o) % n + n) % n;
+    bool fresh = any(lessThan(wt, po)) || any(greaterThanEqual(wt, po + n));
+    vec2 hp = fresh ? vec2(0.0) : texelFetch(prev_sim, p, 0).rg;
+    float h = hp.r, h_prev = hp.g;
+    // Neighbours (wrapping in storage; the window's outer ring is pinned to rest so nothing wraps in).
+    ivec2 rel = wt - o;
+    bool border = any(lessThan(rel, ivec2(1))) || any(greaterThanEqual(rel, ivec2(n - 1)));
+    float sum = texelFetch(prev_sim, (p + ivec2(1, 0)) % n, 0).r + texelFetch(prev_sim, (p + ivec2(n - 1, 0)) % n, 0).r +
+                texelFetch(prev_sim, (p + ivec2(0, 1)) % n, 0).r + texelFetch(prev_sim, (p + ivec2(0, n - 1)) % n, 0).r;
+    // Wave speed c (m/s): k = (c dt / dx)^2 (stable < 0.5); damping per step.
+    float c = pc.p0.x, dt = pc.p0.y, damping = pc.p0.z;
+    float k = min(0.45, (c * dt / texel) * (c * dt / texel));
+    float h_next = (2.0 * h - h_prev + k * (sum - 4.0 * h)) * damping;
+    // Sources: a smooth dent, the strength in metres of push this step.
+    vec2 wp = (vec2(wt) + 0.5) * texel;
+    int count = int(W.ripple2.z);
+    for (int i = 0; i < count; i++) {
+        vec4 s = W.rip[2 * i];
+        float d = length(wp - s.xy);
+        if (d < s.z) {
+            float f = 1.0 - d / s.z;
+            h_next -= s.w * f * f * (3.0 - 2.0 * f);
+        }
+    }
+    // Rain: random drops, a few per square metre per second at full rain.
+    float rain = W.info.w;
+    if (rain > 0.0 && hash(uvec3(uvec2(wt + 100000), uint(W.ripple2.w))) < rain * 0.0008)
+        h_next -= 0.006;
+    if (fresh || border) { h_next = 0.0; h = 0.0; }
+    imageStore(out_sim, p, vec4(clamp(h_next, -0.25, 0.25), h, 0.0, 0.0));
+}

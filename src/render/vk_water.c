@@ -1,0 +1,433 @@
+// Water surfaces (docs/WATER.md "Rendering"): the level's static water meshes (lakes, rivers, pools,
+// flat at their level) and the ocean grid around the camera (displaced by the swell in the vertex
+// shader, shaders/water/water_waves.glsl), drawn after the opaque scene is lit and fogged and before
+// the scene copy, so particles, TAA and the next frame's SSR treat the water like any opaque
+// surface. Passes:
+//   water_prep     snapshot of the lit scene and its depth (refraction / SSR source: the surface
+//                  pass writes the depth attachment, so it cannot sample it)
+//   water_ripple   the interactive ripple sim (2D wave equation, toroidal window, r_water >= 2)
+//   water          the surface: hdr + depth + velocity (shaders/water/water.vert, water_surface.glsl)
+#include "vk_internal.h"
+#include "graph/fg.h"
+#include "post/post_internal.h"
+#include <math.h>
+#include <string.h>
+
+#define RIPPLE_TEXELS 256
+#define RIPPLE_TEXEL 0.125f          // m: a 32 m window
+#define OCEAN_RINGS 7                // clipmap levels (cells 0.5 m .. 32 m: ~8 km across)
+#define OCEAN_CELLS 64               // cells per ring side (level 0: 32 m)
+
+// Must match shaders/water/water_common.glsl (std430).
+typedef struct GpuWaterData {
+    vec4 info, wind, ripple, ripple2, ocean;
+    vec4 waves[RENDER_WATER_WAVES * 2];
+    RenderWaterBody body[RENDER_WATER_BODIES];
+    vec4 rip[RENDER_WATER_RIPPLES * 2];
+} GpuWaterData;
+
+typedef struct WaterPush {
+    vec4 grid;
+    mat4 inv_vp;
+    vec4 misc;
+    vec4 misc2;
+} WaterPush;
+_Static_assert(sizeof(WaterPush) <= 128, "WaterPush: the guaranteed push constant budget");
+
+static struct {
+    bool ok;
+    VkPipelineLayout layout;
+    VkPipeline pipe, pipe_vel;
+    GpuBuffer data[FRAMES_IN_FLIGHT];
+    // static meshes (lakes / rivers / pools)
+    GpuBuffer vb, ib;
+    u32 icount;
+    // ocean grid (one ring per clipmap level, drawn with a per-level snapped origin)
+    GpuBuffer ovb, oib;
+    u32 oicount;
+    u32 ofirst[OCEAN_RINGS], ocount[OCEAN_RINGS];
+    RenderWater w;
+    float prev_wave_time;
+    vec2 ripple_origin, ripple_prev;
+    bool ripple_valid;
+    u32 frame;
+    // frame graph
+    FgRes hdr, depth, velocity, snap_color, snap_depth, sim_prev, sim_next;
+    Cvar *r_water, *r_water_debug;
+} W;
+
+void render_water_mesh(const RenderWaterVertex *v, u32 vcount, const u32 *idx, u32 icount) {
+    if (W.vb.buffer) vkr_defer_buffer(&W.vb);
+    if (W.ib.buffer) vkr_defer_buffer(&W.ib);
+    memset(&W.vb, 0, sizeof(W.vb));
+    memset(&W.ib, 0, sizeof(W.ib));
+    W.icount = 0;
+    if (!v || !vcount || !idx || !icount) return;
+    W.vb = vkr_buffer_create(sizeof(RenderWaterVertex) * vcount, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, true);
+    W.ib = vkr_buffer_create(sizeof(u32) * icount, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, true);
+    memcpy(W.vb.mapped, v, sizeof(RenderWaterVertex) * vcount);
+    memcpy(W.ib.mapped, idx, sizeof(u32) * icount);
+    W.icount = icount;
+}
+
+void render_set_water(const RenderWater *w) { W.w = *w; }
+
+// Clipmap rings: level 0 a full OCEAN_CELLS^2 grid of 0.5 m cells, each next level the same count of
+// cells twice the size with the inner half cut out. Vertices are relative to the camera's snapped
+// cell (the vertex shader adds the snapped origin, so the grid never swims).
+static void build_ocean_grid(void) {
+    int n = OCEAN_CELLS;
+    u32 vmax = (u32)(OCEAN_RINGS * (n + 1) * (n + 1)), imax = (u32)(OCEAN_RINGS * n * n * 6);
+    RenderWaterVertex *v = (RenderWaterVertex *)malloc(sizeof(RenderWaterVertex) * vmax);
+    u32 *idx = (u32 *)malloc(sizeof(u32) * imax);
+    u32 vc = 0, ic = 0;
+    for (int lv = 0; lv < OCEAN_RINGS; lv++) {
+        float cell = 0.5f * (float)(1 << lv);
+        float half = cell * (float)n * 0.5f;
+        u32 base = vc;
+        for (int z = 0; z <= n; z++)
+            for (int x = 0; x <= n; x++) {
+                RenderWaterVertex *o = &v[vc++];
+                o->pos[0] = -half + (float)x * cell;
+                o->pos[1] = 0.0f;
+                o->pos[2] = -half + (float)z * cell;
+                o->body = 0;
+            }
+        W.ofirst[lv] = ic;
+        for (int z = 0; z < n; z++)
+            for (int x = 0; x < n; x++) {
+                // The middle (covered by the finer level) is skipped, one cell short on every side:
+                // the finer level is snapped to half this level's step, so it can sit one cell off
+                // centre; the overlap leaves no gap.
+                if (lv > 0 && x >= n / 4 + 1 && x < 3 * n / 4 - 1 && z >= n / 4 + 1 && z < 3 * n / 4 - 1) continue;
+                u32 a = base + (u32)(z * (n + 1) + x), b = a + 1, c = a + (u32)(n + 1), d = c + 1;
+                idx[ic++] = a; idx[ic++] = c; idx[ic++] = b;
+                idx[ic++] = b; idx[ic++] = c; idx[ic++] = d;
+            }
+        W.ocount[lv] = ic - W.ofirst[lv];
+    }
+    W.ovb = vkr_buffer_create(sizeof(RenderWaterVertex) * vc, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, true);
+    W.oib = vkr_buffer_create(sizeof(u32) * ic, VK_BUFFER_USAGE_INDEX_BUFFER_BIT, true);
+    memcpy(W.ovb.mapped, v, sizeof(RenderWaterVertex) * vc);
+    memcpy(W.oib.mapped, idx, sizeof(u32) * ic);
+    W.oicount = ic;
+    free(v);
+    free(idx);
+}
+
+// ------------------------------------------------------------------ pipelines
+
+static VkPipeline surface_pipe(const char *frag, bool velocity) {
+    VkShaderModule vs = vkp_load_shader("water/water.vert"), fs = vkp_load_shader(frag);
+    if (!vs || !fs) {
+        if (vs) vkDestroyShaderModule(R->device, vs, NULL);
+        if (fs) vkDestroyShaderModule(R->device, fs, NULL);
+        return VK_NULL_HANDLE;
+    }
+    VkPipelineShaderStageCreateInfo st[2] = { { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO }, { VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO } };
+    st[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+    st[0].module = vs;
+    st[0].pName = "main";
+    st[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+    st[1].module = fs;
+    st[1].pName = "main";
+    VkVertexInputBindingDescription bind = { 0, sizeof(RenderWaterVertex), VK_VERTEX_INPUT_RATE_VERTEX };
+    VkVertexInputAttributeDescription attrs[2] = {
+        { 0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(RenderWaterVertex, pos) },
+        { 1, 0, VK_FORMAT_R32_UINT, offsetof(RenderWaterVertex, body) },
+    };
+    VkPipelineVertexInputStateCreateInfo vi = { VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO };
+    vi.vertexBindingDescriptionCount = 1;
+    vi.pVertexBindingDescriptions = &bind;
+    vi.vertexAttributeDescriptionCount = 2;
+    vi.pVertexAttributeDescriptions = attrs;
+    VkPipelineInputAssemblyStateCreateInfo ia = { VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO };
+    ia.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    VkPipelineViewportStateCreateInfo vp = { VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO };
+    vp.viewportCount = vp.scissorCount = 1;
+    VkPipelineRasterizationStateCreateInfo rs = { VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO };
+    rs.polygonMode = VK_POLYGON_MODE_FILL;
+    rs.cullMode = VK_CULL_MODE_NONE;          // seen from below too (underwater)
+    rs.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    rs.lineWidth = 1.0f;
+    VkPipelineMultisampleStateCreateInfo ms = { VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO };
+    ms.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+    VkPipelineDepthStencilStateCreateInfo ds = { VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO };
+    ds.depthTestEnable = VK_TRUE;
+    ds.depthWriteEnable = VK_TRUE;
+    ds.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+    VkPipelineColorBlendAttachmentState cba[2];
+    memset(cba, 0, sizeof(cba));
+    cba[0].colorWriteMask = 0xF;
+    cba[1].colorWriteMask = 0xF;
+    VkPipelineColorBlendStateCreateInfo cb = { VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO };
+    cb.attachmentCount = velocity ? 2 : 1;
+    cb.pAttachments = cba;
+    VkDynamicState dyn[2] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
+    VkPipelineDynamicStateCreateInfo dy = { VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO };
+    dy.dynamicStateCount = 2;
+    dy.pDynamicStates = dyn;
+    VkFormat colors[2] = { VK_FORMAT_R16G16B16A16_SFLOAT, GB_VELOCITY_FORMAT };
+    VkPipelineRenderingCreateInfo rci = { VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO };
+    rci.colorAttachmentCount = velocity ? 2 : 1;
+    rci.pColorAttachmentFormats = colors;
+    rci.depthAttachmentFormat = VK_FORMAT_D32_SFLOAT;
+    VkGraphicsPipelineCreateInfo gp = { VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO };
+    gp.pNext = &rci;
+    gp.stageCount = 2;
+    gp.pStages = st;
+    gp.pVertexInputState = &vi;
+    gp.pInputAssemblyState = &ia;
+    gp.pViewportState = &vp;
+    gp.pRasterizationState = &rs;
+    gp.pMultisampleState = &ms;
+    gp.pDepthStencilState = &ds;
+    gp.pColorBlendState = &cb;
+    gp.pDynamicState = &dy;
+    gp.layout = W.layout;
+    VkPipeline p = VK_NULL_HANDLE;
+    VkResult r = vkCreateGraphicsPipelines(R->device, VK_NULL_HANDLE, 1, &gp, NULL, &p);
+    vkDestroyShaderModule(R->device, vs, NULL);
+    vkDestroyShaderModule(R->device, fs, NULL);
+    if (r != VK_SUCCESS) { log_error("water: pipeline %s failed (%d)", frag, (int)r); return VK_NULL_HANDLE; }
+    return p;
+}
+
+bool vkw_create_pipelines(void) {
+    if (!W.layout) return true;
+    if (W.pipe) vkDestroyPipeline(R->device, W.pipe, NULL);
+    if (W.pipe_vel) vkDestroyPipeline(R->device, W.pipe_vel, NULL);
+    W.pipe = surface_pipe("water/water.frag", false);
+    W.pipe_vel = surface_pipe("water/water_vel.frag", true);
+    W.ok = W.pipe && W.pipe_vel;
+    if (!W.ok) log_error("water: surface pipelines failed (no water rendering until the shaders are fixed)");
+    return true;
+}
+
+void vkw_init(void) {
+    memset(&W, 0, sizeof(W));
+    W.r_water = cvar_reg_int("r_water", 3, 0, 3, CVAR_ARCHIVE,
+                             "Water quality: 0 flat + sky reflection, 1 + SSR + refraction, 2 + ripple sim + caustics, 3 + every detail (Engine Fidelity bounds it)");
+    W.r_water_debug = cvar_reg_int("r_water_debug", 0, 0, 1, 0, "Water render debug: 1 ripple sim heights as the surface colour");
+    if (!P.ok || !P.layout) { log_warn("water: no post stack (no water rendering)"); return; }
+    VkDescriptorSetLayout sets[2] = { R->frame_layout, P.layout };
+    VkPushConstantRange pr = { VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(WaterPush) };
+    VkPipelineLayoutCreateInfo pli = { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
+    pli.setLayoutCount = 2;
+    pli.pSetLayouts = sets;
+    pli.pushConstantRangeCount = 1;
+    pli.pPushConstantRanges = &pr;
+    VK_CHECK(vkCreatePipelineLayout(R->device, &pli, NULL, &W.layout));
+    for (int i = 0; i < FRAMES_IN_FLIGHT; i++) {
+        W.data[i] = vkr_buffer_create(sizeof(GpuWaterData), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);
+        memset(W.data[i].mapped, 0, sizeof(GpuWaterData));
+    }
+    build_ocean_grid();
+    vkp_register_shader("water/water.vert");
+    vkp_register_shader("water/water.frag");
+    vkp_register_shader("water/water_vel.frag");
+    vkp_register_shader("water/water_prep.comp");
+    vkp_register_shader("water/water_ripple.comp");
+    vkw_create_pipelines();
+}
+
+void vkw_shutdown(void) {
+    if (!R || !R->device) return;
+    if (W.pipe) vkDestroyPipeline(R->device, W.pipe, NULL);
+    if (W.pipe_vel) vkDestroyPipeline(R->device, W.pipe_vel, NULL);
+    if (W.layout) vkDestroyPipelineLayout(R->device, W.layout, NULL);
+    for (int i = 0; i < FRAMES_IN_FLIGHT; i++) vkr_buffer_destroy_now(&W.data[i]);
+    vkr_buffer_destroy_now(&W.vb);
+    vkr_buffer_destroy_now(&W.ib);
+    vkr_buffer_destroy_now(&W.ovb);
+    vkr_buffer_destroy_now(&W.oib);
+    memset(&W, 0, sizeof(W));
+}
+
+// ------------------------------------------------------------------ frame
+
+static int tier(void) { return DG_CLAMP(DG_MIN(W.r_water->i, W.w.tier >= 0 ? W.w.tier : 3), 0, 3); }
+
+static void upload(void) {
+    GpuWaterData *g = (GpuWaterData *)W.data[R->frame_slot].mapped;
+    const RenderWater *w = &W.w;
+    int nb = DG_CLAMP(w->body_count, 0, RENDER_WATER_BODIES), nw = DG_CLAMP(w->wave_count, 0, RENDER_WATER_WAVES);
+    int nr = DG_CLAMP(w->ripple_count, 0, RENDER_WATER_RIPPLES);
+    g->info = v4(w->wave_time, (float)nb, (float)nw, w->rain);
+    g->wind = v4(w->wind_dir.x, w->wind_dir.y, w->wind, (float)tier());
+    g->ripple = v4(W.ripple_origin.x, W.ripple_origin.y, RIPPLE_TEXEL, (float)RIPPLE_TEXELS);
+    g->ripple2 = v4(W.ripple_prev.x, W.ripple_prev.y, (float)nr, (float)(W.frame & 0xFFFFFF));
+    g->ocean = v4((float)w->ocean_body, w->ocean_level, W.prev_wave_time, 0.0f);
+    memcpy(g->waves, w->waves, sizeof(vec4) * 2 * (size_t)nw);
+    memcpy(g->body, w->body, sizeof(RenderWaterBody) * (size_t)nb);
+    for (int i = 0; i < nr; i++) {
+        g->rip[2 * i] = w->ripples[i].pos_radius_strength;
+        g->rip[2 * i + 1] = w->ripples[i].vel;
+    }
+}
+
+static void bind_data(PostBind *b) { pb_buf(b, 13, W.data[R->frame_slot].buffer, sizeof(GpuWaterData), false); }
+
+static void exec_prep(VkCommandBuffer cmd, void *u) {
+    (void)u;
+    PostBind b = { 0 };
+    pb_ubo(&b);
+    pb_tex_fg(&b, 0, W.hdr, P.point);
+    pb_tex_fg(&b, 1, W.depth, P.point);
+    pb_img_fg(&b, 8, W.snap_color);
+    pb_img_fg(&b, 9, W.snap_depth);
+    pb_push(cmd, &b, VK_PIPELINE_BIND_POINT_COMPUTE);
+    u32 w, h;
+    fg_extent(W.hdr, &w, &h);
+    post_dispatch(cmd, "water/water_prep", w, h, 1, 8);
+}
+
+static void exec_ripple(VkCommandBuffer cmd, void *u) {
+    (void)u;
+    PostBind b = { 0 };
+    pb_ubo(&b);
+    pb_tex_fg(&b, 0, fg_history_valid(W.sim_prev) ? W.sim_prev : FG_NONE, P.point);
+    pb_img_fg(&b, 8, W.sim_next);
+    bind_data(&b);
+    pb_push(cmd, &b, VK_PIPELINE_BIND_POINT_COMPUTE);
+    struct { vec4 p0, p1, p2, p3; u32 u[16]; } pc;
+    memset(&pc, 0, sizeof(pc));
+    pc.p0 = v4(0.9f, 1.0f / 60.0f, 0.985f, 0.0f);   // wave speed (m/s), step (s), damping per step
+    post_push_constants(cmd, &pc, 128);
+    post_dispatch(cmd, "water/water_ripple", RIPPLE_TEXELS, RIPPLE_TEXELS, 1, 8);
+}
+
+static void draw_surface(VkCommandBuffer cmd, VkBuffer vb, VkBuffer ib, u32 icount, const WaterPush *pc) {
+    VkDeviceSize off = 0;
+    vkCmdBindVertexBuffers(cmd, 0, 1, &vb, &off);
+    vkCmdBindIndexBuffer(cmd, ib, 0, VK_INDEX_TYPE_UINT32);
+    vkCmdPushConstants(cmd, W.layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(*pc), pc);
+    vkCmdDrawIndexed(cmd, icount, 1, 0, 0, 0);
+    R->stats.draw_calls++;
+}
+
+static void exec_surface(VkCommandBuffer cmd, void *u) {
+    (void)u;
+    u32 w, h;
+    fg_extent(W.hdr, &w, &h);
+    bool vel = W.velocity != FG_NONE;
+    VkRenderingAttachmentInfo ca[2] = { { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO }, { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO } };
+    ca[0].imageView = fg_view(W.hdr);
+    ca[0].imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    ca[0].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+    ca[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    if (vel) {
+        ca[1] = ca[0];
+        ca[1].imageView = fg_view(W.velocity);
+    }
+    VkRenderingAttachmentInfo da = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
+    da.imageView = fg_view(W.depth);
+    da.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+    da.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+    da.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    VkRenderingInfo ri = { VK_STRUCTURE_TYPE_RENDERING_INFO };
+    ri.renderArea.extent = (VkExtent2D){ w, h };
+    ri.layerCount = 1;
+    ri.colorAttachmentCount = vel ? 2 : 1;
+    ri.pColorAttachments = ca;
+    ri.pDepthAttachment = &da;
+    vkCmdBeginRendering(cmd, &ri);
+    VkViewport vp = { 0, 0, (float)w, (float)h, 0, 1 };
+    VkRect2D sc = { { 0, 0 }, { w, h } };
+    vkCmdSetViewport(cmd, 0, 1, &vp);
+    vkCmdSetScissor(cmd, 0, 1, &sc);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, vel ? W.pipe_vel : W.pipe);
+    VkDescriptorSet fs = R->frames[R->frame_slot].frame_set;
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, W.layout, 0, 1, &fs, 0, NULL);
+    PostBind b = { 0 };
+    pb_tex_fg(&b, 0, W.snap_color, P.linear);
+    pb_tex_fg(&b, 1, W.snap_depth, P.point);
+    if (W.sim_next != FG_NONE) pb_tex_fg(&b, 2, W.sim_next, P.linear_repeat);
+    else pb_tex(&b, 2, P.black, P.linear_repeat);
+    VkDescriptorImageInfo fog;
+    post_froxel_image(true, &fog);
+    pb_tex(&b, 3, fog.imageView, fog.sampler);
+    bind_data(&b);
+    vkCmdPushDescriptorSetKHR(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, W.layout, 1, (u32)b.n, b.w);
+
+    int t = tier();
+    WaterPush pc;
+    memset(&pc, 0, sizeof(pc));
+    // The depth buffer was rendered with the jittered projection: reconstruct with the same.
+    pc.inv_vp = mat4_inverse(mat4_mul(R->proj_j, R->view));
+    pc.misc = v4(t >= 1 ? 1.0f : 0.0f, W.sim_next != FG_NONE ? 1.0f : 0.0f, t >= 2 ? 1.0f : 0.0f, t >= 1 ? 1.0f : 0.0f);
+    pc.misc2 = v4(1.0f, 0.06f, 0.0f, 0.0f);
+    if (W.icount) draw_surface(cmd, W.vb.buffer, W.ib.buffer, W.icount, &pc);
+    if (W.w.ocean_body >= 0 && W.oicount) {
+        // One draw per clipmap level, each snapped to twice its own cell (no vertex swimming, the
+        // finer level's hole stays aligned).
+        vec3 c = R->cam.pos;
+        for (int lv = 0; lv < OCEAN_RINGS; lv++) {
+            float snap = 0.5f * (float)(1 << lv) * 2.0f;
+            pc.grid = v4(floorf(c.x / snap) * snap, floorf(c.z / snap) * snap, 1.0f, 0.0f);
+            u32 first = W.ofirst[lv], count = W.ocount[lv];
+            VkDeviceSize off = 0;
+            vkCmdBindVertexBuffers(cmd, 0, 1, &W.ovb.buffer, &off);
+            vkCmdBindIndexBuffer(cmd, W.oib.buffer, 0, VK_INDEX_TYPE_UINT32);
+            vkCmdPushConstants(cmd, W.layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pc), &pc);
+            vkCmdDrawIndexed(cmd, count, 1, first, 0, 0);
+            R->stats.draw_calls++;
+        }
+    }
+    vkCmdEndRendering(cmd);
+}
+
+void vkw_build_graph(int hdr, int depth, int velocity) {
+    W.hdr = hdr;
+    W.depth = depth;
+    W.velocity = velocity;
+    W.sim_next = FG_NONE;
+    bool any = W.w.enabled && (W.icount > 0 || W.w.ocean_body >= 0);
+    if (!W.ok || !any || hdr < 0 || depth < 0) {
+        W.ripple_valid = false;
+        return;
+    }
+    W.frame++;
+    int t = tier();
+    upload();
+
+    FgTexDesc dc = { "water_snap_color", VK_FORMAT_R16G16B16A16_SFLOAT, FG_SIZE_RENDER };
+    FgTexDesc dd = { "water_snap_depth", VK_FORMAT_R32_SFLOAT, FG_SIZE_RENDER };
+    W.snap_color = fg_texture(&dc);
+    W.snap_depth = fg_texture(&dd);
+    int p = fg_pass("water_prep", exec_prep, NULL);
+    fg_read(p, hdr, FG_SAMPLED);
+    fg_read(p, depth, FG_SAMPLED);
+    fg_write(p, W.snap_color, FG_STORAGE);
+    fg_write(p, W.snap_depth, FG_STORAGE);
+
+    // Ripple sim: ping-pong histories, the window following the ripple centre in whole texels.
+    if (t >= 2) {
+        float span = RIPPLE_TEXEL * (float)RIPPLE_TEXELS;
+        vec2 o = v2(floorf((W.w.ripple_center.x - span * 0.5f) / RIPPLE_TEXEL) * RIPPLE_TEXEL,
+                    floorf((W.w.ripple_center.z - span * 0.5f) / RIPPLE_TEXEL) * RIPPLE_TEXEL);
+        W.ripple_prev = W.ripple_valid ? W.ripple_origin : o;
+        W.ripple_origin = o;
+        W.ripple_valid = true;
+        upload();
+        FgTexDesc ra = { (W.frame & 1) ? "water_ripple_a" : "water_ripple_b", VK_FORMAT_R16G16_SFLOAT, FG_SIZE_ABS, RIPPLE_TEXELS, RIPPLE_TEXELS, 1 };
+        FgTexDesc rb = { (W.frame & 1) ? "water_ripple_b" : "water_ripple_a", VK_FORMAT_R16G16_SFLOAT, FG_SIZE_ABS, RIPPLE_TEXELS, RIPPLE_TEXELS, 1 };
+        W.sim_prev = fg_history(&ra);
+        W.sim_next = fg_history(&rb);
+        p = fg_pass("water_ripple", exec_ripple, NULL);
+        fg_read(p, W.sim_prev, FG_SAMPLED);
+        fg_write(p, W.sim_next, FG_STORAGE);
+    } else {
+        W.ripple_valid = false;
+    }
+
+    p = fg_pass("water", exec_surface, NULL);
+    fg_read(p, W.snap_color, FG_SAMPLED);
+    fg_read(p, W.snap_depth, FG_SAMPLED);
+    if (W.sim_next != FG_NONE) fg_read(p, W.sim_next, FG_SAMPLED);
+    if (post_froxels() >= 0) fg_read(p, post_froxels(), FG_SAMPLED);
+    fg_write(p, hdr, FG_COLOR);
+    fg_write(p, depth, FG_DEPTH);
+    if (velocity != FG_NONE) fg_write(p, velocity, FG_COLOR);
+    W.prev_wave_time = W.w.wave_time;
+}
