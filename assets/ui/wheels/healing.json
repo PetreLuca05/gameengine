@@ -1,0 +1,9 @@
+{
+    "id": "healing",
+    "title": "Healing",
+    "source": "inventory",
+    "filter": { "kind": "consumable", "tag": "heal" },
+    "min_slots": 4,
+    "max_slots": 8,
+    "slots": ["medkit", "bandage", "painkillers", "armor", "canned_food", "water_bottle"]
+}

@@ -1,0 +1,16 @@
+{
+    "id": "ping",
+    "title": "Ping",
+    "source": "static",
+    "default": "generic",
+    "slots": [
+        { "id": "generic", "label": "Ping", "icon": "generic", "color": 0, "lifetime": 20, "chat": "pinged a spot", "sound": "ping", "desc": "Marks a spot for the team." },
+        { "id": "enemy", "label": "Enemy", "icon": "enemy", "color": 1, "lifetime": 10, "chat": "spotted an enemy", "sound": "ping_alert", "desc": "Enemy here." },
+        { "id": "loot", "label": "Loot", "icon": "loot", "color": 2, "lifetime": 45, "chat": "found loot", "sound": "ping", "desc": "Something worth taking." },
+        { "id": "danger", "label": "Danger", "icon": "danger", "color": 3, "lifetime": 20, "chat": "warns: danger", "sound": "ping_alert", "desc": "Stay away from here." },
+        { "id": "go", "label": "Go Here", "icon": "go", "color": 4, "lifetime": 40, "chat": "wants to go here", "sound": "ping", "desc": "Let's move there." },
+        { "id": "help", "label": "Need Help", "icon": "help", "color": 5, "lifetime": 25, "chat": "needs help", "sound": "ping_alert", "desc": "Come to me." },
+        { "id": "vehicle", "label": "Vehicle", "icon": "vehicle", "color": 6, "lifetime": 60, "chat": "found a vehicle", "sound": "ping", "desc": "A ride." },
+        { "id": "defend", "label": "Defend", "icon": "defend", "color": 7, "lifetime": 60, "chat": "wants to defend here", "sound": "ping", "desc": "Hold this position." }
+    ]
+}

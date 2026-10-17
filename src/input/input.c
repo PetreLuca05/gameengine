@@ -36,6 +36,7 @@ static const char *k_action_names[ACT_COUNT] = {
     "slot1", "slot2", "slot3", "slot4", "slot5", "slot6", "slot7", "slot8", "slot9",
     "nextitem", "previtem", "firemode", "flashlight", "vehiclecam", "headlights", "horn",
     "phonepair", "phonegallery", "phone", "phoneselfie",
+    "healwheel", "ping",
 };
 
 static const char *k_action_labels[ACT_COUNT] = {
@@ -44,6 +45,7 @@ static const char *k_action_labels[ACT_COUNT] = {
     "Hotbar 1", "Hotbar 2", "Hotbar 3", "Hotbar 4", "Hotbar 5", "Hotbar 6", "Hotbar 7", "Hotbar 8", "Hotbar 9",
     "Next Item", "Previous Item", "Fire Mode", "Flashlight / Enter Vehicle", "Vehicle Camera", "Headlights", "Horn",
     "Phone: Pair (QR)", "Phone: Gallery", "Phone: Take Out / Put Away", "Phone: Front / Back Camera",
+    "Healing Wheel (hold) / Quick Heal (tap)", "Ping (tap) / Ping Wheel (hold)",
 };
 
 const char *action_name(Action a) { return (a >= 0 && a < ACT_COUNT) ? k_action_names[a] : "?"; }
@@ -97,6 +99,10 @@ void input_reset_bindings(void) {
     IN->binds[ACT_PHONE][0] = key(SDL_SCANCODE_X);
     IN->binds[ACT_PHONE][1] = padb(SDL_GAMEPAD_BUTTON_DPAD_DOWN);
     IN->binds[ACT_PHONE_SELFIE][0] = key(SDL_SCANCODE_T);
+    IN->binds[ACT_HEAL_WHEEL][0] = key(SDL_SCANCODE_C);
+    IN->binds[ACT_HEAL_WHEEL][1] = padb(SDL_GAMEPAD_BUTTON_DPAD_RIGHT);
+    IN->binds[ACT_PING][0] = mouse(SDL_BUTTON_MIDDLE);
+    IN->binds[ACT_PING][1] = key(SDL_SCANCODE_Z);
 }
 
 static bool binding_eq(Binding a, Binding b) { return a.type == b.type && a.code == b.code; }
@@ -365,6 +371,8 @@ void input_end_frame(float dt) {
     float k = 0.0022f * scale; // radians per pixel at sensitivity 1
     if (IN->sweep_frames > 0) { IN->mouse_accum = v2_add(IN->mouse_accum, IN->sweep); IN->sweep_frames--; }
     vec2 look = v2(-IN->mouse_accum.x * k * IN->sens->f, -IN->mouse_accum.y * k * IN->sens_y->f);
+    IN->frame.mouse_px = IN->mouse_accum;
+    IN->frame.rstick = v2(0, 0);
     IN->mouse_accum = v2(0, 0);
     vec2 move = v2(0, 0);
     if (input_down(ACT_FORWARD)) move.y += 1;
@@ -379,6 +387,7 @@ void input_end_frame(float dt) {
         float ry = apply_deadzone(SDL_GetGamepadAxis(IN->pad, SDL_GAMEPAD_AXIS_RIGHTY) / 32767.0f, dz);
         move.x += lx;
         move.y -= ly;
+        IN->frame.rstick = v2(rx, ry);
         // Quadratic response curve for finer aim.
         float s = IN->pad_sens->f * scale * dt;
         look.x -= rx * fabsf(rx) * s;

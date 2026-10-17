@@ -4,6 +4,7 @@
 #include "characters.h"
 #include "anim/anim_library.h"
 #include "health.h"
+#include "zombies/horde.h"
 #include "core/log.h"
 #include <stdio.h>
 #include <math.h>
@@ -77,6 +78,43 @@ static void door_use(World *w, EntityId self, int player) {
     ev_sound(w, opening ? "door_open" : "door_close", w->xf[i].pos, 1.0f, EVENT_ALL);
 }
 
+bool door_action(World *w, EntityId door, int player, int action) {
+    if (!ent_valid(w, door) || w->type[ENT_INDEX(door)] != ET_DOOR || player < 0 || player >= MAX_PLAYERS) return false;
+    int i = (int)ENT_INDEX(door);
+    Player *p = &w->players[player];
+    if (!p->active || p->sim.move.mode == MOVE_DEAD) return false;
+    if (v3_dist(player_eye_pos(&p->sim.move), ent_focus_point(w, door)) > w->inter[i].range + 0.75f) return false;
+    Door *d = &w->door[i];
+    if (action == DOOR_ACT_SLAM) {
+        if ((w->flags[i] & EF_LOCKED) && !(d->key_item && inv_has(&p->inv, d->key_item))) {
+            ev_hint(w, player, "Locked");
+            ev_sound(w, "locked", w->xf[i].pos, 1.0f, EVENT_ALL);
+            return false;
+        }
+        door_use(w, door, player);
+        d->speed_mult = 3.5f;
+        ev_sound(w, "door_slam", w->xf[i].pos, 1.6f, EVENT_ALL);
+        horde_noise(w->xf[i].pos, 40.0f);
+        return true;
+    }
+    door_use(w, door, player);
+    return true;
+}
+
+bool door_visor_view(const World *w, EntityId door, vec3 from, vec3 *eye, vec3 *dir) {
+    if (!ent_valid(w, door) || w->type[ENT_INDEX(door)] != ET_DOOR) return false;
+    int i = (int)ENT_INDEX(door);
+    const Door *d = &w->door[i];
+    // The panel as it stands (a peek needs it closed, but follow it anyway).
+    vec3 n = quat_rotate(w->xf[i].rot, v3(0, 0, 1));
+    float side = v3_dot(v3_sub(from, w->xf[i].pos), n) >= 0 ? 1.0f : -1.0f;
+    vec3 v = d->visor_local;
+    v.z = -side * (w->vis[i].half.z + 0.035f);
+    *eye = v3_add(w->xf[i].pos, quat_rotate(w->xf[i].rot, v));
+    *dir = v3_scale(n, -side);
+    return true;
+}
+
 static bool door_hand(World *w, EntityId self, int player, int hand, vec3 *pos, quat *rot) {
     (void)hand;   // either hand (the free one when holding an item)
     int i = (int)ENT_INDEX(self);
@@ -113,6 +151,8 @@ EntityId spawn_door(World *w, vec3 base, float yaw, float width, float height, b
     d->key_item = key_item;
     w->item[i] = key_item;
     d->knob_local = v3(width * 0.5f - 0.09f, -height * 0.5f + 1.0f, 0.07f);
+    d->visor_local = v3(0, -height * 0.5f + fminf(1.58f, height - 0.25f), 0);
+    d->speed_mult = 1.0f;
     if (locked) w->flags[i] |= EF_LOCKED;
     ent_set_pos(w, e, center, rot, true);
     entity_setup(w, e);
@@ -620,7 +660,9 @@ void entities_tick(World *w, float dt) {
         case ET_GATE: {
             Door *d = &w->door[i];
             float prev = d->progress;
-            d->progress = approachf(d->progress, d->target, d->speed * dt);
+            float mult = d->speed_mult > 1.0f ? d->speed_mult : 1.0f;
+            d->progress = approachf(d->progress, d->target, d->speed * mult * dt);
+            if (d->progress == d->target) d->speed_mult = 1.0f;
             w->anim[i] = d->progress;
             if (prev != d->progress || w->tick < 2) {
                 vec3 pos;

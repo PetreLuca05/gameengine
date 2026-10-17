@@ -30,6 +30,7 @@
 #include "assets/assets.h"
 #include "net/net.h"
 #include "world/openworld.h"
+#include "gameplay/throwables.h"
 #include "input/input.h"
 #include <math.h>
 
@@ -348,6 +349,18 @@ static void render_entity(World *w, int i, float alpha, bool focused) {
         vec3 knob = w->door[i].knob_local;
         draw_box_local(pos, rot, v3(knob.x, knob.y, 0.05f), v3(0.025f, 0.025f, 0.03f), km);
         draw_box_local(pos, rot, v3(knob.x, knob.y, -0.05f), v3(0.025f, 0.025f, 0.03f), km);
+        // Door viewer (the peek visor): a brass ring with a dark lens on both faces.
+        {
+            vec3 vl = w->door[i].visor_local;
+            quat vr = quat_mul(rot, quat_axis_angle(v3(1, 0, 0), DG_PI * 0.5f));
+            Material lens = mat_from(rgba8(0.05f, 0.06f, 0.08f, 1), 0.05f, 0);
+            lens.metallic = 0.2f;
+            for (int sd = -1; sd <= 1; sd += 2) {
+                float z = (float)sd * (v->half.z + 0.006f);
+                draw_shape(VIS_CYLINDER, v3(0.022f, 0.008f, 0.022f), v3_add(pos, quat_rotate(rot, v3(vl.x, vl.y, z))), vr, km);
+                draw_shape(VIS_CYLINDER, v3(0.012f, 0.004f, 0.012f), v3_add(pos, quat_rotate(rot, v3(vl.x, vl.y, z + (float)sd * 0.008f))), vr, lens);
+            }
+        }
         if (w->flags[i] & EF_LOCKED) {
             Material lm = mat_from(rgba8(0.9f, 0.1f, 0.1f, 1), 0.4f, MAT_UNLIT);
             draw_box_local(pos, rot, v3(knob.x, knob.y + 0.1f, 0.03f), v3(0.02f, 0.03f, 0.01f), lm);
@@ -472,6 +485,12 @@ static void render_entity(World *w, int i, float alpha, bool focused) {
         break;
     }
     case ET_PROJECTILE:
+        if (w->item[i]) {
+            // Thrown items (gameplay/throwables.c): their own shape, burning flares / fire light up.
+            if (v->shape != VIS_NONE) draw_shape((VisShape)v->shape, v->half, pos, rot, m);
+            throwables_render(w, i);
+            break;
+        }
         draw_shape(VIS_BOX, v->half, pos, rot, m);
         break;
     case ET_GATE:
@@ -657,9 +676,14 @@ void game_render(void) {
         chars_set_thirdperson(tp);
         GR->cam_mode = 0;
         // A dev scene's camera (src/game/scene.h): third person, the body drawn whole.
-        bool scam = lp && scene_camera(w, &cam);
-        int vcam = lp && !scam ? vehicles_camera(w, &cam) : 0;
-        if (scam) {
+        bool pcam = lp && peek_camera(w, &cam);   // door peek through the visor (game_peek.c)
+        bool scam = lp && !pcam && scene_camera(w, &cam);
+        int vcam = lp && !scam && !pcam ? vehicles_camera(w, &cam) : 0;
+        if (pcam) {
+            chars_set_thirdperson(true);   // the body stays whole (the camera is on the far side of the door)
+            G->view.eye = cam.pos;
+            GR->cam_mode = 3;
+        } else if (scam) {
             chars_set_thirdperson(true);
             G->view.eye = cam.pos;
             GR->cam_mode = 3;
@@ -828,7 +852,7 @@ void game_render(void) {
     dbg_submit((float)g_engine.frame_dt, cam.pos, right, up);
     audio_update(cam.pos, fwd, up);
 
-    if (!game_post_photo_mode() && !scene_hides_hud()) { hud_draw(); vehicles_draw_hud(); phone_draw(); }
+    if (!game_post_photo_mode() && !scene_hides_hud()) { peek_draw(); hud_draw(); if (!menus_open()) wheels_draw(); vehicles_draw_hud(); phone_draw(); }
     vehicles_draw();
     sights_draw();
     daynight_draw();

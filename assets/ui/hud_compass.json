@@ -1,0 +1,10 @@
+{
+    "fov_deg": 150,
+    "tick_every": 5,
+    "label_every": 15,
+    "edge_fade": 0.18,
+    "coords": true,
+    "coords_hz": 10,
+    "marker_max_dist": 800,
+    "markers": { "pings": true, "teammates": true }
+}

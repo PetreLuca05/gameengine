@@ -3,6 +3,7 @@
 // Everything sits in the UI safe area and hides while a game screen is open. The crosshair and
 // hit markers are crosshair.c; the developer overlays keep the small debug font.
 #include "hud.h"
+#include "hud/hud_internal.h"
 #include "crosshair.h"
 #include "menus.h"
 #include "ui.h"
@@ -22,20 +23,19 @@
 #include <string.h>
 #include <math.h>
 
-#define TH (gui_theme())
 #define COL_PANEL UI_RGBA(10, 12, 14, 150)
 
 void inventory_slot_view(const InvSlot *s, const ItemDB *db, int mag_override, GuiSlotView *v);   // scr_inventory.c
+
+static float s_compass_bottom;
+float hud_compass_bottom(void) { return s_compass_bottom; }
 
 static GuiRect safe_rect(void) {
     LayoutParams lp = gui_layout_params();
     return gui_layout_safe_rect(&lp);
 }
 
-static void caps(float x, float y, float size, u32 c, int align, const char *s) {
-    GuiText t = { size, GW_SEMIBOLD, c, align, TH->tracking_caps * 1.3f, true, true, 0 };
-    gd_text(&t, x, y, s);
-}
+static void caps(float x, float y, float size, u32 c, int align, const char *s) { hud_caps(x, y, size, c, align, s); }
 
 static void bar(GuiRect r, float frac, u32 fill, u32 back) {
     gd_round(r, r.h * 0.5f, back);
@@ -149,12 +149,15 @@ static void draw_ammo(Game *g, World *w, GuiRect safe) {
         snprintf(b, sizeof(b), "%d", slot->count);
         GuiText mg = { gui_s(TH->t_huge * 0.8f), GW_SEMIBOLD, TH->hud_text, GUI_RIGHT, 0, false, true, 0 };
         gd_text(&mg, x, y + gui_s(16), b);
-        if (p->sim.wpn.use_t >= 0) {
-            float frac = p->sim.wpn.use_t / fmaxf(0.01f, it->use_time);
-            gd_ring(cx, cy, gui_s(22), gui_s(2.5f), frac, TH->ok);
-        } else {
-            caps(x, y + gui_s(70), gui_s(TH->t_tiny), TH->text_faint, GUI_RIGHT, "Hold fire to use");
-        }
+        // The use itself shows on the timed ring (game_wheels.c).
+        if (p->sim.wpn.use_t < 0) caps(x, y + gui_s(70), gui_s(TH->t_tiny), TH->text_faint, GUI_RIGHT, "Hold fire to use");
+    } else if (it->kind == ITEM_THROWABLE) {
+        char b[16];
+        snprintf(b, sizeof(b), "%d", slot->count);
+        GuiText mg = { gui_s(TH->t_huge * 0.8f), GW_SEMIBOLD, TH->hud_text, GUI_RIGHT, 0, false, true, 0 };
+        gd_text(&mg, x, y + gui_s(16), b);
+        if (p->sim.wpn.use_t < 0)
+            caps(x, y + gui_s(70), gui_s(TH->t_tiny), TH->text_faint, GUI_RIGHT, it->thr.kind == THROW_GRENADE ? "Hold fire to cook, release to throw" : "Hold fire, release to throw");
     } else if (wd) {
         char b[32];
         snprintf(b, sizeof(b), "%.0f dmg", wd->damage);
@@ -234,19 +237,6 @@ static void draw_hints(Game *g, GuiRect safe) {
         GuiText t = { gui_s(TH->t_body), GW_MEDIUM, gui_rgba_mul(UI_RGBA(245, 232, 205, 255), a), GUI_CENTER, 0, false, true, 0 };
         gd_text(&t, gui_w() * 0.5f, y, h->text);
         y += gui_s(24);
-    }
-    float ky = safe.y;
-    for (int i = 0; i < MAX_KILLFEED; i++) {
-        Hint *h = &g->killfeed[i];
-        if (h->time <= 0) continue;
-        float a = saturate(h->time);
-        GuiText t = { gui_s(TH->t_small + 1), GW_MEDIUM, gui_rgba_mul(TH->hud_text, a), GUI_RIGHT, 0, false, false, 0 };
-        float tw = gd_text_width(&t, h->text);
-        GuiRect r = { safe.x + safe.w - tw - gui_s(20), ky, tw + gui_s(20), gui_s(26) };
-        gd_round(r, gui_s(TH->radius), gui_rgba_mul(TH->hud_panel, a));
-        gd_rect(gui_rect(r.x + r.w - gui_s(3), r.y, gui_s(3), r.h), gui_rgba_mul(TH->danger, a));
-        gd_text(&t, r.x + r.w - gui_s(12), r.y + (r.h - gd_line_height(t.size)) * 0.5f, h->text);
-        ky += gui_s(30);
     }
 }
 
@@ -340,6 +330,11 @@ void hud_draw(void) {
     draw_ammo(g, w, safe);
     draw_hotbar(g, w, safe);
     draw_hints(g, safe);
+    hud_pings_draw(g, safe);
+    s_compass_bottom = hud_compass_draw(g, safe);
+    gd_alpha_push(hud_cvars()->opacity->f);
+    hud_kills_draw(g, safe);
+    gd_alpha_pop();
     Player *p = game_local_player();
     if (p && p->sim.move.mode == MOVE_DEAD) {
         GuiText t = { gui_s(TH->t_huge * 1.2f), GW_SEMIBOLD, TH->danger, GUI_CENTER, 0.2f, true, true, 0 };

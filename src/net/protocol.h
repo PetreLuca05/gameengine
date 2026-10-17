@@ -9,7 +9,7 @@
 #ifndef DG_PROTOCOL_H
 #define DG_PROTOCOL_H
 
-#define DG_PROTOCOL_VERSION 16  // 16: lobby (HELLO build hash / version / Steam id / listen port, MSG_LOBBY); 15: hand poses (AC_HAND_POSES in the join manifest); 14: phone (UserCmd phone_rot / phone_flags, ANS_PHONE in the character state); 13: modular character parts (ANS_PARTS in the anim state, RPC_SET_PART); 12: PlayerMove.veh_raise; 11: vehicles (PlayerMove seat fields, vehicle block in snapshots, BTN_VEHICLE); 10: weather in snapshots; 9: inventory intents (RPC_INV_OP, MSG_INVENTORY ack); 8: weapon attachments (InvSlot.att, NF_ATTACH), time of day in snapshots
+#define DG_PROTOCOL_VERSION 17  // 17: HUD (EV_KILL flags + KillEventData, EV_PING / RPC_PING, RPC_DOOR_ACTION, EV_EXPLOSION, throwable projectiles); 16: lobby (HELLO build hash / version / Steam id / listen port, MSG_LOBBY); 15: hand poses (AC_HAND_POSES in the join manifest); 14: phone (UserCmd phone_rot / phone_flags, ANS_PHONE in the character state); 13: modular character parts (ANS_PARTS in the anim state, RPC_SET_PART); 12: PlayerMove.veh_raise; 11: vehicles (PlayerMove seat fields, vehicle block in snapshots, BTN_VEHICLE); 10: weather in snapshots; 9: inventory intents (RPC_INV_OP, MSG_INVENTORY ack); 8: weapon attachments (InvSlot.att, NF_ATTACH), time of day in snapshots
 #define DG_DEFAULT_PORT 27015
 #define DG_DISCOVERY_PORT 27016
 

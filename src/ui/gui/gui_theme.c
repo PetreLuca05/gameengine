@@ -43,6 +43,9 @@ static void defaults(GuiTheme *t) {
     t->type_misc = RGBA(150, 150, 150, 255);
     t->hud_panel = RGBA(10, 12, 14, 130);
     t->hud_text = RGBA(236, 236, 230, 255);
+    t->select = RGBA(255, 255, 255, 255);
+    t->ring = RGBA(255, 255, 255, 255);
+    for (int i = 0; i < 8; i++) t->ping[i] = t->accent;
     t->rarity[0] = RGBA(170, 170, 166, 255);
     t->rarity[1] = RGBA(110, 196, 112, 255);
     t->rarity[2] = RGBA(110, 160, 226, 255);
@@ -172,6 +175,10 @@ bool gui_theme_load(const char *path) {
         C(type_weapon); C(type_ammo); C(type_consumable); C(type_attachment); C(type_key); C(type_misc);
         C(hud_panel); C(hud_text);
 #undef C
+        col(c, "select", &t.select);
+        col(c, "ring", &t.ring);
+        const cJSON *pc = cJSON_GetObjectItemCaseSensitive(c, "ping_types");
+        for (int i = 0; i < 8 && cJSON_IsArray(pc) && i < cJSON_GetArraySize(pc); i++) col_item(cJSON_GetArrayItem(pc, i), &t.ping[i]);
         static const char *const rn[5] = { "rarity_common", "rarity_uncommon", "rarity_rare", "rarity_epic", "rarity_legendary" };
         for (int i = 0; i < 5; i++) col(c, rn[i], &t.rarity[i]);
         const cJSON *cn = cJSON_GetObjectItemCaseSensitive(c, "chat_names");

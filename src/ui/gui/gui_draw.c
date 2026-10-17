@@ -704,8 +704,14 @@ float gd_text_wrap(const GuiText *t, float x, float y, float w, const char *s, b
             GuiText tt = *t;
             tt.align = GUI_LEFT;
             tt.max_w = 0;
-            if (t->shadow) emit(&tt, floorf(x), floorf(y + h), line, (int)(stop - line), true);
-            emit(&tt, floorf(x), floorf(y + h), line, (int)(stop - line), false);
+            // Centred / right-aligned paragraphs: each line inside [x, x + w).
+            float lx = x;
+            if (t->align != GUI_LEFT) {
+                float lw = measure(t, line, (int)(stop - line));
+                lx = t->align == GUI_CENTER ? x + (w - lw) * 0.5f : x + w - lw;
+            }
+            if (t->shadow) emit(&tt, floorf(lx), floorf(y + h), line, (int)(stop - line), true);
+            emit(&tt, floorf(lx), floorf(y + h), line, (int)(stop - line), false);
         }
         h += lh;
         line = stop;

@@ -127,6 +127,8 @@ typedef struct Door {
     u16 key_item;
     bool sliding;
     vec3 knob_local;      // knob position relative to door center (closed frame)
+    vec3 visor_local;     // door viewer (peephole) at eye height, panel centre (docs/UI_WHEELS_HUD.md "Peek")
+    float speed_mult;     // > 1 while slamming (back to 1 when it stops)
 } Door;
 
 typedef struct Lever {
@@ -173,6 +175,11 @@ typedef struct Projectile {
     EntityId owner;
     int weapon;
     float life;
+    // Throwables (gameplay/throwables.c): item != 0.
+    u16 item;
+    float fuse;           // s until it goes off (grenades)
+    float burn;           // s left burning (flares, molotov fire)
+    bool resting;
 } Projectile;
 
 typedef struct Hitbox {

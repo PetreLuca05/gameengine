@@ -1,0 +1,11 @@
+{
+    "id": "door",
+    "title": "Door",
+    "source": "static",
+    "default": "open",
+    "slots": [
+        { "id": "open", "label": "Open", "icon": "door_open", "desc": "Opens (or closes) the door." },
+        { "id": "slam", "label": "Slam", "icon": "door_slam", "desc": "Fast and loud. Zombies hear it." },
+        { "id": "peek", "label": "Peek", "icon": "peek", "desc": "Look through the visor. Move or press use to stop." }
+    ]
+}
