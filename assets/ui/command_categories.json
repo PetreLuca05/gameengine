@@ -27,6 +27,8 @@
         "sv_cheats": "system",
         "cl_name": "network",
         "cl_fov": "camera",
+        "sv_fov": "camera",
+        "sv_fov_max_aspect": "camera",
         "cl_interp": "network",
         "cl_predict_impacts": "network",
         "cl_predict_hit_reactions": "network",

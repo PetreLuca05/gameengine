@@ -33,8 +33,8 @@ Attachment space uses the item convention: -Z points forward (along the barrel),
 | `sight_socket` | The ADS point on the optic axis: the rear of the red dot window, or the scope ocular |
 | `eye_relief` | Metres from the eye to `sight_socket`. `"weapon"` keeps the iron-sight stock weld (red dots). |
 | `zoom` | Magnification |
-| `ads_fov` | Explicit sight FOV (degrees at `cl_fov` 75). The default is `2·atan(tan(base/2)/zoom)`. |
-| `main_zoom` | PiP scopes: mild zoom of the main view around the scope (default 1.15) |
+| `ads_fov` | Explicit sight FOV (degrees against a 75° view). Scopes: sets the lens magnification `tan(37.5°)/tan(ads_fov/2)`; red dots: the hands / weapon zoom. The default is `2·atan(tan(base/2)/zoom)`. |
+| `main_zoom` | Scopes: mild zoom of the hands / weapon projection around the scope (default 1.15); the world is not zoomed |
 | `rail_offset` | Metres along the rail; + moves towards the stock. Clamped to the slot's `rail`. Scopes default to `"auto"` (see Eye relief). |
 | `reticle` | See the next table |
 | `lens` | See the table after it |
@@ -166,19 +166,28 @@ per-frame re-solve. The barrel pull is used only if the slide isn't enough.
 
 ## FOV and sensitivity
 
-- The camera FOV follows the weapon's ADS progress `ads_t` exactly. It is
-  `lerp(hip, ads_fov, smoothstep(ads_t))`, so the aimed FOV holds the moment `ads_t` reaches 1.
-- Iron sights use the weapon's `ads_fov`. A red dot uses its sight FOV.
-- A PiP scope keeps the main view at `main_zoom`; the scope image carries the magnification.
-- A full-screen scope (`r_scope_mode 1`) blends to `main_zoom`, then switches to the scope FOV on
-  the exact frame the aim completes. The weapon and arms are hidden while it is up.
-- The weapon and arms keep the weapon-FOV projection. `RenderCamera.vm_fov_deg` is the hip FOV
-  (or `cam_weapon_fov`), so ADS zoom never scales the viewmodel. The sight is on the view axis,
-  so it projects to the exact screen centre under either projection.
+- **The world camera FOV never changes with ADS.** It is the host's `sv_fov` (vertical degrees,
+  default 75 = 107° horizontal at 16:9), the same for every player whatever their settings: no FOV
+  advantage. Screens up to `sv_fov_max_aspect` (16:9) see more to the sides (Hor+); wider screens
+  keep the 16:9 horizontal FOV. `cl_fov` is still accepted from old configs and ignored. Sprint
+  widening (`cl_sprint_fov`) and the fire FOV punch still apply.
+- **ADS zooms only the hands and the weapon.** Their projection narrows by `attach_ads_vm_zoom`
+  (a tangent ratio) along `smoothstep(ads_t)`, exactly the aimed value the moment `ads_t`
+  reaches 1. Iron sights use the weapon's `ads_fov`, a red dot its own `ads_fov` / `zoom` on top,
+  a scope `main_zoom`; each as a FOV against a 75° view, so the gun and sight look as they did
+  when this zoomed the whole view. The hip value is `RenderCamera.vm_fov_deg` (the hip FOV) or
+  `cam_weapon_fov`. The sight is on the view axis, so it projects to the exact screen centre
+  under either projection.
+- **Scopes magnify only inside the lens.** The picture-in-picture image carries the whole
+  magnification (`attach_sight_zoom`: `zoom`, or `ads_fov` against 75°) relative to the base
+  FOV; the world around the scope stays at the base FOV. A second-focal-plane reticle scales with
+  the weapon projection it is drawn in (`post_sights.c`). There is no full-screen scope mode.
 
 ### Sensitivity
 
-Sensitivity while aiming is `cl_ads_sensitivity` times the sight FOV factor.
+Sensitivity while aiming is `cl_ads_sensitivity` times the sight FOV factor. The sight FOV is the
+base FOV at the optic's real magnification: irons and red dots are 1x (factor 1, the world is not
+zoomed), a 4x scope `2·atan(tan(base/2)/4)`.
 `ads_sens_mode` sets the factor:
 
 | Mode | Factor |
@@ -267,9 +276,9 @@ ADS DoF switches on exactly while the aim is complete (`ads_dof`):
 |---|---|
 | `attach [slot] [id/none]` | Equipped weapon; no arguments lists the slots and options |
 | `bench` | Toggle the bench UI |
-| `ads_debug 1` | The sight socket projected against the exact screen centre (px, mm off axis, degrees, eye relief), sight / main / PiP FOV, sensitivity, DoF mode |
+| `ads_debug 1` | The sight socket projected against the exact screen centre (px, mm off axis, degrees, eye relief), world / hands FOV, sight zoom, PiP FOV, sensitivity, DoF mode |
 | `sight_debug 1..6` | 1 lens mask, 2 raw PiP, 3 eye box, 4 reticle only, 5 glass only, 6 lens hit / occlusion |
-| `r_scope_mode` | 0 picture-in-picture, 1 full screen |
+| `sv_fov`, `sv_fov_max_aspect` | World camera vertical FOV for every player (host, replicated; 60..100, default 75) and the widest Hor+ aspect (16:9; 0 = unlimited) |
 | `r_scope_pip_scale` | PiP resolution (fraction of the render height) |
 | `sight_brightness` | Red dot / illuminated reticle brightness |
 | `ads_sens_mode`, `ads_sens_coef` | Sensitivity scaling |
@@ -283,7 +292,7 @@ ADS DoF switches on exactly while the aim is complete (`ads_dof`):
 | `sight_test sweep` | The same pitch / yaw sweep for the weapon as equipped |
 | `sight_test aspect` | The sight socket through 16:9, 21:9 and 4:3 projections: ≤ 0.5 px from the centre |
 | `sight_test parallax` | Red dot: an eye 2 cm off axis still sees the dot on the 50 m target within 1 MOA |
-| `sight_test fov` … `sight_test_report` | The frame ADS completes already has the aimed FOV and the ADS DoF; the first incomplete frame has neither |
+| `sight_test fov` … `sight_test_report` | The world FOV never changes while aiming; the frame ADS completes already has the aimed hands / weapon FOV and the ADS DoF; the first incomplete frame has neither |
 | `sight_test net` | `NF_ATTACH` through the real snapshot encoder: full, 2-slot delta, unchanged (no field) |
 | `.toolchain/snet.sh` | Two instances over LAN, each mounting optics through `RPC_ATTACH`. `sight_test dump` shows matching ids on both machines, and screenshots show the other player's optic. |
 | `tools/tests/sights.cfg`, `sight_lane.cfg`, `sight_misc.cfg` | Screenshots and the tests above |
