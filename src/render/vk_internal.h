@@ -13,6 +13,7 @@
 #define MAX_SWAP_IMAGES 8
 #define MAX_MESHES 16384
 #define MAX_TEXTURES 1024
+#define MAX_MAT_SETS 256
 #define MAX_DRAWS 16384
 #define MAX_VM_DRAWS 512
 #define MAX_DEFERRED 4096
@@ -170,11 +171,15 @@ typedef struct PushLit {
     vec4 color;
     vec4 params;
     u32 flags[4];
+    u32 pbr[4];     // glTF maps (shaders/pbr_maps.glsl): float bits of normal_scale, occlusion_strength, emissive_rgb, float bits of alpha_cutoff
 } PushLit;
+_Static_assert(sizeof(PushLit) == 128, "PushLit: the guaranteed push constant budget");
 
 typedef enum PipelineId {
     PIPE_LIT, PIPE_LIT_WIRE, PIPE_LIT_BLEND, PIPE_SHADOW, PIPE_LINES, PIPE_LINES_OVERLAY,
-    PIPE_TEXT, PIPE_PREPASS, PIPE_UI, PIPE_SKIN, PIPE_SKIN_WIRE, PIPE_SKIN_SHADOW, PIPE_PREPASS_SKIN, PIPE_UI3D, PIPE_PRECIP, PIPE_COUNT
+    PIPE_TEXT, PIPE_PREPASS, PIPE_UI, PIPE_SKIN, PIPE_SKIN_WIRE, PIPE_SKIN_SHADOW, PIPE_PREPASS_SKIN, PIPE_UI3D, PIPE_PRECIP,
+    // glTF material variants of PIPE_LIT / PIPE_PREPASS (docs/PBR.md): doubleSided (no culling), alphaMode MASK (discard, no culling)
+    PIPE_LIT_2S, PIPE_LIT_MASK, PIPE_PREPASS_2S, PIPE_PREPASS_MASK, PIPE_COUNT
 } PipelineId;
 
 // Must match SkinInstance in shaders/common.glsl (std430).
@@ -221,6 +226,7 @@ typedef struct Renderer {
     VkDescriptorSetLayout frame_layout;   // set 0
     VkDescriptorSetLayout tex_layout;     // set 1
     VkDescriptorSetLayout lit_post_layout; // set 2 of layout_lit (push descriptor: AO, contact, SSR, SSGI)
+    VkDescriptorSetLayout mat_layout;     // set 3 of layout_lit: glTF PBR maps (metallic-roughness, normal, occlusion, emissive)
     VkDescriptorPool pool;
     VkPipelineLayout layout_lit;          // set0 + set1 + push lit
     VkPipelineLayout layout_ui;           // set1 + push (vertex + fragment: screen scale, 1 / size)
@@ -239,7 +245,12 @@ typedef struct Renderer {
     u32 mesh_free_hint;
     GpuTexture textures[MAX_TEXTURES];
     TextureId white_tex;
+    TextureId flat_normal_tex;            // (0.5, 0.5, 1): a normal map that is not ready yet
     TextureId text_atlas;
+    // glTF PBR map sets (set 3, vk_resources.c vkr_material_set): one per combination of the four
+    // map textures; [0] = all white (materials without maps).
+    struct MatSet { TextureId tex[4]; VkDescriptorSet set; } mat_sets[MAX_MAT_SETS];
+    u32 mat_set_count;
 
     Upload uploads[MAX_UPLOADS];
     int upload_count;
@@ -369,6 +380,9 @@ void vkg_samplers_changed(void);          // vk_vgeo.c: re-enter the texture tab
 VkDescriptorSet vkr_alloc_tex_set(VkImageView view, VkSampler sampler);
 void vkr_write_tex_set(VkDescriptorSet set, VkImageView view, VkSampler sampler);
 void vkr_rewrite_all_texture_sets(void);
+// Set 3 of layout_lit for a material's glTF maps (index into R->mat_sets, 0 = no maps / table full);
+// maps that are not ready yet sample white (flat for the normal map) until they are.
+u32 vkr_material_set(const Material *m);
 // A texture slot over an image owned elsewhere (UI render targets): sampled clamped by the UI.
 TextureId vkr_texture_wrap(VkImage image, VkImageView view, u32 w, u32 h, VkFormat fmt);
 void vkr_texture_rewrap(TextureId id, VkImage image, VkImageView view, u32 w, u32 h);

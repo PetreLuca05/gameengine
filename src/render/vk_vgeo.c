@@ -928,6 +928,18 @@ static u32 level_mesh(const RenderVgeoPlacement *pl) {
             m.flags = mm->flags & (MAT_TEXTURED | MAT_TRIPLANAR | MAT_GRID | MAT_CHECKER);
             m.tex_scale = mm->tex_scale > 0 ? mm->tex_scale : 1.0f;
             if ((mm->flags & MAT_TEXTURED) && mm->texture) { m.albedo_tex = mm->texture; tex_use(mm->texture); }
+            // glTF maps (docs/PBR.md): the resolve samples them through the texture table.
+            const u32 map_flag[4] = { MAT_MR_TEX, MAT_NORMAL_TEX, MAT_OCCLUSION_TEX, MAT_EMISSIVE_TEX };
+            const TextureId map_tex[4] = { mm->mr_tex, mm->normal_tex, mm->occlusion_tex, mm->emissive_tex };
+            u32 *map_dst[4] = { &m.mr_tex, &m.normal_tex, &m.occlusion_tex, &m.emissive_tex };
+            for (int t = 0; t < 4; t++)
+                if ((mm->flags & map_flag[t]) && map_tex[t]) { m.flags |= map_flag[t]; *map_dst[t] = map_tex[t]; tex_use(map_tex[t]); }
+            m.normal_scale = mm->normal_scale;
+            m.occlusion_strength = mm->occlusion_strength;
+            m.emissive_rgb = mm->emissive_rgb;
+            // alphaMode MASK / doubleSided: the vgeo masked / two-sided paths (every raster path and the shadows)
+            if (mm->flags & MAT_ALPHA_MASK) { m.flags |= VGM_MASKED; m.mask_tex = m.albedo_tex; m.alpha_cutoff = mm->alpha_cutoff; }
+            if (mm->flags & (MAT_TWO_SIDED | MAT_ALPHA_MASK)) m.flags |= VGM_TWO_SIDED | MAT_TWO_SIDED;
             const ModelFoliage *fo = &model->foliage;
             if (fo->enabled) {   // manifest "foliage": the vgeo material flags and WPO parameters
                 m.flags |= VGM_FOLIAGE | (fo->masked ? VGM_MASKED : 0) | (fo->two_sided ? VGM_TWO_SIDED : 0) | (fo->dither ? VGM_DITHER_FADE : 0);
@@ -1149,6 +1161,19 @@ void vkg_submit_fallback(void) {
         di.mat.metallic = vm->metallic;
         di.mat.emissive = vm->emissive;
         di.mat.tex_scale = vm->tex_scale;
+        // glTF maps (docs/PBR.md): the same textures as the resolve (the albedo only with maps, so meshes
+        // drawn untextured here so far stay so)
+        if (vm->flags & MAT_PBR_MAPS) {
+            di.mat.flags = vm->flags & (MAT_PBR_MAPS | MAT_TEXTURED | MAT_TWO_SIDED);
+            di.mat.texture = vm->albedo_tex;
+            di.mat.mr_tex = vm->mr_tex;
+            di.mat.normal_tex = vm->normal_tex;
+            di.mat.occlusion_tex = vm->occlusion_tex;
+            di.mat.emissive_tex = vm->emissive_tex;
+            di.mat.normal_scale = vm->normal_scale;
+            di.mat.occlusion_strength = vm->occlusion_strength;
+            di.mat.emissive_rgb = vm->emissive_rgb;
+        }
         render_draw(&di);
     }
 }

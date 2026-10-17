@@ -221,7 +221,7 @@ typedef struct VgCounters { u32 args[VGA_COUNT][4]; u32 n[VGN_COUNT]; } VgCounte
 #define VG_VIS_TRI_BITS 7
 #define VG_VIS_INDEX_BITS 25
 
-// Material flags above the renderer's MaterialFlags (render.h MAT_*, bits 0-11), Phase 7.
+// Material flags above the renderer's MaterialFlags (render.h MAT_*, bits 0-19), Phase 7.
 enum VgMaterialFlags {
     VGM_MASKED = 1u << 24,           // alpha mask: mask_tex alpha >= alpha_cutoff, the same test in every raster path
     VGM_TWO_SIDED = 1u << 25,        // no back-face / cone culling, the resolve flips back-facing normals
@@ -247,7 +247,11 @@ typedef struct VgMaterial {
     float fade_start, fade_end;      // m: distance fade (VGM_FOLIAGE; fade_end 0 = none)
     float wpo_params[4];             // snippet parameters (wpo.glsl)
     float shadow_max_dist;           // m: sun cascades skip the mesh beyond this distance from the camera (0 = always)
-    u32 pad[3];
+    // glTF PBR maps (docs/PBR.md, shaders/pbr_maps.glsl): texture indices (0 = none; the MAT_*_TEX flags
+    // say which are meant), normal_scale, occlusion_strength, emissive colour RGBA8 (with MAT_EMISSIVE_TEX).
+    u32 mr_tex, normal_tex, occlusion_tex, emissive_tex;
+    float normal_scale, occlusion_strength;
+    u32 emissive_rgb;
 } VgMaterial;
 
 // Push constants of every cull kernel (48 B).
@@ -288,7 +292,7 @@ _Static_assert(sizeof(VgInstance) == 32, "VgInstance");
 _Static_assert(sizeof(VgCell) == 32, "VgCell");
 _Static_assert(sizeof(VgPaletteSlot) == 32, "VgPaletteSlot");
 _Static_assert(sizeof(VgViewGpu) == 496, "VgViewGpu");
-_Static_assert(sizeof(VgMaterial) == 96, "VgMaterial");
+_Static_assert(sizeof(VgMaterial) == 112, "VgMaterial");
 _Static_assert(sizeof(VgCounters) == 256, "VgCounters");
 _Static_assert(sizeof(VgPush) == 48, "VgPush");
 _Static_assert(sizeof(VgFileHeader) == 112 + VGS_COUNT * 8, "VgFileHeader");

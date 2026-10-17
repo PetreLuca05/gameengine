@@ -5,6 +5,9 @@
 // Foliage (Phase 7): positions include the WPO (and the previous frame's WPO for velocity), two-sided
 // materials flip back-facing normals, WPO materials' vertex colours are wind weights (not albedo),
 // impostor entries sample their atlas.
+// glTF maps (docs/PBR.md): the material's map textures + parameters for shaders/pbr_maps.glsl and the
+// triangle's tangent frame from its positions and uvs (exact per triangle; no screen derivatives,
+// which cross triangle and instance edges in a full-screen resolve).
 #include "vgeo/vg_impostor.glsl"
 vec3 v_world, v_normal;
 vec2 v_uv;
@@ -14,6 +17,17 @@ uint g_mat_flags;
 uint g_tex;                 // texture index of the material (VG_TEXTURES), 0 = none
 float g_depth;
 bool g_front;               // false: a back face of a two-sided material (the bodies flip the normal)
+uvec4 g_pbr_tex;            // metallic-roughness, normal, occlusion, emissive texture indices
+uvec4 g_pbr;                // PBR_PARAMS (pbr_maps.glsl)
+vec3 g_tangent, g_bitangent;   // world dP/du, dP/dv of the triangle (0: no frame)
+
+// The tangent frame for pbr_normal: the triangle's T / B made orthogonal to the shading normal n
+// (directions kept: mirrored uvs stay mirrored).
+mat3 vg_tangent_frame(vec3 n) {
+    vec3 t = g_tangent - n * dot(n, g_tangent), b = g_bitangent - n * dot(n, g_bitangent);
+    if (dot(t, t) < 1e-20 || dot(b, b) < 1e-20) return mat3(vec3(0.0), vec3(0.0), n);
+    return mat3(normalize(t), normalize(b), n);
+}
 
 // Perspective-correct barycentrics of NDC point pn on the triangle with clip positions c0 c1 c2.
 vec3 vg_resolve_bary(vec4 c0, vec4 c1, vec4 c2, vec2 pn, out float area) {
@@ -31,13 +45,22 @@ vec3 vg_resolve_bary(vec4 c0, vec4 c1, vec4 c2, vec2 pn, out float area) {
 void vg_resolve_material(VgMaterial mat) {
     g_mat_color = mat.color;
     g_mat_params = vec4(mat.roughness, mat.metallic, mat.emissive, mat.tex_scale);
-    g_tex = mat.albedo_tex;
+    // Texture table indices are bounded: a pixel can decode a material record that is not a real
+    // material (an index past the table would fault the device; 0 = none / white).
+    g_tex = mat.albedo_tex < uint(VG_TEX_COUNT) ? mat.albedo_tex : 0u;
+    g_pbr_tex = uvec4(mat.mr_tex, mat.normal_tex, mat.occlusion_tex, mat.emissive_tex);
+    g_pbr_tex = mix(uvec4(0u), g_pbr_tex, lessThan(g_pbr_tex, uvec4(uint(VG_TEX_COUNT))));
+    g_pbr = uvec4(floatBitsToUint(mat.normal_scale), floatBitsToUint(mat.occlusion_strength), mat.emissive_rgb, floatBitsToUint(mat.alpha_cutoff));
 #ifdef VG_TEXTURES
     g_mat_flags = g_tex != 0u ? mat.flags : (mat.flags & ~MAT_TEXTURED);
 #else
     g_mat_flags = mat.flags & ~MAT_TEXTURED;
 #endif
     g_mat_flags &= ~VGM_FLAGS;
+    if (g_pbr_tex.x == 0u) g_mat_flags &= ~MAT_MR_TEX;
+    if (g_pbr_tex.y == 0u) g_mat_flags &= ~MAT_NORMAL_TEX;
+    if (g_pbr_tex.z == 0u) g_mat_flags &= ~MAT_OCCLUSION_TEX;
+    if (g_pbr_tex.w == 0u) g_mat_flags &= ~MAT_EMISSIVE_TEX;
 }
 
 bool vg_resolve_pixel() {
@@ -48,6 +71,7 @@ bool vg_resolve_pixel() {
     uint lo = uint(e & 0xFFFFFFFFul), hi = uint(e >> 32);
     g_depth = 1.0 - uintBitsToFloat(hi);
     g_front = true;
+    g_tangent = g_bitangent = vec3(0.0);
     uvec2 ent = visible[lo >> VG_VIS_TRI_BITS];
     VgXf x = vg_instance_xf(ent.x);
     VgMesh m = meshes[x.mesh];
@@ -70,7 +94,7 @@ bool vg_resolve_pixel() {
         v_prev_clip = V.prev_view_proj * vec4(v_world, 1.0);
         vg_resolve_material(materials[m.material_base]);
         g_mat_color = vec4(1.0);
-        g_mat_flags &= ~(MAT_TEXTURED | MAT_TRIPLANAR | MAT_GRID | MAT_CHECKER);
+        g_mat_flags &= ~(MAT_TEXTURED | MAT_TRIPLANAR | MAT_GRID | MAT_CHECKER | MAT_MR_TEX | MAT_NORMAL_TEX | MAT_OCCLUSION_TEX | MAT_EMISSIVE_TEX);
         return true;
     }
     VgClusterRef ref = vg_cluster_ref(ent.y);
@@ -92,7 +116,8 @@ bool vg_resolve_pixel() {
     if (x.skin || (m.fflags & VGMF_WPO) != 0u)
         prev_world = vg_vertex_world_ex(x, c, m, t.x, true) * b.x + vg_vertex_world_ex(x, c, m, t.y, true) * b.y + vg_vertex_world_ex(x, c, m, t.z, true) * b.z;
     v_normal = normalize(vg_xf_dir(x, n0 * b.x + n1 * b.y + n2 * b.z));
-    v_uv = vg_vertex_uv(c, m, t.x) * b.x + vg_vertex_uv(c, m, t.y) * b.y + vg_vertex_uv(c, m, t.z) * b.z;
+    vec2 u0 = vg_vertex_uv(c, m, t.x), u1 = vg_vertex_uv(c, m, t.y), u2 = vg_vertex_uv(c, m, t.z);
+    v_uv = u0 * b.x + u1 * b.y + u2 * b.z;
     v_color = vg_vertex_color(c, m, t.x) * b.x + vg_vertex_color(c, m, t.y) * b.y + vg_vertex_color(c, m, t.z) * b.z;
     v_cur_clip = V.view_proj * vec4(v_world, 1.0);        // unjittered (velocity)
     v_prev_clip = V.prev_view_proj * vec4(prev_world, 1.0);
@@ -104,5 +129,14 @@ bool vg_resolve_pixel() {
     // Two-sided: Vulkan front faces have a negative signed area here (y down, CCW front).
     if ((mat.flags & VGM_TWO_SIDED) != 0u) g_front = area < 0.0;
     vg_resolve_material(mat);
+    if ((g_mat_flags & MAT_NORMAL_TEX) != 0u) {
+        vec3 e1 = w1 - w0, e2 = w2 - w0;
+        vec2 d1 = u1 - u0, d2 = u2 - u0;
+        float r = d1.x * d2.y - d2.x * d1.y;
+        if (abs(r) > 1e-12) {
+            g_tangent = (e1 * d2.y - e2 * d1.y) / r;
+            g_bitangent = (e2 * d1.x - e1 * d2.x) / r;
+        }
+    }
     return true;
 }

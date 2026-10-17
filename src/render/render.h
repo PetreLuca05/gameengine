@@ -51,7 +51,16 @@ enum MaterialFlags {
     // textures each vertex with the layer in its colour's alpha (255 = none), tinted by its rgb.
     MAT_TERRAIN  = 1u << 12,
     MAT_LAYERED  = 1u << 13,
+    // glTF PBR material (docs/PBR.md, lit / gbuffer pipelines and vgeo): alphaMode MASK (discard below
+    // alpha_cutoff; drawn two-sided), doubleSided (no back-face culling), and which map textures are set.
+    MAT_ALPHA_MASK    = 1u << 14,
+    MAT_TWO_SIDED     = 1u << 15,
+    MAT_MR_TEX        = 1u << 16,  // metallic-roughness: g roughness, b metallic (x the factors), linear
+    MAT_NORMAL_TEX    = 1u << 17,  // tangent-space normal (x normal_scale), linear
+    MAT_OCCLUSION_TEX = 1u << 18,  // r = ambient occlusion (occlusion_strength), linear
+    MAT_EMISSIVE_TEX  = 1u << 19,  // sRGB x emissive_rgb x emissive (replaces the albedo-tinted emissive)
 };
+#define MAT_PBR_MAPS (MAT_MR_TEX | MAT_NORMAL_TEX | MAT_OCCLUSION_TEX | MAT_EMISSIVE_TEX)
 
 typedef struct Material {
     vec4 color;
@@ -61,6 +70,10 @@ typedef struct Material {
     float emissive;
     float tex_scale;
     u32 flags;
+    // glTF PBR maps (MAT_*_TEX says which are set; no flag = the scalar factors alone).
+    TextureId mr_tex, normal_tex, occlusion_tex, emissive_tex;
+    float normal_scale, occlusion_strength, alpha_cutoff;
+    u32 emissive_rgb;       // RGBA8 emissive colour (glTF emissiveFactor / its largest channel), with MAT_EMISSIVE_TEX
 } Material;
 
 typedef struct DrawItem {
@@ -436,6 +449,9 @@ DG_INLINE Material material_color(vec4 color) {
     m.color = color;
     m.roughness = 0.8f;
     m.tex_scale = 1.0f;
+    m.normal_scale = m.occlusion_strength = 1.0f;
+    m.alpha_cutoff = 0.5f;
+    m.emissive_rgb = 0xFFFFFFFFu;
     return m;
 }
 

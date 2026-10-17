@@ -61,7 +61,11 @@ void log_msg(LogLevel level, const char *fmt, ...) {
     if (s_log.mutex) SDL_UnlockMutex(s_log.mutex);
 
     if (level == LOG_FATAL) {
-        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Deadground fatal error", buf, NULL);
+        // Scripted runs (--test, or DG_NO_FATAL_DIALOG set) abort without a dialog: nothing waits on the desktop.
+        bool dialog = !SDL_getenv("DG_NO_FATAL_DIALOG");
+        for (int i = 1; i < g_engine.argc && dialog; i++)
+            if (!strcmp(g_engine.argv[i], "--test")) dialog = false;
+        if (dialog) SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Deadground fatal error", buf, NULL);
         abort();
     }
 }
