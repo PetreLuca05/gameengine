@@ -1,7 +1,7 @@
 {
   "name": "zombie",
   "slots": {
-    "idle": "idle_fight",
+    "idle": "idle",
     "walk_f": "jog_forward",
     "walk_b": "jog_backward",
     "walk_l": "jog_strafe_left",
