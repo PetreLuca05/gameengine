@@ -27,7 +27,7 @@ DG_INLINE void timed_ring_text(float remaining, char *out, int size) {
     if (remaining < 10.0f) {
         // Round up to the tenth so it never shows 0.0 before the end.
         float t = ceilf(remaining * 10.0f - 1e-4f) / 10.0f;
-        if (t <= 0.0f) t = 0.0f;   // no "-0.0"
+        if (!(t > 0.0f)) { snprintf(out, (size_t)size, "0.0"); return; }   // no "-0.0" (ceilf(-1e-4) is -0, kept by fast-math)
         snprintf(out, (size_t)size, "%.1f", (double)t);
     } else {
         snprintf(out, (size_t)size, "%d", (int)ceilf(remaining - 1e-4f));
