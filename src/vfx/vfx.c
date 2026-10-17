@@ -11,6 +11,10 @@
 #include "audio/audio.h"
 #include "game/game.h"
 #include "gameplay/effects.h"
+#include "gameplay/ballistics/bal_acoustics.h"
+#include "gameplay/ballistics/bal_muzzle.h"
+#include "gameplay/ballistics/bal_world.h"
+#include "render/fidelity/fidelity.h"
 #include "world/world.h"
 #include <math.h>
 #include <stdio.h>
@@ -30,6 +34,9 @@ typedef struct VfxGame {
     float sun_intensity;
     vec3 wind;
     u32 local_muzzle;          // handle of the latest first-person flash (follows the barrel)
+    struct { u32 h; float along; } local_parts[24];   // composed first-person flash parts (gameplay/ballistics)
+    int local_part_next;
+    VfxMuzzleFn composer;      // physically composed muzzle flash (gameplay/ballistics/bal_fx.c)
     vec3 muzzle_pos, muzzle_dir;
     bool muzzle_valid;
     RenderVfxSprite sprites[MAX_FRAME_SPRITES];
@@ -328,20 +335,92 @@ void vfx_game_impact(vec3 pos, vec3 normal, vec3 incoming, int material, int cal
     sp.scale = cs.size;
     sp.count_mul = cs.count;
     sp.energy = cs.energy;
+    sp.decal_scale = cs.size > 0.0f ? cs.decal / cs.size : 1.0f;
     // Grazing hits: fewer chunks, more streaks along the surface (emitters with VFX_DIR_SURFACE).
     float graze = 1.0f - fabsf(v3_dot(sp.normal, sp.incoming));
     sp.intensity = 1.0f - graze * 0.3f;
     sp.decal_ok = (flags & 4u) != 0;
+    // Ballistic impacts (gameplay/ballistics): everything scales with the energy that arrived
+    // (crater volume ~ E, so sizes ~ E^1/3), plus ricochet / exit / steel / pyrophoric extras.
+    u32 bo = (flags >> 24) & 0xFFu;
+    float energy = bal_energy_decode((u8)(flags >> 16));
+    if ((bo & BAL_IMP_BALLISTIC) && !flesh) {
+        const BalMaterial *bm = &bal_data()->mat[DG_CLAMP(material, 0, SURF_COUNT - 1)];
+        float es = clampf(cbrtf(fmaxf(energy, 1.0f) / 1500.0f), 0.3f, 2.6f);
+        sp.scale = es * ((bo & BAL_IMP_EXIT) ? 1.3f : 1.0f);
+        sp.count_mul = es * ((bo & BAL_IMP_EXIT) ? 1.5f : 1.0f) * ((bo & BAL_IMP_RICOCHET) ? 0.5f : 1.0f);
+        sp.energy = clampf(sqrtf(energy / 1500.0f), 0.4f, 2.0f);
+        sp.decal_scale = bm->decal_scale * ((bo & BAL_IMP_RICOCHET) ? 0.6f : 1.0f);
+        if (bo & BAL_IMP_RICOCHET) {
+            VfxSpawnParams rp = sp;
+            rp.scale = 1.0f;
+            rp.count_mul = es;
+            vfx_game_spawn("impact_ricochet", &rp);
+            AudioFx fx;
+            memset(&fx, 0, sizeof(fx));
+            fx.delay = audio_travel_delay(pos);
+            fx.lowpass_hz = bal_lowpass_hz(v3_dist(pos, audio_listener_pos()));
+            fx.pitch = 0.85f + 0.3f * (float)(vfx_hash((u32)(pos.x * 997.0f) ^ (u32)(pos.z * 131.0f)) & 0xFF) / 255.0f;
+            fx.max_dist = 200.0f;
+            audio_play_fx("bullet_ricochet", pos, 0.7f, SND_SFX, &fx);
+        }
+        if (bo & BAL_IMP_EXIT) {
+            VfxSpawnParams xp = sp;
+            xp.scale = es * 1.8f;   // the exit cone is wider than the entry
+            vfx_game_spawn("impact_exit_spall", &xp);
+        }
+        if (bm->hardness >= 0.9f && energy > 300.0f && !(bo & BAL_IMP_EXIT)) {
+            // Steel: the jacket and lead splash out along the plate.
+            VfxSpawnParams lp = sp;
+            lp.scale = 1.0f;
+            lp.count_mul = es;
+            vfx_game_spawn("impact_lead_splash", &lp);
+            if (material == SURF_METAL_THICK && energy > 500.0f) {
+                AudioFx fx;
+                memset(&fx, 0, sizeof(fx));
+                fx.delay = audio_travel_delay(pos);
+                fx.lowpass_hz = bal_lowpass_hz(v3_dist(pos, audio_listener_pos()));
+                fx.max_dist = 600.0f;
+                fx.rolloff = 0.5f;
+                audio_play_fx("impact_plate_ring", pos, clampf(energy / 2000.0f, 0.3f, 1.0f), SND_SFX, &fx);
+            }
+        }
+        if (bm->hardness >= 0.8f && energy > 900.0f && !(bo & BAL_IMP_EXIT)) {
+            // Pyrophoric flash: hard targets hit at high velocity throw a tiny hot flash.
+            VfxSpawnParams pp = sp;
+            pp.scale = es;
+            vfx_game_spawn("impact_pyro", &pp);
+        }
+    }
     if (vfx_sys_spawn(&V->sys, e, &sp)) {
         const char *snd = e >= 0 && V->lib.effects[e].sound[0] ? V->lib.effects[e].sound : NULL;
         char def[32];
         if (!snd) { snprintf(def, sizeof(def), "impact_%s", surface_sound_class(material)); snd = def; }
-        audio_play(snd, pos, 0.55f * fminf(1.0f, cs.energy), SND_SFX);
+        // Heard when the sound gets here (a distant hit after its crack, before the report).
+        AudioFx fx;
+        memset(&fx, 0, sizeof(fx));
+        float dist = v3_dist(pos, audio_listener_pos());
+        fx.delay = audio_travel_delay(pos);
+        fx.lowpass_hz = bal_lowpass_hz(dist);
+        fx.max_dist = 150.0f;
+        audio_play_fx(snd, pos, 0.55f * fminf(1.0f, cs.energy), SND_SFX, &fx);
     }
 }
 
+void vfx_game_set_muzzle_composer(VfxMuzzleFn fn) { if (V) V->composer = fn; }
+
+void vfx_game_track_local_muzzle(u32 handle, float along) {
+    if (!V || !handle) return;
+    int k = V->local_part_next++ % (int)ARRAY_COUNT(V->local_parts);
+    V->local_parts[k].h = handle;
+    V->local_parts[k].along = along;
+}
+
+quat vfx_rot_from_dir(vec3 dir) { return rot_from_dir(dir); }
+
 u32 vfx_game_muzzle(vec3 pos, vec3 dir, int type, int device, bool viewmodel) {
     if (!vfx_game_active()) return 0;
+    if (V->composer) return V->composer(pos, dir, type, device, viewmodel);
     int e = vfx_lib_muzzle_effect(&V->lib, type, device);
     VfxSpawnParams sp = vfx_spawn_params(pos);
     sp.rot = rot_from_dir(dir);
@@ -435,10 +514,48 @@ static void push_mesh(const VfxCpuParticle *p, const VfxEmitterDef *e, vec4 col)
     render_draw(&di);
 }
 
+// Sprites pushed by gameplay for this frame only (tracer heads and tails: gameplay/ballistics).
+#define MAX_EXT_SPRITES 2048
+static struct { int emitter; vec3 pos, vel; float size; vec4 color; } g_ext[MAX_EXT_SPRITES];
+static int g_ext_n;
+
+int vfx_game_emitter(const char *effect, int k) {
+    if (!V) return -1;
+    int e = vfx_lib_find_effect(&V->lib, effect);
+    if (e < 0 || k < 0 || k >= V->lib.effects[e].emitter_count) return -1;
+    return V->lib.effects[e].emitters[k];
+}
+
+void vfx_game_push_sprite(int emitter, vec3 pos, vec3 vel, float size, vec4 color) {
+    if (!V || emitter < 0 || emitter >= V->lib.emitter_count || g_ext_n >= MAX_EXT_SPRITES) return;
+    g_ext[g_ext_n].emitter = emitter;
+    g_ext[g_ext_n].pos = pos;
+    g_ext[g_ext_n].vel = vel;
+    g_ext[g_ext_n].size = size;
+    g_ext[g_ext_n].color = color;
+    g_ext_n++;
+}
+
 static int build_sprites(vec3 cam, int *out_add) {
     const VfxLibrary *lib = &V->lib;
     int add = 0, alpha = 0;
     static RenderVfxSprite tmp_alpha[MAX_FRAME_SPRITES];
+    for (int i = 0; i < g_ext_n; i++) {
+        const VfxEmitterDef *e = &lib->emitters[g_ext[i].emitter];
+        RenderVfxSprite sp;
+        memset(&sp, 0, sizeof(sp));
+        sp.pos_size = v4(g_ext[i].pos.x, g_ext[i].pos.y, g_ext[i].pos.z, g_ext[i].size);
+        sp.vel_rot = v4(g_ext[i].vel.x, g_ext[i].vel.y, g_ext[i].vel.z, 0);
+        sp.color = g_ext[i].color;
+        sp.info[0] = (u32)g_ext[i].emitter;
+        if (e->render.mode == VFX_RENDER_ADD) {
+            if (add < MAX_FRAME_SPRITES) V->sprites[add++] = sp;
+        } else if (alpha < MAX_FRAME_SPRITES) {
+            V->sort_d[alpha] = v3_len2(v3_sub(g_ext[i].pos, cam));
+            tmp_alpha[alpha++] = sp;
+        }
+    }
+    g_ext_n = 0;
     for (int i = 0; i < V->sys.cpu_count; i++) {
         const VfxCpuParticle *p = &V->sys.cpu[i];
         if (!p->alive) continue;
@@ -626,6 +743,16 @@ void vfx_game_render(vec3 cam) {
         Player *p = game_local_player();
         vfx_sys_set_transform(&V->sys, V->local_muzzle, V->muzzle_pos, rot_from_dir(V->muzzle_dir), p ? p->sim.move.vel : v3(0, 0, 0));
     }
+    if (V->muzzle_valid) {
+        Player *p = game_local_player();
+        for (int i = 0; i < (int)ARRAY_COUNT(V->local_parts); i++) {
+            u32 h = V->local_parts[i].h;
+            if (!h) continue;
+            if (!vfx_sys_alive(&V->sys, h)) { V->local_parts[i].h = 0; continue; }
+            vfx_sys_set_transform(&V->sys, h, v3_madd(V->muzzle_pos, V->muzzle_dir, V->local_parts[i].along), rot_from_dir(V->muzzle_dir),
+                                  p ? p->sim.move.vel : v3(0, 0, 0));
+        }
+    }
     int inst_count = 0;
     for (int i = 0; i < VFX_MAX_INSTANCES; i++) {
         const VfxInstance *in = &V->sys.inst[i];
@@ -654,8 +781,15 @@ void vfx_game_render(vec3 cam) {
     if (f.dt > 0.1f) f.dt = 0.1f;
     f.timescale = V->timescale->f;
     f.wind = V->wind;
-    // Muzzle flashes read far less bright in daylight (the eye is adapted): 1 at night.
-    f.exposure_visibility = clampf(1.2f - 0.3f * V->sun_intensity, 0.2f, 1.0f);
+    // Hot emitters (flashes, tracers, sparks) have a fixed physical brightness: after auto exposure
+    // they fade into daylight and dominate at night (gameplay/ballistics/bal_muzzle.c).
+    {
+        float ev_night, ev_day;
+        daynight_ev_range(&ev_night, &ev_day);
+        float ev = fid_level() == FID_OFF ? render_direct_exposure_ev() : render_exposure_ev();
+        (void)ev_day;
+        f.exposure_visibility = bal_flash_exposure_gain(ev, ev_night, daynight_daylight());
+    }
     f.lighting = V->lighting->i != 0;
     f.collision = V->quality->i >= 1;
     f.max_sorted = k_quality_sort[DG_CLAMP(V->quality->i, 0, 3)];

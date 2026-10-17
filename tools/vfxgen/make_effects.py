@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Writes the milestone-1 effect set to assets/vfx/effects/*.json from parameter tables:
-muzzle flashes (6 weapon types x 4 muzzle devices), bullet impacts (every surface material +
-flesh headshot), shell casings and the GPU stress test.
+"""Writes the milestone-1 effect set to assets/vfx/effects/*.json from parameter tables: bullet
+impacts (every surface material + flesh headshot), shell casings and the GPU stress test (muzzle
+flash components and tracers: make_ballistic_effects.py).
 
 The JSON files are the source of truth afterwards (edit them by hand or in the in-game editor,
 F7 / vfx_editor). Re-running this script only rewrites files it generated itself unless --force:
@@ -38,117 +38,10 @@ def write(name, fx):
         f.write("\n")
 
 
-# ------------------------------------------------------------------ muzzle flashes
-
-# type: core size, side flame length, side count, smoke, embers, light intensity, light radius
-TYPES = {
-    "pistol":  dict(core=0.10, side=0.12, sides=2, smoke=2, embers=3, light=7.0, radius=4.0, smoke_size=0.12),
-    "smg":     dict(core=0.11, side=0.13, sides=2, smoke=2, embers=3, light=7.0, radius=4.0, smoke_size=0.12),
-    "rifle":   dict(core=0.16, side=0.22, sides=3, smoke=3, embers=5, light=10.0, radius=5.0, smoke_size=0.16),
-    "lmg":     dict(core=0.19, side=0.26, sides=3, smoke=4, embers=6, light=11.0, radius=5.5, smoke_size=0.18),
-    "shotgun": dict(core=0.24, side=0.28, sides=4, smoke=5, embers=10, light=13.0, radius=6.0, smoke_size=0.22),
-    "sniper":  dict(core=0.26, side=0.34, sides=4, smoke=5, embers=8, light=14.0, radius=6.5, smoke_size=0.24),
-}
+# Muzzle flashes are composed from physical components at runtime (gameplay/ballistics/bal_muzzle.c);
+# their effects come from make_ballistic_effects.py.
 
 FADE_FAST = [[0, 1], [0.5, 0.85], [1, 0]]
-
-
-def core_emitter(size, tex="flash_core", emissive=6.0, aspect=1.0, orient="cross"):
-    return {
-        "name": "core", "tier": "gpu",
-        "spawn": {"mode": "burst", "count": 1, "life": [0.032, 0.05], "size": [size * 0.85, size * 1.15], "rotation": [0, 360],
-                  "speed": [0.01, 0.01], "local": True, "frame_random": True, "variant_no_repeat": True,
-                  "color": [1.0, 0.9, 0.75, 1.0], "color2": [1.0, 0.8, 0.6, 1.0]},
-        "update": {"size_curve": [[0, 0.75], [0.3, 1.0], [1, 1.1]], "alpha_curve": FADE_FAST},
-        "render": {"mode": "add", "orient": orient, "texture": tex, "emissive": emissive, "exposure_aware": True,
-                   "near_fade": 0.0, "soft": 0.02, "aspect": aspect},
-    }
-
-
-def side_emitter(length, count, dir_mode="socket", angle=4.0, tex="flash_side", emissive=5.0):
-    return {
-        "name": "side", "tier": "gpu",
-        "spawn": {"mode": "burst", "count": count, "life": [0.03, 0.045], "size": [length * 0.8, length * 1.2],
-                  "speed": [0.02, 0.02], "dir": dir_mode, "angle": angle, "local": True, "frame_random": True,
-                  "color": [1.0, 0.85, 0.6, 1.0], "color2": [1.0, 0.7, 0.45, 1.0]},
-        "update": {"size_curve": [[0, 0.6], [0.4, 1.0], [1, 1.05]], "alpha_curve": FADE_FAST},
-        "render": {"mode": "add", "orient": "axis", "texture": tex, "emissive": emissive, "exposure_aware": True,
-                   "near_fade": 0.0, "soft": 0.02, "aspect": 0.45},
-    }
-
-
-def smoke_emitter(count, size, speed=(0.4, 1.4), life=(0.6, 1.3), alpha=0.13):
-    return {
-        "name": "smoke", "tier": "gpu",
-        "spawn": {"mode": "burst", "count": [max(1, count // 2), max(1, count - 1)], "life": list(life), "size": [size * 0.5, size * 0.85],
-                  "speed": list(speed), "angle": 18, "offset": 0.03, "inherit": 0.4, "rotation": [0, 360], "spin": [-40, 40],
-                  "color": [0.78, 0.77, 0.75, alpha], "color2": [0.68, 0.67, 0.66, alpha * 0.7]},
-        "update": {"gravity": -0.04, "drag": 3.2, "wind": 0.35, "turbulence": {"strength": 0.5, "freq": 1.6, "speed": 0.4},
-                   "size_curve": {"type": "bezier", "keys": [[0, 0.45], [0.25, 1.2], [1, 2.2]]},
-                   "alpha_curve": {"type": "bezier", "keys": [[0, 0], [0.08, 1], [0.5, 0.55], [1, 0]]},
-                   "frame_over_life": True, "motion_vectors": True},
-        "render": {"mode": "alpha", "orient": "billboard", "lighting": "sixway", "texture": "smoke_puff", "soft": 0.25, "near_fade": 0.2},
-    }
-
-
-def ember_emitter(count, speed=(3.0, 9.0), angle=22):
-    return {
-        "name": "embers", "tier": "gpu",
-        "spawn": {"mode": "burst", "count": [max(0, count - 2), count + 2], "life": [0.08, 0.32], "size": [0.008, 0.016],
-                  "speed": list(speed), "angle": angle, "inherit": 0.5,
-                  "color": [1.0, 0.75, 0.4, 1.0], "color2": [1.0, 0.55, 0.2, 1.0]},
-        "update": {"gravity": 0.5, "drag": 1.5, "collide": "depth", "bounce": 0.3, "friction": 0.5, "alpha_curve": [[0, 1], [0.7, 0.8], [1, 0]]},
-        "render": {"mode": "add", "orient": "stretch", "texture": "spark", "emissive": 5.0, "stretch": 0.015, "stretch_max": 10.0, "near_fade": 0.05},
-    }
-
-
-def heat_emitter(size):
-    return {
-        "name": "heat", "tier": "gpu",
-        "spawn": {"mode": "burst", "count": 1, "life": [0.12, 0.2], "size": [size * 1.5, size * 2.0], "speed": [0.3, 0.6], "offset": 0.05,
-                  "color": [1, 1, 1, 1]},
-        "update": {"size_curve": [[0, 0.6], [1, 1.4]], "alpha_curve": [[0, 1], [1, 0]]},
-        "render": {"mode": "distort", "texture": "heat_distort", "distortion": 0.015, "soft": 0.1, "near_fade": 0.1},
-    }
-
-
-def muzzle(type_name, device):
-    t = TYPES[type_name]
-    ems = []
-    light = {"color": [1.0, 0.68, 0.36], "intensity": t["light"], "radius": t["radius"], "duration": 0.034, "exposure_aware": True}
-    if device == "bare":
-        ems.append(core_emitter(t["core"]))
-        ems.append(side_emitter(t["side"], t["sides"]))
-        ems.append(smoke_emitter(t["smoke"], t["smoke_size"]))
-        ems.append(ember_emitter(t["embers"]))
-        ems.append(heat_emitter(t["core"]))
-    elif device == "hider":
-        # Flash hider: small core, the flame is broken into short prongs, less visible light.
-        ems.append(core_emitter(t["core"] * 0.7, emissive=4.5))
-        ems.append(side_emitter(t["side"] * 0.45, 4, dir_mode="socket", angle=28, emissive=3.5))
-        ems.append(smoke_emitter(t["smoke"], t["smoke_size"]))
-        ems.append(ember_emitter(max(1, t["embers"] // 2)))
-        light["intensity"] *= 0.6
-    elif device == "comp":
-        # Compensator: gas vented sideways / up, short forward core.
-        ems.append(core_emitter(t["core"] * 0.8, emissive=5.0))
-        ems.append(side_emitter(t["side"] * 0.7, 2, dir_mode="side", angle=6, emissive=4.5))
-        sm = smoke_emitter(t["smoke"] + 1, t["smoke_size"])
-        sm["spawn"]["dir"] = "side"
-        sm["spawn"]["angle"] = 25
-        ems.append(sm)
-        em = ember_emitter(t["embers"])
-        em["spawn"]["dir"] = "side"
-        ems.append(em)
-        ems.append(heat_emitter(t["core"]))
-    else:  # suppressor
-        ems.append(core_emitter(t["core"] * 0.35, tex="flash_suppressed", emissive=1.6, orient="billboard"))
-        sm = smoke_emitter(t["smoke"] + 2, t["smoke_size"] * 0.8, speed=(0.15, 0.6), life=(0.9, 1.8), alpha=0.22)
-        ems.append(sm)
-        light["intensity"] *= 0.12
-        light["radius"] *= 0.6
-    return {"duration": 0.1, "priority": 3, "max_instances": 12, "cull_distance": 400,
-            "lod": [[30, 0.75], [80, 0.45], [160, 0.25]], "light": light, "emitters": ems}
 
 
 # ------------------------------------------------------------------ impacts
@@ -323,9 +216,6 @@ def shell(name, mesh, size, color):
 
 def main():
     os.makedirs(OUT, exist_ok=True)
-    for t in TYPES:
-        for d in ("bare", "hider", "comp", "suppressor"):
-            write(f"muzzle_{t}_{d}", muzzle(t, d))
     for m, fx in IMPACTS.items():
         write(f"impact_{m}", fx)
     write("impact_flesh_head", headshot())

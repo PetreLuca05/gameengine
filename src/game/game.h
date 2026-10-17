@@ -109,7 +109,7 @@ typedef struct Game {
     int magdump_first_tick, magdump_last_tick, magdump_shots, magdump_last_mag;
 
     Cvar *g_map, *sv_hostname, *cl_name, *dev_mode, *r_drawhitboxes, *r_drawcollision;
-    Cvar *cl_showfps, *net_autohost, *world_seed, *interact_range, *anim_rate;
+    Cvar *cl_showfps, *net_autohost, *world_seed, *interact_range, *anim_rate, *host_timescale;
 } Game;
 
 void game_init(void);
@@ -155,7 +155,10 @@ int world_day_number(World *w);
 bool world_is_night(World *w);                   // sun below -6 deg (civil twilight over)
 float world_sun_elevation_deg(World *w);
 float world_light_level(World *w, vec3 pos);     // 0..1: sun / moon (visible from pos) + sky + lamps
-void daynight_add_listener(TodEventFn fn, void *user);   // sunrise / sunset / midnight / noon on every machine
+void daynight_add_listener(TodEventFn fn, void *user);
+// Auto-exposure range of the day / night cycle (EV100): the night floor and the day maximum.
+void daynight_ev_range(float *night, float *day);
+float daynight_daylight(void);   // 0 night .. 1 full sun (eye adaptation for exposure-aware effects)   // sunrise / sunset / midnight / noon on every machine
 
 // Weather (game_weather.c, docs/WEATHER.md): queries on the replicated weather. Events fire on
 // every machine from the evaluated parameters (no network traffic of their own).

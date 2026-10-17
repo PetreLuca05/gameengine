@@ -213,6 +213,9 @@ const AnimNetState *chars_net_state(const World *w, int ent_index);
 void chars_on_damage(World *w, EntityId target, float dealt, int part, vec3 dir, vec3 point, bool killed, int damage_type);
 // Hit tests against characters (host: rewound to view_tick256 when > 0; clients: current pose).
 bool chars_raycast(World *w, EntityId ignore, vec3 origin, vec3 dir, float range, u32 view_tick256, EntityId *ent, HitboxRayHit *hit);
+// One character (ballistics broadphase: gameplay/ballistics/bal_world.c). chord: the path length
+// inside the hit capsule (flesh thickness for penetration), NULL to skip.
+bool chars_raycast_one(World *w, CharacterInst *c, vec3 o, vec3 d, float range, u32 view_tick256, HitboxRayHit *out, float *chord);
 bool chars_sweep(World *w, EntityId ignore, vec3 a, vec3 b, float radius, EntityId *ent, HitboxRayHit *hit);
 // Client-side predicted (unconfirmed) reaction on a target the local player hit.
 void chars_predict_hit(World *w, EntityId target, int part, vec3 dir);

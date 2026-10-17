@@ -1,0 +1,104 @@
+{
+  "duration": 0.1,
+  "priority": 3,
+  "max_instances": 16,
+  "cull_distance": 600,
+  "lod": [
+    [
+      40,
+      0.8
+    ],
+    [
+      120,
+      0.5
+    ],
+    [
+      250,
+      0.3
+    ]
+  ],
+  "emitters": [
+    {
+      "name": "spikes",
+      "tier": "gpu",
+      "spawn": {
+        "mode": "burst",
+        "count": 1,
+        "life": [
+          0.012,
+          0.018
+        ],
+        "size": [
+          1.6,
+          2.0
+        ],
+        "rotation": [
+          0,
+          360
+        ],
+        "speed": [
+          0.05,
+          0.05
+        ],
+        "local": true,
+        "color": [
+          1,
+          1,
+          1,
+          1.0
+        ],
+        "color2": [
+          1,
+          1,
+          1,
+          1.0
+        ],
+        "angle": 14,
+        "frame_random": true,
+        "variant_no_repeat": true
+      },
+      "update": {
+        "size_curve": [
+          [
+            0,
+            0.7
+          ],
+          [
+            0.3,
+            1.0
+          ],
+          [
+            1,
+            1.08
+          ]
+        ],
+        "alpha_curve": [
+          [
+            0,
+            1
+          ],
+          [
+            0.5,
+            0.85
+          ],
+          [
+            1,
+            0
+          ]
+        ]
+      },
+      "render": {
+        "mode": "add",
+        "orient": "axis",
+        "texture": "flash_prong",
+        "emissive": 4.0,
+        "exposure_aware": true,
+        "near_fade": 0.0,
+        "soft": 0.02,
+        "aspect": 0.35
+      }
+    }
+  ],
+  "name": "muzzle_prongs",
+  "_generated": "make_ballistic_effects.py"
+}

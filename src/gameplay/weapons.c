@@ -4,6 +4,8 @@
 #include "effects.h"
 #include "flesh_fx.h"
 #include "throwables.h"
+#include "ballistics/bal_world.h"
+#include "ballistics/bal_fx.h"
 #include "core/log.h"
 #include "core/engine.h"
 #include "core/cvar.h"
@@ -106,6 +108,7 @@ static RecoilMods make_mods(const PlayerSim *sim, float scale) {
 
 static WeaponVehicleHooks g_vh;
 void weapons_set_vehicle_hooks(const WeaponVehicleHooks *h) { g_vh = *h; }
+const WeaponVehicleHooks *weapons_vehicle_hooks(void) { return &g_vh; }
 
 float weapon_current_spread(const World *w, int slot) {
     const WeaponDef *d = weapon_equipped_def(w, slot);
@@ -169,19 +172,56 @@ static FireMode next_mode(FireMode cur, u8 bits) {
     return cur;
 }
 
-typedef struct HitResult {
-    bool hit;
-    float dist;
-    vec3 point, normal;
-    EntityId ent;
-    BodyId body;
-    bool hitbox;
-    bool headshot;
-    int part;          // BodyPart for character hitboxes, -1 otherwise
-    bool character;
-    int material;      // SurfaceMaterial (flesh for hitboxes)
-    int tire;          // vehicle wheel hit (-1 none)
-} HitResult;
+BodyId weapon_shooter_ignore_body(World *w, int shooter) {
+    Player *sp = &w->players[shooter];
+    BodyId self = sp->character ? phys_character_inner_body(sp->character) : PHYS_INVALID_BODY;
+    if (sp->sim.move.mode == MOVE_SEATED && g_vh.ignore_body) self = g_vh.ignore_body(w, shooter);   // not the own vehicle
+    return self;
+}
+
+bool weapon_trace_legacy_hitboxes(World *w, int shooter, vec3 origin, vec3 dir, float range, u32 view_tick256, HitResult *r) {
+    Player *sp = &w->players[shooter];
+    float best = r->hit ? r->dist : range;
+    u32 view_tick = view_tick256 >> 8;
+    bool found = false;
+    ENT_FOREACH(w, i) {
+        if (!(w->comps[i] & C_HITBOX) || (w->flags[i] & EF_DEAD)) continue;
+        EntityId e = ENT_MAKE(i, w->gen[i]);
+        if (e == sp->ent || char_get_index(w, i)) continue;   // characters use per-part hitboxes
+        vec3 pos = w->xf[i].pos;
+        if (w->authority && view_tick) world_lagcomp_get(w, e, view_tick, &pos);
+        const Hitbox *hb = &w->hitbox[i];
+        // Dummies are positioned at their capsule center; players at their feet.
+        vec3 feet = w->type[i] == ET_DUMMY ? v3_sub(pos, v3(0, 0.9f, 0)) : pos;
+        float height = hb->height;
+        if (w->type[i] == ET_PLAYER && (w->flags[i] & EF_CROUCHED)) height = PLAYER_CROUCH_HEIGHT;
+        vec3 head_c = v3_add(feet, v3(0, w->type[i] == ET_PLAYER ? height - 0.18f : hb->head_height, 0));
+        // Head sphere first (as a tiny capsule).
+        float th = ray_capsule(origin, dir, head_c, v3_add(head_c, v3(0, 0.01f, 0)), hb->head_radius);
+        float tb = ray_capsule(origin, dir, v3_add(feet, v3(0, hb->radius, 0)), v3_add(feet, v3(0, height - hb->radius - 0.25f, 0)), hb->radius);
+        float t = -1;
+        bool head = false;
+        if (th > 0 && (tb < 0 || th <= tb + 0.05f)) { t = th; head = true; }
+        else if (tb > 0) t = tb;
+        if (t > 0 && t < best) {
+            best = t;
+            found = true;
+            r->hit = true;
+            r->dist = t;
+            r->point = v3_madd(origin, dir, t);
+            r->normal = v3_neg(dir);
+            r->ent = e;
+            r->hitbox = true;
+            r->character = false;
+            r->headshot = head;
+            r->part = -1;
+            r->tire = -1;
+            r->body = PHYS_INVALID_BODY;
+            r->material = SURF_FLESH;
+        }
+    }
+    return found;
+}
 
 // Lag-compensated hitscan: world geometry via Jolt, hitbox capsules rewound to view_tick.
 static HitResult trace_shot(World *w, int shooter, vec3 origin, vec3 dir, float range, u32 view_tick256) {
@@ -189,8 +229,7 @@ static HitResult trace_shot(World *w, int shooter, vec3 origin, vec3 dir, float 
     memset(&r, 0, sizeof(r));
     r.tire = -1;
     Player *sp = &w->players[shooter];
-    BodyId self = sp->character ? phys_character_inner_body(sp->character) : PHYS_INVALID_BODY;
-    if (sp->sim.move.mode == MOVE_SEATED && g_vh.ignore_body) self = g_vh.ignore_body(w, shooter);   // not the own vehicle
+    BodyId self = weapon_shooter_ignore_body(w, shooter);
     RayHit rh;
     if (phys_raycast(w->phys, origin, v3_scale(dir, range), PL_MASK_WORLD, self, &rh)) {
         r.hit = true;
@@ -221,38 +260,7 @@ static HitResult trace_shot(World *w, int shooter, vec3 origin, vec3 dir, float 
             r.tire = wheel;
         }
     }
-    ENT_FOREACH(w, i) {
-        if (!(w->comps[i] & C_HITBOX) || (w->flags[i] & EF_DEAD)) continue;
-        EntityId e = ENT_MAKE(i, w->gen[i]);
-        if (e == sp->ent || char_get_index(w, i)) continue;   // characters use per-part hitboxes below
-        vec3 pos = w->xf[i].pos;
-        if (w->authority && view_tick) world_lagcomp_get(w, e, view_tick, &pos);
-        const Hitbox *hb = &w->hitbox[i];
-        // Dummies are positioned at their capsule center; players at their feet.
-        vec3 feet = w->type[i] == ET_DUMMY ? v3_sub(pos, v3(0, 0.9f, 0)) : pos;
-        float height = hb->height;
-        if (w->type[i] == ET_PLAYER && (w->flags[i] & EF_CROUCHED)) height = PLAYER_CROUCH_HEIGHT;
-        vec3 head_c = v3_add(feet, v3(0, w->type[i] == ET_PLAYER ? height - 0.18f : hb->head_height, 0));
-        // Head sphere first (as a tiny capsule).
-        float th = ray_capsule(origin, dir, head_c, v3_add(head_c, v3(0, 0.01f, 0)), hb->head_radius);
-        float tb = ray_capsule(origin, dir, v3_add(feet, v3(0, hb->radius, 0)), v3_add(feet, v3(0, height - hb->radius - 0.25f, 0)), hb->radius);
-        float t = -1;
-        bool head = false;
-        if (th > 0 && (tb < 0 || th <= tb + 0.05f)) { t = th; head = true; }
-        else if (tb > 0) t = tb;
-        if (t > 0 && t < best) {
-            best = t;
-            r.hit = true;
-            r.dist = t;
-            r.point = v3_madd(origin, dir, t);
-            r.normal = v3_neg(dir);
-            r.ent = e;
-            r.hitbox = true;
-            r.headshot = head;
-            r.body = PHYS_INVALID_BODY;
-            r.material = SURF_FLESH;
-        }
-    }
+    if (weapon_trace_legacy_hitboxes(w, shooter, origin, dir, range, view_tick256, &r)) best = r.dist;
     // Per-bone hitboxes on characters: the host rewinds them to the shooter's view tick.
     EntityId ce;
     HitboxRayHit hh;
@@ -372,6 +380,35 @@ static void push_shot_events(World *w, int shooter, vec3 from, const HitResult *
     }
 }
 
+void weapon_apply_hit(World *w, int shooter, const WeaponDef *d, const HitResult *h, vec3 dir, float damage_scale) {
+    apply_hit(w, shooter, d, h, dir, damage_scale);
+}
+
+void weapon_push_impact(World *w, int shooter, const WeaponDef *d, const HitResult *h, vec3 dir, bool killed, u32 extra) {
+    GameEvent ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.type = EV_IMPACT;
+    ev.target = EVENT_ALL;
+    ev.except = EVENT_ALL;
+    ev.pos = h->point;
+    ev.dir = h->normal;
+    ev.ent2 = (u32)shooter + 1u;   // the shooter skips it when it predicted the impact
+    ev.id = fx_impact_pack(h->material, d->vfx_caliber, impact_flags(h)) | (extra & 0xFFFF0000u);
+    memcpy(ev.data, &dir, sizeof(dir));
+    if (h->character) {
+        ev.ent = h->ent;
+        ev.value = shot_damage(w, d, h);
+        flesh_pack_event(ev.data, dir, h->part, killed, false, h->dist);
+    }
+    ev_push(w, &ev);
+}
+
+void weapon_local_impact(World *w, const WeaponDef *d, const HitResult *h, vec3 dir, u32 extra) {
+    if (!fx_predict_impacts()) return;
+    if (h->character) flesh_predict(w, h, dir, d);
+    else fx_impact_ex(h->point, h->normal, dir, h->material, d->vfx_caliber, impact_flags(h) | (extra & 0xFFFF0000u));
+}
+
 static vec3 muzzle_world(const PlayerMove *m, const WeaponDef *d, bool local_view) {
     // Local player: the real barrel tip of the viewmodel. Bullets still trace from the eye
     // (so they go where the crosshair says), only the flash / tracer / casing start here.
@@ -412,15 +449,21 @@ static u32 dbg_check_color(vec3 aim, vec3 sdir, float cone) {
 }
 
 static void fire(World *w, int slot, PlayerSim *sim, const WeaponDef *d, const UserCmd *cmd, bool first, bool local_view,
-                 vec3 dir, float spread, u32 seed) {
+                 vec3 dir, float spread, u32 seed, int shot_in_mag) {
     PlayerMove *m = &sim->move;
     vec3 eye = player_eye_pos(m);
     Rng rng = rng_make(seed);
     vec3 muzzle = muzzle_world(m, d, local_view);
     int dbg = WC.recoil_debug ? WC.recoil_debug->i : 0;
+    bool ballistic = bal_world_enabled() && bal_weapon_cartridge(d) >= 0;
     if (local_view && first) {
-        fx_muzzle_ex(muzzle, dir, d->vfx_muzzle_type, d->vfx_muzzle_device, true);
-        fx_sound(d->sound_fire, eye, 1.0f);
+        if (ballistic) {
+            bal_fx_muzzle_weapon(slot, d, muzzle, dir, true);
+            bal_shooter_report(d, eye);
+        } else {
+            fx_muzzle_ex(muzzle, dir, d->vfx_muzzle_type, d->vfx_muzzle_device, true);
+            fx_sound(d->sound_fire, eye, 1.0f);
+        }
     }
     if (d->kind == WPN_PROJECTILE) {
         if (w->authority) {
@@ -440,6 +483,35 @@ static void fire(World *w, int slot, PlayerSim *sim, const WeaponDef *d, const U
             ev_sound(w, d->sound_fire, eye, 1.0f, slot);
         }
         return;
+    }
+    // Guns with a cartridge fire simulated bullets (gameplay/ballistics): the host's are
+    // authoritative, the shooter predicts its own, everyone else replays the EV_SHOT record.
+    if (ballistic) {
+        const InvSlot *eq = weapon_equipped(w, slot);
+        const WeaponDef *base = eq ? item_weapon(w->items, eq->item) : NULL;
+        if (base) {
+            BalFireIn bi;
+            memset(&bi, 0, sizeof(bi));
+            bi.slot = slot;
+            bi.def = d;
+            bi.weapon_index = (int)(base - w->items->weapons);
+            bi.att = eq->att;
+            bi.eye = eye;
+            bi.aim = dir;
+            bi.muzzle = muzzle;
+            bi.spread = spread;
+            bi.seed = seed;
+            bi.view_tick256 = cmd->view_tick;
+            bi.shot_in_mag = shot_in_mag;
+            bi.mag_size = d->mag_size;
+            bi.mag_seed = sim->wpn.rc.mag_seed;
+            bi.shot_counter = (u16)sim->wpn.shots;
+            bi.local_view = local_view;
+            bi.first = first;
+            if (first && local_view && dbg) debug_check_shot(slot, dir, recoil_cone_dir(dir, spread, &rng), spread, &sim->wpn.rc, dbg >= 2);
+            bal_fire(w, &bi);
+            return;   // the report reaches the others with EV_SHOT
+        }
     }
     int pellets = DG_MAX(1, d->pellets);
     for (int p = 0; p < pellets; p++) {
@@ -850,9 +922,10 @@ void weapons_tick(World *w, int slot, PlayerSim *sim, const UserCmd *cmd, u16 pr
             float cone = recoil_spread(rp, &ws->rc, &sm) + chars_limb_spread(w, p->ent);
             if (sim->move.mode == MOVE_SEATED && g_vh.spread_mult) cone *= g_vh.spread_mult(w, slot);
             u32 seed = shot_seed(cmd, slot, ws->shots);
+            int shot_in_mag = d->mag_size - *mag;   // 0 = first round of the magazine (tracer loading)
             if (!WC.infinite_ammo->i) (*mag)--;
             if (w->authority) ws->mag = s->ammo;
-            fire(w, slot, sim, d, cmd, first, local_view, dir, cone, seed);
+            fire(w, slot, sim, d, cmd, first, local_view, dir, cone, seed, shot_in_mag);
             ws->shots++;
             RecoilMods am = make_mods(sim, rscale);
             if (ws->rc.shot_index == 0 && ws->since_sprint < rp->sprint_to_fire + 0.35f) am.extra = rp->after_sprint_kick;

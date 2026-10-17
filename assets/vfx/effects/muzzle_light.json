@@ -1,0 +1,35 @@
+{
+  "duration": 0.03,
+  "priority": 3,
+  "max_instances": 16,
+  "cull_distance": 600,
+  "lod": [
+    [
+      40,
+      0.8
+    ],
+    [
+      120,
+      0.5
+    ],
+    [
+      250,
+      0.3
+    ]
+  ],
+  "emitters": [],
+  "light": {
+    "color": [
+      1.0,
+      0.62,
+      0.3
+    ],
+    "intensity": 1.0,
+    "radius": 1.0,
+    "duration": 0.025,
+    "exposure_aware": false,
+    "shadow": false
+  },
+  "name": "muzzle_light",
+  "_generated": "make_ballistic_effects.py"
+}

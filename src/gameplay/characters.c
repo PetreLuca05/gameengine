@@ -1272,6 +1272,32 @@ bool chars_raycast(World *w, EntityId ignore, vec3 o, vec3 d, float range, u32 v
     return found;
 }
 
+bool chars_raycast_one(World *w, CharacterInst *c, vec3 o, vec3 d, float range, u32 view_tick256, HitboxRayHit *out, float *chord) {
+    if (!c || !ent_valid(w, c->ent) || c->dead || (w->flags[ENT_INDEX(c->ent)] & EF_DEAD)) return false;
+    vec3 cc = v3_add(c->root.t, v3(0, 0.95f, 0));
+    float rad = 1.4f + (view_tick256 && c->history ? 2.5f : 0.0f);
+    vec3 oc = v3_sub(cc, o);
+    float tca = v3_dot(oc, d);
+    if (tca < -rad || tca > range + rad) return false;
+    if (v3_len2(oc) - tca * tca > rad * rad) return false;
+    HitboxSet rew;
+    const HitboxSet *set = &c->hit;
+    if (w->authority && view_tick256 && c->history) {
+        hitbox_rewind(c->history, view_tick256, &rew);
+        set = &rew;
+    }
+    if (!hitbox_raycast(set, o, d, range, out)) return false;
+    if (chord) {
+        // Path length inside the hit capsule: the same ray cast back from beyond it.
+        const HitCapsule *hc = &set->c[out->index];
+        float span = v3_dist(hc->a, hc->b) + 2.0f * hc->r + 0.05f;
+        vec3 far = v3_madd(o, d, out->t + span);
+        float tb = ray_capsule(far, v3_neg(d), hc->a, hc->b, hc->r);
+        *chord = tb >= 0.0f ? fmaxf(span - tb, 0.0f) : hc->r;
+    }
+    return true;
+}
+
 bool chars_sweep(World *w, EntityId ignore, vec3 a, vec3 b, float radius, EntityId *ent, HitboxRayHit *out) {
     if (!w->chars) return false;
     float best = 1e9f;

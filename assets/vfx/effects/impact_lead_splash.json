@@ -1,0 +1,83 @@
+{
+  "duration": 0.05,
+  "priority": 1,
+  "max_instances": 24,
+  "cull_distance": 300,
+  "lod": [
+    [
+      40,
+      0.8
+    ],
+    [
+      120,
+      0.5
+    ],
+    [
+      250,
+      0.3
+    ]
+  ],
+  "emitters": [
+    {
+      "name": "lead",
+      "tier": "gpu",
+      "spawn": {
+        "mode": "burst",
+        "count": [
+          10,
+          18
+        ],
+        "life": [
+          0.15,
+          0.4
+        ],
+        "size": [
+          0.004,
+          0.009
+        ],
+        "speed": [
+          6.0,
+          16.0
+        ],
+        "dir": "surface",
+        "angle": 85,
+        "color": [
+          0.75,
+          0.75,
+          0.78,
+          1.0
+        ],
+        "color2": [
+          0.6,
+          0.6,
+          0.62,
+          1.0
+        ]
+      },
+      "update": {
+        "gravity": 1.0,
+        "drag": 1.0,
+        "alpha_curve": [
+          [
+            0,
+            1
+          ],
+          [
+            1,
+            0
+          ]
+        ]
+      },
+      "render": {
+        "mode": "alpha",
+        "orient": "stretch",
+        "texture": "spark",
+        "lighting": "simple",
+        "stretch": 0.01,
+        "stretch_max": 6.0
+      }
+    }
+  ],
+  "name": "impact_lead_splash",
+  "_generated": "make_ballistic_effects.py"
+}

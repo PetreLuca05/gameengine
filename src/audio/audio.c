@@ -13,7 +13,10 @@ static void audio_loops_shutdown(void);
 #define MAX_VOICES 48
 #define MAX_KNOWN 64
 
-typedef struct Voice { ma_sound sound; bool used; } Voice;
+typedef struct Voice { ma_sound sound; bool used; bool lpf_on; ma_lpf_node lpf; } Voice;
+#define MAX_SCHEDULED 96
+// Sounds that start later (gunfire travelling at the speed of sound): played by audio_update.
+typedef struct Scheduled { double at; char name[32]; vec3 pos; float volume; SoundCategory cat; AudioFx fx; } Scheduled;
 typedef struct KnownSound { u32 hash; bool exists; char path[256]; } KnownSound;
 
 typedef struct AudioSystem {
@@ -26,7 +29,10 @@ typedef struct AudioSystem {
     int known_count;
     ma_sound music;
     bool music_loaded;
-    Cvar *master, *music_vol, *sfx, *voice, *ui;
+    bool lpf_ready;
+    Scheduled sched[MAX_SCHEDULED];
+    int sched_count;
+    Cvar *master, *music_vol, *sfx, *voice, *ui, *trace;
 } AudioSystem;
 
 #define A (g_engine.audio)
@@ -38,6 +44,7 @@ bool audio_init(void) {
     A->sfx = cvar_reg_float("snd_sfx", 0.9f, 0, 1, CVAR_ARCHIVE, "effects volume");
     A->voice = cvar_reg_float("snd_voice", 1.0f, 0, 1, CVAR_ARCHIVE, "voice chat volume (reserved)");
     A->ui = cvar_reg_float("snd_ui", 0.8f, 0, 1, CVAR_ARCHIVE, "interface sounds volume");
+    A->trace = cvar_reg_bool("snd_trace", false, 0, "log every delayed / filtered sound (gunfire timing tests; works with --nosound)");
     for (int i = 1; i < g_engine.argc; i++)
         if (!strcmp(g_engine.argv[i], "--nosound") || !strcmp(g_engine.argv[i], "--test")) { log_info("audio: disabled by --nosound"); return false; }
     ma_engine_config cfg = ma_engine_config_init();
@@ -46,6 +53,12 @@ bool audio_init(void) {
         return false;
     }
     for (int i = 0; i < 4; i++) ma_sound_group_init(&A->engine, 0, NULL, &A->groups[i]);
+    // One low-pass per voice (distance / air absorption on gunfire), routed in only when used.
+    A->lpf_ready = true;
+    for (int i = 0; i < MAX_VOICES && A->lpf_ready; i++) {
+        ma_lpf_node_config lc = ma_lpf_node_config_init(ma_engine_get_channels(&A->engine), ma_engine_get_sample_rate(&A->engine), 20000.0, 2);
+        if (ma_lpf_node_init(ma_engine_get_node_graph(&A->engine), &lc, NULL, &A->voices[i].lpf) != MA_SUCCESS) A->lpf_ready = false;
+    }
     A->ok = true;
     log_info("audio: miniaudio engine at %u Hz", ma_engine_get_sample_rate(&A->engine));
     return true;
@@ -55,6 +68,8 @@ void audio_shutdown(void) {
     if (!A) return;
     if (A->ok) {
         for (int i = 0; i < MAX_VOICES; i++) if (A->voices[i].used) ma_sound_uninit(&A->voices[i].sound);
+        if (A->lpf_ready)
+            for (int i = 0; i < MAX_VOICES; i++) ma_lpf_node_uninit(&A->voices[i].lpf, NULL);
         if (A->music_loaded) ma_sound_uninit(&A->music);
         audio_loops_shutdown();
         for (int i = 0; i < 4; i++) ma_sound_group_uninit(&A->groups[i]);
@@ -97,7 +112,7 @@ static ma_sound_group *group_for(SoundCategory c) {
     }
 }
 
-static void play(const char *name, vec3 pos, float volume, SoundCategory cat, bool spatial) {
+static void play(const char *name, vec3 pos, float volume, SoundCategory cat, bool spatial, const AudioFx *fx) {
     if (!audio_available()) return;
     const char *path = resolve(name);
     if (!path) return;
@@ -111,17 +126,63 @@ static void play(const char *name, vec3 pos, float volume, SoundCategory cat, bo
     ma_sound_set_volume(&v->sound, volume);
     if (spatial) {
         ma_sound_set_position(&v->sound, pos.x, pos.y, pos.z);
-        ma_sound_set_min_distance(&v->sound, 1.5f);
-        ma_sound_set_max_distance(&v->sound, 60.0f);
+        ma_sound_set_min_distance(&v->sound, fx && fx->min_dist > 0 ? fx->min_dist : 1.5f);
+        ma_sound_set_max_distance(&v->sound, fx && fx->max_dist > 0 ? fx->max_dist : 60.0f);
+        ma_sound_set_rolloff(&v->sound, fx && fx->rolloff > 0 ? fx->rolloff : 1.0f);
         ma_sound_set_attenuation_model(&v->sound, ma_attenuation_model_inverse);
     } else {
         ma_sound_set_spatialization_enabled(&v->sound, MA_FALSE);
     }
+    if (fx && fx->pitch > 0) ma_sound_set_pitch(&v->sound, fx->pitch);
+    // Low-pass: the sound -> its voice's filter -> the category group.
+    if (fx && fx->lowpass_hz > 0 && fx->lowpass_hz < 18000.0f && A->lpf_ready) {
+        ma_lpf_config lc = ma_lpf_config_init(ma_format_f32, ma_engine_get_channels(&A->engine), ma_engine_get_sample_rate(&A->engine), fx->lowpass_hz, 2);
+        ma_lpf_node_reinit(&lc, &v->lpf);
+        if (!v->lpf_on) ma_node_attach_output_bus(&v->lpf, 0, group_for(cat), 0);
+        ma_node_attach_output_bus(&v->sound, 0, &v->lpf, 0);
+        v->lpf_on = true;
+    }
     ma_sound_start(&v->sound);
 }
 
-void audio_play(const char *name, vec3 pos, float volume, SoundCategory cat) { play(name, pos, volume, cat, true); }
-void audio_play_2d(const char *name, float volume, SoundCategory cat) { play(name, v3(0, 0, 0), volume, cat, false); }
+void audio_play(const char *name, vec3 pos, float volume, SoundCategory cat) { play(name, pos, volume, cat, true, NULL); }
+
+bool audio_has_sound(const char *name) {
+    if (!A || !name || !name[0]) return false;
+    return resolve(name) != NULL;
+}
+
+void audio_play_fx(const char *name, vec3 pos, float volume, SoundCategory cat, const AudioFx *fx) {
+    if (!A || !name || !name[0]) return;
+    if (fx && fx->delay > 0.0005f) {
+        if (A->sched_count >= MAX_SCHEDULED) return;   // a wall of gunfire: drop the newest
+        Scheduled *s = &A->sched[A->sched_count++];
+        s->at = platform_time() + fx->delay;
+        dg_strcpy(s->name, sizeof(s->name), name);
+        s->pos = pos;
+        s->volume = volume;
+        s->cat = cat;
+        s->fx = *fx;
+        s->fx.delay = 0.0f;
+        if (A->trace && A->trace->i) log_info("snd: %s scheduled in %.3f s (lpf %.0f Hz, vol %.3f)", name, fx->delay, fx->lowpass_hz, volume);
+        return;
+    }
+    if (A->trace && A->trace->i) log_info("snd: %s now (lpf %.0f Hz, vol %.3f)", name, fx ? fx->lowpass_hz : 0.0f, volume);
+    play(name, pos, volume, cat, true, fx);
+}
+
+static void run_scheduled(void) {
+    double now = platform_time();
+    int keep = 0;
+    for (int i = 0; i < A->sched_count; i++) {
+        Scheduled *s = &A->sched[i];
+        if (s->at > now) { A->sched[keep++] = *s; continue; }
+        if (A->trace && A->trace->i) log_info("snd: %s starts (late %.1f ms)", s->name, (now - s->at) * 1000.0);
+        play(s->name, s->pos, s->volume, s->cat, true, &s->fx);
+    }
+    A->sched_count = keep;
+}
+void audio_play_2d(const char *name, float volume, SoundCategory cat) { play(name, v3(0, 0, 0), volume, cat, false, NULL); }
 
 void audio_play_music(const char *name) {
     if (!audio_available()) return;
@@ -207,7 +268,15 @@ static void update_loops(float dt) {
     }
 }
 
+static vec3 s_listener;
+static float s_sound_speed = 343.0f;
+vec3 audio_listener_pos(void) { return s_listener; }
+void audio_set_sound_speed(float c) { s_sound_speed = c > 100.0f ? c : 343.0f; }
+float audio_travel_delay(vec3 pos) { return v3_dist(pos, s_listener) / s_sound_speed; }
+
 void audio_update(vec3 pos, vec3 fwd, vec3 up) {
+    s_listener = pos;
+    if (A) run_scheduled();
     if (audio_available()) update_loops(1.0f / 60.0f);
     if (!audio_available()) return;
     ma_engine_listener_set_position(&A->engine, 0, pos.x, pos.y, pos.z);
@@ -221,6 +290,10 @@ void audio_update(vec3 pos, vec3 fwd, vec3 up) {
     // Recycle finished voices.
     for (int i = 0; i < MAX_VOICES; i++) {
         Voice *v = &A->voices[i];
-        if (v->used && ma_sound_at_end(&v->sound)) { ma_sound_uninit(&v->sound); v->used = false; }
+        if (v->used && ma_sound_at_end(&v->sound)) {
+            ma_sound_uninit(&v->sound);
+            v->used = false;
+            if (v->lpf_on) { ma_node_detach_output_bus(&v->lpf, 0); v->lpf_on = false; }
+        }
     }
 }

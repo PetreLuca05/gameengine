@@ -429,7 +429,10 @@ void flesh_fx_hit(World *w, const FleshHit *h) {
     int cal = DG_CLAMP(h->caliber, 0, VFX_CAL_COUNT - 1);
     const FleshCaliberRule *cr = &r->cal[cal];
     float scale = flesh_hit_scale(r, cal, h->damage, h->dist);
-    if (head) scale *= 1.15f;
+    // Ballistic hits: the wound scales with the temporary cavity (energy left in the body: rifle /
+    // fragmenting rounds far above pistols), headshots heavier.
+    if ((h->flags & FLESH_BALLISTIC) && h->cavity > 0.0f) scale = clampf(0.45f + 0.55f * h->cavity, 0.4f, 2.6f);
+    if (head) scale *= (h->flags & FLESH_BALLISTIC) ? 1.4f : 1.15f;
     vec4 tint = blood_tint(def);
     // Aerosol: the character's darkness only (its hue would turn the lit mist brown like dust).
     float mdk = clampf(1.0f - (def->blood.darkness - 0.55f) * 0.6f, 0.5f, 1.2f);
@@ -504,7 +507,7 @@ void flesh_fx_hit(World *w, const FleshHit *h) {
     float thick = 0;
     bool exited = false;
     if (!melee && cap && flesh_capsule_exit(cap->a, cap->b, cap->r, h->pos, dir, &ex, &thick))
-        exited = flesh_should_exit(r, cal, part, thick, h->dist, seed ^ 0xe817u);
+        exited = (h->flags & FLESH_BALLISTIC) ? (h->flags & FLESH_EXITS) != 0 : flesh_should_exit(r, cal, part, thick, h->dist, seed ^ 0xe817u);
     FF->last.exit = ex;
     FF->last.thickness = thick;
     FF->last.exited = exited;

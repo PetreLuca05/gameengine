@@ -1,0 +1,13 @@
+{
+  "kind": "emissive",
+  "grid": [
+    2,
+    2
+  ],
+  "variants": 4,
+  "cell": 128,
+  "placeholder": {
+    "type": "flash_prong",
+    "seed": 73
+  }
+}

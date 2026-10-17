@@ -1,0 +1,97 @@
+{
+  "duration": 30.0,
+  "priority": 1,
+  "max_instances": 96,
+  "cull_distance": 600,
+  "lod": [
+    [
+      40,
+      0.8
+    ],
+    [
+      120,
+      0.5
+    ],
+    [
+      250,
+      0.3
+    ]
+  ],
+  "emitters": [
+    {
+      "name": "trail",
+      "tier": "gpu",
+      "spawn": {
+        "mode": "distance",
+        "per_meter": 0.35,
+        "life": [
+          0.4,
+          0.9
+        ],
+        "size": [
+          0.05,
+          0.09
+        ],
+        "speed": [
+          0.0,
+          0.2
+        ],
+        "rotation": [
+          0,
+          360
+        ],
+        "color": [
+          0.8,
+          0.75,
+          0.72,
+          0.06
+        ],
+        "color2": [
+          0.7,
+          0.66,
+          0.64,
+          0.04
+        ]
+      },
+      "update": {
+        "gravity": -0.05,
+        "drag": 2.0,
+        "wind": 0.7,
+        "size_curve": [
+          [
+            0,
+            0.6
+          ],
+          [
+            1,
+            2.2
+          ]
+        ],
+        "alpha_curve": [
+          [
+            0,
+            0
+          ],
+          [
+            0.15,
+            1
+          ],
+          [
+            1,
+            0
+          ]
+        ]
+      },
+      "render": {
+        "mode": "alpha",
+        "orient": "billboard",
+        "lighting": "simple",
+        "texture": "smoke_puff",
+        "soft": 0.2,
+        "near_fade": 0.3
+      }
+    }
+  ],
+  "name": "tracer_smoke",
+  "_generated": "make_ballistic_effects.py"
+}

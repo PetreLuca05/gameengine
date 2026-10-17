@@ -14,6 +14,8 @@
 #include "anim/body_parts.h"
 #include "ui/crosshair.h"
 #include "gameplay/throwables.h"
+#include "gameplay/ballistics/bal_world.h"
+#include "gameplay/ballistics/bal_fx.h"
 #include <stdio.h>
 #include <math.h>
 
@@ -58,6 +60,7 @@ void game_hud_tick(float dt) {
     G->damage_flash = fmaxf(0.0f, G->damage_flash - dt * 1.5f);
     fx_update(dt);
     flesh_fx_update(G->world, dt);
+    if (G->world) bal_world_frame(G->world, G->view.eye, dt);
     // Hold-interaction progress for the HUD: authoritative value (host) or replicated (client), of
     // the viewed player (a spectated player's comes with its local data).
     Player *p = game_view_player();
@@ -103,6 +106,10 @@ void game_handle_event(const GameEvent *ev) {
             fh.damage = ev->value;
             u32 fl = (ev->id >> 12) & 0xF;
             fh.flags = ((fl & FX_IMPACT_HEAD) ? FLESH_HEAD : 0u) | (kill ? FLESH_KILL : 0u) | (melee ? FLESH_MELEE : 0u) | (predicted ? FLESH_NO_ENTRY : 0u);
+            if (bal_impact_outcome(ev->id) & BAL_IMP_BALLISTIC) {
+                fh.flags |= FLESH_BALLISTIC | ((bal_impact_outcome(ev->id) & BAL_IMP_PENETRATE) ? FLESH_EXITS : 0u);
+                fh.cavity = bal_impact_cavity(ev->id);
+            }
             flesh_fx_hit(w, &fh);
             break;
         }
@@ -110,7 +117,7 @@ void game_handle_event(const GameEvent *ev) {
         if (predicted) break;
         vec3 inc;
         memcpy(&inc, ev->data, sizeof(inc));
-        fx_impact_ex(ev->pos, ev->dir, inc, (int)(ev->id & 0xFF), (int)((ev->id >> 8) & 0xF), (ev->id >> 12) & 0xF);
+        fx_impact_ex(ev->pos, ev->dir, inc, (int)(ev->id & 0xFF), (int)((ev->id >> 8) & 0xF), ((ev->id >> 12) & 0xF) | (ev->id & 0xFFFF0000u));
         break;
     }
     case EV_TRACER: {
@@ -126,6 +133,22 @@ void game_handle_event(const GameEvent *ev) {
             }
         }
         fx_tracer(from, ev->dir);
+        break;
+    }
+    case EV_SHOT: {
+        // Another player's ballistic shot: flash + casing at their visible barrel, the report, and a
+        // replay of the bullets for tracers / cracks (the host's EV_IMPACT events carry the hits).
+        BalShotRecord rec;
+        memcpy(&rec, ev->data, sizeof(rec));
+        vec3 mp = ev->pos, md = ev->dir;
+        if (ent_valid(w, ev->ent)) chars_item_muzzle(w, ev->ent, &mp, &md);
+        if (w->items && rec.weapon < w->items->weapon_count)
+            bal_fx_muzzle((int)ev->ent2 - 1, rec.cart, rec.device, w->items->weapons[rec.weapon].barrel_length, mp, md, false);
+        if (rec.caliber != 3u) {   // not shotgun shells: casing out of the right side
+            vec3 right = v3_norm(v3_cross(md, v3(0, 1, 0)));
+            fx_shell_ex(mp, v3_add(v3_scale(right, 2.2f), v3(0, 1.4f, 0)), rec.caliber);
+        }
+        bal_on_shot_event(w, ev, mp);
         break;
     }
     case EV_MUZZLE:
