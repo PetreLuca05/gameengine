@@ -48,11 +48,25 @@ static bool load_png(const char *rel, int want, u8 *dst, int stride) {
     u8 *px = stbi_load_from_memory((const u8 *)data, (int)size, &w, &h, &c, 4);
     free(data);
     if (!px) return false;
-    // Nearest / box resample into the tile when the file has another size.
+    // Into the tile; another size is box-filtered (premultiplied alpha) when shrinking, nearest when growing.
     for (int y = 0; y < want; y++)
         for (int x = 0; x < want; x++) {
-            int sx = x * w / want, sy = y * h / want;
-            memcpy(dst + (size_t)y * stride + (size_t)x * 4, px + ((size_t)sy * w + sx) * 4, 4);
+            int x0 = x * w / want, x1 = DG_MAX(x0 + 1, (x + 1) * w / want);
+            int y0 = y * h / want, y1 = DG_MAX(y0 + 1, (y + 1) * h / want);
+            float r = 0, g = 0, b = 0, a = 0;
+            int n = 0;
+            for (int sy = y0; sy < y1; sy++)
+                for (int sx = x0; sx < x1; sx++, n++) {
+                    const u8 *p = px + ((size_t)sy * w + sx) * 4;
+                    float pa = p[3] / 255.0f;
+                    r += p[0] * pa; g += p[1] * pa; b += p[2] * pa; a += pa;
+                }
+            u8 *o = dst + (size_t)y * stride + (size_t)x * 4;
+            float inv = a > 0 ? 1.0f / a : 0.0f;
+            o[0] = (u8)DG_CLAMP((int)(r * inv + 0.5f), 0, 255);
+            o[1] = (u8)DG_CLAMP((int)(g * inv + 0.5f), 0, 255);
+            o[2] = (u8)DG_CLAMP((int)(b * inv + 0.5f), 0, 255);
+            o[3] = (u8)DG_CLAMP((int)(a / (float)n * 255.0f + 0.5f), 0, 255);
         }
     stbi_image_free(px);
     return true;
@@ -87,7 +101,7 @@ static void setup(void) {
         I.src[i] = ok ? ICON_FILE : ICON_LIVE_PENDING;
         files += ok;
     }
-    I.atlas = render_texture_create(ATLAS_W, h, px, false, false);
+    I.atlas = render_texture_create(ATLAS_W, h, px, false, true);   // mips: the icons draw well below the tile size (hotbar, wheels)
     free(px);
     if (!I.live_target) I.live_target = render_ui3d_target_create(512, 512);
     I.ready = true;
@@ -215,8 +229,9 @@ static void cmd_bake_icons(int argc, const char **argv) {
     SDL_CreateDirectory(sub);
     snprintf(sub, sizeof(sub), "%s/128", I.bake_dir);
     SDL_CreateDirectory(sub);
-    if (!I.bake_t256) I.bake_t256 = render_ui3d_target_create(512, 512);
-    if (!I.bake_t128) I.bake_t128 = render_ui3d_target_create(256, 256);
+    // 4x supersampled: box-filtered down on readback (render_ui.c), antialiased silhouettes.
+    if (!I.bake_t256) I.bake_t256 = render_ui3d_target_create(1024, 1024);
+    if (!I.bake_t128) I.bake_t128 = render_ui3d_target_create(512, 512);
     I.baking = true;
     I.bake_next = 0;
     I.bake_wait = 2;

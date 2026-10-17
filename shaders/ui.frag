@@ -5,6 +5,7 @@
 //   uv.x in [2, 3]       SDF text / shapes (distance in alpha, 0.5 = edge), anti-aliased per pixel
 //   uv.x in [4, 5]       soft SDF (text shadow / glow): a wide edge
 //   uv.x < -0.5          the blurred scene behind the UI, sampled in screen space (render_ui_backdrop)
+//   uv.x >= 6            SDF ring (rounded-rect outline corners): 6 + 2k + u, k = thickness in half pixels
 // Derivatives are taken in uniform control flow, from the uv (smooth), never from the sampled
 // distance: fwidth of the distance across a thin stem is meaningless and dropped strokes.
 layout(location = 0) in vec2 v_uv;
@@ -16,14 +17,24 @@ layout(location = 0) out vec4 out_color;
 const float SDF_SLOPE = 128.0 / 6.0 / 255.0;   // distance units per atlas texel (FONT_PAD 6)
 
 void main() {
-    float mode = v_uv.x < -0.5 ? -1.0 : (v_uv.x > 3.5 ? 2.0 : (v_uv.x > 1.5 ? 1.0 : 0.0));
-    vec2 uv = v_uv - vec2(mode > 1.5 ? 4.0 : (mode > 0.5 ? 2.0 : 0.0), 0.0);
+    float ring_k = v_uv.x > 5.5 ? floor((v_uv.x - 6.0) * 0.5) : -1.0;
+    float mode = v_uv.x < -0.5 ? -1.0 : (ring_k >= 0.0 ? 3.0 : (v_uv.x > 3.5 ? 2.0 : (v_uv.x > 1.5 ? 1.0 : 0.0)));
+    vec2 uv = v_uv - vec2(mode > 2.5 ? 6.0 + 2.0 * ring_k : (mode > 1.5 ? 4.0 : (mode > 0.5 ? 2.0 : 0.0)), 0.0);
     vec2 texels = fwidth(uv) * vec2(textureSize(tex, 0));        // screen pixel footprint in texels
     float px = max(max(texels.x, texels.y), 1e-3) * SDF_SLOPE;    // distance change per screen pixel
     vec2 dx = dFdx(uv), dy = dFdy(uv);
     if (mode < -0.5) {
         vec2 suv = gl_FragCoord.xy * pc.screen.zw;
         out_color = vec4(texture(tex, suv).rgb * v_color.rgb, v_color.a);
+        return;
+    }
+    if (mode > 2.5) {
+        // Ring: inside the outer edge, outside the edge moved in by the thickness (anti-aliased both sides).
+        float d = texture(tex, uv).a;
+        float w = clamp(px * 0.7, 0.004, 0.25);
+        float t = ring_k * 0.5 * px;   // thickness: half pixels -> distance units
+        float a = smoothstep(0.5 - w, 0.5 + w, d) - smoothstep(0.5 - w, 0.5 + w, d - t);
+        out_color = vec4(v_color.rgb, v_color.a * clamp(a, 0.0, 1.0));
         return;
     }
     if (mode > 0.5) {

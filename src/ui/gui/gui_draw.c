@@ -474,21 +474,34 @@ void gd_round(GuiRect r, float radius, u32 c) {
 // Outline of a rounded rect: straight edges + quarter arcs (works over translucent fills).
 void gd_round_outline(GuiRect r, float radius, float t, u32 c) {
     if ((c >> 24) == 0 || t <= 0) return;
+    // Whole pixels: the edges come out equally thick and sharp (fractional layouts / tweens blurred one
+    // side and not the other).
+    float x0 = floorf(r.x + 0.5f), y0 = floorf(r.y + 0.5f), x1 = floorf(r.x + r.w + 0.5f), y1 = floorf(r.y + r.h + 0.5f);
+    r = gui_rect(x0, y0, x1 - x0, y1 - y0);
+    t = fmaxf(1.0f, floorf(t + 0.5f));
     radius = fminf(radius, fminf(r.w, r.h) * 0.5f);
+    // Below ~5 px the SDF circle is too small to round cleanly: a square, non-overlapping border.
+    if (radius < 5.0f) { gd_border(r, t, c); return; }
     gd_rect(gui_rect(r.x + radius, r.y, r.w - 2 * radius, t), c);
     gd_rect(gui_rect(r.x + radius, r.y + r.h - t, r.w - 2 * radius, t), c);
     gd_rect(gui_rect(r.x, r.y + radius, t, r.h - 2 * radius), c);
     gd_rect(gui_rect(r.x + r.w - t, r.y + radius, t, r.h - 2 * radius), c);
-    if (radius < 0.75f) return;
-    int seg = radius < 4 ? 3 : (radius < 10 ? 5 : 8);
-    float rr = radius - t * 0.5f;
-    float cx[4] = { r.x + radius, r.x + r.w - radius, r.x + r.w - radius, r.x + radius };
-    float cy[4] = { r.y + radius, r.y + radius, r.y + r.h - radius, r.y + r.h - radius };
-    float a0[4] = { DG_PI, 1.5f * DG_PI, 0.0f, 0.5f * DG_PI };
-    for (int k = 0; k < 4; k++)
-        for (int s = 0; s < seg; s++) {
-            float ta = a0[k] + 0.5f * DG_PI * (float)s / (float)seg, tb = a0[k] + 0.5f * DG_PI * (float)(s + 1) / (float)seg;
-            gd_line(cx[k] + cosf(ta) * rr, cy[k] + sinf(ta) * rr, cx[k] + cosf(tb) * rr, cy[k] + sinf(tb) * rr, t, c);
+    // Corners: quadrants of the SDF circle in ring mode (ui.frag: 6 + 2k + u, k = thickness in half
+    // pixels), anti-aliased inside and out like gd_round (the old line-segment arcs stair-stepped).
+    c = col(c);
+    float k = fminf(floorf(t * 2.0f + 0.5f), 60.0f);
+    float e = CIRCLE_SZ * 0.5f - CIRCLE_R;
+    float u0 = CIRCLE_X + e, u1 = CIRCLE_X + CIRCLE_SZ * 0.5f, u2 = CIRCLE_X + CIRCLE_SZ - e;
+    float v0 = CIRCLE_Y + e, v1 = CIRCLE_Y + CIRCLE_SZ * 0.5f, v2_ = CIRCLE_Y + CIRCLE_SZ - e;
+    float xs[2][2] = { { r.x, r.x + radius }, { r.x + r.w - radius, r.x + r.w } };
+    float ys[2][2] = { { r.y, r.y + radius }, { r.y + r.h - radius, r.y + r.h } };
+    float us[2][2] = { { u0, u1 }, { u1, u2 } }, vs[2][2] = { { v0, v1 }, { v1, v2_ } };
+    for (int j = 0; j < 2; j++)
+        for (int i = 0; i < 2; i++) {
+            vec2 a = auv(us[i][0], vs[j][0]), b = auv(us[i][1], vs[j][1]);
+            a.x += 6.0f + 2.0f * k;
+            b.x += 6.0f + 2.0f * k;
+            quad_uv(D.atlas, xs[i][0], ys[j][0], xs[i][1], ys[j][1], a, b, c);
         }
 }
 
