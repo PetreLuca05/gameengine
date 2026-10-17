@@ -1,10 +1,11 @@
-// Weapon sights at runtime (docs/ATTACHMENTS.md): ADS FOV per sight, sensitivity scaling, the
-// sight hand-off to the renderer (red dot / scope lens geometry, reticle, picture-in-picture
-// camera, ADS depth of field), the ads_debug overlay and the sight tests.
+// Weapon sights at runtime (docs/ATTACHMENTS.md): the ADS arms / weapon zoom per sight,
+// sensitivity scaling, the sight hand-off to the renderer (red dot / scope lens geometry, reticle,
+// picture-in-picture camera, ADS depth of field), the ads_debug overlay and the sight tests.
+// ADS never changes the world camera FOV (the server's sv_fov): only the arms / weapon projection
+// narrows, and a scope's magnification exists only inside its lens.
 //
 // Order per frame (game_render.c):
-//   sights_camera()  before camera_update: ADS progress -> main FOV (+ full-screen scope snap),
-//                    sensitivity scale
+//   sights_camera()  before camera_update: ADS progress -> arms / weapon zoom, sensitivity scale
 //   ... camera, world, hands, first-person body (the item lands on its hold point) ...
 //   sights_frame()   lens / reticle / PiP from the rendered item -> render_set_sight()
 //   sights_draw()    ads_debug overlay (UI)
@@ -44,20 +45,20 @@ typedef struct SightTest {
     char worst_name[64];
     // fov: ADS enter / exit switch frames
     int fov_stage, fov_wait;
-    float prev_t;
+    float prev_t, hip_fov;
     int fov_fail, fov_checks;
     bool quit;                // quit when done (scripted runs)
     bool keep;                // sweep: test the weapon as equipped (no swap)
 } SightTest;
 
 static struct {
-    Cvar *scope_mode, *pip_scale, *brightness, *ads_debug, *sight_debug, *sens_mode, *sens_coef, *relief_scale, *look_lag;
+    Cvar *pip_scale, *brightness, *ads_debug, *sight_debug, *sens_mode, *sens_coef, *relief_scale, *look_lag;
     Cvar *ads_dof, *dof_focus, *dof_fstop, *iron_blur, *thirdperson;
     // this frame
     const AttachmentDef *optic;
     WeaponDef wd;              // effective equipped weapon (copy)
     bool have_wd;
-    float ads_t, base_fov, sight_fov, main_fov, sens_scale;
+    float ads_t, base_fov, sight_fov, vm_zoom, sens_scale;
     bool sway_on;
     int sway_n[2];
     vec2 sway_min[2], sway_max[2];
@@ -98,20 +99,15 @@ void sights_camera(const Player *p, const WeaponDef *wd, CameraAds *out) {
     S.optic = gun ? attach_optic(&G->items, wd->att_applied) : NULL;
     S.ads_t = (p && gun) ? game_ads_vis() : 0.0f;
     bool scope = S.optic && S.optic->sight == SIGHT_SCOPE;
-    bool pip = scope && S.scope_mode->i == 0;
-    S.kind = !S.optic ? RSIGHT_NONE : (scope ? (pip ? RSIGHT_SCOPE_PIP : RSIGHT_SCOPE_FULL) : RSIGHT_REDDOT);
-    S.sight_fov = gun ? attach_sight_fov(wd, S.optic, S.base_fov) : S.base_fov;
+    S.kind = !S.optic ? RSIGHT_NONE : (scope ? RSIGHT_SCOPE_PIP : RSIGHT_REDDOT);
+    // The sight's magnification (scopes only, shown inside the lens): the sensitivity follows it.
+    S.sight_fov = gun ? attach_sight_fov(S.optic, S.base_fov) : S.base_fov;
     S.complete = gun && S.ads_t >= 1.0f;
+    S.vm_zoom = gun ? attach_ads_vm_zoom(wd, S.optic) : 1.0f;
     if (gun) {
-        if (scope && !pip) {
-            out->fov = attach_main_ads_fov(wd, S.optic, S.base_fov, true);   // absolute, like every ADS FOV
-            out->snap_fov = S.sight_fov;
-        } else {
-            out->fov = attach_main_ads_fov(wd, S.optic, S.base_fov, pip);
-        }
+        out->vm_zoom = S.vm_zoom;
         out->t = S.ads_t;
     }
-    S.main_fov = out->fov;
     S.sens_scale = gun ? sens_scale(S.sight_fov, S.base_fov) : 1.0f;
     input_set_ads_fov_scale(S.sens_scale);
 }
@@ -220,7 +216,6 @@ void sights_frame(const RenderCamera *cam, bool first_person) {
             rs->eye_relief = holdpoint_ads_relief(a->eye_relief > 0 ? a->eye_relief : 0.1f);
             rs->pip_scale = S.pip_scale->f;
             rs->dof_near_blur = a->dof_near_blur;
-            rs->hide_viewmodel = S.kind == RSIGHT_SCOPE_FULL && S.complete;
         } else {
             rs->dof_near_blur = S.iron_blur->f;
         }
@@ -278,10 +273,10 @@ void sights_draw(void) {
             ui_line(dp.x - 5 * s, dp.y + 5 * s, dp.x + 5 * s, dp.y - 5 * s, 1.0f, UI_RGBA(255, 200, 40, 255));
         }
     }
-    const char *kinds[] = { "iron", "red dot", "scope (PiP)", "scope (full screen)" };
-    snprintf(line, sizeof(line), "%s %s  |  sight FOV %.2f  main FOV %.2f  PiP FOV %.2f  |  sens x%.3f (%s %.2f)  |  DoF %s",
-             S.have_wd ? S.wd.id : "-", kinds[DG_CLAMP(S.kind, 0, 3)], S.sight_fov, S.main_fov, render_scope_pip_fov(), S.sens_scale, S.sens_mode->str,
-             S.sens_coef->f, S.rs.ads_dof ? "ADS" : "user");
+    const char *kinds[] = { "iron", "red dot", "scope (PiP)" };
+    snprintf(line, sizeof(line), "%s %s  |  world FOV %.2f  hands FOV %.2f (x%.2f aimed)  sight %.2fx (FOV %.2f)  PiP FOV %.2f  |  sens x%.3f (%s %.2f)  |  DoF %s",
+             S.have_wd ? S.wd.id : "-", kinds[DG_CLAMP(S.kind, 0, 2)], G->view.fov, render_vm_fov(), S.vm_zoom, attach_sight_zoom(S.optic), S.sight_fov,
+             render_scope_pip_fov(), S.sens_scale, S.sens_mode->str, S.sens_coef->f, S.rs.ads_dof ? "ADS" : "user");
     ui_text_shadow(cx, y, FONT_SMALL, white, UI_ALIGN_CENTER, line);
 }
 
@@ -430,7 +425,7 @@ static void cmd_sight_test(int argc, const char **argv) {
         const char *names[3] = { "16:9", "21:9", "4:3" };
         int fails = 0;
         for (int i = 0; i < 3; i++) {
-            mat4 pr = mat4_perspective(S.main_fov > 1 ? S.main_fov * DG_DEG2RAD : 1.2f, aspects[i], 0.04f, 1500.0f);
+            mat4 pr = mat4_perspective(render_vm_fov() * DG_DEG2RAD, aspects[i], 0.04f, 1500.0f);   // the weapon projection
             vec4 c = mat4_mul_v4(pr, v4(sc.x, sc.y, sc.z, 1));
             float h = 1080.0f, w = h * aspects[i];
             float ex = c.x / c.w * 0.5f * w, ey = c.y / c.w * 0.5f * h;
@@ -503,7 +498,8 @@ static void cmd_sight_test(int argc, const char **argv) {
             log_info("sight_test dump: %s slot %d %s item %s |%s", net_role() == NET_CLIENT ? "client" : "host", sl, p->local ? "(local)" : "(remote)",
                      w->item[i] ? item_def(&G->items, w->item[i])->id : "-", ids);
         }
-        log_info("sight_test dump: settings FOV %.1f, ADS %.2f, aimed FOV %.2f (sight picture %.2f), camera FOV now %.2f", S.base_fov, S.ads_t, S.main_fov, S.sight_fov, G->view.fov);
+        log_info("sight_test dump: base FOV %.2f, ADS %.2f, camera FOV now %.2f, hands FOV now %.2f (aimed zoom x%.3f), sight %.2fx (FOV %.2f)", S.base_fov, S.ads_t, G->view.fov,
+                 render_vm_fov(), S.vm_zoom, attach_sight_zoom(S.optic), S.sight_fov);
         return;
     }
     log_info("usage: sight_test align [weapon] | fov | parallax | aspect | net | dump");
@@ -566,23 +562,37 @@ static void align_frame(void) {
     }
 }
 
-// FOV / DoF switch: the frame ADS completes must already show the aimed FOV and the ADS DoF; the
-// first frame it is incomplete again must show neither (the user's DoF mode is back).
+// FOV / DoF switch: the world FOV never changes with ADS (it equals the hip frame's); the frame ADS
+// completes must already show the aimed hands / weapon FOV and the ADS DoF; the first frame it is
+// incomplete again must show neither (the user's DoF mode is back).
 static void fov_frame(const RenderCamera *cam) {
     SightTest *t = &S.t;
-    float target = S.kind == RSIGHT_SCOPE_FULL ? S.sight_fov : S.main_fov;
+    Cvar *rvm = cvar_find("r_viewmodel_fov");
+    float vm = render_vm_fov_for(cam, rvm ? rvm->f : 0.0f);
+    RenderCamera hip_cam = *cam;
+    hip_cam.ads_t = 0;
+    float vm_hip = render_vm_fov_for(&hip_cam, rvm ? rvm->f : 0.0f);
+    float vm_target = 2.0f * atanf(tanf(vm_hip * 0.5f * DG_DEG2RAD) / fmaxf(S.vm_zoom, 1.0f)) * DG_RAD2DEG;
     bool complete = S.complete;
     bool was = t->prev_t >= 1.0f;
+    if (S.ads_t <= 0.0f || t->hip_fov <= 1.0f) t->hip_fov = cam->fov_deg;   // (also when the test starts mid-aim)
+    if (S.ads_t > 0.0f && t->hip_fov > 1.0f && fabsf(cam->fov_deg - t->hip_fov) > 1e-3f) {
+        t->fov_checks++;
+        t->fov_fail++;
+        log_info("sight_test fov: world FOV %.3f while aiming (hip %.3f) -> FAIL", cam->fov_deg, t->hip_fov);
+        t->hip_fov = cam->fov_deg;   // once per change
+    }
     if (complete && !was) {
-        bool ok = fabsf(cam->fov_deg - target) < 1e-3f && S.rs.ads_dof;
+        bool ok = fabsf(vm - vm_target) < 1e-3f && S.rs.ads_dof && fabsf(cam->fov_deg - t->hip_fov) < 1e-3f;
         t->fov_checks++;
         if (!ok) t->fov_fail++;
-        log_info("sight_test fov: ADS complete -> FOV %.3f (target %.3f) ADS DoF %d -> %s", cam->fov_deg, target, S.rs.ads_dof, ok ? "ok" : "FAIL");
+        log_info("sight_test fov: ADS complete -> world FOV %.3f (hip %.3f), hands FOV %.3f (target %.3f) ADS DoF %d -> %s", cam->fov_deg, t->hip_fov, vm,
+                 vm_target, S.rs.ads_dof, ok ? "ok" : "FAIL");
     } else if (!complete && was) {
-        bool ok = !S.rs.ads_dof && (S.kind != RSIGHT_SCOPE_FULL || fabsf(cam->fov_deg - S.sight_fov) > 1e-2f);
+        bool ok = !S.rs.ads_dof && (S.vm_zoom <= 1.0f || vm > vm_target + 1e-3f);
         t->fov_checks++;
         if (!ok) t->fov_fail++;
-        log_info("sight_test fov: ADS left -> FOV %.3f ADS DoF %d (user mode restored) -> %s", cam->fov_deg, S.rs.ads_dof, ok ? "ok" : "FAIL");
+        log_info("sight_test fov: ADS left -> world FOV %.3f, hands FOV %.3f ADS DoF %d (user mode restored) -> %s", cam->fov_deg, vm, S.rs.ads_dof, ok ? "ok" : "FAIL");
     }
     t->prev_t = S.ads_t;
 }
@@ -607,10 +617,9 @@ bool sights_dof_managed(void) { return S.ads_dof && S.ads_dof->i; }
 void sights_register(void) {
     S.look_lag = cvar_reg_float("wpn_look_lag", 0.5f, 0.0f, 2.0f, CVAR_ARCHIVE, "how far the weapon trails mouse turns at the hip (x the hold style's look lag; 0 = locked to the view)");
     S.relief_scale = cvar_reg_float("ads_eye_relief_scale", 0.5f, 0.2f, 1.5f, CVAR_ARCHIVE, "ADS: sight distance from the eye x this (1 = the stock weld / the scope eye relief)");
-    S.scope_mode = cvar_reg_int("r_scope_mode", 0, 0, 1, CVAR_ARCHIVE, "scopes: 0 = picture-in-picture (second scene render at the scope FOV), 1 = full-screen FOV + vignette");
     S.pip_scale = cvar_reg_float("r_scope_pip_scale", 1.0f, 0.2f, 2.0f, CVAR_ARCHIVE, "scope picture-in-picture resolution (fraction of the render height; > 1 supersamples, max 2048 px)");
     S.brightness = cvar_reg_float("sight_brightness", 1.0f, 0.0f, 4.0f, CVAR_ARCHIVE, "red dot / illuminated reticle brightness");
-    S.ads_debug = cvar_reg_bool("ads_debug", false, 0, "ADS overlay: the sight socket projected against the exact screen centre, FOVs, sensitivity");
+    S.ads_debug = cvar_reg_bool("ads_debug", false, 0, "ADS overlay: the sight socket projected against the exact screen centre, world / hands FOV, sight zoom, sensitivity");
     S.sight_debug = cvar_reg_int("sight_debug", 0, 0, 6, 0, "sight shader views: 1 lens mask, 2 PiP raw, 3 eye box, 4 reticle only, 5 glass only");
     S.sens_mode = cvar_reg_string("ads_sens_mode", "monitor_distance", CVAR_ARCHIVE, "ADS sensitivity scaling: monitor_distance | fov_ratio | off");
     S.sens_coef = cvar_reg_float("ads_sens_coef", 1.0f, 0.0f, 3.0f, CVAR_ARCHIVE, "ADS sensitivity coefficient (monitor distance: fraction of the half screen height; fov_ratio: multiplier)");

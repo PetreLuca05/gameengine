@@ -12,6 +12,7 @@
 #include "game/game_internal.h"
 #include "gameplay/characters.h"
 #include "input/input.h"
+#include "player/camera.h"
 #include "app/video.h"
 #include "render/render.h"
 #include "render/fidelity/fidelity.h"
@@ -337,7 +338,14 @@ static void tab_graphics(GuiCursor *c, GuiRect content) {
     if (gw_button(rid("revert_display"), revert, "Revert", GB_SECONDARY, dirty)) S.pending = cur;
 
     section(c, "View");
-    row_slider_cvar(c, "Field of view", "cl_fov", 50, 120, 1, "%.0f\xC2\xB0", "Vertical-equivalent camera FOV. Aiming down sights uses each sight's own FOV.");
+    {
+        // The world FOV is the server's (the same for everyone); only the hands / weapon FOV is yours.
+        GuiRect r = gw_setting_row(c, "Field of view", "FOV is fixed by the server, the same for every player. Aiming zooms only your hands and weapon; scopes magnify inside the scope.",
+                                   rid("fov_fixed"));
+        char buf[64];
+        snprintf(buf, sizeof(buf), "%.0f\xC2\xB0 (server)", camera_base_fov());
+        gw_label(r, buf, gui_s(TH->t_body), GW_REGULAR, TH->text_faint, GUI_LEFT);
+    }
     {
         // Stretched resolution simulator: the slider and what it looks like on this display.
         Cvar *st = cv("r_stretch");
@@ -361,7 +369,7 @@ static void tab_graphics(GuiCursor *c, GuiRect content) {
         if (vm) {
             bool follow = vm->f < 1.0f;
             GuiRect tr = gw_setting_row(c, "Hands FOV follows camera", NULL, rid("vm_follow"));
-            if (gw_toggle(rid("vm_follow"), tr, &follow)) cvar_set_float(vm, follow ? 0.0f : cv("cl_fov")->f);
+            if (gw_toggle(rid("vm_follow"), tr, &follow)) cvar_set_float(vm, follow ? 0.0f : roundf(camera_base_fov()));
             if (!follow) row_slider_cvar(c, "Hands / weapon FOV", "cam_weapon_fov", 40, 120, 1, "%.0f\xC2\xB0", NULL);
         }
     }
@@ -520,8 +528,6 @@ static void tab_graphics(GuiCursor *c, GuiRect content) {
     row_slider_cvar(c, "Screen effects", "r_post_feedback", 0, 1, 0.05f, "%.2f", "Damage, flash and low-health effects.");
 
     section(c, "Sights");
-    static const char *const scope[] = { "Picture-in-picture", "Full screen" };
-    row_combo_cvar(c, "Scopes", "r_scope_mode", scope, 2, "Picture-in-picture keeps the world visible around the scope.");
     row_fid_slider(c, "Scope picture resolution", FF_SCOPE_PIP_SCALE, 0.2f, 2.0f, 0.05f, "%.2f", "1 = the render height, above 1 supersamples (sharper, slower).");
     row_slider_cvar(c, "Red dot brightness", "sight_brightness", 0.0f, 3.0f, 0.05f, "%.2f", NULL);
     row_fid_toggle(c, "Depth of field while aiming", FF_ADS_DOF, "A slight blur on the weapon while aimed.");

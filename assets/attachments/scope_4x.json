@@ -1,5 +1,5 @@
 {
-  "_comment": "4x scope: picture-in-picture (or full screen with r_scope_mode 1), second focal plane duplex reticle, eye box.",
+  "_comment": "4x scope: picture-in-picture (the magnification exists only inside the lens), second focal plane duplex reticle, eye box.",
   "id": "scope_4x",
   "name": "4x Scope",
   "slot": "optic",

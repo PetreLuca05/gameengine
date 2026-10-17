@@ -5,8 +5,7 @@
 // eye box (scope shadow when the eye is off the exit pupil or at the wrong relief) and the
 // reticle: first focal plane (fixed against the target, scales with magnification) or second
 // focal plane (fixed in the eyepiece). Away from the eye the ocular is dark coated glass.
-// Full-screen mode (r_scope_mode 1, once aimed): the main view already has the scope FOV; the
-// shader draws the tube vignette and the reticle around the optic axis.
+// The magnification exists only inside the ocular: the main view stays at the base FOV.
 #extension GL_GOOGLE_include_directive : require
 #include "sight_common.glsl"
 layout(location = 0) in vec2 v_uv;
@@ -50,21 +49,6 @@ void main() {
         float a = S.misc.y;
         vec2 q = (uv - 0.5) * vec2(a, 1.0) + 0.5;
         out_color = vec4(pip_sample(q), 1.0);
-        return;
-    }
-    if (kind == 3.0 && S.right.w > 0.5) {
-        // Full screen: tube vignette around the optic axis, reticle in world angles (k = 1).
-        vec4 c = U.proj * vec4(S.fwd.xyz, 0.0);
-        vec2 cuv = c.xy / max(c.w, 1e-6) * 0.5 + 0.5;
-        vec2 d = (uv - cuv) * vec2(S.misc.y, 1.0);
-        float r = length(d) / 0.47;
-        float w = max(fwidth(r), 1e-4);
-        float inside = 1.0 - smoothstep(1.0 - w, 1.0 + w, r);
-        float vig = smoothstep(0.7, 1.0, r) * 0.55;
-        vec3 col = reticle_over(vec3(0.0), t, px_main, 1.0);
-        float ink = reticle_mask(t, px_main, S.glass.z, S.dotp.w, S.glass.w);
-        float alpha = max(1.0 - inside, max(vig * inside, ink * inside));
-        out_color = vec4(sanitize(col * inside), alpha);
         return;
     }
 

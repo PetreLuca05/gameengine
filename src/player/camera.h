@@ -20,11 +20,11 @@ typedef struct ViewState {
     float fov_hip;             // smoothed hip FOV (sprint widening), the ADS blend starts from it
 } ViewState;
 
-// ADS FOV input (game_sights.c): the blend follows the weapon's ADS progress exactly.
+// ADS input (game_sights.c). The world FOV never changes with ADS; the arms / weapon projection
+// narrows by vm_zoom along the weapon's ADS progress (exactly vm_zoom once t reaches 1).
 typedef struct CameraAds {
     float t;                   // 0 hip .. 1 fully aimed (WeaponState.ads_t)
-    float fov;                 // main camera FOV at t = 1 (deg, already scaled for cl_fov); 0 = none
-    float snap_fov;            // > 0: full-screen scope FOV, used once t reaches 1 (exactly)
+    float vm_zoom;             // arms / weapon magnification at t = 1 (tan ratio, >= 1; 0 / 1 = none)
 } CameraAds;
 
 void camera_register_cvars(void);
@@ -32,6 +32,9 @@ void camera_register_cvars(void);
 void camera_apply_look(ViewState *v, vec2 look_delta);
 // Builds the render camera from the interpolated movement state.
 RenderCamera camera_update(ViewState *v, const PlayerMove *m, float dt, const CameraAds *ads, bool dead);
+// The world camera's vertical FOV for this screen: sv_fov, kept at sv_fov_max_aspect's horizontal
+// FOV on wider screens (no extra view to the sides); before sprint widening / the fire FOV punch.
 float camera_base_fov(void);
+float camera_fov_for_aspect(float fov_v, float max_aspect, float aspect);   // pure
 
 #endif

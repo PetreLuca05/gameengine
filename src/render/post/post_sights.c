@@ -4,8 +4,8 @@
 //   red dot   glass.frag (multiply: glass tint)  ->  reddot.frag (add: collimated MOA dot,
 //             fresnel reflection, dust)
 //   scope     scope.frag (premultiplied over): the picture-in-picture image magnified through the
-//             ocular (chromatic aberration, eye box / scope shadow, reticle FFP / SFP), or the
-//             full-screen mode (r_scope_mode 1): vignette + reticle over the zoomed main view
+//             ocular (chromatic aberration, eye box / scope shadow, reticle FFP / SFP). The
+//             magnification exists only there: the main view stays at the base FOV.
 // Geometry is analytic: the lens disc is intersected per pixel in view space with the viewmodel
 // projection (the item is drawn with it), occluded by the viewmodel depth; the dot and the
 // magnified image use the main projection (they show the world).
@@ -176,7 +176,10 @@ FgRes post_sights_build(FgRes color) {
     // shown at tangent t * k on screen (k = zoom at the base FOV, rescaled to the main FOV).
     float tan_main = tanf(P.in.fov_y * 0.5f), tan_base = tanf(fmaxf(s->base_fov, 10.0f) * 0.5f * DG_DEG2RAD);
     float k = fmaxf(s->zoom, 1.0f) * tan_main / fmaxf(tan_base, 1e-4f);
-    float k_nom = fmaxf(s->zoom, 1.0f) / 1.15f;   // SFP: the reticle is fixed in the eyepiece (main view at the scope's main zoom)
+    // SFP: the reticle is fixed in the eyepiece, i.e. it scales with the weapon projection the
+    // ocular is drawn with (authored at the scope's 1.15 main zoom).
+    float tan_vm = 1.0f / fmaxf(fabsf(SG.vm_proj.m[5]), 1e-4f);
+    float k_nom = fmaxf(s->zoom, 1.0f) / 1.15f * tan_main / fmaxf(tan_vm, 1e-4f);
     g->scope = v4(k, k_nom, fmaxf(s->eye_box, 1e-4f), fmaxf(s->eye_box_depth, 1e-4f));
     // Eye box: the eye relative to the optic's own axis (the picture follows the eye -> sight line,
     // the scope shadow reacts to the gun's residual sway about the reticle).
@@ -193,8 +196,8 @@ FgRes post_sights_build(FgRes color) {
     g->render = v4((float)P.in.render_w, (float)P.in.render_h, (float)w, (float)h);
     g->pip_from_view = SG.pip_from_view;
     SG.target = color;
-    // Full screen: the full-screen scope once aimed, and the debug views.
-    SG.full = (s->kind == RSIGHT_SCOPE_FULL && s->complete) || s->debug == 2;
+    // Full screen: the raw PiP debug view.
+    SG.full = s->debug == 2;
     if (SG.full) SG.scissor = (VkRect2D){ { 0, 0 }, { w, h } };
     else if (!lens_scissor(g, w, h)) return color;
     if (s->kind == RSIGHT_REDDOT) {
