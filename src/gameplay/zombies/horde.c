@@ -591,8 +591,8 @@ void horde_host_tick(World *w, float dt) {
         float face = atan2f(-to.x, -to.z);
         float diff = fabsf(wrap_angle(face - H->yaw[s]));
         if (diff > cfg->attack_facing_deg * DG_DEG2RAD) continue;
-        chars_npc_melee(w, c);
-        H->atk_hit[s] = cfg->attack_hit_time;
+        float hit = chars_npc_melee(w, c);   // the chosen clip's contact time
+        H->atk_hit[s] = hit > 0 ? hit : cfg->attack_hit_time;
         H->atk_cd[s] = cfg->attack_cooldown * (0.85f + 0.3f * (float)(hh((u32)s + w->tick) & 255u) / 255.0f);
         st->attacks++;
     }

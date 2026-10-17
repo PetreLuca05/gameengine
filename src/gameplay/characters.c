@@ -990,6 +990,8 @@ static void client_one(World *w, CharacterInst *c, int i, double rt, float dt) {
         in.speed = c->cl_speed;
         in.move_local = c->cl_speed > 0.05f ? v2(0, 1) : v2(0, 0);
         in.body_yaw = in.aim_yaw = quat_get_yaw(w->xf[i].rot);
+        if (c->cl_attack_t > 0) c->cl_attack_t -= dt;
+        in.attacking = c->cl_attack_t > 0;
         zombie_look(w, c, i, &in, dt);
     }
     c->body_yaw = in.body_yaw;
@@ -1139,7 +1141,13 @@ static void apply_event(World *w, const AnimEvent *e) {
     case AEV_LAND: if (remote) { ctrl_set(&c->rt.ctrl, AP_VERTICAL_VEL, -(float)e->extra / 8.0f); charrt_trigger(&c->rt, AP_T_LAND); } break;
     case AEV_RELOAD: if (remote) charrt_trigger(&c->rt, AP_T_RELOAD); break;
     case AEV_EQUIP: if (remote) charrt_trigger(&c->rt, AP_T_EQUIP); break;
-    case AEV_MELEE: if (remote) charrt_trigger(&c->rt, AP_T_MELEE); break;
+    case AEV_MELEE:
+        if (remote) {
+            ctrl_set(&c->rt.ctrl, AP_SEED, (float)e->seed);   // the host's attack variant (zombies)
+            if (w->type[ENT_INDEX(c->ent)] == ET_ZOMBIE) c->cl_attack_t = ZOMBIE_ATTACK_TIME;
+            charrt_trigger(&c->rt, AP_T_MELEE);
+        }
+        break;
     case AEV_FIRE:
         if (remote) charrt_trigger(&c->rt, AP_T_FIRE);
         if (!c->local) c->kick_v = v3_add(c->kick_v, v3(0, 0.6f, 1.4f));   // third-person recoil on the item
@@ -2366,30 +2374,42 @@ void zombies_attack(World *w) {
     for (int k = 0; k < MAX_CHARACTERS; k++) {
         CharacterInst *c = w->chars->c[k];
         if (!c || !ent_valid(w, c->ent) || w->type[ENT_INDEX(c->ent)] != ET_ZOMBIE || c->dead) continue;
-        c->ai.attack_t = 1.2f;
-        c->ai.mode = ZM_ATTACK;
-        ctrl_set(&c->rt.ctrl, AP_SEED, (float)(dg_hash_u32(c->ent ^ w->tick) % 3));
-        charrt_trigger(&c->rt, AP_T_MELEE);
-        AnimEvent ev;
-        memset(&ev, 0, sizeof(ev));
-        ev.type = AEV_MELEE;
-        ev.ent = c->ent;
-        ev.tick = w->tick;
-        chars_push_event(w, &ev);
+        chars_npc_melee(w, c);
     }
 }
 
-void chars_npc_melee(World *w, CharacterInst *c) {
-    c->ai.attack_t = 1.2f;
+// Zombie attacks (controller.json "attack" / upper "zombie_punch", anim_sets/zombie.json): the seed
+// picks the variant - 0 swipe, 1 two-handed smash, 2 lunge (full body, standing), 3 punch (upper
+// body only, so a zombie that is still walking keeps its legs). Random, never the same one twice in
+// a row; a moving zombie always punches. The seed goes to clients with the melee event.
+#define ZOMBIE_ATTACK_VARIANTS 4
+#define ZOMBIE_PUNCH 3
+static const float k_attack_hit[ZOMBIE_ATTACK_VARIANTS] = { 0.55f, 0.95f, 0.75f, 0.35f };   // contact time in each clip
+
+float chars_npc_melee(World *w, CharacterInst *c) {
+    int last = (int)c->last_attack - 1;
+    int v;
+    if (c->ai.speed > 0.6f) {
+        v = ZOMBIE_PUNCH;
+    } else {
+        u32 h = dg_hash_u32(c->ent ^ (w->tick * 2654435761u));
+        int n = last >= 0 ? ZOMBIE_ATTACK_VARIANTS - 1 : ZOMBIE_ATTACK_VARIANTS;
+        v = (int)(h % (u32)n);
+        if (last >= 0 && v >= last) v++;   // skip the previous one
+    }
+    c->last_attack = (u8)(v + 1);
+    c->ai.attack_t = ZOMBIE_ATTACK_TIME;
     c->ai.mode = ZM_ATTACK;
-    ctrl_set(&c->rt.ctrl, AP_SEED, (float)(dg_hash_u32(c->ent ^ w->tick) % 3));
+    ctrl_set(&c->rt.ctrl, AP_SEED, (float)v);
     charrt_trigger(&c->rt, AP_T_MELEE);
     AnimEvent ev;
     memset(&ev, 0, sizeof(ev));
     ev.type = AEV_MELEE;
     ev.ent = c->ent;
     ev.tick = w->tick;
+    ev.seed = (u8)v;
     chars_push_event(w, &ev);
+    return k_attack_hit[v];
 }
 
 static void zombie_ai(World *w, CharacterInst *c, int i, float dt) {
