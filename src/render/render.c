@@ -1215,7 +1215,7 @@ static void compute_matrices(FrameData *fd) {
         vec3 rig = any ? v3_scale(v3_add(lo, hi), 0.5f) : c->pos;
         // A rig centre far from the eye is a bad bound (a skinned draw without one): the eye's front.
         if (v3_len(v3_sub(rig, c->pos)) > 1.5f) rig = v3_madd(c->pos, fwd, 0.45f);
-        R->shadow_vm_active = shadows_on && key_cast && any && R->r_vm_shadow->i && !R->sight.hide_viewmodel && R->vm_shadow_size > 8;
+        R->shadow_vm_active = shadows_on && key_cast && any && R->r_vm_shadow->i && R->vm_shadow_size > 8;   // (the viewmodel is always drawn: no full-screen scope mode)
         R->shadow_vm_tile = (CsmTile){ 0 };
         if (R->shadow_vm_active) csm_fit_vm(&lview, rig, R->vm_shadow_size, &R->shadow_vm_tile);
     }
