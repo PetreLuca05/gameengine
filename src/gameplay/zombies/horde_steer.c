@@ -211,6 +211,7 @@ void horde_steer_range(const HordeSteerIn *in, HordeSteerOut *out, int begin, in
         }
         float diff = wrapf(face - in->yaw[i]);
         float maxt = c->turn_rate_deg * DG_DEG2RAD * dt;
+        if (chase && busy && td2 > 1e-4f) maxt = DG_PI;   // attacking: snapped onto the player, no turn rate
         out->yaw[i] = wrapf(in->yaw[i] + clampf(diff, -maxt, maxt));
     }
 }
