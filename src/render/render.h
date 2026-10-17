@@ -5,6 +5,7 @@
 
 #include "core/base.h"
 #include "core/dgmath.h"
+#include "render/shadow_settings.h"
 #include "anim/anim_mesh.h"
 #include "render/post/post_settings.h"
 #include "render/shadow_sky.h"
@@ -68,6 +69,12 @@ enum MaterialFlags {
     // procedural animated caustic light (emissive) on the liquid and the chamber floor.
     MAT_GLASS    = 1u << 22,
     MAT_CAUSTICS = 1u << 23,
+    // Unity-style renderer shadow flags (docs/SHADOWS_UNITY_MODEL.md): Cast Shadows Off =
+    // MAT_NO_SHADOW, Shadows Only = MAT_SHADOW_ONLY, Two Sided = MAT_SHADOW_TWO_SIDED (no back-face
+    // culling in the shadow pass; On culls as the material does); Receive Shadows off = MAT_NO_RECEIVE.
+    // Bit 24 is MAT_TERRAIN_MORPH, bits 24..27 the vgeo material's VGM_* flags (vgeo_gpu.h).
+    MAT_NO_RECEIVE       = 1u << 28,
+    MAT_SHADOW_TWO_SIDED = 1u << 29,
 };
 #define MAT_PBR_MAPS (MAT_MR_TEX | MAT_NORMAL_TEX | MAT_OCCLUSION_TEX | MAT_EMISSIVE_TEX)
 // Terrain chunk geomorph (docs/LOD.md, chunks.c): uv.x = height delta to the next coarser LOD, uv.y = its
@@ -94,6 +101,7 @@ typedef struct DrawItem {
     Material mat;
     u32 object_id;          // stable id of a moving object (0 = static): previous transform -> velocity
     u32 prev_slot;          // renderer internal
+    u8 layer;               // 0 .. 7: Unity-style layer (light culling masks, docs/SHADOWS_UNITY_MODEL.md)
 } DrawItem;
 
 #define LIGHT_NO_SHADOW 1u   // PointLight / SpotLight flags: never shadowed (muzzle flashes)
@@ -103,6 +111,7 @@ typedef struct PointLight {
     vec3 color;
     float intensity;
     u32 flags;          // LIGHT_*; lights cast shadows by default (docs/LIGHT_SHADOWS.md)
+    const LightShadowSettings *shadow;   // Unity-style shadow settings (copied); NULL = the engine default (Soft)
 } PointLight;
 
 typedef struct RenderCamera {
@@ -230,6 +239,7 @@ typedef struct SkinnedDraw {
     u32 object_id;          // stable id (0 = none): previous palette -> per-bone velocity
     TextureId texture;      // albedo (with MAT_TEXTURED in flags), 0 = vertex colours
     vec4 recon;             // MAT_RECON: spine base (world xyz) + progress 0..1 (w)
+    u8 layer;               // 0 .. 7 (light culling masks)
 } SkinnedDraw;
 MeshId render_skinned_mesh_create(const SkinVertex *verts, u32 vcount, const u32 *indices, u32 icount);
 void render_draw_skinned(const SkinnedDraw *d);
@@ -237,7 +247,11 @@ void render_draw_viewmodel(const DrawItem *item);
 void render_add_light(const PointLight *light);
 // Spot lights (flashlights): cone from pos along dir, projected cookie (render_set_spot_cookie),
 // no shadows (a light at the eye needs none). Up to 4 per frame.
-typedef struct SpotLight { vec3 pos, dir; float range, inner_deg, outer_deg, intensity; vec3 color; u32 flags; } SpotLight;
+typedef struct SpotLight { vec3 pos, dir; float range, inner_deg, outer_deg, intensity; vec3 color; u32 flags; const LightShadowSettings *shadow; } SpotLight;
+// The directional light's (sun / moon) Unity-style shadow settings: type, resolution, strength,
+// bias, normal bias, culling mask (docs/SHADOWS_UNITY_MODEL.md). Persist until changed.
+void render_set_sun_shadow(const LightShadowSettings *s);
+void render_get_sun_shadow(LightShadowSettings *out);
 
 // Virtualized geometry placements of the loaded level (docs/VGEO.md "Levels"; mirrors LevelVgeo):
 // replaces every level vgeo instance (vgeo_test_scene instances are cleared too).
@@ -246,6 +260,7 @@ typedef struct RenderVgeoPlacement {
     vec3 pos, color;
     float yaw, scale, scale_jitter, spacing, roughness;
     u32 grid[2], seed;
+    u32 shadow_flags;            // Unity-style renderer flags of every instance (VGI_NO_CAST / SHADOWS_ONLY / NO_RECEIVE, layer << 6)
 } RenderVgeoPlacement;
 void render_vgeo_set_level(const RenderVgeoPlacement *p, int count);
 
@@ -527,12 +542,24 @@ RenderStats render_stats(void);
 typedef struct RenderShadowInfo {
     int cascades;
     unsigned tile, vm_tile;                 // texels per atlas tile / viewmodel map
-    float split[3], radius[3], texel_m[3];  // selection distance, sphere radius, texel size (m)
-    float bias_m[3], nbias_m[3];            // constant / normal offset bias (m)
-    vec3 center[4];                         // snapped sphere centres (3: the moon tile)
+    float split[4], radius[4], texel_m[4];  // selection distance, tile half extent, texel size (m)
+    float bias_m[4], nbias_m[4];            // constant / normal offset bias (m)
+    vec3 center[5];                         // tile centres (4: the moon map)
     float moon_radius, distance, low_sun;
     vec3 light_dir;                         // towards the key light
-    bool active[4], vm_active, taa;
+    bool active[4], moon_active, vm_active, taa;
+    // Unity-style controls this frame (docs/SHADOWS_UNITY_MODEL.md)
+    ShadowsMode mode;
+    ShadowRes resolution;
+    ShadowProjection projection;
+    SoftQuality soft_quality;
+    float border, near_offset, shadowmask_distance;
+    int shadowmask;
+    LightShadowSettings sun;
+    ShadowType sun_type;
+    int filter_mode;                        // SHF_*
+    float filter_tent;
+    unsigned local_lights, local_tiles, local_atlas;
     vec3 vm_center;
     float vm_radius, vm_texel_m, vm_pcss;
     float pcss_w, max_texels, fade;         // filter state as uploaded (ssky / shadow_cfg)

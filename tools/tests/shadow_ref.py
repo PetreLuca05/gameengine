@@ -48,7 +48,7 @@ EYE_Y = 7.0            # setpos feet height (noclip): the eye ~ 8.6 m over the g
 EYE_H = EYE_Y + 1.6    # eye height over the ground (approx.: only the 2 deg tilt offset uses it)
 PITCH = -88.0          # the view pitch limit: 2 deg off straight down
 TILT_DZ = EYE_H * math.tan(math.radians(90.0 + PITCH))   # the view centre lands this far north (-z) of the eye
-TEXEL = 1.0 / 167.0    # cascade 0 texel at shadow quality 3 (4096 tiles, 16:9; tests/test_shadow_csm.c prints the layout)
+TEXEL = 1.0 / 113.0    # cascade 0 texel at the Modern tier (Very High = 4096, four cascades to 300 m; tests/test_shadow_csm.c prints the layout)
 
 report = []
 failures = 0
@@ -71,7 +71,7 @@ def run_game(name, lines, validation=False, timeout=3600):
     script = os.path.join(OUT, name + '.cfg')
     with open(script, 'w') as f:
         f.write('r_maxfps 60\nr_width %d\nr_height %d\nvid_restart\nwait 20\nmap devroom\nwait 120\n' % RES)
-        f.write('r_fidelity 4\nr_era 0\nr_shadow_quality 3\nwait 30\n')
+        f.write('r_fidelity 4\nr_era 0\nr_shadow_resolution 3\nwait 30\n')
         f.write('\n'.join(lines) + '\nwait 5\nquit\n')
     log_path = os.path.join(OUT, name + '.log')
     cmd = [EXE, '--test', '--nosound', '--log', log_path, '--script', script]

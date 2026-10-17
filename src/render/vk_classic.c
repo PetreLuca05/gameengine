@@ -45,8 +45,8 @@
 #define CL_KEY_FADE 8u              // key bit: a fading part (dithered pipelines)
 #define CL_KEY_SHIFT 4              // key = mesh << 4 | fade << 3 | LOD
 #define CL_PARTS 3                  // parts of one instance at most (impostor, coarser, finer)
-#define CL_VIEWS 5                  // main view + 3 sun cascades + the scope picture-in-picture
-#define CL_VIEW_PIP 4
+#define CL_VIEWS 6                  // main view + 4 sun cascades + the scope picture-in-picture
+#define CL_VIEW_PIP 5               // after the cascades (views 1 .. 4)
 #define CL_IMPOSTOR_TRIS 256        // meshes this heavy (coarsest LOD) use r_classic_impostor_px
 
 typedef struct ClSection { u32 first_index, index_count, material; } ClSection;
@@ -649,6 +649,7 @@ typedef struct ClCull {
     // instance fade width, shrink, shadow distance scale and fade fraction, whole-cell limit scales
     bool legacy;
     float band, imp_band, fol_k, fol_band_k, fol_instance, fol_shrink, shadow_k, shadow_band, fade_lim_k, shadow_lim_k;
+    u32 layers;                     // shadow views: the light's culling mask (0 = every layer)
 } ClCull;
 
 static float clamp01f(float x) { return x < 0 ? 0 : (x > 1 ? 1 : x); }
@@ -684,7 +685,11 @@ static void emit_part(ClInst *out, u32 *key, u32 *n, u32 mesh, u32 lod, const fl
 
 // One instance against a view: appends to out / key at *n when kept (thread-safe: reads only).
 static void cull_instance(const ClCull *v, const VgScene *s, const VgInstance *in, ClInst *out, u32 *key, u32 *n) {
-    if ((in->flags_phase >> 16) & VGI_SKINNED) return;
+    u32 iflags = in->flags_phase >> 16;
+    if (iflags & VGI_SKINNED) return;
+    // Unity-style Cast Shadows Off / Shadows Only, the light's culling mask (docs/SHADOWS_UNITY_MODEL.md)
+    if (v->shadow ? (iflags & VGI_NO_CAST) != 0 : (iflags & VGI_SHADOWS_ONLY) != 0) return;
+    if (v->shadow && v->layers && !((v->layers >> VGI_LAYER(iflags)) & 1u)) return;
     if (in->mesh >= C.mesh_cap || !C.mesh[in->mesh].used || in->mesh >= s->mesh_count) return;
     const ClMesh *cm = &C.mesh[in->mesh];
     const VgMesh *m = &s->meshes[in->mesh];
@@ -1011,17 +1016,13 @@ void vkc_frame(const VgScene *s, const VgDisplace *disp, float density, float lo
     emit_view(&C.view[0]);
     count_view(&C.view[0]);
     // sun cascades: orthographic, LOD by the cascade's texel size, shadow distance, no impostors
-    if (shadows && R->r_shadow_quality->i > 0) {
-        C.ncasc = (u32)DG_CLAMP(R->r_shadow_cascades->i, 1, 3);
+    if (shadows && (R->shadow_active[0] || R->shadow_active[1] || R->shadow_active[2] || R->shadow_active[3])) {
+        C.ncasc = (u32)DG_CLAMP((int)R->shq.cascades, 1, 4);
         u32 tile = R->shadow_size / 2;
         for (u32 k = 0; k < C.ncasc; k++) {
-            mat4 t = mat4_identity();
-            t.m[0] = 0.5f;
-            t.m[5] = 0.5f;
-            t.m[12] = (k & 1) ? 0.5f : -0.5f;
-            t.m[13] = (k >> 1) ? 0.5f : -0.5f;
-            planes_of(mat4_mul(mat4_inverse(t), R->shadow_vps[k]), v.planes);
+            planes_of(R->shadow_vp_ndc[k], v.planes);   // the untiled matrix (render.c)
             v.ortho = v.shadow = true;
+            v.layers = R->sun_shadow.culling_mask == SHADOW_LAYERS_ALL ? 0u : (R->sun_shadow.culling_mask | 0x100u);
             v.px_scale = (float)tile / (2.0f * R->shadow_radius[k]);   // the tile's half extent (render.c)
             v.lod_px = shadow_px;
             v.era2010 = false;
@@ -1138,7 +1139,7 @@ static void mat_push(PushLit *pc, const VgMaterial *m, TextureId tex, u32 maps, 
 
 static bool lod_ready(const ClLod *L) { return L->gpu && R->meshes[L->gpu].used && R->frame_index >= L->ready_frame; }
 
-// pass 0 G-buffer, 1 lit, 2 shadow (view 1-3: cascade, or a local tile list), 3 scope PiP (lit forward)
+// pass 0 G-buffer, 1 lit, 2 shadow (view 1-4: cascade, or a local tile list), 3 scope PiP (lit forward)
 static void draw_view(VkCommandBuffer cmd, const ClView *v, int pass, u32 shadow_view) {
     if (!C.scene || !v->batch_count) return;
     const VgScene *s = C.scene;
@@ -1274,7 +1275,7 @@ void vkc_draw_shadow(VkCommandBuffer cmd, u32 cascade) {
 // Point / spot light shadow tile: the instances touching the light's sphere and the tile frustum, LOD
 // by distance to the light (~2 texels of error at the tile's resolution), instanced, masked
 // materials alpha-tested. Inside the atlas pass (frame set bound); returns the draw count.
-u32 vkc_draw_local_shadow(VkCommandBuffer cmd, vec4 sphere, const vec4 planes[6], u32 view, u32 tile_px) {
+u32 vkc_draw_local_shadow(VkCommandBuffer cmd, vec4 sphere, const vec4 planes[6], u32 view, u32 tile_px, u32 layers) {
     if (!C.scene) return 0;
     static ClView lv;
     ClCull v;
@@ -1289,6 +1290,7 @@ u32 vkc_draw_local_shadow(VkCommandBuffer cmd, vec4 sphere, const vec4 planes[6]
     v.znear = 0.05f;
     v.shadow = true;
     v.legacy = true;   // shared with r_vgeo 1: the cuts from before docs/LOD.md
+    v.layers = (layers & SHADOW_LAYERS_ALL) == SHADOW_LAYERS_ALL ? 0u : (layers | 0x100u);
     C.tmp_n = 0;
     cull_cells(&v, C.scene);
     emit_view(&lv);
@@ -1308,9 +1310,9 @@ void vkc_stats(void) {
     }
     log_info("classic: GPU %.1f MB (LOD buffers + impostor atlases, every vgeo mesh: kept with r_vgeo 1 too), CPU %.1f MB (exported LOD copies)", (double)C.gpu_bytes / 1048576.0,
              (double)C.cpu_bytes / 1048576.0);
-    log_info("classic: %u meshes (%u with impostors); last frame: main %u instances in %u batches, cascades %u / %u / %u instances, local shadows %u; %u draws, %.2fM tris (%.2fM in shadow views), "
+    log_info("classic: %u meshes (%u with impostors); last frame: main %u instances in %u batches, cascades %u / %u / %u / %u instances, local shadows %u; %u draws, %.2fM tris (%.2fM in shadow views), "
              "CPU cull %.3f ms",
-             meshes, imp, C.view[0].instances, C.view[0].batch_count, C.view[1].instances, C.view[2].instances, C.view[3].instances, C.local_instances, C.draws,
+             meshes, imp, C.view[0].instances, C.view[0].batch_count, C.view[1].instances, C.view[2].instances, C.view[3].instances, C.view[4].instances, C.local_instances, C.draws,
              (double)C.tris / 1e6, (double)C.tris_shadow / 1e6, (double)C.cpu_ms);
     log_info("classic: LOD %s: error %.2f px (shadows %.2f), impostors below %.1f px (trees x species scale) / %.1f px (small cover); main view parts LOD0-3 %u / %u / %u / %u, "
              "impostors %u, fading %u",

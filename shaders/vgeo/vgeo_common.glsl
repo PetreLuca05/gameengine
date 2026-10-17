@@ -28,6 +28,7 @@ struct VgViewGpu {
     vec4 wind_tile;          // wind field tile: texel 0 world x, z, metres per texel, valid
     vec4 wind_tile_prev;     // last frame's
     uvec4 wind_misc;         // x tile texture, y last frame's tile texture, z layers (VGW_*), w debug view (VGWD_*)
+    uvec4 shadow_misc;       // x shadow views: the light's culling mask (0 = every layer)
 };
 struct VgMaterial {
     vec4 color; float roughness, metallic, emissive, tex_scale; uint flags; uint albedo_tex; uint mask_tex; float alpha_cutoff;
@@ -70,6 +71,9 @@ struct VgPaletteSlot { uint first, prev_first, bone_count, pad0; float max_scale
 #define VGF_SKINNED 1u
 #define VGF_HAS_COLOR 4u
 #define VGI_SKINNED 2u
+#define VGI_NO_CAST 8u          // Unity-style renderer flags (docs/SHADOWS_UNITY_MODEL.md)
+#define VGI_SHADOWS_ONLY 16u
+#define VGI_NO_RECEIVE 32u
 #define VGN_CELLS_VIS 0
 #define VGN_CELLS_OCC 1
 #define VGN_INST_VIS 2

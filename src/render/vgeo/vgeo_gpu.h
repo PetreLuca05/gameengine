@@ -100,7 +100,14 @@ typedef struct VgPaletteSlot {
 
 // Instance flags (VgInstance.flags_phase >> 16). Below them: bits 0-7 the wind phase (WPO), bits 8-15 the
 // density hash (foliage: kept while (hash + 0.5) / 256 < r_foliage_density x fade(distance)).
-enum VgInstanceFlags { VGI_XFORM = 1u << 0, VGI_SKINNED = 1u << 1, VGI_CAST_SHADOW = 1u << 2 };
+// Unity-style renderer flags (docs/SHADOWS_UNITY_MODEL.md): Cast Shadows Off = VGI_NO_CAST, Shadows
+// Only = VGI_SHADOWS_ONLY, Receive Shadows off = VGI_NO_RECEIVE; the layer (culling masks) in VGI_LAYER.
+enum VgInstanceFlags {
+    VGI_XFORM = 1u << 0, VGI_SKINNED = 1u << 1, VGI_CAST_SHADOW = 1u << 2,
+    VGI_NO_CAST = 1u << 3, VGI_SHADOWS_ONLY = 1u << 4, VGI_NO_RECEIVE = 1u << 5,
+};
+#define VGI_LAYER_SHIFT 6            // 3 bits: layer 0 .. 7
+#define VGI_LAYER(f) (((f) >> VGI_LAYER_SHIFT) & 7u)
 #define VG_INST_PHASE(fp) ((fp) & 0xFFu)
 #define VG_INST_HASH(fp) (((fp) >> 8) & 0xFFu)
 
@@ -155,7 +162,7 @@ typedef struct VgCell { float min[3]; u32 first; float max[3]; u32 count; } VgCe
 
 // ------------------------------------------------------------------ culling (Phase 2)
 
-#define VG_MAX_VIEWS 5               // main camera + 3 shadow cascades + the moon tile (docs/SHADOWS.md)
+#define VG_MAX_VIEWS 6               // main camera + 4 shadow cascades + the moon map (docs/SHADOWS.md)
 #define VG_PAGE_WORDS (VGEO_PAGE_SIZE / 4u)
 #define VG_CLUSTER_BITS 12           // visible entry: page slot << 12 | cluster within the page
 enum VgViewFlags {
@@ -196,6 +203,7 @@ typedef struct VgViewGpu {
     float wind_tile[4];
     float wind_tile_prev[4];
     u32 wind_tex, wind_tex_prev, wind_layers, wind_debug;
+    u32 cast_layers, pad_[3];        // shadow views: the light's culling mask (0 = every layer)
 } VgViewGpu;
 
 // Counters (binding 8): indirect dispatch args first (x, y, z, unused), then counts.
@@ -303,7 +311,7 @@ _Static_assert(sizeof(VgDiscreteLod) == 32, "VgDiscreteLod");
 _Static_assert(sizeof(VgInstance) == 32, "VgInstance");
 _Static_assert(sizeof(VgCell) == 32, "VgCell");
 _Static_assert(sizeof(VgPaletteSlot) == 32, "VgPaletteSlot");
-_Static_assert(sizeof(VgViewGpu) == 544, "VgViewGpu");
+_Static_assert(sizeof(VgViewGpu) == 560, "VgViewGpu");
 _Static_assert(sizeof(VgMaterial) == 144, "VgMaterial");
 _Static_assert(sizeof(VgCounters) == 256, "VgCounters");
 _Static_assert(sizeof(VgPush) == 48, "VgPush");

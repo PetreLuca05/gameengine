@@ -184,7 +184,9 @@ void main() {
 #endif
         ao *= surf_ao;                        // the surface layers' baked AO, the same way
         float contact = (!vm && frame.post_flags.y > 0.5) ? texture(post_contact, suv).r : 1.0;
-        contact = mix(1.0, contact, frame.ssky0.y);   // contact shadows leave with the cast shadows (sky cutoff)
+        contact = mix(1.0, contact, frame.ssky0.y * frame.shadow_cfg3.w);   // contact shadows leave with the cast shadows (sky cutoff, Strength)
+        bool receive = (flags & MAT_NO_RECEIVE) == 0u;   // Receive Shadows (docs/SHADOWS_UNITY_MODEL.md)
+        if (!receive) contact = 1.0;
         // hemispheric ambient (indirect diffuse): AO only darkens indirect light
         float hemi = n.y * 0.5 + 0.5;
         vec3 ambient = mix(frame.ground_ambient.rgb, frame.sky_ambient.rgb, hemi) * frame.sky_ambient.w;
@@ -209,7 +211,7 @@ void main() {
         // sun
         vec3 l = normalize(frame.sun_dir.xyz);
         // The first-person rig: its own high-resolution tile + the world where it appears (lighting.glsl).
-        float sh = (vm ? shadow_factor_vm(v_world, n) : shadow_factor(v_world, n)) * contact * cloud_shadow_at(v_world);
+        float sh = receive ? (vm ? shadow_factor_vm(v_world, n) : shadow_factor(v_world, n)) * contact * cloud_shadow_at(v_world) : cloud_shadow_at(v_world);
         color += brdf(n, v, l, albedo, rough, metal) * frame.sun_color.rgb * frame.sun_dir.w * sh;
         // Snow sparkle: tiny glints facing the light.
         if (wx_snow > 0.05) {
@@ -217,12 +219,12 @@ void main() {
             color += vec3(g * wx_snow * 2.5) * frame.sun_color.rgb * frame.sun_dir.w * sh * max(dot(n, l), 0.0);
         }
         // Second light: the moon while the sun owns the cascades, shadowed in atlas tile 3.
-        if (frame.fill_dir.w > 0.0) color += brdf(n, v, normalize(frame.fill_dir.xyz), albedo, rough, metal) * frame.fill_color.rgb * frame.fill_dir.w * moon_shadow(v_world, n);
+        if (frame.fill_dir.w > 0.0) color += brdf(n, v, normalize(frame.fill_dir.xyz), albedo, rough, metal) * frame.fill_color.rgb * frame.fill_dir.w * (receive ? moon_shadow(v_world, n) : 1.0);
         // spot lights (flashlights, cookie-projected)
         for (int i = 0; i < int(frame.spot_info.x); i++) {
             vec3 sl;
             vec3 sc = spot_light(i, v_world, sl);
-            if (sc.r + sc.g + sc.b > 0.0) color += brdf(n, v, sl, albedo, rough, metal) * sc * spot_light_shadow(i, v_world, n);
+            if (sc.r + sc.g + sc.b > 0.0) color += brdf(n, v, sl, albedo, rough, metal) * sc * (receive ? spot_light_shadow(i, v_world, n) : 1.0);
         }
         // point lights
         int count = int(frame.ground_ambient.w);
@@ -235,7 +237,7 @@ void main() {
             vec3 ldir = dl / max(dist, 1e-4);
             float falloff = clamp(1.0 - pow(dist / radius, 4.0), 0.0, 1.0);
             falloff = falloff * falloff / (dist * dist + 1.0);
-            float lsh = dot(n, ldir) > 0.0 ? point_light_shadow(i, v_world, n) : 1.0;
+            float lsh = dot(n, ldir) > 0.0 && receive ? point_light_shadow(i, v_world, n) : 1.0;
             color += brdf(n, v, ldir, albedo, rough, metal) * frame.lights[i].color_intensity.rgb * frame.lights[i].color_intensity.w * falloff * lsh;
         }
     }
@@ -280,6 +282,6 @@ void main() {
         color += vec3(0.6, 0.85, 1.0) * fr * 0.6;
     }
     int sh_view = int(frame.ssky2.y);
-    if (sh_view >= 2 && sh_view <= 7 && (flags & MAT_UNLIT) == 0u) color = shadow_debug_color(sh_view, v_world) * 0.6;   // 8: lines only
+    if (sh_view >= 2 && sh_view != 8 && (flags & MAT_UNLIT) == 0u) color = shadow_debug_color(sh_view, v_world, normalize(v_normal)) * 0.6;   // 8: lines only
     out_color = vec4(color, base.a);
 }

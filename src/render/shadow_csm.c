@@ -4,14 +4,7 @@
 #include <math.h>
 #include <stdio.h>
 
-u32 csm_tile_texels(int quality) {
-    switch (quality) { case 1: return 1024; case 2: return 2048; case 3: return 4096; default: return 8; }
-}
-
-u32 csm_vm_texels(int quality) {
-    if (quality <= 0) return 8;
-    return quality >= 2 ? 2048 : 1024;
-}
+u32 csm_vm_texels(u32 sun_tile) { return sun_tile < 1024u ? 1024u : (sun_tile > 2048u ? 2048u : sun_tile); }
 
 void csm_sector_sphere(float s, float tan_corner, float *ahead, float *radius) {
     float th = atanf(fmaxf(tan_corner, 0.0f));
@@ -37,6 +30,7 @@ void csm_layout(const CsmParams *p, CsmLayout *out) {
         float t = (float)i / (float)n;
         float lg = CSM_NEAR * powf(D / CSM_NEAR, t), un = CSM_NEAR + (D - CSM_NEAR) * t;
         float s = i == n ? D : CSM_LAMBDA * lg + (1.0f - CSM_LAMBDA) * un;
+        if (p->splits && i < n) s = fminf(fmaxf(p->splits[i - 1], 0.5f), D);
         out->split[k] = s;
         float r;
         csm_sector_sphere(s, tc, &out->ahead[k], &r);
@@ -54,19 +48,21 @@ mat4 csm_light_view(vec3 to_light) {
     return mat4_look_at(v3(0, 0, 0), v3_neg(L), up);
 }
 
-void csm_fit(const mat4 *lview, vec3 center, float radius, u32 texels, float back, CsmTile *out) {
+void csm_fit(const mat4 *lview, vec3 center, float radius, u32 texels, float back, CsmTile *out) { csm_fit_reach(lview, center, radius, texels, back, CSM_REACH, out); }
+
+void csm_fit_reach(const mat4 *lview, vec3 center, float radius, u32 texels, float back, float reach, CsmTile *out) {
     vec3 cl = mat4_mul_point(*lview, center);
     float texel = 2.0f * radius / (float)DG_MAX(texels, 1u);
     // Whole texels: the grid origin (cl - radius) moves by whole texels with the camera.
     cl.x = floorf(cl.x / texel) * texel;
     cl.y = floorf(cl.y / texel) * texel;
     out->view = *lview;
-    out->proj = mat4_ortho(cl.x - radius, cl.x + radius, cl.y - radius, cl.y + radius, -cl.z - CSM_REACH, -cl.z + back);
+    out->proj = mat4_ortho(cl.x - radius, cl.x + radius, cl.y - radius, cl.y + radius, -cl.z - reach, -cl.z + back);
     out->vp = mat4_mul(out->proj, out->view);
     out->center = mat4_mul_point(mat4_inverse_rigid(*lview), cl);
     out->radius = radius;
     out->texel_m = texel;
-    out->span = CSM_REACH + back;
+    out->span = reach + back;
 }
 
 float csm_low_sun(float sun_elev) {
@@ -104,6 +100,32 @@ int csm_select(const CsmLayout *l, float d, int first, float *blend, float *fade
         return c;
     }
     return n - 1;
+}
+
+void csm_fit_close(const mat4 *lview, vec3 cam, vec3 fwd, vec3 right, vec3 up, float tan_v, float tan_h, float d0, float d1, u32 texels, float reach,
+                   CsmTile *out) {
+    vec3 lo = v3(1e30f, 1e30f, 1e30f), hi = v3(-1e30f, -1e30f, -1e30f);
+    for (int i = 0; i < 8; i++) {
+        float d = (i & 4) ? d1 : fmaxf(d0, 0.05f);
+        float sx = (i & 1) ? 1.0f : -1.0f, sy = (i & 2) ? 1.0f : -1.0f;
+        vec3 p = v3_add(cam, v3_add(v3_scale(fwd, d), v3_add(v3_scale(right, sx * tan_h * d), v3_scale(up, sy * tan_v * d))));
+        vec3 l = mat4_mul_point(*lview, p);
+        lo = v3_min(lo, l);
+        hi = v3_max(hi, l);
+    }
+    // Square tile (one texel size), the shader's border around it; no snap (Unity's Close Fit swims).
+    float r = 0.5f * fmaxf(hi.x - lo.x, hi.y - lo.y);
+    float T = (float)DG_MAX(texels, 32u);
+    r *= T / (T - 2.0f * CSM_EDGE_TEXELS);
+    vec3 c = v3_scale(v3_add(lo, hi), 0.5f);
+    float back = (hi.z - lo.z) * 0.5f + 2.0f;
+    out->view = *lview;
+    out->proj = mat4_ortho(c.x - r, c.x + r, c.y - r, c.y + r, -c.z - back - reach, -c.z + back);
+    out->vp = mat4_mul(out->proj, out->view);
+    out->center = mat4_mul_point(mat4_inverse_rigid(*lview), c);
+    out->radius = r;
+    out->texel_m = 2.0f * r / T;
+    out->span = reach + 2.0f * back;
 }
 
 void csm_fit_vm(const mat4 *lview, vec3 rig_center, u32 texels, CsmTile *out) {
