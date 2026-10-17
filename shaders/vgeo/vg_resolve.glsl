@@ -20,6 +20,8 @@ bool g_front;               // false: a back face of a two-sided material (the b
 uvec4 g_pbr_tex;            // metallic-roughness, normal, occlusion, emissive texture indices
 uvec4 g_pbr;                // PBR_PARAMS (pbr_maps.glsl)
 vec3 g_tangent, g_bitangent;   // world dP/du, dP/dv of the triangle (0: no frame)
+vec4 g_cover;               // ground cover (MAT_COVER, shaders/cover.glsl): x root -> tip, y card hash, z clump hash
+vec3 g_cover_pivot;         // the instance's position (the clump's root)
 
 // The tangent frame for pbr_normal: the triangle's T / B made orthogonal to the shading normal n
 // (directions kept: mirrored uvs stay mirrored).
@@ -86,6 +88,8 @@ void vg_resolve_defaults() {
     g_pbr_tex = uvec4(0u);
     g_pbr = uvec4(0u);
     g_tangent = g_bitangent = vec3(0.0);
+    g_cover = vec4(1.0, 0.0, 0.0, 0.0);
+    g_cover_pivot = vec3(0.0);
 }
 
 bool vg_resolve_pixel() {
@@ -155,6 +159,8 @@ bool vg_resolve_pixel() {
     if (mat.wpo != WPO_NONE) {                              // wind weights, not albedo
         vec4 wc = v_color;
         v_color = vec4(1.0);
+        g_cover = vec4(wc.r, wc.a, float(x.fp & 255u) / 256.0, 0.0);   // the wind weights' height and the card hash
+        g_cover_pivot = x.pos;
         if (V.wind_misc.w == VGWD_CHANNELS) {                  // wind_debug: R flutter, G phase, B branch as the colour
             vg_resolve_material(mat);
             g_mat_color = vec4(wc.rgb, 1.0);

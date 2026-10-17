@@ -1,5 +1,6 @@
 #include "openworld.h"
 #include "openworld_internal.h"
+#include "terrain/terrain_world.h"
 #include "chunks.h"
 #include "core/engine.h"
 #include "core/cvar.h"
@@ -43,6 +44,7 @@ static void ow_free(World *w) {
     if (!o) return;
     ow_foliage_free(w, o);
     render_surface_map(NULL, 0, 0, 0, 1);
+    terrain_world_unload();
     mapgen_raster_free(&o->raster);
     mappoi_free(&o->pois);
     mapgen_free(&o->gen);
@@ -625,6 +627,7 @@ bool openworld_load(World *w, const cJSON *root) {
     // terrain surface textures: the layers + this map's material raster (MgMaterial = SurfTexLayer ids)
     render_surfaces_load();
     render_surface_map(o->raster.mat, o->raster.n, o->raster.origin, o->raster.origin, o->raster.spacing);
+    terrain_world_load(o->raster.h, o->raster.mat, o->raster.n, o->raster.origin, o->raster.origin, o->raster.spacing);   // docs/TERRAIN_SHADING.md
     chunks_create_custom(w, &prov);
     horde_set_water(ow_water_fn, o);
     horde_set_sense(o->sense);

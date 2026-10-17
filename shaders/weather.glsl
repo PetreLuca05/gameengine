@@ -4,6 +4,12 @@
 // and the level's puddle mask (low points). The constants match weather_wet_material()
 // (src/world/weather.c).
 
+// Surface overrides set by the terrain shading (shaders/terrain/terrain.glsl) before weather_surface; the
+// defaults leave every other surface exactly as before.
+float g_wx_porosity = -1.0;   // >= 0: the surface's porosity (the terrain layers')
+float g_wx_puddle = 0.0;      // puddle potential beside the level's mask (moist low ground, low borders)
+float g_wx_snow = 1.0;        // snow accumulation (per layer, the snow line band)
+
 float wx_hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
 vec2 wx_hash2(vec2 p) { return fract(sin(vec2(dot(p, vec2(127.1, 311.7)), dot(p, vec2(269.5, 183.3)))) * 43758.5453); }
 
@@ -57,17 +63,18 @@ float weather_surface(vec3 wp, inout vec3 n, inout vec3 albedo, inout float roug
     float exposed = wx_exposed(wp);
     if (exposed <= 0.0) return 0.0;
     float up = n.y;
-    float porosity = (1.0 - metal) * clamp(rough * 1.15, 0.2, 1.0);
+    float porosity = g_wx_porosity >= 0.0 ? g_wx_porosity : (1.0 - metal) * clamp(rough * 1.15, 0.2, 1.0);
     // Wetness: tops fully, walls partly (run-off).
     float w = wet * exposed * mix(0.45, 1.0, clamp(up * 0.5 + 0.5, 0.0, 1.0));
     float k = 1.0 - w * (0.55 * porosity + 0.08);
     albedo *= k;
     rough = mix(rough, min(rough, 0.18), w * (0.6 + 0.35 * porosity));
     // Puddles: up-facing ground where the mask has low points, filling with the puddle level.
-    if (frame.wx2.w > 0.5 && pud > 0.001 && up > 0.85) {
+    if ((frame.wx2.w > 0.5 || g_wx_puddle > 0.0) && pud > 0.001 && up > 0.85) {
         vec2 puv = (wp.xz - frame.puddle_xf.xy) * frame.puddle_xf.zw;
-        if (all(greaterThan(puv, vec2(0.0))) && all(lessThan(puv, vec2(1.0)))) {
-            float m = texture(wx_puddles, puv).r;
+        bool in_mask = frame.wx2.w > 0.5 && all(greaterThan(puv, vec2(0.0))) && all(lessThan(puv, vec2(1.0)));
+        if (in_mask || g_wx_puddle > 0.0) {
+            float m = max(in_mask ? texture(wx_puddles, puv).r : 0.0, g_wx_puddle);
             float nz = wx_hash(floor(wp.xz * 1.7)) * 0.15 + sin(wp.x * 2.1) * sin(wp.z * 1.7) * 0.08;
             float cover = smoothstep(1.0 - pud * 0.9, 1.0 - pud * 0.9 + 0.12, m + nz * m) * exposed;
             if (cover > 0.0) {
@@ -81,7 +88,7 @@ float weather_surface(vec3 wp, inout vec3 n, inout vec3 albedo, inout float roug
         }
     }
     // Snow cover on upward faces.
-    float s = snow * exposed * smoothstep(0.25, 0.75, up);
+    float s = min(snow * exposed * smoothstep(0.25, 0.75, up) * g_wx_snow, 1.0);
     if (s > 0.0) {
         albedo = mix(albedo, vec3(0.86, 0.89, 0.93), s);
         rough = mix(rough, 0.62, s);

@@ -1,0 +1,23 @@
+{
+  "name": "sand_grass",
+  "a": [
+    "sand"
+  ],
+  "b": [
+    "grass",
+    "meadow",
+    "dirt"
+  ],
+  "width_m": 1.2,
+  "edge_noise_scale_m": 2.5,
+  "edge_noise_strength_m": 0.6,
+  "crumbs": 0.2,
+  "modes": [
+    "height",
+    "noise",
+    "crumbs",
+    "directional"
+  ],
+  "direction": "wind",
+  "direction_m": 1.0
+}

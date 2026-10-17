@@ -155,7 +155,7 @@ is kept.
 | Foliage shadows | grass 15, wheat 20, bushes 40, trees 70 m (cut) | 22.5 / 30 / 60 / 105 m, fading out over the last 15 % |
 | Terrain LOD | 70 / 140 / 280 m by chunk centre, cut, skirts | 105 / 210 / 420 m by the chunk's nearest point, per-vertex geomorph over the last 0.5 octave (crack- and pop-free: `test_lod`), skirts never exposed |
 | Far terrain tiles | 4 m grid within 700 m | within 1050 m (still a cut, see Limits) |
-| Terrain detail | anti-tiling 70-110 m, triplanar cut at 160 m | 105-165 m, triplanar fading over 195-240 m |
+| Terrain detail | anti-tiling 70-110 m, triplanar cut at 160 m | 105-165 m, triplanar fading over 195-240 m (the older surface blend, `r_terrain 0`; the terrain shading's own distances come from assets/terrain/terrain.json and the fidelity level, docs/TERRAIN_SHADING.md) |
 | VFX spawn LOD | x0.7 / 0.4 / 0.2 beyond 25 / 60 / 110 m (steps) | beyond 37.5 / 90 / 165 m, interpolated (log distance) |
 | Streaming | a not-yet-resident exported LOD was skipped (hole) | the nearest resident LOD is drawn (coarser first) until it is in; the next finer LOD is prefetched |
 

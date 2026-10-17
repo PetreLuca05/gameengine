@@ -1,0 +1,127 @@
+{
+  "_doc": "Fountain tussocks, dry-variegated ribbon grass (reference b3 / b4 / b5: r1 mid / right). 50-80 % cream / straw blades.",
+  "kind": "blade_atlas",
+  "model": "higgsfield-ai/soul/standard",
+  "resolution": "1080p",
+  "aspect_ratio": "1:1",
+  "style": "blade",
+  "background": "magenta",
+  "grid": [
+    2,
+    2
+  ],
+  "size": 2048,
+  "fill": 0.94,
+  "color_match": 0.85,
+  "target": {
+    "root": "#5f613f",
+    "mid": "#76744c",
+    "tip": "#857c56",
+    "dry_root": "#8a8058",
+    "dry_mid": "#9a8e62",
+    "dry_tip": "#a59669"
+  },
+  "avoid": "soil, roots, pot, vase, hands, shadows on the background, gradient background, blur, bokeh, depth of field, cartoon, illustration, saturated emerald or blue-green colour, pink or purple tint on the leaves, frame, border, text, watermark",
+  "checks": {
+    "coverage": [
+      0.05,
+      0.5
+    ],
+    "bottom": 0.01,
+    "residue": 0.03
+  },
+  "cells": [
+    {
+      "prompt": "A fountain-shaped tussock of about eighteen narrow arching grass blades, mostly dry cream and pale straw yellow with some olive green blades near the base, the blades fan out from a dense base at the bottom and arch outward to both sides, pointed tips",
+      "placeholder": {
+        "blades": [
+          14,
+          20
+        ],
+        "height": [
+          0.6,
+          0.9
+        ],
+        "width": 0.016,
+        "arch": 0.6,
+        "fan": 50,
+        "dry": 0.65,
+        "rib": 0.04,
+        "seed": 21
+      }
+    },
+    {
+      "prompt": "A tussock of variegated ribbon grass, about sixteen narrow arching blades with cream edges and a green centre stripe, pale overall, fanning out from the base at the bottom and arching outward, pointed tips",
+      "placeholder": {
+        "blades": [
+          14,
+          18
+        ],
+        "height": [
+          0.6,
+          0.88
+        ],
+        "width": 0.017,
+        "arch": 0.55,
+        "fan": 45,
+        "dry": 0.5,
+        "rib": 0.1,
+        "seed": 22
+      }
+    },
+    {
+      "prompt": "A dense fountain tussock of about twenty narrow arching olive-green grass blades with dry straw-coloured tips, fanning out from the base at the bottom and arching outward, pointed tips",
+      "placeholder": {
+        "blades": [
+          16,
+          20
+        ],
+        "height": [
+          0.62,
+          0.9
+        ],
+        "width": 0.015,
+        "arch": 0.6,
+        "fan": 48,
+        "dry": 0.3,
+        "rib": 0.04,
+        "seed": 23
+      }
+    },
+    {
+      "prompt": "A clump of about twelve stiff narrow dark olive-green grass blades fanning out like a fountain from the base at the bottom, slightly glaucous, a few dry tips, pointed tips",
+      "target": {
+        "root": "#50553a",
+        "mid": "#66694a",
+        "tip": "#7b7756"
+      },
+      "placeholder": {
+        "seed": 24,
+        "blades": [
+          10,
+          13
+        ],
+        "height": [
+          0.55,
+          0.85
+        ],
+        "width": 0.016,
+        "arch": 0.35,
+        "fan": 40,
+        "dry": 0.15,
+        "rib": 0.05
+      }
+    }
+  ],
+  "card": {
+    "height_m": [
+      0.3,
+      0.5
+    ],
+    "width_m": 0.6
+  },
+  "ref_region": "r1_blade_dry_mid",
+  "ref_blades": [
+    "b3_ribbon_tussock"
+  ]
+}

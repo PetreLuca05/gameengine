@@ -1,0 +1,12 @@
+{
+  "_doc": "Terrain layer (docs/TERRAIN_SHADING.md); keys: src/world/terrain/terrain_params.c parse_layer.",
+  "texture": "surf:crop",
+  "tile_m": 3.0,
+  "blend": {
+    "height_contrast": 0.6,
+    "sharpness": 0.2
+  },
+  "porosity": 0.8,
+  "ao": 0.8,
+  "roughness": 0.9
+}

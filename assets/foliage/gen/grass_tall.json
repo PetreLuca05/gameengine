@@ -1,0 +1,121 @@
+{
+  "_doc": "Tall thin grass, straw stems, seed plumes (reference b6 / b7: r3 / r4).",
+  "kind": "blade_atlas",
+  "model": "higgsfield-ai/soul/standard",
+  "resolution": "1080p",
+  "aspect_ratio": "1:1",
+  "style": "blade",
+  "background": "magenta",
+  "grid": [
+    2,
+    2
+  ],
+  "size": 2048,
+  "fill": 0.94,
+  "color_match": 0.85,
+  "target": {
+    "root": "#4e4d2d",
+    "mid": "#5c5a33",
+    "tip": "#6c6840",
+    "dry_root": "#7a6a48",
+    "dry_mid": "#8a7a55",
+    "dry_tip": "#9d8f66"
+  },
+  "avoid": "soil, roots, pot, vase, hands, shadows on the background, gradient background, blur, bokeh, depth of field, cartoon, illustration, saturated emerald or blue-green colour, pink or purple tint on the leaves, frame, border, text, watermark",
+  "checks": {
+    "coverage": [
+      0.02,
+      0.4
+    ],
+    "bottom": 0.005,
+    "residue": 0.03
+  },
+  "cells": [
+    {
+      "prompt": "A tall clump of about fourteen thin straight wild grass stems and very narrow leaves, dry straw and olive colours, slightly kinked stems, needle-thin tips",
+      "placeholder": {
+        "blades": [
+          12,
+          16
+        ],
+        "height": [
+          0.8,
+          0.98
+        ],
+        "width": 0.007,
+        "arch": 0.12,
+        "fan": 12,
+        "dry": 0.6,
+        "rib": 0.0,
+        "seed": 31
+      }
+    },
+    {
+      "prompt": "A tall clump of about twelve thin green wild grass stems with long narrow leaves, olive green, straight with a slight lean, needle-thin tips",
+      "placeholder": {
+        "blades": [
+          10,
+          14
+        ],
+        "height": [
+          0.78,
+          0.98
+        ],
+        "width": 0.008,
+        "arch": 0.15,
+        "fan": 12,
+        "dry": 0.2,
+        "rib": 0.0,
+        "seed": 32
+      }
+    },
+    {
+      "prompt": "Eight tall thin wild grass stems each topped with a small feathery pale cream seed plume, narrow olive green leaves low on the stems",
+      "placeholder": {
+        "blades": [
+          7,
+          10
+        ],
+        "height": [
+          0.8,
+          0.98
+        ],
+        "width": 0.007,
+        "arch": 0.1,
+        "fan": 10,
+        "dry": 0.3,
+        "plume": 0.6,
+        "rib": 0.0,
+        "seed": 33
+      }
+    },
+    {
+      "prompt": "A tall clump of thin dry straw-coloured grass stems with a few drooping seed heads, beige and pale brown, needle-thin tips",
+      "placeholder": {
+        "blades": [
+          12,
+          16
+        ],
+        "height": [
+          0.78,
+          0.98
+        ],
+        "width": 0.006,
+        "arch": 0.18,
+        "fan": 14,
+        "dry": 0.9,
+        "plume": 0.25,
+        "plume_col": "#b8a880",
+        "rib": 0.0,
+        "seed": 34
+      }
+    }
+  ],
+  "card": {
+    "height_m": [
+      0.45,
+      0.8
+    ],
+    "width_m": 0.4
+  }
+}

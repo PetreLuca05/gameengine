@@ -1,0 +1,17 @@
+{
+ "size": 2048,
+ "source": "placeholder",
+ "mean": "#6e685a",
+ "target_mean": "#6e685a",
+ "mean_delta": 0.0,
+ "seam": 1.1183,
+ "tile_m": 2.0,
+ "name": "pebble_band",
+ "kind": "transition",
+ "tool_version": 1,
+ "recipe": "assets/terrain/gen/pebble_band.json",
+ "pair": [
+  "dirt",
+  "rock"
+ ]
+}

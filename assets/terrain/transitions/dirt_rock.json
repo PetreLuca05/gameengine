@@ -1,0 +1,33 @@
+{
+  "name": "dirt_rock",
+  "a": [
+    "rock"
+  ],
+  "b": [
+    "dirt",
+    "gravel",
+    "dirt_road",
+    "plowed"
+  ],
+  "width_m": 0.4,
+  "edge_noise_scale_m": 1.0,
+  "edge_noise_strength_m": 0.5,
+  "crumbs": 0.25,
+  "modes": [
+    "height",
+    "noise",
+    "crumbs",
+    "set",
+    "scatter",
+    "slope"
+  ],
+  "set": "pebble_band",
+  "set_strength": 0.9,
+  "set_tile_m": 2.0,
+  "slope_bias_m": 0.6,
+  "scatter_sprites": [
+    0,
+    1
+  ],
+  "scatter_per_m2": 4.0
+}

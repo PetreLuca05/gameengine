@@ -1,0 +1,14 @@
+{
+ "size": 2048,
+ "source": "placeholder",
+ "mean": "#4d3a26",
+ "target_mean": "#4d3a26",
+ "mean_delta": 0.0,
+ "seam": 1.0348,
+ "tile_m": 3.0,
+ "name": "field_soil",
+ "kind": "terrain_layer",
+ "tool_version": 1,
+ "recipe": "assets/terrain/gen/field_soil.json",
+ "replaces": 10
+}

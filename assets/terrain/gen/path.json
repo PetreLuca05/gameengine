@@ -1,0 +1,36 @@
+{
+  "kind": "terrain_layer",
+  "model": "higgsfield-ai/soul/standard",
+  "resolution": "1080p",
+  "aspect_ratio": "1:1",
+  "style": "ground",
+  "prompt": "Worn packed earth footpath surface seen from directly above: light grey-brown compacted soil, small embedded pebbles, a few dry grass bits, slightly dusty",
+  "avoid": "standing grass blades, plants growing upward, flowers, footprints, tyre tracks, puddles, people, animals, objects, horizon, sky, perspective, vignette, strong shadows, text, watermark, saturated green",
+  "target_mean": "#6a614a",
+  "color_match": 0.9,
+  "tile_m": 3.0,
+  "bump": 3.5,
+  "rough": 0.9,
+  "size": 2048,
+  "macro": {
+    "scale_m": 40,
+    "val": 0.1,
+    "accent": "#7a7050",
+    "accent_amount": 0.3,
+    "seed": 14
+  },
+  "placeholder": {
+    "type": "path",
+    "accent": [
+      "#5a5240",
+      "#9a9280"
+    ],
+    "pebbles": 60,
+    "blades": 40,
+    "cracks": 0.3,
+    "seed": 114
+  },
+  "replaces": 8,
+  "doc_ref": "r5 path #615942",
+  "ref_region": "r5_path"
+}

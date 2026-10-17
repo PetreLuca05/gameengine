@@ -162,7 +162,7 @@ file(GLOB DG_SHADER_SOURCES CONFIGURE_DEPENDS
   ${CMAKE_SOURCE_DIR}/shaders/sky/*.comp ${CMAKE_SOURCE_DIR}/shaders/vgeo/*.comp
   ${CMAKE_SOURCE_DIR}/shaders/vgeo/*.vert ${CMAKE_SOURCE_DIR}/shaders/vgeo/*.frag ${CMAKE_SOURCE_DIR}/shaders/vgeo/*.mesh
   ${CMAKE_SOURCE_DIR}/shaders/water/*.vert ${CMAKE_SOURCE_DIR}/shaders/water/*.frag ${CMAKE_SOURCE_DIR}/shaders/water/*.comp)
-file(GLOB DG_SHADER_INCLUDES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/shaders/*.glsl ${CMAKE_SOURCE_DIR}/shaders/post/*.glsl ${CMAKE_SOURCE_DIR}/shaders/sights/*.glsl ${CMAKE_SOURCE_DIR}/shaders/sky/*.glsl ${CMAKE_SOURCE_DIR}/shaders/vgeo/*.glsl ${CMAKE_SOURCE_DIR}/shaders/water/*.glsl ${CMAKE_SOURCE_DIR}/third_party/fsr/*.h
+file(GLOB DG_SHADER_INCLUDES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/shaders/*.glsl ${CMAKE_SOURCE_DIR}/shaders/post/*.glsl ${CMAKE_SOURCE_DIR}/shaders/sights/*.glsl ${CMAKE_SOURCE_DIR}/shaders/sky/*.glsl ${CMAKE_SOURCE_DIR}/shaders/vgeo/*.glsl ${CMAKE_SOURCE_DIR}/shaders/terrain/*.glsl ${CMAKE_SOURCE_DIR}/shaders/water/*.glsl ${CMAKE_SOURCE_DIR}/third_party/fsr/*.h
   ${CMAKE_SOURCE_DIR}/shaders/post/*.h)
 set(DG_SHADER_OUT ${CMAKE_BINARY_DIR}/bin/shaders)
 set(DG_SPV_FILES)
@@ -334,7 +334,7 @@ target_link_libraries(fbx_textures PRIVATE dg_animcore)
 
 # Virtualized geometry builder (pure C): the game compiles the same sources through the src glob.
 add_library(dg_vgeo STATIC src/render/vgeo/vgeo_build.c src/render/vgeo/vgeo_procgen.c src/render/vgeo/vgeo_procgen_building.c src/render/vgeo/vgeo_procgen_skinned.c src/render/vgeo/vgeo_import.c src/render/vgeo/vgeo_impostor.c src/render/vgeo/vgeo_procgen_foliage.c src/render/vgeo/vgeo_tree.c
-  src/render/vgeo/foliage_wind.c)
+  src/render/vgeo/foliage_wind.c src/render/vgeo/grass_asset.c)
 set_target_properties(dg_vgeo PROPERTIES C_STANDARD 11)
 target_link_libraries(dg_vgeo PUBLIC dg_animcore meshopt)
 if(MSVC)
@@ -488,6 +488,26 @@ set_target_properties(test_wind PROPERTIES C_STANDARD 11)
 target_link_libraries(test_wind PRIVATE dg_vgeo)
 add_test(NAME wind COMMAND test_wind WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
 
+# Terrain shading (docs/TERRAIN_SHADING.md): pure modules (parameters, baked maps, the CPU mirror of the
+# shader's blending / tiling) and their test: assets/terrain parses, maps vs CPU references, border
+# distance / band width / height blend / noise borders / biases, hex bombing autocorrelation + histogram.
+add_library(dg_terrain STATIC src/world/terrain/terrain_params.c src/world/terrain/terrain_maps.c src/world/terrain/terrain_blend.c)
+set_target_properties(dg_terrain PROPERTIES C_STANDARD 11)
+target_link_libraries(dg_terrain PUBLIC dg_animcore)
+add_executable(test_terrain tests/test_terrain.c)
+set_target_properties(test_terrain PROPERTIES C_STANDARD 11)
+target_link_libraries(test_terrain PRIVATE dg_terrain)
+add_dependencies(test_terrain dg_copy_data)
+add_test(NAME terrain COMMAND test_terrain WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+
+# Grass assets (docs/FOLIAGE_GRASS.md): the JSON assets against the target spec, clump meshes (extent,
+# cells, root -> tip), the placement rule's clumps per m2, materials per fidelity level.
+add_executable(test_grass tests/test_grass.c)
+set_target_properties(test_grass PROPERTIES C_STANDARD 11)
+target_link_libraries(test_grass PRIVATE dg_vgeo)
+add_dependencies(test_grass dg_copy_data)
+add_test(NAME grass COMMAND test_grass WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+
 # Water (docs/WATER.md): deterministic polynomials, swell spectrum / continuity / determinism, body
 # shapes and queries, buoyancy (analytic, Jolt half-submersion / drag / sinking, 200-body budget).
 # water_determinism runs the wave fingerprint in two processes and compares them.
@@ -635,6 +655,10 @@ if(Python3_Interpreter_FOUND)
   add_test(NAME lint_commands COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/tests/lint_commands.py)
   add_test(NAME aim_sockets COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/tests/aim_sockets.py)
   add_test(NAME lint_looks COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/tests/lint_looks.py)
+  # Ground textures (docs/GROUND_REFERENCE.md): the recipes validate, the generated / placeholder sets
+  # meet their colour, coverage, gradient, silhouette and seam checks (needs numpy + Pillow).
+  add_test(NAME ground_recipes COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/vfxgen/groundgen.py --validate)
+  add_test(NAME ground_textures COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/tests/ground_tex_check.py)
 endif()
 # Post-processing Looks (docs/LOOKS.md): five fixed looks, the analytic grade vs the baked LUT, Realism
 # identity, PUBG-style / Cinematic / Vibrant / Gritty character, field isolation, fidelity caps,

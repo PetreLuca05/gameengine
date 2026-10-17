@@ -1,0 +1,32 @@
+{
+  "name": "paved_edges",
+  "a": [
+    "asphalt",
+    "concrete"
+  ],
+  "b": [
+    "grass",
+    "meadow",
+    "forest",
+    "dirt",
+    "dirt_road",
+    "gravel",
+    "sand",
+    "mud"
+  ],
+  "width_m": 0.25,
+  "edge_noise_scale_m": 0.8,
+  "edge_noise_strength_m": 0.12,
+  "crumbs": 0.05,
+  "modes": [
+    "noise",
+    "crumbs",
+    "scatter"
+  ],
+  "scatter_sprites": [
+    0,
+    1
+  ],
+  "scatter_per_m2": 3.0,
+  "puddle_bias": 0.4
+}

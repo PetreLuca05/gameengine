@@ -1,0 +1,38 @@
+{
+  "kind": "transition",
+  "model": "higgsfield-ai/soul/standard",
+  "resolution": "1080p",
+  "aspect_ratio": "1:1",
+  "style": "ground",
+  "prompt": "Bare dry grey-brown earth seen from directly above with sparse small flattened tufts of short dry grass, dead grass bits and small pebbles scattered over it",
+  "avoid": "puddles, people, objects, horizon, sky, perspective, vignette, strong shadows, text, watermark, saturated green",
+  "target_mean": "#5f5838",
+  "color_match": 0.9,
+  "tile_m": 2.5,
+  "bump": 5.0,
+  "rough": 0.9,
+  "size": 2048,
+  "macro": {
+    "scale_m": 30,
+    "val": 0.1,
+    "accent": "#6a6440",
+    "accent_amount": 0.3,
+    "seed": 5
+  },
+  "placeholder": {
+    "type": "sparse_grass",
+    "accent": [
+      "#4a4232",
+      "#7a7040",
+      "#b0a890"
+    ],
+    "pebbles": 40,
+    "blades": 500,
+    "leaves": 200,
+    "seed": 201
+  },
+  "pair": [
+    "ground_litter",
+    "dirt"
+  ]
+}

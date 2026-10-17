@@ -315,6 +315,8 @@ float lit_caustic(vec3 p, float t) {
     return c / 3.0;
 }
 
+// Specular scale of the surface being shaded (ground cover: its "specular"; 1 everywhere else).
+float g_spec_scale = 1.0;
 vec3 brdf(vec3 n, vec3 v, vec3 l, vec3 albedo, float rough, float metal) {
     vec3 h = normalize(v + l);
     float ndl = max(dot(n, l), 0.0);
@@ -324,7 +326,7 @@ vec3 brdf(vec3 n, vec3 v, vec3 l, vec3 albedo, float rough, float metal) {
     float a = max(rough * rough, 0.02);
     vec3 f0 = mix(vec3(0.04), albedo, metal);
     vec3 F = f_schlick(vdh, f0);
-    vec3 spec = d_ggx(ndh, a) * v_smith(ndv, ndl, a) * F;
+    vec3 spec = d_ggx(ndh, a) * v_smith(ndv, ndl, a) * F * g_spec_scale;
     vec3 kd = (1.0 - F) * (1.0 - metal);
     return (kd * albedo / PI + spec) * ndl;
 }

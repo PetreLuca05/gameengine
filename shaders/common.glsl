@@ -26,10 +26,16 @@
 #define MAT_RECON_FX   2097152u
 #define MAT_GLASS      4194304u
 #define MAT_CAUSTICS   8388608u
-#define MAT_TERRAIN_MORPH 16777216u   // terrain geomorph (render.h, shaders/lod_fade.glsl lod_terrain_vertex)
-// bits 24..27 are also the vgeo material's own VGM_* flags; the shadow flags sit above them
-#define MAT_NO_RECEIVE       268435456u  // Receive Shadows off (docs/SHADOWS_UNITY_MODEL.md)
-#define MAT_SHADOW_TWO_SIDED 536870912u
+// Terrain geomorph (render.h, shaders/lod_fade.glsl lod_terrain_vertex): classic draw materials only; the
+// same bit is VGM_MASKED in vgeo material tables, which never carry it (vk_vgeo.c masks the flags).
+#define MAT_TERRAIN_MORPH 16777216u
+// Shadow flags (docs/SHADOWS_UNITY_MODEL.md) on bits 25 / 26: the vgeo material bits VGM_* there are
+// stripped before shading (vg_resolve, vk_classic), so runtime / draw flags may reuse them.
+#define MAT_NO_RECEIVE       33554432u   // Receive Shadows off
+#define MAT_SHADOW_TWO_SIDED 67108864u
+// Ground cover (render.h MAT_COVER, MAT_COVER_ID)
+#define MAT_COVER      268435456u
+#define MAT_COVER_ID(f) (((f) >> 29u) & 7u)
 
 struct PointLight {
     vec4 pos_radius;
@@ -121,6 +127,12 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 shadow_moon2;    // x 1 / map size
     vec4 local_rect[LOCAL_SHADOW_TILES];   // local light atlas squares: xy uv origin, z uv size
     vec4 local_cfg;       // x tent base of Soft local lights (texels), y Hard Only cap
+    vec4 cover[24];       // ground cover table: 3 per MAT_COVER id (grass_asset.h grass_cover_params)
+    vec4 cover_info;      // x assets, y grass level, z translucency on, w r_grass_debug
+    vec4 ground_color[16];   // per terrain material: mean albedo (linear), w grass top coverage
+    vec4 ground_top[16];     // per terrain material: grass tops' colour (linear)
+    vec4 ground_macro;    // x, y 1 / scales (m), z hue swing (rad), w value swing
+    vec4 ground_macro2;   // x saturation swing, y strength (0 off)
 } frame;
 
 // Where a world point lies in the screen-space inputs (AO, contact, SSR, SSGI, froxels): this

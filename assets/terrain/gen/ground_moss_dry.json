@@ -1,0 +1,34 @@
+{
+  "kind": "terrain_layer",
+  "model": "higgsfield-ai/soul/standard",
+  "resolution": "1080p",
+  "aspect_ratio": "1:1",
+  "style": "ground",
+  "prompt": "Dry yellowed moss and lichen crust on sandy soil seen from directly above, ochre and olive tones, small dry leaves",
+  "avoid": "standing grass blades, plants growing upward, flowers, footprints, tyre tracks, puddles, people, animals, objects, horizon, sky, perspective, vignette, strong shadows, text, watermark, saturated green",
+  "target_mean": "#75692f",
+  "color_match": 0.9,
+  "tile_m": 3.0,
+  "bump": 3.5,
+  "rough": 0.88,
+  "size": 2048,
+  "macro": {
+    "scale_m": 30,
+    "val": 0.1,
+    "accent": "#8a7a3a",
+    "accent_amount": 0.3,
+    "seed": 5
+  },
+  "placeholder": {
+    "type": "moss",
+    "accent": [
+      "#6a5a28",
+      "#8a7a3a",
+      "#9a9070"
+    ],
+    "leaves": 300,
+    "blades": 200,
+    "seed": 105
+  },
+  "variant_of": "meadow_ground"
+}

@@ -1,0 +1,61 @@
+{
+  "_doc": "Terrain layer (docs/TERRAIN_SHADING.md); keys: src/world/terrain/terrain_params.c parse_layer.",
+  "texture": "rock",
+  "tile_m": 6.0,
+  "macro_scale_m": 60,
+  "tiling": {
+    "mode": "hex",
+    "cell": 1.0,
+    "scale_jitter": 0.2,
+    "rotation": 1.0
+  },
+  "hsv_jitter": {
+    "hue_deg": 2,
+    "sat": 0.05,
+    "val": 0.1,
+    "scale_m": 12
+  },
+  "blend": {
+    "height_contrast": 1.5,
+    "sharpness": 0.12,
+    "height_offset": 0.1
+  },
+  "porosity": 0.3,
+  "curvature": {
+    "cavity": 0.35,
+    "ridge": 0.25
+  },
+  "moisture": {
+    "tint": [
+      0.85,
+      0.9,
+      0.8
+    ],
+    "amount": 0.3,
+    "darken": 0.25
+  },
+  "ao": 1.0,
+  "variants": [
+    {
+      "texture": "rock_mossy",
+      "mask": "moisture",
+      "lo": 0.45,
+      "hi": 0.7
+    }
+  ],
+  "variant_noise": {
+    "scale_m": 12,
+    "weight": 0.5
+  },
+  "detail": {
+    "parallax_m": 0.05,
+    "detail_normal": 0.7,
+    "micro_roughness": 0.08
+  },
+  "snow": {
+    "accumulation": 0.6
+  },
+  "expose_below": 0.6,
+  "expose": 1.0,
+  "roughness": 0.78
+}

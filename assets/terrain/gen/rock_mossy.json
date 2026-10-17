@@ -1,0 +1,31 @@
+{
+  "kind": "terrain_layer",
+  "model": "higgsfield-ai/soul/standard",
+  "resolution": "1080p",
+  "aspect_ratio": "1:1",
+  "style": "ground",
+  "prompt": "Weathered grey rock surface close-up covered in patches of yellow-green moss and grey lichen, one continuous natural rock, no joints",
+  "avoid": "standing grass blades, plants growing upward, flowers, footprints, tyre tracks, puddles, people, animals, objects, horizon, sky, perspective, vignette, strong shadows, text, watermark, saturated green",
+  "target_mean": "#6f6f55",
+  "color_match": 0.9,
+  "tile_m": 6.0,
+  "bump": 5.0,
+  "rough": 0.82,
+  "size": 2048,
+  "macro": {
+    "scale_m": 50,
+    "val": 0.12,
+    "accent": "#5a6a32",
+    "accent_amount": 0.4,
+    "seed": 11
+  },
+  "placeholder": {
+    "type": "rock",
+    "accent": [
+      "#5a6a32",
+      "#8a8a78"
+    ],
+    "seed": 111
+  },
+  "variant_of": "rock"
+}

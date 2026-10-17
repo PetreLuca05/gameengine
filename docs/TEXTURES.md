@@ -1,6 +1,6 @@
 # Surface textures
 
-Terrain, roads, open-world buildings and the grass / wheat cards are textured. Code:
+Terrain, roads, open-world buildings and the grass / wheat cards are textured. The open-world terrain itself is now shaded by the terrain set (docs/TERRAIN_SHADING.md) and the grass by the grass assets (docs/FOLIAGE_GRASS.md); this page covers the surface layers that roads and buildings keep, and the terrain fallback (`r_terrain 0`). Code:
 `src/render/surface_tex.c` (arrays, material map, bindings), `shaders/surfaces.glsl` (shading),
 `src/world/openworld.c` (layers per prim, the map upload), `src/render/vk_vgeo.c`
 (`foliage_card_file`: grass / wheat cards). Tools: `tools/vfxgen/texgen.py` (+ `texgen_recipes.json`),

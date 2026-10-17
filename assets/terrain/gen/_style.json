@@ -1,0 +1,7 @@
+{
+  "_doc": "Shared prompt tails for assets/terrain/gen recipes (tools/vfxgen/groundgen.py).",
+  "styles": {
+    "ground": "Seamless tileable texture, straight top-down orthographic photograph, flat even overcast daylight, no shadows, no perspective, no horizon, the surface fills the whole frame edge to edge, uniform density, sharp photographic detail, physically based albedo, natural muted colours",
+    "sprite": "The objects isolated on a solid flat pure magenta (#FF00FF) background, seen from directly above, centred, well separated, even soft light, no cast shadows, photorealistic, sharp focus"
+  }
+}

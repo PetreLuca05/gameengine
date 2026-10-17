@@ -1,0 +1,97 @@
+{
+  "_doc": "Reeds / sedges on wet ground (mud, pond edges): 3 tall cards, 0.8-1.4 m.",
+  "atlas": "reed",
+  "grid": [
+    2,
+    1
+  ],
+  "variants": 3,
+  "clump": {
+    "cards": 3,
+    "segments": 4,
+    "height_m": [
+      0.8,
+      1.4
+    ],
+    "width_m": [
+      0.4,
+      0.55
+    ],
+    "fan_deg": 8,
+    "lean": 0.08,
+    "bend_m": 0.1,
+    "base_jitter_m": 0.06,
+    "normal_dome": 0.4,
+    "mirror": 0.5
+  },
+  "placement": {
+    "density": {
+      "mud": 1.4
+    },
+    "clump_scale_m": 6,
+    "clump_amount": 0.6,
+    "bare": 0.3,
+    "scale": [
+      0.85,
+      1.2
+    ],
+    "slope_max": 0.8
+  },
+  "shading": {
+    "roughness": 0.7,
+    "specular": 0.35,
+    "sss": 0.35,
+    "sss_wrap": 0.5,
+    "alpha_cutoff": 0.45,
+    "root_dark": 0.75,
+    "root_extent": 0.2,
+    "ground_match": 0.2,
+    "ground_extent": 0.2,
+    "var_hue_deg": 4,
+    "var_sat": 0.08,
+    "var_val": 0.07,
+    "macro": 0.8,
+    "ao_root": 0.55
+  },
+  "terrain": {
+    "top_color": "#77704a",
+    "coverage": 0.5
+  },
+  "tiers": {
+    "off": {
+      "full_m": 18,
+      "end_m": 38,
+      "shadow_m": 0,
+      "density": 0.35
+    },
+    "low": {
+      "full_m": 22,
+      "end_m": 50,
+      "shadow_m": 0,
+      "density": 0.5
+    },
+    "medium": {
+      "full_m": 30,
+      "end_m": 65,
+      "shadow_m": 10,
+      "density": 0.75
+    },
+    "high": {
+      "full_m": 35,
+      "end_m": 80,
+      "shadow_m": 20,
+      "density": 0.9
+    },
+    "modern": {
+      "full_m": 40,
+      "end_m": 90,
+      "shadow_m": 20,
+      "density": 1.0
+    }
+  },
+  "wind": {
+    "main": 1.2,
+    "detail": 1.1,
+    "flutter": 1.0
+  }
+}

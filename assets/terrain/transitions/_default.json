@@ -1,0 +1,12 @@
+{
+  "name": "default",
+  "width_m": 0.6,
+  "edge_noise_scale_m": 1.5,
+  "edge_noise_strength_m": 0.4,
+  "crumbs": 0.15,
+  "modes": [
+    "height",
+    "noise",
+    "crumbs"
+  ]
+}

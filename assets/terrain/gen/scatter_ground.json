@@ -1,0 +1,79 @@
+{
+  "_doc": "Scatter sprites for the terrain scatter layer and border scatter (pebbles at rock / dirt, dead grass at grass / dirt, leaves, twigs). Placed per cell by the terrain shader.",
+  "kind": "scatter_atlas",
+  "model": "higgsfield-ai/soul/standard",
+  "resolution": "1080p",
+  "aspect_ratio": "1:1",
+  "style": "sprite",
+  "background": "magenta",
+  "grid": [
+    3,
+    2
+  ],
+  "size": 1536,
+  "bump": 6.0,
+  "color_match": 0.8,
+  "avoid": "background texture, soil, grass, shadows on the background, gradient background, text, watermark, cartoon",
+  "cells": [
+    {
+      "prompt": "Three small rounded grey and brown pebbles",
+      "target_mean": "#7a7468",
+      "rough": 0.75,
+      "placeholder": {
+        "type": "pebble",
+        "color": "#7a7468",
+        "seed": 301
+      }
+    },
+    {
+      "prompt": "A few small angular light grey rock chips",
+      "target_mean": "#8a8478",
+      "rough": 0.8,
+      "placeholder": {
+        "type": "pebble",
+        "color": "#8a8478",
+        "seed": 302
+      }
+    },
+    {
+      "prompt": "A single small dry brown dead leaf, curled at the edges",
+      "target_mean": "#6a4a30",
+      "rough": 0.85,
+      "placeholder": {
+        "type": "leaf",
+        "color": "#6a4a30",
+        "seed": 303
+      }
+    },
+    {
+      "prompt": "A small thin dry twig with one fork, grey-brown bark",
+      "target_mean": "#5a4a3a",
+      "rough": 0.85,
+      "placeholder": {
+        "type": "twig",
+        "color": "#5a4a3a",
+        "seed": 304
+      }
+    },
+    {
+      "prompt": "A small loose handful of short dead dry grass bits, pale straw colour",
+      "target_mean": "#9a8a5a",
+      "rough": 0.9,
+      "placeholder": {
+        "type": "grass_bits",
+        "color": "#9a8a5a",
+        "seed": 305
+      }
+    },
+    {
+      "prompt": "A small cluster of brown pine needles and a tiny pine cone",
+      "target_mean": "#5a4530",
+      "rough": 0.85,
+      "placeholder": {
+        "type": "twig",
+        "color": "#5a4530",
+        "seed": 306
+      }
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "kind": "transition",
+  "model": "higgsfield-ai/soul/standard",
+  "resolution": "1080p",
+  "aspect_ratio": "1:1",
+  "style": "ground",
+  "prompt": "Thin drifts of pale beige sand over a grey rock surface seen from directly above, the rock showing through in patches",
+  "avoid": "puddles, people, objects, horizon, sky, perspective, vignette, strong shadows, text, watermark, saturated green",
+  "target_mean": "#8e8672",
+  "color_match": 0.9,
+  "tile_m": 4.0,
+  "bump": 4.0,
+  "rough": 0.9,
+  "size": 2048,
+  "macro": {
+    "scale_m": 30,
+    "val": 0.1,
+    "accent": "#9a9070",
+    "accent_amount": 0.3,
+    "seed": 3
+  },
+  "placeholder": {
+    "type": "sand",
+    "accent": [
+      "#7a756b",
+      "#b0a888"
+    ],
+    "pebbles": 20,
+    "seed": 205
+  },
+  "pair": [
+    "sand",
+    "rock"
+  ]
+}

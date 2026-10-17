@@ -1103,6 +1103,17 @@ static TextureId mat_texture(const VgMaterial *m) {
 // and the descriptor set of the combination (vkr_material_set; 0 = all white).
 static u32 mat_maps(const VgMaterial *m, u32 *set) {
     *set = 0;
+    if ((m->flags & MAT_COVER) && m->mr_tex) {
+        // ground cover: its nta map (normal, thickness, AO; shaders/cover.glsl) in the first slot, no map flag
+        Material pm;
+        memset(&pm, 0, sizeof(pm));
+        pm.mr_tex = resolve_texture(m->mr_tex);
+        if (pm.mr_tex) {
+            pm.flags = MAT_MR_TEX;
+            *set = vkr_material_set(&pm);
+        }
+        return 0;
+    }
     if (!(m->flags & MAT_PBR_MAPS)) return 0;
     Material pm;
     memset(&pm, 0, sizeof(pm));

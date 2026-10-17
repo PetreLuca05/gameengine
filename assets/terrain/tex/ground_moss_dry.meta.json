@@ -1,0 +1,14 @@
+{
+ "size": 2048,
+ "source": "placeholder",
+ "mean": "#75692f",
+ "target_mean": "#75692f",
+ "mean_delta": 0.0,
+ "seam": 1.2786,
+ "tile_m": 3.0,
+ "name": "ground_moss_dry",
+ "kind": "terrain_layer",
+ "tool_version": 1,
+ "recipe": "assets/terrain/gen/ground_moss_dry.json",
+ "variant_of": "meadow_ground"
+}

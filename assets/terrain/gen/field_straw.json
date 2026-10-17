@@ -1,0 +1,33 @@
+{
+  "kind": "terrain_layer",
+  "model": "higgsfield-ai/soul/standard",
+  "resolution": "1080p",
+  "aspect_ratio": "1:1",
+  "style": "ground",
+  "prompt": "Harvested field seen from directly above: flattened straw stubble and chaff over dark brown soil",
+  "avoid": "standing grass blades, plants growing upward, flowers, footprints, tyre tracks, puddles, people, animals, objects, horizon, sky, perspective, vignette, strong shadows, text, watermark, saturated green",
+  "target_mean": "#6e5a3a",
+  "color_match": 0.9,
+  "tile_m": 3.0,
+  "bump": 4.0,
+  "rough": 0.9,
+  "size": 2048,
+  "macro": {
+    "scale_m": 40,
+    "val": 0.1,
+    "accent": "#8a7048",
+    "accent_amount": 0.3,
+    "seed": 16
+  },
+  "placeholder": {
+    "type": "field",
+    "accent": [
+      "#4a3a26",
+      "#9a8050"
+    ],
+    "pebbles": 10,
+    "blades": 1500,
+    "seed": 116
+  },
+  "variant_of": "field_soil"
+}

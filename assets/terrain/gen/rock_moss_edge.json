@@ -1,0 +1,34 @@
+{
+  "kind": "transition",
+  "model": "higgsfield-ai/soul/standard",
+  "resolution": "1080p",
+  "aspect_ratio": "1:1",
+  "style": "ground",
+  "prompt": "Grey rock surface seen from directly above with moss cushions and dark soil filling the cracks and edges",
+  "avoid": "puddles, people, objects, horizon, sky, perspective, vignette, strong shadows, text, watermark, saturated green",
+  "target_mean": "#6a6650",
+  "color_match": 0.9,
+  "tile_m": 4.0,
+  "bump": 5.5,
+  "rough": 0.9,
+  "size": 2048,
+  "macro": {
+    "scale_m": 30,
+    "val": 0.1,
+    "accent": "#5a6a32",
+    "accent_amount": 0.3,
+    "seed": 21
+  },
+  "placeholder": {
+    "type": "rock",
+    "accent": [
+      "#5a6a32",
+      "#4a4232"
+    ],
+    "seed": 206
+  },
+  "pair": [
+    "ground_litter",
+    "rock"
+  ]
+}

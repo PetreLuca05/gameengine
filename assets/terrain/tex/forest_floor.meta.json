@@ -1,0 +1,14 @@
+{
+ "size": 2048,
+ "source": "placeholder",
+ "mean": "#4a3d2c",
+ "target_mean": "#4a3d2c",
+ "mean_delta": 0.0,
+ "seam": 1.0075,
+ "tile_m": 3.0,
+ "name": "forest_floor",
+ "kind": "terrain_layer",
+ "tool_version": 1,
+ "recipe": "assets/terrain/gen/forest_floor.json",
+ "replaces": 2
+}

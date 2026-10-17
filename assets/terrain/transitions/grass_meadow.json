@@ -1,0 +1,19 @@
+{
+  "name": "grass_meadow",
+  "a": [
+    "meadow"
+  ],
+  "b": [
+    "grass",
+    "forest"
+  ],
+  "width_m": 2.5,
+  "edge_noise_scale_m": 6.0,
+  "edge_noise_strength_m": 2.0,
+  "crumbs": 0.25,
+  "modes": [
+    "height",
+    "noise",
+    "crumbs"
+  ]
+}

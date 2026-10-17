@@ -1,0 +1,38 @@
+{
+  "kind": "terrain_layer",
+  "model": "higgsfield-ai/soul/standard",
+  "resolution": "1080p",
+  "aspect_ratio": "1:1",
+  "style": "ground",
+  "prompt": "Ground of a wild summer meadow seen from directly above between the grass clumps: dark olive-brown soil covered in small dead leaves, short moss, bits of dry flattened grass, tiny twigs and a few small pale pebbles",
+  "avoid": "standing grass blades, plants growing upward, flowers, footprints, tyre tracks, puddles, people, animals, objects, horizon, sky, perspective, vignette, strong shadows, text, watermark, saturated green",
+  "target_mean": "#524c2c",
+  "color_match": 0.9,
+  "tile_m": 2.5,
+  "bump": 5.0,
+  "rough": 0.9,
+  "size": 2048,
+  "macro": {
+    "scale_m": 40,
+    "val": 0.12,
+    "accent": "#6b6a34",
+    "accent_amount": 0.4,
+    "seed": 1
+  },
+  "placeholder": {
+    "type": "litter",
+    "accent": [
+      "#3e3a22",
+      "#6b4a30",
+      "#7a7040"
+    ],
+    "leaves": 900,
+    "twigs": 25,
+    "blades": 300,
+    "pebbles": 20,
+    "seed": 101
+  },
+  "replaces": 0,
+  "doc_ref": "r1 ground under the grass #4d4926",
+  "ref_region": "r1_ground_under"
+}
