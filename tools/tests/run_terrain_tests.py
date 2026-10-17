@@ -6,8 +6,9 @@
   reload   the strip captured, assets/terrain/terrain.json edited while the game runs (macro texture
            strength 0), captured again: the reload is logged and applied before the next capture (the
            parameters reach the GPU in the frame the change is seen; the poll runs once a second)
+  seam     the grass fade: no luminance step in the ground where the grass ends (terrain grass term)
 
-    py tools/tests/run_terrain_tests.py [--bin build/bin] [--only levels|reload]
+    py tools/tests/run_terrain_tests.py [--bin build/bin] [--only levels|reload|seam]
 Exit 1 on a failure. Needs a Vulkan device (lavapipe works: VK_ICD_FILENAMES=.../lvp_icd.json, under xvfb-run).
 """
 import argparse
@@ -112,6 +113,41 @@ def test_reload(bin_dir, work):
     return fails
 
 
+def test_seam(bin_dir, work):
+    """Grass fade seam: across the terrain yard's flat grass base (x = 60, looking south from 15 m), the ground's
+    row luminance must not step where the grass ends (Modern: 70 m): the largest row-to-row change within
+    60..80 m stays under 3x the median change over 40..110 m."""
+    fails = []
+    cfg = os.path.join(work, "seam.cfg")
+    h, vfov = 15.0, 75.0
+    with open(cfg, "w") as f:
+        f.write("set r_maxfps 60\nset cl_fov %g\nmap terrain_yard\nwait 20\ntime_set 11:30\ntime_pause\nweather_set overcast 0\nweather_lock 1\nset r_fidelity 4\n"
+                "setpos 60 %g -85 180 0\nwait 1\nnoclip\nwait 40\nscreenshot seam.png\nwait 2\nquit\n" % (vfov, 10.0 + h))
+    run(bin_dir, cfg, work, os.path.join(work, "seam.log"))
+    p = os.path.join(work, "seam.png")
+    if not os.path.exists(p):
+        return ["seam: no capture"]
+    im = np.asarray(Image.open(p).convert("L")).astype(np.float32)
+    H, W = im.shape
+    t = np.tan(np.radians(vfov) / 2)
+
+    def row(d):   # the screen row of ground at horizontal distance d (pitch 0)
+        return int(round((0.5 + 0.5 * (h / d) / t) * H))
+
+    cols = slice(int(W * 0.4), int(W * 0.6))
+    ds = np.arange(40.0, 110.0, 1.0)
+    lum = np.array([im[row(d), cols].mean() for d in ds])
+    lum = np.convolve(lum, np.ones(3) / 3, mode="same")
+    step = np.abs(np.diff(lum))
+    med = float(np.median(step[2:-2])) + 1e-3
+    near = step[(ds[:-1] >= 60) & (ds[:-1] <= 80)]
+    ratio = float(near.max()) / med
+    if ratio > 3.0:
+        fails.append(f"luminance step at the grass end {near.max():.2f} = {ratio:.1f}x the median row change")
+    print(f"seam: {'ok' if not fails else 'FAIL'} (largest change near the fade {ratio:.1f}x the median)" + "".join("\n  " + f for f in fails))
+    return fails
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--bin", default=os.path.join(ROOT, "build", "bin"))
@@ -123,6 +159,8 @@ def main():
         fails += test_levels(a.bin, work)
     if a.only in ("", "reload"):
         fails += test_reload(a.bin, work)
+    if a.only in ("", "seam"):
+        fails += test_seam(a.bin, work)
     print(f"outputs in {work}")
     return 1 if fails else 0
 

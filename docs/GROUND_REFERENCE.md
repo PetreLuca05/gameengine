@@ -354,3 +354,15 @@ procedural placeholders (`ground_placeholder.py`), which is what the repository 
 
 Snapshots: `docs/ground_match/before_veg_spawn.jpg` (before), `grass_stage1_veg.jpg`, `terrain_stage1_veg.jpg`,
 `terrain_strip.jpg`, `compare_r*.jpg`.
+
+**State of the match (placeholder textures, `docs/ground_match/report.md`)**: hue is within 0-14 deg in
+every region (r2-r4 use `little_cloudy`: the shots are sunlit; full overcast turned the ground blue-grey).
+The remaining gaps are, first, saturation 0.1-0.25 low almost everywhere (the flat placeholder albedos;
+re-check after the key run before adding any grading) and, second, grass density (the reference meadows read
+as a carpet, ours as clumps on visible ground at the spec's 3-6 clumps / m2). Raise `placement.density` once
+GPU timings exist (section 10).
+
+**Runtime tests** (need a GPU or lavapipe; slow, not in ctest): `py tools/tests/run_terrain_tests.py`
+(every `r_terrain_quality` level with validation, hot reload within a frame, the grass-fade seam) and
+`py tools/tests/tree_regression.py <main build/bin> <this build/bin> --heights 16.41,12.79,14.66` (canopy views of
+the three forests against a main build, within one build's run-to-run noise: two runs are not bit-identical).
