@@ -1,4 +1,5 @@
-// Shared lit shading (lit.frag, skin.frag). The includer defines MAT_COLOR, MAT_PARAMS, MAT_FLAGS.
+// Shared lit shading (lit.frag, skin.frag). The includer defines MAT_COLOR, MAT_PARAMS, MAT_FLAGS;
+// PBR_MAPS adds the glTF material maps (shaders/pbr_maps.glsl), LIT_ALPHA_MASK the alphaMode MASK test.
 #include "weather.glsl"
 // LIT_CUSTOM_INPUTS: the includer provides v_world, v_normal, v_uv, v_color and LIT_FRONT_FACING
 // itself (the vgeo lit resolve decodes them per pixel, shaders/vg_lit.frag).
@@ -17,6 +18,9 @@ layout(location = 3) in vec4 v_color;
 layout(set = 1, binding = 0) uniform sampler2D tex;
 #ifdef LIT_SURFACES
 #include "surfaces.glsl"
+#endif
+#ifdef PBR_MAPS
+#include "pbr_maps.glsl"
 #endif
 // Screen-space inputs from the post stack (push descriptor, render resolution): ambient occlusion
 // (indirect only), sun contact shadows, reflections (rgb + confidence), diffuse GI.
@@ -223,6 +227,14 @@ void main() {
         }
         base *= t;
     }
+#ifdef LIT_ALPHA_MASK
+    if (base.a < pbr_alpha_cutoff()) discard;
+    base.a = 1.0;
+#endif
+    vec2 map_uv = v_uv * max(MAT_PARAMS.w, 1e-3);   // the albedo's uv (glTF maps share it)
+#ifdef PBR_MAPS
+    n = pbr_normal(flags, map_uv, v_world, n);
+#endif
     float surf_rough = -1.0;   // >= 0: the surface textures' roughness replaces the material's
 #ifdef LIT_SURFACES
     if (frame.surf_info.y > 0.5) {
@@ -247,6 +259,10 @@ void main() {
         vec3 v = normalize(frame.camera_pos.xyz - v_world);
         float rough = clamp(surf_rough >= 0.0 ? surf_rough : MAT_PARAMS.x, 0.04, 1.0);
         float metal = clamp(MAT_PARAMS.y, 0.0, 1.0);
+#ifdef PBR_MAPS
+        pbr_metal_rough(flags, map_uv, rough, metal);
+        rough = max(rough, 0.04);
+#endif
         vec3 albedo = base.rgb;
         // Screen-space inputs (never on the viewmodel: it is excluded from the screen-space passes).
         bool vm = (flags & MAT_VIEWMODEL) != 0u;
@@ -254,6 +270,9 @@ void main() {
         float wx_snow = weather_surface(v_world, n, albedo, rough, metal, vm);
         vec2 suv = gl_FragCoord.xy * frame.screen.zw;
         float ao = (!vm && frame.post_flags.x > 0.5) ? mix(1.0, texture(post_ao, suv).r, frame.post_params.z) : 1.0;
+#ifdef PBR_MAPS
+        ao *= pbr_occlusion(flags, map_uv);   // material AO x SSAO (indirect diffuse + specular occlusion)
+#endif
         float contact = (!vm && frame.post_flags.y > 0.5) ? texture(post_contact, suv).r : 1.0;
         // hemispheric ambient (indirect diffuse): AO only darkens indirect light
         float hemi = n.y * 0.5 + 0.5;
@@ -308,6 +327,10 @@ void main() {
             color += brdf(n, v, ldir, albedo, rough, metal) * frame.lights[i].color_intensity.rgb * frame.lights[i].color_intensity.w * falloff * lsh;
         }
     }
+#ifdef PBR_MAPS
+    if ((flags & MAT_EMISSIVE_TEX) != 0u) color += pbr_emissive(map_uv) * MAT_PARAMS.z;   // glTF: not tinted by the albedo
+    else
+#endif
     color += base.rgb * MAT_PARAMS.z; // emissive
 
     if ((flags & MAT_HIGHLIGHT) != 0u) {
