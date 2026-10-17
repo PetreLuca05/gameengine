@@ -399,9 +399,9 @@ static void swim_tick(World *w, PlayerSim *sim, PhysCharacter *ch, u16 buttons, 
         // Never pop out of the water from below: the surface spring takes over at the top.
         if (m->pos.y > float_feet && rel.y > 0.0f) rel.y *= 0.5f;
     }
-    // Quadratic drag: a dive from height loses its speed within a couple of metres.
+    // Quadratic drag above swimming speeds: a dive from height loses its speed within a couple of metres.
     float rs = v3_len(rel);
-    rel = v3_scale(rel, 1.0f / (1.0f + 0.6f * rs * dt));
+    if (rs > 3.0f) rel = v3_scale(rel, 1.0f / (1.0f + 0.6f * (rs - 3.0f) * dt));
     vec3 vel = v3_add(rel, v3(h->flow.x, 0.0f, h->flow.z));
 
     // Climb out: forward + jump against a ledge, from the surface (the mantle from a swimming pose).

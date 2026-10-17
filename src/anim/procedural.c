@@ -366,6 +366,14 @@ void proc_run(ProcState *st, const ProcInput *in0, Pose *pose, Xform *model) {
     } else proc_turn(st, &in);
     in.root.r = quat_yaw(st->render_body_yaw);
     if (in.seated) proc_seated(st, &in, pose, model);
+    if (in.swim || st->swim_w > 0.0f) {
+        // Swimming: no ground under the feet, no lean; the stroke owns the arms the item leaves free.
+        if (in.swim) {
+            in.foot_ik = false;
+            in.lean = false;
+        }
+        proc_swim(st, &in, pose, model);
+    }
     float foot_off[2] = { 0, 0 };
     vec3 anim_foot[2] = { { 0 }, { 0 } };
     if (in.foot_ik) proc_foot_pelvis(st, &in, pose, model, foot_off, anim_foot);
