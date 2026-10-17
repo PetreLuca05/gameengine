@@ -95,6 +95,18 @@ float v_smith(float ndv, float ndl, float a) {
     return 1.0 / ((ndv * (1.0 - k) + k) * (ndl * (1.0 - k) + k) * 4.0);
 }
 
+// Animated caustic light (fabricator chamber, docs/REVIVE.md): a few warped sine layers; depends
+// only on position and time (TAA-safe).
+float lit_caustic(vec3 p, float t) {
+    vec2 q = p.xz * 5.0 + vec2(0.0, p.y * 2.0);
+    float c = 0.0;
+    for (int i = 0; i < 3; i++) {
+        q += vec2(sin(q.y * 1.3 + t * 0.9 + float(i)), cos(q.x * 1.1 - t * 0.7 + float(i) * 1.7));
+        c += 1.0 / (1.0 + 8.0 * abs(sin(q.x) + sin(q.y)));
+    }
+    return c / 3.0;
+}
+
 vec3 brdf(vec3 n, vec3 v, vec3 l, vec3 albedo, float rough, float metal) {
     vec3 h = normalize(v + l);
     float ndl = max(dot(n, l), 0.0);

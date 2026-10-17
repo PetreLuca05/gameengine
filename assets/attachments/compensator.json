@@ -3,11 +3,20 @@
   "id": "compensator",
   "name": "Compensator",
   "slot": "muzzle",
+  "fire": { "mass": 0.12, "impulse": { "pitch": 0.75, "yaw": 1.4 }, "omega_mult": 1.15, "zeta_add": 0.1, "fov_punch": 1.1 },
   "mount": {
     "pos": [0, 0, 0]
   },
   "muzzle_length": 0.05,
-  "muzzle_device": "compensator",
+  "muzzle_device": {
+    "_comment": "Ports bleed gas sideways and up: less secondary flash, bright side / top jets, a louder report (most of all beside the shooter) and more blast dust.",
+    "kind": "comp",
+    "flash": { "primary": 1, "mach": 1, "secondary": 0.7, "prongs": 0, "vents": 0.8, "vapor": 0, "smoke": 1.1, "sparks": 1, "blast": 1.6, "light": 0.8 },
+    "ports": [[1, 0.3, 0], [-1, 0.3, 0], [0, 1, 0]],
+    "report_db": 3,
+    "report_db_side": 6,
+    "velocity_mul": 1.0
+  },
   "modifiers": {
     "recoil_vertical": 0.86,
     "recoil_horizontal": 0.78,

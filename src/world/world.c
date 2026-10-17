@@ -5,7 +5,8 @@
 #include <stdlib.h>
 
 static const char *k_type_names[ET_COUNT] = { "none", "player", "prop", "door", "gate", "lever", "switch", "light",
-                                              "container", "pickup", "dummy", "projectile", "marker", "zombie", "bench", "vehicle", "fuel_pump" };
+                                              "container", "pickup", "dummy", "projectile", "marker", "zombie", "bench", "vehicle", "fuel_pump",
+                                              "corpse", "fabricator" };
 
 const char *ent_type_name(EntityType t) { return (t >= 0 && t < ET_COUNT) ? k_type_names[t] : "?"; }
 

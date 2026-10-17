@@ -14,6 +14,7 @@
 #include "anim/body_parts.h"
 #include "ui/crosshair.h"
 #include "gameplay/throwables.h"
+#include "gameplay/revive/revive.h"
 #include <stdio.h>
 #include <math.h>
 
@@ -139,6 +140,8 @@ void game_handle_event(const GameEvent *ev) {
     case EV_KILL: add_kill(ev); break;
     case EV_PING: game_pings_event(ev); break;
     case EV_EXPLOSION: throwables_event(ev); break;
+    case EV_REVIVE:
+    case EV_DNA: revive_handle_event(ev); break;
     case EV_CONTAINER:
         G->container_open = true;
         G->container_ent = ev->ent;

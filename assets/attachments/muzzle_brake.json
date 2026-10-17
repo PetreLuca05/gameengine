@@ -1,0 +1,28 @@
+{
+  "_comment": "Muzzle brake: big side ports turn the gas sideways. Less recoil than a compensator, a much louder report beside the shooter, a large dust signature near the ground.",
+  "id": "muzzle_brake",
+  "name": "Muzzle Brake",
+  "slot": "muzzle",
+  "mount": {
+    "pos": [0, 0, 0]
+  },
+  "muzzle_length": 0.065,
+  "muzzle_device": {
+    "kind": "comp",
+    "flash": { "primary": 1, "mach": 1, "secondary": 0.7, "prongs": 0, "vents": 0.8, "vapor": 0, "smoke": 1.2, "sparks": 1, "blast": 2.0, "light": 0.85 },
+    "ports": [[1, 0.1, 0], [-1, 0.1, 0], [0.8, 0.1, 0.2], [-0.8, 0.1, 0.2]],
+    "report_db": 4,
+    "report_db_side": 8,
+    "velocity_mul": 1.0
+  },
+  "modifiers": {
+    "recoil_vertical": 0.82,
+    "recoil_horizontal": 0.85,
+    "camera_kick": 0.85
+  },
+  "model": [
+      {"offset": [0, 0, -0.0325], "half": [0.016, 0.013, 0.0325], "color": [0.12, 0.12, 0.12]},
+      {"offset": [0, 0, -0.02], "half": [0.018, 0.004, 0.006], "color": [0.04, 0.04, 0.04]},
+      {"offset": [0, 0, -0.045], "half": [0.018, 0.004, 0.006], "color": [0.04, 0.04, 0.04]}
+    ]
+}

@@ -104,16 +104,8 @@ void holdpoint_editor_draw(void) {
         }
         if (nk_tree_push(ctx, NK_TREE_TAB, "Procedural", NK_MINIMIZED)) {
             ch |= frow(ctx, "ADS scale", &s->ads_scale, 0, 1, 0.01f);
-            ch |= frow(ctx, "look lag deg/(rad/s)", &s->lag_rot, 0, 10, 0.05f);
-            ch |= frow(ctx, "look lag pos", &s->lag_pos, 0, 0.05f, 0.0005f);
-            ch |= frow(ctx, "look lag max deg", &s->lag_max, 0, 30, 0.1f);
-            ch |= frow(ctx, "lag stiffness", &s->lag_k, 1, 1000, 1);
-            ch |= frow(ctx, "lag damping", &s->lag_d, 0, 100, 0.5f);
-            ch |= frow(ctx, "sway deg", &s->sway_rot, 0, 5, 0.01f);
-            ch |= frow(ctx, "sway freq", &s->sway_freq, 0, 5, 0.01f);
-            ch |= frow(ctx, "breath m", &s->breath_pos, 0, 0.02f, 0.0002f);
-            ch |= frow(ctx, "bob m", &s->bob_pos, 0, 0.05f, 0.0005f);
-            ch |= frow(ctx, "bob roll deg", &s->bob_rot, 0, 10, 0.05f);
+            nk_layout_row_dynamic(ctx, S(18), 1);
+            nk_label(ctx, "Sway is global: assets/weapons/sway_global.json", NK_TEXT_LEFT);
             ch |= frow(ctx, "kick scale", &s->kick_scale, 0, 3, 0.01f);
             nk_tree_pop(ctx);
         }

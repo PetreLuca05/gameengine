@@ -9,6 +9,7 @@ void game_cl_reconcile(const PlayerSim *server, u32 ack_seq);
 int game_spawn_player(World *w, int slot, const char *name, bool local, int peer);
 void game_remove_player(World *w, int slot);
 void game_respawn_player(World *w, int slot);
+void game_respawn_player_at(World *w, int slot, vec3 pos, float yaw, float hp);
 void game_create_player_character(World *w, int slot, vec3 feet);
 
 // game_events.c
@@ -21,6 +22,7 @@ void game_pings_register(void);
 bool game_ping_target(vec3 *pos, int *kind);    // the crosshair's point + contextual kind
 bool game_ping_request(int type);               // type < 0: contextual
 void game_sv_ping(World *w, int slot, int a, int b, int c);
+void game_sv_auto_ping(World *w, int slot, int type, vec3 pos);   // host: a ping on a player's behalf (downed / dead, docs/REVIVE.md)
 void game_pings_event(const GameEvent *ev);
 void game_pings_tick(float dt);
 void game_pings_reset(void);
@@ -163,6 +165,28 @@ typedef struct PostFrameInfo {
     float level_fog;
 } PostFrameInfo;
 void game_post_init(void);
+// Fire animation (src/game/game_fire.c, docs/FIRE_ANIM.md): the viewed player's gun-driven fire motion.
+struct FireAnimOut;
+struct ShotEvent;
+void game_fire_init(void);
+void game_fire_on_shot(const struct ShotEvent *ev);
+void game_fire_tick(void);                               // per sim tick, before chars_present_tick
+const struct FireAnimOut *game_fire_sample(float alpha); // this frame's interpolated output (camera layer, hands)
+void game_fire_post(float *blur, float *chroma);         // post feedback this frame
+void game_fire_reset(void);
+void game_fire_frame(void);                              // per frame (fire_compare driver)
+void game_fire_flush_flash(void);                        // after the first-person item is placed: the muzzle flash on it
+// Recorder (tuner graphs): one entry per tick, oldest first.
+typedef struct FireRecord { float gun_pitch, gun_back, hand_pitch, cam_pitch, fov; bool shot, held; } FireRecord;
+int game_fire_record(FireRecord *out, int max);
+const struct FireAnimDef *game_fire_def(void);
+// Tuner loops (single / burst / mag dump, repeated) at a simulation time scale; save a class file.
+typedef enum FireLoop { FIRE_LOOP_OFF, FIRE_LOOP_SINGLE, FIRE_LOOP_BURST, FIRE_LOOP_MAGDUMP } FireLoop;
+void game_fire_loop(int mode, float timescale);
+float game_fire_timescale(void);
+bool game_fire_loop_trigger(void);   // the loop holds the trigger this tick
+bool game_fire_save_class(const struct FireAnimDef *d);
+struct FireAnimState *game_fire_state(void);
 void game_post_frame(const PostFrameInfo *fi);
 void game_post_draw_overlay(void);
 void game_post_draw_photo_ui(void);

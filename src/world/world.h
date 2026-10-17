@@ -28,7 +28,9 @@ typedef u32 EntityId;
 
 typedef enum EntityType {
     ET_NONE, ET_PLAYER, ET_PROP, ET_DOOR, ET_GATE, ET_LEVER, ET_SWITCH, ET_LIGHT,
-    ET_CONTAINER, ET_PICKUP, ET_DUMMY, ET_PROJECTILE, ET_MARKER, ET_ZOMBIE, ET_BENCH, ET_VEHICLE, ET_FUEL_PUMP, ET_COUNT
+    ET_CONTAINER, ET_PICKUP, ET_DUMMY, ET_PROJECTILE, ET_MARKER, ET_ZOMBIE, ET_BENCH, ET_VEHICLE, ET_FUEL_PUMP,
+    ET_CORPSE, ET_FABRICATOR,   // revive loop (docs/REVIVE.md): DNA source body, reconstruction machine
+    ET_COUNT
 } EntityType;
 
 enum EntityFlags {
@@ -51,9 +53,11 @@ enum EntityFlags {
     EF_BRAKING   = 1 << 16,   // vehicles: brake lights
     EF_WRECKED   = 1 << 17,   // vehicles: destroyed (no engine)
     EF_ENGINE    = 1 << 18,   // vehicles: engine running
-    EF_SWIM      = 1 << 19,   // players: swimming (MOVE_SWIM)
-    EF_UNDERWATER = 1 << 20,  // players: diving (head under water)
-    EF_WADE      = 1 << 21,   // players: walking in water
+    EF_DOWNED    = 1 << 19,   // players: knocked down (docs/REVIVE.md)
+    EF_DNA       = 1 << 20,   // corpses: a DNA sample can still be extracted
+    EF_SWIM      = 1 << 21,   // players: swimming (MOVE_SWIM)
+    EF_UNDERWATER = 1 << 22,  // players: diving (head under water)
+    EF_WADE      = 1 << 23,   // players: walking in water
 };
 
 enum ComponentBits {
@@ -110,6 +114,7 @@ typedef struct InteractDef {
     bool (*hand_target)(World *w, EntityId self, int player, int hand, vec3 *pos, quat *rot);
     float hold_time;
     HandMode hands;
+    u8 action;            // ActKind (gameplay/revive): a predicted timed action instead of on_use / hold_time
 } InteractDef;
 
 typedef struct Interactable {
@@ -298,6 +303,8 @@ struct World {
     u8 player_slot[MAX_ENTITIES];
     u8 char_id[MAX_ENTITIES];       // character definition (character_id) for players / zombies / dummies
     float life[MAX_ENTITIES];       // >0: host destroys the entity when it runs out (dropped items)
+    u16 aux_count[MAX_ENTITIES];    // replicated per-type count (corpse: samples left, fabricator: state | queue << 8)
+    vec3 aux_extra[MAX_ENTITIES];   // replicated per-type data (corpse / fabricator ticks, docs/REVIVE.md)
 
     LagRecord lag[LAGCOMP_TICKS][MAX_ENTITIES]; // hitbox entity positions per tick (lag compensation)
 

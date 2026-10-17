@@ -1,0 +1,52 @@
+{
+  "_doc": "Downed / revive / corpse / DNA / fabricator rules (docs/REVIVE.md). Host-only; times in seconds.",
+  "respawn_mode": "both",
+  "death_skippable": true,
+  "downed": {
+    "enabled": true,
+    "bleed_time": 60,
+    "bleed_scale": 0.6,
+    "bleed_min": 15,
+    "max_downs": 0,
+    "overkill": 0,
+    "move_speed": 0.6,
+    "hp": 100,
+    "keep_sidearm": true,
+    "sidearm_can_shoot": true,
+    "auto_ping": true,
+    "self_revive": false
+  },
+  "revive": {
+    "time": 6,
+    "range": 1.6,
+    "hp": 30,
+    "move_tolerance": 0.35,
+    "pauses_bleed": true,
+    "resets_downs": false
+  },
+  "corpse": {
+    "lifetime": 600,
+    "despawn_after_extract": 20,
+    "range": 0.6,
+    "extract_time": 3,
+    "samples": 1,
+    "crouch": true,
+    "auto_ping": true
+  },
+  "sample": {
+    "on_carrier_death": "drop",
+    "weight": 0.1
+  },
+  "fabricator": {
+    "insert_time": 5,
+    "insert_range": 1.8,
+    "reconstruct_time": 10,
+    "open_time": 1.5,
+    "cooldown": 3,
+    "queue_max": 5,
+    "respawn_hp": 60,
+    "respawn_items": [["bandage", 1]],
+    "eject_on_power_loss": true,
+    "require_power": false
+  }
+}

@@ -1,15 +1,15 @@
 {
-  "_comment": "Heavy stock: less recoil and sway, slower to aim.",
+  "_comment": "Heavy stock: less recoil, a heavier push into the shoulder (fire animation), slower to aim. Sway is global: a stock never changes it.",
   "id": "heavy_stock",
   "name": "Heavy Stock",
   "slot": "stock",
+  "fire": { "mass": 0.35, "impulse": { "back": 0.8, "pitch": 0.9 } },
   "mount": {
     "pos": [0, 0, 0]
   },
   "modifiers": {
     "recoil_vertical": 0.88,
     "camera_kick": 0.8,
-    "sway_scale": 0.8,
     "ads_time": 1.1
   },
   "model": [

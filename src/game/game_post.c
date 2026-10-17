@@ -10,6 +10,7 @@
 // (post_bench, post_volumes, screenshot_hdr) and the post profiler overlay (r_post_profile).
 #include "game_internal.h"
 #include "player/spectator.h"
+#include "game_revive.h"
 #include "core/engine.h"
 #include "core/cvar.h"
 #include "core/log.h"
@@ -543,6 +544,15 @@ static void apply_feedback(PostSettings *s, const PostFrameInfo *fi, float dt) {
     s->fb_lowhealth = GP.lowhealth * k;
     s->fb_flash = GP.flash * k;
     s->fb_hitmarker = hm * k;
+    // Fire animation (docs/FIRE_ANIM.md layer 5): the 1-2 tick blur spike on the viewmodel and the
+    // chromatic / vignette tick of heavy weapons (already 0 at Low fidelity).
+    {
+        float blur = 0.0f, chroma = 0.0f;
+        game_fire_post(&blur, &chroma);
+        s->mb_viewmodel = blur * 0.5f;
+        s->chromatic += chroma * 0.6f;
+        s->vignette += chroma * 0.12f;
+    }
     s->fb_sprint = GP.sprint * 0.6f * k;
     s->fb_underwater = GP.underwater->f;
     s->fb_nightvision = GP.nightvision_w;
@@ -584,6 +594,7 @@ void game_post_frame(const PostFrameInfo *fi) {
     daynight_post(&s);
     weather_post(&s);
     apply_feedback(&s, fi, dt);
+    game_death_post(&s);   // death sequence / downed variant (game_death.c)
     peek_post(&s);   // door peek: fisheye through the visor
     apply_photo(&s);
     // With ADS DoF on (game_sights.c), aiming switches the DoF exactly when the aim completes;

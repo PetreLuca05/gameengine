@@ -8,6 +8,7 @@
 #include "core/dgmath.h"
 #include "game/usercmd.h"
 #include "gameplay/recoil.h"
+#include "gameplay/revive/revive_core.h"
 
 struct World;
 struct PhysicsWorld;
@@ -119,8 +120,10 @@ typedef struct WeaponState {
 typedef struct PlayerSim {
     PlayerMove move;
     WeaponState wpn;
+    DownState down;     // knocked down / bleed-out / revive progress (docs/REVIVE.md); host-written parts noted there
+    ActionState act;    // predicted timed action (revive / extract DNA / insert into a fabricator)
     u16 last_buttons;
-    u16 pad;
+    u16 frozen_ticks;   // forced idle after a fabricator respawn (no input)
 } PlayerSim;
 
 // Tunables (cvars, registered by player_register_cvars).

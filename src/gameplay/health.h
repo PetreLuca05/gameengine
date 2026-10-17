@@ -12,6 +12,8 @@ void health_init(Health *h, float hp, float armor);
 float apply_damage(World *w, EntityId target, float amount, DamageType type, EntityId attacker, vec3 point, vec3 dir, bool headshot);
 // Body-part aware variant (amount already multiplied): part = BodyPart or -1, part_mult for dev numbers.
 float apply_damage_part(World *w, EntityId target, float amount, DamageType type, EntityId attacker, vec3 point, vec3 dir, int part, float part_mult);
+// With DamageFlags (gameplay/revive/revive.h): DMGF_KILL skips the downed state.
+float apply_damage_ex(World *w, EntityId target, float amount, DamageType type, EntityId attacker, vec3 point, vec3 dir, int part, float part_mult, u32 flags);
 // Kill feed: the item doing the damage until reset to 0 (thrown grenades, fire); 0 = the attacker's held item.
 void health_set_source_item(u16 item);
 void heal(World *w, EntityId target, float hp, float armor);

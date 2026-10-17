@@ -128,6 +128,7 @@ static void parse_attachment(AttachmentDef *a, const cJSON *j, const char *file)
     a->recoil_h = jnum(m, "recoil_horizontal", 1.0f);
     a->cam_kick = jnum(m, "camera_kick", 1.0f);
     a->vm_kick = jnum(m, "viewmodel_kick", 1.0f);
+    fire_anim_att_parse(&a->fire, cJSON_GetObjectItemCaseSensitive(j, "fire"));
     a->spread_hip = jnum(m, "spread_hip", 1.0f);
     a->spread_ads = jnum(m, "spread_ads", 1.0f);
     a->damage = jnum(m, "damage", 1.0f);
@@ -135,7 +136,9 @@ static void parse_attachment(AttachmentDef *a, const cJSON *j, const char *file)
     a->mag_mult = jnum(m, "mag_size", 1.0f);
     a->reload_time = jnum(m, "reload_time", 1.0f);
     a->muzzle_len = jnum(j, "muzzle_length", 0.0f);
-    a->muzzle_device = vfx_muzzle_device_from_name(jstr(j, "muzzle_device", ""));
+    const cJSON *md = cJSON_GetObjectItemCaseSensitive(j, "muzzle_device");
+    a->bal_device = cJSON_IsObject(md);
+    a->muzzle_device = vfx_muzzle_device_from_name(a->bal_device ? jstr(md, "kind", "") : jstr(j, "muzzle_device", ""));
     const cJSON *gl = cJSON_GetObjectItemCaseSensitive(j, "grip_l");
     if (gl) { a->has_grip_l = true; a->grip_l = jxform(j, "grip_l", xf_identity()); }
     const cJSON *p;
@@ -320,8 +323,14 @@ void attach_weapon_effective(const ItemDB *db, const WeaponDef *base, const u8 *
         r->base_hip *= a->spread_hip;
         r->base_ads *= a->spread_ads;
         r->ads_time *= a->ads_time;
-        r->idle_sway *= a->sway_scale;
-        r->scope_sway *= a->sway_scale;
+        if (k == ATT_OPTIC) r->sway_optic *= a->sway_scale;   // only an optic's steadiness touches sway (global profile)
+        if (out != base && a->fire.set) {
+            // Fire animation: the attachment's mass sits where it is mounted (in front of / above the grip).
+            FaAttMod fm = a->fire;
+            if (fm.dist == 0.0f) fm.dist = fmaxf(0.0f, -place.t.z - base->grip_offset.z);
+            if (fm.height == 0.0f) fm.height = place.t.y;
+            fire_anim_add_attachment(&out->fire, &fm);
+        }
         out->damage *= a->damage;
         out->range *= a->range;
         out->falloff_start *= a->range;
@@ -337,6 +346,7 @@ void attach_weapon_effective(const ItemDB *db, const WeaponDef *base, const u8 *
                 out->sockets.length = fmaxf(out->sockets.length, -front.z);
             }
             if (a->muzzle_device >= 0) out->vfx_muzzle_device = a->muzzle_device;
+            if (a->bal_device) dg_strcpy(out->muzzle_device_id, sizeof(out->muzzle_device_id), a->id);
         }
         if (k == ATT_OPTIC) {
             // The optic's sight point is the ADS socket. Eye relief: the optic's own, or (red dots)
@@ -361,6 +371,7 @@ void attach_weapon_effective(const ItemDB *db, const WeaponDef *base, const u8 *
             out->support_offset = g.t;
         }
     }
+    if (out != base) fire_anim_resolve(&out->fire);
     if (hide) {
         int n = 0;
         for (int i = 0; i < base->part_count; i++)
@@ -405,6 +416,7 @@ int attach_draw_parts(const ItemDB *db, const WeaponDef *base, const u8 *att, At
             out[n].rot = place.r;
             out[n].half = a->parts[i].half;
             out[n].color = a->parts[i].color;
+            out[n].slot = (u8)k;
             n++;
         }
     }

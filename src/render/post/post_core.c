@@ -486,7 +486,7 @@ void post_begin_frame(const PostFrameIn *in) {
     u->s_gi = v4(s->ssgi_intensity, (float)s->ssgi, 0.35f, s->contact_shadows >= 2 ? 14.0f : 8.0f);   // contact steps by quality
     u->s_vol = v4(s->fog_density, s->fog_height, s->fog_falloff, s->fog_anisotropy);
     u->s_vol2 = v4(s->fog_albedo.x, s->fog_albedo.y, s->fog_albedo.z, s->sun_shafts);
-    u->s_mb = v4(s->mb_intensity, (float)s->motion_blur, 40.0f, 16.0f);
+    u->s_mb = v4(s->mb_intensity, (float)s->motion_blur, 40.0f, s->mb_viewmodel);   // w: fire blur spike on the viewmodel
     u->s_dof = v4(s->dof_focus, s->dof_fstop, s->dof_focal_mm, s->dof_max_coc);
     u->s_dof2 = v4((float)s->dof_autofocus, s->dof_quality >= 2 ? (float)s->dof_bokeh : 0.0f, (float)s->dof, 24.0f);
     u->s_bloom = v4(s->bloom_intensity, s->bloom_dirt, 6.0f, (float)s->bloom);
@@ -502,6 +502,7 @@ void post_begin_frame(const PostFrameIn *in) {
     u->s_fb = v4(s->fb_damage, s->fb_lowhealth, s->fb_flash, s->fb_hitmarker);
     u->s_fb2 = v4(s->fb_sprint, s->fb_underwater, s->fb_nightvision, s->fb_desaturate);
     u->s_fb_tint = v4(s->fb_tint.x, s->fb_tint.y, s->fb_tint.z, s->user_gamma);
+    u->s_fb3 = v4(saturate(s->fb_black), saturate(s->fb_blur), 0.0f, 0.0f);
     u->s_dbg = v4((float)s->debug_view, s->compare_split ? 1.0f : 0.0f, 1.0f, s->fog_ambient);   // w: fog ambient in-scatter (weather)
     for (u32 i = 0; i < R->light_count && i < MAX_POINT_LIGHTS; i++) {
         u->lights[i * 2] = R->lights[i].pos_radius;

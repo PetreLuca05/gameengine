@@ -4,6 +4,9 @@
   "vfx": { "muzzle": { "type": "sniper", "device": "bare" }, "caliber": "sniper" },
   "item": "sniper",
   "kind": "hitscan",
+  "cartridge": "762x51_m80",
+  "barrel_length": 0.61,
+  "zero_distance": 300,
   "damage_type": "bullet",
   "damage": 110,
   "mag_size": 5,
@@ -36,6 +39,7 @@
     "sway": { "anchor": { "hip": "pivot_socket", "ads": "sight" } }
   },
   "pose": "rifle",
+  "fire_anim": { "class": "sniper", "mass": 6.5, "moment": 0.55 },
   "sound_fire": "shot_sniper",
   "grip": [0, 0, 0],
   "support": [0, 0.02, -0.36],
@@ -68,6 +72,6 @@
     { "offset": [0, 0.03, -0.12], "half": [0.026, 0.035, 0.26], "color": [0.32, 0.24, 0.15] },
     { "offset": [0, 0.02, 0.22], "half": [0.022, 0.05, 0.14], "color": [0.34, 0.25, 0.16] },
     { "offset": [0, 0.115, -0.1], "half": [0.024, 0.024, 0.14], "color": [0.05, 0.05, 0.06] },
-    { "offset": [0.03, 0.06, 0.02], "half": [0.02, 0.006, 0.006], "color": [0.5, 0.5, 0.5] }
+    { "offset": [0.03, 0.06, 0.02], "half": [0.02, 0.006, 0.006], "color": [0.5, 0.5, 0.5], "mech": "bolt" }
   ]
 }

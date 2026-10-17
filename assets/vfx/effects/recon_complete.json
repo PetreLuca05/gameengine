@@ -1,0 +1,25 @@
+{
+  "name": "recon_complete",
+  "_doc": "Reconstruction done (docs/REVIVE.md): a burst of motes and a flash as the chamber opens.",
+  "duration": 0.6,
+  "priority": 2,
+  "max_instances": 8,
+  "cull_distance": 60,
+  "emitters": [
+    {
+      "name": "burst",
+      "tier": "gpu",
+      "spawn": { "mode": "burst", "count": [60, 80], "life": [0.4, 0.9], "size": [0.008, 0.02], "speed": [1.5, 4.0], "dir": "random",
+                 "shape": "sphere", "radius": 0.5, "color": [0.55, 0.95, 1.0, 1.0], "color2": [1.0, 1.0, 1.0, 1.0] },
+      "update": { "gravity": 0.3, "drag": 1.5, "alpha_curve": [[0, 1], [1, 0]] },
+      "render": { "mode": "add", "orient": "stretch", "texture": "spark", "emissive": 6.0, "stretch": 0.015, "stretch_max": 8.0 }
+    },
+    {
+      "name": "flash",
+      "tier": "cpu",
+      "spawn": { "mode": "burst", "count": [1, 1], "life": [0.35, 0.35], "size": [1.4, 1.4], "speed": [0, 0], "color": [0.6, 0.95, 1.0, 0.8] },
+      "update": { "alpha_curve": [[0, 1], [1, 0]], "size_curve": [[0, 0.6], [1, 1.2]] },
+      "render": { "mode": "add", "orient": "billboard", "texture": "flash_core", "emissive": 4.0 }
+    }
+  ]
+}

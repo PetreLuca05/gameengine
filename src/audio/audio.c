@@ -4,6 +4,7 @@
 #include "core/log.h"
 #include "core/platform.h"
 #include "miniaudio.h"
+#include "death_synth.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <math.h>
@@ -27,9 +28,50 @@ typedef struct AudioSystem {
     ma_sound music;
     bool music_loaded;
     Cvar *master, *music_vol, *sfx, *voice, *ui;
+    // Death / downed mix (docs/REVIVE.md): world buses -> low-pass -> endpoint; the synth -> endpoint.
+    ma_lpf_node lpf;
+    bool lpf_ok;
+    float lpf_applied;
+    struct SynthNode { ma_node_base base; DeathSynth synth; float rate; } synth_node;
+    bool synth_ok;
+    AudioDeathMix mix;
 } AudioSystem;
 
 #define A (g_engine.audio)
+
+static void synth_process(ma_node *node, const float **in, ma_uint32 *in_count, float **out, ma_uint32 *out_count) {
+    (void)in;
+    (void)in_count;
+    struct SynthNode *n = (struct SynthNode *)node;
+    memset(out[0], 0, sizeof(float) * 2 * *out_count);
+    death_synth_render(&n->synth, out[0], (int)*out_count, 2, n->rate);
+}
+
+static ma_node_vtable g_synth_vtable = { synth_process, NULL, 0, 1, MA_NODE_FLAG_CONTINUOUS_PROCESSING };
+
+static void death_mix_init(void) {
+    ma_node_graph *graph = ma_engine_get_node_graph(&A->engine);
+    ma_uint32 rate = ma_engine_get_sample_rate(&A->engine), ch = ma_engine_get_channels(&A->engine);
+    A->mix.lpf_hz = 20000.0f;
+    A->mix.world_gain = 1.0f;
+    A->lpf_applied = 20000.0f;
+    ma_lpf_node_config lc = ma_lpf_node_config_init(ch, rate, 20000.0, 2);
+    if (ma_lpf_node_init(graph, &lc, NULL, &A->lpf) == MA_SUCCESS) {
+        A->lpf_ok = true;
+        ma_node_attach_output_bus(&A->lpf, 0, ma_engine_get_endpoint(&A->engine), 0);
+        for (int i = 0; i < 3; i++) ma_node_attach_output_bus(&A->groups[i], 0, &A->lpf, 0);   // sfx, music, voice (not the UI)
+    }
+    ma_uint32 out_ch = 2;
+    ma_node_config nc = ma_node_config_init();
+    nc.vtable = &g_synth_vtable;
+    nc.pOutputChannels = &out_ch;
+    death_synth_init(&A->synth_node.synth);
+    A->synth_node.rate = (float)rate;
+    if (ma_node_init(graph, &nc, NULL, &A->synth_node.base) == MA_SUCCESS) {
+        A->synth_ok = true;
+        ma_node_attach_output_bus(&A->synth_node.base, 0, ma_engine_get_endpoint(&A->engine), 0);
+    }
+}
 
 bool audio_init(void) {
     A = (AudioSystem *)calloc(1, sizeof(AudioSystem));
@@ -46,6 +88,7 @@ bool audio_init(void) {
         return false;
     }
     for (int i = 0; i < 4; i++) ma_sound_group_init(&A->engine, 0, NULL, &A->groups[i]);
+    death_mix_init();
     A->ok = true;
     log_info("audio: miniaudio engine at %u Hz", ma_engine_get_sample_rate(&A->engine));
     return true;
@@ -57,7 +100,9 @@ void audio_shutdown(void) {
         for (int i = 0; i < MAX_VOICES; i++) if (A->voices[i].used) ma_sound_uninit(&A->voices[i].sound);
         if (A->music_loaded) ma_sound_uninit(&A->music);
         audio_loops_shutdown();
+        if (A->synth_ok) ma_node_uninit(&A->synth_node.base, NULL);
         for (int i = 0; i < 4; i++) ma_sound_group_uninit(&A->groups[i]);
+        if (A->lpf_ok) ma_lpf_node_uninit(&A->lpf, NULL);
         ma_engine_uninit(&A->engine);
     }
     free(A);
@@ -65,6 +110,24 @@ void audio_shutdown(void) {
 }
 
 bool audio_available(void) { return A && A->ok; }
+
+void audio_set_death_mix(const AudioDeathMix *m) {
+    if (!A) return;
+    A->mix = *m;
+    if (!A->ok) return;
+    // The cutoff moves per frame (the sweep is ~0.5 s); tiny changes are skipped (filter reinit).
+    float hz = fminf(fmaxf(m->lpf_hz, 40.0f), 20000.0f);
+    if (A->lpf_ok && fabsf(hz - A->lpf_applied) > A->lpf_applied * 0.01f) {
+        ma_lpf_config cfg = ma_lpf_config_init(ma_format_f32, ma_engine_get_channels(&A->engine), ma_engine_get_sample_rate(&A->engine), hz, 2);
+        if (ma_lpf_node_reinit(&cfg, &A->lpf) == MA_SUCCESS) A->lpf_applied = hz;
+    }
+    if (A->synth_ok) {
+        DeathSynthParams p = { m->ring_gain, m->ring_freq, m->warble_hz, m->warble_depth, m->heart_gain, m->heart_bpm };
+        death_synth_set(&A->synth_node.synth, &p);
+    }
+}
+
+const AudioDeathMix *audio_death_mix(void) { return A ? &A->mix : NULL; }
 
 static const char *resolve(const char *name) {
     u32 h = dg_hash_str(name);
@@ -214,9 +277,10 @@ void audio_update(vec3 pos, vec3 fwd, vec3 up) {
     ma_engine_listener_set_direction(&A->engine, 0, fwd.x, fwd.y, fwd.z);
     ma_engine_listener_set_world_up(&A->engine, 0, up.x, up.y, up.z);
     ma_engine_set_volume(&A->engine, A->master->f);
-    ma_sound_group_set_volume(&A->groups[0], A->sfx->f);
-    ma_sound_group_set_volume(&A->groups[1], A->music_vol->f);
-    ma_sound_group_set_volume(&A->groups[2], A->voice->f);
+    float wg = A->mix.world_gain;   // death / downed duck (docs/REVIVE.md)
+    ma_sound_group_set_volume(&A->groups[0], A->sfx->f * wg);
+    ma_sound_group_set_volume(&A->groups[1], A->music_vol->f * wg);
+    ma_sound_group_set_volume(&A->groups[2], A->voice->f * wg);
     ma_sound_group_set_volume(&A->groups[3], A->ui->f);
     // Recycle finished voices.
     for (int i = 0; i < MAX_VOICES; i++) {

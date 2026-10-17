@@ -148,6 +148,7 @@ typedef struct DamageSpring { i16 bone; vec3 x, v; float k, c; } DamageSpring;
 typedef struct ProcState {
     bool init;
     float render_body_yaw;     // smoothed lower-body yaw (turn in place)
+    float kneel_w;             // smoothed kneel weight (proc_kneel)
     float pelvis_offset;       // foot IK pelvis drop (smoothed)
     FootState foot[2];
     vec3 prev_vel;
@@ -210,6 +211,7 @@ typedef struct ProcInput {
     bool foot_ik, spine, turn, hold, lean, damage;  // per-system enables (LOD + cvars)
     vec3 item_kick_pos, item_kick_rot;   // recoil kick applied to the item (aim space, m / deg)
     float crouch_drop;         // procedural crouch: pelvis lowering (m) when no crouch clips are bound
+    float kneel;               // 0..1 target: knocked down (docs/REVIVE.md), knees on the ground, torso up
     bool first_person;         // the local player's own body (diagnostics only: never changes the pose)
     int eye_bone;              // camera parent bone (Head) and the eye socket relative to it
     Xform eye_local;

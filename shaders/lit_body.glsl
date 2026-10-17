@@ -157,6 +157,9 @@ void main() {
     if ((flags & MAT_GRID) != 0u && frame.params.x > 0.5) base.rgb = apply_grid(base.rgb, v_world, n);
     if ((flags & MAT_GRID_FINE) != 0u) base.rgb = apply_fine_grid(base.rgb, v_world, n);
     if ((flags & MAT_GRID_MOA) != 0u) base.rgb = apply_moa_grid(base.rgb, v_world, n, MAT_PARAMS.w);
+#ifdef LIT_BASE_HOOK
+    LIT_BASE_HOOK
+#endif
 
     vec3 color;
     if ((flags & MAT_UNLIT) != 0u) {
@@ -239,6 +242,9 @@ void main() {
     else
 #endif
     color += base.rgb * MAT_PARAMS.z; // emissive
+#ifdef LIT_EMISSIVE_HOOK
+    color += LIT_EMISSIVE_HOOK;
+#endif
 
     if ((flags & MAT_HIGHLIGHT) != 0u) {
         vec3 v = normalize(frame.camera_pos.xyz - v_world);
@@ -263,5 +269,13 @@ void main() {
     }
 #endif
 
+    if ((flags & MAT_CAUSTICS) != 0u) color += base.rgb * lit_caustic(v_world, frame.camera_pos.w) * 2.5;
+    if ((flags & MAT_GLASS) != 0u) {
+        // Glass: more opaque and brighter at grazing angles (Fresnel), clear face-on.
+        vec3 vg = normalize(frame.camera_pos.xyz - v_world);
+        float fr = pow(1.0 - abs(dot(n, vg)), 4.0);
+        base.a = clamp(base.a + fr * 0.55, 0.0, 0.85);
+        color += vec3(0.6, 0.85, 1.0) * fr * 0.6;
+    }
     out_color = vec4(color, base.a);
 }

@@ -90,6 +90,9 @@ void hands_set_body_arms(bool on);
 void hands_fp_shift(vec3 delta);
 // True first person: draw the held item (and its muzzle) at the body's hold transform this frame.
 void hands_fp_set_item(vec3 pos, quat rot);
+// Fire animation layer 4 on the next weapon draw: slide / bolt / pump travel (m, + = back) and the
+// magazine / optic / underbarrel wobble (deg). first_person: the viewmodel (kept), else the next held draw.
+void hands_set_fire_mech(bool first_person, float slide, vec3 wobble_rot);
 // Held item draw scale (the grip root's calibration scale, docs/HANDPOSE.md): the third-person
 // draws (hands_draw_held*, reset to 1 after) and this frame's first-person item.
 void hands_set_draw_scale(float s);

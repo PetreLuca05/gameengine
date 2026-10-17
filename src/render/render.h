@@ -59,6 +59,14 @@ enum MaterialFlags {
     MAT_NORMAL_TEX    = 1u << 17,  // tangent-space normal (x normal_scale), linear
     MAT_OCCLUSION_TEX = 1u << 18,  // r = ambient occlusion (occlusion_strength), linear
     MAT_EMISSIVE_TEX  = 1u << 19,  // sRGB x emissive_rgb x emissive (replaces the albedo-tinted emissive)
+    // Reconstruction (docs/REVIVE.md): skinned draws dissolve in by SkinnedDraw.recon (spine base,
+    // progress); MAT_RECON_FX adds the construction edge, scan lines and the wire flash (fidelity).
+    MAT_RECON    = 1u << 20,
+    MAT_RECON_FX = 1u << 21,
+    // Fabricator chamber (docs/REVIVE.md): glass = Fresnel-weighted opacity + rim; caustics =
+    // procedural animated caustic light (emissive) on the liquid and the chamber floor.
+    MAT_GLASS    = 1u << 22,
+    MAT_CAUSTICS = 1u << 23,
 };
 #define MAT_PBR_MAPS (MAT_MR_TEX | MAT_NORMAL_TEX | MAT_OCCLUSION_TEX | MAT_EMISSIVE_TEX)
 
@@ -203,6 +211,7 @@ typedef struct SkinnedDraw {
     float radius;
     u32 object_id;          // stable id (0 = none): previous palette -> per-bone velocity
     TextureId texture;      // albedo (with MAT_TEXTURED in flags), 0 = vertex colours
+    vec4 recon;             // MAT_RECON: spine base (world xyz) + progress 0..1 (w)
 } SkinnedDraw;
 MeshId render_skinned_mesh_create(const SkinVertex *verts, u32 vcount, const u32 *indices, u32 icount);
 void render_draw_skinned(const SkinnedDraw *d);

@@ -234,6 +234,14 @@ else()
   target_compile_options(deadground PRIVATE -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers)
   target_link_libraries(deadground PRIVATE m pthread)
 endif()
+# Ballistics must integrate bit-identically on the host and the predicting client: no FMA
+# contraction, precise float semantics (docs/BALLISTICS.md "Determinism").
+file(GLOB DG_BALLISTICS_SOURCES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/src/gameplay/ballistics/*.c)
+if(MSVC)
+  set_source_files_properties(${DG_BALLISTICS_SOURCES} PROPERTIES COMPILE_OPTIONS "/fp:precise")
+else()
+  set_source_files_properties(${DG_BALLISTICS_SOURCES} PROPERTIES COMPILE_OPTIONS "-ffp-contract=off")
+endif()
 # Data / assets are mirrored next to the exe on every build (not only when it relinks), so asset-only
 # edits (effects, textures) reach the tests and the game. copy_directory_if_different skips unchanged files.
 add_custom_target(dg_copy_data ALL
@@ -264,6 +272,19 @@ else()
   target_link_libraries(test_spectate PRIVATE m)
 endif()
 add_test(NAME spectate COMMAND test_spectate)
+add_executable(test_ballistics tests/test_ballistics.c src/gameplay/ballistics/bal_data.c src/gameplay/ballistics/bal_drag.c
+  src/gameplay/ballistics/bal_sim.c src/gameplay/ballistics/bal_surface.c src/gameplay/ballistics/bal_acoustics.c
+  src/gameplay/ballistics/bal_tracer.c src/gameplay/ballistics/bal_muzzle.c third_party/cjson/cJSON.c)
+set_target_properties(test_ballistics PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
+target_include_directories(test_ballistics PRIVATE src third_party/cjson)
+target_compile_definitions(test_ballistics PRIVATE DG_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+if(MSVC)
+  target_compile_options(test_ballistics PRIVATE /W3 /utf-8 /fp:precise)
+else()
+  target_compile_options(test_ballistics PRIVATE -ffp-contract=off)
+  target_link_libraries(test_ballistics PRIVATE m)
+endif()
+add_test(NAME ballistics COMMAND test_ballistics)
 
 # ---------------------------------------------------------------- animation tools
 # Engine-free subset: anim core + FBX import + cache (+ log / platform helpers).
@@ -271,7 +292,7 @@ set(DG_ANIMCORE_SOURCES
   src/anim/anim.c src/anim/skeleton.c src/anim/retarget.c src/anim/anim_mesh.c src/anim/controller.c src/anim/procedural.c src/anim/turn.c src/anim/spine.c
   src/anim/weapon_hold.c src/anim/handpose.c src/editor/handpose/hp_discover.c src/editor/handpose/hp_edit.c src/editor/handpose/hp_rig.c src/editor/handpose/hp_xform.c src/anim/damage_additive.c src/anim/foot_ik.c src/anim/swim.c src/anim/anim_net.c src/anim/ragdoll_def.c
   src/anim/anim_library.c src/anim/character_rt.c src/gameplay/hitboxes.c src/gameplay/items.c src/gameplay/attachments.c src/gameplay/recoil.c src/core/spring.c
-  src/world/time_of_day.c src/world/weather.c src/world/wind.c src/world/water/water.c src/world/water/water_waves.c src/gameplay/vehicle_def.c src/vfx/vfx_curve.c src/vfx/vfx_library.c src/vfx/vfx_sim.c src/vfx/vfx_flesh.c src/vfx/vfx_atlas.c src/player/holdpoint.c src/player/camera_fp_math.c src/gameplay/phone/phone_orient.c
+  src/world/time_of_day.c src/world/weather.c src/world/wind.c src/world/water/water.c src/world/water/water_waves.c src/gameplay/vehicle_def.c src/vfx/vfx_curve.c src/vfx/vfx_library.c src/vfx/vfx_sim.c src/vfx/vfx_flesh.c src/vfx/vfx_atlas.c src/player/holdpoint.c src/player/sway.c src/anim/fire_anim.c src/player/camera_fp_math.c src/gameplay/phone/phone_orient.c
   src/assets/fbx_loader.c src/assets/anim_cache.c src/assets/character.c src/render/skeletal_mesh.c
   src/core/log.c src/core/platform.c)
 add_library(dg_animcore STATIC ${DG_ANIMCORE_SOURCES})
@@ -465,6 +486,14 @@ endif()
 add_test(NAME horde COMMAND test_horde WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
 
 # Hip vs ADS recoil: hip ratios, ADS kick anchored on the sight for every weapon x optic.
+add_executable(test_fire_anim tests/test_fire_anim.c)
+set_target_properties(test_fire_anim PROPERTIES C_STANDARD 11)
+target_link_libraries(test_fire_anim PRIVATE dg_animcore)
+if(MSVC)
+  target_compile_options(test_fire_anim PRIVATE /W3 /wd4100 /wd4201 /utf-8)
+endif()
+add_test(NAME fire_anim COMMAND test_fire_anim)
+
 add_executable(test_recoil_ads tests/test_recoil_ads.c)
 set_target_properties(test_recoil_ads PROPERTIES C_STANDARD 11)
 target_link_libraries(test_recoil_ads PRIVATE dg_animcore)
@@ -550,6 +579,17 @@ if(MSVC)
 endif()
 add_dependencies(test_hud dg_copy_data)
 add_test(NAME hud COMMAND test_hud WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+# Downed / revive / corpse / DNA / fabricator state machines + the death sequence (docs/REVIVE.md).
+add_executable(test_revive tests/test_revive.c src/gameplay/revive/revive_core.c src/gameplay/revive/death_seq.c src/audio/death_synth.c third_party/cjson/cJSON.c)
+set_target_properties(test_revive PROPERTIES C_STANDARD 11)
+target_include_directories(test_revive PRIVATE src third_party/cjson)
+if(MSVC)
+  target_compile_options(test_revive PRIVATE /W3 /wd4100 /wd4201 /utf-8)
+else()
+  target_link_libraries(test_revive PRIVATE m)
+endif()
+add_dependencies(test_revive dg_copy_data)
+add_test(NAME revive COMMAND test_revive WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if(Python3_Interpreter_FOUND)
   add_test(NAME lint_commands COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/tests/lint_commands.py)

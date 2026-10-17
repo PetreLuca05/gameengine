@@ -50,7 +50,7 @@ float attach_sight_fov(const WeaponDef *eff, const AttachmentDef *optic, float b
 float attach_main_ads_fov(const WeaponDef *eff, const AttachmentDef *optic, float base_fov, bool pip);
 
 // Visual: every mounted attachment's parts (item space boxes), for drawing.
-typedef struct AttachDrawPart { vec3 center; quat rot; vec3 half; vec4 color; } AttachDrawPart;
+typedef struct AttachDrawPart { vec3 center; quat rot; vec3 half; vec4 color; u8 slot; } AttachDrawPart;
 int attach_draw_parts(const ItemDB *db, const WeaponDef *base, const u8 *att, AttachDrawPart *out, int max);
 
 #endif

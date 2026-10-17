@@ -283,7 +283,10 @@ typedef struct Field { const char *name; size_t off, size; } Field;
 // Every field of the local data, enumerated. A new PlayerSim field fails the coverage check below
 // until it is listed here (and DG_PROTOCOL_VERSION is bumped).
 static const Field k_fields[] = {
-    F(ack_seq), F(hold_progress), F(open_container), F(sim.last_buttons), F(sim.pad),
+    F(ack_seq), F(hold_progress), F(open_container), F(sim.last_buttons), F(sim.frozen_ticks),
+    F(sim.down.downed), F(sim.down.downs), F(sim.down.reviver), F(sim.down.self_reviving), F(sim.down.bleed_ticks), F(sim.down.bleed_total),
+    F(sim.down.revive_ticks), F(sim.down.revive_total), F(sim.act.kind), F(sim.act.phase), F(sim.act.cancel), F(sim.act.pad), F(sim.act.target),
+    F(sim.act.ticks), F(sim.act.dur), F(sim.act.start_pos),
     F(sim.move.pos), F(sim.move.vel), F(sim.move.yaw), F(sim.move.pitch), F(sim.move.body_yaw), F(sim.move.body_turning), F(sim.move.pad_body),
     F(sim.move.mode), F(sim.move.on_ground), F(sim.move.crouched), F(sim.move.sprinting), F(sim.move.crouch_toggled), F(sim.move.sprint_toggled),
     F(sim.move.ground_steep), F(sim.move.pad0), F(sim.move.coyote), F(sim.move.jump_buffer), F(sim.move.crouch_amount), F(sim.move.air_time),

@@ -4,6 +4,9 @@
   "vfx": { "muzzle": { "type": "smg", "device": "bare" }, "caliber": "smg" },
   "item": "smg",
   "kind": "hitscan",
+  "cartridge": "9x19_fmj",
+  "barrel_length": 0.225,
+  "zero_distance": 50,
   "one_hand_capable": true,
   "damage_type": "bullet",
   "damage": 15,
@@ -36,6 +39,7 @@
     "sway": { "anchor": { "hip": "pivot_socket", "ads": "sight" } }
   },
   "pose": "rifle",
+  "fire_anim": { "class": "smg", "mass": 2.8, "moment": 0.35 },
   "sound_fire": "shot_smg",
   "grip": [0, 0, 0],
   "support": [0, 0.0, -0.2],
@@ -61,7 +65,7 @@
   "falloff": { "start": 15, "end": 50, "min": 0.55 },
   "attachment_slots": {
     "optic": {"pos": [0, 0.082, -0.02], "rail": [-0.06, 0.04], "allow": ["red_dot", "scope_4x"]},
-    "muzzle": {"allow": ["suppressor", "compensator"]},
+    "muzzle": {"allow": ["suppressor", "compensator", "flash_hider", "muzzle_brake"]},
     "underbarrel": {"pos": [0, 0.018, -0.22], "allow": ["vertical_grip"]},
     "magazine": {"pos": [0, 0.018, -0.1], "allow": ["extended_mag"], "hide_parts": [2]},
     "stock": {"pos": [0, 0.04, 0.06], "allow": ["heavy_stock"], "hide_parts": [3]}
@@ -69,7 +73,8 @@
   "model": [
     { "offset": [0, 0.05, -0.12], "half": [0.02, 0.032, 0.2], "color": [0.14, 0.14, 0.15] },
     { "offset": [0, -0.02, 0.0], "half": [0.015, 0.05, 0.022], "color": [0.1, 0.1, 0.1] },
-    { "offset": [0, -0.04, -0.1], "half": [0.012, 0.075, 0.018], "color": [0.12, 0.12, 0.12] },
-    { "offset": [0, 0.04, 0.14], "half": [0.012, 0.03, 0.08], "color": [0.18, 0.18, 0.18] }
+    { "offset": [0, -0.04, -0.1], "half": [0.012, 0.075, 0.018], "color": [0.12, 0.12, 0.12], "mech": "mag" },
+    { "offset": [0, 0.04, 0.14], "half": [0.012, 0.03, 0.08], "color": [0.18, 0.18, 0.18] },
+    { "offset": [0.021, 0.06, -0.05], "half": [0.003, 0.007, 0.024], "color": [0.06, 0.06, 0.06], "mech": "bolt" }
   ]
 }

@@ -5,6 +5,7 @@
 #include "anim/anim_library.h"
 #include "health.h"
 #include "zombies/horde.h"
+#include "revive/revive.h"
 #include "core/log.h"
 #include <stdio.h>
 #include <math.h>
@@ -576,6 +577,7 @@ void entity_setup(World *w, EntityId e) {
         if (t == ET_DOOR) w->inter[i].focus_offset = v3(w->vis[i].half.x - 0.09f, -w->vis[i].half.y + 1.0f, 0);
         if (t == ET_LEVER) w->inter[i].focus_offset = v3(0, 0.6f, 0);
     }
+    if (t == ET_CORPSE || t == ET_FABRICATOR) revive_entity_setup(w, e);   // control column body, ranges, focus points
     bool replica = !w->authority;
     switch (t) {
     case ET_DOOR:
@@ -644,6 +646,7 @@ void entity_setup(World *w, EntityId e) {
         }
         if (id) char_attach(w, e, id);
     }
+    if (t == ET_CORPSE) chars_attach_corpse(w, e, w->item[i] < MAX_PLAYERS ? (int)w->item[i] : -1);
 }
 
 void entities_link(World *w) {

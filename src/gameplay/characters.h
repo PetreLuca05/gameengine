@@ -13,6 +13,7 @@
 #include "anim/character_rt.h"
 #include "anim/anim_net.h"
 #include "anim/anim_lod.h"
+#include "anim/fire_anim.h"
 #include "gameplay/hitboxes.h"
 #include "physics/ragdoll.h"
 
@@ -78,11 +79,20 @@ typedef struct CharacterInst {
     u32 last_eval;
     int interval;
     bool culled;
-    vec3 kick_x, kick_v;              // remote recoil kick on the item (cosmetic)
+    // Third-person fire animation (docs/FIRE_ANIM.md): layers 1, 2 and 4 at a reduced scale, driven
+    // by the fire events with a deterministic seed, so everyone sees the kick and the slide.
+    FireAnimState tp_fire;
+    FireAnimOut tp_fire_out;
+    u32 tp_fire_shots;
     // death / ragdoll
     Ragdoll rag;
     bool dead, rag_pending, settled;
     bool tool_rag;                    // ragdolled by a dev tool (not dead): no auto revive
+    bool corpse;                      // a corpse entity's body (docs/REVIVE.md): never evaluated, holds an adopted ragdoll / pose
+    bool adopted;                     // corpse: took over its player's ragdoll when the player came back
+    bool phantom;                     // client-local display body (fabricator reconstruction): idle, no foot IK
+    vec4 recon;                       // phantom: MAT_RECON spine base + progress (docs/REVIVE.md)
+    u32 recon_flags;                  // MAT_RECON | MAT_RECON_FX
     u32 death_tick;
     u8 death_seed, death_part;
     vec3 death_impulse;
@@ -139,12 +149,32 @@ CharacterInst *char_get(const World *w, EntityId e);
 bool chars_item_muzzle(World *w, EntityId e, vec3 *pos, vec3 *dir);
 // Eye (camera socket) of a character's current pose, ragdoll included (death camera).
 bool chars_head_world(World *w, EntityId e, float alpha, vec3 *out);
+// Corpses (docs/REVIVE.md): the body of an ET_CORPSE entity. While its player is dead the player's
+// own ragdoll is the body; when the player respawns the corpse adopts that ragdoll / pose.
+CharacterInst *chars_attach_corpse(World *w, EntityId corpse, int owner_slot);
+// Reconstruction display body: the given player's character (definition + modular parts) on a
+// client-local entity, evaluated in an idle pose and drawn with the dissolve (docs/REVIVE.md).
+CharacterInst *chars_attach_phantom(World *w, EntityId local_ent, int player_slot);
+// Pelvis + head of a character's current (ragdoll / settled / animated) pose.
+bool chars_body_axis(World *w, EntityId e, vec3 *pelvis, vec3 *head);
+// extract_blood hand IK: [0] where the free hand steadies the body (chest), [1] the needle point (arm / neck).
+bool chars_extract_points(World *w, EntityId e, vec3 out[2]);
+// Death sequence impact probe (docs/REVIVE.md): the ragdoll's head and chest bodies, their speeds
+// and their clearance above the world below (m). False without an active ragdoll.
+bool chars_ragdoll_probe(World *w, EntityId e, vec3 pos[2], float speed[2], float clearance[2]);
 bool chars_palm_world(World *w, EntityId e, int hand, vec3 *out);   // latest pose, world space
 // First person: this frame's final camera (the held item is placed relative to it).
 void chars_set_fp_camera(vec3 pos, quat rot, bool valid);
 // Aim offset of the held item (degrees right / up of the view, the view pitch in radians): the
 // first-person item turns about the eye so its sight points where the shots go.
 void chars_set_fp_aim_offset(float right_deg, float up_deg, float view_pitch, float world_fov_deg, float vm_fov_deg);
+// Fire animation of the first-person weapon (docs/FIRE_ANIM.md): tick = this tick's output (the
+// gun kick on the hold point, evaluated per tick), frame = this frame's interpolated output (hand
+// lag, trigger, slide, attachment wobble at render). NULL keeps the previous one; both NULL clears.
+Xform chars_fp_item_cam_raw(void);   // the rendered first-person item in camera space (this frame)
+struct FireAnimOut;
+void chars_set_fp_fire(const struct FireAnimOut *tick, const struct FireAnimOut *frame);
+void chars_set_fp_fire_snap(bool snap);   // a shot landed this tick: no item interpolation until the next one
 // Last first-person frame: hand <-> socket error ([0] left, [1] right; m / deg) and ADS sight error.
 void chars_fp_diag(float glue_pos[2], float glue_ang[2], float *ads_pos, float *ads_ang);
 const char *chars_holdpoint_text(World *w, int local_slot);   // "hold <state> <blend>% pull .. reach .."

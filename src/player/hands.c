@@ -11,6 +11,7 @@
 #include "gameplay/weapons.h"
 #include "gameplay/characters.h"
 #include "gameplay/entities.h"
+#include "gameplay/revive/revive.h"
 #include "editor/handpose/hp_system.h"
 #include "cJSON.h"
 #include <stdlib.h>
@@ -370,6 +371,9 @@ void hands_update(const HandsInput *in) {
         H->weapon = &H->weff;
     }
     H->held_item = slot ? item_def(w->items, slot->item) : NULL;
+    // Timed actions show their tool: the syringe while extracting, the vial while inserting (docs/REVIVE.md).
+    u16 tool = revive_held_override(w, in->player);
+    if (tool) { H->weapon = NULL; H->held_item = item_def(w->items, tool); }
     bool weapon_two_handed = false;
     if (H->weapon && H->weapon->kind != WPN_MELEE && !sim->wpn.reloading) {
         vec3 support = v3_add(target_pos[HAND_RIGHT], quat_rotate(target_rot[HAND_RIGHT], H->weapon->support_offset));
@@ -460,11 +464,16 @@ void hands_update(const HandsInput *in) {
             H->ia_t = u * (ph == HCP_REACH ? reach_time : ph == HCP_HOLD ? fmaxf(hold_time, 1e-3f) : return_time);
         } else {
             if (H->ia_phase == IA_REACH && H->ia_t >= reach_time) { H->ia_phase = IA_HOLD; H->ia_t = 0; }
+            // Timed actions (revive_assist / extract_blood / fabricator_insert) hold while the predicted action runs.
+            bool timed = def && def->action;
+            const ActionState *act = &w->players[in->player].sim.act;
+            bool acting = timed && act->phase == ACTP_RUNNING && act->target == H->ia_target;
             if (H->ia_phase == IA_HOLD) {
                 bool hold_interaction = def && def->hold_time > 0;
                 bool released = hold_interaction && !in->use_held && H->ia_t < def->hold_time;
                 bool gone = !valid && H->ia_target != ENT_NONE;
-                if (gone || released || H->ia_t >= hold_time) { H->ia_phase = IA_RETURN; H->ia_t = 0; }
+                if (timed) { if (!acting && H->ia_t > 0.1f) { H->ia_phase = IA_RETURN; H->ia_t = 0; } }
+                else if (gone || released || H->ia_t >= hold_time) { H->ia_phase = IA_RETURN; H->ia_t = 0; }
             }
             if (H->ia_phase == IA_RETURN && H->ia_t >= return_time) H->ia_phase = IA_NONE;
         }
@@ -477,7 +486,7 @@ void hands_update(const HandsInput *in) {
         bool holding = H->weapon || H->held_item;
         int free_hand = holding ? HAND_LEFT : HAND_RIGHT;
         for (int h = 0; h < 2; h++) {
-            bool uses_hand = (H->ia_mode == HANDS_BOTH && !holding) || h == free_hand;
+            bool uses_hand = (H->ia_mode == HANDS_BOTH && (!holding || timed)) || h == free_hand;   // the tool hand reaches too
             if (!uses_hand) continue;
             vec3 tp;
             quat tr;
@@ -645,19 +654,53 @@ static void draw_arm(const ArmChain *c, int hand, quat cam_rot, bool viewmodel) 
     draw_hand(c, hand, viewmodel);
 }
 
+// Fire animation layer 4 (docs/FIRE_ANIM.md): slide / bolt / pump travel and the wobble of the
+// magazine, optic and underbarrel a tick behind the receiver. s_mech_fp: the first-person weapon
+// (hands_render), s_mech: the next held draw (third person, set and cleared around it).
+typedef struct FireMech { float slide; vec3 wobble; } FireMech;
+static FireMech s_mech_fp, s_mech;
+static const FireMech *s_mech_cur;
+
+void hands_set_fire_mech(bool first_person, float slide, vec3 wobble_rot) {
+    FireMech m = { slide, wobble_rot };
+    if (first_person) s_mech_fp = m;
+    else s_mech = m;
+}
+
+// A part's transform with the mechanical layer: travel along the barrel (+z = back) or the lagging
+// wobble about the grip.
+static void mech_part(int mech, vec3 *center, quat *prot) {
+    const FireMech *m = s_mech_cur;
+    if (!m || !mech) return;
+    if (mech == MECH_SLIDE || mech == MECH_BOLT || mech == MECH_PUMP) center->z += m->slide;
+    else if (v3_len2(m->wobble) > 1e-10f) {
+        quat w = hp_euler_deg(m->wobble);
+        *center = quat_rotate(w, *center);
+        *prot = quat_mul(w, *prot);
+    }
+}
+
 // wd: an effective weapon (attach_weapon_effective): its parts without the hidden ones, plus every
 // applied attachment's parts placed on its slot.
 static void draw_weapon(const WeaponDef *wd, vec3 pos, quat rot, bool viewmodel) {
     float k = s_draw_scale > 0 ? s_draw_scale : 1.0f;
     for (int i = 0; i < wd->part_count; i++) {
         const WeaponModelPart *p = &wd->parts[i];
-        draw_box(v3_add(pos, quat_rotate(rot, v3_scale(p->offset, k))), rot, v3_scale(p->half, k), p->color, viewmodel);
+        vec3 c = p->offset;
+        quat pr = quat_identity();
+        mech_part(p->mech, &c, &pr);
+        draw_box(v3_add(pos, quat_rotate(rot, v3_scale(c, k))), quat_mul(rot, pr), v3_scale(p->half, k), p->color, viewmodel);
     }
     if (!H->db) return;
     AttachDrawPart parts[ATT_SLOTS * ATT_MAX_PARTS];
     int n = attach_draw_parts(H->db, wd, wd->att_applied, parts, ARRAY_COUNT(parts));
-    for (int i = 0; i < n; i++)
-        draw_box(v3_add(pos, quat_rotate(rot, v3_scale(parts[i].center, k))), quat_mul(rot, parts[i].rot), v3_scale(parts[i].half, k), parts[i].color, viewmodel);
+    for (int i = 0; i < n; i++) {
+        vec3 c = parts[i].center;
+        quat pr = parts[i].rot;
+        int sl = parts[i].slot;
+        mech_part(sl == ATT_OPTIC || sl == ATT_UNDERBARREL || sl == ATT_MAGAZINE ? MECH_MAG : MECH_NONE, &c, &pr);
+        draw_box(v3_add(pos, quat_rotate(rot, v3_scale(c, k))), quat_mul(rot, pr), v3_scale(parts[i].half, k), parts[i].color, viewmodel);
+    }
 }
 
 static void draw_held_item(const ItemDef *it, vec3 pos, quat rot, bool viewmodel) {
@@ -741,8 +784,10 @@ void hands_render(void) {
         for (int h = 0; h < 2; h++) draw_arm(&H->chain[h], h, H->cam_rot, true);
     H->body_arms = false;
     s_draw_scale = s_fp_scale;
+    s_mech_cur = &s_mech_fp;
     if (H->weapon) draw_weapon(H->weapon, H->weapon_pos, H->weapon_rot, true);
     else if (H->held_item && H->held_item->kind != ITEM_WEAPON) draw_held_item(H->held_item, H->weapon_pos, H->weapon_rot, true);
+    s_mech_cur = NULL;
     s_draw_scale = 1.0f;
     s_fp_scale = 1.0f;
 }
@@ -750,8 +795,11 @@ void hands_render(void) {
 void hands_draw_held(const WeaponDef *wd, const ItemDef *it, vec3 pos, quat rot, u32 flags) {
     if (!H) return;
     s_world_item_flags = flags;
+    s_mech_cur = &s_mech;
     if (wd) draw_weapon(wd, pos, rot, false);
     else if (it) draw_held_item(it, pos, rot, false);
+    s_mech_cur = NULL;
+    memset(&s_mech, 0, sizeof(s_mech));
     s_world_item_flags = MAT_NO_SHADOW;
 }
 

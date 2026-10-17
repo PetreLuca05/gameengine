@@ -331,11 +331,30 @@ static void update_ring(float dt) {
     float dur = 0, rem = 0;
     int mode = TR_DRAIN;
     const char *label = "";
+    static char rv_label[48];
     if (p && p->sim.move.mode != MOVE_DEAD) {
         const InvSlot *eq = weapon_equipped(w, G->local_slot);
         const ItemDef *d = eq && eq->item ? item_def(w->items, eq->item) : NULL;
         const char *tl = NULL;
-        if (d && d->kind == ITEM_CONSUMABLE && p->sim.wpn.use_t >= 0 && d->use_time > 0) {
+        const ActionState *act = &p->sim.act;
+        const DownState *dn = &p->sim.down;
+        if (act->phase == ACTP_RUNNING && act->dur) {
+            // Revive / extract / insert (docs/REVIVE.md): predicted, so the ring starts on the press.
+            active = true;
+            dur = (float)act->dur / (float)REVIVE_HZ;
+            rem = act_remaining(act);
+            int ts = world_player_by_ent(w, act->target);
+            if (act->kind == RACT_REVIVE) snprintf(rv_label, sizeof(rv_label), "Reviving %s", ts >= 0 ? w->players[ts].name : "");
+            else snprintf(rv_label, sizeof(rv_label), "%s", act->kind == RACT_EXTRACT ? "Extracting DNA" : "Inserting DNA");
+            label = rv_label;
+        } else if (dn->downed && dn->reviver != REVIVE_NOBODY && dn->revive_total) {
+            // The downed player's ring follows the reviver (host state).
+            active = true;
+            dur = (float)dn->revive_total / (float)REVIVE_HZ;
+            rem = (float)(dn->revive_total - DG_MIN(dn->revive_ticks, dn->revive_total)) / (float)REVIVE_HZ;
+            snprintf(rv_label, sizeof(rv_label), "Revived by %s", dn->reviver < MAX_PLAYERS ? w->players[dn->reviver].name : "");
+            label = rv_label;
+        } else if (d && d->kind == ITEM_CONSUMABLE && p->sim.wpn.use_t >= 0 && d->use_time > 0) {
             active = true;
             dur = d->use_time;
             rem = fmaxf(0.0f, d->use_time - p->sim.wpn.use_t);

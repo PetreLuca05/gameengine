@@ -7,6 +7,7 @@
 #include "gameplay/recoil.h"
 #include "anim/procedural.h"
 #include "anim/body_parts.h"
+#include "anim/fire_anim.h"
 
 #define MAX_ITEM_DEFS 128
 #define MAX_WEAPON_DEFS 32
@@ -66,7 +67,10 @@ typedef struct ItemDef {
 
 typedef enum VehicleUse { VUSE_NONE, VUSE_FUEL, VUSE_TIRE_REPAIR, VUSE_SPARE_TIRE } VehicleUse;
 
-typedef struct WeaponModelPart { vec3 offset; vec3 half; vec4 color; } WeaponModelPart;
+// mech: the part's role in the fire animation's mechanical layer (docs/FIRE_ANIM.md): it slides back
+// with the slide / bolt / pump, or wobbles a tick behind the receiver (magazine).
+typedef enum PartMech { MECH_NONE, MECH_SLIDE, MECH_BOLT, MECH_PUMP, MECH_MAG } PartMech;
+typedef struct WeaponModelPart { vec3 offset; vec3 half; vec4 color; u8 mech; } WeaponModelPart;
 
 // ------------------------------------------------------------------ attachments
 // assets/attachments/*.json (docs/ATTACHMENTS.md). Ids are 1-based u8 indices (0 = none), loaded
@@ -118,12 +122,14 @@ typedef struct AttachmentDef {
     float ads_time;           // multiplier
     float sway_scale;         // multiplier on idle / scope sway
     float recoil_v, recoil_h, cam_kick, vm_kick;   // multipliers
+    FaAttMod fire;            // fire animation: mass at the socket, impulse / settle modifiers ("fire" block)
     float spread_hip, spread_ads;
     float damage, range;
     float mag_mult;           // magazine capacity multiplier
     float reload_time;        // multiplier
     float muzzle_len;         // m the muzzle moves forward (muzzle devices)
-    int muzzle_device;        // VfxMuzzleDevice, -1 = keep
+    int muzzle_device;        // VfxMuzzleDevice, -1 = keep ("muzzle_device" string, or the "kind" of its object)
+    bool bal_device;          // the "muzzle_device" object is a ballistics device block (gameplay/ballistics)
     bool has_grip_l;
     Xform grip_l;             // underbarrel grips: left hand socket (attachment space)
     WeaponModelPart parts[ATT_MAX_PARTS];
@@ -169,7 +175,14 @@ typedef struct WeaponDef {
     bool one_hand_capable;    // can be fired one-handed while driving (pistols, SMGs: docs/VEHICLES.md)
     // VFX ("vfx" block): muzzle flash type x device, impact caliber (src/vfx/vfx_library.h enums).
     int vfx_muzzle_type, vfx_muzzle_device, vfx_caliber;
+    // Ballistics (docs/BALLISTICS.md): cartridge id (assets/ballistics/cartridges.json), barrel
+    // length (muzzle velocity, flash), zero distance (launch elevation) and the muzzle device id
+    // (an attachment id with a "muzzle_device" block; "bare" = none). Empty cartridge = hitscan.
+    char cartridge[24];
+    float barrel_length, zero_distance;
+    char muzzle_device_id[32];
     RecoilParams recoil;      // guns: recoil, spread, fire modes, ADS/sway feel ("recoil" block)
+    FireAnimDef fire;         // guns: gun-driven fire animation (class pose + mass, "fire_anim" block; docs/FIRE_ANIM.md)
     // Third-person procedural hold ("hold" block): style + item sockets (shared with the viewmodel grip data).
     char hold_style[16];
     ItemSockets sockets;
@@ -200,6 +213,8 @@ typedef struct ItemDB {
 bool items_load(ItemDB *db, const char *items_path, const char *weapons_path);
 // Re-reads only the weapon definitions in place (live tuning). Item ids must not change.
 bool weapons_reload_defs(ItemDB *db, const char *weapons_path);
+// Forget the cached fire animation class files (assets/weapons/fire_poses): the next load re-reads them.
+void items_fire_classes_reload(void);
 u16 item_find(const ItemDB *db, const char *id);
 // The model drawn in the hands (and on the ground): non-weapons are a palm-sized box (pickup sizes
 // are world-scale, held items are capped at 7 cm half extent) offset from the grip; weapons are
