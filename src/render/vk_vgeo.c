@@ -115,9 +115,12 @@ static struct {
     VkPipeline p_gbuffer, p_lit, p_shadow, p_shadow_args, p_shadow_masked;
     // Foliage (docs/VGEO.md "Foliage support"): wind of the previous frame (velocity), the displacement
     // buffer, foliage types by name (placement chunks resolve their mesh names here), the check.
-    Cvar *impostor_px;
+    Cvar *impostor_px, *foliage_wind, *foliage_wind_solo;
     float wind_cur[4], wind_prev[4], time_cur, time_prev;
     bool wind_init;
+    VgWindTex wind;              // the wind field's tile (docs/FOLIAGE_WIND.md)
+    bool wind_ok;
+    bool wind_mat_dirty;         // render_foliage_wind_set: materials to re-upload this frame
     VgDisplace disp;
     bool disp_ok;
     // role / weight: the scatter role of a tree type (RENDER_TREE_*, -1 none) and its pick weight
@@ -369,6 +372,9 @@ void vkg_init(void) {
     G.pages_per_frame = cvar_reg_int("r_vgeo_stream_pages_per_frame", 64, 1, 1024, CVAR_ARCHIVE, "vgeo: pages streamed in per frame");
     G.impostor_px = cvar_reg_float("r_vgeo_impostor_px", 16.0f, 0.0f, 256.0f, CVAR_ARCHIVE,
                                    "vgeo: instances with an impostor atlas draw it below this projected size (pixels across, 0 = never)");
+    G.foliage_wind = cvar_reg_int("r_foliage_wind", 3, 0, 3, CVAR_ARCHIVE,
+                                  "foliage wind animation (docs/FOLIAGE_WIND.md): 0 none, 1 main bending, 2 + branch bending, 3 + leaf flutter and bent normals");
+    G.foliage_wind_solo = cvar_reg_int("r_foliage_wind_solo", 0, 0, 3, 0, "foliage wind debug: 0 every layer (r_foliage_wind), 1 main bending only, 2 detail only, 3 flutter only");
     cmd_register("foliage_push_test", cmd_foliage_push_test, "foliage_push_test [seconds=10]: a ring of displacement-buffer pushes circling the camera");
     cmd_register("foliage_stats", cmd_foliage_stats, "foliage: placement chunks, region allocator audit, last frame's foliage counters");
     cmd_register("foliage_query", cmd_foliage_query, "foliage_query [radius=2]: placement instances around the camera (foliage_query API)");
@@ -414,6 +420,8 @@ void vkg_init(void) {
     G.stream_ok = vg_stream_init(&G.stream, &G.scene, &G.cull, &sc);
     G.disp_ok = vg_displace_init(&G.disp, c, &G.cull.tex);
     if (!G.disp_ok) log_warn("vgeo: foliage displacement buffer unavailable");
+    G.wind_ok = vg_wind_init(&G.wind, c, &G.cull.tex);
+    if (!G.wind_ok) log_warn("vgeo: wind field tile unavailable (foliage uses the mean wind)");
     VkQueryPoolCreateInfo sq = { VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO };
     sq.queryType = VK_QUERY_TYPE_TIMESTAMP;
     sq.queryCount = 8 * FRAMES_IN_FLIGHT;   // cull begin / end, 3 x draw begin / end
@@ -439,6 +447,8 @@ void vkg_shutdown(void) {
     vgc_buffer_free(&G.ctx, &G.check.vis);
     skin_shutdown();
     if (G.disp_ok) vg_displace_shutdown(&G.disp);
+    if (G.wind_ok) vg_wind_shutdown(&G.wind);
+    G.wind_ok = false;
     G.disp_ok = false;
     if (G.sqp) vkDestroyQueryPool(R->device, G.sqp, NULL);
     G.sqp = VK_NULL_HANDLE;
@@ -460,10 +470,10 @@ static bool active(void) { return G.ok && G.r_vgeo->i && (G.scene.instance_count
 
 // The foliage fields of a view (WPO wind / time this frame and last, density, impostor switch,
 // displacement buffer, dither rotation).
+// The wind outside the field's tile (docs/FOLIAGE_WIND.md): instant x, z, settled bend x, z.
 static void foliage_wind_frame(void) {
     const RenderWeather *wx = &R->weather;
-    float ws = sqrtf(wx->wind.x * wx->wind.x + wx->wind.z * wx->wind.z);
-    float w[4] = { ws > 1e-4f ? wx->wind.x / ws : 1.0f, ws > 1e-4f ? wx->wind.z / ws : 0.0f, ws, wx->gust };
+    float w[4] = { wx->wind_global.x, wx->wind_global.y, wx->wind_global.z, wx->wind_global.w };
     memcpy(G.wind_prev, G.wind_init ? G.wind_cur : w, 16);
     G.time_prev = G.wind_init ? G.time_cur : wx->time;
     memcpy(G.wind_cur, w, 16);
@@ -479,6 +489,11 @@ static void view_foliage(VgViewGpu *v) {
     v->foliage[3] = G.impostor_px->f;
     v->frame_index = R->frame_index;
     if (G.disp_ok) vg_displace_view(&G.disp, v);
+    if (G.wind_ok) vg_wind_view(&G.wind, v);
+    // layers: the fidelity tier (r_foliage_wind), or one layer solo (tuning); the debug view
+    int solo = R->weather.wind_solo ? R->weather.wind_solo : G.foliage_wind_solo->i;
+    v->wind_layers = solo == 1 ? VGW_MAIN : solo == 2 ? VGW_DETAIL : solo == 3 ? VGW_FLUTTER : vgeo_wind_tier_layers(G.foliage_wind->i);
+    v->wind_debug = (u32)DG_CLAMP(R->weather.wind_view, 0, 2);
 }
 
 // ------------------------------------------------------------------ debug spheres
@@ -777,6 +792,22 @@ static void frame_begin(VkCommandBuffer cmd) {
         }
         float cam[3] = { R->cam.pos.x, R->cam.pos.y, R->cam.pos.z };
         vg_displace_record(&G.disp, cmd, frame, cam, dt);
+    }
+    // the wind field's tile (the game updated it this frame), live-tuned wind materials
+    if (G.wind_ok) vg_wind_record(&G.wind, cmd, frame, R->weather.wind_texels, R->weather.wind_ox, R->weather.wind_oz, R->weather.wind_texel);
+    if (G.wind_mat_dirty && G.scene.b_materials.buffer && G.scene.material_count) {
+        VkDeviceSize n = sizeof(VgMaterial) * (VkDeviceSize)G.scene.material_count;
+        for (VkDeviceSize o = 0; o < n; o += 65536) vkCmdUpdateBuffer(cmd, G.scene.b_materials.buffer, o, DG_MIN(n - o, 65536), (const u8 *)G.scene.materials + o);
+        VkMemoryBarrier2 mb = { VK_STRUCTURE_TYPE_MEMORY_BARRIER_2 };
+        mb.srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+        mb.srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT;
+        mb.dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+        mb.dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT;
+        VkDependencyInfo dep = { VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+        dep.memoryBarrierCount = 1;
+        dep.pMemoryBarriers = &mb;
+        vkCmdPipelineBarrier2(cmd, &dep);
+        G.wind_mat_dirty = false;
     }
 }
 
@@ -1584,6 +1615,64 @@ static int foliage_type_of_mesh(u32 mesh) {
     for (u32 i = 0; i < G.ftype_count; i++)
         if (G.ftype[i].mesh == mesh) return (int)i;
     return -1;
+}
+
+// ------------------------------------------------------------------ wind tuning (docs/FOLIAGE_WIND.md)
+
+int render_foliage_type_count(void) { return G.ok ? (int)G.ftype_count : 0; }
+const char *render_foliage_type_name(int i) { return G.ok && i >= 0 && (u32)i < G.ftype_count ? G.ftype[i].name : NULL; }
+
+static void foliage_commit(void);
+
+// The wind materials of a type's mesh: [*first, *first + count).
+static bool type_wind_materials(const char *type, u32 *mesh, u32 *first, u32 *count) {
+    if (!G.ok || !type) return false;
+    for (u32 i = 0; i < G.ftype_count; i++)
+        if (!strcmp(G.ftype[i].name, type)) {
+            *mesh = G.ftype[i].mesh;
+            *first = G.scene.meshes[*mesh].material_base;
+            *count = G.scene.mesh_mat_count[*mesh];
+            return true;
+        }
+    return false;
+}
+
+bool render_foliage_wind_get(const char *type, RenderFoliageWind *out) {
+    u32 mesh, first, count;
+    if (!type_wind_materials(type, &mesh, &first, &count)) return false;
+    for (u32 k = first; k < first + count && k < G.scene.material_count; k++) {
+        const VgMaterial *mt = &G.scene.materials[k];
+        if (mt->wpo == WPO_NONE) continue;
+        VgWindParams p;
+        vgeo_wind_unpack(mt->wpo_params, mt->wind_params, &p);
+        _Static_assert(sizeof(RenderFoliageWind) == sizeof(VgWindParams), "RenderFoliageWind mirrors VgWindParams");
+        memcpy(out, &p, sizeof(p));
+        return true;
+    }
+    return false;
+}
+
+// Live tuning: every wind material of the type takes the parameters; uploaded with the next frame
+// (vkCmdUpdateBuffer). A larger bound than the mesh carries re-commits the scene (the culling spheres).
+bool render_foliage_wind_set(const char *type, const RenderFoliageWind *w) {
+    u32 mesh, first, count;
+    if (!type_wind_materials(type, &mesh, &first, &count)) return false;
+    VgWindParams p;
+    memcpy(&p, w, sizeof(p));
+    bool grow = false;
+    for (u32 k = first; k < first + count && k < G.scene.material_count; k++) {
+        VgMaterial *mt = &G.scene.materials[k];
+        if (mt->wpo == WPO_NONE) continue;
+        vgeo_wind_pack(&p, mt->wpo_params, mt->wind_params);
+        mt->wpo_max = vgeo_wpo_max(mt);
+        grow |= mt->wpo_max > G.scene.meshes[mesh].max_wpo;
+    }
+    G.wind_mat_dirty = true;
+    if (grow) {
+        G.need_commit = true;
+        foliage_commit();
+    }
+    return true;
 }
 
 // The placement region (1M instances = 32 MB, 65536 cells: an open-world map's trees fill thousands

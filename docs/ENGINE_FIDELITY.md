@@ -88,6 +88,7 @@ era preset (`r_era`): `era x3` = three times the era's own error threshold, also
 | `vgeo_shadow_error_px` | era x4 | era x3 | era x2 | era x1.41 | era x1 |
 | `vgeo_lod_px` | era x8 | era x4 | era x2 | era x1.41 | era x1 |
 | `foliage_density` | era, max 0.1 | era, max 0.25 | era, max 0.5 | era, max 0.8 | era, max 1 |
+| `foliage_wind` | 1, max 1 | 1, max 1 | 2, max 2 | 3, max 3 | 3, max 3 |
 | `impostor_px` | 96, min 96 | 48, min 48 | 24, min 24 | 16, min 16 | 16, min 0 |
 | `lod_bias` | 0.25, max 0.25 | 0.25, max 0.25 | 0.5, max 0.5 | 0.71, max 0.71 | 1, max 4 |
 | `char_quality` | 0, max 0 | 0, max 1 | 1, max 2 | 2, max 3 | 2, max 3 |
@@ -136,7 +137,7 @@ Budgets (1080p, mid-range GPU): Off 3 ms, Low 5 ms, Medium 8 ms, High 12 ms, Mod
 | ssr / ssgi | `r_ssr` / `r_ssgi` | | cloud_shadows | `r_cloud_shadows` |
 | puddle_reflections | `r_puddle_reflections` | | texture_quality / aniso | `r_texture_quality` / `r_aniso` |
 | volumetrics | `r_volumetrics` | | vgeo, vgeo_error_px, vgeo_shadow_error_px, vgeo_lod_px | `r_vgeo`, `r_vgeo_error_px`, `r_vgeo_shadow_error_px`, `r_vgeo_lod_px` |
-| vol_local_lights | `r_vol_local_lights` **new** | | foliage_density / impostor_px | `r_foliage_density` / `r_vgeo_impostor_px` |
+| vol_local_lights | `r_vol_local_lights` **new** | | foliage_density / foliage_wind / impostor_px | `r_foliage_density` / `r_foliage_wind` (0 none, 1 main bending, 2 + branches, 3 + leaf flutter, bent normals; docs/FOLIAGE_WIND.md) / `r_vgeo_impostor_px` |
 | motion_blur | `r_motion_blur` | | lod_bias / char_quality | `r_lod_bias` / `r_char_quality` |
 | dof / dof_quality | `r_dof` / `r_dof_quality` (16 / 32 / 48 taps) **new** | | scope_pip_scale | `r_scope_pip_scale` |
 | ads_dof | `ads_dof` | | vfx_quality / vfx_lighting | `vfx_quality` / `vfx_lighting` |

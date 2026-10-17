@@ -384,11 +384,13 @@ static void draw_modal(int id, bool top) {
 bool menus_wants_mouse(void) {
     Game *g = game();
     return (M && M->depth > 0) || (g && (g->inventory_open || g->container_open || g->bench_open)) || vfx_editor_open() || holdpoint_editor_open() ||
-           daynight_editor_open() || flesh_range_open() || scene_wants_mouse();
+           daynight_editor_open() || flesh_range_open() || wind_game_panel_open() || scene_wants_mouse();
 }
 
 bool menus_open(void) { return M && M->depth > 0; }
-bool menus_dev_tools_open(void) { return vfx_editor_open() || holdpoint_editor_open() || daynight_editor_open() || flesh_range_open() || scene_wants_mouse(); }
+bool menus_dev_tools_open(void) {
+    return vfx_editor_open() || holdpoint_editor_open() || daynight_editor_open() || flesh_range_open() || wind_game_panel_open() || scene_wants_mouse();
+}
 void menus_frame_end(void) { if (M && M->inited) gui_frame_end(); }
 bool menus_paused(void) { return M && M->depth > 0 && M->stack[0] == SCR_PAUSE && menus_can_pause(); }
 

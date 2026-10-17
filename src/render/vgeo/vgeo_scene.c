@@ -273,7 +273,7 @@ static void world_sphere(const VgInstance *in, const VgMesh *m, const float c[3]
     out[0] = p[0] + w[0];
     out[1] = p[1] + w[1];
     out[2] = p[2] + w[2];
-    out[3] = r * s + m->max_wpo;
+    out[3] = r * s + vg_wpo_margin(m, s);
 }
 
 // Mesh foliage fields from its materials (declared WPO bounds, fades, shadow distance, flags).
@@ -283,7 +283,7 @@ static void mesh_foliage(VgScene *s) {
     bool fade_inf = false, shadow_inf = false;
     for (u32 i = 0; i < s->material_count; i++) {
         VgMaterial *mt = &s->materials[i];
-        mt->wpo_max = mt->wpo != WPO_NONE ? vgeo_wpo_max(mt->wpo, mt->wpo_params) : 0.0f;
+        mt->wpo_max = mt->wpo != WPO_NONE ? vgeo_wpo_max(mt) : 0.0f;
     }
     for (u32 mi = 0; mi < s->mesh_count; mi++) {
         VgMesh *m = &s->meshes[mi];
@@ -771,7 +771,7 @@ u32 vgeo_scene_cpu_select_ex(const VgScene *s, const VgViewGpu *v, bool all_resi
         {
             float ms[4];
             vgeo_xf_sphere(&x, m->center, m->radius, ms);
-            if (vgeo_use_impostor(v, m, ms)) continue;
+            if (vgeo_use_impostor(v, m, ms, x.wpo)) continue;
         }
         float sc = x.scale;
         u32 ng = (u32)((in->mesh + 1 < s->mesh_count ? s->meshes[in->mesh + 1].group_base : s->group_count) - m->group_base);

@@ -48,6 +48,7 @@
     "vgeo_shadow_error_px": {"avail": "on", "scale": 2},
     "vgeo_lod_px": {"avail": "on", "scale": 2},
     "foliage_density": {"avail": "on", "max": 0.5},
+    "foliage_wind": {"avail": "on", "default": 2, "max": 2},
     "impostor_px": {"avail": "on", "default": 24, "min": 24},
     "lod_bias": {"avail": "on", "default": 0.5, "max": 0.5},
     "char_quality": {"avail": "on", "default": 1, "max": 2},

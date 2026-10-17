@@ -41,6 +41,19 @@ void daynight_register(void);
 void weather_register(void);                     // game_weather.c
 // Foliage (game_foliage.c, docs/VGEO.md "Foliage support")
 void foliage_register(void);
+// game_wind.c: the wind field (docs/FOLIAGE_WIND.md)
+struct WindField;
+void wind_game_register(void);
+void wind_game_frame(const WeatherParams *cur, double tick_time, vec3 cam, float dt, RenderWeather *rw);   // cur NULL: no weather
+vec3 wind_game_at(vec3 pos);                        // instant wind (m/s): gusts, turbulence, local sources
+void wind_game_blast(vec3 pos, float radius, float strength);   // an explosion's wind ring
+void wind_game_wake(vec3 pos, vec3 vel, float radius);         // a vehicle's wake (call every few frames while moving)
+float wind_game_leaf_rate(vec3 pos);                // leaves torn off per second per tree (leaf-shedding effects)
+float wind_game_rustle(vec3 pos);                   // foliage rustle 0..1: local wind x foliage nearby (ambience)
+const struct WindField *wind_game_field(void);
+void wind_game_draw_debug(vec3 cam);
+void wind_game_draw_panel(void);
+bool wind_game_panel_open(void);
 void foliage_frame(World *w);                     // players flatten grass
 void foliage_clear(void);                         // the test scatter placements + their capsules
 void foliage_level_reset(void);                   // map load: the placements (the old world took the capsules)

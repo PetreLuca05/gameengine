@@ -57,7 +57,8 @@ Simplification and clustering use meshoptimizer v0.22 (`simplifier.cpp`, `cluste
 | `shaders/vgeo/vg_test_skin.comp` | test-only kernel: the shared skin helper on a vertex list |
 | `tests/test_vgeo_skinned.c` | ctest `vgeo_skinned` (`--validation`) |
 | `src/render/vgeo/vgeo_tex.{c,h}` | `VgTextures`: the texture table at binding 23 of every cull set (renderer ids + module textures) |
-| `src/render/vgeo/foliage_support.{c,h}` | WPO CPU mirror + declared bounds, fade / density / impostor mirrors, `.vgp` chunks, scatter, `foliage_query`, impostor upload, displacement buffer |
+| `src/render/vgeo/foliage_support.{c,h}` | WPO CPU mirror + declared bounds, fade / density / impostor mirrors, `.vgp` chunks, scatter, `foliage_query`, impostor upload, displacement buffer, wind field tile ring |
+| `src/render/vgeo/foliage_wind.{c,h}` | vegetation wind model, CPU mirror of `wpo_veg` (docs/FOLIAGE_WIND.md) |
 | `src/render/vgeo/vgeo_impostor.{c,h}` | CPU hemi-octahedral impostor baker, file section |
 | `src/render/vgeo/vgeo_procgen_foliage.{c,h}` | grass tuft, wheat, the test bush, alpha masks, their materials |
 | `src/render/vgeo/vgeo_tree.{c,h}` | imported tree models: species table, FBX / OBJ import, wind weights, capsules, cache, coverage mips |
@@ -842,14 +843,15 @@ renderer already binds as set 3.
 Foliage is ordinary vgeo content plus a few material, instance and placement features. Culling, LOD,
 both rasterisers, the shadows and streaming are the core's. The content is the imported tree models
 ("Tree models") plus procedural grass tufts and wheat; procedural test types exercise the GPU paths.
+The wind that moves all of it is docs/FOLIAGE_WIND.md.
 
-### Materials (`VgMaterial`, 96 B)
+### Materials (`VgMaterial`, 128 B)
 
 | Field | Meaning |
 |---|---|
 | `flags` | `MAT_*` plus `VGM_MASKED`, `VGM_TWO_SIDED`, `VGM_DITHER_FADE`, `VGM_FOLIAGE` (bits 24-27) |
 | `mask_tex`, `alpha_cutoff` | alpha mask (0: `albedo_tex`), its threshold |
-| `wpo`, `wpo_params[4]`, `wpo_max` | snippet (`WPO_GRASS`, `WPO_TREE`, `\| WPO_DISPLACE`), parameters, declared bound (the commit computes it with `vgeo_wpo_max`) |
+| `wpo`, `wpo_params[4]`, `wind_params[8]`, `wpo_max` | vegetation wind preset (`WPO_GRASS`, `WPO_BUSH`, `WPO_TREE`, `\| WPO_DISPLACE`), its parameters (docs/FOLIAGE_WIND.md), declared bound (the commit computes it with `vgeo_wpo_max`) |
 | `fade_start`, `fade_end` | distance fade of `VGM_FOLIAGE` instances (m) |
 | `shadow_max_dist` | no sun-cascade shadow beyond this distance from the camera (m, 0 = always) |
 
@@ -893,24 +895,24 @@ set 4 is gone.
 
 ### WPO (`shaders/vgeo/wpo.glsl`)
 
-- Snippets (pure functions; CPU mirror `vgeo_wpo_eval`):
-  - `WPO_GRASS`: bend along the wind by R, with the bent tip dropping.
-  - `WPO_TREE`: trunk sway (R), branch bounce (G), leaf flutter (B), per-instance phase.
-  - `WPO_DISPLACE`: adds the displacement buffer's push, weighted by R.
-- Every snippet clamps the wind to the full wind it was declared for (`prm.w`). So `vgeo_wpo_max` bounds it for
-  any weather:
-  - grass: `√2 · bend`;
-  - tree: `sway + branch + 1.5 · flutter`;
-  - displacement: `+ 1.118 · VG_DISPLACE_MAX` (0.6 m).
-- `vg_vertex_world` applies the snippet in every stage: both rasterisers, the shadows, the resolve, the test
-  kernel.
-- Every world sphere (`vg_world_sphere`) grows by the mesh's `max_wpo`: instance, BVH node, group and cluster
-  LOD spheres, culling spheres, and the cell bounds. The LOD distance therefore shrinks by it too. The error
-  itself is unchanged.
+- One vegetation model for every snippet (docs/FOLIAGE_WIND.md): the GPU Gems 3 chapter 16 (Crysis)
+  layers driven by the canonical wind channels of the vertex colour (R flutter, G branch phase, B
+  branch bend; trunk bending from the height), sampling the wind field's tile at the instance pivot.
+  CPU mirror `vgeo_wind_eval` / `vgeo_wpo_eval`.
+- `WPO_DISPLACE` adds the displacement buffer's push first (weighted by the height) and takes the wind
+  out of the pushed plant.
+- Bounds: `vgeo_wpo_max` sums the layers' declared maxima (`vgeo_wind_layer_max`) + `1.118 ·
+  VG_DISPLACE_MAX` (0.6 m) with the displacement buffer. Every world sphere (`vg_world_sphere`) grows by
+  the mesh's `max_wpo` x max(instance scale, 1) (`vg_wpo_margin`): instance, BVH node, group and
+  cluster LOD spheres, culling spheres, and the cell bounds. The LOD distance therefore shrinks by it
+  too. The error itself is unchanged.
+- `vg_vertex_world` applies the snippet in every stage: both rasterisers, the shadows, the resolve, the
+  test kernel. The resolve also bends / flutters the normals (High / Modern).
 - The SW/HW size test and the impostor switch use the size without that margin.
-- Velocity: the resolve evaluates the snippet with last frame's wind and time (`VgViewGpu.wind_prev`,
-  `foliage.y`). The game feeds the views from `RenderWeather` (wind, gust, time). `FrameData.wx5 = (gust, gust
-  phase, time, wind direction angle)`.
+- Velocity: the resolve evaluates the snippet with last frame's wind tile, fallback wind and time
+  (`VgViewGpu.wind_tile_prev`, `wind_prev`, `foliage.y`). The game feeds the views from `RenderWeather`
+  (the wind field's tile and fallback, the wind time). `FrameData.wx5 = (gust, gust phase, time, wind
+  direction angle)`.
 
 ### Instances: density, fade, shadow distance, impostors
 
@@ -1015,9 +1017,9 @@ bush is GPU test / bench content only (`vgeo_foliage`, `bench_vgeo`, `build_vgeo
   - Tree It card normals point up / outwards whatever the winding (and are not unit length). Each card
     triangle is re-wound towards its normal, so the front face is the lit side (the resolve flips only
     back faces). Without this, half of the leaves turned black.
-  - Wind weights in the vertex colour: R = (y / H)^1.5 (trunk sway), G = (r / crown radius)^1.3,
-    faded in over the lowest quarter of the height (branch bounce), B = 1 on card-only vertices (flutter).
-    Shared positions get the same R / G, so bark and cards bend together.
+  - Wind weights in the vertex colour: Tree It's own channels, which are the canonical layout of
+    docs/FOLIAGE_WIND.md (R leaf flutter, G branch phase, B branch bend, normalised to a maximum of 1 per
+    tree; trunk bending comes from the height). Without colours they are inferred from the geometry.
   - Trunk capsule: the 25th percentile of the bark's distance from the axis between 0.4 and 1.6 m
     (scaled down for bushes), + 10 %; height min(H / 2, 5 m).
 - **Build.** The ordinary vgeo builder: its DAG is the LOD chain (the files' own `_LODn` meshes are not
@@ -1092,8 +1094,8 @@ half the real heights, and the columnar juniper and the acacia tree read as mini
 heights are logged by `build_vgeo --trees` (`scale ... (<file units> -> <m>)`); `tools/tests/tree_scale.cfg`
 takes the scale screenshots (third-person player beside each forest, a zombieland forest, r_vgeo 0).
 
-Wind (m at full wind, sway / branch / flutter): conifers 0.18-0.2 / 0.12 / 0.02, broadleaves
-0.18-0.26 / 0.16-0.18 / 0.04-0.05, the old tree 0.08 / 0.05 / 0.02, bushes 0.05-0.08. Trees fade at
+Wind: per-species tuning of the vegetation model (`k_wind`, docs/FOLIAGE_WIND.md "Parameters"); the
+main bend's height is the species' scale-1 height. Trees fade at
 850-1100 m with shadows to 70 m; bushes 150-210 m / 40 m; daisies 50-80 m / 15 m.
 
 **Budget.** 13 species, 91k source triangles, 2.2k clusters; .dgtree files 40 MB on disk (mostly the
@@ -1227,8 +1229,8 @@ landed the support pieces ("Foliage support"); a foliage system then needs only:
 
 1. **Meshes.** Author or generate grass, bush and tree meshes as normal glTF with `"vgeo": true` and a
    `"foliage": { "masked": true, "two_sided": true, "wpo": "grass" | "tree", "wpo_params": [...], "fade": [s, e],
-   "shadow_max_dist": d }` block in `data/assets.json`. Bake wind weights into vertex colour: R = trunk / bend,
-   G = branch, B = leaf flutter (`VgSource.color`, 4 extra bytes per vertex; WPO materials do not use it as
+   "shadow_max_dist": d }` block in `data/assets.json`. Bake wind weights into vertex colour in the canonical
+   layout of docs/FOLIAGE_WIND.md: R = leaf flutter, G = branch phase, B = branch bend (`VgSource.color`, 4 extra bytes per vertex; WPO materials do not use it as
    albedo). For distant instances, `build_vgeo --impostor` bakes the hemi-octahedral atlas into the `.vgeo`,
    `vgeo_foliage_impostor_upload` puts it on the GPU, and `r_vgeo_impostor_px` sets the switch.
 2. **Placement.** Write per-chunk placement files (`.vgp`, `vgp_write`): ≤ 16 cells of 8 m per 32 m chunk, 32 B

@@ -1,6 +1,7 @@
 // Procedural foliage test content (docs/VGEO.md "Foliage support"): a grass tuft (~60 triangles: 5
 // crossed cards) and a bush (~600 triangles: a tapered trunk and 46 leaf cards), with wind weights in
-// the vertex colour (R bend / trunk, G branch, B flutter) and noise alpha masks (grass blades, leaves).
+// the vertex colour (the canonical layout of foliage_wind.h: R flutter, G branch phase, B branch bend)
+// and noise alpha masks (grass blades, leaves).
 // Deterministic for a seed; generated at run time, never committed. Pure C (no renderer).
 #ifndef DG_VGEO_PROCGEN_FOLIAGE_H
 #define DG_VGEO_PROCGEN_FOLIAGE_H

@@ -23,25 +23,65 @@
 // across by default: their cards do not coarsen, a distant tree would stay thousands of triangles),
 // bushes at 2x.
 static const VgTreeSpecies k_species[] = {
-    //  name           file          role               w     height (m)    sway  branch flutter fade      shadow atlas imp. cap
-    { "tree_pine",     "pine.fbx",   VG_TREE_CONIFER,   1.0f, 18.0f, 32.0f, 0.20f, 0.12f, 0.02f, 850, 1100, 70, 512, 6.0f, true },
-    { "tree_fir",      "fir.fbx",    VG_TREE_CONIFER,   1.0f, 20.0f, 36.0f, 0.18f, 0.12f, 0.02f, 850, 1100, 70, 512, 6.0f, true },
-    { "tree_spruce",   "spruce.fbx", VG_TREE_CONIFER,   1.0f, 20.0f, 36.0f, 0.20f, 0.12f, 0.02f, 850, 1100, 70, 512, 6.0f, true },
-    { "tree_oak",      "oak.fbx",    VG_TREE_BROADLEAF, 1.0f, 16.0f, 28.0f, 0.18f, 0.16f, 0.04f, 850, 1100, 70, 512, 6.0f, true },
-    { "tree_beech",    "beech.fbx",  VG_TREE_BROADLEAF, 1.0f, 20.0f, 34.0f, 0.22f, 0.16f, 0.04f, 850, 1100, 70, 512, 6.0f, true },
-    { "tree_birch",    "birch.fbx",  VG_TREE_BROADLEAF, 0.8f, 14.0f, 24.0f, 0.26f, 0.18f, 0.05f, 850, 1100, 70, 512, 6.0f, true },
-    { "tree_elm",      "elm.fbx",    VG_TREE_BROADLEAF, 0.8f, 16.0f, 27.0f, 0.22f, 0.16f, 0.04f, 850, 1100, 70, 512, 6.0f, true },
-    { "tree_maple",    "maple.fbx",  VG_TREE_BROADLEAF, 1.0f, 14.0f, 24.0f, 0.20f, 0.16f, 0.04f, 850, 1100, 70, 512, 6.0f, true },
-    { "tree_old",      "old.fbx",    VG_TREE_DEAD,      1.0f, 10.0f, 17.0f, 0.08f, 0.05f, 0.02f, 850, 1100, 70, 512, 1.0f, true },
-    { "bush_juniper",  "juniper.fbx", VG_TREE_BUSH,     1.0f, 3.0f,  7.0f,  0.05f, 0.05f, 0.02f, 150, 210, 40, 512, 2.0f, true },
-    { "bush_bamboo",   "bamboo.obj", VG_TREE_BUSH,      0.4f, 2.5f,  5.0f,  0.08f, 0.08f, 0.03f, 150, 210, 40, 512, 2.0f, true },
-    { "bush_acacia",   "tree1.obj",  VG_TREE_BUSH,      0.4f, 4.0f,  8.0f,  0.08f, 0.08f, 0.03f, 150, 210, 40, 512, 2.0f, true },
-    { "flower_daisy",  "daisy.fbx",  VG_TREE_FLOWER,    1.0f, 0.35f, 0.75f, 0.04f, 0.05f, 0.02f, 50, 80, 15, 0, 1.0f, false },
+    //  name           file          role               w     height (m)     fade      shadow atlas imp. cap
+    { "tree_pine",     "pine.fbx",   VG_TREE_CONIFER,   1.0f, 18.0f, 32.0f,  850, 1100, 70, 512, 6.0f, true },
+    { "tree_fir",      "fir.fbx",    VG_TREE_CONIFER,   1.0f, 20.0f, 36.0f,  850, 1100, 70, 512, 6.0f, true },
+    { "tree_spruce",   "spruce.fbx", VG_TREE_CONIFER,   1.0f, 20.0f, 36.0f,  850, 1100, 70, 512, 6.0f, true },
+    { "tree_oak",      "oak.fbx",    VG_TREE_BROADLEAF, 1.0f, 16.0f, 28.0f,  850, 1100, 70, 512, 6.0f, true },
+    { "tree_beech",    "beech.fbx",  VG_TREE_BROADLEAF, 1.0f, 20.0f, 34.0f,  850, 1100, 70, 512, 6.0f, true },
+    { "tree_birch",    "birch.fbx",  VG_TREE_BROADLEAF, 0.8f, 14.0f, 24.0f,  850, 1100, 70, 512, 6.0f, true },
+    { "tree_elm",      "elm.fbx",    VG_TREE_BROADLEAF, 0.8f, 16.0f, 27.0f,  850, 1100, 70, 512, 6.0f, true },
+    { "tree_maple",    "maple.fbx",  VG_TREE_BROADLEAF, 1.0f, 14.0f, 24.0f,  850, 1100, 70, 512, 6.0f, true },
+    { "tree_old",      "old.fbx",    VG_TREE_DEAD,      1.0f, 10.0f, 17.0f,  850, 1100, 70, 512, 1.0f, true },
+    { "bush_juniper",  "juniper.fbx", VG_TREE_BUSH,     1.0f, 3.0f,  7.0f,   150, 210, 40, 512, 2.0f, true },
+    { "bush_bamboo",   "bamboo.obj", VG_TREE_BUSH,      0.4f, 2.5f,  5.0f,   150, 210, 40, 512, 2.0f, true },
+    { "bush_acacia",   "tree1.obj",  VG_TREE_BUSH,      0.4f, 4.0f,  8.0f,   150, 210, 40, 512, 2.0f, true },
+    { "flower_daisy",  "daisy.fbx",  VG_TREE_FLOWER,    1.0f, 0.35f, 0.75f,  50, 80, 15, 0, 1.0f, false },
+};
+
+// Wind tuning per species (docs/FOLIAGE_WIND.md "Parameters"; 0 = the preset's value). Old oaks are
+// stiff, birch slender with a quick flutter, conifers have drooping branches and stiff needles, bamboo
+// is very flexible and settles quickly. Fields: trunk / branch / leaf stiffness, full wind, main /
+// detail / flutter Hz, max bend (deg), settle time (s), response.
+typedef struct TreeWind { const char *name; float trunk, branch, leaf, full, main_hz, detail_hz, flutter_hz, max_bend, settle, response; } TreeWind;
+static const TreeWind k_wind[] = {
+    { "tree_pine",    0.045f, 0.35f, 0.03f,  0, 0.16f, 0, 4.0f, 0, 0, 0 },
+    { "tree_fir",     0.045f, 0.38f, 0.03f,  0, 0.16f, 0, 4.0f, 0, 0, 0 },
+    { "tree_spruce",  0.045f, 0.40f, 0.03f,  0, 0.16f, 0, 4.0f, 0, 0, 0 },
+    { "tree_oak",     0.035f, 0.30f, 0.05f,  0, 0.14f, 0, 0, 5.0f, 0, 0 },
+    { "tree_beech",   0.045f, 0.30f, 0.055f, 0, 0.17f, 0, 0, 0, 0, 0 },
+    { "tree_birch",   0.07f,  0.35f, 0.07f,  18.0f, 0.22f, 0, 7.0f, 9.0f, 0, 0 },
+    { "tree_elm",     0.05f,  0.28f, 0.055f, 0, 0, 0, 0, 0, 0, 0 },
+    { "tree_maple",   0.045f, 0.30f, 0.06f,  0, 0.17f, 0, 0, 0, 0, 0 },
+    { "tree_old",     0.03f,  0.25f, 0.04f,  0, 0.15f, 0, 0, 5.0f, 0, 0 },
+    { "bush_juniper", 0.055f, 0.25f, 0.025f, 0, 0.20f, 0, 4.5f, 0, 0, 0 },
+    { "bush_bamboo",  0.12f,  0.30f, 0.06f,  16.0f, 0.30f, 0, 0, 14.0f, 1.6f, 1.0f },
+    { "bush_acacia",  0.04f,  0.30f, 0.05f,  0, 0, 0, 0, 0, 0, 0 },
+    { "flower_daisy", 0.35f,  0, 0.03f,      10.0f, 0, 0, 0, 25.0f, 0, 0 },
 };
 
 u32 vgeo_tree_species_count(void) { return (u32)(sizeof(k_species) / sizeof(k_species[0])); }
 const VgTreeSpecies *vgeo_tree_species(u32 i) { return i < vgeo_tree_species_count() ? &k_species[i] : NULL; }
 float vgeo_tree_height(const VgTreeSpecies *sp) { return 0.5f * (sp->height_min + sp->height_max); }
+
+void vgeo_tree_wind(const VgTreeSpecies *sp, VgWindParams *out) {
+    vgeo_wind_defaults(out, sp->role == VG_TREE_FLOWER ? VGWP_GRASS : VGWP_TREE, vgeo_tree_height(sp));
+    for (u32 i = 0; i < sizeof(k_wind) / sizeof(k_wind[0]); i++) {
+        const TreeWind *w = &k_wind[i];
+        if (strcmp(w->name, sp->name)) continue;
+        if (w->trunk > 0) out->trunk_stiffness = w->trunk;
+        if (w->branch > 0) out->branch_stiffness = w->branch;
+        if (w->leaf > 0) out->leaf_stiffness = w->leaf;
+        if (w->full > 0) out->full_wind = w->full;
+        if (w->main_hz > 0) out->main_freq = w->main_hz;
+        if (w->detail_hz > 0) out->detail_freq = w->detail_hz;
+        if (w->flutter_hz > 0) out->flutter_freq = w->flutter_hz;
+        if (w->max_bend > 0) out->max_bend_deg = w->max_bend;
+        if (w->settle > 0) out->settle_time = w->settle;
+        if (w->response > 0) out->response = w->response;
+        break;
+    }
+}
 
 bool vgeo_tree_scale_range(const char *name, float *lo, float *hi) {
     for (u32 i = 0; i < vgeo_tree_species_count(); i++) {
@@ -121,7 +161,7 @@ void vgeo_tree_mip_coverage(u8 *mips, u32 w, u32 h, u32 levels, float cutoff) {
 
 // ------------------------------------------------------------------ import
 
-typedef struct TreeVert { float p[3], n[3], uv[2]; } TreeVert;
+typedef struct TreeVert { float p[3], n[3], uv[2]; u32 col; } TreeVert;   // col: the canonical wind weights (part of the dedup key)
 
 // "oak leaf_2" -> "oak leaf" (Tree It numbers its FBX models)
 static void strip_suffix(const char *in, char *out, size_t n) {
@@ -133,18 +173,40 @@ static void strip_suffix(const char *in, char *out, size_t n) {
     *u = 0;
 }
 
-static float smooth01(float x) {
-    x = x < 0 ? 0 : (x > 1 ? 1 : x);
-    return x * x * (3 - 2 * x);
-}
-
 static int cmp_float(const void *a, const void *b) {
     float x = *(const float *)a, y = *(const float *)b;
     return x < y ? -1 : (x > y ? 1 : 0);
 }
 
-bool vgeo_tree_import(const VgTreeSpecies *sp, const char *dir, VgFoliageMesh *out, VgTree *meta, char *err, int err_size) {
-    memset(out, 0, sizeof(*out));
+static u32 uf_find(u32 *p, u32 x) {
+    while (p[x] != x) {
+        p[x] = p[p[x]];
+        x = p[x];
+    }
+    return x;
+}
+
+// Every triangle corner of the source (metres at the species height, the trunk base at the origin) with
+// its source colour (RGBA 0..1) and connected piece (a branch, a card: corners sharing file vertices).
+typedef struct TreeCorners {
+    TreeVert *v;
+    float *col;                  // 4 per corner
+    u32 *piece;
+    u16 *tmat;                   // per triangle
+    size_t n;
+    u32 pieces;
+    bool has_color;
+} TreeCorners;
+
+static void corners_free(TreeCorners *c) {
+    free(c->v), free(c->col), free(c->piece), free(c->tmat);
+    memset(c, 0, sizeof(*c));
+}
+
+// Loads the source mesh: the corners, the materials (textures loaded, masked = the texture cuts out),
+// card winding, metres, the trunk capsule.
+static bool tree_load(const VgTreeSpecies *sp, const char *dir, TreeCorners *c, VgTree *meta, char *err, int err_size) {
+    memset(c, 0, sizeof(*c));
     char path[600];
     snprintf(path, sizeof(path), "%s%s", dir, sp->file);
     ufbx_load_opts o;
@@ -158,19 +220,25 @@ bool vgeo_tree_import(const VgTreeSpecies *sp, const char *dir, VgFoliageMesh *o
         snprintf(err, (size_t)err_size, "%s: %s", path, b);
         return false;
     }
-    // every triangle of every mesh node, one corner per vertex (deduplicated below)
-    size_t cap = 0;
+    // every triangle of every mesh node, one corner per vertex (deduplicated by the import)
+    size_t cap = 0, total_pos = 0;
     for (size_t i = 0; i < s->nodes.count; i++)
-        if (s->nodes.data[i]->mesh) cap += s->nodes.data[i]->mesh->num_triangles * 3;
+        if (s->nodes.data[i]->mesh) cap += s->nodes.data[i]->mesh->num_triangles * 3, total_pos += s->nodes.data[i]->mesh->num_vertices;
     TreeVert *v = (TreeVert *)calloc(cap ? cap : 1, sizeof(TreeVert));
+    float *col = (float *)malloc(sizeof(float) * 4 * (cap ? cap : 1));
+    u32 *posid = (u32 *)malloc(sizeof(u32) * (cap ? cap : 1));
+    u32 *uf = (u32 *)malloc(sizeof(u32) * (total_pos ? total_pos : 1));
+    for (size_t i = 0; i < total_pos; i++) uf[i] = (u32)i;
     u16 *tmat = (u16 *)malloc(sizeof(u16) * (cap / 3 + 1));
     size_t nv = 0;
+    u32 vbase = 0;
     meta->material_count = 0;
     u32 tri_idx[64];
     for (size_t i = 0; i < s->nodes.count; i++) {
         const ufbx_node *node = s->nodes.data[i];
         const ufbx_mesh *m = node->mesh;
         if (!m) continue;
+        if (m->vertex_color.exists) c->has_color = true;
         ufbx_matrix nm = ufbx_matrix_for_normals(&node->geometry_to_world);
         for (size_t f = 0; f < m->faces.count; f++) {
             char name[48];
@@ -186,9 +254,9 @@ bool vgeo_tree_import(const VgTreeSpecies *sp, const char *dir, VgFoliageMesh *o
             }
             u32 nt = ufbx_triangulate_face(tri_idx, 64, m, m->faces.data[f]);
             for (u32 t = 0; t < nt; t++) {
-                for (u32 c = 0; c < 3; c++) {
-                    u32 ix = tri_idx[t * 3 + c];
-                    TreeVert *q = &v[nv++];
+                for (u32 k = 0; k < 3; k++) {
+                    u32 ix = tri_idx[t * 3 + k];
+                    TreeVert *q = &v[nv];
                     ufbx_vec3 p = ufbx_transform_position(&node->geometry_to_world, ufbx_get_vertex_vec3(&m->vertex_position, ix));
                     ufbx_vec3 n = m->vertex_normal.exists ? ufbx_transform_direction(&nm, ufbx_get_vertex_vec3(&m->vertex_normal, ix)) : (ufbx_vec3){ 0, 1, 0 };
                     double nl = sqrt(n.x * n.x + n.y * n.y + n.z * n.z);
@@ -200,18 +268,36 @@ bool vgeo_tree_import(const VgTreeSpecies *sp, const char *dir, VgFoliageMesh *o
                         q->uv[0] = (float)uv.x;
                         q->uv[1] = 1.0f - (float)uv.y;   // files: v up; textures: row 0 on top
                     }
+                    ufbx_vec4 cl = m->vertex_color.exists ? ufbx_get_vertex_vec4(&m->vertex_color, ix) : (ufbx_vec4){ 0, 0, 0, 1 };
+                    col[nv * 4] = (float)cl.x, col[nv * 4 + 1] = (float)cl.y, col[nv * 4 + 2] = (float)cl.z, col[nv * 4 + 3] = (float)cl.w;
+                    posid[nv] = vbase + m->vertex_indices.data[ix];
+                    nv++;
+                }
+                for (int k = 1; k < 3; k++) {   // the triangle's file vertices are one piece
+                    u32 a = uf_find(uf, posid[nv - 3]), b = uf_find(uf, posid[nv - 3 + (size_t)k]);
+                    if (a != b) uf[a] = b;
                 }
                 tmat[nv / 3 - 1] = (u16)mi;
             }
         }
+        vbase += (u32)m->num_vertices;
     }
     ufbx_free_scene(s);
     if (nv < 3) {
         snprintf(err, (size_t)err_size, "%s: no triangles", path);
-        free(v);
-        free(tmat);
+        free(v), free(col), free(posid), free(uf), free(tmat);
         return false;
     }
+    // pieces, numbered densely
+    u32 *piece = (u32 *)malloc(sizeof(u32) * nv), *remap = (u32 *)malloc(sizeof(u32) * (total_pos ? total_pos : 1));
+    for (size_t i = 0; i < total_pos; i++) remap[i] = ~0u;
+    u32 pieces = 0;
+    for (size_t i = 0; i < nv; i++) {
+        u32 r = uf_find(uf, posid[i]);
+        if (remap[r] == ~0u) remap[r] = pieces++;
+        piece[i] = remap[r];
+    }
+    free(remap), free(uf), free(posid);
     // textures: "<material>.png"; a material whose texture cuts out (> 2 % of the texels below half
     // alpha) is a masked, two-sided card
     for (u32 k = 0; k < meta->material_count; k++) {
@@ -233,8 +319,8 @@ bool vgeo_tree_import(const VgTreeSpecies *sp, const char *dir, VgFoliageMesh *o
     // flips the normal of back faces only)
     for (size_t t = 0; t + 2 < nv; t += 3) {
         if (!meta->masked[tmat[t / 3]]) continue;
-        const float *a = v[t].p, *b = v[t + 1].p, *c = v[t + 2].p;
-        float e1[3] = { b[0] - a[0], b[1] - a[1], b[2] - a[2] }, e2[3] = { c[0] - a[0], c[1] - a[1], c[2] - a[2] };
+        const float *a = v[t].p, *b = v[t + 1].p, *cc = v[t + 2].p;
+        float e1[3] = { b[0] - a[0], b[1] - a[1], b[2] - a[2] }, e2[3] = { cc[0] - a[0], cc[1] - a[1], cc[2] - a[2] };
         float g[3] = { e1[1] * e2[2] - e1[2] * e2[1], e1[2] * e2[0] - e1[0] * e2[2], e1[0] * e2[1] - e1[1] * e2[0] };
         float d = 0;
         for (int q = 0; q < 3; q++) d += g[q] * (v[t].n[q] + v[t + 1].n[q] + v[t + 2].n[q]);
@@ -242,6 +328,10 @@ bool vgeo_tree_import(const VgTreeSpecies *sp, const char *dir, VgFoliageMesh *o
             TreeVert x = v[t + 1];
             v[t + 1] = v[t + 2];
             v[t + 2] = x;
+            float xc[4];
+            memcpy(xc, col + (t + 1) * 4, 16);
+            memcpy(col + (t + 1) * 4, col + (t + 2) * 4, 16);
+            memcpy(col + (t + 2) * 4, xc, 16);
         }
     }
     // metres at the species height, ground (file y = 0) kept, the trunk base centred
@@ -264,10 +354,8 @@ bool vgeo_tree_import(const VgTreeSpecies *sp, const char *dir, VgFoliageMesh *o
     // branches and root flares lie further out), 10 % over
     float *rs = (float *)malloc(sizeof(float) * nv);
     size_t nr = 0;
-    float rmax = 0.5f;
     for (size_t i = 0; i < nv; i++) {
         float r = sqrtf(v[i].p[0] * v[i].p[0] + v[i].p[2] * v[i].p[2]);
-        rmax = DG_MAX(rmax, r);
         if (!meta->masked[tmat[i / 3]] && v[i].p[1] >= 0.4f * DG_MIN(1.0f, height / 4.0f) && v[i].p[1] <= 1.6f * DG_MIN(1.0f, height / 4.0f)) rs[nr++] = r;
     }
     if (nr) {
@@ -276,13 +364,235 @@ bool vgeo_tree_import(const VgTreeSpecies *sp, const char *dir, VgFoliageMesh *o
     } else meta->cap_r = 0.1f;
     meta->cap_h = DG_MIN(0.5f * height, 5.0f);
     free(rs);
-    // deduplicate the corners
-    ufbx_vertex_stream st = { v, nv, sizeof(TreeVert) };
+    c->v = v, c->col = col, c->piece = piece, c->tmat = tmat, c->n = nv, c->pieces = pieces;
+    return true;
+}
+
+// ------------------------------------------------------------------ wind channels (docs/FOLIAGE_WIND.md)
+
+typedef struct Acc { double n, sx, sy, sxx, syy, sxy; } Acc;
+static void acc_add(Acc *a, double x, double y) { a->n += 1, a->sx += x, a->sy += y, a->sxx += x * x, a->syy += y * y, a->sxy += x * y; }
+static double acc_corr(const Acc *a) {
+    if (a->n < 2) return 0;
+    double cx = a->sxx - a->sx * a->sx / a->n, cy = a->syy - a->sy * a->sy / a->n, cxy = a->sxy - a->sx * a->sy / a->n;
+    return cx > 1e-12 && cy > 1e-12 ? cxy / sqrt(cx * cy) : 0;
+}
+
+typedef struct ChStats {
+    double within, total;        // pooled within-piece / total sums of squares
+    int distinct;
+    float bark_max, max;
+    float card_zero;             // fraction of card pieces whose min is ~0
+    double uv_corr, radial_corr;
+    bool varies;
+} ChStats;
+
+static void channel_stats(const TreeCorners *c, const VgTree *meta, ChStats st[4], bool *have_bark, bool *have_leaf) {
+    memset(st, 0, sizeof(ChStats) * 4);
+    double *pm = (double *)calloc(c->pieces, sizeof(double) * 4), *pn = (double *)calloc(c->pieces, sizeof(double));
+    float *pmin = (float *)malloc(sizeof(float) * 4 * c->pieces);
+    u8 *pleaf = (u8 *)calloc(c->pieces, 1);
+    for (u32 i = 0; i < c->pieces * 4; i++) pmin[i] = 1e9f;
+    double mean[4] = { 0 };
+    *have_bark = *have_leaf = false;
+    for (size_t i = 0; i < c->n; i++) {
+        u32 p = c->piece[i];
+        pn[p] += 1;
+        pleaf[p] = meta->masked[c->tmat[i / 3]];
+        if (pleaf[p]) *have_leaf = true;
+        else *have_bark = true;
+        for (int k = 0; k < 4; k++) {
+            float x = c->col[i * 4 + (size_t)k];
+            pm[p * 4 + (u32)k] += x;
+            mean[k] += x;
+            if (x < pmin[p * 4 + (u32)k]) pmin[p * 4 + (u32)k] = x;
+        }
+    }
+    for (int k = 0; k < 4; k++) mean[k] /= (double)c->n;
+    Acc uv[4], rad[4];
+    memset(uv, 0, sizeof(uv));
+    memset(rad, 0, sizeof(rad));
+    u8 seen[4][256];
+    memset(seen, 0, sizeof(seen));
+    for (size_t i = 0; i < c->n; i++) {
+        u32 p = c->piece[i];
+        bool leaf = meta->masked[c->tmat[i / 3]];
+        const float *q = c->v[i].p;
+        double rr = sqrt((double)q[0] * q[0] + (double)q[2] * q[2]);
+        for (int k = 0; k < 4; k++) {
+            double x = c->col[i * 4 + (size_t)k], pmean = pm[p * 4 + (u32)k] / pn[p];
+            st[k].within += (x - pmean) * (x - pmean);
+            st[k].total += (x - mean[k]) * (x - mean[k]);
+            if (x > st[k].max) st[k].max = (float)x;
+            if (!leaf && x > st[k].bark_max) st[k].bark_max = (float)x;
+            int b = (int)lround(x * 255.0);
+            seen[k][b < 0 ? 0 : b > 255 ? 255 : b] = 1;
+            if (leaf) acc_add(&uv[k], x, c->v[i].uv[1]);
+            else acc_add(&rad[k], x, rr);
+        }
+    }
+    u32 nleaf = 0, zero[4] = { 0 };
+    for (u32 p = 0; p < c->pieces; p++) {
+        if (!pleaf[p] || !pn[p]) continue;
+        nleaf++;
+        for (int k = 0; k < 4; k++) zero[k] += pmin[p * 4 + (u32)k] <= 2.5f / 255.0f;
+    }
+    for (int k = 0; k < 4; k++) {
+        for (int b = 0; b < 256; b++) st[k].distinct += seen[k][b];
+        st[k].card_zero = nleaf ? (float)zero[k] / (float)nleaf : 0;
+        st[k].uv_corr = acc_corr(&uv[k]);
+        st[k].radial_corr = acc_corr(&rad[k]);
+        st[k].varies = st[k].total > 1e-6 * (double)c->n && st[k].distinct >= 2;
+    }
+    free(pm), free(pn), free(pmin), free(pleaf);
+}
+
+static bool detect(const TreeCorners *c, const VgTree *meta, VgTreeChannelReport *rep) {
+    memset(rep, 0, sizeof(*rep));
+    rep->flutter = rep->phase = rep->branch = -1;
+    rep->has_color = c->has_color;
+    if (!c->has_color) {
+        dg_strcpy(rep->note, sizeof(rep->note), "no vertex colours");
+        return false;
+    }
+    ChStats st[4];
+    bool have_bark, have_leaf;
+    channel_stats(c, meta, st, &have_bark, &have_leaf);
+    // phase: the most per-piece-constant varying channel
+    double best = 1e9;
+    for (int k = 0; k < 4; k++) {
+        if (!st[k].varies || st[k].distinct < 3) continue;
+        double f = st[k].within / st[k].total;
+        if (f < best) best = f, rep->phase = k;
+    }
+    // flutter: ~0 on the bark, ~0 at the stem end of most cards. When two channels pass (a plant whose
+    // only bark is the trunk, where the branch weight is 0 too: bamboo) the data cannot tell them
+    // apart: the Tree It order (R) wins and the report says so.
+    double bf = -1, score[4] = { -1, -1, -1, -1 };
+    for (int k = 0; k < 4; k++) {
+        if (k == rep->phase || !st[k].varies) continue;
+        if (have_bark && st[k].bark_max > 3.0f / 255.0f) continue;
+        score[k] = st[k].card_zero + 0.25 * fabs(st[k].uv_corr);
+        if (score[k] > bf) bf = score[k], rep->flutter = k;
+    }
+    int passing = 0;
+    for (int k = 0; k < 4; k++) passing += score[k] >= 0.8 * bf && bf > 0;
+    bool ambiguous = passing > 1;
+    if (ambiguous && score[0] >= 0.8 * bf && rep->phase != 0) rep->flutter = 0;
+    // branch: the remaining colour channel (prefer RGB, the one that varies most)
+    double bv = -1;
+    for (int k = 0; k < 4; k++) {
+        if (k == rep->phase || k == rep->flutter) continue;
+        double x = st[k].total + (k < 3 ? 1e-3 : 0);
+        if (x > bv) bv = x, rep->branch = k;
+    }
+    if (rep->flutter >= 0) {
+        rep->flutter_bark_max = st[rep->flutter].bark_max;
+        rep->flutter_uv_corr = -(float)st[rep->flutter].uv_corr;   // the file's v (stored flipped)
+        rep->flutter_card_zero = st[rep->flutter].card_zero;
+    }
+    if (rep->phase >= 0) rep->phase_const = (float)(1.0 - st[rep->phase].within / st[rep->phase].total);
+    if (rep->branch >= 0) {
+        rep->branch_radial_corr = (float)st[rep->branch].radial_corr;
+        rep->branch_max = st[rep->branch].max;
+    }
+    snprintf(rep->note, sizeof(rep->note), "%s%s%s", have_bark ? "bark" : "no bark", have_leaf ? " + cards" : ", no cards",
+             ambiguous ? "; flutter ambiguous from the data (two channels ~0 on bark and card stems): Tree It order" : "");
+    return rep->flutter >= 0 && rep->phase >= 0 && rep->branch >= 0;
+}
+
+bool vgeo_tree_detect_channels(const VgTreeSpecies *sp, const char *dir, VgTreeChannelReport *r, char *err, int err_size) {
+    TreeCorners c;
+    VgTree meta;
+    memset(&meta, 0, sizeof(meta));
+    meta.sp = sp;
+    bool ok = tree_load(sp, dir, &c, &meta, err, err_size);
+    if (ok) detect(&c, &meta, r);
+    corners_free(&c);
+    vgeo_tree_free(&meta);
+    return ok;
+}
+
+static float frac_hash(u32 h) {
+    h ^= h >> 16;
+    h *= 0x7FEB352Du;
+    h ^= h >> 15;
+    h *= 0x846CA68Bu;
+    h ^= h >> 16;
+    return (float)(h >> 8) / 16777216.0f;
+}
+
+static u32 unorm8(float x) { return (u32)lroundf((x < 0 ? 0 : x > 1 ? 1 : x) * 255.0f); }
+
+// The canonical wind weights of every corner (TreeVert.col, foliage_wind.h): Tree It's vertex colours
+// (R flutter, G branch phase, B branch bend: the layout tests/test_wind.c detects on every export), the
+// branch channel normalised to 1 (Tree It's maximum differs per tree: pine 0.10, beech 1.0). Without
+// colours they are inferred: flutter along each card from its trunk-side end (0 .. 0.8), a phase per
+// ~1.5 m of crown (a branch and its cards), branch = the distance from the trunk axis / the crown radius.
+static void tree_wind_weights(TreeCorners *c, VgTree *meta, bool infer) {
+    size_t n = c->n;
+    float rmax = 1e-3f;
+    for (size_t i = 0; i < n; i++) rmax = DG_MAX(rmax, sqrtf(c->v[i].p[0] * c->v[i].p[0] + c->v[i].p[2] * c->v[i].p[2]));
+    meta->wind_inferred = infer || !c->has_color;
+    float *att = NULL, *ext = NULL, *ph = NULL;
+    if (meta->wind_inferred) {
+        att = (float *)malloc(sizeof(float) * 4 * c->pieces);   // xyz, r of the attachment corner
+        ext = (float *)calloc(c->pieces, sizeof(float));
+        ph = (float *)malloc(sizeof(float) * c->pieces);
+        double *cen = (double *)calloc(c->pieces, sizeof(double) * 4);
+        for (u32 p = 0; p < c->pieces; p++) att[p * 4 + 3] = 1e30f;
+        for (size_t i = 0; i < n; i++) {
+            u32 p = c->piece[i];
+            const float *q = c->v[i].p;
+            float rr = sqrtf(q[0] * q[0] + q[2] * q[2]);
+            if (rr < att[p * 4 + 3]) memcpy(&att[p * 4], q, 12), att[p * 4 + 3] = rr;
+            for (int k = 0; k < 3; k++) cen[p * 4 + (u32)k] += q[k];
+            cen[p * 4 + 3] += 1;
+        }
+        for (size_t i = 0; i < n; i++) {
+            u32 p = c->piece[i];
+            const float *q = c->v[i].p;
+            float dx = q[0] - att[p * 4], dy = q[1] - att[p * 4 + 1], dz = q[2] - att[p * 4 + 2];
+            ext[p] = DG_MAX(ext[p], sqrtf(dx * dx + dy * dy + dz * dz));
+        }
+        for (u32 p = 0; p < c->pieces; p++) {
+            i32 g[3];
+            for (int k = 0; k < 3; k++) g[k] = (i32)floor(cen[p * 4 + (u32)k] / fmax(cen[p * 4 + 3], 1.0) / 1.5);
+            ph[p] = frac_hash((u32)g[0] * 73856093u ^ (u32)g[1] * 19349663u ^ (u32)g[2] * 83492791u);
+        }
+        free(cen);
+    }
+    float *w = (float *)malloc(sizeof(float) * 3 * n), bmax = 0;
+    for (size_t i = 0; i < n; i++) {
+        const float *q = c->v[i].p;
+        if (!meta->wind_inferred) {
+            w[i * 3] = c->col[i * 4], w[i * 3 + 1] = c->col[i * 4 + 1], w[i * 3 + 2] = c->col[i * 4 + 2];
+        } else {
+            u32 p = c->piece[i];
+            float dx = q[0] - att[p * 4], dy = q[1] - att[p * 4 + 1], dz = q[2] - att[p * 4 + 2];
+            w[i * 3] = meta->masked[c->tmat[i / 3]] && ext[p] > 1e-4f ? 0.8f * sqrtf(dx * dx + dy * dy + dz * dz) / ext[p] : 0.0f;
+            w[i * 3 + 1] = ph[p];
+            w[i * 3 + 2] = sqrtf(q[0] * q[0] + q[2] * q[2]) / rmax;
+        }
+        bmax = DG_MAX(bmax, w[i * 3 + 2]);
+    }
+    meta->branch_scale = bmax > 1e-3f ? 1.0f / bmax : 1.0f;
+    for (size_t i = 0; i < n; i++)
+        c->v[i].col = unorm8(w[i * 3]) | unorm8(w[i * 3 + 1]) << 8 | unorm8(w[i * 3 + 2] * meta->branch_scale) << 16 | 0xFF000000u;
+    free(w), free(att), free(ext), free(ph);
+}
+
+bool vgeo_tree_import(const VgTreeSpecies *sp, const char *dir, VgFoliageMesh *out, VgTree *meta, char *err, int err_size) {
+    memset(out, 0, sizeof(*out));
+    TreeCorners c;
+    if (!tree_load(sp, dir, &c, meta, err, err_size)) return false;
+    tree_wind_weights(&c, meta, sp->infer_wind);
+    // deduplicate the corners (position, normal, uv and wind weights)
+    size_t nv = c.n;
+    ufbx_vertex_stream st = { c.v, nv, sizeof(TreeVert) };
     u32 *idx = (u32 *)malloc(sizeof(u32) * nv);
     ufbx_error ge;
     size_t nu = ufbx_generate_indices(&st, 1, idx, nv, NULL, &ge);
-    // wind weights: R trunk sway grows with height, G branch bounce with the distance from the trunk
-    // (none near the ground), B flutter on the cards (a vertex shared by bark and a card is bark)
     out->vertex_count = (u32)nu;
     out->index_count = (u32)nv;
     out->material_count = meta->material_count;
@@ -291,21 +601,15 @@ bool vgeo_tree_import(const VgTreeSpecies *sp, const char *dir, VgFoliageMesh *o
     out->uv = (float *)malloc(sizeof(float) * 2 * nu);
     out->color = (u32 *)malloc(sizeof(u32) * nu);
     out->indices = idx;
-    out->tri_material = tmat;
-    u8 *card = (u8 *)calloc(nu, 1);
-    for (size_t i = 0; i < nv; i++) card[idx[i]] |= meta->masked[tmat[i / 3]] ? 1 : 2;
+    out->tri_material = c.tmat;
+    c.tmat = NULL;
     for (size_t i = 0; i < nu; i++) {
-        memcpy(out->pos + i * 3, v[i].p, 12);
-        memcpy(out->normal + i * 3, v[i].n, 12);
-        memcpy(out->uv + i * 2, v[i].uv, 8);
-        float y = v[i].p[1], r = sqrtf(v[i].p[0] * v[i].p[0] + v[i].p[2] * v[i].p[2]);
-        float wr = powf(DG_CLAMP(y / height, 0.0f, 1.0f), 1.5f);
-        float wg = powf(DG_CLAMP(r / rmax, 0.0f, 1.0f), 1.3f) * smooth01(y / (0.25f * height));
-        float wb = card[i] == 1 ? 1.0f : 0.0f;
-        out->color[i] = (u32)(wr * 255.0f + 0.5f) | (u32)(wg * 255.0f + 0.5f) << 8 | (u32)(wb * 255.0f + 0.5f) << 16 | 0xFFu << 24;
+        memcpy(out->pos + i * 3, c.v[i].p, 12);
+        memcpy(out->normal + i * 3, c.v[i].n, 12);
+        memcpy(out->uv + i * 2, c.v[i].uv, 8);
+        out->color[i] = c.v[i].col;
     }
-    free(card);
-    free(v);
+    corners_free(&c);
     out->vcap = out->vertex_count;
     out->icap = out->index_count;
     return true;
@@ -448,6 +752,8 @@ bool vgeo_tree_load_or_build(const VgTreeSpecies *sp, const char *dir, const cha
 void vgeo_tree_materials(const VgTree *t, VgMaterial out[VG_TREE_MAX_MATERIALS]) {
     const VgTreeSpecies *sp = t->sp;
     memset(out, 0, sizeof(VgMaterial) * VG_TREE_MAX_MATERIALS);
+    VgWindParams w;
+    vgeo_tree_wind(sp, &w);
     for (u32 k = 0; k < VG_TREE_MAX_MATERIALS; k++) {
         VgMaterial *m = &out[k];
         m->color[0] = m->color[1] = m->color[2] = m->color[3] = 1.0f;   // the textures carry the colour
@@ -458,11 +764,9 @@ void vgeo_tree_materials(const VgTree *t, VgMaterial out[VG_TREE_MAX_MATERIALS])
             m->flags |= VGM_MASKED | VGM_TWO_SIDED;
             m->alpha_cutoff = 0.5f;
         }
-        m->wpo = WPO_TREE;
-        m->wpo_params[0] = sp->sway;
-        m->wpo_params[1] = sp->branch;
-        m->wpo_params[2] = sp->flutter;
-        m->wpo_params[3] = 14.0f;   // full wind (m/s)
+        // flowers are walked through (the displacement buffer first); trees and bushes have trunk capsules
+        m->wpo = sp->role == VG_TREE_FLOWER ? (WPO_GRASS | WPO_DISPLACE) : WPO_TREE;
+        vgeo_wind_pack(&w, m->wpo_params, m->wind_params);
         m->fade_start = sp->fade_start;
         m->fade_end = sp->fade_end;
         m->shadow_max_dist = sp->shadow_max;

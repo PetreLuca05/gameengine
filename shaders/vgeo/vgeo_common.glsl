@@ -20,15 +20,19 @@ struct VgViewGpu {
     uvec4 caps0;             // nodes (per region), groups (per region), visible (per list), occluded
     uvec4 caps1;             // cells (per region), instances, requests, slot material base (skinned instances: materials[base + slot], ~0 none)
     mat4 raster_view_proj;   // the view the visible clusters are rasterised with (main view: jittered)
-    vec4 wind;               // foliage (Phase 7): direction x, z, strength (m/s), gust
+    vec4 wind;               // foliage (Phase 7): the wind field outside its tile: instant x, z, settled bend x, z (m/s)
     vec4 wind_prev;          // last frame's (velocity)
     vec4 foliage;            // time, previous time, r_foliage_density, r_vgeo_impostor_px
     vec4 disp;               // displacement buffer: texel 0 world x, z, metres per texel, valid
     uvec4 misc;              // x frame index (dither rotation), y displacement texture index, z / w float bits: fol_fade_max, fol_shadow_max
+    vec4 wind_tile;          // wind field tile: texel 0 world x, z, metres per texel, valid
+    vec4 wind_tile_prev;     // last frame's
+    uvec4 wind_misc;         // x tile texture, y last frame's tile texture, z layers (VGW_*), w debug view (VGWD_*)
 };
 struct VgMaterial {
     vec4 color; float roughness, metallic, emissive, tex_scale; uint flags; uint albedo_tex; uint mask_tex; float alpha_cutoff;
     uint wpo; float wpo_max, fade_start, fade_end; vec4 wpo_params; float shadow_max_dist; uint pad0, pad1, pad2;
+    vec4 wind_a, wind_b;     // wind_params[8]: height, main / detail / flutter Hz | tan(max bend), settle mix, response, 0
 };
 struct VgNode { vec4 sphere; float max_parent_error; uint first; uint count_flags; uint pad; };
 struct VgGroup { vec4 lod; float parent_error; uint page; uint first_count; uint level; };
@@ -104,7 +108,15 @@ struct VgPaletteSlot { uint first, prev_first, bone_count, pad0; float max_scale
 #define WPO_NONE 0u
 #define WPO_GRASS 1u
 #define WPO_TREE 2u
+#define WPO_BUSH 3u
 #define WPO_DISPLACE 256u
+#define VGW_MAIN 1u
+#define VGW_DETAIL 2u
+#define VGW_FLUTTER 4u
+#define VGW_NORMALS 8u
+#define VGWD_NONE 0u
+#define VGWD_CHANNELS 1u
+#define VGWD_BEND 2u
 #define VG_DISPLACE_MAX 0.6
 // Material / impostor / displacement textures (vgeo_tex.h): binding 23, renderer texture ids [0, 1024),
 // the vgeo module's own [1024, 1152).
@@ -183,7 +195,7 @@ VgXf vg_instance_xf(uint i) {
     x.pscale = unpackHalf2x16(in_.scale_mesh & 0xFFFFu).x;
     x.scale = x.pscale;
     x.mesh = in_.scale_mesh >> 16;
-    x.wpo = meshes[x.mesh].max_wpo;
+    x.wpo = meshes[x.mesh].max_wpo * max(x.pscale, 1.0);   // vg_wpo_margin
     x.fp = in_.flags_phase;
     x.skin = false;
     x.live = true;
@@ -240,7 +252,7 @@ float vg_foliage_alpha(VgMesh m, uint fp, float dist) {
 // impostor atlas whose world sphere (without the WPO margin) projects below r_vgeo_impostor_px across
 // draws its impostor quad, else its DAG cut. Never in orthographic (shadow) views. CPU mirror:
 // vgeo_use_impostor.
-bool vg_use_impostor(VgMesh m, vec4 s);
+bool vg_use_impostor(VgMesh m, vec4 s, float wpo);
 
 // Animated culling sphere of a skinned cluster (instance space) from its bone set at pool word w
 // (vgeo_gpu.h): the box around the union over its bones of AABB(palette[b] * box_b), conservative for
@@ -287,10 +299,10 @@ float vg_project_size(vec4 s) {
     return 2.0 * s.w * V.cam_pos.w / d;
 }
 
-bool vg_use_impostor(VgMesh m, vec4 s) {   // s: the WPO-inflated sphere; the switch measures the mesh's own size
+bool vg_use_impostor(VgMesh m, vec4 s, float wpo) {   // s: the WPO-inflated sphere (margin wpo = x.wpo); the switch measures the mesh's own size
     uint k = m.impostor_grid >> 16;   // the mesh's switch scale (1/16 units, 0 = 1x)
     float px = V.foliage.w * (k != 0u ? float(k) / 16.0 : 1.0);
-    return m.impostor != 0xFFFFFFFFu && V.foliage.w > 0.0 && (vg_flags() & VGV_ORTHO) == 0u && vg_project_size(vec4(s.xyz, s.w - m.max_wpo)) < px;
+    return m.impostor != 0xFFFFFFFFu && V.foliage.w > 0.0 && (vg_flags() & VGV_ORTHO) == 0u && vg_project_size(vec4(s.xyz, s.w - wpo)) < px;
 }
 
 // Per-pixel dither threshold in [0, 1) (interleaved gradient noise), rotated per frame for TAA.
