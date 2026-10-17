@@ -36,6 +36,7 @@ Windows, no admin; tools are portable, in `.toolchain/` (git-ignored).
 | FP camera, hold point | CAMERA_HOLDPOINT.md | src/player/{holdpoint,hands,camera_fp}.c |
 | Weapons, recoil, sway | RECOIL.md, ATTACHMENTS.md | src/gameplay/{weapons,recoil,items}.c, data/weapons |
 | Fire animation (gun-driven kick, mass model, hands / camera lag, punches; ONE global sway) | FIRE_ANIM.md | src/anim/fire_anim.c (pure), src/game/game_fire.c, src/player/sway.c, src/ui/fire_tuner.c, assets/weapons/{fire_poses,sway_global.json}; tests: test_fire_anim, tools/tests/fire_anim.cfg, sway_check / fire_compare / fire_bench |
+| Ballistics (projectiles, drag / wind / ricochet / penetration, crack / report timing, composed muzzle flash, tracers, energy impacts, range `bal_range`) | BALLISTICS.md | src/gameplay/ballistics (bal_sim / bal_surface / bal_acoustics / bal_muzzle / bal_tracer pure; bal_world, bal_fx), assets/ballistics, attachment `muzzle_device` blocks; tests: test_ballistics, tools/ballistics_ref.py, tools/tests/bal_range.cfg |
 | Render post / sky / time | RENDERING_POST.md, DAYNIGHT.md | src/render/{post,sky,graph}, game_post.c, game_daynight.c |
 | glTF PBR maps (metal-rough, normal, AO, emissive, MASK, doubleSided) | PBR.md | src/assets/assets.c gltf_material, shaders/pbr_maps.glsl, render.c draw_items (set 3), vg_resolve.glsl; test: tools/gen_pbr_test.py, tools/tests/pbr_shelf.cfg |
 | Engine Fidelity (Off .. Modern, bounds every graphics setting) | ENGINE_FIDELITY.md | assets/render/fidelity, src/render/fidelity, src/game/game_fidelity.c, scr_settings.c; tests: test_fidelity, tools/tests/run_fidelity_tests.py |
@@ -46,6 +47,7 @@ Windows, no admin; tools are portable, in `.toolchain/` (git-ignored).
 | Foliage wind (Crysis vegetation WPO, wind field, gust tile, fidelity tiers) | FOLIAGE_WIND.md | src/world/wind.c (pure), src/render/vgeo/foliage_wind.c, shaders/vgeo/wpo.glsl, src/game/game_wind.c, Tree It wind channels in src/render/vgeo/vgeo_tree.c; tests: test_wind, vgeo_foliage, tools/tests/wind.cfg |
 | Vehicles | VEHICLES.md | src/physics/phys_vehicle.c, src/gameplay/vehicle_def.c (pure), src/game/game_vehicles.c |
 | Light shadows | LIGHT_SHADOWS.md | src/render/vk_light_shadow.c, common.glsl point/spot_light_shadow |
+| Sun / moon shadows driven by the sky (softness, contrast, overcast cutoff, PCSS, cloud shadows, moon tile) | SHADOWS.md | src/render/shadow_sky.c (pure), src/game/game_shadow_sky.c, lit_body.glsl sh_tile, assets/render/shadows_sky.json; tests: test_shadow_sky, tools/tests/shadow_ref.py (dev room corner (-50, 0, -11)) |
 | Virtualized geometry | VGEO.md, VGEO_PLAN.md | src/render/vgeo, src/render/vk_vgeo.c, shaders/vgeo, tools/{build,bench}_vgeo |
 | no-nanite classic renderer (this branch: vgeo off) | NO_NANITE.md | src/render/vk_classic.c, shaders/classic_*, tools/tests/perf_compare.cfg |
 | Phone (equip = pairing, HUD phone panel, phone OS: portal / home / camera / gallery; the model shows no screen) | PHONE.md | src/gameplay/phone (phone_os.c pure), src/net/http_ws, src/render/phone_view.c, web/phone, assets/phone; tests: test_phone, tools/tests/phone_{flow,ws,screen}.py, phone_e2e.sh, phone_net.sh |
@@ -65,5 +67,6 @@ Hall at the origin. Other areas:
 - Sighting lane: east of the hall.
 - Flesh range: north.
 - Post corner: south-west.
+- Shadow reference corner: (−50, 0, −11), switches jump to `shadow_preset`s.
 
 Console: `help [filter]` lists commands, `cvarlist [filter]` lists cvars. New commands / cvars need a description and a category (assets/ui/command_categories.json; tools/tests/lint_commands.py).

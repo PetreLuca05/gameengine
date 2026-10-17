@@ -7,6 +7,7 @@
 #include "core/dgmath.h"
 #include "anim/anim_mesh.h"
 #include "render/post/post_settings.h"
+#include "render/shadow_sky.h"
 
 struct SDL_Window;
 
@@ -131,8 +132,9 @@ typedef struct RenderEnvironment {
     float clouds;       // cloud coverage 0..1
     // Physically based sky + time of day (game_daynight.c, src/render/sky): replaces the gradient
     // sky above and the hemispheric ambient (environment map + SH irradiance) when set. The key
-    // light (sun_dir / sun_color / sun_intensity: shadowed) is the sun by day, the moon at night;
-    // the other one is the unshadowed fill light.
+    // light (sun_dir / sun_color / sun_intensity: the cascades) is the sun while its disc is up,
+    // then the moon; the second light (fill_*) is the moon while the sun owns the cascades,
+    // shadowed in atlas tile 3 (shadow_sky.second_shadowed).
     bool atmosphere;
     vec3 sun_true_dir, moon_dir;        // towards the bodies
     float sun_illuminance;              // above the atmosphere (cloud loss applied)
@@ -141,17 +143,23 @@ typedef struct RenderEnvironment {
     float sun_size, moon_size;          // angular radius multipliers
     vec3 cel_x, cel_y, cel_z;           // world -> celestial rows (stars, milky way)
     float star_brightness, milky_way, night_floor;
-    float cloud_cover, cloud_altitude, cloud_scale, cloud_shadow_strength;
+    float cloud_cover, cloud_altitude, cloud_scale;
+    float cloud_shadow_tau;             // optical depth of a full cloud shadow texel (0 = no cloud shadows)
     vec2 cloud_offset;                  // wind drift (m)
     float cloud_density;                // weather: layer opacity 0..1 (0 = default 0.92)
     float cloud_softness;               // weather: edge softness 0..1 (fog-like stratus vs crisp cumulus)
     float cloud_darkness;               // weather: storm clouds darken 0..1
-    float ambient_scale;                // environment (SH + specular) multiplier
+    float ambient_scale;                // environment (SH + specular) multiplier: 1 = physical (daynight.json curve; docs/SHADOWS.md)
     float aerial_scale;                 // world distance multiplier of the aerial perspective
     float aerial_max;                   // m covered by the aerial perspective froxels
     float mie_scale;                    // aerosol density (haze / weather)
-    vec3 fill_dir, fill_color;          // unshadowed secondary directional light
+    vec3 fill_dir, fill_color;          // second directional light (the moon while the sun owns the cascades)
     float fill_intensity;
+    // Sky-driven shadows (shadow_sky.c, docs/SHADOWS.md): source radius, cutoff fade, wide mode,
+    // PCF steps, the moon tile. Not valid (levels without the time-of-day sky): a clear sun.
+    bool shadow_sky_valid;
+    ShadowSkyOut shadow_sky;
+    vec3 ground_albedo;                 // the sky probe's ground (snow / wet); 0 = default
     bool moon_key;                      // the key light is the moon
     int sky_debug;                      // sky_debug view (1 transmittance .. 6 aerial perspective)
 } RenderEnvironment;

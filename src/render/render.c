@@ -52,7 +52,10 @@ void render_register_cvars(void) {
     r->r_bloom_intensity = cvar_reg_float("r_bloom_intensity", 0.05f, 0.0f, 0.5f, CVAR_ARCHIVE, "bloom strength (energy conserving mix)");
     r->r_shadow_cascades = cvar_reg_int("r_shadow_cascades", 3, 1, 3, CVAR_ARCHIVE, "sun shadow cascades (1 .. 3)");
     r->r_shadow_distance = cvar_reg_float("r_shadow_distance", 1.0f, 0.25f, 1.0f, CVAR_ARCHIVE, "sun shadow reach (scale of the far cascades)");
-    r->r_shadow_filter = cvar_reg_int("r_shadow_filter", 2, 0, 2, CVAR_ARCHIVE, "sun shadow softness: 0 hard (1 tap), 1 PCF 3x3, 2 PCF 5x5 (at High shadow quality)");
+    r->r_shadow_filter = cvar_reg_int("r_shadow_filter", 2, 0, 2, CVAR_ARCHIVE,
+                                      "sun shadow filter (softness follows the sky, docs/SHADOWS.md): 0 PCF in 3 steps, 1 PCSS (limited radius), 2 full PCSS + wide mode");
+    r->r_shadow_debug = cvar_reg_int("r_shadow_debug", 0, 0, 5, 0,
+                                     "sky-driven shadow views: 1 readout (sun vs sky irradiance, contrast, source radius, mode), 2 penumbra width, 3 blocker distance, 4 cascade / mode, 5 cloud shadow");
     r->r_stretch = cvar_reg_float("r_stretch", 0.0f, 0.0f, 1.0f, CVAR_ARCHIVE,
                                   "stretched resolution simulator: 0 normal .. 1 extreme (the 3D view squeezed into a narrower aspect, stretched to the screen)");
     r->r_shadow_min_radius = cvar_reg_float("r_shadow_min_radius", 0.0f, 0.0f, 4.0f, CVAR_ARCHIVE, "props smaller than this radius (m) cast no sun shadow");
@@ -1033,7 +1036,7 @@ static void compute_matrices(FrameData *fd) {
     for (int k = 0; k < 3; k++) radii[k] = all_radii[ncasc == 1 ? 1 : k];
     vec3 fwd = v3_norm(v3(-sinf(c->yaw), 0, -cosf(c->yaw)));
     u32 tile = R->shadow_size / 2;
-    float bias[3];
+    float bias[3], span[3];
     for (int k = 0; k < ncasc; k++) {
         float r = radii[k];
         vec3 center = v3_madd(c->pos, fwd, r * 0.35f);
@@ -1050,6 +1053,7 @@ static void compute_matrices(FrameData *fd) {
         float reach = 3000.0f;
         mat4 lproj = mat4_ortho(cl.x - r, cl.x + r, cl.y - r, cl.y + r, -cl.z - reach, -cl.z + depth_range);
         bias[k] = (2.0f * depth_range) / (reach + depth_range);
+        span[k] = reach + depth_range;   // metres of light-space depth per NDC unit (PCSS blocker distance)
         // NDC -> the cascade's atlas tile (x right, y down in the atlas).
         mat4 t = mat4_identity();
         t.m[0] = 0.5f;
@@ -1062,6 +1066,7 @@ static void compute_matrices(FrameData *fd) {
     for (int k = ncasc; k < 3; k++) {
         R->shadow_vps[k] = R->shadow_vps[ncasc - 1];
         bias[k] = bias[ncasc - 1];
+        span[k] = span[ncasc - 1];
         radii[k] = radii[ncasc - 1];
     }
     // A shortened reach fades the shadow out over the last 15 % of the last cascade (w = its radius).
@@ -1069,6 +1074,53 @@ static void compute_matrices(FrameData *fd) {
     R->shadow_splits = v4(radii[0], radii[1], radii[2], (float)ncasc);
     R->shadow_bias = v4(bias[0], bias[1], bias[2], fade ? radii[ncasc - 1] : 0.0f);
     R->shadow_vp = R->shadow_vps[2];
+
+    // Sky-driven shadows (shadow_sky.c, docs/SHADOWS.md): which atlas tiles are drawn (none under
+    // the sky cutoff, no cascade 0 in wide mode, tile 3 for the moon while the sun owns the
+    // cascades), the filter's units. Levels without the time-of-day sky: a clear sun, always cast.
+    const ShadowSkyOut *ss = e->shadow_sky_valid ? &e->shadow_sky : NULL;
+    bool shadows_on = R->r_shadow_quality->i > 0;
+    bool key_cast = !ss || ss->key.cast;
+    float near_w = ss ? ss->near_weight : 1.0f;
+    for (int k = 0; k < 3; k++) R->shadow_active[k] = shadows_on && key_cast && k < ncasc && !(k == 0 && ncasc >= 2 && near_w <= 0.0f);
+    float moon_fade = ss && ss->second_shadowed && e->fill_intensity > 0.0f ? ss->second.fade : 0.0f;
+    R->shadow_active[3] = shadows_on && moon_fade > 0.0f;
+    float moon_r = all_radii[1], moon_span = span[0];
+    if (R->shadow_active[3]) {
+        // One square tile around the camera (the middle cascade's size) along the moon, snapped.
+        vec3 L2 = v3_norm(e->fill_dir);
+        vec3 up2 = fabsf(L2.y) > 0.99f ? v3(0, 0, 1) : v3(0, 1, 0);
+        mat4 mview = mat4_look_at(v3(0, 0, 0), v3_neg(L2), up2);
+        vec3 cl = mat4_mul_point(mview, v3_madd(c->pos, fwd, moon_r * 0.35f));
+        float texel = (2.0f * moon_r) / (float)tile;
+        cl.x = floorf(cl.x / texel) * texel;
+        cl.y = floorf(cl.y / texel) * texel;
+        float depth_range = fmaxf(moon_r * 4.0f, 120.0f), reach = 3000.0f;
+        mat4 lproj = mat4_ortho(cl.x - moon_r, cl.x + moon_r, cl.y - moon_r, cl.y + moon_r, -cl.z - reach, -cl.z + depth_range);
+        moon_span = reach + depth_range;
+        mat4 t = mat4_identity();
+        t.m[0] = 0.5f;
+        t.m[5] = 0.5f;
+        t.m[12] = 0.5f;
+        t.m[13] = 0.5f;
+        R->shadow_vp_moon = mat4_mul(t, mat4_mul(lproj, mview));
+    }
+    {
+        int model = ss ? ss->filter_model : DG_CLAMP(R->r_shadow_filter->i, 0, 2);
+        float key_r = ss ? ss->key.radius_deg : 0.265f, moon_rad = ss ? ss->second.radius_deg : 0.26f;
+        static const float k_max_tex[3] = { 2.0f, 6.0f, 32.0f };
+        fd->shadow_vp_moon = R->shadow_vp_moon;
+        fd->ssky0 = v4(tanf(key_r * DG_DEG2RAD), ss ? ss->key.fade : 1.0f, near_w, (float)model);
+        fd->ssky1 = v4(ss ? ss->pcf_radius : (float)model, ss ? ss->pcss_max_texels : k_max_tex[model], ss ? ss->pcss_search_m : 30.0f, R->shadow_active[3] ? moon_fade : 0.0f);
+        // Contact shadows: rays only as long as the penumbra stays under contact_px pixels (a soft
+        // source has a sharp contact zone that is short); 0.35 m is the clear-sun length.
+        float px8 = 8.0f * 2.0f * tanf(c->fov_deg * DG_DEG2RAD * 0.5f) / (float)DG_MAX(R->hdr.h, 1u);
+        float pen_len = (ss ? ss->contact_px : 1.5f) * px8 / fmaxf(2.0f * tanf(key_r * DG_DEG2RAD), 1e-5f);
+        R->contact_scale = clampf(pen_len / 0.35f, 0.1f, 1.0f);
+        fd->ssky2 = v4(tanf(moon_rad * DG_DEG2RAD), (float)R->r_shadow_debug->i, R->contact_scale, moon_r);
+        fd->shadow_mpt = v4(2.0f * radii[0] / (float)tile, 2.0f * radii[1] / (float)tile, 2.0f * radii[2] / (float)tile, 2.0f * moon_r / (float)tile);
+        fd->shadow_span = v4(span[0], span[1], span[2], moon_span);
+    }
 
     fd->view_proj = mat4_mul(R->proj_j, R->view);
     fd->view = R->view;
@@ -1094,9 +1146,8 @@ static void compute_matrices(FrameData *fd) {
     // Volumetric fog replaces the analytic per-pixel fog of the lit shaders.
     bool vol = post_settings()->volumetrics > 0 && fg_pass_enabled("vol_inject");
     fd->fog = v4(e->fog_color.x, e->fog_color.y, e->fog_color.z, vol ? 0.0f : e->fog_density);
-    int pcf = DG_MIN(R->r_shadow_filter->i, R->r_shadow_quality->i >= 3 ? 2 : 1);   // 0 = hard (one bilinear compare)
-    if (e->atmosphere && e->cloud_cover > 0.65f) pcf++;   // weather: overcast skies soften the shadows
-    fd->params = v4(R->r_grid->i ? 1.0f : 0.0f, 1.0f / (float)R->shadow_size, (float)pcf, 0.0f);
+    // z: unused (the filter follows the sky: ssky0 / ssky1)
+    fd->params = v4(R->r_grid->i ? 1.0f : 0.0f, 1.0f / (float)R->shadow_size, 0.0f, 0.0f);
     fd->screen = v4((float)R->hdr.w, (float)R->hdr.h, 1.0f / (float)R->hdr.w, 1.0f / (float)R->hdr.h);
     {
         // Time-of-day sky: fill light, environment / SH ambient, cloud shadow (lit shaders).
@@ -1970,9 +2021,12 @@ void render_end_frame(void) {
         if (R->r_shadow_quality->i > 0) {
             // One atlas tile per cascade (the cascade index rides in the push constants). The
             // cascade matrices already map into their tile: full viewport, scissored to the tile.
+            // Tiles the sky does not need are skipped (compute_matrices: under the cutoff, wide
+            // mode's cascade 0); tile 3 is the moon's (SHADOW_PASS_MOON).
             u32 tile = R->shadow.w / 2;
             g_shadow_min_radius = R->r_shadow_min_radius->f;
-            for (int k = 0; k < DG_CLAMP(R->r_shadow_cascades->i, 1, 3); k++) {
+            for (int k = 0; k < 4; k++) {
+                if (!R->shadow_active[k]) continue;
                 VkViewport vp = { 0.0f, 0.0f, (float)R->shadow.w, (float)R->shadow.h, 0.0f, 1.0f };
                 VkRect2D sc = { { (int)((k & 1) * tile), (int)((k >> 1) * tile) }, { tile, tile } };
                 vkCmdSetViewport(cmd, 0, 1, &vp);
@@ -1980,7 +2034,7 @@ void render_end_frame(void) {
                 vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_SHADOW]);
                 vkCmdSetDepthBias(cmd, 1.25f, 0.0f, 1.75f);
                 vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 0, 1, &f->frame_set, 0, NULL);
-                g_shadow_cascade = (u32)k;
+                g_shadow_cascade = k == 3 ? SHADOW_PASS_MOON : (u32)k;
                 draw_items(cmd, R->draws, R->draw_count, true, false, 0, PIPE_SHADOW);
                 vkg_draw_shadow(cmd, (u32)k);
                 vkc_draw_shadow(cmd, (u32)k);
@@ -1990,7 +2044,7 @@ void render_end_frame(void) {
                     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_SKIN_SHADOW]);
                     PushLit pc;
                     memset(&pc, 0, sizeof(pc));
-                    pc.flags[3] = (u32)k;
+                    pc.flags[3] = g_shadow_cascade;
                     vkCmdPushConstants(cmd, R->layout_lit, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushLit), &pc);
                     draw_skin_pass(cmd, &skin_shadow);
                 }

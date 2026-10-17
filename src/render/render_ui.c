@@ -37,9 +37,35 @@ typedef struct Ui3dJob {
 
 typedef struct Readback {
     GpuBuffer buf;
-    int size;
+    int size;   // the PNG's size
+    int src;    // the read-back target's size (a multiple of size: box-filtered down on the CPU)
     char path[256];
 } Readback;
+
+// Box filter of a square RGBA8 image by an integer factor, in premultiplied alpha (no dark fringes
+// where the transparent background is averaged in). Icons bake at 4x and come out antialiased.
+static void downsample_box(const u8 *src, int sw, u8 *dst, int dw) {
+    int f = sw / dw;
+    for (int y = 0; y < dw; y++)
+        for (int x = 0; x < dw; x++) {
+            float r = 0, g = 0, b = 0, a = 0;
+            for (int j = 0; j < f; j++)
+                for (int i = 0; i < f; i++) {
+                    const u8 *p = src + ((size_t)(y * f + j) * sw + (size_t)(x * f + i)) * 4;
+                    float pa = p[3] / 255.0f;
+                    r += p[0] * pa;
+                    g += p[1] * pa;
+                    b += p[2] * pa;
+                    a += pa;
+                }
+            u8 *o = dst + ((size_t)y * dw + x) * 4;
+            float inv = a > 0 ? 1.0f / a : 0.0f;
+            o[0] = (u8)DG_CLAMP((int)(r * inv + 0.5f), 0, 255);
+            o[1] = (u8)DG_CLAMP((int)(g * inv + 0.5f), 0, 255);
+            o[2] = (u8)DG_CLAMP((int)(b * inv + 0.5f), 0, 255);
+            o[3] = (u8)DG_CLAMP((int)(a / (float)(f * f) * 255.0f + 0.5f), 0, 255);
+        }
+}
 
 static struct {
     // backdrop
@@ -275,9 +301,25 @@ static void exec_ui3d(VkCommandBuffer cmd, void *u) {
                               VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
                               VK_ACCESS_2_SHADER_SAMPLED_READ_BIT, 1);
         }
-        if (png) {
+        int full = (int)t->color.w;
+        int ps = DG_CLAMP(j->v.png_size > 0 ? j->v.png_size : full, 8, 512);
+        if (png && full > ps && full % ps == 0 && full == (int)t->color.h) {
+            // Supersampled bake: the whole target to the CPU, box-filtered there (render_ui_frame_done).
+            Readback *rb = &UR.rb[UR.rb_count++];
+            rb->size = ps;
+            rb->src = full;
+            dg_strcpy(rb->path, sizeof(rb->path), j->png_path);
+            rb->buf = vkr_buffer_create_readback((VkDeviceSize)full * full * 4);
+            VkBufferImageCopy region = { 0 };
+            region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            region.imageSubresource.layerCount = 1;
+            region.imageExtent.width = (u32)full;
+            region.imageExtent.height = (u32)full;
+            region.imageExtent.depth = 1;
+            vkCmdCopyImageToBuffer(cmd, t->color.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, rb->buf.buffer, 1, &region);
+        } else if (png) {
             ensure_bake();
-            int s = DG_CLAMP(j->v.png_size > 0 ? j->v.png_size : (int)t->color.w, 8, 512);
+            int s = ps;
             vkr_image_barrier(cmd, UR.bake.image, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
                               VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_READ_BIT, VK_PIPELINE_STAGE_2_TRANSFER_BIT,
                               VK_ACCESS_2_TRANSFER_WRITE_BIT, 1);
@@ -287,6 +329,7 @@ static void exec_ui3d(VkCommandBuffer cmd, void *u) {
                               VK_ACCESS_2_TRANSFER_READ_BIT, 1);
             Readback *rb = &UR.rb[UR.rb_count++];
             rb->size = s;
+            rb->src = s;
             dg_strcpy(rb->path, sizeof(rb->path), j->png_path);
             rb->buf = vkr_buffer_create_readback((VkDeviceSize)s * s * 4);
             VkBufferImageCopy region = { 0 };
@@ -370,7 +413,16 @@ void render_ui_frame_done(void) {
     for (int i = 0; i < UR.rb_count; i++) {
         Readback *rb = &UR.rb[i];
         vmaInvalidateAllocation(R->vma, rb->buf.alloc, 0, VK_WHOLE_SIZE);
-        if (stbi_write_png(rb->path, rb->size, rb->size, 4, rb->buf.mapped, rb->size * 4)) log_debug("ui: wrote %s", rb->path);
+        const u8 *px = (const u8 *)rb->buf.mapped;
+        u8 *small = NULL;
+        if (rb->src > rb->size) {
+            small = (u8 *)malloc((size_t)rb->size * rb->size * 4);
+            downsample_box(px, rb->src, small, rb->size);
+            px = small;
+        }
+        bool ok = stbi_write_png(rb->path, rb->size, rb->size, 4, px, rb->size * 4) != 0;
+        free(small);
+        if (ok) log_debug("ui: wrote %s", rb->path);
         else log_error("ui: failed to write %s", rb->path);
         vkr_buffer_destroy_now(&rb->buf);
     }

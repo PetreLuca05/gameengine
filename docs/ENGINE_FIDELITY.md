@@ -76,11 +76,12 @@ era preset (`r_era`): `era x3` = three times the era's own error threshold, also
 | `shadow_quality` | 1, max 1 | 1, max 1 | 1, max 2 | 2, max 3 | 2, max 3 |
 | `shadow_cascades` | 1, max 1 | 2, max 2 | 3, max 3 | 3, max 3 | 3, max 3 |
 | `shadow_distance` | 0.5, max 0.5 | 0.5, max 0.6 | 0.75, max 0.85 | 0.75, max 1 | 1, max 1 |
-| `shadow_filter` | 0, max 0 | 0, max 0 | 1, max 1 | 1, max 2 | 2, max 2 |
+| `shadow_filter` | 0, max 0 | 0, max 0 | 1, max 1 | 2, max 2 | 2, max 2 |
 | `shadow_min_radius` | 1, min 1 | 0.5, min 0.5 | 0.25, min 0 | 0, min 0 | 0, min 0 |
 | `light_shadows` | - | off | on | on | on |
 | `light_shadow_quality` | 1, max 1 | 1, max 1 | 1, max 1 | 2, max 2 | 2, max 2 |
 | `cloud_shadows` | - | off | on | on | on |
+| `moon_shadows` | - | - | off | on | on |
 | `texture_quality` | 0, max 0 | 0, max 0 | 1, max 1 | 2, max 2 | 2, max 2 |
 | `aniso` | 1, {1,2} | 2, {1,2,4} | 4, {1,2,4,8} | 8, {1,2,4,8,16} | 8, {1,2,4,8,16} |
 | `vgeo` | on | on | on | on | on |
@@ -131,10 +132,10 @@ Budgets (1080p, mid-range GPU): Off 3 ms, Low 5 ms, Medium 8 ms, High 12 ms, Mod
 | aa | `r_aa` (0 off, 1 FXAA, 2 SMAA, 3 TAA) | | shadow_quality | `r_shadow_quality` (0 off, 1 1024, 2 2048, 3 4096) |
 | upscaler | `r_upscaler` (0 off, 1 TAA-U, 2 FSR 1, 3 / 4 slots) | | shadow_cascades | `r_shadow_cascades` (1 .. 3) **new** |
 | upscale_ratio | `r_upscale_ratio` | | shadow_distance | `r_shadow_distance` (reach of the far cascades) **new** |
-| render_scale | `r_render_scale` | | shadow_filter | `r_shadow_filter` (0 hard, 1 PCF 3x3, 2 PCF 5x5) **new** |
+| render_scale | `r_render_scale` | | shadow_filter | `r_shadow_filter` (filter model, softness follows the sky: 0 PCF in 3 steps, 1 PCSS limited, 2 full PCSS + wide mode; docs/SHADOWS.md) |
 | sharpen | `r_sharpen` | | shadow_min_radius | `r_shadow_min_radius` (m) **new** |
 | ao / contact_shadows | `r_ao` / `r_contact_shadows` | | light_shadows / _quality | `r_light_shadows` / `r_light_shadow_quality` |
-| ssr / ssgi | `r_ssr` / `r_ssgi` | | cloud_shadows | `r_cloud_shadows` |
+| ssr / ssgi | `r_ssr` / `r_ssgi` | | cloud_shadows / moon_shadows | `r_cloud_shadows` / `r_moon_shadows` **new** |
 | puddle_reflections | `r_puddle_reflections` | | texture_quality / aniso | `r_texture_quality` / `r_aniso` |
 | volumetrics | `r_volumetrics` | | vgeo, vgeo_error_px, vgeo_shadow_error_px, vgeo_lod_px | `r_vgeo`, `r_vgeo_error_px`, `r_vgeo_shadow_error_px`, `r_vgeo_lod_px` |
 | vol_local_lights | `r_vol_local_lights` **new** | | foliage_density / foliage_wind / impostor_px | `r_foliage_density` / `r_foliage_wind` (0 none, 1 main bending, 2 + branches, 3 + leaf flutter, bent normals; docs/FOLIAGE_WIND.md) / `r_vgeo_impostor_px` |
@@ -250,9 +251,11 @@ extension velocity is always written and the log says so).
 `r_shadow_cascades` 1 .. 3 (1: the middle cascade alone, 2: near + middle; the unused atlas tiles
 aren't drawn, vgeo doesn't cull them), `r_shadow_distance` scales the far cascades (the near one
 stays 12 m) and, below 1 or with fewer than 3 cascades, fades the shadow out over the last 15 % of
-the last cascade (`shadow_bias.w`), `r_shadow_filter` caps the PCF kernel (0 = one hardware
-compare), `r_shadow_min_radius` skips sun shadow casters smaller than the radius. Modern keeps the
-pre-existing behaviour exactly (3 cascades, full reach, PCF from the shadow quality).
+the last cascade (`shadow_bias.w`), `r_shadow_filter` picks the filter model (the softness itself
+follows the sky, docs/SHADOWS.md: 0 PCF in 3 steps by the source radius, 1 PCSS with a 6-texel
+limit, 2 full PCSS + wide mode), `r_moon_shadows` gives the moon atlas tile 3 while the sun still
+owns the cascades, `r_shadow_min_radius` skips sun shadow casters smaller than the radius. The 2010
+era keeps fixed-hardness PCF; its shadows still lighten and vanish with the sky.
 
 ## Era axis
 

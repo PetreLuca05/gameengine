@@ -44,7 +44,7 @@ void tod_config_default(TodConfig *c) {
     static const float stars[] = { 0, 1.0f, 4.5f, 1.0f, 6.0f, 0.0f, 19.5f, 0.0f, 21.5f, 1.0f };
     static const float moon[] = { 0, 1.8f };
     static const float sun[] = { 0, 1.6f };
-    static const float amb[] = { 0, 1.6f };
+    static const float amb[] = { 0, 1.0f };   // 1 = physical (docs/SHADOWS.md): sun and sky share one atmosphere
     curve_set(&c->curves[TOD_FOG_DENSITY], 7, fog);
     curve_set(&c->curves[TOD_EXPOSURE_COMP], 6, expc);
     curve_set(&c->curves[TOD_CLOUD_COVER], 3, cloud);

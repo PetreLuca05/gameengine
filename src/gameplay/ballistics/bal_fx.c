@@ -29,7 +29,7 @@ static struct {
     u32 smoke_h[BAL_POOL];
     int em_head, em_tail;
     u32 lib_rev;
-    Cvar *vfx_quality, *ignition, *shutter, *trace, *vapor;
+    Cvar *vfx_quality, *ignition, *shutter, *trace, *vapor, *timescale;
     double next_trace;
     // muzzle_preview: a flash every 0.8 s in front of the camera, seen from the side, in slow motion.
     bool preview;
@@ -248,8 +248,9 @@ void bal_fx_frame(World *w, vec3 cam, float dt) {
     }
     const BalData *data = bal_data();
     bool arcade = cv(&F.ignition, "bal_tracer_ignition", 1) == 0.0f;
+    // Shutter: the frame's time in the simulation's clock (slow motion shortens the streak).
     float shutter = cv(&F.shutter, "shutter_preview", 0);
-    if (shutter <= 0.0f) shutter = clampf(dt, 1.0f / 240.0f, 1.0f / 20.0f);
+    if (shutter <= 0.0f) shutter = clampf(dt, 1.0f / 240.0f, 1.0f / 20.0f) * cv(&F.timescale, "host_timescale", 1.0f);
     // Night: the scene is exposed for darkness (the tracers light their surroundings).
     bool night = daynight_daylight() < 0.2f;
     struct { float d; vec3 pos; vec3 col; float k; } lights[TRACER_LIGHTS];
@@ -309,8 +310,8 @@ void bal_fx_frame(World *w, vec3 cam, float dt) {
         }
         vec3 rgb = bal_tracer_rgb(c->tracer.color);
         vec4 col = v4(rgb.x * k, rgb.y * k, rgb.z * k, 1.0f);
-        // Width: a few cm, never thinner than ~1.5 px so a distant tracer stays visible.
-        float width = fmaxf(0.03f, cam_d * 0.0016f);
+        // Width: a few cm, never thinner than ~2 px so a distant tracer stays visible.
+        float width = fmaxf(0.03f, cam_d * 0.003f);
         float streak = fminf(bal_tracer_streak(speed, shutter), fmaxf(l->b.dist, 0.5f));
         if (F.em_head >= 0) vfx_game_push_sprite(F.em_head, v3_madd(head, dir, -streak), v3_scale(dir, streak), width, col);
         // Tail: the last tick positions (curved by gravity / wind), fading.

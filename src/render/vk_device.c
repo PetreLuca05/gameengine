@@ -441,18 +441,23 @@ void vkd_create_shadow_map(u32 size) {
     R->shadow_size = size;
     for (int i = 0; i < FRAMES_IN_FLIGHT; i++) {
         if (!R->frames[i].frame_set) continue;
-        VkDescriptorImageInfo ii = { R->sampler_shadow, R->shadow.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+        // 1: compare sampler (PCF taps), 15: raw depth (PCSS blocker search).
+        VkDescriptorImageInfo ii[2] = { { R->sampler_shadow, R->shadow.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL },
+                                        { R->sampler_depth, R->shadow.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL } };
         VkDescriptorSet sets[FRAME_SET_COUNT];
         frame_sets_of(&R->frames[i], sets);
         for (int k = 0; k < FRAME_SET_COUNT; k++) {
             if (!sets[k]) continue;
-            VkWriteDescriptorSet w = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
-            w.dstSet = sets[k];
-            w.dstBinding = 1;
-            w.descriptorCount = 1;
-            w.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-            w.pImageInfo = &ii;
-            vkUpdateDescriptorSets(R->device, 1, &w, 0, NULL);
+            VkWriteDescriptorSet w[2];
+            for (int b = 0; b < 2; b++) {
+                w[b] = (VkWriteDescriptorSet){ VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+                w[b].dstSet = sets[k];
+                w[b].dstBinding = b ? 15 : 1;
+                w[b].descriptorCount = 1;
+                w[b].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+                w[b].pImageInfo = &ii[b];
+            }
+            vkUpdateDescriptorSets(R->device, 2, w, 0, NULL);
         }
     }
 }

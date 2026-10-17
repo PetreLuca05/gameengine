@@ -133,6 +133,7 @@ typedef struct GpuPointLight { vec4 pos_radius; vec4 color_intensity; } GpuPoint
 typedef struct GpuSpotLight { mat4 vp; vec4 pos_range; vec4 dir_cos; vec4 color_intensity; vec4 params; } GpuSpotLight;
 #define MAX_SPOT_LIGHTS 4
 #define LOCAL_SHADOW_TILES 64     // local light shadow atlas: 8 x 8 tiles (6 per point light, 1 per spot)
+#define SHADOW_PASS_MOON 0x10000u // shadow pass view index of the moon tile (shaders/common.glsl)
 typedef struct FrameData {
     mat4 view_proj, view, proj, vm_proj, shadow_vp;
     mat4 view_proj_nj, prev_view_proj_nj, vm_view_proj_nj, prev_vm_view_proj_nj;
@@ -142,7 +143,7 @@ typedef struct FrameData {
     vec4 fill_color;      // rgb
     vec4 sky_flags;       // x environment + SH valid, y ambient scale, z environment mips, w cloud shadow valid
     vec4 cshadow;         // xy cloud shadow origin (world xz), z 1 / size
-    mat4 shadow_vps[3];   // cascaded shadow maps: world -> atlas tile (2 x 2 atlas, tile 3 unused)
+    mat4 shadow_vps[3];   // cascaded shadow maps: world -> atlas tile (2 x 2 atlas, tile 3: the moon, shadow_vp_moon)
     vec4 shadow_splits;   // x, y, z: cascade radii (m), w: cascade count
     vec4 shadow_bias;     // x, y, z: per-cascade depth bias scale (constant bias in metres)
     vec4 spot_info;       // x spot light count, y cookie valid
@@ -165,6 +166,13 @@ typedef struct FrameData {
     // 1 / spacing, samples per side (0 = no map); y of surf_info: layers loaded (0 = untextured).
     vec4 surf_map;
     vec4 surf_info;
+    // Sky-driven shadows (shadow_sky.c, docs/SHADOWS.md).
+    mat4 shadow_vp_moon;  // world -> atlas tile 3 (the moon while the sun owns the cascades)
+    vec4 ssky0;           // x tan(key source radius), y cast fade, z cascade 0 weight (0: wide mode), w softness model (0 PCF steps, 1 PCSS limited, 2 full)
+    vec4 ssky1;           // x PCF radius (texels, model 0 / era), y PCSS max filter half width (texels), z blocker search (m), w moon tile fade (0 = off)
+    vec4 ssky2;           // x tan(moon source radius), y r_shadow_debug view, z contact shadow length scale, w moon tile fade-out radius (m)
+    vec4 shadow_mpt;      // metres per texel: cascades 0..2, w the moon tile
+    vec4 shadow_span;     // metres of light-space depth per NDC unit: cascades 0..2, w the moon tile
 } FrameData;
 
 typedef struct PushLit {
@@ -237,6 +245,7 @@ typedef struct Renderer {
     VkSampler sampler_linear;   // material textures (aniso)
     VkSampler sampler_clamp;    // post / ui
     VkSampler sampler_shadow;   // compare
+    VkSampler sampler_depth;    // nearest, no compare (PCSS blocker search)
 
     FrameResources frames[FRAMES_IN_FLIGHT];
     u32 frame_slot;
@@ -308,6 +317,8 @@ typedef struct Renderer {
     mat4 shadow_vps[3];
     vec4 shadow_splits;
     vec4 shadow_bias;
+    mat4 shadow_vp_moon;                        // atlas tile 3 (shadow_active[3])
+    bool shadow_active[4];                      // shadow atlas tiles drawn this frame: cascades 0..2, the moon tile
     // temporal state (TAA / motion blur / velocity)
     mat4 proj_j, vm_proj_j;                     // jittered projections (this frame)
     mat4 view_proj_nj, prev_view_proj_nj, vm_view_proj_nj, prev_vm_view_proj_nj;
@@ -339,6 +350,8 @@ typedef struct Renderer {
     Cvar *r_aa, *r_brightness, *r_gamma, *r_grid, *r_vignette, *r_shader_hotreload, *r_culling;
     Cvar *r_vm_fov, *r_cpu_skinning, *r_bloom, *r_bloom_intensity, *r_hdr_output;
     Cvar *r_shadow_cascades, *r_shadow_distance, *r_shadow_filter, *r_shadow_min_radius;   // Engine Fidelity shadow tiers
+    Cvar *r_shadow_debug;       // sky-driven shadow views (docs/SHADOWS.md)
+    float contact_scale;        // contact shadow ray length scale (penumbra-limited, compute_matrices)
     Cvar *r_stretch;   // stretched resolution simulator (0 normal .. 1 extreme)
     float exposure_boost;
     u32 aniso_mod, texq_mod;
@@ -429,7 +442,7 @@ bool vkg_wants_occluders(void);        // render.c adds vgeo_occluders (static l
 void vkg_graph_cull_pass2(int depth_res);   // this frame's Hi-Z (vgeo + static occluders), pass 2 cull + raster
 void vkg_graph_hiz(int depth_res, int velocity_res);     // frame graph, after the prepass: this frame's Hi-Z (next frame's history)
 void vkg_record_shadow_cull(VkCommandBuffer cmd);   // before the shadow pass: cascade views
-void vkg_draw_shadow(VkCommandBuffer cmd, u32 cascade);   // inside the shadow pass, per cascade tile
+void vkg_draw_shadow(VkCommandBuffer cmd, u32 cascade);   // inside the shadow pass, per cascade tile (3 = the moon tile)
 void vkg_draw_gbuffer(VkCommandBuffer cmd);   // prepass, before the legacy draws
 void vkg_draw_lit(VkCommandBuffer cmd);       // opaque pass
 void vkg_bench_camera(RenderCamera *cam);     // vgeo_bench: spline camera override (render_set_camera)

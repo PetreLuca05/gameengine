@@ -351,10 +351,11 @@ void sky_build(void) {
     g->cel_z = v4f(e->cel_z, e->night_floor);
     g->clouds = v4(e->cloud_cover, e->cloud_altitude, e->cloud_offset.x, e->cloud_offset.y);
     g->clouds3 = v4(e->cloud_softness, e->cloud_darkness, 0.0f, 0.0f);
-    g->clouds2 = v4(e->cloud_density > 0.0f ? e->cloud_density : 0.92f, P.in.time, e->cloud_scale > 1.0f ? e->cloud_scale : 3000.0f, e->cloud_shadow_strength);
+    g->clouds2 = v4(e->cloud_density > 0.0f ? e->cloud_density : 0.92f, P.in.time, e->cloud_scale > 1.0f ? e->cloud_scale : 3000.0f, e->cloud_shadow_tau);
     vec3 cam = R->cam.pos;
     g->cam = v4(cam.x, cam.y, cam.z, fmaxf(cam.y * 0.001f, 0.0f) + 0.002f);
-    g->ground = v4(0.25f, 0.24f, 0.22f, e->ambient_scale);
+    vec3 ga = v3_len2(e->ground_albedo) > 0 ? e->ground_albedo : v3(0.25f, 0.24f, 0.22f);   // snow / wet ground (shadow_sky.c)
+    g->ground = v4(ga.x, ga.y, ga.z, e->ambient_scale);
     // Aerosols in steps of 0.1: the transmittance / multiple scattering LUTs are rebuilt only when
     // the step changes (every pass reads the same quantized value).
     float mie_q = roundf(fmaxf(e->mie_scale, 0.0f) * 10.0f) / 10.0f;

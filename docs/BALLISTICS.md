@@ -216,9 +216,11 @@ Inputs: the cartridge, `barrel_length` (L), the device, the heat of recent fire,
 | Light | `6·charge^(2/3)·(0.3 + u)`, 1–2 ticks, radius `3 + 2·charge^(1/3)`; shadows at `vfx_quality 3` | |
 
 **Exposure**
-- Hot emitters (flash, tracer, sparks) are exposure aware: the VFX layer multiplies them by `bal_flash_exposure_gain(EV)`.
-  - `gain = 2^(EV − EV_night) · lerp(1, 0.15, smoothstep(EV_night + 0.5, EV_night + 0.75·(EV_day − EV_night), EV))`.
-  - The night and day EV come from `assets/world/daynight.json`.
+- Hot emitters (flash, tracer, sparks) are exposure aware: the VFX layer multiplies them by `bal_flash_exposure_gain(EV, EV_night, daylight)`.
+  - `gain = 2^(EV − EV_night) · lerp(1, 0.15, daylight)`.
+  - The first factor cancels the camera's adaptation relative to night. The engine's auto-exposure range is compressed: noon is about EV 1 against a −1.5 night floor, so the EV alone is not enough.
+  - The second factor is the eye's adaptation. `daynight_daylight()` is the sun's share of full noon light, 0 at night and 1 in full sun.
+  - `EV_night` is the night floor in `assets/world/daynight.json`.
 - After the tonemapper's `2^−EV`, perceived brightness is the authored night look at night and about 0.15× of it in full daylight. The flash also feeds bloom.
 - The flash light is physical and gets no gain.
 

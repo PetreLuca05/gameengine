@@ -477,13 +477,16 @@ void post_begin_frame(const PostFrameIn *in) {
     u->jitter = v4(in->jitter.x, in->jitter.y, in->prev_jitter.x, in->prev_jitter.y);
     u->depth = v4(in->znear, in->zfar, tanf(in->fov_y * 0.5f), (float)in->frame);
     u->sun_dir = v4(in->sun_dir.x, in->sun_dir.y, in->sun_dir.z, in->sun_intensity);
-    u->sun_color = v4(in->sun_color.x, in->sun_color.y, in->sun_color.z, R->r_shadow_quality->i > 0 ? 1.0f : 0.0f);
+    // w: sun shadows on x the sky cutoff fade (shadow_sky.c; the volumetrics' shafts fade with the cast shadows)
+    float shadow_w = R->env.shadow_sky_valid ? R->env.shadow_sky.key.fade : 1.0f;
+    u->sun_color = v4(in->sun_color.x, in->sun_color.y, in->sun_color.z, R->r_shadow_quality->i > 0 ? shadow_w : 0.0f);
     u->sky = v4(in->sky.x, in->sky.y, in->sky.z, in->ambient);
     u->ground = v4(in->ground.x, in->ground.y, in->ground.z, (float)R->light_count);
     u->misc = v4(in->dt, in->camera_cut ? 1.0f : 0.0f, in->ads ? 1.0f : 0.0f, (float)in->output_w / (float)DG_MAX(1u, in->output_h));
     u->s_ao = v4(s->ao_radius, s->ao_intensity, (float)s->ao, s->ao >= 2 ? 12.0f : 6.0f);
     u->s_ssr = v4(s->ssr_intensity, s->ssr_max_roughness, (float)s->ssr, 0.15f);
-    u->s_gi = v4(s->ssgi_intensity, (float)s->ssgi, 0.35f, s->contact_shadows >= 2 ? 14.0f : 8.0f);   // contact steps by quality
+    // contact ray length: 0.35 m for a clear sun, shorter under a wider source (docs/SHADOWS.md); steps by quality
+    u->s_gi = v4(s->ssgi_intensity, (float)s->ssgi, 0.35f * (R->contact_scale > 0.0f ? R->contact_scale : 1.0f), s->contact_shadows >= 2 ? 14.0f : 8.0f);
     u->s_vol = v4(s->fog_density, s->fog_height, s->fog_falloff, s->fog_anisotropy);
     u->s_vol2 = v4(s->fog_albedo.x, s->fog_albedo.y, s->fog_albedo.z, s->sun_shafts);
     u->s_mb = v4(s->mb_intensity, (float)s->motion_blur, 40.0f, s->mb_viewmodel);   // w: fire blur spike on the viewmodel
