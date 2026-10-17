@@ -236,10 +236,12 @@ void main() {
     n = pbr_normal(flags, map_uv, v_world, n);
 #endif
     float surf_rough = -1.0;   // >= 0: the surface textures' roughness replaces the material's
+    float surf_metal = -1.0;   // >= 0: the metal layers' metallic replaces the material's
+    float surf_ao = 1.0;       // the surface layers' baked AO (x SSAO)
 #ifdef LIT_SURFACES
     if (frame.surf_info.y > 0.5) {
-        if ((flags & MAT_TERRAIN) != 0u && frame.surf_map.w > 0.5) surf_terrain(v_world, n, base, 0.82 + 0.36 * v_color.a, surf_rough);
-        else if ((flags & MAT_LAYERED) != 0u) surf_layered(v_world, v_uv, v_color, n, base, surf_rough);
+        if ((flags & MAT_TERRAIN) != 0u && frame.surf_map.w > 0.5) surf_terrain(v_world, n, base, 0.82 + 0.36 * v_color.a, surf_rough, surf_ao);
+        else if ((flags & MAT_LAYERED) != 0u) surf_layered(v_world, v_uv, v_color, n, base, surf_rough, surf_metal, surf_ao);
     }
     if ((flags & (MAT_TERRAIN | MAT_LAYERED)) != 0u) base.a = MAT_COLOR.a;   // the vertex alpha is a layer / variation
 #endif
@@ -258,7 +260,7 @@ void main() {
     } else {
         vec3 v = normalize(frame.camera_pos.xyz - v_world);
         float rough = clamp(surf_rough >= 0.0 ? surf_rough : MAT_PARAMS.x, 0.04, 1.0);
-        float metal = clamp(MAT_PARAMS.y, 0.0, 1.0);
+        float metal = clamp(surf_metal >= 0.0 ? surf_metal : MAT_PARAMS.y, 0.0, 1.0);
 #ifdef PBR_MAPS
         pbr_metal_rough(flags, map_uv, rough, metal);
         rough = max(rough, 0.04);
@@ -273,6 +275,7 @@ void main() {
 #ifdef PBR_MAPS
         ao *= pbr_occlusion(flags, map_uv);   // material AO x SSAO (indirect diffuse + specular occlusion)
 #endif
+        ao *= surf_ao;                        // the surface layers' baked AO, the same way
         float contact = (!vm && frame.post_flags.y > 0.5) ? texture(post_contact, suv).r : 1.0;
         // hemispheric ambient (indirect diffuse): AO only darkens indirect light
         float hemi = n.y * 0.5 + 0.5;

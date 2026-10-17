@@ -1,7 +1,8 @@
 // Surface textures (docs/TEXTURES.md): the terrain / building surface layers as two texture arrays
-// (albedo sRGB 1024 px; normal xy + roughness + height 512 px, both with mips) and the terrain
-// material map (R8, one SurfTexLayer id per raster sample) in frame set bindings 12, 13, 14. The lit
-// pipeline (shaders/surfaces.glsl) samples them for MAT_TERRAIN / MAT_LAYERED draws.
+// (albedo sRGB 1024 px + the baked AO in its alpha; normal xy + roughness + height 512 px, then the
+// metal layers' masks as STEX_METAL_SLOTS extra layers; both with mips) and the terrain material map
+// (R8, one SurfTexLayer id per raster sample) in frame set bindings 12, 13, 14. The lit pipeline
+// (shaders/surfaces.glsl) samples them for MAT_TERRAIN / MAT_LAYERED draws.
 // Until the layers load (first open-world map) the bindings hold 1-texel placeholders.
 #include "vk_internal.h"
 #include "core/platform.h"
@@ -11,9 +12,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
 
 #define ALBEDO_SIZE 1024
 #define NRH_SIZE 512
+// Layers with a metal mask (<name>_metal.png: R bare metal, G paint wear), appended to the nrh array
+// in this order (surfaces.glsl SURF_METAL_SLOT).
+static const int STEX_METAL_LAYERS[] = { STEX_METAL, STEX_RUST };
+#define STEX_METAL_SLOTS 2
 
 static const char *const STEX_LAYER_NAMES[STEX_LAYER_COUNT] = {
     "grass", "meadow", "forest", "dirt", "rock", "sand", "gravel", "asphalt", "dirt_road", "concrete",
@@ -123,26 +129,56 @@ static u8 *load_layer(const char *name, const char *suffix, u32 size, const u8 f
     return out;
 }
 
+// The baked AO (<name>_ao.png, 512 px grey, tools/vfxgen/surface_pbr.py) into the albedo's alpha,
+// bilinear up to ALBEDO_SIZE (wrapping: the layers tile). Missing: alpha stays 255 (no occlusion).
+static bool load_ao_into_alpha(const char *name, u8 *alb) {
+    char rel[128], path[512];
+    snprintf(rel, sizeof(rel), "assets/textures/surfaces/%s_ao.png", name);
+    int w, h, comp;
+    u8 *px = stbi_load(platform_data_path(rel, path, sizeof(path)), &w, &h, &comp, 1);
+    if (!px) return false;
+    for (u32 y = 0; y < ALBEDO_SIZE; y++)
+        for (u32 x = 0; x < ALBEDO_SIZE; x++) {
+            float fx = ((float)x + 0.5f) * (float)w / ALBEDO_SIZE - 0.5f, fy = ((float)y + 0.5f) * (float)h / ALBEDO_SIZE - 0.5f;
+            int x0 = (int)floorf(fx), y0 = (int)floorf(fy);
+            float tx = fx - (float)x0, ty = fy - (float)y0;
+            int xa = (x0 % w + w) % w, xb = (xa + 1) % w, ya = (y0 % h + h) % h, yb = (ya + 1) % h;
+            float a = (float)px[ya * w + xa] * (1 - tx) + (float)px[ya * w + xb] * tx;
+            float b = (float)px[yb * w + xa] * (1 - tx) + (float)px[yb * w + xb] * tx;
+            alb[((size_t)y * ALBEDO_SIZE + x) * 4 + 3] = (u8)(a * (1 - ty) + b * ty + 0.5f);
+        }
+    stbi_image_free(px);
+    return true;
+}
+
 bool render_surfaces_load(void) {
     if (!R || !R->device) return false;
     if (S.tried) return S.loaded;
     S.tried = true;
     u64 t0 = SDL_GetTicksNS();
-    static const u8 grey[4] = { 188, 188, 188, 255 }, flat[4] = { 128, 128, 217, 128 };
-    u8 *alb[STEX_LAYER_COUNT], *nrh[STEX_LAYER_COUNT];
-    int missing = 0;
+    static const u8 grey[4] = { 188, 188, 188, 255 }, flat[4] = { 128, 128, 217, 128 }, no_metal[4] = { 0, 0, 0, 0 };
+    u8 *alb[STEX_LAYER_COUNT], *nrh[STEX_LAYER_COUNT + STEX_METAL_SLOTS];
+    int missing = 0, no_ao = 0;
     for (int l = 0; l < STEX_LAYER_COUNT; l++) {
         bool ok1 = true, ok2 = true;
         alb[l] = load_layer(STEX_LAYER_NAMES[l], "albedo.jpg", ALBEDO_SIZE, grey, &ok1);
         nrh[l] = load_layer(STEX_LAYER_NAMES[l], "nrh.png", NRH_SIZE, flat, &ok2);
         if (!ok1 || !ok2) { missing++; log_warn("surfaces: %s textures missing (flat placeholder)", STEX_LAYER_NAMES[l]); }
+        if (!load_ao_into_alpha(STEX_LAYER_NAMES[l], alb[l])) no_ao++;
     }
+    for (int k = 0; k < STEX_METAL_SLOTS; k++) {
+        bool ok = true;
+        nrh[STEX_LAYER_COUNT + k] = load_layer(STEX_LAYER_NAMES[STEX_METAL_LAYERS[k]], "metal.png", NRH_SIZE, no_metal, &ok);
+        if (!ok) log_warn("surfaces: %s metal mask missing (the material metallic stays)", STEX_LAYER_NAMES[STEX_METAL_LAYERS[k]]);
+    }
+    if (no_ao) log_warn("surfaces: %d layers without baked AO (tools/vfxgen/surface_pbr.py)", no_ao);
     vkDeviceWaitIdle(R->device);   // once: the placeholders leave the frame sets
     image_destroy(&S.albedo);
     image_destroy(&S.nrh);
     S.albedo = upload_layers(alb, STEX_LAYER_COUNT, ALBEDO_SIZE, VK_FORMAT_R8G8B8A8_SRGB);
-    S.nrh = upload_layers(nrh, STEX_LAYER_COUNT, NRH_SIZE, VK_FORMAT_R8G8B8A8_UNORM);
-    for (int l = 0; l < STEX_LAYER_COUNT; l++) { free(alb[l]); free(nrh[l]); }
+    S.nrh = upload_layers(nrh, STEX_LAYER_COUNT + STEX_METAL_SLOTS, NRH_SIZE, VK_FORMAT_R8G8B8A8_UNORM);
+    for (int l = 0; l < STEX_LAYER_COUNT; l++) free(alb[l]);
+    for (int l = 0; l < STEX_LAYER_COUNT + STEX_METAL_SLOTS; l++) free(nrh[l]);
     S.loaded = missing < STEX_LAYER_COUNT;
     S.dirty = true;
     log_info("surfaces: %d layers (%d missing) in %.0f ms", STEX_LAYER_COUNT, missing, (double)(SDL_GetTicksNS() - t0) / 1e6);
