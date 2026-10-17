@@ -1,0 +1,14 @@
+{
+  "name": "Streaming Test Terrain",
+  "level": "streaming",
+  "thumbnail": "assets/maps/thumbs/terrain.png",
+  "size_m": 0,
+  "biome": "Procedural hills",
+  "players": [1, 8],
+  "time_of_day": 10,
+  "season": "spring",
+  "weather": "",
+  "dev": true,
+  "order": 95,
+  "description": "Endless seeded noise terrain streamed in 32 m chunks around every player (world_seed). For streaming and network relevance tests."
+}

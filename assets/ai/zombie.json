@@ -1,7 +1,7 @@
 {
   "_comment": "Horde tuning (src/gameplay/zombies, docs/ZOMBIES.md). Tiers are by distance to the nearest player: near / mid / far bounds (m), beyond far = dormant. Intervals are ticks (60 Hz) for steering + mover (sim) and host animation + hitboxes (anim), snapshots for the network (0 = not sent).",
   "movement": {
-    "speed_mult": 1.0, "accel": 6.0, "turn_rate_deg": 220, "stop_dist": 0.9, "speed_jitter": 0.1,
+    "speed_mult": 1.0, "accel": 6.0, "turn_rate_deg": 220, "stop_dist": 0.9, "face_target_dist": 4.0, "speed_jitter": 0.1,
     "separation_radius": 0.85, "separation_weight": 2.2,
     "alignment_radius": 2.2, "alignment_weight": 0.25,
     "avoid_weight": 2.5, "seek_weight": 1.0,

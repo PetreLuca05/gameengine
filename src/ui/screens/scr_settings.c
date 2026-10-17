@@ -624,6 +624,14 @@ static void tab_character(GuiCursor *c) {
     row_slider_cvar(c, "Safe area", "ui_safe_area", -1, 0.15f, 0.005f, "%.3f", "Margin around menus and the HUD (-1 = theme default).");
     row_toggle_cvar(c, "Health bars over characters", "cl_healthbars", NULL);
     row_toggle_cvar(c, "Show FPS", "cl_showfps", NULL);
+    // Spectating (docs/SPECTATE.md).
+    section(c, "Spectating");
+    row_slider_cvar(c, "Death camera time", "spec_death_cam_time", 0, 10, 0.5f, "%.1f s",
+                    "How long the camera stays on your body before you watch your killer (or the nearest player). Fire skips it.");
+    row_toggle_cvar(c, "Spectator delay readout", "spec_show_delay",
+                    "Time from the watched player's input to your screen. The minimum is one network hop from them to the host plus one from the host to you: their own commands are replayed here, no interpolation delay on top.");
+    row_slider_cvar(c, "Camera blend on switch", "spec_blend_time", 0, 0.5f, 0.01f, "%.2f s", "Smooths the jump to the next player.");
+    row_toggle_cvar(c, "Free camera collision", "spec_free_collide", NULL);
 }
 
 // Phone companion (docs/PHONE.md): server, stream, orientation, capture.

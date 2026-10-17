@@ -33,6 +33,8 @@ typedef struct LanServer {
     float ping_ms;       // transport RTT
     float app_rtt_ms;    // client: command -> acked snapshot round trip
     double last_seen;
+    bool in_game;        // the game is running (else: in the lobby)
+    u32 version;         // the host's lobby version hash (0: an old host)
 } LanServer;
 
 #define MAX_LAN_SERVERS 16
@@ -56,7 +58,20 @@ double net_client_render_tick(void);    // fractional server tick being rendered
 int net_host_client_count(void);
 void net_host_send_anim_events(struct World *w);
 void net_send_rpc(int type, int a, int b, int c);
+u16 net_player_owd_ms(int slot);         // host: one-way delay estimate of a remote player (RTT / 2), 0 = local / none
 NetStats net_stats(void);
+
+// Lobby (src/net/lobby_net.c): raw reliable sends (host: to a peer; client: to the host; the data
+// starts with MSG_LOBBY), welcome a lobby member into the started game, drop / identify peers.
+bool net_send_reliable(int peer, const void *data, u32 size);
+void net_flush(void);
+bool net_host_welcome(int peer, const char *name);
+void net_drop_peer(int peer);
+bool net_peer_address(int peer, char *out, int size);   // client: the host's
+float net_peer_ping(int peer);                          // ms, < 0 unknown (client: the host's)
+TransportKind net_kind(void);
+bool net_client_welcomed(void);
+int net_listen_port(void);
 
 // LAN browser
 void net_lan_refresh(void);

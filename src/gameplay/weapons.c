@@ -641,7 +641,7 @@ void weapons_tick(World *w, int slot, PlayerSim *sim, const UserCmd *cmd, u16 pr
     memset(out, 0, sizeof(*out));
     WeaponState *ws = &sim->wpn;
     Player *p = &w->players[slot];
-    bool local_view = p->local;
+    bool local_view = p->local || slot == game_view_slot();   // the viewed player (local or spectated) predicts its effects
     if (sim->move.mode == MOVE_DEAD) return;
 
     u8 want = (u8)DG_CLAMP((int)cmd->slot, 0, INV_HOTBAR - 1);

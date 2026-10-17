@@ -4,6 +4,9 @@
 #define DG_GUI_THEME_H
 
 #include "core/base.h"
+#include "gui_layout.h"
+
+#define GUI_THEME_MAX_TOKENS 96
 
 typedef struct GuiTheme {
     // colours (RGBA8, r in the low byte)
@@ -14,6 +17,8 @@ typedef struct GuiTheme {
     u32 slot_bg, slot_border, slot_hi;
     u32 type_weapon, type_ammo, type_consumable, type_attachment, type_key, type_misc;
     u32 hud_panel, hud_text;
+    u32 rarity[5];                // cosmetics: common, uncommon, rare, epic, legendary
+    u32 chat_name[8];             // lobby chat: name colour per member id (cycled)
     // type sizes (px at 1080p)
     float t_tiny, t_small, t_body, t_label, t_title, t_large, t_huge;
     float tracking_caps;          // small-caps letter spacing (em)
@@ -29,9 +34,13 @@ typedef struct GuiTheme {
     char snd_hover[32], snd_click[32], snd_back[32], snd_open[32], snd_error[32], snd_drop[32], snd_equip[32], snd_tab[32];
     float snd_volume;
     char font_regular[96], font_medium[96], font_semibold[96];
+    // "layout": named design-px sizes for screen JSON ("@name") and the screens' code (gui_tok)
+    LayoutToken layout[GUI_THEME_MAX_TOKENS];
+    int layout_count;
 } GuiTheme;
 
 const GuiTheme *gui_theme(void);
+float gui_tok(const char *name);         // a "layout" token (design px); logs once and returns 0 if missing
 bool gui_theme_load(const char *path);   // missing keys keep their defaults
 u32 gui_rgba_mul(u32 c, float a);         // alpha multiplied
 u32 gui_rgba_lerp(u32 a, u32 b, float t);

@@ -183,6 +183,86 @@ int gw_tabs(GuiId id, GuiRect r, const char *const *labels, int n, int cur) {
     return res;
 }
 
+// ------------------------------------------------------------------ top tab bar / power / avatar
+
+static void initials(const char *name, char *out);
+
+int gw_tabbar(GuiId id, GuiRect r, const char *const *labels, const bool *enabled, const char *const *reason, int n, int cur, bool focusable) {
+    if (n <= 0) return cur;
+    float sz = gui_s(gui_tok("tab_text"));
+    GuiText t = text_style(sz, GW_SEMIBOLD, TH->text_dim, GUI_LEFT);
+    t.caps = true;
+    t.tracking = TH->tracking_caps * 1.3f;
+    float gap = gui_s(gui_tok("tab_gap")), padx = gui_s(gui_tok("tab_pad"));
+    float under = fmaxf(1.0f, gui_s(gui_tok("tab_underline")));
+    float x = r.x;
+    int res = cur;
+    float cur_x = r.x, cur_w = 0;
+    gd_rect(gui_rect(r.x, r.y + r.h - 1, r.w, 1), TH->panel_border);
+    for (int i = 0; i < n; i++) {
+        bool on = !enabled || enabled[i];
+        float w = gd_text_width(&t, labels[i]);
+        GuiRect tr = { x - padx, r.y, w + padx * 2, r.h };
+        GuiId tid = gui_idi("tabbar", (int)id + i);
+        GuiInteract in = gui_interact(tid, tr, on ? (focusable ? GUI_FOCUSABLE : 0) : GUI_DISABLED);
+        float h = gui_tween(tid, (in.hot && on) || i == cur ? 1.0f : 0.0f, TH->hover_t);
+        if (in.hot && on && i != cur) gd_rect_grad(tr, gui_rgba_mul(TH->hover, 0.0f), gui_rgba_mul(TH->hover, h * 1.4f));
+        t.color = !on ? gui_rgba_mul(TH->text_faint, 0.6f) : (i == cur ? TH->text : gui_rgba_lerp(TH->text_faint, TH->text, h * 0.75f));
+        gd_text(&t, x, text_y(r, sz), labels[i]);
+        // Key hint while the keyboard / pad drives.
+        if (gui_nav_mode() && on) {
+            char k[12];
+            snprintf(k, sizeof(k), "%d", i + 1);
+            GuiText kt = text_style(gui_s(TH->t_tiny), GW_MEDIUM, TH->text_faint, GUI_LEFT);
+            gd_text(&kt, x + w + gui_s(4), r.y + gui_s(gui_tok("tab_hint_y")), k);
+        }
+        if (in.focused) gw_focus_ring(tr, gui_s(TH->radius), 1.0f);
+        if (!on && reason && reason[i] && gui_rect_contains(tr, gui_mouse().x, gui_mouse().y)) gui_tooltip(tid, reason[i]);
+        if (in.clicked && on && i != cur) { res = i; gui_sound(TH->snd_tab); }
+        if (i == cur) { cur_x = x; cur_w = w; }
+        x += w + gap;
+    }
+    float ux = gui_tween(id ^ 0xB1u, cur_x, 0.14f), uw = gui_tween(id ^ 0xB2u, cur_w, 0.14f);
+    gd_rect(gui_rect(ux, r.y + r.h - under, uw, under), TH->accent);
+    return res;
+}
+
+bool gw_power(GuiId id, GuiRect r, const char *tooltip) {
+    GuiInteract in = gui_interact(id, r, GUI_FOCUSABLE);
+    float h = gui_tween(id ^ 0x51u, in.hot ? 1.0f : 0.0f, TH->hover_t);
+    float cx = r.x + r.w * 0.5f, cy = r.y + r.h * 0.5f;
+    float rad = fminf(r.w, r.h) * 0.5f;
+    if (h > 0.01f) gd_circle(cx, cy, rad, gui_rgba_mul(TH->danger, h * 0.18f));
+    u32 c = gui_rgba_lerp(TH->text_dim, TH->danger, h);
+    float ir = rad * 0.46f, th = fmaxf(1.2f, gui_s(gui_tok("power_stroke")));
+    // The ring opens at the top (80 degrees); the stroke stands in the gap.
+    const int seg = 28;
+    const float gap = 80.0f * DG_DEG2RAD, span = 2.0f * DG_PI - gap;
+    for (int k = 0; k < seg; k++) {
+        float a0 = gap * 0.5f + span * (float)k / (float)seg, a1 = gap * 0.5f + span * (float)(k + 1) / (float)seg;
+        gd_line(cx + sinf(a0) * ir, cy - cosf(a0) * ir, cx + sinf(a1) * ir, cy - cosf(a1) * ir, th, c);
+    }
+    gd_line(cx, cy - ir - th, cx, cy - ir * 0.12f, th, c);
+    if (in.focused) gw_focus_ring(r, rad, 1.0f);
+    if (in.hovered && tooltip) gui_tooltip(id, tooltip);
+    if (in.clicked) gui_sound(TH->snd_click);
+    return in.clicked;
+}
+
+void gw_avatar(GuiRect r, TextureId tex, const char *name, u32 tint) {
+    float rad = gui_s(TH->radius);
+    if (tex) {
+        gd_image(r, tex, v4(0, 0, 1, 1), UI_RGBA(255, 255, 255, 255));
+        gd_round_outline(r, rad, 1.0f, TH->panel_border);
+        return;
+    }
+    char ini[4];
+    initials(name && name[0] ? name : "?", ini);
+    float s = fminf(r.w, r.h);
+    gd_circle(r.x + r.w * 0.5f, r.y + r.h * 0.5f, s * 0.5f, gui_rgba_mul(tint, 0.55f));
+    gw_label(r, ini, s * 0.42f, GW_SEMIBOLD, TH->text, GUI_CENTER);
+}
+
 // ------------------------------------------------------------------ settings controls
 
 GuiRect gw_setting_row(GuiCursor *c, const char *label, const char *hint, GuiId id) {
@@ -380,6 +460,9 @@ bool gw_keybind(GuiId id, GuiRect r, const char *text, bool capturing) {
 }
 
 static GuiId g_edit;
+
+void gw_textfield_activate(GuiId id) { g_edit = id; gui_set_text_mode(true); gui_set_focus(id); }
+bool gw_textfield_editing(GuiId id) { return g_edit == id; }
 
 bool gw_textfield(GuiId id, GuiRect r, char *buf, int size, const char *placeholder) {
     GuiInteract in = gui_interact(id, r, GUI_FOCUSABLE);

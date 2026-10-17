@@ -1,0 +1,11 @@
+{
+  "_doc": "Maps tab: the map list, the details (thumbnail, facts, description) and the session look: season, start time, start weather, dynamic weather. Selecting changes the background and, for a host, the lobby map.",
+  "nodes": [
+    { "id": "root", "dir": "row", "align": "stretch", "gap": "@mm_gap_lg" },
+    { "id": "left", "parent": "root", "w": "@mm_list_w", "dir": "column", "align": "stretch", "gap": "@mm_gap" },
+    { "id": "filters", "parent": "left", "h": "@mm_filter_h" },
+    { "id": "list", "parent": "left", "flex": 1 },
+    { "id": "spacer", "parent": "root", "flex": 1 },
+    { "id": "detail", "parent": "root", "w": "@mm_detail_wide" }
+  ]
+}

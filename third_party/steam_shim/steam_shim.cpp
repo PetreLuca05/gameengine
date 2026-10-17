@@ -6,7 +6,9 @@
 #include "steam/isteamnetworkingutils.h"
 #include "steam/isteammatchmaking.h"
 #include "steam/isteamfriends.h"
+#include "steam/isteamutils.h"
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define DGS_MAX_QUEUED 256
@@ -27,6 +29,10 @@ struct ShimState {
     SteamNetworkingMessage_t *held[DGS_MAX_MSGS];
     int held_count = 0;
     CCallResult<ShimState, LobbyCreated_t> lobby_created;
+    CCallResult<ShimState, LobbyMatchList_t> lobby_list;
+    int list_status = 0;          // 0 idle, 1 pending, 2 ready
+    int list_count = 0;
+    CSteamID list_ids[64];
 
     STEAM_CALLBACK(ShimState, OnConnStatus, SteamNetConnectionStatusChangedCallback_t);
     STEAM_CALLBACK(ShimState, OnLobbyEnter, LobbyEnter_t);
@@ -34,6 +40,7 @@ struct ShimState {
     STEAM_CALLBACK(ShimState, OnRichPresenceJoin, GameRichPresenceJoinRequested_t);
 
     void OnLobbyCreated(LobbyCreated_t *p, bool io_failure);
+    void OnLobbyList(LobbyMatchList_t *p, bool io_failure);
 
     void push(const DgsEvent &e) {
         if (queued_count < DGS_MAX_QUEUED) queued[queued_count++] = e;
@@ -82,6 +89,15 @@ void ShimState::OnLobbyCreated(LobbyCreated_t *p, bool io_failure) {
     e.type = DGS_EV_LOBBY_CREATED;
     e.id = p->m_ulSteamIDLobby;
     push(e);
+}
+
+void ShimState::OnLobbyList(LobbyMatchList_t *p, bool io_failure) {
+    list_count = 0;
+    if (!io_failure) {
+        uint32 n = p->m_nLobbiesMatching;
+        for (uint32 i = 0; i < n && list_count < 64; i++) list_ids[list_count++] = SteamMatchmaking()->GetLobbyByIndex((int)i);
+    }
+    list_status = 2;
 }
 
 void ShimState::OnLobbyEnter(LobbyEnter_t *p) {
@@ -230,6 +246,143 @@ void dgs_invite_overlay(void) {
 
 void dgs_set_rich_presence(const char *key, const char *value) {
     if (g_shim) SteamFriends()->SetRichPresence(key, value);
+}
+
+bool dgs_create_lobby_typed(int max_members, int type) {
+    if (!g_shim) return false;
+    ELobbyType t = type == DGS_LOBBY_PUBLIC ? k_ELobbyTypePublic : (type == DGS_LOBBY_PRIVATE ? k_ELobbyTypePrivate : k_ELobbyTypeFriendsOnly);
+    SteamAPICall_t call = SteamMatchmaking()->CreateLobby(t, max_members);
+    g_shim->lobby_created.Set(call, g_shim, &ShimState::OnLobbyCreated);
+    return true;
+}
+
+void dgs_set_lobby_data(const char *key, const char *value) {
+    if (g_shim && g_shim->lobby.IsValid()) SteamMatchmaking()->SetLobbyData(g_shim->lobby, key, value);
+}
+
+void dgs_set_lobby_type(int type) {
+    if (!g_shim || !g_shim->lobby.IsValid()) return;
+    ELobbyType t = type == DGS_LOBBY_PUBLIC ? k_ELobbyTypePublic : (type == DGS_LOBBY_PRIVATE ? k_ELobbyTypePrivate : k_ELobbyTypeFriendsOnly);
+    SteamMatchmaking()->SetLobbyType(g_shim->lobby, t);
+}
+
+void dgs_set_lobby_joinable(bool joinable) {
+    if (g_shim && g_shim->lobby.IsValid()) SteamMatchmaking()->SetLobbyJoinable(g_shim->lobby, joinable);
+}
+
+uint64_t dgs_lobby_owner(void) {
+    if (!g_shim || !g_shim->lobby.IsValid()) return 0;
+    return SteamMatchmaking()->GetLobbyOwner(g_shim->lobby).ConvertToUint64();
+}
+
+bool dgs_set_lobby_owner(uint64_t steam_id) {
+    if (!g_shim || !g_shim->lobby.IsValid()) return false;
+    return SteamMatchmaking()->SetLobbyOwner(g_shim->lobby, CSteamID(steam_id));
+}
+
+bool dgs_conn_steam_id(uint32_t conn, uint64_t *out) {
+    if (!g_shim) return false;
+    SteamNetConnectionInfo_t info;
+    if (!SteamNetworkingSockets()->GetConnectionInfo(conn, &info)) return false;
+    *out = info.m_identityRemote.GetSteamID64();
+    return *out != 0;
+}
+
+float dgs_relay_ping_ms(void) {
+    if (!g_shim) return -1.0f;
+    SteamNetworkingPOPID pops[64];
+    int n = SteamNetworkingUtils()->GetPOPList(pops, 64);
+    int best = -1;
+    for (int i = 0; i < n; i++) {
+        SteamNetworkingPOPID via = 0;
+        int ms = SteamNetworkingUtils()->GetPingToDataCenter(pops[i], &via);
+        if (ms >= 0 && (best < 0 || ms < best)) best = ms;
+    }
+    return best < 0 ? -1.0f : (float)best;
+}
+
+void dgs_request_lobby_list(const char *map, int distance, int min_free_slots) {
+    if (!g_shim) return;
+    ISteamMatchmaking *mm = SteamMatchmaking();
+    mm->AddRequestLobbyListStringFilter("game", "deadground", k_ELobbyComparisonEqual);
+    if (map && map[0]) mm->AddRequestLobbyListStringFilter("map", map, k_ELobbyComparisonEqual);
+    if (min_free_slots > 0) mm->AddRequestLobbyListFilterSlotsAvailable(min_free_slots);
+    mm->AddRequestLobbyListDistanceFilter((ELobbyDistanceFilter)(distance < 0 ? 1 : (distance > 3 ? 3 : distance)));
+    mm->AddRequestLobbyListResultCountFilter(64);
+    SteamAPICall_t call = mm->RequestLobbyList();
+    g_shim->lobby_list.Set(call, g_shim, &ShimState::OnLobbyList);
+    g_shim->list_status = 1;
+}
+
+int dgs_lobby_list_status(void) { return g_shim ? g_shim->list_status : 0; }
+
+static void lobby_str(CSteamID lob, const char *key, char *out, size_t n) {
+    const char *v = SteamMatchmaking()->GetLobbyData(lob, key);
+    snprintf(out, n, "%s", v ? v : "");
+}
+
+int dgs_lobby_list(DgsLobbyInfo *out, int max) {
+    if (!g_shim) return 0;
+    int n = 0;
+    for (int i = 0; i < g_shim->list_count && n < max; i++) {
+        CSteamID lob = g_shim->list_ids[i];
+        DgsLobbyInfo &d = out[n++];
+        memset(&d, 0, sizeof(d));
+        d.id = lob.ConvertToUint64();
+        CSteamID owner = SteamMatchmaking()->GetLobbyOwner(lob);
+        d.owner = owner.ConvertToUint64();
+        lobby_str(lob, "name", d.name, sizeof(d.name));
+        lobby_str(lob, "map", d.map, sizeof(d.map));
+        lobby_str(lob, "version", d.version, sizeof(d.version));
+        lobby_str(lob, "state", d.state, sizeof(d.state));
+        char tmp[16];
+        lobby_str(lob, "players", tmp, sizeof(tmp)); d.players = atoi(tmp);
+        lobby_str(lob, "max", tmp, sizeof(tmp)); d.max_players = atoi(tmp);
+        lobby_str(lob, "privacy", tmp, sizeof(tmp)); d.privacy = atoi(tmp);
+        lobby_str(lob, "season", tmp, sizeof(tmp)); d.season = atoi(tmp);
+        d.members = SteamMatchmaking()->GetNumLobbyMembers(lob);
+        d.friend_owner = owner.IsValid() && SteamFriends()->GetFriendRelationship(owner) == k_EFriendRelationshipFriend;
+    }
+    return n;
+}
+
+int dgs_friends(DgsFriend *out, int max) {
+    if (!g_shim) return 0;
+    int count = SteamFriends()->GetFriendCount(k_EFriendFlagImmediate);
+    int n = 0;
+    AppId_t app = SteamUtils()->GetAppID();
+    for (int i = 0; i < count && n < max; i++) {
+        CSteamID f = SteamFriends()->GetFriendByIndex(i, k_EFriendFlagImmediate);
+        DgsFriend &d = out[n++];
+        memset(&d, 0, sizeof(d));
+        d.id = f.ConvertToUint64();
+        snprintf(d.name, sizeof(d.name), "%s", SteamFriends()->GetFriendPersonaName(f));
+        EPersonaState st = SteamFriends()->GetFriendPersonaState(f);
+        d.state = st == k_EPersonaStateOffline ? 0 : (st == k_EPersonaStateOnline || st == k_EPersonaStateLookingToPlay || st == k_EPersonaStateLookingToTrade ? 1 : 2);
+        FriendGameInfo_t gi;
+        if (SteamFriends()->GetFriendGamePlayed(f, &gi) && gi.m_gameID.AppID() == app) {
+            d.in_this_game = true;
+            d.lobby = gi.m_steamIDLobby.IsValid() ? gi.m_steamIDLobby.ConvertToUint64() : 0;
+        }
+    }
+    return n;
+}
+
+bool dgs_invite_friend(uint64_t steam_id) {
+    if (!g_shim || !g_shim->lobby.IsValid()) return false;
+    return SteamMatchmaking()->InviteUserToLobby(g_shim->lobby, CSteamID(steam_id));
+}
+
+bool dgs_avatar_rgba(uint64_t steam_id, int *w, int *h, uint8_t *out, int cap) {
+    if (!g_shim) return false;
+    int img = SteamFriends()->GetSmallFriendAvatar(CSteamID(steam_id));
+    if (img <= 0) return false;   // 0: none, -1: still loading
+    uint32 iw = 0, ih = 0;
+    if (!SteamUtils()->GetImageSize(img, &iw, &ih) || (int)(iw * ih * 4) > cap) return false;
+    if (!SteamUtils()->GetImageRGBA(img, out, (int)(iw * ih * 4))) return false;
+    *w = (int)iw;
+    *h = (int)ih;
+    return true;
 }
 
 } // extern "C"

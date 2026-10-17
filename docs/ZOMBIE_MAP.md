@@ -29,6 +29,8 @@ zombies, no POIs.
 **Species.** A tree's role comes from the forest's `pine` / `dead` fractions as before; its species is a
 weighted pick within the role by a position hash (`openworld_foliage.c` `role_pick`, the type order of
 `render_foliage_role_types`). Every machine places the same species, and the trunk capsules match.
+Its height is picked in the species' real-world range (pines 18-32 m, broadleaves 14-34 m, bushes
+2.5-8 m: docs/VGEO.md "Tree models", "Heights").
 
 ## Coordinates
 

@@ -1,0 +1,10 @@
+{
+  "_doc": "Cosmetics tab: categories, the item grid (inventory slot widget), the character in the middle (live), the selected item.",
+  "nodes": [
+    { "id": "root", "dir": "row", "align": "stretch", "gap": "@mm_gap_lg" },
+    { "id": "cats", "parent": "root", "w": "@mm_cat_w" },
+    { "id": "grid", "parent": "root", "w": "@mm_grid_w" },
+    { "id": "preview", "parent": "root", "flex": 1 },
+    { "id": "detail", "parent": "root", "w": "@mm_info_w" }
+  ]
+}

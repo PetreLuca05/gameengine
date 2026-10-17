@@ -1,0 +1,13 @@
+{
+  "_comment": "Seasons (docs/MENU_LOBBY.md 'Time, season and weather'): picked in the main menu's Maps tab and the lobby. day_of_year: the calendar day (sun path and day length, docs/DAYNIGHT.md). temperature_offset: added to every weather target (precipitation below 0 C falls as snow). weather: the presets the random scheduler may pick in this season and their weights (0 = never); the lobby's start weather lists them too. snow / wetness: the ground at the start (0..1). Autumn leans on rain, winter on snow (every precipitation preset is cold enough to snow with the -14 C offset).",
+  "seasons": [
+    { "id": "spring", "name": "Spring", "day_of_year": 110, "temperature_offset": -2, "snow": 0, "wetness": 0.35,
+      "weather": { "clear": 2, "little_cloudy": 3, "cloudy": 2, "overcast": 1.5, "light_rain": 2, "rain": 1, "fog": 1 } },
+    { "id": "summer", "name": "Summer", "day_of_year": 196, "temperature_offset": 8, "snow": 0, "wetness": 0,
+      "weather": { "clear": 4, "little_cloudy": 3, "cloudy": 1.5, "light_rain": 0.5, "rain": 0.4, "storm": 0.6 } },
+    { "id": "autumn", "name": "Autumn", "day_of_year": 288, "temperature_offset": -4, "snow": 0, "wetness": 0.5,
+      "weather": { "clear": 0.3, "little_cloudy": 0.5, "cloudy": 1.5, "overcast": 2, "fog": 1.5, "light_rain": 3, "rain": 3, "storm": 0.5 } },
+    { "id": "winter", "name": "Winter", "day_of_year": 15, "temperature_offset": -14, "snow": 0.7, "wetness": 0.1,
+      "weather": { "clear": 0.4, "little_cloudy": 0.4, "cloudy": 0.6, "overcast": 1.5, "fog": 0.8, "light_snow": 3, "snow": 3, "blizzard": 0.6 } }
+  ]
+}

@@ -67,6 +67,12 @@ void vehicles_draw_hud(void);
 void vehicles_draw(void);
 EntityId vehicle_spawn(World *w, const char *def, vec3 pos, float yaw);
 void weather_level_loaded(World *w, const char *map);
+// Seasons (src/world/season.h, docs/MENU_LOBBY.md): host. season -1 = off. start "" = a weighted
+// pick of the season's presets; dynamic = the season-biased scheduler changes the weather over time.
+struct SeasonTable;
+void weather_apply_season(World *w, int season, const char *start, bool dynamic);
+const struct SeasonTable *weather_seasons(void);
+int weather_season(void);
 void weather_host_tick(World *w);
 bool weather_active(World *w);
 bool weather_current(World *w, WeatherParams *out);
@@ -78,6 +84,8 @@ float weather_fog_density(World *w, float fallback);
 float weather_lightning_flash(void);
 void weather_draw(void);
 void daynight_level_loaded(World *w);
+// Host: calendar day (1..365, the season's sun path / day length) and the time (hours < 0 = keep).
+void daynight_set_calendar(World *w, int day_of_year, float hours);
 void daynight_host_tick(World *w);
 void daynight_handle_event(const GameEvent *ev);
 bool daynight_active(World *w);

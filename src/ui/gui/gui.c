@@ -35,6 +35,7 @@ static struct {
     float repeat_t[4];
     vec2 stick;
     int chars[MAX_CHARS], char_count, char_read;
+    int keys[16], key_count;      // scancodes pressed this frame (gui_key_pressed)
     int backspaces;
     // interaction
     GuiId hover, hover_next;      // the topmost widget under the mouse (resolved at frame end)
@@ -139,6 +140,7 @@ bool gui_handle_event(const SDL_Event *ev) {
         G.shift = (m & SDL_KMOD_SHIFT) != 0;
         G.ctrl = (m & SDL_KMOD_CTRL) != 0;
         if (!down) return false;
+        if (!ev->key.repeat && G.key_count < 16) G.keys[G.key_count++] = (int)ev->key.scancode;
         switch (ev->key.scancode) {
         case SDL_SCANCODE_UP: set_nav(NAV_UP); break;
         case SDL_SCANCODE_DOWN: set_nav(NAV_DOWN); break;
@@ -240,6 +242,7 @@ static void end_input(void) {
     G.wheel = 0;
     memset(G.nav, 0, sizeof(G.nav));
     G.char_count = G.char_read = 0;
+    G.key_count = 0;
     G.backspaces = 0;
     G.mouse_prev = G.mouse;
     if (!G.mdown[0] && !G.mdown[1]) G.press_id = 0;
@@ -265,6 +268,14 @@ void gui_set_text_mode(bool on) {
     if (on == G.text_mode) return;
     G.text_mode = on;
     if (g_engine.window) { if (on) SDL_StartTextInput(g_engine.window); else SDL_StopTextInput(g_engine.window); }
+}
+
+bool gui_text_mode(void) { return G.text_mode; }
+
+bool gui_key_pressed(int scancode) {
+    if (G.text_mode) return false;
+    for (int i = 0; i < G.key_count; i++) if (G.keys[i] == scancode) return true;
+    return false;
 }
 
 bool gui_text_input_char(int *cp) {

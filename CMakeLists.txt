@@ -250,6 +250,15 @@ else()
   target_link_libraries(test_recoil PRIVATE m)
 endif()
 add_test(NAME recoil COMMAND test_recoil)
+add_executable(test_spectate tests/test_spectate.c src/net/spectate_core.c src/gameplay/recoil.c src/core/spring.c)
+set_target_properties(test_spectate PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
+target_include_directories(test_spectate PRIVATE src)
+if(MSVC)
+  target_compile_options(test_spectate PRIVATE /W3 /utf-8)
+else()
+  target_link_libraries(test_spectate PRIVATE m)
+endif()
+add_test(NAME spectate COMMAND test_spectate)
 
 # ---------------------------------------------------------------- animation tools
 # Engine-free subset: anim core + FBX import + cache (+ log / platform helpers).
@@ -468,6 +477,16 @@ if(MSVC)
 endif()
 add_test(NAME ui COMMAND test_ui WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
 
+# Main menu + lobby (docs/MENU_LOBBY.md): lobby state machine, membership / kick / ready / start,
+# chat, version check, wire, maps, cosmetics round trip, profile, seasons + weather bias, screen lint.
+add_executable(test_lobby tests/test_lobby.c src/net/lobby.c src/world/maplist.c src/world/season.c src/gameplay/cosmetics.c src/game/profile.c src/ui/gui/gui_layout.c src/core/cvar.c)
+set_target_properties(test_lobby PROPERTIES C_STANDARD 11)
+target_link_libraries(test_lobby PRIVATE dg_animcore)
+if(MSVC)
+  target_compile_options(test_lobby PRIVATE /W3 /wd4100 /wd4201 /utf-8)
+endif()
+add_dependencies(test_lobby dg_copy_data)
+add_test(NAME lobby COMMAND test_lobby WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
 # Engine Fidelity (docs/ENGINE_FIDELITY.md): tables, bounds, apply / clamp on the real cvar system, era
 # matrix, frame graph validation.
 add_executable(test_fidelity tests/test_fidelity.c src/render/fidelity/fidelity.c src/render/graph/fg_check.c src/core/cvar.c)

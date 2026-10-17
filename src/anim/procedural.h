@@ -220,6 +220,9 @@ typedef struct ProcInput {
     float hp_sway_scale;       // hold point look lag / sway / breathing / sprint bob (wpn_sway_scale, 0 = none)
     HoldKickParams hold_kick;  // kick / sway anchors, ADS kick shaping (from the weapon's recoil data)
     float hp_bob_scale;        // hold point movement bob outside sprint (wpn_bob_scale)
+    bool hp_phase_valid;       // deterministic hold point phases (players simulated here): clock (s) + stride
+    double hp_clock;
+    float hp_stride;
     vec3 hand_anchor[2];       // world-space ledge anchors (mantle / hang), weight below
     float hand_anchor_w;
     // Seated (vehicles, docs/VEHICLES.md): the pelvis on the seat's hip point, thighs flexed, feet

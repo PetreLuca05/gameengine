@@ -1,0 +1,10 @@
+{
+  "_doc": "Player tab: the 3D preview is the menu scene itself (the camera frames the character inside 'preview'; drag to orbit, wheel to zoom); the info panel on the right.",
+  "nodes": [
+    { "id": "root", "dir": "row", "align": "stretch", "gap": "@mm_gap_lg" },
+    { "id": "preview", "parent": "root", "flex": 1, "dir": "column", "align": "stretch" },
+    { "id": "preview_area", "parent": "preview", "flex": 1 },
+    { "id": "preview_bar", "parent": "preview", "h": "@mm_preview_bar_h" },
+    { "id": "info", "parent": "root", "w": "@mm_info_w" }
+  ]
+}

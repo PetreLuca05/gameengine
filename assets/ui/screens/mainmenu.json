@@ -1,0 +1,14 @@
+{
+  "_doc": "Main menu shell (docs/MENU_LOBBY.md 'Screen map'). Same rules as pause.json; sizes are theme.json 'layout' tokens (@name) only - tests/test_lobby.c lints every mainmenu_*.json. The tab screens (mainmenu_<tab>.json) are solved inside 'content'.",
+  "nodes": [
+    { "id": "root", "safe": true, "dir": "column", "align": "stretch" },
+    { "id": "tabbar", "parent": "root", "h": "@mm_tabbar_h", "dir": "row", "align": "stretch", "gap": "@mm_gap_lg" },
+    { "id": "tabs", "parent": "tabbar", "flex": 1 },
+    { "id": "power", "parent": "tabbar", "w": "@mm_power" },
+    { "id": "content", "parent": "root", "flex": 1, "pad": ["@zero", "@mm_content_gap", "@zero", "@mm_content_gap"] },
+    { "id": "footer", "parent": "root", "h": "@mm_footer_h", "dir": "row", "align": "stretch", "gap": "@mm_gap_lg" },
+    { "id": "status", "parent": "footer", "w": "@mm_status_w" },
+    { "id": "footer_mid", "parent": "footer", "flex": 1 },
+    { "id": "news", "parent": "footer", "w": "@mm_news_w" }
+  ]
+}

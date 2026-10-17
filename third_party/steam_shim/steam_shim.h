@@ -49,6 +49,42 @@ uint64_t dgs_current_lobby(void);
 void dgs_invite_overlay(void);
 void dgs_set_rich_presence(const char *key, const char *value);
 
+// Lobby (src/net/lobby_net.c, docs/MENU_LOBBY.md)
+enum { DGS_LOBBY_PRIVATE = 0, DGS_LOBBY_FRIENDS = 1, DGS_LOBBY_PUBLIC = 2 };   // = ELobbyType
+bool dgs_create_lobby_typed(int max_members, int type);
+void dgs_set_lobby_data(const char *key, const char *value);
+void dgs_set_lobby_type(int type);
+void dgs_set_lobby_joinable(bool joinable);
+uint64_t dgs_lobby_owner(void);
+bool dgs_set_lobby_owner(uint64_t steam_id);
+bool dgs_conn_steam_id(uint32_t conn, uint64_t *out);   // the remote end of a connection
+float dgs_relay_ping_ms(void);                          // nearest relay (POP), < 0 unknown yet
+
+// Lobby browser: request, then poll the status (0 idle, 1 pending, 2 ready) and read the results.
+typedef struct DgsLobbyInfo {
+    uint64_t id, owner;
+    char name[64], map[32], version[16], state[16];
+    int players, max_players, members, privacy, season;
+    bool friend_owner;          // the owner is on our friends list
+} DgsLobbyInfo;
+// distance: 0 close, 1 default, 2 far, 3 worldwide (ELobbyDistanceFilter). map: "" = any.
+void dgs_request_lobby_list(const char *map, int distance, int min_free_slots);
+int dgs_lobby_list_status(void);
+int dgs_lobby_list(DgsLobbyInfo *out, int max);
+
+// Friends
+typedef struct DgsFriend {
+    uint64_t id;
+    char name[64];
+    int state;                  // 0 offline, 1 online, 2 busy / away / snooze
+    bool in_this_game;
+    uint64_t lobby;             // the friend's lobby in this game (0 none)
+} DgsFriend;
+int dgs_friends(DgsFriend *out, int max);
+bool dgs_invite_friend(uint64_t steam_id);
+// Small avatar as RGBA8 (32 x 32). false while Steam still downloads it.
+bool dgs_avatar_rgba(uint64_t steam_id, int *w, int *h, uint8_t *out, int cap);
+
 #ifdef __cplusplus
 }
 #endif

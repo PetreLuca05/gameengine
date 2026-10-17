@@ -1,5 +1,5 @@
 {
-  "_doc": "Pause screen layout (docs/UI.md 'Layout'). Sizes in design pixels at 1080p. Nodes with an action are the button stack entries; 'if' hides a node (steam, online, world; '!' negates). 'modal' is where sub-menus open; it avoids the stack on narrow screens.",
+  "_doc": "Pause screen layout (docs/UI.md 'Layout'). Sizes in design pixels at 1080p. Nodes with an action are the button stack entries; 'if' hides a node (steam, online, world, lobby, menu, legacy_online; '!' negates). 'modal' is where sub-menus open; it avoids the stack on narrow screens.",
   "nodes": [
     { "id": "root", "safe": true },
     { "id": "stack", "parent": "root", "anchor": "bottom_left", "dir": "column", "align": "stretch", "w": 250, "gap": 2 },
@@ -7,9 +7,11 @@
     { "id": "resume", "parent": "stack", "h": 34, "label": "Resume", "action": "resume" },
     { "id": "inventory", "parent": "stack", "h": 34, "label": "Inventory", "action": "inventory", "if": "world" },
     { "id": "settings", "parent": "stack", "h": 34, "label": "Settings", "action": "settings" },
-    { "id": "multiplayer", "parent": "stack", "h": 34, "label": "Multiplayer", "action": "multiplayer" },
+    { "id": "lobby", "parent": "stack", "h": 34, "label": "Lobby", "action": "lobby", "if": "lobby" },
+    { "id": "multiplayer", "parent": "stack", "h": 34, "label": "Multiplayer", "action": "multiplayer", "if": "!menu" },
     { "id": "invite", "parent": "stack", "h": 34, "label": "Invite friends", "action": "invite", "if": "steam" },
-    { "id": "leave", "parent": "stack", "h": 34, "label": "Disconnect", "action": "leave", "if": "online" },
+    { "id": "leave", "parent": "stack", "h": 34, "label": "Disconnect", "action": "leave", "if": "legacy_online" },
+    { "id": "mainmenu", "parent": "stack", "h": 34, "label": "Leave to main menu", "action": "mainmenu", "if": "menu" },
     { "id": "spacer", "parent": "stack", "h": 14 },
     { "id": "quit", "parent": "stack", "h": 34, "label": "Quit to desktop", "action": "quit" },
     { "id": "brand", "parent": "root", "anchor": "bottom_right", "w": 460, "h": 110 },

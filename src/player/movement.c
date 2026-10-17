@@ -306,6 +306,10 @@ void player_move_tick(World *w, int slot, PlayerSim *sim, PhysCharacter *ch, con
         const struct AnimLibrary *lib = g_engine.anim;
         float hspeed = v3_len(v3_flat(m->vel));
         m->body_yaw = anim_body_yaw_step(m->body_yaw, m->yaw, hspeed > 0.3f || m->mode != MOVE_WALK, lib ? &lib->proc : NULL, dt, &m->body_turning);
+        // Walk-cycle phase for the held item / camera bob: stepped from the replicated movement, so
+        // every machine simulating this player (owner, host, spectators) bobs in step
+        // (docs/SPECTATE.md "Determinism audit"). Wrapped at 1024 cycles (exact for bob freq 1).
+        m->stride = fmodf(m->stride + dt * (4.5f + hspeed * 1.1f), 2.0f * DG_PI * 1024.0f);
     }
     m->pitch = clampf(cmd->pitch, -89.0f * DG_DEG2RAD, 89.0f * DG_DEG2RAD);
     if (m->regrab_cooldown > 0) m->regrab_cooldown -= dt;
@@ -575,7 +579,7 @@ void player_move_tick(World *w, int slot, PlayerSim *sim, PhysCharacter *ch, con
     if (m->on_ground && m->vel.y < 0) m->vel.y = 0;
     if (!was_ground && m->on_ground) {
         m->land_speed = -prev_vy;
-        m->land_tick = w->tick;
+        m->land_tick = cmd->seq;   // the command, not the machine's world tick: identical on every machine
     }
     if (!m->on_ground && was_ground && !jumped) m->fall_start_y = m->pos.y;
     (void)slot;

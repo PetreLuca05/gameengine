@@ -17,7 +17,7 @@
 #include "vgeo_build.h"
 #include "vgeo_procgen_foliage.h"
 
-#define VG_TREE_VERSION 2        // bump when the import's output changes (cache key)
+#define VG_TREE_VERSION 3        // bump when the import's output changes (cache key)
 #define VG_TREE_MAX_MATERIALS 4
 #define VG_TREE_TEX_MAX 512      // textures are box-filtered down to this side (GPU memory, impostor bake)
 
@@ -29,7 +29,7 @@ typedef struct VgTreeSpecies {
     const char *file;            // source mesh in the tree directory
     u8 role;                     // VgTreeRole
     float weight;                // relative pick weight within the role
-    float height;                // m: ground to top at instance scale 1
+    float height_min, height_max;   // m: ground to top, the instance range (scale 1 = the middle)
     float sway, branch, flutter; // WPO_TREE amplitudes (m at full wind, weight 1)
     float fade_start, fade_end, shadow_max;   // m
     u32 atlas;                   // impostor atlas px (8 x 8 frames; 0 = none)
@@ -39,6 +39,11 @@ typedef struct VgTreeSpecies {
 
 u32 vgeo_tree_species_count(void);
 const VgTreeSpecies *vgeo_tree_species(u32 i);
+// The mesh height at instance scale 1 (m): the middle of the species range.
+float vgeo_tree_height(const VgTreeSpecies *sp);
+// The instance scale range of a species by foliage type name (height_min / max over the scale-1
+// height); false for a type that is not a tree species.
+bool vgeo_tree_scale_range(const char *name, float *lo, float *hi);
 
 // An RGBA8 texture (sRGB colour, linear alpha), box-filtered down to <= max_side.
 typedef struct VgTreeTexture { u8 *rgba; u32 w, h; } VgTreeTexture;

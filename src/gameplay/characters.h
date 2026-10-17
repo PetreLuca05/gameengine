@@ -99,6 +99,7 @@ typedef struct CharacterInst {
     vec3 hit_feet;                    // feet when the hitboxes were last built
     vec3 cl_prev_feet;                // client: zombie locomotion derived from the replicated motion
     float cl_speed;
+    float look_yaw, look_pitch;       // zombies: smoothed head / spine look at the nearest player (yaw relative to the body)
     bool is_player, local;
     int slot;
     u32 events_received[AEV_COUNT];

@@ -1,6 +1,7 @@
 #include "health.h"
 #include "weapons.h"
 #include "characters.h"
+#include "net/spectate.h"
 #include <stdio.h>
 
 void health_init(Health *h, float hp, float armor) {
@@ -90,6 +91,7 @@ float apply_damage_part(World *w, EntityId target, float amount, DamageType type
             p->sim.move.mode = MOVE_DEAD;
             p->respawn_timer = PLAYER_RESPAWN_TIME;
             p->deaths++;
+            spectate_on_death(w, victim_player, attacker_player);   // sv_respawn_time, the killer (auto spectate)
         }
         if (attacker_player >= 0 && attacker_player != victim_player && victim_player >= 0) w->players[attacker_player].kills++;
     }

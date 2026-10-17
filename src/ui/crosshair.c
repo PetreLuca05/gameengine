@@ -5,6 +5,7 @@
 #include "core/log.h"
 #include "core/platform.h"
 #include "game/game.h"
+#include "player/spectator.h"
 #include "gameplay/weapons.h"
 #include "render/render.h"
 #include "cJSON.h"
@@ -183,12 +184,17 @@ static void draw_hitmarker(Game *g, float cx, float cy, float s) {
 void crosshair_draw(float dt) {
     Game *g = game();
     World *w = game_world();
-    Player *p = game_local_player();
+    // The viewed player's crosshair: the local one, or a spectated player's in first person (its
+    // spread, sway and focus). Third person / free camera spectating: none.
+    Player *p = game_view_player();
+    int vs = game_view_slot();
     if (!g || !w || !p || p->sim.move.mode == MOVE_DEAD || g->menu_open || g->inventory_open || g->container_open) return;
+    if (spectator_mode() != SPEC_OFF && !spectator_first_person()) return;
+    const UserCmd *vcmd = game_view_cmd();
     const CrossStyle *st = &CH.st;
     float s = ui_height() / 1080.0f;
     float scr_w = ui_width(), scr_h = ui_height();
-    const WeaponDef *wd = weapon_equipped_def(w, g->local_slot);
+    const WeaponDef *wd = weapon_equipped_def(w, vs);
     bool gun = wd && wd->kind != WPN_MELEE;
     bool ads = gun && p->sim.wpn.ads_t > 0.5f;
 
@@ -198,7 +204,7 @@ void crosshair_draw(float dt) {
 
     // Where the next bullet goes: the view (+ sway); the camera adds the kick spring on top.
     float cx = scr_w * 0.5f, cy = scr_h * 0.5f;
-    vec2 sway = gun ? weapon_aim_offset_deg(wd, &p->sim.wpn, &p->sim.move, weapon_sway_time(g->last_cmd.seq) + g->alpha * SIM_DT) : v2(0, 0);
+    vec2 sway = gun ? weapon_aim_offset_deg(wd, &p->sim.wpn, &p->sim.move, weapon_sway_time(vcmd->seq) + g->alpha * SIM_DT) : v2(0, 0);
     vec3 aim = dir_from_angles(g->view.yaw - sway.x * DG_DEG2RAD, g->view.pitch + sway.y * DG_DEG2RAD);
     if (!CH.follow_kick->i) {
         vec2 px;
@@ -212,7 +218,7 @@ void crosshair_draw(float dt) {
     // Target tint: hitbox along the aim ray (enemies red, other players blue).
     u32 base = st->colors[DG_CLAMP(CH.color->i, 0, st->color_count - 1)];
     if (CH.target_color->i) {
-        EntityId t = weapon_trace_target(w, g->local_slot, g->view.eye, aim, gun ? fminf(wd->range, st->enemy_range) : 3.0f);
+        EntityId t = weapon_trace_target(w, vs, g->view.eye, aim, gun ? fminf(wd->range, st->enemy_range) : 3.0f);
         if (t && ent_valid(w, t)) {
             int ti = (int)ENT_INDEX(t);
             base = w->type[ti] == ET_PLAYER ? st->friendly : st->enemy;
@@ -226,7 +232,7 @@ void crosshair_draw(float dt) {
     if (!gun) {
         // Melee / empty hands: small dot, accent over interactables.
         float d = 4 * s;
-        u32 c = g->focus ? UI_RGBA(220, 130, 45, 255) : col;
+        u32 c = (vs == g->local_slot ? g->focus : (EntityId)vcmd->use_target) ? UI_RGBA(220, 130, 45, 255) : col;
         rect_ol(cx - d * 0.5f, cy - d * 0.5f, d, d, c, ocol, ow);
         draw_hitmarker(g, cx, cy, s);
         return;

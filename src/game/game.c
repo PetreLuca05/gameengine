@@ -1,6 +1,7 @@
 #include "gameplay/phone/phone.h"
 #include "gameplay/attachments.h"
 #include "game.h"
+#include "ui/mainmenu/mainmenu.h"
 #include "game_internal.h"
 #include "editor/handpose/hp_system.h"
 #include "editor/handpose/hp_editor.h"
@@ -27,6 +28,8 @@
 #include "render/render.h"
 #include "render/debug_draw.h"
 #include "net/net.h"
+#include "net/spectate.h"
+#include "player/spectator.h"
 #include "audio/audio.h"
 #include "ui/console.h"
 #include "ui/crosshair.h"
@@ -45,6 +48,23 @@ Player *game_local_player(void) {
     if (!G || !G->world || G->local_slot < 0) return NULL;
     Player *p = &G->world->players[G->local_slot];
     return p->active ? p : NULL;
+}
+
+int game_view_slot(void) {
+    int s = spectator_view_slot();
+    return s >= 0 ? s : (G ? G->local_slot : -1);
+}
+
+Player *game_view_player(void) {
+    int s = spectator_view_slot();
+    if (s < 0) return game_local_player();
+    Player *p = &G->world->players[s];
+    return p->active ? p : NULL;
+}
+
+const UserCmd *game_view_cmd(void) {
+    const UserCmd *c = spectator_view_cmd();
+    return c ? c : &G->last_cmd;
 }
 
 // ------------------------------------------------------------------ players
@@ -104,8 +124,9 @@ void game_respawn_player(World *w, int slot) {
     }
     int i = (int)ENT_INDEX(p->ent);
     health_init(&w->health[i], 100.0f, 0.0f);
-    w->flags[i] &= ~(u32)EF_DEAD;
+    w->flags[i] &= ~(u32)(EF_DEAD | EF_HIDDEN);   // hidden: joined dead (sv_join_dead)
     ent_set_pos(w, p->ent, pos, quat_yaw(yaw), true);
+    spectate_on_respawn(slot);
     GameEvent ev;
     memset(&ev, 0, sizeof(ev));
     ev.type = EV_RESPAWN;
@@ -245,6 +266,7 @@ void game_sim_player(World *w, int slot, const UserCmd *cmd, float dt, bool firs
     WeaponOutput wo;
     weapons_tick(w, slot, &p->sim, &c, pressed, dt, first, &wo);
     if (wo.fired || wo.swung) chars_notify_attack(w, slot, wo.swung, first);
+    spectator_note_kick(slot, c.seq, wo.view_kick);   // a watched player's camera carries its kick (spectator.c)
     if (first && p->local && G) {
         // Aim recoil + recovery rotate the real view (the next command carries it).
         G->view.yaw += wo.view_kick.x;
@@ -290,6 +312,7 @@ static void host_tick(World *w, const UserCmd *local_cmd) {
         if (!p->active) continue;
         if (p->local) {
             game_sim_player(w, s, local_cmd, SIM_DT, true);
+            p->last_processed_seq = local_cmd->seq;   // its local data acks it like a remote player's (spectators)
         } else {
             // Remote players simulate exactly once per received command (never on a guess), so
             // the host runs the same ticks the client predicted: movement, fire timing, recoil
@@ -307,12 +330,13 @@ static void host_tick(World *w, const UserCmd *local_cmd) {
         // Death / respawn
         int i = (int)ENT_INDEX(p->ent);
         if (w->flags[i] & EF_DEAD) {
-            p->respawn_timer -= SIM_DT;
-            if (p->respawn_timer <= 0) game_respawn_player(w, s);
+            if (p->respawn_timer > 0) p->respawn_timer -= SIM_DT;
+            if (spectate_respawn_ready(w, s)) game_respawn_player(w, s);   // sv_respawn_time / sv_respawn_mode
         }
         // Fell out of the world.
         if (p->sim.move.pos.y < -60.0f && p->sim.move.mode != MOVE_NOCLIP) game_respawn_player(w, s);
     }
+    spectate_host_tick(w);   // observers: targets still legal, auto-advance
     entities_tick(w, SIM_DT);
     projectiles_tick(w, SIM_DT);
     horde_host_tick(w, SIM_DT);   // horde zombies: tiers, steering, mover, attacks (before their animation)
@@ -337,7 +361,8 @@ static void host_tick(World *w, const UserCmd *local_cmd) {
 static void dispatch_events(World *w) {
     for (int k = 0; k < w->event_count; k++) {
         const GameEvent *ev = &w->events[k];
-        bool to_local = G->local_slot >= 0 && (ev->target == EVENT_ALL || ev->target == G->local_slot) && ev->except != G->local_slot;
+        // The same routing as remote players get (spectators see their target's HUD feedback).
+        bool to_local = G->local_slot >= 0 && spec_event_delivers(ev->target, ev->except, ev->type, G->local_slot, spectate_event_target(G->local_slot));
         if (to_local) game_handle_event(ev);
     }
     net_host_send_events(w);
@@ -353,7 +378,7 @@ static void dispatch_events(World *w) {
 // Shot hook: client-only cosmetic layers driven by every locally predicted shot.
 static void on_shot(const ShotEvent *ev, void *user) {
     (void)user;
-    if (!ev->local_view || !G) return;
+    if (!G || ev->slot != game_view_slot()) return;   // the viewed player's shots (local, or spectated)
     const WeaponCvars *wc = weapons_cvars();
     recoil_visual_kick(&ev->def->recoil, &G->recoil_vis, wc->visual_scale->f, ev->ads_t, ev->seed);
     // Shell casing out of the right side (bolt / pump guns eject when cycling instead).
@@ -366,13 +391,14 @@ static void on_shot(const ShotEvent *ev, void *user) {
 }
 
 static void weapon_feel_tick(void) {
-    Player *p = game_local_player();
-    const WeaponDef *d = p ? weapon_equipped_def(G->world, G->local_slot) : NULL;
+    Player *p = game_view_player();
+    int vs = game_view_slot();
+    const WeaponDef *d = p ? weapon_equipped_def(G->world, vs) : NULL;
     static RecoilParams fallback;
     if (!fallback.rpm) recoil_params_default(&fallback);
     recoil_visual_step(d && d->kind != WPN_MELEE ? &d->recoil : &fallback, &G->recoil_vis, SIM_DT);
     G->spread_prev = G->spread_cur;
-    G->spread_cur = p ? weapon_current_spread(G->world, G->local_slot) : 0;
+    G->spread_cur = p ? weapon_current_spread(G->world, vs) : 0;
     if (G->bolt_timer > 0) {
         G->bolt_timer -= SIM_DT;
         if (G->bolt_timer <= 0 && p && d && d->bolt_action) {
@@ -451,7 +477,12 @@ static UserCmd build_cmd(void) {
     if (G->noclip_request) { c.buttons |= BTN_NOCLIP; G->noclip_request = false; }
     if (G->menu_open || G->inventory_open || G->container_open || G->bench_open || console_is_open()) {
         c.move_x = c.move_y = 0;
-        c.buttons &= (u16)(BTN_CROUCH | BTN_NOCLIP | BTN_FLASHLIGHT | BTN_PHONE);
+        c.buttons &= (u16)(BTN_CROUCH | BTN_NOCLIP | BTN_FLASHLIGHT | BTN_PHONE | BTN_VEH_CAM);
+    }
+    if (spectator_controls_input()) {
+        // Spectating: the keys drive the spectator controls, the own (dead / dev) player stands still.
+        c.move_x = c.move_y = 0;
+        c.buttons &= (u16)(BTN_CROUCH | BTN_NOCLIP);
     }
     if (G->magdump_ticks > 0) magdump_cmd(&c);
     c.slot = G->hotbar_slot;
@@ -499,15 +530,18 @@ void game_cl_reconcile(const PlayerSim *server, u32 ack_seq) {
 }
 
 static void tick(void) {
-    Player *lp = game_local_player();
-    G->ads_prev = lp ? lp->sim.wpn.ads_t : 0.0f;
+    Player *vp = game_view_player();
+    G->ads_prev = vp ? vp->sim.wpn.ads_t : 0.0f;
     UserCmd cmd = build_cmd();
     G->last_cmd = cmd;
     World *w = G->world;
     if (G->mode == GM_HOST) {
+        // The host's own commands go to its spectators like a remote player's (docs/SPECTATE.md).
+        spectate_host_cmds(w, G->local_slot, &cmd, 1, platform_wall_ms());
         host_tick(w, &cmd);
         dispatch_events(w);
         net_host_after_tick(w);
+        spectator_tick(w);
     } else if (G->mode == GM_CLIENT) {
         G->cmd_history[cmd.seq % CMD_HISTORY] = cmd;
         net_client_send_cmds(G->cmd_history, CMD_HISTORY, cmd.seq);
@@ -517,6 +551,7 @@ static void tick(void) {
             game_sim_player(w, G->local_slot, &cmd, SIM_DT, true);
             chars_local_predict(w, G->local_slot, true);
         }
+        spectator_tick(w);   // the watched player: relayed commands through the same path
         g_chars_force_phys_step = vehicles_client_tick(w, &cmd);
         chars_client_tick(w, net_client_render_tick(), SIM_DT);
         vehicles_client_post(w, cmd.seq);
@@ -524,8 +559,9 @@ static void tick(void) {
         w->tick++;
     }
     // Render-side character work at tick rate (LOD-scaled post-pass, ragdolls).
-    chars_present_tick(w, G->view.eye, G->view.fov > 1 ? G->view.fov : 75.0f, (float)render_height(), SIM_DT, G->local_slot);
+    chars_present_tick(w, G->view.eye, G->view.fov > 1 ? G->view.fov : 75.0f, (float)render_height(), SIM_DT, game_view_slot());
     weapon_feel_tick();
+    spectator_dump_tick(w, cmd.seq);
 }
 
 // ------------------------------------------------------------------ focus
@@ -603,7 +639,7 @@ static void handle_hotbar(void) {
 // ADS progress is simulated at the tick rate; the zoom and the sight presentation use it
 // interpolated to the frame so aiming in and out is smooth at any frame rate.
 float game_ads_vis(void) {
-    Player *p = game_local_player();
+    Player *p = game_view_player();
     if (!p) return 0.0f;
     return saturate(lerpf(G->ads_prev, p->sim.wpn.ads_t, saturate(G->alpha)));
 }
@@ -616,7 +652,8 @@ void game_frame(float dt) {
     G->frame_look = ui_blocking ? v2(0, 0) : f.look_delta;
     camera_apply_look(&G->view, G->frame_look);
     vehicles_view_frame(&G->view);
-    if (!ui_blocking) handle_hotbar();
+    if (!ui_blocking && !spectator_controls_input()) handle_hotbar();
+    spectator_frame(dt);   // spectator controls, death camera -> spectate, free camera
     G->use_pressed_frame = !ui_blocking && input_peek_press(ACT_USE);
     // The interaction may finish inside this frame's tick (pickups vanish): remember its target
     // for the hand reach.
@@ -685,8 +722,12 @@ static bool load_map(World *w, const char *map) {
     return ok;
 }
 
-bool game_host(const char *map) {
-    net_stop();
+bool game_host(const char *map) { return game_host_ex(map, 0); }
+
+// flags: GH_KEEP_NET (a lobby session is starting its game: the connected players stay connected and
+// are welcomed after the load), GH_NO_AUTOHOST (main menu background: not reachable on the LAN).
+bool game_host_ex(const char *map, u32 flags) {
+    if (!(flags & GH_KEEP_NET)) net_stop();
     destroy_world();
     G->world = world_create(true, &G->items);
     dg_strcpy(G->map, sizeof(G->map), map);
@@ -703,6 +744,8 @@ bool game_host(const char *map) {
     handpose_system_scan(G->world, false);   // interactables placed in this level
     flesh_fx_clear();
     horde_level_reset();
+    spectate_reset();
+    spectator_reset();
     G->mode = GM_HOST;
     G->local_slot = 0;
     G->client_seq = 0;
@@ -711,7 +754,7 @@ bool game_host(const char *map) {
     memset(&G->view, 0, sizeof(G->view));
     game_spawn_player(G->world, 0, G->cl_name->str, true, -1);
     G->view.yaw = G->world->players[0].sim.move.yaw;
-    if (G->net_autohost->i) net_host(TRANSPORT_LAN, (u16)cvar_find("net_port")->i);
+    if (G->net_autohost->i && !(flags & (GH_KEEP_NET | GH_NO_AUTOHOST))) net_host(TRANSPORT_LAN, (u16)cvar_find("net_port")->i);
     log_info("game: hosting '%s'", G->map);
     return true;
 }
@@ -728,6 +771,7 @@ void game_cl_welcome(int slot, const char *map, u32 seed, u32 server_tick) {
     handpose_system_scan(G->world, false);   // interactables placed in this level
     flesh_fx_clear();
     horde_level_reset();
+    spectator_reset();
     G->mode = GM_CLIENT;
     G->local_slot = slot;
     G->client_seq = 0;
@@ -747,6 +791,11 @@ void game_cl_disconnected(const char *reason) {
 
 void game_disconnect_to_local(const char *reason) {
     net_stop();
+    // Main menu builds (not --test): a lost / left session returns to the menu.
+    if (mainmenu_enabled()) {
+        mainmenu_enter(reason);
+        return;
+    }
     char hint[64];
     snprintf(hint, sizeof(hint), "Disconnected: %s", reason ? reason : "");
     game_host(G->g_map->str);
@@ -756,10 +805,21 @@ void game_disconnect_to_local(const char *reason) {
 int game_sv_player_join(int peer, const char *name) {
     World *w = G->world;
     if (!w || G->mode != GM_HOST) return -1;
+    bool join_dead = spectate_join_dead(w);   // sv_join_dead: before the joiner counts as alive
     for (int s = 0; s < MAX_PLAYERS; s++) {
         if (w->players[s].active) continue;
         game_spawn_player(w, s, name, false, peer);
         ev_hint(w, -1, "%s joined", name);
+        if (join_dead) {
+            // Late joiner: dead and hidden until the respawn rules let it in, spectating meanwhile.
+            Player *p = &w->players[s];
+            int i = (int)ENT_INDEX(p->ent);
+            w->flags[i] |= EF_DEAD | EF_HIDDEN;
+            w->health[i].hp = 0;
+            p->sim.move.mode = MOVE_DEAD;
+            spectate_on_death(w, s, -1);
+            spectate_request(w, s, SPEC_IN_EYE, SPEC_REQ_AUTO, false);
+        }
         return s;
     }
     return -1;
@@ -770,6 +830,7 @@ void game_sv_player_leave(int slot) {
     if (!w || slot < 0 || slot >= MAX_PLAYERS) return;
     char name[32];
     dg_strcpy(name, sizeof(name), w->players[slot].name);
+    spectate_player_left(slot);
     game_remove_player(w, slot);
     ev_hint(w, -1, "%s left", name);
 }
@@ -801,6 +862,7 @@ void game_sv_receive_cmd(int slot, const UserCmd *cmd) {
 static void cmd_map(int argc, const char **argv) {
     if (argc < 2) { log_info("usage: map <devroom|streaming|flat>"); return; }
     cvar_set_cv(G->g_map, argv[1]);
+    if (mainmenu_active()) mainmenu_session_started();   // map from the console: the menu closes
     game_host(argv[1]);
 }
 
@@ -894,9 +956,15 @@ static void cmd_bench(int argc, const char **argv) {
 
 static void cmd_noclip(int argc, const char **argv) { G->noclip_request = true; }
 
+// kill [player slot]: suicide, or (host, tests) kill another player.
 static void cmd_kill(int argc, const char **argv) {
     if (G->mode != GM_HOST) return;
     Player *p = game_local_player();
+    if (argc > 1) {
+        int s = atoi(argv[1]);
+        p = s >= 0 && s < MAX_PLAYERS && G->world->players[s].active ? &G->world->players[s] : NULL;
+        if (!p) { log_warn("kill: no player in slot %d", s); return; }
+    }
     if (p) apply_damage(G->world, p->ent, 10000, DMG_GENERIC, p->ent, p->sim.move.pos, v3(0, 0, 0), false);
 }
 
@@ -1267,7 +1335,7 @@ void game_init(void) {
     cmd_register("bench", cmd_bench, "toggle the weapon bench (attachments) UI");
     cmd_register("attach", cmd_attach, "attach <slot> <attachment|none>: weapon attachments of the equipped weapon (no args: list)");
     cmd_register("noclip", cmd_noclip, "toggle noclip (sv_cheats)");
-    cmd_register("kill", cmd_kill, "suicide");
+    cmd_register("kill", cmd_kill, "kill [player slot]: suicide (host: or another player)");
     cmd_register("damage", cmd_damage, "damage <amount>: hurt yourself (testing)");
     cmd_register("setpos", cmd_setpos, "teleport: setpos x y z [yaw] [pitch]");
     cmd_register("getpos", cmd_getpos, "print position");
@@ -1298,6 +1366,7 @@ void game_init(void) {
     recoil_debug_init();
     camera_register_cvars();
     camera_fp_register_cvars();
+    spectator_init();
     game_holdpoint_register();
     handpose_system_init();
     scenes_init();
