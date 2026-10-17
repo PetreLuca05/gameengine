@@ -39,13 +39,13 @@ void ssky_config_default(ShadowSkyConfig *c) {
     c->wide_deg = 2.0f;
     c->wide_hyst = 0.15f;
     c->smooth_s = 1.0f;
-    c->pcf_step_deg[0] = 0.5f;
-    c->pcf_step_deg[1] = 1.5f;
-    c->pcf_hyst = 0.15f;
-    c->era_pcf = 1.0f;
+    c->pcf_ref_m = 2.0f;
+    c->min_texels = 1.0f;
+    c->era_pcf = 1.5f;
+    c->mode_s = 0.12f;
     c->pcss_search_m = 30.0f;
-    c->pcss_max_texels[0] = 2.0f;
-    c->pcss_max_texels[1] = 6.0f;
+    c->pcss_max_texels[0] = 4.0f;
+    c->pcss_max_texels[1] = 8.0f;
     c->pcss_max_texels[2] = 32.0f;
     c->contact_px = 1.5f;
     static const float ec[] = { 0.0f, 0.0f, 0.5f, 0.1f, 0.9f, 0.3f, 1.0f, 0.3f };
@@ -124,13 +124,10 @@ bool ssky_config_parse(ShadowSkyConfig *c, const char *json, char *err, int err_
     const cJSON *fi = cJSON_GetObjectItemCaseSensitive(r, "filter");
     n.wide_deg = jf(fi, "wide_deg", n.wide_deg);
     n.wide_hyst = jf(fi, "wide_hyst", n.wide_hyst);
-    const cJSON *ps = cJSON_GetObjectItemCaseSensitive(fi, "pcf_step_deg");
-    if (cJSON_IsArray(ps) && cJSON_GetArraySize(ps) == 2) {
-        n.pcf_step_deg[0] = (float)cJSON_GetArrayItem(ps, 0)->valuedouble;
-        n.pcf_step_deg[1] = (float)cJSON_GetArrayItem(ps, 1)->valuedouble;
-    }
-    n.pcf_hyst = jf(fi, "pcf_hyst", n.pcf_hyst);
+    n.pcf_ref_m = jf(fi, "pcf_ref_m", n.pcf_ref_m);
+    n.min_texels = jf(fi, "min_texels", n.min_texels);
     n.era_pcf = jf(fi, "era_pcf", n.era_pcf);
+    n.mode_s = jf(fi, "mode_s", n.mode_s);
     n.pcss_search_m = jf(fi, "pcss_search_m", n.pcss_search_m);
     const cJSON *pm = cJSON_GetObjectItemCaseSensitive(fi, "pcss_max_texels");
     if (cJSON_IsArray(pm) && cJSON_GetArraySize(pm) == 3)
@@ -145,7 +142,10 @@ bool ssky_config_parse(ShadowSkyConfig *c, const char *json, char *err, int err_
     n.wet_darken = jf(gr, "wet_darken", n.wet_darken);
     cJSON_Delete(r);
     if (ok && !(n.cutoff_on > n.cutoff_off && n.cutoff_off >= 0.0f)) { snprintf(err, (size_t)err_size, "cutoff: need 0 <= off < on"); ok = false; }
-    if (ok && !(n.pcf_step_deg[1] > n.pcf_step_deg[0])) { snprintf(err, (size_t)err_size, "filter.pcf_step_deg must increase"); ok = false; }
+    if (ok && !(n.pcf_ref_m > 0.0f && n.min_texels >= 0.5f && n.pcss_max_texels[0] >= n.min_texels)) {
+        snprintf(err, (size_t)err_size, "filter: need pcf_ref_m > 0, min_texels >= 0.5, pcss_max_texels >= min_texels");
+        ok = false;
+    }
     if (ok && !(n.wide_deg > 0.0f && n.sun_radius_deg > 0.0f && n.moon_radius_deg > 0.0f)) { snprintf(err, (size_t)err_size, "radii must be > 0"); ok = false; }
     if (ok) *c = n;
     return ok;
@@ -263,19 +263,25 @@ void ssky_update(ShadowSkyState *s, const ShadowSkyConfig *c, const ShadowSkyInp
     if (s->wide && s->near_w < 0.01f) s->near_w = 0.0f;
     if (!s->wide && s->near_w > 0.99f) s->near_w = 1.0f;
     out->near_weight = key->cast ? s->near_w : 1.0f;
-    // PCF steps (softness 0) / fixed hardness (era 2010).
-    int step = s->pcf_step < 0 ? 0 : s->pcf_step;
-    if (snap) step = r > c->pcf_step_deg[1] ? 2 : r > c->pcf_step_deg[0] ? 1 : 0;
+    // One filter for every tier: the half width is d x tan(r) in metres with d measured (PCSS) or
+    // assumed (pcf_ref_m). A tier change (Engine Fidelity) only moves the PCSS weight and the
+    // max width, both over mode_s: no discrete switch of the filter between frames.
+    int soft = DG_CLAMP(in->softness, 0, 2);
+    float pcss_target = soft >= 2 && !in->fixed_hardness ? 1.0f : 0.0f;
+    float max_target = c->pcss_max_texels[soft];
+    if (snap || s->max_tex <= 0.0f) { s->pcss_w = pcss_target; s->max_tex = max_target; }
     else {
-        if (step < 2 && r > c->pcf_step_deg[step] * (1.0f + c->pcf_hyst)) step++;
-        if (step > 0 && r < c->pcf_step_deg[step - 1] * (1.0f - c->pcf_hyst)) step--;
+        s->pcss_w = approach(s->pcss_w, pcss_target, dt, c->mode_s);
+        s->max_tex = approach(s->max_tex, max_target, dt, c->mode_s);
+        if (fabsf(s->pcss_w - pcss_target) < 1e-3f) s->pcss_w = pcss_target;
     }
-    s->pcf_step = step;
-    float pcf_target = in->fixed_hardness ? c->era_pcf : (float)step;
-    s->pcf = snap ? pcf_target : approach(s->pcf, pcf_target, dt, c->smooth_s * 0.5f);
-    out->pcf_radius = s->pcf;
-    out->filter_model = in->fixed_hardness ? 0 : DG_CLAMP(in->softness, 0, 2);
-    out->pcss_max_texels = c->pcss_max_texels[DG_CLAMP(in->softness, 0, 2)];
+    out->filter_model = in->fixed_hardness ? 0 : soft;
+    if (s->pcss_w > 0.0f && out->filter_model < 2) out->filter_model = 2;   // the blocker search runs while PCSS fades
+    out->pcss_weight = s->pcss_w;
+    out->pcf_ref_m = c->pcf_ref_m;
+    out->min_texels = c->min_texels;
+    out->fixed_texels = in->fixed_hardness ? c->era_pcf : 0.0f;
+    out->pcss_max_texels = s->max_tex;
     out->pcss_search_m = c->pcss_search_m;
     out->contact_px = c->contact_px;
     // Cloud patches (the cloud shadow map) and their drift: the weather wind at the layer.

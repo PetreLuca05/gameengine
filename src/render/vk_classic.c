@@ -1005,7 +1005,7 @@ void vkc_frame(const VgScene *s, const VgDisplace *disp, float density, float lo
             t.m[13] = (k >> 1) ? 0.5f : -0.5f;
             planes_of(mat4_mul(mat4_inverse(t), R->shadow_vps[k]), v.planes);
             v.ortho = v.shadow = true;
-            v.px_scale = (float)tile / (2.0f * (&R->shadow_splits.x)[k]);
+            v.px_scale = (float)tile / (2.0f * R->shadow_radius[k]);   // the tile's half extent (render.c)
             v.lod_px = shadow_px;
             v.era2010 = false;
             C.tmp_n = 0;

@@ -473,13 +473,13 @@ static void tab_graphics(GuiCursor *c, GuiRect content) {
     }
 
     section(c, "Shadows & lighting");
-    static const char *const shadow[] = { "Off", "Low (1024)", "Medium (2048)", "High (4096)" };
+    static const char *const shadow[] = { "Off", "Low (1024 / cascade)", "Medium (2048 / cascade)", "High (4096 / cascade)" };
     row_fid_combo(c, "Shadows", FF_SHADOW_QUALITY, shadow, NULL, 4, NULL);
     static const char *const casc[] = { "1", "2", "3" };
     static const int casc_v[] = { 1, 2, 3 };
     row_fid_combo(c, "Shadow cascades", FF_SHADOW_CASCADES, casc, casc_v, 3, NULL);
     row_fid_slider(c, "Shadow distance", FF_SHADOW_DISTANCE, 0.25f, 1.0f, 0.05f, "%.2fx", NULL);
-    static const char *const filt[] = { "Basic (3 steps)", "Contact-hardening", "Full (sky-driven)" };
+    static const char *const filt[] = { "PCF (12 taps)", "PCF (16 taps)", "Contact-hardening (PCSS)" };
     row_fid_combo(c, "Shadow softness", FF_SHADOW_FILTER, filt, NULL, 3, "Softness follows the sky: crisp under the sun, soft in haze, none under overcast.");
     row_fid_slider(c, "Skip shadows of props under", FF_SHADOW_MIN_RADIUS, 0, 4, 0.25f, "%.2f m", "Small props cast no sun shadow (cheaper).");
     row_fid_toggle(c, "Lamp / flashlight shadows", FF_LIGHT_SHADOWS, NULL);

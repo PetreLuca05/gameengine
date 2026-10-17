@@ -6,9 +6,11 @@
 //              (direct x shadow + sky SH x AO, ambient scale 1) already gives it, the driver only
 //              decides when the cast shadow is worth drawing (cutoff with hysteresis + fade)
 //   softness   the effective angular radius of the source: the disc (sun 0.265 deg) widened by the
-//              aureole of haze, thin cloud, fog and rain (shadows_sky.json curves). PCSS penumbra
-//              half width = blocker distance x tan(radius); past wide_deg cascade 0 fades out
-//              (wide blur from cascade 1), under the cutoff the passes are skipped
+//              aureole of haze, thin cloud, fog and rain (shadows_sky.json curves). Penumbra half
+//              width = d x tan(radius), d the blocker distance: measured (PCSS, weight pcss_weight)
+//              or assumed (pcf_ref_m, the PCF tiers); one continuous filter, no discrete modes; past
+//              wide_deg cascade 0 fades out (wide blur from cascade 1), under the cutoff the passes
+//              are skipped after the fade
 //   clouds     a uniform sheet (veil) attenuates the direct light: exp(-tau / mu); the cloud
 //              shadow map adds the patches (cumulus tau) and drifts with the weather wind aloft
 //   moon       the sun owns the cascades while any of its disc is up, the moon after that; while
@@ -52,9 +54,12 @@ typedef struct ShadowSkyConfig {
     // Wide mode: cascade 0 fades out past wide_deg, back under wide_deg x (1 - wide_hyst).
     float wide_deg, wide_hyst;
     float smooth_s;                          // time constant of radius / fade / weights (s)
-    // Low tiers: PCF steps 1 tap / 3 x 3 / 5 x 5 by radius (deg), step hysteresis.
-    float pcf_step_deg[2], pcf_hyst;
-    float era_pcf;                           // fixed-hardness era (2010): this PCF radius always
+    // One filter (docs/SHADOWS.md "The filter"): half width = d x tan(r) in metres, d measured by the
+    // blocker search (PCSS tier) or pcf_ref_m (PCF tiers), clamped to [min_texels, max] texels.
+    float pcf_ref_m;                         // PCF tiers: assumed blocker distance (m)
+    float min_texels;                        // smallest filter half width (texels): no aliased edges
+    float era_pcf;                           // fixed-hardness era (2010): this half width (cascade 0 texels, kept in metres)
+    float mode_s;                            // time constant of a tier change (PCF <-> PCSS, max width), s
     // PCSS: blocker search distance (m), max filter half width (texels) per softness tier.
     float pcss_search_m;
     float pcss_max_texels[3];
@@ -78,7 +83,7 @@ typedef struct ShadowSkyInput {
     float fog, precip, snow, wetness;        // 1/m, 0..1, 0..1, 0..1
     float mie_scale;                         // aerosols (1 = clear)
     float wind_dir_deg, wind_speed;          // weather wind (towards, 0 = -Z, 90 = +X), m/s
-    int softness;                            // fidelity: 0 PCF steps, 1 PCSS limited, 2 full PCSS
+    int softness;                            // fidelity: 0 PCF (12 taps), 1 PCF (16 taps), 2 PCSS + wide mode
     bool moon_shadows;                       // fidelity: the moon tile while the sun owns the cascades
     bool fixed_hardness;                     // era 2010: one PCF radius, contrast still physical
 } ShadowSkyInput;
@@ -95,8 +100,8 @@ typedef struct SskyLight {
 typedef struct ShadowSkyState {
     bool init;
     bool cast[2], wide;
-    int pcf_step;
-    float fade[2], radius[2], near_w, pcf;
+    float fade[2], radius[2], near_w;
+    float pcss_w, max_tex;                   // tier crossfade (filter_model / pcss_max_texels targets)
     vec2 cloud_offset;
 } ShadowSkyState;
 
@@ -108,9 +113,11 @@ typedef struct ShadowSkyOut {
     float veil_tau, veil_t;                  // sheet optical depth, its transmittance at the key
     float cumulus_tau;                       // cloud shadow map depth (0 = no cloud shadows)
     float near_weight;                       // cascade 0 weight (0 = wide mode: not drawn)
-    int filter_model;                        // 0 PCF steps (also the 2010 era), 1 PCSS limited, 2 full PCSS
-    float pcf_radius;                        // filter model 0: PCF radius (texels, fractional ring)
-    float pcss_max_texels, pcss_search_m;
+    int filter_model;                        // tap budget: 0 PCF 12 taps, 1 PCF 16 taps, 2 PCSS 16 + 16
+    float pcss_weight;                       // 0 .. 1: measured vs assumed blocker distance (smoothed over mode_s)
+    float pcf_ref_m, min_texels;             // assumed blocker distance (m), smallest half width (texels)
+    float fixed_texels;                      // era 2010: fixed half width (cascade 0 texels), 0 = from the sky
+    float pcss_max_texels, pcss_search_m;    // max half width (texels, smoothed over mode_s), search (m)
     float contact_px;                        // contact shadow ray: until the penumbra spans this many px
     vec2 cloud_offset, cloud_vel;            // m, m/s
     float exposure_comp;                     // EV

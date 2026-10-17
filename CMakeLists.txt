@@ -459,6 +459,15 @@ if(MSVC)
   target_compile_options(test_shadow_sky PRIVATE /W3 /wd4100 /wd4201 /utf-8)
 endif()
 add_test(NAME shadow_sky COMMAND test_shadow_sky WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+add_executable(test_shadow_csm tests/test_shadow_csm.c src/render/shadow_csm.c third_party/cjson/cJSON.c)
+set_target_properties(test_shadow_csm PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
+target_include_directories(test_shadow_csm PRIVATE src third_party/cjson)
+if(MSVC)
+  target_compile_options(test_shadow_csm PRIVATE /W3 /wd4201 /utf-8)
+else()
+  target_link_libraries(test_shadow_csm PRIVATE m)
+endif()
+add_test(NAME shadow_csm COMMAND test_shadow_csm WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
 
 # Foliage wind (docs/FOLIAGE_WIND.md): the wind field (gust fronts, tile, springs, sources), the Crysis
 # vegetation WPO CPU mirror (trunk length, layer linearity, phase decorrelation, bounds), the Tree It

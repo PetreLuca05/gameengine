@@ -517,6 +517,23 @@ mat4 render_view_proj(void);
 int render_width(void);
 int render_height(void);
 RenderStats render_stats(void);
+// Sun shadow state of the last built frame (docs/SHADOWS.md: shadow_info, r_shadow_debug 1 / 8,
+// shadow_switch_stress).
+typedef struct RenderShadowInfo {
+    int cascades;
+    unsigned tile, vm_tile;                 // texels per atlas tile / viewmodel map
+    float split[3], radius[3], texel_m[3];  // selection distance, sphere radius, texel size (m)
+    float bias_m[3], nbias_m[3];            // constant / normal offset bias (m)
+    vec3 center[4];                         // snapped sphere centres (3: the moon tile)
+    float moon_radius, distance, low_sun;
+    vec3 light_dir;                         // towards the key light
+    bool active[4], vm_active, taa;
+    vec3 vm_center;
+    float vm_radius, vm_texel_m, vm_pcss;
+    float pcss_w, max_texels, fade;         // filter state as uploaded (ssky / shadow_cfg)
+    unsigned unrendered;                    // frames that sampled an unrendered tile (must stay 0)
+} RenderShadowInfo;
+void render_shadow_info(RenderShadowInfo *out);
 const char *render_device_name(void);
 
 DG_INLINE u32 rgba8(float r, float g, float b, float a) {

@@ -71,8 +71,8 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 sky_flags;       // x environment + SH valid, y ambient scale, z environment mips, w cloud shadow valid
     vec4 cshadow;         // xy cloud shadow origin (world xz), z 1 / size
     mat4 shadow_vps[3];   // cascaded shadow maps: world -> atlas tile (2 x 2 atlas)
-    vec4 shadow_splits;   // x, y, z: cascade radii (m), w: cascade count
-    vec4 shadow_bias;     // x, y, z: per-cascade depth bias scale (constant bias in metres)
+    vec4 shadow_splits;   // x, y, z: cascade selection distances (m from the camera), w: cascade count
+    vec4 shadow_bias;     // x, y, z: constant depth bias per cascade (NDC, from its texel size), w the moon tile
     vec4 spot_info;       // x spot light count, y cookie valid
     SpotLight spots[MAX_SPOT_LIGHTS];
     // Weather (shaders/weather.glsl)
@@ -93,17 +93,26 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 surf_info;       // y: surface layers loaded (shaders/surfaces.glsl)
     // Sky-driven shadows (src/render/shadow_sky.c, docs/SHADOWS.md)
     mat4 shadow_vp_moon;  // world -> atlas tile 3 (the moon while the sun owns the cascades)
-    vec4 ssky0;           // x tan(key source radius), y cast fade, z cascade 0 weight (0: wide mode), w softness model (0 PCF steps, 1 PCSS limited, 2 full)
-    vec4 ssky1;           // x PCF radius (texels, model 0 / era), y PCSS max filter half width (texels), z blocker search (m), w moon tile fade (0 = off)
+    vec4 ssky0;           // x tan(key source radius), y cast fade, z cascade 0 weight (0: wide mode), w tap budget (0 PCF 12, 1 PCF 16, 2 PCSS 16 + 16)
+    vec4 ssky1;           // x unused, y max filter half width (texels), z blocker search (m), w moon tile fade (0 = off)
     vec4 ssky2;           // x tan(moon source radius), y r_shadow_debug view, z contact shadow length scale, w moon tile fade-out radius (m)
     vec4 shadow_mpt;      // metres per texel: cascades 0..2, w the moon tile
     vec4 shadow_span;     // metres of light-space depth per NDC unit: cascades 0..2, w the moon tile
     vec4 lod_fade;        // LOD cross-fades (shaders/lod_fade.glsl): x dither frame, y debug bits, z new fades on, w terrain detail scale
     vec4 lod_terrain;     // x terrain geomorph band (octaves), y chunk diagonal (m)
+    // Cascade fit, bias, filter state, the viewmodel tile (src/render/shadow_csm.c, docs/SHADOWS.md)
+    mat4 shadow_vp_vm;    // world -> the viewmodel shadow map (bindings 16 / 17)
+    vec4 shadow_nbias;    // normal offset (m) per cascade 0..2, w the moon tile
+    vec4 shadow_cfg;      // x kernel rotation per frame (TAA on), y PCSS weight, z PCF blocker distance (m), w smallest half width (texels)
+    vec4 shadow_cfg2;     // x fixed half width (m, era 2010; 0 = from the sky), y low-sun factor (1 .. 3), z shadow distance (m), w viewmodel FOV scale
+    vec4 shadow_vm;       // x metres per texel, y metres per NDC depth, z on (0 = off), w normal offset (m)
+    vec4 shadow_vm2;      // x 1 / map size, y constant bias (NDC), z world-cascade skip (m), w PCSS weight of the viewmodel tile
 } frame;
 
 layout(set = 0, binding = 1) uniform sampler2DShadow shadow_map;
 layout(set = 0, binding = 15) uniform sampler2D shadow_depth;          // the same atlas, raw depth (PCSS blocker search)
+layout(set = 0, binding = 16) uniform sampler2DShadow shadow_vm_map;  // the viewmodel tile (first-person rig)
+layout(set = 0, binding = 17) uniform sampler2D shadow_vm_depth;       // the same, raw depth
 layout(set = 0, binding = 11) uniform sampler2DShadow local_shadow;   // point / spot light shadow atlas
 // Time-of-day sky (src/render/sky): environment (octahedral), SH9 irradiance, cloud shadow.
 layout(set = 0, binding = 5) uniform sampler2D sky_env;
@@ -116,10 +125,13 @@ layout(set = 0, binding = 9) uniform sampler2D wx_occl;
 layout(set = 0, binding = 10) uniform sampler2D wx_puddles;
 
 // Shadow passes (shadow.vert / skin_shadow.vert): flags.w selects the view: 0-2 sun cascades, 3 the
-// rain occlusion map, 4+ a local light atlas tile, SHADOW_PASS_MOON the moon tile.
+// rain occlusion map, 4+ a local light atlas tile, SHADOW_PASS_MOON the moon tile, SHADOW_PASS_VM
+// the viewmodel tile.
 #define SHADOW_PASS_MOON 0x10000u
+#define SHADOW_PASS_VM 0x20000u
 mat4 shadow_pass_vp(uint idx) {
     if (idx == SHADOW_PASS_MOON) return frame.shadow_vp_moon;
+    if (idx == SHADOW_PASS_VM) return frame.shadow_vp_vm;
     if (idx >= 4u) return frame.local_vps[min(idx - 4u, uint(LOCAL_SHADOW_TILES - 1))];
     return idx == 3u ? frame.occl_vp : frame.shadow_vps[min(idx, 2u)];
 }

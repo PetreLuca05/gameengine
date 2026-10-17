@@ -566,6 +566,23 @@ bool daynight_preset_time(World *w, float elev_deg, bool moon_full) {
     return true;
 }
 
+// The morning sun: from noon backwards, the last time the sun is still above elev_deg.
+bool daynight_preset_morning(World *w, float elev_deg) {
+    if (!w || !w->authority || !w->tod.version) return false;
+    double day = floor(tod_days(&w->tod, (double)w->tick));
+    TodSky sk;
+    float found = 12.0f;
+    for (float hh = 12.0f; hh > 0.1f; hh -= 1.0f / 120.0f) {
+        tod_sky(&DN.cfg, day + hh / 24.0, &sk);
+        if (sk.sun_elev * DG_RAD2DEG <= elev_deg) { found = hh + 1.0f / 120.0f; break; }
+    }
+    tod_set_time(&w->tod, (double)w->tick, found);
+    DN.host_last_days = tod_days(&w->tod, w->tick);
+    DN.key_init = false;
+    DN.second_init = false;
+    return true;
+}
+
 // tod_demo: 24 h in 60 s, then the previous speed.
 static void cmd_tod_demo(int argc, const char **argv) {
     World *w = host_world("tod_demo");

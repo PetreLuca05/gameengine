@@ -1,0 +1,139 @@
+// Cascaded sun shadow layout: splits, sector sphere fit, texel snapping, bias and kernel from the
+// texel size, the viewmodel tile (shadow_csm.h, docs/SHADOWS.md "Cascades").
+#include "render/shadow_csm.h"
+#include <math.h>
+#include <stdio.h>
+
+u32 csm_tile_texels(int quality) {
+    switch (quality) { case 1: return 1024; case 2: return 2048; case 3: return 4096; default: return 8; }
+}
+
+u32 csm_vm_texels(int quality) {
+    if (quality <= 0) return 8;
+    return quality >= 2 ? 2048 : 1024;
+}
+
+void csm_sector_sphere(float s, float tan_corner, float *ahead, float *radius) {
+    float th = atanf(fmaxf(tan_corner, 0.0f));
+    if (th >= 0.25f * DG_PI) {
+        // Wide: the cap circle's own sphere already holds the apex and the cap top.
+        *ahead = s * cosf(th);
+        *radius = s * sinf(th);
+    } else {
+        // Narrow: equidistant from the apex and the cap rim.
+        *ahead = *radius = s / (2.0f * cosf(th));
+    }
+}
+
+void csm_layout(const CsmParams *p, CsmLayout *out) {
+    int n = DG_CLAMP(p->cascades, 1, CSM_MAX);
+    float D = fmaxf(p->distance, CSM_NEAR * 2.0f);
+    float tv = tanf(fmaxf(p->fov_y_deg, CSM_FIT_FOV_MIN) * 0.5f * DG_DEG2RAD);
+    float th = tv * fmaxf(p->aspect, 0.1f);
+    float tc = sqrtf(tv * tv + th * th);
+    out->count = n;
+    for (int k = 0; k < CSM_MAX; k++) {
+        int i = DG_MIN(k, n - 1) + 1;
+        float t = (float)i / (float)n;
+        float lg = CSM_NEAR * powf(D / CSM_NEAR, t), un = CSM_NEAR + (D - CSM_NEAR) * t;
+        float s = i == n ? D : CSM_LAMBDA * lg + (1.0f - CSM_LAMBDA) * un;
+        out->split[k] = s;
+        float r;
+        csm_sector_sphere(s, tc, &out->ahead[k], &r);
+        // The tile is CSM_EDGE_TEXELS wider on each side than the sphere: the shader's 4-texel border
+        // plus the snap (up to one texel per axis) never cut a point of the sphere off.
+        float T = (float)DG_MAX(p->tile, 32u);
+        out->radius[k] = r * T / (T - 2.0f * CSM_EDGE_TEXELS);
+        out->texel_m[k] = 2.0f * out->radius[k] / (float)DG_MAX(p->tile, 1u);
+    }
+}
+
+mat4 csm_light_view(vec3 to_light) {
+    vec3 L = v3_norm(to_light);
+    vec3 up = fabsf(L.y) > 0.99f ? v3(0, 0, 1) : v3(0, 1, 0);
+    return mat4_look_at(v3(0, 0, 0), v3_neg(L), up);
+}
+
+void csm_fit(const mat4 *lview, vec3 center, float radius, u32 texels, float back, CsmTile *out) {
+    vec3 cl = mat4_mul_point(*lview, center);
+    float texel = 2.0f * radius / (float)DG_MAX(texels, 1u);
+    // Whole texels: the grid origin (cl - radius) moves by whole texels with the camera.
+    cl.x = floorf(cl.x / texel) * texel;
+    cl.y = floorf(cl.y / texel) * texel;
+    out->view = *lview;
+    out->proj = mat4_ortho(cl.x - radius, cl.x + radius, cl.y - radius, cl.y + radius, -cl.z - CSM_REACH, -cl.z + back);
+    out->vp = mat4_mul(out->proj, out->view);
+    out->center = mat4_mul_point(mat4_inverse_rigid(*lview), cl);
+    out->radius = radius;
+    out->texel_m = texel;
+    out->span = CSM_REACH + back;
+}
+
+float csm_low_sun(float sun_elev) {
+    return 1.0f + 2.0f * (1.0f - smoothstepf(3.0f * DG_DEG2RAD, 15.0f * DG_DEG2RAD, sun_elev));
+}
+
+CsmBias csm_bias(float texel_m, float sun_elev) {
+    float k = csm_low_sun(sun_elev);
+    CsmBias b;
+    b.normal_m = 1.5f * texel_m * k;
+    b.const_m = 0.75f * texel_m * k;
+    return b;
+}
+
+CsmBias csm_bias_vm(float texel_m, float sun_elev) {
+    CsmBias b = csm_bias(texel_m, sun_elev);
+    float k = csm_low_sun(sun_elev);
+    b.normal_m = fmaxf(b.normal_m, CSM_VM_NORMAL_M * k);
+    b.const_m = fmaxf(b.const_m, CSM_VM_CONST_M * k);
+    return b;
+}
+
+float csm_kernel_texels(float pen_m, float texel_m, float min_tex, float max_tex) {
+    return clampf(pen_m / fmaxf(texel_m, 1e-6f), min_tex, fmaxf(max_tex, min_tex));
+}
+
+int csm_select(const CsmLayout *l, float d, int first, float *blend, float *fade) {
+    int n = l->count;
+    float D = l->split[n - 1];
+    *fade = 1.0f - smoothstepf(D * (1.0f - CSM_FADE), D, d);
+    *blend = 0.0f;
+    for (int c = DG_MIN(first, n - 1); c < n; c++) {
+        if (d > l->split[c] && c < n - 1) continue;
+        if (c < n - 1) *blend = smoothstepf(l->split[c] * (1.0f - CSM_BLEND), l->split[c], d);
+        return c;
+    }
+    return n - 1;
+}
+
+void csm_fit_vm(const mat4 *lview, vec3 rig_center, u32 texels, CsmTile *out) {
+    csm_fit(lview, rig_center, CSM_VM_RADIUS, texels, CSM_VM_RADIUS + 0.5f, out);
+}
+
+bool csm_validate(const CsmParams *p, float min_tpm, float max_ratio, char *err, int err_size) {
+    CsmLayout l;
+    csm_layout(p, &l);
+    int n = l.count;
+    if (fabsf(l.split[n - 1] - p->distance) > 1e-3f * p->distance) {
+        snprintf(err, (size_t)err_size, "last split %.2f m != distance %.2f m", l.split[n - 1], p->distance);
+        return false;
+    }
+    for (int k = 0; k < n; k++) {
+        if (k && l.split[k] <= l.split[k - 1]) { snprintf(err, (size_t)err_size, "split %d not increasing", k); return false; }
+        if (l.radius[k] < 0.5f * l.split[k] || l.ahead[k] < 0.0f) { snprintf(err, (size_t)err_size, "cascade %d sphere does not hold its sector", k); return false; }
+        if (k && l.texel_m[k] > max_ratio * l.texel_m[k - 1]) {
+            snprintf(err, (size_t)err_size, "cascade %d texel %.4f m > %.1f x cascade %d (%.4f m)", k, l.texel_m[k], max_ratio, k - 1, l.texel_m[k - 1]);
+            return false;
+        }
+        CsmBias b = csm_bias(l.texel_m[k], DG_PI * 0.5f);
+        if (fabsf(b.normal_m / l.texel_m[k] - 1.5f) > 1e-4f || fabsf(b.const_m / l.texel_m[k] - 0.75f) > 1e-4f) {
+            snprintf(err, (size_t)err_size, "cascade %d bias not from its texel size", k);
+            return false;
+        }
+    }
+    if (1.0f / l.texel_m[0] < min_tpm) {
+        snprintf(err, (size_t)err_size, "cascade 0: %.1f texels / m < %.1f", 1.0f / l.texel_m[0], min_tpm);
+        return false;
+    }
+    return true;
+}
