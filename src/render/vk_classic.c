@@ -1234,7 +1234,8 @@ static void draw_view(VkCommandBuffer cmd, const ClView *v, int pass, u32 shadow
         pc.model.m[4] = (float)cm->imp_grid;
         pc.model.m[14] = (float)(R->frame_index & 63u);
         pc.model.m[15] = (vm->fflags & VGMF_DITHER) || (bt->key & CL_KEY_FADE) ? 1.0f : 0.0f;
-        pc.color = v4(1, 1, 1, 1);
+        float gain = C.lod_new ? lod_table()->imp_gain : 1.0f;   // docs/LOD.md: matches the mesh's mean colour
+        pc.color = v4(gain, gain, gain, 1);
         pc.params = v4(m->roughness, m->metallic, m->emissive, 1.0f);
         pc.flags[0] = m->flags & ~(u32)(VGM_FLAGS | MAT_TEXTURED | MAT_TRIPLANAR | MAT_GRID | MAT_CHECKER | MAT_PBR_MAPS);
         vkCmdPushConstants(cmd, C.layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushLit), &pc);

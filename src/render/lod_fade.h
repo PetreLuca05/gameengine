@@ -46,6 +46,7 @@ typedef struct LodTable {
     float char_ik_band;                  // fraction of the LOD0 threshold over which foot IK / lean fade
     // impostors
     float imp_band;                      // octaves of projected size over which mesh and impostor cross-fade
+    float imp_gain;                      // impostor albedo gain matching the mesh's mean colour (classic)
     // foliage
     float fol_band;                      // x the fade band length (start .. end)
     float fol_instance;                  // per-instance fade width (fraction of the band; was 1/16)

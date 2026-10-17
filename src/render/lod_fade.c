@@ -35,6 +35,7 @@ void lod_table_default(LodTable *t) {
     t->char_ramp_s = 1.5f;
     t->char_ik_band = 0.3f;
     t->imp_band = 0.35f;
+    t->imp_gain = 1.2f;
     t->fol_band = 1.5f;
     t->fol_instance = 0.3f;
     t->fol_shrink = 0.35f;
@@ -91,6 +92,7 @@ bool lod_table_parse(LodTable *t, const char *json, char *err, int n) {
     t->char_ik_band = jnum(ch, "ik_band", t->char_ik_band);
     const cJSON *im = cJSON_GetObjectItemCaseSensitive(root, "impostor");
     t->imp_band = jnum(im, "band", t->imp_band);
+    t->imp_gain = jnum(im, "gain", t->imp_gain);
     const cJSON *fo = cJSON_GetObjectItemCaseSensitive(root, "foliage");
     t->fol_band = jnum(fo, "band", t->fol_band);
     t->fol_instance = jnum(fo, "instance_fade", t->fol_instance);

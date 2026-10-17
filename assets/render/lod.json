@@ -47,8 +47,9 @@
     },
 
     "impostor": {
-        "_comment": "band: octaves of projected size over which mesh and impostor cross-fade (the impostor fades in past the switch size).",
-        "band": 0.35
+        "_comment": "band: octaves of projected size over which mesh and impostor cross-fade (the impostor fades in past the switch size). gain: impostor albedo x this so its mean colour matches the mesh (baked normals catch less sky than the mesh's bent leaf normals; measured: -8 % luminance at 1, -4 % at 1.2, docs/LOD.md).",
+        "band": 0.35,
+        "gain": 1.2
     },
 
     "foliage": {

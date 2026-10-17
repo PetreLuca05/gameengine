@@ -58,6 +58,7 @@ static void test_table(void) {
     CHECK(t.char_px[0] == 140 && t.char_px[1] == 60 && t.char_px[2] == 25, "character targets 140 / 60 / 25 px");
     CHECK(t.cat[LODC_STATIC] == 2 && t.cat[LODC_IMPOSTOR] == 2 && t.cat[LODC_FOLIAGE] == 1.5f && t.cat[LODC_TERRAIN] == 1.5f, "spec multipliers");
     CHECK(fabsf(t.fade_time - 0.35f) < 1e-6f, "lod_fade_time default 0.35 s");
+    CHECK(fabsf(t.imp_gain - def.imp_gain) < 1e-6f && fabsf(t.imp_band - def.imp_band) < 1e-6f, "impostor gain / band differ from the built-ins");
     // malformed
     CHECK(!lod_table_parse(&t, "{", err, sizeof(err)), "a parse error is rejected");
     CHECK(!lod_table_parse(&t, "{\"characters\": {\"px\": [10, 60, 25]}}", err, sizeof(err)), "increasing thresholds are rejected");
