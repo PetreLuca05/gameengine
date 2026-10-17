@@ -135,7 +135,9 @@ static void parse_attachment(AttachmentDef *a, const cJSON *j, const char *file)
     a->mag_mult = jnum(m, "mag_size", 1.0f);
     a->reload_time = jnum(m, "reload_time", 1.0f);
     a->muzzle_len = jnum(j, "muzzle_length", 0.0f);
-    a->muzzle_device = vfx_muzzle_device_from_name(jstr(j, "muzzle_device", ""));
+    const cJSON *md = cJSON_GetObjectItemCaseSensitive(j, "muzzle_device");
+    a->bal_device = cJSON_IsObject(md);
+    a->muzzle_device = vfx_muzzle_device_from_name(a->bal_device ? jstr(md, "kind", "") : jstr(j, "muzzle_device", ""));
     const cJSON *gl = cJSON_GetObjectItemCaseSensitive(j, "grip_l");
     if (gl) { a->has_grip_l = true; a->grip_l = jxform(j, "grip_l", xf_identity()); }
     const cJSON *p;
@@ -337,6 +339,7 @@ void attach_weapon_effective(const ItemDB *db, const WeaponDef *base, const u8 *
                 out->sockets.length = fmaxf(out->sockets.length, -front.z);
             }
             if (a->muzzle_device >= 0) out->vfx_muzzle_device = a->muzzle_device;
+            if (a->bal_device) dg_strcpy(out->muzzle_device_id, sizeof(out->muzzle_device_id), a->id);
         }
         if (k == ATT_OPTIC) {
             // The optic's sight point is the ADS socket. Eye relief: the optic's own, or (red dots)

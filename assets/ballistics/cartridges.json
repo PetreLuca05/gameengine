@@ -1,0 +1,75 @@
+{
+  "_comment": "Cartridges for the projectile ballistics (docs/BALLISTICS.md). Units: mass_g grams, diameter/length/twist mm, mv_curve [barrel mm, muzzle velocity m/s], bc lb/in^2 in the named drag table (g1 | g7 | gs sphere), powder_g grams, gas_k kelvin, burn_length_m = barrel length at which the charge is fully burnt, muzzle_pressure_mpa at the reference barrel (first mv_curve point at or above 'ref_barrel_mm'), pen.hard / pen.soft = penetration relative to 5.56 M855 at its muzzle energy, fragment_v m/s (0 = never), yaw_depth_mm = tissue depth where the bullet turns sideways (0 = stays point-on), transonic_k rad/s of yaw growth through Mach 1.2..0.8.",
+  "cartridges": [
+    {
+      "id": "9x19_fmj", "name": "9x19mm 124gr FMJ",
+      "mass_g": 8.0, "diameter_mm": 9.01, "length_mm": 15.5, "twist_mm": 250,
+      "drag": "g1", "bc": 0.15,
+      "ref_barrel_mm": 102, "mv_curve": [[76, 330], [102, 360], [127, 375], [200, 398], [225, 405]],
+      "powder_g": 0.35, "gas_k": 2600, "burn_length_m": 0.13, "muzzle_pressure_mpa": 40,
+      "pen": { "hard": 0.25, "soft": 0.45 }, "fragment_v": 0, "yaw_depth_mm": 0, "transonic_k": 0.03,
+      "max_range": 1500,
+      "tracer": { "every": 5, "last_n": 0, "color": "red", "ignition_m": 0, "burn_m": 300, "burn_s": 1.0 }
+    },
+    {
+      "id": "45acp_fmj", "name": ".45 ACP 230gr FMJ",
+      "mass_g": 14.9, "diameter_mm": 11.48, "length_mm": 17.0, "twist_mm": 406,
+      "drag": "g1", "bc": 0.19,
+      "ref_barrel_mm": 127, "mv_curve": [[89, 245], [127, 260], [200, 275]],
+      "powder_g": 0.32, "gas_k": 2500, "burn_length_m": 0.13, "muzzle_pressure_mpa": 25,
+      "pen": { "hard": 0.22, "soft": 0.40 }, "fragment_v": 0, "yaw_depth_mm": 0, "transonic_k": 0.0,
+      "max_range": 1500,
+      "tracer": { "every": 5, "last_n": 0, "color": "red", "ignition_m": 0, "burn_m": 250, "burn_s": 1.0 }
+    },
+    {
+      "id": "556_m855", "name": "5.56x45mm M855 62gr",
+      "mass_g": 4.0, "diameter_mm": 5.70, "length_mm": 23.0, "twist_mm": 178,
+      "drag": "g7", "bc": 0.151,
+      "ref_barrel_mm": 368, "mv_curve": [[254, 820], [290, 855], [368, 900], [508, 945], [610, 960]],
+      "powder_g": 1.65, "gas_k": 2950, "burn_length_m": 0.51, "muzzle_pressure_mpa": 70,
+      "pen": { "hard": 1.0, "soft": 1.0 }, "fragment_v": 760, "yaw_depth_mm": 120, "transonic_k": 0.02,
+      "max_range": 2000,
+      "tracer": { "every": 5, "last_n": 3, "color": "red", "ignition_m": 70, "burn_m": 800, "burn_s": 1.6, "mass_g": 4.13, "bc": 0.145 }
+    },
+    {
+      "id": "762x39_m43", "name": "7.62x39mm M43 123gr",
+      "mass_g": 7.9, "diameter_mm": 7.92, "length_mm": 26.8, "twist_mm": 240,
+      "drag": "g7", "bc": 0.138,
+      "ref_barrel_mm": 415, "mv_curve": [[300, 680], [415, 720], [520, 735]],
+      "powder_g": 1.6, "gas_k": 2850, "burn_length_m": 0.42, "muzzle_pressure_mpa": 60,
+      "pen": { "hard": 1.2, "soft": 1.1 }, "fragment_v": 0, "yaw_depth_mm": 180, "transonic_k": 0.025,
+      "max_range": 2000,
+      "tracer": { "every": 4, "last_n": 3, "color": "green", "ignition_m": 50, "burn_m": 800, "burn_s": 1.8 }
+    },
+    {
+      "id": "762x51_m80", "name": "7.62x51mm M80 147gr",
+      "mass_g": 9.5, "diameter_mm": 7.82, "length_mm": 28.9, "twist_mm": 305,
+      "drag": "g7", "bc": 0.200,
+      "ref_barrel_mm": 559, "mv_curve": [[305, 760], [406, 805], [508, 838], [559, 850], [610, 862], [660, 870]],
+      "powder_g": 2.9, "gas_k": 2950, "burn_length_m": 0.61, "muzzle_pressure_mpa": 75,
+      "pen": { "hard": 2.0, "soft": 1.6 }, "fragment_v": 820, "yaw_depth_mm": 160, "transonic_k": 0.02,
+      "max_range": 2000,
+      "tracer": { "every": 5, "last_n": 3, "color": "red", "ignition_m": 100, "burn_m": 900, "burn_s": 1.9, "mass_g": 9.33, "bc": 0.19 }
+    },
+    {
+      "id": "50bmg_m33", "name": ".50 BMG M33 660gr",
+      "mass_g": 42.8, "diameter_mm": 12.98, "length_mm": 58.9, "twist_mm": 381,
+      "drag": "g7", "bc": 0.330,
+      "ref_barrel_mm": 1143, "mv_curve": [[737, 850], [910, 880], [1143, 900]],
+      "powder_g": 15.0, "gas_k": 3000, "burn_length_m": 1.14, "muzzle_pressure_mpa": 80,
+      "pen": { "hard": 6.0, "soft": 3.0 }, "fragment_v": 0, "yaw_depth_mm": 250, "transonic_k": 0.01,
+      "max_range": 2000,
+      "tracer": { "every": 5, "last_n": 3, "color": "orange", "ignition_m": 100, "burn_m": 1450, "burn_s": 2.6 }
+    },
+    {
+      "id": "12ga_00buck", "name": "12 gauge 00 buckshot",
+      "mass_g": 3.5, "diameter_mm": 8.38, "length_mm": 8.38, "twist_mm": 0,
+      "drag": "gs", "bc": 0.071, "pellets": 9, "pellet_spread_deg": 0,
+      "ref_barrel_mm": 470, "mv_curve": [[300, 370], [470, 400], [710, 410]],
+      "powder_g": 1.9, "gas_k": 2700, "burn_length_m": 0.66, "muzzle_pressure_mpa": 35,
+      "pen": { "hard": 0.12, "soft": 0.35 }, "fragment_v": 0, "yaw_depth_mm": 0, "transonic_k": 0.0,
+      "max_range": 600,
+      "tracer": { "every": 0 }
+    }
+  ]
+}

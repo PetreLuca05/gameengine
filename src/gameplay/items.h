@@ -123,7 +123,8 @@ typedef struct AttachmentDef {
     float mag_mult;           // magazine capacity multiplier
     float reload_time;        // multiplier
     float muzzle_len;         // m the muzzle moves forward (muzzle devices)
-    int muzzle_device;        // VfxMuzzleDevice, -1 = keep
+    int muzzle_device;        // VfxMuzzleDevice, -1 = keep ("muzzle_device" string, or the "kind" of its object)
+    bool bal_device;          // the "muzzle_device" object is a ballistics device block (gameplay/ballistics)
     bool has_grip_l;
     Xform grip_l;             // underbarrel grips: left hand socket (attachment space)
     WeaponModelPart parts[ATT_MAX_PARTS];
@@ -169,6 +170,12 @@ typedef struct WeaponDef {
     bool one_hand_capable;    // can be fired one-handed while driving (pistols, SMGs: docs/VEHICLES.md)
     // VFX ("vfx" block): muzzle flash type x device, impact caliber (src/vfx/vfx_library.h enums).
     int vfx_muzzle_type, vfx_muzzle_device, vfx_caliber;
+    // Ballistics (docs/BALLISTICS.md): cartridge id (assets/ballistics/cartridges.json), barrel
+    // length (muzzle velocity, flash), zero distance (launch elevation) and the muzzle device id
+    // (an attachment id with a "muzzle_device" block; "bare" = none). Empty cartridge = hitscan.
+    char cartridge[24];
+    float barrel_length, zero_distance;
+    char muzzle_device_id[32];
     RecoilParams recoil;      // guns: recoil, spread, fire modes, ADS/sway feel ("recoil" block)
     // Third-person procedural hold ("hold" block): style + item sockets (shared with the viewmodel grip data).
     char hold_style[16];

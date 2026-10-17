@@ -4,6 +4,9 @@
   "vfx": { "muzzle": { "type": "smg", "device": "bare" }, "caliber": "smg" },
   "item": "smg",
   "kind": "hitscan",
+  "cartridge": "9x19_fmj",
+  "barrel_length": 0.225,
+  "zero_distance": 50,
   "one_hand_capable": true,
   "damage_type": "bullet",
   "damage": 15,
@@ -61,7 +64,7 @@
   "falloff": { "start": 15, "end": 50, "min": 0.55 },
   "attachment_slots": {
     "optic": {"pos": [0, 0.082, -0.02], "rail": [-0.06, 0.04], "allow": ["red_dot", "scope_4x"]},
-    "muzzle": {"allow": ["suppressor", "compensator"]},
+    "muzzle": {"allow": ["suppressor", "compensator", "flash_hider", "muzzle_brake"]},
     "underbarrel": {"pos": [0, 0.018, -0.22], "allow": ["vertical_grip"]},
     "magazine": {"pos": [0, 0.018, -0.1], "allow": ["extended_mag"], "hide_parts": [2]},
     "stock": {"pos": [0, 0.04, 0.06], "allow": ["heavy_stock"], "hide_parts": [3]}

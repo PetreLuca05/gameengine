@@ -4,6 +4,9 @@
   "vfx": { "muzzle": { "type": "sniper", "device": "comp" }, "caliber": "sniper" },
   "item": "dmr",
   "kind": "hitscan",
+  "cartridge": "762x51_m80",
+  "barrel_length": 0.508,
+  "zero_distance": 200,
   "damage_type": "bullet",
   "damage": 45,
   "mag_size": 10,
@@ -59,7 +62,7 @@
   "part_mult": { "head": 1.2 },
   "attachment_slots": {
     "optic": {"pos": [0, 0.082, -0.02], "rail": [-0.06, 0.06], "allow": ["red_dot", "scope_4x", "scope_8x"], "hide_parts": [4], "default": "scope_4x"},
-    "muzzle": {"allow": ["suppressor", "compensator"]},
+    "muzzle": {"allow": ["suppressor", "compensator", "flash_hider", "muzzle_brake"]},
     "underbarrel": {"pos": [0, 0.018, -0.32], "allow": ["vertical_grip"]},
     "magazine": {"pos": [0, 0.015, -0.08], "allow": ["extended_mag"], "hide_parts": [3]},
     "stock": {"pos": [0, 0.035, 0.09], "allow": ["heavy_stock"], "hide_parts": [2]}
