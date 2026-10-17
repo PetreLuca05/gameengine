@@ -36,6 +36,11 @@ typedef struct UserCmd {
     u32 phone_rot;     // phone held by a paired real phone: packed rotation relative to the view yaw (docs/PHONE.md)
     u8 phone_flags;    // CHAR_PHONE_* (anim/character_rt.h): landscape / driven / recording
     u8 phone_zoom;     // phone camera zoom x 32 (spectators see the same lens)
+    // Aim model (docs/AIM.md): the held weapon's muzzle socket in camera space relative to the eye
+    // (mm, from the pose the shooter sees; validated by the host), and the shooter's predicted aim
+    // point distance of its last shot (cm, 0 = none; host discrepancy log).
+    i16 muzzle_cam[3];
+    u16 aim_dist;
 } UserCmd;
 
 #endif

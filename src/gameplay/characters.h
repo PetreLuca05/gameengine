@@ -66,6 +66,9 @@ typedef struct CharacterInst {
     Xform veh_prev, veh_cur;   // seated: the vehicle transform at the two evaluated poses (re-attached when drawn)
     bool veh_valid;
     Xform item_cam_prev, item_cam_cur;   // hold point item in camera space (owner re-places per frame)
+    vec3 muzzle_cam;                     // aim model: the muzzle socket relative to the player's simulated eye / view (docs/AIM.md)
+    bool muzzle_cam_valid;
+    u32 muzzle_cam_tick;                 // chars tick of that pose
     bool item_valid;
     const struct WeaponDef *item_weapon;
     const struct ItemDef *item_def;
@@ -147,6 +150,10 @@ void char_detach(World *w, EntityId e);
 CharacterInst *char_get(const World *w, EntityId e);
 // Visual muzzle of the item a character holds (world space, barrel forward). VFX for remote shooters.
 bool chars_item_muzzle(World *w, EntityId e, vec3 *pos, vec3 *dir);
+// Aim model (docs/AIM.md): the held weapon's muzzle socket in camera space (x right, y up, -z forward)
+// relative to the player's simulated eye and view angles, from the latest evaluated tick pose, and its
+// age in ticks. The shooter claims it in its UserCmd; the host checks the claim against its own copy.
+bool chars_muzzle_cam(World *w, EntityId e, vec3 *cam, int *age_ticks);
 // Eye (camera socket) of a character's current pose, ragdoll included (death camera).
 bool chars_head_world(World *w, EntityId e, float alpha, vec3 *out);
 // Corpses (docs/REVIVE.md): the body of an ET_CORPSE entity. While its player is dead the player's

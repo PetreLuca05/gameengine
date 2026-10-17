@@ -19,6 +19,7 @@
   "sprint_to_fire": 0.12,
   "hold_breath": 3.5,
   "range": 120,
+  "aim": { "obstruct_near": 0.2, "max_range": 120 },
   "impulse": 40,
   "headshot_mult": 1.8,
   "ads_fov": 58,

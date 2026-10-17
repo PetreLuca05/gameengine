@@ -601,6 +601,7 @@ static void draw_debug(World *w, vec3 cam) {
         }
     }
     chars_debug_draw(w, cam);
+    weapons_aim_debug_frame(w);   // aim_debug (docs/AIM.md)
     horde_debug_draw(w);
     if (G->r_drawhitboxes->i) {
         ENT_FOREACH(w, i) {

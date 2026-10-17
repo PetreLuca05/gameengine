@@ -272,6 +272,15 @@ else()
   target_link_libraries(test_spectate PRIVATE m)
 endif()
 add_test(NAME spectate COMMAND test_spectate)
+add_executable(test_aim tests/test_aim.c src/gameplay/aim.c src/gameplay/recoil.c src/core/spring.c)
+set_target_properties(test_aim PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
+target_include_directories(test_aim PRIVATE src)
+if(MSVC)
+  target_compile_options(test_aim PRIVATE /W3 /utf-8)
+else()
+  target_link_libraries(test_aim PRIVATE m)
+endif()
+add_test(NAME aim COMMAND test_aim)
 add_executable(test_ballistics tests/test_ballistics.c src/gameplay/ballistics/bal_data.c src/gameplay/ballistics/bal_drag.c
   src/gameplay/ballistics/bal_sim.c src/gameplay/ballistics/bal_surface.c src/gameplay/ballistics/bal_acoustics.c
   src/gameplay/ballistics/bal_tracer.c src/gameplay/ballistics/bal_muzzle.c third_party/cjson/cJSON.c)
@@ -604,6 +613,7 @@ add_test(NAME revive COMMAND test_revive WORKING_DIRECTORY $<TARGET_FILE_DIR:dea
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if(Python3_Interpreter_FOUND)
   add_test(NAME lint_commands COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/tests/lint_commands.py)
+  add_test(NAME aim_sockets COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/tests/aim_sockets.py)
 endif()
 # Engine Fidelity (docs/ENGINE_FIDELITY.md): tables, bounds, apply / clamp on the real cvar system, era
 # matrix, frame graph validation.

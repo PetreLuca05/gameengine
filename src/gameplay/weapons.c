@@ -11,8 +11,10 @@
 #include "core/engine.h"
 #include "core/cvar.h"
 #include "render/debug_draw.h"
+#include "render/render.h"
 #include "player/hands.h"
 #include "gameplay/characters.h"
+#include "gameplay/aim.h"
 #include "game/game.h"
 #include "vfx/vfx_library.h"
 #include <math.h>
@@ -26,6 +28,35 @@ static void cmd_infinite_ammo(int argc, const char **argv) {
     bool on = argc > 1 ? atoi(argv[1]) != 0 : !WC.infinite_ammo->i;
     cvar_set_cv(WC.infinite_ammo, on ? "1" : "0");
     log_info("infinite ammo %s", on ? "ON" : "off");
+}
+
+static AimStats g_aim_stats;
+const AimStats *weapons_aim_stats(void) { return &g_aim_stats; }
+void weapons_aim_stats_reset(void) { memset(&g_aim_stats, 0, sizeof(g_aim_stats)); }
+
+static void cmd_aim_stats(int argc, const char **argv) {
+    if (argc > 1 && !strcmp(argv[1], "reset")) { weapons_aim_stats_reset(); log_info("aim_stats: reset"); return; }
+    const AimStats *a = &g_aim_stats;
+    log_info("aim_stats: %u shots, %u muzzle claims checked, %u clamped (worst %.1f mm), %u aim points checked, %u mismatched (worst %.2f m), "
+             "%u muzzles inside geometry, %u trigger pulls blocked",
+             a->shots, a->checked, a->clamped, a->max_error * 1000.0f, a->p_checked, a->p_mismatch, a->max_p_error, a->recovered, a->blocked);
+}
+
+static void cmd_aim_report(int argc, const char **argv) {
+    (void)argc; (void)argv;
+    World *w = game_world();
+    Game *g = game();
+    int slot = game_view_slot();
+    if (!w || !g || slot < 0) { log_info("aim_report: no player"); return; }
+    AimSolve a;
+    if (!weapon_aim_preview(w, slot, player_eye_pos(&w->players[slot].sim.move), g->view.yaw, g->view.pitch, game_view_cmd(), &a)) { log_info("aim_report: no gun"); return; }
+    vec2 px = v2(0, 0);
+    bool on = render_world_to_screen(a.q, &px);
+    log_info("aim_report: class %s P %.3f %.3f %.3f (%s, %.2f m) muzzle %.3f %.3f %.3f origin %.3f %.3f %.3f%s Q %.3f %.3f %.3f (%.3f m) "
+             "dir %.4f %.4f %.4f Q screen %.1f %.1f%s render %dx%d",
+             aim_class_name(a.cls), a.p.x, a.p.y, a.p.z, a.p_hit ? "hit" : "far", v3_dist(a.eye, a.p), a.muzzle.x, a.muzzle.y, a.muzzle.z,
+             a.origin.x, a.origin.y, a.origin.z, a.recovered ? " (recovered)" : "", a.q.x, a.q.y, a.q.z, a.q_dist, a.dir.x, a.dir.y, a.dir.z,
+             px.x, px.y, on ? "" : " (behind)", render_width(), render_height());
 }
 
 void weapons_register_cvars(void) {
@@ -43,6 +74,12 @@ void weapons_register_cvars(void) {
     // Replicated so clients' predicted magazines agree with the host.
     WC.infinite_ammo = cvar_reg_bool("sv_infinite_ammo", false, CVAR_SERVER, "shots don't use ammo (host, replicated)");
     cmd_register("infinite_ammo", cmd_infinite_ammo, "infinite_ammo [0|1]: toggle infinite ammo (host)");
+    // Aim model (docs/AIM.md).
+    WC.block_barrel = cvar_reg_bool("block_fire_when_barrel_blocked", false, CVAR_SERVER, "the trigger does nothing while the barrel is against a wall (obstruction within the weapon's obstruct_near; 0 = the bullet hits the wall point blank)");
+    WC.muzzle_tolerance = cvar_reg_float("wpn_muzzle_tolerance", 0.3f, 0.02f, 2.0f, CVAR_SERVER, "host: how far (m) a client's claimed muzzle may be from the host's copy of its weapon pose before it is clamped (anti-cheat)");
+    WC.aim_debug = cvar_reg_int("aim_debug", 0, 0, 2, 0, "aim model overlay: 1 = camera ray, aim point P, muzzle -> P bullet line, obstruction Q, class, crosshair target; 2 = also log every shot");
+    cmd_register("aim_stats", cmd_aim_stats, "aim_stats [reset]: host checks of the shooters' muzzle claims and aim points (docs/AIM.md)");
+    cmd_register("aim_report", cmd_aim_report, "aim_report: the local player's aim this frame (P, muzzle, Q, class) for tests");
 }
 
 const WeaponCvars *weapons_cvars(void) { return &WC; }
@@ -410,18 +447,139 @@ void weapon_local_impact(World *w, const WeaponDef *d, const HitResult *h, vec3 
     else fx_impact_ex(h->point, h->normal, dir, h->material, d->vfx_caliber, impact_flags(h) | (extra & 0xFFFF0000u));
 }
 
-static vec3 muzzle_world(const PlayerMove *m, const WeaponDef *d, bool local_view) {
-    // Local player: the real barrel tip of the viewmodel. Bullets still trace from the eye
-    // (so they go where the crosshair says), only the flash / tracer / casing start here.
-    vec3 mp;
-    vec3 mf;
-    if (local_view && hands_muzzle(&mp, &mf) && v3_dist(mp, player_eye_pos(m)) < 1.5f) return v3_madd(mp, mf, 0.015f);
-    // Others (host-side events): approximate barrel in front of the right side of the eye.
-    vec3 eye = player_eye_pos(m);
-    vec3 f = dir_from_angles(m->yaw, m->pitch);
-    vec3 r = right_from_yaw(m->yaw);
-    vec3 u = v3_cross(r, f);
-    return v3_add(eye, v3_add(v3_scale(f, 0.45f - d->muzzle_offset.z * 0.5f), v3_add(v3_scale(r, 0.14f), v3_scale(u, -0.1f))));
+// ------------------------------------------------------------------ aim model (docs/AIM.md)
+
+#define AIM_REACH 1.5f          // a muzzle is never farther than this from the eye (hard cap on claims)
+#define AIM_HOST_MAX_AGE 4      // host weapon poses older than this (ticks, LOD / culled) are not used to check claims
+#define AIM_RECOVER_MARGIN 0.02f
+
+// Without a claim or a pose: a barrel in front of the right side of the eye (camera space).
+static vec3 fallback_muzzle_cam(bool hand) { return hand ? v3(0.12f, -0.12f, -0.45f) : v3(0.14f, -0.1f, -0.55f); }
+
+AimQuery weapon_aim_query(World *w, int slot, const PlayerMove *m, const UserCmd *cmd, vec3 cam_dir, float max_range, float obstruct_near, u32 view_tick256) {
+    (void)w;
+    (void)slot;
+    AimQuery q;
+    memset(&q, 0, sizeof(q));
+    q.eye = player_eye_pos(m);
+    q.yaw = m->yaw;
+    q.pitch = m->pitch;
+    q.cam_dir = cam_dir;
+    q.have_claim = cmd && aim_claim_valid(cmd->muzzle_cam);
+    if (q.have_claim) q.claim = aim_claim_unpack(cmd->muzzle_cam);
+    q.max_range = fmaxf(1.0f, max_range);
+    q.obstruct_near = obstruct_near;
+    q.view_tick256 = view_tick256;
+    return q;
+}
+
+static bool is_friendly(World *w, int shooter, EntityId e) {
+    return ent_valid(w, e) && w->type[ENT_INDEX(e)] == ET_PLAYER && e != w->players[shooter].ent;
+}
+
+void weapon_aim_solve(World *w, int slot, const AimQuery *q, AimSolve *out) {
+    memset(out, 0, sizeof(*out));
+    out->eye = q->eye;
+    out->cam_dir = q->cam_dir;
+    // Muzzle: the shooter's claim, checked against this machine's copy of its weapon pose. The host's
+    // copy is authoritative; a client predicting itself has the very pose it claimed.
+    vec3 host_cam = v3(0, 0, 0);
+    int age = 0;
+    bool have_host = !q->hand && chars_muzzle_cam(w, w->players[slot].ent, &host_cam, &age) && age <= AIM_HOST_MAX_AGE;
+    bool check = have_host && q->have_claim && w->authority;
+    AimValidate v = aim_validate_muzzle(q->claim, q->have_claim, host_cam, check, WC.muzzle_tolerance ? WC.muzzle_tolerance->f : 0.3f, AIM_REACH);
+    vec3 cam = (q->have_claim || have_host) ? v.cam : fallback_muzzle_cam(q->hand);
+    out->claim_error = check ? v.error : 0.0f;
+    out->claim_clamped = check && v.clamped;
+    out->muzzle = aim_cam_to_world(q->eye, q->yaw, q->pitch, cam);
+    // Muzzle inside geometry (mantle, vehicle entry, barrel poked through a thin wall): back along the
+    // eye -> muzzle line to the last free point, so a bullet never starts inside or behind a surface.
+    BodyId self = weapon_shooter_ignore_body(w, slot);
+    out->origin = out->muzzle;
+    RayHit rh;
+    vec3 to_m = v3_sub(out->muzzle, q->eye);
+    float lm = v3_len(to_m);
+    if (lm > 1e-4f && phys_raycast(w->phys, q->eye, to_m, PL_MASK_WORLD, self, &rh)) {
+        out->origin = aim_recover_origin(q->eye, out->muzzle, rh.distance / lm, AIM_RECOVER_MARGIN);
+        out->recovered = true;
+    }
+    // Aim point: the camera ray (what the reticle means).
+    HitResult hp = trace_shot(w, slot, q->eye, q->cam_dir, q->max_range, q->view_tick256);
+    out->p_hit = hp.hit;
+    out->p = hp.hit ? hp.point : v3_madd(q->eye, q->cam_dir, q->max_range);
+    // Convergence: from the barrel to P.
+    out->dir = aim_converge(out->origin, out->p, q->cam_dir);
+    // Obstruction: the bullet's own line, short of P (P is a surface hit itself).
+    float len = v3_dist(out->origin, out->p);
+    out->q = out->p;
+    out->q_dist = len;
+    out->q_ent = hp.ent;
+    if (out->recovered) {
+        // The muzzle is in the wall: the shot lands on it at point blank.
+        out->q = out->origin;
+        out->q_dist = 0.0f;
+        out->q_ent = (EntityId)rh.user;
+        out->cls = AIM_BARREL;
+        return;
+    }
+    float probe = len - 0.03f;
+    if (probe > 0.0f) {
+        HitResult ho = trace_shot(w, slot, out->origin, out->dir, probe, q->view_tick256);
+        if (ho.hit && ho.dist < probe) {
+            out->q = ho.point;
+            out->q_dist = ho.dist;
+            out->q_ent = ho.ent;
+            out->cls = (int)aim_classify(ho.dist, len, q->obstruct_near, is_friendly(w, slot, ho.ent));
+        }
+    }
+}
+
+bool weapon_aim_preview(World *w, int slot, vec3 eye, float yaw, float pitch, const UserCmd *cmd, AimSolve *out) {
+    if (!w || slot < 0 || slot >= MAX_PLAYERS || !w->players[slot].active) return false;
+    const WeaponDef *d = weapon_equipped_def(w, slot);
+    if (!d || d->kind == WPN_MELEE) return false;
+    Player *p = &w->players[slot];
+    Game *g = game();
+    vec2 sway = weapon_aim_offset_deg(d, &p->sim.wpn, &p->sim.move, weapon_sway_time(cmd ? cmd->seq : 0) + (g ? g->alpha * SIM_DT : 0.0f));
+    PlayerMove m = p->sim.move;
+    m.yaw = yaw;
+    m.pitch = pitch;
+    vec3 dir = dir_from_angles(yaw - sway.x * DG_DEG2RAD, pitch + sway.y * DG_DEG2RAD);
+    AimQuery q = weapon_aim_query(w, slot, &m, cmd, dir, d->aim_max_range, d->obstruct_near, 0);
+    q.eye = eye;
+    weapon_aim_solve(w, slot, &q, out);
+    return true;
+}
+
+static u16 g_aim_claim;
+u16 weapons_take_aim_claim(void) {
+    u16 v = g_aim_claim;
+    g_aim_claim = 0;
+    return v;
+}
+
+// aim_debug: the whole model of one shot / frame.
+static void aim_debug_draw(const AimSolve *a, float life) {
+    dbg_line(a->eye, a->p, DBG_WHITE, life, true);                      // camera ray
+    dbg_cross(a->p, 0.05f, a->p_hit ? DBG_GREEN : DBG_BLUE, life);         // P
+    dbg_line(a->origin, a->q, DBG_YELLOW, life, true);                   // the bullet's line (to where it lands)
+    if (a->cls != AIM_CLEAR) dbg_line(a->q, a->p, DBG_RED, life, true);  // the part it never reaches
+    dbg_cross(a->muzzle, 0.02f, DBG_ORANGE, life);
+    if (a->recovered) dbg_cross(a->origin, 0.03f, DBG_MAGENTA, life);
+    if (a->cls != AIM_CLEAR) {
+        dbg_cross(a->q, 0.04f, a->cls == AIM_FRIENDLY ? DBG_BLUE : DBG_RED, life);
+        dbg_text(a->q, aim_class_name(a->cls), DBG_YELLOW, 0.03f, life);
+    }
+}
+
+void weapons_aim_debug_frame(World *w) {
+    if (!WC.aim_debug || !WC.aim_debug->i || !w) return;
+    Game *g = game();
+    int slot = game_view_slot();
+    if (!g || slot < 0) return;
+    AimSolve a;
+    if (!weapon_aim_preview(w, slot, player_eye_pos(&w->players[slot].sim.move), g->view.yaw, g->view.pitch, game_view_cmd(), &a)) return;
+    aim_debug_draw(&a, 0.0f);
 }
 
 static LocalFlashFn g_local_flash;
@@ -452,24 +610,75 @@ static u32 dbg_check_color(vec3 aim, vec3 sdir, float cone) {
     return off <= cone * 0.5f + 1e-3f ? DBG_GREEN : DBG_RED;
 }
 
+// Host: the shooter's claims against this machine's reconstruction (aim_stats; discrepancies logged).
+static void aim_host_check(World *w, int slot, const UserCmd *cmd, const AimSolve *a, bool local_view) {
+    AimStats *st = &g_aim_stats;
+    st->shots++;
+    if (a->recovered) st->recovered++;
+    if (local_view) return;   // the host's own player: its claim is its own pose
+    if (a->claim_error > 0.0f) {
+        st->checked++;
+        st->max_error = fmaxf(st->max_error, a->claim_error);
+        if (a->claim_clamped) {
+            st->clamped++;
+            log_warn("aim: p%d muzzle claim %.0f mm from the host's weapon pose (tolerance %.0f mm): clamped", slot, a->claim_error * 1000.0f,
+                     WC.muzzle_tolerance->f * 1000.0f);
+        }
+    }
+    if (cmd->aim_dist) {
+        // The client's predicted aim point vs the host's (lag-compensated) one.
+        float cl = (float)cmd->aim_dist * 0.01f, hd = v3_dist(a->eye, a->p);
+        float err = fabsf(cl - hd);
+        st->p_checked++;
+        st->max_p_error = fmaxf(st->max_p_error, err);
+        if (err > fmaxf(0.5f, hd * 0.05f)) {
+            st->p_mismatch++;
+            log_debug("aim: p%d aim point %.2f m on the client, %.2f m on the host", slot, cl, hd);
+        }
+    }
+}
+
 static void fire(World *w, int slot, PlayerSim *sim, const WeaponDef *d, const UserCmd *cmd, bool first, bool local_view,
-                 vec3 dir, float spread, u32 seed, int shot_in_mag) {
+                 vec3 aim, float spread, u32 seed, int shot_in_mag, AimSolve *as) {
     PlayerMove *m = &sim->move;
     vec3 eye = player_eye_pos(m);
     Rng rng = rng_make(seed);
-    vec3 muzzle = muzzle_world(m, d, local_view);
+    if (!w->authority && !(local_view && first)) {
+        // Prediction replays / spectated players: nothing is spawned or drawn here (EV_SHOT does it).
+        memset(as, 0, sizeof(*as));
+        as->eye = as->muzzle = as->origin = as->q = as->p = eye;
+        as->dir = as->cam_dir = aim;
+        return;
+    }
+    // Aim model (docs/AIM.md): the bullet leaves the muzzle and converges on the camera ray's aim point.
+    AimQuery aq = weapon_aim_query(w, slot, m, cmd, aim, d->aim_max_range, d->obstruct_near, w->authority ? cmd->view_tick : 0);
+    weapon_aim_solve(w, slot, &aq, as);
+    vec3 muzzle = as->muzzle, origin = as->origin, dir = as->dir;
+    if (w->authority) aim_host_check(w, slot, cmd, as, local_view);
+    if (local_view && first) {
+        if (!w->authority && !g_aim_claim) g_aim_claim = (u16)DG_CLAMP((int)lrintf(v3_dist(as->eye, as->p) * 100.0f), 1, 65535);
+        if (WC.aim_debug && WC.aim_debug->i) {
+            aim_debug_draw(as, 4.0f);
+            if (WC.aim_debug->i >= 2)
+                log_info("aim: shot class %s P %.2f m Q %.2f m%s claim err %.1f mm", aim_class_name(as->cls), v3_dist(as->eye, as->p), as->q_dist,
+                         as->recovered ? " (muzzle inside geometry)" : "", as->claim_error * 1000.0f);
+        }
+    }
     int dbg = WC.recoil_debug ? WC.recoil_debug->i : 0;
     bool ballistic = bal_world_enabled() && bal_weapon_cartridge(d) >= 0;
     if (local_view && first) {
+        // The flash on the drawn gun (the first-person item may use its own FOV); the bullet from the muzzle.
+        vec3 flash = muzzle, mp, mf;
+        if (hands_muzzle(&mp, &mf) && v3_dist(mp, muzzle) < 0.5f) flash = v3_madd(mp, mf, 0.015f);
         if (ballistic) {
-            bal_fx_muzzle_weapon(slot, d, muzzle, dir, true);   // composed flash + the shooter's report (docs/BALLISTICS.md)
+            bal_fx_muzzle_weapon(slot, d, flash, dir, true);   // composed flash + the shooter's report (docs/BALLISTICS.md)
             bal_shooter_report(d, eye);
         } else {
             // The flash is parented to the gun's final transform of this tick (after the fire animation's
             // kick, docs/FIRE_ANIM.md): the game spawns it once the first-person item is placed. The
             // sound's transient is this tick, the same tick as the gun's peak displacement.
             if (g_local_flash) g_local_flash(dir, d->vfx_muzzle_type, d->vfx_muzzle_device);
-            else fx_muzzle_ex(muzzle, dir, d->vfx_muzzle_type, d->vfx_muzzle_device, true);
+            else fx_muzzle_ex(flash, dir, d->vfx_muzzle_type, d->vfx_muzzle_device, true);
             fx_sound(d->sound_fire, eye, 1.0f);
         }
     }
@@ -487,8 +696,8 @@ static void fire(World *w, int slot, PlayerSim *sim, const WeaponDef *d, const U
             w->proj[i].weapon = (int)(d - w->items->weapons);
             w->proj[i].life = 8.0f;
             float yaw = atan2f(-pdir.x, -pdir.z), pitch = asinf(clampf(pdir.y, -1, 1));
-            ent_set_pos(w, e, v3_madd(eye, pdir, 0.5f), quat_euler(yaw, pitch, 0), true);
-            ev_sound(w, d->sound_fire, eye, 1.0f, slot);
+            ent_set_pos(w, e, origin, quat_euler(yaw, pitch, 0), true);
+            ev_sound(w, d->sound_fire, muzzle, 1.0f, slot);
         }
         return;
     }
@@ -505,8 +714,8 @@ static void fire(World *w, int slot, PlayerSim *sim, const WeaponDef *d, const U
             bi.weapon_index = (int)(base - w->items->weapons);
             bi.att = eq->att;
             bi.eye = eye;
+            bi.origin = origin;
             bi.aim = dir;
-            bi.muzzle = muzzle;
             bi.spread = spread;
             bi.seed = seed;
             bi.view_tick256 = cmd->view_tick;
@@ -527,19 +736,19 @@ static void fire(World *w, int slot, PlayerSim *sim, const WeaponDef *d, const U
         if (first && local_view) {
             debug_check_shot(slot, dir, sdir, spread, &sim->wpn.rc, dbg >= 2);
             if (dbg) {
-                HitResult dh = trace_shot(w, slot, eye, sdir, d->range, 0);
+                HitResult dh = trace_shot(w, slot, origin, sdir, d->range, 0);
                 if (dh.hit) dbg_cross(dh.point, 0.03f, dbg_check_color(dir, sdir, spread), 10.0f);
             }
         }
         if (w->authority) {
-            HitResult h = trace_shot(w, slot, eye, sdir, d->range, cmd->view_tick);
-            vec3 end = h.hit ? h.point : v3_madd(eye, sdir, d->range);
+            HitResult h = trace_shot(w, slot, origin, sdir, d->range, cmd->view_tick);
+            vec3 end = h.hit ? h.point : v3_madd(origin, sdir, d->range);
             bool was_alive = h.hit && h.character && ent_valid(w, h.ent) && !(w->flags[ENT_INDEX(h.ent)] & EF_DEAD);
             if (h.hit) apply_hit(w, slot, d, &h, sdir, 1.0f);
             bool killed = was_alive && (w->flags[ENT_INDEX(h.ent)] & EF_DEAD);
-            push_shot_events(w, slot, muzzle, &h, end, d, p == 0, killed);
+            push_shot_events(w, slot, origin, &h, end, d, p == 0, killed);
             if (local_view && first) {
-                fx_tracer(muzzle, end);
+                fx_tracer(origin, end);
                 if (h.hit && fx_predict_impacts()) {
                     if (h.character) flesh_predict(w, &h, sdir, d);
                     else fx_impact_ex(h.point, h.normal, sdir, h.material, d->vfx_caliber, impact_flags(&h));
@@ -547,9 +756,9 @@ static void fire(World *w, int slot, PlayerSim *sim, const WeaponDef *d, const U
             }
         } else if (local_view && first) {
             // Predicted cosmetic trace against the replica world.
-            HitResult h = trace_shot(w, slot, eye, sdir, d->range, 0);
-            vec3 end = h.hit ? h.point : v3_madd(eye, sdir, d->range);
-            fx_tracer(muzzle, end);
+            HitResult h = trace_shot(w, slot, origin, sdir, d->range, 0);
+            vec3 end = h.hit ? h.point : v3_madd(origin, sdir, d->range);
+            fx_tracer(origin, end);
             if (h.hit && fx_predict_impacts()) {
                 if (h.character) flesh_predict(w, &h, sdir, d);
                 else fx_impact_ex(h.point, h.normal, sdir, h.material, d->vfx_caliber, impact_flags(&h));
@@ -558,7 +767,7 @@ static void fire(World *w, int slot, PlayerSim *sim, const WeaponDef *d, const U
             if (h.character) chars_predict_hit(w, h.ent, h.part, sdir);
         }
     }
-    if (w->authority) ev_sound(w, d->sound_fire, eye, 1.0f, slot);
+    if (w->authority) ev_sound(w, d->sound_fire, muzzle, 1.0f, slot);
 }
 
 static void melee_step(World *w, int slot, PlayerSim *sim, const WeaponDef *d, bool first, bool local_view) {
@@ -919,6 +1128,20 @@ void weapons_tick(World *w, int slot, PlayerSim *sim, const UserCmd *cmd, u16 pr
             trigger = false;
         }
         cap = DG_MIN(cap, (int)*mag);
+        // block_fire_when_barrel_blocked (host rule, replicated): no shot while the barrel is against a wall.
+        if (WC.block_barrel && WC.block_barrel->i && trigger && ready && cap > 0) {
+            vec2 sw = weapon_aim_offset_deg(d, ws, &sim->move, weapon_sway_time(cmd->seq));
+            vec3 adir = dir_from_angles(sim->move.yaw - sw.x * DG_DEG2RAD, sim->move.pitch + sw.y * DG_DEG2RAD);
+            AimQuery bq = weapon_aim_query(w, slot, &sim->move, cmd, adir, d->aim_max_range, d->obstruct_near, 0);
+            AimSolve bs;
+            weapon_aim_solve(w, slot, &bq, &bs);
+            if (bs.cls == AIM_BARREL) {
+                ready = false;
+                out->barrel_blocked = true;
+                if ((pressed & BTN_ATTACK) && local_view && first) fx_sound("dry_fire", sim->move.pos, 0.4f);
+                if (w->authority && first) g_aim_stats.blocked++;
+            }
+        }
         int n = recoil_fire_budget(&ws->cooldown, interval, dt, trigger && ready && cap > 0, DG_MAX(cap, 0));
         float cooldown_after = ws->cooldown;
         PlayerMove *m = &sim->move;
@@ -936,7 +1159,8 @@ void weapons_tick(World *w, int slot, PlayerSim *sim, const UserCmd *cmd, u16 pr
             int shot_in_mag = d->mag_size - *mag;   // 0 = first round of the magazine (tracer loading)
             if (!WC.infinite_ammo->i) (*mag)--;
             if (w->authority) ws->mag = s->ammo;
-            fire(w, slot, sim, d, cmd, first, local_view, dir, cone, seed, shot_in_mag);
+            AimSolve as;
+            fire(w, slot, sim, d, cmd, first, local_view, dir, cone, seed, shot_in_mag, &as);
             ws->shots++;
             RecoilMods am = make_mods(sim, rscale);
             if (ws->rc.shot_index == 0 && ws->since_sprint < rp->sprint_to_fire + 0.35f) am.extra = rp->after_sprint_kick;
@@ -956,7 +1180,7 @@ void weapons_tick(World *w, int slot, PlayerSim *sim, const UserCmd *cmd, u16 pr
                 ev.local_view = local_view;
                 ev.def = d;
                 ev.eye = eye;
-                ev.muzzle = muzzle_world(m, d, local_view);
+                ev.muzzle = as.origin;
                 ev.dir = dir;
                 ev.cone_deg = cone;
                 ev.pattern_index = pattern_index;

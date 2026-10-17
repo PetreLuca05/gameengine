@@ -181,6 +181,9 @@ typedef struct WeaponDef {
     char cartridge[24];
     float barrel_length, zero_distance;
     char muzzle_device_id[32];
+    // Aim model ("aim" block, docs/AIM.md): obstruction closer than obstruct_near to the muzzle =
+    // barrel blocked; the camera ray looks for the aim point up to max_range (0 = range).
+    float obstruct_near, aim_max_range;
     RecoilParams recoil;      // guns: recoil, spread, fire modes, ADS/sway feel ("recoil" block)
     FireAnimDef fire;         // guns: gun-driven fire animation (class pose + mass, "fire_anim" block; docs/FIRE_ANIM.md)
     // Third-person procedural hold ("hold" block): style + item sockets (shared with the viewmodel grip data).

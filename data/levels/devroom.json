@@ -311,7 +311,20 @@
     {"type": "box", "pos": [71.75, 0, -82], "size": [0.5, 3, 12], "color": [0.62, 0.64, 0.66], "material": "concrete"},
     {"type": "box", "pos": [88.25, 0, -82], "size": [0.5, 3, 12], "color": [0.62, 0.64, 0.66], "material": "concrete"},
     {"type": "box", "pos": [80, 0, -82], "size": [16, 0.02, 12], "color": [0.35, 0.6, 0.7], "material": "concrete", "grid": true},
-    {"type": "ramp", "pos": [80, 0, -69.88], "width": 2.5, "length": 8.24, "angle": 20, "platform": 1.5, "color": [0.5, 0.58, 0.68], "label": "pool ramp"}
+    {"type": "ramp", "pos": [80, 0, -69.88], "width": 2.5, "length": 8.24, "angle": 20, "platform": 1.5, "color": [0.5, 0.58, 0.68], "label": "pool ramp"},
+    {"_comment": "Aim stand (docs/AIM.md): corners and frames for the muzzle obstruction cases, aim_debug 1. Fire from the floor marks at z = 41.5 facing -Z (yaw 0); targets 15 m down range.", "type": "box", "pos": [113, 0, 42.6], "size": [32, 0.02, 0.4], "color": [0.85, 0.75, 0.2], "grid": false, "collide": false, "shadow": false},
+    {"_comment": "wall edge: stand at x 104.0 so the eye sees past the edge while a hip muzzle (right of the eye) is behind it", "type": "box", "pos": [105.6, 0, 40], "size": [3, 3, 0.3], "color": [0.62, 0.6, 0.56], "material": "concrete", "label": "wall edge"},
+    {"_comment": "window frame: 1.2 x 0.8 m opening, sill at 1.1 m (crouch: the sill blocks the barrel, the eye still sees over it)", "type": "box", "pos": [109.2, 0, 40], "size": [0.4, 2.4, 0.2], "color": [0.62, 0.6, 0.56], "material": "wood"},
+    {"type": "box", "pos": [110.8, 0, 40], "size": [0.4, 2.4, 0.2], "color": [0.62, 0.6, 0.56], "material": "wood"},
+    {"type": "box", "pos": [110, 0, 40], "size": [1.2, 1.1, 0.2], "color": [0.62, 0.6, 0.56], "material": "wood", "label": "window"},
+    {"type": "box", "pos": [110, 1.9, 40], "size": [1.2, 0.5, 0.2], "color": [0.62, 0.6, 0.56], "material": "wood"},
+    {"type": "box", "pos": [110, 1.45, 40], "size": [0.05, 0.45, 0.05], "color": [0.3, 0.25, 0.2], "material": "wood", "_comment": "mullion: a thin partial obstruction in the middle of the opening"},
+    {"_comment": "low wall for crouch / prone: the eye clears it, a barrel held lower hits its top", "type": "box", "pos": [122, 0, 40], "size": [3, 0.75, 0.3], "color": [0.62, 0.6, 0.56], "material": "brick", "label": "low wall"},
+    {"_comment": "thin wall: walk the barrel into it (the muzzle pokes through while the camera stays behind)", "type": "box", "pos": [128, 0, 40.6], "size": [2, 3, 0.04], "color": [0.8, 0.8, 0.76], "material": "plaster", "label": "thin wall"},
+    {"type": "box", "pos": [104.5, 0, 25], "size": [1.5, 2.2, 0.1], "color": [0.9, 0.9, 0.86], "fine_grid": true, "material": "wood"},
+    {"type": "box", "pos": [110, 0, 25], "size": [1.5, 2.2, 0.1], "color": [0.9, 0.9, 0.86], "fine_grid": true, "material": "wood"},
+    {"type": "box", "pos": [122, 0, 25], "size": [1.5, 2.2, 0.1], "color": [0.9, 0.9, 0.86], "fine_grid": true, "material": "wood"},
+    {"type": "box", "pos": [128, 0, 25], "size": [1.5, 2.2, 0.1], "color": [0.9, 0.9, 0.86], "fine_grid": true, "material": "wood"}
   ],
   "puddles": [
     {"_comment": "Authored puddle areas (game_weather.c bake_puddles): pos [x, z], size [w, d], value 0..1 (1 fills first).", "pos": [-44, 26], "size": [5, 3], "value": 1.0},
@@ -321,7 +334,8 @@
   "vehicles": [
     {"def": "car", "pos": [-114, 0.3, -6], "yaw": 0, "fuel": 30},
     {"def": "car", "pos": [-118, 0.3, -6], "yaw": 0, "fuel": 8},
-    {"def": "moto", "pos": [-114, 0.3, 4], "yaw": 0, "fuel": 10}
+    {"def": "moto", "pos": [-114, 0.3, 4], "yaw": 0, "fuel": 10},
+    {"def": "car", "pos": [116, 0.3, 40], "yaw": 90, "fuel": 0, "_comment": "aim stand: lean on the bodywork / shoot over the bonnet (docs/AIM.md)"}
   ],
   "fuel_pumps": [{"pos": [-104.5, 0.12, -12], "yaw": 90}],
   "vehicle_spikes": [{"pos": [-110, 8], "size": [7, 0.5]}],
@@ -329,6 +343,7 @@
     {"type": "lake", "name": "devpool", "preset": "pool", "level": 2.6, "box": {"center": [80, -82], "half": [8, 6]}}
   ],
   "labels": [
+    {"pos": [115, 0, 43.4], "yaw": 0, "floor": true, "size": 0.18, "text": "aim stand: wall edge / window / car / low wall / thin wall. aim_debug 1, crosshair_obstruct, block_fire_when_barrel_blocked, aim_report, aim_stats"},
     {"pos": [33.5, 0, -42.0], "yaw": -90, "floor": true, "size": 0.18, "text": "ballistics range: ballistics_debug 1, fire_tracers_only 1, bal_wind <m/s>, shutter_preview, muzzle_preview <weapon> <device>"},
     {"pos": [33.5, 0, -57.5], "yaw": -90, "floor": true, "size": 0.18, "text": "penetration: steel / pine / sandbag / brick / plaster, witness panels behind"},
     {"pos": [0, 0, 47.5], "yaw": 0, "floor": true, "size": 0.3, "text": "horde yard: spawn_horde <count> [radius] [ring|random|cluster], horde_debug 1"},

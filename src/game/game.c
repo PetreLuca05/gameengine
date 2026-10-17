@@ -22,6 +22,7 @@
 #include "gameplay/ballistics/bal_world.h"
 #include "gameplay/ballistics/bal_fx.h"
 #include "gameplay/characters.h"
+#include "gameplay/aim.h"
 #include "anim/anim_library.h"
 #include "assets/anim_cache.h"
 #include "ui/anim_debug.h"
@@ -511,6 +512,12 @@ static UserCmd build_cmd(void) {
     c.use_target = G->focus;
     c.view_tick = net_client_view_tick256();
     phone_fill_cmd(&c);
+    // Aim model (docs/AIM.md): where the muzzle is in the pose this player sees (the host checks it).
+    {
+        Player *lp = game_local_player();
+        vec3 mc;
+        if (lp && chars_muzzle_cam(G->world, lp->ent, &mc, NULL)) aim_claim_pack(mc, c.muzzle_cam);
+    }
     return c;
 }
 
@@ -566,13 +573,15 @@ static void tick(void) {
         spectator_tick(w);
     } else if (G->mode == GM_CLIENT) {
         G->cmd_history[cmd.seq % CMD_HISTORY] = cmd;
-        net_client_send_cmds(G->cmd_history, CMD_HISTORY, cmd.seq);
         Player *p = game_local_player();
         if (p && p->character) {
             G->predicted_prev = p->sim.move;
             game_sim_player(w, G->local_slot, &cmd, SIM_DT, true);
             chars_local_predict(w, G->local_slot, true);
         }
+        // Sent after the prediction: the command carries its shot's predicted aim point (docs/AIM.md).
+        G->cmd_history[cmd.seq % CMD_HISTORY].aim_dist = weapons_take_aim_claim();
+        net_client_send_cmds(G->cmd_history, CMD_HISTORY, cmd.seq);
         spectator_tick(w);   // the watched player: relayed commands through the same path
         g_chars_force_phys_step = vehicles_client_tick(w, &cmd);
         chars_client_tick(w, net_client_render_tick(), SIM_DT);

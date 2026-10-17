@@ -578,6 +578,12 @@ static void parse_weapon(ItemDB *db, const cJSON *w, const char *file) {
     d->barrel_length = jnum(w, "barrel_length", 0.4f);
     d->zero_distance = jnum(w, "zero_distance", 100.0f);
     {
+        const cJSON *am = cJSON_GetObjectItemCaseSensitive(w, "aim");
+        d->obstruct_near = jnum(am, "obstruct_near", 0.25f);
+        d->aim_max_range = jnum(am, "max_range", 0.0f);
+        if (d->aim_max_range <= 0.0f) d->aim_max_range = d->range;
+    }
+    {
         static const char *k_integral[] = { "bare", "flash_hider", "compensator", "suppressor" };
         const char *im = jstr(w, "integral_muzzle", NULL);
         int dv = DG_CLAMP(d->vfx_muzzle_device, 0, 3);
