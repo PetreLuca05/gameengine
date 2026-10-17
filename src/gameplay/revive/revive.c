@@ -1123,6 +1123,45 @@ static void cmd_revive_approach(int argc, const char **argv) {
     log_info("revive_approach: %s at %.2f %.2f %.2f", argv[1], stand.x, stand.y, stand.z);
 }
 
+// Script sync (two-instance tests): hold the script until a condition is true (or the timeout).
+// revive_wait players <n> | <slot> alive|dead|downed|reconstructing [timeout frames, default 3000]
+static bool wait_done(int argc, const char **argv) {
+    World *w = game_world();
+    if (!w || argc < 3) return true;
+    if (!strcmp(argv[1], "players")) {
+        int n = 0;
+        for (int s = 0; s < MAX_PLAYERS; s++) n += w->players[s].active ? 1 : 0;
+        return n >= atoi(argv[2]);
+    }
+    int s = atoi(argv[1]);
+    if (s < 0 || s >= MAX_PLAYERS || !w->players[s].active) return false;
+    const Player *p = &w->players[s];
+    bool dead = p->sim.move.mode == MOVE_DEAD || (ent_valid(w, p->ent) && (w->flags[ENT_INDEX(p->ent)] & EF_DEAD));
+    bool downed = (ent_valid(w, p->ent) && (w->flags[ENT_INDEX(p->ent)] & EF_DOWNED)) || p->sim.down.downed;
+    if (!strcmp(argv[2], "alive")) return !dead && !downed;
+    if (!strcmp(argv[2], "dead")) return dead;
+    if (!strcmp(argv[2], "downed")) return downed;
+    if (!strcmp(argv[2], "reconstructing")) {
+        RecoveryStatus rs;
+        return revive_recovery_status(w, s, &rs) && rs.stage == REC_RECONSTRUCTING;
+    }
+    return true;
+}
+
+static void cmd_revive_wait(int argc, const char **argv) {
+    static int frames;
+    int timeout = argc > 3 ? atoi(argv[3]) : 3000;
+    if (wait_done(argc, argv) || ++frames > timeout) {
+        if (frames > timeout) log_warn("revive_wait: timeout (%s %s)", argc > 1 ? argv[1] : "", argc > 2 ? argv[2] : "");
+        else log_info("revive_wait: %s %s after %d frames", argc > 1 ? argv[1] : "", argc > 2 ? argv[2] : "", frames);
+        frames = 0;
+        return;
+    }
+    char line[128];
+    snprintf(line, sizeof(line), "revive_wait %s %s %d", argc > 1 ? argv[1] : "", argc > 2 ? argv[2] : "", timeout);
+    cbuf_retry(line);
+}
+
 static void cmd_fab_power(int argc, const char **argv) {
     World *w = host_world("fab_power");
     if (!w || argc < 2) { log_info("usage: fab_power <0|1> [fabricator entity]"); return; }
@@ -1195,6 +1234,7 @@ void revive_register(void) {
     cmd_register("spawn_fabricator", cmd_spawn_fabricator, "spawn_fabricator [distance] [powered 0|1]: a reconstruction fabricator in front of you (host)");
     cmd_register("spawn_teammate", cmd_spawn_teammate, "spawn_teammate [name] [distance]: a client-less teammate in front of you (host, revive loop tests)");
     cmd_register("revive_approach", cmd_revive_approach, "revive_approach corpse|fab|downed [offset]: stand in reach of a timed action and look at it (tests)");
+    cmd_register("revive_wait", cmd_revive_wait, "revive_wait players <n> | <slot> alive|dead|downed|reconstructing [timeout]: hold the script until true (tests)");
     cmd_register("fab_power", cmd_fab_power, "fab_power <0|1> [entity]: power fabricators on / off (ejects samples mid-cycle)");
     cmd_register("revive_dump", cmd_revive_dump, "log downed / action / corpse / fabricator / DNA state (tests)");
     cmd_register("revive_rules_reload", cmd_reload_rules, "reload assets/gameplay/revive_rules.json");
