@@ -69,7 +69,13 @@ G-buffer layout is unchanged.
 
 The vgeo resolve bounds every texture-table index it takes from a material record (albedo and the
 four maps) to `VG_TEX_COUNT`, so a pixel that decodes a record that is not a real material can at
-worst sample white, never index past the table. On `VK_ERROR_DEVICE_LOST`, `VK_CHECK` logs
+worst sample white, never index past the table. Empty pixels are covered too: the resolve passes
+`discard` them, which the Vulkan 1.3 target compiles to `OpDemoteToHelperInvocation`, so those lanes
+keep running the shading body as helper invocations; `vg_resolve_pixel` gives every input a default
+(no flags, texture index 0) before it reads the visibility buffer. Before that the helpers sampled
+`vg_tex[]` with undefined (register garbage) indices whenever their undefined flags said so: with the
+maps in the G-buffer resolve this lost the device about a second after `spawn_horde 200` (skinned
+characters fill the screen with resolve work). On `VK_ERROR_DEVICE_LOST`, `VK_CHECK` logs
 `VK_EXT_device_fault` data (description, fault addresses, vendor records) before the fatal error.
 `--test` runs (or `DG_NO_FATAL_DIALOG=1`) abort without the fatal message box.
 

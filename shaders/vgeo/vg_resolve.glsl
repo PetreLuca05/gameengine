@@ -63,15 +63,37 @@ void vg_resolve_material(VgMaterial mat) {
     if (g_pbr_tex.w == 0u) g_mat_flags &= ~MAT_EMISSIVE_TEX;
 }
 
+// Every input defined first, also for empty pixels: the includers discard those, and with the Vulkan
+// 1.3 target (SPIR-V 1.6) `discard` is OpDemoteToHelperInvocation, so the lane keeps running the
+// G-buffer / lit body as a helper invocation (derivatives). Left undefined, its flags and texture
+// indices are register garbage: a map / albedo sample through vg_tex[garbage] can read a descriptor past
+// the table and faults the device (VK_ERROR_DEVICE_LOST with a horde on screen). Defaults: no
+// texture, no map flags, index 0 (white).
+void vg_resolve_defaults() {
+    v_world = V.cam_pos.xyz;
+    v_normal = vec3(0.0, 1.0, 0.0);
+    v_uv = vec2(0.0);
+    v_color = vec4(1.0);
+    v_cur_clip = v_prev_clip = vec4(0.0, 0.0, 0.0, 1.0);
+    g_mat_color = vec4(1.0);
+    g_mat_params = vec4(1.0, 0.0, 0.0, 1.0);
+    g_mat_flags = 0u;
+    g_tex = 0u;
+    g_depth = 1.0;
+    g_front = true;
+    g_pbr_tex = uvec4(0u);
+    g_pbr = uvec4(0u);
+    g_tangent = g_bitangent = vec3(0.0);
+}
+
 bool vg_resolve_pixel() {
+    vg_resolve_defaults();
     ivec2 p = ivec2(gl_FragCoord.xy);
     uint w = uint(V.viewport.x);
     uint64_t e = vis[uint(p.y) * w + uint(p.x)];
     if (e == 0ul) return false;
     uint lo = uint(e & 0xFFFFFFFFul), hi = uint(e >> 32);
     g_depth = 1.0 - uintBitsToFloat(hi);
-    g_front = true;
-    g_tangent = g_bitangent = vec3(0.0);
     uvec2 ent = visible[lo >> VG_VIS_TRI_BITS];
     VgXf x = vg_instance_xf(ent.x);
     VgMesh m = meshes[x.mesh];

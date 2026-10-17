@@ -320,6 +320,10 @@ opaque         legacy forward lighting, then the vgeo lit resolve (vgeo_lit.frag
   roughness, metallic, emissive, flags. Textures are not bound yet (bindless table with Phase 5 glTF content:
   `MAT_TEXTURED` is masked off).
 - Velocity: current / previous unjittered view-projection of the reconstructed position (static instances).
+- Empty pixels `discard`, which is `OpDemoteToHelperInvocation` with the Vulkan 1.3 shader target: the lane
+  runs on as a helper (derivatives), so `vg_resolve_pixel` defines every input first (`vg_resolve_defaults`:
+  no flags, texture index 0). Undefined flags / indices there sampled the texture table out of range and lost
+  the device (docs/PBR.md "Robustness").
 - The vgeo pipelines use the renderer's sets 0-2 and push range (compatible with `layout_lit`) plus the vgeo
   set as set 3 (`VG_SET 3`, `VG_NO_PUSH`).
 
