@@ -101,7 +101,7 @@ Events fire on every machine from the evaluated parameters, with hysteresis: sta
 - Streaks are oriented along their velocity; flakes are camera-facing with turbulence.
 - They are lit by the sky ambient, a little key light and lightning.
 - Instances under a roof collapse, tested against the occlusion map.
-- Splashes are spawned per time slot on the top surface from the occlusion map.
+- Splashes are spawned per time slot on the top surface from the occlusion map, uniformly over a ring 1.5 .. 14 m from the camera: none at the player's feet (rain makes no footstep splashes).
 - Counts per `r_precip_quality`: 4,000 / 9,000 / 16,000 streaks × intensity, and 300 / 700 / 1,300 splashes × rain. `-1` = auto from `r_post_preset` (low → 1, medium → 2, high and ultra → 3).
 - Precipitation is drawn after the particles in the main view and in the scope picture-in-picture.
 
