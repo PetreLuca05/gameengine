@@ -91,7 +91,9 @@ bool vg_resolve_pixel() {
     // Velocity: the previous palette / wind / time with the same barycentrics.
     if (x.skin || (m.fflags & VGMF_WPO) != 0u)
         prev_world = vg_vertex_world_ex(x, c, m, t.x, true) * b.x + vg_vertex_world_ex(x, c, m, t.y, true) * b.y + vg_vertex_world_ex(x, c, m, t.z, true) * b.z;
-    v_normal = normalize(vg_xf_dir(x, n0 * b.x + n1 * b.y + n2 * b.z));
+    if (!x.skin && (m.fflags & VGMF_WPO) != 0u && (V.wind_misc.z & VGW_NORMALS) != 0u)   // wind-bent / fluttering normals
+        v_normal = normalize(vg_vertex_normal_world(x, c, m, t.x) * b.x + vg_vertex_normal_world(x, c, m, t.y) * b.y + vg_vertex_normal_world(x, c, m, t.z) * b.z);
+    else v_normal = normalize(vg_xf_dir(x, n0 * b.x + n1 * b.y + n2 * b.z));
     v_uv = vg_vertex_uv(c, m, t.x) * b.x + vg_vertex_uv(c, m, t.y) * b.y + vg_vertex_uv(c, m, t.z) * b.z;
     v_color = vg_vertex_color(c, m, t.x) * b.x + vg_vertex_color(c, m, t.y) * b.y + vg_vertex_color(c, m, t.z) * b.z;
     v_cur_clip = V.view_proj * vec4(v_world, 1.0);        // unjittered (velocity)
@@ -100,7 +102,27 @@ bool vg_resolve_pixel() {
     uint mi = m.material_base + c.material;
     if (x.slot != 0xFFFFFFFFu && V.caps1.w != 0xFFFFFFFFu) mi = V.caps1.w + x.slot;
     VgMaterial mat = materials[mi];
-    if (mat.wpo != WPO_NONE) v_color = vec4(1.0);           // wind weights, not albedo
+    if (mat.wpo != WPO_NONE) {                              // wind weights, not albedo
+        vec4 wc = v_color;
+        v_color = vec4(1.0);
+        if (V.wind_misc.w == VGWD_CHANNELS) {                  // wind_debug: R flutter, G phase, B branch as the colour
+            vg_resolve_material(mat);
+            g_mat_color = vec4(wc.rgb, 1.0);
+            g_mat_flags &= ~(MAT_TEXTURED | MAT_TRIPLANAR | MAT_GRID | MAT_CHECKER);
+            if ((mat.flags & VGM_TWO_SIDED) != 0u) g_front = area < 0.0;
+            return true;
+        }
+        if (V.wind_misc.w == VGWD_BEND) {                      // wind_debug: the instance's main bend (black .. red at max)
+            vec4 wf = vg_wind_at(x.pos.xz, false);
+            vec2 W = wf.xy + (wf.zw - wf.xy) * mat.wind_b.y;
+            float bend = min(mat.wpo_params.x * pow(clamp(length(W) / mat.wpo_params.w, 0.0, 1.0), mat.wind_b.z) / max(mat.wind_b.x, 1e-4), 1.0);
+            vg_resolve_material(mat);
+            g_mat_color = vec4(bend, 0.15 * (1.0 - bend), 0.05, 1.0);
+            g_mat_flags &= ~(MAT_TEXTURED | MAT_TRIPLANAR | MAT_GRID | MAT_CHECKER);
+            if ((mat.flags & VGM_TWO_SIDED) != 0u) g_front = area < 0.0;
+            return true;
+        }
+    }
     // Two-sided: Vulkan front faces have a negative signed area here (y down, CCW front).
     if ((mat.flags & VGM_TWO_SIDED) != 0u) g_front = area < 0.0;
     vg_resolve_material(mat);

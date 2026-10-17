@@ -13,16 +13,17 @@
 #define DG_FOLIAGE_SUPPORT_H
 
 #include "vgeo_cull.h"
+#include "foliage_wind.h"
 
 // ------------------------------------------------------------------ WPO (wpo.glsl)
 
-// Declared max displacement (m) of a material's snippet (wpo = VgWpo) for its parameters, at any wind.
-float vgeo_wpo_max(u32 wpo, const float prm[4]);
-// The snippet's offset at world position p (CPU mirror): instance position ip, vertex colour col (0..1),
-// phase (0..1), wind (dir x, z, strength, gust), time t; disp: the displacement buffer's push at p
-// (WPO_DISPLACE; NULL = none).
-void vgeo_wpo_eval(u32 wpo, const float prm[4], const float p[3], const float ip[3], const float col[4], float phase, const float wind[4], float t,
-                   const float disp[2], float out[3]);
+// Declared max displacement (m, instance scale 1: vg_wpo_margin scales it) of a material's vegetation
+// WPO (foliage_wind.h) for its parameters, at any wind, + the displacement buffer's (WPO_DISPLACE).
+float vgeo_wpo_max(const VgMaterial *mt);
+// The material's offset of a vertex (CPU mirror of vg_wpo / wpo_veg): wind = the field at the pivot
+// (instant x, z, settled bend x, z: wind_tile_sample), layers VgWindLayer; disp: the displacement
+// buffer's push at the vertex (WPO_DISPLACE; NULL = none). n_out (may be NULL): the bent normal.
+void vgeo_wpo_eval(const VgMaterial *mt, const VgWindVertex *v, const float wind[4], float t, u32 layers, const float disp[2], float out[3], float n_out[3]);
 
 // ------------------------------------------------------------------ instances
 
@@ -30,7 +31,8 @@ void vgeo_wpo_eval(u32 wpo, const float prm[4], const float p[3], const float ip
 float vgeo_foliage_alpha(const VgMesh *m, u32 fp, float dist, float density);
 // vg_use_impostor for the view v and the instance's world sphere (WPO-inflated, as the culling uses it;
 // the switch takes the margin off again).
-bool vgeo_use_impostor(const VgViewGpu *v, const VgMesh *m, const float sphere[4]);
+// wpo: the margin the sphere carries (vg_wpo_margin of the instance).
+bool vgeo_use_impostor(const VgViewGpu *v, const VgMesh *m, const float sphere[4], float wpo);
 // vg_project_size (pixels across).
 float vgeo_project_size(const VgViewGpu *v, const float sphere[4]);
 // A foliage instance: rotation about y, wind phase and density hash fixed by its position (stable
@@ -132,5 +134,33 @@ void vg_displace_push(VgDisplace *d, const float pos[3], float radius, float str
 void vg_displace_record(VgDisplace *d, VkCommandBuffer cmd, u32 frame, const float cam[3], float dt);
 // The view fields WPO_DISPLACE reads (VgViewGpu disp / disp_tex).
 void vg_displace_view(const VgDisplace *d, VgViewGpu *v);
+
+// ------------------------------------------------------------------ wind field tile (docs/FOLIAGE_WIND.md)
+
+// The wind field's render tile (src/world/wind.h: 64 x 64 RGBA16F, toroidal by world texel) on the GPU:
+// a ring of 3 images, each with a fixed texture-table entry (no descriptor changes per frame). A frame
+// writes ring[k] and reads it and ring[k - 1] (last frame's tile: velocity); 2 frames in flight never
+// touch ring[k + 1].
+#define VG_WIND_RING 3
+#define VG_WIND_TEX 64
+typedef struct VgWindTex {
+    const VgContext *ctx;
+    VgTextures *tex;
+    VkImage image[VG_WIND_RING];
+    VmaAllocation alloc[VG_WIND_RING];
+    VkImageView view[VG_WIND_RING];
+    u32 tex_index[VG_WIND_RING];
+    VgBuffer staging[VG_MAX_FRAMES];
+    u32 cur;                         // ring slot of the last record
+    float tile[4], tile_prev[4];     // window texel 0 world x, z, metres per texel, valid
+    bool ok;
+} VgWindTex;
+bool vg_wind_init(VgWindTex *w, const VgContext *ctx, VgTextures *t);
+void vg_wind_shutdown(VgWindTex *w);
+// Uploads this frame's tile: texels (VG_WIND_TEX^2 x RGBA16F, row = world texel z mod 64), window
+// origin (ox, oz) in texels of `texel` m; before the frame's culls. texels NULL: no tile this frame.
+void vg_wind_record(VgWindTex *w, VkCommandBuffer cmd, u32 frame, const u16 *texels, i32 ox, i32 oz, float texel);
+// The view fields of the tile (VgViewGpu wind_tile / wind_tile_prev / wind_tex / wind_tex_prev).
+void vg_wind_view(const VgWindTex *w, VgViewGpu *v);
 
 #endif
