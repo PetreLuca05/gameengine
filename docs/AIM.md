@@ -24,8 +24,11 @@ between the barrel and that point, the crosshair moves to where the bullet will 
      M ────────────────── Q ✕ ─ ─ ╱        Q: first hit of M → P before P (obstruction)
 ```
 
-1. **Aim point P.** The camera ray: the simulated eye (`player_eye_pos`) along the view plus recoil and
-   the sight offset (`weapon_aim_offset_deg`). First hit of the shot trace (world, tires, hitboxes; lag
+1. **Aim point P.** The camera ray: from the **first-person camera** (the head's `camera` socket of the
+   tick pose, the point the player looks from) along the view plus recoil and the sight offset
+   (`weapon_aim_offset_deg`). The capsule eye (`player_eye_pos`) is only the frame the claims are
+   expressed in: it sits ~11 cm behind / left of the camera standing and ~30 cm below it crouched, so a
+   ray from it missed the screen centre (and put crouched P under window sills the player saw over). First hit of the shot trace (world, tires, hitboxes; lag
    compensated on the host), or `eye + dir × max_range`.
 2. **Muzzle M.** The `muzzle` socket of the held weapon in the latest evaluated tick pose: hold point,
    fire animation, recoil kick, wall pull-back. `chars_muzzle_cam` stores it in camera space (x right,
@@ -47,7 +50,11 @@ between the barrel and that point, the crosshair moves to where the bullet will 
 ## Networking and validation
 
 - `UserCmd.muzzle_cam` (3 × i16 mm): the muzzle the shooter sees, written by `build_cmd` from
-  `chars_muzzle_cam`. All zero means "no claim". `UserCmd.aim_dist` (cm): the client's predicted
+  `chars_muzzle_cam`. All zero means "no claim".
+- `UserCmd.eye_cam` (3 × i16 mm, protocol 23): the first-person camera in the same frame
+  (`chars_eye_cam`). The host checks it against its own pose's camera socket (12 cm tolerance, 0.6 m
+  reach cap) and casts from the capsule eye to it so it is never behind a wall. Without a claim or a
+  pose the capsule eye is used. `UserCmd.aim_dist` (cm): the client's predicted
   distance to P of its first shot of the tick. Clients send their commands **after** predicting the
   tick, so it is filled in. Protocol 22.
 - Host (`weapon_aim_solve`, `aim_host_check`):
@@ -103,8 +110,10 @@ between the barrel and that point, the crosshair moves to where the bullet will 
   - the bullet's line to where it lands (yellow), and the unreached part (red);
   - M (orange), the recovered origin (magenta), and Q with its class.
 - `aim_debug 2` also logs every shot.
-- `aim_report` prints this frame's solve and Q's screen position. `crosshair_pos` prints where the HUD
-  drew the crosshair.
+- `aim_report` prints this frame's solve and Q's screen position, and the ray's eye against the render
+  camera (`G->view.eye`, within ~1 mm). `crosshair_pos` prints where the HUD drew the crosshair and
+  the frame's target (Q's projection). Settled on an obstruction, the crosshair follows Q exactly (the
+  ease is only for the moves to and from it).
 - Theme: `crosshair_obstructed` (amber), `crosshair_friendly` (blue) in `assets/ui/theme.json`.
 
 ## Tests

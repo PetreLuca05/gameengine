@@ -36,7 +36,8 @@ typedef struct SightTest {
     int combo, combo_count;
     u16 items[64];
     u8 optics[64];
-    int phase, frames;
+    int phase, frames;        // frames: simulation ticks in this phase (frame-rate independent)
+    u32 last_tick;
     float base_yaw;
     float max_lat_mm, max_ang, min_d, max_d;
     int samples, fails;
@@ -308,6 +309,7 @@ static void align_next(void) {
     if (!t->keep) put_weapon(p, t->items[t->combo], t->optics[t->combo]);
     t->phase = 0;
     t->frames = 0;
+    t->last_tick = G->world ? G->world->tick : 0;
     t->max_lat_mm = t->max_ang = 0;
     t->min_d = 1e9f;
     t->max_d = -1e9f;
@@ -508,8 +510,16 @@ static void cmd_sight_test(int argc, const char **argv) {
 static void align_frame(void) {
     SightTest *t = &S.t;
     Player *p = game_local_player();
-    if (!p) { t->mode = 0; return; }
-    t->frames++;
+    if (!p || !G->world) { t->mode = 0; return; }
+    // Counted in simulation ticks, not frames: the equip / ADS / hold point blend and the tick's spine
+    // take the same time at any frame rate (uncapped, 600 frames were less than one equip + ADS).
+    int steps = (int)(G->world->tick - t->last_tick);
+    t->last_tick = G->world->tick;
+    if (steps <= 0) {
+        if (t->phase == 0) return;
+        steps = 0;
+    }
+    t->frames += steps;
     // Settle: equip, aim fully, the hold point blend done.
     Xform ic;
     int st;
@@ -520,13 +530,13 @@ static void align_frame(void) {
         else if (t->frames > 600) { log_warn("sight_test align: %s never aimed", item_def(&G->items, t->items[t->combo])->id); t->total_fail++; t->combo++; align_next(); }
         return;
     }
-    // Sweep: pitch -89 -> 89 (1 deg / frame) then yaw 360 deg (4 deg / frame) at pitch 0. The
-    // first frames after each jump let the tick's spine catch up (as a real mouse would).
+    // Sweep: pitch -89 -> 89 (1 deg / tick) then yaw 360 deg (4 deg / tick) at pitch 0. The
+    // first ticks after each jump let the tick's spine catch up (as a real mouse would).
     if (t->phase == 1) {
-        if (t->frames > 15) G->view.pitch = fminf(G->view.pitch + 1.0f * DG_DEG2RAD, 89.0f * DG_DEG2RAD);
+        if (t->frames > 15) G->view.pitch = fminf(G->view.pitch + (float)steps * DG_DEG2RAD, 89.0f * DG_DEG2RAD);
         if (G->view.pitch >= 89.0f * DG_DEG2RAD - 1e-4f && t->frames > 200) { t->phase = 2; t->frames = 0; G->view.pitch = 0; }
     } else if (t->phase == 2) {
-        if (t->frames > 15) G->view.yaw = wrap_angle(G->view.yaw + 4.0f * DG_DEG2RAD);
+        if (t->frames > 15) G->view.yaw = wrap_angle(G->view.yaw + 4.0f * (float)steps * DG_DEG2RAD);
         if (t->frames > 15 + 90) t->phase = 3;
     }
     if (t->frames > 15 && aimed) {

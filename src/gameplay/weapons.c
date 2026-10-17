@@ -38,8 +38,9 @@ static void cmd_aim_stats(int argc, const char **argv) {
     if (argc > 1 && !strcmp(argv[1], "reset")) { weapons_aim_stats_reset(); log_info("aim_stats: reset"); return; }
     const AimStats *a = &g_aim_stats;
     log_info("aim_stats: %u shots, %u muzzle claims checked, %u clamped (worst %.1f mm), %u aim points checked, %u mismatched (worst %.2f m), "
-             "%u muzzles inside geometry, %u trigger pulls blocked",
-             a->shots, a->checked, a->clamped, a->max_error * 1000.0f, a->p_checked, a->p_mismatch, a->max_p_error, a->recovered, a->blocked);
+             "%u muzzles inside geometry, %u trigger pulls blocked, %u camera claims checked, %u clamped (worst %.1f mm)",
+             a->shots, a->checked, a->clamped, a->max_error * 1000.0f, a->p_checked, a->p_mismatch, a->max_p_error, a->recovered, a->blocked, a->eye_checked,
+             a->eye_clamped, a->max_eye_error * 1000.0f);
 }
 
 static void cmd_aim_report(int argc, const char **argv) {
@@ -57,6 +58,8 @@ static void cmd_aim_report(int argc, const char **argv) {
              aim_class_name(a.cls), a.p.x, a.p.y, a.p.z, a.p_hit ? "hit" : "far", v3_dist(a.eye, a.p), a.muzzle.x, a.muzzle.y, a.muzzle.z,
              a.origin.x, a.origin.y, a.origin.z, a.recovered ? " (recovered)" : "", a.q.x, a.q.y, a.q.z, a.q_dist, a.dir.x, a.dir.y, a.dir.z,
              px.x, px.y, on ? "" : " (behind)", render_width(), render_height());
+    log_info("aim_report: eye %.3f %.3f %.3f render camera %.3f %.3f %.3f (%.1f mm)", a.eye.x, a.eye.y, a.eye.z, g->view.eye.x, g->view.eye.y, g->view.eye.z,
+             v3_dist(a.eye, g->view.eye) * 1000.0f);
 }
 
 void weapons_register_cvars(void) {
@@ -450,6 +453,8 @@ void weapon_local_impact(World *w, const WeaponDef *d, const HitResult *h, vec3 
 // ------------------------------------------------------------------ aim model (docs/AIM.md)
 
 #define AIM_REACH 1.5f          // a muzzle is never farther than this from the eye (hard cap on claims)
+#define AIM_EYE_REACH 0.6f      // the first-person camera is never farther than this from the simulated eye
+#define AIM_EYE_TOLERANCE 0.12f // host: a camera claim within this of its own pose's camera is used as is
 #define AIM_HOST_MAX_AGE 4      // host weapon poses older than this (ticks, LOD / culled) are not used to check claims
 #define AIM_RECOVER_MARGIN 0.02f
 
@@ -467,6 +472,8 @@ AimQuery weapon_aim_query(World *w, int slot, const PlayerMove *m, const UserCmd
     q.cam_dir = cam_dir;
     q.have_claim = cmd && aim_claim_valid(cmd->muzzle_cam);
     if (q.have_claim) q.claim = aim_claim_unpack(cmd->muzzle_cam);
+    q.have_eye_claim = cmd && aim_claim_valid(cmd->eye_cam);
+    if (q.have_eye_claim) q.eye_claim = aim_claim_unpack(cmd->eye_cam);
     q.max_range = fmaxf(1.0f, max_range);
     q.obstruct_near = obstruct_near;
     q.view_tick256 = view_tick256;
@@ -479,8 +486,27 @@ static bool is_friendly(World *w, int shooter, EntityId e) {
 
 void weapon_aim_solve(World *w, int slot, const AimQuery *q, AimSolve *out) {
     memset(out, 0, sizeof(*out));
-    out->eye = q->eye;
     out->cam_dir = q->cam_dir;
+    BodyId self = weapon_shooter_ignore_body(w, slot);
+    RayHit rh;
+    // Camera ray origin: the first-person camera the player looks through (the head's camera socket),
+    // not the capsule eye, which sits 10 cm (standing) to 30 cm (crouched) off it: the shooter's claim,
+    // checked like the muzzle against this machine's copy of the pose; without either, the capsule eye.
+    {
+        vec3 host_eye = v3(0, 0, 0);
+        int eage = 0;
+        bool have_host = chars_eye_cam(w, w->players[slot].ent, &host_eye, &eage) && eage <= AIM_HOST_MAX_AGE;
+        bool check = have_host && q->have_eye_claim && w->authority;
+        AimValidate ev = aim_validate_muzzle(q->eye_claim, q->have_eye_claim, host_eye, check, AIM_EYE_TOLERANCE, AIM_EYE_REACH);
+        vec3 ecam = q->have_eye_claim ? ev.cam : (have_host ? host_eye : v3(0, 0, 0));
+        out->eye_error = check ? ev.error : 0.0f;
+        out->eye_clamped = check && ev.clamped;
+        out->eye = aim_cam_to_world(q->eye, q->yaw, q->pitch, ecam);
+        // Never through a wall: the render camera is kept out of geometry the same way (camera_fp_collide).
+        vec3 to_e = v3_sub(out->eye, q->eye);
+        float le = v3_len(to_e);
+        if (le > 1e-4f && phys_raycast(w->phys, q->eye, to_e, PL_MASK_WORLD, self, &rh)) out->eye = aim_recover_origin(q->eye, out->eye, rh.distance / le, AIM_RECOVER_MARGIN);
+    }
     // Muzzle: the shooter's claim, checked against this machine's copy of its weapon pose. The host's
     // copy is authoritative; a client predicting itself has the very pose it claimed.
     vec3 host_cam = v3(0, 0, 0);
@@ -494,9 +520,7 @@ void weapon_aim_solve(World *w, int slot, const AimQuery *q, AimSolve *out) {
     out->muzzle = aim_cam_to_world(q->eye, q->yaw, q->pitch, cam);
     // Muzzle inside geometry (mantle, vehicle entry, barrel poked through a thin wall): back along the
     // eye -> muzzle line to the last free point, so a bullet never starts inside or behind a surface.
-    BodyId self = weapon_shooter_ignore_body(w, slot);
     out->origin = out->muzzle;
-    RayHit rh;
     vec3 to_m = v3_sub(out->muzzle, q->eye);
     float lm = v3_len(to_m);
     if (lm > 1e-4f && phys_raycast(w->phys, q->eye, to_m, PL_MASK_WORLD, self, &rh)) {
@@ -504,9 +528,9 @@ void weapon_aim_solve(World *w, int slot, const AimQuery *q, AimSolve *out) {
         out->recovered = true;
     }
     // Aim point: the camera ray (what the reticle means).
-    HitResult hp = trace_shot(w, slot, q->eye, q->cam_dir, q->max_range, q->view_tick256);
+    HitResult hp = trace_shot(w, slot, out->eye, q->cam_dir, q->max_range, q->view_tick256);
     out->p_hit = hp.hit;
-    out->p = hp.hit ? hp.point : v3_madd(q->eye, q->cam_dir, q->max_range);
+    out->p = hp.hit ? hp.point : v3_madd(out->eye, q->cam_dir, q->max_range);
     // Convergence: from the barrel to P.
     out->dir = aim_converge(out->origin, out->p, q->cam_dir);
     // Obstruction: the bullet's own line, short of P (P is a surface hit itself).
@@ -625,6 +649,14 @@ static void aim_host_check(World *w, int slot, const UserCmd *cmd, const AimSolv
                      WC.muzzle_tolerance->f * 1000.0f);
         }
     }
+    if (a->eye_error > 0.0f) {
+        st->eye_checked++;
+        st->max_eye_error = fmaxf(st->max_eye_error, a->eye_error);
+        if (a->eye_clamped) {
+            st->eye_clamped++;
+            log_warn("aim: p%d camera claim %.0f mm from the host's pose (tolerance %.0f mm): clamped", slot, a->eye_error * 1000.0f, AIM_EYE_TOLERANCE * 1000.0f);
+        }
+    }
     if (cmd->aim_dist) {
         // The client's predicted aim point vs the host's (lag-compensated) one.
         float cl = (float)cmd->aim_dist * 0.01f, hd = v3_dist(a->eye, a->p);
@@ -713,7 +745,7 @@ static void fire(World *w, int slot, PlayerSim *sim, const WeaponDef *d, const U
             bi.def = d;
             bi.weapon_index = (int)(base - w->items->weapons);
             bi.att = eq->att;
-            bi.eye = eye;
+            bi.eye = as->eye;
             bi.origin = origin;
             bi.aim = dir;
             bi.spread = spread;

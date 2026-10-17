@@ -1689,6 +1689,18 @@ static void post_one(World *w, CharacterInst *c, int i, float dt, vec3 cam_pos, 
         c->muzzle_cam_valid = true;
         c->muzzle_cam_tick = w->chars->tick;
     }
+    // The camera ray's origin: the head's camera socket of the same pose (chars_fp_camera re-reads it
+    // per frame for the render camera), relative to the same simulated eye / view.
+    c->eye_cam_valid = false;
+    if (c->is_player && c->slot >= 0 && c->slot < MAX_PLAYERS && !c->dead) {
+        const PlayerMove *pm = &w->players[c->slot].sim.move;
+        Xform sock;
+        if (character_socket_world(c->def, "camera", c->pose_cur, &sock)) {
+            c->eye_cam = aim_world_to_cam(player_eye_pos(pm), pm->yaw, pm->pitch, sock.t);
+            c->eye_cam_valid = true;
+            c->eye_cam_tick = w->chars->tick;
+        }
+    }
     // First pose: nothing to interpolate from. A newly held item: snap only its own transforms (the
     // body keeps interpolating - snapping it whenever the hands were empty made the head, and the
     // first-person camera on it, move in tick-sized steps with no item selected).
@@ -2503,6 +2515,14 @@ bool chars_muzzle_cam(World *w, EntityId e, vec3 *cam, int *age_ticks) {
     if (!c || !c->muzzle_cam_valid || !c->item_valid || c->dead) return false;
     *cam = c->muzzle_cam;
     if (age_ticks) *age_ticks = (int)(w->chars->tick - c->muzzle_cam_tick);
+    return true;
+}
+
+bool chars_eye_cam(World *w, EntityId e, vec3 *cam, int *age_ticks) {
+    CharacterInst *c = char_get(w, e);
+    if (!c || !c->eye_cam_valid || c->dead || c->rag.active) return false;
+    *cam = c->eye_cam;
+    if (age_ticks) *age_ticks = (int)(w->chars->tick - c->eye_cam_tick);
     return true;
 }
 

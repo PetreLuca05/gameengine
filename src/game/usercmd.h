@@ -41,6 +41,9 @@ typedef struct UserCmd {
     // point distance of its last shot (cm, 0 = none; host discrepancy log).
     i16 muzzle_cam[3];
     u16 aim_dist;
+    // The first-person camera (the head's "camera" socket) relative to the simulated eye, in the same
+    // camera space and units: the camera ray starts where the player's view does (validated by the host).
+    i16 eye_cam[3];
 } UserCmd;
 
 #endif

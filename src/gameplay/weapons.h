@@ -77,18 +77,20 @@ bool weapon_trace_legacy_hitboxes(World *w, int shooter, vec3 origin, vec3 dir, 
 // Aim model (docs/AIM.md, gameplay/aim.h): a shot leaves the muzzle socket and converges on the
 // aim point P of the camera ray; whatever is between the muzzle and P is hit first (Q).
 typedef struct AimQuery {
-    vec3 eye;                 // camera ray origin (the simulated eye)
+    vec3 eye;                 // the simulated eye (player_eye_pos: inside the capsule, the frame of the claims)
     float yaw, pitch;         // the view the muzzle claim is relative to (command angles)
     vec3 cam_dir;             // aim direction (view + recoil + sight offset), before the spread cone
     bool have_claim;
     vec3 claim;               // the shooter's camera-space muzzle (UserCmd.muzzle_cam)
+    bool have_eye_claim;
+    vec3 eye_claim;           // the shooter's first-person camera, same frame (UserCmd.eye_cam)
     bool hand;                // thrown items: the hand socket; no claim / pose = a point beside the eye
     float max_range;          // camera ray length (no hit: P = eye + cam_dir * max_range)
     float obstruct_near;      // obstruction closer than this to the muzzle = barrel blocked
     u32 view_tick256;         // host lag compensation of the traces (0 = the present world)
 } AimQuery;
 typedef struct AimSolve {
-    vec3 eye, cam_dir;
+    vec3 eye, cam_dir;        // the camera ray: from the first-person camera (the validated eye claim)
     vec3 p;                   // aim point
     bool p_hit;
     vec3 muzzle;              // the (validated) muzzle socket
@@ -101,6 +103,8 @@ typedef struct AimSolve {
     EntityId q_ent;
     float claim_error;        // |claim - the host's reconstruction| (m; 0 = not checked)
     bool claim_clamped;       // out of tolerance: moved onto the host's tolerance sphere
+    float eye_error;          // the same for the camera eye claim
+    bool eye_clamped;
 } AimSolve;
 AimQuery weapon_aim_query(World *w, int slot, const PlayerMove *m, const UserCmd *cmd, vec3 cam_dir, float max_range, float obstruct_near, u32 view_tick256);
 void weapon_aim_solve(World *w, int slot, const AimQuery *q, AimSolve *out);
@@ -112,7 +116,7 @@ u16 weapons_take_aim_claim(void);
 // aim_debug: draws the viewed player's aim of this frame (per frame, from the game's debug pass).
 void weapons_aim_debug_frame(World *w);
 // Host aim checks (aim_stats): shots, claims clamped, worst claim error (m), aim point mismatches.
-typedef struct AimStats { u32 shots, checked, clamped, p_checked, p_mismatch, recovered, blocked; float max_error, max_p_error; } AimStats;
+typedef struct AimStats { u32 shots, checked, clamped, p_checked, p_mismatch, recovered, blocked, eye_checked, eye_clamped; float max_error, max_p_error, max_eye_error; } AimStats;
 const AimStats *weapons_aim_stats(void);
 void weapons_aim_stats_reset(void);
 
