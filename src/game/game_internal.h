@@ -9,6 +9,7 @@ void game_cl_reconcile(const PlayerSim *server, u32 ack_seq);
 int game_spawn_player(World *w, int slot, const char *name, bool local, int peer);
 void game_remove_player(World *w, int slot);
 void game_respawn_player(World *w, int slot);
+void game_respawn_player_at(World *w, int slot, vec3 pos, float yaw, float hp);
 void game_create_player_character(World *w, int slot, vec3 feet);
 
 // game_events.c
@@ -21,6 +22,7 @@ void game_pings_register(void);
 bool game_ping_target(vec3 *pos, int *kind);    // the crosshair's point + contextual kind
 bool game_ping_request(int type);               // type < 0: contextual
 void game_sv_ping(World *w, int slot, int a, int b, int c);
+void game_sv_auto_ping(World *w, int slot, int type, vec3 pos);   // host: a ping on a player's behalf (downed / dead, docs/REVIVE.md)
 void game_pings_event(const GameEvent *ev);
 void game_pings_tick(float dt);
 void game_pings_reset(void);

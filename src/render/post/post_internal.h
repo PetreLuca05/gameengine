@@ -47,6 +47,7 @@ typedef struct PostUBO {
     vec4 s_fb2;          // sprint, underwater, night vision, desaturate
     vec4 s_fb_tint;      // rgb, w user gamma
     vec4 s_dbg;          // view, split, debug channel scale, fog ambient (weather)
+    vec4 s_fb3;          // death sequence: black, blur (docs/REVIVE.md)
     vec4 lights[MAX_POINT_LIGHTS * 2];   // pos radius, color intensity
 } PostUBO;
 

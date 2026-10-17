@@ -15,6 +15,8 @@
 #include "world/chunks.h"
 #include "gameplay/entities.h"
 #include "gameplay/health.h"
+#include "gameplay/revive/revive.h"
+#include "game_revive.h"
 #include "gameplay/weapons.h"
 #include "gameplay/characters.h"
 #include "anim/anim_library.h"
@@ -113,6 +115,12 @@ void game_respawn_player(World *w, int slot) {
     Player *p = &w->players[slot];
     float yaw = 0;
     vec3 pos = pick_spawn(w, &p->spawn_index, &yaw);
+    game_respawn_player_at(w, slot, pos, yaw, 100.0f);
+}
+
+// Respawn at a given place (spawn points, a fabricator chamber: docs/REVIVE.md).
+void game_respawn_player_at(World *w, int slot, vec3 pos, float yaw, float hp) {
+    Player *p = &w->players[slot];
     player_move_reset(&p->sim, pos, yaw);
     memset(&p->sim.wpn, 0, sizeof(p->sim.wpn));
     p->sim.wpn.swing_t = -1;
@@ -125,7 +133,9 @@ void game_respawn_player(World *w, int slot) {
     }
     int i = (int)ENT_INDEX(p->ent);
     health_init(&w->health[i], 100.0f, 0.0f);
+    w->health[i].hp = fminf(hp, w->health[i].max_hp);
     w->flags[i] &= ~(u32)(EF_DEAD | EF_HIDDEN);   // hidden: joined dead (sv_join_dead)
+    revive_sv_on_respawn(w, slot);
     ent_set_pos(w, p->ent, pos, quat_yaw(yaw), true);
     spectate_on_respawn(slot);
     GameEvent ev;
@@ -198,10 +208,12 @@ static bool interact_valid(World *w, int slot, EntityId target) {
 
 static void interact_tick(World *w, int slot, const UserCmd *cmd, u16 pressed, float dt) {
     Player *p = &w->players[slot];
-    if (p->sim.move.mode == MOVE_DEAD) return;
+    if (p->sim.move.mode == MOVE_DEAD || p->sim.down.downed) return;
     EntityId target = (EntityId)cmd->use_target;
     bool use_down = (cmd->buttons & BTN_USE) != 0;
-    if ((pressed & BTN_USE) && interact_valid(w, slot, target)) {
+    // Timed actions (revive, extract DNA, insert into a fabricator) run in revive_sim_pre.
+    bool timed = ent_valid(w, target) && (w->comps[ENT_INDEX(target)] & C_INTERACT) && w->inter[ENT_INDEX(target)].def && w->inter[ENT_INDEX(target)].def->action;
+    if ((pressed & BTN_USE) && !timed && interact_valid(w, slot, target)) {
         const InteractDef *def = w->inter[ENT_INDEX(target)].def;
         if (def->hold_time > 0 && !(def == interact_def_for(ET_CONTAINER) && w->cont[ENT_INDEX(target)].opened)) {
             p->hold_target = target;
@@ -260,6 +272,8 @@ void game_sim_player(World *w, int slot, const UserCmd *cmd, float dt, bool firs
     UserCmd c = *cmd;
     Cvar *cheats = cvar_find("sv_cheats");
     if (!cheats || !cheats->i) c.buttons &= (u16)~BTN_NOCLIP;
+    revive_sim_pre(w, slot, &c, pressed, dt, first);   // timed actions, downed crawl, forced idle (docs/REVIVE.md)
+    pressed = (u16)(c.buttons & ~p->sim.last_buttons);
     vehicles_player_cmd(w, slot, &c, pressed, first);   // enter / exit / seats / driver input (host)
     // A driver's right click holds the gun out at the hip: no aim-down-sights from it.
     if (p->sim.move.mode == MOVE_SEATED && p->sim.move.veh_onehand) c.buttons &= (u16)~BTN_AIM;
@@ -287,7 +301,7 @@ void game_sim_player(World *w, int slot, const UserCmd *cmd, float dt, bool firs
     w->xf[i].pos = m->pos;
     w->xf[i].rot = quat_yaw(m->yaw);
     w->anim[i] = m->pitch;
-    u32 f = w->flags[i] & (EF_DEAD | EF_HIDDEN);
+    u32 f = w->flags[i] & (EF_DEAD | EF_HIDDEN | EF_DOWNED);
     if (m->crouched) f |= EF_CROUCHED;
     if (m->sprinting) f |= EF_SPRINT;
     if (m->mode == MOVE_HANG) f |= EF_HANG;
@@ -302,6 +316,8 @@ void game_sim_player(World *w, int slot, const UserCmd *cmd, float dt, bool firs
     w->item[i] = eq ? eq->item : 0;
     if (eq) memcpy(w->attach[i], eq->att, sizeof(w->attach[i]));
     else memset(w->attach[i], 0, sizeof(w->attach[i]));
+    u16 shown = revive_held_override(w, slot);   // the syringe / the vial during a timed action
+    if (shown) { w->item[i] = shown; memset(w->attach[i], 0, sizeof(w->attach[i])); }
 }
 
 static void host_tick(World *w, const UserCmd *local_cmd) {
@@ -334,7 +350,7 @@ static void host_tick(World *w, const UserCmd *local_cmd) {
         int i = (int)ENT_INDEX(p->ent);
         if (w->flags[i] & EF_DEAD) {
             if (p->respawn_timer > 0) p->respawn_timer -= SIM_DT;
-            if (spectate_respawn_ready(w, s)) game_respawn_player(w, s);   // sv_respawn_time / sv_respawn_mode
+            if (spectate_respawn_ready(w, s) && revive_sv_timer_respawn_allowed(w, s)) game_respawn_player(w, s);   // sv_respawn_time / sv_respawn_mode
         }
         // Fell out of the world.
         if (p->sim.move.pos.y < -60.0f && p->sim.move.mode != MOVE_NOCLIP) game_respawn_player(w, s);
@@ -342,6 +358,7 @@ static void host_tick(World *w, const UserCmd *local_cmd) {
     spectate_host_tick(w);   // observers: targets still legal, auto-advance
     if (!frozen) {
         entities_tick(w, SIM_DT);
+        revive_host_tick(w);   // corpses, fabricators, DNA samples (docs/REVIVE.md)
         projectiles_tick(w, SIM_DT);
         horde_host_tick(w, SIM_DT);   // horde zombies: tiers, steering, mover, attacks (before their animation)
     }
@@ -566,6 +583,7 @@ static void tick(void) {
         if (w->chunks) chunks_update(w, SIM_DT);
         w->tick++;
     }
+    revive_frame(w);   // downed players are interactable (revive prompt)
     // Render-side character work at tick rate (LOD-scaled post-pass, ragdolls).
     chars_present_tick(w, G->view.eye, G->view.fov > 1 ? G->view.fov : 75.0f, (float)render_height(), SIM_DT, game_view_slot());
     weapon_feel_tick();
@@ -692,6 +710,8 @@ void game_frame(float dt) {
     if (steps == 8) G->accumulator = 0; // spiral of death guard
     game_holdpoint_test_frame();
     G->alpha = (float)(G->accumulator / SIM_DT);
+    game_death_frame(dt);   // death sequence: post / mix / HUD from this frame's state (docs/REVIVE.md)
+    game_revive_frame(G->world, dt);   // reconstruction bodies + particles
     // Reconciliation corrections fade over cam_recon_smooth_time (the head stabilizer adds its own spring).
     {
         float tsm = camera_fp_cvars()->recon_smooth ? camera_fp_cvars()->recon_smooth->f : 0.08f;
@@ -742,11 +762,13 @@ bool game_host_ex(const char *map, u32 flags) {
     if (!(flags & GH_KEEP_NET)) net_stop();
     destroy_world();
     G->world = world_create(true, &G->items);
+    revive_world_reset(G->world);
     dg_strcpy(G->map, sizeof(G->map), map);
     if (!load_map(G->world, map)) {
         log_error("game: failed to load map '%s', falling back to devroom", map);
         destroy_world();
         G->world = world_create(true, &G->items);
+        revive_world_reset(G->world);
         dg_strcpy(G->map, sizeof(G->map), "devroom");
         if (!load_map(G->world, "devroom")) return false;
     }
@@ -775,6 +797,7 @@ bool game_host_ex(const char *map, u32 flags) {
 void game_cl_welcome(int slot, const char *map, u32 seed, u32 server_tick) {
     destroy_world();
     G->world = world_create(false, &G->items);
+    revive_world_reset(G->world);
     dg_strcpy(G->map, sizeof(G->map), map);
     cvar_set_int(G->world_seed, (int)seed);
     if (!load_map(G->world, map)) log_error("client: cannot load map '%s'", map);
@@ -824,6 +847,7 @@ int game_sv_player_join(int peer, const char *name) {
         if (w->players[s].active) continue;
         game_spawn_player(w, s, name, false, peer);
         ev_hint(w, -1, "%s joined", name);
+        revive_sv_player_joined(w, s);   // the DNA registry (events are not replayed to late joiners)
         if (join_dead) {
             // Late joiner: dead and hidden until the respawn rules let it in, spectating meanwhile.
             Player *p = &w->players[s];
@@ -979,7 +1003,7 @@ static void cmd_kill(int argc, const char **argv) {
         p = s >= 0 && s < MAX_PLAYERS && G->world->players[s].active ? &G->world->players[s] : NULL;
         if (!p) { log_warn("kill: no player in slot %d", s); return; }
     }
-    if (p) apply_damage(G->world, p->ent, 10000, DMG_GENERIC, p->ent, p->sim.move.pos, v3(0, 0, 0), false);
+    if (p) apply_damage_ex(G->world, p->ent, 10000, DMG_GENERIC, p->ent, p->sim.move.pos, v3(0, 0, 0), -1, 0.0f, DMGF_KILL);   // kill-type: no down
 }
 
 static void cmd_damage(int argc, const char **argv) {
@@ -1366,6 +1390,8 @@ void game_init(void) {
     G->world_seed = cvar_reg_int("world_seed", 1337, 0, 999999999, CVAR_ARCHIVE, "procedural world seed");
     cmd_register("map", cmd_map, "host a new game on a map");
     wheels_register();
+    revive_register();
+    game_death_register();
     game_pings_register();
     hud_register();
     openworld_register_commands();

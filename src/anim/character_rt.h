@@ -10,6 +10,7 @@ typedef struct CharInputs {
     float speed;            // horizontal m/s
     vec2 move_local;        // unit direction in body space (x right, y forward)
     bool grounded, crouch, prone, sprint, ads, mantling, vaulting, hanging, dead, attacking;
+    bool downed;            // knocked down (docs/REVIVE.md): controller state 'downed' + the procedural kneel
     float mantle_t;
     float vertical_vel;
     float aim_pitch, aim_yaw, body_yaw;   // radians (world yaw)

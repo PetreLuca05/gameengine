@@ -1,0 +1,7 @@
+{
+  "_doc": "Death / downed ear ring: procedural tinnitus voice + heartbeat + world-bus low-pass snapshot (docs/REVIVE.md).",
+  "ring": { "pitch": 3600, "warble_hz": 5.5, "warble_depth": 0.004, "level": 0.32, "attack": 0.25, "fade": 2.0 },
+  "mix": { "lpf_from": 20000, "lpf_to": 400, "sweep": 0.5, "world_duck": 0.45 },
+  "heartbeat": { "level": 0.5, "bpm_start": 92, "bpm_end": 46 },
+  "downed": { "lpf": 2500, "ring": 0.06, "world": 0.8 }
+}

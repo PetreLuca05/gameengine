@@ -18,6 +18,7 @@
 #include "game/game_internal.h"
 #include "gameplay/attachments.h"
 #include "gameplay/weapons.h"
+#include "gameplay/revive/revive.h"
 #include "player/camera.h"
 #include "core/cvar.h"
 #include <SDL3/SDL.h>
@@ -220,7 +221,7 @@ void inventory_slot_view(const InvSlot *s, const ItemDB *db, int mag_override, G
     if (!s->item) return;
     const ItemDef *d = item_def(db, s->item);
     v->tint = type_color(d);
-    v->name = d->name;
+    v->name = revive_item_name(db, s->item, s->ammo);   // DNA samples carry the player's name
     v->count = s->count;
     v->icon = 0;
     icons_get(s->item, &v->icon, &v->uv);
@@ -338,7 +339,7 @@ static void draw_slot(int i, GuiRect r, const Player *p, const ItemDB *db, int e
     if (in.hovered && s->item && V.dd.state == DD_IDLE && !V.ctx.open) {
         const ItemDef *d = item_def(db, s->item);
         char tip[200];
-        snprintf(tip, sizeof(tip), "%s\n%s", d->name, item_kind_name(d->kind));
+        snprintf(tip, sizeof(tip), "%s\n%s", revive_item_name(db, s->item, s->ammo), item_kind_name(d->kind));
         gui_tooltip(slot_id(i), tip);
     }
 }
@@ -552,7 +553,7 @@ static void draw_preview(GuiRect r, const Player *p, const ItemDB *db, int sel, 
     // Name, type, description, stats.
     GuiRect nr = gc_row(&c, gui_s(30));
     GuiText name = { gui_s(TH->t_title - 2), GW_SEMIBOLD, TH->text, GUI_LEFT, 0, false, false, nr.w };
-    gd_text(&name, nr.x, nr.y, d->name);
+    gd_text(&name, nr.x, nr.y, revive_item_name(db, s->item, s->ammo));
     GuiRect tr = gc_row(&c, gui_s(18));
     gw_label_caps(tr, item_kind_name(d->kind), gui_s(TH->t_label), type_color(d), GUI_LEFT);
     GuiText desc = { gui_s(TH->t_small + 1), GW_REGULAR, TH->text_dim, GUI_LEFT, 0, false, false, 0 };

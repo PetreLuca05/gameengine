@@ -17,6 +17,7 @@ layout(std140, set = 0, binding = 12) uniform PostUBO {
     vec4 misc;        // dt, camera cut, ads, aspect
     vec4 s_ao, s_ssr, s_gi, s_vol, s_vol2, s_vol3, s_mb, s_dof, s_dof2, s_bloom, s_exp, s_exp2;
     vec4 s_lens, s_lens2, s_tm, s_lift, s_gamma, s_gain, s_out, s_fb, s_fb2, s_fb_tint, s_dbg;
+    vec4 s_fb3;          // x death black (1 = black frame), y death blur, z/w unused (docs/REVIVE.md)
     vec4 lights[MAX_POINT_LIGHTS * 2];
 } U;
 

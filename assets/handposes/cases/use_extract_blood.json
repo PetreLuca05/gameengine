@@ -1,0 +1,17 @@
+{
+  "schema": 2,
+  "id": "use_extract_blood",
+  "label": "Interactable: extract_blood",
+  "kind": "interact",
+  "bind": "interactable:extract_blood",
+  "source": "interactable:extract_blood",
+  "inherits": "style/grip_grab",
+  "hands": ["left", "right"],
+  "reviewed": false,
+  "auto_placed": false,
+  "setup": { "prop": "extract_blood", "distance": 0.75 },
+  "anchor": { "pos": [0, 0, 0], "q": [0, 0, 0, 1] },
+  "duration": 0.76,
+  "markers": { "contact": 0.16, "use": 0.31199998, "release": 0.53999996 },
+  "keys": []
+}

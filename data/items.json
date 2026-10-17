@@ -35,6 +35,8 @@
     { "id": "duct_tape",   "name": "Duct Tape",        "kind": "misc", "stack": 5, "color": [0.55, 0.56, 0.58], "shape": "cylinder", "size": [0.05, 0.025, 0.05], "hold": { "style": "item_small" }, "desc": "Fixes everything (crafting, future)." },
     { "id": "mech_parts",  "name": "Mechanical Parts", "kind": "misc", "stack": 10, "color": [0.4, 0.38, 0.35], "size": [0.1, 0.05, 0.08], "hold": { "style": "item_small" }, "desc": "Gears, bearings, springs (crafting, future)." },
     { "id": "seeds",       "name": "Seed Packet",      "kind": "misc", "stack": 10, "color": [0.6, 0.5, 0.25], "size": [0.06, 0.01, 0.09], "hold": { "style": "item_small" }, "desc": "For a garden, one day." },
+    { "id": "syringe",     "name": "Syringe",          "kind": "misc", "stack": 1, "color": [0.85, 0.88, 0.92], "shape": "cylinder", "size": [0.008, 0.07, 0.008], "hold": { "style": "item_small" }, "desc": "Draws a blood sample from a fallen teammate (DNA for a fabricator)." },
+    { "id": "dna_sample",  "name": "DNA Sample",       "kind": "misc", "stack": 1, "color": [0.75, 0.08, 0.1], "shape": "cylinder", "size": [0.012, 0.04, 0.012], "hold": { "style": "item_small" }, "desc": "A teammate's blood. Insert it into a fabricator to reconstruct them." },
     { "id": "fishing_kit", "name": "Fishing Kit",      "kind": "misc", "stack": 1, "color": [0.3, 0.45, 0.35], "size": [0.14, 0.05, 0.1], "hold": { "style": "item_small" }, "desc": "Line, hooks and lures (fishing, future)." },
     { "id": "phone", "name": "Phone", "kind": "misc", "stack": 1, "builtin": true, "color": [0.05, 0.05, 0.06], "size": [0.036, 0.075, 0.005],
       "hold": { "style": "phone", "style_landscape": "phone_landscape",
