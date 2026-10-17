@@ -543,22 +543,39 @@ void gd_line(float x0, float y0, float x1, float y1, float t, u32 c) {
     vec2 d = v2(x1 - x0, y1 - y0);
     float l = sqrtf(d.x * d.x + d.y * d.y);
     if (l < 1e-4f || (c >> 24) == 0) return;
-    Layer *L = prim(D.atlas, 4, 6);
+    Layer *L = prim(D.atlas, 8, 18);
     if (!L) return;
     c = col(c);
-    vec2 n = v2(-d.y / l * t * 0.5f, d.x / l * t * 0.5f);
+    // Anti-aliased: a solid core plus a 1 px feather on each side that fades to transparent (the
+    // HUD's vector icons / rings were stair-stepped). Lines thinner than the feather fade in alpha.
+    vec2 u = v2(d.x / l, d.y / l), nn = v2(-u.y, u.x);
+    float core = fmaxf(0.0f, t * 0.5f - 0.5f), outer = core + 1.0f;
+    u32 ce = c;
+    if (t < 1.0f) {
+        u32 a = (u32)((float)(c >> 24) * fmaxf(t, 0.25f));
+        ce = (c & 0x00FFFFFFu) | (a << 24);
+    }
+    u32 c0 = ce & 0x00FFFFFFu;   // transparent edge
+    vec2 e = v2(u.x * 0.5f, u.y * 0.5f);   // half a pixel past each end
+    vec2 p0 = v2(x0 - e.x, y0 - e.y), p1 = v2(x1 + e.x, y1 + e.y);
     vec2 uv = auv(WHITE_UV_X + 0.5f, WHITE_UV_X + 0.5f);
     u32 b = L->vc;
     UiVertex *v = L->v + b;
-    v[0] = (UiVertex){ v2(x0 + n.x, y0 + n.y), uv, c };
-    v[1] = (UiVertex){ v2(x1 + n.x, y1 + n.y), uv, c };
-    v[2] = (UiVertex){ v2(x1 - n.x, y1 - n.y), uv, c };
-    v[3] = (UiVertex){ v2(x0 - n.x, y0 - n.y), uv, c };
-    L->vc += 4;
+    float o[4] = { outer, core, -core, -outer };
+    u32 cs[4] = { c0, ce, ce, c0 };
+    for (int k = 0; k < 4; k++) {
+        v[k] = (UiVertex){ v2(p0.x + nn.x * o[k], p0.y + nn.y * o[k]), uv, cs[k] };
+        v[4 + k] = (UiVertex){ v2(p1.x + nn.x * o[k], p1.y + nn.y * o[k]), uv, cs[k] };
+    }
+    L->vc += 8;
     u32 *i = L->i + L->ic;
-    i[0] = b; i[1] = b + 1; i[2] = b + 2; i[3] = b; i[4] = b + 2; i[5] = b + 3;
-    L->ic += 6;
-    L->cmd[L->cc - 1].index_count += 6;
+    for (int k = 0; k < 3; k++) {
+        u32 a0 = b + (u32)k, a1 = b + (u32)k + 1, b0 = b + 4 + (u32)k, b1 = b + 4 + (u32)k + 1;
+        i[k * 6 + 0] = a0; i[k * 6 + 1] = b0; i[k * 6 + 2] = b1;
+        i[k * 6 + 3] = a0; i[k * 6 + 4] = b1; i[k * 6 + 5] = a1;
+    }
+    L->ic += 18;
+    L->cmd[L->cc - 1].index_count += 18;
 }
 
 void gd_ring(float cx, float cy, float radius, float t, float frac, u32 c) {
