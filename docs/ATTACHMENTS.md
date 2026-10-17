@@ -40,7 +40,7 @@ Attachment space uses the item convention: -Z points forward (along the barrel),
 | `lens` | See the table after it |
 | `ads_dof_near_blur` | Near-field (weapon) blur while aimed, in CoC pixels |
 | `modifiers` | Multipliers. Default 1, see below. |
-| `muzzle_length`, `muzzle_device` | Muzzle devices: the muzzle moves to the device's front face. The device is `suppressor`, `compensator` or `hider` (VFX). |
+| `muzzle_length`, `muzzle_device` | Muzzle devices: the muzzle moves to the device's front face. `muzzle_device` is a block, `{ "kind": "hider|comp|suppressor", "flash": {...}, "ports", "report_db", "velocity_mul", "poi_moa", "pop_cold_s", ... }`. Its fields are the flash component multipliers, the report level, velocity / point of impact, and the suppressor pop / heat ([BALLISTICS.md](BALLISTICS.md) "Muzzle devices"). A plain string picks only the VFX device. |
 | `grip_l` | Underbarrel grips: the left-hand socket, as `{pos, fingers, back}` (palm frame) |
 | `model` | Box parts `{offset, half, color}`, up to 10 |
 

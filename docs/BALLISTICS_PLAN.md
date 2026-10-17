@@ -1,5 +1,12 @@
 # Ballistics, muzzle flash, tracers: plan (pre-implementation)
 
+> **Status: implemented.** The system as built is described in [BALLISTICS.md](BALLISTICS.md).
+> It differs from this plan in these ways:
+> - The shot is replicated as one reliable `EV_SHOT` GameEvent per shot, and hits use the existing `EV_IMPACT`, with energy and outcome in id bits 16–31. There is no separate batched `MSG_SHOTS` / `MSG_IMPACTS`.
+> - All-tracer magazine items are not added; `InvSlot` is unchanged. Tracers follow the per-magazine pattern, and `fire_tracers_only` covers the range.
+> - Exposure awareness uses the day/night cycle's daylight level as well as the EV. The engine's auto-exposure range is compressed (noon is about EV 1), so the EV alone could not reach 0.15× in daylight.
+> - Predicted impacts that the host contradicts are not faded out. As with the old hitscan prediction, the host's copy of the shooter's own impact is skipped.
+
 This plan comes before any code. It covers what exists today, the design, the data tables, the per-shot cost budget, the phases, and the open decisions.
 When it is implemented, it becomes `docs/BALLISTICS.md`. Numbers marked ≈ come from a rough point-mass solver run while planning. The final reference values come from `tools/ballistics_ref.py`, which uses the full G1/G7 tables.
 

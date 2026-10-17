@@ -35,6 +35,7 @@ Windows, no admin; tools are portable, in `.toolchain/` (git-ignored).
 | Skeleton / meshes / modular characters | CHARACTERS.md | src/anim/skeleton.c, src/render/skeletal_mesh.c, src/assets/character.c, tools/bake_* |
 | FP camera, hold point | CAMERA_HOLDPOINT.md | src/player/{holdpoint,hands,camera_fp}.c |
 | Weapons, recoil, sway | RECOIL.md, ATTACHMENTS.md | src/gameplay/{weapons,recoil,items}.c, data/weapons |
+| Ballistics (projectiles, drag / wind / ricochet / penetration, crack / report timing, composed muzzle flash, tracers, energy impacts, range `bal_range`) | BALLISTICS.md | src/gameplay/ballistics (bal_sim / bal_surface / bal_acoustics / bal_muzzle / bal_tracer pure; bal_world, bal_fx), assets/ballistics, attachment `muzzle_device` blocks; tests: test_ballistics, tools/ballistics_ref.py, tools/tests/bal_range.cfg |
 | Render post / sky / time | RENDERING_POST.md, DAYNIGHT.md | src/render/{post,sky,graph}, game_post.c, game_daynight.c |
 | glTF PBR maps (metal-rough, normal, AO, emissive, MASK, doubleSided) | PBR.md | src/assets/assets.c gltf_material, shaders/pbr_maps.glsl, render.c draw_items (set 3), vg_resolve.glsl; test: tools/gen_pbr_test.py, tools/tests/pbr_shelf.cfg |
 | Engine Fidelity (Off .. Modern, bounds every graphics setting) | ENGINE_FIDELITY.md | assets/render/fidelity, src/render/fidelity, src/game/game_fidelity.c, scr_settings.c; tests: test_fidelity, tools/tests/run_fidelity_tests.py |

@@ -59,20 +59,29 @@ two frames later, only for stats and to size the sort.
 
 ## Muzzle flashes
 
-`muzzle_<type>_<device>` covers 6 weapon types (pistol, smg, rifle, lmg, shotgun, sniper) and 4 muzzle
-devices (bare, hider, comp, suppressor). Weapons choose with a block in their JSON:
-`"vfx": { "muzzle": { "type": "rifle", "device": "hider" }, "caliber": "rifle" }`.
-Defaults come from the weapon id. The test pedestal swaps devices (`vfx_pedestal rifle comp`).
+Muzzle flashes are composed from physics: `gameplay/ballistics/bal_muzzle.c` derives each component's
+size, distance along the bore, life, brightness and colour from the cartridge (powder charge, gas
+temperature, burn length, muzzle pressure), the barrel length and the muzzle device.
+`gameplay/ballistics/bal_fx.c` spawns one small effect per component:
 
-Each flash is made of these parts:
-- **core:** a front star (cross orientation: billboard plus a quad along the barrel), with a variant
-  drawn without repeats.
-- **side:** flame tongues along the barrel axis. A compensator vents them sideways; a flash hider
-  turns them into short prongs.
-- **smoke:** 6-way lit with motion-vector flipbook blending.
-- **embers:** stretched sparks with depth collision.
-- **heat shimmer:** distortion.
-- **light:** about two frames, budgeted.
+- `muzzle_primary`: a dim orange glow at the crown, under a tick.
+- `muzzle_mach`: the intermediate flash behind the Mach disk, 2-6 cm out.
+- `muzzle_secondary_{1,2,3}`: the fireball 10-50 cm out, as 16 petal variants that never repeat twice in a row.
+- `muzzle_prongs`: what a flash hider leaves.
+- `muzzle_vent`: compensator and brake port jets, one per port.
+- `muzzle_vapor`: the suppressor's wisp.
+- `muzzle_smoke`: smoke.
+- `muzzle_haze` / `muzzle_can_shimmer`: sustained-fire haze and hot-can haze.
+- `muzzle_sparks`: unburnt powder.
+- `muzzle_blast`: the blast ring.
+- `muzzle_dust`: dust when the muzzle is near a surface.
+- `muzzle_light(_shadow)`: the light.
+
+The effects come from `tools/vfxgen/make_ballistic_effects.py`. Device multipliers live in each
+attachment's `muzzle_device` block. Details are in [BALLISTICS.md](BALLISTICS.md) "Muzzle flash".
+`vfx_game_muzzle(type, device)` still works through a representative cartridge per type, which
+is how the `vfx_pedestal` command uses it. `muzzle_preview <weapon> <device>` shows a weapon's
+real flash in slow motion.
 
 Rules:
 - **Exactly one flash per shot.** The shooter's flash comes from the predicted shot. Observers get it
