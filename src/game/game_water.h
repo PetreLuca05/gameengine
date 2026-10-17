@@ -20,6 +20,15 @@ WaterWorld *game_water_mut(void);
 struct BuoySystem *game_water_buoyancy(void);
 const WaterParams *game_water_preset(const char *name);
 void game_water_set_level(int body, float level);
+// Buoyant bodies owned elsewhere (vehicles): probes in body space, the vehicle sets b->volume as it
+// floods. step_one: clients' predicted vehicle (the host steps every body in water_tick).
+struct Buoyancy;
+struct BuoyProbe;
+struct BuoyDesc;
+struct Buoyancy *game_water_buoy_attach(World *w, BodyId body, const struct BuoyProbe *probes, int n, const struct BuoyDesc *d);
+void game_water_buoy_detach(BodyId body);
+struct Buoyancy *game_water_buoy_of(BodyId body);
+void game_water_buoy_step_one(World *w, BodyId body);
 
 // Queries at a server tick (host: w->tick + alpha, clients: the render / view tick).
 float game_water_time(double tick);

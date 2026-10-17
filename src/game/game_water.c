@@ -50,6 +50,7 @@ static struct {
     // buoyancy (host)
     BuoySystem buoy;
     EntityId buoy_ent[BUOY_MAX_BODIES];
+    bool buoy_ext[BUOY_MAX_BODIES]; // owned by another system (vehicles): not a prop, attach / detach
     i16 buoy_of[MAX_ENTITIES];      // entity index -> buoy item + 1
     u32 wind_tick;                  // tick the wind was last sampled at (quantized to 1 s)
     Cvar *debug, *wave_scale, *drown_dps;
@@ -428,19 +429,60 @@ static bool buoy_plane(void *user, float x, float z, float extent, BuoyWaterPlan
 static void buoy_forget(int k) {
     int last = GW.buoy.count - 1;
     EntityId e = GW.buoy_ent[k];
-    if (e) GW.buoy_of[ENT_INDEX(e)] = 0;
+    if (e && !GW.buoy_ext[k]) GW.buoy_of[ENT_INDEX(e)] = 0;
     if (k != last) {
         GW.buoy.item[k] = GW.buoy.item[last];
         GW.buoy_ent[k] = GW.buoy_ent[last];
-        if (GW.buoy_ent[k]) GW.buoy_of[ENT_INDEX(GW.buoy_ent[k])] = (i16)(k + 1);
+        GW.buoy_ext[k] = GW.buoy_ext[last];
+        if (GW.buoy_ent[k] && !GW.buoy_ext[k]) GW.buoy_of[ENT_INDEX(GW.buoy_ent[k])] = (i16)(k + 1);
     }
     GW.buoy.count--;
+}
+
+// ---- externally owned buoyant bodies (vehicles: game_vehicles.c)
+
+Buoyancy *game_water_buoy_of(BodyId body) { return buoy_find(&GW.buoy, body); }
+
+Buoyancy *game_water_buoy_attach(World *w, BodyId body, const BuoyProbe *probes, int n, const BuoyDesc *d) {
+    int k = buoy_add_probes(&GW.buoy, w->phys, body, probes, n, d);
+    if (k < 0) return NULL;
+    GW.buoy_ent[k] = (EntityId)phys_body_user(w->phys, body);
+    GW.buoy_ext[k] = true;
+    return &GW.buoy.item[k];
+}
+
+void game_water_buoy_detach(BodyId body) {
+    for (int k = 0; k < GW.buoy.count; k++)
+        if (GW.buoy.item[k].body == body && GW.buoy_ext[k]) { buoy_forget(k); return; }
+}
+
+// One body's buoyancy now (clients: the vehicle they predict, before their physics step).
+void game_water_buoy_step_one(World *w, BodyId body) {
+    Buoyancy *b = buoy_find(&GW.buoy, body);
+    if (!b || !w->phys || !GW.world.count) return;
+    BuoyBodyState st;
+    phys_get_transform(w->phys, body, &st.pos, &st.rot);
+    st.com = phys_body_com(w->phys, body);
+    st.v = phys_get_velocity(w->phys, body);
+    st.w = phys_get_angular_velocity(w->phys, body);
+    float t = waves_time(w->tick, 0.0f, SIM_HZ);
+    BuoyWater water = { buoy_plane, &t, 9.81f };
+    BuoyResult r;
+    buoy_compute(b, &st, &water, SIM_DT, &r);
+    b->prev_submerged = b->submerged;
+    b->submerged = r.submerged;
+    b->water_h = r.water_h;
+    b->in_water = r.in_water;
+    b->impulse = r.impulse;
+    b->ang_impulse = r.ang_impulse;
+    if (r.in_water) phys_add_impulse_com(w->phys, body, r.impulse, r.ang_impulse);
 }
 
 // Every dynamic prop is buoyant (its density decides whether it floats). New props register on the
 // tick they appear; destroyed ones leave.
 static void sync_buoyant(World *w) {
     for (int k = GW.buoy.count - 1; k >= 0; k--) {
+        if (GW.buoy_ext[k]) continue;
         EntityId e = GW.buoy_ent[k];
         int i = (int)ENT_INDEX(e);
         if (!e || !ent_valid(w, e) || !(w->comps[i] & C_BODY) || w->body[i].body != GW.buoy.item[k].body || w->body[i].motion != PM_DYNAMIC)

@@ -7,6 +7,8 @@
 // headlights, exhaust / dust / skids / sparks, engine audio), the vehicle camera, the HUD panel,
 // console commands and the in-game tests.
 #include "game_internal.h"
+#include "game_water.h"
+#include "physics/buoyancy.h"
 #include "gameplay/vehicle_def.h"
 #include "gameplay/entities.h"
 #include "gameplay/health.h"
@@ -66,7 +68,11 @@ typedef struct Vehicle {
     int gear;
     float susp[VEH_MAX_WHEELS];
     bool engine, lights, braking, handbrake, wrecked, onehand, horn;
+    float flood;                  // 0..1 cabin full of water (docs/WATER.md "Vehicles")
+    bool drowned;                 // the engine took water: dead until the cabin drains
     vec3 vel, angvel, prev_vel;
+    // host: water
+    float intake_t;               // s the engine intake has been under water
     // host: driver input
     float in_throttle, in_steer, in_hand, in_brake;   // in_brake: tests
     u8 in_lights_prev, in_horn_prev;
@@ -184,7 +190,10 @@ static void proxies_destroy(World *w, Vehicle *v) {
 }
 
 static void veh_release(World *w, Vehicle *v) {
-    if (v->pv) phys_vehicle_destroy(w->phys, v->pv);
+    if (v->pv) {
+        game_water_buoy_detach(phys_vehicle_body(v->pv));
+        phys_vehicle_destroy(w->phys, v->pv);
+    }
     v->pv = NULL;
     proxies_destroy(w, v);
     v->used = false;
@@ -875,7 +884,7 @@ static void drive(World *w, Vehicle *v, float dt) {
     float vf = v3_dot(v->vel, fwd), speed = v3_len(v->vel);
     int driver = -1;
     for (int s = 0; s < d->seat_count; s++) if (d->seats[s].driver && v->occ[s]) driver = s;
-    v->engine = driver >= 0 && v->fuel > 0.0f && !v->wrecked;
+    v->engine = driver >= 0 && v->fuel > 0.0f && !v->wrecked && !v->drowned;
     float throttle = driver >= 0 ? v->in_throttle : 0.0f, steer_in = driver >= 0 ? v->in_steer : 0.0f;
     float hand = driver >= 0 ? v->in_hand : (speed < 1.5f ? 1.0f : 0.0f);
     if (!v->engine) throttle = fminf(throttle, 0.0f) * 0.0f;
@@ -915,6 +924,58 @@ static void drive(World *w, Vehicle *v, float dt) {
         }
     }
     for (int k = 0; k < d->wheel_count; k++) tire_tick(&v->tire[k], dt);
+}
+
+// Water (docs/WATER.md "Vehicles"): buoyancy probes over the body boxes; the displaced volume
+// shrinks as the cabin floods through the door sills, so a car floats for a while and then sinks;
+// the engine dies once its intake has been under water for flood_time (or the cabin is half full),
+// the electrics with it. A boat hull never floods; its throttle pushes at the stern (stub). Host:
+// flooding; every machine simulating the vehicle: the buoyancy (the flood level is replicated).
+static void vehicle_water(World *w, Vehicle *v, bool host) {
+    const VehicleDef *d = vdef(v);
+    BodyId body = phys_vehicle_body(v->pv);
+    Buoyancy *b = game_water_buoy_of(body);
+    if (!b) {
+        if (!game_water()->count) return;
+        BuoyProbe pr[BUOY_MAX_PROBES];
+        int n = 0;
+        for (int k = 0; k < d->box_count && n < BUOY_MAX_PROBES; k++) {
+            int nx, ny, nz;
+            buoy_box_grid(d->box_half[k], 16, &nx, &ny, &nz);
+            n += buoy_probes_box(d->box_center[k], d->box_half[k], nx, ny, nz, pr + n, BUOY_MAX_PROBES - n);
+        }
+        BuoyDesc bd = buoy_desc_default();
+        bd.drag = 0.6f;
+        bd.angular_drag = 1.0f;
+        b = game_water_buoy_attach(w, body, pr, n, &bd);
+        if (!b) return;
+    }
+    b->volume = vehicle_float_volume(d, v->flood);
+    if (d->boat && b->in_water) {
+        float throttle = v->engine ? v->in_throttle : 0.0f;
+        vec3 p;
+        quat r;
+        phys_get_transform(w->phys, body, &p, &r);
+        vec3 fwd = quat_rotate(r, v3(0, 0, -1)), stern = v3_add(p, quat_rotate(r, v3(0, 0, d->box_half[0].z)));
+        phys_add_impulse(w->phys, body, v3_scale(fwd, throttle * d->boat_thrust * SIM_DT), stern);
+    }
+    if (!host) return;
+    vec3 p;
+    quat r;
+    pose_sim(w, v, &p, &r);
+    float surf = game_water_height(p.x, p.z, (double)w->tick);
+    bool wet = surf > -1e8f;
+    v->flood = vehicle_flood_step(d, v->flood, wet ? surf - (p.y + d->flood_inlet_y) : -1.0f, SIM_DT);
+    bool intake = wet && surf > p.y + d->engine_intake_y;
+    v->intake_t = intake ? v->intake_t + SIM_DT : fmaxf(0.0f, v->intake_t - SIM_DT);
+    if (!v->drowned && !d->boat && (v->intake_t >= d->flood_time || v->flood > 0.5f)) {
+        v->drowned = true;
+        v->engine = false;
+        ev_sound(w, "engine_stall", p, 0.9f, EVENT_ALL);
+        if (VG.debug->i) log_info("vehicle %u: engine flooded", v->ent);
+    }
+    if (v->drowned && v->flood <= 0.0f && !intake) v->drowned = false;   // dried out
+    if (v->drowned) v->lights = false;
 }
 
 // Reads the simulated state back (after the physics step).
@@ -1010,6 +1071,7 @@ void vehicles_host_tick(World *w) {
         }
         if (!v->pv) continue;
         drive(w, v, SIM_DT);
+        vehicle_water(w, v, true);
     }
 }
 
@@ -1127,7 +1189,10 @@ static void predict_start(World *w, Vehicle *v) {
 }
 
 static void predict_stop(World *w, Vehicle *v) {
-    if (v->pv) phys_vehicle_destroy(w->phys, v->pv);
+    if (v->pv) {
+        game_water_buoy_detach(phys_vehicle_body(v->pv));
+        phys_vehicle_destroy(w->phys, v->pv);
+    }
     v->pv = NULL;
     v->predicted = false;
     v->corr = v3(0, 0, 0);
@@ -1161,6 +1226,8 @@ bool vehicles_client_tick(World *w, const UserCmd *cmd) {
             v->in_hand = (cmd->buttons & BTN_JUMP) ? 1.0f : 0.0f;
             v->onehand = lp->sim.move.veh_onehand != 0;
             drive(w, v, SIM_DT);
+            vehicle_water(w, v, false);
+            game_water_buoy_step_one(w, phys_vehicle_body(v->pv));   // the host steps it in water_tick
             need = true;
         } else {
             proxies_ensure(w, v);
@@ -1245,6 +1312,7 @@ static void reconcile(World *w, Vehicle *v, u32 ack_seq) {
 #define VF_WRECK 8
 #define VF_ONEHAND 16
 #define VF_HAND 32
+#define VF_DROWNED 64
 
 void vehicles_net_write(World *w, Writer *wr) {
     VehicleSys *s = (VehicleSys *)w->vehicles;
@@ -1265,8 +1333,9 @@ void vehicles_net_write(World *w, Writer *wr) {
         w_u8(wr, (u8)(i8)DG_CLAMP(v->gear, -1, 9));
         for (int k = 0; k < VEH_MAX_WHEELS; k++) w_u8(wr, veh_q01(k < d->wheel_count && d->wheels[k].susp_max > 0 ? v->susp[k] / d->wheels[k].susp_max : 0));
         u8 f = (v->engine ? VF_ENGINE : 0) | (v->lights ? VF_LIGHTS : 0) | (v->braking ? VF_BRAKE : 0) | (v->wrecked ? VF_WRECK : 0) | (v->onehand ? VF_ONEHAND : 0) |
-               (v->handbrake ? VF_HAND : 0);
+               (v->handbrake ? VF_HAND : 0) | (v->drowned ? VF_DROWNED : 0);
         w_u8(wr, f);
+        w_u8(wr, veh_q01(v->flood));
         vec3 p;
         quat r;
         pose_sim(w, v, &p, &r);
@@ -1294,6 +1363,7 @@ void vehicles_net_read(World *w, Reader *rd, bool apply, u32 ack_seq) {
         float susp[VEH_MAX_WHEELS];
         for (int k = 0; k < VEH_MAX_WHEELS; k++) susp[k] = veh_dq01(r_u8(rd));
         u8 f = r_u8(rd);
+        float flood = veh_dq01(r_u8(rd));
         vec3 p = r_vec3(rd);
         quat r;
         r.x = r_f32(rd); r.y = r_f32(rd); r.z = r_f32(rd); r.w = r_f32(rd);
@@ -1318,6 +1388,8 @@ void vehicles_net_read(World *w, Reader *rd, bool apply, u32 ack_seq) {
         v->wrecked = (f & VF_WRECK) != 0;
         v->onehand = (f & VF_ONEHAND) != 0;
         v->handbrake = (f & VF_HAND) != 0;
+        v->drowned = (f & VF_DROWNED) != 0;
+        v->flood = flood;
         v->s_pos = p;
         v->s_rot = quat_norm(r);
         v->s_vel = vel;
@@ -2417,6 +2489,64 @@ void vehicles_test_tick(World *w) {
         }
         return;
     }
+    case 8: {   // flood: dropped into the deepest lake with the driver in it
+        const WaterWorld *ww = game_water();
+        int lake = -1;
+        float best = 0;
+        for (int i = 0; i < ww->count; i++) {
+            const WaterBody *b = &ww->body[i];
+            float area = (b->bmax[0] - b->bmin[0]) * (b->bmax[1] - b->bmin[1]);
+            if (b->kind == WATER_LAKE && area > best) { best = area; lake = i; }
+        }
+        if (lake < 0) { test_check(false, "a lake on this map (map wateryard)"); test_end(); return; }
+        const WaterBody *lb = &ww->body[lake];
+        vec3 c = v3((lb->bmin[0] + lb->bmax[0]) * 0.5f, lb->level, (lb->bmin[1] + lb->bmax[1]) * 0.5f);
+        bool moto = strstr(VG.t.name, "moto") != NULL;
+        if (f == 1) test_setup_vehicle(w, moto ? "moto" : "car");
+        v = test_vehicle(w);
+        if (!v || !v->pv) { test_end(); return; }
+        const VehicleDef *d = vdef(v);
+        BodyId body = phys_vehicle_body(v->pv);
+        if (f == 2) {
+            // Teleport over the lake's middle, then sit the driver in.
+            phys_set_transform(w->phys, body, v3_add(c, v3(0, 0.6f, 0)), quat_yaw(0), true);
+            phys_set_velocity(w->phys, body, v3(0, 0, 0), v3(0, 0, 0));
+            v->flood = 0;
+            v->drowned = false;
+            v->intake_t = 0;
+            p->sim.move.pos = v3_add(c, v3(3, 1, 0));
+            if (p->character) phys_character_set_pos(p->character, p->sim.move.pos);
+            p->sim.move.oxygen = player_breath_max();
+        }
+        if (f == 4) { test_force_enter(w, 0); VG.t.val[0] = -1; VG.t.val[1] = -1; }
+        vec3 pos;
+        quat rot;
+        pose_sim(w, v, &pos, &rot);
+        float t = (float)(f - 4) / (float)SIM_HZ;
+        if (f > 4 && v->drowned && VG.t.val[0] < 0) VG.t.val[0] = t;
+        float top = pos.y + d->box_center[d->box_count > 1 ? 1 : 0].y + d->box_half[d->box_count > 1 ? 1 : 0].y;
+        if (f > 4 && top < lb->level - 0.2f && VG.t.val[1] < 0) VG.t.val[1] = t;
+        if (VG.debug->i && f % 60 == 0) log_info("vehicle_test flood: t %.1f y %.2f flood %.2f engine %d drowned %d submerged %.2f", t, pos.y, v->flood, v->engine, v->drowned, game_water_buoy_of(body) ? game_water_buoy_of(body)->submerged : -1.0f);
+        if (!moto && f == 4 + SIM_HZ) {
+            test_check(pos.y > lb->level - 1.6f && v->engine, "1 s in: afloat (origin %.2f, surface %.2f), engine running", pos.y, lb->level);
+        }
+        if (f == 4 + 40 * SIM_HZ) {
+            if (moto) {
+                test_check(VG.t.val[1] >= 0 && VG.t.val[1] < 8.0f, "motorcycle under within 8 s (%.1f s)", VG.t.val[1]);
+            } else {
+                test_check(VG.t.val[0] >= d->flood_time - 0.5f && VG.t.val[0] <= d->flood_time + 8.0f, "engine flooded after %.1f s (flood_time %.1f)", VG.t.val[0], d->flood_time);
+                test_check(VG.t.val[1] > 3.0f && VG.t.val[1] < 30.0f, "car floated, then sank under after %.1f s (flood %.2f)", VG.t.val[1], v->flood);
+                test_check(!v->engine && !v->lights, "engine and electrics dead");
+            }
+            test_check(p->sim.move.oxygen < player_breath_max() - 2.0f, "driver holding breath in the sunk vehicle (%.1f s left)", p->sim.move.oxygen);
+            vehicle_exit(w, G->local_slot, false);
+        }
+        if (f == 4 + 46 * SIM_HZ) {
+            test_check(p->sim.move.mode == MOVE_SWIM, "got out and swims (mode %d, water %d)", p->sim.move.mode, p->sim.move.water);
+            test_end();
+        }
+        return;
+    }
     default: test_end(); return;
     }
 }
@@ -2425,13 +2555,13 @@ static void cmd_vehicle_test(int argc, const char **argv) {
     World *w = G ? G->world : NULL;
     if (!w || !w->authority || !game_local_player()) { log_info("vehicle_test: host with a local player"); return; }
     const char *what = argc > 1 ? argv[1] : "";
-    static const char *modes[] = { "", "enter", "glue", "clamp", "fuel", "tires", "drive", "zombies" };
+    static const char *modes[] = { "", "enter", "glue", "clamp", "fuel", "tires", "drive", "zombies", "flood" };
     int m = 0;
     char base[16];
     dg_strcpy(base, sizeof(base), what);
     size_t L = strlen(base);
     if (L > 5 && !strcmp(base + L - 5, "_moto")) base[L - 5] = 0;
-    for (int i = 1; i < 8; i++) if (!strcmp(base, modes[i])) m = i;
+    for (int i = 1; i < 9; i++) if (!strcmp(base, modes[i])) m = i;
     if (!strcmp(what, "dump")) {
         VehicleSys *s = (VehicleSys *)w->vehicles;
         for (int i = 0; s && i < MAX_VEH; i++) {
@@ -2446,7 +2576,7 @@ static void cmd_vehicle_test(int argc, const char **argv) {
         }
         return;
     }
-    if (!m) { log_info("usage: vehicle_test enter|enter_moto|glue|glue_moto|clamp|fuel|tires|drive|drive_moto|zombies|dump [quit]"); return; }
+    if (!m) { log_info("usage: vehicle_test enter|enter_moto|glue|glue_moto|clamp|fuel|tires|drive|drive_moto|zombies|flood|flood_moto|dump [quit]"); return; }
     memset(&VG.t, 0, sizeof(VG.t));
     VG.t.mode = m;
     dg_strcpy(VG.t.name, sizeof(VG.t.name), what);

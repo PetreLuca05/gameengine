@@ -73,6 +73,15 @@ typedef struct VehicleDef {
     float passenger_spread_mult;    // spread multiplier for passengers (vehicle motion)
     float exit_ragdoll_speed;       // m/s: leaving faster ragdolls the occupant
     vec3 color;                     // placeholder paint
+    // Water (docs/WATER.md "Vehicles", JSON "water"): the air that keeps it afloat while dry, the
+    // cabin inlets (door sills) water floods through, the engine intake, a boat hull (stub).
+    float float_volume;             // m3 displaced fully submerged while dry (sealed cabin + hull)
+    float flood_inlet_y;            // m (vehicle space): water above this floods the cabin
+    float flood_rate;               // cabin fill per second with 0.5 m of water over the inlet
+    float flood_time;               // s with the intake under water (or a half-flooded cabin) before the engine dies
+    float engine_intake_y;          // m (vehicle space)
+    bool boat;                      // buoyant hull, never floods; throttle pushes at the stern (stub)
+    float boat_thrust;              // N at full throttle
 } VehicleDef;
 
 typedef struct VehicleLib {
@@ -86,6 +95,13 @@ bool vehicle_def_parse(VehicleDef *d, const char *json, size_t len);
 bool vehicle_lib_load(VehicleLib *lib, const char *dir);   // car.json, moto.json (built-in defaults if missing)
 const VehicleDef *vehicle_lib_find(const VehicleLib *lib, const char *name);
 int vehicle_lib_index(const VehicleLib *lib, const char *name);
+
+// ---- water (flooding)
+// Cabin flood 0..1 after dt s with `over_inlet` m of water over the inlets (<= 0: drains slowly
+// once the vehicle is out of the water).
+float vehicle_flood_step(const VehicleDef *d, float flood, float over_inlet, float dt);
+// Displaced volume at full submersion with the cabin `flood` full (water replaces the air).
+float vehicle_float_volume(const VehicleDef *d, float flood);
 
 // ---- fuel
 // Litres per second at a throttle (0..1) and engine speed (0..1 of the rpm range).

@@ -92,6 +92,12 @@ void vehicle_def_defaults(VehicleDef *d, VehicleKind kind) {
         d->one_hand_steer_limit = 0.35f;
         d->exit_ragdoll_speed = 6.0f;
         d->color = v3(0.55f, 0.1f, 0.08f);
+        // Floats ~half submerged at first (1250 kg on 2.6 m3), the cabin fills through the door sills.
+        d->float_volume = 2.6f;
+        d->flood_inlet_y = 0.45f;
+        d->flood_rate = 0.07f;
+        d->flood_time = 3.0f;
+        d->engine_intake_y = 0.8f;
     } else {
         dg_strcpy(d->name, sizeof(d->name), "moto");
         dg_strcpy(d->display, sizeof(d->display), "Motorcycle");
@@ -137,6 +143,12 @@ void vehicle_def_defaults(VehicleDef *d, VehicleKind kind) {
         d->one_hand_spread_mult = 1.8f;
         d->exit_ragdoll_speed = 5.0f;
         d->color = v3(0.1f, 0.2f, 0.45f);
+        // Steel and an engine block: sinks (tyres and the tank barely help).
+        d->float_volume = 0.09f;
+        d->flood_inlet_y = 0.3f;
+        d->flood_rate = 0.5f;
+        d->flood_time = 1.0f;
+        d->engine_intake_y = 0.55f;
     }
 }
 
@@ -224,6 +236,14 @@ bool vehicle_def_parse(VehicleDef *d, const char *json, size_t len) {
     d->hp = jf(dm, "hp", d->hp);
     d->impact_damage_speed = jf(dm, "impact_speed", d->impact_damage_speed);
     d->impact_damage_scale = jf(dm, "impact_scale", d->impact_damage_scale);
+    const cJSON *wa = cJSON_GetObjectItemCaseSensitive(r, "water");
+    d->float_volume = jf(wa, "float_volume", d->float_volume);
+    d->flood_inlet_y = jf(wa, "inlet", d->flood_inlet_y);
+    d->flood_rate = jf(wa, "flood_rate", d->flood_rate);
+    d->flood_time = jf(wa, "flood_time", d->flood_time);
+    d->engine_intake_y = jf(wa, "intake", d->engine_intake_y);
+    d->boat = jb(wa, "boat", d->boat);
+    d->boat_thrust = jf(wa, "thrust", d->boat_thrust);
     const cJSON *t = cJSON_GetObjectItemCaseSensitive(r, "tires");
     d->tire_bullet_damage = jf(t, "bullet_damage", d->tire_bullet_damage);
     d->tire_leak_per_hit = jf(t, "leak_per_hit", d->tire_leak_per_hit);
@@ -309,6 +329,15 @@ const VehicleDef *vehicle_lib_find(const VehicleLib *lib, const char *name) {
 }
 
 // ------------------------------------------------------------------ fuel
+
+float vehicle_flood_step(const VehicleDef *d, float flood, float over_inlet, float dt) {
+    if (d->boat) return 0.0f;
+    if (over_inlet > 0.0f) flood += d->flood_rate * fminf(over_inlet / 0.5f, 2.0f) * dt;
+    else flood -= dt / 120.0f;   // out of the water: it drains out of the doors over two minutes
+    return clampf(flood, 0.0f, 1.0f);
+}
+
+float vehicle_float_volume(const VehicleDef *d, float flood) { return d->float_volume * (1.0f - 0.85f * clampf(flood, 0.0f, 1.0f)); }
 
 float vehicle_fuel_rate(const VehicleDef *d, float throttle, float rpm_frac) {
     throttle = fminf(fmaxf(throttle, 0.0f), 1.0f);

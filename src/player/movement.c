@@ -498,6 +498,9 @@ void player_move_tick(World *w, int slot, PlayerSim *sim, PhysCharacter *ch, con
         m->air_time = 0;
         m->fall_start_y = m->pos.y;
         m->coyote = 0;
+        // A vehicle under water: the occupants hold their breath (and drown; get out and swim).
+        WaterHere swh = water_here(w, m, cmd);
+        water_update(m, &swh, dt);
         sim->last_buttons = buttons;
         return;
     }
