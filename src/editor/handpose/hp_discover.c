@@ -89,6 +89,7 @@ void hp_sources_from_items(HandPoseSourceList *l, const ItemDB *db, const ProcPa
             dg_strcpy(c->item, sizeof(c->item), wd->id);
             snprintf(c->inherits, sizeof(c->inherits), "style/%s", wd->hold_style);
             c->hands = s->hands;
+            c->duration = wd->reload_time;
         }
     }
     for (int i = 1; i < db->item_count; i++) {
@@ -310,6 +311,13 @@ void hp_scan(HandPoseDB *db, const HandPoseSourceList *src, const HandPoseScanOp
             c->hands = s->hands;
             c->seen = true;
             c->auto_placed = s->auto_place;
+            if (s->kind == HCK_RELOAD && s->duration > 0) {
+                // The reload's timeline: hands handed to the clip early, taken back near the end.
+                c->duration = s->duration;
+                c->contact = fminf(0.15f, s->duration * 0.2f);
+                c->release = fmaxf(c->contact, s->duration - 0.2f);
+                c->use = 0.5f * (c->contact + c->release);
+            }
             if (s->hold_time > 0) {
                 // A held interaction: the hold segment spans the hold time (+ the 0.25 s the runtime adds).
                 c->release = c->contact + s->hold_time + 0.25f;

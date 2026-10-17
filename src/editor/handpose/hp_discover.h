@@ -33,6 +33,7 @@ typedef struct HandPoseSource {
     char prop[24], vehicle[24], item[32], hold_state[24];
     i8 seat;
     float hold_time;           // interactables: > 0 = a held interaction (the hold segment of the timeline)
+    float duration;            // reloads: the reload time (the timeline)
 } HandPoseSource;
 
 typedef struct HandPoseSourceList {

@@ -83,6 +83,7 @@ void hp_undo_free(HpUndo *u);
 void hp_undo_clear(HpUndo *u);
 void hp_undo_push(HpUndo *u, const HandPoseDB *db, HpTarget t, u32 key);
 void hp_undo_break(HpUndo *u);
+void hp_undo_pop(HpUndo *u);   // drops the last pushed step (a cancelled transform)
 // Restore the last snapshot (the current state goes to the other stack). Returns the target it
 // restored (entry / ci -1: nothing to undo, or it is gone). The caller commits.
 HpTarget hp_undo(HpUndo *u, HandPoseDB *db);

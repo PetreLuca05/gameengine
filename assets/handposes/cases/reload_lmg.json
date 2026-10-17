@@ -11,7 +11,7 @@
   "auto_placed": false,
   "setup": { "item": "lmg", "distance": 0.75 },
   "anchor": { "pos": [0, 0, 0], "q": [0, 0, 0, 1] },
-  "duration": 0.76,
-  "markers": { "contact": 0.16, "use": 0.31199998, "release": 0.53999996 },
+  "duration": 4.5,
+  "markers": { "contact": 0.15, "use": 2.2250001, "release": 4.3 },
   "keys": []
 }

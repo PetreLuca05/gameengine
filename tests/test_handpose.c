@@ -610,6 +610,110 @@ static void test_glue_tweaks(const ItemDB *idb) {
     free(rt);
 }
 
+// ------------------------------------------------------------------ glue: items + case keys
+
+static void run_rt(CharRuntime *rt, const CharacterDef *def, int style, const ItemSockets *item, int ticks, ProcInput *last, void (*setup)(ProcInput *, void *), void *ud) {
+    charrt_init(rt, L, def);
+    CharInputs in;
+    memset(&in, 0, sizeof(in));
+    in.grounded = true;
+    in.weapon_type = style;
+    for (int t = 0; t < ticks; t++) {
+        charrt_set_inputs(rt, &in);
+        charrt_tick(rt, 1.0f / 60.0f);
+        charrt_eval_base(rt);
+        ProcInput pi;
+        charrt_proc_input(rt, &pi, xf_identity(), 1.0f / 60.0f);
+        pi.item = item;
+        pi.hand_ik_weight = 1.0f;
+        if (setup) setup(&pi, ud);
+        charrt_post(rt, &pi);
+        if (last) *last = pi;
+    }
+}
+
+// Every held item (not only the weapons): the hands on their grip sockets.
+static void test_glue_items(const ItemDB *idb) {
+    const CharacterDef *def = anim_lib_char_by_id(L, "player");
+    if (!def) return;
+    CharRuntime *rt = (CharRuntime *)malloc(sizeof(CharRuntime));
+    const Skeleton *s = &L->skel;
+    int tested = 0;
+    float worst = 0;
+    for (int i = 1; i < idb->item_count; i++) {
+        const ItemDef *it = &idb->items[i];
+        if (!it->has_hold || it->weapon >= 0) continue;
+        int style = proc_hold_style_index(&L->proc, it->hold_style);
+        if (style < 0) continue;
+        run_rt(rt, def, style, &it->sockets, 30, NULL, NULL, NULL);
+        Xform palm_r = xf_mul(rt->final_model[s->role[BR_R_HAND]], L->hands.palm[1]);
+        float er = v3_dist(xf_mul(palm_r, xf_inverse(rt->proc.hand[1].sock)).t, rt->proc.item_model.t);
+        CHECK(er < 1e-4f, "%s: item not on the right hand (%.2f mm)", it->id, er * 1000);
+        if (it->sockets.has_left && proc_hold_style(&L->proc, style)->left_hand) {
+            Xform sock = xf_mul(rt->proc.item_model, rt->proc.hand[0].sock);
+            Xform palm_l = xf_mul(rt->final_model[s->role[BR_L_HAND]], L->hands.palm[0]);
+            float pe = v3_dist(palm_l.t, sock.t);
+            CHECK(pe < 0.002f, "%s: left hand %.2f mm off its socket", it->id, pe * 1000);
+            worst = fmaxf(worst, pe);
+        }
+        tested++;
+    }
+    printf("  glue: %d held items, worst left hand %.3f mm\n", tested, worst * 1000);
+    free(rt);
+}
+
+typedef struct KeyGlue { u32 case_hash; float t; vec3 target[2]; u8 hands; } KeyGlue;
+static void key_setup(ProcInput *pi, void *ud) {
+    const KeyGlue *k = (const KeyGlue *)ud;
+    for (int h = 0; h < 2; h++) {
+        pi->hand_anchor[h] = k->target[h];
+        pi->hand_anchor_rot[h] = quat_identity();
+        pi->anchor_case[h] = k->case_hash;
+        pi->anchor_case_t[h] = k->t;
+        pi->anchor_pose_base[h] = handpose_grip_style_hash(3);   // grab
+    }
+    pi->hand_anchor_rot_valid = true;
+    pi->hand_anchor_w = 1.0f;
+    pi->hand_anchor_skip = (u8)(~k->hands & 3);
+}
+
+// Every case keyframe (each case gets one where it has none): the case's IK targets on a
+// reachable anchor in front of the chest, solved by the anchor pass; the palms land on them.
+static void test_glue_case_keys(void) {
+    const CharacterDef *def = anim_lib_char_by_id(L, "player");
+    if (!def) return;
+    HandPoseDB *db = &L->handposes;
+    CharRuntime *rt = (CharRuntime *)malloc(sizeof(CharRuntime));
+    const Skeleton *s = &L->skel;
+    int keys = 0;
+    float worst = 0;
+    for (int ci = 0; ci < db->case_count; ci++) {
+        HandPoseCase *c = &db->c[ci];
+        if (c->kind == HCK_ITEM || c->kind == HCK_RELOAD) continue;   // their hands are the item's grip / the clip
+        if (!c->key_count) handpose_case_key_at(db, ci, db->c[ci].contact);
+        c = &db->c[ci];
+        for (int k = 0; k < c->key_count; k++) {
+            KeyGlue g = { c->hash, c->keys[k].t, { v3(-0.14f, 1.15f, -0.38f), v3(0.14f, 1.15f, -0.38f) }, c->hands };
+            run_rt(rt, def, 0, NULL, 20, NULL, key_setup, &g);
+            for (int h = 0; h < 2; h++) {
+                if (!(c->hands & (1 << h))) continue;
+                HandPose hp;
+                handpose_case_eval(db, ci, handpose_find_hash(db, handpose_grip_style_hash(3)), h, c->keys[k].t, &hp);
+                // The anchor pass works in model space (root = identity here): target * socket.
+                Xform want = xf_mul(xf_make(g.target[h], quat_identity()), hp.socket);
+                Xform palm = xf_mul(rt->final_model[s->role[h ? BR_R_HAND : BR_L_HAND]], L->hands.palm[h]);
+                float e = v3_dist(palm.t, want.t);
+                CHECK(e < 0.002f, "case %s key %d hand %d: palm %.2f mm off its IK target", c->id, k, h, e * 1000);
+                worst = fmaxf(worst, e);
+            }
+            keys++;
+        }
+    }
+    printf("  glue: %d case keyframes, worst palm %.3f mm\n", keys, worst * 1000);
+    anim_lib_reload_handposes(L);   // drop the keys added here
+    free(rt);
+}
+
 // ------------------------------------------------------------------ universal grip
 
 // One grip per item: the hand targets on the item (item space socket, pole, IK weight, fingers)
@@ -920,6 +1024,8 @@ int main(int argc, char **argv) {
     test_case_timeline();
     test_universal_grip(db);
     test_glue_tweaks(db);
+    test_glue_items(db);
+    test_glue_case_keys();
     test_discovery(db);
     printf("%d checks, %d failed\n", g_checks, g_fail);
     return g_fail ? 1 : 0;

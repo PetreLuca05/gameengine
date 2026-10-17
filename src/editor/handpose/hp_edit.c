@@ -175,6 +175,10 @@ void hp_undo_free(HpUndo *u) {
 }
 void hp_undo_clear(HpUndo *u) { u->undo_count = u->redo_count = 0; u->last_key = u->last_hash = 0; }
 void hp_undo_break(HpUndo *u) { u->last_key = 0; }
+void hp_undo_pop(HpUndo *u) {
+    if (u->undo_count > 0) u->undo_count--;
+    u->last_key = 0;
+}
 
 static u32 target_hash(const HandPoseDB *db, HpTarget t) {
     if (t.entry >= 0 && t.entry < db->count) return db->e[t.entry].hash;

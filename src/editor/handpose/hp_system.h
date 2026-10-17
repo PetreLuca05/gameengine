@@ -31,6 +31,9 @@ float handpose_seat_case_time(u32 case_hash);                  // the "use" mark
 float handpose_seat_case_weight(u32 case_hash);                // 1 (editor: the reach / return blend at the timeline time)
 u32 handpose_mantle_case(void);                                // "mantle" when it has keys (0: the ledge grab as before)
 float handpose_mantle_case_time(float progress);               // traversal progress 0..1 (< 0 = hanging: the "use" marker)
+// Reloads (reload_<weapon>, once reviewed): the hand IK weight at `elapsed` of a `total` s reload
+// from the case's hand-off markers; < 0 = no authored case (the controller's transitions).
+float handpose_reload_ik_weight(const char *weapon, float elapsed, float total);
 // Editor: a case previewed at timeline time t (seats, ledges); hash 0 = off.
 void handpose_case_preview(u32 case_hash, float t);
 // Vehicles: the anchor of a seat's case (the steering wheel / handlebar offset from the def's

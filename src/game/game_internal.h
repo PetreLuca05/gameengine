@@ -112,6 +112,12 @@ void vehicles_frame(World *w, vec3 cam_pos);
 void vehicles_draw_hud(void);
 void vehicles_draw(void);
 EntityId vehicle_spawn(World *w, const char *def, vec3 pos, float yaw);
+// Hand pose editor (simulated vehicle cases, docs/HANDPOSE.md): seat / unseat the player, the
+// steering base frame (the driver case's anchor is relative to it) and the passenger lap frame.
+bool vehicles_editor_seat(World *w, EntityId veh, int slot, int seat);
+void vehicles_editor_unseat(World *w, int slot);
+bool vehicles_steer_base(World *w, int slot, Xform *base);
+bool vehicles_seat_frame(World *w, int slot, Xform *out);
 void weather_level_loaded(World *w, const char *map);
 // Seasons (src/world/season.h, docs/MENU_LOBBY.md): host. season -1 = off. start "" = a weighted
 // pick of the season's presets; dynamic = the season-biased scheduler changes the weather over time.
@@ -120,6 +126,12 @@ void weather_apply_season(World *w, int season, const char *start, bool dynamic)
 const struct SeasonTable *weather_seasons(void);
 int weather_season(void);
 void weather_host_tick(World *w);
+void weather_freeze(World *w, bool on, bool neutral);   // frozen world: hold the weather (neutral: clear sky)
+// Frozen world (scene handpose, game_freeze.c): time, weather, wind, VFX time, zombies / NPCs,
+// vehicle physics, props and ambience stop. Neutral lighting: 12:30 and a clear sky.
+void game_world_freeze(World *w, bool on, bool neutral_light);
+void game_world_freeze_lighting(World *w, bool neutral);
+bool game_world_frozen(void);
 bool weather_active(World *w);
 bool weather_current(World *w, WeatherParams *out);
 void weather_frame(World *w, const RenderCamera *cam, const Player *lp);   // before daynight_environment

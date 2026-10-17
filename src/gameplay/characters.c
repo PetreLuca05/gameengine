@@ -876,6 +876,7 @@ static void sim_range(void *u, int begin, int end) {
 static int g_host_evals;
 static float g_host_ms;
 void chars_host_stats(int *evaluated, float *ms) { if (evaluated) *evaluated = g_host_evals; if (ms) *ms = g_host_ms; }
+bool g_chars_frozen;
 
 void chars_host_tick(World *w, float dt) {
     if (!w->chars || !LIB) return;
@@ -888,6 +889,7 @@ void chars_host_tick(World *w, float dt) {
         CharacterInst *c = w->chars->c[k];
         if (!c || !ent_valid(w, c->ent)) continue;
         int i = (int)ENT_INDEX(c->ent);
+        if (g_chars_frozen && !c->is_player) continue;   // frozen world (hand pose editor): NPCs hold still
         if (c->horde) {
             int iv = DG_MAX(1, c->sim_interval);
             sim_pre(w, c, i);
@@ -1347,6 +1349,15 @@ static void post_one(World *w, CharacterInst *c, int i, float dt, vec3 cam_pos, 
     else if (c->local && !w->authority) charrt_eval_base(&c->rt);
     ProcInput pi;
     charrt_proc_input(&c->rt, &pi, c->root, dt * (float)DG_MAX(1, c->interval));
+    // An authored reload case (reload_<weapon>): its hand-off markers shape the hand IK weight
+    // over the reload (players simulated here: the reload timer is known).
+    if (c->is_player && c->slot >= 0 && c->slot < MAX_PLAYERS && w->players[c->slot].active && w->players[c->slot].sim.wpn.reloading) {
+        const WeaponDef *rw = weapon_equipped_def(w, c->slot);
+        if (rw) {
+            float k = handpose_reload_ik_weight(rw->id, rw->reload_time - w->players[c->slot].sim.wpn.reload_t, rw->reload_time);
+            if (k >= 0.0f) pi.hand_ik_weight = k;
+        }
+    }
     pi.raycast = ray_cb;
     pi.ray_ctx = w->phys;
     int sys = systems_for_lod(lod);
@@ -1478,6 +1489,29 @@ static void post_one(World *w, CharacterInst *c, int i, float dt, vec3 cam_pos, 
                     pi.anchor_case_t[h] = handpose_seat_case_time(sc);
                 }
             }
+        }
+        // The local player's interactions (door knob, lever, pickup: the first-person hand
+        // system's targets and cases, docs/HANDPOSE.md) on the third-person body too (shadow,
+        // third-person views, the hand pose editor's orbit view): the same case evaluation.
+        HandsFpTargets ft;
+        if (w->players[c->slot].local && !pi.seated && pi.hand_anchor_w <= 0.0f && hands_fp_targets(&ft)) {
+            float wmax = 0.0f;
+            u8 skip = 0;
+            for (int h = 0; h < 2; h++) {
+                if (ft.ov_w[h] <= 0.001f) { skip |= (u8)(1u << h); continue; }
+                pi.hand_anchor[h] = ft.ov_palm[h].t;
+                pi.hand_anchor_rot[h] = ft.ov_palm[h].r;
+                pi.anchor_case[h] = ft.ov_case[h];
+                pi.anchor_case_t[h] = ft.ov_case_t[h];
+                pi.anchor_pose_base[h] = handpose_grip_style_hash(ft.grip[h] < GRIP_COUNT ? ft.grip[h] : GRIP_GRAB);
+                wmax = fmaxf(wmax, ft.ov_w[h]);
+            }
+            if (wmax > 0.0f) {
+                pi.hand_anchor_w = wmax;
+                pi.hand_anchor_rot_valid = true;
+                pi.hand_anchor_skip = skip;
+            }
+
         }
     }
     g_ray_ignore = (pi.seated && g_vehicle_pose.vehicle_body) ? g_vehicle_pose.vehicle_body(w, c->slot) : PHYS_INVALID_BODY;

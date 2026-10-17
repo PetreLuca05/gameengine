@@ -231,6 +231,21 @@ float handpose_mantle_case_time(float progress) {
     return progress < 0 ? c->use : saturate(progress) * c->duration;
 }
 
+float handpose_reload_ik_weight(const char *weapon, float elapsed, float total) {
+    if (!weapon) return -1.0f;
+    char bind[80];
+    snprintf(bind, sizeof(bind), "reload:%s", weapon);
+    u32 h = case_for_bind(bind);
+    const HandPoseCase *c = handpose_case_by_hash(h);
+    if (!c || !(c->reviewed || h == HS.preview_case)) return -1.0f;   // a stub: the controller's transitions as before
+    float t = total > 0 ? saturate(elapsed / total) * c->duration : 0.0f;
+    // Hand-off: the IK lets go over [0, contact] (the clip takes the hands), takes them back over
+    // [release, duration].
+    if (t < c->contact) return 1.0f - smoothstepf(0.0f, fmaxf(c->contact, 1e-3f), t);
+    if (t < c->release) return 0.0f;
+    return smoothstepf(c->release, fmaxf(c->duration, c->release + 1e-3f), t);
+}
+
 Xform handpose_seat_anchor(const char *vehicle, bool driver) {
     if (!vehicle) return xf_identity();
     char bind[80];
@@ -259,7 +274,8 @@ static int auto_entry(const InteractDef *def) {
     char bind[80];
     snprintf(bind, sizeof(bind), "interactable:%s", def->name);
     int i = handpose_case_find_bind(d, bind);
-    return i >= 0 && d->c[i].reviewed ? i : -1;   // auto-placed anchors act once a person reviewed them
+    // Auto-placed anchors act once a person reviewed them (or while the editor previews the case).
+    return i >= 0 && (d->c[i].reviewed || (HS.preview_case && d->c[i].hash == HS.preview_case)) ? i : -1;
 }
 
 bool handpose_interact_has_target(const InteractDef *def) { return def && (def->hand_target || auto_entry(def) >= 0); }

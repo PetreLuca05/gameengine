@@ -14,7 +14,7 @@
   "auto_placed": false,
   "setup": {
     "prop": "door",
-    "distance": 0.75
+    "distance": 0.42
   },
   "anchor": {
     "pos": [

@@ -11,7 +11,7 @@
   "auto_placed": false,
   "setup": { "item": "pistol", "distance": 0.75 },
   "anchor": { "pos": [0, 0, 0], "q": [0, 0, 0, 1] },
-  "duration": 0.76,
-  "markers": { "contact": 0.16, "use": 0.31199998, "release": 0.53999996 },
+  "duration": 1.4,
+  "markers": { "contact": 0.15, "use": 0.67499995, "release": 1.1999999 },
   "keys": []
 }

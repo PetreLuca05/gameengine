@@ -130,6 +130,8 @@ static struct {
 } VG;
 
 static void free_sys(World *w);
+static bool vehicle_enter(World *w, int slot, struct Vehicle *v, int seat);
+static bool vehicle_exit(World *w, int slot, bool force);
 
 static VehicleSys *sys(World *w) {
     if (!w) return NULL;
@@ -374,7 +376,8 @@ static bool seat_hands(World *w, int slot, vec3 pos[2], quat rot[2], bool use[2]
         pose_render(w, v, &p, &r);
         const VehicleSeatDef *sd = &vdef(v)->seats[seat];
         for (int h = 0; h < 2; h++) {
-            pos[h] = to_world(p, r, v3_add(sd->pos, v3(h ? 0.12f : -0.12f, 0.06f, -0.28f)));
+            // One base point (the lap) for both hands: the case's anchor and keys place each hand.
+            pos[h] = to_world(p, r, v3_add(sd->pos, v3(0, 0.06f, -0.28f)));
             rot[h] = r;   // palm down, fingers forward
             use[h] = true;
         }
@@ -386,6 +389,37 @@ static bool seat_hands(World *w, int slot, vec3 pos[2], quat rot[2], bool use[2]
     bool gun = wd && wd->kind != WPN_MELEE;
     use[0] = true;
     use[1] = !(gun && slot_onehand(w, slot, v));
+    return true;
+}
+
+// ------------------------------------------------------------------ hand pose editor (simulated vehicle cases)
+
+bool vehicles_editor_seat(World *w, EntityId veh, int slot, int seat) {
+    Vehicle *v = veh_of(w, veh);
+    return v && vehicle_enter(w, slot, v, seat);
+}
+
+void vehicles_editor_unseat(World *w, int slot) { vehicle_exit(w, slot, true); }
+
+bool vehicles_steer_base(World *w, int slot, Xform *base) {
+    int seat;
+    Vehicle *v = veh_of_slot(w, slot, &seat);
+    if (!v) return false;
+    vec3 p;
+    quat r;
+    pose_render(w, v, &p, &r);
+    *base = xf_make(to_world(p, r, vdef(v)->steer_pivot), r);
+    return true;
+}
+
+bool vehicles_seat_frame(World *w, int slot, Xform *out) {
+    int seat;
+    Vehicle *v = veh_of_slot(w, slot, &seat);
+    if (!v) return false;
+    vec3 p;
+    quat r;
+    pose_render(w, v, &p, &r);
+    *out = xf_make(to_world(p, r, v3_add(vdef(v)->seats[seat].pos, v3(0, 0.06f, -0.28f))), r);
     return true;
 }
 
