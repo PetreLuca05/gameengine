@@ -1564,6 +1564,7 @@ static void exec_scope_pip(VkCommandBuffer cmd, void *u) {
     draw_items(cmd, R->draws, R->draw_count, false, true, 0, PIPE_LIT);
     memcpy(R->frustum, saved, sizeof(saved));
     draw_skinned(cmd, 0, PIPE_SKIN, PIPE_LIT, F.skin_main);
+    vkc_draw_pip(cmd);   // the vgeo scene content, culled / LOD-selected with the PiP projection (docs/LOD.md)
     vkCmdEndRendering(cmd);
 }
 
@@ -1674,10 +1675,32 @@ int render_alt_scene_pass(int slot, const char *name, FgRes color, FgRes depth, 
     return p;
 }
 
+// The scope PiP view for LOD selection (docs/LOD.md "Scopes"): the classic renderer culls it with its
+// own projection, characters take the larger of their main-view and PiP pixel sizes.
+static struct { bool valid; mat4 vp; vec3 eye, fwd; float tan_half, size; } g_scope_lod;
+
+bool render_scope_cull(mat4 *vp, vec3 *eye, float *px_scale) {
+    if (!g_scope_lod.valid || !lod_scope()) return false;
+    *vp = g_scope_lod.vp;
+    *eye = g_scope_lod.eye;
+    *px_scale = g_scope_lod.size / (2.0f * g_scope_lod.tan_half);
+    return true;
+}
+
+bool render_scope_view(vec3 *eye, vec3 *fwd, float *tan_half, float *size_px) {
+    if (!g_scope_lod.valid || !lod_scope()) return false;
+    *eye = g_scope_lod.eye;
+    *fwd = g_scope_lod.fwd;
+    *tan_half = g_scope_lod.tan_half;
+    *size_px = g_scope_lod.size;
+    return true;
+}
+
 // PiP camera + its frame UBO; returns false when no PiP is needed this frame.
 static bool setup_scope_pip(FrameData *fd) {
     const RenderSight *s = &R->sight;
     R->pip_fov = 0;
+    g_scope_lod.valid = false;
     if (s->kind != RSIGHT_SCOPE_PIP || s->ads_t < 0.02f) return false;
     vec3 fwd = v3_norm(s->fwd), up = v3_norm(s->up);
     if (v3_len2(fwd) < 0.5f) return false;
@@ -1696,6 +1719,12 @@ static bool setup_scope_pip(FrameData *fd) {
     mat4 vp = mat4_mul(proj, view);
     extract_frustum(vp, F.pip_frustum);
     F.pip_from_view = mat4_mul(vp, mat4_inverse_rigid(R->view));
+    g_scope_lod.valid = true;
+    g_scope_lod.vp = vp;
+    g_scope_lod.eye = s->objective_pos;
+    g_scope_lod.fwd = fwd;
+    g_scope_lod.tan_half = tan_half;
+    g_scope_lod.size = (float)n;
     FrameData *pd = (FrameData *)F.f->ubo_pip.mapped;
     memcpy(pd, fd, sizeof(FrameData));
     pd->view_proj = vp;

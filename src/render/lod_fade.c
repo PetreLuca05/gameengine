@@ -247,7 +247,7 @@ int lod_pick_band(const float *err, int count, int first, float k, float px, flo
 static struct {
     bool init;
     LodTable t;
-    Cvar *fade_time, *band, *fade_debug, *legacy, *bias, *vgeo, *era, *debug;
+    Cvar *fade_time, *band, *fade_debug, *legacy, *bias, *vgeo, *era, *debug, *scope;
 } L;
 
 const LodTable *lod_table(void) {
@@ -292,6 +292,7 @@ void lod_init(void) {
                             "distance band of the stateless LOD / impostor cross-fades (octaves of projected size, 0 = cut; docs/LOD.md)");
     L.fade_debug = cvar_reg_int("r_lod_fade_debug", 0, 0, 1, 0, "tint fading LODs (green: fading in, red: fading out)");
     L.legacy = cvar_reg_bool("r_lod_legacy", false, 0, "the LOD ranges and transitions from before docs/LOD.md (comparisons; r_vgeo 1 always uses them)");
+    L.scope = cvar_reg_bool("r_lod_scope", true, 0, "scope picture-in-picture LOD (docs/LOD.md): its own classic culling / LOD pick, characters at their magnified size (0: before)");
     cmd_register("r_lod_reload", cmd_lod_reload, "reload assets/render/lod.json (LOD ranges, docs/LOD.md)");
 }
 
@@ -325,6 +326,7 @@ float lod_scale(LodCat c) {
 float lod_fade_time(void) { return L.fade_time ? L.fade_time->f : lod_table()->fade_time; }
 float lod_band(void) { return L.band ? L.band->f : lod_table()->band; }
 int lod_fade_debug(void) { return L.fade_debug ? L.fade_debug->i : 0; }
+bool lod_scope(void) { return !L.scope || L.scope->i != 0; }
 int lod_debug(void) {
     if (!L.debug) L.debug = cvar_find("r_lod_debug");
     return L.debug ? L.debug->i : 0;

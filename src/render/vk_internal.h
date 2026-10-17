@@ -484,6 +484,9 @@ struct VgWindTex;
 void vkc_wind_frame(const struct VgViewGpu *v, const struct VgWindTex *w);   // after the wind tile upload: the frame's wind (set 4)
 void vkc_draw_gbuffer(VkCommandBuffer cmd);   // inside the prepass (frame set bound)
 void vkc_draw_lit(VkCommandBuffer cmd);       // inside the opaque pass (depth EQUAL)
+void vkc_draw_pip(VkCommandBuffer cmd);       // inside the scope PiP pass (own culling / LOD, lit forward; docs/LOD.md)
+// The scope PiP view of this frame (setup_scope_pip): view-projection, eye, pixels per unit tangent; false: none.
+bool render_scope_cull(mat4 *vp, vec3 *eye, float *px_scale);
 void vkc_draw_shadow(VkCommandBuffer cmd, u32 cascade);   // inside the sun shadow pass
 u32 vkc_draw_local_shadow(VkCommandBuffer cmd, vec4 sphere, const vec4 planes[6], u32 view, u32 tile_px);
 void vkc_stats(void);

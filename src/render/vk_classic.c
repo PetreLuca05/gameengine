@@ -45,7 +45,8 @@
 #define CL_KEY_FADE 8u              // key bit: a fading part (dithered pipelines)
 #define CL_KEY_SHIFT 4              // key = mesh << 4 | fade << 3 | LOD
 #define CL_PARTS 3                  // parts of one instance at most (impostor, coarser, finer)
-#define CL_VIEWS 4                  // main view + 3 sun cascades
+#define CL_VIEWS 5                  // main view + 3 sun cascades + the scope picture-in-picture
+#define CL_VIEW_PIP 4
 #define CL_IMPOSTOR_TRIS 256        // meshes this heavy (coarsest LOD) use r_classic_impostor_px
 
 typedef struct ClSection { u32 first_index, index_count, material; } ClSection;
@@ -95,7 +96,8 @@ static struct {
     u32 parts;                      // output slots per instance (CL_PARTS with the fades, else 1)
 } T;   // culling tasks (cull_cells)
 
-enum { CP_GB, CP_GB_2S, CP_GB_CLIP, CP_GB_CLIP_2S, CP_LIT, CP_LIT_2S, CP_LIT_CLIP, CP_LIT_CLIP_2S, CP_SHADOW, CP_SHADOW_MASKED, CP_IMP_GB, CP_IMP_LIT, CP_COUNT };
+enum { CP_GB, CP_GB_2S, CP_GB_CLIP, CP_GB_CLIP_2S, CP_LIT, CP_LIT_2S, CP_LIT_CLIP, CP_LIT_CLIP_2S, CP_SHADOW, CP_SHADOW_MASKED, CP_IMP_GB, CP_IMP_LIT,
+       CP_PIP, CP_PIP_2S, CP_PIP_CLIP, CP_PIP_CLIP_2S, CP_PIP_IMP, CP_COUNT };   // CP_PIP*: the scope PiP, forward (lit + depth write)
 
 static struct {
     bool ok;
@@ -317,6 +319,12 @@ void vkc_init(void) {
     C.pipe[CP_SHADOW_MASKED] = cl_pipeline("classic_shadow.vert", "classic_shadow_masked.frag", false, true, true, le, true, 0);
     C.pipe[CP_IMP_GB] = cl_pipeline("classic_impostor.vert", "classic_impostor_gbuffer.frag", true, false, true, le, true, 3);
     C.pipe[CP_IMP_LIT] = cl_pipeline("classic_impostor.vert", "classic_impostor_lit.frag", true, false, true, eq, false, 1);
+    // scope picture-in-picture: lit forward with depth write (no prepass in the PiP)
+    C.pipe[CP_PIP] = cl_pipeline("classic.vert", "classic_lit.frag", false, false, false, le, true, 1);
+    C.pipe[CP_PIP_2S] = cl_pipeline("classic.vert", "classic_lit.frag", false, false, true, le, true, 1);
+    C.pipe[CP_PIP_CLIP] = cl_pipeline("classic.vert", "classic_lit_clip.frag", false, false, false, le, true, 1);
+    C.pipe[CP_PIP_CLIP_2S] = cl_pipeline("classic.vert", "classic_lit_clip.frag", false, false, true, le, true, 1);
+    C.pipe[CP_PIP_IMP] = cl_pipeline("classic_impostor.vert", "classic_impostor_lit.frag", true, false, true, le, true, 1);
     for (int i = 0; i < CP_COUNT; i++)
         if (!C.pipe[i]) { log_error("classic: renderer unavailable (pipeline %d)", i); return; }
     C.ok = true;   // the default set 3 (white) is written at the first frame (the white texture comes later)
@@ -922,12 +930,6 @@ void vkc_frame(const VgScene *s, const VgDisplace *disp, float density, float lo
             C.set_disp = cl_alloc_set(disp->view, VK_IMAGE_LAYOUT_GENERAL, R->textures[R->white_tex].view, R->sampler_linear);
         }
     }
-    if (!views) {   // r_vgeo 1: vgeo draws the main view and the cascades, only local light tiles come here
-        C.cpu_ms = 0;
-        memset(C.lod_n, 0, sizeof(C.lod_n));
-        C.lod_fading = 0;
-        return;
-    }
     // main view
     ClCull v;
     memset(&v, 0, sizeof(v));
@@ -964,6 +966,29 @@ void vkc_frame(const VgScene *s, const VgDisplace *disp, float density, float lo
         v.shadow_lim_k = s_sh;
     }
     C.eff_lod_px = v.lod_px, C.eff_shadow_px = shadow_px, C.eff_imp_px = v.impostor_px, C.eff_small_px = v.small_impostor_px;
+    // Scope picture-in-picture (both paths: vgeo has no PiP view): its own LOD / impostor / foliage
+    // selection from the PiP projection, so a magnified distant object gets the detail the lens shows
+    // (docs/LOD.md "Scopes").
+    mat4 pip_vp;
+    vec3 pip_eye;
+    float pip_px;
+    if (render_scope_cull(&pip_vp, &pip_eye, &pip_px)) {
+        ClCull pv = v;
+        planes_of(pip_vp, pv.planes);
+        pv.eye = pv.lod_eye = pip_eye;
+        pv.px_scale = pip_px;
+        pv.znear = 0.3f;
+        C.tmp_n = 0;
+        cull_cells(&pv, s);
+        emit_view(&C.view[CL_VIEW_PIP]);
+        build_lods(&C.view[CL_VIEW_PIP]);
+    }
+    if (!views) {   // r_vgeo 1: vgeo draws the main view and the cascades, only local light tiles (and the scope PiP) come here
+        C.cpu_ms = 0;
+        memset(C.lod_n, 0, sizeof(C.lod_n));
+        C.lod_fading = 0;
+        return;
+    }
     C.tmp_n = 0;
     cull_cells(&v, s);
     emit_view(&C.view[0]);
@@ -988,7 +1013,7 @@ void vkc_frame(const VgScene *s, const VgDisplace *disp, float density, float lo
             emit_view(&C.view[1 + k]);
         }
     }
-    for (int i = 0; i < CL_VIEWS; i++) build_lods(&C.view[i]);
+    for (int i = 0; i < CL_VIEW_PIP; i++) build_lods(&C.view[i]);
     C.cpu_ms = (float)((double)(SDL_GetPerformanceCounter() - t0) / (double)SDL_GetPerformanceFrequency() * 1000.0);
 }
 
@@ -1096,7 +1121,7 @@ static void mat_push(PushLit *pc, const VgMaterial *m, TextureId tex, u32 maps, 
 
 static bool lod_ready(const ClLod *L) { return L->gpu && R->meshes[L->gpu].used && R->frame_index >= L->ready_frame; }
 
-// pass 0 G-buffer, 1 lit, 2 shadow (view 1-3: cascade, or a local tile list)
+// pass 0 G-buffer, 1 lit, 2 shadow (view 1-3: cascade, or a local tile list), 3 scope PiP (lit forward)
 static void draw_view(VkCommandBuffer cmd, const ClView *v, int pass, u32 shadow_view) {
     if (!C.scene || !v->batch_count) return;
     const VgScene *s = C.scene;
@@ -1106,6 +1131,7 @@ static void draw_view(VkCommandBuffer cmd, const ClView *v, int pass, u32 shadow
     memset(&none, 0, sizeof(none));
     u32 bound5 = vkr_material_set(&none);   // set 5: no maps
     if (pass != 2) vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, C.layout, 5, 1, &R->mat_sets[bound5].set, 0, NULL);
+    int base = pass == 0 ? CP_GB : (pass == 1 ? CP_LIT : (pass == 3 ? CP_PIP : CP_SHADOW));
     if (!C.set4_views[R->frame_slot][0]) return;   // the frame's wind was never written (no draw before vkc_wind_frame)
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, C.layout, 4, 1, &C.set4[R->frame_slot], 0, NULL);
     VkDeviceSize zero = 0;
@@ -1113,7 +1139,7 @@ static void draw_view(VkCommandBuffer cmd, const ClView *v, int pass, u32 shadow
     // pipeline groups: plain one-sided first (early-z), then two-sided, then clipped
     int groups = pass == 2 ? 2 : 4;
     for (int g = 0; g < groups; g++) {
-        int pipe = pass == 0 ? CP_GB + g : (pass == 1 ? CP_LIT + g : CP_SHADOW + g);
+        int pipe = base + g;
         bool pipe_bound = false;
         TextureId bound_tex = ~0u;
         for (u32 b = 0; b < v->batch_count; b++) {
@@ -1192,7 +1218,7 @@ static void draw_view(VkCommandBuffer cmd, const ClView *v, int pass, u32 shadow
         const ClMesh *cm = &C.mesh[bt->key >> CL_KEY_SHIFT];
         if (!cm->imp_set || !R->textures[cm->imp_albedo].ready || !R->textures[cm->imp_normal].ready) continue;
         if (!pipe_bound) {
-            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, C.pipe[pass == 0 ? CP_IMP_GB : CP_IMP_LIT]);
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, C.pipe[pass == 0 ? CP_IMP_GB : (pass == 3 ? CP_PIP_IMP : CP_IMP_LIT)]);
             vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, C.layout, 1, 1, &R->textures[R->white_tex].set, 0, NULL);
             pipe_bound = true;
         }
@@ -1222,6 +1248,7 @@ static void draw_view(VkCommandBuffer cmd, const ClView *v, int pass, u32 shadow
 
 void vkc_draw_gbuffer(VkCommandBuffer cmd) { draw_view(cmd, &C.view[0], 0, 0); }
 void vkc_draw_lit(VkCommandBuffer cmd) { draw_view(cmd, &C.view[0], 1, 0); }
+void vkc_draw_pip(VkCommandBuffer cmd) { draw_view(cmd, &C.view[CL_VIEW_PIP], 3, 0); }
 void vkc_draw_shadow(VkCommandBuffer cmd, u32 cascade) {
     if (cascade < C.ncasc) draw_view(cmd, &C.view[1 + cascade], 2, cascade);
 }

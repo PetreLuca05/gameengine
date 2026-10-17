@@ -125,6 +125,7 @@ float lod_user_bias(void);                 // r_lod_bias / the level's default (
 float lod_fade_time(void);                 // r_lod_fade_time
 float lod_band(void);                      // r_lod_fade_band
 int lod_fade_debug(void);                  // r_lod_fade_debug
+bool lod_scope(void);                      // r_lod_scope: LOD selection of the scope PiP view (both renderers)
 int lod_debug(void);                       // r_lod_debug
 
 #endif

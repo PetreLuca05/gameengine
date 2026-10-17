@@ -1723,6 +1723,12 @@ void chars_present_tick(World *w, vec3 cam_pos, float fov_deg, float screen_h, f
     bool lod_new = lod_active();   // docs/LOD.md (r_vgeo 0); r_vgeo 1 / r_lod_legacy: the ranges from before
     const LodTable *lt = lod_table();
     float lod_s = lod_scale(LODC_CHARACTER) * quality;
+    // Scoped (docs/LOD.md "Scopes"): a character inside the scope picture-in-picture takes the larger of
+    // its main-view and its magnified PiP pixel size (LOD, fades, update rate, IK, shadow follow it).
+    vec3 sc_eye, sc_fwd;
+    float sc_tan = 0, sc_size = 0;
+    bool scoped = render_scope_view(&sc_eye, &sc_fwd, &sc_tan, &sc_size);
+    float sc_cos = scoped ? cosf(atanf(sc_tan * 1.4142136f)) : 1.0f;   // the square PiP's corner
     float tanh = tanf(fov_deg * 0.5f * DG_DEG2RAD);
     bool step_phys = false;
     // Characters due for a post-pass this tick (evaluated after the loop, within the budget).
@@ -1740,6 +1746,11 @@ void chars_present_tick(World *w, vec3 cam_pos, float fov_deg, float screen_h, f
         // LOD by projected height.
         float dist = fmaxf(0.1f, v3_dist(cam_pos, c->root.t));
         c->pixels = screen_h * (LIB->skel.height * c->def->scale) / (2.0f * dist * tanh);
+        if (scoped && !c->local) {
+            vec3 mid = v3_add(c->root.t, v3(0, 0.5f * LIB->skel.height * c->def->scale, 0)), dv = v3_sub(mid, sc_eye);
+            float sd = v3_len(dv);
+            if (sd > 0.1f && v3_dot(dv, sc_fwd) > sd * sc_cos) c->pixels = fmaxf(c->pixels, sc_size * (LIB->skel.height * c->def->scale) / (2.0f * sd * sc_tan));
+        }
         if (lod_new) {
             // docs/LOD.md: lod.json targets x tier, a cross-fade that always completes, eased update rate,
             // LOD0 systems and the shadow faded over pixel bands
