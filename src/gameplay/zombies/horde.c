@@ -588,9 +588,12 @@ void horde_host_tick(World *w, float dt) {
         vec3 to = v3_sub(tp->sim.move.pos, H->pos[s]);
         float d2 = to.x * to.x + to.z * to.z;
         if (d2 > cfg->attack_range * cfg->attack_range || fabsf(to.y) > 1.6f) continue;
+        // In range: snap to face the player and swing (the steering keeps it facing them while the
+        // attack runs, horde_steer.c).
         float face = atan2f(-to.x, -to.z);
-        float diff = fabsf(wrap_angle(face - H->yaw[s]));
-        if (diff > cfg->attack_facing_deg * DG_DEG2RAD) continue;
+        H->yaw[s] = face;
+        c->ai.yaw = c->body_yaw = face;
+        w->xf[i].rot = quat_yaw(face);
         float hit = chars_npc_melee(w, c);   // the chosen clip's contact time
         H->atk_hit[s] = hit > 0 ? hit : cfg->attack_hit_time;
         H->atk_cd[s] = cfg->attack_cooldown * (0.85f + 0.3f * (float)(hh((u32)s + w->tick) & 255u) / 255.0f);

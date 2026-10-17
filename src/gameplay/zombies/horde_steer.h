@@ -19,7 +19,7 @@ typedef struct HordeConfig {
     float sep_radius, sep_weight, align_radius, align_weight, avoid_weight, seek_weight;
     float speed_jitter;                 // +- fraction per zombie
     // attack
-    float attack_range, attack_facing_deg, attack_cooldown, attack_hit_time, attack_damage;
+    float attack_range, attack_facing_deg, attack_cooldown, attack_hit_time, attack_damage;   // attack_facing_deg: unused (attacks snap onto the player)
     // targets / casts
     int retarget_ticks, cast_interval, ground_interval;
     float cast_len, step_height, max_slope_deg;

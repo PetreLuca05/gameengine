@@ -62,7 +62,8 @@ The host tick (`horde_host_tick`, before `chars_host_tick`) runs these phases in
    - Zombies never walk inside a player (0.62 m).
 7. **Physics tier:** near zombies keep their kinematic Jolt capsule so they block and get pushed;
    others have it disabled. The near tier also keeps lag-compensation history.
-8. **Attacks:** a near zombie in range and facing its target swings (`chars_npc_melee`). The hit
+8. **Attacks:** a near zombie in range of its target snaps to face it and swings (`chars_npc_melee`); it
+   stays snapped onto the player while the attack runs (no turn rate; `attack.facing_deg` is unused). The hit
    lands after `hit_time` if the target is still close, through `apply_damage`.
 9. **Facing / look:** chasing a player within `movement.face_target_dist` (4 m), or attacking, the
    body faces the player instead of the motion (crowd separation and wall slides used to turn them
