@@ -62,7 +62,7 @@ Enter accept, B / Esc back (browser → Play, a tab → Play, Play → the quit 
 cycle the tabs (inside Settings they cycle the settings' own tabs), 1-6 jump to a tab. Key hints
 show next to the tab names while the keyboard / pad drives.
 
-`--test` runs boot into the dev room as before (scripts, screenshots); `--menu` forces the menu.
+`--test` runs boot into the dev room as before (scripts, screenshots); `--menu` forces the menu. `--nomenu` skips the splash and the menu in a normal run (your config loads as usual): straight into `+map <id>` / `+scene <id>`, or the boot map.
 
 ## Lobby state machine
 
