@@ -318,7 +318,7 @@ static void draw_spectator(GuiRect safe) {
 static void draw_downed(World *w, Player *p) {
     if (!p || !p->sim.down.downed || p->sim.move.mode == MOVE_DEAD) return;
     const DownState *d = &p->sim.down;
-    float cx = gui_w() * 0.5f, cy = gui_h() * 0.72f;
+    float cx = gui_w() * 0.5f, cy = gui_h() * 0.79f;   // under the hints, above the hotbar
     float total = (float)d->bleed_total / (float)REVIVE_HZ, left = (float)d->bleed_ticks / (float)REVIVE_HZ;
     bool helped = d->reviver != REVIVE_NOBODY;
     ui_timed_ring_at(cx, cy, 0.85f, total, left, TR_DRAIN, helped ? "Paused" : "Bleeding out", 1.0f);
