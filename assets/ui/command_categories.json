@@ -56,6 +56,6 @@
         "cl_crouch_toggle": "input",
         "cl_sprint_toggle": "input"
     },
-    "destructive": ["quit", "map", "disconnect", "kill", "die", "zombie_clear", "horde_despawn", "despawn_horde", "unbindall", "writeconfig", "cfg_reset", "lobby_leave", "host", "connect", "vid_restart"],
+    "destructive": ["quit", "map", "disconnect", "kill", "die", "zombie_clear", "inv_clear", "horde_despawn", "despawn_horde", "unbindall", "writeconfig", "cfg_reset", "lobby_leave", "host", "connect", "vid_restart"],
     "favorites": ["noclip", "give", "setpos", "time_set", "weather", "map", "ping", "copypos"]
 }

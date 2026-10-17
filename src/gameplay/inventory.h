@@ -1,11 +1,11 @@
-// Slot-based inventory: 9 hotbar slots + a 6x4 backpack grid.
+// Slot-based inventory: 6 hotbar slots + a 6x4 backpack grid.
 #ifndef DG_INVENTORY_H
 #define DG_INVENTORY_H
 
 #include "core/base.h"
 #include "items.h"
 
-#define INV_HOTBAR 9
+#define INV_HOTBAR 6
 #define INV_BACKPACK_W 6
 #define INV_BACKPACK_H 4
 #define INV_BACKPACK (INV_BACKPACK_W * INV_BACKPACK_H)
