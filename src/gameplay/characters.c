@@ -68,7 +68,7 @@ typedef struct CharGlobals {
     // baked per-style arm pose for LOD2+ (captured from LOD0/1 hold solves)
     Xform style_arms[HOLD_STYLE_MAX][ANIM_MAX_BONES];
     bool style_arms_valid[HOLD_STYLE_MAX];
-    Cvar *foot_ik, *spine, *turn, *hold, *lean, *damage, *ragdoll, *ragdoll_debug, *corpse_collision, *ragdoll_time;
+    Cvar *foot_ik, *spine, *turn, *hold, *forearm_twist, *ik_shoulders, *lean, *damage, *ragdoll, *ragdoll_debug, *corpse_collision, *ragdoll_time;
     Cvar *max_ragdolls, *debug, *hold_debug, *hold_assert, *hitbox_debug, *lod_debug, *lod_force, *lod_bias, *lod_quality;
     Cvar *eval_budget;
     int last_evals, last_deferred;      // budget stats (previous present tick)
@@ -108,6 +108,8 @@ void characters_register_cvars(void) {
     g->spine = cvar_reg_bool("anim_spine", true, CVAR_ARCHIVE, "spine / head look at the aim");
     g->turn = cvar_reg_bool("anim_turn", true, CVAR_ARCHIVE, "turn in place smoothing + foot locking");
     g->hold = cvar_reg_bool("anim_hold", true, CVAR_ARCHIVE, "procedural weapon holding (two-hand IK)");
+    g->forearm_twist = cvar_reg_float("anim_forearm_twist", 0.6f, 0.0f, 1.0f, CVAR_ARCHIVE, "hand IK: share of the hand's twist taken by the forearm (0 = all at the wrist)");
+    g->ik_shoulders = cvar_reg_bool("anim_ik_shoulders", false, CVAR_ARCHIVE, "hand IK may move the clavicles (reach / hold-point shoulder offsets); off = arms from the upper arm down");
     g->lean = cvar_reg_bool("anim_lean", true, CVAR_ARCHIVE, "slope / acceleration lean");
     g->damage = cvar_reg_bool("anim_damage", true, CVAR_ARCHIVE, "additive damage reactions");
     g->ragdoll = cvar_reg_bool("anim_ragdoll", true, CVAR_ARCHIVE, "ragdoll on death");
@@ -900,8 +902,15 @@ static float g_host_ms;
 void chars_host_stats(int *evaluated, float *ms) { if (evaluated) *evaluated = g_host_evals; if (ms) *ms = g_host_ms; }
 bool g_chars_frozen;
 
+// Hand IK options (src/anim): read by every arm solve this frame.
+static void sync_anim_cvars(void) {
+    if (CG->forearm_twist) g_anim_forearm_twist = CG->forearm_twist->f;
+    if (CG->ik_shoulders) g_anim_ik_shoulders = CG->ik_shoulders->i != 0;
+}
+
 void chars_host_tick(World *w, float dt) {
     if (!w->chars || !LIB) return;
+    sync_anim_cvars();
     double t0 = platform_time();
     w->chars->tick = w->tick;
     // Horde zombies due this tick are evaluated in parallel jobs (chunks), everything else here.
@@ -1072,6 +1081,7 @@ static void apply_event(World *w, const AnimEvent *e);
 
 void chars_client_tick(World *w, double rt, float dt) {
     if (!w->chars || !LIB) return;
+    sync_anim_cvars();
     w->chars->tick = (u32)rt;
     // Due events (in arrival order).
     CharacterSystem *cs = w->chars;
@@ -1687,6 +1697,7 @@ static void post_one(World *w, CharacterInst *c, int i, float dt, vec3 cam_pos, 
 
 void chars_present_tick(World *w, vec3 cam_pos, float fov_deg, float screen_h, float dt, int local_slot) {
     if (!w->chars || !LIB) return;
+    sync_anim_cvars();
     ensure_gpu_meshes();
     CharGlobals *g = CG;
     g->lod.bias = (g->lod_bias ? g->lod_bias->f : 1.0f) * (g->lod_quality ? 0.5f + 0.25f * (float)g->lod_quality->i : 1.0f);
@@ -2083,6 +2094,14 @@ void chars_render_local_fp(World *w, float alpha, int local_slot) {
         // away from the tick's solve. If grip_l is out of reach, pull the hold point towards the
         // left shoulder by the shortfall (never stretch the arm); warn once per item.
         const Xform sock_l0 = fp_hand_sock(c, k, 0), sock_r0 = fp_hand_sock(c, k, 1);
+        if (!g_anim_ik_shoulders && ra >= 0 && rf >= 0 && rh >= 0 && ikw > 0.99f) {
+            // The right hand out of reach without the shoulders: the hold point comes towards the
+            // shoulder by the shortfall (before the left hand is solved against it).
+            float reach_r = v3_dist(model[ra].t, model[rf].t) + v3_dist(model[rf].t, model[rh].t);
+            vec3 hr = proc_hand_for_socket(xf_mul(want, sock_r0), LIB->hands.palm[1]).t;
+            float need_r = v3_dist(model[ra].t, hr);
+            if (need_r > reach_r - 0.003f && need_r < reach_r + 0.5f) want.t = v3_madd(want.t, v3_norm(v3_sub(model[ra].t, hr)), need_r - reach_r + 0.003f);
+        }
         Xform grip_l = sock_l0;   // ADS: may slide back along the handguard (exact ADS kept)
         if (hs->left_hand && k->has_left && la >= 0 && lf >= 0 && lh >= 0 && ikw > 0.99f) {
             float reach = v3_dist(model[la].t, model[lf].t) + v3_dist(model[lf].t, model[lh].t);
@@ -2134,7 +2153,7 @@ void chars_render_local_fp(World *w, float alpha, int local_slot) {
                 float reach_r = v3_dist(model[ra].t, model[rf].t) + v3_dist(model[rf].t, model[rh].t);
                 proc_clavicle_reach(s, posep, model, s->role[BR_R_SHOULDER], ra, hand_r.t, reach_r, 0.003f, 45.0f);
             }
-            anim_ik_two_bone_pose(s, posep, model, ra, rf, rh, hand_r.t, &hand_r.r, quat_rotate(cam_rm, fp_hand_pole(c, hs, 1)), ikw * c->rt.proc.hand[1].ikw);
+            anim_ik_arm_pose(s, posep, model, ra, rf, rh, hand_r.t, &hand_r.r, quat_rotate(cam_rm, fp_hand_pole(c, hs, 1)), ikw * c->rt.proc.hand[1].ikw);
             fp_fire_fingers(s, posep, model, 1, ikw);   // trigger pull
         }
         // The item stays exactly on its hold point while the hands hold it (the arms follow by IK;
@@ -2152,7 +2171,7 @@ void chars_render_local_fp(World *w, float alpha, int local_slot) {
         if (hs->left_hand && k->has_left && la >= 0 && lf >= 0 && lh >= 0 && ikw > 0.001f) {
             Xform sock_l = xf_mul(item, grip_l);
             Xform hand_l = proc_hand_for_socket(fp_fire_hand_lag(sock_l, cam_rm, lag_pivot), LIB->hands.palm[0]);
-            anim_ik_two_bone_pose(s, posep, model, la, lf, lh, hand_l.t, &hand_l.r, quat_rotate(cam_rm, fp_hand_pole(c, hs, 0)), ikw * c->rt.proc.hand[0].ikw);
+            anim_ik_arm_pose(s, posep, model, la, lf, lh, hand_l.t, &hand_l.r, quat_rotate(cam_rm, fp_hand_pole(c, hs, 0)), ikw * c->rt.proc.hand[0].ikw);
             fp_fire_fingers(s, posep, model, 0, ikw);   // the support grip tightens
             Xform palm_l = xf_mul(model[lh], LIB->hands.palm[0]);
             CG->fp_glue_pos[0] = v3_dist(palm_l.t, sock_l.t);
@@ -2212,7 +2231,7 @@ void chars_render_local_fp(World *w, float alpha, int local_slot) {
         Xform hand = proc_hand_for_socket(palm, LIB->hands.palm[h]);
         float side = h ? 1.0f : -1.0f;
         vec3 pole = quat_rotate(quat_conj(root.r), quat_rotate(t.cam_rot, hp.has_pole ? hp.pole : v3(0.8f * side, -1.0f, 0.25f)));
-        anim_ik_two_bone_pose(s, posep, model, ua, fa, ha, hand.t, &hand.r, pole, t.ov_w[h] * hp.ik_weight);
+        anim_ik_arm_pose(s, posep, model, ua, fa, ha, hand.t, &hand.r, pole, t.ov_w[h] * hp.ik_weight);
         handpose_apply_fingers(s, posep, model, h, hp.j, &LIB->hands, t.ov_w[h]);
     }
     // Neck, head (and hair / eyes / end bones) collapsed: the camera sits inside the head

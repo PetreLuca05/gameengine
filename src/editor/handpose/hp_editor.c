@@ -757,7 +757,7 @@ static void draw_onion(void) {
             Xform palm_m = xf_mul(w2m, kw[HP_RIG_IK(h)]);
             Xform hand = proc_hand_for_socket(palm_m, lib->hands.palm[h]);
             vec3 pole = quat_rotate(quat_conj(m2w.r), v3_sub(kw[HP_RIG_POLE(h)].t, E.ctx.elbow[h]));
-            anim_ik_two_bone_pose(s, &pose, model, a, b, hb, hand.t, &hand.r, pole, 1.0f);
+            anim_ik_arm_pose(s, &pose, model, a, b, hb, hand.t, &hand.r, pole, 1.0f);
             HandPose hp;
             handpose_case_key_pose(db(), kt.ci, -1, kt.key, h, &hp);
             handpose_apply_fingers(s, &pose, model, h, hp.j, &lib->hands, 1.0f);

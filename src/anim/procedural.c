@@ -306,7 +306,7 @@ void proc_rotate_bone(const Skeleton *s, Pose *p, Xform *model, int b, quat q) {
 // clavicle `clav` towards it (at most max_deg): shoulder protraction / elevation instead of moving
 // the held item. Returns the remaining shortfall (0 = in reach).
 float proc_clavicle_reach(const Skeleton *s, Pose *p, Xform *model, int clav, int arm, vec3 target, float reach, float margin, float max_deg) {
-    if (clav < 0 || arm < 0) return 0;
+    if (clav < 0 || arm < 0 || !g_anim_ik_shoulders) return 0;   // the shoulders stay the clip's (anim_ik_shoulders)
     float need = v3_dist(model[arm].t, target) - (reach - margin);
     if (need <= 0) return 0;
     vec3 c = model[clav].t;

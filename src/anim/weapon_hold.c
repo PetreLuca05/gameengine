@@ -150,8 +150,8 @@ void proc_hold(ProcState *st, const ProcInput *in, Pose *pose, Xform *model) {
             proc_rotate_bone(s, pose, model, sp2, quat_yaw(-tw * 0.55f));
             proc_rotate_bone(s, pose, model, neck, quat_yaw(tw));
         }
-        if (lsh >= 0 && v3_len2(hs.hp.clav_l) > 0 && hs.left_hand && it->has_left) proc_rotate_bone(s, pose, model, lsh, euler_deg(v3_scale(hs.hp.clav_l, w)));
-        if (rsh >= 0 && v3_len2(hs.hp.clav_r) > 0) proc_rotate_bone(s, pose, model, rsh, euler_deg(v3_scale(hs.hp.clav_r, w)));
+        if (g_anim_ik_shoulders && lsh >= 0 && v3_len2(hs.hp.clav_l) > 0 && hs.left_hand && it->has_left) proc_rotate_bone(s, pose, model, lsh, euler_deg(v3_scale(hs.hp.clav_l, w)));
+        if (g_anim_ik_shoulders && rsh >= 0 && v3_len2(hs.hp.clav_r) > 0) proc_rotate_bone(s, pose, model, rsh, euler_deg(v3_scale(hs.hp.clav_r, w)));
     }
 
     // Camera (model space): the head bone + eye socket after the spine look, rotated by the view
@@ -240,7 +240,8 @@ void proc_hold(ProcState *st, const ProcInput *in, Pose *pose, Xform *model) {
     hs.shoulder_r = v3_add(hs.shoulder_r, add_r);
     if (hs.left_hand && it->has_left) hs.shoulder_l = v3_add(hs.shoulder_l, add_l);
 
-    // Clavicles.
+    // Clavicles (only with anim_ik_shoulders: by default the hand IK chain starts at the upper arm).
+    if (!g_anim_ik_shoulders) hs.shoulder_r = hs.shoulder_l = v3(0, 0, 0);
     if (rsh >= 0 && v3_len2(hs.shoulder_r) > 0) proc_rotate_bone(s, pose, model, rsh, euler_deg(v3_scale(hs.shoulder_r, w)));
     if (lsh >= 0 && v3_len2(hs.shoulder_l) > 0) proc_rotate_bone(s, pose, model, lsh, euler_deg(v3_scale(hs.shoulder_l, w)));
 
@@ -264,7 +265,7 @@ void proc_hold(ProcState *st, const ProcInput *in, Pose *pose, Xform *model) {
     // (towards the receiver, as a shooter shifts the grip) and only then moves the item.
     bool ads_exact = st->hp_out.state == HP_ADS;
     float slide = 0, max_slide = ads_exact && it->has_left ? fmaxf(0.0f, -sock_l0.t.z - 0.08f) : 0.0f;
-    for (int iter = 0; iter < 16; iter++) {
+    for (int iter = 0; iter < 24; iter++) {   // more passes: without the shoulders the item does all the reaching
         if (iter > 0) {
             pose_copy(pose, &base_pose);
             memcpy(model, base_model, sizeof(Xform) * (size_t)s->count);
@@ -276,9 +277,16 @@ void proc_hold(ProcState *st, const ProcInput *in, Pose *pose, Xform *model) {
         {
             float reach_r = v3_dist(model[ra].t, model[rf].t) + v3_dist(model[rf].t, model[rh].t);
             proc_clavicle_reach(s, pose, model, rsh, ra, hand_r.t, reach_r, 0.003f, 45.0f * w);
+            // Still out of reach (the shoulders stay the clip's, anim_ik_shoulders): the item comes
+            // towards the shoulder by the shortfall, the arm never stretches and the hand stays on it.
+            float need_r = v3_dist(model[ra].t, hand_r.t);
+            if (need_r > reach_r - 0.003f && need_r < reach_r + 0.5f) {
+                want.t = v3_madd(want.t, v3_norm(v3_sub(model[ra].t, hand_r.t)), need_r - reach_r + 0.003f);
+                hand_r = proc_hand_for_socket(xf_mul(want, sock_r), hf->palm[1]);
+            }
         }
         vec3 pole_r = quat_rotate(yaw_q, st->hand[1].pole);
-        anim_ik_two_bone_pose(s, pose, model, ra, rf, rh, hand_r.t, &hand_r.r, pole_r, w * st->hand[1].ikw);
+        anim_ik_arm_pose(s, pose, model, ra, rf, rh, hand_r.t, &hand_r.r, pole_r, w * st->hand[1].ikw);
         // Item finalized from the solved right hand (this is what gets rendered).
         Xform palm_r = xf_mul(model[rh], hf->palm[1]);
         item = xf_mul(palm_r, xf_inverse(sock_r));
@@ -295,7 +303,7 @@ void proc_hold(ProcState *st, const ProcInput *in, Pose *pose, Xform *model) {
         // hold point; only what the shoulder can't cover moves the item.
         proc_clavicle_reach(s, pose, model, lsh, la, hand_l.t, reach, margin * 1.5f, 75.0f * w);
         float need = v3_dist(model[la].t, hand_l.t);
-        if (need > reach - margin * 0.5f && iter < 15 && slide < max_slide - 1e-5f) {
+        if (need > reach - margin * 0.5f && iter < 23 && slide < max_slide - 1e-5f) {
             vec3 to_sh = v3_norm(v3_sub(model[la].t, hand_l.t));
             float g = v3_dot(to_sh, quat_rotate(item.r, v3(0, 0, 1)));
             if (g > 0.2f) {
@@ -303,7 +311,7 @@ void proc_hold(ProcState *st, const ProcInput *in, Pose *pose, Xform *model) {
                 continue;
             }
         }
-        if (need > reach - margin * 0.5f && iter < 15 && shift >= max_shift - 1e-5f) {
+        if (need > reach - margin * 0.5f && iter < 23 && shift >= max_shift - 1e-5f) {
             // The barrel-axis pull is exhausted: move the hold point towards the shoulder by the
             // remaining shortfall (never stretch the arm, never leave a gap).
             vec3 to_sh = v3_norm(v3_sub(model[la].t, hand_l.t));
@@ -312,7 +320,7 @@ void proc_hold(ProcState *st, const ProcInput *in, Pose *pose, Xform *model) {
             st->reach_shifted = true;
             continue;
         }
-        if (need > reach - margin * 0.5f && iter < 15 && shift < max_shift) {
+        if (need > reach - margin * 0.5f && iter < 23 && shift < max_shift) {
             // How much does moving along `back` shorten the shoulder -> hand distance?
             vec3 to_sh = v3_norm(v3_sub(model[la].t, hand_l.t));
             float gain = v3_dot(to_sh, back);
@@ -326,7 +334,7 @@ void proc_hold(ProcState *st, const ProcInput *in, Pose *pose, Xform *model) {
             continue;
         }
         vec3 pole_l = quat_rotate(yaw_q, st->hand[0].pole);
-        left_ok = anim_ik_two_bone_pose(s, pose, model, la, lf, lh, hand_l.t, &hand_l.r, pole_l, w * st->hand[0].ikw);
+        left_ok = anim_ik_arm_pose(s, pose, model, la, lf, lh, hand_l.t, &hand_l.r, pole_l, w * st->hand[0].ikw);
         Xform palm_l = xf_mul(model[lh], hf->palm[0]);
         st->glue_err_pos = v3_dist(palm_l.t, sock_l.t);
         st->glue_err_ang = socket_error_angle(palm_l.r, sock_l.r);
@@ -389,7 +397,7 @@ void proc_hand_anchors(ProcState *st, const ProcInput *in, Pose *pose, Xform *mo
         Xform hand = proc_hand_for_socket(palm, in->hands->palm[h]);
         vec3 pole = v3(h ? 1.0f : -1.0f, -0.6f, 0.4f);
         if (posed && hp.has_pole) pole = hp.pole;
-        anim_ik_two_bone_pose(s, pose, model, a, b, c, hand.t, &hand.r, pole, w * (posed ? hp.ik_weight : 1.0f));
+        anim_ik_arm_pose(s, pose, model, a, b, c, hand.t, &hand.r, pole, w * (posed ? hp.ik_weight : 1.0f));
         if (posed && !in->no_fingers) handpose_apply_fingers(s, pose, model, h, hp.j, in->hands, w);
     }
 }

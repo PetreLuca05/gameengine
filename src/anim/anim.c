@@ -408,8 +408,17 @@ bool anim_ik_two_bone(vec3 root, vec3 target, vec3 pole, float a, float b, vec3 
     return reached;
 }
 
-bool anim_ik_two_bone_pose(const Skeleton *s, Pose *p, Xform *model, int ia, int ib, int ic, vec3 target_pos,
-                           const quat *target_rot, vec3 pole_dir, float weight) {
+float g_anim_forearm_twist = 0.6f;
+bool g_anim_ik_shoulders = false;
+
+// The twist of q about the unit axis n (swing-twist decomposition), as an angle (radians).
+static float twist_angle(quat q, vec3 n) {
+    float proj = q.x * n.x + q.y * n.y + q.z * n.z;
+    return 2.0f * atan2f(proj, q.w);
+}
+
+static bool two_bone_pose(const Skeleton *s, Pose *p, Xform *model, int ia, int ib, int ic, vec3 target_pos,
+                          const quat *target_rot, vec3 pole_dir, float weight, float forearm_twist) {
     if (ia < 0 || ib < 0 || ic < 0 || weight <= 0.0f) return true;
     Xform orig_a = p->local[ia], orig_b = p->local[ib], orig_c = p->local[ic];
     vec3 pa = model[ia].t, pb = model[ib].t, pc = model[ic].t;
@@ -429,6 +438,20 @@ bool anim_ik_two_bone_pose(const Skeleton *s, Pose *p, Xform *model, int ia, int
     nb.r = quat_norm(quat_mul(quat_from_to(e0, e1), nb.r));
     pose_set_model(s, p, model, ib, nb);
     model[ic] = xf_mul(model[ib], p->local[ic]);
+    if (target_rot && forearm_twist > 0.0f) {
+        // Roll the lower bone about its own axis (the end joint stays put) by a share of the end's
+        // twist relative to it: the twist spreads along the forearm instead of all at the wrist.
+        vec3 ax = v3_sub(model[ic].t, model[ib].t);
+        if (v3_len2(ax) > 1e-10f) {
+            ax = v3_norm(ax);
+            // World-space turn still needed at the end (current -> wanted); its twist about the axis.
+            float tw = wrap_angle(twist_angle(quat_mul(target_rot[0], quat_conj(model[ic].r)), ax));
+            Xform nb2 = model[ib];
+            nb2.r = quat_norm(quat_mul(quat_axis_angle(ax, tw * clampf(forearm_twist, 0.0f, 1.0f)), nb2.r));
+            pose_set_model(s, p, model, ib, nb2);
+            model[ic] = xf_mul(model[ib], p->local[ic]);
+        }
+    }
     if (target_rot) {
         Xform nc = model[ic];
         nc.r = *target_rot;
@@ -442,6 +465,16 @@ bool anim_ik_two_bone_pose(const Skeleton *s, Pose *p, Xform *model, int ia, int
     }
     pose_update_children(s, p, model, ia);
     return reached;
+}
+
+bool anim_ik_two_bone_pose(const Skeleton *s, Pose *p, Xform *model, int ia, int ib, int ic, vec3 target_pos,
+                           const quat *target_rot, vec3 pole_dir, float weight) {
+    return two_bone_pose(s, p, model, ia, ib, ic, target_pos, target_rot, pole_dir, weight, 0.0f);
+}
+
+bool anim_ik_arm_pose(const Skeleton *s, Pose *p, Xform *model, int ia, int ib, int ic, vec3 target_pos,
+                      const quat *target_rot, vec3 pole_dir, float weight) {
+    return two_bone_pose(s, p, model, ia, ib, ic, target_pos, target_rot, pole_dir, weight, g_anim_forearm_twist);
 }
 
 void anim_aim_bone(const Skeleton *s, Pose *p, Xform *model, int bone, vec3 local_axis, vec3 target_dir, float weight) {

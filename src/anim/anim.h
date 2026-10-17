@@ -182,6 +182,13 @@ bool anim_ik_two_bone(vec3 root, vec3 target, vec3 pole, float a, float b, vec3 
 // model must be current for the whole skeleton; it is updated for the chain and descendants.
 bool anim_ik_two_bone_pose(const Skeleton *s, Pose *p, Xform *model, int ia, int ib, int ic, vec3 target_pos,
                            const quat *target_rot, vec3 pole_dir, float weight);
+// Arm version (upper arm, forearm, hand; the clavicle is never part of the chain): as above, plus the
+// hand's twist about the forearm axis is shared with the forearm (g_anim_forearm_twist of it rolls the
+// forearm, the rest stays at the wrist) - no candy-wrapper wrist when the hand turns.
+bool anim_ik_arm_pose(const Skeleton *s, Pose *p, Xform *model, int ia, int ib, int ic, vec3 target_pos,
+                      const quat *target_rot, vec3 pole_dir, float weight);
+extern float g_anim_forearm_twist;   // anim_forearm_twist (0..1, default 0.6)
+extern bool g_anim_ik_shoulders;     // anim_ik_shoulders: hand IK may move the clavicles (default off)
 // Rotates bone so that its child direction (model) points at target (look-at style), weight 0..1.
 void anim_aim_bone(const Skeleton *s, Pose *p, Xform *model, int bone, vec3 local_axis, vec3 target_dir, float weight);
 
