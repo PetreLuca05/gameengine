@@ -28,6 +28,7 @@ bool scene_enter(const char *name);           // leaves the current one first
 void scene_leave(void);
 const GameScene *scene_active(void);
 bool scene_wants_mouse(void);
+bool scene_has_panels(void);                  // the scene draws Nuklear panels (dev tool UI gets the events; not the main menu)
 bool scene_hides_hud(void);
 bool scene_camera(struct World *w, RenderCamera *cam);   // game_render: true = the scene's camera (third person)
 void scene_draw(void);

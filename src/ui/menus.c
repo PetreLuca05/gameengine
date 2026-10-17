@@ -404,7 +404,7 @@ bool menus_wants_mouse(void) {
 
 bool menus_open(void) { return M && M->depth > 0; }
 bool menus_dev_tools_open(void) {
-    return vfx_editor_open() || holdpoint_editor_open() || fire_tuner_open() || daynight_editor_open() || flesh_range_open() || wind_game_panel_open() || scene_wants_mouse();
+    return vfx_editor_open() || holdpoint_editor_open() || fire_tuner_open() || daynight_editor_open() || flesh_range_open() || wind_game_panel_open() || scene_has_panels();   // the main menu scene draws no panels: the game UI keeps its input
 }
 void menus_frame_end(void) { if (M && M->inited) gui_frame_end(); }
 bool menus_paused(void) { return M && M->depth > 0 && M->stack[0] == SCR_PAUSE && menus_can_pause(); }
@@ -580,6 +580,13 @@ static void cmd_ui_key(int argc, const char **argv) {
 }
 
 // ui_mouse <x> <y> [down|up|click|rclick|dclick|wheel <n>] (fractions 0..1 of the window when <= 1)
+// Synthetic mouse events go through SDL's queue, so they take the same route as the real mouse
+// (main.c handle_event: the dev-tool / game UI split, the cursor capture), not straight into the GUI.
+static void ui_mouse_send(SDL_Event *ev) {
+    if (g_engine.window) { ev->common.timestamp = SDL_GetTicksNS(); SDL_PushEvent(ev); }
+    else gui_handle_event(ev);
+}
+
 static void cmd_ui_mouse(int argc, const char **argv) {
     if (argc < 3) return;
     float x = (float)atof(argv[1]), y = (float)atof(argv[2]);
@@ -592,14 +599,14 @@ static void cmd_ui_mouse(int argc, const char **argv) {
     ev.motion.x = x / pd;
     ev.motion.y = y / pd;
     ev.motion.xrel = 4;
-    gui_handle_event(&ev);
+    ui_mouse_send(&ev);
     const char *what = argc > 3 ? argv[3] : "";
     bool right = !strcmp(what, "rclick") || !strcmp(what, "rdown") || !strcmp(what, "rup");
     if (!strcmp(what, "wheel")) {
         memset(&ev, 0, sizeof(ev));
         ev.type = SDL_EVENT_MOUSE_WHEEL;
         ev.wheel.y = argc > 4 ? (float)atof(argv[4]) : -1.0f;
-        gui_handle_event(&ev);
+        ui_mouse_send(&ev);
         return;
     }
     bool down = !strcmp(what, "down") || !strcmp(what, "rdown") || !strcmp(what, "click") || !strcmp(what, "rclick") || !strcmp(what, "dclick");
@@ -611,7 +618,7 @@ static void cmd_ui_mouse(int argc, const char **argv) {
         ev.button.x = x / pd;
         ev.button.y = y / pd;
         ev.button.clicks = !strcmp(what, "dclick") ? 2 : 1;
-        gui_handle_event(&ev);
+        ui_mouse_send(&ev);
     }
     if (up) {
         // Released next frame (a press and release in one frame is still a click).
@@ -620,7 +627,7 @@ static void cmd_ui_mouse(int argc, const char **argv) {
         ev.button.button = right ? SDL_BUTTON_RIGHT : SDL_BUTTON_LEFT;
         ev.button.x = x / pd;
         ev.button.y = y / pd;
-        gui_handle_event(&ev);
+        ui_mouse_send(&ev);
     }
 }
 
