@@ -1,0 +1,13 @@
+{
+  "schema": 2,
+  "id": "phone",
+  "label": "Phone",
+  "category": "item",
+  "source": "data/items.json",
+  "inherits": "style/phone",
+  "hands": ["left", "right"],
+  "reviewed": false,
+  "auto_placed": false,
+  "left": {},
+  "right": {}
+}

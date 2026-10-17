@@ -1,0 +1,17 @@
+{
+  "schema": 2,
+  "id": "reload_pistol",
+  "label": "Reload: Pistol",
+  "kind": "reload",
+  "bind": "reload:pistol",
+  "source": "data/weapons/01_pistol.json",
+  "inherits": "style/pistol",
+  "hands": ["left", "right"],
+  "reviewed": false,
+  "auto_placed": false,
+  "setup": { "item": "pistol", "distance": 0.75 },
+  "anchor": { "pos": [0, 0, 0], "q": [0, 0, 0, 1] },
+  "duration": 1.4,
+  "markers": { "contact": 0.15, "use": 0.67499995, "release": 1.1999999 },
+  "keys": []
+}

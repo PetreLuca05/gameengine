@@ -20,6 +20,10 @@
     "jump_loop": "jump@0.38:0.52",
     "jump_land": "jump@0.6:0.78",
     "jump_land_hard": "jump@0.6:0.85",
-    "hang_idle": "Hanging Idle"
+    "hang_idle": "Hanging Idle",
+    "attack_1": "zombie_swipe@0.0:0.62",
+    "attack_2": "zombie_smash@0.08:0.55",
+    "attack_3": "zombie_lunge@0.08:0.58",
+    "attack_upper": "zombie_punch"
   }
 }

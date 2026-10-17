@@ -36,6 +36,7 @@ Windows, no admin; tools are portable, in `.toolchain/` (git-ignored).
 | FP camera, hold point | CAMERA_HOLDPOINT.md | src/player/{holdpoint,hands,camera_fp}.c |
 | Weapons, recoil, sway | RECOIL.md, ATTACHMENTS.md | src/gameplay/{weapons,recoil,items}.c, data/weapons |
 | Render post / sky / time | RENDERING_POST.md, DAYNIGHT.md | src/render/{post,sky,graph}, game_post.c, game_daynight.c |
+| glTF PBR maps (metal-rough, normal, AO, emissive, MASK, doubleSided) | PBR.md | src/assets/assets.c gltf_material, shaders/pbr_maps.glsl, render.c draw_items (set 3), vg_resolve.glsl; test: tools/gen_pbr_test.py, tools/tests/pbr_shelf.cfg |
 | Engine Fidelity (Off .. Modern, bounds every graphics setting) | ENGINE_FIDELITY.md | assets/render/fidelity, src/render/fidelity, src/game/game_fidelity.c, scr_settings.c; tests: test_fidelity, tools/tests/run_fidelity_tests.py |
 | VFX / flesh | VFX*.md | src/vfx, src/gameplay/flesh_fx.c, assets/vfx |
 | UI | UI.md | src/ui/gui, src/ui/screens, assets/ui |
@@ -47,7 +48,7 @@ Windows, no admin; tools are portable, in `.toolchain/` (git-ignored).
 | Virtualized geometry | VGEO.md, VGEO_PLAN.md | src/render/vgeo, src/render/vk_vgeo.c, shaders/vgeo, tools/{build,bench}_vgeo |
 | no-nanite classic renderer (this branch: vgeo off) | NO_NANITE.md | src/render/vk_classic.c, shaders/classic_*, tools/tests/perf_compare.cfg |
 | Phone (equip = pairing, HUD phone panel, phone OS: portal / home / camera / gallery; the model shows no screen) | PHONE.md | src/gameplay/phone (phone_os.c pure), src/net/http_ws, src/render/phone_view.c, web/phone, assets/phone; tests: test_phone, tools/tests/phone_{flow,ws,screen}.py, phone_e2e.sh, phone_net.sh |
-| Hand poses + editor (`scene handpose`) | HANDPOSE.md | src/anim/handpose.c, src/editor/handpose, src/game/game_scene.c; test: tools/tests/hp_scene.cfg |
+| Hand poses: universal grips + cases, rig editor (`scene handpose`, frozen world) | HANDPOSE.md | src/anim/{handpose,weapon_hold}.c, src/editor/handpose (hp_rig, hp_xform, hp_case, hp_editor), src/game/game_freeze.c, assets/handposes/{items,cases,styles}; tools/handpose_migrate; tests: test_handpose(_rig), test_hp_edit, tools/tests/hp_scene.cfg, hp_gameplay.cfg |
 | Surface textures (terrain, roads, buildings, grass/wheat; `r_surfaces`) | TEXTURES.md | src/render/surface_tex.c, shaders/surfaces.glsl, assets/textures/{surfaces,foliage}, tools/vfxgen/{texgen,foliage_atlas}.py; tests: tools/tests/tex_*.cfg |
 | Main menu, lobby, seasons, cosmetics, profile (`--menu` in `--test` runs) | MENU_LOBBY.md | src/ui/mainmenu, src/net/{lobby,lobby_net}.c, src/world/{maplist,season}.c, src/gameplay/cosmetics.c, src/game/profile.c, assets/{maps,cosmetics}, assets/world/seasons.json; tests: test_lobby, tools/tests/mm_nav.cfg, lobby_lan.sh |
 | Spectating (first-person in-eye, `spectate`) | SPECTATE.md | src/net/spectate{,_core}.c, src/player/spectator.c, game_view_slot (game.c); tests: test_spectate, tools/tests/spec_net.sh |

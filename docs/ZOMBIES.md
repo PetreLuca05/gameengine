@@ -69,6 +69,12 @@ The host tick (`horde_host_tick`, before `chars_host_tick`) runs these phases in
    sideways, which also blocked the attack's facing check). Head and spine track the nearest living
    player within 16 m and 120 deg of the body (`zombie_look` in characters.c, through the aim
    inputs). Host and clients run the same rule from replicated positions, so nothing extra is sent.
+10. **Attack clips:** four Mixamo clips (`assets/human/Zombie Attack*.fbx`, `Zombie Punching*.fbx`,
+   git-ignored like the other FBX): swipe, two-handed smash and lunge play full body on the base
+   layer (trimmed to the strike in `anim_sets/zombie.json`, sped up in `clips.json`); the punch plays on
+   the upper body (`zombie_punch` state) so a zombie that is still walking keeps its legs.
+   `chars_npc_melee` picks one at random, never the same twice in a row (a moving zombie always
+   punches), sends it as the melee event's seed, and returns that clip's contact time for the hit.
 
 `chars_host_tick` then evaluates animation and hitboxes:
 

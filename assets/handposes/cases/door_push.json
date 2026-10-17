@@ -1,0 +1,39 @@
+{
+  "schema": 2,
+  "id": "door_push",
+  "label": "Door: push (closing an open door)",
+  "kind": "interact",
+  "bind": "interactable:door/open",
+  "source": "interactable:door",
+  "inherits": "style/grip_palm",
+  "hands": [
+    "left",
+    "right"
+  ],
+  "reviewed": false,
+  "auto_placed": false,
+  "setup": {
+    "prop": "door",
+    "distance": 0.42
+  },
+  "anchor": {
+    "pos": [
+      0,
+      0,
+      0
+    ],
+    "q": [
+      0,
+      0,
+      0,
+      1
+    ]
+  },
+  "duration": 0.76,
+  "markers": {
+    "contact": 0.16,
+    "use": 0.312,
+    "release": 0.54
+  },
+  "keys": []
+}

@@ -1,0 +1,13 @@
+{
+  "schema": 2,
+  "id": "dmr",
+  "label": "DMR",
+  "category": "weapon",
+  "source": "data/weapons/09_dmr.json",
+  "inherits": "style/rifle",
+  "hands": ["left", "right"],
+  "reviewed": false,
+  "auto_placed": false,
+  "left": {},
+  "right": {}
+}

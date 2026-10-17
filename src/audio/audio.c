@@ -169,7 +169,11 @@ static Loop *loop_get(u32 h, const char *name, float volume, bool spatial) {
     return l;
 }
 
+static float s_ambience_gain = 1.0f;
+void audio_set_ambience_gain(float g) { s_ambience_gain = g < 0 ? 0 : g; }
+
 void audio_loop_set(const char *name, float volume) {
+    volume *= s_ambience_gain;
     if (!audio_available()) return;
     Loop *l = loop_get(dg_hash_str(name), name, volume, false);
     if (!l) return;

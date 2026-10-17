@@ -55,14 +55,16 @@ typedef struct HandsSystem {
     vec3 ov_pos[2];
     quat ov_rot[2];
     u8 ov_grip[2];
-    u32 ov_pose[2];           // hand pose entry + state of the override (docs/HANDPOSE.md)
-    u8 ov_state[2];
+    u32 ov_case[2];           // hand pose case + its timeline time of the override (docs/HANDPOSE.md)
+    float ov_case_t[2];
 
     // interaction animation
     InteractPhase ia_phase;
     EntityId ia_target;
     float ia_t;
     HandMode ia_mode;
+    u32 ia_case;              // the interaction's case (hash, 0 = none: the grip style alone)
+    HandsCaseDrive drive;     // editor: the interaction forced to a case timeline time
     vec3 ia_last_pos[2];
     quat ia_last_rot[2];
 
@@ -388,8 +390,8 @@ void hands_update(const HandsInput *in) {
             // Palm down on the ledge, fingers pointing over the edge.
             H->ov_rot[h] = quat_mul(quat_yaw(in->yaw), quat_axis_angle(v3(1, 0, 0), -0.25f));
             H->ov_grip[h] = GRIP_PALM;
-            H->ov_pose[h] = 0;
-            H->ov_state[h] = HPS_DEFAULT;
+            H->ov_case[h] = handpose_mantle_case();
+            H->ov_case_t[h] = handpose_mantle_case_time(m->mode == MOVE_HANG ? -1.0f : m->m_t);
         }
     }
 
@@ -398,16 +400,16 @@ void hands_update(const HandsInput *in) {
         vec3 sp[2];
         quat sr[2];
         bool use[2];
-        const char *vname = g_vehicle_pose.seat_vehicle ? g_vehicle_pose.seat_vehicle(w, in->player) : NULL;
+        u32 seat_case = handpose_seat_case(w, in->player);
         if (g_vehicle_pose.seat_hands(w, in->player, sp, sr, use))
             for (int h = 0; h < 2; h++) {
                 if (!use[h]) continue;
-                ov_target[h] = 1.0f;
+                ov_target[h] = handpose_seat_case_weight(seat_case);
                 H->ov_pos[h] = sp[h];
                 H->ov_rot[h] = sr[h];
                 H->ov_grip[h] = GRIP_GRAB;
-                H->ov_pose[h] = vname ? handpose_entry_hash(HPC_VEHICLE, vname) : 0;
-                H->ov_state[h] = use[0] && use[1] ? HPS_DRIVE : HPS_DRIVE_ONEHAND;
+                H->ov_case[h] = seat_case;
+                H->ov_case_t[h] = handpose_seat_case_time(seat_case);
                 if (h == HAND_LEFT) weapon_two_handed = false;
             }
     }
@@ -421,6 +423,7 @@ void hands_update(const HandsInput *in) {
             H->ia_target = in->focus;
             H->ia_t = 0;
             H->ia_mode = def->hands;
+            H->ia_case = handpose_interact_case(w, in->focus);
         }
     }
     // The target vanished inside this frame's tick (a pickup): reach for where it was.
@@ -429,28 +432,47 @@ void hands_update(const HandsInput *in) {
         H->ia_target = ENT_NONE;
         H->ia_t = 0;
         H->ia_mode = (HandMode)in->use_target_hands;
+        H->ia_case = handpose_interact_case_name("pickup", false);
         quat palm_down = quat_mul(quat_yaw(in->yaw), quat_axis_angle(v3(1, 0, 0), -1.2f));   // as pickup_hand
         for (int h = 0; h < 2; h++) { H->ia_last_pos[h] = in->use_target; H->ia_last_rot[h] = palm_down; }
+    }
+    // Editor (scene handpose, simulated case): the interaction sits at the timeline time.
+    if (H->drive.active) {
+        H->ia_target = H->drive.target;
+        H->ia_case = H->drive.case_hash;
+        bool dv = ent_valid(w, H->ia_target) && w->inter[ENT_INDEX(H->ia_target)].def;
+        H->ia_mode = dv ? w->inter[ENT_INDEX(H->ia_target)].def->hands : HANDS_RIGHT;
+        if (H->ia_phase == IA_NONE) H->ia_phase = IA_REACH;
     }
     if (H->ia_phase != IA_NONE) {
         H->ia_t += dt;
         bool valid = ent_valid(w, H->ia_target) && w->inter[ENT_INDEX(H->ia_target)].def;
         const InteractDef *def = valid ? w->inter[ENT_INDEX(H->ia_target)].def : NULL;
-        float reach_time = 0.16f;
+        // Reach / return durations come from the case timeline (its contact / release markers).
+        const HandPoseCase *ic = handpose_case_by_hash(H->ia_case);
+        float reach_time = handpose_case_reach_time(ic), return_time = handpose_case_return_time(ic);
         float hold_time = def ? (def->hold_time > 0 ? def->hold_time + 0.25f : 0.38f) : (H->ia_target == ENT_NONE ? 0.12f : 0.0f);
-        if (H->ia_phase == IA_REACH && H->ia_t >= reach_time) { H->ia_phase = IA_HOLD; H->ia_t = 0; }
-        if (H->ia_phase == IA_HOLD) {
-            bool hold_interaction = def && def->hold_time > 0;
-            bool released = hold_interaction && !in->use_held && H->ia_t < def->hold_time;
-            bool gone = !valid && H->ia_target != ENT_NONE;
-            if (gone || released || H->ia_t >= hold_time) { H->ia_phase = IA_RETURN; H->ia_t = 0; }
+        if (H->drive.active) {
+            int ph;
+            float u;
+            handpose_case_phase(ic, H->drive.t, &ph, &u);
+            H->ia_phase = ph == HCP_REACH ? IA_REACH : ph == HCP_HOLD ? IA_HOLD : IA_RETURN;
+            H->ia_t = u * (ph == HCP_REACH ? reach_time : ph == HCP_HOLD ? fmaxf(hold_time, 1e-3f) : return_time);
+        } else {
+            if (H->ia_phase == IA_REACH && H->ia_t >= reach_time) { H->ia_phase = IA_HOLD; H->ia_t = 0; }
+            if (H->ia_phase == IA_HOLD) {
+                bool hold_interaction = def && def->hold_time > 0;
+                bool released = hold_interaction && !in->use_held && H->ia_t < def->hold_time;
+                bool gone = !valid && H->ia_target != ENT_NONE;
+                if (gone || released || H->ia_t >= hold_time) { H->ia_phase = IA_RETURN; H->ia_t = 0; }
+            }
+            if (H->ia_phase == IA_RETURN && H->ia_t >= return_time) H->ia_phase = IA_NONE;
         }
-        if (H->ia_phase == IA_RETURN && H->ia_t >= 0.22f) H->ia_phase = IA_NONE;
 
-        float wgt = 0;
-        if (H->ia_phase == IA_REACH) wgt = smoothstepf(0, 1, H->ia_t / reach_time);
-        else if (H->ia_phase == IA_HOLD) wgt = 1;
-        else if (H->ia_phase == IA_RETURN) wgt = 1.0f - smoothstepf(0, 1, H->ia_t / 0.22f);
+        float wgt = 0, case_t = 0;
+        if (H->ia_phase == IA_REACH) { wgt = smoothstepf(0, 1, H->ia_t / reach_time); case_t = handpose_case_time(ic, HCP_REACH, H->ia_t / reach_time); }
+        else if (H->ia_phase == IA_HOLD) { wgt = 1; case_t = handpose_case_time(ic, HCP_HOLD, H->ia_t / fmaxf(hold_time, 1e-3f)); }
+        else if (H->ia_phase == IA_RETURN) { wgt = 1.0f - smoothstepf(0, 1, H->ia_t / return_time); case_t = handpose_case_time(ic, HCP_RETURN, H->ia_t / return_time); }
         // Holding something: the free (left) hand does the interaction / pickup, the item stays.
         bool holding = H->weapon || H->held_item;
         int free_hand = holding ? HAND_LEFT : HAND_RIGHT;
@@ -469,14 +491,15 @@ void hands_update(const HandsInput *in) {
                 H->ov_pos[h] = H->ia_last_pos[h];
                 H->ov_rot[h] = H->ia_last_rot[h];
                 H->ov_grip[h] = H->ia_mode == HANDS_POINT ? GRIP_POINT : GRIP_GRAB;
-                H->ov_pose[h] = def ? handpose_entry_hash(HPC_INTERACT, def->name) : 0;
-                H->ov_state[h] = def && def->hold_time > 0 ? HPS_HOLD : HPS_USE;
+                H->ov_case[h] = H->ia_case;
+                H->ov_case_t[h] = case_t;
             }
             // A one-handed interaction releases the weapon support grip.
             if (h == free_hand && weapon_two_handed && wgt > 0) weapon_two_handed = false;
         }
     }
     for (int h = 0; h < 2; h++) {
+        if (H->drive.active) H->ov_w[h] = ov_target[h];   // the editor's timeline: no follow lag (deterministic scrubbing)
         H->ov_w[h] = ov_target[h] > H->ov_w[h] ? approachf(H->ov_w[h], ov_target[h], dt * 12.0f) : approachf(H->ov_w[h], ov_target[h], dt * 6.0f);
         if (H->ov_w[h] > 0.001f) {
             float t = smoothstepf(0, 1, H->ov_w[h]);
@@ -518,8 +541,8 @@ void hands_update(const HandsInput *in) {
             t->palm[h] = hand;
             t->ov_palm[h] = xf_make(H->ov_pos[h], H->ov_rot[h]);
             t->ov_w[h] = smoothstepf(0, 1, H->ov_w[h]);
-            t->ov_pose[h] = H->ov_pose[h];
-            t->ov_state[h] = H->ov_state[h];
+            t->ov_case[h] = H->ov_case[h];
+            t->ov_case_t[h] = H->ov_case_t[h];
             t->grip[h] = H->chain[h].grip;
             Xform sock;
             bool use = false;
@@ -550,6 +573,8 @@ void hands_update(const HandsInput *in) {
 // ------------------------------------------------------------------ rendering
 
 static u32 s_world_item_flags = MAT_NO_SHADOW;   // flags for third-person held items (hands_draw_held)
+static float s_draw_scale = 1.0f;                // held item scale (the grip root's calibration, docs/HANDPOSE.md)
+static float s_fp_scale = 1.0f;                  // the same for the first-person item this frame
 
 static void draw_box(vec3 center, quat rot, vec3 half, vec4 color, bool viewmodel) {
     DrawItem d;
@@ -623,15 +648,16 @@ static void draw_arm(const ArmChain *c, int hand, quat cam_rot, bool viewmodel) 
 // wd: an effective weapon (attach_weapon_effective): its parts without the hidden ones, plus every
 // applied attachment's parts placed on its slot.
 static void draw_weapon(const WeaponDef *wd, vec3 pos, quat rot, bool viewmodel) {
+    float k = s_draw_scale > 0 ? s_draw_scale : 1.0f;
     for (int i = 0; i < wd->part_count; i++) {
         const WeaponModelPart *p = &wd->parts[i];
-        draw_box(v3_add(pos, quat_rotate(rot, p->offset)), rot, p->half, p->color, viewmodel);
+        draw_box(v3_add(pos, quat_rotate(rot, v3_scale(p->offset, k))), rot, v3_scale(p->half, k), p->color, viewmodel);
     }
     if (!H->db) return;
     AttachDrawPart parts[ATT_SLOTS * ATT_MAX_PARTS];
     int n = attach_draw_parts(H->db, wd, wd->att_applied, parts, ARRAY_COUNT(parts));
     for (int i = 0; i < n; i++)
-        draw_box(v3_add(pos, quat_rotate(rot, parts[i].center)), quat_mul(rot, parts[i].rot), parts[i].half, parts[i].color, viewmodel);
+        draw_box(v3_add(pos, quat_rotate(rot, v3_scale(parts[i].center, k))), quat_mul(rot, parts[i].rot), v3_scale(parts[i].half, k), parts[i].color, viewmodel);
 }
 
 static void draw_held_item(const ItemDef *it, vec3 pos, quat rot, bool viewmodel) {
@@ -642,8 +668,12 @@ static void draw_held_item(const ItemDef *it, vec3 pos, quat rot, bool viewmodel
     // Pickup sizes are world-scale; held items are palm-sized (item_held_box, also the ground model).
     vec3 center, half;
     item_held_box(it, &center, &half);
-    draw_box(v3_add(pos, quat_rotate(rot, center)), rot, half, it->color, viewmodel);
+    float k = s_draw_scale > 0 ? s_draw_scale : 1.0f;
+    draw_box(v3_add(pos, quat_rotate(rot, v3_scale(center, k))), rot, v3_scale(half, k), it->color, viewmodel);
 }
+
+void hands_set_draw_scale(float s) { s_draw_scale = s > 0 ? s : 1.0f; }
+void hands_fp_set_item_scale(float s) { s_fp_scale = s > 0 ? s : 1.0f; }
 
 bool hands_muzzle(vec3 *pos, vec3 *fwd) {
     if (!H || !H->initialized || !H->weapon || H->weapon->kind == WPN_MELEE) return false;
@@ -681,6 +711,14 @@ void hands_vm_kick(vec3 *pos, vec3 *rot) {
     *rot = H ? H->kick_rot : v3(0, 0, 0);
 }
 
+void hands_case_drive(const HandsCaseDrive *d) {
+    if (!H) return;
+    bool was = H->drive.active;
+    if (d) H->drive = *d;
+    else memset(&H->drive, 0, sizeof(H->drive));
+    if (was && !H->drive.active) H->ia_phase = IA_NONE;
+}
+
 void hands_fp_set_item(vec3 pos, quat rot) {
     if (!H) return;
     H->weapon_pos = pos;
@@ -702,8 +740,11 @@ void hands_render(void) {
     if (!H->body_arms)
         for (int h = 0; h < 2; h++) draw_arm(&H->chain[h], h, H->cam_rot, true);
     H->body_arms = false;
+    s_draw_scale = s_fp_scale;
     if (H->weapon) draw_weapon(H->weapon, H->weapon_pos, H->weapon_rot, true);
     else if (H->held_item && H->held_item->kind != ITEM_WEAPON) draw_held_item(H->held_item, H->weapon_pos, H->weapon_rot, true);
+    s_draw_scale = 1.0f;
+    s_fp_scale = 1.0f;
 }
 
 void hands_draw_held(const WeaponDef *wd, const ItemDef *it, vec3 pos, quat rot, u32 flags) {

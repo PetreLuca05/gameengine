@@ -1,0 +1,39 @@
+{
+  "schema": 2,
+  "id": "pickup_ground",
+  "label": "Pickup from the ground",
+  "kind": "interact",
+  "bind": "interactable:pickup",
+  "source": "interactable:pickup",
+  "inherits": "style/grip_grab",
+  "hands": [
+    "left",
+    "right"
+  ],
+  "reviewed": false,
+  "auto_placed": false,
+  "setup": {
+    "prop": "pickup",
+    "distance": 0.35
+  },
+  "anchor": {
+    "pos": [
+      0,
+      0,
+      0
+    ],
+    "q": [
+      0,
+      0,
+      0,
+      1
+    ]
+  },
+  "duration": 0.76,
+  "markers": {
+    "contact": 0.16,
+    "use": 0.312,
+    "release": 0.54
+  },
+  "keys": []
+}

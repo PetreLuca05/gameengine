@@ -306,6 +306,8 @@ void game_sim_player(World *w, int slot, const UserCmd *cmd, float dt, bool firs
 
 static void host_tick(World *w, const UserCmd *local_cmd) {
     world_store_prev(w);
+    // Frozen world (the hand pose editor): only the players (and their animation) run.
+    bool frozen = game_world_frozen();
     daynight_host_tick(w);
     weather_host_tick(w);
     for (int s = 0; s < MAX_PLAYERS; s++) {
@@ -338,17 +340,21 @@ static void host_tick(World *w, const UserCmd *local_cmd) {
         if (p->sim.move.pos.y < -60.0f && p->sim.move.mode != MOVE_NOCLIP) game_respawn_player(w, s);
     }
     spectate_host_tick(w);   // observers: targets still legal, auto-advance
-    entities_tick(w, SIM_DT);
-    projectiles_tick(w, SIM_DT);
-    horde_host_tick(w, SIM_DT);   // horde zombies: tiers, steering, mover, attacks (before their animation)
+    if (!frozen) {
+        entities_tick(w, SIM_DT);
+        projectiles_tick(w, SIM_DT);
+        horde_host_tick(w, SIM_DT);   // horde zombies: tiers, steering, mover, attacks (before their animation)
+    }
     chars_host_tick(w, SIM_DT);   // sim-only animation -> per-part hitboxes (before the lag-comp record)
-    horde_post_tick(w);
+    if (!frozen) horde_post_tick(w);
     if (w->chunks) chunks_update(w, SIM_DT);
-    openworld_tick(w, SIM_DT);   // open-world maps: deep water, POI zombie spawner
-    vehicles_host_tick(w);
-    phys_step(w->phys, SIM_DT);
-    vehicles_host_post(w);
-    vehicles_test_tick(w);
+    if (!frozen) {
+        openworld_tick(w, SIM_DT);   // open-world maps: deep water, POI zombie spawner
+        vehicles_host_tick(w);
+        phys_step(w->phys, SIM_DT);
+        vehicles_host_post(w);
+        vehicles_test_tick(w);
+    }
     // Props moved by physics: pull their new transforms.
     ENT_FOREACH(w, i) {
         if (w->type[i] == ET_PROP) ent_sync_from_body(w, ENT_MAKE(i, w->gen[i]));

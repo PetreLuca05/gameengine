@@ -435,8 +435,41 @@ void weather_level_loaded(World *w, const char *map) {
     bake_puddles(w, map);
 }
 
+// Frozen world (scene handpose): the weather holds its current values (or a clear sky), the
+// scheduler and the surface integration stop; unfreezing restores the state, the transition
+// resuming where it stopped.
+void weather_freeze(World *w, bool on, bool neutral) {
+    static WeatherState saved;
+    static u32 tick0;
+    static bool frozen;
+    if (!w || !w->authority) return;
+    if (on && !frozen) {
+        ensure_lib();
+        saved = w->weather;
+        tick0 = w->tick;
+        frozen = true;
+        if (!w->weather.version) return;
+        if (neutral) set_preset(w, "clear", 0.0f);
+        else {
+            WeatherParams cur;
+            weather_eval(&w->weather, w->tick, SIM_DT, &cur);
+            weather_set_target(&w->weather, &cur, w->tick, 0.0f);
+        }
+        w->weather.random = 0;
+    } else if (!on && frozen) {
+        frozen = false;
+        u32 dt = w->tick - tick0;
+        saved.start_tick += dt;
+        if (saved.next_change_tick) saved.next_change_tick += dt;
+        u16 v = w->weather.version;
+        w->weather = saved;
+        w->weather.version = (u16)(v + 1);
+    }
+}
+
 void weather_host_tick(World *w) {
     if (!w || !w->authority || !w->weather.version) return;
+    if (game_world_frozen()) return;
     ensure_lib();
     weather_schedule(&w->weather, &WX.lib, w->tick, SIM_DT);
     WeatherParams cur;

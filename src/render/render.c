@@ -216,6 +216,8 @@ bool render_init(SDL_Window *window) {
 
     u32 white = 0xFFFFFFFFu;
     R->white_tex = render_texture_create(1, 1, &white, false, false);
+    u32 flat = 0xFFFF8080u;   // tangent-space (0, 0, 1)
+    R->flat_normal_tex = render_texture_create(1, 1, &flat, false, false);
     R->text_atlas = R->white_tex;
 
     RenderEnvironment env = { 0 };
@@ -586,7 +588,22 @@ static void draw_precip(VkCommandBuffer cmd, VkDescriptorSet frame_set);
 static u32 g_shadow_cascade;   // shadow pass: the cascade being drawn (push constants flags.w)
 static float g_shadow_min_radius;   // sun cascades: smaller casters skipped (r_shadow_min_radius)
 
-static void draw_items(VkCommandBuffer cmd, DrawItem *items, u32 count, bool shadow_pass, bool cull, int alpha_mode) {
+// glTF materials (docs/PBR.md): the doubleSided / alphaMode MASK variant of the pass pipeline `base`.
+static PipelineId item_pipe(PipelineId base, u32 flags) {
+    if (base == PIPE_LIT) return (flags & MAT_ALPHA_MASK) ? PIPE_LIT_MASK : (flags & MAT_TWO_SIDED) ? PIPE_LIT_2S : PIPE_LIT;
+    if (base == PIPE_PREPASS) return (flags & MAT_ALPHA_MASK) ? PIPE_PREPASS_MASK : (flags & MAT_TWO_SIDED) ? PIPE_PREPASS_2S : PIPE_PREPASS;
+    return base;
+}
+
+static u32 f32_bits(float f) {
+    u32 u;
+    memcpy(&u, &f, 4);
+    return u;
+}
+
+// pipe: the pipeline the caller bound (glTF materials switch to its variants and back), shadow passes
+// ignore it.
+static void draw_items(VkCommandBuffer cmd, DrawItem *items, u32 count, bool shadow_pass, bool cull, int alpha_mode, PipelineId pipe) {
     // alpha_mode: 0 = opaque only, 1 = blended only, 2 = all
     if (!count) return;
     ArenaMark mark = arena_mark(&g_engine.frame_arena);
@@ -595,7 +612,7 @@ static void draw_items(VkCommandBuffer cmd, DrawItem *items, u32 count, bool sha
     for (u32 i = 0; i < count; i++) {
         DrawItem *d = &items[i];
         if (!R->meshes[d->mesh].used) continue;
-        bool blended = d->mat.color.w < 0.999f;
+        bool blended = d->mat.color.w < 0.999f && !(d->mat.flags & MAT_ALPHA_MASK);
         if (alpha_mode == 0 && blended) continue;
         if (alpha_mode == 1 && !blended) continue;
         if (shadow_pass && (d->mat.flags & MAT_NO_SHADOW)) continue;
@@ -611,21 +628,35 @@ static void draw_items(VkCommandBuffer cmd, DrawItem *items, u32 count, bool sha
             if (!sphere_visible(R->frustum, c, r)) { R->stats.culled++; continue; }
         }
         TextureId tex = (d->mat.flags & MAT_TEXTURED) && d->mat.texture ? d->mat.texture : R->white_tex;
-        keys[n].key = shadow_pass ? (u64)d->mesh : (((u64)tex << 32) | d->mesh);
+        // pipeline variant (2 bits) | glTF map set (9) | albedo texture (10) | mesh (32)
+        u64 variant = (u64)(item_pipe(pipe, d->mat.flags) != pipe) + (u64)((d->mat.flags & MAT_ALPHA_MASK) != 0);
+        u64 ms = shadow_pass ? 0 : vkr_material_set(&d->mat);
+        keys[n].key = shadow_pass ? (u64)d->mesh : ((variant << 51) | (ms << 42) | ((u64)tex << 32) | d->mesh);
         keys[n].index = i;
         n++;
     }
     qsort(keys, n, sizeof(SortKey), cmp_sortkey);
-    u32 bound_mesh = 0, bound_tex = 0;
+    u32 bound_mesh = 0, bound_tex = 0, bound_ms = ~0u;
+    PipelineId bound_pipe = pipe;
     for (u32 k = 0; k < n; k++) {
         DrawItem *d = &items[keys[k].index];
         GpuMesh *m = &R->meshes[d->mesh];
         if (!shadow_pass) {
+            PipelineId p = item_pipe(pipe, d->mat.flags);
+            if (p != bound_pipe) {
+                vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[p]);
+                bound_pipe = p;
+            }
             TextureId tex = (d->mat.flags & MAT_TEXTURED) && d->mat.texture ? d->mat.texture : R->white_tex;
             if (!R->textures[tex].used || !R->textures[tex].ready) tex = R->white_tex;
             if (tex != bound_tex) {
                 vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 1, 1, &R->textures[tex].set, 0, NULL);
                 bound_tex = tex;
+            }
+            u32 ms = (u32)((keys[k].key >> 42) & 511u);
+            if (ms != bound_ms) {
+                vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 3, 1, &R->mat_sets[ms].set, 0, NULL);
+                bound_ms = ms;
             }
         }
         if (d->mesh != bound_mesh) {
@@ -642,11 +673,16 @@ static void draw_items(VkCommandBuffer cmd, DrawItem *items, u32 count, bool sha
         pc.flags[1] = shadow_pass ? 0 : d->prev_slot;   // previous model (velocity), 0 = static
         pc.flags[2] = g_froxel_fog_draws ? 1u : 0u;      // blended draws after the fog pass: froxel fog
         pc.flags[3] = shadow_pass ? g_shadow_cascade : 0;
+        pc.pbr[0] = f32_bits(d->mat.normal_scale);
+        pc.pbr[1] = f32_bits(d->mat.occlusion_strength);
+        pc.pbr[2] = d->mat.emissive_rgb;
+        pc.pbr[3] = f32_bits(d->mat.alpha_cutoff);
         vkCmdPushConstants(cmd, R->layout_lit, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushLit), &pc);
         vkCmdDrawIndexed(cmd, m->index_count, 1, 0, 0, 0);
         R->stats.draw_calls++;
         R->stats.triangles += m->index_count / 3;
     }
+    if (bound_pipe != pipe) vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[pipe]);
     arena_pop_to(mark);
 }
 
@@ -875,6 +911,7 @@ static void draw_cpu_skinned(VkCommandBuffer cmd, FrameResources *f, const CpuSk
         pc.flags[0] = d->flags & ~(u32)MAT_SHADOW_ONLY;
         pc.flags[1] = pc.flags[2] = 0;
         pc.flags[3] = pass == 1 ? g_shadow_cascade : 0;
+        memset(pc.pbr, 0, sizeof(pc.pbr));
         vkCmdPushConstants(cmd, R->layout_lit, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushLit), &pc);
         vkCmdDrawIndexed(cmd, m->index_count, 1, 0, 0, 0);
         R->stats.draw_calls++;
@@ -1194,6 +1231,9 @@ static void draw_skinned(VkCommandBuffer cmd, int pass, PipelineId gpu_pipe, Pip
     if (F.cpu_skinned) {
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[cpu_pipe]);
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 1, 1, &R->textures[R->white_tex].set, 0, NULL);
+        Material none;
+        memset(&none, 0, sizeof(none));
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 3, 1, &R->mat_sets[vkr_material_set(&none)].set, 0, NULL);   // lit.frag: no glTF maps
         draw_cpu_skinned(cmd, F.f, F.cpu_skinned, pass);
     } else if (sp->batch_count) {
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[gpu_pipe]);
@@ -1211,7 +1251,7 @@ static void exec_prepass(VkCommandBuffer cmd, void *u) {
     post_push_lit_inputs(cmd, NULL, false);
     vkg_draw_gbuffer(cmd);   // vgeo surfaces first (depth export), the legacy draws test against them
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_PREPASS]);
-    draw_items(cmd, R->draws, R->draw_count, false, R->r_culling->i != 0, 0);
+    draw_items(cmd, R->draws, R->draw_count, false, R->r_culling->i != 0, 0, PIPE_PREPASS);
     vkc_draw_gbuffer(cmd);   // classic instanced vgeo content (no-nanite)
     draw_skinned(cmd, 0, PIPE_PREPASS_SKIN, PIPE_PREPASS, F.skin_main);
     vkCmdEndRendering(cmd);
@@ -1238,7 +1278,7 @@ static void exec_vgeo_occluders(VkCommandBuffer cmd, void *u) {
         item_bounds(d, &c, &r);
         if (r >= 2.0f) occ[n++] = *d;
     }
-    draw_items(cmd, occ, n, false, true, 0);
+    draw_items(cmd, occ, n, false, true, 0, PIPE_PREPASS);
     arena_pop_to(mark);
     vkCmdEndRendering(cmd);
 }
@@ -1250,7 +1290,7 @@ static void exec_opaque(VkCommandBuffer cmd, void *u) {
     bind_frame(cmd);
     post_push_lit_inputs(cmd, &F.lit, false);
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[R->r_wireframe->i ? PIPE_LIT_WIRE : PIPE_LIT]);
-    draw_items(cmd, R->draws, R->draw_count, false, R->r_culling->i != 0, 0);
+    draw_items(cmd, R->draws, R->draw_count, false, R->r_culling->i != 0, 0, R->r_wireframe->i ? PIPE_LIT_WIRE : PIPE_LIT);
     vkc_draw_lit(cmd);   // classic instanced vgeo content (depth EQUAL to its prepass)
     vkg_draw_lit(cmd);   // vgeo pixels (depth equal to the exported depth)
     vkCmdEndRendering(cmd);
@@ -1295,7 +1335,7 @@ static void exec_transparent(VkCommandBuffer cmd, void *u) {
     post_push_lit_inputs(cmd, NULL, true);
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_LIT_BLEND]);
     g_froxel_fog_draws = true;
-    draw_items(cmd, R->draws, R->draw_count, false, R->r_culling->i != 0, 1);
+    draw_items(cmd, R->draws, R->draw_count, false, R->r_culling->i != 0, 1, PIPE_LIT_BLEND);
     g_froxel_fog_draws = false;
     if (R->line_count[0] && F.line_off[0] != (VkDeviceSize)-1) {
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_LINES]);
@@ -1379,7 +1419,7 @@ static void exec_vm_prepass(VkCommandBuffer cmd, void *u) {
         bind_frame(cmd);
         post_push_lit_inputs(cmd, NULL, false);
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_PREPASS]);
-        draw_items(cmd, R->vm_draws, R->vm_draw_count, false, false, 2);
+        draw_items(cmd, R->vm_draws, R->vm_draw_count, false, false, 2, PIPE_PREPASS);
         draw_skinned(cmd, 2, PIPE_PREPASS_SKIN, PIPE_PREPASS, F.skin_vm);
     }
     vkCmdEndRendering(cmd);
@@ -1393,7 +1433,7 @@ static void exec_viewmodel(VkCommandBuffer cmd, void *u) {
     post_push_lit_inputs(cmd, NULL, false);
     if ((R->vm_draw_count || F.any_skin_vm) && !R->sight.hide_viewmodel) {
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[R->r_wireframe->i ? PIPE_LIT_WIRE : PIPE_LIT]);
-        draw_items(cmd, R->vm_draws, R->vm_draw_count, false, false, 2);
+        draw_items(cmd, R->vm_draws, R->vm_draw_count, false, false, 2, R->r_wireframe->i ? PIPE_LIT_WIRE : PIPE_LIT);
         // First-person arms (body model), same depth as the viewmodel weapon.
         draw_skinned(cmd, 2, R->r_wireframe->i ? PIPE_SKIN_WIRE : PIPE_SKIN, R->r_wireframe->i ? PIPE_LIT_WIRE : PIPE_LIT, F.skin_vm);
     }
@@ -1443,7 +1483,7 @@ static void exec_scope_pip(VkCommandBuffer cmd, void *u) {
     vec4 saved[6];
     memcpy(saved, R->frustum, sizeof(saved));
     memcpy(R->frustum, F.pip_frustum, sizeof(saved));
-    draw_items(cmd, R->draws, R->draw_count, false, true, 0);
+    draw_items(cmd, R->draws, R->draw_count, false, true, 0, PIPE_LIT);
     memcpy(R->frustum, saved, sizeof(saved));
     draw_skinned(cmd, 0, PIPE_SKIN, PIPE_LIT, F.skin_main);
     vkCmdEndRendering(cmd);
@@ -1519,7 +1559,7 @@ static void exec_alt_scene(VkCommandBuffer cmd, void *u) {
     vec4 saved[6];
     memcpy(saved, R->frustum, sizeof(saved));
     memcpy(R->frustum, a->frustum, sizeof(saved));
-    draw_items(cmd, R->draws, R->draw_count, false, true, 0);
+    draw_items(cmd, R->draws, R->draw_count, false, true, 0, PIPE_LIT);
     memcpy(R->frustum, saved, sizeof(saved));
     draw_skinned(cmd, 3, PIPE_SKIN, PIPE_LIT, F.skin_phone);
     vkx_draw_particles_pip(cmd, set);
@@ -1940,7 +1980,7 @@ void render_end_frame(void) {
                 vkCmdSetDepthBias(cmd, 1.25f, 0.0f, 1.75f);
                 vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 0, 1, &f->frame_set, 0, NULL);
                 g_shadow_cascade = (u32)k;
-                draw_items(cmd, R->draws, R->draw_count, true, false, 0);
+                draw_items(cmd, R->draws, R->draw_count, true, false, 0, PIPE_SHADOW);
                 vkg_draw_shadow(cmd, (u32)k);
                 vkc_draw_shadow(cmd, (u32)k);
                 vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_SHADOW]);
@@ -1997,7 +2037,7 @@ void render_end_frame(void) {
         vkCmdSetDepthBias(cmd, 0.0f, 0.0f, 0.0f);
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 0, 1, &f->frame_set, 0, NULL);
         g_shadow_cascade = 3;
-        draw_items(cmd, R->draws, R->draw_count, true, false, 0);
+        draw_items(cmd, R->draws, R->draw_count, true, false, 0, PIPE_SHADOW);
         g_shadow_cascade = 0;
         vkCmdEndRendering(cmd);
         vkr_image_barrier(cmd, R->occl.image, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,

@@ -134,15 +134,6 @@ void surf_terrain(vec3 p, inout vec3 n, inout vec4 base, float variation, out fl
     rough = r / wsum;
 }
 
-// Cotangent frame of the mesh uv (no tangent attribute): T along +u, B along +v.
-mat3 surf_cotangent(vec3 N, vec3 dpx, vec3 dpy, vec2 dux, vec2 duy) {
-    vec3 dp2perp = cross(dpy, N), dp1perp = cross(N, dpx);
-    vec3 T = dp2perp * dux.x + dp1perp * duy.x;
-    vec3 B = dp2perp * dux.y + dp1perp * duy.y;
-    float invmax = inversesqrt(max(max(dot(T, T), dot(B, B)), 1e-20));
-    return mat3(T * invmax, B * invmax, N);
-}
-
 // Layered prim: uv in metres (u along the face, v up the face), the layer in the vertex alpha,
 // the vertex colour as the paint / material colour (the texture modulates around its mean).
 void surf_layered(vec3 p, vec2 uv_m, vec4 vcol, inout vec3 n, inout vec4 base, out float rough) {
@@ -157,7 +148,7 @@ void surf_layered(vec3 p, vec2 uv_m, vec4 vcol, inout vec3 n, inout vec4 base, o
     SurfTap t = surf_tap(float(layer), uv, gx, gy, 0.0);
     vec3 ratio = clamp(t.alb / surf_mean(float(layer)), vec3(0.0), vec3(3.0));
     base.rgb *= ratio;
-    mat3 tbn = surf_cotangent(n, dpx, dpy, vec2(dux.x, -dux.y), vec2(duy.x, -duy.y));
+    mat3 tbn = cotangent_frame(n, dpx, dpy, vec2(dux.x, -dux.y), vec2(duy.x, -duy.y));
     vec3 pn = tbn * vec3(t.nt.x, -t.nt.y, t.nt.z);   // image up (+g) = -v of the flipped uv
     if (dot(pn, pn) > 1e-8) n = normalize(pn);
     rough = t.rough;

@@ -1,0 +1,17 @@
+{
+  "schema": 2,
+  "id": "reload_dmr",
+  "label": "Reload: DMR",
+  "kind": "reload",
+  "bind": "reload:dmr",
+  "source": "data/weapons/09_dmr.json",
+  "inherits": "style/rifle",
+  "hands": ["left", "right"],
+  "reviewed": false,
+  "auto_placed": false,
+  "setup": { "item": "dmr", "distance": 0.75 },
+  "anchor": { "pos": [0, 0, 0], "q": [0, 0, 0, 1] },
+  "duration": 2.4,
+  "markers": { "contact": 0.15, "use": 1.1750001, "release": 2.2 },
+  "keys": []
+}

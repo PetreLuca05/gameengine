@@ -1,0 +1,40 @@
+{
+  "schema": 2,
+  "id": "vehicle_passenger",
+  "label": "Vehicle: passenger",
+  "kind": "vehicle",
+  "bind": "vehicle:passenger",
+  "source": "assets/vehicles",
+  "inherits": "style/grip_relaxed",
+  "hands": [
+    "left",
+    "right"
+  ],
+  "reviewed": false,
+  "auto_placed": false,
+  "setup": {
+    "vehicle": "car",
+    "seat": 1,
+    "distance": 0.75
+  },
+  "anchor": {
+    "pos": [
+      0,
+      0,
+      0
+    ],
+    "q": [
+      0,
+      0,
+      0,
+      1
+    ]
+  },
+  "duration": 0.76,
+  "markers": {
+    "contact": 0.16,
+    "use": 0.312,
+    "release": 0.54
+  },
+  "keys": []
+}

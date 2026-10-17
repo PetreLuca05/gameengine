@@ -1,0 +1,13 @@
+{
+  "schema": 2,
+  "id": "shotgun",
+  "label": "Shotgun",
+  "category": "weapon",
+  "source": "data/weapons/03_shotgun.json",
+  "inherits": "style/shotgun",
+  "hands": ["left", "right"],
+  "reviewed": false,
+  "auto_placed": false,
+  "left": {},
+  "right": {}
+}

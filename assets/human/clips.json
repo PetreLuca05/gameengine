@@ -53,6 +53,25 @@
     },
     "Hanging Idle": {
       "loop": true
+    },
+    "Zombie Attack (1)": {
+      "name": "zombie_swipe",
+      "loop": false,
+      "speed": 1.15
+    },
+    "Zombie Attack": {
+      "name": "zombie_smash",
+      "loop": false,
+      "speed": 1.5
+    },
+    "Zombie Punching (1)": {
+      "name": "zombie_lunge",
+      "loop": false,
+      "speed": 1.35
+    },
+    "Zombie Punching": {
+      "name": "zombie_punch",
+      "loop": false
     }
   }
 }

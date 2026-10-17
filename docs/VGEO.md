@@ -320,6 +320,10 @@ opaque         legacy forward lighting, then the vgeo lit resolve (vgeo_lit.frag
   roughness, metallic, emissive, flags. Textures are not bound yet (bindless table with Phase 5 glTF content:
   `MAT_TEXTURED` is masked off).
 - Velocity: current / previous unjittered view-projection of the reconstructed position (static instances).
+- Empty pixels `discard`, which is `OpDemoteToHelperInvocation` with the Vulkan 1.3 shader target: the lane
+  runs on as a helper (derivatives), so `vg_resolve_pixel` defines every input first (`vg_resolve_defaults`:
+  no flags, texture index 0). Undefined flags / indices there sampled the texture table out of range and lost
+  the device (docs/PBR.md "Robustness").
 - The vgeo pipelines use the renderer's sets 0-2 and push range (compatible with `layout_lit`) plus the vgeo
   set as set 3 (`VG_SET 3`, `VG_NO_PUSH`).
 
@@ -845,7 +849,7 @@ both rasterisers, the shadows and streaming are the core's. The content is the i
 ("Tree models") plus procedural grass tufts and wheat; procedural test types exercise the GPU paths.
 The wind that moves all of it is docs/FOLIAGE_WIND.md.
 
-### Materials (`VgMaterial`, 128 B)
+### Materials (`VgMaterial`, 144 B)
 
 | Field | Meaning |
 |---|---|
@@ -854,6 +858,7 @@ The wind that moves all of it is docs/FOLIAGE_WIND.md.
 | `wpo`, `wpo_params[4]`, `wind_params[8]`, `wpo_max` | vegetation wind preset (`WPO_GRASS`, `WPO_BUSH`, `WPO_TREE`, `\| WPO_DISPLACE`), its parameters (docs/FOLIAGE_WIND.md), declared bound (the commit computes it with `vgeo_wpo_max`) |
 | `fade_start`, `fade_end` | distance fade of `VGM_FOLIAGE` instances (m) |
 | `shadow_max_dist` | no sun-cascade shadow beyond this distance from the camera (m, 0 = always) |
+| `mr_tex`, `normal_tex`, `occlusion_tex`, `emissive_tex`, `normal_scale`, `occlusion_strength`, `emissive_rgb` | glTF maps (docs/PBR.md): texture table indices (0 = none, with the `MAT_*_TEX` flags), the resolve shades them with the triangle's tangent frame |
 
 At commit every mesh gets its foliage fields from its materials (`VgMesh` 80 B: `max_wpo`, fades, shadow distance,
 `fflags`, impostor atlas). Model meshes take them from a `"foliage": {...}` block in `data/assets.json`

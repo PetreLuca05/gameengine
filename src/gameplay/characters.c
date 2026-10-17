@@ -12,6 +12,7 @@
 #include "render/render.h"
 #include "render/debug_draw.h"
 #include "player/hands.h"
+#include "editor/handpose/hp_system.h"
 #include "anim/procedural_internal.h"
 #include "cJSON.h"
 #include "core/platform.h"
@@ -875,6 +876,7 @@ static void sim_range(void *u, int begin, int end) {
 static int g_host_evals;
 static float g_host_ms;
 void chars_host_stats(int *evaluated, float *ms) { if (evaluated) *evaluated = g_host_evals; if (ms) *ms = g_host_ms; }
+bool g_chars_frozen;
 
 void chars_host_tick(World *w, float dt) {
     if (!w->chars || !LIB) return;
@@ -887,6 +889,7 @@ void chars_host_tick(World *w, float dt) {
         CharacterInst *c = w->chars->c[k];
         if (!c || !ent_valid(w, c->ent)) continue;
         int i = (int)ENT_INDEX(c->ent);
+        if (g_chars_frozen && !c->is_player) continue;   // frozen world (hand pose editor): NPCs hold still
         if (c->horde) {
             int iv = DG_MAX(1, c->sim_interval);
             sim_pre(w, c, i);
@@ -990,6 +993,8 @@ static void client_one(World *w, CharacterInst *c, int i, double rt, float dt) {
         in.speed = c->cl_speed;
         in.move_local = c->cl_speed > 0.05f ? v2(0, 1) : v2(0, 0);
         in.body_yaw = in.aim_yaw = quat_get_yaw(w->xf[i].rot);
+        if (c->cl_attack_t > 0) c->cl_attack_t -= dt;
+        in.attacking = c->cl_attack_t > 0;
         zombie_look(w, c, i, &in, dt);
     }
     c->body_yaw = in.body_yaw;
@@ -1139,7 +1144,13 @@ static void apply_event(World *w, const AnimEvent *e) {
     case AEV_LAND: if (remote) { ctrl_set(&c->rt.ctrl, AP_VERTICAL_VEL, -(float)e->extra / 8.0f); charrt_trigger(&c->rt, AP_T_LAND); } break;
     case AEV_RELOAD: if (remote) charrt_trigger(&c->rt, AP_T_RELOAD); break;
     case AEV_EQUIP: if (remote) charrt_trigger(&c->rt, AP_T_EQUIP); break;
-    case AEV_MELEE: if (remote) charrt_trigger(&c->rt, AP_T_MELEE); break;
+    case AEV_MELEE:
+        if (remote) {
+            ctrl_set(&c->rt.ctrl, AP_SEED, (float)e->seed);   // the host's attack variant (zombies)
+            if (w->type[ENT_INDEX(c->ent)] == ET_ZOMBIE) c->cl_attack_t = ZOMBIE_ATTACK_TIME;
+            charrt_trigger(&c->rt, AP_T_MELEE);
+        }
+        break;
     case AEV_FIRE:
         if (remote) charrt_trigger(&c->rt, AP_T_FIRE);
         if (!c->local) c->kick_v = v3_add(c->kick_v, v3(0, 0.6f, 1.4f));   // third-person recoil on the item
@@ -1346,6 +1357,15 @@ static void post_one(World *w, CharacterInst *c, int i, float dt, vec3 cam_pos, 
     else if (c->local && !w->authority) charrt_eval_base(&c->rt);
     ProcInput pi;
     charrt_proc_input(&c->rt, &pi, c->root, dt * (float)DG_MAX(1, c->interval));
+    // An authored reload case (reload_<weapon>): its hand-off markers shape the hand IK weight
+    // over the reload (players simulated here: the reload timer is known).
+    if (c->is_player && c->slot >= 0 && c->slot < MAX_PLAYERS && w->players[c->slot].active && w->players[c->slot].sim.wpn.reloading) {
+        const WeaponDef *rw = weapon_equipped_def(w, c->slot);
+        if (rw) {
+            float k = handpose_reload_ik_weight(rw->id, rw->reload_time - w->players[c->slot].sim.wpn.reload_t, rw->reload_time);
+            if (k >= 0.0f) pi.hand_ik_weight = k;
+        }
+    }
     pi.raycast = ray_cb;
     pi.ray_ctx = w->phys;
     int sys = systems_for_lod(lod);
@@ -1440,6 +1460,13 @@ static void post_one(World *w, CharacterInst *c, int i, float dt, vec3 cam_pos, 
             pi.hand_anchor[0] = m->hand_anchor[0];
             pi.hand_anchor[1] = m->hand_anchor[1];
             pi.hand_anchor_w = 1.0f;
+            // The ledge case (mantle_ledge) at the traversal's progress, once it has a pose.
+            u32 mc = handpose_mantle_case();
+            for (int h = 0; h < 2 && mc; h++) {
+                pi.anchor_case[h] = mc;
+                pi.anchor_pose_base[h] = handpose_grip_style_hash(GRIP_PALM);
+                pi.anchor_case_t[h] = handpose_mantle_case_time(m->mode == MOVE_HANG ? -1.0f : m->m_t);
+            }
         }
         // Seated in a vehicle: pelvis on the seat, feet on the pedals, hands on the controls.
         float yaw;
@@ -1461,14 +1488,38 @@ static void post_one(World *w, CharacterInst *c, int i, float dt, vec3 cam_pos, 
                 pi.hand_anchor_w = 1.0f;
                 pi.hand_anchor_skip = (u8)((use[0] ? 0 : 1) | (use[1] ? 0 : 2));
                 pi.vehicle_onehand = !use[1] && item != NULL;
-                // Hand poses on the controls (the first-person pass uses the same entry).
-                const char *vname = g_vehicle_pose.seat_vehicle ? g_vehicle_pose.seat_vehicle(w, c->slot) : NULL;
+                // The seat's case on the controls (the first-person pass uses the same case).
+                u32 sc = handpose_seat_case(w, c->slot);
+                pi.hand_anchor_w = handpose_seat_case_weight(sc);
                 for (int h = 0; h < 2; h++) {
-                    pi.anchor_pose[h] = vname ? handpose_entry_hash(HPC_VEHICLE, vname) : 0;
+                    pi.anchor_case[h] = sc;
                     pi.anchor_pose_base[h] = handpose_grip_style_hash(GRIP_GRAB);
-                    pi.anchor_pose_state[h] = use[0] && use[1] ? HPS_DRIVE : HPS_DRIVE_ONEHAND;
+                    pi.anchor_case_t[h] = handpose_seat_case_time(sc);
                 }
             }
+        }
+        // The local player's interactions (door knob, lever, pickup: the first-person hand
+        // system's targets and cases, docs/HANDPOSE.md) on the third-person body too (shadow,
+        // third-person views, the hand pose editor's orbit view): the same case evaluation.
+        HandsFpTargets ft;
+        if (w->players[c->slot].local && !pi.seated && pi.hand_anchor_w <= 0.0f && hands_fp_targets(&ft)) {
+            float wmax = 0.0f;
+            u8 skip = 0;
+            for (int h = 0; h < 2; h++) {
+                if (ft.ov_w[h] <= 0.001f) { skip |= (u8)(1u << h); continue; }
+                pi.hand_anchor[h] = ft.ov_palm[h].t;
+                pi.hand_anchor_rot[h] = ft.ov_palm[h].r;
+                pi.anchor_case[h] = ft.ov_case[h];
+                pi.anchor_case_t[h] = ft.ov_case_t[h];
+                pi.anchor_pose_base[h] = handpose_grip_style_hash(ft.grip[h] < GRIP_COUNT ? ft.grip[h] : GRIP_GRAB);
+                wmax = fmaxf(wmax, ft.ov_w[h]);
+            }
+            if (wmax > 0.0f) {
+                pi.hand_anchor_w = wmax;
+                pi.hand_anchor_rot_valid = true;
+                pi.hand_anchor_skip = skip;
+            }
+
         }
     }
     g_ray_ignore = (pi.seated && g_vehicle_pose.vehicle_body) ? g_vehicle_pose.vehicle_body(w, c->slot) : PHYS_INVALID_BODY;
@@ -2030,6 +2081,7 @@ void chars_render_local_fp(World *w, float alpha, int local_slot) {
         Xform item_w = xf_mul(root, item);
         item_w.s = v3(1, 1, 1);
         hands_fp_set_item(item_w.t, item_w.r);
+        hands_fp_set_item_scale(c->rt.proc.item_scale);
         // cam_debug: hold point axes, pivot, sockets, IK targets, collision cast.
         Cvar *cd = cvar_find("cam_debug");
         if (cd && cd->i) {
@@ -2059,15 +2111,14 @@ void chars_render_local_fp(World *w, float alpha, int local_slot) {
         if (t.ov_w[h] <= 0.001f) continue;
         int ua = s->role[h ? BR_R_ARM : BR_L_ARM], fa = s->role[h ? BR_R_FOREARM : BR_L_FOREARM], ha = s->role[h ? BR_R_HAND : BR_L_HAND];
         if (ua < 0 || fa < 0 || ha < 0) continue;
-        // Hand pose: the grip style with the interactable's / vehicle's entry on top; its socket
-        // is an offset from the gameplay target (docs/HANDPOSE.md).
+        // Hand pose: the grip style with the case (door knob, steering wheel, ledge) at its
+        // timeline time on top; its socket (anchor * key IK target) is an offset from the gameplay
+        // target (docs/HANDPOSE.md).
         HandPose hp;
         const HandPoseDB *db = &LIB->handposes;
         int base = handpose_find_hash(db, handpose_grip_style_hash(t.grip[h] < GRIP_COUNT ? t.grip[h] : GRIP_GRAB));
-        handpose_resolve_over(db, base, handpose_find_hash(db, t.ov_pose[h]), h, t.ov_state[h], &hp);
-        Xform palm = xf_mul(inv_root, t.ov_palm[h]);
-        if (hp.has_socket) palm = xf_mul(palm, hp.socket);
-        palm = xf_mul(palm, hp.wrist);
+        handpose_case_eval(db, handpose_case_find_hash(db, t.ov_case[h]), base, h, t.ov_case_t[h], &hp);
+        Xform palm = xf_mul(xf_mul(inv_root, t.ov_palm[h]), hp.socket);
         Xform hand = proc_hand_for_socket(palm, LIB->hands.palm[h]);
         float side = h ? 1.0f : -1.0f;
         vec3 pole = quat_rotate(quat_conj(root.r), quat_rotate(t.cam_rot, hp.has_pole ? hp.pole : v3(0.8f * side, -1.0f, 0.25f)));
@@ -2268,7 +2319,9 @@ void chars_render(World *w, float alpha, vec3 cam_pos, int local_slot) {
             float span = (float)DG_MAX(1, c->interval);
             float t = saturate(((float)(w->chars->tick - c->last_eval) + alpha) / span);
             Xform it = xf_mul(seat_fix(w, c, t), xf_lerp(c->item_prev, c->item_cur, t));
+            hands_set_draw_scale(c->rt.proc.item_scale);   // the grip root's calibration scale
             hands_draw_held_att(c->item_weapon, c->item_weapon ? NULL : c->item_def, c->item_att, it.t, it.r, local ? (MAT_SHADOW_ONLY) : 0);
+            hands_set_draw_scale(1.0f);
         }
         (void)dist;
     }
@@ -2366,30 +2419,42 @@ void zombies_attack(World *w) {
     for (int k = 0; k < MAX_CHARACTERS; k++) {
         CharacterInst *c = w->chars->c[k];
         if (!c || !ent_valid(w, c->ent) || w->type[ENT_INDEX(c->ent)] != ET_ZOMBIE || c->dead) continue;
-        c->ai.attack_t = 1.2f;
-        c->ai.mode = ZM_ATTACK;
-        ctrl_set(&c->rt.ctrl, AP_SEED, (float)(dg_hash_u32(c->ent ^ w->tick) % 3));
-        charrt_trigger(&c->rt, AP_T_MELEE);
-        AnimEvent ev;
-        memset(&ev, 0, sizeof(ev));
-        ev.type = AEV_MELEE;
-        ev.ent = c->ent;
-        ev.tick = w->tick;
-        chars_push_event(w, &ev);
+        chars_npc_melee(w, c);
     }
 }
 
-void chars_npc_melee(World *w, CharacterInst *c) {
-    c->ai.attack_t = 1.2f;
+// Zombie attacks (controller.json "attack" / upper "zombie_punch", anim_sets/zombie.json): the seed
+// picks the variant - 0 swipe, 1 two-handed smash, 2 lunge (full body, standing), 3 punch (upper
+// body only, so a zombie that is still walking keeps its legs). Random, never the same one twice in
+// a row; a moving zombie always punches. The seed goes to clients with the melee event.
+#define ZOMBIE_ATTACK_VARIANTS 4
+#define ZOMBIE_PUNCH 3
+static const float k_attack_hit[ZOMBIE_ATTACK_VARIANTS] = { 0.55f, 0.95f, 0.75f, 0.35f };   // contact time in each clip
+
+float chars_npc_melee(World *w, CharacterInst *c) {
+    int last = (int)c->last_attack - 1;
+    int v;
+    if (c->ai.speed > 0.6f) {
+        v = ZOMBIE_PUNCH;
+    } else {
+        u32 h = dg_hash_u32(c->ent ^ (w->tick * 2654435761u));
+        int n = last >= 0 ? ZOMBIE_ATTACK_VARIANTS - 1 : ZOMBIE_ATTACK_VARIANTS;
+        v = (int)(h % (u32)n);
+        if (last >= 0 && v >= last) v++;   // skip the previous one
+    }
+    c->last_attack = (u8)(v + 1);
+    c->ai.attack_t = ZOMBIE_ATTACK_TIME;
     c->ai.mode = ZM_ATTACK;
-    ctrl_set(&c->rt.ctrl, AP_SEED, (float)(dg_hash_u32(c->ent ^ w->tick) % 3));
+    ctrl_set(&c->rt.ctrl, AP_SEED, (float)v);
     charrt_trigger(&c->rt, AP_T_MELEE);
     AnimEvent ev;
     memset(&ev, 0, sizeof(ev));
     ev.type = AEV_MELEE;
     ev.ent = c->ent;
     ev.tick = w->tick;
+    ev.seed = (u8)v;
     chars_push_event(w, &ev);
+    return k_attack_hit[v];
 }
 
 static void zombie_ai(World *w, CharacterInst *c, int i, float dt) {

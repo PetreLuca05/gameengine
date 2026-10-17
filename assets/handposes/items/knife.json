@@ -1,0 +1,13 @@
+{
+  "schema": 2,
+  "id": "knife",
+  "label": "Knife",
+  "category": "weapon",
+  "source": "data/weapons/06_knife.json",
+  "inherits": "style/melee_1h",
+  "hands": ["right"],
+  "reviewed": false,
+  "auto_placed": false,
+  "left": {},
+  "right": {}
+}

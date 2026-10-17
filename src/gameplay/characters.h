@@ -18,6 +18,7 @@
 
 #define MAX_CHARACTERS 2048   // hordes (src/gameplay/zombies)
 #define CHAR_NET_SAMPLES 8
+#define ZOMBIE_ATTACK_TIME 1.4f   // a zombie stands for its attack (the clips run ~1.3-1.5 s)
 
 typedef enum ZombieMode { ZM_IDLE, ZM_WANDER, ZM_ATTACK } ZombieMode;
 
@@ -99,6 +100,8 @@ typedef struct CharacterInst {
     vec3 hit_feet;                    // feet when the hitboxes were last built
     vec3 cl_prev_feet;                // client: zombie locomotion derived from the replicated motion
     float cl_speed;
+    float cl_attack_t;                // client: a zombie's attack runs (from its melee event), drives is_attacking
+    u8 last_attack;                   // zombies: the previous attack variant + 1 (never twice in a row)
     float look_yaw, look_pitch;       // zombies: smoothed head / spine look at the nearest player (yaw relative to the body)
     bool is_player, local;
     int slot;
@@ -217,7 +220,7 @@ void chars_predict_hit(World *w, EntityId target, int part, vec3 dir);
 EntityId spawn_zombie(World *w, vec3 feet, float yaw, u8 character_id);
 void zombies_attack(World *w);
 // Host: an NPC swings (melee animation + replicated event); the caller applies the damage.
-void chars_npc_melee(World *w, CharacterInst *c);
+float chars_npc_melee(World *w, CharacterInst *c);   // starts a zombie attack; returns its hit delay (s)
 // Extra spread (degrees) from arm injuries.
 float chars_limb_spread(const World *w, EntityId e);
 // Debug / tools.
@@ -238,9 +241,11 @@ typedef struct VehiclePoseHooks {
     bool (*holstered)(World *w, int slot);   // driving with both hands: nothing held
     bool (*vehicle_xform)(World *w, int slot, Xform *out);   // the seat's vehicle as drawn this frame
     BodyId (*vehicle_body)(World *w, int slot);              // its physics body (ignored by the hold point's wall check)
-    const char *(*seat_vehicle)(World *w, int slot);         // the seat's vehicle definition name ("car"): its hand pose entry
+    const char *(*seat_vehicle)(World *w, int slot);         // the seat's vehicle definition name ("car"): its hand pose case
+    bool (*seat_driver)(World *w, int slot);                 // the seat is the driver's (else a passenger seat)
 } VehiclePoseHooks;
 extern VehiclePoseHooks g_vehicle_pose;
 extern bool g_chars_force_phys_step;   // client: step physics this tick (vehicle prediction)
+extern bool g_chars_frozen;            // host: the world is frozen (hand pose editor): zombies / NPCs don't simulate
 
 #endif

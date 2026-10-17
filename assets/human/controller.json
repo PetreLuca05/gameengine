@@ -101,7 +101,7 @@
         { "from": "turn_left", "to": "locomotion", "when": [["speed", ">", 0.5]], "duration": 0.15 },
         { "from": "turn_right", "to": "locomotion", "when": [["speed", ">", 0.5]], "duration": 0.15 },
 
-        { "from": "locomotion", "to": "attack", "when": [["melee", "trigger"], ["is_attacking", "true"]], "duration": 0.1 },
+        { "from": "locomotion", "to": "attack", "when": [["melee", "trigger"], ["is_attacking", "true"], ["seed", "<", 2.5]], "duration": 0.12 },
         { "from": "attack", "to": "locomotion", "exit_time": 0.9, "duration": 0.2 }
       ]
     },
@@ -114,16 +114,19 @@
         { "name": "reload", "clip": "reload_{weapon}", "loop": false, "hand_ik": false },
         { "name": "fire", "clip": "fire_{weapon}", "loop": false },
         { "name": "melee", "clip": "melee_{weapon}", "loop": false, "hand_ik": false },
+        { "name": "zombie_punch", "clip": "attack_upper", "loop": false, "hand_ik": false },
         { "name": "equip", "clip": "equip_{weapon}", "loop": false, "hand_ik": false }
       ],
       "transitions": [
         { "from": "*", "to": "reload", "when": [["reload", "trigger"]], "duration": 0.15 },
-        { "from": "*", "to": "melee", "when": [["melee", "trigger"]], "duration": 0.08 },
+        { "from": "*", "to": "zombie_punch", "when": [["melee", "trigger"], ["is_attacking", "true"], ["seed", ">", 2.5]], "duration": 0.1 },
+        { "from": "*", "to": "melee", "when": [["melee", "trigger"], ["is_attacking", "false"]], "duration": 0.08 },
         { "from": "none", "to": "fire", "when": [["fire", "trigger"]], "duration": 0.04 },
         { "from": "fire", "to": "fire", "when": [["fire", "trigger"]], "duration": 0.03, "allow_self": true },
         { "from": "*", "to": "equip", "when": [["equip", "trigger"]], "duration": 0.1 },
         { "from": "reload", "to": "none", "exit_time": 0.95, "duration": 0.2 },
         { "from": "melee", "to": "none", "exit_time": 0.9, "duration": 0.15 },
+        { "from": "zombie_punch", "to": "none", "exit_time": 0.9, "duration": 0.2 },
         { "from": "fire", "to": "none", "exit_time": 0.9, "duration": 0.1 },
         { "from": "equip", "to": "none", "exit_time": 0.95, "duration": 0.15 },
         { "from": "*", "to": "none", "when": [["is_dead", "true"]], "duration": 0.1 }
@@ -165,8 +168,8 @@
     "melee_2h": { "hip_offset": [0.16, -0.10, -0.20], "hip_rot": [22, 0, -12], "fp_hip": [0.17, -0.24, -0.46] },
     "item_small": { "left_hand": false, "hip_offset": [0.22, -0.22, -0.32], "hip_rot": [-20, 0, 0] },
     "item_large": { "hip_offset": [0.05, -0.2, -0.35] },
-    "phone": { "left_hand": false, "elbow_r": [0.6, -1.0, 0.1], "curl_r": [25, 8, 8, 10, 12] },
-    "phone_landscape": { "left_hand": true, "elbow_r": [0.7, -1.0, 0.1], "elbow_l": [-0.7, -1.0, 0.1], "curl_r": [15, 35, 40, 45, 50], "curl_l": [15, 35, 40, 45, 50] }
+    "phone": { "left_hand": false, "elbow_r": [0.6, -1.0, 0.1] },
+    "phone_landscape": { "left_hand": true, "elbow_r": [0.7, -1.0, 0.1], "elbow_l": [-0.7, -1.0, 0.1] }
   },
 
   "damage_reactions": {

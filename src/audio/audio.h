@@ -17,6 +17,8 @@ void audio_play_music(const char *name);
 // Ambient loops (rain, wind ...): started on the first call with volume > 0, faded to the volume,
 // stopped at 0. Non-spatial, effects group.
 void audio_loop_set(const char *name, float volume);
+// Scales every ambient loop (the hand pose editor's frozen world: 0).
+void audio_set_ambience_gain(float g);
 // Positional loop (key: one per source, e.g. an entity id): refresh every frame, else it fades out.
 void audio_loop3d(u32 key, const char *name, vec3 pos, float volume, float pitch);
 bool audio_available(void);
