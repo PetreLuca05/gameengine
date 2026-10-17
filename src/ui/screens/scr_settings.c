@@ -114,6 +114,35 @@ void settings_confirm_result(bool keep) {
     log_info("video: display settings reverted");
 }
 
+// Graphics defaults: the archived graphics cvars (r_*, post_*, vfx_* and the view settings of the
+// Graphics tab) go back to their registered defaults; then the Engine Fidelity level (itself back
+// to its default) applies its table defaults to every feature, with the custom tweaks cleared.
+// Kept: the display (Apply / Revert, confirmed) and the fidelity benchmark results.
+static const char *const k_gfx_keep[] = { "r_width", "r_height", "r_mode", "r_vsync", "r_fidelity_bench", "r_fidelity_recommended", "r_fidelity_autodetect", "r_fidelity_custom" };
+static const char *const k_gfx_extra[] = { "cl_fov", "cl_ads_world_zoom", "cam_weapon_fov", "gore_level", "sight_brightness" };
+
+static bool gfx_cvar(const Cvar *c) {
+    for (int k = 0; k < ARRAY_COUNT(k_gfx_keep); k++) if (!strcmp(c->name, k_gfx_keep[k])) return false;
+    for (int k = 0; k < ARRAY_COUNT(k_gfx_extra); k++) if (!strcmp(c->name, k_gfx_extra[k])) return true;
+    if (!(c->flags & CVAR_ARCHIVE)) return false;
+    return !strncmp(c->name, "r_", 2) || !strncmp(c->name, "post_", 5) || !strncmp(c->name, "vfx_", 4);
+}
+
+void settings_graphics_defaults(void) {
+    int n = 0;
+    for (int i = 0; i < cvar_count(); i++) {
+        Cvar *c = cvar_at(i);
+        if (!c || !gfx_cvar(c) || !strcmp(c->str, c->default_str)) continue;
+        cvar_reset(c);
+        n++;
+    }
+    fid_custom_load("");
+    cvar_set("r_fidelity_custom", "");
+    fid_apply(fid_level());
+    S.pending = read_display();
+    log_info("settings: %d graphics settings back to their defaults (Engine Fidelity %s)", n, fid_level_name(fid_level()));
+}
+
 // ------------------------------------------------------------------ rows
 
 static GuiId rid(const char *label) { return gui_id(label); }
@@ -357,6 +386,15 @@ static void look_section(GuiCursor *c) {
 // ------------------------------------------------------------------ tabs
 
 static void tab_graphics(GuiCursor *c, GuiRect content) {
+    {
+        // Default: every graphics setting back to the coded defaults (asks first).
+        GuiRect br = gc_row(c, gui_s(TH->button_h + 4));
+        GuiRect def = { br.x + br.w - gui_s(140), br.y, gui_s(140), br.h };
+        gw_label(gui_rect(br.x, br.y, br.w - def.w - gui_s(16), br.h), "Every graphics setting back to its default (the display mode has its own Apply).", gui_s(TH->t_body - 2), GW_REGULAR,
+                 TH->text_faint, GUI_LEFT);
+        if (gw_button(rid("gfx_defaults"), def, "Default", GB_SECONDARY, true))
+            screens_confirm(CONFIRM_GRAPHICS_DEFAULTS, "Reset graphics settings?", "Every graphics setting goes back to its default, Engine Fidelity included. Resolution, window mode and VSync stay.", 0);
+    }
     fidelity_section(c);
     section(c, "Display");
     int sel = 0;
@@ -420,12 +458,18 @@ static void tab_graphics(GuiCursor *c, GuiRect content) {
         }
     }
     {
+        // Hands / weapon FOV (cam_weapon_fov, 0 = the camera's) is the hip value: aiming still narrows
+        // it by the sight's ADS hands zoom (attach_ads_vm_zoom, irons 75 -> 60 deg = 1.25x).
         Cvar *vm = cv("cam_weapon_fov");
         if (vm) {
             bool follow = vm->f < 1.0f;
             GuiRect tr = gw_setting_row(c, "Hands FOV follows camera", NULL, rid("vm_follow"));
             if (gw_toggle(rid("vm_follow"), tr, &follow)) cvar_set_float(vm, follow ? 0.0f : roundf(camera_base_fov()));
-            if (!follow) row_slider_cvar(c, "Hands / weapon FOV", "cam_weapon_fov", 40, 120, 1, "%.0f\xC2\xB0", NULL);
+            float v = follow ? roundf(camera_base_fov()) : vm->f;
+            GuiRect sr = gw_setting_row(c, "Hands / weapon FOV",
+                                        "FOV of your arms and the held item. Aiming down sights still zooms them by the sight's own amount. Moving it stops following the camera.",
+                                        rid("cam_weapon_fov"));
+            if (gw_slider(rid("cam_weapon_fov"), sr, &v, 40, 120, 1, "%.0f\xC2\xB0")) cvar_set_float(vm, v);
         }
     }
     row_slider_cvar(c, "Brightness", "r_brightness", 0.5f, 2.0f, 0.05f, "%.2f", NULL);

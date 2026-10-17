@@ -332,6 +332,7 @@ static void draw_confirm(bool top) {
     case CONFIRM_DROP: yes_l = "Drop"; break;
     case CONFIRM_DISPLAY: yes_l = "Keep"; no_l = "Revert"; break;
     case CONFIRM_RESET_BINDS: yes_l = "Reset"; yes_kind = GB_DANGER; break;
+    case CONFIRM_GRAPHICS_DEFAULTS: yes_l = "Reset"; yes_kind = GB_DANGER; break;
     case CONFIRM_FIDELITY: yes_l = "Apply recommended"; no_l = "Keep current"; break;
     case CONFIRM_COMMAND: yes_l = "Run"; yes_kind = GB_DANGER; break;
     }
@@ -359,6 +360,7 @@ static void draw_confirm(bool top) {
         case CONFIRM_DROP: inventory_confirm_drop(yes_pressed); break;
         case CONFIRM_DISPLAY: settings_confirm_result(yes_pressed); break;
         case CONFIRM_RESET_BINDS: if (yes_pressed) input_reset_bindings(); break;
+        case CONFIRM_GRAPHICS_DEFAULTS: if (yes_pressed) settings_graphics_defaults(); break;
         case CONFIRM_FIDELITY: if (yes_pressed) game_fidelity_apply_recommended(); break;
         case CONFIRM_COMMAND: commands_tab_confirm_result(yes_pressed); break;
         }
@@ -641,6 +643,12 @@ static void cmd_ui_reload(int argc, const char **argv) {
     log_info("ui: reloaded theme, fonts, screen layouts and icons");
 }
 
+static void cmd_r_defaults(int argc, const char **argv) {
+    (void)argc;
+    (void)argv;
+    settings_graphics_defaults();
+}
+
 static void cmd_inventory(int argc, const char **argv) {
     (void)argc;
     (void)argv;
@@ -659,6 +667,7 @@ void menus_init(void) {
     commands_tab_register();
     cmd_register("menu", cmd_menu, "open a menu: pause | settings | controls | crosshair | audio | character | phone | multiplayer | inventory | close");
     cmd_register("inventory", cmd_inventory, "toggle the inventory screen");
+    cmd_register("r_defaults", cmd_r_defaults, "every graphics setting back to its coded default (Settings > Graphics > Default; the display mode is kept)");
     cmd_register("ui_screen", cmd_ui_screen, "ui_screen <name>: open a UI screen (no args: list + current stack)");
     cmd_register("ui_reload", cmd_ui_reload, "reload the UI theme, fonts, screen layouts and icons");
     cmd_register("ui_nav", cmd_ui_nav, "ui_nav <up|down|left|right|accept|back|tab_next|tab_prev|alt|alt2|menu|view> [pad]: synthetic UI navigation");

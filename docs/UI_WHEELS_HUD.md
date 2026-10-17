@@ -128,7 +128,7 @@ middle.
   - A pulse on each kill and a headshot tick.
   - A "Streak ×N" pill: kills less than 4 s apart.
 - **Feed (under the counter).** Five entries, 6 s each, fading over the last second, sliding in.
-  - Each row: killer, weapon icon, headshot icon, victim.
+  - Each row: killer, weapon icon, headshot icon, victim. The icons draw white (the weapon icon is the silhouette of its baked item icon, `gd_image_mask`).
   - Your kills have a white edge; your deaths a red one.
 
 ## Compass

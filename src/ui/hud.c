@@ -85,7 +85,8 @@ static void draw_vitals(World *w, GuiRect safe) {
     Player *p = hud_player();
     if (!p) return;
     Health *h = &w->health[ENT_INDEX(p->ent)];
-    float bw = gui_s(250), x = safe.x, y = safe.y + safe.h - gui_s(58);
+    // The lowest bar sits on the safe area's bottom edge, like the hotbar and the ammo ticks.
+    float bw = gui_s(250), x = safe.x, y = safe.y + safe.h - gui_s(h->max_armor > 0 ? 34.0f : 24.0f);
     float hp = h->hp / fmaxf(1, h->max_hp);
     gd_shadow(gui_rect(x, y - gui_s(2), bw + gui_s(60), gui_s(44)), 0, gui_s(30), UI_RGBA(0, 0, 0, 55));
     caps(x, y - gui_s(6), gui_s(TH->t_label), TH->text_dim, GUI_LEFT, "Health");
@@ -100,7 +101,7 @@ static void draw_vitals(World *w, GuiRect safe) {
         if (h->armor > 0) {
             snprintf(b, sizeof(b), "%.0f", h->armor);
             GuiText an = { gui_s(TH->t_small), GW_MEDIUM, TH->info, GUI_LEFT, 0, false, true, 0 };
-            gd_text(&an, x + bw + gui_s(12), y + gui_s(31), b);
+            gd_text(&an, x + bw + gui_s(12), y + gui_s(32) - gd_line_height(an.size) * 0.5f, b);   // centred on the bar
         }
     }
 }

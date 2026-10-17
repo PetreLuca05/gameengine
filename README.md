@@ -196,7 +196,7 @@ Steam friends list or via **Invite Friends** (the overlay invite dialog), or wit
 | Flashlight | F |
 | Reload | R |
 | Drop held item | G |
-| Hotbar | 1–9, mouse wheel |
+| Hotbar | 1–6, mouse wheel |
 | Inventory | Tab (click two slots to move, right-click to drop) |
 | Net stats | F3 |
 | Console | ~ |

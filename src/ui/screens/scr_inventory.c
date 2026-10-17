@@ -1,5 +1,5 @@
 // Inventory screen (docs/UI.md "Inventory"): a centred modal over the blurred game.
-//   left:  backpack grid (6 x 4) and the hotbar (1-9), the same slot widget as the HUD;
+//   left:  backpack grid (6 x 4) and the hotbar (1-6, grid-sized slots), the same slot widget as the HUD;
 //   right: the live 3D preview of the selected item (auto-rotates, drag to rotate, wheel to zoom),
 //          name / type / description / stats with attachment deltas, attachment slots (drag an
 //          attachment onto a slot or onto the weapon to mount it, drag it out to unmount);
@@ -703,11 +703,11 @@ bool inventory_draw(GuiRect area, bool as_modal) {
     int sel = V.selected >= 0 ? V.selected : equipped;
     if (sel >= 0 && !p->inv.slots[sel].item && V.selected >= 0) sel = V.selected;
 
-    // Metrics: grid slots + a hotbar of the same total width.
+    // Metrics: grid slots; the hotbar uses the same slot size (one grid row: INV_HOTBAR == INV_BACKPACK_W).
     float gap = gui_s(TH->slot_gap);
     float gs = gui_s(TH->slot * 1.18f);
     float grid_w = gs * INV_BACKPACK_W + gap * (INV_BACKPACK_W - 1);
-    float hs = (grid_w - gap * (INV_HOTBAR - 1)) / INV_HOTBAR;
+    float hs = gs;
     float side_w = container ? gs * 4 + gap * 3 : gui_s(400);
     float pad = gui_s(TH->pad + 6), mid = gui_s(28);
     float pw = pad * 2 + grid_w + mid + side_w;

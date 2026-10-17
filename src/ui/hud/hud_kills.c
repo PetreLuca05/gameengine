@@ -14,11 +14,12 @@ void hud_caps(float x, float y, float size, u32 c, int align, const char *s) {
     gd_text(&t, x, y, s);
 }
 
+// The item's icon as a silhouette in `color` (the kill feed draws them white), else the fallback glyph.
 void hud_item_icon(u16 item, const char *fallback, float cx, float cy, float size, u32 color) {
     TextureId tex;
     vec4 uv;
     if (item && icons_get(item, &tex, &uv)) {
-        gd_image(gui_rect(cx - size * 0.5f, cy - size * 0.5f, size, size), tex, uv, gui_rgba_mul(UI_RGBA(255, 255, 255, 255), (float)(color >> 24) / 255.0f));
+        gd_image_mask(gui_rect(cx - size * 0.5f, cy - size * 0.5f, size, size), tex, uv, color);
         return;
     }
     hud_icon(fallback, cx, cy, size * 0.8f, color);
@@ -108,7 +109,7 @@ static float draw_feed(Game *g, GuiRect safe, float y) {
         if (e->mine || e->me_victim) gd_rect(gui_rect(r.x + r.w - gui_s(3), r.y, gui_s(3), r.h), e->mine ? TH->select : TH->danger);
         float x = r.x + pad, ty = r.y + (rh - gd_line_height(kt.size)) * 0.5f, cy = r.y + rh * 0.5f;
         if (kw > 0) { gd_text(&kt, x, ty, e->killer); x += kw + sp; }
-        hud_item_icon(e->weapon, (e->flags & KILLF_KILLER_PLAYER) ? "skull" : "zombie", x + is * 0.5f, cy, is, TH->text_dim);
+        hud_item_icon(e->weapon, (e->flags & KILLF_KILLER_PLAYER) ? "skull" : "zombie", x + is * 0.5f, cy, is, TH->select);   // white
         x += is;
         if (head) { x += sp; hud_icon("headshot", x + is * 0.4f, cy, is * 0.8f, TH->select); x += is * 0.8f; }
         x += sp;

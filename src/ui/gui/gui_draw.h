@@ -53,6 +53,7 @@ void gd_circle(float cx, float cy, float radius, u32 c);
 void gd_ring(float cx, float cy, float radius, float t, float frac, u32 c);   // frac 0..1 of a circle, clockwise from the top
 void gd_line(float x0, float y0, float x1, float y1, float t, u32 c);
 void gd_image(GuiRect r, TextureId tex, vec4 uv, u32 tint);
+void gd_image_mask(GuiRect r, TextureId tex, vec4 uv, u32 color);   // the image's silhouette (its alpha) in one colour
 void gd_backdrop(GuiRect r, u32 tint);   // the blurred scene behind r (falls back to a dark fill)
 
 float gd_text(const GuiText *t, float x, float y, const char *s);   // y = top of the line box; returns width

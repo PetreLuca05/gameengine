@@ -1,7 +1,8 @@
 #version 450
 // UI (src/ui/gui/gui_draw.c). The uv range selects the mode, so shapes, text and shadows batch
 // into one draw per texture / clip:
-//   uv.x in [0, 1]       textured (white pixel for flat shapes, 9-slice panels, icons, item views)
+//   uv.x in [0, 1]       textured (white pixel for flat shapes, 9-slice panels, icons, item views);
+//                        uv.y in [2, 3]: a silhouette, the vertex colour in the texture's alpha (gd_image_mask)
 //   uv.x in [2, 3]       SDF text / shapes (distance in alpha, 0.5 = edge), anti-aliased per pixel
 //   uv.x in [4, 5]       soft SDF (text shadow / glow): a wide edge
 //   uv.x < -0.5          the blurred scene behind the UI, sampled in screen space (render_ui_backdrop)
@@ -19,7 +20,8 @@ const float SDF_SLOPE = 128.0 / 6.0 / 255.0;   // distance units per atlas texel
 void main() {
     float ring_k = v_uv.x > 5.5 ? floor((v_uv.x - 6.0) * 0.5) : -1.0;
     float mode = v_uv.x < -0.5 ? -1.0 : (ring_k >= 0.0 ? 3.0 : (v_uv.x > 3.5 ? 2.0 : (v_uv.x > 1.5 ? 1.0 : 0.0)));
-    vec2 uv = v_uv - vec2(mode > 2.5 ? 6.0 + 2.0 * ring_k : (mode > 1.5 ? 4.0 : (mode > 0.5 ? 2.0 : 0.0)), 0.0);
+    bool mask = mode > -0.5 && mode < 0.5 && v_uv.y > 1.5;
+    vec2 uv = v_uv - vec2(mode > 2.5 ? 6.0 + 2.0 * ring_k : (mode > 1.5 ? 4.0 : (mode > 0.5 ? 2.0 : 0.0)), mask ? 2.0 : 0.0);
     vec2 texels = fwidth(uv) * vec2(textureSize(tex, 0));        // screen pixel footprint in texels
     float px = max(max(texels.x, texels.y), 1e-3) * SDF_SLOPE;    // distance change per screen pixel
     vec2 dx = dFdx(uv), dy = dFdy(uv);
@@ -56,5 +58,6 @@ void main() {
         out_color = vec4(v_color.rgb, v_color.a * a);
         return;
     }
-    out_color = v_color * texture(tex, uv);
+    vec4 c = texture(tex, uv);
+    out_color = mask ? vec4(v_color.rgb, v_color.a * c.a) : v_color * c;
 }

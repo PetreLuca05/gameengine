@@ -675,7 +675,7 @@ static void handle_hotbar(void) {
     // The built-in phone (docs/PHONE.md): X takes it out over whatever slot is selected and puts it
     // away again; choosing a slot puts it away too.
     if (input_consume_press(ACT_PHONE)) G->phone_out = !G->phone_out;
-    for (int i = 0; i < 9; i++)
+    for (int i = 0; i < INV_HOTBAR; i++)
         if (input_consume_press((Action)(ACT_SLOT1 + i))) { G->hotbar_slot = (u8)i; G->phone_out = false; }
     // Phone camera mode: the wheel zooms instead of switching items.
     if (input_consume_press(ACT_NEXT_ITEM) && !phone_wheel(-1)) { G->hotbar_slot = (u8)((G->hotbar_slot + 1) % INV_HOTBAR); G->phone_out = false; }
@@ -995,6 +995,17 @@ static void give_kinds(int argc, const char **argv, bool ammo_only) {
     log_info("%s: %d items given%s", ammo_only ? "give_ammo" : "give_all", given, full ? " (inventory full for the rest)" : "");
 }
 static void cmd_give_all(int argc, const char **argv) { give_kinds(argc, argv, false); }
+
+// inv_clear [player slot]: empties the inventory (host; tests that cycle more weapons than the
+// hotbar holds).
+static void cmd_inv_clear(int argc, const char **argv) {
+    World *w = G->world;
+    if (!w || G->mode != GM_HOST) { log_info("inv_clear: host only"); return; }
+    int target = argc > 1 ? atoi(argv[1]) : G->local_slot;
+    if (target < 0 || target >= MAX_PLAYERS || !w->players[target].active) { log_warn("inv_clear: no player in slot %d", target); return; }
+    inv_clear(&w->players[target].inv);
+    w->players[target].inv.revision++;
+}
 static void cmd_give_ammo(int argc, const char **argv) { give_kinds(argc, argv, true); }
 
 // Host: put attachment id `att` (0 = remove) into attachment slot `aslot` of the weapon in
@@ -1117,7 +1128,7 @@ static void cmd_setang(int argc, const char **argv) {
 }
 
 static void cmd_slot(int argc, const char **argv) {
-    if (argc > 1) { G->hotbar_slot = (u8)DG_CLAMP(atoi(argv[1]) - 1, 0, 8); G->phone_out = false; }
+    if (argc > 1) { G->hotbar_slot = (u8)DG_CLAMP(atoi(argv[1]) - 1, 0, INV_HOTBAR - 1); G->phone_out = false; }
 }
 
 static void cmd_phone_out(int argc, const char **argv) {
@@ -1574,6 +1585,7 @@ void game_init(void) {
     cmd_register("give_list", cmd_give_list, "give_list [filter]: the item ids give takes");
     cmd_register("give_all", cmd_give_all, "give_all [player slot]: one of every item into the inventory (host)");
     cmd_register("give_ammo", cmd_give_ammo, "give_ammo [player slot]: a full stack of every ammo type (host)");
+    cmd_register("inv_clear", cmd_inv_clear, "inv_clear [player slot]: empty the inventory (host)");
     cmd_register("flashlight", cmd_flashlight, "flashlight [0|1]: toggle / set the flashlight (key F)");
     cmd_register("bench", cmd_bench, "toggle the weapon bench (attachments) UI");
     cmd_register("attach", cmd_attach, "attach <slot> <attachment|none>: weapon attachments of the equipped weapon (no args: list)");
@@ -1583,7 +1595,7 @@ void game_init(void) {
     cmd_register("setpos", cmd_setpos, "teleport: setpos x y z [yaw] [pitch]");
     cmd_register("getpos", cmd_getpos, "print position");
     cmd_register("setang", cmd_setang, "set view angles: setang yaw pitch");
-    cmd_register("slot", cmd_slot, "select hotbar slot 1-9");
+    cmd_register("slot", cmd_slot, "select hotbar slot 1-6");
     cmd_register("phone_out", cmd_phone_out, "phone_out [0|1]: take the built-in phone out / put it away (key X)");
     cmd_register("status", cmd_status, "print game status");
     cmd_register("inv", cmd_inv, "print local inventory");

@@ -593,6 +593,12 @@ void gd_image(GuiRect r, TextureId tex, vec4 uv, u32 tint) {
     quad_uv(tex, r.x, r.y, r.x + r.w, r.y + r.h, v2(uv.x, uv.y), v2(uv.z, uv.w), col(tint));
 }
 
+// The image's alpha filled with one colour (ui.frag: uv.y + 2 selects the silhouette mode).
+void gd_image_mask(GuiRect r, TextureId tex, vec4 uv, u32 color) {
+    if (!tex) return;
+    quad_uv(tex, r.x, r.y, r.x + r.w, r.y + r.h, v2(uv.x, uv.y + 2.0f), v2(uv.z, uv.w + 2.0f), col(color));
+}
+
 void gd_backdrop(GuiRect r, u32 tint) {
     if (gui_theme()->blur <= 0.0f) { gd_rect(r, UI_RGBA(12, 13, 15, 235)); return; }
     if (!D.backdrop) D.backdrop = render_ui_backdrop();
