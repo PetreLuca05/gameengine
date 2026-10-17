@@ -1,0 +1,41 @@
+{
+  "_doc": "Ground reference regions (docs/GROUND_REFERENCE.md). Boxes are [x0, y0, x1, y1] in the source image's pixels. 'mask' picks pixels inside the box: all | green | dry | dark (see tools/ground_ref.py). Used by the colour table, the blade sheet and ground_match_report.",
+  "images": {
+    "r1": { "file": "ref1_crater_meadow.webp", "note": "1920x1080 promo still, low sun from the right, clear sky; the cleanest blade detail" },
+    "r2": { "file": "ref2_wheat.webp",         "note": "1280x720 gameplay, overcast, letterboxed (rows 88-630 are the picture)" },
+    "r3": { "file": "ref3_snowfield.webp",     "note": "739x415 gameplay, overcast, pale ground patches (frost / chalk)" },
+    "r4": { "file": "ref4_hillside.webp",      "note": "739x415 gameplay, overcast, dry hillside" },
+    "r5": { "file": "ref5_meadow_path.png",    "note": "620x300 gameplay, sunny, flowers + worn path" }
+  },
+  "regions": [
+    { "id": "r1_blade_green_near", "image": "r1", "box": [0, 760, 700, 1080],    "mask": "green", "class": "blade_green" },
+    { "id": "r1_blade_dry_mid",    "image": "r1", "box": [820, 400, 1300, 520],  "mask": "dry",   "class": "blade_dry" },
+    { "id": "r1_blade_dry_right",  "image": "r1", "box": [1400, 380, 1920, 600], "mask": "dry",   "class": "blade_dry" },
+    { "id": "r1_ground_under",     "image": "r1", "box": [80, 700, 520, 820],    "mask": "dark",  "class": "ground_grass" },
+    { "id": "r1_dirt_crater_wall", "image": "r1", "box": [1080, 560, 1360, 760], "mask": "all",   "class": "dirt" },
+    { "id": "r1_dirt_crater_rim",  "image": "r1", "box": [600, 800, 1000, 860],  "mask": "all",   "class": "dirt_dry" },
+    { "id": "r1_field_far",        "image": "r1", "box": [560, 270, 1200, 330],  "mask": "all",   "class": "field_far" },
+    { "id": "r1_bush_leaves",      "image": "r1", "box": [1100, 700, 1500, 900], "mask": "green", "class": "shrub" },
+    { "id": "r2_wheat_ears",       "image": "r2", "box": [0, 260, 1280, 480],    "mask": "dry",   "class": "wheat" },
+    { "id": "r2_wheat_ground",     "image": "r2", "box": [60, 470, 420, 600],    "mask": "dark",  "class": "dirt_field" },
+    { "id": "r3_grass_mid",        "image": "r3", "box": [0, 200, 600, 330],     "mask": "green", "class": "blade_green_overcast" },
+    { "id": "r3_pale_ground",      "image": "r3", "box": [560, 140, 739, 230],   "mask": "all",   "class": "ground_pale" },
+    { "id": "r4_grass_hill",       "image": "r4", "box": [380, 250, 739, 380],   "mask": "all",   "class": "blade_mixed_overcast" },
+    { "id": "r4_dirt_patch",       "image": "r4", "box": [170, 320, 330, 380],   "mask": "all",   "class": "dirt_patch" },
+    { "id": "r4_moss_ground",      "image": "r4", "box": [330, 330, 420, 390],   "mask": "all",   "class": "ground_moss" },
+    { "id": "r5_meadow",           "image": "r5", "box": [0, 160, 620, 250],     "mask": "all",   "class": "meadow_sunny" },
+    { "id": "r5_path",             "image": "r5", "box": [390, 252, 500, 298],   "mask": "all",   "class": "path_worn" },
+    { "id": "r5_ground_moss",      "image": "r5", "box": [500, 178, 580, 205],   "mask": "all",   "class": "ground_moss_sunny" }
+  ],
+  "blades": [
+    { "id": "b1_broad_green_clump",  "image": "r1", "box": [150, 820, 330, 1075],  "type": "broad_green" },
+    { "id": "b2_broad_green_arch",   "image": "r1", "box": [380, 830, 480, 1000],  "type": "broad_green" },
+    { "id": "b3_ribbon_tussock",     "image": "r1", "box": [1400, 455, 1525, 595], "type": "ribbon_variegated" },
+    { "id": "b4_ribbon_tussock_2",   "image": "r1", "box": [1270, 470, 1400, 595], "type": "ribbon_variegated" },
+    { "id": "b5_dark_fountain",      "image": "r1", "box": [1650, 630, 1760, 702], "type": "dark_fountain" },
+    { "id": "b6_dry_straw",          "image": "r4", "box": [0, 280, 150, 415],   "type": "dry_straw" },
+    { "id": "b7_seed_plume",         "image": "r3", "box": [430, 190, 600, 330],   "type": "seed_plume" },
+    { "id": "b8_wheat",              "image": "r2", "box": [20, 330, 300, 620],   "type": "wheat" },
+    { "id": "b9_meadow_tuft",        "image": "r5", "box": [30, 170, 225, 298],   "type": "meadow_tuft" }
+  ]
+}
