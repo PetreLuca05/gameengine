@@ -918,7 +918,7 @@ static void cmd_flashlight(int argc, const char **argv) {
 
 static void cmd_give(int argc, const char **argv) {
     World *w = G->world;
-    if (argc < 2 || G->mode != GM_HOST) { log_info("usage: give <item> [count] [player slot] (host only)"); return; }
+    if (argc < 2 || G->mode != GM_HOST) { log_info("usage: give <item> [count] [player slot] (host only); give_list [filter] lists the item ids, give_all / give_ammo"); return; }
     u16 item = item_find(&G->items, argv[1]);
     if (!item) { log_warn("give: unknown item '%s'", argv[1]); return; }
     int count = argc > 2 ? atoi(argv[2]) : (G->items.items[item].max_stack > 1 ? G->items.items[item].max_stack : 1);
@@ -930,6 +930,44 @@ static void cmd_give(int argc, const char **argv) {
     p->inv.revision++;
     log_info("gave %d x %s", count - left, argv[1]);
 }
+
+// give_list [filter]: every item id (what `give` takes), with its kind and name.
+static void cmd_give_list(int argc, const char **argv) {
+    static const char *kinds[ITEM_KIND_COUNT] = { "misc", "ammo", "consumable", "weapon", "key", "attachment", "throwable" };
+    const char *f = argc > 1 ? argv[1] : NULL;
+    int n = 0;
+    for (int i = 1; i < G->items.item_count; i++) {
+        const ItemDef *d = &G->items.items[i];
+        if (f && !strstr(d->id, f) && !strstr(d->name, f)) continue;
+        log_info("  %-22s %-10s %s", d->id, (unsigned)d->kind < ITEM_KIND_COUNT ? kinds[d->kind] : "?", d->name);
+        n++;
+    }
+    log_info("give_list: %d items (give <id> [count])", n);
+}
+
+// give_all [player slot]: one of every item (a full stack of stackables) while there is room;
+// give_ammo [player slot]: a full stack of every ammo type.
+static void give_kinds(int argc, const char **argv, bool ammo_only) {
+    World *w = G->world;
+    if (!w || G->mode != GM_HOST) { log_info("%s: host only", ammo_only ? "give_ammo" : "give_all"); return; }
+    int target = argc > 1 ? atoi(argv[1]) : G->local_slot;
+    if (target < 0 || target >= MAX_PLAYERS || !w->players[target].active) { log_warn("give: no player in slot %d", target); return; }
+    Player *p = &w->players[target];
+    int given = 0, full = 0;
+    for (int i = 1; i < G->items.item_count; i++) {
+        const ItemDef *d = &G->items.items[i];
+        if (ammo_only ? d->kind != ITEM_AMMO : d->kind == ITEM_KEY) continue;
+        int count = d->max_stack > 1 ? d->max_stack : 1;
+        const WeaponDef *wd = item_weapon(&G->items, (u16)i);
+        int left = inv_add(&p->inv, &G->items, (u16)i, count, wd ? (i16)wd->mag_size : 0);
+        if (left < count) given++;
+        else full++;
+    }
+    p->inv.revision++;
+    log_info("%s: %d items given%s", ammo_only ? "give_ammo" : "give_all", given, full ? " (inventory full for the rest)" : "");
+}
+static void cmd_give_all(int argc, const char **argv) { give_kinds(argc, argv, false); }
+static void cmd_give_ammo(int argc, const char **argv) { give_kinds(argc, argv, true); }
 
 // Host: put attachment id `att` (0 = remove) into attachment slot `aslot` of the weapon in
 // inventory slot `inv_slot` of player `slot`. Validated against the weapon's slots.
@@ -1405,6 +1443,9 @@ void game_init(void) {
     hud_register();
     openworld_register_commands();
     cmd_register("give", cmd_give, "give <item> [count]");
+    cmd_register("give_list", cmd_give_list, "give_list [filter]: the item ids give takes");
+    cmd_register("give_all", cmd_give_all, "give_all [player slot]: one of every item into the inventory (host)");
+    cmd_register("give_ammo", cmd_give_ammo, "give_ammo [player slot]: a full stack of every ammo type (host)");
     cmd_register("flashlight", cmd_flashlight, "flashlight [0|1]: toggle / set the flashlight (key F)");
     cmd_register("bench", cmd_bench, "toggle the weapon bench (attachments) UI");
     cmd_register("attach", cmd_attach, "attach <slot> <attachment|none>: weapon attachments of the equipped weapon (no args: list)");
