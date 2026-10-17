@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "id": "use_revive_assist",
+  "label": "Interactable: revive_assist",
+  "category": "interactable",
+  "source": "interactable:revive_assist",
+  "inherits": "style/grip_grab",
+  "hands": ["left", "right"],
+  "states": ["default", "use"],
+  "relative": true,
+  "reviewed": false,
+  "auto_placed": false,
+  "left": {},
+  "right": {}
+}

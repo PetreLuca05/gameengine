@@ -90,6 +90,9 @@ typedef struct FabView {
     float progress, remaining;
 } FabView;
 bool revive_fab_view(const World *w, EntityId fab, FabView *out);
+// Display name of an inventory item: "DNA: Alex #3" for samples (who + unique id), else the item name.
+// The returned string lives until 8 more calls.
+const char *revive_item_name(const ItemDB *db, u16 item, i16 ammo);
 // Reconstruction preview (dev room, reconstruction_preview): < 0 = off.
 float revive_recon_preview(void);
 

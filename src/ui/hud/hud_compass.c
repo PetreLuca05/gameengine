@@ -197,7 +197,19 @@ float hud_compass_draw(Game *g, GuiRect safe) {
                     vec3 op = w->xf[ENT_INDEX(o->ent)].pos;
                     if (v3_dist(op, me) > c->marker_max_dist) continue;
                     char ini[4] = { o->name[0] ? o->name[0] : '?', 0 };
-                    strip_marker(cx, half_w, my, compass_offset_deg(compass_bearing_deg(me, op), heading), half_fov, "player", TH->info, ms * 0.8f, ini);
+                    // Knocked down teammates stand out (docs/REVIVE.md).
+                    bool down = (w->flags[ENT_INDEX(o->ent)] & EF_DOWNED) != 0;
+                    strip_marker(cx, half_w, my, compass_offset_deg(compass_bearing_deg(me, op), heading), half_fov, down ? "help" : "player", down ? TH->danger : TH->info, ms * (down ? 1.0f : 0.8f), ini);
+                }
+                // Bodies with DNA left (the dead see their own), fabricators reconstructing.
+                ENT_FOREACH(w, i) {
+                    if (w->type[i] != ET_CORPSE || !(w->flags[i] & EF_DNA)) continue;
+                    vec3 cp = w->xf[i].pos;
+                    float d = v3_dist(cp, me);
+                    if (d > c->marker_max_dist) continue;
+                    char db[16];
+                    snprintf(db, sizeof(db), "DNA %.0fm", d);
+                    strip_marker(cx, half_w, my, compass_offset_deg(compass_bearing_deg(me, cp), heading), half_fov, "help", TH->ping[7 % 8], ms * 0.85f, db);
                 }
             }
             if (c->markers_pings) {

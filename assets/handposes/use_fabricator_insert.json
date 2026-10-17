@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "id": "use_fabricator_insert",
+  "label": "Interactable: fabricator_insert",
+  "category": "interactable",
+  "source": "interactable:fabricator_insert",
+  "inherits": "style/grip_grab",
+  "hands": ["left", "right"],
+  "states": ["default", "use"],
+  "relative": true,
+  "reviewed": false,
+  "auto_placed": false,
+  "left": {},
+  "right": {}
+}

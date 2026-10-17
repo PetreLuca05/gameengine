@@ -934,6 +934,18 @@ bool revive_recovery_status(const World *w, int slot, RecoveryStatus *out) {
     return out->stage != REC_NONE;
 }
 
+const char *revive_item_name(const ItemDB *db, u16 item, i16 ammo) {
+    static char ring[8][48];
+    static int at;
+    const ItemDef *d = item_def(db, item);
+    if (!RV.dna_item || item != RV.dna_item) return d->name;
+    const DnaSample *ds = dna_get_c(&RV.dna, ammo);
+    char *b = ring[at++ & 7];
+    if (ds) snprintf(b, sizeof(ring[0]), "DNA: %s #%u", ds->name, ds->uid);
+    else snprintf(b, sizeof(ring[0]), "%s", d->name);
+    return b;
+}
+
 // ------------------------------------------------------------------ client events
 
 void revive_handle_event(const GameEvent *ev) {

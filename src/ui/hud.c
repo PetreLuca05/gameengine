@@ -23,6 +23,8 @@
 #include "net/net.h"
 #include "input/input.h"
 #include "player/spectator.h"
+#include "gameplay/revive/revive.h"
+#include "widgets/timed_ring.h"
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
@@ -256,6 +258,8 @@ static void draw_hints(Game *g, GuiRect safe) {
 
 static void key_name(Action a, char *out, int size) { binding_name(input_get_binding(a, 0), out, size); }
 
+static void draw_recovery(World *w, int slot, float y);
+
 // Spectator bar (top centre): who is watched and how, the delay readout, the controls; the respawn
 // countdown / Respawn bottom centre; the death camera countdown before spectating starts.
 static void draw_spectator(GuiRect safe) {
@@ -293,6 +297,8 @@ static void draw_spectator(GuiRect safe) {
     }
     if (sh.dead) {
         float y = safe.y + safe.h - gui_s(TH->slot * 0.82f) - gui_s(70);
+        Game *g = game();
+        if (g && g->world) draw_recovery(g->world, g->local_slot, y - gui_s(46));
         if (sh.can_respawn) {
             key_name(ACT_RELOAD, k1, sizeof(k1));
             snprintf(msg, sizeof(msg), "%s  Respawn", k1);
@@ -302,6 +308,84 @@ static void draw_spectator(GuiRect safe) {
             caps(cx, y, gui_s(TH->t_small), TH->text_dim, GUI_CENTER, msg);
             bar(gui_rect(cx - gui_s(80), y + gui_s(22), gui_s(160), gui_s(4)), 1.0f - fminf(1.0f, sh.respawn_s / 30.0f), TH->accent, UI_RGBA(255, 255, 255, 30));
         }
+    }
+}
+
+// ------------------------------------------------------------------ revive loop (docs/REVIVE.md)
+
+// Downed: the bleed-out ring and what to do (the viewed player: spectators see it too).
+static void draw_downed(World *w, Player *p) {
+    if (!p || !p->sim.down.downed || p->sim.move.mode == MOVE_DEAD) return;
+    const DownState *d = &p->sim.down;
+    float cx = gui_w() * 0.5f, cy = gui_h() * 0.72f;
+    float total = (float)d->bleed_total / (float)REVIVE_HZ, left = (float)d->bleed_ticks / (float)REVIVE_HZ;
+    bool helped = d->reviver != REVIVE_NOBODY;
+    ui_timed_ring_at(cx, cy, 0.85f, total, left, TR_DRAIN, helped ? "Paused" : "Bleeding out", 1.0f);
+    caps(cx, cy - gui_s(70), gui_s(TH->t_body), TH->danger, GUI_CENTER, "Downed");
+    char msg[96];
+    if (helped && d->reviver < MAX_PLAYERS) snprintf(msg, sizeof(msg), "%s is reviving you", w->players[d->reviver].name);
+    else snprintf(msg, sizeof(msg), "Crawl to cover or wait for help");
+    caps(cx, cy - gui_s(48), gui_s(TH->t_small), TH->hud_text, GUI_CENTER, msg);
+}
+
+// A dead player's body / sample / fabricator progress (the spectator bar, bottom).
+static void draw_recovery(World *w, int slot, float y) {
+    RecoveryStatus rs;
+    if (!revive_recovery_status(w, slot, &rs)) return;
+    float cx = gui_w() * 0.5f;
+    char msg[96];
+    u32 col = TH->hud_text;
+    switch (rs.stage) {
+    case REC_BODY: snprintf(msg, sizeof(msg), "Your body is waiting: DNA can be extracted"); col = TH->text_dim; break;
+    case REC_EXTRACTED: snprintf(msg, sizeof(msg), "DNA extracted by %s", rs.by); col = TH->accent; break;
+    case REC_QUEUED: snprintf(msg, sizeof(msg), "In fabricator: queue #%d", rs.queue_pos); col = TH->accent; break;
+    case REC_RECONSTRUCTING: snprintf(msg, sizeof(msg), "Reconstructing... %.0f", ceilf(rs.remaining)); col = TH->ok; break;
+    case REC_OPENING: snprintf(msg, sizeof(msg), "Reconstructed"); col = TH->ok; break;
+    default: return;
+    }
+    caps(cx, y, gui_s(rs.stage == REC_RECONSTRUCTING ? TH->t_body : TH->t_small), col, GUI_CENTER, msg);
+    if (rs.stage == REC_RECONSTRUCTING) bar(gui_rect(cx - gui_s(110), y + gui_s(24), gui_s(220), gui_s(4)), rs.progress, TH->ok, UI_RGBA(255, 255, 255, 30));
+}
+
+// Fabricator panels: a world-space plate over each nearby machine (state, player, progress, queue).
+static void draw_fabricators(Game *g, World *w) {
+    ENT_FOREACH(w, i) {
+        if (w->type[i] != ET_FABRICATOR) continue;
+        EntityId e = ENT_MAKE(i, w->gen[i]);
+        vec3 at;
+        if (!revive_fab_socket(w, e, "panel", &at, NULL)) continue;
+        at.y += 0.55f;
+        float dist = v3_dist(at, g->view.eye);
+        if (dist > 14.0f) continue;
+        vec2 sp;
+        if (!render_world_to_screen(at, &sp)) continue;
+        FabView fv;
+        revive_fab_view(w, e, &fv);
+        float k = DG_CLAMP(5.0f / fmaxf(dist, 1.0f), 0.55f, 1.2f);
+        float pw = gui_s(190) * k, ph = gui_s(fv.m.qn ? 74 : 58) * k;
+        GuiRect r = { sp.x - pw * 0.5f, sp.y - ph, pw, ph };
+        gd_alpha_push(saturate((14.0f - dist) / 3.0f));
+        gd_round(r, gui_s(TH->radius) * k, TH->hud_panel);
+        caps(sp.x, r.y + gui_s(7) * k, gui_s(TH->t_tiny) * k, fv.m.powered ? TH->accent : TH->warning, GUI_CENTER, "Fabricator");
+        char msg[96];
+        if (!fv.m.powered) snprintf(msg, sizeof(msg), "No power");
+        else if (fv.m.state == FAB_RECONSTRUCTING) snprintf(msg, sizeof(msg), "%s  %.0f s", fv.current_name, ceilf(fv.remaining));
+        else if (fv.m.state == FAB_OPENING) snprintf(msg, sizeof(msg), "%s  opening", fv.current_name);
+        else if (fv.m.state == FAB_COOLDOWN) snprintf(msg, sizeof(msg), "Cooling down %.0f s", ceilf(fv.remaining));
+        else snprintf(msg, sizeof(msg), "Ready: insert DNA");
+        GuiText t = { gui_s(TH->t_small) * k, GW_SEMIBOLD, TH->hud_text, GUI_CENTER, 0, false, true, 0 };
+        gd_text(&t, sp.x, r.y + gui_s(22) * k, msg);
+        if (fv.m.state == FAB_RECONSTRUCTING) bar(gui_rect(r.x + gui_s(12) * k, r.y + gui_s(44) * k, pw - gui_s(24) * k, gui_s(3) * k), fv.progress, TH->ok, UI_RGBA(255, 255, 255, 30));
+        if (fv.m.qn) {
+            char q[80] = "Queue:";
+            for (int n = 0; n < fv.m.qn; n++) {
+                const DnaSample *ds = dna_get_c(revive_dna(), fv.m.queue[n]);
+                size_t l = strlen(q);
+                snprintf(q + l, sizeof(q) - l, " %s", ds ? ds->name : "?");
+            }
+            caps(sp.x, r.y + gui_s(54) * k, gui_s(TH->t_tiny) * k, TH->text_dim, GUI_CENTER, q);
+        }
+        gd_alpha_pop();
     }
 }
 
@@ -387,6 +471,7 @@ void hud_draw(void) {
     if (menus_open()) return;   // the HUD hides behind game screens
     GuiRect safe = safe_rect();
     draw_world_bars(g, w, gui_scale());
+    draw_fabricators(g, w);
     fx_draw_hud();
     if (!phone_holding()) crosshair_draw((float)g_engine.frame_dt);   // the raised phone is the aim (docs/PHONE.md)
     draw_prompt(g);
@@ -406,6 +491,7 @@ void hud_draw(void) {
         gd_text(&t, gui_w() * 0.5f, gui_h() * 0.36f, "You died");
     }
     draw_spectator(safe);
+    draw_downed(w, p);
     if (p && p->sim.move.mode == MOVE_HANG) {
         char k1[32], k2[32], msg[96];
         binding_name(input_get_binding(ACT_JUMP, 0), k1, sizeof(k1));

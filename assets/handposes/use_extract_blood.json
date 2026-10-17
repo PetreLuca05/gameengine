@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "id": "use_extract_blood",
+  "label": "Interactable: extract_blood",
+  "category": "interactable",
+  "source": "interactable:extract_blood",
+  "inherits": "style/grip_grab",
+  "hands": ["left", "right"],
+  "states": ["default", "use"],
+  "relative": true,
+  "reviewed": false,
+  "auto_placed": false,
+  "left": {},
+  "right": {}
+}
