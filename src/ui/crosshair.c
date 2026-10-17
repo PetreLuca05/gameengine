@@ -252,6 +252,7 @@ void crosshair_draw(float dt) {
     float scr_w = ui_width(), scr_h = ui_height();
     const WeaponDef *wd = weapon_equipped_def(w, vs);
     bool gun = wd && wd->kind != WPN_MELEE;
+    if (p->sim.move.mode == MOVE_HANG && !weapon_is_sidearm(wd)) gun = false;   // slung while hanging (only a sidearm comes out)
     bool ads = gun && p->sim.wpn.ads_t > 0.5f;
 
     // ADS fade (presentation-rate).

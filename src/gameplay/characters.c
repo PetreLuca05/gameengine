@@ -545,6 +545,10 @@ static const ItemSockets *held_sockets(const CharacterInst *c) {
     return c->item_weapon ? &c->item_sock : &c->item_def->sockets;
 }
 
+// Hanging from a ledge with a sidearm out (from replicated state: the hang flag + the held weapon):
+// the gun in the right hand, the left hand keeps the ledge grip. Long guns are slung while hanging.
+static bool hang_sidearm(const CharacterInst *c) { return c->rt.in.hanging && weapon_is_sidearm(c->item_weapon); }
+
 static int item_hold_style(const World *w, u16 item, const WeaponDef **wd_out, const ItemDef **it_out) {
     *wd_out = NULL;
     *it_out = NULL;
@@ -1537,6 +1541,31 @@ static void post_one(World *w, CharacterInst *c, int i, float dt, vec3 cam_pos, 
                 pi.anchor_case_t[h] = handpose_mantle_case_time(m->mode == MOVE_HANG ? -1.0f : m->m_t);
             }
         }
+        // Ledge hang (the replicated flag: remote players on a client have no movement state; their
+        // grips come from the replicated feet and body yaw, which the hang keeps on the wall).
+        if (c->rt.in.hanging) {
+            if (pi.hand_anchor_w <= 0.0f) {
+                player_hang_grips(c->root.t, c->rt.in.body_yaw, pi.hand_anchor);
+                pi.hand_anchor_w = 1.0f;
+                u32 mc = handpose_mantle_case();
+                for (int h = 0; h < 2 && mc; h++) {
+                    pi.anchor_case[h] = mc;
+                    pi.anchor_pose_base[h] = handpose_grip_style_hash(GRIP_PALM);
+                    pi.anchor_case_t[h] = handpose_mantle_case_time(-1.0f);
+                }
+            }
+            if (hang_sidearm(c)) {
+                // The sidearm held out one-handed (the hip hold, aimed along the view), the right
+                // hand off the ledge.
+                pi.vehicle_onehand = true;
+                pi.empty_hands = false;
+                pi.hand_ik_weight = 1.0f;
+                pi.hand_anchor_skip = 2;
+            } else {
+                item = NULL;   // slung: both hands on the ledge
+                pi.item = NULL;
+            }
+        }
         // Swimming (docs/WATER.md "Swim animation"): the replicated flags (every machine), the
         // simulation's stroke phase where this machine simulates the player.
         u32 ef = w->flags[ENT_INDEX(c->ent)];
@@ -2095,6 +2124,7 @@ void chars_render_local_fp(World *w, float alpha, int local_slot) {
         Xform want = xf_mul(cam_m, icam);
         float ikw = 1.0f;
         ctrl_hand_ik_weight(&c->rt.ctrl, &ikw);
+        if (hang_sidearm(c)) ikw = 1.0f;   // the hang clip owns the hands, except the sidearm hand
         int style = DG_CLAMP(c->rt.in.weapon_type, 0, HOLD_STYLE_MAX - 1);
         const HoldStyle *hs = proc_hold_style(&LIB->proc, style);
         int ra = s->role[BR_R_ARM], rf = s->role[BR_R_FOREARM], rh = s->role[BR_R_HAND];
@@ -2241,6 +2271,8 @@ void chars_render_local_fp(World *w, float alpha, int local_slot) {
         Xform hand = proc_hand_for_socket(palm, LIB->hands.palm[h]);
         float side = h ? 1.0f : -1.0f;
         vec3 pole = quat_rotate(quat_conj(root.r), quat_rotate(t.cam_rot, hp.has_pole ? hp.pole : v3(0.8f * side, -1.0f, 0.25f)));
+        // The ledge grip is the body's (proc_hand_anchors): looking around never swings the elbows.
+        if (t.ov_case[h] && t.ov_case[h] == handpose_mantle_case()) pole = hp.has_pole ? hp.pole : v3(side, -0.6f, 0.4f);
         anim_ik_arm_pose(s, posep, model, ua, fa, ha, hand.t, &hand.r, pole, t.ov_w[h] * hp.ik_weight);
         handpose_apply_fingers(s, posep, model, h, hp.j, &LIB->hands, t.ov_w[h]);
     }

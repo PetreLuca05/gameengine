@@ -137,7 +137,7 @@ static RecoilMods make_mods(const PlayerSim *sim, float scale) {
     m.move01 = saturate((v3_len(v3_flat(sim->move.vel)) - 0.3f) / 5.0f);
     m.crouched = sim->move.crouched != 0;
     m.prone = false;   // no prone stance yet (data only)
-    m.airborne = !sim->move.on_ground && sim->move.mode == MOVE_WALK;
+    m.airborne = !sim->move.on_ground && (sim->move.mode == MOVE_WALK || sim->move.mode == MOVE_HANG);   // hanging one-handed: the air accuracy
     m.fire_mode = (FireMode)sim->wpn.fire_mode;
     m.extra = 1.0f;
     m.scale = scale;
@@ -996,6 +996,8 @@ void weapons_tick(World *w, int slot, PlayerSim *sim, const UserCmd *cmd, u16 pr
     if (sim->move.mode == MOVE_SEATED) busy = !(g_vh.can_shoot && g_vh.can_shoot(w, slot, sim, d));   // passengers, one-handed drivers
     // Swimming: a one-handed weapon (sidearm) at the surface only; under water everything is stowed.
     if (sim->move.mode == MOVE_SWIM) busy = !(sim->move.water == WATER_SURFACE && d && d->one_hand_capable);
+    // Hanging from a ledge: a sidearm in the free hand (no reload: the other hand holds on).
+    if (sim->move.mode == MOVE_HANG) busy = !weapon_is_sidearm(d);
 
     // Throwables: hold to cook / charge, release to throw (gameplay/throwables.c).
     if (idef->kind == ITEM_THROWABLE && s->item) {
@@ -1100,7 +1102,7 @@ void weapons_tick(World *w, int slot, PlayerSim *sim, const UserCmd *cmd, u16 pr
             reset_recoil(ws, d, cmd, slot);   // new magazine: pattern restarts with a new seed
         }
         if (w->authority) ws->mag = s->ammo;
-    } else if (wants_reload && *mag < d->mag_size && reserve > 0 && !busy) {
+    } else if (wants_reload && *mag < d->mag_size && reserve > 0 && !busy && sim->move.mode != MOVE_HANG) {
         ws->reloading = 1;
         ws->reload_t = d->reload_time;
         ws->burst_left = 0;

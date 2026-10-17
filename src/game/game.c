@@ -282,6 +282,15 @@ void game_sim_player(World *w, int slot, const UserCmd *cmd, float dt, bool firs
     // A driver's right click holds the gun out at the hip: no aim-down-sights from it.
     if (p->sim.move.mode == MOVE_SEATED && p->sim.move.veh_onehand) c.buttons &= (u16)~BTN_AIM;
     if (p->sim.move.mode == MOVE_SWIM) c.buttons &= (u16)~BTN_AIM;
+    // Hanging: a sidearm is fired one-handed from the hip (the other hand holds the ledge); long guns stay slung.
+    if (p->sim.move.mode == MOVE_HANG) {
+        c.buttons &= (u16)~BTN_AIM;
+        if (first && p->local && G && (pressed & BTN_ATTACK)) {
+            const InvSlot *eq = weapon_equipped(w, slot);
+            const WeaponDef *wd = eq ? item_weapon(w->items, eq->item) : NULL;
+            if (wd && !weapon_is_sidearm(wd)) game_add_hint("Only a sidearm while hanging");
+        }
+    }
     player_move_tick(w, slot, &p->sim, p->character, &c, dt, first);
     WeaponOutput wo;
     weapons_tick(w, slot, &p->sim, &c, pressed, dt, first, &wo);
@@ -693,6 +702,11 @@ void game_frame(float dt) {
     G->frame_look = ui_blocking || peek_look || wheel_look ? v2(0, 0) : f.look_delta;
     camera_apply_look(&G->view, G->frame_look);
     vehicles_view_frame(&G->view);
+    {
+        // Hanging from a ledge: the view turns within pl_hang_yaw_limit of the wall (movement clamps the same).
+        Player *lp = game_local_player();
+        if (lp && lp->sim.move.mode == MOVE_HANG) G->view.yaw = player_hang_clamp_yaw(&lp->sim.move, G->view.yaw);
+    }
     if (!ui_blocking && !spectator_controls_input()) handle_hotbar();
     spectator_frame(dt);   // spectator controls, death camera -> spectate, free camera
     G->use_pressed_frame = !ui_blocking && input_peek_press(ACT_USE);
