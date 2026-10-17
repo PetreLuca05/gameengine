@@ -51,6 +51,14 @@ enum MaterialFlags {
     // textures each vertex with the layer in its colour's alpha (255 = none), tinted by its rgb.
     MAT_TERRAIN  = 1u << 12,
     MAT_LAYERED  = 1u << 13,
+    // Reconstruction (docs/REVIVE.md): skinned draws dissolve in by SkinnedDraw.recon (spine base,
+    // progress); MAT_RECON_FX adds the construction edge, scan lines and the wire flash (fidelity).
+    MAT_RECON    = 1u << 14,
+    MAT_RECON_FX = 1u << 15,
+    // Fabricator chamber (docs/REVIVE.md): glass = Fresnel-weighted opacity + rim; caustics =
+    // procedural animated caustic light (emissive) on the liquid and the chamber floor.
+    MAT_GLASS    = 1u << 16,
+    MAT_CAUSTICS = 1u << 17,
 };
 
 typedef struct Material {
@@ -190,6 +198,7 @@ typedef struct SkinnedDraw {
     float radius;
     u32 object_id;          // stable id (0 = none): previous palette -> per-bone velocity
     TextureId texture;      // albedo (with MAT_TEXTURED in flags), 0 = vertex colours
+    vec4 recon;             // MAT_RECON: spine base (world xyz) + progress 0..1 (w)
 } SkinnedDraw;
 MeshId render_skinned_mesh_create(const SkinVertex *verts, u32 vcount, const u32 *indices, u32 icount);
 void render_draw_skinned(const SkinnedDraw *d);

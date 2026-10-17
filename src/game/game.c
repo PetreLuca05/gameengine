@@ -705,6 +705,7 @@ void game_frame(float dt) {
     game_holdpoint_test_frame();
     G->alpha = (float)(G->accumulator / SIM_DT);
     game_death_frame(dt);   // death sequence: post / mix / HUD from this frame's state (docs/REVIVE.md)
+    game_revive_frame(G->world, dt);   // reconstruction bodies + particles
     // Reconciliation corrections fade over cam_recon_smooth_time (the head stabilizer adds its own spring).
     {
         float tsm = camera_fp_cvars()->recon_smooth ? camera_fp_cvars()->recon_smooth->f : 0.08f;

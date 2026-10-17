@@ -178,7 +178,7 @@ typedef enum PipelineId {
 } PipelineId;
 
 // Must match SkinInstance in shaders/common.glsl (std430).
-typedef struct GpuSkinInstance { vec4 color; vec4 params; u32 info[4]; } GpuSkinInstance;
+typedef struct GpuSkinInstance { vec4 color; vec4 params; u32 info[4]; vec4 recon; } GpuSkinInstance;
 
 typedef struct LineBatch { VkDeviceSize offset; u32 count; } LineBatch;
 

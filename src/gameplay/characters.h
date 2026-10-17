@@ -83,6 +83,9 @@ typedef struct CharacterInst {
     bool tool_rag;                    // ragdolled by a dev tool (not dead): no auto revive
     bool corpse;                      // a corpse entity's body (docs/REVIVE.md): never evaluated, holds an adopted ragdoll / pose
     bool adopted;                     // corpse: took over its player's ragdoll when the player came back
+    bool phantom;                     // client-local display body (fabricator reconstruction): idle, no foot IK
+    vec4 recon;                       // phantom: MAT_RECON spine base + progress (docs/REVIVE.md)
+    u32 recon_flags;                  // MAT_RECON | MAT_RECON_FX
     u32 death_tick;
     u8 death_seed, death_part;
     vec3 death_impulse;
@@ -140,6 +143,9 @@ bool chars_head_world(World *w, EntityId e, float alpha, vec3 *out);
 // Corpses (docs/REVIVE.md): the body of an ET_CORPSE entity. While its player is dead the player's
 // own ragdoll is the body; when the player respawns the corpse adopts that ragdoll / pose.
 CharacterInst *chars_attach_corpse(World *w, EntityId corpse, int owner_slot);
+// Reconstruction display body: the given player's character (definition + modular parts) on a
+// client-local entity, evaluated in an idle pose and drawn with the dissolve (docs/REVIVE.md).
+CharacterInst *chars_attach_phantom(World *w, EntityId local_ent, int player_slot);
 // Pelvis + head of a character's current (ragdoll / settled / animated) pose.
 bool chars_body_axis(World *w, EntityId e, vec3 *pelvis, vec3 *head);
 // extract_blood hand IK: [0] where the free hand steadies the body (chest), [1] the needle point (arm / neck).

@@ -14,6 +14,10 @@
 #define MAT_GRID_MOA   1024u
 #define MAT_TERRAIN    4096u
 #define MAT_LAYERED    8192u
+#define MAT_RECON      16384u
+#define MAT_RECON_FX   32768u
+#define MAT_GLASS      65536u
+#define MAT_CAUSTICS   131072u
 
 struct PointLight {
     vec4 pos_radius;
@@ -162,6 +166,7 @@ struct SkinInstance {
     vec4 color;
     vec4 params;    // roughness, metallic, emissive, lod fade (-1..1, 0 = fully visible)
     uvec4 info;     // x = first bone, y = material flags
+    vec4 recon;     // MAT_RECON: spine base xyz, progress w (docs/REVIVE.md)
 };
 layout(std430, set = 0, binding = 2) readonly buffer SkinBones { mat4 bones[]; } skin_bones;
 layout(std430, set = 0, binding = 3) readonly buffer SkinInstances { SkinInstance inst[]; } skin_inst;

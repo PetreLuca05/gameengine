@@ -1072,6 +1072,7 @@ void chars_client_tick(World *w, double rt, float dt) {
     for (int k = 0; k < MAX_CHARACTERS; k++) {
         CharacterInst *c = w->chars->c[k];
         if (!c || !ent_valid(w, c->ent) || c->local || c->corpse) continue;
+        if (c->phantom) { sim_one(w, c, (int)ENT_INDEX(c->ent), dt); continue; }   // local display body: no samples
         client_one(w, c, (int)ENT_INDEX(c->ent), rt, dt);
     }
 }
@@ -1365,7 +1366,7 @@ static void post_one(World *w, CharacterInst *c, int i, float dt, vec3 cam_pos, 
     pi.raycast = ray_cb;
     pi.ray_ctx = w->phys;
     int sys = systems_for_lod(lod);
-    pi.foot_ik = cv(CG->foot_ik) && sys <= 0;
+    pi.foot_ik = cv(CG->foot_ik) && sys <= 0 && !c->phantom;   // phantoms float in the fabricator chamber
     pi.spine = cv(CG->spine) && sys <= 1;
     pi.turn = cv(CG->turn) && sys <= 0;
     pi.lean = cv(CG->lean) && sys <= 0;
@@ -1691,6 +1692,7 @@ static void draw_part(const CharacterInst *c, const SkeletonInstance *si, const 
     d.radius = s->height * c->def->scale;
     d.texture = gp->texture;
     if (d.texture) d.flags |= MAT_TEXTURED;
+    if (c->phantom && c->recon_flags) { d.flags |= c->recon_flags; d.recon = c->recon; }   // reconstruction dissolve
     // Stable id per character + part + LOD (previous palette -> per-bone velocity for TAA / motion blur).
     d.object_id = shadow ? 0u : (0x20000000u | ((u32)ENT_INDEX(c->ent) << 8) | ((u32)slot << 4) | id_low);
     render_draw_skinned(&d);
@@ -2403,6 +2405,24 @@ CharacterInst *chars_attach_corpse(World *w, EntityId corpse, int owner_slot) {
     // The player is already back (late join, spawn_corpse): a seeded lying pose at the corpse.
     bool owner_dead = p && p->active && (p->sim.move.mode == MOVE_DEAD || (w->flags[ENT_INDEX(p->ent)] & EF_DEAD));
     if (!owner_dead) c->settled = true;
+    return c;
+}
+
+CharacterInst *chars_attach_phantom(World *w, EntityId local_ent, int player_slot) {
+    if (!w->chars || !LIB) return NULL;
+    const Player *p = player_slot >= 0 && player_slot < MAX_PLAYERS ? &w->players[player_slot] : NULL;
+    CharacterInst *pc = p && p->active ? char_get(w, p->ent) : NULL;
+    u8 id = pc ? pc->def->net_id : 0;
+    if (!id) {
+        const CharacterDef *cd = anim_lib_char_by_id(LIB, "player");
+        if (cd) id = cd->net_id;
+    }
+    CharacterInst *c = id ? char_attach(w, local_ent, id) : NULL;
+    if (!c) return NULL;
+    c->phantom = true;
+    c->is_player = false;
+    c->slot = -1;
+    if (pc) memcpy(c->parts, pc->parts, sizeof(c->parts));
     return c;
 }
 

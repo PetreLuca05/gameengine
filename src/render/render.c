@@ -700,6 +700,7 @@ static u32 build_skin_pass(FrameResources *f, int pass, u32 base, SkinPass *out)
         if (shadow) g_skin_shadow_inst[draw_of[order[k]]] = base + k;
         g->color = d->color;
         g->params = v4(d->roughness, d->metallic, d->emissive, d->fade);
+        g->recon = d->recon;
         g->info[0] = d->bone_count & 0xFFFFFu;
         g->info[1] = d->flags;
         g->info[2] = g->info[3] = 0;

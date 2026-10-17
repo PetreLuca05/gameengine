@@ -1552,7 +1552,7 @@ u32 vkg_route_skinned(const SkinnedDraw *draws, u32 n, const mat4 *bones, u8 *ro
     vg_palettes_begin(&G.pal, R->frame_slot);
     for (u32 i = 0; i < n && !scope; i++) {
         const SkinnedDraw *d = &draws[i];
-        if ((d->flags & (MAT_VIEWMODEL | MAT_SHADOW_ONLY | MAT_HIGHLIGHT)) || d->fade != 0.0f || !d->object_id) continue;
+        if ((d->flags & (MAT_VIEWMODEL | MAT_SHADOW_ONLY | MAT_HIGHLIGHT | MAT_RECON)) || d->fade != 0.0f || !d->object_id) continue;   // reconstruction: skin.frag dissolve
         u32 bc = d->bone_count >> 20, off = d->bone_count & 0xFFFFFu;
         if (!bc || bc > VGEO_MAX_BONES) continue;
         int ri = skin_rec_of(d->mesh, false);

@@ -8,6 +8,11 @@
 
 // Draws the chamber glass / liquid and the reconstructing body (from draw_fabricator).
 void game_revive_draw_chamber(World *w, int i, vec3 pos, quat rot, const FabView *fv, float pulse);
+// Per frame: the reconstruction bodies (the player's own character dissolving in), motes, bubbles,
+// mist, the completion burst and camera bump; reconstruction_preview in the dev room.
+void game_revive_frame(World *w, float dt);
+// Displayed reconstruction progress of a fabricator (the replicated state, or the preview), < 0 = none.
+float game_revive_display_progress(World *w, EntityId fab, int *player_slot);
 
 // Death sequence (game_death.c).
 struct PostSettings;

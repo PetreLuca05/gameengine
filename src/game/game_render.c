@@ -326,7 +326,7 @@ static void draw_fabricator(World *w, int i, vec3 pos, quat rot, u32 hl) {
     draw_box_local(pos, rot, v3(0.3f, 0.06f, 0.0f), v3(0.95f, 0.06f, 0.7f), dark);
     // Chamber floor with an emissive ring, top cap with a light strip.
     vec3 cyan = v3(0.35f, 0.9f, 1.0f);
-    Material ring = mat_from(rgba8(cyan.x, cyan.y, cyan.z, 1), 0.3f, MAT_NO_SHADOW);
+    Material ring = mat_from(rgba8(cyan.x, cyan.y, cyan.z, 1), 0.3f, MAT_NO_SHADOW | (recon ? MAT_CAUSTICS : 0u));
     ring.emissive = 2.0f + 6.0f * pulse;
     draw_shape(VIS_CYLINDER, v3(0.6f, 0.012f, 0.6f), v3_add(pos, quat_rotate(rot, v3(0, 0.13f, 0))), rot, ring);
     draw_shape(VIS_CYLINDER, v3(0.56f, 0.02f, 0.56f), v3_add(pos, quat_rotate(rot, v3(0, 0.12f, 0))), rot, metal);

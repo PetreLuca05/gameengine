@@ -1,0 +1,19 @@
+{
+  "name": "recon_mote",
+  "_doc": "Reconstruction (docs/REVIVE.md): one glowing mote flying from the chamber wall onto the dissolve front (spawned per mote by game_revive.c, aimed along rot -Z; speed x energy = distance / life).",
+  "duration": 0.05,
+  "priority": 1,
+  "max_instances": 256,
+  "cull_distance": 40,
+  "emitters": [
+    {
+      "name": "mote",
+      "tier": "gpu",
+      "spawn": { "mode": "burst", "count": [1, 1], "life": [0.55, 0.55], "size": [0.008, 0.016], "speed": [1.0, 1.0], "dir": "socket", "angle": 0,
+                 "color": [0.55, 0.95, 1.0, 1.0], "color2": [0.9, 1.0, 1.0, 1.0] },
+      "update": { "gravity": 0.0, "drag": 0.0,
+                  "alpha_curve": [[0, 0], [0.15, 1], [0.85, 1], [1, 0]], "size_curve": [[0, 0.6], [0.7, 1], [1, 0.3]] },
+      "render": { "mode": "add", "orient": "stretch", "texture": "glow", "emissive": 5.0, "stretch": 0.02, "stretch_max": 6.0, "near_fade": 0.05 }
+    }
+  ]
+}
