@@ -3,8 +3,10 @@
 //
 //   fbx_textures [--out <dir>] <model.fbx>...      (default out: <fbx dir>/textures)
 //
-// Character models (Mixamo "nonPBR" exports) embed Diffuse / Normal / Specular / Glossiness PNGs;
-// the game loads the extracted diffuse maps for skinned characters (assets/human/textures).
+// Character models (Mixamo "nonPBR" exports) embed Diffuse / Normal / Specular / Glossiness PNGs.
+// Also lists every material texture connection and writes <out>/<model>.maps.json (material -> FBX
+// property -> file), from which tools/gen_skin_atlas.py builds the skins' albedo, normal and ORM
+// atlases (docs/CHARACTERS.md "PBR maps").
 #include "ufbx.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -55,6 +57,46 @@ static int extract(const char *path, const char *out_dir_opt) {
         const ufbx_material *mt = sc->materials.data[m];
         const ufbx_texture *t = mt->fbx.diffuse_color.texture ? mt->fbx.diffuse_color.texture : mt->pbr.base_color.texture;
         printf("  material '%s' -> %s\n", mt->name.data, t ? base_name(t->relative_filename.length ? t->relative_filename.data : t->filename.data) : "(no texture)");
+        // Every texture connection (property <- file, embedded or not) and the scalar terms the
+        // maps scale, so a model's real PBR content is visible (docs/CHARACTERS.md "PBR maps").
+        for (size_t k = 0; k < mt->textures.count; k++) {
+            const ufbx_material_texture *mtx = &mt->textures.data[k];
+            const ufbx_texture *tx = mtx->texture;
+            const char *fn = tx ? base_name(tx->relative_filename.length ? tx->relative_filename.data : tx->filename.data) : "?";
+            printf("      %-22s <- %s%s\n", mtx->material_prop.data, fn, tx && tx->content.size ? " (embedded)" : "");
+        }
+        printf("      shininess %.2f  specular %.3f %.3f %.3f x %.2f  emission %.3f %.3f %.3f x %.2f  bump %.2f\n",
+               mt->fbx.specular_exponent.value_real,
+               mt->fbx.specular_color.value_vec3.x, mt->fbx.specular_color.value_vec3.y, mt->fbx.specular_color.value_vec3.z,
+               mt->fbx.specular_factor.value_real,
+               mt->fbx.emission_color.value_vec3.x, mt->fbx.emission_color.value_vec3.y, mt->fbx.emission_color.value_vec3.z,
+               mt->fbx.emission_factor.value_real, mt->fbx.bump_factor.value_real);
+    }
+    // <out>/<model>.maps.json: material -> { FBX property: texture file } for tools/gen_skin_atlas.py
+    // (which file is the normal map / glossiness / specular of which material, docs/CHARACTERS.md).
+    char mpath[1400], model[256];
+    snprintf(model, sizeof(model), "%s", base_name(path));
+    char *dot = strrchr(model, '.');
+    if (dot) *dot = 0;
+    snprintf(mpath, sizeof(mpath), "%s/%s.maps.json", out_dir, model);
+    FILE *mf = fopen(mpath, "wb");
+    if (mf) {
+        fprintf(mf, "{\n  \"model\": \"%s\",\n  \"materials\": {", model);
+        for (size_t m = 0; m < sc->materials.count; m++) {
+            const ufbx_material *mt = sc->materials.data[m];
+            fprintf(mf, "%s\n    \"%s\": {", m ? "," : "", mt->name.data);
+            int n = 0;
+            for (size_t k = 0; k < mt->textures.count; k++) {
+                const ufbx_texture *tx = mt->textures.data[k].texture;
+                if (!tx) continue;
+                fprintf(mf, "%s \"%s\": \"%s\"", n++ ? "," : "", mt->textures.data[k].material_prop.data,
+                        base_name(tx->relative_filename.length ? tx->relative_filename.data : tx->filename.data));
+            }
+            fprintf(mf, " }");
+        }
+        fprintf(mf, "\n  }\n}\n");
+        fclose(mf);
+        printf("  %s\n", mpath);
     }
     printf("%s: %d texture(s)\n", path, written);
     ufbx_free_scene(sc);
