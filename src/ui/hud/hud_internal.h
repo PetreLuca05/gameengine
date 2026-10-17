@@ -31,7 +31,7 @@ float hud_compass_draw(Game *g, GuiRect safe);         // returns the bottom (co
 void hud_pings_draw(Game *g, GuiRect safe);
 // Caps label in the HUD style (hud.c).
 void hud_caps(float x, float y, float size, u32 c, int align, const char *s);
-// Item / vector icon in a box (the item's baked icon, else the named vector icon).
+// Item / vector icon in a box, one colour (the silhouette of the item's baked icon, else the named vector icon).
 void hud_item_icon(u16 item, const char *fallback, float cx, float cy, float size, u32 color);
 
 #endif
