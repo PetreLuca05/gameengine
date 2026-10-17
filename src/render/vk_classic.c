@@ -20,7 +20,16 @@
 //   wind     the vgeo path's foliage wind (docs/FOLIAGE_WIND.md): wpo_veg with the material's wind
 //            parameters (push constants), the wind field (fallback + tile ring, this frame's and last
 //            frame's for velocity, layers, debug view) in a per-frame-slot uniform buffer (set 4)
+//   LOD      docs/LOD.md (lod_active): ranges from assets/render/lod.json x tier x era; LOD, impostor,
+//            foliage density and shadow distance switches cross-fade over a distance band: an instance
+//            in a band is drawn as two or three parts (impostor / coarser / finer LOD) that split the
+//            dither threshold range [0, 1) between them (ClInst misc.z), so their coverage sums to 1;
+//            fading parts batch apart (key bit 3) and draw through the dithered pipelines. A LOD that is
+//            not resident yet draws the nearest resident one (the finer one is prefetched). The local
+//            light tiles (shared with r_vgeo 1) and r_lod_legacy keep the cuts from before.
 #include "vk_internal.h"
+#include "lod_fade.h"
+#include "fidelity/fidelity.h"
 #include "vgeo/vgeo_scene.h"
 #include "vgeo/foliage_support.h"
 #include "vgeo/vgeo_impostor.h"
@@ -33,6 +42,9 @@
 
 #define CL_MATS 8
 #define CL_IMPOSTOR 7u              // key LOD slot of the impostor bucket
+#define CL_KEY_FADE 8u              // key bit: a fading part (dithered pipelines)
+#define CL_KEY_SHIFT 4              // key = mesh << 4 | fade << 3 | LOD
+#define CL_PARTS 3                  // parts of one instance at most (impostor, coarser, finer)
 #define CL_VIEWS 4                  // main view + 3 sun cascades
 #define CL_IMPOSTOR_TRIS 256        // meshes this heavy (coarsest LOD) use r_classic_impostor_px
 
@@ -61,14 +73,15 @@ typedef struct ClMesh {
     u32 coarse_tris;                // triangles of the coarsest LOD: small meshes switch to impostors late
 } ClMesh;
 
-// Per-instance vertex stream (binding 1): position + scale, rotation, wind phase / fade alpha.
+// Per-instance vertex stream (binding 1): position + scale, rotation, misc: wind phase, fade alpha (foliage
+// density / shadow distance), the kept dither interval (lod_iv_pack, 0 = all), debug (LOD + 8 x role).
 typedef struct ClInst { float pos[4], rot[4], misc[4]; } ClInst;
 // Set 4 binding 0 (shaders/classic_common.glsl ClWind): the VgViewGpu wind fields of the frame.
 typedef struct ClWindGpu {
     float wind[4], wind_prev[4], tile[4], tile_prev[4], disp[4], time[4];
     u32 ring, ring_prev, layers, debug;
 } ClWindGpu;
-typedef struct ClBatch { u32 key, first, count; } ClBatch;   // key = mesh << 3 | LOD (CL_IMPOSTOR)
+typedef struct ClBatch { u32 key, first, count; } ClBatch;   // key = mesh << 4 | fade << 3 | LOD (CL_IMPOSTOR)
 typedef struct ClView {
     ClBatch *batches;
     u32 batch_count, batch_cap, instances;
@@ -79,6 +92,7 @@ static struct {
     u32 n, cap;
     const struct ClCull *v;
     const VgScene *s;
+    u32 parts;                      // output slots per instance (CL_PARTS with the fades, else 1)
 } T;   // culling tasks (cull_cells)
 
 enum { CP_GB, CP_GB_2S, CP_GB_CLIP, CP_GB_CLIP_2S, CP_LIT, CP_LIT_2S, CP_LIT_CLIP, CP_LIT_CLIP_2S, CP_SHADOW, CP_SHADOW_MASKED, CP_IMP_GB, CP_IMP_LIT, CP_COUNT };
@@ -102,7 +116,7 @@ static struct {
     GpuBuffer inst[FRAMES_IN_FLIGHT];
     u32 inst_cap[FRAMES_IN_FLIGHT], inst_used;
     ClInst *tmp;                    // gathered instances of one view
-    u16 *tmp_key;
+    u32 *tmp_key;
     u32 tmp_n, tmp_cap;
     u32 *count;                     // per key
     u32 count_cap;
@@ -118,6 +132,9 @@ static struct {
     u32 draws, tris, tris_shadow, local_instances;
     u64 gpu_bytes, cpu_bytes;      // LOD buffers + impostor textures / CPU copies of exported LODs (classic_stats)
     Cvar *impostor_px;
+    bool lod_new;                   // this frame's main view / cascades use docs/LOD.md
+    u32 lod_n[5], lod_fading;       // main view parts per LOD 0..3 / impostor, parts in a fade (render_classic_lod_counts)
+    float eff_lod_px, eff_shadow_px, eff_imp_px, eff_small_px;   // this frame's effective thresholds (classic_stats)
 } C;
 
 // ------------------------------------------------------------------ pipelines
@@ -591,7 +608,7 @@ static void tmp_reserve(u32 n) {
     u32 cap = C.tmp_cap ? C.tmp_cap : 4096;
     while (cap < n) cap *= 2;
     C.tmp = (ClInst *)realloc(C.tmp, sizeof(ClInst) * cap);
-    C.tmp_key = (u16 *)realloc(C.tmp_key, sizeof(u16) * cap);
+    C.tmp_key = (u32 *)realloc(C.tmp_key, sizeof(u32) * cap);
     C.tmp_cap = cap;
 }
 
@@ -603,10 +620,45 @@ typedef struct ClCull {
     float px_scale, lod_px, impostor_px, small_impostor_px, density, znear;
     bool ortho, shadow, era2010;
     vec4 sphere;                    // local light shadows: casters must touch it (w > 0)
+    // docs/LOD.md (legacy: the cuts from before): bands (octaves), foliage fade range / band scales,
+    // instance fade width, shrink, shadow distance scale and fade fraction, whole-cell limit scales
+    bool legacy;
+    float band, imp_band, fol_k, fol_band_k, fol_instance, fol_shrink, shadow_k, shadow_band, fade_lim_k, shadow_lim_k;
 } ClCull;
 
+static float clamp01f(float x) { return x < 0 ? 0 : (x > 1 ? 1 : x); }
+
+// Foliage density / distance fade (docs/LOD.md): the material's fade range and band scaled, a gentler
+// (smoothstep) density falloff, each instance fading over fol_instance of it (vgeo: 1/16).
+static float cl_foliage_alpha(const ClCull *v, const VgMesh *m, u32 fp, float dist) {
+    if (!(m->fflags & VGMF_FOLIAGE)) return 1.0f;
+    float t = v->density;
+    if (m->fade_end > m->fade_start) {
+        float s0 = m->fade_start * v->fol_k, s1 = s0 + (m->fade_end - m->fade_start) * v->fol_band_k;
+        float u = clamp01f((s1 - dist) / fmaxf(s1 - s0, 1e-3f));
+        t *= u * u * (3.0f - 2.0f * u);
+    }
+    float h = ((float)VG_INST_HASH(fp) + 0.5f) * (0.9375f / 256.0f);
+    return clamp01f((t - h) / fmaxf(v->fol_instance, 1e-3f));
+}
+
+// One part of an instance: debug = LOD (CL_IMPOSTOR -> 4) + 8 x role (1 incoming / coarser, 2 outgoing
+// / finer, 3 alpha fade only).
+static void emit_part(ClInst *out, u32 *key, u32 *n, u32 mesh, u32 lod, const float p[3], const float q[4], float sc, float phase, float alpha, float iv) {
+    ClInst *o = &out[*n];
+    o->pos[0] = p[0], o->pos[1] = p[1], o->pos[2] = p[2], o->pos[3] = sc;
+    memcpy(o->rot, q, 16);
+    o->misc[0] = phase;
+    o->misc[1] = alpha;
+    o->misc[2] = iv;
+    float role = iv != 0.0f ? (fmodf(iv, 512.0f) == 0.0f ? 1.0f : 2.0f) : (alpha < 1.0f ? 3.0f : 0.0f);
+    o->misc[3] = (float)(lod == CL_IMPOSTOR ? 4u : lod) + 8.0f * role;
+    bool fading = iv != 0.0f || alpha < 1.0f;
+    key[(*n)++] = mesh << CL_KEY_SHIFT | (fading ? CL_KEY_FADE : 0u) | lod;
+}
+
 // One instance against a view: appends to out / key at *n when kept (thread-safe: reads only).
-static void cull_instance(const ClCull *v, const VgScene *s, const VgInstance *in, ClInst *out, u16 *key, u32 *n) {
+static void cull_instance(const ClCull *v, const VgScene *s, const VgInstance *in, ClInst *out, u32 *key, u32 *n) {
     if ((in->flags_phase >> 16) & VGI_SKINNED) return;
     if (in->mesh >= C.mesh_cap || !C.mesh[in->mesh].used || in->mesh >= s->mesh_count) return;
     const ClMesh *cm = &C.mesh[in->mesh];
@@ -622,6 +674,42 @@ static void cull_instance(const ClCull *v, const VgScene *s, const VgInstance *i
     }
     if (!sphere_in(v->planes, 6, c, r)) return;
     float dx = p[0] - v->eye.x, dy = p[1] - v->eye.y, dz = p[2] - v->eye.z, dist = sqrtf(dx * dx + dy * dy + dz * dz);
+    if (!v->legacy) {   // docs/LOD.md
+        float alpha = 1.0f, shrink = 1.0f;
+        if (v->shadow && m->shadow_max_dist > 0) {   // the shadow fades out over the end of its (scaled) distance
+            float sd = m->shadow_max_dist * v->shadow_k;
+            if (dist > sd) return;
+            alpha = v->shadow_band > 0 ? clamp01f((sd - dist) / (sd * v->shadow_band)) : 1.0f;
+        }
+        if (m->fflags & VGMF_FOLIAGE) {   // density / distance fade: dither + the blades shrink
+            float fa = cl_foliage_alpha(v, m, in->flags_phase, dist);
+            if (fa <= 0) return;
+            alpha *= fa;
+            shrink = v->fol_shrink + (1.0f - v->fol_shrink) * fa;
+        }
+        if (alpha <= 0) return;
+        float dl = fmaxf(v3_dist(c, v->lod_eye), v->znear), dcl = fmaxf(dl - r, v->znear);
+        float imp_px = cm->coarse_tris >= CL_IMPOSTOR_TRIS ? v->impostor_px : v->small_impostor_px;
+        u32 ks = m->impostor_grid >> 16;
+        if (ks) imp_px *= (float)ks / 16.0f;
+        float iw = 0;   // impostor share: fades in over imp_band octaves past the switch size
+        if (!v->shadow && cm->imp_set && imp_px > 0) {
+            float size = 2.0f * m->radius * sc * v->px_scale / dl;
+            if (size < imp_px) iw = lod_band_weight(log2f(imp_px / fmaxf(size, 1e-6f)), v->imp_band);
+        }
+        float k = v->ortho ? sc * v->px_scale : sc * v->px_scale / dcl, cw = 0;
+        int first = v->era2010 && cm->lod_count > 1 ? 1 : 0;
+        u32 lod = iw >= 1.0f ? 0u : (u32)lod_pick_band(cm->lod_error, (int)cm->lod_count, first, k, v->lod_px, v->band, &cw);
+        float phase = (float)VG_INST_PHASE(in->flags_phase) / 256.0f, sd = sc * shrink;
+        // parts: impostor [0, iw), coarser LOD [iw, mid), finer LOD [mid, 1)
+        float mid = iw + (1.0f - iw) * cw;
+        if (iw > 0) emit_part(out, key, n, in->mesh, CL_IMPOSTOR, p, q, sd, phase, alpha, iw < 1.0f ? lod_iv_pack(0, iw) : 0.0f);
+        if (iw < 1.0f) {
+            if (cw > 0) emit_part(out, key, n, in->mesh, lod + 1, p, q, sd, phase, alpha, cw < 1.0f || iw > 0 ? lod_iv_pack(iw, mid) : 0.0f);
+            if (mid < 1.0f) emit_part(out, key, n, in->mesh, lod, p, q, sd, phase, alpha, mid > 0 ? lod_iv_pack(mid, 1.0f) : 0.0f);
+        }
+        return;
+    }
     if (v->shadow && m->shadow_max_dist > 0 && dist > m->shadow_max_dist) return;
     float alpha = (m->fflags & VGMF_FOLIAGE) ? vgeo_foliage_alpha(m, in->flags_phase, dist, v->density) : 1.0f;
     if (alpha <= 0) return;
@@ -645,7 +733,7 @@ static void cull_instance(const ClCull *v, const VgScene *s, const VgInstance *i
     o->misc[0] = (float)VG_INST_PHASE(in->flags_phase) / 256.0f;
     o->misc[1] = alpha;
     o->misc[2] = o->misc[3] = 0;
-    key[(*n)++] = (u16)(in->mesh << 3 | lod);
+    key[(*n)++] = in->mesh << CL_KEY_SHIFT | lod;
 }
 
 // The cells a view keeps become tasks (their instances), culled in parallel on the job system: task
@@ -657,7 +745,7 @@ static void task_add(const VgInstance *inst, u32 n) {
         T.cap = T.cap ? T.cap * 2 : 1024;
         T.t = (ClTask *)realloc(T.t, sizeof(ClTask) * T.cap);
     }
-    u32 off = T.n ? T.t[T.n - 1].off + T.t[T.n - 1].n : 0;
+    u32 off = T.n ? T.t[T.n - 1].off + T.t[T.n - 1].n * T.parts : 0;
     T.t[T.n++] = (ClTask){ inst, n, off, 0 };
 }
 
@@ -672,6 +760,8 @@ static void cull_range(void *ctx, int begin, int end) {
 
 static void cull_cells(const ClCull *v, const VgScene *s) {
     T.n = 0;
+    T.parts = v->legacy ? 1u : CL_PARTS;
+    float lim_k = v->legacy ? 1.0f : (v->shadow ? v->shadow_lim_k : v->fade_lim_k);   // docs/LOD.md: scaled distances
     for (u32 ci = 0; ci < s->cell_count; ci++) {
         const VgCell *cl = &s->cells[ci];
         u32 n = cl->count & VG_CELL_COUNT;
@@ -685,7 +775,7 @@ static void cull_cells(const ClCull *v, const VgScene *s) {
         if (!ch->used) continue;
         if (h < C.chunk_cap) {   // whole chunk: distance limit, frustum, light sphere
             const struct ClChunk *cc = &C.chunk[h];
-            float lim = v->shadow ? cc->shadow : cc->fade;
+            float lim = (v->shadow ? cc->shadow : cc->fade) * lim_k;
             if (lim > 0 && box_dist(cc->min, cc->max, v->eye) > lim) continue;
             if (!box_in(v->planes, 6, cc->min, cc->max)) continue;
             if (v->sphere.w > 0 && box_dist(cc->min, cc->max, v3(v->sphere.x, v->sphere.y, v->sphere.z)) > v->sphere.w) continue;
@@ -694,7 +784,7 @@ static void cull_cells(const ClCull *v, const VgScene *s) {
             u32 ci = ch->cells[k];
             const VgCell *cl = &pl->cells[ci];
             if (!cl->count) continue;
-            float lim = ci < (1u << 16) ? (v->shadow ? C.cell_shadow[ci] : C.cell_fade[ci]) : 0;
+            float lim = ci < (1u << 16) ? (v->shadow ? C.cell_shadow[ci] : C.cell_fade[ci]) * lim_k : 0;
             if (lim > 0 && box_dist(cl->min, cl->max, v->eye) > lim) continue;
             if (!box_in(v->planes, 6, cl->min, cl->max)) continue;
             if (v->sphere.w > 0 && box_dist(cl->min, cl->max, v3(v->sphere.x, v->sphere.y, v->sphere.z)) > v->sphere.w) continue;
@@ -702,7 +792,7 @@ static void cull_cells(const ClCull *v, const VgScene *s) {
         }
     }
     if (!T.n) return;
-    tmp_reserve(T.t[T.n - 1].off + T.t[T.n - 1].n);
+    tmp_reserve(T.t[T.n - 1].off + T.t[T.n - 1].n * T.parts);
     T.v = v;
     T.s = s;
     jobs_parallel_for((int)T.n, 8, cull_range, NULL);
@@ -711,7 +801,7 @@ static void cull_cells(const ClCull *v, const VgScene *s) {
         const ClTask *t = &T.t[i];
         if (t->out && t->off != w) {
             memmove(C.tmp + w, C.tmp + t->off, sizeof(ClInst) * t->out);
-            memmove(C.tmp_key + w, C.tmp_key + t->off, sizeof(u16) * t->out);
+            memmove(C.tmp_key + w, C.tmp_key + t->off, sizeof(u32) * t->out);
         }
         w += t->out;
     }
@@ -744,7 +834,7 @@ static void emit_view(ClView *out) {
     out->batch_count = 0;
     out->instances = C.tmp_n;
     if (!C.tmp_n) return;
-    u32 nkeys = C.mesh_cap * 8;
+    u32 nkeys = C.mesh_cap << CL_KEY_SHIFT;
     if (C.count_cap < nkeys) {
         C.count = (u32 *)realloc(C.count, sizeof(u32) * nkeys);
         C.count_cap = nkeys;
@@ -771,10 +861,37 @@ static void emit_view(ClView *out) {
 
 static void build_lods(const ClView *v) {
     for (u32 b = 0; b < v->batch_count; b++) {
-        u32 mesh = v->batches[b].key >> 3, lod = v->batches[b].key & 7u;
+        u32 mesh = v->batches[b].key >> CL_KEY_SHIFT, lod = v->batches[b].key & 7u;
         ClMesh *cm = &C.mesh[mesh];
         if (lod != CL_IMPOSTOR && !cm->lods[lod].gpu && cm->verts) cl_build_exported(cm, lod);
+        // docs/LOD.md: prefetch the next finer LOD, so it is resident before the band reaches it
+        if (C.lod_new && lod != CL_IMPOSTOR && lod > 0 && !cm->lods[lod - 1].gpu && cm->verts) cl_build_exported(cm, lod - 1);
     }
+}
+
+// Main view parts per LOD / impostor and the fading ones (docs/LOD.md, lod_dolly).
+static void count_view(const ClView *v) {
+    memset(C.lod_n, 0, sizeof(C.lod_n));
+    C.lod_fading = 0;
+    for (u32 b = 0; b < v->batch_count; b++) {
+        u32 lod = v->batches[b].key & 7u;
+        C.lod_n[lod == CL_IMPOSTOR ? 4 : DG_MIN(lod, 3u)] += v->batches[b].count;
+        if (v->batches[b].key & CL_KEY_FADE) C.lod_fading += v->batches[b].count;
+    }
+}
+
+void render_classic_lod_counts(u32 n[5], u32 *fading) {
+    memcpy(n, C.lod_n, sizeof(C.lod_n));
+    *fading = C.lod_fading;
+}
+
+// A threshold with the Engine Fidelity level's own scaling taken out (docs/LOD.md: the tier comes from
+// lod.json instead): cur x modern default / level default.
+static float without_level_scale(int feature, float cur) {
+    if (!fid_loaded()) return cur;
+    FidBounds b = fid_bounds(fid_level(), fid_era(), feature), m = fid_bounds(FID_MODERN, fid_era(), feature);
+    if (b.era_lacks || b.def <= 0 || m.def <= 0) return cur;
+    return cur * m.def / b.def;
 }
 
 void vkc_frame(const VgScene *s, const VgDisplace *disp, float density, float lod_px, float shadow_lod_px, float small_impostor_px, bool era2010, bool shadows,
@@ -782,6 +899,7 @@ void vkc_frame(const VgScene *s, const VgDisplace *disp, float density, float lo
     C.scene = NULL;
     C.inst_used = 0;
     C.draws = C.tris = C.tris_shadow = C.local_instances = 0;
+    C.lod_new = views && lod_active();
     for (int v = 0; v < CL_VIEWS; v++) C.view[v].batch_count = C.view[v].instances = 0;
     if (!C.ok || !s || !C.mesh_cap) return;
     if (!C.set_default) {
@@ -806,6 +924,8 @@ void vkc_frame(const VgScene *s, const VgDisplace *disp, float density, float lo
     }
     if (!views) {   // r_vgeo 1: vgeo draws the main view and the cascades, only local light tiles come here
         C.cpu_ms = 0;
+        memset(C.lod_n, 0, sizeof(C.lod_n));
+        C.lod_fading = 0;
         return;
     }
     // main view
@@ -820,9 +940,34 @@ void vkc_frame(const VgScene *s, const VgDisplace *disp, float density, float lo
     v.density = density;
     v.znear = R->cam.znear;
     v.era2010 = era2010;
+    v.legacy = !C.lod_new;
+    float shadow_px = shadow_lod_px;
+    if (C.lod_new) {
+        // docs/LOD.md: lod.json x tier x era; the fidelity level's own scaling of the shared thresholds
+        // is replaced by the tier (without_level_scale), the user's deviation from it is kept
+        const LodTable *lt = lod_table();
+        float band_k = lt->band > 0 ? lod_band() / lt->band : 1.0f;
+        float s_st = lod_scale(LODC_STATIC), s_im = lod_scale(LODC_IMPOSTOR), s_fo = lod_scale(LODC_FOLIAGE), s_sh = lod_scale(LODC_SHADOW);
+        v.lod_px = without_level_scale(FF_VGEO_LOD_PX, lod_px) / s_st;
+        v.impostor_px = C.impostor_px->f / s_im;
+        v.small_impostor_px = without_level_scale(FF_IMPOSTOR_PX, small_impostor_px) / s_im;
+        shadow_px = without_level_scale(FF_VGEO_SHADOW_ERROR_PX, shadow_lod_px) / s_sh;
+        v.band = lod_band();
+        v.imp_band = lt->imp_band * band_k;
+        v.fol_k = s_fo;
+        v.fol_band_k = s_fo * lt->fol_band / lt->cat[LODC_FOLIAGE];
+        v.fol_instance = lt->fol_instance;
+        v.fol_shrink = lt->fol_shrink;
+        v.shadow_k = s_sh;
+        v.shadow_band = lt->shadow_band * band_k;
+        v.fade_lim_k = fmaxf(v.fol_k, v.fol_band_k);
+        v.shadow_lim_k = s_sh;
+    }
+    C.eff_lod_px = v.lod_px, C.eff_shadow_px = shadow_px, C.eff_imp_px = v.impostor_px, C.eff_small_px = v.small_impostor_px;
     C.tmp_n = 0;
     cull_cells(&v, s);
     emit_view(&C.view[0]);
+    count_view(&C.view[0]);
     // sun cascades: orthographic, LOD by the cascade's texel size, shadow distance, no impostors
     if (shadows && R->r_shadow_quality->i > 0) {
         C.ncasc = (u32)DG_CLAMP(R->r_shadow_cascades->i, 1, 3);
@@ -836,7 +981,7 @@ void vkc_frame(const VgScene *s, const VgDisplace *disp, float density, float lo
             planes_of(mat4_mul(mat4_inverse(t), R->shadow_vps[k]), v.planes);
             v.ortho = v.shadow = true;
             v.px_scale = (float)tile / (2.0f * (&R->shadow_splits.x)[k]);
-            v.lod_px = shadow_lod_px;
+            v.lod_px = shadow_px;
             v.era2010 = false;
             C.tmp_n = 0;
             cull_cells(&v, s);
@@ -973,11 +1118,20 @@ static void draw_view(VkCommandBuffer cmd, const ClView *v, int pass, u32 shadow
         TextureId bound_tex = ~0u;
         for (u32 b = 0; b < v->batch_count; b++) {
             const ClBatch *bt = &v->batches[b];
-            u32 mesh = bt->key >> 3, lod = bt->key & 7u;
+            u32 mesh = bt->key >> CL_KEY_SHIFT, lod = bt->key & 7u;
+            bool fading = (bt->key & CL_KEY_FADE) != 0;
             if (lod == CL_IMPOSTOR) continue;
             const ClMesh *cm = &C.mesh[mesh];
             const ClLod *L = &cm->lods[lod];
-            if (!lod_ready(L)) continue;
+            if (!lod_ready(L)) {
+                if (!C.lod_new) continue;
+                // docs/LOD.md streaming: the nearest resident LOD (coarser first) until this one is in
+                u32 ready = 0;
+                for (u32 l = 0; l < cm->lod_count; l++) ready |= lod_ready(&cm->lods[l]) ? 1u << l : 0u;
+                int rl = lod_resident_pick((int)lod, ready, (int)cm->lod_count);
+                if (rl < 0) continue;
+                L = &cm->lods[rl];
+            }
             const VgMesh *vm = &s->meshes[mesh];
             bool mesh_bound = false;
             for (u32 k = 0; k < L->nsec; k++) {
@@ -986,9 +1140,9 @@ static void draw_view(VkCommandBuffer cmd, const ClView *v, int pass, u32 shadow
                 const VgMaterial *m = &s->materials[mi < s->material_count ? mi : 0];
                 TextureId tex = mat_texture(m);
                 bool two = (m->flags & VGM_TWO_SIDED) != 0;
-                bool clip = ((m->flags & VGM_MASKED) && tex) || (m->flags & VGM_DITHER_FADE);
+                bool clip = fading || ((m->flags & VGM_MASKED) && tex) || (m->flags & VGM_DITHER_FADE);
                 int want;
-                if (pass == 2) want = (m->flags & VGM_MASKED) && tex ? 1 : 0;
+                if (pass == 2) want = fading || ((m->flags & VGM_MASKED) && tex) ? 1 : 0;
                 else want = (clip ? 2 : 0) + (two ? 1 : 0);
                 if (want != g) continue;
                 if (!pipe_bound) {
@@ -1018,6 +1172,7 @@ static void draw_view(VkCommandBuffer cmd, const ClView *v, int pass, u32 shadow
                 }
                 PushLit pc;
                 mat_push(&pc, m, tex, maps, shadow_view);
+                if (fading) pc.model.m[15] = 1.0f;   // a fading part dithers whatever its material
                 vkCmdPushConstants(cmd, C.layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushLit), &pc);
                 vkCmdDrawIndexed(cmd, sec->index_count, bt->count, sec->first_index, 0, bt->first);
                 R->stats.draw_calls++;
@@ -1034,7 +1189,7 @@ static void draw_view(VkCommandBuffer cmd, const ClView *v, int pass, u32 shadow
     for (u32 b = 0; b < v->batch_count; b++) {
         const ClBatch *bt = &v->batches[b];
         if ((bt->key & 7u) != CL_IMPOSTOR) continue;
-        const ClMesh *cm = &C.mesh[bt->key >> 3];
+        const ClMesh *cm = &C.mesh[bt->key >> CL_KEY_SHIFT];
         if (!cm->imp_set || !R->textures[cm->imp_albedo].ready || !R->textures[cm->imp_normal].ready) continue;
         if (!pipe_bound) {
             vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, C.pipe[pass == 0 ? CP_IMP_GB : CP_IMP_LIT]);
@@ -1042,7 +1197,7 @@ static void draw_view(VkCommandBuffer cmd, const ClView *v, int pass, u32 shadow
             pipe_bound = true;
         }
         vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, C.layout, 3, 1, &cm->imp_set, 0, NULL);
-        const VgMesh *vm = &s->meshes[bt->key >> 3];
+        const VgMesh *vm = &s->meshes[bt->key >> CL_KEY_SHIFT];
         const VgMaterial *m = &s->materials[vm->material_base < s->material_count ? vm->material_base : 0];
         PushLit pc;
         memset(&pc, 0, sizeof(pc));
@@ -1052,7 +1207,7 @@ static void draw_view(VkCommandBuffer cmd, const ClView *v, int pass, u32 shadow
         pc.model.m[3] = cm->imp_radius;
         pc.model.m[4] = (float)cm->imp_grid;
         pc.model.m[14] = (float)(R->frame_index & 63u);
-        pc.model.m[15] = (vm->fflags & VGMF_DITHER) ? 1.0f : 0.0f;
+        pc.model.m[15] = (vm->fflags & VGMF_DITHER) || (bt->key & CL_KEY_FADE) ? 1.0f : 0.0f;
         pc.color = v4(1, 1, 1, 1);
         pc.params = v4(m->roughness, m->metallic, m->emissive, 1.0f);
         pc.flags[0] = m->flags & ~(u32)(VGM_FLAGS | MAT_TEXTURED | MAT_TRIPLANAR | MAT_GRID | MAT_CHECKER | MAT_PBR_MAPS);
@@ -1088,6 +1243,7 @@ u32 vkc_draw_local_shadow(VkCommandBuffer cmd, vec4 sphere, const vec4 planes[6]
     v.density = C.density;
     v.znear = 0.05f;
     v.shadow = true;
+    v.legacy = true;   // shared with r_vgeo 1: the cuts from before docs/LOD.md
     C.tmp_n = 0;
     cull_cells(&v, C.scene);
     emit_view(&lv);
@@ -1111,4 +1267,8 @@ void vkc_stats(void) {
              "CPU cull %.3f ms",
              meshes, imp, C.view[0].instances, C.view[0].batch_count, C.view[1].instances, C.view[2].instances, C.view[3].instances, C.local_instances, C.draws,
              (double)C.tris / 1e6, (double)C.tris_shadow / 1e6, (double)C.cpu_ms);
+    log_info("classic: LOD %s: error %.2f px (shadows %.2f), impostors below %.1f px (trees x species scale) / %.1f px (small cover); main view parts LOD0-3 %u / %u / %u / %u, "
+             "impostors %u, fading %u",
+             C.lod_new ? "docs/LOD.md" : "legacy", (double)C.eff_lod_px, (double)C.eff_shadow_px, (double)C.eff_imp_px, (double)C.eff_small_px, C.lod_n[0], C.lod_n[1], C.lod_n[2],
+             C.lod_n[3], C.lod_n[4], C.lod_fading);
 }

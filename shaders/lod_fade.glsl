@@ -48,6 +48,29 @@ float lod_dither(vec2 frag) {
 bool lod_faded_n(float f, float n) { return f != 0.0 && (f > 0.0 ? n >= f : n < 1.0 + f); }
 bool lod_faded(float f, vec2 frag) { return f != 0.0 && lod_faded_n(f, lod_dither(frag)); }
 
+// Terrain geomorph (src/render/lod_fade.c lod_terrain_morph, docs/LOD.md): morph of a vertex at flat
+// distance dist in a chunk of `level` towards level + 1.
+float lod_terrain_morph(float dist, float level, float lod_d, float band, float diag) {
+    if (level > 2.5 || lod_d <= 0.0) return 0.0;
+    float L = log2(max(dist, 1e-3) / lod_d) - level;
+    float a = 1.0 - clamp(band, 0.02, 1.0);
+    if (level > 0.5) a = max(a, log2(1.0 + diag / (lod_d * exp2(level))));
+    if (a >= 1.0) return L >= 1.0 ? 1.0 : 0.0;
+    return clamp((L - a) / (1.0 - a), 0.0, 1.0);
+}
+
+// MAT_TERRAIN_MORPH vertex (chunks.c): uv.x the height delta to the next coarser LOD, uv.y its normal
+// (x, z 12 bit each); enc = chunk LOD + 8 x LOD distance (m). wp: world position (in / out), n: normal.
+void lod_terrain_vertex(inout vec3 wp, inout vec3 n, vec2 uv, float enc) {
+    float level = mod(enc, 8.0), lod_d = floor(enc / 8.0);
+    float m = lod_terrain_morph(length(wp.xz - frame.camera_pos.xz), level, lod_d, frame.lod_terrain.x, frame.lod_terrain.y);
+    if (m <= 0.0) return;
+    wp.y += uv.x * m;
+    vec2 q = vec2(mod(uv.y, 4096.0), floor(uv.y / 4096.0)) / 4095.0 * 2.0 - 1.0;
+    vec3 cn = vec3(q.x, sqrt(max(1.0 - dot(q, q), 0.0)), q.y);
+    n = normalize(mix(n, cn, m));
+}
+
 // r_lod_fade_debug (frame.lod_fade.y bit 0): fading draws tinted (green in, red out).
 vec3 lod_fade_debug_tint(vec3 c, float f) {
     if ((uint(frame.lod_fade.y) & 1u) == 0u || f == 0.0) return c;

@@ -6,7 +6,9 @@
 //   model[3]  unused, alpha cutoff (0 = not masked), frame index (dither), dither fade on
 //   color, params (roughness, metallic, emissive, tex scale), flags (x material, y WPO snippet | WPO_DISPLACE, w shadow view),
 //   pbr (glTF maps: normal_scale, occlusion_strength bits, emissive RGBA8, 0; shaders/pbr_maps.glsl)
-// Instance stream (binding 1): i_pos (xyz, uniform scale), i_rot (quaternion), i_misc (x wind phase, y fade alpha).
+// Instance stream (binding 1): i_pos (xyz, uniform scale), i_rot (quaternion), i_misc (x wind phase, y fade alpha,
+// z the kept dither interval of a LOD cross-fade part (lo + 512 hi in 1/256, 0 = all; docs/LOD.md), w debug:
+// LOD + 8 x role).
 // Set 4 (per frame slot): the wind field as the vgeo views see it (VgViewGpu wind / wind_tile / foliage /
 // disp / wind_misc) and the wind tile ring (docs/FOLIAGE_WIND.md).
 #define WPO_DISPLACE 256u
@@ -18,6 +20,7 @@
 #define VGWD_CHANNELS 1u
 #define VGWD_BEND 2u
 #include "vgeo/wpo.glsl"
+#include "lod_fade.glsl"
 
 layout(push_constant) uniform Push {
     mat4 model;
@@ -98,9 +101,29 @@ vec4 cl_wind_debug_color(vec3 ip, vec4 col) {
 #define CL_MAT_COLOR (cl_wind_debug() ? vec4(1.0) : pc.color)
 #define CL_MAT_FLAGS (cl_wind_debug() ? (pc.flags.x & ~(MAT_TEXTURED | MAT_TRIPLANAR | MAT_GRID | MAT_CHECKER)) : pc.flags.x)
 
-// Fade dither (vg_dither: interleaved gradient noise rotated per frame for TAA).
+// Fade dither: the LOD cross-fade blue noise (shaders/lod_fade.glsl, docs/LOD.md); before docs/LOD.md
+// (frame.lod_fade.z 0) vg_dither's interleaved gradient noise rotated per frame for TAA.
 float cl_dither(ivec2 px) {
+    if (frame.lod_fade.z > 0.5) return lod_dither_at(px, uint(frame.lod_fade.x));
     vec2 p = vec2(px) + 5.588238 * float(uint(pc.model[3].z) & 63u);
     return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715))));
 }
-bool cl_faded(float fade, vec2 frag) { return pc.model[3].w > 0.5 && fade < 1.0 && fade <= cl_dither(ivec2(frag)); }
+// f: x fade alpha (kept below it), y kept interval [lo, hi) of a cross-fade part (0 = all).
+bool cl_faded(vec4 f, vec2 frag) {
+    if (pc.model[3].w <= 0.5 || (f.x >= 1.0 && f.y == 0.0)) return false;
+    float n = cl_dither(ivec2(frag));
+    if (f.x < 1.0 && f.x <= n) return true;
+    if (f.y != 0.0) {
+        float lo = mod(f.y, 512.0) / 256.0, hi = floor(f.y / 512.0) / 256.0;
+        if (n < lo || n >= hi) return true;
+    }
+    return false;
+}
+// r_lod_fade_debug / r_lod_debug 2 tints (f.z: LOD + 8 x role: 1 incoming, 2 outgoing, 3 alpha fade).
+vec3 cl_lod_debug(vec3 c, vec4 f) {
+    float role = floor(f.z / 8.0), level = f.z - 8.0 * role;
+    c = lod_level_tint(c, level);
+    if (role > 0.5) c = lod_fade_debug_tint(c, role > 2.5 ? -0.5 : (role < 1.5 ? 0.5 : -0.5));
+    if (role > 2.5 && (uint(frame.lod_fade.y) & 1u) != 0u) c = mix(c, vec3(0.2, 0.4, 1.0), 0.5);
+    return c;
+}

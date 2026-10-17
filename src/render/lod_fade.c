@@ -270,17 +270,23 @@ bool lod_load(const char *path) {
     return true;
 }
 
+static void load_shipped(void) {
+    char path[512];
+    platform_data_path("assets/render/lod.json", path, sizeof(path));
+    lod_load(path);
+}
+
 static void cmd_lod_reload(int argc, const char **argv) {
     (void)argc;
     (void)argv;
-    lod_load("assets/render/lod.json");
+    load_shipped();
 }
 
 void lod_init(void) {
     if (L.init) return;
     L.init = true;
     lod_table_default(&L.t);
-    lod_load("assets/render/lod.json");
+    load_shipped();
     L.fade_time = cvar_reg_float("r_lod_fade_time", L.t.fade_time, 0.0f, 3.0f, CVAR_ARCHIVE, "LOD cross-fade time of characters and their shadows (s, 0 = cut; docs/LOD.md)");
     L.band = cvar_reg_float("r_lod_fade_band", L.t.band, 0.0f, 2.0f, CVAR_ARCHIVE,
                             "distance band of the stateless LOD / impostor cross-fades (octaves of projected size, 0 = cut; docs/LOD.md)");

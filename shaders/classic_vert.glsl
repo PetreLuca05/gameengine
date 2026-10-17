@@ -10,13 +10,13 @@ layout(location = 5) in vec4 i_rot;
 layout(location = 6) in vec4 i_misc;
 
 layout(location = 2) out vec2 v_uv;
+layout(location = 9) flat out vec4 v_fade;   // the instance's fade alpha, cross-fade interval, debug (classic_common.glsl cl_faded)
 #ifndef CL_SHADOW
 layout(location = 0) out vec3 v_world;
 layout(location = 1) out vec3 v_normal;
 layout(location = 3) out vec4 v_color;
 layout(location = 7) out vec4 v_cur_clip;
 layout(location = 8) out vec4 v_prev_clip;
-layout(location = 9) flat out float v_fade;
 // The prepass and the lit pass (depth EQUAL) must produce bit-identical depth.
 invariant gl_Position;
 #endif
@@ -26,6 +26,7 @@ void main() {
     vec3 n = cl_qrot(i_rot, in_normal), nb = n;
     uint layers = cw.misc.z;
     v_uv = in_uv;
+    v_fade = i_misc.yzwx;
 #ifdef CL_SHADOW
     vec3 w = base + cl_wpo(base, n, i_pos.xyz, i_pos.w, in_color, i_misc.x, false, layers & ~VGW_NORMALS, nb);
     gl_Position = shadow_pass_vp(pc.flags.w) * vec4(w, 1.0);
@@ -34,7 +35,6 @@ void main() {
     v_world = w;
     v_normal = nb;
     v_color = pc.flags.y != 0u ? (cl_wind_debug() ? cl_wind_debug_color(i_pos.xyz, in_color) : vec4(1.0)) : in_color;   // WPO materials: the colour is wind weights
-    v_fade = i_misc.y;
     gl_Position = frame.view_proj * vec4(w, 1.0);
     v_cur_clip = frame.view_proj_nj * vec4(w, 1.0);
     vec3 pw = w;

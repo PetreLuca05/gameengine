@@ -5,6 +5,7 @@
 #include "core/jobs.h"
 #include "render/mesh_gen.h"
 #include "render/debug_draw.h"
+#include "render/lod_fade.h"
 #include "gameplay/entities.h"
 #include "FastNoiseLite.h"
 #include <SDL3/SDL.h>
@@ -171,7 +172,34 @@ static float flat_height_at(void *user, float x, float z) { (void)user; (void)x;
 
 // ------------------------------------------------------------------ meshing (LOD + skirts)
 
-static MeshId build_lod_mesh(const ChunkData *d, int stride) {
+// Grid normal at sample (x, z) from the neighbours `stride` samples away (clamped to the chunk).
+static vec3 grid_normal(const ChunkData *d, int x, int z, int stride) {
+    int xl = DG_MAX(x - stride, 0), xr = DG_MIN(x + stride, CHUNK_SAMPLES - 1);
+    int zd = DG_MAX(z - stride, 0), zu = DG_MIN(z + stride, CHUNK_SAMPLES - 1);
+    float dx = (d->heights[z * CHUNK_SAMPLES + xr] - d->heights[z * CHUNK_SAMPLES + xl]) / (float)(xr - xl);
+    float dz = (d->heights[zu * CHUNK_SAMPLES + x] - d->heights[zd * CHUNK_SAMPLES + x]) / (float)(zu - zd);
+    return v3_norm(v3(-dx, 1.0f, -dz));
+}
+
+// Geomorph target of a vertex (docs/LOD.md): the height and normal the next coarser LOD (stride 2s)
+// has at this sample: its own vertex, or the middle of the coarse edge / diagonal (b-c, the coarse
+// triangulation) it lies on. Packed into uv: x = height delta, y = normal x / z (12 bit each).
+static vec2 morph_target(const ChunkData *d, int x, int z, int stride, float h) {
+    int S = stride * 2;
+    if (S > 8) return v2(0.0f, -1.0f);   // the coarsest LOD: nothing to morph to (normal unused)
+    bool ex = (x % S) != 0, ez = (z % S) != 0;
+    int ax = x, az = z, bx = x, bz = z;
+    if (ex && ez) { ax = x + stride, az = z - stride, bx = x - stride, bz = z + stride; }   // the coarse diagonal
+    else if (ex) { ax = x - stride, bx = x + stride; }
+    else if (ez) { az = z - stride, bz = z + stride; }
+    float ch = 0.5f * (d->heights[az * CHUNK_SAMPLES + ax] + d->heights[bz * CHUNK_SAMPLES + bx]);
+    vec3 cn = v3_norm(v3_add(grid_normal(d, ax, az, S), grid_normal(d, bx, bz, S)));
+    float qx = floorf(clampf(cn.x * 0.5f + 0.5f, 0, 1) * 4095.0f + 0.5f), qz = floorf(clampf(cn.z * 0.5f + 0.5f, 0, 1) * 4095.0f + 0.5f);
+    return v2(ch - h, qx + qz * 4096.0f);
+}
+
+// morph: uv carries the geomorph target (MAT_TERRAIN_MORPH draws); otherwise uv = (x, z) as before.
+static MeshId build_lod_mesh(const ChunkData *d, int stride, bool morph) {
     MeshBuilder mb;
     mb_init(&mb);
     int n = (CHUNK_SAMPLES - 1) / stride + 1;
@@ -179,12 +207,9 @@ static MeshId build_lod_mesh(const ChunkData *d, int stride) {
         for (int xi = 0; xi < n; xi++) {
             int x = xi * stride, z = zi * stride;
             float h = d->heights[z * CHUNK_SAMPLES + x];
-            int xl = DG_MAX(x - stride, 0), xr = DG_MIN(x + stride, CHUNK_SAMPLES - 1);
-            int zd = DG_MAX(z - stride, 0), zu = DG_MIN(z + stride, CHUNK_SAMPLES - 1);
-            float dx = (d->heights[z * CHUNK_SAMPLES + xr] - d->heights[z * CHUNK_SAMPLES + xl]) / (float)(xr - xl);
-            float dz = (d->heights[zu * CHUNK_SAMPLES + x] - d->heights[zd * CHUNK_SAMPLES + x]) / (float)(zu - zd);
-            vec3 nrm = v3_norm(v3(-dx, 1.0f, -dz));
-            mb_vertex(&mb, v3((float)x, h, (float)z), nrm, v2((float)x, (float)z), d->colors[z * CHUNK_SAMPLES + x]);
+            vec3 nrm = grid_normal(d, x, z, stride);
+            vec2 uv = morph ? morph_target(d, x, z, stride, h) : v2((float)x, (float)z);
+            mb_vertex(&mb, v3((float)x, h, (float)z), nrm, uv, d->colors[z * CHUNK_SAMPLES + x]);
         }
     for (int zi = 0; zi < n - 1; zi++)
         for (int xi = 0; xi < n - 1; xi++) {
@@ -259,7 +284,8 @@ BodyId chunks_capsule_body(World *w, const RenderCapsule *caps, int n) {
 
 static void finalize_chunk(ChunkStreamer *s, Chunk *ch) {
     ChunkData *d = ch->data;
-    for (int l = 0; l < LOD_COUNT; l++) ch->lod[l] = build_lod_mesh(d, 1 << l);
+    // uv = the geomorph target (docs/LOD.md); the shading never reads a terrain chunk's uv (untextured)
+    for (int l = 0; l < LOD_COUNT; l++) ch->lod[l] = build_lod_mesh(d, 1 << l, true);
     ch->heights = (float *)malloc(sizeof(float) * CHUNK_SAMPLES * CHUNK_SAMPLES);
     memcpy(ch->heights, d->heights, sizeof(float) * CHUNK_SAMPLES * CHUNK_SAMPLES);
     BodyDesc bd;
@@ -621,6 +647,14 @@ void chunks_render(World *w, vec3 cam) {
     ChunkStreamer *s = w->chunks;
     if (!s) return;
     float lod_d = CG->lod_dist->f;
+    // docs/LOD.md: LOD distances x lod.json x tier (at least 32 m: one chunk diagonal fits a level), the
+    // level from the chunk's nearest point and a per-vertex geomorph (no pops, no visible skirts)
+    bool morph = lod_active();
+    float far_d = 700.0f;
+    if (morph) {
+        lod_d = floorf(fmaxf(lod_d * lod_scale(LODC_TERRAIN), 32.0f));
+        far_d *= lod_scale(LODC_TERRAIN);
+    }
     u32 grid = CG->grid->i && !s->provider.no_grid ? MAT_GRID : 0;
     if (s->provider.surface_textures) grid |= MAT_TERRAIN;
     static u8 complete[FAR_MAX_TILES];
@@ -633,7 +667,7 @@ void chunks_render(World *w, vec3 cam) {
         float d = v3_len(v3_flat(v3_sub(center, cam)));
         DrawItem di;
         memset(&di, 0, sizeof(di));
-        di.mesh = ft->lod[d < 700.0f ? 0 : 1];
+        di.mesh = ft->lod[d < far_d ? 0 : 1];
         di.model = mat4_translate(origin);
         di.mat = material_color(v4(1, 1, 1, 1));
         di.mat.roughness = 0.95f;
@@ -659,6 +693,10 @@ void chunks_render(World *w, vec3 cam) {
         vec3 center = v3_add(origin, v3(CHUNK_SIZE * 0.5f, 0, CHUNK_SIZE * 0.5f));
         float d = v3_len(v3_flat(v3_sub(center, cam)));
         int lod = d < lod_d ? 0 : d < lod_d * 2 ? 1 : d < lod_d * 4 ? 2 : 3;
+        if (morph) {
+            float nx = clampf(cam.x, origin.x, origin.x + CHUNK_SIZE) - cam.x, nz = clampf(cam.z, origin.z, origin.z + CHUNK_SIZE) - cam.z;
+            lod = lod_terrain_level(sqrtf(nx * nx + nz * nz), lod_d);
+        }
         DrawItem di;
         memset(&di, 0, sizeof(di));
         di.mesh = ch->lod[lod];
@@ -666,6 +704,10 @@ void chunks_render(World *w, vec3 cam) {
         di.mat = material_color(v4(1, 1, 1, 1));
         di.mat.roughness = 0.95f;
         di.mat.flags = grid;
+        if (morph) {
+            di.mat.flags |= MAT_TERRAIN_MORPH;
+            di.mat.tex_scale = (float)lod + 8.0f * lod_d;   // lod_terrain_vertex
+        }
         render_draw(&di);
     }
 }

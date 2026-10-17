@@ -173,6 +173,11 @@ typedef struct FrameData {
     vec4 ssky2;           // x tan(moon source radius), y r_shadow_debug view, z contact shadow length scale, w moon tile fade-out radius (m)
     vec4 shadow_mpt;      // metres per texel: cascades 0..2, w the moon tile
     vec4 shadow_span;     // metres of light-space depth per NDC unit: cascades 0..2, w the moon tile
+    // LOD cross-fades (docs/LOD.md, shaders/lod_fade.glsl): x dither frame (0..63, 0 = static), y debug bits
+    // (1 r_lod_fade_debug, 2 r_lod_debug 2 level colours), z 1 = the new LOD fades (0 = legacy), w terrain
+    // surface detail range scale; lod_terrain: x geomorph band (octaves), y chunk diagonal (m).
+    vec4 lod_fade;
+    vec4 lod_terrain;
 } FrameData;
 
 typedef struct PushLit {
@@ -186,7 +191,7 @@ _Static_assert(sizeof(PushLit) == 128, "PushLit: the guaranteed push constant bu
 
 typedef enum PipelineId {
     PIPE_LIT, PIPE_LIT_WIRE, PIPE_LIT_BLEND, PIPE_SHADOW, PIPE_LINES, PIPE_LINES_OVERLAY,
-    PIPE_TEXT, PIPE_PREPASS, PIPE_UI, PIPE_SKIN, PIPE_SKIN_WIRE, PIPE_SKIN_SHADOW, PIPE_PREPASS_SKIN, PIPE_UI3D, PIPE_PRECIP,
+    PIPE_TEXT, PIPE_PREPASS, PIPE_UI, PIPE_SKIN, PIPE_SKIN_WIRE, PIPE_SKIN_SHADOW, PIPE_SKIN_SHADOW_FADE, PIPE_SHADOW_MORPH, PIPE_PREPASS_SKIN, PIPE_UI3D, PIPE_PRECIP,
     // glTF material variants of PIPE_LIT / PIPE_PREPASS (docs/PBR.md): doubleSided (no culling), alphaMode MASK (discard, no culling)
     PIPE_LIT_2S, PIPE_LIT_MASK, PIPE_PREPASS_2S, PIPE_PREPASS_MASK, PIPE_COUNT
 } PipelineId;

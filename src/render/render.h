@@ -70,6 +70,9 @@ enum MaterialFlags {
     MAT_CAUSTICS = 1u << 23,
 };
 #define MAT_PBR_MAPS (MAT_MR_TEX | MAT_NORMAL_TEX | MAT_OCCLUSION_TEX | MAT_EMISSIVE_TEX)
+// Terrain chunk geomorph (docs/LOD.md, chunks.c): uv.x = height delta to the next coarser LOD, uv.y = its
+// normal (12 + 12 bit x / z), tex_scale = chunk LOD + 8 x LOD distance (m); lit.vert / shadow_morph.vert.
+#define MAT_TERRAIN_MORPH (1u << 24)
 
 typedef struct Material {
     vec4 color;
@@ -200,6 +203,9 @@ void render_surface_map(const u8 *ids, int n, float origin_x, float origin_z, fl
 // Frame
 bool render_begin_frame(void);
 void render_set_camera(const RenderCamera *cam);
+// Classic renderer (r_vgeo 0), last frame's main view: instances per LOD 0..3 and impostors (n[4]), and
+// those in a cross-fade band (drawn twice, docs/LOD.md).
+void render_classic_lod_counts(u32 n[5], u32 *fading);
 void render_set_camera_override(bool (*fn)(RenderCamera *cam));   // replaces the camera while fn returns true (bench_fidelity flythrough)
 void render_set_environment(const RenderEnvironment *env);
 void render_draw(const DrawItem *item);
