@@ -5,7 +5,8 @@
 //     background, dark text (assets/phone/theme.json). The layout comes from phone_os_layout, the
 //     same rects the HUD panel hit tests;
 //   * the HUD: the phone panel (the simulated phone screen, bottom-right), key hints, toasts;
-//   * the phone model (body, emissive screen with glass, lens, the screen light) for hands.c.
+//   * the phone model (body, a dark glass screen, lens) for hands.c: the model never shows the
+//     screen content (the user's call: the screen lives on the HUD panel / the real phone).
 #include "phone_internal.h"
 #include "core/engine.h"
 #include "core/log.h"
@@ -298,7 +299,7 @@ static void status_bar(PhoneState *s, const PhoneScreenView *v, Canvas *c, float
     snprintf(clock, sizeof(clock), "%02d:%02d", (int)h % 24, (int)((h - floorf(h)) * 60.0f));
     c_text(c, 1, 30, 44, 0, fg, clock);
     // Battery (cosmetic, drains slowly while the phone is out: a later mechanic hook).
-    float bat = v->remote ? 0.8f : s->os.battery;
+    float bat = s->os.battery;
     float bx = W - 76;
     c_round(c, bx, 22, 44, 22, 6, with_a(fg, 210), 2.5f);
     c_rect(c, bx + 44, 29, 4, 8, with_a(fg, 190));
@@ -318,7 +319,7 @@ static void status_bar(PhoneState *s, const PhoneScreenView *v, Canvas *c, float
         char t[24];
         c_round(c, W * 0.5f - 80, 16, 160, 34, 17, RGBA(220, 30, 30, 230), 0);
         c_circle(c, W * 0.5f - 56, 33, 7, RGBA(255, 255, 255, 255), 0);
-        c_text(c, 1, W * 0.5f + 10, 44, 1, RGBA(255, 255, 255, 255), v->remote ? "REC" : mmss((g_engine.real_time - s->rec_start), t, sizeof(t)));
+        c_text(c, 1, W * 0.5f + 10, 44, 1, RGBA(255, 255, 255, 255), mmss((g_engine.real_time - s->rec_start), t, sizeof(t)));
     }
 }
 
@@ -344,10 +345,6 @@ static void portal_ui(PhoneState *s, const PhoneScreenView *v, Canvas *c, const 
     const PhoneTheme *T = &s->theme;
     bool lost = v->flow == PFLOW_LOST;
     c_text(c, 2, W * 0.5f, 140, 1, T->text, lost ? "Phone disconnected" : "Connect your phone");
-    if (v->remote) {
-        c_text(c, 1, W * 0.5f, 420, 1, T->text_dim, "Connecting a phone...");
-        return;
-    }
     c_text(c, 0, W * 0.5f, 182, 1, T->text_dim, lost ? "Reconnect, or keep playing with the in-game phone" : "Scan with your phone's camera (same Wi-Fi)");
     float side = 380, x0 = (W - side) * 0.5f, y0 = 210;
     c_round(c, x0 - 14, y0 - 14, side + 28, side + 28, 26, T->surface, 0);
@@ -460,7 +457,7 @@ static void camera_ui(PhoneState *s, const PhoneScreenView *v, Canvas *c, const 
             c_circle(c, cx, cy, hv ? 20.0f : 18.0f, RGBA(230, 40, 40, 255), 0);
             break;
         case PB_THUMB:
-            if (s->have_last_thumb && !v->remote) {
+            if (s->have_last_thumb) {
                 c_round(c, h->r.x + 4, h->r.y + 4, 52, 92, 8, ui, 0);
                 c_image(c, s->last_thumb, PHONE_THUMB_W, PHONE_THUMB_H, h->r.x + 7, h->r.y + 7, 46, 86, 1.0f);
             } else {
@@ -509,12 +506,12 @@ static void camera_ui(PhoneState *s, const PhoneScreenView *v, Canvas *c, const 
 
 static void gallery_ui(PhoneState *s, const PhoneScreenView *v, Canvas *c, const PhoneHit *hits, int nh, float W, float H) {
     const PhoneTheme *T = &s->theme;
-    int count = v->remote ? 6 : s->gallery.count;
+    int count = s->gallery.count;
     if (v->viewer >= 0 && v->viewer < count) {
         // Viewer: the image fitted (zoom = a centred crop), back / prev / next / delete.
         float ax = 0, ay = 160, aw = W, ah = H - 420;
         c_rect(c, ax, ay, aw, ah, T->surface);
-        const PhoneGalleryItem *it = v->remote ? NULL : &s->gallery.items[v->viewer];
+        const PhoneGalleryItem *it = &s->gallery.items[v->viewer];
         if (it && viewer_image(s, it)) {
             float z = fmaxf(1.0f, s->os.viewer_zoom);
             float iw = (float)s->viewer_w, ih = (float)s->viewer_h;
@@ -546,7 +543,7 @@ static void gallery_ui(PhoneState *s, const PhoneScreenView *v, Canvas *c, const
             } else if (h->id == PB_NEXT && v->viewer + 1 < count) {
                 c_circle(c, h->r.x + 60, h->r.y + h->r.h * 0.5f, hv ? 32.0f : 28.0f, RGBA(255, 255, 255, 200), 0);
                 c_text(c, 2, h->r.x + 62, h->r.y + h->r.h * 0.5f + 18, 1, T->text, ">");
-            } else if (h->id == PB_DELETE && !v->remote) {
+            } else if (h->id == PB_DELETE) {
                 c_round(c, h->r.x, h->r.y, h->r.w, h->r.h, h->r.h * 0.5f, hv ? with_a(T->danger, 255) : with_a(T->danger, 225), 0);
                 c_text(c, 1, h->r.x + h->r.w * 0.5f, h->r.y + h->r.h * 0.5f + 11, 1, RGBA(255, 255, 255, 255), "Delete");
             }
@@ -567,11 +564,11 @@ static void gallery_ui(PhoneState *s, const PhoneScreenView *v, Canvas *c, const
         }
         if (h->id != PB_CELL) continue;
         float x = h->r.x, y = h->r.y, cw = h->r.w, ch = h->r.h;
-        PhoneThumb *th = v->remote ? NULL : thumb_for(s, &s->gallery.items[h->index], &loaded);
+        PhoneThumb *th = thumb_for(s, &s->gallery.items[h->index], &loaded);
         if (th) c_image(c, th->px, PHONE_THUMB_W, PHONE_THUMB_H, x, y, cw, ch, 1.0f);
-        else c_rect(c, x, y, cw, ch, v->remote ? RGBA(200 - 12 * (h->index % 4), 210 - 8 * (h->index % 3), 220, 255) : T->surface_hi);
+        else c_rect(c, x, y, cw, ch, T->surface_hi);
         if (v->hover == i) c_round(c, x, y, cw, ch, 4, RGBA(255, 255, 255, 60), 0);
-        if (!v->remote && s->gallery.items[h->index].video) {
+        if (s->gallery.items[h->index].video) {
             c_circle(c, x + cw * 0.5f, y + ch * 0.5f, 26, RGBA(0, 0, 0, 140), 0);
             c_circle(c, x + cw * 0.5f + 3, y + ch * 0.5f, 10, RGBA(255, 255, 255, 230), 0);
             char d[16];
@@ -585,7 +582,7 @@ u32 phone_ui_hash(const PhoneState *s, const PhoneScreenView *v) {
     World *w = game_world();
     u32 h = 2166136261u;
     u32 vals[24] = { (u32)v->app, (u32)v->flow, (u32)(v->viewer + 1), (u32)v->scroll, (u32)(v->hover + 1), (u32)lrintf(v->zoom * 50.0f),
-                     v->rec ? (u32)(g_engine.real_time - s->rec_start) + 1 : 0, (u32)v->front | (u32)v->landscape << 1 | (u32)v->landscape_neg << 2 | (u32)v->driven << 3 | (u32)v->fake << 4 | (u32)v->remote << 5,
+                     v->rec ? (u32)(g_engine.real_time - s->rec_start) + 1 : 0, (u32)v->front | (u32)v->landscape << 1 | (u32)v->landscape_neg << 2 | (u32)v->driven << 3 | (u32)v->fake << 4,
                      (u32)s->token_left, (u32)s->gallery.count, w ? (u32)(world_time_hours(w) * 60.0f) : 0, (u32)s->have_last_thumb,
                      (u32)(s->server_err[0] != 0), (u32)(s->token[0] != 0), (u32)(s->os.battery * 100.0f), (u32)lrintf(s->os.viewer_zoom * 20.0f),
                      v->app == PAPP_PORTAL ? (u32)(g_engine.real_time * 2.0) : 0, 0, 0, 0, 0, 0, 0, 0 };
@@ -606,7 +603,7 @@ void phone_ui_build_screen(PhoneState *s, const PhoneScreenView *v, u8 *rgba, in
     if (!buf) return;
     Canvas c = { buf, cw, ch, (float)DG_MIN(cw, ch) / PHONE_DESIGN_W };
     float W = (float)cw / c.s, H = (float)ch / c.s;
-    PhoneLayoutIn li = { v->app, v->flow, v->viewer, v->scroll, s->apps.count, s->apps.columns, v->remote ? 6 : s->gallery.count };
+    PhoneLayoutIn li = { v->app, v->flow, v->viewer, v->scroll, s->apps.count, s->apps.columns, s->gallery.count };
     PhoneHit hits[PHONE_MAX_HITS];
     int nh = land ? 0 : phone_os_layout(&li, hits, PHONE_MAX_HITS);
     bool light = v->app == PAPP_CAMERA;
@@ -621,7 +618,7 @@ void phone_ui_build_screen(PhoneState *s, const PhoneScreenView *v, u8 *rgba, in
     status_bar(s, v, &c, W, light);
     if (v->app != PAPP_PORTAL) home_bar(s, &c, W, H, light);
     // Gamepad focus ring (the HUD panel's navigation).
-    if (!v->remote && s->nav_hold && s->nav >= 0 && s->nav < nh) {
+    if (s->nav_hold && s->nav >= 0 && s->nav < nh) {
         const PhoneHit *f = &hits[s->nav];
         c_round(&c, f->r.x - 4, f->r.y - 4, f->r.w + 8, f->r.h + 8, fminf(30.0f, f->r.h * 0.5f + 4), light ? s->theme.camera_accent : s->theme.accent, 4);
     }
@@ -771,15 +768,6 @@ static void draw_part(MeshId mesh, mat4 m, Material mat, bool viewmodel) {
     else render_draw(&d);
 }
 
-void phone_set_draw_state(u8 app, u8 flags, u8 zoom) {
-    PhoneState *s = phone_state();
-    s->draw_app = app;
-    s->draw_flags = flags;
-    s->draw_zoom = zoom;
-}
-
-#define SCREEN_ALBEDO 0.04f   // the glass: a dark dielectric (Fresnel reflections), the image is emissive
-
 void phone_draw_held(const ItemDef *it, vec3 pos, quat rot, bool viewmodel, u32 flags) {
     PhoneState *s = phone_state();
     if (!s->init) return;
@@ -797,51 +785,18 @@ void phone_draw_held(const ItemDef *it, vec3 pos, quat rot, bool viewmodel, u32 
     lens.flags = flags;
     vec3 lp = v3_add(pos, quat_rotate(rot, v3_add(it->cam.lens.t, v3(0, 0, -0.001f))));
     draw_part(s->cube, mat4_trs(lp, rot, v3(0.011f, 0.011f, 0.003f)), lens, viewmodel);
-    // Screen: view 0 = ours (or the spectated player's), view 1 = the nearest other phone; other
-    // phones farther away glow white (their app is on) or stay black (off).
-    u8 app = viewmodel ? (u8)s->os.app : s->draw_app;
-    if (s->spec && viewmodel) app = (u8)s->spec_app;
-    // The own body's copy (shadow only) is neither a remote phone nor a light.
-    bool shadow_copy = (flags & MAT_SHADOW_ONLY) != 0;
-    if (!viewmodel && !shadow_copy && s->remote_count < (int)ARRAY_COUNT(s->remote)) {
-        s->remote[s->remote_count].pos = pos;
-        s->remote[s->remote_count].rot = rot;
-        s->remote[s->remote_count].it = it;
-        s->remote[s->remote_count].app = s->draw_app;
-        s->remote[s->remote_count].flags = s->draw_flags;
-        s->remote[s->remote_count].zoom = s->draw_zoom;
-        s->remote_count++;
-    }
-    if (shadow_copy) return;   // the screen is never in the shadow pass
-    TextureId tex = 0;
-    bool on = app != PAPP_OFF;
-    if (viewmodel) tex = render_phone_screen(0);
-    else if (s->remote_valid && v3_dist(pos, s->remote_lens) < 0.08f) tex = render_phone_screen(1);
+    // Screen: plain dark glass. The phone's UI is only on the HUD panel (and the paired real
+    // phone): the model never shows screen content (no texture, no emissive, no light).
+    if (flags & MAT_SHADOW_ONLY) return;   // the screen is never in the shadow pass
     vec3 sp = v3_add(pos, quat_rotate(rot, v3_add(it->cam.screen.t, v3(0, 0, 0.0003f))));
     quat sr = quat_mul(rot, it->cam.screen.r);
-    Material scr = material_color(on ? v4(SCREEN_ALBEDO, SCREEN_ALBEDO, SCREEN_ALBEDO, 1) : v4(0.004f, 0.005f, 0.006f, 1));
-    scr.flags = (on && tex ? MAT_TEXTURED : 0) | MAT_NO_SHADOW | (flags & MAT_VIEWMODEL);
-    scr.texture = on ? tex : 0;
+    Material scr = material_color(v4(0.006f, 0.007f, 0.009f, 1));
+    scr.flags = MAT_NO_SHADOW | (flags & MAT_VIEWMODEL);
     scr.roughness = 0.07f;
     scr.metallic = 0.0f;
-    scr.emissive = on ? s->screen_k / SCREEN_ALBEDO : 0.0f;
-    scr.tex_scale = 1.0f;
     draw_part(s->quad, mat4_trs(sp, sr, v3(it->cam.screen_half.x * 2.0f, it->cam.screen_half.y * 2.0f, 1.0f)), scr, viewmodel);
-    // The lit screen is a small light on the hands / face (noticeable at night only).
-    if (on && s->cv.screen_light->f > 0.0f && s->lights_added < 3) {
-        PointLight l;
-        memset(&l, 0, sizeof(l));
-        vec3 nrm = quat_rotate(sr, v3(0, 0, 1));
-        // Just in front of the glass: the hands / face get it, the glass itself almost none (no
-        // highlight of the light on the screen). Viewmodel geometry is lit at its own positions.
-        l.pos = v3_add(sp, v3_scale(nrm, 0.003f));
-        l.radius = 1.6f;
-        l.color = app == PAPP_CAMERA ? v3(0.85f, 0.9f, 1.0f) : v3(0.95f, 0.97f, 1.0f);
-        l.intensity = s->cv.screen_light->f;
-        l.flags = LIGHT_NO_SHADOW;
-        render_add_light(&l);
-        s->lights_added++;
-    }
+    s->model_screen_draws++;
+    if (scr.texture || scr.emissive > 0.0f || (scr.flags & (MAT_TEXTURED | MAT_UNLIT))) s->model_screen_content++;   // phone_status: always 0
 }
 
 void phone_ui_shutdown(void) {

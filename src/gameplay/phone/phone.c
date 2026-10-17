@@ -778,7 +778,6 @@ void phone_fill_cmd(UserCmd *c) {
     c->phone_flags = f;
     c->phone_rot = PH.driven ? PH.rot_packed : 0;
     c->phone_zoom = (u8)DG_CLAMP((int)lrintf(PH.zoom_target * 32.0f), 32, 255);   // spectators: the same lens
-    c->phone_app = (u8)PH.os.app;
 }
 
 bool phone_wheel(int dir) {
@@ -810,19 +809,18 @@ bool phone_ui_escape(void) {
 PhoneScreenView phone_view_own(const PhoneState *s) {
     PhoneScreenView v;
     memset(&v, 0, sizeof(v));
-    v.app = s->spec ? s->spec_app : s->os.app;
-    v.flow = s->spec ? PFLOW_LOCAL : s->os.flow;
-    v.viewer = s->spec ? -1 : s->os.viewer;
-    v.scroll = s->spec ? 0 : s->os.scroll;
-    v.hover = s->spec ? -1 : s->hover;
+    v.app = s->os.app;
+    v.flow = s->os.flow;
+    v.viewer = s->os.viewer;
+    v.scroll = s->os.scroll;
+    v.hover = s->hover;
     v.zoom = s->zoom;
-    v.rec = s->spec ? (s->spec_flags & CHAR_PHONE_REC) != 0 : s->rec != NULL;
+    v.rec = s->rec != NULL;
     v.front = s->front;
     v.landscape = s->landscape;
     v.driven = s->driven;
     v.landscape_neg = s->driven && phone_euler_ypr(s->rel).z < 0;
     v.fake = s->fake;
-    v.remote = s->spec;
     return v;
 }
 
@@ -869,8 +867,7 @@ static bool update_overlay(void) {
 }
 
 static void local_view(bool overlay_changed) {
-    PhoneApp app = PH.spec ? PH.spec_app : PH.os.app;
-    bool ui_only = phone_os_ui_only(app);
+    bool ui_only = phone_os_ui_only(PH.os.app);
     if (!ui_only && !PH.lens_valid) return;
     double now = g_engine.real_time;
     float fps = (float)DG_CLAMP(PH.cv.fps->i, 5, 60);
@@ -930,66 +927,6 @@ static void consume_readback(void) {
         if (!PH.rec_thumb_done) record_thumb(px, w, h);
         if (g_engine.real_time - PH.rec_start >= (double)PH.cv.record_max->i) record_stop();
     }
-}
-
-// The nearest other phone within range (drawn this frame as a world item) gets view 1: its screen
-// from its replicated state (app, zoom, flags), the lens only in its camera app.
-static void remote_view(vec3 cam_pos) {
-    PH.remote_valid = false;
-    float best = PH.cv.remote_range->f;
-    int bi = -1;
-    for (int i = 0; i < PH.remote_count; i++) {
-        float d = v3_dist(PH.remote[i].pos, cam_pos);
-        if (d < best) { best = d; bi = i; }
-    }
-    if (bi < 0) return;
-    const ItemDef *it = PH.remote[bi].it;
-    vec3 lens = v3_add(PH.remote[bi].pos, quat_rotate(PH.remote[bi].rot, it->cam.lens.t));
-    PH.remote_lens = PH.remote[bi].pos;
-    PH.remote_valid = true;
-    double now = g_engine.real_time;
-    if (now - PH.remote_t < 1.0 / (double)DG_CLAMP(PH.cv.remote_fps->i, 1, 30)) return;
-    PH.remote_t = now;
-    PhoneScreenView sv;
-    memset(&sv, 0, sizeof(sv));
-    sv.app = PH.remote[bi].app < PAPP_COUNT ? (PhoneApp)PH.remote[bi].app : PAPP_OFF;
-    sv.flow = PFLOW_LOCAL;
-    sv.viewer = -1;
-    sv.hover = -1;
-    sv.zoom = PH.remote[bi].zoom ? (float)PH.remote[bi].zoom / 32.0f : 1.0f;
-    sv.rec = (PH.remote[bi].flags & CHAR_PHONE_REC) != 0;
-    sv.front = (PH.remote[bi].flags & CHAR_PHONE_FRONT) != 0;
-    sv.landscape = (PH.remote[bi].flags & CHAR_PHONE_LANDSCAPE) != 0;
-    sv.driven = (PH.remote[bi].flags & CHAR_PHONE_DRIVEN) != 0;
-    sv.remote = true;
-    static u8 *px;
-    rebuild_overlay(&PH.overlay_remote, &px, &PH.remote_hash, &PH.remote_overlay_t, &sv, 270, 480, false);
-    PH.remote_px = px;
-    RenderPhoneView v;
-    memset(&v, 0, sizeof(v));
-    v.view = 1;
-    v.pos = lens;
-    v.rot = PH.remote[bi].rot;
-    v.fov_deg = 2.0f * atanf(tanf(it->cam.fov_deg * 0.5f * DG_DEG2RAD) / fmaxf(sv.zoom, 1.0f)) * DG_RAD2DEG;
-    v.width = 270;
-    v.height = 480;
-    v.overlay = PH.overlay_remote;
-    v.ui_only = phone_os_ui_only(sv.app);
-    v.vignette = 0.3f;
-    render_phone_view(&v);
-}
-
-// The screen's emissive: a display of luminance L = phone_screen_emissive x 2.4 (scene units:
-// about the daylight scene average), shown at clamp(L x exposure, phone_screen_min,
-// phone_screen_max): white but never blown out by day, a mild glow (bloom) at night, when the
-// exposure opens up.
-static void screen_level(void) {
-    float ev = render_exposure_ev();
-    float e = 0.18f / fmaxf(exp2f(ev) * 0.125f, 1e-6f);   // the main view's exposure (EV100 -> multiplier)
-    float L = 2.4f * PH.cv.screen_emissive->f;
-    float lo = PH.cv.screen_min->f, hi = fmaxf(PH.cv.screen_max->f, lo);
-    PH.screen_level = clampf(L * e, lo, hi);
-    PH.screen_k = PH.screen_level / e;
 }
 
 void phone_frame(World *w, const RenderCamera *cam, const Player *lp) {
@@ -1053,12 +990,11 @@ void phone_frame(World *w, const RenderCamera *cam, const Player *lp) {
         if (vc->phone_zoom) PH.zoom_target = clampf((float)vc->phone_zoom / 32.0f, 1.0f, MAX_ZOOM);
         PH.front = (vc->phone_flags & CHAR_PHONE_FRONT) != 0;
         PH.landscape = (vc->phone_flags & CHAR_PHONE_LANDSCAPE) != 0;
-        PH.spec_flags = vc->phone_flags;
-        PH.spec_app = vc->phone_app < PAPP_COUNT && vc->phone_app != PAPP_OFF ? (PhoneApp)vc->phone_app : PAPP_HOME;
         if (PH.rec) record_stop();
     }
-    PhoneApp app = PH.spec ? PH.spec_app : PH.os.app;
-    PH.camera = PH.holding && app == PAPP_CAMERA;
+    // A spectated player's phone shows no screen here (the screen lives on its owner's HUD panel /
+    // real phone): only the pose (landscape, driven rotation) comes over the network.
+    PH.camera = own && PH.os.app == PAPP_CAMERA;
     // Local input (in game, nothing on top). The camera app's keys work with the mouse in the game;
     // the HUD panel takes the cursor with phoneui (Alt) or the gamepad with phonenav.
     PH.panel_on = own && phone_os_panel(&PH.os);
@@ -1097,13 +1033,10 @@ void phone_frame(World *w, const RenderCamera *cam, const Player *lp) {
         if (!warned++) log_warn("phone: non-finite lens transform (held item %.2f %.2f %.2f)", ipos.x, ipos.y, ipos.z);
         PH.lens_valid = false;
     }
-    screen_level();
-    if (PH.holding) local_view(update_overlay());
+    if (own) local_view(update_overlay());
     consume_readback();
     if (PH.sink) PH.sink->update(PH.sink, now_ms());
-    remote_view(cam->pos);
-    PH.remote_count = 0;
-    PH.lights_added = 0;
+    (void)cam;
     // The HUD panel slides in / out.
     float slide = fmaxf(0.05f, PH.theme.panel.slide);
     PH.panel_t = approachf(PH.panel_t, PH.panel_on ? 1.0f : 0.0f, dt / slide);
@@ -1184,10 +1117,10 @@ static void cmd_phone_status(int argc, const char **argv) {
     (void)argc;
     (void)argv;
     log_info("phone_status: flow=%s app=%s panel=%d panel_t=%.2f server=%d token=%d paired=%d raised=%d camera=%d capture=%d driven=%d samples=%u "
-             "level=%.3f ev=%.2f viewer=%d gallery=%d spec=%d spec_app=%s reason=\"%s\"",
+             "model_screen=%d/%d ev=%.2f viewer=%d gallery=%d spec=%d reason=\"%s\"",
              phone_flow_name(PH.os.flow), phone_app_name(PH.os.app), PH.panel_on, PH.panel_t, PH.server != NULL, PH.token[0] != 0, PH.conn >= 0, PH.raised,
-             PH.camera, PH.ui_capture, PH.driven, PH.samples, PH.screen_level, render_exposure_ev(), PH.os.viewer, PH.gallery.count, PH.spec,
-             phone_app_name(PH.spec_app), PH.os.reason);
+             PH.camera, PH.ui_capture, PH.driven, PH.samples, PH.model_screen_content, PH.model_screen_draws, render_exposure_ev(), PH.os.viewer, PH.gallery.count, PH.spec,
+             PH.os.reason);
 }
 
 static void cmd_phone_photo(int argc, const char **argv) {
@@ -1319,12 +1252,6 @@ void phone_register(void) {
     c->video_kbps = cvar_reg_int("phone_video_kbps", 4000, 500, 20000, CVAR_ARCHIVE, "phone video bitrate (kbit/s)");
     c->photo_hires = cvar_reg_bool("phone_photo_hires", true, CVAR_ARCHIVE, "photos: re-render the frame at 1080 x 1920");
     c->filter = cvar_reg_int("phone_filter", 0, 0, PHONE_FILTER_COUNT - 1, CVAR_ARCHIVE, "photo filter: 0 none, 1 vivid, 2 warm, 3 cool, 4 mono, 5 noir");
-    c->remote_range = cvar_reg_float("phone_remote_range", 4.0f, 0.0f, 20.0f, CVAR_ARCHIVE, "other players' phone screens render live within this distance (m)");
-    c->remote_fps = cvar_reg_int("phone_remote_fps", 8, 1, 30, CVAR_ARCHIVE, "other players' phone screens: render rate (Hz)");
-    c->screen_emissive = cvar_reg_float("phone_screen_emissive", 1.0f, 0.0f, 4.0f, CVAR_ARCHIVE, "phone screen luminance (x 2.4, about the daylight scene average): glows more at night through the exposure");
-    c->screen_min = cvar_reg_float("phone_screen_min", 1.15f, 0.2f, 4.0f, CVAR_ARCHIVE, "phone screen: lowest displayed level (daylight; white, no bloom)");
-    c->screen_max = cvar_reg_float("phone_screen_max", 2.4f, 0.5f, 8.0f, CVAR_ARCHIVE, "phone screen: highest displayed level (night; caps the bloom)");
-    c->screen_light = cvar_reg_float("phone_screen_light", 0.25f, 0.0f, 4.0f, CVAR_ARCHIVE, "the phone screen's light on the hands / face (point light intensity, 0 = off)");
     c->battery_drain = cvar_reg_float("phone_battery_drain", 0.5f, 0.0f, 100.0f, CVAR_ARCHIVE, "cosmetic phone battery drain while equipped (% per minute)");
     c->hud_size = cvar_reg_float("hud_phone_size", 0.22f, 0.12f, 0.4f, CVAR_ARCHIVE, "HUD: phone panel height (fraction of the screen height)");
     c->hud_corner = cvar_reg_int("hud_phone_corner", 0, 0, 3, CVAR_ARCHIVE, "HUD: phone panel corner: 0 bottom right, 1 bottom left, 2 top right, 3 top left");

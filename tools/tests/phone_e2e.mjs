@@ -1,11 +1,15 @@
 // End-to-end test of the phone companion page against a running game (docs/PHONE.md):
-//   pair (URL from the game log) -> live feed frames -> orientation samples drive the in-game
-//   phone -> shutter (photo + blob) -> 2 s video -> gallery + download -> unpair.
+//   pair (URL from the game log, printed when the phone is equipped) -> Connect portal "Connected"
+//   -> home screen (theme + icons injected by the game) -> Camera (live feed frames, the in-game
+//   screen follows) -> orientation drives the in-game phone -> shutter (photo + blob) -> 2 s
+//   video -> Gallery (grid, viewer, download, delete) -> unpair.
 // Uses Playwright's Chromium with synthetic DeviceOrientation events (the game's certificate is
 // self-signed: certificate errors are ignored, exactly what "visit this website" does on a phone).
 //
 //   node tools/tests/phone_e2e.mjs <game log> [screenshot dir]
 // Normally started by tools/tests/phone_e2e.sh, which runs the game with phone_e2e.cfg.
+// PLAYWRIGHT_PATH: an existing playwright module (nothing is installed by the test); CHROMIUM: a
+// Chromium executable.
 import { createRequire } from 'module';
 import fs from 'fs';
 const require = createRequire(import.meta.url);
@@ -27,9 +31,13 @@ async function waitLog(re, timeout_s) {
   }
   return null;
 }
+const lastStatus = () => {
+  const l = (fs.existsSync(log) ? fs.readFileSync(log, 'utf8') : '').split('\n').filter((x) => x.includes('phone_status:'));
+  return l.length ? l[l.length - 1] : '';
+};
 
 const m = await waitLog(/phone_pair: open (https?:\/\/\S+)/, 240);
-check(!!m, 'the game printed a pairing URL');
+check(!!m, 'equipping the phone printed a pairing URL (no key press)');
 if (!m) process.exit(1);
 const url = m[1];
 console.log('url', url);
@@ -41,12 +49,24 @@ page.on('dialog', (d) => d.accept());
 page.on('console', (msg) => { if (msg.type() === 'error') console.log('page error:', msg.text()); });
 await page.goto(url);
 check(await page.evaluate(() => window.isSecureContext), 'secure context (HTTPS: motion sensors allowed)');
-await page.click('#go');
-// Session established: the one-time token left the address bar.
+check(await page.evaluate(() => !!window.DG_THEME && !!window.DG_APPS && String(window.DG_ICONS).startsWith('data:image/png')), 'the game injected theme, apps and icon atlas');
+// Session established: the one-time token left the address bar; the portal says Connected.
 await page.waitForFunction(() => !!sessionStorage.getItem('dg_session'), null, { timeout: 30000 });
 check(!page.url().includes('t='), 'pairing token removed from the URL after pairing');
+await page.waitForFunction(() => document.getElementById('ptitle').textContent === 'Connected', null, { timeout: 10000 }).catch(() => {});
+check((await page.textContent('#ptitle')) === 'Connected', 'Connect portal: Connected');
+await page.screenshot({ path: shots + '/phone_page_portal.png' });
+await page.click('#go');
+await sleep(800);
+check(await page.isVisible('#s-home'), 'home screen after the permission step');
+const bg = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
+check(bg === 'rgb(255, 255, 255)', 'light theme from assets/phone/theme.json (' + bg + ')');
+check((await page.$$('#apps .app')).length === 2, 'home grid: Camera and Gallery');
+await page.waitForFunction(() => /\d\d:\d\d/.test(document.getElementById('hclock').textContent), null, { timeout: 10000 }).catch(() => {});
+await page.screenshot({ path: shots + '/phone_page_home.png' });
 
-// Orientation: hold upright (beta 90), then turn 30 deg left + tilt up 15 deg.
+// Camera: the page sends the app, the game streams frames and its screen follows.
+await page.click('#app-camera');
 async function orient(a, b, g) {
   await page.evaluate(([a, b, g]) => window.dispatchEvent(new DeviceOrientationEvent('deviceorientation', { alpha: a, beta: b, gamma: g })), [a, b, g]);
 }
@@ -58,10 +78,11 @@ while (Date.now() - t0 < 60000) {
   if (frames >= 12) break;
   await sleep(200);
 }
-check(frames >= 12, 'live feed frames decoded on the page (' + frames + ')');
+check(frames >= 12, 'camera app: live feed frames decoded on the page (' + frames + ')');
 for (let i = 0; i < 25; i++) { await orient(30, 105, 0); await sleep(120); }
 await page.screenshot({ path: shots + '/phone_page_feed.png' });
 const st = await page.evaluate(() => status);
+check(st.app === 'camera', 'the in-game phone is on the camera app too');
 check(st.driven === true, 'the in-game phone is driven by the page orientation');
 check(st.calibrated === true, 'calibrated on the first sample');
 
@@ -93,12 +114,31 @@ check(dl.status === 200 && dl.type === 'video/mp4' && String.fromCharCode(...dl.
 const noauth = await page.evaluate(async (it) => (await fetch(it.url)).status, pho || {});
 check(noauth === 403, 'media without the session is refused');
 
-await page.click('#thumb');
+// Home -> Gallery (the home bar, then the app): grid, viewer, delete.
+await page.click('#homebar');
+await sleep(300);
+await page.click('#app-gallery');
+await page.waitForFunction(() => document.querySelectorAll('#grid .cell').length > 0, null, { timeout: 10000 }).catch(() => {});
 await sleep(1500);
+check((await page.$$('#grid .cell')).length >= 2, 'gallery grid shows the photo and the video');
+await sleep(1200);
+const gst = await page.evaluate(() => status);
+check(gst.app === 'gallery', 'the in-game phone is on the gallery too');
 await page.screenshot({ path: shots + '/phone_page_gallery.png' });
-await page.click('#gclose');
+await page.click('#grid .cell');
+await sleep(800);
+check(await page.isVisible('#viewer'), 'viewer opens');
+await page.screenshot({ path: shots + '/phone_page_viewer.png' });
+const before = (await page.evaluate(() => gallery)).length;
+const delId = await page.evaluate(() => gallery[viewerIdx].id);
+await page.click('#vdel');
+await page.waitForFunction((n) => gallery.length === n - 1, before, { timeout: 15000 }).catch(() => {});
+check((await page.evaluate(() => gallery.length)) === before - 1 && !(await page.evaluate((id) => gallery.some((g) => g.id === id), delId)), 'delete removes the item in the game');
 
-// Unpair: the page is told, the session stops working.
+// Unpair: the page is told, the session stops working; the game's panel comes back on the portal.
+await page.click('#homebar');
+await page.click('#app-camera');
+await sleep(300);
 await page.click('#menu');
 await page.click('#unpair');
 await sleep(1500);
@@ -106,5 +146,8 @@ const sess = await page.evaluate(() => sessionStorage.getItem('dg_session'));
 check(!sess, 'unpaired: session forgotten on the page');
 await page.screenshot({ path: shots + '/phone_page_unpaired.png' });
 await browser.close();
+const lost = await waitLog(/phone_status: flow=lost app=portal panel=1/, 60);
+check(!!lost, 'the game: device gone -> HUD panel back on the portal');
+console.log('last status:', lastStatus());
 console.log(failed ? 'phone_e2e: ' + failed + ' FAILED' : 'phone_e2e: PASS');
 process.exit(failed ? 1 : 0);

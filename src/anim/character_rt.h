@@ -21,8 +21,6 @@ typedef struct CharInputs {
     // relative to the view yaw (phone_quat_pack). Replicated (ANS_PHONE).
     u8 phone_flags;
     u32 phone_rot;
-    u8 phone_app;           // PhoneApp on the screen (phone_os.h): other clients draw the same screen
-    u8 phone_zoom;          // camera zoom x 32
 } CharInputs;
 
 enum CharPhoneFlags { CHAR_PHONE_CAMERA = 1 << 0, CHAR_PHONE_LANDSCAPE = 1 << 1, CHAR_PHONE_DRIVEN = 1 << 2, CHAR_PHONE_REC = 1 << 3, CHAR_PHONE_FRONT = 1 << 4 };

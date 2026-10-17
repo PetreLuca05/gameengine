@@ -687,8 +687,6 @@ static void tab_phone(GuiCursor *c) {
     row_combo_cvar(c, "Photo filter", "phone_filter", filters, 6, NULL);
     row_toggle_cvar(c, "High resolution photos", "phone_photo_hires", "Re-renders the frame at 1080 x 1920.");
     row_slider_cvar(c, "Exposure", "phone_exposure", -3, 3, 0.1f, "%.1f EV", NULL);
-    row_slider_cvar(c, "Screen glow", "phone_screen_emissive", 0, 4, 0.05f, "%.2f", "White screen luminance: a mild glow at night, never blown out by day.");
-    row_slider_cvar(c, "Screen light", "phone_screen_light", 0, 2, 0.05f, "%.2f", "The screen lights your hands and face in the dark.");
     row_slider_cvar(c, "Video bitrate", "phone_video_kbps", 500, 20000, 500, "%.0f kbit/s", NULL);
     row_slider_cvar(c, "Video max length", "phone_record_max", 2, 3600, 1, "%.0f s", NULL);
 }

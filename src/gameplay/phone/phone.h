@@ -36,7 +36,5 @@ const char *phone_status_text(void);
 bool phone_ui_wants_mouse(void);   // the cursor is out for the HUD phone panel (phoneui, Alt)
 bool phone_ui_blocks_game(void);   // gamepad navigation of the panel holds the game controls
 bool phone_ui_escape(void);        // Esc with the cursor on the panel: back (true = consumed)
-// The character about to be drawn holds a phone: its replicated screen (characters.c).
-void phone_set_draw_state(u8 app, u8 flags, u8 zoom);
 
 #endif

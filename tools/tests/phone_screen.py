@@ -1,14 +1,12 @@
 #!/usr/bin/env python3
-"""Phone screen look (docs/PHONE.md "The in-game phone"): runs tools/tests/phone_screen.cfg and
-checks the white emissive screen by day and at night, the bloom halo and the screen light.
+"""The held phone model draws no screen content (docs/PHONE.md "The in-game phone"): runs
+tools/tests/phone_screen.cfg and checks
 
-  * phone_status "level" (the displayed screen level = emissive x exposure) stays inside
-    [phone_screen_min, phone_screen_max]: at the minimum by day, higher (up to the cap) at night;
-  * the screenshots: the screen is white (near-neutral, bright) day and night; at night the pixels
-    just outside the phone glow (bloom) far above the dark scene around them; the screen light
-    brightens the hand.
+  * phone_status "model_screen=<content>/<draws>": the screen quad is drawn, never with a
+    texture, emissive or unlit material;
+  * the screenshots (PIL + numpy, else skipped): the model's screen is dark glass by day (home and
+    camera apps) and at night with no glow around it, while the HUD panel shows the white phone UI.
 
-PIL + numpy when available (else the image checks are skipped and reported).
     cd build/bin && python ../../tools/tests/phone_screen.py
 """
 import os, re, subprocess, sys
@@ -34,15 +32,13 @@ def main():
                         "--script", os.path.join(HERE, "phone_screen.cfg")], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=600)
     txt = open(log, encoding="utf-8", errors="replace").read()
     st = [dict(re.findall(r"(\w+)=(\"[^\"]*\"|\S+)", l)) for l in txt.splitlines() if "phone_status:" in l]
-    check(len(st) >= 4, "phone_status lines (%d)" % len(st))
-    if len(st) < 4:
+    check(len(st) >= 3, "phone_status lines (%d)" % len(st))
+    if len(st) < 3:
         return
-    lo, hi = 1.15, 2.4   # phone_screen_min / phone_screen_max defaults
-    day, night, cam, dusk = (float(s["level"]) for s in st[:4])
-    evd, evn = float(st[0]["ev"]), float(st[1]["ev"])
-    check(abs(day - lo) < 0.02, "day: the screen at the minimum level (%.3f, EV %.2f)" % (day, evd))
-    check(night > day * 1.5 and night <= hi + 1e-3, "night: brighter, capped (%.3f <= %.2f, EV %.2f)" % (night, hi, evn))
-    check(lo - 1e-3 <= dusk <= hi + 1e-3 and lo - 1e-3 <= cam <= hi + 1e-3, "dusk / camera app inside [min, max] (%.3f, %.3f)" % (dusk, cam))
+    for s, label in zip(st, ("day / home", "day / camera", "night / home")):
+        content, draws = (int(v) for v in s["model_screen"].split("/"))
+        check(draws > 0 and content == 0, "%s: the model's screen is drawn %d times, never with content" % (label, draws))
+    check(st[1]["app"] == "camera" and st[1]["camera"] == "1", "the camera app runs (lens view for the panel)")
     try:
         from PIL import Image
         import numpy as np
@@ -50,28 +46,21 @@ def main():
         print("skip image checks (no PIL / numpy)")
         return
 
-    def img(n):
-        return np.asarray(Image.open(n).convert("RGB")).astype(float)
-
-    def region(a, x0, y0, x1, y1):
+    def region(name, x0, y0, x1, y1):
+        a = np.asarray(Image.open(name).convert("RGB")).astype(float)
         return a[y0:y1, x0:x1].reshape(-1, 3)
 
-    # 1600 x 900: the held phone's screen spans about x 795..920, y 418..685 (home screen: the
-    # blank band under the app grid is pure screen white).
-    for name, label in (("phone_screen_day.png", "day"), ("phone_screen_night.png", "night")):
-        a = img(name)
-        s = region(a, 805, 600, 905, 630).mean(axis=0)
-        check(s.min() > 185 and s.max() - s.min() < 18, "%s: the screen is white (%s)" % (label, s.round(0)))
-    n = img("phone_screen_night.png")
-    halo = region(n, 926, 470, 936, 520).mean()     # just right of the phone body
-    far = region(n, 1100, 470, 1140, 520).mean()     # the night scene farther away
-    check(halo > far + 12, "night: bloom around the screen (%.1f next to it vs %.1f away)" % (halo, far))
-    d = img("phone_screen_day.png")
-    dhalo, dfar = region(d, 926, 470, 936, 520).mean(), region(d, 1100, 470, 1140, 520).mean()
-    check(dhalo < dfar + 25, "day: no blown-out glow (%.1f next to it vs %.1f away)" % (dhalo, dfar))
-    lit, unlit = img("phone_screen_night.png"), img("phone_screen_night_nolight.png")
-    hand_l, hand_u = region(lit, 935, 560, 975, 640).mean(), region(unlit, 935, 560, 975, 640).mean()
-    check(hand_l > hand_u + 3, "night: the screen light brightens the hand (%.1f vs %.1f without)" % (hand_l, hand_u))
+    # 1600 x 900: the held phone's screen spans about x 795..920, y 418..685; the HUD panel's
+    # screen about x 1452..1562, y 580..775.
+    for name, label in (("phone_screen_day.png", "day / home"), ("phone_screen_day_camera.png", "day / camera"), ("phone_screen_night.png", "night")):
+        scr = region(name, 815, 450, 900, 660).mean(axis=0)
+        panel = region(name, 1465, 700, 1550, 760).mean(axis=0) if "camera" not in name else None
+        check(scr.mean() < 70, "%s: the model's screen is dark glass (%s)" % (label, scr.round(0)))
+        if panel is not None:
+            check(panel.min() > 200, "%s: the HUD panel shows the white phone UI (%s)" % (label, panel.round(0)))
+    n_halo = region("phone_screen_night.png", 926, 470, 936, 520).mean()
+    n_far = region("phone_screen_night.png", 1100, 470, 1140, 520).mean()
+    check(n_halo < n_far + 8, "night: no glow around the model (%.1f next to it vs %.1f away)" % (n_halo, n_far))
 
 
 if __name__ == "__main__":

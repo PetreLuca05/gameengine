@@ -1,5 +1,4 @@
 #include "gameplay/phone/phone_orient.h"
-#include "gameplay/phone/phone.h"
 #include "gameplay/attachments.h"
 #include "characters.h"
 #include "net/net.h"
@@ -593,8 +592,6 @@ static void player_inputs(World *w, CharacterInst *c, const Player *p, CharInput
     if (c->item_def && c->item_def->camera && !c->item_weapon && in->ads) {
         in->phone_flags = (u8)(CHAR_PHONE_CAMERA | (p->last_cmd.phone_flags & (CHAR_PHONE_LANDSCAPE | CHAR_PHONE_DRIVEN | CHAR_PHONE_REC | CHAR_PHONE_FRONT)));
         in->phone_rot = (in->phone_flags & CHAR_PHONE_DRIVEN) ? p->last_cmd.phone_rot : 0;
-        in->phone_app = p->last_cmd.phone_app;
-        in->phone_zoom = p->last_cmd.phone_zoom;
         if (in->phone_flags & CHAR_PHONE_LANDSCAPE) in->weapon_type = phone_alt_style(c->item_def, in->weapon_type);
     }
     static const u8 none[ATT_SLOTS];
@@ -689,8 +686,6 @@ static void capture_net(World *w, CharacterInst *c) {
     else { n->death_tick = 0; n->death_seed = 0; }
     n->phone_flags = in->phone_flags;
     n->phone_rot = in->phone_rot;
-    n->phone_app = in->phone_app;
-    n->phone_zoom = in->phone_zoom;
 }
 
 // Inputs reconstructed from replicated state (quantized exactly like the host sent them).
@@ -715,8 +710,6 @@ static void inputs_from_net(const World *w, CharacterInst *c, const AnimNetState
     in->weapon_type = item_hold_style(w, s->weapon, &c->item_weapon, &c->item_def);
     in->phone_flags = s->phone_flags;
     in->phone_rot = s->phone_rot;
-    in->phone_app = s->phone_app;
-    in->phone_zoom = s->phone_zoom;
     if (c->item_def && (in->phone_flags & CHAR_PHONE_LANDSCAPE)) in->weapon_type = phone_alt_style(c->item_def, in->weapon_type);
     update_item_sockets(w, c, NULL);
 }
@@ -2275,7 +2268,6 @@ void chars_render(World *w, float alpha, vec3 cam_pos, int local_slot) {
             float span = (float)DG_MAX(1, c->interval);
             float t = saturate(((float)(w->chars->tick - c->last_eval) + alpha) / span);
             Xform it = xf_mul(seat_fix(w, c, t), xf_lerp(c->item_prev, c->item_cur, t));
-            if (c->item_def && c->item_def->camera) phone_set_draw_state(c->rt.in.phone_app, c->rt.in.phone_flags, c->rt.in.phone_zoom);   // its screen (docs/PHONE.md)
             hands_draw_held_att(c->item_weapon, c->item_weapon ? NULL : c->item_def, c->item_att, it.t, it.r, local ? (MAT_SHADOW_ONLY) : 0);
         }
         (void)dist;

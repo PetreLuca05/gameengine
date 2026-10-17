@@ -22,18 +22,17 @@ typedef struct PhoneThumb { char path[260]; bool loaded, video; u8 px[PHONE_THUM
 
 typedef struct PhoneCvars {
     Cvar *server, *port, *tls, *bind, *pairing, *res_w, *res_h, *fps, *quality, *smoothing, *sensitivity, *invert_yaw, *invert_pitch, *invert_roll,
-        *record_max, *video_kbps, *photo_hires, *filter, *remote_range, *remote_fps, *exposure, *token_ttl,
-        *auto_pair, *pair_timeout, *screen_emissive, *screen_min, *screen_max, *screen_light, *battery_drain, *hud_size, *hud_corner;
+        *record_max, *video_kbps, *photo_hires, *filter, *exposure, *token_ttl,
+        *auto_pair, *pair_timeout, *battery_drain, *hud_size, *hud_corner;
 } PhoneCvars;
 
-// What one phone screen shows: the own phone (local / spectated) or a remote one from its
-// replicated state (remote: no QR code, no private photos).
+// What the phone screen shows (the HUD panel and the stream: the model never shows it).
 typedef struct PhoneScreenView {
     PhoneApp app;
     PhoneFlow flow;
     int viewer, scroll, hover;   // hover: the highlighted hit (HUD panel), -1 none
     float zoom;
-    bool rec, front, landscape, landscape_neg, driven, fake, remote;
+    bool rec, front, landscape, landscape_neg, driven, fake;
 } PhoneScreenView;
 
 typedef struct PhoneState {
@@ -82,8 +81,6 @@ typedef struct PhoneState {
     u8 *icons_px;
     int icons_w, icons_h;
     bool spec;                   // showing a spectated player's phone
-    PhoneApp spec_app;
-    u8 spec_flags;
     bool raised;                 // the hold point is in the phone pose (always while equipped)
     PhoneApp sent_app;           // last app / flow logged and sent to the page
     PhoneFlow sent_flow;
@@ -128,21 +125,8 @@ typedef struct PhoneState {
     int overlay_w, overlay_h;
     u32 overlay_hash;
     double overlay_t;
-    // remote phones seen this frame (drawn as world items) -> view 1
-    struct { vec3 pos; quat rot; const struct ItemDef *it; u8 app, flags, zoom; } remote[8];
-    u8 draw_app, draw_flags, draw_zoom;   // the character being drawn (phone_set_draw_state)
-    int remote_best;
-    TextureId overlay_remote;
-    u8 *remote_px;
-    u32 remote_hash;
-    double remote_overlay_t;
-    int lights_added;            // screen lights this frame (local + remote phones)
-    int remote_count;
-    vec3 remote_lens;
-    bool remote_valid;
-    double remote_t;
-    float screen_k;              // emissive multiplier of the screen this frame (scene units)
-    float screen_level;          // the screen's displayed level (emissive x exposure; tests)
+    // the model: screen quads drawn / with content (texture, emissive, unlit): always 0 (tests)
+    u32 model_screen_draws, model_screen_content;
     MeshId quad, cube;
 } PhoneState;
 
