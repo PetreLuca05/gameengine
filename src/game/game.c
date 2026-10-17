@@ -456,6 +456,7 @@ static UserCmd build_cmd(void) {
     if (input_down(ACT_WALK)) c.buttons |= BTN_WALK;
     if (input_down(ACT_USE)) c.buttons |= BTN_USE;
     if (input_down(ACT_ATTACK) && (can_play || !input_game_focus())) c.buttons |= BTN_ATTACK;
+    if (game_fire_loop_trigger()) c.buttons |= BTN_ATTACK;   // fire tuner loops (docs/FIRE_ANIM.md)
     if (input_down(ACT_AIM)) c.buttons |= BTN_AIM;
     if (input_down(ACT_RELOAD)) c.buttons |= BTN_RELOAD;
     // Edge presses shorter than a tick still register.
@@ -671,7 +672,7 @@ void game_frame(float dt) {
         }
     }
 
-    G->accumulator += dt * wheels_timescale();   // slowed while a radial wheel is open (single player)
+    G->accumulator += dt * wheels_timescale() * game_fire_timescale();   // x the fire tuner's slow motion   // slowed while a radial wheel is open (single player)
     if (G->paused) G->accumulator = 0;   // the pause menu (single player / host alone) stops the simulation
     int steps = 0;
     while (G->accumulator >= SIM_DT && steps < 8) {

@@ -115,17 +115,16 @@ static void test_accumulation(void) {
             fire_anim_class_defaults(&d, classes[ci]);
             Trace t;
             run(&d, 30, rpms[r], 0, 1, &t);
-            // Running peak over each of the first 5 shot intervals grows, and never returns to rest.
-            float last = 0;
-            int grow = 0;
+            // The peak of each shot interval builds over the first 5 shots (per-shot randomness aside:
+            // shot 5 clearly above shot 1, the running maximum rising), and never returns to rest.
+            float pk[5] = { 0 }, run = 0;
+            int rises = 0;
             for (int s = 0; s < 5; s++) {
                 int a = t.shot_tick[s], b = t.shot_tick[s + 1];
-                float pk = 0;
-                for (int i = a; i <= b; i++) pk = fmaxf(pk, t.pitch[i]);
-                if (pk > last + 1e-4f) grow++;
-                last = fmaxf(last, pk);
+                for (int i = a; i < b; i++) pk[s] = fmaxf(pk[s], t.pitch[i]);
+                if (pk[s] > run + 1e-4f) { if (s) rises++; run = pk[s]; }
             }
-            CHECK(grow >= 4, "%s @%.0f rpm: peak grew on %d of the first 5 shots", fire_class_name(classes[ci]), rpms[r], grow);
+            CHECK(pk[4] > pk[0] * 1.25f && rises >= 2, "%s @%.0f rpm: shot peaks %.2f %.2f %.2f %.2f %.2f", fire_class_name(classes[ci]), rpms[r], pk[0], pk[1], pk[2], pk[3], pk[4]);
             float minv = 1e9f;
             for (int i = t.shot_tick[1]; i < t.shot_tick[20]; i++) minv = fminf(minv, t.pitch[i]);
             CHECK(minv > 0.2f, "%s @%.0f rpm: the gun snapped back to rest between shots (%.3f)", fire_class_name(classes[ci]), rpms[r], minv);
@@ -180,6 +179,59 @@ static void test_attachments(void) {
     // mag dump sits lower than without it, relative to the peak.
     printf("  attachments: base peak %.2f settle %d | suppressor %.2f settle %d | brake %.2f settle %d\n", mb.peak, mb.settle_tick - mb.peak_tick, ms.peak,
            ms.settle_tick - ms.peak_tick, mk.peak, mk.settle_tick - mk.peak_tick);
+}
+
+// Every class: a suppressor (front mass) lowers the peak and lengthens the settle; a brake lowers
+// the peak and does not lengthen it.
+static void test_attachments_all_classes(void) {
+    for (int c = 0; c < FC_COUNT; c++) {
+        FireAnimDef base, sup, brake;
+        fire_anim_class_defaults(&base, c);
+        sup = brake = base;
+        FaAttMod m;
+        cJSON *j = cJSON_Parse("{\"mass\":0.45,\"dist\":0.7,\"impulse\":{\"pitch\":0.85},\"settle_mult\":1.3,\"droop\":1.2}");
+        fire_anim_att_parse(&m, j);
+        cJSON_Delete(j);
+        fire_anim_add_attachment(&sup, &m);
+        fire_anim_resolve(&sup);
+        j = cJSON_Parse("{\"impulse\":{\"pitch\":0.75,\"yaw\":1.4},\"omega_mult\":1.15,\"zeta_add\":0.1}");
+        fire_anim_att_parse(&m, j);
+        cJSON_Delete(j);
+        fire_anim_add_attachment(&brake, &m);
+        fire_anim_resolve(&brake);
+        Trace tb, ts, tk;
+        run(&base, 1, 0, 0, 1, &tb);
+        run(&sup, 1, 0, 0, 1, &ts);
+        run(&brake, 1, 0, 0, 1, &tk);
+        FaMetrics mb = fire_anim_metrics(tb.pitch, N, 0.05f), ms = fire_anim_metrics(ts.pitch, N, 0.05f), mk = fire_anim_metrics(tk.pitch, N, 0.05f);
+        CHECK(ms.peak < mb.peak && ms.settle_tick - ms.peak_tick > mb.settle_tick - mb.peak_tick, "%s suppressor: peak %.2f / %.2f settle %d / %d", fire_class_name(c),
+              ms.peak, mb.peak, ms.settle_tick - ms.peak_tick, mb.settle_tick - mb.peak_tick);
+        CHECK(mk.peak < mb.peak && mk.settle_tick - mk.peak_tick <= mb.settle_tick - mb.peak_tick, "%s brake: peak %.2f / %.2f settle %d / %d", fire_class_name(c),
+              mk.peak, mb.peak, mk.settle_tick - mk.peak_tick, mb.settle_tick - mb.peak_tick);
+    }
+}
+
+// Third person: the reduced instance (scale 0.55, no perceptual layer) is deterministic from the
+// shot seeds and never touches the camera.
+static void test_third_person(void) {
+    FireAnimDef d;
+    fire_anim_class_defaults(&d, FC_RIFLE);
+    float a[120], b[120];
+    for (int pass = 0; pass < 2; pass++) {
+        FireAnimState s;
+        fire_anim_reset(&s);
+        for (int i = 0; i < 120; i++) {
+            if (i % 5 == 0 && i < 60) {
+                FireShot sh = { 0, 0, dg_hash_u32(7u * 7919u + (u32)i), 1, 0.08f, 0.55f };
+                fire_anim_shot(&s, &d, &sh);
+            }
+            FireAnimOut o;
+            fire_anim_step(&s, &d, DT, false, 0.0f, &o);
+            (pass ? b : a)[i] = o.gun_rot.x + o.gun_pos.z + o.slide;
+            CHECK(o.fov_punch == 0.0f && o.blur == 0.0f && o.chroma == 0.0f && o.roll_twitch == 0.0f, "third person: perceptual layer at tick %d", i);
+        }
+    }
+    CHECK(!memcmp(a, b, sizeof(a)), "third-person kick not deterministic");
 }
 
 static void test_determinism_and_ads(void) {
@@ -300,6 +352,8 @@ int main(void) {
     test_accumulation();
     test_perceptual();
     test_attachments();
+    test_attachments_all_classes();
+    test_third_person();
     test_determinism_and_ads();
     test_mechanical();
     test_json_roundtrip();

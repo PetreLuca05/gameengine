@@ -183,20 +183,20 @@ void fire_anim_class_defaults(FireAnimDef *d, int cls) {
         d->ch[FA_UP] = CH(0.008f, 14.0f, 0.45f, 0.0f, 0.05f, 0.0f);
         // Muzzle up + back with a slight roll; the first shot pushes the shoulder harder.
         CURVE(d->first, { 0, 1.0f, 0, 0.5f, 0.014f, 0.003f }, { 0.05f, 0.5f, 0, 0.2f, 0.008f, 0.002f }, { 0.14f, 0, 0, 0, 0, 0 }, { 0.24f, -0.35f, 0, 0, -0.002f, 0 }, { 0.4f, 0, 0, 0, 0, 0 });
-        CURVE(d->sustained, { 0, 1.0f, 0, 0.3f, 0.008f, 0.002f }, { 0.05f, 0.5f, 0, 0.1f, 0.004f, 0.001f }, { 0.14f, 0, 0, 0, 0, 0 });
+        CURVE(d->sustained, { 0, 0.7f, 0, 0.3f, 0.006f, 0.002f }, { 0.05f, 0.35f, 0, 0.1f, 0.003f, 0.001f }, { 0.14f, 0, 0, 0, 0, 0 });
         CURVE(d->release, { 0, 0, 0, 0, 0, 0 }, { 0.14f, -1.0f, 0, 0, -0.004f, 0 }, { 0.36f, 0.3f, 0, 0, 0.001f, 0 }, { 0.6f, 0, 0, 0, 0, 0 });
         d->slide_travel = 0.03f; d->slide_time = 0.06f;
         d->fov_punch = 2.5f; d->roll_twitch = 0.5f; d->screen_kick = 0.009f;
         break;
     }
     // Sustained fire rides up and back (the climb and the push build over the string).
-    float ride = cls == FC_SMG ? 0.45f : cls == FC_LMG ? 0.5f : cls == FC_RIFLE ? 0.42f : 0.3f;
+    float ride = cls == FC_SMG ? 0.4f : cls == FC_LMG ? 0.42f : cls == FC_RIFLE ? 0.3f : 0.3f;
     d->ch[FA_PITCH].ride = ride;
-    d->ch[FA_PITCH].ride_max = cls == FC_LMG ? 3.0f : 2.4f;
-    d->ch[FA_BACK].ride = ride * 0.7f;
-    d->ch[FA_BACK].ride_max = 1.6f;
-    d->ch[FA_UP].ride = ride * 0.6f;
-    d->ch[FA_UP].ride_max = 1.6f;
+    d->ch[FA_PITCH].ride_max = cls == FC_LMG ? 2.0f : 1.5f;
+    d->ch[FA_BACK].ride = ride * 0.6f;
+    d->ch[FA_BACK].ride_max = 0.9f;
+    d->ch[FA_UP].ride = ride * 0.5f;
+    d->ch[FA_UP].ride_max = 1.0f;
     d->ch[FA_YAW].ride = 0.15f;
     d->ch[FA_YAW].ride_max = 1.5f;
     d->ride_release = cls == FC_LMG ? 0.16f : 0.11f;
@@ -456,7 +456,8 @@ void fire_anim_resolve(FireAnimDef *d) {
         float m_ref = inertia_of(d, ch, d->ref_mass, d->ref_moment, false);
         float m = inertia_of(d, ch, d->mass, d->moment, true);
         float w = fmaxf(0.5f, c->omega * omega_mult);
-        float zeta = clampf(c->zeta + zeta_add, 0.05f, 2.0f);
+        // settle_mult (suppressor): a longer, heavier ring-out on top of the added inertia.
+        float zeta = clampf((c->zeta + zeta_add) / fmaxf(0.25f, settle), 0.05f, 2.0f);
         // Stiffness is set at the reference mass: added mass slows the spring down (w = sqrt(k / m)).
         float k = m_ref * w * w;
         d->k[ch] = k;

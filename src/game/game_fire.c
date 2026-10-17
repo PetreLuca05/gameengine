@@ -18,8 +18,10 @@
 #include "gameplay/attachments.h"
 #include "gameplay/effects.h"
 #include "render/fidelity/fidelity.h"
+#include "ui/fire_tuner.h"
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define G (g_engine.game)
@@ -40,6 +42,9 @@ static struct {
     // fire_compare / sway_check runs
     int cmp_weapon, cmp_phase, cmp_wait;
     bool cmp_active;
+    // tuner loops
+    int loop, loop_tick;
+    float timescale;
 } FA;
 
 const FireAnimDef *game_fire_def(void) { return FA.have_def ? &FA.def : NULL; }
@@ -158,6 +163,7 @@ void game_fire_tick(void) {
     chars_set_fp_fire(&FA.out, NULL);
     chars_set_fp_fire_snap(FA.rec_shot);
     record(&FA.out, held);
+    if (FA.loop) FA.loop_tick++;
 }
 
 const FireAnimOut *game_fire_sample(float alpha) {
@@ -319,6 +325,49 @@ static const WeaponDef *next_gun(int *wi) {
     return NULL;
 }
 
+void game_fire_loop(int mode, float timescale) {
+    FA.loop = mode;
+    FA.loop_tick = 0;
+    FA.timescale = mode ? clampf(timescale, 0.05f, 1.0f) : 1.0f;
+    if (mode) cbuf_add("infinite_ammo 1\n");
+}
+
+float game_fire_timescale(void) { return FA.timescale > 0.0f ? FA.timescale : 1.0f; }
+
+bool game_fire_save_class(const FireAnimDef *d) {
+    char *txt = fire_anim_to_json(d);
+    char rel[160], path[600];
+    snprintf(rel, sizeof(rel), "assets/weapons/fire_poses/%s.json", d->cls_name);
+#ifdef DG_SOURCE_DIR
+    snprintf(path, sizeof(path), "%s/%s", DG_SOURCE_DIR, rel);
+#else
+    platform_data_path(rel, path, sizeof(path));
+#endif
+    FILE *f = fopen(path, "wb");
+    bool ok = f != NULL;
+    if (f) { fputs(txt, f); fputc('\n', f); fclose(f); }
+    // Runtime copy too (a reload keeps the edit when running from the build).
+    char rt[600];
+    snprintf(rt, sizeof(rt), "%s%s", platform_base_dir(), rel);
+    if (ok && strcmp(rt, path)) {
+        FILE *g = fopen(rt, "wb");
+        if (g) { fputs(txt, g); fputc('\n', g); fclose(g); }
+    }
+    free(txt);
+    log_info("fire_tuner: %s %s", ok ? "wrote" : "cannot write", path);
+    return ok;
+}
+
+// Tuner loops, in sim ticks since the loop started: single = one shot every 1.2 s, burst = 3
+// rounds then 1.2 s, mag dump = 2.5 s of fire then 1.5 s of settle. The trigger goes straight into
+// the user command (game_fire_loop_trigger): the tuner window owns the mouse meanwhile.
+bool game_fire_loop_trigger(void) {
+    if (!FA.loop) return false;
+    int period = FA.loop == FIRE_LOOP_MAGDUMP ? 240 : 72;
+    int hold = FA.loop == FIRE_LOOP_SINGLE ? 1 : (FA.loop == FIRE_LOOP_BURST ? 13 : 150);
+    return (FA.loop_tick % period) < hold;
+}
+
 void game_fire_frame(void) {
     if (!FA.cmp_active || !G) return;
     if (FA.cmp_wait > 0) { FA.cmp_wait--; return; }
@@ -407,6 +456,13 @@ static void load_sway_profile(void) {
     sway_set_global(&prof);
 }
 
+// fire_loop <single|burst|magdump|off> [timescale]: the tuner's loops from the console / scripts.
+static void cmd_fire_loop(int argc, const char **argv) {
+    int mode = FIRE_LOOP_OFF;
+    if (argc > 1) mode = !strcmp(argv[1], "single") ? FIRE_LOOP_SINGLE : !strcmp(argv[1], "burst") ? FIRE_LOOP_BURST : !strcmp(argv[1], "magdump") ? FIRE_LOOP_MAGDUMP : FIRE_LOOP_OFF;
+    game_fire_loop(mode, argc > 2 ? (float)atof(argv[2]) : 1.0f);
+}
+
 // fire_reload: the class files, the weapons' fire blocks and the global sway profile (live tuning).
 static void cmd_fire_reload(int argc, const char **argv) {
     (void)argc;
@@ -418,6 +474,8 @@ static void cmd_fire_reload(int argc, const char **argv) {
 void game_fire_init(void) {
     weapons_set_local_flash(local_flash);
     load_sway_profile();
+    fire_tuner_init();
+    cmd_register("fire_loop", cmd_fire_loop, "fire_loop <single|burst|magdump|off> [timescale]: repeat a fire pattern (slow motion < 1) for tuning");
     cmd_register("fire_reload", cmd_fire_reload, "reload the fire animation classes (assets/weapons/fire_poses), the weapons and the global sway profile");
     FA.scale = cvar_reg_float("wpn_fire_anim_scale", 1.0f, 0.0f, 3.0f, CVAR_ARCHIVE, "fire animation master scale (gun kick, hands, body, camera reaction; docs/FIRE_ANIM.md)");
     FA.punch = cvar_reg_float("cl_fire_punch", 1.0f, 0.0f, 1.0f, CVAR_ARCHIVE, "fire FOV punch / roll twitch / blur spike / chromatic tick (0 = off; also off at Low fidelity)");

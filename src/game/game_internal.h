@@ -178,6 +178,12 @@ void game_fire_flush_flash(void);                        // after the first-pers
 typedef struct FireRecord { float gun_pitch, gun_back, hand_pitch, cam_pitch, fov; bool shot, held; } FireRecord;
 int game_fire_record(FireRecord *out, int max);
 const struct FireAnimDef *game_fire_def(void);
+// Tuner loops (single / burst / mag dump, repeated) at a simulation time scale; save a class file.
+typedef enum FireLoop { FIRE_LOOP_OFF, FIRE_LOOP_SINGLE, FIRE_LOOP_BURST, FIRE_LOOP_MAGDUMP } FireLoop;
+void game_fire_loop(int mode, float timescale);
+float game_fire_timescale(void);
+bool game_fire_loop_trigger(void);   // the loop holds the trigger this tick
+bool game_fire_save_class(const struct FireAnimDef *d);
 struct FireAnimState *game_fire_state(void);
 void game_post_frame(const PostFrameInfo *fi);
 void game_post_draw_overlay(void);

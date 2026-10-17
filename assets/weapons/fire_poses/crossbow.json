@@ -20,7 +20,7 @@
 			"follow":	0.05,
 			"sign_random":	0,
 			"ride":	0.3,
-			"ride_max":	2.4
+			"ride_max":	1.5
 		},
 		"yaw":	{
 			"peak":	0.5,
@@ -52,8 +52,8 @@
 			"ads":	0.7,
 			"follow":	0.05,
 			"sign_random":	0,
-			"ride":	0.21,
-			"ride_max":	1.6
+			"ride":	0.18,
+			"ride_max":	0.9
 		},
 		"up":	{
 			"peak":	0.006,
@@ -63,8 +63,8 @@
 			"ads":	0,
 			"follow":	0,
 			"sign_random":	0,
-			"ride":	0.18,
-			"ride_max":	1.6
+			"ride":	0.15,
+			"ride_max":	1
 		}
 	},
 	"curves":	{
