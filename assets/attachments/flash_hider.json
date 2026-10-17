@@ -1,0 +1,24 @@
+{
+  "_comment": "Birdcage flash hider: the prongs break up the secondary flash (0.1-0.3x); a dim forward cone stays between them. Smoke and report unchanged.",
+  "id": "flash_hider",
+  "name": "Flash Hider",
+  "slot": "muzzle",
+  "mount": {
+    "pos": [0, 0, 0]
+  },
+  "muzzle_length": 0.055,
+  "muzzle_device": {
+    "kind": "hider",
+    "flash": { "primary": 1, "mach": 0.6, "secondary": 0.2, "prongs": 0.35, "vents": 0, "vapor": 0, "smoke": 1, "sparks": 0.5, "blast": 1, "light": 0.25 },
+    "prongs": 4,
+    "report_db": 0,
+    "velocity_mul": 1.0
+  },
+  "modifiers": {
+    "camera_kick": 0.97
+  },
+  "model": [
+      {"offset": [0, 0, -0.0275], "half": [0.011, 0.011, 0.0275], "color": [0.08, 0.08, 0.085]},
+      {"offset": [0, 0, -0.045], "half": [0.012, 0.012, 0.01], "color": [0.05, 0.05, 0.05]}
+    ]
+}

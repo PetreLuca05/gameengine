@@ -528,6 +528,16 @@ static void parse_weapon(ItemDB *db, const cJSON *w, const char *file) {
         d->vfx_muzzle_device = dv >= 0 ? dv : VFX_DEV_BARE;
         d->vfx_caliber = c >= 0 ? c : cal;
     }
+    // Ballistics: the cartridge (falls back to the ammo item's), barrel, zero, integral device.
+    dg_strcpy(d->cartridge, sizeof(d->cartridge), jstr(w, "cartridge", ""));
+    d->barrel_length = jnum(w, "barrel_length", 0.4f);
+    d->zero_distance = jnum(w, "zero_distance", 100.0f);
+    {
+        static const char *k_integral[] = { "bare", "flash_hider", "compensator", "suppressor" };
+        const char *im = jstr(w, "integral_muzzle", NULL);
+        int dv = DG_CLAMP(d->vfx_muzzle_device, 0, 3);
+        dg_strcpy(d->muzzle_device_id, sizeof(d->muzzle_device_id), im ? im : k_integral[dv]);
+    }
     d->iron_sight = d->sockets.sight;
     attachments_parse_weapon_slots(d, w);
     part_mult_defaults(d->part_mult);
