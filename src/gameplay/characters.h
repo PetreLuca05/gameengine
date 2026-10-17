@@ -238,7 +238,8 @@ typedef struct VehiclePoseHooks {
     bool (*holstered)(World *w, int slot);   // driving with both hands: nothing held
     bool (*vehicle_xform)(World *w, int slot, Xform *out);   // the seat's vehicle as drawn this frame
     BodyId (*vehicle_body)(World *w, int slot);              // its physics body (ignored by the hold point's wall check)
-    const char *(*seat_vehicle)(World *w, int slot);         // the seat's vehicle definition name ("car"): its hand pose entry
+    const char *(*seat_vehicle)(World *w, int slot);         // the seat's vehicle definition name ("car"): its hand pose case
+    bool (*seat_driver)(World *w, int slot);                 // the seat is the driver's (else a passenger seat)
 } VehiclePoseHooks;
 extern VehiclePoseHooks g_vehicle_pose;
 extern bool g_chars_force_phys_step;   // client: step physics this tick (vehicle prediction)

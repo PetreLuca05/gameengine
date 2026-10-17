@@ -38,7 +38,6 @@ typedef struct HoldStyle {
     vec3 elbow_r, elbow_l;     // pole hints (camera space directions)
     vec3 shoulder_r, shoulder_l; // clavicle rotation (deg)
     float max_shift;           // how far the item may move towards the body to keep the left hand on its grip
-    float curl_r[5], curl_l[5];// finger curl (deg) thumb, index, middle, ring, pinky
     HoldPointStyle hp;         // where the item sits relative to the camera (assets/human/holdpoint.json)
 } HoldStyle;
 
@@ -116,12 +115,9 @@ typedef struct HandFrames {
     float thumb_side[2];       // sign of the thumb along the palm frame's x (finger spread direction)
 } HandFrames;
 void proc_hand_frames(const Skeleton *s, HandFrames *out);
-// Curls one hand's fingers (side 0 left, 1 right) by curl[5] degrees (thumb..pinky), scaled by weight.
-// Fingers never move the wrist. Model transforms of the finger chains are updated.
-void proc_curl_fingers(const Skeleton *s, Pose *pose, Xform *model, int side, const float *curl, const HandFrames *hf, float weight);
 
-// One hand's resolved hand pose on the held item (item space socket incl. the wrist offset, pole
-// hint, IK weight, fingers), inertialized when the entry / state / data changes.
+// One hand's resolved grip on the held item (item space socket incl. the wrist offset and the root
+// scale, pole hint, IK weight, fingers), inertialized when the entry / style / data changes.
 typedef struct HandHold {
     bool init;
     u32 key;                   // entry, base, state, data revision
@@ -161,6 +157,7 @@ typedef struct ProcState {
     int style, prev_style;
     float style_t;             // 0..1 blend from prev to style
     Xform item_model;          // finalized item transform (model space) this evaluation
+    float item_scale;          // the grip root's calibration scale (drawn items scale by it)
     Xform item_world;
     bool has_item;
     // damage reactions
@@ -239,12 +236,13 @@ typedef struct ProcInput {
     quat phone_rot;
     vec3 seat_hip;
     vec3 seat_feet[2];
-    // Hand poses (docs/HANDPOSE.md). NULL = the hold styles' finger curls (the old tables).
+    // Hand poses (docs/HANDPOSE.md). NULL = open hands on the item's sockets.
     const HandPoseDB *handposes;
     bool no_fingers;           // editor / contact solver: leave the fingers at the clip pose
-    // World anchors (vehicle controls): the entry + state per hand, its socket an offset from the anchor.
-    u32 anchor_pose[2], anchor_pose_base[2];
-    u8 anchor_pose_state[2];
+    // World anchors (vehicle controls, ledges): the case (hash) + its timeline time and the grip
+    // style under it, per hand; the case socket is an offset from the anchor.
+    u32 anchor_case[2], anchor_pose_base[2];
+    float anchor_case_t[2];
 } ProcInput;
 
 // Body yaw (simulation, host-owned, predicted locally): faces the aim while moving; while
@@ -259,6 +257,10 @@ void proc_damage_hit(ProcState *s, const ProcParams *p, const Skeleton *skel, in
 bool proc_damage_active(const ProcState *s);
 // Runs the post-pass (steps 0..6). pose/model are in model space relative to in->root.
 void proc_run(ProcState *s, const ProcInput *in, Pose *pose, Xform *model);
+// The held item's grip root (its alignment in the hold frame, .s = calibration scale) and one
+// hand's universal grip target on it (the same code as the runtime hold: tests, editor).
+Xform proc_item_root(const ProcInput *in, const ItemSockets *it);
+void proc_hand_grip(const HandPoseDB *db, const HoldStyle *hs, const ItemSockets *it, int hand, float root_scale, HandHold *o);
 // Socket world transform from an item transform.
 DG_INLINE Xform proc_socket_world(Xform item, Xform socket) { return xf_mul(item, socket); }
 // Hand bone transform that puts the palm frame on a socket.

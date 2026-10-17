@@ -1,0 +1,13 @@
+{
+  "schema": 2,
+  "id": "mech_parts",
+  "label": "Mechanical Parts",
+  "category": "item",
+  "source": "data/items.json",
+  "inherits": "style/item_small",
+  "hands": ["right"],
+  "reviewed": false,
+  "auto_placed": false,
+  "left": {},
+  "right": {}
+}

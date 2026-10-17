@@ -1,0 +1,40 @@
+{
+  "schema": 2,
+  "id": "vehicle_car_driver",
+  "label": "Hatchback: driver (steering wheel)",
+  "kind": "vehicle",
+  "bind": "vehicle:car:driver",
+  "source": "assets/vehicles/car.json",
+  "inherits": "style/grip_grab",
+  "hands": [
+    "left",
+    "right"
+  ],
+  "reviewed": false,
+  "auto_placed": false,
+  "setup": {
+    "vehicle": "car",
+    "seat": 0,
+    "distance": 0.75
+  },
+  "anchor": {
+    "pos": [
+      0,
+      0,
+      0
+    ],
+    "q": [
+      0,
+      0,
+      0,
+      1
+    ]
+  },
+  "duration": 0.76,
+  "markers": {
+    "contact": 0.16,
+    "use": 0.312,
+    "release": 0.54
+  },
+  "keys": []
+}

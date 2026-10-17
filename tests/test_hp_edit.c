@@ -1,7 +1,8 @@
 // Hand pose editor logic (src/editor/handpose/hp_edit.c, docs/HANDPOSE.md "Editor"): field
-// provenance (override / inherited / shadowed), seeding an override keeps the resolved pose,
-// reset to inherited, joint limits on edits, presets, mirror, contacts, the canonical file only
-// holds overrides, undo / redo (coalescing, bounds, redo cleared by a new edit, DB reorder).
+// provenance (override / inherited), seeding an override keeps the resolved pose, reset to
+// inherited, joint limits on edits, presets, mirror, contacts, the canonical file only holds
+// overrides, case keys as targets, undo / redo (coalescing, bounds, redo cleared by a new edit, DB
+// reorder, cases).
 #include "editor/handpose/hp_edit.h"
 #include "core/engine.h"
 #include "core/log.h"
@@ -32,8 +33,8 @@ static bool pose_eq(const HandPose *a, const HandPose *b) {
     return !a->has_pole || !memcmp(&a->pole, &b->pole, sizeof(a->pole));
 }
 
-// style/rifle: relaxed fingers on both hands (default), a hip socket on the right hand.
-// rifle inherits it and overrides nothing; pistol inherits nothing.
+// style/rifle: relaxed fingers on both hands, a socket on the right hand. rifle inherits it and
+// overrides nothing; pistol inherits nothing. One case (door) inheriting style/rifle with a key.
 static void build(HandPoseDB *db) {
     handpose_db_init(db);
     int s = handpose_add(db, "style/rifle", HPC_STYLE);
@@ -41,13 +42,17 @@ static void build(HandPoseDB *db) {
     handpose_add(db, "pistol", HPC_WEAPON);
     dg_strcpy(db->e[r].inherits, sizeof(db->e[r].inherits), "style/rifle");
     for (int h = 0; h < 2; h++) {
-        HandPoseLayer *l = &db->e[s].layer[h][HPS_DEFAULT];
+        HandPoseLayer *l = &db->e[s].grip[h];
         handpose_preset("relaxed", l->j);
         l->set |= HPL_FINGERS_ALL;
     }
-    HandPoseLayer *hip = &db->e[s].layer[1][HPS_HIP];
-    hip->socket = xf_make(v3(0.01f, 0.02f, -0.03f), quat_axis_angle(v3(0, 1, 0), 0.2f));
-    hip->set |= HPL_SOCKET;
+    db->e[s].grip[1].socket = xf_make(v3(0.01f, 0.02f, -0.03f), quat_axis_angle(v3(0, 1, 0), 0.2f));
+    db->e[s].grip[1].set |= HPL_SOCKET;
+    int c = handpose_case_add(db, "door_knob", HCK_INTERACT);
+    dg_strcpy(db->c[c].inherits, sizeof(db->c[c].inherits), "style/rifle");
+    dg_strcpy(db->c[c].bind, sizeof(db->c[c].bind), "interactable:door");
+    db->c[c].bind_hash = dg_hash_str(db->c[c].bind);
+    db->c[c].anchor = xf_make(v3(0, 0.05f, 0), quat_identity());
     handpose_link(db);
     handpose_rehash(db);
 }
@@ -56,19 +61,19 @@ static void test_sources(void) {
     HandPoseDB db;
     build(&db);
     int s = handpose_find(&db, "style/rifle"), r = handpose_find(&db, "rifle"), p = handpose_find(&db, "pistol");
-    HpFieldSource src = hp_field_source(&db, r, 1, HPS_HIP, HPL_FINGER(HF_INDEX));
-    CHECK(src.entry == s && src.state == HPS_DEFAULT, "index on rifle hip should come from style/rifle default (%d %d)", src.entry, src.state);
-    src = hp_field_source(&db, r, 1, HPS_HIP, HPL_SOCKET);
-    CHECK(src.entry == s && src.state == HPS_HIP, "socket should come from style/rifle hip");
-    src = hp_field_source(&db, r, 1, HPS_ADS, HPL_SOCKET);
-    CHECK(src.entry < 0, "no ADS socket anywhere: base");
-    src = hp_field_source(&db, p, 0, HPS_HIP, HPL_FINGER(HF_THUMB));
+    HpFieldSource src = hp_field_source(&db, r, 1, HPL_FINGER(HF_INDEX));
+    CHECK(src.entry == s, "index on rifle should come from style/rifle (%d)", src.entry);
+    src = hp_field_source(&db, r, 0, HPL_SOCKET);
+    CHECK(src.entry < 0, "no left socket anywhere: base");
+    src = hp_field_source(&db, p, 0, HPL_FINGER(HF_THUMB));
     CHECK(src.entry < 0, "pistol has no chain");
     char t[96];
-    hp_field_source_text(&db, hp_field_source(&db, r, 1, HPS_HIP, HPL_SOCKET), t, sizeof(t));
-    CHECK(!strcmp(t, "style/rifle (hip)"), "source text '%s'", t);
-    CHECK(!hp_field_overridden(&db, r, 1, HPS_HIP, HPL_FINGER(HF_INDEX)), "rifle overrides nothing yet");
-    CHECK(hp_field_source(&db, -1, 1, 0, HPL_SOCKET).entry < 0 && hp_field_source(&db, 99, 1, 0, HPL_SOCKET).entry < 0, "bad index");
+    hp_field_source_text(&db, hp_field_source(&db, r, 1, HPL_SOCKET), t, sizeof(t));
+    CHECK(!strcmp(t, "style/rifle"), "source text '%s'", t);
+    CHECK(!hp_field_overridden(&db, hp_target_grip(r), 1, HPL_FINGER(HF_INDEX)), "rifle overrides nothing yet");
+    CHECK(hp_field_source(&db, -1, 1, HPL_SOCKET).entry < 0 && hp_field_source(&db, 99, 1, HPL_SOCKET).entry < 0, "bad index");
+    CHECK(!hp_target_has_layers(&db, hp_target_case(0, -1)) && hp_target_valid(&db, hp_target_case(0, -1)), "a case without a key: valid, no layers");
+    CHECK(!hp_target_valid(&db, hp_target_case(0, 3)), "a missing key is not a target");
     handpose_db_free(&db);
 }
 
@@ -76,76 +81,86 @@ static void test_touch_reset(void) {
     HandPoseDB db;
     build(&db);
     int r = handpose_find(&db, "rifle");
-    // Seeding an override changes nothing visible, for every field and state.
+    HpTarget tg = hp_target_grip(r);
+    // Seeding an override changes nothing visible, for every field.
     HpEditDefaults def;
     for (int h = 0; h < 2; h++) { def.socket[h] = xf_make(v3(0, -0.05f, 0.1f * (float)h), quat_identity()); def.pole[h] = v3(h ? 1.0f : -1.0f, -1, 0); }
     u16 bits[] = { HPL_SOCKET, HPL_WRIST, HPL_POLE, HPL_IKW, HPL_FINGER(HF_THUMB), HPL_FINGER(HF_PINKY), HPL_CONTACTS };
-    for (int st = 0; st < HPS_COUNT; st++)
+    for (int h = 0; h < 2; h++)
         for (int b = 0; b < (int)ARRAY_COUNT(bits); b++) {
             HandPose before, after;
-            handpose_resolve(&db, r, 1, st, &before);
-            HandPoseLayer *l = hp_edit_touch(&db, r, 1, st, bits[b], &def);
-            handpose_resolve(&db, r, 1, st, &after);
+            handpose_resolve(&db, r, h, &before);
+            HandPoseLayer *l = hp_edit_touch(&db, tg, h, bits[b], &def);
+            handpose_resolve(&db, r, h, &after);
             CHECK(l && (l->set & bits[b]), "touch didn't set the bit");
             if (bits[b] == HPL_SOCKET && !before.has_socket) {
-                CHECK(after.has_socket && !memcmp(&after.socket, &def.socket[1], sizeof(Xform)), "unset socket seeds from the item's grip (state %d)", st);
+                CHECK(after.has_socket && !memcmp(&after.socket, &def.socket[h], sizeof(Xform)), "unset socket seeds from the item's grip (hand %d)", h);
             } else if (bits[b] == HPL_POLE && !before.has_pole) {
-                CHECK(after.has_pole && v3_dist(after.pole, def.pole[1]) < 1e-6f, "unset pole seeds from the style elbow");
+                CHECK(after.has_pole && v3_dist(after.pole, def.pole[h]) < 1e-6f, "unset pole seeds from the style elbow");
             } else {
-                CHECK(pose_eq(&before, &after), "touching bit %x at state %s changed the pose", bits[b], handpose_state_name(st));
+                CHECK(pose_eq(&before, &after), "touching bit %x (hand %d) changed the pose", bits[b], h);
             }
-            CHECK(hp_field_overridden(&db, r, 1, st, bits[b]), "override flag");
-            CHECK(hp_edit_reset(&db, r, 1, st, bits[b]), "reset");
-            CHECK(!hp_edit_reset(&db, r, 1, st, bits[b]), "second reset is a no-op");
-            handpose_resolve(&db, r, 1, st, &after);
-            CHECK(pose_eq(&before, &after), "reset to inherited didn't restore (bit %x state %s)", bits[b], handpose_state_name(st));
+            CHECK(hp_field_overridden(&db, tg, h, bits[b]), "override flag");
+            CHECK(hp_edit_reset(&db, tg, h, bits[b]), "reset");
+            CHECK(!hp_edit_reset(&db, tg, h, bits[b]), "second reset is a no-op");
+            handpose_resolve(&db, r, h, &after);
+            CHECK(pose_eq(&before, &after), "reset to inherited didn't restore (bit %x hand %d)", bits[b], h);
         }
     CHECK(!handpose_entry_has_overrides(&db.e[r]), "rifle should be clean after resets");
 
     // A joint edit: clamped, the finger's other joints keep their inherited values.
     HandPose inh, now;
-    handpose_resolve(&db, r, 1, HPS_HIP, &inh);
-    hp_edit_set_joint(&db, r, 1, HPS_HIP, HF_INDEX, 1, (HandJoint){ 500, 0, -500 });
-    handpose_resolve(&db, r, 1, HPS_HIP, &now);
+    handpose_resolve(&db, r, 1, &inh);
+    hp_edit_set_joint(&db, tg, 1, HF_INDEX, 1, (HandJoint){ 500, 0, -500 });
+    handpose_resolve(&db, r, 1, &now);
     HandJoint lo, hi;
     handpose_joint_limits(HF_INDEX, 1, &lo, &hi);
     CHECK(now.j[HF_INDEX][1].curl == hi.curl && now.j[HF_INDEX][1].twist == lo.twist, "edit not clamped (%.1f %.1f)", now.j[HF_INDEX][1].curl, now.j[HF_INDEX][1].twist);
     CHECK(!memcmp(&now.j[HF_INDEX][0], &inh.j[HF_INDEX][0], sizeof(HandJoint)) && !memcmp(&now.j[HF_INDEX][2], &inh.j[HF_INDEX][2], sizeof(HandJoint)),
           "other joints of the finger moved");
     CHECK(!memcmp(now.j[HF_MIDDLE], inh.j[HF_MIDDLE], sizeof(now.j[HF_MIDDLE])), "another finger moved");
-    CHECK(db.e[r].layer[1][HPS_HIP].set == HPL_FINGER(HF_INDEX), "only the index bit is set (%x)", db.e[r].layer[1][HPS_HIP].set);
-    HpFieldSource src = hp_field_source(&db, r, 1, HPS_HIP, HPL_FINGER(HF_INDEX));
-    CHECK(src.entry == r && src.state == HPS_HIP, "override is now the source");
+    CHECK(db.e[r].grip[1].set == HPL_FINGER(HF_INDEX), "only the index bit is set (%x)", db.e[r].grip[1].set);
+    CHECK(hp_field_source(&db, r, 1, HPL_FINGER(HF_INDEX)).entry == r, "override is now the source");
+    // The curl shortcut drives the three joints together (clamped per joint).
+    hp_edit_set_curl(&db, tg, 1, HF_RING, 80.0f);
+    handpose_resolve(&db, r, 1, &now);
+    CHECK(fabsf(handpose_finger_curl(now.j, HF_RING) - 80.0f) < 1e-3f && now.j[HF_RING][1].curl > now.j[HF_RING][0].curl, "curl shortcut (%.2f)", handpose_finger_curl(now.j, HF_RING));
 
-    // The canonical file holds only that override.
+    // The canonical file holds only the overrides.
     char *txt = handpose_entry_write(&db.e[r]);
-    CHECK(txt && strstr(txt, "\"index\"") && !strstr(txt, "\"thumb\"") && !strstr(txt, "\"socket\""), "writer holds more than the override:\n%s", txt ? txt : "(null)");
+    CHECK(txt && strstr(txt, "\"index\"") && !strstr(txt, "\"thumb\"") && !strstr(txt, "\"ik\"") && !strstr(txt, "\"root\""), "writer holds more than the overrides:\n%s", txt ? txt : "(null)");
     free(txt);
 
-    // Default-layer edit shadowed by the hip layer.
-    hp_edit_set_joint(&db, r, 1, HPS_DEFAULT, HF_INDEX, 0, (HandJoint){ 10, 0, 0 });
-    CHECK(hp_field_shadowed(&db, r, 1, HPS_HIP, HPL_FINGER(HF_INDEX)), "default edit should be shadowed at hip");
-    CHECK(!hp_field_shadowed(&db, r, 1, HPS_ADS, HPL_FINGER(HF_INDEX)), "not shadowed at ads");
+    // The root: set, clamped, written, reset.
+    hp_target_set_root(&db, tg, xf_make(v3(0.01f, 0, 0), quat_identity()));
+    Xform rs = hp_target_root(&db, tg);
+    rs.s = v3s(9.0f);
+    hp_target_set_root(&db, tg, rs);
+    CHECK(fabsf(handpose_root(&db, r).s.x - HANDPOSE_ROOT_SCALE_MAX) < 1e-6f, "root scale clamped (%.2f)", handpose_root(&db, r).s.x);
+    txt = handpose_entry_write(&db.e[r]);
+    CHECK(txt && strstr(txt, "\"root\""), "root not written");
+    free(txt);
+    CHECK(hp_edit_reset_root(&db, tg) && !db.e[r].has_root, "root reset");
 
     // Presets: all five fingers; mirror copies to the other hand.
-    CHECK(hp_edit_preset(&db, r, 1, HPS_ADS, "fist"), "preset");
-    CHECK(!hp_edit_preset(&db, r, 1, HPS_ADS, "nope"), "unknown preset");
+    CHECK(hp_edit_preset(&db, tg, 1, "fist"), "preset");
+    CHECK(!hp_edit_preset(&db, tg, 1, "nope"), "unknown preset");
     HandFingers fist;
     handpose_preset("fist", fist);
-    handpose_resolve(&db, r, 1, HPS_ADS, &now);
+    handpose_resolve(&db, r, 1, &now);
     CHECK(!memcmp(now.j, fist, sizeof(fist)), "preset not applied");
-    CHECK((db.e[r].layer[1][HPS_ADS].set & HPL_FINGERS_ALL) == HPL_FINGERS_ALL, "preset sets every finger");
-    hp_edit_touch(&db, r, 1, HPS_ADS, HPL_SOCKET, NULL)->socket = xf_make(v3(0.1f, 0, 0), quat_identity());
-    hp_edit_mirror(&db, r, 1);
-    CHECK(db.e[r].layer[0][HPS_ADS].set == db.e[r].layer[1][HPS_ADS].set && fabsf(db.e[r].layer[0][HPS_ADS].socket.t.x + 0.1f) < 1e-6f, "mirror R -> L");
+    CHECK((db.e[r].grip[1].set & HPL_FINGERS_ALL) == HPL_FINGERS_ALL, "preset sets every finger");
+    hp_edit_touch(&db, tg, 1, HPL_SOCKET, NULL)->socket = xf_make(v3(0.1f, 0, 0), quat_identity());
+    hp_edit_mirror(&db, tg, 1);
+    CHECK(db.e[r].grip[0].set == db.e[r].grip[1].set && fabsf(db.e[r].grip[0].socket.t.x + 0.1f) < 1e-6f, "mirror R -> L");
 
     // Contacts.
-    CHECK(hp_edit_add_contact(&db, r, 1, HPS_HIP, HF_INDEX, v3(0, 0, -0.1f)), "add contact");
-    CHECK(hp_edit_add_contact(&db, r, 1, HPS_HIP, HF_MIDDLE, v3(0, 0, -0.2f)), "add contact 2");
-    hp_edit_remove_contact(&db, r, 1, HPS_HIP, 0);
-    HandPoseLayer *l = &db.e[r].layer[1][HPS_HIP];
+    CHECK(hp_edit_add_contact(&db, tg, 1, HF_INDEX, v3(0, 0, -0.1f)), "add contact");
+    CHECK(hp_edit_add_contact(&db, tg, 1, HF_MIDDLE, v3(0, 0, -0.2f)), "add contact 2");
+    hp_edit_remove_contact(&db, tg, 1, 0);
+    HandPoseLayer *l = &db.e[r].grip[1];
     CHECK(l->contact_count == 1 && l->contacts[0].finger == HF_MIDDLE, "remove contact");
-    for (int i = 0; i < 8; i++) hp_edit_add_contact(&db, r, 1, HPS_HIP, HF_RING, v3(0, 0, 0));
+    for (int i = 0; i < 8; i++) hp_edit_add_contact(&db, tg, 1, HF_RING, v3(0, 0, 0));
     CHECK(l->contact_count == HANDPOSE_CONTACTS, "contacts bounded");
 
     // Commit: net identity changes, revision bumps.
@@ -155,15 +170,44 @@ static void test_touch_reset(void) {
     handpose_db_free(&db);
 }
 
+// Case keys as targets: seeded relative to the anchor, the anchor is the root.
+static void test_case_target(void) {
+    HandPoseDB db;
+    build(&db);
+    int ci = handpose_case_find(&db, "door_knob");
+    int k = handpose_case_key_at(&db, ci, 0.16f);
+    CHECK(k == 0 && db.c[ci].key_count == 1, "key added (%d)", k);
+    CHECK(handpose_case_key_at(&db, ci, 0.1605f) == 0, "a key within 1 ms is the same key");
+    HpTarget t = hp_target_case(ci, k);
+    HandPose kp;
+    hp_target_resolve(&db, t, 1, &kp);
+    CHECK(v3_len(kp.socket.t) < 1e-5f, "the seeded key sits on the anchor (relative %.4f)", v3_len(kp.socket.t));
+    HandPose ev;
+    handpose_case_eval(&db, ci, -1, 1, 0.16f, &ev);
+    CHECK(v3_dist(ev.socket.t, db.c[ci].anchor.t) < 1e-5f, "evaluated socket = the anchor");
+    HandPoseLayer *l = hp_edit_touch(&db, t, 1, HPL_SOCKET, NULL);
+    l->socket.t = v3(0.02f, 0, 0);
+    handpose_case_eval(&db, ci, -1, 1, 0.16f, &ev);
+    CHECK(v3_dist(ev.socket.t, v3(0.02f, 0.05f, 0)) < 1e-5f, "key IK target is relative to the anchor");
+    // Moving the anchor carries the hands.
+    hp_target_set_root(&db, hp_target_case(ci, -1), xf_make(v3(0, 0.1f, 0), quat_identity()));
+    handpose_case_eval(&db, ci, -1, 1, 0.16f, &ev);
+    CHECK(v3_dist(ev.socket.t, v3(0.02f, 0.1f, 0)) < 1e-5f, "anchor moves the key's hand");
+    char *txt = handpose_case_write(&db.c[ci]);
+    CHECK(txt && strstr(txt, "\"keys\"") && strstr(txt, "\"ik\""), "case writer");
+    free(txt);
+    handpose_db_free(&db);
+}
+
 static float index_curl(const HandPoseDB *db, int e) {
     HandPose p;
-    handpose_resolve(db, e, 1, HPS_HIP, &p);
+    handpose_resolve(db, e, 1, &p);
     return p.j[HF_INDEX][0].curl;
 }
 
 static void set_curl(HandPoseDB *db, HpUndo *u, int e, float c, u32 key) {
-    hp_undo_push(u, db, e, key);
-    hp_edit_set_joint(db, e, 1, HPS_HIP, HF_INDEX, 0, (HandJoint){ c, 0, 0 });
+    hp_undo_push(u, db, hp_target_grip(e), key);
+    hp_edit_set_joint(db, hp_target_grip(e), 1, HF_INDEX, 0, (HandJoint){ c, 0, 0 });
 }
 
 static void test_undo(void) {
@@ -173,8 +217,8 @@ static void test_undo(void) {
     memset(&u, 0, sizeof(u));
     int r = handpose_find(&db, "rifle");
     float c0 = index_curl(&db, r);
-    CHECK(hp_undo(&u, &db) < 0 && hp_redo(&u, &db) < 0, "empty stacks");
-    // A drag (same key) is one step; a second slider is another.
+    CHECK(hp_undo(&u, &db).entry < 0 && hp_redo(&u, &db).entry < 0, "empty stacks");
+    // A drag (same key) is one step; a second control is another.
     for (int i = 1; i <= 10; i++) set_curl(&db, &u, r, (float)i, 7);
     CHECK(u.undo_count == 1, "drag should coalesce (%d)", u.undo_count);
     set_curl(&db, &u, r, 40, 8);
@@ -182,26 +226,36 @@ static void test_undo(void) {
     hp_undo_break(&u);
     set_curl(&db, &u, r, 50, 8);
     CHECK(u.undo_count == 3, "break ends the coalescing");
-    CHECK(hp_undo(&u, &db) == r && index_curl(&db, r) == 40, "undo 1 -> %.1f", index_curl(&db, r));
-    CHECK(hp_undo(&u, &db) == r && index_curl(&db, r) == 10, "undo 2 -> %.1f", index_curl(&db, r));
-    CHECK(hp_redo(&u, &db) == r && index_curl(&db, r) == 40, "redo -> %.1f", index_curl(&db, r));
-    CHECK(hp_undo(&u, &db) == r && hp_undo(&u, &db) == r && index_curl(&db, r) == c0, "back to the start");
+    CHECK(hp_undo(&u, &db).entry == r && index_curl(&db, r) == 40, "undo 1 -> %.1f", index_curl(&db, r));
+    CHECK(hp_undo(&u, &db).entry == r && index_curl(&db, r) == 10, "undo 2 -> %.1f", index_curl(&db, r));
+    CHECK(hp_redo(&u, &db).entry == r && index_curl(&db, r) == 40, "redo -> %.1f", index_curl(&db, r));
+    CHECK(hp_undo(&u, &db).entry == r && hp_undo(&u, &db).entry == r && index_curl(&db, r) == c0, "back to the start");
     CHECK(!handpose_entry_has_overrides(&db.e[r]), "undo removes the override bit too");
-    CHECK(hp_undo(&u, &db) < 0, "nothing left");
+    CHECK(hp_undo(&u, &db).entry < 0, "nothing left");
     CHECK(u.redo_count == 3, "redo holds 3 (%d)", u.redo_count);
     set_curl(&db, &u, r, 20, 9);
     CHECK(u.redo_count == 0, "a new edit clears redo");
-    // reviewed is part of the snapshot.
-    hp_undo_push(&u, &db, r, 0);
+    // reviewed and the root are part of the snapshot.
+    hp_undo_push(&u, &db, hp_target_grip(r), 0);
     db.e[r].reviewed = true;
+    hp_target_set_root(&db, hp_target_grip(r), xf_make(v3(0, 0.3f, 0), quat_identity()));
     hp_undo(&u, &db);
-    CHECK(!db.e[r].reviewed, "reviewed restored");
+    CHECK(!db.e[r].reviewed && !db.e[r].has_root, "reviewed / root restored");
+    // Cases: the whole case (anchor, keys) is one snapshot.
+    int ci = handpose_case_find(&db, "door_knob");
+    Xform a0 = db.c[ci].anchor;
+    hp_undo_push(&u, &db, hp_target_case(ci, -1), 0);
+    handpose_case_key_at(&db, ci, 0.3f);
+    db.c[ci].anchor.t.x = 1.0f;
+    HpTarget back = hp_undo(&u, &db);
+    CHECK(back.ci == ci && db.c[ci].key_count == 0 && !memcmp(&db.c[ci].anchor, &a0, sizeof(a0)), "case undo (keys %d)", db.c[ci].key_count);
+    CHECK(hp_redo(&u, &db).ci == ci && db.c[ci].key_count == 1 && db.c[ci].anchor.t.x == 1.0f, "case redo");
     // Bounded: the oldest steps drop off.
     hp_undo_clear(&u);
     for (int i = 0; i < HP_UNDO_MAX + 10; i++) set_curl(&db, &u, r, (float)(i % 90), (u32)(100 + i));
     CHECK(u.undo_count == HP_UNDO_MAX, "bounded (%d)", u.undo_count);
     int n = 0;
-    while (hp_undo(&u, &db) >= 0) n++;
+    while (hp_undo(&u, &db).entry >= 0) n++;
     CHECK(n == HP_UNDO_MAX, "undid %d", n);
     // Entries found by hash after a reload reorders the DB; a removed entry's steps are skipped.
     hp_undo_clear(&u);
@@ -214,11 +268,11 @@ static void test_undo(void) {
     handpose_link(&db);
     r = handpose_find(&db, "rifle");
     p = handpose_find(&db, "pistol");
-    CHECK(hp_undo(&u, &db) == r && index_curl(&db, r) != 66, "undo after reorder (rifle)");
+    CHECK(hp_undo(&u, &db).entry == r && index_curl(&db, r) != 66, "undo after reorder (rifle)");
     db.e[p] = db.e[db.count - 1];   // pistol removed
     db.count--;
     handpose_link(&db);
-    CHECK(handpose_find(&db, "pistol") < 0 && hp_undo(&u, &db) < 0, "a removed entry's step is skipped");
+    CHECK(handpose_find(&db, "pistol") < 0 && hp_undo(&u, &db).entry < 0, "a removed entry's step is skipped");
     hp_undo_free(&u);
     handpose_db_free(&db);
 }
@@ -230,6 +284,7 @@ int main(int argc, char **argv) {
     log_set_min_level(LOG_WARN);
     test_sources();
     test_touch_reset();
+    test_case_target();
     test_undo();
     printf("%d checks, %d failed\n", g_checks, g_fail);
     return g_fail ? 1 : 0;

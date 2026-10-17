@@ -16,21 +16,16 @@ static HoldStyle default_style(int id) {
     h.elbow_r = v3(0.7f, -1.0f, 0.3f);
     h.elbow_l = v3(-0.6f, -1.0f, 0.0f);
     h.max_shift = 0.3f;    // upper bound; the hold point's reach_pull is the per-style limit
-    float cr[5] = { 20, 25, 70, 75, 80 }, cl[5] = { 40, 50, 55, 60, 65 };
-    memcpy(h.curl_r, cr, sizeof(cr));
-    memcpy(h.curl_l, cl, sizeof(cl));
+    // Fingers: assets/handposes/styles/<name>.json (docs/HANDPOSE.md).
     switch (id) {
-    case HOLD_NONE: h.left_hand = false; memset(h.curl_r, 0, sizeof(h.curl_r)); break;
+    case HOLD_NONE: h.left_hand = false; break;
     case HOLD_PISTOL: h.elbow_l = v3(-0.8f, -1.0f, 0.2f); break;
-    case HOLD_MELEE_1H: h.left_hand = false; { float c[5] = { 60, 85, 90, 90, 90 }; memcpy(h.curl_r, c, sizeof(c)); } break;
-    case HOLD_MELEE_2H: { float c[5] = { 60, 85, 90, 90, 90 }; memcpy(h.curl_r, c, sizeof(c)); memcpy(h.curl_l, c, sizeof(c)); } break;
-    case HOLD_ITEM_SMALL: h.left_hand = false; { float c[5] = { 30, 45, 50, 55, 60 }; memcpy(h.curl_r, c, sizeof(c)); } break;
-    // Phone: fingers wrap the back of the phone, the thumb stays on the screen side.
-    case HOLD_PHONE: h.left_hand = false; h.elbow_r = v3(0.6f, -1.0f, 0.1f); { float c[5] = { 25, 8, 8, 10, 12 }; memcpy(h.curl_r, c, sizeof(c)); } break;
+    case HOLD_MELEE_1H: h.left_hand = false; break;
+    case HOLD_ITEM_SMALL: h.left_hand = false; break;
+    case HOLD_PHONE: h.left_hand = false; h.elbow_r = v3(0.6f, -1.0f, 0.1f); break;
     case HOLD_PHONE_LANDSCAPE:
         h.elbow_r = v3(0.7f, -1.0f, 0.1f);
         h.elbow_l = v3(-0.7f, -1.0f, 0.1f);
-        { float c[5] = { 15, 35, 40, 45, 50 }; memcpy(h.curl_r, c, sizeof(c)); memcpy(h.curl_l, c, sizeof(c)); }
         break;
     default: break;
     }
@@ -147,8 +142,6 @@ bool proc_params_load(ProcParams *p, const cJSON *root) {
                 h->shoulder_r = jv(e, "shoulder_r", h->shoulder_r);
                 h->shoulder_l = jv(e, "shoulder_l", h->shoulder_l);
                 h->max_shift = jf(e, "max_shift", h->max_shift);
-                jarr(e, "curl_r", h->curl_r, 5);
-                jarr(e, "curl_l", h->curl_l, 5);
             }
         }
         const cJSON *dr = cJSON_GetObjectItemCaseSensitive(root, "damage_reactions");

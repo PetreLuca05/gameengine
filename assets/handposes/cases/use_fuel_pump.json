@@ -1,0 +1,25 @@
+{
+  "schema": 2,
+  "id": "use_fuel_pump",
+  "label": "Interactable: fuel_pump",
+  "kind": "interact",
+  "bind": "interactable:fuel_pump",
+  "source": "interactable:fuel_pump",
+  "inherits": "style/grip_grab",
+  "hands": ["left", "right"],
+  "reviewed": false,
+  "auto_placed": true,
+  "setup": { "prop": "fuel_pump", "distance": 0.75 },
+  "anchor": { "pos": [0, 0, 0], "q": [0, 0, 0, 1] },
+  "duration": 0.76,
+  "markers": { "contact": 0.16, "use": 0.31199998, "release": 0.53999996 },
+  "keys": [
+    { "t": 0.16, "name": "contact",
+      "left": {
+        "ik": { "pos": [0, 0.02, 0], "q": [0, 0, 0, 1] }
+      },
+      "right": {
+        "ik": { "pos": [0, 0.02, 0], "q": [0, 0, 0, 1] }
+      } }
+  ]
+}

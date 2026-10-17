@@ -71,8 +71,8 @@ typedef struct HandsFpTargets {
     bool on_weapon[2];        // palm is on the held item's socket (finger curl from the hold style)
     Xform ov_palm[2];         // interaction / ledge target palm (world)
     float ov_w[2];            // its weight (0 = the body's own hold / pose)
-    u32 ov_pose[2];           // its hand pose entry (docs/HANDPOSE.md: "use_<interactable>", "veh_<vehicle>"; 0 = the grip style)
-    u8 ov_state[2];           // HandPoseState (use / hold / drive / drive_onehand)
+    u32 ov_case[2];           // its hand pose case (docs/HANDPOSE.md: door_knob, vehicle_car_driver, ...; 0 = the grip style)
+    float ov_case_t[2];       // the case timeline time (s) this frame
     const struct WeaponDef *weapon;
     const struct ItemDef *item;
     vec3 cam_pos;
@@ -90,11 +90,24 @@ void hands_set_body_arms(bool on);
 void hands_fp_shift(vec3 delta);
 // True first person: draw the held item (and its muzzle) at the body's hold transform this frame.
 void hands_fp_set_item(vec3 pos, quat rot);
+// Held item draw scale (the grip root's calibration scale, docs/HANDPOSE.md): the third-person
+// draws (hands_draw_held*, reset to 1 after) and this frame's first-person item.
+void hands_set_draw_scale(float s);
+void hands_fp_set_item_scale(float s);
 // World-space barrel tip of the local viewmodel weapon (last hands_update). False if no gun.
 bool hands_muzzle(vec3 *pos, vec3 *fwd);
 // The first-person weapon this frame (viewmodel world space) and its effective definition
 // (attachments applied). False when no weapon is held.
 bool hands_fp_item(vec3 *pos, quat *rot, const struct WeaponDef **wd);
 void hands_reload_poses(void);
+// Editor (scene handpose, simulated cases, docs/HANDPOSE.md): the interaction with `target` held
+// at case timeline time t (s) instead of running on the use press. NULL / !active = off.
+typedef struct HandsCaseDrive {
+    bool active;
+    EntityId target;
+    u32 case_hash;
+    float t;
+} HandsCaseDrive;
+void hands_case_drive(const HandsCaseDrive *d);
 
 #endif

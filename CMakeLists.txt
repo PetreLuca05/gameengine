@@ -377,6 +377,10 @@ endforeach()
 add_executable(handpose_report tools/handpose_report/handpose_report.c)
 set_target_properties(handpose_report PROPERTIES C_STANDARD 11)
 target_link_libraries(handpose_report PRIVATE dg_animcore)
+# Schema 1 (per state) -> universal grips + cases, with a report of the dropped differences.
+add_executable(handpose_migrate tools/handpose_migrate/handpose_migrate.c)
+set_target_properties(handpose_migrate PROPERTIES C_STANDARD 11)
+target_link_libraries(handpose_migrate PRIVATE dg_animcore)
 
 add_executable(validate_rig tools/validate_rig/validate_rig.c)
 set_target_properties(validate_rig PROPERTIES C_STANDARD 11)

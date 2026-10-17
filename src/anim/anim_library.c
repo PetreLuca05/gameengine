@@ -533,9 +533,8 @@ bool anim_lib_load(AnimLibrary *lib, float rate) {
 bool anim_lib_reload_handposes(AnimLibrary *lib) {
     handpose_db_clear(&lib->handposes);
     int files = handpose_db_load_dir(&lib->handposes, HANDPOSE_DIR);
-    handpose_add_style_defaults(&lib->handposes, &lib->proc);
     lib->manifest.hash[AC_HAND_POSES] = lib->handposes.hash;
-    log_info("anim: %d hand pose files, %d entries (%08x)", files, lib->handposes.count, lib->handposes.hash);
+    log_info("anim: %d hand pose files, %d grips, %d cases (%08x)", files, lib->handposes.count, lib->handposes.case_count, lib->handposes.hash);
     return true;
 }
 
@@ -550,8 +549,6 @@ void anim_lib_free(AnimLibrary *lib) {
 bool anim_lib_reload_meta(AnimLibrary *lib) {
     apply_clip_meta(lib);
     bool ok = load_controller(lib);
-    handpose_add_style_defaults(&lib->handposes, &lib->proc);   // generated styles follow controller.json
-    lib->manifest.hash[AC_HAND_POSES] = lib->handposes.hash;
     load_sets(lib);
     for (int i = 0; i < lib->char_count; i++) {
         int s = anim_lib_find_set(lib, lib->chars[i].anim_set);

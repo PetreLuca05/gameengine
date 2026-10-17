@@ -1,0 +1,17 @@
+{
+  "schema": 2,
+  "id": "reload_rifle",
+  "label": "Reload: Assault Rifle",
+  "kind": "reload",
+  "bind": "reload:rifle",
+  "source": "data/weapons/02_rifle.json",
+  "inherits": "style/rifle",
+  "hands": ["left", "right"],
+  "reviewed": false,
+  "auto_placed": false,
+  "setup": { "item": "rifle", "distance": 0.75 },
+  "anchor": { "pos": [0, 0, 0], "q": [0, 0, 0, 1] },
+  "duration": 0.76,
+  "markers": { "contact": 0.16, "use": 0.31199998, "release": 0.53999996 },
+  "keys": []
+}

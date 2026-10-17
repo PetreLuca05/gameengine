@@ -1,0 +1,17 @@
+{
+  "schema": 2,
+  "id": "reload_lmg",
+  "label": "Reload: LMG",
+  "kind": "reload",
+  "bind": "reload:lmg",
+  "source": "data/weapons/08_lmg.json",
+  "inherits": "style/lmg",
+  "hands": ["left", "right"],
+  "reviewed": false,
+  "auto_placed": false,
+  "setup": { "item": "lmg", "distance": 0.75 },
+  "anchor": { "pos": [0, 0, 0], "q": [0, 0, 0, 1] },
+  "duration": 0.76,
+  "markers": { "contact": 0.16, "use": 0.31199998, "release": 0.53999996 },
+  "keys": []
+}

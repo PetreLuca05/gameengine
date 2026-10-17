@@ -1,0 +1,13 @@
+{
+  "schema": 2,
+  "id": "rifle",
+  "label": "Assault Rifle",
+  "category": "weapon",
+  "source": "data/weapons/02_rifle.json",
+  "inherits": "style/rifle",
+  "hands": ["left", "right"],
+  "reviewed": false,
+  "auto_placed": false,
+  "left": {},
+  "right": {}
+}

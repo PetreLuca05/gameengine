@@ -1,0 +1,39 @@
+{
+  "schema": 2,
+  "id": "lever",
+  "label": "Lever",
+  "kind": "interact",
+  "bind": "interactable:lever",
+  "source": "interactable:lever",
+  "inherits": "style/grip_grab",
+  "hands": [
+    "left",
+    "right"
+  ],
+  "reviewed": false,
+  "auto_placed": false,
+  "setup": {
+    "prop": "lever",
+    "distance": 0.7
+  },
+  "anchor": {
+    "pos": [
+      0,
+      0,
+      0
+    ],
+    "q": [
+      0,
+      0,
+      0,
+      1
+    ]
+  },
+  "duration": 0.76,
+  "markers": {
+    "contact": 0.16,
+    "use": 0.312,
+    "release": 0.54
+  },
+  "keys": []
+}

@@ -12,6 +12,7 @@
 #include "render/render.h"
 #include "render/debug_draw.h"
 #include "player/hands.h"
+#include "editor/handpose/hp_system.h"
 #include "anim/procedural_internal.h"
 #include "cJSON.h"
 #include "core/platform.h"
@@ -1440,6 +1441,13 @@ static void post_one(World *w, CharacterInst *c, int i, float dt, vec3 cam_pos, 
             pi.hand_anchor[0] = m->hand_anchor[0];
             pi.hand_anchor[1] = m->hand_anchor[1];
             pi.hand_anchor_w = 1.0f;
+            // The ledge case (mantle_ledge) at the traversal's progress, once it has a pose.
+            u32 mc = handpose_mantle_case();
+            for (int h = 0; h < 2 && mc; h++) {
+                pi.anchor_case[h] = mc;
+                pi.anchor_pose_base[h] = handpose_grip_style_hash(GRIP_PALM);
+                pi.anchor_case_t[h] = handpose_mantle_case_time(m->mode == MOVE_HANG ? -1.0f : m->m_t);
+            }
         }
         // Seated in a vehicle: pelvis on the seat, feet on the pedals, hands on the controls.
         float yaw;
@@ -1461,12 +1469,13 @@ static void post_one(World *w, CharacterInst *c, int i, float dt, vec3 cam_pos, 
                 pi.hand_anchor_w = 1.0f;
                 pi.hand_anchor_skip = (u8)((use[0] ? 0 : 1) | (use[1] ? 0 : 2));
                 pi.vehicle_onehand = !use[1] && item != NULL;
-                // Hand poses on the controls (the first-person pass uses the same entry).
-                const char *vname = g_vehicle_pose.seat_vehicle ? g_vehicle_pose.seat_vehicle(w, c->slot) : NULL;
+                // The seat's case on the controls (the first-person pass uses the same case).
+                u32 sc = handpose_seat_case(w, c->slot);
+                pi.hand_anchor_w = handpose_seat_case_weight(sc);
                 for (int h = 0; h < 2; h++) {
-                    pi.anchor_pose[h] = vname ? handpose_entry_hash(HPC_VEHICLE, vname) : 0;
+                    pi.anchor_case[h] = sc;
                     pi.anchor_pose_base[h] = handpose_grip_style_hash(GRIP_GRAB);
-                    pi.anchor_pose_state[h] = use[0] && use[1] ? HPS_DRIVE : HPS_DRIVE_ONEHAND;
+                    pi.anchor_case_t[h] = handpose_seat_case_time(sc);
                 }
             }
         }
@@ -2030,6 +2039,7 @@ void chars_render_local_fp(World *w, float alpha, int local_slot) {
         Xform item_w = xf_mul(root, item);
         item_w.s = v3(1, 1, 1);
         hands_fp_set_item(item_w.t, item_w.r);
+        hands_fp_set_item_scale(c->rt.proc.item_scale);
         // cam_debug: hold point axes, pivot, sockets, IK targets, collision cast.
         Cvar *cd = cvar_find("cam_debug");
         if (cd && cd->i) {
@@ -2059,15 +2069,14 @@ void chars_render_local_fp(World *w, float alpha, int local_slot) {
         if (t.ov_w[h] <= 0.001f) continue;
         int ua = s->role[h ? BR_R_ARM : BR_L_ARM], fa = s->role[h ? BR_R_FOREARM : BR_L_FOREARM], ha = s->role[h ? BR_R_HAND : BR_L_HAND];
         if (ua < 0 || fa < 0 || ha < 0) continue;
-        // Hand pose: the grip style with the interactable's / vehicle's entry on top; its socket
-        // is an offset from the gameplay target (docs/HANDPOSE.md).
+        // Hand pose: the grip style with the case (door knob, steering wheel, ledge) at its
+        // timeline time on top; its socket (anchor * key IK target) is an offset from the gameplay
+        // target (docs/HANDPOSE.md).
         HandPose hp;
         const HandPoseDB *db = &LIB->handposes;
         int base = handpose_find_hash(db, handpose_grip_style_hash(t.grip[h] < GRIP_COUNT ? t.grip[h] : GRIP_GRAB));
-        handpose_resolve_over(db, base, handpose_find_hash(db, t.ov_pose[h]), h, t.ov_state[h], &hp);
-        Xform palm = xf_mul(inv_root, t.ov_palm[h]);
-        if (hp.has_socket) palm = xf_mul(palm, hp.socket);
-        palm = xf_mul(palm, hp.wrist);
+        handpose_case_eval(db, handpose_case_find_hash(db, t.ov_case[h]), base, h, t.ov_case_t[h], &hp);
+        Xform palm = xf_mul(xf_mul(inv_root, t.ov_palm[h]), hp.socket);
         Xform hand = proc_hand_for_socket(palm, LIB->hands.palm[h]);
         float side = h ? 1.0f : -1.0f;
         vec3 pole = quat_rotate(quat_conj(root.r), quat_rotate(t.cam_rot, hp.has_pole ? hp.pole : v3(0.8f * side, -1.0f, 0.25f)));
@@ -2268,7 +2277,9 @@ void chars_render(World *w, float alpha, vec3 cam_pos, int local_slot) {
             float span = (float)DG_MAX(1, c->interval);
             float t = saturate(((float)(w->chars->tick - c->last_eval) + alpha) / span);
             Xform it = xf_mul(seat_fix(w, c, t), xf_lerp(c->item_prev, c->item_cur, t));
+            hands_set_draw_scale(c->rt.proc.item_scale);   // the grip root's calibration scale
             hands_draw_held_att(c->item_weapon, c->item_weapon ? NULL : c->item_def, c->item_att, it.t, it.r, local ? (MAT_SHADOW_ONLY) : 0);
+            hands_set_draw_scale(1.0f);
         }
         (void)dist;
     }
