@@ -21,6 +21,11 @@
 #define MAT_NORMAL_TEX    131072u
 #define MAT_OCCLUSION_TEX 262144u
 #define MAT_EMISSIVE_TEX  524288u
+// Reconstruction / fabricator chamber (render.h, docs/REVIVE.md)
+#define MAT_RECON      1048576u
+#define MAT_RECON_FX   2097152u
+#define MAT_GLASS      4194304u
+#define MAT_CAUSTICS   8388608u
 
 struct PointLight {
     vec4 pos_radius;
@@ -169,6 +174,7 @@ struct SkinInstance {
     vec4 color;
     vec4 params;    // roughness, metallic, emissive, lod fade (-1..1, 0 = fully visible)
     uvec4 info;     // x = first bone, y = material flags
+    vec4 recon;     // MAT_RECON: spine base xyz, progress w (docs/REVIVE.md)
 };
 layout(std430, set = 0, binding = 2) readonly buffer SkinBones { mat4 bones[]; } skin_bones;
 layout(std430, set = 0, binding = 3) readonly buffer SkinInstances { SkinInstance inst[]; } skin_inst;

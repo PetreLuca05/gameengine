@@ -1,0 +1,115 @@
+{
+	"class":	"smg",
+	"mass":	2.8,
+	"moment":	0.35,
+	"length":	0.4,
+	"class_mass":	2.8,
+	"class_moment":	0.35,
+	"first_shot":	1.25,
+	"hip_scale":	1,
+	"ads_scale":	1,
+	"string_gap":	0.25,
+	"ride_release":	0.11,
+	"springs":	{
+		"pitch":	{
+			"peak":	1.5,
+			"random":	[0.85, 1.15],
+			"omega":	18,
+			"zeta":	0.5,
+			"ads":	0.45,
+			"follow":	0.18,
+			"sign_random":	0,
+			"ride":	0.4,
+			"ride_max":	1.5
+		},
+		"yaw":	{
+			"peak":	0.9,
+			"random":	[0.85, 1.15],
+			"omega":	19,
+			"zeta":	0.5,
+			"ads":	0.4,
+			"follow":	0.1,
+			"sign_random":	1,
+			"ride":	0.15,
+			"ride_max":	1.5
+		},
+		"roll":	{
+			"peak":	0.8,
+			"random":	[0.85, 1.15],
+			"omega":	20,
+			"zeta":	0.5,
+			"ads":	0.5,
+			"follow":	0,
+			"sign_random":	1,
+			"ride":	0,
+			"ride_max":	0
+		},
+		"back":	{
+			"peak":	0.012,
+			"random":	[0.85, 1.15],
+			"omega":	20,
+			"zeta":	0.5,
+			"ads":	0.7,
+			"follow":	0.12,
+			"sign_random":	0,
+			"ride":	0.24,
+			"ride_max":	0.9
+		},
+		"up":	{
+			"peak":	0.005,
+			"random":	[0.85, 1.15],
+			"omega":	18,
+			"zeta":	0.5,
+			"ads":	0,
+			"follow":	0.1,
+			"sign_random":	0,
+			"ride":	0.2,
+			"ride_max":	1
+		}
+	},
+	"curves":	{
+		"first":	[[0, 0.8, 0, 0.3, 0.008, 0.002], [0.05, 0.2, 0, 0, 0.003, 0], [0.12, -0.2, 0, 0, 0, 0], [0.22, 0, 0, 0, 0, 0]],
+		"sustained":	[[0, 0.8, 0, 0.2, 0.004, 0.001], [0.05, 0.2, 0, 0, 0.001, 0], [0.12, 0, 0, 0, 0, 0]],
+		"release":	[[0, 0, 0, 0, 0, 0], [0.1, -0.8, 0, 0, -0.003, 0], [0.26, 0.25, 0, 0, 0.001, 0], [0.45, 0, 0, 0, 0, 0]]
+	},
+	"body":	{
+		"hand_omega":	70,
+		"hand_zeta":	0.8,
+		"hand_max_err":	0.01,
+		"shoulder_push":	0.35,
+		"shoulder_omega":	26,
+		"shoulder_zeta":	0.55,
+		"trigger_pull":	1
+	},
+	"mechanical":	{
+		"slide_travel":	0.03,
+		"slide_time":	0.05,
+		"lock_empty":	true,
+		"bolt_delay":	0,
+		"wobble_omega":	34,
+		"wobble_zeta":	0.3,
+		"wobble_gain":	0.6,
+		"heat_per_shot":	0.06,
+		"heat_decay":	0.5,
+		"droop":	0
+	},
+	"camera":	{
+		"gain":	{
+			"pitch":	0.32,
+			"yaw":	0.25,
+			"roll":	0.45,
+			"back":	0.5,
+			"up":	0
+		},
+		"delay_ticks":	2,
+		"omega":	20,
+		"zeta":	0.42,
+		"fov_punch":	2,
+		"fov_release":	0.11667,
+		"roll_twitch":	0.4,
+		"screen_kick":	0.005,
+		"screen_release":	0.1,
+		"blur_ticks":	2,
+		"chroma":	0
+	}
+}

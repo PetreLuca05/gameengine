@@ -223,6 +223,7 @@
   "vehicle_spikes": [{"pos": [-110, 8], "size": [7, 0.5]}],
   "labels": [
     {"pos": [0, 0, 47.5], "yaw": 0, "floor": true, "size": 0.3, "text": "horde yard: spawn_horde <count> [radius] [ring|random|cluster], horde_debug 1"},
+    {"pos": [7.0, 0, 24.6], "yaw": -83, "floor": true, "size": 0.22, "text": "fabricator: spawn_teammate, down 1, kill 1, extract DNA, insert (docs/REVIVE.md)"},
     {"pos": [-10, 0, -34.9], "yaw": 0, "floor": true, "size": 0.25, "text": "5 m: player / zombie / helmet"},
     {"pos": [0, 0, -34.9], "yaw": 0, "floor": true, "size": 0.25, "text": "15 m: player / zombie / helmet"},
     {"pos": [10, 0, -34.9], "yaw": 0, "floor": true, "size": 0.25, "text": "40 m: player / zombie / helmet"},
@@ -261,6 +262,8 @@
     {"type": "light", "pos": [60, 4.95, 28], "color": [1.0, 0.78, 0.5], "radius": 16, "intensity": 16, "schedule": true, "flicker": 0.6},
     {"type": "light", "pos": [68, 4.95, 22], "color": [1.0, 0.78, 0.5], "radius": 16, "intensity": 16, "schedule": true},
     {"type": "bench", "pos": [4.2, 0.85, 27.6], "yaw": 0},
+    {"type": "fabricator", "pos": [8.5, 0, 23], "yaw": 97, "powered": true},
+    {"type": "pickup", "item": "syringe", "pos": [5.85, 0.92, 27.85], "respawn": 5},
     {"type": "bench", "pos": [32.2, 0.85, -6.6], "yaw": -90},
     {"type": "marker", "pos": [3, 0, 22], "shape": "capsule", "half": [0.3, 0.6, 0.3], "color": [0.2, 0.55, 0.9], "name": "ref_capsule"},
     {"type": "pickup", "item": "pistol", "pos": [-3.2, 0.9, 19], "respawn": 10},

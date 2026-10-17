@@ -56,5 +56,5 @@ void main() {
     } else {
         o = srgb_encode(clamp(e, 0.0, 1.0)) + dither / 255.0;
     }
-    o_color = vec4(clamp(o, 0.0, 1.0), 1.0);
+    o_color = vec4(clamp(o, 0.0, 1.0) * (1.0 - clamp(U.s_fb3.x, 0.0, 1.0)), 1.0);   // death black: no grain / dither left
 }

@@ -1,0 +1,19 @@
+{
+  "name": "recon_bubble",
+  "_doc": "Reconstruction (docs/REVIVE.md): bubbles rising through the chamber liquid.",
+  "duration": 0.05,
+  "priority": 0,
+  "max_instances": 128,
+  "cull_distance": 30,
+  "emitters": [
+    {
+      "name": "bubble",
+      "tier": "gpu",
+      "spawn": { "mode": "burst", "count": [1, 2], "life": [1.4, 2.6], "size": [0.006, 0.014], "speed": [0.35, 0.7], "dir": "up", "angle": 8,
+                 "shape": "disc", "radius": 0.06, "color": [0.7, 1.0, 0.95, 0.55], "color2": [0.85, 1.0, 1.0, 0.35] },
+      "update": { "gravity": -0.05, "drag": 0.3, "turbulence": 0.25,
+                  "alpha_curve": [[0, 0], [0.1, 1], [0.9, 0.8], [1, 0]] },
+      "render": { "mode": "add", "orient": "billboard", "texture": "glow", "emissive": 1.2, "near_fade": 0.05 }
+    }
+  ]
+}

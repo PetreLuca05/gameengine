@@ -37,6 +37,7 @@
     "sway": { "anchor": { "hip": "pivot_socket", "ads": "sight" } }
   },
   "pose": "rifle",
+  "fire_anim": { "class": "crossbow", "mass": 3.0, "moment": 0.4 },
   "sound_fire": "shot_crossbow",
   "grip": [0, 0, 0],
   "support": [0, 0.0, -0.25],

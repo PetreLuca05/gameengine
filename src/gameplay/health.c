@@ -3,6 +3,7 @@
 #include "characters.h"
 #include "net/spectate.h"
 #include "kill_stats.h"
+#include "revive/revive.h"
 #include <stdio.h>
 
 void health_init(Health *h, float hp, float armor) {
@@ -22,6 +23,10 @@ float apply_damage(World *w, EntityId target, float amount, DamageType type, Ent
 }
 
 float apply_damage_part(World *w, EntityId target, float amount, DamageType type, EntityId attacker, vec3 point, vec3 dir, int part, float part_mult) {
+    return apply_damage_ex(w, target, amount, type, attacker, point, dir, part, part_mult, 0);
+}
+
+float apply_damage_ex(World *w, EntityId target, float amount, DamageType type, EntityId attacker, vec3 point, vec3 dir, int part, float part_mult, u32 flags) {
     bool headshot = part == BP_HEAD;
     if (!w->authority || !ent_valid(w, target)) return 0;
     int i = (int)ENT_INDEX(target);
@@ -44,6 +49,9 @@ float apply_damage_part(World *w, EntityId target, float amount, DamageType type
     int victim_player = world_player_by_ent(w, target);
     int attacker_player = world_player_by_ent(w, attacker);
     if (victim_player >= 0 && dealt > 0) weapon_flinch(w, victim_player, dealt);
+    if (victim_player >= 0 && dealt > 0) revive_sv_on_damage(w, victim_player);   // interrupts timed actions
+    // 0 hp knocks a player down instead (docs/REVIVE.md), unless kill-type / rules say otherwise.
+    if (killed && victim_player >= 0 && revive_sv_try_down(w, victim_player, flags, dmg - dealt, attacker)) killed = false;
 
     GameEvent ev;
     memset(&ev, 0, sizeof(ev));
@@ -112,6 +120,7 @@ float apply_damage_part(World *w, EntityId target, float amount, DamageType type
             p->respawn_timer = PLAYER_RESPAWN_TIME;
             p->deaths++;
             spectate_on_death(w, victim_player, attacker_player);   // sv_respawn_time, the killer (auto spectate)
+            revive_sv_on_death(w, victim_player);   // corpse (DNA source), carried samples, auto ping
         }
         if (attacker_player >= 0 && attacker_player != victim_player && victim_player >= 0) w->players[attacker_player].kills++;
     }

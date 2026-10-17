@@ -3,6 +3,7 @@
   "id": "red_dot",
   "name": "Red Dot Sight",
   "slot": "optic",
+  "fire": { "mass": 0.1 },
   "sight": "reddot",
   "mount": {
     "pos": [0, 0, 0]

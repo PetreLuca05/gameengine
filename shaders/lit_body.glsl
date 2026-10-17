@@ -192,6 +192,18 @@ float v_smith(float ndv, float ndl, float a) {
     return 1.0 / ((ndv * (1.0 - k) + k) * (ndl * (1.0 - k) + k) * 4.0);
 }
 
+// Animated caustic light (fabricator chamber, docs/REVIVE.md): a few warped sine layers; depends
+// only on position and time (TAA-safe).
+float lit_caustic(vec3 p, float t) {
+    vec2 q = p.xz * 5.0 + vec2(0.0, p.y * 2.0);
+    float c = 0.0;
+    for (int i = 0; i < 3; i++) {
+        q += vec2(sin(q.y * 1.3 + t * 0.9 + float(i)), cos(q.x * 1.1 - t * 0.7 + float(i) * 1.7));
+        c += 1.0 / (1.0 + 8.0 * abs(sin(q.x) + sin(q.y)));
+    }
+    return c / 3.0;
+}
+
 vec3 brdf(vec3 n, vec3 v, vec3 l, vec3 albedo, float rough, float metal) {
     vec3 h = normalize(v + l);
     float ndl = max(dot(n, l), 0.0);
@@ -253,6 +265,9 @@ void main() {
     if ((flags & MAT_GRID) != 0u && frame.params.x > 0.5) base.rgb = apply_grid(base.rgb, v_world, n);
     if ((flags & MAT_GRID_FINE) != 0u) base.rgb = apply_fine_grid(base.rgb, v_world, n);
     if ((flags & MAT_GRID_MOA) != 0u) base.rgb = apply_moa_grid(base.rgb, v_world, n, MAT_PARAMS.w);
+#ifdef LIT_BASE_HOOK
+    LIT_BASE_HOOK
+#endif
 
     vec3 color;
     if ((flags & MAT_UNLIT) != 0u) {
@@ -335,6 +350,9 @@ void main() {
     else
 #endif
     color += base.rgb * MAT_PARAMS.z; // emissive
+#ifdef LIT_EMISSIVE_HOOK
+    color += LIT_EMISSIVE_HOOK;
+#endif
 
     if ((flags & MAT_HIGHLIGHT) != 0u) {
         vec3 v = normalize(frame.camera_pos.xyz - v_world);
@@ -359,5 +377,13 @@ void main() {
     }
 #endif
 
+    if ((flags & MAT_CAUSTICS) != 0u) color += base.rgb * lit_caustic(v_world, frame.camera_pos.w) * 2.5;
+    if ((flags & MAT_GLASS) != 0u) {
+        // Glass: more opaque and brighter at grazing angles (Fresnel), clear face-on.
+        vec3 vg = normalize(frame.camera_pos.xyz - v_world);
+        float fr = pow(1.0 - abs(dot(n, vg)), 4.0);
+        base.a = clamp(base.a + fr * 0.55, 0.0, 0.85);
+        color += vec3(0.6, 0.85, 1.0) * fr * 0.6;
+    }
     out_color = vec4(color, base.a);
 }

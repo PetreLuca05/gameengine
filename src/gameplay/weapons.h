@@ -29,9 +29,15 @@ typedef struct ShotEvent {
     FireMode mode;
     float ads_t;
     u32 seed;                 // deterministic per-shot seed
+    float sub_tick;           // 0..1: when inside the tick the shot fired (exact RPM timing)
+    float interval;           // s to the next shot at the current rate (auto / burst), 0 = single
 } ShotEvent;
 typedef void (*ShotHook)(const ShotEvent *ev, void *user);
 void weapons_add_shot_hook(ShotHook fn, void *user);
+// The local player's muzzle flash: deferred to the game, which spawns it on the first-person gun's
+// final (kicked) transform of the frame (NULL: spawned at once at the predicted muzzle).
+typedef void (*LocalFlashFn)(vec3 dir, int type, int device);
+void weapons_set_local_flash(LocalFlashFn fn);
 
 typedef struct WeaponCvars {
     struct Cvar *recoil_scale, *visual_scale, *spread_scale, *recoil_debug, *infinite_ammo, *sway_scale, *kick_scale, *bob_scale, *ads_sway, *ads_bob, *sway_ads_scale, *sway_cosmetic;

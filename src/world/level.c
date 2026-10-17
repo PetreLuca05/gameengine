@@ -8,6 +8,7 @@
 #include "ui/font.h"
 #include "gameplay/entities.h"
 #include "gameplay/characters.h"
+#include "gameplay/revive/revive.h"
 #include "anim/anim_library.h"
 #include "vfx/vfx_library.h"
 #include "cJSON.h"
@@ -532,6 +533,8 @@ static void spawn_entity(World *w, const cJSON *e) {
         return;
     } else if (!strcmp(type, "bench")) {
         id = spawn_bench(w, pos, yaw);
+    } else if (!strcmp(type, "fabricator")) {
+        id = revive_spawn_fabricator(w, pos, yaw, jb(e, "powered", true));   // docs/REVIVE.md
     } else if (!strcmp(type, "marker")) {
         const char *shape = js(e, "shape", "capsule");
         VisShape vs = !strcmp(shape, "box") ? VIS_BOX : (!strcmp(shape, "cylinder") ? VIS_CYLINDER : VIS_CAPSULE);

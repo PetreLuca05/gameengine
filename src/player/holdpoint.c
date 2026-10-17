@@ -1,4 +1,5 @@
 #include "holdpoint.h"
+#include "sway.h"
 #include "cJSON.h"
 #include <math.h>
 #include <stdio.h>
@@ -87,18 +88,6 @@ void holdpoint_style_defaults(HoldPointStyle *s, const char *name) {
     s->blend_in[HP_EMPTY] = 0.25f;
     s->blend_in[HP_PHONE_PORTRAIT] = s->blend_in[HP_PHONE_LANDSCAPE] = 0.22f;
     s->ads_scale = 0.25f;
-    s->lag_rot = 1.6f;                          // deg per rad/s of view rotation
-    s->lag_pos = 0.004f;
-    s->lag_max = 5.0f;
-    s->lag_k = 140.0f;
-    s->lag_d = 18.0f;
-    s->sway_rot = 0.35f;
-    s->sway_freq = 0.55f;
-    s->breath_pos = 0.0025f;
-    s->breath_freq = 0.25f;
-    s->bob_pos = 0.012f;
-    s->bob_rot = 1.2f;
-    s->bob_freq = 1.0f;
     s->kick_scale = 1.0f;
     s->col_back = 0.22f;
     s->col_up = 0.05f;
@@ -152,21 +141,7 @@ void holdpoint_style_parse(HoldPointStyle *s, const cJSON *o) {
     jv(o, "ads_rot", &s->ads_rot);
     const cJSON *pr = jget(o, "procedural");
     s->ads_scale = jf(pr, "ads_scale", s->ads_scale);
-    const cJSON *lg = jget(pr, "look_lag");
-    s->lag_rot = jf(lg, "rot", s->lag_rot);
-    s->lag_pos = jf(lg, "pos", s->lag_pos);
-    s->lag_max = jf(lg, "max", s->lag_max);
-    s->lag_k = jf(lg, "stiffness", s->lag_k);
-    s->lag_d = jf(lg, "damping", s->lag_d);
-    const cJSON *sw = jget(pr, "sway");
-    s->sway_rot = jf(sw, "rot", s->sway_rot);
-    s->sway_freq = jf(sw, "freq", s->sway_freq);
-    s->breath_pos = jf(sw, "breath", s->breath_pos);
-    s->breath_freq = jf(sw, "breath_freq", s->breath_freq);
-    const cJSON *bb = jget(pr, "bob");
-    s->bob_pos = jf(bb, "pos", s->bob_pos);
-    s->bob_rot = jf(bb, "rot", s->bob_rot);
-    s->bob_freq = jf(bb, "freq", s->bob_freq);
+    // "look_lag" / "sway" / "bob" are no longer per style: one global sway profile (src/player/sway.c).
     s->kick_scale = jf(pr, "kick_scale", s->kick_scale);
     const cJSON *co = jget(o, "collision");
     s->col_back = jf(co, "back", s->col_back);
@@ -231,21 +206,6 @@ char *holdpoint_style_to_json(const HoldPointStyle *s) {
     put_v3(o, "ads_rot", s->ads_rot);
     cJSON *pr = cJSON_AddObjectToObject(o, "procedural");
     put_num(pr, "ads_scale", s->ads_scale);
-    cJSON *lg = cJSON_AddObjectToObject(pr, "look_lag");
-    put_num(lg, "rot", s->lag_rot);
-    put_num(lg, "pos", s->lag_pos);
-    put_num(lg, "max", s->lag_max);
-    put_num(lg, "stiffness", s->lag_k);
-    put_num(lg, "damping", s->lag_d);
-    cJSON *sw = cJSON_AddObjectToObject(pr, "sway");
-    put_num(sw, "rot", s->sway_rot);
-    put_num(sw, "freq", s->sway_freq);
-    put_num(sw, "breath", s->breath_pos);
-    put_num(sw, "breath_freq", s->breath_freq);
-    cJSON *bb = cJSON_AddObjectToObject(pr, "bob");
-    put_num(bb, "pos", s->bob_pos);
-    put_num(bb, "rot", s->bob_rot);
-    put_num(bb, "freq", s->bob_freq);
     put_num(pr, "kick_scale", s->kick_scale);
     cJSON *co = cJSON_AddObjectToObject(o, "collision");
     put_num(co, "back", s->col_back);
@@ -404,8 +364,8 @@ void holdpoint_eval(HoldPointState *st, const HoldPointInput *in, HoldPointOutpu
         st->blend_t = st->blend_dur = 1;
         st->off_pos = v3(0, 0, 0);
         st->off_rot = quat_identity();
-        st->prev_yaw = in->aim_yaw;
-        st->prev_pitch = in->aim_pitch;
+        st->sway.prev_yaw = in->aim_yaw;
+        st->sway.prev_pitch = in->aim_pitch;
         st->pitch_w = (state == HP_ADS || state >= HP_PHONE_PORTRAIT) ? 0.0f : 1.0f;
     }
     if (state != st->state || in->style_key != st->style_key) {
@@ -474,74 +434,39 @@ void holdpoint_eval(HoldPointState *st, const HoldPointInput *in, HoldPointOutpu
     // turns, settles on a spring), movement bob (walk / run cycle, sprint bounce), landing dip.
     // Each has a hip and an ADS multiplier, blended with the ADS progress; ADS sway turns the gun
     // about the reticle centre only (the sight stays on the view axis, see below).
-    float S = in->static_pose ? 0.0f : in->sway_scale;
-    float mh[4] = { 1, 1, 1, 1 }, ma[4] = { 0.35f, 0.25f, 0.15f, 0.5f };
-    float optic = 1.0f, breath_k = 1.0f, stance = 1.0f, wobble = 0.0f;
-    if (kp.sway_set) {
-        for (int c = 0; c < 4; c++) { mh[c] = kp.sway_mh[c]; ma[c] = kp.sway_ma[c]; }
-        optic = kp.optic_sway > 0 ? kp.optic_sway : 1.0f;
-        breath_k = kp.breath_k > 0 ? kp.breath_k : 1.0f;
-        stance = kp.stance > 0 ? kp.stance : 1.0f;
-        wobble = kp.wobble;
-    }
-    // Hold breath: steadies quickly; letting go (or running out) gives a short shaky overshoot.
-    if (st->breath_s <= 0.0f) st->breath_s = 1.0f;
-    if (st->breath_s < 0.5f && breath_k > 0.5f) st->shake = 1.0f;
-    st->breath_s += (breath_k - st->breath_s) * (1.0f - expf(-dt / 0.2f));
-    st->shake = fmaxf(0.0f, st->shake - dt / 0.9f);
-    float wy = dt > 1e-6f ? wrap_angle(in->aim_yaw - st->prev_yaw) / dt : 0.0f;
-    float wp = dt > 1e-6f ? (in->aim_pitch - st->prev_pitch) / dt : 0.0f;
-    st->prev_yaw = in->aim_yaw;
-    st->prev_pitch = in->aim_pitch;
-    // Look lag: the item trails the view rotation (muzzle behind the turn), grows with the mouse speed.
-    vec2 lag_t = v2(clampf(-wp * s->lag_rot, -s->lag_max, s->lag_max) * S, clampf(-wy * s->lag_rot, -s->lag_max, s->lag_max) * S);
-    st->lag.x = spring1(st->lag.x, &st->lag_v.x, lag_t.x, s->lag_k, s->lag_d, dt);
-    st->lag.y = spring1(st->lag.y, &st->lag_v.y, lag_t.y, s->lag_k, s->lag_d, dt);
-    st->t = in->phase_valid ? (float)fmod(in->clock, 3600.0) : st->t + dt;
-    // Breathing: slow layered sines (figure-eight + breath), plus the extra wobble.
-    float sw = s->sway_rot * S;
-    vec3 breath_rot = v3(sinf(st->t * s->sway_freq * 2.0f * DG_PI) * sw * 0.6f + sinf(st->t * 0.37f * 2.0f * DG_PI + 1.7f) * sw * 0.25f,
-                         sinf(st->t * s->sway_freq * DG_PI) * sw + sinf(st->t * 0.23f * 2.0f * DG_PI + 0.4f) * sw * 0.2f, 0);
-    float wob = (wobble + st->shake * 0.8f) * S;
-    breath_rot.x += (sinf(st->t * 2.3f * 2.0f * DG_PI) * 0.5f + sinf(st->t * 3.7f * 2.0f * DG_PI + 1.0f) * 0.35f) * wob;
-    breath_rot.y += (sinf(st->t * 2.9f * 2.0f * DG_PI + 0.5f) * 0.45f + sinf(st->t * 4.3f * 2.0f * DG_PI + 2.1f) * 0.3f) * wob;
-    vec3 breath_pos = v3(0, sinf(st->t * s->breath_freq * 2.0f * DG_PI) * s->breath_pos * S, 0);
-    // Movement bob, scaled with the speed (the camera's own bob comes from the head animation).
-    float speed = sqrtf(in->vel_cam.x * in->vel_cam.x + in->vel_cam.z * in->vel_cam.z);
-    float bob_target = in->grounded ? clampf(speed / 6.0f, 0, 1) : 0.0f;
-    st->bob_amt += (bob_target - st->bob_amt) * (1.0f - expf(-8.0f * dt));
-    if (in->phase_valid) st->bob_phase = in->stride * s->bob_freq;
-    else st->bob_phase += dt * (4.5f + speed * 1.1f) * s->bob_freq;
-    float bob = st->bob_amt * S * (state == HP_SPRINT ? 1.4f : in->bob_scale);
-    vec3 bob_pos = v3(sinf(st->bob_phase) * s->bob_pos * bob, -fabsf(cosf(st->bob_phase)) * s->bob_pos * 1.2f * bob, 0);
-    vec3 bob_rot = v3(0, 0, sinf(st->bob_phase) * s->bob_rot * bob);
-    // Landing: a dip on touchdown, stronger for harder landings, settling on a spring.
-    float vy_world = quat_rotate(in->cam_world.r, in->vel_cam).y;
-    if (!in->grounded) st->air_vy = fminf(st->air_vy, vy_world);
-    if (in->grounded && !st->was_grounded && st->air_vy < -1.5f) st->land_v += clampf(-st->air_vy * 0.06f, 0.0f, 0.9f) * S;
-    if (in->grounded) st->air_vy = 0.0f;
-    st->was_grounded = in->grounded;
-    st->land = spring1(st->land, &st->land_v, 0.0f, 110.0f, 13.0f, dt);
-    vec3 land_pos = v3(0, -st->land, -st->land * 0.3f);
-    vec3 land_rot = v3(-st->land * 55.0f, 0, 0);
-    // Recoil item spring (from the recoil system).
-    vec3 kick_pos = v3_scale(in->kick_pos, s->kick_scale * (in->static_pose ? 0.0f : 1.0f));
-    vec3 kick_rot = v3_scale(in->kick_rot, s->kick_scale * (in->static_pose ? 0.0f : 1.0f));
-    if (in->static_pose) { st->lag = v2(0, 0); st->lag_v = v2(0, 0); st->land = st->land_v = 0; }
-    vec3 lag_rot = v3(st->lag.x, st->lag.y, 0);
-    vec3 lag_pos = v3(st->lag.y * s->lag_pos * 10.0f, st->lag.x * s->lag_pos * 10.0f, 0);
-    // Hip: everything about the hip anchor (look lag x the user's wpn_look_lag).
-    float gl = g_look_lag_scale;
-    vec3 hip_rot = v3_scale(v3_add(v3_add(v3_scale(breath_rot, mh[0]), v3_scale(lag_rot, mh[1] * gl)), v3_add(v3_scale(bob_rot, mh[2]), v3_scale(land_rot, mh[3]))), stance);
-    vec3 hip_pos = v3_scale(v3_add(v3_add(v3_scale(breath_pos, mh[0]), v3_scale(lag_pos, mh[1] * gl)), v3_add(v3_scale(bob_pos, mh[2]), v3_scale(land_pos, mh[3]))), stance);
-    // ADS: rotation only (about the sight), translations turned into the equivalent rotation of a
-    // 0.35 m lever; x the optic's steadiness and the hold-breath factor.
-    const float lever = 0.35f;
-    vec3 as_breath = v3_add(breath_rot, v3(-breath_pos.y / lever * DG_RAD2DEG, 0, 0));
-    vec3 as_bob = v3_add(bob_rot, v3(-bob_pos.y / lever * DG_RAD2DEG, bob_pos.x / lever * DG_RAD2DEG, 0));
-    vec3 as_land = v3_add(land_rot, v3(-land_pos.y / lever * DG_RAD2DEG * 0.5f, 0, 0));
-    float ads_k = optic * st->breath_s * stance * (1.0f + st->shake * 1.5f);
-    vec3 ads_sway = v3_scale(v3_add(v3_add(v3_scale(as_breath, ma[0]), v3_scale(lag_rot, ma[1])), v3_add(v3_scale(as_bob, ma[2]), v3_scale(as_land, ma[3]))), ads_k);
+    // Sway: ONE global profile for every held item (src/player/sway.c, assets/weapons/sway_global.json);
+    // nothing weapon-specific reaches it except the optic's steadiness.
+    SwayInput si;
+    memset(&si, 0, sizeof(si));
+    si.dt = dt;
+    si.phase_valid = in->phase_valid;
+    si.clock = in->clock;
+    si.stride = in->stride;
+    si.aim_yaw = in->aim_yaw;
+    si.aim_pitch = in->aim_pitch;
+    si.vel_cam = in->vel_cam;
+    si.vel_world_y = quat_rotate(in->cam_world.r, in->vel_cam).y;
+    si.grounded = in->grounded;
+    si.sprint = state == HP_SPRINT;
+    si.static_pose = in->static_pose;
+    si.sway_scale = in->sway_scale;
+    si.bob_scale = in->bob_scale;
+    si.look_lag_scale = g_look_lag_scale;
+    si.optic = kp.sway_set && kp.optic_sway > 0 ? kp.optic_sway : 1.0f;
+    si.breath_k = kp.sway_set && kp.breath_k > 0 ? kp.breath_k : 1.0f;
+    si.stance = kp.sway_set && kp.stance > 0 ? kp.stance : 1.0f;
+    si.wobble = kp.sway_set ? kp.wobble : 0.0f;
+    si.ads_mult = kp.sway_set && kp.ads_sway_mult > 0 ? kp.ads_sway_mult : 1.0f;
+    SwayOut so;
+    sway_eval(&st->sway, in->sway ? in->sway : sway_global(), &si, &so);
+    out->sway_hip_rot = so.hip_rot;
+    out->sway_hip_pos = so.hip_pos;
+    out->sway_ads_rot = so.ads_rot;
+    vec3 hip_rot = so.hip_rot, hip_pos = so.hip_pos, ads_sway = so.ads_rot;
+    // Fire animation (src/anim/fire_anim.c): the gun kick + the screen kick along the view axis.
+    float ks = s->kick_scale * (in->static_pose ? 0.0f : 1.0f);
+    vec3 kick_pos = v3_scale(in->kick_pos, ks);
+    vec3 kick_rot = v3_scale(in->kick_rot, ks);
     // Two contributions, blended by the ADS progress (no pop when aiming mid-burst / mid-stride):
     //  hip: sway about its hip anchor, kick about its hip anchor, full translation;
     //  ADS: everything about the reticle centre, translation only along the view axis (+ roll),

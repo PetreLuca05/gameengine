@@ -12,6 +12,7 @@
 #include "render/render.h"
 #include "render/debug_draw.h"
 #include "player/hands.h"
+#include "player/sway.h"
 #include "editor/handpose/hp_system.h"
 #include "anim/procedural_internal.h"
 #include "cJSON.h"
@@ -19,6 +20,7 @@
 #include "core/jobs.h"
 #include "assets/assets.h"
 #include "game/game.h"
+#include "gameplay/revive/revive.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -29,6 +31,11 @@ static void cmd_parts(int argc, const char **argv);
 
 #define CG (g_engine.chars)
 static quat g_fp_aim_off = { 0, 0, 0, 1 };   // chars_set_fp_aim_offset (sight sway / bob)
+static FireAnimOut g_fp_fire, g_fp_fire_frame;   // chars_set_fp_fire: first-person fire animation (tick / frame)
+static bool g_fp_fire_snap;                        // a shot landed this tick: the item shows it at once (no interpolation)
+#define TP_FIRE_SCALE 0.55f                        // third-person fire animation scale (remote players)
+static Xform fp_fire_hand_lag(Xform sock, quat cam_rm, vec3 pivot);
+static void fp_fire_fingers(const Skeleton *s, Pose *pose, Xform *model, int side, float w);
 #define LIB (g_engine.anim)
 
 // GPU side of one SkeletalMesh part as a character wears it: LOD meshes with its material tints baked
@@ -578,6 +585,8 @@ static void player_inputs(World *w, CharacterInst *c, const Player *p, CharInput
     in->vaulting = m->mode == MOVE_VAULT;
     in->hanging = m->mode == MOVE_HANG;
     in->dead = m->mode == MOVE_DEAD || (w->flags[ENT_INDEX(p->ent)] & EF_DEAD);
+    in->downed = p->sim.down.downed || (w->flags[ENT_INDEX(p->ent)] & EF_DOWNED);   // knocked down (docs/REVIVE.md)
+    if (in->downed) in->crouch = true;
     in->mantle_t = m->m_t;
     in->vertical_vel = m->vel.y;
     in->aim_pitch = m->pitch;
@@ -586,6 +595,8 @@ static void player_inputs(World *w, CharacterInst *c, const Player *p, CharInput
     const InvSlot *eq = weapon_equipped(w, c->slot);
     if (g_vehicle_pose.holstered && g_vehicle_pose.holstered(w, c->slot)) eq = NULL;   // both hands on the wheel
     u16 item = eq ? eq->item : 0;
+    u16 shown = revive_held_override(w, c->slot);   // syringe / DNA vial during a timed action (docs/REVIVE.md)
+    if (shown) { item = shown; eq = NULL; }
     in->weapon_id = item;
     in->weapon_type = item_hold_style(w, item, &c->item_weapon, &c->item_def);
     // Phone (docs/PHONE.md): camera mode = aiming with a camera item; landscape / driven rotation
@@ -702,6 +713,8 @@ static void inputs_from_net(const World *w, CharacterInst *c, const AnimNetState
     in->mantling = (s->flags & ANF_MANTLE) != 0;
     in->hanging = (s->flags & ANF_HANG) != 0;
     in->dead = (s->flags & ANF_DEAD) != 0;
+    in->downed = (w->flags[ENT_INDEX(c->ent)] & EF_DOWNED) != 0;   // replicated entity flag (no anim-state bit)
+    if (in->downed) in->crouch = true;
     in->mantle_t = (float)s->mantle_t / 255.0f;
     in->aim_pitch = and_pitch(s->aim_pitch);
     in->aim_yaw = and_angle(s->aim_yaw);
@@ -785,8 +798,16 @@ static void update_limbs(CharacterInst *c, float dt) {
 
 static void zombie_ai(World *w, CharacterInst *c, int i, float dt);
 
+static CharacterInst *corpse_for_slot(World *w, int slot);
+static void corpse_adopt(World *w, CharacterInst *corpse, CharacterInst *c);
+
 static void revive(World *w, CharacterInst *c) {
     if (c->dead && g_life_hook) g_life_hook(w, c, false);
+    // A player coming back leaves its body behind: the corpse entity takes the ragdoll / pose.
+    if (c->dead && c->is_player && !c->tool_rag && c->have_pose) {
+        CharacterInst *body = corpse_for_slot(w, c->slot);
+        if (body) corpse_adopt(w, body, c);
+    }
     memcpy(c->armor_left, c->def->armor_hits, sizeof(c->armor_left));
     c->dead = c->rag_pending = c->settled = c->tool_rag = false;
     if (c->rag.active) { ragdoll_destroy(&c->rag, w->phys); w->chars->ragdolls--; }
@@ -897,6 +918,7 @@ void chars_host_tick(World *w, float dt) {
             else shift_hitboxes(w, c, i);
             continue;
         }
+        if (c->corpse) continue;   // bodies never animate
         if (w->type[i] == ET_ZOMBIE) zombie_ai(w, c, i, dt);
         if (w->type[i] == ET_ZOMBIE && !c->history) chars_ensure_history(c);
         sim_one(w, c, i, dt);
@@ -1060,7 +1082,8 @@ void chars_client_tick(World *w, double rt, float dt) {
     cs->pending_count = keep;
     for (int k = 0; k < MAX_CHARACTERS; k++) {
         CharacterInst *c = w->chars->c[k];
-        if (!c || !ent_valid(w, c->ent) || c->local) continue;
+        if (!c || !ent_valid(w, c->ent) || c->local || c->corpse) continue;
+        if (c->phantom) { sim_one(w, c, (int)ENT_INDEX(c->ent), dt); continue; }   // local display body: no samples
         client_one(w, c, (int)ENT_INDEX(c->ent), rt, dt);
     }
 }
@@ -1092,7 +1115,7 @@ void chars_local_predict(World *w, int slot, bool first) {
 
 const AnimNetState *chars_net_state(const World *w, int i) {
     CharacterInst *c = char_get_index(w, i);
-    return c ? &c->net : NULL;
+    return c && !c->corpse ? &c->net : NULL;
 }
 
 // ------------------------------------------------------------------ events
@@ -1153,7 +1176,16 @@ static void apply_event(World *w, const AnimEvent *e) {
         break;
     case AEV_FIRE:
         if (remote) charrt_trigger(&c->rt, AP_T_FIRE);
-        if (!c->local) c->kick_v = v3_add(c->kick_v, v3(0, 0.6f, 1.4f));   // third-person recoil on the item
+        if (!c->local && c->item_weapon && c->item_weapon->kind != WPN_MELEE) {
+            // Third-person fire animation: the gun kick, the push and the slide at a reduced scale.
+            FireShot sh;
+            memset(&sh, 0, sizeof(sh));
+            sh.seed = dg_hash_u32(ENT_INDEX(c->ent) * 7919u + (++c->tp_fire_shots));
+            sh.mag_left = 1;
+            sh.interval = 60.0f / fmaxf(1.0f, c->item_weapon->recoil.rpm);
+            sh.scale = TP_FIRE_SCALE;
+            fire_anim_shot(&c->tp_fire, &c->item_weapon->fire, &sh);
+        }
         break;
     case AEV_HIT: {
         // A reaction we already predicted for this target / part within 0.3 s is not doubled.
@@ -1369,7 +1401,7 @@ static void post_one(World *w, CharacterInst *c, int i, float dt, vec3 cam_pos, 
     pi.raycast = ray_cb;
     pi.ray_ctx = w->phys;
     int sys = systems_for_lod(lod);
-    pi.foot_ik = cv(CG->foot_ik) && sys <= 0;
+    pi.foot_ik = cv(CG->foot_ik) && sys <= 0 && !c->phantom;   // phantoms float in the fabricator chamber
     pi.spine = cv(CG->spine) && sys <= 1;
     pi.turn = cv(CG->turn) && sys <= 0;
     pi.lean = cv(CG->lean) && sys <= 0;
@@ -1382,18 +1414,18 @@ static void post_one(World *w, CharacterInst *c, int i, float dt, vec3 cam_pos, 
     else if (c->item_def && c->rt.in.weapon_id) item = &c->item_def->sockets;
     if (item) { sock = *item; item = &sock; }
     pi.item = item;
-    pi.item_kick_pos = v3(0, c->kick_x.y * 0.01f, c->kick_x.z * 0.02f);
-    pi.item_kick_rot = v3(c->kick_x.y * 3.0f, 0, 0);
+    // Fire animation (docs/FIRE_ANIM.md): the gun kick on the hold point. The owner's comes from the
+    // first-person fire animation of this very tick (the kick lands on the shot's tick), the others'
+    // from their own reduced third-person instance.
+    pi.item_kick_pos = c->tp_fire_out.gun_pos;
+    pi.item_kick_rot = c->tp_fire_out.gun_rot;
     if (c->local) {
-        // The owner's first-person weapon is the body's: the viewmodel recoil springs drive it.
-        vec3 kp, kr;
-        hands_vm_kick(&kp, &kr);
-        pi.item_kick_pos = kp;
-        pi.item_kick_rot = kr;
+        pi.item_kick_pos = v3_add(g_fp_fire.gun_pos, v3(0, 0, g_fp_fire.screen_kick));
+        pi.item_kick_rot = g_fp_fire.gun_rot;
     }
     {
         const WeaponCvars *wc = weapons_cvars();
-        float kk = c->local ? 1.0f : (wc->kick_scale ? wc->kick_scale->f : 0.0f);   // the owner's springs are scaled in hands.c
+        float kk = wc->kick_scale ? wc->kick_scale->f : 1.0f;   // wpn_kick_scale: the gun kick on the hold point (1)
         pi.item_kick_pos = v3_scale(pi.item_kick_pos, kk);
         pi.item_kick_rot = v3_scale(pi.item_kick_rot, kk);
         // Item sway: wpn_sway_scale (host) x the player's cosmetic "Weapon sway" setting.
@@ -1409,19 +1441,18 @@ static void post_one(World *w, CharacterInst *c, int i, float dt, vec3 cam_pos, 
             pi.hold_kick.kick_ads = rp->anchor_ads;
             pi.hold_kick.sway_hip = rp->sway_anchor_hip;
             pi.hold_kick.sway_ads = rp->sway_anchor_ads;
-            // Weapon sway multipliers (docs/RECOIL.md "Weapon sway").
+            // Global weapon sway inputs (docs/FIRE_ANIM.md "Global sway"): nothing from the weapon.
             pi.hold_kick.sway_set = true;
-            float ak = wc->sway_ads_scale ? wc->sway_ads_scale->f : 1.0f;
-            for (int k = 0; k < 4; k++) { pi.hold_kick.sway_mh[k] = rp->sway_hip[k]; pi.hold_kick.sway_ma[k] = rp->sway_ads[k] * ak; }
+            pi.hold_kick.ads_sway_mult = wc->sway_ads_scale ? wc->sway_ads_scale->f : 1.0f;
             const AttachmentDef *opt = attach_def(w->items, c->item_att[ATT_OPTIC]);
             pi.hold_kick.optic_sway = opt && opt->sway_scale > 0 ? opt->sway_scale : 1.0f;
-            pi.hold_kick.stance = c->rt.in.prone ? 0.55f : (c->rt.in.crouch ? 0.75f : 1.0f);
+            pi.hold_kick.stance = c->rt.in.prone ? sway_global()->prone : (c->rt.in.crouch ? sway_global()->crouch : 1.0f);
             pi.hold_kick.breath_k = 1.0f;
             pi.hold_kick.wobble = 0.0f;
             if (c->slot >= 0 && c->slot < MAX_PLAYERS && w->players[c->slot].active) {
                 const Player *pl = &w->players[c->slot];
                 const WeaponState *ws = &pl->sim.wpn;
-                if (ws->breath_holding) pi.hold_kick.breath_k = rp->hold_breath_mult;
+                if (ws->breath_holding) pi.hold_kick.breath_k = sway_global()->hold_breath_mult;
                 // Extra wobble: low health, and aiming right after a sprint.
                 const Health *hh = &w->health[ENT_INDEX(pl->ent)];
                 float low = hh->max_hp > 0 ? saturate((0.35f - hh->hp / hh->max_hp) / 0.25f) : 0.0f;
@@ -1622,9 +1653,9 @@ void chars_present_tick(World *w, vec3 cam_pos, float fov_deg, float screen_h, f
         int i = (int)ENT_INDEX(c->ent);
         if (c->is_player && c->slot >= 0) c->local = c->slot == local_slot;
         if (c->predicted_hit_t > 0) c->predicted_hit_t -= dt;
-        // Remote recoil kick spring.
-        c->kick_v = v3_add(c->kick_v, v3_scale(v3_add(v3_scale(c->kick_x, -220.0f), v3_scale(c->kick_v, -22.0f)), dt));
-        c->kick_x = v3_madd(c->kick_x, c->kick_v, dt);
+        // Third-person fire animation (layers 1, 2, 4; no camera, no perceptual punches).
+        if (!c->local && c->item_weapon && c->item_weapon->kind != WPN_MELEE && (c->tp_fire.string_shots || c->tp_fire.curve_kind || c->tp_fire.slide_active || fabsf(c->tp_fire.gun[FA_PITCH].x) > 1e-5f))
+            fire_anim_step(&c->tp_fire, &c->item_weapon->fire, dt, false, 0.0f, &c->tp_fire_out);
         // LOD by projected height.
         float dist = fmaxf(0.1f, v3_dist(cam_pos, c->root.t));
         c->pixels = screen_h * (LIB->skel.height * c->def->scale) / (2.0f * dist * tanh);
@@ -1726,6 +1757,7 @@ static void draw_part(const CharacterInst *c, const SkeletonInstance *si, const 
     d.radius = s->height * c->def->scale;
     d.texture = gp->texture;
     if (d.texture) d.flags |= MAT_TEXTURED;
+    if (c->phantom && c->recon_flags) { d.flags |= c->recon_flags; d.recon = c->recon; }   // reconstruction dissolve
     // Stable id per character + part + LOD (previous palette -> per-bone velocity for TAA / motion blur).
     d.object_id = shadow ? 0u : (0x20000000u | ((u32)ENT_INDEX(c->ent) << 8) | ((u32)slot << 4) | id_low);
     render_draw_skinned(&d);
@@ -1971,6 +2003,9 @@ void chars_render_local_fp(World *w, float alpha, int local_slot) {
         const ItemSockets *k = held_sockets(c);
         float span = (float)DG_MAX(1, c->interval);
         float it = saturate(((float)(w->chars->tick - c->last_eval) + alpha) / span);
+        // The fire kick is a one-tick displacement: on the shot's tick the item jumps to it (the same
+        // frame as the flash and the sound) instead of easing in over the tick.
+        if (g_fp_fire_snap) it = 1.0f;
         Xform icam = xf_lerp(c->item_cam_prev, c->item_cam_cur, it);
         icam.s = v3(1, 1, 1);
         {
@@ -2040,13 +2075,16 @@ void chars_render_local_fp(World *w, float alpha, int local_slot) {
                 log_warn("first person: grip_l out of reach this frame, hold point pulled %.0f mm towards the shoulder", pulled * 1000.0f);
             }
         }
+        // Fire animation layer 3: the hands trail the gun's one-tick kick and catch up in 1-2 ticks.
+        vec3 lag_pivot = xf_point(want, k->pivot);
         if (ra >= 0 && rf >= 0 && rh >= 0) {
-            Xform hand_r = proc_hand_for_socket(xf_mul(want, sock_r0), LIB->hands.palm[1]);
+            Xform hand_r = proc_hand_for_socket(fp_fire_hand_lag(xf_mul(want, sock_r0), cam_rm, lag_pivot), LIB->hands.palm[1]);
             if (ikw > 0.99f) {
                 float reach_r = v3_dist(model[ra].t, model[rf].t) + v3_dist(model[rf].t, model[rh].t);
                 proc_clavicle_reach(s, posep, model, s->role[BR_R_SHOULDER], ra, hand_r.t, reach_r, 0.003f, 45.0f);
             }
             anim_ik_two_bone_pose(s, posep, model, ra, rf, rh, hand_r.t, &hand_r.r, quat_rotate(cam_rm, fp_hand_pole(c, hs, 1)), ikw * c->rt.proc.hand[1].ikw);
+            fp_fire_fingers(s, posep, model, 1, ikw);   // trigger pull
         }
         // The item stays exactly on its hold point while the hands hold it (the arms follow by IK;
         // a reach shortfall shows as a few mm at the hand, never as the sight leaving the aim).
@@ -2062,8 +2100,9 @@ void chars_render_local_fp(World *w, float alpha, int local_slot) {
         for (int h = 0; h < 2; h++) if (t.ov_w[h] > 0.001f) CG->fp_hold_w = 0;   // interaction / ledge grab owns a hand
         if (hs->left_hand && k->has_left && la >= 0 && lf >= 0 && lh >= 0 && ikw > 0.001f) {
             Xform sock_l = xf_mul(item, grip_l);
-            Xform hand_l = proc_hand_for_socket(sock_l, LIB->hands.palm[0]);
+            Xform hand_l = proc_hand_for_socket(fp_fire_hand_lag(sock_l, cam_rm, lag_pivot), LIB->hands.palm[0]);
             anim_ik_two_bone_pose(s, posep, model, la, lf, lh, hand_l.t, &hand_l.r, quat_rotate(cam_rm, fp_hand_pole(c, hs, 0)), ikw * c->rt.proc.hand[0].ikw);
+            fp_fire_fingers(s, posep, model, 0, ikw);   // the support grip tightens
             Xform palm_l = xf_mul(model[lh], LIB->hands.palm[0]);
             CG->fp_glue_pos[0] = v3_dist(palm_l.t, sock_l.t);
             CG->fp_glue_ang[0] = quat_angle_between(palm_l.r, sock_l.r) * DG_RAD2DEG;
@@ -2176,6 +2215,41 @@ void chars_render_local_fp(World *w, float alpha, int local_slot) {
 static bool g_thirdperson;
 void chars_set_thirdperson(bool on) { g_thirdperson = on; }
 
+// Fire animation layer 3 on a hand socket (model space): the hand error (camera space, behind the
+// gun by the one-tick kick) turned about the item's pivot, so the hand lags where the gun went.
+static Xform fp_fire_hand_lag(Xform sock, quat cam_rm, vec3 pivot) {
+    const FireAnimOut *f = &g_fp_fire_frame;
+    if (v3_len2(f->hand_pos) < 1e-12f && v3_len2(f->hand_rot) < 1e-10f) return sock;
+    quat rc = hp_euler_deg(v3(f->hand_rot.x, -f->hand_rot.y, f->hand_rot.z));   // camera space (kick convention: yaw + = right)
+    quat rm = quat_mul(quat_mul(cam_rm, rc), quat_conj(cam_rm));
+    sock.t = v3_add(pivot, quat_rotate(rm, v3_sub(sock.t, pivot)));
+    sock.r = quat_norm(quat_mul(rm, sock.r));
+    sock.t = v3_add(sock.t, quat_rotate(cam_rm, f->hand_pos));
+    return sock;
+}
+
+// Trigger finger pull (right index) and the support hand's grip tightening on the shot.
+static void fp_fire_fingers(const Skeleton *s, Pose *pose, Xform *model, int side, float w) {
+    float t = g_fp_fire_frame.trigger;
+    if (t <= 1e-3f || w <= 0.0f) return;
+    HandFingers j;
+    memset(j, 0, sizeof(HandFingers));
+    if (side == 1) {
+        for (int k = 0; k < 3; k++) j[HF_INDEX][k].curl = 12.0f * t * (k == 0 ? 1.0f : 0.6f);
+    } else {
+        for (int f = HF_INDEX; f < HAND_FINGERS; f++) j[f][0].curl = 4.0f * t;
+    }
+    handpose_apply_fingers(s, pose, model, side, j, &LIB->hands, w);
+}
+
+void chars_set_fp_fire_snap(bool snap) { g_fp_fire_snap = snap; }
+
+void chars_set_fp_fire(const FireAnimOut *tick, const FireAnimOut *frame) {
+    if (!tick && !frame) { memset(&g_fp_fire, 0, sizeof(g_fp_fire)); memset(&g_fp_fire_frame, 0, sizeof(g_fp_fire_frame)); g_fp_fire_snap = false; return; }
+    if (tick) g_fp_fire = *tick;
+    if (frame) g_fp_fire_frame = *frame;
+}
+
 void chars_set_fp_aim_offset(float right_deg, float up_deg, float view_pitch, float world_fov_deg, float vm_fov_deg) {
     // The shot is dir(yaw - a, pitch + b) = R(yaw, pitch) * q * forward with
     // q = X(-pitch) * Y(-a) * X(pitch + b) in camera space (exact, not small-angle).
@@ -2217,6 +2291,7 @@ bool chars_fp_item_cam(Xform *item_cam, int *state, float *blend) {
     return true;
 }
 
+Xform chars_fp_item_cam_raw(void) { ensure_globals(); return CG->fp_item_cam; }
 vec3 chars_fp_sight_cam(void) { ensure_globals(); return CG->fp_sight_cam; }
 vec3 chars_fp_sight_world(void) { ensure_globals(); return CG->fp_sight_world; }
 float chars_fp_reach_pull(void) { ensure_globals(); return CG->fp_reach_pull; }
@@ -2320,6 +2395,9 @@ void chars_render(World *w, float alpha, vec3 cam_pos, int local_slot) {
             float t = saturate(((float)(w->chars->tick - c->last_eval) + alpha) / span);
             Xform it = xf_mul(seat_fix(w, c, t), xf_lerp(c->item_prev, c->item_cur, t));
             hands_set_draw_scale(c->rt.proc.item_scale);   // the grip root's calibration scale
+            // Slide / wobble: the owner's body copy (shadow) uses the first-person fire animation.
+            const FireAnimOut *fo = local ? &g_fp_fire_frame : &c->tp_fire_out;
+            hands_set_fire_mech(false, fo->slide, fo->wobble_rot);
             hands_draw_held_att(c->item_weapon, c->item_weapon ? NULL : c->item_def, c->item_att, it.t, it.r, local ? (MAT_SHADOW_ONLY) : 0);
             hands_set_draw_scale(1.0f);
         }
@@ -2378,6 +2456,141 @@ bool chars_head_world(World *w, EntityId e, float alpha, vec3 *out) {
     int head = s->role[BR_HEAD];
     if (head < 0) return false;
     *out = pose[head].t;
+    return true;
+}
+
+// ------------------------------------------------------------------ corpses (docs/REVIVE.md)
+
+static CharacterInst *corpse_for_slot(World *w, int slot) {
+    CharacterInst *best = NULL;
+    for (int k = 0; k < MAX_CHARACTERS; k++) {
+        CharacterInst *o = w->chars->c[k];
+        if (!o || !o->corpse || o->adopted || !ent_valid(w, o->ent)) continue;
+        if ((int)w->item[ENT_INDEX(o->ent)] != slot) continue;
+        if (!best || ENT_INDEX(o->ent) > ENT_INDEX(best->ent)) best = o;
+    }
+    return best;
+}
+
+static void corpse_adopt(World *w, CharacterInst *body, CharacterInst *c) {
+    (void)w;
+    Xform *t;
+    t = body->pose_cur; body->pose_cur = c->pose_cur; c->pose_cur = t;
+    t = body->pose_prev; body->pose_prev = c->pose_prev; c->pose_prev = t;
+    free(body->settled_pose);
+    body->settled_pose = c->settled_pose;
+    c->settled_pose = NULL;
+    body->rag = c->rag;   // the physics bodies keep simulating under the corpse
+    memset(&c->rag, 0, sizeof(c->rag));
+    memcpy(body->parts, c->parts, sizeof(body->parts));
+    body->root = c->root;
+    body->body_yaw = c->body_yaw;
+    body->death_tick = c->death_tick;
+    body->death_seed = c->death_seed;
+    body->dead = true;
+    body->settled = c->settled || !body->rag.active;
+    body->rag_pending = false;
+    body->have_pose = true;
+    body->adopted = true;
+    body->lod = c->lod;
+}
+
+CharacterInst *chars_attach_corpse(World *w, EntityId corpse, int owner_slot) {
+    if (!w->chars || !LIB) return NULL;
+    int i = (int)ENT_INDEX(corpse);
+    u8 id = w->char_id[i];
+    const Player *p = owner_slot >= 0 && owner_slot < MAX_PLAYERS ? &w->players[owner_slot] : NULL;
+    if (!id && p && p->active && ent_valid(w, p->ent)) id = w->char_id[ENT_INDEX(p->ent)];
+    if (!id) {
+        const CharacterDef *cd = anim_lib_char_by_id(LIB, "player");
+        if (cd) id = cd->net_id;
+    }
+    CharacterInst *c = id ? char_attach(w, corpse, id) : NULL;
+    if (!c) return NULL;
+    c->corpse = true;
+    c->is_player = false;
+    c->slot = -1;
+    c->dead = true;
+    c->rag_pending = false;
+    c->death_seed = (u8)(dg_hash_u32(corpse) & 0xFF);
+    CharacterInst *pc = p && p->active ? char_get(w, p->ent) : NULL;
+    if (pc) memcpy(c->parts, pc->parts, sizeof(c->parts));
+    // The player is already back (late join, spawn_corpse): a seeded lying pose at the corpse.
+    bool owner_dead = p && p->active && (p->sim.move.mode == MOVE_DEAD || (w->flags[ENT_INDEX(p->ent)] & EF_DEAD));
+    if (!owner_dead) c->settled = true;
+    return c;
+}
+
+CharacterInst *chars_attach_phantom(World *w, EntityId local_ent, int player_slot) {
+    if (!w->chars || !LIB) return NULL;
+    const Player *p = player_slot >= 0 && player_slot < MAX_PLAYERS ? &w->players[player_slot] : NULL;
+    CharacterInst *pc = p && p->active ? char_get(w, p->ent) : NULL;
+    u8 id = pc ? pc->def->net_id : 0;
+    if (!id) {
+        const CharacterDef *cd = anim_lib_char_by_id(LIB, "player");
+        if (cd) id = cd->net_id;
+    }
+    CharacterInst *c = id ? char_attach(w, local_ent, id) : NULL;
+    if (!c) return NULL;
+    c->phantom = true;
+    c->is_player = false;
+    c->slot = -1;
+    if (pc) memcpy(c->parts, pc->parts, sizeof(c->parts));
+    return c;
+}
+
+static const Xform *current_pose(World *w, CharacterInst *c) {
+    static Xform pose[ANIM_MAX_BONES];
+    if (!c->have_pose) return NULL;
+    if (c->rag.active) ragdoll_read_pose(&c->rag, w->phys, &LIB->ragdoll, &LIB->skel, pose);
+    else if (c->dead && c->settled_pose) memcpy(pose, c->settled_pose, sizeof(Xform) * (size_t)LIB->skel.count);
+    else memcpy(pose, c->pose_cur, sizeof(Xform) * (size_t)LIB->skel.count);
+    return pose;
+}
+
+bool chars_body_axis(World *w, EntityId e, vec3 *pelvis, vec3 *head) {
+    CharacterInst *c = char_get(w, e);
+    if (!c || !LIB) return false;
+    const Xform *pose = current_pose(w, c);
+    int hb = LIB->skel.role[BR_HIPS], hd = LIB->skel.role[BR_HEAD];
+    if (!pose || hb < 0 || hd < 0) return false;
+    *pelvis = pose[hb].t;
+    *head = pose[hd].t;
+    return true;
+}
+
+bool chars_extract_points(World *w, EntityId e, vec3 out[2]) {
+    CharacterInst *c = char_get(w, e);
+    if (!c || !LIB) return false;
+    const Xform *pose = current_pose(w, c);
+    const Skeleton *s = &LIB->skel;
+    int chest = s->role[BR_SPINE2], arm = s->role[BR_L_FOREARM], neck = s->role[BR_NECK];
+    if (!pose || chest < 0) return false;
+    out[0] = pose[chest].t;
+    // The needle: the forearm (inner elbow) when it is reachable, else the neck.
+    out[1] = arm >= 0 ? v3_lerp(pose[arm].t, pose[s->role[BR_L_ARM] >= 0 ? s->role[BR_L_ARM] : arm].t, 0.15f) : (neck >= 0 ? pose[neck].t : pose[chest].t);
+    return true;
+}
+
+bool chars_ragdoll_probe(World *w, EntityId e, vec3 pos[2], float speed[2], float clearance[2]) {
+    CharacterInst *c = char_get(w, e);
+    if (!c || !LIB || !c->rag.active) return false;
+    const RagdollDef *d = &LIB->ragdoll;
+    int idx[2] = { -1, -1 };
+    for (int b = 0; b < d->body_count && b < c->rag.body_count; b++) {
+        if (!strcmp(d->bodies[b].name, "head")) idx[0] = b;
+        if (!strcmp(d->bodies[b].name, "chest")) idx[1] = b;
+    }
+    for (int k = 0; k < 2; k++) {
+        if (idx[k] < 0) return false;
+        quat r;
+        phys_get_transform(w->phys, c->rag.body[idx[k]], &pos[k], &r);
+        speed[k] = v3_len(phys_get_velocity(w->phys, c->rag.body[idx[k]]));
+        // Distance to whatever is below (the ragdoll's own bodies are not in PL_MASK_WORLD).
+        RayHit rh;
+        float r0 = d->bodies[idx[k]].radius * c->rag.scale;
+        clearance[k] = phys_raycast(w->phys, pos[k], v3(0, -3.0f, 0), PL_MASK_WORLD, PHYS_INVALID_BODY, &rh) ? fmaxf(0.0f, rh.distance - r0) : 3.0f;
+    }
     return true;
 }
 

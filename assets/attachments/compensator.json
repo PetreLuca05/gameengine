@@ -3,6 +3,7 @@
   "id": "compensator",
   "name": "Compensator",
   "slot": "muzzle",
+  "fire": { "mass": 0.12, "impulse": { "pitch": 0.75, "yaw": 1.4 }, "omega_mult": 1.15, "zeta_add": 0.1, "fov_punch": 1.1 },
   "mount": {
     "pos": [0, 0, 0]
   },

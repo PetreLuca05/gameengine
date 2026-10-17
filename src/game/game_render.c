@@ -31,6 +31,8 @@
 #include "net/net.h"
 #include "world/openworld.h"
 #include "gameplay/throwables.h"
+#include "gameplay/revive/revive.h"
+#include "game_revive.h"
 #include "input/input.h"
 #include "player/spectator.h"
 #include "editor/handpose/hp_system.h"
@@ -308,6 +310,61 @@ static void draw_box_local(vec3 pos, quat rot, vec3 offset, vec3 half, Material 
     draw_shape(VIS_BOX, half, v3_add(pos, quat_rotate(rot, offset)), rot, m);
 }
 
+// Fabricator placeholder (docs/REVIVE.md): plinth, glass chamber (the reconstruction happens inside,
+// game_revive.c), back spine, control column with the panel and the sample slot, top cap, light.
+// Local frame: -Z is the front; matches the sockets in revive.c.
+static void draw_fabricator(World *w, int i, vec3 pos, quat rot, u32 hl) {
+    FabView fv;
+    revive_fab_view(w, ENT_MAKE(i, w->gen[i]), &fv);
+    float t = (float)g_engine.real_time;
+    bool recon = fv.m.state == FAB_RECONSTRUCTING, open = fv.m.state == FAB_OPENING;
+    float pulse = recon ? 0.6f + 0.4f * sinf(t * (3.0f + 6.0f * fv.progress)) : (open ? 1.0f : 0.35f);
+    if (!fv.m.powered) pulse = 0.0f;
+    Material metal = mat_from(rgba8(0.28f, 0.3f, 0.33f, 1), 0.45f, 0);
+    metal.metallic = 0.8f;
+    Material dark = mat_from(rgba8(0.12f, 0.13f, 0.15f, 1), 0.55f, 0);
+    draw_box_local(pos, rot, v3(0.3f, 0.06f, 0.0f), v3(0.95f, 0.06f, 0.7f), dark);
+    // Chamber floor with an emissive ring, top cap with a light strip.
+    vec3 cyan = v3(0.35f, 0.9f, 1.0f);
+    Material ring = mat_from(rgba8(cyan.x, cyan.y, cyan.z, 1), 0.3f, MAT_NO_SHADOW | (recon ? MAT_CAUSTICS : 0u));
+    ring.emissive = 2.0f + 6.0f * pulse;
+    draw_shape(VIS_CYLINDER, v3(0.6f, 0.012f, 0.6f), v3_add(pos, quat_rotate(rot, v3(0, 0.13f, 0))), rot, ring);
+    draw_shape(VIS_CYLINDER, v3(0.56f, 0.02f, 0.56f), v3_add(pos, quat_rotate(rot, v3(0, 0.12f, 0))), rot, metal);
+    draw_shape(VIS_CYLINDER, v3(0.63f, 0.09f, 0.63f), v3_add(pos, quat_rotate(rot, v3(0, 2.33f, 0))), rot, metal);
+    draw_shape(VIS_CYLINDER, v3(0.6f, 0.012f, 0.6f), v3_add(pos, quat_rotate(rot, v3(0, 2.23f, 0))), rot, ring);
+    // Back spine + control column (the column has the collision body).
+    draw_box_local(pos, rot, v3(0.0f, 1.2f, 0.62f), v3(0.2f, 1.15f, 0.07f), metal);
+    Material col = metal;
+    col.flags |= hl;
+    draw_box_local(pos, rot, v3(0.85f, 0.95f, 0.0f), v3(0.25f, 0.95f, 0.35f), col);
+    // Panel: green ready, amber reconstructing, red unpowered; the sample slot glows while busy.
+    vec3 pc = !fv.m.powered ? v3(0.9f, 0.15f, 0.1f) : (recon || open ? v3(1.0f, 0.65f, 0.15f) : v3(0.25f, 0.95f, 0.45f));
+    Material panel = mat_from(rgba8(pc.x, pc.y, pc.z, 1), 0.2f, hl);
+    panel.emissive = fv.m.powered ? 3.0f : 0.6f;
+    quat tilt = quat_mul(rot, quat_axis_angle(v3(1, 0, 0), 0.35f));
+    draw_shape(VIS_BOX, v3(0.2f, 0.13f, 0.012f), v3_add(pos, quat_rotate(rot, v3(0.85f, 1.38f, -0.36f))), tilt, panel);
+    if (recon) {
+        // Progress bar on the panel.
+        Material pb = mat_from(rgba8(1, 1, 1, 1), 0.2f, MAT_NO_SHADOW);
+        pb.emissive = 5.0f;
+        float wbar = 0.36f * fmaxf(fv.progress, 0.02f);
+        draw_shape(VIS_BOX, v3(wbar * 0.5f, 0.012f, 0.004f), v3_add(pos, quat_rotate(rot, v3(0.85f - 0.18f + wbar * 0.5f, 1.30f, -0.375f))), tilt, pb);
+    }
+    Material slot = mat_from(rgba8(0.05f, 0.05f, 0.06f, 1), 0.4f, 0);
+    draw_box_local(pos, rot, v3(0.85f, 1.06f, -0.36f), v3(0.06f, 0.045f, 0.02f), slot);
+    Material rim = mat_from(rgba8(cyan.x, cyan.y, cyan.z, 1), 0.3f, MAT_NO_SHADOW);
+    rim.emissive = fv.m.qn || recon ? 6.0f : 1.5f;
+    draw_box_local(pos, rot, v3(0.85f, 1.06f, -0.381f), v3(0.065f, 0.006f, 0.004f), rim);
+    // Glass + liquid (blended, drawn in the transparent pass), then the reconstruction inside.
+    game_revive_draw_chamber(w, i, pos, rot, &fv, pulse);
+    // Interior light pulsing with the progress.
+    if (fv.m.powered) {
+        PointLight l = { v3_add(pos, quat_rotate(rot, v3(0, 1.4f, 0))), 3.5f, cyan, 1.0f + (recon ? 5.0f * pulse * (0.4f + fv.progress) : 0.6f * pulse) };
+        l.flags = LIGHT_NO_SHADOW;
+        render_add_light(&l);
+    }
+}
+
 static void render_entity(World *w, int i, float alpha, bool focused) {
     EntityType t = (EntityType)w->type[i];
     Transform *xf = &w->xf[i];
@@ -429,6 +486,8 @@ static void render_entity(World *w, int i, float alpha, bool focused) {
         break;
     }
     case ET_BENCH: break;   // interaction volume only (the bench itself is a level brush)
+    case ET_CORPSE: break;   // the adopted ragdoll / lying pose (characters.c)
+    case ET_FABRICATOR: draw_fabricator(w, i, pos, rot, hl); break;
     case ET_PICKUP: {
         if (w->flags[i] & EF_HIDDEN) break;
         // The same model as in the hands, lying where it landed (casts a shadow; highlighted on focus).
@@ -644,9 +703,13 @@ void game_render(void) {
     RenderCamera cam = camera_update(&G->view, &interp, (float)g_engine.frame_dt, &cads, dead);
     // Weapon feel: camera kick spring (visual only, aim unaffected) + aim sway (bullets use it too).
     if (p && !dead) {
+        // Fire animation layer 5 (docs/FIRE_ANIM.md): the camera follows the body's reaction 2-3 ticks
+        // after the gun (its own overshoot), plus the roll twitch and the FOV punch.
         float ck = cvar_find("cam_kick_scale") ? cvar_find("cam_kick_scale")->f : 1.0f;   // visual camera kick (aim recoil unaffected)
-        vec3 kr = v3_scale(spring_vec3_sample(&G->recoil_vis.cam_rot, G->alpha), ck);
-        float kb = spring_f32_sample(&G->recoil_vis.cam_back, G->alpha) * ck;
+        const FireAnimOut *fo = game_fire_sample(G->alpha);
+        vec3 kr = v3_scale(v3(fo->cam_rot.x, fo->cam_rot.y, fo->cam_rot.z), ck);
+        float kb = fo->cam_back * ck;
+        cam.fov_deg = fmaxf(5.0f, cam.fov_deg - fo->fov_punch * ck);
         // Sway and ADS bob move the weapon (about the eye), not the camera: the sight centre stays
         // exactly on the bullets' line (weapon_aim_offset_deg is what the shots use).
         vec2 sway = weapon_aim_offset_deg(wd, &p->sim.wpn, &p->sim.move, weapon_sway_time(vcmd->seq) + G->alpha * SIM_DT);
@@ -863,12 +926,17 @@ void game_render(void) {
             hi.use_held = (G->last_cmd.buttons & BTN_USE) != 0;
         }
         hi.ads = ads;
-        hi.vm_kick_pos = spring_vec3_sample(&G->recoil_vis.vm_pos, G->alpha);
-        hi.vm_kick_rot = spring_vec3_sample(&G->recoil_vis.vm_rot, G->alpha);
+        {
+            const FireAnimOut *fo = game_fire_sample(G->alpha);   // the empty-hands fallback rig (cl_fp_body 0)
+            hi.vm_kick_pos = v3_add(fo->gun_pos, v3(0, 0, fo->screen_kick));
+            hi.vm_kick_rot = fo->gun_rot;
+            hands_set_fire_mech(true, fo->slide, fo->wobble_rot);
+        }
         hands_update(&hi);
         bool tpv = cvar_find("cl_thirdperson")->i || GR->cam_mode == 3;   // incl. the third-person vehicle camera
         if (!tpv) {
             chars_render_local_fp(w, G->alpha, vs);
+            game_fire_flush_flash();   // the muzzle flash on this frame's (kicked) gun
             fp_cam_test_hands();
             ads_sweep_frame();
         }
