@@ -53,17 +53,33 @@ const CharacterDef *anim_lib_char_by_id(const AnimLibrary *lib, const char *id) 
 
 // ------------------------------------------------------------------ pieces
 
-// Turns a clip's root bones (and extracted travel) about +Y by deg (positive = to the left).
+// Turns a clip's lower body about +Y by deg (positive = to the left): the root bones turn about the
+// vertical through the hips, the spine is counter-turned so everything above it (chest, arms, head:
+// the first-person eye) keeps its authored model-space pose. A bladed stance: the legs / pelvis turn,
+// the upper body still faces the aim. Travel (root_t) is unchanged.
 static void clip_turn(const Skeleton *s, Clip *c, float deg) {
     quat q = quat_axis_angle(v3(0, 1, 0), deg * DG_DEG2RAD);
+    int hips = s->role[BR_HIPS], spine = s->role[BR_SPINE];
+    if (hips < 0 || c->bones != s->count) return;
     for (int f = 0; f < c->frames; f++) {
-        for (int b = 0; b < c->bones && b < s->count; b++) {
+        Xform *loc = &c->data[(size_t)f * (size_t)c->bones];
+        Pose p;
+        Xform m[ANIM_MAX_BONES], m2[ANIM_MAX_BONES];
+        p.count = c->bones;
+        memcpy(p.local, loc, sizeof(Xform) * (size_t)c->bones);
+        pose_to_model(s, &p, m);
+        vec3 pivot = v3(m[hips].t.x, 0, m[hips].t.z);
+        for (int b = 0; b < c->bones; b++) {
             if (s->parent[b] >= 0) continue;
-            Xform *x = &c->data[(size_t)f * (size_t)c->bones + (size_t)b];
-            x->r = quat_norm(quat_mul(q, x->r));
-            x->t = quat_rotate(q, x->t);
+            loc[b].r = quat_norm(quat_mul(q, loc[b].r));
+            loc[b].t = v3_add(pivot, quat_rotate(q, v3_sub(loc[b].t, pivot)));
         }
-        if (c->root_t) c->root_t[f] = quat_rotate(q, c->root_t[f]);
+        if (spine >= 0 && s->parent[spine] >= 0) {
+            memcpy(p.local, loc, sizeof(Xform) * (size_t)c->bones);
+            pose_to_model(s, &p, m2);
+            loc[spine] = xf_mul(xf_inverse(m2[s->parent[spine]]), m[spine]);
+            loc[spine].r = quat_norm(loc[spine].r);
+        }
     }
 }
 

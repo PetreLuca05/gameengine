@@ -1,5 +1,5 @@
 {
-  "_comment": "Per-clip metadata. Key = baked clip name (FBX file stem, or 'file:take'). Keys: name (alias used by anim sets), loop, speed, root_speed (m/s travel of an in-place clip: speed matching), root_motion, markers [left_plant, right_plant], events, blend_in, blend_out, additive, reference, yaw (degrees about +Y, negative = turn the body to the right).",
+  "_comment": "Per-clip metadata. Key = baked clip name (FBX file stem, or 'file:take'). Keys: name (alias used by anim sets), loop, speed, root_speed (m/s travel of an in-place clip: speed matching), root_motion, markers [left_plant, right_plant], events, blend_in, blend_out, additive, reference, yaw (degrees about +Y, negative = to the right: the hips / legs turn, the upper body keeps its pose).",
   "clips": {
     "Animations:Armature|Idle": {
       "name": "idle",

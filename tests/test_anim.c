@@ -60,10 +60,10 @@ static void test_clip_facing(void) {
         pose_to_model(s, &p, m);
         float hips = bone_facing_deg(s, m, s->role[BR_HIPS]), chest = bone_facing_deg(s, m, s->role[BR_SPINE2]);
         printf("  facing %-24s hips %+7.1f chest %+7.1f deg\n", L->clips[i].name, hips, chest);
-        // An authored clips.json "yaw" turns the whole clip on purpose: measure against it.
+        CHECK(fabsf(chest) < 35.0f, "clip %s: chest faces %.0f deg off forward", L->clips[i].name, chest);
+        // An authored clips.json "yaw" turns the lower body on purpose (a bladed stance): the hips.
         float want = L->clip_yaw[i];
-        CHECK(fabsf(wrap_angle((chest - want) * DG_DEG2RAD)) * DG_RAD2DEG < 35.0f, "clip %s: chest faces %.0f deg off its facing (%.0f)", L->clips[i].name, chest, want);
-        CHECK(fabsf(wrap_angle((hips - want) * DG_DEG2RAD)) * DG_RAD2DEG < 35.0f, "clip %s: hips face %.0f deg off its facing (%.0f)", L->clips[i].name, hips, want);
+        CHECK(fabsf(wrap_angle((hips - want) * DG_DEG2RAD)) * DG_RAD2DEG < 35.0f, "clip %s: hips face %.0f deg off their facing (%.0f)", L->clips[i].name, hips, want);
     }
 }
 
