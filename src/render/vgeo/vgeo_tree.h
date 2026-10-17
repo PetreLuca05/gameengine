@@ -65,6 +65,9 @@ typedef struct VgTree {
     char tex[VG_TREE_MAX_MATERIALS][48];   // albedo texture file per material ("oak leaf.png")
     bool masked[VG_TREE_MAX_MATERIALS];
     VgTreeTexture texture[VG_TREE_MAX_MATERIALS];   // loaded by vgeo_tree_load_or_build
+    // Opaque (bark) materials' PBR maps from assets/treepbr (tools/vfxgen/tree_pbr.py): tangent normal
+    // (glTF convention) and ORM (r AO, g roughness, b metallic); rgba NULL = none (cards, missing files).
+    VgTreeTexture normal[VG_TREE_MAX_MATERIALS], orm[VG_TREE_MAX_MATERIALS];
     float cap_r, cap_h;          // trunk capsule (m at scale 1)
     float src_height;            // source mesh height (file units), the scale applied
     float scale;
@@ -100,7 +103,9 @@ u32 vgeo_tree_key(const VgTreeSpecies *sp, const char *dir);
 bool vgeo_tree_load_or_build(const VgTreeSpecies *sp, const char *dir, const char *built_dir, const char *cache_dir, VgTree *out, char *err, int err_size);
 // Writes the cache file of a built tree.
 bool vgeo_tree_write(const VgTree *t, u32 key, const char *path);
-// The species' vgeo materials (flags, wind (vgeo_tree_wind), fades; albedo_tex / mask_tex left 0 for the caller).
+// The species' vgeo materials (flags, wind (vgeo_tree_wind), fades; albedo_tex / mask_tex left 0 for the
+// caller). Materials with bark maps get MAT_NORMAL_TEX | MAT_MR_TEX | MAT_OCCLUSION_TEX and their
+// factors; the caller enters normal_tex / mr_tex / occlusion_tex (the resolve drops a flag whose index is 0).
 void vgeo_tree_materials(const VgTree *t, VgMaterial out[VG_TREE_MAX_MATERIALS]);
 void vgeo_tree_free(VgTree *t);
 

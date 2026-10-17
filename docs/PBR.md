@@ -79,6 +79,18 @@ characters fill the screen with resolve work). On `VK_ERROR_DEVICE_LOST`, `VK_CH
 `VK_EXT_device_fault` data (description, fault addresses, vendor records) before the fatal error.
 `--test` runs (or `DG_NO_FATAL_DIALOG=1`) abort without the fatal message box.
 
+## Other content using the same terms
+
+- **Tree bark** (docs/VGEO.md "Tree models", "Bark maps"): the imported trees' opaque materials carry a
+  normal map and an ORM map (r AO, g roughness, b metallic 0) as vgeo module textures
+  (`assets/treepbr`, `tools/vfxgen/tree_pbr.py`), through the same `MAT_NORMAL_TEX` / `MAT_MR_TEX` /
+  `MAT_OCCLUSION_TEX` path of the vgeo resolve. Module textures (index >= `VG_TEX_GAME`) are not legacy
+  renderer textures, so the r_vgeo 0 fallback draws a material's maps only when every index is a
+  renderer id.
+- **Surface layers** (docs/TEXTURES.md "Ambient occlusion", "Metal"): the baked layer AO multiplies the
+  SSAO exactly like `pbr_occlusion` (`ao *= surf_ao` in `lit_body.glsl`), and the metal layers replace the
+  material metallic (`surf_metal`).
+
 ## Limits
 
 - KHR_texture_transform: a uniform scale without offset / rotation on the base colour becomes

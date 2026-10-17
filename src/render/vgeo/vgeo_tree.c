@@ -12,6 +12,7 @@
 #include <string.h>
 
 #define MAT_TEXTURED_FLAG (1u << 6)   // render.h MAT_TEXTURED
+#define MAT_BARK_MAP_FLAGS ((1u << 16) | (1u << 17) | (1u << 18))   // render.h MAT_MR_TEX | MAT_NORMAL_TEX | MAT_OCCLUSION_TEX
 
 // The species (assets/treefbx, Tree It exports: 0.85-14 m models in centimetres, docs/VGEO.md "Tree
 // models"). Each has a target height range in metres, from published mature heights (sources in the
@@ -685,6 +686,28 @@ static bool tree_read(const char *path, u32 key, VgTree *t) {
     return true;
 }
 
+// The opaque materials' bark maps: <tree dir>../treepbr/<texture stem>_n.png / _orm.png (generated
+// next to the Tree It files by tools/vfxgen/tree_pbr.py; runtime data, not part of the cache key).
+static void tree_load_maps(const VgTreeSpecies *sp, const char *dir, VgTree *t) {
+    for (u32 k = 0; k < t->material_count; k++) {
+        if (t->masked[k]) continue;
+        char stem[48], tp[700];
+        dg_strcpy(stem, sizeof(stem), t->tex[k]);
+        char *dot = strrchr(stem, '.');
+        if (dot) *dot = 0;
+        snprintf(tp, sizeof(tp), "%s../treepbr/%s_n.png", dir, stem);
+        bool ok = vgeo_tree_texture_load(tp, VG_TREE_TEX_MAX, &t->normal[k]);
+        snprintf(tp, sizeof(tp), "%s../treepbr/%s_orm.png", dir, stem);
+        ok = vgeo_tree_texture_load(tp, VG_TREE_TEX_MAX, &t->orm[k]) && ok;
+        if (!ok) {
+            log_warn("vgeo_tree: %s: no bark maps for %s (tools/vfxgen/tree_pbr.py)", sp->name, t->tex[k]);
+            free(t->normal[k].rgba), free(t->orm[k].rgba);
+            memset(&t->normal[k], 0, sizeof(t->normal[k]));
+            memset(&t->orm[k], 0, sizeof(t->orm[k]));
+        }
+    }
+}
+
 static void impostor_materials(const VgTree *t, VgImpostorMaterial im[VG_TREE_MAX_MATERIALS]) {
     memset(im, 0, sizeof(VgImpostorMaterial) * VG_TREE_MAX_MATERIALS);
     for (u32 k = 0; k < t->material_count; k++) {
@@ -713,6 +736,7 @@ bool vgeo_tree_load_or_build(const VgTreeSpecies *sp, const char *dir, const cha
             snprintf(tp, sizeof(tp), "%s%s", dir, out->tex[k]);
             if (!vgeo_tree_texture_load(tp, VG_TREE_TEX_MAX, &out->texture[k])) log_warn("vgeo_tree: %s: texture %s missing", sp->name, tp);
         }
+        tree_load_maps(sp, dir, out);
         return true;
     }
     VgFoliageMesh fm;
@@ -742,6 +766,7 @@ bool vgeo_tree_load_or_build(const VgTreeSpecies *sp, const char *dir, const cha
         vgeo_impostor_bake(&out->b, &io);
     }
     out->b.hdr.key = key;
+    tree_load_maps(sp, dir, out);
     if (cpath[0]) {
         SDL_CreateDirectory(cache_dir);
         if (!vgeo_tree_write(out, key, cpath)) log_warn("vgeo_tree: cannot write cache %s", cpath);
@@ -763,6 +788,12 @@ void vgeo_tree_materials(const VgTree *t, VgMaterial out[VG_TREE_MAX_MATERIALS])
         if (t->masked[k]) {
             m->flags |= VGM_MASKED | VGM_TWO_SIDED;
             m->alpha_cutoff = 0.5f;
+        } else if (t->normal[k].rgba && t->orm[k].rgba) {
+            // bark maps (docs/PBR.md): the ORM's g is the roughness itself, its r the cavity AO
+            m->flags |= MAT_BARK_MAP_FLAGS;
+            m->roughness = 1.0f;
+            m->normal_scale = 1.0f;
+            m->occlusion_strength = 0.8f;
         }
         // flowers are walked through (the displacement buffer first); trees and bushes have trunk capsules
         m->wpo = sp->role == VG_TREE_FLOWER ? (WPO_GRASS | WPO_DISPLACE) : WPO_TREE;
@@ -775,7 +806,7 @@ void vgeo_tree_materials(const VgTree *t, VgMaterial out[VG_TREE_MAX_MATERIALS])
 
 void vgeo_tree_free(VgTree *t) {
     vgeo_free(&t->b);
-    for (u32 k = 0; k < VG_TREE_MAX_MATERIALS; k++) free(t->texture[k].rgba);
+    for (u32 k = 0; k < VG_TREE_MAX_MATERIALS; k++) free(t->texture[k].rgba), free(t->normal[k].rgba), free(t->orm[k].rgba);
     const VgTreeSpecies *sp = t->sp;
     memset(t, 0, sizeof(*t));
     t->sp = sp;

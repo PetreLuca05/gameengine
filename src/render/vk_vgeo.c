@@ -128,8 +128,9 @@ static struct {
     u32 ftype_count;
     bool test_types, map_types;
     u32 tree_roles;              // roles whose imported species were loaded (bits of VgTreeRole)
-    struct { char name[48]; u32 tex; } tree_tex[48];   // imported tree textures by file (shared by species)
+    struct { char name[64]; u32 tex; } tree_tex[80];   // imported tree textures by file (+ "#n" / "#orm" bark maps; shared by species)
     u32 tree_tex_count;
+    size_t tree_tex_bytes;
     double disp_time;
     float push_test;             // foliage_push_test: seconds left
     bool need_commit;            // a placement chunk resolved a mesh the scene did not have
@@ -1194,7 +1195,9 @@ void vkg_submit_fallback(void) {
         di.mat.tex_scale = vm->tex_scale;
         // glTF maps (docs/PBR.md): the same textures as the resolve (the albedo only with maps, so meshes
         // drawn untextured here so far stay so)
-        if (vm->flags & MAT_PBR_MAPS) {
+        // (renderer texture ids only: module textures, e.g. the tree bark maps, are not legacy textures)
+        if ((vm->flags & MAT_PBR_MAPS) && vm->albedo_tex < VG_TEX_GAME && vm->mr_tex < VG_TEX_GAME && vm->normal_tex < VG_TEX_GAME && vm->occlusion_tex < VG_TEX_GAME &&
+            vm->emissive_tex < VG_TEX_GAME) {
             di.mat.flags = vm->flags & (MAT_PBR_MAPS | MAT_TEXTURED | MAT_TWO_SIDED);
             di.mat.texture = vm->albedo_tex;
             di.mat.mr_tex = vm->mr_tex;
@@ -1849,19 +1852,25 @@ static void tree_job(void *ctx, int begin, int end) {
     for (int i = begin; i < end; i++) tb[i].ok = vgeo_tree_load_or_build(tb[i].sp, tb[i].dir, tb[i].built, tb[i].cache, &tb[i].t, tb[i].err, sizeof(tb[i].err));
 }
 
-static u32 tree_texture(const VgTree *t, u32 k) {
+// A tree texture of material k (map: 0 albedo, 1 bark normal, 2 bark ORM), shared by file name.
+static u32 tree_texture(const VgTree *t, u32 k, int map) {
+    static const char *const suffix[3] = { "", "#n", "#orm" };
+    char name[64];
+    snprintf(name, sizeof(name), "%s%s", t->tex[k], suffix[map]);
     for (u32 i = 0; i < G.tree_tex_count; i++)
-        if (!strcmp(G.tree_tex[i].name, t->tex[k])) return G.tree_tex[i].tex;
-    const VgTreeTexture *x = &t->texture[k];
-    if (!x->rgba || G.tree_tex_count >= 48) return 0;
+        if (!strcmp(G.tree_tex[i].name, name)) return G.tree_tex[i].tex;
+    const VgTreeTexture *x = map == 0 ? &t->texture[k] : map == 1 ? &t->normal[k] : &t->orm[k];
+    if (!x->rgba || G.tree_tex_count >= sizeof(G.tree_tex) / sizeof(G.tree_tex[0])) return 0;
     u32 levels;
     u8 *mips = (u8 *)malloc(vg_tex_mip_bytes(x->w, x->h, &levels));
     vg_tex_build_mips(x->rgba, x->w, x->h, mips);
-    if (t->masked[k]) vgeo_tree_mip_coverage(mips, x->w, x->h, levels, 0.5f);
-    u32 id = vg_tex_create(&G.cull.tex, x->w, x->h, levels, mips, true, true);
+    if (map == 0 && t->masked[k]) vgeo_tree_mip_coverage(mips, x->w, x->h, levels, 0.5f);
+    u32 id = vg_tex_create(&G.cull.tex, x->w, x->h, levels, mips, map == 0, true);   // the maps are linear
     free(mips);
-    dg_strcpy(G.tree_tex[G.tree_tex_count].name, sizeof(G.tree_tex[0].name), t->tex[k]);
-    G.tree_tex[G.tree_tex_count++].tex = id;
+    dg_strcpy(G.tree_tex[G.tree_tex_count].name, sizeof(G.tree_tex[0].name), name);
+    G.tree_tex[G.tree_tex_count].tex = id;
+    G.tree_tex_count++;
+    G.tree_tex_bytes += vg_tex_mip_bytes(x->w, x->h, &levels);
     return id;
 }
 
@@ -1895,7 +1904,11 @@ static int foliage_build_trees(u32 role_mask) {
         fallback_register(mesh, &q->t.b, false);
         u32 base = 0;
         for (u32 k = 0; k < q->t.material_count; k++) {
-            mats[k].albedo_tex = mats[k].mask_tex = tree_texture(&q->t, k);
+            mats[k].albedo_tex = mats[k].mask_tex = tree_texture(&q->t, k, 0);
+            if (q->t.normal[k].rgba) {   // bark maps (vgeo_tree_materials set the flags)
+                mats[k].normal_tex = tree_texture(&q->t, k, 1);
+                mats[k].mr_tex = mats[k].occlusion_tex = tree_texture(&q->t, k, 2);
+            }
             u32 idx = vgeo_scene_add_material(&G.scene, &mats[k]);
             if (!k) base = idx;
         }
@@ -1918,7 +1931,10 @@ static int foliage_build_trees(u32 role_mask) {
         vgeo_tree_free(&q->t);
     }
     free(tb);
-    log_info("vgeo: %d tree species (%d cached) in %.0f ms, %u tree textures", reg, cached, (double)(SDL_GetTicksNS() - t0) / 1e6, G.tree_tex_count);
+    u32 own = 0;
+    for (u32 i = 0; i < VG_TEX_OWN; i++) own += G.cull.tex.own[i].used;
+    log_info("vgeo: %d tree species (%d cached) in %.0f ms, %u tree textures (%.1f MB, albedo + bark maps), %u / %u module textures", reg, cached,
+             (double)(SDL_GetTicksNS() - t0) / 1e6, G.tree_tex_count, (double)G.tree_tex_bytes / (1024.0 * 1024.0), own, VG_TEX_OWN);
     return reg;
 }
 
