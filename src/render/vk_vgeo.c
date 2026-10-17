@@ -860,7 +860,7 @@ void vkg_record_shadow_cull(VkCommandBuffer cmd) {
         t.m[13] = (k >> 1) ? 0.5f : -0.5f;
         const mat4 *tile_vp = k == 3 ? &R->shadow_vp_moon : &R->shadow_vps[k];
         mat4 vp = mat4_mul(mat4_inverse(t), *tile_vp);
-        float radius = k == 3 ? (&R->shadow_splits.x)[DG_MIN(1u, ncasc - 1)] : (&R->shadow_splits.x)[k];
+        float radius = R->shadow_radius[k];   // the tile's half extent (render.c: the cascade's sphere; k = 3 the moon tile)
         float eye[3] = { R->cam.pos.x, R->cam.pos.y, R->cam.pos.z };
         VgViewGpu v;
         vgeo_view_setup(&v, vp.m, vp.m, eye, (float)tile / (2.0f * radius), 0.0f, tile, tile, G.shadow_error_px->f, 0.0f,

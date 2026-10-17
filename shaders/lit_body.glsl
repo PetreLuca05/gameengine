@@ -208,7 +208,8 @@ void main() {
         color += spec_ind * fr * frame.post_params.w * spec_occ;
         // sun
         vec3 l = normalize(frame.sun_dir.xyz);
-        float sh = shadow_factor(v_world, n) * contact * cloud_shadow_at(v_world);
+        // The first-person rig: its own high-resolution tile + the world where it appears (lighting.glsl).
+        float sh = (vm ? shadow_factor_vm(v_world, n) : shadow_factor(v_world, n)) * contact * cloud_shadow_at(v_world);
         color += brdf(n, v, l, albedo, rough, metal) * frame.sun_color.rgb * frame.sun_dir.w * sh;
         // Snow sparkle: tiny glints facing the light.
         if (wx_snow > 0.05) {
@@ -279,6 +280,6 @@ void main() {
         color += vec3(0.6, 0.85, 1.0) * fr * 0.6;
     }
     int sh_view = int(frame.ssky2.y);
-    if (sh_view >= 2 && (flags & MAT_UNLIT) == 0u) color = shadow_debug_color(sh_view, v_world) * 0.6;
+    if (sh_view >= 2 && sh_view <= 7 && (flags & MAT_UNLIT) == 0u) color = shadow_debug_color(sh_view, v_world) * 0.6;   // 8: lines only
     out_color = vec4(color, base.a);
 }

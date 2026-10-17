@@ -77,7 +77,7 @@ final (CAS, grain, dither, sRGB / PQ) + UI -> present
 | auto exposure | `histogram`, `exposure` | 256-bin log histogram, centre weighted, percentile window, EV100 clamp, separate up / down adaptation; result stays on the GPU (`exposure_buf`), read back for the UI / tests |
 | bloom | `bloom_down`, `bloom_up` | Jimenez 13-tap down (Karis on mip 0) / tent up, energy-conserving mix, lens dirt |
 | lens flare | `flare.comp` | ghosts + halo + anamorphic streak from the quarter-res bloom mip |
-| tonemap + grade | `tonemap.comp` | distortion, chromatic aberration, bloom / flare, exposure, vignette, white balance, contrast / saturation, gameplay feedback, **ACES** (Hill fit) / **AgX** / **Khronos PBR Neutral**, lift / gamma / gain, 3D LUT (.cube), colour-blind correction, brightness / gamma, A/B split |
+| tonemap + grade | `tonemap.comp` | distortion, chromatic aberration, bloom / flare (Look threshold / tint, halation), exposure, vignette, white balance, contrast / saturation, gameplay feedback, the **Look**'s baked LUT (docs/LOOKS.md; its tonemapper and whole grade in one fetch) or **ACES** (Hill fit) / **AgX** / **Khronos PBR Neutral**, lift / gamma / gain, 3D LUT (.cube), colour-blind correction, brightness / gamma, letterbox, A/B split |
 | final | `final.frag` | CAS sharpening, film grain, blue-noise triangular dither, sRGB OETF or **HDR10 PQ** |
 
 Shaders use one push-descriptor layout (`post_internal.h`): bindings 0–7 samplers, 8–11
@@ -120,7 +120,9 @@ SMAA, 3 TAA), `r_upscaler` (0 off, 1 TAA-U, 2 FSR 1, 3 FSR 2 slot, 4 DLSS slot),
 `r_upscale_ratio`, `r_sharpen`, `r_ao`, `r_contact_shadows`, `r_ssr`, `r_ssgi`,
 `r_volumetrics`, `r_fog_scale`, `r_motion_blur`, `r_motion_blur_strength`, `r_dof`, `r_bloom`,
 `r_bloom_quality`, `r_bloom_intensity`, `r_lens_flare`, `r_lens_dirt`, `r_chromatic`,
-`r_vignette`, `r_film_grain`, `r_lens_distortion`, `r_tonemapper` (0 ACES, 1 AgX, 2 Neutral),
+`r_vignette`, `r_film_grain`, `r_lens_distortion`, `r_tonemapper` (0 ACES, 1 AgX, 2 Neutral; with a
+Look the tonemapper is the Look's own and `r_tonemapper` drives only the A/B split and photo mode;
+vignette / grain / chromatic / sharpen / bloom intensity scale the Look's finish, docs/LOOKS.md),
 `r_auto_exposure`, `r_exposure`, `r_lut` (.cube path, e.g. `assets/post/luts/teal_orange.cube`;
 samples from `tools/gen_luts.py`), `r_colorblind`, `r_brightness`, `r_gamma`,
 `r_post_feedback`, `r_hdr_output`, `r_hdr_paper_white`, `r_hdr_max_nits`, `r_render_scale`.

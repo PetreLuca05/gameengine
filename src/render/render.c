@@ -1,6 +1,7 @@
 // Frame orchestration: particle compute -> shadow pass -> frame graph (G-buffer prepass,
 // screen-space lighting, lit scene, fog, transparency, viewmodel, post stack, final + UI) -> present.
 #include "render/phone_view.h"
+#include "render/shadow_csm.h"
 #include "vk_internal.h"
 #include "post/post.h"
 #include "sky/sky.h"
@@ -36,7 +37,7 @@ void render_register_cvars(void) {
     r->r_vsync = cvar_reg_bool("r_vsync", true, CVAR_ARCHIVE, "vertical sync");
     r->r_wireframe = cvar_reg_bool("r_wireframe", false, 0, "wireframe rendering");
     r->r_render_scale = cvar_reg_float("r_render_scale", 1.0f, 0.25f, 2.0f, CVAR_ARCHIVE, "3D resolution scale");
-    r->r_shadow_quality = cvar_reg_int("r_shadow_quality", 2, 0, 3, CVAR_ARCHIVE, "0 off, 1 low, 2 medium, 3 high");
+    r->r_shadow_quality = cvar_reg_int("r_shadow_quality", 2, 0, 3, CVAR_ARCHIVE, "sun shadow resolution per cascade: 0 off, 1 1024, 2 2048, 3 4096 (docs/SHADOWS.md)");
     r->r_aniso = cvar_reg_int("r_aniso", 8, 1, 16, CVAR_ARCHIVE, "anisotropic filtering level");
     r->r_texture_quality = cvar_reg_int("r_texture_quality", 2, 0, 2, CVAR_ARCHIVE, "0 low, 1 medium, 2 high");
     r->r_aa = cvar_reg_int("r_aa", 3, 0, 3, CVAR_ARCHIVE, "anti-aliasing: 0 none, 1 FXAA, 2 SMAA 1x, 3 TAA");
@@ -52,19 +53,23 @@ void render_register_cvars(void) {
     r->r_hdr_output = cvar_reg_bool("r_hdr_output", false, CVAR_ARCHIVE, "HDR10 output (PQ) when the display supports it");
     r->r_bloom_intensity = cvar_reg_float("r_bloom_intensity", 0.05f, 0.0f, 0.5f, CVAR_ARCHIVE, "bloom strength (energy conserving mix)");
     r->r_shadow_cascades = cvar_reg_int("r_shadow_cascades", 3, 1, 3, CVAR_ARCHIVE, "sun shadow cascades (1 .. 3)");
-    r->r_shadow_distance = cvar_reg_float("r_shadow_distance", 1.0f, 0.25f, 1.0f, CVAR_ARCHIVE, "sun shadow reach (scale of the far cascades)");
+    r->r_shadow_distance = cvar_reg_float("r_shadow_distance", 1.0f, 0.25f, 1.0f, CVAR_ARCHIVE, "sun shadow distance (scale of the level's full reach; the last cascade ends there, fading over its last 10 %)");
     r->r_shadow_filter = cvar_reg_int("r_shadow_filter", 2, 0, 2, CVAR_ARCHIVE,
-                                      "sun shadow filter (softness follows the sky, docs/SHADOWS.md): 0 PCF in 3 steps, 1 PCSS (limited radius), 2 full PCSS + wide mode");
-    r->r_shadow_debug = cvar_reg_int("r_shadow_debug", 0, 0, 5, 0,
-                                     "sky-driven shadow views: 1 readout (sun vs sky irradiance, contrast, source radius, mode), 2 penumbra width, 3 blocker distance, 4 cascade / mode, 5 cloud shadow");
+                                      "sun shadow filter (softness follows the sky, docs/SHADOWS.md): 0 PCF 12 taps, 1 PCF 16 taps, 2 PCSS + wide mode");
+    r->r_shadow_debug = cvar_reg_int("r_shadow_debug", 0, 0, 8, 0,
+                                     "shadow views: 1 readout (sky, cascades, bias, filter, jitter), 2 penumbra width, 3 blocker distance, 4 cascade / mode, 5 cloud shadow, 6 texel size, 7 viewmodel tile coverage, 8 fitting spheres + light frustums");
+    r->r_vm_shadow = cvar_reg_bool("r_vm_shadow", true, CVAR_ARCHIVE, "first-person rig (arms, held item) in its own high-resolution shadow tile (docs/SHADOWS.md)");
     r->r_stretch = cvar_reg_float("r_stretch", 0.0f, 0.0f, 1.0f, CVAR_ARCHIVE,
                                   "stretched resolution simulator: 0 normal .. 1 extreme (the 3D view squeezed into a narrower aspect, stretched to the screen)");
     r->r_shadow_min_radius = cvar_reg_float("r_shadow_min_radius", 0.0f, 0.0f, 4.0f, CVAR_ARCHIVE, "props smaller than this radius (m) cast no sun shadow");
     r->r_vsync->on_change = on_render_cvar_changed;
 }
 
+// The sun atlas holds 2 x 2 tiles of csm_tile_texels (shadow_csm.c), within the device limit.
 static u32 shadow_size_for_quality(int q) {
-    switch (q) { case 1: return 1024; case 2: return 2048; case 3: return 4096; default: return 16; }
+    u32 s = 2u * csm_tile_texels(q), lim = R->gpu_props.limits.maxImageDimension2D;
+    while (lim && s > lim) s /= 2u;
+    return s;
 }
 
 static void create_frames(void) {
@@ -185,6 +190,7 @@ bool render_init(SDL_Window *window) {
     R->target_scale = 1.0f;
     vkd_create_targets();
     vkd_create_shadow_map(shadow_size_for_quality(R->r_shadow_quality->i));
+    vkd_create_vm_shadow_map(csm_vm_texels(R->r_shadow_quality->i));
     vkls_init();
     if (!vkp_create_pipelines()) { log_error("render: pipeline creation failed"); return false; }
     if (!vkx_init()) log_warn("render: VFX pipelines unavailable (particles disabled)");
@@ -268,6 +274,7 @@ void render_shutdown(void) {
         vkp_destroy_pipelines();
         vkr_destroy_all_resources();
         vkr_target_destroy(&R->shadow);
+        vkr_target_destroy(&R->vm_shadow);
         vkd_destroy_targets();
         vkd_destroy_swapchain();
         destroy_frames();
@@ -320,9 +327,15 @@ static void apply_setting_changes(void) {
         vkd_create_targets();
         targets_changed();
     }
+    // Shadow resolution (Engine Fidelity): on the frame boundary, before compute_matrices; the new
+    // maps are rendered this frame before any pass samples them (no stale texel grid, no unwritten map).
     if (shadow_size_for_quality(R->r_shadow_quality->i) != R->shadow_size) {
         vkDeviceWaitIdle(R->device);
         vkd_create_shadow_map(shadow_size_for_quality(R->r_shadow_quality->i));
+    }
+    if (csm_vm_texels(R->r_shadow_quality->i) != R->vm_shadow_size) {
+        vkDeviceWaitIdle(R->device);
+        vkd_create_vm_shadow_map(csm_vm_texels(R->r_shadow_quality->i));
     }
     if (R->r_aniso->modified != R->aniso_mod || R->r_texture_quality->modified != R->texq_mod) {
         R->aniso_mod = R->r_aniso->modified;
@@ -594,6 +607,9 @@ static bool g_froxel_fog_draws;   // transparent pass: blended lit draws apply t
 static void draw_precip(VkCommandBuffer cmd, VkDescriptorSet frame_set);
 static u32 g_shadow_cascade;   // shadow pass: the cascade being drawn (push constants flags.w)
 static float g_shadow_min_radius;   // sun cascades: smaller casters skipped (r_shadow_min_radius)
+static bool g_shadow_cull;          // sun / viewmodel tiles: casters outside the tile's light frustum skipped
+static vec4 g_shadow_planes[6];     // that frustum (the box reaches CSM_REACH towards the light)
+static bool g_shadow_vm_pass;       // the viewmodel tile is being drawn (CPU-skinned viewmodel draws take its view)
 
 // glTF materials (docs/PBR.md): the doubleSided / alphaMode MASK variant of the pass pipeline `base`.
 static PipelineId item_pipe(PipelineId base, u32 flags) {
@@ -624,10 +640,11 @@ static void draw_items(VkCommandBuffer cmd, DrawItem *items, u32 count, bool sha
         if (alpha_mode == 1 && !blended) continue;
         if (shadow_pass && (d->mat.flags & MAT_NO_SHADOW)) continue;
         if (!shadow_pass && (d->mat.flags & MAT_SHADOW_ONLY)) continue;
-        if (shadow_pass && g_shadow_min_radius > 0.0f) {
+        if (shadow_pass && (g_shadow_min_radius > 0.0f || g_shadow_cull)) {
             vec3 c; float r;
             item_bounds(d, &c, &r);
             if (r < g_shadow_min_radius) continue;
+            if (g_shadow_cull && !sphere_visible(g_shadow_planes, c, r)) { R->stats.culled++; continue; }
         }
         if (cull) {
             vec3 c; float r;
@@ -638,7 +655,11 @@ static void draw_items(VkCommandBuffer cmd, DrawItem *items, u32 count, bool sha
         // pipeline variant (2 bits) | glTF map set (9) | albedo texture (10) | mesh (32)
         u64 variant = (u64)(item_pipe(pipe, d->mat.flags) != pipe) + (u64)((d->mat.flags & MAT_ALPHA_MASK) != 0);
         u64 ms = shadow_pass ? 0 : vkr_material_set(&d->mat);
-        keys[n].key = shadow_pass ? ((u64)((d->mat.flags & MAT_TERRAIN_MORPH) != 0) << 40) | (u64)d->mesh : ((variant << 51) | (ms << 42) | ((u64)tex << 32) | d->mesh);
+        // Shadow passes: opaque casters, then terrain geomorph casters (own pipeline, docs/LOD.md), then
+        // alpha-masked casters (alpha test, PIPE_SHADOW_MASK) by texture.
+        bool masked = shadow_pass && (d->mat.flags & MAT_ALPHA_MASK) != 0;
+        keys[n].key = shadow_pass ? (masked ? (1ull << 63) | ((u64)tex << 32) | d->mesh : ((u64)((d->mat.flags & MAT_TERRAIN_MORPH) != 0) << 40) | (u64)d->mesh)
+                                  : ((variant << 51) | (ms << 42) | ((u64)tex << 32) | d->mesh);
         keys[n].index = i;
         n++;
     }
@@ -649,9 +670,21 @@ static void draw_items(VkCommandBuffer cmd, DrawItem *items, u32 count, bool sha
     for (u32 k = 0; k < n; k++) {
         DrawItem *d = &items[keys[k].index];
         GpuMesh *m = &R->meshes[d->mesh];
-        if (shadow_pass && !morph_bound && (d->mat.flags & MAT_TERRAIN_MORPH)) {
+        if (shadow_pass && !morph_bound && (d->mat.flags & MAT_TERRAIN_MORPH) && !(d->mat.flags & MAT_ALPHA_MASK)) {
             vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_SHADOW_MORPH]);
             morph_bound = true;
+        }
+        if (shadow_pass && (d->mat.flags & MAT_ALPHA_MASK)) {
+            if (bound_pipe != PIPE_SHADOW_MASK) {
+                vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_SHADOW_MASK]);
+                bound_pipe = PIPE_SHADOW_MASK;
+            }
+            TextureId tex = (d->mat.flags & MAT_TEXTURED) && d->mat.texture ? d->mat.texture : R->white_tex;
+            if (!R->textures[tex].used || !R->textures[tex].ready) tex = R->white_tex;
+            if (tex != bound_tex) {
+                vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 1, 1, &R->textures[tex].set, 0, NULL);
+                bound_tex = tex;
+            }
         }
         if (!shadow_pass) {
             PipelineId p = item_pipe(pipe, d->mat.flags);
@@ -931,7 +964,7 @@ static void draw_cpu_skinned(VkCommandBuffer cmd, FrameResources *f, const CpuSk
         pc.params = v4(d->roughness, d->metallic, d->emissive, 1.0f);
         pc.flags[0] = d->flags & ~(u32)MAT_SHADOW_ONLY;
         pc.flags[1] = pc.flags[2] = 0;
-        pc.flags[3] = pass == 1 ? g_shadow_cascade : 0;
+        pc.flags[3] = pass == 1 || g_shadow_vm_pass ? g_shadow_cascade : 0;
         memset(pc.pbr, 0, sizeof(pc.pbr));
         vkCmdPushConstants(cmd, R->layout_lit, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushLit), &pc);
         vkCmdDrawIndexed(cmd, m->index_count, 1, 0, 0, 0);
@@ -1004,6 +1037,24 @@ static bool prev_palette(u32 id, u32 *off, u32 *count) {
 
 // ------------------------------------------------------------------ frame matrices
 
+// Validation (docs/SHADOWS.md "Tests"): every tile the lit shaders will sample this frame
+// (lighting.glsl's rules on the uniforms) was rendered this frame. A miss is counted and logged
+// (shadow_info, shadow_switch_stress fail on it).
+static void shadow_check_sampled(const FrameData *fd) {
+    u32 want = 0;
+    bool on = fd->sun_color.w > 0.5f && fd->ssky0.y > 0.0f;
+    int count = (int)fd->shadow_splits.w;
+    int first = count > 1 && fd->ssky0.z <= 0.0f ? 1 : 0;
+    if (on)
+        for (int k = first; k < count; k++) want |= 1u << k;
+    if (fd->ssky1.w > 0.0f && fd->sun_color.w > 0.5f) want |= 1u << 3;
+    if (on && fd->shadow_vm.z > 0.0f) want |= 1u << 4;
+    u32 miss = want & ~R->shadow_drawn;
+    if (miss) {
+        if (!R->shadow_unrendered++) log_error("shadows: frame %u samples unrendered shadow tiles 0x%x (drawn 0x%x)", R->frame_index, miss, R->shadow_drawn);
+    }
+}
+
 static void compute_matrices(FrameData *fd) {
     float aspect = view_aspect();
     RenderCamera *c = &R->cam;
@@ -1033,68 +1084,75 @@ static void compute_matrices(FrameData *fd) {
     R->vm_view_proj_nj = mat4_mul(R->vm_proj, R->view);
     R->prev_cam_pos = c->pos;
 
-    // Directional shadow: 3 cascades in a 2 x 2 atlas of the shadow map. Each cascade is a fixed
-    // size ortho box (a sphere-sized square: rotating the camera never changes it) around the
-    // camera, nudged forward, snapped to its own texels: stable under camera motion and as the sun
-    // moves (the game also steps the light direction, game_daynight.c).
+    // Directional shadow (docs/SHADOWS.md "Cascades", shadow_csm.c): up to 3 cascades in a 2 x 2
+    // atlas (tile 3: the moon). Practical splits up to the shadow distance; each cascade is the
+    // bounding sphere of its view sector (the camera rotating never resizes it), snapped to whole
+    // texels in light space (no swimming), reaching CSM_REACH towards the light (tall and
+    // off-screen casters always cast). Bias and filter units follow each cascade's texel size.
+    // Matrices, tiles and uniforms are all built here, in the frame that renders and samples them.
     RenderEnvironment *e = &R->env;
     float ext = e->shadow_extent > 1.0f ? e->shadow_extent : 40.0f;
     vec3 L = v3_norm(e->sun_dir);
-    vec3 up = fabsf(L.y) > 0.99f ? v3(0, 0, 1) : v3(0, 1, 0);
-    mat4 lview = mat4_look_at(v3(0, 0, 0), v3_neg(L), up);
-    // Engine Fidelity: fewer cascades (1: the middle one alone, 2: near + middle) and a shorter reach
-    // (r_shadow_distance scales the far cascades; the near one stays 12 m).
+    float sun_elev = asinf(clampf(L.y, -1.0f, 1.0f));
+    // The fit never looks up from under the horizon (the sun owns the cascades while any of its
+    // disc is up): at least 1 deg; the shading keeps the true direction (a sub-degree difference).
+    vec3 Lfit = L;
+    if (Lfit.y < 0.0175f) {
+        float hz = sqrtf(Lfit.x * Lfit.x + Lfit.z * Lfit.z);
+        Lfit = hz > 1e-4f ? v3(Lfit.x / hz * 0.99985f, 0.0175f, Lfit.z / hz * 0.99985f) : v3(0, 1, 0);
+        sun_elev = fmaxf(sun_elev, 1.0f * DG_DEG2RAD);
+    }
+    mat4 lview = csm_light_view(Lfit);
     int ncasc = DG_CLAMP(R->r_shadow_cascades->i, 1, 3);
     float reach_k = clampf(R->r_shadow_distance->f, 0.25f, 1.0f);
-    float all_radii[3] = { 12.0f, fmaxf(ext * 1.1f, 36.0f) * reach_k, fmaxf(ext * 3.5f, 110.0f) * reach_k };
-    all_radii[1] = fmaxf(all_radii[1], 16.0f);
-    all_radii[2] = fmaxf(all_radii[2], all_radii[1] * 1.5f);
-    float radii[3];
-    for (int k = 0; k < 3; k++) radii[k] = all_radii[ncasc == 1 ? 1 : k];
-    vec3 fwd = v3_norm(v3(-sinf(c->yaw), 0, -cosf(c->yaw)));
+    // A distance change (Engine Fidelity) glides over ~0.2 s instead of resizing every cascade at once.
+    float dist_target = fmaxf(ext * 3.5f, 110.0f) * reach_k;
+    float fdt = (float)g_engine.frame_dt;
+    if (R->shadow_dist <= 0.0f || R->camera_cut || fdt <= 0.0f) R->shadow_dist = dist_target;
+    else R->shadow_dist = dist_target + (R->shadow_dist - dist_target) * expf(-fdt / 0.08f);
+    if (fabsf(R->shadow_dist - dist_target) < 0.01f) R->shadow_dist = dist_target;
     u32 tile = R->shadow_size / 2;
-    float bias[3], span[3];
+    CsmParams cp = { ncasc, tile, R->shadow_dist, c->fov_deg, aspect };
+    csm_layout(&cp, &R->csm);
+    // View direction (3D) from the view matrix: the spheres sit along it.
+    vec3 fwd = v3_norm(v3(-R->view.m[2], -R->view.m[6], -R->view.m[10]));
+    float bias[4], span[4], nbias[4], mpt[4];
     for (int k = 0; k < ncasc; k++) {
-        float r = radii[k];
-        vec3 center = v3_madd(c->pos, fwd, r * 0.35f);
-        if (k == 2) center = v3_lerp(center, e->shadow_center, 0.5f);
-        vec3 cl = mat4_mul_point(lview, center);
-        float texel = (2.0f * r) / (float)tile;
-        cl.x = floorf(cl.x / texel) * texel;
-        cl.y = floorf(cl.y / texel) * texel;
-        float depth_range = fmaxf(r * 4.0f, 120.0f);
-        // Towards the sun the box reaches far out: distant tall casters (the towers on the
-        // horizon) throw long shadows at a low sun, and a box that only sometimes contained them
-        // (its centre follows the view) made those shadows pop in and out as the camera turned.
-        // The depth bias is rescaled so it stays the same in metres.
-        float reach = 3000.0f;
-        mat4 lproj = mat4_ortho(cl.x - r, cl.x + r, cl.y - r, cl.y + r, -cl.z - reach, -cl.z + depth_range);
-        bias[k] = (2.0f * depth_range) / (reach + depth_range);
-        span[k] = reach + depth_range;   // metres of light-space depth per NDC unit (PCSS blocker distance)
+        CsmTile t;
+        csm_fit(&lview, v3_madd(c->pos, fwd, R->csm.ahead[k]), R->csm.radius[k], tile, R->csm.radius[k] + 2.0f, &t);
+        CsmBias cb = csm_bias(t.texel_m, sun_elev);
+        bias[k] = cb.const_m / t.span;
+        nbias[k] = cb.normal_m;
+        span[k] = t.span;
+        mpt[k] = t.texel_m;
+        R->shadow_radius[k] = t.radius;
+        R->shadow_center[k] = t.center;
+        R->shadow_vp_ndc[k] = t.vp;
         // NDC -> the cascade's atlas tile (x right, y down in the atlas).
-        mat4 t = mat4_identity();
-        t.m[0] = 0.5f;
-        t.m[5] = 0.5f;
-        t.m[12] = (k & 1) ? 0.5f : -0.5f;
-        t.m[13] = (k >> 1) ? 0.5f : -0.5f;
-        R->shadow_vps[k] = mat4_mul(t, mat4_mul(lproj, lview));
+        mat4 tm = mat4_identity();
+        tm.m[0] = 0.5f;
+        tm.m[5] = 0.5f;
+        tm.m[12] = (k & 1) ? 0.5f : -0.5f;
+        tm.m[13] = (k >> 1) ? 0.5f : -0.5f;
+        R->shadow_vps[k] = mat4_mul(tm, t.vp);
     }
     // Unused cascade slots repeat the last one (shadow_vp / bias.z users: decals, froxels, particles).
     for (int k = ncasc; k < 3; k++) {
         R->shadow_vps[k] = R->shadow_vps[ncasc - 1];
+        R->shadow_vp_ndc[k] = R->shadow_vp_ndc[ncasc - 1];
+        R->shadow_radius[k] = R->shadow_radius[ncasc - 1];
+        R->shadow_center[k] = R->shadow_center[ncasc - 1];
         bias[k] = bias[ncasc - 1];
         span[k] = span[ncasc - 1];
-        radii[k] = radii[ncasc - 1];
+        nbias[k] = nbias[ncasc - 1];
+        mpt[k] = mpt[ncasc - 1];
     }
-    // A shortened reach fades the shadow out over the last 15 % of the last cascade (w = its radius).
-    bool fade = ncasc < 3 || reach_k < 0.999f;
-    R->shadow_splits = v4(radii[0], radii[1], radii[2], (float)ncasc);
-    R->shadow_bias = v4(bias[0], bias[1], bias[2], fade ? radii[ncasc - 1] : 0.0f);
+    R->shadow_splits = v4(R->csm.split[0], R->csm.split[1], R->csm.split[2], (float)ncasc);
     R->shadow_vp = R->shadow_vps[2];
 
-    // Sky-driven shadows (shadow_sky.c, docs/SHADOWS.md): which atlas tiles are drawn (none under
-    // the sky cutoff, no cascade 0 in wide mode, tile 3 for the moon while the sun owns the
-    // cascades), the filter's units. Levels without the time-of-day sky: a clear sun, always cast.
+    // Sky-driven shadows (shadow_sky.c, docs/SHADOWS.md): which atlas tiles are drawn (none once the
+    // sky cutoff's fade has ended, no cascade 0 in wide mode, tile 3 for the moon while the sun owns
+    // the cascades), the filter's units. Levels without the time-of-day sky: a clear sun, always cast.
     const ShadowSkyOut *ss = e->shadow_sky_valid ? &e->shadow_sky : NULL;
     bool shadows_on = R->r_shadow_quality->i > 0;
     bool key_cast = !ss || ss->key.cast;
@@ -1102,41 +1160,99 @@ static void compute_matrices(FrameData *fd) {
     for (int k = 0; k < 3; k++) R->shadow_active[k] = shadows_on && key_cast && k < ncasc && !(k == 0 && ncasc >= 2 && near_w <= 0.0f);
     float moon_fade = ss && ss->second_shadowed && e->fill_intensity > 0.0f ? ss->second.fade : 0.0f;
     R->shadow_active[3] = shadows_on && moon_fade > 0.0f;
-    float moon_r = all_radii[1], moon_span = span[0];
+    int mk = DG_MIN(1, ncasc - 1);
+    float moon_r = R->csm.radius[mk];
+    bias[3] = bias[mk];
+    span[3] = span[mk];
+    nbias[3] = nbias[mk];
+    mpt[3] = mpt[mk];
+    R->shadow_radius[3] = moon_r;
     if (R->shadow_active[3]) {
-        // One square tile around the camera (the middle cascade's size) along the moon, snapped.
+        // One tile around the camera (the middle cascade's sphere) along the moon, snapped.
         vec3 L2 = v3_norm(e->fill_dir);
-        vec3 up2 = fabsf(L2.y) > 0.99f ? v3(0, 0, 1) : v3(0, 1, 0);
-        mat4 mview = mat4_look_at(v3(0, 0, 0), v3_neg(L2), up2);
-        vec3 cl = mat4_mul_point(mview, v3_madd(c->pos, fwd, moon_r * 0.35f));
-        float texel = (2.0f * moon_r) / (float)tile;
-        cl.x = floorf(cl.x / texel) * texel;
-        cl.y = floorf(cl.y / texel) * texel;
-        float depth_range = fmaxf(moon_r * 4.0f, 120.0f), reach = 3000.0f;
-        mat4 lproj = mat4_ortho(cl.x - moon_r, cl.x + moon_r, cl.y - moon_r, cl.y + moon_r, -cl.z - reach, -cl.z + depth_range);
-        moon_span = reach + depth_range;
-        mat4 t = mat4_identity();
-        t.m[0] = 0.5f;
-        t.m[5] = 0.5f;
-        t.m[12] = 0.5f;
-        t.m[13] = 0.5f;
-        R->shadow_vp_moon = mat4_mul(t, mat4_mul(lproj, mview));
+        if (L2.y < 0.0175f) {
+            float hz = sqrtf(L2.x * L2.x + L2.z * L2.z);
+            L2 = hz > 1e-4f ? v3(L2.x / hz * 0.99985f, 0.0175f, L2.z / hz * 0.99985f) : v3(0, 1, 0);
+        }
+        mat4 mview = csm_light_view(L2);
+        CsmTile t;
+        csm_fit(&mview, v3_madd(c->pos, fwd, R->csm.ahead[mk]), moon_r, tile, moon_r + 2.0f, &t);
+        CsmBias cb = csm_bias(t.texel_m, asinf(clampf(L2.y, -1.0f, 1.0f)));
+        bias[3] = cb.const_m / t.span;
+        nbias[3] = cb.normal_m;
+        span[3] = t.span;
+        R->shadow_center[3] = t.center;
+        R->shadow_vp_ndc[3] = t.vp;
+        mat4 tm = mat4_identity();
+        tm.m[0] = 0.5f;
+        tm.m[5] = 0.5f;
+        tm.m[12] = 0.5f;
+        tm.m[13] = 0.5f;
+        R->shadow_vp_moon = mat4_mul(tm, t.vp);
+    }
+    R->shadow_bias = v4(bias[0], bias[1], bias[2], bias[3]);
+
+    // The viewmodel tile (docs/SHADOWS.md "The viewmodel tile"): the first-person rig's own map,
+    // fitted every frame around its drawn bounds, snapped, along the key light.
+    {
+        vec3 lo = v3(1e9f, 1e9f, 1e9f), hi = v3(-1e9f, -1e9f, -1e9f);
+        bool any = false;
+        for (u32 i = 0; i < R->vm_draw_count; i++) {
+            vec3 bc;
+            float br;
+            item_bounds(&R->vm_draws[i], &bc, &br);
+            lo = v3_min(lo, v3_sub(bc, v3(br, br, br)));
+            hi = v3_max(hi, v3_add(bc, v3(br, br, br)));
+            any = true;
+        }
+        for (u32 i = 0; i < R->skin_draw_count; i++) {
+            const SkinnedDraw *d = &R->skin_draws[i];
+            if (!(d->flags & MAT_VIEWMODEL) || d->radius <= 0.0f) continue;
+            lo = v3_min(lo, v3_sub(d->center, v3(d->radius, d->radius, d->radius)));
+            hi = v3_max(hi, v3_add(d->center, v3(d->radius, d->radius, d->radius)));
+            any = true;
+        }
+        vec3 rig = any ? v3_scale(v3_add(lo, hi), 0.5f) : c->pos;
+        // A rig centre far from the eye is a bad bound (a skinned draw without one): the eye's front.
+        if (v3_len(v3_sub(rig, c->pos)) > 1.5f) rig = v3_madd(c->pos, fwd, 0.45f);
+        R->shadow_vm_active = shadows_on && key_cast && any && R->r_vm_shadow->i && R->vm_shadow_size > 8;
+        R->shadow_vm_tile = (CsmTile){ 0 };
+        if (R->shadow_vm_active) csm_fit_vm(&lview, rig, R->vm_shadow_size, &R->shadow_vm_tile);
     }
     {
         int model = ss ? ss->filter_model : DG_CLAMP(R->r_shadow_filter->i, 0, 2);
         float key_r = ss ? ss->key.radius_deg : 0.265f, moon_rad = ss ? ss->second.radius_deg : 0.26f;
-        static const float k_max_tex[3] = { 2.0f, 6.0f, 32.0f };
+        static const float k_max_tex[3] = { 4.0f, 8.0f, 32.0f };
+        float pcss_w = ss ? ss->pcss_weight : (model >= 2 ? 1.0f : 0.0f);
         fd->shadow_vp_moon = R->shadow_vp_moon;
         fd->ssky0 = v4(tanf(key_r * DG_DEG2RAD), ss ? ss->key.fade : 1.0f, near_w, (float)model);
-        fd->ssky1 = v4(ss ? ss->pcf_radius : (float)model, ss ? ss->pcss_max_texels : k_max_tex[model], ss ? ss->pcss_search_m : 30.0f, R->shadow_active[3] ? moon_fade : 0.0f);
+        fd->ssky1 = v4(0.0f, ss ? ss->pcss_max_texels : k_max_tex[model], ss ? ss->pcss_search_m : 30.0f, R->shadow_active[3] ? moon_fade : 0.0f);
         // Contact shadows: rays only as long as the penumbra stays under contact_px pixels (a soft
         // source has a sharp contact zone that is short); 0.35 m is the clear-sun length.
         float px8 = 8.0f * 2.0f * tanf(c->fov_deg * DG_DEG2RAD * 0.5f) / (float)DG_MAX(R->hdr.h, 1u);
         float pen_len = (ss ? ss->contact_px : 1.5f) * px8 / fmaxf(2.0f * tanf(key_r * DG_DEG2RAD), 1e-5f);
         R->contact_scale = clampf(pen_len / 0.35f, 0.1f, 1.0f);
         fd->ssky2 = v4(tanf(moon_rad * DG_DEG2RAD), (float)R->r_shadow_debug->i, R->contact_scale, moon_r);
-        fd->shadow_mpt = v4(2.0f * radii[0] / (float)tile, 2.0f * radii[1] / (float)tile, 2.0f * radii[2] / (float)tile, 2.0f * moon_r / (float)tile);
-        fd->shadow_span = v4(span[0], span[1], span[2], moon_span);
+        fd->shadow_mpt = v4(mpt[0], mpt[1], mpt[2], mpt[3]);
+        fd->shadow_span = v4(span[0], span[1], span[2], span[3]);
+        fd->shadow_nbias = v4(nbias[0], nbias[1], nbias[2], nbias[3]);
+        // The kernel rotates per frame only under TAA (it averages the pattern); otherwise it is fixed.
+        R->shadow_taa = post_wants_jitter();
+        fd->shadow_cfg = v4(R->shadow_taa ? 1.0f : 0.0f, pcss_w, ss ? ss->pcf_ref_m : 2.0f, ss ? ss->min_texels : 1.0f);
+        float era_m = ss && ss->fixed_texels > 0.0f ? ss->fixed_texels * mpt[0] : 0.0f;
+        float vm_k = tanf(c->fov_deg * 0.5f * DG_DEG2RAD) / tanf(fmaxf(vm_fov, 1.0f) * 0.5f * DG_DEG2RAD);
+        fd->shadow_cfg2 = v4(era_m, csm_low_sun(sun_elev), R->shadow_dist, vm_k);
+        // The viewmodel tile: PCSS from Medium up (it is small), its own crossfade on a tier change.
+        float vm_target = (model >= 1 || pcss_w > 0.0f) && !(ss && ss->fixed_texels > 0.0f) ? 1.0f : 0.0f;
+        if (R->camera_cut || fdt <= 0.0f) R->shadow_vm_pcss = vm_target;
+        else R->shadow_vm_pcss = vm_target + (R->shadow_vm_pcss - vm_target) * expf(-fdt / 0.12f);
+        if (fabsf(R->shadow_vm_pcss - vm_target) < 1e-3f) R->shadow_vm_pcss = vm_target;
+        const CsmTile *vt = &R->shadow_vm_tile;
+        CsmBias vb = csm_bias_vm(vt->texel_m, sun_elev);
+        fd->shadow_vp_vm = R->shadow_vm_active ? vt->vp : mat4_identity();
+        fd->shadow_vm = v4(vt->texel_m, vt->span, R->shadow_vm_active ? 1.0f : 0.0f, vb.normal_m);
+        fd->shadow_vm2 = v4(1.0f / (float)DG_MAX(R->vm_shadow_size, 1u), vt->span > 0.0f ? vb.const_m / vt->span : 0.0f, CSM_VM_SKIP, R->shadow_vm_pcss);
+        R->shadow_dbg_bias_m = csm_bias(mpt[0], sun_elev).const_m;
     }
     {
         // LOD cross-fades (docs/LOD.md): the dither turns per frame where TAA resolves it into a blend
@@ -2123,6 +2239,7 @@ void render_end_frame(void) {
     vkx_record_compute(cmd);
 
     // ---------------------------------------------------------- shadow pass
+    R->shadow_drawn = 0;
     vkg_record_shadow_cull(cmd);   // vgeo cascade views (docs/VGEO.md)
     vkr_image_barrier(cmd, R->shadow.image, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
                       VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, 0,
@@ -2148,8 +2265,11 @@ void render_end_frame(void) {
             // mode's cascade 0); tile 3 is the moon's (SHADOW_PASS_MOON).
             u32 tile = R->shadow.w / 2;
             g_shadow_min_radius = R->r_shadow_min_radius->f;
+            g_shadow_cull = R->r_culling->i != 0;
             for (int k = 0; k < 4; k++) {
                 if (!R->shadow_active[k]) continue;
+                extract_frustum(R->shadow_vp_ndc[k], g_shadow_planes);   // casters outside this tile's light box are skipped
+                R->shadow_drawn |= 1u << k;
                 VkViewport vp = { 0.0f, 0.0f, (float)R->shadow.w, (float)R->shadow.h, 0.0f, 1.0f };
                 VkRect2D sc = { { (int)((k & 1) * tile), (int)((k >> 1) * tile) }, { tile, tile } };
                 vkCmdSetViewport(cmd, 0, 1, &vp);
@@ -2180,6 +2300,7 @@ void render_end_frame(void) {
             }
             g_shadow_cascade = 0;
             g_shadow_min_radius = 0.0f;
+            g_shadow_cull = false;
         }
         vkCmdEndRendering(cmd);
     }
@@ -2187,6 +2308,53 @@ void render_end_frame(void) {
                       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
                       VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                       VK_ACCESS_2_SHADER_SAMPLED_READ_BIT, 1);
+
+    // ---------------------------------------------------------- viewmodel shadow tile
+    // The first-person rig (arms, held item, attachments) alone, in its own map: cleared every frame
+    // (an inactive tile reads lit), drawn with this frame's matrices and palettes.
+    vkr_image_barrier(cmd, R->vm_shadow.image, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+                      VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, 0, VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                      VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, 1);
+    {
+        VkRenderingAttachmentInfo da = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
+        da.imageView = R->vm_shadow.view;
+        da.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+        da.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        da.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        da.clearValue.depthStencil.depth = 1.0f;
+        VkRenderingInfo ri = { VK_STRUCTURE_TYPE_RENDERING_INFO };
+        ri.renderArea.extent.width = R->vm_shadow.w;
+        ri.renderArea.extent.height = R->vm_shadow.h;
+        ri.layerCount = 1;
+        ri.pDepthAttachment = &da;
+        vkCmdBeginRendering(cmd, &ri);
+        if (R->shadow_vm_active) {
+            set_viewport(cmd, R->vm_shadow.w, R->vm_shadow.h);
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_SHADOW]);
+            vkCmdSetDepthBias(cmd, 1.0f, 0.0f, 1.5f);
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 0, 1, &f->frame_set, 0, NULL);
+            g_shadow_cascade = SHADOW_PASS_VM;
+            g_shadow_vm_pass = true;
+            draw_items(cmd, R->vm_draws, R->vm_draw_count, true, false, 0, PIPE_SHADOW);
+            if (F.cpu_skinned) draw_cpu_skinned(cmd, f, F.cpu_skinned, 2);
+            else if (skin_vm.batch_count) {
+                vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_SKIN_SHADOW]);
+                PushLit pc;
+                memset(&pc, 0, sizeof(pc));
+                pc.flags[3] = SHADOW_PASS_VM;
+                vkCmdPushConstants(cmd, R->layout_lit, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushLit), &pc);
+                draw_skin_pass(cmd, &skin_vm);
+            }
+            g_shadow_vm_pass = false;
+            g_shadow_cascade = 0;
+            R->shadow_drawn |= 1u << 4;
+        }
+        vkCmdEndRendering(cmd);
+    }
+    vkr_image_barrier(cmd, R->vm_shadow.image, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+                      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                      VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT, 1);
+    shadow_check_sampled(fd);
 
     // ---------------------------------------------------------- point / spot light shadows
     vkls_record(cmd, f);
@@ -2438,4 +2606,39 @@ mat4 render_view_proj(void) { return R->view_proj; }
 int render_width(void) { return (int)R->swap_extent.width; }
 int render_height(void) { return (int)R->swap_extent.height; }
 RenderStats render_stats(void) { return R->last_stats; }
+
+void render_shadow_info(RenderShadowInfo *o) {
+    memset(o, 0, sizeof(*o));
+    const FrameData *fd = (const FrameData *)R->frames[R->frame_slot].ubo.mapped;
+    vec3 L = v3_norm(R->env.sun_dir);
+    float elev = asinf(clampf(L.y, -1.0f, 1.0f));
+    o->cascades = R->csm.count;
+    o->tile = R->shadow_size / 2;
+    o->vm_tile = R->vm_shadow_size;
+    for (int k = 0; k < 3; k++) {
+        o->split[k] = R->csm.split[k];
+        o->radius[k] = R->shadow_radius[k];
+        o->texel_m[k] = R->csm.texel_m[k];
+        CsmBias b = csm_bias(R->csm.texel_m[k], elev);
+        o->bias_m[k] = b.const_m;
+        o->nbias_m[k] = b.normal_m;
+    }
+    for (int k = 0; k < 4; k++) { o->center[k] = R->shadow_center[k]; o->active[k] = R->shadow_active[k]; }
+    o->moon_radius = R->shadow_radius[3];
+    o->distance = R->shadow_dist;
+    o->low_sun = csm_low_sun(elev);
+    o->light_dir = L;
+    o->vm_active = R->shadow_vm_active;
+    o->taa = R->shadow_taa;
+    o->vm_center = R->shadow_vm_tile.center;
+    o->vm_radius = R->shadow_vm_tile.radius;
+    o->vm_texel_m = R->shadow_vm_tile.texel_m;
+    o->vm_pcss = R->shadow_vm_pcss;
+    if (fd) {
+        o->pcss_w = fd->shadow_cfg.y;
+        o->max_texels = fd->ssky1.y;
+        o->fade = fd->ssky0.y;
+    }
+    o->unrendered = R->shadow_unrendered;
+}
 const char *render_device_name(void) { return R->gpu_props.deviceName; }

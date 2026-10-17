@@ -27,11 +27,11 @@ internal), `r_fidelity_recommended`, `r_fidelity_bench` (last measured ms per le
 
 | level | what it is |
 |---|---|
-| **Modern** | Everything the renderer has, at full: GTAO, contact shadows, full-res SSR, SSGI, froxel volumetrics up to ultra with lamp scattering, 3 cascades up to 4096 with PCF 5x5, TAA / TAA-U / FSR, bokeh DoF (48 taps), camera + object motion blur, lens flare / dirt / chromatic aberration / distortion / droplets, HDR10 output, lit 6-way particles, full foliage, vgeo at the era's error. **Defaults = the engine's defaults before Engine Fidelity existed** (so Modern changes nothing for existing configs). Every control unlocked. |
-| **High** | The same feature set at cheaper tiers: SSR half res (max), SSGI unavailable, volumetrics "high" froxel grid (160x90x64) max, shadows 2048 by default with 3 cascades, PCF 3x3 by default, reach -25 %, bloom 5 mips (max), hybrid DoF (32 taps), foliage cap 0.8, LOD bias +0.5 (characters x0.71, vgeo error x1.41), decals 256 (max 512). |
+| **Modern** | Everything the renderer has, at full: GTAO, contact shadows, full-res SSR, SSGI, froxel volumetrics up to ultra with lamp scattering, 3 cascades of 2048 (up to 4096) per cascade with sky-driven PCSS, TAA / TAA-U / FSR, bokeh DoF (48 taps), camera + object motion blur, lens flare / dirt / chromatic aberration / distortion / droplets, HDR10 output, lit 6-way particles, full foliage, vgeo at the era's error. **Defaults = the engine's defaults before Engine Fidelity existed** (so Modern changes nothing for existing configs). Every control unlocked. |
+| **High** | The same feature set at cheaper tiers: SSR half res (max), SSGI unavailable, volumetrics "high" froxel grid (160x90x64) max, shadows 2048 per cascade by default with 3 cascades, PCSS, reach -25 %, bloom 5 mips (max), hybrid DoF (32 taps), foliage cap 0.8, LOD bias +0.5 (characters x0.71, vgeo error x1.41), decals 256 (max 512). |
 | **Medium** | Drops the expensive screen-space work: SSR unavailable (sky / ground environment reflections), GTAO low tier, fog-only volumetrics (80x45x48, no lamp scattering), 3 cascades at 1024, camera-only motion blur, aiming-only gaussian-style DoF (16 taps), lens flare / dirt / CA / distortion / droplets unavailable, FSR 1 at 0.75 by default (TAA by default, FXAA / SMAA selectable), unlit particles, foliage cap 0.5, impostors from 24 px, LOD bias +1, decals 128, textures one mip down (max), particles "medium". |
-| **Low** | The minimum that still looks like the game: AO / SSR / volumetrics unavailable (the lit shaders' analytic distance fog), 2 hard cascades at 1024 with half the reach, tiny bloom (4 mips), DoF / motion blur unavailable, FXAA only, render scale 0.66 with a bilinear upscale (FSR 1 selectable), ACES / Neutral tonemapper + LUT, unlit "low" particles, foliage cap 0.25, impostors from 48 px, LOD bias +2, vgeo error x3, discrete LOD error x4, textures two mips down, props under 0.5 m cast no sun shadow. |
-| **Off** | **No post-processing at all.** The frame graph schedules the scene passes and the final pass, which tonemaps the lit HDR straight to the swapchain (`final_direct.frag`): no AA, TAA jitter, velocity, bloom, AO, SSR, SSGI, volumetrics, DoF, motion blur, exposure adaptation (a fixed metered exposure), lens effects, grading / LUT, sharpening, grain or vignette. One short hard cascade at 1024, render scale 0.6 (0.5 .. 0.66), foliage cap 0.1 with impostors from 96 px, LOD bias +3, vgeo error x4, decals 16, low particles, textures two mips down, props under 1 m cast no sun shadow. Every effect control is locked. Plain but correct lighting (sun, shadow, sky / IBL ambient, lamps, analytic fog). |
+| **Low** | The minimum that still looks like the game: AO / SSR / volumetrics unavailable (the lit shaders' analytic distance fog), 2 cascades of 1024 with half the reach (12-tap PCF), tiny bloom (4 mips), DoF / motion blur unavailable, FXAA only, render scale 0.66 with a bilinear upscale (FSR 1 selectable), ACES / Neutral tonemapper + LUT, unlit "low" particles, foliage cap 0.25, impostors from 48 px, LOD bias +2, vgeo error x3, discrete LOD error x4, textures two mips down, props under 0.5 m cast no sun shadow. |
+| **Off** | **No post-processing at all.** The frame graph schedules the scene passes and the final pass, which tonemaps the lit HDR straight to the swapchain (`final_direct.frag`): no AA, TAA jitter, velocity, bloom, AO, SSR, SSGI, volumetrics, DoF, motion blur, exposure adaptation (a fixed metered exposure), lens effects, sharpening, grain or vignette. The Look's colour grade stays as its baked LUT in place of the plain tonemap (one fetch, docs/LOOKS.md); its finish effects are dropped. One short hard cascade at 1024, render scale 0.6 (0.5 .. 0.66), foliage cap 0.1 with impostors from 96 px, LOD bias +3, vgeo error x4, decals 16, low particles, textures two mips down, props under 1 m cast no sun shadow. Every effect control is locked. Plain but correct lighting (sun, shadow, sky / IBL ambient, lamps, analytic fog). |
 
 ## Per-feature table (modern era)
 
@@ -129,10 +129,10 @@ Budgets (1080p, mid-range GPU): Off 3 ms, Low 5 ms, Medium 8 ms, High 12 ms, Mod
 
 | feature | cvar | | feature | cvar |
 |---|---|---|---|---|
-| aa | `r_aa` (0 off, 1 FXAA, 2 SMAA, 3 TAA) | | shadow_quality | `r_shadow_quality` (0 off, 1 1024, 2 2048, 3 4096) |
+| aa | `r_aa` (0 off, 1 FXAA, 2 SMAA, 3 TAA) | | shadow_quality | `r_shadow_quality` (0 off, 1 1024, 2 2048, 3 4096 per cascade) |
 | upscaler | `r_upscaler` (0 off, 1 TAA-U, 2 FSR 1, 3 / 4 slots) | | shadow_cascades | `r_shadow_cascades` (1 .. 3) **new** |
-| upscale_ratio | `r_upscale_ratio` | | shadow_distance | `r_shadow_distance` (reach of the far cascades) **new** |
-| render_scale | `r_render_scale` | | shadow_filter | `r_shadow_filter` (filter model, softness follows the sky: 0 PCF in 3 steps, 1 PCSS limited, 2 full PCSS + wide mode; docs/SHADOWS.md) |
+| upscale_ratio | `r_upscale_ratio` | | shadow_distance | `r_shadow_distance` (shadow distance: scale of the level's full reach) **new** |
+| render_scale | `r_render_scale` | | shadow_filter | `r_shadow_filter` (tap budget of the one sky-driven filter: 0 PCF 12 taps, 1 PCF 16 taps, 2 PCSS + wide mode; docs/SHADOWS.md) |
 | sharpen | `r_sharpen` | | shadow_min_radius | `r_shadow_min_radius` (m) **new** |
 | ao / contact_shadows | `r_ao` / `r_contact_shadows` | | light_shadows / _quality | `r_light_shadows` / `r_light_shadow_quality` |
 | ssr / ssgi | `r_ssr` / `r_ssgi` | | cloud_shadows / moon_shadows | `r_cloud_shadows` / `r_moon_shadows` **new** |
@@ -248,14 +248,16 @@ extension velocity is always written and the log says so).
 
 ## Shadows
 
-`r_shadow_cascades` 1 .. 3 (1: the middle cascade alone, 2: near + middle; the unused atlas tiles
-aren't drawn, vgeo doesn't cull them), `r_shadow_distance` scales the far cascades (the near one
-stays 12 m) and, below 1 or with fewer than 3 cascades, fades the shadow out over the last 15 % of
-the last cascade (`shadow_bias.w`), `r_shadow_filter` picks the filter model (the softness itself
-follows the sky, docs/SHADOWS.md: 0 PCF in 3 steps by the source radius, 1 PCSS with a 6-texel
-limit, 2 full PCSS + wide mode), `r_moon_shadows` gives the moon atlas tile 3 while the sun still
-owns the cascades, `r_shadow_min_radius` skips sun shadow casters smaller than the radius. The 2010
-era keeps fixed-hardness PCF; its shadows still lighten and vanish with the sky.
+Every preset's shadow entries follow one formula (docs/SHADOWS.md "Per-preset tables",
+`tests/test_shadow_csm.c` asserts it): `r_shadow_quality` is the tile size per cascade (1024 / 2048 /
+4096, the atlas is 2 x 2 tiles), `r_shadow_cascades` 1 .. 3 practical splits up to the shadow
+distance (the unused atlas tiles aren't drawn, vgeo doesn't cull them), `r_shadow_distance` scales
+the level's full reach and is where the last cascade ends (always fading over its last 10 %),
+`r_shadow_filter` is the tap budget of the one sky-driven filter (0 PCF 12 taps, 1 PCF 16 taps,
+2 PCSS + wide mode; a change crossfades), `r_moon_shadows` gives the moon atlas tile 3 while the sun
+still owns the cascades, `r_shadow_min_radius` skips sun shadow casters smaller than the radius,
+`r_vm_shadow` the first-person rig's own tile (1024 at shadow quality 1, else 2048). The 2010 era
+keeps a fixed-hardness kernel; its shadows still lighten and vanish with the sky.
 
 ## Era axis
 
@@ -317,7 +319,8 @@ level and the switches.
 ## Spec mapping: where the implementation differs
 
 * **Cascades.** The shadow atlas is 2x2 with three cascade tiles and Modern itself has 3, so High
-  has 3 cascades (not 4) at 2048. There is no PCSS in the renderer: Modern's "softer" is PCF 5x5.
+  has 3 cascades (not 4) at 2048 per cascade. Softness follows the sky on every tier (docs/SHADOWS.md):
+  High / Modern measure the blocker (PCSS), the lower tiers assume its distance (PCF).
 * **AO tiers.** GTAO always runs at half resolution; Medium's "cheap SSAO quarter res" is GTAO's
   low tier (6 steps), not a quarter-res pass.
 * **Particles at half / quarter resolution.** `vfx_half_res` exists as a cvar but the renderer has no

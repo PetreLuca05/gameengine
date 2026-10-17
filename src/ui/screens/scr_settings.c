@@ -16,6 +16,7 @@
 #include "app/video.h"
 #include "render/render.h"
 #include "render/fidelity/fidelity.h"
+#include "render/post/look.h"
 #include <SDL3/SDL.h>
 #include <math.h>
 #include <stdio.h>
@@ -306,6 +307,53 @@ static void fidelity_section(GuiCursor *c) {
     c->y = card.y + card.h + gui_s(6);
 }
 
+// ------------------------------------------------------------------ Look
+
+// The post-processing Look (docs/LOOKS.md): one dropdown, its line of description, the live
+// preview strip (the scene under each look; a click picks it) and hold-to-compare with Realism.
+// Looks are fixed: no sliders, no parameters here.
+static void look_section(GuiCursor *c) {
+    const char *items[LOOK_COUNT];
+    for (int i = 0; i < LOOK_COUNT; i++) items[i] = look_display_name(i);
+    int sel = game_look_selected();
+    GuiRect r = gw_setting_row(c, "Look", "How the image is graded and finished. Independent of Engine Fidelity (what runs) and of the era look.", rid("r_look"));
+    r.y += gui_s(3);
+    r.h -= gui_s(6);
+    if (gw_dropdown(rid("r_look"), r, items, LOOK_COUNT, &sel)) game_look_set(sel);
+    gw_label(gc_row(c, gui_s(22)), look_desc(sel), gui_s(TH->t_body - 2), GW_REGULAR, TH->text_dim, GUI_LEFT);
+
+    int tiles = LOOK_COUNT;
+    float aspect = 16.0f / 9.0f;
+    TextureId tex = render_look_preview(&tiles, &aspect);
+    float gap = gui_s(8), cap = gui_s(18);
+    float tw = (c->area.w - gap * (float)(tiles - 1)) / (float)tiles, th = tw / aspect;
+    GuiRect strip = gc_row(c, th + cap + gui_s(4));
+    int shown = game_look_current();
+    for (int i = 0; i < tiles && i < LOOK_COUNT; i++) {
+        GuiRect t = gui_rect(strip.x + (float)i * (tw + gap), strip.y, tw, th);
+        GuiInteract in = gui_interact(gui_idi("look_tile", i), t, 0);
+        if (tex) gd_image(t, tex, v4((float)i / (float)tiles, 0.0f, (float)(i + 1) / (float)tiles, 1.0f), UI_RGBA(255, 255, 255, 255));
+        else gd_rect(t, UI_RGBA(20, 22, 26, 255));
+        u32 border = i == sel ? TH->accent : (in.hovered ? UI_RGBA(255, 255, 255, 90) : UI_RGBA(255, 255, 255, 24));
+        gd_round_border(t, gui_s(2), i == sel ? gui_s(2) : 1.0f, 0, border);
+        u32 tc = i == shown ? TH->text : TH->text_dim;
+        gw_label(gui_rect(t.x, t.y + th + gui_s(2), tw, cap), look_display_name(i), gui_s(TH->t_small), i == sel ? GW_SEMIBOLD : GW_REGULAR, tc, GUI_CENTER);
+        if (in.clicked) game_look_set(i);
+    }
+
+    GuiRect br = gc_row(c, gui_s(TH->button_h + 4));
+    GuiRect b = gui_rect(br.x, br.y, gui_s(300), br.h);
+    bool can = sel != LOOK_REALISM;
+    GuiInteract in = gui_interact(rid("look_ab"), b, can ? GUI_FOCUSABLE : GUI_DISABLED);
+    bool held = can && in.held;
+    gd_alpha_push(can ? 1.0f : 0.4f);
+    gd_round_border(b, gui_s(TH->radius), 1.0f, held ? gui_rgba_mul(TH->accent, 0.35f) : UI_RGBA(255, 255, 255, in.hovered ? 30 : 12),
+                    held ? TH->accent : TH->panel_border);
+    gw_label(b, held ? "Showing Realism (release to go back)" : "Hold to compare with Realism", gui_s(TH->t_small + 1), GW_SEMIBOLD, TH->text, GUI_CENTER);
+    gd_alpha_pop();
+    if (held) game_look_compare_hold(true);
+}
+
 // ------------------------------------------------------------------ tabs
 
 static void tab_graphics(GuiCursor *c, GuiRect content) {
@@ -400,11 +448,12 @@ static void tab_graphics(GuiCursor *c, GuiRect content) {
     if (cv("r_upscaler") && cv("r_upscaler")->i) row_fid_slider(c, "Upscaler resolution", FF_UPSCALE_RATIO, 0.5f, 1.0f, 0.01f, "%.2fx", NULL);
     static const char *const aa[] = { "Off", "FXAA", "SMAA 1x", "TAA" };
     row_fid_combo(c, "Anti-aliasing", FF_AA, aa, NULL, 4, NULL);
-    row_fid_slider(c, "Sharpening", FF_SHARPEN, 0, 1, 0.05f, "%.2f", NULL);
+    row_fid_slider(c, "Sharpening", FF_SHARPEN, 0, 1, 0.05f, "%.2f", "Strength of the Look's sharpening (0.35 = as the Look intends).");
 
     section(c, "Post-processing & Effects");
     if (!fid_level_post(fid_level()))
-        gw_label(gc_row(c, gui_s(22)), "Engine Fidelity Off: no post-processing. The scene goes straight to the screen.", gui_s(TH->t_body - 2), GW_REGULAR, TH->text_faint, GUI_LEFT);
+        gw_label(gc_row(c, gui_s(22)), "Engine Fidelity Off: no post-processing. The scene goes straight to the screen (the Look's colour grade stays).", gui_s(TH->t_body - 2), GW_REGULAR, TH->text_faint, GUI_LEFT);
+    look_section(c);
     {
         static const char *const presets[] = { "Low", "Medium", "High", "Ultra", "Custom" };
         bool en[5];
@@ -457,18 +506,17 @@ static void tab_graphics(GuiCursor *c, GuiRect content) {
     static const char *const bq[] = { "Tiny", "Low", "High" };
     if (cv("r_bloom") && cv("r_bloom")->i) {
         row_fid_combo(c, "Bloom quality", FF_BLOOM_QUALITY, bq, NULL, 3, NULL);
-        row_slider_cvar(c, "Bloom intensity", "r_bloom_intensity", 0, 0.3f, 0.005f, "%.3f", NULL);
+        row_slider_cvar(c, "Bloom intensity", "r_bloom_intensity", 0, 0.3f, 0.005f, "%.3f", "Strength of the Look's bloom (0.05 = as the Look intends).");
     }
     row_fid_slider(c, "Lens flare", FF_LENS_FLARE, 0, 2, 0.05f, "%.2f", NULL);
     row_fid_slider(c, "Lens dirt", FF_LENS_DIRT, 0, 2, 0.05f, "%.2f", NULL);
-    row_fid_slider(c, "Chromatic aberration", FF_CHROMATIC, 0, 2, 0.05f, "%.2f", NULL);
+    row_fid_slider(c, "Chromatic aberration", FF_CHROMATIC, 0, 2, 0.05f, "%.2f", "Strength of the Look's chromatic aberration (0.15 = as the Look intends).");
     row_fid_slider(c, "Lens distortion", FF_LENS_DISTORTION, -1, 1, 0.05f, "%.2f", NULL);
     row_fid_toggle(c, "Lens droplets", FF_LENS_DROPS, "Rain drops on the camera in first person.");
     if (cv("r_lens_drops") && cv("r_lens_drops")->i && fid_level() >= FID_HIGH) row_slider_cvar(c, "Lens droplet intensity", "r_lens_drops_intensity", 0.0f, 1.0f, 0.05f, "%.2f", NULL);
-    row_fid_slider(c, "Vignette", FF_VIGNETTE, 0, 1, 0.05f, "%.2f", NULL);
-    row_fid_slider(c, "Film grain", FF_FILM_GRAIN, 0, 1, 0.01f, "%.2f", NULL);
-    static const char *const tm[] = { "ACES (filmic)", "AgX", "PBR Neutral" };
-    row_fid_combo(c, "Tonemapper", FF_TONEMAPPER, tm, NULL, 3, NULL);
+    row_fid_slider(c, "Vignette", FF_VIGNETTE, 0, 1, 0.05f, "%.2f", "Strength of the Look's vignette (0.25 = as the Look intends).");
+    row_fid_slider(c, "Film grain", FF_FILM_GRAIN, 0, 1, 0.01f, "%.2f", "Strength of the Look's film grain (0.04 = as the Look intends).");
+    // The tonemapper belongs to the Look (docs/LOOKS.md); r_tonemapper only drives r_post_compare / photo mode.
     row_fid_toggle(c, "Auto exposure", FF_AUTO_EXPOSURE, "Off: fixed exposure.");
     row_slider_cvar(c, "Exposure compensation", "r_exposure", -3, 3, 0.1f, "%+.1f EV", NULL);
     if (render_hdr_supported()) {
@@ -480,13 +528,13 @@ static void tab_graphics(GuiCursor *c, GuiRect content) {
     }
 
     section(c, "Shadows & lighting");
-    static const char *const shadow[] = { "Off", "Low (1024)", "Medium (2048)", "High (4096)" };
+    static const char *const shadow[] = { "Off", "Low (1024 / cascade)", "Medium (2048 / cascade)", "High (4096 / cascade)" };
     row_fid_combo(c, "Shadows", FF_SHADOW_QUALITY, shadow, NULL, 4, NULL);
     static const char *const casc[] = { "1", "2", "3" };
     static const int casc_v[] = { 1, 2, 3 };
     row_fid_combo(c, "Shadow cascades", FF_SHADOW_CASCADES, casc, casc_v, 3, NULL);
     row_fid_slider(c, "Shadow distance", FF_SHADOW_DISTANCE, 0.25f, 1.0f, 0.05f, "%.2fx", NULL);
-    static const char *const filt[] = { "Basic (3 steps)", "Contact-hardening", "Full (sky-driven)" };
+    static const char *const filt[] = { "PCF (12 taps)", "PCF (16 taps)", "Contact-hardening (PCSS)" };
     row_fid_combo(c, "Shadow softness", FF_SHADOW_FILTER, filt, NULL, 3, "Softness follows the sky: crisp under the sun, soft in haze, none under overcast.");
     row_fid_slider(c, "Skip shadows of props under", FF_SHADOW_MIN_RADIUS, 0, 4, 0.25f, "%.2f m", "Small props cast no sun shadow (cheaper).");
     row_fid_toggle(c, "Lamp / flashlight shadows", FF_LIGHT_SHADOWS, NULL);

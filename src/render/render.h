@@ -486,6 +486,11 @@ u32 render_sky_refilters(void);
 void render_camera_cut(void);                                 // teleport / respawn: reset temporal history
 bool render_capture_hdr(const char *exr_path);                // next frame: linear HDR EXR
 bool render_load_lut(const char *cube_path);                  // grading LUT (.cube); NULL / "" = neutral
+// Looks (docs/LOOKS.md): rebake every look's LUT before the next frame (look_tune, Engine Fidelity
+// changes); the Settings preview strip of this frame (tiles side by side, LookId order; 0 until the
+// first strip is graded).
+void render_looks_invalidate(void);
+TextureId render_look_preview(int *tiles, float *tile_aspect);
 int render_pass_count(void);                                  // frame graph passes (last completed frame)
 const char *render_pass_name(int i);
 float render_pass_ms(int i);
@@ -517,6 +522,23 @@ mat4 render_view_proj(void);
 int render_width(void);
 int render_height(void);
 RenderStats render_stats(void);
+// Sun shadow state of the last built frame (docs/SHADOWS.md: shadow_info, r_shadow_debug 1 / 8,
+// shadow_switch_stress).
+typedef struct RenderShadowInfo {
+    int cascades;
+    unsigned tile, vm_tile;                 // texels per atlas tile / viewmodel map
+    float split[3], radius[3], texel_m[3];  // selection distance, sphere radius, texel size (m)
+    float bias_m[3], nbias_m[3];            // constant / normal offset bias (m)
+    vec3 center[4];                         // snapped sphere centres (3: the moon tile)
+    float moon_radius, distance, low_sun;
+    vec3 light_dir;                         // towards the key light
+    bool active[4], vm_active, taa;
+    vec3 vm_center;
+    float vm_radius, vm_texel_m, vm_pcss;
+    float pcss_w, max_texels, fade;         // filter state as uploaded (ssky / shadow_cfg)
+    unsigned unrendered;                    // frames that sampled an unrendered tile (must stay 0)
+} RenderShadowInfo;
+void render_shadow_info(RenderShadowInfo *out);
 const char *render_device_name(void);
 
 DG_INLINE u32 rgba8(float r, float g, float b, float a) {

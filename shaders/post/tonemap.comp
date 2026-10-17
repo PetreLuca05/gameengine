@@ -6,6 +6,9 @@
 // exposure -> vignette -> white balance -> contrast / saturation -> feedback (damage, low health,
 // underwater, night vision, desaturate, tint) -> tonemapper (ACES fit, AgX, Khronos PBR Neutral)
 // -> lift / gamma / gain -> 3D LUT -> colour-blind correction -> brightness / gamma -> flash.
+// With a Look (docs/LOOKS.md, s_look.x) the tonemapper is the look's baked LUT (binding 7: its whole
+// grade, look.glsl); the look also sets the bloom threshold / tint, halation, letterbox and the
+// damage / low-health colours.
 // Split compare (s_dbg.y): the left half shows the raw lit HDR, only exposed and tonemapped.
 #extension GL_GOOGLE_include_directive : require
 #include "post_common.glsl"
@@ -17,6 +20,7 @@ layout(set = 0, binding = 3) uniform sampler2D dirt_tex;
 layout(set = 0, binding = 4) uniform sampler3D lut_tex;
 layout(set = 0, binding = 5) uniform sampler2D noise_tex;
 layout(set = 0, binding = 6) uniform sampler2D compare_tex;
+layout(set = 0, binding = 7) uniform sampler3D look_tex;
 layout(set = 0, binding = 8, rgba16f) uniform writeonly image2D dst;
 layout(std430, set = 0, binding = 13) readonly buffer Exposure { float e[16]; } X;
 // pc.u0.x bloom present, u0.y flare present, u0.z bloom mip count, u0.w compare source present
@@ -90,6 +94,7 @@ vec3 white_balance(vec3 c, float temp, float tint) {
 }
 
 #include "colorblind.glsl"
+#include "look.glsl"
 
 const mat3 REC709_TO_2020 = mat3(0.6274, 0.0691, 0.0164, 0.3293, 0.9195, 0.0880, 0.0433, 0.0114, 0.8956);
 
@@ -139,7 +144,12 @@ void main() {
         // Death sequence blur (docs/REVIVE.md): the bloom chain is the blurred scene; stronger at the edges.
         float db = U.s_fb3.y;
         if (db > 0.0) c = mix(c, b, clamp(db * (0.45 + 0.55 * smoothstep(0.0, 0.9, sqrt(r2))), 0.0, 0.9));
-        c = mix(c, b, bi);
+        // Look: a soft threshold (exposed scene units; restrained looks keep the bloom off the
+        // shadows) and a tint; halation = a red-orange glow where the wide bloom is bright.
+        float thr = U.s_look.y;
+        float bw = thr > 0.0 ? smoothstep(thr * 0.5, thr * 1.5, luma(b) * expo) : 1.0;
+        c = mix(c, b * U.s_look2.rgb, bi * bw);
+        if (U.s_look.z > 0.0) c += vec3(1.0, 0.32, 0.12) * max(luma(b) - 0.8 / expo, 0.0) * U.s_look.z * 0.5;
         if (U.s_bloom.y > 0.0) c += b * textureLod(dirt_tex, uv, 0.0).rgb * (U.s_bloom.y * bi * 8.0);
     }
     if (pc.u0.y != 0u) {
@@ -152,8 +162,13 @@ void main() {
     // Vignette (natural cos^4-like falloff), deepened by low health and sprint.
     float vr = sqrt(r2) / sqrt(0.25 * (aspect * aspect + 1.0));   // 0 centre .. 1 corner
     float pulse = 0.5 + 0.5 * sin(time * 5.5);
-    float vig = U.s_lens.w + U.s_fb.y * (0.35 + 0.25 * pulse) + U.s_fb2.x * 0.2;
-    c *= 1.0 - clamp(vig, 0.0, 1.0) * smoothstep(0.25, 1.1, vr);
+    float vig_base = U.s_lens.w + U.s_fb2.x * 0.2;
+    float vig = vig_base + U.s_fb.y * (0.35 + 0.25 * pulse);
+    float vm = smoothstep(0.25, 1.1, vr);
+    float vy = luma(c);
+    c *= 1.0 - clamp(vig, 0.0, 1.0) * vm;
+    // The low-health part of the vignette takes the look's colour (black = plain darkening).
+    c += U.s_look4.rgb * vy * (clamp(vig, 0.0, 1.0) - clamp(vig_base, 0.0, 1.0)) * vm;
 
     c = white_balance(c, U.s_tm.y, U.s_tm.z);
     // Contrast in log space around mid grey, saturation around luminance.
@@ -164,7 +179,7 @@ void main() {
 
     // Damage: red edge tint; underwater: blue-green absorption; night vision: green amplified mono.
     float edge = smoothstep(0.35, 1.0, vr);
-    c = mix(c, c * vec3(1.3, 0.25, 0.2) + vec3(0.12, 0.0, 0.0) * y, U.s_fb.x * (0.25 + 0.75 * edge));
+    c = mix(c, c * U.s_look3.rgb + vec3(0.12 * U.s_look3.r / 1.3, 0.0, 0.0) * y, U.s_fb.x * (0.25 + 0.75 * edge));
     c = mix(c, c * vec3(0.35, 0.8, 0.9) + vec3(0.0, 0.02, 0.03), uw);
     if (U.s_fb2.z > 0.0) {
         float n = blue_noise(noise_tex, p).r - 0.5;
@@ -175,12 +190,13 @@ void main() {
     c *= U.s_fb_tint.rgb;
 
     vec3 o;
+    bool look = U.s_look.x > 0.5;
     if (hdr) {
         // Shoulder at max nits: tonemap in the paper-white normalised range scaled by max / paper.
         float pw = U.s_out.y, mx = max(U.s_out.z, pw);
-        o = tonemap(c * (pw / mx)) * (mx / pw);   // 1.0 = paper white
+        o = (look ? look_lut(look_tex, c * (pw / mx)) : tonemap(c * (pw / mx))) * (mx / pw);   // 1.0 = paper white
     } else {
-        o = tonemap(c);
+        o = look ? look_lut(look_tex, c) : tonemap(c);
     }
 
     // Lift / gamma / gain (display referred), LUT and colour-blind filter on encoded values.
@@ -205,6 +221,11 @@ void main() {
         o *= U.s_out.w;
         o = mix(o, vec3(4.0), clamp(U.s_fb.z, 0.0, 1.0));
         o = REC709_TO_2020 * o * (U.s_out.y / 10000.0);
+    }
+    // Look letterbox (s_look.w = target aspect): bars top and bottom, 1 px soft edge.
+    if (U.s_look.w > 0.0 && aspect < U.s_look.w) {
+        float bar = 0.5 * (1.0 - aspect / U.s_look.w), px = 1.0 / float(sz.y);
+        o *= smoothstep(bar - px, bar, uv.y) * smoothstep(bar - px, bar, 1.0 - uv.y);
     }
     o *= 1.0 - clamp(U.s_fb3.x, 0.0, 1.0);   // death sequence: the cut to black
     imageStore(dst, p, vec4(o, 1.0));

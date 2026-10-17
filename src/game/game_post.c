@@ -452,6 +452,7 @@ void game_post_init(void) {
     cmd_register("post_status", cmd_post_status, "print the active post settings");
     cmd_register("screenshot_hdr", cmd_screenshot_hdr, "screenshot_hdr [name]: PNG + linear EXR into screenshots/");
     cmd_register("photomode", cmd_photomode, "toggle photo mode (HUD hidden, camera / grade controls)");
+    game_look_init();
 }
 
 // ------------------------------------------------------------------ per frame
@@ -509,6 +510,9 @@ static void build_settings(PostSettings *s, const PostFrameInfo *fi) {
     s->paper_white = GP.paper->f;
     s->max_nits = GP.maxnits->f;
     s->lut_weight = lut_name()[0] ? 1.0f : 0.0f;
+    // The Look (docs/LOOKS.md): its baked grade and its finish, scaled by the effect cvars above as
+    // strengths and bounded by Engine Fidelity. Post volumes still override on top.
+    game_look_apply(s);
     // Level fog -> volumetric density (the lit shaders' analytic fog is off while froxels run).
     s->fog_density = fmaxf(fi->level_fog * 1.5f, 0.004f) * GP.fog_scale->f;
     s->fog_albedo = v3(0.9f, 0.92f, 0.95f);
@@ -576,7 +580,10 @@ static void apply_photo(PostSettings *s) {
     s->grain += GP.photo_grain;
     s->wb_temp += GP.photo_temp;
     s->saturation *= GP.photo_sat;
-    if (GP.photo_tm >= 0) s->tonemapper = GP.photo_tm;
+    if (GP.photo_tm >= 0) {
+        s->tonemapper = GP.photo_tm;
+        s->look_lut = -1;   // a photo-mode tonemapper replaces the look's grade
+    }
     s->motion_blur = 0;
 }
 
@@ -589,10 +596,12 @@ void game_post_frame(const PostFrameInfo *fi) {
         GP.lut_loaded_mod = (float)GP.lut->modified;
         render_load_lut(lut_name());
     }
+    game_look_frame();
     PostSettings s;
     build_settings(&s, fi);
     daynight_post(&s);
     weather_post(&s);
+    game_look_modulate(&s);
     apply_feedback(&s, fi, dt);
     game_death_post(&s);   // death sequence / downed variant (game_death.c)
     peek_post(&s);   // door peek: fisheye through the visor

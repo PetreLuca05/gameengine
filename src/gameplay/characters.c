@@ -28,6 +28,7 @@
 #include <stdlib.h>
 
 static void cmd_fp_eye_check(int argc, const char **argv);
+static void cmd_fp_shadow_check(int argc, const char **argv);
 static void cmd_set_part(int argc, const char **argv);
 static void cmd_parts(int argc, const char **argv);
 
@@ -121,6 +122,7 @@ void characters_register_cvars(void) {
     g->debug = cvar_reg_int("anim_debug", 0, 0, 2, 0, "animation debug: 1 = skeleton + window, 2 = all characters");
     g->hold_debug = cvar_reg_bool("anim_hold_debug", false, 0, "draw hold sockets / wrists and print the left-hand glue error");
     cmd_register("fp_eye_check", cmd_fp_eye_check, "print where the first-person camera socket sits on each character's head (bind pose)");
+    cmd_register("fp_shadow_check", cmd_fp_shadow_check, "first person: the drawn body's pelvis / feet against the owner's shadow copy (world, mm apart)");
     g->hold_assert = cvar_reg_bool("anim_hold_assert", false, 0, "log any left hand <-> grip_l error above 2 mm / 1 deg");
     g->hitbox_debug = cvar_reg_bool("hitbox_debug", false, 0, "draw per-part hitboxes with their multipliers");
     g->lod_debug = cvar_reg_int("r_lod_debug", 0, 0, 2, 0, "LOD debug (docs/LOD.md): 1 per-character LOD / fade / pixel size / update rate / systems, 2 + classic LOD levels as colours");
@@ -1998,6 +2000,7 @@ static struct {
     Pose pose;
     Xform root;
     Xform spine2_before;   // chest before the frame's spine correction (the held item follows it)
+    World *w;
 } FP;
 
 static float lerp_angle_fp(float a, float b, float t) { return wrap_angle(a + wrap_angle(b - a) * t); }
@@ -2059,6 +2062,7 @@ static void fp_prepare(World *w, CharacterInst *c, float alpha, float yaw, float
     for (int b = 0; b < s->count; b++) FP.world[b] = xf_mul(FP.root, FP.model[b]);
     FP.frame = g_engine.frame_index;
     FP.ent = c->ent;
+    FP.w = w;
 }
 
 static CharacterInst *local_fp_char(World *w, int local_slot);
@@ -2119,6 +2123,25 @@ static void cmd_fp_eye_check(int argc, const char **argv) {
                  "top %.3f (eye %.3f below), chin %.3f, face front %.3f, back %.3f, face at eye height %.3f -> eye %.3f %s the face",
                  d->id, hb.x, hb.y, hb.z, eye.t.x, eye.t.y, eye.t.z, eye.t.y - hb.y, hb.z - eye.t.z, n, top, top - eye.t.y, chin, front, back,
                  face_at_eye, fabsf(eye.t.z - face_at_eye), eye.t.z < face_at_eye ? "in front of" : "behind");
+    }
+}
+
+// fp_shadow_check: the drawn first-person body against the owner's shadow copy (MAT_SHADOW_ONLY,
+// c->pose_draw): pelvis and feet, world space. They must coincide or the shadow detaches.
+static void cmd_fp_shadow_check(int argc, const char **argv) {
+    (void)argc;
+    (void)argv;
+    ensure_globals();
+    if (!LIB || FP.frame + 1 < g_engine.frame_index) { log_info("fp_shadow_check: no first-person pose"); return; }
+    CharacterInst *c = FP.w ? char_get(FP.w, FP.ent) : NULL;
+    if (!c || !c->pose_draw) { log_info("fp_shadow_check: no shadow copy"); return; }
+    const int roles[3] = { BR_HIPS, BR_L_FOOT, BR_R_FOOT };
+    const char *nm[3] = { "pelvis", "left foot", "right foot" };
+    for (int i = 0; i < 3; i++) {
+        int b = LIB->skel.role[roles[i]];
+        if (b < 0) continue;
+        vec3 a = FP.world[b].t, d = c->pose_draw[b].t;
+        log_info("fp_shadow_check: %-10s drawn (%.3f %.3f %.3f) shadow copy (%.3f %.3f %.3f) -> %.0f mm", nm[i], a.x, a.y, a.z, d.x, d.y, d.z, v3_dist(a, d) * 1000.0f);
     }
 }
 
