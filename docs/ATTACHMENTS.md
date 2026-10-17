@@ -107,6 +107,25 @@ Shipped attachments:
 The iron sight stays the default sight. It is `hold.sockets.sight`, or the one derived from the
 model, used whenever no optic is mounted.
 
+### Iron sight models (`iron_sights`)
+
+    "iron_sights": { "type": "aperture", "line": 0.112, "rear_z": 0, "front_z": -0.44, "rear_base": 0.085 }
+
+Generates the sight parts and the sight socket from one line of sight (item space):
+
+- `type`: `aperture`: a thin ghost ring (`aperture` hole, default 7 mm; `ring` thickness 1.6 mm) on a
+  stem, plus a front post between `wings`. `notch`: a blade (`rear_half`) with a square `notch`
+  (`notch_depth`), plus a front post.
+- `line`: the height of the sight line, which is the post's top, the ring's centre and the top of the
+  blade. `rear_z` / `front_z`: where the rear and front sights stand. `rear_base` / `front_base`: the
+  surface they stand on. Also `post` width, `mech` (e.g. `slide`: they ride the pistol slide), `color`.
+- The sight socket becomes `(0, line, rear_z)`, so ADS puts the post top exactly in the
+  notch / ring centre on the view axis.
+- The stock weld (eye to grip) is kept, as `eye_relief_add = derived sight z - rear_z`: `rear_z` alone
+  sets how far the rear sight is from the eye. Red dots and auto-rail scopes keep the same weld.
+- The parts are flagged in `WeaponDef.iron_parts` and fold away (hidden) while an optic is mounted.
+- Weapons have up to `WPN_MAX_PARTS` (16) model parts, counting the generated ones.
+
 ## Placement and exact ADS
 
 Attachment space maps to item space as:
