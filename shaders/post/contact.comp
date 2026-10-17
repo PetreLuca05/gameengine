@@ -51,7 +51,9 @@ void main() {
             // Same surface seen at a grazing angle (floor beyond the ray) is not an occluder.
             vec3 op = view_pos(suv, sd);
             if (dot(op - vp, N) < plane_min) continue;
-            occ = 1.0 - t * 0.6;
+            // The ray ends where the penumbra reaches ~1.5 px (its length follows the source size,
+            // render.c): full occlusion at contact, half at the end of the ray.
+            occ = 1.0 - 0.5 * t * t;
             break;
         }
     }

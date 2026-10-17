@@ -4,8 +4,10 @@
 // schedules, the per-frame sky / lighting environment for the renderer (sun / moon positions,
 // key + fill light colours through the atmosphere transmittance, stable shadow direction,
 // clouds, stars, IBL scale), exposure / fog curves, the gameplay API, the clock HUD, the
-// time-of-day editor and the tests.
+// time-of-day editor and the tests. The shadows (key / second light, softness, cutoff, cloud
+// optical depth) come from the sky-driven shadow driver (game_shadow_sky.c, docs/SHADOWS.md).
 #include "game_internal.h"
+#include "render/shadow_sky.h"
 #include "ui/hud.h"
 #include "ui/menus.h"
 #include "scene.h"
@@ -44,7 +46,8 @@ static struct {
     double host_last_days;
     bool host_init;
     vec3 key_dir;                // shadowed light direction (stable steps)
-    bool key_moon, key_init;
+    vec3 second_dir;             // the moon's tile while the sun owns the cascades (stable steps)
+    bool key_moon, key_init, second_init;
     float cloud_cover;
     // demo
     bool demo;
@@ -193,7 +196,9 @@ void daynight_level_loaded(World *w) {
         DN.host_init = true;
     }
     DN.key_init = false;
+    DN.second_init = false;
     DN.demo = false;
+    shadow_sky_level_loaded();
     char b[16];
     tod_format_hours(DN.cfg.start_hours, b, sizeof(b));
     log_info("daynight: '%s' latitude %.1f, day %d, start %s, %.1f min per day", lvl, DN.cfg.latitude_deg, DN.cfg.day_of_year, b, DN.cfg.day_length_minutes);
@@ -345,41 +350,73 @@ void daynight_environment(World *w, const RenderCamera *cam, RenderEnvironment *
     WeatherParams wxp;
     float density = weather_current(w, &wxp) ? wxp.v[WP_CLOUD_DENSITY] : 0.6f;
     float mie = 1.0f + fmaxf(0.0f, fog - 0.005f) * 60.0f + DN.cloud_cover * 0.5f;   // dawn mist / overcast haze
-    float loss = 1.0f - DN.cfg.cloud_light_loss * DN.cloud_cover * (0.6f + 0.6f * density);
-    loss = fmaxf(loss, 0.08f);
-    vec3 sun = body_light(s.sun_elev, DN.cfg.sun_illuminance * loss, mie);
-    vec3 moon = v3_mul(body_light(s.moon_elev, DN.cfg.moon_illuminance * s.moon_illum * loss, mie), v3(0.82f, 0.9f, 1.0f));
-    float ls = fmaxf(sun.x, fmaxf(sun.y, sun.z)), lm = fmaxf(moon.x, fmaxf(moon.y, moon.z));
-    bool moon_key = lm > ls;
-    vec3 key = moon_key ? moon : sun, fill = moon_key ? sun : moon;
+    // The sky (and the clouds' own light) under the cover: cloud_light_loss. The direct light is
+    // not dimmed by it: the shadow driver attenuates it by the cloud sheet's optical depth
+    // (exp(-tau / mu): gone under a thick deck, no floor) and the cloud shadow map adds the patches.
+    float sky_loss = fmaxf(1.0f - DN.cfg.cloud_light_loss * DN.cloud_cover * (0.6f + 0.6f * density), 0.0f);
+    vec3 sun_atm = body_light(s.sun_elev, DN.cfg.sun_illuminance, mie);
+    vec3 moon_atm = v3_mul(body_light(s.moon_elev, DN.cfg.moon_illuminance * s.moon_illum, mie), v3(0.82f, 0.9f, 1.0f));
+    float ambient_scale = tod_curve(&DN.cfg, TOD_AMBIENT_SCALE, h);
+    ShadowSkyInput sin_;
+    memset(&sin_, 0, sizeof(sin_));
+    sin_.dt = (float)g_engine.frame_dt;
+    sin_.sun_elev = s.sun_elev;
+    sin_.moon_elev = s.moon_elev;
+    sin_.sun_light = sun_atm;
+    sin_.moon_light = moon_atm;
+    sin_.sky_up = v3_scale(render_sky_irradiance(v3(0, 1, 0)), ambient_scale);
+    sin_.cloud_cover = DN.cloud_cover;
+    sin_.cloud_density = density;
+    sin_.fog = fog;
+    sin_.mie_scale = mie;
+    bool wx = weather_current(w, &wxp);
+    sin_.precip = wx ? wxp.v[WP_PRECIP] : 0.0f;
+    sin_.snow = w->weather.snow;
+    sin_.wetness = w->weather.wetness;
+    // Cloud drift: the weather wind aloft, else daynight.json's cloud wind (already aloft).
+    sin_.wind_dir_deg = wx ? wxp.v[WP_WIND_DIR] : DN.cfg.cloud_wind_dir_deg;
+    sin_.wind_speed = wx ? wxp.v[WP_WIND] : -1.0f;
+    ShadowSkyOut sso;
+    shadow_sky_frame(&sin_, &sso, wx ? 0.0f : DN.cfg.cloud_wind_mps);
+    bool moon_key = sso.key_is_moon;
     vec3 key_target = moon_key ? s.moon_dir : s.sun_dir;
-    vec3 fill_dir = moon_key ? s.sun_dir : s.moon_dir;
     // Stable shadows: the shadowed direction moves in small steps (sub-texel at the shadow map's
-    // resolution), coarser at night; the sun / moon handover happens when both are weak.
+    // resolution), coarser for the moon; the sun hands the cascades to the moon once its disc is
+    // gone (shadow_sky.c: nothing of the sun is left to change on screen).
     float step_deg = moon_key ? 0.25f : 0.04f;
     if (!DN.key_init || moon_key != DN.key_moon || acosf(clampf(v3_dot(key_target, DN.key_dir), -1.0f, 1.0f)) * DG_RAD2DEG > step_deg) {
         DN.key_dir = key_target;
         DN.key_moon = moon_key;
         DN.key_init = true;
     }
-    float kmax = fmaxf(key.x, fmaxf(key.y, key.z)), fmax_ = fmaxf(fill.x, fmaxf(fill.y, fill.z));
+    if (!DN.second_init || acosf(clampf(v3_dot(s.moon_dir, DN.second_dir), -1.0f, 1.0f)) * DG_RAD2DEG > 0.25f) {
+        DN.second_dir = s.moon_dir;
+        DN.second_init = true;
+    }
     // A body below the horizon lights nothing (its direction would light from below).
     vec3 kd = DN.key_dir;
     if (kd.y < 0.02f) kd = v3_norm(v3(kd.x, 0.02f, kd.z));
     env->sun_dir = kd;
-    env->sun_color = kmax > 1e-6f ? v3_scale(key, 1.0f / kmax) : v3(1, 1, 1);
-    env->sun_intensity = kmax;
+    env->sun_color = sso.key.color;
+    env->sun_intensity = sso.key.intensity;
     // How much the eye is daylight-adapted (exposure-aware flashes): the sun's share of full noon.
+    float ls = moon_key ? 0.0f : sso.key.intensity;
     DN.daylight = smoothstepf(0.0f, 1.0f, ls / fmaxf(DN.cfg.sun_illuminance * 0.35f, 1e-6f));
-    env->fill_dir = fill_dir.y > 0.02f ? fill_dir : v3_norm(v3(fill_dir.x, 0.02f, fill_dir.z));
-    env->fill_color = fmax_ > 1e-6f ? v3_scale(fill, 1.0f / fmax_) : v3(1, 1, 1);
-    env->fill_intensity = fill_dir.y > -0.01f ? fmax_ : 0.0f;
+    // Second light: the moon while the sun owns the cascades, shadowed in atlas tile 3 on the
+    // tiers with moon shadows (no unshadowed fill: it lit through roofs and filled every shadow).
+    vec3 sd = DN.second_dir;
+    env->fill_dir = sd.y > 0.02f ? sd : v3_norm(v3(sd.x, 0.02f, sd.z));
+    env->fill_color = sso.second.color;
+    env->fill_intensity = moon_key ? 0.0f : sso.second.intensity;
     env->moon_key = moon_key;
+    env->shadow_sky = sso;
+    env->shadow_sky_valid = true;
+    env->ground_albedo = sso.ground_albedo;
     env->atmosphere = true;
     env->sun_true_dir = s.sun_dir;
     env->moon_dir = s.moon_dir;
-    env->sun_illuminance = DN.cfg.sun_illuminance * loss;
-    env->moon_illuminance = DN.cfg.moon_illuminance * s.moon_illum * loss;
+    env->sun_illuminance = DN.cfg.sun_illuminance * sky_loss;
+    env->moon_illuminance = DN.cfg.moon_illuminance * s.moon_illum * sky_loss;
     env->moon_full_illuminance = DN.cfg.moon_illuminance;
     // sky_disc_zoom (inspection): bigger discs, the same surface brightness.
     float zoom = DN.disc_zoom ? DN.disc_zoom->f : 1.0f;
@@ -395,13 +432,10 @@ void daynight_environment(World *w, const RenderCamera *cam, RenderEnvironment *
     env->cloud_cover = DN.cloud_cover;
     env->cloud_altitude = DN.cfg.cloud_altitude_m;
     env->cloud_scale = 3000.0f;
-    env->cloud_shadow_strength = 0.75f;
-    // Wind drift as if a day took 24 real minutes: identical on every machine, a time-lapse at
-    // higher speeds.
-    float wd = DN.cfg.cloud_wind_dir_deg * DG_DEG2RAD;
-    float travel = (float)fmod(days * 1440.0 * 60.0 * DN.cfg.cloud_wind_mps, 1.0e7);
-    env->cloud_offset = v2(sinf(wd) * travel, -cosf(wd) * travel);
-    env->ambient_scale = tod_curve(&DN.cfg, TOD_AMBIENT_SCALE, h);
+    // Cloud shadow map: Beer-Lambert through the patches; drift at the wind aloft (real seconds).
+    env->cloud_shadow_tau = sso.cumulus_tau;
+    env->cloud_offset = sso.cloud_offset;
+    env->ambient_scale = ambient_scale;
     env->aerial_scale = DN.aerial_scale->f;
     env->aerial_max = DN.aerial_max->f;
     env->mie_scale = mie;
@@ -434,6 +468,7 @@ void daynight_post(PostSettings *s) {
     s->ev_min = DN.cfg.night_floor_ev;
     s->ev_max = DN.cfg.day_max_ev;
     s->exposure_comp += tod_curve(&DN.cfg, TOD_EXPOSURE_COMP, h);
+    s->exposure_comp += shadow_sky_exposure();   // overcast / snow: metered grey reads darker than it is
     s->exposure_manual = fmaxf(s->exposure_manual, DN.cfg.night_floor_ev);
     // Fog density by time (dawn mist), the volumetrics use the key light (sun / moon).
     float fog = weather_fog_density(w, tod_curve(&DN.cfg, TOD_FOG_DENSITY, h)) * (DN.weather_fog->f >= 0 ? DN.weather_fog->f : 1.0f);
@@ -499,6 +534,36 @@ static void cmd_time_days(int argc, const char **argv) {
     tod_add_days(&w->tod, (double)w->tick, n);
     DN.host_last_days = tod_days(&w->tod, w->tick);
     log_info("time_days %+d: day %d", n, (int)DN.host_last_days);
+}
+
+// Shadow reference presets (game_shadow_sky.c): the time when the sun stands at elev_deg
+// (evening side), or a full moon night (moon_full: skips days to the next full moon, midnight).
+bool daynight_preset_time(World *w, float elev_deg, bool moon_full) {
+    if (!w || !w->authority || !w->tod.version) return false;
+    double day = floor(tod_days(&w->tod, (double)w->tick));
+    TodSky sk;
+    if (moon_full) {
+        int best = 0;
+        float best_illum = -1;
+        for (int d = 0; d < 30; d++) {
+            tod_sky(&DN.cfg, day + d + 0.999, &sk);
+            if (sk.moon_illum > best_illum) { best_illum = sk.moon_illum; best = d; }
+        }
+        if (best) tod_add_days(&w->tod, (double)w->tick, best);
+        tod_set_time(&w->tod, (double)w->tick, 23.99f);
+    } else {
+        // from noon towards the evening: the first time the sun drops under elev_deg
+        float found = 12.0f;
+        for (float hh = 12.0f; hh < 23.9f; hh += 1.0f / 120.0f) {
+            tod_sky(&DN.cfg, day + hh / 24.0, &sk);
+            if (sk.sun_elev * DG_RAD2DEG <= elev_deg) { found = hh; break; }
+        }
+        tod_set_time(&w->tod, (double)w->tick, found);
+    }
+    DN.host_last_days = tod_days(&w->tod, w->tick);
+    DN.key_init = false;
+    DN.second_init = false;
+    return true;
 }
 
 // tod_demo: 24 h in 60 s, then the previous speed.

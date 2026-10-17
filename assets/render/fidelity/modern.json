@@ -41,6 +41,7 @@
     "light_shadows": {"avail": "on"},
     "light_shadow_quality": {"avail": "on", "default": 2, "max": 2},
     "cloud_shadows": {"avail": "on"},
+    "moon_shadows": {"avail": "on"},
     "texture_quality": {"avail": "on", "default": 2, "max": 2},
     "aniso": {"avail": "on", "default": 8, "allowed": [1, 2, 4, 8, 16]},
     "vgeo": {"avail": "on"},

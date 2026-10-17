@@ -40,7 +40,17 @@ void main() {
         float cs = textureLod(cshadow_tex, vec2(0.5), 0.0).r;
         vec3 E = transmittance(rg, S.y) * SK.sun_dir.w * max(S.y, 0.0) + transmittance(rg, M.y) * SK.moon_dir.w * max(M.y, 0.0);
         E *= cs;
-        E += (sky_lut(vec3(0.0, 1.0, 0.0)) + sky_lut(normalize(vec3(1.0, 0.25, 0.0))) + sky_lut(normalize(vec3(-1.0, 0.25, 0.0)))) * (PI / 3.0) * 1.6;
+        // Sky irradiance on the ground: cosine-weighted quadrature of the sky view (3 zenith bands
+        // x 4 azimuths; band weights 2 pi x (sin^2 t1 - sin^2 t0) / 2, summing to pi). No fudge
+        // factor: the ground bounce lights shadows as much as the sky really does (docs/SHADOWS.md).
+        const float zen[3] = float[3](0.2617994, 0.7853982, 1.3089969);
+        const float wgt[3] = float[3](0.7853982, 1.5707963, 0.7853982);
+        for (int b = 0; b < 3; b++)
+            for (int a = 0; a < 4; a++) {
+                float az = float(a) * 1.5707963 + 0.3926991;
+                vec3 d = vec3(sin(zen[b]) * cos(az), cos(zen[b]), sin(zen[b]) * sin(az));
+                E += sky_lut(d) * (wgt[b] * 0.25);
+            }
         L = SK.ground.rgb / PI * E;
         // The horizon line blends into the ground.
         L = mix(L, sky_lut(vec3(dir.x, 0.0, dir.z)), smoothstep(-0.12, -0.02, dir.y) * 0.6);

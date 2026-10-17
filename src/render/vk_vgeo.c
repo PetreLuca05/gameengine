@@ -824,20 +824,31 @@ void vkg_record_shadow_cull(VkCommandBuffer cmd) {
         vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, G.sqp, frame * 8);
     }
     u32 ncasc = (u32)DG_CLAMP(R->r_shadow_cascades->i, 1, 3);   // Engine Fidelity: cascades drawn this frame
-    for (u32 k = 0; k < ncasc; k++) {
+    // Tiles the sky does not need (render.c shadow_active: the cutoff, wide mode's cascade 0) are
+    // not culled; tile 3 is the moon's (view 4, no timings).
+    for (u32 k = 0; k < 4; k++) {
+        if (k < 3 && (k >= ncasc || !R->shadow_active[k])) {
+            if (G.sqp && k < ncasc) {   // empty intervals keep the readback complete
+                vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, G.sqp, frame * 8 + 2 + k * 2);
+                vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, G.sqp, frame * 8 + 3 + k * 2);
+            }
+            continue;
+        }
+        if (k == 3 && !R->shadow_active[3]) continue;
         // untile: the cascade matrices map into their 2 x 2 atlas tile (render.c)
         mat4 t = mat4_identity();
         t.m[0] = 0.5f;
         t.m[5] = 0.5f;
         t.m[12] = (k & 1) ? 0.5f : -0.5f;
         t.m[13] = (k >> 1) ? 0.5f : -0.5f;
-        mat4 vp = mat4_mul(mat4_inverse(t), R->shadow_vps[k]);
-        float radius = (&R->shadow_splits.x)[k];
+        const mat4 *tile_vp = k == 3 ? &R->shadow_vp_moon : &R->shadow_vps[k];
+        mat4 vp = mat4_mul(mat4_inverse(t), *tile_vp);
+        float radius = k == 3 ? (&R->shadow_splits.x)[DG_MIN(1u, ncasc - 1)] : (&R->shadow_splits.x)[k];
         float eye[3] = { R->cam.pos.x, R->cam.pos.y, R->cam.pos.z };
         VgViewGpu v;
         vgeo_view_setup(&v, vp.m, vp.m, eye, (float)tile / (2.0f * radius), 0.0f, tile, tile, G.shadow_error_px->f, 0.0f,
                         VGV_ORTHO | VGV_NO_OCCLUSION | VGV_NO_CONE | VGV_NO_SKINNED);
-        memcpy(v.raster_view_proj, R->shadow_vps[k].m, 64);
+        memcpy(v.raster_view_proj, tile_vp->m, 64);
         view_foliage(&v);   // the same WPO, density and fade as the main view (cam_pos is the camera)
         vg_cull_record(&G.cull, cmd, frame, 1 + k, &v, NULL, NULL);
         VgPush pc;
@@ -870,13 +881,14 @@ void vkg_record_shadow_cull(VkCommandBuffer cmd) {
 // Inside the shadow pass, cascade k (viewport / scissor / depth bias / frame set already set).
 void vkg_draw_shadow(VkCommandBuffer cmd, u32 k) {
     if (!G.shadow_culled) return;
-    if (G.sqp) vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, G.sqp, R->frame_slot * 8 + 2 + k * 2);
+    bool moon = k == 3;   // the moon tile: view 4, its own matrix, no timings
+    if (G.sqp && !moon) vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, G.sqp, R->frame_slot * 8 + 2 + k * 2);
     VkDescriptorSet set = vg_cull_set(&G.cull, R->frame_slot, 1 + k);
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, G.p_shadow);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, G.gfx_layout, 3, 1, &set, 0, NULL);
     PushLit pc;
     memset(&pc, 0, sizeof(pc));
-    pc.flags[3] = k;
+    pc.flags[3] = moon ? SHADOW_PASS_MOON : k;
     vkCmdPushConstants(cmd, G.gfx_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushLit), &pc);
     vkCmdDrawIndirect(cmd, G.cull.v[1 + k].counters.buffer, VGA_DRAW_HW * 16, 1, 16);
     // masked clusters (the cascade view's SW half): alpha-tested
@@ -884,7 +896,7 @@ void vkg_draw_shadow(VkCommandBuffer cmd, u32 k) {
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, G.gfx_layout, 3, 1, &set, 0, NULL);
     vkCmdPushConstants(cmd, G.gfx_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushLit), &pc);
     vkCmdDrawIndirect(cmd, G.cull.v[1 + k].counters.buffer, VGA_SW * 16, 1, 16);
-    if (G.sqp) {
+    if (G.sqp && !moon) {
         vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, G.sqp, R->frame_slot * 8 + 3 + k * 2);
         if (k == 2) G.sqp_written[R->frame_slot] = true;
     }

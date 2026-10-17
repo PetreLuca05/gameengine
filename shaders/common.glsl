@@ -90,9 +90,17 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 local_shadow_info;                // x 1 / atlas size, y shadowed point lights
     vec4 surf_map;        // terrain material map: origin x, z, 1 / spacing, samples per side (0 = none)
     vec4 surf_info;       // y: surface layers loaded (shaders/surfaces.glsl)
+    // Sky-driven shadows (src/render/shadow_sky.c, docs/SHADOWS.md)
+    mat4 shadow_vp_moon;  // world -> atlas tile 3 (the moon while the sun owns the cascades)
+    vec4 ssky0;           // x tan(key source radius), y cast fade, z cascade 0 weight (0: wide mode), w softness model (0 PCF steps, 1 PCSS limited, 2 full)
+    vec4 ssky1;           // x PCF radius (texels, model 0 / era), y PCSS max filter half width (texels), z blocker search (m), w moon tile fade (0 = off)
+    vec4 ssky2;           // x tan(moon source radius), y r_shadow_debug view, z contact shadow length scale, w moon tile fade-out radius (m)
+    vec4 shadow_mpt;      // metres per texel: cascades 0..2, w the moon tile
+    vec4 shadow_span;     // metres of light-space depth per NDC unit: cascades 0..2, w the moon tile
 } frame;
 
 layout(set = 0, binding = 1) uniform sampler2DShadow shadow_map;
+layout(set = 0, binding = 15) uniform sampler2D shadow_depth;          // the same atlas, raw depth (PCSS blocker search)
 layout(set = 0, binding = 11) uniform sampler2DShadow local_shadow;   // point / spot light shadow atlas
 // Time-of-day sky (src/render/sky): environment (octahedral), SH9 irradiance, cloud shadow.
 layout(set = 0, binding = 5) uniform sampler2D sky_env;
@@ -105,8 +113,10 @@ layout(set = 0, binding = 9) uniform sampler2D wx_occl;
 layout(set = 0, binding = 10) uniform sampler2D wx_puddles;
 
 // Shadow passes (shadow.vert / skin_shadow.vert): flags.w selects the view: 0-2 sun cascades, 3 the
-// rain occlusion map, 4+ a local light atlas tile.
+// rain occlusion map, 4+ a local light atlas tile, SHADOW_PASS_MOON the moon tile.
+#define SHADOW_PASS_MOON 0x10000u
 mat4 shadow_pass_vp(uint idx) {
+    if (idx == SHADOW_PASS_MOON) return frame.shadow_vp_moon;
     if (idx >= 4u) return frame.local_vps[min(idx - 4u, uint(LOCAL_SHADOW_TILES - 1))];
     return idx == 3u ? frame.occl_vp : frame.shadow_vps[min(idx, 2u)];
 }

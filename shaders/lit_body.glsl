@@ -127,6 +127,86 @@ float cloud_shadow_at(vec3 p) {
     return textureLod(sky_cloud_shadow, uv, 0.0).r;
 }
 
+// Sky-driven shadows (src/render/shadow_sky.c, docs/SHADOWS.md). The source's angular radius
+// (frame.ssky0.x = tan r) sets the penumbra: half width = blocker distance x tan r (PCSS: blocker
+// search, then a filter of that radius, both converted from metres to the tile's texels, so the
+// penumbra does not change across cascades). Every tap compares against the receiver's plane at
+// the tap (depth gradient from the normal): wide kernels on surfaces sloped to the light do not
+// shadow themselves. tests/test_shadow_sky.c runs the same kernel on the CPU.
+float g_sh_pen = 0.0, g_sh_block = -1.0;   // r_shadow_debug: penumbra half width, blocker distance (m)
+int g_sh_casc = -1;
+
+float sh_ign(vec2 p) { return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715)))); }
+vec2 sh_vogel(int i, int n, float rot) {
+    float r = sqrt((float(i) + 0.5) / float(n)), t = float(i) * 2.39996323 + rot;
+    return r * vec2(cos(t), sin(t));
+}
+
+// d(depth NDC) / d(atlas uv) of the plane through the receiver with normal n under the ortho
+// matrix M; clamped to `limit` (grazing surfaces).
+vec2 sh_receiver_gradient(mat4 M, vec3 n, float limit) {
+    vec3 t1 = normalize(cross(n, abs(n.y) < 0.99 ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0)));
+    vec3 t2 = cross(n, t1);
+    vec3 a = mat3(M) * t1, b = mat3(M) * t2;
+    float det = a.x * b.y - b.x * a.y;
+    if (abs(det) < 1e-12) return vec2(0.0);
+    vec2 g = vec2(a.z * b.y - b.z * a.y, b.z * a.x - a.z * b.x) / det * 2.0;   // uv = xy * 0.5 + 0.5
+    float l = length(g);
+    return l > limit ? g * (limit / l) : g;
+}
+
+// One atlas tile [lo, lo + 0.5]: uv, receiver depth z (NDC, biased), gradient g, metres per texel,
+// metres per NDC depth, tan of the source radius.
+float sh_tile(vec2 uv, float z, vec2 g, vec2 lo, float mpt, float span, float tan_r, float model, float rot) {
+    float texel = frame.params.y;
+    vec2 tmin = lo + texel * 0.5, tmax = lo + 0.5 - texel * 0.5;
+    if (model < 0.5) {
+        // PCF steps (Off / Low, the 2010 era): a square kernel with a fractional outer ring, so a
+        // step change of the radius blends in instead of popping.
+        float rf = frame.ssky1.x;
+        int r = int(ceil(rf - 1e-3));
+        float sum = 0.0, wsum = 0.0;
+        for (int y = -r; y <= r; y++)
+            for (int x = -r; x <= r; x++) {
+                int ring = max(abs(x), abs(y));
+                float w = float(ring) <= floor(rf + 1e-3) ? 1.0 : fract(rf);
+                vec2 o = vec2(x, y) * texel;
+                sum += w * texture(shadow_map, vec3(clamp(uv + o, tmin, tmax), z + dot(g, o)));
+                wsum += w;
+            }
+        g_sh_pen = rf * mpt;
+        return sum / max(wsum, 1e-4);
+    }
+    bool full = model > 1.5;
+    int nb = full ? 16 : 8, nf = full ? 16 : 8;
+    float max_tex = frame.ssky1.y;
+    float search = clamp(frame.ssky1.z * tan_r / mpt, 1.0, max_tex * 1.5);
+    float bsum = 0.0, bcnt = 0.0;
+    for (int i = 0; i < nb; i++) {
+        vec2 o = sh_vogel(i, nb, rot) * search * texel;
+        float zt = z + dot(g, o);
+        float d = textureLod(shadow_depth, clamp(uv + o, tmin, tmax), 0.0).r;
+        if (d < zt) { bsum += zt - d; bcnt += 1.0; }
+    }
+    if (bcnt < 0.5) { g_sh_block = -1.0; g_sh_pen = 0.0; return 1.0; }
+    float dblock = bsum / bcnt * span;
+    float w = clamp(dblock * tan_r / mpt, 0.5, max_tex);
+    g_sh_block = dblock;
+    g_sh_pen = w * mpt;
+    float sum = 0.0;
+    for (int i = 0; i < nf; i++) {
+        vec2 o = sh_vogel(i, nf, rot) * w * texel;
+        sum += texture(shadow_map, vec3(clamp(uv + o, tmin, tmax), z + dot(g, o)));
+    }
+    return sum / float(nf);
+}
+
+// The kernel's rotation: interleaved gradient noise per pixel, a new pattern every frame (TAA).
+float sh_rotation() {
+    float f = mod(floor(frame.camera_pos.w * 60.0), 64.0);
+    return sh_ign(gl_FragCoord.xy + 5.588238 * f) * 6.2831853;
+}
+
 // One cascade of the 2 x 2 shadow atlas: -1 when p is outside its tile.
 float shadow_cascade(int c, vec3 p, vec3 n) {
     float k = c == 0 ? 1.0 : (c == 1 ? 2.5 : 7.0);   // texel size relative to cascade 0
@@ -136,47 +216,87 @@ float shadow_cascade(int c, vec3 p, vec3 n) {
     vec2 uv = sp.xy * 0.5 + 0.5;
     vec2 tile = vec2(c & 1, c >> 1) * 0.5;
     vec2 local = (uv - tile) * 2.0;
-    float edge = 2.0 * frame.params.y * (frame.params.z + 1.0);
+    float edge = 4.0 * frame.params.y;
     if (any(lessThan(local, vec2(edge))) || any(greaterThan(local, vec2(1.0 - edge))) || sp.z > 1.0 || sp.z < 0.0) return -1.0;
-    float texel = frame.params.y;
-    int r = int(frame.params.z);
-    float sum = 0.0;
-    float count = 0.0;
-    for (int y = -r; y <= r; y++)
-        for (int x = -r; x <= r; x++) {
-            sum += texture(shadow_map, vec3(uv + vec2(x, y) * texel, sp.z - 0.0012 * k * frame.shadow_bias[c]));
-            count += 1.0;
-        }
-    return sum / count;
+    float mpt = frame.shadow_mpt[c], span = frame.shadow_span[c];
+    // receiver plane: slopes up to ~80 deg; constant bias + one texel of slope
+    vec2 g = sh_receiver_gradient(frame.shadow_vps[c], n, 6.0 * mpt / (frame.params.y * span));
+    float z = sp.z - 0.0012 * k * frame.shadow_bias[c] - frame.params.y * length(g);
+    g_sh_casc = c;
+    return sh_tile(uv, z, g, tile, mpt, span, frame.ssky0.x, frame.ssky0.w, sh_rotation());
 }
 
 float shadow_factor(vec3 p, vec3 n) {
-    if (frame.sun_color.w < 0.5) return 1.0;
+    if (frame.sun_color.w < 0.5 || frame.ssky0.y <= 0.0) return 1.0;   // off, or under the sky cutoff
     int count = int(frame.shadow_splits.w);
+    float s = 1.0;
     if (count <= 1) {
-        float s = shadow_cascade(0, p, n);
+        s = shadow_cascade(0, p, n);
         float fade_end = frame.shadow_bias.w;
         if (s >= 0.0 && fade_end > 0.0) s = mix(s, 1.0, smoothstep(fade_end * 0.85, fade_end, length(p - frame.camera_pos.xyz)));
-        return s < 0.0 ? 1.0 : s;
-    }
-    // Cascade by distance from the camera; the last 15 % of a cascade blends into the next one.
-    // Engine Fidelity: 1 .. 3 cascades (w); shadow_bias.w > 0 fades the last one out (shorter reach).
-    float d = length(p - frame.camera_pos.xyz);
-    for (int c = 0; c < count; c++) {
-        float radius = frame.shadow_splits[c];
-        if (d > radius && c < count - 1) continue;
-        float s = shadow_cascade(c, p, n);
-        if (s < 0.0) continue;
-        float blend = c < count - 1 ? smoothstep(radius * 0.85, radius, d) : 0.0;
-        if (blend > 0.0) {
-            float s2 = shadow_cascade(c + 1, p, n);
-            if (s2 >= 0.0) s = mix(s, s2, blend);
+        s = s < 0.0 ? 1.0 : s;
+    } else {
+        // Cascade by distance from the camera; the last 15 % of a cascade blends into the next one.
+        // Engine Fidelity: 1 .. 3 cascades (w); shadow_bias.w > 0 fades the last one out (shorter reach).
+        // Wide mode (ssky0.z < 1): cascade 0 fades into cascade 1 (the wide blur), then is not drawn.
+        float d = length(p - frame.camera_pos.xyz);
+        float w0 = frame.ssky0.z;
+        int first = w0 <= 0.0 ? 1 : 0;
+        for (int c = first; c < count; c++) {
+            float radius = frame.shadow_splits[c];
+            if (d > radius && c < count - 1) continue;
+            float sc = shadow_cascade(c, p, n);
+            if (sc < 0.0) continue;
+            float blend = c < count - 1 ? smoothstep(radius * 0.85, radius, d) : 0.0;
+            if (c == 0 && w0 < 1.0) blend = max(blend, 1.0 - w0);
+            if (blend > 0.0) {
+                float s2 = shadow_cascade(c + 1, p, n);
+                if (s2 >= 0.0) sc = mix(sc, s2, blend);
+            }
+            float fade_end = frame.shadow_bias.w;
+            if (fade_end > 0.0) sc = mix(sc, 1.0, smoothstep(fade_end * 0.85, fade_end, d));
+            s = sc;
+            break;
         }
-        float fade_end = frame.shadow_bias.w;
-        if (fade_end > 0.0) s = mix(s, 1.0, smoothstep(fade_end * 0.85, fade_end, d));
-        return s;
     }
-    return 1.0;
+    return mix(1.0, s, frame.ssky0.y);
+}
+
+// The moon tile (atlas tile 3): the moon while the sun still owns the cascades.
+float moon_shadow(vec3 p, vec3 n) {
+    if (frame.ssky1.w <= 0.0 || frame.sun_color.w < 0.5) return 1.0;
+    vec4 sp = frame.shadow_vp_moon * vec4(p + n * 0.075, 1.0);
+    sp.xyz /= sp.w;
+    vec2 uv = sp.xy * 0.5 + 0.5;
+    vec2 local = (uv - 0.5) * 2.0;
+    float edge = 4.0 * frame.params.y;
+    if (any(lessThan(local, vec2(edge))) || any(greaterThan(local, vec2(1.0 - edge))) || sp.z > 1.0 || sp.z < 0.0) return 1.0;
+    float mpt = frame.shadow_mpt.w, span = frame.shadow_span.w;
+    vec2 g = sh_receiver_gradient(frame.shadow_vp_moon, n, 6.0 * mpt / (frame.params.y * span));
+    float z = sp.z - 0.0012 * 2.5 * frame.shadow_bias.y - frame.params.y * length(g);
+    float s = sh_tile(uv, z, g, vec2(0.5), mpt, span, frame.ssky2.x, min(frame.ssky0.w, 1.0), sh_rotation());
+    float r = frame.ssky2.w;
+    s = mix(s, 1.0, smoothstep(r * 0.85, r, length(p - frame.camera_pos.xyz)));
+    return mix(1.0, s, frame.ssky1.w);
+}
+
+// r_shadow_debug 2..5: penumbra width, blocker distance, cascade / mode, cloud shadow.
+vec3 shadow_debug_color(int view, vec3 p) {
+    vec3 heat[4] = vec3[4](vec3(0.05, 0.05, 0.4), vec3(0.1, 0.8, 0.3), vec3(1.0, 0.85, 0.1), vec3(1.0, 0.1, 0.05));
+    if (view == 2 || view == 3) {
+        float v = view == 2 ? g_sh_pen / 0.5 : (g_sh_block < 0.0 ? -1.0 : g_sh_block / 30.0);   // 0 .. 0.5 m, 0 .. 30 m
+        if (v < 0.0) return vec3(0.15);
+        float t = clamp(v, 0.0, 1.0) * 3.0;
+        int i = min(int(t), 2);
+        return mix(heat[i], heat[i + 1], t - float(i));
+    }
+    if (view == 4) {
+        if (frame.ssky0.y <= 0.0) return vec3(0.4);   // cast shadows off (sky only)
+        vec3 c = g_sh_casc == 0 ? vec3(1.0, 0.25, 0.2) : g_sh_casc == 1 ? vec3(0.25, 1.0, 0.3) : g_sh_casc == 2 ? vec3(0.3, 0.4, 1.0) : vec3(0.6);
+        if (frame.ssky0.z < 1.0) c = mix(c, vec3(1.0, 1.0, 0.2), 0.35);   // wide mode
+        return c * (0.35 + 0.65 * frame.ssky0.y);
+    }
+    return vec3(cloud_shadow_at(p));
 }
 
 float d_ggx(float ndh, float a) {
@@ -292,6 +412,7 @@ void main() {
 #endif
         ao *= surf_ao;                        // the surface layers' baked AO, the same way
         float contact = (!vm && frame.post_flags.y > 0.5) ? texture(post_contact, suv).r : 1.0;
+        contact = mix(1.0, contact, frame.ssky0.y);   // contact shadows leave with the cast shadows (sky cutoff)
         // hemispheric ambient (indirect diffuse): AO only darkens indirect light
         float hemi = n.y * 0.5 + 0.5;
         vec3 ambient = mix(frame.ground_ambient.rgb, frame.sky_ambient.rgb, hemi) * frame.sky_ambient.w;
@@ -322,8 +443,8 @@ void main() {
             float g = step(0.9965, wx_hash(floor(v_world.xz * 90.0) + floor(dot(v, vec3(13.0, 7.0, 3.0)) * 8.0)));
             color += vec3(g * wx_snow * 2.5) * frame.sun_color.rgb * frame.sun_dir.w * sh * max(dot(n, l), 0.0);
         }
-        // Fill: the other celestial light (the moon by day / the sun at twilight), unshadowed.
-        if (frame.fill_dir.w > 0.0) color += brdf(n, v, normalize(frame.fill_dir.xyz), albedo, rough, metal) * frame.fill_color.rgb * frame.fill_dir.w;
+        // Second light: the moon while the sun owns the cascades, shadowed in atlas tile 3.
+        if (frame.fill_dir.w > 0.0) color += brdf(n, v, normalize(frame.fill_dir.xyz), albedo, rough, metal) * frame.fill_color.rgb * frame.fill_dir.w * moon_shadow(v_world, n);
         // spot lights (flashlights, cookie-projected)
         for (int i = 0; i < int(frame.spot_info.x); i++) {
             vec3 sl;
@@ -385,5 +506,7 @@ void main() {
         base.a = clamp(base.a + fr * 0.55, 0.0, 0.85);
         color += vec3(0.6, 0.85, 1.0) * fr * 0.6;
     }
+    int sh_view = int(frame.ssky2.y);
+    if (sh_view >= 2 && (flags & MAT_UNLIT) == 0u) color = shadow_debug_color(sh_view, v_world) * 0.6;
     out_color = vec4(color, base.a);
 }
