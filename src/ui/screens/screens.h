@@ -14,7 +14,7 @@ typedef enum ScreenId {
     SCR_COUNT
 } ScreenId;
 
-typedef enum ConfirmKind { CONFIRM_QUIT, CONFIRM_LEAVE, CONFIRM_DROP, CONFIRM_DISPLAY, CONFIRM_RESET_BINDS, CONFIRM_FIDELITY, CONFIRM_MAINMENU, CONFIRM_COMMAND } ConfirmKind;
+typedef enum ConfirmKind { CONFIRM_QUIT, CONFIRM_LEAVE, CONFIRM_DROP, CONFIRM_DISPLAY, CONFIRM_RESET_BINDS, CONFIRM_GRAPHICS_DEFAULTS, CONFIRM_FIDELITY, CONFIRM_MAINMENU, CONFIRM_COMMAND } ConfirmKind;
 
 // Shared by the screens (menus.c)
 const char *screen_name(int id);
@@ -34,6 +34,10 @@ void settings_open(int tab);
 bool settings_draw(GuiRect r);             // true = close
 void settings_tick(float dt);              // display "keep?" countdown
 void settings_confirm_result(bool keep);
+// Settings > Graphics "Default": every graphics cvar back to its registered (coded) default, the
+// Engine Fidelity level's own defaults for its features (custom tweaks cleared). The display
+// (resolution, window mode, vsync) is kept: it has its own Apply / Revert. Console: r_defaults.
+void settings_graphics_defaults(void);
 float settings_confirm_left(void);
 void screens_confirm_expired(void);        // the display countdown ran out with the dialog open
 

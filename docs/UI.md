@@ -44,7 +44,7 @@ world: weapon bench   ──▶ BENCH (free attachment changes, stats)
 | `src/ui/gui/gui_theme.c` | `assets/ui/theme.json`. |
 | `src/ui/menus.c` | Screen stack, pause screen (from `assets/ui/screens/pause.json`), confirm dialog, commands. |
 | `src/ui/screens/` | Settings, multiplayer, inventory, bench. |
-| Settings → Graphics | Engine Fidelity card on top (docs/ENGINE_FIDELITY.md), then Display, View, Resolution & upscaling, Post-processing & Effects (the former Post-processing tab), Shadows & lighting, Geometry / textures / foliage, Effects, Sights, Weather. Bounded rows (`row_fid_*`): options above the level greyed with "requires &lt;level&gt;", features the level lacks locked with "Requires Engine Fidelity: &lt;level&gt;". |
+| Settings → Graphics | A **Default** button on top (asks first; `settings_graphics_defaults`, console `r_defaults`): every archived `r_*` / `post_*` / `vfx_*` cvar plus `cl_fov`, `cl_ads_world_zoom`, `cam_weapon_fov`, `gore_level`, `sight_brightness` back to its registered default, then the Engine Fidelity level's table defaults with the custom tweaks cleared; the display (resolution, window mode, vsync) and the benchmark results stay. Then the Engine Fidelity card (docs/ENGINE_FIDELITY.md), then Display, View, Resolution & upscaling, Post-processing & Effects (the former Post-processing tab), Shadows & lighting, Geometry / textures / foliage, Effects, Sights, Weather. Bounded rows (`row_fid_*`): options above the level greyed with "requires &lt;level&gt;", features the level lacks locked with "Requires Engine Fidelity: &lt;level&gt;". |
 | `src/ui/inv_dragdrop.c` | Inventory drag and drop state machine. Pure (tested). |
 | `src/gameplay/inv_ops.c` | Inventory intents: the one implementation of every change. Pure (tested). |
 | `src/ui/item_view.c`, `src/ui/icons.c` | Item models for the UI, the icon atlas and bakes. |
@@ -110,7 +110,7 @@ small caps at 12 px as well as at 4K.
 
 ## Inventory
 
-**Layout.** The left side holds the backpack (6 × 4) and the hotbar (1–9) at the same total width.
+**Layout.** The left side holds the backpack (6 × 4) and the hotbar (1–6), its slots the same size as the backpack slots (one row of the grid).
 Slots show:
 * the icon;
 * the stack count;
@@ -175,7 +175,8 @@ mount, unmount. It goes to the host as `RPC_INV_OP` with a sequence number.
 
 All HUD elements sit in the safe area:
 * **Vitals** (bottom left): small-caps label, a slim health bar (pulses red under 30 %), the
-  value, and an armour bar.
+  value, and an armour bar. The lowest bar sits on the safe area's bottom edge, the same edge as the
+  hotbar slots and the ammo panel's magazine ticks.
 * **Ammo** (bottom right): weapon name, magazine (large; amber below 25 %, red when empty), the
   reserve, magazine ticks, and the fire mode when the weapon has several.
 * **Hotbar** (bottom centre): the inventory's slot widget, the selected slot lifted; the item name
