@@ -80,6 +80,21 @@ characters fill the screen with resolve work). On `VK_ERROR_DEVICE_LOST`, `VK_CH
 `VK_EXT_device_fault` data (description, fault addresses, vendor records) before the fatal error.
 `--test` runs (or `DG_NO_FATAL_DIALOG=1`) abort without the fatal message box.
 
+## Skinned characters
+
+Textured skins carry normal, ORM (r occlusion, g roughness, b metallic) and optional emissive atlases built
+from the FBX maps (docs/CHARACTERS.md "PBR maps"). `SkinnedDraw` has `mr_tex` / `normal_tex` / `occlusion_tex`
+/ `emissive_tex` / `normal_scale` with the same `MAT_*_TEX` flags:
+
+- Legacy / classic path (`r_vgeo 0`, phone views, first-person arms): `skin.frag` and `gbuffer_skin.frag`
+  define `PBR_MAPS` (cotangent frame from screen derivatives, as `lit.frag`). `build_skin_pass` resolves the
+  map set (`vkr_material_set`) per batch (per albedo + mesh, and a mesh has one set of maps) and
+  `draw_skin_pass_f` binds it as set 3; `normal_scale` rides in `SkinInstance.info.w` (`skin.vert` passes
+  it flat as `PBR_PARAMS.x`). The G-buffer skin pass uses `vec4(params.xyz, 1)` as `GB_PARAMS` (its `w`
+  is the LOD fade, not a uv scale). The CPU skinning fallback draws without maps.
+- vgeo (`r_vgeo 1`): `vkg_route_skinned` writes the maps into the character slot's `VgMaterial`; the
+  resolve's triangle frame uses the skinned vertex positions, so the normal map follows the pose.
+
 ## Other content using the same terms
 
 - **Tree bark** (docs/VGEO.md "Tree models", "Bark maps"): the imported trees' opaque materials carry a
@@ -99,7 +114,9 @@ characters fill the screen with resolve work). On `VK_ERROR_DEVICE_LOST`, `VK_CH
   stage). The vgeo path has masked shadows.
 - MASK single-sided is drawn two-sided; alphaMode BLEND relies on the existing blended path
   (`baseColorFactor` alpha < 1), a texture-only BLEND alpha draws opaque (logged).
-- Skinned characters (`SkinnedDraw`) keep albedo-only materials.
+- Skinned characters take maps only through their skin atlases (docs/CHARACTERS.md "PBR maps"): the skin
+  shaders have occlusion strength 1, a white emissive colour and no alpha cutoff (only `normal_scale` is
+  per instance).
 
 ## Test content
 

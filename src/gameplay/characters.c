@@ -51,6 +51,9 @@ typedef struct GpuPart {
     int mesh;                       // library SkeletalMesh
     MeshId lod[CHAR_LOD_COUNT], arm, noarm;
     TextureId texture;              // skin atlas (0 = vertex colours only)
+    // PBR maps of a textured skin (docs/CHARACTERS.md "PBR maps"): <atlas>_normal, <atlas>_orm
+    // (r occlusion, g roughness, b metallic), <atlas>_emissive, tiled like the albedo; 0 = none.
+    TextureId normal_tex, orm_tex, emissive_tex;
 } GpuPart;
 
 typedef struct CharGlobals {
@@ -72,6 +75,7 @@ typedef struct CharGlobals {
     bool style_arms_valid[HOLD_STYLE_MAX];
     Cvar *foot_ik, *spine, *turn, *hold, *forearm_twist, *ik_shoulders, *lean, *damage, *ragdoll, *ragdoll_debug, *corpse_collision, *ragdoll_time;
     Cvar *max_ragdolls, *debug, *hold_debug, *hold_assert, *hitbox_debug, *lod_debug, *lod_force, *lod_bias, *lod_quality;
+    Cvar *char_maps, *char_normal_scale;
     Cvar *eval_budget;
     int last_evals, last_deferred;      // budget stats (previous present tick)
     Cvar *predict_hits, *resync_ticks, *local_resim, *net_debug, *zombie_speed;
@@ -136,6 +140,8 @@ void characters_register_cvars(void) {
     g->fp_debug = cvar_reg_int("cl_fp_debug", 0, 0, 2, 0, "first person: 1 = log / draw hand targets and weapon pull-back, 2 = raw body pose (no arm IK, head visible)");
     g->eval_budget = cvar_reg_int("anim_eval_budget", 64, 0, 4096, CVAR_ARCHIVE, "max full character post-passes per tick (0 = unlimited); the rest wait a tick, biggest on screen first");
     g->lod_quality = cvar_reg_int("r_char_quality", 2, 0, 3, CVAR_ARCHIVE, "character detail (0 low .. 3 ultra), scales LOD thresholds");
+    g->char_maps = cvar_reg_bool("r_char_maps", true, CVAR_ARCHIVE, "textured skins use their PBR maps (normal, roughness / metallic, AO, emissive; docs/CHARACTERS.md); 0 = albedo only");
+    g->char_normal_scale = cvar_reg_float("r_char_normal_scale", 1.0f, 0.0f, 4.0f, 0, "strength of the character skins' normal maps (1 = as authored)");
     g->predict_hits = cvar_reg_bool("cl_predict_hit_reactions", true, CVAR_ARCHIVE, "show an unconfirmed reaction on targets you hit");
     g->resync_ticks = cvar_reg_int("anim_resync_ticks", 8, 1, 120, 0, "ticks of state mismatch before snapping to the host's state");
     g->local_resim = cvar_reg_bool("anim_local_resim", false, 0, "local player: re-simulate the controller on reconcile (else snap state ids)");
@@ -297,6 +303,15 @@ static int gpu_part_for(const CharPartOption *o, const BoneSet *hidden) {
     gp->key = key;
     gp->mesh = o->mesh;
     gp->texture = tex;
+    if (tex) {   // the skin's PBR atlases (tools/gen_skin_atlas.py), when they were built
+        char name[64];
+        snprintf(name, sizeof(name), "%s_normal", skin->atlas);
+        gp->normal_tex = assets_texture(name);
+        snprintf(name, sizeof(name), "%s_orm", skin->atlas);
+        gp->orm_tex = assets_texture(name);
+        snprintf(name, sizeof(name), "%s_emissive", skin->atlas);
+        gp->emissive_tex = assets_texture(name);
+    }
     build_part_meshes(sm, colors, tile, tiles, hidden, gp->lod, &gp->arm, &gp->noarm);
     return CG->part_count++;
 }
@@ -1932,6 +1947,26 @@ static void draw_part(const CharacterInst *c, const SkeletonInstance *si, const 
     d.radius = s->height * c->def->scale;
     d.texture = gp->texture;
     if (d.texture) d.flags |= MAT_TEXTURED;
+    if (d.texture && cv(CG->char_maps)) {
+        // PBR maps: the ORM gives roughness / metallic / AO (the factors stay 1, wet still glosses:
+        // 0.28 / 0.75 of the dry roughness), the normal map its tangent-space detail.
+        if (gp->orm_tex) {
+            d.flags |= MAT_MR_TEX | MAT_OCCLUSION_TEX;
+            d.mr_tex = d.occlusion_tex = gp->orm_tex;
+            d.roughness = lerpf(1.0f, 0.28f / 0.75f, wk);
+            d.metallic = 1.0f;
+        }
+        if (gp->normal_tex) {
+            d.flags |= MAT_NORMAL_TEX;
+            d.normal_tex = gp->normal_tex;
+            d.normal_scale = CG->char_normal_scale ? DG_MAX(CG->char_normal_scale->f, 1e-4f) : 1.0f;
+        }
+        if (gp->emissive_tex) {
+            d.flags |= MAT_EMISSIVE_TEX;
+            d.emissive_tex = gp->emissive_tex;
+            d.emissive = 1.0f;
+        }
+    }
     if (c->phantom && c->recon_flags) { d.flags |= c->recon_flags; d.recon = c->recon; }   // reconstruction dissolve
     // Stable id per character + part + LOD (previous palette -> per-bone velocity for TAA / motion blur).
     d.object_id = shadow ? 0u : (0x20000000u | ((u32)ENT_INDEX(c->ent) << 8) | ((u32)slot << 4) | id_low);

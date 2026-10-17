@@ -276,6 +276,58 @@ character's `parts`.
 | `character_parts [entity]`, `character_set_part <slot> <id\|none> [entity]` | List / set parts |
 | `cl_skin <id>` | Your outfit (sent to the host, replicated) |
 
+## PBR maps (textured skins)
+
+What the Mixamo skins in `assets/human` contain (`build/bin/fbx_textures` lists every material texture
+connection; all maps are embedded PNGs, FBX "Video" content):
+
+| Model | Material | DiffuseColor | NormalMap / Bump | ShininessExponent | SpecularColor |
+|---|---|---|---|---|---|
+| Ch32 (hazmat) | Ch32_body | 1001_Diffuse 4096Â² | NormalMap 1001_Normal | 1001_Glossiness (L) | 1001_Specular |
+| Ch33 (officer), Ch38 (athlete) | ChNN_body | 1001_Diffuse 4096Â² | NormalMap 1001_Normal | 1001_Glossiness | 1001_Specular |
+| | ChNN_hair | 1002_Diffuse 2048Â² RGBA (also TransparentColor) | Bump = 1002_Normal (a normal map) | none | none |
+| Ch42 (casual) | Ch42_Body | 1001_Diffuse | NormalMap 1001_Normal | 1001_Glossiness | 1001_Specular |
+| | Ch42_Hair | 1002_Diffuse RGBA | Bump = 1001_Normal: the body's map (export error, ignored) | none | none |
+
+No AO, emissive or metallic maps; the Dummy has none at all (the zombies and placeholder characters stay
+vertex-coloured). The specular maps are a constant sRGB 56 (linear F0 0.04, dielectric) except a few
+buckles / zips / rings (hazmat up to sRGB 141).
+
+**Building the atlases.**
+
+1. `build/bin/fbx_textures --out assets/human/textures assets/human/Ch*_nonPBR.fbx` extracts the PNGs and
+   writes `<model>.maps.json` (material -> FBX property -> file).
+2. `python tools/gen_skin_atlas.py` writes, per skin, tiled like the albedo (1024Â² per material, `--tile`):
+   - `<atlas>.png` albedo (sRGB);
+   - `<atlas>_normal.png` (linear): NormalMap, else Bump when that image is a normal map; a map of another
+     UDIM tile than the material's diffuse is dropped (flat);
+   - `<atlas>_orm.png` (linear): r AO (255: none), g roughness = 1 - glossiness, b metallic from the
+     specular colour (KHR_materials_pbrSpecularGlossiness conversion: F0 0.04 -> metallic 0 and the albedo
+     unchanged; only metallic texels get the converted albedo);
+   - `<atlas>_emissive.png` (sRGB) when a material has an EmissiveColor map.
+   It registers them in `data/assets.json` (`"srgb": false` for the linear ones). A tile in `skins.json`
+   may name its maps itself (`normal`, `gloss`, `roughness`, `specular`, `metallic`, `occlusion`, `emissive`).
+   The generated PNGs are model content (git-ignored, like the extracted textures).
+
+**Checks the tool makes (it prints them).**
+
+- Normal map convention by integrability: a normal map is the gradient of a height field, so its curl
+  vanishes only for the right green direction. Counted over 32 x 32 blocks: the body maps are OpenGL (green
+  up, e.g. Ch32 802 / 117 blocks), the Ch33 / Ch38 hair maps DirectX (167 / 126, 126 / 40) and are flipped.
+  The engine convention is glTF / OpenGL with the FBX v flipped at load (image up = -v, `pbr_normal`).
+- Glossiness, not roughness: the ShininessExponent map is bright on skin / hard hat and dark on cloth;
+  roughness means 0.62 .. 0.83.
+- sRGB vs linear: albedo / emissive sRGB, normal / ORM UNORM.
+
+**At run time** `gpu_part_for` looks the atlases up by name (`<atlas>_normal`, `_orm`, `_emissive`); a
+skin without them draws as before. `draw_part` sets the maps with factors 1 (wet characters still gloss:
+roughness factor 0.37 when soaked). Both renderers sample them (docs/PBR.md "Skinned characters").
+`r_char_maps 0` turns them off (A/B), `r_char_normal_scale` scales the normal maps.
+
+Cost (RTX 3060 Ti, 1600x900, five textured characters near the camera, `r_char_maps` 1 vs 0 alternated):
+GPU 4.32 vs 4.27 ms with vgeo, 3.18 vs 3.53 ms classic, both within the run-to-run noise. Memory: one
+normal + one ORM RGBA8 atlas per skin (2048 x 1024 with mips: 11 MB each for two-material skins).
+
 ## Networking
 
 - The character id and the **part selection** travel in the replicated anim state

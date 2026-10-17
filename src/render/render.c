@@ -735,7 +735,9 @@ static void draw_items(VkCommandBuffer cmd, DrawItem *items, u32 count, bool sha
 
 // ------------------------------------------------------------------ skinned characters
 
-typedef struct SkinBatch { u32 mesh, texture, first, count; bool fade; } SkinBatch;   // fade: shadow pass, PIPE_SKIN_SHADOW_FADE (docs/LOD.md)
+// fade: shadow pass, PIPE_SKIN_SHADOW_FADE (docs/LOD.md); mat_set: the PBR map set (set 3, vkr_material_set;
+// ~0 in the shadow pass, whose shaders sample none).
+typedef struct SkinBatch { u32 mesh, texture, first, count; bool fade; u32 mat_set; } SkinBatch;
 typedef struct SkinPass { SkinBatch batches[MAX_SKIN_DRAWS]; u32 batch_count; } SkinPass;
 typedef struct CpuSkin { VkDeviceSize offset; bool ok; } CpuSkin;
 
@@ -786,7 +788,9 @@ static u32 build_skin_pass(FrameResources *f, int pass, u32 base, SkinPass *out)
         g->recon = d->recon;
         g->info[0] = d->bone_count & 0xFFFFFu;
         g->info[1] = d->flags;
-        g->info[2] = g->info[3] = 0;
+        g->info[2] = 0;
+        float ns = d->normal_scale != 0.0f ? d->normal_scale : 1.0f;
+        memcpy(&g->info[3], &ns, sizeof(ns));   // skin.vert -> PBR_PARAMS.x (shaders/pbr_maps.glsl)
         // Last frame's palette of the same object (appended after this frame's bones).
         if (!shadow && d->object_id && !R->camera_cut) {
             u32 off, count;
@@ -795,15 +799,28 @@ static u32 build_skin_pass(FrameResources *f, int pass, u32 base, SkinPass *out)
         }
     }
     out->batch_count = nb;
-    for (u32 b = 0; b < nb; b++)
-        out->batches[b] = (SkinBatch){ (u32)(runs[b].key & 0xFFFFFFFFu), (u32)((runs[b].key >> 32) & 0x7FFFFFFFu), base + runs[b].first, runs[b].count, (runs[b].key >> 63) != 0 };
+    for (u32 b = 0; b < nb; b++) {
+        out->batches[b] = (SkinBatch){ (u32)(runs[b].key & 0xFFFFFFFFu), (u32)((runs[b].key >> 32) & 0x7FFFFFFFu), base + runs[b].first, runs[b].count, (runs[b].key >> 63) != 0, ~0u };
+        if (shadow) continue;
+        // PBR maps of the batch: batches are per (albedo, mesh) and a mesh (one GPU part LOD) has one
+        // set of maps, so the batch's first draw speaks for all of it.
+        const SkinnedDraw *d = &R->skin_draws[draw_of[order[runs[b].first]]];
+        Material mm;
+        memset(&mm, 0, sizeof(mm));
+        mm.flags = d->flags & MAT_PBR_MAPS;
+        mm.mr_tex = d->mr_tex;
+        mm.normal_tex = d->normal_tex;
+        mm.occlusion_tex = d->occlusion_tex;
+        mm.emissive_tex = d->emissive_tex;
+        out->batches[b].mat_set = vkr_material_set(&mm);
+    }
     arena_pop_to(mark);
     return n;
 }
 
 // fade: -1 every batch, 0 / 1 only the batches without / with a shadow fade (shadow pass pipelines).
 static void draw_skin_pass_f(VkCommandBuffer cmd, const SkinPass *p, int fade) {
-    u32 bound_tex = 0xFFFFFFFFu;
+    u32 bound_tex = 0xFFFFFFFFu, bound_ms = 0xFFFFFFFFu;
     for (u32 b = 0; b < p->batch_count; b++) {
         const SkinBatch *sb = &p->batches[b];
         if (fade >= 0 && (int)sb->fade != fade) continue;
@@ -813,6 +830,11 @@ static void draw_skin_pass_f(VkCommandBuffer cmd, const SkinPass *p, int fade) {
         if (tex != bound_tex) {
             vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 1, 1, &R->textures[tex].set, 0, NULL);
             bound_tex = tex;
+        }
+        // PBR maps (set 3): normal / ORM / emissive of textured skins (set 0 = none).
+        if (sb->mat_set != ~0u && sb->mat_set != bound_ms && sb->mat_set < R->mat_set_count) {
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 3, 1, &R->mat_sets[sb->mat_set].set, 0, NULL);
+            bound_ms = sb->mat_set;
         }
         VkDeviceSize zero = 0;
         vkCmdBindVertexBuffers(cmd, 0, 1, &m->vb.buffer, &zero);
@@ -962,7 +984,7 @@ static void draw_cpu_skinned(VkCommandBuffer cmd, FrameResources *f, const CpuSk
         pc.model = mat4_identity();
         pc.color = d->color;
         pc.params = v4(d->roughness, d->metallic, d->emissive, 1.0f);
-        pc.flags[0] = d->flags & ~(u32)MAT_SHADOW_ONLY;
+        pc.flags[0] = d->flags & ~(u32)(MAT_SHADOW_ONLY | MAT_PBR_MAPS);   // CPU fallback: no maps (set 3 = none)
         pc.flags[1] = pc.flags[2] = 0;
         pc.flags[3] = pass == 1 || g_shadow_vm_pass ? g_shadow_cascade : 0;
         memset(pc.pbr, 0, sizeof(pc.pbr));

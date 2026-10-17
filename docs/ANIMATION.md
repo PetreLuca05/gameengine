@@ -144,7 +144,8 @@ Textured skins: the FBX textures are extracted with `fbx_textures`
 `python tools/gen_skin_atlas.py` puts each skin's material diffuse maps side by side (1024² tiles) into
 `assets/human/textures/skin_<id>.png` and registers it in `data/assets.json`. At load every vertex's UV
 is remapped into its material's tile, so a skin is one mesh + one texture (`SkinnedDraw.texture`,
-batched by mesh and texture). Normal / specular / glossiness maps are extracted but not used yet.
+batched by mesh and texture). The normal / specular / glossiness maps become normal and ORM atlases
+next to it (CHARACTERS.md "PBR maps").
 
 ## Anim sets
 

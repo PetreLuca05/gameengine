@@ -230,6 +230,11 @@ typedef struct SkinnedDraw {
     u32 object_id;          // stable id (0 = none): previous palette -> per-bone velocity
     TextureId texture;      // albedo (with MAT_TEXTURED in flags), 0 = vertex colours
     vec4 recon;             // MAT_RECON: spine base (world xyz) + progress 0..1 (w)
+    // PBR maps (docs/PBR.md, docs/CHARACTERS.md "PBR maps"; MAT_*_TEX in flags says which are set):
+    // skin atlases' normal / ORM (occlusion = the ORM's r) / emissive, sampled as the static path does.
+    // roughness / metallic above are factors on the map. Draws of one mesh share the same maps.
+    TextureId mr_tex, normal_tex, occlusion_tex, emissive_tex;
+    float normal_scale;     // with MAT_NORMAL_TEX (0 is taken as 1)
 } SkinnedDraw;
 MeshId render_skinned_mesh_create(const SkinVertex *verts, u32 vcount, const u32 *indices, u32 icount);
 void render_draw_skinned(const SkinnedDraw *d);

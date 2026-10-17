@@ -19,6 +19,7 @@ layout(location = 6) flat out uint v_mat_flags;
 layout(location = 7) out vec4 v_cur_clip;
 layout(location = 8) out vec4 v_prev_clip;
 layout(location = 9) flat out vec4 v_recon;
+layout(location = 10) flat out uint v_normal_scale;   // float bits (PBR maps, shaders/pbr_maps.glsl)
 
 invariant gl_Position;
 
@@ -37,6 +38,7 @@ void main() {
     v_mat_params = si.params;
     v_mat_flags = si.info.y;
     v_recon = si.recon;
+    v_normal_scale = si.info.w;
     // First-person arms from the body model are drawn in the viewmodel pass (own projection).
     if ((si.info.y & MAT_VIEWMODEL) != 0u) {
         gl_Position = frame.vm_proj * frame.view * world;
