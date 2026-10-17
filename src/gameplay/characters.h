@@ -13,6 +13,7 @@
 #include "anim/character_rt.h"
 #include "anim/anim_net.h"
 #include "anim/anim_lod.h"
+#include "render/lod_fade.h"
 #include "anim/fire_anim.h"
 #include "gameplay/hitboxes.h"
 #include "physics/ragdoll.h"
@@ -79,6 +80,13 @@ typedef struct CharacterInst {
     u32 last_eval;
     int interval;
     bool culled;
+    // docs/LOD.md (lod_active): the cross-fade (completes even when the selector reverses), the update
+    // interval eased in log2 (one octave per update_ramp_s, never halved in one step) with its eval
+    // accumulator and the next gap (span, ticks), the LOD0 systems' weight (foot IK / lean / turn over a
+    // pixel band) and the sun shadow's coverage (faded at the shadow size).
+    LodFade lodf;
+    float interval_log2, eval_acc, ik_w, shadow_w;
+    int span;
     // Third-person fire animation (docs/FIRE_ANIM.md): layers 1, 2 and 4 at a reduced scale, driven
     // by the fire events with a deterministic seed, so everyone sees the kick and the slide.
     FireAnimState tp_fire;

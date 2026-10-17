@@ -122,7 +122,7 @@ void characters_register_cvars(void) {
     cmd_register("fp_eye_check", cmd_fp_eye_check, "print where the first-person camera socket sits on each character's head (bind pose)");
     g->hold_assert = cvar_reg_bool("anim_hold_assert", false, 0, "log any left hand <-> grip_l error above 2 mm / 1 deg");
     g->hitbox_debug = cvar_reg_bool("hitbox_debug", false, 0, "draw per-part hitboxes with their multipliers");
-    g->lod_debug = cvar_reg_bool("r_lod_debug", false, 0, "per-character LOD / pixel size / update rate / systems");
+    g->lod_debug = cvar_reg_int("r_lod_debug", 0, 0, 2, 0, "LOD debug (docs/LOD.md): 1 per-character LOD / fade / pixel size / update rate / systems, 2 + classic LOD levels as colours");
     g->lod_force = cvar_reg_int("r_lod_force", -1, -1, 3, 0, "force a character LOD (-1 = automatic)");
     g->lod_bias = cvar_reg_float("r_lod_bias", 1.0f, 0.25f, 4.0f, CVAR_ARCHIVE, "character LOD bias (>1 = more detail)");
     g->skin_cvar = cvar_reg_string("cl_skin", "", CVAR_ARCHIVE, "your character skin (skins.json / assets/skins id; empty = the default), seen by everyone");
@@ -502,6 +502,10 @@ CharacterInst *char_attach(World *w, EntityId e, u8 character_id) {
     c->is_player = w->type[i] == ET_PLAYER;
     c->slot = c->is_player ? w->player_slot[i] : -1;
     c->lod = -1;
+    c->lodf.cur = c->lodf.from = -1;
+    c->lodf.t = 1.0f;
+    c->ik_w = c->shadow_w = 1.0f;
+    c->span = 1;
     c->si = (SkeletonInstance *)malloc(sizeof(SkeletonInstance));
     skel_inst_init(c->si, &LIB->skeleton);
     pick_parts(c, dg_hash_u32(e));
@@ -1438,10 +1442,13 @@ static void post_one(World *w, CharacterInst *c, int i, float dt, vec3 cam_pos, 
     pi.raycast = ray_cb;
     pi.ray_ctx = w->phys;
     int sys = systems_for_lod(lod);
-    pi.foot_ik = cv(CG->foot_ik) && sys <= 0 && !c->phantom;   // phantoms float in the fabricator chamber
+    // docs/LOD.md: the LOD0 systems fade over a pixel band (ik_w) instead of dropping at the switch
+    bool lod0 = lod_active() && !c->local ? c->ik_w > 0.0f : sys <= 0;
+    if (lod_active() && !c->local) pi.lod_w = c->ik_w;
+    pi.foot_ik = cv(CG->foot_ik) && lod0 && !c->phantom;   // phantoms float in the fabricator chamber
     pi.spine = cv(CG->spine) && sys <= 1;
-    pi.turn = cv(CG->turn) && sys <= 0;
-    pi.lean = cv(CG->lean) && sys <= 0;
+    pi.turn = cv(CG->turn) && lod0;
+    pi.lean = cv(CG->lean) && lod0;
     pi.damage = cv(CG->damage) && sys <= 1;
     pi.hold = cv(CG->hold) && sys <= 1;
     pi.ads_t = c->rt.in.ads ? 1.0f : 0.0f;
@@ -1700,8 +1707,12 @@ void chars_present_tick(World *w, vec3 cam_pos, float fov_deg, float screen_h, f
     sync_anim_cvars();
     ensure_gpu_meshes();
     CharGlobals *g = CG;
-    g->lod.bias = (g->lod_bias ? g->lod_bias->f : 1.0f) * (g->lod_quality ? 0.5f + 0.25f * (float)g->lod_quality->i : 1.0f);
+    float quality = g->lod_quality ? 0.5f + 0.25f * (float)g->lod_quality->i : 1.0f;
+    g->lod.bias = (g->lod_bias ? g->lod_bias->f : 1.0f) * quality;
     int force = g->lod_force && g->lod_force->i >= 0 ? g->lod_force->i : g->force_lod;
+    bool lod_new = lod_active();   // docs/LOD.md (r_vgeo 0); r_vgeo 1 / r_lod_legacy: the ranges from before
+    const LodTable *lt = lod_table();
+    float lod_s = lod_scale(LODC_CHARACTER) * quality;
     float tanh = tanf(fov_deg * 0.5f * DG_DEG2RAD);
     bool step_phys = false;
     // Characters due for a post-pass this tick (evaluated after the loop, within the budget).
@@ -1719,17 +1730,40 @@ void chars_present_tick(World *w, vec3 cam_pos, float fov_deg, float screen_h, f
         // LOD by projected height.
         float dist = fmaxf(0.1f, v3_dist(cam_pos, c->root.t));
         c->pixels = screen_h * (LIB->skel.height * c->def->scale) / (2.0f * dist * tanh);
-        int lod = force >= 0 ? force : lod_select(&g->lod, c->lod, c->pixels * c->def->lod_bias);
-        if (c->local) lod = 0;
-        if (lod != c->lod) {
-            c->fade_from = c->lod >= 0 ? c->lod : lod;
-            c->lod_fade = c->lod >= 0 ? 0.0f : 1.0f;
-            c->lod = lod;
+        if (lod_new) {
+            // docs/LOD.md: lod.json targets x tier, a cross-fade that always completes, eased update rate,
+            // LOD0 systems and the shadow faded over pixel bands
+            float s = lod_s * c->def->lod_bias;
+            int want = force >= 0 ? force : lod_char_select(lt, s, c->lodf.cur, c->pixels);
+            if (c->local) { want = 0; lod_fade_reset(&c->lodf, 0); }
+            lod_fade_step(&c->lodf, want, dt, lod_fade_time());
+            c->lod = c->lodf.cur;
+            float target = log2f((float)lt->char_update[DG_CLAMP(c->lod, 0, CHAR_LOD_COUNT - 1)]);
+            if (!c->have_pose || c->local) c->interval_log2 = target;
+            else {
+                float step = dt / fmaxf(lt->char_ramp_s, 1e-3f);
+                c->interval_log2 = c->interval_log2 < target ? fminf(c->interval_log2 + step, target) : fmaxf(c->interval_log2 - step, target);
+            }
+            float t0 = lt->char_px[0] / s, b = fmaxf(lt->char_ik_band, 1e-3f);
+            c->ik_w = c->local ? 1.0f : saturate((c->pixels - t0 * (1.0f - b)) / (t0 * b));
+            c->shadow_w = c->local ? 1.0f : lod_band_weight(log2f(fmaxf(c->pixels, 1e-3f) * s / lt->char_shadow_px), lod_band());
+            c->culled = c->pixels < lt->char_cull_px;
+        } else {
+            int lod = force >= 0 ? force : lod_select(&g->lod, c->lod, c->pixels * c->def->lod_bias);
+            if (c->local) lod = 0;
+            if (lod != c->lod) {
+                c->fade_from = c->lod >= 0 ? c->lod : lod;
+                c->lod_fade = c->lod >= 0 ? 0.0f : 1.0f;
+                c->lod = lod;
+            }
+            c->lod_fade = fminf(1.0f, c->lod_fade + dt / 0.15f);
+            c->interval = g->lod.update_every[DG_CLAMP(c->lod, 0, CHAR_LOD_COUNT - 1)];
+            lod_fade_reset(&c->lodf, c->lod);   // a switch to the new fades starts from here
+            c->ik_w = c->shadow_w = 1.0f;
+            c->interval_log2 = log2f((float)DG_MAX(1, c->interval));
+            // Off-screen: the state machine keeps ticking (sim / client tick); the render pose freezes.
+            c->culled = c->pixels < g->lod.cull_pixels;
         }
-        c->lod_fade = fminf(1.0f, c->lod_fade + dt / 0.15f);
-        c->interval = g->lod.update_every[DG_CLAMP(c->lod, 0, CHAR_LOD_COUNT - 1)];
-        // Off-screen: the state machine keeps ticking (sim / client tick); the render pose freezes.
-        c->culled = c->pixels < g->lod.cull_pixels;
         if (c->dead) {
             if (c->rag_pending) {
                 bool sim_ok = c->lod <= 2 && !c->culled;
@@ -1761,7 +1795,11 @@ void chars_present_tick(World *w, vec3 cam_pos, float fov_deg, float screen_h, f
             continue;
         }
         if (c->culled && c->have_pose) continue;
-        if (c->have_pose && (int)(w->chars->tick - c->last_eval) < c->interval) continue;
+        if (lod_new) {
+            // eased update rate: an accumulator of 1 / interval per tick, an eval each time it reaches 1
+            c->eval_acc += exp2f(-c->interval_log2);
+            if (c->have_pose && c->eval_acc < 1.0f - 1e-4f) continue;
+        } else if (c->have_pose && (int)(w->chars->tick - c->last_eval) < c->interval) continue;
         due[due_count++] = k;
     }
     // Budget: the local player first, then by projected size, then by how overdue (stable order).
@@ -1784,8 +1822,19 @@ void chars_present_tick(World *w, vec3 cam_pos, float fov_deg, float screen_h, f
     int evals = due_count < budget ? due_count : budget;
     for (int n = 0; n < evals; n++) {
         CharacterInst *c = w->chars->c[due[n]];
+        if (lod_new) {
+            // the post-pass integrates the ticks since the last one; the render pose then interpolates
+            // over the gap to the next eval (span: the accumulator's next crossing)
+            c->interval = c->have_pose ? DG_CLAMP((int)(w->chars->tick - c->last_eval), 1, 64) : 1;
+            c->eval_acc = fmaxf(c->eval_acc - 1.0f, 0.0f);
+        }
         c->last_eval = w->chars->tick;
         post_one(w, c, (int)ENT_INDEX(c->ent), dt, cam_pos, local_slot);
+        if (lod_new) {
+            float inc = exp2f(-c->interval_log2);
+            c->span = DG_CLAMP((int)ceilf((1.0f - c->eval_acc) / inc - 1e-3f), 1, 64);
+            c->interval = c->span;
+        }
     }
     g->last_evals = evals;
     g->last_deferred = due_count - evals;
@@ -2449,16 +2498,35 @@ void chars_render(World *w, float alpha, vec3 cam_pos, int local_slot) {
         resolve_parts(c, sel);
         skel_inst_set_pose(c->si, pose);
         float dist = v3_dist(cam_pos, c->root.t);
-        bool shadow = c->pixels > CG->lod.shadow_pixels || local;
         int lod = c->lod < 0 ? 0 : c->lod;
-        if (c->lod_fade < 1.0f && c->fade_from != lod) {
-            draw_char(w, c, c->fade_from, -(1.0f - c->lod_fade), flags, false);
-            draw_char(w, c, lod, c->lod_fade, flags, false);
+        if (lod_active() && c->lodf.cur >= 0) {
+            // docs/LOD.md: both LODs of a cross-fade with complementary dithers, their shadows (one LOD
+            // coarser) the same way; the shadow fades in / out over a band at the shadow size
+            int lods[2];
+            float fades[2];
+            int nd = lod_fade_draws(&c->lodf, lods, fades);
+            for (int k2 = 0; k2 < nd; k2++) draw_char(w, c, lods[k2], fades[k2], flags, false);
+            if (local || c->shadow_w > 0.0f) {
+                int s0 = DG_MIN(lods[0] + 1, CHAR_LOD_COUNT - 1), s1 = nd > 1 ? DG_MIN(lods[1] + 1, CHAR_LOD_COUNT - 1) : s0;
+                float sw = local ? 1.0f : c->shadow_w;
+                if (nd > 1 && s0 != s1) {
+                    draw_char(w, c, s0, fades[0], MAT_SHADOW_ONLY, true);
+                    draw_char(w, c, s1, fades[1], MAT_SHADOW_ONLY, true);
+                } else {
+                    draw_char(w, c, s1, sw < 1.0f ? lod_fade_in(sw) : 0.0f, MAT_SHADOW_ONLY, true);
+                }
+            }
         } else {
-            draw_char(w, c, lod, 0, flags, false);
+            bool shadow = c->pixels > CG->lod.shadow_pixels || local;
+            if (c->lod_fade < 1.0f && c->fade_from != lod) {
+                draw_char(w, c, c->fade_from, -(1.0f - c->lod_fade), flags, false);
+                draw_char(w, c, lod, c->lod_fade, flags, false);
+            } else {
+                draw_char(w, c, lod, 0, flags, false);
+            }
+            // Shadows: one LOD coarser than the main draw.
+            if (shadow) draw_char(w, c, DG_MIN(lod + 1, CHAR_LOD_COUNT - 1), 0, MAT_SHADOW_ONLY, true);
         }
-        // Shadows: one LOD coarser than the main draw.
-        if (shadow) draw_char(w, c, DG_MIN(lod + 1, CHAR_LOD_COUNT - 1), 0, MAT_SHADOW_ONLY, true);
         // Held item (glued to the right hand).
         if (c->item_valid && !c->dead && (c->item_weapon || c->item_def)) {
             float span = (float)DG_MAX(1, c->interval);
@@ -2837,8 +2905,14 @@ void chars_debug_draw(World *w, vec3 cam_pos) {
             dbg_cross(c->pose_cur[s->role[BR_R_HAND]].t, 0.02f, DBG_RED, 0);
             dbg_cross(xf_point(it, k2->muzzle), 0.02f, DBG_ORANGE, 0);
         }
-        if (cv(CG->lod_debug) && v3_dist(cam_pos, c->root.t) < 140.0f) {
-            char t[96];
+        if (cv(CG->lod_debug) && v3_dist(cam_pos, c->root.t) < (lod_active() ? 260.0f : 140.0f)) {
+            char t[128];
+            if (lod_active()) {   // docs/LOD.md: level, fade state, eased rate, LOD0 systems weight, shadow
+                char fs[24] = "";
+                if (lod_fade_active(&c->lodf)) snprintf(fs, sizeof(fs), "<%d %.0f%%", c->lodf.from, (double)(c->lodf.t * 100.0f));
+                snprintf(t, sizeof(t), "LOD%d%s %.0fpx 1/%.1f ik%.2f sh%.2f %s%s", c->lod, fs, c->pixels, (double)exp2f(c->interval_log2), (double)c->ik_w, (double)c->shadow_w,
+                         c->lod <= 1 ? "hold dmg" : "baked-arms", c->culled ? " CULLED" : "");
+            } else
             snprintf(t, sizeof(t), "LOD%d %.0fpx 1/%d %s%s%s", c->lod, c->pixels, c->interval, c->lod <= 0 ? "foot spine turn " : "",
                      c->lod <= 1 ? "hold dmg" : "baked-arms", c->culled ? " CULLED" : "");
             dbg_text(v3_add(c->root.t, v3(0, LIB->skel.height * c->def->scale + 0.6f, 0)), t, DBG_YELLOW, 0.06f, 0);   // above the HUD health bar

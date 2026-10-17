@@ -209,6 +209,7 @@ typedef struct ProcInput {
     const ItemSockets *item;   // NULL = nothing held
     float hand_ik_weight;      // controller: 0 while reload / melee clips own the hands
     bool foot_ik, spine, turn, hold, lean, damage;  // per-system enables (LOD + cvars)
+    float lod_w;               // weight of the LOD0 systems (foot IK, lean, turn), faded over a pixel band (docs/LOD.md); 1 = full
     vec3 item_kick_pos, item_kick_rot;   // recoil kick applied to the item (aim space, m / deg)
     float crouch_drop;         // procedural crouch: pelvis lowering (m) when no crouch clips are bound
     float kneel;               // 0..1 target: knocked down (docs/REVIVE.md), knees on the ground, torso up

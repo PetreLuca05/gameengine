@@ -33,4 +33,6 @@ void proc_turn(ProcState *st, const ProcInput *in) {
     float d = wrap_angle(in->body_yaw - st->render_body_yaw);
     if (fabsf(d) > 1.5f) st->render_body_yaw = in->body_yaw;
     else st->render_body_yaw = wrap_angle(st->render_body_yaw + d * (1.0f - expf(-in->dt * 22.0f)));
+    // LOD fade (docs/LOD.md): towards the replicated yaw as the weight goes to 0 (no snap when turn stops)
+    if (in->lod_w < 1.0f) st->render_body_yaw = wrap_angle(in->body_yaw + wrap_angle(st->render_body_yaw - in->body_yaw) * fmaxf(in->lod_w, 0.0f));
 }
