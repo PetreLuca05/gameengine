@@ -229,6 +229,14 @@ else()
   target_compile_options(deadground PRIVATE -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers)
   target_link_libraries(deadground PRIVATE m pthread)
 endif()
+# Ballistics must integrate bit-identically on the host and the predicting client: no FMA
+# contraction, precise float semantics (docs/BALLISTICS.md "Determinism").
+file(GLOB DG_BALLISTICS_SOURCES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/src/gameplay/ballistics/*.c)
+if(MSVC)
+  set_source_files_properties(${DG_BALLISTICS_SOURCES} PROPERTIES COMPILE_OPTIONS "/fp:precise")
+else()
+  set_source_files_properties(${DG_BALLISTICS_SOURCES} PROPERTIES COMPILE_OPTIONS "-ffp-contract=off")
+endif()
 # Data / assets are mirrored next to the exe on every build (not only when it relinks), so asset-only
 # edits (effects, textures) reach the tests and the game. copy_directory_if_different skips unchanged files.
 add_custom_target(dg_copy_data ALL
@@ -259,6 +267,19 @@ else()
   target_link_libraries(test_spectate PRIVATE m)
 endif()
 add_test(NAME spectate COMMAND test_spectate)
+add_executable(test_ballistics tests/test_ballistics.c src/gameplay/ballistics/bal_data.c src/gameplay/ballistics/bal_drag.c
+  src/gameplay/ballistics/bal_sim.c src/gameplay/ballistics/bal_surface.c src/gameplay/ballistics/bal_acoustics.c
+  src/gameplay/ballistics/bal_tracer.c src/gameplay/ballistics/bal_muzzle.c third_party/cjson/cJSON.c)
+set_target_properties(test_ballistics PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
+target_include_directories(test_ballistics PRIVATE src third_party/cjson)
+target_compile_definitions(test_ballistics PRIVATE DG_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+if(MSVC)
+  target_compile_options(test_ballistics PRIVATE /W3 /utf-8 /fp:precise)
+else()
+  target_compile_options(test_ballistics PRIVATE -ffp-contract=off)
+  target_link_libraries(test_ballistics PRIVATE m)
+endif()
+add_test(NAME ballistics COMMAND test_ballistics)
 
 # ---------------------------------------------------------------- animation tools
 # Engine-free subset: anim core + FBX import + cache (+ log / platform helpers).

@@ -4,6 +4,9 @@
   "vfx": { "muzzle": { "type": "pistol", "device": "bare" }, "caliber": "pistol" },
   "item": "pistol",
   "kind": "hitscan",
+  "cartridge": "9x19_fmj",
+  "barrel_length": 0.102,
+  "zero_distance": 25,
   "one_hand_capable": true,
   "damage_type": "bullet",
   "damage": 25,
@@ -60,7 +63,7 @@
   "falloff": { "start": 20, "end": 60, "min": 0.6 },
   "attachment_slots": {
     "optic": {"pos": [0, 0.077, -0.04], "allow": ["red_dot"]},
-    "muzzle": {"allow": ["suppressor", "compensator"]}
+    "muzzle": {"allow": ["suppressor", "compensator", "flash_hider", "muzzle_brake"]}
   },
   "model": [
     { "offset": [0, 0.055, -0.07], "half": [0.016, 0.022, 0.11], "color": [0.15, 0.15, 0.17] },
