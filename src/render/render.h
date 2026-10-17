@@ -333,6 +333,9 @@ typedef struct RenderWater {
 } RenderWater;
 void render_water_mesh(const RenderWaterVertex *v, u32 vcount, const u32 *idx, u32 icount);   // NULL / 0: none
 void render_set_water(const RenderWater *w);   // every frame (enabled = false: no water pass)
+// Tests (water_test waves): the GPU swell height (shaders/water/water_waves.glsl) at n points of the
+// current render water's waves; xzt = (x, z, wave time) per point. Blocking (waits for the GPU).
+bool render_water_gpu_heights(const float *xzt, int n, float *out);
 
 // Per-foliage-type wind parameters (docs/FOLIAGE_WIND.md; the vgeo materials' VgWindParams, same order).
 typedef struct RenderFoliageWind {

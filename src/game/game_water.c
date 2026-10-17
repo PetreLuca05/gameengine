@@ -61,10 +61,11 @@ static struct {
         UserCmd cmd;      // scripted input (swim)
         bool drive;
         float hp0, hp_prev;
+        int above, total;
     } t;
 } GW;
 
-enum { WT_NONE, WT_PROPS, WT_SWIM };
+enum { WT_NONE, WT_PROPS, WT_SWIM, WT_WAVES };
 
 const WaterWorld *game_water(void) { return &GW.world; }
 WaterWorld *game_water_mut(void) { return &GW.world; }
@@ -467,7 +468,7 @@ static bool move_water(World *w, float x, float z, double tick, float *surface, 
     if (!water_sample(&GW.world, x, z, game_water_time(tick), &s)) return false;
     *surface = s.height;
     *column = s.depth;
-    *flow = v3(s.vel[0], 0.0f, s.vel[2]);
+    *flow = v3(s.vel[0], s.vel[1], s.vel[2]);   // y: the surface's own vertical motion (waves)
     return true;
 }
 
@@ -533,7 +534,8 @@ static void test_check(bool ok, const char *fmt, ...) {
 }
 
 static void test_end(void) {
-    if (GW.t.mode == WT_SWIM) log_info("water_test swim -> %s (%d checks, %d failed)", GW.t.fails ? "FAIL" : "ok", GW.t.checks, GW.t.fails);
+    if (GW.t.mode == WT_SWIM || GW.t.mode == WT_WAVES)
+        log_info("water_test %s -> %s (%d checks, %d failed)", GW.t.mode == WT_SWIM ? "swim" : "waves", GW.t.fails ? "FAIL" : "ok", GW.t.checks, GW.t.fails);
     GW.t.mode = WT_NONE;
     GW.t.drive = false;
     if (GW.t.quit) cmd_execute_line("quit");
@@ -640,8 +642,74 @@ static void test_swim(World *w) {
     }
 }
 
+// water_test waves (wateryard): wind 10 m/s; an idle swimmer in the open sea keeps the head above the
+// waves on >= 95 % of the ticks; then the GPU swell (water_waves.glsl) against the CPU one
+// (water_waves.c) at 512 points: within 1 cm.
+static void test_waves(World *w) {
+    Player *p = game_local_player();
+    if (!p || GW.world.ocean < 0) { test_check(false, "an ocean and a local player (map wateryard)"); test_end(); return; }
+    PlayerMove *m = &p->sim.move;
+    int f = ++GW.t.frame;
+    if (f == 1) {
+        GW.t.drive = true;
+        set_input(0, 0, 0, 0);
+        cmd_execute_line("weather_params wind 10 time 0.1");
+        teleport_local(w, v3(0.0f, -1.6f, 240.0f), 0.0f);
+        GW.t.above = GW.t.total = GW.t.ticks = 0;
+    }
+    // Wait for the weather's wind transition, then measure 30 s.
+    if (!GW.t.ticks) {
+        if (fabsf(GW.world.wind - 10.0f * GW.wave_scale->f) < 0.3f) {
+            GW.t.ticks = f;
+            test_check(GW.world.waves.hs > 0.5f, "swell driven by the 10 m/s wind after %.1f s: Hs %.2f m, peak %.0f m", (float)f / SIM_HZ, GW.world.waves.hs,
+                       GW.world.waves.peak_len);
+        } else if (f > 90 * SIM_HZ) {
+            test_check(false, "the wind reached 10 m/s (%.1f)", GW.world.wind);
+            test_end();
+        }
+        return;
+    }
+    int since = f - GW.t.ticks;
+    if (since > SIM_HZ && since <= 31 * SIM_HZ) {
+        GW.t.total++;
+        if (m->mode == MOVE_SWIM && !m->head_under) GW.t.above++;
+    }
+    if (since == 31 * SIM_HZ) {
+        float ratio = (float)GW.t.above / (float)DG_MAX(GW.t.total, 1);
+        test_check(ratio >= 0.95f, "swimmer's head above the waves on %.1f %% of %d ticks (>= 95 %%)", ratio * 100.0f, GW.t.total);
+        // CPU == GPU swell.
+        enum { N = 512 };
+        static float xzt[N * 3], gpu[N];
+        u32 st = 0x1234567u;
+        float t = waves_time(w->tick, 0.0f, SIM_HZ);
+        for (int i = 0; i < N; i++) {
+            st = st * 1664525u + 1013904223u;
+            float a = (float)(st >> 8) / 16777216.0f * 6.2831853f;
+            st = st * 1664525u + 1013904223u;
+            float r = (float)(st >> 8) / 16777216.0f * 300.0f;
+            xzt[3 * i] = m->pos.x + cosf(a) * r;
+            xzt[3 * i + 1] = m->pos.z + sinf(a) * r;
+            xzt[3 * i + 2] = t + (float)(i % 7) * 1.37f;
+        }
+        if (render_water_gpu_heights(xzt, N, gpu)) {
+            float worst = 0.0f, mean = 0.0f;
+            for (int i = 0; i < N; i++) {
+                float c = waves_height(&GW.world.waves, xzt[3 * i], xzt[3 * i + 1], xzt[3 * i + 2], 2);
+                float e = fabsf(c - gpu[i]);
+                worst = fmaxf(worst, e);
+                mean += e / (float)N;
+            }
+            test_check(worst < 0.01f, "GPU swell == CPU swell at %d points: worst %.5f m, mean %.6f m (< 1 cm)", N, worst, mean);
+        } else {
+            test_check(false, "GPU probe ran");
+        }
+        test_end();
+    }
+}
+
 static void test_tick(World *w) {
     if (GW.t.mode == WT_SWIM) { test_swim(w); return; }
+    if (GW.t.mode == WT_WAVES) { test_waves(w); return; }
     if (--GW.t.ticks > 0) return;
     if (GW.t.mode == WT_PROPS) test_props(w);
     log_info("water_test done");
@@ -858,13 +926,14 @@ static void cmd_water_info(int argc, const char **argv) {
 
 // water_test props [seconds] [quit]
 static void cmd_water_test(int argc, const char **argv) {
-    if (argc < 2) { log_info("usage: water_test props|swim [seconds] [quit]"); return; }
+    if (argc < 2) { log_info("usage: water_test props|swim|waves [seconds] [quit]"); return; }
     if (!host_world("water_test")) return;
     GW.t.quit = argc > 2 && !strcmp(argv[argc - 1], "quit");
     float sec = argc > 2 && strcmp(argv[2], "quit") ? (float)atof(argv[2]) : 15.0f;
     GW.t.frame = GW.t.fails = GW.t.checks = 0;
     if (!strcmp(argv[1], "props")) GW.t.mode = WT_PROPS;
     else if (!strcmp(argv[1], "swim")) GW.t.mode = WT_SWIM;
+    else if (!strcmp(argv[1], "waves")) GW.t.mode = WT_WAVES;
     else { log_info("water_test: unknown mode '%s'", argv[1]); return; }
     GW.t.ticks = (int)(sec * SIM_HZ);
     log_info("water_test %s: checking in %.0f s", argv[1], sec);
@@ -878,6 +947,6 @@ void water_register(void) {
     cmd_register("water_level", cmd_water_level, "water_level [<body|index> <level>]: list the water bodies / move one's surface (host)");
     cmd_register("wind_set", cmd_wind_set, "wind_set <m/s> [dir_deg] [seconds]: set the weather wind (waves, foliage, rain) (host)");
     cmd_register("spawn_float", cmd_spawn_float, "spawn_float <density> [size] [box|plank|sphere|barrel]: buoyant prop in front of you (host)");
-    cmd_register("water_test", cmd_water_test, "water_test props|swim [seconds] [quit]: in-game water checks (logs ok / FAIL)");
+    cmd_register("water_test", cmd_water_test, "water_test props|swim|waves [seconds] [quit]: in-game water checks (logs ok / FAIL)");
     cmd_register("water_info", cmd_water_info, "water_info: bodies, wind, swell, buoyancy cost, the water at the player");
 }

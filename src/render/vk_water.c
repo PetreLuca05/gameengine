@@ -228,6 +228,7 @@ void vkw_init(void) {
     vkp_register_shader("water/water_vel.frag");
     vkp_register_shader("water/water_prep.comp");
     vkp_register_shader("water/water_ripple.comp");
+    vkp_register_shader("water/water_probe.comp");
     vkw_create_pipelines();
 }
 
@@ -375,6 +376,70 @@ static void exec_surface(VkCommandBuffer cmd, void *u) {
         }
     }
     vkCmdEndRendering(cmd);
+}
+
+bool render_water_gpu_heights(const float *xzt, int n, float *out) {
+    if (!W.ok || n <= 0) return false;
+    VkPipeline pipe = post_compute_pipe("water/water_probe");
+    if (!pipe) return false;
+    GpuBuffer data = vkr_buffer_create(sizeof(GpuWaterData), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);
+    GpuBuffer pts = vkr_buffer_create(sizeof(vec4) * (VkDeviceSize)n, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);
+    // The probe's own copy of the water data (the frame's buffer may be in flight).
+    GpuWaterData *g = (GpuWaterData *)data.mapped;
+    memset(g, 0, sizeof(*g));
+    int nw = DG_CLAMP(W.w.wave_count, 0, RENDER_WATER_WAVES);
+    g->info = v4(0, 0, (float)nw, 0);
+    memcpy(g->waves, W.w.waves, sizeof(vec4) * 2 * (size_t)nw);
+    vec4 *p = (vec4 *)pts.mapped;
+    for (int i = 0; i < n; i++) p[i] = v4(xzt[3 * i], xzt[3 * i + 1], xzt[3 * i + 2], 0.0f);
+    VkCommandPoolCreateInfo pci = { VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
+    pci.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
+    pci.queueFamilyIndex = R->queue_family;
+    VkCommandPool pool;
+    VK_CHECK(vkCreateCommandPool(R->device, &pci, NULL, &pool));
+    VkCommandBufferAllocateInfo ai = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
+    ai.commandPool = pool;
+    ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    ai.commandBufferCount = 1;
+    VkCommandBuffer cmd;
+    VK_CHECK(vkAllocateCommandBuffers(R->device, &ai, &cmd));
+    VkCommandBufferBeginInfo bi = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+    bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    VK_CHECK(vkBeginCommandBuffer(cmd, &bi));
+    PostBind b = { 0 };
+    pb_ubo(&b);
+    pb_buf(&b, 13, data.buffer, sizeof(GpuWaterData), false);
+    pb_buf(&b, 14, pts.buffer, sizeof(vec4) * (VkDeviceSize)n, false);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipe);
+    pb_push(cmd, &b, VK_PIPELINE_BIND_POINT_COMPUTE);
+    struct { vec4 p[4]; u32 u[16]; } pc;
+    memset(&pc, 0, sizeof(pc));
+    pc.u[0] = (u32)n;
+    post_push_constants(cmd, &pc, 128);
+    vkCmdDispatch(cmd, (u32)(n + 63) / 64, 1, 1);
+    VkMemoryBarrier2 mb = { VK_STRUCTURE_TYPE_MEMORY_BARRIER_2 };
+    mb.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+    mb.srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT;
+    mb.dstStageMask = VK_PIPELINE_STAGE_2_HOST_BIT;
+    mb.dstAccessMask = VK_ACCESS_2_HOST_READ_BIT;
+    VkDependencyInfo di = { VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+    di.memoryBarrierCount = 1;
+    di.pMemoryBarriers = &mb;
+    vkCmdPipelineBarrier2(cmd, &di);
+    VK_CHECK(vkEndCommandBuffer(cmd));
+    VkCommandBufferSubmitInfo cbi = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO };
+    cbi.commandBuffer = cmd;
+    VkSubmitInfo2 si = { VK_STRUCTURE_TYPE_SUBMIT_INFO_2 };
+    si.commandBufferInfoCount = 1;
+    si.pCommandBufferInfos = &cbi;
+    VK_CHECK(vkQueueSubmit2(R->queue, 1, &si, VK_NULL_HANDLE));
+    VK_CHECK(vkQueueWaitIdle(R->queue));
+    vkDestroyCommandPool(R->device, pool, NULL);
+    vmaInvalidateAllocation(R->vma, pts.alloc, 0, VK_WHOLE_SIZE);
+    for (int i = 0; i < n; i++) out[i] = p[i].w;
+    vkr_buffer_destroy_now(&data);
+    vkr_buffer_destroy_now(&pts);
+    return true;
 }
 
 void vkw_build_graph(int hdr, int depth, int velocity) {

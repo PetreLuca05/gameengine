@@ -402,7 +402,8 @@ static void swim_tick(World *w, PlayerSim *sim, PhysCharacter *ch, u16 buttons, 
     // Quadratic drag above swimming speeds: a dive from height loses its speed within a couple of metres.
     float rs = v3_len(rel);
     if (rs > 3.0f) rel = v3_scale(rel, 1.0f / (1.0f + 0.6f * (rs - 3.0f) * dt));
-    vec3 vel = v3_add(rel, v3(h->flow.x, 0.0f, h->flow.z));
+    // Back to world velocity: a swimmer drifts with the current and rides the waves' vertical motion.
+    vec3 vel = v3_add(rel, h->flow);
 
     // Climb out: forward + jump against a ledge, from the surface (the mantle from a swimming pose).
     if (!dive && mv.y > 0.2f && (up || m->jump_buffer > 0.0f) && m->regrab_cooldown <= 0.0f) {

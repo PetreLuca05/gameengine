@@ -155,8 +155,9 @@ void movement_set_eye_offset(vec3 (*fn)(float yaw, float pitch));
 typedef bool (*SeatPoseFn)(struct World *w, u32 vehicle, int seat, vec3 *feet, vec3 *vel);
 void movement_set_seat_pose(SeatPoseFn fn);
 // Water at (x, z) at server tick `tick` (the command's view tick: identical on the host and the
-// predicting client): surface height, water column depth (surface - bottom), flow velocity. False =
-// no water. Set by the game (game_water.c); without it nobody swims.
+// predicting client): surface height, water column depth (surface - bottom), water velocity (flow +
+// the waves' orbital motion, y = the surface rising / falling). False = no water. Set by the game
+// (game_water.c); without it nobody swims.
 typedef bool (*MoveWaterFn)(struct World *w, float x, float z, double tick, float *surface, float *column, vec3 *flow);
 void movement_set_water(MoveWaterFn fn);
 // Fall damage multiplier for a landing in water of `depth` m (1 on land, 0 from ~2.5 m down): the
