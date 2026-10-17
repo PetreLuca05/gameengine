@@ -14,6 +14,48 @@ The page then:
 
 Everything stays on the local network: the game is the server, and nothing goes through the cloud.
 
+## Phone flow rework: plan (written before the code)
+
+Goal: equip = pairing, an always-raised phone, a HUD "simulated phone" panel, a Connect portal
+with an in-game fallback, a small phone OS (home, Camera, Gallery), a white emissive screen.
+
+1. **Flow state machine (pure, `phone_os.c`, unit tested).** `PhoneFlow`: `IDLE -> PAIRING`
+   (portal) on equip; `PAIRING -> LOCAL` on decline, timeout (`phone_pair_timeout`) or server
+   failure; `PAIRING / LOST -> PAIRED` on a device connect; `PAIRED -> LOST` on disconnect
+   (portal with Reconnect); Cancel puts the phone away. Per session: re-equipping a paired or
+   declined phone skips the portal. `phone_auto_pair 0` goes straight to `LOCAL`.
+2. **Apps (`PhoneApp`, replicated).** `OFF, PORTAL, HOME, CAMERA, GALLERY` + gallery viewer
+   sub-state. `assets/phone/apps.json` lists the home-screen apps (id, label, icon tile);
+   `assets/phone/theme.json` holds the light phone-OS tokens and the HUD panel tokens. Layout
+   rects are computed once in design px (640 x 1136) and shared by drawing and hit testing.
+3. **Always focused.** Camera items always aim (`weapons.c`, no `BTN_AIM`), so the hold point
+   stays in `phone_portrait` while equipped; P (pair) is removed, `phoneui` (Alt / pad d-pad
+   right) toggles the cursor for the panel.
+4. **One screen image, three consumers.** The CPU canvas (`phone_ui.c`) draws the OS over a white
+   background (transparent only where the camera app shows the lens). `phone_view` composites it
+   (camera apps over the lens image; other apps without any scene pass: `ui_only`) into the
+   screen target (the 3D screen) and a new sRGB **panel** image with a rounded alpha mask (the HUD
+   panel). Remote / spectated phones build their canvas from replicated state (no QR, no
+   private photos), rendered locally.
+5. **HUD panel** bottom-right above the item readout, ~22 % of the screen height
+   (`hud_phone_size`, `hud_phone_corner`), bezel / radius / shadow from `assets/phone/theme.json`,
+   `hud_opacity`; slides out + fades when a device connects, comes back on disconnect.
+6. **Web page** = a mirrored HTML implementation (touch, native text, gestures and the browser's
+   download / share need real DOM). It uses the same assets: the server injects
+   `assets/phone/theme.json`, `apps.json` and the icon atlas (data URI) into the page, so both
+   look the same. Page and game sync the current app both ways (`{"c":"app"}` / status `app`).
+7. **Screen material.** Lit, near-black albedo (`0.04 x` the screen image) + emissive, so the glass
+   gets real Fresnel reflections; emissive = `phone_screen_emissive` nits-like luminance turned
+   into the displayed level `clamp(L x exposure, phone_screen_min, phone_screen_max)`: white but
+   not blown out by day, a mild bloom at night. A small unshadowed point light at the screen
+   socket (`phone_screen_light`). Off / not equipped: black.
+8. **Replication.** `UserCmd.phone_app` + ANS_PHONE gains app and zoom (7 bytes). Protocol 19.
+9. **Tests.** `test_phone` (flow, layout hit tests at 16:9 / 21:9 / 4:3, apps.json/theme.json,
+   gallery delete, page injection); script tests (`phone_flow.cfg`: equip -> pairing in one tick,
+   decline -> home, camera -> photo -> gallery, day / night screen levels, screenshots); a Python
+   stdlib WebSocket device (`phone_flow_ws.py`) for connect / orientation / disconnect; the updated
+   Playwright e2e; a two-instance LAN check.
+
 | Area | Code | Data |
 |---|---|---|
 | Phone module: server lifecycle, page messages, orientation, capture, commands | `src/gameplay/phone/phone.c` | |
