@@ -205,13 +205,7 @@ static VkPipeline cl_pipeline(const char *vert, const char *frag, bool impostor,
     return p;
 }
 
-static VkDescriptorSet cl_alloc_set(VkImageView v0, VkImageLayout l0, VkImageView v1, VkSampler s0) {
-    VkDescriptorSetAllocateInfo ai = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
-    ai.descriptorPool = R->pool;
-    ai.descriptorSetCount = 1;
-    ai.pSetLayouts = &C.set3_layout;
-    VkDescriptorSet set = VK_NULL_HANDLE;
-    if (vkAllocateDescriptorSets(R->device, &ai, &set) != VK_SUCCESS) return VK_NULL_HANDLE;
+static void cl_write_set(VkDescriptorSet set, VkImageView v0, VkImageLayout l0, VkImageView v1, VkSampler s0) {
     VkDescriptorImageInfo im[2] = { { s0, v0, l0 }, { R->sampler_linear, v1, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL } };
     VkWriteDescriptorSet w[2];
     for (int i = 0; i < 2; i++) {
@@ -223,6 +217,16 @@ static VkDescriptorSet cl_alloc_set(VkImageView v0, VkImageLayout l0, VkImageVie
         w[i].pImageInfo = &im[i];
     }
     vkUpdateDescriptorSets(R->device, 2, w, 0, NULL);
+}
+
+static VkDescriptorSet cl_alloc_set(VkImageView v0, VkImageLayout l0, VkImageView v1, VkSampler s0) {
+    VkDescriptorSetAllocateInfo ai = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
+    ai.descriptorPool = R->pool;
+    ai.descriptorSetCount = 1;
+    ai.pSetLayouts = &C.set3_layout;
+    VkDescriptorSet set = VK_NULL_HANDLE;
+    if (vkAllocateDescriptorSets(R->device, &ai, &set) != VK_SUCCESS) return VK_NULL_HANDLE;
+    cl_write_set(set, v0, l0, v1, s0);
     return set;
 }
 
@@ -430,8 +434,21 @@ static TextureId cl_texture_mips(const u8 *rgba, u32 size, u32 keep_levels, bool
 }
 
 void vkc_set_textures(const VgTextures *t) { C.vtex = t; }
-// The renderer rewrote every texture set (wrapped ones with its clamp sampler): re-apply the slots' samplers.
-void vkc_samplers_changed(void) { memset(C.modver, 0xFF, sizeof(C.modver)); }
+// The renderer recreated its material sampler (r_aniso / r_texture_quality) and rewrote every texture
+// set (wrapped ones with its clamp sampler): re-apply the slots' samplers, and rewrite this module's own
+// sets, which hold the material sampler too (the default / displacement sets, the impostor atlases;
+// the local light shadow tiles draw through them even with r_vgeo 1). The caller waited for the device.
+void vkc_samplers_changed(void) {
+    memset(C.modver, 0xFF, sizeof(C.modver));
+    VkImageView white = R->textures[R->white_tex].view;
+    if (C.set_default) cl_write_set(C.set_default, white, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, white, R->sampler_linear);
+    if (C.set_disp && C.disp_view) cl_write_set(C.set_disp, C.disp_view, VK_IMAGE_LAYOUT_GENERAL, white, R->sampler_linear);
+    for (u32 i = 0; i < C.mesh_cap; i++) {
+        ClMesh *cm = &C.mesh[i];
+        if (cm->imp_set)
+            cl_write_set(cm->imp_set, R->textures[cm->imp_normal].view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, R->textures[cm->imp_albedo].view, R->sampler_linear);
+    }
+}
 
 // A vgeo module texture slot as a renderer texture: a wrap of the slot's own image and view, sampled
 // with the slot's sampler (repeat / clamp), rewritten when the slot changes. No copy.
