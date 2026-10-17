@@ -537,7 +537,7 @@ static void tick(void) {
     World *w = G->world;
     if (G->mode == GM_HOST) {
         // The host's own commands go to its spectators like a remote player's (docs/SPECTATE.md).
-        spectate_host_cmds(w, G->local_slot, &cmd, 1, (u32)(platform_time() * 1000.0));
+        spectate_host_cmds(w, G->local_slot, &cmd, 1, platform_wall_ms());
         host_tick(w, &cmd);
         dispatch_events(w);
         net_host_after_tick(w);

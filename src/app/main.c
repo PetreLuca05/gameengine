@@ -80,7 +80,9 @@ static void parse_args(int argc, char **argv, AppOptions *o) {
                 strncat(line, " ", sizeof(line) - strlen(line) - 1);
                 strncat(line, argv[++i], sizeof(line) - strlen(line) - 1);
             }
-            cbuf_add(line);
+            // +set applies at once: before the boot map hosts (e.g. +set net_port for parallel tests).
+            if (!strncmp(line, "set ", 4)) cmd_execute_line(line);
+            else cbuf_add(line);
         }
     }
 }

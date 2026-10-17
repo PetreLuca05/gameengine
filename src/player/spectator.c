@@ -69,9 +69,11 @@ typedef struct Spectator {
 
 static Spectator SP;
 
+#define SPEC_TELEPORT_DIST 10.0f   // corrections above this are host teleports, not mispredictions
+
 static bool watch_mode(int m) { return m == SPEC_IN_EYE || m == SPEC_THIRD; }
 static float lerp_ang(float a, float b, float t) { return wrap_angle(a + wrap_angle(b - a) * t); }
-static u32 now_ms(void) { return (u32)(platform_time() * 1000.0); }
+static u32 now_ms(void) { return platform_wall_ms(); }   // the clock of the send stamps (net.c)
 
 static Player *slot_player(World *w, int s) {
     if (!w || s < 0 || s >= MAX_PLAYERS || !w->players[s].active || !ent_valid(w, w->players[s].ent)) return NULL;
@@ -128,7 +130,17 @@ static void reset_presentation(void) {
     SP.error_offset = v3(0, 0, 0);
 }
 
+// spec_dump: the watched target's numbers (tools/tests/spec_compare.py), every 2 s and before a switch.
+static void log_stats(void) {
+    if (!SP.dump || !SP.dump->i) return;
+    SP.stats_time = platform_time();
+    log_info("spec_stats: target %d delay measured %.1f ms estimate %.1f ms, max correction %.3f m, rewinds %u, corrections > %.2f m: %u, stalls %u, catchups %u, extrap %d",
+             SP.target, SP.delay_meas_ms, SP.delay_est_ms, SP.max_pop, SP.rewinds, SP.pop_warn ? SP.pop_warn->f : 0.0f, SP.pops, SP.clk.stalls,
+             SP.clk.catchups, SP.clk.extrap);
+}
+
 static void begin_switch(World *w) {
+    if (SP.ready) log_stats();   // the outgoing target's numbers: its clock and largest correction restart
     if (SP.cam_valid) {
         SP.blend_on = true;
         SP.blend_t = 0;
@@ -143,6 +155,8 @@ static void begin_switch(World *w) {
     SP.max_pop = 0;
     reset_presentation();
 }
+
+static void dump_slot(World *w, const char *who, int slot, u32 seq);
 
 static void sim_one(World *w, int slot, const UserCmd *c, bool first, bool anim) {
     game_sim_player(w, slot, c, SIM_DT, first);
@@ -168,8 +182,21 @@ static void extrapolate(World *w, int slot, int ticks, int already) {
     }
 }
 
-static void note_pop(vec3 expect, vec3 got) {
+static void note_pop(vec3 expect, vec3 got, bool seated) {
     float d = v3_dist(expect, got);
+    if (d > SPEC_TELEPORT_DIST) {
+        // A host teleport (setpos, respawn, a seat): the target's own view jumps the same way.
+        log_debug("spectate: teleport %.1f m (seq %u)", d, SP.clk.sim_seq);
+        SP.error_offset = v3(0, 0, 0);
+        return;
+    }
+    if (seated) {
+        // The vehicle under a spectated driver comes from snapshots, not re-simulated (docs/SPECTATE.md
+        // "Known gaps"): its corrections are smoothed but not counted against the replica.
+        if (d < 1.0f) SP.error_offset = v3_add(SP.error_offset, v3_sub(expect, got));
+        else SP.error_offset = v3(0, 0, 0);
+        return;
+    }
     if (d > SP.max_pop) SP.max_pop = d;
     if (SP.pop_warn && d > SP.pop_warn->f) {
         SP.pops++;
@@ -212,6 +239,7 @@ void spectator_cl_local_data(World *w, int slot, const SpecLocalData *d, const S
     }
     // Reconcile exactly like the local player: the host's state at ack, then the commands after it.
     vec3 before = p->sim.move.pos;
+    bool was_seated = p->sim.move.mode == MOVE_SEATED;
     SpecStep st = spec_clock_reconcile(&SP.clk, d->ack_seq);
     restore(w, p, &d->sim);
     for (u32 s = st.real_from; s <= st.real_to; s++) {
@@ -222,7 +250,7 @@ void spectator_cl_local_data(World *w, int slot, const SpecLocalData *d, const S
     SP.real_pitch = SP.pitch[1];
     SP.confirmed = p->sim;
     extrapolate(w, slot, st.extrap_ticks, 0);
-    note_pop(before, p->sim.move.pos);
+    note_pop(before, p->sim.move.pos, was_seated || p->sim.move.mode == MOVE_SEATED);
 }
 
 void spectator_cl_cmds(World *w, Reader *r) {
@@ -299,6 +327,7 @@ void spectator_tick(World *w) {
     SP.yaw[0] = SP.yaw[1];
     SP.pitch[0] = SP.pitch[1];
     vec3 before = p->sim.move.pos, vel = p->sim.move.vel;
+    bool was_seated = p->sim.move.mode == MOVE_SEATED;
     int extrap_max = SP.extrap ? SP.extrap->i : 6;
     SpecStep st = spec_clock_step(&SP.clk, spec_ring_contiguous(&SP.ring, SP.clk.sim_seq), extrap_max);
     if (st.rewind) {
@@ -314,6 +343,7 @@ void spectator_tick(World *w) {
         bool first = s + 1 >= st.real_to;
         if ((c->buttons & BTN_USE) && !(SP.last_real.buttons & BTN_USE)) SP.use_press = true;
         sim_one(w, slot, c, first, true);
+        if (SP.dump && SP.dump->i) dump_slot(w, "observer", slot, s);   // spec_compare.py: first simulation of each command
         SP.last_real = *c;
         SP.real_yaw = SP.yaw[1];
         SP.real_pitch = SP.pitch[1];
@@ -325,19 +355,14 @@ void spectator_tick(World *w) {
     }
     if (st.real_to >= st.real_from) SP.confirmed = p->sim;
     extrapolate(w, slot, st.extrap_ticks, SP.clk.extrap - st.extrap_ticks);
-    if (st.rewind) note_pop(v3_madd(before, vel, SIM_DT), p->sim.move.pos);
+    if (st.rewind) note_pop(v3_madd(before, vel, SIM_DT), p->sim.move.pos, was_seated || p->sim.move.mode == MOVE_SEATED);
     // Estimated input -> screen delay: target -> host, host -> here, the backlog, half a tick.
     NetStats ns = net_stats();
     u32 avail = spec_ring_contiguous(&SP.ring, SP.clk.sim_seq);
     float backlog = (float)(avail > SP.clk.display ? avail - SP.clk.display : 0) * SIM_DT * 1000.0f;
     float est = (float)SP.target_owd_ms + ns.app_rtt_ms * 0.5f + backlog + SIM_DT * 500.0f;
     SP.delay_est_ms = SP.delay_est_ms > 0 ? SP.delay_est_ms * 0.95f + est * 0.05f : est;
-    if (SP.dump && SP.dump->i && platform_time() - SP.stats_time > 2.0) {
-        SP.stats_time = platform_time();
-        log_info("spec_stats: target %d delay measured %.1f ms estimate %.1f ms, max correction %.3f m, rewinds %u, corrections > %.2f m: %u, stalls %u, catchups %u, extrap %d",
-                 SP.target, SP.delay_meas_ms, SP.delay_est_ms, SP.max_pop, SP.rewinds, SP.pop_warn ? SP.pop_warn->f : 0.0f, SP.pops, SP.clk.stalls,
-                 SP.clk.catchups, SP.clk.extrap);
-    }
+    if (platform_time() - SP.stats_time > 2.0) log_stats();
 }
 
 void spectator_note_kick(int slot, u32 seq, vec2 kick) {
@@ -371,11 +396,10 @@ static void dump_slot(World *w, const char *who, int slot, u32 seq) {
 
 void spectator_dump_tick(World *w, u32 local_seq) {
     if (!SP.dump || !SP.dump->i || !w || !G) return;
-    // The predicting player itself (the target's process), and the watched replica (the observer's)
-    // whenever its state is a confirmed command (not extrapolated): tools/tests/spec_compare.py
+    // The predicting player itself (the target's process); the watched replica (the observer's)
+    // dumps from spectator_tick as each relayed command is first simulated. tools/tests/spec_compare.py
     // matches the two logs by seq.
     if (spectator_view_slot() < 0) dump_slot(w, "local", G->local_slot, local_seq);
-    else if (!w->authority && SP.clk.extrap == 0 && SP.clk.started) dump_slot(w, "observer", SP.target, SP.clk.sim_seq);
 }
 
 // ------------------------------------------------------------------ per frame: controls, death flow, free camera

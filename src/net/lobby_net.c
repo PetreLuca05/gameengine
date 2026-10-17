@@ -999,6 +999,30 @@ static void cmd_cos_equip(int argc, const char **argv) {
     log_info("cos_equip: cl_skin '%s' cl_parts '%s'", cs ? cs->str : "", cp ? cp->str : "");
 }
 
+// lobby_wait players <n> | ready <n> | state <name> | host [timeout frames]: scripted tests hold the
+// script until the lobby gets there (two processes start at different speeds), at most the timeout.
+static void cmd_lobby_wait(int argc, const char **argv) {
+    if (argc < 2) { log_info("usage: lobby_wait players <n> | ready <n> | state <name> | host [timeout frames, default 1800]"); return; }
+    bool host = !strcmp(argv[1], "host");
+    int ai = host ? 2 : 3;
+    const char *want = host ? "" : argc > 2 ? argv[2] : "";
+    int left = argc > ai ? atoi(argv[ai]) : 1800;
+    const Lobby *L = &S->L;
+    int ready = 0;
+    for (int i = 0; i < LOBBY_MAX_MEMBERS; i++) if (L->members[i].active && L->members[i].ready) ready++;
+    bool done = host ? L->is_host && L->state == LS_LOBBY
+              : !strcmp(argv[1], "players") ? lobby_count(L) >= atoi(want)
+              : !strcmp(argv[1], "ready") ? ready >= atoi(want)
+              : !strcmp(argv[1], "state") ? !strcmp(lobby_state_name(L->state), want)
+              : true;
+    if (done) { log_info("lobby_wait %s %s: done", argv[1], want); return; }
+    if (left <= 0) { log_warn("lobby_wait %s %s: timed out (state %s, %d players, %d ready)", argv[1], want, lobby_state_name(L->state), lobby_count(L), ready); return; }
+    char line[128];
+    if (host) snprintf(line, sizeof(line), "lobby_wait host %d", left - 2);
+    else snprintf(line, sizeof(line), "lobby_wait %s %.32s %d", argv[1], want, left - 2);
+    cbuf_retry(line);
+}
+
 static void cmd_lobby_status(int argc, const char **argv) {
     (void)argc; (void)argv;
     const Lobby *L = &S->L;
@@ -1033,6 +1057,7 @@ void lobby_net_init(void) {
     cmd_register("lobby_kick", cmd_lobby_kick, "lobby_kick <name>: kick (host)");
     cmd_register("lobby_season", cmd_lobby_season, "lobby_season <season> [hour] [start weather|random] [static]: the lobby's season / time / weather (host)");
     cmd_register("lobby_status", cmd_lobby_status, "print the lobby");
+    cmd_register("lobby_wait", cmd_lobby_wait, "lobby_wait players <n> | ready <n> | state <name> | host [timeout frames]: hold a script until the lobby gets there");
     cmd_register("cos_equip", cmd_cos_equip, "cos_equip <item id> | none <slot>: equip a cosmetic (no args: the loadout)");
 }
 
