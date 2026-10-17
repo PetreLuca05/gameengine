@@ -40,6 +40,7 @@
     "sway": { "anchor": { "hip": "pivot_socket", "ads": "sight" } }
   },
   "pose": "rifle",
+  "fire_anim": { "class": "shotgun", "mass": 3.4, "moment": 0.55 },
   "sound_fire": "shot_shotgun",
   "grip": [0, 0, 0],
   "support": [0, 0.0, -0.32],
@@ -70,7 +71,7 @@
   },
   "model": [
     { "offset": [0, 0.055, -0.25], "half": [0.02, 0.022, 0.38], "color": [0.15, 0.15, 0.15] },
-    { "offset": [0, 0.02, -0.3], "half": [0.026, 0.024, 0.12], "color": [0.35, 0.22, 0.12] },
+    { "offset": [0, 0.02, -0.3], "half": [0.026, 0.024, 0.12], "color": [0.35, 0.22, 0.12], "mech": "pump" },
     { "offset": [0, 0.01, 0.17], "half": [0.022, 0.05, 0.14], "color": [0.38, 0.24, 0.13] }
   ]
 }

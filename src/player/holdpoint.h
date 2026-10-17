@@ -16,6 +16,7 @@
 #include "core/base.h"
 #include "core/dgmath.h"
 #include "anim/anim.h"
+#include "player/sway.h"
 
 struct cJSON;
 
@@ -38,11 +39,9 @@ typedef struct HoldPointStyle {
     float blend_in[HP_STATE_COUNT];   // blend time into each state (s)
     float eye_relief;                 // ADS: sight distance in front of the eye (m)
     vec3 ads_rot;                     // ADS extra rotation (deg), normally 0
-    // procedural layer (scaled by ads_scale while aiming down sights)
+    // procedural layer. Sway (breathing, look lag, bob, landing) is NOT per style: one global
+    // profile for every item (src/player/sway.c). kick_scale scales the fire animation's gun kick.
     float ads_scale;
-    float lag_rot, lag_pos, lag_max, lag_k, lag_d;   // look lag: deg / m per rad/s, clamp deg, spring
-    float sway_rot, sway_freq, breath_pos, breath_freq;
-    float bob_pos, bob_rot, bob_freq;
     float kick_scale;
     // weapon collision
     float col_back, col_up, col_pitch, col_curve, col_in_speed, col_out_speed, col_radius;
@@ -74,18 +73,10 @@ typedef struct HoldPointState {
     float ix0[6], iv0[6], iT[6];
     vec3 base_vel, base_avel;         // last tick's hold point velocity (m/s, rad/s rotation vector)
     Xform base;                       // last blended state transform (hold point, camera space)
-    float prev_yaw, prev_pitch;
-    vec2 lag, lag_v;                  // look lag (deg pitch, yaw) spring
-    float bob_phase, bob_amt, t;
+    SwayState sway;                   // global sway (look lag, breathing, bob, landing, hold breath)
     float pull;                       // collision pull 0..1 (smoothed)
     float pitch_w;                    // soft pitch limit weight (0 in ADS)
     u8 ads_from;                      // the state the blend came from (ADS anchor blend out of ADS)
-    // weapon sway extras
-    float land, land_v;               // landing dip spring (m, +down)
-    float air_vy;                     // lowest vertical speed while airborne (landing strength)
-    bool was_grounded;
-    float breath_s;                   // smoothed hold-breath factor
-    float shake;                      // 0..1 after letting go of a held breath (shaky overshoot)
 } HoldPointState;
 
 typedef bool (*HoldPointRayFn)(void *ctx, vec3 origin, vec3 dir_len, float *fraction, vec3 *point, vec3 *normal);
@@ -100,13 +91,12 @@ typedef struct HoldKickParams {
     float ads_push, ads_roll, ads_misalign_deg;
     u8 kick_hip, kick_ads, sway_hip, sway_ads;
     float ads_in, ads_out;   // blend times into / out of ADS (s, > 0: the weapon's ADS time, so the gun and the zoom finish together)
-    // Weapon sway (docs/RECOIL.md "Weapon sway"): component multipliers [breathing, look lag, bob,
-    // landing] at the hip and in ADS (blended with the ADS progress), the optic's steadiness, the
-    // hold-breath factor (1 normal, hold_breath_mult while held), stance (crouch / prone < 1) and an
-    // extra wobble 0..1 (low health, aiming right after sprinting).
+    // Global weapon sway inputs (docs/FIRE_ANIM.md "Global sway"): the optic's steadiness, the
+    // hold-breath factor (1 normal, the profile's hold_breath_mult while held), stance (crouch /
+    // prone < 1), an extra wobble 0..1 (low health, aiming right after sprinting) and the global
+    // wpn_sway_ads_scale. Never anything weapon-specific.
     bool sway_set;
-    float sway_mh[4], sway_ma[4];
-    float optic_sway, breath_k, stance, wobble;
+    float optic_sway, breath_k, stance, wobble, ads_sway_mult;
 } HoldKickParams;
 
 typedef struct HoldPointInput {
@@ -146,6 +136,7 @@ typedef struct HoldPointInput {
     float sway_scale;                 // look lag, idle sway, breathing, sprint bob (wpn_sway_scale; 0 = none)
     float bob_scale;                  // movement bob outside sprint (wpn_bob_scale; 0 = the item stays still)
     HoldKickParams kick_params;       // anchors / ADS kick shaping (unset = sight anchor, push 1, roll 1)
+    const SwayProfile *sway;          // NULL = the global profile (sway_global())
 } HoldPointInput;
 
 typedef struct HoldPointOutput {
@@ -159,6 +150,7 @@ typedef struct HoldPointOutput {
     float pull;                       // collision pull 0..1
     vec3 cast_from, cast_to;          // world, last collision cast (debug)
     bool cast_hit;
+    vec3 sway_hip_rot, sway_hip_pos, sway_ads_rot;   // this tick's global sway (sway_check)
 } HoldPointOutput;
 
 void holdpoint_style_defaults(HoldPointStyle *s, const char *style_name);

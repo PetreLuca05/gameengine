@@ -193,6 +193,7 @@ int main(int argc, char **argv) {
     // Test runs never read or write the user's settings (they used to overwrite them on exit).
     config_set_enabled(!opt.test);
     bool first_run = false;
+    cvar_reg_float("dev_fixed_fps", 0.0f, 0.0f, 1000.0f, 0, "frame time fixed to 1 / this (0 = real time): deterministic captures on slow machines");
     if (opt.test) cvar_set("r_maxfps", "60");
     else if (config_exec_file(video_config_path())) log_info("config loaded from %s", video_config_path());
     else { log_info("no config yet: settings will be saved to %s", video_config_path()); first_run = true; }
@@ -214,6 +215,7 @@ int main(int argc, char **argv) {
     input_set_game_focus(!menus_wants_mouse() && !console_is_open());   // the main menu keeps the cursor
     audio_play_music("ambient");
 
+    Cvar *fixed_fps = cvar_find("dev_fixed_fps");
     double last = platform_time();
     double worst_dt = 0, total_time = 0, smoothed_dt = 0;
     while (!g_engine.quit) {
@@ -222,6 +224,9 @@ int main(int argc, char **argv) {
         last = frame_start;
         if (g_engine.frame_index > 5) { if (dt > worst_dt) worst_dt = dt; total_time += dt; }
         if (dt > 0.25) dt = 0.25;
+        // Captures / tests on slow machines: every frame advances exactly 1 / dev_fixed_fps seconds
+        // (one sim tick at 60), whatever the wall clock did.
+        if (fixed_fps && fixed_fps->f > 0.0f) dt = 1.0 / fixed_fps->f;
         g_engine.real_time = frame_start;
         g_engine.frame_dt = dt;
         // Smooth the frame time (not 1/dt, which outliers dominate).

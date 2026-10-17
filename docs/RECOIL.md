@@ -9,8 +9,7 @@ Data: `data/weapons/*.json` (one gun per file), `assets/ui/crosshair.json`.
 | Layer | Where | Affects aim? | Networked |
 |---|---|---|---|
 | **Aim recoil** | `RecoilState` in `WeaponState` (part of `PlayerSim`) | yes: rotates the real view | predicted on the client and replayed identically on the host |
-| **Camera kick** | `RecoilVisual.cam_*` springs (client only) | no: camera only | no |
-| **Viewmodel kick** | `RecoilVisual.vm_*` springs to `HandsInput.vm_kick_*` | no: weapon/hands only | no |
+| **Fire animation** | `src/anim/fire_anim.c` (docs/FIRE_ANIM.md): gun kick, hands, body, camera, punches | no: weapon / hands / camera only | no (remote players: a reduced third-person instance from the fire events) |
 | **Spread cone** | `recoil_spread()` | bullets are drawn inside it | derived from the replicated state |
 
 ### Aim recoil
@@ -45,16 +44,15 @@ recovery keeps what was already returned and countered and continues the pattern
 perfectly and recovery has nothing to undo. Don't pull and you end up `(1 − fraction) × acc` above
 your start.
 
-### Camera and viewmodel kick
+### Camera and gun kick: the fire animation
 
-Each locally predicted shot raises a `ShotEvent`, and the game's hook `on_shot` adds an impulse to
-the client springs (`recoil_visual_kick`). The springs are stepped per tick (semi-implicit Euler, 4
-substeps) and sampled with the render alpha. The camera spring adds pitch, yaw and roll plus a small
-backward offset. The aim is untouched, so the crosshair drifts against the kick. With
-`crosshair_follow_kick 1` the crosshair is pinned to the screen center instead. The viewmodel spring
-pushes the grip back and up, rotates the muzzle, and the IK support hand follows. `wpn_visual_scale`
-scales both layers. ADS scales the camera kick by 0.6 and the viewmodel kick by
-`viewmodel_kick.ads_scale`.
+Each locally predicted shot raises a `ShotEvent` (with its sub-tick time), and the game's hook
+feeds the gun-driven fire animation: a one-tick, mass-based gun kick, hands that lag it, a camera
+that follows the body 2-3 ticks later, FOV punch and the other perceptual layers. See
+**docs/FIRE_ANIM.md**. The aim is untouched, so the crosshair drifts against the camera layer.
+With `crosshair_follow_kick 1` the crosshair is pinned to the screen center instead. The weapons'
+`camera_kick` / `viewmodel_kick` blocks and `recoil_visual_*` are legacy: they are still parsed
+but no longer drive the view.
 
 ### Spread cone and crosshair
 
@@ -144,17 +142,20 @@ The arms follow by IK, so the hands stay glued. Sway is cosmetic: it never moves
 * The scope eye-box shadow uses the optic's own axis, so it reacts to the residual sway. The
   picture follows the eye → sight line.
 
-**Same sway on every item:** no weapon sets its own `sway`, `idle_sway` or `scope_sway`; every held
-item uses the defaults above (idle sway 0.05). Only attachments still scale it (`sway_scale`). The
-keys still parse, so a weapon can override them again.
+**Same sway on every item:** sway is ONE global profile, `assets/weapons/sway_global.json`
+(`src/player/sway.c`, docs/FIRE_ANIM.md "Global sway"). Weapons, their mass and their attachments
+never change it; a weapon's `sway`, `idle_sway` or `scope_sway` keys are ignored with a warning.
+Only an optic's own `sway_scale` scales the ADS sway. `sway_check` asserts bit-identical sway
+across every weapon x attachment combination.
 
 **Aim sway:** the old aim sway that moved the reticle itself (`wpn_ads_sway`, `wpn_ads_bob`) is
 still available, but defaults to 0.
 
+The multipliers live in `assets/weapons/sway_global.json` (one profile for every item):
+
 ```json
-"sway": { "hip": { "breathing": 1.0, "look_lag": 1.0, "bob": 1.0, "landing": 1.0 },
-          "ads": { "breathing": 0.35, "look_lag": 0.25, "bob": 0.15, "landing": 0.5 }, "hold_breath_mult": 0.1 },
-"hold_breath": 3.5
+"hip": { "breathing": 1.0, "look_lag": 1.0, "bob": 1.0, "landing": 1.0 },
+"ads": { "breathing": 0.35, "look_lag": 0.25, "bob": 0.15, "landing": 0.5 }, "hold_breath_mult": 0.1
 ```
 
 **Settings:**

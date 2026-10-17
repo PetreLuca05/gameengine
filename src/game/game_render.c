@@ -703,9 +703,13 @@ void game_render(void) {
     RenderCamera cam = camera_update(&G->view, &interp, (float)g_engine.frame_dt, &cads, dead);
     // Weapon feel: camera kick spring (visual only, aim unaffected) + aim sway (bullets use it too).
     if (p && !dead) {
+        // Fire animation layer 5 (docs/FIRE_ANIM.md): the camera follows the body's reaction 2-3 ticks
+        // after the gun (its own overshoot), plus the roll twitch and the FOV punch.
         float ck = cvar_find("cam_kick_scale") ? cvar_find("cam_kick_scale")->f : 1.0f;   // visual camera kick (aim recoil unaffected)
-        vec3 kr = v3_scale(spring_vec3_sample(&G->recoil_vis.cam_rot, G->alpha), ck);
-        float kb = spring_f32_sample(&G->recoil_vis.cam_back, G->alpha) * ck;
+        const FireAnimOut *fo = game_fire_sample(G->alpha);
+        vec3 kr = v3_scale(v3(fo->cam_rot.x, fo->cam_rot.y, fo->cam_rot.z), ck);
+        float kb = fo->cam_back * ck;
+        cam.fov_deg = fmaxf(5.0f, cam.fov_deg - fo->fov_punch * ck);
         // Sway and ADS bob move the weapon (about the eye), not the camera: the sight centre stays
         // exactly on the bullets' line (weapon_aim_offset_deg is what the shots use).
         vec2 sway = weapon_aim_offset_deg(wd, &p->sim.wpn, &p->sim.move, weapon_sway_time(vcmd->seq) + G->alpha * SIM_DT);
@@ -922,12 +926,17 @@ void game_render(void) {
             hi.use_held = (G->last_cmd.buttons & BTN_USE) != 0;
         }
         hi.ads = ads;
-        hi.vm_kick_pos = spring_vec3_sample(&G->recoil_vis.vm_pos, G->alpha);
-        hi.vm_kick_rot = spring_vec3_sample(&G->recoil_vis.vm_rot, G->alpha);
+        {
+            const FireAnimOut *fo = game_fire_sample(G->alpha);   // the empty-hands fallback rig (cl_fp_body 0)
+            hi.vm_kick_pos = v3_add(fo->gun_pos, v3(0, 0, fo->screen_kick));
+            hi.vm_kick_rot = fo->gun_rot;
+            hands_set_fire_mech(true, fo->slide, fo->wobble_rot);
+        }
         hands_update(&hi);
         bool tpv = cvar_find("cl_thirdperson")->i || GR->cam_mode == 3;   // incl. the third-person vehicle camera
         if (!tpv) {
             chars_render_local_fp(w, G->alpha, vs);
+            game_fire_flush_flash();   // the muzzle flash on this frame's (kicked) gun
             fp_cam_test_hands();
             ads_sweep_frame();
         }

@@ -3,6 +3,7 @@
   "id": "extended_mag",
   "name": "Extended Magazine",
   "slot": "magazine",
+  "fire": { "mass": 0.3 },
   "mount": {
     "pos": [0, 0, 0]
   },
