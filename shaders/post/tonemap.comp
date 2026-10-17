@@ -136,6 +136,9 @@ void main() {
     if (pc.u0.x != 0u) {
         vec3 b = textureLod(bloom_tex, suv, 0.0).rgb / max(float(pc.u0.z), 1.0);
         float bi = U.s_bloom.x;
+        // Death sequence blur (docs/REVIVE.md): the bloom chain is the blurred scene; stronger at the edges.
+        float db = U.s_fb3.y;
+        if (db > 0.0) c = mix(c, b, clamp(db * (0.45 + 0.55 * smoothstep(0.0, 0.9, sqrt(r2))), 0.0, 0.9));
         c = mix(c, b, bi);
         if (U.s_bloom.y > 0.0) c += b * textureLod(dirt_tex, uv, 0.0).rgb * (U.s_bloom.y * bi * 8.0);
     }
@@ -203,5 +206,6 @@ void main() {
         o = mix(o, vec3(4.0), clamp(U.s_fb.z, 0.0, 1.0));
         o = REC709_TO_2020 * o * (U.s_out.y / 10000.0);
     }
+    o *= 1.0 - clamp(U.s_fb3.x, 0.0, 1.0);   // death sequence: the cut to black
     imageStore(dst, p, vec4(o, 1.0));
 }

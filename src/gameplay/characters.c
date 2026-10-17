@@ -2439,6 +2439,28 @@ bool chars_extract_points(World *w, EntityId e, vec3 out[2]) {
     return true;
 }
 
+bool chars_ragdoll_probe(World *w, EntityId e, vec3 pos[2], float speed[2], float clearance[2]) {
+    CharacterInst *c = char_get(w, e);
+    if (!c || !LIB || !c->rag.active) return false;
+    const RagdollDef *d = &LIB->ragdoll;
+    int idx[2] = { -1, -1 };
+    for (int b = 0; b < d->body_count && b < c->rag.body_count; b++) {
+        if (!strcmp(d->bodies[b].name, "head")) idx[0] = b;
+        if (!strcmp(d->bodies[b].name, "chest")) idx[1] = b;
+    }
+    for (int k = 0; k < 2; k++) {
+        if (idx[k] < 0) return false;
+        quat r;
+        phys_get_transform(w->phys, c->rag.body[idx[k]], &pos[k], &r);
+        speed[k] = v3_len(phys_get_velocity(w->phys, c->rag.body[idx[k]]));
+        // Distance to whatever is below (the ragdoll's own bodies are not in PL_MASK_WORLD).
+        RayHit rh;
+        float r0 = d->bodies[idx[k]].radius * c->rag.scale;
+        clearance[k] = phys_raycast(w->phys, pos[k], v3(0, -3.0f, 0), PL_MASK_WORLD, PHYS_INVALID_BODY, &rh) ? fmaxf(0.0f, rh.distance - r0) : 3.0f;
+    }
+    return true;
+}
+
 bool chars_ragdoll_release(World *w, EntityId e) {
     CharacterInst *c = char_get(w, e);
     if (!c || !c->tool_rag) return false;

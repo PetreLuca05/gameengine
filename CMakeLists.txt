@@ -508,7 +508,7 @@ endif()
 add_dependencies(test_hud dg_copy_data)
 add_test(NAME hud COMMAND test_hud WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
 # Downed / revive / corpse / DNA / fabricator state machines + the death sequence (docs/REVIVE.md).
-add_executable(test_revive tests/test_revive.c src/gameplay/revive/revive_core.c src/gameplay/revive/death_seq.c third_party/cjson/cJSON.c)
+add_executable(test_revive tests/test_revive.c src/gameplay/revive/revive_core.c src/gameplay/revive/death_seq.c src/audio/death_synth.c third_party/cjson/cJSON.c)
 set_target_properties(test_revive PROPERTIES C_STANDARD 11)
 target_include_directories(test_revive PRIVATE src third_party/cjson)
 if(MSVC)

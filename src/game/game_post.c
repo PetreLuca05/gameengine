@@ -10,6 +10,7 @@
 // (post_bench, post_volumes, screenshot_hdr) and the post profiler overlay (r_post_profile).
 #include "game_internal.h"
 #include "player/spectator.h"
+#include "game_revive.h"
 #include "core/engine.h"
 #include "core/cvar.h"
 #include "core/log.h"
@@ -584,6 +585,7 @@ void game_post_frame(const PostFrameInfo *fi) {
     daynight_post(&s);
     weather_post(&s);
     apply_feedback(&s, fi, dt);
+    game_death_post(&s);   // death sequence / downed variant (game_death.c)
     peek_post(&s);   // door peek: fisheye through the visor
     apply_photo(&s);
     // With ADS DoF on (game_sights.c), aiming switches the DoF exactly when the aim completes;

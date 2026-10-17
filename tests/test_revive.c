@@ -6,6 +6,7 @@
 // neutral after revive, impact detector paths).
 #include "gameplay/revive/revive_core.h"
 #include "gameplay/revive/death_seq.h"
+#include "audio/death_synth.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -503,6 +504,56 @@ static void test_death_seq(void) {
     CHECK(finite, "finite curves");
 }
 
+// ------------------------------------------------------------------ death synth (ring + heartbeat)
+
+static void test_synth(void) {
+    const float sr = 48000.0f;
+    static float buf[48000 * 2];
+    DeathSynth s;
+    death_synth_init(&s);
+    memset(buf, 0, sizeof(buf));
+    death_synth_render(&s, buf, 48000, 2, sr);
+    float mx = 0;
+    for (int i = 0; i < 96000; i++) mx = fmaxf(mx, fabsf(buf[i]));
+    CHECK(mx == 0.0f, "silent until targeted");
+    // Ring at 3600 Hz, no warble: the zero crossings give the pitch.
+    DeathSynthParams p = { 0.3f, 3600.0f, 0.0f, 0.0f, 0.0f, 70.0f };
+    death_synth_set(&s, &p);
+    memset(buf, 0, sizeof(buf));
+    death_synth_render(&s, buf, 48000, 2, sr);
+    int zc = 0;
+    for (int i = 24000; i < 48000 - 1; i++) if ((buf[i * 2] < 0) != (buf[i * 2 + 2] < 0)) zc++;
+    float hz = (float)zc / 2.0f / 0.5f;
+    CHECK(fabsf(hz - 3600.0f) < 40.0f, "ring pitch %.0f Hz", hz);
+    // A gain step (the ring starting at death, stopping at the cut) never jumps: max sample delta
+    // stays near the tone's own slope (2*pi*f/sr * amplitude).
+    float slope = (float)(6.2831853 * 3600.0 / sr) * 0.3f * 0.5f * 1.16f;   // sin + 0.08 sin(2x): slope factor 1.16
+    float maxd = 0;
+    for (int i = 1; i < 48000; i++) maxd = fmaxf(maxd, fabsf(buf[i * 2] - buf[i * 2 - 2]));
+    CHECK(maxd <= slope * 1.05f, "no pop on the attack (max delta %.4f, tone slope %.4f)", maxd, slope);
+    p.ring_gain = 0.0f;
+    death_synth_set(&s, &p);
+    memset(buf, 0, sizeof(buf));
+    death_synth_render(&s, buf, 24000, 2, sr);
+    maxd = 0;
+    for (int i = 1; i < 24000; i++) maxd = fmaxf(maxd, fabsf(buf[i * 2] - buf[i * 2 - 2]));
+    CHECK(maxd <= slope * 1.05f, "no pop on the stop (max delta %.4f)", maxd);
+    CHECK(fabsf(buf[23999 * 2]) < 1e-4f && death_synth_silent(&s), "silent after the release");
+    // Heartbeat: periodic low thumps at the target rate.
+    DeathSynthParams h = { 0.0f, 3600.0f, 0.0f, 0.0f, 0.6f, 60.0f };
+    death_synth_init(&s);
+    death_synth_set(&s, &h);
+    memset(buf, 0, sizeof(buf));
+    death_synth_render(&s, buf, 48000, 1, sr);
+    float e_beat = 0, e_gap = 0;
+    for (int i = 0; i < 4800; i++) e_beat += buf[i] * buf[i];             // 0..100 ms: the lub
+    for (int i = 33600; i < 38400; i++) e_gap += buf[i] * buf[i];        // 700..800 ms: between beats
+    CHECK(e_beat > 50.0f * fmaxf(e_gap, 1e-9f), "heartbeat pulses (%.3f vs %.6f)", e_beat, e_gap);
+    bool finite = true;
+    for (int i = 0; i < 48000; i++) finite = finite && isfinite(buf[i]);
+    CHECK(finite, "finite output");
+}
+
 int main(void) {
     test_rules();
     test_downed();
@@ -513,6 +564,7 @@ int main(void) {
     test_fabricator();
     test_full_loop();
     test_death_seq();
+    test_synth();
     printf("test_revive: %d checks, %d failed\n", g_checks, g_fail);
     return g_fail ? 1 : 0;
 }

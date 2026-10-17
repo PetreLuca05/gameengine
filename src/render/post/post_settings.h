@@ -64,6 +64,7 @@ typedef struct PostSettings {
     float fb_damage, fb_lowhealth, fb_flash, fb_hitmarker, fb_sprint, fb_underwater, fb_nightvision;
     vec3 fb_tint;
     float fb_desaturate;
+    float fb_black, fb_blur;       // death sequence (docs/REVIVE.md): black cut, mild screen blur
     // debug
     int debug_view;                // index into post_debug_names (0 = off)
     bool compare_split;            // left half: no post (tonemap only), right half: full stack

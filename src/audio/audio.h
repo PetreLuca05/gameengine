@@ -21,4 +21,15 @@ void audio_loop_set(const char *name, float volume);
 void audio_loop3d(u32 key, const char *name, vec3 pos, float volume, float pitch);
 bool audio_available(void);
 
+// Death / downed mix snapshot (docs/REVIVE.md "Death sequence"): the world buses (effects, music,
+// voice; not the UI) through a low-pass at lpf_hz and a gain, plus the procedural ear ring and
+// heartbeat (audio/death_synth.h). Neutral: lpf_hz >= 20000, world_gain 1, ring / heart 0.
+typedef struct AudioDeathMix {
+    float lpf_hz, world_gain;
+    float ring_gain, ring_freq, warble_hz, warble_depth;
+    float heart_gain, heart_bpm;
+} AudioDeathMix;
+void audio_set_death_mix(const AudioDeathMix *m);
+const AudioDeathMix *audio_death_mix(void);   // the last set (tests, debug)
+
 #endif

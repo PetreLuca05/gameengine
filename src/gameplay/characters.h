@@ -144,6 +144,9 @@ CharacterInst *chars_attach_corpse(World *w, EntityId corpse, int owner_slot);
 bool chars_body_axis(World *w, EntityId e, vec3 *pelvis, vec3 *head);
 // extract_blood hand IK: [0] where the free hand steadies the body (chest), [1] the needle point (arm / neck).
 bool chars_extract_points(World *w, EntityId e, vec3 out[2]);
+// Death sequence impact probe (docs/REVIVE.md): the ragdoll's head and chest bodies, their speeds
+// and their clearance above the world below (m). False without an active ragdoll.
+bool chars_ragdoll_probe(World *w, EntityId e, vec3 pos[2], float speed[2], float clearance[2]);
 bool chars_palm_world(World *w, EntityId e, int hand, vec3 *out);   // latest pose, world space
 // First person: this frame's final camera (the held item is placed relative to it).
 void chars_set_fp_camera(vec3 pos, quat rot, bool valid);

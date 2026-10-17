@@ -16,6 +16,7 @@
 #include "gameplay/entities.h"
 #include "gameplay/health.h"
 #include "gameplay/revive/revive.h"
+#include "game_revive.h"
 #include "gameplay/weapons.h"
 #include "gameplay/characters.h"
 #include "anim/anim_library.h"
@@ -703,6 +704,7 @@ void game_frame(float dt) {
     if (steps == 8) G->accumulator = 0; // spiral of death guard
     game_holdpoint_test_frame();
     G->alpha = (float)(G->accumulator / SIM_DT);
+    game_death_frame(dt);   // death sequence: post / mix / HUD from this frame's state (docs/REVIVE.md)
     // Reconciliation corrections fade over cam_recon_smooth_time (the head stabilizer adds its own spring).
     {
         float tsm = camera_fp_cvars()->recon_smooth ? camera_fp_cvars()->recon_smooth->f : 0.08f;
@@ -1382,6 +1384,7 @@ void game_init(void) {
     cmd_register("map", cmd_map, "host a new game on a map");
     wheels_register();
     revive_register();
+    game_death_register();
     game_pings_register();
     hud_register();
     openworld_register_commands();

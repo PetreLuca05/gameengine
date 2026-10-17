@@ -29,5 +29,7 @@ void main() {
     } else {
         o = direct_output_srgb(c, pc.p0.x) + dither / 255.0;
     }
-    o_color = vec4(clamp(o, 0.0, 1.0), 1.0);
+    // The death sequence's desaturation and black cut work even without a post stack (docs/REVIVE.md).
+    o = mix(o, vec3(dot(o, vec3(0.2126, 0.7152, 0.0722))), clamp(U.s_fb2.w, 0.0, 1.0));
+    o_color = vec4(clamp(o, 0.0, 1.0) * (1.0 - clamp(U.s_fb3.x, 0.0, 1.0)), 1.0);
 }

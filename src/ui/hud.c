@@ -25,6 +25,7 @@
 #include "player/spectator.h"
 #include "gameplay/revive/revive.h"
 #include "widgets/timed_ring.h"
+#include "game/game_revive.h"
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
@@ -469,6 +470,7 @@ void hud_draw(void) {
     icons_tick();
     draw_dev(g, w, s);
     if (menus_open()) return;   // the HUD hides behind game screens
+    if (game_death_hud_hidden()) return;   // the death sequence: the fall and the black are HUD-free (docs/REVIVE.md)
     GuiRect safe = safe_rect();
     draw_world_bars(g, w, gui_scale());
     draw_fabricators(g, w);
