@@ -50,7 +50,7 @@ void proc_foot_pelvis(ProcState *st, const ProcInput *in, Pose *pose, Xform *mod
     st->pelvis_offset = lerpf(st->pelvis_offset, want, k * 0.6f);
     if (hips >= 0 && st->pelvis_offset < 0) {
         Xform h = model[hips];
-        h.t.y += st->pelvis_offset;
+        h.t.y += in->lod_w < 1.0f ? st->pelvis_offset * fmaxf(in->lod_w, 0.0f) : st->pelvis_offset;   // LOD fade (docs/LOD.md)
         pose_set_model(s, pose, model, hips, h);
         pose_update_children(s, pose, model, hips);
     }
@@ -74,6 +74,7 @@ void proc_lean(ProcState *st, const ProcInput *in, Pose *pose, Xform *model) {
     st->lean.z = lerpf(st->lean.z, roll_t, k);
     int spine = s->role[BR_SPINE];
     quat q = quat_mul(quat_axis_angle(v3(1, 0, 0), st->lean.x), quat_axis_angle(v3(0, 0, 1), st->lean.z));
+    if (in->lod_w < 1.0f) q = quat_nlerp(quat_identity(), q, fmaxf(in->lod_w, 0.0f));   // LOD fade (docs/LOD.md)
     proc_rotate_bone(s, pose, model, spine >= 0 ? spine : hips, q);
 }
 
@@ -113,11 +114,12 @@ void proc_foot_legs(ProcState *st, const ProcInput *in, Pose *pose, Xform *model
         vec3 pole = v3_sub(model[b].t, mid);
         if (v3_len2(pole) < 1e-6f) pole = v3(0, 0, -1);
         quat keep = model[c].r;
-        anim_ik_two_bone_pose(s, pose, model, a, b, c, target, &keep, v3_norm(pole), 1.0f);
+        float lw = in->lod_w < 1.0f ? fmaxf(in->lod_w, 0.0f) : 1.0f;   // LOD fade (docs/LOD.md)
+        anim_ik_two_bone_pose(s, pose, model, a, b, c, target, &keep, v3_norm(pole), lw);
         // Align the foot to the ground normal (model space).
         vec3 n = quat_rotate(quat_conj(in->root.r), fs->ground_n);
         quat al = quat_from_to(v3(0, 1, 0), v3_norm(n));
-        al = quat_nlerp(quat_identity(), al, in->params->foot_align);
+        al = quat_nlerp(quat_identity(), al, in->params->foot_align * lw);
         if (quat_angle_between(al, quat_identity()) < 0.6f) proc_rotate_bone(s, pose, model, c, al);
     }
 }

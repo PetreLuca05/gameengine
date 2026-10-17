@@ -7,7 +7,7 @@
 #include "classic_common.glsl"
 #include "classic_mask.glsl"
 layout(set = 1, binding = 0) uniform sampler2D tex;
-layout(location = 9) flat in float v_fade;
+layout(location = 9) flat in vec4 v_fade;
 bool cl_clip(vec2 uv) {
     if (cl_faded(v_fade, gl_FragCoord.xy)) return true;
     return pc.model[3].y > 0.0 && cl_mask_alpha(tex, uv * max(pc.params.w, 1e-3)) < pc.model[3].y;

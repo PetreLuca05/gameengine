@@ -341,6 +341,10 @@ bool vkp_create_pipelines(void) {
     d[PIPE_LIT_BLEND].cull = VK_CULL_MODE_NONE;
     d[PIPE_SHADOW] = (PipeDesc){ "shadow.vert", NULL, VL_MESH_POS_ONLY, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, VK_POLYGON_MODE_FILL,
                                  VK_CULL_MODE_NONE, true, true, false, VK_FORMAT_UNDEFINED, depth, true, R->layout_lit };
+    // Terrain chunks with the geomorph (docs/LOD.md): position + uv (the morph target), shadow_morph.vert.
+    d[PIPE_SHADOW_MORPH] = d[PIPE_SHADOW];
+    d[PIPE_SHADOW_MORPH].vert = "shadow_morph.vert";
+    d[PIPE_SHADOW_MORPH].vl = VL_MESH;
     d[PIPE_LINES] = (PipeDesc){ "lines.vert", "lines.frag", VL_LINE, VK_PRIMITIVE_TOPOLOGY_LINE_LIST, VK_POLYGON_MODE_FILL,
                                 VK_CULL_MODE_NONE, true, false, true, hdr, depth, false, R->layout_lit };
     d[PIPE_LINES_OVERLAY] = d[PIPE_LINES];
@@ -385,6 +389,10 @@ bool vkp_create_pipelines(void) {
     d[PIPE_SKIN_SHADOW] = d[PIPE_SHADOW];
     d[PIPE_SKIN_SHADOW].vert = "skin_shadow.vert";
     d[PIPE_SKIN_SHADOW].vl = VL_SKIN_SHADOW;
+    // Fading shadow casters (docs/LOD.md): the LOD cross-fade / shadow distance fade dithered into the
+    // shadow map with the main view's complementary masks (no double shadows, no gaps).
+    d[PIPE_SKIN_SHADOW_FADE] = d[PIPE_SKIN_SHADOW];
+    d[PIPE_SKIN_SHADOW_FADE].frag = "skin_shadow.frag";
 
     VkPipeline built[PIPE_COUNT];
     bool ok = true;
@@ -410,9 +418,9 @@ void vkp_destroy_pipelines(void) {
 
 // ------------------------------------------------------------------ hot reload
 
-static const char *k_shader_files[] = { "lit.vert", "lit.frag", "shadow.vert", "lines.vert", "lines.frag", "text.vert",
+static const char *k_shader_files[] = { "lit.vert", "lit.frag", "shadow.vert", "shadow_morph.vert", "lines.vert", "lines.frag", "text.vert",
                                         "text.frag", "fullscreen.vert", "gbuffer.frag", "gbuffer_skin.frag", "ui.vert", "ui.frag",
-                                        "skin.vert", "skin.frag", "skin_shadow.vert",
+                                        "skin.vert", "skin.frag", "skin_shadow.vert", "skin_shadow.frag",
                                         "vfx_reset.comp", "vfx_begin.comp", "vfx_emit.comp", "vfx_emit_sub.comp", "vfx_args.comp",
                                         "vfx_update.comp", "vfx_draw_args.comp", "vfx_sort.comp", "vfx_particle.vert", "vfx_particle.frag",
                                         "vfx_decal.vert", "vfx_decal.frag" };
@@ -447,7 +455,7 @@ static i64 shader_sources_mtime(void) {
         i64 t = platform_file_mtime(path);
         if (t > newest) newest = t;
     }
-    static const char *incs[] = { "common.glsl", "vfx_common.glsl", "vfx_spawn.glsl", "lit_body.glsl", "lighting.glsl", "weather.glsl", "post/post_common.glsl", "water/water_waves.glsl", "water/water_common.glsl" };
+    static const char *incs[] = { "common.glsl", "vfx_common.glsl", "vfx_spawn.glsl", "lit_body.glsl", "lighting.glsl", "weather.glsl", "post/post_common.glsl", "water/water_waves.glsl", "water/water_common.glsl", "lod_fade.glsl" };
     for (int i = 0; i < ARRAY_COUNT(incs); i++) {
         snprintf(path, sizeof(path), "%s/shaders/%s", DG_SOURCE_DIR, incs[i]);
         i64 t = platform_file_mtime(path);

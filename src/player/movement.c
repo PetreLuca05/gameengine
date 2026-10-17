@@ -40,6 +40,7 @@ void player_register_cvars(void) {
     t->mantle_reach = cvar_reg_float("pl_mantle_reach", 0.65f, 0.1f, 2, CVAR_SERVER, "forward reach for ledge detection (m)");
     t->mantle_speed = cvar_reg_float("pl_mantle_speed", 1.0f, 0.2f, 4, CVAR_SERVER, "mantle animation speed multiplier");
     t->vault_speed = cvar_reg_float("pl_vault_speed", 1.0f, 0.2f, 4, CVAR_SERVER, "vault animation speed multiplier");
+    t->hang_yaw_limit = cvar_reg_float("pl_hang_yaw_limit", 110.0f, 20.0f, 180.0f, CVAR_SERVER, "ledge hang: how far the view turns away from the wall (deg); the body and the grips stay on the ledge");
     t->debug_mantle = cvar_reg_bool("pl_debug_mantle", false, 0, "draw mantle/vault/hang shape casts");
     t->debug_melee = cvar_reg_bool("wpn_debug_melee", false, 0, "draw melee sweep rays");
     t->noclip_speed = cvar_reg_float("pl_noclip_speed", 10.0f, 1.0f, 100, 0, "noclip fly speed");
@@ -65,6 +66,14 @@ const PlayerTuning *player_tuning(void) { return T; }
 
 float player_eye_height(const PlayerMove *m) {
     return lerpf(PLAYER_EYE_STAND, PLAYER_EYE_CROUCH, smoothstepf(0, 1, m->crouch_amount));
+}
+
+float player_hang_wall_yaw(const PlayerMove *m) { return atan2f(m->hang_normal.x, m->hang_normal.z); }
+
+float player_hang_clamp_yaw(const PlayerMove *m, float yaw) {
+    float lim = (T && T->hang_yaw_limit ? T->hang_yaw_limit->f : 110.0f) * DG_DEG2RAD;
+    float rel = wrap_angle(yaw - player_hang_wall_yaw(m));
+    return yaw - (rel - clampf(rel, -lim, lim));
 }
 
 static vec3 (*g_eye_offset)(float yaw, float pitch);
@@ -243,6 +252,16 @@ static void set_hand_anchors(PlayerMove *m, vec3 wall_point, vec3 wall_normal, f
         m->hand_anchor[1] = t;
     }
     m->hand_anchor_valid = 1;
+}
+
+// Inverse of the hang placement in detect_ledge (feet 2.05 m under the top, PLAYER_RADIUS + 0.06 m
+// out from the wall point).
+void player_hang_grips(vec3 feet, float wall_yaw, vec3 grip[2]) {
+    PlayerMove m;
+    vec3 n = v3(sinf(wall_yaw), 0.0f, cosf(wall_yaw));
+    set_hand_anchors(&m, v3_madd(feet, n, -(PLAYER_RADIUS + 0.06f)), n, feet.y + 2.05f);
+    grip[0] = m.hand_anchor[0];
+    grip[1] = m.hand_anchor[1];
 }
 
 static void start_traverse(PlayerMove *m, MoveMode kind, vec3 start, vec3 mid, vec3 end, float dur, bool end_crouched) {
@@ -461,6 +480,8 @@ void player_move_tick(World *w, int slot, PlayerSim *sim, PhysCharacter *ch, con
         const struct AnimLibrary *lib = g_engine.anim;
         float hspeed = v3_len(v3_flat(m->vel));
         m->body_yaw = anim_body_yaw_step(m->body_yaw, m->yaw, hspeed > 0.3f || m->mode != MOVE_WALK, lib ? &lib->proc : NULL, dt, &m->body_turning);
+        // Hanging: the body faces the wall whatever the view does (the grips stay on the ledge).
+        if (m->mode == MOVE_HANG) { m->body_yaw = player_hang_wall_yaw(m); m->body_turning = 0; }
         // Walk-cycle phase for the held item / camera bob: stepped from the replicated movement, so
         // every machine simulating this player (owner, host, spectators) bobs in step
         // (docs/SPECTATE.md "Determinism audit"). Wrapped at 1024 cycles (exact for bob freq 1).
@@ -626,6 +647,7 @@ void player_move_tick(World *w, int slot, PlayerSim *sim, PhysCharacter *ch, con
     // ---- ledge hang
     if (m->mode == MOVE_HANG) {
         m->hang_time += dt;
+        m->yaw = player_hang_clamp_yaw(m, m->yaw);   // the client's view is clamped the same way (game.c)
         phys_character_set_pos(ch, m->hang_pos);
         m->pos = m->hang_pos;
         m->vel = v3(0, 0, 0);

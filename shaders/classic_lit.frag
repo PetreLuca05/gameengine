@@ -4,6 +4,8 @@
 #include "common.glsl"
 #define PBR_MAPS   // glTF material maps (set 5)
 #include "classic_common.glsl"
+layout(location = 9) flat in vec4 v_fade;
+#define LIT_BASE_HOOK base.rgb = cl_lod_debug(base.rgb, v_fade);
 #define MAT_COLOR CL_MAT_COLOR
 #define MAT_PARAMS pc.params
 #define MAT_FLAGS CL_MAT_FLAGS

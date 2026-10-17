@@ -6,6 +6,7 @@
 #include "sky/sky.h"
 #include "graph/fg.h"
 #include "skeletal_mesh.h"
+#include "lod_fade.h"
 #include "core/platform.h"
 #include <SDL3/SDL.h>
 #include <stdlib.h>
@@ -195,6 +196,7 @@ bool render_init(SDL_Window *window) {
         VK_CHECK(vkCreateQueryPool(R->device, &qi, NULL, &g_frame_qp));
     }
     vkg_init();
+    lod_init();   // LOD ranges / cross-fades (docs/LOD.md): after r_vgeo
     if (!post_init()) { log_error("render: post-processing stack unavailable"); return false; }
     vkw_init();   // after the post stack (its descriptor layout, samplers)
     sky_init();
@@ -636,16 +638,21 @@ static void draw_items(VkCommandBuffer cmd, DrawItem *items, u32 count, bool sha
         // pipeline variant (2 bits) | glTF map set (9) | albedo texture (10) | mesh (32)
         u64 variant = (u64)(item_pipe(pipe, d->mat.flags) != pipe) + (u64)((d->mat.flags & MAT_ALPHA_MASK) != 0);
         u64 ms = shadow_pass ? 0 : vkr_material_set(&d->mat);
-        keys[n].key = shadow_pass ? (u64)d->mesh : ((variant << 51) | (ms << 42) | ((u64)tex << 32) | d->mesh);
+        keys[n].key = shadow_pass ? ((u64)((d->mat.flags & MAT_TERRAIN_MORPH) != 0) << 40) | (u64)d->mesh : ((variant << 51) | (ms << 42) | ((u64)tex << 32) | d->mesh);
         keys[n].index = i;
         n++;
     }
     qsort(keys, n, sizeof(SortKey), cmp_sortkey);
     u32 bound_mesh = 0, bound_tex = 0, bound_ms = ~0u;
     PipelineId bound_pipe = pipe;
+    bool morph_bound = false;   // shadow passes: terrain geomorph casters (docs/LOD.md) last, own pipeline
     for (u32 k = 0; k < n; k++) {
         DrawItem *d = &items[keys[k].index];
         GpuMesh *m = &R->meshes[d->mesh];
+        if (shadow_pass && !morph_bound && (d->mat.flags & MAT_TERRAIN_MORPH)) {
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_SHADOW_MORPH]);
+            morph_bound = true;
+        }
         if (!shadow_pass) {
             PipelineId p = item_pipe(pipe, d->mat.flags);
             if (p != bound_pipe) {
@@ -688,13 +695,14 @@ static void draw_items(VkCommandBuffer cmd, DrawItem *items, u32 count, bool sha
         R->stats.triangles += m->index_count / 3;
     }
     if (bound_pipe != pipe) vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[pipe]);
+    if (morph_bound) vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_SHADOW]);
     arena_pop_to(mark);
 }
 
 
 // ------------------------------------------------------------------ skinned characters
 
-typedef struct SkinBatch { u32 mesh, texture, first, count; } SkinBatch;
+typedef struct SkinBatch { u32 mesh, texture, first, count; bool fade; } SkinBatch;   // fade: shadow pass, PIPE_SKIN_SHADOW_FADE (docs/LOD.md)
 typedef struct SkinPass { SkinBatch batches[MAX_SKIN_DRAWS]; u32 batch_count; } SkinPass;
 typedef struct CpuSkin { VkDeviceSize offset; bool ok; } CpuSkin;
 
@@ -729,6 +737,7 @@ static u32 build_skin_pass(FrameResources *f, int pass, u32 base, SkinPass *out)
         if (!skin_in_pass(d, pass)) continue;
         if (pass == 0 && R->r_culling->i && d->radius > 0 && !sphere_visible(R->frustum, d->center, d->radius)) { R->stats.culled++; continue; }
         keys[n] = ((u64)d->texture << 32) | d->mesh;
+        if (shadow && d->fade != 0.0f) keys[n] |= 1ull << 63;   // fading casters batch apart (dithered shadow pipeline)
         draw_of[n] = i;
         n++;
     }
@@ -754,15 +763,17 @@ static u32 build_skin_pass(FrameResources *f, int pass, u32 base, SkinPass *out)
     }
     out->batch_count = nb;
     for (u32 b = 0; b < nb; b++)
-        out->batches[b] = (SkinBatch){ (u32)(runs[b].key & 0xFFFFFFFFu), (u32)(runs[b].key >> 32), base + runs[b].first, runs[b].count };
+        out->batches[b] = (SkinBatch){ (u32)(runs[b].key & 0xFFFFFFFFu), (u32)((runs[b].key >> 32) & 0x7FFFFFFFu), base + runs[b].first, runs[b].count, (runs[b].key >> 63) != 0 };
     arena_pop_to(mark);
     return n;
 }
 
-static void draw_skin_pass(VkCommandBuffer cmd, const SkinPass *p) {
+// fade: -1 every batch, 0 / 1 only the batches without / with a shadow fade (shadow pass pipelines).
+static void draw_skin_pass_f(VkCommandBuffer cmd, const SkinPass *p, int fade) {
     u32 bound_tex = 0xFFFFFFFFu;
     for (u32 b = 0; b < p->batch_count; b++) {
         const SkinBatch *sb = &p->batches[b];
+        if (fade >= 0 && (int)sb->fade != fade) continue;
         GpuMesh *m = &R->meshes[sb->mesh];
         // Albedo of textured skins (set 1); white otherwise.
         TextureId tex = sb->texture && R->textures[sb->texture].used && R->textures[sb->texture].ready ? sb->texture : R->white_tex;
@@ -778,6 +789,7 @@ static void draw_skin_pass(VkCommandBuffer cmd, const SkinPass *p) {
         R->stats.triangles += m->index_count / 3 * sb->count;
     }
 }
+static void draw_skin_pass(VkCommandBuffer cmd, const SkinPass *p) { draw_skin_pass_f(cmd, p, -1); }
 
 // CPU fallback: skin into lit vertices in the dynamic buffer (same palettes as the GPU path).
 static void cpu_skin_all(FrameResources *f, CpuSkin *out) {
@@ -874,19 +886,22 @@ u32 render_draw_shadow_casters(VkCommandBuffer cmd, FrameResources *f, vec4 sphe
         n++;
     }
     if (!g_skin_shadow_gpu) return n;
-    bool bound = false;
+    int bound = -1;   // the bound pipeline: 0 opaque casters, 1 fading casters (docs/LOD.md)
     for (u32 i = 0; i < R->skin_draw_count; i++) {
         const SkinnedDraw *d = &R->skin_draws[i];
         if (g_skin_shadow_inst[i] == ~0u || d->radius <= 0) continue;
         if (v3_len2(v3_sub(d->center, lc)) > (d->radius + sphere.w) * (d->radius + sphere.w) || !sphere_in_planes(planes, d->center, d->radius)) continue;
-        if (!bound) {
-            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_SKIN_SHADOW]);
-            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 1, 1, &R->textures[R->white_tex].set, 0, NULL);
-            PushLit pc;
-            memset(&pc, 0, sizeof(pc));
-            pc.flags[3] = cascade;
-            vkCmdPushConstants(cmd, R->layout_lit, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushLit), &pc);
-            bound = true;
+        int want = d->fade != 0.0f ? 1 : 0;
+        if (bound != want) {
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[want ? PIPE_SKIN_SHADOW_FADE : PIPE_SKIN_SHADOW]);
+            if (bound < 0) {
+                vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 1, 1, &R->textures[R->white_tex].set, 0, NULL);
+                PushLit pc;
+                memset(&pc, 0, sizeof(pc));
+                pc.flags[3] = cascade;
+                vkCmdPushConstants(cmd, R->layout_lit, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushLit), &pc);
+            }
+            bound = want;
         }
         GpuMesh *m = &R->meshes[d->mesh];
         VkDeviceSize zero = 0;
@@ -1122,6 +1137,15 @@ static void compute_matrices(FrameData *fd) {
         fd->ssky2 = v4(tanf(moon_rad * DG_DEG2RAD), (float)R->r_shadow_debug->i, R->contact_scale, moon_r);
         fd->shadow_mpt = v4(2.0f * radii[0] / (float)tile, 2.0f * radii[1] / (float)tile, 2.0f * radii[2] / (float)tile, 2.0f * moon_r / (float)tile);
         fd->shadow_span = v4(span[0], span[1], span[2], moon_span);
+    }
+    {
+        // LOD cross-fades (docs/LOD.md): the dither turns per frame where TAA resolves it into a blend
+        bool on = lod_active();
+        const LodTable *lt = lod_table();
+        float rot = on && R->r_aa->i == 3 ? (float)(1u + (R->frame_index & 63u)) : 0.0f;
+        u32 dbg = (lod_fade_debug() ? 1u : 0u) | (lod_debug() >= 2 ? 2u : 0u);
+        fd->lod_fade = v4(rot, (float)dbg, on ? 1.0f : 0.0f, on ? lt->ter_detail * lod_scale(LODC_TERRAIN) / lt->cat[LODC_TERRAIN] : 1.0f);
+        fd->lod_terrain = v4(lt->ter_morph, 32.0f * 1.41421356f, 0, 0);
     }
 
     fd->view_proj = mat4_mul(R->proj_j, R->view);
@@ -1540,6 +1564,7 @@ static void exec_scope_pip(VkCommandBuffer cmd, void *u) {
     draw_items(cmd, R->draws, R->draw_count, false, true, 0, PIPE_LIT);
     memcpy(R->frustum, saved, sizeof(saved));
     draw_skinned(cmd, 0, PIPE_SKIN, PIPE_LIT, F.skin_main);
+    vkc_draw_pip(cmd);   // the vgeo scene content, culled / LOD-selected with the PiP projection (docs/LOD.md)
     vkCmdEndRendering(cmd);
 }
 
@@ -1650,10 +1675,32 @@ int render_alt_scene_pass(int slot, const char *name, FgRes color, FgRes depth, 
     return p;
 }
 
+// The scope PiP view for LOD selection (docs/LOD.md "Scopes"): the classic renderer culls it with its
+// own projection, characters take the larger of their main-view and PiP pixel sizes.
+static struct { bool valid; mat4 vp; vec3 eye, fwd; float tan_half, size; } g_scope_lod;
+
+bool render_scope_cull(mat4 *vp, vec3 *eye, float *px_scale) {
+    if (!g_scope_lod.valid || !lod_scope()) return false;
+    *vp = g_scope_lod.vp;
+    *eye = g_scope_lod.eye;
+    *px_scale = g_scope_lod.size / (2.0f * g_scope_lod.tan_half);
+    return true;
+}
+
+bool render_scope_view(vec3 *eye, vec3 *fwd, float *tan_half, float *size_px) {
+    if (!g_scope_lod.valid || !lod_scope()) return false;
+    *eye = g_scope_lod.eye;
+    *fwd = g_scope_lod.fwd;
+    *tan_half = g_scope_lod.tan_half;
+    *size_px = g_scope_lod.size;
+    return true;
+}
+
 // PiP camera + its frame UBO; returns false when no PiP is needed this frame.
 static bool setup_scope_pip(FrameData *fd) {
     const RenderSight *s = &R->sight;
     R->pip_fov = 0;
+    g_scope_lod.valid = false;
     if (s->kind != RSIGHT_SCOPE_PIP || s->ads_t < 0.02f) return false;
     vec3 fwd = v3_norm(s->fwd), up = v3_norm(s->up);
     if (v3_len2(fwd) < 0.5f) return false;
@@ -1672,6 +1719,12 @@ static bool setup_scope_pip(FrameData *fd) {
     mat4 vp = mat4_mul(proj, view);
     extract_frustum(vp, F.pip_frustum);
     F.pip_from_view = mat4_mul(vp, mat4_inverse_rigid(R->view));
+    g_scope_lod.valid = true;
+    g_scope_lod.vp = vp;
+    g_scope_lod.eye = s->objective_pos;
+    g_scope_lod.fwd = fwd;
+    g_scope_lod.tan_half = tan_half;
+    g_scope_lod.size = (float)n;
     FrameData *pd = (FrameData *)F.f->ubo_pip.mapped;
     memcpy(pd, fd, sizeof(FrameData));
     pd->view_proj = vp;
@@ -2050,7 +2103,13 @@ void render_end_frame(void) {
                     memset(&pc, 0, sizeof(pc));
                     pc.flags[3] = g_shadow_cascade;
                     vkCmdPushConstants(cmd, R->layout_lit, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushLit), &pc);
-                    draw_skin_pass(cmd, &skin_shadow);
+                    draw_skin_pass_f(cmd, &skin_shadow, 0);
+                    bool any_fade = false;
+                    for (u32 b = 0; b < skin_shadow.batch_count; b++) any_fade |= skin_shadow.batches[b].fade;
+                    if (any_fade) {   // LOD / distance cross-fading casters, dithered (docs/LOD.md)
+                        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_SKIN_SHADOW_FADE]);
+                        draw_skin_pass_f(cmd, &skin_shadow, 1);
+                    }
                 }
             }
             g_shadow_cascade = 0;

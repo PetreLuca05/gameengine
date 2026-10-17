@@ -91,7 +91,8 @@ The state is picked by priority:
 
 **empty > inspect > sprint > ADS > prone > crouch > hip**
 
-- **empty:** no item, or hands busy (mantle, ledge hang, vault).
+- **empty:** no item, or hands busy (mantle, ledge hang, vault). Hanging with a sidearm uses the
+  one-handed hip hold instead (docs/ANIMATION.md "Ledge hang").
 - **inspect:** reserved, driven via `holdpoint_force_state`.
 - **prone:** defined for when a prone movement mode exists. None exists yet.
 

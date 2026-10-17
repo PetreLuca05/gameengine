@@ -1,6 +1,6 @@
 {
   "name": "player",
-  "_comment": "Slot -> clip (Animations.fbx). Diagonals: forward/backward clip + lower-body yaw (no diagonal clips needed). Modifiers: @reverse, @mirror, @a:b.",
+  "_comment": "Slot -> clip (Animations.fbx; pistol / rifle idle + forward run from their own FBX: controller idle_{weapon} / run_f_{weapon}, unlisted weapon types use idle / run_f). Diagonals: forward/backward clip + lower-body yaw (no diagonal clips needed). Modifiers: @reverse, @mirror, @a:b.",
   "slots": {
     "idle": "idle",
     "walk_f": "jog_forward",
@@ -21,6 +21,16 @@
     "jump_loop": "jump@0.38:0.52",
     "jump_land": "jump@0.6:0.78",
     "jump_land_hard": "jump@0.6:0.85",
-    "hang_idle": "Hanging Idle"
+    "hang_idle": "Hanging Idle",
+    "idle_pistol": "pistol_idle",
+    "run_f_pistol": "pistol_run",
+    "idle_rifle": "rifle_idle",
+    "run_f_rifle": "rifle_run",
+    "idle_smg": "rifle_idle",
+    "run_f_smg": "rifle_run",
+    "idle_shotgun": "rifle_idle",
+    "run_f_shotgun": "rifle_run",
+    "idle_lmg": "rifle_idle",
+    "run_f_lmg": "rifle_run"
   }
 }

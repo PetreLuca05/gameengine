@@ -86,12 +86,16 @@ cull time.
 
 ### Gaps / differences
 
-- LOD and impostor switches pop (no cross-fade); vgeo's cut is continuous. Trees turn into impostors much
-  earlier (64 px instead of 16 px): softer distant forests, far fewer triangles.
+- LOD, impostor, foliage density and shadow-distance switches cross-fade over distance bands with
+  complementary dithers, at the ranges of `assets/render/lod.json` x the Engine Fidelity tier
+  (docs/LOD.md); `r_lod_legacy 1` brings back the cuts. vgeo's cut is continuous. Trees turn into impostors
+  earlier than on vgeo (192 px x the species scale at Modern): softer distant forests, far fewer triangles.
+- The scope picture-in-picture draws the vgeo content through a classic view culled with the PiP projection
+  (both renderers; docs/LOD.md "Scopes").
 - The CPU culls every live placement cell that passes the chunk tests each frame (~0.5-2 ms with the
   job system on the test maps); vgeo culls on the GPU.
 - No occlusion culling (vgeo has two-pass Hi-Z): the dense devroom foliage yard draws what the frustum keeps.
-- Scope picture-in-picture, phone views and the rain occlusion map do not show vgeo content (as with vgeo).
+- Phone views and the rain occlusion map do not show vgeo content (as with vgeo).
 - A multi-material model mesh whose page data is not in memory falls back to the exported LODs with its
   first material only (no such content today).
 

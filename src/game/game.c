@@ -33,6 +33,7 @@
 #include "player/hands.h"
 #include "render/render.h"
 #include "render/debug_draw.h"
+#include "render/lod_fade.h"
 #include "net/net.h"
 #include "net/spectate.h"
 #include "player/spectator.h"
@@ -282,6 +283,15 @@ void game_sim_player(World *w, int slot, const UserCmd *cmd, float dt, bool firs
     // A driver's right click holds the gun out at the hip: no aim-down-sights from it.
     if (p->sim.move.mode == MOVE_SEATED && p->sim.move.veh_onehand) c.buttons &= (u16)~BTN_AIM;
     if (p->sim.move.mode == MOVE_SWIM) c.buttons &= (u16)~BTN_AIM;
+    // Hanging: a sidearm is fired one-handed from the hip (the other hand holds the ledge); long guns stay slung.
+    if (p->sim.move.mode == MOVE_HANG) {
+        c.buttons &= (u16)~BTN_AIM;
+        if (first && p->local && G && (pressed & BTN_ATTACK)) {
+            const InvSlot *eq = weapon_equipped(w, slot);
+            const WeaponDef *wd = eq ? item_weapon(w->items, eq->item) : NULL;
+            if (wd && !weapon_is_sidearm(wd)) game_add_hint("Only a sidearm while hanging");
+        }
+    }
     player_move_tick(w, slot, &p->sim, p->character, &c, dt, first);
     WeaponOutput wo;
     weapons_tick(w, slot, &p->sim, &c, pressed, dt, first, &wo);
@@ -559,6 +569,8 @@ void game_cl_reconcile(const PlayerSim *server, u32 ack_seq) {
     else G->error_offset = v3(0, 0, 0);
 }
 
+static void dolly_tick(float dt);   // lod_dolly (docs/LOD.md)
+
 static void tick(void) {
     Player *vp = game_view_player();
     G->ads_prev = vp ? vp->sim.wpn.ads_t : 0.0f;
@@ -595,6 +607,7 @@ static void tick(void) {
     revive_frame(w);   // downed players are interactable (revive prompt)
     // Fire animation before the hold point is evaluated: the kick lands on the shot's own tick.
     game_fire_tick();
+    dolly_tick(SIM_DT);   // lod_dolly (docs/LOD.md)
     // Render-side character work at tick rate (LOD-scaled post-pass, ragdolls).
     chars_present_tick(w, G->view.eye, G->view.fov > 1 ? G->view.fov : 75.0f, (float)render_height(), SIM_DT, game_view_slot());
     weapon_feel_tick();
@@ -694,6 +707,11 @@ void game_frame(float dt) {
     G->frame_look = ui_blocking || peek_look || wheel_look ? v2(0, 0) : f.look_delta;
     camera_apply_look(&G->view, G->frame_look);
     vehicles_view_frame(&G->view);
+    {
+        // Hanging from a ledge: the view turns within pl_hang_yaw_limit of the wall (movement clamps the same).
+        Player *lp = game_local_player();
+        if (lp && lp->sim.move.mode == MOVE_HANG) G->view.yaw = player_hang_clamp_yaw(&lp->sim.move, G->view.yaw);
+    }
     if (!ui_blocking && !spectator_controls_input()) handle_hotbar();
     spectator_frame(dt);   // spectator controls, death camera -> spectate, free camera
     G->use_pressed_frame = !ui_blocking && input_peek_press(ACT_USE);
@@ -1333,9 +1351,10 @@ static void cmd_char_spawn(int argc, const char **argv) {
     log_info("char_spawn: %s ent %u", d->id, e);
 }
 
-// LOD line-up: one player-model dummy (rifle) and one zombie at 5 / 15 / 30 / 60 / 120 m along the view.
+// LOD line-up: one player-model dummy (rifle) and one zombie at 5 / 15 / 30 / 60 / 120 / 240 m along the view.
 static EntityId g_lineup[16];
 static int g_lineup_count;
+#define LINEUP_N 6
 
 static void cmd_anim_lod_lineup(int argc, const char **argv) {
     World *w = G->world;
@@ -1345,11 +1364,11 @@ static void cmd_anim_lod_lineup(int argc, const char **argv) {
     if (argc > 1 && !strcmp(argv[1], "clear")) { log_info("anim_lod_lineup: cleared"); return; }
     Player *p = game_local_player();
     if (!p) return;
-    static const float dist[5] = { 5, 15, 30, 60, 120 };
+    static const float dist[LINEUP_N] = { 5, 15, 30, 60, 120, 240 };
     vec3 fwd = forward_from_yaw(G->view.yaw), right = right_from_yaw(G->view.yaw);
     const CharacterDef *pd = anim_lib_char_by_id(g_engine.anim, "player");
     const CharacterDef *zd = anim_lib_char_by_id(g_engine.anim, "zombie_placeholder");
-    for (int k = 0; k < 5; k++) {
+    for (int k = 0; k < LINEUP_N; k++) {
         for (int side = 0; side < 2; side++) {
             vec3 pos = v3_add(p->sim.move.pos, v3_add(v3_scale(fwd, dist[k]), v3_scale(right, side ? 0.8f : -0.8f)));
             RayHit rh;
@@ -1372,7 +1391,98 @@ static void cmd_anim_lod_lineup(int argc, const char **argv) {
             if (e && g_lineup_count < 16) g_lineup[g_lineup_count++] = e;
         }
     }
-    log_info("anim_lod_lineup: %d characters at 5/15/30/60/120 m (r_lod_debug 1 shows LOD + pixels; anim_lod_lineup clear)", g_lineup_count);
+    log_info("anim_lod_lineup: %d characters at 5/15/30/60/120/240 m (r_lod_debug 1 shows LOD + pixels; anim_lod_lineup clear)", g_lineup_count);
+}
+
+// ------------------------------------------------------------------ LOD dolly (docs/LOD.md)
+// lod_dolly <characters|static|impostor|foliage|terrain|stop> [speed m/s] [distance m]: a slow camera
+// dolly backwards along the view (noclip, at tick rate). characters: a rifle dummy 3 m ahead; every LOD
+// cross-fade start / end, the shadow and LOD0 systems' weights are logged with distance and pixel size.
+// The other categories log the classic renderer's main-view instances per LOD, impostors and fading
+// instances once per second (render_classic_lod_counts). Ends with "lod_dolly: done".
+static struct {
+    int cat;              // -1 off, else LodCat
+    float speed, dist, travelled, log_t;
+    vec3 start, fwd;
+    EntityId subject;
+    int last_lod, last_from;
+    bool last_fading;
+} g_dolly = { -1 };
+
+static void dolly_stop(const char *why) {
+    World *w = G->world;
+    if (g_dolly.subject && w && ent_valid(w, g_dolly.subject)) ent_destroy(w, g_dolly.subject);
+    g_dolly.subject = ENT_NONE;
+    if (g_dolly.cat >= 0) log_info("lod_dolly: done (%s, %.1f m)", why, (double)g_dolly.travelled);
+    g_dolly.cat = -1;
+}
+
+static void cmd_lod_dolly(int argc, const char **argv) {
+    static const char *k_names[LODC_COUNT] = { "characters", "static", "impostor", "foliage", "terrain", "shadow", "vfx" };
+    if (argc < 2 || !strcmp(argv[1], "stop")) { dolly_stop("stopped"); return; }
+    int cat = -1;
+    for (int c = 0; c < LODC_COUNT; c++) if (!strcmp(argv[1], k_names[c])) cat = c;
+    World *w = G->world;
+    Player *p = game_local_player();
+    if (cat < 0 || !w || !p) { log_info("usage: lod_dolly <characters|static|impostor|foliage|terrain|stop> [speed m/s] [distance m]"); return; }
+    dolly_stop("restarted");
+    g_dolly.cat = cat;
+    g_dolly.speed = argc > 2 ? (float)atof(argv[2]) : (cat == LODC_CHARACTER ? 1.5f : 4.0f);
+    g_dolly.dist = argc > 3 ? (float)atof(argv[3]) : (cat == LODC_CHARACTER ? 250.0f : 400.0f);
+    g_dolly.travelled = g_dolly.log_t = 0;
+    g_dolly.start = p->sim.move.pos;
+    g_dolly.fwd = forward_from_yaw(G->view.yaw);
+    g_dolly.last_lod = g_dolly.last_from = -1;
+    g_dolly.last_fading = false;
+    p->sim.move.mode = MOVE_NOCLIP;
+    if (cat == LODC_CHARACTER && w->authority) {
+        const CharacterDef *pd = anim_lib_char_by_id(g_engine.anim, "player");
+        vec3 pos = v3_add(p->sim.move.pos, v3_scale(g_dolly.fwd, 3.0f));
+        RayHit rh;
+        if (phys_raycast(w->phys, v3_add(pos, v3(0, 10, 0)), v3(0, -30, 0), PL_MASK(PL_STATIC), PHYS_INVALID_BODY, &rh)) pos.y = rh.point.y;
+        EntityId e = spawn_dummy(w, pos, G->view.yaw + DG_PI, 300);
+        if (e && pd) {
+            char_detach(w, e);
+            w->char_id[ENT_INDEX(e)] = pd->net_id;
+            char_attach(w, e, pd->net_id);
+            w->item[ENT_INDEX(e)] = item_find(w->items, "rifle");
+        }
+        g_dolly.subject = e;
+    }
+    log_info("lod_dolly: %s at %.1f m/s over %.0f m (lod scale %.2f)", k_names[cat], (double)g_dolly.speed, (double)g_dolly.dist, (double)lod_scale((LodCat)cat));
+}
+
+static void dolly_tick(float dt) {
+    if (g_dolly.cat < 0) return;
+    World *w = G->world;
+    Player *p = game_local_player();
+    if (!w || !p) { dolly_stop("no player"); return; }
+    g_dolly.travelled += g_dolly.speed * dt;
+    vec3 pos = v3_sub(g_dolly.start, v3_scale(g_dolly.fwd, g_dolly.travelled));
+    p->sim.move.pos = pos;
+    p->sim.move.vel = v3(0, 0, 0);
+    p->sim.move.mode = MOVE_NOCLIP;
+    if (p->character) phys_character_set_pos(p->character, pos);
+    if (g_dolly.cat == LODC_CHARACTER) {
+        CharacterInst *c = g_dolly.subject ? char_get(w, g_dolly.subject) : NULL;
+        if (c) {
+            bool fading = lod_fade_active(&c->lodf);
+            float d = v3_dist(G->view.eye, c->root.t);
+            if (fading && !g_dolly.last_fading)
+                log_info("lod_dolly: %.2f m %.0f px fade LOD%d -> LOD%d start (1/%.2f updates, ik %.2f, shadow %.2f)", (double)d, (double)c->pixels, c->lodf.from, c->lodf.cur,
+                         (double)exp2f(c->interval_log2), (double)c->ik_w, (double)c->shadow_w);
+            if (!fading && g_dolly.last_fading) log_info("lod_dolly: %.2f m %.0f px fade to LOD%d done", (double)d, (double)c->pixels, c->lodf.cur);
+            if (!lod_active() && c->lod != g_dolly.last_lod && g_dolly.last_lod >= 0) log_info("lod_dolly: %.2f m %.0f px LOD%d -> LOD%d (legacy)", (double)d, (double)c->pixels, g_dolly.last_lod, c->lod);
+            g_dolly.last_fading = fading;
+            g_dolly.last_lod = c->lod;
+        }
+    } else if ((g_dolly.log_t += dt) >= 1.0f) {
+        g_dolly.log_t = 0;
+        u32 n[5], fading = 0;
+        render_classic_lod_counts(n, &fading);
+        log_info("lod_dolly: %.0f m  LOD0 %u LOD1 %u LOD2 %u LOD3 %u impostor %u fading %u", (double)g_dolly.travelled, n[0], n[1], n[2], n[3], n[4], fading);
+    }
+    if (g_dolly.travelled >= g_dolly.dist) dolly_stop("end");
 }
 
 static void cmd_char_list(int argc, const char **argv) {
@@ -1490,7 +1600,8 @@ void game_init(void) {
     cmd_register("ragdoll", cmd_ragdoll, "ragdoll [push N]: ragdoll / push the character under the crosshair (local)");
     cmd_register("char_kill", cmd_char_kill, "char_kill [damage]: lethal hit on the character under the crosshair (host)");
     cmd_register("char_spawn", cmd_char_spawn, "char_spawn <character> x y z [yaw] [item]: spawn a character (host)");
-    cmd_register("anim_lod_lineup", cmd_anim_lod_lineup, "anim_lod_lineup [clear]: characters at 5/15/30/60/120 m along the view (host)");
+    cmd_register("anim_lod_lineup", cmd_anim_lod_lineup, "anim_lod_lineup [clear]: characters at 5/15/30/60/120/240 m along the view (host)");
+    cmd_register("lod_dolly", cmd_lod_dolly, "lod_dolly <characters|static|impostor|foliage|terrain|stop> [speed m/s] [distance m]: slow dolly-out logging the LOD fades (docs/LOD.md)");
     cmd_register("char_list", cmd_char_list, "list characters: state, LOD, resyncs, events");
     cmd_register("wpn_magdump", cmd_magdump, "wpn_magdump [weapon] [10|25|50] [ads]: empty a magazine at the recoil wall");
     cmd_register("weapon_reload", cmd_weapon_reload, "re-read data/weapons/*.json (live recoil tuning)");

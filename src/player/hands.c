@@ -374,6 +374,8 @@ void hands_update(const HandsInput *in) {
     // Timed actions show their tool: the syringe while extracting, the vial while inserting (docs/REVIVE.md).
     u16 tool = revive_held_override(w, in->player);
     if (tool) { H->weapon = NULL; H->held_item = item_def(w->items, tool); }
+    // Hanging from a ledge: long guns and items are slung (both hands hold on); a sidearm stays out.
+    if (m->mode == MOVE_HANG && !weapon_is_sidearm(H->weapon)) { H->weapon = NULL; H->held_item = NULL; }
     bool weapon_two_handed = false;
     if (H->weapon && H->weapon->kind != WPN_MELEE && !sim->wpn.reloading) {
         vec3 support = v3_add(target_pos[HAND_RIGHT], quat_rotate(target_rot[HAND_RIGHT], H->weapon->support_offset));
@@ -387,12 +389,17 @@ void hands_update(const HandsInput *in) {
     float ov_target[2] = { 0, 0 };
     // Ledge anchors (hang / mantle / vault).
     if (m->hand_anchor_valid && (m->mode == MOVE_HANG || m->mode == MOVE_MANTLE || m->mode == MOVE_VAULT)) {
+        // Hanging: the grips are the wall's (looking around never turns them); a sidearm takes the right hand.
+        bool hang = m->mode == MOVE_HANG;
+        bool sidearm = hang && weapon_is_sidearm(H->weapon);
+        float grip_yaw = hang ? player_hang_wall_yaw(m) : in->yaw;
         for (int h = 0; h < 2; h++) {
             if (m->mode == MOVE_VAULT && h == HAND_RIGHT) continue;
+            if (sidearm && h == HAND_RIGHT) continue;
             ov_target[h] = 1.0f;
             H->ov_pos[h] = m->hand_anchor[h];
             // Palm down on the ledge, fingers pointing over the edge.
-            H->ov_rot[h] = quat_mul(quat_yaw(in->yaw), quat_axis_angle(v3(1, 0, 0), -0.25f));
+            H->ov_rot[h] = quat_mul(quat_yaw(grip_yaw), quat_axis_angle(v3(1, 0, 0), -0.25f));
             H->ov_grip[h] = GRIP_PALM;
             H->ov_case[h] = handpose_mantle_case();
             H->ov_case_t[h] = handpose_mantle_case_time(m->mode == MOVE_HANG ? -1.0f : m->m_t);

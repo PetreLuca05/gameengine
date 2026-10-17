@@ -54,6 +54,22 @@
     "Hanging Idle": {
       "loop": true
     },
+    "Pistol Idle": {
+      "name": "pistol_idle",
+      "loop": true
+    },
+    "Pistol Run": {
+      "name": "pistol_run",
+      "loop": true
+    },
+    "Rifle Aiming Idle (1)": {
+      "name": "rifle_idle",
+      "loop": true
+    },
+    "Rifle Run (1)": {
+      "name": "rifle_run",
+      "loop": true
+    },
     "Zombie Attack (1)": {
       "name": "zombie_swipe",
       "loop": false,

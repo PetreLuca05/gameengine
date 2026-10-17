@@ -226,6 +226,9 @@ void item_held_box(const ItemDef *it, vec3 *center, vec3 *half);
 bool item_model_bounds(const ItemDB *db, u16 item, vec3 *mn, vec3 *mx);
 const ItemDef *item_def(const ItemDB *db, u16 item);
 const WeaponDef *item_weapon(const ItemDB *db, u16 item); // NULL if not a weapon
+// Sidearm: a one-handed gun with the pistol hold, the only weapon a player hanging from a ledge can
+// draw and fire (the other hand keeps the grip: docs/ANIMATION.md "Ledge hang").
+bool weapon_is_sidearm(const WeaponDef *d);
 const char *damage_type_name(DamageType t);
 const char *item_kind_name(ItemKind k);
 // Attachment items (ITEM_ATTACHMENT): one per attachment definition ("att_<id>"), created after

@@ -26,6 +26,7 @@
 #define MAT_RECON_FX   2097152u
 #define MAT_GLASS      4194304u
 #define MAT_CAUSTICS   8388608u
+#define MAT_TERRAIN_MORPH 16777216u   // terrain geomorph (render.h, shaders/lod_fade.glsl lod_terrain_vertex)
 
 struct PointLight {
     vec4 pos_radius;
@@ -97,6 +98,8 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 ssky2;           // x tan(moon source radius), y r_shadow_debug view, z contact shadow length scale, w moon tile fade-out radius (m)
     vec4 shadow_mpt;      // metres per texel: cascades 0..2, w the moon tile
     vec4 shadow_span;     // metres of light-space depth per NDC unit: cascades 0..2, w the moon tile
+    vec4 lod_fade;        // LOD cross-fades (shaders/lod_fade.glsl): x dither frame, y debug bits, z new fades on, w terrain detail scale
+    vec4 lod_terrain;     // x terrain geomorph band (octaves), y chunk diagonal (m)
 } frame;
 
 layout(set = 0, binding = 1) uniform sampler2DShadow shadow_map;

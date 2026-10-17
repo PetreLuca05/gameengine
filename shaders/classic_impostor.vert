@@ -10,7 +10,7 @@ layout(location = 6) in vec4 i_misc;
 layout(location = 0) out vec3 o_world;
 layout(location = 1) flat out vec4 o_rot;
 layout(location = 2) flat out vec4 o_ctr;
-layout(location = 3) flat out float o_fade;
+layout(location = 3) flat out vec4 o_fade;
 invariant gl_Position;
 
 void main() {
@@ -27,6 +27,6 @@ void main() {
     o_world = w;
     o_rot = i_rot;
     o_ctr = vec4(c, h);
-    o_fade = i_misc.y;
+    o_fade = i_misc.yzwx;
     gl_Position = frame.view_proj * vec4(w, 1.0);
 }

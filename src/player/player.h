@@ -132,6 +132,7 @@ typedef struct PlayerTuning {
     struct Cvar *accel, *air_accel, *friction, *air_control, *gravity, *jump_speed;
     struct Cvar *coyote_time, *jump_buffer_time, *step_height, *max_slope;
     struct Cvar *mantle_min, *mantle_max, *hang_max, *air_mantle_max, *vault_max, *mantle_reach, *mantle_speed, *vault_speed;
+    struct Cvar *hang_yaw_limit;
     struct Cvar *debug_mantle, *debug_melee, *noclip_speed;
     struct Cvar *crouch_toggle, *sprint_toggle;
     // water (pl_swim_*)
@@ -148,6 +149,14 @@ void player_move_tick(struct World *w, int slot, PlayerSim *sim, struct PhysChar
 void player_move_reset(PlayerSim *sim, vec3 feet, float yaw);
 float player_eye_height(const PlayerMove *m);
 vec3 player_eye_pos(const PlayerMove *m);
+// Ledge hang: the yaw facing the wall (the body and both ledge grips stay on it), and a view yaw
+// kept within pl_hang_yaw_limit of it (unwrapped: only the excess is removed).
+float player_hang_wall_yaw(const PlayerMove *m);
+float player_hang_clamp_yaw(const PlayerMove *m, float yaw);
+// The ledge grips (left, right) of a hang from the hanging feet and the wall yaw alone (the hang
+// puts the feet a fixed distance under and out from the edge): remote players' grips from their
+// replicated position and body yaw, identical to the simulated ones.
+void player_hang_grips(vec3 feet, float wall_yaw, vec3 grip[2]);
 // Spine-bend eye offset (set by the animation system; zero without it).
 void movement_set_eye_offset(vec3 (*fn)(float yaw, float pitch));
 // Seated players follow their seat (game_vehicles.c): feet position (so the standing eye height

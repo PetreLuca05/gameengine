@@ -11,4 +11,5 @@
 #define MAT_PARAMS pc.params
 #define MAT_FLAGS pc.flags.x
 #define LIT_PRE_MAIN if (!cl_impostor_pixel()) discard;
+#define LIT_BASE_HOOK base.rgb = cl_lod_debug(base.rgb, i_fade);
 #include "lit_body.glsl"

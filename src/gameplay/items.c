@@ -803,6 +803,10 @@ const ItemDef *item_def(const ItemDB *db, u16 item) {
     return (item < db->item_count) ? &db->items[item] : &db->items[0];
 }
 
+bool weapon_is_sidearm(const WeaponDef *d) {
+    return d && d->kind != WPN_MELEE && d->one_hand_capable && !strcmp(d->hold_style, "pistol");
+}
+
 const WeaponDef *item_weapon(const ItemDB *db, u16 item) {
     const ItemDef *d = item_def(db, item);
     return (d->kind == ITEM_WEAPON && d->weapon >= 0) ? &db->weapons[d->weapon] : NULL;
