@@ -1480,6 +1480,18 @@ u32 vkg_route_skinned(const SkinnedDraw *draws, u32 n, const mat4 *bones, u8 *ro
         m.flags = d->flags & (MAT_TEXTURED | MAT_UNLIT);
         m.albedo_tex = (d->flags & MAT_TEXTURED) && d->texture ? d->texture : 0;
         if (m.albedo_tex) tex_use(m.albedo_tex);
+        // PBR maps of textured skins (docs/CHARACTERS.md "PBR maps"): the resolve's triangle tangent frame
+        // (skinned positions) shades the normal map, as for static vgeo materials.
+        const u32 map_flag[4] = { MAT_MR_TEX, MAT_NORMAL_TEX, MAT_OCCLUSION_TEX, MAT_EMISSIVE_TEX };
+        const TextureId map_tex[4] = { d->mr_tex, d->normal_tex, d->occlusion_tex, d->emissive_tex };
+        u32 *map_dst[4] = { &m.mr_tex, &m.normal_tex, &m.occlusion_tex, &m.emissive_tex };
+        for (int t = 0; t < 4; t++) {
+            *map_dst[t] = 0;
+            if ((d->flags & map_flag[t]) && map_tex[t]) { m.flags |= map_flag[t]; *map_dst[t] = map_tex[t]; tex_use(map_tex[t]); }
+        }
+        m.normal_scale = d->normal_scale != 0.0f ? d->normal_scale : 1.0f;
+        m.occlusion_strength = 1.0f;
+        m.emissive_rgb = 0xFFFFFFFFu;
         if (memcmp(&m, &G.slot_mat[slot], sizeof(m))) { G.slot_mat[slot] = m; G.slot_mat_dirty[slot] = 1; }
         routed[i] = 1;
         routed_n++;

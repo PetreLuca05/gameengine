@@ -24,6 +24,46 @@
     {
       "name": "skin_casual",
       "path": "assets/human/textures/skin_casual.png"
+    },
+    {
+      "name": "skin_hazmat_normal",
+      "path": "assets/human/textures/skin_hazmat_normal.png",
+      "srgb": false
+    },
+    {
+      "name": "skin_hazmat_orm",
+      "path": "assets/human/textures/skin_hazmat_orm.png",
+      "srgb": false
+    },
+    {
+      "name": "skin_officer_normal",
+      "path": "assets/human/textures/skin_officer_normal.png",
+      "srgb": false
+    },
+    {
+      "name": "skin_officer_orm",
+      "path": "assets/human/textures/skin_officer_orm.png",
+      "srgb": false
+    },
+    {
+      "name": "skin_athlete_normal",
+      "path": "assets/human/textures/skin_athlete_normal.png",
+      "srgb": false
+    },
+    {
+      "name": "skin_athlete_orm",
+      "path": "assets/human/textures/skin_athlete_orm.png",
+      "srgb": false
+    },
+    {
+      "name": "skin_casual_normal",
+      "path": "assets/human/textures/skin_casual_normal.png",
+      "srgb": false
+    },
+    {
+      "name": "skin_casual_orm",
+      "path": "assets/human/textures/skin_casual_orm.png",
+      "srgb": false
     }
   ],
   "models": [
