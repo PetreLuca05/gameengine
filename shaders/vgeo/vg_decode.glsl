@@ -89,20 +89,44 @@ mat4 vg_vertex_skin_matrix(VgXf x, VgClusterData c, VgMesh m, uint v, bool prev)
 }
 // ------------------------------------------------------------------ world-position offset (Phase 7)
 
-// The material's WPO snippet (wpo.glsl) at world position w of vertex v: this frame's wind / time, or
-// the previous frame's (prev: velocity). WPO_DISPLACE adds the displacement buffer's push.
-vec3 vg_wpo(VgXf x, VgClusterData c, VgMesh m, uint v, vec3 w, bool prev) {
+// The wind field at world xz (docs/FOLIAGE_WIND.md): the tile (toroidal, 64 texels, REPEAT addressing:
+// uv = world / tile size), blended into the field outside it (V.wind) over its outer 2 texels. CPU mirror:
+// wind_tile_sample (src/world/wind.c). prev: last frame's tile / fallback (velocity).
+vec4 vg_wind_at(vec2 xz, bool prev) {
+    vec4 tile = prev ? V.wind_tile_prev : V.wind_tile, g = prev ? V.wind_prev : V.wind;
+    if (tile.w < 0.5) return g;
+    vec2 lo = tile.xy + 0.5 * tile.z, hi = lo + 63.0 * tile.z;
+    float e = min(min(xz.x - lo.x, hi.x - xz.x), min(xz.y - lo.y, hi.y - xz.y));
+    float w = clamp(e / (2.0 * tile.z), 0.0, 1.0);
+    if (w <= 0.0) return g;
+    vec4 s = textureLod(vg_tex[nonuniformEXT(prev ? V.wind_misc.y : V.wind_misc.x)], xz / (64.0 * tile.z), 0.0);
+    return g + (s - g) * w;
+}
+
+// The material's vegetation WPO (wpo.glsl) at world position w of vertex v: this frame's wind / time,
+// or the previous frame's (prev: velocity). WPO_DISPLACE adds the displacement buffer's push. nrm: the
+// vertex's world normal, perturbed by the wind when the VGW_NORMALS layer is on.
+vec3 vg_wpo_n(VgXf x, VgClusterData c, VgMesh m, uint v, vec3 w, bool prev, inout vec3 nrm) {
     VgMaterial mat = materials[m.material_base + c.material];
     if (mat.wpo == WPO_NONE) return vec3(0.0);
     vec4 col = vg_vertex_color(c, m, v);
     float phase = float(x.fp & 0xFFu) / 256.0;
-    vec3 d = wpo_offset(mat.wpo & 0xFFu, mat.wpo_params, w, x.pos, col, phase, prev ? V.wind_prev : V.wind, prev ? V.foliage.y : V.foliage.x);
+    vec2 disp = vec2(0.0);
+    bool has_disp = false;
     if ((mat.wpo & WPO_DISPLACE) != 0u && V.disp.w > 0.5) {
         vec2 rel = w.xz - V.disp.xy, ext = vec2(128.0 * V.disp.z);
-        if (all(greaterThanEqual(rel, vec2(0.0))) && all(lessThan(rel, ext)))   // toroidal: world texel = texel mod 128
-            d += wpo_displace(textureLod(vg_tex[nonuniformEXT(V.misc.y)], w.xz / ext, 0.0).rg, col);
+        if (all(greaterThanEqual(rel, vec2(0.0))) && all(lessThan(rel, ext))) {   // toroidal: world texel = texel mod 128
+            disp = textureLod(vg_tex[nonuniformEXT(V.misc.y)], w.xz / ext, 0.0).rg;
+            has_disp = true;
+        }
     }
-    return d;
+    vec3 n = vg_xf_dir(x, vg_vertex_normal(c, m, v));
+    return wpo_veg(mat.wpo_params, mat.wind_a, mat.wind_b, w, n, x.pos, x.pscale, col, phase, vg_wind_at(x.pos.xz, prev), prev ? V.foliage.y : V.foliage.x,
+                   V.wind_misc.z, disp, has_disp, nrm);
+}
+vec3 vg_wpo(VgXf x, VgClusterData c, VgMesh m, uint v, vec3 w, bool prev) {
+    vec3 n = vec3(0.0, 1.0, 0.0);
+    return vg_wpo_n(x, c, m, v, w, prev, n);
 }
 
 // World position of vertex v (skinned into instance space first, then displaced by the material's
@@ -115,6 +139,14 @@ vec3 vg_vertex_world_ex(VgXf x, VgClusterData c, VgMesh m, uint v, bool prev) {
     return w;
 }
 vec3 vg_vertex_world(VgXf x, VgClusterData c, VgMesh m, uint v) { return vg_vertex_world_ex(x, c, m, v, false); }
+// World normal of vertex v (static, unskinned instances), bent / fluttered with the wind when the
+// material has a WPO and VGW_NORMALS is on (the resolve).
+vec3 vg_vertex_normal_world(VgXf x, VgClusterData c, VgMesh m, uint v) {
+    vec3 n = vg_xf_dir(x, vg_vertex_normal(c, m, v));
+    if ((m.fflags & VGMF_WPO) == 0u || (V.wind_misc.z & VGW_NORMALS) == 0u) return n;
+    vg_wpo_n(x, c, m, v, vg_xf_point(x, vg_vertex_pos(c, m, v)), false, n);
+    return n;
+}
 
 // Local vertex indices of triangle t.
 uvec3 vg_triangle(VgClusterData c, uint t) {

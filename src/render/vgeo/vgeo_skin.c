@@ -212,7 +212,7 @@ void vgeo_xf_decode(VgXfCpu *x, const VgInstance *in, const VgMesh *m, const VgP
     vgeo_instance_decode(in, x->pos, x->rot, &x->pscale);
     x->scale = x->pscale;
     x->active = true;
-    x->wpo = m->max_wpo;
+    x->wpo = vg_wpo_margin(m, x->pscale);
     if (!((in->flags_phase >> 16) & VGI_SKINNED) || !(m->flags & VGF_SKINNED)) return;
     x->skinned = true;
     const VgPaletteSlot *s = p && in->extra < p->max_slots ? &p->cpu_slots[in->extra] : NULL;
