@@ -4,6 +4,7 @@
 // surface the prepass kept.
 #extension GL_GOOGLE_include_directive : require
 #include "common.glsl"
+#define PBR_MAPS   // glTF material maps (set 5)
 #include "classic_common.glsl"
 #include "classic_mask.glsl"
 layout(location = 9) flat in float v_fade;

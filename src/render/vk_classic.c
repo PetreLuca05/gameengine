@@ -276,10 +276,11 @@ void vkc_init(void) {
         w.pBufferInfo = &bi;
         vkUpdateDescriptorSets(R->device, 1, &w, 0, NULL);   // the ring (binding 1) at the slot's first frame
     }
-    VkDescriptorSetLayout sets[5] = { R->frame_layout, R->tex_layout, R->lit_post_layout, C.set3_layout, C.set4_layout };
+    // set 5: the glTF maps of a material (the legacy lit layout's set 3, docs/PBR.md)
+    VkDescriptorSetLayout sets[6] = { R->frame_layout, R->tex_layout, R->lit_post_layout, C.set3_layout, C.set4_layout, R->mat_layout };
     VkPushConstantRange pr = { VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushLit) };
     VkPipelineLayoutCreateInfo pli = { VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO };
-    pli.setLayoutCount = 5;
+    pli.setLayoutCount = 6;
     pli.pSetLayouts = sets;
     pli.pushConstantRangeCount = 1;
     pli.pPushConstantRanges = &pr;
@@ -900,8 +901,27 @@ static TextureId mat_texture(const VgMaterial *m) {
     return a;
 }
 
-// Push constants of a material draw (shaders/classic_common.glsl).
-static void mat_push(PushLit *pc, const VgMaterial *m, TextureId tex, u32 shadow_view) {
+// The glTF maps of a material (docs/PBR.md) as renderer textures: the MAT_*_TEX flags whose texture
+// resolves (a map that does not, e.g. still uploading, is dropped: no undefined index reaches a shader)
+// and the descriptor set of the combination (vkr_material_set; 0 = all white).
+static u32 mat_maps(const VgMaterial *m, u32 *set) {
+    *set = 0;
+    if (!(m->flags & MAT_PBR_MAPS)) return 0;
+    Material pm;
+    memset(&pm, 0, sizeof(pm));
+    const u32 flag[4] = { MAT_MR_TEX, MAT_NORMAL_TEX, MAT_OCCLUSION_TEX, MAT_EMISSIVE_TEX };
+    const u32 src[4] = { m->mr_tex, m->normal_tex, m->occlusion_tex, m->emissive_tex };
+    TextureId *dst[4] = { &pm.mr_tex, &pm.normal_tex, &pm.occlusion_tex, &pm.emissive_tex };
+    for (int i = 0; i < 4; i++) {
+        TextureId t = (m->flags & flag[i]) && src[i] ? resolve_texture(src[i]) : 0;
+        if (t) { pm.flags |= flag[i]; *dst[i] = t; }
+    }
+    if (pm.flags) *set = vkr_material_set(&pm);
+    return *set ? pm.flags : 0;   // out of map sets: drawn without maps
+}
+
+// Push constants of a material draw (shaders/classic_common.glsl); maps: the MAT_*_TEX flags of mat_maps.
+static void mat_push(PushLit *pc, const VgMaterial *m, TextureId tex, u32 maps, u32 shadow_view) {
     memset(pc, 0, sizeof(*pc));
     memcpy(&pc->model.m[0], m->wpo_params, 16);
     memcpy(&pc->model.m[4], m->wind_params, 32);   // model[1], model[2]
@@ -910,9 +930,14 @@ static void mat_push(PushLit *pc, const VgMaterial *m, TextureId tex, u32 shadow
     pc->model.m[15] = (m->flags & VGM_DITHER_FADE) ? 1.0f : 0.0f;
     pc->color = v4(m->color[0], m->color[1], m->color[2], 1.0f);
     pc->params = v4(m->roughness, m->metallic, m->emissive, m->tex_scale > 0 ? m->tex_scale : 1.0f);
-    pc->flags[0] = (m->flags & ~(u32)VGM_FLAGS) & ~(tex ? 0u : (u32)MAT_TEXTURED);
+    pc->flags[0] = ((m->flags & ~(u32)(VGM_FLAGS | MAT_PBR_MAPS)) & ~(tex ? 0u : (u32)MAT_TEXTURED)) | maps;
     pc->flags[1] = m->wpo;
     pc->flags[3] = shadow_view;
+    if (maps) {
+        memcpy(&pc->pbr[0], &m->normal_scale, 4);
+        memcpy(&pc->pbr[1], &m->occlusion_strength, 4);
+        pc->pbr[2] = m->emissive_rgb;
+    }
 }
 
 static bool lod_ready(const ClLod *L) { return L->gpu && R->meshes[L->gpu].used && R->frame_index >= L->ready_frame; }
@@ -923,6 +948,10 @@ static void draw_view(VkCommandBuffer cmd, const ClView *v, int pass, u32 shadow
     const VgScene *s = C.scene;
     VkDescriptorSet bound3 = C.set_default;
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, C.layout, 3, 1, &C.set_default, 0, NULL);
+    Material none;
+    memset(&none, 0, sizeof(none));
+    u32 bound5 = vkr_material_set(&none);   // set 5: no maps
+    if (pass != 2) vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, C.layout, 5, 1, &R->mat_sets[bound5].set, 0, NULL);
     if (!C.set4_views[R->frame_slot][0]) return;   // the frame's wind was never written (no draw before vkc_wind_frame)
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, C.layout, 4, 1, &C.set4[R->frame_slot], 0, NULL);
     VkDeviceSize zero = 0;
@@ -973,8 +1002,13 @@ static void draw_view(VkCommandBuffer cmd, const ClView *v, int pass, u32 shadow
                     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, C.layout, 3, 1, &want3, 0, NULL);
                     bound3 = want3;
                 }
+                u32 ms = 0, maps = pass == 2 ? 0 : mat_maps(m, &ms);
+                if (pass != 2 && ms != bound5) {
+                    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, C.layout, 5, 1, &R->mat_sets[ms].set, 0, NULL);
+                    bound5 = ms;
+                }
                 PushLit pc;
-                mat_push(&pc, m, tex, shadow_view);
+                mat_push(&pc, m, tex, maps, shadow_view);
                 vkCmdPushConstants(cmd, C.layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushLit), &pc);
                 vkCmdDrawIndexed(cmd, sec->index_count, bt->count, sec->first_index, 0, bt->first);
                 R->stats.draw_calls++;
@@ -1012,7 +1046,7 @@ static void draw_view(VkCommandBuffer cmd, const ClView *v, int pass, u32 shadow
         pc.model.m[15] = (vm->fflags & VGMF_DITHER) ? 1.0f : 0.0f;
         pc.color = v4(1, 1, 1, 1);
         pc.params = v4(m->roughness, m->metallic, m->emissive, 1.0f);
-        pc.flags[0] = m->flags & ~(u32)(VGM_FLAGS | MAT_TEXTURED | MAT_TRIPLANAR | MAT_GRID | MAT_CHECKER);
+        pc.flags[0] = m->flags & ~(u32)(VGM_FLAGS | MAT_TEXTURED | MAT_TRIPLANAR | MAT_GRID | MAT_CHECKER | MAT_PBR_MAPS);
         vkCmdPushConstants(cmd, C.layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushLit), &pc);
         vkCmdDraw(cmd, 6, bt->count, 0, bt->first);
         R->stats.draw_calls++;

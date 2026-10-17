@@ -3,6 +3,7 @@
 // repeats the test at depth EQUAL).
 #extension GL_GOOGLE_include_directive : require
 #include "common.glsl"
+#define PBR_MAPS   // glTF material maps (set 5)
 #include "classic_common.glsl"
 #include "classic_mask.glsl"
 layout(set = 1, binding = 0) uniform sampler2D tex;

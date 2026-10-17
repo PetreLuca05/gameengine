@@ -63,7 +63,8 @@ G-buffer layout is unchanged.
   `normal_scale`, `occlusion_strength`, `emissive_rgb`). The map indices are renderer texture ids in the
   vgeo texture table (binding 23), entered like the albedo (`tex_use`). MASK maps to `VGM_MASKED`
   (mask = albedo alpha) and doubleSided to `VGM_TWO_SIDED`, so every vgeo raster path and the shadows
-  respect them. The era fallback draws the maps through the legacy path.
+  respect them. The era fallback draws the maps through the legacy path; on `no-nanite` the classic renderer
+  samples them in its own prepass / lit shaders (docs/NO_NANITE.md).
 
 ## Robustness
 

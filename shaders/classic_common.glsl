@@ -4,7 +4,8 @@
 //   model[1]  wind_params a (height, main / detail / flutter Hz)      impostors: x frames per side
 //   model[2]  wind_params b (tan max bend, settle mix, response, 0)
 //   model[3]  unused, alpha cutoff (0 = not masked), frame index (dither), dither fade on
-//   color, params (roughness, metallic, emissive, tex scale), flags (x material, y WPO snippet | WPO_DISPLACE, w shadow view)
+//   color, params (roughness, metallic, emissive, tex scale), flags (x material, y WPO snippet | WPO_DISPLACE, w shadow view),
+//   pbr (glTF maps: normal_scale, occlusion_strength bits, emissive RGBA8, 0; shaders/pbr_maps.glsl)
 // Instance stream (binding 1): i_pos (xyz, uniform scale), i_rot (quaternion), i_misc (x wind phase, y fade alpha).
 // Set 4 (per frame slot): the wind field as the vgeo views see it (VgViewGpu wind / wind_tile / foliage /
 // disp / wind_misc) and the wind tile ring (docs/FOLIAGE_WIND.md).
@@ -23,7 +24,16 @@ layout(push_constant) uniform Push {
     vec4 color;
     vec4 params;
     uvec4 flags;
+    uvec4 pbr;
 } pc;
+
+// PBR_MAPS (mesh shaders): set 5 is the material's glTF maps (R->mat_layout, vkr_material_set: every slot
+// a valid texture, white / flat normal where the material has none), sampled by pbr_maps.glsl with the
+// screen-derivative cotangent frame as on the legacy path (docs/PBR.md).
+#ifdef PBR_MAPS
+layout(set = 5, binding = 0) uniform sampler2D cl_pbr_tex[4];
+#define PBR_TEX(slot, uv) texture(cl_pbr_tex[slot], (uv))
+#endif
 
 // Set 3: binding 0 the displacement buffer (vertex) or an impostor's normal atlas, binding 1 its albedo atlas.
 layout(set = 3, binding = 0) uniform sampler2D cl_aux;
