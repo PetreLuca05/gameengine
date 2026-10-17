@@ -82,6 +82,7 @@ int gui_backspaces(void);
 void gui_set_text_mode(bool on);       // a text field is being edited (letters are text, not shortcuts)
 bool gui_text_mode(void);
 bool gui_key_pressed(int scancode);    // SDL scancode pressed this frame (not a repeat; never while typing)
+bool gui_key_pressed_raw(int scancode); // the same, also while typing (text fields: history, completion)
 
 // Interaction (registers focusables while input is enabled)
 GuiInteract gui_interact(GuiId id, GuiRect r, u32 flags);

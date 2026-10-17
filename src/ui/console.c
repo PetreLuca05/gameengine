@@ -53,18 +53,16 @@ static void set_input(const char *s) {
     C->input_len = (int)strlen(C->input);
 }
 
-static void complete(void) {
+int console_complete(char *buf, int size, char *hint, int hint_size) {
     const char *matches[64];
+    if (hint && hint_size) hint[0] = 0;
     // Complete the first token only.
-    if (strchr(C->input, ' ')) return;
-    int n = cmd_complete(C->input, matches, 64);
-    if (n == 0) { C->completion_hint[0] = 0; return; }
+    if (strchr(buf, ' ')) return 0;
+    int n = cmd_complete(buf, matches, 64);
+    if (n == 0) return 0;
     if (n == 1) {
-        char buf[INPUT_MAX];
-        snprintf(buf, sizeof(buf), "%s ", matches[0]);
-        set_input(buf);
-        C->completion_hint[0] = 0;
-        return;
+        snprintf(buf, (size_t)size, "%s ", matches[0]);
+        return 1;
     }
     // Longest common prefix
     size_t lcp = strlen(matches[0]);
@@ -73,14 +71,52 @@ static void complete(void) {
         while (k < lcp && matches[i][k] && SDL_tolower(matches[i][k]) == SDL_tolower(matches[0][k])) k++;
         lcp = k;
     }
-    char buf[INPUT_MAX];
-    snprintf(buf, sizeof(buf), "%.*s", (int)lcp, matches[0]);
-    if (strlen(buf) > strlen(C->input)) set_input(buf);
-    C->completion_hint[0] = 0;
-    for (int i = 0; i < n && i < 24; i++) {
-        strncat(C->completion_hint, matches[i], sizeof(C->completion_hint) - strlen(C->completion_hint) - 2);
-        strncat(C->completion_hint, "  ", sizeof(C->completion_hint) - strlen(C->completion_hint) - 1);
+    if (lcp > strlen(buf)) snprintf(buf, (size_t)size, "%.*s", (int)lcp, matches[0]);
+    for (int i = 0; hint && i < n && i < 24; i++) {
+        strncat(hint, matches[i], (size_t)hint_size - strlen(hint) - 2);
+        strncat(hint, "  ", (size_t)hint_size - strlen(hint) - 1);
     }
+    return n;
+}
+
+static void complete(void) {
+    console_complete(C->input, INPUT_MAX, C->completion_hint, sizeof(C->completion_hint));
+    C->input_len = (int)strlen(C->input);
+}
+
+void console_hint(const char *input, char *out, int size) {
+    out[0] = 0;
+    char word[CVAR_NAME_MAX];
+    int n = 0;
+    while (input[n] == ' ') input++;
+    while (input[n] && input[n] != ' ' && n < CVAR_NAME_MAX - 1) { word[n] = input[n]; n++; }
+    word[n] = 0;
+    if (!n) return;
+    const Cvar *cv = cvar_find(word);
+    if (cv) {
+        if (cv->has_range) snprintf(out, (size_t)size, "%s = %s (default %s, %g..%g)  %s", cv->name, cv->str, cv->default_str, cv->min, cv->max, cv->desc);
+        else snprintf(out, (size_t)size, "%s = \"%s\" (default \"%s\")  %s", cv->name, cv->str, cv->default_str, cv->desc);
+        return;
+    }
+    const char *d = cmd_desc(word);
+    if (d) snprintf(out, (size_t)size, "%s: %s", word, d);
+}
+
+int console_history_count(void) { return C ? DG_MIN(C->history_count, HISTORY) : 0; }
+const char *console_history_at(int i) {
+    if (!C || i < 0 || i >= console_history_count()) return "";
+    int first = C->history_count - console_history_count();
+    return C->history[(first + i) % HISTORY];
+}
+
+void console_submit(const char *line) {
+    if (!C || !line || !line[0]) return;
+    log_info("] %s", line);
+    dg_strcpy(C->history[C->history_count % HISTORY], INPUT_MAX, line);
+    C->history_count++;
+    C->history_pos = C->history_count;
+    cbuf_add(line);
+    C->scroll_to_bottom = true;
 }
 
 bool console_handle_event(const SDL_Event *ev) {
@@ -106,11 +142,7 @@ bool console_handle_event(const SDL_Event *ev) {
 static void submit(void) {
     C->input[C->input_len] = 0;
     if (!C->input[0]) return;
-    log_info("] %s", C->input);
-    dg_strcpy(C->history[C->history_count % HISTORY], INPUT_MAX, C->input);
-    C->history_count++;
-    C->history_pos = C->history_count;
-    cbuf_add(C->input);
+    console_submit(C->input);
     C->input[0] = 0;
     C->input_len = 0;
     C->completion_hint[0] = 0;

@@ -64,6 +64,21 @@ typedef struct Horde {
 
 static Horde *H;
 
+// Loud noises (horde_noise): heard for HORDE_NOISE_TICKS ticks.
+#define HORDE_NOISES 8
+#define HORDE_NOISE_TICKS 60
+static vec3 s_noise[HORDE_NOISES];
+static float s_noise_r[HORDE_NOISES];
+static int s_noise_ttl[HORDE_NOISES];
+
+void horde_noise(vec3 pos, float radius) {
+    int k = 0;
+    for (int n = 1; n < HORDE_NOISES; n++) if (s_noise_ttl[n] < s_noise_ttl[k]) k = n;
+    s_noise[k] = pos;
+    s_noise_r[k] = radius;
+    s_noise_ttl[k] = HORDE_NOISE_TICKS;
+}
+
 static u32 hh(u32 x) {
     x ^= x >> 16;
     x *= 0x7feb352dU;
@@ -291,6 +306,7 @@ void horde_host_tick(World *w, float dt) {
     double t0 = platform_time();
     const HordeConfig *cfg = &H->cfg;
     HordeStats *st = &H->st;
+    for (int n = 0; n < HORDE_NOISES; n++) if (s_noise_ttl[n] > 0) s_noise_ttl[n]--;
     // Staggered spawning.
     for (int k = 0; k < cfg->spawn_per_tick && H->q_count > 0; k++) {
         PendingSpawn p = H->queue[H->q_head];
@@ -365,6 +381,8 @@ void horde_host_tick(World *w, float dt) {
             // within 8 m every 6 s, staggered per zombie).
             if (H->sense > 0 && H->target_mode == HTARGET_PLAYERS) {
                 bool shot = bi >= 0 && pfiring[bi] && H->dist[s] < H->sense * 3.0f;
+                for (int n = 0; n < HORDE_NOISES && !shot; n++)
+                    shot = s_noise_ttl[n] > 0 && v3_dist(s_noise[n], H->pos[s]) < s_noise_r[n];
                 if (H->dist[s] < H->sense || shot || w->health[i].hp < w->health[i].max_hp) H->aggro[s] = 1;
                 else if (H->dist[s] > H->sense * 2.5f) H->aggro[s] = 0;
                 if (!H->aggro[s]) {

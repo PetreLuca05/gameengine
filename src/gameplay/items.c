@@ -59,11 +59,12 @@ static ItemKind kind_from(const char *s) {
     if (!strcmp(s, "weapon")) return ITEM_WEAPON;
     if (!strcmp(s, "key")) return ITEM_KEY;
     if (!strcmp(s, "attachment")) return ITEM_ATTACHMENT;
+    if (!strcmp(s, "throwable")) return ITEM_THROWABLE;
     return ITEM_MISC;
 }
 
 const char *item_kind_name(ItemKind k) {
-    static const char *n[ITEM_KIND_COUNT] = { "Misc", "Ammo", "Consumable", "Weapon", "Key", "Attachment" };
+    static const char *n[ITEM_KIND_COUNT] = { "Misc", "Ammo", "Consumable", "Weapon", "Key", "Attachment", "Throwable" };
     return (int)k >= 0 && k < ITEM_KIND_COUNT ? n[k] : "Misc";
 }
 
@@ -612,6 +613,21 @@ bool items_load(ItemDB *db, const char *items_path, const char *weapons_path) {
         d->heal = jnum(it, "heal", 0);
         d->armor = jnum(it, "armor", 0);
         d->use_time = jnum(it, "use_time", 0);
+        d->interrupt_on_damage = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(it, "interrupt_on_damage"));
+        if (d->kind == ITEM_THROWABLE) {
+            const cJSON *t = cJSON_GetObjectItemCaseSensitive(it, "throw");
+            const char *tk = jstr(t, "kind", "grenade");
+            d->thr.kind = !strcmp(tk, "flare") ? THROW_FLARE : !strcmp(tk, "molotov") ? THROW_MOLOTOV : THROW_GRENADE;
+            d->thr.fuse = jnum(t, "fuse", d->thr.kind == THROW_GRENADE ? 4.0f : 0.0f);
+            d->thr.radius = jnum(t, "radius", 6.0f);
+            d->thr.damage = jnum(t, "damage", 120.0f);
+            d->thr.speed_min = jnum(t, "speed_min", 7.0f);
+            d->thr.speed_max = jnum(t, "speed_max", 20.0f);
+            d->thr.charge_time = jnum(t, "charge_time", 0.8f);
+            d->thr.bounce = jnum(t, "bounce", 0.35f);
+            d->thr.light_time = jnum(t, "light_time", 30.0f);
+            d->thr.light_color = jvec3(t, "light_color", v3(1.0f, 0.25f, 0.15f));
+        }
         {
             const char *vu = jstr(it, "vehicle_use", "");
             d->vehicle_use = !strcmp(vu, "fuel") ? VUSE_FUEL : !strcmp(vu, "tire_repair") ? VUSE_TIRE_REPAIR : !strcmp(vu, "spare_tire") ? VUSE_SPARE_TIRE : VUSE_NONE;

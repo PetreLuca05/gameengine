@@ -1,0 +1,9 @@
+{
+    "id": "throwables",
+    "title": "Throwables",
+    "source": "inventory",
+    "filter": { "kind": "throwable" },
+    "min_slots": 4,
+    "max_slots": 8,
+    "slots": ["frag_grenade", "flare", "molotov"]
+}

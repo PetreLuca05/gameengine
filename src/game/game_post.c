@@ -584,6 +584,7 @@ void game_post_frame(const PostFrameInfo *fi) {
     daynight_post(&s);
     weather_post(&s);
     apply_feedback(&s, fi, dt);
+    peek_post(&s);   // door peek: fisheye through the visor
     apply_photo(&s);
     // With ADS DoF on (game_sights.c), aiming switches the DoF exactly when the aim completes;
     // the older button-driven "ADS only" mode stays for ads_dof 0.

@@ -11,6 +11,8 @@
     { "id": "multiplayer", "parent": "stack", "h": 34, "label": "Multiplayer", "action": "multiplayer", "if": "!menu" },
     { "id": "invite", "parent": "stack", "h": 34, "label": "Invite friends", "action": "invite", "if": "steam" },
     { "id": "leave", "parent": "stack", "h": 34, "label": "Disconnect", "action": "leave", "if": "legacy_online" },
+    { "id": "commands", "parent": "stack", "h": 34, "label": "Commands", "action": "commands", "if": "commands" },
+    { "id": "copypos", "parent": "stack", "h": 34, "label": "Copy position", "action": "copypos", "if": "world" },
     { "id": "mainmenu", "parent": "stack", "h": 34, "label": "Leave to main menu", "action": "mainmenu", "if": "menu" },
     { "id": "spacer", "parent": "stack", "h": 14 },
     { "id": "quit", "parent": "stack", "h": 34, "label": "Quit to desktop", "action": "quit" },

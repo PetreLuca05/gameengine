@@ -6,7 +6,7 @@
 #include "core/base.h"
 #include "gui_layout.h"
 
-#define GUI_THEME_MAX_TOKENS 96
+#define GUI_THEME_MAX_TOKENS 160
 
 typedef struct GuiTheme {
     // colours (RGBA8, r in the low byte)
@@ -17,6 +17,9 @@ typedef struct GuiTheme {
     u32 slot_bg, slot_border, slot_hi;
     u32 type_weapon, type_ammo, type_consumable, type_attachment, type_key, type_misc;
     u32 hud_panel, hud_text;
+    u32 select;                   // radial wheel / hotbar selection (white)
+    u32 ring;                     // timed-action ring (white)
+    u32 ping[8];                  // ping types (wheel order: generic, enemy, loot, danger, go, help, vehicle, defend)
     u32 rarity[5];                // cosmetics: common, uncommon, rare, epic, legendary
     u32 chat_name[8];             // lobby chat: name colour per member id (cycled)
     // type sizes (px at 1080p)

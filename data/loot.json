@@ -22,7 +22,7 @@
       ["scrap", 6, 2, 8], ["mech_parts", 5, 1, 3], ["duct_tape", 3, 1, 2], ["fuel_can", 2, 1, 1], ["battery", 3, 1, 2], ["cloth", 2, 1, 3],
       ["tire_repair", 1, 1, 1], ["armor", 0.4, 1, 1] ] },
     "rare": { "rolls": [2, 4], "empty": 0.1, "items": [
-      ["ammo_rifle", 4, 20, 45], ["ammo_762", 3, 20, 40], ["medkit", 3, 1, 2], ["armor", 3, 1, 1], ["fuel_can", 3, 1, 1], ["dmr", 0.8, 1, 1],
+      ["ammo_rifle", 4, 20, 45], ["ammo_762", 3, 20, 40], ["medkit", 3, 1, 2], ["armor", 3, 1, 1], ["fuel_can", 3, 1, 1], ["dmr", 0.8, 1, 1], ["frag_grenade", 2, 1, 2], ["flare", 2, 1, 2], ["molotov", 1, 1, 1],
       ["lmg", 0.4, 1, 1], ["sniper", 0.5, 1, 1], ["rifle", 1, 1, 1], ["canned_food", 2, 1, 3], ["key_blue", 0.5, 1, 1], ["mech_parts", 2, 1, 2] ] },
     "military": { "rolls": [3, 5], "empty": 0, "items": [
       ["ammo_762", 5, 40, 80], ["ammo_rifle", 5, 40, 80], ["lmg", 1, 1, 1], ["sniper", 1, 1, 1], ["dmr", 1, 1, 1], ["armor", 4, 1, 2], ["medkit", 3, 1, 2] ] },

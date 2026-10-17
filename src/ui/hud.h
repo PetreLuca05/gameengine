@@ -4,5 +4,8 @@
 #define DG_HUD_H
 
 void hud_draw(void);
+void hud_register(void);            // HUD cvars (hud/hud_compass.c)
+// Bottom of the compass block last frame (pixels): the day / night clock sits under it.
+float hud_compass_bottom(void);
 
 #endif

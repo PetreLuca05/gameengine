@@ -28,6 +28,12 @@ void entities_client_sync(World *w);
 void entities_link(World *w);
 
 const InteractDef *interact_def_for(EntityType t);
+typedef enum DoorAction { DOOR_ACT_TOGGLE, DOOR_ACT_SLAM } DoorAction;
+// Door wheel actions (RPC_DOOR_ACTION, host): toggle = the normal use; slam = 3.5x the speed, loud,
+// heard by zombies (horde_noise). False when the player can't (range, locked without the key).
+bool door_action(World *w, EntityId door, int player, int action);
+// Peek: the visor on the far side of a closed door from `from` (world), looking away from it.
+bool door_visor_view(const World *w, EntityId door, vec3 from, vec3 *eye, vec3 *dir);
 void entities_set_interact_def(EntityType t, const InteractDef *def);
 
 #endif
