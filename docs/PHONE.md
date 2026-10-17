@@ -2,99 +2,128 @@
 
 Every player carries a phone (it is built in, outside the inventory). **X** takes it out over
 whatever hotbar slot is selected and puts it away again; choosing a slot also puts it away.
-Holding **right mouse** raises it into **camera mode**. Its screen is a live render target from its
-lens.
+While it is out it is **always raised** in the focused, camera-ready pose (hold point state
+`phone_portrait`): there is no aim / "hold right mouse" mode. Mouse look still turns the view.
 
-The game also serves a **companion web page**. Open it on your real phone by scanning a QR code.
-The page then:
-- shows the in-game phone camera live;
-- drives the in-game phone with the real phone's orientation;
-- takes photos and videos, zooms and switches between the front and back cameras;
-- lets you browse and save the gallery.
+The phone's **screen is not on the phone model**. It is shown in two places only:
+- the **HUD phone panel** (the simulated phone screen, bottom right), for the local player;
+- the **companion web page** on your real phone, once it is paired. Then the panel slides away and
+  the real phone's orientation drives the in-game phone.
+
+The held model's screen is plain dark glass (no texture, no glow, no light), for everyone. Other
+players and spectators only see the pose (raised, portrait / landscape, the real phone's rotation).
 
 Everything stays on the local network: the game is the server, and nothing goes through the cloud.
 
-## Phone flow rework: plan (written before the code)
+## Phone flow
 
-Goal: equip = pairing, an always-raised phone, a HUD "simulated phone" panel, a Connect portal
-with an in-game fallback, a small phone OS (home, Camera, Gallery), a white emissive screen.
+```
+equip (X / hotbar) ──> server up + pairing code + Connect portal (same frame) ──┬─ device connects ──> PAIRED
+        │                                                                       │   (panel slides out; the page has the UI)
+        │                                                                       ├─ "Use in-game phone instead" / timeout /
+        │                                                                       │   no server ──> LOCAL (home screen in the panel)
+        │                                                                       └─ "Cancel" ──> the phone goes away
+PAIRED ── device disconnects ──> LOST: the panel comes back on the portal with "Reconnect"
+```
 
-1. **Flow state machine (pure, `phone_os.c`, unit tested).** `PhoneFlow`: `IDLE -> PAIRING`
-   (portal) on equip; `PAIRING -> LOCAL` on decline, timeout (`phone_pair_timeout`) or server
-   failure; `PAIRING / LOST -> PAIRED` on a device connect; `PAIRED -> LOST` on disconnect
-   (portal with Reconnect); Cancel puts the phone away. Per session: re-equipping a paired or
-   declined phone skips the portal. `phone_auto_pair 0` goes straight to `LOCAL`.
-2. **Apps (`PhoneApp`, replicated).** `OFF, PORTAL, HOME, CAMERA, GALLERY` + gallery viewer
-   sub-state. `assets/phone/apps.json` lists the home-screen apps (id, label, icon tile);
-   `assets/phone/theme.json` holds the light phone-OS tokens and the HUD panel tokens. Layout
-   rects are computed once in design px (640 x 1136) and shared by drawing and hit testing.
-3. **Always focused.** Camera items always aim (`weapons.c`, no `BTN_AIM`), so the hold point
-   stays in `phone_portrait` while equipped; P (pair) is removed, `phoneui` (Alt / pad d-pad
-   right) toggles the cursor for the panel.
-4. **One screen image, three consumers.** The CPU canvas (`phone_ui.c`) draws the OS over a white
-   background (transparent only where the camera app shows the lens). `phone_view` composites it
-   (camera apps over the lens image; other apps without any scene pass: `ui_only`) into the
-   screen target (the 3D screen) and a new sRGB **panel** image with a rounded alpha mask (the HUD
-   panel). Remote / spectated phones build their canvas from replicated state (no QR, no
-   private photos), rendered locally.
-5. **HUD panel** bottom-right above the item readout, ~22 % of the screen height
-   (`hud_phone_size`, `hud_phone_corner`), bezel / radius / shadow from `assets/phone/theme.json`,
-   `hud_opacity`; slides out + fades when a device connects, comes back on disconnect.
-6. **Web page** = a mirrored HTML implementation (touch, native text, gestures and the browser's
-   download / share need real DOM). It uses the same assets: the server injects
-   `assets/phone/theme.json`, `apps.json` and the icon atlas (data URI) into the page, so both
-   look the same. Page and game sync the current app both ways (`{"c":"app"}` / status `app`).
-7. **Screen material.** Lit, near-black albedo (`0.04 x` the screen image) + emissive, so the glass
-   gets real Fresnel reflections; emissive = `phone_screen_emissive` nits-like luminance turned
-   into the displayed level `clamp(L x exposure, phone_screen_min, phone_screen_max)`: white but
-   not blown out by day, a mild bloom at night. A small unshadowed point light at the screen
-   socket (`phone_screen_light`). Off / not equipped: black.
-8. **Replication.** `UserCmd.phone_app` + ANS_PHONE gains app and zoom (7 bytes). Protocol 19.
-9. **Tests.** `test_phone` (flow, layout hit tests at 16:9 / 21:9 / 4:3, apps.json/theme.json,
-   gallery delete, page injection); script tests (`phone_flow.cfg`: equip -> pairing in one tick,
-   decline -> home, camera -> photo -> gallery, day / night screen levels, screenshots); a Python
-   stdlib WebSocket device (`phone_flow_ws.py`) for connect / orientation / disconnect; the updated
-   Playwright e2e; a two-instance LAN check.
+- **Equip = pairing.** Equipping starts the HTTPS / WebSocket server if needed, issues a one-time
+  code and its QR, and shows the **Connect portal** at once: the QR, the URL as text, "Waiting for
+  device…", `Use in-game phone instead` (decline) and `Cancel`.
+- **Declined, no connection within `phone_pair_timeout` (60 s), or no server** (port in use,
+  `phone_server 0`, pairing disabled): the panel becomes the in-game phone and opens the home
+  screen. The home screen keeps a "Connect your phone" button that opens the portal again.
+- **Connected:** the panel slides out and fades; the page shows the same phone OS (home, Camera,
+  Gallery) and the device's orientation drives the phone. **Disconnected:** the panel slides back in
+  on the portal (`Phone disconnected`, `Reconnect`). A page that resumes with its session reconnects
+  on its own.
+- **Per session:** re-equipping a paired or declined phone skips the portal (the last app opens).
+- `phone_auto_pair 0`: equipping goes straight to the in-game phone.
+
+The flow is a pure state machine (`phone_os.c`: `PhoneOs`, `phone_os_equip / tick / connected /
+disconnected / decline / cancel / reconnect`), unit tested.
+
+## The phone OS
+
+| App | In the HUD panel / on the page |
+|---|---|
+| **Connect portal** | QR + URL + status + decline / cancel (+ Reconnect after a disconnect). The page's portal shows "Connected" and asks for motion access ("Allow motion & continue"). |
+| **Home** | status bar (in-game clock, LINK when paired, cosmetic signal, battery), the big clock, day + part of day, the weather glyph + name from the weather system, the app grid, the home bar. |
+| **Camera** | the live lens view, zoom chips 1x / 2x / 5x + log slider (wheel / pinch), shutter, record, last-shot thumbnail, front / back switch. |
+| **Gallery** | thumbnails grid (photos + videos, newest first, wheel scroll), viewer (prev / next or swipe, wheel / pinch zoom), Delete; Download / Share on the page. |
+
+- **Apps are data:** `assets/phone/apps.json` lists the home grid (id, label, icon tile, the
+  built-in app it opens). An entry without a built-in app shows "coming soon" (map, messages,
+  flashlight later). Weather presets map to glyphs there too.
+- **Look:** `assets/phone/theme.json` (light theme: white background, dark text, accent blue)
+  plus the HUD panel tokens (readout gap, radius, bezel, shadow, slide time).
+- **Icons:** one atlas, `assets/phone/icons.png` (128 px tiles: camera, gallery, weather glyphs),
+  generated by `tools/phone_icons.py` (Python stdlib, signed distance shapes).
+- **Battery** drains slowly while the phone is out (`phone_battery_drain`, cosmetic, never below
+  5 %): a hook for a later mechanic.
+
+### Why the page is a mirrored HTML implementation
+
+The in-game screen is a CPU canvas (`phone_ui.c`) because it must be an image (the HUD panel, the
+lens composite). The page is HTML: native text at the phone's DPI, touch gestures, scrolling,
+`<video>`, and the browser's Download / Share sheets need a real DOM; streaming the in-game UI as
+pixels would be blurry and laggy. To make both **look the same** they share the assets: the game
+injects `theme.json`, `apps.json` and the icon atlas (as a data URI) into the page at the
+`/*DG_PHONE_DATA*/` marker (`phone_page_build`). The current app is synced both ways: the page
+sends `{"c":"app","v":"camera"}`, the game's status carries `"app"`.
+
+### Input
+
+| Input (default) | |
+|---|---|
+| **X** / pad d-pad down | take out / put away |
+| **Left Alt** (`phoneui`) | free the cursor for the HUD panel (again: back to mouse look). Hover + click its buttons; **Esc** = back (viewer → grid → home), then releases; a click outside the panel releases; the wheel scrolls / zooms the panel. Alt is shared with walk on purpose. |
+| **Right stick click** held (`phonenav`) | gamepad: the d-pad / stick moves the focus over the panel's buttons, A presses, B goes back (the game controls pause meanwhile) |
+| **Left mouse** / **R** / **T** / **wheel** | Camera app with the mouse in the game: photo / record / selfie / zoom |
+| **J** | Gallery ↔ home |
+
+On the page: tap, the home bar (or a swipe up from the bottom edge) for home, a swipe right from the
+left edge for back, swipes in the viewer for prev / next, pinch to zoom.
+
+## The HUD panel
+
+- Height `hud_phone_size` × the screen height (0.22), portrait at the phone screen's aspect, in the
+  `hud_phone_corner` corner of the HUD safe area (0 bottom right). Bottom right it sits
+  `readout_gap` above the item / ammo readout. Bezel, radius and shadow come from
+  `assets/phone/theme.json`, the opacity from `hud_opacity`. Settings → HUD → Phone panel.
+- The image is the phone's screen (UI over the lens view in the camera app), **box-filtered down to
+  the panel's pixel size** with rounded corners as alpha (`shaders/post/phone_panel.comp`), so text
+  stays clean at 22 %.
+- The panel rect is a pure function (`phone_panel_rect`), unit tested at 16:9, 21:9, 4:3 and more.
 
 | Area | Code | Data |
 |---|---|---|
 | Phone module: server lifecycle, page messages, orientation, capture, commands | `src/gameplay/phone/phone.c` | |
-| Screen UI (CPU-drawn), HUD + pairing panel, the phone model | `src/gameplay/phone/phone_ui.c` | |
+| Phone OS (pure): flow, apps, layout + hit tests, assets, HUD panel rect, page injection | `src/gameplay/phone/phone_os.c` | `assets/phone/apps.json`, `theme.json`, `icons.png` (`tools/phone_icons.py`) |
+| Screen UI (CPU canvas), HUD panel + hints, the phone model (dark glass) | `src/gameplay/phone/phone_ui.c` | |
 | Orientation math (pure) | `src/gameplay/phone/phone_orient.c` | |
 | Stream rate control + JPEG (pure), the JPEG-over-WebSocket sink | `src/gameplay/phone/phone_stream.c`, `phone_stream_ws.c` | |
 | Photos, sidecars, gallery (pure) / H.264 MP4 recording / QR codes | `phone_capture.c`, `phone_video.c`, `phone_qr.c` | |
 | Wire protocol (shared with the page) | `src/gameplay/phone/phone_proto.h` | |
 | HTTPS + WebSocket server, tokens, TLS + certificates | `src/net/http_ws/` | |
-| Lens camera, screen target, light post, readback | `src/render/phone_view.c`, `shaders/post/phone_tonemap.comp` | |
+| Lens camera, UI-only views, screen + HUD panel images, light post, readback | `src/render/phone_view.c`, `shaders/post/phone_tonemap.comp`, `phone_panel.comp` | |
+| Always raised while equipped (no aim button) | `src/gameplay/weapons.c` (camera items) | |
 | Hold point states, driven rotation | `src/player/holdpoint.c`, `src/anim/weapon_hold.c` | `assets/human/holdpoint.json` (`phone`, `phone_landscape`) |
 | Hold styles | `src/anim/procedural.c` | `assets/human/controller.json` |
 | Item | `src/gameplay/items.c` (`"camera"`, `"builtin"`) | `data/items.json` (`phone`) |
 | Companion page | `web/phone/index.html` | |
-| Settings tab | `src/ui/screens/scr_settings.c` (Phone) | |
-| Tests | `tests/test_phone.c`, `tests/test_anim.c` (`test_phone_hold`), `tools/tests/phone_e2e.sh` | |
+| Settings | `src/ui/screens/scr_settings.c` (Phone; HUD → Phone panel) | |
+| Tests | `tests/test_phone.c`, `tests/test_anim.c` (`test_phone_hold`), `tools/tests/phone_{flow,ws,screen}.py`, `phone_e2e.sh`, `phone_net.sh` | |
 
-## Using it
+## Pairing details
 
-| Key (default) | While holding the phone |
-|---|---|
-| **X** | take out / put away (from any slot) |
-| **Right mouse** (hold) | raise the phone: camera mode |
-| **Left mouse** | photo (camera mode) |
-| **R** | start / stop recording (camera mode) |
-| **Mouse wheel** | zoom 1x to 8x (camera mode; the wheel doesn't switch items then) |
-| **T** | front (selfie) / back camera |
-| **P** | pairing screen with the QR code (press again to close) |
-| **J** | gallery on the phone's screen |
 
-### Pairing
-
-1. Take the phone out (X) and press **P**.
-2. A QR code appears on the in-game phone's screen and, bigger, on a HUD panel. Both encode
-   `https://<lan-ip>:47820/?t=<token>`. The address is also shown as text, in case your camera
-   can't read the code.
+1. Take the phone out (X). The Connect portal opens in the HUD panel at once.
+2. Its QR code encodes `https://<lan-ip>:47820/?t=<token>`; the address is also shown as text, in
+   case your camera can't read the code.
 3. Scan the code with the real phone. It must be on the same Wi-Fi.
 4. The first time, the browser warns about the certificate (see the next section). Accept it.
-5. Tap **Start**. On iOS, allow **Motion & Orientation** access when asked.
+5. The page's portal says **Connected**: tap **Allow motion & continue**. On iOS, allow **Motion &
+   Orientation** access when asked. The page opens the home screen.
 6. Hold the phone upright, facing the direction your character is looking. The first sample
    calibrates automatically. Later, use **Calibrate** in the page's menu, or double-tap the picture.
 
@@ -105,7 +134,8 @@ Pairing rules:
 - Each player has one phone. Pairing another phone, or opening the page in a second tab, replaces the
   first one, which sees "Paired elsewhere".
 - **Unpair** (on the page, or `phone_unpair`) revokes the session.
-- Pairing again later works the same way: press P for a new code.
+- Pairing again later: **Reconnect** on the portal, "Connect your phone" on the home screen, or
+  `phone_pair`. An expired code on an open portal is replaced by a new one automatically.
 
 ## HTTPS and permissions (read this before blaming the code)
 
@@ -208,9 +238,8 @@ Choices:
     150 ms target on a normal LAN.
   - **Not measured on real hardware here:** the test machine renders at about 1 fps in software,
     which dominates its numbers.
-- **Other players' phones.** Each client renders the nearest other phone within
-  `phone_remote_range` (4 m) itself, at `phone_remote_fps` (8 Hz, 270×480), from that phone's
-  replicated transform. Nothing extra is sent over the network.
+- **Other players' phones** show no screen (the model is dark glass): only the pose is replicated
+  (`ANS_PHONE`: flags + rotation). Nothing about the screen content goes over the network.
 
 ### Upgrading to WebRTC
 
@@ -259,7 +288,7 @@ Replication:
 - Clients send the packed rotation in `UserCmd.phone_rot`: smallest-three, 32 bits, about 0.1°
   error.
 - Flags go in `phone_flags`: landscape, driven, recording, front camera.
-- The host copies them into the character state (`ANS_PHONE`, 5 bytes), only while in camera mode.
+- The host copies them into the character state (`ANS_PHONE`, 5 bytes), only while the phone is out (it is always raised then).
   Remote copies interpolate the rotation between snapshots and solve the same pose.
 - This bumped `DG_PROTOCOL_VERSION` to 12.
 
@@ -278,22 +307,24 @@ returns to the mouse.
   - `hip` / `sprint`: lowered at the chest, screen tilted towards the eyes.
   - `phone_portrait` / `phone_landscape`: their `pos` / `rot` place the **screen socket** in
     camera space (right, up, forward), not the anchor. Tune them with the holdpoint editor (F8).
-- **Screen.** A live render target:
+- **Screen.** The model's screen quad is **dark glass** (a near-black dielectric: real reflections,
+  no texture, no emissive, no light), for the owner, other players and spectators alike. The
+  phone's UI lives on the HUD panel and the paired page only (`phone_status` reports
+  `model_screen=<with content>/<drawn>`, always `0/n`).
+- **Lens view** (the camera app, photos, video, the stream):
   - the lens camera has its own FOV: 68° vertical at 1x; zoom narrows it as
     `2·atan(tan(fov/2)/zoom)`;
-  - rendered at `phone_res_w × phone_res_h` (640×1136) at `phone_fps` (30 Hz);
+  - rendered at `phone_res_w × phone_res_h` (640×1136) at `phone_fps` (30 Hz), only in the camera
+    app; the other apps are **UI-only views** (no scene pass: the overlay over black);
   - opaque scene + characters + particles + rain, sky, then the **light post**
     (`phone_tonemap.comp`): the main view's auto exposure + `phone_exposure`, the user's tonemapper
     (ACES / PBR Neutral), vignette — no DoF, motion blur or bloom.
 
-  The scene pass writes two images:
+  It writes:
   - the clean sRGB camera image (stream, photos, video);
-  - the screen image, with the **UI overlay** composited on top. The overlay is drawn on the CPU:
-    status bar with in-game clock, battery and link, shutter / record / thumbnail, zoom chips and
-    slider, SELFIE chip, pairing QR, gallery grid. It is uploaded only when it changes, at most twice
-    a second.
-
-  The quad is emissive, scaled by the current exposure so it reads like a lit display.
+  - the screen image, with the **phone OS** composited on top (drawn on the CPU, white background
+    outside the camera app, uploaded when it changes);
+  - from that, the **HUD panel image** at the panel's pixel size (`phone_panel.comp`).
 - **Front (selfie) camera.** The owner's body is drawn shadow-only in first person; `MAT_SELF`
   makes it visible to phone cameras (skinned pass 3), head included. The in-game preview is mirrored;
   photos, videos and the stream are not.
@@ -335,20 +366,23 @@ returns to the mouse.
 |---|---|
 | `phone_out [0|1]` | take the phone out / put it away (X) |
 | `phone_server on|off` | start / stop the server (`phone_server` cvar: 0 off, 1 on, 2 automatic — starts the first time the phone comes out) |
-| `phone_pair` | new pairing code: QR on the phone + HUD, URL printed to the console |
+| `phone_pair` | new pairing code: the Connect portal (Reconnect), URL printed to the console |
 | `phone_unpair` | revoke the session |
 | `phone_fake_orientation <pitch> <yaw> <roll>` / `off` | drive the phone without a device |
 | `phone_stream_stats` | resolution, quality, fps, kbps, encode ms, RTT, glass-to-glass, server counters, orientation source |
-| `phone_photo`, `phone_record`, `phone_zoom <x>`, `phone_selfie [0|1]`, `phone_landscape [0|1]`, `phone_screen camera|pair|gallery`, `phone_calibrate` | the same as the keys / page buttons |
+| `phone_photo`, `phone_record`, `phone_zoom <x>`, `phone_selfie [0|1]`, `phone_landscape [0|1]`, `phone_screen home|camera|gallery|pair`, `phone_calibrate` | the same as the keys / page buttons |
+| `phone_decline`, `phone_back`, `phone_ui [0|1]` | portal decline, back, free the cursor for the panel |
+| `phone_button <name> [index]`, `phone_tap <x> <y>` | press a screen button / tap at design px (the same path as a click on the panel) |
+| `phone_status`, `phone_wait <flow|app> [frames]` | one status line; hold a script until the phone gets there (tests) |
 
 Cvars:
-- `phone_port`, `phone_tls`, `phone_bind`, `phone_pairing`, `phone_token_ttl`
+- `phone_port`, `phone_tls`, `phone_bind`, `phone_pairing`, `phone_token_ttl`, `phone_auto_pair`, `phone_pair_timeout`
 - `phone_res_w`, `phone_res_h`, `phone_fps`, `phone_quality`
 - `phone_smoothing`, `phone_sensitivity`, `phone_invert_yaw`, `phone_invert_pitch`,
   `phone_invert_roll`
-- `phone_filter`, `phone_photo_hires`, `phone_exposure`, `phone_screen_brightness`
+- `phone_filter`, `phone_photo_hires`, `phone_exposure`, `phone_battery_drain`
 - `phone_video_kbps`, `phone_record_max`
-- `phone_remote_range`, `phone_remote_fps`
+- `hud_phone_size`, `hud_phone_corner` (Settings → HUD)
 
 Most of them are also in **Settings → Phone**.
 
@@ -368,7 +402,7 @@ is GPLv2 or commercial; civetweb because its TLS needs OpenSSL DLLs.
 
 ## Tests
 
-- **`ctest -R phone`** (`tests/test_phone.c`, 385 checks):
+- **`ctest -R phone`** (`tests/test_phone.c`, 843 checks):
   - QR encode → decode with quirc;
   - token auth: wrong, empty, prefix, expired at exactly 2 minutes, replayed, re-pair, unpair;
     rate limit + bans;
@@ -384,7 +418,15 @@ is GPLv2 or commercial; civetweb because its TLS needs OpenSSL DLLs.
     sample, 100 streamed frames, photo download, 2 s video download, resume with the session,
     unpair;
   - TLS: certificate generation, a handshake that verifies the IP SAN against the CA, the CA over
-    the HTTP helper, CA reuse, a new server certificate for a new IP.
+    the HTTP helper, CA reuse, a new server certificate for a new IP;
+  - phone OS: the flow (equip → pairing, timeout at 60 s, decline, cancel, no server, auto-pair
+    off, connect / lose / reconnect, per-session skip of the portal, back), every app's buttons on
+    screen and hit-tested at their centres, the gallery paging, the zoom slider round trip,
+    `apps.json` (exactly Camera + Gallery, atlas tiles, a glyph per weather preset, a data-only
+    extra app), the atlas size, `theme.json`, the page injection (`</` escaped, missing assets),
+    the HUD panel at 1920×1080 / 2560×1080 / 1440×1080 / 3440×1440 / 1280×720 / 1024×768 in all four
+    corners (22 % high, phone aspect, inside the safe area, clear of the item readout), gallery
+    delete (file + sidecar).
 - **`ctest -R anim`** (`test_phone_hold`): the phone driven by random poses (some far outside the
   cone) in portrait and landscape.
   - Right hand on the phone: 0.04 mm portrait, about 6 mm at the landscape extremes (the arm is
@@ -398,3 +440,24 @@ is GPLv2 or commercial; civetweb because its TLS needs OpenSSL DLLs.
     in-game phone, calibration, the photo blob, 2 s video, gallery, MP4 download, 403 without the
     session, unpair.
   - Screenshots: `phone_page_*.png`.
+- **`tools/tests/phone_flow.py`** (from `build/bin`, runs `phone_flow.cfg`): equip → one frame later
+  server + code + portal + panel; raised without any aim input; decline → home; Camera → photo →
+  Gallery → viewer → back; re-equip skips the portal; the HUD panel measured in screenshots at
+  1600×900 / 2100×900 / 1200×900; static: no phone focus bind, the phone never reads aim.
+  Screenshots `phone_flow_*.png`.
+- **`tools/tests/phone_ws.py`**: a simulated device in Python's stdlib (TLS + WebSocket): the page
+  carries the injected assets, pairing, panel removed, orientation drives the phone, the page opens
+  Camera (frames), takes a photo (blob), opens Gallery (listed, downloads with the session),
+  disconnects → the panel is back on the portal. Screenshots `phone_ws_*.png`.
+- **`tools/tests/phone_screen.py`**: the model's screen is dark glass day / night and in the camera
+  app (`model_screen=0/n`), no glow, while the panel shows the white UI.
+- **`tools/tests/phone_e2e.sh`**: the game plus headless Chromium driving the real page.
+  - Needs an existing Playwright module (`PLAYWRIGHT_PATH`) and Chromium (`CHROMIUM`); nothing is
+    installed.
+  - Covers: HTTPS secure context, the injected assets, token removed from the URL, the portal's
+    Connected, the light home screen with two apps, Camera frames, the in-game app following, gyro,
+    calibration, the photo blob, 2 s video, MP4 download, 403 without the session, Gallery grid +
+    viewer + delete, unpair → the game's panel back on the portal.
+  - Screenshots: `phone_page_*.png`.
+- **`tools/tests/phone_net.sh`**: host + client: the client sees the host's phone raised in portrait
+  with a dark screen.
