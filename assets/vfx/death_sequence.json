@@ -1,0 +1,7 @@
+{
+  "_doc": "First-person death sequence visuals (docs/REVIVE.md). stage1: fall through the ragdoll's eyes; stage2: instant black on the head/torso impact; downed: light persistent variant.",
+  "stage1": { "time": 0.4, "desaturate": 0.95, "contrast": -0.15, "vignette": 0.35, "blur": 0.35, "exposure": -0.4 },
+  "impact": { "timeout": 2.5, "min_time": 0.15, "min_speed": 1.2, "speed_drop": 0.45, "contact_dist": 0.14 },
+  "stage2": { "hold_time": 1.0, "fade_in": 0.8 },
+  "downed": { "desaturate": 0.45, "vignette": 0.22, "blur": 0.08, "attack": 0.6, "release": 0.8 }
+}
