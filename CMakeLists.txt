@@ -526,7 +526,7 @@ add_test(NAME fidelity COMMAND test_fidelity WORKING_DIRECTORY $<TARGET_FILE_DIR
 set(DG_PHONE_CORE_SOURCES
   src/net/http_ws/hws_proto.c src/net/http_ws/hws_auth.c src/net/http_ws/hws_tls.c src/net/http_ws/hws_server.c
   src/gameplay/phone/phone_stream.c src/gameplay/phone/phone_stream_ws.c
-  src/gameplay/phone/phone_video.c src/gameplay/phone/phone_capture.c src/gameplay/phone/phone_qr.c)
+  src/gameplay/phone/phone_video.c src/gameplay/phone/phone_capture.c src/gameplay/phone/phone_qr.c src/gameplay/phone/phone_os.c)
 file(GLOB DG_QUIRC_SOURCES third_party/quirc/*.c)
 add_executable(test_phone tests/test_phone.c ${DG_PHONE_CORE_SOURCES} ${DG_QUIRC_SOURCES} src/core/jobs.c)
 set_target_properties(test_phone PROPERTIES C_STANDARD 11)

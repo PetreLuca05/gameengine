@@ -2,6 +2,10 @@
 // persistent targets through a light post stack (exposure + tonemap, no DoF / motion blur):
 //   screen   display-linear image + the phone UI overlay: sampled by the phone's screen quad
 //   scene    the clean sRGB camera image, optionally copied to the CPU (stream, photo, video)
+//   panel    the screen image box-filtered down to the HUD panel's pixel size, sRGB-encoded,
+//            with a rounded-corner alpha mask (the HUD phone panel: crisp at any panel size)
+// A UI-only view (the phone's home screen, portal, gallery) skips the scene pass: the overlay is
+// composited over black.
 // View 0 is the local player's phone, view 1 a nearby remote phone (rendered at a low rate by the
 // game). A view rendered this frame is sampled from the next frame on (its passes run after the
 // viewmodel); CPU copies complete two frames later and never stall the render thread.
@@ -24,10 +28,14 @@ typedef struct RenderPhoneView {
     float vignette;           // camera vignette 0..1 (the scene image too)
     bool readback;            // copy the scene image to the CPU this frame
     bool mirror;              // front (selfie) camera: the screen preview is mirrored, the image is not
+    bool ui_only;             // no lens view: the screen is the overlay alone (opaque UI apps)
+    int panel_w, panel_h;     // the HUD panel image size in pixels (0 = no panel image)
+    float panel_radius;       // its corner radius in pixels
 } RenderPhoneView;
 
 void render_phone_view(const RenderPhoneView *v);   // this frame (call between begin / end frame)
 TextureId render_phone_screen(int view);            // 0 until the view has been rendered once
+TextureId render_phone_panel(int view);             // the panel image (sRGB, rounded alpha), 0 until rendered
 // The newest completed CPU copy (RGBA8 sRGB, top row first, stride w * 4). The pointer stays
 // valid for one frame. *serial increases with every new copy; returns false if there is none.
 bool render_phone_readback(int view, const u8 **rgba, int *w, int *h, u32 *serial);

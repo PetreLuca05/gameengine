@@ -1,0 +1,28 @@
+{
+  "_doc": "Phone OS light theme (docs/PHONE.md): the in-game screen canvas (design px on a 640 x 1136 screen), the companion page (CSS variables, injected by the game) and the HUD phone panel (1080p design px, scaled like the HUD). Colours RGBA 0-255.",
+  "colors": {
+    "bg": [255, 255, 255, 255],
+    "surface": [242, 243, 246, 255],
+    "surface_hi": [226, 229, 235, 255],
+    "text": [20, 22, 26, 255],
+    "text_dim": [96, 102, 112, 255],
+    "text_faint": [160, 166, 176, 255],
+    "accent": [10, 122, 255, 255],
+    "accent_text": [255, 255, 255, 255],
+    "ok": [40, 170, 80, 255],
+    "warning": [230, 140, 20, 255],
+    "danger": [226, 52, 44, 255],
+    "home_bar": [20, 22, 26, 200],
+    "camera_ui": [255, 255, 255, 240],
+    "camera_accent": [255, 214, 10, 240]
+  },
+  "sizes": {
+    "status_h": 64, "pad": 32, "radius": 28, "button_h": 84, "icon": 112, "icon_label": 26,
+    "home_bar_w": 210, "home_bar_h": 8, "grid_gap": 26
+  },
+  "panel": {
+    "_doc": "HUD panel (the simulated phone screen): height = hud_phone_size x screen height, portrait at the phone screen's aspect, in the hud_phone_corner corner of the HUD safe area; bottom-right it sits above the item / ammo readout (readout_gap).",
+    "readout_gap": 104, "radius": 22, "bezel": 7, "shadow": 26, "hint_gap": 10, "slide": 0.35,
+    "bezel_color": [16, 17, 20, 245], "bezel_edge": [255, 255, 255, 40], "shadow_color": [0, 0, 0, 110]
+  }
+}

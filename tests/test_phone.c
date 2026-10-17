@@ -4,6 +4,8 @@
 // JPEG pipeline throughput on the job system, photo / video files (headers parsed back) and their
 // sidecars, and a headless client round trip against the real server: pair -> 100 frames ->
 // photo -> 2 s video -> unpair. Plus TLS: certificate generation and a handshake with mbedTLS.
+// Phone OS: the pairing flow, the screen layout + hit tests, assets/phone/*.json + the icon atlas,
+// the companion page injection, the HUD panel at 16:9 / 21:9 / 4:3, gallery delete.
 #if !defined(_WIN32) && !defined(_DEFAULT_SOURCE)
 #define _DEFAULT_SOURCE
 #endif
@@ -30,6 +32,7 @@ typedef int tsock;
 #include "core/platform.h"
 #include "gameplay/phone/phone_capture.h"
 #include "gameplay/phone/phone_orient.h"
+#include "gameplay/phone/phone_os.h"
 #include "gameplay/phone/phone_proto.h"
 #include "gameplay/phone/phone_qr.h"
 #include "gameplay/phone/phone_stream.h"
@@ -949,6 +952,242 @@ static void test_tls(const char *dir) {
     hws_stop(s3);
 }
 
+// ------------------------------------------------------------------ phone OS (flow, layout, assets)
+
+static char *read_asset(const char *rel) {
+    char p[512];
+    platform_data_path(rel, p, sizeof(p));
+    size_t n;
+    return platform_read_file(p, &n);
+}
+
+static void test_phone_os_flow(void) {
+    PhoneOs os;
+    phone_os_init(&os);
+    CHECK(os.flow == PFLOW_IDLE && os.app == PAPP_OFF && !phone_os_panel(&os), "idle: no panel");
+    // Equip: pairing at once (the caller starts the server + issues a code), the portal, the panel.
+    CHECK(phone_os_equip(&os, true, false), "equip asks for a pairing code");
+    CHECK(os.flow == PFLOW_PAIRING && os.app == PAPP_PORTAL && phone_os_panel(&os), "equip -> pairing, portal, panel");
+    CHECK(!phone_os_ui_only(PAPP_CAMERA) && phone_os_ui_only(PAPP_PORTAL) && phone_os_ui_only(PAPP_HOME), "only the camera renders the lens");
+    phone_os_open(&os, PAPP_CAMERA);
+    CHECK(os.app == PAPP_PORTAL, "apps do not open over the portal");
+    // Timeout -> the in-game phone (home).
+    for (int i = 0; i < 59; i++) phone_os_tick(&os, 1.0f, 60.0f, 0.0f);
+    CHECK(os.flow == PFLOW_PAIRING, "59 s: still pairing");
+    phone_os_tick(&os, 1.0f, 60.0f, 0.0f);
+    CHECK(os.flow == PFLOW_LOCAL && os.app == PAPP_HOME && phone_os_panel(&os) && os.reason[0], "60 s: in-game phone (%s)", os.reason);
+    // Session memory: a declined / timed-out phone skips the portal on re-equip.
+    phone_os_open(&os, PAPP_GALLERY);
+    phone_os_unequip(&os);
+    CHECK(os.app == PAPP_OFF && !phone_os_panel(&os), "unequipped: off, no panel");
+    CHECK(!phone_os_equip(&os, true, false) && os.app == PAPP_GALLERY, "re-equip: no portal, the last app");
+    // Back: viewer -> grid -> home -> nothing.
+    os.viewer = 2;
+    CHECK(phone_os_back(&os) && os.viewer == -1 && os.app == PAPP_GALLERY, "back: viewer -> grid");
+    CHECK(phone_os_back(&os) && os.app == PAPP_HOME, "back: grid -> home");
+    CHECK(!phone_os_back(&os), "back on home: nothing");
+    // Connect portal from the home screen ("Connect your phone"), then a device.
+    CHECK(phone_os_reconnect(&os) && os.flow == PFLOW_PAIRING && os.app == PAPP_PORTAL, "connect: the portal again");
+    phone_os_connected(&os);
+    CHECK(os.flow == PFLOW_PAIRED && os.app == PAPP_HOME && !phone_os_panel(&os), "device connected: paired, home, panel removed");
+    phone_os_open(&os, PAPP_CAMERA);
+    phone_os_disconnected(&os);
+    CHECK(os.flow == PFLOW_LOST && os.app == PAPP_PORTAL && phone_os_panel(&os), "device lost: the portal (Reconnect), panel back");
+    PhoneLayoutIn li = { os.app, os.flow, -1, 0, 2, 4, 0 };
+    PhoneHit h[PHONE_MAX_HITS];
+    int n = phone_os_layout(&li, h, PHONE_MAX_HITS);
+    CHECK(phone_os_find(h, n, PB_RECONNECT, 0) && phone_os_find(h, n, PB_DECLINE, 0) && phone_os_find(h, n, PB_CANCEL, 0), "lost portal: Reconnect, decline, cancel");
+    phone_os_connected(&os);
+    CHECK(os.app == PAPP_CAMERA, "reconnected: back to the app it was on");
+    // Paired + unequip + re-equip with the device still there: no portal.
+    phone_os_unequip(&os);
+    CHECK(!phone_os_equip(&os, true, true) && os.flow == PFLOW_PAIRED && os.app == PAPP_CAMERA, "re-equip paired: skips the portal");
+    // The device left while the phone was down: the portal on the next equip.
+    phone_os_unequip(&os);
+    CHECK(!phone_os_equip(&os, true, false) && os.flow == PFLOW_LOST && os.app == PAPP_PORTAL, "re-equip after the device left: portal");
+    // Decline from the portal; cancel; no server; auto-pair off.
+    phone_os_decline(&os);
+    CHECK(os.flow == PFLOW_LOCAL && os.app == PAPP_CAMERA && !os.reason[0], "decline: in-game phone, no reason");
+    PhoneOs b;
+    phone_os_init(&b);
+    phone_os_equip(&b, true, false);
+    phone_os_cancel(&b);
+    CHECK(b.flow == PFLOW_IDLE, "cancel: pairing stops");
+    phone_os_unequip(&b);
+    CHECK(phone_os_equip(&b, true, false) && b.flow == PFLOW_PAIRING, "after cancel: equip pairs again");
+    phone_os_server_failed(&b, "port in use");
+    CHECK(b.flow == PFLOW_LOCAL && b.app == PAPP_HOME && !strcmp(b.reason, "port in use"), "no server: in-game phone at once");
+    phone_os_init(&b);
+    CHECK(!phone_os_equip(&b, false, false) && b.flow == PFLOW_LOCAL && b.app == PAPP_HOME, "auto-pair off: straight to the in-game phone");
+    // Battery: cosmetic drain while equipped, never below 5 %.
+    float b0 = b.battery;
+    phone_os_tick(&b, 600.0f, 0.0f, 0.005f / 60.0f);
+    CHECK(b.battery < b0 && b.battery >= 0.05f, "battery drains while equipped (%.3f -> %.3f)", b0, b.battery);
+    CHECK(phone_app_from_name("gallery") == PAPP_GALLERY && !strcmp(phone_app_name(PAPP_PORTAL), "portal") && phone_app_from_name("x") < 0, "app names");
+}
+
+static void test_phone_os_layout(void) {
+    // Every app's buttons stay on the 640 x 1136 screen, do not overlap (except the home bar strip
+    // under full-height areas) and hit-test back to themselves.
+    static const PhoneApp apps[] = { PAPP_PORTAL, PAPP_HOME, PAPP_CAMERA, PAPP_GALLERY, PAPP_GALLERY };
+    for (int a = 0; a < 5; a++) {
+        for (int f = PFLOW_PAIRING; f <= PFLOW_LOST; f++) {
+            PhoneLayoutIn li = { apps[a], (PhoneFlow)f, a == 4 ? 1 : -1, 0, 2, 4, 14 };
+            PhoneHit h[PHONE_MAX_HITS];
+            int n = phone_os_layout(&li, h, PHONE_MAX_HITS);
+            CHECK(n > 0, "%s: buttons", phone_app_name(apps[a]));
+            for (int i = 0; i < n; i++) {
+                const PhoneRect *r = &h[i].r;
+                CHECK(r->x >= 0 && r->y >= 0 && r->x + r->w <= PHONE_DESIGN_W + 0.01f && r->y + r->h <= PHONE_DESIGN_H + 0.01f, "%s: button %d on screen", phone_app_name(apps[a]), h[i].id);
+                int k = phone_os_hit(h, n, r->x + r->w * 0.5f, r->y + r->h * 0.5f);
+                CHECK(k == i, "%s: button %d (%d) hit at its centre (got %d)", phone_app_name(apps[a]), h[i].id, h[i].index, k);
+            }
+        }
+    }
+    // Home grid: one cell per app in apps.json order; the gallery grid pages with the scroll.
+    PhoneLayoutIn li = { PAPP_HOME, PFLOW_LOCAL, -1, 0, 2, 4, 0 };
+    PhoneHit h[PHONE_MAX_HITS];
+    int n = phone_os_layout(&li, h, PHONE_MAX_HITS);
+    CHECK(phone_os_find(h, n, PB_APP, 0) && phone_os_find(h, n, PB_APP, 1) && !phone_os_find(h, n, PB_APP, 2), "home: exactly the two apps");
+    CHECK(phone_os_find(h, n, PB_CONNECT, 0) != NULL, "home (in-game phone): Connect your phone");
+    li.flow = PFLOW_PAIRED;
+    n = phone_os_layout(&li, h, PHONE_MAX_HITS);
+    CHECK(!phone_os_find(h, n, PB_CONNECT, 0), "home (paired): no Connect button");
+    PhoneLayoutIn g = { PAPP_GALLERY, PFLOW_LOCAL, -1, 0, 2, 4, 40 };
+    n = phone_os_layout(&g, h, PHONE_MAX_HITS);
+    const PhoneHit *c0 = phone_os_find(h, n, PB_CELL, 0);
+    g.scroll = 2;
+    n = phone_os_layout(&g, h, PHONE_MAX_HITS);
+    const PhoneHit *c6 = phone_os_find(h, n, PB_CELL, 6);
+    CHECK(c0 && c6 && !phone_os_find(h, n, PB_CELL, 0), "gallery: scrolling by two rows starts at item 6");
+    // Zoom slider: log scale, the knob maps back to the zoom.
+    PhoneRect s = { 0, 100, 40, 500 };
+    for (float z = 1.0f; z <= 8.0f; z *= 1.3f) {
+        float y = phone_slider_from_zoom(z, s, 8.0f);
+        CHECK(fabsf(phone_zoom_from_slider(y, s, 8.0f) - z) < 1e-3f, "slider round trip at %.2fx", z);
+    }
+    CHECK(fabsf(phone_zoom_from_slider(100, s, 8) - 8) < 1e-4f && fabsf(phone_zoom_from_slider(600, s, 8) - 1) < 1e-4f, "slider ends: 8x top, 1x bottom");
+}
+
+static void test_phone_os_assets(void) {
+    char err[160] = "";
+    char *js = read_asset("assets/phone/apps.json");
+    CHECK(js != NULL, "assets/phone/apps.json present");
+    PhoneApps a;
+    CHECK(js && phone_apps_parse(js, &a, err, sizeof(err)), "apps.json parses (%s)", err);
+    CHECK(a.count == 2 && !strcmp(a.apps[0].id, "camera") && a.apps[0].app == PAPP_CAMERA && !strcmp(a.apps[1].id, "gallery") && a.apps[1].app == PAPP_GALLERY,
+          "apps.json: exactly Camera and Gallery");
+    CHECK(a.apps[0].tile >= 0 && a.apps[1].tile >= 0 && a.tile_px == 128, "app icons are atlas tiles");
+    CHECK(phone_apps_weather_tile(&a, "rain", false) == phone_apps_tile(&a, "w_rain") && phone_apps_weather_tile(&a, "clear", true) == phone_apps_tile(&a, "w_night") &&
+          phone_apps_weather_tile(&a, "nope", false) == phone_apps_tile(&a, "w_partly"), "weather glyphs (clear at night = moon)");
+    // Every weather preset has a glyph.
+    static const char *wx[] = { "clear", "little_cloudy", "cloudy", "overcast", "fog", "light_rain", "rain", "storm", "light_snow", "snow", "blizzard" };
+    for (size_t i = 0; i < sizeof(wx) / sizeof(wx[0]); i++) {
+        bool found = false;
+        for (int k = 0; k < a.wx_count; k++) found |= !strcmp(a.wx[k].weather, wx[i]);
+        CHECK(found, "weather_icons: %s", wx[i]);
+    }
+    // An app with no built-in app (future: map, messages) parses as "coming soon".
+    PhoneApps b;
+    CHECK(phone_apps_parse("{\"apps\":[{\"id\":\"map\",\"label\":\"Map\",\"icon\":\"map\"}]}", &b, err, sizeof(err)) && b.count == 1 && b.apps[0].app < 0 && b.apps[0].tile < 0,
+          "data-driven: an extra app without a built-in");
+    CHECK(!phone_apps_parse("{\"apps\":[]}", &b, err, sizeof(err)), "no apps: an error");
+    free(js);
+    // Icon atlas: one row of 128 px tiles, as many as apps.json lists.
+    char p[512];
+    platform_data_path("assets/phone/icons.png", p, sizeof(p));
+    size_t pn;
+    u8 *png = (u8 *)platform_read_file(p, &pn);
+    CHECK(png && pn > 24 && !memcmp(png + 1, "PNG", 3), "assets/phone/icons.png present");
+    if (png) {
+        u32 w = (u32)png[16] << 24 | (u32)png[17] << 16 | (u32)png[18] << 8 | png[19], h = (u32)png[20] << 24 | (u32)png[21] << 16 | (u32)png[22] << 8 | png[23];
+        CHECK(h == 128 && w == 128u * (u32)a.tile_count, "atlas %ux%u for %d tiles", w, h, a.tile_count);
+    }
+    // Theme: light (white background, dark text), every key present.
+    js = read_asset("assets/phone/theme.json");
+    PhoneTheme t;
+    CHECK(js && phone_theme_parse(js, &t, err, sizeof(err)), "theme.json parses");
+    CHECK(t.bg == 0xFFFFFFFFu && (t.text & 0xFF) < 60, "light theme: white screen, dark text");
+    CHECK(t.panel.readout_gap > 0 && t.panel.radius > 0 && t.panel.bezel > 0 && t.panel.shadow > 0 && (t.bezel_color >> 24) > 0, "panel tokens");
+    // Page injection: the marker replaced, "</" escaped, the atlas as a data URI.
+    const char *page = "<script>/*DG_PHONE_DATA*/</script><p>x</p>";
+    size_t on = 0;
+    char *o = phone_page_build(page, strlen(page), js, "{\"a\":\"</script>\"}", png, pn, &on);
+    CHECK(o && strstr(o, "window.DG_THEME={") && strstr(o, "window.DG_APPS={\"a\":\"<\\/script>\"}") && strstr(o, "window.DG_ICONS=\"data:image/png;base64,iVBORw0KGgo") &&
+          !strstr(o, "/*DG_PHONE_DATA*/") && on == strlen(o) && !strcmp(o + on - 17, "</script><p>x</p>"), "page: assets injected");
+    free(o);
+    o = phone_page_build(page, strlen(page), NULL, NULL, NULL, 0, &on);
+    CHECK(o && strstr(o, "window.DG_THEME=null;window.DG_APPS=null;window.DG_ICONS=null;"), "page: missing assets -> null");
+    free(o);
+    free(js);
+    free(png);
+}
+
+static bool overlaps(PhoneRect a, PhoneRect b) { return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h; }
+
+static void test_phone_panel_layout(void) {
+    // The HUD panel at 16:9, 21:9 and 4:3: from the theme tokens and the HUD safe area only,
+    // portrait at the screen aspect, ~22 % of the height, inside the safe area, never over the
+    // item / ammo readout (bottom right, readout_gap high, ~240 design px wide).
+    PhoneTheme t;
+    phone_theme_default(&t);
+    char *js = read_asset("assets/phone/theme.json");
+    char err[64];
+    if (js) phone_theme_parse(js, &t, err, sizeof(err));
+    free(js);
+    static const int res[][2] = { { 1920, 1080 }, { 2560, 1080 }, { 1440, 1080 }, { 3440, 1440 }, { 1280, 720 }, { 1024, 768 } };
+    float aspect = 640.0f / 1136.0f;
+    for (size_t i = 0; i < sizeof(res) / sizeof(res[0]); i++) {
+        float W = (float)res[i][0], H = (float)res[i][1], px = H / 1080.0f;
+        float m = 0.035f * H;   // safe_frac (assets/ui/theme.json)
+        PhoneRect safe = { m, m, W - 2 * m, H - 2 * m };
+        PhoneRect readout = { safe.x + safe.w - 240 * px, safe.y + safe.h - t.panel.readout_gap * px, 240 * px, t.panel.readout_gap * px };
+        for (int corner = 0; corner < 4; corner++) {
+            PhoneRect r = phone_panel_rect(safe, px, H, 0.22f, corner, aspect, &t.panel);
+            float bez = t.panel.bezel * px;
+            PhoneRect outer = { r.x - bez, r.y - bez, r.w + 2 * bez, r.h + 2 * bez };
+            CHECK(fabsf(r.h - 0.22f * H) < 1.0f && fabsf(r.w / r.h - aspect) < 1e-3f, "%dx%d corner %d: 22 %% high, phone aspect", res[i][0], res[i][1], corner);
+            CHECK(outer.x >= safe.x - 0.5f && outer.y >= safe.y - 0.5f && outer.x + outer.w <= safe.x + safe.w + 0.5f && outer.y + outer.h <= safe.y + safe.h + 0.5f,
+                  "%dx%d corner %d: inside the safe area", res[i][0], res[i][1], corner);
+            CHECK(!overlaps(outer, readout) || corner == 1 || corner == 3, "%dx%d corner %d: clear of the item readout", res[i][0], res[i][1], corner);
+            bool right = corner == 0 || corner == 2, bottom = corner <= 1;
+            CHECK(right ? outer.x + outer.w > safe.x + safe.w - 1 : outer.x < safe.x + 1, "%dx%d corner %d: against its side", res[i][0], res[i][1], corner);
+            CHECK(bottom ? outer.y + outer.h > safe.y + safe.h - t.panel.readout_gap * px - 1 : outer.y < safe.y + 1, "%dx%d corner %d: against its edge", res[i][0], res[i][1], corner);
+        }
+        // An oversized panel shrinks to the room left.
+        PhoneRect big = phone_panel_rect(safe, px, H, 0.5f, 0, aspect, &t.panel);
+        CHECK(big.y >= safe.y && big.h <= safe.h, "%dx%d: 50 %% panel fits", res[i][0], res[i][1]);
+    }
+}
+
+static void test_gallery_delete(const char *dir) {
+    char base[512], d[600], path[700];
+    snprintf(base, sizeof(base), "%sdelete_test/", dir);
+    SDL_CreateDirectory(base);
+    snprintf(d, sizeof(d), "%sscreenshots", base);
+    SDL_CreateDirectory(d);
+    snprintf(d, sizeof(d), "%sscreenshots/phone", base);
+    SDL_CreateDirectory(d);
+    PhoneGallery *g = (PhoneGallery *)calloc(1, sizeof(PhoneGallery));
+    for (int i = 0; i < 3; i++) {
+        snprintf(path, sizeof(path), "%s/del_%d.jpg", d, i);
+        platform_write_file(path, "\xff\xd8x", 3);
+        char side[720];
+        snprintf(side, sizeof(side), "%s/del_%d.json", d, i);
+        platform_write_file(side, "{}", 2);
+        PhoneGalleryItem *it = phone_gallery_add(g, path, false, NULL);
+        it->server_id = 10 + i;
+    }
+    CHECK(g->count == 3 && phone_gallery_find_server_id(g, 11) == 1, "3 items, found by server id");
+    snprintf(path, sizeof(path), "%s/del_1.jpg", d);
+    CHECK(phone_gallery_delete(g, 1) && g->count == 2 && !platform_file_exists(path), "delete: entry + file gone");
+    snprintf(path, sizeof(path), "%s/del_1.json", d);
+    CHECK(!platform_file_exists(path), "delete: sidecar gone");
+    CHECK(phone_gallery_find_server_id(g, 11) < 0 && phone_gallery_find_server_id(g, 12) == 0 && !phone_gallery_delete(g, 5), "delete: the others stay, out of range is refused");
+    while (g->count) phone_gallery_delete(g, 0);
+    free(g);
+}
+
 int main(int argc, char **argv) {
     (void)argc;
     (void)argv;
@@ -966,6 +1205,11 @@ int main(int argc, char **argv) {
     test_photo_video_files(dir);
     test_server_roundtrip(dir);
     test_tls(dir);
+    test_phone_os_flow();
+    test_phone_os_layout();
+    test_phone_os_assets();
+    test_phone_panel_layout();
+    test_gallery_delete(dir);
     hws_random_shutdown();
     jobs_shutdown();
     printf("phone: %d checks, %d failed\n", g_checks, g_fail);
