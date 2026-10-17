@@ -783,7 +783,7 @@ void vgeo_tree_materials(const VgTree *t, VgMaterial out[VG_TREE_MAX_MATERIALS])
         VgMaterial *m = &out[k];
         m->color[0] = m->color[1] = m->color[2] = m->color[3] = 1.0f;   // the textures carry the colour
         m->tex_scale = 1.0f;
-        m->roughness = t->masked[k] ? 0.7f : 0.92f;
+        m->roughness = t->masked[k] ? 0.95f : 0.92f;   // leaves / needles matte: a lower value made the two-sided cards read as glossy at low sun
         m->flags = VGM_FOLIAGE | VGM_DITHER_FADE | MAT_TEXTURED_FLAG;
         if (t->masked[k]) {
             m->flags |= VGM_MASKED | VGM_TWO_SIDED;

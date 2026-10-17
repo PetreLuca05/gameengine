@@ -229,7 +229,7 @@ u32 vgeo_foliage_materials(int kind, VgMaterial out[2]) {
     memset(out, 0, sizeof(VgMaterial) * 2);
     for (int i = 0; i < 2; i++) {
         out[i].tex_scale = 1.0f;
-        out[i].roughness = 0.75f;
+        out[i].roughness = 0.95f;   // grass / wheat / bush leaves: matte (no sky sheen on the cards)
         out[i].color[3] = 1.0f;
     }
     if (kind == VG_FOLIAGE_BUSH) {
