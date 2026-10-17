@@ -100,7 +100,25 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 shadow_span;     // metres of light-space depth per NDC unit: cascades 0..2, w the moon tile
     vec4 lod_fade;        // LOD cross-fades (shaders/lod_fade.glsl): x dither frame, y debug bits, z new fades on, w terrain detail scale
     vec4 lod_terrain;     // x terrain geomorph band (octaves), y chunk diagonal (m)
+    // Scope picture-in-picture: the main view's screen-space inputs / froxels through its projection.
+    mat4 ss_view_proj;    // world -> the main view's jittered clip
+    mat4 ss_view;         // world -> the main view
+    vec4 ss_info;         // x 1 = on (this camera is not the one the screen-space passes ran for)
 } frame;
+
+// Where a world point lies in the screen-space inputs (AO, contact, SSR, SSGI, froxels): this
+// camera's own pixel, or for the scope PiP the main view's (the same surface, seen along nearly the
+// same ray: the objective lens sits on the view axis).
+vec2 ss_main_uv(vec3 world, vec2 own_uv) {
+    if (frame.ss_info.x < 0.5) return own_uv;
+    vec4 c = frame.ss_view_proj * vec4(world, 1.0);
+    return clamp(c.xy / max(c.w, 1e-4) * 0.5 + 0.5, vec2(0.0), vec2(1.0));
+}
+// View depth (m) of a world point in the camera the froxel volume belongs to.
+float ss_main_depth(vec3 world) {
+    if (frame.ss_info.x < 0.5) return dot(world - frame.camera_pos.xyz, -vec3(frame.view[0][2], frame.view[1][2], frame.view[2][2]));
+    return -(frame.ss_view * vec4(world, 1.0)).z;
+}
 
 layout(set = 0, binding = 1) uniform sampler2DShadow shadow_map;
 layout(set = 0, binding = 15) uniform sampler2D shadow_depth;          // the same atlas, raw depth (PCSS blocker search)

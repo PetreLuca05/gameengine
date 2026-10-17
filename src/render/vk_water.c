@@ -53,9 +53,18 @@ static struct {
     bool ripple_valid;
     u32 frame;
     // frame graph
-    FgRes hdr, depth, velocity, snap_color, snap_depth, sim_prev, sim_next;
+    FgRes sim_prev, sim_next;
     Cvar *r_water, *r_water_debug;
 } W;
+
+// Where a water surface pass draws: the main view, or the scope picture-in-picture (the same water
+// through the scope camera: its own scene snapshot, frame set and depth reconstruction).
+typedef struct WaterTarget {
+    FgRes hdr, depth, velocity, snap_color, snap_depth;
+    bool pip;
+    mat4 inv_vp;   // pip: inverse view-projection of the PiP camera (main: this frame's jittered one)
+} WaterTarget;
+static WaterTarget g_wt_main, g_wt_pip;
 
 void render_water_mesh(const RenderWaterVertex *v, u32 vcount, const u32 *idx, u32 icount) {
     if (W.vb.buffer) vkr_defer_buffer(&W.vb);
@@ -271,16 +280,16 @@ static void upload(void) {
 static void bind_data(PostBind *b) { pb_buf(b, 13, W.data[R->frame_slot].buffer, sizeof(GpuWaterData), false); }
 
 static void exec_prep(VkCommandBuffer cmd, void *u) {
-    (void)u;
+    const WaterTarget *t = (const WaterTarget *)u;
     PostBind b = { 0 };
     pb_ubo(&b);
-    pb_tex_fg(&b, 0, W.hdr, P.point);
-    pb_tex_fg(&b, 1, W.depth, P.point);
-    pb_img_fg(&b, 8, W.snap_color);
-    pb_img_fg(&b, 9, W.snap_depth);
+    pb_tex_fg(&b, 0, t->hdr, P.point);
+    pb_tex_fg(&b, 1, t->depth, P.point);
+    pb_img_fg(&b, 8, t->snap_color);
+    pb_img_fg(&b, 9, t->snap_depth);
     pb_push(cmd, &b, VK_PIPELINE_BIND_POINT_COMPUTE);
     u32 w, h;
-    fg_extent(W.hdr, &w, &h);
+    fg_extent(t->hdr, &w, &h);
     post_dispatch(cmd, "water/water_prep", w, h, 1, 8);
 }
 
@@ -309,21 +318,21 @@ static void draw_surface(VkCommandBuffer cmd, VkBuffer vb, VkBuffer ib, u32 icou
 }
 
 static void exec_surface(VkCommandBuffer cmd, void *u) {
-    (void)u;
+    const WaterTarget *wt = (const WaterTarget *)u;
     u32 w, h;
-    fg_extent(W.hdr, &w, &h);
-    bool vel = W.velocity != FG_NONE;
+    fg_extent(wt->hdr, &w, &h);
+    bool vel = wt->velocity != FG_NONE;
     VkRenderingAttachmentInfo ca[2] = { { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO }, { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO } };
-    ca[0].imageView = fg_view(W.hdr);
+    ca[0].imageView = fg_view(wt->hdr);
     ca[0].imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     ca[0].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
     ca[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
     if (vel) {
         ca[1] = ca[0];
-        ca[1].imageView = fg_view(W.velocity);
+        ca[1].imageView = fg_view(wt->velocity);
     }
     VkRenderingAttachmentInfo da = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
-    da.imageView = fg_view(W.depth);
+    da.imageView = fg_view(wt->depth);
     da.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
     da.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
     da.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
@@ -339,11 +348,11 @@ static void exec_surface(VkCommandBuffer cmd, void *u) {
     vkCmdSetViewport(cmd, 0, 1, &vp);
     vkCmdSetScissor(cmd, 0, 1, &sc);
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, vel ? W.pipe_vel : W.pipe);
-    VkDescriptorSet fs = R->frames[R->frame_slot].frame_set;
+    VkDescriptorSet fs = wt->pip ? R->frames[R->frame_slot].frame_set_pip : R->frames[R->frame_slot].frame_set;
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, W.layout, 0, 1, &fs, 0, NULL);
     PostBind b = { 0 };
-    pb_tex_fg(&b, 0, W.snap_color, P.linear);
-    pb_tex_fg(&b, 1, W.snap_depth, P.point);
+    pb_tex_fg(&b, 0, wt->snap_color, P.linear);
+    pb_tex_fg(&b, 1, wt->snap_depth, P.point);
     if (W.sim_next != FG_NONE) pb_tex_fg(&b, 2, W.sim_next, P.linear_repeat);
     else pb_tex(&b, 2, P.black, P.linear_repeat);
     VkDescriptorImageInfo fog;
@@ -356,7 +365,7 @@ static void exec_surface(VkCommandBuffer cmd, void *u) {
     WaterPush pc;
     memset(&pc, 0, sizeof(pc));
     // The depth buffer was rendered with the jittered projection: reconstruct with the same.
-    pc.inv_vp = mat4_inverse(mat4_mul(R->proj_j, R->view));
+    pc.inv_vp = wt->pip ? wt->inv_vp : mat4_inverse(mat4_mul(R->proj_j, R->view));
     pc.misc = v4(t >= 1 ? 1.0f : 0.0f, W.sim_next != FG_NONE ? 1.0f : 0.0f, t >= 2 ? 1.0f : 0.0f, t >= 1 ? 1.0f : 0.0f);
     pc.misc2 = v4(1.0f, 0.06f, 0.0f, 0.0f);
     if (W.icount) draw_surface(cmd, W.vb.buffer, W.ib.buffer, W.icount, &pc);
@@ -444,9 +453,11 @@ bool render_water_gpu_heights(const float *xzt, int n, float *out) {
 }
 
 void vkw_build_graph(int hdr, int depth, int velocity) {
-    W.hdr = hdr;
-    W.depth = depth;
-    W.velocity = velocity;
+    WaterTarget *wt = &g_wt_main;
+    memset(wt, 0, sizeof(*wt));
+    wt->hdr = hdr;
+    wt->depth = depth;
+    wt->velocity = velocity;
     W.sim_next = FG_NONE;
     bool any = W.w.enabled && (W.icount > 0 || W.w.ocean_body >= 0);
     if (!W.ok || !any || hdr < 0 || depth < 0) {
@@ -459,13 +470,13 @@ void vkw_build_graph(int hdr, int depth, int velocity) {
 
     FgTexDesc dc = { "water_snap_color", VK_FORMAT_R16G16B16A16_SFLOAT, FG_SIZE_RENDER };
     FgTexDesc dd = { "water_snap_depth", VK_FORMAT_R32_SFLOAT, FG_SIZE_RENDER };
-    W.snap_color = fg_texture(&dc);
-    W.snap_depth = fg_texture(&dd);
-    int p = fg_pass("water_prep", exec_prep, NULL);
+    wt->snap_color = fg_texture(&dc);
+    wt->snap_depth = fg_texture(&dd);
+    int p = fg_pass("water_prep", exec_prep, wt);
     fg_read(p, hdr, FG_SAMPLED);
     fg_read(p, depth, FG_SAMPLED);
-    fg_write(p, W.snap_color, FG_STORAGE);
-    fg_write(p, W.snap_depth, FG_STORAGE);
+    fg_write(p, wt->snap_color, FG_STORAGE);
+    fg_write(p, wt->snap_depth, FG_STORAGE);
 
     // Ripple sim: ping-pong histories, the window following the ripple centre in whole texels.
     if (t >= 2) {
@@ -487,13 +498,46 @@ void vkw_build_graph(int hdr, int depth, int velocity) {
         W.ripple_valid = false;
     }
 
-    p = fg_pass("water", exec_surface, NULL);
-    fg_read(p, W.snap_color, FG_SAMPLED);
-    fg_read(p, W.snap_depth, FG_SAMPLED);
+    p = fg_pass("water", exec_surface, wt);
+    fg_read(p, wt->snap_color, FG_SAMPLED);
+    fg_read(p, wt->snap_depth, FG_SAMPLED);
     if (W.sim_next != FG_NONE) fg_read(p, W.sim_next, FG_SAMPLED);
     if (post_froxels() >= 0) fg_read(p, post_froxels(), FG_SAMPLED);
     fg_write(p, hdr, FG_COLOR);
     fg_write(p, depth, FG_DEPTH);
     if (velocity != FG_NONE) fg_write(p, velocity, FG_COLOR);
     W.prev_wave_time = W.w.wave_time;
+}
+
+// The scope picture-in-picture (render.c, after its fog): the same water through the scope camera,
+// on its own snapshot of the PiP colour / depth (refraction, reflection march); the ripple sim and
+// the froxels are the main view's (looked up through frame.ss_info).
+void vkw_build_graph_pip(int hdr, int depth, mat4 view_proj) {
+    bool any = W.w.enabled && (W.icount > 0 || W.w.ocean_body >= 0);
+    if (!W.ok || !any || hdr < 0 || depth < 0) return;
+    WaterTarget *wt = &g_wt_pip;
+    memset(wt, 0, sizeof(*wt));
+    wt->hdr = hdr;
+    wt->depth = depth;
+    wt->velocity = FG_NONE;
+    wt->pip = true;
+    wt->inv_vp = mat4_inverse(view_proj);
+    u32 w, h;
+    fg_extent(hdr, &w, &h);
+    FgTexDesc dc = { "water_pip_snap_color", VK_FORMAT_R16G16B16A16_SFLOAT, FG_SIZE_ABS, w, h, 1, 1, 0 };
+    FgTexDesc dd = { "water_pip_snap_depth", VK_FORMAT_R32_SFLOAT, FG_SIZE_ABS, w, h, 1, 1, 0 };
+    wt->snap_color = fg_texture(&dc);
+    wt->snap_depth = fg_texture(&dd);
+    int p = fg_pass("scope_pip_water_prep", exec_prep, wt);
+    fg_read(p, hdr, FG_SAMPLED);
+    fg_read(p, depth, FG_SAMPLED);
+    fg_write(p, wt->snap_color, FG_STORAGE);
+    fg_write(p, wt->snap_depth, FG_STORAGE);
+    p = fg_pass("scope_pip_water", exec_surface, wt);
+    fg_read(p, wt->snap_color, FG_SAMPLED);
+    fg_read(p, wt->snap_depth, FG_SAMPLED);
+    if (W.sim_next != FG_NONE) fg_read(p, W.sim_next, FG_SAMPLED);
+    if (post_froxels() >= 0) fg_read(p, post_froxels(), FG_SAMPLED);
+    fg_write(p, hdr, FG_COLOR);
+    fg_write(p, depth, FG_DEPTH);
 }

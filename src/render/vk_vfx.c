@@ -48,6 +48,8 @@ typedef struct VfxUbo {
 typedef struct VfxFrameRes {
     GpuBuffer ubo, spawns, prefix, sprites, decals, instances, readback;
     VkDescriptorSet set;
+    GpuBuffer ubo_pip;          // the scope picture-in-picture's copy of the UBO (its camera / target)
+    VkDescriptorSet set_pip;    // the same set with ubo_pip and the PiP depth (decals in the scope)
     u32 spawn_particles, spawn_records;
     int sprite_add, sprite_alpha, decal_count, decal_dynamic;
     bool readback_valid;
@@ -184,11 +186,12 @@ static void write_image(VkDescriptorSet set, u32 binding, VkImageView view, VkSa
 }
 
 static void write_static_descriptors(void) {
-    for (int i = 0; i < FRAMES_IN_FLIGHT; i++) {
-        VfxFrameRes *f = &X.fr[i];
-        VkDescriptorSet s = f->set;
+    for (int i = 0; i < FRAMES_IN_FLIGHT * 2; i++) {
+        VfxFrameRes *f = &X.fr[i % FRAMES_IN_FLIGHT];
+        bool pip = i >= FRAMES_IN_FLIGHT;
+        VkDescriptorSet s = pip ? f->set_pip : f->set;
         const VkDescriptorType SB = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-        write_buffer(s, 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, f->ubo.buffer, sizeof(VfxUbo));
+        write_buffer(s, 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, pip ? f->ubo_pip.buffer : f->ubo.buffer, sizeof(VfxUbo));
         GpuBuffer *bufs[] = { &X.pos, &X.vel, &X.misc, &X.info, &X.dead, &X.alive_a, &X.alive_b, &X.counters, &X.emitters, &X.luts,
                               &f->spawns, &f->prefix, &X.list_add, &X.sort_keys, &X.list_distort, &X.subs };
         for (int b = 0; b < 16; b++) write_buffer(s, (u32)(1 + b), SB, bufs[b]->buffer, VK_WHOLE_SIZE);
@@ -545,7 +548,10 @@ static void upload_atlas(u8 **pages, int page_count) {
     vkr_buffer_destroy_now(&st);
     free(regions);
     X.pages = page_count;
-    for (int i = 0; i < FRAMES_IN_FLIGHT; i++) write_image(X.fr[i].set, 17, X.atlas_view, X.atlas_sampler, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    for (int i = 0; i < FRAMES_IN_FLIGHT; i++) {
+        write_image(X.fr[i].set, 17, X.atlas_view, X.atlas_sampler, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        write_image(X.fr[i].set_pip, 17, X.atlas_view, X.atlas_sampler, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    }
 }
 
 // Emitter table + curve LUTs from the library (after the atlas placed the textures).
@@ -718,6 +724,9 @@ void vkx_targets_changed(void) {
     for (int i = 0; i < FRAMES_IN_FLIGHT; i++) {
         write_image(X.fr[i].set, 19, R->depth.view, X.depth_sampler, VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL);
         write_image(X.fr[i].set, 20, X.scene_copy.view, R->sampler_clamp, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        // The PiP set: its depth is written per frame (vkx_draw_decals_pip); until then the main one.
+        write_image(X.fr[i].set_pip, 19, R->depth.view, X.depth_sampler, VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL);
+        write_image(X.fr[i].set_pip, 20, X.scene_copy.view, R->sampler_clamp, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     }
     X.depth_valid = false;
 }
@@ -742,11 +751,12 @@ bool vkx_init(void) {
     li.bindingCount = VFX_BINDINGS;
     li.pBindings = b;
     VK_CHECK(vkCreateDescriptorSetLayout(R->device, &li, NULL, &X.layout));
-    VkDescriptorPoolSize ps[3] = { { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, FRAMES_IN_FLIGHT },
-                                   { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4 * FRAMES_IN_FLIGHT },
-                                   { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 19 * FRAMES_IN_FLIGHT } };
+    // Two sets per frame: the main view's and the scope picture-in-picture's.
+    VkDescriptorPoolSize ps[3] = { { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 2 * FRAMES_IN_FLIGHT },
+                                   { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 8 * FRAMES_IN_FLIGHT },
+                                   { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 38 * FRAMES_IN_FLIGHT } };
     VkDescriptorPoolCreateInfo pci = { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
-    pci.maxSets = FRAMES_IN_FLIGHT;
+    pci.maxSets = 2 * FRAMES_IN_FLIGHT;
     pci.poolSizeCount = 3;
     pci.pPoolSizes = ps;
     VK_CHECK(vkCreateDescriptorPool(R->device, &pci, NULL, &X.pool));
@@ -787,6 +797,7 @@ bool vkx_init(void) {
     for (int i = 0; i < FRAMES_IN_FLIGHT; i++) {
         VfxFrameRes *f = &X.fr[i];
         f->ubo = vkr_buffer_create(sizeof(VfxUbo), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, true);
+        f->ubo_pip = vkr_buffer_create(sizeof(VfxUbo), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, true);
         f->spawns = vkr_buffer_create(sizeof(VfxGpuSpawn) * VFX_MAX_GPU_SPAWNS, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);
         f->prefix = vkr_buffer_create(sizeof(u32) * VFX_MAX_GPU_SPAWNS, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);
         f->sprites = vkr_buffer_create(sizeof(RenderVfxSprite) * VFX_MAX_SPRITES, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);
@@ -799,6 +810,7 @@ bool vkx_init(void) {
         ai.descriptorSetCount = 1;
         ai.pSetLayouts = &X.layout;
         VK_CHECK(vkAllocateDescriptorSets(R->device, &ai, &f->set));
+        VK_CHECK(vkAllocateDescriptorSets(R->device, &ai, &f->set_pip));
     }
     VkSamplerCreateInfo s = { VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
     s.magFilter = s.minFilter = VK_FILTER_LINEAR;
@@ -840,7 +852,7 @@ void vkx_shutdown(void) {
     for (int i = 0; i < (int)ARRAY_COUNT(bufs); i++) vkr_buffer_destroy_now(bufs[i]);
     for (int i = 0; i < FRAMES_IN_FLIGHT; i++) {
         VfxFrameRes *f = &X.fr[i];
-        GpuBuffer *fb[] = { &f->ubo, &f->spawns, &f->prefix, &f->sprites, &f->decals, &f->instances, &f->readback };
+        GpuBuffer *fb[] = { &f->ubo, &f->ubo_pip, &f->spawns, &f->prefix, &f->sprites, &f->decals, &f->instances, &f->readback };
         for (int k = 0; k < (int)ARRAY_COUNT(fb); k++) vkr_buffer_destroy_now(fb[k]);
     }
     destroy_atlas();
@@ -1080,7 +1092,7 @@ void vkx_draw_particles_pip(VkCommandBuffer cmd, VkDescriptorSet frame_set) {
     if (!X.ok) return;
     VkDescriptorSet sets[2] = { frame_set, f->set };
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, X.gfx_layout, 0, 2, sets, 0, NULL);
-    push_fog(cmd, false);   // the scope camera's frame: analytic fog only
+    push_fog(cmd, true);    // the main view's froxels, looked up through its projection (frame.ss_info)
     u32 pc[4] = { 1, 1, 0, 0 };
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, X.g_alpha);
     vkCmdPushConstants(cmd, X.gfx_layout, VK_SHADER_STAGE_COMPUTE_BIT | VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pc), pc);
@@ -1100,6 +1112,30 @@ void vkx_draw_particles_pip(VkCommandBuffer cmd, VkDescriptorSet frame_set) {
         vkCmdDraw(cmd, 6, (u32)f->sprite_add, 0, 0);
     }
     R->stats.draw_calls += 4;
+}
+
+// The scope picture-in-picture: every decal (static and skinned: its characters are drawn already)
+// projected onto the PiP depth (sampled in DEPTH_READ_ONLY while it is the read-only attachment),
+// lit through the PiP frame set. The PiP set is this frame slot's (its fence has been waited, and
+// it is not bound yet in this command buffer), so its depth binding is rewritten here.
+void vkx_draw_decals_pip(VkCommandBuffer cmd, VkDescriptorSet frame_set, VkImageView depth_view, mat4 view_proj, mat4 view, mat4 proj, vec3 cam, u32 w, u32 h) {
+    VfxFrameRes *f = &X.fr[R->frame_slot];
+    if (!X.ok || f->decal_count <= 0 || !depth_view) return;
+    VfxUbo *u = (VfxUbo *)f->ubo_pip.mapped;
+    memcpy(u, f->ubo.mapped, sizeof(VfxUbo));
+    u->view_proj = u->prev_view_proj = view_proj;
+    u->inv_view_proj = mat4_inverse(view_proj);
+    u->view = view;
+    u->proj = proj;
+    u->cam_pos = v4(cam.x, cam.y, cam.z, u->cam_pos.w);
+    u->screen = v4((float)w, (float)h, 1.0f / (float)w, 1.0f / (float)h);
+    u->depth_params.x = 0.3f;   // the PiP near plane
+    write_image(f->set_pip, 19, depth_view, X.depth_sampler, VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL);
+    VkDescriptorSet sets[2] = { frame_set, f->set_pip };
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, X.gfx_layout, 0, 2, sets, 0, NULL);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, X.g_decal);
+    vkCmdDraw(cmd, 36, (u32)f->decal_count, 0, 0);
+    R->stats.draw_calls++;
 }
 
 // Static decals before the characters; the skinned ones (wounds, stains) after them, so they

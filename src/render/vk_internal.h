@@ -178,6 +178,12 @@ typedef struct FrameData {
     // surface detail range scale; lod_terrain: x geomorph band (octaves), y chunk diagonal (m).
     vec4 lod_fade;
     vec4 lod_terrain;
+    // A second camera of the same frame (the scope picture-in-picture, docs/ATTACHMENTS.md): its
+    // screen-space inputs (AO, contact shadows, SSR, SSGI) and the froxel fog are the main view's,
+    // looked up through the main view's projection (shaders/common.glsl ss_main_uv). x: 1 = on.
+    mat4 ss_view_proj;    // world -> the main view's jittered clip (what the screen-space passes saw)
+    mat4 ss_view;         // world -> the main view (froxel depth)
+    vec4 ss_info;
 } FrameData;
 
 typedef struct PushLit {
@@ -465,6 +471,7 @@ bool vkw_create_pipelines(void);
 // Frame graph, after the opaque scene is fogged and before the scene copy: snapshot, ripple sim,
 // surface pass (writes hdr, depth, velocity).
 void vkw_build_graph(int hdr, int depth, int velocity);
+void vkw_build_graph_pip(int hdr, int depth, mat4 view_proj);   // the scope PiP (after its fog)
 // vk_classic.c: the classic instanced renderer of the vgeo scene content (r_vgeo 0, docs/CLASSIC_RENDERER.md)
 struct VgScene;
 struct VgBuilt;
@@ -500,7 +507,9 @@ void vkx_record_compute(VkCommandBuffer cmd); // frame start, before the shadow 
 void vkx_draw_decals(VkCommandBuffer cmd, bool dynamic);    // inside the scene pass, depth read-only
 void vkx_copy_scene(VkCommandBuffer cmd);     // outside rendering: HDR -> scene copy (distortion)
 void vkx_draw_particles(VkCommandBuffer cmd); // inside the scene pass, depth read-only
-void vkx_draw_particles_pip(VkCommandBuffer cmd, VkDescriptorSet frame_set);   // inside the scope picture-in-picture pass
+void vkx_draw_particles_pip(VkCommandBuffer cmd, VkDescriptorSet frame_set);
+// Inside the scope PiP decal pass (PiP depth as the read-only attachment and sampled).
+void vkx_draw_decals_pip(VkCommandBuffer cmd, VkDescriptorSet frame_set, VkImageView depth_view, mat4 view_proj, mat4 view, mat4 proj, vec3 cam, u32 w, u32 h);   // inside the scope picture-in-picture pass
 void vkx_timestamp(VkCommandBuffer cmd, int slot);
 RenderTarget *vkx_scene_copy(void);           // opaque HDR copy (distortion; TAA "hdr_opaque"), SHADER_READ_ONLY
 void vkx_begin_frame_queries(VkCommandBuffer cmd);

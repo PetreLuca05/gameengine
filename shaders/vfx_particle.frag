@@ -41,7 +41,9 @@ vec4 particle_fog(vec2 suv) {
     if (v_fog.w < 0.5) return vec4(0.0, 0.0, 0.0, 1.0);
     vec3 d = v_fog.xyz - frame.camera_pos.xyz;
     if (frame.post_fog.x > 0.5) {
-        float vz = max(dot(d, -vec3(frame.view[0][2], frame.view[1][2], frame.view[2][2])), 0.15);
+        // The scope PiP: the main view's volume through its projection (common.glsl ss_main_uv).
+        if (frame.ss_info.x > 0.5) suv = ss_main_uv(v_fog.xyz, suv);
+        float vz = max(ss_main_depth(v_fog.xyz), 0.15);
         float w = clamp(log(vz / 0.15) / log(frame.post_fog.y / 0.15), 0.0, 1.0);
         // The slice stores the integral up to its far edge (as in fog_apply): half a slice back.
         w = clamp(w - 0.5 / float(textureSize(vfx_froxel, 0).z), 0.0, 1.0);
@@ -85,8 +87,9 @@ void main() {
     // Soft particles + near fade.
     vec2 suv = gl_FragCoord.xy * vf.screen.zw;
     float fade = 1.0;
-    if (v_misc.z > 0.0 && pc.pad0 == 0u) {   // the soft fade reads the main view's depth (none in the scope picture)
-        float scene = lin_depth(texture(vfx_depth, suv).r);
+    if (v_misc.z > 0.0) {   // the soft fade reads the main view's depth (the scope PiP: through the main projection;
+                            // v_misc.y is the main camera's view depth in both)
+        float scene = lin_depth(texture(vfx_depth, ss_main_uv(v_fog.xyz, suv)).r);
         fade *= clamp((scene - v_misc.y) / v_misc.z, 0.0, 1.0);
     }
     if (v_misc.w > 0.0) fade *= clamp((v_misc.y - 0.05) / v_misc.w, 0.0, 1.0);
