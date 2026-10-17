@@ -483,7 +483,7 @@ static UserCmd build_cmd(void) {
     vehicles_fill_cmd(&c);
     if (G->noclip_request) { c.buttons |= BTN_NOCLIP; G->noclip_request = false; }
     wheels_filter_cmd(&c);   // E tap / hold on doors, the healing wheel's auto-use, open wheels (game_wheels.c)
-    if (G->menu_open || G->inventory_open || G->container_open || G->bench_open || console_is_open()) {
+    if (G->menu_open || G->inventory_open || G->container_open || G->bench_open || console_is_open() || phone_ui_blocks_game()) {
         c.move_x = c.move_y = 0;
         c.buttons &= (u16)(BTN_CROUCH | BTN_NOCLIP | BTN_FLASHLIGHT | BTN_PHONE | BTN_VEH_CAM);
     }
@@ -628,6 +628,7 @@ static void update_focus(void) {
 static void handle_hotbar(void) {
     Player *p = game_local_player();
     if (!p) return;
+    if (phone_ui_blocks_game()) return;   // the gamepad drives the phone panel (phonenav held)
     vehicles_input();   // F / 1-4 / V / H while seated or looking at a vehicle
     // The built-in phone (docs/PHONE.md): X takes it out over whatever slot is selected and puts it
     // away again; choosing a slot puts it away too.

@@ -35,7 +35,7 @@ static const char *k_action_names[ACT_COUNT] = {
     "use", "attack", "aim", "reload", "drop", "inventory", "netstats",
     "slot1", "slot2", "slot3", "slot4", "slot5", "slot6", "slot7", "slot8", "slot9",
     "nextitem", "previtem", "firemode", "flashlight", "vehiclecam", "headlights", "horn",
-    "phonepair", "phonegallery", "phone", "phoneselfie",
+    "phoneui", "phonegallery", "phone", "phoneselfie", "phonenav",
     "healwheel", "ping",
 };
 
@@ -44,7 +44,7 @@ static const char *k_action_labels[ACT_COUNT] = {
     "Use / Interact", "Attack / Fire", "Aim Down Sights", "Reload", "Drop Item", "Inventory", "Net Stats",
     "Hotbar 1", "Hotbar 2", "Hotbar 3", "Hotbar 4", "Hotbar 5", "Hotbar 6", "Hotbar 7", "Hotbar 8", "Hotbar 9",
     "Next Item", "Previous Item", "Fire Mode", "Flashlight / Enter Vehicle", "Vehicle Camera", "Headlights", "Horn",
-    "Phone: Pair (QR)", "Phone: Gallery", "Phone: Take Out / Put Away", "Phone: Front / Back Camera",
+    "Phone: Use Screen (cursor)", "Phone: Gallery", "Phone: Take Out / Put Away", "Phone: Front / Back Camera", "Phone: Navigate Screen (hold)",
     "Healing Wheel (hold) / Quick Heal (tap)", "Ping (tap) / Ping Wheel (hold)",
 };
 
@@ -94,7 +94,8 @@ void input_reset_bindings(void) {
     IN->binds[ACT_VEHICLE_CAM][0] = key(SDL_SCANCODE_V);
     IN->binds[ACT_LIGHTS][0] = key(SDL_SCANCODE_H);
     IN->binds[ACT_HORN][0] = key(SDL_SCANCODE_Q);
-    IN->binds[ACT_PHONE_PAIR][0] = key(SDL_SCANCODE_P);
+    IN->binds[ACT_PHONE_UI][0] = key(SDL_SCANCODE_LALT);   // shared with walk: walking is moot with the cursor out
+    IN->binds[ACT_PHONE_NAV][1] = padb(SDL_GAMEPAD_BUTTON_RIGHT_STICK);   // hold: the d-pad / stick + A / B drive the phone screen
     IN->binds[ACT_PHONE_GALLERY][0] = key(SDL_SCANCODE_J);
     IN->binds[ACT_PHONE][0] = key(SDL_SCANCODE_X);
     IN->binds[ACT_PHONE][1] = padb(SDL_GAMEPAD_BUTTON_DPAD_DOWN);
@@ -123,7 +124,7 @@ void input_bind_missing_defaults(void) {
         for (int s = 0; s < BINDS_PER_ACTION; s++) {
             if (def[a][s].type == BIND_NONE) continue;
             bool taken = false;
-            for (int o = 0; o < ACT_COUNT && !taken; o++)
+            for (int o = 0; o < ACT_COUNT && !taken && a != ACT_PHONE_UI; o++)   // phoneui shares Alt with walk by design
                 for (int t = 0; t < BINDS_PER_ACTION; t++) taken |= binding_eq(IN->binds[o][t], def[a][s]);
             if (!taken) IN->binds[a][s] = def[a][s];
         }

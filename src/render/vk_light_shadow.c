@@ -20,8 +20,7 @@ static u32 tile_size_for(int quality) { return quality >= 2 ? 512u : 256u; }
 
 static void write_binding(void) {
     for (int i = 0; i < FRAMES_IN_FLIGHT; i++) {
-        // Every frame set (main, scope PiP, both phone views): the lit shaders sample it in each.
-        VkDescriptorSet sets[FRAME_SET_COUNT];
+        VkDescriptorSet sets[FRAME_SET_COUNT];   // main, scope PiP and the phone camera views
         frame_sets_of(&R->frames[i], sets);
         for (int k = 0; k < FRAME_SET_COUNT; k++) {
             if (!sets[k]) continue;

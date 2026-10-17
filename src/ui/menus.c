@@ -18,6 +18,7 @@
 #include "icons.h"
 #include "screens/screens.h"
 #include "core/engine.h"
+#include "gameplay/phone/phone.h"
 #include "core/cvar.h"
 #include "core/log.h"
 #include "core/platform.h"
@@ -397,7 +398,7 @@ static void draw_modal(int id, bool top) {
 bool menus_wants_mouse(void) {
     Game *g = game();
     return (M && M->depth > 0) || (g && (g->inventory_open || g->container_open || g->bench_open)) || vfx_editor_open() || holdpoint_editor_open() ||
-           daynight_editor_open() || flesh_range_open() || wind_game_panel_open() || scene_wants_mouse();
+           daynight_editor_open() || flesh_range_open() || wind_game_panel_open() || scene_wants_mouse() || phone_ui_wants_mouse();
 }
 
 bool menus_open(void) { return M && M->depth > 0; }

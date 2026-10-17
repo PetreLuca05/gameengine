@@ -5,6 +5,7 @@
 // the *viewed* player: a spectated player's HUD exactly as they see it, plus the spectator bar
 // (docs/SPECTATE.md "Spectator HUD").
 #include "hud.h"
+#include "gameplay/phone/phone.h"
 #include "hud/hud_internal.h"
 #include "crosshair.h"
 #include "menus.h"
@@ -387,7 +388,7 @@ void hud_draw(void) {
     GuiRect safe = safe_rect();
     draw_world_bars(g, w, gui_scale());
     fx_draw_hud();
-    crosshair_draw((float)g_engine.frame_dt);
+    if (!phone_holding()) crosshair_draw((float)g_engine.frame_dt);   // the raised phone is the aim (docs/PHONE.md)
     draw_prompt(g);
     draw_damage_indicators(g);
     draw_vitals(w, safe);

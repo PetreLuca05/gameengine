@@ -1,0 +1,18 @@
+{
+  "_doc": "Phone OS home screen (docs/PHONE.md). Apps appear in this order in the home grid on the in-game screen, the HUD panel and the companion page. 'app' names the built-in app it opens (camera, gallery); an entry without a built-in app shows 'Coming soon' (map, messages, flashlight are planned). Icons are tiles of the atlas below (tools/phone_icons.py).",
+  "apps": [
+    { "id": "camera", "label": "Camera", "icon": "camera", "app": "camera" },
+    { "id": "gallery", "label": "Gallery", "icon": "gallery", "app": "gallery" }
+  ],
+  "icons": {
+    "atlas": "assets/phone/icons.png",
+    "tile": 128,
+    "tiles": ["camera", "gallery", "w_clear", "w_night", "w_partly", "w_cloudy", "w_rain", "w_storm", "w_snow", "w_fog"]
+  },
+  "weather_icons": {
+    "clear": "w_clear", "little_cloudy": "w_partly", "cloudy": "w_cloudy", "overcast": "w_cloudy", "fog": "w_fog",
+    "light_rain": "w_rain", "rain": "w_rain", "storm": "w_storm", "light_snow": "w_snow", "snow": "w_snow", "blizzard": "w_snow",
+    "indoor": "w_cloudy", "custom": "w_partly"
+  },
+  "home_columns": 4
+}

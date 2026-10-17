@@ -215,6 +215,26 @@ int phone_gallery_scan(PhoneGallery *g, const char *base) {
     return g->count;
 }
 
+bool phone_gallery_delete(PhoneGallery *g, int i) {
+    if (i < 0 || i >= g->count) return false;
+    PhoneGalleryItem *it = &g->items[i];
+    char side[300];
+    size_t stem = strlen(it->path) > 4 ? strlen(it->path) - 4 : 0;
+    snprintf(side, sizeof(side), "%.*s.json", (int)stem, it->path);
+    remove(it->path);
+    remove(side);
+    if (it->video) remove(it->thumb);
+    memmove(&g->items[i], &g->items[i + 1], sizeof(PhoneGalleryItem) * (size_t)(g->count - i - 1));
+    g->count--;
+    return true;
+}
+
+int phone_gallery_find_server_id(const PhoneGallery *g, int server_id) {
+    for (int i = 0; server_id > 0 && i < g->count; i++)
+        if (g->items[i].server_id == server_id) return i;
+    return -1;
+}
+
 PhoneGalleryItem *phone_gallery_add(PhoneGallery *g, const char *path, bool video, const PhoneShotMeta *meta) {
     if (g->count >= PHONE_GALLERY_MAX) g->count = PHONE_GALLERY_MAX - 1;
     memmove(&g->items[1], &g->items[0], sizeof(PhoneGalleryItem) * (size_t)g->count);
