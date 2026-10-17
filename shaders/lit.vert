@@ -1,6 +1,7 @@
 #version 450
 #extension GL_GOOGLE_include_directive : require
 #include "common.glsl"
+#include "lod_fade.glsl"
 
 layout(location = 0) in vec3 in_pos;
 layout(location = 1) in vec3 in_normal;
@@ -30,6 +31,11 @@ void main() {
     v_world = world.xyz;
     v_normal = normalize(nmat * in_normal);
     v_uv = in_uv;
+    if ((pc.flags.x & MAT_TERRAIN_MORPH) != 0u) {   // terrain geomorph (docs/LOD.md): uv carries the morph target
+        lod_terrain_vertex(world.xyz, v_normal, in_uv, pc.params.w);
+        v_world = world.xyz;
+        v_uv = in_pos.xz;
+    }
     v_color = in_color;
     vec4 prev_world = pc.flags.y != 0u ? draw_prev.prev_models[pc.flags.y - 1u] * vec4(in_pos, 1.0) : world;
     if ((pc.flags.x & MAT_VIEWMODEL) != 0u) {

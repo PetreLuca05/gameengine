@@ -206,7 +206,18 @@ u32 vfx_sys_spawn(VfxSystem *s, int effect, const VfxSpawnParams *p) {
     in->last_pos = p->pos;
     in->dist = dist;
     in->lod_mul = 1.0f;
-    for (int k = 0; k < 3; k++) if (dist > fx->lod_dist[k]) in->lod_mul = fx->lod_mul[k];
+    if (s->cfg.lod_smooth) {
+        // continuous: from 1 at lod_dist[0] / 2 through each step's multiplier at its distance (scaled)
+        float ds = s->cfg.lod_dist_scale > 0 ? s->cfg.lod_dist_scale : 1.0f, d0 = fx->lod_dist[0] * ds * 0.5f, m0 = 1.0f;
+        for (int k = 0; k < 3 && fx->lod_dist[k] < 1e8f; k++) {
+            float d1 = fx->lod_dist[k] * ds;
+            if (dist <= d0) break;
+            if (dist < d1) { float t = logf(dist / d0) / logf(d1 / d0); in->lod_mul = m0 + (fx->lod_mul[k] - m0) * t; break; }
+            in->lod_mul = m0 = fx->lod_mul[k];
+            d0 = d1;
+        }
+    } else
+        for (int k = 0; k < 3; k++) if (dist > fx->lod_dist[k]) in->lod_mul = fx->lod_mul[k];
     if (p->viewmodel) in->lod_mul = 1.0f;
     s->inst_live++;
     // Effect light (1-2 ticks for flashes).

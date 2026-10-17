@@ -73,14 +73,15 @@ SurfTap surf_tap(float layer, vec2 uv, vec2 gx, vec2 gy, float anti) {
 // The layer's AO at its strength.
 float surf_ao_of(int layer, float ao) { return clamp(1.0 + SURF_AO[layer] * (ao - 1.0), 0.0, 1.0); }
 
-// Terrain layer at p: planar from above, triplanar on steep ground. World-space normal out.
-SurfTap surf_terrain_layer(int layer, vec3 p, vec3 ng, vec3 dpx, vec3 dpy, float anti, bool tri, out vec3 nw) {
+// Terrain layer at p: planar from above, triplanar on steep ground (weight tri: 1 near, fading to 0 at
+// the distance LOD, docs/LOD.md). World-space normal out.
+SurfTap surf_terrain_layer(int layer, vec3 p, vec3 ng, vec3 dpx, vec3 dpy, float anti, float tri, out vec3 nw) {
     float s = 1.0 / SURF_TILE[layer];
     float l = float(layer);
     SurfTap top = surf_tap(l, p.xz * s, dpx.xz * s, dpy.xz * s, anti);
     // whiteout blend: image right = +x, image up = -z
     vec3 ntop = vec3(top.nt.x + ng.x, top.nt.z * ng.y, -top.nt.y + ng.z);
-    if (abs(ng.y) > 0.8 || !tri) { nw = normalize(ntop); return top; }
+    if (abs(ng.y) > 0.8 || tri <= 0.0) { nw = normalize(ntop); return top; }
     vec3 w = pow(abs(ng), vec3(4.0));
     w /= w.x + w.y + w.z;
     SurfTap sx = surf_tap(l, vec2(p.z, -p.y) * s, vec2(dpx.z, -dpx.y) * s, vec2(dpy.z, -dpy.y) * s, anti);
@@ -93,6 +94,13 @@ SurfTap surf_terrain_layer(int layer, vec3 p, vec3 ng, vec3 dpx, vec3 dpy, float
     t.rough = sx.rough * w.x + top.rough * w.y + sz.rough * w.z;
     t.h = sx.h * w.x + top.h * w.y + sz.h * w.z;
     t.ao = sx.ao * w.x + top.ao * w.y + sz.ao * w.z;
+    if (tri < 1.0) {   // the distance band: back to the planar tap
+        nw = normalize(mix(ntop, nw, tri));
+        t.alb = mix(top.alb, t.alb, tri);
+        t.rough = mix(top.rough, t.rough, tri);
+        t.h = mix(top.h, t.h, tri);
+        t.ao = mix(top.ao, t.ao, tri);
+    }
     t.nt = vec3(0, 0, 1);
     return t;
 }
@@ -104,8 +112,10 @@ void surf_terrain(vec3 p, inout vec3 n, inout vec4 base, float variation, out fl
     // distance LOD: the anti-tiling tap and the side projections cost the most where the mips have
     // already flattened the detail (beyond ~100 m one planar tap per layer)
     float dist = length(p - frame.camera_pos.xyz);
-    float anti = smoothstep(0.35, 0.65, surf_noise(p.xz * 0.045)) * (1.0 - smoothstep(70.0, 110.0, dist));
-    bool tri = dist < 160.0;
+    // docs/LOD.md: the ranges x frame.lod_fade.w (1 before), the triplanar end a band instead of a cut
+    float ds = frame.lod_fade.w;
+    float anti = smoothstep(0.35, 0.65, surf_noise(p.xz * 0.045)) * (1.0 - smoothstep(70.0 * ds, 110.0 * ds, dist));
+    float tri = frame.lod_fade.z > 0.5 ? 1.0 - smoothstep(130.0 * ds, 160.0 * ds, dist) : (dist < 160.0 ? 1.0 : 0.0);
     vec2 jit = vec2(surf_noise(p.xz * 0.9), surf_noise(p.xz * 0.9 + 17.3)) - 0.5;
     vec2 g = (p.xz - frame.surf_map.xy) * frame.surf_map.z + jit * 0.9;   // raster samples at integer g
     vec2 gf = floor(g), fr = g - gf;

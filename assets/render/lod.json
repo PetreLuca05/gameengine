@@ -1,0 +1,77 @@
+{
+    "_comment": "LOD ranges and cross-fades (docs/LOD.md, src/render/lod_fade.c). Applies to the classic renderer (r_vgeo 0) and the systems it shares (characters, terrain, VFX spawn LOD); r_vgeo 1 and r_lod_legacy 1 keep the ranges from before. Every range = the value below x the Engine Fidelity tier (tiers) x the user's r_lod_bias against the level default x the era's multiplier. Reload: r_lod_reload.",
+
+    "fade": {
+        "_comment": "time: s, time-based cross-fades (characters, their shadows; r_lod_fade_time). band: octaves of projected size over which stateless instances cross-fade (classic LOD chains; r_lod_fade_band).",
+        "time": 0.35,
+        "band": 0.25
+    },
+
+    "distance": {
+        "_comment": "x the distance of every switch before docs/LOD.md. characters: 1 (the px table below holds the new targets).",
+        "characters": 1.0,
+        "static": 2.0,
+        "impostor": 2.0,
+        "foliage": 1.5,
+        "terrain": 1.5,
+        "shadow": 1.5,
+        "vfx": 1.5
+    },
+
+    "tiers": {
+        "_comment": "per Engine Fidelity level (r_fidelity): the Modern targets x this. Adjusted per tier when a tier exceeds its budget (docs/LOD.md).",
+        "off": 0.3,
+        "low": 0.4,
+        "medium": 0.6,
+        "high": 0.85,
+        "modern": 1.0
+    },
+
+    "eras": {
+        "_comment": "per-era multipliers on top of the tier (the 2015 / 2010 presets keep their own pixel errors and densities, docs/CLASSIC_RENDERER.md); 'all' or per category.",
+        "modern": { "all": 1.0 },
+        "2020": { "all": 1.0 },
+        "2015": { "all": 0.85 },
+        "2010": { "all": 0.7 }
+    },
+
+    "characters": {
+        "_comment": "projected height (px at 1080p-equivalent render height, bias 1): LOD0 above px[0], LOD1 above px[1], LOD2 above px[2], LOD3 below (was 260 / 120 / 50). update_every: pose ticks per LOD; update_ramp_s: s per octave of interval change. ik_band: foot IK / lean fade over this fraction below the LOD0 threshold.",
+        "px": [140, 60, 25],
+        "hysteresis": 0.15,
+        "cull_px": 3,
+        "shadow_px": 20,
+        "update_every": [1, 2, 4, 8],
+        "update_ramp_s": 1.5,
+        "ik_band": 0.3
+    },
+
+    "impostor": {
+        "_comment": "band: octaves of projected size over which mesh and impostor cross-fade (the impostor fades in past the switch size). gain: impostor albedo x this so its mean colour matches the mesh (baked normals catch less sky than the mesh's bent leaf normals; measured: -8 % luminance at 1, -4 % at 1.2, docs/LOD.md).",
+        "band": 0.35,
+        "gain": 1.2
+    },
+
+    "foliage": {
+        "_comment": "band: x the length of a material's fade band (start .. end); instance_fade: width of one instance's fade (fraction of the band, was 1/16); shrink: scale of an instance at the end of its fade.",
+        "band": 1.5,
+        "instance_fade": 0.3,
+        "shrink": 0.35
+    },
+
+    "terrain": {
+        "_comment": "detail_range: x the surface detail distances (anti-tiling 70-110 m, triplanar 160 m); morph: octaves of the geomorph band at the far end of each chunk LOD.",
+        "detail_range": 1.5,
+        "morph": 0.5
+    },
+
+    "shadow": {
+        "_comment": "band: fraction of a caster's shadow distance over which its shadow fades out (was a cut).",
+        "band": 0.15
+    },
+
+    "streaming": {
+        "_comment": "prefetch: classic LODs are made resident when an instance is within this many octaves of switching to them.",
+        "prefetch": 0.5
+    }
+}

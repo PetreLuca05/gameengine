@@ -6,7 +6,7 @@
 layout(location = 0) in vec3 i_world;
 layout(location = 1) flat in vec4 i_rot;
 layout(location = 2) flat in vec4 i_ctr;     // quad centre (world), half size
-layout(location = 3) flat in float i_fade;
+layout(location = 3) flat in vec4 i_fade;   // fade alpha, cross-fade interval, debug (cl_faded)
 
 vec3 cl_hemi_oct_decode(vec2 uv) {
     vec2 p = uv * 2.0 - 1.0;

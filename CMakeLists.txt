@@ -625,6 +625,16 @@ if(MSVC)
 endif()
 add_test(NAME fidelity COMMAND test_fidelity WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
 
+# LOD ranges and cross-fades (docs/LOD.md): lod.json x tier, character px -> LOD, fades in a slow dolly,
+# camera reversal, complementary masks, streaming holds, terrain geomorph without cracks / pops.
+add_executable(test_lod tests/test_lod.c src/render/lod_fade.c src/render/fidelity/fidelity.c src/core/cvar.c)
+set_target_properties(test_lod PROPERTIES C_STANDARD 11)
+target_link_libraries(test_lod PRIVATE dg_animcore)
+if(MSVC)
+  target_compile_options(test_lod PRIVATE /W3 /wd4100 /wd4201 /utf-8)
+endif()
+add_test(NAME lod COMMAND test_lod WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+
 # Phone (docs/PHONE.md): QR round trip, pairing auth, HTTP / WebSocket, orientation math, filter +
 # reach clamp, JPEG pipeline at 30 fps, photo / video files + sidecars, headless client round trip, TLS.
 set(DG_PHONE_CORE_SOURCES

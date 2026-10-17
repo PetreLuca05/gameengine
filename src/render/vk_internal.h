@@ -173,6 +173,11 @@ typedef struct FrameData {
     vec4 ssky2;           // x tan(moon source radius), y r_shadow_debug view, z contact shadow length scale, w moon tile fade-out radius (m)
     vec4 shadow_mpt;      // metres per texel: cascades 0..2, w the moon tile
     vec4 shadow_span;     // metres of light-space depth per NDC unit: cascades 0..2, w the moon tile
+    // LOD cross-fades (docs/LOD.md, shaders/lod_fade.glsl): x dither frame (0..63, 0 = static), y debug bits
+    // (1 r_lod_fade_debug, 2 r_lod_debug 2 level colours), z 1 = the new LOD fades (0 = legacy), w terrain
+    // surface detail range scale; lod_terrain: x geomorph band (octaves), y chunk diagonal (m).
+    vec4 lod_fade;
+    vec4 lod_terrain;
 } FrameData;
 
 typedef struct PushLit {
@@ -186,7 +191,7 @@ _Static_assert(sizeof(PushLit) == 128, "PushLit: the guaranteed push constant bu
 
 typedef enum PipelineId {
     PIPE_LIT, PIPE_LIT_WIRE, PIPE_LIT_BLEND, PIPE_SHADOW, PIPE_LINES, PIPE_LINES_OVERLAY,
-    PIPE_TEXT, PIPE_PREPASS, PIPE_UI, PIPE_SKIN, PIPE_SKIN_WIRE, PIPE_SKIN_SHADOW, PIPE_PREPASS_SKIN, PIPE_UI3D, PIPE_PRECIP,
+    PIPE_TEXT, PIPE_PREPASS, PIPE_UI, PIPE_SKIN, PIPE_SKIN_WIRE, PIPE_SKIN_SHADOW, PIPE_SKIN_SHADOW_FADE, PIPE_SHADOW_MORPH, PIPE_PREPASS_SKIN, PIPE_UI3D, PIPE_PRECIP,
     // glTF material variants of PIPE_LIT / PIPE_PREPASS (docs/PBR.md): doubleSided (no culling), alphaMode MASK (discard, no culling)
     PIPE_LIT_2S, PIPE_LIT_MASK, PIPE_PREPASS_2S, PIPE_PREPASS_MASK, PIPE_COUNT
 } PipelineId;
@@ -479,6 +484,9 @@ struct VgWindTex;
 void vkc_wind_frame(const struct VgViewGpu *v, const struct VgWindTex *w);   // after the wind tile upload: the frame's wind (set 4)
 void vkc_draw_gbuffer(VkCommandBuffer cmd);   // inside the prepass (frame set bound)
 void vkc_draw_lit(VkCommandBuffer cmd);       // inside the opaque pass (depth EQUAL)
+void vkc_draw_pip(VkCommandBuffer cmd);       // inside the scope PiP pass (own culling / LOD, lit forward; docs/LOD.md)
+// The scope PiP view of this frame (setup_scope_pip): view-projection, eye, pixels per unit tangent; false: none.
+bool render_scope_cull(mat4 *vp, vec3 *eye, float *px_scale);
 void vkc_draw_shadow(VkCommandBuffer cmd, u32 cascade);   // inside the sun shadow pass
 u32 vkc_draw_local_shadow(VkCommandBuffer cmd, vec4 sphere, const vec4 planes[6], u32 view, u32 tile_px);
 void vkc_stats(void);
