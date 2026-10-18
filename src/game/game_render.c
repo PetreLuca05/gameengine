@@ -737,10 +737,12 @@ void game_render(void) {
         static u32 seen_cam, seen_r;
         Cvar *cw = camera_fp_cvars()->weapon_fov, *rv = cvar_find("r_viewmodel_fov");
         if (cw && rv) {
+            CvarSource src = cvar_source_push(CVAR_SRC_HOST);   // both locked (dev builds may still set either)
             if (cw->modified != seen_cam && cw->f != rv->f) cvar_set_float(rv, cw->f);
             else if (rv->modified != seen_r && cw->f != rv->f) cvar_set_float(cw, rv->f);
             seen_cam = cw->modified;
             seen_r = rv->modified;
+            cvar_source_pop(src);
         }
     }
     // True first-person camera. Order of operations (nothing after the arm IK moves the camera,

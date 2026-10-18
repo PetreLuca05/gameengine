@@ -33,43 +33,26 @@ static const FidFeatureDef k_features[FF_COUNT] = {
     [FF_ADS_DOF] = { "ads_dof", "ads_dof", B, true, 0, 0, 1, false, false, "Depth of field while aiming" },
     [FF_BLOOM] = { "bloom", "r_bloom", B, true, 0, 0, 1, false, false, "Bloom" },
     [FF_BLOOM_QUALITY] = { "bloom_quality", "r_bloom_quality", I, false, 0, 0, 2, false, false, "Bloom quality" },
-    [FF_LENS_FLARE] = { "lens_flare", "r_lens_flare", F, true, 0, 0, 2, false, false, "Lens flare" },
-    [FF_LENS_DIRT] = { "lens_dirt", "r_lens_dirt", F, true, 0, 0, 2, false, false, "Lens dirt" },
     [FF_CHROMATIC] = { "chromatic", "r_chromatic", F, true, 0, 0, 2, false, false, "Chromatic aberration" },
-    [FF_LENS_DISTORTION] = { "lens_distortion", "r_lens_distortion", F, true, 0, -1, 1, false, false, "Lens distortion" },
-    [FF_LENS_DROPS] = { "lens_drops", "r_lens_drops", B, true, 0, 0, 1, false, false, "Lens droplets" },
     [FF_VIGNETTE] = { "vignette", "r_vignette", F, true, 0, 0, 1, false, false, "Vignette" },
     [FF_FILM_GRAIN] = { "film_grain", "r_film_grain", F, true, 0, 0, 1, false, false, "Film grain" },
-    [FF_AUTO_EXPOSURE] = { "auto_exposure", "r_auto_exposure", B, true, 0, 0, 1, false, false, "Auto exposure" },
-    [FF_TONEMAPPER] = { "tonemapper", "r_tonemapper", I, false, 0, 0, 2, false, false, "Tonemapper" },
     [FF_HDR_OUTPUT] = { "hdr_output", "r_hdr_output", B, true, 0, 0, 1, false, false, "HDR10 output" },
     [FF_SHADOWS] = { "shadows", "r_shadows", I, true, 0, 0, 2, false, false, "Shadows" },
     [FF_SHADOW_RESOLUTION] = { "shadow_resolution", "r_shadow_resolution", I, false, 0, 0, 3, false, false, "Shadow resolution" },
     [FF_SHADOW_PROJECTION] = { "shadow_projection", "r_shadow_projection", I, false, 0, 0, 1, false, false, "Shadow projection" },
     [FF_SHADOW_CASCADES] = { "shadow_cascades", "r_shadow_cascades", I, false, 0, 1, 4, false, false, "Shadow cascades" },
-    [FF_SHADOW_DISTANCE] = { "shadow_distance", "r_shadow_max_distance", F, false, 0, 10.0f, 1000.0f, false, false, "Shadow distance" },
     [FF_SOFT_SHADOW_QUALITY] = { "soft_shadow_quality", "r_soft_shadow_quality", I, false, 0, 0, 3, false, false, "Soft shadow quality" },
     [FF_SHADOW_MIN_RADIUS] = { "shadow_min_radius", "r_shadow_min_radius", F, false, 0, 0, 4, true, false, "Small object shadows" },
-    [FF_LIGHT_SHADOWS] = { "light_shadows", "r_light_shadows", B, true, 0, 0, 1, false, false, "Point / spot light shadows" },
     [FF_LIGHT_SHADOW_QUALITY] = { "light_shadow_quality", "r_light_shadow_quality", I, false, 0, 1, 2, false, false, "Light shadow quality" },
-    [FF_CLOUD_SHADOWS] = { "cloud_shadows", "r_cloud_shadows", B, true, 0, 0, 1, false, false, "Cloud shadows" },
-    [FF_MOON_SHADOWS] = { "moon_shadows", "r_moon_shadows", B, true, 0, 0, 1, false, false, "Moon shadows at twilight" },
     [FF_TEXTURE_QUALITY] = { "texture_quality", "r_texture_quality", I, false, 0, 0, 2, false, false, "Textures" },
     [FF_ANISO] = { "aniso", "r_aniso", I, false, 0, 1, 16, false, false, "Anisotropic filtering" },
     [FF_VGEO] = { "vgeo", "r_vgeo", B, true, 0, 0, 1, false, true, "Virtualized geometry" },
-    [FF_VGEO_ERROR_PX] = { "vgeo_error_px", "r_vgeo_error_px", F, false, 0, 0.25f, 16, true, true, "Geometry detail (vgeo error)" },
     [FF_VGEO_SHADOW_ERROR_PX] = { "vgeo_shadow_error_px", "r_vgeo_shadow_error_px", F, false, 0, 0.25f, 32, true, true, "Shadow geometry detail" },
-    [FF_VGEO_LOD_PX] = { "vgeo_lod_px", "r_vgeo_lod_px", F, false, 0, 0.25f, 64, true, true, "Discrete LOD error" },
-    [FF_FOLIAGE_DENSITY] = { "foliage_density", "r_foliage_density", F, false, 0, 0, 1, false, true, "Foliage density" },
     [FF_FOLIAGE_WIND] = { "foliage_wind", "r_foliage_wind", I, true, 0, 0, 3, false, false, "Foliage wind" },
-    [FF_IMPOSTOR_PX] = { "impostor_px", "r_vgeo_impostor_px", F, false, 0, 0, 256, true, false, "Impostor distance" },
     [FF_TERRAIN_QUALITY] = { "terrain_quality", "r_terrain_quality", I, false, 0, 0, 4, false, false, "Terrain detail" },
-    [FF_LOD_BIAS] = { "lod_bias", "r_lod_bias", F, false, 0, 0.25f, 4, false, false, "Character LOD detail" },
-    [FF_CHAR_QUALITY] = { "char_quality", "r_char_quality", I, false, 0, 0, 3, false, false, "Character detail" },
     [FF_SCOPE_PIP_SCALE] = { "scope_pip_scale", "r_scope_pip_scale", F, false, 0, 0.2f, 2, false, false, "Scope picture resolution" },
     [FF_VFX_QUALITY] = { "vfx_quality", "vfx_quality", I, false, 0, 0, 3, false, false, "Effects (particles)" },
     [FF_VFX_LIGHTING] = { "vfx_lighting", "vfx_lighting", B, true, 0, 0, 1, false, false, "Lit particles" },
-    [FF_DECAL_MAX] = { "decal_max", "vfx_decal_max", I, false, 0, 0, 4096, false, false, "Impact decals" },
     [FF_PRECIP_QUALITY] = { "precip_quality", "r_precip_quality", I, false, 0, -1, 3, false, false, "Rain / snow quality" },
     [FF_WATER] = { "water", "r_water", I, false, 0, 0, 3, false, false, "Water quality" },
 };
@@ -79,7 +62,7 @@ static const FidFeatureDef k_features[FF_COUNT] = {
 
 // Features whose values have no cost order (a choice, not a tier): an explicit user choice is kept
 // when the new level allows it.
-static bool unordered(int f) { return f == FF_UPSCALER || f == FF_TONEMAPPER || f == FF_PRECIP_QUALITY || f == FF_LENS_DISTORTION; }
+static bool unordered(int f) { return f == FF_UPSCALER || f == FF_PRECIP_QUALITY; }
 
 static const char *k_level_ids[FID_LEVELS] = { "off", "low", "medium", "high", "modern" };
 static const char *k_level_names[FID_LEVELS] = { "Off", "Low", "Medium", "High", "Modern" };
@@ -394,7 +377,6 @@ FidBounds fid_bounds(int level, int era, int f) {
 }
 
 int fid_cost_cmp(const FidFeatureDef *d, float a, float b) {
-    if (d == &k_features[FF_LENS_DISTORTION]) { a = fabsf(a); b = fabsf(b); }
     if (fabsf(a - b) < 1e-4f) return 0;
     bool lt = d->cheaper_high ? a > b : a < b;
     return lt ? -1 : 1;
@@ -566,7 +548,11 @@ void fid_custom_load(const char *s) {
         while (*s && *s != ';') s++;
         if (*s == ';') s++;
         int f = fid_feature_find(id);
-        if (f >= 0 && have && !k_features[f].era_owned) { S.user_set[f] = true; S.user_val[f] = v; }
+        // Under the release locks only the player's own features count (docs/SETTINGS_AUDIT.md): a
+        // tier feature in an older config is the level's, dropped here.
+        Cvar *fc = f >= 0 ? cvar_find(k_features[f].cvar) : NULL;
+        bool tier = fc && (fc->flags & CVAR_TIER) && cvar_release_locks();
+        if (f >= 0 && have && !k_features[f].era_owned && !tier) { S.user_set[f] = true; S.user_val[f] = v; }
     }
 }
 
@@ -600,7 +586,9 @@ static void set_value(int f, float v) {
     fmt_value(&k_features[f], v, buf, sizeof(buf));
     bool in = S.internal;
     S.internal = true;
+    CvarSource src = cvar_source_push(CVAR_SRC_FIDELITY);   // tier cvars (docs/SETTINGS_AUDIT.md)
     cvar_set_cv(S.cv[f], buf);
+    cvar_source_pop(src);
     S.internal = in;
 }
 
@@ -675,12 +663,13 @@ int fid_custom_count(void) { return fid_check_table(S.level, NULL, 0); }
 // renderer switch, character / scope detail stay with the overall level (and the Debug tab).
 static const int k_g_post[] = { FF_AO, FF_CONTACT_SHADOWS, FF_SSR, FF_SSGI, FF_PUDDLE_REFLECTIONS, FF_VOLUMETRICS, FF_VOL_LOCAL_LIGHTS,
                                 FF_DOF, FF_DOF_QUALITY, FF_ADS_DOF, FF_BLOOM, FF_BLOOM_QUALITY };
-static const int k_g_shadows[] = { FF_SHADOWS, FF_SHADOW_RESOLUTION, FF_SHADOW_CASCADES, FF_SHADOW_DISTANCE, FF_SOFT_SHADOW_QUALITY,
-                                   FF_SHADOW_MIN_RADIUS, FF_LIGHT_SHADOWS, FF_LIGHT_SHADOW_QUALITY, FF_CLOUD_SHADOWS, FF_MOON_SHADOWS };
+static const int k_g_shadows[] = { FF_SHADOWS, FF_SHADOW_RESOLUTION, FF_SHADOW_CASCADES, FF_SOFT_SHADOW_QUALITY, FF_SHADOW_MIN_RADIUS, FF_LIGHT_SHADOW_QUALITY };
 static const int k_g_textures[] = { FF_TEXTURE_QUALITY, FF_ANISO, FF_TERRAIN_QUALITY };
-static const int k_g_effects[] = { FF_VFX_QUALITY, FF_VFX_LIGHTING, FF_DECAL_MAX, FF_PRECIP_QUALITY, FF_WATER, FF_LENS_DROPS };
-static const int k_g_foliage[] = { FF_FOLIAGE_DENSITY, FF_FOLIAGE_WIND };
-static const int k_g_view[] = { FF_LOD_BIAS, FF_IMPOSTOR_PX, FF_VGEO_ERROR_PX, FF_VGEO_SHADOW_ERROR_PX, FF_VGEO_LOD_PX };
+static const int k_g_effects[] = { FF_VFX_QUALITY, FF_VFX_LIGHTING, FF_PRECIP_QUALITY, FF_WATER };
+// Foliage / view distance: their density and ranges are locked (docs/SETTINGS_AUDIT.md); what is
+// left is shading cost (wind layers, the shadow-view geometry error).
+static const int k_g_foliage[] = { FF_FOLIAGE_WIND };
+static const int k_g_view[] = { FF_VGEO_SHADOW_ERROR_PX };
 static const struct { const char *id; const int *f; int n; } k_groups[FG_COUNT] = {
     [FG_POST] = { "post", k_g_post, ARRAY_COUNT(k_g_post) },
     [FG_SHADOWS] = { "shadows", k_g_shadows, ARRAY_COUNT(k_g_shadows) },
@@ -729,7 +718,9 @@ void fid_group_apply(int g, int tier) {
         if (fabsf(v - fid_cvar_value(f)) < 1e-5f) continue;
         char buf[32];
         fmt_value(&k_features[f], v, buf, sizeof(buf));
+        CvarSource src = cvar_source_push(CVAR_SRC_FIDELITY);
         cvar_set_cv(S.cv[f], buf);
+        cvar_source_pop(src);
     }
 }
 
@@ -757,7 +748,8 @@ int fid_group_detect(int g) {
 bool fid_pass_is_post(const char *n) {
     static const char *exact[] = { "hiz", "contact", "color_pyramid", "depth_history", "taa", "taau", "fxaa", "fsr_easu", "post_buffers_init",
                                    "exposure", "bloom", "flare", "tonemap", "debug_view" };
-    static const char *prefix[] = { "gtao", "ssgi", "ssr", "vol_", "smaa_", "mb_", "dof_", "lens_" };
+    // (lens_drops / lens_apply are scene passes: the droplets run at every level, docs/SETTINGS_AUDIT.md.)
+    static const char *prefix[] = { "gtao", "ssgi", "ssr", "vol_", "smaa_", "mb_", "dof_" };
     for (int i = 0; i < ARRAY_COUNT(exact); i++) if (!strcmp(n, exact[i])) return true;
     for (int i = 0; i < ARRAY_COUNT(prefix); i++) if (!strncmp(n, prefix[i], strlen(prefix[i]))) return true;
     return false;

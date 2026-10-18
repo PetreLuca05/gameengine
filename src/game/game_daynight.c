@@ -830,20 +830,20 @@ void daynight_draw(void) {
 // ------------------------------------------------------------------ registration
 
 void daynight_register(void) {
-    DN.atmosphere = cvar_reg_bool("r_atmosphere", true, CVAR_ARCHIVE, "physically based sky + day / night cycle on open levels (0 = the fixed gradient sky)");
-    DN.clock = cvar_reg_bool("cl_clock", true, CVAR_ARCHIVE, "on-screen clock (time of day, sun elevation, exposure)");
-    DN.sky_debug = cvar_reg_int("sky_debug", 0, 0, 6, 0, "sky views: 1 transmittance, 2 multiple scattering, 3 sky view, 4 cloud shadow, 5 environment, 6 aerial perspective");
-    DN.aerial_scale = cvar_reg_float("sky_aerial_scale", 2.0f, 0.0f, 20.0f, CVAR_ARCHIVE, "aerial perspective distance multiplier (1 = physical)");
-    DN.aerial_max = cvar_reg_float("sky_aerial_max", 3000.0f, 100.0f, 32000.0f, 0, "aerial perspective froxel depth (m)");
-    DN.weather_clouds = cvar_reg_float("weather_clouds", -1.0f, -1.0f, 1.0f, CVAR_SERVER, "weather hook: cloud cover 0..1 (-1 = the daynight.json curve)");
-    DN.weather_fog = cvar_reg_float("weather_fog", -1.0f, -1.0f, 10.0f, CVAR_SERVER, "weather hook: fog density multiplier (-1 = 1)");
-    DN.on_sunrise = cvar_reg_string("tod_on_sunrise", "", 0, "console commands run at sunrise");
-    DN.on_sunset = cvar_reg_string("tod_on_sunset", "", 0, "console commands run at sunset");
-    DN.on_midnight = cvar_reg_string("tod_on_midnight", "", 0, "console commands run at midnight");
-    DN.disc_zoom = cvar_reg_float("sky_disc_zoom", 1.0f, 0.1f, 40.0f, 0, "sun / moon disc size multiplier (inspection; same surface brightness)");
-    DN.on_noon = cvar_reg_string("tod_on_noon", "", 0, "console commands run at noon");
-    DN.night_ambience = cvar_reg_string("tod_night_ambience", "", CVAR_ARCHIVE, "ambient track started at sunset (empty = keep)");
-    DN.day_ambience = cvar_reg_string("tod_day_ambience", "", CVAR_ARCHIVE, "ambient track started at sunrise (empty = keep)");
+    DN.atmosphere = cvar_reg_bool("r_atmosphere", true, CVAR_LOCKED, "physically based sky + day / night cycle on open levels (0 = the fixed gradient sky)");
+    DN.clock = cvar_reg_bool("cl_clock", true, CVAR_ARCHIVE | CVAR_EDITABLE, "on-screen clock (time of day, sun elevation, exposure)");
+    DN.sky_debug = cvar_reg_int("sky_debug", 0, 0, 6, CVAR_LOCKED, "sky views: 1 transmittance, 2 multiple scattering, 3 sky view, 4 cloud shadow, 5 environment, 6 aerial perspective");
+    DN.aerial_scale = cvar_reg_float("sky_aerial_scale", 2.0f, 0.0f, 20.0f, CVAR_LOCKED, "aerial perspective distance multiplier (1 = physical)");
+    DN.aerial_max = cvar_reg_float("sky_aerial_max", 3000.0f, 100.0f, 32000.0f, CVAR_LOCKED, "aerial perspective froxel depth (m)");
+    DN.weather_clouds = cvar_reg_float("weather_clouds", -1.0f, -1.0f, 1.0f, CVAR_SERVER | CVAR_LOCKED | CVAR_RULE, "weather hook: cloud cover 0..1 (-1 = the daynight.json curve)");
+    DN.weather_fog = cvar_reg_float("weather_fog", -1.0f, -1.0f, 10.0f, CVAR_SERVER | CVAR_LOCKED | CVAR_RULE, "weather hook: fog density multiplier (-1 = 1)");
+    DN.on_sunrise = cvar_reg_string("tod_on_sunrise", "", CVAR_LOCKED, "console commands run at sunrise");
+    DN.on_sunset = cvar_reg_string("tod_on_sunset", "", CVAR_LOCKED, "console commands run at sunset");
+    DN.on_midnight = cvar_reg_string("tod_on_midnight", "", CVAR_LOCKED, "console commands run at midnight");
+    DN.disc_zoom = cvar_reg_float("sky_disc_zoom", 1.0f, 0.1f, 40.0f, CVAR_LOCKED, "sun / moon disc size multiplier (inspection; same surface brightness)");
+    DN.on_noon = cvar_reg_string("tod_on_noon", "", CVAR_LOCKED, "console commands run at noon");
+    DN.night_ambience = cvar_reg_string("tod_night_ambience", "", CVAR_LOCKED, "ambient track started at sunset (empty = keep)");
+    DN.day_ambience = cvar_reg_string("tod_day_ambience", "", CVAR_LOCKED, "ambient track started at sunrise (empty = keep)");
     cmd_register("time_set", cmd_time_set, "time_set HH:MM (host)");
     cmd_register("time_scale", cmd_time_scale, "time_scale <x>: day speed multiplier, 0 pauses (host)");
     cmd_register("time_pause", cmd_time_pause, "time_pause [0|1] (host)");

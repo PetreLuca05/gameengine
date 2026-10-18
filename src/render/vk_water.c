@@ -216,9 +216,9 @@ bool vkw_create_pipelines(void) {
 
 void vkw_init(void) {
     memset(&W, 0, sizeof(W));
-    W.r_water = cvar_reg_int("r_water", 3, 0, 3, CVAR_ARCHIVE,
+    W.r_water = cvar_reg_int("r_water", 3, 0, 3, CVAR_TIER,
                              "Water quality: 0 flat + sky reflection, 1 + SSR + refraction, 2 + ripple sim + caustics, 3 + every detail (Engine Fidelity bounds it)");
-    W.r_water_debug = cvar_reg_int("r_water_debug", 0, 0, 1, 0, "Water render debug: 1 ripple sim heights as the surface colour");
+    W.r_water_debug = cvar_reg_int("r_water_debug", 0, 0, 1, CVAR_LOCKED, "Water render debug: 1 ripple sim heights as the surface colour");
     if (!P.ok || !P.layout) { log_warn("water: no post stack (no water rendering)"); return; }
     VkDescriptorSetLayout sets[2] = { R->frame_layout, P.layout };
     VkPushConstantRange pr = { VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(WaterPush) };

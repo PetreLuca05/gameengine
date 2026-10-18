@@ -534,11 +534,11 @@ static void cmd_peek(int argc, const char **argv) {
 }
 
 void wheels_register(void) {
-    W.hold_time = cvar_reg_float("wheel_hold_time", 0.22f, 0.05f, 1.0f, CVAR_ARCHIVE, "radial wheels: hold the key this long to open the wheel (a shorter press is the tap action)");
-    W.timescale = cvar_reg_float("wheel_timescale", 0.35f, 0.05f, 1.0f, CVAR_ARCHIVE, "radial wheels: simulation speed while a wheel is open (single player / hosting alone)");
-    W.enable = cvar_reg_bool("wheel_enable", true, CVAR_ARCHIVE, "radial wheels: hold-to-open wheels (off: the keys only do their tap action)");
-    W.heal_auto = cvar_reg_bool("wheel_heal_auto_use", true, CVAR_ARCHIVE, "healing wheel / quick heal: start using the item at once");
-    W.ring_on = cvar_reg_bool("hud_timed_ring", true, CVAR_ARCHIVE, "HUD: the timed ring for healing, cooking grenades and hold interactions");
+    W.hold_time = cvar_reg_float("wheel_hold_time", 0.22f, 0.05f, 1.0f, CVAR_ARCHIVE | CVAR_EDITABLE, "radial wheels: hold the key this long to open the wheel (a shorter press is the tap action)");
+    W.timescale = cvar_reg_float("wheel_timescale", 0.35f, 0.05f, 1.0f, CVAR_ARCHIVE | CVAR_EDITABLE, "radial wheels: simulation speed while a wheel is open (single player / hosting alone)");
+    W.enable = cvar_reg_bool("wheel_enable", true, CVAR_ARCHIVE | CVAR_EDITABLE, "radial wheels: hold-to-open wheels (off: the keys only do their tap action)");
+    W.heal_auto = cvar_reg_bool("wheel_heal_auto_use", true, CVAR_ARCHIVE | CVAR_EDITABLE, "healing wheel / quick heal: start using the item at once");
+    W.ring_on = cvar_reg_bool("hud_timed_ring", true, CVAR_ARCHIVE | CVAR_EDITABLE, "HUD: the timed ring for healing, cooking grenades and hold interactions");
     cmd_register("wheel_open", cmd_wheel_open, "open a radial wheel as if its key were held: wheel_open heal|throw|ping|door [slot]");
     cmd_register("wheel_select", cmd_wheel_select, "pick a slot of the open radial wheel: wheel_select <slot>");
     cmd_register("wheel_release", cmd_wheel_release, "release the open radial wheel (selects its slot)");

@@ -550,6 +550,10 @@ float render_pass_ms(int i);
 u64 render_post_memory(void);
 float render_exposure_ev(void);
 // Engine Fidelity (docs/ENGINE_FIDELITY.md) diagnostics.
+// The fog extinction (1/m) of this frame: the froxel volumetrics' base density (time of day, weather,
+// post volumes). The analytic distance fog without volumetrics (Engine Fidelity Off / Low, the 2010
+// era) uses the same value, so fog hides the same at every level (docs/SETTINGS_AUDIT.md V6).
+float render_fog_extinction(void);
 float render_direct_exposure_ev(void);                        // Engine Fidelity Off: the fixed (metered) exposure as EV100
 float render_stretch_factor(void);                            // r_stretch: horizontal stretch of the 3D view (1 = none)
 float render_gpu_frame_ms(void);                              // whole command buffer, GPU timestamps (last completed frame)
@@ -574,6 +578,13 @@ float render_vm_fov(void);   // the viewmodel (arms + held item) projection FOV 
 mat4 render_view_proj(void);
 int render_width(void);
 int render_height(void);
+// LOD / impostor / character LOD decisions measure projected sizes against this height, not the
+// render or display resolution: render scale, upscaling and a 4K screen never move a switch, so every
+// player sees the same detail at the same distance (docs/SETTINGS_AUDIT.md V14).
+#define RENDER_LOD_REF_H 1080.0f
+// The last frame's virtualized-geometry instance counts (visibility_probe): visible (both passes),
+// faded out by density / fade distance, drawn as impostors. false: no culled frame yet.
+bool render_vgeo_counts(u32 *visible, u32 *faded, u32 *impostors);
 RenderStats render_stats(void);
 // Sun shadow state of the last built frame (docs/SHADOWS.md: shadow_info, r_shadow_debug 1 / 8,
 // shadow_switch_stress).

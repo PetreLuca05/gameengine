@@ -90,7 +90,7 @@ void fg_init(void) {
     qi.queryType = VK_QUERY_TYPE_TIMESTAMP;
     qi.queryCount = FG_MAX_PASSES * 2 * FRAMES_IN_FLIGHT;
     VK_CHECK(vkCreateQueryPool(R->device, &qi, NULL, &G.qp));
-    G.disable = cvar_reg_string("r_post_disable", "", 0, "comma separated frame graph passes to skip (e.g. ssr,gtao); r_post_passes lists them");
+    G.disable = cvar_reg_string("r_post_disable", "", CVAR_LOCKED, "comma separated frame graph passes to skip (e.g. ssr,gtao); r_post_passes lists them");
 }
 
 static void phys_destroy(FgPhys *p, bool now) {

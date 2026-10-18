@@ -50,8 +50,8 @@ void fx_init(const BasicMeshes *meshes) {
     FX = (FxSystem *)calloc(1, sizeof(FxSystem));
     FX->meshes = meshes;
     FX->rng = rng_make(1234);
-    FX->dev_damage_numbers = cvar_reg_bool("dev_damage_numbers", true, CVAR_ARCHIVE, "show floating damage numbers");
-    FX->fx_tracers = cvar_reg_bool("fx_tracers", true, CVAR_ARCHIVE, "draw bullet tracers");
+    FX->dev_damage_numbers = cvar_reg_bool("dev_damage_numbers", true, CVAR_ARCHIVE | CVAR_LOCKED | CVAR_RULE, "show floating damage numbers");
+    FX->fx_tracers = cvar_reg_bool("fx_tracers", true, CVAR_LOCKED, "draw bullet tracers");
     vfx_game_init(meshes);
     bal_fx_init();
     vfx_editor_init();

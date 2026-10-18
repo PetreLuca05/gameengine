@@ -112,7 +112,8 @@ static void test_tables(void) {
         const cJSON *f = cJSON_GetObjectItemCaseSensitive(r, "features");
         int q = (int)feat(f, "shadow_resolution", "default", 2), qmax = (int)feat(f, "shadow_resolution", "max", (float)q);
         int c = (int)feat(f, "shadow_cascades", "default", 4);
-        float d = feat(f, "shadow_distance", "default", 100.0f), dmax = feat(f, "shadow_distance", "max", d);
+        // The distance is locked for every level (docs/SETTINGS_AUDIT.md): the tiers trade resolution / cascades only.
+        float d = SHADOW_LOCKED_DISTANCE, dmax = d;
         check_table(levels[i], "default", q, c, d, min_tpm[i]);
         check_table(levels[i], "max", qmax, c, dmax, min_tpm[i] * 0.4f);   // max distance at the max resolution
         // The pure tier table (shadow_settings.c) equals the JSON defaults.
@@ -125,7 +126,7 @@ static void test_tables(void) {
         const cJSON *eras = cJSON_GetObjectItemCaseSensitive(r, "eras");
         for (const cJSON *e = eras ? eras->child : NULL; e; e = e->next) {
             int eq = (int)feat(e, "shadow_resolution", "default", (float)q), ec = (int)feat(e, "shadow_cascades", "default", (float)c);
-            float ed = feat(e, "shadow_distance", "default", d);
+            float ed = d;
             char v[32];
             snprintf(v, sizeof(v), "era %s", e->string);
             check_table(levels[i], v, eq, ec, ed, min_tpm[i] * 0.8f);   // an era may trade a little density for reach

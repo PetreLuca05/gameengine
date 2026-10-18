@@ -80,7 +80,7 @@ static FogTarget g_fog_main, g_fog_pip;
 
 // The lit shaders' analytic fog (render.c: frame.fog) is on when the volumetrics are off.
 static bool analytic_fog(void) {
-    if (R->env.fog_density <= 0.0f || (!P.in.sky_on && !sky_active())) return false;
+    if (render_fog_extinction() <= 0.0f || (!P.in.sky_on && !sky_active())) return false;
     return !(P.set.volumetrics > 0 && fg_pass_enabled("vol_inject"));
 }
 
@@ -170,7 +170,7 @@ static void exec_fog_apply(VkCommandBuffer cmd, void *u) {
     pc.u[1] = t->ap ? 1u : 0u;
     pc.u[2] = t->analytic ? 1u : 0u;
     pc.u[3] = t->reproject ? 1u : 0u;
-    float f1[4] = { R->env.aerial_max > 10.0f ? R->env.aerial_max : 3000.0f, P.in.zfar, R->env.fog_density, 0.0f };
+    float f1[4] = { R->env.aerial_max > 10.0f ? R->env.aerial_max : 3000.0f, P.in.zfar, render_fog_extinction(), 0.0f };
     float col[3] = { R->env.fog_color.x, R->env.fog_color.y, R->env.fog_color.z };
     float cam[3] = { t->cam.x, t->cam.y, t->cam.z };
     memcpy(&pc.u[4], f1, 16);

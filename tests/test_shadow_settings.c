@@ -110,6 +110,29 @@ static cJSON *load_json(const char *name) {
     return NULL;
 }
 
+// The locked sun shadow distance (assets/render/consistency.json).
+static float locked_shadow_distance(void) {
+    static const char *paths[] = { "assets/render/consistency.json", "../assets/render/consistency.json", "../../assets/render/consistency.json" };
+    for (int i = 0; i < 3; i++) {
+        FILE *f = fopen(paths[i], "rb");
+        if (!f) continue;
+        fseek(f, 0, SEEK_END);
+        long n = ftell(f);
+        fseek(f, 0, SEEK_SET);
+        char *s = malloc((size_t)n + 1);
+        size_t got = fread(s, 1, (size_t)n, f);
+        s[got] = 0;
+        fclose(f);
+        cJSON *j = cJSON_Parse(s);
+        free(s);
+        const cJSON *v = cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(j, "values"), "r_shadow_max_distance"), "value");
+        float d = cJSON_IsNumber(v) ? (float)v->valuedouble : -1.0f;
+        cJSON_Delete(j);
+        return d;
+    }
+    return -1.0f;
+}
+
 static double feat_default(const cJSON *j, const char *key) {
     const cJSON *f = cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(j, "features"), key);
     const cJSON *d = cJSON_GetObjectItemCaseSensitive(f, "default");
@@ -119,7 +142,10 @@ static double feat_default(const cJSON *j, const char *key) {
 static void test_tiers(void) {
     static const char *files[5] = { "off.json", "low.json", "medium.json", "high.json", "modern.json" };
     // the spec's table: mode, resolution, cascades, distance, soft quality
-    static const int want[5][5] = { { 0, 0, 1, 50, 0 }, { 1, 0, 2, 50, 0 }, { 2, 1, 2, 100, 0 }, { 2, 2, 4, 200, 1 }, { 2, 3, 4, 300, 3 } };
+    // (docs/SETTINGS_AUDIT.md: every tier has sun shadows and the locked distance)
+    static const int want[5][5] = { { 1, 1, 1, 150, 0 }, { 1, 1, 2, 150, 0 }, { 2, 1, 2, 150, 0 }, { 2, 2, 4, 150, 1 }, { 2, 3, 4, 150, 3 } };
+    float locked = locked_shadow_distance();
+    CHECK(near_(locked, SHADOW_LOCKED_DISTANCE, 0.01f), "consistency.json r_shadow_max_distance %g = SHADOW_LOCKED_DISTANCE", locked);
     for (int l = 0; l < 5; l++) {
         QualityShadowSettings q;
         shs_quality_for_tier(&q, l);
@@ -131,7 +157,7 @@ static void test_tiers(void) {
         CHECK((int)feat_default(j, "shadows") == (int)q.mode, "%s shadows", files[l]);
         CHECK((int)feat_default(j, "shadow_resolution") == (int)q.resolution, "%s shadow_resolution", files[l]);
         CHECK((int)feat_default(j, "shadow_cascades") == q.cascades, "%s shadow_cascades", files[l]);
-        CHECK(near_((float)feat_default(j, "shadow_distance"), q.distance, 0.01f), "%s shadow_distance", files[l]);
+        CHECK(feat_default(j, "shadow_distance") < 0, "%s: shadow_distance is locked, not a tier (docs/SETTINGS_AUDIT.md)", files[l]);
         CHECK((int)feat_default(j, "soft_shadow_quality") == (int)q.soft_quality, "%s soft_shadow_quality", files[l]);
         cJSON_Delete(j);
     }
@@ -251,10 +277,10 @@ static void test_cascades(void) {
     shs_quality_default(&q);
     float s[4];
     CHECK(shs_cascade_splits(&q, s) == 4, "4 cascades");
-    CHECK(near_(s[0], 0.067f * 300.0f, 0.01f) && near_(s[1], 60.0f, 0.01f) && near_(s[2], 0.467f * 300.0f, 0.01f) && s[3] == 300.0f, "4-split percentages");
+    CHECK(near_(s[0], 0.067f * 150.0f, 0.01f) && near_(s[1], 30.0f, 0.01f) && near_(s[2], 0.467f * 150.0f, 0.01f) && s[3] == 150.0f, "4-split percentages");
     q.cascades = 2;
     q.distance = 100.0f;
-    CHECK(shs_cascade_splits(&q, s) == 2 && near_(s[0], 33.333f, 0.01f) && s[1] == 100.0f, "2-split percentage");
+    CHECK(shs_cascade_splits(&q, s) == 2 && near_(s[0], 25.0f, 0.01f) && s[1] == 100.0f, "2-split percentage");
     q.cascades = 1;
     CHECK(shs_cascade_splits(&q, s) == 1 && s[0] == 100.0f, "no cascades");
 

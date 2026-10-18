@@ -736,7 +736,7 @@ void vkx_targets_changed(void) {
 
 bool vkx_init(void) {
     memset(&X, 0, sizeof(X));
-    X.max_particles_cvar = cvar_reg_int("vfx_max_particles", 1 << 20, 1 << 14, 1 << 22, CVAR_ARCHIVE, "GPU particle pool size (restart)");
+    X.max_particles_cvar = cvar_reg_int("vfx_max_particles", 1 << 20, 1 << 14, 1 << 22, CVAR_LOCKED, "GPU particle pool size (restart)");
     X.max_particles = (u32)X.max_particles_cvar->i;
     VkDescriptorSetLayoutBinding b[VFX_BINDINGS];
     memset(b, 0, sizeof(b));

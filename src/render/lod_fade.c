@@ -20,10 +20,11 @@ void lod_table_default(LodTable *t) {
     t->band = 0.25f;
     const float cat[LODC_COUNT] = { 1.0f, 2.0f, 2.0f, 1.5f, 1.5f, 1.5f, 1.5f };
     memcpy(t->cat, cat, sizeof(cat));
-    const float tier[5] = { 0.3f, 0.4f, 0.6f, 0.85f, 1.0f };
-    memcpy(t->tier, tier, sizeof(tier));
+    // Every level and era: 1 (docs/SETTINGS_AUDIT.md: LOD / foliage / impostor ranges are the same for
+    // every player; Low renders cheaper, not shorter).
+    for (int l = 0; l < 5; l++) t->tier[l] = 1.0f;
     for (int e = 0; e < 4; e++)
-        for (int c = 0; c < LODC_COUNT; c++) t->era[e][c] = e == 2 ? 0.85f : (e == 3 ? 0.7f : 1.0f);
+        for (int c = 0; c < LODC_COUNT; c++) t->era[e][c] = 1.0f;
     t->char_px[0] = 140.0f;
     t->char_px[1] = 60.0f;
     t->char_px[2] = 25.0f;
@@ -111,8 +112,12 @@ bool lod_table_parse(LodTable *t, const char *json, char *err, int n) {
         if (!(t->char_px[i] > t->char_px[i + 1]) || t->char_px[i + 1] <= 0) { snprintf(err, (size_t)n, "lod.json: characters.px must decrease"); return false; }
     for (int c = 0; c < LODC_COUNT; c++)
         if (!(t->cat[c] > 0)) { snprintf(err, (size_t)n, "lod.json: distance.%s must be > 0", k_cat_id[c]); return false; }
+    // Visibility ranges: one set for everyone (docs/SETTINGS_AUDIT.md).
     for (int l = 0; l < 5; l++)
-        if (!(t->tier[l] > 0) || (l > 0 && t->tier[l] < t->tier[l - 1])) { snprintf(err, (size_t)n, "lod.json: tiers must be > 0 and not decrease (%s)", k_tier_id[l]); return false; }
+        if (fabsf(t->tier[l] - 1.0f) > 1e-6f) { snprintf(err, (size_t)n, "lod.json: tiers.%s must be 1 (LOD ranges are the same at every level, docs/SETTINGS_AUDIT.md)", k_tier_id[l]); return false; }
+    for (int e = 0; e < 4; e++)
+        for (int c = 0; c < LODC_COUNT; c++)
+            if (fabsf(t->era[e][c] - 1.0f) > 1e-6f) { snprintf(err, (size_t)n, "lod.json: eras.%s must be 1 (LOD ranges are the same in every era)", k_era_id[e]); return false; }
     if (t->fade_time < 0 || t->band < 0 || t->fol_shrink < 0 || t->fol_shrink > 1) { snprintf(err, (size_t)n, "lod.json: fade values out of range"); return false; }
     return true;
 }
@@ -289,12 +294,12 @@ void lod_init(void) {
     L.init = true;
     lod_table_default(&L.t);
     load_shipped();
-    L.fade_time = cvar_reg_float("r_lod_fade_time", L.t.fade_time, 0.0f, 3.0f, CVAR_ARCHIVE, "LOD cross-fade time of characters and their shadows (s, 0 = cut; docs/LOD.md)");
-    L.band = cvar_reg_float("r_lod_fade_band", L.t.band, 0.0f, 2.0f, CVAR_ARCHIVE,
+    L.fade_time = cvar_reg_float("r_lod_fade_time", L.t.fade_time, 0.0f, 3.0f, CVAR_LOCKED, "LOD cross-fade time of characters and their shadows (s, 0 = cut; docs/LOD.md)");
+    L.band = cvar_reg_float("r_lod_fade_band", L.t.band, 0.0f, 2.0f, CVAR_LOCKED,
                             "distance band of the stateless LOD / impostor cross-fades (octaves of projected size, 0 = cut; docs/LOD.md)");
-    L.fade_debug = cvar_reg_int("r_lod_fade_debug", 0, 0, 1, 0, "tint fading LODs (green: fading in, red: fading out)");
-    L.legacy = cvar_reg_bool("r_lod_legacy", false, 0, "the LOD ranges and transitions from before docs/LOD.md (comparisons; r_vgeo 1 always uses them)");
-    L.scope = cvar_reg_bool("r_lod_scope", true, 0, "scope picture-in-picture LOD (docs/LOD.md): its own classic culling / LOD pick, characters at their magnified size (0: before)");
+    L.fade_debug = cvar_reg_int("r_lod_fade_debug", 0, 0, 1, CVAR_LOCKED, "tint fading LODs (green: fading in, red: fading out)");
+    L.legacy = cvar_reg_bool("r_lod_legacy", false, CVAR_LOCKED, "the LOD ranges and transitions from before docs/LOD.md (comparisons; r_vgeo 1 always uses them)");
+    L.scope = cvar_reg_bool("r_lod_scope", true, CVAR_LOCKED, "scope picture-in-picture LOD (docs/LOD.md): its own classic culling / LOD pick, characters at their magnified size (0: before)");
     cmd_register("r_lod_reload", cmd_lod_reload, "reload assets/render/lod.json (LOD ranges, docs/LOD.md)");
 }
 
@@ -316,8 +321,7 @@ static int cur_level(void) { return fid_loaded() ? fid_level() : FID_MODERN; }
 float lod_user_bias(void) {
     if (!L.bias) L.bias = cvar_find("r_lod_bias");
     if (!L.bias) return 1.0f;
-    float def = fid_loaded() ? fid_bounds(cur_level(), fid_era_from_cvar(cur_era()), FF_LOD_BIAS).def : 1.0f;
-    return def > 0 ? L.bias->f / def : L.bias->f;
+    return L.bias->f;   // locked 1 (docs/SETTINGS_AUDIT.md); dev builds may still bias
 }
 
 float lod_scale(LodCat c) {

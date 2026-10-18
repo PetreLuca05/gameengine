@@ -181,6 +181,7 @@ typedef struct PostFrameInfo {
     float level_fog;
 } PostFrameInfo;
 void game_post_init(void);
+void game_settings_audit_init(void);   // settings_audit, sv_rule, consistency_check (docs/SETTINGS_AUDIT.md)
 // game_look.c: the post-processing Look (docs/LOOKS.md): r_look, its finish / modulators in the frame's
 // PostSettings, the Settings A/B, dev look_tune / look_dump.
 struct PostSettings;

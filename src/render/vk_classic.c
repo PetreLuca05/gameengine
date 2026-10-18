@@ -250,7 +250,7 @@ static VkDescriptorSet cl_alloc_set(VkImageView v0, VkImageLayout l0, VkImageVie
 }
 
 void vkc_init(void) {
-    C.impostor_px = cvar_reg_float("r_classic_impostor_px", 64.0f, 0.0f, 1024.0f, CVAR_ARCHIVE,
+    C.impostor_px = cvar_reg_float("r_classic_impostor_px", 64.0f, 0.0f, 1024.0f, CVAR_LOCKED,
                                    "classic renderer: trees with an impostor atlas draw it below this projected size (pixels across, 0 = never)");
     VkDescriptorSetLayoutBinding b[2];
     memset(b, 0, sizeof(b));
@@ -957,7 +957,7 @@ void vkc_frame(const VgScene *s, const VgDisplace *disp, float density, float lo
     memset(&v, 0, sizeof(v));
     planes_of(R->view_proj_nj, v.planes);
     v.eye = v.lod_eye = R->cam.pos;
-    v.px_scale = (float)R->hdr.h / (2.0f * tanf(R->cam.fov_deg * DG_DEG2RAD * 0.5f));
+    v.px_scale = RENDER_LOD_REF_H / (2.0f * tanf(R->cam.fov_deg * DG_DEG2RAD * 0.5f));   // resolution independent (V14)
     v.lod_px = lod_px;
     v.impostor_px = C.impostor_px->f;
     v.small_impostor_px = small_impostor_px;
@@ -967,14 +967,14 @@ void vkc_frame(const VgScene *s, const VgDisplace *disp, float density, float lo
     v.legacy = !C.lod_new;
     float shadow_px = shadow_lod_px;
     if (C.lod_new) {
-        // docs/LOD.md: lod.json x tier x era; the fidelity level's own scaling of the shared thresholds
-        // is replaced by the tier (without_level_scale), the user's deviation from it is kept
+        // docs/LOD.md: lod.json ranges (the same at every level); the shadow-view geometry error is
+        // still a fidelity tier: its level scaling is taken out (without_level_scale)
         const LodTable *lt = lod_table();
         float band_k = lt->band > 0 ? lod_band() / lt->band : 1.0f;
         float s_st = lod_scale(LODC_STATIC), s_im = lod_scale(LODC_IMPOSTOR), s_fo = lod_scale(LODC_FOLIAGE), s_sh = lod_scale(LODC_SHADOW);
-        v.lod_px = without_level_scale(FF_VGEO_LOD_PX, lod_px) / s_st;
+        v.lod_px = lod_px / s_st;   // locked (docs/SETTINGS_AUDIT.md): no level scale to take out
         v.impostor_px = C.impostor_px->f / s_im;
-        v.small_impostor_px = without_level_scale(FF_IMPOSTOR_PX, small_impostor_px) / s_im;
+        v.small_impostor_px = small_impostor_px / s_im;
         shadow_px = without_level_scale(FF_VGEO_SHADOW_ERROR_PX, shadow_lod_px) / s_sh;
         v.band = lod_band();
         v.imp_band = lt->imp_band * band_k;

@@ -36,6 +36,7 @@ void lobby_chat(const char *text);      // slash commands included
 void lobby_set_ready(bool ready);
 void lobby_set_map(const char *map);
 void lobby_set_settings(const LobbySettings *s);
+void lobby_apply_rules(const LobbySettings *s);   // host: the session's server rules (foliage density ...)
 void lobby_kick(u8 member);
 void lobby_promote(u8 member);
 void lobby_start(bool force);

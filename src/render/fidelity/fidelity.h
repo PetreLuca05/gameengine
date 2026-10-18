@@ -7,6 +7,9 @@
 // Every other graphics control (post-processing & effects, resolution / upscaler, shadows,
 // foliage, era look ...) is a cvar bound to one feature: whatever sets it (menu, console, config,
 // presets, the era preset) goes through cvar.bound and is clamped to the current level's bounds.
+// What changes visibility (foliage density, LOD / impostor ranges, shadow distance and shadow types,
+// fog, exposure, lens effects, decal budget) is not a feature: one value for every level
+// (assets/render/consistency.json, docs/SETTINGS_AUDIT.md). Levels trade cost for quality only.
 //
 // Data: assets/render/fidelity/{off,low,medium,high,modern}.json (+ eras.json, the era capability
 // matrix). Pure C (cvar system + cJSON, no renderer): tests/test_fidelity.c.
@@ -25,14 +28,13 @@ typedef enum FidFeature {
     FF_AA, FF_UPSCALER, FF_UPSCALE_RATIO, FF_RENDER_SCALE, FF_SHARPEN,
     FF_AO, FF_CONTACT_SHADOWS, FF_SSR, FF_SSGI, FF_PUDDLE_REFLECTIONS, FF_VOLUMETRICS, FF_VOL_LOCAL_LIGHTS,
     FF_MOTION_BLUR, FF_DOF, FF_DOF_QUALITY, FF_ADS_DOF,
-    FF_BLOOM, FF_BLOOM_QUALITY, FF_LENS_FLARE, FF_LENS_DIRT, FF_CHROMATIC, FF_LENS_DISTORTION, FF_LENS_DROPS,
-    FF_VIGNETTE, FF_FILM_GRAIN, FF_AUTO_EXPOSURE, FF_TONEMAPPER, FF_HDR_OUTPUT,
+    FF_BLOOM, FF_BLOOM_QUALITY, FF_CHROMATIC, FF_VIGNETTE, FF_FILM_GRAIN, FF_HDR_OUTPUT,
     // Unity-style shadow quality (docs/SHADOWS_UNITY_MODEL.md)
-    FF_SHADOWS, FF_SHADOW_RESOLUTION, FF_SHADOW_PROJECTION, FF_SHADOW_CASCADES, FF_SHADOW_DISTANCE, FF_SOFT_SHADOW_QUALITY, FF_SHADOW_MIN_RADIUS,
-    FF_LIGHT_SHADOWS, FF_LIGHT_SHADOW_QUALITY, FF_CLOUD_SHADOWS, FF_MOON_SHADOWS,
-    FF_TEXTURE_QUALITY, FF_ANISO, FF_VGEO, FF_VGEO_ERROR_PX, FF_VGEO_SHADOW_ERROR_PX, FF_VGEO_LOD_PX,
-    FF_FOLIAGE_DENSITY, FF_FOLIAGE_WIND, FF_IMPOSTOR_PX, FF_TERRAIN_QUALITY, FF_LOD_BIAS, FF_CHAR_QUALITY, FF_SCOPE_PIP_SCALE,
-    FF_VFX_QUALITY, FF_VFX_LIGHTING, FF_DECAL_MAX, FF_PRECIP_QUALITY, FF_WATER,
+    FF_SHADOWS, FF_SHADOW_RESOLUTION, FF_SHADOW_PROJECTION, FF_SHADOW_CASCADES, FF_SOFT_SHADOW_QUALITY, FF_SHADOW_MIN_RADIUS,
+    FF_LIGHT_SHADOW_QUALITY,
+    FF_TEXTURE_QUALITY, FF_ANISO, FF_VGEO, FF_VGEO_SHADOW_ERROR_PX,
+    FF_FOLIAGE_WIND, FF_TERRAIN_QUALITY, FF_SCOPE_PIP_SCALE,
+    FF_VFX_QUALITY, FF_VFX_LIGHTING, FF_PRECIP_QUALITY, FF_WATER,
     FF_COUNT
 } FidFeature;
 

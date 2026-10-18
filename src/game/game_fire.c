@@ -50,13 +50,13 @@ static struct {
 const FireAnimDef *game_fire_def(void) { return FA.have_def ? &FA.def : NULL; }
 FireAnimState *game_fire_state(void) { return &FA.st; }
 
-// Engine Fidelity: the perceptual punches (FOV punch, roll twitch, blur spike, chroma) are off at
-// Low and below, reduced at Medium. The gun / hands / camera motion itself is gameplay feel: always on.
+// The perceptual punches (FOV punch, roll twitch, blur spike, chroma): the same at every Engine
+// Fidelity level (they used to be off at Low: a steadier picture there, docs/SETTINGS_AUDIT.md),
+// scaled by the player's Camera shake (cam_kick_scale, 0.25 .. 1).
 static float perceptual_scale(void) {
     float k = FA.punch ? FA.punch->f : 1.0f;
-    if (!fid_loaded()) return k;
-    int lv = fid_level();
-    return lv <= FID_LOW ? 0.0f : (lv == FID_MEDIUM ? 0.6f * k : k);
+    Cvar *shake = cvar_find("cam_kick_scale");
+    return shake ? k * shake->f : k;
 }
 
 // Muzzle flash on the gun's final transform: the shot only records it; it is spawned once this
@@ -477,9 +477,9 @@ void game_fire_init(void) {
     fire_tuner_init();
     cmd_register("fire_loop", cmd_fire_loop, "fire_loop <single|burst|magdump|off> [timescale]: repeat a fire pattern (slow motion < 1) for tuning");
     cmd_register("fire_reload", cmd_fire_reload, "reload the fire animation classes (assets/weapons/fire_poses), the weapons and the global sway profile");
-    FA.scale = cvar_reg_float("wpn_fire_anim_scale", 1.0f, 0.0f, 3.0f, CVAR_ARCHIVE, "fire animation master scale (gun kick, hands, body, camera reaction; docs/FIRE_ANIM.md)");
-    FA.punch = cvar_reg_float("cl_fire_punch", 1.0f, 0.0f, 1.0f, CVAR_ARCHIVE, "fire FOV punch / roll twitch / blur spike / chromatic tick (0 = off; also off at Low fidelity)");
-    FA.debug = cvar_reg_int("wpn_fire_debug", 0, 0, 2, 0, "fire animation log: 1 every shot (sub-tick time, ADS, magazine), 2 also the first-person gun per frame");
+    FA.scale = cvar_reg_float("wpn_fire_anim_scale", 1.0f, 0.0f, 3.0f, CVAR_LOCKED, "fire animation master scale (gun kick, hands, body, camera reaction; docs/FIRE_ANIM.md)");
+    FA.punch = cvar_reg_float("cl_fire_punch", 1.0f, 0.0f, 1.0f, CVAR_LOCKED, "fire FOV punch / roll twitch / blur spike / chromatic tick (x cam_kick_scale; the same at every fidelity level)");
+    FA.debug = cvar_reg_int("wpn_fire_debug", 0, 0, 2, CVAR_LOCKED, "fire animation log: 1 every shot (sub-tick time, ADS, magazine), 2 also the first-person gun per frame");
     cmd_register("sway_check", cmd_sway_check, "assert the global sway is bit-identical for every weapon x attachment (idle, walk, ADS) and list the fire motion per weapon");
     cmd_register("fire_compare", cmd_fire_compare, "mag-dump every gun in turn and log its fire motion (peak, no reset, release settle)");
     cmd_register("fire_bench", cmd_fire_bench, "fire motion of every gun x muzzle device (mass, inertia, peak, settle) and give every gun");

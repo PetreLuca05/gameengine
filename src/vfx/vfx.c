@@ -56,7 +56,6 @@ typedef struct VfxGame {
 
 static VfxGame *V;
 
-static const float k_quality_mul[4] = { 0.35f, 0.65f, 1.0f, 1.35f };
 static const int k_quality_sort[4] = { 8192, 32768, 65536, 131072 };
 
 // ------------------------------------------------------------------ callbacks
@@ -262,16 +261,16 @@ void vfx_game_init(const BasicMeshes *meshes) {
     V = (VfxGame *)calloc(1, sizeof(VfxGame));
     V->meshes = meshes;
     V->sun_intensity = 2.0f;
-    V->enable = cvar_reg_bool("vfx_enable", true, CVAR_ARCHIVE, "particle effects (muzzle flashes, impacts)");
-    V->quality = cvar_reg_int("vfx_quality", 2, 0, 3, CVAR_ARCHIVE, "VFX quality: 0 low, 1 medium, 2 high, 3 ultra");
-    V->debug = cvar_reg_int("vfx_debug", 0, 0, 2, 0, "VFX debug: 1 stats, 2 + instance markers");
-    V->half_res = cvar_reg_bool("vfx_half_res", false, CVAR_ARCHIVE, "render particles at half resolution (post stack upsample)");
-    V->lighting = cvar_reg_bool("vfx_lighting", true, CVAR_ARCHIVE, "lit particles (sun, shadows, point lights, 6-way maps)");
-    V->decal_max = cvar_reg_int("vfx_decal_max", 256, 0, 4096, CVAR_ARCHIVE, "maximum impact decals (oldest fade first)");
-    V->timescale = cvar_reg_float("vfx_timescale", 1.0f, 0.0f, 4.0f, CVAR_CHEAT, "VFX time scale (editor slow motion)");
-    V->predict = cvar_reg_bool("cl_predict_impacts", true, CVAR_ARCHIVE, "show own bullet impacts immediately (predicted)");
-    V->night = cvar_reg_bool("env_night", false, 0, "night lighting (dev: muzzle flash day/night look)");
-    V->gore = cvar_reg_int("gore_level", 2, 0, 2, CVAR_ARCHIVE, "gore: 0 off (dust puffs, no blood decals), 1 low, 2 high");
+    V->enable = cvar_reg_bool("vfx_enable", true, CVAR_LOCKED, "particle effects (muzzle flashes, impacts)");
+    V->quality = cvar_reg_int("vfx_quality", 2, 0, 3, CVAR_TIER, "VFX quality: 0 low, 1 medium, 2 high, 3 ultra");
+    V->debug = cvar_reg_int("vfx_debug", 0, 0, 2, CVAR_LOCKED, "VFX debug: 1 stats, 2 + instance markers");
+    V->half_res = cvar_reg_bool("vfx_half_res", false, CVAR_TIER, "render particles at half resolution (post stack upsample)");
+    V->lighting = cvar_reg_bool("vfx_lighting", true, CVAR_TIER, "lit particles (sun, shadows, point lights, 6-way maps)");
+    V->decal_max = cvar_reg_int("vfx_decal_max", 256, 0, 4096, CVAR_LOCKED, "maximum impact decals (oldest fade first)");
+    V->timescale = cvar_reg_float("vfx_timescale", 1.0f, 0.0f, 4.0f, CVAR_CHEAT | CVAR_LOCKED, "VFX time scale (editor slow motion)");
+    V->predict = cvar_reg_bool("cl_predict_impacts", true, CVAR_LOCKED, "show own bullet impacts immediately (predicted)");
+    V->night = cvar_reg_bool("env_night", false, CVAR_LOCKED, "night lighting (dev: muzzle flash day/night look)");
+    V->gore = cvar_reg_int("gore_level", 2, 0, 2, CVAR_ARCHIVE | CVAR_EDITABLE, "gore: 0 off (dust puffs, no blood decals), 1 low, 2 high");
     cmd_register("vfx_pedestal", cmd_vfx_pedestal, "vfx_pedestal [type [device] | off]: dev room muzzle flash pedestal");
     cmd_register("vfx_daynight", cmd_vfx_daynight, "vfx_daynight [0|1]: toggle night lighting");
     cmd_register("vfx_reload", cmd_vfx_reload, "reload assets/vfx effects and textures");
@@ -457,7 +456,10 @@ void vfx_game_set_local_muzzle(vec3 pos, vec3 dir, bool valid) {
 static void apply_config(vec3 cam) {
     VfxConfig *c = &V->sys.cfg;
     int q = DG_CLAMP(V->quality->i, 0, 3);
-    c->quality_mul = k_quality_mul[q];
+    // Smoke, dust, blood and impact counts hide / show the same at every quality tier
+    // (docs/SETTINGS_AUDIT.md V9): the tier buys sorting, collisions and lighting, not emission.
+    c->quality_mul = 1.0f;
+    (void)q;
     c->decal_max = V->decal_max->i;
     static const int k_blood_max[3] = { 0, 96, 256 };
     c->blood_decal_max = k_blood_max[DG_CLAMP(V->gore->i, 0, 2)];

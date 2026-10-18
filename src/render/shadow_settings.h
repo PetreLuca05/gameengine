@@ -60,6 +60,9 @@ typedef struct QualityShadowSettings {
 
 void shs_light_default(LightShadowSettings *s, ShadowLightKind kind);
 void shs_quality_default(QualityShadowSettings *q);         // Unity's Quality defaults (= the Modern tier)
+// The sun shadow distance of every tier: assets/render/consistency.json r_shadow_max_distance
+// (docs/SETTINGS_AUDIT.md). tests/test_shadow_settings.c checks the two agree.
+#define SHADOW_LOCKED_DISTANCE 150.0f
 void shs_quality_for_tier(QualityShadowSettings *q, int fid_level);   // FID_OFF .. FID_MODERN (fidelity.h)
 // Clamps every field to its range (splits sorted, cascades 1 / 2 / 4).
 void shs_quality_sanitize(QualityShadowSettings *q);

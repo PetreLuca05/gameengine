@@ -56,6 +56,13 @@ screens and the HUD draw during `game_render`, and `ui_render` flushes the old H
 (crosshair, dev overlays), then the game UI (`gui_frame_end`: navigation, tooltip, flush), then
 Nuklear.
 
+### Settings → Graphics (since the settings audit)
+
+docs/SETTINGS_AUDIT.md section 6 is current: Graphics = "Why can't I change X?" + Default, the
+Engine Fidelity card, **Display** and **Comfort**; the crosshair moved into the HUD tab; Debug exists
+only in dev builds (developer mode, no release locks) and holds tier features only. The text below
+describes the layout before the audit.
+
 ### Settings → Graphics: Normal and Debug
 
 The Graphics tab has two sub-tabs (`gw_tabs` under the main tab bar, `k_gfx_pages` in

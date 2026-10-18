@@ -118,9 +118,10 @@ FgRes post_resolve(void) {
     T.exr_armed = false;
     memset(&T.exr_buf, 0, sizeof(T.exr_buf));
     if (P.set.direct_output) {
-        // Engine Fidelity Off: no post pass at all. The weapon sights are gameplay (aiming) and stay;
-        // the final pass shows the lit HDR through final_direct.frag.
-        T.color = post_sights_build(P.in.hdr);
+        // Engine Fidelity Off: no post pass at all. The weapon sights (aiming) and the lens droplets
+        // (rain on the camera hides the same at every level, docs/SETTINGS_AUDIT.md V11) stay; the
+        // final pass shows the lit HDR through final_direct.frag.
+        T.color = post_lens_build(post_sights_build(P.in.hdr));
         T.ldr = T.color;
         post_look_preview_build(T.color, true);
         if (P.exr_pending > 0 && P.exr_path[0]) {

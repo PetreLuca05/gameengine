@@ -334,7 +334,7 @@ static void life_hook(World *w, CharacterInst *c, bool died) {
 void flesh_fx_init(void) {
     memset(FF, 0, sizeof(*FF));
     FF->debug = cvar_find("vfx_debug");
-    FF->bleed = cvar_reg_bool("gore_bleed", true, CVAR_ARCHIVE, "corpse wounds keep bleeding (drops, decaying rate)");
+    FF->bleed = cvar_reg_bool("gore_bleed", true, CVAR_LOCKED, "corpse wounds keep bleeding (drops, decaying rate)");
     flesh_fx_reload();
     vfx_game_set_bone_fn(vfx_bone_cb);
     chars_set_life_hook(life_hook);
