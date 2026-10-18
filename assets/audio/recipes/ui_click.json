@@ -1,0 +1,2 @@
+{ "name": "ui_click", "bus": "ui", "spatial": false, "env": false, "priority": 0.9, "max_instances": 4,
+  "layers": [ { "patch": "ui_click", "random": { "hz": ["mul", 0.97, 1.03] } }, { "sample": "click", "gain_db": -6, "optional": true } ] }

@@ -696,7 +696,7 @@ endif()
 add_dependencies(test_hud dg_copy_data)
 add_test(NAME hud COMMAND test_hud WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
 # Downed / revive / corpse / DNA / fabricator state machines + the death sequence (docs/REVIVE.md).
-add_executable(test_revive tests/test_revive.c src/gameplay/revive/revive_core.c src/gameplay/revive/death_seq.c src/audio/death_synth.c third_party/cjson/cJSON.c)
+add_executable(test_revive tests/test_revive.c src/gameplay/revive/revive_core.c src/gameplay/revive/death_seq.c third_party/cjson/cJSON.c)
 set_target_properties(test_revive PROPERTIES C_STANDARD 11)
 target_include_directories(test_revive PRIVATE src third_party/cjson)
 if(MSVC)
@@ -706,6 +706,29 @@ else()
 endif()
 add_dependencies(test_revive dg_copy_data)
 add_test(NAME revive COMMAND test_revive WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+# Procedural audio (docs/AUDIO_PROCEDURAL.md "Tests"): the synth graph, nodes, recipes, the mixer
+# (propagation delay, no allocation in the audio callback, budget) and the environment model / chain
+# (air absorption, occlusion, room estimate in the dev room corridor, cliff echoes). Every source is
+# force-included with the allocator hook.
+file(GLOB DG_AUDIO_DSP_SOURCES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/src/audio/synth/*.c ${CMAKE_SOURCE_DIR}/src/audio/env/env_chain.c
+     ${CMAKE_SOURCE_DIR}/src/audio/env/env_model.c ${CMAKE_SOURCE_DIR}/src/audio/env/env_world.c ${CMAKE_SOURCE_DIR}/src/audio/mixer.c)
+if(NOT MSVC)
+  # The DSP loops vectorize at -O3 (GCC's -O2 cost model leaves them scalar; MSVC /O2 vectorizes).
+  set_source_files_properties(${DG_AUDIO_DSP_SOURCES} PROPERTIES COMPILE_OPTIONS "-O3")
+endif()
+foreach(t synth audio_env)
+  add_executable(test_${t} tests/test_${t}.c tests/audio_alloc_hook.c ${DG_AUDIO_DSP_SOURCES} third_party/cjson/cJSON.c)
+  set_target_properties(test_${t} PROPERTIES C_STANDARD 11)
+  target_include_directories(test_${t} PRIVATE src third_party/cjson tests)
+  target_compile_definitions(test_${t} PRIVATE DG_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+  if(MSVC)
+    target_compile_options(test_${t} PRIVATE /W3 /wd4100 /wd4201 /utf-8 /FI${CMAKE_SOURCE_DIR}/tests/audio_alloc_hook.h)
+  else()
+    target_compile_options(test_${t} PRIVATE -include ${CMAKE_SOURCE_DIR}/tests/audio_alloc_hook.h)
+    target_link_libraries(test_${t} PRIVATE m)
+  endif()
+  add_test(NAME ${t} COMMAND test_${t} WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+endforeach()
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if(Python3_Interpreter_FOUND)
   add_test(NAME lint_commands COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/tests/lint_commands.py)

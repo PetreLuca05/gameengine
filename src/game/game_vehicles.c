@@ -96,6 +96,8 @@ typedef struct Vehicle {
     vec3 skid_last[VEH_MAX_WHEELS];
     bool skid_on[VEH_MAX_WHEELS];
     float skid_amount;
+    int ground_mat;               // audio: the surface under the wheels this frame (tire noise)
+    float aud_susp[VEH_MAX_WHEELS], aud_flat[VEH_MAX_WHEELS];   // audio: suspension last frame, flat-tire rotation phase
     float steer_vis;
     bool test_steer_override;
 } Vehicle;
@@ -1683,6 +1685,83 @@ static mat4 basis_mat(vec3 pos, vec3 x, vec3 y, vec3 z) {
     return m;
 }
 
+// Audio (docs/AUDIO_PROCEDURAL.md "Vehicles"): the synthesized engine (firing pulses at rpm through
+// the exhaust, over the engine_loop sample; doppler, the exhaust radiates backwards), tire noise from
+// speed and the surface under the wheels (+ skids), the wind past the body (louder inside at speed),
+// thumps when the suspension bottoms and from a flat tire's rim once per turn.
+static void vehicle_audio(World *w, Vehicle *v, const VehicleDef *d, vec3 p, quat r, float vol, float dt) {
+    vec3 fwd = quat_rotate(r, v3(0, 0, -1));
+    float speed = v3_len(v->vel);
+    u32 key = (v->ent * 2654435761u) | 1u;
+    float far = v3_dist(p, audio_listener_pos());
+    if (far > 170.0f) return;   // beyond every vehicle recipe's distance law
+    bool moto = d->kind == VK_MOTO;
+    const Player *lp = game_local_player();
+    bool inside = lp && lp->sim.move.mode == MOVE_SEATED && lp->sim.move.vehicle == v->ent;
+    AudioEmit e;
+    AudioParams ap = { 0 };
+    audio_emit_init(&e, "vehicle_engine", to_world(p, r, d->exhaust));
+    e.fwd = fwd;
+    e.vel = v->vel;
+    e.volume = vol;
+    e.seed = v->ent;
+    e.self_radius = 2.8f;   // its own body does not occlude it
+    audio_param(&ap, "rpm", v->rpm);
+    audio_param(&ap, "max_rpm", d->max_rpm);
+    audio_param(&ap, "throttle", fabsf(v->in_throttle));
+    audio_param(&ap, "cyl", moto ? 2.0f : 4.0f);
+    audio_param(&ap, "moto", moto ? 1.0f : 0.0f);
+    audio_param(&ap, "running", vol > 0 ? 1.0f : 0.0f);
+    if (vol > 0) audio_loop_recipe(key, &e, &ap);
+    if (speed > 0.5f || v->skid_amount > 0) {
+        AudioParams tp = { 0 };
+        audio_emit_init(&e, "vehicle_tires", p);
+        e.vel = v->vel;
+        e.seed = v->ent ^ 0x7123u;
+        e.self_radius = 2.8f;
+        audio_param(&tp, "speed", speed);
+        audio_param(&tp, "material", (float)(v->ground_mat >= 0 ? v->ground_mat : SURF_ASPHALT));
+        audio_param(&tp, "skid", v->skid_amount);
+        audio_loop_recipe(key ^ 0x5000u, &e, &tp);
+    }
+    if (speed > 5.0f) {
+        AudioParams wp = { 0 };
+        audio_emit_init(&e, "vehicle_wind", p);
+        e.seed = v->ent ^ 0x9A1Du;
+        e.self_radius = 2.8f;
+        audio_param(&wp, "speed", speed);
+        audio_param(&wp, "inside", inside ? 1.0f : 0.0f);
+        audio_loop_recipe(key ^ 0xA000u, &e, &wp);
+    }
+    for (int i = 0; i < d->wheel_count; i++) {
+        const VehicleWheelDef *wd = &d->wheels[i];
+        float rate = dt > 1e-4f ? (v->susp[i] - v->aud_susp[i]) / dt : 0.0f;
+        v->aud_susp[i] = v->susp[i];
+        vec3 wc = to_world(p, r, wd->pos);
+        AudioParams hp = { 0 };
+        // Parked / remote cars settle and their replicated suspension steps: only a real hit, close by.
+        if (fabsf(rate) > 2.5f && wd->susp_max > 0 && speed > 1.0f && far < 60.0f) {
+            audio_emit_init(&e, "vehicle_thump", wc);
+            e.seed = v->ent ^ (u32)i ^ (u32)(w->tick * 31u);
+            e.self_radius = 2.8f;
+            audio_param(&hp, "force", fabsf(rate) / 3.0f);
+            audio_emit(&e, &hp);
+        }
+        if (tire_on_rim(&v->tire[i]) && speed > 1.0f) {
+            v->aud_flat[i] += speed / (6.2831853f * fmaxf(wd->radius, 0.1f)) * dt;
+            if (v->aud_flat[i] >= 1.0f) {
+                v->aud_flat[i] -= 1.0f;
+                audio_emit_init(&e, "vehicle_thump", wc);
+                e.seed = v->ent ^ (u32)(i * 977) ^ (u32)w->tick;
+                e.self_radius = 2.8f;
+                audio_param(&hp, "force", clampf(speed / 12.0f, 0.2f, 1.2f));
+                audio_param(&hp, "flat", 1.0f);
+                audio_emit(&e, &hp);
+            }
+        }
+    }
+}
+
 static void draw_model(u16 id, mat4 base, const Vehicle *v, int part, vec3 paint, float damage, bool brake, bool lights, bool focused) {
     const Model *mdl = assets_model(id);
     if (!mdl) return;
@@ -1759,6 +1838,7 @@ static void present(World *w, Vehicle *v, vec3 cam_pos, float dt, int *spots_lef
     float smax = front_steer_deg(d);
     float speed = v3_len(v->vel);
     v->skid_amount = 0;
+    v->ground_mat = -1;
     for (int i = 0; i < d->wheel_count; i++) {
         const VehicleWheelDef *wd = &d->wheels[i];
         float ks = tire_radius_scale(&v->tire[i]);
@@ -1778,6 +1858,7 @@ static void present(World *w, Vehicle *v, vec3 cam_pos, float dt, int *spots_lef
         bool ground = phys_raycast(w->phys, c, v3_scale(up, -(wd->radius * ks + 0.12f)), PL_MASK_WORLD, ign, &rh);
         if (!ground) { v->skid_on[i] = false; continue; }
         vec3 cp = rh.point;
+        if (v->ground_mat < 0) v->ground_mat = rh.material;
         vec3 pv_vel = v3_add(v->vel, v3_cross(v->angvel, v3_sub(cp, p)));
         float lat = fabsf(v3_dot(pv_vel, right));
         bool locked = v->handbrake && !wd->max_steer_deg && speed > 2.0f;
@@ -1834,11 +1915,9 @@ static void present(World *w, Vehicle *v, vec3 cam_pos, float dt, int *spots_lef
             (*spots_left)--;
         }
     }
-    // Audio: engine (pitched by rpm), tire screech.
+    // Audio: engine, tires, wind, thumps (vehicle_audio).
     float vol = v->engine || (w->flags[ei] & EF_ENGINE) ? 0.45f + 0.35f * fminf(fabsf(v->in_throttle) + v->rpm / fmaxf(d->max_rpm, 1.0f), 1.0f) : 0.0f;
-    float pitch = 0.7f + 2.6f * (d->max_rpm > 0 ? v->rpm / d->max_rpm : 0.0f) * (d->kind == VK_MOTO ? 1.25f : 1.0f);
-    if (vol > 0) audio_loop3d(v->ent, "engine_loop", p, vol, pitch);
-    if (v->skid_amount > 0) audio_loop3d(v->ent ^ 0x5000u, "tire_skid", p, 0.7f * v->skid_amount, 0.9f + 0.2f * v->skid_amount);
+    vehicle_audio(w, v, d, p, r, vol, dt);
 }
 
 // Seated remote players follow the vehicle as it is drawn this frame (their replicated position

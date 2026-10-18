@@ -1,0 +1,16 @@
+{
+  "_doc": "Legacy sound names (audio_play / fx_sound / impact effects) -> recipes with fixed inputs (docs/AUDIO_PROCEDURAL.md 'Events'). A name not listed plays its sample (assets/sounds/<name>.wav). Inputs the caller passes win over these.",
+  "sounds": {
+    "click": { "recipe": "ui_click" },
+    "impact_hard": { "recipe": "impact", "inputs": { "material": 1, "energy": 400 } },
+    "impact_soft": { "recipe": "impact", "inputs": { "material": 7, "energy": 400 } },
+    "impact_metal": { "recipe": "impact", "inputs": { "material": 4, "energy": 400 } },
+    "impact_wood": { "recipe": "impact", "inputs": { "material": 6, "energy": 400 } },
+    "impact_glass": { "recipe": "impact", "inputs": { "material": 11, "energy": 400 } },
+    "impact_water": { "recipe": "impact", "inputs": { "material": 12, "energy": 400 } },
+    "impact_flesh": { "recipe": "impact", "inputs": { "material": 13, "energy": 300 } },
+    "melee_hit_wall": { "recipe": "impact", "inputs": { "material": 1, "energy": 120, "cosi": 0.8 } },
+    "bullet_ricochet": { "recipe": "ricochet" },
+    "thunder": { "recipe": "thunder" }
+  }
+}

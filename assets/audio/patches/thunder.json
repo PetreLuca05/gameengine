@@ -1,0 +1,17 @@
+{
+  "_doc": "Thunder: the crackle of a near strike (decaying clicks) and the rolling rumble (brown noise, slow random AM), darker and longer the farther it is.",
+  "name": "thunder",
+  "max_dur": 12,
+  "params": { "amp": [1, 0, 3], "crackle": [0.5, 0, 2], "lp": [800, 60, 6000], "time": [1, 0.3, 4], "roll_hz": [2.5, 0.3, 10] },
+  "nodes": [
+    { "id": "c", "type": "grains", "src": "click", "rate": 600, "decay": 4, "hz": 3000, "spread": 0.7, "dur_ms": 2, "q": 2 },
+    { "id": "ce", "type": "env", "in": "c", "stages": [[2, 1], [500, 0, 3]], "amp": "$crackle" },
+    { "id": "b", "type": "noise", "color": "brown" },
+    { "id": "am", "type": "am", "hz": "$roll_hz", "depth": 0.6, "in": "b" },
+    { "id": "e", "type": "env", "in": "am", "stages": [[80, 1, 0], [600, 0.8, 1], [3500, 0, 2.5]], "time": "$time" },
+    { "id": "m", "type": "mix", "in": ["ce", "e"] },
+    { "id": "lp", "type": "biquad", "mode": "lp", "hz": "$lp", "q": 0.6, "in": "m" },
+    { "id": "out", "type": "gain", "amp": "$amp", "in": "lp" }
+  ],
+  "out": "out"
+}

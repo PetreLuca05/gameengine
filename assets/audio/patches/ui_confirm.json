@@ -1,0 +1,12 @@
+{
+  "name": "ui_confirm",
+  "params": { "amp": [0.4, 0, 2], "hz": [880, 200, 4000] },
+  "nodes": [
+    { "id": "a", "type": "osc", "wave": "sine", "hz": "$hz" },
+    { "id": "ae", "type": "env", "in": "a", "stages": [[2, 1], [70, 0, 3]] },
+    { "id": "b", "type": "osc", "wave": "sine", "hz": "$hz*1.5" },
+    { "id": "be", "type": "env", "in": "b", "stages": [[60, 0], [2, 1], [110, 0, 3]] },
+    { "id": "m", "type": "mix", "in": ["ae", "be"], "amp": "$amp" }
+  ],
+  "out": "m"
+}

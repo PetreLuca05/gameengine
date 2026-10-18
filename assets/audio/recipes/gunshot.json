@@ -1,0 +1,28 @@
+{
+  "_doc": "Gunshot (docs/AUDIO_PROCEDURAL.md 'Gunshots'): synthesized blast + mechanism over the weapon's own generated sample (its mechanical character) and its distant sample past ~100 m. The tail is not baked: the environment chain makes it (room, slapback, valley echo). Inputs come from the shot record (bal_world.c play_report).",
+  "name": "gunshot",
+  "bus": "sfx", "priority": 0.95, "echo": true, "max_instances": 24, "reverb": 1.0,
+  "distance": { "min": 6, "max": 2500, "rolloff": 0.6 },
+  "directivity": { "front_db": 3, "rear_db": -6, "rear_lp": 4000 },
+  "inputs": { "energy": 2000, "caliber": 7.62, "barrel": 0.4, "device": 0, "pop": 0, "local": 0, "pellets": 1, "auto": 1 },
+  "layers": [
+    { "patch": "gun_blast", "gain_db": -6,
+      "bind": {
+        "amp": "sqrt(max(energy, 50) / 2000)",
+        "thump_ms": "0.6 * cbrt(max(energy, 50) / 100)",
+        "thump_amp": "device == 3 ? 0.05 + 0.2 * pop : 0.9",
+        "burst_amp": "sel(device, 1, 0.9, 1.25, 0.06 + 0.25 * pop) * db(lerp(barrel, 0.25, 3, 0.6, 0))",
+        "burst_scale": "sel(device, 1, 0.95, 1.05, 0.4) * lerp(barrel, 0.25, 1.4, 0.6, 0.9) * lerp(caliber, 5, 0.8, 12, 1.3)",
+        "tilt": "sel(device, 0, -1.5, 2.5, -6)",
+        "lp_hz": "sel(device, 14000, 12000, 16000, 2600)",
+        "hp_hz": "lerp(energy, 400, 120, 4000, 45)",
+        "crackle": "device == 3 ? 0 : lerp(barrel, 0.25, 0.35, 0.6, 0.08)"
+      },
+      "random": { "thump_ms": ["mul", 0.95, 1.05], "burst_amp": ["db", -1.2, 1.2], "burst_scale": ["mul", 0.92, 1.08], "tilt": ["add", -0.8, 0.8] } },
+    { "patch": "gun_mech", "gain_db": -24, "when": "local > 0.5 || distance < 8", "optional": true,
+      "bind": { "cycle": "auto", "pitch": "lerp(caliber, 5, 1.2, 12, 0.8)" },
+      "random": { "pitch": ["mul", 0.97, 1.03] } },
+    { "sample": "@", "gain_db": "lerp(distance, 100, 0, 250, -30) - 3", "pitch": [0.98, 1.02] },
+    { "sample": "@_distant", "when": "distance > 80", "gain_db": "lerp(distance, 100, -30, 250, -3)", "pitch": [0.98, 1.02] }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "_doc": "Water lapping at a shore / pool edge: low-passed noise swelling with the waves, the odd bubble.",
+  "name": "water_lap",
+  "loop": true,
+  "params": { "amp": [1, 0, 3], "lap_hz": [0.4, 0.05, 3], "bubbles": [6, 0, 100] },
+  "nodes": [
+    { "id": "n", "type": "noise", "color": "pink" },
+    { "id": "lp", "type": "svf", "mode": "lp", "hz": 600, "q": 0.8, "in": "n" },
+    { "id": "am", "type": "am", "hz": "$lap_hz", "depth": 0.8, "in": "lp" },
+    { "id": "b", "type": "grains", "src": "sine", "rate": "$bubbles", "hz": 800, "spread": 0.5, "dur_ms": 30 },
+    { "id": "m", "type": "mix", "in": ["am", "b"], "gains": [1, 0.3], "amp": "$amp" }
+  ],
+  "out": "m"
+}

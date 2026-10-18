@@ -1,0 +1,7 @@
+{
+  "name": "water_lap",
+  "bus": "ambience", "priority": 0.3, "loop": true, "max_instances": 4,
+  "distance": { "min": 2, "max": 40, "rolloff": 1 },
+  "inputs": { "waves": 0.3 },
+  "layers": [ { "patch": "water_lap", "bind": { "amp": "0.2 + 0.8 * waves", "lap_hz": "0.25 + 0.4 * waves", "bubbles": "4 + 20 * waves" } } ]
+}

@@ -1,0 +1,20 @@
+{
+  "_doc": "Tires: rolling noise low-passed by speed (asphalt hiss), gravel crunch grains, a skid band and a jittered squeal.",
+  "name": "tires",
+  "loop": true,
+  "params": { "amp": [1, 0, 3], "roll": [0, 0, 2], "roll_hz": [600, 80, 6000], "crunch": [0, 0, 2], "crunch_rate": [300, 0, 3000], "skid": [0, 0, 2] },
+  "nodes": [
+    { "id": "n", "type": "noise", "color": "pink" },
+    { "id": "rl", "type": "svf", "mode": "lp", "hz": "$roll_hz", "q": 0.7, "in": "n" },
+    { "id": "rg", "type": "gain", "amp": "$roll", "in": "rl" },
+    { "id": "cr", "type": "grains", "src": "click", "rate": "$crunch_rate", "hz": 2600, "spread": 0.6, "dur_ms": 3, "q": 2.5 },
+    { "id": "cg", "type": "gain", "amp": "$crunch*0.4", "in": "cr" },
+    { "id": "w", "type": "noise", "color": "white" },
+    { "id": "sb", "type": "svf", "mode": "bp", "hz": 1800, "q": 4, "in": "w" },
+    { "id": "br", "type": "noise", "color": "brown" },
+    { "id": "sq", "type": "osc", "wave": "sine", "hz": 2100, "fm": 400, "in": "br" },
+    { "id": "sm", "type": "mix", "in": ["sb", "sq"], "gains": [1, 0.25], "amp": "$skid" },
+    { "id": "m", "type": "mix", "in": ["rg", "cg", "sm"], "amp": "$amp" }
+  ],
+  "out": "m"
+}

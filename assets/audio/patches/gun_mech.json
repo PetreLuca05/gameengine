@@ -1,0 +1,15 @@
+{
+  "_doc": "Mechanism: the hammer / bolt transient through a small metallic modal bank; 'cycle' adds the bolt carrier slamming home ~28 ms later (automatics).",
+  "name": "gun_mech",
+  "params": { "amp": [0.3, 0, 2], "pitch": [1, 0.5, 2], "damp": [1, 0.2, 3], "cycle": [1, 0, 1] },
+  "nodes": [
+    { "id": "im", "type": "impulse", "amp": 1, "width_ms": 0.15 },
+    { "id": "im2", "type": "impulse", "amp": "$cycle*0.6", "width_ms": 0.2, "delay_ms": 28 },
+    { "id": "nz", "type": "noise", "color": "white" },
+    { "id": "ne", "type": "env", "in": "nz", "stages": [[0.05, 1], [2, 0, 4]], "amp": 0.4 },
+    { "id": "ex", "type": "mix", "in": ["im", "im2", "ne"] },
+    { "id": "md", "type": "modal", "in": "ex", "pitch": "$pitch", "damp": "$damp", "amp": "$amp", "spread": 1,
+      "modes": [[2350, 0.05, 1], [3910, 0.04, 0.7], [5230, 0.03, 0.6], [6870, 0.025, 0.45], [8410, 0.02, 0.3]] }
+  ],
+  "out": "md"
+}

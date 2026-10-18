@@ -1,0 +1,24 @@
+{
+  "_doc": "Vehicle engine (game_vehicles.c): synthesized firing pulses -> exhaust waveguide, over the engine_loop sample pitched by rpm. Doppler as it passes; the exhaust radiates backwards.",
+  "name": "vehicle_engine",
+  "bus": "sfx", "priority": 0.7, "loop": true, "doppler": true, "max_instances": 12,
+  "distance": { "min": 3, "max": 160, "rolloff": 1 },
+  "directivity": { "front_db": -2, "rear_db": 3, "rear_lp": 20000 },
+  "inputs": { "rpm": 900, "max_rpm": 6000, "throttle": 0, "cyl": 4, "moto": 0, "running": 1 },
+  "layers": [
+    { "patch": "engine", "gain_db": -8,
+      "bind": {
+        "fire_hz": "rpm * cyl / 120",
+        "drive": "1 + 2.5 * throttle",
+        "decay_ms": "lerp(rpm, 800, 7, 6000, 2)",
+        "width_ms": "lerp(throttle, 0, 0.9, 1, 0.35)",
+        "lp": "lerp(rpm, 800, 1400, 6000, 6000) * (0.6 + 0.4 * throttle)",
+        "intake": "0.05 + 0.3 * throttle",
+        "intake_hz": "rpm / 6",
+        "pipe": "moto > 0.5 ? 0.8 : 1.4",
+        "amp": "(0.55 + 0.45 * throttle) * running"
+      },
+      "random": { "pipe": ["mul", 0.9, 1.1] } },
+    { "sample": "engine_loop", "gain_db": -10, "optional": true, "bind": { "pitch": "(0.7 + 2.6 * rpm / max(max_rpm, 1)) * (moto > 0.5 ? 1.25 : 1)", "amp": "running" } }
+  ]
+}

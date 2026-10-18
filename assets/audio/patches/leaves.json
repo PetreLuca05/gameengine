@@ -1,0 +1,13 @@
+{
+  "_doc": "Leaf rustle: dense high grains (density x wind), swaying with the gusts.",
+  "name": "leaves",
+  "loop": true,
+  "params": { "amp": [0, 0, 3], "rate": [300, 0, 4000], "sway": [0.35, 0.05, 3] },
+  "nodes": [
+    { "id": "g", "type": "grains", "src": "noise", "rate": "$rate", "hz": 4500, "spread": 0.5, "dur_ms": 4, "q": 2 },
+    { "id": "hp", "type": "biquad", "mode": "hp", "hz": 1800, "in": "g" },
+    { "id": "am", "type": "am", "hz": "$sway", "depth": 0.5, "in": "hp" },
+    { "id": "out", "type": "gain", "amp": "$amp", "in": "am" }
+  ],
+  "out": "out"
+}

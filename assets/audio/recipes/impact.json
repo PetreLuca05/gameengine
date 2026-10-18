@@ -1,0 +1,29 @@
+{
+  "_doc": "Bullet / melee / debris impact (vfx_game_spawn): the surface's modal bank excited by the arriving energy (amplitude ~ sqrt(E), head-on rings, grazing scrapes), crumbling debris above ~200 J, a splash on water, the generated impact sample as a quiet layer. material = SurfaceMaterial.",
+  "name": "impact",
+  "bus": "sfx", "priority": 0.6, "echo": true, "max_instances": 24,
+  "distance": { "min": 1.5, "max": 300, "rolloff": 1 },
+  "inputs": { "material": 1, "energy": 600, "cosi": 1, "ricochet": 0, "exit": 0 },
+  "layers": [
+    { "patch": "impact_modal", "when": "material != 12",
+      "bind": {
+        "material": "material",
+        "amp": "clamp(sqrt(energy / 1500), 0.15, 2) * (0.4 + 0.6 * cosi)",
+        "contact_ms": "mat_contact(material) * lerp(energy, 100, 1.5, 3000, 0.7)",
+        "noise_amp": "mat_noise(material) * (0.5 + 0.5 * (1 - cosi))",
+        "noise_hz": "mat_noise_hz(material)",
+        "noise_time": "lerp(energy, 100, 0.6, 3000, 1.6)",
+        "thud": "material == 7 || material == 8 || material == 10 || material == 13 || material == 17 || material == 18 ? 0.8 : 0.15"
+      },
+      "random": { "pitch": ["mul", 0.94, 1.06], "noise_hz": ["mul", 0.85, 1.15], "amp": ["db", -1.5, 1.5] } },
+    { "patch": "debris", "optional": true, "when": "energy > 200 && material != 12 && material != 13 && material != 14",
+      "gain_db": "lerp(energy, 200, -20, 3000, -8)",
+      "bind": {
+        "hz": "sel(material, 2500, 2500, 2200, 1800, 4000, 3000, 1500, 900, 1200, 3500, 2000, 6500, 900, 500, 800, 3500, 2500)",
+        "rate": "lerp(energy, 200, 60, 3000, 300)",
+        "time": "lerp(energy, 200, 0.4, 3000, 1.2) * (material == 11 ? 1.6 : 1)"
+      } },
+    { "patch": "splash", "when": "material == 12", "bind": { "amp": "clamp(sqrt(energy / 1000), 0.2, 1.5)", "size": "lerp(energy, 100, 0.6, 3000, 1.6)", "bubbles": "lerp(energy, 100, 30, 3000, 160)" } },
+    { "sample": "@", "gain_db": -9, "optional": true, "pitch": [0.95, 1.05] }
+  ]
+}

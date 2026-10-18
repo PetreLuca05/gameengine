@@ -1,0 +1,25 @@
+{
+  "_doc": "Footstep (characters.c chars_take_steps -> game_audio.c): the ground under the foot (material incl. snow / mud / leaves), speed, weight, crouch; water when wading.",
+  "name": "footstep",
+  "bus": "sfx", "priority": 0.3, "max_instances": 24, "stack_s": 0.0, "reverb": 0.8,
+  "distance": { "min": 1, "max": 45, "rolloff": 1.2 },
+  "inputs": { "material": 1, "speed": 3, "weight": 80, "crouch": 0, "water": 0, "local": 0 },
+  "layers": [
+    { "patch": "footstep", "when": "water < 0.5",
+      "bind": {
+        "material": "material",
+        "amp": "clamp(speed / 4, 0.25, 1.5) * (crouch > 0.5 ? 0.45 : 1) * sqrt(weight / 80) * (local > 0.5 ? 0.6 : 1)",
+        "gap_ms": "clamp(95 - speed * 11, 35, 95)",
+        "contact_ms": "mat_contact(material) * (crouch > 0.5 ? 1.6 : 1) + 0.4",
+        "modal": "mat_modes(material) > 0 ? 0.5 : 0",
+        "thud": "0.4 + 0.3 * weight / 80",
+        "crunch": "material == 9 ? 1 : (material == 17 ? 0.8 : (material == 19 ? 0.6 : (material == 8 ? 0.35 : 0)))",
+        "crunch_hz": "material == 17 ? 1300 : (material == 9 ? 3800 : 2500)",
+        "crunch_rate": "material == 17 ? 700 : 450",
+        "swish": "material == 10 || material == 19 ? 0.6 : (material == 18 ? 0.3 : 0)",
+        "lp": "lerp(weight, 60, 9000, 120, 5000)"
+      },
+      "random": { "amp": ["db", -2, 2], "gap_ms": ["mul", 0.85, 1.15], "crunch_hz": ["mul", 0.85, 1.15] } },
+    { "patch": "splash", "when": "water > 0.5", "bind": { "amp": "clamp(speed / 4, 0.3, 1.2)", "size": "0.7", "bubbles": "40" } }
+  ]
+}

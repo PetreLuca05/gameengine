@@ -1,0 +1,12 @@
+{
+  "_doc": "Subsonic pass-by: band-passed noise whose centre falls as the bullet passes (the doppler of a small whistling body), over ~0.15 s.",
+  "name": "bullet_whizz",
+  "params": { "amp": [1, 0, 2], "time": [1, 0.3, 3], "q": [2.5, 0.5, 8] },
+  "nodes": [
+    { "id": "sw", "type": "env", "stages": [[1, 1], [160, 0, 2]], "time": "$time" },
+    { "id": "n", "type": "noise", "color": "pink" },
+    { "id": "f", "type": "svf", "mode": "bp", "hz": { "mod": "sw", "scale": 1600, "offset": 450 }, "q": "$q", "in": "n" },
+    { "id": "e", "type": "env", "in": "f", "stages": [[50, 1, 0], [110, 0, 3]], "time": "$time", "amp": "$amp" }
+  ],
+  "out": "e"
+}

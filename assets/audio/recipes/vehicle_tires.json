@@ -1,0 +1,17 @@
+{
+  "name": "vehicle_tires",
+  "bus": "sfx", "priority": 0.45, "loop": true, "max_instances": 12,
+  "distance": { "min": 2, "max": 90, "rolloff": 1 },
+  "inputs": { "speed": 0, "material": 16, "skid": 0 },
+  "layers": [
+    { "patch": "tires",
+      "bind": {
+        "roll": "clamp(speed / 25, 0, 1) * (material == 9 || material == 7 ? 0.6 : 1)",
+        "roll_hz": "lerp(speed, 0, 150, 35, 2500) * (material == 16 ? 1.3 : 0.7)",
+        "crunch": "material == 9 || material == 8 || material == 17 ? clamp(speed / 15, 0, 1.2) : 0",
+        "crunch_rate": "speed * 120",
+        "skid": "skid * 0.8"
+      } },
+    { "sample": "tire_skid", "when": "1", "gain_db": "skid > 0.05 ? -6 : -60", "optional": true }
+  ]
+}

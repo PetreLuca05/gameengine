@@ -851,6 +851,16 @@ static void revive(World *w, CharacterInst *c) {
     c->have_pose = false;
 }
 
+// The controller's foot plants of this tick (its events are cleared at every tick).
+static void note_steps(CharacterInst *c) {
+    const ControllerInst *ct = &c->rt.ctrl;
+    for (int k = 0; k < ct->event_count; k++)
+        if ((ct->events[k] == CEV_FOOTSTEP_L || ct->events[k] == CEV_FOOTSTEP_R) && c->steps_pending < 8) {
+            c->steps_pending++;
+            c->step_foot = ct->events[k] == CEV_FOOTSTEP_L ? 0 : 1;
+        }
+}
+
 static void sim_pre(World *w, CharacterInst *c, int i) {
     bool dead_now = (w->flags[i] & EF_DEAD) != 0 || (c->is_player && c->slot >= 0 && w->players[c->slot].sim.move.mode == MOVE_DEAD);
     if (c->dead && !dead_now && !c->tool_rag) revive(w, c);
@@ -866,6 +876,7 @@ static void sim_core(World *w, CharacterInst *c, int i, float dt) {
     charrt_set_inputs(&c->rt, &in);
     host_triggers(w, c, i);
     charrt_tick(&c->rt, dt);
+    note_steps(c);
     charrt_eval_base(&c->rt);
     // Root motion (host only) for clips flagged root_motion: NPCs move by it (the horde moves
     // its zombies itself).
@@ -1063,6 +1074,7 @@ static void client_one(World *w, CharacterInst *c, int i, double rt, float dt) {
     c->body_yaw = in.body_yaw;
     charrt_set_inputs(&c->rt, &in);
     charrt_tick(&c->rt, dt);
+    note_steps(c);
     // Divergence: snap to the host's state ids (with a short crossfade) if we disagree for a while.
     ControllerInst *ct = &c->rt.ctrl;
     bool mismatch = false;
@@ -1144,6 +1156,7 @@ void chars_local_predict(World *w, int slot, bool first) {
     if (p->sim.move.land_tick != c->last_land_tick) { c->last_land_tick = p->sim.move.land_tick; charrt_trigger(&c->rt, AP_T_LAND); }
     c->was_grounded = in.grounded;
     charrt_tick(&c->rt, SIM_DT);
+    note_steps(c);
     // Snap to the host's replicated state ids when they disagree (reconciliation without re-sim).
     if (c->sample_count) {
         const AnimNetState *rep = &c->net;
@@ -3158,4 +3171,66 @@ static void cmd_set_part(int argc, const char **argv) {
         return;
     }
     if (!chars_set_part(w, c->ent, slot, o)) log_info("character_set_part: option unavailable");
+}
+
+// ------------------------------------------------------------------ audio queries
+
+int chars_take_steps(World *w, vec3 near, float radius, float dt, CharStep *out, int max) {
+    if (!w->chars) return 0;
+    int n = 0;
+    double now = platform_time();
+    float r2 = radius * radius;
+    for (int k = 0; k < w->chars->count; k++) {
+        CharacterInst *c = w->chars->c[k];
+        if (!c) continue;
+        int i = (int)ENT_INDEX(c->ent);
+        vec3 feet = w->xf[i].pos;
+        const CharInputs *in = &c->rt.in;
+        int steps = c->steps_pending;
+        c->steps_pending = 0;
+        if (c->horde && !c->dead && in->speed > 0.4f) {
+            // ~1.6 steps / s at a shamble, ~3 at a run; the phase per character keeps a crowd apart.
+            float rate = 1.2f + 0.45f * in->speed;
+            float ph = (float)fmod(now * rate + (double)(dg_hash_u32(c->ent) & 1023u) / 1024.0, 1.0);
+            float prev = ph - dt * rate;
+            steps = prev < 0.0f ? 1 : 0;
+        }
+        if (!steps || c->dead || !in->grounded || v3_len2(v3_sub(feet, near)) > r2) continue;
+        // Two machines' worth of ticks (host simulation + local prediction) never step twice.
+        if (now - c->last_step_time < 0.18) continue;
+        c->last_step_time = now;
+        if (n >= max) continue;
+        CharStep *s = &out[n++];
+        s->ent = c->ent;
+        s->pos = feet;
+        s->speed = in->speed;
+        s->crouch = in->crouch;
+        s->player = c->is_player;
+        s->zombie = w->type[i] == ET_ZOMBIE;
+        s->left = c->step_foot == 0;
+    }
+    return n;
+}
+
+int chars_zombies_near(World *w, vec3 p, float radius, CharVoiceInfo *out, int max) {
+    if (!w->chars) return 0;
+    int n = 0;
+    float r2 = radius * radius;
+    for (int k = 0; k < w->chars->count && n < max; k++) {
+        CharacterInst *c = w->chars->c[k];
+        if (!c) continue;
+        int i = (int)ENT_INDEX(c->ent);
+        if (w->type[i] != ET_ZOMBIE) continue;
+        vec3 feet = w->xf[i].pos;
+        if (v3_len2(v3_sub(feet, p)) > r2) continue;
+        CharVoiceInfo *o = &out[n++];
+        o->ent = c->ent;
+        o->head = v3_add(feet, v3(0, 1.6f, 0));
+        o->speed = c->rt.in.speed;
+        o->attacking = c->rt.in.attacking;
+        o->dead = c->dead;
+        const Health *h = &w->health[i];
+        o->health = h->max_hp > 0 ? h->hp / h->max_hp : 1.0f;
+    }
+    return n;
 }

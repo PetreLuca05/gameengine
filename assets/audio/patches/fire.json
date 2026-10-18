@@ -1,0 +1,18 @@
+{
+  "_doc": "Fire: crackle (Poisson pops), a hiss of the flames and a low roar by size.",
+  "name": "fire",
+  "loop": true,
+  "params": { "amp": [1, 0, 3], "crackle": [40, 0, 400], "hiss": [0.3, 0, 2], "roar": [0.5, 0, 2] },
+  "nodes": [
+    { "id": "c", "type": "grains", "src": "noise", "rate": "$crackle", "hz": 2500, "spread": 0.7, "dur_ms": 2, "q": 3 },
+    { "id": "n", "type": "noise", "color": "pink" },
+    { "id": "hp", "type": "biquad", "mode": "hp", "hz": 1500, "in": "n" },
+    { "id": "hg", "type": "gain", "amp": "$hiss*0.4", "in": "hp" },
+    { "id": "b", "type": "noise", "color": "brown" },
+    { "id": "lp", "type": "biquad", "mode": "lp", "hz": 200, "in": "b" },
+    { "id": "am", "type": "am", "hz": 1.7, "depth": 0.4, "in": "lp" },
+    { "id": "rg", "type": "gain", "amp": "$roar", "in": "am" },
+    { "id": "m", "type": "mix", "in": ["c", "hg", "rg"], "amp": "$amp" }
+  ],
+  "out": "m"
+}

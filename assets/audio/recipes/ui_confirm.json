@@ -1,0 +1,2 @@
+{ "name": "ui_confirm", "bus": "ui", "spatial": false, "env": false, "priority": 0.9, "max_instances": 2,
+  "layers": [ { "patch": "ui_confirm" } ] }

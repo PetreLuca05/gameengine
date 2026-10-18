@@ -1,0 +1,17 @@
+{
+  "_doc": "Supersonic crack heard where the shock cone sweeps the listener (bal_crack_segment): N-wave duration grows with miss^(1/4) and the projectile size; the recorded crack is a quiet optional layer.",
+  "name": "bullet_crack",
+  "bus": "sfx", "priority": 0.85, "echo": true, "max_instances": 16,
+  "distance": { "min": 2, "max": 400, "rolloff": 1 },
+  "inputs": { "miss": 5, "caliber": 7.62, "speed": 800 },
+  "layers": [
+    { "patch": "bullet_crack",
+      "bind": {
+        "dur_ms": "clamp(0.17 * caliber / 7.62 * pow(max(miss, 0.5), 0.25), 0.08, 0.7)",
+        "rise_us": "lerp(miss, 1, 8, 100, 60)",
+        "ring": "lerp(miss, 1, 0.25, 50, 0.05)"
+      },
+      "random": { "dur_ms": ["mul", 0.95, 1.05] } },
+    { "sample": "bullet_crack_1", "gain_db": -12, "optional": true }
+  ]
+}
