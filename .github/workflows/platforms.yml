@@ -51,12 +51,13 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - name: glslang
-        shell: bash
+      - name: Vulkan SDK (glslc)
+        shell: pwsh
         run: |
-          curl -sSL -o glslang.zip https://github.com/KhronosGroup/glslang/releases/download/main-tot/glslang-master-windows-Release.zip
-          mkdir -p "$RUNNER_TEMP/glslang" && unzip -q glslang.zip -d "$RUNNER_TEMP/glslang"
-          echo "$(cygpath -w "$RUNNER_TEMP/glslang/bin")" >> "$GITHUB_PATH"
+          Invoke-WebRequest -Uri https://sdk.lunarg.com/sdk/download/latest/windows/vulkan_sdk.exe -OutFile vulkan_sdk.exe
+          Start-Process -Wait -FilePath .\vulkan_sdk.exe -ArgumentList '--root','C:\VulkanSDK','--accept-licenses','--default-answer','--confirm-command','install'
+          "VULKAN_SDK=C:\VulkanSDK" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "C:\VulkanSDK\Bin" | Out-File -FilePath $env:GITHUB_PATH -Append
       - name: Configure
         run: cmake -S . -B build -A x64
       - name: Build
