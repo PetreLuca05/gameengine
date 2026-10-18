@@ -219,7 +219,8 @@ static void draw_box(vec3 c, vec3 half, vec4 col, float rough, float metal) {
 
 static void draw_showcase(const RenderCamera *cam) {
     if (strcmp(G->map, "devroom") && strcmp(G->map, "devroom_vegetation")) return;
-    if (v3_len(v3_sub(cam->pos, k_showcase)) > 70.0f) return;
+    // Near it only: the horde yard (60 m east) and its benchmarks (perf_compare dev_horde_200) never pay for it.
+    if (v3_len(v3_sub(cam->pos, k_showcase)) > 40.0f) return;
     ItemMesh *meshes[128];
     const char *names[128];
     int conds[128];
