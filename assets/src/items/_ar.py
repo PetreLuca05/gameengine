@@ -247,12 +247,12 @@ class AR:
         for sx in (1, -1):
             t.add(L.cyl((sx * 0.0085, tube_y + 0.004, z0), (sx * 0.0085, tube_y + 0.004, z1), 0.0045, 20, "steel_parkerized", bevel=0.0005))
         t.add(L.box((0, tube_y + 0.004, z0 + 0.008), (0.0145, 0.009, 0.008), 0.0015, 2, self.fin))
-        bp = L.side_prism([(z1 - 0.006, tube_y + 0.03), (z1 + 0.006, tube_y + 0.03), (z1 + 0.008, tube_y - 0.05), (z1 - 0.004, tube_y - 0.05)], -0.017, 0.017,
+        bp = L.side_prism([(z1 - 0.006, tube_y + 0.022), (z1 + 0.006, tube_y + 0.022), (z1 + 0.008, tube_y - 0.05), (z1 - 0.004, tube_y - 0.05)], -0.017, 0.017,
                           bevel=0.003, segs=3, mat="polymer_matte")
-        pad = L.side_prism([(z1 + 0.006, tube_y + 0.03), (z1 + 0.014, tube_y + 0.029), (z1 + 0.015, tube_y - 0.049), (z1 + 0.008, tube_y - 0.05)], -0.0175,
+        pad = L.side_prism([(z1 + 0.006, tube_y + 0.022), (z1 + 0.014, tube_y + 0.021), (z1 + 0.015, tube_y - 0.049), (z1 + 0.008, tube_y - 0.05)], -0.0175,
                            0.0175, bevel=0.0025, segs=3, mat="rubber")
         pad.cut(L.merge(*[L.box((0, tube_y + 0.022 - k * 0.0085, z1 + 0.015), (0.02, 0.0012, 0.0012), 0, 0) for k in range(9)]))
-        t.add(bp, pad, L.box((0, tube_y + 0.032, (z0 + z1) * 0.5 + 0.03), (0.007, 0.004, 0.05), 0.0018, 2, "polymer_matte"))
+        t.add(bp, pad, L.box((0, tube_y + 0.02, (z0 + z1) * 0.5 + 0.03), (0.007, 0.004, 0.05), 0.0018, 2, "polymer_matte"))   # cheek bar: low enough for the ADS near plane
         return []
 
     # ---------------------------------------------------------------- assembly

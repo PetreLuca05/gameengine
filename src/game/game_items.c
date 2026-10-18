@@ -270,7 +270,7 @@ static void draw_showcase(const RenderCamera *cam) {
 // Near-plane check (tools/tests/item_nearplane.cfg): the LOD 0 triangles of the first-person weapon and its
 // attachments, posed as drawn, in view space. A visible clip is an edge crossing the camera near plane
 // inside the view's near rectangle (a stock behind the eye, outside the frustum, is never seen).
-typedef struct NearStats { int cuts, behind, total; float min_depth; } NearStats;
+typedef struct NearStats { int cuts, behind, total; float min_depth; int worst_cuts; char worst[40]; } NearStats;
 
 static void nearplane_mesh(ItemMesh *m, Xform root, const ItemMeshPose *pose, mat4 view, float zn, float tx, float ty, NearStats *st) {
     for (int p = 0; p < m->part_count; p++) {
@@ -291,6 +291,7 @@ static void nearplane_mesh(ItemMesh *m, Xform root, const ItemMeshPose *pose, ma
             if (depth < zn) st->behind++;
         }
         const u16 *ix = m->indices + dp->lod_i0[0];
+        int before = st->cuts;
         for (u32 t = 0; t + 2 < dp->lod_in[0]; t += 3)
             for (int e = 0; e < 3; e++) {
                 vec3 a = vs[ix[t + e]], b = vs[ix[t + (e + 1) % 3]];
@@ -299,6 +300,10 @@ static void nearplane_mesh(ItemMesh *m, Xform root, const ItemMeshPose *pose, ma
                 vec3 c = v3_lerp(a, b, da / (da - db));
                 if (fabsf(c.x) <= zn * tx && fabsf(c.y) <= zn * ty) st->cuts++;
             }
+        if (st->cuts - before > st->worst_cuts) {
+            st->worst_cuts = st->cuts - before;
+            snprintf(st->worst, sizeof(st->worst), "%s/%s", m->id, m->parts[p].name);
+        }
         free(vs);
     }
 }
@@ -316,7 +321,7 @@ static void cmd_item_nearplane(int argc, const char **argv) {
     float fov;
     render_camera_info(&cp, &fov);
     float zn = render_camera_znear(), ty = tanf(fov * 0.5f * DG_DEG2RAD), tx = ty * (float)render_width() / (float)DG_MAX(render_height(), 1);
-    NearStats st = { 0, 0, 0, 1e9f };
+    NearStats st = { 0, 0, 0, 1e9f, 0, "" };
     ItemMeshPose pose = { 0 };
     pose.wobble = quat_identity();
     for (int s = 0; s < ATT_SLOTS; s++)
@@ -328,8 +333,8 @@ static void cmd_item_nearplane(int argc, const char **argv) {
         ItemMesh *am = a ? item_mesh_get(attach_model_for(a, wd)->mesh) : NULL;
         if (am) nearplane_mesh(am, xf_mul(xf_make(pos, rot), attach_placement(wd, a)), NULL, view, zn, tx, ty, &st);
     }
-    log_info("item_nearplane %s %s: %d visible near-plane cuts (%d / %d vertices nearer than %.3f m, outside the view), nearest %.3f m -> %s", wd->id, state, st.cuts,
-             st.behind, st.total, zn, st.min_depth, st.cuts ? "CLIPS" : "ok");
+    log_info("item_nearplane %s %s: %d visible near-plane cuts (%d / %d vertices nearer than %.3f m, outside the view), nearest %.3f m -> %s%s%s", wd->id, state, st.cuts,
+             st.behind, st.total, zn, st.min_depth, st.cuts ? "CLIPS" : "ok", st.cuts ? ", most in " : "", st.worst);
 }
 
 void items_game_register(void) {

@@ -103,13 +103,15 @@ def trigger_group():
 
 def stock():
     y = 0.01
-    pts = [(RZ1, 0.06), (0.06, 0.056), (0.25, 0.062), (0.305, 0.068), (0.305, -0.075), (0.25, -0.07), (0.1, -0.045), (0.05, -0.065), (0.024, -0.068), (0.018, -0.03),
+    # Comb drop ~40 mm below the sight line where the cheek rests (a higher comb crosses the camera's near
+    # plane in ADS: tools/tests/item_nearplane.cfg).
+    pts = [(RZ1, 0.058), (0.06, 0.046), (0.25, 0.054), (0.305, 0.062), (0.305, -0.075), (0.25, -0.07), (0.1, -0.045), (0.05, -0.065), (0.024, -0.068), (0.018, -0.03),
            (RZ1, 0.006)]
     s = L.side_prism(pts, -0.0205, 0.0205, bevel=0.006, segs=4, mat="wood_walnut", angle=15)
     panel = lambda yy, z: -0.06 < yy < -0.006 and (0.02 + (-yy) * 0.1) < z < (0.06 + (-yy) * 0.25)
     for sx in (1, -1):
         s.cut(L.stipple(sx * 0.0205, -0.062, -0.004, 0.015, 0.08, pitch=0.0028, r=0.0008, depth=0.0005, side=sx, inside=panel, mat="wood_walnut"))
-    pad = L.side_prism([(0.305, 0.068), (0.326, 0.067), (0.327, -0.074), (0.305, -0.076)], -0.0212, 0.0212, bevel=0.004, segs=3, mat="rubber", angle=15)
+    pad = L.side_prism([(0.305, 0.062), (0.326, 0.061), (0.327, -0.074), (0.305, -0.076)], -0.0212, 0.0212, bevel=0.004, segs=3, mat="rubber", angle=15)
     pad.cut(L.merge(*[L.box((0, 0.058 - k * 0.0095, 0.3265), (0.023, 0.0013, 0.0013), 0, 0) for k in range(14)]))
     cap = L.side_prism([(0.024, -0.068), (0.05, -0.065), (0.052, -0.07), (0.026, -0.073)], -0.012, 0.012, bevel=0.002, segs=2, mat="plastic_black")
     stud = L.lathe([(0, 0), (0.0045, 0), (0.0045, 0.004), (0.003, 0.005), (0, 0.005)], (0, -0.072, 0.27), (0, -1, 0.15), 16, "steel_blued")
