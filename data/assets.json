@@ -108,6 +108,24 @@
     {
       "name": "moto_bar",
       "path": "assets/vehicles/moto_bar.gltf"
+    },
+    {
+      "name": "foliage_bush",
+      "path": "assets/models/foliage/foliage_bush.gltf",
+      "vgeo": true
+    },
+    {
+      "name": "foliage_grass",
+      "path": "assets/models/foliage/foliage_grass.gltf",
+      "vgeo": true
+    },
+    {
+      "name": "foliage_bush_ref",
+      "path": "assets/models/foliage/foliage_bush.gltf",
+      "ao": {
+        "strength": 1.0,
+        "combine": "multiply"
+      }
     }
   ]
 }

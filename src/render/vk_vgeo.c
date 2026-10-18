@@ -279,6 +279,7 @@ static u32 level_mesh(const RenderVgeoPlacement *pl) {
                 m.fade_end = fo->fade_end;
                 m.shadow_max_dist = fo->shadow_max_dist;
             }
+            vg_material_set_ao(&m, mm->ao_strength, mm->ao_combine, mm->ao_vertex);   // with the final VGM_MASKED
         }
         u32 idx = vgeo_scene_add_material(&G.scene, &m);
         if (k == 0) base = idx;

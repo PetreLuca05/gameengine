@@ -1,12 +1,13 @@
 #version 450
 // r_post_debug: visualise one intermediate (replaces the tonemapped image, display-linear out).
-// pc.u0.x = view (post_debug_names), u0.y = hi-z mip / froxel slice, p0.x = scale.
+// pc.u0.x = view (post_debug_names), u0.y = hi-z mip / froxel slice, p0.x = scale, p0.y = AO intensity (lerp).
 #extension GL_GOOGLE_include_directive : require
 #include "post_common.glsl"
 layout(local_size_x = 8, local_size_y = 8) in;
 layout(set = 0, binding = 0) uniform sampler2D src_tex;
 layout(set = 0, binding = 1) uniform sampler3D vol_tex;
 layout(set = 0, binding = 2) uniform sampler2D depth_tex;
+layout(set = 0, binding = 3) uniform sampler2D material_tex;
 layout(set = 0, binding = 8, rgba16f) uniform writeonly image2D dst;
 layout(std430, set = 0, binding = 13) readonly buffer Exposure { float e[16]; } X;
 
@@ -56,6 +57,14 @@ void main() {
         vec4 f = textureLod(vol_tex, vec3(uv, w), 0.0);
         float fog = 1.0 - f.a;                               // opacity of the fog up to the surface
         o = vec3(sqrt(fog)) * 0.7 + f.rgb * 6.0 * k;
+        break;
+    }
+    case 18u: case 19u: o = vec3(s.r); break;                                         // ao raw (GTAO), ao blurred (bilateral)
+    case 20u: {                                                                       // ao final: lit-pass input x intensity x material weight
+        vec4 m = textureLod(material_tex, uv, 0.0);
+        float a = mix(1.0, mix(1.0, s.r, pc.p0.y), gb_ao_strength(m));
+        o = vec3(a);
+        if ((gb_flags(m) & GB_THIN) != 0u) o *= vec3(0.85, 1.0, 0.85);   // thin occluders (foliage) tinted green
         break;
     }
     default: o = s.rgb; break;

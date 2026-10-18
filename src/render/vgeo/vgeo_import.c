@@ -32,11 +32,12 @@ bool vgeo_import_gltf(const char *path, VgImported *out, char *err, int err_size
         for (cgltf_size pi = 0; pi < node->mesh->primitives_count; pi++) {
             cgltf_primitive *prim = &node->mesh->primitives[pi];
             if (prim->type != cgltf_primitive_type_triangles) continue;
-            const cgltf_accessor *ap = NULL, *an = NULL, *at = NULL;
+            const cgltf_accessor *ap = NULL, *an = NULL, *at = NULL, *ac = NULL;
             for (cgltf_size k = 0; k < prim->attributes_count; k++) {
                 if (prim->attributes[k].type == cgltf_attribute_type_position) ap = prim->attributes[k].data;
                 else if (prim->attributes[k].type == cgltf_attribute_type_normal) an = prim->attributes[k].data;
                 else if (prim->attributes[k].type == cgltf_attribute_type_texcoord && prim->attributes[k].index == 0) at = prim->attributes[k].data;
+                else if (prim->attributes[k].type == cgltf_attribute_type_color && prim->attributes[k].index == 0) ac = prim->attributes[k].data;
             }
             if (!ap) continue;
             u32 vbase = out->vertex_count, vn = (u32)ap->count;
@@ -46,6 +47,11 @@ bool vgeo_import_gltf(const char *path, VgImported *out, char *err, int err_size
                 out->pos = realloc(out->pos, sizeof(float) * 3 * vcap);
                 out->normal = realloc(out->normal, sizeof(float) * 3 * vcap);
                 out->uv = realloc(out->uv, sizeof(float) * 2 * vcap);
+                if (out->color) out->color = realloc(out->color, sizeof(u32) * vcap);
+            }
+            if (ac && !out->color) {   // the first coloured primitive: white for everything before it
+                out->color = malloc(sizeof(u32) * vcap);
+                for (u32 v = 0; v < vbase; v++) out->color[v] = 0xFFFFFFFFu;
             }
             if (out->index_count + in > icap) {
                 while (out->index_count + in > icap) icap = icap ? icap * 2 : 12288;
@@ -63,6 +69,13 @@ bool vgeo_import_gltf(const char *path, VgImported *out, char *err, int err_size
                     wn[r] = world[0 * 4 + r] * n[0] + world[1 * 4 + r] * n[1] + world[2 * 4 + r] * n[2];
                 }
                 memcpy(&out->uv[(vbase + v) * 2], t, 8);
+                if (out->color) {   // RGBA8, r in the low byte (render.h Vertex.color; e.g. alpha = baked AO, material_ao.h)
+                    float c[4] = { 1, 1, 1, 1 };
+                    if (ac) read_vec(ac, v, c, ac->type == cgltf_type_vec3 ? 3 : 4);
+                    u32 rgba = 0;
+                    for (int k = 0; k < 4; k++) rgba |= (u32)(fminf(fmaxf(c[k], 0.0f), 1.0f) * 255.0f + 0.5f) << (k * 8);
+                    out->color[vbase + v] = rgba;
+                }
             }
             u32 mat = prim->material ? (u32)(prim->material - d->materials) : 0;
             for (u32 i = 0; i + 2 < in; i += 3) {
@@ -82,6 +95,7 @@ void vgeo_imported_free(VgImported *m) {
     free(m->pos);
     free(m->normal);
     free(m->uv);
+    free(m->color);
     free(m->indices);
     free(m->tri_material);
     free(m->material_names);
@@ -94,6 +108,7 @@ void vgeo_imported_source(const VgImported *m, VgSource *src) {
     src->pos = m->pos;
     src->normal = m->normal;
     src->uv = m->uv;
+    src->color = m->color;
     src->index_count = m->index_count;
     src->indices = m->indices;
     src->tri_material = m->tri_material;

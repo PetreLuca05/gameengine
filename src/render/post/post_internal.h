@@ -53,6 +53,8 @@ typedef struct PostUBO {
     vec4 s_look2;        // bloom tint rgb, w unused
     vec4 s_look3;        // damage edge tint rgb, w unused
     vec4 s_look4;        // low-health vignette colour rgb, w unused
+    vec4 s_ao2;          // GTAO: falloff (fraction of the radius), thickness (m), slices, foliage radius (m)
+    vec4 s_ao3;          // AO blur: depth sharpness, radius (px); z full resolution, w unused
     vec4 lights[MAX_POINT_LIGHTS * 2];   // pos radius, color intensity
 } PostUBO;
 
@@ -97,6 +99,7 @@ typedef struct PostCtx {
     bool looks_dirty;
     // per frame
     FgRes hiz, ao, contact, ssr, ssgi, froxels, color_prev, depth_prev, vol_history;
+    FgRes ao_raw, ao_blur;            // GTAO before / after the bilateral blur (debug views 18 / 19)
     float last_ev;
     float direct_exposure;            // Engine Fidelity Off: this frame's fixed exposure
     bool exposure_init;

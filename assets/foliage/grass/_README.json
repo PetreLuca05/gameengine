@@ -1,3 +1,4 @@
 {
-  "_doc": "Not an asset (files starting with _ are skipped). Grass / ground-cover assets: src/render/vgeo/grass_asset.h documents every key; docs/FOLIAGE_GRASS.md the shading. Densities are clumps per m2 at full density per terrain material (MgMaterial names), x the clumping keep rate (mean about 0.6), x the fidelity level's density, x r_foliage_density."
+  "_doc": "Not an asset (files starting with _ are skipped). Grass / ground-cover assets: src/render/vgeo/grass_asset.h documents every key; docs/FOLIAGE_GRASS.md the shading. Densities are clumps per m2 at full density per terrain material (MgMaterial names), x the clumping keep rate (mean about 0.6), x the fidelity level's density, x r_foliage_density.",
+  "_doc_ao": "shading.ao_strength (0..1, default 0.3): weight of the screen-space AO on the cards (lerp(1, ao, s)); 0 = none. shading.ao_combine: \"min\" (default) or \"multiply\" for the clump AO (ao_root, the nta map's AO) against the screen-space AO. docs/RENDERING_POST.md \"Foliage-aware AO\"."
 }

@@ -1333,6 +1333,72 @@
    "reason": "AO / contact shadows / SSR / SSGI / puddle reflections: lighting quality tiers. SSR only reflects pixels already on screen (no new information).",
    "category": "rendering"
   },
+  "r_ao_blur": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "GTAO tuning (radius, falloff, foliage clamp, sampling, blur, temporal): engine values, not a player setting; the quality is r_ao (tier).",
+   "category": "rendering"
+  },
+  "r_ao_blur_sharpness": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "GTAO tuning (radius, falloff, foliage clamp, sampling, blur, temporal): engine values, not a player setting; the quality is r_ao (tier).",
+   "category": "rendering"
+  },
+  "r_ao_falloff": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "GTAO tuning (radius, falloff, foliage clamp, sampling, blur, temporal): engine values, not a player setting; the quality is r_ao (tier).",
+   "category": "rendering"
+  },
+  "r_ao_foliage_radius": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "GTAO tuning (radius, falloff, foliage clamp, sampling, blur, temporal): engine values, not a player setting; the quality is r_ao (tier).",
+   "category": "rendering"
+  },
+  "r_ao_full_res": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "GTAO tuning (radius, falloff, foliage clamp, sampling, blur, temporal): engine values, not a player setting; the quality is r_ao (tier).",
+   "category": "rendering"
+  },
+  "r_ao_intensity": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "GTAO tuning (radius, falloff, foliage clamp, sampling, blur, temporal): engine values, not a player setting; the quality is r_ao (tier).",
+   "category": "rendering"
+  },
+  "r_ao_radius": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "GTAO tuning (radius, falloff, foliage clamp, sampling, blur, temporal): engine values, not a player setting; the quality is r_ao (tier).",
+   "category": "rendering"
+  },
+  "r_ao_slices": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "GTAO tuning (radius, falloff, foliage clamp, sampling, blur, temporal): engine values, not a player setting; the quality is r_ao (tier).",
+   "category": "rendering"
+  },
+  "r_ao_steps": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "GTAO tuning (radius, falloff, foliage clamp, sampling, blur, temporal): engine values, not a player setting; the quality is r_ao (tier).",
+   "category": "rendering"
+  },
+  "r_ao_temporal": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "GTAO tuning (radius, falloff, foliage clamp, sampling, blur, temporal): engine values, not a player setting; the quality is r_ao (tier).",
+   "category": "rendering"
+  },
+  "r_ao_thickness": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "GTAO tuning (radius, falloff, foliage clamp, sampling, blur, temporal): engine values, not a player setting; the quality is r_ao (tier).",
+   "category": "rendering"
+  },
   "r_atmosphere": {
    "class": "LOCKED",
    "ui": "—",

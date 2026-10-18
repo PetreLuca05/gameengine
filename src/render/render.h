@@ -9,6 +9,7 @@
 #include "anim/anim_mesh.h"
 #include "render/post/post_settings.h"
 #include "render/shadow_sky.h"
+#include "render/material_ao.h"
 
 struct SDL_Window;
 
@@ -101,6 +102,12 @@ typedef struct Material {
     TextureId mr_tex, normal_tex, occlusion_tex, emissive_tex;
     float normal_scale, occlusion_strength, alpha_cutoff;
     u32 emissive_rgb;       // RGBA8 emissive colour (glTF emissiveFactor / its largest channel), with MAT_EMISSIVE_TEX
+    // Ambient occlusion (render/material_ao.h, docs/RENDERING_POST.md "Foliage-aware AO"): the weight of the
+    // screen-space AO (0 = automatic: 1, or 0.3 for MAT_ALPHA_MASK; MATERIAL_AO_OFF = none), how the baked AO
+    // combines with it (MaterialAoCombine), and whether the vertex colour alpha is baked AO.
+    float ao_strength;
+    u8 ao_combine;
+    bool ao_vertex;
 } Material;
 
 typedef struct DrawItem {
@@ -624,6 +631,12 @@ DG_INLINE u32 rgba8(float r, float g, float b, float a) {
     return R | (G << 8) | (B << 16) | (A << 24);
 }
 DG_INLINE u32 rgba8v(vec4 c) { return rgba8(c.x, c.y, c.z, c.w); }
+
+// The pbr emissive word of a draw (PushLit.pbr.z, VgMaterial.emissive_rgb): the emissive colour, the
+// material's AO byte in the alpha (render/material_ao.h).
+DG_INLINE u32 material_gpu_emissive(const Material *m) {
+    return material_ao_word(m->emissive_rgb, material_ao_byte(m->ao_strength, m->ao_combine, m->ao_vertex, (m->flags & MAT_ALPHA_MASK) != 0));
+}
 
 DG_INLINE Material material_color(vec4 color) {
     Material m;

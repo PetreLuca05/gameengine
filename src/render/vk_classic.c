@@ -1148,8 +1148,8 @@ static void mat_push(PushLit *pc, const VgMaterial *m, TextureId tex, u32 maps, 
     if (maps) {
         memcpy(&pc->pbr[0], &m->normal_scale, 4);
         memcpy(&pc->pbr[1], &m->occlusion_strength, 4);
-        pc->pbr[2] = m->emissive_rgb;
     }
+    pc->pbr[2] = m->emissive_rgb;   // its alpha: the AO byte (render/material_ao.h), with or without maps
 }
 
 static bool lod_ready(const ClLod *L) { return L->gpu && R->meshes[L->gpu].used && R->frame_index >= L->ready_frame; }

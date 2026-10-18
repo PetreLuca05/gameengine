@@ -2,16 +2,27 @@
 // (shaders/pbr_maps.glsl: normal, metallic-roughness, emissive) as the lit pass applies them;
 // GB_ALPHA_MASK (an expression: the albedo alpha) discards below the alphaMode MASK cutoff.
 //   normal   RG16_SNORM  octahedral world normal
-//   material RGBA8       r roughness, g metallic, b flags / 255 (1 viewmodel, 2 dynamic, 4 unlit), a emissive (0..1 of 8)
+//   material RGBA8       r roughness, g metallic, b flags / 255 (1 viewmodel, 2 dynamic, 4 unlit, 8 thin occluder,
+//                        bits 4-7 (1 - ao_strength) x 15), a emissive (0..1 of 8)
 //   velocity RG16F       current - previous position in UV units (unjittered)
+// GB_AO_BYTE: the material's AO byte (src/render/material_ao.h; default the pbr emissive word's alpha).
 #define GB_VIEWMODEL 1u
 #define GB_DYNAMIC 2u
 #define GB_UNLIT 4u
+#define GB_THIN 8u
+#define GB_AO_SHIFT 4u
 #define GB_DYNAMIC_FLAG 0x80000000u
 
 #include "weather.glsl"
 #ifdef PBR_MAPS
 #include "pbr_maps.glsl"
+#endif
+#ifndef GB_AO_BYTE
+#ifdef PBR_MAPS
+#define GB_AO_BYTE (PBR_PARAMS.z >> 24u)
+#else
+#define GB_AO_BYTE 0u
+#endif
 #endif
 
 // GB_CUSTOM_INPUTS: the includer provides v_world ... v_prev_clip and GB_FRONT_FACING itself
@@ -66,6 +77,11 @@ void main() {
     if ((flags & MAT_VIEWMODEL) != 0u) gf |= GB_VIEWMODEL;
     if ((flags & GB_DYNAMIC_FLAG) != 0u || (flags & MAT_HIGHLIGHT) != 0u) gf |= GB_DYNAMIC;
     if ((flags & MAT_UNLIT) != 0u) gf |= GB_UNLIT;
+    // Per-material AO (docs/RENDERING_POST.md "Foliage-aware AO"): thin occluders for the GTAO search, the
+    // weight for the debug view (the lit pass applies the exact value from the material itself).
+    uint ao_b = GB_AO_BYTE;
+    if ((ao_b & MAT_AO_BYTE_THIN) != 0u) gf |= GB_THIN;
+    gf |= uint((1.0 - mat_ao_strength(ao_b)) * 15.0 + 0.5) << GB_AO_SHIFT;
     o_material = vec4(wx_rough, metal, float(gf) / 255.0, clamp(emissive / 8.0, 0.0, 1.0));
     vec2 cur = v_cur_clip.xy / v_cur_clip.w, prev = v_prev_clip.xy / v_prev_clip.w;
     o_velocity = (cur - prev) * 0.5;   // NDC -> UV

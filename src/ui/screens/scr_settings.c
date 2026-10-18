@@ -536,6 +536,21 @@ static void tab_graphics_debug(GuiCursor *c) {
     }
     static const char *const ao[] = { "Off", "Low", "High" };
     row_fid_combo(c, "Ambient occlusion", FF_AO, ao, NULL, 3, NULL);
+    if (cv("r_ao") && cv("r_ao")->i) {
+        // GTAO detail (docs/RENDERING_POST.md "Foliage-aware AO"); per-material weights live in the materials.
+        row_toggle_cvar(c, "AO full resolution", "r_ao_full_res", "Off: half resolution, blurred and upsampled (faster).");
+        row_slider_cvar(c, "AO radius", "r_ao_radius", 0.1f, 4.0f, 0.05f, "%.2f m", "How far around a point occluders count.");
+        row_slider_cvar(c, "AO intensity", "r_ao_intensity", 0.0f, 3.0f, 0.05f, "%.2f", "Below 1 fades the AO, above 1 deepens it.");
+        row_slider_cvar(c, "AO falloff", "r_ao_falloff", 0.05f, 1.0f, 0.05f, "%.2f", "Share of the radius over which distant occluders fade out.");
+        row_slider_cvar(c, "AO thin-occluder thickness", "r_ao_thickness", 0.02f, 2.0f, 0.01f, "%.2f m",
+                        "Leaf / grass cards further in front of a surface than this stop darkening it (they are thin).");
+        row_slider_cvar(c, "AO foliage radius", "r_ao_foliage_radius", 0.05f, 2.0f, 0.05f, "%.2f m", "Radius clamp for foliage: no dark halos around plants.");
+        row_slider_cvar(c, "AO slices", "r_ao_slices", 0, 8, 1, "%.0f", "Directions per pixel (0 = by quality).");
+        row_slider_cvar(c, "AO steps", "r_ao_steps", 0, 16, 1, "%.0f", "Samples per direction and side (0 = by quality).");
+        row_slider_cvar(c, "AO blur radius", "r_ao_blur", 0, 8, 1, "%.0f px", "Depth / normal aware blur (0 = off).");
+        row_slider_cvar(c, "AO blur sharpness", "r_ao_blur_sharpness", 0, 200, 5, "%.0f", "Higher keeps the blur off smaller depth steps.");
+        row_slider_cvar(c, "AO temporal accumulation", "r_ao_temporal", 0.0f, 0.97f, 0.01f, "%.2f", "History weight (0 = off): less noise, slower to react.");
+    }
     row_fid_combo(c, "Contact shadows", FF_CONTACT_SHADOWS, ao, NULL, 3, NULL);
     static const char *const ssr[] = { "Off", "Half resolution", "Full resolution" };
     row_fid_combo(c, "Screen-space reflections", FF_SSR, ssr, NULL, 3, "Without them: sky / probe reflections.");

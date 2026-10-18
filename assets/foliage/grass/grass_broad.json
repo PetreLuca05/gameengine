@@ -54,7 +54,9 @@
     "var_sat": 0.08,
     "var_val": 0.07,
     "macro": 1.0,
-    "ao_root": 0.55
+    "ao_root": 0.55,
+    "ao_strength": 0.3,
+    "ao_combine": "min"
   },
   "terrain": {
     "top_color": "#6f7340",

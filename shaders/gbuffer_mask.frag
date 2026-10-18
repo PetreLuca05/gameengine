@@ -17,5 +17,6 @@ layout(set = 1, binding = 0) uniform sampler2D tex;
 #define GB_FLAGS (pc.flags.x | (pc.flags.y != 0u ? GB_DYNAMIC_FLAG : 0u))
 #define GB_PARAMS pc.params
 #define PBR_MAPS
-#define GB_ALPHA_MASK (pc.color.a * v_color.a * ((pc.flags.x & MAT_TEXTURED) != 0u ? texture(tex, v_uv * max(pc.params.w, 1e-3)).a : 1.0))
+// (the vertex alpha is baked AO, not opacity, with MAT_AO_BYTE_VERTEX)
+#define GB_ALPHA_MASK (pc.color.a * (((pc.pbr.z >> 24u) & MAT_AO_BYTE_VERTEX) != 0u ? 1.0 : v_color.a) * ((pc.flags.x & MAT_TEXTURED) != 0u ? texture(tex, v_uv * max(pc.params.w, 1e-3)).a : 1.0))
 #include "gbuffer_body.glsl"
