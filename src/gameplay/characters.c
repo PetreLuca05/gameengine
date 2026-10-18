@@ -42,6 +42,33 @@ static bool g_fp_fire_snap;                        // a shot landed this tick: t
 #define TP_FIRE_SCALE 0.55f                        // third-person fire animation scale (remote players)
 static Xform fp_fire_hand_lag(Xform sock, quat cam_rm, vec3 pivot);
 static void fp_fire_fingers(const Skeleton *s, Pose *pose, Xform *model, int side, float w);
+
+// docs/perf/FINDINGS.md PF-0034: the shared pose cache (see "shared poses" below).
+#define POSE_SETS 128                  // the cache: POSE_SETS x POSE_WAYS bucket poses (a horde uses ~100 - 300)
+#define POSE_WAYS 4
+#define POSE_SPEED_STEP 0.25f          // blend inputs quantized: speed (m/s) ...
+#define POSE_DIR_STEP 0.125f           // ... and the move direction's components
+#define POSE_PAL_CLASSES 8             // part palette classes per bucket and frame
+#define POSE_FILLS_PER_FRAME 24        // bucket samples per frame (~20 - 50 us each: a cold cache does not hitch)
+
+typedef struct PoseKey {
+    const ControllerDef *def;
+    const AnimBinding *bind;
+    i16 state, variant, phase, speed, mx, my, wtype, pad;
+} PoseKey;
+
+typedef struct PoseEntry {
+    PoseKey key;
+    bool valid;
+    u64 used;                          // engine frame of the last use (never refilled within it)
+    u32 gen;                           // bumped at every fill (chars_bone_draw)
+    SkeletonInstance *si;              // the pose in model space (world = model) and its palette
+    u64 pal_frame;                     // the palette handles below belong to this frame
+    int pal_n;
+    int pal_class[POSE_PAL_CLASSES];
+    u32 pal_handle[POSE_PAL_CLASSES];
+} PoseEntry;
+static void pose_cache_free(void);
 #define LIB (g_engine.anim)
 
 // GPU side of one SkeletalMesh part as a character wears it: LOD meshes with its material tints baked
@@ -57,6 +84,7 @@ typedef struct GpuPart {
     // PBR maps of a textured skin (docs/CHARACTERS.md "PBR maps"): <atlas>_normal, <atlas>_orm
     // (r occlusion, g roughness, b metallic), <atlas>_emissive, tiled like the albedo; 0 = none.
     TextureId normal_tex, orm_tex, emissive_tex;
+    int pal_class;                  // parts gathering the same palette (skm_palette_equal) share one class
 } GpuPart;
 
 typedef struct CharGlobals {
@@ -158,6 +186,7 @@ void characters_register_cvars(void) {
 }
 
 void characters_shutdown_globals(void) {
+    pose_cache_free();
     if (!CG) return;
     for (int k = 0; k < CG->part_count; k++) {
         for (int l = 0; l < CHAR_LOD_COUNT; l++) render_mesh_destroy(CG->parts[k].lod[l]);
@@ -307,6 +336,9 @@ static int gpu_part_for(const CharPartOption *o, const BoneSet *hidden) {
     memset(gp, 0, sizeof(*gp));
     gp->key = key;
     gp->mesh = o->mesh;
+    gp->pal_class = CG->part_count;
+    for (int k = 0; k < CG->part_count; k++)
+        if (skm_palette_equal(&LIB->meshes[CG->parts[k].mesh], sm)) { gp->pal_class = CG->parts[k].pal_class; break; }
     gp->texture = tex;
     if (tex) {   // the skin's PBR atlases (tools/gen_skin_atlas.py), when they were built
         char name[64];
@@ -451,6 +483,11 @@ int chars_bone_draw(World *w, EntityId e, int bone, Xform *out) {
     if (!c || !LIB || bone < 0 || bone >= LIB->skel.count) return -1;
     if (!c->pose_draw || !c->pose_draw_frame) return 0;
     if (c->pose_draw_frame + 1 < g_engine.frame_index) return 0;   // not drawn this frame (culled / hidden)
+    if (c->shared && c->shared_frame == c->pose_draw_frame) {   // PF-0034: its bucket's pose where it stands
+        if (c->shared->gen != c->shared_gen) return 0;          // the bucket was refilled since
+        *out = xf_mul(c->shared_root, c->shared->si->world[bone]);
+        return 1;
+    }
     *out = c->pose_draw[bone];
     return 1;
 }
@@ -1735,6 +1772,19 @@ static void post_one(World *w, CharacterInst *c, int i, float dt, vec3 cam_pos, 
     // World transforms: rendered root uses the smoothed body yaw.
     Xform root = xf_make(c->root.t, quat_yaw(c->rt.proc.render_body_yaw));
     memcpy(c->pose_prev, c->pose_cur, sizeof(Xform) * (size_t)s->count);
+    // PF-0034: the base layer's phase / state and the root this pose was placed at (shared poses
+    // interpolate them like the pose).
+    c->draw_phase[0] = c->draw_phase[1];
+    c->draw_state[0] = c->draw_state[1];
+    c->draw_root[0] = c->draw_root[1];
+    c->draw_phase[1] = c->rt.ctrl.layer[0].phase;
+    c->draw_state[1] = c->rt.ctrl.layer[0].state;
+    c->draw_root[1] = root;
+    if (!c->have_pose) {
+        c->draw_phase[0] = c->draw_phase[1];
+        c->draw_state[0] = c->draw_state[1];
+        c->draw_root[0] = c->draw_root[1];
+    }
     // Seated: remember the vehicle pose this body was solved against (see seat_fix).
     {
         Xform vx;
@@ -1809,6 +1859,12 @@ void chars_present_tick(World *w, vec3 cam_pos, float fov_deg, float screen_h, f
     float sc_cos = scoped ? cosf(atanf(sc_tan * 1.4142136f)) : 1.0f;   // the square PiP's corner
     float tanh = tanf(fov_deg * 0.5f * DG_DEG2RAD);
     bool step_phys = false;
+    // docs/perf/FINDINGS.md PF-0033: NPCs outside the last frame's view (grown by a margin) pose at the
+    // cheap rate without foot IK / lean / turn, and come back to their LOD's rate with a fresh pose the
+    // tick they enter it. Presentation only: the host's simulation, hitboxes and lag compensation run
+    // in chars_host_tick on the base pose; players (the aim model reads their post-pass) keep theirs.
+    bool frustum_lod = lod_new && prof_fix_enabled(PFX_ANIM_FRUSTUM_LOD);
+    float off_margin = sinf(DG_CLAMP(lt->char_offscreen_margin_deg, 0.0f, 89.0f) * DG_DEG2RAD);
     // Characters due for a post-pass this tick (evaluated after the loop, within the budget).
     static int due[MAX_CHARACTERS];
     int due_count = 0;
@@ -1829,6 +1885,13 @@ void chars_present_tick(World *w, vec3 cam_pos, float fov_deg, float screen_h, f
             float sd = v3_len(dv);
             if (sd > 0.1f && v3_dot(dv, sc_fwd) > sd * sc_cos) c->pixels = fmaxf(c->pixels, sc_size * (LIB->skel.height * c->def->scale) / (2.0f * sd * sc_tan));
         }
+        bool was_off = c->offscreen;
+        c->outside = false;
+        if (lod_new && !c->is_player && !c->dead && c->have_pose) {
+            float h = LIB->skel.height * c->def->scale;
+            c->outside = !render_sphere_maybe_visible(v3_add(c->root.t, v3(0, 0.5f * h, 0)), h + dist * off_margin);
+        }
+        c->offscreen = frustum_lod && c->outside;
         if (lod_new) {
             // docs/LOD.md: lod.json targets x tier, a cross-fade that always completes, eased update rate,
             // LOD0 systems and the shadow faded over pixel bands
@@ -1838,13 +1901,14 @@ void chars_present_tick(World *w, vec3 cam_pos, float fov_deg, float screen_h, f
             lod_fade_step(&c->lodf, want, dt, lod_fade_time());
             c->lod = c->lodf.cur;
             float target = log2f((float)lt->char_update[DG_CLAMP(c->lod, 0, CHAR_LOD_COUNT - 1)]);
-            if (!c->have_pose || c->local) c->interval_log2 = target;
+            if (c->offscreen) target = fmaxf(target, log2f((float)lt->char_offscreen_update));
+            if (!c->have_pose || c->local || c->offscreen != was_off) c->interval_log2 = target;   // PF-0033: no ramp at the view's edge
             else {
                 float step = dt / fmaxf(lt->char_ramp_s, 1e-3f);
                 c->interval_log2 = c->interval_log2 < target ? fminf(c->interval_log2 + step, target) : fmaxf(c->interval_log2 - step, target);
             }
             float t0 = lt->char_px[0] / s, b = fmaxf(lt->char_ik_band, 1e-3f);
-            c->ik_w = c->local ? 1.0f : saturate((c->pixels - t0 * (1.0f - b)) / (t0 * b));
+            c->ik_w = c->local ? 1.0f : c->offscreen ? 0.0f : saturate((c->pixels - t0 * (1.0f - b)) / (t0 * b));
             c->shadow_w = c->local ? 1.0f : lod_band_weight(log2f(fmaxf(c->pixels, 1e-3f) * s / lt->char_shadow_px), lod_band());
             c->culled = c->pixels < lt->char_cull_px;
         } else {
@@ -1897,6 +1961,9 @@ void chars_present_tick(World *w, vec3 cam_pos, float fov_deg, float screen_h, f
         if (lod_new) {
             // eased update rate: an accumulator of 1 / interval per tick, an eval each time it reaches 1
             c->eval_acc += exp2f(-c->interval_log2);
+            // PF-0033: entering the view, the accumulator restarts on the view's rate from the last eval
+            // (a pose older than that interval is redone this tick)
+            if (was_off && !c->offscreen && c->have_pose) c->eval_acc = (float)(w->chars->tick - c->last_eval) * exp2f(-c->interval_log2);
             if (c->have_pose && c->eval_acc < 1.0f - 1e-4f) continue;
         } else if (c->have_pose && (int)(w->chars->tick - c->last_eval) < c->interval) continue;
         due[due_count++] = k;
@@ -1907,10 +1974,10 @@ void chars_present_tick(World *w, vec3 cam_pos, float fov_deg, float screen_h, f
         for (int a = 1; a < due_count; a++) {
             int v = due[a], b = a - 1;
             const CharacterInst *cv_ = w->chars->c[v];
-            float pv = cv_->local ? 1e9f : cv_->pixels * (1.0f + 0.25f * (float)(w->chars->tick - cv_->last_eval));
+            float pv = cv_->local ? 1e9f : cv_->pixels * (1.0f + 0.25f * (float)(w->chars->tick - cv_->last_eval)) * (cv_->offscreen ? 0.25f : 1.0f);
             while (b >= 0) {
                 const CharacterInst *cb = w->chars->c[due[b]];
-                float pb = cb->local ? 1e9f : cb->pixels * (1.0f + 0.25f * (float)(w->chars->tick - cb->last_eval));
+                float pb = cb->local ? 1e9f : cb->pixels * (1.0f + 0.25f * (float)(w->chars->tick - cb->last_eval)) * (cb->offscreen ? 0.25f : 1.0f);
                 if (pb >= pv) break;
                 due[b + 1] = due[b];
                 b--;
@@ -1924,6 +1991,7 @@ void chars_present_tick(World *w, vec3 cam_pos, float fov_deg, float screen_h, f
         CharacterInst *c = w->chars->c[due[n]];
         prof_count(PC_ANIM_EVAL, 1);
         if (c->culled && !w->authority) prof_count(PC_ANIM_EVAL_OFFSCREEN, 1);   // a client poses it for nothing it shows (no hitboxes there)
+        if (c->outside) prof_count(PC_ANIM_EVAL_OUTSIDE, 1);
         if (lod_new) {
             // the post-pass integrates the ticks since the last one; the render pose then interpolates
             // over the gap to the next eval (span: the accumulator's next crossing)
@@ -1949,6 +2017,197 @@ void chars_present_tick(World *w, vec3 cam_pos, float fov_deg, float screen_h, f
 
 static mat4 g_palette[SKM_MAX_BONES];
 static u32 g_part_draws;   // diagnostics: part draws submitted (tests / inspector)
+// docs/perf/FINDINGS.md PF-0021: while chars_render queues them, the palettes reserved by draw_part are
+// gathered afterwards on the jobs (each into its own reserved slot).
+typedef struct PalFill { mat4 *dst; const SkeletalMesh *sm; const SkeletonInstance *si; } PalFill;
+#define MAX_PAL_FILLS 4096   // = the renderer's skinned draws per frame (a palette per draw at most)
+static PalFill *g_fills;
+static int g_fill_n;
+
+// ------------------------------------------------------------------ shared poses
+
+// docs/perf/FINDINGS.md PF-0034 (visual trade-off): far characters (LOD >= lod.json shared_pose_lod)
+// whose pose is the controller's base layer alone (no crossfade or inertial blend, the other layers
+// empty, nothing in the hands, legs straight, no kneel / swim, not seated, alive) draw a pose sampled
+// once per (anim set, state, variant, phase bucket, quantized blend inputs) and kept across frames: the
+// bucket's model-space skeleton palette, placed per character by its own interpolated root in the
+// skinning shader (SkinnedDraw.rooted). They skip their interpolation, skeleton palette and gathers;
+// each bucket's palette goes into the frame's bone buffer once per part class. At these sizes the
+// post-pass runs no IK, spine, hold or damage layer, so the bucket pose is what each of them would show
+// at the bucket's phase and inputs. Presentation only: the simulation never reads it.
+static PoseEntry *g_pose;              // POSE_SETS x POSE_WAYS, allocated on first use
+static ControllerInst *g_pose_ctl;     // scratch controller sampling a bucket
+static u32 g_pose_rev;                 // LIB->revision the cache was filled from
+
+static void pose_cache_free(void) {
+    for (int i = 0; g_pose && i < POSE_SETS * POSE_WAYS; i++) free(g_pose[i].si);
+    free(g_pose);
+    free(g_pose_ctl);
+    g_pose = NULL;
+    g_pose_ctl = NULL;
+}
+
+// A blend tree reading no input but the speed / move direction (the key holds them quantized).
+static bool pose_tree_plain(const ControllerDef *d, int node, int depth) {
+    if (node < 0) return true;
+    if (node >= d->node_count || depth > 8) return false;
+    const BlendNode *n = &d->nodes[node];
+    if (n->kind == NK_CLIP) return true;
+    bool y = n->kind != NK_BLEND1D;
+    if (n->param_x >= 0 && n->param_x != AP_SPEED && n->param_x != AP_MOVE_X && n->param_x != AP_MOVE_Y) return false;
+    if (y && n->param_y >= 0 && n->param_y != AP_SPEED && n->param_y != AP_MOVE_X && n->param_y != AP_MOVE_Y) return false;
+    for (int i = 0; i < n->child_count; i++)
+        if (!pose_tree_plain(d, n->child[i], depth + 1)) return false;
+    return true;
+}
+
+// pose_tree_plain of the base layer's states, per controller (-1 unknown, 0 / 1).
+static struct { const ControllerDef *def; u32 rev; i8 plain[AC_MAX_STATES][AC_MAX_VARIANTS + 1]; } g_pose_plain;
+
+static bool state_plain(const ControllerDef *d, int state, int variant, int node) {
+    if (g_pose_plain.def != d || g_pose_plain.rev != LIB->revision) {
+        memset(g_pose_plain.plain, -1, sizeof(g_pose_plain.plain));
+        g_pose_plain.def = d;
+        g_pose_plain.rev = LIB->revision;
+    }
+    i8 *v = &g_pose_plain.plain[state][DG_CLAMP(variant, 0, AC_MAX_VARIANTS)];
+    if (*v < 0) *v = pose_tree_plain(d, node, 0) ? 1 : 0;
+    return *v == 1;
+}
+
+static int state_root_node(const LayerDef *L, int state, int variant) {
+    if (state < 0 || state >= L->state_count) return -1;
+    const StateDef *s = &L->states[state];
+    return variant > 0 && variant <= s->variant_count ? s->variants[variant - 1] : s->node;
+}
+
+// The bucket of a character's pose at interpolation instant t; false when its pose is not the plain
+// base layer.
+static bool pose_key(const CharacterInst *c, float t, int phases, PoseKey *k) {
+    const ControllerInst *ct = &c->rt.ctrl;
+    const ControllerDef *d = ct->def;
+    if (!d || !ct->bind || !d->layer_count || c->rt.override_clip >= 0) return false;
+    if (ct->inert_pending || ct->inert_duration > 0.0f) return false;
+    if (c->rt.in.weapon_id || fabsf(c->rt.leg_yaw) > 0.02f || c->rt.proc.kneel_w > 0.01f || c->rt.proc.swim_w > 0.0f) return false;
+    for (int li = 0; li < d->layer_count; li++) {
+        const LayerState *S = &ct->layer[li];
+        if (ct->mute[li] || ct->solo[li]) return false;
+        if (S->blend_total && S->blend_ticks < S->blend_total) return false;   // a crossfade
+        if (li > 0 && state_root_node(&d->layers[li], S->state, S->variant) >= 0) return false;   // the upper body / hit layer plays
+    }
+    const LayerDef *L = &d->layers[0];
+    const LayerState *S = &ct->layer[0];
+    int node = state_root_node(L, S->state, S->variant);
+    if (node < 0 || L->states[S->state].time_param >= 0 || !state_plain(d, S->state, S->variant, node)) return false;
+    // The phase at the drawn instant, between the last two post-passes (a looping state wraps).
+    if (c->draw_state[0] != S->state || c->draw_state[1] != S->state) return false;
+    bool loop = L->states[S->state].loop;
+    float p0 = c->draw_phase[0], p1 = c->draw_phase[1];
+    if (p1 < p0) {
+        if (!loop) return false;   // the clamped state started again
+        p1 += 1.0f;
+    }
+    float ph = p0 + (p1 - p0) * t;
+    ph = loop ? ph - floorf(ph) : saturate(ph);
+    memset(k, 0, sizeof(*k));
+    k->def = d;
+    k->bind = ct->bind;
+    k->state = S->state;
+    k->variant = S->variant;
+    k->phase = (i16)DG_MIN((int)(ph * (float)phases), phases - 1);
+    k->speed = (i16)lroundf(ct->params[AP_SPEED] / POSE_SPEED_STEP);
+    k->mx = (i16)lroundf(ct->params[AP_MOVE_X] / POSE_DIR_STEP);
+    k->my = (i16)lroundf(ct->params[AP_MOVE_Y] / POSE_DIR_STEP);
+    k->wtype = (i16)DG_CLAMP((int)ct->params[AP_WEAPON_TYPE], 0, 15);
+    return true;
+}
+
+// The bucket's pose: the character's controller at the bucket's phase centre and inputs, sampled into
+// the entry's skeleton instance in model space.
+static void pose_fill(PoseEntry *e, const CharacterInst *c, int phases) {
+    ControllerInst *s = g_pose_ctl;
+    const ControllerInst *ct = &c->rt.ctrl;
+    s->def = ct->def;
+    s->bind = ct->bind;
+    s->tick = ct->tick;
+    memcpy(s->params, ct->params, sizeof(s->params));
+    s->params[AP_SPEED] = (float)e->key.speed * POSE_SPEED_STEP;
+    s->params[AP_MOVE_X] = (float)e->key.mx * POSE_DIR_STEP;
+    s->params[AP_MOVE_Y] = (float)e->key.my * POSE_DIR_STEP;
+    memcpy(s->layer, ct->layer, sizeof(s->layer));
+    for (int li = 0; li < AC_MAX_LAYERS; li++) {
+        s->layer[li].blend_total = 0;
+        s->mute[li] = s->solo[li] = false;
+    }
+    s->layer[0].phase = ((float)e->key.phase + 0.5f) / (float)phases;
+    s->inert_pending = false;
+    s->inert_duration = 0.0f;
+    s->have_last = false;
+    static Pose pose;
+    static Xform model[ANIM_MAX_BONES];
+    ctrl_evaluate(s, &LIB->skel, &LIB->lookup, &pose);
+    pose_to_model(&LIB->skel, &pose, model);
+    if (!e->si) {
+        e->si = (SkeletonInstance *)malloc(sizeof(SkeletonInstance));
+        skel_inst_init(e->si, &LIB->skeleton);
+    }
+    skel_inst_set_pose(e->si, model);
+    e->gen++;
+    e->pal_frame = 0;
+    prof_count(PC_ANIM_POSE_SAMPLES, 1);
+}
+
+static PoseEntry *pose_get(const CharacterInst *c, const PoseKey *k, int phases) {
+    if (!g_pose) {
+        g_pose = (PoseEntry *)calloc(POSE_SETS * POSE_WAYS, sizeof(PoseEntry));
+        g_pose_ctl = (ControllerInst *)calloc(1, sizeof(ControllerInst));
+        g_pose_rev = LIB->revision;
+    }
+    if (g_pose_rev != LIB->revision) {   // a reload: the keys' controllers / bindings are gone
+        for (int i = 0; i < POSE_SETS * POSE_WAYS; i++) g_pose[i].valid = false;
+        g_pose_rev = LIB->revision;
+    }
+    u32 h = 2166136261u;
+    const u8 *b = (const u8 *)k;
+    for (size_t i = 0; i < sizeof(*k); i++) h = (h ^ b[i]) * 16777619u;
+    PoseEntry *set = &g_pose[(h % POSE_SETS) * POSE_WAYS], *victim = NULL;
+    u64 now = g_engine.frame_index;
+    for (int w = 0; w < POSE_WAYS; w++) {
+        PoseEntry *e = &set[w];
+        if (e->valid && !memcmp(&e->key, k, sizeof(*k))) { e->used = now; return e; }
+        if (e->valid && e->used == now) continue;   // drawn this frame: kept
+        if (!victim || (victim->valid && (!e->valid || e->used < victim->used))) victim = e;
+    }
+    // Every way in use this frame, or this frame's samples spent: the character draws its own pose.
+    static u64 fill_frame;
+    static int fills;
+    if (fill_frame != now) { fill_frame = now; fills = 0; }
+    if (!victim || fills >= POSE_FILLS_PER_FRAME) return NULL;
+    fills++;
+    victim->key = *k;
+    victim->valid = true;
+    victim->used = now;
+    pose_fill(victim, c, phases);
+    return victim;
+}
+
+// Main thread (chars_render): does the character draw a shared pose this frame (c->shared)?
+static bool shared_pose(CharacterInst *c, float t) {
+    if (!prof_fix_enabled(PFX_ANIM_SHARED_POSE) || !lod_active() || !render_skin_rooted_ok()) return false;
+    const LodTable *lt = lod_table();
+    if (c->is_player || c->dead || c->rag.active || c->phantom || c->recon_flags || c->veh_valid || c->item_valid || !c->have_pose) return false;
+    if (c->lodf.cur < lt->char_shared_lod || (lod_fade_active(&c->lodf) && c->lodf.from < lt->char_shared_lod)) return false;
+    PoseKey k;
+    if (!pose_key(c, t, lt->char_shared_phases, &k)) return false;
+    PoseEntry *e = pose_get(c, &k, lt->char_shared_phases);
+    if (!e) return false;
+    c->shared_cont = c->shared_frame + 1 == g_engine.frame_index;   // drawn shared last frame too (pose_char: velocity)
+    c->shared_frame = g_engine.frame_index;
+    c->shared = e;
+    c->shared_gen = e->gen;
+    prof_count(PC_ANIM_POSE_SHARED, 1);
+    return true;
+}
 
 // One part draw: the part's palette gathered from the character's shared skeleton palette.
 static void draw_part(const CharacterInst *c, const SkeletonInstance *si, const GpuPart *gp, MeshId mesh, int slot, float fade, u32 flags,
@@ -1958,8 +2217,42 @@ static void draw_part(const CharacterInst *c, const SkeletonInstance *si, const 
     SkinnedDraw d;
     memset(&d, 0, sizeof(d));
     d.mesh = mesh;
-    d.palette = g_palette;
-    d.bone_count = (u32)skm_gather_palette(&LIB->meshes[gp->mesh], si, NULL, g_palette);
+    const SkeletalMesh *sm = &LIB->meshes[gp->mesh];
+    PoseEntry *pe = c->shared && si == c->shared->si ? c->shared : NULL;   // PF-0034: a shared model-space pose
+    if (pe) {
+        d.rooted = true;
+        d.root = c->shared_m[0];
+        d.prev_root = c->shared_m[1];
+    }
+    if (pe && (prof_fix_enabled(PFX_SKIN_PALETTE_DIRECT) || g_fills)) {
+        // The bucket's palette once per part class and frame, whichever of its characters draws first.
+        if (pe->pal_frame != g_engine.frame_index) { pe->pal_frame = g_engine.frame_index; pe->pal_n = 0; }
+        for (int i = 0; i < pe->pal_n && !d.palette_handle; i++)
+            if (pe->pal_class[i] == gp->pal_class) d.palette_handle = pe->pal_handle[i];
+        if (!d.palette_handle) {
+            mat4 *dst = render_skin_palette(si, si->pose_version, (u32)gp->pal_class, (u32)sm->bone_count, &d.palette_handle);
+            if (dst && g_fills && g_fill_n < MAX_PAL_FILLS) g_fills[g_fill_n++] = (PalFill){ dst, sm, si };
+            else if (dst) skm_gather_palette(sm, si, NULL, dst);
+            if (d.palette_handle && pe->pal_n < POSE_PAL_CLASSES) {
+                pe->pal_class[pe->pal_n] = gp->pal_class;
+                pe->pal_handle[pe->pal_n++] = d.palette_handle;
+            }
+        }
+        if (!d.palette_handle) return;
+        d.bone_count = (u32)sm->bone_count;
+    } else if (prof_fix_enabled(PFX_SKIN_PALETTE_DIRECT) || g_fills) {
+        // docs/perf/FINDINGS.md PF-0020: gathered straight into this frame's bone buffer, once per
+        // pose and bone table class (every part, LOD and shadow draw of the pose shares it); PF-0021
+        // queues the gather for the jobs.
+        mat4 *dst = render_skin_palette(si, si->pose_version, (u32)gp->pal_class, (u32)sm->bone_count, &d.palette_handle);
+        if (dst && g_fills && g_fill_n < MAX_PAL_FILLS) g_fills[g_fill_n++] = (PalFill){ dst, sm, si };
+        else if (dst) skm_gather_palette(sm, si, NULL, dst);
+        if (!d.palette_handle) return;
+        d.bone_count = (u32)sm->bone_count;
+    } else {
+        d.palette = g_palette;
+        d.bone_count = (u32)skm_gather_palette(sm, si, NULL, g_palette);
+    }
     // Wet (docs/WATER.md): darker, glossier skin and clothes after the water.
     float wk = c->wet;
     d.color = v4(1.0f - 0.42f * wk, 1.0f - 0.42f * wk, 1.0f - 0.38f * wk, 1);
@@ -1967,7 +2260,7 @@ static void draw_part(const CharacterInst *c, const SkeletonInstance *si, const 
     d.flags = flags;
     d.fade = fade;
     d.cast_shadow = shadow;
-    d.center = si->world[s->role[BR_HIPS]].t;
+    d.center = pe ? xf_point(c->shared_root, si->world[s->role[BR_HIPS]].t) : si->world[s->role[BR_HIPS]].t;
     d.radius = s->height * c->def->scale;
     d.texture = gp->texture;
     if (d.texture) d.flags |= MAT_TEXTURED;
@@ -1993,7 +2286,7 @@ static void draw_part(const CharacterInst *c, const SkeletonInstance *si, const 
     }
     if (c->phantom && c->recon_flags) { d.flags |= c->recon_flags; d.recon = c->recon; }   // reconstruction dissolve
     // Stable id per character + part + LOD (previous palette -> per-bone velocity for TAA / motion blur).
-    d.object_id = shadow ? 0u : (0x20000000u | ((u32)ENT_INDEX(c->ent) << 8) | ((u32)slot << 4) | id_low);
+    d.object_id = shadow || pe ? 0u : (0x20000000u | ((u32)ENT_INDEX(c->ent) << 8) | ((u32)slot << 4) | id_low);   // a shared pose: velocity from prev_root
     render_draw_skinned(&d);
     g_part_draws++;
 }
@@ -2007,7 +2300,7 @@ static void draw_char(World *w, CharacterInst *c, int lod, float fade, u32 flags
         const GpuPart *gp = &CG->parts[c->part_gpu[sl] - 1];
         MeshId mesh = 0;
         for (int l = lod; l >= 0 && !mesh; l--) mesh = gp->lod[l];
-        draw_part(c, c->si, gp, mesh, sl, fade, flags, shadow, (u32)lod);
+        draw_part(c, c->shared ? c->shared->si : c->si, gp, mesh, sl, fade, flags, shadow, (u32)lod);
     }
     (void)w;
 }
@@ -2645,88 +2938,161 @@ static void sync_local_parts(World *w, int local_slot) {
     }
 }
 
+// A drawn character's pose source this frame (chars_render): the interpolated post-IK pose, or a
+// pose already final (ragdoll, read on the main thread: it reads the physics world; settled / dead).
+typedef struct CharDrawPrep {
+    CharacterInst *c;
+    float t;          // interpolation instant between pose_prev and pose_cur
+    Xform sfix;       // seat fix (vehicles)
+    u8 src;           // PREP_*
+} CharDrawPrep;
+enum { PREP_LERP, PREP_DRAWN, PREP_SETTLED, PREP_CUR, PREP_SHARED };
+
+// Main thread: false when the character is not drawn; else its pose source (ragdolls read here).
+static bool prep_char(World *w, CharacterInst *c, float alpha, CharDrawPrep *p) {
+    if (!c || !ent_valid(w, c->ent) || !c->have_pose) return false;
+    int i = (int)ENT_INDEX(c->ent);
+    if (w->flags[i] & EF_HIDDEN) return false;
+    if (c->culled && !c->dead) return false;
+    p->c = c;
+    p->t = 0.0f;
+    p->sfix = xf_identity();
+    c->shared = NULL;
+    if (c->rag.active) {
+        ragdoll_read_pose(&c->rag, w->phys, &LIB->ragdoll, &LIB->skel, c->pose_draw);
+        p->src = PREP_DRAWN;
+    } else if (c->dead) {
+        p->src = c->settled_pose ? PREP_SETTLED : PREP_CUR;
+    } else {
+        float span = (float)DG_MAX(1, c->interval);
+        p->t = saturate(((float)(w->chars->tick - c->last_eval) + alpha) / span);
+        p->sfix = seat_fix(w, c, p->t);
+        p->src = shared_pose(c, p->t) ? PREP_SHARED : PREP_LERP;   // PF-0034
+    }
+    c->pose_draw_frame = g_engine.frame_index;
+    return true;
+}
+
+// Any thread: the full post-IK pose drawn (hands + item from the same two ticks) and its skeleton
+// palette (one pose, one palette: every part skins from c->si). Writes only this character's.
+static void pose_char(const CharDrawPrep *p) {
+    CharacterInst *c = p->c;
+    int n = LIB->skel.count;
+    if (p->src == PREP_SHARED) {
+        // Drawn from its bucket's pose, placed at its own interpolated root (chars_bone_draw places its bones).
+        Xform r = xf_lerp(c->draw_root[0], c->draw_root[1], p->t);
+        r.s = v3(c->def->scale, c->def->scale, c->def->scale);   // charrt_to_world's root
+        c->shared_root_prev = c->shared_cont ? c->shared_root : r;
+        c->shared_root = r;
+        c->shared_m[0] = xf_to_mat4(r);
+        c->shared_m[1] = xf_to_mat4(c->shared_root_prev);
+        return;
+    }
+    if (p->src == PREP_SETTLED) memcpy(c->pose_draw, c->settled_pose, sizeof(Xform) * (size_t)n);
+    else if (p->src == PREP_CUR) memcpy(c->pose_draw, c->pose_cur, sizeof(Xform) * (size_t)n);
+    else if (p->src == PREP_LERP)
+        for (int b = 0; b < n; b++) c->pose_draw[b] = xf_mul(p->sfix, xf_lerp(c->pose_prev[b], c->pose_cur[b], p->t));
+    skel_inst_set_pose(c->si, c->pose_draw);
+}
+
+// Main thread: part selection, LODs and fades, every draw of the character, its held item.
+static void draw_char_all(World *w, CharacterInst *c, float alpha, int local_slot) {
+    bool local = c->is_player && c->slot == local_slot && !g_thirdperson;
+    u32 flags = local ? (MAT_SHADOW_ONLY | MAT_SELF) : 0;   // the owner's body: shadows + phone cameras (selfies)
+    u8 sel[CSLOT_COUNT];
+    drawn_selection(c, local_slot, sel);
+    resolve_parts(c, sel);
+    int lod = c->lod < 0 ? 0 : c->lod;
+    if (lod_active() && c->lodf.cur >= 0) {
+        // docs/LOD.md: both LODs of a cross-fade with complementary dithers, their shadows (one LOD
+        // coarser) the same way; the shadow fades in / out over a band at the shadow size
+        int lods[2];
+        float fades[2];
+        int nd = lod_fade_draws(&c->lodf, lods, fades);
+        for (int k2 = 0; k2 < nd; k2++) draw_char(w, c, lods[k2], fades[k2], flags, false);
+        if (local || c->shadow_w > 0.0f) {
+            int s0 = DG_MIN(lods[0] + 1, CHAR_LOD_COUNT - 1), s1 = nd > 1 ? DG_MIN(lods[1] + 1, CHAR_LOD_COUNT - 1) : s0;
+            float sw = local ? 1.0f : c->shadow_w;
+            if (nd > 1 && s0 != s1) {
+                draw_char(w, c, s0, fades[0], MAT_SHADOW_ONLY, true);
+                draw_char(w, c, s1, fades[1], MAT_SHADOW_ONLY, true);
+            } else {
+                draw_char(w, c, s1, sw < 1.0f ? lod_fade_in(sw) : 0.0f, MAT_SHADOW_ONLY, true);
+            }
+        }
+    } else {
+        bool shadow = c->pixels > CG->lod.shadow_pixels || local;
+        if (c->lod_fade < 1.0f && c->fade_from != lod) {
+            draw_char(w, c, c->fade_from, -(1.0f - c->lod_fade), flags, false);
+            draw_char(w, c, lod, c->lod_fade, flags, false);
+        } else {
+            draw_char(w, c, lod, 0, flags, false);
+        }
+        // Shadows: one LOD coarser than the main draw.
+        if (shadow) draw_char(w, c, DG_MIN(lod + 1, CHAR_LOD_COUNT - 1), 0, MAT_SHADOW_ONLY, true);
+    }
+    // Held item (glued to the right hand).
+    if (c->item_valid && !c->dead && (c->item_weapon || c->item_def)) {
+        float span = (float)DG_MAX(1, c->interval);
+        float t = saturate(((float)(w->chars->tick - c->last_eval) + alpha) / span);
+        Xform it = xf_mul(seat_fix(w, c, t), xf_lerp(c->item_prev, c->item_cur, t));
+        hands_set_draw_scale(c->rt.proc.item_scale);   // the grip root's calibration scale
+        // Slide / wobble: the owner's body copy (shadow) uses the first-person fire animation.
+        const FireAnimOut *fo = local ? &g_fp_fire_frame : &c->tp_fire_out;
+        hands_set_fire_mech(false, fo->slide, fo->wobble_rot);
+        hands_draw_held_att(c->item_weapon, c->item_weapon ? NULL : c->item_def, c->item_att, it.t, it.r, local ? (MAT_SHADOW_ONLY) : 0);
+        hands_set_draw_scale(1.0f);
+    }
+}
+
+static void pose_range(void *u, int begin, int end) {
+    const CharDrawPrep *p = (const CharDrawPrep *)u;
+    for (int k = begin; k < end; k++) pose_char(&p[k]);
+}
+
+static void fill_range(void *u, int begin, int end) {
+    const PalFill *f = (const PalFill *)u;
+    for (int k = begin; k < end; k++) skm_gather_palette(f[k].sm, f[k].si, NULL, f[k].dst);
+}
+
 void chars_render(World *w, float alpha, vec3 cam_pos, int local_slot) {
     if (!w->chars || !LIB) return;
     ensure_gpu_meshes();
     int own = game() ? game()->local_slot : local_slot;   // own skin / parts; local_slot here is the viewed player
     sync_local_skin(w, own);
     sync_local_parts(w, own);
-    const Skeleton *s = &LIB->skel;
-    static Xform pose[ANIM_MAX_BONES];
-    for (int k = 0; k < MAX_CHARACTERS; k++) {
-        CharacterInst *c = w->chars->c[k];
-        if (!c || !ent_valid(w, c->ent) || !c->have_pose) continue;
-        int i = (int)ENT_INDEX(c->ent);
-        if (w->flags[i] & EF_HIDDEN) continue;
-        if (c->culled && !c->dead) continue;
-        // Interpolate the full post-IK pose (hands + item from the same two ticks).
-        if (c->rag.active) {
-            ragdoll_read_pose(&c->rag, w->phys, &LIB->ragdoll, s, pose);
-        } else if (c->dead && c->settled_pose) {
-            memcpy(pose, c->settled_pose, sizeof(Xform) * (size_t)s->count);
-        } else if (c->dead) {
-            memcpy(pose, c->pose_cur, sizeof(Xform) * (size_t)s->count);
-        } else {
-            float span = (float)DG_MAX(1, c->interval);
-            float t = saturate(((float)(w->chars->tick - c->last_eval) + alpha) / span);
-            Xform sfix = seat_fix(w, c, t);
-            for (int b = 0; b < s->count; b++) pose[b] = xf_mul(sfix, xf_lerp(c->pose_prev[b], c->pose_cur[b], t));
+    (void)cam_pos;
+    static CharDrawPrep prep[MAX_CHARACTERS];
+    PROF_BEGIN("chars:render");
+    if (!prof_fix_enabled(PFX_CHAR_POSE_JOBS)) {
+        // One character after the other (perf_fix_disable PF-0021).
+        for (int k = 0; k < MAX_CHARACTERS; k++) {
+            if (!prep_char(w, w->chars->c[k], alpha, &prep[0])) continue;
+            pose_char(&prep[0]);
+            draw_char_all(w, prep[0].c, alpha, local_slot);
         }
-        bool local = c->is_player && c->slot == local_slot && !g_thirdperson;
-        u32 flags = local ? (MAT_SHADOW_ONLY | MAT_SELF) : 0;   // the owner's body: shadows + phone cameras (selfies)
-        memcpy(c->pose_draw, pose, sizeof(Xform) * (size_t)s->count);
-        c->pose_draw_frame = g_engine.frame_index;
-        // One pose, one palette: every part skins from c->si.
-        u8 sel[CSLOT_COUNT];
-        drawn_selection(c, local_slot, sel);
-        resolve_parts(c, sel);
-        skel_inst_set_pose(c->si, pose);
-        float dist = v3_dist(cam_pos, c->root.t);
-        int lod = c->lod < 0 ? 0 : c->lod;
-        if (lod_active() && c->lodf.cur >= 0) {
-            // docs/LOD.md: both LODs of a cross-fade with complementary dithers, their shadows (one LOD
-            // coarser) the same way; the shadow fades in / out over a band at the shadow size
-            int lods[2];
-            float fades[2];
-            int nd = lod_fade_draws(&c->lodf, lods, fades);
-            for (int k2 = 0; k2 < nd; k2++) draw_char(w, c, lods[k2], fades[k2], flags, false);
-            if (local || c->shadow_w > 0.0f) {
-                int s0 = DG_MIN(lods[0] + 1, CHAR_LOD_COUNT - 1), s1 = nd > 1 ? DG_MIN(lods[1] + 1, CHAR_LOD_COUNT - 1) : s0;
-                float sw = local ? 1.0f : c->shadow_w;
-                if (nd > 1 && s0 != s1) {
-                    draw_char(w, c, s0, fades[0], MAT_SHADOW_ONLY, true);
-                    draw_char(w, c, s1, fades[1], MAT_SHADOW_ONLY, true);
-                } else {
-                    draw_char(w, c, s1, sw < 1.0f ? lod_fade_in(sw) : 0.0f, MAT_SHADOW_ONLY, true);
-                }
-            }
-        } else {
-            bool shadow = c->pixels > CG->lod.shadow_pixels || local;
-            if (c->lod_fade < 1.0f && c->fade_from != lod) {
-                draw_char(w, c, c->fade_from, -(1.0f - c->lod_fade), flags, false);
-                draw_char(w, c, lod, c->lod_fade, flags, false);
-            } else {
-                draw_char(w, c, lod, 0, flags, false);
-            }
-            // Shadows: one LOD coarser than the main draw.
-            if (shadow) draw_char(w, c, DG_MIN(lod + 1, CHAR_LOD_COUNT - 1), 0, MAT_SHADOW_ONLY, true);
-        }
-        // Held item (glued to the right hand).
-        if (c->item_valid && !c->dead && (c->item_weapon || c->item_def)) {
-            float span = (float)DG_MAX(1, c->interval);
-            float t = saturate(((float)(w->chars->tick - c->last_eval) + alpha) / span);
-            Xform it = xf_mul(seat_fix(w, c, t), xf_lerp(c->item_prev, c->item_cur, t));
-            hands_set_draw_scale(c->rt.proc.item_scale);   // the grip root's calibration scale
-            // Slide / wobble: the owner's body copy (shadow) uses the first-person fire animation.
-            const FireAnimOut *fo = local ? &g_fp_fire_frame : &c->tp_fire_out;
-            hands_set_fire_mech(false, fo->slide, fo->wobble_rot);
-            hands_draw_held_att(c->item_weapon, c->item_weapon ? NULL : c->item_def, c->item_att, it.t, it.r, local ? (MAT_SHADOW_ONLY) : 0);
-            hands_set_draw_scale(1.0f);
-        }
-        (void)dist;
+        PROF_END();
+        return;
     }
+    // docs/perf/FINDINGS.md PF-0021: pose sources on the main thread, the poses on the jobs, every
+    // draw on the main thread in entity order (each part reserving its palette in this frame's bone
+    // buffer), the palette gathers on the jobs. Each job writes only its own character / palette.
+    int n = 0;
+    PROF_BEGIN("chars:prep");
+    for (int k = 0; k < MAX_CHARACTERS; k++)
+        if (prep_char(w, w->chars->c[k], alpha, &prep[n])) n++;
+    PROF_END();
+    jobs_parallel_for(n, 8, pose_range, prep);
+    static PalFill fills[MAX_PAL_FILLS];
+    g_fills = fills;
+    g_fill_n = 0;
+    PROF_BEGIN("chars:draws");
+    for (int k = 0; k < n; k++) draw_char_all(w, prep[k].c, alpha, local_slot);
+    PROF_END();
+    g_fills = NULL;
+    jobs_parallel_for(g_fill_n, 16, fill_range, fills);
+    PROF_END();
 }
-
 bool chars_ragdoll_now(World *w, EntityId e, vec3 impulse) {
     CharacterInst *c = char_get(w, e);
     if (!c || !c->have_pose) return false;
@@ -3119,7 +3485,7 @@ void chars_debug_draw(World *w, vec3 cam_pos) {
                 char fs[24] = "";
                 if (lod_fade_active(&c->lodf)) snprintf(fs, sizeof(fs), "<%d %.0f%%", c->lodf.from, (double)(c->lodf.t * 100.0f));
                 snprintf(t, sizeof(t), "LOD%d%s %.0fpx 1/%.1f ik%.2f sh%.2f %s%s", c->lod, fs, c->pixels, (double)exp2f(c->interval_log2), (double)c->ik_w, (double)c->shadow_w,
-                         c->lod <= 1 ? "hold dmg" : "baked-arms", c->culled ? " CULLED" : "");
+                         c->lod <= 1 ? "hold dmg" : "baked-arms", c->culled ? " CULLED" : c->offscreen ? " OFFSCREEN" : c->shared ? " SHARED" : "");
             } else
             snprintf(t, sizeof(t), "LOD%d %.0fpx 1/%d %s%s%s", c->lod, c->pixels, c->interval, c->lod <= 0 ? "foot spine turn " : "",
                      c->lod <= 1 ? "hold dmg" : "baked-arms", c->culled ? " CULLED" : "");

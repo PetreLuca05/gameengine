@@ -111,6 +111,10 @@ void skm_compact_bones(SkeletalMesh *m);
 // transform per mesh-only bone). leaf_local: optional per mesh bone local override for mesh-only bones
 // (secondary motion layer; NULL = rigid on the parent). Returns the bone count written to out.
 int skm_gather_palette(const SkeletalMesh *m, const SkeletonInstance *si, const Xform *leaf_local, mat4 *out);
+// True when both meshes gather the same palette from any skeleton instance (leaf_local NULL): the same
+// bone list as far as the gather reads it (skeleton bones, per-bone fixes, mesh-only leaves). Parts of a
+// modular character with equal tables share one palette (docs/perf/FINDINGS.md PF-0020).
+bool skm_palette_equal(const SkeletalMesh *a, const SkeletalMesh *b);
 // World transform of a mesh bone (skeleton bones: the instance's; mesh-only: through their parents).
 Xform skm_bone_world(const SkeletalMesh *m, const SkeletonInstance *si, int mesh_bone);
 // Mesh-local socket ("backpack" on one jacket) in world space.

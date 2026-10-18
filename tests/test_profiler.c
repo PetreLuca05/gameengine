@@ -26,6 +26,25 @@ static void range_work(void *ctx, int b, int e) { (void)ctx; (void)b; (void)e; s
 
 static void section(FILE *f) { fprintf(f, "{\"hello\":1}"); }
 
+// parallel_for back to back (late helpers of one loop meet the next loops on their slot): every index
+// runs exactly once and all of them before the call returns (docs/perf/FINDINGS.md PF-0021).
+static SDL_AtomicInt g_pf_hits[512];
+static void count_range(void *ctx, int b, int e) {
+    (void)ctx;
+    for (int i = b; i < e; i++) SDL_AddAtomicInt(&g_pf_hits[i], 1);
+    if ((b & 7) == 0) SDL_Delay(0);   // yield: helpers fall behind
+}
+static int pf_stress(int loops) {
+    int bad = 0;
+    for (int l = 0; l < loops; l++) {
+        int n = 17 + (l * 37) % 480;
+        for (int i = 0; i < n; i++) SDL_SetAtomicInt(&g_pf_hits[i], 0);
+        jobs_parallel_for(n, 1 + l % 5, count_range, NULL);
+        for (int i = 0; i < n; i++) bad += SDL_GetAtomicInt(&g_pf_hits[i]) != 1;
+    }
+    return bad;
+}
+
 int main(void) {
     log_init("test_profiler.log");
     prof_init();
@@ -93,6 +112,8 @@ int main(void) {
     }
 
     // perf_fix_disable -> prof_fix_enabled
+    int pf_bad = pf_stress(4000);
+    CHECK(pf_bad == 0, "parallel_for: %d indices not run exactly once by the time it returned", pf_bad);
     CHECK(prof_fix_enabled(PFX_CVAR_HASH), "fixes on by default");
     cvar_set("perf_fix_disable", "PF-0002,PF-0005");
     CHECK(!prof_fix_enabled(PFX_CVAR_HASH) && !prof_fix_enabled(PFX_FG_REPORT_LAZY) && prof_fix_enabled(PFX_SHADOW_CLEAR_SKIP), "fix ids parsed");

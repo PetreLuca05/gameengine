@@ -296,9 +296,13 @@ vec3 srgb_to_linear(vec3 c) { return pow(c, vec3(2.2)); }
 struct SkinInstance {
     vec4 color;
     vec4 params;    // roughness, metallic, emissive, lod fade (-1..1, 0 = fully visible)
-    uvec4 info;     // x = first bone, y = material flags
+    uvec4 info;     // x = first bone, y = material flags, z = previous palette's first bone + 1 (bit 31: SKIN_ROOTED)
     vec4 recon;     // MAT_RECON: spine base xyz, progress w (docs/REVIVE.md)
+    vec4 root[3];   // SKIN_ROOTED: rows of the 3x4 placing a shared model-space palette (docs/perf/FINDINGS.md PF-0034)
+    vec4 prev_root[3];   // ... last frame's (velocity)
 };
+#define SKIN_ROOTED 0x80000000u
+mat4 skin_root(vec4 r0, vec4 r1, vec4 r2) { return transpose(mat4(r0, r1, r2, vec4(0.0, 0.0, 0.0, 1.0))); }
 layout(std430, set = 0, binding = 2) readonly buffer SkinBones { mat4 bones[]; } skin_bones;
 layout(std430, set = 0, binding = 3) readonly buffer SkinInstances { SkinInstance inst[]; } skin_inst;
 

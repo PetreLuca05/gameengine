@@ -1,10 +1,10 @@
 // Performance audit runs (docs/PERF_AUDIT.md): the fixed benchmark scenes of assets/perf/scenes.json,
 // captured by the profiler (src/core/profiler.h) as JSON profiles for tools/perf_audit.
 //
-//   perf_audit [all|scene,scene..] [frames=300] [out=perf_out] [levels=modern,low] [settle=120] [refs] [quit]
+//   perf_audit [all|scene,scene..] [frames=300] [out=perf_out] [levels=modern,low] [settle=120] [cap=fps] [refs] [quit]
 //       every scene x level: load, settle, capture N frames along the scene's camera path; refs also
 //       takes reference screenshots (UI hidden) at fixed camera keys after the capture.
-//   perf_verify <PF-xxxx> [all|scene,..] [frames=240] [out=perf_out/verify] [reps=2] [settle=120] [quit]
+//   perf_verify <PF-xxxx> [all|scene,..] [frames=240] [out=perf_out/verify] [reps=2] [settle=120] [cap=fps] [quit]
 //       A / B proof of a fidelity-neutral fix: A runs with perf_fix_disable <id>, B with every fix;
 //       passes alternate A B A B. Each pass captures a profile (timings), a gameplay state hash per
 //       tick (the replicated state of every entity: positions, rotations, hp, flags, animation state
@@ -12,6 +12,9 @@
 //
 // The runs pause the clock and the weather, fix the frame step (dev_fixed_fps 60: one sim tick per
 // frame, so every pass does the same work), drop the frame cap / vsync and restore everything after.
+// cap=<fps> keeps a frame cap instead: both sides then submit at the same rate, so a CPU-side speed-up
+// cannot move GPU timings through the GPU's duty cycle (queueing behind the previous frame, other
+// processes' GPU work landing inside the frame's timestamps; docs/perf/FINDINGS.md PF-0021).
 // Nothing else changes: a run measures the engine as it is.
 #include "game_internal.h"
 #include "core/engine.h"
@@ -58,6 +61,7 @@ static struct {
     int plan_count, step;
     PerfPhase phase;
     int frame, frames, shot, shot_wait;
+    int cap;                 // cap=<fps>: the frame cap kept on (both sides submit at one rate; 0 = none)
     char out[192], fix[16];
     vec3 center;
     // restored after the run
@@ -269,7 +273,9 @@ static bool run_begin(bool verify, const char *out) {
     save_cvar("r_vsync", PF.saved_vsync, sizeof(PF.saved_vsync));
     save_cvar("r_fidelity", PF.saved_level, sizeof(PF.saved_level));
     dev_set("dev_fixed_fps", "60");
-    cvar_set("r_maxfps", "0");
+    char cap[16];
+    snprintf(cap, sizeof(cap), "%d", PF.cap);
+    cvar_set("r_maxfps", cap);
     cvar_set("r_vsync", "0");
     PF.verify = verify;
     PF.step = 0;
@@ -409,6 +415,7 @@ static void cmd_perf_audit(int argc, const char **argv) {
     PF.settle = kv(argc, argv, "settle") ? DG_MAX(2, atoi(kv(argc, argv, "settle"))) : PF.settle_default;
     PF.refs = has_flag(argc, argv, "refs");
     PF.quit = has_flag(argc, argv, "quit");
+    PF.cap = kv(argc, argv, "cap") ? DG_MAX(0, atoi(kv(argc, argv, "cap"))) : 0;
     PF.fix[0] = 0;
     int levels[5], nl = 0;
     char lb[64];
@@ -427,7 +434,7 @@ static void cmd_perf_verify(int argc, const char **argv) {
     const char *id = positional(argc, argv, 0);
     // "all": every fix off on the A side (the nightly CI checks images / state of all fixes together).
     if (!id || (strncmp(id, "PF-", 3) && strcmp(id, "all"))) {
-        log_info("usage: perf_verify <PF-xxxx|all> [all|scene,..] [frames=240] [out] [reps=2] [levels=modern] [settle=120] [quit]");
+        log_info("usage: perf_verify <PF-xxxx|all> [all|scene,..] [frames=240] [out] [reps=2] [levels=modern] [settle=120] [cap=fps] [quit]");
         return;
     }
     int sc[PERF_MAX_SCENES];
@@ -437,6 +444,7 @@ static void cmd_perf_verify(int argc, const char **argv) {
     PF.settle = kv(argc, argv, "settle") ? DG_MAX(2, atoi(kv(argc, argv, "settle"))) : PF.settle_default;
     PF.refs = true;
     PF.quit = has_flag(argc, argv, "quit");
+    PF.cap = kv(argc, argv, "cap") ? DG_MAX(0, atoi(kv(argc, argv, "cap"))) : 0;
     dg_strcpy(PF.fix, sizeof(PF.fix), id);
     int reps = reps_s ? DG_CLAMP(atoi(reps_s), 1, 8) : 2;
     int levels[5], nl = 0;
@@ -467,9 +475,9 @@ static void cmd_perf_scenes(int argc, const char **argv) {
 
 void game_perf_init(void) {
     cmd_register("perf_audit", cmd_perf_audit,
-                 "perf_audit [all|scene,..] [frames=300] [out=perf_out] [levels=modern,low] [settle=120] [refs] [quit]: profile the benchmark scenes (docs/PERF_AUDIT.md)");
+                 "perf_audit [all|scene,..] [frames=300] [out=perf_out] [levels=modern,low] [settle=120] [cap=fps] [refs] [quit]: profile the benchmark scenes (docs/PERF_AUDIT.md)");
     cmd_register("perf_verify", cmd_perf_verify,
-                 "perf_verify <PF-xxxx|all> [all|scene,..] [frames=240] [out=perf_out/verify] [reps=2] [levels=modern] [settle=120] [quit]: A/B timings, image and state diffs of a fix");
+                 "perf_verify <PF-xxxx|all> [all|scene,..] [frames=240] [out=perf_out/verify] [reps=2] [levels=modern] [settle=120] [cap=fps] [quit]: A/B timings, image and state diffs of a fix");
     cmd_register("perf_scenes", cmd_perf_scenes, "list the perf_audit benchmark scenes (assets/perf/scenes.json)");
     render_set_camera_override(perf_camera);
     prof_add_frame_hook(hash_frame);

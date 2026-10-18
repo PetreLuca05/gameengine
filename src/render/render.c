@@ -133,7 +133,40 @@ void render_set_sun_shadow(const LightShadowSettings *s) {
 }
 void render_get_sun_shadow(LightShadowSettings *out) { *out = R->sun_shadow; }
 
+// docs/perf/FINDINGS.md PF-0020: the frame sets' bone palettes (binding 2): the shared ring the
+// palettes are written into in place, or (perf_fix_disable PF-0020, CPU skinning) this slot's own
+// buffer of this frame's + last frame's palettes, created on first use. Called once the slot's fence
+// signalled (no command buffer that reads its sets is pending).
+static void bind_bones(FrameResources *f, bool ring) {
+    if (f->bones_ring == ring && (ring || f->bones.buffer)) return;
+    if (!ring && !f->bones.buffer)
+        f->bones = vkr_buffer_create(sizeof(mat4) * MAX_SKIN_BONES * 2, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);   // + last frame's
+    VkDescriptorSet sets[FRAME_SET_COUNT];
+    frame_sets_of(f, sets);
+    VkDescriptorBufferInfo bi = { ring ? R->bone_ring.buffer : f->bones.buffer, 0, VK_WHOLE_SIZE };
+    for (int s = 0; s < FRAME_SET_COUNT; s++) {
+        if (!sets[s]) continue;
+        VkWriteDescriptorSet w = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
+        w.dstSet = sets[s];
+        w.dstBinding = 2;
+        w.descriptorCount = 1;
+        w.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+        w.pBufferInfo = &bi;
+        vkUpdateDescriptorSets(R->device, 1, &w, 0, NULL);
+    }
+    f->bones_ring = ring;
+}
+
 static void create_frames(void) {
+    // Absolute ring offsets ride in SkinnedDraw.bone_count's low 20 bits.
+    _Static_assert(SKIN_RING_REGIONS * MAX_SKIN_BONES < (1 << 20), "skin ring offsets must fit 20 bits");
+    R->bone_ring = vkr_buffer_create(sizeof(mat4) * MAX_SKIN_BONES * SKIN_RING_REGIONS, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);
+    {
+        VkMemoryPropertyFlags mf = 0;
+        vmaGetAllocationMemoryProperties(R->vma, R->bone_ring.alloc, &mf);
+        log_info("render: skinning palette ring %.1f MB, %s memory", (double)R->bone_ring.size / (1024.0 * 1024.0),
+                 (mf & VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT) ? "device-local (BAR)" : "host");
+    }
     for (int i = 0; i < FRAMES_IN_FLIGHT; i++) {
         FrameResources *f = &R->frames[i];
         VkCommandPoolCreateInfo pci = { VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
@@ -154,7 +187,6 @@ static void create_frames(void) {
         f->ubo_pip = vkr_buffer_create(sizeof(FrameData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, true);
         for (int k = 0; k < 2; k++) f->ubo_phone[k] = vkr_buffer_create(sizeof(FrameData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, true);
         f->dyn = vkr_buffer_create(DYN_BUFFER_SIZE, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, true);
-        f->bones = vkr_buffer_create(sizeof(mat4) * MAX_SKIN_BONES * 2, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);   // + last frame's
         f->instances = vkr_buffer_create(sizeof(GpuSkinInstance) * MAX_SKIN_DRAWS * 8, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);   // main + shadow + 5 culled shadow (PF-0011) + vm / phone
         f->prev_models = vkr_buffer_create(sizeof(mat4) * (MAX_DRAWS + MAX_VM_DRAWS), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);
 
@@ -178,7 +210,7 @@ static void create_frames(void) {
             w.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
             w.pBufferInfo = &bi;
             vkUpdateDescriptorSets(R->device, 1, &w, 0, NULL);
-            VkDescriptorBufferInfo sb[3] = { { f->bones.buffer, 0, VK_WHOLE_SIZE }, { f->instances.buffer, 0, VK_WHOLE_SIZE },
+            VkDescriptorBufferInfo sb[3] = { { R->bone_ring.buffer, 0, VK_WHOLE_SIZE }, { f->instances.buffer, 0, VK_WHOLE_SIZE },
                                              { f->prev_models.buffer, 0, VK_WHOLE_SIZE } };
             VkWriteDescriptorSet ws[3];
             for (int k = 0; k < 3; k++) {
@@ -191,6 +223,7 @@ static void create_frames(void) {
             }
             vkUpdateDescriptorSets(R->device, 3, ws, 0, NULL);
         }
+        f->bones_ring = true;
     }
 }
 
@@ -231,13 +264,14 @@ static void destroy_frames(void) {
         vkr_buffer_destroy_now(&f->ubo_pip);
         for (int k = 0; k < 2; k++) vkr_buffer_destroy_now(&f->ubo_phone[k]);
         vkr_buffer_destroy_now(&f->dyn);
-        vkr_buffer_destroy_now(&f->bones);
+        vkr_buffer_destroy_now(&f->bones);   // a no-op unless made (bind_bones)
         vkr_buffer_destroy_now(&f->instances);
         vkr_buffer_destroy_now(&f->prev_models);
         vkDestroySemaphore(R->device, f->image_available, NULL);
         vkDestroyFence(R->device, f->fence, NULL);
         vkDestroyCommandPool(R->device, f->pool, NULL);
     }
+    vkr_buffer_destroy_now(&R->bone_ring);
 }
 
 bool render_init(SDL_Window *window) {
@@ -433,6 +467,9 @@ bool render_begin_frame(void) {
     R->draw_count = R->vm_draw_count = R->light_count = 0;
     R->spot_count = 0;
     R->skin_draw_count = R->skin_bone_count = 0;
+    R->skin_direct = false;   // palettes go to skin_bones until this frame's slot is free (below)
+    R->skin_base = 0;
+    R->skin_epoch++;
     R->line_count[0] = R->line_count[1] = 0;
     R->text_count = 0;
     R->ui_vcount = R->ui_icount = R->ui_ccount = 0;
@@ -458,6 +495,12 @@ bool render_begin_frame(void) {
     if (res != VK_SUCCESS && res != VK_SUBOPTIMAL_KHR) { log_error("acquire failed %d", (int)res); return false; }
     VK_CHECK(vkResetFences(R->device, 1, &f->fence));
     R->frame_active = true;
+    // docs/perf/FINDINGS.md PF-0020: this frame's palettes go straight into its ring region (its last
+    // readers, frames N - 3 and N - 2, are complete: this slot's fence was frame N - 2's).
+    R->skin_cpu = R->r_cpu_skinning->i != 0;
+    R->skin_direct = !R->skin_cpu && prof_fix_enabled(PFX_SKIN_PALETTE_DIRECT);
+    R->skin_base = R->skin_direct ? R->bone_region * MAX_SKIN_BONES : 0;
+    bind_bones(f, R->skin_direct);
     return true;
 }
 
@@ -498,13 +541,53 @@ void render_draw(const DrawItem *item) {
     R->draws[R->draw_count++] = *item;
 }
 
+// docs/perf/FINDINGS.md PF-0020: the palette goes where the shaders read it (the ring when direct),
+// keyed so that the parts of one pose share one copy (the caller knows which parts gather the same
+// matrices: same skeleton instance, pose version and bone table class).
+mat4 *render_skin_palette(const void *src, u32 version, u32 variant, u32 count, u32 *handle) {
+    enum { PAL_KEYS = 8 };
+    static struct { const void *src; u32 version, variant, count, epoch, handle; } keys[PAL_KEYS];
+    static u32 next;
+    *handle = 0;
+    if (!count || count > 0xFFFu) return NULL;
+    for (u32 k = 0; k < PAL_KEYS && prof_fix_enabled(PFX_SKIN_PALETTE_SHARE); k++) {   // PF-0007: one copy per pose
+        u32 j = (next + PAL_KEYS - 1 - k) % PAL_KEYS;   // newest first
+        if (keys[j].epoch != R->skin_epoch || keys[j].src != src || keys[j].version != version || keys[j].variant != variant ||
+            keys[j].count != count) continue;
+        *handle = keys[j].handle;
+        return NULL;
+    }
+    if (R->skin_bone_count + count > MAX_SKIN_BONES) return NULL;
+    u32 off = R->skin_base + R->skin_bone_count;
+    *handle = off | (count << 20);
+    keys[next].src = src;
+    keys[next].version = version;
+    keys[next].variant = variant;
+    keys[next].count = count;
+    keys[next].epoch = R->skin_epoch;
+    keys[next].handle = *handle;
+    next = (next + 1) % PAL_KEYS;
+    mat4 *dst = R->skin_direct ? (mat4 *)R->bone_ring.mapped + off : R->skin_bones + R->skin_bone_count;
+    R->skin_bone_count += count;
+    prof_count(PC_SKIN_PALETTES, 1);   // docs/PERF_AUDIT.md R10: palettes vs distinct poses
+    prof_count(PC_SKIN_PALETTE_BYTES, (i64)(sizeof(mat4) * count));
+    return dst;
+}
+
+bool render_skin_rooted_ok(void) { return R->frame_active && !R->skin_cpu; }
+
 void render_draw_skinned(const SkinnedDraw *d) {
-    if (!d->mesh || !d->palette || !d->bone_count || R->skin_draw_count >= MAX_SKIN_DRAWS) return;
-    if (R->skin_bone_count + d->bone_count > MAX_SKIN_BONES) return;
+    if (!d->mesh || !(d->palette || d->palette_handle) || !d->bone_count || R->skin_draw_count >= MAX_SKIN_DRAWS) return;
+    if (!d->palette_handle && R->skin_bone_count + d->bone_count > MAX_SKIN_BONES) return;
     if (!R->meshes[d->mesh].used || !R->meshes[d->mesh].skinned) return;
     SkinnedDraw *s = &R->skin_draws[R->skin_draw_count++];
     *s = *d;
     if (!s->object_id && (s->flags & MAT_VIEWMODEL)) s->object_id = 0x40000000u | R->skin_draw_count;
+    if (d->palette_handle) {   // written in place (render_skin_palette)
+        s->palette = NULL;
+        s->bone_count = d->palette_handle;
+        return;
+    }
     // docs/perf/FINDINGS.md PF-0007: the parts of a modular character (and its shadow LOD) gather
     // their palettes from its one skeleton (characters.c draw_part); parts with the same bone table
     // get the same matrices. A palette equal (bit for bit) to one of the last copies of this frame
@@ -513,7 +596,7 @@ void render_draw_skinned(const SkinnedDraw *d) {
     enum { PAL_RECENT = 8 };
     static struct { u32 off, n, frame; } recent[PAL_RECENT];
     static u32 recent_next;
-    if (prof_fix_enabled(PFX_SKIN_PALETTE_SHARE)) {
+    if (prof_fix_enabled(PFX_SKIN_PALETTE_SHARE) && !R->skin_direct) {   // (the ring is write-only memory: no compare)
         for (u32 k = 0; k < PAL_RECENT; k++) {
             u32 j = (recent_next + PAL_RECENT - 1 - k) % PAL_RECENT;   // newest first
             if (recent[j].frame != R->frame_index + 1u || recent[j].n != d->bone_count) continue;
@@ -527,10 +610,11 @@ void render_draw_skinned(const SkinnedDraw *d) {
         recent[recent_next].frame = R->frame_index + 1u;   // 0 = never written
         recent_next = (recent_next + 1) % PAL_RECENT;
     }
-    memcpy(R->skin_bones + R->skin_bone_count, d->palette, sizeof(mat4) * d->bone_count);
+    memcpy(R->skin_direct ? (mat4 *)R->bone_ring.mapped + R->skin_base + R->skin_bone_count : R->skin_bones + R->skin_bone_count, d->palette,
+           sizeof(mat4) * d->bone_count);
     // The palette pointer is replaced by its offset into this frame's bone buffer.
     s->palette = NULL;
-    s->bone_count = R->skin_bone_count | ((u32)d->bone_count << 20);
+    s->bone_count = (R->skin_base + R->skin_bone_count) | ((u32)d->bone_count << 20);
     R->skin_bone_count += d->bone_count;
     prof_count(PC_SKIN_PALETTES, 1);   // docs/PERF_AUDIT.md R10: palettes vs distinct poses
     prof_count(PC_SKIN_PALETTE_BYTES, (i64)(sizeof(mat4) * d->bone_count));
@@ -893,6 +977,18 @@ static void draw_items(VkCommandBuffer cmd, DrawItem *items, u32 count, bool sha
 
 // ------------------------------------------------------------------ skinned characters
 
+// docs/perf/FINDINGS.md PF-0034: a shared model-space palette placed by the draw's root (rows of the
+// column-major 3x4; last frame's root for the velocity). info.z = SKIN_ROOTED: no previous palette.
+static void skin_instance_root(GpuSkinInstance *g, const SkinnedDraw *d) {
+    if (!d->rooted) return;
+    const float *a = d->root.m, *b = d->prev_root.m;
+    for (int r = 0; r < 3; r++) {
+        g->root[r] = v4(a[r], a[4 + r], a[8 + r], a[12 + r]);
+        g->prev_root[r] = v4(b[r], b[4 + r], b[8 + r], b[12 + r]);
+    }
+    g->info[2] = SKIN_ROOTED;
+}
+
 // fade: shadow pass, PIPE_SKIN_SHADOW_FADE (docs/LOD.md); mat_set: the PBR map set (set 3, vkr_material_set;
 // ~0 in the shadow pass, whose shaders sample none).
 typedef struct SkinBatch { u32 mesh, texture, first, count; bool fade; u32 mat_set; } SkinBatch;
@@ -935,6 +1031,7 @@ static u32 build_skin_pass(FrameResources *f, int pass, u32 base, SkinPass *out)
     }
     // Instanced batches per (texture, mesh): modular characters sharing parts batch per (part, LOD).
     u32 nb = skin_batch_build(keys, n, order, runs);
+    _Static_assert(SKIN_RING_REGIONS * MAX_SKIN_BONES < SKIN_ROOTED, "info.z: palette offsets below the rooted bit");
     GpuSkinInstance *inst = (GpuSkinInstance *)f->instances.mapped;
     if (shadow) g_skin_shadow_base = base;
     for (u32 k = 0; k < n; k++) {
@@ -949,12 +1046,16 @@ static u32 build_skin_pass(FrameResources *f, int pass, u32 base, SkinPass *out)
         g->info[2] = 0;
         float ns = d->normal_scale != 0.0f ? d->normal_scale : 1.0f;
         memcpy(&g->info[3], &ns, sizeof(ns));   // skin.vert -> PBR_PARAMS.x (shaders/pbr_maps.glsl)
-        // Last frame's palette of the same object (appended after this frame's bones).
+        // Last frame's palette of the same object: in place in the ring's previous region (PF-0020), else
+        // appended after this frame's bones.
         if (!shadow && d->object_id && !R->camera_cut) {
             u32 off, count;
-            if (prev_palette(d->object_id, &off, &count) && count == (d->bone_count >> 20) && off + count <= R->prev_bone_count)
-                g->info[2] = R->skin_bone_count + off + 1;
+            if (prev_palette(d->object_id, &off, &count) && count == (d->bone_count >> 20) && R->skin_direct == R->skin_prev_direct) {
+                if (R->skin_direct) g->info[2] = off + 1;
+                else if (off + count <= R->prev_bone_count) g->info[2] = R->skin_bone_count + off + 1;
+            }
         }
+        skin_instance_root(g, d);
     }
     out->batch_count = nb;
     for (u32 b = 0; b < nb; b++) {
@@ -1006,6 +1107,7 @@ static u32 cull_skin_shadow(FrameResources *f, int k, u32 base, const SkinPass *
             g->info[2] = 0;
             float ns = d->normal_scale != 0.0f ? d->normal_scale : 1.0f;
             memcpy(&g->info[3], &ns, sizeof(ns));
+            skin_instance_root(g, d);
             n++;
         }
         if (n == first) continue;
@@ -1067,6 +1169,7 @@ static void cpu_skin_all(FrameResources *f, CpuSkin *out) {
                 p = v3_madd(p, mat4_mul_point(pal[sv->joints[k]], sv->pos), w);
                 nn = v3_madd(nn, mat4_mul_dir(pal[sv->joints[k]], sv->normal), w);
             }
+            if (d->rooted) { p = mat4_mul_point(d->root, p); nn = mat4_mul_dir(d->root, nn); }   // PF-0034
             dst[v].pos = p;
             dst[v].normal = v3_norm(nn);
             dst[v].uv = sv->uv;
@@ -2157,6 +2260,11 @@ bool render_scope_cull(mat4 *vp, vec3 *eye, float *px_scale) {
     return true;
 }
 
+bool render_sphere_maybe_visible(vec3 center, float radius) {
+    if (!R->have_prev || R->phone_views_last) return true;
+    return sphere_visible(R->frustum, center, radius);   // the main view's (compute_matrices; the PiP restores it)
+}
+
 bool render_scope_view(vec3 *eye, vec3 *fwd, float *tan_half, float *size_px) {
     if (!g_scope_lod.valid || !lod_scope()) return false;
     *eye = g_scope_lod.eye;
@@ -2555,7 +2663,8 @@ void render_end_frame(void) {
 
     // Skinned characters: palettes + per-pass instance lists (GPU) or CPU-skinned vertices.
     // The bone SSBO holds this frame's palettes, then last frame's (previous-palette velocity).
-    bool cpu_skin = R->r_cpu_skinning->i != 0;
+    bool cpu_skin = R->skin_cpu;   // read once at render_begin_frame (the palettes' place depends on it)
+    R->phone_views_last = phone_view_pending();
     g_skin_shadow_gpu = false;
     static SkinPass skin_main, skin_shadow, skin_vm, skin_phone, skin_shadow_k[5];
     skin_main.batch_count = skin_shadow.batch_count = skin_vm.batch_count = skin_phone.batch_count = 0;
@@ -2571,9 +2680,11 @@ void render_end_frame(void) {
             F.cpu_skinned = ARENA_PUSH_N(&g_engine.frame_arena, CpuSkin, R->skin_draw_count);
             cpu_skin_all(f, F.cpu_skinned);
         } else {
-            memcpy(f->bones.mapped, R->skin_bones, sizeof(mat4) * R->skin_bone_count);
-            if (R->prev_bone_count && R->skin_bone_count + R->prev_bone_count <= MAX_SKIN_BONES * 2)
-                memcpy((mat4 *)f->bones.mapped + R->skin_bone_count, R->prev_bones, sizeof(mat4) * R->prev_bone_count);
+            if (!R->skin_direct) {   // perf_fix_disable PF-0020: upload this frame's palettes and last frame's
+                memcpy(f->bones.mapped, R->skin_bones, sizeof(mat4) * R->skin_bone_count);
+                if (R->prev_bone_count && R->skin_bone_count + R->prev_bone_count <= MAX_SKIN_BONES * 2)
+                    memcpy((mat4 *)f->bones.mapped + R->skin_bone_count, R->prev_bones, sizeof(mat4) * R->prev_bone_count);
+            }
             memset(g_skin_shadow_inst, 0xFF, sizeof(u32) * R->skin_draw_count);
             g_skin_shadow_gpu = true;
             u32 used = build_skin_pass(f, 0, 0, &skin_main);
@@ -2911,8 +3022,10 @@ void render_end_frame(void) {
     store_prev_models(R->draws, R->draw_count);
     store_prev_models(R->vm_draws, R->vm_draw_count);
     if (!cpu_skin) {
-        memcpy(R->prev_bones, R->skin_bones, sizeof(mat4) * R->skin_bone_count);
-        R->prev_bone_count = R->skin_bone_count;
+        // PF-0020: the ring keeps this frame's palettes where they are (next frame's previous region).
+        if (!R->skin_direct) memcpy(R->prev_bones, R->skin_bones, sizeof(mat4) * R->skin_bone_count);
+        R->prev_bone_count = R->skin_direct ? 0 : R->skin_bone_count;
+        R->skin_prev_direct = R->skin_direct;
         for (u32 i = 0; i < R->skin_draw_count; i++) {
             const SkinnedDraw *d = &R->skin_draws[i];
             if (!d->object_id) continue;
@@ -2926,6 +3039,7 @@ void render_end_frame(void) {
     R->have_prev = true;
     R->camera_cut = false;
     R->frame_index++;
+    if (R->skin_direct) R->bone_region = (R->bone_region + 1) % SKIN_RING_REGIONS;   // submitted: the next frame's region
 
     R->frame_slot = (R->frame_slot + 1) % FRAMES_IN_FLIGHT;
     R->frame_active = false;

@@ -115,7 +115,7 @@ spawn-rate steps; shadow casters at `shadow_max_dist`.
 | Ranges | `assets/render/lod.json` (reload: `r_lod_reload`), `src/render/lod_fade.{h,c}` (pure: `tests/test_lod.c`) |
 | Cross-fade dither | `shaders/lod_fade.glsl`: 16 x 16 void-and-cluster blue noise (`tools/gen_lod_bluenoise.py`), shifted per frame (R2) while TAA is on |
 | Characters | `src/gameplay/characters.c` (`LodFade`, `lod_char_select`), `shaders/skin*.frag`, `skin_shadow.frag` (`PIPE_SKIN_SHADOW_FADE`) |
-| Animation tiers | `characters.c` (eased update rate), `src/anim/foot_ik.c`, `turn.c` (`ProcInput.lod_w`) |
+| Animation tiers | `characters.c` (eased update rate), `src/anim/foot_ik.c`, `turn.c` (`ProcInput.lod_w`); outside the view the cheap rate without IK (`characters.offscreen_update` / `offscreen_margin_deg`, docs/perf/FINDINGS.md PF-0033); from `characters.shared_pose_lod` a shared sampled pose per phase bucket (`shared_pose_phases`, PF-0034; docs/ANIMATION.md "LOD") |
 | Classic renderer | `src/render/vk_classic.c` (`cull_instance`, `emit_part`, `lod_pick_band`), `shaders/classic_common.glsl` (`cl_faded`) |
 | Terrain | `src/world/chunks.c` (`morph_target`, nearest-point levels), `shaders/lit.vert`, `shadow_morph.vert` (`PIPE_SHADOW_MORPH`), `surfaces.glsl` |
 | VFX | `src/vfx/vfx_sim.c` (`lod_smooth`, `lod_dist_scale`) |

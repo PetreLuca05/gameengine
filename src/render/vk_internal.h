@@ -23,6 +23,7 @@
 #define DYN_BUFFER_SIZE (16u << 20)
 #define MAX_SKIN_BONES 196608   // hordes: ~1000 characters x 65 bones + shadow draws
 #define MAX_SKIN_DRAWS 4096
+#define SKIN_RING_REGIONS (FRAMES_IN_FLIGHT + 1)   // PF-0020: the frame being written, the one in flight, its previous
 #define OBJ_SLOTS 16384                // power of two: object_id hash for previous transforms
 
 #define R (g_engine.render)
@@ -116,7 +117,8 @@ typedef struct FrameResources {
     GpuBuffer ubo_phone[2];   // phone camera views (src/render/phone_view.c)
     VkDescriptorSet frame_set_phone[2];
     GpuBuffer dyn;        // host-visible: lines, text, ui
-    GpuBuffer bones;      // host-visible SSBO: skinning palettes
+    GpuBuffer bones;      // host-visible SSBO: skinning palettes + last frame's (perf_fix_disable PF-0020 only, made on first use)
+    bool bones_ring;      // the frame sets bind R->bone_ring (PF-0020), not `bones`
     GpuBuffer instances;  // host-visible SSBO: skinned instance data
     GpuBuffer prev_models; // host-visible SSBO: previous model matrices of moving draws (velocity)
     VkDeviceSize dyn_used;
@@ -254,7 +256,10 @@ typedef enum PipelineId {
 } PipelineId;
 
 // Must match SkinInstance in shaders/common.glsl (std430).
-typedef struct GpuSkinInstance { vec4 color; vec4 params; u32 info[4]; vec4 recon; } GpuSkinInstance;
+// info: first bone, material flags, previous palette's first bone + 1 (bit 31: SKIN_ROOTED), normal scale bits.
+// root / prev_root: rows of the 3x4 placing a shared model-space palette (SKIN_ROOTED only, PF-0034).
+typedef struct GpuSkinInstance { vec4 color; vec4 params; u32 info[4]; vec4 recon; vec4 root[3], prev_root[3]; } GpuSkinInstance;
+#define SKIN_ROOTED 0x80000000u
 
 typedef struct LineBatch { VkDeviceSize offset; u32 count; } LineBatch;
 
@@ -346,7 +351,17 @@ typedef struct Renderer {
     SkinnedDraw *skin_draws;      // palette pointers rewritten to offsets into skin_bones
     u32 skin_draw_count;
     mat4 *skin_bones;
-    u32 skin_bone_count;
+    u32 skin_bone_count;          // this frame's palettes (matrices)
+    // docs/perf/FINDINGS.md PF-0020: palettes written in place into a mapped ring of SKIN_RING_REGIONS
+    // x MAX_SKIN_BONES matrices shared by the frame slots (frame N writes region bone_region, its
+    // previous palettes are region N - 1's, read in place).
+    GpuBuffer bone_ring;
+    u32 bone_region;              // this frame's region
+    u32 skin_base;                // its first matrix (0 when not direct: skin_bones, copied at the end)
+    u32 skin_epoch;               // bumped every frame (render_skin_palette keys)
+    bool skin_direct, skin_prev_direct;   // this / last frame's palettes are in the ring
+    bool skin_cpu;                // r_cpu_skinning, read once per frame
+    bool phone_views_last;        // a phone camera view rendered last frame (render_sphere_maybe_visible)
     GpuPointLight lights[MAX_POINT_LIGHTS];
     u32 light_count;
     GpuSpotLight spots[MAX_SPOT_LIGHTS];

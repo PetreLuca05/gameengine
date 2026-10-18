@@ -36,14 +36,18 @@
     },
 
     "characters": {
-        "_comment": "projected height (px at 1080p-equivalent render height, bias 1): LOD0 above px[0], LOD1 above px[1], LOD2 above px[2], LOD3 below (was 260 / 120 / 50). update_every: pose ticks per LOD; update_ramp_s: s per octave of interval change. ik_band: foot IK / lean fade over this fraction below the LOD0 threshold.",
+        "_comment": "projected height (px at 1080p-equivalent render height, bias 1): LOD0 above px[0], LOD1 above px[1], LOD2 above px[2], LOD3 below (was 260 / 120 / 50). update_every: pose ticks per LOD; update_ramp_s: s per octave of interval change. ik_band: foot IK / lean fade over this fraction below the LOD0 threshold. offscreen_update: pose ticks (at least) of a character outside the last frame's view grown by offscreen_margin_deg, which also drops its foot IK / lean / turn (docs/perf/FINDINGS.md PF-0033: presentation only, the host's simulation and hitboxes are untouched; its shadow may be in view). shared_pose_lod: from this LOD on (4 = never) a character whose pose is the plain base layer draws a pose sampled once per (state, phase bucket of shared_pose_phases per cycle, quantized speed / direction), shared with every character in the same bucket and kept across frames (docs/perf/FINDINGS.md PF-0034, presentation only).",
         "px": [140, 60, 25],
         "hysteresis": 0.15,
         "cull_px": 3,
         "shadow_px": 20,
         "update_every": [1, 2, 4, 8],
         "update_ramp_s": 1.5,
-        "ik_band": 0.3
+        "ik_band": 0.3,
+        "offscreen_update": 8,
+        "offscreen_margin_deg": 10,
+        "shared_pose_lod": 2,
+        "shared_pose_phases": 32
     },
 
     "impostor": {

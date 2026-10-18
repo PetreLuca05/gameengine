@@ -42,6 +42,8 @@ typedef enum ProfCounter {
     PC_AUDIO_VOICES, PC_AUDIO_VOICES_SILENT,       // voices mixed / of them, inaudible (zero gain)
     PC_UI_TEXT, PC_UI_VERTS,                       // text runs drawn / UI vertices
     PC_DRAW_ITEMS, PC_SHADOW_ITEMS,                // CPU draw items submitted / to the sun shadow tiles
+    PC_ANIM_EVAL_OUTSIDE,                          // characters posed this tick outside the last frame's view (PF-0033)
+    PC_ANIM_POSE_SHARED, PC_ANIM_POSE_SAMPLES,     // draw poses from the shared pose cache / cache fills (PF-0034)
     PC_COUNT
 } ProfCounter;
 
@@ -64,6 +66,8 @@ typedef enum ProfFix {
     PFX_ALPHA_MASK,           // PF-0014: shadow / prepass alpha tests sample an R8 alpha mask, not the RGBA albedo
     PFX_VIEW_DEPTH_ORDER,     // PF-0015: classic main view instances drawn front to back from the camera
     PFX_TEX_DECODE_JOBS,      // PF-0024: texture files decoded on the jobs at load (the same pixels)
+    PFX_SKIN_PALETTE_DIRECT,  // PF-0020: skinning palettes written straight into the mapped GPU ring
+    PFX_CHAR_POSE_JOBS,       // PF-0021: character draw poses and palettes on the job system
     // Visual trade-offs (not fidelity neutral: perf_verify measures them, the images differ by design):
     // perf_fix_disable "all" leaves them on, only their own id turns them off.
     PFX_SHADOW_CASTER_LIMIT,  // PF-0013: grass / small plant shadows in the near cascades only (r_shadow_caster_limit)
@@ -71,6 +75,8 @@ typedef enum ProfFix {
     PFX_UPSCALE_MIP_BIAS,     // PF-0029: TAA-U by default at High / Medium + negative mip bias under temporal upscaling
     PFX_SHADOW_FAR_STAGGER,   // PF-0028: sun cascades 2..3 re-rendered every r_shadow_far_interval frames, alternating
     PFX_TEX_BC,               // PF-0035: world / terrain / foliage textures block-compressed (BC7, r_texture_compress)
+    PFX_ANIM_FRUSTUM_LOD,     // PF-0033: characters outside the view pose at the cheap rate, without IK (presentation only)
+    PFX_ANIM_SHARED_POSE,     // PF-0034: far characters share one sampled pose per clip / phase bucket (presentation only)
     PFX_COUNT
 } ProfFix;
 #define PFX_TRADEOFF_FIRST PFX_SHADOW_CASTER_LIMIT

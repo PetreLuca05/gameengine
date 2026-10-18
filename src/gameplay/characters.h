@@ -94,6 +94,20 @@ typedef struct CharacterInst {
     LodFade lodf;
     float interval_log2, eval_acc, ik_w, shadow_w;
     int span;
+    bool outside;                     // outside the last frame's view (grown by a margin): PF-0033's test
+    bool offscreen;                   // ... and posed at the cheap rate without IK (PF-0033 on)
+    // docs/perf/FINDINGS.md PF-0034: the base layer's phase / state and the root of the last two
+    // post-passes (prev, cur), and the shared pose drawn this frame (NULL: the character's own) placed
+    // at shared_root (last frame's: shared_root_prev; character scale included).
+    float draw_phase[2];
+    i16 draw_state[2];
+    Xform draw_root[2];
+    struct PoseEntry *shared;
+    u32 shared_gen;
+    u64 shared_frame;
+    bool shared_cont;                 // also drawn shared the frame before (its root then is the velocity's)
+    Xform shared_root, shared_root_prev;
+    mat4 shared_m[2];                 // ... as matrices (the draws' root / prev_root)
     // Third-person fire animation (docs/FIRE_ANIM.md): layers 1, 2 and 4 at a reduced scale, driven
     // by the fire events with a deterministic seed, so everyone sees the kick and the slide.
     FireAnimState tp_fire;

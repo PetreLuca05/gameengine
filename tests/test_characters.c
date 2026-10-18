@@ -155,6 +155,17 @@ static void test_mesh_subset_palette(void) {
             }
     CHECK(matched > 50 && seam < 1e-5f, "part vs full body skinning: %d matched, worst %.6f m", matched, seam);
     printf("  head part: %d bones (body %d), gather vs full evaluation %.2g m, vs body %.2g m\n", hm->bone_count, bm->bone_count, worst, seam);
+    // docs/perf/FINDINGS.md PF-0020: parts whose bone tables are equal share one palette copy.
+    SkeletalMesh *cp = calloc(1, sizeof(SkeletalMesh));
+    skm_copy(cp, bm);
+    mat4 cpal[SKM_MAX_BONES];
+    skm_gather_palette(cp, si, NULL, cpal);
+    CHECK(skm_palette_equal(bm, cp) && !memcmp(cpal, bpal, sizeof(mat4) * (size_t)bm->bone_count), "equal bone tables must gather equal palettes");
+    CHECK(!skm_palette_equal(bm, hm), "body and head bone tables taken as equal");
+    cp->bones[0].has_fix = !cp->bones[0].has_fix;
+    CHECK(!skm_palette_equal(bm, cp), "a per-bone fix must make the tables differ");
+    skm_free(cp);
+    free(cp);
     free(rt);
     free(si);
 }

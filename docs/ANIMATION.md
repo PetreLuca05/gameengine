@@ -301,7 +301,9 @@ animation follows the movement (`speed_match`).
 
 * **GPU skinning.** One SSBO holds bone palettes and another holds per-instance data
   (`PIPE_SKIN`, `PIPE_SKIN_SHADOW`, `PIPE_SKIN_WIRE`). Instances of the same mesh and LOD are batched
-  into one instanced draw. Vertices carry 4 weights each (44-byte `SkinVertex`).
+  into one instanced draw. Vertices carry 4 weights each (44-byte `SkinVertex`). The palettes are
+  gathered straight into the mapped bone ring and the draw poses are interpolated on the jobs
+  (docs/CHARACTERS.md "Rendering", docs/perf/FINDINGS.md PF-0020 / PF-0021).
 * **CPU fallback.** `r_cpu_skinning 1` skins on the CPU into dynamic vertex buffers, for debugging
   and drivers without the SSBO path. The output looks the same as GPU skinning.
 * **Local player.** The full body is drawn **shadow-only** (`MAT_SHADOW_ONLY`), so first-person views
@@ -370,7 +372,42 @@ inside a scope the magnified PiP pixel size. The table below is the legacy (`r_l
   and `tools/tests/anim_budget.cfg` runs the DevRoom with a budget of 4.
 * `anim_lod_lineup` (host) spawns a player dummy and a zombie at 5 / 15 / 30 / 60 / 120 / 240 m along the
   view. With `r_lod_debug 1` each character shows its LOD, pixel height, update interval and active
-  systems. `tools/tests/anim_lod.cfg` runs this on the flat map.
+  systems (`OFFSCREEN`, `SHARED`: below). `tools/tests/anim_lod.cfg` runs this on the flat map.
+* **Outside the view** (docs/perf/FINDINGS.md PF-0033, visual trade-off). An NPC whose bounding sphere
+  lies outside the last frame's main view, grown by `characters.offscreen_margin_deg` (10 deg) in
+  `assets/render/lod.json`, and with no phone camera rendering, is posed at least every
+  `offscreen_update` ticks (8, LOD3's rate) with `ik_w` 0 (no foot IK, lean or turn), and ranks at a quarter
+  of its size for the budget. Entering the view, its LOD's rate comes back at once and a pose older than
+  that interval is redone the same tick. What can show is the shadow of a character outside the view.
+  Players keep their post-pass (the aim model reads it); the host's simulation and hitboxes never read
+  this pose. Counter `anim_eval_outside`: post-passes of characters outside the view.
+* **Shared poses** (PF-0034, visual trade-off). From `characters.shared_pose_lod` (2) a character whose
+  pose is the controller's base layer alone (no crossfade or inertial blend, the upper body and hit
+  layers empty, nothing in the hands, legs straight, no kneel / swim, not seated, alive) draws a pose
+  sampled once per bucket: (anim set, state, variant, phase bucket of `shared_pose_phases` (32) per
+  cycle, speed in 0.25 m/s and move direction in 0.125 steps). The bucket's pose is the controller
+  evaluated at the bucket's phase centre and inputs, kept in a 512-entry cache across frames (at most 24
+  samples per frame, so a cold cache does not hitch; the rest draw their own pose meanwhile) as a
+  model-space skeleton palette. Each character places it at its own interpolated root: the skinning
+  instance carries the root (and last frame's, for the velocity) and the vertex shaders apply it
+  (`SKIN_ROOTED`). A bucket's palette goes into the frame's bone buffer once per part class, and its
+  characters skip their interpolation, skeleton palette and gathers. At these sizes (< 60 px) the
+  post-pass runs no IK, spine, hold or damage layer, so the shared pose is what each character would
+  show at the bucket's phase and inputs: the visible difference is a phase off by up to half a bucket
+  (1/64 of a cycle) and quantized blend inputs. `chars_bone_draw` (skinned decals) places the bucket's
+  bones at the character's root. Counters `anim_pose_shared` (draws from the cache), `anim_pose_samples`
+  (cache fills).
+* **Toward 1000+ characters: vertex animation textures (not built).** The shared pose cache is the CPU
+  half of an animation atlas: its keys are (clip set, phase bucket, blend inputs) and its values
+  model-space palettes. The next step bakes the far LODs' locomotion buckets once per anim set into a
+  GPU atlas (an SSBO or RGBA32F texture of 3x4 palettes, rows = buckets, columns = bones, ~200 KB per
+  clip at 32 phases x 65 bones), indexed by (bucket, bone) in a variant of `skin.vert`: a far character
+  then needs no palette upload at all, only its instance (root, prev root, bucket index, the next
+  bucket and a blend factor for in-between phases). True VAT (baked vertex positions per frame) is
+  not worth it here: the modular parts multiply the bake by part x LOD x skin, and 4-bone skinning of
+  LOD2 / LOD3 meshes from a palette atlas costs the GPU about the same per vertex. Not done: the far
+  characters' CPU cost is already ~1 us each with PF-0034, the remaining per-character cost is the
+  host simulation (hitboxes at the horde tiers' rates), which must stay per character.
 
 ## Hot reload
 
