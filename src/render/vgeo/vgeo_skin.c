@@ -116,6 +116,7 @@ static void barrier(VkCommandBuffer cmd, VkPipelineStageFlags2 src, VkAccessFlag
 
 void vg_palettes_record(VgPalettes *p, VkCommandBuffer cmd) {
     if (!p->ok) return;
+    PROF_BEGIN("vgeo:palettes_record");
     VgBuffer *st = &p->staging[p->frame];
     VkDeviceSize table = PAL_SLOT_BYTES * p->max_slots;
     // The copy regions: a buffer kept for the palettes' lifetime instead of a malloc / free every
@@ -145,6 +146,7 @@ void vg_palettes_record(VgPalettes *p, VkCommandBuffer cmd) {
     barrier(cmd, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
     prof_count(PC_SKIN_PALETTES, n);
     if (!scratch) free(rg);
+    PROF_END();
 }
 
 // ------------------------------------------------------------------ CPU mirror

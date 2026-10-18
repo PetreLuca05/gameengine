@@ -102,6 +102,27 @@ int main(void) {
     Cvar *b = cvar_find("perf_fix_disable");
     CHECK(a && a == b, "cvar_find hash == scan, case-insensitive");
     CHECK(cvar_find("no_such_cvar_xyz") == NULL, "missing cvar");
+    // PF-0002 cost per lookup with as many cvars as the game registers (~700): scan vs index.
+    for (int i = 0; i < 700; i++) {
+        char nm[32];
+        snprintf(nm, sizeof(nm), "bench_cvar_%03d", i);
+        cvar_reg_int(nm, i, 0, 1000, 0, "microbenchmark cvar");
+    }
+    double us[2];
+    for (int pass = 0; pass < 2; pass++) {
+        cvar_set("perf_fix_disable", pass == 0 ? "PF-0002" : "");
+        u64 t0 = SDL_GetPerformanceCounter();
+        int hits = 0;
+        for (int i = 0; i < 20000; i++) {
+            char nm[32];
+            snprintf(nm, sizeof(nm), "BENCH_CVAR_%03d", (i * 37) % 700);
+            hits += cvar_find(nm) != NULL;
+        }
+        us[pass] = (double)(SDL_GetPerformanceCounter() - t0) * 1e6 / (double)SDL_GetPerformanceFrequency() / 20000.0;
+        CHECK(hits == 20000, "every bench cvar found (pass %d)", pass);
+    }
+    printf("cvar_find with %d cvars: scan %.3f us, hash index %.3f us per lookup\n", cvar_count(), us[0], us[1]);
+    CHECK(us[1] < us[0], "the index is faster than the scan");
 
     jobs_shutdown();
     prof_shutdown();

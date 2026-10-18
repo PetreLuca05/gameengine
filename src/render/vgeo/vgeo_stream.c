@@ -407,6 +407,7 @@ static void barrier(VkCommandBuffer cmd, VkPipelineStageFlags2 src, VkAccessFlag
 void vg_stream_update(VgStream *st, VkCommandBuffer cmd, u32 frame) {
     VgScene *s = st->scene;
     if (!st->ok || !s->b_page_table.buffer) return;
+    PROF_BEGIN("vgeo:stream_update");
     u64 t0 = SDL_GetPerformanceCounter();
     if (s->generation != st->generation) sync(st);
     const VgContext *c = st->ctx;
@@ -559,4 +560,5 @@ void vg_stream_update(VgStream *st, VkCommandBuffer cmd, u32 frame) {
     prof_series("vgeo_stream_evicted", st->stats.evicted);
     prof_series("vgeo_stream_resident", resident);
     prof_series("vgeo_stream_slots", st->slots);
+    PROF_END();
 }

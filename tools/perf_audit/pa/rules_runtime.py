@@ -462,6 +462,25 @@ def r26_lookups(p, ctx):
                     fix_id="PF-0002")]
 
 
+@rule("R27", "Startup critical path: blocking I/O and serial init on the main thread")
+def r27_startup(p, ctx):
+    st = p.d.get("startup") or {}
+    zones = st.get("zones", [])
+    if not zones:
+        return []
+    total = st.get("total_ms", 0.0)
+    io = sum(z[3] for z in zones if z[0] == 0 and z[1] == "io")
+    top = sorted(([z[1], round(z[3], 1)] for z in zones if z[0] == 0 and z[4] == 1), key=lambda x: -x[1])[:8]
+    out = []
+    if io > 50.0:
+        out.append(Finding("R27", "startup_io", "Main thread blocked %.0f ms on file reads during startup (%.0f ms to the first frame)" % (io, total),
+                           "startup", {"zone": "startup"}, {"startup": {"io_ms": round(io, 1), "total_ms": round(total, 1), "top_init_ms": top}},
+                           {"cpu_ms": 0.0}, "medium", "M",
+                           "Read the assets the first frame does not need on jobs (assets_init / game_init order), overlap pipeline creation "
+                           "with loading. Startup only: not a per-frame saving.", scene="startup"))
+    return out
+
+
 # ---------------------------------------------------------------------------------------- net
 
 

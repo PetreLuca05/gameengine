@@ -763,7 +763,7 @@ static void finish_startup(void) {
             double dur = ticks_ms(e->t - b->t);
             if (dur < 0.05 && sp > 1) continue;   // keep the file small: tiny nested zones dropped
             P.startup[P.startup_count].thread = ti;
-            P.startup[P.startup_count].name = b->cat == CAT_ZONE ? b->name : (b->cat == CAT_WAIT ? "wait" : "job");
+            P.startup[P.startup_count].name = b->cat == CAT_ZONE || b->cat == CAT_WAIT ? b->name : "job";   // waits: io, jobs_wait, ..
             P.startup[P.startup_count].start_ms = ticks_ms(b->t - P.record_t0);
             P.startup[P.startup_count].dur_ms = dur;
             P.startup[P.startup_count].depth = sp;

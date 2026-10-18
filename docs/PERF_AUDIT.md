@@ -188,6 +188,7 @@ sources, shaders and assets. Every rule has a synthetic-profile test (`tools/per
 | R24 | Pipeline / descriptor binding churn (rebinding for most draws) | GPU scopes | none (opaque draw order inside a depth-tested pass) |
 | R25 | GPU work outside any scope (unattributed) | GPU scopes | coverage |
 | R26 | Name lookups in the frame loop (`cvar_find`) | counters, sources | none |
+| R27 | Startup critical path: main thread blocked on file reads during startup, slowest init stages | startup section | none |
 | T01 | Heaviest passes: lower settings would save part of them | GPU scopes | **trade-off** |
 
 Half-precision math, fewer samples, lower resolutions, shorter distances and texture compression are

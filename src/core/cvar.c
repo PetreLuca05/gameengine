@@ -154,8 +154,7 @@ static u32 name_hash(const char *s) {
 
 // cvar_find is called from per-frame code (114 call sites): a hash index instead of a case-insensitive
 // scan over every cvar (docs/perf/FINDINGS.md PF-0002). Same result; perf_fix_disable PF-0002 scans.
-Cvar *cvar_find(const char *name) {
-    prof_count(PC_CVAR_FIND, 1);
+static Cvar *find(const char *name) {
     if (prof_fix_enabled(PFX_CVAR_HASH)) {
         for (u32 h = name_hash(name) & (CVAR_INDEX - 1);; h = (h + 1) & (CVAR_INDEX - 1)) {
             int k = s_cv.index[h];
@@ -166,6 +165,14 @@ Cvar *cvar_find(const char *name) {
     for (int i = 0; i < s_cv.cvar_count; i++)
         if (SDL_strcasecmp(s_cv.cvars[i]->name, name) == 0) return s_cv.cvars[i];
     return NULL;
+}
+
+Cvar *cvar_find(const char *name) {
+    prof_count(PC_CVAR_FIND, 1);
+    PROF_BEGIN("cvar_find");   // its own zone: the per-call cost is what PF-0002 changes
+    Cvar *cv = find(name);
+    PROF_END();
+    return cv;
 }
 
 Cvar *cvar_reg(const char *name, const char *def, CvarType type, u32 flags, const char *desc) {

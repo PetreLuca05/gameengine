@@ -12,6 +12,13 @@
 #endif
 #include <stdlib.h>
 #include <string.h>
+#if defined(_MSC_VER)
+// Every CRT header that (re)declares malloc / memcpy comes in before the macros below (a declaration
+// seen after them would be macro-expanded): <malloc.h>, <memory.h>, <intrin.h> (SDL_intrin.h, windows.h).
+#include <malloc.h>
+#include <memory.h>
+#include <intrin.h>
+#endif
 
 #ifdef DG_PROFILE_ALLOC
 

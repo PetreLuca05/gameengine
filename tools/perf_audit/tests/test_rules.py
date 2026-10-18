@@ -160,6 +160,12 @@ class Cpu(unittest.TestCase):
         f = [x for x in run(d) if x.rule == "R26"]
         self.assertTrue(f and f[0].fix_id == "PF-0002")
 
+    def test_r27_startup_io(self):
+        d = S.base()
+        d["startup"] = {"total_ms": 9000.0, "zones": [[0, "assets_init", 100.0, 4000.0, 1], [0, "io", 200.0, 300.0, 2], [0, "io", 900.0, 120.0, 2]]}
+        f = [x for x in run(d) if x.rule == "R27"]
+        self.assertTrue(f and f[0].evidence["startup"]["io_ms"] == 420.0)
+
     def test_r15_streaming(self):
         d = S.base()
         d["series"]["vgeo_stream_waiting"] = [3.0] * S.N
