@@ -91,6 +91,10 @@ float lod_band_weight(float y, float band);
 // Discrete LOD chain pick by projected error: err[i] (metres) x k (px per metre) <= px. Returns the
 // finer LOD of the pair; *coarse_w the weight of lod + 1 (0: no fade).
 int lod_pick_band(const float *err, int count, int first, float k, float px, float band, float *coarse_w);
+// Foliage instance alpha (classic, docs/LOD.md): density keeps the instances with hash01 < density
+// (thinning, never a partial alpha); fade (1 before the distance fade .. 0 at its end) fades each kept
+// one over `width` of it, staggered by the hash so that every instance is opaque at fade 1.
+float lod_foliage_alpha(float density, float fade, float hash01, float width);
 // Coverage of one draw of a fade pair (for tests): in = t, out = 1 - t.
 float lod_coverage(float f);
 // The shader's test (shaders/lod_fade.glsl lod_faded_n): is a texel of threshold n in [0, 1) kept?

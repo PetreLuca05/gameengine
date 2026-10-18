@@ -174,6 +174,13 @@ is kept.
   octaves past a threshold both sides are drawn. A slow dolly fades smoothly (coverage changes < 0.2 % per
   frame at walking speed), a reversal reverses it, and a camera that stops inside a band keeps a stable
   mix that TAA resolves into a blend (temporal std 2.14 vs 2.04 / 255 without bands, `lod_check.py`).
+* **Foliage density / distance fade** (`lod_foliage_alpha`): density keeps the instances whose hash is
+  below it (thinning drops instances, never a partial alpha); the distance fade (smoothstep, 1 before the
+  band) fades each kept instance over `instance_fade` (0.3) of it, the start staggered by hash x (1 - 0.3),
+  so every instance is opaque before its band. (Before the fix the hash went straight into the
+  vgeo mapping `(density x fade - hash x 0.9375) / width`, which needs width 1/16 to reach 1: with 0.3 a
+  quarter of all trees, bushes and grass stayed at alpha 0.21 .. 1, shrunk, at every distance. Latent
+  while `r_vgeo 1` was the default; `classic_fade_probe` counts such parts.)
 * **Fading parts** batch apart (key bit 3) and draw through the dithered (clip / masked shadow) pipelines
   whatever their material; settled instances keep the opaque early-z pipelines.
 
@@ -210,7 +217,13 @@ shows terrain and characters only; with 1 the trees and bushes appear at their P
   vertex (random cameras, LOD distances 32-300 m).
 * `tools/tests/lod_fade_shots.cfg` + `lod_check.py`: a forced character switch with the fade ramps (largest
   2-frame step 27 % of the switch) where the cut jumps (53 %); TAA temporal variance of the yard with and
-  without bands.
+  without bands; with the log as second argument (`lod_check.py . f.log`) the `classic_fade_probe 40` lines
+  of the foliage yard and three vegetation forest spots: no instance within 40 m drawn with alpha < 1
+  outside a cross-fade (before the foliage-alpha fix: 1 860 in the yard, 2 300 - 3 000 per forest spot).
+* `classic_fade_probe [radius=30]`: every scene instance (level + placements) within the radius, in every
+  direction, through the main view's cull: parts with alpha < 1 outside a cross-fade (trees / bushes,
+  other), the lowest alpha and its distance, parts in a cross-fade. `test_lod` checks `lod_foliage_alpha`
+  (all 256 hashes opaque before the fade, gone at its end, monotone, density never partial).
 * `tools/tests/lod_scope.cfg`, `tools/tests/lod_perf.cfg`, `lod_dolly <category>`.
 * Impostor vs mesh colour (vegetation forest, impostors forced on / off): luminance -8 % before the gain,
   -4 % with `impostor.gain` 1.2 (the remaining difference is hue: the mesh's bent leaf normals catch more

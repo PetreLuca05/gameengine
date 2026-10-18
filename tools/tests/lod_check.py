@@ -8,9 +8,12 @@
   taa_band_*.png / taa_cut_*.png  a fixed camera over the foliage yard (wind off) with the distance-band
                           cross-fades / without (r_lod_fade_band 0): mean temporal standard deviation (TAA
                           stability of the dithered fades). Pass: within +2.0 / 255 of the cut's.
+  <log> (optional)        the run's log: its "classic_fade_probe" lines (foliage yard + vegetation forest,
+                          40 m). Pass: no tree / bush / foliage part within the radius drawn with alpha < 1
+                          outside a LOD cross-fade (they were: a quarter of all instances, docs/LOD.md).
 Needs numpy + Pillow; exits 1 on a failed check, 2 when the shots are missing.
 """
-import glob, os, sys
+import glob, os, re, sys
 import numpy as np
 from PIL import Image
 
@@ -56,6 +59,26 @@ def main():
     if std_b > std_c + 2.0:
         ok = False
         print('FAIL: the dithered fades flicker under TAA')
+    if len(sys.argv) > 2:
+        probes = 0
+        pat = re.compile(r'classic_fade_probe: radius (\d+) m: (\d+) instances.*trees / bushes (\d+), other (\d+) \(min alpha ([\d.]+)')
+        with open(sys.argv[2], errors='replace') as f:
+            for line in f:
+                m = pat.search(line)
+                if not m:
+                    continue
+                probes += 1
+                r, n, tr, ot, mn = int(m.group(1)), int(m.group(2)), int(m.group(3)), int(m.group(4)), float(m.group(5))
+                print('fade probe %d m: %d instances, dithered outside a cross-fade: trees / bushes %d, other %d (min alpha %.3f)' % (r, n, tr, ot, mn))
+                if r <= 40 and (tr or ot):
+                    ok = False
+                    print('FAIL: instances within %d m of the camera drawn see-through (alpha < 1)' % r)
+                if n == 0:
+                    ok = False
+                    print('FAIL: the probe found no instances')
+        if probes < 4:
+            ok = False
+            print('FAIL: %d classic_fade_probe lines in %s (want 4)' % (probes, sys.argv[2]))
     print('lod_check:', 'ok' if ok else 'FAILED')
     return 0 if ok else 1
 

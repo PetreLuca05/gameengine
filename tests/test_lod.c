@@ -8,6 +8,9 @@
 //   * fades complete on camera reversal (no ping-pong half-fades);
 //   * complementary masks: coverage sums to 1 for every dither threshold (no holes, no double
 //     shadows), also for the three-way impostor / coarse / fine split;
+//   * foliage density / distance fade: every instance (all 256 hashes) fully opaque before its fade
+//     starts, at the shipped instance_fade; density thins by dropping instances, never by a partial
+//     alpha (a tree near the camera is never dithered);
 //   * streaming: never a lower LOD after a higher one is resident;
 //   * terrain geomorph: neighbouring chunks agree on every shared edge vertex, a chunk LOD switch
 //     does not move a vertex.
@@ -209,6 +212,50 @@ static void test_masks(void) {
     CHECK(lod_iv_pack(0, 1) == LOD_IV_FULL && lod_iv_kept(LOD_IV_FULL, 0.99f) && lod_iv_kept(0, 0.5f), "full interval / no interval");
 }
 
+// Foliage instance alpha (vk_classic.c cl_foliage_alpha): with instance_fade 0.3 the old mapping
+// (alpha = (density - hash x 0.9375) / width) left a quarter of the instances (hash > 0.7) at alpha
+// 0.21 .. 1 at every distance: trees and grass dithered see-through up close.
+static void test_foliage_alpha(void) {
+    LodTable t;
+    lod_table_default(&t);
+    char err[256];
+    char *text = platform_read_file("assets/render/lod.json", NULL);
+    if (text) {
+        CHECK(lod_table_parse(&t, text, err, sizeof(err)), "lod.json: %s", err);
+        free(text);
+    }
+    const float widths[] = { t.fol_instance, 1.0f / 16.0f, 0.3f, 1.0f };
+    for (int wi = 0; wi < 4; wi++) {
+        float w = widths[wi];
+        int partial_near = 0, visible_far = 0, rising = 0, partial_density = 0, kept = 0;
+        for (int h = 0; h < 256; h++) {
+            float hash = ((float)h + 0.5f) / 256.0f;
+            if (lod_foliage_alpha(1.0f, 1.0f, hash, w) != 1.0f) partial_near++;
+            if (lod_foliage_alpha(1.0f, 0.0f, hash, w) != 0.0f) visible_far++;
+            float prev = 1.0f;
+            for (int k = 0; k <= 64; k++) {   // the camera backs away through the fade: alpha only falls
+                float a = lod_foliage_alpha(1.0f, 1.0f - (float)k / 64.0f, hash, w);
+                if (a > prev + 1e-6f) rising++;
+                prev = a;
+            }
+            for (int d = 1; d < 10; d++) {   // density thinning: kept (opaque) or dropped
+                float a = lod_foliage_alpha((float)d / 10.0f, 1.0f, hash, w);
+                if (a != 0.0f && a != 1.0f) partial_density++;
+                kept += a > 0;
+            }
+        }
+        CHECK(partial_near == 0, "width %.3f: %d of 256 instances not opaque before the fade starts", (double)w, partial_near);
+        CHECK(visible_far == 0, "width %.3f: %d instances left at the fade end", (double)w, visible_far);
+        CHECK(rising == 0, "width %.3f: alpha rises %d times while the camera backs away", (double)w, rising);
+        CHECK(partial_density == 0, "width %.3f: %d partial-alpha instances from density thinning", (double)w, partial_density);
+        CHECK(abs(kept - 256 * 45 / 10) <= 9, "width %.3f: density 0.1 .. 0.9 keeps %d instance-steps (want ~%d)", (double)w, kept, 256 * 45 / 10);
+    }
+    // the per-instance fade is a short front: half way through the band about half are gone
+    int half = 0;
+    for (int h = 0; h < 256; h++) half += lod_foliage_alpha(1.0f, 0.5f, ((float)h + 0.5f) / 256.0f, t.fol_instance) > 0.5f;
+    CHECK(half > 96 && half < 160, "fade 0.5: %d of 256 instances above alpha 0.5", half);
+}
+
 // Static discrete chain under a slow dolly: per-LOD coverage over distance from lod_pick_band.
 static void test_static_dolly(void) {
     const float err[4] = { 0.0f, 0.004f, 0.02f, 0.1f };
@@ -320,6 +367,7 @@ int main(void) {
     test_reversal();
     test_masks();
     test_static_dolly();
+    test_foliage_alpha();
     test_streaming();
     test_terrain();
     printf("test_lod: %d checks, %d failures\n", g_checks, g_fail);
