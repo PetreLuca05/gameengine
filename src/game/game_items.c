@@ -49,7 +49,12 @@ static ItemMesh *mesh_for_id(const char *id, int *cond) {
             if (!strcmp(db->attachments[a].id, id + 4)) { *cond = db->attachments[a].model.condition; return item_mesh_get(db->attachments[a].model.mesh); }
     }
     u16 it = item_find(db, id);
-    if (!it) return NULL;
+    if (!it) {   // a mesh with no item of its own (a "mesh_for" variant): by file name
+        char path[96];
+        snprintf(path, sizeof(path), "assets/items/meshes/%s.dgim", id);
+        *cond = ITEM_COND_WORN;
+        return item_mesh_get(path);
+    }
     const WeaponDef *wd = item_weapon(db, it);
     const ItemModelRef *mr = wd ? &wd->model : &db->items[it].model;
     if (db->items[it].kind == ITEM_ATTACHMENT) {
