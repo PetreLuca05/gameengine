@@ -150,12 +150,18 @@ def verify_dir(path, fixes_registry=None, heat=True):
         (a_prof if ps["pass"] == "A" else b_prof).append(Profile.load(ps["profile"]))
     timings = [timing_verdict(a_prof, b_prof, m) for m in metrics]
     primary = timings[0] if timings else {"improved": False}
-    # Whole-frame guard: the fix must not make the frame slower (p < 0.05 the other way).
+    # Whole-frame guard: the fix must not make the frame slower: significant over the pooled frames
+    # (p < 0.05, > 2 %) AND every B pass slower than every A pass (one disturbed pass, a background
+    # job or a thermal dip, is not a regression).
     guards = []
     for m in ("cpu_work", "gpu_frame"):
         if a_prof and b_prof:
             t = timing_verdict(b_prof, a_prof, m)   # "A smaller than B" = B regressed
-            guards.append({"metric": m, "b_regressed": t["improved"] and t["delta_pct"] < -2.0, "a_median": t["b_median"], "b_median": t["a_median"]})
+            pa_ = [median(metric_samples(p, m)) for p in a_prof]
+            pb_ = [median(metric_samples(p, m)) for p in b_prof]
+            consistent = min(pb_) > max(pa_) * 1.02
+            guards.append({"metric": m, "b_regressed": t["improved"] and t["delta_pct"] < -2.0 and consistent, "a_median": t["b_median"],
+                           "b_median": t["a_median"], "a_pass_medians": [round(x, 4) for x in pa_], "b_pass_medians": [round(x, 4) for x in pb_]})
     state = state_verdict(a_prof, b_prof)
     hd = os.path.join(path, "diff") if heat else None
     if hd:

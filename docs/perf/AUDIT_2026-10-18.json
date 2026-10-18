@@ -1,0 +1,2052 @@
+{
+ "meta": {
+  "date": "2026-10-18",
+  "profiles": 6,
+  "machine": "unknown",
+  "rules_runtime": [
+   "R01",
+   "R02",
+   "R03",
+   "R04",
+   "R05",
+   "R24",
+   "R25",
+   "R06",
+   "R07",
+   "R08",
+   "R10",
+   "R12",
+   "R13",
+   "R15",
+   "R18",
+   "R19",
+   "R23",
+   "R11",
+   "R09",
+   "R20",
+   "R26",
+   "R27",
+   "R16",
+   "T01"
+  ],
+  "rules_static": [
+   "R08",
+   "R19",
+   "R26",
+   "R20",
+   "R17",
+   "R21",
+   "R14",
+   "R22"
+  ]
+ },
+ "profiles": [
+  "/tmp/claude-0/-home-user-gameengine/ce674441-9067-5382-a7b4-35a05beb6d57/scratchpad/run/audit/devroom_low.json",
+  "/tmp/claude-0/-home-user-gameengine/ce674441-9067-5382-a7b4-35a05beb6d57/scratchpad/run/audit/devroom_modern.json",
+  "/tmp/claude-0/-home-user-gameengine/ce674441-9067-5382-a7b4-35a05beb6d57/scratchpad/run/audit/horde500_low.json",
+  "/tmp/claude-0/-home-user-gameengine/ce674441-9067-5382-a7b4-35a05beb6d57/scratchpad/run/audit/horde500_modern.json",
+  "/tmp/claude-0/-home-user-gameengine/ce674441-9067-5382-a7b4-35a05beb6d57/scratchpad/run/audit/lan2/lan2_client.json",
+  "/tmp/claude-0/-home-user-gameengine/ce674441-9067-5382-a7b4-35a05beb6d57/scratchpad/run/audit/lan2/lan2_host.json"
+ ],
+ "findings": [
+  {
+   "id": "F-b96020",
+   "rule": "R02",
+   "title": "Static shadow casters re-rendered into every cascade every frame",
+   "system": "render/shadows",
+   "location": {
+    "pass": "shadow_sun",
+    "file": "src/render/render.c"
+   },
+   "evidence": {
+    "devroom/low": {
+     "gpu_ms": 16.4558,
+     "draws": 97.1,
+     "shadow_items": 797.5
+    },
+    "devroom/modern": {
+     "gpu_ms": 131.9632,
+     "draws": 1118.9,
+     "shadow_items": 1575.5
+    },
+    "horde500/low": {
+     "gpu_ms": 13.4797,
+     "draws": 45.9,
+     "shadow_items": 797.5
+    },
+    "horde500/modern": {
+     "gpu_ms": 131.3289,
+     "draws": 924.3,
+     "shadow_items": 1575.5
+    },
+    "lan2_client/4": {
+     "gpu_ms": 169.5658,
+     "draws": 1267.5,
+     "shadow_items": 1575.5
+    },
+    "lan2_host/4": {
+     "gpu_ms": 179.2658,
+     "draws": 1070.6,
+     "shadow_items": 1575.5
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 107.55947368421052,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "L",
+   "fix": "Cache the static casters per cascade (re-render a cascade only when its snapped matrix or a static caster changes) and draw only the dynamic casters over a copy of the cached depth. Identical depth by construction.",
+   "fidelity_impact": "none",
+   "verify": "verify by image + state diff after implementation (perf_verify)",
+   "fix_id": null,
+   "scenes": [
+    "devroom/low",
+    "devroom/modern",
+    "horde500/low",
+    "horde500/modern",
+    "lan2_client/4",
+    "lan2_host/4"
+   ],
+   "source": "runtime",
+   "below_noise": false,
+   "score": 8.06696
+  },
+  {
+   "id": "F-7b209b",
+   "rule": "R11",
+   "title": "1575 shadow caster items per frame for 551 scene draw items",
+   "system": "render/shadows",
+   "location": {
+    "file": "src/render/render.c",
+    "function": "draw_sun_casters"
+   },
+   "evidence": {
+    "devroom/modern": {
+     "shadow_items": 1575,
+     "draw_items": 551
+    },
+    "lan2_client/4": {
+     "shadow_items": 1575,
+     "draw_items": 545
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 33.91315789473685,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "low",
+   "effort": "M",
+   "fix": "Cull casters against the receiver volume (camera frustum extruded towards the light) per cascade, not only the light box.",
+   "fidelity_impact": "none",
+   "verify": "verify by image + state diff after implementation (perf_verify)",
+   "fix_id": null,
+   "scenes": [
+    "devroom/modern",
+    "lan2_client/4"
+   ],
+   "source": "runtime",
+   "below_noise": false,
+   "score": 3.39132
+  },
+  {
+   "id": "F-c4fd8c",
+   "rule": "R02",
+   "title": "'sky_view' recomputed every frame with unchanged inputs",
+   "system": "render/sky",
+   "location": {
+    "pass": "sky_view"
+   },
+   "evidence": {
+    "devroom/low": {
+     "runs_per_frame": 0.95,
+     "gpu_ms": 3.7574,
+     "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
+    },
+    "devroom/modern": {
+     "runs_per_frame": 0.95,
+     "gpu_ms": 5.4582,
+     "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
+    },
+    "horde500/low": {
+     "runs_per_frame": 0.95,
+     "gpu_ms": 3.709,
+     "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
+    },
+    "horde500/modern": {
+     "runs_per_frame": 0.95,
+     "gpu_ms": 5.0238,
+     "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
+    },
+    "lan2_client/4": {
+     "runs_per_frame": 0.95,
+     "gpu_ms": 9.4227,
+     "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
+    },
+    "lan2_host/4": {
+     "runs_per_frame": 0.95,
+     "gpu_ms": 7.5264,
+     "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 8.951575,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "M",
+   "fix": "Hash the pass inputs (the uniforms it reads, quantized as the shader reads them) and skip the dispatch when the hash matches the content already in the target. The output is bit-identical by construction.",
+   "fidelity_impact": "none",
+   "verify": "verify by image + state diff after implementation (perf_verify)",
+   "fix_id": null,
+   "scenes": [
+    "devroom/low",
+    "devroom/modern",
+    "horde500/low",
+    "horde500/modern",
+    "lan2_client/4",
+    "lan2_host/4"
+   ],
+   "source": "runtime",
+   "below_noise": false,
+   "score": 1.79031
+  },
+  {
+   "id": "F-a7f6ca",
+   "rule": "R02",
+   "title": "'sky_cshadow' recomputed every frame with unchanged inputs",
+   "system": "render/sky",
+   "location": {
+    "pass": "sky_cshadow"
+   },
+   "evidence": {
+    "devroom/low": {
+     "runs_per_frame": 0.95,
+     "gpu_ms": 0.5109,
+     "inputs": "cloud shadow map (cloud map + camera texel snap)"
+    },
+    "devroom/modern": {
+     "runs_per_frame": 0.95,
+     "gpu_ms": 2.5549,
+     "inputs": "cloud shadow map (cloud map + camera texel snap)"
+    },
+    "horde500/low": {
+     "runs_per_frame": 0.95,
+     "gpu_ms": 0.5218,
+     "inputs": "cloud shadow map (cloud map + camera texel snap)"
+    },
+    "horde500/modern": {
+     "runs_per_frame": 0.95,
+     "gpu_ms": 1.6063,
+     "inputs": "cloud shadow map (cloud map + camera texel snap)"
+    },
+    "lan2_client/4": {
+     "runs_per_frame": 0.95,
+     "gpu_ms": 3.9225,
+     "inputs": "cloud shadow map (cloud map + camera texel snap)"
+    },
+    "lan2_host/4": {
+     "runs_per_frame": 0.95,
+     "gpu_ms": 3.8298,
+     "inputs": "cloud shadow map (cloud map + camera texel snap)"
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 3.7263575,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "M",
+   "fix": "Hash the pass inputs (the uniforms it reads, quantized as the shader reads them) and skip the dispatch when the hash matches the content already in the target. The output is bit-identical by construction.",
+   "fidelity_impact": "none",
+   "verify": "verify by image + state diff after implementation (perf_verify)",
+   "fix_id": null,
+   "scenes": [
+    "devroom/low",
+    "devroom/modern",
+    "horde500/low",
+    "horde500/modern",
+    "lan2_client/4",
+    "lan2_host/4"
+   ],
+   "source": "runtime",
+   "below_noise": false,
+   "score": 0.74527
+  },
+  {
+   "id": "F-b0d253",
+   "rule": "R02",
+   "title": "'sky_clouds' recomputed every other frame with unchanged inputs",
+   "system": "render/sky",
+   "location": {
+    "pass": "sky_clouds"
+   },
+   "evidence": {
+    "devroom/low": {
+     "runs_per_frame": 0.47,
+     "gpu_ms": 1.3934,
+     "inputs": "cloud map (cloud cover, wind offset, time)"
+    },
+    "devroom/modern": {
+     "runs_per_frame": 0.47,
+     "gpu_ms": 3.0052,
+     "inputs": "cloud map (cloud cover, wind offset, time)"
+    },
+    "horde500/low": {
+     "runs_per_frame": 0.47,
+     "gpu_ms": 1.3398,
+     "inputs": "cloud map (cloud cover, wind offset, time)"
+    },
+    "horde500/modern": {
+     "runs_per_frame": 0.47,
+     "gpu_ms": 2.407,
+     "inputs": "cloud map (cloud cover, wind offset, time)"
+    },
+    "lan2_client/4": {
+     "runs_per_frame": 0.47,
+     "gpu_ms": 3.9125,
+     "inputs": "cloud map (cloud cover, wind offset, time)"
+    },
+    "lan2_host/4": {
+     "runs_per_frame": 0.47,
+     "gpu_ms": 4.0181,
+     "inputs": "cloud map (cloud cover, wind offset, time)"
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 1.908575,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "M",
+   "fix": "Hash the pass inputs (the uniforms it reads, quantized as the shader reads them) and skip the dispatch when the hash matches the content already in the target. The output is bit-identical by construction.",
+   "fidelity_impact": "none",
+   "verify": "verify by image + state diff after implementation (perf_verify)",
+   "fix_id": null,
+   "scenes": [
+    "devroom/low",
+    "devroom/modern",
+    "horde500/low",
+    "horde500/modern",
+    "lan2_client/4",
+    "lan2_host/4"
+   ],
+   "source": "runtime",
+   "below_noise": false,
+   "score": 0.38171
+  },
+  {
+   "id": "F-95b664",
+   "rule": "R10",
+   "title": "117 palettes uploaded per frame for 6 evaluated poses",
+   "system": "anim/skinning",
+   "location": {
+    "file": "src/render/vgeo/vgeo_skin.c"
+   },
+   "evidence": {
+    "devroom/low": {
+     "palettes": 117.0,
+     "anim_evals": 5.8
+    },
+    "devroom/modern": {
+     "palettes": 117.0,
+     "anim_evals": 7.6
+    },
+    "horde500/low": {
+     "palettes": 995.0,
+     "anim_evals": 64.0
+    },
+    "horde500/modern": {
+     "palettes": 995.0,
+     "anim_evals": 64.0
+    },
+    "lan2_client/4": {
+     "palettes": 117.0,
+     "anim_evals": 7.5
+    },
+    "lan2_host/4": {
+     "palettes": 657.2,
+     "anim_evals": 54.4
+    }
+   },
+   "savings": {
+    "cpu_ms": 1.862,
+    "gpu_ms": 0.0,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "M",
+   "fix": "Upload a palette once per pose and let the main, shadow and viewmodel passes share the slot (the bone SSBO already holds this frame's palettes).",
+   "fidelity_impact": "none",
+   "verify": "verify by image + state diff after implementation (perf_verify)",
+   "fix_id": null,
+   "scenes": [
+    "devroom/low",
+    "devroom/modern",
+    "horde500/low",
+    "horde500/modern",
+    "lan2_client/4",
+    "lan2_host/4"
+   ],
+   "source": "runtime",
+   "below_noise": false,
+   "score": 0.3724
+  },
+  {
+   "id": "F-7519d1",
+   "rule": "R23",
+   "title": "16.3 MB copied per frame by wrapped memcpy",
+   "system": "core",
+   "location": {},
+   "evidence": {
+    "horde500/low": {
+     "memcpy_mb": 16.31,
+     "calls": 7560
+    },
+    "horde500/modern": {
+     "memcpy_mb": 16.33,
+     "calls": 10240
+    },
+    "lan2_host/4": {
+     "memcpy_mb": 14.57,
+     "calls": 13463
+    }
+   },
+   "savings": {
+    "cpu_ms": 1.306034704208374,
+    "gpu_ms": 0.0,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "M",
+   "fix": "Write the data where it is consumed (mapped buffers) instead of staging copies.",
+   "fidelity_impact": "none",
+   "verify": "verify by image + state diff after implementation (perf_verify)",
+   "fix_id": null,
+   "scenes": [
+    "horde500/low",
+    "horde500/modern",
+    "lan2_host/4"
+   ],
+   "source": "runtime",
+   "below_noise": false,
+   "score": 0.26121
+  },
+  {
+   "id": "F-f33e1a",
+   "rule": "R07",
+   "title": "Job fn_0x557d71be9b70 runs 5760 times for 0.9 us each (queue overhead dominates)",
+   "system": "core/jobs",
+   "location": {
+    "function": "fn_0x557d71be9b70"
+   },
+   "evidence": {
+    "lan2_host/4": {
+     "count": 5760,
+     "avg_us": 0.88,
+     "queue_ms_avg": 0.0
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.28800000000000003,
+    "gpu_ms": 0.0,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "S",
+   "fix": "Batch the work into fewer, larger jobs.",
+   "fidelity_impact": "none",
+   "verify": "verify by image + state diff after implementation (perf_verify)",
+   "fix_id": null,
+   "scenes": [
+    "lan2_host/4"
+   ],
+   "source": "runtime",
+   "below_noise": false,
+   "score": 0.1728
+  },
+  {
+   "id": "F-34cb18",
+   "rule": "R07",
+   "title": "Job fn_0x556b005dbb70 runs 2880 times for 1.8 us each (queue overhead dominates)",
+   "system": "core/jobs",
+   "location": {
+    "function": "fn_0x556b005dbb70"
+   },
+   "evidence": {
+    "lan2_client/4": {
+     "count": 2880,
+     "avg_us": 1.78,
+     "queue_ms_avg": 0.0
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.14400000000000002,
+    "gpu_ms": 0.0,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "S",
+   "fix": "Batch the work into fewer, larger jobs.",
+   "fidelity_impact": "none",
+   "verify": "verify by image + state diff after implementation (perf_verify)",
+   "fix_id": null,
+   "scenes": [
+    "lan2_client/4"
+   ],
+   "source": "runtime",
+   "below_noise": false,
+   "score": 0.0864
+  },
+  {
+   "id": "F-66ec5c",
+   "rule": "R07",
+   "title": "Workers busy 0% of the frame while the main thread runs serial zones",
+   "system": "core/jobs",
+   "location": {
+    "zone": "game_render"
+   },
+   "evidence": {
+    "devroom/low": {
+     "workers": 3,
+     "worker_busy_ms": 0.001,
+     "frame_ms": 216.535,
+     "top_main_zones_ms": [
+      [
+       "game_render",
+       1.458
+      ],
+      [
+       "input",
+       1.268
+      ],
+      [
+       "render_end",
+       0.762
+      ],
+      [
+       "vgeo:palettes_record",
+       0.444
+      ],
+      [
+       "render:frame_graph",
+       0.387
+      ]
+     ]
+    },
+    "devroom/modern": {
+     "workers": 3,
+     "worker_busy_ms": 0.004,
+     "frame_ms": 843.635,
+     "top_main_zones_ms": [
+      [
+       "game_render",
+       1.474
+      ],
+      [
+       "input",
+       1.295
+      ],
+      [
+       "render_end",
+       1.136
+      ],
+      [
+       "render:record_pre",
+       1.072
+      ],
+      [
+       "vgeo:palettes_record",
+       0.913
+      ]
+     ]
+    },
+    "horde500/low": {
+     "workers": 3,
+     "worker_busy_ms": 0.615,
+     "frame_ms": 219.882,
+     "top_main_zones_ms": [
+      [
+       "game_render",
+       4.126
+      ],
+      [
+       "render:prepare",
+       2.928
+      ],
+      [
+       "render_end",
+       1.049
+      ],
+      [
+       "input",
+       0.848
+      ],
+      [
+       "sim:anim_hitboxes",
+       0.633
+      ]
+     ]
+    },
+    "horde500/modern": {
+     "workers": 3,
+     "worker_busy_ms": 0.598,
+     "frame_ms": 756.082,
+     "top_main_zones_ms": [
+      [
+       "game_render",
+       4.376
+      ],
+      [
+       "render:prepare",
+       3.199
+      ],
+      [
+       "render_end",
+       1.549
+      ],
+      [
+       "render:record_pre",
+       1.22
+      ],
+      [
+       "input",
+       0.993
+      ]
+     ]
+    },
+    "lan2_client/4": {
+     "workers": 3,
+     "worker_busy_ms": 0.007,
+     "frame_ms": 1222.182,
+     "top_main_zones_ms": [
+      [
+       "render:record_pre",
+       2.275
+      ],
+      [
+       "render_end",
+       2.186
+      ],
+      [
+       "game_render",
+       1.599
+      ],
+      [
+       "input",
+       1.553
+      ],
+      [
+       "vgeo:palettes_record",
+       1.262
+      ]
+     ]
+    },
+    "lan2_host/4": {
+     "workers": 3,
+     "worker_busy_ms": 0.457,
+     "frame_ms": 911.075,
+     "top_main_zones_ms": [
+      [
+       "render:prepare",
+       4.188
+      ],
+      [
+       "game_render",
+       3.495
+      ],
+      [
+       "render_end",
+       2.507
+      ],
+      [
+       "render:record_pre",
+       2.182
+      ],
+      [
+       "input",
+       1.501
+      ]
+     ]
+    }
+   },
+   "savings": {
+    "cpu_ms": 2.18785,
+    "gpu_ms": 0.0,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "low",
+   "effort": "L",
+   "fix": "The largest main-thread zones are candidates for jobs_parallel_for (per-index outputs keep results thread-count independent: no behaviour change).",
+   "fidelity_impact": "none",
+   "verify": "verify by image + state diff after implementation (perf_verify)",
+   "fix_id": null,
+   "scenes": [
+    "devroom/low",
+    "devroom/modern",
+    "horde500/low",
+    "horde500/modern",
+    "lan2_client/4",
+    "lan2_host/4"
+   ],
+   "source": "runtime",
+   "below_noise": false,
+   "score": 0.08204
+  },
+  {
+   "id": "F-692d04",
+   "rule": "R07",
+   "title": "Job fn_0x55d7b7492b70 runs 1380 times for 0.6 us each (queue overhead dominates)",
+   "system": "core/jobs",
+   "location": {
+    "function": "fn_0x55d7b7492b70"
+   },
+   "evidence": {
+    "devroom/modern": {
+     "count": 1380,
+     "avg_us": 0.6,
+     "queue_ms_avg": 0.0
+    },
+    "horde500/modern": {
+     "count": 1848,
+     "avg_us": 1.05,
+     "queue_ms_avg": 0.0
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.09240000000000001,
+    "gpu_ms": 0.0,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "S",
+   "fix": "Batch the work into fewer, larger jobs.",
+   "fidelity_impact": "none",
+   "verify": "verify by image + state diff after implementation (perf_verify)",
+   "fix_id": null,
+   "scenes": [
+    "devroom/modern",
+    "horde500/modern"
+   ],
+   "source": "runtime",
+   "below_noise": false,
+   "score": 0.05544
+  },
+  {
+   "id": "F-d084cd",
+   "rule": "R26",
+   "title": "16 cvar_find calls per frame",
+   "system": "core/cvar",
+   "location": {
+    "file": "src/core/cvar.c",
+    "function": "cvar_find"
+   },
+   "evidence": {
+    "devroom/low": {
+     "calls_per_frame": 16.0
+    },
+    "devroom/modern": {
+     "calls_per_frame": 17.0
+    },
+    "horde500/low": {
+     "calls_per_frame": 17.0
+    },
+    "horde500/modern": {
+     "calls_per_frame": 18.0
+    },
+    "lan2_client/4": {
+     "calls_per_frame": 17.0
+    },
+    "lan2_host/4": {
+     "calls_per_frame": 18.0
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.045,
+    "gpu_ms": 0.0,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "high",
+   "effort": "S",
+   "fix": "Index the cvars by a case-insensitive name hash (same result), and cache Cvar* at init in the per-frame callers.",
+   "fidelity_impact": "none",
+   "verify": "perf_verify PF-0002 (perf_fix_disable A/B)",
+   "fix_id": "PF-0002",
+   "scenes": [
+    "devroom/low",
+    "devroom/modern",
+    "horde500/low",
+    "horde500/modern",
+    "lan2_client/4",
+    "lan2_host/4"
+   ],
+   "source": "runtime",
+   "below_noise": false,
+   "score": 0.0405
+  },
+  {
+   "id": "F-82429b",
+   "rule": "R22",
+   "title": "7 byte-identical files duplicated across assets/vfx/tex / assets/vfx/tex_placeholder (3.7 MB): smoke_puff_lm0.png, smoke_puff_mv.png, smoke_puff.png, dust_puff_lm0.png, dust_puff.png",
+   "system": "assets",
+   "location": {
+    "file": "assets/vfx/tex / assets/vfx/tex_placeholder"
+   },
+   "evidence": {
+    "static": {
+     "files": [
+      "smoke_puff_lm0.png",
+      "smoke_puff_mv.png",
+      "smoke_puff.png",
+      "dust_puff_lm0.png",
+      "dust_puff.png",
+      "smoke_puff_lm1.png",
+      "dust_puff_lm1.png"
+     ]
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 0.0,
+    "mb": 3.7038955688476562,
+    "bytes_s": 0.0
+   },
+   "confidence": "low",
+   "effort": "S",
+   "fix": "Reference one copy. If only one directory is ever loaded (check the asset cache keys), the duplicate costs disk / package size only.",
+   "fidelity_impact": "none",
+   "verify": "verify by image + state diff after implementation (perf_verify)",
+   "fix_id": null,
+   "scenes": [
+    "static"
+   ],
+   "source": "static",
+   "below_noise": false,
+   "score": 0.02222
+  },
+  {
+   "id": "F-b6ea0c",
+   "rule": "R24",
+   "title": "'light_shadows' rebinds a pipeline for 66% of its draws",
+   "system": "render",
+   "location": {
+    "pass": "light_shadows"
+   },
+   "evidence": {
+    "devroom/modern": {
+     "draws": 51.026315789473685,
+     "pipeline_binds": 33.8421052631579,
+     "descriptor_binds": 1.3157894736842106
+    },
+    "lan2_client/4": {
+     "draws": 127.0,
+     "pipeline_binds": 75.0,
+     "descriptor_binds": 3.0
+    },
+    "lan2_host/4": {
+     "draws": 125.0,
+     "pipeline_binds": 73.0,
+     "descriptor_binds": 1.0
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0375,
+    "gpu_ms": 0.0,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "M",
+   "fix": "Sort the draw list by pipeline (then material) and bind on change only. Draw order inside one depth-tested opaque pass does not change the image; keep blended draws in their order.",
+   "fidelity_impact": "none",
+   "verify": "verify by image + state diff after implementation (perf_verify)",
+   "fix_id": null,
+   "scenes": [
+    "devroom/modern",
+    "lan2_client/4",
+    "lan2_host/4"
+   ],
+   "source": "runtime",
+   "below_noise": false,
+   "score": 0.0075
+  },
+  {
+   "id": "F-7e8239",
+   "rule": "R18",
+   "title": "UI rebuilds 23 text runs every frame (100% of frames unchanged), 0.26 ms",
+   "system": "ui",
+   "location": {
+    "file": "src/ui/gui/gui_draw.c",
+    "function": "gd_text"
+   },
+   "evidence": {
+    "lan2_client/4": {
+     "ui_ms": 0.255,
+     "text_runs": 23.0
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.1275785,
+    "gpu_ms": 0.0,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "low",
+   "effort": "L",
+   "fix": "Cache the shaped glyph runs per (string, font, size) and reuse the vertex block of panels whose inputs did not change.",
+   "fidelity_impact": "none",
+   "verify": "verify by image + state diff after implementation (perf_verify)",
+   "fix_id": null,
+   "scenes": [
+    "lan2_client/4"
+   ],
+   "source": "runtime",
+   "below_noise": false,
+   "score": 0.00478
+  },
+  {
+   "id": "F-a9afc1",
+   "rule": "R08",
+   "title": "vg_palettes_record() calls malloc in the frame loop (fixed: persistent buffer)",
+   "system": "core/alloc",
+   "location": {
+    "file": "src/render/vgeo/vgeo_skin.c",
+    "line": 124,
+    "function": "vg_palettes_record"
+   },
+   "evidence": {
+    "static": {
+     "call": "malloc",
+     "fixed": true
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0005,
+    "gpu_ms": 0.0,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "S",
+   "fix": "Keep the buffer for the owner's lifetime (sized at init) or take it from g_engine.frame_arena.",
+   "fidelity_impact": "none",
+   "verify": "perf_verify PF-0003 (perf_fix_disable A/B)",
+   "fix_id": "PF-0003",
+   "scenes": [
+    "static"
+   ],
+   "source": "static",
+   "below_noise": false,
+   "score": 0.0006
+  },
+  {
+   "id": "F-e93490",
+   "rule": "R08",
+   "title": "vg_stream_update() calls malloc in the frame loop (fixed: persistent buffer)",
+   "system": "core/alloc",
+   "location": {
+    "file": "src/render/vgeo/vgeo_stream.c",
+    "line": 423,
+    "function": "vg_stream_update"
+   },
+   "evidence": {
+    "static": {
+     "call": "malloc",
+     "fixed": true
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0005,
+    "gpu_ms": 0.0,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "S",
+   "fix": "Keep the buffer for the owner's lifetime (sized at init) or take it from g_engine.frame_arena.",
+   "fidelity_impact": "none",
+   "verify": "perf_verify PF-0004 (perf_fix_disable A/B)",
+   "fix_id": "PF-0004",
+   "scenes": [
+    "static"
+   ],
+   "source": "static",
+   "below_noise": false,
+   "score": 0.0006
+  },
+  {
+   "id": "F-a3573f",
+   "rule": "R04",
+   "title": "9 adjacent frame graph passes are independent but barrier separately",
+   "system": "render/fg",
+   "location": {
+    "file": "src/render/graph/fg.c",
+    "function": "pass_barriers"
+   },
+   "evidence": {
+    "devroom/low": {
+     "independent_adjacent_pairs": 9,
+     "barrier_calls_per_frame": 192.5
+    },
+    "devroom/modern": {
+     "independent_adjacent_pairs": 17,
+     "barrier_calls_per_frame": 264.2
+    },
+    "horde500/low": {
+     "independent_adjacent_pairs": 9,
+     "barrier_calls_per_frame": 192.5
+    },
+    "horde500/modern": {
+     "independent_adjacent_pairs": 17,
+     "barrier_calls_per_frame": 263.2
+    },
+    "lan2_client/4": {
+     "independent_adjacent_pairs": 17,
+     "barrier_calls_per_frame": 264.5
+    },
+    "lan2_host/4": {
+     "independent_adjacent_pairs": 18,
+     "barrier_calls_per_frame": 264.5
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 0.054,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "low",
+   "effort": "M",
+   "fix": "Emit the barriers of a run of independent passes as one vkCmdPipelineBarrier2 before the run (fg_execute look-ahead).",
+   "fidelity_impact": "none",
+   "verify": "verify by image + state diff after implementation (perf_verify)",
+   "fix_id": null,
+   "scenes": [
+    "devroom/low",
+    "devroom/modern",
+    "horde500/low",
+    "horde500/modern",
+    "lan2_client/4",
+    "lan2_host/4"
+   ],
+   "source": "runtime",
+   "below_noise": true,
+   "score": 0.00054
+  },
+  {
+   "id": "F-87756e",
+   "rule": "R19",
+   "title": "perf_stop_frame() logs unconditionally (log_info) at its top level",
+   "system": "core/log",
+   "location": {
+    "file": "src/game/game_post.c",
+    "line": 324,
+    "function": "perf_stop_frame"
+   },
+   "evidence": {
+    "static": {
+     "call": "log_info"
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.01,
+    "gpu_ms": 0.0,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "low",
+   "effort": "S",
+   "fix": "Check it is not reached every frame; log on change / once.",
+   "fidelity_impact": "none",
+   "verify": "verify by image + state diff after implementation (perf_verify)",
+   "fix_id": null,
+   "scenes": [
+    "static"
+   ],
+   "source": "static",
+   "below_noise": true,
+   "score": 0.0003
+  },
+  {
+   "id": "F-9e6403",
+   "rule": "R19",
+   "title": "grass_update_tier() logs unconditionally (log_info) at its top level",
+   "system": "core/log",
+   "location": {
+    "file": "src/render/vk_vgeo.c",
+    "line": 1938,
+    "function": "grass_update_tier"
+   },
+   "evidence": {
+    "static": {
+     "call": "log_info"
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.01,
+    "gpu_ms": 0.0,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "low",
+   "effort": "S",
+   "fix": "Check it is not reached every frame; log on change / once.",
+   "fidelity_impact": "none",
+   "verify": "verify by image + state diff after implementation (perf_verify)",
+   "fix_id": null,
+   "scenes": [
+    "static"
+   ],
+   "source": "static",
+   "below_noise": true,
+   "score": 0.0003
+  },
+  {
+   "id": "F-88d204",
+   "rule": "R19",
+   "title": "render_foliage_map_types() logs unconditionally (log_info) at its top level",
+   "system": "core/log",
+   "location": {
+    "file": "src/render/vk_vgeo.c",
+    "line": 2048,
+    "function": "render_foliage_map_types"
+   },
+   "evidence": {
+    "static": {
+     "call": "log_info"
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.01,
+    "gpu_ms": 0.0,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "low",
+   "effort": "S",
+   "fix": "Check it is not reached every frame; log on change / once.",
+   "fidelity_impact": "none",
+   "verify": "verify by image + state diff after implementation (perf_verify)",
+   "fix_id": null,
+   "scenes": [
+    "static"
+   ],
+   "source": "static",
+   "below_noise": true,
+   "score": 0.0003
+  },
+  {
+   "id": "F-34957e",
+   "rule": "R19",
+   "title": "console_submit() logs unconditionally (log_info) at its top level",
+   "system": "core/log",
+   "location": {
+    "file": "src/ui/console.c",
+    "line": 113,
+    "function": "console_submit"
+   },
+   "evidence": {
+    "static": {
+     "call": "log_info"
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.01,
+    "gpu_ms": 0.0,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "low",
+   "effort": "S",
+   "fix": "Check it is not reached every frame; log on change / once.",
+   "fidelity_impact": "none",
+   "verify": "verify by image + state diff after implementation (perf_verify)",
+   "fix_id": null,
+   "scenes": [
+    "static"
+   ],
+   "source": "static",
+   "below_noise": true,
+   "score": 0.0003
+  },
+  {
+   "id": "F-f042a5",
+   "rule": "R26",
+   "title": "fov_frame() looks up 1 cvar(s) by name: r_viewmodel_fov",
+   "system": "core/cvar",
+   "location": {
+    "file": "src/game/game_sights.c",
+    "line": 584,
+    "function": "fov_frame"
+   },
+   "evidence": {
+    "static": {
+     "cvars": [
+      "r_viewmodel_fov"
+     ]
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0025,
+    "gpu_ms": 0.0,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "high",
+   "effort": "S",
+   "fix": "Cache the Cvar* at init (the hash index of PF-0002 already makes each lookup cheap).",
+   "fidelity_impact": "none",
+   "verify": "verify by image + state diff after implementation (perf_verify)",
+   "fix_id": null,
+   "scenes": [
+    "static"
+   ],
+   "source": "static",
+   "below_noise": true,
+   "score": 0.00023
+  },
+  {
+   "id": "F-35ee3f",
+   "rule": "R26",
+   "title": "terrain_game_frame() looks up 1 cvar(s) by name: r_terrain_quality",
+   "system": "core/cvar",
+   "location": {
+    "file": "src/game/game_terrain.c",
+    "line": 127,
+    "function": "terrain_game_frame"
+   },
+   "evidence": {
+    "static": {
+     "cvars": [
+      "r_terrain_quality"
+     ]
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0025,
+    "gpu_ms": 0.0,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "high",
+   "effort": "S",
+   "fix": "Cache the Cvar* at init (the hash index of PF-0002 already makes each lookup cheap).",
+   "fidelity_impact": "none",
+   "verify": "verify by image + state diff after implementation (perf_verify)",
+   "fix_id": null,
+   "scenes": [
+    "static"
+   ],
+   "source": "static",
+   "below_noise": true,
+   "score": 0.00023
+  },
+  {
+   "id": "F-7677d8",
+   "rule": "R26",
+   "title": "flesh_fx_update() looks up 1 cvar(s) by name: vfx_timescale",
+   "system": "core/cvar",
+   "location": {
+    "file": "src/gameplay/flesh_fx.c",
+    "line": 562,
+    "function": "flesh_fx_update"
+   },
+   "evidence": {
+    "static": {
+     "cvars": [
+      "vfx_timescale"
+     ]
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0025,
+    "gpu_ms": 0.0,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "high",
+   "effort": "S",
+   "fix": "Cache the Cvar* at init (the hash index of PF-0002 already makes each lookup cheap).",
+   "fidelity_impact": "none",
+   "verify": "verify by image + state diff after implementation (perf_verify)",
+   "fix_id": null,
+   "scenes": [
+    "static"
+   ],
+   "source": "static",
+   "below_noise": true,
+   "score": 0.00023
+  },
+  {
+   "id": "F-0a7c78",
+   "rule": "R26",
+   "title": "draw_world_bars() looks up 1 cvar(s) by name: cl_healthbars",
+   "system": "core/cvar",
+   "location": {
+    "file": "src/ui/hud.c",
+    "line": 393,
+    "function": "draw_world_bars"
+   },
+   "evidence": {
+    "static": {
+     "cvars": [
+      "cl_healthbars"
+     ]
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0025,
+    "gpu_ms": 0.0,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "high",
+   "effort": "S",
+   "fix": "Cache the Cvar* at init (the hash index of PF-0002 already makes each lookup cheap).",
+   "fidelity_impact": "none",
+   "verify": "verify by image + state diff after implementation (perf_verify)",
+   "fix_id": null,
+   "scenes": [
+    "static"
+   ],
+   "source": "static",
+   "below_noise": true,
+   "score": 0.00023
+  },
+  {
+   "id": "F-0714da",
+   "rule": "R27",
+   "title": "Main thread blocked 349 ms on file reads during startup (22961 ms to the first frame)",
+   "system": "startup",
+   "location": {
+    "zone": "startup"
+   },
+   "evidence": {
+    "startup": {
+     "io_ms": 349.2,
+     "total_ms": 22960.8,
+     "top_init_ms": [
+      [
+       "render_init",
+       20363.1
+      ],
+      [
+       "game_init",
+       2034.5
+      ],
+      [
+       "ui_init",
+       260.9
+      ],
+      [
+       "assets_init",
+       184.7
+      ],
+      [
+       "boot_map",
+       70.5
+      ],
+      [
+       "lobby_init",
+       1.1
+      ],
+      [
+       "cvar_find",
+       0.0
+      ],
+      [
+       "cvar_find",
+       0.0
+      ]
+     ]
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 0.0,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "M",
+   "fix": "Read the assets the first frame does not need on jobs (assets_init / game_init order), overlap pipeline creation with loading. Startup only: not a per-frame saving.",
+   "fidelity_impact": "none",
+   "verify": "verify by image + state diff after implementation (perf_verify)",
+   "fix_id": null,
+   "scenes": [
+    "startup"
+   ],
+   "source": "runtime",
+   "below_noise": false,
+   "score": 0.0002
+  },
+  {
+   "id": "F-452c11",
+   "rule": "R06",
+   "title": "Main thread waits 211.18 ms on present (GPU bound: GPU 210.25 ms vs CPU work 5.36 ms)",
+   "system": "frame",
+   "location": {
+    "zone": "wait:present"
+   },
+   "evidence": {
+    "devroom/low": {
+     "wait_ms": 211.18,
+     "gpu_ms": 210.25,
+     "cpu_ms": 216.535
+    },
+    "devroom/modern": {
+     "wait_ms": 844.138,
+     "gpu_ms": 842.1,
+     "cpu_ms": 843.635
+    },
+    "horde500/low": {
+     "wait_ms": 211.585,
+     "gpu_ms": 206.7,
+     "cpu_ms": 219.882
+    },
+    "horde500/modern": {
+     "wait_ms": 772.275,
+     "gpu_ms": 733.0,
+     "cpu_ms": 756.082
+    },
+    "lan2_client/4": {
+     "wait_ms": 1208.075,
+     "gpu_ms": 1207.0,
+     "cpu_ms": 1222.182
+    },
+    "lan2_host/4": {
+     "wait_ms": 1017.487,
+     "gpu_ms": 939.15,
+     "cpu_ms": 911.075
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 0.0,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "high",
+   "effort": "M",
+   "fix": "Nothing to fix on the CPU side; the GPU findings of this scene are the lever.",
+   "fidelity_impact": "none",
+   "verify": "no change (classification)",
+   "fix_id": null,
+   "scenes": [
+    "devroom/low",
+    "devroom/modern",
+    "horde500/low",
+    "horde500/modern",
+    "lan2_client/4",
+    "lan2_host/4"
+   ],
+   "source": "runtime",
+   "below_noise": true,
+   "score": 3e-05
+  }
+ ],
+ "tradeoffs": [
+  {
+   "id": "F-df14d5",
+   "rule": "T01",
+   "title": "'shadow_sun' costs 131.96 ms: a lower setting would save part of it",
+   "system": "render",
+   "location": {
+    "pass": "shadow_sun"
+   },
+   "evidence": {
+    "devroom/modern": {
+     "gpu_ms": 131.963
+    },
+    "horde500/modern": {
+     "gpu_ms": 131.329
+    },
+    "lan2_client/4": {
+     "gpu_ms": 169.566
+    },
+    "lan2_host/4": {
+     "gpu_ms": 179.266
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 71.70631578947369,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "S",
+   "fix": "Lower its resolution / sample count / distance (changes the image: Engine Fidelity's job, not this audit's).",
+   "fidelity_impact": "tradeoff",
+   "verify": "changes the image: not a fidelity-neutral fix",
+   "fix_id": null,
+   "scenes": [
+    "devroom/modern",
+    "horde500/modern",
+    "lan2_client/4",
+    "lan2_host/4"
+   ],
+   "source": "runtime",
+   "below_noise": false,
+   "score": 43.02379
+  },
+  {
+   "id": "F-a3994d",
+   "rule": "T01",
+   "title": "'mb_blur' costs 115.40 ms: a lower setting would save part of it",
+   "system": "render",
+   "location": {
+    "pass": "mb_blur"
+   },
+   "evidence": {
+    "devroom/modern": {
+     "gpu_ms": 115.395
+    },
+    "horde500/modern": {
+     "gpu_ms": 117.708
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 47.08330666666667,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "S",
+   "fix": "Lower its resolution / sample count / distance (changes the image: Engine Fidelity's job, not this audit's).",
+   "fidelity_impact": "tradeoff",
+   "verify": "changes the image: not a fidelity-neutral fix",
+   "fix_id": null,
+   "scenes": [
+    "devroom/modern",
+    "horde500/modern"
+   ],
+   "source": "runtime",
+   "below_noise": false,
+   "score": 28.24998
+  },
+  {
+   "id": "F-237107",
+   "rule": "T01",
+   "title": "'taa' costs 50.19 ms: a lower setting would save part of it",
+   "system": "render",
+   "location": {
+    "pass": "taa"
+   },
+   "evidence": {
+    "devroom/modern": {
+     "gpu_ms": 50.187
+    },
+    "horde500/modern": {
+     "gpu_ms": 48.976
+    },
+    "lan2_client/4": {
+     "gpu_ms": 111.123
+    },
+    "lan2_host/4": {
+     "gpu_ms": 85.558
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 44.44915789473685,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "S",
+   "fix": "Lower its resolution / sample count / distance (changes the image: Engine Fidelity's job, not this audit's).",
+   "fidelity_impact": "tradeoff",
+   "verify": "changes the image: not a fidelity-neutral fix",
+   "fix_id": null,
+   "scenes": [
+    "devroom/modern",
+    "horde500/modern",
+    "lan2_client/4",
+    "lan2_host/4"
+   ],
+   "source": "runtime",
+   "below_noise": false,
+   "score": 26.66949
+  },
+  {
+   "id": "F-e5de9a",
+   "rule": "T01",
+   "title": "'opaque' costs 19.60 ms: a lower setting would save part of it",
+   "system": "render",
+   "location": {
+    "pass": "opaque"
+   },
+   "evidence": {
+    "devroom/low": {
+     "gpu_ms": 19.596
+    },
+    "devroom/modern": {
+     "gpu_ms": 68.524
+    },
+    "horde500/low": {
+     "gpu_ms": 22.06
+    },
+    "horde500/modern": {
+     "gpu_ms": 80.452
+    },
+    "lan2_client/4": {
+     "gpu_ms": 108.402
+    },
+    "lan2_host/4": {
+     "gpu_ms": 81.926
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 43.36073684210527,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "S",
+   "fix": "Lower its resolution / sample count / distance (changes the image: Engine Fidelity's job, not this audit's).",
+   "fidelity_impact": "tradeoff",
+   "verify": "changes the image: not a fidelity-neutral fix",
+   "fix_id": null,
+   "scenes": [
+    "devroom/low",
+    "devroom/modern",
+    "horde500/low",
+    "horde500/modern",
+    "lan2_client/4",
+    "lan2_host/4"
+   ],
+   "source": "runtime",
+   "below_noise": false,
+   "score": 26.01644
+  },
+  {
+   "id": "F-e77cce",
+   "rule": "T01",
+   "title": "'ssr_temporal' costs 76.59 ms: a lower setting would save part of it",
+   "system": "render",
+   "location": {
+    "pass": "ssr_temporal"
+   },
+   "evidence": {
+    "lan2_client/4": {
+     "gpu_ms": 76.595
+    },
+    "lan2_host/4": {
+     "gpu_ms": 62.805
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 30.637894736842107,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "S",
+   "fix": "Lower its resolution / sample count / distance (changes the image: Engine Fidelity's job, not this audit's).",
+   "fidelity_impact": "tradeoff",
+   "verify": "changes the image: not a fidelity-neutral fix",
+   "fix_id": null,
+   "scenes": [
+    "lan2_client/4",
+    "lan2_host/4"
+   ],
+   "source": "runtime",
+   "below_noise": false,
+   "score": 18.38274
+  },
+  {
+   "id": "F-852ca1",
+   "rule": "T01",
+   "title": "'tonemap' costs 33.10 ms: a lower setting would save part of it",
+   "system": "render",
+   "location": {
+    "pass": "tonemap"
+   },
+   "evidence": {
+    "devroom/low": {
+     "gpu_ms": 33.103
+    },
+    "horde500/low": {
+     "gpu_ms": 31.368
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 13.24105263157895,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "S",
+   "fix": "Lower its resolution / sample count / distance (changes the image: Engine Fidelity's job, not this audit's).",
+   "fidelity_impact": "tradeoff",
+   "verify": "changes the image: not a fidelity-neutral fix",
+   "fix_id": null,
+   "scenes": [
+    "devroom/low",
+    "horde500/low"
+   ],
+   "source": "runtime",
+   "below_noise": false,
+   "score": 7.94463
+  },
+  {
+   "id": "F-a7049f",
+   "rule": "T01",
+   "title": "'bloom' costs 28.31 ms: a lower setting would save part of it",
+   "system": "render",
+   "location": {
+    "pass": "bloom"
+   },
+   "evidence": {
+    "devroom/low": {
+     "gpu_ms": 28.312
+    },
+    "horde500/low": {
+     "gpu_ms": 27.936
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 11.324736842105263,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "S",
+   "fix": "Lower its resolution / sample count / distance (changes the image: Engine Fidelity's job, not this audit's).",
+   "fidelity_impact": "tradeoff",
+   "verify": "changes the image: not a fidelity-neutral fix",
+   "fix_id": null,
+   "scenes": [
+    "devroom/low",
+    "horde500/low"
+   ],
+   "source": "runtime",
+   "below_noise": false,
+   "score": 6.79484
+  },
+  {
+   "id": "F-99fa9d",
+   "rule": "T01",
+   "title": "'fxaa' costs 16.84 ms: a lower setting would save part of it",
+   "system": "render",
+   "location": {
+    "pass": "fxaa"
+   },
+   "evidence": {
+    "devroom/low": {
+     "gpu_ms": 16.842
+    },
+    "horde500/low": {
+     "gpu_ms": 21.17
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 8.468000000000002,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "S",
+   "fix": "Lower its resolution / sample count / distance (changes the image: Engine Fidelity's job, not this audit's).",
+   "fidelity_impact": "tradeoff",
+   "verify": "changes the image: not a fidelity-neutral fix",
+   "fix_id": null,
+   "scenes": [
+    "devroom/low",
+    "horde500/low"
+   ],
+   "source": "runtime",
+   "below_noise": false,
+   "score": 5.0808
+  },
+  {
+   "id": "F-1a9828",
+   "rule": "R14",
+   "title": "assets/human/textures/Ch38_1001_Diffuse.png: 4096x4096 RGBA8 PNG (85 MB with mips in VRAM), no BC sibling",
+   "system": "assets/textures",
+   "location": {
+    "file": "assets/human/textures/Ch38_1001_Diffuse.png"
+   },
+   "evidence": {
+    "static": {
+     "w": 4096,
+     "h": 4096
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 0.0,
+    "mb": 63.84,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "M",
+   "fix": "BC7 / BC5 compression (or a smaller size where the texel density is never reached). Lossy: changes the image.",
+   "fidelity_impact": "tradeoff",
+   "verify": "changes the image: not a fidelity-neutral fix",
+   "fix_id": null,
+   "scenes": [
+    "static"
+   ],
+   "source": "static",
+   "below_noise": false,
+   "score": 0.25536
+  },
+  {
+   "id": "F-b68f06",
+   "rule": "R14",
+   "title": "assets/human/textures/Ch38_1001_Glossiness.png: 4096x4096 RGBA8 PNG (85 MB with mips in VRAM), no BC sibling",
+   "system": "assets/textures",
+   "location": {
+    "file": "assets/human/textures/Ch38_1001_Glossiness.png"
+   },
+   "evidence": {
+    "static": {
+     "w": 4096,
+     "h": 4096
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 0.0,
+    "mb": 63.84,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "M",
+   "fix": "BC7 / BC5 compression (or a smaller size where the texel density is never reached). Lossy: changes the image.",
+   "fidelity_impact": "tradeoff",
+   "verify": "changes the image: not a fidelity-neutral fix",
+   "fix_id": null,
+   "scenes": [
+    "static"
+   ],
+   "source": "static",
+   "below_noise": false,
+   "score": 0.25536
+  },
+  {
+   "id": "F-fcfa27",
+   "rule": "R14",
+   "title": "assets/human/textures/Ch38_1001_Normal.png: 4096x4096 RGBA8 PNG (85 MB with mips in VRAM), no BC sibling",
+   "system": "assets/textures",
+   "location": {
+    "file": "assets/human/textures/Ch38_1001_Normal.png"
+   },
+   "evidence": {
+    "static": {
+     "w": 4096,
+     "h": 4096
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 0.0,
+    "mb": 63.84,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "M",
+   "fix": "BC7 / BC5 compression (or a smaller size where the texel density is never reached). Lossy: changes the image.",
+   "fidelity_impact": "tradeoff",
+   "verify": "changes the image: not a fidelity-neutral fix",
+   "fix_id": null,
+   "scenes": [
+    "static"
+   ],
+   "source": "static",
+   "below_noise": false,
+   "score": 0.25536
+  },
+  {
+   "id": "F-af693b",
+   "rule": "R14",
+   "title": "assets/human/textures/Ch38_1001_Specular.png: 4096x4096 RGBA8 PNG (85 MB with mips in VRAM), no BC sibling",
+   "system": "assets/textures",
+   "location": {
+    "file": "assets/human/textures/Ch38_1001_Specular.png"
+   },
+   "evidence": {
+    "static": {
+     "w": 4096,
+     "h": 4096
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 0.0,
+    "mb": 63.84,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "M",
+   "fix": "BC7 / BC5 compression (or a smaller size where the texel density is never reached). Lossy: changes the image.",
+   "fidelity_impact": "tradeoff",
+   "verify": "changes the image: not a fidelity-neutral fix",
+   "fix_id": null,
+   "scenes": [
+    "static"
+   ],
+   "source": "static",
+   "below_noise": false,
+   "score": 0.25536
+  },
+  {
+   "id": "F-4e2a25",
+   "rule": "R14",
+   "title": "assets/human/textures/Ch42_1001_Diffuse.png: 4096x4096 RGBA8 PNG (85 MB with mips in VRAM), no BC sibling",
+   "system": "assets/textures",
+   "location": {
+    "file": "assets/human/textures/Ch42_1001_Diffuse.png"
+   },
+   "evidence": {
+    "static": {
+     "w": 4096,
+     "h": 4096
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 0.0,
+    "mb": 63.84,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "M",
+   "fix": "BC7 / BC5 compression (or a smaller size where the texel density is never reached). Lossy: changes the image.",
+   "fidelity_impact": "tradeoff",
+   "verify": "changes the image: not a fidelity-neutral fix",
+   "fix_id": null,
+   "scenes": [
+    "static"
+   ],
+   "source": "static",
+   "below_noise": false,
+   "score": 0.25536
+  },
+  {
+   "id": "F-8c1cbb",
+   "rule": "R14",
+   "title": "assets/human/textures/Ch42_1001_Glossiness.png: 4096x4096 RGBA8 PNG (85 MB with mips in VRAM), no BC sibling",
+   "system": "assets/textures",
+   "location": {
+    "file": "assets/human/textures/Ch42_1001_Glossiness.png"
+   },
+   "evidence": {
+    "static": {
+     "w": 4096,
+     "h": 4096
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 0.0,
+    "mb": 63.84,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "M",
+   "fix": "BC7 / BC5 compression (or a smaller size where the texel density is never reached). Lossy: changes the image.",
+   "fidelity_impact": "tradeoff",
+   "verify": "changes the image: not a fidelity-neutral fix",
+   "fix_id": null,
+   "scenes": [
+    "static"
+   ],
+   "source": "static",
+   "below_noise": false,
+   "score": 0.25536
+  },
+  {
+   "id": "F-d36958",
+   "rule": "R14",
+   "title": "assets/human/textures/Ch42_1001_Normal.png: 4096x4096 RGBA8 PNG (85 MB with mips in VRAM), no BC sibling",
+   "system": "assets/textures",
+   "location": {
+    "file": "assets/human/textures/Ch42_1001_Normal.png"
+   },
+   "evidence": {
+    "static": {
+     "w": 4096,
+     "h": 4096
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 0.0,
+    "mb": 63.84,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "M",
+   "fix": "BC7 / BC5 compression (or a smaller size where the texel density is never reached). Lossy: changes the image.",
+   "fidelity_impact": "tradeoff",
+   "verify": "changes the image: not a fidelity-neutral fix",
+   "fix_id": null,
+   "scenes": [
+    "static"
+   ],
+   "source": "static",
+   "below_noise": false,
+   "score": 0.25536
+  },
+  {
+   "id": "F-a94519",
+   "rule": "R14",
+   "title": "assets/human/textures/Ch42_1001_Specular.png: 4096x4096 RGBA8 PNG (85 MB with mips in VRAM), no BC sibling",
+   "system": "assets/textures",
+   "location": {
+    "file": "assets/human/textures/Ch42_1001_Specular.png"
+   },
+   "evidence": {
+    "static": {
+     "w": 4096,
+     "h": 4096
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 0.0,
+    "mb": 63.84,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "M",
+   "fix": "BC7 / BC5 compression (or a smaller size where the texel density is never reached). Lossy: changes the image.",
+   "fidelity_impact": "tradeoff",
+   "verify": "changes the image: not a fidelity-neutral fix",
+   "fix_id": null,
+   "scenes": [
+    "static"
+   ],
+   "source": "static",
+   "below_noise": false,
+   "score": 0.25536
+  }
+ ],
+ "errors": []
+}
