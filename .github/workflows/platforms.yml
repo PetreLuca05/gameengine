@@ -64,25 +64,26 @@ jobs:
           "VULKAN_SDK=C:\VulkanSDK" | Out-File -FilePath $env:GITHUB_ENV -Append
           "C:\VulkanSDK\Bin" | Out-File -FilePath $env:GITHUB_PATH -Append
       - name: Configure
+        # Visual Studio generator: Jolt's project only has Debug / Release / Distribution configurations
         run: cmake -S . -B build -A x64
       - name: Python packages (ground texture tests)
         run: python -m pip install numpy pillow
       - name: Build
         shell: bash
         run: |
-          cmake --build build --config RelWithDebInfo --parallel 2>&1 | tee build.log; test ${PIPESTATUS[0]} -eq 0
+          cmake --build build --config Release --parallel 2>&1 | tee build.log; test ${PIPESTATUS[0]} -eq 0
       - name: Build errors
         if: failure()
         shell: bash
         run: |
-          grep -E "error (C|LNK)[0-9]+|fatal error" build.log | sort -u | head -60
+          grep -E "error (C|LNK|MSB)[0-9]+|fatal error" build.log | sort -u | head -60
       - name: Tests
         shell: bash
-        run: ctest --test-dir build -C RelWithDebInfo --output-on-failure -j 4 -E "$(tools/ci/known_failures.sh windows)"
+        run: ctest --test-dir build -C Release --output-on-failure -j 4 -E "$(tools/ci/known_failures.sh windows)"
       - name: Known failures (not gating)
         continue-on-error: true
         shell: bash
-        run: ctest --test-dir build -C RelWithDebInfo --output-on-failure -R "$(tools/ci/known_failures.sh windows)"
+        run: ctest --test-dir build -C Release --output-on-failure -R "$(tools/ci/known_failures.sh windows)"
 
   macos-arm64:
     runs-on: macos-15
