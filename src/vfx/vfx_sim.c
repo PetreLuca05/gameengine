@@ -425,7 +425,7 @@ static int cpu_alloc(VfxSystem *s) {
             return i;
         }
     }
-    // Pool full: recycle the oldest resting particle (casings on the ground).
+    // Pool full: recycle the oldest resting particle (debris on the ground).
     int best = -1;
     float age = -1;
     for (int i = 0; i < max; i++) if (s->cpu[i].resting && s->cpu[i].age > age) { age = s->cpu[i].age; best = i; }

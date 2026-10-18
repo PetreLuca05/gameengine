@@ -23,7 +23,6 @@ typedef enum BalBulletFlags {
     BF_SUPERSONIC_EVER = 1 << 0,   // was above Mach 1 at some point (crack)
     BF_SUBSONIC        = 1 << 1,   // launched below Mach 1 (whizz, no crack)
     BF_TRACER          = 1 << 2,
-    BF_RICOCHET        = 1 << 3,
     BF_PENETRATED      = 1 << 4,
     BF_FRAGMENTED      = 1 << 5,
     BF_PREDICTED       = 1 << 6,   // client-side prediction / replay copy (visual only)
@@ -32,15 +31,15 @@ typedef enum BalBulletFlags {
 
 typedef struct BalBullet {
     vec3 pos, vel;
-    float bc;              // effective BC (tracer variant, × tumble after a ricochet / yawed exit)
+    float bc;              // effective BC (tracer variant, × deformation / yaw after an exit)
     float mass;            // kg (tracer variant)
-    float yaw;             // rad: transonic / ricochet yaw (extra drag + lateral random walk)
+    float yaw;             // rad: transonic yaw (extra drag + lateral random walk)
     float dist;            // m of path flown
     float time;            // s of flight
     Rng rng;               // per-bullet stream: shot seed ^ pellet
     u8 cart;               // BalData.cart index
     u8 flags;              // BalBulletFlags
-    u8 events;             // ricochets + penetrations so far
+    u8 events;             // penetrations so far
     u8 pellet;
 } BalBullet;
 

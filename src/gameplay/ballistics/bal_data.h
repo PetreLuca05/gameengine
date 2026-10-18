@@ -56,7 +56,6 @@ typedef struct BalCartridge {
 
 typedef struct BalMaterial {
     u8 cls;               // BalMatClass
-    float ricochet_deg;   // incidence from the surface
     float depth_ref;      // m defeated by 5.56 M855 at its muzzle (x cartridge pen at its own muzzle)
     float hardness, porosity;
     float exit_spread_deg;

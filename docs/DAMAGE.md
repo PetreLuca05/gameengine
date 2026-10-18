@@ -46,8 +46,8 @@ final = base × character.part_mult[part] × weapon.part_mult[part] × falloff(d
 `apply_damage_part` applies the result and raises a damage-number event carrying the part and the
 multiplier. Hit feedback:
 * the number is labelled `<damage> <part> x<mult>`;
-* head hits use the `hit_head` hitmarker sound;
-* kills use the kill hitmarker.
+* head hits use the head hitmarker colour, kills the kill hitmarker (larger);
+* hit markers are visual only: no hit, headshot or kill confirm sound.
 
 On the test stand dummies, each hit is also logged:
 

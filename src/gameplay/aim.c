@@ -121,10 +121,10 @@ float aim_obstruct_margin(const AimObstructRule *r, float far, float parallax) {
     return fmaxf(fmaxf(r->margin_abs, r->margin_rel * fmaxf(far, 0.0f)), parallax);
 }
 
-float aim_parallax(float offset, float sin_graze) {
-    float s = fmaxf(fminf(sin_graze, 1.0f), 0.05f);
+float aim_parallax(float separation, float sin_graze, float far) {
+    float s = fmaxf(fminf(sin_graze, 1.0f), 0.005f);
     float cot = sqrtf(fmaxf(1.0f - s * s, 0.0f)) / s;
-    return fminf(fmaxf(offset, 0.0f) * cot, 3.0f);
+    return fminf(fmaxf(separation, 0.0f) * cot, fmaxf(3.0f, 0.25f * fmaxf(far, 0.0f)));
 }
 
 AimClass aim_classify(float hit, float muzzle_depth, float far, float parallax, const AimObstructRule *r, bool friendly) {

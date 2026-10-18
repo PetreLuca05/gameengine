@@ -39,7 +39,6 @@ Mirror: https://github.com/lavenderdotpet/CC0-Public-Domain-Sounds.git at `f2b62
 - `door_open_1..3`: wood_metal `door_open_01.ogg`, wood_metal `wood_squeak_01.ogg`, wood_metal `wood_squeak_02.ogg`
 - `door_close_1..2`: wood_metal `wood_close_01.ogg`, wood_metal `wood_close_02.ogg`
 - `door_slam_1..4`: wood_metal `wood_slam_01.ogg`, wood_metal `wood_slam_02.ogg`, wood_metal `wood_slam_03.ogg`, wood_metal `wood_slam_04.ogg`
-- `bullet_ricochet_1..2`: warfork `weapons/ric1.ogg`, warfork `weapons/ric2.ogg`
 - `hurt_1..4`: warfork `players/male/pain25.ogg`, warfork `players/male/pain50.ogg`, warfork `players/male/pain75.ogg`, warfork `players/male/pain100.ogg`
 - `zombie_groan_1..12`: creature2 `human_01.ogg`, creature2 `human_02.ogg`, creature2 `human_03.ogg`, creature2 `human_04.ogg`, creature2 `human_05.ogg`, creature2 `human_06.ogg`, creature2 `human_07.ogg`, creature2 `human_08.ogg`, creature `monster_03.ogg`, creature `monster_06.ogg`, creature `grunt_01.ogg`, creature `grunt_03.ogg`
 - `zombie_growl_1..10`: creature2 `roar_04.ogg`, creature2 `roar_05.ogg`, creature2 `roar_06.ogg`, creature2 `grunt_06.ogg`, creature2 `grunt_08.ogg`, creature2 `grunt_09.ogg`, creature2 `monster_09.ogg`, creature2 `monster_15.ogg`, creature `roar_02.ogg`, creature `troll_02.ogg`

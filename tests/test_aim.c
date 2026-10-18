@@ -155,11 +155,18 @@ static void test_classify(void) {
     CHECK(fabsf(aim_obstruct_margin(&r, 100.0f, 0.0f) - 5.0f) < 1e-5f && fabsf(aim_obstruct_margin(&r, 2.0f, 0.0f) - 0.75f) < 1e-6f, "margin = max(abs, rel x far)");
     // Grazing: the camera hits the ground 15 m ahead at 6.5 deg; a hip barrel 0.12 m off the camera
     // ray reaches the ground ~1 m sooner. Parallax, not an obstruction; a crate 4 m short still is.
-    float sg = sinf(6.5f * DG_DEG2RAD), par = aim_parallax(0.12f, sg);
+    float sg = sinf(6.5f * DG_DEG2RAD), par = aim_parallax(0.12f, sg, 15.0f);
     CHECK(par > 1.0f && par < 1.1f, "parallax at 6.5 deg: %.3f m", par);
     CHECK(aim_classify(15.0f - 1.05f - depth, depth, 15.0f, par, &r, false) == AIM_CLEAR, "barrel on the ground just short of P = clear");
     CHECK(aim_classify(11.0f - depth, depth, 15.0f, par, &r, false) == AIM_OBSTRUCTED, "a crate 4 m short of P = obstructed");
-    CHECK(aim_parallax(0.12f, 1.0f) < 1e-6f && aim_parallax(0.5f, 0.0f) <= 3.0f, "head on: none; edge on: capped");
+    CHECK(aim_parallax(0.12f, 1.0f, 15.0f) < 1e-6f && aim_parallax(0.5f, 0.0f, 10.0f) <= 3.0f && aim_parallax(0.5f, 0.0f, 100.0f) <= 25.0f,
+          "head on: none; edge on: capped at max(3 m, 25 %% of far)");
+    // ADS in the open: terrain 145 m out at a 0.6 deg grazing angle, a barrel 0.07 deg off the ray and
+    // 4.5 cm under it lands ~21 m short on the same slope: parallax. A wall 60 m short is not.
+    float sep = 0.045f + 145.0f * tanf(0.07f * DG_DEG2RAD);
+    par = aim_parallax(sep, sinf(0.6f * DG_DEG2RAD), 145.0f);
+    CHECK(aim_classify(124.0f - depth, depth, 145.0f, par, &r, false) == AIM_CLEAR, "far grazing terrain 21 m short = clear (%.1f m allowance)", par);
+    CHECK(aim_classify(85.0f - depth, depth, 145.0f, par, &r, false) == AIM_OBSTRUCTED, "a wall 60 m short = obstructed");
     CHECK(aim_classify_t(30.0f, depth, 300.0f, &r, true) == AIM_FRIENDLY, "teammate on the barrel line = friendly");
     CHECK(aim_classify_t(0.1f, depth, 300.0f, &r, true) == AIM_FRIENDLY, "teammate at the barrel = friendly");
     CHECK(!strcmp(aim_class_name(AIM_BARREL), "barrel") && !strcmp(aim_class_name(AIM_CLEAR), "clear") && !strcmp(aim_class_name(AIM_OBSTRUCTED), "obstructed"), "class names");

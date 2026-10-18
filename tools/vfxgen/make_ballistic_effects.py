@@ -161,14 +161,6 @@ def tracers():
 
 
 def impacts():
-    # Ricochet: a spray of sparks / lead along the deflected path.
-    write("impact_ricochet", effect([{
-        "name": "streak", "tier": "gpu",
-        "spawn": {"mode": "burst", "count": [3, 6], "life": [0.05, 0.18], "size": [0.006, 0.012], "speed": [25.0, 60.0], "dir": "reflect", "angle": 12,
-                  "color": [1.0, 0.85, 0.55, 1.0], "color2": [1.0, 0.6, 0.25, 1.0]},
-        "update": {"gravity": 1.0, "drag": 0.5, "alpha_curve": [[0, 1], [1, 0]]},
-        "render": {"mode": "add", "orient": "stretch", "texture": "spark", "emissive": 7.0, "exposure_aware": True, "stretch": 0.02, "stretch_max": 16.0, "near_fade": 0.05},
-    }], duration=0.05, max_inst=32, priority=1, cull=400))
     # Exit-side spall: a wider cone of fragments than the entry, along the bullet path.
     write("impact_exit_spall", effect([{
         "name": "spall", "tier": "gpu",

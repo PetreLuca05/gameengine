@@ -126,12 +126,12 @@ bool bal_step(BalBullet *b, const BalCartridge *c, const BalEnv *e, float dt) {
             // gcc / MSVC), and a Mac host and a PC client must walk the same way
             float gw = bal_rng_gauss(&b->rng), gu = bal_rng_gauss(&b->rng);
             b->vel = v3_add(b->vel, v3_add(v3_scale(u, gu * k), v3_scale(w, gw * k)));
-        } else if (b->yaw > 0.0f && !(b->flags & BF_RICOCHET)) {
+        } else if (b->yaw > 0.0f) {
             b->yaw -= b->yaw * fminf(2.0f * h, 1.0f);
         }
         // Spin drift (Litz): drift = 1.25·(Sg + 1.2)·t^1.83 inches for a right-hand twist. Applied as
         // its time derivative, to the right of the flight path, once the bullet has flown 0.3 s.
-        if (e->spin_drift && c->spin_sg > 0.0f && b->time > 0.3f && !(b->flags & BF_RICOCHET)) {
+        if (e->spin_drift && c->spin_sg > 0.0f && b->time > 0.3f) {
             float rate = 1.25f * (c->spin_sg + 1.2f) * 1.83f * dm_powf(b->time, 0.83f) * 0.0254f;   // m/s
             float rate0 = 1.25f * (c->spin_sg + 1.2f) * 1.83f * dm_powf(b->time - h, 0.83f) * 0.0254f;
             vec3 dir = v3_scale(b->vel, 1.0f / fmaxf(s, 1e-3f));

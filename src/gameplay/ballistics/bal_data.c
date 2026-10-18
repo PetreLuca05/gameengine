@@ -53,7 +53,6 @@ void bal_data_init(BalData *d) {
     for (int i = 0; i < SURF_COUNT; i++) {
         BalMaterial *m = &d->mat[i];
         m->cls = BAL_HARD;
-        m->ricochet_deg = 12.0f;
         m->depth_ref = 0.04f;
         m->hardness = 0.7f;
         m->porosity = 0.5f;
@@ -191,7 +190,6 @@ bool bal_data_parse_materials(BalData *d, const char *json) {
         if (i < 0) continue;
         BalMaterial *m = &d->mat[i];
         m->cls = !strcmp(jstr(j, "class", "hard"), "soft") ? BAL_SOFT : BAL_HARD;
-        m->ricochet_deg = jnum(j, "ricochet_deg", m->ricochet_deg);
         m->depth_ref = jnum(j, "depth_ref_mm", m->depth_ref * 1000.0f) * 0.001f;
         m->hardness = jnum(j, "hardness", m->hardness);
         m->porosity = jnum(j, "porosity", m->porosity);

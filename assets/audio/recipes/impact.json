@@ -3,7 +3,7 @@
   "name": "impact",
   "bus": "sfx", "priority": 0.6, "echo": true, "max_instances": 24,
   "distance": { "min": 1.5, "max": 300, "rolloff": 1 },
-  "inputs": { "material": 1, "energy": 600, "cosi": 1, "ricochet": 0, "exit": 0 },
+  "inputs": { "material": 1, "energy": 600, "cosi": 1, "exit": 0 },
   "layers": [
     { "patch": "impact_modal", "when": "material != 12",
       "bind": {

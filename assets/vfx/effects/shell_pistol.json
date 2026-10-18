@@ -11,8 +11,8 @@
         "mode": "burst",
         "count": 1,
         "life": [
-          3.0,
-          4.0
+          0.55,
+          0.7
         ],
         "size": [
           0.02,
@@ -37,16 +37,13 @@
       "update": {
         "gravity": 1.0,
         "drag": 0.15,
-        "collide": "physics",
-        "bounce": 0.35,
-        "friction": 0.45,
-        "alpha_curve": [
+        "size_curve": [
           [
             0,
             1
           ],
           [
-            0.9,
+            0.75,
             1
           ],
           [

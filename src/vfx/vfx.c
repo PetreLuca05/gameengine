@@ -73,7 +73,7 @@ static bool cb_raycast(void *ctx, vec3 from, vec3 delta, vec3 *hit, vec3 *normal
     return true;
 }
 
-// Material -> sound class (impacts, casings, debris): hard / metal / wood / soft / glass / water / flesh.
+// Material -> sound class (impacts, debris): hard / metal / wood / soft / glass / water / flesh.
 static const char *surface_sound_class(int m) {
     switch (m) {
     case SURF_METAL_THIN: case SURF_METAL_THICK: return "metal";
@@ -86,7 +86,8 @@ static const char *surface_sound_class(int m) {
     }
 }
 
-// "<mesh>_<material>" from the CPU tier ("casing_rifle_concrete") -> "<kind>_<class>" ("casing_hard").
+// "<mesh>_<material>" from the CPU tier ("shard_concrete") -> "debris_<class>" ("debris_hard").
+// Casings never collide, so they never get here (they are silent).
 static void cb_sound(void *ctx, const char *name, vec3 pos, float volume) {
     (void)ctx;
     char kind[32];
@@ -102,12 +103,9 @@ static void cb_sound(void *ctx, const char *name, vec3 pos, float volume) {
     }
     const char *cls = surface_sound_class(m < 0 ? SURF_DEFAULT : m);
     if (!strcmp(kind, "shard") && m == SURF_GLASS) { audio_play("shard_glass", pos, volume, SND_SFX); return; }
-    if (!strcmp(kind, "shell")) cls = (m == SURF_DIRT || m == SURF_SAND || m == SURF_GRASS || m == SURF_WATER) ? "soft" : "hard";
-    if (!strcmp(kind, "casing") && m == SURF_FLESH) cls = "soft";
-    if (strcmp(kind, "casing") && strcmp(kind, "shell")) {
-        strcpy(kind, "debris");
-        cls = (!strcmp(cls, "soft") || !strcmp(cls, "water") || !strcmp(cls, "flesh")) ? "soft" : "hard";
-    }
+    if (!strcmp(kind, "casing") || !strcmp(kind, "shell")) return;   // casings are silent
+    strcpy(kind, "debris");
+    cls = (!strcmp(cls, "soft") || !strcmp(cls, "water") || !strcmp(cls, "flesh")) ? "soft" : "hard";
     char snd[64];
     snprintf(snd, sizeof(snd), "%s_%s", kind, cls);
     audio_play(snd, pos, volume, SND_SFX);
@@ -342,30 +340,16 @@ void vfx_game_impact(vec3 pos, vec3 normal, vec3 incoming, int material, int cal
     sp.intensity = 1.0f - graze * 0.3f;
     sp.decal_ok = (flags & 4u) != 0;
     // Ballistic impacts (gameplay/ballistics): everything scales with the energy that arrived
-    // (crater volume ~ E, so sizes ~ E^1/3), plus ricochet / exit / steel / pyrophoric extras.
+    // (crater volume ~ E, so sizes ~ E^1/3), plus exit / steel / pyrophoric extras.
     u32 bo = (flags >> 24) & 0xFFu;
     float energy = bal_energy_decode((u8)(flags >> 16));
     if ((bo & BAL_IMP_BALLISTIC) && !flesh) {
         const BalMaterial *bm = &bal_data()->mat[DG_CLAMP(material, 0, SURF_COUNT - 1)];
         float es = clampf(cbrtf(fmaxf(energy, 1.0f) / 1500.0f), 0.3f, 2.6f);
         sp.scale = es * ((bo & BAL_IMP_EXIT) ? 1.3f : 1.0f);
-        sp.count_mul = es * ((bo & BAL_IMP_EXIT) ? 1.5f : 1.0f) * ((bo & BAL_IMP_RICOCHET) ? 0.5f : 1.0f);
+        sp.count_mul = es * ((bo & BAL_IMP_EXIT) ? 1.5f : 1.0f);
         sp.energy = clampf(sqrtf(energy / 1500.0f), 0.4f, 2.0f);
-        sp.decal_scale = bm->decal_scale * ((bo & BAL_IMP_RICOCHET) ? 0.6f : 1.0f);
-        if (bo & BAL_IMP_RICOCHET) {
-            VfxSpawnParams rp = sp;
-            rp.scale = 1.0f;
-            rp.count_mul = es;
-            vfx_game_spawn("impact_ricochet", &rp);
-            // The whine (assets/audio/recipes/ricochet.json): pitch, sweep and tumble vary per hit.
-            AudioEmit re;
-            audio_emit_init(&re, "ricochet", pos);
-            re.volume = 0.7f;
-            re.seed = vfx_hash((u32)(pos.x * 997.0f) ^ (u32)(pos.z * 131.0f) ^ (u32)(pos.y * 61.0f));
-            AudioParams rpa = { 0 };
-            audio_param(&rpa, "energy", energy);
-            audio_emit(&re, &rpa);
-        }
+        sp.decal_scale = bm->decal_scale;
         if (bo & BAL_IMP_EXIT) {
             VfxSpawnParams xp = sp;
             xp.scale = es * 1.8f;   // the exit cone is wider than the entry
@@ -409,7 +393,6 @@ void vfx_game_impact(vec3 pos, vec3 normal, vec3 incoming, int material, int cal
         audio_param(&ipa, "material", (float)material);
         audio_param(&ipa, "energy", energy > 0.0f ? energy : 1500.0f * cs.energy);
         audio_param(&ipa, "cosi", fabsf(v3_dot(sp.normal, sp.incoming)));
-        audio_param(&ipa, "ricochet", (bo & BAL_IMP_RICOCHET) ? 1.0f : 0.0f);
         audio_param(&ipa, "exit", (bo & BAL_IMP_EXIT) ? 1.0f : 0.0f);
         audio_emit(&ie, &ipa);
     }
@@ -503,20 +486,20 @@ static int cmp_sort(const void *a, const void *b) {
     return da < db ? 1 : (da > db ? -1 : 0);   // far first
 }
 
-static void push_mesh(const VfxCpuParticle *p, const VfxEmitterDef *e, vec4 col) {
-    if (!V->meshes) return;
-    // Casings / shards: small boxes (shape from the mesh name).
-    vec3 half = v3(p->size * 0.5f, p->size * 0.5f, p->size * 0.5f);
+static void push_mesh(const VfxCpuParticle *p, const VfxEmitterDef *e, vec4 col, float size) {
+    if (!V->meshes || size <= 0.0f) return;
+    // Casings / shards: small boxes (shape from the mesh name); size includes the size curve.
+    vec3 half = v3(size * 0.5f, size * 0.5f, size * 0.5f);
     const char *m = e->render.mesh;
     MeshId mesh = V->meshes->cube;
     if (!strncmp(m, "casing", 6) || !strncmp(m, "shell", 5)) {
         mesh = V->meshes->cylinder;
-        half = v3(p->size * 0.18f, p->size * 0.5f, p->size * 0.18f);
-        if (strstr(m, "shotgun")) half = v3(p->size * 0.3f, p->size * 0.5f, p->size * 0.3f);
+        half = v3(size * 0.18f, size * 0.5f, size * 0.18f);
+        if (strstr(m, "shotgun")) half = v3(size * 0.3f, size * 0.5f, size * 0.3f);
     } else if (strstr(m, "glass")) {
-        half = v3(p->size * 0.5f, p->size * 0.04f, p->size * 0.35f);
+        half = v3(size * 0.5f, size * 0.04f, size * 0.35f);
     } else if (strstr(m, "wood") || strstr(m, "splinter")) {
-        half = v3(p->size * 0.12f, p->size * 0.1f, p->size * 0.5f);
+        half = v3(size * 0.12f, size * 0.1f, size * 0.5f);
     }
     DrawItem di;
     memset(&di, 0, sizeof(di));
@@ -581,7 +564,7 @@ static int build_sprites(vec3 cam, int *out_add) {
         vec4 cc = vfx_curve_eval(&u->color_curve, tl);
         vec4 col = v4(p->color.x * cc.x, p->color.y * cc.y, p->color.z * cc.z, p->color.w * cc.w);
         u8 mode = e->render.mode;
-        if (mode == VFX_RENDER_MESH) { push_mesh(p, e, col); continue; }
+        if (mode == VFX_RENDER_MESH) { push_mesh(p, e, col, size); continue; }
         if (mode == VFX_RENDER_NONE) continue;
         float frame = p->frame;
         if (u->frame_over_life && e->render.texture_id >= 0) {

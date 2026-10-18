@@ -38,7 +38,6 @@
     "door_open":  { "src": "wood_metal", "files": ["door_open_01.ogg", "wood_squeak_*.ogg"], "max_s": 1.0 },
     "door_close": { "src": "wood_metal", "files": ["wood_close_*.ogg"], "max_s": 0.8 },
     "door_slam":  { "src": "wood_metal", "files": ["wood_slam_*.ogg"], "max_s": 0.8 },
-    "bullet_ricochet": { "src": "warfork", "files": ["weapons/ric1.ogg", "weapons/ric2.ogg"], "hp": 200 },
     "hurt": { "src": "warfork", "files": ["players/male/pain25.ogg", "players/male/pain50.ogg", "players/male/pain75.ogg", "players/male/pain100.ogg"], "hp": 90 },
 
     "zombie_groan":  { "src": "creature2", "files": ["human_0*.ogg"], "extra": { "creature": ["monster_03.ogg", "monster_06.ogg", "grunt_01.ogg", "grunt_03.ogg"] }, "hp": 70 },
