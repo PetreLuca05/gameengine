@@ -58,6 +58,7 @@ horde has no sense radius or despawn distance, as in the dev room.
 |---|---|
 | Load | about 21 s from start to the first frame against 11.6 s for `vegetation` (the 2817² terrain maps bake in 5.6 s, `terrain_world_load`) |
 | Frame (RTX 3060 Ti shared with other jobs, 1600 × 900, uncapped, `tools/tests/devroom_veg_perf.cfg`) | hall 15.5 ms, horde yard 17.6 ms, sighting lane 17.4 ms, pine forest edge 30.0 ms, aerial 14.1 ms; `vegetation` spawn 32.4 ms, pine forest 43.3 ms, aerial 18.1 ms; the plain dev room hall 5.8 ms |
+| Network | a client joins and plays (it loads for about 14 s: the host's load grace, "Load" below) |
 | Tests | `ctest -R level_include` (merge rules; every dev room anchor and footprint area on flat concrete at y = 0 without trees); `tools/tests/devroom_veg_tour.cfg` (screenshots of every area, a drive) |
 
 ## Level includes
@@ -394,8 +395,11 @@ cast. With every lamp shadowed, the night city took 36 ms a frame.
 **Load.** The generator, raster and uploads take about 1 s. The foliage types take about 0.4 s: the tree
 models load from the build's `assets/vgeo/trees/*.dgtree` (0.23 s for the 9 trees, textures included),
 the grass tuft and wheat are built procedurally. Without those files the game builds the species itself
-(about 1.1 s more, once: cached in `assets/cache`). A client therefore joins well inside the 4 s ENet
-timeout.
+(about 1.1 s more, once: cached in `assets/cache`). A loading peer answers nothing, and ENet drops a peer
+after 4..8 s without answers, so the host gives a peer a 90 s load grace (`net_peer_load_grace`,
+`NetTransport.set_peer_timeout`): from its welcome until its first commands, and for every lobby member
+while the host itself loads the lobby's map. Larger worlds load for longer (`devroom_vegetation`: about
+14 s on a client).
 
 ## What is placeholder
 

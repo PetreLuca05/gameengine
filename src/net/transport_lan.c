@@ -7,6 +7,8 @@
 #include <stdio.h>
 
 #define LAN_MAX_PEERS 16
+#define LAN_TIMEOUT_MIN_MS 4000   // an unanswered reliable packet drops the peer after 4..8 s (ENet: by its retries)
+#define LAN_TIMEOUT_MAX_MS 8000
 #define MAX_HELD_PACKETS 256
 
 typedef struct LanImpl {
@@ -51,7 +53,7 @@ static bool lan_connect(NetTransport *t, const char *address) {
     if (!l->host) { log_error("lan: cannot create client host"); return false; }
     ENetPeer *p = enet_host_connect(l->host, &addr, CH_COUNT, 0);
     if (!p) { log_error("lan: connect failed"); return false; }
-    enet_peer_timeout(p, 0, 4000, 8000);
+    enet_peer_timeout(p, 0, LAN_TIMEOUT_MIN_MS, LAN_TIMEOUT_MAX_MS);
     l->peers[0] = p;
     log_info("lan: connecting to %s:%u", host, port);
     return true;
@@ -84,7 +86,7 @@ static int lan_poll(NetTransport *t, NetEvent *out, int max) {
         switch (ev.type) {
         case ENET_EVENT_TYPE_CONNECT:
             e->type = NETEV_CONNECT;
-            enet_peer_timeout(ev.peer, 0, 4000, 8000);
+            enet_peer_timeout(ev.peer, 0, LAN_TIMEOUT_MIN_MS, LAN_TIMEOUT_MAX_MS);
             n++;
             break;
         case ENET_EVENT_TYPE_DISCONNECT:
@@ -125,6 +127,13 @@ static bool lan_stats(NetTransport *t, PeerId peer, float *rtt, float *loss) {
     return true;
 }
 
+static void lan_set_timeout(NetTransport *t, PeerId peer, u32 ms) {
+    LanImpl *l = (LanImpl *)t->impl;
+    if (peer < 0 || peer >= LAN_MAX_PEERS || !l->peers[peer]) return;
+    if (ms) enet_peer_timeout(l->peers[peer], 0, ms, ms);
+    else enet_peer_timeout(l->peers[peer], 0, LAN_TIMEOUT_MIN_MS, LAN_TIMEOUT_MAX_MS);
+}
+
 static bool lan_address(NetTransport *t, PeerId peer, char *out, int size) {
     LanImpl *l = (LanImpl *)t->impl;
     if (peer < 0 || peer >= LAN_MAX_PEERS || !l->peers[peer]) return false;
@@ -156,6 +165,7 @@ NetTransport *transport_lan_create(void) {
     t->flush = lan_flush;
     t->peer_stats = lan_stats;
     t->peer_address = lan_address;
+    t->set_peer_timeout = lan_set_timeout;
     t->destroy = lan_destroy;
     return t;
 }
