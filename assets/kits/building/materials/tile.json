@@ -1,0 +1,29 @@
+{
+ "_doc": "Kit material set (docs/BUILDING_KIT.md 'Materials'): slot M_tile. Variants: [r, g, b, roughness, metallic(, emissive)]; instances pick one per slot (\"mat\": {\"M_tile\": \"<variant>\"}) and may tint.",
+ "slot": "M_tile",
+ "surface": "tile",
+ "glass": false,
+ "variants": {
+  "default": [
+   0.86,
+   0.87,
+   0.88,
+   0.25,
+   0.0
+  ],
+  "dark": [
+   0.3,
+   0.31,
+   0.33,
+   0.3,
+   0.0
+  ],
+  "green": [
+   0.45,
+   0.58,
+   0.52,
+   0.25,
+   0.0
+  ]
+ }
+}

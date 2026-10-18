@@ -257,10 +257,13 @@ static void parse_action(Parse *p, StoryAction *a, const cJSON *j, const char *w
     memset(a, 0, sizeof(*a));
     a->ref = STORY_NONE;
     if (!cJSON_IsObject(j)) { perr(p, "%s: an action must be an object", where); return; }
+    // The action is the object's first key that names one ({"fade": "in", "time": 3} is a fade with a
+    // duration, not a time action): parameters may share names with other actions.
     const cJSON *v = NULL;
     int type = -1;
-    for (int t = 0; t < SA_COUNT; t++)
-        if ((v = cJSON_GetObjectItemCaseSensitive(j, ACT_NAMES[t]))) { type = t; break; }
+    for (const cJSON *k = j->child; k && type < 0; k = k->next)
+        for (int t = 0; t < SA_COUNT; t++)
+            if (k->string && !strcmp(k->string, ACT_NAMES[t])) { type = t; v = k; break; }
     if (type < 0) { perr(p, "%s: unknown action", where); return; }
     a->type = (u8)type;
     const char *s = cJSON_IsString(v) ? v->valuestring : "";

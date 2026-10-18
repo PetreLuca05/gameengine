@@ -61,7 +61,7 @@
     {"id": "leave", "text": "obj.leave", "requires": "first_zombie", "children": [
       {"id": "pack", "text": "obj.pack", "optional": true, "complete_on": {"signal": "pack_confirmed"}},
       {"id": "corridor", "text": "obj.corridor", "complete_on": {"volume": "vol_corridor_10", "on": "enter"}},
-      {"id": "fire_door", "text": "obj.fire_door", "requires": "corridor", "complete_on": {"entity": "fire_door_10", "on": "opened"}},
+      {"id": "fire_door", "text": "obj.fire_door", "requires": "corridor", "complete_on": {"entity": "f10_fire_door", "on": "opened"}},
       {"id": "stairwell", "text": "obj.stairwell", "requires": "fire_door", "complete_on": {"volume": "vol_stair_9_5", "on": "enter"}}
     ]}
   ],
@@ -152,7 +152,7 @@
       {"subtitle": "sub.setpiece"},
       {"objective": "window_setpiece", "set": "done"},
       {"wait": 20.0},
-      {"weather": "smoke_haze", "blend": 120},
+      {"weather": "cloudy+fog", "blend": 120},
       {"sequence": "smoke_aldric"}
     ]},
     {"id": "knock_start", "when": {"timer": 25, "since": "window_setpiece"}, "do": [
@@ -207,7 +207,7 @@
       {"sequence": "lift_smoke"},
       {"sequence": "city_fires"},
       {"subtitle": "sub.leave"},
-      {"unlock": "fire_door_10"}
+      {"unlock": "f10_fire_door"}
     ]},
     {"id": "chapter_end", "when": {"objective": "leave"}, "do": [
       {"sequence": "stair_eye_screams"},

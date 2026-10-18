@@ -23,6 +23,7 @@ typedef struct MapInfo {
     int players_min, players_max;   // recommended
     bool dev;                 // developer / test map (filtered out unless "show dev maps")
     char scene[32];           // optional dev scene opened once the level is up ("handpose"; "" = none)
+    char chapter[48];         // story chapter (assets/story/chapters/<id>.json): hosting it starts the chapter ("" = none)
     int order;                // list order
 } MapInfo;
 

@@ -1,0 +1,15 @@
+{
+ "_doc": "Kit material set (docs/BUILDING_KIT.md 'Materials'): slot M_carpet. Variants: [r, g, b, roughness, metallic(, emissive)]; instances pick one per slot (\"mat\": {\"M_carpet\": \"<variant>\"}) and may tint.",
+ "slot": "M_carpet",
+ "surface": "cloth",
+ "glass": false,
+ "variants": {
+  "default": [
+   0.5,
+   0.46,
+   0.42,
+   1.0,
+   0.0
+  ]
+ }
+}

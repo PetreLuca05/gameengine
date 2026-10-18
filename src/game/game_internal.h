@@ -149,6 +149,8 @@ void game_audio_register(void);
 void game_audio_frame(World *w, const RenderCamera *cam, const Player *p, bool ads);
 void game_audio_draw(vec3 cam_pos);
 void daynight_level_loaded(World *w);
+void daynight_story_drive(World *w, float hours, float minutes_per_second);   // story mode: the beat clock drives the time
+bool weather_set_preset(World *w, const char *spec, float seconds);           // host: preset / composition over seconds (story mode)
 // Host: calendar day (1..365, the season's sun path / day length) and the time (hours < 0 = keep).
 void daynight_set_calendar(World *w, int day_of_year, float hours);
 void daynight_host_tick(World *w);

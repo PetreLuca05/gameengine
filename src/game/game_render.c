@@ -476,6 +476,7 @@ static void render_entity(World *w, int i, float alpha, bool focused) {
         break;
     }
     case ET_CONTAINER: {
+        if (v->shape == VIS_NONE) break;   // furniture is the container (building kit)
         vec3 h = v->half;
         m.texture = assets_texture("crate");
         if (m.texture) { m.flags |= MAT_TEXTURED | MAT_TRIPLANAR; m.tex_scale = 1.6f; m.color = v4(1, 1, 1, 1); }

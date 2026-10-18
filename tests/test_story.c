@@ -82,6 +82,10 @@ static void test_parse_errors(void) {
     CHECK(!story_def_parse(d, "{\"id\":\"x\",\"objectives\":[{\"id\":\"a\",\"requires\":\"zz\"}]}", err, sizeof(err)) && strstr(err, "unknown objective 'zz'"), "unknown requires: %s", err);
     CHECK(!story_def_parse(d, "{\"id\":\"x\",\"objectives\":[{\"id\":\"a\"}],\"triggers\":[{\"id\":\"t\",\"when\":true,\"do\":[{\"explode\":1}]}]}", err, sizeof(err)) && strstr(err, "unknown action"), "unknown action: %s", err);
     CHECK(!story_def_parse(d, "{\"id\":\"x\",\"objectives\":[{\"id\":\"a\"}],\"triggers\":[{\"id\":\"t\",\"when\":{\"wibble\":1}}]}", err, sizeof(err)) && strstr(err, "unknown condition"), "unknown condition: %s", err);
+    // The leading key names the action; later keys are parameters even when they name another action.
+    CHECK(story_def_parse(d, "{\"id\":\"x\",\"objectives\":[{\"id\":\"a\"}],\"triggers\":[{\"id\":\"t\",\"when\":true,\"do\":[{\"fade\":\"in\",\"time\":3},{\"camhint\":\"p\",\"time\":2}]}]}", err, sizeof(err))
+              && d->act[d->trig[0].first_action].type == SA_FADE && d->act[d->trig[0].first_action].num[0] == 3.0f && d->act[d->trig[0].first_action + 1].type == SA_CAMHINT,
+          "fade / camhint with a time parameter: %s", err);
     CHECK(!story_def_parse(d, "{\"id\":\"x\",\"objectives\":[{\"id\":\"a\"}],\"triggers\":[{\"id\":\"t\",\"when\":{\"time\":\"25:99\"}}]}", err, sizeof(err)) && strstr(err, "clock"), "bad clock: %s", err);
     CHECK(!story_def_parse(d, "{\"id\":\"x\",\"objectives\":[{\"id\":\"a\"}],\"triggers\":[{\"id\":\"t\",\"when\":true,\"do\":[{\"checkpoint\":\"nope\"}]}]}", err, sizeof(err)) && strstr(err, "checkpoint"), "unknown checkpoint: %s", err);
     CHECK(!story_def_parse(d, "{\"id\":\"x\",\"objectives\":[{\"id\":\"a\"}],\"triggers\":[{\"id\":\"t\",\"when\":{\"timer\":3,\"since\":\"ghost\"}}]}", err, sizeof(err)) && strstr(err, "ghost"), "unknown since: %s", err);

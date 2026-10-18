@@ -62,6 +62,7 @@ bool maplist_parse(const char *json, const char *id, MapInfo *out, MapFileExists
         out->order = (int)order;
         out->dev = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(root, "dev"));
         get_s(root, "scene", out->scene, sizeof(out->scene));
+        get_s(root, "chapter", out->chapter, sizeof(out->chapter));
     }
     if (!bad && file_exists && !file_exists(out->thumbnail, user)) bad = "thumbnail file missing";
     cJSON_Delete(root);

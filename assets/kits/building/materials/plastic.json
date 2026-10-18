@@ -1,0 +1,29 @@
+{
+ "_doc": "Kit material set (docs/BUILDING_KIT.md 'Materials'): slot M_plastic. Variants: [r, g, b, roughness, metallic(, emissive)]; instances pick one per slot (\"mat\": {\"M_plastic\": \"<variant>\"}) and may tint.",
+ "slot": "M_plastic",
+ "surface": "default",
+ "glass": false,
+ "variants": {
+  "default": [
+   0.12,
+   0.12,
+   0.13,
+   0.4,
+   0.0
+  ],
+  "white": [
+   0.92,
+   0.92,
+   0.92,
+   0.4,
+   0.0
+  ],
+  "toy": [
+   0.85,
+   0.3,
+   0.25,
+   0.4,
+   0.0
+  ]
+ }
+}

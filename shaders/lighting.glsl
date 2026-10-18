@@ -23,6 +23,35 @@ vec2 sky_env_uv(vec3 n) {
     vec2 e = n.y >= 0.0 ? n.xz : (1.0 - abs(n.zx)) * vec2(n.x >= 0.0 ? 1.0 : -1.0, n.z >= 0.0 ? 1.0 : -1.0);
     return e * 0.5 + 0.5;
 }
+// Interior volumes (render_set_interiors, docs/STORY.md "Rendering"): 1 outdoors; inside a room the sky
+// ambient and the environment reflections fall to its sky factor away from its glass faces. Volumes
+// blend over their edge width (doorways between rooms); overlaps keep the darker.
+float interior_sky(vec3 p) {
+    int n = int(frame.interior_info.x + 0.5);
+    float s = 1.0;
+    for (int i = 0; i < n; i++) {
+        vec3 dmin = p - frame.interior_min[i].xyz, dmax = frame.interior_max[i].xyz - p;
+        float edge = min(min(min(dmin.x, dmax.x), min(dmin.y, dmax.y)), min(dmin.z, dmax.z));
+        float w = clamp(edge / frame.interior_params[i].y + 0.5, 0.0, 1.0);
+        if (w <= 0.0) continue;
+        uint faces = uint(frame.interior_max[i].w + 0.5);
+        float d = 1e9;
+        if ((faces & 1u) != 0u) d = min(d, dmin.x);
+        if ((faces & 2u) != 0u) d = min(d, dmax.x);
+        if ((faces & 4u) != 0u) d = min(d, dmin.y);
+        if ((faces & 8u) != 0u) d = min(d, dmax.y);
+        if ((faces & 16u) != 0u) d = min(d, dmin.z);
+        if ((faces & 32u) != 0u) d = min(d, dmax.z);
+        float inside = mix(frame.interior_min[i].w, 1.0, exp(-max(d, 0.0) / frame.interior_params[i].x));
+        s = min(s, mix(1.0, inside, w));
+    }
+    return s;
+}
+// Sky light deep in a room arrives after bouncing off its walls: desaturated, warmer, dimmer (isky 1 = untouched).
+vec3 interior_bounce(vec3 c, float isky) {
+    float lum = dot(c, vec3(0.2126, 0.7152, 0.0722));
+    return mix(lum * vec3(1.06, 0.96, 0.84), c, isky) * isky;
+}
 float cloud_shadow_at(vec3 p) {
     if (frame.sky_flags.w < 0.5) return 1.0;
     vec2 uv = (p.xz - frame.cshadow.xy) * frame.cshadow.z;

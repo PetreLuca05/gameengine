@@ -1,0 +1,15 @@
+{
+ "_doc": "Kit material set (docs/BUILDING_KIT.md 'Materials'): slot M_stone. Variants: [r, g, b, roughness, metallic(, emissive)]; instances pick one per slot (\"mat\": {\"M_stone\": \"<variant>\"}) and may tint.",
+ "slot": "M_stone",
+ "surface": "concrete",
+ "glass": false,
+ "variants": {
+  "default": [
+   0.74,
+   0.7,
+   0.62,
+   0.85,
+   0.0
+  ]
+ }
+}

@@ -26,9 +26,10 @@ launch ── splash (1.6 s, any key / click skips) ──▶ MAIN MENU
               slow camera drift, lit by the selected map's season / time / weather (frozen)
   top bar:  Play · Player · Cosmetics · Maps · Settings · Credits                  [⏻]
             Q / E · LB / RB · 1-6 · mouse                         ⏻ ─▶ CONFIRM "Quit to desktop?"
-  ├─ Play ──┬─ Host game ─────────────────────────────────────▶ LOBBY (host)
+  ├─ Play ──┬─ Continue  (the last story checkpoint, docs/STORY.md; else the last session; greyed without)
+  │         ├─ Story: 10th Floor (starts chapter 1, story_chapter 1)
+  │         ├─ Host game ─────────────────────────────────────▶ LOBBY (host)
   │         ├─ Join ─▶ SERVER BROWSER [Steam lobbies | Friends | LAN | Direct IP] ─▶ LOBBY
-  │         ├─ Continue  (stub: greyed until a saved session exists)
   │         ├─ Quick play (first public lobby with space and the same version, else hosts one)
   │         └─ Host on: Steam / LAN
   ├─ Player     3D preview (the scene camera frames the real character; drag / wheel / stick),

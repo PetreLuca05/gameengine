@@ -218,6 +218,13 @@ typedef struct FrameData {
     // (rad), w value swing; ground_macro2: x saturation swing, y strength (0 off).
     vec4 ground_macro;
     vec4 ground_macro2;
+    // Interior volumes (render_set_interiors, docs/STORY.md "Rendering"): rooms scale the sky ambient and
+    // the environment reflections by how much sky they see through their glass. min.w: sky factor deep
+    // inside, max.w: glass faces (bits -x +x -y +y -z +z), params: x falloff from the glass (m), y edge blend (m).
+    vec4 interior_info;   // x volume count
+    vec4 interior_min[RENDER_MAX_INTERIORS];
+    vec4 interior_max[RENDER_MAX_INTERIORS];
+    vec4 interior_params[RENDER_MAX_INTERIORS];
 } FrameData;
 
 typedef struct PushLit {

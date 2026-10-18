@@ -483,6 +483,7 @@ void hud_draw(void) {
     draw_ammo(g, w, safe);
     draw_hotbar(g, w, safe);
     draw_hints(g, safe);
+    hud_story_draw(safe);
     hud_pings_draw(g, safe);
     s_compass_bottom = hud_compass_draw(g, safe);
     gd_alpha_push(hud_cvars()->opacity->f);
@@ -502,4 +503,5 @@ void hud_draw(void) {
         snprintf(msg, sizeof(msg), "%s  Pull up      %s  Drop", k1, k2);
         caps(gui_w() * 0.5f, gui_h() * 0.5f + gui_s(100), gui_s(TH->t_small), TH->hud_text, GUI_CENTER, msg);
     }
+    hud_story_draw_fade();
 }

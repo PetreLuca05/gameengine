@@ -365,14 +365,17 @@ static bool container_hand(World *w, EntityId self, int player, int hand, vec3 *
 
 static const InteractDef k_container_def = { "container", container_focus, NULL, container_use, container_hold, container_hand, 1.0f, HANDS_BOTH };
 
-EntityId spawn_container(World *w, vec3 base, float yaw) {
+EntityId spawn_container(World *w, vec3 base, float yaw) { return spawn_container_ex(w, base, yaw, v3(0.5f, 0.3f, 0.35f), true); }
+
+// visible = false: furniture is the visual (building kit pieces, docs/BUILDING_KIT.md); half = the collider.
+EntityId spawn_container_ex(World *w, vec3 base, float yaw, vec3 half, bool visible) {
     EntityId e = ent_spawn(w, ET_CONTAINER);
     int i = (int)ENT_INDEX(e);
-    w->vis[i].shape = VIS_BOX;
-    w->vis[i].half = v3(0.5f, 0.3f, 0.35f);
+    w->vis[i].shape = visible ? VIS_BOX : VIS_NONE;
+    w->vis[i].half = half;
     w->vis[i].color = col(0.45f, 0.32f, 0.18f);
     w->comps[i] |= C_VISUAL | C_CONTAINER | C_INTERACT;
-    ent_set_pos(w, e, v3_add(base, v3(0, 0.3f, 0)), quat_yaw(yaw), true);
+    ent_set_pos(w, e, v3_add(base, v3(0, half.y, 0)), quat_yaw(yaw), true);
     entity_setup(w, e);
     return e;
 }

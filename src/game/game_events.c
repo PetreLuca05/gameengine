@@ -17,6 +17,7 @@
 #include "gameplay/revive/revive.h"
 #include "gameplay/ballistics/bal_world.h"
 #include "gameplay/ballistics/bal_fx.h"
+#include "game_story.h"
 #include <stdio.h>
 #include <math.h>
 
@@ -72,6 +73,7 @@ void game_handle_event(const GameEvent *ev) {
     World *w = G->world;
     switch (ev->type) {
     case EV_HINT: game_add_hint(ev->text); break;
+    case EV_STORY: story_handle_event(ev); break;
     case EV_SOUND: audio_play(ev->text, ev->pos, ev->value, SND_SFX); break;
     case EV_DAMAGE_NUMBER: break;   // floating damage numbers removed (hit markers / damage effects remain)
     case EV_HIT_CONFIRM:

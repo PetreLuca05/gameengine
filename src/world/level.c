@@ -14,6 +14,7 @@
 #include "cJSON.h"
 #include "assets/assets.h"
 #include "openworld.h"
+#include "kit_world.h"
 #include "level_include.h"
 #include <stdlib.h>
 #include <stdio.h>
@@ -208,6 +209,9 @@ static void build_brush(LevelBuild *b, const cJSON *br) {
     // Optional PBR surface (glossy floors, metal props, emissive signs); batched per surface.
     b->surf = v3(jf(br, "roughness", 0.85f), jf(br, "metallic", 0.0f), jf(br, "emissive", 0.0f));
     if (jb(br, "unlit", false)) flags |= MAT_UNLIT;
+    // Greybox glass (story levels before the building kit, docs/STORY.md): a transparent bucket with the
+    // Fresnel glass look; no shadow (sun reaches through), still collides.
+    if (jb(br, "glass", false)) flags = (flags & ~(u32)(MAT_GRID | MAT_GRID_FINE)) | MAT_GLASS | MAT_NO_SHADOW;
     b->material = surface_from_name(mat_name);
     if (b->material < 0) { log_warn("level: unknown material '%s'", mat_name); b->material = SURF_DEFAULT; }
 
@@ -707,9 +711,33 @@ bool level_load(World *w, const char *path) {
         d->mat.roughness = b.bucket_surf[i].x;
         d->mat.metallic = b.bucket_surf[i].y;
         d->mat.emissive = b.bucket_surf[i].z;
+        if (d->mat.flags & MAT_GLASS) d->mat.color.w = 0.12f;   // forward blended pass (render.c exec_transparent)
         if (b.bucket_spacing[i] > 0) d->mat.tex_scale = b.bucket_spacing[i];
         d->model = mat4_identity();
         mb_free(&b.buckets[i]);
+    }
+    kit_world_level(w, root);   // building kit instances + prefabs (docs/BUILDING_KIT.md): the draw / body tail
+    // Interior volumes (render_set_interiors, docs/STORY.md "Rendering"): every level sets (or clears) them.
+    {
+        RenderInterior iv[RENDER_MAX_INTERIORS];
+        int ni = 0;
+        const cJSON *it;
+        cJSON_ArrayForEach(it, cJSON_GetObjectItemCaseSensitive(root, "interiors")) {
+            if (ni >= RENDER_MAX_INTERIORS) { log_warn("level: more than %d interiors", RENDER_MAX_INTERIORS); break; }
+            RenderInterior *r = &iv[ni++];
+            r->mn = jv3(it, "min", v3(0, 0, 0));
+            r->mx = jv3(it, "max", v3(0, 0, 0));
+            r->sky = jf(it, "sky", 0.2f);
+            r->falloff = jf(it, "falloff", 2.5f);
+            r->blend = jf(it, "blend", 0.4f);
+            r->open_faces = 0;
+            static const char *const faces[6] = { "-x", "+x", "-y", "+y", "-z", "+z" };
+            const cJSON *g;
+            cJSON_ArrayForEach(g, cJSON_GetObjectItemCaseSensitive(it, "glass"))
+                for (int f = 0; f < 6; f++)
+                    if (cJSON_IsString(g) && !strcmp(g->valuestring, faces[f])) r->open_faces |= 1u << f;
+        }
+        render_set_interiors(iv, ni);
     }
     phys_optimize(w->phys);
     cJSON_Delete(root);
