@@ -42,7 +42,7 @@ VgImpostorTri g_it;       // this thread's triangle of the quad
 int64_t edge(ivec2 a, ivec2 b, ivec2 p) { return int64_t(b.x - a.x) * int64_t(p.y - a.y) - int64_t(b.y - a.y) * int64_t(p.x - a.x); }
 // Top-left rule for the positive (screen-clockwise, y down) orientation: a top edge runs exactly
 // horizontal to the right, a left edge runs up. Pixel centres on other edges are excluded.
-int64_t bias(ivec2 a, ivec2 b) { ivec2 d = b - a; return (d.y < 0 || (d.y == 0 && d.x > 0)) ? int64_t(0) : int64_t(-1); }
+int64_t fill_bias(ivec2 a, ivec2 b) { ivec2 d = b - a; return (d.y < 0 || (d.y == 0 && d.x > 0)) ? int64_t(0) : int64_t(-1); }
 
 // Writes a covered pixel: the per-pixel test first (masked / impostor variants).
 void sw_write(int x, int y, float z, uint payload) {
@@ -168,10 +168,10 @@ void main() {
     float inv = 1.0 / float(area), dzb = zb - za, dzd = zd - za;
     uint payload = vg_vis_payload(vi, t);
     if (max(hi.x - lo.x, hi.y - lo.y) < 32768) {
-        int bb = int(bias(b, d)), bd = int(bias(d, a)), ba = int(bias(a, b));
+        int bb = int(fill_bias(b, d)), bd = int(fill_bias(d, a)), ba = int(fill_bias(a, b));
         SCAN(int, int(edge(b, d, p0)) + bb, int(edge(d, a, p0)) + bd, int(edge(a, b, p0)) + ba, 0)
     } else {
-        int64_t bb = bias(b, d), bd = bias(d, a), ba = bias(a, b);
+        int64_t bb = fill_bias(b, d), bd = fill_bias(d, a), ba = fill_bias(a, b);
         SCAN(int64_t, edge(b, d, p0) + bb, edge(d, a, p0) + bd, edge(a, b, p0) + ba, int64_t(0))
     }
 }

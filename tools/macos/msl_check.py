@@ -45,6 +45,14 @@ def main():
         if out: cmd += ["--output", out]
         r = subprocess.run(cmd, capture_output=True, text=True)
         if r.returncode != 0:
+            # some SPIRV-Cross builds throw on the argument-buffer layout without MoltenVK's resource
+            # bindings: the plain MSL translation still exercises every name / feature for the compile
+            cmd = [x for x in cmd if x not in ("--msl-argument-buffers", "--msl-decoration-binding", "--msl-force-native-arrays")]
+            if "--msl-argument-buffer-tier" in cmd:
+                k = cmd.index("--msl-argument-buffer-tier")
+                del cmd[k:k + 2]
+            r = subprocess.run(cmd, capture_output=True, text=True)
+        if r.returncode != 0:
             bad.append((rel, (r.stderr or r.stdout).strip().splitlines()[-1:] or ["?"]))
             continue
         if a.metal and out:
