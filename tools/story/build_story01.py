@@ -418,7 +418,7 @@ box(-12.0, -8.5, 6.0, 6.3, FLOOR + 1.5, FLOOR + 3.0, [0.35, 0.3, 0.25], "metal_t
 
 # Story entities (not kit pieces): the bat, story interactables, the barricade cabinet.
 ent("pickup", (10.2, FLOOR + 0.8, 9.25), item="bat", name="pickup_bat")
-story_obj("phone_nightstand", 1.0, 0.56, 1.0, "use", "Check phone", size=(0.04, 0.005, 0.075), color=(0.05, 0.05, 0.06), signal="phone_messages_read", show="msg.01_family")
+story_obj("phone_sofa", 9.0, 0.46, 3.1, "use", "Check phone", size=(0.04, 0.005, 0.075), color=(0.05, 0.05, 0.06), signal="phone_messages_read", show="msg.01_family")
 story_obj("note_dana", 6.2, 0.93, 5.55, "read", "Read note", show="doc.note_dana")
 story_obj("note_jules", 4.9, 1.4, 5.34, "read", "Read note", size=(0.08, 0.1, 0.005), show="doc.note_jules")
 story_obj("note_mia_slip", 9.8, 0.76, 11.4, "read", "Read permission slip", show="doc.note_mia_slip")
@@ -437,7 +437,7 @@ story_obj("pack_bag", 5.4, 0.45, 9.6, "use", "Pack and go", size=(0.15, 0.2, 0.1
 story_obj("lift_call", 3.0, 1.2, 17.45, "use", "Call the lift", size=(0.06, 0.1, 0.01), color=(0.3, 0.3, 0.3), signal="lift_dead", subtitle="sub.lift_dead")
 ent("prop", (4.85, FLOOR, 8.7), name="hall_cabinet_barricade", shape="box", size=[0.45, 1.0, 0.9], color=[0.45, 0.35, 0.25], mass=60)
 
-point("spawn_bed", 2.2, 3.4, 0)
+point("spawn_sofa", 10.3, 3.8, -162.7)   # in front of the L-sofa seat, facing the TV (11.0, 5.8)
 point("spawn_hall", 5.25, 9.0, 0)
 point("spawn_teen", 9.5, 7.0, 90)
 point("spawn_10b", -4.0, 6.0, 0)
@@ -495,7 +495,7 @@ level = {
             "sky_zenith": [0.24, 0.42, 0.72], "sky_horizon": [0.78, 0.8, 0.84], "clouds": 0.3},
     "room": {"size": [60, 10, 60], "walls": False, "ceiling": False, "floor_size": [3000, 0, 3000], "floor_material": "asphalt", "floor_grid": False,
              "floor_color": [0.32, 0.33, 0.34]},
-    "spawns": [{"pos": points["spawn_bed"]["pos"], "yaw": 0}, {"pos": points["spawn_hall"]["pos"], "yaw": 0},
+    "spawns": [{"pos": points["spawn_sofa"]["pos"], "yaw": -162.7}, {"pos": points["spawn_hall"]["pos"], "yaw": 0},
                {"pos": points["spawn_teen"]["pos"], "yaw": 90}, {"pos": [5.25, FLOOR, 13.2], "yaw": 0}],
     "interiors": interiors,
     "city": vista["city"],
