@@ -588,7 +588,8 @@ static void test_phone_hold(const ItemDB *db) {
 
 // ------------------------------------------------------------------ hold point / first person camera
 
-static void hp_step(CharRuntime *rt, const ItemSockets *k, CharInputs *in, float dt, bool static_pose, bool first_person, vec3 kick_p, vec3 kick_r) {
+// One tick with a held item. `view`: the presentation hold point too (players).
+static void hp_step(CharRuntime *rt, const ItemSockets *k, CharInputs *in, float dt, bool static_pose, bool view, vec3 kick_p, vec3 kick_r) {
     charrt_set_inputs(rt, in);
     charrt_tick(rt, dt);
     charrt_eval_base(rt);
@@ -597,7 +598,7 @@ static void hp_step(CharRuntime *rt, const ItemSockets *k, CharInputs *in, float
     pi.item = k;
     pi.hand_ik_weight = 1.0f;
     pi.hp_static = static_pose;
-    pi.first_person = first_person;
+    pi.hp_view = view;
     pi.item_kick_pos = kick_p;
     pi.item_kick_rot = kick_r;
     charrt_post(rt, &pi);
@@ -674,39 +675,149 @@ static void test_clavicles_keep_clip(const ItemDB *db) {
     free(rt);
 }
 
+// Rule 1 (docs/CAMERA_HOLDPOINT.md): the first-person frame re-solve - only spine look and IK on stage
+// A - given the tick's own inputs reproduces the tick's pose bit for bit, through locomotion, ADS,
+// crouch, recoil kick with the hands trailing and the trigger pull, hits and a full turn; and a sprint
+// hands the arms to its clip (hand IK weight 0), a run keeps the hold (1).
+static void test_frame_solve(const ItemDB *db) {
+    const float dt = 1.0f / 60.0f;
+    const CharacterDef *def = anim_lib_char_by_id(L, "player");
+    if (!def) return;
+    const Skeleton *s = &L->skel;
+    CharRuntime *a = (CharRuntime *)malloc(sizeof(CharRuntime));
+    static ProcStageA cap;
+    static ProcState st;
+    static Pose pose;
+    static Xform model[ANIM_MAX_BONES];
+    for (int wi = 0; wi < db->weapon_count; wi++) {
+        const WeaponDef *wd = &db->weapons[wi];
+        int style = proc_hold_style_index(&L->proc, wd->hold_style);
+        charrt_init(a, L, def);
+        CharInputs in;
+        memset(&in, 0, sizeof(in));
+        in.grounded = true;
+        in.weapon_type = style;
+        in.weapon_id = (u16)(wi + 1);
+        int checks = 0, fails = 0;
+        u32 passes_all = 0;
+        for (int t = 0; t < 360; t++) {
+            int ph = t / 60;
+            in.ads = ph == 1 || ph == 4;
+            in.crouch = ph == 3;
+            in.speed = ph == 2 ? 3.5f : (ph == 3 ? 1.2f : 0.0f);
+            in.move_local = v2(0, 1);
+            in.aim_yaw = ph == 5 ? (float)t * 0.11f : 0.6f * sinf((float)t * 0.05f);
+            in.aim_pitch = 0.5f * sinf((float)t * 0.031f);
+            u8 turning = 0;
+            in.body_yaw = anim_body_yaw_step(in.body_yaw, in.aim_yaw, in.speed > 0.3f, &L->proc, dt, &turning);
+            if (t == 100) proc_damage_hit(&a->proc, &L->proc, s, 0, s->role[BR_SPINE1], v3(0.3f, 0, -1), 2.0f);
+            ProcInput pi;
+            charrt_set_inputs(a, &in);
+            charrt_tick(a, dt);
+            charrt_eval_base(a);
+            charrt_proc_input(a, &pi, root_at(v3(0, 0, 0), in.body_yaw), dt);
+            pi.item = &wd->sockets;
+            pi.hand_ik_weight = 1.0f;
+            pi.hp_view = true;
+            pi.capture = &cap;
+            if (ph == 4) {   // a recoil string: kick, the hands trailing it, the trigger
+                float k = fabsf(sinf((float)t * 0.7f));
+                pi.item_kick_pos = v3(0, 0.004f * k, 0.03f * k);
+                pi.item_kick_rot = v3(4.0f * k, 0.6f, 1.0f * k);
+                pi.hand_lag_pos = v3(0, -0.003f * k, 0.008f * k);
+                pi.hand_lag_rot = v3(-1.5f * k, 0.2f, 0);
+                pi.trigger = k;
+            }
+            cap.valid = false;
+            charrt_post(a, &pi);
+            CHECK(cap.valid, "%s: stage A not captured", wd->id);
+            st = a->proc;
+            pose_copy(&pose, &cap.pose);
+            memcpy(model, cap.model, sizeof(Xform) * (size_t)s->count);
+            ProcInput fi = pi;
+            fi.hp_given = true;
+            u32 passes = proc_frame_solve(&st, &fi, cap.clav_clip, &a->final, a->final_model, &pose, model);
+            passes_all |= passes;
+            checks++;
+            if (memcmp(pose.local, a->final.local, sizeof(Xform) * (size_t)s->count) || memcmp(model, a->final_model, sizeof(Xform) * (size_t)s->count) ||
+                memcmp(&st.item_model, &a->proc.item_model, sizeof(Xform)))
+                fails++;
+        }
+        CHECK(fails == 0, "%s: the frame re-solve differs from the tick pose in %d of %d ticks", wd->id, fails, checks);
+        CHECK((passes_all & ~(PROC_PASS_SPINE | PROC_PASS_IK)) == 0, "%s: a pass outside the whitelist wrote bones (0x%x)", wd->id, passes_all);
+        if (wi < 3) printf("  frame re-solve %-9s %d ticks bit-identical to the tick pose (passes 0x%x)\n", wd->id, checks - fails, passes_all);
+    }
+    // Sprint: the clip owns the arms; run: the hold.
+    {
+        charrt_init(a, L, def);
+        CharInputs in;
+        memset(&in, 0, sizeof(in));
+        in.grounded = true;
+        in.weapon_type = proc_hold_style_index(&L->proc, db->weapons[1].hold_style);
+        in.weapon_id = 2;
+        in.move_local = v2(0, 1);
+        float w_run = 0, w_sprint = 1;
+        for (int t = 0; t < 240; t++) {
+            in.sprint = t >= 120;
+            in.speed = in.sprint ? 7.0f : 4.2f;
+            charrt_set_inputs(a, &in);
+            charrt_tick(a, dt);
+            float w = 1;
+            ctrl_hand_ik_weight(&a->ctrl, &w);
+            if (t == 110) w_run = w;
+            if (t == 230) w_sprint = w;
+        }
+        CHECK(w_run > 0.99f, "running: hand IK weight %.2f (the hold should own the hands)", w_run);
+        CHECK(w_sprint < 0.01f, "sprinting: hand IK weight %.2f (the sprint clip should own the arms)", w_sprint);
+        printf("  hand IK: run %.2f, sprint %.2f (the sprint clip carries the arms)\n", w_run, w_sprint);
+    }
+    free(a);
+}
+
 static void test_holdpoint(const ItemDB *db) {
     const float dt = 1.0f / 60.0f;
     const CharacterDef *def = anim_lib_char_by_id(L, "player");
     if (!def) return;
     CharRuntime *a = (CharRuntime *)malloc(sizeof(CharRuntime)), *b = (CharRuntime *)malloc(sizeof(CharRuntime));
-    // 1) ADS: the sight socket on the view axis within 0.5 mm / 0.1 deg after the full solve
-    //    (right-arm IK + reach pull), for every gun, at several view pitches.
+    // 1) ADS (docs/CAMERA_HOLDPOINT.md): the presentation hold point puts the sight socket on the view
+    //    axis within 0.5 mm / 0.1 deg for every gun at several view pitches, and the body ignores ADS:
+    //    the pose's item (camera space) is the hip one to 0.01 mm.
     for (int wi = 0; wi < db->weapon_count; wi++) {
         const WeaponDef *wd = &db->weapons[wi];
         if (wd->kind == WPN_MELEE) continue;
         int style = proc_hold_style_index(&L->proc, wd->hold_style);
-        float worst_p = 0, worst_a = 0;
+        float worst_p = 0, worst_a = 0, worst_body = 0;
         for (int pt = 0; pt < 5; pt++) {
             charrt_init(a, L, def);
+            charrt_init(b, L, def);
             CharInputs in;
             memset(&in, 0, sizeof(in));
             in.grounded = true;
             in.weapon_type = style;
             in.weapon_id = (u16)(wi + 1);
-            in.ads = true;
             in.aim_pitch = (-0.6f + 0.3f * (float)pt);
-            for (int t = 0; t < 40; t++) hp_step(a, &wd->sockets, &in, dt, true, false, v3(0, 0, 0), v3(0, 0, 0));
-            Xform ic = xf_mul(xf_inverse(a->proc.cam_model), a->proc.item_model);
+            CharInputs hip = in;
+            in.ads = true;
+            for (int t = 0; t < 40; t++) {
+                hp_step(a, &wd->sockets, &in, dt, true, true, v3(0, 0, 0), v3(0, 0, 0));
+                hp_step(b, &wd->sockets, &hip, dt, true, true, v3(0, 0, 0), v3(0, 0, 0));
+            }
+            CHECK(a->proc.hp_view_valid, "%s: no presentation hold point", wd->id);
+            Xform ic = a->proc.view_item_cam;
             vec3 sc = xf_point(ic, wd->sockets.sight);
             float pe = sqrtf(sc.x * sc.x + sc.y * sc.y), ae = quat_angle_between(ic.r, quat_identity()) * DG_RAD2DEG;
             worst_p = fmaxf(worst_p, pe);
             worst_a = fmaxf(worst_a, ae);
+            Xform pa = xf_mul(xf_inverse(a->proc.cam_model), a->proc.item_model), pb = xf_mul(xf_inverse(b->proc.cam_model), b->proc.item_model);
+            worst_body = fmaxf(worst_body, v3_dist(pa.t, pb.t));
         }
         CHECK(worst_p < 0.0005f && worst_a < 0.1f, "%s: ADS sight %.3f mm / %.3f deg off the view axis", wd->id, worst_p * 1000, worst_a);
-        printf("  ads %-9s sight on axis within %.4f mm / %.4f deg\n", wd->id, worst_p * 1000, worst_a);
+        CHECK(worst_body < 0.00001f, "%s: ADS moved the item of the body %.3f mm (the model must stay unchanged)", wd->id, worst_body * 1000);
+        printf("  ads %-9s presented sight on axis within %.4f mm / %.4f deg, body item %.4f mm from hip\n", wd->id, worst_p * 1000, worst_a, worst_body * 1000);
     }
     // 2) The owner and a remote copy solve bit-identical poses from the same inputs (no
-    //    first-person-only pose code): 300 ticks through states, look, recoil.
+    //    first-person-only pose code - the owner also evaluates the presentation hold point, which
+    //    nothing in the pose follows): 300 ticks through states, look, recoil.
     for (int wi = 0; wi < db->weapon_count; wi++) {
         const WeaponDef *wd = &db->weapons[wi];
         int style = proc_hold_style_index(&L->proc, wd->hold_style);
@@ -731,7 +842,7 @@ static void test_holdpoint(const ItemDB *db) {
             u8 turning = 0;
             in.body_yaw = anim_body_yaw_step(in.body_yaw, in.aim_yaw, in.speed > 0.3f, &L->proc, dt, &turning);
             hp_step(a, &wd->sockets, &in, dt, false, false, kp, kr);
-            hp_step(b, &wd->sockets, &in, dt, false, true, kp, kr);
+            hp_step(b, &wd->sockets, &in, dt, false, true, kp, kr);   // the owner: + presentation hold point
             if (memcmp(a->final_model, b->final_model, sizeof(Xform) * (size_t)L->skel.count) != 0 ||
                 memcmp(&a->proc.item_model, &b->proc.item_model, sizeof(Xform)) != 0) {
                 same = false;
@@ -1087,6 +1198,7 @@ int main(int argc, char **argv) {
     test_hold_and_glue(db);
     test_phone_hold(db);
     test_holdpoint(db);
+    test_frame_solve(db);
     test_clavicles_keep_clip(db);
     test_body_parts(db);
     test_damage_reaction();

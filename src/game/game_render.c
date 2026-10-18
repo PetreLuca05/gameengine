@@ -54,6 +54,10 @@ typedef struct GameRender {
     // as seen from the capsule, or geometry is closer than the near plane margin
     u32 pen_frames, pen_behind, pen_near;
     float pen_min_dist;
+    // The arms layer's aim correction this frame (deg right / up of the shot against the view: sway,
+    // ADS bob, the ADS counter of the visual camera kick) and the view pitch it is measured at.
+    vec2 arms_aim;
+    float arms_aim_pitch;
 } GameRender;
 #define GR (g_engine.game_render)
 
@@ -737,14 +741,14 @@ void game_render(void) {
         float kb = fo->cam_back * ck;
         cam.fov_deg = fmaxf(5.0f, cam.fov_deg - fo->fov_punch * ck);
         // Sway and ADS bob move the weapon (about the eye), not the camera: the sight centre stays
-        // exactly on the bullets' line (weapon_aim_offset_deg is what the shots use).
+        // exactly on the bullets' line (weapon_aim_offset_deg is what the shots use). The visual camera
+        // kick turns the view but not the aim: while aimed the weapon counters it, so the reticle keeps
+        // marking exactly where the shots go (docs/RECOIL.md "Hip vs ADS"). Both only move the arms
+        // layer (render.c), never the body (docs/CAMERA_HOLDPOINT.md "Rule 1").
         vec2 sway = weapon_aim_offset_deg(wd, &p->sim.wpn, &p->sim.move, weapon_sway_time(vcmd->seq) + G->alpha * SIM_DT);
-        Cvar *rvm = cvar_find("r_viewmodel_fov");
-        float vmf = render_vm_fov_for(&cam, rvm ? rvm->f : 0.0f);
-        // The visual camera kick turns the view but not the aim: while aimed the weapon counters it,
-        // so the reticle keeps marking exactly where the shots go (docs/RECOIL.md "Hip vs ADS").
         float ads_a = wd ? game_ads_vis() : 0.0f;
-        chars_set_fp_aim_offset(sway.x - kr.y * ads_a, sway.y - kr.x * ads_a, cam.pitch + kr.x * DG_DEG2RAD, cam.fov_deg, vmf);
+        GR->arms_aim = v2(sway.x - kr.y * ads_a, sway.y - kr.x * ads_a);
+        GR->arms_aim_pitch = cam.pitch + kr.x * DG_DEG2RAD;
         cam.pitch += kr.x * DG_DEG2RAD;
         cam.yaw -= kr.y * DG_DEG2RAD;
         cam.roll += kr.z * DG_DEG2RAD;
@@ -811,7 +815,7 @@ void game_render(void) {
                 G->view.eye = cam.pos;
                 GR->cam_mode = 2;
             }
-        } else if (lp && cvar_find("cl_camera_socket")->i && chars_fp_camera(w, G->alpha, vs, cam.yaw, cam.pitch, &sock)) {
+        } else if (lp && cvar_find("cl_camera_socket")->i && chars_fp_camera(w, G->alpha, vs, G->view.yaw, G->view.pitch, &sock)) {
             // Camera = the head eye: Head bone x the "camera" socket (assets/characters/player.json),
             // read after this frame's spine / head look solve. The old capsule-based stabilizer (an
             // "ideal" capsule eye followed by a clamped spring, which left the camera up to 45 cm

@@ -73,7 +73,6 @@ typedef struct DamagePreset {
 typedef struct ProcParams {
     // spine / look
     float spine_weights[5];    // spine, spine1, spine2, neck, head (sum ~1)
-    float spine_weights_ads_up[5]; // looking up in ADS: mostly the lower spine, the upper body rotates with the gun
     float spine_weights_up[5]; // pitch weights when looking up: mostly neck / head, so the torso
                                // doesn't lean back (the head stays over the body)
     float yaw_limit, pitch_limit;  // degrees (pitch_limit: looking down)
@@ -153,7 +152,6 @@ typedef struct ProcState {
     FootState foot[2];
     vec3 prev_vel;
     vec3 lean;                 // smoothed lean angles
-    float ads_lean;            // 0..1: looking up in ADS leans the upper body back with the gun (smoothed ads_t)
     // hold style blend
     int style, prev_style;
     float style_t;             // 0..1 blend from prev to style
@@ -172,9 +170,17 @@ typedef struct ProcState {
     bool reach_shifted;
     float reach_shift;
     float grip_l_slide;              // ADS: support hand slid back along the handguard (m, item +Z) to stay in reach
-    // hold point (camera space item placement)
+    // hold point (camera space item placement). The pose's hold point never aims down the sights:
+    // the model stays unchanged in ADS (docs/CAMERA_HOLDPOINT.md "Rule 1").
     HoldPointState hp;
     HoldPointOutput hp_out;
+    // Presentation hold point (ProcInput.hp_view): the same inputs with ADS. The first-person arms
+    // layer moves the drawn arms + item rigidly from the pose's item onto it; the aim claims use it.
+    HoldPointState hp_view;
+    HoldPointOutput hp_view_out;
+    bool hp_view_valid;
+    Xform view_item_cam;       // presented item (hold point item x grip root), camera space
+    Xform view_item_model;     // ... model space (camera x view_item_cam)
     Xform cam_model;           // camera (head bone + eye socket, view rotation), model space
     Xform item_cam;            // item target in camera space (pre-IK; the owner re-solves per frame)
     u32 warned_styles;
@@ -191,6 +197,19 @@ typedef struct ProcState {
 // World raycast for foot IK and muzzle pull-back (local physics world, static geometry).
 // Returns true on hit with the fraction along dir_len, the point and the surface normal.
 typedef bool (*ProcRaycastFn)(void *ctx, vec3 origin, vec3 dir_len, float *fraction, vec3 *point, vec3 *normal);
+
+// Stage A (docs/CAMERA_HOLDPOINT.md "Rule 1"): the pose after the shared animation (clips, leg
+// yaw, hit additive, turn, seated / kneel / swim posture, pelvis drop, slope lean), before the only
+// two passes allowed to follow it - spine look and IK. Captured for the first-person frame re-solve.
+typedef struct ProcStageA {
+    Pose pose;
+    Xform model[ANIM_MAX_BONES];
+    Xform clav_clip[2];        // the clip's clavicles (the IK pass starts from them)
+    bool valid;
+} ProcStageA;
+
+// The bone-writing passes after stage A (the dev assert's whitelist).
+enum { PROC_PASS_SPINE = 1u << 0, PROC_PASS_IK = 1u << 1 };
 
 typedef struct ProcInput {
     const Skeleton *skel;
@@ -211,9 +230,15 @@ typedef struct ProcInput {
     bool foot_ik, spine, turn, hold, lean, damage;  // per-system enables (LOD + cvars)
     float lod_w;               // weight of the LOD0 systems (foot IK, lean, turn), faded over a pixel band (docs/LOD.md); 1 = full
     vec3 item_kick_pos, item_kick_rot;   // recoil kick applied to the item (aim space, m / deg)
+    // Fire animation layer 3 (docs/FIRE_ANIM.md), every character alike: the hands trail the gun's
+    // one-tick kick (camera space m / deg, kick convention) and the trigger / support grip tighten (0..1).
+    vec3 hand_lag_pos, hand_lag_rot;
+    float trigger;
     float crouch_drop;         // procedural crouch: pelvis lowering (m) when no crouch clips are bound
     float kneel;               // 0..1 target: knocked down (docs/REVIVE.md), knees on the ground, torso up
-    bool first_person;         // the local player's own body (diagnostics only: never changes the pose)
+    ProcStageA *capture;       // non-NULL: stage A is copied here (first-person frame re-solve)
+    bool hp_given;             // frame re-solve: st->hp_out is supplied, the hold point isn't evaluated
+    bool hp_view;              // also evaluate the presentation hold point (players: arms layer + aim claims)
     int eye_bone;              // camera parent bone (Head) and the eye socket relative to it
     Xform eye_local;
     bool prone, inspect, empty_hands;   // hold point state flags (empty: mantle / hang / vault)
@@ -270,6 +295,13 @@ void proc_damage_hit(ProcState *s, const ProcParams *p, const Skeleton *skel, in
 bool proc_damage_active(const ProcState *s);
 // Runs the post-pass (steps 0..6). pose/model are in model space relative to in->root.
 void proc_run(ProcState *s, const ProcInput *in, Pose *pose, Xform *model);
+// First-person frame re-solve: only the whitelisted passes - spine look, then the IK pass (clip
+// clavicles, arm IK onto the held item, fingers, hand anchors) - re-run on a stage-A pose with this
+// frame's root (in->root.t, st->render_body_yaw), view (in->aim_*) and hold point (st->hp_out,
+// in->hp_given). `st` is a scratch copy of the tick's state and nothing advances (dt 0). The legs
+// come from legs_pose / legs_model (the tick's foot IK). With the tick's own inputs the result is
+// the tick's pose bit for bit. Returns the passes that wrote bones (PROC_PASS_*).
+u32 proc_frame_solve(ProcState *st, const ProcInput *in, const Xform clav_clip[2], const Pose *legs_pose, const Xform *legs_model, Pose *pose, Xform *model);
 // The held item's grip root (its alignment in the hold frame, .s = calibration scale) and one
 // hand's universal grip target on it (the same code as the runtime hold: tests, editor).
 Xform proc_item_root(const ProcInput *in, const ItemSockets *it);

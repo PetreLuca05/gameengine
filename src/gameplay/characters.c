@@ -30,18 +30,17 @@
 
 static void cmd_fp_eye_check(int argc, const char **argv);
 static void cmd_fp_shadow_check(int argc, const char **argv);
+static void cmd_fp_rules_report(int argc, const char **argv);
 static void cmd_clavicle_check(int argc, const char **argv);
 static CharacterInst *cmd_target(World *w, int argc, const char **argv, int arg);
 static void cmd_set_part(int argc, const char **argv);
 static void cmd_parts(int argc, const char **argv);
 
 #define CG (g_engine.chars)
-static quat g_fp_aim_off = { 0, 0, 0, 1 };   // chars_set_fp_aim_offset (sight sway / bob)
-static FireAnimOut g_fp_fire, g_fp_fire_frame;   // chars_set_fp_fire: first-person fire animation (tick / frame)
+// The viewed player's first-person fire animation (chars_set_fp_fire, tick / frame): the camera
+// reaction and the arms layer only - every body's kick is its own character instance (tp_fire).
+static FireAnimOut g_fp_fire, g_fp_fire_frame;
 static bool g_fp_fire_snap;                        // a shot landed this tick: the item shows it at once (no interpolation)
-#define TP_FIRE_SCALE 0.55f                        // third-person fire animation scale (remote players)
-static Xform fp_fire_hand_lag(Xform sock, quat cam_rm, vec3 pivot);
-static void fp_fire_fingers(const Skeleton *s, Pose *pose, Xform *model, int side, float w);
 
 // docs/perf/FINDINGS.md PF-0034: the shared pose cache (see "shared poses" below).
 #define POSE_SETS 128                  // the cache: POSE_SETS x POSE_WAYS bucket poses (a horde uses ~100 - 300)
@@ -79,7 +78,12 @@ static void pose_cache_free(void);
 typedef struct GpuPart {
     u32 key;
     int mesh;                       // library SkeletalMesh
-    MeshId lod[CHAR_LOD_COUNT], arm, noarm;
+    // First person (LOD0, docs/CAMERA_HOLDPOINT.md): the arms from the upper arms down (both; each
+    // side for the vehicle controls), the body without them (noarm: cl_fp_debug 2) and without them
+    // and the head / neck (fpbody: the owner's view; fp_none: nothing of the part is left).
+    MeshId lod[CHAR_LOD_COUNT], arm, noarm, fpbody, arm_side[2];
+    bool fp_none;
+    u32 fp_tris[5];                 // LOD0 triangles: whole, arms, no arms, owner's body, both sides (fp_rules_report)
     TextureId texture;              // skin atlas (0 = vertex colours only)
     // PBR maps of a textured skin (docs/CHARACTERS.md "PBR maps"): <atlas>_normal, <atlas>_orm
     // (r occlusion, g roughness, b metallic), <atlas>_emissive, tiled like the albedo; 0 = none.
@@ -95,9 +99,26 @@ typedef struct CharGlobals {
     char skin_sent[32];             // cl_skin last requested from the host
     Cvar *parts_cvar;               // cl_parts: equipped cosmetics ("head:helmet_olive torso:vest_tan")
     char parts_sent[256];
-    // First-person body: arm bone set (arm-only meshes for the viewmodel pass) and head bones.
+    // First-person body: arm bone set (arm-only meshes for the arms layer, the side of each arm bone)
+    // and the head bones (masked out of the owner's view by mesh, never by bone).
     bool arm_bone[ANIM_MAX_BONES], head_bone[ANIM_MAX_BONES];
-    Cvar *fp_body, *fp_debug;
+    u8 arm_side[ANIM_MAX_BONES];
+    Cvar *fp_body, *fp_debug, *fp_parity;
+    // First-person frame re-solve inputs (the viewed player, docs/CAMERA_HOLDPOINT.md "Rule 1"): the
+    // last two ticks' stage-A poses and roots, hold point outputs (pose / presentation), the tick's
+    // inputs with a copy of its item sockets; the parity check's counters.
+    struct {
+        EntityId ent;
+        int n;
+        ProcStageA cap, sa[2];
+        Xform root[2];
+        HoldPointOutput hp[2];
+        Xform view_cam[2];
+        bool view_valid;
+        ProcInput in;
+        ItemSockets item;
+        u32 parity_checks, parity_fails;
+    } fpd;
     u32 lib_revision;
     LodConfig lod;
     int force_lod;
@@ -128,6 +149,7 @@ typedef struct CharGlobals {
     float fp_clav_err;               // this frame's first-person clavicle turn by the hold / IK (deg, -1 = no pass)
     Xform fp_cam;
     bool fp_cam_valid;
+    u32 fp_rule_fails;               // frames whose drawn pose had a writer after the whitelisted passes
 } CharGlobals;
 
 // ------------------------------------------------------------------ globals
@@ -159,6 +181,7 @@ void characters_register_cvars(void) {
     g->hold_debug = cvar_reg_bool("anim_hold_debug", false, CVAR_LOCKED, "draw hold sockets / wrists and print the left-hand glue error");
     cmd_register("fp_eye_check", cmd_fp_eye_check, "print where the first-person camera socket sits on each character's head (bind pose)");
     cmd_register("fp_shadow_check", cmd_fp_shadow_check, "first person: the drawn body's pelvis / feet against the owner's shadow copy (world, mm apart)");
+    cmd_register("fp_rules_report", cmd_fp_rules_report, "first-person rule 1 (docs/CAMERA_HOLDPOINT.md): parity checks / failures, frames with a pose edit after spine look / IK, the mesh masks; PASS / FAIL");
     cmd_register("anim_clavicle_check", cmd_clavicle_check, "clavicle local rotation after the hold / IK against the clip (third person + first person, deg; PASS / FAIL)");
     g->hold_assert = cvar_reg_bool("anim_hold_assert", false, CVAR_LOCKED, "log any left hand <-> grip_l error above 2 mm / 1 deg");
     g->hitbox_debug = cvar_reg_bool("hitbox_debug", false, CVAR_LOCKED, "draw per-part hitboxes with their multipliers");
@@ -170,7 +193,9 @@ void characters_register_cvars(void) {
     cmd_register("character_set_part", cmd_set_part, "character_set_part <slot> <option id | none> [entity]: swap a modular part (host; default: the character you look at, else your own)");
     cmd_register("character_parts", cmd_parts, "list the part slots / options of the character you look at (or an entity id)");
     g->fp_body = cvar_reg_bool("cl_fp_body", true, CVAR_ARCHIVE | CVAR_EDITABLE, "first person: draw your own body; the player model's arms replace the placeholder hands");
-    g->fp_debug = cvar_reg_int("cl_fp_debug", 0, 0, 2, CVAR_LOCKED, "first person: 1 = log / draw hand targets and weapon pull-back, 2 = raw body pose (no arm IK, head visible)");
+    g->fp_debug = cvar_reg_int("cl_fp_debug", 0, 0, 2, CVAR_LOCKED, "first person: 1 = log / draw hand targets and weapon pull-back, 2 = the head shown (no mesh mask)");
+    g->fp_parity = cvar_reg_int("anim_fp_parity", 30, 0, 600, CVAR_LOCKED,
+                                "first-person rule 1 check every N ticks: the frame re-solve with the tick's inputs must equal the tick pose bit for bit (0 = off; fp_rules_report)");
     g->eval_budget = cvar_reg_int("anim_eval_budget", 64, 0, 4096, CVAR_TIER, "max full character post-passes per tick (0 = unlimited); the rest wait a tick, biggest on screen first");
     g->lod_quality = cvar_reg_int("r_char_quality", 2, 0, 3, CVAR_LOCKED, "character detail (0 low .. 3 ultra), scales LOD thresholds");
     g->char_maps = cvar_reg_bool("r_char_maps", true, CVAR_TIER, "textured skins use their PBR maps (normal, roughness / metallic, AO, emissive; docs/CHARACTERS.md); 0 = albedo only");
@@ -192,6 +217,9 @@ void characters_shutdown_globals(void) {
         for (int l = 0; l < CHAR_LOD_COUNT; l++) render_mesh_destroy(CG->parts[k].lod[l]);
         render_mesh_destroy(CG->parts[k].arm);
         render_mesh_destroy(CG->parts[k].noarm);
+        render_mesh_destroy(CG->parts[k].fpbody);
+        render_mesh_destroy(CG->parts[k].arm_side[0]);
+        render_mesh_destroy(CG->parts[k].arm_side[1]);
     }
     free(CG);
     CG = NULL;
@@ -202,12 +230,42 @@ void chars_force_lod(int lod) { ensure_globals(); CG->force_lod = lod; }
 
 static bool cv(Cvar *c) { return c && c->i != 0; }
 
+// Arm-only mesh of a triangle list (source indices into v): its vertices re-weighted onto the arm
+// bones only (exactly 255: the shader never renormalises).
+static MeshId arm_mesh(const SkinVertex *v, u32 vcount, const u32 *idx, u32 n, const i16 *jmap) {
+    if (!n) return 0;
+    u32 *remap = (u32 *)malloc(sizeof(u32) * vcount);
+    SkinVertex *av = (SkinVertex *)malloc(sizeof(SkinVertex) * vcount);
+    u32 *ai = (u32 *)malloc(sizeof(u32) * n);
+    u32 avc = 0;
+    for (u32 i = 0; i < vcount; i++) remap[i] = 0xFFFFFFFFu;
+    for (u32 i = 0; i < n; i++) {
+        u32 src = idx[i];
+        if (remap[src] == 0xFFFFFFFFu) {
+            SkinVertex sv = v[src];
+            float aw[4];
+            for (int j = 0; j < 4; j++) aw[j] = CG->arm_bone[jmap[sv.joints[j]]] ? (float)sv.weights[j] : 0.0f;
+            skin_quantize_weights(aw, 4, sv.weights);
+            remap[src] = avc;
+            av[avc++] = sv;
+        }
+        ai[i] = remap[src];
+    }
+    MeshId m = render_skinned_mesh_create(av, avc, ai, n);
+    free(remap);
+    free(av);
+    free(ai);
+    return m;
+}
+
 // GPU meshes of one SkeletalMesh part: every LOD (LOD2+ joints were folded onto the Skeleton's reduced
 // bone set at bake) with the material colours baked into the vertex colours, without the triangles
-// that only follow `hidden` bones (another part covers them), plus the first-person arm / no-arm split
-// of LOD0. tiles > 0: texture atlas skin, vertex UVs remapped into the material's tile (mat_tile).
+// that only follow `hidden` bones (another part covers them), plus the first-person split of LOD0
+// (arms, each arm, body without arms, body without arms and head / neck). tiles > 0: texture atlas
+// skin, vertex UVs remapped into the material's tile (mat_tile).
 static void build_part_meshes(const SkeletalMesh *sm, const u32 *colors, const int *mat_tile, int tiles, const BoneSet *hidden,
-                              MeshId *out_lod, MeshId *out_arm, MeshId *out_noarm) {
+                              MeshId *out_lod, MeshId *out_arm, MeshId *out_noarm, MeshId *out_fpbody, MeshId out_side[2], bool *out_fp_none,
+                              u32 out_tris[5]) {
     const SkinMeshData *m = &sm->data;
     i16 jmap[SKM_MAX_BONES];
     skm_joint_map(sm, jmap);
@@ -237,45 +295,55 @@ static void build_part_meshes(const SkeletalMesh *sm, const u32 *colors, const i
         }
         out_lod[l] = render_skinned_mesh_create(v, L->vcount, L->indices, L->icount);
         if (l == 0) {
-            // Arm-only copy for the first-person viewmodel pass: triangles whose vertices are
-            // mostly skinned to the arm chains, re-weighted onto arm bones only.
-            u32 *remap = (u32 *)malloc(sizeof(u32) * L->vcount);
-            SkinVertex *av = (SkinVertex *)malloc(sizeof(SkinVertex) * L->vcount);
+            // First-person split: arm triangles (every vertex mostly skinned to an arm chain), per side;
+            // the rest without them (noarm) and without the head / neck as well (fpbody: the owner's
+            // body is masked by mesh, never by collapsing bones).
             u32 *ai = (u32 *)malloc(sizeof(u32) * L->icount);
+            u32 *si[2] = { (u32 *)malloc(sizeof(u32) * L->icount), (u32 *)malloc(sizeof(u32) * L->icount) };
             u32 *bi = (u32 *)malloc(sizeof(u32) * L->icount);
-            u32 avc = 0, aic = 0, bic = 0;
-            for (u32 i = 0; i < L->vcount; i++) remap[i] = 0xFFFFFFFFu;
+            u32 *fi = (u32 *)malloc(sizeof(u32) * L->icount);
+            u32 aic = 0, sic[2] = { 0, 0 }, bic = 0, fic = 0;
             for (u32 t = 0; t + 2 < L->icount; t += 3) {
-                bool keep = true;
-                for (int k = 0; k < 3 && keep; k++) {
+                bool arm = true, head = true;
+                int side_w[2] = { 0, 0 };
+                for (int k = 0; k < 3; k++) {
                     const SkinVertex *sv = &v[L->indices[t + k]];
-                    int aw = 0;
-                    for (int j = 0; j < 4; j++) if (CG->arm_bone[jmap[sv->joints[j]]]) aw += sv->weights[j];
-                    keep = aw >= 128;
+                    int aw = 0, hw = 0;
+                    for (int j = 0; j < 4; j++) {
+                        int b = jmap[sv->joints[j]];
+                        if (CG->arm_bone[b]) {
+                            aw += sv->weights[j];
+                            side_w[CG->arm_side[b]] += sv->weights[j];
+                        }
+                        if (CG->head_bone[b]) hw += sv->weights[j];
+                    }
+                    arm = arm && aw >= 128;
+                    head = head && hw >= 128;
                 }
-                if (!keep) {
-                    for (int k = 0; k < 3; k++) bi[bic++] = L->indices[t + k];
+                const u32 *tri = &L->indices[t];
+                if (arm) {
+                    int sd = side_w[1] > side_w[0] ? 1 : 0;
+                    for (int k = 0; k < 3; k++) { ai[aic++] = tri[k]; si[sd][sic[sd]++] = tri[k]; }
                     continue;
                 }
-                for (int k = 0; k < 3; k++) {
-                    u32 src = L->indices[t + k];
-                    if (remap[src] == 0xFFFFFFFFu) {
-                        SkinVertex sv = v[src];
-                        float aw[4];
-                        for (int j = 0; j < 4; j++) aw[j] = CG->arm_bone[jmap[sv.joints[j]]] ? (float)sv.weights[j] : 0.0f;
-                        skin_quantize_weights(aw, 4, sv.weights);   // exactly 255 (the shader never renormalises)
-                        remap[src] = avc;
-                        av[avc++] = sv;
-                    }
-                    ai[aic++] = remap[src];
-                }
+                for (int k = 0; k < 3; k++) bi[bic++] = tri[k];
+                if (!head) for (int k = 0; k < 3; k++) fi[fic++] = tri[k];
             }
-            if (aic) *out_arm = render_skinned_mesh_create(av, avc, ai, aic);
+            *out_arm = arm_mesh(v, L->vcount, ai, aic, jmap);
+            for (int sd = 0; sd < 2; sd++) out_side[sd] = arm_mesh(v, L->vcount, si[sd], sic[sd], jmap);
             if (aic && bic) *out_noarm = render_skinned_mesh_create(v, L->vcount, bi, bic);
-            free(bi);
-            free(remap);
-            free(av);
+            if (fic && fic < L->icount) *out_fpbody = render_skinned_mesh_create(v, L->vcount, fi, fic);
+            *out_fp_none = fic == 0;
+            out_tris[0] = L->icount / 3;
+            out_tris[1] = aic / 3;
+            out_tris[2] = bic / 3;
+            out_tris[3] = fic / 3;
+            out_tris[4] = (sic[0] + sic[1]) / 3;
             free(ai);
+            free(si[0]);
+            free(si[1]);
+            free(bi);
+            free(fi);
         }
         free(v);
         free(hidx);
@@ -287,6 +355,9 @@ static void destroy_gpu_parts(void) {
         for (int l = 0; l < CHAR_LOD_COUNT; l++) render_mesh_destroy(CG->parts[k].lod[l]);
         render_mesh_destroy(CG->parts[k].arm);
         render_mesh_destroy(CG->parts[k].noarm);
+        render_mesh_destroy(CG->parts[k].fpbody);
+        render_mesh_destroy(CG->parts[k].arm_side[0]);
+        render_mesh_destroy(CG->parts[k].arm_side[1]);
     }
     CG->part_count = 0;
     CG->part_gen++;
@@ -301,6 +372,7 @@ static void ensure_gpu_meshes(void) {
     for (int i = 0; i < s->count; i++) {
         int p = s->parent[i];
         CG->arm_bone[i] = i == s->role[BR_L_ARM] || i == s->role[BR_R_ARM] || (p >= 0 && CG->arm_bone[p]);
+        CG->arm_side[i] = i == s->role[BR_R_ARM] ? 1 : (i == s->role[BR_L_ARM] ? 0 : (p >= 0 ? CG->arm_side[p] : 0));
         CG->head_bone[i] = i == s->role[BR_HEAD] || i == s->role[BR_NECK] || (p >= 0 && CG->head_bone[p]);
     }
     CG->lib_revision = LIB->revision;
@@ -349,7 +421,7 @@ static int gpu_part_for(const CharPartOption *o, const BoneSet *hidden) {
         snprintf(name, sizeof(name), "%s_emissive", skin->atlas);
         gp->emissive_tex = assets_texture(name);
     }
-    build_part_meshes(sm, colors, tile, tiles, hidden, gp->lod, &gp->arm, &gp->noarm);
+    build_part_meshes(sm, colors, tile, tiles, hidden, gp->lod, &gp->arm, &gp->noarm, &gp->fpbody, gp->arm_side, &gp->fp_none, gp->fp_tris);
     return CG->part_count++;
 }
 
@@ -841,6 +913,24 @@ static void host_triggers(World *w, CharacterInst *c, int i) {
     (void)i;
 }
 
+// One shot of the character's fire animation (docs/FIRE_ANIM.md): gun kick, hands trailing it,
+// trigger pull and slide - every character the same way from what every machine knows (the
+// replicated ADS flag, a seed from the shot count), the shooter's own body included, so its pose is
+// the one everyone else computes (docs/CAMERA_HOLDPOINT.md "Rule 1").
+static void char_fire_shot(CharacterInst *c) {
+    if (!c->item_weapon || c->item_weapon->kind == WPN_MELEE) return;
+    static Cvar *scale;
+    if (!scale) scale = cvar_find("wpn_fire_anim_scale");
+    FireShot sh;
+    memset(&sh, 0, sizeof(sh));
+    sh.ads_t = c->rt.in.ads ? 1.0f : 0.0f;
+    sh.seed = dg_hash_u32(ENT_INDEX(c->ent) * 7919u + (++c->tp_fire_shots));
+    sh.mag_left = 1;
+    sh.interval = 60.0f / fmaxf(1.0f, c->item_weapon->recoil.rpm);
+    sh.scale = scale ? scale->f : 1.0f;
+    fire_anim_shot(&c->tp_fire, &c->item_weapon->fire, &sh);
+}
+
 void chars_notify_attack(World *w, int slot, bool melee, bool first) {
     if (!w->chars || slot < 0) return;
     Player *p = &w->players[slot];
@@ -858,6 +948,7 @@ void chars_notify_attack(World *w, int slot, bool melee, bool first) {
     } else if (first && (p->local || slot == game_view_slot())) {
         charrt_trigger(&c->rt, melee ? AP_T_MELEE : AP_T_FIRE);   // the predicting owner, or its first-person spectator
     }
+    if (!melee && first && c->local) char_fire_shot(c);
 
 }
 
@@ -1268,16 +1359,7 @@ static void apply_event(World *w, const AnimEvent *e) {
         break;
     case AEV_FIRE:
         if (remote) charrt_trigger(&c->rt, AP_T_FIRE);
-        if (!c->local && c->item_weapon && c->item_weapon->kind != WPN_MELEE) {
-            // Third-person fire animation: the gun kick, the push and the slide at a reduced scale.
-            FireShot sh;
-            memset(&sh, 0, sizeof(sh));
-            sh.seed = dg_hash_u32(ENT_INDEX(c->ent) * 7919u + (++c->tp_fire_shots));
-            sh.mag_left = 1;
-            sh.interval = 60.0f / fmaxf(1.0f, c->item_weapon->recoil.rpm);
-            sh.scale = TP_FIRE_SCALE;
-            fire_anim_shot(&c->tp_fire, &c->item_weapon->fire, &sh);
-        }
+        if (!c->local) char_fire_shot(c);   // the viewed player's own shots: chars_notify_attack
         break;
     case AEV_HIT: {
         // A reaction we already predicted for this target / part within 0.3 s is not doubled.
@@ -1500,6 +1582,69 @@ static int systems_for_lod(int lod) { return lod; }
 VehiclePoseHooks g_vehicle_pose;
 bool g_chars_force_phys_step;
 
+// Dev check of rule 1 (docs/CAMERA_HOLDPOINT.md): the first-person frame re-solve, given the tick's
+// own inputs, must reproduce the tick's pose bit for bit with only the whitelisted passes writing
+// bones after stage A - so the drawn body is the pose every other machine computes.
+static void fp_parity_check(CharacterInst *c) {
+    const Skeleton *s = &LIB->skel;
+    static ProcState st;
+    static Pose pose;
+    static Xform model[ANIM_MAX_BONES];
+    st = c->rt.proc;
+    pose_copy(&pose, &CG->fpd.sa[1].pose);
+    memcpy(model, CG->fpd.sa[1].model, sizeof(Xform) * (size_t)s->count);
+    ProcInput in = CG->fpd.in;
+    in.hp_given = true;
+    u32 passes = proc_frame_solve(&st, &in, CG->fpd.sa[1].clav_clip, &c->rt.final, c->rt.final_model, &pose, model);
+    CG->fpd.parity_checks++;
+    int bad = -1;
+    for (int b = 0; b < s->count && bad < 0; b++)
+        if (memcmp(&pose.local[b], &c->rt.final.local[b], sizeof(Xform))) bad = b;
+    if (bad < 0 && !(passes & ~(PROC_PASS_SPINE | PROC_PASS_IK))) return;
+    CG->fpd.parity_fails++;
+    static u64 last;
+    if (g_engine.frame_index - last < 120) return;
+    last = g_engine.frame_index;
+    if (bad >= 0)
+        log_error("fp_rules: the first-person re-solve differs from the tick pose at %s (%.4f mm, %.4f deg): a bone writer outside spine look / IK (%u of %u checks)",
+                  s->names[bad], v3_dist(pose.local[bad].t, c->rt.final.local[bad].t) * 1000.0f,
+                  quat_angle_between(pose.local[bad].r, c->rt.final.local[bad].r) * DG_RAD2DEG, CG->fpd.parity_fails, CG->fpd.parity_checks);
+    else
+        log_error("fp_rules: a pass other than spine look / IK wrote bones after stage A (passes 0x%x)", passes);
+}
+
+// The viewed player's tick: keep its stage A, root, hold point outputs and inputs for the frame re-solve.
+static void fpd_push(World *w, CharacterInst *c, const ProcInput *pi, Xform root) {
+    if (CG->fpd.ent != c->ent) CG->fpd.n = 0;
+    CG->fpd.ent = c->ent;
+    CG->fpd.sa[0] = CG->fpd.sa[1];
+    CG->fpd.root[0] = CG->fpd.root[1];
+    CG->fpd.hp[0] = CG->fpd.hp[1];
+    CG->fpd.view_cam[0] = CG->fpd.view_cam[1];
+    CG->fpd.sa[1] = CG->fpd.cap;
+    CG->fpd.cap.valid = false;
+    root.s = v3s(c->def->scale);
+    CG->fpd.root[1] = root;
+    CG->fpd.hp[1] = c->rt.proc.hp_out;
+    CG->fpd.view_cam[1] = c->rt.proc.view_item_cam;
+    CG->fpd.view_valid = c->rt.proc.hp_view_valid;
+    CG->fpd.in = *pi;
+    CG->fpd.in.capture = NULL;
+    if (pi->item) {
+        CG->fpd.item = *pi->item;
+        CG->fpd.in.item = &CG->fpd.item;
+    }
+    if (CG->fpd.n == 0) {
+        CG->fpd.sa[0] = CG->fpd.sa[1];
+        CG->fpd.root[0] = CG->fpd.root[1];
+        CG->fpd.hp[0] = CG->fpd.hp[1];
+        CG->fpd.view_cam[0] = CG->fpd.view_cam[1];
+    }
+    CG->fpd.n = DG_MIN(CG->fpd.n + 1, 2);
+    int every = CG->fp_parity ? CG->fp_parity->i : 0;
+    if (every > 0 && (w->chars->tick % (u32)every) == 0) fp_parity_check(c);
+}
+
 static void post_one(World *w, CharacterInst *c, int i, float dt, vec3 cam_pos, int local_slot) {
     (void)cam_pos;
     int lod = c->lod;
@@ -1535,22 +1680,22 @@ static void post_one(World *w, CharacterInst *c, int i, float dt, vec3 cam_pos, 
     else if (c->item_def && c->rt.in.weapon_id) item = &c->item_def->sockets;
     if (item) { sock = *item; item = &sock; }
     pi.item = item;
-    // Fire animation (docs/FIRE_ANIM.md): the gun kick on the hold point. The owner's comes from the
-    // first-person fire animation of this very tick (the kick lands on the shot's tick), the others'
-    // from their own reduced third-person instance.
+    // Fire animation (docs/FIRE_ANIM.md): the gun kick on the hold point, the hands trailing it and
+    // the trigger pull - the character's own instance, the shooter's too (its first-person instance
+    // only moves the camera and the arms layer: docs/CAMERA_HOLDPOINT.md "Rule 1").
     pi.item_kick_pos = c->tp_fire_out.gun_pos;
     pi.item_kick_rot = c->tp_fire_out.gun_rot;
-    if (c->local) {
-        pi.item_kick_pos = v3_add(g_fp_fire.gun_pos, v3(0, 0, g_fp_fire.screen_kick));
-        pi.item_kick_rot = g_fp_fire.gun_rot;
-    }
+    pi.hand_lag_pos = c->tp_fire_out.hand_pos;
+    pi.hand_lag_rot = c->tp_fire_out.hand_rot;
+    pi.trigger = c->tp_fire_out.trigger;
     {
         const WeaponCvars *wc = weapons_cvars();
         float kk = wc->kick_scale ? wc->kick_scale->f : 1.0f;   // wpn_kick_scale: the gun kick on the hold point (1)
         pi.item_kick_pos = v3_scale(pi.item_kick_pos, kk);
         pi.item_kick_rot = v3_scale(pi.item_kick_rot, kk);
-        // Item sway: wpn_sway_scale (host) x the player's cosmetic "Weapon sway" setting.
-        pi.hp_sway_scale = (wc->sway_scale ? wc->sway_scale->f : 0.0f) * (wc->sway_cosmetic ? wc->sway_cosmetic->f : 1.0f);
+        // Item sway: wpn_sway_scale (host). The player's cosmetic "Weapon sway" never reaches a pose:
+        // it scales the arms layer only.
+        pi.hp_sway_scale = wc->sway_scale ? wc->sway_scale->f : 0.0f;
         if (c->item_weapon) {
             const RecoilParams *rp = &c->item_weapon->recoil;
             pi.hold_kick.set = true;
@@ -1595,7 +1740,11 @@ static void post_one(World *w, CharacterInst *c, int i, float dt, vec3 cam_pos, 
         }
     }
     if (c->rt.in.crouch) pi.crouch_drop = 0.38f;
-    pi.first_person = c->local && cv(CG->fp_body);
+    // The viewed player (first person): stage A for the frame re-solve. Players: the presentation
+    // hold point too (the arms layer, the aim claims; docs/CAMERA_HOLDPOINT.md).
+    bool fp_cap = c->local && c->is_player && cv(CG->fp_body);
+    if (fp_cap) pi.capture = &CG->fpd.cap;
+    pi.hp_view = c->is_player && (w->authority || c->local);
     pi.hp_static = cv(CG->hp_static);
     if (CG->hp_force_state && CG->hp_force_state->i >= 0) {
         int fs = CG->hp_force_state->i;
@@ -1800,6 +1949,7 @@ static void post_one(World *w, CharacterInst *c, int i, float dt, vec3 cam_pos, 
     if (c->rt.proc.has_item) c->item_cam_cur = c->rt.proc.item_cam;
     charrt_to_world(&c->rt, c->rt.final_model, root, c->def->scale, c->pose_cur);
     c->item_cur = c->rt.proc.has_item ? xf_mul(xf_make(root.t, root.r), xf_make(v3_scale(c->rt.proc.item_model.t, c->def->scale), c->rt.proc.item_model.r)) : c->item_cur;
+    if (fp_cap && CG->fpd.cap.valid) fpd_push(w, c, &pi, root);
     bool had_item = c->item_valid;
     c->item_valid = c->rt.proc.has_item;
     // Aim model (docs/AIM.md): where the muzzle is relative to the simulated eye and view of this tick
@@ -1807,8 +1957,13 @@ static void post_one(World *w, CharacterInst *c, int i, float dt, vec3 cam_pos, 
     c->muzzle_cam_valid = false;
     if (c->item_valid && c->item_weapon && c->item_weapon->kind != WPN_MELEE && c->is_player && c->slot >= 0 && c->slot < MAX_PLAYERS) {
         const PlayerMove *pm = &w->players[c->slot].sim.move;
-        c->muzzle_cam = aim_world_to_cam(player_eye_pos(pm), pm->yaw, pm->pitch, xf_point(c->item_cur, held_sockets(c)->muzzle));
-        c->barrel_cam = quat_rotate(quat_conj(aim_view_rot(pm->yaw, pm->pitch)), quat_rotate(c->item_cur.r, v3(0, 0, -1)));
+        // The presented item (the presentation hold point: ADS included) - the gun the shooter sees and
+        // aims; the host computes the same one (docs/CAMERA_HOLDPOINT.md "Rule 3").
+        Xform iv = c->item_cur;
+        if (c->rt.proc.hp_view_valid && c->rt.proc.has_item)
+            iv = xf_mul(xf_make(root.t, root.r), xf_make(v3_scale(c->rt.proc.view_item_model.t, c->def->scale), c->rt.proc.view_item_model.r));
+        c->muzzle_cam = aim_world_to_cam(player_eye_pos(pm), pm->yaw, pm->pitch, xf_point(iv, held_sockets(c)->muzzle));
+        c->barrel_cam = quat_rotate(quat_conj(aim_view_rot(pm->yaw, pm->pitch)), quat_rotate(iv.r, v3(0, 0, -1)));
         c->muzzle_cam_valid = true;
         c->muzzle_cam_tick = w->chars->tick;
     }
@@ -1874,8 +2029,8 @@ void chars_present_tick(World *w, vec3 cam_pos, float fov_deg, float screen_h, f
         int i = (int)ENT_INDEX(c->ent);
         if (c->is_player && c->slot >= 0) c->local = c->slot == local_slot;
         if (c->predicted_hit_t > 0) c->predicted_hit_t -= dt;
-        // Third-person fire animation (layers 1, 2, 4; no camera, no perceptual punches).
-        if (!c->local && c->item_weapon && c->item_weapon->kind != WPN_MELEE && (c->tp_fire.string_shots || c->tp_fire.curve_kind || c->tp_fire.slide_active || fabsf(c->tp_fire.gun[FA_PITCH].x) > 1e-5f))
+        // The character's fire animation (gun, hands, trigger, slide; no camera, no perceptual punches).
+        if (c->item_weapon && c->item_weapon->kind != WPN_MELEE && (c->tp_fire.string_shots || c->tp_fire.curve_kind || c->tp_fire.slide_active || fabsf(c->tp_fire.gun[FA_PITCH].x) > 1e-5f))
             fire_anim_step(&c->tp_fire, &c->item_weapon->fire, dt, false, 0.0f, &c->tp_fire_out);
         // LOD by projected height.
         float dist = fmaxf(0.1f, v3_dist(cam_pos, c->root.t));
@@ -2305,17 +2460,32 @@ static void draw_char(World *w, CharacterInst *c, int lod, float fade, u32 flags
     (void)w;
 }
 
-// First person: each part's body (no arms) or arm-only mesh from a given skeleton instance.
-static bool draw_char_fp(CharacterInst *c, const SkeletonInstance *si, bool arms, u32 flags) {
+// First person (docs/CAMERA_HOLDPOINT.md): every draw of the owner's body from one skeleton instance -
+// the pose everyone computes, never edited for the view. What is hidden is chosen by mesh: the body
+// without the arms and the head / neck (the owner's view), the arms (the arms layer), one arm (the
+// vehicle controls), or everything (shadows, phone cameras).
+typedef enum FpDraw { FPD_BODY, FPD_BODY_HEAD, FPD_ARMS, FPD_ARM_L, FPD_ARM_R, FPD_FULL } FpDraw;
+
+static bool draw_char_fp(CharacterInst *c, const SkeletonInstance *si, FpDraw what, int lod, u32 flags, bool shadow) {
     bool any = false;
     prof_count(PC_SKIN_POSES, 1);
     for (int sl = 0; sl < CSLOT_COUNT; sl++) {
         if (!c->part_gpu[sl]) continue;
         const GpuPart *gp = &CG->parts[c->part_gpu[sl] - 1];
-        // Parts without arm triangles draw whole in the body pass; arm-only parts (hands) only as arms.
-        MeshId mesh = arms ? gp->arm : (gp->arm ? gp->noarm : gp->lod[0]);
-        if (arms && mesh) any = true;
-        draw_part(c, si, gp, mesh, sl, 0, flags, false, (flags & MAT_VIEWMODEL) ? 9u : 8u);
+        MeshId mesh = 0;
+        switch (what) {
+        case FPD_BODY: mesh = gp->fp_none ? 0 : (gp->fpbody ? gp->fpbody : gp->lod[0]); break;
+        case FPD_BODY_HEAD: mesh = gp->arm ? gp->noarm : gp->lod[0]; break;   // cl_fp_debug 2: the head shown
+        case FPD_ARMS: mesh = gp->arm; break;
+        case FPD_ARM_L: mesh = gp->arm_side[0]; break;
+        case FPD_ARM_R: mesh = gp->arm_side[1]; break;
+        case FPD_FULL:
+            for (int l = DG_CLAMP(lod, 0, CHAR_LOD_COUNT - 1); l >= 0 && !mesh; l--) mesh = gp->lod[l];
+            break;
+        }
+        if (!mesh) continue;
+        any = true;
+        draw_part(c, si, gp, mesh, sl, 0, flags, shadow, what == FPD_FULL ? (u32)lod : ((flags & MAT_VIEWMODEL) ? 9u : 8u));
     }
     return any;
 }
@@ -2346,16 +2516,30 @@ vec3 chars_eye_offset(float yaw, float pitch) {
     return quat_rotate(quat_yaw(yaw), v3_sub(eye, eye0));
 }
 
-// This frame's first-person body pose (shared by the camera socket and the body / arm draw).
+// This frame's first-person body pose (the camera socket, the body / arm / shadow draws): the tick's
+// stage A interpolated, then only the whitelisted passes - spine look and IK - re-run with this
+// frame's view and hold point (docs/CAMERA_HOLDPOINT.md "Rule 1").
 static struct {
     u64 frame;
     EntityId ent;
     Xform world[ANIM_MAX_BONES], model[ANIM_MAX_BONES];
     Pose pose;
     Xform root;
-    Xform spine2_before;   // chest before the frame's spine correction (the held item follows it)
     World *w;
+    bool solved;                 // the re-solve ran (else: the interpolated tick pose as it is)
+    u32 passes;                  // the passes that wrote bones after stage A this frame (PROC_PASS_*)
+    u32 hash;                    // the re-solve's world pose: the upload must match (nothing wrote after it)
+    bool has_item;
+    Xform item_model;            // the held item this frame (model space): the drawn item
+    Xform cam_model;             // the pose eye: head bone x eye socket, the view's rotation (model space)
+    Xform view_item_cam;         // the presentation hold point's item (ADS included), pose-eye space
+    bool view_valid;
+    float ikw;                   // the hold's hand IK weight this frame (the presentation follows clips below 1)
+    Xform clav[2];               // the clip's clavicles the IK pass started from
+    ProcState st;                // scratch copy of the tick's state
 } FP;
+
+static u32 fp_pose_hash(const Xform *x, int n) { return anim_hash(x, sizeof(Xform) * (size_t)n, 2166136261u); }
 
 static float lerp_angle_fp(float a, float b, float t) { return wrap_angle(a + wrap_angle(b - a) * t); }
 
@@ -2369,9 +2553,17 @@ static Xform seat_fix(World *w, const CharacterInst *c, float t) {
     return xf_mul(now, xf_inverse(then));
 }
 
+// Interpolates two transforms about the point p (their local frame): p moves on a straight line, so
+// a hold point's sight stays on the view axis between ticks.
+static Xform lerp_about(Xform a, Xform b, float t, vec3 p) {
+    Xform r = xf_lerp(a, b, t);
+    r.s = v3(1, 1, 1);
+    r.t = v3_sub(v3_lerp(xf_point(a, p), xf_point(b, p), t), quat_rotate(r.r, p));
+    return r;
+}
+
 static void fp_prepare(World *w, CharacterInst *c, float alpha, float yaw, float pitch) {
     const Skeleton *s = &LIB->skel;
-    const ProcParams *pp = &LIB->proc;
     float span = (float)DG_MAX(1, c->interval);
     float it = saturate(((float)(w->chars->tick - c->last_eval) + alpha) / span);
     Xform sfix = seat_fix(w, c, it);
@@ -2381,39 +2573,67 @@ static void fp_prepare(World *w, CharacterInst *c, float alpha, float yaw, float
     FP.root = xf_mul(sfix, xf_make(c->root.t, quat_yaw(body_yaw)));
     FP.root.s = v3s(c->def->scale);
     Xform inv_root = xf_inverse(FP.root);
-    FP.pose.count = s->count;
+    // The interpolated tick pose in this body frame: drawn as it is without a stage A; the legs keep
+    // its foot IK either way.
+    static Pose legs;
+    static Xform legs_model[ANIM_MAX_BONES];
+    legs.count = s->count;
     for (int b = 0; b < s->count; b++) {
-        FP.model[b] = xf_mul(inv_root, FP.world[b]);
+        legs_model[b] = xf_mul(inv_root, FP.world[b]);
         int p = s->parent[b];
-        FP.pose.local[b] = p >= 0 ? xf_mul(xf_inverse(FP.model[p]), FP.model[b]) : FP.model[b];
+        legs.local[b] = p >= 0 ? xf_mul(xf_inverse(legs_model[p]), legs_model[b]) : legs_model[b];
     }
-    // The post-pass aimed the spine at the tick's view; bend it the rest of the way to this
-    // frame's view (same bones / weights / limits as proc_spine), so the head - and the camera
-    // socket on it - follows the mouse without a tick of lag.
-    if (s->role[BR_SPINE2] >= 0) FP.spine2_before = FP.world[s->role[BR_SPINE2]];
-    if (cv(CG->spine)) {
-        float lim_p = pp->pitch_limit * DG_DEG2RAD, lim_u = pp->pitch_limit_up * DG_DEG2RAD, lim_y = pp->yaw_limit * DG_DEG2RAD;
-        float posed_pitch = clampf(lerpf(c->fp_pitch[0], c->fp_pitch[1], it), -lim_p, lim_u);
-        float posed_aim = lerp_angle_fp(c->fp_yaw[0], c->fp_yaw[1], it);
-        float posed_rel = clampf(wrap_angle(posed_aim - body_yaw), -lim_y, lim_y);
-        float want_rel = clampf(wrap_angle(yaw - body_yaw), -lim_y, lim_y);
-        float dy = want_rel - posed_rel;
-        int bones[5] = { s->role[BR_SPINE], s->role[BR_SPINE1], s->role[BR_SPINE2], s->role[BR_NECK], s->role[BR_HEAD] };
-        float acc = 0;
-        for (int i = 0; i < 5; i++) {
-            if (bones[i] < 0) continue;
-            float wgt = pp->spine_weights[i];
-            acc += want_rel * wgt;
-            vec3 lateral = quat_rotate(quat_yaw(acc), v3(1, 0, 0));
-            // Pitch: the difference of the up / down distributions between the tick's pose and
-            // this frame's view (same split as proc_spine).
-            float want_p = clampf(pitch, -lim_p, lim_u);
-            float al = c->rt.proc.ads_lean;
-            float pw = want_p * proc_spine_pitch_weight(pp, i, want_p, al) - posed_pitch * proc_spine_pitch_weight(pp, i, posed_pitch, al);
-            proc_rotate_bone(s, &FP.pose, FP.model, bones[i], quat_mul(quat_axis_angle(lateral, pw), quat_yaw(dy * wgt)));
+    pose_copy(&FP.pose, &legs);
+    memcpy(FP.model, legs_model, sizeof(Xform) * (size_t)s->count);
+    FP.solved = false;
+    FP.passes = 0;
+    FP.has_item = c->item_valid;
+    FP.view_valid = false;
+    FP.ikw = 0.0f;
+    if (c->item_valid) FP.item_model = xf_mul(inv_root, xf_mul(sfix, xf_lerp(c->item_prev, c->item_cur, it)));
+    if (CG->fpd.ent == c->ent && CG->fpd.n > 0 && CG->fpd.sa[1].valid && CG->fpd.sa[0].valid) {
+        // Stage A of the last two ticks, interpolated like the pose (world), in this body frame.
+        const ProcStageA *a0 = &CG->fpd.sa[0], *a1 = &CG->fpd.sa[1];
+        for (int b = 0; b < s->count; b++)
+            FP.model[b] = xf_mul(inv_root, xf_mul(sfix, xf_lerp(xf_mul(CG->fpd.root[0], a0->model[b]), xf_mul(CG->fpd.root[1], a1->model[b]), it)));
+        FP.pose.count = s->count;
+        for (int b = 0; b < s->count; b++) {
+            int p = s->parent[b];
+            FP.pose.local[b] = p >= 0 ? xf_mul(xf_inverse(FP.model[p]), FP.model[b]) : FP.model[b];
         }
+        Xform *clav = FP.clav;
+        for (int k = 0; k < 2; k++) clav[k] = xf_lerp(a0->clav_clip[k], a1->clav_clip[k], it);
+        // The hold point of the last two ticks (pose and presentation), interpolated about the sight.
+        // The fire kick is a one-tick displacement: on the shot's tick it shows at once (the same
+        // frame as the flash and the sound) instead of easing in over the tick.
+        ProcInput in = CG->fpd.in;
+        float ht = g_fp_fire_snap ? 1.0f : it;
+        FP.st = c->rt.proc;
+        FP.st.render_body_yaw = body_yaw;
+        if (in.item) {
+            Xform gr = proc_item_root(&in, in.item);
+            float rs = gr.s.x;
+            gr.s = v3(1, 1, 1);
+            vec3 sight_item = v3_scale(in.item->sight, rs), sight_hold = xf_point(gr, sight_item);
+            FP.st.hp_out = CG->fpd.hp[1];
+            FP.st.hp_out.item = lerp_about(CG->fpd.hp[0].item, CG->fpd.hp[1].item, ht, sight_hold);
+            FP.st.hp_out.offset = v3_lerp(CG->fpd.hp[0].offset, CG->fpd.hp[1].offset, ht);
+            FP.view_item_cam = lerp_about(CG->fpd.view_cam[0], CG->fpd.view_cam[1], ht, sight_item);
+            FP.view_valid = CG->fpd.view_valid;
+        }
+        in.root = xf_make(FP.root.t, FP.root.r);   // model space is the skeleton's (the scale is the root's)
+        in.aim_yaw = yaw;
+        in.aim_pitch = pitch;
+        in.hp_given = true;
+        FP.ikw = saturate(in.hand_ik_weight);
+        FP.passes = proc_frame_solve(&FP.st, &in, clav, &legs, legs_model, &FP.pose, FP.model);
+        FP.solved = true;
+        FP.has_item = FP.st.has_item;
+        FP.item_model = FP.st.item_model;
+        FP.cam_model = FP.st.cam_model;
     }
     for (int b = 0; b < s->count; b++) FP.world[b] = xf_mul(FP.root, FP.model[b]);
+    FP.hash = fp_pose_hash(FP.world, s->count);
     FP.frame = g_engine.frame_index;
     FP.ent = c->ent;
     FP.w = w;
@@ -2499,6 +2719,37 @@ static void cmd_fp_shadow_check(int argc, const char **argv) {
     }
 }
 
+// fp_rules_report: rule 1 of the first-person view (docs/CAMERA_HOLDPOINT.md). The frame re-solve
+// reproduced the tick pose bit for bit at every parity check, no frame's drawn pose was edited after
+// the spine look / IK passes, and the owner's meshes hide the head and the arms by triangles: the
+// body mask has no arm or head / neck triangle, the arm meshes only arm triangles, nothing is drawn
+// twice (body + arms + head = the whole part).
+static void cmd_fp_rules_report(int argc, const char **argv) {
+    (void)argc;
+    (void)argv;
+    ensure_globals();
+    if (!LIB) return;
+    ensure_gpu_meshes();
+    int parts = 0, masked = 0, bad = 0;
+    for (int k = 0; k < CG->part_count; k++) {
+        const GpuPart *gp = &CG->parts[k];
+        if (!gp->lod[0]) continue;
+        parts++;
+        const u32 *n = gp->fp_tris;   // whole, arms, no arms, owner's body, both sides
+        if (gp->fpbody || gp->fp_none) masked++;
+        // Arms + the rest = the part (nothing drawn twice, nothing lost); the owner's body only drops
+        // the head / neck from the rest; the two sides are the arms.
+        bool ok = n[1] + n[2] == n[0] && n[3] <= n[2] && n[4] == n[1];
+        if (!ok) {
+            bad++;
+            log_warn("fp_rules_report: part %d: %u triangles = arms %u (sides %u) + rest %u (owner's body %u)", k, n[0], n[1], n[4], n[2], n[3]);
+        }
+    }
+    bool pass = CG->fpd.parity_fails == 0 && CG->fp_rule_fails == 0 && bad == 0;
+    log_info("fp_rules_report: parity %u checks, %u failures | pose edited after spine look / IK: %u frames | meshes: %d parts, %d head-masked, %d inconsistent -> %s",
+             CG->fpd.parity_checks, CG->fpd.parity_fails, CG->fp_rule_fails, parts, masked, bad, pass ? "PASS" : "FAIL");
+}
+
 // anim_clavicle_check [entity]: the clavicles keep the animation clip's local rotation after every
 // procedural layer (hold, hand IK, reach, damage): third person = the post-pass pose against the
 // controller's clip pose; first person = this frame's hold / IK pass against the pose it started from.
@@ -2551,6 +2802,10 @@ static vec3 fp_hand_pole(const CharacterInst *c, const HoldStyle *hs, int h) {
     return c->rt.proc.hand[h].init ? c->rt.proc.hand[h].pole : (h ? hs->elbow_r : hs->elbow_l);
 }
 
+// The owner's body in first person (docs/CAMERA_HOLDPOINT.md): this frame's pose (fp_prepare), never
+// edited for the view. Drawn as the body without the arms and the head / neck (world camera), the
+// arms with the held item (the arms layer: own camera and FOV, render.c), and whole for its shadow
+// and phone cameras.
 void chars_render_local_fp(World *w, float alpha, int local_slot) {
     CharacterInst *c = local_fp_char(w, local_slot);
     HandsFpTargets t;
@@ -2558,163 +2813,78 @@ void chars_render_local_fp(World *w, float alpha, int local_slot) {
     CG->fp_hold_w = 0;
     CG->fp_glue_pos[0] = CG->fp_glue_pos[1] = -1;   // no hold this frame
     CG->fp_clav_err = -1;
-    if (!c || !hands_fp_targets(&t)) return;
+    if (!c) return;
     const Skeleton *s = &LIB->skel;
+    bool have_t = hands_fp_targets(&t);
     // This frame's pose (prepared by the camera socket; otherwise aimed at the hands' camera).
     if (FP.frame != g_engine.frame_index || FP.ent != c->ent) {
-        vec3 f = quat_rotate(t.cam_rot, v3(0, 0, -1));
+        vec3 f = have_t ? quat_rotate(t.cam_rot, v3(0, 0, -1)) : dir_from_angles(c->rt.in.aim_yaw, c->rt.in.aim_pitch);
         fp_prepare(w, c, alpha, atan2f(-f.x, -f.z), asinf(clampf(f.y, -1.0f, 1.0f)));
     }
-    // True first person (Unreal-style): the body and the item it holds are exactly the
-    // third-person character everyone else sees - procedural hold, both hands glued, no
-    // viewmodel offsets, no stretching - and the camera sits on the head socket.
-    Xform *world = FP.world, *model = FP.model;
-    Pose *posep = &FP.pose;
     Xform root = FP.root;
-    const int clav[2] = { s->role[BR_L_SHOULDER], s->role[BR_R_SHOULDER] };
-    quat clav0[2];
-    for (int k = 0; k < 2; k++) clav0[k] = clav[k] >= 0 ? posep->local[clav[k]].r : quat_identity();
-    Xform inv_root = xf_inverse(root);
+    // Rule 1, dev check: the pose drawn is the re-solve's, and only spine look / IK wrote bones after
+    // stage A (no scale, no per-view edit since).
+    bool rule_ok = FP.hash == fp_pose_hash(FP.world, s->count) && !(FP.passes & ~(PROC_PASS_SPINE | PROC_PASS_IK));
+    for (int b = 0; b < s->count && rule_ok; b++)
+        if (fabsf(FP.world[b].s.x - root.s.x) > 1e-4f || fabsf(FP.world[b].s.y - root.s.y) > 1e-4f || fabsf(FP.world[b].s.z - root.s.z) > 1e-4f) rule_ok = false;
+    if (!rule_ok) {
+        static u64 last;
+        CG->fp_rule_fails++;
+        if (g_engine.frame_index - last > 120) {
+            last = g_engine.frame_index;
+            log_error("fp_rules: the first-person pose was edited after the spine look / IK passes (%u frames)", CG->fp_rule_fails);
+        }
+    }
+    static SkeletonInstance fp_si;
+    skel_inst_init(&fp_si, &LIB->skeleton);
+    skel_inst_set_pose(&fp_si, FP.world);
+    u8 sel[CSLOT_COUNT];
+    drawn_selection(c, local_slot, sel);
+    resolve_parts(c, sel);
+    // The whole body in this frame's pose: its shadow (one LOD coarser, as every character's) and the
+    // phone cameras (selfies); draw_char_all leaves both to this pass.
+    draw_char_fp(c, &fp_si, FPD_FULL, 1, MAT_SHADOW_ONLY, true);
+    draw_char_fp(c, &fp_si, FPD_FULL, 0, MAT_SHADOW_ONLY | MAT_SELF, false);
+    Xform item_w = xf_mul(root, FP.item_model);
+    item_w.s = v3(1, 1, 1);
+    if (FP.has_item && (c->item_weapon || c->item_def)) {
+        hands_set_draw_scale(c->rt.proc.item_scale);
+        hands_set_fire_mech(false, g_fp_fire_frame.slide, g_fp_fire_frame.wobble_rot);
+        hands_draw_held_att(c->item_weapon, c->item_weapon ? NULL : c->item_def, c->item_att, item_w.t, item_w.r, MAT_SHADOW_ONLY);
+        hands_set_draw_scale(1.0f);
+    }
+    if (!have_t) return;
     bool raw = CG->fp_debug && CG->fp_debug->i >= 2;
-    // Hold point (true first person): the item is a child of this frame's camera; both arms are
-    // re-solved onto its sockets every frame, so hands stay glued and the item never lags the view.
-    // Clip-driven states (reload / equip / melee: hand IK weight < 1) hand control to the right
-    // hand bone; the item is always finalized from the solved right hand.
-    if (c->item_valid && (c->item_weapon || c->item_def) && CG->fp_cam_valid && !raw) {
+    if (FP.has_item && (c->item_weapon || c->item_def)) {
         const ItemSockets *k = held_sockets(c);
-        float span = (float)DG_MAX(1, c->interval);
-        float it = saturate(((float)(w->chars->tick - c->last_eval) + alpha) / span);
-        // The fire kick is a one-tick displacement: on the shot's tick the item jumps to it (the same
-        // frame as the flash and the sound) instead of easing in over the tick.
-        if (g_fp_fire_snap) it = 1.0f;
-        Xform icam = xf_lerp(c->item_cam_prev, c->item_cam_cur, it);
-        icam.s = v3(1, 1, 1);
-        {
-            // Interpolate about the sight point (the ADS kick anchor): a plain transform lerp of two
-            // rotations about the sight would move the sight off the view axis between ticks.
-            const ItemSockets *hk = held_sockets(c);
-            if (hk) {
-                vec3 sp = xf_point(c->item_cam_prev, hk->sight), sc = xf_point(c->item_cam_cur, hk->sight);
-                icam.t = v3_sub(v3_lerp(sp, sc, it), quat_rotate(icam.r, hk->sight));
-            }
-        }
-        icam = xf_mul(xf_make(v3(0, 0, 0), g_fp_aim_off), icam);   // sight sway / bob about the eye
-        Xform cam_m = xf_mul(inv_root, CG->fp_cam);
+        const ProcState *ps = &FP.st;
+        Xform cam_m = FP.cam_model;
         cam_m.s = v3(1, 1, 1);
-        Xform want = xf_mul(cam_m, icam);
-        float ikw = 1.0f;
-        ctrl_hand_ik_weight(&c->rt.ctrl, &ikw);
-        if (hang_sidearm(c)) ikw = 1.0f;   // the hang clip owns the hands, except the sidearm hand
-        int style = DG_CLAMP(c->rt.in.weapon_type, 0, HOLD_STYLE_MAX - 1);
-        const HoldStyle *hs = proc_hold_style(&LIB->proc, style);
-        int ra = s->role[BR_R_ARM], rf = s->role[BR_R_FOREARM], rh = s->role[BR_R_HAND];
-        int la = s->role[BR_L_ARM], lf = s->role[BR_L_FOREARM], lh = s->role[BR_L_HAND];
-        quat cam_rm = cam_m.r;
-        // Reach: this frame's spine (re-bent to the frame's view) can move the support shoulder
-        // away from the tick's solve. If grip_l is out of reach, pull the hold point towards the
-        // left shoulder by the shortfall (never stretch the arm); warn once per item.
-        const Xform sock_l0 = fp_hand_sock(c, k, 0), sock_r0 = fp_hand_sock(c, k, 1);
-        if (!g_anim_ik_shoulders && ra >= 0 && rf >= 0 && rh >= 0 && ikw > 0.99f) {
-            // The right hand out of reach without the shoulders: the hold point comes towards the
-            // shoulder by the shortfall (before the left hand is solved against it).
-            float reach_r = v3_dist(model[ra].t, model[rf].t) + v3_dist(model[rf].t, model[rh].t);
-            vec3 hr = proc_hand_for_socket(xf_mul(want, sock_r0), LIB->hands.palm[1]).t;
-            float need_r = v3_dist(model[ra].t, hr);
-            if (need_r > reach_r - 0.003f && need_r < reach_r + 0.5f) want.t = v3_madd(want.t, v3_norm(v3_sub(model[ra].t, hr)), need_r - reach_r + 0.003f);
-        }
-        Xform grip_l = sock_l0;   // ADS: may slide back along the handguard (exact ADS kept)
-        if (hs->left_hand && k->has_left && la >= 0 && lf >= 0 && lh >= 0 && ikw > 0.99f) {
-            float reach = v3_dist(model[la].t, model[lf].t) + v3_dist(model[lf].t, model[lh].t);
-            float pulled = 0;
-            bool ads_exact = c->rt.proc.hp_out.state == HP_ADS;
-            float slide = 0, max_slide = ads_exact ? fmaxf(0.0f, -sock_l0.t.z - 0.08f) : 0.0f;
-            // Shoulder first (clavicle), then the support hand along the handguard (ADS), then the hold point.
-            proc_clavicle_reach(s, posep, model, s->role[BR_L_SHOULDER], la, proc_hand_for_socket(xf_mul(want, sock_l0), LIB->hands.palm[0]).t, reach, 0.004f, 75.0f);
-            for (int iter = 0; iter < 8; iter++) {
-                grip_l = sock_l0;
-                grip_l.t.z += slide;
-                Xform hand_l = proc_hand_for_socket(xf_mul(want, grip_l), LIB->hands.palm[0]);
-                float need = v3_dist(model[la].t, hand_l.t);
-                if (need <= reach - 0.002f) break;
-                if (need > reach + 0.5f) break;   // teleport frame: the body hasn't caught up with the camera yet
-                if (slide < max_slide - 1e-5f) {
-                    vec3 to_sh = v3_norm(v3_sub(model[la].t, hand_l.t));
-                    float g = v3_dot(to_sh, quat_rotate(want.r, v3(0, 0, 1)));
-                    if (g > 0.2f) {
-                        slide = fminf(max_slide, slide + (need - reach + 0.003f) / g);
-                        continue;
-                    }
-                }
-                // Along the item's own barrel axis first (sights stay on the view axis in ADS),
-                // towards the shoulder only when the barrel doesn't shorten the reach.
-                vec3 to_sh = v3_norm(v3_sub(model[la].t, hand_l.t));
-                // ADS: along the view axis (the barrel may be turned by the kick about the sight;
-                // pulling along it would move the reticle centre off the aim).
-                vec3 back = ads_exact ? quat_rotate(cam_m.r, v3(0, 0, 1)) : quat_rotate(want.r, v3(0, 0, 1));
-                float gain = v3_dot(to_sh, back);
-                vec3 dir = gain >= 0.5f ? back : to_sh;
-                float d = (need - reach + 0.003f) / (gain >= 0.5f ? gain : 1.0f);
-                want.t = v3_madd(want.t, dir, d);
-                pulled += d;
-            }
-            CG->fp_reach_pull = pulled;
-            static u32 warned_item;
-            u32 key = (u32)(uintptr_t)k;
-            if (pulled > 0.03f && warned_item != key) {
-                warned_item = key;
-                log_warn("first person: grip_l out of reach this frame, hold point pulled %.0f mm towards the shoulder", pulled * 1000.0f);
-            }
-        }
-        // Fire animation layer 3: the hands trail the gun's one-tick kick and catch up in 1-2 ticks.
-        vec3 lag_pivot = xf_point(want, k->pivot);
-        if (ra >= 0 && rf >= 0 && rh >= 0) {
-            Xform hand_r = proc_hand_for_socket(fp_fire_hand_lag(xf_mul(want, sock_r0), cam_rm, lag_pivot), LIB->hands.palm[1]);
-            if (ikw > 0.99f) {
-                float reach_r = v3_dist(model[ra].t, model[rf].t) + v3_dist(model[rf].t, model[rh].t);
-                proc_clavicle_reach(s, posep, model, s->role[BR_R_SHOULDER], ra, hand_r.t, reach_r, 0.003f, 45.0f);
-            }
-            anim_ik_arm_pose(s, posep, model, ra, rf, rh, hand_r.t, &hand_r.r, quat_rotate(cam_rm, fp_hand_pole(c, hs, 1)), ikw * c->rt.proc.hand[1].ikw);
-            fp_fire_fingers(s, posep, model, 1, ikw);   // trigger pull
-        }
-        // The item stays exactly on its hold point while the hands hold it (the arms follow by IK;
-        // a reach shortfall shows as a few mm at the hand, never as the sight leaving the aim).
-        // Clip-driven states (reload / equip: hand IK weight < 1) finalize it from the right hand.
-        Xform item = want;
-        if (rh >= 0 && ikw < 0.99f) item = xf_mul(xf_mul(model[rh], LIB->hands.palm[1]), xf_inverse(sock_r0));
-        Xform palm_r = rh >= 0 ? xf_mul(model[rh], LIB->hands.palm[1]) : xf_identity();
-        Xform sock_r = xf_mul(want, sock_r0);
-        CG->fp_glue_pos[1] = v3_dist(palm_r.t, sock_r.t);
-        CG->fp_glue_ang[1] = quat_angle_between(palm_r.r, sock_r.r) * DG_RAD2DEG;
-        CG->fp_glue_pos[0] = CG->fp_glue_ang[0] = 0;
-        CG->fp_hold_w = ikw;
+        Xform icam = xf_mul(xf_inverse(cam_m), FP.item_model);   // the drawn item in pose-eye space
+        CG->fp_glue_pos[1] = ps->right_err_pos;
+        CG->fp_glue_ang[1] = 0;
+        CG->fp_glue_pos[0] = ps->glue_err_pos;
+        CG->fp_glue_ang[0] = ps->glue_err_ang;
+        CG->fp_hold_w = FP.solved ? FP.ikw : 0.0f;
         for (int h = 0; h < 2; h++) if (t.ov_w[h] > 0.001f) CG->fp_hold_w = 0;   // interaction / ledge grab owns a hand
-        if (hs->left_hand && k->has_left && la >= 0 && lf >= 0 && lh >= 0 && ikw > 0.001f) {
-            Xform sock_l = xf_mul(item, grip_l);
-            Xform hand_l = proc_hand_for_socket(fp_fire_hand_lag(sock_l, cam_rm, lag_pivot), LIB->hands.palm[0]);
-            anim_ik_arm_pose(s, posep, model, la, lf, lh, hand_l.t, &hand_l.r, quat_rotate(cam_rm, fp_hand_pole(c, hs, 0)), ikw * c->rt.proc.hand[0].ikw);
-            fp_fire_fingers(s, posep, model, 0, ikw);   // the support grip tightens
-            Xform palm_l = xf_mul(model[lh], LIB->hands.palm[0]);
-            CG->fp_glue_pos[0] = v3_dist(palm_l.t, sock_l.t);
-            CG->fp_glue_ang[0] = quat_angle_between(palm_l.r, sock_l.r) * DG_RAD2DEG;
-        }
-        // ADS check: the sight on the view axis (lateral error + barrel angle to the view).
-        vec3 sight_c = xf_point(xf_mul(xf_inverse(cam_m), item), k->sight);
+        // ADS check on the presented item (the arms layer draws the item there): the sight on the view axis.
+        Xform pv = FP.view_valid ? FP.view_item_cam : icam;
+        vec3 sight_c = xf_point(pv, k->sight);
         CG->fp_ads_pos = sqrtf(sight_c.x * sight_c.x + sight_c.y * sight_c.y);
         CG->fp_sight_cam = sight_c;
-        CG->fp_sight_world = xf_point(root, xf_point(item, k->sight));
-        CG->fp_ads_ang = quat_angle_between(xf_mul(xf_inverse(cam_m), item).r, quat_identity()) * DG_RAD2DEG;
-        CG->fp_item_cam = xf_mul(xf_inverse(cam_m), item);
-        CG->fp_item_target = c->rt.proc.hp_out.item;   // the hold point's item (before any reach pull)
-        CG->fp_hp_state = c->rt.proc.hp_out.state;
-        CG->fp_hp_blend = c->rt.proc.hp_out.blend;
-        Xform item_w = xf_mul(root, item);
-        item_w.s = v3(1, 1, 1);
+        CG->fp_ads_ang = quat_angle_between(pv.r, quat_identity()) * DG_RAD2DEG;
+        CG->fp_sight_world = xf_point(item_w, k->sight);   // the drawn sight (the arms layer maps it onto the screen)
+        CG->fp_item_cam = icam;
+        CG->fp_item_target = ps->hp_out.item;   // the hold point's item (before any reach pull)
+        CG->fp_hp_state = FP.view_valid && c->rt.proc.hp_view_valid ? c->rt.proc.hp_view_out.state : ps->hp_out.state;
+        CG->fp_hp_blend = FP.view_valid && c->rt.proc.hp_view_valid ? c->rt.proc.hp_view_out.blend : ps->hp_out.blend;
+        CG->fp_reach_pull = ps->reach_shift;
         hands_fp_set_item(item_w.t, item_w.r);
         hands_fp_set_item_scale(c->rt.proc.item_scale);
-        // cam_debug: hold point axes, pivot, sockets, IK targets, collision cast.
+        // cam_debug: hold point axes, pivot, sockets, collision cast.
         Cvar *cd = cvar_find("cam_debug");
         if (cd && cd->i) {
-            Xform hold_w = xf_mul(CG->fp_cam, xf_mul(icam, xf_make(k->anchor.t, quat_identity())));
+            Xform hold_w = xf_mul(root, xf_mul(cam_m, ps->hp_out.item));
             vec3 o = hold_w.t;
             dbg_line(o, v3_add(o, quat_rotate(hold_w.r, v3(0.05f, 0, 0))), DBG_RED, 0, false);
             dbg_line(o, v3_add(o, quat_rotate(hold_w.r, v3(0, 0.05f, 0))), DBG_GREEN, 0, false);
@@ -2722,121 +2892,71 @@ void chars_render_local_fp(World *w, float alpha, int local_slot) {
             dbg_cross(xf_point(item_w, k->pivot), 0.015f, DBG_MAGENTA, 0);
             dbg_cross(xf_point(item_w, k->sight), 0.01f, DBG_CYAN, 0);
             dbg_cross(xf_point(item_w, k->muzzle), 0.012f, DBG_ORANGE, 0);
-            dbg_cross(xf_mul(item_w, sock_r0).t, 0.012f, DBG_YELLOW, 0);
-            if (k->has_left) dbg_cross(xf_mul(item_w, sock_l0).t, 0.012f, DBG_YELLOW, 0);
-            const HoldPointOutput *ho = &c->rt.proc.hp_out;
+            dbg_cross(xf_mul(item_w, k->grip_r).t, 0.012f, DBG_YELLOW, 0);
+            if (k->has_left) dbg_cross(xf_mul(item_w, k->grip_l).t, 0.012f, DBG_YELLOW, 0);
+            const HoldPointOutput *ho = &ps->hp_out;
             if (v3_len2(v3_sub(ho->cast_to, ho->cast_from)) > 0) dbg_line(ho->cast_from, ho->cast_to, ho->cast_hit ? DBG_RED : DBG_GREEN, 0, false);
         }
     } else if (c->item_valid) {
-        float span = (float)DG_MAX(1, c->interval);
-        float it = saturate(((float)(w->chars->tick - c->last_eval) + alpha) / span);
-        Xform item = xf_mul(seat_fix(w, c, it), xf_lerp(c->item_prev, c->item_cur, it));
-        item.s = v3(1, 1, 1);
-        hands_fp_set_item(item.t, item.r);
+        hands_fp_set_item(item_w.t, item_w.r);
     }
-    // Interactions / ledge grabs from the first-person hand system (door knobs, levers, pickups
-    // with the free hand) are IK'd on top of the body, blended by their weight.
-    for (int h = 0; h < 2 && !raw; h++) {
-        if (t.ov_w[h] <= 0.001f) continue;
-        int ua = s->role[h ? BR_R_ARM : BR_L_ARM], fa = s->role[h ? BR_R_FOREARM : BR_L_FOREARM], ha = s->role[h ? BR_R_HAND : BR_L_HAND];
-        if (ua < 0 || fa < 0 || ha < 0) continue;
-        // Hand pose: the grip style with the case (door knob, steering wheel, ledge) at its
-        // timeline time on top; its socket (anchor * key IK target) is an offset from the gameplay
-        // target (docs/HANDPOSE.md).
-        HandPose hp;
-        const HandPoseDB *db = &LIB->handposes;
-        int base = handpose_find_hash(db, handpose_grip_style_hash(t.grip[h] < GRIP_COUNT ? t.grip[h] : GRIP_GRAB));
-        handpose_case_eval(db, handpose_case_find_hash(db, t.ov_case[h]), base, h, t.ov_case_t[h], &hp);
-        Xform palm = xf_mul(xf_mul(inv_root, t.ov_palm[h]), hp.socket);
-        Xform hand = proc_hand_for_socket(palm, LIB->hands.palm[h]);
-        float side = h ? 1.0f : -1.0f;
-        vec3 pole = quat_rotate(quat_conj(root.r), quat_rotate(t.cam_rot, hp.has_pole ? hp.pole : v3(0.8f * side, -1.0f, 0.25f)));
-        // The ledge grip is the body's (proc_hand_anchors): looking around never swings the elbows.
-        if (t.ov_case[h] && t.ov_case[h] == handpose_mantle_case()) pole = hp.has_pole ? hp.pole : v3(side, -0.6f, 0.4f);
-        anim_ik_arm_pose(s, posep, model, ua, fa, ha, hand.t, &hand.r, pole, t.ov_w[h] * hp.ik_weight);
-        handpose_apply_fingers(s, posep, model, h, hp.j, &LIB->hands, t.ov_w[h]);
-    }
-    // The hold / IK above never turns the clavicles (anim_clavicle_check).
+    // The IK pass starts from the clip's clavicles and never turns them (anim_clavicle_check).
     CG->fp_clav_err = 0;
-    for (int k = 0; k < 2; k++)
-        if (clav[k] >= 0) CG->fp_clav_err = fmaxf(CG->fp_clav_err, quat_angle_between(posep->local[clav[k]].r, clav0[k]) * DG_RAD2DEG);
-    // Neck, head (and hair / eyes / end bones) collapsed: the camera sits inside the head
-    // (owner's view only: other players and the shadow pass get the full body).
-    for (int b = 0; b < s->count; b++) {
-        world[b] = xf_mul(root, model[b]);
-        if (CG->head_bone[b] && !raw) world[b].s = v3s(1e-4f);
+    if (FP.solved) {
+        const int clav[2] = { s->role[BR_L_SHOULDER], s->role[BR_R_SHOULDER] };
+        for (int k = 0; k < 2; k++)
+            if (clav[k] >= 0) CG->fp_clav_err = fmaxf(CG->fp_clav_err, quat_angle_between(FP.pose.local[clav[k]].r, FP.clav[k].r) * DG_RAD2DEG);
     }
-    // Arms are drawn once, in the viewmodel pass with the item (no wall clipping, own FOV); the
-    // world pass gets the body without them.
-    u8 sel[CSLOT_COUNT];
-    drawn_selection(c, local_slot, sel);
-    resolve_parts(c, sel);
-    static SkeletonInstance fp_si, fp_si_l, fp_si_r;
-    skel_inst_init(&fp_si, &LIB->skeleton);
-    skel_inst_set_pose(&fp_si, world);
-    draw_char_fp(c, &fp_si, false, 0);
+    // The body without the arms and the head / neck (world camera); the arms with the item go to the
+    // arms layer (MAT_VIEWMODEL: own camera, FOV and depth, never in walls).
+    draw_char_fp(c, &fp_si, raw ? FPD_BODY_HEAD : FPD_BODY, 0, 0, false);
     bool arm = false;
     for (int sl = 0; sl < CSLOT_COUNT; sl++) if (c->part_gpu[sl] && CG->parts[c->part_gpu[sl] - 1].arm) arm = true;
     // Driving (docs/VEHICLES.md): the hands on the controls are world geometry (the wheel is drawn
-    // with the world FOV); only a right hand holding the one-handed gun keeps the viewmodel
-    // treatment (own FOV, hold point). Each arm is drawn alone by collapsing the other one.
+    // with the world camera); only a right hand holding the one-handed gun stays in the arms layer.
     vec3 sp[2];
     quat sr[2];
     bool use[2];
     bool driving = arm && g_vehicle_pose.seat_hands && g_vehicle_pose.seat_hands(w, c->slot, sp, sr, use);
     if (driving) {
-        static Xform wl[ANIM_MAX_BONES], wr[ANIM_MAX_BONES];
-        memcpy(wl, world, sizeof(Xform) * (size_t)s->count);
-        memcpy(wr, world, sizeof(Xform) * (size_t)s->count);
-        int ls = s->role[BR_L_SHOULDER], rs = s->role[BR_R_SHOULDER];
-        for (int b = 0; b < s->count; b++) {
-            if (rs >= 0 && (b == rs || skel_is_descendant(s, b, rs))) wl[b].s = v3s(1e-4f);   // left arm only
-            if (ls >= 0 && (b == ls || skel_is_descendant(s, b, ls))) wr[b].s = v3s(1e-4f);   // right arm only
-        }
-        skel_inst_init(&fp_si_l, &LIB->skeleton);
-        skel_inst_init(&fp_si_r, &LIB->skeleton);
-        skel_inst_set_pose(&fp_si_l, wl);
-        skel_inst_set_pose(&fp_si_r, wr);
-        draw_char_fp(c, &fp_si_l, true, 0);
-        draw_char_fp(c, &fp_si_r, true, use[1] ? 0 : MAT_VIEWMODEL);
-    } else draw_char_fp(c, &fp_si, true, MAT_VIEWMODEL);
+        draw_char_fp(c, &fp_si, FPD_ARM_L, 0, 0, false);
+        draw_char_fp(c, &fp_si, FPD_ARM_R, 0, use[1] ? 0 : MAT_VIEWMODEL, false);
+    } else draw_char_fp(c, &fp_si, FPD_ARMS, 0, MAT_VIEWMODEL, false);
     hands_set_body_arms(arm);
     if (cv(CG->fp_debug))
         for (int h = 0; h < 2; h++) {
             if (t.ov_w[h] > 0.001f) dbg_cross(t.ov_palm[h].t, 0.03f, DBG_YELLOW, 0);
-            dbg_cross(world[s->role[h ? BR_R_HAND : BR_L_HAND]].t, 0.02f, DBG_RED, 0);
+            dbg_cross(FP.world[s->role[h ? BR_R_HAND : BR_L_HAND]].t, 0.02f, DBG_RED, 0);
         }
+}
+
+// The arms layer's inputs (render.c, docs/CAMERA_HOLDPOINT.md "Rule 3"): this frame's pose eye (world)
+// and the rigid move from the drawn item onto the presented one (pose-eye space; identity without a
+// hold or while a clip owns the hands).
+bool chars_fp_arms_inputs(Xform *pose_eye_world, Xform *present, int *hp_state, float *hp_blend) {
+    ensure_globals();
+    if (!LIB || FP.frame + 1 < g_engine.frame_index || !FP.solved) return false;
+    Xform cam_m = FP.cam_model;
+    cam_m.s = v3(1, 1, 1);
+    Xform r = FP.root;
+    r.s = v3(1, 1, 1);
+    *pose_eye_world = xf_mul(r, xf_make(v3_scale(cam_m.t, FP.root.s.x), cam_m.r));
+    Xform mv = xf_identity();
+    if (FP.has_item && FP.view_valid) {
+        Xform icam = xf_mul(xf_inverse(cam_m), FP.item_model);
+        mv = xf_mul(FP.view_item_cam, xf_inverse(icam));
+        mv.s = v3(1, 1, 1);
+        // A clip owning the hands (reload, equip, sprint) carries the item: the presentation follows it.
+        if (FP.ikw < 1.0f) mv = xf_lerp(xf_identity(), mv, FP.ikw);
+    }
+    *present = mv;
+    if (hp_state) *hp_state = CG->fp_hp_state;
+    if (hp_blend) *hp_blend = CG->fp_hp_blend;
+    return true;
 }
 
 static bool g_thirdperson;
 void chars_set_thirdperson(bool on) { g_thirdperson = on; }
-
-// Fire animation layer 3 on a hand socket (model space): the hand error (camera space, behind the
-// gun by the one-tick kick) turned about the item's pivot, so the hand lags where the gun went.
-static Xform fp_fire_hand_lag(Xform sock, quat cam_rm, vec3 pivot) {
-    const FireAnimOut *f = &g_fp_fire_frame;
-    if (v3_len2(f->hand_pos) < 1e-12f && v3_len2(f->hand_rot) < 1e-10f) return sock;
-    quat rc = hp_euler_deg(v3(f->hand_rot.x, -f->hand_rot.y, f->hand_rot.z));   // camera space (kick convention: yaw + = right)
-    quat rm = quat_mul(quat_mul(cam_rm, rc), quat_conj(cam_rm));
-    sock.t = v3_add(pivot, quat_rotate(rm, v3_sub(sock.t, pivot)));
-    sock.r = quat_norm(quat_mul(rm, sock.r));
-    sock.t = v3_add(sock.t, quat_rotate(cam_rm, f->hand_pos));
-    return sock;
-}
-
-// Trigger finger pull (right index) and the support hand's grip tightening on the shot.
-static void fp_fire_fingers(const Skeleton *s, Pose *pose, Xform *model, int side, float w) {
-    float t = g_fp_fire_frame.trigger;
-    if (t <= 1e-3f || w <= 0.0f) return;
-    HandFingers j;
-    memset(j, 0, sizeof(HandFingers));
-    if (side == 1) {
-        for (int k = 0; k < 3; k++) j[HF_INDEX][k].curl = 12.0f * t * (k == 0 ? 1.0f : 0.6f);
-    } else {
-        for (int f = HF_INDEX; f < HAND_FINGERS; f++) j[f][0].curl = 4.0f * t;
-    }
-    handpose_apply_fingers(s, pose, model, side, j, &LIB->hands, w);
-}
 
 void chars_set_fp_fire_snap(bool snap) { g_fp_fire_snap = snap; }
 
@@ -2844,19 +2964,6 @@ void chars_set_fp_fire(const FireAnimOut *tick, const FireAnimOut *frame) {
     if (!tick && !frame) { memset(&g_fp_fire, 0, sizeof(g_fp_fire)); memset(&g_fp_fire_frame, 0, sizeof(g_fp_fire_frame)); g_fp_fire_snap = false; return; }
     if (tick) g_fp_fire = *tick;
     if (frame) g_fp_fire_frame = *frame;
-}
-
-void chars_set_fp_aim_offset(float right_deg, float up_deg, float view_pitch, float world_fov_deg, float vm_fov_deg) {
-    // The shot is dir(yaw - a, pitch + b) = R(yaw, pitch) * q * forward with
-    // q = X(-pitch) * Y(-a) * X(pitch + b) in camera space (exact, not small-angle).
-    float a = right_deg * DG_DEG2RAD, b = up_deg * DG_DEG2RAD;
-    quat q = quat_mul(quat_axis_angle(v3(1, 0, 0), -view_pitch), quat_mul(quat_axis_angle(v3(0, 1, 0), -a), quat_axis_angle(v3(1, 0, 0), view_pitch + b)));
-    vec3 d = quat_rotate(quat_norm(q), v3(0, 0, -1));
-    // The item is drawn with the viewmodel FOV: aim it at the viewmodel-space direction that lands
-    // on the same pixel as the shot does with the world FOV (x / y scaled by the tan ratio).
-    float s = (world_fov_deg > 1.0f && vm_fov_deg > 1.0f) ? tanf(vm_fov_deg * 0.5f * DG_DEG2RAD) / tanf(world_fov_deg * 0.5f * DG_DEG2RAD) : 1.0f;
-    vec3 dv = v3_norm(v3(d.x * s, d.y * s, d.z));
-    g_fp_aim_off = quat_norm(quat_from_to(v3(0, 0, -1), dv));
 }
 
 void chars_set_fp_camera(vec3 pos, quat rot, bool valid) {
@@ -2998,6 +3105,9 @@ static void pose_char(const CharDrawPrep *p) {
 // Main thread: part selection, LODs and fades, every draw of the character, its held item.
 static void draw_char_all(World *w, CharacterInst *c, float alpha, int local_slot) {
     bool local = c->is_player && c->slot == local_slot && !g_thirdperson;
+    // First person: the shadow, the phone-camera body and the held item's shadow are drawn by
+    // chars_render_local_fp from the frame's own pose (head included), which this one isn't yet.
+    if (local && local_fp_char(w, local_slot) == c) return;
     u32 flags = local ? (MAT_SHADOW_ONLY | MAT_SELF) : 0;   // the owner's body: shadows + phone cameras (selfies)
     u8 sel[CSLOT_COUNT];
     drawn_selection(c, local_slot, sel);

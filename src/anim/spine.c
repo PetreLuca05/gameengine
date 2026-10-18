@@ -3,15 +3,10 @@
 #include "procedural_internal.h"
 #include <math.h>
 
-float proc_spine_pitch_weight(const ProcParams *p, int i, float pitch, float ads_lean) {
-    if (pitch <= 0) return p->spine_weights[i];
-    return p->spine_weights_up[i] + (p->spine_weights_ads_up[i] - p->spine_weights_up[i]) * clampf(ads_lean, 0.0f, 1.0f);
-}
+float proc_spine_pitch_weight(const ProcParams *p, int i, float pitch) { return pitch <= 0 ? p->spine_weights[i] : p->spine_weights_up[i]; }
 
+// No ADS term: aiming down the sights never changes the model (docs/CAMERA_HOLDPOINT.md "Rule 1").
 void proc_spine(ProcState *st, const ProcInput *in, Pose *pose, Xform *model) {
-    // ADS lean eases in / out (~0.15 s) so entering ADS while looking up doesn't pop.
-    float target = clampf(in->ads_t, 0.0f, 1.0f);
-    st->ads_lean += (target - st->ads_lean) * (1.0f - expf(-in->dt / 0.15f));
     const Skeleton *s = in->skel;
     const ProcParams *p = in->params;
     int bones[5] = { s->role[BR_SPINE], s->role[BR_SPINE1], s->role[BR_SPINE2], s->role[BR_NECK], s->role[BR_HEAD] };
@@ -24,7 +19,7 @@ void proc_spine(ProcState *st, const ProcInput *in, Pose *pose, Xform *model) {
         int b = bones[i];
         if (b < 0) continue;
         float w = p->spine_weights[i];
-        float y = yaw * w, pt = pitch * proc_spine_pitch_weight(p, i, pitch, st->ads_lean);
+        float y = yaw * w, pt = pitch * proc_spine_pitch_weight(p, i, pitch);
         acc_yaw += y;
         // Yaw about model up, pitch about the (already yawed) lateral axis.
         vec3 lateral = quat_rotate(quat_yaw(acc_yaw), v3(1, 0, 0));

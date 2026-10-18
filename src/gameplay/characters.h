@@ -209,7 +209,10 @@ bool chars_palm_world(World *w, EntityId e, int hand, vec3 *out);   // latest po
 void chars_set_fp_camera(vec3 pos, quat rot, bool valid);
 // Aim offset of the held item (degrees right / up of the view, the view pitch in radians): the
 // first-person item turns about the eye so its sight points where the shots go.
-void chars_set_fp_aim_offset(float right_deg, float up_deg, float view_pitch, float world_fov_deg, float vm_fov_deg);
+// The arms layer's inputs (docs/CAMERA_HOLDPOINT.md "Rule 3"): this frame's pose eye (world: head bone
+// x eye socket, the view's rotation) and the rigid move of the drawn arms + item onto the presented
+// item (the presentation hold point, ADS included; pose-eye space). False: no first-person pose.
+bool chars_fp_arms_inputs(Xform *pose_eye_world, Xform *present, int *hp_state, float *hp_blend);
 // Fire animation of the first-person weapon (docs/FIRE_ANIM.md): tick = this tick's output (the
 // gun kick on the hold point, evaluated per tick), frame = this frame's interpolated output (hand
 // lag, trigger, slide, attachment wobble at render). NULL keeps the previous one; both NULL clears.

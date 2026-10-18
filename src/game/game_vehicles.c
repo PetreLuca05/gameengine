@@ -1663,7 +1663,7 @@ int vehicles_camera(World *w, RenderCamera *cam) {
     // it). A seated body animates standing still (no run cycle, no bob), so it is steady; the seat's
     // eye point is the fallback.
     Xform sock;
-    if (cvar_find("cl_camera_socket")->i && chars_fp_camera(w, G->alpha, game_view_slot(), cam->yaw, cam->pitch, &sock)) cam->pos = sock.t;
+    if (cvar_find("cl_camera_socket")->i && chars_fp_camera(w, G->alpha, game_view_slot(), G->view.yaw, G->view.pitch, &sock)) cam->pos = sock.t;
     else cam->pos = to_world(p, r, v3_add(d->seats[seat].pos, d->seats[seat].eye));
     cam->roll = 0.0f;
     return 1;
