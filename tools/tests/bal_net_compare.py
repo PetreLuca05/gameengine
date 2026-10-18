@@ -46,8 +46,9 @@ def main():
             continue
         h = hs[i]
         do = sum((c[k] - h[k]) ** 2 for k in range(3)) ** 0.5
-        dot = max(-1.0, min(1.0, sum(c[k] * h[k] for k in range(3, 6))))
-        da = math.degrees(math.acos(dot))
+        # (the logged unit vectors are rounded: compare their angle, not their dot)
+        cross = [c[4] * h[5] - c[5] * h[4], c[5] * h[3] - c[3] * h[5], c[3] * h[4] - c[4] * h[3]]
+        da = math.degrees(math.atan2(math.sqrt(sum(x * x for x in cross)), sum(c[k] * h[k] for k in range(3, 6))))
         ok = do <= 0.002 and da <= 0.02
         fails += not ok
         print(f"shot {i}: origin {do * 1000:.1f} mm, direction {da:.4f} deg apart {'ok' if ok else 'FAIL'}")
