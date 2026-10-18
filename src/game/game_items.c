@@ -239,7 +239,7 @@ static void draw_showcase(const RenderCamera *cam) {
         ItemMesh *m = meshes[i];
         vec3 ctr = v3_scale(v3_add(m->bmax, m->bmin), 0.5f);
         float r = v3_len(v3_scale(v3_sub(m->bmax, m->bmin), 0.5f));
-        float scale = r > 0.42f ? 0.42f / r : 1.0f;   // long guns shrink to the plinth; real size otherwise
+        float scale = clampf(0.3f / fmaxf(r, 1e-3f), 0.5f, 6.0f);   // one display size: long guns shrink, a pill bottle grows (the label says by how much)
         quat rot = quat_axis_angle(v3(0, 1, 0), spin + i * 0.7f);
         vec3 c = v3(base.x, 0.93f + 0.06f + r * scale, base.z);
         vec3 pos = v3_sub(c, quat_rotate(rot, v3_scale(ctr, scale)));
@@ -247,8 +247,8 @@ static void draw_showcase(const RenderCamera *cam) {
         pose.wobble = quat_identity();
         item_mesh_draw(m, item_mesh_condition(conds[i]), pos, rot, scale, &pose, 0, false);
         char label[64];
-        snprintf(label, sizeof(label), "%s  %uk tris", names[i], (m->tris[0] + 500) / 1000);
-        dbg_text(v3(base.x, 0.2f, base.z - 0.47f), label, DBG_WHITE, 0.45f, 0);
+        snprintf(label, sizeof(label), "%s  %uk tris  x%.1f", names[i], (m->tris[0] + 500) / 1000, scale);
+        dbg_text(v3(base.x, 0.86f, base.z - 0.47f), label, DBG_WHITE, 0.07f, 0);
     }
     // Lighting rig: warm key / cool fill / rim per row.
     int rows = (n + SHOWCASE_COLS - 1) / SHOWCASE_COLS;

@@ -42,7 +42,7 @@ int inv_add(Inventory *inv, const ItemDB *db, u16 item, int count, i16 ammo) { r
 int inv_add_att(Inventory *inv, const ItemDB *db, u16 item, int count, i16 ammo, const u8 *att) {
     if (item == ITEM_NONE || count <= 0) return count;
     const ItemDef *d = item_def(db, item);
-    bool hotbar_first = d->kind == ITEM_WEAPON || d->kind == ITEM_CONSUMABLE || d->kind == ITEM_THROWABLE || d->camera;   // the phone is equipped from the hotbar
+    bool hotbar_first = d->kind == ITEM_WEAPON || d->kind == ITEM_CONSUMABLE || d->kind == ITEM_THROWABLE || d->camera || d->hotbar;   // the phone is equipped from the hotbar
     int left = slots_add_att(inv->slots, INV_SLOTS, db, item, count, ammo, att, hotbar_first ? 0 : INV_HOTBAR,
                              hotbar_first ? INV_HOTBAR : INV_BACKPACK);
     if (left != count) inv->revision++;
