@@ -8,7 +8,7 @@
  "tile_m": 2.0,
  "name": "pebble_band",
  "kind": "transition",
- "tool_version": 1,
+ "tool_version": 2,
  "recipe": "assets/terrain/gen/pebble_band.json",
  "pair": [
   "dirt",

@@ -1,14 +1,14 @@
 {
  "size": 2048,
  "source": "generated",
- "mean": "#756a47",
+ "mean": "#736945",
  "target_mean": "#6e6440",
- "mean_delta": 0.0271,
- "seam": 0.8038,
+ "mean_delta": 0.02,
+ "seam": 0.8037,
  "tile_m": 2.5,
  "name": "ground_litter_dry",
  "kind": "terrain_layer",
- "tool_version": 1,
+ "tool_version": 2,
  "recipe": "assets/terrain/gen/ground_litter_dry.json",
  "variant_of": "ground_litter"
 }

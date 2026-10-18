@@ -1,14 +1,14 @@
 {
  "size": 2048,
  "source": "generated",
- "mean": "#706853",
+ "mean": "#6f664f",
  "target_mean": "#6a614a",
- "mean_delta": 0.0369,
- "seam": 0.8294,
+ "mean_delta": 0.02,
+ "seam": 0.829,
  "tile_m": 3.0,
  "name": "path",
  "kind": "terrain_layer",
- "tool_version": 1,
+ "tool_version": 2,
  "recipe": "assets/terrain/gen/path.json",
  "replaces": 8
 }

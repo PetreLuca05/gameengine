@@ -1,14 +1,14 @@
 {
  "size": 2048,
  "source": "generated",
- "mean": "#72725b",
+ "mean": "#72725a",
  "target_mean": "#6f6f55",
- "mean_delta": 0.0217,
- "seam": 0.7386,
+ "mean_delta": 0.02,
+ "seam": 0.7387,
  "tile_m": 6.0,
  "name": "rock_mossy",
  "kind": "terrain_layer",
- "tool_version": 1,
+ "tool_version": 2,
  "recipe": "assets/terrain/gen/rock_mossy.json",
  "variant_of": "rock"
 }

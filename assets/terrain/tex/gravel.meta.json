@@ -8,7 +8,7 @@
  "tile_m": 2.0,
  "name": "gravel",
  "kind": "terrain_layer",
- "tool_version": 1,
+ "tool_version": 2,
  "recipe": "assets/terrain/gen/gravel.json",
  "replaces": 6
 }

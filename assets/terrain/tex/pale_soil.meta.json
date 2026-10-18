@@ -1,14 +1,14 @@
 {
  "size": 2048,
  "source": "generated",
- "mean": "#7c7964",
+ "mean": "#7c7861",
  "target_mean": "#77735c",
- "mean_delta": 0.0306,
+ "mean_delta": 0.02,
  "seam": 0.8424,
  "tile_m": 3.0,
  "name": "pale_soil",
  "kind": "terrain_layer",
- "tool_version": 1,
+ "tool_version": 2,
  "recipe": "assets/terrain/gen/pale_soil.json",
  "layer": 14
 }

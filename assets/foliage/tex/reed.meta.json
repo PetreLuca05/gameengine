@@ -6,31 +6,30 @@
  "size": 2048,
  "cells": [
   {
-   "coverage": 0.113,
-   "bottom": 0.16,
-   "height": 0.94,
-   "root": "#726b3c",
-   "mid": "#6c6d43",
-   "tip": "#9aae57",
-   "residue": 0.0018,
+   "coverage": 0.135,
+   "bottom": 0.166,
+   "height": 0.939,
+   "root": "#515334",
+   "mid": "#5e623a",
+   "residue": 0.0,
    "source": "generated",
    "fails": []
   },
   {
-   "coverage": 0.152,
-   "bottom": 0.143,
-   "height": 0.94,
-   "root": "#686236",
-   "mid": "#69673c",
-   "tip": "#86834d",
-   "residue": 0.0003,
+   "coverage": 0.148,
+   "bottom": 0.139,
+   "height": 0.939,
+   "root": "#535536",
+   "mid": "#5f623a",
+   "tip": "#737048",
+   "residue": 0.0,
    "source": "generated",
    "fails": []
   }
  ],
  "name": "reed",
  "kind": "blade_atlas",
- "tool_version": 1,
+ "tool_version": 2,
  "recipe": "assets/foliage/gen/reed.json",
  "card": {
   "height_m": [

@@ -8,7 +8,7 @@
  "tile_m": 3.0,
  "name": "forest_needles",
  "kind": "terrain_layer",
- "tool_version": 1,
+ "tool_version": 2,
  "recipe": "assets/terrain/gen/forest_needles.json",
  "variant_of": "forest_floor"
 }
