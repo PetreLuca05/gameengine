@@ -1,0 +1,14 @@
+{
+  "name": "Dev Room Vegetation",
+  "level": "devroom_vegetation",
+  "thumbnail": "assets/maps/thumbs/devroom_vegetation.png",
+  "size_m": 2800,
+  "biome": "Test facility, forest",
+  "players": [1, 8],
+  "time_of_day": 12,
+  "season": "summer",
+  "weather": "clear",
+  "dev": true,
+  "order": 91,
+  "description": "The whole dev room (hall, yards, lanes, ranges, pool, vehicles, fabricator) at its own coordinates on flat ground in the vegetation valley: forests, a pond, a meadow and a wheat field around it."
+}

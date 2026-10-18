@@ -37,6 +37,7 @@
 #include "core/engine.h"
 #include "core/platform.h"
 #include "cJSON.h"
+#include "world/level.h"
 #include "world/openworld.h"
 #include "world/mapgen_poi.h"
 #include "editor/handpose/hp_system.h"
@@ -1517,11 +1518,7 @@ void vehicles_level_loaded(World *w, const char *map) {
     s->spike_count = 0;
     VG.have_prev_yaw = false;
     VG.cam_tp = false;
-    char rel[160], buf[512];
-    snprintf(rel, sizeof(rel), "data/levels/%s.json", map ? map : "");
-    char *text = map && map[0] ? platform_read_file(platform_data_path(rel, buf, sizeof(buf)), NULL) : NULL;
-    cJSON *root = text ? cJSON_Parse(text) : NULL;
-    free(text);
+    cJSON *root = level_json_load(map);   // includes resolved
     if (!root) return;
     const cJSON *it;
     cJSON_ArrayForEach(it, cJSON_GetObjectItemCaseSensitive(root, "vehicle_spikes")) {

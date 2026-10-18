@@ -21,6 +21,7 @@
 #include "core/engine.h"
 #include "core/platform.h"
 #include "cJSON.h"
+#include "world/level.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -121,11 +122,9 @@ void shadow_sky_level_loaded(void) {
     if (!SS.loaded) load();
     LightShadowSettings ls = SS.sun_json;
     if (G && G->map[0]) {
-        char rel[160], buf[512];
+        char rel[160];
         snprintf(rel, sizeof(rel), "data/levels/%s.json", G->map);
-        char *text = platform_read_file(platform_data_path(rel, buf, sizeof(buf)), NULL);
-        cJSON *root = text ? cJSON_Parse(text) : NULL;
-        free(text);
+        cJSON *root = level_json_load(G->map);
         if (root) parse_light_shadow(cJSON_GetObjectItemCaseSensitive(root, "sun_shadow"), &ls, rel);
         if (root) cJSON_Delete(root);
     }

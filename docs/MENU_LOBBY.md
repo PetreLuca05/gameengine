@@ -187,6 +187,10 @@ Console: `season [spring|summer|autumn|winter|off] [start preset|random] [static
 
 The map catalogue is part of the build hash: both sides must have the same maps.
 
+The dev maps: Dev Room (`devroom`), Dev Room Vegetation (`devroom_vegetation`: the dev room in the
+vegetation valley, docs/ZOMBIE_MAP.md "Dev room in the vegetation valley"), Water Yard, the terrain
+yards and the Hand Pose Editor.
+
 Note: there is no 4 × 4 km map in the repository. The open world (`zombieland`) is 2 × 2 km and the
 "Streaming Test Terrain" (`streaming`) is unbounded noise terrain.
 
