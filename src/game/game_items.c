@@ -233,7 +233,7 @@ static void draw_showcase(const RenderCamera *cam) {
     for (int i = 0; i < n; i++) {
         int row = i / SHOWCASE_COLS, col = i % SHOWCASE_COLS;
         vec3 base = v3(k_showcase.x + col * SHOWCASE_SPACING, 0, k_showcase.z + row * SHOWCASE_SPACING * 1.4f);
-        // Turntable: a plinth, a dark top disc stand-in (box), the item centred 25 cm above it.
+        // Turntable: a plinth, a dark top disc stand-in (box), the item resting 3 cm above it.
         draw_box(v3(base.x, 0.45f, base.z), v3(0.45f, 0.45f, 0.45f), v4(0.16f, 0.16f, 0.17f, 1), 0.8f, 0.0f);
         draw_box(v3(base.x, 0.915f, base.z), v3(0.4f, 0.015f, 0.4f), v4(0.05f, 0.05f, 0.055f, 1), 0.35f, 0.6f);
         ItemMesh *m = meshes[i];
@@ -241,7 +241,7 @@ static void draw_showcase(const RenderCamera *cam) {
         float r = v3_len(v3_scale(v3_sub(m->bmax, m->bmin), 0.5f));
         float scale = clampf(0.3f / fmaxf(r, 1e-3f), 0.5f, 6.0f);   // one display size: long guns shrink, a pill bottle grows (the label says by how much)
         quat rot = quat_axis_angle(v3(0, 1, 0), spin + i * 0.7f);
-        vec3 c = v3(base.x, 0.93f + 0.06f + r * scale, base.z);
+        vec3 c = v3(base.x, 0.93f + 0.03f + (ctr.y - m->bmin.y) * scale, base.z);   // a yaw turn keeps the height extent
         vec3 pos = v3_sub(c, quat_rotate(rot, v3_scale(ctr, scale)));
         ItemMeshPose pose = { 0 };
         pose.wobble = quat_identity();

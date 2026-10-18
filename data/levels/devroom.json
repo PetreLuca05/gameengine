@@ -489,7 +489,7 @@
   ],
   "labels": [
     {"pos": [115, 0, 43.4], "yaw": 0, "floor": true, "size": 0.18, "text": "aim stand: wall edge / window / car / low wall / thin wall. aim_debug 1, crosshair_obstruct, block_fire_when_barrel_blocked, aim_report, aim_stats"},
-    {"pos": [-54.3, 0, 49.6], "yaw": 0, "floor": true, "size": 0.18, "text": "item showcase: every detailed item on a turntable (item_showcase). item_inspect <id> [wire|matid|wear|ao|dirt|sockets], item_condition new|worn|rusty, item_meshes 0|1"},
+    {"pos": [-52.2, 0, 49.6], "yaw": 180, "floor": true, "size": 0.18, "text": "item showcase: item_inspect <id> [view]"},
     {"pos": [-50, 0, -29.9], "yaw": 0, "floor": true, "size": 0.12, "text": "AO foliage corner: bushes 0.3 + vertex AO (legacy, by the wall / 4 m out) | reference 1.0 multiply | vgeo | step. r_post_debug 18 raw, 19 blur, 20 final"},
     {"pos": [33.5, 0, -42.0], "yaw": -90, "floor": true, "size": 0.18, "text": "ballistics range: ballistics_debug 1, fire_tracers_only 1, bal_wind <m/s>, shutter_preview, muzzle_preview <weapon> <device>"},
     {"pos": [33.5, 0, -57.5], "yaw": -90, "floor": true, "size": 0.18, "text": "penetration: steel / pine / sandbag / brick / plaster, witness panels behind"},
