@@ -61,6 +61,10 @@ typedef struct GpuTexture {
     bool used;
     bool ready;       // upload recorded
     bool wrapped;     // the image belongs to someone else (render_ui.c targets): only the set is ours
+    // World material textures (render_texture_create_world, docs/TEXTURE_MIPS.md): r_texture_quality
+    // keeps their top `dropped` levels out of memory; w / h / mips are what is resident.
+    bool world;
+    u32 full_w, full_h, full_mips, dropped;
 } GpuTexture;
 
 typedef struct RenderTarget {
@@ -289,7 +293,8 @@ typedef struct Renderer {
     VkPipelineLayout layout_ui;           // set1 + push (vertex + fragment: screen scale, 1 / size)
     VkPipelineLayout layout_ui3d;         // push only (render_ui.c item views)
     VkPipeline pipes[PIPE_COUNT];
-    VkSampler sampler_linear;   // material textures (aniso)
+    VkSampler sampler_linear;   // material textures (aniso; r_texture_quality as a min LOD)
+    VkSampler sampler_world;    // world textures (aniso; r_texture_quality dropped their top levels instead)
     VkSampler sampler_clamp;    // post / ui
     VkSampler sampler_shadow;   // compare
     VkSampler sampler_depth;    // nearest, no compare (PCSS blocker search)
@@ -434,6 +439,8 @@ typedef struct Renderer {
     Cvar *r_stretch;   // stretched resolution simulator (0 normal .. 1 extreme)
     float exposure_boost;
     u32 aniso_mod, texq_mod;
+    bool texq_retry;            // world textures still uploading when the quality went down: trim next frame
+    bool tex_reload;            // the quality went up: world textures want their source again (assets_reload_textures)
 } Renderer;
 
 // render_ui.c (frame graph hooks)
@@ -472,7 +479,13 @@ void vkr_target_destroy(RenderTarget *t);
 void vkr_create_samplers(void);
 void vkr_destroy_samplers(void);
 void vkr_recreate_linear_sampler(void);   // anisotropy / texture quality change
+float vkr_material_anisotropy(void);      // r_aniso within the device limit, 0 = off
+VkSampler vkr_texture_sampler(u32 id);    // the sampler of a texture table entry (clamp / world / linear)
+// r_texture_quality changed: world textures drop levels now (GPU copy), or ask for a reload (raised).
+// The caller waited for the device.
+void vkr_textures_quality_changed(void);
 void vkg_samplers_changed(void);          // vk_vgeo.c: the classic renderer re-wraps the module textures
+void vkg_texture_replaced(u32 id);        // vk_vgeo.c: texture `id` has a new image (the classic renderer re-wraps its slots)
 VkDescriptorSet vkr_alloc_tex_set(VkImageView view, VkSampler sampler);
 void vkr_write_tex_set(VkDescriptorSet set, VkImageView view, VkSampler sampler);
 void vkr_rewrite_all_texture_sets(void);

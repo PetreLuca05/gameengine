@@ -399,7 +399,11 @@ static void apply_setting_changes(void) {
         R->aniso_mod = R->r_aniso->modified;
         R->texq_mod = R->r_texture_quality->modified;
         vkDeviceWaitIdle(R->device);
+        vkr_textures_quality_changed();   // world textures drop levels (or want a reload) first: new views
         vkr_recreate_linear_sampler();
+    } else if (R->texq_retry) {
+        vkDeviceWaitIdle(R->device);
+        vkr_textures_quality_changed();
     }
 }
 

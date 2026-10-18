@@ -264,6 +264,7 @@ int main(int argc, char **argv) {
         game_frame((float)dt);
         jobs_pump_completions(8);
         render_poll_shader_hot_reload();
+        assets_reload_textures();
 
         if (render_begin_frame()) {
             game_render();

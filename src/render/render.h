@@ -216,6 +216,19 @@ AABB render_mesh_bounds(MeshId id);
 TextureId render_texture_create(int w, int h, const void *rgba8, bool srgb, bool mips);
 // Raw compressed or uncompressed upload (KTX2); levels are tightly packed in data.
 TextureId render_texture_create_raw(int w, int h, int levels, u32 vk_format, const void *data, const size_t *level_sizes);
+// World material textures (glTF maps, the asset manifest; docs/TEXTURE_MIPS.md): mipmapped, and
+// r_texture_quality keeps their top levels out of memory. Lowering the quality trims them on the GPU;
+// raising it needs their pixels again: when render_textures_reload_wanted, the owner calls
+// render_texture_reload(_raw) between _begin and _end for every texture render_texture_reload_needed
+// names (same size and format as at creation).
+TextureId render_texture_create_world(int w, int h, const void *rgba8, bool srgb);
+TextureId render_texture_create_raw_world(int w, int h, int levels, u32 vk_format, const void *data, const size_t *level_sizes);
+bool render_textures_reload_wanted(void);
+bool render_texture_reload_needed(TextureId id);
+void render_textures_reload_begin(void);
+void render_texture_reload(TextureId id, int w, int h, const void *rgba8);
+void render_texture_reload_raw(TextureId id, int w, int h, int levels, u32 vk_format, const void *data, const size_t *level_sizes);
+void render_textures_reload_end(void);
 void render_texture_destroy(TextureId id);
 // Surface textures (docs/TEXTURES.md): the layer arrays (assets/textures/surfaces, loaded on first
 // use) and the terrain material map: n x n samples of SurfTexLayer ids (spacing m, min corner origin);

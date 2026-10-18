@@ -80,8 +80,17 @@ static void cmd_foliage_stats(int argc, const char **argv);
 static void cmd_foliage_query(int argc, const char **argv);
 static void cmd_classic_stats(int argc, const char **argv) { (void)argc; (void)argv; vkc_stats(); }
 
-// The material sampler changed: the classic renderer re-wraps the module texture slots.
-void vkg_samplers_changed(void) { vkc_samplers_changed(); }
+// The material sampler changed: r_aniso on the module textures too, the classic renderer re-wraps them.
+void vkg_samplers_changed(void) {
+    if (G.ok) vg_tex_set_anisotropy(&G.tex, vkr_material_anisotropy());
+    vkc_samplers_changed();
+}
+
+// Texture `id` got a new image (texture quality): the classic renderer re-wraps the module slots.
+void vkg_texture_replaced(u32 id) {
+    (void)id;
+    vkc_samplers_changed();
+}
 
 // ------------------------------------------------------------------ lifetime
 
@@ -114,6 +123,7 @@ void vkg_init(void) {
         vg_tex_shutdown(&G.tex);
         return;
     }
+    vg_tex_set_anisotropy(&G.tex, vkr_material_anisotropy());   // r_aniso on the module textures, before the foliage support takes the samplers
     G.disp_ok = vg_displace_init(&G.disp, c, &G.tex);
     if (!G.disp_ok) log_warn("vgeo: foliage displacement buffer unavailable");
     G.wind_ok = vg_wind_init(&G.wind, c, &G.tex);

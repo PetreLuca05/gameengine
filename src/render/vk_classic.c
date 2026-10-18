@@ -466,6 +466,7 @@ void vkc_set_textures(const VgTextures *t) { C.vtex = t; }
 // the local light shadow tiles draw through them too). The caller waited for the device.
 void vkc_samplers_changed(void) {
     memset(C.modver, 0xFF, sizeof(C.modver));
+    memset(C.set4_views, 0, sizeof(C.set4_views));   // the wind ring's sets hold the module's repeat sampler
     VkImageView white = R->textures[R->white_tex].view;
     if (C.set_default) cl_write_set(C.set_default, white, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, white, R->sampler_linear);
     if (C.set_disp && C.disp_view) cl_write_set(C.set_disp, C.disp_view, VK_IMAGE_LAYOUT_GENERAL, white, R->sampler_linear);
