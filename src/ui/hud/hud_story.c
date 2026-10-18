@@ -244,9 +244,24 @@ void hud_story_draw(GuiRect safe) {
     }
 }
 
-// The fade covers the whole HUD (drawn last).
+// The title card ("Day 3" + one caps line; the end card's type), over the fade: it reads on black
+// while the screen fades in from a night.
+static void draw_title(const StoryUi *u) {
+    if (!u->title[0]) return;
+    float t = u->time - u->title_time;
+    if (t < 0 || t > u->title_len) return;
+    float a = saturate(t / 0.6f) * saturate((u->title_len - t) / 0.8f);
+    const char *title = title_of(u, u->title);
+    const char *line = text_of(u, u->title);
+    GuiText tt = { gui_s(TH->t_huge), GW_SEMIBOLD, gui_rgba_mul(TH->hud_text, a), GUI_CENTER, 0.1f, true, true, 0 };
+    gd_text(&tt, gui_w() * 0.5f, gui_h() * 0.38f, title ? title : line);
+    if (title && line[0]) hud_caps(gui_w() * 0.5f, gui_h() * 0.38f + gui_s(64), gui_s(TH->t_label), gui_rgba_mul(TH->accent, a), GUI_CENTER, line);
+}
+
+// The fade covers the whole HUD (drawn last), the title card on top.
 void hud_story_draw_fade(void) {
     const StoryUi *u = story_ui();
-    if (!u->active || u->fade < 0.002f) return;
-    gd_rect(gui_rect(0, 0, gui_w(), gui_h()), UI_RGBA(0, 0, 0, (int)(255.0f * saturate(u->fade))));
+    if (!u->active) return;
+    if (u->fade >= 0.002f) gd_rect(gui_rect(0, 0, gui_w(), gui_h()), UI_RGBA(0, 0, 0, (int)(255.0f * saturate(u->fade))));
+    draw_title(u);
 }

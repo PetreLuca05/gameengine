@@ -109,6 +109,7 @@ PhysicsWorld *phys_world_create(void) {
     JPH_BroadPhaseLayerInterfaceTable_MapObjectToBroadPhaseLayer(bp, PL_TRIGGER, 1);
     JPH_BroadPhaseLayerInterfaceTable_MapObjectToBroadPhaseLayer(bp, PL_RAGDOLL, 1);
     JPH_BroadPhaseLayerInterfaceTable_MapObjectToBroadPhaseLayer(bp, PL_RAGDOLL_SOLID, 1);
+    JPH_BroadPhaseLayerInterfaceTable_MapObjectToBroadPhaseLayer(bp, PL_CLIP, 0);
     JPH_ObjectLayerPairFilter *pairs = JPH_ObjectLayerPairFilterTable_Create(PL_COUNT);
     JPH_ObjectLayerPairFilterTable_EnableCollision(pairs, PL_STATIC, PL_MOVING);
     JPH_ObjectLayerPairFilterTable_EnableCollision(pairs, PL_STATIC, PL_CHARACTER);
@@ -124,6 +125,7 @@ PhysicsWorld *phys_world_create(void) {
     JPH_ObjectLayerPairFilterTable_EnableCollision(pairs, PL_RAGDOLL_SOLID, PL_STATIC);
     JPH_ObjectLayerPairFilterTable_EnableCollision(pairs, PL_RAGDOLL_SOLID, PL_RAGDOLL_SOLID);
     JPH_ObjectLayerPairFilterTable_EnableCollision(pairs, PL_RAGDOLL_SOLID, PL_CHARACTER);
+    JPH_ObjectLayerPairFilterTable_EnableCollision(pairs, PL_CLIP, PL_CHARACTER);
     JPH_ObjectVsBroadPhaseLayerFilter *ovb = JPH_ObjectVsBroadPhaseLayerFilterTable_Create(bp, 2, pairs, PL_COUNT);
     JPH_PhysicsSystemSettings s = { 0 };
     s.maxBodies = MAX_BODIES;

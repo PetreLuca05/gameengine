@@ -783,6 +783,7 @@ void game_render(void) {
         // Spectator free camera (noclip): no body, no hands.
         bool fcam = spectator_free_camera(&cam);
         bool pcam = !fcam && lp && peek_camera(w, &cam);   // door peek through the visor (game_peek.c)
+        pcam = pcam || (!fcam && lp && lean_camera(w, &cam));   // leaning out of a window (game_lean.c): the body stays whole too
         // A dev scene's camera (src/game/scene.h): third person, the body drawn whole.
         bool scam = !fcam && !pcam && lp && scene_camera(w, &cam);
         int vcam = lp && !scam && !fcam && !pcam ? vehicles_camera(w, &cam) : 0;
@@ -988,7 +989,7 @@ void game_render(void) {
     game_audio_frame(w, &cam, p, ads);   // listener state + the world the environment chain listens to
     audio_update(cam.pos, fwd, up);
 
-    if (!game_post_photo_mode() && !scene_hides_hud()) { peek_draw(); hud_draw(); if (!menus_open()) wheels_draw(); vehicles_draw_hud(); phone_draw(); }
+    if (!game_post_photo_mode() && !scene_hides_hud()) { peek_draw(); lean_draw(); hud_draw(); if (!menus_open()) wheels_draw(); vehicles_draw_hud(); phone_draw(); }
     vehicles_draw();
     sights_draw();
     daynight_draw();

@@ -17,6 +17,7 @@ typedef enum PhysLayer {
     PL_TRIGGER,        // sensors
     PL_RAGDOLL,        // cosmetic ragdoll bodies: static + other ragdolls only (never pushes gameplay props)
     PL_RAGDOLL_SOLID,  // ragdolls that also block characters (anim_corpse_collision 1)
+    PL_CLIP,           // static, blocks characters only (an open window's opening): rays and props pass
     PL_COUNT
 } PhysLayer;
 

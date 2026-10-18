@@ -859,6 +859,30 @@
    "reason": "Dev: run the kit validator as pieces load (warnings in the log).",
    "category": "story"
   },
+  "lean_distance": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Window lean: how far the head goes out past the window; what you can see from it is game state.",
+   "category": "hud"
+  },
+  "lean_drop": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Window lean: how far the head drops while leaning; what you can see from it is game state.",
+   "category": "hud"
+  },
+  "lean_pitch_down": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Window lean: how far down the view may look; what you can see from it is game state.",
+   "category": "hud"
+  },
+  "lean_yaw_limit": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Window lean: the look left / right limit; what you can see from it is game state.",
+   "category": "hud"
+  },
   "lobby_privacy": {
    "class": "EDITABLE",
    "ui": "—",

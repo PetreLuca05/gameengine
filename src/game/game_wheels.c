@@ -321,7 +321,7 @@ static bool action_down(int kind) {
 
 static bool is_door(EntityId e) {
     World *w = G->world;
-    return ent_valid(w, e) && w->type[ENT_INDEX(e)] == ET_DOOR;
+    return ent_valid(w, e) && w->type[ENT_INDEX(e)] == ET_DOOR && !door_is_window(w, e);   // windows: a plain tap, no wheel
 }
 
 static void update_ring(float dt) {
@@ -546,4 +546,5 @@ void wheels_register(void) {
     cmd_register("wheel_reload", cmd_wheel_reload, "reload assets/ui/wheels/*.json");
     cmd_register("peek", cmd_peek, "peek through the visor of the door you look at (again: stop)");
     peek_register();
+    lean_register();
 }
