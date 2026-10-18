@@ -179,6 +179,13 @@ int lod_fade_draws(const LodFade *f, int lods[2], float fades[2]) {
     return 2;
 }
 
+float lod_foliage_alpha(float density, float fade, float hash01, float width) {
+    if (hash01 >= density) return 0.0f;
+    float w = fminf(fmaxf(width, 1e-3f), 1.0f);
+    float a = (fade - hash01 * (1.0f - w)) / w;
+    return a <= 0 ? 0.0f : (a >= 1 ? 1.0f : a);
+}
+
 float lod_coverage(float f) { return f == 0.0f ? 1.0f : (f > 0.0f ? f : -f); }
 
 bool lod_kept(float f, float n) { return f == 0.0f || (f > 0.0f ? n < f : n >= 1.0f + f); }
