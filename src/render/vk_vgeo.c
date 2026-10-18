@@ -19,6 +19,7 @@
 #include "vgeo/vgeo_impostor.h"
 #include "vgeo/vgeo_tree.h"
 #include "vgeo/grass_asset.h"
+#include "tex_compress.h"
 #include "core/cvar.h"
 #include "fidelity/fidelity.h"
 #include "assets/assets.h"
@@ -76,6 +77,25 @@ static struct {
 
 static void fallback_register(u32 mesh, const VgBuilt *b, bool persistent);
 static void vkg_register_era(void);
+// The module's own textures (tree maps, grass atlases, foliage masks, impostor atlases): each level
+// of the chain the loader built (alpha-weighted, coverage-preserving) block-compressed as it is.
+// Colour (sRGB albedo + coverage) or data (normals, ORM, nta maps). NULL keeps RGBA8.
+static u8 *module_tex_compress(const u8 *rgba, u32 w, u32 h, u32 levels, bool srgb, u32 *vk_format, size_t *level_sizes) {
+    TexcImage im[16];
+    size_t at = 0, off[16], total = 0;
+    u32 n = DG_MIN(levels, 16u);
+    for (u32 l = 0, lw = w, lh = h; l < n; l++, lw = DG_MAX(1u, lw / 2), lh = DG_MAX(1u, lh / 2)) {
+        im[l] = (TexcImage){ rgba + at, lw, lh };
+        at += (size_t)lw * lh * 4;
+    }
+    TexcKind k = srgb ? TEXC_COLOR : TEXC_DATA;
+    u8 *bc = texc_encode(im, (int)n, k, off, &total);
+    if (!bc) return NULL;
+    for (u32 l = 0; l < n; l++) level_sizes[l] = (l + 1 < n ? off[l + 1] : total) - off[l];
+    *vk_format = texc_vk_format(k);
+    return bc;
+}
+
 static void cmd_foliage_push_test(int argc, const char **argv);
 static void cmd_foliage_stats(int argc, const char **argv);
 static void cmd_foliage_query(int argc, const char **argv);
@@ -128,6 +148,7 @@ void vkg_init(void) {
         vg_tex_shutdown(&G.tex);
         return;
     }
+    G.tex.compress = module_tex_compress;   // BC7 while r_texture_compress is on (at each texture's load)
     vg_tex_set_anisotropy(&G.tex, vkr_material_anisotropy(), R->mip_bias);   // r_aniso on the module textures, before the foliage support takes the samplers
     G.disp_ok = vg_displace_init(&G.disp, c, &G.tex);
     if (!G.disp_ok) log_warn("vgeo: foliage displacement buffer unavailable");
@@ -686,6 +707,17 @@ static u8 *grass_tex_load(const char *atlas, const char *suffix, u32 div, u32 *w
     return out;
 }
 
+// PF-0024: every grass asset's atlas + nta map decoded (and box-downsampled) on the jobs before the
+// serial build loop takes them in asset order (the same grass_tex_load: the same pixels).
+typedef struct GrassTexLoad { const GrassAsset *a; u32 div; u8 *alb, *nta; u32 aw, ah, nw, nh; } GrassTexLoad;
+static void grass_tex_job(void *ctx, int begin, int end) {
+    GrassTexLoad *g = (GrassTexLoad *)ctx;
+    for (int i = begin; i < end; i++) {
+        g[i].alb = grass_tex_load(g[i].a->atlas, "albedo", g[i].div, &g[i].aw, &g[i].ah);
+        g[i].nta = grass_tex_load(g[i].a->atlas, "nta", g[i].div * 2, &g[i].nw, &g[i].nh);
+    }
+}
+
 static u32 grass_tex_upload(const u8 *px, u32 w, u32 h, bool srgb) {
     u32 levels;
     u8 *mips = (u8 *)malloc(vg_tex_mip_bytes(w, h, &levels));
@@ -732,12 +764,18 @@ static void foliage_build_grass(void) {
     u8 *alb[GRASS_MAX_ASSETS] = { 0 };
     u32 aw[GRASS_MAX_ASSETS] = { 0 }, ah[GRASS_MAX_ASSETS] = { 0 };
     int nb = 0;
+    GrassTexLoad gt[GRASS_MAX_ASSETS];
+    memset(gt, 0, sizeof(gt));
+    for (int i = 0; i < GR.n; i++) gt[i].a = &GR.a[i], gt[i].div = div;
+    bool pre = prof_fix_enabled(PFX_TEX_DECODE_JOBS);
+    if (pre) jobs_parallel_for(GR.n, 1, grass_tex_job, gt);
     for (int i = 0; i < GR.n; i++) {
         const GrassAsset *a = &GR.a[i];
         GR.mat[i] = ~0u;
-        u32 nw = 0, nh = 0;
-        alb[i] = grass_tex_load(a->atlas, "albedo", div, &aw[i], &ah[i]);
-        u8 *nta = grass_tex_load(a->atlas, "nta", div * 2, &nw, &nh);
+        if (!pre) grass_tex_job(gt, i, i + 1);
+        alb[i] = gt[i].alb, aw[i] = gt[i].aw, ah[i] = gt[i].ah;
+        u8 *nta = gt[i].nta;
+        u32 nw = gt[i].nw, nh = gt[i].nh;
         if (!alb[i]) { log_warn("grass: %s: atlas %s missing (tools/vfxgen/groundgen.py)", a->name, a->atlas); free(nta); continue; }
         VgMaterial mt;
         grass_material(a, GR.tier, (u32)i, &mt);

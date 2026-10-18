@@ -250,6 +250,10 @@ bool render_texture_reload_needed(TextureId id);
 void render_textures_reload_begin(void);
 void render_texture_reload(TextureId id, int w, int h, const void *rgba8);
 void render_texture_reload_raw(TextureId id, int w, int h, int levels, u32 vk_format, const void *data, const size_t *level_sizes);
+// Between _begin and _end: world texture `id` gets an image of another format (r_texture_compress
+// switched between RGBA8 and BC7, docs/TEXTURE_MIPS.md "Block compression"), at the current quality.
+void render_texture_replace(TextureId id, int w, int h, const void *rgba8, bool srgb);
+void render_texture_replace_raw(TextureId id, int w, int h, int levels, u32 vk_format, const void *data, const size_t *level_sizes);
 void render_textures_reload_end(void);
 void render_texture_destroy(TextureId id);
 // Surface textures (docs/TEXTURES.md): the layer arrays (assets/textures/surfaces, loaded on first

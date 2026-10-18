@@ -560,6 +560,18 @@ else()
   target_link_libraries(test_shadow_casters PRIVATE m)
 endif()
 add_test(NAME shadow_casters COMMAND test_shadow_casters WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+# BCn codecs (docs/TEXTURE_MIPS.md "Block compression", PF-0035): BC7 mode accounting, error bounds on
+# synthetic blocks and real assets (run in the bin dir: the assets are copied there), determinism.
+add_executable(test_bc_codec tests/test_bc_codec.c src/render/bc_codec.c third_party/impl/tp_stb.c)
+set_target_properties(test_bc_codec PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
+target_include_directories(test_bc_codec PRIVATE src third_party/stb)
+if(MSVC)
+  target_compile_options(test_bc_codec PRIVATE /W3 /wd4201 /utf-8)
+  target_compile_definitions(test_bc_codec PRIVATE _CRT_SECURE_NO_WARNINGS)
+else()
+  target_link_libraries(test_bc_codec PRIVATE m)
+endif()
+add_test(NAME bc_codec COMMAND test_bc_codec WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
 
 # Foliage wind (docs/FOLIAGE_WIND.md): the wind field (gust fronts, tile, springs, sources), the Crysis
 # vegetation WPO CPU mirror (trunk length, layer linearity, phase decorrelation, bounds), the Tree It

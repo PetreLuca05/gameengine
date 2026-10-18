@@ -8,6 +8,7 @@
 #include "graph/fg.h"
 #include "skeletal_mesh.h"
 #include "lod_fade.h"
+#include "tex_compress.h"
 #include "core/platform.h"
 #include "core/profiler.h"
 #include <SDL3/SDL.h>
@@ -244,6 +245,7 @@ bool render_init(SDL_Window *window) {
     render_register_cvars();
     if (!vkd_create_device(window)) return false;
     vkr_create_samplers();
+    texc_init();   // block-compressed textures (docs/TEXTURE_MIPS.md): before any texture loads
     vkp_create_layouts();
     create_frames();
     if (!vkd_create_swapchain()) { log_error("render: initial swapchain creation failed"); return false; }

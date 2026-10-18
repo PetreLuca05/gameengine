@@ -66,11 +66,12 @@ u32 vg_tex_build_mips(const u8 *rgba, u32 w, u32 h, u8 *out) {
     return levels;
 }
 
-static bool create_image(VgTextures *t, VgOwnTex *o, u32 w, u32 h, u32 levels, const u8 *rgba, bool srgb) {
+// `levels` levels of `fmt` packed in data (sizes[l] bytes each; NULL: RGBA8 sizes).
+static bool create_image(VgTextures *t, VgOwnTex *o, u32 w, u32 h, u32 levels, const u8 *rgba, VkFormat fmt, const size_t *sizes) {
     const VgContext *c = t->ctx;
     VkImageCreateInfo ii = { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
     ii.imageType = VK_IMAGE_TYPE_2D;
-    ii.format = srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
+    ii.format = fmt;
     ii.extent.width = w;
     ii.extent.height = h;
     ii.extent.depth = 1;
@@ -90,7 +91,7 @@ static bool create_image(VgTextures *t, VgOwnTex *o, u32 w, u32 h, u32 levels, c
     vi.subresourceRange.layerCount = 1;
     if (vkCreateImageView(c->device, &vi, NULL, &o->view) != VK_SUCCESS) return false;
     size_t bytes = 0;
-    for (u32 l = 0, lw = w, lh = h; l < levels; l++, lw = lw > 1 ? lw / 2 : 1, lh = lh > 1 ? lh / 2 : 1) bytes += (size_t)lw * lh * 4;
+    for (u32 l = 0, lw = w, lh = h; l < levels; l++, lw = lw > 1 ? lw / 2 : 1, lh = lh > 1 ? lh / 2 : 1) bytes += sizes ? sizes[l] : (size_t)lw * lh * 4;
     VgBuffer st = vgc_buffer(c, bytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VGM_UPLOAD);
     if (!st.buffer) return false;
     memcpy(st.mapped, rgba, bytes);
@@ -111,7 +112,7 @@ static bool create_image(VgTextures *t, VgOwnTex *o, u32 w, u32 h, u32 levels, c
         r[l].imageExtent.width = lw;
         r[l].imageExtent.height = lh;
         r[l].imageExtent.depth = 1;
-        off += (size_t)lw * lh * 4;
+        off += sizes ? sizes[l] : (size_t)lw * lh * 4;
     }
     vkCmdCopyBufferToImage(cmd, st.buffer, o->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, n, r);
     transition(cmd, o->image, levels, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_2_TRANSFER_BIT,
@@ -173,7 +174,7 @@ bool vg_tex_init(VgTextures *t, const VgContext *ctx) {
     VgOwnTex w;
     memset(&w, 0, sizeof(w));
     const u8 white[4] = { 255, 255, 255, 255 };
-    if (!create_image(t, &w, 1, 1, 1, white, false)) { log_error("vgeo: texture table init failed"); return false; }
+    if (!create_image(t, &w, 1, 1, 1, white, VK_FORMAT_R8G8B8A8_UNORM, NULL)) { log_error("vgeo: texture table init failed"); return false; }
     t->white = w.image;
     t->white_alloc = w.alloc;
     t->white_view = w.view;
@@ -234,7 +235,13 @@ u32 vg_tex_create(VgTextures *t, u32 w, u32 h, u32 levels, const u8 *rgba, bool 
     u32 idx = vg_tex_alloc(t);
     if (!idx) return 0;
     VgOwnTex *o = &t->own[idx - VG_TEX_GAME];
-    if (!create_image(t, o, w, h, levels ? levels : 1, rgba, srgb)) {
+    levels = DG_CLAMP(levels, 1u, 16u);
+    u32 fmt = srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
+    size_t sizes[16];
+    u8 *bc = t->compress ? t->compress(rgba, w, h, levels, srgb, &fmt, sizes) : NULL;
+    bool ok = create_image(t, o, w, h, levels, bc ? bc : rgba, (VkFormat)fmt, bc ? sizes : NULL);
+    free(bc);
+    if (!ok) {
         log_error("vgeo: texture %ux%u upload failed", w, h);
         vg_tex_release(t, idx);
         return 0;
