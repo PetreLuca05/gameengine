@@ -1,6 +1,6 @@
-// Virtualized geometry: the data layout shared by the builder, the .vgeo file, the renderer and the
-// shaders (docs/VGEO.md "Data layout"). std430-compatible; mirrored in shaders/vgeo/vgeo_common.glsl.
-// Every size is asserted: change a struct here and in the GLSL mirror together.
+// vgeo: the data layout shared by the builder, the .vgeo file, the scene tables and the classic
+// renderer (docs/VGEO.md). std430-compatible (the GLSL mirror, vgeo_common.glsl, lives on branch nanite).
+// Every size is asserted.
 #ifndef DG_VGEO_GPU_H
 #define DG_VGEO_GPU_H
 

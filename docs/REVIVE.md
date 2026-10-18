@@ -239,7 +239,7 @@ Each machine draws a client-local display body: the reconstructed player's own c
 its definition and modular parts. It is an `ET_MARKER` local entity with `CharacterInst.phantom`
 set: evaluated idle, no foot IK, floating `float_height` above the floor with a small bob. Its
 skinned draws carry `MAT_RECON` (+ `MAT_RECON_FX`) and `SkinnedDraw.recon` = (feet position,
-progress). They never go through vgeo (`vkg_route_skinned` skips `MAT_RECON`), so `skin.frag` /
+progress). They draw through the legacy skinned path like every character, so `skin.frag` /
 `gbuffer_skin.frag` run the dissolve.
 
 - **Build order.** For every point:

@@ -251,7 +251,7 @@ bool render_init(SDL_Window *window) {
         VK_CHECK(vkCreateQueryPool(R->device, &qi, NULL, &g_frame_qp));
     }
     vkg_init();
-    lod_init();   // LOD ranges / cross-fades (docs/LOD.md): after r_vgeo
+    lod_init();   // LOD ranges / cross-fades (docs/LOD.md)
     if (!post_init()) { log_error("render: post-processing stack unavailable"); return false; }
     vkw_init();   // after the post stack (its descriptor layout, samplers)
     sky_init();
@@ -434,7 +434,6 @@ bool render_begin_frame(void) {
 
 void render_set_camera(const RenderCamera *cam) {
     R->cam = *cam;
-    vkg_bench_camera(&R->cam);   // vgeo_bench flythrough
     vkg_frame_update();          // grass fades / shadows follow the fidelity level (outside the frame's recording)
     if (g_cam_override) g_cam_override(&R->cam);   // bench_fidelity flythrough
     cam = &R->cam;
@@ -822,11 +821,8 @@ typedef struct CpuSkin { VkDeviceSize offset; bool ok; } CpuSkin;
 
 // Skinned passes: 0 = main (world), 1 = shadow, 2 = viewmodel (first-person arms, after the depth
 // clear), 3 = phone cameras (the world + the local player's own body, MAT_SELF: selfies).
-static u8 g_skin_routed[MAX_SKIN_DRAWS];   // this frame's skinned draws vgeo takes (main view, vkg_route_skinned)
-
 static bool skin_in_pass(const SkinnedDraw *d, int pass) {
     bool vm = (d->flags & MAT_VIEWMODEL) != 0;
-    if (pass == 0 && g_skin_routed[d - R->skin_draws]) return false;
     if (pass == 1) return d->cast_shadow && !vm;
     if (pass == 2) return vm;
     if (pass == 3) return !vm && (!(d->flags & MAT_SHADOW_ONLY) || (d->flags & MAT_SELF));
@@ -1570,37 +1566,10 @@ static void exec_prepass(VkCommandBuffer cmd, void *u) {
     bind_frame(cmd);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 1, 1, &R->textures[R->white_tex].set, 0, NULL);
     post_push_lit_inputs(cmd, NULL, false);
-    vkg_draw_gbuffer(cmd);   // vgeo surfaces first (depth export), the legacy draws test against them
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_PREPASS]);
     draw_items(cmd, R->draws, R->draw_count, false, R->r_culling->i != 0, 0, PIPE_PREPASS);
-    vkc_draw_gbuffer(cmd);   // classic instanced vgeo content (r_vgeo 0)
+    vkc_draw_gbuffer(cmd);   // classic instanced vgeo content
     draw_skinned(cmd, 0, PIPE_PREPASS_SKIN, PIPE_PREPASS, F.skin_main);
-    vkCmdEndRendering(cmd);
-}
-
-// vgeo (docs/VGEO.md "Foliage support"): the depth of the large static legacy surfaces (walls, level
-// brushes) before this frame's vgeo Hi-Z, so pass 2 occlusion counts them; the prepass clears and
-// redraws everything after.
-static void exec_vgeo_occluders(VkCommandBuffer cmd, void *u) {
-    (void)u;
-    begin_gbuffer(cmd, R->depth.view, true);
-    bind_frame(cmd);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 1, 1, &R->textures[R->white_tex].set, 0, NULL);
-    post_push_lit_inputs(cmd, NULL, false);
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_PREPASS]);
-    ArenaMark mark = arena_mark(&g_engine.frame_arena);
-    DrawItem *occ = ARENA_PUSH_N(&g_engine.frame_arena, DrawItem, R->draw_count + 1);
-    u32 n = 0;
-    for (u32 i = 0; i < R->draw_count; i++) {
-        const DrawItem *d = &R->draws[i];
-        if (d->object_id || d->mat.color.w < 0.999f || (d->mat.flags & (MAT_SHADOW_ONLY | MAT_VIEWMODEL)) || !R->meshes[d->mesh].used) continue;
-        vec3 c;
-        float r;
-        item_bounds(d, &c, &r);
-        if (r >= 2.0f) occ[n++] = *d;
-    }
-    draw_items(cmd, occ, n, false, true, 0, PIPE_PREPASS);
-    arena_pop_to(mark);
     vkCmdEndRendering(cmd);
 }
 
@@ -1613,7 +1582,6 @@ static void exec_opaque(VkCommandBuffer cmd, void *u) {
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[R->r_wireframe->i ? PIPE_LIT_WIRE : PIPE_LIT]);
     draw_items(cmd, R->draws, R->draw_count, false, R->r_culling->i != 0, 0, R->r_wireframe->i ? PIPE_LIT_WIRE : PIPE_LIT);
     vkc_draw_lit(cmd);   // classic instanced vgeo content (depth EQUAL to its prepass)
-    vkg_draw_lit(cmd);   // vgeo pixels (depth equal to the exported depth)
     vkCmdEndRendering(cmd);
 }
 
@@ -1767,7 +1735,7 @@ static void exec_viewmodel(VkCommandBuffer cmd, void *u) {
     vkCmdEndRendering(cmd);
 }
 
-// Scope picture-in-picture: the opaque scene (static + characters + the classic / vgeo content,
+// Scope picture-in-picture: the opaque scene (static + characters + the classic vgeo content,
 // lit forward like the main opaque pass, with the main view's AO / contact / SSR / SSGI through its
 // projection) from the objective lens at the scope FOV into a square target; then its decals, the
 // sky and fog (post_scope_sky) and its transparency (scope_pip_fx). The local player's own weapon
@@ -2158,22 +2126,11 @@ static void build_frame_graph(FrameData *fd) {
     post_begin_frame(&in);
     sky_build();   // atmosphere LUTs, sky view, aerial perspective, cloud shadow, environment refilter
 
-    vkg_graph_cull(F.depth);   // vgeo culling (docs/VGEO.md), against last frame's Hi-Z
-    int p;
-    if (vkg_wants_occluders()) {   // static legacy occluders' depth: vgeo pass 2 occlusion counts walls
-        p = fg_pass("vgeo_occluders", exec_vgeo_occluders, NULL);
-        fg_write(p, F.depth, FG_DEPTH);
-        fg_write(p, F.normal, FG_COLOR);
-        fg_write(p, F.material, FG_COLOR);
-        fg_write(p, F.velocity, FG_COLOR);
-    }
-    vkg_graph_cull_pass2(F.depth);
-    p = fg_pass("prepass", exec_prepass, NULL);
+    int p = fg_pass("prepass", exec_prepass, NULL);
     fg_write(p, F.depth, FG_DEPTH);
     fg_write(p, F.normal, FG_COLOR);
     fg_write(p, F.material, FG_COLOR);
     fg_write(p, F.velocity, FG_COLOR);
-    vkg_graph_hiz(F.depth, F.velocity);    // this frame's occlusion Hi-Z
 
     post_screen_space(&F.lit);
     const PostSettings *ps = post_settings();
@@ -2281,7 +2238,7 @@ static void build_frame_graph(FrameData *fd) {
 }
 
 // The sun's casters into one cascade tile (k 0..3) or the moon map (k 4): raster draws (culled
-// against the tile's light box, Cast Shadows / culling mask in draw_items), vgeo / classic
+// against the tile's light box, Cast Shadows / culling mask in draw_items), the classic
 // instances, skinned characters (batched; per draw when the culling mask excludes a layer).
 static void draw_sun_casters(VkCommandBuffer cmd, FrameResources *f, int k, const SkinPass *skin_shadow) {
     const LightShadowSettings *sl = &R->sun_shadow;
@@ -2289,7 +2246,6 @@ static void draw_sun_casters(VkCommandBuffer cmd, FrameResources *f, int k, cons
     vkCmdSetDepthBias(cmd, 1.25f * sl->bias, 0.0f, 1.75f * sl->bias);   // Unity's Bias scales the hardware terms too
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 0, 1, &f->frame_set, 0, NULL);
     draw_items(cmd, R->draws, R->draw_count, true, false, 0, PIPE_SHADOW);
-    vkg_draw_shadow(cmd, (u32)k);
     if (k < 4) vkc_draw_shadow(cmd, (u32)k);
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_SHADOW]);
     if (F.cpu_skinned) draw_cpu_skinned(cmd, f, F.cpu_skinned, 1);
@@ -2352,8 +2308,7 @@ void render_end_frame(void) {
 
     FrameData *fd = (FrameData *)f->ubo.mapped;
     compute_matrices(fd);
-    vkg_submit_fallback();   // the classic renderer's culling / LOD / instance batches (r_vgeo 0; r_vgeo 1: local light tiles only)
-    vkg_bench_frame();
+    vkg_classic_frame();   // the classic renderer's culling / LOD / instance batches
     memset(&F, 0, sizeof(F));
     F.f = f;
 
@@ -2386,8 +2341,6 @@ void render_end_frame(void) {
     F.skin_phone = &skin_phone;
     for (u32 i = 0; i < R->skin_draw_count; i++) F.any_skin_vm |= (R->skin_draws[i].flags & MAT_VIEWMODEL) != 0;
     ArenaMark skin_mark = arena_mark(&g_engine.frame_arena);
-    memset(g_skin_routed, 0, R->skin_draw_count);
-    if (R->skin_draw_count && !cpu_skin) vkg_route_skinned(R->skin_draws, R->skin_draw_count, R->skin_bones, g_skin_routed);
     if (R->skin_draw_count) {
         if (cpu_skin) {
             F.cpu_skinned = ARENA_PUSH_N(&g_engine.frame_arena, CpuSkin, R->skin_draw_count);
@@ -2411,7 +2364,7 @@ void render_end_frame(void) {
 
     // ---------------------------------------------------------- shadow pass
     R->shadow_drawn = 0;
-    vkg_record_shadow_cull(cmd);   // vgeo cascade views (docs/VGEO.md)
+    vkg_record_foliage(cmd);   // foliage wind, displacement buffer (the classic renderer's WPO inputs)
     vkr_image_barrier(cmd, R->shadow.image, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
                       VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, 0,
                       VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,

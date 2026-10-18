@@ -1,10 +1,10 @@
-# LOD ranges and transitions (classic renderer, `r_vgeo 0`)
+# LOD ranges and transitions (classic renderer)
 
 Scope: the classic renderer (`src/render/vk_classic.c`, `shaders/classic_*`: discrete LOD chains,
 impostors, foliage, sun cascades) and the non-vgeo systems it shares (characters / skinned meshes and
 their animation tiers, terrain chunks and surface textures, foliage density fade, VFX spawn LOD). The
-virtualized geometry path (`r_vgeo 1`: cluster DAG, error threshold, vgeo impostors) is out of scope and
-renders as before (section 2).
+virtualized geometry path this was written next to (`r_vgeo 1`) lives on branch `nanite`; the notes on it
+below are history.
 
 ## 1. Report: thresholds and transitions before this change
 
@@ -48,7 +48,7 @@ Transitions:
   **skipped** (the instance vanishes for a frame or two: a hole, not a coarser LOD).
 - Sun cascades: own LOD pick by texel size (`r_vgeo_shadow_error_px` 2 px of cascade texel), never
   impostors, mesh `shadow_max_dist` as a **hard cut** (grass 15 m, wheat 20, bushes 40, trees 70 m).
-- Local light shadow tiles: LOD by distance to the light at ~2 texels (shared with `r_vgeo 1`, unchanged).
+- Local light shadow tiles: LOD by distance to the light at ~2 texels (the cuts from before, unchanged).
 
 ### Impostors (classic)
 
@@ -122,7 +122,7 @@ spawn-rate steps; shadow casters at `shadow_max_dist`.
 | Cvars | `r_lod_fade_time` (0.35 s), `r_lod_fade_band` (0.25 octaves), `r_lod_fade_debug` (tint fading draws: green in, red out, blue alpha only), `r_lod_debug` (1 character labels: LOD, fade `<from %`, pixels, update rate, IK and shadow weights; 2 + classic LOD levels as colours: white 0, green 1, yellow 2, red 3, blue impostor), `r_lod_bias` (user bias against the tier), `r_lod_legacy` (the ranges / cuts from before, for comparisons), `r_lod_scope` (the scope PiP's own LOD selection) |
 | Commands | `lod_dolly <characters\|static\|impostor\|foliage\|terrain\|stop> [m/s] [m]`, `anim_lod_lineup` (now 5 / 15 / 30 / 60 / 120 / 240 m), `classic_stats` (effective thresholds, parts per LOD, fading parts) |
 
-**Which path.** `lod_active()`: `r_vgeo 0` and not `r_lod_legacy`. With `r_vgeo 1` every shared system
+**Which path.** `lod_active()`: not `r_lod_legacy` (before the nanite removal also `r_vgeo 0`). With `r_vgeo 1` every shared system
 (characters, terrain, surface detail, VFX) keeps exactly its behaviour from before (the frame UBO's
 `lod_fade.z` = 0 selects the legacy dither and distances in the shaders), so the virtualized path renders as
 before: the screenshot regression (`r_vgeo 1`, vegetation meadow / pine / aerial, dev hall, foliage yard)
@@ -218,7 +218,7 @@ shows terrain and characters only; with 1 the trees and bushes appear at their P
 
 ## 6. Performance per tier
 
-RTX 3060 Ti, 1600 x 900 window, `r_vgeo 0`, uncapped, two alternating runs per configuration
+RTX 3060 Ti, 1600 x 900 window, the classic renderer, uncapped, two alternating runs per configuration
 (`tools/tests/lod_perf.cfg`), new ranges vs `r_lod_legacy 1`. Frame = CPU frame time.
 
 | stop | frame ms new / old | GPU ms new / old (delta) | tris M new / old | budget (1080p) |

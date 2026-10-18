@@ -256,7 +256,6 @@ typedef struct Renderer {
     bool has_device_fault;         // VK_EXT_device_fault: fault addresses / vendor info on a lost device
     bool has_unused_attachments;   // VK_EXT_dynamic_rendering_unused_attachments: G-buffer without velocity
     bool hdr_supported, swap_hdr;
-    bool vg_scalar, vg_int64, vg_indirect_count, vg_descriptor_indexing, vg_mesh_shader;   // vgeo device features
     int hdr_output_applied;
     float max_anisotropy;
 
@@ -473,7 +472,7 @@ void vkr_target_destroy(RenderTarget *t);
 void vkr_create_samplers(void);
 void vkr_destroy_samplers(void);
 void vkr_recreate_linear_sampler(void);   // anisotropy / texture quality change
-void vkg_samplers_changed(void);          // vk_vgeo.c: re-enter the texture table with the new material sampler
+void vkg_samplers_changed(void);          // vk_vgeo.c: the classic renderer re-wraps the module textures
 VkDescriptorSet vkr_alloc_tex_set(VkImageView view, VkSampler sampler);
 void vkr_write_tex_set(VkDescriptorSet set, VkImageView view, VkSampler sampler);
 void vkr_rewrite_all_texture_sets(void);
@@ -525,25 +524,14 @@ void vkls_record(VkCommandBuffer cmd, FrameResources *f); // renders the atlas t
 // with shadow cascade index `cascade` (push constants flags.w). Returns the draw count.
 u32 render_draw_shadow_casters(VkCommandBuffer cmd, FrameResources *f, vec4 sphere, const vec4 planes[6], u32 cascade, u32 layers);
 
-// vk_vgeo.c: virtualized geometry in the frame (docs/VGEO.md)
+// vk_vgeo.c: the vgeo scene content (tables, level placements, foliage, wind) the classic renderer draws
 void vkg_init(void);
 void vkg_shutdown(void);
-void vkg_graph_cull(int depth_res);    // frame graph, before the prepass: culling against last frame's Hi-Z, raster pass 1
-bool vkg_wants_occluders(void);        // render.c adds vgeo_occluders (static legacy depth) between the two
-void vkg_graph_cull_pass2(int depth_res);   // this frame's Hi-Z (vgeo + static occluders), pass 2 cull + raster
-void vkg_graph_hiz(int depth_res, int velocity_res);     // frame graph, after the prepass: this frame's Hi-Z (next frame's history)
-void vkg_record_shadow_cull(VkCommandBuffer cmd);   // before the shadow pass: cascade views
-void vkg_draw_shadow(VkCommandBuffer cmd, u32 cascade);   // inside the shadow pass, per cascade tile (3 = the moon tile)
-void vkg_draw_gbuffer(VkCommandBuffer cmd);   // prepass, before the legacy draws
-void vkg_draw_lit(VkCommandBuffer cmd);       // opaque pass
+void vkg_record_foliage(VkCommandBuffer cmd); // before the shadow pass: wind, displacement buffer, wind tile, classic wind set
 void vkg_frame_update(void);                  // per frame before recording (render_set_camera): grass fidelity level
-void vkg_bench_camera(RenderCamera *cam);     // vgeo_bench: spline camera override (render_set_camera)
-void vkg_bench_frame(void);                   // vgeo_bench: per-frame timings
-void vkg_submit_fallback(void);
-// Skinned draws vgeo takes this frame (main view): routed[i] = 1; returns their count.
-u32 vkg_route_skinned(const SkinnedDraw *draws, u32 n, const mat4 *bones, u8 *routed);
-// Point / spot light shadow tile: vgeo instances near the light as discrete LOD meshes (PIPE_SHADOW bound).
-u32 vkg_draw_local_shadow(VkCommandBuffer cmd, vec4 sphere, const vec4 planes[6], u32 cascade, u32 tile_px, u32 layers);               // r_era 2015 / 2010: discrete LODs through the legacy draws (after compute_matrices)
+void vkg_classic_frame(void);                 // after compute_matrices: the classic renderer's culling / LOD / batches
+// Point / spot light shadow tile: the scene instances near the light (PIPE_SHADOW bound).
+u32 vkg_draw_local_shadow(VkCommandBuffer cmd, vec4 sphere, const vec4 planes[6], u32 cascade, u32 tile_px, u32 layers);
 
 // vk_water.c: water surfaces (docs/WATER.md "Rendering")
 void vkw_init(void);
@@ -553,7 +541,7 @@ bool vkw_create_pipelines(void);
 // surface pass (writes hdr, depth, velocity).
 void vkw_build_graph(int hdr, int depth, int velocity);
 void vkw_build_graph_pip(int hdr, int depth, mat4 view_proj);   // the scope PiP (after its fog)
-// vk_classic.c: the classic instanced renderer of the vgeo scene content (r_vgeo 0, docs/CLASSIC_RENDERER.md)
+// vk_classic.c: the classic instanced renderer of the vgeo scene content (docs/CLASSIC_RENDERER.md)
 struct VgScene;
 struct VgBuilt;
 struct VgDisplace;
@@ -564,9 +552,9 @@ struct VgTextures;
 void vkc_set_textures(const struct VgTextures *t);
 void vkc_samplers_changed(void);                              // the vgeo texture table (module-owned slots)
 void vkc_chunk_loaded(const struct VgScene *s, u32 handle);                    // placement chunk: per-cell distance limits
-// views: r_vgeo 0 (main view + sun cascade batches); false: the scene for the local light tiles only.
+// The frame's batches: main view, sun cascades, scope PiP; the scene for the local light tiles.
 void vkc_frame(const struct VgScene *s, const struct VgDisplace *disp, float density, float lod_px, float shadow_lod_px, float small_impostor_px, bool era2010,
-               bool shadows, bool views);
+               bool shadows);
 struct VgViewGpu;
 struct VgWindTex;
 void vkc_wind_frame(const struct VgViewGpu *v, const struct VgWindTex *w);   // after the wind tile upload: the frame's wind (set 4)

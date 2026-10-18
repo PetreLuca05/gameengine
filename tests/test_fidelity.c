@@ -35,14 +35,14 @@ static int g_fail, g_checks;
         }                                                       \
     } while (0)
 
-// Era preset values (vk_vgeo.c k_eras): vgeo, error px, shadow error px, discrete LOD px, foliage.
-static const float k_era_vals[FID_ERAS][5] = { { 1, 1, 2, 2, 1 }, { 1, 2, 4, 3, 0.7f }, { 0, 1, 2, 4, 0.4f }, { 0, 1, 2, 12, 0.2f } };
+// Era preset values (vk_vgeo.c k_eras): shadow error px, discrete LOD px, foliage.
+static const float k_era_vals[FID_ERAS][3] = { { 2, 2, 1 }, { 4, 3, 0.7f }, { 2, 4, 0.4f }, { 2, 12, 0.2f } };
 static Cvar *g_era;
 
 static void register_cvars(void) {
-    const int owned[5] = { FF_VGEO, FF_VGEO_ERROR_PX, FF_VGEO_SHADOW_ERROR_PX, FF_VGEO_LOD_PX, FF_FOLIAGE_DENSITY };
+    const int owned[3] = { FF_VGEO_SHADOW_ERROR_PX, FF_VGEO_LOD_PX, FF_FOLIAGE_DENSITY };
     for (int e = 0; e < FID_ERAS; e++)
-        for (int k = 0; k < 5; k++) fid_set_era_value(e, owned[k], k_era_vals[e][k]);
+        for (int k = 0; k < 3; k++) fid_set_era_value(e, owned[k], k_era_vals[e][k]);
     // Every feature cvar with its engine range and the Modern default (= the engine default).
     for (int f = 0; f < fid_feature_count(); f++) {
         const FidFeatureDef *d = fid_feature(f);
@@ -65,8 +65,8 @@ static void set(int f, float v) {
 static void set_era(int e) {
     cvar_set_int(g_era, e);
     // The era preset sets its own values (vk_vgeo.c era_apply), then the bounds clamp everything.
-    const int owned[5] = { FF_VGEO, FF_VGEO_ERROR_PX, FF_VGEO_SHADOW_ERROR_PX, FF_VGEO_LOD_PX, FF_FOLIAGE_DENSITY };
-    for (int k = 0; k < 5; k++) set(owned[k], k_era_vals[e][k]);
+    const int owned[3] = { FF_VGEO_SHADOW_ERROR_PX, FF_VGEO_LOD_PX, FF_FOLIAGE_DENSITY };
+    for (int k = 0; k < 3; k++) set(owned[k], k_era_vals[e][k]);
     fid_enforce_all();
 }
 
@@ -224,7 +224,7 @@ static void test_levels(void) {
     }
     CHECK(fid_bounds(FID_OFF, 0, FF_TONEMAPPER).avail == FID_UNAVAILABLE, "Off: tonemapper locked (direct output)");
     CHECK(val(FF_SHADOWS) == 0 && val(FF_SHADOW_CASCADES) == 1 && val(FF_RENDER_SCALE) >= 0.5f && val(FF_RENDER_SCALE) <= 0.66f + 1e-4f, "Off: shadows Disable, 0.5-0.66 scale");
-    CHECK(fabsf(val(FF_VGEO_ERROR_PX) - 4.0f) < 1e-4f, "Off: vgeo error x4");
+    CHECK(fabsf(val(FF_VGEO_LOD_PX) - 16.0f) < 1e-4f, "Off: discrete LOD error x8");
     // Internal consistency: TAA (and TAA-U) only where the level has TAA; HDR output only High / Modern.
     for (int e = 0; e < FID_ERAS; e++)
         for (int l = 0; l < FID_LEVELS; l++) {
@@ -238,7 +238,7 @@ static void test_levels(void) {
     // The spec's per-level points.
     fid_apply(FID_LOW);
     CHECK(val(FF_AA) == 1 && val(FF_SHADOW_CASCADES) == 2 && val(FF_SHADOWS) == 1 && val(FF_SHADOW_RESOLUTION) == 0 && fabsf(val(FF_SHADOW_DISTANCE) - 50.0f) < 1e-3f && fabsf(val(FF_RENDER_SCALE) - 0.66f) < 1e-3f, "Low: FXAA, Hard Only, Low resolution, 2 cascades, 50 m, 0.66");
-    CHECK(fabsf(val(FF_FOLIAGE_DENSITY) - 0.25f) < 1e-4f && fabsf(val(FF_VGEO_ERROR_PX) - 3.0f) < 1e-4f && val(FF_TEXTURE_QUALITY) == 0, "Low: foliage 0.25, vgeo x3, mips -2");
+    CHECK(fabsf(val(FF_FOLIAGE_DENSITY) - 0.25f) < 1e-4f && fabsf(val(FF_VGEO_LOD_PX) - 8.0f) < 1e-4f && val(FF_TEXTURE_QUALITY) == 0, "Low: foliage 0.25, discrete LODs x4, mips -2");
     fid_apply(FID_MEDIUM);
     CHECK(val(FF_SSR) == 0 && val(FF_MOTION_BLUR) == 1 && val(FF_DOF) == 1 && val(FF_UPSCALER) == 2 && fabsf(val(FF_UPSCALE_RATIO) - 0.75f) < 1e-4f, "Medium: no SSR, camera MB, ADS DoF, FSR 1 0.75");
     CHECK(val(FF_VOL_LOCAL_LIGHTS) == 0 && val(FF_VOLUMETRICS) == 1 && val(FF_VFX_LIGHTING) == 0 && val(FF_DECAL_MAX) == 128, "Medium: fog-only, unlit particles, decals halved");
@@ -254,7 +254,7 @@ static void test_levels(void) {
 static void test_eras(void) {
     set_era(FID_ERA_2010);
     fid_apply(FID_MODERN);
-    CHECK(val(FF_SSR) == 0 && val(FF_SSGI) == 0 && val(FF_VOLUMETRICS) == 0 && val(FF_VGEO) == 0, "2010: no SSR / SSGI / froxels / vgeo");
+    CHECK(val(FF_SSR) == 0 && val(FF_SSGI) == 0 && val(FF_VOLUMETRICS) == 0, "2010: no SSR / SSGI / froxels");
     CHECK(fid_bounds(FID_MODERN, FID_ERA_2010, FF_SSR).era_lacks && fid_min_level_for(FID_ERA_2010, FF_SSR, 1) < 0, "2010 lacks SSR at every level");
     CHECK(val(FF_AA) == 2, "2010 Modern: SMAA (no TAA in the era): %g", val(FF_AA));
     cvar_set("r_aa", "3");
@@ -265,7 +265,7 @@ static void test_eras(void) {
     CHECK(fabsf(val(FF_FOLIAGE_DENSITY) - 0.2f) < 1e-4f, "2010-era Low: the era's foliage (0.2) under the cap (0.25): %g", val(FF_FOLIAGE_DENSITY));
     set_era(FID_ERA_2020);
     fid_apply(FID_LOW);
-    CHECK(fabsf(val(FF_VGEO_ERROR_PX) - 6.0f) < 1e-3f, "2020-era Low: vgeo error 2 px x3 = %g", val(FF_VGEO_ERROR_PX));
+    CHECK(fabsf(val(FF_VGEO_SHADOW_ERROR_PX) - 12.0f) < 1e-3f, "2020-era Low: shadow LOD error 4 px x3 = %g", val(FF_VGEO_SHADOW_ERROR_PX));
     fid_apply(FID_MEDIUM);
     CHECK(fabsf(val(FF_FOLIAGE_DENSITY) - 0.5f) < 1e-4f && val(FF_SSR) == 0, "2020-era Medium: foliage 0.7 capped at 0.5");
     // Custom era (4) behaves as modern.
@@ -279,7 +279,7 @@ static void test_passes(void) {
     const char *post[] = { "hiz", "contact", "gtao", "gtao_temporal", "gtao_upsample", "ssgi", "ssgi_temporal", "ssr", "ssr_temporal", "vol_inject",
                            "vol_integrate", "color_pyramid", "depth_history", "taa", "taau", "fxaa", "smaa_prep", "smaa_blend", "fsr_easu", "mb_tiles",
                            "mb_blur", "dof_focus", "dof_gather", "lens_drops", "lens_apply", "post_buffers_init", "exposure", "bloom", "flare", "tonemap" };
-    const char *scene[] = { "prepass", "vgeo_cull", "vgeo_raster", "vgeo_hiz", "opaque", "decals", "opaque_dynamic", "decals_dynamic", "sky", "sky_luts",
+    const char *scene[] = { "prepass", "opaque", "decals", "opaque_dynamic", "decals_dynamic", "sky", "sky_luts",
                             "sky_view", "fog_apply", "scene_copy", "transparent", "vm_prepass", "viewmodel", "scope_pip", "scope_pip_fx", "sight_scope",
                             "sight_reddot", "phone_post0", "ui_blur", "ui_views", "final", "exr_capture" };
     for (int i = 0; i < ARRAY_COUNT(post); i++) CHECK(fid_pass_is_post(post[i]), "%s is a post pass", post[i]);

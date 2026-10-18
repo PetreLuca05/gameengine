@@ -1,9 +1,9 @@
-// Virtualized geometry scene (docs/VGEO.md "GPU module"): the global GPU tables every view culls
-// against. Meshes (VgMesh + their BVH nodes, groups and pages) and instances (32 B VgInstance,
-// binned into 8 m placement cells) are registered at load time and uploaded by vgeo_scene_commit;
-// nothing here runs per frame. Page pool: without a budget every page is resident (slot = global
-// page index); with one (vgeo_scene_set_pool, the streamer) the pool has that many 128 KiB slots and
-// only the root pages are resident after a commit: src/render/vgeo/vgeo_stream.c fills the rest.
+// vgeo scene (docs/VGEO.md "Scene tables"): the global tables the classic renderer draws. Meshes
+// (VgMesh + their BVH nodes, groups and pages) and instances (32 B VgInstance, binned into 8 m
+// placement cells) are registered at load time and committed by vgeo_scene_commit; nothing here runs
+// per frame. Without a context (the game: vgeo_scene_init(s, NULL)) the tables stay on the CPU; with
+// one the commit also uploads them and a page pool (every page resident without a budget, slot =
+// global page index; vgeo_scene_set_pool: root pages only, the page streamer of branch `nanite`).
 // The CPU keeps every page's header + cluster records ("meta": the CPU reference cut, tests, debug)
 // and a source for the payload: the page data in memory, or a byte range of the .vgeo file.
 #ifndef DG_VGEO_SCENE_H

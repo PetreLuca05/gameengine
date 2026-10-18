@@ -97,7 +97,7 @@
       "label": "locked: red key",
       "door": {"name": "door_b", "locked": true, "key": "key_red", "color": [0.24, 0.24, 0.24]}
     },
-    {"_comment": "Foliage yard (south-east, x 60..380, z 80..400): foliage_test_scatter [count=300000] fills it with vgeo placement chunks (docs/VGEO.md \"Foliage support\"); this 8 m wall along its north edge is the Hi-Z occluder of foliage_check (stand at (220, 0, 75.3) facing south).", "type": "box", "pos": [220, 0, 76], "size": [60, 8, 0.5], "color": [0.55, 0.55, 0.55], "material": "concrete", "label": "foliage yard: foliage_test_scatter, foliage_check", "label_size": 0.4},
+    {"_comment": "Foliage yard (south-east, x 60..380, z 80..400): foliage_test_scatter [count=300000] fills it with vgeo placement chunks (docs/VGEO.md \"Foliage support\"); an 8 m wall along its north edge.", "type": "box", "pos": [220, 0, 76], "size": [60, 8, 0.5], "color": [0.55, 0.55, 0.55], "material": "concrete", "label": "foliage yard: foliage_test_scatter", "label_size": 0.4},
     {"type": "box", "pos": [17, 0, 4], "size": [10.25, 3.5, 0.25], "color": [0.60, 0.60, 0.60]},
     {"type": "box", "pos": [22, 0, 9], "size": [0.25, 3.5, 10], "color": [0.60, 0.60, 0.60]},
     {"type": "doorway", "pos": [20, 0, 24], "yaw": -90, "length": 12, "height": 4.0, "thickness": 0.3, "door_width": 3.0, "door_height": 3.0, "color": [0.58, 0.58, 0.58], "label": "gate (use lever)"},

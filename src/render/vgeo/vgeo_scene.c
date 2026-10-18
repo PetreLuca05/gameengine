@@ -355,12 +355,16 @@ void vgeo_scene_reserve_placements(VgScene *s, u32 instances, u32 cells) {
     p->cell_cap = cells;
 }
 
-static void dirty_range(VgPlacements *p, u32 first, u32 count) {
-    if (!count) return;
+// The ranges vgeo_scene_placement_record uploads (a CPU-only scene, without a context, has no GPU copy).
+static void dirty_range(VgScene *s, u32 first, u32 count) {
+    VgPlacements *p = &s->pl;
+    if (!count || !s->ctx) return;
     GROW(p->dirty_inst, p->dirty_inst_n, p->dirty_inst_cap, 1);
     p->dirty_inst[p->dirty_inst_n++] = (VgRange){ first, count };
 }
-static void dirty_cell(VgPlacements *p, u32 c) {
+static void dirty_cell(VgScene *s, u32 c) {
+    VgPlacements *p = &s->pl;
+    if (!s->ctx) return;
     GROW(p->dirty_cells, p->dirty_cells_n, p->dirty_cells_cap, 1);
     p->dirty_cells[p->dirty_cells_n++] = c;
 }
@@ -419,9 +423,9 @@ u32 vgeo_scene_placement_add(VgScene *s, const VgCell *cells, u32 ncells, const 
         cl->count = DG_MIN(cells[k].count, n - DG_MIN(cells[k].first, n));
         for (u32 i = cl->first; i < cl->first + cl->count; i++) p->inst[i].cell = c;
         cell_bounds(s, cl);
-        dirty_cell(p, c);
+        dirty_cell(s, c);
     }
-    dirty_range(p, first, n);
+    dirty_range(s, first, n);
     p->live_chunks++;
     p->live_instances += n;
     return h;
@@ -436,7 +440,7 @@ void vgeo_scene_placement_remove(VgScene *s, u32 h) {
         p->cells[c] = k_empty_cell;
         p->cell_chunk[c] = ~0u;
         p->free_cells[p->free_cells_n++] = c;
-        dirty_cell(p, c);
+        dirty_cell(s, c);
     }
     // instance range back into the sorted free list, merged with its neighbours
     u32 at = 0;

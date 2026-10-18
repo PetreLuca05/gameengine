@@ -1783,7 +1783,7 @@ void chars_present_tick(World *w, vec3 cam_pos, float fov_deg, float screen_h, f
     float quality = g->lod_quality ? 0.5f + 0.25f * (float)g->lod_quality->i : 1.0f;
     g->lod.bias = (g->lod_bias ? g->lod_bias->f : 1.0f) * quality;
     int force = g->lod_force && g->lod_force->i >= 0 ? g->lod_force->i : g->force_lod;
-    bool lod_new = lod_active();   // docs/LOD.md (r_vgeo 0); r_vgeo 1 / r_lod_legacy: the ranges from before
+    bool lod_new = lod_active();   // docs/LOD.md; r_lod_legacy: the ranges from before
     const LodTable *lt = lod_table();
     float lod_s = lod_scale(LODC_CHARACTER) * quality;
     // Scoped (docs/LOD.md "Scopes"): a character inside the scope picture-in-picture takes the larger of

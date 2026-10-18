@@ -12,7 +12,7 @@ at the densities of the asset's table and shaded by the ground-cover terms (`MAT
 | Atlases | `assets/foliage/tex/<atlas>_albedo.png` (sRGB, coverage alpha), `<atlas>_nta.png` (normal xy, thickness, AO): `tools/vfxgen/groundgen.py` (recipes `assets/foliage/gen`) |
 | Pure C | `src/render/vgeo/grass_asset.c` (JSON, clump mesh, material, cover parameters, clumping noise) |
 | Renderer | `vk_vgeo.c` (`foliage_build_grass`, `grass_update_tier`, `render_grass_fade`), `ground.c` (cover table, ground colours, macro), `vk_classic.c` (the nta map in the material set) |
-| Shaders | `shaders/cover.glsl` (both renderers' lit pass), `terrain/terrain_ground.glsl`, `terrain/terrain_macro.glsl` |
+| Shaders | `shaders/cover.glsl` (the lit passes), `terrain/terrain_ground.glsl`, `terrain/terrain_macro.glsl` |
 | Placement | `src/world/openworld_foliage.c` (`grass_cover`) |
 | Tests | `tests/test_grass.c` (ctest `grass`), `tools/tests/ground_tex_check.py` (atlases), `tools/ground_match.py blades` |
 

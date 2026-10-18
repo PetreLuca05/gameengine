@@ -251,7 +251,7 @@ is 4 images (≈ $0.80): one broad-blade sheet, one tussock sheet, `ground_litte
 - Terrain: one material id per 1 m sample (`MgRaster.mat`), blended in `surf_terrain` from the 4 nearest
   samples with a height bias; per-layer constants hardcoded in GLSL; one rotated anti-tile tap; no macro,
   curvature, moisture, wear or distance-to-border data; not hot reloadable. The frame descriptor set is full
-  (16 bindings). Terrain is a legacy draw shaded by `lit.frag` in both renderers (one implementation).
+  (16 bindings). Terrain is a legacy draw shaded by `lit.frag` (one implementation).
 - No fidelity knob for terrain; `r_surfaces` is a plain cvar. Grass has density / wind / impostor knobs only.
 - Bug found on the way: `vgeo_gen_foliage_mask` tests `VG_FOLIAGE_CROP` twice (`vgeo_procgen_foliage.c:299`),
   so the procedural wheat fallback is empty (hidden by `wheat.png`).
