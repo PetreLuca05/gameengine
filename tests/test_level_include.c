@@ -183,8 +183,18 @@ static void test_devroom_vegetation(void) {
     for (size_t i = 0; i < sizeof(spots) / sizeof(spots[0]); i++) check_ground(&g, &r, spots[i][0], spots[i][1], "spot");
     // the vegetation is still there: trees in the forests, the pond holds water
     float trees = 0;
-    for (int i = -40; i <= 40; i += 4) trees += mapgen_tree_density(&g, &r, -140.0f + (float)i, -215.0f, NULL, NULL);
+    for (int i = -40; i <= 40; i += 4) trees += mapgen_tree_density(&g, &r, -60.0f + (float)i, -330.0f, NULL, NULL);
     CHECK(trees > 0.0f, "the pine forest has trees");
+    // The audio range's open field (docs/AUDIO_PROCEDURAL.md): nothing within 450 m of (-700, 300).
+    for (int dz = -440; dz <= 440; dz += 40)
+        for (int dx = -440; dx <= 440; dx += 40) {
+            if (dx * dx + dz * dz > 440 * 440) continue;
+            float x = -700.0f + (float)dx, z = 300.0f + (float)dz;
+            u8 m;
+            float h = mapgen_height(&g, x, z, &m);
+            CHECK(fabsf(h) < 0.01f, "open field (%.0f, %.0f): ground %.3f", x, z, h);
+            CHECK(mapgen_tree_density(&g, &r, x, z, NULL, NULL) == 0.0f, "open field (%.0f, %.0f): trees", x, z);
+        }
     CHECK(mapgen_water_level(&g, 0, -205) > -100.0f && mapgen_height(&g, 0, -205, NULL) < mapgen_water_level(&g, 0, -205), "the pond holds water");
     printf("devroom_vegetation: %d dev room anchors on flat, clear ground\n", n);
     mapgen_raster_free(&r);

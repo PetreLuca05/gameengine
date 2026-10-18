@@ -13,24 +13,25 @@
     "features": [
       {"type": "rim", "edges": "WNES", "height": 60, "width": 90},
       {"type": "mountain", "pos": [-850, -750], "radius": [360, 300], "height": 110, "ridge": 0.6},
-      {"type": "mountain", "pos": [-800, 850], "radius": [320, 280], "height": 85, "ridge": 0.5},
+      {"type": "mountain", "pos": [900, 1000], "radius": [320, 280], "height": 85, "ridge": 0.5},
       {"type": "hill", "pos": [500, -950], "radius": [260, 200], "height": 40},
       {"type": "hill", "pos": [350, 950], "radius": [300, 220], "height": 45},
-      {"type": "hill", "pos": [-330, -300], "radius": [70, 60], "height": 6},
+      {"type": "hill", "pos": [-200, -560], "radius": [70, 60], "height": 6},
       {"type": "hill", "pos": [430, -300], "radius": [60, 70], "height": 5},
       {"type": "lake", "pos": [0, -205], "radius": [48, 30], "yaw": 10, "level": -1.4, "depth": 4, "shore_noise": 10},
-      {"type": "paint", "pos": [-330, -110], "size": [160, 120], "material": "meadow"},
+      {"type": "paint", "pos": [160, -380], "size": [160, 120], "material": "meadow"},
+      {"_comment": "The dev room audio range's open field (docs/AUDIO_PROCEDURAL.md 'Audio range'): nothing within 450 m of (-700, 0, 300), as on the dev room's endless floor: a flat meadow (no trees: pads keep only forest trees; grass has no collision). Paint features win over pads: keep them off the dev room's footprint.", "type": "pad", "pos": [-700, 300], "size": [920, 920], "level": 0, "blend": 60, "material": "meadow"},
       {"type": "paint", "pos": [-90, 360], "size": [150, 70], "material": "field"},
-      {"type": "forest", "pos": [-140, -215], "radius": [85, 70], "density": 3.6, "pine": 1.0, "dead": 0.02},
+      {"type": "forest", "pos": [-60, -330], "radius": [85, 70], "density": 3.6, "pine": 1.0, "dead": 0.02},
       {"type": "forest", "pos": [150, -215], "radius": [85, 70], "density": 3.0, "pine": 0.0, "dead": 0.02},
-      {"type": "forest", "pos": [-300, 80], "radius": [65, 75], "density": 2.2, "pine": 0.3, "dead": 0.85},
+      {"type": "forest", "pos": [200, 500], "radius": [65, 75], "density": 2.2, "pine": 0.3, "dead": 0.85},
       {"type": "forest", "pos": [-120, 230], "radius": [65, 70], "density": 2.8, "pine": 0.5, "dead": 0.12}
     ],
     "roads": [
-      {"class": "trail", "name": "Pond trail", "points": [[0, -95], [-10, -150], [-60, -180], [-140, -215], [-200, -170], [-300, -120]], "smooth": true},
+      {"class": "trail", "name": "Pond trail", "points": [[0, -95], [-10, -150], [-40, -230], [-60, -330]], "smooth": true},
       {"class": "trail", "name": "Broadleaf trail", "points": [[-10, -150], [60, -175], [150, -215]], "smooth": true},
       {"class": "trail", "name": "South trail", "points": [[0, 100], [-50, 150], [-120, 230], [-100, 310], [-90, 325]], "smooth": true},
-      {"class": "trail", "name": "Dead wood trail", "points": [[-185, 20], [-240, 50], [-300, 80]], "smooth": true}
+      {"class": "trail", "name": "Dead wood trail", "points": [[30, 410], [120, 455], [200, 500]], "smooth": true}
     ],
     "zombies": {"wild_density": 0, "wild_max": 0, "cap": 0, "despawn": 100000, "spawn_min": 40, "spawn_max": 95, "sense": 0}
   },
