@@ -2,7 +2,7 @@
 // (arrays appended, objects merged with the including level winning, values filled only where missing),
 // errors (missing level, cycles), the footprint pads; and on the shipped data (run from the exe folder):
 // devroom_vegetation holds every dev room element, the generated ground is flat at y = 0 (the room
-// floor's pad a little lower) and concrete under every brush, entity and footprint area, with no trees.
+// floor slab: the nature ground) and flat grass under every brush, entity and footprint area, with no trees.
 #include "world/level_include.h"
 #include "world/mapgen.h"
 #include "cJSON.h"
@@ -133,8 +133,9 @@ static void check_ground(const MapGen *g, const MgRaster *r, float x, float z, c
     u8 mat;
     float h = mapgen_height(g, x, z, &mat);
     float d = fmaxf(fabsf(x), fabsf(z));   // the hall's floor box: 61 m square, its pad 8 cm low, 0.6 m blend
-    if (d <= 30.5f || d >= 31.1f) CHECK(fabsf(h - (d <= 30.5f ? -0.08f : 0.0f)) < 0.005f, "%s (%.1f, %.1f): ground %.3f", what, x, z, h);
-    CHECK(mat == MGM_CONCRETE, "%s (%.1f, %.1f): material %s", what, x, z, mapgen_material_name(mat));
+    (void)d;   // devroom_vegetation: no floor slab, no sunk room pad: the nature ground at y = 0 everywhere
+    CHECK(fabsf(h) < 0.005f, "%s (%.1f, %.1f): ground %.3f", what, x, z, h);
+    CHECK(mat == MGM_GRASS, "%s (%.1f, %.1f): material %s", what, x, z, mapgen_material_name(mat));
     CHECK(mapgen_tree_density(g, r, x, z, NULL, NULL) == 0.0f, "%s (%.1f, %.1f): trees", what, x, z);
 }
 

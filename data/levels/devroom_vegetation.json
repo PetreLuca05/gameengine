@@ -2,10 +2,10 @@
   "name": "DevRoom_Vegetation",
   "comment": "The dev room in the vegetation valley (map devroom_vegetation): the vegetation map's generator world (seed, terrain, every foliage kind: pine forest, broadleaf forest, dead wood, mixed forest, meadow, wheat field, pond) laid out around the whole dev room, which comes in by \"include\" (level_include.h, docs/ZOMBIE_MAP.md 'Level includes') and so always tracks data/levels/devroom.json: its brushes, entities, labels, spawns, vehicles, pumps, spikes, water pool, puddles, post volumes and weather, at the dev room's own coordinates. \"ground\" flattens the terrain to y = 0 (concrete, no trees or grass) under its footprint, so every dev room command and script coordinate works unchanged. The terrain is the vegetation map's lowered by 14 m (ground at 0) and 2.8 km across, so the 1.3 km landmark tower and the 500 m ballistics range fit. Engine coordinates: X east, Z south (north = -Z). Format: docs/ZOMBIE_MAP.md.",
   "env": {"sun_dir": [0.45, 0.8, 0.35], "sun_color": [1.0, 0.95, 0.86], "sun_intensity": 3.0, "sky": [0.45, 0.55, 0.72], "ground": [0.28, 0.27, 0.22], "fog": [0.62, 0.68, 0.75], "fog_density": 0.0012, "sky_zenith": [0.24, 0.42, 0.72], "sky_horizon": [0.7, 0.76, 0.84], "clouds": 0.35},
-  "_room": "Merged over the dev room's room (the including level wins): its floor without the grid.",
-  "room": {"floor_grid": false},
+  "_room": "Merged over the dev room's room (the including level wins): no floor slab, the dev room stands on the valley's own ground (flat grass pads, no trees).",
+  "room": {"floor": false},
   "include": [
-    {"level": "devroom", "ground": {"level": 0, "cell": 4, "margin": 6, "blend": 12, "material": "concrete", "room_sink": 0.08}}
+    {"level": "devroom", "ground": {"level": 0, "cell": 4, "margin": 6, "blend": 12, "material": "grass", "room_sink": 0}}
   ],
   "world": {
     "seed": 4242,
