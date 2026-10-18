@@ -238,7 +238,7 @@ def r06_waits(p, ctx):
             out.append(Finding("R06", "wait:" + w, "Main thread waits %.2f ms on %s (GPU bound: GPU %.2f ms vs CPU work %.2f ms)" % (ms, w, gpu, cpu - ms),
                                "frame", {"zone": "wait:" + w}, {p.key: {"wait_ms": round(ms, 3), "gpu_ms": round(gpu, 3), "cpu_ms": round(cpu, 3)}}, {},
                                "high", "M", "Nothing to fix on the CPU side; the GPU findings of this scene are the lever.", scene=p.key,
-                               verify="no change (classification)", below_noise=True))
+                               verify="no change (classification)", fidelity="info", below_noise=True))
             continue
         out.append(Finding("R06", "wait:" + w, "Main thread blocked %.2f ms per frame on %s" % (ms, w), "frame", {"zone": "wait:" + w},
                            {p.key: {"wait_ms": round(ms, 3), "max_ms": round(z.get("max_ms", 0), 3), "gpu_ms": round(gpu, 3)}}, {"cpu_ms": ms},

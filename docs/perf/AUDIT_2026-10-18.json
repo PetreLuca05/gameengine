@@ -1,8 +1,8 @@
 {
  "meta": {
   "date": "2026-10-18",
-  "profiles": 6,
-  "machine": "unknown",
+  "profiles": 8,
+  "machine": "Linux container, Mesa lavapipe 25.2 (software Vulkan), 4 cores",
   "rules_runtime": [
    "R01",
    "R02",
@@ -41,12 +41,14 @@
   ]
  },
  "profiles": [
-  "/tmp/claude-0/-home-user-gameengine/ce674441-9067-5382-a7b4-35a05beb6d57/scratchpad/run/audit/devroom_low.json",
-  "/tmp/claude-0/-home-user-gameengine/ce674441-9067-5382-a7b4-35a05beb6d57/scratchpad/run/audit/devroom_modern.json",
-  "/tmp/claude-0/-home-user-gameengine/ce674441-9067-5382-a7b4-35a05beb6d57/scratchpad/run/audit/horde500_low.json",
-  "/tmp/claude-0/-home-user-gameengine/ce674441-9067-5382-a7b4-35a05beb6d57/scratchpad/run/audit/horde500_modern.json",
-  "/tmp/claude-0/-home-user-gameengine/ce674441-9067-5382-a7b4-35a05beb6d57/scratchpad/run/audit/lan2/lan2_client.json",
-  "/tmp/claude-0/-home-user-gameengine/ce674441-9067-5382-a7b4-35a05beb6d57/scratchpad/run/audit/lan2/lan2_host.json"
+  "/tmp/claude-0/-home-user-gameengine/ce674441-9067-5382-a7b4-35a05beb6d57/scratchpad/run/final/night_lights/night_lights_low.json",
+  "/tmp/claude-0/-home-user-gameengine/ce674441-9067-5382-a7b4-35a05beb6d57/scratchpad/run/final/night_lights/night_lights_modern.json",
+  "/tmp/claude-0/-home-user-gameengine/ce674441-9067-5382-a7b4-35a05beb6d57/scratchpad/run/final/devroom/devroom_low.json",
+  "/tmp/claude-0/-home-user-gameengine/ce674441-9067-5382-a7b4-35a05beb6d57/scratchpad/run/final/devroom/devroom_modern.json",
+  "/tmp/claude-0/-home-user-gameengine/ce674441-9067-5382-a7b4-35a05beb6d57/scratchpad/run/final/horde500/horde500_low.json",
+  "/tmp/claude-0/-home-user-gameengine/ce674441-9067-5382-a7b4-35a05beb6d57/scratchpad/run/final/horde500/horde500_modern.json",
+  "/tmp/claude-0/-home-user-gameengine/ce674441-9067-5382-a7b4-35a05beb6d57/scratchpad/run/final/vehicle_yard/vehicle_yard_low.json",
+  "/tmp/claude-0/-home-user-gameengine/ce674441-9067-5382-a7b4-35a05beb6d57/scratchpad/run/final/vehicle_yard/vehicle_yard_modern.json"
  ],
  "findings": [
   {
@@ -59,40 +61,50 @@
     "file": "src/render/render.c"
    },
    "evidence": {
+    "night_lights/low": {
+     "gpu_ms": 16.2826,
+     "draws": 86.9,
+     "shadow_items": 797.5
+    },
+    "night_lights/modern": {
+     "gpu_ms": 113.6105,
+     "draws": 1086.2,
+     "shadow_items": 1575.5
+    },
     "devroom/low": {
-     "gpu_ms": 16.4558,
+     "gpu_ms": 18.9553,
      "draws": 97.1,
      "shadow_items": 797.5
     },
     "devroom/modern": {
-     "gpu_ms": 131.9632,
+     "gpu_ms": 138.8579,
      "draws": 1118.9,
      "shadow_items": 1575.5
     },
     "horde500/low": {
-     "gpu_ms": 13.4797,
+     "gpu_ms": 13.8232,
      "draws": 45.9,
      "shadow_items": 797.5
     },
     "horde500/modern": {
-     "gpu_ms": 131.3289,
+     "gpu_ms": 129.1816,
      "draws": 924.3,
      "shadow_items": 1575.5
     },
-    "lan2_client/4": {
-     "gpu_ms": 169.5658,
-     "draws": 1267.5,
-     "shadow_items": 1575.5
+    "vehicle_yard/low": {
+     "gpu_ms": 11.1574,
+     "draws": 49.6,
+     "shadow_items": 864.7
     },
-    "lan2_host/4": {
-     "gpu_ms": 179.2658,
-     "draws": 1070.6,
-     "shadow_items": 1575.5
+    "vehicle_yard/modern": {
+     "gpu_ms": 133.6211,
+     "draws": 862.4,
+     "shadow_items": 1718.7
     }
    },
    "savings": {
     "cpu_ms": 0.0,
-    "gpu_ms": 107.55947368421052,
+    "gpu_ms": 83.31473684210528,
     "mb": 0.0,
     "bytes_s": 0.0
    },
@@ -103,16 +115,18 @@
    "verify": "verify by image + state diff after implementation (perf_verify)",
    "fix_id": null,
    "scenes": [
+    "night_lights/low",
+    "night_lights/modern",
     "devroom/low",
     "devroom/modern",
     "horde500/low",
     "horde500/modern",
-    "lan2_client/4",
-    "lan2_host/4"
+    "vehicle_yard/low",
+    "vehicle_yard/modern"
    ],
    "source": "runtime",
    "below_noise": false,
-   "score": 8.06696
+   "score": 6.24861
   },
   {
    "id": "F-7b209b",
@@ -124,18 +138,22 @@
     "function": "draw_sun_casters"
    },
    "evidence": {
+    "night_lights/modern": {
+     "shadow_items": 1575,
+     "draw_items": 551
+    },
     "devroom/modern": {
      "shadow_items": 1575,
      "draw_items": 551
     },
-    "lan2_client/4": {
-     "shadow_items": 1575,
-     "draw_items": 545
+    "vehicle_yard/modern": {
+     "shadow_items": 1719,
+     "draw_items": 547
     }
    },
    "savings": {
     "cpu_ms": 0.0,
-    "gpu_ms": 33.91315789473685,
+    "gpu_ms": 27.771578947368425,
     "mb": 0.0,
     "bytes_s": 0.0
    },
@@ -146,12 +164,13 @@
    "verify": "verify by image + state diff after implementation (perf_verify)",
    "fix_id": null,
    "scenes": [
+    "night_lights/modern",
     "devroom/modern",
-    "lan2_client/4"
+    "vehicle_yard/modern"
    ],
    "source": "runtime",
    "below_noise": false,
-   "score": 3.39132
+   "score": 2.77716
   },
   {
    "id": "F-c4fd8c",
@@ -162,40 +181,50 @@
     "pass": "sky_view"
    },
    "evidence": {
+    "night_lights/low": {
+     "runs_per_frame": 0.95,
+     "gpu_ms": 4.5204,
+     "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
+    },
+    "night_lights/modern": {
+     "runs_per_frame": 0.95,
+     "gpu_ms": 4.8326,
+     "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
+    },
     "devroom/low": {
      "runs_per_frame": 0.95,
-     "gpu_ms": 3.7574,
+     "gpu_ms": 4.5625,
      "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
     },
     "devroom/modern": {
      "runs_per_frame": 0.95,
-     "gpu_ms": 5.4582,
+     "gpu_ms": 5.504,
      "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
     },
     "horde500/low": {
      "runs_per_frame": 0.95,
-     "gpu_ms": 3.709,
+     "gpu_ms": 4.2821,
      "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
     },
     "horde500/modern": {
      "runs_per_frame": 0.95,
-     "gpu_ms": 5.0238,
+     "gpu_ms": 5.1896,
      "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
     },
-    "lan2_client/4": {
+    "vehicle_yard/low": {
      "runs_per_frame": 0.95,
-     "gpu_ms": 9.4227,
+     "gpu_ms": 4.2742,
      "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
     },
-    "lan2_host/4": {
+    "vehicle_yard/modern": {
      "runs_per_frame": 0.95,
-     "gpu_ms": 7.5264,
+     "gpu_ms": 4.7062,
      "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
     }
    },
    "savings": {
     "cpu_ms": 0.0,
-    "gpu_ms": 8.951575,
+    "gpu_ms": 5.22877,
     "mb": 0.0,
     "bytes_s": 0.0
    },
@@ -206,16 +235,18 @@
    "verify": "verify by image + state diff after implementation (perf_verify)",
    "fix_id": null,
    "scenes": [
+    "night_lights/low",
+    "night_lights/modern",
     "devroom/low",
     "devroom/modern",
     "horde500/low",
     "horde500/modern",
-    "lan2_client/4",
-    "lan2_host/4"
+    "vehicle_yard/low",
+    "vehicle_yard/modern"
    ],
    "source": "runtime",
    "below_noise": false,
-   "score": 1.79031
+   "score": 1.04575
   },
   {
    "id": "F-a7f6ca",
@@ -226,40 +257,50 @@
     "pass": "sky_cshadow"
    },
    "evidence": {
+    "night_lights/low": {
+     "runs_per_frame": 0.95,
+     "gpu_ms": 0.5891,
+     "inputs": "cloud shadow map (cloud map + camera texel snap)"
+    },
+    "night_lights/modern": {
+     "runs_per_frame": 0.95,
+     "gpu_ms": 2.2842,
+     "inputs": "cloud shadow map (cloud map + camera texel snap)"
+    },
     "devroom/low": {
      "runs_per_frame": 0.95,
-     "gpu_ms": 0.5109,
+     "gpu_ms": 0.6044,
      "inputs": "cloud shadow map (cloud map + camera texel snap)"
     },
     "devroom/modern": {
      "runs_per_frame": 0.95,
-     "gpu_ms": 2.5549,
+     "gpu_ms": 2.6679,
      "inputs": "cloud shadow map (cloud map + camera texel snap)"
     },
     "horde500/low": {
      "runs_per_frame": 0.95,
-     "gpu_ms": 0.5218,
+     "gpu_ms": 0.6348,
      "inputs": "cloud shadow map (cloud map + camera texel snap)"
     },
     "horde500/modern": {
      "runs_per_frame": 0.95,
-     "gpu_ms": 1.6063,
+     "gpu_ms": 1.6649,
      "inputs": "cloud shadow map (cloud map + camera texel snap)"
     },
-    "lan2_client/4": {
+    "vehicle_yard/low": {
      "runs_per_frame": 0.95,
-     "gpu_ms": 3.9225,
+     "gpu_ms": 0.5931,
      "inputs": "cloud shadow map (cloud map + camera texel snap)"
     },
-    "lan2_host/4": {
+    "vehicle_yard/modern": {
      "runs_per_frame": 0.95,
-     "gpu_ms": 3.8298,
+     "gpu_ms": 1.6933,
      "inputs": "cloud shadow map (cloud map + camera texel snap)"
     }
    },
    "savings": {
     "cpu_ms": 0.0,
-    "gpu_ms": 3.7263575,
+    "gpu_ms": 2.5345225,
     "mb": 0.0,
     "bytes_s": 0.0
    },
@@ -270,16 +311,18 @@
    "verify": "verify by image + state diff after implementation (perf_verify)",
    "fix_id": null,
    "scenes": [
+    "night_lights/low",
+    "night_lights/modern",
     "devroom/low",
     "devroom/modern",
     "horde500/low",
     "horde500/modern",
-    "lan2_client/4",
-    "lan2_host/4"
+    "vehicle_yard/low",
+    "vehicle_yard/modern"
    ],
    "source": "runtime",
    "below_noise": false,
-   "score": 0.74527
+   "score": 0.5069
   },
   {
    "id": "F-b0d253",
@@ -290,40 +333,50 @@
     "pass": "sky_clouds"
    },
    "evidence": {
+    "night_lights/low": {
+     "runs_per_frame": 0.47,
+     "gpu_ms": 1.5378,
+     "inputs": "cloud map (cloud cover, wind offset, time)"
+    },
+    "night_lights/modern": {
+     "runs_per_frame": 0.47,
+     "gpu_ms": 2.8376,
+     "inputs": "cloud map (cloud cover, wind offset, time)"
+    },
     "devroom/low": {
      "runs_per_frame": 0.47,
-     "gpu_ms": 1.3934,
+     "gpu_ms": 1.7523,
      "inputs": "cloud map (cloud cover, wind offset, time)"
     },
     "devroom/modern": {
      "runs_per_frame": 0.47,
-     "gpu_ms": 3.0052,
+     "gpu_ms": 3.1421,
      "inputs": "cloud map (cloud cover, wind offset, time)"
     },
     "horde500/low": {
      "runs_per_frame": 0.47,
-     "gpu_ms": 1.3398,
+     "gpu_ms": 1.8894,
      "inputs": "cloud map (cloud cover, wind offset, time)"
     },
     "horde500/modern": {
      "runs_per_frame": 0.47,
-     "gpu_ms": 2.407,
+     "gpu_ms": 2.5917,
      "inputs": "cloud map (cloud cover, wind offset, time)"
     },
-    "lan2_client/4": {
+    "vehicle_yard/low": {
      "runs_per_frame": 0.47,
-     "gpu_ms": 3.9125,
+     "gpu_ms": 1.4858,
      "inputs": "cloud map (cloud cover, wind offset, time)"
     },
-    "lan2_host/4": {
+    "vehicle_yard/modern": {
      "runs_per_frame": 0.47,
-     "gpu_ms": 4.0181,
+     "gpu_ms": 2.4357,
      "inputs": "cloud map (cloud cover, wind offset, time)"
     }
    },
    "savings": {
     "cpu_ms": 0.0,
-    "gpu_ms": 1.908575,
+    "gpu_ms": 1.4925,
     "mb": 0.0,
     "bytes_s": 0.0
    },
@@ -334,74 +387,18 @@
    "verify": "verify by image + state diff after implementation (perf_verify)",
    "fix_id": null,
    "scenes": [
+    "night_lights/low",
+    "night_lights/modern",
     "devroom/low",
     "devroom/modern",
     "horde500/low",
     "horde500/modern",
-    "lan2_client/4",
-    "lan2_host/4"
+    "vehicle_yard/low",
+    "vehicle_yard/modern"
    ],
    "source": "runtime",
    "below_noise": false,
-   "score": 0.38171
-  },
-  {
-   "id": "F-95b664",
-   "rule": "R10",
-   "title": "117 palettes uploaded per frame for 6 evaluated poses",
-   "system": "anim/skinning",
-   "location": {
-    "file": "src/render/vgeo/vgeo_skin.c"
-   },
-   "evidence": {
-    "devroom/low": {
-     "palettes": 117.0,
-     "anim_evals": 5.8
-    },
-    "devroom/modern": {
-     "palettes": 117.0,
-     "anim_evals": 7.6
-    },
-    "horde500/low": {
-     "palettes": 995.0,
-     "anim_evals": 64.0
-    },
-    "horde500/modern": {
-     "palettes": 995.0,
-     "anim_evals": 64.0
-    },
-    "lan2_client/4": {
-     "palettes": 117.0,
-     "anim_evals": 7.5
-    },
-    "lan2_host/4": {
-     "palettes": 657.2,
-     "anim_evals": 54.4
-    }
-   },
-   "savings": {
-    "cpu_ms": 1.862,
-    "gpu_ms": 0.0,
-    "mb": 0.0,
-    "bytes_s": 0.0
-   },
-   "confidence": "medium",
-   "effort": "M",
-   "fix": "Upload a palette once per pose and let the main, shadow and viewmodel passes share the slot (the bone SSBO already holds this frame's palettes).",
-   "fidelity_impact": "none",
-   "verify": "verify by image + state diff after implementation (perf_verify)",
-   "fix_id": null,
-   "scenes": [
-    "devroom/low",
-    "devroom/modern",
-    "horde500/low",
-    "horde500/modern",
-    "lan2_client/4",
-    "lan2_host/4"
-   ],
-   "source": "runtime",
-   "below_noise": false,
-   "score": 0.3724
+   "score": 0.2985
   },
   {
    "id": "F-7519d1",
@@ -417,14 +414,10 @@
     "horde500/modern": {
      "memcpy_mb": 16.33,
      "calls": 10240
-    },
-    "lan2_host/4": {
-     "memcpy_mb": 14.57,
-     "calls": 13463
     }
    },
    "savings": {
-    "cpu_ms": 1.306034704208374,
+    "cpu_ms": 1.3060347785949709,
     "gpu_ms": 0.0,
     "mb": 0.0,
     "bytes_s": 0.0
@@ -437,80 +430,44 @@
    "fix_id": null,
    "scenes": [
     "horde500/low",
-    "horde500/modern",
-    "lan2_host/4"
+    "horde500/modern"
    ],
    "source": "runtime",
    "below_noise": false,
    "score": 0.26121
   },
   {
-   "id": "F-f33e1a",
-   "rule": "R07",
-   "title": "Job fn_0x557d71be9b70 runs 5760 times for 0.9 us each (queue overhead dominates)",
-   "system": "core/jobs",
+   "id": "F-76a2e9",
+   "rule": "R05",
+   "title": "11.0 MB of pooled frame graph images unused by the current graph",
+   "system": "render/fg",
    "location": {
-    "function": "fn_0x557d71be9b70"
+    "file": "src/render/graph/fg.c"
    },
    "evidence": {
-    "lan2_host/4": {
-     "count": 5760,
-     "avg_us": 0.88,
-     "queue_ms_avg": 0.0
+    "night_lights/modern": {
+     "stale_images": 3,
+     "stale_mb": 11.04
     }
    },
    "savings": {
-    "cpu_ms": 0.28800000000000003,
+    "cpu_ms": 0.0,
     "gpu_ms": 0.0,
-    "mb": 0.0,
+    "mb": 11.04,
     "bytes_s": 0.0
    },
    "confidence": "medium",
    "effort": "S",
-   "fix": "Batch the work into fewer, larger jobs.",
+   "fix": "fg_trim after level / setting changes (the 240-frame eviction keeps them meanwhile).",
    "fidelity_impact": "none",
    "verify": "verify by image + state diff after implementation (perf_verify)",
    "fix_id": null,
    "scenes": [
-    "lan2_host/4"
+    "night_lights/modern"
    ],
    "source": "runtime",
    "below_noise": false,
-   "score": 0.1728
-  },
-  {
-   "id": "F-34cb18",
-   "rule": "R07",
-   "title": "Job fn_0x556b005dbb70 runs 2880 times for 1.8 us each (queue overhead dominates)",
-   "system": "core/jobs",
-   "location": {
-    "function": "fn_0x556b005dbb70"
-   },
-   "evidence": {
-    "lan2_client/4": {
-     "count": 2880,
-     "avg_us": 1.78,
-     "queue_ms_avg": 0.0
-    }
-   },
-   "savings": {
-    "cpu_ms": 0.14400000000000002,
-    "gpu_ms": 0.0,
-    "mb": 0.0,
-    "bytes_s": 0.0
-   },
-   "confidence": "medium",
-   "effort": "S",
-   "fix": "Batch the work into fewer, larger jobs.",
-   "fidelity_impact": "none",
-   "verify": "verify by image + state diff after implementation (perf_verify)",
-   "fix_id": null,
-   "scenes": [
-    "lan2_client/4"
-   ],
-   "source": "runtime",
-   "below_noise": false,
-   "score": 0.0864
+   "score": 0.13248
   },
   {
    "id": "F-66ec5c",
@@ -521,22 +478,22 @@
     "zone": "game_render"
    },
    "evidence": {
-    "devroom/low": {
+    "night_lights/low": {
      "workers": 3,
      "worker_busy_ms": 0.001,
-     "frame_ms": 216.535,
+     "frame_ms": 229.824,
      "top_main_zones_ms": [
       [
        "game_render",
-       1.458
+       1.49
       ],
       [
        "input",
-       1.268
+       1.46
       ],
       [
        "render_end",
-       0.762
+       0.771
       ],
       [
        "vgeo:palettes_record",
@@ -544,148 +501,202 @@
       ],
       [
        "render:frame_graph",
-       0.387
+       0.407
+      ]
+     ]
+    },
+    "night_lights/modern": {
+     "workers": 3,
+     "worker_busy_ms": 0.005,
+     "frame_ms": 841.907,
+     "top_main_zones_ms": [
+      [
+       "input",
+       1.604
+      ],
+      [
+       "render:record_pre",
+       1.568
+      ],
+      [
+       "game_render",
+       1.559
+      ],
+      [
+       "render_end",
+       1.196
+      ],
+      [
+       "vgeo:palettes_record",
+       1.031
+      ]
+     ]
+    },
+    "devroom/low": {
+     "workers": 3,
+     "worker_busy_ms": 0.001,
+     "frame_ms": 240.045,
+     "top_main_zones_ms": [
+      [
+       "game_render",
+       1.667
+      ],
+      [
+       "input",
+       1.506
+      ],
+      [
+       "render_end",
+       0.885
+      ],
+      [
+       "vgeo:palettes_record",
+       0.472
+      ],
+      [
+       "render:frame_graph",
+       0.446
       ]
      ]
     },
     "devroom/modern": {
      "workers": 3,
-     "worker_busy_ms": 0.004,
-     "frame_ms": 843.635,
+     "worker_busy_ms": 0.003,
+     "frame_ms": 919.894,
      "top_main_zones_ms": [
       [
        "game_render",
-       1.474
+       1.606
       ],
       [
        "input",
-       1.295
+       1.408
       ],
       [
        "render_end",
-       1.136
+       1.218
       ],
       [
        "render:record_pre",
-       1.072
+       1.12
       ],
       [
        "vgeo:palettes_record",
-       0.913
+       0.945
       ]
      ]
     },
     "horde500/low": {
      "workers": 3,
-     "worker_busy_ms": 0.615,
-     "frame_ms": 219.882,
+     "worker_busy_ms": 0.68,
+     "frame_ms": 236.219,
      "top_main_zones_ms": [
       [
        "game_render",
-       4.126
+       4.171
       ],
       [
        "render:prepare",
-       2.928
-      ],
-      [
-       "render_end",
-       1.049
+       2.948
       ],
       [
        "input",
-       0.848
+       1.172
+      ],
+      [
+       "render_end",
+       1.038
       ],
       [
        "sim:anim_hitboxes",
-       0.633
+       0.769
       ]
      ]
     },
     "horde500/modern": {
      "workers": 3,
-     "worker_busy_ms": 0.598,
-     "frame_ms": 756.082,
+     "worker_busy_ms": 0.781,
+     "frame_ms": 816.813,
      "top_main_zones_ms": [
       [
        "game_render",
-       4.376
+       4.362
       ],
       [
        "render:prepare",
-       3.199
+       3.073
       ],
       [
        "render_end",
-       1.549
-      ],
-      [
-       "render:record_pre",
-       1.22
+       1.39
       ],
       [
        "input",
-       0.993
+       1.388
+      ],
+      [
+       "render:record_pre",
+       0.954
       ]
      ]
     },
-    "lan2_client/4": {
+    "vehicle_yard/low": {
      "workers": 3,
-     "worker_busy_ms": 0.007,
-     "frame_ms": 1222.182,
+     "worker_busy_ms": 0.001,
+     "frame_ms": 222.775,
      "top_main_zones_ms": [
       [
-       "render:record_pre",
-       2.275
-      ],
-      [
-       "render_end",
-       2.186
-      ],
-      [
        "game_render",
-       1.599
+       1.741
       ],
       [
        "input",
-       1.553
+       1.556
+      ],
+      [
+       "render_end",
+       0.828
+      ],
+      [
+       "sim:anim_hitboxes",
+       0.455
+      ],
+      [
+       "render:frame_graph",
+       0.447
+      ]
+     ]
+    },
+    "vehicle_yard/modern": {
+     "workers": 3,
+     "worker_busy_ms": 0.003,
+     "frame_ms": 865.776,
+     "top_main_zones_ms": [
+      [
+       "game_render",
+       1.616
+      ],
+      [
+       "input",
+       1.469
+      ],
+      [
+       "render_end",
+       1.144
+      ],
+      [
+       "render:record_pre",
+       0.976
       ],
       [
        "vgeo:palettes_record",
-       1.262
-      ]
-     ]
-    },
-    "lan2_host/4": {
-     "workers": 3,
-     "worker_busy_ms": 0.457,
-     "frame_ms": 911.075,
-     "top_main_zones_ms": [
-      [
-       "render:prepare",
-       4.188
-      ],
-      [
-       "game_render",
-       3.495
-      ],
-      [
-       "render_end",
-       2.507
-      ],
-      [
-       "render:record_pre",
-       2.182
-      ],
-      [
-       "input",
-       1.501
+       0.83
       ]
      ]
     }
    },
    "savings": {
-    "cpu_ms": 2.18785,
+    "cpu_ms": 2.181075,
     "gpu_ms": 0.0,
     "mb": 0.0,
     "bytes_s": 0.0
@@ -697,39 +708,51 @@
    "verify": "verify by image + state diff after implementation (perf_verify)",
    "fix_id": null,
    "scenes": [
+    "night_lights/low",
+    "night_lights/modern",
     "devroom/low",
     "devroom/modern",
     "horde500/low",
     "horde500/modern",
-    "lan2_client/4",
-    "lan2_host/4"
+    "vehicle_yard/low",
+    "vehicle_yard/modern"
    ],
    "source": "runtime",
    "below_noise": false,
-   "score": 0.08204
+   "score": 0.08179
   },
   {
-   "id": "F-692d04",
+   "id": "F-25e1c0",
    "rule": "R07",
-   "title": "Job fn_0x55d7b7492b70 runs 1380 times for 0.6 us each (queue overhead dominates)",
+   "title": "Job cull_range (vk_classic.c) runs 2616 times for 0.6 us each (queue overhead dominates)",
    "system": "core/jobs",
    "location": {
-    "function": "fn_0x55d7b7492b70"
+    "function": "cull_range (vk_classic.c)"
    },
    "evidence": {
+    "night_lights/modern": {
+     "count": 2616,
+     "avg_us": 0.57,
+     "queue_ms_avg": 0.0
+    },
     "devroom/modern": {
      "count": 1380,
-     "avg_us": 0.6,
+     "avg_us": 0.65,
      "queue_ms_avg": 0.0
     },
     "horde500/modern": {
      "count": 1848,
-     "avg_us": 1.05,
+     "avg_us": 0.99,
+     "queue_ms_avg": 0.0
+    },
+    "vehicle_yard/modern": {
+     "count": 912,
+     "avg_us": 0.63,
      "queue_ms_avg": 0.0
     }
    },
    "savings": {
-    "cpu_ms": 0.09240000000000001,
+    "cpu_ms": 0.13080000000000003,
     "gpu_ms": 0.0,
     "mb": 0.0,
     "bytes_s": 0.0
@@ -741,12 +764,14 @@
    "verify": "verify by image + state diff after implementation (perf_verify)",
    "fix_id": null,
    "scenes": [
+    "night_lights/modern",
     "devroom/modern",
-    "horde500/modern"
+    "horde500/modern",
+    "vehicle_yard/modern"
    ],
    "source": "runtime",
    "below_noise": false,
-   "score": 0.05544
+   "score": 0.07848
   },
   {
    "id": "F-d084cd",
@@ -758,6 +783,12 @@
     "function": "cvar_find"
    },
    "evidence": {
+    "night_lights/low": {
+     "calls_per_frame": 16.0
+    },
+    "night_lights/modern": {
+     "calls_per_frame": 17.0
+    },
     "devroom/low": {
      "calls_per_frame": 16.0
     },
@@ -770,11 +801,11 @@
     "horde500/modern": {
      "calls_per_frame": 18.0
     },
-    "lan2_client/4": {
-     "calls_per_frame": 17.0
+    "vehicle_yard/low": {
+     "calls_per_frame": 16.0
     },
-    "lan2_host/4": {
-     "calls_per_frame": 18.0
+    "vehicle_yard/modern": {
+     "calls_per_frame": 17.0
     }
    },
    "savings": {
@@ -790,12 +821,14 @@
    "verify": "perf_verify PF-0002 (perf_fix_disable A/B)",
    "fix_id": "PF-0002",
    "scenes": [
+    "night_lights/low",
+    "night_lights/modern",
     "devroom/low",
     "devroom/modern",
     "horde500/low",
     "horde500/modern",
-    "lan2_client/4",
-    "lan2_host/4"
+    "vehicle_yard/low",
+    "vehicle_yard/modern"
    ],
    "source": "runtime",
    "below_noise": false,
@@ -844,30 +877,25 @@
   {
    "id": "F-b6ea0c",
    "rule": "R24",
-   "title": "'light_shadows' rebinds a pipeline for 66% of its draws",
+   "title": "'light_shadows' rebinds a pipeline for 62% of its draws",
    "system": "render",
    "location": {
     "pass": "light_shadows"
    },
    "evidence": {
+    "night_lights/modern": {
+     "draws": 107.6842105263158,
+     "pipeline_binds": 66.60526315789474,
+     "descriptor_binds": 5.684210526315789
+    },
     "devroom/modern": {
      "draws": 51.026315789473685,
      "pipeline_binds": 33.8421052631579,
      "descriptor_binds": 1.3157894736842106
-    },
-    "lan2_client/4": {
-     "draws": 127.0,
-     "pipeline_binds": 75.0,
-     "descriptor_binds": 3.0
-    },
-    "lan2_host/4": {
-     "draws": 125.0,
-     "pipeline_binds": 73.0,
-     "descriptor_binds": 1.0
     }
    },
    "savings": {
-    "cpu_ms": 0.0375,
+    "cpu_ms": 0.03330263157894737,
     "gpu_ms": 0.0,
     "mb": 0.0,
     "bytes_s": 0.0
@@ -879,47 +907,12 @@
    "verify": "verify by image + state diff after implementation (perf_verify)",
    "fix_id": null,
    "scenes": [
-    "devroom/modern",
-    "lan2_client/4",
-    "lan2_host/4"
+    "night_lights/modern",
+    "devroom/modern"
    ],
    "source": "runtime",
    "below_noise": false,
-   "score": 0.0075
-  },
-  {
-   "id": "F-7e8239",
-   "rule": "R18",
-   "title": "UI rebuilds 23 text runs every frame (100% of frames unchanged), 0.26 ms",
-   "system": "ui",
-   "location": {
-    "file": "src/ui/gui/gui_draw.c",
-    "function": "gd_text"
-   },
-   "evidence": {
-    "lan2_client/4": {
-     "ui_ms": 0.255,
-     "text_runs": 23.0
-    }
-   },
-   "savings": {
-    "cpu_ms": 0.1275785,
-    "gpu_ms": 0.0,
-    "mb": 0.0,
-    "bytes_s": 0.0
-   },
-   "confidence": "low",
-   "effort": "L",
-   "fix": "Cache the shaped glyph runs per (string, font, size) and reuse the vertex block of panels whose inputs did not change.",
-   "fidelity_impact": "none",
-   "verify": "verify by image + state diff after implementation (perf_verify)",
-   "fix_id": null,
-   "scenes": [
-    "lan2_client/4"
-   ],
-   "source": "runtime",
-   "below_noise": false,
-   "score": 0.00478
+   "score": 0.00666
   },
   {
    "id": "F-a9afc1",
@@ -1001,6 +994,14 @@
     "function": "pass_barriers"
    },
    "evidence": {
+    "night_lights/low": {
+     "independent_adjacent_pairs": 9,
+     "barrier_calls_per_frame": 192.5
+    },
+    "night_lights/modern": {
+     "independent_adjacent_pairs": 16,
+     "barrier_calls_per_frame": 263.8
+    },
     "devroom/low": {
      "independent_adjacent_pairs": 9,
      "barrier_calls_per_frame": 192.5
@@ -1017,18 +1018,18 @@
      "independent_adjacent_pairs": 17,
      "barrier_calls_per_frame": 263.2
     },
-    "lan2_client/4": {
-     "independent_adjacent_pairs": 17,
-     "barrier_calls_per_frame": 264.5
+    "vehicle_yard/low": {
+     "independent_adjacent_pairs": 9,
+     "barrier_calls_per_frame": 192.5
     },
-    "lan2_host/4": {
-     "independent_adjacent_pairs": 18,
-     "barrier_calls_per_frame": 264.5
+    "vehicle_yard/modern": {
+     "independent_adjacent_pairs": 17,
+     "barrier_calls_per_frame": 263.3
     }
    },
    "savings": {
     "cpu_ms": 0.0,
-    "gpu_ms": 0.054,
+    "gpu_ms": 0.051000000000000004,
     "mb": 0.0,
     "bytes_s": 0.0
    },
@@ -1039,16 +1040,18 @@
    "verify": "verify by image + state diff after implementation (perf_verify)",
    "fix_id": null,
    "scenes": [
+    "night_lights/low",
+    "night_lights/modern",
     "devroom/low",
     "devroom/modern",
     "horde500/low",
     "horde500/modern",
-    "lan2_client/4",
-    "lan2_host/4"
+    "vehicle_yard/low",
+    "vehicle_yard/modern"
    ],
    "source": "runtime",
    "below_noise": true,
-   "score": 0.00054
+   "score": 0.00051
   },
   {
    "id": "F-87756e",
@@ -1091,7 +1094,7 @@
    "system": "core/log",
    "location": {
     "file": "src/render/vk_vgeo.c",
-    "line": 1938,
+    "line": 1943,
     "function": "grass_update_tier"
    },
    "evidence": {
@@ -1125,7 +1128,7 @@
    "system": "core/log",
    "location": {
     "file": "src/render/vk_vgeo.c",
-    "line": 2048,
+    "line": 2053,
     "function": "render_foliage_map_types"
    },
    "evidence": {
@@ -1333,39 +1336,39 @@
   {
    "id": "F-0714da",
    "rule": "R27",
-   "title": "Main thread blocked 349 ms on file reads during startup (22961 ms to the first frame)",
+   "title": "Main thread blocked 358 ms on file reads during startup (23518 ms to the first frame)",
    "system": "startup",
    "location": {
     "zone": "startup"
    },
    "evidence": {
     "startup": {
-     "io_ms": 349.2,
-     "total_ms": 22960.8,
+     "io_ms": 358.0,
+     "total_ms": 23518.1,
      "top_init_ms": [
       [
        "render_init",
-       20363.1
+       21029.7
       ],
       [
        "game_init",
-       2034.5
+       1934.9
       ],
       [
        "ui_init",
-       260.9
+       245.0
       ],
       [
        "assets_init",
-       184.7
+       181.4
       ],
       [
        "boot_map",
-       70.5
+       88.6
       ],
       [
        "lobby_init",
-       1.1
+       1.4
       ],
       [
        "cvar_find",
@@ -1396,98 +1399,40 @@
    "source": "runtime",
    "below_noise": false,
    "score": 0.0002
-  },
-  {
-   "id": "F-452c11",
-   "rule": "R06",
-   "title": "Main thread waits 211.18 ms on present (GPU bound: GPU 210.25 ms vs CPU work 5.36 ms)",
-   "system": "frame",
-   "location": {
-    "zone": "wait:present"
-   },
-   "evidence": {
-    "devroom/low": {
-     "wait_ms": 211.18,
-     "gpu_ms": 210.25,
-     "cpu_ms": 216.535
-    },
-    "devroom/modern": {
-     "wait_ms": 844.138,
-     "gpu_ms": 842.1,
-     "cpu_ms": 843.635
-    },
-    "horde500/low": {
-     "wait_ms": 211.585,
-     "gpu_ms": 206.7,
-     "cpu_ms": 219.882
-    },
-    "horde500/modern": {
-     "wait_ms": 772.275,
-     "gpu_ms": 733.0,
-     "cpu_ms": 756.082
-    },
-    "lan2_client/4": {
-     "wait_ms": 1208.075,
-     "gpu_ms": 1207.0,
-     "cpu_ms": 1222.182
-    },
-    "lan2_host/4": {
-     "wait_ms": 1017.487,
-     "gpu_ms": 939.15,
-     "cpu_ms": 911.075
-    }
-   },
-   "savings": {
-    "cpu_ms": 0.0,
-    "gpu_ms": 0.0,
-    "mb": 0.0,
-    "bytes_s": 0.0
-   },
-   "confidence": "high",
-   "effort": "M",
-   "fix": "Nothing to fix on the CPU side; the GPU findings of this scene are the lever.",
-   "fidelity_impact": "none",
-   "verify": "no change (classification)",
-   "fix_id": null,
-   "scenes": [
-    "devroom/low",
-    "devroom/modern",
-    "horde500/low",
-    "horde500/modern",
-    "lan2_client/4",
-    "lan2_host/4"
-   ],
-   "source": "runtime",
-   "below_noise": true,
-   "score": 3e-05
   }
  ],
  "tradeoffs": [
   {
    "id": "F-df14d5",
    "rule": "T01",
-   "title": "'shadow_sun' costs 131.96 ms: a lower setting would save part of it",
+   "title": "'shadow_sun' costs 16.28 ms: a lower setting would save part of it",
    "system": "render",
    "location": {
     "pass": "shadow_sun"
    },
    "evidence": {
+    "night_lights/low": {
+     "gpu_ms": 16.283
+    },
+    "night_lights/modern": {
+     "gpu_ms": 113.611
+    },
+    "devroom/low": {
+     "gpu_ms": 18.955
+    },
     "devroom/modern": {
-     "gpu_ms": 131.963
+     "gpu_ms": 138.858
     },
     "horde500/modern": {
-     "gpu_ms": 131.329
+     "gpu_ms": 129.182
     },
-    "lan2_client/4": {
-     "gpu_ms": 169.566
-    },
-    "lan2_host/4": {
-     "gpu_ms": 179.266
+    "vehicle_yard/modern": {
+     "gpu_ms": 133.621
     }
    },
    "savings": {
     "cpu_ms": 0.0,
-    "gpu_ms": 71.70631578947369,
+    "gpu_ms": 55.54315789473685,
     "mb": 0.0,
     "bytes_s": 0.0
    },
@@ -1498,34 +1443,42 @@
    "verify": "changes the image: not a fidelity-neutral fix",
    "fix_id": null,
    "scenes": [
+    "night_lights/low",
+    "night_lights/modern",
+    "devroom/low",
     "devroom/modern",
     "horde500/modern",
-    "lan2_client/4",
-    "lan2_host/4"
+    "vehicle_yard/modern"
    ],
    "source": "runtime",
    "below_noise": false,
-   "score": 43.02379
+   "score": 33.32589
   },
   {
    "id": "F-a3994d",
    "rule": "T01",
-   "title": "'mb_blur' costs 115.40 ms: a lower setting would save part of it",
+   "title": "'mb_blur' costs 125.41 ms: a lower setting would save part of it",
    "system": "render",
    "location": {
     "pass": "mb_blur"
    },
    "evidence": {
+    "night_lights/modern": {
+     "gpu_ms": 125.412
+    },
     "devroom/modern": {
-     "gpu_ms": 115.395
+     "gpu_ms": 129.279
     },
     "horde500/modern": {
-     "gpu_ms": 117.708
+     "gpu_ms": 132.359
+    },
+    "vehicle_yard/modern": {
+     "gpu_ms": 123.717
     }
    },
    "savings": {
     "cpu_ms": 0.0,
-    "gpu_ms": 47.08330666666667,
+    "gpu_ms": 52.94378666666667,
     "mb": 0.0,
     "bytes_s": 0.0
    },
@@ -1536,88 +1489,52 @@
    "verify": "changes the image: not a fidelity-neutral fix",
    "fix_id": null,
    "scenes": [
-    "devroom/modern",
-    "horde500/modern"
-   ],
-   "source": "runtime",
-   "below_noise": false,
-   "score": 28.24998
-  },
-  {
-   "id": "F-237107",
-   "rule": "T01",
-   "title": "'taa' costs 50.19 ms: a lower setting would save part of it",
-   "system": "render",
-   "location": {
-    "pass": "taa"
-   },
-   "evidence": {
-    "devroom/modern": {
-     "gpu_ms": 50.187
-    },
-    "horde500/modern": {
-     "gpu_ms": 48.976
-    },
-    "lan2_client/4": {
-     "gpu_ms": 111.123
-    },
-    "lan2_host/4": {
-     "gpu_ms": 85.558
-    }
-   },
-   "savings": {
-    "cpu_ms": 0.0,
-    "gpu_ms": 44.44915789473685,
-    "mb": 0.0,
-    "bytes_s": 0.0
-   },
-   "confidence": "medium",
-   "effort": "S",
-   "fix": "Lower its resolution / sample count / distance (changes the image: Engine Fidelity's job, not this audit's).",
-   "fidelity_impact": "tradeoff",
-   "verify": "changes the image: not a fidelity-neutral fix",
-   "fix_id": null,
-   "scenes": [
+    "night_lights/modern",
     "devroom/modern",
     "horde500/modern",
-    "lan2_client/4",
-    "lan2_host/4"
+    "vehicle_yard/modern"
    ],
    "source": "runtime",
    "below_noise": false,
-   "score": 26.66949
+   "score": 31.76627
   },
   {
    "id": "F-e5de9a",
    "rule": "T01",
-   "title": "'opaque' costs 19.60 ms: a lower setting would save part of it",
+   "title": "'opaque' costs 22.90 ms: a lower setting would save part of it",
    "system": "render",
    "location": {
     "pass": "opaque"
    },
    "evidence": {
+    "night_lights/low": {
+     "gpu_ms": 22.897
+    },
+    "night_lights/modern": {
+     "gpu_ms": 75.078
+    },
     "devroom/low": {
-     "gpu_ms": 19.596
+     "gpu_ms": 22.493
     },
     "devroom/modern": {
-     "gpu_ms": 68.524
+     "gpu_ms": 77.345
     },
     "horde500/low": {
-     "gpu_ms": 22.06
+     "gpu_ms": 23.077
     },
     "horde500/modern": {
-     "gpu_ms": 80.452
+     "gpu_ms": 85.433
     },
-    "lan2_client/4": {
-     "gpu_ms": 108.402
+    "vehicle_yard/low": {
+     "gpu_ms": 21.749
     },
-    "lan2_host/4": {
-     "gpu_ms": 81.926
+    "vehicle_yard/modern": {
+     "gpu_ms": 67.836
     }
    },
    "savings": {
     "cpu_ms": 0.0,
-    "gpu_ms": 43.36073684210527,
+    "gpu_ms": 34.17336842105263,
     "mb": 0.0,
     "bytes_s": 0.0
    },
@@ -1628,36 +1545,44 @@
    "verify": "changes the image: not a fidelity-neutral fix",
    "fix_id": null,
    "scenes": [
+    "night_lights/low",
+    "night_lights/modern",
     "devroom/low",
     "devroom/modern",
     "horde500/low",
     "horde500/modern",
-    "lan2_client/4",
-    "lan2_host/4"
+    "vehicle_yard/low",
+    "vehicle_yard/modern"
    ],
    "source": "runtime",
    "below_noise": false,
-   "score": 26.01644
+   "score": 20.50402
   },
   {
-   "id": "F-e77cce",
+   "id": "F-237107",
    "rule": "T01",
-   "title": "'ssr_temporal' costs 76.59 ms: a lower setting would save part of it",
+   "title": "'taa' costs 57.99 ms: a lower setting would save part of it",
    "system": "render",
    "location": {
-    "pass": "ssr_temporal"
+    "pass": "taa"
    },
    "evidence": {
-    "lan2_client/4": {
-     "gpu_ms": 76.595
+    "night_lights/modern": {
+     "gpu_ms": 57.993
     },
-    "lan2_host/4": {
-     "gpu_ms": 62.805
+    "devroom/modern": {
+     "gpu_ms": 59.458
+    },
+    "horde500/modern": {
+     "gpu_ms": 54.976
+    },
+    "vehicle_yard/modern": {
+     "gpu_ms": 59.077
     }
    },
    "savings": {
     "cpu_ms": 0.0,
-    "gpu_ms": 30.637894736842107,
+    "gpu_ms": 23.783368421052632,
     "mb": 0.0,
     "bytes_s": 0.0
    },
@@ -1668,32 +1593,40 @@
    "verify": "changes the image: not a fidelity-neutral fix",
    "fix_id": null,
    "scenes": [
-    "lan2_client/4",
-    "lan2_host/4"
+    "night_lights/modern",
+    "devroom/modern",
+    "horde500/modern",
+    "vehicle_yard/modern"
    ],
    "source": "runtime",
    "below_noise": false,
-   "score": 18.38274
+   "score": 14.27002
   },
   {
    "id": "F-852ca1",
    "rule": "T01",
-   "title": "'tonemap' costs 33.10 ms: a lower setting would save part of it",
+   "title": "'tonemap' costs 35.04 ms: a lower setting would save part of it",
    "system": "render",
    "location": {
     "pass": "tonemap"
    },
    "evidence": {
+    "night_lights/low": {
+     "gpu_ms": 35.043
+    },
     "devroom/low": {
-     "gpu_ms": 33.103
+     "gpu_ms": 37.966
     },
     "horde500/low": {
-     "gpu_ms": 31.368
+     "gpu_ms": 33.918
+    },
+    "vehicle_yard/low": {
+     "gpu_ms": 35.964
     }
    },
    "savings": {
     "cpu_ms": 0.0,
-    "gpu_ms": 13.24105263157895,
+    "gpu_ms": 15.18642105263158,
     "mb": 0.0,
     "bytes_s": 0.0
    },
@@ -1704,32 +1637,40 @@
    "verify": "changes the image: not a fidelity-neutral fix",
    "fix_id": null,
    "scenes": [
+    "night_lights/low",
     "devroom/low",
-    "horde500/low"
+    "horde500/low",
+    "vehicle_yard/low"
    ],
    "source": "runtime",
    "below_noise": false,
-   "score": 7.94463
+   "score": 9.11185
   },
   {
    "id": "F-a7049f",
    "rule": "T01",
-   "title": "'bloom' costs 28.31 ms: a lower setting would save part of it",
+   "title": "'bloom' costs 31.74 ms: a lower setting would save part of it",
    "system": "render",
    "location": {
     "pass": "bloom"
    },
    "evidence": {
+    "night_lights/low": {
+     "gpu_ms": 31.74
+    },
     "devroom/low": {
-     "gpu_ms": 28.312
+     "gpu_ms": 32.593
     },
     "horde500/low": {
-     "gpu_ms": 27.936
+     "gpu_ms": 30.322
+    },
+    "vehicle_yard/low": {
+     "gpu_ms": 30.972
     }
    },
    "savings": {
     "cpu_ms": 0.0,
-    "gpu_ms": 11.324736842105263,
+    "gpu_ms": 13.037052631578948,
     "mb": 0.0,
     "bytes_s": 0.0
    },
@@ -1740,32 +1681,34 @@
    "verify": "changes the image: not a fidelity-neutral fix",
    "fix_id": null,
    "scenes": [
+    "night_lights/low",
     "devroom/low",
-    "horde500/low"
+    "horde500/low",
+    "vehicle_yard/low"
    ],
    "source": "runtime",
    "below_noise": false,
-   "score": 6.79484
+   "score": 7.82223
   },
   {
    "id": "F-99fa9d",
    "rule": "T01",
-   "title": "'fxaa' costs 16.84 ms: a lower setting would save part of it",
+   "title": "'fxaa' costs 21.84 ms: a lower setting would save part of it",
    "system": "render",
    "location": {
     "pass": "fxaa"
    },
    "evidence": {
-    "devroom/low": {
-     "gpu_ms": 16.842
-    },
     "horde500/low": {
-     "gpu_ms": 21.17
+     "gpu_ms": 21.845
+    },
+    "vehicle_yard/low": {
+     "gpu_ms": 17.596
     }
    },
    "savings": {
     "cpu_ms": 0.0,
-    "gpu_ms": 8.468000000000002,
+    "gpu_ms": 8.737894736842106,
     "mb": 0.0,
     "bytes_s": 0.0
    },
@@ -1776,12 +1719,12 @@
    "verify": "changes the image: not a fidelity-neutral fix",
    "fix_id": null,
    "scenes": [
-    "devroom/low",
-    "horde500/low"
+    "horde500/low",
+    "vehicle_yard/low"
    ],
    "source": "runtime",
    "below_noise": false,
-   "score": 5.0808
+   "score": 5.24274
   },
   {
    "id": "F-1a9828",
