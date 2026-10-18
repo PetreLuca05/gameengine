@@ -59,13 +59,23 @@ def cmd_analyze(a):
             for x in fs:
                 if x.fix_id == fid:
                     status[x.id] = f.get("status", "implemented")
+    notes = list(a.note or [])
+    try:
+        with open(os.path.join(ROOT, "assets", "perf", "scenes.json"), encoding="utf-8") as f:
+            ids = [s["id"] for s in json.load(f)["scenes"]] + ["lan2_host", "lan2_client"]
+        have = {p.scene for p in profiles}
+        missing = [i for i in ids if i not in have]
+        if profiles and missing:
+            notes.append("Coverage: no profile for %s (crashed, skipped or not run; see each scene's audit.log)." % ", ".join(missing))
+    except (OSError, ValueError, KeyError):
+        pass
     date = a.date or datetime.date.today().isoformat()
     os.makedirs(a.out, exist_ok=True)
     md = os.path.join(a.out, "AUDIT_%s.md" % date)
     js = os.path.join(a.out, "AUDIT_%s.json" % date)
     meta = {"date": date, "profiles": len(profiles), "machine": a.machine, "rules_runtime": [r.rid for r in rules_runtime.RULES],
             "rules_static": [r.rid for r in rules_static.RULES]}
-    main, trade = report.write_audit(md, js, fs, profiles, meta, a.note, status, a.top)
+    main, trade = report.write_audit(md, js, fs, profiles, meta, notes, status, a.top)
     tdir = os.path.join(a.out, "timeline")
     os.makedirs(tdir, exist_ok=True)
     for p in profiles:

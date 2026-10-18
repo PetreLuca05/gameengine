@@ -21,8 +21,14 @@ cd "$BIN"
 
 echo "perf_audit: scenes $SCENES, $FRAMES frames, settle $SETTLE -> $OUT"
 if [ "$SCENES" != "lan2" ]; then
-  printf 'perf_audit %s %s %s levels=modern,low settle=%s refs quit\n' "$SCENES" "$FRAMES" "$OUT" "$SETTLE" > "$OUT/audit.cfg"
-  $DG_DISPLAY_WRAP $EXE --test --nosound --log "$OUT/audit.log" $PORTARG --script "$OUT/audit.cfg" > /dev/null 2>&1 || echo "perf_audit: the game exited with $? (see $OUT/audit.log)"
+  LIST=$SCENES
+  [ "$LIST" = "all" ] && LIST=$("$PY" -c "import json,sys;print(' '.join(s['id'] for s in json.load(open(sys.argv[1]))['scenes']))" "$ROOT/assets/perf/scenes.json")
+  # One process per scene: a crash costs that scene only (the report lists what is missing).
+  for SC in $(echo "$LIST" | tr ',' ' '); do
+    printf 'perf_audit %s %s %s levels=modern,low settle=%s refs quit\n' "$SC" "$FRAMES" "$OUT/$SC" "$SETTLE" > "$OUT/audit_$SC.cfg"
+    mkdir -p "$OUT/$SC"
+    $DG_DISPLAY_WRAP $EXE --test --nosound --log "$OUT/$SC/audit.log" $PORTARG --script "$OUT/audit_$SC.cfg" > /dev/null 2>&1 || echo "perf_audit: $SC: the game exited with $? (see $OUT/$SC/audit.log)"
+  done
 fi
 
 if [ "$SCENES" = "all" ] || [ "$SCENES" = "lan2" ]; then
