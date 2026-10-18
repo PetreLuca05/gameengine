@@ -37,7 +37,7 @@ typedef enum ProfCounter {
     PC_JOBS, PC_PARFOR,
     PC_ANIM_EVAL, PC_ANIM_EVAL_OFFSCREEN,          // characters posed this frame / of them, none visible (client)
     PC_SKIN_PALETTES, PC_SKIN_PALETTE_BYTES,       // palettes uploaded / bytes
-    PC_SKIN_POSES,                                 // distinct palettes among them (parts of one character share one)
+    PC_SKIN_POSES,                                 // character poses drawn (draw_char: every part shares one)
     PC_VFX_EMITTERS, PC_VFX_EMITTERS_CULLED,       // emitters updated / of them, off-screen
     PC_AUDIO_VOICES, PC_AUDIO_VOICES_SILENT,       // voices mixed / of them, inaudible (zero gain)
     PC_UI_TEXT, PC_UI_VERTS,                       // text runs drawn / UI vertices
@@ -53,6 +53,11 @@ typedef enum ProfFix {
     // PF-0003 / PF-0004 (vgeo palette upload / page streaming scratch) went with the virtualized
     // geometry renderer; their ids are not reused.
     PFX_FG_REPORT_LAZY,       // PF-0005: frame graph validation report built on demand
+    PFX_SHADOW_RCV_CULL,      // PF-0006: sun cascade casters culled to the cascade's receiver volume
+    PFX_SKIN_PALETTE_SHARE,   // PF-0007: parts of one character share one palette copy
+    // PF-0008 (character draw poses on the job system) was dropped: the GPU frame regressed; the id is not reused.
+    PFX_CLASSIC_CULL_BATCH,   // PF-0009: the classic renderer's views culled in one parallel pass
+    PFX_WIND_TILE_JOBS,       // PF-0010: the wind tile window rows on the job system
     PFX_COUNT
 } ProfFix;
 

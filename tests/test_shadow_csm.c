@@ -242,6 +242,72 @@ static void test_snapping(void) {
     CHECK(worst < 0.02f, "edges swim: %.4f texel", worst);
 }
 
+// ------------------------------------------------------------------ receiver volume (PF-0006)
+
+static bool rcv_inside(const vec4 *pl, int n, vec3 c, float r) {
+    for (int i = 0; i < n; i++)
+        if (pl[i].x * c.x + pl[i].y * c.y + pl[i].z * c.z + pl[i].w < -r) return false;
+    return true;
+}
+
+// Every caster that can shadow a receiver of the cascade (anywhere towards the light from it, within
+// the filter margin sideways) is inside the receiver planes; boxes far from the view sector are culled.
+static void test_receivers(void) {
+    printf("shadow_csm: receiver volume (light-extruded view slice) keeps every caster of a receiver\n");
+    CsmParams p = { 4, 2048, 150.0f, 70.0f, 16.0f / 9.0f };
+    CsmLayout l;
+    csm_layout(&p, &l);
+    float tv = tanf(35.0f * DG_DEG2RAD), th = tv * 16.0f / 9.0f;
+    int miss = 0, n = 0, culled = 0, tested = 0, degenerate = 0;
+    for (int it = 0; it < 300; it++) {
+        float elev = (2.0f + frand() * 87.0f) * DG_DEG2RAD, az = frand() * 2.0f * DG_PI;
+        vec3 L = v3(cosf(elev) * sinf(az), sinf(elev), cosf(elev) * cosf(az));
+        mat4 lv = csm_light_view(L);
+        vec3 cam = v3((frand() - 0.5f) * 500.0f, frand() * 20.0f, (frand() - 0.5f) * 500.0f), f, r, u;
+        cam_basis(frand() * 6.28f, (frand() - 0.5f) * 2.5f, &f, &r, &u);
+        for (int k = 0; k < 3; k++) {
+            CsmTile t;
+            csm_fit(&lv, v3_madd(cam, f, l.ahead[k]), l.radius[k], p.tile, l.radius[k] + 2.0f, &t);
+            vec3 pts[16];
+            for (int i = 0; i < 8; i++) {
+                float d = (i & 4) ? l.split[k] : 0.05f, sx = (i & 1) ? 1.0f : -1.0f, sy = (i & 2) ? 1.0f : -1.0f;
+                pts[i] = v3_add(cam, v3_add(v3_scale(f, d), v3_add(v3_scale(r, sx * th * d), v3_scale(u, sy * tv * d))));
+                pts[8 + i] = v3_add(cam, v3((i & 1) ? 3.0f : -3.0f, (i & 2) ? 3.0f : -3.0f, (i & 4) ? 3.0f : -3.0f));
+            }
+            float margin = 0.5f + 52.0f * t.texel_m;
+            vec4 pl[CSM_RCV_MAX];
+            int np = csm_receiver_planes(&t.vp, pts, 16, margin, pl);
+            if (np == 0) { degenerate++; continue; }
+            vec3 lx = v3_norm(v3_cross(L, fabsf(L.y) < 0.99f ? v3(0, 1, 0) : v3(1, 0, 0))), ly = v3_cross(L, lx);
+            for (int s = 0; s < 40; s++) {
+                float sx = (frand() * 2 - 1) * th, sy = (frand() * 2 - 1) * tv;
+                vec3 dir = v3_norm(v3_add(f, v3_add(v3_scale(r, sx), v3_scale(u, sy))));
+                vec3 rc = v3_madd(cam, dir, l.split[k] * sqrtf(frand()));
+                if (s < 4) rc = v3_add(cam, v3((frand() - 0.5f) * 5.0f, (frand() - 0.5f) * 5.0f, (frand() - 0.5f) * 5.0f));   // the rig
+                // a caster up to 1 km towards the light, up to 0.95 x the margin sideways
+                float a = frand() * 6.2832f, w = 0.95f * margin * sqrtf(frand());
+                vec3 c = v3_madd(v3_madd(v3_madd(rc, L, frand() * 1000.0f), lx, w * cosf(a)), ly, w * sinf(a));
+                n++;
+                if (!rcv_inside(pl, np, c, 0.0f)) miss++;
+            }
+            for (int s = 0; s < 200; s++) {   // points of the tile's square: how many the volume culls
+                vec3 c = v3_madd(v3_madd(t.center, lx, (frand() * 2 - 1) * t.radius), ly, (frand() * 2 - 1) * t.radius);
+                tested++;
+                if (!rcv_inside(pl, np, c, 0.0f)) culled++;
+            }
+        }
+    }
+    printf("  %d receivers' casters, %d outside; %.0f %% of the tile area culled, %d degenerate\n", n, miss, 100.0f * culled / DG_MAX(tested, 1), degenerate);
+    CHECK(miss == 0, "%d of %d casters of a receiver culled", miss, n);
+    CHECK(culled > tested / 5, "the receiver volume culls only %d of %d tile points", culled, tested);
+    CHECK(degenerate < 10, "%d degenerate receiver hulls", degenerate);
+    // Too few / too many points: no planes (cull nothing).
+    vec4 pl[CSM_RCV_MAX];
+    mat4 id = mat4_identity();
+    vec3 two[2] = { v3(0, 0, 0), v3(1, 0, 0) };
+    CHECK(csm_receiver_planes(&id, two, 2, 0.0f, pl) == 0, "two points gave planes");
+}
+
 // ------------------------------------------------------------------ casters outside the view
 
 static void test_casters(void) {
@@ -404,6 +470,7 @@ int main(void) {
     test_fit();
     test_snapping();
     test_casters();
+    test_receivers();
     test_selection();
     test_bias_kernel();
     test_viewmodel();

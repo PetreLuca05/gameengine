@@ -656,11 +656,13 @@ static void extract_frustum(mat4 m, vec4 out[6]) {
     }
 }
 
-static bool sphere_visible(const vec4 planes[6], vec3 c, float r) {
-    for (int i = 0; i < 6; i++)
+static bool sphere_in_n(const vec4 *planes, int n, vec3 c, float r) {
+    for (int i = 0; i < n; i++)
         if (planes[i].x * c.x + planes[i].y * c.y + planes[i].z * c.z + planes[i].w < -r) return false;
     return true;
 }
+
+static bool sphere_visible(const vec4 planes[6], vec3 c, float r) { return sphere_in_n(planes, 6, c, r); }
 
 static void item_bounds(const DrawItem *d, vec3 *center, float *radius) {
     AABB b = R->meshes[d->mesh].bounds;
@@ -702,6 +704,8 @@ static u32 g_shadow_cascade;   // shadow pass: the cascade being drawn (push con
 static float g_shadow_min_radius;   // sun cascades: smaller casters skipped (r_shadow_min_radius)
 static bool g_shadow_cull;          // sun / viewmodel tiles: casters outside the tile's light frustum skipped
 static vec4 g_shadow_planes[6];     // that frustum (the box reaches CSM_REACH towards the light)
+static const vec4 *g_shadow_rcv;    // the cascade's receiver volume (PF-0006), g_shadow_rcv_n planes (0: none)
+static int g_shadow_rcv_n;
 static bool g_shadow_vm_pass;       // the viewmodel tile is being drawn (CPU-skinned viewmodel draws take its view)
 static u32 g_shadow_layers = SHADOW_LAYERS_ALL;   // the light's culling mask (DrawItem / SkinnedDraw layer bits)
 
@@ -752,6 +756,7 @@ static void draw_items(VkCommandBuffer cmd, DrawItem *items, u32 count, bool sha
             item_bounds(d, &c, &r);
             if (r < g_shadow_min_radius) continue;
             if (g_shadow_cull && !sphere_visible(g_shadow_planes, c, r)) { R->stats.culled++; continue; }
+            if (g_shadow_cull && g_shadow_rcv_n && !sphere_in_n(g_shadow_rcv, g_shadow_rcv_n, c, r)) { R->stats.culled++; continue; }
         }
         if (cull) {
             vec3 c; float r;
@@ -1418,6 +1423,32 @@ static void compute_matrices(FrameData *fd) {
         fd->shadow_vm = v4(vt->texel_m, vt->span, R->shadow_vm_active ? 1.0f : 0.0f, vb.normal_m);
         fd->shadow_vm2 = v4(1.0f / (float)DG_MAX(R->vm_shadow_size, 1u), vt->span > 0.0f ? vb.const_m / vt->span : 0.0f, CSM_VM_SKIP, pcss_w);
         R->shadow_dbg_bias_m = bias[0] * span[0];
+    }
+    // Receiver volumes (docs/perf/FINDINGS.md PF-0006). lighting.glsl samples cascade k < last only
+    // for receivers at a selection distance <= split k (its own range, the blend from k - 1, the
+    // fallback from a tile k - 1 missed): visible points of the view slice up to split k, plus the
+    // first-person rig (sh_vm_apparent, within a few metres of the eye). A caster whose light-space
+    // footprint misses that slice by more than the filter's reach (PCSS search / tent / normal
+    // offset, in texels of the cascade) writes no texel any receiver reads: skipping it leaves every
+    // sampled depth identical. The last cascade is also read by particles, decals and the froxels
+    // anywhere in its tile: never culled. Neither are the cascades while a second camera samples them
+    // (scope PiP, phone views).
+    {
+        bool second_view = (R->sight.kind == RSIGHT_SCOPE_PIP && R->sight.ads_t >= 0.02f) || phone_view_pending();
+        bool on = prof_fix_enabled(PFX_SHADOW_RCV_CULL) && !second_view;
+        float max_tex = fmaxf(fmaxf(ss ? ss->pcss_max_texels : 32.0f, ss ? ss->min_texels : 1.0f), 7.0f);
+        for (int k = 0; k < 4; k++) {
+            R->shadow_rcv_n[k] = 0;
+            if (!on || k >= ncasc - 1 || !R->shadow_active[k]) continue;
+            vec3 pts[16];
+            for (int i = 0; i < 8; i++) {
+                float d = (i & 4) ? splits[k] : fmaxf(c->znear, 0.01f), sx = (i & 1) ? 1.0f : -1.0f, sy = (i & 2) ? 1.0f : -1.0f;
+                pts[i] = v3_add(c->pos, v3_add(v3_scale(fwd, d), v3_add(v3_scale(right, sx * tan_h * d), v3_scale(upv, sy * tan_v * d))));
+                pts[8 + i] = v3_add(c->pos, v3((i & 1) ? 3.0f : -3.0f, (i & 2) ? 3.0f : -3.0f, (i & 4) ? 3.0f : -3.0f));
+            }
+            float margin = nbias[k] + (1.5f * max_tex + 6.0f) * mpt[k] + 0.25f;
+            R->shadow_rcv_n[k] = csm_receiver_planes(&R->shadow_vp_ndc[k], pts, 16, margin, R->shadow_rcv[k]);
+        }
     }
     {
         // LOD cross-fades (docs/LOD.md): the dither turns per frame where TAA resolves it into a blend
@@ -2464,8 +2495,11 @@ void render_end_frame(void) {
                     vkCmdSetViewport(cmd, 0, 1, &vp);
                     vkCmdSetScissor(cmd, 0, 1, &sc);
                     g_shadow_cascade = (u32)k;
+                    g_shadow_rcv = R->shadow_rcv[k];
+                    g_shadow_rcv_n = R->shadow_rcv_n[k];
                     draw_sun_casters(cmd, f, k, &skin_shadow);
                 }
+                g_shadow_rcv_n = 0;
                 g_shadow_cascade = 0;
                 g_shadow_min_radius = 0.0f;
                 g_shadow_cull = false;

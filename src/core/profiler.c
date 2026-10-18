@@ -74,7 +74,7 @@ static const char *k_counter_names[PC_COUNT] = {
     "anim_eval", "anim_eval_offscreen", "skin_palettes", "skin_palette_bytes", "skin_poses", "vfx_emitters", "vfx_emitters_culled", "audio_voices",
     "audio_voices_silent", "ui_text", "ui_verts", "draw_items", "shadow_items",
 };
-static const char *k_fix_ids[PFX_COUNT] = { "PF-0001", "PF-0002", "PF-0005" };
+static const char *k_fix_ids[PFX_COUNT] = { "PF-0001", "PF-0002", "PF-0005", "PF-0006", "PF-0007", "PF-0009", "PF-0010" };
 
 static struct {
     bool init;

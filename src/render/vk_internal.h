@@ -398,7 +398,9 @@ typedef struct Renderer {
     mat4 shadow_vp_ndc[5];                      // cascades 0..3, 4 the moon map
     float shadow_radius[5];
     vec3 shadow_center[5];
-    float shadow_dist;                          // m: the smoothed shadow distance (r_shadow_distance x level reach)
+    vec4 shadow_rcv[4][CSM_RCV_MAX];            // per cascade: its receiver volume (csm_receiver_planes, PF-0006)
+    int shadow_rcv_n[4];                        // plane count (0: cull by the light box only)
+    float shadow_dist;                         // m: the smoothed shadow distance (r_shadow_distance x level reach)
     CsmTile shadow_vm_tile;
     bool shadow_vm_active, shadow_taa;
     float shadow_vm_pcss;                       // viewmodel tile PCSS weight (crossfades on a tier change)

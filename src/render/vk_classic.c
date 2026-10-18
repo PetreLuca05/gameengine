@@ -652,6 +652,8 @@ typedef struct ClCull {
     bool legacy;
     float band, imp_band, fol_k, fol_band_k, fol_instance, fol_shrink, shadow_k, shadow_band, fade_lim_k, shadow_lim_k;
     u32 layers;                     // shadow views: the light's culling mask (0 = every layer)
+    vec4 rcv[CSM_RCV_MAX];          // sun cascades: the receiver volume (render.c, PF-0006), nrcv planes (0: none)
+    int nrcv;
 } ClCull;
 
 static float clamp01f(float x) { return x < 0 ? 0 : (x > 1 ? 1 : x); }
@@ -705,6 +707,7 @@ static void cull_instance(const ClCull *v, const VgScene *s, const VgInstance *i
         if (v3_len2(v3_sub(c, v3(v->sphere.x, v->sphere.y, v->sphere.z))) > rr * rr) return;
     }
     if (!sphere_in(v->planes, 6, c, r)) return;
+    if (v->nrcv && !sphere_in(v->rcv, v->nrcv, c, r)) return;
     float dx = p[0] - v->eye.x, dy = p[1] - v->eye.y, dz = p[2] - v->eye.z, dist = sqrtf(dx * dx + dy * dy + dz * dz);
     if (!v->legacy) {   // docs/LOD.md
         float alpha = 1.0f, shrink = 1.0f;
@@ -798,6 +801,7 @@ static void cull_cells(const ClCull *v, const VgScene *s) {
         const VgCell *cl = &s->cells[ci];
         u32 n = cl->count & VG_CELL_COUNT;
         if (!n || !box_in(v->planes, 6, cl->min, cl->max)) continue;
+        if (v->nrcv && !box_in(v->rcv, v->nrcv, cl->min, cl->max)) continue;
         if (v->sphere.w > 0 && box_dist(cl->min, cl->max, v3(v->sphere.x, v->sphere.y, v->sphere.z)) > v->sphere.w) continue;
         if (cl->first < s->instance_count) task_add(&s->instances[cl->first], DG_MIN(n, s->instance_count - cl->first));
     }
@@ -810,6 +814,7 @@ static void cull_cells(const ClCull *v, const VgScene *s) {
             float lim = (v->shadow ? cc->shadow : cc->fade) * lim_k;
             if (lim > 0 && box_dist(cc->min, cc->max, v->eye) > lim) continue;
             if (!box_in(v->planes, 6, cc->min, cc->max)) continue;
+            if (v->nrcv && !box_in(v->rcv, v->nrcv, cc->min, cc->max)) continue;
             if (v->sphere.w > 0 && box_dist(cc->min, cc->max, v3(v->sphere.x, v->sphere.y, v->sphere.z)) > v->sphere.w) continue;
         }
         for (u32 k = 0; k < ch->cell_count; k++) {
@@ -819,6 +824,7 @@ static void cull_cells(const ClCull *v, const VgScene *s) {
             float lim = ci < (1u << 16) ? (v->shadow ? C.cell_shadow[ci] : C.cell_fade[ci]) * lim_k : 0;
             if (lim > 0 && box_dist(cl->min, cl->max, v->eye) > lim) continue;
             if (!box_in(v->planes, 6, cl->min, cl->max)) continue;
+            if (v->nrcv && !box_in(v->rcv, v->nrcv, cl->min, cl->max)) continue;
             if (v->sphere.w > 0 && box_dist(cl->min, cl->max, v3(v->sphere.x, v->sphere.y, v->sphere.z)) > v->sphere.w) continue;
             task_add(&pl->inst[cl->first], cl->count);
         }
@@ -1031,6 +1037,8 @@ void vkc_frame(const VgScene *s, const VgDisplace *disp, float density, float lo
             v.px_scale = (float)tile / (2.0f * R->shadow_radius[k]);   // the tile's half extent (render.c)
             v.lod_px = shadow_px;
             v.era2010 = false;
+            v.nrcv = R->shadow_rcv_n[k];
+            memcpy(v.rcv, R->shadow_rcv[k], sizeof(vec4) * (size_t)v.nrcv);
             C.tmp_n = 0;
             cull_cells(&v, s);
             emit_view(&C.view[1 + k]);

@@ -104,6 +104,14 @@ void csm_fit_close(const mat4 *lview, vec3 cam, vec3 fwd, vec3 right, vec3 up, f
 // Viewmodel tile: around the rig's bounds centre (world), fixed radius.
 void csm_fit_vm(const mat4 *lview, vec3 rig_center, u32 texels, CsmTile *out);
 
+// Receiver volume of a cascade (docs/perf/FINDINGS.md PF-0006): the light-space 2D convex hull of
+// the points the cascade's receivers can occupy (frustum slice corners, a box around the eye),
+// extruded along the light, as world planes (inside: dot(n, p) + w >= 0) grown by margin_m. A
+// caster sphere outside any plane projects onto no receiver nor into its filter footprint. vp: the
+// cascade's ortho NDC matrix. Returns the plane count (0: degenerate, cull nothing).
+#define CSM_RCV_MAX 16
+int csm_receiver_planes(const mat4 *vp, const vec3 *pts, int n, float margin_m, vec4 out[CSM_RCV_MAX]);
+
 // Preset table check (docs/SHADOWS.md "Per-preset tables"): the layout follows the formula, the
 // cascades reach the distance, texel density of cascade 0 at least min_tpm texels per metre,
 // neighbouring cascades within max_ratio of each other. False + err.
