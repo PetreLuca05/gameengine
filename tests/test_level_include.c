@@ -100,7 +100,77 @@ static void test_footprint(void) {
     CHECK(in_pads(pads, -50, 20, NULL) && in_pads(pads, 20, 205, NULL), "entities and footprint areas covered");
     CHECK(!in_pads(pads, 50, 100, NULL), "the gaps between stay free");
     CHECK(in_pads(pads, 0, 0, &lvl) && fabsf(lvl - (2.0f - g.room_sink)) < 1e-4f, "the room's pad comes last, sunk under its floor (%.3f)", lvl);
+    int paints = 0;
+    const cJSON *f;
+    cJSON_ArrayForEach(f, pads) paints += !strcmp(cJSON_GetObjectItemCaseSensitive(f, "type")->valuestring, "paint");
+    CHECK(paints == 0, "no hard material: no paint (%d)", paints);
     cJSON_Delete(pads);
+    cJSON_Delete(lv);
+}
+
+// "hard": the ground under structures standing on it painted, rotated with them, grown by the margin.
+static void test_hard_paint(void) {
+    cJSON *lv = cJSON_Parse("{\"brushes\": [{\"type\": \"box\", \"pos\": [100, 0, 0], \"size\": [10, 3, 2], \"yaw\": 90},"
+                            " {\"type\": \"box\", \"pos\": [0, 0.9, 0], \"size\": [1, 1, 1]},"            // raised: a shelf item
+                            " {\"type\": \"box\", \"pos\": [0, 0, 50], \"size\": [3, 0.05, 3]},"          // a marker plate
+                            " {\"type\": \"stairs\", \"pos\": [-40, 0, 0], \"count\": 10, \"run\": 0.3, \"width\": 2}]}");
+    cJSON *out = cJSON_CreateArray();
+    LevelGround g;
+    level_ground_defaults(&g);
+    snprintf(g.hard_material, sizeof(g.hard_material), "rock");
+    g.hard_min_size = 0.0f;   // exact rectangles here; the minimum below
+    level_footprint_pads(lv, &g, out);
+    int n = 0;
+    float cx = 0, cz = 0, w = 0, d = 0, yaw = 0;
+    const cJSON *f;
+    cJSON_ArrayForEach(f, out) {
+        if (strcmp(cJSON_GetObjectItemCaseSensitive(f, "type")->valuestring, "paint")) continue;
+        CHECK(!strcmp(cJSON_GetObjectItemCaseSensitive(f, "material")->valuestring, "rock"), "paint material");
+        const cJSON *p = cJSON_GetObjectItemCaseSensitive(f, "pos"), *s = cJSON_GetObjectItemCaseSensitive(f, "size"), *y = cJSON_GetObjectItemCaseSensitive(f, "yaw");
+        if (n == 0) {
+            cx = (float)cJSON_GetArrayItem(p, 0)->valuedouble, cz = (float)cJSON_GetArrayItem(p, 1)->valuedouble;
+            w = (float)cJSON_GetArrayItem(s, 0)->valuedouble, d = (float)cJSON_GetArrayItem(s, 1)->valuedouble;
+            yaw = cJSON_IsNumber(y) ? (float)y->valuedouble : 0;
+        } else {   // the stairs: from pos towards -Z, 3 m long
+            CHECK(fabsf((float)cJSON_GetArrayItem(p, 0)->valuedouble + 40) < 1e-3f && fabsf((float)cJSON_GetArrayItem(p, 1)->valuedouble + 1.5f) < 1e-3f, "stairs paint centred behind their foot");
+            CHECK(fabsf((float)cJSON_GetArrayItem(s, 1)->valuedouble - (3.0f + 2 * g.hard_margin)) < 1e-3f, "stairs paint length");
+        }
+        n++;
+    }
+    CHECK(n == 2, "a paint per structure on the ground, none for the raised box or the plate (%d)", n);
+    CHECK(cx == 100 && cz == 0 && yaw == 90 && fabsf(w - (10 + 2 * g.hard_margin)) < 1e-3f && fabsf(d - (2 + 2 * g.hard_margin)) < 1e-3f, "the wall's paint: its rectangle + margin, rotated (%.1f x %.1f, yaw %.0f)", w, d, yaw);
+    // the generator paints the wall's rotated rectangle: along Z at x = 100 (yaw 90 turns its length)
+    static MapGen mg;
+    mapgen_init(&mg, 1);
+    char err[128];
+    cJSON *world = cJSON_CreateObject();
+    cJSON_AddNumberToObject(world, "half_size", 300);
+    cJSON_AddItemToObject(world, "features", cJSON_Duplicate(out, true));
+    CHECK(mapgen_parse(&mg, world, err, sizeof(err)), "world: %s", err);
+    mapgen_finalize(&mg);
+    u8 m;
+    mapgen_height(&mg, 100.0f, 6.0f, &m);
+    CHECK(m == MGM_ROCK, "inside the wall's length + margin: rock (%s)", mapgen_material_name(m));
+    mapgen_height(&mg, 100.0f + 1.0f + g.hard_margin + 0.5f, 0.0f, &m);
+    CHECK(m != MGM_ROCK, "beyond the margin across the wall: not rock (%s)", mapgen_material_name(m));
+    mapgen_height(&mg, 0.0f, 50.0f, &m);
+    CHECK(m != MGM_ROCK, "the marker plate: not rock (%s)", mapgen_material_name(m));
+    mapgen_free(&mg);
+    cJSON_Delete(world);
+    cJSON_Delete(out);
+    // min_size: a thin wall's paint is at least that wide, so the terrain blend map keeps it
+    out = cJSON_CreateArray();
+    g.hard_min_size = 6.0f;
+    level_footprint_pads(lv, &g, out);
+    bool wide = false;
+    cJSON_ArrayForEach(f, out) {
+        if (strcmp(cJSON_GetObjectItemCaseSensitive(f, "type")->valuestring, "paint")) continue;
+        const cJSON *s = cJSON_GetObjectItemCaseSensitive(f, "size");
+        wide = cJSON_GetArrayItem(s, 0)->valuedouble >= 6.0 - 1e-3 && cJSON_GetArrayItem(s, 1)->valuedouble >= 6.0 - 1e-3;
+        break;
+    }
+    CHECK(wide, "min_size widens the wall's paint");
+    cJSON_Delete(out);
     cJSON_Delete(lv);
 }
 
@@ -129,15 +199,18 @@ static cJSON *read_data(const char *level, void *user) {
     return r;
 }
 
-static void check_ground(const MapGen *g, const MgRaster *r, float x, float z, const char *what) {
+static void check_ground_mat(const MapGen *g, const MgRaster *r, float x, float z, const char *what, int want) {
     u8 mat;
     float h = mapgen_height(g, x, z, &mat);
     float d = fmaxf(fabsf(x), fabsf(z));   // the hall's floor box: 61 m square, its pad 8 cm low, 0.6 m blend
     (void)d;   // devroom_vegetation: no floor slab, no sunk room pad: the nature ground at y = 0 everywhere
     CHECK(fabsf(h) < 0.005f, "%s (%.1f, %.1f): ground %.3f", what, x, z, h);
-    CHECK(mat == MGM_GRASS, "%s (%.1f, %.1f): material %s", what, x, z, mapgen_material_name(mat));
+    // the pads are grass; the hard structures' ground (and a margin around it) rock
+    CHECK(want >= 0 ? mat == want : (mat == MGM_GRASS || mat == MGM_ROCK), "%s (%.1f, %.1f): material %s", what, x, z, mapgen_material_name(mat));
     CHECK(mapgen_tree_density(g, r, x, z, NULL, NULL) == 0.0f, "%s (%.1f, %.1f): trees", what, x, z);
 }
+
+static void check_ground(const MapGen *g, const MgRaster *r, float x, float z, const char *what) { check_ground_mat(g, r, x, z, what, -1); }
 
 static void test_devroom_vegetation(void) {
     cJSON *dv = read_data("devroom_vegetation", NULL), *dr = read_data("devroom", NULL);
@@ -164,7 +237,10 @@ static void test_devroom_vegetation(void) {
         const cJSON *p = cJSON_GetObjectItemCaseSensitive(e, "pos");
         float x = (float)cJSON_GetArrayItem(p, 0)->valuedouble, z = (float)cJSON_GetArrayItem(p, 2)->valuedouble;
         CHECK(fabsf(x) < g.half_size - 20 && fabsf(z) < g.half_size - 20, "brush at (%.0f, %.0f) inside the map", x, z);
-        check_ground(&g, &r, x, z, "brush");
+        const cJSON *t = cJSON_GetObjectItemCaseSensitive(e, "type"), *s = cJSON_GetObjectItemCaseSensitive(e, "size"), *c = cJSON_GetObjectItemCaseSensitive(e, "collide");
+        bool hard_box = (!cJSON_IsString(t) || !strcmp(t->valuestring, "box")) && cJSON_GetArrayItem(p, 1)->valuedouble <= 0.3 && cJSON_GetArraySize(s) >= 3 &&
+                        cJSON_GetArrayItem(s, 1)->valuedouble >= 0.15 && !cJSON_IsFalse(c);
+        check_ground_mat(&g, &r, x, z, "brush", hard_box ? MGM_ROCK : -1);   // a wall / block standing on the ground: rock under it
         n++;
     }
     cJSON_ArrayForEach(e, cJSON_GetObjectItemCaseSensitive(dr, "entities")) {
@@ -207,6 +283,7 @@ static void test_devroom_vegetation(void) {
 int main(void) {
     test_merge();
     test_footprint();
+    test_hard_paint();
     test_devroom_vegetation();
     printf("%d checks, %d failed\n", g_checks, g_fail);
     return g_fail ? 1 : 0;

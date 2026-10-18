@@ -31,11 +31,19 @@ typedef struct LevelGround {
     float blend;      // pad blend into the terrain (m)
     float room_sink;  // the room floor's pad sits this far below `level` (its floor box covers it)
     char material[24];
+    // "hard": {"material": "rock", "margin": 1.5, "min_height": 0.15, "min_size": 6}: the ground under the hard
+    // structures standing on it (brush boxes, ramps, stairs, doorways, tunnels), grown by `margin`, is
+    // painted `material` (paint features: one rotated rectangle each). Empty material: off.
+    char hard_material[24];
+    float hard_margin;
+    float hard_min_height;   // boxes lower than this (marker plates, floor strips) are not structures
+    float hard_min_size;     // each painted side at least this long: the terrain's blend map keeps the dominant
+                             // material of a 7 m box (blend_radius_m 3), narrower strips would vanish
 } LevelGround;
 
 void level_ground_defaults(LevelGround *g);
-// The footprint of a level's content as pad features appended to `features` (a cJSON array). Returns
-// the number of pads.
+// The footprint of a level's content as pad features appended to `features` (a cJSON array), then the
+// hard structures' paint features (LevelGround.hard_material). Returns the number of features added.
 int level_footprint_pads(const struct cJSON *level, const LevelGround *g, struct cJSON *features);
 
 #endif

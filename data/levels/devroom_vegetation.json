@@ -5,7 +5,7 @@
   "_room": "Merged over the dev room's room (the including level wins): no floor slab, the dev room stands on the valley's own ground (flat grass pads, no trees).",
   "room": {"floor": false},
   "include": [
-    {"level": "devroom", "ground": {"level": 0, "cell": 4, "margin": 6, "blend": 12, "material": "grass", "room_sink": 0}}
+    {"level": "devroom", "ground": {"level": 0, "cell": 4, "margin": 6, "blend": 12, "material": "grass", "room_sink": 0, "hard": {"material": "rock", "margin": 1.5}}}
   ],
   "world": {
     "seed": 4242,
