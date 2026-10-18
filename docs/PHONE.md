@@ -437,8 +437,7 @@ is GPLv2 or commercial; civetweb because its TLS needs OpenSSL DLLs.
 
 ## Tests
 
-- **`ctest -R phone`** (`tests/test_phone.c`, 889 checks; "page: assets injected" fails on Linux on
-  the base branch too):
+- **`ctest -R phone`** (`tests/test_phone.c`, 890 checks):
   - QR encode → decode with quirc;
   - token auth: wrong, empty, prefix, expired at exactly 2 minutes, replayed, re-pair, unpair;
     session lifetime (sliding on resume, expiry), stored sessions restored (malformed keys refused);

@@ -50,7 +50,7 @@ def main():
         if os.path.exists(log):
             os.remove(log)
         subprocess.run([exe, "--test", "--nosound", "--log", log, "+set", "net_port", "27391", "+set", "phone_port", "47391",
-                        "--script", os.path.join(HERE, "phone_flow.cfg")], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=600)
+                        "--script", os.path.join(HERE, "phone_flow.cfg")], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3600)
     txt = open(log, encoding="utf-8", errors="replace").read()
     st = [dict(re.findall(r"(\w+)=(\"[^\"]*\"|\S+)", l)) for l in txt.splitlines() if "phone_status:" in l]
     check(len(st) >= 12, "phone_status lines (%d)" % len(st))

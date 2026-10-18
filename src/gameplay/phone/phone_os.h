@@ -140,7 +140,7 @@ bool phone_theme_parse(const char *json, PhoneTheme *out, char *err, size_t err_
 PhoneRect phone_panel_rect(PhoneRect safe, float px, float screen_h, float size_frac, int corner, float aspect, const PhonePanelTokens *t);
 
 // The companion page with window.DG_THEME / DG_APPS / DG_ICONS (data URI) replacing the
-// /*DG_PHONE_DATA*/ marker (malloc'd, *out_len). NULL inputs inject "null".
+// /*DG_PHONE_DATA*/ marker (malloc'd, NUL-terminated, *out_len without the NUL). NULL inputs inject "null".
 char *phone_page_build(const char *page, size_t page_len, const char *theme_json, const char *apps_json, const u8 *png, size_t png_len, size_t *out_len);
 
 #endif

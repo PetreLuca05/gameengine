@@ -485,6 +485,7 @@ char *phone_page_build(const char *page, size_t page_len, const char *theme_json
     size_t n = 0;
     if (!at) {
         memcpy(o, page, page_len);
+        o[page_len] = 0;
         *out_len = page_len;
         return o;
     }
@@ -507,6 +508,7 @@ char *phone_page_build(const char *page, size_t page_len, const char *theme_json
     size_t rest = page_len - pre - (sizeof(marker) - 1);
     memcpy(o + n, at + sizeof(marker) - 1, rest);
     n += rest;
+    o[n] = 0;   // a C string too (out_len excludes the terminator)
     *out_len = n;
     return o;
 }
