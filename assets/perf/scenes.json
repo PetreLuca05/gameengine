@@ -25,6 +25,13 @@
       "orbit": { "radius": 18, "height": 3.5, "pitch": -8 }
     },
     {
+      "id": "horde_foliage",
+      "desc": "vegetation map: 500 zombies converging on the player through trees, grass and ground cover (the target game: big hordes in dense vegetation)",
+      "map": "vegetation",
+      "setup": ["time_set 15:00", "time_pause 1", "weather_lock 1", "weather_set little_cloudy 0", "spawn_horde 500 30 ring", "horde_target players"],
+      "orbit": { "radius": 22, "height": 6, "pitch": -14 }
+    },
+    {
       "id": "water_weather",
       "desc": "water yard in rain: water surfaces, wet shading, precipitation, rain occlusion",
       "map": "wateryard",
