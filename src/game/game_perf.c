@@ -300,6 +300,9 @@ void game_perf_frame(void) {
     const PerfScene *s = &PF.scenes[st->scene];
     switch (PF.phase) {
     case PH_SETUP: {
+        // Start every pass on the same TAA jitter phase: from here every frame count of the pass is
+        // fixed, so the reference shots land on the same sim tick and jitter in A and B.
+        if (render_frame_index() % 8) break;
         cvar_set("perf_fix_disable", st->pass == 'A' ? PF.fix : "");
         char lv[8];
         snprintf(lv, sizeof(lv), "%d", st->level);
@@ -343,11 +346,12 @@ void game_perf_frame(void) {
         render_set_ui_hidden(PF.refs);
         break;
     case PH_SHOTS:
-        // Each key: hold at least 24 frames (temporal AA, exposure and LOD fades converge), shoot on
-        // the same TAA jitter phase in every pass (A and B compare like for like), wait for the file.
+        // Each key: hold 24 frames (temporal AA, exposure and LOD fades converge), shoot, wait for the
+        // file. The pass started on jitter phase 0 and every count since is fixed: the same tick and
+        // jitter in every pass (A and B compare like for like).
         if (PF.shot >= PF.shots) { PF.phase = PH_NEXT; render_set_ui_hidden(false); break; }
         PF.shot_wait++;
-        if (PF.shot_wait >= 24 && PF.shot_wait < 1000 && render_frame_index() % 8 == 0) {
+        if (PF.shot_wait == 24) {
             char path[256];
             step_path(path, sizeof(path), st, "png", PF.shot);
             render_screenshot(path);

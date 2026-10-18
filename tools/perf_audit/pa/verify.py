@@ -37,6 +37,10 @@ def metric_samples(p, metric):
             if z["name"] == name:
                 v = [a + b for a, b in zip(v, z["incl_ms"])]
         return v
+    if kind == "scopec":       # scopec:<scope>:<count> (clear_px, draws, barriers, ..): deterministic work
+        sname, _, key = name.rpartition(":")
+        s = p.gpu_scope(sname)
+        return list(s.get(key, [])) if s else [0] * p.frames
     if kind == "scope":
         s = p.gpu_scope(name)
         if not s:
@@ -82,7 +86,7 @@ def timing_verdict(a_profiles, b_profiles, metric, min_gain=0.0):
     b = [x for p in b_profiles for x in metric_samples(p, metric)]
     ma, mb = median(a), median(b)
     pval = mann_whitney_less(b, a)
-    deterministic = metric.startswith("counter") or metric.startswith("site")
+    deterministic = metric.startswith(("counter", "site", "scopec"))
     improved = (mean(b) < mean(a) - 1e-9) if deterministic else (pval < 0.05 and mb < ma - min_gain)
     return {"metric": metric, "a_median": round(ma, 5), "b_median": round(mb, 5), "a_mean": round(mean(a), 5), "b_mean": round(mean(b), 5),
             "delta": round(mb - ma, 5), "delta_pct": round(100.0 * (mb - ma) / ma, 2) if ma else 0.0, "p_value": round(pval, 5),

@@ -13,7 +13,9 @@
   "description": "The sun cascade atlas, the moon map and the viewmodel shadow tile were transitioned, cleared to depth 1 and transitioned back every frame even when nothing is drawn into them (the whole atlas at night, the moon map all day). A map that was cleared and left empty last frame and draws nothing this frame keeps its content: the clear, both barriers and the empty rendering are skipped.",
   "neutral": "The skipped map holds exactly the clear the next sample expects (depth 1, read as lit), in the same SHADER_READ_ONLY layout; the earlier barrier made that clear visible to every later read in submission order. A re-created map (resize, resolution change) bumps shadow_gen and is cleared again. shadow_drawn bits (validation) are unchanged.",
   "metrics": [
+   "scopec:shadow_moon:clear_px",
    "scope:shadow_moon",
+   "scopec:shadow_sun:clear_px",
    "scope:shadow_sun",
    "scope:shadow_vm",
    "gpu_frame"
