@@ -18,6 +18,7 @@ Generated from `docs/perf/fixes.json` by `tools/perf_audit/perf_audit.py finding
 | PF-0012 | R02 shadow casters in every cascade (F-b96020) / alpha-test overdraw in the dense vegetation zones: the pine forest interior's sun shadow pass ran 670 M alpha-tested fragment invocations per frame (~40 x the 4 tiles' 16.7 M texels; 14 - 21 ms of GPU at Modern), instances in cell order, small meshes before trees | Classic shadow instances drawn front to back from the light | closed | S | DESKTOP-SN4N74U | CLOSED: scope:shadow_sun 29.5 -> 27.49 (-6.81%, p=1e-05); images pass; state identical |
 | PF-0013 | R02 shadow casters in every cascade (F-b96020) / alpha-test overdraw in the dense vegetation zones: after PF-0012 the pine forest's sun shadow pass still ran ~660 M alpha-tested fragment invocations per frame (~40 x overdraw of leaf / grass cards in the 4 x 2048^2 tiles, 14 - 30 ms at Modern); 2 cascades instead of 4 cut 58 % but blurred every tree shadow | Grass and small plant shadows in the near cascades only (per-class caster cascade limit) **(visual trade-off)** | closed | M | DESKTOP-SN4N74U | CLOSED: scope:shadow_sun 3.009 -> 2.546 (-15.39%, p=0); images differ (visual trade-off, by design); state identical |
 | PF-0014 | R02 shadow casters in every cascade (F-b96020) / alpha-test overdraw in the dense vegetation zones: the forest interiors' sun shadow pass runs ~660 M alpha-tested fragment invocations per frame, each sampling the material's full RGBA8 albedo (4 bytes a texel) only for its alpha; the prepass of masked materials the same | Shadow and prepass alpha tests sample an R8 alpha mask | open | S | DESKTOP-SN4N74U | NOT CLOSED: scope:shadow_sun 13.47 -> 13.235 (-1.74%, p=0.348); images pass; state identical |
+| PF-0015 | Main view prepass + opaque 4 - 6 ms in the vegetation zones (audit 2026-10-18): the classic main view's instances were emitted in cell order inside each batch, so the prepass's alpha-tested leaf / grass cards behind nearer ones ran their shader before failing the depth test | Classic main view instances drawn front to back from the camera | verified on DESKTOP-SN4N74U (close on the target machine) | S | DESKTOP-SN4N74U | CLOSED: scope:prepass 1.8755 -> 1.743 (-7.06%, p=0); images pass; state identical |
 
 ## PF-0001: Empty shadow maps are not re-cleared every frame
 
@@ -188,3 +189,15 @@ A masked material texture drawn by the classic renderer gets an R8_UNORM copy of
 - Why fidelity-neutral: The mask has the albedo's size, level count and the same sampler, and every texel holds the albedo texel's 8-bit alpha (UNORM in both formats; sRGB decoding never applies to alpha), so cl_mask_alpha computes the same level of detail and filters the same values: the same fragments pass the alpha test, the depth / G-buffer outputs are bit-identical. Until a mask is built the albedo is bound, as before. Nothing feeds the simulation.
 
 - Verification run (DESKTOP-SN4N74U, 2026-10-18): NOT CLOSED: scope:shadow_sun 13.47 -> 13.235 (-1.74%, p=0.348); images pass; state identical
+
+## PF-0015: Classic main view instances drawn front to back from the camera
+
+The main view's instance stream is ordered like a sun cascade's (PF-0012): within each batch, 32 depth buckets nearest first, here over log2 of the camera's view depth (the clip w of the unjittered view-projection), and the batches big meshes first. The prepass's masked cards behind already written depth fail the early depth test; the lit pass at depth EQUAL runs once per kept pixel as before.
+
+- Rule / finding: R02 Main view prepass + opaque 4 - 6 ms in the vegetation zones (audit 2026-10-18): the classic main view's instances were emitted in cell order inside each batch, so the prepass's alpha-tested leaf / grass cards behind nearer ones ran their shader before failing the depth test
+- Code: `src/render/vk_classic.c emit_view_depth_order (PF-0012's light-depth ordering with the camera's clip w, log2-bucketed), cull_views / vkc_frame`
+- Metrics (perf_verify): `scope:prepass`, `scope:opaque`, `gpu_frame`
+- Scenes: veg_forest_pine, veg_forest_broadleaf, veg_meadow
+- Why fidelity-neutral: The same instances and batches are drawn with the same pipelines and data; only the order inside the depth-tested prepass changes, which keeps the nearest fragment of every pixel whatever the order (exact depth ties between different surfaces aside, which perf_verify's image check covers). The lit pass shades at depth EQUAL exactly the surface the prepass kept. Nothing feeds the simulation.
+
+- Verification run (DESKTOP-SN4N74U, 2026-10-18): CLOSED: scope:prepass 1.8755 -> 1.743 (-7.06%, p=0); images pass; state identical

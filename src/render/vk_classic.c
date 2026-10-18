@@ -926,9 +926,11 @@ static void cull_range_multi(void *ctx, int begin, int end) {
 
 static void emit_view(ClView *out);
 
-static void emit_view_light_order(ClView *out, const mat4 *vp);
+static void emit_view_depth_order(ClView *out, const mat4 *vp, int row);
 
-static void cull_views(const ClCull *views, ClView *const *outs, const mat4 *const *light_vps, int nv, const VgScene *s) {
+// light_vps[i]: view i's instances ordered front to back along row depth_rows[i] of that matrix (NULL:
+// plain key order).
+static void cull_views(const ClCull *views, ClView *const *outs, const mat4 *const *light_vps, const int *depth_rows, int nv, const VgScene *s) {
     MV.n = nv;
     MV.s = s;
     u32 total = 0;
@@ -969,7 +971,7 @@ static void cull_views(const ClCull *views, ClView *const *outs, const mat4 *con
         ClInst *ct = C.tmp;
         u32 *ck = C.tmp_key, cc = C.tmp_cap;
         C.tmp = m->tmp, C.tmp_key = m->key, C.tmp_cap = m->tmp_cap, C.tmp_n = w;
-        if (light_vps && light_vps[i]) emit_view_light_order(outs[i], light_vps[i]);
+        if (light_vps && light_vps[i]) emit_view_depth_order(outs[i], light_vps[i], depth_rows[i]);
         else emit_view(outs[i]);
         C.tmp = ct, C.tmp_key = ck, C.tmp_cap = cc, C.tmp_n = 0;
     }
@@ -1032,6 +1034,11 @@ static void emit_view(ClView *out) {
 // fragments behind already written depth fail the early depth test before their alpha-test shader
 // runs. A depth-only pass keeps the minimum depth of every fragment whatever the draw order (the
 // fragments, their depths and their alpha tests do not depend on it): the map is bit-identical.
+//
+// PF-0015: the main view the same way with the camera's clip w (its view depth) for row 3: nearest
+// instances (and big meshes) first, so the prepass's alpha-tested cards behind them fail early depth.
+// The prepass keeps the nearest fragment of every pixel whatever the order (exact depth ties aside),
+// and the lit pass shades at depth EQUAL what the prepass kept.
 #define CL_DEPTH_BUCKETS 32u
 static int cmp_batch_size(const void *pa, const void *pb) {
     const ClBatch *x = (const ClBatch *)pa, *y = (const ClBatch *)pb;
@@ -1041,11 +1048,11 @@ static int cmp_batch_size(const void *pa, const void *pb) {
     if (rx != ry) return rx > ry ? -1 : 1;
     return x->key < y->key ? -1 : (x->key > y->key ? 1 : 0);
 }
-static void emit_view_light_order(ClView *out, const mat4 *vp) {
+static void emit_view_depth_order(ClView *out, const mat4 *vp, int row) {
     out->batch_count = 0;
     out->instances = C.tmp_n;
     if (!C.tmp_n) return;
-    const float *m = vp->m;   // column-major: row 2 = the NDC depth (ortho: w = 1)
+    const float *m = vp->m + row;   // column-major: row 2 = the NDC depth (light ortho: w = 1), row 3 = the clip w (camera)
     float zlo = 1e30f, zhi = -1e30f;
     static u8 *bucket;
     static u32 bucket_cap;
@@ -1055,13 +1062,15 @@ static void emit_view_light_order(ClView *out, const mat4 *vp) {
     }
     for (u32 i = 0; i < C.tmp_n; i++) {
         const float *q = C.tmp[i].pos;
-        float z = m[2] * q[0] + m[6] * q[1] + m[10] * q[2] + m[14];
+        float z = m[0] * q[0] + m[4] * q[1] + m[8] * q[2] + m[12];
+        if (row == 3) z = log2f(fmaxf(z, 0.25f));   // camera distance: the buckets fine near, coarse far
         zlo = fminf(zlo, z), zhi = fmaxf(zhi, z);
     }
     float k = zhi > zlo ? (float)CL_DEPTH_BUCKETS / (zhi - zlo) : 0.0f;
     for (u32 i = 0; i < C.tmp_n; i++) {
         const float *q = C.tmp[i].pos;
-        float z = m[2] * q[0] + m[6] * q[1] + m[10] * q[2] + m[14];
+        float z = m[0] * q[0] + m[4] * q[1] + m[8] * q[2] + m[12];
+        if (row == 3) z = log2f(fmaxf(z, 0.25f));   // camera distance: the buckets fine near, coarse far
         int b = (int)((z - zlo) * k);
         bucket[i] = (u8)(b < 0 ? 0 : (b >= (int)CL_DEPTH_BUCKETS ? CL_DEPTH_BUCKETS - 1 : b));
     }
@@ -1247,6 +1256,7 @@ void vkc_frame(const VgScene *s, const VgDisplace *disp, float density, float lo
         ClView *outs[CL_VIEWS];
         const mat4 *lvps[CL_VIEWS] = { 0 };
         bool light_order = prof_fix_enabled(PFX_SHADOW_LIGHT_ORDER);
+        int rows[CL_VIEWS] = { 0 };
         int nv = 0;
         bool pip = render_scope_cull(&pip_vp, &pip_eye, &pip_px);
         if (pip) {
@@ -1259,6 +1269,7 @@ void vkc_frame(const VgScene *s, const VgDisplace *disp, float density, float lo
             outs[nv++] = &C.view[CL_VIEW_PIP];
         }
         cv[nv] = v;
+        if (prof_fix_enabled(PFX_VIEW_DEPTH_ORDER)) lvps[nv] = &R->view_proj_nj, rows[nv] = 3;
         outs[nv++] = &C.view[0];
         if (cascades) {
             C.ncasc = (u32)DG_CLAMP((int)R->shq.cascades, 1, 4);
@@ -1267,10 +1278,11 @@ void vkc_frame(const VgScene *s, const VgDisplace *disp, float density, float lo
                 cv[nv] = v;
                 cascade_view(&cv[nv], k, tile, shadow_px);
                 lvps[nv] = light_order ? &R->shadow_vp_ndc[k] : NULL;
+                rows[nv] = 2;
                 outs[nv++] = &C.view[1 + k];
             }
         }
-        cull_views(cv, outs, lvps, nv, s);
+        cull_views(cv, outs, lvps, rows, nv, s);
         if (pip) build_lods(&C.view[CL_VIEW_PIP]);
         count_view(&C.view[0]);
         PROF_END();
@@ -1289,7 +1301,8 @@ void vkc_frame(const VgScene *s, const VgDisplace *disp, float density, float lo
         PROF_BEGIN("classic:cull_main");
         C.tmp_n = 0;
         cull_cells(&v, s);
-        emit_view(&C.view[0]);
+        if (prof_fix_enabled(PFX_VIEW_DEPTH_ORDER)) emit_view_depth_order(&C.view[0], &R->view_proj_nj, 3);
+        else emit_view(&C.view[0]);
         count_view(&C.view[0]);
         PROF_END();
         PROF_BEGIN("classic:cull_cascades");
@@ -1300,7 +1313,7 @@ void vkc_frame(const VgScene *s, const VgDisplace *disp, float density, float lo
                 cascade_view(&v, k, tile, shadow_px);
                 C.tmp_n = 0;
                 cull_cells(&v, s);
-                if (prof_fix_enabled(PFX_SHADOW_LIGHT_ORDER)) emit_view_light_order(&C.view[1 + k], &R->shadow_vp_ndc[k]);
+                if (prof_fix_enabled(PFX_SHADOW_LIGHT_ORDER)) emit_view_depth_order(&C.view[1 + k], &R->shadow_vp_ndc[k], 2);
                 else emit_view(&C.view[1 + k]);
             }
         }
