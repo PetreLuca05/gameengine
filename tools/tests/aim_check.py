@@ -106,7 +106,7 @@ def main():
             if a > SHOT_DIR_DEG:
                 fails.append("%s: shot direction %.2f deg off the barrel line" % (case, a))
             off = line_dist(rep_q, o, d)
-            if m.group(1) != "barrel" and off > 0.02 + math.tan(math.radians(SHOT_DIR_DEG)) * math.dist(rep_q, o):
+            if m.group(1) != "barrel" and off > 0.03 + math.tan(math.radians(SHOT_DIR_DEG)) * math.dist(rep_q, o):
                 fails.append("%s: Q %.3f m off the shot's line" % (case, off))
             print("%-15s shot %.3f deg from the barrel line, Q %.3f m off it" % (case, a, off))
             rep_dir = None

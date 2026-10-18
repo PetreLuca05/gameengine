@@ -74,6 +74,9 @@ parallax = (muzzle's distance from the camera ray) × cot(grazing angle at P), a
   at 40 m).
 - Aiming at the ground ahead: a barrel 12 cm under the camera ray reaches the ground ~1 m before P at
   a 6.5° grazing angle. The `parallax` term covers it.
+- Hip fire in the open: the hip barrel can point ~1–2° off the camera ray. At range its line may end
+  on something well short of what the camera sees (a post 140 m out, P on a hill at 220 m). By the
+  rule that is obstructed and the crosshair shows it: the bullet really lands there.
 - When the obstruction clears, the crosshair eases back to the centre (`crosshair_obstruct_lerp`).
 
 When the crosshair is moved it shows where the bullet goes. Bullets always fly along B: the crosshair
