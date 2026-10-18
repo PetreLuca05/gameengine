@@ -288,7 +288,7 @@ bool render_init(SDL_Window *window) {
     R->line_cpu[1] = (LineVertex *)malloc(sizeof(LineVertex) * R->line_cap);
     R->text_cap = 196608;
     R->text_cpu = (TextVertex *)malloc(sizeof(TextVertex) * R->text_cap);
-    R->ui_vcap = 262144; R->ui_icap = 524288; R->ui_ccap = 8192;
+    R->ui_vcap = 524288; R->ui_icap = 1572864; R->ui_ccap = 12288;   // the screen's layers + an offscreen layer (gui_draw.c)
     R->ui_verts = (UiVertex *)malloc(sizeof(UiVertex) * R->ui_vcap);
     R->ui_indices = (u32 *)malloc(sizeof(u32) * R->ui_icap);
     R->ui_cmds = (UiDrawCmd *)malloc(sizeof(UiDrawCmd) * R->ui_ccap);
@@ -432,6 +432,7 @@ bool render_begin_frame(void) {
     R->line_count[0] = R->line_count[1] = 0;
     R->text_count = 0;
     R->ui_vcount = R->ui_icount = R->ui_ccount = 0;
+    R->ui_off_count = R->ui_off_ccount = 0;
     memset(&R->sight, 0, sizeof(R->sight));   // the game sets this frame's sight (render_set_sight)
     R->last_stats = R->stats;
     R->stats.draw_calls = R->stats.triangles = R->stats.culled = 0;
@@ -663,7 +664,7 @@ void render_set_text_atlas(TextureId atlas) { R->text_atlas = atlas ? atlas : R-
 
 void render_ui(const UiVertex *verts, u32 vcount, const u32 *indices, u32 icount, const UiDrawCmd *cmds, u32 ccount) {
     if (g_ui_hidden) return;
-    if (R->ui_vcount + vcount > R->ui_vcap || R->ui_icount + icount > R->ui_icap || R->ui_ccount + ccount > R->ui_ccap) return;
+    if (R->ui_vcount + vcount > R->ui_vcap || R->ui_icount + icount > R->ui_icap || R->ui_ccount + R->ui_off_ccount + ccount > R->ui_ccap) return;
     u32 vbase = R->ui_vcount, ibase = R->ui_icount;
     memcpy(R->ui_verts + vbase, verts, sizeof(UiVertex) * vcount);
     for (u32 i = 0; i < icount; i++) R->ui_indices[ibase + i] = indices[i] + vbase;
@@ -674,6 +675,31 @@ void render_ui(const UiVertex *verts, u32 vcount, const u32 *indices, u32 icount
     }
     R->ui_vcount += vcount;
     R->ui_icount += icount;
+}
+
+// The job's vertices / indices go into the shared UI arrays (one upload with the screen's), its
+// commands into the end of ui_cmds; render_ui_build records the pass (render_ui.c).
+void render_ui_offscreen(TextureId target, u32 clear, const UiVertex *verts, u32 vcount, const u32 *indices, u32 icount, const UiDrawCmd *cmds,
+                         u32 ccount, bool backdrop_source) {
+    if (g_ui_hidden || !target || R->ui_off_count >= sizeof(R->ui_off) / sizeof(R->ui_off[0])) return;
+    if (R->ui_vcount + vcount > R->ui_vcap || R->ui_icount + icount > R->ui_icap || R->ui_ccount + R->ui_off_ccount + ccount > R->ui_ccap) {
+        static int warned;
+        if (!warned++) log_warn("render: offscreen UI dropped (%u verts, %u indices, %u cmds over the UI budget)", vcount, icount, ccount);
+        return;
+    }
+    u32 vbase = R->ui_vcount, ibase = R->ui_icount;
+    memcpy(R->ui_verts + vbase, verts, sizeof(UiVertex) * vcount);
+    for (u32 i = 0; i < icount; i++) R->ui_indices[ibase + i] = indices[i] + vbase;
+    R->ui_off_ccount += ccount;
+    u32 first = R->ui_ccap - R->ui_off_ccount;
+    for (u32 i = 0; i < ccount; i++) {
+        UiDrawCmd c = cmds[i];
+        c.index_offset += ibase;
+        R->ui_cmds[first + i] = c;
+    }
+    R->ui_vcount += vcount;
+    R->ui_icount += icount;
+    R->ui_off[R->ui_off_count++] = (struct UiOffscreenJob){ target, clear, first, ccount, backdrop_source };
 }
 
 // ------------------------------------------------------------------ helpers
@@ -2235,34 +2261,38 @@ static void exec_final(VkCommandBuffer cmd, void *u) {
     vkCmdBeginRendering(cmd, &ri);
     set_viewport(cmd, R->swap_extent.width, R->swap_extent.height);
     post_final_draw(cmd, F.ldr);
-    if (R->ui_ccount && F.ui_voff != (VkDeviceSize)-1 && F.ui_ioff != (VkDeviceSize)-1) {
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_UI]);
-        float scr[4] = { 2.0f / (float)R->swap_extent.width, 2.0f / (float)R->swap_extent.height, 1.0f / (float)R->swap_extent.width,
-                         1.0f / (float)R->swap_extent.height };
-        vkCmdPushConstants(cmd, R->layout_ui, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(scr), scr);
-        vkCmdBindVertexBuffers(cmd, 0, 1, &f->dyn.buffer, &F.ui_voff);
-        vkCmdBindIndexBuffer(cmd, f->dyn.buffer, F.ui_ioff, VK_INDEX_TYPE_UINT32);
-        u32 bound = 0;
-        for (u32 i = 0; i < R->ui_ccount; i++) {
-            UiDrawCmd *c = &R->ui_cmds[i];
-            if (!c->index_count) continue;
-            TextureId tex = c->texture && R->textures[c->texture].used && R->textures[c->texture].ready ? c->texture : R->white_tex;
-            if (tex != bound) {
-                vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_ui, 0, 1, &R->textures[tex].set, 0, NULL);
-                bound = tex;
-            }
-            int x0 = DG_CLAMP(c->clip_x, 0, (int)R->swap_extent.width);
-            int y0 = DG_CLAMP(c->clip_y, 0, (int)R->swap_extent.height);
-            int x1 = DG_CLAMP(c->clip_x + c->clip_w, 0, (int)R->swap_extent.width);
-            int y1 = DG_CLAMP(c->clip_y + c->clip_h, 0, (int)R->swap_extent.height);
-            if (x1 <= x0 || y1 <= y0) continue;
-            VkRect2D sc = { { x0, y0 }, { (u32)(x1 - x0), (u32)(y1 - y0) } };
-            vkCmdSetScissor(cmd, 0, 1, &sc);
-            vkCmdDrawIndexed(cmd, c->index_count, 1, c->index_offset, 0, 0);
-            R->stats.draw_calls++;
-        }
-    }
+    (void)f;
+    vkr_ui_draw_cmds(cmd, R->ui_cmds, R->ui_ccount, R->swap_extent.width, R->swap_extent.height, PIPE_UI);
     vkCmdEndRendering(cmd);
+}
+
+void vkr_ui_draw_cmds(VkCommandBuffer cmd, const UiDrawCmd *cmds, u32 count, u32 w, u32 h, int pipe) {
+    FrameResources *f = F.f;
+    if (!count || F.ui_voff == (VkDeviceSize)-1 || F.ui_ioff == (VkDeviceSize)-1) return;
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[pipe]);
+    float scr[4] = { 2.0f / (float)w, 2.0f / (float)h, 1.0f / (float)w, 1.0f / (float)h };
+    vkCmdPushConstants(cmd, R->layout_ui, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(scr), scr);
+    vkCmdBindVertexBuffers(cmd, 0, 1, &f->dyn.buffer, &F.ui_voff);
+    vkCmdBindIndexBuffer(cmd, f->dyn.buffer, F.ui_ioff, VK_INDEX_TYPE_UINT32);
+    u32 bound = 0;
+    for (u32 i = 0; i < count; i++) {
+        const UiDrawCmd *c = &cmds[i];
+        if (!c->index_count) continue;
+        TextureId tex = c->texture && R->textures[c->texture].used && R->textures[c->texture].ready ? c->texture : R->white_tex;
+        if (tex != bound) {
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_ui, 0, 1, &R->textures[tex].set, 0, NULL);
+            bound = tex;
+        }
+        int x0 = DG_CLAMP(c->clip_x, 0, (int)w);
+        int y0 = DG_CLAMP(c->clip_y, 0, (int)h);
+        int x1 = DG_CLAMP(c->clip_x + c->clip_w, 0, (int)w);
+        int y1 = DG_CLAMP(c->clip_y + c->clip_h, 0, (int)h);
+        if (x1 <= x0 || y1 <= y0) continue;
+        VkRect2D sc = { { x0, y0 }, { (u32)(x1 - x0), (u32)(y1 - y0) } };
+        vkCmdSetScissor(cmd, 0, 1, &sc);
+        vkCmdDrawIndexed(cmd, c->index_count, 1, c->index_offset, 0, 0);
+        R->stats.draw_calls++;
+    }
 }
 
 // Builds this frame's graph:

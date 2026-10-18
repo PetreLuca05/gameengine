@@ -431,6 +431,19 @@ static void test_maps(void) {
         if (i) CHECK(ml.maps[i - 1].order <= m->order, "sorted by order");
     }
     CHECK(maplist_hash(&ml) != 0, "catalogue hash");
+    // The Maps tab globe (docs/MENU_GLOBE.md): every map has a place, its region is in regions.json.
+    char gpath[512];
+    char *gtext = platform_read_file(platform_data_path("assets/globe/regions.json", gpath, sizeof(gpath)), NULL);
+    cJSON *groot = gtext ? cJSON_Parse(gtext) : NULL;
+    const cJSON *gregions = groot ? cJSON_GetObjectItemCaseSensitive(groot, "regions") : NULL;
+    CHECK(gregions != NULL, "assets/globe/regions.json parses");
+    for (int i = 0; i < ml.count; i++) {
+        const MapInfo *m = &ml.maps[i];
+        CHECK(m->has_geo && m->geo_place[0], "%s: \"globe\" place", m->id);
+        CHECK(!m->geo_region[0] || cJSON_GetObjectItemCaseSensitive(gregions, m->geo_region), "%s: globe region %s in regions.json", m->id, m->geo_region);
+    }
+    cJSON_Delete(groot);
+    free(gtext);
     // Validation of bad files.
     MapInfo mi;
     char err[160];
@@ -443,6 +456,10 @@ static void test_maps(void) {
     CHECK(!maplist_parse("{ nope", "a", &mi, NULL, NULL, err, sizeof(err)), "syntax error");
     CHECK(maplist_parse("{ \"name\": \"A\", \"level\": \"x\", \"thumbnail\": \"t.png\", \"biome\": \"b\", \"description\": \"d\", \"season\": \"winter\" }", "a", &mi, NULL, NULL, err, sizeof(err)) &&
           mi.season == SEASON_WINTER && mi.players_min == 1 && mi.players_max == 4, "minimal valid map + defaults");
+    CHECK(!maplist_parse("{ \"name\": \"A\", \"level\": \"x\", \"thumbnail\": \"t.png\", \"biome\": \"b\", \"description\": \"d\", \"globe\": { \"lon\": 10 } }", "a", &mi, NULL, NULL, err, sizeof(err)) && strstr(err, "globe"), "globe needs lon + lat");
+    CHECK(!maplist_parse("{ \"name\": \"A\", \"level\": \"x\", \"thumbnail\": \"t.png\", \"biome\": \"b\", \"description\": \"d\", \"globe\": { \"lon\": 200, \"lat\": 0 } }", "a", &mi, NULL, NULL, err, sizeof(err)) && strstr(err, "range"), "globe lon range");
+    CHECK(maplist_parse("{ \"name\": \"A\", \"level\": \"x\", \"thumbnail\": \"t.png\", \"biome\": \"b\", \"description\": \"d\", \"globe\": { \"lon\": 28.6, \"lat\": 44.2, \"region\": \"ro_ct\" } }", "a", &mi, NULL, NULL, err, sizeof(err)) &&
+          mi.has_geo && !strcmp(mi.geo_region, "ro_ct") && !strcmp(mi.geo_place, "A"), "globe block + place defaults to the name");
     char sz[32];
     mi.size_m = 2000;
     maplist_size_text(&mi, sz, sizeof(sz));

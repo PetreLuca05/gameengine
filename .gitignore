@@ -47,3 +47,6 @@ Thumbs.db
 
 # Packaged builds for playing / comparing (not source)
 /openable builds/
+
+# Maps tab globe: downloaded source data (tools/globe/build_globe.py re-fetches it)
+/tools/globe/cache/

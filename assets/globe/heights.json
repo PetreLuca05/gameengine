@@ -1,0 +1,42 @@
+{
+ "_doc": "Globe height maps (docs/MENU_GLOBE.md): 16-bit PNG, value = metres + 11000, equirectangular over bbox [west, south, east, north]. Finest grid containing a point wins.",
+ "offset": 11000,
+ "grids": [
+  {
+   "file": "assets/globe/height_world.png",
+   "bbox": [
+    -180,
+    -90,
+    180,
+    90
+   ]
+  },
+  {
+   "file": "assets/globe/height_0.png",
+   "bbox": [
+    -80.0,
+    40.3,
+    -71.7,
+    45.1
+   ]
+  },
+  {
+   "file": "assets/globe/height_1.png",
+   "bbox": [
+    -74.35,
+    40.45,
+    -73.65,
+    41.0
+   ]
+  },
+  {
+   "file": "assets/globe/height_2.png",
+   "bbox": [
+    27.15,
+    43.6,
+    29.75,
+    44.95
+   ]
+  }
+ ]
+}

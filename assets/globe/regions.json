@@ -1,0 +1,35 @@
+{
+  "_doc": "Maps tab globe (docs/MENU_GLOBE.md). A region is the admin layer the camera dives into on the way to a map: its country (dimmed less than the rest of the world), its unit (state / judet: hatched, outlined, named) and the camera legs (overview of the whole country layer, the unit, then the city). Radii are the globe's radius in pixels at a 900 px tall screen (they scale with the screen height); detail_from: the radius the detail layer (counties / communes) is fully in by (none: with the admin layer). detail: the areas the build tool (tools/globe/build_globe.py) renders deeper than the world levels, from Sentinel-2 imagery and a 30 m height map: bbox [west, south, east, north] in degrees, level = the deepest tile level (10 = about 38 m per texel). Maps point at a region with their \"globe\" block (assets/maps/*.json).",
+  "regions": {
+    "us_ny": {
+      "label": "New York State, US",
+      "country": "USA",
+      "unit": "US-NY",
+      "unit_code": "NY",
+      "unit_name": "New York",
+      "layer": "us_states",
+      "overview": { "lon": -97.0, "lat": 39.0, "radius": 1000 },
+      "focus": { "lon": -75.6, "lat": 42.6, "radius": 5200 },
+      "city_radius": 42000,
+      "detail_from": 4000,
+      "detail": [
+        { "bbox": [-80.0, 40.3, -71.7, 45.1], "level": 8 },
+        { "bbox": [-74.35, 40.45, -73.65, 41.0], "level": 10 }
+      ]
+    },
+    "ro_ct": {
+      "label": "Județul Constanța, RO",
+      "country": "ROU",
+      "unit": "RO-CT",
+      "unit_code": "CT",
+      "unit_name": "Constanța",
+      "layer": "ro_judete",
+      "overview": { "lon": 25.0, "lat": 45.9, "radius": 4000 },
+      "focus": { "lon": 28.25, "lat": 44.24, "radius": 18000 },
+      "city_radius": 85000,
+      "detail": [
+        { "bbox": [27.15, 43.6, 29.75, 44.95], "level": 10 }
+      ]
+    }
+  }
+}

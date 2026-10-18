@@ -4,3 +4,5 @@
 *.wav binary
 *.ktx2 binary
 *.bin binary
+*.dgt binary
+*.dgv binary

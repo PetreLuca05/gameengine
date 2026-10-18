@@ -19,6 +19,8 @@
 #define MAX_GLYPHS 1024
 #define LAYER_VERTS 98304
 #define LAYER_INDICES 196608
+#define OFFSCREEN_VERTS 393216     // the Maps tab globe: tile meshes, coasts and borders, focus masks
+#define OFFSCREEN_INDICES 1048576
 #define LAYER_CMDS 2048
 #define CLIP_STACK 16
 #define ALPHA_STACK 16
@@ -42,9 +44,9 @@ typedef struct Font {
 
 typedef struct Layer {
     UiVertex *v;
-    u32 vc;
+    u32 vc, vcap;
     u32 *i;
-    u32 ic;
+    u32 ic, icap;
     UiDrawCmd cmd[LAYER_CMDS];
     u32 cc;
 } Layer;
@@ -65,6 +67,9 @@ static struct {
     float alpha[ALPHA_STACK];
     int alpha_n;
     TextureId backdrop;
+    TextureId off_target;        // gd_offscreen_begin: this frame's offscreen layer target
+    u32 off_clear;
+    int off_prev_layer, off_clip_n;
     int stat_cmds, stat_verts;
 } D;
 
@@ -264,7 +269,8 @@ static bool load_font(Font *f, const char *path) {
         if (c >= 127 && c < 160) continue;
         f->map[c] = (short)bake_glyph(f, c);
     }
-    static const int extras[] = { 0x2022, 0x2026, 0x2014, 0x2013, 0x2018, 0x2019, 0x201C, 0x201D, 0x2190, 0x2191, 0x2192, 0x2193, 0x25B2, 0x25BC, 0x2715, 0x2713, 0x221E };
+    static const int extras[] = { 0x2022, 0x2026, 0x2014, 0x2013, 0x2018, 0x2019, 0x201C, 0x201D, 0x2190, 0x2191, 0x2192, 0x2193, 0x25B2, 0x25BC, 0x2715, 0x2713, 0x221E,
+                                  0x0102, 0x0103, 0x0218, 0x0219, 0x021A, 0x021B };   // + Romanian (Maps tab places)
     f->extra_count = 0;
     for (int i = 0; i < (int)ARRAY_COUNT(extras); i++) {
         int g = bake_glyph(f, extras[i]);
@@ -302,8 +308,11 @@ static bool build_atlas(void) {
 
 bool gd_init(void) {
     for (int l = 0; l < GL_COUNT; l++) {
-        D.layers[l].v = (UiVertex *)malloc(sizeof(UiVertex) * LAYER_VERTS);
-        D.layers[l].i = (u32 *)malloc(sizeof(u32) * LAYER_INDICES);
+        Layer *L = &D.layers[l];
+        L->vcap = l == GL_OFFSCREEN ? OFFSCREEN_VERTS : LAYER_VERTS;
+        L->icap = l == GL_OFFSCREEN ? OFFSCREEN_INDICES : LAYER_INDICES;
+        L->v = (UiVertex *)malloc(sizeof(UiVertex) * L->vcap);
+        L->i = (u32 *)malloc(sizeof(u32) * L->icap);
     }
     D.ok = build_atlas();
     return D.ok;
@@ -320,6 +329,7 @@ void gd_shutdown(void) {
 }
 
 TextureId gd_atlas(void) { return D.atlas; }
+vec2 gd_white_uv(void) { return auv(WHITE_UV_X + 0.5f, WHITE_UV_X + 0.5f); }
 
 // ui_dump_atlas [path]: the SDF atlas alpha as a grey PNG (font / shape debugging).
 #include "stb_image_write.h"
@@ -337,6 +347,8 @@ static void cmd_dump_atlas(int argc, const char **argv) {
 void gd_register_commands(void) { cmd_register("ui_dump_atlas", cmd_dump_atlas, "ui_dump_atlas [path]: write the UI SDF atlas (alpha) as a PNG"); }
 int gd_stats_cmds(void) { return D.stat_cmds; }
 int gd_stats_verts(void) { return D.stat_verts; }
+u32 gd_layer_verts(int layer) { return D.layers[DG_CLAMP(layer, 0, GL_COUNT - 1)].vc; }
+u32 gd_layer_verts_cap(int layer) { return D.layers[DG_CLAMP(layer, 0, GL_COUNT - 1)].vcap; }
 
 // ------------------------------------------------------------------ draw list
 
@@ -350,6 +362,7 @@ void gd_begin(int w, int h) {
     D.alpha_n = 1;
     D.alpha[0] = 1.0f;
     D.backdrop = 0;
+    D.off_target = 0;
 }
 
 void gd_set_layer(int layer) { D.layer = DG_CLAMP(layer, 0, GL_COUNT - 1); }
@@ -379,7 +392,7 @@ static u32 col(u32 c) {
 // Starts / continues the command for (texture, clip); returns the layer or NULL when full.
 static Layer *prim(TextureId tex, u32 nv, u32 ni) {
     Layer *L = &D.layers[D.layer];
-    if (L->vc + nv > LAYER_VERTS || L->ic + ni > LAYER_INDICES) return NULL;
+    if (L->vc + nv > L->vcap || L->ic + ni > L->icap) return NULL;
     GuiRect c = D.clip[D.clip_n - 1];
     int cx = (int)floorf(c.x), cy = (int)floorf(c.y), cw = (int)ceilf(c.x + c.w) - cx, ch = (int)ceilf(c.y + c.h) - cy;
     UiDrawCmd *last = L->cc ? &L->cmd[L->cc - 1] : NULL;
@@ -600,6 +613,91 @@ void gd_image_mask(GuiRect r, TextureId tex, vec4 uv, u32 color) {
     quad_uv(tex, r.x, r.y, r.x + r.w, r.y + r.h, v2(uv.x, uv.y + 2.0f), v2(uv.z, uv.w + 2.0f), col(color));
 }
 
+void gd_tris(TextureId tex, const UiVertex *v, int nv, const u32 *idx, int ni) {
+    if (!tex || nv <= 0 || ni <= 0) return;
+    Layer *L = prim(tex, (u32)nv, (u32)ni);
+    if (!L) return;
+    u32 b = L->vc;
+    float a = D.alpha[D.alpha_n - 1];
+    UiVertex *o = L->v + b;
+    memcpy(o, v, sizeof(UiVertex) * (size_t)nv);
+    if (a < 0.999f)
+        for (int k = 0; k < nv; k++) o[k].color = gui_rgba_mul(o[k].color, a);
+    u32 *oi = L->i + L->ic;
+    for (int k = 0; k < ni; k++) oi[k] = b + idx[k];
+    L->vc += (u32)nv;
+    L->ic += (u32)ni;
+    L->cmd[L->cc - 1].index_count += (u32)ni;
+}
+
+// Four vertices per point (outer feather, core, -core, -outer along the mitred normal), three quads
+// per segment; the mitre is capped so sharp turns do not spike.
+void gd_polyline(const vec2 *p, int n, float t, u32 c, bool closed) {
+    if (n < 2 || (c >> 24) == 0) return;
+    int segs = closed ? n : n - 1;
+    float core = fmaxf(0.0f, t * 0.5f - 0.5f), outer = core + 1.0f;
+    // Up to 1 px the core has no width: three vertices per point (feather, centre, feather).
+    int K = core < 0.01f ? 3 : 4;
+    Layer *L = prim(D.atlas, (u32)(n * K), (u32)(segs * (K - 1) * 6));
+    if (!L) return;
+    c = col(c);
+    u32 ce = c;
+    if (t < 1.0f) {
+        u32 a = (u32)((float)(c >> 24) * fmaxf(t, 0.25f));
+        ce = (c & 0x00FFFFFFu) | (a << 24);
+    }
+    u32 c0 = ce & 0x00FFFFFFu;
+    vec2 uv = auv(WHITE_UV_X + 0.5f, WHITE_UV_X + 0.5f);
+    u32 b = L->vc;
+    UiVertex *v = L->v + b;
+    float o4[4] = { outer, core, -core, -outer }, o3[3] = { outer, 0.0f, -outer };
+    u32 c4[4] = { c0, ce, ce, c0 }, c3[3] = { c0, ce, c0 };
+    const float *o = K == 3 ? o3 : o4;
+    const u32 *cs = K == 3 ? c3 : c4;
+    for (int k = 0; k < n; k++) {
+        int kp = k > 0 ? k - 1 : (closed ? n - 1 : 0), kn = k < n - 1 ? k + 1 : (closed ? 0 : n - 1);
+        vec2 d0 = v2(p[k].x - p[kp].x, p[k].y - p[kp].y), d1 = v2(p[kn].x - p[k].x, p[kn].y - p[k].y);
+        float l0 = sqrtf(d0.x * d0.x + d0.y * d0.y), l1 = sqrtf(d1.x * d1.x + d1.y * d1.y);
+        vec2 n0 = l0 > 1e-6f ? v2(-d0.y / l0, d0.x / l0) : v2(0, 0), n1 = l1 > 1e-6f ? v2(-d1.y / l1, d1.x / l1) : v2(0, 0);
+        if (l0 <= 1e-6f) n0 = n1;
+        if (l1 <= 1e-6f) n1 = n0;
+        vec2 m = v2(n0.x + n1.x, n0.y + n1.y);
+        float ml = sqrtf(m.x * m.x + m.y * m.y);
+        m = ml > 1e-6f ? v2(m.x / ml, m.y / ml) : n0;
+        float dotn = m.x * n0.x + m.y * n0.y;
+        float s = 1.0f / fmaxf(dotn, 0.5f);   // mitre length, capped at 2x
+        for (int j = 0; j < K; j++) v[k * K + j] = (UiVertex){ v2(p[k].x + m.x * o[j] * s, p[k].y + m.y * o[j] * s), uv, cs[j] };
+    }
+    L->vc += (u32)(n * K);
+    u32 *ix = L->i + L->ic;
+    int per = (K - 1) * 6;
+    for (int sgi = 0; sgi < segs; sgi++) {
+        u32 a = b + (u32)(sgi * K), bb = b + (u32)(((sgi + 1) % n) * K);
+        for (int k = 0; k < K - 1; k++) {
+            u32 a0 = a + (u32)k, a1 = a + (u32)k + 1, b0 = bb + (u32)k, b1 = bb + (u32)k + 1;
+            u32 *q = ix + sgi * per + k * 6;
+            q[0] = a0; q[1] = b0; q[2] = b1;
+            q[3] = a0; q[4] = b1; q[5] = a1;
+        }
+    }
+    L->ic += (u32)(segs * per);
+    L->cmd[L->cc - 1].index_count += (u32)(segs * per);
+}
+
+void gd_offscreen_begin(TextureId target, u32 clear) {
+    D.off_target = target;
+    D.off_clear = clear;
+    D.off_prev_layer = D.layer;
+    D.off_clip_n = D.clip_n;
+    D.layer = GL_OFFSCREEN;
+    if (D.clip_n < CLIP_STACK) D.clip[D.clip_n++] = gui_rect(0, 0, (float)D.sw, (float)D.sh);
+}
+
+void gd_offscreen_end(void) {
+    D.layer = D.off_prev_layer;
+    D.clip_n = D.off_clip_n;
+}
+
 void gd_backdrop(GuiRect r, u32 tint) {
     if (gui_theme()->blur <= 0.0f) { gd_rect(r, UI_RGBA(12, 13, 15, 235)); return; }
     if (!D.backdrop) D.backdrop = render_ui_backdrop();
@@ -622,6 +720,7 @@ static int utf8_next(const char **s) {
 static int upper(int c) {
     if (c >= 'a' && c <= 'z') return c - 32;
     if (c >= 0xE0 && c <= 0xFE && c != 0xF7) return c - 32;
+    if (c == 0x0103 || c == 0x0219 || c == 0x021B) return c - 1;   // ă ș ț
     return c;
 }
 
@@ -763,9 +862,15 @@ float gd_text_wrap(const GuiText *t, float x, float y, float w, const char *s, b
 
 void gd_flush(void) {
     D.stat_cmds = D.stat_verts = 0;
+    Layer *O = &D.layers[GL_OFFSCREEN];
+    if (O->ic && D.off_target) {
+        render_ui_offscreen(D.off_target, D.off_clear, O->v, O->vc, O->i, O->ic, O->cmd, O->cc, true);
+        D.stat_cmds += (int)O->cc;
+        D.stat_verts += (int)O->vc;
+    }
     for (int l = 0; l < GL_COUNT; l++) {
         Layer *L = &D.layers[l];
-        if (!L->ic) continue;
+        if (!L->ic || l == GL_OFFSCREEN) continue;
         render_ui(L->v, L->vc, L->i, L->ic, L->cmd, L->cc);
         D.stat_cmds += (int)L->cc;
         D.stat_verts += (int)L->vc;

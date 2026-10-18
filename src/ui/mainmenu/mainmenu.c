@@ -19,6 +19,7 @@
 #include "audio/audio.h"
 #include "assets/assets.h"
 #include "world/season.h"
+#include "ui/globe/globe.h"
 #include <SDL3/SDL.h>
 #include <math.h>
 #include <stdio.h>
@@ -338,8 +339,13 @@ bool mainmenu_draw(bool top) {
         if (M->splash) draw_splash();
         return false;
     }
-    // Readability: darken the left and the bottom like the pause menu.
     float a = gui_ease_out(gui_anim_t(gui_id("mm_open")) / fmaxf(0.01f, TH->menu_in * 2));
+    // The Maps tab's globe replaces the background world (docs/MENU_GLOBE.md).
+    if (M->tab == MT_MAPS && tab_allowed(MT_MAPS, NULL) && st != LS_CLOSED) {
+        mm_layout_solve(&M->shell, gui_rect(0, 0, gui_w(), gui_h()));
+        mm_maps_background(mm_node(&M->shell, "content"), a * gui_ease_out(gui_anim_t(gui_id("mm_tab_in")) / TH->modal_in));
+    }
+    // Readability: darken the left and the bottom like the pause menu.
     gd_rect_hgrad(gui_rect(0, 0, gui_w() * 0.6f, gui_h()), gui_rgba_mul(UI_RGBA(0, 0, 0, 190), a), UI_RGBA(0, 0, 0, 0));
     gd_rect_grad(gui_rect(0, gui_h() * 0.55f, gui_w(), gui_h() * 0.45f), UI_RGBA(0, 0, 0, 0), gui_rgba_mul(UI_RGBA(0, 0, 0, 170), a));
     gd_rect_grad(gui_rect(0, 0, gui_w(), gui_h() * 0.16f), gui_rgba_mul(UI_RGBA(0, 0, 0, 140), a), UI_RGBA(0, 0, 0, 0));
@@ -512,6 +518,7 @@ void mainmenu_init(void) {
     M->dynamic_weather = true;
     load_layouts();
     mm_scene_register();
+    globe_register();
     const Profile *p = lobby_profile();
     const char *map = p->last_map[0] ? p->last_map : "devroom";
     mm_select_map(lobby_map_info(map) ? map : (lobby_maps()->count ? lobby_maps()->maps[0].id : "devroom"));
