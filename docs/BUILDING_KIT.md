@@ -8,7 +8,8 @@
 - **Unit tests:** `tests/test_kit.c` (ctest `kit`) covers broken fixtures from `tools/kit_gen/kit_bad_fixtures.py`, piece loading and prefab expansion.
 - **Engine:** `src/assets/kit_piece.c` (pure loader + rules), `src/world/kit_layout.c` (pure prefab expansion), `src/world/kit_world.c` (draws, collision, socket entities, hot reload).
 - **Chapter 1:** levels are assembled from prefabs written by `tools/story/build_story01.py`.
-- **Not built yet:** `tools/blender/kit_export.py` and the Blender round trip.
+- **Blender exporter:** `tools/blender/kit_export.py` (batch or N panel).
+- **Round trip:** `tools/tests/kit_roundtrip.py` (Blender or `pip install bpy`) imports a piece, edits it, exports it and validates it. It also checks that four broken variants are refused. It is verified with bpy 5.2.
 
 This is the modular architecture kit that story levels and the near city are assembled from. Chapter 1 is the first user (docs/CHAPTER_01.md).
 
@@ -41,7 +42,7 @@ The first piece set is **generated** by `tools/kit_gen/` (Python, writes `.glb` 
 |---|---|
 | Units | Metres, real scale. 1 m plan grid, 0.1 m sub-grid. Heights snap to 0.05 m. |
 | Axes (engine) | +Y up. A piece's front faces **−Z**, the engine's yaw-0 direction. |
-| Axes (Blender) | Z up, model the front facing **−Y** (Blender's Front view looks at it). The exporter converts. |
+| Axes (Blender) | Z up. The piece sits in the **positive octant** (x 0..length, y 0..depth, z 0..height) with its origin at that corner. Its front faces **+Y** (Blender's Back view, Ctrl+Numpad 1, looks at it). The stock glTF exporter (+Y up) then gives exactly the engine's x 0..w, y 0..h, z −d..0 with the front at −Z. Importing a kit `.glb` lands it the same way. |
 | Pivot | **Bottom-left-back** corner on the grid. Seen from the front: min x, min y, and the back face, which is max z in engine space. The piece extends +X (length), +Y (height) and −Z (depth/thickness). |
 | Wall thickness | 0.2 interior, 0.3 exterior/party. The placement tool aligns `back` / `center` / `front` to the grid line. Plans in docs/CHAPTER_01.md are centrelines. |
 | Storey | Floor-to-floor 3.0. Slab 0.3 (top at storey y). Ceiling 2.7 above the floor top. Wall pieces are 2.7 tall (interior) or 3.0 (exterior/party, covering the slab edge). |
@@ -215,14 +216,14 @@ Prefabs nest. An instance may `mirror` (x) and `override` pieces by path. The le
 ## 6. Blender workflow
 
 1. Open `assets/kits/building/src/<piece>.blend`, or import the `.glb`.
-2. Model at real scale with the front facing −Y and the origin at the bottom-left-back corner. Name slots `M_*`, sockets `S_*`, collision `UCX_*`, and LODs `_LOD1..3`.
+2. Model at real scale in the positive octant, with the front facing +Y and the origin at the corner. Name slots `M_*`, sockets `S_*` (empties), collision `UCX_*` / `UBX_*`, and LODs `_LOD1..3`. Add two UV maps: UV0 at world scale (1 unit = 1 m) and UV1 unwrapped without overlaps.
 3. Export with **`tools/blender/kit_export.py`**: `blender -b src/wall_int_300.blend -P tools/blender/kit_export.py`, or from the N-panel "Deadground Kit ▸ Export". The script:
    - applies transforms
    - checks the pivot
    - converts axes
    - writes the `.glb` with custom props
    - runs `validate_kit` on the result and prints its messages
-4. If the game is running, every instance updates within about 1 s (or run `kit_reload wall_int_300`).
+4. If the game is running, every instance updates within about 1 s (or run `kit_reload wall_int_300`). This is verified headless: the mullion re-exported 5× thicker mid-run, and all 614 instances rebuilt in place.
 
 Round-trip test (`tools/tests/kit_roundtrip.py`):
 1. Modify a piece programmatically: offset a vertex, add a socket.
