@@ -20,6 +20,7 @@ Generated from `docs/perf/fixes.json` by `tools/perf_audit/perf_audit.py finding
 | PF-0014 | R02 shadow casters in every cascade (F-b96020) / alpha-test overdraw in the dense vegetation zones: the forest interiors' sun shadow pass runs ~660 M alpha-tested fragment invocations per frame, each sampling the material's full RGBA8 albedo (4 bytes a texel) only for its alpha; the prepass of masked materials the same | Shadow and prepass alpha tests sample an R8 alpha mask | open | S | DESKTOP-SN4N74U | NOT CLOSED: scope:shadow_sun 13.47 -> 13.235 (-1.74%, p=0.348); images pass; state identical |
 | PF-0015 | Main view prepass + opaque 4 - 6 ms in the vegetation zones (audit 2026-10-18): the classic main view's instances were emitted in cell order inside each batch, so the prepass's alpha-tested leaf / grass cards behind nearer ones ran their shader before failing the depth test | Classic main view instances drawn front to back from the camera | verified on DESKTOP-SN4N74U (close on the target machine) | S | DESKTOP-SN4N74U | CLOSED: scope:prepass 1.8755 -> 1.743 (-7.06%, p=0); images pass; state identical |
 | PF-0028 | R02 shadow casters in every cascade (F-b96020): the sun shadow pass (14 - 30 ms in the forest interiors at Modern, audit 2026-10-18) re-renders all four 2048^2 cascade tiles every frame; the audit estimated up to 18 ms in the far cascades 2 - 3 | Far sun cascades re-rendered every other frame, in turn **(visual trade-off)** | verified on DESKTOP-SN4N74U (close on the target machine) | M | DESKTOP-SN4N74U | CLOSED: scope:shadow_sun 14.22 -> 12.15 (-14.56%, p=0); images pass; state identical |
+| PF-0029 | T01 heaviest passes: alpha-tested foliage costs per pixel; the vegetation zones' prepass + opaque (4 - 6 ms at Modern) scale with the render resolution, and High rendered natively | TAA-U by default at High / Medium, negative mip bias under temporal upscaling **(visual trade-off)** | open | S | - | - |
 
 ## PF-0001: Empty shadow maps are not re-cleared every frame
 
@@ -215,3 +216,16 @@ compute_matrices decides per cascade whether it is due (frame_index phase per fa
 - What stays identical: Not fidelity neutral (a visual trade-off): a kept tile shows its casters as they were up to interval - 1 frames earlier. The lit shaders sample it with the matrices it was drawn with, so the shadows stay in place (no swimming) and cascade selection is unchanged. Nothing feeds the simulation: the state hashes must match.
 
 - Verification run (DESKTOP-SN4N74U, 2026-10-18): CLOSED: scope:shadow_sun 14.22 -> 12.15 (-14.56%, p=0); images pass; state identical
+
+## PF-0029: TAA-U by default at High / Medium, negative mip bias under temporal upscaling
+
+The tier tables default High and Medium to TAA-U at 0.75. vkr_material_mip_bias gives log2(R->hdr.w / swap width), clamped to -1, while r_aa is TAA or r_upscaler is TAA-U / FSR 2 and the render is below display width; a change recreates the material samplers (like r_aniso) and the vgeo module samplers. perf_fix_disable PF-0029 turns the bias off (the tier defaults are data). Measured manually (pine forest, High, 1600 x 900, one process, r_upscaler 0 / 1 alternating, 2 x 240 frames): GPU frame 10.15 -> 8.67 ms (-14.6 %), opaque 2.76 -> 1.96 ms, prepass 0.90 -> 0.77 ms.
+
+- Rule / finding: T01 T01 heaviest passes: alpha-tested foliage costs per pixel; the vegetation zones' prepass + opaque (4 - 6 ms at Modern) scale with the render resolution, and High rendered natively
+- Code: `assets/render/fidelity/{high,medium}.json (upscaler / upscale_ratio defaults)`, `src/render/vk_resources.c vkr_material_mip_bias, create_linear_sampler; render.c (sampler recreation on a bias change); vgeo/vgeo_tex.c create_samplers / vg_tex_set_anisotropy(mip_bias)`
+- Metrics (perf_verify): `gpu_frame`, `scope:opaque`, `scope:prepass`
+- Scenes: veg_forest_pine, veg_forest_broadleaf
+- **Visual trade-off** (not fidelity neutral): High (was native) and Medium (was FSR 1) render at 0.75 of the display resolution and resolve with TAA-U by default; Modern stays native, Low / Off have no temporal AA. Under any temporal resolve from below display resolution the material samplers (renderer and vgeo module textures) take a mip bias of log2(render / display width) (at most -1) so textures keep the display's texel density. The image is slightly softer in the foliage at High.
+- Screenshots: `docs/perf_screenshots/upscale_high_native.jpg`, `docs/perf_screenshots/upscale_high_taau075.jpg`
+- What stays identical: Not fidelity neutral (a visual trade-off): a lower internal resolution, and sharper texture sampling under it. Nothing feeds the simulation.
+

@@ -215,6 +215,17 @@ void vkam_record(VkCommandBuffer cmd) {
     A.queued = keep;
 }
 
+// The material / module samplers were recreated (the caller waited for the device): queued masks hold
+// the old sampler (asked for again at their next draw), built ones get a set with the new one then.
+void vkam_samplers_changed(void) {
+    for (u32 i = 0; i < MAX_TEXTURES; i++) {
+        AlphaMask *m = &A.m[i];
+        if (m->state == 1) m->state = 0;
+        m->sampler = VK_NULL_HANDLE;
+    }
+    A.queued = 0;
+}
+
 // Texture `t` was destroyed: its mask goes too (a later texture in the slot builds its own).
 void vkam_texture_destroyed(TextureId t) {
     if (t && t < MAX_TEXTURES && A.m[t].state) am_release(&A.m[t]);

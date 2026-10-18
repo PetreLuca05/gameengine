@@ -84,7 +84,7 @@ static void cmd_classic_fade_probe(int argc, const char **argv) { vkc_fade_probe
 
 // The material sampler changed: r_aniso on the module textures too, the classic renderer re-wraps them.
 void vkg_samplers_changed(void) {
-    if (G.ok) vg_tex_set_anisotropy(&G.tex, vkr_material_anisotropy());
+    if (G.ok) vg_tex_set_anisotropy(&G.tex, vkr_material_anisotropy(), R->mip_bias);
     vkc_samplers_changed();
 }
 
@@ -128,7 +128,7 @@ void vkg_init(void) {
         vg_tex_shutdown(&G.tex);
         return;
     }
-    vg_tex_set_anisotropy(&G.tex, vkr_material_anisotropy());   // r_aniso on the module textures, before the foliage support takes the samplers
+    vg_tex_set_anisotropy(&G.tex, vkr_material_anisotropy(), R->mip_bias);   // r_aniso on the module textures, before the foliage support takes the samplers
     G.disp_ok = vg_displace_init(&G.disp, c, &G.tex);
     if (!G.disp_ok) log_warn("vgeo: foliage displacement buffer unavailable");
     G.wind_ok = vg_wind_init(&G.wind, c, &G.tex);

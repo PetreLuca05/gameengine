@@ -1,5 +1,6 @@
 // GPU resources: buffers, meshes, textures, samplers, deferred deletion and staged uploads.
 #include "vk_internal.h"
+#include "core/profiler.h"
 #include "vgeo/vgeo_tex.h"
 #include <stdlib.h>
 #include <math.h>
@@ -170,6 +171,17 @@ float vkr_material_anisotropy(void) {
     return aniso > 1.0f && R->max_anisotropy > 1.0f ? fminf(aniso, R->max_anisotropy) : 0.0f;
 }
 
+float vkr_material_mip_bias(void) {
+    if (!prof_fix_enabled(PFX_UPSCALE_MIP_BIAS) || !R->hdr.w || !R->swap_extent.width) return 0.0f;
+    static Cvar *aa, *up;
+    if (!aa) aa = cvar_find("r_aa");
+    if (!up) up = cvar_find("r_upscaler");
+    bool temporal = (aa && aa->i == 3) || (up && (up->i == 1 || up->i == 3));
+    float ratio = (float)R->hdr.w / (float)R->swap_extent.width;
+    if (!temporal || ratio >= 0.999f) return 0.0f;
+    return fmaxf(log2f(ratio), -1.0f);
+}
+
 // The material samplers: trilinear + anisotropic. sampler_linear skips the top mip levels for
 // r_texture_quality (0 = high, 1 = medium, 2 = low) as a min LOD (texture arrays, impostors, UI
 // atlases: their levels stay resident); sampler_world does not: world textures dropped those levels
@@ -187,6 +199,7 @@ static void create_linear_sampler(void) {
     }
     s.minLod = (float)DG_CLAMP(2 - R->r_texture_quality->i, 0, 2);
     s.maxLod = VK_LOD_CLAMP_NONE;
+    s.mipLodBias = R->mip_bias;   // below display resolution under a temporal resolve: the display's texel density (PF-0029)
     VK_CHECK(vkCreateSampler(R->device, &s, NULL, &R->sampler_linear));
     s.minLod = 0.0f;
     VK_CHECK(vkCreateSampler(R->device, &s, NULL, &R->sampler_world));

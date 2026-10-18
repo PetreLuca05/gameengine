@@ -412,7 +412,9 @@ static void apply_setting_changes(void) {
         vkDeviceWaitIdle(R->device);
         vkd_create_moon_shadow_map(moon_shadow_size());
     }
-    if (R->r_aniso->modified != R->aniso_mod || R->r_texture_quality->modified != R->texq_mod) {
+    float mip_bias = vkr_material_mip_bias();
+    if (R->r_aniso->modified != R->aniso_mod || R->r_texture_quality->modified != R->texq_mod || fabsf(mip_bias - R->mip_bias) > 0.01f) {
+        R->mip_bias = mip_bias;
         R->aniso_mod = R->r_aniso->modified;
         R->texq_mod = R->r_texture_quality->modified;
         vkDeviceWaitIdle(R->device);

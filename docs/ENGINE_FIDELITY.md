@@ -53,8 +53,8 @@ era preset (`r_era`): `era x3` = three times the era's own error threshold, also
 | feature | Off | Low | Medium | High | Modern |
 |---|---|---|---|---|---|
 | `aa` | - | 1, max 1 | 3, max 3 | 3, max 3 | 3, max 3 |
-| `upscaler` | - | off, {0,2} | 2, {0,1,2} | off, {0,1,2,3,4} | off, {0,1,2,3,4} |
-| `upscale_ratio` | 0.67 | 0.67 | 0.75 | 0.67 | 0.67 |
+| `upscaler` | - | off, {0,2} | 1, {0,1,2} | 1, {0,1,2,3,4} | off, {0,1,2,3,4} |
+| `upscale_ratio` | 0.67 | 0.67 | 0.75 | 0.75 | 0.67 |
 | `render_scale` | 0.6, max 0.66, min 0.5 | 0.66, max 1, min 0.5 | 1, max 1, min 0.5 | 1, max 1.5, min 0.5 | 1, max 2 |
 | `sharpen` | - | off, max 1 | 0.35 | 0.35 | 0.35 |
 | `ao` | - | - | 1, max 1 | 2, max 2 | 2, max 2 |
@@ -88,6 +88,7 @@ era preset (`r_era`): `era x3` = three times the era's own error threshold, also
 | `soft_shadow_quality` (0 Low .. 3 Ultra) | 0, max 0 | 0, max 0 | 0, max 1 | 1, max 3 | 3, max 3 |
 | `shadow_min_radius` | 1, min 1 | 0.5, min 0.5 | 0.25, min 0 | 0, min 0 | 0, min 0 |
 | `shadow_caster_limit` (0 off, 1 near cascades, 2 cascade 0 + caps; docs/SHADOWS.md "Caster cascade limits") | 2, min 2 | 2, min 2 | 2, min 1 | 1, min 1 | 1, min 0 |
+| `shadow_far_interval` (frames between redraws of cascades 2 / 3; docs/SHADOWS.md "Far cascade staggering") | 2, min 2 | 2, min 2 | 2, min 2 | 2, min 1 | 2, min 1 |
 | `light_shadows` | - | off | on | on | on |
 | `light_shadow_quality` | 1, max 1 | 1, max 1 | 1, max 1 | 2, max 2 | 2, max 2 |
 | `cloud_shadows` | - | off | on | on | on |
@@ -142,7 +143,7 @@ Budgets (1080p, mid-range GPU): Off 3 ms, Low 5 ms, Medium 8 ms, High 12 ms, Mod
 | upscaler | `r_upscaler` (0 off, 1 TAA-U, 2 FSR 1, 3 / 4 slots) | | shadow_cascades / shadow_projection | `r_shadow_cascades` (1 / 2 / 4) / `r_shadow_projection` |
 | upscale_ratio | `r_upscale_ratio` | | shadow_distance | `r_shadow_max_distance` (m) |
 | render_scale | `r_render_scale` | | soft_shadow_quality | `r_soft_shadow_quality` (tent 3 / 5 / 7, 3 Ultra = PCSS) |
-| sharpen | `r_sharpen` | | shadow_min_radius / shadow_caster_limit | `r_shadow_min_radius` (m) / `r_shadow_caster_limit` (grass / small plant shadow cascades) |
+| sharpen | `r_sharpen` | | shadow_min_radius / shadow_caster_limit / shadow_far_interval | `r_shadow_min_radius` (m) / `r_shadow_caster_limit` (grass / small plant shadow cascades) / `r_shadow_far_interval` |
 | ao / contact_shadows | `r_ao` / `r_contact_shadows` | | light_shadows / _quality | `r_light_shadows` / `r_light_shadow_quality` |
 | ssr / ssgi | `r_ssr` / `r_ssgi` | | cloud_shadows / moon_shadows | `r_cloud_shadows` / `r_moon_shadows` **new** |
 | puddle_reflections | `r_puddle_reflections` | | texture_quality / aniso | `r_texture_quality` / `r_aniso` |
@@ -271,8 +272,19 @@ Every preset's shadow entries follow one formula (docs/SHADOWS.md "Per-preset ta
 - `r_shadow_caster_limit`: grass / ground cover casts sun shadows only into cascade 0, small plants
   into cascades 0 - 1 (mode 2 adds 15 / 30 m caps for the one- and two-cascade levels), trees into all
   (docs/SHADOWS.md "Caster cascade limits", PF-0013).
+- `r_shadow_far_interval`: cascades 2 and 3 (of 4) are re-rendered every N frames, in turn, and keep
+  their tile in between (docs/SHADOWS.md "Far cascade staggering", PF-0028).
 - `r_vm_shadow`: the first-person rig's own tile (1024 .. 2048, following the sun's resolution). The 2010 era
 keeps a fixed-hardness kernel; its shadows still lighten and vanish with the sky.
+
+**Upscaling in the foliage tiers (PF-0029, a visual trade-off).** High and Medium render at 0.75 of the
+display and resolve with TAA-U by default (Medium used FSR 1, High native): alpha-tested foliage costs per
+pixel, so the prepass / opaque passes scale with the render size. Whenever a temporal resolve (TAA, TAA-U,
+FSR 2) works from below display resolution, the material samplers (renderer and vgeo module textures)
+take a mip bias of log2(render / display width), at most -1, so textures keep the display's texel density
+(`vkr_material_mip_bias`). Pine forest at High (one process, 2 x A/B, 1600 x 900): GPU frame 10.15 ->
+8.67 ms (-14.6 %), opaque -29 %, prepass -14 %; the image is slightly softer in the canopy
+(docs/perf_screenshots/upscale_high_native.jpg, upscale_high_taau075.jpg). Modern stays native.
 
 ## Era axis
 

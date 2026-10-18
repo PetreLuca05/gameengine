@@ -1433,5 +1433,35 @@
    "summary": "CLOSED: scope:shadow_sun 14.22 -> 12.15 (-14.56%, p=0); images pass; state identical",
    "machine": "DESKTOP-SN4N74U"
   }
+ },
+ "PF-0029": {
+  "title": "TAA-U by default at High / Medium, negative mip bias under temporal upscaling",
+  "rule": "T01",
+  "finding": "T01 heaviest passes: alpha-tested foliage costs per pixel; the vegetation zones' prepass + opaque (4 - 6 ms at Modern) scale with the render resolution, and High rendered natively",
+  "effort": "S",
+  "status": "open",
+  "tradeoff": "High (was native) and Medium (was FSR 1) render at 0.75 of the display resolution and resolve with TAA-U by default; Modern stays native, Low / Off have no temporal AA. Under any temporal resolve from below display resolution the material samplers (renderer and vgeo module textures) take a mip bias of log2(render / display width) (at most -1) so textures keep the display's texel density. The image is slightly softer in the foliage at High.",
+  "screenshots": [
+   "docs/perf_screenshots/upscale_high_native.jpg",
+   "docs/perf_screenshots/upscale_high_taau075.jpg"
+  ],
+  "code": [
+   "assets/render/fidelity/{high,medium}.json (upscaler / upscale_ratio defaults)",
+   "src/render/vk_resources.c vkr_material_mip_bias, create_linear_sampler; render.c (sampler recreation on a bias change); vgeo/vgeo_tex.c create_samplers / vg_tex_set_anisotropy(mip_bias)"
+  ],
+  "description": "The tier tables default High and Medium to TAA-U at 0.75. vkr_material_mip_bias gives log2(R->hdr.w / swap width), clamped to -1, while r_aa is TAA or r_upscaler is TAA-U / FSR 2 and the render is below display width; a change recreates the material samplers (like r_aniso) and the vgeo module samplers. perf_fix_disable PF-0029 turns the bias off (the tier defaults are data). Measured manually (pine forest, High, 1600 x 900, one process, r_upscaler 0 / 1 alternating, 2 x 240 frames): GPU frame 10.15 -> 8.67 ms (-14.6 %), opaque 2.76 -> 1.96 ms, prepass 0.90 -> 0.77 ms.",
+  "neutral": "Not fidelity neutral (a visual trade-off): a lower internal resolution, and sharper texture sampling under it. Nothing feeds the simulation.",
+  "metrics": [
+   "gpu_frame",
+   "scope:opaque",
+   "scope:prepass"
+  ],
+  "scenes": [
+   "veg_forest_pine",
+   "veg_forest_broadleaf"
+  ],
+  "verification": {
+   "runs": []
+  }
  }
 }

@@ -489,6 +489,7 @@ void vkc_set_textures(const VgTextures *t) { C.vtex = t; }
 // sets, which hold the material sampler too (the default / displacement sets, the impostor atlases;
 // the local light shadow tiles draw through them too). The caller waited for the device.
 void vkc_samplers_changed(void) {
+    vkam_samplers_changed();
     memset(C.modver, 0xFF, sizeof(C.modver));
     memset(C.set4_views, 0, sizeof(C.set4_views));   // the wind ring's sets hold the module's repeat sampler
     VkImageView white = R->textures[R->white_tex].view;

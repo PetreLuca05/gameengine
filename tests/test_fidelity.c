@@ -250,10 +250,11 @@ static void test_levels(void) {
     CHECK(val(FF_AA) == 1 && val(FF_SHADOW_CASCADES) == 2 && val(FF_SHADOWS) == 1 && val(FF_SHADOW_RESOLUTION) == 1 && fabsf(val(FF_RENDER_SCALE) - 0.66f) < 1e-3f, "Low: FXAA, Hard Only, 1024 px (the locked 150 m), 2 cascades, 0.66");
     CHECK(fabsf(val(FF_VGEO_SHADOW_ERROR_PX) - 6.0f) < 1e-4f && val(FF_TEXTURE_QUALITY) == 0, "Low: shadow geometry x3, mips -2");
     fid_apply(FID_MEDIUM);
-    CHECK(val(FF_SSR) == 0 && val(FF_MOTION_BLUR) == 1 && val(FF_DOF) == 1 && val(FF_UPSCALER) == 2 && fabsf(val(FF_UPSCALE_RATIO) - 0.75f) < 1e-4f, "Medium: no SSR, camera MB, ADS DoF, FSR 1 0.75");
+    CHECK(val(FF_SSR) == 0 && val(FF_MOTION_BLUR) == 1 && val(FF_DOF) == 1 && val(FF_UPSCALER) == 1 && fabsf(val(FF_UPSCALE_RATIO) - 0.75f) < 1e-4f, "Medium: no SSR, camera MB, ADS DoF, TAA-U 0.75 (PF-0029)");
     CHECK(val(FF_VOL_LOCAL_LIGHTS) == 0 && val(FF_VOLUMETRICS) == 1 && val(FF_VFX_LIGHTING) == 0, "Medium: fog-only, unlit particles");
     CHECK(!fid_value_allowed(FID_MEDIUM, 0, FF_CHROMATIC, 0.5f), "Medium: CA greyed");
     fid_apply(FID_HIGH);
+    CHECK(val(FF_UPSCALER) == 1 && fabsf(val(FF_UPSCALE_RATIO) - 0.75f) < 1e-4f, "High: TAA-U 0.75 (PF-0029)");
     CHECK(val(FF_SSR) == 1 && val(FF_SSGI) == 0 && !fid_value_allowed(FID_HIGH, 0, FF_SSGI, 1) && val(FF_BLOOM_QUALITY) == 1 && val(FF_DOF_QUALITY) == 1, "High: SSR half, SSGI greyed, fewer bloom mips, hybrid DoF");
     CHECK(val(FF_SHADOW_CASCADES) == 4 && val(FF_SOFT_SHADOW_QUALITY) == 1, "High: 4 cascades, soft Medium");
     fid_apply(FID_MODERN);
