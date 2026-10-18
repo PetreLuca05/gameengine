@@ -1,5 +1,6 @@
 {
   "_doc": "Leafy shrub sprigs (reference r1 right: pinnate leaflets, greener and bluer than the grass): 4 wide cards, 0.3-0.7 m, sparse on meadows / grass / forest edges.",
+  "shadow_class": "small",
   "atlas": "shrub_leafy",
   "grid": [
     2,

@@ -27,9 +27,14 @@
 //            fading parts batch apart (key bit 3) and draw through the dithered pipelines. A LOD that is
 //            not resident yet draws the nearest resident one (the finer one is prefetched). The local
 //            light tiles and r_lod_legacy keep the cuts from before.
+//   casters  sun cascades take each mesh's caster class (shadow_casters.h, docs/SHADOWS.md "Caster
+//            cascade limits", PF-0013): grass / ground cover only in the near cascade, small plants in
+//            the near two, dithering out before the end of their last one; trees everywhere.
 #include "core/profiler.h"
 #include "vk_internal.h"
 #include "lod_fade.h"
+#include "shadow_casters.h"
+#include "core/platform.h"
 #include "fidelity/fidelity.h"
 #include "vgeo/vgeo_scene.h"
 #include "vgeo/foliage_support.h"
@@ -126,7 +131,8 @@ static struct {
     ClView view[CL_VIEWS];
     const VgScene *scene;
     float cell_fade[1 << 16], cell_shadow[1 << 16];   // placement cells: largest foliage fade end / shadow distance (0 = unlimited)
-    struct ClChunk { float min[3], max[3], fade, shadow; } *chunk;   // per placement chunk: bounds and the max of its cells' limits
+    u8 cell_scc[1 << 16];           // placement cells: the shadow caster classes of their meshes (bit per SCC_*)
+    struct ClChunk { float min[3], max[3], fade, shadow; u32 scc; } *chunk;   // per placement chunk: bounds, the max of its cells' limits, their classes
     u32 chunk_cap;
     float disp[4];
     u32 ncasc;
@@ -139,6 +145,9 @@ static struct {
     u32 lod_n[5], lod_fading;       // main view parts per LOD 0..3 / impostor, parts in a fade (render_classic_lod_counts)
     bool counted;                   // lod_n holds a culled main view (render_vgeo_counts)
     float eff_lod_px, eff_shadow_px, eff_imp_px, eff_small_px;   // this frame's effective thresholds (classic_stats)
+    SccTable scc;                   // caster cascade limits (assets/render/shadow_casters.json)
+    int scc_mode;                   // this frame's r_shadow_caster_limit (0: off, or PF-0013 disabled)
+    SccView scc_view[4];            // this frame's per cascade (classic_stats)
 } C;
 
 // ------------------------------------------------------------------ pipelines
@@ -254,6 +263,19 @@ static VkDescriptorSet cl_alloc_set(VkImageView v0, VkImageLayout l0, VkImageVie
 void vkc_init(void) {
     C.impostor_px = cvar_reg_float("r_classic_impostor_px", 64.0f, 0.0f, 1024.0f, CVAR_LOCKED,
                                    "classic renderer: trees with an impostor atlas draw it below this projected size (pixels across, 0 = never)");
+    {   // sun shadow caster cascade limits (shadow_casters.h)
+        char path[512], err[160] = "";
+        platform_data_path("assets/render/shadow_casters.json", path, sizeof(path));
+        size_t n = 0;
+        char *txt = platform_read_file(path, &n);
+        if (!txt) {
+            scc_defaults(&C.scc);
+            log_warn("classic: %s missing: built-in caster cascade limits", path);
+        } else {
+            if (!scc_parse(&C.scc, txt, err, sizeof(err))) log_error("classic: %s: %s (built-in caster cascade limits)", path, err);
+            free(txt);
+        }
+    }
     VkDescriptorSetLayoutBinding b[2];
     memset(b, 0, sizeof(b));
     for (u32 i = 0; i < 2; i++) {
@@ -559,8 +581,11 @@ void vkc_chunk_loaded(const VgScene *s, u32 handle) {
         const VgCell *c = &s->pl.cells[ci];
         float fade = 0, shadow = 0;
         bool unlimited_fade = false, unlimited_shadow = false;
+        u32 scc = 0;
         for (u32 i = c->first; i < c->first + c->count; i++) {
             const VgMesh *m = &s->meshes[s->pl.inst[i].mesh];
+            u32 sc = VGMF_SHADOW_CLASS(m->fflags);
+            scc |= 1u << (sc < SCC_COUNT ? sc : SCC_NONE);
             if (!(m->fflags & VGMF_FOLIAGE) || m->fade_end <= m->fade_start) unlimited_fade = true;
             else fade = fmaxf(fade, m->fade_end);
             if (m->shadow_max_dist <= 0) unlimited_shadow = true;
@@ -568,18 +593,20 @@ void vkc_chunk_loaded(const VgScene *s, u32 handle) {
         }
         C.cell_fade[ci] = unlimited_fade ? 0 : fade;
         C.cell_shadow[ci] = unlimited_shadow ? 0 : shadow;
+        C.cell_scc[ci] = (u8)scc;
     }
     // the chunk: union of its cells, largest limits (0 if any cell is unlimited)
     if (handle >= C.chunk_cap) {
         u32 cap = C.chunk_cap ? C.chunk_cap : 256;
         while (cap <= handle) cap *= 2;
         C.chunk = (struct ClChunk *)realloc(C.chunk, sizeof(*C.chunk) * cap);
-        for (u32 i = C.chunk_cap; i < cap; i++) C.chunk[i] = (struct ClChunk){ { -1e30f, -1e30f, -1e30f }, { 1e30f, 1e30f, 1e30f }, 0, 0 };   // not seen: never skipped
+        for (u32 i = C.chunk_cap; i < cap; i++) C.chunk[i] = (struct ClChunk){ { -1e30f, -1e30f, -1e30f }, { 1e30f, 1e30f, 1e30f }, 0, 0, (1u << SCC_COUNT) - 1u };   // not seen: never skipped
         C.chunk_cap = cap;
     }
     struct ClChunk *cc = &C.chunk[handle];
     for (int a = 0; a < 3; a++) cc->min[a] = 1e30f, cc->max[a] = -1e30f;
     cc->fade = cc->shadow = 0;
+    cc->scc = 0;
     bool fade_inf = false, shadow_inf = false;
     for (u32 k = 0; k < ch->cell_count; k++) {
         u32 ci = ch->cells[k];
@@ -588,6 +615,7 @@ void vkc_chunk_loaded(const VgScene *s, u32 handle) {
         float f = ci < (1u << 16) ? C.cell_fade[ci] : 0, sh = ci < (1u << 16) ? C.cell_shadow[ci] : 0;
         fade_inf |= f <= 0;
         shadow_inf |= sh <= 0;
+        cc->scc |= ci < (1u << 16) ? C.cell_scc[ci] : (1u << SCC_COUNT) - 1u;
         cc->fade = fmaxf(cc->fade, f);
         cc->shadow = fmaxf(cc->shadow, sh);
     }
@@ -655,6 +683,8 @@ typedef struct ClCull {
     u32 layers;                     // shadow views: the light's culling mask (0 = every layer)
     vec4 rcv[CSM_RCV_MAX];          // sun cascades: the receiver volume (render.c, PF-0006), nrcv planes (0: none)
     int nrcv;
+    bool scc_on;                    // sun cascades: the caster classes' cascade limits (PF-0013)
+    SccView scc;
 } ClCull;
 static ClCull g_main_cull;          // the last frame's main view (classic_fade_probe)
 static bool g_main_cull_ok;
@@ -712,12 +742,18 @@ static void cull_instance(const ClCull *v, const VgScene *s, const VgInstance *i
     if (!sphere_in(v->planes, 6, c, r)) return;
     if (v->nrcv && !sphere_in(v->rcv, v->nrcv, c, r)) return;
     float dx = p[0] - v->eye.x, dy = p[1] - v->eye.y, dz = p[2] - v->eye.z, dist = sqrtf(dx * dx + dy * dy + dz * dz);
+    float casc_a = 1.0f;   // PF-0013: the caster class's cascade limit (0: not in this cascade / beyond its end)
+    if (v->scc_on) {
+        u32 sc = VGMF_SHADOW_CLASS(m->fflags);
+        casc_a = scc_alpha(&v->scc, sc < SCC_COUNT ? (int)sc : SCC_NONE, dist);
+        if (casc_a <= 0.0f) return;
+    }
     if (!v->legacy) {   // docs/LOD.md
-        float alpha = 1.0f, shrink = 1.0f;
+        float alpha = casc_a, shrink = 1.0f;
         if (v->shadow && m->shadow_max_dist > 0) {   // the shadow fades out over the end of its (scaled) distance
             float sd = m->shadow_max_dist * v->shadow_k;
             if (dist > sd) return;
-            alpha = v->shadow_band > 0 ? clamp01f((sd - dist) / (sd * v->shadow_band)) : 1.0f;
+            alpha *= v->shadow_band > 0 ? clamp01f((sd - dist) / (sd * v->shadow_band)) : 1.0f;
         }
         if (m->fflags & VGMF_FOLIAGE) {   // density / distance fade: dither + the blades shrink
             float fa = cl_foliage_alpha(v, m, in->flags_phase, dist);
@@ -816,6 +852,10 @@ static void cell_tasks(const ClCull *v, const VgScene *s) {
             const struct ClChunk *cc = &C.chunk[h];
             float lim = (v->shadow ? cc->shadow : cc->fade) * lim_k;
             if (lim > 0 && box_dist(cc->min, cc->max, v->eye) > lim) continue;
+            if (v->scc_on) {   // PF-0013: no class of the chunk casts into this cascade, or not that far
+                float e = scc_mask_end(&v->scc, cc->scc);
+                if (e < 0 || (e > 0 && box_dist(cc->min, cc->max, v->eye) > e)) continue;
+            }
             if (!box_in(v->planes, 6, cc->min, cc->max)) continue;
             if (v->nrcv && !box_in(v->rcv, v->nrcv, cc->min, cc->max)) continue;
             if (v->sphere.w > 0 && box_dist(cc->min, cc->max, v3(v->sphere.x, v->sphere.y, v->sphere.z)) > v->sphere.w) continue;
@@ -826,6 +866,10 @@ static void cell_tasks(const ClCull *v, const VgScene *s) {
             if (!cl->count) continue;
             float lim = ci < (1u << 16) ? (v->shadow ? C.cell_shadow[ci] : C.cell_fade[ci]) * lim_k : 0;
             if (lim > 0 && box_dist(cl->min, cl->max, v->eye) > lim) continue;
+            if (v->scc_on && ci < (1u << 16)) {
+                float e = scc_mask_end(&v->scc, C.cell_scc[ci]);
+                if (e < 0 || (e > 0 && box_dist(cl->min, cl->max, v->eye) > e)) continue;
+            }
             if (!box_in(v->planes, 6, cl->min, cl->max)) continue;
             if (v->nrcv && !box_in(v->rcv, v->nrcv, cl->min, cl->max)) continue;
             if (v->sphere.w > 0 && box_dist(cl->min, cl->max, v3(v->sphere.x, v->sphere.y, v->sphere.z)) > v->sphere.w) continue;
@@ -1100,7 +1144,7 @@ static float without_level_scale(int feature, float cur) {
 }
 
 // Sun cascade k: orthographic, LOD by the cascade's texel size, shadow distance, no impostors, its
-// receiver volume (PF-0006).
+// receiver volume (PF-0006), the caster classes it takes (PF-0013).
 static void cascade_view(ClCull *v, u32 k, u32 tile, float shadow_px) {
     planes_of(R->shadow_vp_ndc[k], v->planes);   // the untiled matrix (render.c)
     v->ortho = v->shadow = true;
@@ -1110,6 +1154,18 @@ static void cascade_view(ClCull *v, u32 k, u32 tile, float shadow_px) {
     v->era2010 = false;
     v->nrcv = R->shadow_rcv_n[k];
     memcpy(v->rcv, R->shadow_rcv[k], sizeof(vec4) * (size_t)v->nrcv);
+    v->scc_on = C.scc_mode > 0;
+    v->scc = C.scc_view[k];
+}
+
+// docs/perf/FINDINGS.md PF-0013 (a visual trade-off): this frame's caster cascade limits per cascade
+// (shadow_casters.h). The mode is the Engine Fidelity tier's r_shadow_caster_limit; perf_fix_disable
+// PF-0013 turns it off for the A side of perf_verify.
+static void caster_limits(u32 ncasc) {
+    C.scc_mode = prof_fix_enabled(PFX_SHADOW_CASTER_LIMIT) && R->r_shadow_caster_limit ? R->r_shadow_caster_limit->i : 0;
+    float splits[4] = { R->shadow_splits.x, R->shadow_splits.y, R->shadow_splits.z, R->shadow_splits.w };
+    bool wide = R->shadow_near_w < 1.0f;   // cascade 0 fading into cascade 1: the limited classes go one further
+    for (u32 k = 0; k < 4; k++) scc_view(&C.scc, C.scc_mode, (int)k, (int)ncasc, splits, wide, R->shq.border, &C.scc_view[k]);
 }
 
 void vkc_frame(const VgScene *s, const VgDisplace *disp, float density, float lod_px, float shadow_lod_px, float small_impostor_px, bool era2010, bool shadows) {
@@ -1205,6 +1261,7 @@ void vkc_frame(const VgScene *s, const VgDisplace *disp, float density, float lo
         outs[nv++] = &C.view[0];
         if (cascades) {
             C.ncasc = (u32)DG_CLAMP((int)R->shq.cascades, 1, 4);
+            caster_limits(C.ncasc);
             for (u32 k = 0; k < C.ncasc; k++) {
                 cv[nv] = v;
                 cascade_view(&cv[nv], k, tile, shadow_px);
@@ -1237,6 +1294,7 @@ void vkc_frame(const VgScene *s, const VgDisplace *disp, float density, float lo
         PROF_BEGIN("classic:cull_cascades");
         if (cascades) {
             C.ncasc = (u32)DG_CLAMP((int)R->shq.cascades, 1, 4);
+            caster_limits(C.ncasc);
             for (u32 k = 0; k < C.ncasc; k++) {
                 cascade_view(&v, k, tile, shadow_px);
                 C.tmp_n = 0;
@@ -1595,4 +1653,12 @@ void vkc_stats(void) {
              "impostors %u, fading %u",
              C.lod_new ? "docs/LOD.md" : "legacy", (double)C.eff_lod_px, (double)C.eff_shadow_px, (double)C.eff_imp_px, (double)C.eff_small_px, C.lod_n[0], C.lod_n[1], C.lod_n[2],
              C.lod_n[3], C.lod_n[4], C.lod_fading);
+    // PF-0013: per class the last cascade it cast into and where it ended (docs/SHADOWS.md "Caster cascade limits")
+    for (int c = SCC_GROUND; c < SCC_COUNT; c++) {
+        int last = -1;
+        float end = 0.0f;
+        for (u32 k = 0; k < C.ncasc; k++)
+            if (C.scc_view[k].allow >> c & 1u) last = (int)k, end = C.scc_view[k].end_m[c];
+        log_info("classic: caster limit mode %d: %-6s cascades 0..%d of %u, %s%.1f m", C.scc_mode, scc_class_name(c), last, C.ncasc, end > 0 ? "ends at " : "unlimited ", (double)end);
+    }
 }

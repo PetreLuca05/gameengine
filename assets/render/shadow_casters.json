@@ -1,0 +1,18 @@
+{
+  "_doc": "Sun shadow caster cascade limits (docs/SHADOWS.md \"Caster cascade limits\", src/render/shadow_casters.c, docs/perf/FINDINGS.md PF-0013: a visual trade-off). Per r_shadow_caster_limit mode (1: High / Modern, 2: Off / Low / Medium; 0 turns the limits off) and caster class (ground: grass, ground cover, flowers; small: bushes, ferns, reeds, wheat, small plants; tree; none: unclassified, never limited): cascade = the last cascade the class casts into (-1 every cascade), max_m = no shadow beyond this distance from the camera (0 none). A limited class ends at the smaller of its last cascade's split and max_m and dithers out over the last `fade` of that distance. Classes come from the assets: grass assets' and model foliage blocks' \"shadow_class\", the procedural kinds (tuft ground, bush / crop small) and the Tree It roles (bush small, flower ground, the rest tree). Must equal scc_defaults (tests/test_shadow_casters.c).",
+  "fade": 0.3,
+  "modes": {
+    "1": {
+      "_doc": "4 cascades (splits 10 / 30 / 70 / 150 m at the locked 150 m): ground cover to ~10 m, small plants to ~30 m, trees everywhere.",
+      "ground": {"cascade": 0},
+      "small": {"cascade": 1},
+      "tree": {"cascade": -1}
+    },
+    "2": {
+      "_doc": "1 - 2 cascades (cascade 0 reaches 37.5 m, or 150 m with one cascade): cascade 0 plus a cap, so the reach in metres stays close to mode 1's.",
+      "ground": {"cascade": 0, "max_m": 15},
+      "small": {"cascade": 0, "max_m": 30},
+      "tree": {"cascade": -1}
+    }
+  }
+}

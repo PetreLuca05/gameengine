@@ -43,6 +43,7 @@ static const FidFeatureDef k_features[FF_COUNT] = {
     [FF_SHADOW_CASCADES] = { "shadow_cascades", "r_shadow_cascades", I, false, 0, 1, 4, false, false, "Shadow cascades" },
     [FF_SOFT_SHADOW_QUALITY] = { "soft_shadow_quality", "r_soft_shadow_quality", I, false, 0, 0, 3, false, false, "Soft shadow quality" },
     [FF_SHADOW_MIN_RADIUS] = { "shadow_min_radius", "r_shadow_min_radius", F, false, 0, 0, 4, true, false, "Small object shadows" },
+    [FF_SHADOW_CASTER_LIMIT] = { "shadow_caster_limit", "r_shadow_caster_limit", I, false, 0, 0, 2, true, false, "Grass / plant shadow cascades" },
     [FF_LIGHT_SHADOW_QUALITY] = { "light_shadow_quality", "r_light_shadow_quality", I, false, 0, 1, 2, false, false, "Light shadow quality" },
     [FF_TEXTURE_QUALITY] = { "texture_quality", "r_texture_quality", I, false, 0, 0, 2, false, false, "Textures" },
     [FF_ANISO] = { "aniso", "r_aniso", I, false, 0, 1, 16, false, false, "Anisotropic filtering" },
@@ -691,7 +692,7 @@ int fid_custom_count(void) { return fid_check_table(S.level, NULL, 0); }
 // renderer switch, character / scope detail stay with the overall level (and the Debug tab).
 static const int k_g_post[] = { FF_AO, FF_CONTACT_SHADOWS, FF_SSR, FF_SSGI, FF_PUDDLE_REFLECTIONS, FF_VOLUMETRICS, FF_VOL_LOCAL_LIGHTS,
                                 FF_DOF, FF_DOF_QUALITY, FF_ADS_DOF, FF_BLOOM, FF_BLOOM_QUALITY };
-static const int k_g_shadows[] = { FF_SHADOWS, FF_SHADOW_RESOLUTION, FF_SHADOW_CASCADES, FF_SOFT_SHADOW_QUALITY, FF_SHADOW_MIN_RADIUS, FF_LIGHT_SHADOW_QUALITY };
+static const int k_g_shadows[] = { FF_SHADOWS, FF_SHADOW_RESOLUTION, FF_SHADOW_CASCADES, FF_SOFT_SHADOW_QUALITY, FF_SHADOW_MIN_RADIUS, FF_SHADOW_CASTER_LIMIT, FF_LIGHT_SHADOW_QUALITY };
 static const int k_g_textures[] = { FF_TEXTURE_QUALITY, FF_ANISO, FF_TERRAIN_QUALITY };
 static const int k_g_effects[] = { FF_VFX_QUALITY, FF_VFX_LIGHTING, FF_PRECIP_QUALITY, FF_WATER };
 // Foliage / view distance: their density and ranges are locked (docs/SETTINGS_AUDIT.md); what is

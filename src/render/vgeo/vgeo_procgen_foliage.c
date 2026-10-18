@@ -1,6 +1,7 @@
 #include "vgeo_procgen_foliage.h"
 #include "foliage_wind.h"
 #include "vgeo_impostor.h"
+#include "render/shadow_casters.h"
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
@@ -248,6 +249,7 @@ u32 vgeo_foliage_materials(int kind, VgMaterial out[2]) {
             out[i].fade_start = 100.0f;
             out[i].fade_end = 150.0f;
             out[i].shadow_max_dist = 40.0f;
+            out[i].shadow_class = SCC_SMALL;   // render/shadow_casters.h: the near cascades only
             vg_material_set_ao(&out[i], 0.0f, MAT_AO_COMBINE_AUTO, false);   // leaves 0.3 (thin), the trunk full
         }
         return 2;
@@ -264,10 +266,12 @@ u32 vgeo_foliage_materials(int kind, VgMaterial out[2]) {
     g->fade_start = 40.0f;
     g->fade_end = 65.0f;
     g->shadow_max_dist = 15.0f;
+    g->shadow_class = SCC_GROUND;   // render/shadow_casters.h: grass tufts in the near cascade only
     if (kind == VG_FOLIAGE_CROP) {
         g->fade_start = 60.0f;
         g->fade_end = 95.0f;
         g->shadow_max_dist = 20.0f;
+        g->shadow_class = SCC_SMALL;   // wheat: taller, the near cascades
     }
     vg_material_set_ao(g, MATERIAL_AO_FOLIAGE, MAT_AO_COMBINE_MIN, false);   // thin cards (render/material_ao.h)
     return 1;

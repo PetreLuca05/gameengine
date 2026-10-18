@@ -66,6 +66,7 @@ typedef struct GrassAsset {
     float top_color[3];              // linear
     float coverage;
     GrassTier tier[GRASS_TIERS];
+    int shadow_class;                // "shadow_class": the sun shadow caster class (render/shadow_casters.h; default "ground")
     // wind (foliage_wind.h grass preset, scaled)
     float wind_main, wind_detail, wind_flutter;
 } GrassAsset;

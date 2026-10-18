@@ -1921,6 +1921,12 @@
    "reason": "Shadow filter / resolution / cascades / projection / splits / border / near offset / shadowmask: quality of the same shadows. Distance and the shadow types are locked.",
    "category": "rendering"
   },
+  "r_shadow_caster_limit": {
+   "class": "TIER",
+   "ui": "Graphics (dev)",
+   "reason": "Grass / ground cover and small plants cast sun shadows only into the near cascade(s); trees, characters, buildings and the plants themselves are unchanged. The reach is about the same at every level (ground cover 10 .. 15 m, small plants 30 m; tests/test_shadow_casters.c), and a grass shadow farther away never hides or reveals anyone: cost only (PF-0013).",
+   "category": "rendering"
+  },
   "r_shadow_debug": {
    "class": "LOCKED",
    "ui": "—",

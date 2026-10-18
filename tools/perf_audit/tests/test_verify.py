@@ -188,6 +188,20 @@ class EndToEnd(unittest.TestCase):
             self.assertEqual(r["state"]["verdict"], "behaviour changed")
             self.assertFalse(r["closed"])
 
+    def test_tradeoff_closes_on_timing_and_state(self):
+        # a visual trade-off (fixes.json "tradeoff"): the images differ by design, timing + state decide
+        with tempfile.TemporaryDirectory() as t:
+            self.make_dir(t, lambda img, rep: exposure(img, 0.1))
+            r = verify.verify_dir(t, {"PF-9999": {"metrics": ["cpu_work"], "tradeoff": "grass shadows end nearer"}})
+            self.assertFalse(r["images_pass"])
+            self.assertTrue(r["tradeoff"])
+            self.assertTrue(r["closed"], json.dumps(r)[:600])
+
+    def test_tradeoff_still_needs_state(self):
+        with tempfile.TemporaryDirectory() as t:
+            self.make_dir(t, lambda img, rep: exposure(img, 0.1), b_hash_shift=1)
+            self.assertFalse(verify.verify_dir(t, {"PF-9999": {"metrics": ["cpu_work"], "tradeoff": "x"}})["closed"])
+
     def test_no_speedup_does_not_close(self):
         with tempfile.TemporaryDirectory() as t:
             self.make_dir(t, lambda img, rep: taa_noise(img, seed=50 + rep), b_cpu=10.0)

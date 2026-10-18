@@ -1,6 +1,7 @@
 // Imported tree / bush foliage (vgeo_tree.h, docs/VGEO.md "Tree models").
 #include "vgeo_tree.h"
 #include "vgeo_impostor.h"
+#include "render/shadow_casters.h"
 #include "core/log.h"
 #include "core/platform.h"
 #include "stb_image.h"
@@ -801,6 +802,9 @@ void vgeo_tree_materials(const VgTree *t, VgMaterial out[VG_TREE_MAX_MATERIALS])
         m->fade_start = sp->fade_start;
         m->fade_end = sp->fade_end;
         m->shadow_max_dist = sp->shadow_max;
+        // sun shadow caster class by role (render/shadow_casters.h): bushes the near cascades, flowers
+        // the nearest, trees all of them
+        m->shadow_class = sp->role == VG_TREE_BUSH ? SCC_SMALL : sp->role == VG_TREE_FLOWER ? SCC_GROUND : SCC_TREE;
         // AO (render/material_ao.h): leaf / needle cards 0.3, min with their baked AO; bark full, x its ORM AO
         vg_material_set_ao(m, 0.0f, MAT_AO_COMBINE_AUTO, false);
     }

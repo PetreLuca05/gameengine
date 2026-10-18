@@ -1,5 +1,6 @@
 {
   "_doc": "Short meadow tufts with small wildflowers (reference b9): 2 cards, 0.15-0.35 m; also path edges and weeds.",
+  "shadow_class": "ground",
   "atlas": "grass_short",
   "grid": [
     2,

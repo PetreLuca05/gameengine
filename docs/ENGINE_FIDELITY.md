@@ -87,6 +87,7 @@ era preset (`r_era`): `era x3` = three times the era's own error threshold, also
 | `shadow_distance` (m) | 50, max 50 | 50, max 80 | 100, max 150 | 200, max 300 | 300, max 1000 |
 | `soft_shadow_quality` (0 Low .. 3 Ultra) | 0, max 0 | 0, max 0 | 0, max 1 | 1, max 3 | 3, max 3 |
 | `shadow_min_radius` | 1, min 1 | 0.5, min 0.5 | 0.25, min 0 | 0, min 0 | 0, min 0 |
+| `shadow_caster_limit` (0 off, 1 near cascades, 2 cascade 0 + caps; docs/SHADOWS.md "Caster cascade limits") | 2, min 2 | 2, min 2 | 2, min 1 | 1, min 1 | 1, min 0 |
 | `light_shadows` | - | off | on | on | on |
 | `light_shadow_quality` | 1, max 1 | 1, max 1 | 1, max 1 | 2, max 2 | 2, max 2 |
 | `cloud_shadows` | - | off | on | on | on |
@@ -141,7 +142,7 @@ Budgets (1080p, mid-range GPU): Off 3 ms, Low 5 ms, Medium 8 ms, High 12 ms, Mod
 | upscaler | `r_upscaler` (0 off, 1 TAA-U, 2 FSR 1, 3 / 4 slots) | | shadow_cascades / shadow_projection | `r_shadow_cascades` (1 / 2 / 4) / `r_shadow_projection` |
 | upscale_ratio | `r_upscale_ratio` | | shadow_distance | `r_shadow_max_distance` (m) |
 | render_scale | `r_render_scale` | | soft_shadow_quality | `r_soft_shadow_quality` (tent 3 / 5 / 7, 3 Ultra = PCSS) |
-| sharpen | `r_sharpen` | | shadow_min_radius | `r_shadow_min_radius` (m) **new** |
+| sharpen | `r_sharpen` | | shadow_min_radius / shadow_caster_limit | `r_shadow_min_radius` (m) / `r_shadow_caster_limit` (grass / small plant shadow cascades) |
 | ao / contact_shadows | `r_ao` / `r_contact_shadows` | | light_shadows / _quality | `r_light_shadows` / `r_light_shadow_quality` |
 | ssr / ssgi | `r_ssr` / `r_ssgi` | | cloud_shadows / moon_shadows | `r_cloud_shadows` / `r_moon_shadows` **new** |
 | puddle_reflections | `r_puddle_reflections` | | texture_quality / aniso | `r_texture_quality` / `r_aniso` |
@@ -267,6 +268,9 @@ Every preset's shadow entries follow one formula (docs/SHADOWS.md "Per-preset ta
 - `r_soft_shadow_quality`: tent 3 / 5 / 7, or Ultra = PCSS + wide mode.
 - `r_moon_shadows`: the moon's own map while the sun still owns the cascades.
 - `r_shadow_min_radius`: skips sun shadow casters smaller than the radius.
+- `r_shadow_caster_limit`: grass / ground cover casts sun shadows only into cascade 0, small plants
+  into cascades 0 - 1 (mode 2 adds 15 / 30 m caps for the one- and two-cascade levels), trees into all
+  (docs/SHADOWS.md "Caster cascade limits", PF-0013).
 - `r_vm_shadow`: the first-person rig's own tile (1024 .. 2048, following the sun's resolution). The 2010 era
 keeps a fixed-hardness kernel; its shadows still lighten and vanish with the sky.
 

@@ -33,6 +33,7 @@
     "shadow_cascades": {"avail": "on", "default": 4, "allowed": [1, 2, 4]},
     "soft_shadow_quality": {"avail": "on", "default": 1, "max": 3},
     "shadow_min_radius": {"avail": "on", "default": 0, "min": 0},
+    "shadow_caster_limit": {"avail": "on", "default": 1, "min": 1},
     "light_shadow_quality": {"avail": "on", "default": 2, "max": 2},
     "texture_quality": {"avail": "on", "default": 2, "max": 2},
     "aniso": {"avail": "on", "default": 8, "allowed": [1, 2, 4, 8, 16]},

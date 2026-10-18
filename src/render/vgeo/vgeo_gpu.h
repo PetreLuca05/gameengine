@@ -39,6 +39,9 @@ typedef struct VgGroup {
 
 // Mesh-level foliage flags (VgMesh.fflags), derived from its materials at commit (Phase 7).
 enum VgMeshFoliage { VGMF_FOLIAGE = 1u << 0, VGMF_MASKED = 1u << 1, VGMF_TWO_SIDED = 1u << 2, VGMF_DITHER = 1u << 3, VGMF_WPO = 1u << 4 };
+// Bits 8..11: the mesh's sun shadow caster class (render/shadow_casters.h SCC_*), the least limited one of its materials.
+#define VGMF_SHADOW_CLASS_SHIFT 8u
+#define VGMF_SHADOW_CLASS(fflags) (((fflags) >> VGMF_SHADOW_CLASS_SHIFT) & 15u)
 
 // One loaded mesh in the global tables.
 typedef struct VgMesh {
@@ -274,6 +277,7 @@ typedef struct VgMaterial {
     float normal_scale, occlusion_strength;
     u32 emissive_rgb;
     float wind_params[8];            // vegetation wind parameters, second half (foliage_wind.h vgeo_wind_pack)
+    u32 shadow_class;                // sun shadow caster class (render/shadow_casters.h SCC_*: none / ground / small / tree), the cascades it casts into
 } VgMaterial;
 
 // The material's AO (render/material_ao.h). The alpha-tested ones (VGM_MASKED: leaf / needle / grass cards)
@@ -328,7 +332,7 @@ _Static_assert(sizeof(VgInstance) == 32, "VgInstance");
 _Static_assert(sizeof(VgCell) == 32, "VgCell");
 _Static_assert(sizeof(VgPaletteSlot) == 32, "VgPaletteSlot");
 _Static_assert(sizeof(VgViewGpu) == 560, "VgViewGpu");
-_Static_assert(sizeof(VgMaterial) == 144, "VgMaterial");
+_Static_assert(sizeof(VgMaterial) == 148, "VgMaterial");   // CPU only since the nanite removal (no GPU layout)
 _Static_assert(sizeof(VgCounters) == 256, "VgCounters");
 _Static_assert(sizeof(VgPush) == 48, "VgPush");
 _Static_assert(sizeof(VgFileHeader) == 112 + VGS_COUNT * 8, "VgFileHeader");

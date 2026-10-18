@@ -615,6 +615,9 @@ static void tab_graphics_debug(GuiCursor *c) {
     static const char *const smask[] = { "Shadowmask", "Distance Shadowmask" };
     row_combo_cvar(c, "Shadowmask mode", "r_shadowmask_mode", smask, 2, "Reserved for baked lighting (no baked data yet).");
     row_fid_slider(c, "Skip shadows of props under", FF_SHADOW_MIN_RADIUS, 0, 4, 0.25f, "%.2f m", "Small props cast no sun shadow (cheaper).");
+    static const char *const scl[] = { "Off (every cascade)", "Near cascades (High / Modern)", "Near cascade + caps (Off .. Medium)" };
+    row_fid_combo(c, "Grass / plant shadow cascades", FF_SHADOW_CASTER_LIMIT, scl, NULL, 3,
+                  "Grass casts sun shadows only near the camera (~10 - 15 m), small plants to ~30 m, trees everywhere (assets/render/shadow_casters.json).");
 
     section(c, "Geometry, textures & foliage");
     static const char *const texq[] = { "Low (mips -2)", "Medium (mips -1)", "High" };

@@ -3,6 +3,7 @@
 #include "core/log.h"
 #include "core/platform.h"
 #include "render/render.h"   // MAT_COVER
+#include "render/shadow_casters.h"
 #include "cJSON.h"
 #include <SDL3/SDL.h>
 #include <math.h>
@@ -20,6 +21,7 @@ static const char *const k_tier_names[GRASS_TIERS] = { "off", "low", "medium", "
 static void defaults(GrassAsset *a) {
     memset(a, 0, sizeof(*a));
     a->cols = a->rows = 1;
+    a->shadow_class = SCC_GROUND;
     a->variants = 3;
     a->cards = 3;
     a->segments = 3;
@@ -86,6 +88,12 @@ bool grass_asset_parse(GrassAsset *a, const char *json, const char *name) {
     const cJSON *at = cJSON_GetObjectItemCaseSensitive(root, "atlas");
     if (!cJSON_IsString(at)) { log_error("grass: %s: no \"atlas\"", name); cJSON_Delete(root); return false; }
     dg_strcpy(a->atlas, sizeof(a->atlas), at->valuestring);
+    const cJSON *sc = cJSON_GetObjectItemCaseSensitive(root, "shadow_class");
+    if (cJSON_IsString(sc)) {
+        int c = scc_class_from_name(sc->valuestring);
+        if (c < 0) log_warn("grass: %s: unknown shadow_class \"%s\" (none / ground / small / tree)", name, sc->valuestring);
+        else a->shadow_class = c;
+    }
     const cJSON *g = cJSON_GetObjectItemCaseSensitive(root, "grid");
     if (cJSON_IsArray(g) && cJSON_GetArraySize(g) == 2) {
         a->cols = DG_CLAMP(cJSON_GetArrayItem(g, 0)->valueint, 1, 8);
@@ -335,6 +343,7 @@ void grass_material(const GrassAsset *a, int tier, u32 cover_id, VgMaterial *out
     out->fade_end = t->end_m;
     // shadow_max_dist 0 means "always": a level without grass shadows gets a distance nothing is under
     out->shadow_max_dist = t->shadow_m > 0 ? t->shadow_m : 0.01f;
+    out->shadow_class = (u32)a->shadow_class;
     vg_material_set_ao(out, a->ao_strength, a->ao_combine, false);
 }
 

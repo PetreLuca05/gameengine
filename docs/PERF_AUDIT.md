@@ -222,7 +222,11 @@ decides:
   the deterministic scenes and time them there.
 
 `closed` = timing improved AND every image pair passes AND the state is identical AND no guard
-regressed. `--update` records the run in `docs/perf/fixes.json` and regenerates `docs/perf/FINDINGS.md`;
+regressed. A **visual trade-off** (a `fixes.json` entry with `"tradeoff"`: what changes on screen, and
+`"screenshots"`) is the exception: it changes the image by design, so its image pairs are recorded
+(heat maps in `<dir>/diff`) but do not decide; timing, state and the guards still do, and the visual
+difference is documented with before / after screenshots instead. Trade-off fixes sit after
+`PFX_TRADEOFF_FIRST` in `ProfFix`; `perf_fix_disable all` (the CI's image check) leaves them on. `--update` records the run in `docs/perf/fixes.json` and regenerates `docs/perf/FINDINGS.md`;
 `--target` (or `PERF_TARGET=1` in `run_verify.sh`) marks the machine as the target hardware, the only
 place a pass sets the status to `closed`. The harness itself is tested on a known-neutral change
 (sub-tolerance TAA-like noise) and known-visible changes (+0.1 EV exposure, a darkened 8 x 8 patch, a
@@ -293,8 +297,10 @@ outside the runs): absolute GPU milliseconds of separate runs varied up to 2x, s
 - Visible trade-offs, not applied (measured in the pine forest at Modern, shadow pass): 2 cascades
   instead of 4: -58 % (fragment invocations 663 M -> 268 M); the 2048 atlas (Shadow Resolution
   High instead of Very High): -53 % (159 M); `r_vgeo_shadow_error_px` 2 -> 8 and Soft Shadow
-  Quality Low: no measurable change. Grass / bush casters limited to the near cascades would cut the
-  same fragments without the resolution loss on trees (needs a per-mesh cascade limit: not built).
+  Quality Low: no measurable change. Grass / bush casters limited to the near cascades cut the
+  same fragments without the resolution loss on trees: built as PF-0013, a visual trade-off
+  (docs/SHADOWS.md "Caster cascade limits", FINDINGS.md): meadow shadow pass -38 % at Modern, -84 % at
+  Low; the forest interiors only -1 .. -9 % (their fragments are tree leaf cards).
 - `horde_foliage` is not deterministic between map loads (above, Verification).
 
 ## CI

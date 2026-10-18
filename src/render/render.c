@@ -88,6 +88,8 @@ void render_register_cvars(void) {
     r->r_stretch = cvar_reg_float("r_stretch", 0.0f, 0.0f, 1.0f, CVAR_LOCKED,
                                   "stretched resolution simulator: 0 normal .. 1 extreme (the 3D view squeezed into a narrower aspect, stretched to the screen)");
     r->r_shadow_min_radius = cvar_reg_float("r_shadow_min_radius", 0.0f, 0.0f, 4.0f, CVAR_TIER, "props smaller than this radius (m) cast no sun shadow");
+    r->r_shadow_caster_limit = cvar_reg_int("r_shadow_caster_limit", 1, 0, 2, CVAR_TIER,
+                                            "sun cascades: grass / ground cover and small plants cast into the near cascade(s) only, trees into all (assets/render/shadow_casters.json): 0 off, 1 High / Modern, 2 Off .. Medium (cascade 0 + distance caps)");
     r->r_vsync->on_change = on_render_cvar_changed;
 }
 
@@ -1417,6 +1419,7 @@ static void compute_matrices(FrameData *fd) {
     bool shadows_on = q->mode != SHADOWS_DISABLE && R->sun_type != SHADOW_NONE && R->shadow_size > 16;
     bool key_cast = !ss || ss->key.cast;
     float near_w = ss && R->sun_filter.mode == SHF_PCSS ? ss->near_weight : 1.0f;
+    R->shadow_near_w = near_w;
     for (int k = 0; k < 4; k++) R->shadow_active[k] = shadows_on && key_cast && k < ncasc && !(k == 0 && ncasc >= 2 && near_w <= 0.0f);
     float moon_fade = ss && ss->second_shadowed && e->fill_intensity > 0.0f ? ss->second.fade : 0.0f;
     R->moon_active = shadows_on && moon_fade > 0.0f && R->moon_shadow_size > 16;

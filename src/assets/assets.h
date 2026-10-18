@@ -31,6 +31,7 @@ typedef struct ModelFoliage {
     float wpo_params[4];              // "wpo_params"
     float fade_start, fade_end;       // "fade": [start, end] (m)
     float shadow_max_dist;            // "shadow_max_dist" (m, 0 = always)
+    int shadow_class;                 // "shadow_class": "none" (default) | "ground" | "small" | "tree" (render/shadow_casters.h)
     bool capsule;                     // "colliders": "capsule"
     float capsule_radius, capsule_height;   // "capsule": [radius, height] (m, at scale 1)
 } ModelFoliage;

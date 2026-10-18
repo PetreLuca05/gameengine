@@ -96,6 +96,12 @@ int main(void) {
     CHECK(prof_fix_enabled(PFX_CVAR_HASH), "fixes on by default");
     cvar_set("perf_fix_disable", "PF-0002,PF-0005");
     CHECK(!prof_fix_enabled(PFX_CVAR_HASH) && !prof_fix_enabled(PFX_FG_REPORT_LAZY) && prof_fix_enabled(PFX_SHADOW_CLEAR_SKIP), "fix ids parsed");
+    // "all" = every fidelity-neutral fix; the visual trade-offs only by their own id
+    cvar_set("perf_fix_disable", "all");
+    CHECK(!prof_fix_enabled(PFX_SHADOW_LIGHT_ORDER) && prof_fix_enabled(PFX_SHADOW_CASTER_LIMIT), "all: neutral fixes off, trade-offs on");
+    cvar_set("perf_fix_disable", "PF-0013");
+    CHECK(!prof_fix_enabled(PFX_SHADOW_CASTER_LIMIT) && prof_fix_enabled(PFX_SHADOW_LIGHT_ORDER) && !strcmp(prof_fix_id(PFX_SHADOW_CASTER_LIMIT), "PF-0013"), "a trade-off by its id");
+    cvar_set("perf_fix_disable", "PF-0002,PF-0005");
     // cvar_find: the hash index and the scan agree (PF-0002)
     Cvar *a = cvar_find("PERF_FIX_DISABLE");
     cvar_set("perf_fix_disable", "");

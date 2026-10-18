@@ -4,6 +4,7 @@
 #include "core/platform.h"
 #include "render/mesh_gen.h"
 #include "render/vgeo/vgeo_import.h"
+#include "render/shadow_casters.h"
 #include "stb_image.h"
 #include "cgltf.h"
 #include "cJSON.h"
@@ -386,7 +387,7 @@ static void model_load_vgeo(Model *m, const char *gltf_path) {
 }
 
 // "foliage": { "masked", "two_sided", "alpha_cutoff", "wpo", "displace", "wpo_params", "fade",
-// "shadow_max_dist" } and "colliders": "capsule" + "capsule": [radius, height].
+// "shadow_max_dist", "shadow_class" } and "colliders": "capsule" + "capsule": [radius, height].
 static void model_parse_foliage(Model *m, const cJSON *it) {
     ModelFoliage *f = &m->foliage;
     memset(f, 0, sizeof(*f));
@@ -418,6 +419,13 @@ static void model_parse_foliage(Model *m, const cJSON *it) {
     }
     v = cJSON_GetObjectItemCaseSensitive(o, "shadow_max_dist");
     f->shadow_max_dist = cJSON_IsNumber(v) ? (float)v->valuedouble : 0.0f;
+    v = cJSON_GetObjectItemCaseSensitive(o, "shadow_class");   // the cascades it casts into (docs/SHADOWS.md)
+    f->shadow_class = SCC_NONE;
+    if (cJSON_IsString(v)) {
+        int c = scc_class_from_name(v->valuestring);
+        if (c < 0) log_warn("assets: %s: unknown foliage shadow_class \"%s\" (none / ground / small / tree)", m->name, v->valuestring);
+        else f->shadow_class = c;
+    }
 }
 
 // ------------------------------------------------------------------ manifest
