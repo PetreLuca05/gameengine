@@ -47,9 +47,12 @@ static struct {
 
 static bool ray(vec3 from, vec3 dir_len, EnvRayHit *out, void *user) {
     (void)user;
-    if (!GA.w || !GA.w->phys) return false;
+    // The current world, not GA.w: sounds started before this frame's game_audio_frame (vehicles)
+    // right after a map load would otherwise cast into the freed previous world.
+    World *w = game_world();
+    if (!w || !w->phys) return false;
     RayHit rh;
-    if (!phys_raycast(GA.w->phys, from, dir_len, PL_MASK_WORLD, GA.ignore, &rh)) return false;
+    if (!phys_raycast(w->phys, from, dir_len, PL_MASK_WORLD, w == GA.w ? GA.ignore : PHYS_INVALID_BODY, &rh)) return false;
     out->hit = true;
     out->dist = rh.distance;
     out->point = rh.point;
