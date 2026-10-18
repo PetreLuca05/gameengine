@@ -88,6 +88,8 @@ void render_register_cvars(void) {
     r->r_stretch = cvar_reg_float("r_stretch", 0.0f, 0.0f, 1.0f, CVAR_LOCKED,
                                   "stretched resolution simulator: 0 normal .. 1 extreme (the 3D view squeezed into a narrower aspect, stretched to the screen)");
     r->r_shadow_min_radius = cvar_reg_float("r_shadow_min_radius", 0.0f, 0.0f, 4.0f, CVAR_TIER, "props smaller than this radius (m) cast no sun shadow");
+    r->r_shadow_far_interval = cvar_reg_int("r_shadow_far_interval", 2, 1, 4, CVAR_TIER,
+                                            "sun cascades 2 and 3 (of 4) re-rendered every N frames, alternating (the others keep last frame's tile): 1 every frame, 2 each far cascade every other frame (PF-0028)");
     r->r_shadow_caster_limit = cvar_reg_int("r_shadow_caster_limit", 1, 0, 2, CVAR_TIER,
                                             "sun cascades: grass / ground cover and small plants cast into the near cascade(s) only, trees into all (assets/render/shadow_casters.json): 0 off, 1 High / Modern, 2 Off .. Medium (cascade 0 + distance caps)");
     r->r_vsync->on_change = on_render_cvar_changed;
@@ -1396,6 +1398,35 @@ static void compute_matrices(FrameData *fd) {
         tm.m[13] = (k >> 1) ? 0.5f : -0.5f;
         R->shadow_vps[k] = mat4_mul(tm, t.vp);
     }
+    // PF-0028 (a visual trade-off, docs/SHADOWS.md "Far cascade staggering"): with 4 cascades, 2 and 3
+    // are re-rendered every r_shadow_far_interval frames, out of phase (one far tile per frame at 2).
+    // A cascade not due keeps the tile and everything it was drawn with; it is drawn anyway after a cut,
+    // a settings / map change, or once its fit moved a tenth of its radius (so its box still covers
+    // what the splits send to it).
+    {
+        int interval = prof_fix_enabled(PFX_SHADOW_FAR_STAGGER) && R->r_shadow_far_interval ? R->r_shadow_far_interval->i : 1;
+        u32 key = (u32)ncasc | tile << 3 | (close_fit ? 1u << 2 : 0u) | (u32)R->shadow_gen << 20;
+        if (key != R->shadow_hold_key || R->camera_cut) {
+            for (int k = 0; k < 4; k++) R->shadow_hold[k].valid = false;
+            R->shadow_hold_key = key;
+        }
+        for (int k = 0; k < 4; k++) {
+            struct ShadowHold *h = &R->shadow_hold[k];
+            bool due = interval < 2 || ncasc < 4 || k < 2 || (R->frame_index + (u32)((k - 2) * (interval / 2))) % (u32)interval == 0;
+            bool moved = !h->valid || v3_dist(h->center, R->shadow_center[k]) > 0.1f * h->radius || fabsf(h->radius - R->shadow_radius[k]) > 0.02f * h->radius;
+            R->shadow_redraw[k] = due || moved;
+            if (R->shadow_redraw[k]) {
+                *h = (struct ShadowHold){ true, R->shadow_vps[k], R->shadow_vp_ndc[k], R->shadow_center[k], R->shadow_radius[k], R->csm.texel_m[k], bias[k], span[k], nbias[k], mpt[k] };
+                continue;
+            }
+            R->shadow_vps[k] = h->vps;
+            R->shadow_vp_ndc[k] = h->vp_ndc;
+            R->shadow_center[k] = h->center;
+            R->shadow_radius[k] = R->csm.radius[k] = h->radius;
+            R->csm.texel_m[k] = h->texel_m;
+            bias[k] = h->bias, span[k] = h->span, nbias[k] = h->nbias, mpt[k] = h->mpt;
+        }
+    }
     // Unused cascade slots repeat the last one (shadow_vp / bias.w users: decals, froxels, particles).
     for (int k = ncasc; k < 4; k++) {
         R->shadow_vps[k] = R->shadow_vps[ncasc - 1];
@@ -1421,6 +1452,8 @@ static void compute_matrices(FrameData *fd) {
     float near_w = ss && R->sun_filter.mode == SHF_PCSS ? ss->near_weight : 1.0f;
     R->shadow_near_w = near_w;
     for (int k = 0; k < 4; k++) R->shadow_active[k] = shadows_on && key_cast && k < ncasc && !(k == 0 && ncasc >= 2 && near_w <= 0.0f);
+    for (int k = 0; k < 4; k++)
+        if (!R->shadow_active[k]) R->shadow_hold[k].valid = false, R->shadow_redraw[k] = true;   // its tile is not kept
     float moon_fade = ss && ss->second_shadowed && e->fill_intensity > 0.0f ? ss->second.fade : 0.0f;
     R->moon_active = shadows_on && moon_fade > 0.0f && R->moon_shadow_size > 16;
     int mk = DG_MIN(1, ncasc - 1);
@@ -2545,7 +2578,7 @@ void render_end_frame(void) {
             skin_shadow_cull = prof_fix_enabled(PFX_SKIN_SHADOW_CULL) && skin_shadow.batch_count &&
                                (R->sun_shadow.culling_mask & SHADOW_LAYERS_ALL) == SHADOW_LAYERS_ALL;
             for (int k = 0; k < 5 && skin_shadow_cull; k++)
-                if (k < 4 ? R->shadow_active[k] : R->moon_active) used += cull_skin_shadow(f, k, used, &skin_shadow, &skin_shadow_k[k]);
+                if (k < 4 ? R->shadow_active[k] && R->shadow_redraw[k] : R->moon_active) used += cull_skin_shadow(f, k, used, &skin_shadow, &skin_shadow_k[k]);
             used += build_skin_pass(f, 2, used, &skin_vm);
             if (phone_view_pending()) build_skin_pass(f, 3, used, &skin_phone);
         }
@@ -2566,8 +2599,14 @@ void render_end_frame(void) {
     vkg_record_foliage(cmd);   // foliage wind, displacement buffer (the classic renderer's WPO inputs)
     vkp_scope_begin(cmd, "shadow_sun");
     bool skip_clear = shadow_clear_skip(0, R->shadow.image, R->shadow_active[0] || R->shadow_active[1] || R->shadow_active[2] || R->shadow_active[3]);
+    // PF-0028: tiles kept from an earlier frame (an active cascade not re-rendered) keep the atlas contents:
+    // loaded, the other tiles cleared one by one
+    bool keep = false;
+    for (int k = 0; k < 4; k++) keep |= R->shadow_active[k] && !R->shadow_redraw[k];
+    if (skip_clear)
+        for (int k = 0; k < 4; k++) R->shadow_hold[k].valid = false;
     if (!skip_clear) {
-        vkr_image_barrier(cmd, R->shadow.image, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+        vkr_image_barrier(cmd, R->shadow.image, VK_IMAGE_ASPECT_DEPTH_BIT, keep ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL : VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
                           VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, 0,
                           VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
                           VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, 1);
@@ -2575,7 +2614,7 @@ void render_end_frame(void) {
             VkRenderingAttachmentInfo da = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
             da.imageView = R->shadow.view;
             da.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
-            da.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+            da.loadOp = keep ? VK_ATTACHMENT_LOAD_OP_LOAD : VK_ATTACHMENT_LOAD_OP_CLEAR;
             da.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
             da.clearValue.depthStencil.depth = 1.0f;
             VkRenderingInfo ri = { VK_STRUCTURE_TYPE_RENDERING_INFO };
@@ -2584,6 +2623,14 @@ void render_end_frame(void) {
             ri.layerCount = 1;
             ri.pDepthAttachment = &da;
             vkCmdBeginRendering(cmd, &ri);
+            if (keep) {
+                VkClearAttachment ca = { VK_IMAGE_ASPECT_DEPTH_BIT, 0, { .depthStencil = { 1.0f, 0 } } };
+                VkClearRect cr[4];
+                u32 n = 0, half = R->shadow.w / 2;
+                for (int k = 0; k < 4; k++)
+                    if (!R->shadow_active[k] || R->shadow_redraw[k]) cr[n++] = (VkClearRect){ { { (int)((k & 1) * half), (int)((k >> 1) * half) }, { half, half } }, 0, 1 };
+                if (n) vkCmdClearAttachments(cmd, 1, &ca, n, cr);
+            }
             if (R->shadow_active[0] || R->shadow_active[1] || R->shadow_active[2] || R->shadow_active[3]) {
                 // One atlas tile per cascade (the cascade index rides in the push constants). The
                 // cascade matrices already map into their tile: full viewport, scissored to the tile.
@@ -2595,8 +2642,9 @@ void render_end_frame(void) {
                 g_shadow_layers = R->sun_shadow.culling_mask;
                 for (int k = 0; k < 4; k++) {
                     if (!R->shadow_active[k]) continue;
-                    extract_frustum(R->shadow_vp_ndc[k], g_shadow_planes);   // casters outside this tile's light box are skipped
                     R->shadow_drawn |= 1u << k;
+                    if (!R->shadow_redraw[k]) continue;   // kept from its last frame (PF-0028)
+                    extract_frustum(R->shadow_vp_ndc[k], g_shadow_planes);   // casters outside this tile's light box are skipped
                     VkViewport vp = { 0.0f, 0.0f, (float)R->shadow.w, (float)R->shadow.h, 0.0f, 1.0f };
                     VkRect2D sc = { { (int)((k & 1) * tile), (int)((k >> 1) * tile) }, { tile, tile } };
                     vkCmdSetViewport(cmd, 0, 1, &vp);

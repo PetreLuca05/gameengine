@@ -1275,6 +1275,7 @@ void vkc_frame(const VgScene *s, const VgDisplace *disp, float density, float lo
             C.ncasc = (u32)DG_CLAMP((int)R->shq.cascades, 1, 4);
             caster_limits(C.ncasc);
             for (u32 k = 0; k < C.ncasc; k++) {
+                if (!R->shadow_redraw[k]) { C.view[1 + k].batch_count = 0; continue; }   // its tile is kept this frame (PF-0028)
                 cv[nv] = v;
                 cascade_view(&cv[nv], k, tile, shadow_px);
                 lvps[nv] = light_order ? &R->shadow_vp_ndc[k] : NULL;
@@ -1310,6 +1311,7 @@ void vkc_frame(const VgScene *s, const VgDisplace *disp, float density, float lo
             C.ncasc = (u32)DG_CLAMP((int)R->shq.cascades, 1, 4);
             caster_limits(C.ncasc);
             for (u32 k = 0; k < C.ncasc; k++) {
+                if (!R->shadow_redraw[k]) { C.view[1 + k].batch_count = 0; continue; }   // its tile is kept this frame (PF-0028)
                 cascade_view(&v, k, tile, shadow_px);
                 C.tmp_n = 0;
                 cull_cells(&v, s);

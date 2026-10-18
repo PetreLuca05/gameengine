@@ -1969,6 +1969,12 @@
    "reason": "Debug view / log: dev builds only (debug views can show geometry and entities through walls).",
    "category": "rendering"
   },
+  "r_shadow_far_interval": {
+   "class": "TIER",
+   "ui": "Graphics (dev)",
+   "reason": "The two far sun cascades are re-rendered in turn (each every N frames) and keep the tile they were drawn with in between; forced after a cut or once the fit moved. Far shadows of moving casters lag up to N - 1 frames; nothing is hidden or revealed that the near cascades show: cost only (PF-0028).",
+   "category": "rendering"
+  },
   "r_shadow_max_distance": {
    "class": "LOCKED",
    "ui": "—",

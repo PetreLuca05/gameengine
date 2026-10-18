@@ -618,6 +618,10 @@ static void tab_graphics_debug(GuiCursor *c) {
     static const char *const scl[] = { "Off (every cascade)", "Near cascades (High / Modern)", "Near cascade + caps (Off .. Medium)" };
     row_fid_combo(c, "Grass / plant shadow cascades", FF_SHADOW_CASTER_LIMIT, scl, NULL, 3,
                   "Grass casts sun shadows only near the camera (~10 - 15 m), small plants to ~30 m, trees everywhere (assets/render/shadow_casters.json).");
+    static const char *const sfi[] = { "Every frame", "Every 2nd frame", "Every 3rd frame", "Every 4th frame" };
+    static const int sfv[] = { 1, 2, 3, 4 };
+    row_fid_combo(c, "Far shadow updates", FF_SHADOW_FAR_INTERVAL, sfi, sfv, 4,
+                  "The two far sun cascades (of four) are re-rendered in turn: far shadows of swaying trees lag a frame, the near ones never do.");
 
     section(c, "Geometry, textures & foliage");
     static const char *const texq[] = { "Low (mips -2)", "Medium (mips -1)", "High" };
