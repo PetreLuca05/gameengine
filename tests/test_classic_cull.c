@@ -173,14 +173,14 @@ static void old_cull(const ClCull *v, const VgMesh *m, const OldMesh *cm, u32 me
 static void new_cull(const ClCull *v, const VgMesh *m, const OldMesh *cm, u32 mesh, const float p[3], const float q[4], float sc, u32 fp, ClInst *out, u32 *key, u32 *n) {
     if (clc_flags_out(v, fp >> 16)) return;
     const ClcChain ch = { cm->lod_error, cm->lod_count, cm->coarse_tris, cm->imp_set };
-    ClcFront f;
-    if (!clc_front(v, m, p, q, sc, &f)) return;
     if (!v->legacy) {
         ClcParts o;
-        u32 np = clc_lod_parts(v, m, &ch, &f, sc, fp, &o);
+        u32 np = clc_cull(v, m, &ch, p, q, sc, fp, &o);
         for (u32 i = 0; i < np; i++) emit_part(out, key, n, mesh, o.lod[i], p, q, o.scale, o.phase, o.alpha, o.iv[i]);
         return;
     }
+    ClcFront f;
+    if (!clc_front(v, m, p, q, sc, &f)) return;
     if (v->shadow && m->shadow_max_dist > 0 && f.dist > m->shadow_max_dist) return;
     float alpha = (m->fflags & VGMF_FOLIAGE) ? legacy_foliage_alpha(m, fp, f.dist, v->density) : 1.0f;
     if (alpha <= 0) return;

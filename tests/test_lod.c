@@ -266,7 +266,7 @@ static void test_split_sweep(void) {
     CHECK(split_empty == 0, "classic parts: %d empty parts emitted", split_empty);
 }
 
-// Foliage instance alpha (vk_classic.c cl_foliage_alpha): with instance_fade 0.3 the old mapping
+// Foliage instance alpha (classic_cull_math.h clc_foliage_alpha): with instance_fade 0.3 the old mapping
 // (alpha = (density - hash x 0.9375) / width) left a quarter of the instances (hash > 0.7) at alpha
 // 0.21 .. 1 at every distance: trees and grass dithered see-through up close.
 static void test_foliage_alpha(void) {

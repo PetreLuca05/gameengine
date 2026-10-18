@@ -723,14 +723,14 @@ static void cull_instance(const ClCull *v, const VgScene *s, const VgInstance *i
     const ClcChain ch = { cm->lod_error, cm->lod_count, cm->coarse_tris, cm->imp_set != VK_NULL_HANDLE };
     float p[3], q[4], sc;
     vgeo_instance_decode(in, p, q, &sc);
-    ClcFront f;
-    if (!clc_front(v, m, p, q, sc, &f)) return;
     if (!v->legacy) {   // docs/LOD.md: up to three parts (impostor, coarser, finer LOD)
         ClcParts o;
-        u32 np = clc_lod_parts(v, m, &ch, &f, sc, in->flags_phase, &o);
+        u32 np = clc_cull(v, m, &ch, p, q, sc, in->flags_phase, &o);
         for (u32 i = 0; i < np; i++) emit_part(out, key, n, in->mesh, o.lod[i], p, q, o.scale, o.phase, o.alpha, o.iv[i]);
         return;
     }
+    ClcFront f;
+    if (!clc_front(v, m, p, q, sc, &f)) return;
     if (v->shadow && m->shadow_max_dist > 0 && f.dist > m->shadow_max_dist) return;
     float alpha = (m->fflags & VGMF_FOLIAGE) ? vgeo_foliage_alpha(m, in->flags_phase, f.dist, v->density) : 1.0f;
     if (alpha <= 0) return;

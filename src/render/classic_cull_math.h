@@ -183,7 +183,8 @@ DG_INLINE u32 clc_lod_parts(const ClCull *v, const VgMesh *m, const ClcChain *ch
 }
 
 // The whole docs/LOD.md decision for an instance that passed clc_flags_out: clc_front, then
-// clc_lod_parts. Returns the part count (0: culled).
+// clc_lod_parts. Returns the part count (0: culled). cull_instance's docs/LOD.md branch and
+// test_classic_cull call it: the entry point the GPU twin mirrors.
 DG_INLINE u32 clc_cull(const ClCull *v, const VgMesh *m, const ClcChain *ch, const float p[3], const float q[4], float sc, u32 fp, ClcParts *o) {
     ClcFront f;
     if (!clc_front(v, m, p, q, sc, &f)) { o->n = 0; return 0; }
