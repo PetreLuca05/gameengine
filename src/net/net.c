@@ -1091,6 +1091,18 @@ static void cmd_snapstats(int argc, const char **argv) {
 // from the host (MSG_CVARS) and may not set them itself.
 static bool can_set_rules(void) { return !N || N->role != NET_CLIENT; }
 
+// Scripts: waits (one frame per retry, the rest of the script after it) until n remote clients are
+// welcomed, at most `timeout` frames (perf_audit LAN scene: the host captures with its client in).
+static void cmd_net_wait_clients(int argc, const char **argv) {
+    int want = argc > 1 ? atoi(argv[1]) : 1, left = argc > 2 ? atoi(argv[2]) : 3600;
+    int have = net_host_client_count();
+    if (have >= want) { log_info("net_wait_clients %d: done", want); return; }
+    if (left <= 0) { log_warn("net_wait_clients %d: timed out with %d client(s)", want, have); return; }
+    char line[64];
+    snprintf(line, sizeof(line), "net_wait_clients %d %d", want, left - 1);
+    cbuf_retry(line);
+}
+
 bool net_init(void) {
     N = (NetSystem *)calloc(1, sizeof(NetSystem));
     cvar_set_rule_gate(can_set_rules);
@@ -1108,6 +1120,7 @@ bool net_init(void) {
     spectate_set_sender(spec_send);
     snap_history_init(&N->cl_history);
     N->stats_time = platform_time();
+    cmd_register("net_wait_clients", cmd_net_wait_clients, "net_wait_clients [n=1] [timeout frames=3600]: scripts wait until n clients are in (host)");
     cmd_register("net_snapstats", cmd_snapstats, "host: per-client snapshot kB/s since the last call, held zombie updates");
     cmd_register("connect", cmd_connect, "connect <ip[:port]> to a LAN/direct host");
     cmd_register("host", cmd_host, "host [lan|steam]: accept players into this game");

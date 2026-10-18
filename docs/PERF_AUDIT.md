@@ -245,6 +245,28 @@ state hash that changes at one tick, a fix with no speed-up): `tools/perf_audit/
    profiles), run `python tools/perf_audit/tests/run_tests.py`.
 4. List it in the table above.
 
+## First run (2026-10-18)
+
+Made where the tool was written: a Linux container without a GPU, the engine on Mesa lavapipe (Vulkan
+on 4 CPU cores) under Xvfb, 1600 x 900. CPU zones, counters, allocation sites, frame graph, command
+counts, screenshots and state hashes are real; GPU milliseconds are the software rasterizer's.
+Report: [perf/AUDIT_2026-10-18.md](perf/AUDIT_2026-10-18.md); fixes: [perf/FINDINGS.md](perf/FINDINGS.md).
+
+- Scenes captured: devroom, horde500, night_lights, vehicle_yard (Modern and Low). `foliage` and
+  `water_weather` (the open-world maps) crash inside lavapipe's JIT; the unmodified base commit
+  (2cd1d95) crashes the same way on `map vegetation` without any capture, so it is the software
+  driver, not the instrumentation. `lan2` was not exercised: on this Linux container the client never
+  completes the ENet connect to a local host (loopback UDP works; the host, running at ~100 ms frames
+  and waiting with `net_wait_clients`, logs no incoming peer). The LAN tests (`tools/tests/*_net.sh`)
+  run on Windows, where the first run captures `lan2`; the net section's rule (R16) is tested on
+  synthetic profiles.
+- The five fixes were verified A/B (2 x A/B, 40 frames, the dev room): state hashes identical in
+  every pass, every reference image inside the A vs A' envelope (lavapipe frames differ run to run by
+  ~0.3 % of the pixels), timings as recorded in FINDINGS.md. PF-0003 removes its allocation but its
+  time gain is below this machine's noise: not closed.
+- On the target machine: `tools/perf_audit/first_run.sh` (the full audit, then `run_verify.sh` for
+  every fix with `PERF_TARGET=1`) replaces these numbers and closes the findings there.
+
 ## CI
 
 `.github/workflows/perf_audit.yml`:

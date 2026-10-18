@@ -238,7 +238,7 @@ def r06_waits(p, ctx):
             out.append(Finding("R06", "wait:" + w, "Main thread waits %.2f ms on %s (GPU bound: GPU %.2f ms vs CPU work %.2f ms)" % (ms, w, gpu, cpu - ms),
                                "frame", {"zone": "wait:" + w}, {p.key: {"wait_ms": round(ms, 3), "gpu_ms": round(gpu, 3), "cpu_ms": round(cpu, 3)}}, {},
                                "high", "M", "Nothing to fix on the CPU side; the GPU findings of this scene are the lever.", scene=p.key,
-                               verify="no change (classification)", below_noise=True))
+                               verify="no change (classification)", fidelity="info", below_noise=True))
             continue
         out.append(Finding("R06", "wait:" + w, "Main thread blocked %.2f ms per frame on %s" % (ms, w), "frame", {"zone": "wait:" + w},
                            {p.key: {"wait_ms": round(ms, 3), "max_ms": round(z.get("max_ms", 0), 3), "gpu_ms": round(gpu, 3)}}, {"cpu_ms": ms},
@@ -308,16 +308,20 @@ def r08_hot_alloc(p, ctx):
     return out
 
 
-@rule("R10", "Redundant skinning palette work")
+@rule("R10", "Redundant skinning palette uploads")
 def r10_skinning(p, ctx):
-    evals, pals = p.counter_mean("anim_eval"), p.counter_mean("skin_palettes")
-    if evals <= 0 or pals <= evals * 1.1:
+    """Every part of a modular character copies the same palette into the frame's bone buffer
+    (render_draw_skinned): palette uploads vs distinct poses per frame."""
+    sets, poses, bytes_ = p.counter_mean("skin_palettes"), p.counter_mean("skin_poses"), p.counter_mean("skin_palette_bytes")
+    if poses <= 0 or sets <= poses * 1.1:
         return []
-    return [Finding("R10", "palettes_vs_evals", "%.0f palettes uploaded per frame for %.0f evaluated poses" % (pals, evals), "anim/skinning",
-                    {"function": "render_draw_skinned", "file": "src/render/render.c"}, {p.key: {"palettes": round(pals, 1), "anim_evals": round(evals, 1)}},
-                    {"cpu_ms": (pals - evals) * 0.002}, "medium", "M",
-                    "Upload a palette once per pose and let the main, shadow and viewmodel passes share the slot (the bone SSBO already holds "
-                    "this frame's palettes).", scene=p.key)]
+    dup = (sets - poses) / sets
+    return [Finding("R10", "duplicate_palettes", "%.0f palette uploads per frame for %.0f distinct palettes (%.0f%% duplicates, %.0f kB)" % (
+        sets, poses, 100 * dup, bytes_ * dup / 1024.0), "anim/skinning", {"file": "src/render/render.c", "function": "render_draw_skinned"},
+        {p.key: {"palette_sets": round(sets, 1), "distinct": round(poses, 1), "bytes_per_frame": round(bytes_)}},
+        {"cpu_ms": (sets - poses) * 0.002, "mb": 0.0}, "high", "M",
+        "Copy each character's palette once and let its parts (and the shadow / viewmodel passes) share the bone offset: the same "
+        "matrices, uploaded once.", scene=p.key)]
 
 
 @rule("R12", "Off-screen animation on clients")

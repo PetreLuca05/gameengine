@@ -37,6 +37,7 @@ typedef enum ProfCounter {
     PC_JOBS, PC_PARFOR,
     PC_ANIM_EVAL, PC_ANIM_EVAL_OFFSCREEN,          // characters posed this frame / of them, none visible (client)
     PC_SKIN_PALETTES, PC_SKIN_PALETTE_BYTES,       // palettes uploaded / bytes
+    PC_SKIN_POSES,                                 // distinct palettes among them (parts of one character share one)
     PC_VFX_EMITTERS, PC_VFX_EMITTERS_CULLED,       // emitters updated / of them, off-screen
     PC_AUDIO_VOICES, PC_AUDIO_VOICES_SILENT,       // voices mixed / of them, inaudible (zero gain)
     PC_UI_TEXT, PC_UI_VERTS,                       // text runs drawn / UI vertices
