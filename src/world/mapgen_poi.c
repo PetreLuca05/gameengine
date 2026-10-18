@@ -318,7 +318,8 @@ static void plan_suburbs(Plan *pl) {
                     if (road_clear(g, hc, v2(w, d), yaw) < 6.0f) continue;
                     if (rng_float(&pl->rng) < 0.08f) continue;   // empty lot
                     int st = rng_float(&pl->rng) < 0.35f ? 2 : 1;
-                    int flags = (rng_float(&pl->rng) < 0.38f ? MPL_ENTERABLE : 0) | (rng_float(&pl->rng) < 0.18f ? MPL_DAMAGED : 0);
+                    int flags = rng_float(&pl->rng) < 0.38f ? MPL_ENTERABLE : 0;
+                    flags |= rng_float(&pl->rng) < 0.18f ? MPL_DAMAGED : 0;
                     MpLot *hl = add_lot(pl->p, LK_HOUSE, pl->poi, hc, v2(w, d), yaw, st, flags, rng_next(&pl->rng), "household");
                     hl->variant = (u8)(rng_next(&pl->rng) & 15);
                     lot_keepout(g, hl, 1.0f);
@@ -327,7 +328,11 @@ static void plan_suburbs(Plan *pl) {
                     add_paint(g, drive, v2(3.5f, 8.0f), yaw, MGM_CONCRETE);
                     if (rng_float(&pl->rng) < 0.45f) {
                         vec2 sc = v2_add(hc, rot2(v2(rng_range(&pl->rng, -3, 3), -d * 0.5f - 7.0f), yaw));
-                        if (lot_free(pl->p, first_lot, sc, v2(3.5f, 3), yaw, 0.5f)) lot_keepout(g, add_lot(pl->p, LK_SHED, pl->poi, sc, v2(3, 2.6f), yaw, 1, rng_float(&pl->rng) < 0.6f ? MPL_ENTERABLE : 0, rng_next(&pl->rng), "garage"), 0.5f);
+                        if (lot_free(pl->p, first_lot, sc, v2(3.5f, 3), yaw, 0.5f)) {
+                            u32 seed = rng_next(&pl->rng);
+                            int fl = rng_float(&pl->rng) < 0.6f ? MPL_ENTERABLE : 0;
+                            lot_keepout(g, add_lot(pl->p, LK_SHED, pl->poi, sc, v2(3, 2.6f), yaw, 1, fl, seed, "garage"), 0.5f);
+                        }
                     }
                 }
             }
@@ -649,11 +654,13 @@ static void plan_forest(Plan *pl) {
         n++;
     }
     for (int k = 0; k < 5; k++) {
-        vec2 p = v2_add(c, v2(rng_range(&pl->rng, -h.x, h.x) * 0.8f, rng_range(&pl->rng, -h.y, h.y) * 0.8f));
+        float py = rng_range(&pl->rng, -h.y, h.y), px = rng_range(&pl->rng, -h.x, h.x);
+        vec2 p = v2_add(c, v2(px * 0.8f, py * 0.8f));
         keep_lot(pl, add_lot(pl->p, LK_HUNT_STAND, pl->poi, p, v2(2.2f, 2.2f), rng_range(&pl->rng, 0, 6.28f), 1, 0, 120 + (u32)k, "camping"), 1.5f);
     }
     for (int k = 0; k < 2; k++) {
-        vec2 p = v2_add(c, v2(rng_range(&pl->rng, -h.x, h.x) * 0.6f, rng_range(&pl->rng, -h.y, h.y) * 0.6f));
+        float py = rng_range(&pl->rng, -h.y, h.y), px = rng_range(&pl->rng, -h.x, h.x);
+        vec2 p = v2_add(c, v2(px * 0.6f, py * 0.6f));
         keep_lot(pl, add_lot(pl->p, LK_CAMPFIRE, pl->poi, p, v2(3, 3), 0, 1, 0, 130 + (u32)k, ""), 8);
         for (int t = 0; t < 2; t++) add_lot(pl->p, LK_TENT, pl->poi, v2_add(p, rot2(v2(6, 0), (float)t * 2.5f + 0.4f)), v2(2.6f, 3.2f), (float)t * 2.5f, 1, 0, 140 + (u32)(k * 2 + t), "camping");
     }
@@ -1062,7 +1069,8 @@ static float kit_building(Kit *k, vec2 pos, float yaw, const BldSpec *b) {
     if (b->damaged) {   // rubble at the base
         for (int i = 0; i < 4; i++) {
             float dx = rng_range(&k->rng, -hw, hw), dz = hd + rng_range(&k->rng, 0.5f, 3.0f);
-            kbox_r(k, &f, v3(dx, 0.25f - (y0 - hi) , dz), v3(rng_range(&k->rng, 0.3f, 1.0f), 0.3f, rng_range(&k->rng, 0.3f, 0.8f)), quat_yaw(rng_range(&k->rng, 0, 3)), b->trim, MPF_DETAIL | MPF_COLLIDE, "concrete");
+            float ry = rng_range(&k->rng, 0, 3), sz = rng_range(&k->rng, 0.3f, 0.8f), sx = rng_range(&k->rng, 0.3f, 1.0f);
+            kbox_r(k, &f, v3(dx, 0.25f - (y0 - hi) , dz), v3(sx, 0.3f, sz), quat_yaw(ry), b->trim, MPF_DETAIL | MPF_COLLIDE, "concrete");
         }
     }
     return y0;
@@ -1635,7 +1643,8 @@ static void kit_gravel(Kit *k, const MpLot *l) {
     Frame f = frame(v3(l->pos.x, h, l->pos.y), 0);
     for (int i = 0; i < 3; i++) {
         float r = l->size.x * 0.5f * (0.5f + 0.25f * (float)i);
-        vec3 c = v3(rng_range(&k->rng, -r, r) * 0.5f, 0, rng_range(&k->rng, -r, r) * 0.5f);
+        float cz = rng_range(&k->rng, -r, r), cx = rng_range(&k->rng, -r, r);
+        vec3 c = v3(cx * 0.5f, 0, cz * 0.5f);
         float hh = r * 0.33f;
         kcyl(k, &f, v3(c.x, hh - 0.3f, c.z), r, hh, 0.1f, quat_identity(), Cv(jitter_col(&k->rng, v3(0.45f, 0.42f, 0.38f), 0.12f)), MPF_COLLIDE, "gravel");
     }
@@ -1659,8 +1668,10 @@ static void kit_plane_wreck(Kit *k, const MpLot *l) {
     kbox_r(k, &f, v3(7.0f, 0.4f, 4.0f), v3(4.5f, 0.15f, 1.5f), quat_mul(quat_yaw(0.4f), quat_axis_angle(v3(0, 0, 1), -0.2f)), burnt, MPF_COLLIDE | MPF_METAL, "metal_thin");
     kbox_r(k, &f, v3(1.6f, 3.0f, -12.0f), v3(0.15f, 2.0f, 1.6f), quat_yaw(0.35f), w, MPF_COLLIDE | MPF_METAL, "metal_thin");
     for (int i = 0; i < 8; i++) {
-        vec3 p = v3(rng_range(&k->rng, -12, 12), 0.15f, rng_range(&k->rng, -14, 14));
-        kbox_r(k, &f, p, v3(rng_range(&k->rng, 0.3f, 1.2f), 0.06f, rng_range(&k->rng, 0.3f, 1.0f)), quat_yaw(rng_range(&k->rng, 0, 3)), i & 1 ? w : burnt, MPF_DETAIL, "metal_thin");
+        float pz = rng_range(&k->rng, -14, 14), px = rng_range(&k->rng, -12, 12);
+        vec3 p = v3(px, 0.15f, pz);
+        float ry = rng_range(&k->rng, 0, 3), sz = rng_range(&k->rng, 0.3f, 1.0f), sx = rng_range(&k->rng, 0.3f, 1.2f);
+        kbox_r(k, &f, p, v3(sx, 0.06f, sz), quat_yaw(ry), i & 1 ? w : burnt, MPF_DETAIL, "metal_thin");
     }
     kent(k, MPE_CONTAINER, fp(&f, v3(0, 0.2f, 0)), l->yaw, "rare");
     kent(k, MPE_ZOMBIE_SPOT, fp(&f, v3(4, 0.1f, 6)), l->yaw, NULL);
@@ -1684,7 +1695,8 @@ static void kit_yard_clutter(Kit *k, const MpLot *l) {
     Frame f0 = frame(v3(l->pos.x, 0, l->pos.y), l->yaw);
     int n = (int)(l->size.x * l->size.y / 600.0f);
     for (int i = 0; i < n; i++) {
-        vec3 lp = v3(rng_range(&k->rng, -0.5f, 0.5f) * l->size.x, 0, rng_range(&k->rng, -0.5f, 0.5f) * l->size.y);
+        float uz = rng_range(&k->rng, -0.5f, 0.5f), ux = rng_range(&k->rng, -0.5f, 0.5f);
+        vec3 lp = v3(ux * l->size.x, 0, uz * l->size.y);
         vec3 wp = fp(&f0, lp);
         if (mapgen_in_keepout(k->g, wp.x, wp.z, 1.5f)) continue;
         float h = ground(k, v2(wp.x, wp.z));
@@ -1704,9 +1716,12 @@ static void kit_yard_clutter(Kit *k, const MpLot *l) {
             kit_tractor(k, v3(wp.x, h, wp.z), yaw, true);
             kblock(k, &f, 0, -4.5f, 1.25f, 3.2f, 1.0f, 3.8f, Cv(jitter_col(&k->rng, v3(0.6f, 0.6f, 0.6f), 0.2f)), MPF_COLLIDE | MPF_METAL, "metal_thin");
         } else if (r < 0.92f) {   // scrap pile
-            for (int s = 0; s < 6; s++)
-                kbox_r(k, &f, v3(rng_range(&k->rng, -1.5f, 1.5f), 0.3f, rng_range(&k->rng, -1.5f, 1.5f)), v3(rng_range(&k->rng, 0.2f, 1.0f), 0.08f, rng_range(&k->rng, 0.1f, 0.5f)),
-                       quat_euler(rng_range(&k->rng, 0, 6), rng_range(&k->rng, -0.5f, 0.5f), rng_range(&k->rng, -0.5f, 0.5f)), C(0.35f, 0.22f, 0.12f), MPF_DETAIL, "metal_thin");
+            for (int s = 0; s < 6; s++) {
+                float er = rng_range(&k->rng, -0.5f, 0.5f), ep = rng_range(&k->rng, -0.5f, 0.5f), ey = rng_range(&k->rng, 0, 6);
+                float sz = rng_range(&k->rng, 0.1f, 0.5f), sx = rng_range(&k->rng, 0.2f, 1.0f);
+                float pz = rng_range(&k->rng, -1.5f, 1.5f), px = rng_range(&k->rng, -1.5f, 1.5f);
+                kbox_r(k, &f, v3(px, 0.3f, pz), v3(sx, 0.08f, sz), quat_euler(ey, ep, er), C(0.35f, 0.22f, 0.12f), MPF_DETAIL, "metal_thin");
+            }
             kent(k, MPE_PICKUP, v3(wp.x, h + 0.2f, wp.z), 0, "scrap");
         } else {
             kent(k, MPE_CONTAINER, v3(wp.x, h, wp.z), yaw, l->tier[0] ? l->tier : "industrial");
@@ -1746,25 +1761,29 @@ static void kit_hay(Kit *k, const MpLot *l) {
 static void kit_rocks(Kit *k, const MpLot *l) {
     // boulders scattered over the area (rotated boxes; dense areas get many)
     for (int i = 0; i < l->storeys; i++) {
-        vec2 p = v2_add(l->pos, v2(rng_range(&k->rng, -0.5f, 0.5f) * l->size.x, rng_range(&k->rng, -0.5f, 0.5f) * l->size.y));
+        float uy = rng_range(&k->rng, -0.5f, 0.5f), ux = rng_range(&k->rng, -0.5f, 0.5f);
+        vec2 p = v2_add(l->pos, v2(ux * l->size.x, uy * l->size.y));
         if (mapgen_in_keepout(k->g, p.x, p.y, 2) || mapgen_water_level(k->g, p.x, p.y) > ground(k, p) - 0.5f) continue;
         float rd;
         if (mapgen_nearest_road(k->g, p.x, p.y, 4, &rd) >= 0) continue;
         float h = ground(k, p), s = rng_range(&k->rng, 0.5f, 1.8f);
         Frame f = frame(v3(p.x, h, p.y), rng_range(&k->rng, 0, 6.28f));
-        kbox_r(k, &f, v3(0, s * 0.3f, 0), v3(s, s * 0.7f, s * 0.8f), quat_euler(0, rng_range(&k->rng, -0.4f, 0.4f), rng_range(&k->rng, -0.4f, 0.4f)),
-               Cv(jitter_col(&k->rng, v3(0.38f, 0.37f, 0.35f), 0.15f)), MPF_COLLIDE, "concrete");
+        vec3 col = jitter_col(&k->rng, v3(0.38f, 0.37f, 0.35f), 0.15f);
+        float er = rng_range(&k->rng, -0.4f, 0.4f), ep = rng_range(&k->rng, -0.4f, 0.4f);
+        kbox_r(k, &f, v3(0, s * 0.3f, 0), v3(s, s * 0.7f, s * 0.8f), quat_euler(0, ep, er), Cv(col), MPF_COLLIDE, "concrete");
         if (l->tier[0] && i % 9 == 0) kent(k, MPE_CONTAINER, v3(p.x + s + 0.8f, ground(k, v2(p.x + s + 0.8f, p.y)), p.y), 0, l->tier);   // supply cache
     }
 }
 
 static void kit_logs(Kit *k, const MpLot *l) {
     for (int i = 0; i < l->storeys; i++) {
-        vec2 p = v2_add(l->pos, v2(rng_range(&k->rng, -0.5f, 0.5f) * l->size.x, rng_range(&k->rng, -0.5f, 0.5f) * l->size.y));
+        float uy = rng_range(&k->rng, -0.5f, 0.5f), ux = rng_range(&k->rng, -0.5f, 0.5f);
+        vec2 p = v2_add(l->pos, v2(ux * l->size.x, uy * l->size.y));
         if (mapgen_in_keepout(k->g, p.x, p.y, 3) || mapgen_water_level(k->g, p.x, p.y) > ground(k, p) - 0.5f) continue;
         float rd;
         if (mapgen_nearest_road(k->g, p.x, p.y, 5, &rd) >= 0) continue;
-        kit_tree_log(k, p, rng_range(&k->rng, 0, 6.28f), rng_range(&k->rng, 4, 10), rng_range(&k->rng, 0.2f, 0.45f));
+        float lr = rng_range(&k->rng, 0.2f, 0.45f), ll = rng_range(&k->rng, 4, 10), ly = rng_range(&k->rng, 0, 6.28f);
+        kit_tree_log(k, p, ly, ll, lr);
     }
 }
 
@@ -1829,7 +1848,10 @@ static void kit_parking(Kit *k, const MpLot *l) {
         for (int c = 0; c < cols; c++) {
             float x = -l->size.x * 0.5f + 1.5f + (float)c * 3.0f, z = -l->size.y * 0.5f + 3.5f + (float)r * 7.0f;
             kblock(k, &f, x - 1.5f, z, 0.06f, 2.5f, 0.0f, 0.03f, C(0.8f, 0.8f, 0.78f), MPF_NO_SHADOW | MPF_DETAIL, "asphalt");
-            if (rng_float(&k->rng) < 0.45f) kit_car(k, fp(&f, v3(x, 0, z)), l->yaw + (r & 1 ? DG_PI : 0) + rng_range(&k->rng, -0.1f, 0.1f), rng_float(&k->rng) < 0.15f ? 1 : 0);
+            if (rng_float(&k->rng) < 0.45f) {
+                int style = rng_float(&k->rng) < 0.15f ? 1 : 0;
+                kit_car(k, fp(&f, v3(x, 0, z)), l->yaw + (r & 1 ? DG_PI : 0) + rng_range(&k->rng, -0.1f, 0.1f), style);
+            }
         }
 }
 
@@ -2150,14 +2172,15 @@ static void build_city_streets(Kit *k, const MpLot *l) {
                 float lane = (rng_float(&k->rng) < 0.5f ? -1.0f : 1.0f) * rd->width * 0.25f;
                 vec2 p = v2_add(s->p, v2_scale(nrm, lane));
                 int style = rng_float(&k->rng) < 0.3f ? 1 : (city && rng_float(&k->rng) < 0.25f ? 3 : 0);
-                kit_car(k, v3(p.x, s->h, p.y), yaw + rng_range(&k->rng, -0.5f, 0.5f) + (rng_float(&k->rng) < 0.5f ? DG_PI : 0), style);
+                float jy = rng_range(&k->rng, -0.5f, 0.5f);
+                kit_car(k, v3(p.x, s->h, p.y), yaw + jy + (rng_float(&k->rng) < 0.5f ? DG_PI : 0), style);
             }
             // debris
             if (city && rng_float(&k->rng) < 0.05f) {
                 vec2 p = v2_add(s->p, v2_scale(nrm, rng_range(&k->rng, -rd->width * 0.5f, rd->width * 0.5f)));
                 Frame f = frame(v3(p.x, s->h, p.y), rng_range(&k->rng, 0, 6));
-                kbox_r(k, &f, v3(0, 0.1f, 0), v3(rng_range(&k->rng, 0.2f, 0.7f), 0.1f, rng_range(&k->rng, 0.2f, 0.5f)), quat_axis_angle(v3(1, 0, 0), rng_range(&k->rng, -0.3f, 0.3f)),
-                       C(0.3f, 0.29f, 0.27f), MPF_DETAIL, "concrete");
+                float tilt = rng_range(&k->rng, -0.3f, 0.3f), sz = rng_range(&k->rng, 0.2f, 0.5f), sx = rng_range(&k->rng, 0.2f, 0.7f);
+                kbox_r(k, &f, v3(0, 0.1f, 0), v3(sx, 0.1f, sz), quat_axis_angle(v3(1, 0, 0), tilt), C(0.3f, 0.29f, 0.27f), MPF_DETAIL, "concrete");
             }
         }
         // barricade at one end of some city streets (one lane left open)
@@ -2231,7 +2254,8 @@ static void build_encounters(Kit *k) {
                 kit_car(k, v3(shoulder.x, hs, shoulder.y), yaw + rng_range(&k->rng, -0.4f, 0.4f), 0);
                 if (rng_float(&k->rng) < 0.4f) {
                     vec2 p2 = v2_add(shoulder, v2_scale(s->dir, 7.0f));
-                    kit_car(k, v3(p2.x, ground(k, p2), p2.y), yaw + rng_range(&k->rng, -0.6f, 0.6f), rng_float(&k->rng) < 0.5f ? 1 : 0);
+                    int style = rng_float(&k->rng) < 0.5f ? 1 : 0;
+                    kit_car(k, v3(p2.x, ground(k, p2), p2.y), yaw + rng_range(&k->rng, -0.6f, 0.6f), style);
                 }
             } else if (r0 < 0.5f) {
                 kit_car(k, v3(shoulder.x, hs, shoulder.y), yaw + rng_range(&k->rng, 0.5f, 1.2f), 1);
@@ -2239,7 +2263,10 @@ static void build_encounters(Kit *k) {
                 Frame f = frame(v3(shoulder.x, hs, shoulder.y), yaw + rng_range(&k->rng, -0.3f, 0.3f));
                 kbox_r(k, &f, v3(side * 1.2f, 1.25f, 0), v3(1.3f, 1.25f, 4.5f), quat_axis_angle(v3(0, 0, 1), DG_PI * 0.5f), C(0.6f, 0.6f, 0.62f), MPF_COLLIDE | MPF_METAL, "metal_thin");
                 kbox_r(k, &f, v3(side * 1.0f, 1.0f, 5.6f), v3(1.0f, 1.1f, 1.1f), quat_axis_angle(v3(0, 0, 1), DG_PI * 0.5f), C(0.2f, 0.3f, 0.5f), MPF_COLLIDE | MPF_METAL, "metal_thin");
-                for (int c = 0; c < 4; c++) kblock(k, &f, side * (3.0f + rng_range(&k->rng, 0, 2)), rng_range(&k->rng, -4, 2), 0.4f, 0.4f, 0, 0.8f, C(0.4f, 0.32f, 0.2f), MPF_COLLIDE | MPF_DETAIL, "wood");
+                for (int c = 0; c < 4; c++) {
+                    float bz = rng_range(&k->rng, -4, 2), bx = rng_range(&k->rng, 0, 2);
+                    kblock(k, &f, side * (3.0f + bx), bz, 0.4f, 0.4f, 0, 0.8f, C(0.4f, 0.32f, 0.2f), MPF_COLLIDE | MPF_DETAIL, "wood");
+                }
                 kent(k, MPE_CONTAINER, fp(&f, v3(side * 3.5f, 0, 4.0f)), yaw, "industrial");
             } else if (r0 < 0.74f) {   // barricade across one lane
                 for (int b = 0; b < 3; b++) {

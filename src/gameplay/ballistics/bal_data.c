@@ -1,4 +1,5 @@
 // Ballistics data parsing (cartridges, materials, muzzle devices).
+#define DG_DETMATH   // cross-platform bit-identical math (core/dgmath.h)
 #include "gameplay/ballistics/bal_data.h"
 #include "core/detmath.h"
 #include "gameplay/ballistics/bal_drag.h"

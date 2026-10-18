@@ -1,4 +1,5 @@
 // Aim model math (docs/AIM.md). Pure: unit tested by tests/test_aim.c.
+#define DG_DETMATH   // cross-platform bit-identical math (core/dgmath.h)
 #include "gameplay/aim.h"
 #include "core/detmath.h"
 #include <math.h>

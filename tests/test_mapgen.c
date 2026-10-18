@@ -76,6 +76,44 @@ static u64 raster_hash(const MgRaster *r) {
     return h;
 }
 
+static u64 fnv_bytes(u64 h, const void *p, size_t n) {
+    for (size_t i = 0; i < n; i++) h = (h ^ ((const u8 *)p)[i]) * 1099511628211ull;
+    return h;
+}
+
+// The POI build (lots, primitives, entities: numeric fields only, no pointers / padding): equal on
+// every compiler and platform (a Mac host and a PC client build the same map; docs/PLATFORM_MACOS.md
+// "Determinism": no RNG draws in unsequenced argument lists).
+static u64 poi_hash(const MapPois *p) {
+    u64 h = 1469598103934665603ull;
+    for (int i = 0; i < p->lot_count; i++) {
+        const MpLot *l = &p->lots[i];
+        u32 k[5] = { l->kind, l->poi, l->storeys, l->flags, l->variant };
+        h = fnv_bytes(h, k, sizeof(k));
+        h = fnv_bytes(h, &l->pos, sizeof(vec2));
+        h = fnv_bytes(h, &l->size, sizeof(vec2));
+        h = fnv_bytes(h, &l->yaw, sizeof(float));
+        h = fnv_bytes(h, &l->seed, sizeof(u32));
+    }
+    for (int i = 0; i < p->prim_count; i++) {
+        const MpPrim *q = &p->prims[i];
+        u32 k[4] = { q->color, q->flags, q->shape, q->poi };
+        h = fnv_bytes(h, &q->pos, sizeof(vec3));
+        h = fnv_bytes(h, &q->half, sizeof(vec3));
+        h = fnv_bytes(h, &q->rot, sizeof(quat));
+        h = fnv_bytes(h, k, sizeof(k));
+    }
+    for (int i = 0; i < p->ent_count; i++) {
+        const MpEnt *e = &p->ents[i];
+        float f[5] = { e->yaw, e->w, e->h, e->radius, e->intensity };
+        h = fnv_bytes(h, &e->kind, 1);
+        h = fnv_bytes(h, &e->pos, sizeof(vec3));
+        h = fnv_bytes(h, f, sizeof(f));
+        h = fnv_bytes(h, &e->count, sizeof(int));
+    }
+    return h;
+}
+
 static bool is_building(const char *kind) {
     static const char *const k[] = { "apartment", "shop", "office", "clinic", "police", "supermarket", "house", "hall", "warehouse", "admin", "workshop",
                                      "farmhouse", "barn", "hangar", "terminal", "harbor_office", "cabin", "plant" };
@@ -281,6 +319,9 @@ int main(int argc, char **argv) {
     if (!build(&a, root, 2.0f) || !build(&b, root, 2.0f)) return 1;
     CHECK(raster_hash(&a.r) == raster_hash(&b.r), "raster not deterministic");
     CHECK(a.p.prim_count == b.p.prim_count && a.p.ent_count == b.p.ent_count, "POI build not deterministic");
+    CHECK(poi_hash(&a.p) == poi_hash(&b.p), "POI build not deterministic");
+    printf("raster hash %016llx, POI hash %016llx (%d lots, %d prims, %d ents)\n", (unsigned long long)raster_hash(&a.r), (unsigned long long)poi_hash(&a.p),
+           a.p.lot_count, a.p.prim_count, a.p.ent_count);
     destroy(&b);
     // The terrain / road / POI / loot checks are written against the Zombieland map's layout.
     const cJSON *nm = cJSON_GetObjectItemCaseSensitive(root, "name");

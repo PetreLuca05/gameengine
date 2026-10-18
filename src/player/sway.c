@@ -1,3 +1,4 @@
+#define DG_DETMATH   // cross-platform bit-identical math (core/dgmath.h)
 #include "sway.h"
 #include "core/detmath.h"
 #include "cJSON.h"

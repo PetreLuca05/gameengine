@@ -1,4 +1,5 @@
 // Point-mass projectile integration (docs/BALLISTICS.md "Physics model").
+#define DG_DETMATH   // cross-platform bit-identical math (core/dgmath.h)
 #include "gameplay/ballistics/bal_sim.h"
 #include "core/detmath.h"
 #include "gameplay/ballistics/bal_drag.h"
@@ -25,7 +26,10 @@ BalEnv bal_env_make(float temp_c, float altitude_m, int drag_model) {
 
 float bal_rng_gauss(Rng *rng) {
     // Irwin-Hall with 4 uniforms, rescaled to unit variance: cheap and libm-free.
-    float s = rng_float(rng) + rng_float(rng) + rng_float(rng) + rng_float(rng);
+    float s = rng_float(rng);   // sequenced draws (operand order is unspecified in C)
+    s += rng_float(rng);
+    s += rng_float(rng);
+    s += rng_float(rng);
     return (s - 2.0f) * 1.7320508f;
 }
 
@@ -118,7 +122,10 @@ bool bal_step(BalBullet *b, const BalCartridge *c, const BalEnv *e, float dt) {
             vec3 u = any_perp(dir);
             vec3 w = v3_cross(dir, u);
             float k = b->yaw * s * 0.1f * h;
-            b->vel = v3_add(b->vel, v3_add(v3_scale(u, bal_rng_gauss(&b->rng) * k), v3_scale(w, bal_rng_gauss(&b->rng) * k)));
+            // one draw per statement: argument evaluation order differs between compilers (clang vs
+            // gcc / MSVC), and a Mac host and a PC client must walk the same way
+            float gw = bal_rng_gauss(&b->rng), gu = bal_rng_gauss(&b->rng);
+            b->vel = v3_add(b->vel, v3_add(v3_scale(u, gu * k), v3_scale(w, gw * k)));
         } else if (b->yaw > 0.0f && !(b->flags & BF_RICOCHET)) {
             b->yaw -= b->yaw * fminf(2.0f * h, 1.0f);
         }

@@ -1,3 +1,4 @@
+#define DG_DETMATH   // cross-platform bit-identical math (core/dgmath.h)
 #include "recoil.h"
 #include "core/detmath.h"
 #include <math.h>
@@ -212,7 +213,10 @@ vec3 recoil_cone_dir(vec3 dir, float cone_deg, Rng *rng) {
     vec3 t = fabsf(dir.y) < 0.95f ? v3_norm(v3_cross(dir, v3(0, 1, 0))) : v3(1, 0, 0);
     vec3 b = v3_cross(t, dir);
     // Gaussian-ish radius (sum of uniforms), truncated to the cone edge.
-    float g = (rng_float(rng) + rng_float(rng) + rng_float(rng)) / 3.0f;   // mean .5, sd ~.17
+    float g = rng_float(rng);   // sequenced draws (operand order is unspecified in C)
+    g += rng_float(rng);
+    g += rng_float(rng);
+    g /= 3.0f;                  // mean .5, sd ~.17
     float r = fabsf(g - 0.5f) * 2.0f * 1.35f;                              // ~half the shots in the inner 40%
     r = fminf(r, 1.0f);
     float a = rng_float(rng) * 2.0f * DG_PI;

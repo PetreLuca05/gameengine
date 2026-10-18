@@ -6,6 +6,25 @@
 #include <math.h>
 #include "base.h"
 
+// Deterministic translation units (host / predicting client must agree bit for bit across platforms:
+// ballistics, recoil, sway, fire animation, aim) define DG_DETMATH before their first include: the
+// inline helpers below then use the cross-platform kernels of detmath.h instead of the platform libm
+// (docs/PLATFORM_MACOS.md "Determinism").
+#ifdef DG_DETMATH
+#include "detmath.h"
+#define DGM_SINF dm_sinf
+#define DGM_COSF dm_cosf
+#define DGM_TANF dm_tanf
+#define DGM_EXPF dm_expf
+#define DGM_ATAN2F dm_atan2f
+#else
+#define DGM_SINF sinf
+#define DGM_COSF cosf
+#define DGM_TANF tanf
+#define DGM_EXPF expf
+#define DGM_ATAN2F atan2f
+#endif
+
 #define DG_PI 3.14159265358979323846f
 #define DG_DEG2RAD (DG_PI / 180.0f)
 #define DG_RAD2DEG (180.0f / DG_PI)
@@ -31,7 +50,7 @@ DG_INLINE float approachf(float cur, float target, float delta) {
     return cur - delta < target ? target : cur - delta;
 }
 // Frame-rate independent exponential smoothing factor.
-DG_INLINE float exp_decay(float rate, float dt) { return 1.0f - expf(-rate * dt); }
+DG_INLINE float exp_decay(float rate, float dt) { return 1.0f - DGM_EXPF(-rate * dt); }
 DG_INLINE float wrap_angle(float a) {
     // Huge or non-finite input (a teleport / degenerate spring) would never leave the loops below:
     // reduce it first (ordinary angles keep the exact loop results).
@@ -68,18 +87,18 @@ DG_INLINE vec4 v4_lerp(vec4 a, vec4 b, float t) { return v4(lerpf(a.x, b.x, t), 
 
 // Yaw rotates around +Y; yaw=0, pitch=0 looks down -Z.
 DG_INLINE vec3 dir_from_angles(float yaw, float pitch) {
-    float cp = cosf(pitch);
-    return v3(-sinf(yaw) * cp, sinf(pitch), -cosf(yaw) * cp);
+    float cp = DGM_COSF(pitch);
+    return v3(-DGM_SINF(yaw) * cp, DGM_SINF(pitch), -DGM_COSF(yaw) * cp);
 }
-DG_INLINE vec3 right_from_yaw(float yaw) { return v3(cosf(yaw), 0.0f, -sinf(yaw)); }
-DG_INLINE vec3 forward_from_yaw(float yaw) { return v3(-sinf(yaw), 0.0f, -cosf(yaw)); }
+DG_INLINE vec3 right_from_yaw(float yaw) { return v3(DGM_COSF(yaw), 0.0f, -DGM_SINF(yaw)); }
+DG_INLINE vec3 forward_from_yaw(float yaw) { return v3(-DGM_SINF(yaw), 0.0f, -DGM_COSF(yaw)); }
 
 // ------------------------------------------------------------------ quaternion
 DG_INLINE quat quat_identity(void) { quat q = { 0, 0, 0, 1 }; return q; }
 DG_INLINE quat quat_axis_angle(vec3 axis, float angle) {
     vec3 n = v3_norm(axis);
-    float s = sinf(angle * 0.5f);
-    quat q = { n.x * s, n.y * s, n.z * s, cosf(angle * 0.5f) };
+    float s = DGM_SINF(angle * 0.5f);
+    quat q = { n.x * s, n.y * s, n.z * s, DGM_COSF(angle * 0.5f) };
     return q;
 }
 DG_INLINE quat quat_mul(quat a, quat b) {
@@ -117,7 +136,7 @@ DG_INLINE quat quat_euler(float yaw, float pitch, float roll) {
 }
 DG_INLINE float quat_get_yaw(quat q) {
     vec3 f = quat_rotate(q, v3(0, 0, -1));
-    return atan2f(-f.x, -f.z);
+    return DGM_ATAN2F(-f.x, -f.z);
 }
 
 // ------------------------------------------------------------------ matrix
@@ -182,7 +201,7 @@ DG_INLINE mat4 mat4_trs(vec3 t, quat q, vec3 s) {
 }
 // Vulkan perspective: depth 0..1, clip Y down (flipped here so +Y is up on screen).
 DG_INLINE mat4 mat4_perspective(float fovy, float aspect, float znear, float zfar) {
-    float f = 1.0f / tanf(fovy * 0.5f);
+    float f = 1.0f / DGM_TANF(fovy * 0.5f);
     mat4 r = { { 0 } };
     r.m[0] = f / aspect;
     r.m[5] = -f;

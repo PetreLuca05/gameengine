@@ -4,6 +4,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 static int g_fail, g_checks;
 
@@ -76,6 +77,33 @@ static void test_determinism(void) {
     CHECK(differs, "different seeds should give different patterns");
     CHECK(recoil_mag_seed(10, 2) == recoil_mag_seed(10, 2), "mag seed not deterministic");
     CHECK(recoil_mag_seed(10, 2) != recoil_mag_seed(11, 2), "mag seed ignores input");
+}
+
+// Cross-platform golden (docs/PLATFORM_MACOS.md "Determinism"): pattern steps, shots with every
+// modifier and the recovery ticks of a 60-round string hashed bit for bit; golden from Linux x86_64,
+// checked in CI on Windows and macOS arm64 / x86_64.
+static void test_cross_platform_golden(void) {
+    u64 h = 0xCBF29CE484222325ull;
+    RecoilParams p;
+    recoil_params_default(&p);
+    p.pattern_randomness = 0.6f;
+    RecoilState s;
+    memset(&s, 0, sizeof(s));   // recoil_reset keeps the input tracking of the previous state
+    recoil_reset(&s, recoil_mag_seed(77, 3));
+    RecoilMods m;
+    memset(&m, 0, sizeof(m));
+    m.ads_t = 0.3f;
+    m.move01 = 0.2f;
+    m.extra = 1.0f;
+    for (int i = 0; i < 60; i++) {
+        RecoilKick a = recoil_pattern_step(&p, 4242, i), k = recoil_shot(&p, &s, &m), t = recoil_tick(&p, &s, 1.0f / 60.0f);
+        float sp = recoil_spread(&p, &s, &m);
+        float v[7] = { a.pitch, a.yaw, k.pitch, k.yaw, t.pitch, t.yaw, sp };
+        for (size_t b = 0; b < sizeof(v); b++) { h ^= ((const u8 *)v)[b]; h *= 0x100000001B3ull; }
+    }
+    const u64 golden = 0x6BD1B0A74189FDB1ull;
+    printf("cross-platform recoil hash %016llx (golden %016llx)\n", (unsigned long long)h, (unsigned long long)golden);
+    CHECK(h == golden, "recoil hash %016llx differs from the golden %016llx", (unsigned long long)h, (unsigned long long)golden);
 }
 
 static void test_ramp_and_pattern(void) {
@@ -281,6 +309,7 @@ static void test_springs(void) {
 
 int main(void) {
     test_determinism();
+    test_cross_platform_golden();
     test_ramp_and_pattern();
     test_modifiers();
     test_recovery_uncountered();

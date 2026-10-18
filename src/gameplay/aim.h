@@ -58,7 +58,7 @@ AimClass aim_classify(float t, float len, float obstruct_near, bool friendly);
 vec3 aim_recover_origin(vec3 eye, vec3 muzzle, float f, float margin);
 
 // Crosshair: frame-rate independent exponential approach (tau seconds to ~63 %).
-DG_INLINE float aim_lerp_k(float dt, float tau) { return tau <= 1e-4f ? 1.0f : 1.0f - expf(-dt / tau); }
+DG_INLINE float aim_lerp_k(float dt, float tau) { return tau <= 1e-4f ? 1.0f : 1.0f - DGM_EXPF(-dt / tau); }
 // The spread ring around the impact point: the cone's radius at distance dist from the muzzle,
 // seen from the camera at distance cam_dist (px for a vertical FOV fov_v, screen height h).
 float aim_spread_px(float spread_deg, float dist, float cam_dist, float fov_v_rad, float screen_h);

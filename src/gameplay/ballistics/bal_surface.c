@@ -1,4 +1,5 @@
 // Ricochet / penetration / flesh (docs/BALLISTICS.md "Surfaces").
+#define DG_DETMATH   // cross-platform bit-identical math (core/dgmath.h)
 #include "gameplay/ballistics/bal_surface.h"
 #include "core/detmath.h"
 #include <math.h>

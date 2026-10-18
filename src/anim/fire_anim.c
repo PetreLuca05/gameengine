@@ -1,3 +1,4 @@
+#define DG_DETMATH   // cross-platform bit-identical math (core/dgmath.h)
 #include "fire_anim.h"
 #include "core/detmath.h"
 #include "cJSON.h"

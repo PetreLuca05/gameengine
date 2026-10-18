@@ -1,6 +1,7 @@
 // Unit tests for the pure ballistics modules (src/gameplay/ballistics: drag, sim, surfaces,
 // acoustics, tracers, muzzle flash, data). Reference trajectories: tests/data/ballistics_ref.json
 // (tools/ballistics_ref.py, py-ballisticcalc). Build: target test_ballistics; run: ctest.
+#include "core/detmath.h"
 #include "gameplay/ballistics/bal_acoustics.h"
 #include "gameplay/ballistics/bal_data.h"
 #include "gameplay/ballistics/bal_drag.h"
@@ -198,6 +199,43 @@ static void test_determinism(void) {
     CHECK(!memcmp(&a.pos, &b.pos, sizeof(vec3)) && !memcmp(&a.vel, &b.vel, sizeof(vec3)), "same seed: bit-identical");
     CHECK(a.yaw > 0.0f, "transonic yaw built up (%.4f)", a.yaw);
     CHECK(!v3_eq(a.pos, d.pos), "another pellet takes another random walk");
+}
+
+// Cross-platform golden (docs/PLATFORM_MACOS.md "Determinism"): every cartridge, both drag models,
+// wind, the transonic walk, the zero solve: the bits of the whole flight hashed. The golden value is
+// from Linux x86_64; CI checks it on Windows (MSVC) and macOS arm64 / x86_64 (a Mac host and a PC
+// client predict the same trajectories).
+static u64 hash_bits(u64 h, const void *p, size_t n) {
+    for (size_t i = 0; i < n; i++) { h ^= ((const u8 *)p)[i]; h *= 0x100000001B3ull; }
+    return h;
+}
+
+static void test_cross_platform_golden(void) {
+    u64 h = 0xCBF29CE484222325ull;
+    for (int ci = 0; ci < g_data.cart_count; ci++) {
+        const BalCartridge *c = &g_data.cart[ci];
+        for (int model = 0; model < 2; model++) {
+            BalEnv e = bal_env_make(12.0f + 3.0f * (float)ci, 150.0f * (float)model, model ? BAL_DRAG_TABLE : 0);
+            e.wind = v3(2.5f, 0.0f, -1.25f);
+            float speed = c->mv_ref > 0.0f ? c->mv_ref : 400.0f;
+            float zero = bal_zero_angle(c, speed, 100.0f, 0.06f, e.drag_model);
+            h = hash_bits(h, &zero, sizeof(zero));
+            BalBullet b;
+            bal_launch(&b, c, ci, v3(0, 1.5f, 0), v3_norm(v3(1.0f, dm_tanf(zero) + 0.01f * (float)model, 0.03f)), speed, 0xBADC0DEu + (u32)ci, model, false);
+            for (int i = 0; i < 360 && bal_step(&b, c, &e, 1.0f / 60.0f); i++) {
+                h = hash_bits(h, &b.pos, sizeof(vec3));
+                h = hash_bits(h, &b.vel, sizeof(vec3));
+                h = hash_bits(h, &b.yaw, sizeof(float));
+            }
+            float mach = bal_bullet_mach(&b, &e), energy = bal_bullet_energy(&b);
+            h = hash_bits(h, &mach, sizeof(float));
+            h = hash_bits(h, &energy, sizeof(float));
+        }
+    }
+    const u64 golden = 0x1AE223078FDA6D4Bull;
+    printf("  cross-platform trajectory hash %016llx (golden %016llx)\n", (unsigned long long)h, (unsigned long long)golden);
+    CHECK(h == golden, "trajectory hash %016llx differs from the golden %016llx (FMA contraction / libm in a deterministic module?)",
+          (unsigned long long)h, (unsigned long long)golden);
 }
 
 // ------------------------------------------------------------------ surfaces
@@ -505,6 +543,7 @@ int main(void) {
     test_trajectories();
     test_zero_and_mv();
     test_determinism();
+    test_cross_platform_golden();
     test_ricochet();
     test_penetration();
     test_acoustics();
