@@ -388,19 +388,19 @@ coordinates, not only the verdict.
 
 ## 9. Verified (and where)
 
-GitHub Actions `platforms.yml`, branch `claude/macos-port`.
+GitHub Actions `platforms.yml`, branch `claude/macos-port`. First all-green run: run 11 (commit `928133e`), all four jobs.
 
 | What | Linux x86_64 (gcc) | Windows x64 (MSVC) | macOS arm64 (Apple clang, macos-15) | macOS x86_64 (Apple clang, macos-15-intel) |
 |---|---|---|---|---|
 | Full build (game, tools, tests) | yes | yes | yes | yes |
-| Headless unit suite | pass | pass | pass | pass |
+| Headless unit suite (47 tests; `ground_textures` / `phone` / `vgeo_gpu` fail on `main` already, run non-gating) | pass | pass | pass | pass |
 | `test_detmath` golden | = | = | = | = |
 | `test_ballistics` trajectory golden | = | = | = | = |
 | `test_recoil` golden | = | = | = | = |
 | `test_mapgen` vegetation raster golden | = | = | = | = |
 | vgeo GPU harness (`vgeo_raster`, `_stream`, `_skinned`, `_foliage`) | llvmpipe, 64-bit **and** forced 32-bit writes | no GPU on the runner (skipped) | **MoltenVK on the runner's Apple paravirtual GPU**: 32-bit writes, vertex pulling; HW / SW depth within 1e-5 of the CPU reference | no GPU (skipped) |
 | SPIR-V -> MSL (SPIRV-Cross) | 139 / 139 (7 never loaded on Metal) | — | 139 / 139, then `xcrun metal` AIR compile | — |
-| Universal build + Deadground.app (ad-hoc signed) | — | — | built as an artifact | — |
+| Universal build + Deadground.app (ad-hoc signed) | — | — | `deadground` fat x86_64 + arm64 (x86_64 slice built under Rosetta); universal MoltenVK in `Contents/Frameworks`; `codesign --verify --strict` passes; uploaded as the `Deadground-macos-universal` artifact | — |
 
 Local checks in this repository's container (Linux, llvmpipe, Xvfb):
 * The game runs (`--test`, dev room).
@@ -409,11 +409,13 @@ Local checks in this repository's container (Linux, llvmpipe, Xvfb):
 * gcc and clang trees: all tests and goldens equal.
 * `msl_check`: 0 failures.
 
-Bugs only the Mac CI could find, each fixed:
+Bugs only the Mac / clang / MSVC CI could find, each fixed:
 * minih264's Apple arm64 path called a non-existent intrinsic (`vtbl2q_u8`).
 * `ffx_a.h` relied on implicit `abs` (clang errors).
 * A shader function named `bias` collided with `metal::bias` after SPIRV-Cross, so the SW raster pipelines failed to create on Metal.
 * `ru_maxrss` is in bytes on macOS.
+* Jolt's Visual Studio project has no RelWithDebInfo configuration (CI builds Release with that generator).
+* The portable math made the ballistic step 50 % slower; the bit-exact `floor` / `ldexp` / `frexp` brought it back to +25 % (0.25 us per step).
 
 ## 10. Not verified here: needs Mac hardware (manual checklist)
 
