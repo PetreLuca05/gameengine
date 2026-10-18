@@ -113,9 +113,20 @@ jobs:
           export VK_ICD_FILENAMES="$(brew --prefix molten-vk)/etc/vulkan/icd.d/MoltenVK_icd.json"
           export DYLD_FALLBACK_LIBRARY_PATH="$(brew --prefix)/lib"
           printf 'set r_maxfps 60\nwait 120\nscreenshot %s/mvk_devroom.png\nwait 3\nquit\n' "$PWD" > mvk.cfg
-          cd build-mac-arm64/bin && (timeout 600 ./deadground --test --nosound --log "$GITHUB_WORKSPACE/mvk.log" --script "$GITHUB_WORKSPACE/mvk.cfg"; echo "exit $?")
-          grep -E "vulkan:|portability|swapchain|fidelity|error|crash" "$GITHUB_WORKSPACE/mvk.log" | head -40
-          test -f "$GITHUB_WORKSPACE/mvk_devroom.png"
+          # macOS has no timeout(1): a background watchdog. The result goes out as an annotation too
+          # (readable from the check-run API without the full log).
+          W="$GITHUB_WORKSPACE"
+          (cd build-mac-arm64/bin && exec ./deadground --test --nosound --log "$W/mvk.log" --script "$W/mvk.cfg") > "$W/mvk.out" 2>&1 &
+          pid=$!
+          (sleep 600; kill -9 $pid) > /dev/null 2>&1 &
+          wd=$!
+          rc=0; wait $pid || rc=$?
+          kill $wd 2>/dev/null || true
+          tail -40 "$W/mvk.out" || true
+          lines=$(cat "$W/mvk.log" "$W/mvk.out" 2>/dev/null | grep -E "vulkan:|portability|swapchain|fidelity|error|crash|screenshot" | head -12 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}' || true)
+          if [ -f "$W/mvk_devroom.png" ]; then shot=yes; else shot=no; fi
+          echo "::notice title=MoltenVK game (exit $rc, screenshot $shot)::${lines:-no log lines}"
+          test "$shot" = yes
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -123,6 +134,7 @@ jobs:
           path: |
             mvk_devroom.png
             mvk.log
+            mvk.out
           retention-days: 14
       - name: SPIR-V -> MSL -> AIR (SPIRV-Cross + xcrun metal)
         if: always()
