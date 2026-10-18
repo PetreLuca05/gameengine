@@ -31,6 +31,7 @@ void screens_footer_hint(GuiRect r, const char *text);   // bottom-right key hin
 
 // Settings (scr_settings.c)
 void settings_open(int tab);
+void settings_graphics_page(int page);     // Graphics sub-tab: 0 Normal, 1 Debug (shown in developer mode only)
 bool settings_draw(GuiRect r);             // true = close
 void settings_tick(float dt);              // display "keep?" countdown
 void settings_confirm_result(bool keep);

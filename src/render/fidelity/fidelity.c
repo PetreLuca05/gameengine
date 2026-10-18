@@ -668,6 +668,90 @@ int fid_check_table(int level, char *report, int size) {
 
 int fid_custom_count(void) { return fid_check_table(S.level, NULL, 0); }
 
+// ------------------------------------------------------------------ quality groups
+
+// Anti-aliasing, render scale, sharpening and motion blur have their own Normal rows; the lens
+// finish (flare, dirt, chromatic aberration, vignette, grain), exposure, the tonemapper, the
+// renderer switch, character / scope detail stay with the overall level (and the Debug tab).
+static const int k_g_post[] = { FF_AO, FF_CONTACT_SHADOWS, FF_SSR, FF_SSGI, FF_PUDDLE_REFLECTIONS, FF_VOLUMETRICS, FF_VOL_LOCAL_LIGHTS,
+                                FF_DOF, FF_DOF_QUALITY, FF_ADS_DOF, FF_BLOOM, FF_BLOOM_QUALITY };
+static const int k_g_shadows[] = { FF_SHADOWS, FF_SHADOW_RESOLUTION, FF_SHADOW_CASCADES, FF_SHADOW_DISTANCE, FF_SOFT_SHADOW_QUALITY,
+                                   FF_SHADOW_MIN_RADIUS, FF_LIGHT_SHADOWS, FF_LIGHT_SHADOW_QUALITY, FF_CLOUD_SHADOWS, FF_MOON_SHADOWS };
+static const int k_g_textures[] = { FF_TEXTURE_QUALITY, FF_ANISO, FF_TERRAIN_QUALITY };
+static const int k_g_effects[] = { FF_VFX_QUALITY, FF_VFX_LIGHTING, FF_DECAL_MAX, FF_PRECIP_QUALITY, FF_WATER, FF_LENS_DROPS };
+static const int k_g_foliage[] = { FF_FOLIAGE_DENSITY, FF_FOLIAGE_WIND };
+static const int k_g_view[] = { FF_LOD_BIAS, FF_IMPOSTOR_PX, FF_VGEO_ERROR_PX, FF_VGEO_SHADOW_ERROR_PX, FF_VGEO_LOD_PX };
+static const struct { const char *id; const int *f; int n; } k_groups[FG_COUNT] = {
+    [FG_POST] = { "post", k_g_post, ARRAY_COUNT(k_g_post) },
+    [FG_SHADOWS] = { "shadows", k_g_shadows, ARRAY_COUNT(k_g_shadows) },
+    [FG_TEXTURES] = { "textures", k_g_textures, ARRAY_COUNT(k_g_textures) },
+    [FG_EFFECTS] = { "effects", k_g_effects, ARRAY_COUNT(k_g_effects) },
+    [FG_FOLIAGE] = { "foliage", k_g_foliage, ARRAY_COUNT(k_g_foliage) },
+    [FG_VIEW_DISTANCE] = { "view_distance", k_g_view, ARRAY_COUNT(k_g_view) },
+};
+
+int fid_group_features(int g, const int **f) {
+    if (g < 0 || g >= FG_COUNT) { if (f) *f = NULL; return 0; }
+    if (f) *f = k_groups[g].f;
+    return k_groups[g].n;
+}
+const char *fid_group_id(int g) { return g >= 0 && g < FG_COUNT ? k_groups[g].id : "?"; }
+
+// A feature the current level locks without an off state (render scale style) takes no part.
+static bool group_locked(int f) {
+    FidBounds b = fid_bounds(S.level, fid_era(), f);
+    return b.avail == FID_UNAVAILABLE && !k_features[f].has_off;
+}
+
+bool fid_group_tier_allowed(int g, int tier, int *req) {
+    if (req) *req = -1;
+    if (g < 0 || g >= FG_COUNT || tier < 0 || tier >= FID_LEVELS) return false;
+    int era = fid_era(), need = 0;
+    for (int i = 0; i < k_groups[g].n; i++) {
+        int f = k_groups[g].f[i];
+        if (group_locked(f)) continue;
+        int l = fid_min_level_for(era, f, fid_bounds(tier, era, f).def);
+        if (l < 0) return false;
+        need = DG_MAX(need, l);
+    }
+    if (req) *req = need;
+    return need <= S.level;
+}
+
+// A user change (tracked as the user's choice, clamped by the bound hook like a menu set).
+void fid_group_apply(int g, int tier) {
+    if (!fid_loaded() || g < 0 || g >= FG_COUNT || tier < 0 || tier >= FID_LEVELS) return;
+    int era = fid_era();
+    for (int i = 0; i < k_groups[g].n; i++) {
+        int f = k_groups[g].f[i];
+        if (!S.cv[f] || group_locked(f)) continue;
+        float v = fid_bounds(tier, era, f).def;
+        if (fabsf(v - fid_cvar_value(f)) < 1e-5f) continue;
+        char buf[32];
+        fmt_value(&k_features[f], v, buf, sizeof(buf));
+        cvar_set_cv(S.cv[f], buf);
+    }
+}
+
+static bool group_matches(int g, int tier) {
+    int era = fid_era();
+    for (int i = 0; i < k_groups[g].n; i++) {
+        int f = k_groups[g].f[i];
+        float v = fid_cvar_value(f);
+        if (isnan(v) || group_locked(f)) continue;
+        if (fabsf(v - fid_clamp_current(f, fid_bounds(tier, era, f).def)) > 1e-3f) return false;
+    }
+    return true;
+}
+
+int fid_group_detect(int g) {
+    if (!fid_loaded() || g < 0 || g >= FG_COUNT) return -1;
+    if (group_matches(g, S.level)) return S.level;
+    for (int t = FID_LEVELS - 1; t >= 0; t--)
+        if (fid_group_tier_allowed(g, t, NULL) && group_matches(g, t)) return t;
+    return -1;
+}
+
 // ------------------------------------------------------------------ passes
 
 bool fid_pass_is_post(const char *n) {

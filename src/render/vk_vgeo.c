@@ -1076,8 +1076,16 @@ static const EraDef k_eras[4] = {
 };
 
 // Compared after the Engine Fidelity bounds (docs/ENGINE_FIDELITY.md): Low scales the era's error
-// thresholds, caps its foliage; the era still reads back as itself.
-static bool era_eq(int f, float v, float era_v) { return fabsf(v - fid_clamp_current(f, era_v)) < 1e-4f; }
+// thresholds, caps its foliage; the era still reads back as itself. So does a lower level's own value
+// of the era (Settings > Graphics > Normal: the Foliage / View distance qualities, fid_group_apply).
+static bool era_eq(int f, float v, float era_v) {
+    if (fabsf(v - fid_clamp_current(f, era_v)) < 1e-4f) return true;
+    for (int l = 0; l < fid_level(); l++) {
+        FidBounds b = fid_bounds(l, fid_era(), f);
+        if (fabsf(v - fid_clamp_current(f, fid_clamp(&b, fid_feature(f), era_v))) < 1e-4f) return true;
+    }
+    return false;
+}
 
 static int era_detect(void) {
     for (int e = 0; e < 4; e++) {
