@@ -334,7 +334,7 @@ static VkPipeline build_pipeline(const PipeDesc *d) {
     gp.pDynamicState = &dy;
     gp.layout = d->layout;
     VkPipeline pipe = VK_NULL_HANDLE;
-    VkResult res = vkCreateGraphicsPipelines(R->device, VK_NULL_HANDLE, 1, &gp, NULL, &pipe);
+    VkResult res = vkCreateGraphicsPipelines(R->device, R->pipeline_cache, 1, &gp, NULL, &pipe);
     vkDestroyShaderModule(R->device, vs, NULL);
     if (fs) vkDestroyShaderModule(R->device, fs, NULL);
     if (res != VK_SUCCESS) { log_error("pipeline creation failed (%s/%s): %d", d->vert, d->frag, (int)res); return VK_NULL_HANDLE; }

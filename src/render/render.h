@@ -605,6 +605,8 @@ typedef struct RenderShadowInfo {
 } RenderShadowInfo;
 void render_shadow_info(RenderShadowInfo *out);
 const char *render_device_name(void);
+u32 render_device_vendor(void);          // VkPhysicalDeviceProperties.vendorID (0x106B: Apple)
+bool render_device_portability(void);    // a VK_KHR_portability_subset device (MoltenVK)
 
 DG_INLINE u32 rgba8(float r, float g, float b, float a) {
     u32 R = (u32)(saturate(r) * 255.0f + 0.5f), G = (u32)(saturate(g) * 255.0f + 0.5f);

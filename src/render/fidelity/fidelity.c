@@ -97,6 +97,32 @@ int fid_feature_by_cvar(const char *cvar) {
 }
 const char *fid_level_id(int l) { return l >= 0 && l < FID_LEVELS ? k_level_ids[l] : "?"; }
 const char *fid_level_name(int l) { return l >= 0 && l < FID_LEVELS ? k_level_names[l] : "?"; }
+FidGpuFamily fid_gpu_family(u32 vendor_id, const char *name, bool portability) {
+    if (vendor_id == 0x106B) {
+        // Apple GPUs: base M-series chips (7-10 GPU cores) vs the Pro / Max / Ultra parts
+        if (name && (strstr(name, " Pro") || strstr(name, " Max") || strstr(name, " Ultra"))) return FID_GPU_APPLE_PRO;
+        return FID_GPU_APPLE;
+    }
+    if (!portability) return FID_GPU_OTHER;
+    if (vendor_id == 0x8086) return FID_GPU_MAC_INTEL;
+    if (vendor_id == 0x1002) return FID_GPU_MAC_AMD;
+    return FID_GPU_OTHER;
+}
+
+int fid_gpu_level_cap(FidGpuFamily f) {
+    switch (f) {
+    case FID_GPU_APPLE: return FID_HIGH;        // M1 / M2 / M3 / M4: vgeo through the 32-bit writes
+    case FID_GPU_MAC_INTEL: return FID_MEDIUM;  // UHD 630 / Iris: tier-1 argument buffers, classic renderer
+    case FID_GPU_MAC_AMD: return FID_HIGH;      // Radeon Pro 5xxx / Vega: no 64-bit atomics either
+    default: return FID_MODERN;
+    }
+}
+
+const char *fid_gpu_family_name(FidGpuFamily f) {
+    static const char *names[FID_GPU_FAMILIES] = { "other", "Apple", "Apple Pro / Max / Ultra", "Intel (Mac)", "AMD (Mac)" };
+    return f >= 0 && f < FID_GPU_FAMILIES ? names[f] : "?";
+}
+
 const char *fid_era_id(int e) { return e >= 0 && e < FID_ERAS ? k_era_ids[e] : "?"; }
 int fid_era_from_cvar(int r_era) { return r_era >= 0 && r_era < FID_ERAS ? r_era : FID_ERA_MODERN; }
 

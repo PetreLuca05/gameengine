@@ -267,7 +267,7 @@ VkPipeline post_compute_pipe(const char *name) {
     ci.stage.module = m;
     ci.stage.pName = "main";
     ci.layout = P.pl;
-    VkResult r = vkCreateComputePipelines(R->device, VK_NULL_HANDLE, 1, &ci, NULL, &p->pipe);
+    VkResult r = vkCreateComputePipelines(R->device, R->pipeline_cache, 1, &ci, NULL, &p->pipe);
     vkDestroyShaderModule(R->device, m, NULL);
     if (r != VK_SUCCESS) { log_error("post: compute pipeline %s failed (%d)", name, (int)r); p->pipe = VK_NULL_HANDLE; }
     return p->pipe;
@@ -346,7 +346,7 @@ VkPipeline post_graphics_pipe(const char *frag, VkFormat color, int blend) {
     gp.pColorBlendState = &cb;
     gp.pDynamicState = &dy;
     gp.layout = P.pl;
-    VkResult r = vkCreateGraphicsPipelines(R->device, VK_NULL_HANDLE, 1, &gp, NULL, &p->pipe);
+    VkResult r = vkCreateGraphicsPipelines(R->device, R->pipeline_cache, 1, &gp, NULL, &p->pipe);
     vkDestroyShaderModule(R->device, vs, NULL);
     vkDestroyShaderModule(R->device, fs, NULL);
     if (r != VK_SUCCESS) { log_error("post: pipeline %s failed (%d)", frag, (int)r); p->pipe = VK_NULL_HANDLE; }

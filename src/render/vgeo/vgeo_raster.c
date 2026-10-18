@@ -47,7 +47,7 @@ static VkPipeline graphics_pipeline(VgRaster *r, const char *first, VkShaderStag
         gi.pMultisampleState = &ms;
         gi.pDynamicState = &ds;
         gi.layout = r->pl;
-        if (vkCreateGraphicsPipelines(c->device, VK_NULL_HANDLE, 1, &gi, NULL, &p) != VK_SUCCESS) {
+        if (vkCreateGraphicsPipelines(c->device, c->pipeline_cache, 1, &gi, NULL, &p) != VK_SUCCESS) {
             log_error("vgeo: pipeline %s failed", first);
             p = VK_NULL_HANDLE;
         }

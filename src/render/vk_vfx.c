@@ -215,7 +215,7 @@ static VkPipeline compute_pipe(const char *name) {
     ci.stage.pName = "main";
     ci.layout = X.comp_layout;
     VkPipeline p = VK_NULL_HANDLE;
-    VkResult r = vkCreateComputePipelines(R->device, VK_NULL_HANDLE, 1, &ci, NULL, &p);
+    VkResult r = vkCreateComputePipelines(R->device, R->pipeline_cache, 1, &ci, NULL, &p);
     vkDestroyShaderModule(R->device, m, NULL);
     if (r != VK_SUCCESS) { log_error("vfx: compute pipeline %s failed (%d)", name, (int)r); return VK_NULL_HANDLE; }
     return p;
@@ -301,7 +301,7 @@ static VkPipeline graphics_pipe(const char *vs_name, const char *fs_name, VkPipe
     gp.pDynamicState = &dy;
     gp.layout = layout;
     VkPipeline p = VK_NULL_HANDLE;
-    VkResult r = vkCreateGraphicsPipelines(R->device, VK_NULL_HANDLE, 1, &gp, NULL, &p);
+    VkResult r = vkCreateGraphicsPipelines(R->device, R->pipeline_cache, 1, &gp, NULL, &p);
     vkDestroyShaderModule(R->device, vs, NULL);
     vkDestroyShaderModule(R->device, fs, NULL);
     if (r != VK_SUCCESS) { log_error("vfx: pipeline %s/%s failed (%d)", vs_name, fs_name, (int)r); return VK_NULL_HANDLE; }

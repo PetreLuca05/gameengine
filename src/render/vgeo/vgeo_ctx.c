@@ -88,7 +88,7 @@ VkPipeline vgc_compute_pipeline(const VgContext *c, VkPipelineLayout layout, con
     ci.stage.pName = "main";
     ci.layout = layout;
     VkPipeline p = VK_NULL_HANDLE;
-    if (vkCreateComputePipelines(c->device, VK_NULL_HANDLE, 1, &ci, NULL, &p) != VK_SUCCESS) log_error("vgeo: pipeline %s failed", shader);
+    if (vkCreateComputePipelines(c->device, c->pipeline_cache, 1, &ci, NULL, &p) != VK_SUCCESS) log_error("vgeo: pipeline %s failed", shader);
     vkDestroyShaderModule(c->device, m, NULL);
     return p;
 }

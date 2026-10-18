@@ -184,6 +184,12 @@ static void detect_done(void) {
     int rec = FID_OFF;
     for (int l = FID_MODERN; l >= FID_OFF; l--)
         if (F.level_ms[l] > 0.0f && F.level_ms[l] <= target) { rec = l; break; }
+    // the GPU family's cap (Macs: docs/PLATFORM_MACOS.md "Fidelity on Macs")
+    FidGpuFamily fam = fid_gpu_family(render_device_vendor(), render_device_name(), render_device_portability());
+    if (rec > fid_gpu_level_cap(fam)) {
+        log_info("fidelity_detect: %s GPU: recommendation capped at %s (measured %s)", fid_gpu_family_name(fam), fid_level_name(fid_gpu_level_cap(fam)), fid_level_name(rec));
+        rec = fid_gpu_level_cap(fam);
+    }
     cvar_set_int(F.recommended, rec);
     for (int l = 0; l < FID_LEVELS; l++) store_bench_ms(l, F.level_ms[l]);
     log_info("fidelity_detect: off %.2f, low %.2f, medium %.2f, high %.2f, modern %.2f ms -> recommended %s (budget %.1f ms at %.0f fps)",

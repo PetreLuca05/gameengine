@@ -2850,3 +2850,5 @@ void render_shadow_info(RenderShadowInfo *o) {
     o->unrendered = R->shadow_unrendered;
 }
 const char *render_device_name(void) { return R->gpu_props.deviceName; }
+u32 render_device_vendor(void) { return R->gpu_props.vendorID; }
+bool render_device_portability(void) { return R->portability; }

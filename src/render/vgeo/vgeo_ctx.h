@@ -19,6 +19,7 @@ typedef struct VgContext {
     float timestamp_period;      // ns per tick (VkPhysicalDeviceLimits)
     // "vgeo/vg_traverse.comp" -> module (NULL on failure); the caller owns the returned module.
     VkShaderModule (*load_shader)(const char *name);
+    VkPipelineCache pipeline_cache;   // the renderer's (VK_NULL_HANDLE: none)
     // Capabilities (the creator enables them on the device when present).
     bool int64_atomics;          // shaderBufferInt64Atomics: one-pass visibility writes; else the 32-bit two-phase writes (vgeo_raster.h)
     bool vis32;                  // force the 32-bit visibility writes (r_vgeo_vis32, tests)

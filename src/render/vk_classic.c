@@ -218,7 +218,7 @@ static VkPipeline cl_pipeline(const char *vert, const char *frag, bool impostor,
     gp.pDynamicState = &dy;
     gp.layout = C.layout;
     VkPipeline p = VK_NULL_HANDLE;
-    if (vkCreateGraphicsPipelines(R->device, VK_NULL_HANDLE, 1, &gp, NULL, &p) != VK_SUCCESS) log_error("classic: pipeline %s / %s failed", vert, frag ? frag : "-");
+    if (vkCreateGraphicsPipelines(R->device, R->pipeline_cache, 1, &gp, NULL, &p) != VK_SUCCESS) log_error("classic: pipeline %s / %s failed", vert, frag ? frag : "-");
     vkDestroyShaderModule(R->device, vs, NULL);
     if (fs) vkDestroyShaderModule(R->device, fs, NULL);
     return p;

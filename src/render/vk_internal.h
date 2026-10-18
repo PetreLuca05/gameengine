@@ -258,6 +258,7 @@ typedef struct Renderer {
     bool hdr_supported, swap_hdr;
     bool vg_scalar, vg_int64, vg_atomic64, vg_indirect_count, vg_descriptor_indexing, vg_mesh_shader;   // vgeo device features
     bool portability;            // VK_KHR_portability_subset device (MoltenVK; docs/PLATFORM_MACOS.md)
+    VkPipelineCache pipeline_cache;   // every renderer pipeline; persisted in the pref dir (vk_device.c)
     VkDriverId driver_id;        // VK_DRIVER_ID_MOLTENVK on macOS
     int hdr_output_applied;
     float max_anisotropy;

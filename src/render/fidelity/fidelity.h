@@ -65,6 +65,16 @@ int fid_feature_find(const char *id);
 int fid_feature_by_cvar(const char *cvar);
 const char *fid_level_id(int level);          // "off" .. "modern"
 const char *fid_level_name(int level);        // "Off" .. "Modern"
+
+// GPU families for the auto-detect (docs/PLATFORM_MACOS.md "Fidelity on Macs"): the measured
+// recommendation is capped per family, so a short benchmark on a thermally fresh Mac (or with the
+// coarse MoltenVK timestamps) cannot recommend more than the family sustains.
+typedef enum FidGpuFamily { FID_GPU_OTHER, FID_GPU_APPLE, FID_GPU_APPLE_PRO, FID_GPU_MAC_INTEL, FID_GPU_MAC_AMD, FID_GPU_FAMILIES } FidGpuFamily;
+// From VkPhysicalDeviceProperties (vendorID, deviceName) and whether the device is a portability
+// implementation (MoltenVK): Apple 0x106B (M1..M4, Pro / Max / Ultra), Intel / AMD behind MoltenVK.
+FidGpuFamily fid_gpu_family(u32 vendor_id, const char *device_name, bool portability);
+int fid_gpu_level_cap(FidGpuFamily family);   // the highest level the auto-detect recommends
+const char *fid_gpu_family_name(FidGpuFamily family);
 const char *fid_level_desc(int level);        // one line (JSON "description")
 float fid_level_budget_ms(int level);         // 1080p mid-range GPU budget
 bool fid_level_post(int level);               // false: no post-processing (direct output)

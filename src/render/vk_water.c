@@ -196,7 +196,7 @@ static VkPipeline surface_pipe(const char *frag, bool velocity) {
     gp.pDynamicState = &dy;
     gp.layout = W.layout;
     VkPipeline p = VK_NULL_HANDLE;
-    VkResult r = vkCreateGraphicsPipelines(R->device, VK_NULL_HANDLE, 1, &gp, NULL, &p);
+    VkResult r = vkCreateGraphicsPipelines(R->device, R->pipeline_cache, 1, &gp, NULL, &p);
     vkDestroyShaderModule(R->device, vs, NULL);
     vkDestroyShaderModule(R->device, fs, NULL);
     if (r != VK_SUCCESS) { log_error("water: pipeline %s failed (%d)", frag, (int)r); return VK_NULL_HANDLE; }

@@ -394,7 +394,22 @@ static void test_malformed(void) {
     CHECK(fid_load_dir("assets/render/fidelity", ok_err, sizeof(ok_err)), "reload: %s", ok_err);
 }
 
+// GPU families of the auto-detect cap (docs/PLATFORM_MACOS.md): MoltenVK device names / vendor ids.
+static void test_gpu_families(void) {
+    CHECK(fid_gpu_family(0x106B, "Apple M1", true) == FID_GPU_APPLE, "M1");
+    CHECK(fid_gpu_family(0x106B, "Apple M3 Max", true) == FID_GPU_APPLE_PRO, "M3 Max");
+    CHECK(fid_gpu_family(0x106B, "Apple M2 Ultra", true) == FID_GPU_APPLE_PRO, "M2 Ultra");
+    CHECK(fid_gpu_family(0x106B, "Apple M4 Pro", true) == FID_GPU_APPLE_PRO, "M4 Pro");
+    CHECK(fid_gpu_family(0x8086, "Intel(R) UHD Graphics 630", true) == FID_GPU_MAC_INTEL, "Intel Mac");
+    CHECK(fid_gpu_family(0x1002, "AMD Radeon Pro 5500M", true) == FID_GPU_MAC_AMD, "AMD Mac");
+    CHECK(fid_gpu_family(0x8086, "Intel(R) Arc(TM) A770", false) == FID_GPU_OTHER, "Intel on Windows / Linux");
+    CHECK(fid_gpu_family(0x10DE, "NVIDIA GeForce RTX 3060 Ti", false) == FID_GPU_OTHER, "NVIDIA");
+    CHECK(fid_gpu_level_cap(FID_GPU_MAC_INTEL) == FID_MEDIUM && fid_gpu_level_cap(FID_GPU_APPLE) == FID_HIGH, "caps");
+    CHECK(fid_gpu_level_cap(FID_GPU_OTHER) == FID_MODERN && fid_gpu_level_cap(FID_GPU_APPLE_PRO) == FID_MODERN, "no cap elsewhere");
+}
+
 int main(void) {
+    test_gpu_families();
     cvar_system_init();
     char err[256] = "";
     if (!fid_load_dir("assets/render/fidelity", err, sizeof(err))) { printf("FAIL tables: %s\n", err); return 1; }

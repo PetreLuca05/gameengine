@@ -1,6 +1,8 @@
 // Instance, device, swapchain and render target management.
 #include "vk_internal.h"
 #include "vk_portability.h"
+#include "core/platform.h"
+#include <stdio.h>
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
 #include <stdlib.h>
@@ -59,6 +61,59 @@ static void log_portability_subset(VkPhysicalDevice gpu) {
              "beyondStride %d, constantAlpha %d (none used; docs/PLATFORM_MACOS.md)",
              ps.triangleFans, ps.pointPolygons, ps.events, ps.imageViewFormatSwizzle, ps.samplerMipLodBias, ps.vertexAttributeAccessBeyondStride,
              ps.constantAlphaColorBlendFactors);
+}
+
+// Pipeline cache in the pref dir (docs/PLATFORM_MACOS.md "Shader cache"): every pipeline of the
+// renderer is created through it. On MoltenVK an entry holds the SPIRV-Cross output (MSL) of the
+// pipeline's shaders, so later launches skip the translation (Metal keeps its own cache of the
+// compiled MSL); other drivers keep their usual binaries. Data from another GPU / driver is checked
+// against the header and dropped (the driver would ignore it anyway). --test runs neither read nor
+// write it (reproducible test timings, no stray files).
+static bool test_run(void) {
+    for (int i = 1; i < g_engine.argc; i++)
+        if (!strcmp(g_engine.argv[i], "--test")) return true;
+    return false;
+}
+
+static void pipeline_cache_path(char *buf, size_t n) { snprintf(buf, n, "%spipeline_cache.bin", platform_pref_dir()); }
+
+static void pipeline_cache_load(void) {
+    char path[1024];
+    pipeline_cache_path(path, sizeof(path));
+    size_t size = 0;
+    char *data = test_run() ? NULL : platform_read_file(path, &size);
+    VkPipelineCacheCreateInfo ci = { VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO };
+    // header (VkPipelineCacheHeaderVersionOne): length, version, vendor, device, UUID
+    if (data && size >= 32) {
+        u32 vendor, device;
+        memcpy(&vendor, data + 8, 4);
+        memcpy(&device, data + 12, 4);
+        if (vendor == R->gpu_props.vendorID && device == R->gpu_props.deviceID && !memcmp(data + 16, R->gpu_props.pipelineCacheUUID, VK_UUID_SIZE)) {
+            ci.initialDataSize = size;
+            ci.pInitialData = data;
+        }
+    }
+    if (vkCreatePipelineCache(R->device, &ci, NULL, &R->pipeline_cache) != VK_SUCCESS) {
+        ci.initialDataSize = 0;
+        ci.pInitialData = NULL;
+        if (vkCreatePipelineCache(R->device, &ci, NULL, &R->pipeline_cache) != VK_SUCCESS) R->pipeline_cache = VK_NULL_HANDLE;
+    }
+    if (ci.initialDataSize) log_info("vulkan: pipeline cache %s (%zu KB)", path, size / 1024);
+    free(data);
+}
+
+static void pipeline_cache_save(void) {
+    if (!R->pipeline_cache) return;
+    size_t size = 0;
+    if (!test_run() && vkGetPipelineCacheData(R->device, R->pipeline_cache, &size, NULL) == VK_SUCCESS && size) {
+        void *data = malloc(size);
+        char path[1024];
+        pipeline_cache_path(path, sizeof(path));
+        if (vkGetPipelineCacheData(R->device, R->pipeline_cache, &size, data) == VK_SUCCESS) platform_write_file(path, data, size);
+        free(data);
+    }
+    vkDestroyPipelineCache(R->device, R->pipeline_cache, NULL);
+    R->pipeline_cache = VK_NULL_HANDLE;
 }
 
 bool vkd_create_device(SDL_Window *window) {
@@ -335,10 +390,12 @@ bool vkd_create_device(SDL_Window *window) {
     aci.instance = R->instance;
     aci.pVulkanFunctions = &vf;
     VK_CHECK(vmaCreateAllocator(&aci, &R->vma));
+    pipeline_cache_load();
     return true;
 }
 
 void vkd_destroy_device(void) {
+    pipeline_cache_save();
     if (R->vma) vmaDestroyAllocator(R->vma);
     if (R->device) vkDestroyDevice(R->device, NULL);
     if (R->surface) vkDestroySurfaceKHR(R->instance, R->surface, NULL);

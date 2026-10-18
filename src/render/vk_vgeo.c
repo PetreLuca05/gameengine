@@ -227,7 +227,7 @@ static VkPipeline gfx_pipeline(const char *vert, const char *frag, const VkForma
     gp.pDynamicState = &dy;
     gp.layout = G.gfx_layout;
     VkPipeline p = VK_NULL_HANDLE;
-    if (vkCreateGraphicsPipelines(R->device, VK_NULL_HANDLE, 1, &gp, NULL, &p) != VK_SUCCESS) log_error("vgeo: pipeline %s / %s failed", vert, frag ? frag : "-");
+    if (vkCreateGraphicsPipelines(R->device, R->pipeline_cache, 1, &gp, NULL, &p) != VK_SUCCESS) log_error("vgeo: pipeline %s / %s failed", vert, frag ? frag : "-");
     vkDestroyShaderModule(R->device, vs, NULL);
     if (fs) vkDestroyShaderModule(R->device, fs, NULL);
     return p;
@@ -418,6 +418,7 @@ void vkg_init(void) {
     c->frames = FRAMES_IN_FLIGHT;
     c->timestamp_period = R->gpu_props.limits.timestampPeriod;
     c->load_shader = vkp_load_shader;
+    c->pipeline_cache = R->pipeline_cache;
     c->int64_atomics = R->vg_atomic64;
     // The MoltenVK paths on any GPU (docs/PLATFORM_MACOS.md): read at startup, before the config.
     c->vis32 = startup_flag("--vgeo-vis32", "DG_VGEO_VIS32");
