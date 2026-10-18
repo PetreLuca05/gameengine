@@ -34,10 +34,12 @@ jobs:
       - name: Configure
         run: cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo
       - name: Build
-        run: cmake --build build 2>&1 | tee build.log; test ${PIPESTATUS[0]} -eq 0
+        run: |
+          cmake --build build 2>&1 | tee build.log; test ${PIPESTATUS[0]} -eq 0
       - name: Build errors
         if: failure()
-        run: grep -E "error[: ]" build.log | grep -v "validity error" | sort -u | head -60
+        run: |
+          grep -E "error[: ]" build.log | grep -v "validity error" | sort -u | head -60
       - name: Tests
         run: ctest --test-dir build --output-on-failure -j 4 -E "$(tools/ci/known_failures.sh linux)"
       - name: vgeo GPU tests, 32-bit visibility writes (MoltenVK's path)
@@ -67,11 +69,13 @@ jobs:
         run: python -m pip install numpy pillow
       - name: Build
         shell: bash
-        run: cmake --build build --config RelWithDebInfo --parallel 2>&1 | tee build.log; test ${PIPESTATUS[0]} -eq 0
+        run: |
+          cmake --build build --config RelWithDebInfo --parallel 2>&1 | tee build.log; test ${PIPESTATUS[0]} -eq 0
       - name: Build errors
         if: failure()
         shell: bash
-        run: grep -E "error (C|LNK)[0-9]+|fatal error" build.log | sort -u | head -60
+        run: |
+          grep -E "error (C|LNK)[0-9]+|fatal error" build.log | sort -u | head -60
       - name: Tests
         shell: bash
         run: ctest --test-dir build -C RelWithDebInfo --output-on-failure -j 4 -E "$(tools/ci/known_failures.sh windows)"
@@ -91,10 +95,12 @@ jobs:
       - name: Python packages (ground texture tests)
         run: python3 -m pip install --break-system-packages numpy pillow || python3 -m pip install numpy pillow
       - name: Build (arm64)
-        run: cmake --build build-mac-arm64 2>&1 | tee build.log; test ${PIPESTATUS[0]} -eq 0
+        run: |
+          cmake --build build-mac-arm64 2>&1 | tee build.log; test ${PIPESTATUS[0]} -eq 0
       - name: Build errors
         if: failure()
-        run: grep -E "error:" build.log | sort -u | head -60
+        run: |
+          grep -E "error:" build.log | sort -u | head -60
       - name: Architecture
         run: lipo -info build-mac-arm64/bin/deadground && otool -L build-mac-arm64/bin/deadground
       - name: Tests (arm64)
@@ -141,10 +147,12 @@ jobs:
       - name: Python packages (ground texture tests)
         run: python3 -m pip install --break-system-packages numpy pillow || python3 -m pip install numpy pillow
       - name: Build (x86_64)
-        run: cmake --build build-mac-x86_64 2>&1 | tee build.log; test ${PIPESTATUS[0]} -eq 0
+        run: |
+          cmake --build build-mac-x86_64 2>&1 | tee build.log; test ${PIPESTATUS[0]} -eq 0
       - name: Build errors
         if: failure()
-        run: grep -E "error:" build.log | sort -u | head -60
+        run: |
+          grep -E "error:" build.log | sort -u | head -60
       - name: Architecture
         run: lipo -info build-mac-x86_64/bin/deadground
       - name: Tests (x86_64)
