@@ -1585,7 +1585,7 @@ static void compute_matrices(FrameData *fd) {
             // Windows light as the sky darkens (sun elevation), a few stay lit by day.
             float sy = atmo ? e->sun_true_dir.y : 0.5f;
             float night = saturate((0.12f - sy) / 0.24f);
-            fd->city = v4(g_city.base * (0.06f + 0.94f * night), g_city.intensity, g_city.center.x, g_city.center.y);
+            fd->city = v4(g_city.base * night, g_city.intensity, g_city.center.x, g_city.center.y);
             fd->city_power[0] = v4(g_city.power[0], g_city.power[1], g_city.power[2], g_city.power[3]);
             fd->city_power[1] = v4(g_city.power[4], g_city.power[5], g_city.power[6], g_city.power[7]);
         }

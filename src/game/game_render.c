@@ -408,6 +408,20 @@ static void render_entity(World *w, int i, float alpha, bool focused) {
     }
     switch (t) {
     case ET_DOOR: {
+        if ((v->color >> 24) < 0xFF) {
+            // Glass leaf (building kit sliders, "glass": true): a pane in the glass bucket and a metal stile.
+            Material gm = mat_from(v->color | 0xFF000000u, 0.03f, MAT_GLASS | MAT_NO_SHADOW | hl);
+            gm.color.w = 0.12f;   // as the kit's glass set
+            draw_shape(VIS_BOX, v3(v->half.x - 0.03f, v->half.y - 0.03f, 0.008f), pos, rot, gm);
+            Material fm = mat_from(rgba8(0.18f, 0.19f, 0.2f, 1), 0.4f, hl);
+            fm.metallic = 0.8f;
+            for (int sd = -1; sd <= 1; sd += 2) {
+                draw_box_local(pos, rot, v3((float)sd * (v->half.x - 0.015f), 0, 0), v3(0.015f, v->half.y, v->half.z), fm);
+                draw_box_local(pos, rot, v3(0, (float)sd * (v->half.y - 0.015f), 0), v3(v->half.x, 0.015f, v->half.z), fm);
+            }
+            draw_box_local(pos, rot, v3(w->door[i].knob_local.x, w->door[i].knob_local.y, 0), v3(0.012f, 0.12f, v->half.z + 0.02f), fm);
+            break;
+        }
         draw_shape(VIS_BOX, v->half, pos, rot, m);
         // Knobs on both sides.
         Material km = mat_from(rgba8(0.75f, 0.68f, 0.3f, 1), 0.3f, hl);

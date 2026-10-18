@@ -5,7 +5,8 @@
 //
 // Instance: {"piece": id, "pos": [x, y, z], "yaw": deg, "name": "...", <entity params>, "mat": {...}}
 // Prefab use: {"prefab": name, "pos", "yaw", "prefix": "10c_" (child names), "override": {child name: {params}},
-//              "batch": true (static batching: the children merge into big meshes, no entities)}
+//              "batch": true (static batching: the children merge into big meshes, no entities,
+//              no collision unless a child says "collide": true)}
 #ifndef DG_KIT_LAYOUT_H
 #define DG_KIT_LAYOUT_H
 

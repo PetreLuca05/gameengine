@@ -367,7 +367,9 @@ static void spawn_hooked(World *w, const KitInst *in, const cJSON *entry) {
         const cJSON *key = param(entry, def, "key");
         u16 key_item = cJSON_IsString(key) ? item_find(w->items, key->valuestring) : 0;
         const cJSON *lk = param(entry, def, "locked");
-        e = spawn_door(w, pos, yaw, jf(def, "width", 0.88f), jf(def, "height", 2.08f), cJSON_IsTrue(lk), key_item, rgba(jv3(entry, "color", jv3(def, "color", v3(0.92f, 0.9f, 0.86f)))));
+        u32 col = rgba(jv3(entry, "color", jv3(def, "color", v3(0.92f, 0.9f, 0.86f))));
+        if (cJSON_IsTrue(param(entry, def, "glass"))) col = (col & 0x00FFFFFFu) | 0x60000000u;   // alpha < 1: a glass leaf (game_render.c)
+        e = spawn_door(w, pos, yaw, jf(def, "width", 0.88f), jf(def, "height", 2.08f), cJSON_IsTrue(lk), key_item, col);
     } else if (!strcmp(type, "light")) {
         const cJSON *on = param(entry, def, "on");
         e = spawn_light(w, pos, jv3(entry, "color", jv3(def, "color", v3(1.0f, 0.92f, 0.8f))), jf(entry, "radius", jf(def, "radius", 6)), jf(entry, "intensity", jf(def, "intensity", 6)),
@@ -428,7 +430,7 @@ void kit_world_level(World *w, const cJSON *root) {
         in->yaw = pl->yaw * DG_DEG2RAD;
         in->tint = jv3(pl->entry, "tint", v3(1, 1, 1));
         in->batch = pl->batch;
-        in->collide = jb(pl->entry, "collide", true);
+        in->collide = jb(pl->entry, "collide", !pl->batch);   // batched scenery (the vista) does not collide unless asked
         const cJSON *mat = cJSON_GetObjectItemCaseSensitive(pl->entry, "mat");
         const KitGpu *g = &KW.pieces[pi];
         for (int s = 0; s < g->slot_n; s++) {
