@@ -19,6 +19,7 @@
 #include "game/game.h"
 #include "game/game_internal.h"
 #include "game/scene.h"
+#include "gameplay/phone/phone.h"
 #include "world/chunks.h"
 #include "world/season.h"
 #include "ui/mainmenu/mainmenu.h"
@@ -51,6 +52,7 @@ typedef struct LobbySys {
     PendingDrop drops[MAX_DROPS]; // kicked peers: dropped after the LOP_KICKED went out
     int drop_count;
     double ping_time;
+    double phone_time;            // last LI_PHONE sent (1 Hz at most)
     // loading
     int load_phase;               // 0 none, 1 screen up (host: load next frames), 2 loaded (streaming)
     u64 load_frame;
@@ -813,6 +815,13 @@ void lobby_net_update(float dt) {
         LobbyMember *me = lobby_local(&S->L);
         if (me) { float p = net_peer_ping(0); if (p >= 0) me->ping_ms = (u16)p; }
     }
+    // The local phone (docs/PHONE.md): one cosmetic member flag (the lobby's player list icon).
+    LobbyMember *self = lobby_local(&S->L);
+    if (self && S->L.state != LS_JOINING && S->L.state != LS_MIGRATING && self->phone != phone_paired() && t - S->phone_time > 1.0) {
+        S->phone_time = t;
+        LobbyIntent in = mk(LI_PHONE, phone_paired() ? 1 : 0, NULL);
+        send_intent(&in);
+    }
     // Forced-start countdown (host decides; clients only display theirs).
     if (S->L.is_host && lobby_tick(&S->L, dt)) begin_loading();
     else if (!S->L.is_host && S->L.state == LS_COUNTDOWN && S->L.countdown > 0) S->L.countdown = fmaxf(0.0f, S->L.countdown - dt);
@@ -1053,7 +1062,7 @@ static void cmd_lobby_status(int argc, const char **argv) {
              L->settings.weather[0] ? L->settings.weather : "season pick", L->settings.dynamic_weather ? "dynamic" : "fixed", lobby_privacy_name(L->settings.privacy), S->version_hash);
     for (int i = 0; i < LOBBY_MAX_MEMBERS; i++) {
         const LobbyMember *m = &L->members[i];
-        if (m->active) log_info("  #%d %-20s %s%s ping %d ms  %s", m->id, m->name, m->host ? "host " : "", m->ready ? "ready" : "-", m->ping_ms, m->ident);
+        if (m->active) log_info("  #%d %-20s %s%s%s ping %d ms  %s", m->id, m->name, m->host ? "host " : "", m->ready ? "ready" : "-", m->phone ? " phone" : "", m->ping_ms, m->ident);
     }
     if (L->state == LS_CLOSED) log_info("  closed: %s", L->close_reason);
 }

@@ -570,7 +570,7 @@ ENTITIES = {   # piece -> the entity spawned at its socket (instances override p
     "door_frame_bifold_120": {"type": "door", "socket": "door", "width": 1.18, "height": 2.08},
     "door_frame_double_160": {"type": "door", "socket": "door", "width": 1.58, "height": 2.08},
     "door_frame_slide_090": {"type": "door", "socket": "door", "width": 1.38, "height": 2.08, "color": [0.75, 0.88, 0.95]},
-    "glass_slider_frame_150": {"type": "door", "socket": "door", "width": 1.4, "height": 2.6, "color": [0.75, 0.88, 0.95]},
+    "glass_slider_frame_150": {"type": "door", "socket": "door", "width": 1.4, "height": 2.6, "color": [0.75, 0.88, 0.95], "glass": True},
     "corridor_wall_door_recess_150": {"type": "door", "socket": "door", "width": 0.95, "height": 2.1, "locked": True},
     "light_downlight": {"type": "light", "socket": "light", "radius": 5, "intensity": 6, "offset": [0, -0.08, 0]},
     "light_pendant": {"type": "light", "socket": "light", "radius": 6, "intensity": 8, "offset": [0, -0.1, 0]},

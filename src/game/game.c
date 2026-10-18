@@ -23,6 +23,7 @@
 #include "gameplay/revive/revive.h"
 #include "game_revive.h"
 #include "game_story.h"
+#include "game_vista.h"
 #include "world/kit_world.h"
 #include "gameplay/weapons.h"
 #include "gameplay/ballistics/bal_world.h"
@@ -557,11 +558,13 @@ static UserCmd build_cmd(void) {
     c.use_target = G->focus;
     c.view_tick = net_client_view_tick256();
     phone_fill_cmd(&c);
-    // Aim model (docs/AIM.md): where the muzzle is in the pose this player sees (the host checks it).
+    // Aim model (docs/AIM.md): where the muzzle is and where the barrel points in the pose this player
+    // sees (the host checks both).
     {
         Player *lp = game_local_player();
         vec3 mc;
         if (lp && chars_muzzle_cam(G->world, lp->ent, &mc, NULL)) aim_claim_pack(mc, c.muzzle_cam);
+        if (lp && chars_barrel_cam(G->world, lp->ent, &mc, NULL)) aim_dir_pack(mc, c.barrel_cam);
         if (lp && chars_eye_cam(G->world, lp->ent, &mc, NULL)) aim_claim_pack(mc, c.eye_cam);
     }
     return c;
@@ -1663,6 +1666,7 @@ void game_init(void) {
     wheels_register();
     revive_register();
     story_register();
+    vista_register();
     kit_world_register();
     game_death_register();
     game_pings_register();

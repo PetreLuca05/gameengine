@@ -1,5 +1,5 @@
 // Lobby screen (docs/MENU_LOBBY.md "Lobby"): players (avatar / name, ready, host crown, ping, mic
-// stub, kick / promote for the host) | map + game settings (host edits, everyone else sees them) |
+// stub, phone icon, kick / promote for the host) | map + game settings (host edits, everyone else sees them) |
 // chat; Ready, Start (host: everyone ready, or a 10 s countdown), Invite friends, Leave. The same chat
 // backend serves the pause menu's Lobby page and the in-game chat (Enter).
 #include "mm_internal.h"
@@ -135,6 +135,12 @@ static void draw_players(GuiRect r, bool actions) {
         float ic = TOK("lb_icon");
         gd_ring(rx - ic * 0.5f, row.y + row.h * 0.5f, ic * 0.35f, fmaxf(1.0f, gui_s(1.5f)), 1.0f, m->talking ? TH->ok : TH->text_faint);   // mic (stub)
         rx -= ic + TOK("mm_gap");
+        if (m->phone) {   // a paired real phone (docs/PHONE.md)
+            GuiRect pr = { rx - ic, row.y + (row.h - ic) * 0.5f, ic, ic };
+            mm_phone_glyph(pr, TH->ok, true);
+            if (gui_rect_contains(pr, gui_mouse().x, gui_mouse().y)) gui_tooltip(gui_idi("mm_member_phone", m->id), "Playing with a real phone");
+            rx -= ic + TOK("mm_gap");
+        }
         GuiText rt = { gui_s(TH->t_label), GW_SEMIBOLD, m->ready ? TH->ok : TH->text_faint, GUI_RIGHT, TH->tracking_caps, true, false, 0 };
         gd_text(&rt, rx, row.y + (row.h - gd_line_height(rt.size)) * 0.5f, m->ready ? "Ready" : "Not ready");
         // Host actions on the others: kick, promote (on hover / focus).

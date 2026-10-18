@@ -9,12 +9,15 @@
 //   PHONE_MSG_FRAME              u8 type, u8 flags (bit0 recording), u16 w, u16 h, u16 quality,
 //                                u32 frame id, u32 capture time (game ms), f32 zoom, then the JPEG.
 //   PHONE_MSG_PHOTO              u8 type, u8 pad[3], u32 media id, then the JPEG (save-to-phone blob).
-// Text (JSON), page -> game: {"c":"hello","v":N,"ua":"..."}, {"c":"shutter"}, {"c":"record"},
+// Text (JSON), page -> game: {"c":"hello","v":N,"ua":"...","model":"..."}, {"c":"shutter"}, {"c":"record"},
 //   {"c":"zoom","v":2.5}, {"c":"calibrate"}, {"c":"recenter"}, {"c":"unpair"},
 //   {"c":"ack","f":frame_id,"pt":page_ms}, {"c":"ping","pt":page_ms}, {"c":"gallery"},
 //   {"c":"perm","orientation":true|false}
 // Text (JSON), game -> page: {"t":"session",...} (server), {"t":"status",...}, {"t":"pong",...},
 //   {"t":"media",...}, {"t":"gallery","items":[...]}, {"t":"toast","msg":"..."}, {"t":"unpaired"}
+//   status carries "ctx" ("menu": the companion screen, apps greyed; "match"), "pc" (this PC's name)
+//   and "mode" (unset / ingame / device). Close codes: 4000 replaced, 4001 forgotten, 4002 the
+//   game's Disconnect (the session stays: the page offers Reconnect).
 #ifndef DG_PHONE_PROTO_H
 #define DG_PHONE_PROTO_H
 

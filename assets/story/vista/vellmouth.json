@@ -1,0 +1,40 @@
+{
+ "_doc": "Vellmouth, the city seen from unit 10A (docs/CHAPTER_01.md §5, docs/STORY.md 'Vista'). Input of tools/story/vista_gen.py, which writes the city into data/levels/story_01.json (brushes, the batched near-city prefab assets/kits/building/prefabs/vista_vellmouth_near.json, the 'city' block). Bearings are degrees clockwise from north seen from 'view'; distances in metres; heights true (before compression).",
+ "seed": 1010,
+ "view": [6.0, 31.65, 6.0],
+ "zfar": 1500,
+ "compress": {"_doc": "Landmarks farther than 'from' move in to from + span (1 - exp(-(d - from) / scale)), scaled by d'/d about the eye (same angular size), bases extended to the ground, colours fogged for the missing distance.",
+              "from": 1100, "span": 330, "scale": 1200, "fog": [0.62, 0.66, 0.72], "fog_density": 0.0004},
+ "own_tower": {"min": [-40, -30], "max": [45, 55]},
+ "grid": {"pitch": 90, "street": 18, "sidewalk": 3, "origin": [6, 6]},
+ "bands": {"near": [55, 340], "mid": [340, 1250], "skyline": [1290, 1420]},
+ "river": {"_doc": "Centre line: r(b) = base + quad b^2 + bend max(0, b - bend_from)^2 for bearings from..to.",
+           "from": -125, "to": 92, "base": 470, "quad": 0.02, "bend_from": 20, "bend": 0.15, "width": 90, "embankment": 6},
+ "bridges": [{"name": "Vell Bridge", "bearing": -10, "width": 20, "deck": 9, "piers": 3, "color": [0.55, 0.52, 0.48]},
+             {"name": "Ashford Bridge", "bearing": 35, "width": 16, "deck": 11, "piers": 2, "color": [0.45, 0.32, 0.25], "truss": true}],
+ "park": {"name": "Linden Park", "bearing": 10, "distance": 320, "size": [170, 120], "trees": 70},
+ "districts": [
+  {"_doc": "Bearing ranges (start inclusive): style picks materials and heights per band.",
+   "from": -180, "to": -60, "style": "residential"},
+  {"from": -60, "to": 20, "style": "old_town"},
+  {"from": 20, "to": 100, "style": "mixed"},
+  {"from": 100, "to": 180, "style": "residential"}
+ ],
+ "styles": {
+  "residential": {"near": [9, 21], "mid": [12, 33], "tall": 0.04, "tall_h": [45, 70], "kit": ["brick", "render"], "colors": [[0.55, 0.38, 0.3], [0.65, 0.6, 0.52], [0.6, 0.5, 0.42], [0.7, 0.68, 0.62]]},
+  "old_town": {"near": [12, 24], "mid": [15, 30], "tall": 0.03, "tall_h": [40, 60], "kit": ["brick", "stone"], "colors": [[0.52, 0.34, 0.27], [0.62, 0.55, 0.45], [0.45, 0.32, 0.28], [0.72, 0.66, 0.55]]},
+  "mixed": {"near": [12, 27], "mid": [15, 45], "tall": 0.1, "tall_h": [55, 110], "kit": ["concrete", "render", "brick"], "colors": [[0.5, 0.5, 0.52], [0.62, 0.6, 0.56], [0.55, 0.58, 0.62], [0.58, 0.45, 0.36]]}
+ },
+ "near_kit": {"_doc": "Near buildings in this bearing window are real kit facades (batched); the rest are facade boxes.",
+              "bearings": [-50, 100], "max": 16, "max_distance": 280},
+ "landmarks": [
+  {"kind": "kit_tower", "name": "Halden Tower", "bearing": 82, "distance": 360, "height": 95, "bays": [6, 5], "material": "concrete", "window": "c", "sector_note": "sector 1 (45..90) flickers from beat 3"},
+  {"kind": "crane", "name": "Crane A", "bearing": 14, "distance": 900, "height": 85, "jib": 55, "jib_yaw": 30, "site": true},
+  {"kind": "crane", "name": "Crane B", "bearing": 61, "distance": 1400, "height": 95, "jib": 60, "jib_yaw": -50, "site": true},
+  {"kind": "hospital", "name": "St. Aldric Hospital", "bearing": 47, "distance": 1750, "height": 45},
+  {"kind": "spire", "name": "Meridian Needle", "bearing": 28, "distance": 2200, "height": 310},
+  {"kind": "cluster", "name": "Financial district", "bearing": -2, "distance": 3600, "height": 230, "count": 9, "spread": 260},
+  {"kind": "cluster", "name": "Eastgate towers", "bearing": 70, "distance": 2600, "height": 150, "count": 6, "spread": 220},
+  {"kind": "stadium", "name": "Vell Stadium", "bearing": 118, "distance": 2700, "height": 40, "radius": 120}
+ ]
+}

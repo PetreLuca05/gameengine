@@ -356,6 +356,15 @@ else()
   target_link_libraries(test_aim PRIVATE m)
 endif()
 add_test(NAME aim COMMAND test_aim)
+add_executable(test_ledge tests/test_ledge.c src/player/ledge_rules.c)
+set_target_properties(test_ledge PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
+target_include_directories(test_ledge PRIVATE src)
+if(MSVC)
+  target_compile_options(test_ledge PRIVATE /W3 /utf-8)
+else()
+  target_link_libraries(test_ledge PRIVATE m)
+endif()
+add_test(NAME ledge COMMAND test_ledge)
 add_executable(test_ballistics tests/test_ballistics.c src/core/detmath.c src/gameplay/ballistics/bal_data.c src/gameplay/ballistics/bal_drag.c
   src/gameplay/ballistics/bal_sim.c src/gameplay/ballistics/bal_surface.c src/gameplay/ballistics/bal_acoustics.c
   src/gameplay/ballistics/bal_tracer.c src/gameplay/ballistics/bal_muzzle.c third_party/cjson/cJSON.c)
@@ -725,7 +734,7 @@ add_test(NAME revive COMMAND test_revive WORKING_DIRECTORY $<TARGET_FILE_DIR:dea
 # Story mode core (docs/STORY.md "Tests"): chapter JSON + lint, objectives, triggers, sequences, the
 # beat clock, .story scripts, saves, and the solver bot finishing every shipped chapter on every branch.
 add_executable(test_story tests/test_story.c src/story/story_def.c src/story/story_sim.c src/story/story_script.c
-  src/story/story_save.c src/story/story_bot.c third_party/cjson/cJSON.c)
+  src/story/story_save.c src/story/story_bot.c src/story/vista_seq.c third_party/cjson/cJSON.c)
 set_target_properties(test_story PROPERTIES C_STANDARD 11)
 target_include_directories(test_story PRIVATE src third_party/cjson)
 if(MSVC)

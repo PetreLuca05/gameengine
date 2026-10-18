@@ -18,9 +18,12 @@
 #include "net/http_ws/hws_tls.h"
 #include "player/hands.h"
 #include "audio/audio.h"
+#include "net/lobby_net.h"
 #include "ui/console.h"
 #include "ui/menus.h"
 #include "ui/gui/gui.h"
+#include "ui/mainmenu/mainmenu.h"
+#include "ui/screens/screens.h"
 #include "render/phone_view.h"
 #include "cJSON.h"
 #include "stb_image_write.h"
@@ -28,6 +31,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
+#ifndef _WIN32
+#include <unistd.h>
+#endif
 
 #define MAX_ZOOM 8.0f
 #define SAMPLE_TIMEOUT 0.5   // s without orientation samples -> back to the mouse aim
@@ -78,6 +84,28 @@ static void game_clock(char *out, size_t n, int *day, float *hours) {
     if (hours) *hours = h;
 }
 
+// The page's context: the menus (the companion screen: apps greyed out) or a match.
+static bool in_menus(void) {
+    LobbyState st = lobby_state();
+    return mainmenu_active() || st == LS_CREATING || st == LS_JOINING || st == LS_LOBBY || st == LS_COUNTDOWN || st == LS_LOADING || st == LS_MIGRATING;
+}
+
+// This PC's name for the page's "Connected to <PC name>" banner.
+static const char *pc_name(void) {
+    static char n[64];
+    if (n[0]) return n;
+    const char *e = getenv("COMPUTERNAME");
+    if (!e || !e[0]) e = getenv("HOSTNAME");
+    if (e && e[0]) dg_strcpy(n, sizeof(n), e);
+#ifndef _WIN32
+    else if (gethostname(n, sizeof(n) - 1) != 0) n[0] = 0;
+#endif
+    // JSON-safe: printable ASCII without quotes / backslashes.
+    for (char *p = n; *p; p++) if (*p < 32 || *p > 126 || *p == '"' || *p == '\\') *p = '_';
+    if (!n[0]) dg_strcpy(n, sizeof(n), "your PC");
+    return n;
+}
+
 static void send_status(void) {
     if (PH.conn < 0) return;
     PhoneStreamStats st;
@@ -94,12 +122,13 @@ static void send_status(void) {
              "{\"t\":\"status\",\"v\":%d,\"holding\":%s,\"camera\":%s,\"zoom\":%.2f,\"max_zoom\":%.0f,\"rec\":%s,\"rec_s\":%.1f,\"rec_max\":%d,"
              "\"landscape\":%s,\"calibrated\":%s,\"driven\":%s,\"fps\":%.1f,\"kbps\":%.0f,\"q\":%d,\"w\":%d,\"h\":%d,\"glass\":%.0f,\"encode\":%.1f,"
              "\"clock\":\"%s\",\"day\":%d,\"hours\":%.3f,\"filter\":\"%s\",\"photos\":%d,\"front\":%s,\"app\":\"%s\",\"flow\":\"%s\",\"battery\":%.3f,"
-             "\"weather\":\"%s\",\"night\":%s}",
+             "\"weather\":\"%s\",\"night\":%s,\"ctx\":\"%s\",\"pc\":\"%s\",\"mode\":\"%s\"}",
              PHONE_PROTO_VERSION, PH.holding ? "true" : "false", PH.camera ? "true" : "false", PH.zoom, MAX_ZOOM, PH.rec ? "true" : "false",
              PH.rec ? g_engine.real_time - PH.rec_start : 0.0, PH.cv.record_max->i, PH.landscape ? "true" : "false", PH.calibrated ? "true" : "false",
              PH.driven ? "true" : "false", st.fps, st.kbps, st.quality, st.width, st.height, st.glass_ms, st.encode_ms, clock, day, hours,
              phone_filter_name(PH.cv.filter->i), PH.gallery.count, PH.front ? "true" : "false", phone_app_name(PH.os.app), phone_flow_name(PH.os.flow),
-             PH.os.battery, w ? weather_name(w) : "clear", (hours < 6.0f || hours > 19.5f) ? "true" : "false");
+             PH.os.battery, w ? weather_name(w) : "clear", (hours < 6.0f || hours > 19.5f) ? "true" : "false", in_menus() ? "menu" : "match", pc_name(),
+             phone_mode_name(PH.os.mode));
     send_text(b);
 }
 
@@ -185,8 +214,54 @@ static void server_stop(void) {
     log_info("phone: server stopped");
 }
 
+// ------------------------------------------------------------------ the stored device
+// <pref dir>/phone/device.json: the paired phone's session key, so the same page reconnects on the
+// next launch (phone_device_days, sliding: renewed on every connect; 0 = nothing stored).
+
+static void device_path(char *out, size_t n) { snprintf(out, n, "%sphone/device.json", platform_pref_dir()); }
+
+static void device_save(void) {
+    float days = PH.cv.device_days->f;
+    PhoneDeviceStore d;
+    memset(&d, 0, sizeof(d));
+    if (days <= 0 || !PH.server || !hws_session_key(PH.server, 0, d.session)) return;
+    dg_strcpy(d.name, sizeof(d.name), PH.device_name);
+    d.paired = (i64)time(NULL);
+    d.expires = d.paired + (i64)((double)days * 86400.0);
+    char *js = phone_device_store_write(&d), p[512];
+    device_path(p, sizeof(p));
+    if (js && platform_write_file(p, js, strlen(js))) PH.stored = true;
+    free(js);
+}
+
+static void device_delete(void) {
+    char p[512];
+    device_path(p, sizeof(p));
+    if (platform_file_exists(p)) SDL_RemovePath(p);
+    PH.stored = false;
+}
+
+// Server start: the previous run's phone may resume with its key (the page retries on its own).
+static void device_restore(void) {
+    char p[512];
+    device_path(p, sizeof(p));
+    char *js = platform_read_file(p, NULL);
+    if (!js) return;
+    PhoneDeviceStore d;
+    i64 now = (i64)time(NULL);
+    bool ok = PH.cv.device_days->f > 0 && phone_device_store_read(js, &d, now);
+    free(js);
+    if (!ok) { device_delete(); log_info("phone: the stored device expired (or device memory is off): forgotten"); return; }
+    u64 ttl = d.expires ? (u64)(d.expires - now) * 1000u : 0;
+    if (!hws_restore_session(PH.server, 0, d.session, ttl)) { device_delete(); return; }
+    PH.stored = true;
+    dg_strcpy(PH.device_name, sizeof(PH.device_name), d.name);
+    log_info("phone: waiting for the stored device (%s) to reconnect", d.name[0] ? d.name : "unnamed");
+}
+
 static bool server_start(void) {
     if (PH.server) return true;
+    phone_ui_load_assets(&PH);   // the page's icon atlas path
     if (!load_page()) { snprintf(PH.server_err, sizeof(PH.server_err), "web/phone/index.html missing"); return false; }
     u32 ips[8];
     int n = hws_lan_addresses(ips, 8);
@@ -213,6 +288,7 @@ static bool server_start(void) {
     cfg.page = PH.page;
     cfg.page_len = PH.page_len;
     cfg.token_ttl_ms = (u64)(PH.cv.token_ttl->f * 1000.0f);
+    cfg.session_ttl_ms = PH.cv.device_days->f > 0 ? (u64)((double)PH.cv.device_days->f * 86400000.0) : 0;
     PH.server = hws_start(&cfg, PH.server_err, sizeof(PH.server_err));
     if (!PH.server) { log_warn("phone: server failed: %s", PH.server_err); return false; }
     PH.server_err[0] = 0;
@@ -222,6 +298,7 @@ static bool server_start(void) {
     snprintf(PH.ip_text, sizeof(PH.ip_text), "%s:%d", ip, PH.cv.port->i);
     PH.conn = -1;
     log_info("phone: server on %s://%s (CA %s)", cfg.tls ? "https" : "http", PH.ip_text, hws_ca_fingerprint(PH.server));
+    device_restore();
     return true;
 }
 
@@ -247,20 +324,22 @@ static bool pair_begin(void) {
     return true;
 }
 
-// The flow wants a pairing code: start the server and issue one, or fall back to the in-game phone.
-static void flow_pair(void) {
-    if (pair_begin()) return;
-    phone_os_server_failed(&PH.os, PH.server_err);
-    toast("In-game phone: %s", PH.server_err[0] ? PH.server_err : "no server");
-}
-
-static void unpair(void) {
-    if (PH.server) hws_unpair(PH.server, 0);
-    if (PH.conn >= 0) phone_os_disconnected(&PH.os);
+static void drop_conn(void) {
     PH.conn = -1;
     PH.calibrated = false;
     if (PH.sink) phone_stream_ws_set_conn(PH.sink, -1);
-    toast("Phone unpaired");
+}
+
+// Forget device (the card, the page's Unpair, phone_unpair): the session is revoked (the page
+// forgets its key), the stored device deleted.
+static void unpair(void) {
+    if (PH.server) hws_unpair(PH.server, 0);
+    drop_conn();
+    phone_os_forget(&PH.os);
+    device_delete();
+    PH.device_name[0] = 0;
+    PH.token[0] = 0;
+    toast("Phone forgotten");
 }
 
 // ------------------------------------------------------------------ capture
@@ -498,8 +577,11 @@ static void handle_text(const char *s) {
     const cJSON *c = cJSON_GetObjectItemCaseSensitive(j, "c");
     const char *cmd = cJSON_IsString(c) ? c->valuestring : "";
     if (!strcmp(cmd, "hello")) {
-        const cJSON *ua = cJSON_GetObjectItemCaseSensitive(j, "ua");
+        const cJSON *ua = cJSON_GetObjectItemCaseSensitive(j, "ua"), *model = cJSON_GetObjectItemCaseSensitive(j, "model");
         dg_strcpy(PH.page_ua, sizeof(PH.page_ua), cJSON_IsString(ua) ? ua->valuestring : "");
+        // The name from the whole agent string (the browser's token is at its end).
+        phone_device_name(cJSON_IsString(ua) ? ua->valuestring : "", cJSON_IsString(model) ? model->valuestring : NULL, PH.device_name, sizeof(PH.device_name));
+        device_save();
         send_status();
         send_gallery();
     } else if (!strcmp(cmd, "shutter")) {
@@ -582,15 +664,18 @@ static void poll_server(void) {
             PH.token[0] = 0;   // used
             char ip[20];
             hws_ipv4_format(ev.peer_ip, ip, sizeof(ip));
-            toast("Phone %s (%s)", ev.resumed ? "reconnected" : "paired", ip);
+            device_save();
+            // A page that comes back (resume) restores real-phone mode silently.
+            if (ev.resumed) log_info("phone: reconnected (%s)", ip);
+            else toast("Phone paired (%s)", ip);
         } break;
         case HWS_EV_DISCONNECT:
             if (ev.conn == PH.conn) {
-                PH.conn = -1;
-                if (PH.sink) phone_stream_ws_set_conn(PH.sink, -1);
-                phone_os_disconnected(&PH.os);
+                drop_conn();
                 if (PH.rec) record_stop();
-                toast("Phone disconnected");
+                phone_os_disconnected(&PH.os);
+                if (!in_menus()) toast("Phone disconnected \xE2\x80\x94 using in-game phone");
+                else log_info("phone: disconnected");
             }
             break;
         case HWS_EV_TEXT: if (ev.conn == PH.conn) handle_text((const char *)ev.data); break;
@@ -641,11 +726,6 @@ static void open_app(PhoneApp a) {
     phone_os_open(&PH.os, a);
 }
 
-static void put_away(void) {
-    Game *g = game();
-    if (g) g->phone_out = false;
-}
-
 static void set_capture(bool on) {
     if (PH.ui_capture == on) return;
     PH.ui_capture = on;
@@ -662,20 +742,7 @@ static PhoneLayoutIn layout_in(void) {
 // y: the design-px position inside the button (the zoom slider).
 static void activate(int id, int index, float y, const PhoneRect *r) {
     switch (id) {
-    case PB_DECLINE:
-        phone_os_decline(&PH.os);
-        PH.token[0] = 0;
-        toast("Using the in-game phone");
-        break;
-    case PB_CANCEL:
-        phone_os_cancel(&PH.os);
-        PH.token[0] = 0;
-        put_away();
-        break;
-    case PB_RECONNECT:
-    case PB_CONNECT:
-        if (phone_os_reconnect(&PH.os)) flow_pair();
-        break;
+    case PB_CONNECT: menus_open_phone_portal(); break;   // the Connect portal (a modal over the game)
     case PB_APP:
         if (index >= 0 && index < PH.apps.count) {
             if (PH.apps.apps[index].app > PAPP_HOME) open_app((PhoneApp)PH.apps.apps[index].app);
@@ -954,35 +1021,15 @@ void phone_frame(World *w, const RenderCamera *cam, const Player *lp) {
         phone_gallery_scan(&PH.gallery, platform_pref_dir());
         PH.gallery_scanned = true;
     }
-    // Server: 0 off, 1 on, 2 automatic (starts when the phone is equipped, then stays up).
-    int sv = PH.cv.server->i;
-    if (sv == 0 && PH.server) server_stop();
-    if (sv == 1 && !PH.server && !PH.server_err[0]) server_start();
-    // The flow (phone_os.c): equipping starts pairing at once (server + code + portal).
+    // The flow (phone_os.c): equipping never pairs (that is the menus' Connect portal): a connected
+    // device drives the phone at once, else the in-game phone (HUD panel).
     bool own = PH.holding && !spec;
     if (own && !PH.os.equipped) {
-        PH.server_err[0] = 0;
-        if (phone_os_equip(&PH.os, PH.cv.auto_pair->i != 0, PH.conn >= 0)) flow_pair();
+        phone_os_equip(&PH.os);
         log_info("phone: equipped -> %s / %s (server %s)", phone_flow_name(PH.os.flow), phone_app_name(PH.os.app), PH.server ? PH.ip_text : "off");
     } else if (!own && PH.os.equipped) {
         phone_os_unequip(&PH.os);
-        PH.token[0] = 0;
         set_capture(false);
-    }
-    poll_server();
-    if (PH.server && PH.token[0]) {
-        PH.token_left = hws_token_remaining(PH.server, 0);
-        // An expired code on an open portal is replaced (the pairing timeout decides when to give up).
-        if (PH.token_left <= 0 && PH.conn < 0) {
-            PH.token[0] = 0;
-            if (PH.os.app == PAPP_PORTAL && PH.os.flow == PFLOW_PAIRING) pair_begin();
-        }
-    }
-    PhoneFlow before = PH.os.flow;
-    phone_os_tick(&PH.os, dt, PH.cv.pair_timeout->f, PH.cv.battery_drain->f / 6000.0f);
-    if (before == PFLOW_PAIRING && PH.os.flow == PFLOW_LOCAL) {
-        PH.token[0] = 0;
-        toast("No phone connected: using the in-game phone");
     }
     update_orientation(dt);
     if (spec) {
@@ -1006,7 +1053,7 @@ void phone_frame(World *w, const RenderCamera *cam, const Player *lp) {
     if (focus && own) {
         if (PH.camera && atk && !PH.prev_attack) PH.photo_pending = true;
         if (PH.camera && rel && !PH.prev_reload) { if (PH.rec) record_stop(); else record_start(); }
-        if (gal && !PH.prev_gallery && PH.os.app != PAPP_PORTAL) open_app(PH.os.app == PAPP_GALLERY ? PAPP_HOME : PAPP_GALLERY);
+        if (gal && !PH.prev_gallery) open_app(PH.os.app == PAPP_GALLERY ? PAPP_HOME : PAPP_GALLERY);
     }
     PH.prev_attack = atk;
     PH.prev_reload = rel;
@@ -1040,17 +1087,97 @@ void phone_frame(World *w, const RenderCamera *cam, const Player *lp) {
     // The HUD panel slides in / out.
     float slide = fmaxf(0.05f, PH.theme.panel.slide);
     PH.panel_t = approachf(PH.panel_t, PH.panel_on ? 1.0f : 0.0f, dt / slide);
-    // Status to the page (4 Hz, and at once when the app or the flow changes).
-    bool changed = PH.os.app != PH.sent_app || PH.os.flow != PH.sent_flow;
+}
+
+// Every frame (main loop, also without a world or while the frame is not rendered): the server
+// (up from the main menu with auto-pair, or from the first Connect portal, then for the whole
+// run), the page's events, the portal's code, the status to the page.
+void phone_tick(float dt) {
+    if (!PH.init) return;
+    // Server: 0 off, 1 on, 2 automatic (from the main menu with auto-pair, else the first portal).
+    int sv = PH.cv.server->i;
+    if (sv == 0 && PH.server) server_stop();
+    bool want = sv == 1 || (sv == 2 && PH.cv.auto_pair->i && mainmenu_enabled());
+    if (want && !PH.server && !PH.server_err[0]) server_start();
+    poll_server();
+    if (PH.server && PH.token[0]) {
+        PH.token_left = hws_token_remaining(PH.server, 0);
+        // An expired code on an open portal is replaced.
+        if (PH.token_left <= 0 && PH.conn < 0) {
+            PH.token[0] = 0;
+            if (PH.os.portal) pair_begin();
+        }
+    }
+    phone_os_tick(&PH.os, dt, PH.cv.battery_drain->f / 6000.0f);
+    // Status to the page (4 Hz, and at once when the app, the flow or the context changes).
+    bool menu = in_menus();
+    bool changed = PH.os.app != PH.sent_app || PH.os.flow != PH.sent_flow || menu != PH.sent_menu;
     if (PH.conn >= 0 && (changed || g_engine.real_time - PH.last_status_t > 0.25)) {
         PH.last_status_t = g_engine.real_time;
         send_status();
     }
-    if (PH.os.app != PH.sent_app || PH.os.flow != PH.sent_flow) {
-        log_info("phone: %s / %s%s", phone_flow_name(PH.os.flow), phone_app_name(PH.os.app), PH.os.reason[0] && PH.os.flow == PFLOW_LOCAL ? PH.os.reason : "");
+    if (changed) {
+        log_info("phone: %s / %s / %s%s%s", phone_flow_name(PH.os.flow), phone_app_name(PH.os.app), menu ? "menu" : "match", PH.os.reason[0] ? " - " : "", PH.os.reason);
         PH.sent_app = PH.os.app;
         PH.sent_flow = PH.os.flow;
+        PH.sent_menu = menu;
     }
+}
+
+// ------------------------------------------------------------------ pairing (the menus)
+
+void phone_portal_show(void) {
+    if (!PH.init || (PH.os.portal && (PH.token[0] || PH.conn >= 0))) return;   // already up with a code / a device
+    PH.server_err[0] = 0;
+    if (phone_os_portal_open(&PH.os) && !pair_begin()) phone_os_server_failed(&PH.os, PH.server_err);
+    log_info("phone: Connect portal open (%s)", PH.token[0] ? PH.url : (PH.conn >= 0 ? "device connected" : PH.os.reason));
+}
+
+void phone_portal_hide(void) {
+    if (!PH.init || !PH.os.portal) return;
+    phone_os_portal_close(&PH.os);
+    PH.token[0] = 0;
+}
+
+void phone_decline(void) {
+    if (!PH.init || PH.conn >= 0) return;
+    phone_os_decline(&PH.os);
+    PH.token[0] = 0;
+    log_info("phone: using the in-game phone this session");
+}
+
+void phone_disconnect(void) {
+    if (!PH.init) return;
+    if (PH.server) hws_disconnect(PH.server, 0);
+    if (PH.rec) record_stop();
+    drop_conn();
+    phone_os_disconnect(&PH.os);
+    log_info("phone: disconnected (the in-game phone this session; the stored device stays)");
+}
+
+void phone_forget(void) {
+    if (PH.init) unpair();
+}
+
+PhonePairInfo phone_pair_info(void) {
+    PhonePairInfo i;
+    memset(&i, 0, sizeof(i));
+    i.card = phone_os_card(&PH.os);
+    i.mode = PH.os.mode;
+    i.portal = PH.os.portal;
+    i.connected = PH.conn >= 0;
+    i.stored = PH.stored;
+    i.server = PH.server != NULL;
+    i.code = PH.token[0] && PH.token_left > 0;
+    i.token_left = PH.token_left;
+    i.portal_t = PH.os.portal_t;
+    i.portal_connected = PH.conn >= 0 && PH.os.portal_connected_t >= 0 ? PH.os.portal_t - PH.os.portal_connected_t : -1.0f;
+    i.device = PH.device_name;
+    i.url = PH.url;
+    i.address = PH.ip_text;
+    i.error = PH.os.reason[0] ? PH.os.reason : PH.server_err;
+    i.qr = PH.qr_tex;
+    return i;
 }
 
 // ------------------------------------------------------------------ commands
@@ -1066,21 +1193,46 @@ static void cmd_phone_server(int argc, const char **argv) {
     log_info("phone_server: %s%s%s", PH.server ? "on " : "off", PH.server ? PH.ip_text : "", PH.server_err[0] ? PH.server_err : "");
 }
 
+// phone_pair / phone_portal [open|close|decline]: the Connect portal (the menus' modal).
+static void cmd_phone_portal(int argc, const char **argv) {
+    const char *a = argc > 1 ? argv[1] : "open";
+    if (!strcmp(a, "close")) { if (screens_top() == SCR_PHONE) screens_pop(); else phone_portal_hide(); }
+    else if (!strcmp(a, "decline")) phone_decline();
+    else menus_open_phone_portal();
+    log_info("phone_portal: %s%s%s", PH.os.portal ? "open" : "closed", PH.token[0] ? "  " : "", PH.token[0] ? PH.url : "");
+}
+
 static void cmd_phone_pair(int argc, const char **argv) {
     (void)argc;
+    cmd_phone_portal(1, argv);
+}
+
+static void cmd_phone_disconnect(int argc, const char **argv) {
+    (void)argc;
     (void)argv;
-    PH.server_err[0] = 0;
-    if (PH.os.equipped) {
-        if (phone_os_reconnect(&PH.os)) flow_pair();
-    } else if (!pair_begin()) {
-        log_info("phone_pair: %s", PH.server_err);
-    }
+    phone_disconnect();
+}
+
+// phone_mode [ingame]: the session's choice (unset / ingame / device); "ingame" = Use in-game phone.
+static void cmd_phone_mode(int argc, const char **argv) {
+    if (argc > 1 && !strcmp(argv[1], "ingame")) phone_decline();
+    else if (argc > 1) log_info("phone_mode: only 'ingame' can be set (a device sets 'device' by connecting)");
+    log_info("phone_mode: %s (card %s, device %s)", phone_mode_name(PH.os.mode), phone_card_name(phone_os_card(&PH.os)), PH.device_name[0] ? PH.device_name : "-");
 }
 
 static void cmd_phone_unpair(int argc, const char **argv) {
     (void)argc;
     (void)argv;
     unpair();
+}
+
+// The Phone card as one line (tests: phone_card.cfg, phone_ws.py).
+static void cmd_phone_card(int argc, const char **argv) {
+    (void)argc;
+    (void)argv;
+    log_info("phone_card: card=%s mode=%s portal=%d connected=%d stored=%d server=%d code=%d device=\"%s\" ctx=%s panel=%d",
+             phone_card_name(phone_os_card(&PH.os)), phone_mode_name(PH.os.mode), PH.os.portal, PH.conn >= 0, PH.stored, PH.server != NULL,
+             PH.token[0] != 0, PH.device_name, in_menus() ? "menu" : "match", PH.panel_on);
 }
 
 static void cmd_phone_fake(int argc, const char **argv) {
@@ -1117,10 +1269,10 @@ static void cmd_phone_status(int argc, const char **argv) {
     (void)argc;
     (void)argv;
     log_info("phone_status: flow=%s app=%s panel=%d panel_t=%.2f server=%d token=%d paired=%d raised=%d camera=%d capture=%d driven=%d samples=%u "
-             "model_screen=%d/%d ev=%.2f viewer=%d gallery=%d spec=%d reason=\"%s\"",
+             "model_screen=%d/%d ev=%.2f viewer=%d gallery=%d spec=%d mode=%s portal=%d screen=%s reason=\"%s\"",
              phone_flow_name(PH.os.flow), phone_app_name(PH.os.app), PH.panel_on, PH.panel_t, PH.server != NULL, PH.token[0] != 0, PH.conn >= 0, PH.raised,
              PH.camera, PH.ui_capture, PH.driven, PH.samples, PH.model_screen_content, PH.model_screen_draws, render_exposure_ev(), PH.os.viewer, PH.gallery.count, PH.spec,
-             PH.os.reason);
+             phone_mode_name(PH.os.mode), PH.os.portal, screen_name(screens_top()), PH.os.reason);
 }
 
 static void cmd_phone_photo(int argc, const char **argv) {
@@ -1146,7 +1298,7 @@ static void cmd_phone_zoom(int argc, const char **argv) {
 
 static void cmd_phone_screen(int argc, const char **argv) {
     if (argc < 2) { log_info("phone_screen home | camera | gallery | pair: %s", phone_app_name(PH.os.app)); return; }
-    if (!strcmp(argv[1], "pair") || !strcmp(argv[1], "portal")) { cmd_phone_pair(1, argv); return; }
+    if (!strcmp(argv[1], "pair") || !strcmp(argv[1], "portal")) { cmd_phone_portal(1, argv); return; }
     int a = phone_app_from_name(argv[1]);
     if (a > PAPP_PORTAL) open_app((PhoneApp)a);
 }
@@ -1180,6 +1332,7 @@ static void cmd_phone_button(int argc, const char **argv) {
     PhoneHit hits[PHONE_MAX_HITS];
     int n = phone_os_layout(&li, hits, PHONE_MAX_HITS);
     const PhoneHit *h = id > 0 ? phone_os_find(hits, n, id, index) : NULL;
+    if (!h && id == PB_DECLINE) { phone_decline(); return; }   // the portal's decline (now a menu modal)
     if (!h) { log_info("phone_button: %s %d is not on the %s screen", argv[1], index, phone_app_name(PH.os.app)); return; }
     log_info("phone_button: %s %d", argv[1], index);
     activate(h->id, h->index, h->r.y + h->r.h * 0.5f, &h->r);
@@ -1200,7 +1353,7 @@ static void cmd_phone_tap(int argc, const char **argv) {
 static void cmd_phone_decline(int argc, const char **argv) {
     (void)argc;
     (void)argv;
-    activate(PB_DECLINE, 0, 0, NULL);
+    phone_decline();
 }
 
 static void cmd_phone_back(int argc, const char **argv) {
@@ -1212,9 +1365,9 @@ static void cmd_phone_back(int argc, const char **argv) {
 // phone_wait <flow|app> [frames]: hold the script until the phone's flow or app is that (tests:
 // a real / simulated device connects or leaves at its own pace).
 static void cmd_phone_wait(int argc, const char **argv) {
-    if (argc < 2) { log_info("phone_wait <idle|pairing|local|paired|lost|portal|home|camera|gallery|off> [frames]"); return; }
+    if (argc < 2) { log_info("phone_wait <idle|pairing|local|paired|home|camera|gallery|off|not_connected|waiting|connected|ingame> [frames]"); return; }
     int left = argc > 2 ? atoi(argv[2]) : 3600;
-    bool ok = !strcmp(argv[1], phone_flow_name(PH.os.flow)) || !strcmp(argv[1], phone_app_name(PH.os.app));
+    bool ok = !strcmp(argv[1], phone_flow_name(PH.os.flow)) || !strcmp(argv[1], phone_app_name(PH.os.app)) || !strcmp(argv[1], phone_card_name(phone_os_card(&PH.os)));
     if (ok || left <= 0) {
         log_info("phone_wait: %s %s", argv[1], ok ? "reached" : "TIMEOUT");
         return;
@@ -1232,13 +1385,13 @@ static void cmd_phone_ui(int argc, const char **argv) {
 void phone_register(void) {
     memset(&PH, 0, sizeof(PH));
     PhoneCvars *c = &PH.cv;
-    c->server = cvar_reg_int("phone_server", 2, 0, 2, CVAR_ARCHIVE | CVAR_EDITABLE, "phone companion server: 0 off, 1 on, 2 automatic (starts when a phone is equipped)");
+    c->server = cvar_reg_int("phone_server", 2, 0, 2, CVAR_ARCHIVE | CVAR_EDITABLE, "phone companion server: 0 off, 1 on, 2 automatic (the main menu with auto-pair, else the first Connect portal)");
     c->port = cvar_reg_int("phone_port", 47820, 1024, 65534, CVAR_ARCHIVE | CVAR_EDITABLE, "phone server port (HTTPS; the plain HTTP helper uses port + 1)");
     c->tls = cvar_reg_bool("phone_tls", true, CVAR_ARCHIVE | CVAR_EDITABLE, "phone server over HTTPS (needed for motion sensors on iOS / Android, docs/PHONE.md)");
     c->bind = cvar_reg_string("phone_bind", "auto", CVAR_ARCHIVE | CVAR_EDITABLE, "phone server address: auto (the LAN interface), any, or an IPv4 address");
     c->pairing = cvar_reg_bool("phone_pairing", true, CVAR_ARCHIVE | CVAR_EDITABLE, "allow pairing a phone");
-    c->auto_pair = cvar_reg_bool("phone_auto_pair", true, CVAR_ARCHIVE | CVAR_EDITABLE, "equipping the phone starts pairing at once (the Connect portal); off: straight to the in-game phone");
-    c->pair_timeout = cvar_reg_float("phone_pair_timeout", 60.0f, 0.0f, 600.0f, CVAR_ARCHIVE | CVAR_EDITABLE, "seconds on the Connect portal before falling back to the in-game phone (0 = wait)");
+    c->auto_pair = cvar_reg_bool("phone_auto_pair", true, CVAR_ARCHIVE | CVAR_EDITABLE, "start the phone server with the main menu, so a paired phone reconnects by itself (off: when the Connect portal opens)");
+    c->device_days = cvar_reg_float("phone_device_days", 30.0f, 0.0f, 365.0f, CVAR_ARCHIVE | CVAR_EDITABLE, "days a paired phone is remembered (reconnects on the next launch; renewed on every connect; 0 = not stored)");
     c->res_w = cvar_reg_int("phone_res_w", 640, 128, 1440, CVAR_ARCHIVE | CVAR_EDITABLE, "phone camera / stream width (portrait)");
     c->res_h = cvar_reg_int("phone_res_h", 1136, 256, 2560, CVAR_ARCHIVE | CVAR_EDITABLE, "phone camera / stream height (portrait)");
     c->fps = cvar_reg_int("phone_fps", 30, 5, 60, CVAR_ARCHIVE | CVAR_EDITABLE, "phone camera render / stream rate (Hz)");
@@ -1258,8 +1411,13 @@ void phone_register(void) {
     c->exposure = cvar_reg_float("phone_exposure", 0.0f, -3.0f, 3.0f, CVAR_ARCHIVE | CVAR_EDITABLE, "phone camera exposure bias (EV)");
     c->token_ttl = cvar_reg_float("phone_token_ttl", 120.0f, 10.0f, 600.0f, CVAR_EDITABLE, "pairing token lifetime (s)");
     cmd_register("phone_server", cmd_phone_server, "phone_server on | off: the phone companion server");
-    cmd_register("phone_pair", cmd_phone_pair, "new pairing code: the Connect portal on the phone + HUD panel, URL printed to the console");
-    cmd_register("phone_unpair", cmd_phone_unpair, "disconnect the paired phone");
+    cmd_register("phone_pair", cmd_phone_pair, "open the Connect portal (QR code + URL, printed to the console too)");
+    cmd_register("phone_portal", cmd_phone_portal, "phone_portal [open|close|decline]: the Connect portal (a menu modal)");
+    cmd_register("phone_unpair", cmd_phone_unpair, "forget the paired phone (its session ends, the stored device is deleted)");
+    cmd_register("phone_forget", cmd_phone_unpair, "forget the paired phone (= phone_unpair)");
+    cmd_register("phone_disconnect", cmd_phone_disconnect, "disconnect the phone for this session (the in-game phone; it reconnects on the next launch)");
+    cmd_register("phone_mode", cmd_phone_mode, "phone_mode [ingame]: the session's phone mode (unset / ingame / device)");
+    cmd_register("phone_card", cmd_phone_card, "the Phone card's state as one log line (tests)");
     cmd_register("phone_fake_orientation", cmd_phone_fake, "phone_fake_orientation <pitch> <yaw> <roll> | off: drive the phone without a device");
     cmd_register("phone_stream_stats", cmd_phone_stats, "phone stream / server / orientation statistics");
     cmd_register("phone_status", cmd_phone_status, "phone flow / app / HUD panel / screen level (one log line)");
@@ -1272,9 +1430,9 @@ void phone_register(void) {
     cmd_register("phone_calibrate", cmd_phone_calibrate, "re-centre the paired phone's orientation (the page has a button / double tap)");
     cmd_register("phone_button", cmd_phone_button, "phone_button <name> [index]: press a phone screen button (decline, home, app 0, cell 2 ...)");
     cmd_register("phone_tap", cmd_phone_tap, "phone_tap <x> <y>: tap the phone screen at design px (640 x 1136)");
-    cmd_register("phone_decline", cmd_phone_decline, "Connect portal: use the in-game phone instead");
+    cmd_register("phone_decline", cmd_phone_decline, "Connect portal: use the in-game phone this session");
     cmd_register("phone_back", cmd_phone_back, "phone: back (viewer -> gallery -> home)");
-    cmd_register("phone_wait", cmd_phone_wait, "phone_wait <flow|app> [frames]: scripts wait until the phone gets there (tests)");
+    cmd_register("phone_wait", cmd_phone_wait, "phone_wait <flow|app|card> [frames]: scripts wait until the phone gets there (tests)");
     cmd_register("phone_ui", cmd_phone_ui, "phone_ui [0|1]: free the cursor for the HUD phone panel (key Alt)");
     PH.conn = -1;
     PH.zoom = PH.zoom_target = 1.0f;

@@ -4,6 +4,7 @@
 #include "gameplay/zombies/horde.h"
 #include "vfx/vfx.h"
 #include "game_internal.h"
+#include "game_vista.h"
 #include "game_water.h"
 #include "scene.h"
 #include "ui/recoil_debug.h"
@@ -217,6 +218,7 @@ void game_render_init(void) {
     ground_ref_register();
     weather_register();
     water_register();
+    ledge_register();
     wind_game_register();
     game_audio_register();
     foliage_register();
@@ -408,6 +410,20 @@ static void render_entity(World *w, int i, float alpha, bool focused) {
     }
     switch (t) {
     case ET_DOOR: {
+        if ((v->color >> 24) < 0xFF) {
+            // Glass leaf (building kit sliders, "glass": true): a pane in the glass bucket and a metal stile.
+            Material gm = mat_from(v->color | 0xFF000000u, 0.03f, MAT_GLASS | MAT_NO_SHADOW | hl);
+            gm.color.w = 0.12f;   // as the kit's glass set
+            draw_shape(VIS_BOX, v3(v->half.x - 0.03f, v->half.y - 0.03f, 0.008f), pos, rot, gm);
+            Material fm = mat_from(rgba8(0.18f, 0.19f, 0.2f, 1), 0.4f, hl);
+            fm.metallic = 0.8f;
+            for (int sd = -1; sd <= 1; sd += 2) {
+                draw_box_local(pos, rot, v3((float)sd * (v->half.x - 0.015f), 0, 0), v3(0.015f, v->half.y, v->half.z), fm);
+                draw_box_local(pos, rot, v3(0, (float)sd * (v->half.y - 0.015f), 0), v3(v->half.x, 0.015f, v->half.z), fm);
+            }
+            draw_box_local(pos, rot, v3(w->door[i].knob_local.x, w->door[i].knob_local.y, 0), v3(0.012f, 0.12f, v->half.z + 0.02f), fm);
+            break;
+        }
         draw_shape(VIS_BOX, v->half, pos, rot, m);
         // Knobs on both sides.
         Material km = mat_from(rgba8(0.75f, 0.68f, 0.3f, 1), 0.3f, hl);
@@ -904,6 +920,7 @@ void game_render(void) {
     vehicles_frame(w, cam.pos);
     foliage_frame(w);
     game_render_world(w, G->mode == GM_HOST ? G->alpha : 1.0f, cam.pos, fwd);
+    vista_render(cam.pos, env.atmosphere ? DG_CLAMP((0.12f - env.sun_true_dir.y) / 0.24f, 0.0f, 1.0f) : 0.0f);   // story levels: the city outside
 
     if (p && !dead) {
         HandsInput hi;

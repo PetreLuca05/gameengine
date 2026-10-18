@@ -23,7 +23,7 @@ typedef struct PhoneThumb { char path[260]; bool loaded, video; u8 px[PHONE_THUM
 typedef struct PhoneCvars {
     Cvar *server, *port, *tls, *bind, *pairing, *res_w, *res_h, *fps, *quality, *smoothing, *sensitivity, *invert_yaw, *invert_pitch, *invert_roll,
         *record_max, *video_kbps, *photo_hires, *filter, *exposure, *token_ttl,
-        *auto_pair, *pair_timeout, *battery_drain, *hud_size, *hud_corner;
+        *auto_pair, *device_days, *battery_drain, *hud_size, *hud_corner;
 } PhoneCvars;
 
 // What the phone screen shows (the HUD panel and the stream: the model never shows it).
@@ -51,6 +51,8 @@ typedef struct PhoneState {
     TextureId qr_tex;
     float page_rtt;              // ms (ping / pong)
     char page_ua[96];
+    char device_name[64];        // the connected (or stored) device: "iPhone · Safari"
+    bool stored;                 // <pref dir>/phone/device.json holds a paired device
     bool page_orientation;       // the page reports DeviceOrientation access
     double last_status_t;
     // orientation
@@ -84,6 +86,7 @@ typedef struct PhoneState {
     bool raised;                 // the hold point is in the phone pose (always while equipped)
     PhoneApp sent_app;           // last app / flow logged and sent to the page
     PhoneFlow sent_flow;
+    bool sent_menu;
     // HUD panel (the simulated phone screen)
     float panel_t;               // 0 hidden .. 1 shown (slide + fade)
     bool panel_on;

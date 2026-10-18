@@ -3,7 +3,7 @@
     "categories": [
         { "id": "system", "label": "System", "prefixes": ["cfg_", "config", "writeconfig", "exec", "echo", "set", "reset", "toggle", "help", "cmdlist", "cvarlist", "quit", "vid_", "toggleconsole", "cmd_", "con_"] },
         { "id": "input", "label": "Input", "prefixes": ["+", "-", "bind", "unbindall", "bindlist", "mouse_", "pad_", "m_", "in_"] },
-        { "id": "player", "label": "Player", "prefixes": ["cl_", "spec_", "spectate", "respawn", "pl_", "setpos", "getpos", "setang", "lookat", "aimat", "noclip", "kill", "damage", "give", "inv", "slot", "flashlight", "status", "copypos", "spawn_", "g_", "developer", "dev_", "infinite_"] },
+        { "id": "player", "label": "Player", "prefixes": ["cl_", "spec_", "spectate", "respawn", "pl_", "setpos", "getpos", "setang", "lookat", "aimat", "noclip", "kill", "damage", "give", "inv", "slot", "flashlight", "status", "copypos", "spawn_", "g_", "developer", "dev_", "infinite_", "ledge_"] },
         { "id": "camera", "label": "Camera", "prefixes": ["cam_", "fp_", "hands_", "holdpoint", "handpose", "hpe"] },
         { "id": "weapons", "label": "Weapons", "prefixes": ["wpn_", "weapon_", "ads_", "sight_", "crosshair_", "attach", "bench", "recoil_", "fire_", "sway_", "bal_", "ballistics", "shutter_preview", "muzzle_preview", "aim_", "block_fire_"] },
         { "id": "hud", "label": "HUD & Menus", "prefixes": ["ui_", "hud_", "wheel_", "ping", "peek", "mm_", "menu", "mainmenu", "inventory", "cos_", "kill_stats", "commands"] },

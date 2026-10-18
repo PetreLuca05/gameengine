@@ -22,6 +22,7 @@ struct UserCmd;
 
 void phone_register(void);       // cvars + commands (game_render_init)
 void phone_shutdown(void);
+void phone_tick(float dt);       // main loop, every frame: server, page events, portal code, status
 void phone_fill_cmd(struct UserCmd *c);
 bool phone_wheel(int dir);       // true = consumed (zoom in camera mode)
 void phone_frame(struct World *w, const struct RenderCamera *cam, const struct Player *lp);
@@ -36,5 +37,25 @@ const char *phone_status_text(void);
 bool phone_ui_wants_mouse(void);   // the cursor is out for the HUD phone panel (phoneui, Alt)
 bool phone_ui_blocks_game(void);   // gamepad navigation of the panel holds the game controls
 bool phone_ui_escape(void);        // Esc with the cursor on the panel: back (true = consumed)
+
+// Pairing lives in the menus (docs/PHONE.md "Phone flow"): the Phone card (main menu Player tab,
+// pause menu, the main menu footer) and the Connect portal modal (SCR_PHONE, src/ui/mainmenu/mm_phone.c).
+typedef struct PhonePairInfo {
+    int card;                  // PhoneCard (phone_os.h)
+    int mode;                  // PhoneMode
+    bool portal, connected, stored, server, code;
+    float token_left, portal_t;  // s
+    float portal_connected;      // s since a device connected on the open portal (-1: it did not)
+    const char *device;        // the connected / stored device's name ("" unknown)
+    const char *url, *address; // the pairing URL (with the code), ip:port
+    const char *error;         // why there is no code / the last change
+    u32 qr;                    // TextureId of the QR code (0 none)
+} PhonePairInfo;
+PhonePairInfo phone_pair_info(void);
+void phone_portal_show(void);    // the portal opened: the server + a pairing code (no device yet)
+void phone_portal_hide(void);
+void phone_decline(void);        // "Use in-game phone": phone_mode ingame for the session
+void phone_disconnect(void);     // the card's Disconnect: the page's socket closes, the in-game phone
+void phone_forget(void);         // Forget device: the session ends, the stored device is deleted
 
 #endif

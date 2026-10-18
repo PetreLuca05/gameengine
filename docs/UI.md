@@ -19,7 +19,8 @@ in game ── Esc / pad Start ──▶ PAUSE
                                  ├─ Multiplayer ───▶ MULTIPLAYER (host LAN / Steam, connect, LAN list)
                                  ├─ Invite friends   (Steam builds only)
                                  ├─ Leave game / Stop hosting ─▶ CONFIRM
-                                 └─ Quit to desktop ───────────▶ CONFIRM
+                                 ├─ Quit to desktop ───────────▶ CONFIRM
+                                 └─ Phone card (top right) ─▶ PHONE (the Connect portal modal, docs/PHONE.md)
 in game ── Tab / I / pad Back ──▶ INVENTORY (full screen dim, same modal)
                                      └─ drop a non-stackable outside ─▶ CONFIRM
 world: crate (hold E) ──▶ INVENTORY with the crate panel

@@ -1,0 +1,18 @@
+{
+  "_doc": "Connect portal (docs/PHONE.md 'Phone flow'): a centred modal on the screen stack (SCR_PHONE) over the main menu or the pause menu. The QR code on the left, steps / URL / status / buttons on the right.",
+  "nodes": [
+    { "id": "root", "safe": true },
+    { "id": "dialog", "parent": "root", "anchor": "center", "w": "@ph_dialog_w", "h": "@ph_dialog_h", "dir": "column", "align": "stretch", "pad": ["@mm_gap_lg", "@mm_gap_lg", "@mm_gap_lg", "@mm_gap_lg"], "gap": "@mm_gap" },
+    { "id": "title", "parent": "dialog", "h": "@mm_title_h" },
+    { "id": "body", "parent": "dialog", "flex": 1, "dir": "row", "align": "stretch", "gap": "@mm_gap_lg" },
+    { "id": "qr", "parent": "body", "w": "@ph_qr" },
+    { "id": "side", "parent": "body", "flex": 1, "dir": "column", "align": "stretch", "gap": "@mm_gap" },
+    { "id": "steps", "parent": "side", "flex": 1 },
+    { "id": "url", "parent": "side", "h": "@ph_url_h" },
+    { "id": "status", "parent": "side", "h": "@mm_row_h" },
+    { "id": "buttons", "parent": "dialog", "h": "@mm_button_h", "dir": "row", "align": "stretch", "gap": "@mm_gap" },
+    { "id": "spacer", "parent": "buttons", "flex": 1 },
+    { "id": "decline", "parent": "buttons", "w": "@ph_button_w" },
+    { "id": "close", "parent": "buttons", "w": "@mm_button_w" }
+  ]
+}

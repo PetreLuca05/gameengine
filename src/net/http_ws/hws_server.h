@@ -4,6 +4,7 @@
 //   GET /ws?t=<token>      WebSocket: pairs with a one-time token (QR code) ...
 //   GET /ws?s=<session>    ... or resumes a paired session (page reload)
 //   GET /media/<id>/<name>?s=<session>[&dl=1]   a photo / video registered by the game
+//   GET /ping?s=<session>  200: the session is valid (the page reconnects), 403: it ended
 //   GET /ca.crt            the local root certificate (DER), also on the plain HTTP helper port
 // The helper port (http_port) serves /ca.crt and redirects everything else to the HTTPS port.
 // No file system paths are reachable: only the page and the registered media list.
@@ -31,6 +32,7 @@ typedef struct HwsConfig {
     const void *page;         // companion page bytes (copied)
     size_t page_len;
     u64 token_ttl_ms;         // pairing token lifetime (default 120 s)
+    u64 session_ttl_ms;       // paired session lifetime, renewed on every resume (0 = no expiry)
     int max_message;          // largest accepted WebSocket message (default 64 KB)
     int max_conns;            // default 16
 } HwsConfig;
@@ -67,6 +69,10 @@ void hws_close(HwsServer *s, int conn);
 // Pairing (thread safe wrappers around hws_auth.h). issue: copies the token into out.
 bool hws_issue_token(HwsServer *s, int owner, char out[HWS_KEY_CHARS + 1]);
 void hws_unpair(HwsServer *s, int owner);       // revokes the session and closes its sockets
+void hws_disconnect(HwsServer *s, int owner);   // closes its sockets (4002), the session stays valid
+// The previous run's paired phone (persisted key): valid for ttl_ms (0 = no expiry).
+bool hws_restore_session(HwsServer *s, int owner, const char *session, u64 ttl_ms);
+bool hws_session_key(HwsServer *s, int owner, char out[HWS_KEY_CHARS + 1]);   // false: not paired
 float hws_token_remaining(HwsServer *s, int owner);
 bool hws_owner_paired(HwsServer *s, int owner);
 

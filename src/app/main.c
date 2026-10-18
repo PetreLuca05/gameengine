@@ -291,6 +291,7 @@ int main(int argc, char **argv) {
         PROF_BEGIN("net");
         net_update((float)dt);
         lobby_net_update((float)dt);
+        phone_tick((float)dt);   // the phone server lives across menus and maps (docs/PHONE.md)
         PROF_END();
         PROF_BEGIN("game_frame");
         game_frame((float)dt);

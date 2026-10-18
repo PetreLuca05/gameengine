@@ -1,0 +1,32 @@
+{
+ "_doc": "Vista sequences (src/story/vista_seq.h has the schema; docs/STORY.md 'Vista'). Started by the chapter's {\"sequence\": name} actions; every name a chapter uses must exist here (tests/test_story.c). Points are the level's story points (tools/story/vista_gen.py writes the city ones). Power sectors: 45 deg of bearing from the city centre, 0 = N..NE, 1 = NE..E (Halden Tower, St. Aldric), 2 = E..SE, 7 = NW..N.",
+ "traffic_build": {"traffic": {"density": 0.8, "ramp": 240}},
+ "traffic_stall": {"traffic": {"stall": 0.85, "dark": 0.5, "ramp": 90}},
+ "halden_flicker": {"power": [{"t": 0, "sector": 1, "to": 1.6}]},
+ "heli_north_pass": {"heli": {"path": ["heli1_a", "heli1_b"], "duration": 45}},
+ "heli_crash": {
+  "heli": {"from": "heli2_a", "to": "vista_hospital", "approach": 260, "duration": 5.2, "crash": true},
+  "flash": [{"at": "vista_hospital", "t": 5.2, "time": 3.0, "size": 70}],
+  "fire": [{"at": "vista_hospital", "t": 5.2, "size": 18}],
+  "smoke": [{"at": "vista_hospital", "t": 5.2, "grow": 20, "rise": 2.5, "life": 40, "size": [8, 35], "rate": 1.2, "spread": 4}]
+ },
+ "birds_scatter": {"birds": {"scatter": true}},
+ "district_blackout": {"power": [
+  {"t": 0, "sector": 2, "to": 0.0, "fade": 2},
+  {"t": 4, "sector": 1, "to": 0.0, "fade": 1},
+  {"t": 9, "sector": 7, "to": 0.1, "fade": 3},
+  {"t": 15, "sector": 0, "to": 0.15, "fade": 3},
+  {"t": 20, "sector": 3, "to": 0.1, "fade": 4},
+  {"t": 20, "sector": 4, "to": 0.1, "fade": 4},
+  {"t": 22, "sector": 5, "to": 0.1, "fade": 4},
+  {"t": 24, "sector": 6, "to": 0.1, "fade": 4}
+ ]},
+ "smoke_aldric": {"smoke": [{"at": "smoke_hospital", "grow": 120, "rise": 3.5, "life": 80, "size": [20, 110], "rate": 1.4, "shade": [0.08, 0.32], "spread": 10}]},
+ "city_fires": {
+  "smoke": [{"at": "smoke_2", "grow": 90, "rise": 3.0, "life": 70, "size": [14, 80], "rate": 1.0, "spread": 8},
+            {"at": "smoke_3", "t": 25, "grow": 90, "rise": 3.0, "life": 70, "size": [12, 70], "rate": 1.0, "spread": 8}],
+  "fire": [{"at": "smoke_2", "size": 16}, {"at": "smoke_3", "t": 25, "size": 14}]
+ },
+ "lift_smoke": {"smoke": [{"at": "lift_smoke", "grow": 10, "rise": 0.25, "life": 14, "size": [0.4, 2.2], "rate": 3, "spread": 0.4, "drift": [0, 0.05], "shade": [0.15, 0.3]}]},
+ "stair_eye_screams": {"_doc": "Audio only (the chapter's actions); nothing in the vista."}
+}

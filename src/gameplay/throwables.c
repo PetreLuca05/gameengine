@@ -56,7 +56,7 @@ static void spawn_thrown(World *w, int slot, const PlayerSim *sim, u16 item, con
     vec3 eye = player_eye_pos(m);
     // Aim model (docs/AIM.md): from the throwing hand, converging on the camera ray's aim point (the
     // same muzzle-inside-geometry recovery as a gun), then a little loft over that line.
-    AimQuery q = weapon_aim_query(w, slot, m, NULL, dir_from_angles(m->yaw, m->pitch), 40.0f, 0.25f, 0);
+    AimQuery q = weapon_aim_query(w, slot, m, NULL, dir_from_angles(m->yaw, m->pitch), NULL, 0);
     q.hand = true;
     vec3 palm;
     if (chars_palm_world(w, w->players[slot].ent, 1, &palm)) {

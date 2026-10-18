@@ -33,17 +33,20 @@ launch ── splash (1.6 s, any key / click skips) ──▶ MAIN MENU
   │         ├─ Quick play (first public lobby with space and the same version, else hosts one)
   │         └─ Host on: Steam / LAN
   ├─ Player     3D preview (the scene camera frames the real character; drag / wheel / stick),
-  │             name (LAN name field offline), stats (stubs), loadout, "Preview in map lighting"
+  │             name (LAN name field offline), stats (stubs), loadout, "Preview in map lighting",
+  │             the Phone card (Connect ─▶ CONNECT PORTAL modal; docs/PHONE.md "Phone flow")
   ├─ Cosmetics  categories ▸ item grid (inventory slot widget, rarity strip, LOCKED) ▸ equip
   ├─ Maps       list (thumbnail, biome, size, players; test maps toggle) ▸ details ▸ Session:
   │             Season · Start time · Start weather · Dynamic weather ▸ Host on this map
   ├─ Settings   the game's settings screen (Engine Fidelity, Graphics, Controls, Crosshair,
   │             Audio, Character, Phone), applying live
   └─ Credits    rolling credits + third-party licences
-  footer: avatar · name · Online / Offline (LAN only) / LAN build · relay ping · version   patch notes
+  footer: avatar · name · phone glyph + status (click: the Connect portal) · Online / Offline (LAN
+          only) / LAN build · relay ping · version   patch notes
 
 LOBBY (the Play tab while in a session; Maps and Credits are locked, the tab reads "Lobby")
-  players (avatar, name colour, HOST, ready, mic stub, ping; host: Kick, Make host)
+  players (avatar, name colour, HOST, ready, phone icon (a paired real phone), mic stub, ping;
+           host: Kick, Make host)
   | map (host: selector, the map's season / time / weather come with it; others: Vote stub)
   | game settings (difficulty, max players, privacy, join a running game, PvP stub,
   |                season, start time, start weather, dynamic weather)   host edits, others read

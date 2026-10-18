@@ -214,6 +214,12 @@ static void test_ready_start(void) {
     L->state = LS_LOADING;
     LobbyIntent r0 = intent(LI_READY, 0, NULL);
     CHECK(lobby_host_intent(L, a, &r0, 5, map_ok, NULL).result == LR_INVALID, "no unready in game");
+    // The phone flag (docs/PHONE.md): cosmetic, accepted in any state, from anyone about themselves.
+    LobbyIntent p1 = intent(LI_PHONE, 1, NULL), p0 = intent(LI_PHONE, 0, NULL);
+    o = lobby_host_intent(L, a, &p1, 5, map_ok, NULL);
+    CHECK(o.result == LR_OK && o.changed && !o.chat && lobby_member(L, a)->phone && !lobby_member(L, b)->phone, "phone flag set while loading (no chat line)");
+    CHECK(lobby_host_intent(L, a, &p1, 5, map_ok, NULL).result == LR_IGNORED, "phone flag twice: ignored");
+    CHECK(lobby_host_intent(L, a, &p0, 5, map_ok, NULL).changed && !lobby_member(L, a)->phone, "phone flag cleared");
 
     // Map / settings: host only, validated.
     L->state = LS_LOBBY;
@@ -313,6 +319,7 @@ static void test_wire(void) {
     u8 a = lobby_host_add(L, "Alice", 76561198000000002ull, "steam:2", "76561198000000002", 1, 0, why, sizeof(why));
     lobby_member(L, a)->ready = true;
     lobby_member(L, a)->ping_ms = 42;
+    lobby_member(L, a)->phone = true;
     dg_strcpy(L->settings.weather, sizeof(L->settings.weather), "light_rain");
     L->settings.season = 2;
     L->settings.start_hour = 21;
@@ -331,6 +338,7 @@ static void test_wire(void) {
     CHECK(r_u8(&r) == LOP_SNAPSHOT && lobby_read_snapshot(&r, &C), "snapshot decodes");
     CHECK(C.local_id == a && lobby_count(&C) == 2 && lobby_member(&C, a)->ready && lobby_member(&C, a)->ping_ms == 42, "members replicated");
     CHECK(lobby_member(&C, a)->steam_id == 76561198000000002ull && lobby_member(&C, 0)->host, "steam id + host flag");
+    CHECK(lobby_member(&C, a)->phone && !lobby_member(&C, 0)->phone, "phone flag replicated");
     CHECK(!memcmp(&C.settings, &L->settings, sizeof(LobbySettings)), "settings replicated (season, hour, weather, flags)");
     CHECK(C.settings.foliage_pct == 70, "foliage density rule replicated (%d)", C.settings.foliage_pct);
     CHECK(C.chat_count == 1, "local chat kept");

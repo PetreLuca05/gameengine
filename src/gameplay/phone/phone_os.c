@@ -1,6 +1,7 @@
 // Phone OS: flow, apps, layout, assets (see phone_os.h, docs/PHONE.md "Phone flow").
 #include "phone_os.h"
 #include "cJSON.h"
+#include <ctype.h>
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -8,12 +9,21 @@
 
 static const char *k_apps[PAPP_COUNT] = { "off", "portal", "home", "camera", "gallery" };
 static const char *k_flows[] = { "idle", "pairing", "local", "paired", "lost" };
+static const char *k_modes[] = { "unset", "ingame", "device" };
+static const char *k_cards[] = { "not_connected", "waiting", "connected", "ingame" };
 
 const char *phone_app_name(int a) { return a >= 0 && a < PAPP_COUNT ? k_apps[a] : "?"; }
 const char *phone_flow_name(int f) { return f >= 0 && f <= PFLOW_LOST ? k_flows[f] : "?"; }
+const char *phone_mode_name(int m) { return m >= 0 && m <= PMODE_DEVICE ? k_modes[m] : "?"; }
+const char *phone_card_name(int c) { return c >= 0 && c <= PCARD_INGAME ? k_cards[c] : "?"; }
 int phone_app_from_name(const char *s) {
     for (int i = 0; s && i < PAPP_COUNT; i++)
         if (!strcmp(s, k_apps[i])) return i;
+    return -1;
+}
+int phone_mode_from_name(const char *s) {
+    for (int i = 0; s && i <= PMODE_DEVICE; i++)
+        if (!strcmp(s, k_modes[i])) return i;
     return -1;
 }
 
@@ -21,114 +31,107 @@ static void set_reason(PhoneOs *os, const char *r) { snprintf(os->reason, sizeof
 
 // ------------------------------------------------------------------ flow
 
+// The flow follows the state: a device drives the phone, else the portal waits for one, else the
+// held phone is the in-game phone.
+static void refresh(PhoneOs *os) {
+    if (os->device) os->flow = PFLOW_PAIRED;
+    else if (os->portal) os->flow = PFLOW_PAIRING;
+    else if (os->equipped) os->flow = PFLOW_LOCAL;
+    else os->flow = PFLOW_IDLE;
+}
+
+static PhoneApp open_app(PhoneApp a) { return a == PAPP_PORTAL || a == PAPP_OFF ? PAPP_HOME : a; }
+
 void phone_os_init(PhoneOs *os) {
     memset(os, 0, sizeof(*os));
     os->last_app = PAPP_HOME;
     os->viewer = -1;
     os->viewer_zoom = 1.0f;
     os->battery = 0.86f;
+    os->portal_connected_t = -1.0f;
 }
 
-static void to_portal(PhoneOs *os) {
-    os->app = PAPP_PORTAL;
-    os->pair_t = 0;
-}
-
-bool phone_os_equip(PhoneOs *os, bool auto_pair, bool device_connected) {
+void phone_os_equip(PhoneOs *os) {
     os->equipped = true;
-    if (device_connected) {
-        os->flow = PFLOW_PAIRED;
-        os->app = os->last_app;
-        return false;
-    }
-    switch (os->flow) {
-    case PFLOW_LOCAL: os->app = os->last_app; return false;
-    case PFLOW_LOST: to_portal(os); return false;   // the page may resume with its session; Reconnect issues a new code
-    case PFLOW_PAIRED:   // the device went away while the phone was down
-        os->flow = PFLOW_LOST;
-        to_portal(os);
-        return false;
-    default: break;
-    }
-    if (!auto_pair) {
-        os->flow = PFLOW_LOCAL;
-        set_reason(os, "Auto-pair is off");
-        os->app = os->last_app;
-        return false;
-    }
-    os->flow = PFLOW_PAIRING;
-    to_portal(os);
-    return true;
+    os->app = open_app(os->last_app);
+    refresh(os);
 }
 
 void phone_os_unequip(PhoneOs *os) {
     os->equipped = false;
-    if (os->app != PAPP_PORTAL && os->app != PAPP_OFF) os->last_app = os->app;
+    if (os->app != PAPP_OFF) os->last_app = open_app(os->app);
     os->app = PAPP_OFF;
-    // Pairing that never finished starts over on the next equip (a new code).
-    if (os->flow == PFLOW_PAIRING) os->flow = PFLOW_IDLE;
+    refresh(os);
 }
 
-static void to_local(PhoneOs *os, const char *why) {
-    os->flow = PFLOW_LOCAL;
-    set_reason(os, why);
-    if (os->equipped) os->app = os->last_app == PAPP_PORTAL || os->last_app == PAPP_OFF ? PAPP_HOME : os->last_app;
+bool phone_os_portal_open(PhoneOs *os) {
+    os->portal = true;
+    os->portal_t = 0;
+    os->portal_connected_t = -1.0f;
+    set_reason(os, "");
+    refresh(os);
+    return !os->device;
 }
 
-void phone_os_server_failed(PhoneOs *os, const char *why) {
-    if (os->flow == PFLOW_PAIRING || os->flow == PFLOW_IDLE) to_local(os, why && why[0] ? why : "The phone server could not start");
+void phone_os_portal_close(PhoneOs *os) {
+    os->portal = false;
+    refresh(os);
 }
 
-void phone_os_tick(PhoneOs *os, float dt, float pair_timeout, float drain_per_s) {
-    if (os->equipped) os->battery = fmaxf(0.05f, os->battery - drain_per_s * dt);
-    if (os->flow != PFLOW_PAIRING || !os->equipped) return;
-    os->pair_t += dt;
-    if (pair_timeout > 0 && os->pair_t >= pair_timeout) to_local(os, "No device connected in time");
+void phone_os_server_failed(PhoneOs *os, const char *why) { set_reason(os, why && why[0] ? why : "The phone server could not start"); }
+
+void phone_os_decline(PhoneOs *os) {
+    if (os->device) return;
+    os->mode = PMODE_INGAME;
+    os->portal = false;
+    set_reason(os, "");
+    refresh(os);
 }
 
 void phone_os_connected(PhoneOs *os) {
-    os->flow = PFLOW_PAIRED;
+    if (os->portal && !os->device) os->portal_connected_t = os->portal_t;
+    os->device = true;
+    os->mode = PMODE_DEVICE;
     set_reason(os, "");
-    if (os->equipped && (os->app == PAPP_PORTAL || os->app == PAPP_OFF)) os->app = os->last_app == PAPP_PORTAL || os->last_app == PAPP_OFF ? PAPP_HOME : os->last_app;
+    refresh(os);
 }
 
-void phone_os_disconnected(PhoneOs *os) {
-    if (os->flow != PFLOW_PAIRED) return;
-    os->flow = PFLOW_LOST;
-    if (os->equipped) {
-        if (os->app != PAPP_PORTAL && os->app != PAPP_OFF) os->last_app = os->app;
-        to_portal(os);
-    }
+bool phone_os_disconnected(PhoneOs *os) {
+    if (!os->device) return false;
+    os->device = false;
+    set_reason(os, "Phone disconnected");
+    refresh(os);
+    return os->equipped;
 }
 
-void phone_os_decline(PhoneOs *os) {
-    if (os->flow == PFLOW_PAIRED) return;
-    to_local(os, "");
+void phone_os_disconnect(PhoneOs *os) {
+    os->device = false;
+    os->mode = PMODE_INGAME;
+    set_reason(os, "");
+    refresh(os);
 }
 
-void phone_os_cancel(PhoneOs *os) {
-    if (os->flow == PFLOW_PAIRING) os->flow = PFLOW_IDLE;
+void phone_os_forget(PhoneOs *os) {
+    os->device = false;
+    os->mode = PMODE_UNSET;
+    set_reason(os, "");
+    refresh(os);
 }
 
-bool phone_os_reconnect(PhoneOs *os) {
-    if (os->flow == PFLOW_PAIRED) return false;
-    os->flow = PFLOW_PAIRING;
-    if (os->equipped) {
-        if (os->app != PAPP_PORTAL && os->app != PAPP_OFF) os->last_app = os->app;
-        to_portal(os);
-    }
-    return true;
+void phone_os_tick(PhoneOs *os, float dt, float drain_per_s) {
+    if (os->equipped) os->battery = fmaxf(0.05f, os->battery - drain_per_s * dt);
+    if (os->portal) os->portal_t += dt;
 }
 
 void phone_os_open(PhoneOs *os, PhoneApp app) {
-    if (!os->equipped || os->app == PAPP_PORTAL || app <= PAPP_PORTAL || app >= PAPP_COUNT) return;
+    if (!os->equipped || app <= PAPP_PORTAL || app >= PAPP_COUNT) return;
     if (app == PAPP_GALLERY && os->app != PAPP_GALLERY) { os->viewer = -1; os->viewer_zoom = 1.0f; }
     os->app = app;
     os->last_app = app;
 }
 
 bool phone_os_back(PhoneOs *os) {
-    if (!os->equipped || os->app == PAPP_PORTAL || os->app == PAPP_OFF) return false;
+    if (!os->equipped || os->app == PAPP_OFF) return false;
     if (os->app == PAPP_GALLERY && os->viewer >= 0) {
         os->viewer = -1;
         os->viewer_zoom = 1.0f;
@@ -139,8 +142,83 @@ bool phone_os_back(PhoneOs *os) {
     return true;
 }
 
-bool phone_os_panel(const PhoneOs *os) { return os->equipped && os->flow != PFLOW_PAIRED; }
+bool phone_os_panel(const PhoneOs *os) { return os->equipped && !os->device; }
 bool phone_os_ui_only(PhoneApp app) { return app != PAPP_CAMERA; }
+
+PhoneCard phone_os_card(const PhoneOs *os) {
+    if (os->device) return PCARD_CONNECTED;
+    if (os->portal) return PCARD_WAITING;
+    if (os->mode == PMODE_INGAME) return PCARD_INGAME;
+    return PCARD_NOT_CONNECTED;
+}
+
+static const char *find_ci(const char *s, const char *w) {
+    size_t n = strlen(w);
+    for (; s && *s; s++) {
+        size_t i = 0;
+        while (i < n && s[i] && tolower((unsigned char)s[i]) == tolower((unsigned char)w[i])) i++;
+        if (i == n) return s;
+    }
+    return NULL;
+}
+
+void phone_device_name(const char *ua, const char *model, char *out, size_t n) {
+    if (!ua) ua = "";
+    char dev[48] = "";
+    // Android: "Linux; Android 14; Pixel 7 Build/..." or the reduced "Android 10; K" (no model).
+    const char *an = find_ci(ua, "Android");
+    if (model && model[0]) snprintf(dev, sizeof(dev), "%.40s", model);
+    else if (find_ci(ua, "iPhone")) snprintf(dev, sizeof(dev), "iPhone");
+    else if (find_ci(ua, "iPad") || (find_ci(ua, "Macintosh") && find_ci(ua, "Mobile/"))) snprintf(dev, sizeof(dev), "iPad");
+    else if (an) {
+        const char *semi = strchr(an, ';');
+        if (semi) {
+            const char *m = semi + 1;
+            while (*m == ' ') m++;
+            size_t len = strcspn(m, ";)");
+            const char *b = find_ci(m, " Build/");
+            if (b && (size_t)(b - m) < len) len = (size_t)(b - m);
+            if (len > 1 && len < 40) snprintf(dev, sizeof(dev), "%.*s", (int)len, m);
+        }
+        if (!dev[0]) snprintf(dev, sizeof(dev), "%s", find_ci(ua, "Mobile") ? "Android phone" : "Android tablet");
+    } else if (find_ci(ua, "Windows")) snprintf(dev, sizeof(dev), "Windows PC");
+    else if (find_ci(ua, "Macintosh")) snprintf(dev, sizeof(dev), "Mac");
+    else if (find_ci(ua, "Linux")) snprintf(dev, sizeof(dev), "Linux PC");
+    else snprintf(dev, sizeof(dev), "Phone");
+    const char *br = find_ci(ua, "SamsungBrowser") ? "Samsung Internet" : find_ci(ua, "Firefox") || find_ci(ua, "FxiOS") ? "Firefox"
+                   : find_ci(ua, "Edg") ? "Edge" : find_ci(ua, "CriOS") || find_ci(ua, "Chrome") ? "Chrome" : find_ci(ua, "Safari") ? "Safari" : NULL;
+    if (br) snprintf(out, n, "%s \xC2\xB7 %s", dev, br);
+    else snprintf(out, n, "%s", dev);
+}
+
+char *phone_device_store_write(const PhoneDeviceStore *d) {
+    cJSON *j = cJSON_CreateObject();
+    cJSON_AddStringToObject(j, "session", d->session);
+    cJSON_AddStringToObject(j, "device", d->name);
+    cJSON_AddNumberToObject(j, "paired", (double)d->paired);
+    cJSON_AddNumberToObject(j, "expires", (double)d->expires);
+    char *s = cJSON_Print(j);
+    cJSON_Delete(j);
+    return s;
+}
+
+bool phone_device_store_read(const char *json, PhoneDeviceStore *out, i64 now) {
+    memset(out, 0, sizeof(*out));
+    cJSON *j = json ? cJSON_Parse(json) : NULL;
+    if (!j) return false;
+    const cJSON *s = cJSON_GetObjectItemCaseSensitive(j, "session"), *n = cJSON_GetObjectItemCaseSensitive(j, "device");
+    const cJSON *p = cJSON_GetObjectItemCaseSensitive(j, "paired"), *e = cJSON_GetObjectItemCaseSensitive(j, "expires");
+    bool ok = cJSON_IsString(s) && strlen(s->valuestring) > 0 && strlen(s->valuestring) < sizeof(out->session);
+    if (ok) {
+        snprintf(out->session, sizeof(out->session), "%s", s->valuestring);
+        snprintf(out->name, sizeof(out->name), "%s", cJSON_IsString(n) ? n->valuestring : "");
+        out->paired = cJSON_IsNumber(p) ? (i64)p->valuedouble : 0;
+        out->expires = cJSON_IsNumber(e) ? (i64)e->valuedouble : 0;
+        if (out->expires && now >= out->expires) ok = false;
+    }
+    cJSON_Delete(j);
+    return ok;
+}
 
 // ------------------------------------------------------------------ layout
 
@@ -156,13 +234,6 @@ int phone_os_layout(const PhoneLayoutIn *in, PhoneHit *out, int max) {
     const float W = PHONE_DESIGN_W, H = PHONE_DESIGN_H;
     int n = 0;
     switch (in->app) {
-    case PAPP_PORTAL: {
-        float bw = W - 96, bh = 84;
-        if (in->flow == PFLOW_LOST) n = add(out, n, max, PB_RECONNECT, 0, 48, H - 420, bw, bh);
-        n = add(out, n, max, PB_DECLINE, 0, 48, H - 316, bw, bh);
-        n = add(out, n, max, PB_CANCEL, 0, 48, H - 212, bw, bh);
-        return n;
-    }
     case PAPP_HOME: {
         int cols = in->columns > 0 ? in->columns : 4;
         float pad = 32, cw = (W - 2 * pad) / (float)cols, ch = 176, y0 = 520;
@@ -414,6 +485,7 @@ char *phone_page_build(const char *page, size_t page_len, const char *theme_json
     size_t n = 0;
     if (!at) {
         memcpy(o, page, page_len);
+        o[page_len] = 0;
         *out_len = page_len;
         return o;
     }
@@ -436,6 +508,7 @@ char *phone_page_build(const char *page, size_t page_len, const char *theme_json
     size_t rest = page_len - pre - (sizeof(marker) - 1);
     memcpy(o + n, at + sizeof(marker) - 1, rest);
     n += rest;
+    o[n] = 0;   // a C string too (out_len excludes the terminator)
     *out_len = n;
     return o;
 }

@@ -967,6 +967,12 @@
    "reason": "Phone companion transport (PHONE.md): personal device setup.",
    "category": "phone"
   },
+  "phone_device_days": {
+   "class": "EDITABLE",
+   "ui": "Phone",
+   "reason": "Phone companion: personal device / stream preferences; the in-game item behaves the same for everyone.",
+   "category": "phone"
+  },
   "phone_exposure": {
    "class": "EDITABLE",
    "ui": "Phone",
@@ -998,12 +1004,6 @@
    "category": "phone"
   },
   "phone_invert_yaw": {
-   "class": "EDITABLE",
-   "ui": "Phone",
-   "reason": "Phone companion: personal device / stream preferences; the in-game item behaves the same for everyone.",
-   "category": "phone"
-  },
-  "phone_pair_timeout": {
    "class": "EDITABLE",
    "ui": "Phone",
    "reason": "Phone companion: personal device / stream preferences; the in-game item behaves the same for everyone.",
@@ -1129,6 +1129,18 @@
    "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting.",
    "category": "player"
   },
+  "pl_climb_facing_cone": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting.",
+   "category": "player"
+  },
+  "pl_climb_hold_to_jump": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting.",
+   "category": "player"
+  },
   "pl_coyote_time": {
    "class": "LOCKED+RULE",
    "ui": "Lobby rules",
@@ -1160,6 +1172,24 @@
    "category": "player"
   },
   "pl_hang_reach": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting.",
+   "category": "player"
+  },
+  "pl_hang_shimmy_speed": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting.",
+   "category": "player"
+  },
+  "pl_hang_stamina": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting.",
+   "category": "player"
+  },
+  "pl_hang_two_handed": {
    "class": "LOCKED+RULE",
    "ui": "Lobby rules",
    "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting.",
@@ -1217,6 +1247,12 @@
    "class": "LOCKED",
    "ui": "—",
    "reason": "Noclip speed: dev.",
+   "category": "player"
+  },
+  "pl_regrab_cooldown": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting.",
    "category": "player"
   },
   "pl_slow_walk_speed": {
@@ -2377,6 +2413,12 @@
    "reason": "Story saves folder (empty = the user's pref dir); tests point it at a scratch folder.",
    "category": "story"
   },
+  "story_vista_life": {
+   "class": "EDITABLE",
+   "ui": "Console",
+   "reason": "Story vista life (helicopters, smoke, traffic, birds) on or off; cosmetic, this machine only (the story does not depend on it).",
+   "category": "story"
+  },
   "sv_cheats": {
    "class": "LOCKED+RULE",
    "ui": "Lobby rules",
@@ -2762,6 +2804,12 @@
    "category": "weapons"
   },
   "wpn_ads_sway": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting.",
+   "category": "weapons"
+  },
+  "wpn_barrel_tolerance": {
    "class": "LOCKED+RULE",
    "ui": "Lobby rules",
    "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting.",
