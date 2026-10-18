@@ -124,17 +124,50 @@ static bool create_image(VgTextures *t, VgOwnTex *o, u32 w, u32 h, u32 levels, c
     return true;
 }
 
-bool vg_tex_init(VgTextures *t, const VgContext *ctx) {
-    memset(t, 0, sizeof(*t));
-    t->ctx = ctx;
+static bool create_samplers(const VgContext *ctx, float anisotropy, VkSampler *clamp, VkSampler *repeat) {
     VkSamplerCreateInfo si = { VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
     si.magFilter = si.minFilter = VK_FILTER_LINEAR;
     si.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
     si.addressModeU = si.addressModeV = si.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
     si.maxLod = 16.0f;
-    if (vkCreateSampler(ctx->device, &si, NULL, &t->clamp) != VK_SUCCESS) return false;
+    if (anisotropy > 1.0f) {
+        si.anisotropyEnable = VK_TRUE;
+        si.maxAnisotropy = anisotropy;
+    }
+    if (vkCreateSampler(ctx->device, &si, NULL, clamp) != VK_SUCCESS) return false;
     si.addressModeU = si.addressModeV = si.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    if (vkCreateSampler(ctx->device, &si, NULL, &t->repeat) != VK_SUCCESS) return false;
+    if (vkCreateSampler(ctx->device, &si, NULL, repeat) != VK_SUCCESS) {
+        vkDestroySampler(ctx->device, *clamp, NULL);
+        return false;
+    }
+    return true;
+}
+
+void vg_tex_set_anisotropy(VgTextures *t, float anisotropy) {
+    if (!t->ctx) return;
+    if (anisotropy <= 1.0f) anisotropy = 0.0f;
+    if (anisotropy == t->anisotropy) return;
+    VkSampler clamp, repeat;
+    if (!create_samplers(t->ctx, anisotropy, &clamp, &repeat)) { log_warn("vgeo: texture samplers not recreated"); return; }
+    for (u32 i = 0; i < VG_TEX_COUNT; i++) {
+        VgTexEntry *e = &t->e[i];
+        VkSampler s = e->sampler == t->clamp ? clamp : e->sampler == t->repeat ? repeat : VK_NULL_HANDLE;
+        if (!s || !e->view) continue;
+        e->sampler = s;
+    }
+    vkDestroySampler(t->ctx->device, t->clamp, NULL);
+    vkDestroySampler(t->ctx->device, t->repeat, NULL);
+    t->clamp = clamp;
+    t->repeat = repeat;
+    t->anisotropy = anisotropy;
+    for (u32 i = 0; i < VG_TEX_COUNT; i++) t->ver[i]++;   // every entry: empty ones are written with clamp / repeat too
+    t->gen++;
+}
+
+bool vg_tex_init(VgTextures *t, const VgContext *ctx) {
+    memset(t, 0, sizeof(*t));
+    t->ctx = ctx;
+    if (!create_samplers(ctx, 0.0f, &t->clamp, &t->repeat)) return false;
     VgOwnTex w;
     memset(&w, 0, sizeof(w));
     const u8 white[4] = { 255, 255, 255, 255 };

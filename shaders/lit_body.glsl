@@ -14,6 +14,12 @@ layout(location = 3) in vec4 v_color;
 #ifndef LIT_TEX
 #define LIT_TEX(uv) texture(tex, (uv))
 #endif
+// A triplanar sample: uv from v_world, dx / dy its screen gradients from LIT_DPDX / LIT_DPDY (the vgeo
+// lit resolve's analytic dP; it has no valid quad derivatives). Default: LIT_TEX (implicit derivatives,
+// the gradient arguments are dropped unexpanded).
+#ifndef LIT_TEX_W
+#define LIT_TEX_W(uv, dx, dy) LIT_TEX(uv)
+#endif
 
 layout(set = 1, binding = 0) uniform sampler2D tex;
 #ifdef LIT_SURFACES
@@ -131,7 +137,8 @@ void main() {
             float s = MAT_PARAMS.w;
             vec3 w = abs(n);
             w /= (w.x + w.y + w.z);
-            t = LIT_TEX(v_world.zy * s) * w.x + LIT_TEX(v_world.xz * s) * w.y + LIT_TEX(v_world.xy * s) * w.z;
+            t = LIT_TEX_W(v_world.zy * s, LIT_DPDX.zy * s, LIT_DPDY.zy * s) * w.x + LIT_TEX_W(v_world.xz * s, LIT_DPDX.xz * s, LIT_DPDY.xz * s) * w.y +
+                LIT_TEX_W(v_world.xy * s, LIT_DPDX.xy * s, LIT_DPDY.xy * s) * w.z;
         } else {
             t = LIT_TEX(v_uv * max(MAT_PARAMS.w, 1e-3));
         }

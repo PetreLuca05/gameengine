@@ -53,6 +53,10 @@ TextureId assets_texture(const char *name);     // 0 if unknown
 
 TextureId texture_load_file(const char *path, bool srgb);   // PNG/JPG/TGA/BMP or .ktx2
 TextureId texture_load_ktx2(const char *path);
+// r_texture_quality went up: the world textures (glTF maps, manifest textures) decode their sources
+// again for the levels the renderer dropped (docs/TEXTURE_MIPS.md). Cheap when there is nothing to do;
+// the main loop calls it every frame, between frames.
+void assets_reload_textures(void);
 bool model_load_gltf(const char *path, Model *out);
 
 #endif

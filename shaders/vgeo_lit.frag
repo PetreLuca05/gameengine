@@ -12,11 +12,15 @@
 #include "common.glsl"
 #include "vgeo/vg_decode.glsl"
 #include "vgeo/vg_resolve.glsl"
-// Material textures: the vgeo texture table (binding 23 of set 3, vgeo_tex.h; unused entries white).
-#define LIT_TEX(uv) texture(vg_tex[nonuniformEXT(g_tex)], (uv))
+// Material textures: the vgeo texture table (binding 23 of set 3, vgeo_tex.h; unused entries white),
+// with the resolve's analytic gradients (vg_resolve.glsl: no quad derivatives in a full-screen pass).
+#define LIT_TEX(uv) vg_tex_map(g_tex, (uv))
+#define LIT_TEX_W(uv, dx, dy) vg_tex_grad(g_tex, (uv), (dx), (dy))
+#define LIT_DPDX g_dp_dx
+#define LIT_DPDY g_dp_dy
 // glTF maps (shaders/pbr_maps.glsl): the material's texture table entries, the triangle's tangent frame.
 #define PBR_MAPS
-#define PBR_TEX(slot, uv) texture(vg_tex[nonuniformEXT(g_pbr_tex[slot])], (uv))
+#define PBR_TEX(slot, uv) vg_tex_map(g_pbr_tex[slot], (uv))
 #define PBR_PARAMS g_pbr
 #define PBR_TANGENT_FRAME(n) vg_tangent_frame(n)
 #define LIT_CUSTOM_INPUTS
@@ -28,6 +32,6 @@
 #define LIT_COVER
 #define LIT_COVER_IN g_cover
 #define LIT_COVER_PIVOT g_cover_pivot
-#define COVER_TEX(uv) texture(vg_tex[nonuniformEXT(g_pbr_tex.x)], (uv))
+#define COVER_TEX(uv) vg_tex_map(g_pbr_tex.x, (uv))
 #define LIT_PRE_MAIN if (!vg_resolve_pixel()) discard; gl_FragDepth = g_depth;
 #include "lit_body.glsl"

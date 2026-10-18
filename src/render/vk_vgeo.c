@@ -240,14 +240,21 @@ static void tex_use(TextureId id) {
 
 void vkg_samplers_changed(void) {
     memset(G.tex_entered, 0, sizeof(G.tex_entered));
+    if (G.cull.tex.ctx) vg_tex_set_anisotropy(&G.cull.tex, vkr_material_anisotropy());   // r_aniso on the module's own textures too
     vkc_samplers_changed();
+}
+
+void vkg_texture_replaced(u32 id) {
+    if (!id || id >= MAX_TEXTURES || !G.tex_entered[id]) return;
+    vg_tex_set(&G.cull.tex, id, VK_NULL_HANDLE, VK_NULL_HANDLE, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    G.tex_entered[id] = 0;
 }
 
 // Start of a frame: textures wanted and ready enter the table (the cull sets pick them up when recorded).
 static void tex_update(void) {
     for (u32 i = 1; i < MAX_TEXTURES; i++)
         if (G.tex_wanted[i] && !G.tex_entered[i] && R->textures[i].used && R->textures[i].ready) {
-            vg_tex_set(&G.cull.tex, i, R->textures[i].view, R->sampler_linear, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+            vg_tex_set(&G.cull.tex, i, R->textures[i].view, vkr_texture_sampler(i), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
             G.tex_entered[i] = 1;
         }
 }
@@ -421,6 +428,7 @@ void vkg_init(void) {
         vg_cull_shutdown(&G.cull);
         return;
     }
+    vg_tex_set_anisotropy(&G.cull.tex, vkr_material_anisotropy());   // before the foliage support takes the samplers
     for (u32 f = 0; f < FRAMES_IN_FLIGHT; f++) G.dbg_rb[f] = vgc_buffer(c, 8ull * 2 * VKG_DEBUG_MAX + 16, VK_BUFFER_USAGE_TRANSFER_DST_BIT, VGM_READBACK);
     if (!vg_raster_init(&G.raster, c, &G.cull)) {
         log_error("vgeo: rasterisers unavailable");

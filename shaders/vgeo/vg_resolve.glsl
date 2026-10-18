@@ -8,6 +8,9 @@
 // glTF maps (docs/PBR.md): the material's map textures + parameters for shaders/pbr_maps.glsl and the
 // triangle's tangent frame from its positions and uvs (exact per triangle; no screen derivatives,
 // which cross triangle and instance edges in a full-screen resolve).
+// Texture LOD: the same holds for the mip / anisotropy footprint, so material samples go through
+// textureGrad with the uv's analytic screen gradients (the barycentrics one pixel right / down on the
+// same triangle), never implicit derivatives (blurry or sparkling texels along every triangle edge).
 #include "vgeo/vg_impostor.glsl"
 vec3 v_world, v_normal;
 vec2 v_uv;
@@ -22,6 +25,16 @@ uvec4 g_pbr;                // PBR_PARAMS (pbr_maps.glsl)
 vec3 g_tangent, g_bitangent;   // world dP/du, dP/dv of the triangle (0: no frame)
 vec4 g_cover;               // ground cover (MAT_COVER, shaders/cover.glsl): x root -> tip, y card hash, z clump hash
 vec3 g_cover_pivot;         // the instance's position (the clump's root)
+vec2 g_duv_dx, g_duv_dy;    // v_uv one pixel right / down minus v_uv (0: impostors, empty pixels)
+vec3 g_dp_dx, g_dp_dy;      // the same for v_world (triplanar uvs)
+
+// A material texture (albedo, glTF maps, cover nta) at the material uv v_uv x tex_scale.
+vec4 vg_tex_map(uint i, vec2 uv) {
+    float s = max(g_mat_params.w, 1e-3);
+    return textureGrad(vg_tex[nonuniformEXT(i)], uv, g_duv_dx * s, g_duv_dy * s);
+}
+// Any other uv, with its gradients (triplanar: v_world swizzles x the scale).
+vec4 vg_tex_grad(uint i, vec2 uv, vec2 dx, vec2 dy) { return textureGrad(vg_tex[nonuniformEXT(i)], uv, dx, dy); }
 
 // The tangent frame for pbr_normal: the triangle's T / B made orthogonal to the shading normal n
 // (directions kept: mirrored uvs stay mirrored).
@@ -90,6 +103,8 @@ void vg_resolve_defaults() {
     g_tangent = g_bitangent = vec3(0.0);
     g_cover = vec4(1.0, 0.0, 0.0, 0.0);
     g_cover_pivot = vec3(0.0);
+    g_duv_dx = g_duv_dy = vec2(0.0);
+    g_dp_dx = g_dp_dy = vec3(0.0);
 }
 
 bool vg_resolve_pixel() {
@@ -131,8 +146,15 @@ bool vg_resolve_pixel() {
     uvec3 t = vg_triangle(c, lo & ((1u << VG_VIS_TRI_BITS) - 1u));
     // Positions exactly as the rasterisers (vg_vertex_world: skinned instances re-skinned per vertex, WPO).
     vec3 w0 = vg_vertex_world(x, c, m, t.x), w1 = vg_vertex_world(x, c, m, t.y), w2 = vg_vertex_world(x, c, m, t.z);
-    vec3 b = vg_resolve_bary(V.raster_view_proj * vec4(w0, 1.0), V.raster_view_proj * vec4(w1, 1.0), V.raster_view_proj * vec4(w2, 1.0), pn, area);
+    vec4 c0 = V.raster_view_proj * vec4(w0, 1.0), c1 = V.raster_view_proj * vec4(w1, 1.0), c2 = V.raster_view_proj * vec4(w2, 1.0);
+    vec3 b = vg_resolve_bary(c0, c1, c2, pn, area);
+    // The neighbours' barycentrics on this triangle's plane (extrapolated past its edges): the gradients.
+    float area_x, area_y;
+    vec3 bx = vg_resolve_bary(c0, c1, c2, pn + vec2(2.0 * V.viewport.z, 0.0), area_x) - b;
+    vec3 by = vg_resolve_bary(c0, c1, c2, pn + vec2(0.0, 2.0 * V.viewport.w), area_y) - b;
     v_world = w0 * b.x + w1 * b.y + w2 * b.z;
+    g_dp_dx = w0 * bx.x + w1 * bx.y + w2 * bx.z;
+    g_dp_dy = w0 * by.x + w1 * by.y + w2 * by.z;
     vec3 n0 = vg_vertex_normal(c, m, t.x), n1 = vg_vertex_normal(c, m, t.y), n2 = vg_vertex_normal(c, m, t.z);
     vec3 prev_world = v_world;
     if (x.skin) {
@@ -149,6 +171,8 @@ bool vg_resolve_pixel() {
     else v_normal = normalize(vg_xf_dir(x, n0 * b.x + n1 * b.y + n2 * b.z));
     vec2 u0 = vg_vertex_uv(c, m, t.x), u1 = vg_vertex_uv(c, m, t.y), u2 = vg_vertex_uv(c, m, t.z);
     v_uv = u0 * b.x + u1 * b.y + u2 * b.z;
+    g_duv_dx = u0 * bx.x + u1 * bx.y + u2 * bx.z;
+    g_duv_dy = u0 * by.x + u1 * by.y + u2 * by.z;
     v_color = vg_vertex_color(c, m, t.x) * b.x + vg_vertex_color(c, m, t.y) * b.y + vg_vertex_color(c, m, t.z) * b.z;
     v_cur_clip = V.view_proj * vec4(v_world, 1.0);        // unjittered (velocity)
     v_prev_clip = V.prev_view_proj * vec4(prev_world, 1.0);

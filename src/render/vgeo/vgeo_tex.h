@@ -29,11 +29,16 @@ typedef struct VgTextures {
     VkImage white;
     VmaAllocation white_alloc;
     VkImageView white_view;
-    VkSampler clamp, repeat;     // trilinear, clamp to edge / repeat
+    VkSampler clamp, repeat;     // trilinear (+ anisotropic: vg_tex_set_anisotropy), clamp to edge / repeat
+    float anisotropy;            // 0 = off
 } VgTextures;
 
 bool vg_tex_init(VgTextures *t, const VgContext *ctx);
 void vg_tex_shutdown(VgTextures *t);
+// Anisotropic filtering on clamp / repeat (0: off; the creator enabled samplerAnisotropy): both are
+// recreated and the entries holding the old ones switch over. The caller waited for the device (the
+// old samplers are destroyed; whoever copied t->clamp / t->repeat elsewhere rewrites them).
+void vg_tex_set_anisotropy(VgTextures *t, float anisotropy);
 // Entry `index` samples `view` (NULL: white again) with `sampler` (NULL: t->repeat) in `layout`.
 void vg_tex_set(VgTextures *t, u32 index, VkImageView view, VkSampler sampler, VkImageLayout layout);
 // An RGBA8 texture of the module (index >= VG_TEX_GAME, 0 when full): `levels` mips packed one after
