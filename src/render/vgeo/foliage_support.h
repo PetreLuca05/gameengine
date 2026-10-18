@@ -3,7 +3,7 @@
 //   - WPO snippets: CPU mirror of shaders/vgeo/wpo.glsl and the declared bound of each (vgeo_wpo_max,
 //     applied by vgeo_scene_commit to every material and mesh bound)
 //   - instance fade / density (r_foliage_density, a fixed hash per instance) and the impostor switch:
-//     CPU mirrors of vg_foliage_alpha / vg_use_impostor
+//     the rules the classic renderer applies per instance (vgeo_foliage_alpha / vgeo_use_impostor)
 //   - placement chunks: the .vgp file (header, mesh names, cells, 32 B instances) and its loading into
 //     the scene's placement region (vgeo_scene_placement_*), foliage_query over the loaded cells
 //   - impostor atlases on the GPU (vgeo_impostor.h bakes them)

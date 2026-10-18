@@ -94,16 +94,16 @@ allow is greyed "requires &lt;level&gt;"; a row reads Custom when the cvars matc
 | Textures | texture_quality, aniso, terrain_quality |
 | Effects | vfx_quality, vfx_lighting, decal_max, precip_quality, water, lens_drops |
 | Foliage | foliage_density, foliage_wind |
-| View distance | lod_bias, impostor_px, vgeo_error_px, vgeo_shadow_error_px, vgeo_lod_px |
+| View distance | lod_bias, impostor_px, vgeo_shadow_error_px, vgeo_lod_px |
 
-Foliage density and the vgeo thresholds are era-owned: the era preset (`r_era`, `vk_vgeo.c
+Foliage density and the discrete LOD thresholds are era-owned: the era preset (`r_era`, `vk_vgeo.c
 era_detect`) also accepts a lower level's own value of the era, so these tiers keep the era.
 
 **Debug** (developer mode): Diagnostics (performance overlay), the full
 upscaler list (FSR 2 / DLSS slots), Post-processing & Effects (the legacy post preset, every
 screen-space / fog / DoF / bloom / lens / grain / exposure control, motion blur strength),
 Shadows & lighting (cascades, splits and the split bar, near plane, shadowmask, min caster, lamp /
-cloud / moon shadows), Geometry / textures / foliage (no Engine Fidelity card or era look any more: the Normal tab's Overall graphics quality picks the level; the vgeo renderer switch, textures,
+cloud / moon shadows), Geometry / textures / foliage (no Engine Fidelity card or era look any more: the Normal tab's Overall graphics quality picks the level; textures,
 aniso, density, impostors, terrain, character LOD / quality), Effects (particles, lit particles,
 decals), Sights (scope picture resolution, aiming DoF), Weather (rain / snow, puddles, water).
 

@@ -1,5 +1,5 @@
 {
-    "_comment": "LOD ranges and cross-fades (docs/LOD.md, src/render/lod_fade.c). Applies to the classic renderer (r_vgeo 0) and the systems it shares (characters, terrain, VFX spawn LOD); r_vgeo 1 and r_lod_legacy 1 keep the ranges from before. Every range = the value below x the Engine Fidelity tier (tiers) x the user's r_lod_bias against the level default x the era's multiplier. Reload: r_lod_reload.",
+    "_comment": "LOD ranges and cross-fades (docs/LOD.md, src/render/lod_fade.c). Applies to the classic renderer and the systems it shares (characters, terrain, VFX spawn LOD); r_lod_legacy 1 keeps the ranges from before. Every range = the value below x the Engine Fidelity tier (tiers) x the user's r_lod_bias against the level default x the era's multiplier. Reload: r_lod_reload.",
 
     "fade": {
         "_comment": "time: s, time-based cross-fades (characters, their shadows; r_lod_fade_time). band: octaves of projected size over which stateless instances cross-fade (classic LOD chains; r_lod_fade_band).",

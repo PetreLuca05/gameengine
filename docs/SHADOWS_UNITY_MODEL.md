@@ -142,7 +142,7 @@ fields are the host's render settings only.
   world units scaled by the texel). The scale is chosen so 1 / 1 matches the validated look of
   SHADOWS.md.
 - Skinned casters are always drawn two-sided into the sun's maps (thin cloth / hair).
-- vgeo placements carry Cast / Receive / layer per instance. The classic renderer (`r_vgeo 0`)
+- vgeo placements carry Cast / Receive / layer per instance. The classic renderer
   honours Cast Shadows and layers for them but has no per-instance Receive Shadows: a placement's
   `"receive_shadows": false` applies under vgeo only. Draw items (brushes, props) honour it on both.
 - Shadowmask modes are a stub until baked lighting exists.

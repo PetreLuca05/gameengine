@@ -321,7 +321,7 @@ buckles / zips / rings (hazmat up to sRGB 141).
 
 **At run time** `gpu_part_for` looks the atlases up by name (`<atlas>_normal`, `_orm`, `_emissive`); a
 skin without them draws as before. `draw_part` sets the maps with factors 1 (wet characters still gloss:
-roughness factor 0.37 when soaked). Both renderers sample them (docs/PBR.md "Skinned characters").
+roughness factor 0.37 when soaked). The skinned shaders sample them (docs/PBR.md "Skinned characters").
 `r_char_maps 0` turns them off (A/B), `r_char_normal_scale` scales the normal maps.
 
 Cost (RTX 3060 Ti, 1600x900, five textured characters near the camera, `r_char_maps` 1 vs 0 alternated):

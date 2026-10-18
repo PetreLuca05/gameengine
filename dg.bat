@@ -1,12 +1,14 @@
 @echo off
-rem Short launcher for the openable build:  dg [n^|c] [map]
-rem   dg            asks nanite / classic
-rem   dg n          nanite        dg c   classic
-rem   dg n vegetation   straight into a map (no splash / menu); "dg n handpose" opens the editor
-set R=%~1
-if /i "%R%"=="n" set R=nanite
-if /i "%R%"=="c" set R=classic
+rem Short launcher for the openable build:  dg [map]
+rem   dg              main menu
+rem   dg vegetation   straight into a map (no splash / menu); "dg handpose" opens the editor
+rem   dg n ... / dg c ...   the old renderer picks still work (ignored: the classic renderer is the only one)
+set M=%~1
+if /i "%M%"=="n" set M=%~2
+if /i "%M%"=="c" set M=%~2
+if /i "%M%"=="nanite" set M=%~2
+if /i "%M%"=="classic" set M=%~2
 set P="%~dp0openable builds\Deadground\Play.bat"
-if "%~2"=="" (call %P% %R%& goto :eof)
-if /i "%~2"=="handpose" (call %P% %R% --nomenu +scene handpose& goto :eof)
-call %P% %R% --nomenu +map %~2
+if "%M%"=="" (call %P%& goto :eof)
+if /i "%M%"=="handpose" (call %P% --nomenu +scene handpose& goto :eof)
+call %P% --nomenu +map %M%

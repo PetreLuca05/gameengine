@@ -468,7 +468,7 @@ static void apply_config(vec3 cam) {
     c->camera = cam;
     c->wind = V->wind;
     c->lighting = V->lighting->i != 0;
-    c->lod_smooth = lod_active();   // docs/LOD.md (r_vgeo 0): scaled, continuous spawn LOD
+    c->lod_smooth = lod_active();   // docs/LOD.md: scaled, continuous spawn LOD
     c->lod_dist_scale = lod_scale(LODC_VFX);
 }
 

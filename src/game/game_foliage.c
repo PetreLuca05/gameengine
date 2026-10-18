@@ -75,7 +75,7 @@ static void cmd_foliage_test_scatter(int argc, const char **argv) {
 }
 
 // foliage_grove [spacing=16]: every imported species (the Tree It trees and bushes, docs/VGEO.md "Tree
-// models") in rows across the foliage yard (x 80..360, z 130..230, facing the foliage_check camera at z 120),
+// models") in rows across the foliage yard (x 80..360, z 130..230, facing north from z 120),
 // 3 instances each with scale jitter, daisies scattered between them; placement chunks + trunk capsules.
 static void cmd_foliage_grove(int argc, const char **argv) {
     World *w = game_world();

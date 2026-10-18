@@ -269,8 +269,8 @@ typedef struct SpotLight { vec3 pos, dir; float range, inner_deg, outer_deg, int
 void render_set_sun_shadow(const LightShadowSettings *s);
 void render_get_sun_shadow(LightShadowSettings *out);
 
-// Virtualized geometry placements of the loaded level (docs/VGEO.md "Levels"; mirrors LevelVgeo):
-// replaces every level vgeo instance (vgeo_test_scene instances are cleared too).
+// vgeo placements of the loaded level (docs/VGEO.md "Levels and eras"; mirrors LevelVgeo):
+// replaces every level vgeo instance.
 typedef struct RenderVgeoPlacement {
     const char *mesh;            // "assets/vgeo/x.vgeo" or a model name with "vgeo": true
     vec3 pos, color;
