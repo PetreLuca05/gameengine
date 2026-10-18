@@ -8,6 +8,9 @@
 //     centre (decoded vertices, raster_view_proj, 16.8 snapping), within 1e-5 relative
 //   - mixed (sw_px 32) vs all-HW: same tolerance (no holes between the two rasterisers)
 //   - two-pass: pass 1 (occluded by a synthetic wall) + pass 2 rasterise the same image as one pass
+//   - 32-bit two-phase visibility writes (MoltenVK, docs/PLATFORM_MACOS.md) vs 64-bit atomics: every
+//     pixel's depth bit-identical, the decoded (instance, cluster, triangle) identical but for depth
+//     ties (the payload holds the visible-list index: append order, different on every cull)
 //   - --validation: zero validation messages
 #include "vgeo_gpu_harness.h"
 #include "render/vgeo/vgeo_raster.h"
@@ -43,6 +46,8 @@ static VgHarness g_h;
 static VgScene g_scene;
 static VgCuller g_cull;
 static VgRaster g_rast;
+static VgRaster g_rast32;           // 32-bit two-phase writes on the same culler (VgContext.vis32)
+static VgRaster *g_r = &g_rast;     // the rasteriser render() uses
 
 typedef struct Cam { vec3 eye, target; } Cam;
 
@@ -109,24 +114,25 @@ static void place_instances(u32 side, float spacing) {
 // ------------------------------------------------------------------ rendering + decode
 
 typedef struct Px { u32 inst, packed, tri; float depth; } Px;   // inst ~0: empty
-typedef struct Img { Px *px; u32 hw, sw, hw_p1, sw_p1, covered; float ms[2]; } Img;
+typedef struct Img { Px *px; u64 *vis; u32 hw, sw, hw_p1, sw_p1, covered; float ms[2]; } Img;
 
-static void img_free(Img *m) { free(m->px); memset(m, 0, sizeof(*m)); }
+static void img_free(Img *m) { free(m->px); free(m->vis); memset(m, 0, sizeof(*m)); }
 
 // Culls (both passes when the view is two-pass), clears and rasterises passes 1 and 2, reads back.
 static void render(const VgViewGpu *v, const VgHizRef *prev, const VgHizRef *cur, bool mesh, Img *out) {
     memset(out, 0, sizeof(*out));
-    g_rast.use_mesh = mesh && g_rast.p_mesh;
+    g_r->use_mesh = mesh && g_r->p_mesh;
+    vg_cull_set_vis(&g_cull, g_r->vis.buffer);
     VkCommandPool pool;
     VkCommandBuffer cmd = vgc_begin_once(&g_h.ctx, &pool);
     vg_cull_record(&g_cull, cmd, 0, 0, v, prev, cur);
-    vg_raster_clear(&g_rast, cmd);
-    vg_raster_record(&g_rast, cmd, 0, 0, 1);
-    vg_raster_record(&g_rast, cmd, 0, 0, 2);
+    vg_raster_clear(g_r, cmd);
+    vg_raster_record(g_r, cmd, 0, 0, 1);
+    vg_raster_record(g_r, cmd, 0, 0, 2);
     vgc_submit_wait(&g_h.ctx, pool, cmd);
     float ms1[2] = { 0, 0 }, ms2[2] = { 0, 0 };
-    vg_raster_timings(&g_rast, 0, 0, 1, true, ms1);
-    vg_raster_timings(&g_rast, 0, 0, 2, true, ms2);
+    vg_raster_timings(g_r, 0, 0, 1, true, ms1);
+    vg_raster_timings(g_r, 0, 0, 2, true, ms2);
     out->ms[0] = ms1[0] + ms2[0];
     out->ms[1] = ms1[1] + ms2[1];
     VgCounters ctr;
@@ -142,7 +148,7 @@ static void render(const VgViewGpu *v, const VgHizRef *prev, const VgHizRef *cur
     vgh_read(&g_h, &r->visible, 0, 8ull * out->hw, hw);
     vgh_read(&g_h, &r->visible, 8ull * cap, 8ull * out->sw, sw);
     u64 *vis = (u64 *)malloc(8ull * W * H);
-    vgh_read(&g_h, &g_rast.vis, 0, 8ull * W * H, vis);
+    vgh_read(&g_h, &g_r->vis, 0, 8ull * W * H, vis);
     out->px = (Px *)malloc(sizeof(Px) * W * H);
     u32 bad = 0;
     for (u32 i = 0; i < W * H; i++) {
@@ -161,7 +167,7 @@ static void render(const VgViewGpu *v, const VgHizRef *prev, const VgHizRef *cur
         out->covered++;
     }
     CHECK(bad == 0, "%u pixels reference a visible index outside the lists", bad);
-    free(vis);
+    out->vis = vis;
     free(hw);
     free(sw);
 }
@@ -351,6 +357,39 @@ static void test_rasterisers(void) {
     if (!g_rast.p_mesh) printf("no VK_EXT_mesh_shader: mesh path not tested\n");
 }
 
+// Pixels whose depth key (the high word) differs.
+static u32 depth_diff(const Img *a, const Img *b) {
+    u32 d = 0;
+    for (u32 i = 0; i < W * H; i++) d += (a->vis[i] >> 32) != (b->vis[i] >> 32);
+    return d;
+}
+
+// The same views through the 32-bit two-phase writes: the raw visibility buffer must match bit for bit.
+static void test_vis32(void) {
+    if (!g_rast32.ok) { CHECK(false, "vis32 rasteriser unavailable"); return; }
+    for (int ci = 0; ci < 4; ci++) {
+        const float sws[3] = { 0.0f, SW_ALL, 32.0f };
+        for (int k = 0; k < 3; k++) {
+            VgViewGpu v;
+            Img a, b;
+            view_for(&k_cams[ci], VGV_NO_OCCLUSION, sws[k], &v);
+            g_r = &g_rast;
+            render(&v, NULL, NULL, false, &a);
+            g_r = &g_rast32;
+            render(&v, NULL, NULL, false, &b);
+            g_r = &g_rast;
+            u32 dz = depth_diff(&a, &b);
+            printf("  vis32 cam %d sw_px %g: %u covered, %u depths differ (64-bit HW %.3f + SW %.3f ms, 32-bit depth %.3f + payload %.3f ms)\n", ci, sws[k], a.covered, dz,
+                   a.ms[0], a.ms[1], b.ms[0], b.ms[1]);
+            CHECK(a.covered > 0 && a.covered == b.covered, "vis32 cam %d: covered %u vs %u", ci, a.covered, b.covered);
+            CHECK(dz == 0, "vis32 cam %d sw_px %g: %u pixel depths differ from the 64-bit writes", ci, sws[k], dz);
+            compare("vis32 vs 64-bit", &a, &b, 0.0001);
+            img_free(&a);
+            img_free(&b);
+        }
+    }
+}
+
 static void test_two_pass(void) {
     // Camera at z = 60 looking down -z; a wall at 30 m over the left half of the previous Hi-Z.
     Cam cam = { { 0, 2, 60 }, { 0, 2, 0 } };
@@ -377,6 +416,18 @@ static void test_two_pass(void) {
     CHECK(two.hw > two.hw_p1 && two.sw > two.sw_p1, "two-pass: pass 2 rasterised nothing new");
     u32 d = compare("two-pass vs one pass", &one, &two, 0.0001);
     CHECK(d == 0, "two-pass: %u pixels differ from one pass", d);
+    if (g_rast32.ok && g_r != &g_rast32) {
+        Img t64, t32;   // both vertex pulling: the mesh shader path's depths differ in the last bits
+        render(&v, &wr, &er, false, &t64);
+        g_r = &g_rast32;
+        render(&v, &wr, &er, false, &t32);
+        g_r = &g_rast;
+        u32 d32 = depth_diff(&t64, &t32);
+        CHECK(d32 == 0, "two-pass: %u pixel depths differ between the 64-bit and 32-bit writes", d32);
+        compare("two-pass vis32 vs 64-bit", &t64, &t32, 0.0001);
+        img_free(&t64);
+        img_free(&t32);
+    }
     img_free(&one);
     img_free(&two);
     vgh_hiz_destroy(&g_h, &wall);
@@ -405,10 +456,20 @@ int main(int argc, char **argv) {
     if (!vg_raster_init(&g_rast, &g_h.ctx, &g_cull)) { printf("FAIL: raster init\n"); return 1; }
     g_rast.serialize = true;
     vg_raster_resize(&g_rast, W, H);
+    // The second rasteriser on the 32-bit writes (when the device has 64-bit atomics the first one
+    // takes them, so the two are compared; DG_VGEO_VIS32=1 puts both on 32-bit writes).
+    VgContext c32 = g_h.ctx;
+    c32.vis32 = true;
+    if (vg_raster_init(&g_rast32, &c32, &g_cull)) {
+        g_rast32.serialize = true;
+        vg_raster_resize(&g_rast32, W, H);
+    }
     place_instances(20, 12.0f);
     printf("scene: %u meshes, %u instances, mesh shader path %s\n", g_scene.mesh_count, g_scene.instance_count, g_rast.p_mesh ? "yes" : "no");
     test_rasterisers();
     test_two_pass();
+    test_vis32();
+    vg_raster_shutdown(&g_rast32);
     vg_raster_shutdown(&g_rast);
     vg_cull_shutdown(&g_cull);
     vgeo_scene_free(&g_scene);

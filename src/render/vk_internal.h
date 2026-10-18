@@ -256,7 +256,7 @@ typedef struct Renderer {
     bool has_device_fault;         // VK_EXT_device_fault: fault addresses / vendor info on a lost device
     bool has_unused_attachments;   // VK_EXT_dynamic_rendering_unused_attachments: G-buffer without velocity
     bool hdr_supported, swap_hdr;
-    bool vg_scalar, vg_int64, vg_indirect_count, vg_descriptor_indexing, vg_mesh_shader;   // vgeo device features
+    bool vg_scalar, vg_int64, vg_atomic64, vg_indirect_count, vg_descriptor_indexing, vg_mesh_shader;   // vgeo device features
     int hdr_output_applied;
     float max_anisotropy;
 

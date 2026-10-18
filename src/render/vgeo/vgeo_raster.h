@@ -7,6 +7,9 @@
 //   SW  small clusters: compute, one workgroup per cluster, one thread per triangle, 16.8 fixed point
 //       edge functions with the HW fill rule (pixel centres, top-left)
 // Per pass (two-pass occlusion): pass 1 draws the list entries [0, *_P1), pass 2 [*_P1, total).
+// Without 64-bit buffer atomics (MoltenVK) or with VgContext.vis32: the *_v32 shaders, and each pass
+// rasterises twice (depth keys, then payloads) into the same u64 layout (vg_raster.glsl VG_VIS32,
+// docs/PLATFORM_MACOS.md "vgeo on Metal"); the HW path is vertex pulling then.
 //
 // Shares the culler's descriptor sets: call vg_raster_resize (binds the buffer at binding 18) before
 // vg_cull_record, and record the raster after it (same frame / slot). The view's viewport must be
@@ -30,6 +33,7 @@ typedef struct VgRaster {
     VgBuffer vis;                // u64[w * h]
     u32 w, h;
     bool use_mesh;               // HW path: mesh shader (default when available) or vertex pulling
+    bool vis32;                  // two-phase 32-bit visibility writes (no mesh shader pipelines then)
     bool serialize;              // barrier between HW and SW: exact per-rasteriser timings (they overlap otherwise)
     VkQueryPool qp;              // VGR_COUNT timestamps per (frame, view, pass)
     bool qp_written[VG_MAX_FRAMES][VG_MAX_VIEWS][2];
@@ -46,6 +50,7 @@ void vg_raster_clear(VgRaster *r, VkCommandBuffer cmd);
 // with a barrier making the visibility buffer visible to compute / fragment / transfer.
 void vg_raster_record(VgRaster *r, VkCommandBuffer cmd, u32 frame, u32 slot, u32 pass);
 // GPU ms of HW and SW raster for (frame, slot, pass); false when not available. wait: block (tests).
+// vis32: [0] the depth phase (HW + SW), [1] the payload phase.
 bool vg_raster_timings(const VgRaster *r, u32 frame, u32 slot, u32 pass, bool wait, float ms[2]);
 
 #endif

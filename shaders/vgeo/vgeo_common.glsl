@@ -4,7 +4,9 @@
 #extension GL_EXT_nonuniform_qualifier : require
 #ifdef VG_VIS
 #extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+#ifndef VG_VIS32
 #extension GL_EXT_shader_atomic_int64 : require
+#endif
 #endif
 
 struct VgViewGpu {
@@ -162,7 +164,10 @@ layout(set = VG_SET, binding = 21) readonly buffer Palettes { mat4 palette[]; };
 layout(set = VG_SET, binding = 22, scalar) readonly buffer PaletteSlots { VgPaletteSlot palette_slots[]; };
 layout(set = VG_SET, binding = 23) uniform sampler2D vg_tex[VG_TEX_COUNT];
 // Visibility buffer (binding 18, see vgeo_gpu.h): define VG_VIS before including (needs int64).
-#ifdef VG_VIS
+// VG_VIS32 (the writers without 64-bit atomics, vg_raster.glsl): the same buffer as u32 words.
+#if defined(VG_VIS32)
+layout(set = VG_SET, binding = 18) coherent buffer VisBuffer { uint vis32[]; };   // [2i] payload, [2i + 1] depth key
+#elif defined(VG_VIS)
 layout(set = VG_SET, binding = 18) coherent buffer VisBuffer { uint64_t vis[]; };
 #endif
 

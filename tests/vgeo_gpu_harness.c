@@ -175,9 +175,12 @@ bool vgh_init(VgHarness *h, bool validation) {
     c->draw_indirect_count = s12.drawIndirectCount;
     c->descriptor_indexing = s12.runtimeDescriptorArray && s12.descriptorBindingPartiallyBound;
     c->mesh_shader = mesh;
-    printf("harness: %s (api %u.%u), int64 atomics %d, indirect count %d, mesh shader %d, validation %d\n", h->props.deviceName,
-           VK_API_VERSION_MAJOR(h->props.apiVersion), VK_API_VERSION_MINOR(h->props.apiVersion), c->int64_atomics, c->draw_indirect_count, c->mesh_shader,
-           validation);
+    // DG_VGEO_VIS32=1: every vgeo GPU test on the 32-bit two-phase visibility writes (MoltenVK's path)
+    const char *v32 = SDL_getenv("DG_VGEO_VIS32");
+    c->vis32 = v32 && v32[0] == '1';
+    printf("harness: %s (api %u.%u), int64 atomics %d%s, indirect count %d, mesh shader %d, validation %d\n", h->props.deviceName,
+           VK_API_VERSION_MAJOR(h->props.apiVersion), VK_API_VERSION_MINOR(h->props.apiVersion), c->int64_atomics, c->vis32 ? " (32-bit writes forced)" : "",
+           c->draw_indirect_count, c->mesh_shader, validation);
     return true;
 }
 

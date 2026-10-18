@@ -368,6 +368,14 @@ static void cmd_vgeo_clear(int argc, const char **argv) {
 
 // ------------------------------------------------------------------ lifetime
 
+// A startup switch: the command line option or the environment variable set to 1.
+static bool startup_flag(const char *arg, const char *env) {
+    for (int i = 1; i < g_engine.argc; i++)
+        if (!strcmp(g_engine.argv[i], arg)) return true;
+    const char *e = SDL_getenv(env);
+    return e && e[0] == '1';
+}
+
 void vkg_init(void) {
     G.r_vgeo = cvar_reg_bool("r_vgeo", true, CVAR_ARCHIVE, "virtualized geometry (docs/VGEO.md); 0: the classic instanced renderer (docs/CLASSIC_RENDERER.md)");
     G.error_px = cvar_reg_float("r_vgeo_error_px", 1.0f, 0.25f, 16.0f, CVAR_ARCHIVE, "vgeo: allowed projected LOD error (pixels)");
@@ -397,8 +405,8 @@ void vkg_init(void) {
     cmd_register("vgeo_check_resolve", cmd_vgeo_check_resolve, "verify the next frame's vgeo depth export and velocity against the visibility buffer");
     vkg_register_era();
     cmd_register("vgeo_bench", cmd_vgeo_bench, "vgeo_bench [frames=600] [csv] [vgeo_test|foliage]: spline flythrough of map vgeo_test (or the devroom foliage yard), per-pass GPU ms to CSV + summary");
-    if (!R->vg_scalar || !R->vg_int64) {
-        log_warn("vgeo: disabled (needs scalarBlockLayout + shaderBufferInt64Atomics; the 2015 / 2010 era LODs are used instead)");
+    if (!R->vg_scalar || !R->vg_int64 || !R->vg_descriptor_indexing) {
+        log_warn("vgeo: disabled (needs scalarBlockLayout + shaderInt64 + non-uniform sampled image indexing; the 2015 / 2010 era LODs are used instead)");
         return;
     }
     VgContext *c = &G.ctx;
@@ -410,10 +418,12 @@ void vkg_init(void) {
     c->frames = FRAMES_IN_FLIGHT;
     c->timestamp_period = R->gpu_props.limits.timestampPeriod;
     c->load_shader = vkp_load_shader;
-    c->int64_atomics = R->vg_int64;
+    c->int64_atomics = R->vg_atomic64;
+    // The MoltenVK paths on any GPU (docs/PLATFORM_MACOS.md): read at startup, before the config.
+    c->vis32 = startup_flag("--vgeo-vis32", "DG_VGEO_VIS32");
     c->draw_indirect_count = R->vg_indirect_count;
     c->descriptor_indexing = R->vg_descriptor_indexing;
-    c->mesh_shader = R->vg_mesh_shader;
+    c->mesh_shader = R->vg_mesh_shader && !startup_flag("--vgeo-no-mesh", "DG_VGEO_NO_MESH");
     vgeo_scene_init(&G.scene, c);
     VgCullCaps caps = game_caps();
     if (!vg_cull_init(&G.cull, c, &G.scene, &caps)) {
@@ -446,7 +456,8 @@ void vkg_init(void) {
         return;
     }
     G.ok = true;
-    log_info("vgeo: culling ready (indirect count %d, mesh shader %d); r_vgeo 0 draws through the classic renderer", c->draw_indirect_count, c->mesh_shader);
+    log_info("vgeo: culling ready (indirect count %d, mesh shader %d, visibility writes %s); r_vgeo 0 draws through the classic renderer", c->draw_indirect_count,
+             c->mesh_shader && !G.raster.vis32, G.raster.vis32 ? "32-bit two-phase" : "64-bit atomic");
     vkc_init();
     vkc_set_textures(&G.cull.tex);
 }

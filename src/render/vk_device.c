@@ -156,8 +156,10 @@ bool vkd_create_device(SDL_Window *window) {
     f13.shaderDemoteToHelperInvocation = VK_TRUE;
     VkPhysicalDeviceVulkan12Features f12 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES };
     f12.pNext = &f13;
-    // Virtualized geometry (docs/VGEO.md): scalar layouts, 64-bit buffer atomics (visibility buffer),
-    // indirect count draws, descriptor indexing. Enabled when present; vgeo stays off without them.
+    // Virtualized geometry (docs/VGEO.md): scalar layouts, int64, indirect count draws, descriptor
+    // indexing. Enabled when present; vgeo stays off without scalar layouts / int64 / non-uniform
+    // texture indexing. 64-bit buffer atomics are optional: without them (MoltenVK) the visibility
+    // buffer takes the 32-bit two-phase writes (vgeo_raster.h).
     {
         VkPhysicalDeviceVulkan12Features s12 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES };
         VkPhysicalDeviceFeatures2 s2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
@@ -170,9 +172,10 @@ bool vkd_create_device(SDL_Window *window) {
         f12.descriptorBindingPartiallyBound = s12.descriptorBindingPartiallyBound;
         f12.shaderSampledImageArrayNonUniformIndexing = s12.shaderSampledImageArrayNonUniformIndexing;
         R->vg_scalar = s12.scalarBlockLayout;
-        R->vg_int64 = s12.shaderBufferInt64Atomics && s2.features.shaderInt64;
+        R->vg_int64 = s2.features.shaderInt64;
+        R->vg_atomic64 = s12.shaderBufferInt64Atomics && s2.features.shaderInt64;
         R->vg_indirect_count = s12.drawIndirectCount && s2.features.multiDrawIndirect;
-        R->vg_descriptor_indexing = s12.runtimeDescriptorArray && s12.descriptorBindingPartiallyBound;
+        R->vg_descriptor_indexing = s12.runtimeDescriptorArray && s12.descriptorBindingPartiallyBound && s12.shaderSampledImageArrayNonUniformIndexing;
         supported.shaderInt64 = s2.features.shaderInt64;
         supported.multiDrawIndirect = s2.features.multiDrawIndirect;
         supported.drawIndirectFirstInstance = s2.features.drawIndirectFirstInstance;

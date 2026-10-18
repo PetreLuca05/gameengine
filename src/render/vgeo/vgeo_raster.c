@@ -62,6 +62,8 @@ bool vg_raster_init(VgRaster *r, const VgContext *ctx, VgCuller *cull) {
     r->ctx = ctx;
     r->cull = cull;
     if (!cull->ok) return false;
+    r->vis32 = ctx->vis32 || !ctx->int64_atomics;
+    bool v32 = r->vis32;
     r->push_stages = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT;
     if (ctx->mesh_shader) r->push_stages |= VK_SHADER_STAGE_MESH_BIT_EXT;
     VkPushConstantRange pr = { r->push_stages, 0, sizeof(VgPush) };
@@ -72,15 +74,17 @@ bool vg_raster_init(VgRaster *r, const VgContext *ctx, VgCuller *cull) {
     pi.pPushConstantRanges = &pr;
     if (vkCreatePipelineLayout(ctx->device, &pi, NULL, &r->pl) != VK_SUCCESS) return false;
     r->p_args = vgc_compute_pipeline(ctx, r->pl, "vgeo/vg_raster_args.comp");
-    r->p_sw = vgc_compute_pipeline(ctx, r->pl, "vgeo/vg_raster_sw.comp");
-    r->p_sw_masked = vgc_compute_pipeline(ctx, r->pl, "vgeo/vg_raster_sw_masked.comp");
-    r->p_sw_imp = vgc_compute_pipeline(ctx, r->pl, "vgeo/vg_raster_sw_impostor.comp");
+    r->p_sw = vgc_compute_pipeline(ctx, r->pl, v32 ? "vgeo/vg_raster_sw_v32.comp" : "vgeo/vg_raster_sw.comp");
+    r->p_sw_masked = vgc_compute_pipeline(ctx, r->pl, v32 ? "vgeo/vg_raster_sw_masked_v32.comp" : "vgeo/vg_raster_sw_masked.comp");
+    r->p_sw_imp = vgc_compute_pipeline(ctx, r->pl, v32 ? "vgeo/vg_raster_sw_impostor_v32.comp" : "vgeo/vg_raster_sw_impostor.comp");
     // HW: the plain variant for one-sided unmasked clusters, the masked variant (per-pixel test) for
     // two-sided (no culling) and one-sided masked clusters (vg_hw_kind)
-    r->p_vert = graphics_pipeline(r, "vgeo/vg_raster_hw.vert", VK_SHADER_STAGE_VERTEX_BIT, "vgeo/vg_raster_hw.frag", false);
-    r->p_vert2 = graphics_pipeline(r, "vgeo/vg_raster_hw_masked.vert", VK_SHADER_STAGE_VERTEX_BIT, "vgeo/vg_raster_hw_masked.frag", true);
-    r->p_vert3 = graphics_pipeline(r, "vgeo/vg_raster_hw_masked.vert", VK_SHADER_STAGE_VERTEX_BIT, "vgeo/vg_raster_hw_masked.frag", false);
-    if (ctx->mesh_shader) {
+    const char *hw_frag = v32 ? "vgeo/vg_raster_hw_v32.frag" : "vgeo/vg_raster_hw.frag";
+    const char *hw_frag_masked = v32 ? "vgeo/vg_raster_hw_masked_v32.frag" : "vgeo/vg_raster_hw_masked.frag";
+    r->p_vert = graphics_pipeline(r, "vgeo/vg_raster_hw.vert", VK_SHADER_STAGE_VERTEX_BIT, hw_frag, false);
+    r->p_vert2 = graphics_pipeline(r, "vgeo/vg_raster_hw_masked.vert", VK_SHADER_STAGE_VERTEX_BIT, hw_frag_masked, true);
+    r->p_vert3 = graphics_pipeline(r, "vgeo/vg_raster_hw_masked.vert", VK_SHADER_STAGE_VERTEX_BIT, hw_frag_masked, false);
+    if (ctx->mesh_shader && !v32) {
         r->p_mesh = graphics_pipeline(r, "vgeo/vg_raster_hw.mesh", VK_SHADER_STAGE_MESH_BIT_EXT, "vgeo/vg_raster_mesh.frag", false);
         r->p_mesh2 = graphics_pipeline(r, "vgeo/vg_raster_hw_masked.mesh", VK_SHADER_STAGE_MESH_BIT_EXT, "vgeo/vg_raster_mesh_masked.frag", true);
         r->p_mesh3 = graphics_pipeline(r, "vgeo/vg_raster_hw_masked.mesh", VK_SHADER_STAGE_MESH_BIT_EXT, "vgeo/vg_raster_mesh_masked.frag", false);
@@ -152,6 +156,8 @@ static void stamp(VgRaster *r, VkCommandBuffer cmd, u32 base, u32 i) {
     if (r->qp) vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, r->qp, base + i);
 }
 
+static void raster_phase(VgRaster *r, VkCommandBuffer cmd, VkDescriptorSet set, VkBuffer counters, VgPush *pp, u32 q, bool stamps);
+
 void vg_raster_record(VgRaster *r, VkCommandBuffer cmd, u32 frame, u32 slot, u32 pass) {
     VgCuller *c = r->cull;
     if (!r->ok || !r->vis.buffer || slot >= VG_MAX_VIEWS || !c->v[slot].allocated || pass < 1 || pass > 2) return;
@@ -173,6 +179,33 @@ void vg_raster_record(VgRaster *r, VkCommandBuffer cmd, u32 frame, u32 slot, u32
     barrier(cmd, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | raster_stages(r),
             VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
     stamp(r, cmd, q, VGR_BEGIN);
+    if (!r->vis32) {
+        raster_phase(r, cmd, set, counters, &p, q, true);
+    } else {
+        // 32-bit writes: depth keys, then (once every key is final) the payloads of the winners
+        p.a[7] = 1;
+        raster_phase(r, cmd, set, counters, &p, q, false);
+        stamp(r, cmd, q, VGR_HW);
+        barrier(cmd, raster_stages(r), VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, raster_stages(r),
+                VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
+        p.a[7] = 2;
+        raster_phase(r, cmd, set, counters, &p, q, false);
+    }
+    stamp(r, cmd, q, VGR_SW);
+    if (r->qp) r->qp_written[frame][slot][pass - 1] = true;
+    // Visibility buffer to its readers; indirect args / list reads before the next writers (WAR).
+    barrier(cmd, raster_stages(r) | VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+            raster_stages(r) | VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+            VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT | VK_ACCESS_2_TRANSFER_READ_BIT);
+}
+
+// One rasterisation of the pass range: HW draws, then the SW kernels (push constants p, cull set bound
+// for compute). stamps: the VGR_HW timestamp between them (one-phase writes).
+static void raster_phase(VgRaster *r, VkCommandBuffer cmd, VkDescriptorSet set, VkBuffer counters, VgPush *pp, u32 q, bool stamps) {
+    VgCuller *c = r->cull;
+    VgPush p = *pp;
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, r->pl, 0, 1, &set, 0, NULL);
+    vkCmdPushConstants(cmd, r->pl, r->push_stages, 0, sizeof(p), &p);
 
     // HW
     VkRenderingInfo ri = { VK_STRUCTURE_TYPE_RENDERING_INFO };
@@ -201,7 +234,7 @@ void vg_raster_record(VgRaster *r, VkCommandBuffer cmd, u32 frame, u32 slot, u32
     p.a[0] = 0;
     vkCmdPushConstants(cmd, r->pl, r->push_stages, 0, sizeof(p), &p);
     vkCmdEndRendering(cmd);
-    stamp(r, cmd, q, VGR_HW);
+    if (stamps) stamp(r, cmd, q, VGR_HW);
     if (r->serialize)
         barrier(cmd, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT, VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                 VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT);
@@ -218,12 +251,6 @@ void vg_raster_record(VgRaster *r, VkCommandBuffer cmd, u32 frame, u32 slot, u32
         vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, r->p_sw_imp);
         vkCmdDispatchIndirect(cmd, counters, (VkDeviceSize)VGA_SW * 16);
     }
-    stamp(r, cmd, q, VGR_SW);
-    if (r->qp) r->qp_written[frame][slot][pass - 1] = true;
-    // Visibility buffer to its readers; indirect args / list reads before the next writers (WAR).
-    barrier(cmd, raster_stages(r) | VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT, VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
-            raster_stages(r) | VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-            VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT | VK_ACCESS_2_TRANSFER_READ_BIT);
 }
 
 bool vg_raster_timings(const VgRaster *r, u32 frame, u32 slot, u32 pass, bool wait, float ms[2]) {

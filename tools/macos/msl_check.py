@@ -8,6 +8,14 @@ usage: msl_check.py <shader .spv dir> [--out <dir>] [--metal] [--msl-version 300
 """
 import argparse, os, shutil, subprocess, sys
 
+# Never created on MoltenVK: the 64-bit atomic visibility writers (MoltenVK reports no
+# shaderBufferInt64Atomics, vgeo_raster.c takes the *_v32 variants) and their mesh shader pairs.
+NOT_ON_METAL = {
+    "vgeo/vg_raster_hw.frag.spv", "vgeo/vg_raster_hw_masked.frag.spv",
+    "vgeo/vg_raster_mesh.frag.spv", "vgeo/vg_raster_mesh_masked.frag.spv",
+    "vgeo/vg_raster_sw.comp.spv", "vgeo/vg_raster_sw_masked.comp.spv", "vgeo/vg_raster_sw_impostor.comp.spv",
+}
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("spv_dir")
@@ -24,8 +32,12 @@ def main():
         print("msl_check: no .spv under", a.spv_dir)
         return 2
     bad = []
+    skipped = 0
     for f in files:
-        rel = os.path.relpath(f, a.spv_dir)
+        rel = os.path.relpath(f, a.spv_dir).replace(os.sep, "/")
+        if rel in NOT_ON_METAL:
+            skipped += 1
+            continue
         out = os.path.join(a.out, rel[:-4] + ".metal") if a.out else None
         if out: os.makedirs(os.path.dirname(out), exist_ok=True)
         cmd = [a.spirv_cross, f, "--msl", "--msl-version", a.msl_version, "--msl-argument-buffers",
@@ -42,7 +54,7 @@ def main():
                 bad.append((rel + " (metal)", [l for l in m.stderr.splitlines() if "error" in l][:3] or ["?"]))
     for rel, why in bad:
         print("FAIL", rel, ":", " | ".join(why))
-    print("msl_check: %d shaders, %d failed" % (len(files), len(bad)))
+    print("msl_check: %d shaders, %d skipped (not used on MoltenVK), %d failed" % (len(files), skipped, len(bad)))
     return 1 if bad else 0
 
 if __name__ == "__main__":

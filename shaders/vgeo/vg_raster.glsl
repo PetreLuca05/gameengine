@@ -93,7 +93,22 @@ vec4 vg_raster_clip(VgXf x, VgClusterData c, VgMesh m, uint v) {
     return V.raster_view_proj * vec4(vg_vertex_world(x, c, m, v), 1.0);
 }
 
-#ifdef VG_VIS
+#if defined(VG_VIS32)
+// Without 64-bit atomics (MoltenVK; docs/PLATFORM_MACOS.md "vgeo on Metal"): the same 8 bytes per pixel
+// as two u32 words, written by two runs of the same rasterisation (pc.a[7], VgRaster vis32): 1 the depth
+// key, 2 the payload where the key is this fragment's. Nearest depth, then the larger payload: the u64
+// atomicMax value bit for bit (an empty pixel stays 0), so every reader is unchanged. A fragment that
+// raises the key clears the payload: an earlier pass's winner (two-pass occlusion) must not survive
+// in the max of phase 2 (only phase 1 stores there, and only 0: no ordering between raisers matters).
+void vg_vis_write(uint x, uint y, float z, uint payload) {
+    uint i = (y * uint(V.viewport.x) + x) * 2u, key = floatBitsToUint(1.0 - z);
+    if (pc.a[7] == 1u) {
+        if (atomicMax(vis32[i + 1u], key) < key) vis32[i] = 0u;
+    } else if (vis32[i + 1u] == key) {
+        atomicMax(vis32[i], payload);
+    }
+}
+#elif defined(VG_VIS)
 // Visibility buffer write (vgeo_gpu.h): the nearest depth wins, ties go to the larger payload. (A plain
 // load skipping the atomic when it already loses measured no faster on the RTX 3060 Ti.)
 void vg_vis_write(uint x, uint y, float z, uint payload) {
