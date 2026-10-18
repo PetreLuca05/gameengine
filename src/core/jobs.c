@@ -148,6 +148,8 @@ void jobs_wait(JobCounter *counter) {
 
 // ------------------------------------------------------------------ parallel for
 
+// next = the loop's generation (low PF_GEN_BITS) above the next chunk index: an index taken from the
+// counter says which loop it belongs to.
 typedef struct ParFor {
     JobRangeFn fn;
     void *ctx;
@@ -155,17 +157,30 @@ typedef struct ParFor {
     SDL_AtomicInt next, done, gen;
 } ParFor;
 #define PARFOR_SLOTS 16
+#define PF_IDX_BITS 20
+#define PF_IDX_MASK ((1u << PF_IDX_BITS) - 1u)
+#define PF_GEN_MASK ((1u << (32 - PF_IDX_BITS)) - 1u)
 static ParFor g_pf[PARFOR_SLOTS];
 static SDL_AtomicInt g_pf_seq;
 
+// A helper can be late: still queued, or preempted inside this loop, after its parallel_for ended and
+// its slot started a newer one (16 parallel_fors later). It must then never run an index of the old
+// loop against the new loop's fields (that ran a chunk twice and finished the new loop early, its
+// caller going on while a chunk was still running), and must run an index it took from the new loop's
+// counter (else that chunk is lost and the loop never finishes): the generation in the counter decides.
 static void pf_run(ParFor *p, int gen) {
     for (;;) {
         if (SDL_GetAtomicInt(&p->gen) != gen) return;   // a late helper: this loop is over
-        int c = SDL_AddAtomicInt(&p->next, 1);
+        u32 v = (u32)SDL_AddAtomicInt(&p->next, 1);
+        // The slot's current loop: set before its counter, and it cannot end while this index is valid.
+        int cur = SDL_GetAtomicInt(&p->gen);
+        if ((v >> PF_IDX_BITS) != ((u32)cur & PF_GEN_MASK)) return;   // an older loop's index past its end
+        int c = (int)(v & PF_IDX_MASK);
         if (c >= p->chunks) return;
         int b = c * p->chunk;
         p->fn(p->ctx, b, DG_MIN(p->count, b + p->chunk));
         SDL_AddAtomicInt(&p->done, 1);
+        gen = cur;
     }
 }
 
@@ -181,6 +196,7 @@ static void pf_helper(void *u) {
 void jobs_parallel_for(int count, int chunk, JobRangeFn fn, void *ctx) {
     if (count <= 0) return;
     chunk = DG_MAX(1, chunk);
+    if ((count + chunk - 1) / chunk > (int)PF_IDX_MASK) chunk = (count + (int)PF_IDX_MASK - 1) / (int)PF_IDX_MASK;
     int chunks = (count + chunk - 1) / chunk;
     prof_count(PC_PARFOR, 1);
     if (!g_engine.jobs || s_jobs.worker_count <= 0 || chunks <= 1) { fn(ctx, 0, count); return; }
@@ -192,9 +208,9 @@ void jobs_parallel_for(int count, int chunk, JobRangeFn fn, void *ctx) {
     p->count = count;
     p->chunk = chunk;
     p->chunks = chunks;
-    SDL_SetAtomicInt(&p->next, 0);
     SDL_SetAtomicInt(&p->done, 0);
-    SDL_SetAtomicInt(&p->gen, gen);
+    SDL_SetAtomicInt(&p->gen, gen);   // before the counter: whoever takes an index from it sees this loop
+    SDL_SetAtomicInt(&p->next, (int)(((u32)gen & PF_GEN_MASK) << PF_IDX_BITS));
     int helpers = DG_MIN(s_jobs.worker_count, chunks - 1);
     SDL_LockMutex(s_jobs.mutex);
     for (int k = 0; k < helpers; k++) {
