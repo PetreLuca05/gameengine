@@ -224,12 +224,18 @@ static void draw_box(vec3 c, vec3 half, vec4 col, float rough, float metal) {
 
 static void draw_showcase(const RenderCamera *cam) {
     if (strcmp(G->map, "devroom") && strcmp(G->map, "devroom_vegetation")) return;
-    // Near it only: the horde yard (60 m east) and its benchmarks (perf_compare dev_horde_200) never pay for it.
-    if (v3_len(v3_sub(cam->pos, k_showcase)) > 40.0f) return;
+    // Near it only (12 m from its rows): the horde yard and its benchmarks (perf_compare dev_horde_200)
+    // never pay for it, and the weather yard's test camera (-50, 0.05, 34, 18 m south) never sees it.
+    static int rows_seen = 12;   // the last draw's row count (the list is only built in range: it loads meshes)
+    float x0 = k_showcase.x - 1.0f, x1 = k_showcase.x + (SHOWCASE_COLS - 1) * SHOWCASE_SPACING + 1.0f;
+    float z0 = k_showcase.z - 1.0f, z1 = k_showcase.z + (float)(rows_seen - 1) * SHOWCASE_SPACING * 1.4f + 1.0f;
+    float dx = fmaxf(0.0f, fmaxf(x0 - cam->pos.x, cam->pos.x - x1)), dz = fmaxf(0.0f, fmaxf(z0 - cam->pos.z, cam->pos.z - z1));
+    if (dx * dx + dz * dz > 12.0f * 12.0f) return;
     ItemMesh *meshes[128];
     const char *names[128];
     int conds[128];
     int n = showcase_list(meshes, names, conds, 128);
+    rows_seen = DG_MAX(1, (n + SHOWCASE_COLS - 1) / SHOWCASE_COLS);
     float spin = (float)fmod(g_engine.real_time * 0.5, 2.0 * DG_PI);
     for (int i = 0; i < n; i++) {
         int row = i / SHOWCASE_COLS, col = i % SHOWCASE_COLS;

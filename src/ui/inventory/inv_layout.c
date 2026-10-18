@@ -70,18 +70,15 @@ void inv_layout(const InvLayoutIn *in, InvLayout *o) {
     for (int i = 0; i < 5; i++) o->equip[lf[i]] = R(o->center.x, top + (float)i * (q + g), q, q);
     for (int i = 0; i < 4; i++) o->equip[rf[i]] = R(o->center.x + center_w - q, top + (float)i * (q + g), q, q);
     o->player = R(o->center.x + q + g, top, center_w - 2 * (q + g), ph);
-    // Right: the hotbar (INV_HOTBAR large tiles; a row of squares with a world container open, the loot below).
+    // Right: the hotbar, one row of INV_HOTBAR tiles of one grid cell each (the backpack's cell size),
+    // aligned with the grids' cells; below it the binds (name, rounds), or the loot grid (crate,
+    // corpse, trunk) when a world container is open.
     float hy = o->right.y + o->title_h;
-    if (!in->loot) {
-        float th = DG_MIN((o->right.h - o->title_h - (INV_HOTBAR - 1) * g) / (float)INV_HOTBAR, 2.6f * cell);
-        for (int i = 0; i < INV_HOTBAR; i++) o->hot[i] = R(o->right.x, hy + (float)i * (th + g), side, th);
-    } else {
-        o->hot_compact = true;
-        float sq = DG_MIN((side - (INV_HOTBAR - 1) * g) / (float)INV_HOTBAR, 1.6f * cell);
-        for (int i = 0; i < INV_HOTBAR; i++) o->hot[i] = R(o->right.x + (float)i * (sq + g), hy, sq, sq);
-        float ly = hy + sq + 1.5f * g;
-        o->loot = R(o->right.x, ly, side, o->right.y + o->right.h - ly);
-    }
+    float hg = clampf_((side - 2 * o->pad - (float)INV_HOTBAR * cell) / (float)(INV_HOTBAR - 1), 0.0f, 4 * s);
+    for (int i = 0; i < INV_HOTBAR; i++) o->hot[i] = R(o->right.x + o->pad + (float)i * (cell + hg), hy, cell, cell);
+    float ly = hy + cell + 1.5f * g;
+    if (in->loot) o->loot = R(o->right.x, ly, side, o->right.y + o->right.h - ly);
+    else o->hot_info = R(o->right.x, ly, side, DG_MIN(o->right.y + o->right.h - ly, (float)INV_HOTBAR * 26 * s));
 }
 
 int inv_nav_step(const GuiRect *rects, int n, int cur, int dir) {

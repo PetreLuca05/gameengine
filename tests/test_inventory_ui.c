@@ -74,6 +74,9 @@ static void test_layout(void) {
             }
             for (int i = 0; i < INV_HOTBAR; i++) {
                 CHECK(inside(L.hot[i], L.right), "%s: hotbar %d in the right column", n, i + 1);
+                CHECK(fabsf(L.hot[i].w - L.cell) < 0.5f && fabsf(L.hot[i].h - L.cell) < 0.5f, "%s: hotbar %d is one grid cell (%.0f x %.0f, cell %.0f)", n, i + 1,
+                      L.hot[i].w, L.hot[i].h, L.cell);
+                CHECK(fabsf(L.hot[i].y - L.hot[0].y) < 0.5f, "%s: hotbar %d in the row", n, i + 1);
                 for (int j = i + 1; j < INV_HOTBAR; j++) CHECK(!overlaps(L.hot[i], L.hot[j]), "%s: hotbar tiles apart", n);
                 if (loot) CHECK(!overlaps(L.hot[i], L.loot), "%s: hotbar above the loot", n);
             }
@@ -81,7 +84,7 @@ static void test_layout(void) {
                 CHECK(inside(L.loot, L.right) && L.loot.w >= 8 * L.cell, "%s: the 8-wide trunk fits", n);
                 CHECK(L.loot.h >= L.title_h + 3 * L.cell, "%s: loot grid has height (%.0f)", n, L.loot.h);
             } else {
-                CHECK(L.hot[0].h > L.cell, "%s: large hotbar tiles", n);
+                CHECK(inside(L.hot_info, L.right) && L.hot_info.h > 0 && L.hot_info.y >= L.hot[0].y + L.hot[0].h, "%s: the binds listed under the hotbar row", n);
             }
             CHECK(inside(L.discard, L.center) && !overlaps(L.discard, L.equip[EQ_PRIMARY]), "%s: discard zone", n);
         }

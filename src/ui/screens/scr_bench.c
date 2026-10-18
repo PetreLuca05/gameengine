@@ -38,7 +38,7 @@ bool bench_draw(GuiRect r) {
     GuiRect c = screens_modal_frame(r, "Weapon bench", wd ? item_def(w->items, s->item)->name : NULL);
     GuiCursor cur = gc_make(c, gui_s(4));
     if (!wd || wd->kind == WPN_MELEE) {
-        gw_label(gc_row(&cur, gui_s(30)), "Equip a gun (1-9) to fit attachments.", gui_s(TH->t_body), GW_REGULAR, TH->warning, GUI_LEFT);
+        gw_label(gc_row(&cur, gui_s(30)), "Equip a gun (1-6) to fit attachments.", gui_s(TH->t_body), GW_REGULAR, TH->warning, GUI_LEFT);
         return false;
     }
     gw_section(gc_row(&cur, gui_s(26)), "Attachments");

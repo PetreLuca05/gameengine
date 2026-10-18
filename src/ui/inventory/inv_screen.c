@@ -86,6 +86,11 @@ static struct {
 } V;
 
 static Game *g_(void) { return game(); }
+
+// Type size (px) for a design size, never below a readable floor: at 720p the theme's 12 px tiny type
+// is 8 px on screen.
+#define INV_MIN_TEXT_PX 10.0f
+static float tpx(float design) { return fmaxf(gui_s(design), INV_MIN_TEXT_PX); }
 static const ItemDB *items(void) { Game *g = g_(); return g && g->world ? g->world->items : NULL; }
 
 InvTree *inv_screen_tree(int side) {
@@ -353,9 +358,11 @@ static void draw_item_tile(GuiRect r, const InvItem *it, int side, bool dim, Inv
     gd_alpha_push(carrying(side, it->uid) ? 0.35f : (dim ? 0.3f : 1.0f));
     gd_round_border(gui_rect_inset(r, 1), rad, sel ? fmaxf(1.0f, gui_s(1.5f)) : 1.0f, bg, sel ? TH->select : TH->slot_border);
     inv_draw_item_image(gui_rect_inset(r, fminf(r.w, r.h) * 0.08f), db, &it->s, (it->flags & INVF_ROT) != 0, 1.0f);
-    float fs = fmaxf(gui_s(TH->t_tiny), fminf(gui_s(13), V.L.cell * 0.22f));
-    GuiText name = { fs, GW_MEDIUM, TH->text_dim, GUI_LEFT, 0.02f, true, true, r.w - gui_s(8) };
-    gd_text(&name, r.x + gui_s(4), r.y + gui_s(2), revive_item_name(db, it->s.item, it->s.ammo));
+    float fs = fmaxf(tpx(TH->t_tiny), fminf(gui_s(13), V.L.cell * 0.22f));
+    int key = side == INV_SIDE_SELF && p ? bound_key(p, it->uid) : 0;
+    float badge = key ? fs * 1.3f : 0.0f;   // the hotbar key badge (top right): the name stops left of it
+    GuiText name = { fs, GW_MEDIUM, TH->text_dim, GUI_LEFT, 0.02f, true, true, r.w - gui_s(8) - (key ? badge + gui_s(3) : 0.0f) };
+    if (name.max_w > fs * 1.5f) gd_text(&name, r.x + gui_s(4), r.y + gui_s(2), revive_item_name(db, it->s.item, it->s.ammo));
     char b[24];
     const WeaponDef *wd = item_weapon(db, it->s.item);
     if (it->s.count > 1) {
@@ -384,10 +391,9 @@ static void draw_item_tile(GuiRect r, const InvItem *it, int side, bool dim, Inv
         GuiText t2 = { fs * 0.9f, GW_MEDIUM, TH->text_faint, GUI_LEFT, 0, false, true, 0 };
         gd_text(&t2, r.x + gui_s(4), r.y + r.h - gd_line_height(t2.size) - gui_s(2), b);
     }
-    int key = side == INV_SIDE_SELF && p ? bound_key(p, it->uid) : 0;
     if (key) {
         snprintf(b, sizeof(b), "%d", key);
-        float k = fs * 1.3f;
+        float k = badge;
         GuiRect kr = { r.x + r.w - k - gui_s(3), r.y + gui_s(3), k, k };
         gd_round(kr, gui_s(3), gui_rgba_mul(TH->accent, 0.85f));
         gw_label(kr, b, fs, GW_SEMIBOLD, TH->text_dark, GUI_CENTER);
@@ -482,11 +488,11 @@ static void draw_grid(GuiRect origin, GuiRect clip, int side, u16 parent, const 
 }
 
 static void panel_title(GuiRect r, const char *name, float kg, int used, int cap, int *filter, GuiId fid) {
-    GuiText t = { gui_s(TH->t_label), GW_SEMIBOLD, TH->text, GUI_LEFT, TH->tracking_caps, true, false, r.w * 0.38f };
+    GuiText t = { tpx(TH->t_label), GW_SEMIBOLD, TH->text, GUI_LEFT, TH->tracking_caps, true, false, r.w * 0.38f };
     gd_text(&t, r.x, r.y + gui_s(4), name);
     char b[64];
     snprintf(b, sizeof(b), "%.1f kg   %d/%d", kg, used, cap);
-    GuiText s = { gui_s(TH->t_small), GW_REGULAR, TH->text_faint, GUI_RIGHT, 0, false, false, 0 };
+    GuiText s = { tpx(TH->t_small), GW_REGULAR, TH->text_faint, GUI_RIGHT, 0, false, false, 0 };
     float fw = gui_s(46);
     gd_text(&s, r.x + r.w - 2 * fw - gui_s(12), r.y + gui_s(5), b);   // left of the Sort and filter chips
     if (filter) {
@@ -494,7 +500,7 @@ static void panel_title(GuiRect r, const char *name, float kg, int used, int cap
         GuiRect fr = { r.x + r.w - fw, r.y + gui_s(2), fw, gui_s(20) };
         GuiInteract in = gui_interact(fid, fr, 0);
         gd_round(fr, gui_s(TH->radius), in.hot ? TH->hover : gui_rgba_mul(TH->slot_bg, 0.8f));
-        gw_label(fr, names[*filter % 5], gui_s(TH->t_tiny + 1), GW_MEDIUM, *filter ? TH->accent : TH->text_faint, GUI_CENTER);
+        gw_label(fr, names[*filter % 5], tpx(TH->t_tiny + 1), GW_MEDIUM, *filter ? TH->accent : TH->text_faint, GUI_CENTER);
         if (in.clicked) *filter = (*filter + 1) % 5;
         if (in.right_clicked) *filter = 0;
         if (in.hovered) gui_tooltip(fid, "Filter (click to cycle)");
@@ -505,7 +511,7 @@ static void sort_button(GuiRect r, int side, u16 parent, GuiId id) {
     GuiRect br = { r.x + r.w - gui_s(46) * 2 - gui_s(6), r.y + gui_s(2), gui_s(46), gui_s(20) };
     GuiInteract in = gui_interact(id, br, 0);
     gd_round(br, gui_s(TH->radius), in.hot ? TH->hover : gui_rgba_mul(TH->slot_bg, 0.8f));
-    gw_label(br, "Sort", gui_s(TH->t_tiny + 1), GW_MEDIUM, TH->text_faint, GUI_CENTER);
+    gw_label(br, "Sort", tpx(TH->t_tiny + 1), GW_MEDIUM, TH->text_faint, GUI_CENTER);
     static int key;
     if (in.hovered) gui_tooltip(id, key == 0 ? "Sort by type" : key == 1 ? "Sort by weight" : "Sort by size");
     if (in.clicked) {
@@ -585,7 +591,9 @@ static void draw_equip(void) {
         hit_add(HK_EQUIP, r, r, me, 0);
         pad_add(me, r, 1);
         bool hover = V.hover.kind == IT_EQUIP && V.hover.index == s;
-        u32 border = TH->slot_border, bg = gui_rgba_mul(TH->slot_bg, 0.85f);
+        // The centre has no panel behind the player: each slot carries its own backdrop (the panel
+        // colour) so an empty one reads over a bright sky or floor.
+        u32 border = gui_rgba_lerp(TH->panel_border, TH->text_faint, 0.35f), bg = TH->panel;
         if (V.dd.state == IDD_DRAGGING && hover) {
             InvDDOut o = idd_drop_on(&V.dd, me, &v);
             bool ok = o.action == IDA_INTENT && dry_run(&o.in) == IIR_OK;
@@ -598,10 +606,11 @@ static void draw_equip(void) {
         float sh = shake_amount(me);
         if (sh > 0) r.x += sinf(sh * 40.0f) * sh * gui_s(5);
         gd_round_border(r, gui_s(TH->radius), 1, bg, border);
-        GuiText lab = { gui_s(TH->t_tiny), GW_MEDIUM, TH->text_faint, GUI_LEFT, TH->tracking_caps, true, false, r.w - gui_s(8) };
+        GuiText lab = { tpx(TH->t_tiny), GW_MEDIUM, it ? TH->text_faint : TH->text_dim, GUI_LEFT, TH->tracking_caps, true, false, r.w - gui_s(8) };
         gd_text(&lab, r.x + gui_s(5), r.y + gui_s(3), short_slot_name(s));
         if (it) {
-            GuiRect ir = { r.x + gui_s(4), r.y + gui_s(16), r.w - gui_s(8), r.h - gui_s(20) };
+            float lh = gd_line_height(lab.size) + gui_s(4);
+            GuiRect ir = { r.x + gui_s(4), r.y + lh, r.w - gui_s(8), r.h - lh - gui_s(4) };
             draw_item_tile(ir, it, INV_SIDE_SELF, false, me);
             if (hover && V.dd.state == IDD_IDLE && !V.ctx.open) tooltip_for(gui_idi("inv_eq", s), INV_SIDE_SELF, it);
         }
@@ -612,11 +621,12 @@ static void draw_equip(void) {
     InvTarget dt = { IT_DISCARD, 0, 0, 0, 0, 0, 0, 0 };
     hit_add(HK_DISCARD, d, d, dt, 0);
     bool over = V.dd.state == IDD_DRAGGING && V.hover.kind == IT_DISCARD;
-    float a = V.dd.state == IDD_DRAGGING ? 1.0f : 0.45f;
-    gd_alpha_push(a);
-    gd_round_border(d, d.h * 0.5f, 1, over ? gui_rgba_mul(TH->danger, 0.35f) : gui_rgba_mul(TH->slot_bg, 0.7f), over ? TH->danger : TH->slot_border);
-    gw_label_caps(d, "Discard", gui_s(TH->t_label), over ? TH->text : TH->text_faint, GUI_CENTER);
-    gd_alpha_pop();
+    bool dragging = V.dd.state == IDD_DRAGGING;
+    // A solid pill (the panel colour, a danger-tinted edge): visible over the scene before a drag starts.
+    u32 fill = over ? gui_rgba_lerp(TH->panel, TH->danger, 0.45f) : TH->panel;
+    u32 edge = over ? TH->danger : gui_rgba_lerp(TH->panel_border, TH->danger, dragging ? 0.8f : 0.45f);
+    gd_round_border(d, d.h * 0.5f, dragging ? fmaxf(1.0f, gui_s(1.5f)) : 1.0f, fill, edge);
+    gw_label_caps(d, "Discard", tpx(TH->t_label), over ? TH->text : dragging ? TH->text_dim : TH->text_faint, GUI_CENTER);
 }
 
 static void draw_hotbar(void) {
@@ -627,7 +637,7 @@ static void draw_hotbar(void) {
     InvView v = view();
     gw_panel(gui_rect(L->right.x - gui_s(8), L->right.y - gui_s(8), L->right.w + gui_s(16), L->right.h + gui_s(16)), true);
     gui_block_rect(L->right);
-    GuiText t = { gui_s(TH->t_label), GW_SEMIBOLD, TH->text, GUI_LEFT, TH->tracking_caps, true, false, 0 };
+    GuiText t = { tpx(TH->t_label), GW_SEMIBOLD, TH->text, GUI_LEFT, TH->tracking_caps, true, false, 0 };
     gd_text(&t, L->right.x, L->right.y + gui_s(4), "Hotbar");
     for (int k = 0; k < INV_HOTBAR; k++) {
         GuiRect r = L->hot[k];
@@ -640,48 +650,69 @@ static void draw_hotbar(void) {
         u32 border = sel ? TH->select : TH->slot_border, bg = gui_rgba_mul(TH->slot_bg, 0.9f);
         if (V.dd.state == IDD_DRAGGING && hover) {
             InvDDOut o = idd_drop_on(&V.dd, me, &v);
-            bool ok = o.action == IDA_INTENT;
+            bool ok = o.action == IDA_INTENT && dry_run(&o.in) == IIR_OK;
             border = ok ? TH->ok : TH->danger;
             bg = gui_rgba_lerp(bg, border, 0.2f);
         } else if (hover) bg = gui_rgba_lerp(bg, TH->slot_hi, 0.6f);
         float sh = shake_amount(me);
         if (sh > 0) r.x += sinf(sh * 40.0f) * sh * gui_s(5);
         gd_alpha_push(V.dd.state == IDD_DRAGGING && V.dd.src.kind == IT_HOT && V.dd.src.index == k ? 0.4f : 1.0f);
-        gd_round_border(r, gui_s(TH->radius), sel ? fmaxf(1.0f, gui_s(1.5f)) : 1.0f, bg, border);
+        gd_round_border(gui_rect_inset(r, 1), gui_s(TH->radius), sel ? fmaxf(1.0f, gui_s(1.5f)) : 1.0f, bg, border);
         char key[4];
         snprintf(key, sizeof(key), "%d", k + 1);
-        GuiText kt = { gui_s(L->hot_compact ? TH->t_tiny + 1 : TH->t_body), GW_SEMIBOLD, sel ? TH->select : TH->text_faint, GUI_LEFT, 0, false, false, 0 };
-        gd_text(&kt, r.x + gui_s(6), r.y + gui_s(4), key);
+        GuiText kt = { tpx(TH->t_tiny), GW_SEMIBOLD, sel ? TH->select : TH->text_faint, GUI_LEFT, 0, false, false, 0 };
+        gd_text(&kt, r.x + gui_s(4), r.y + gui_s(2), key);
         if (s->item) {
-            const ItemDef *d = item_def(db, s->item);
             const InvItem *it = inv_get_c(&p->inv.t, p->inv.quick[k]);
-            bool rot = false;   // tiles show the item lying flat
-            if (L->hot_compact) {
-                inv_draw_item_image(gui_rect_inset(r, r.w * 0.16f), db, s, rot, 1.0f);
-            } else {
-                GuiRect ir = { r.x + gui_s(26), r.y + gui_s(6), r.w * 0.55f, r.h - gui_s(12) };
-                inv_draw_item_image(ir, db, s, rot, 1.0f);
-                GuiText nm = { gui_s(TH->t_small + 1), GW_SEMIBOLD, TH->text, GUI_RIGHT, 0, false, false, r.w * 0.4f };
-                gd_text(&nm, r.x + r.w - gui_s(10), r.y + gui_s(8), revive_item_name(db, s->item, s->ammo));
-                char b[48] = "";
-                const WeaponDef *wd = item_weapon(db, s->item);
-                if (wd && wd->kind != WPN_MELEE && wd->mag_size > 0) {
-                    WeaponDef eff;
-                    attach_weapon_effective(db, wd, s->att, &eff);
-                    int mag = k == p->sim.wpn.slot ? p->sim.wpn.mag : s->ammo;
-                    snprintf(b, sizeof(b), "%d / %d   \xC2\xB7   %d", mag, eff.mag_size, wd->ammo_item ? inv_count(&p->inv, wd->ammo_item) : 0);
-                } else if (s->count > 1 || d->max_stack > 1) {
-                    snprintf(b, sizeof(b), "x%d", inv_count(&p->inv, s->item));
-                }
-                GuiText at = { gui_s(TH->t_small), GW_MEDIUM, TH->text_dim, GUI_RIGHT, 0, false, false, 0 };
-                gd_text(&at, r.x + r.w - gui_s(10), r.y + r.h - gui_s(24), b);
+            inv_draw_item_image(gui_rect_inset(r, r.w * 0.14f), db, s, false, 1.0f);   // lying flat, at its grid aspect
+            const WeaponDef *wd = item_weapon(db, s->item);
+            char b[16] = "";
+            if (wd && wd->kind != WPN_MELEE && wd->mag_size > 0) snprintf(b, sizeof(b), "%d", k == p->sim.wpn.slot ? p->sim.wpn.mag : s->ammo);
+            else if (s->count > 1) snprintf(b, sizeof(b), "%d", s->count);
+            if (b[0]) {
+                GuiText at = { tpx(TH->t_tiny), GW_SEMIBOLD, TH->text, GUI_RIGHT, 0, false, true, 0 };
+                gd_text(&at, r.x + r.w - gui_s(4), r.y + r.h - gd_line_height(at.size) - gui_s(2), b);
             }
             if (hover && V.dd.state == IDD_IDLE && !V.ctx.open && it) tooltip_for(gui_idi("inv_hot", k), INV_SIDE_SELF, it);
-        } else if (!L->hot_compact) {
-            gw_label(r, "Drag an item here", gui_s(TH->t_small), GW_REGULAR, TH->text_faint, GUI_CENTER);
         }
         gd_alpha_pop();
         if (gui_nav_mode() && V.pad_cur < V.pad_n && V.pad_t[V.pad_cur].kind == IT_HOT && V.pad_t[V.pad_cur].index == k) gw_focus_ring(r, gui_s(TH->radius), 1.0f);
+    }
+    // The binds under the row (loot closed): key, name, magazine / reserve or the stack.
+    GuiRect ir = L->hot_info;
+    if (ir.h <= 0) return;
+    float rh = DG_MIN(ir.h / (float)INV_HOTBAR, gui_s(26));
+    for (int k = 0; k < INV_HOTBAR; k++) {
+        GuiRect row = { ir.x, ir.y + (float)k * rh, ir.w, rh };
+        const InvSlot *s = inv_hot_c(&p->inv, k);
+        bool sel = k == g->hotbar_slot;
+        if (sel) gd_round(row, gui_s(TH->radius), gui_rgba_mul(TH->slot_hi, 0.5f));
+        float ty = row.y + (rh - gd_line_height(tpx(TH->t_small))) * 0.5f;
+        char key[4];
+        snprintf(key, sizeof(key), "%d", k + 1);
+        GuiText kt = { tpx(TH->t_small), GW_SEMIBOLD, sel ? TH->select : TH->text_faint, GUI_LEFT, 0, false, false, 0 };
+        gd_text(&kt, row.x + gui_s(6), ty, key);
+        if (!s->item) {
+            GuiText et = { tpx(TH->t_small), GW_REGULAR, TH->text_faint, GUI_LEFT, 0, false, false, 0 };
+            gd_text(&et, row.x + gui_s(26), ty, "Drag an item onto a tile");
+            continue;
+        }
+        const ItemDef *d = item_def(db, s->item);
+        char b[48] = "";
+        const WeaponDef *wd = item_weapon(db, s->item);
+        if (wd && wd->kind != WPN_MELEE && wd->mag_size > 0) {
+            WeaponDef eff;
+            attach_weapon_effective(db, wd, s->att, &eff);
+            int mag = k == p->sim.wpn.slot ? p->sim.wpn.mag : s->ammo;
+            snprintf(b, sizeof(b), "%d / %d   \xC2\xB7   %d", mag, eff.mag_size, wd->ammo_item ? inv_count(&p->inv, wd->ammo_item) : 0);
+        } else if (s->count > 1 || d->max_stack > 1) {
+            snprintf(b, sizeof(b), "x%d", inv_count(&p->inv, s->item));
+        }
+        GuiText at = { tpx(TH->t_small), GW_MEDIUM, TH->text_dim, GUI_RIGHT, 0, false, false, 0 };
+        float aw = b[0] ? gd_text_width(&at, b) : 0.0f;
+        GuiText nm = { tpx(TH->t_small), GW_SEMIBOLD, TH->text, GUI_LEFT, 0, false, true, row.w - gui_s(26 + 16) - aw };
+        gd_text(&nm, row.x + gui_s(26), ty, revive_item_name(db, s->item, s->ammo));
+        if (b[0]) gd_text(&at, row.x + row.w - gui_s(8), ty, b);
     }
 }
 
@@ -709,7 +740,7 @@ static void draw_loot(void) {
     const ItemDB *db = items();
     GuiRect r = L->loot;
     if (!t) {
-        gw_label(r, "Opening\xE2\x80\xA6", gui_s(TH->t_body), GW_REGULAR, TH->text_faint, GUI_CENTER);
+        gw_label(r, "Opening\xE2\x80\xA6", tpx(TH->t_body), GW_REGULAR, TH->text_faint, GUI_CENTER);
         return;
     }
     const InvContainerDef *cd = inv_root_def(t, db);
@@ -756,13 +787,13 @@ static void draw_loot(void) {
             if (!ccd) continue;
             int cc, cr;
             inv_container_extent(ccd, &cc, &cr);
-            GuiText st = { gui_s(TH->t_small), GW_SEMIBOLD, TH->text_dim, GUI_LEFT, TH->tracking_caps, true, false, r.w };
+            GuiText st = { tpx(TH->t_small), GW_SEMIBOLD, TH->text_dim, GUI_LEFT, TH->tracking_caps, true, false, r.w };
             gd_text(&st, r.x, y + gui_s(2), item_def(db, c->s.item)->name);
             y += gui_s(20);
             draw_grid(gui_rect(r.x, y, 0, 0), clip, INV_SIDE_LOOT, c->uid, ccd, V.filter[INV_UI_MAX_PANELS], 3);
             y += (float)cr * L->cell + L->gap;
         }
-        GuiText st = { gui_s(TH->t_small), GW_SEMIBOLD, TH->text_dim, GUI_LEFT, TH->tracking_caps, true, false, r.w };
+        GuiText st = { tpx(TH->t_small), GW_SEMIBOLD, TH->text_dim, GUI_LEFT, TH->tracking_caps, true, false, r.w };
         gd_text(&st, r.x, y + gui_s(2), "Pockets");
         y += gui_s(20);
     }
@@ -790,12 +821,12 @@ static GuiRect window_frame(vec2 *pos, bool *dragging, vec2 *grab, float w, floa
         if (!gui_mouse_down(0)) *dragging = false;
         else *pos = v2(gui_mouse().x - grab->x, gui_mouse().y - grab->y);
     }
-    GuiText t = { gui_s(TH->t_label), GW_SEMIBOLD, TH->text, GUI_LEFT, TH->tracking_caps, true, false, r.w - gui_s(50) };
+    GuiText t = { tpx(TH->t_label), GW_SEMIBOLD, TH->text, GUI_LEFT, TH->tracking_caps, true, false, r.w - gui_s(50) };
     gd_text(&t, r.x + gui_s(12), r.y + gui_s(8), title);
     GuiRect x = { r.x + r.w - gui_s(28), r.y + gui_s(4), gui_s(22), gui_s(22) };
     GuiInteract xi = gui_interact(id + 1, x, 0);
     gd_round(x, gui_s(TH->radius), xi.hot ? TH->hover : 0);
-    gw_label(x, "\xC3\x97", gui_s(TH->t_body), GW_MEDIUM, xi.hot ? TH->text : TH->text_faint, GUI_CENTER);
+    gw_label(x, "\xC3\x97", tpx(TH->t_body), GW_MEDIUM, xi.hot ? TH->text : TH->text_faint, GUI_CENTER);
     *close = xi.clicked;
     gd_set_layer(layer);
     return gui_rect(r.x + gui_s(12), r.y + gui_s(34), r.w - gui_s(24), r.h - gui_s(44));
@@ -824,7 +855,7 @@ static void draw_windows(void) {
 
 static void stat_line(GuiCursor *c, const char *label, const char *value, float delta, bool higher_better) {
     GuiRect r = gc_row(c, gui_s(19));
-    gw_label(gui_rect(r.x, r.y, r.w * 0.55f, r.h), label, gui_s(TH->t_small + 1), GW_REGULAR, TH->text_dim, GUI_LEFT);
+    gw_label(gui_rect(r.x, r.y, r.w * 0.55f, r.h), label, tpx(TH->t_small + 1), GW_REGULAR, TH->text_dim, GUI_LEFT);
     char buf[64];
     u32 col = TH->text;
     if (fabsf(delta) >= 0.5f) {
@@ -833,7 +864,7 @@ static void stat_line(GuiCursor *c, const char *label, const char *value, float 
     } else {
         snprintf(buf, sizeof(buf), "%s", value);
     }
-    gw_label(gui_rect(r.x + r.w * 0.45f, r.y, r.w * 0.55f, r.h), buf, gui_s(TH->t_small + 1), GW_MEDIUM, col, GUI_RIGHT);
+    gw_label(gui_rect(r.x + r.w * 0.45f, r.y, r.w * 0.55f, r.h), buf, tpx(TH->t_small + 1), GW_MEDIUM, col, GUI_RIGHT);
 }
 
 static float pct(float now, float base) { return base != 0.0f ? 100.0f * (now - base) / fabsf(base) : 0.0f; }
@@ -977,14 +1008,14 @@ static void draw_inspect(void) {
             sv.shake = shake_amount(me);
             if (V.dd.state == IDD_DRAGGING && V.dd.src.kind == IT_ATTACH && V.dd.src.index == k) sv.dim = true;
             gw_slot(chip, &sv);
-            gw_label_caps(gui_rect(chip.x, chip.y + chip.h + gui_s(1), chip.w, gui_s(14)), attach_slot_name(k), gui_s(TH->t_tiny), hover ? TH->text : TH->text_faint, GUI_CENTER);
+            gw_label_caps(gui_rect(chip.x, chip.y + chip.h + gui_s(1), chip.w, gui_s(14)), attach_slot_name(k), tpx(TH->t_tiny), hover ? TH->text : TH->text_faint, GUI_CENTER);
             if (hover && fake.item && V.dd.state == IDD_IDLE) gui_tooltip(gui_idi("inv_att", k), item_def(db, fake.item)->name);
         }
     }
-    GuiText kind = { gui_s(TH->t_label), GW_SEMIBOLD, type_color(d), GUI_LEFT, TH->tracking_caps, true, false, 0 };
+    GuiText kind = { tpx(TH->t_label), GW_SEMIBOLD, type_color(d), GUI_LEFT, TH->tracking_caps, true, false, 0 };
     GuiRect kr = gc_row(&cur, gui_s(18));
     gd_text(&kind, kr.x, kr.y, item_kind_name(d->kind));
-    GuiText desc = { gui_s(TH->t_small + 1), GW_REGULAR, TH->text_dim, GUI_LEFT, 0, false, false, 0 };
+    GuiText desc = { tpx(TH->t_small + 1), GW_REGULAR, TH->text_dim, GUI_LEFT, 0, false, false, 0 };
     float dh = gd_text_wrap(&desc, cur.area.x, cur.y, cur.area.w, d->desc, true);
     cur.y += dh + gui_s(8);
     gd_clip_push(gui_rect(c.x, cur.y, c.w, c.y + c.h - cur.y));
@@ -1038,13 +1069,13 @@ static void draw_context(void) {
     gd_shadow(r, gui_s(TH->radius), gui_s(16), TH->shadow);
     gd_round_border(r, gui_s(TH->radius), 1, TH->panel, TH->panel_border);
     gui_block_rect(r);
-    gw_label_caps(gui_rect(r.x + gui_s(14), r.y + gui_s(6), r.w - gui_s(28), gui_s(20)), d->name, gui_s(TH->t_label), TH->text_faint, GUI_LEFT);
+    gw_label_caps(gui_rect(r.x + gui_s(14), r.y + gui_s(6), r.w - gui_s(28), gui_s(20)), d->name, tpx(TH->t_label), TH->text_faint, GUI_LEFT);
     for (int i = 0; i < n; i++) {
         GuiRect ir = { r.x + gui_s(5), r.y + gui_s(28) + ih * (float)i, r.w - gui_s(10), ih };
         GuiInteract in = gui_interact(gui_idi("inv_ctx", i), ir, GUI_FOCUSABLE | (i == 0 ? GUI_DEFAULT_FOCUS : 0));
         if (in.hot) gd_round(ir, gui_s(TH->radius), TH->hover);
         bool danger = e[i].type == II_DISCARD;
-        gw_label(gui_rect(ir.x + gui_s(10), ir.y, ir.w - gui_s(20), ir.h), e[i].label, gui_s(TH->t_body - 1), GW_MEDIUM,
+        gw_label(gui_rect(ir.x + gui_s(10), ir.y, ir.w - gui_s(20), ir.h), e[i].label, tpx(TH->t_body - 1), GW_MEDIUM,
                  danger ? gui_rgba_lerp(TH->text_dim, TH->danger, 0.6f) : (in.hot ? TH->text : TH->text_dim), GUI_LEFT);
         if (!in.clicked) continue;
         V.ctx.open = false;
@@ -1102,7 +1133,7 @@ static void draw_split(void) {
     gd_set_layer(GL_TOP);
     gw_panel(r, true);
     gui_block_rect(r);
-    gw_label_caps(gui_rect(r.x + gui_s(16), r.y + gui_s(12), r.w - gui_s(32), gui_s(20)), "Split stack", gui_s(TH->t_label), TH->text, GUI_LEFT);
+    gw_label_caps(gui_rect(r.x + gui_s(16), r.y + gui_s(12), r.w - gui_s(32), gui_s(20)), "Split stack", tpx(TH->t_label), TH->text, GUI_LEFT);
     GuiRect sr = { r.x + gui_s(16), r.y + gui_s(48), r.w - gui_s(32), gui_s(30) };
     gw_slider(gui_id("inv_split_n"), sr, &V.split.count, 1, (float)DG_MAX(1, V.split.max), 1, "%.0f");
     GuiRect ok = { r.x + r.w - gui_s(16) - gui_s(110), r.y + r.h - gui_s(48), gui_s(110), gui_s(TH->button_h) };
@@ -1248,7 +1279,7 @@ static void draw_ghost(void) {
     if (V.dd.split && s.count > 1) {
         char b[16];
         snprintf(b, sizeof(b), "%d", s.count / 2);
-        GuiText t = { gui_s(TH->t_small), GW_SEMIBOLD, TH->text, GUI_RIGHT, 0, false, true, 0 };
+        GuiText t = { tpx(TH->t_small), GW_SEMIBOLD, TH->text, GUI_RIGHT, 0, false, true, 0 };
         gd_text(&t, r.x + r.w - gui_s(4), r.y + r.h - gui_s(18), b);
     }
     gd_set_layer(layer);
@@ -1449,11 +1480,11 @@ bool inventory_draw(GuiRect area, bool as_modal) {
     float a = gui_ease_out(gui_anim_t(gui_id("inv_open")) / TH->modal_in);
     gd_alpha_push(a);
     // Header: title, total weight (informational), sync state.
-    GuiText title = { gui_s(TH->t_title), GW_SEMIBOLD, TH->text, GUI_LEFT, 0.02f, true, true, 0 };
+    GuiText title = { tpx(TH->t_title), GW_SEMIBOLD, TH->text, GUI_LEFT, 0.02f, true, true, 0 };
     gd_text(&title, L->header.x, L->header.y + gui_s(6), "Inventory");
     char hb[96];
     snprintf(hb, sizeof(hb), "%.1f kg carried%s", inv_tree_weight(&p->inv.t, db), game_inv_pending() ? "   \xC2\xB7   syncing\xE2\x80\xA6" : "");
-    GuiText ht = { gui_s(TH->t_small + 1), GW_MEDIUM, TH->text_dim, GUI_RIGHT, 0, false, true, 0 };
+    GuiText ht = { tpx(TH->t_small + 1), GW_MEDIUM, TH->text_dim, GUI_RIGHT, 0, false, true, 0 };
     gd_text(&ht, L->header.x + L->header.w, L->header.y + gui_s(14), hb);
     gd_rect(gui_rect(L->header.x, L->header.y + L->header.h - 1, L->header.w, 1), gui_rgba_mul(TH->panel_border, 0.8f));
     // Columns.
@@ -1502,7 +1533,7 @@ bool inventory_draw(GuiRect area, bool as_modal) {
     // Footer: key hints + the last rejection.
     if (V.toast[0] && gui_time() - V.toast_t < 2.5) {
         float ta = 1.0f - saturate((float)(gui_time() - V.toast_t - 2.0) / 0.5f);
-        GuiText t = { gui_s(TH->t_small + 1), GW_SEMIBOLD, gui_rgba_mul(TH->danger, ta), GUI_LEFT, 0, false, true, 0 };
+        GuiText t = { tpx(TH->t_small + 1), GW_SEMIBOLD, gui_rgba_mul(TH->danger, ta), GUI_LEFT, 0, false, true, 0 };
         gd_text(&t, L->footer.x, L->footer.y + gui_s(2), V.toast);
     }
     screens_footer_hint(L->footer, gui_nav_mode() ? "A  pick up / place    X  rotate / menu    Y  quick move    LB RB  panels    B  back"

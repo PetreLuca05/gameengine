@@ -32,8 +32,8 @@ typedef struct InvLayout {
     float left_content_h;      // > left.h: the column scrolls
     GuiRect player;            // the live player (no backdrop)
     GuiRect equip[EQ_COUNT];
-    GuiRect hot[INV_HOTBAR];   // hotbar tiles
-    bool hot_compact;          // a row of squares (loot open) instead of large tiles
+    GuiRect hot[INV_HOTBAR];   // hotbar tiles: one grid cell each, in a row
+    GuiRect hot_info;          // the binds listed under the row (name, rounds), loot closed only
     GuiRect loot;              // the loot panel (title + grid), loot open only
     GuiRect discard;           // drop zone (bottom of the centre)
 } InvLayout;
