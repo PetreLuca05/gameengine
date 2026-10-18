@@ -1,0 +1,24 @@
+{
+  "_doc": "Death / downed ear ring + heartbeat (docs/REVIVE.md 'Death sequence'; was audio/death_synth.c): a ~3.6 kHz tone with a slow pitch warble and a quiet 2nd harmonic, and a low lub-dub at heart_bpm. Gains glide (tau 50 ms): target jumps never pop.",
+  "name": "death_ring",
+  "loop": true,
+  "tau": 0.05,
+  "params": {
+    "ring_gain": [0, 0, 1], "ring_freq": [3600, 500, 8000], "warble_hz": [5.5, 0, 20], "warble_dev": [14, 0, 200],
+    "heart_gain": [0, 0, 1], "heart_bpm": [70, 20, 200]
+  },
+  "nodes": [
+    { "id": "lfo", "type": "osc", "wave": "sine", "hz": "$warble_hz" },
+    { "id": "tone", "type": "osc", "wave": "sine", "hz": "$ring_freq", "fm": "$warble_dev", "in": "lfo" },
+    { "id": "harm", "type": "osc", "wave": "sine", "hz": "$ring_freq*2", "fm": "$warble_dev*2", "amp": 0.08, "in": "lfo" },
+    { "id": "rm", "type": "mix", "in": ["tone", "harm"], "gains": [0.5, 0.5] },
+    { "id": "rg", "type": "gain", "amp": "$ring_gain", "in": "rm" },
+    { "id": "beat", "type": "pulses", "hz": "$heart_bpm*0.0166667", "decay_ms": 70, "width_ms": 6, "count": 1, "spread": 0 },
+    { "id": "low", "type": "osc", "wave": "sine", "hz": 52 },
+    { "id": "lub", "type": "ring", "in": ["low", "beat"] },
+    { "id": "dub", "type": "delay", "ms": 230, "fb": 0, "mix": 0.45, "max_ms": 240, "in": "lub" },
+    { "id": "hg", "type": "gain", "amp": "$heart_gain", "in": "dub" },
+    { "id": "out", "type": "mix", "in": ["rg", "hg"] }
+  ],
+  "out": "out"
+}

@@ -1,0 +1,10 @@
+{
+  "name": "bullet_whizz",
+  "bus": "sfx", "priority": 0.6, "max_instances": 8,
+  "distance": { "min": 1, "max": 30, "rolloff": 1 },
+  "inputs": { "speed": 300, "miss": 2 },
+  "layers": [
+    { "patch": "bullet_whizz", "bind": { "time": "lerp(speed, 150, 1.4, 340, 0.8)", "q": "lerp(miss, 0.5, 4, 8, 1.5)" } },
+    { "sample": "bullet_whizz", "gain_db": -8, "optional": true }
+  ]
+}

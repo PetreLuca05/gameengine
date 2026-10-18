@@ -181,6 +181,12 @@
    "reason": "Character animation features (foot IK, spine, turn, hold, lean, damage reactions, ragdolls): remote players look the same to everyone; lean off would hide a peeking head.",
    "category": "animation"
   },
+  "audio_debug": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Audio debug overlay: dev view.",
+   "category": "audio"
+  },
   "bal_bullet_trace": {
    "class": "LOCKED",
    "ui": "—",
@@ -2203,6 +2209,36 @@
    "reason": "Shutter preview / VFX time scale / sky disc zoom / dev night: dev views.",
    "category": "world"
   },
+  "snd_degrade": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Procedural audio switches (environment chain, echoes, occlusion budget, degradation, helmet stub, offline mixer, recipes): dev / A-B toggles, one value for everyone.",
+   "category": "audio"
+  },
+  "snd_echo_max": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Procedural audio switches (environment chain, echoes, occlusion budget, degradation, helmet stub, offline mixer, recipes): dev / A-B toggles, one value for everyone.",
+   "category": "audio"
+  },
+  "snd_echoes": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Procedural audio switches (environment chain, echoes, occlusion budget, degradation, helmet stub, offline mixer, recipes): dev / A-B toggles, one value for everyone.",
+   "category": "audio"
+  },
+  "snd_env": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Procedural audio switches (environment chain, echoes, occlusion budget, degradation, helmet stub, offline mixer, recipes): dev / A-B toggles, one value for everyone.",
+   "category": "audio"
+  },
+  "snd_helmet": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Procedural audio switches (environment chain, echoes, occlusion budget, degradation, helmet stub, offline mixer, recipes): dev / A-B toggles, one value for everyone.",
+   "category": "audio"
+  },
   "snd_master": {
    "class": "EDITABLE",
    "ui": "Audio",
@@ -2213,6 +2249,24 @@
    "class": "EDITABLE",
    "ui": "Audio",
    "reason": "Volumes.",
+   "category": "audio"
+  },
+  "snd_occlusion_voices": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Procedural audio switches (environment chain, echoes, occlusion budget, degradation, helmet stub, offline mixer, recipes): dev / A-B toggles, one value for everyone.",
+   "category": "audio"
+  },
+  "snd_offline": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Procedural audio switches (environment chain, echoes, occlusion budget, degradation, helmet stub, offline mixer, recipes): dev / A-B toggles, one value for everyone.",
+   "category": "audio"
+  },
+  "snd_procedural": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Procedural audio switches (environment chain, echoes, occlusion budget, degradation, helmet stub, offline mixer, recipes): dev / A-B toggles, one value for everyone.",
    "category": "audio"
   },
   "snd_sfx": {

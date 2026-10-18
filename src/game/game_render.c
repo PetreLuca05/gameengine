@@ -218,6 +218,7 @@ void game_render_init(void) {
     weather_register();
     water_register();
     wind_game_register();
+    game_audio_register();
     foliage_register();
     vehicles_register();
     flesh_range_register();
@@ -966,6 +967,7 @@ void game_render(void) {
     vec3 right = right_from_yaw(cam.yaw);
     vec3 up = v3_cross(right, fwd);
     dbg_submit((float)g_engine.frame_dt, cam.pos, right, up);
+    game_audio_frame(w, &cam, p, ads);   // listener state + the world the environment chain listens to
     audio_update(cam.pos, fwd, up);
 
     if (!game_post_photo_mode() && !scene_hides_hud()) { peek_draw(); hud_draw(); if (!menus_open()) wheels_draw(); vehicles_draw_hud(); phone_draw(); }
@@ -975,6 +977,7 @@ void game_render(void) {
     shadow_sky_draw();
     ground_ref_draw();
     weather_draw();
+    game_audio_draw(cam.pos);
     flesh_range_draw();
     wind_game_draw_panel();
     scene_draw();

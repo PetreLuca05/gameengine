@@ -143,6 +143,11 @@ float weather_cloud_cover(World *w, float fallback);
 float weather_fog_density(World *w, float fallback);
 float weather_lightning_flash(void);
 void weather_draw(void);
+// Audio glue (game_audio.c, docs/AUDIO_PROCEDURAL.md): ray / foliage queries for the environment
+// chain, the listener state each frame (before audio_update), the audio_debug overlay.
+void game_audio_register(void);
+void game_audio_frame(World *w, const RenderCamera *cam, const Player *p, bool ads);
+void game_audio_draw(vec3 cam_pos);
 void daynight_level_loaded(World *w);
 // Host: calendar day (1..365, the season's sun path / day length) and the time (hours < 0 = keep).
 void daynight_set_calendar(World *w, int day_of_year, float hours);

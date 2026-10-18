@@ -1,0 +1,10 @@
+{
+  "name": "death_ring",
+  "bus": "ui", "loop": true, "spatial": false, "env": false, "priority": 1.0, "max_instances": 1,
+  "inputs": { "ring_gain": 0, "ring_freq": 3600, "warble_hz": 5.5, "warble_depth": 0.004, "heart_gain": 0, "heart_bpm": 70 },
+  "layers": [
+    { "patch": "death_ring",
+      "bind": { "ring_gain": "ring_gain", "ring_freq": "ring_freq", "warble_hz": "warble_hz", "warble_dev": "ring_freq * warble_depth",
+                "heart_gain": "heart_gain", "heart_bpm": "heart_bpm" } }
+  ]
+}

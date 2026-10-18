@@ -1,0 +1,24 @@
+{
+  "_doc": "Muzzle blast (docs/AUDIO_PROCEDURAL.md 'Gunshots'): a Friedlander pressure pulse (the low-end thump, positive phase ~ charge^1/3) + a pink-noise burst (expanding gas) tilted by the muzzle device and low-passed (suppressor) + powder crackle (short barrels).",
+  "name": "gun_blast",
+  "params": {
+    "amp": 1, "thump_amp": [0.9, 0, 2], "thump_ms": [1.6, 0.3, 6],
+    "burst_amp": [1, 0, 3], "burst_scale": [1, 0.2, 3], "tilt": [0, -12, 12],
+    "lp_hz": [12000, 500, 20000], "hp_hz": [60, 20, 600], "crackle": [0.2, 0, 1], "drive": [1.5, 0.5, 4]
+  },
+  "nodes": [
+    { "id": "fr", "type": "friedlander", "amp": "$thump_amp", "dur_ms": "$thump_ms", "b": 1.6 },
+    { "id": "frl", "type": "onepole", "mode": "lp", "hz": 2500, "in": "fr" },
+    { "id": "n", "type": "noise", "color": "pink" },
+    { "id": "e", "type": "env", "in": "n", "stages": [[0.15, 1, 0], [5, 0.4, 2], [40, 0, 3.5]], "time": "$burst_scale", "amp": "$burst_amp*3" },
+    { "id": "cr", "type": "grains", "src": "click", "rate": 900, "decay": 30, "amp": "$crackle", "hz": 5000, "dur_ms": 2 },
+    { "id": "crf", "type": "biquad", "mode": "hp", "hz": 2000, "in": "cr" },
+    { "id": "t", "type": "tilt", "db": "$tilt", "pivot": 1500, "in": "e" },
+    { "id": "lp", "type": "biquad", "mode": "lp", "hz": "$lp_hz", "q": 0.6, "in": "t" },
+    { "id": "hp", "type": "biquad", "mode": "hp", "hz": "$hp_hz", "q": 0.6, "in": "lp" },
+    { "id": "ce", "type": "env", "in": "crf", "stages": [[0.1, 1], [60, 0, 3]] },
+    { "id": "m", "type": "mix", "in": ["frl", "hp", "ce"], "gains": [1, 1, 0.5] },
+    { "id": "sh", "type": "shaper", "mode": "tanh", "drive": "$drive", "mix": 0.6, "amp": "$amp", "in": "m" }
+  ],
+  "out": "sh"
+}
