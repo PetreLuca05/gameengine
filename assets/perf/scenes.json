@@ -32,6 +32,205 @@
       "orbit": { "radius": 22, "height": 6, "pitch": -14 }
     },
     {
+      "id": "veg_forest_pine",
+      "desc": "vegetation map, pine forest interior (density 3.6, the densest zone): eye height, looking across the trunks",
+      "map": "vegetation",
+      "setup": [
+        "time_set 15:00",
+        "time_pause 1",
+        "weather_lock 1",
+        "weather_set little_cloudy 0",
+        "setpos -135 16.41 -125"
+      ],
+      "orbit": {
+        "radius": 5,
+        "height": 1.7,
+        "pitch": -2
+      }
+    },
+    {
+      "id": "veg_forest_broadleaf",
+      "desc": "vegetation map, broadleaf forest interior (density 3.0): eye height",
+      "map": "vegetation",
+      "setup": [
+        "time_set 15:00",
+        "time_pause 1",
+        "weather_lock 1",
+        "weather_set little_cloudy 0",
+        "setpos 135 12.79 -125"
+      ],
+      "orbit": {
+        "radius": 5,
+        "height": 1.7,
+        "pitch": -2
+      }
+    },
+    {
+      "id": "veg_forest_edge",
+      "desc": "vegetation map, the pine forest's east edge (forest on one side, meadow / trail on the other)",
+      "map": "vegetation",
+      "setup": [
+        "time_set 15:00",
+        "time_pause 1",
+        "weather_lock 1",
+        "weather_set little_cloudy 0",
+        "setpos -60 12.73 -110"
+      ],
+      "orbit": {
+        "radius": 5,
+        "height": 1.7,
+        "pitch": -2
+      }
+    },
+    {
+      "id": "veg_meadow",
+      "desc": "vegetation map, the bush + tall grass meadow in the middle of the valley",
+      "map": "vegetation",
+      "setup": [
+        "time_set 15:00",
+        "time_pause 1",
+        "weather_lock 1",
+        "weather_set little_cloudy 0",
+        "setpos 0 14.99 10"
+      ],
+      "orbit": {
+        "radius": 5,
+        "height": 1.7,
+        "pitch": -2
+      }
+    },
+    {
+      "id": "veg_wheat",
+      "desc": "vegetation map, the wheat field (south)",
+      "map": "vegetation",
+      "setup": [
+        "time_set 15:00",
+        "time_pause 1",
+        "weather_lock 1",
+        "weather_set little_cloudy 0",
+        "setpos 0 14.28 140"
+      ],
+      "orbit": {
+        "radius": 5,
+        "height": 1.7,
+        "pitch": -2
+      }
+    },
+    {
+      "id": "veg_deadwood",
+      "desc": "vegetation map, the dead forest (west, dead 0.85)",
+      "map": "vegetation",
+      "setup": [
+        "time_set 15:00",
+        "time_pause 1",
+        "weather_lock 1",
+        "weather_set little_cloudy 0",
+        "setpos -160 14.66 95"
+      ],
+      "orbit": {
+        "radius": 5,
+        "height": 1.7,
+        "pitch": -2
+      }
+    },
+    {
+      "id": "veg_pond",
+      "desc": "vegetation map, the pond shore (north): the sparse / light area",
+      "map": "vegetation",
+      "setup": [
+        "time_set 15:00",
+        "time_pause 1",
+        "weather_lock 1",
+        "weather_set little_cloudy 0",
+        "setpos 0 14.21 -110"
+      ],
+      "orbit": {
+        "radius": 5,
+        "height": 1.7,
+        "pitch": -2
+      }
+    },
+    {
+      "id": "veg_overlook",
+      "desc": "vegetation map, from the south rim over the whole valley (the most foliage in view)",
+      "map": "vegetation",
+      "setup": [
+        "time_set 15:00",
+        "time_pause 1",
+        "weather_lock 1",
+        "weather_set little_cloudy 0",
+        "setpos 0 41.47 224.82"
+      ],
+      "camera": [
+        [
+          0,
+          43.3,
+          223,
+          -25,
+          -9
+        ],
+        [
+          0,
+          43.3,
+          223,
+          0,
+          -10
+        ],
+        [
+          0,
+          43.3,
+          223,
+          25,
+          -9
+        ],
+        [
+          0,
+          43.3,
+          223,
+          0,
+          -10
+        ]
+      ]
+    },
+    {
+      "id": "veg_horde_forest",
+      "desc": "vegetation map: 500 zombies converging through the pine forest interior",
+      "map": "vegetation",
+      "setup": [
+        "time_set 15:00",
+        "time_pause 1",
+        "weather_lock 1",
+        "weather_set little_cloudy 0",
+        "setpos -135 16.41 -125",
+        "spawn_horde 500 30 ring",
+        "horde_target players"
+      ],
+      "orbit": {
+        "radius": 14,
+        "height": 4,
+        "pitch": -10
+      }
+    },
+    {
+      "id": "veg_horde_meadow",
+      "desc": "vegetation map: 500 zombies converging across the meadow",
+      "map": "vegetation",
+      "setup": [
+        "time_set 15:00",
+        "time_pause 1",
+        "weather_lock 1",
+        "weather_set little_cloudy 0",
+        "setpos 0 14.99 10",
+        "spawn_horde 500 30 ring",
+        "horde_target players"
+      ],
+      "orbit": {
+        "radius": 18,
+        "height": 5,
+        "pitch": -12
+      }
+    },
+    {
       "id": "water_weather",
       "desc": "water yard in rain: water surfaces, wet shading, precipitation, rain occlusion",
       "map": "wateryard",

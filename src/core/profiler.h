@@ -59,6 +59,7 @@ typedef enum ProfFix {
     PFX_CLASSIC_CULL_BATCH,   // PF-0009: the classic renderer's views culled in one parallel pass
     PFX_WIND_TILE_JOBS,       // PF-0010: the wind tile window rows on the job system
     PFX_SKIN_SHADOW_CULL,     // PF-0011: skinned shadow casters culled per sun cascade
+    PFX_SHADOW_LIGHT_ORDER,   // PF-0012: classic shadow instances drawn front to back from the light
     PFX_COUNT
 } ProfFix;
 
