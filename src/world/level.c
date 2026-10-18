@@ -336,7 +336,8 @@ static void build_room(LevelBuild *b, const cJSON *room) {
     vec3 fsz = b->open_world ? size : jv3(room, "floor_size", v3(size.x, 0, size.z));
     float fx = fmaxf(fsz.x * 0.5f, hx), fz = fmaxf(fsz.z * 0.5f, hz);
     b->material = fm >= 0 ? fm : SURF_CONCRETE;
-    add_box(b, v3(0, -t * 0.5f, 0), v3(fx + t, t * 0.5f, fz + t), 0, floor_col, MAT_GRID, true);
+    // "floor_grid": false = a plain floor (devroom_vegetation: no grid under the dev room).
+    add_box(b, v3(0, -t * 0.5f, 0), v3(fx + t, t * 0.5f, fz + t), 0, floor_col, jb(room, "floor_grid", true) ? MAT_GRID : 0u, true);
     b->material = wm >= 0 ? wm : SURF_PLASTER;
     if (ceiling) add_box(b, v3(0, h + t * 0.5f, 0), v3(hx + t, t * 0.5f, hz + t), 0, wall_col, MAT_GRID | MAT_NO_SHADOW, true);
     if (walls) {

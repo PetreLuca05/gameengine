@@ -91,6 +91,7 @@ The room's pad comes last, `room_sink` lower, under its floor box. On an open wo
 floor at the room's size (no `floor_size`, no invisible boundary: the world's edge walls bound it), and
 the water ground under the level file's own bodies is baked from the physics like a brush level's.
 Keep `devroom.json`'s `footprint_areas` in step when a dev room area without brushes moves.
+The including level's own `room` keys win over the included room's: devroom_vegetation sets `"room": {"floor_grid": false}` (the dev room's floor without its grid; `floor_grid` defaults to true).
 **Paint features win over pads** (the generator applies them after): keep `paint` rectangles and other
 material features off the included footprint. devroom_vegetation also keeps the audio range's surroundings
 clear (no forest / hill near the pad, a flat empty field within 450 m of (-700, 300)); test_level_include checks it.
