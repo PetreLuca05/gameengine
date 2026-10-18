@@ -182,9 +182,11 @@ tells the truth about where that line ends, it changes nothing.
   - spread ring and the crosshair's smoothing (within 1 px of Q after 1 s at 60 and 144 Hz).
 - `aim_sockets` (ctest, Python): the muzzle socket and `aim` block of every gun.
 - `tools/tests/aim_obstruct.cfg` + `aim_check.py` (game): the dev room aim stand.
-  - Open field hip (clear: the crosshair at the centre, the shot along the barrel line, Q on it) and
-    ADS (clear, B within 0.3° of the camera axis).
-  - Wall edge (obstructed), barrel on the wall (barrel), the barrel rule (trigger held), back in the
+  - Hip at a panel 16 m out (clear: the crosshair at the centre, the shot along the barrel line, Q on
+    it) and ADS in the open field (clear, B within 0.3° of the camera axis). The script runs
+    with weapon sway off: the cases are geometry.
+  - A corner at range (the camera ray passes a panel's edge 16 m out, the toed-in hip barrel line
+    lands on it: obstructed), barrel on the wall (barrel), the barrel rule (trigger held), back in the
     open (the crosshair returns to the centre), the ground 15 m ahead (parallax: clear).
   - Window crouched, low wall, thin wall (recovered), car bonnet, a teammate (friendly).
   - Each obstructed case checks the crosshair within 1 px of Q's projection; each shot checks its
