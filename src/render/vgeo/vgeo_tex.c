@@ -66,11 +66,12 @@ u32 vg_tex_build_mips(const u8 *rgba, u32 w, u32 h, u8 *out) {
     return levels;
 }
 
-static bool create_image(VgTextures *t, VgOwnTex *o, u32 w, u32 h, u32 levels, const u8 *rgba, bool srgb) {
+// `levels` levels of `fmt` packed in data (sizes[l] bytes each; NULL: RGBA8 sizes).
+static bool create_image(VgTextures *t, VgOwnTex *o, u32 w, u32 h, u32 levels, const u8 *rgba, VkFormat fmt, const size_t *sizes) {
     const VgContext *c = t->ctx;
     VkImageCreateInfo ii = { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
     ii.imageType = VK_IMAGE_TYPE_2D;
-    ii.format = srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
+    ii.format = fmt;
     ii.extent.width = w;
     ii.extent.height = h;
     ii.extent.depth = 1;
@@ -90,7 +91,7 @@ static bool create_image(VgTextures *t, VgOwnTex *o, u32 w, u32 h, u32 levels, c
     vi.subresourceRange.layerCount = 1;
     if (vkCreateImageView(c->device, &vi, NULL, &o->view) != VK_SUCCESS) return false;
     size_t bytes = 0;
-    for (u32 l = 0, lw = w, lh = h; l < levels; l++, lw = lw > 1 ? lw / 2 : 1, lh = lh > 1 ? lh / 2 : 1) bytes += (size_t)lw * lh * 4;
+    for (u32 l = 0, lw = w, lh = h; l < levels; l++, lw = lw > 1 ? lw / 2 : 1, lh = lh > 1 ? lh / 2 : 1) bytes += sizes ? sizes[l] : (size_t)lw * lh * 4;
     VgBuffer st = vgc_buffer(c, bytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VGM_UPLOAD);
     if (!st.buffer) return false;
     memcpy(st.mapped, rgba, bytes);
@@ -111,7 +112,7 @@ static bool create_image(VgTextures *t, VgOwnTex *o, u32 w, u32 h, u32 levels, c
         r[l].imageExtent.width = lw;
         r[l].imageExtent.height = lh;
         r[l].imageExtent.depth = 1;
-        off += (size_t)lw * lh * 4;
+        off += sizes ? sizes[l] : (size_t)lw * lh * 4;
     }
     vkCmdCopyBufferToImage(cmd, st.buffer, o->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, n, r);
     transition(cmd, o->image, levels, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_2_TRANSFER_BIT,
@@ -124,12 +125,13 @@ static bool create_image(VgTextures *t, VgOwnTex *o, u32 w, u32 h, u32 levels, c
     return true;
 }
 
-static bool create_samplers(const VgContext *ctx, float anisotropy, VkSampler *clamp, VkSampler *repeat) {
+static bool create_samplers(const VgContext *ctx, float anisotropy, float mip_bias, VkSampler *clamp, VkSampler *repeat) {
     VkSamplerCreateInfo si = { VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
     si.magFilter = si.minFilter = VK_FILTER_LINEAR;
     si.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
     si.addressModeU = si.addressModeV = si.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
     si.maxLod = 16.0f;
+    si.mipLodBias = mip_bias;
     if (anisotropy > 1.0f) {
         si.anisotropyEnable = VK_TRUE;
         si.maxAnisotropy = anisotropy;
@@ -143,12 +145,12 @@ static bool create_samplers(const VgContext *ctx, float anisotropy, VkSampler *c
     return true;
 }
 
-void vg_tex_set_anisotropy(VgTextures *t, float anisotropy) {
+void vg_tex_set_anisotropy(VgTextures *t, float anisotropy, float mip_bias) {
     if (!t->ctx) return;
     if (anisotropy <= 1.0f) anisotropy = 0.0f;
-    if (anisotropy == t->anisotropy) return;
+    if (anisotropy == t->anisotropy && mip_bias == t->mip_bias) return;
     VkSampler clamp, repeat;
-    if (!create_samplers(t->ctx, anisotropy, &clamp, &repeat)) { log_warn("vgeo: texture samplers not recreated"); return; }
+    if (!create_samplers(t->ctx, anisotropy, mip_bias, &clamp, &repeat)) { log_warn("vgeo: texture samplers not recreated"); return; }
     for (u32 i = 0; i < VG_TEX_COUNT; i++) {
         VgTexEntry *e = &t->e[i];
         VkSampler s = e->sampler == t->clamp ? clamp : e->sampler == t->repeat ? repeat : VK_NULL_HANDLE;
@@ -160,6 +162,7 @@ void vg_tex_set_anisotropy(VgTextures *t, float anisotropy) {
     t->clamp = clamp;
     t->repeat = repeat;
     t->anisotropy = anisotropy;
+    t->mip_bias = mip_bias;
     for (u32 i = 0; i < VG_TEX_COUNT; i++) t->ver[i]++;   // every entry: empty ones are written with clamp / repeat too
     t->gen++;
 }
@@ -167,11 +170,11 @@ void vg_tex_set_anisotropy(VgTextures *t, float anisotropy) {
 bool vg_tex_init(VgTextures *t, const VgContext *ctx) {
     memset(t, 0, sizeof(*t));
     t->ctx = ctx;
-    if (!create_samplers(ctx, 0.0f, &t->clamp, &t->repeat)) return false;
+    if (!create_samplers(ctx, 0.0f, 0.0f, &t->clamp, &t->repeat)) return false;
     VgOwnTex w;
     memset(&w, 0, sizeof(w));
     const u8 white[4] = { 255, 255, 255, 255 };
-    if (!create_image(t, &w, 1, 1, 1, white, false)) { log_error("vgeo: texture table init failed"); return false; }
+    if (!create_image(t, &w, 1, 1, 1, white, VK_FORMAT_R8G8B8A8_UNORM, NULL)) { log_error("vgeo: texture table init failed"); return false; }
     t->white = w.image;
     t->white_alloc = w.alloc;
     t->white_view = w.view;
@@ -232,7 +235,13 @@ u32 vg_tex_create(VgTextures *t, u32 w, u32 h, u32 levels, const u8 *rgba, bool 
     u32 idx = vg_tex_alloc(t);
     if (!idx) return 0;
     VgOwnTex *o = &t->own[idx - VG_TEX_GAME];
-    if (!create_image(t, o, w, h, levels ? levels : 1, rgba, srgb)) {
+    levels = DG_CLAMP(levels, 1u, 16u);
+    u32 fmt = srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
+    size_t sizes[16];
+    u8 *bc = t->compress ? t->compress(rgba, w, h, levels, srgb, &fmt, sizes) : NULL;
+    bool ok = create_image(t, o, w, h, levels, bc ? bc : rgba, (VkFormat)fmt, bc ? sizes : NULL);
+    free(bc);
+    if (!ok) {
         log_error("vgeo: texture %ux%u upload failed", w, h);
         vg_tex_release(t, idx);
         return 0;

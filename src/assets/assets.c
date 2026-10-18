@@ -5,6 +5,9 @@
 #include "render/mesh_gen.h"
 #include "render/vgeo/vgeo_import.h"
 #include "render/shadow_casters.h"
+#include "render/tex_compress.h"
+#include "core/jobs.h"
+#include "core/profiler.h"
 #include "stb_image.h"
 #include "cgltf.h"
 #include "cJSON.h"
@@ -48,11 +51,66 @@ static void tex_source_add(TextureId id, const char *path, int image, bool srgb)
     dg_strcpy(t->path, sizeof(t->path), path);
 }
 
-// Decoded pixels to the renderer: a texture (world: r_texture_quality applies), or world texture
-// `reload` again.
+// assets_reload_textures with r_texture_compress switched: the world textures change format
+// (render_texture_replace*), not only their resident levels.
+static bool g_tex_replace;
+static int g_tex_bc = -1;   // texc_enabled() when the world textures were made (-1: none yet)
+
+// Decoded pixels to the renderer: a texture (world: r_texture_compress and r_texture_quality apply),
+// or world texture `reload` again. A world texture's chain is built on the CPU with the GPU blit
+// chain's filter and encoded level by level when block compression is on (docs/TEXTURE_MIPS.md).
 static TextureId upload_rgba(int w, int h, const u8 *px, bool srgb, bool world, TextureId reload) {
+    if (world && texc_enabled()) {
+        TexcImage lv[16];
+        u32 levels;
+        u8 *chain = texc_mip_chain(px, (u32)w, (u32)h, srgb, lv, &levels);
+        TexcKind k = srgb ? TEXC_COLOR : TEXC_DATA;
+        size_t off[16], total = 0, sizes[16];
+        u8 *bc = texc_encode(lv, (int)levels, k, off, &total);
+        free(chain);
+        if (bc) {
+            for (u32 l = 0; l < levels; l++) sizes[l] = (l + 1 < levels ? off[l + 1] : total) - off[l];
+            TextureId id = reload;
+            if (reload && g_tex_replace) render_texture_replace_raw(reload, w, h, (int)levels, texc_vk_format(k), bc, sizes);
+            else if (reload) render_texture_reload_raw(reload, w, h, (int)levels, texc_vk_format(k), bc, sizes);
+            else id = render_texture_create_raw_world(w, h, (int)levels, texc_vk_format(k), bc, sizes);
+            free(bc);
+            return id;
+        }
+    }
+    if (reload && g_tex_replace) { render_texture_replace(reload, w, h, px, srgb); return reload; }
     if (reload) { render_texture_reload(reload, w, h, px); return reload; }
     return world ? render_texture_create_world(w, h, px, srgb) : render_texture_create(w, h, px, srgb, true);
+}
+
+// PF-0024 (docs/perf/FINDINGS.md): the manifest's texture files are decoded on the jobs before the
+// serial loop creates them in manifest order, which takes each file's pixels from here (the same
+// stbi_load, the same pixels and texture ids). perf_fix_disable PF-0024 decodes them in the loop.
+typedef struct Predecoded { const char *path; u8 *px; int w, h; } Predecoded;
+static Predecoded *g_pre;
+static int g_pre_n;
+
+static void predecode_job(void *ctx, int begin, int end) {
+    Predecoded *p = (Predecoded *)ctx;
+    for (int i = begin; i < end; i++) {
+        int comp;
+        size_t n = strlen(p[i].path);
+        if (n > 5 && SDL_strcasecmp(p[i].path + n - 5, ".ktx2") == 0) continue;
+        p[i].px = stbi_load(p[i].path, &p[i].w, &p[i].h, &comp, 4);   // NULL: the loop reports it
+    }
+}
+
+static stbi_uc *texture_decode(const char *path, int *w, int *h) {
+    for (int i = 0; i < g_pre_n; i++)
+        if (g_pre[i].px && !strcmp(g_pre[i].path, path)) {
+            stbi_uc *px = g_pre[i].px;
+            g_pre[i].px = NULL;
+            *w = g_pre[i].w;
+            *h = g_pre[i].h;
+            return px;
+        }
+    int comp;
+    return stbi_load(path, w, h, &comp, 4);
 }
 
 #define KTX_VK_R8G8B8A8_UNORM 37u
@@ -130,8 +188,8 @@ done:
 static TextureId texture_load_path(const char *path, bool srgb, bool world, TextureId reload) {
     size_t n = strlen(path);
     if (n > 5 && SDL_strcasecmp(path + n - 5, ".ktx2") == 0) return ktx2_load(path, world, reload);
-    int w, h, comp;
-    stbi_uc *px = stbi_load(path, &w, &h, &comp, 4);
+    int w, h;
+    stbi_uc *px = texture_decode(path, &w, &h);
     if (!px) { log_error("texture: cannot load %s (%s)", path, stbi_failure_reason()); return 0; }
     TextureId id = upload_rgba(w, h, px, srgb, world, reload);
     stbi_image_free(px);
@@ -440,6 +498,23 @@ bool assets_init(const char *manifest_path) {
     free(text);
     if (!root) { log_error("assets: manifest parse error"); return false; }
     const cJSON *it;
+    u64 t0 = SDL_GetTicksNS();
+    int nt = cJSON_GetArraySize(cJSON_GetObjectItemCaseSensitive(root, "textures"));
+    char (*paths)[512] = NULL;
+    if (nt > 0 && prof_fix_enabled(PFX_TEX_DECODE_JOBS)) {
+        PROF_BEGIN("texture_predecode");
+        paths = (char (*)[512])calloc((size_t)nt, sizeof(*paths));
+        g_pre = (Predecoded *)calloc((size_t)nt, sizeof(Predecoded));
+        cJSON_ArrayForEach(it, cJSON_GetObjectItemCaseSensitive(root, "textures")) {
+            const cJSON *p = cJSON_GetObjectItemCaseSensitive(it, "path");
+            if (g_pre_n >= nt || g_pre_n >= MAX_ASSET_TEXTURES) break;
+            platform_data_path(cJSON_IsString(p) ? p->valuestring : "", paths[g_pre_n], sizeof(paths[0]));
+            g_pre[g_pre_n].path = paths[g_pre_n];
+            g_pre_n++;
+        }
+        jobs_parallel_for(g_pre_n, 1, predecode_job, g_pre);
+        PROF_END();
+    }
     cJSON_ArrayForEach(it, cJSON_GetObjectItemCaseSensitive(root, "textures")) {
         if (AS->texture_count >= MAX_ASSET_TEXTURES) break;
         NamedTexture *t = &AS->textures[AS->texture_count++];
@@ -449,6 +524,14 @@ bool assets_init(const char *manifest_path) {
         t->srgb = !cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(it, "srgb"));
         t->id = texture_load_world(platform_data_path(t->path, buf, sizeof(buf)), t->srgb);
     }
+    for (int i = 0; i < g_pre_n; i++) stbi_image_free(g_pre[i].px);   // entries the loop did not take (none normally)
+    free(g_pre);
+    free(paths);
+    g_pre = NULL;
+    g_pre_n = 0;
+    g_tex_bc = texc_enabled();
+    log_info("assets: %d manifest textures in %.0f ms (%s, %s)", AS->texture_count, (double)(SDL_GetTicksNS() - t0) / 1e6,
+             prof_fix_enabled(PFX_TEX_DECODE_JOBS) ? "decoded on the jobs" : "decoded in order", g_tex_bc ? "BC7" : "RGBA8");
     cJSON_ArrayForEach(it, cJSON_GetObjectItemCaseSensitive(root, "models")) {
         if (AS->model_count >= MAX_ASSET_MODELS) break;
         const cJSON *n = cJSON_GetObjectItemCaseSensitive(it, "name"), *p = cJSON_GetObjectItemCaseSensitive(it, "path");
@@ -479,7 +562,11 @@ void assets_shutdown(void) {
 }
 
 void assets_reload_textures(void) {
-    if (!render_textures_reload_wanted()) return;
+    // r_texture_compress / perf_fix_disable PF-0035 switched: every world texture changes format
+    bool bc = texc_enabled(), replace = g_tex_bc >= 0 && (int)bc != g_tex_bc;
+    if (!replace && !render_textures_reload_wanted()) return;
+    g_tex_bc = bc;
+    g_tex_replace = replace;
     u64 t0 = SDL_GetTicksNS();
     render_textures_reload_begin();
     cgltf_data *g = NULL;   // the glTF of the previous source (a model's maps are registered together)
@@ -488,7 +575,7 @@ void assets_reload_textures(void) {
     int n = 0;
     for (int i = 0; i < g_tex_src_count; i++) {
         const TexSource *t = &g_tex_src[i];
-        if (!render_texture_reload_needed(t->id)) continue;
+        if (!replace && !render_texture_reload_needed(t->id)) continue;
         if (t->image < 0) {
             texture_load_path(t->path, t->srgb, true, t->id);
             n++;
@@ -516,7 +603,9 @@ void assets_reload_textures(void) {
     }
     if (g) cgltf_free(g);
     render_textures_reload_end();
-    log_info("texture quality: %d world textures reloaded in %.0f ms", n, (double)(SDL_GetTicksNS() - t0) / 1e6);
+    g_tex_replace = false;
+    if (replace) log_info("texture compression %s: %d world textures replaced in %.0f ms", bc ? "on (BC7)" : "off (RGBA8)", n, (double)(SDL_GetTicksNS() - t0) / 1e6);
+    else log_info("texture quality: %d world textures reloaded in %.0f ms", n, (double)(SDL_GetTicksNS() - t0) / 1e6);
 }
 
 u16 assets_model_id(const char *name) {

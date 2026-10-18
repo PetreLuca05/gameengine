@@ -74,7 +74,7 @@ static const char *k_counter_names[PC_COUNT] = {
     "anim_eval", "anim_eval_offscreen", "skin_palettes", "skin_palette_bytes", "skin_poses", "vfx_emitters", "vfx_emitters_culled", "audio_voices",
     "audio_voices_silent", "ui_text", "ui_verts", "draw_items", "shadow_items",
 };
-static const char *k_fix_ids[PFX_COUNT] = { "PF-0001", "PF-0002", "PF-0005", "PF-0006", "PF-0007", "PF-0009", "PF-0010", "PF-0011", "PF-0012", "PF-0014", "PF-0015", "PF-0013", "PF-0028" };
+static const char *k_fix_ids[PFX_COUNT] = { "PF-0001", "PF-0002", "PF-0005", "PF-0006", "PF-0007", "PF-0009", "PF-0010", "PF-0011", "PF-0012", "PF-0014", "PF-0015", "PF-0024", "PF-0013", "PF-0016", "PF-0029", "PF-0028", "PF-0035" };
 
 static struct {
     bool init;
@@ -924,6 +924,15 @@ void prof_register(void) {
                                     "perf audit A/B: comma separated fix ids switched off (PF-0001..; all = every fidelity-neutral one), docs/perf/FINDINGS.md; the visual trade-offs (PF-0013) only by their id");
     P.fix_disable->on_change = fix_disable_changed;
     fix_disable_changed(P.fix_disable);
+    // Fixes of the startup loads (PF-0024) act before the command line is applied (main.c parse_args,
+    // after the config): "+set perf_fix_disable <ids>" is taken here already, so the A side of a startup
+    // measurement loads the old way too (dev builds: the release locks keep it a host-only value).
+    for (int i = 1; !cvar_release_locks() && i + 2 < g_engine.argc; i++)
+        if (!strcmp(g_engine.argv[i], "+set") && !SDL_strcasecmp(g_engine.argv[i + 1], "perf_fix_disable")) {
+            CvarSource src = cvar_source_push(CVAR_SRC_HOST);
+            cvar_set("perf_fix_disable", g_engine.argv[i + 2]);
+            cvar_source_pop(src);
+        }
     cmd_register("prof_capture", cmd_capture, "prof_capture <frames> <path.json> [label] [warmup=30] [scene=manual]: record a JSON profile (tools/perf_audit)");
 }
 

@@ -68,9 +68,9 @@ static void test_mesh(void) {
         float hmax, rmax;
         grass_mesh_extent(a, &hmax, &rmax);
         VgFoliageMesh m0, m1, m2;
-        grass_gen_mesh(&m0, a, 0);
-        grass_gen_mesh(&m1, a, 0);
-        grass_gen_mesh(&m2, a, 1);
+        grass_gen_mesh(&m0, a, 0, NULL);
+        grass_gen_mesh(&m1, a, 0, NULL);
+        grass_gen_mesh(&m2, a, 1, NULL);
         CHECK(m0.index_count == (u32)(a->cards * a->segments * 6), "%s: %u indices = cards x segments x 2 triangles", a->name, m0.index_count);
         CHECK(m0.vertex_count == m1.vertex_count && !memcmp(m0.pos, m1.pos, sizeof(float) * 3 * m0.vertex_count), "%s: deterministic per variant", a->name);
         CHECK(a->variants < 2 || memcmp(m0.pos, m2.pos, sizeof(float) * 3 * DG_MIN(m0.vertex_count, m2.vertex_count)) != 0, "%s: variants differ", a->name);
@@ -176,9 +176,67 @@ static void test_material(void) {
     }
 }
 
+// PF-0016: fitted cards hold every visible texel of their cell (+ the mip margin), narrower than the cell.
+static void test_fit(void) {
+    if (!g_n) return;
+    GrassAsset a = g_a[0];
+    a.cols = 2, a.rows = 1, a.cell_count = 1, a.cells[0] = 1, a.mirror = 0.5f;
+    const u32 cw = 64, ch = 64, w = cw * 2, h = ch;
+    u8 *px = (u8 *)calloc((size_t)w * h, 4);
+    // cell 1: a blade leaning right, 3 texels wide, root at x 20 .. tip at x 44
+    for (u32 y = 0; y < ch; y++) {
+        u32 x = cw + 20 + (ch - 1 - y) * 24 / ch;
+        for (u32 k = 0; k < 3; k++) px[((size_t)y * w + x + k) * 4 + 3] = 255;
+    }
+    GrassFit fit;
+    grass_fit_compute(&a, px, w, h, &fit);
+    CHECK(fit.valid && fit.bands == a.segments, "fit computed (%d bands)", fit.bands);
+    VgFoliageMesh full, fm;
+    grass_gen_mesh(&full, &a, 0, NULL);
+    grass_gen_mesh(&fm, &a, 0, &fit);
+    CHECK(fm.vertex_count == full.vertex_count && fm.index_count == full.index_count, "same topology");
+    int missed = 0, offplane = 0;
+    double area_full = 0, area_fit = 0;
+    u32 per_card = (u32)(a.segments + 1) * 2;
+    for (u32 c = 0; c < fm.vertex_count / per_card; c++)
+        for (int j = 0; j < a.segments; j++) {
+            u32 v = c * per_card + (u32)j * 2;
+            // the band's uv trapezoid (bottom edge v, v + 1; top v + 2, v + 3) against the opaque texels in it
+            float ul0 = fminf(fm.uv[v * 2], fm.uv[(v + 1) * 2]), ur0 = fmaxf(fm.uv[v * 2], fm.uv[(v + 1) * 2]);
+            float ul1 = fminf(fm.uv[(v + 2) * 2], fm.uv[(v + 3) * 2]), ur1 = fmaxf(fm.uv[(v + 2) * 2], fm.uv[(v + 3) * 2]);
+            float vb = fm.uv[v * 2 + 1], vt = fm.uv[(v + 2) * 2 + 1];
+            for (u32 y = 0; y < ch; y++) {
+                float tv = ((float)y + 0.5f) / (float)h;
+                if (tv < fminf(vb, vt) || tv > fmaxf(vb, vt)) continue;
+                float k = (tv - vb) / (vt - vb);
+                float l = ul0 + (ul1 - ul0) * k, r = ur0 + (ur1 - ur0) * k;
+                for (u32 x = 0; x < w; x++)
+                    if (px[((size_t)y * w + x) * 4 + 3] && (((float)x + 0.5f) / (float)w < l || ((float)x + 0.5f) / (float)w > r)) missed++;
+            }
+            area_fit += (ur0 - ul0 + ur1 - ul1) * 0.5;
+            area_full += (fmaxf(full.uv[v * 2], full.uv[(v + 1) * 2]) - fminf(full.uv[v * 2], full.uv[(v + 1) * 2]));
+            // every fitted vertex on its full card's plane: the position follows the uv along the row
+            for (int e = 0; e < 2; e++) {
+                u32 q = v + (u32)e;
+                float s = (fm.uv[q * 2] - full.uv[v * 2]) / (full.uv[(v + 1) * 2] - full.uv[v * 2]);
+                for (int d = 0; d < 3; d++) {
+                    float want = full.pos[v * 3 + d] + s * (full.pos[(v + 1) * 3 + d] - full.pos[v * 3 + d]);
+                    if (fabsf(fm.pos[q * 3 + d] - want) > 5e-4f) offplane++;   // the fit works against the half-rounded corner uvs
+                }
+            }
+        }
+    CHECK(missed == 0, "every opaque texel inside its fitted band (%d outside)", missed);
+    CHECK(offplane == 0, "fitted vertices on the full card's edges (%d off)", offplane);
+    CHECK(area_fit < 0.6 * area_full, "fitted cards are narrower (%.0f %% of the full area)", 100.0 * area_fit / area_full);
+    vgeo_foliage_mesh_free(&full);
+    vgeo_foliage_mesh_free(&fm);
+    free(px);
+}
+
 int main(void) {
     test_assets();
     test_mesh();
+    test_fit();
     test_placement();
     test_material();
     printf("test_grass: %d / %d checks passed\n", g_checks - g_fail, g_checks);

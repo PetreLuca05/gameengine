@@ -33,6 +33,29 @@ cell bottom at the root). Vertex colour: R height along the card (0 root .. 1 ti
 and the shading's root -> tip parameter), G wind phase, B 0, A the card's hash. 3 cards x 3 segments = 18
 triangles a clump (the tuft had 60).
 
+## Fitted cards (PF-0016)
+
+Atlas cells are mostly transparent around their blades, and every transparent fragment of a card still
+runs the alpha test in the prepass, the lit pass and the shadow tiles. `grass_fit_compute` finds, per
+cell and card band (one per `segments` row), the columns that hold any alpha, grown by 8 texels (2 texels
+of mip 2); `grass_gen_mesh` then moves each row's two vertices inward to cover both bands they bound. The
+triangles stay the same (a trapezoid per band holds the band's opaque rectangle), on the card's plane,
+with the uv following the position exactly as on the full card: uvs are snapped outward to the half grid
+the vertex format stores, positions are computed against the corners' stored uvs, and
+`grass_mesh_match_bounds` keeps the fitted mesh on the full mesh's quantization grid. Without wind the
+fitted cards draw the full cards' pixels; with wind the WPO bend and the dome normals are evaluated at
+the fitted vertices, so the blades sway through slightly different points (a visual trade-off, no
+visible artifact). Every variant's unfitted twin is built too (no impostor) and drawn instead while
+`perf_fix_disable PF-0016` is on. Measured (meadow, wheat, pine forest, Modern, 2 x A/B): prepass
+-8.7 %, opaque -6.8 %, GPU frame -11 %; the meadow alone with the wind off -34 % prepass.
+
+The Tree It leaf cards were measured for the same fit and left as authored: in most species the leaves
+are part of 7+ triangle connected branch meshes, the two-triangle cards of beech / maple / old are bent
+(not one plane), and the convex hull of the visible texels (an octagon grown for mip 2) keeps 85 - 100 %
+of the area of every species' masked triangles, per card or per triangle: the leaf atlases fill their
+cards to the edges and the gaps between leaves are not convex. Cutting them would need concave outlines
+(many more triangles) or the textures re-cropped.
+
 ## Placement
 
 `grass_cover` (per streamed 32 m chunk): a jittered 0.35 m grid; a cell holds a clump with probability

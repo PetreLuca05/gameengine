@@ -1,6 +1,8 @@
 // GPU resources: buffers, meshes, textures, samplers, deferred deletion and staged uploads.
 #include "vk_internal.h"
+#include "core/profiler.h"
 #include "vgeo/vgeo_tex.h"
+#include "tex_compress.h"
 #include <stdlib.h>
 #include <math.h>
 
@@ -170,6 +172,17 @@ float vkr_material_anisotropy(void) {
     return aniso > 1.0f && R->max_anisotropy > 1.0f ? fminf(aniso, R->max_anisotropy) : 0.0f;
 }
 
+float vkr_material_mip_bias(void) {
+    if (!prof_fix_enabled(PFX_UPSCALE_MIP_BIAS) || !R->hdr.w || !R->swap_extent.width) return 0.0f;
+    static Cvar *aa, *up;
+    if (!aa) aa = cvar_find("r_aa");
+    if (!up) up = cvar_find("r_upscaler");
+    bool temporal = (aa && aa->i == 3) || (up && (up->i == 1 || up->i == 3));
+    float ratio = (float)R->hdr.w / (float)R->swap_extent.width;
+    if (!temporal || ratio >= 0.999f) return 0.0f;
+    return fmaxf(log2f(ratio), -1.0f);
+}
+
 // The material samplers: trilinear + anisotropic. sampler_linear skips the top mip levels for
 // r_texture_quality (0 = high, 1 = medium, 2 = low) as a min LOD (texture arrays, impostors, UI
 // atlases: their levels stay resident); sampler_world does not: world textures dropped those levels
@@ -187,6 +200,7 @@ static void create_linear_sampler(void) {
     }
     s.minLod = (float)DG_CLAMP(2 - R->r_texture_quality->i, 0, 2);
     s.maxLod = VK_LOD_CLAMP_NONE;
+    s.mipLodBias = R->mip_bias;   // below display resolution under a temporal resolve: the display's texel density (PF-0029)
     VK_CHECK(vkCreateSampler(R->device, &s, NULL, &R->sampler_linear));
     s.minLod = 0.0f;
     VK_CHECK(vkCreateSampler(R->device, &s, NULL, &R->sampler_world));
@@ -544,44 +558,9 @@ static u32 texture_drop(u32 mips) {
 }
 
 // One 2x2 box level of an RGBA8 image (floor sizes, as the mip chain). sRGB colour is averaged in
-// linear light, as the GPU's mip blits filter it; alpha and UNORM data as they are.
-static u8 *halve_rgba(const u8 *src, int w, int h, bool srgb, int *ow, int *oh) {
-    static float to_linear[256];
-    static u8 to_srgb[4096];
-    static bool tables;
-    if (!tables) {
-        for (int i = 0; i < 256; i++) {
-            float c = (float)i / 255.0f;
-            to_linear[i] = c <= 0.04045f ? c / 12.92f : powf((c + 0.055f) / 1.055f, 2.4f);
-        }
-        for (int i = 0; i < 4096; i++) {
-            float l = (float)i / 4095.0f;
-            float c = l <= 0.0031308f ? l * 12.92f : 1.055f * powf(l, 1.0f / 2.4f) - 0.055f;
-            to_srgb[i] = (u8)DG_CLAMP((int)(c * 255.0f + 0.5f), 0, 255);
-        }
-        tables = true;
-    }
-    int nw = DG_MAX(1, w / 2), nh = DG_MAX(1, h / 2);
-    u8 *dst = (u8 *)malloc((size_t)nw * (size_t)nh * 4);
-    for (int y = 0; y < nh; y++)
-        for (int x = 0; x < nw; x++) {
-            float c[3] = { 0, 0, 0 };
-            u32 a = 0;
-            for (int k = 0; k < 4; k++) {
-                int sx = DG_MIN(x * 2 + (k & 1), w - 1), sy = DG_MIN(y * 2 + (k >> 1), h - 1);
-                const u8 *p = &src[((size_t)sy * (size_t)w + (size_t)sx) * 4];
-                for (int i = 0; i < 3; i++) c[i] += srgb ? to_linear[p[i]] : (float)p[i];
-                a += p[3];
-            }
-            u8 *o = &dst[((size_t)y * (size_t)nw + (size_t)x) * 4];
-            for (int i = 0; i < 3; i++)
-                o[i] = srgb ? to_srgb[DG_CLAMP((int)(c[i] * 0.25f * 4095.0f + 0.5f), 0, 4095)] : (u8)DG_CLAMP((int)(c[i] * 0.25f + 0.5f), 0, 255);
-            o[3] = (u8)((a + 2) / 4);
-        }
-    *ow = nw;
-    *oh = nh;
-    return dst;
-}
+// linear light, as the GPU's mip blits filter it; alpha and UNORM data as they are. The block
+// compressor builds its chains with the same filter (tex_compress.c).
+static u8 *halve_rgba(const u8 *src, int w, int h, bool srgb, int *ow, int *oh) { return texc_halve(src, w, h, srgb, ow, oh); }
 
 // Mip generation by blits needs blit support and linear filtering for the format (RGBA8: everywhere
 // in practice); without it the chain is built on the CPU (vg_tex_build_mips) and uploaded as is.
@@ -881,6 +860,30 @@ void render_texture_reload_raw(TextureId id, int w, int h, int levels, u32 vk_fo
     GpuTexture *t = reload_slot(id, w, h);
     if (!t) return;
     world_fill_raw(id, w, h, levels, t->format, (const u8 *)data, level_sizes);
+    vkg_texture_replaced(id);
+}
+
+// A world texture's image of another format (r_texture_compress switched: RGBA8 <-> BC7). The
+// device is idle (render_textures_reload_begin); the quality's dropped levels apply as at creation.
+static GpuTexture *replace_slot(TextureId id) {
+    if (!id || id >= MAX_TEXTURES || !R->textures[id].used || !R->textures[id].world) return NULL;
+    GpuTexture *t = &R->textures[id];
+    cancel_texture_uploads(id);
+    vkDestroyImageView(R->device, t->view, NULL);
+    vmaDestroyImage(R->vma, t->image, t->alloc);
+    return t;
+}
+
+void render_texture_replace(TextureId id, int w, int h, const void *rgba8, bool srgb) {
+    if (!replace_slot(id)) return;
+    world_fill_rgba(id, w, h, (const u8 *)rgba8, srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM);
+    vkg_texture_replaced(id);
+}
+
+void render_texture_replace_raw(TextureId id, int w, int h, int levels, u32 vk_format, const void *data, const size_t *level_sizes) {
+    levels = DG_CLAMP(levels, 1, 16);
+    if (!raw_format_ok(vk_format, w, h) || !replace_slot(id)) return;
+    world_fill_raw(id, w, h, levels, (VkFormat)vk_format, (const u8 *)data, level_sizes);
     vkg_texture_replaced(id);
 }
 

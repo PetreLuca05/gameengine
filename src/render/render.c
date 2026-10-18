@@ -8,6 +8,7 @@
 #include "graph/fg.h"
 #include "skeletal_mesh.h"
 #include "lod_fade.h"
+#include "tex_compress.h"
 #include "core/platform.h"
 #include "core/profiler.h"
 #include <SDL3/SDL.h>
@@ -244,6 +245,7 @@ bool render_init(SDL_Window *window) {
     render_register_cvars();
     if (!vkd_create_device(window)) return false;
     vkr_create_samplers();
+    texc_init();   // block-compressed textures (docs/TEXTURE_MIPS.md): before any texture loads
     vkp_create_layouts();
     create_frames();
     if (!vkd_create_swapchain()) { log_error("render: initial swapchain creation failed"); return false; }
@@ -412,7 +414,9 @@ static void apply_setting_changes(void) {
         vkDeviceWaitIdle(R->device);
         vkd_create_moon_shadow_map(moon_shadow_size());
     }
-    if (R->r_aniso->modified != R->aniso_mod || R->r_texture_quality->modified != R->texq_mod) {
+    float mip_bias = vkr_material_mip_bias();
+    if (R->r_aniso->modified != R->aniso_mod || R->r_texture_quality->modified != R->texq_mod || fabsf(mip_bias - R->mip_bias) > 0.01f) {
+        R->mip_bias = mip_bias;
         R->aniso_mod = R->r_aniso->modified;
         R->texq_mod = R->r_texture_quality->modified;
         vkDeviceWaitIdle(R->device);

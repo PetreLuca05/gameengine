@@ -469,6 +469,7 @@ typedef struct Renderer {
     Cvar *r_stretch;   // stretched resolution simulator (0 normal .. 1 extreme)
     float exposure_boost;
     u32 aniso_mod, texq_mod;
+    float mip_bias;                     // the material samplers' mipLodBias (vkr_material_mip_bias, PF-0029)
     bool texq_retry;            // world textures still uploading when the quality went down: trim next frame
     bool tex_reload;            // the quality went up: world textures want their source again (assets_reload_textures)
 } Renderer;
@@ -510,6 +511,9 @@ void vkr_create_samplers(void);
 void vkr_destroy_samplers(void);
 void vkr_recreate_linear_sampler(void);   // anisotropy / texture quality change
 float vkr_material_anisotropy(void);      // r_aniso within the device limit, 0 = off
+// PF-0029: log2(render width / display width) (clamped to -1) while a temporal resolve (TAA, TAA-U,
+// FSR 2) accumulates sub-pixel detail from below display resolution, else 0.
+float vkr_material_mip_bias(void);
 VkSampler vkr_texture_sampler(u32 id);    // the sampler of a texture table entry (clamp / world / linear)
 // r_texture_quality changed: world textures drop levels now (GPU copy), or ask for a reload (raised).
 // The caller waited for the device.
@@ -565,6 +569,9 @@ void vkr_cancel_image_upload(VkImage image);
 VkDescriptorSet vkam_set(TextureId t, VkSampler sampler);
 void vkam_record(VkCommandBuffer cmd);
 void vkam_texture_destroyed(TextureId t);
+void vkam_samplers_changed(void);
+// vk_classic.c: mesh `alt` is drawn in `mesh`'s place while PF-0016 (fitted cards) is off (perf_verify's A side).
+void vkc_set_mesh_alt(u32 mesh, u32 alt);   // vkc_samplers_changed: no mask keeps a destroyed sampler
 void vkam_shutdown(void);
 
 // vk_light_shadow.c: shadows of point / spot lights (docs/LIGHT_SHADOWS.md)

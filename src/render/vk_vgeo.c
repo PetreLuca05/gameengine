@@ -19,6 +19,7 @@
 #include "vgeo/vgeo_impostor.h"
 #include "vgeo/vgeo_tree.h"
 #include "vgeo/grass_asset.h"
+#include "tex_compress.h"
 #include "core/cvar.h"
 #include "fidelity/fidelity.h"
 #include "assets/assets.h"
@@ -76,6 +77,25 @@ static struct {
 
 static void fallback_register(u32 mesh, const VgBuilt *b, bool persistent);
 static void vkg_register_era(void);
+// The module's own textures (tree maps, grass atlases, foliage masks, impostor atlases): each level
+// of the chain the loader built (alpha-weighted, coverage-preserving) block-compressed as it is.
+// Colour (sRGB albedo + coverage) or data (normals, ORM, nta maps). NULL keeps RGBA8.
+static u8 *module_tex_compress(const u8 *rgba, u32 w, u32 h, u32 levels, bool srgb, u32 *vk_format, size_t *level_sizes) {
+    TexcImage im[16];
+    size_t at = 0, off[16], total = 0;
+    u32 n = DG_MIN(levels, 16u);
+    for (u32 l = 0, lw = w, lh = h; l < n; l++, lw = DG_MAX(1u, lw / 2), lh = DG_MAX(1u, lh / 2)) {
+        im[l] = (TexcImage){ rgba + at, lw, lh };
+        at += (size_t)lw * lh * 4;
+    }
+    TexcKind k = srgb ? TEXC_COLOR : TEXC_DATA;
+    u8 *bc = texc_encode(im, (int)n, k, off, &total);
+    if (!bc) return NULL;
+    for (u32 l = 0; l < n; l++) level_sizes[l] = (l + 1 < n ? off[l + 1] : total) - off[l];
+    *vk_format = texc_vk_format(k);
+    return bc;
+}
+
 static void cmd_foliage_push_test(int argc, const char **argv);
 static void cmd_foliage_stats(int argc, const char **argv);
 static void cmd_foliage_query(int argc, const char **argv);
@@ -84,7 +104,7 @@ static void cmd_classic_fade_probe(int argc, const char **argv) { vkc_fade_probe
 
 // The material sampler changed: r_aniso on the module textures too, the classic renderer re-wraps them.
 void vkg_samplers_changed(void) {
-    if (G.ok) vg_tex_set_anisotropy(&G.tex, vkr_material_anisotropy());
+    if (G.ok) vg_tex_set_anisotropy(&G.tex, vkr_material_anisotropy(), R->mip_bias);
     vkc_samplers_changed();
 }
 
@@ -128,7 +148,8 @@ void vkg_init(void) {
         vg_tex_shutdown(&G.tex);
         return;
     }
-    vg_tex_set_anisotropy(&G.tex, vkr_material_anisotropy());   // r_aniso on the module textures, before the foliage support takes the samplers
+    G.tex.compress = module_tex_compress;   // BC7 while r_texture_compress is on (at each texture's load)
+    vg_tex_set_anisotropy(&G.tex, vkr_material_anisotropy(), R->mip_bias);   // r_aniso on the module textures, before the foliage support takes the samplers
     G.disp_ok = vg_displace_init(&G.disp, c, &G.tex);
     if (!G.disp_ok) log_warn("vgeo: foliage displacement buffer unavailable");
     G.wind_ok = vg_wind_init(&G.wind, c, &G.tex);
@@ -643,6 +664,7 @@ static void foliage_build_kinds(int k0, int k1, u32 atlas) {
 typedef struct GrassBuild {
     int asset;
     u32 variant;
+    bool full;                       // the unfitted twin of the previous entry (PF-0016's A side: no foliage type, no impostor)
     VgFoliageMesh fm;
     VgSource src;
     VgBuilt b;
@@ -683,6 +705,17 @@ static u8 *grass_tex_load(const char *atlas, const char *suffix, u32 div, u32 *w
     *w = ow;
     *h = oh;
     return out;
+}
+
+// PF-0024: every grass asset's atlas + nta map decoded (and box-downsampled) on the jobs before the
+// serial build loop takes them in asset order (the same grass_tex_load: the same pixels).
+typedef struct GrassTexLoad { const GrassAsset *a; u32 div; u8 *alb, *nta; u32 aw, ah, nw, nh; } GrassTexLoad;
+static void grass_tex_job(void *ctx, int begin, int end) {
+    GrassTexLoad *g = (GrassTexLoad *)ctx;
+    for (int i = begin; i < end; i++) {
+        g[i].alb = grass_tex_load(g[i].a->atlas, "albedo", g[i].div, &g[i].aw, &g[i].ah);
+        g[i].nta = grass_tex_load(g[i].a->atlas, "nta", g[i].div * 2, &g[i].nw, &g[i].nh);
+    }
 }
 
 static u32 grass_tex_upload(const u8 *px, u32 w, u32 h, bool srgb) {
@@ -726,17 +759,23 @@ static void foliage_build_grass(void) {
     GR.tier = grass_fidelity_tier();
     u32 div = GR.r_grass_tex && GR.r_grass_tex->i ? 1u : 2u;
     int total = 0;
-    for (int i = 0; i < GR.n; i++) total += GR.a[i].variants;
+    for (int i = 0; i < GR.n; i++) total += GR.a[i].variants * 2;   // fitted + full (PF-0016)
     GrassBuild *gb = (GrassBuild *)calloc((size_t)DG_MAX(total, 1), sizeof(GrassBuild));
     u8 *alb[GRASS_MAX_ASSETS] = { 0 };
     u32 aw[GRASS_MAX_ASSETS] = { 0 }, ah[GRASS_MAX_ASSETS] = { 0 };
     int nb = 0;
+    GrassTexLoad gt[GRASS_MAX_ASSETS];
+    memset(gt, 0, sizeof(gt));
+    for (int i = 0; i < GR.n; i++) gt[i].a = &GR.a[i], gt[i].div = div;
+    bool pre = prof_fix_enabled(PFX_TEX_DECODE_JOBS);
+    if (pre) jobs_parallel_for(GR.n, 1, grass_tex_job, gt);
     for (int i = 0; i < GR.n; i++) {
         const GrassAsset *a = &GR.a[i];
         GR.mat[i] = ~0u;
-        u32 nw = 0, nh = 0;
-        alb[i] = grass_tex_load(a->atlas, "albedo", div, &aw[i], &ah[i]);
-        u8 *nta = grass_tex_load(a->atlas, "nta", div * 2, &nw, &nh);
+        if (!pre) grass_tex_job(gt, i, i + 1);
+        alb[i] = gt[i].alb, aw[i] = gt[i].aw, ah[i] = gt[i].ah;
+        u8 *nta = gt[i].nta;
+        u32 nw = gt[i].nw, nh = gt[i].nh;
         if (!alb[i]) { log_warn("grass: %s: atlas %s missing (tools/vfxgen/groundgen.py)", a->name, a->atlas); free(nta); continue; }
         VgMaterial mt;
         grass_material(a, GR.tier, (u32)i, &mt);
@@ -747,25 +786,48 @@ static void foliage_build_grass(void) {
         float p[12];
         grass_cover_params(a, p);
         render_ground_set_cover(i, p);
-        for (int v = 0; v < a->variants; v++, nb++) {
-            GrassBuild *q = &gb[nb];
-            q->asset = i;
-            q->variant = (u32)v;
-            grass_gen_mesh(&q->fm, a, (u32)v);
-            vgeo_foliage_source(&q->fm, &q->src);
-            q->im = (VgImpostorMaterial){ { 1, 1, 1, 1 }, alb[i], aw[i], ah[i], 1.0f, true, a->alpha_cutoff };
-            q->io = (VgImpostorOptions){ 512, 8, &q->im, 1 };
-            q->impostor = a->tier[GRASS_TIERS - 1].end_m < 80.0f;   // tall crops fade before an impostor would show
+        static GrassFit fit;
+        grass_fit_compute(a, alb[i], aw[i], ah[i], &fit);   // cards cut to the cells' opaque part (PF-0016)
+        for (int v = 0; v < a->variants; v++) {
+            for (int full = 0; full < 2; full++, nb++) {
+                GrassBuild *q = &gb[nb];
+                q->asset = i;
+                q->variant = (u32)v;
+                q->full = full != 0;
+                grass_gen_mesh(&q->fm, a, (u32)v, full ? NULL : &fit);
+                if (full) {   // the fitted mesh (previous entry) on this one's quantization grid
+                    grass_mesh_match_bounds(&q[-1].fm, &q->fm);
+                    vgeo_foliage_source(&q[-1].fm, &q[-1].src);
+                }
+                vgeo_foliage_source(&q->fm, &q->src);
+                q->im = (VgImpostorMaterial){ { 1, 1, 1, 1 }, alb[i], aw[i], ah[i], 1.0f, true, a->alpha_cutoff };
+                q->io = (VgImpostorOptions){ 512, 8, &q->im, 1 };
+                q->impostor = !full && a->tier[GRASS_TIERS - 1].end_m < 80.0f;   // tall crops fade before an impostor would show
+            }
         }
     }
     render_ground_set_cover_count(GR.n);
     jobs_parallel_for(nb, 1, grass_job, gb);
+    u32 fitted_mesh = ~0u;
     for (int k = 0; k < nb; k++) {
         GrassBuild *q = &gb[k];
         vgeo_foliage_mesh_free(&q->fm);
         if (!q->ok) { log_error("grass: %s variant %u: build failed: %s", GR.a[q->asset].name, q->variant, q->err); continue; }
+        if (q->full) {   // perf_fix_disable PF-0016 draws this one in its fitted twin's place
+            if (fitted_mesh != ~0u) {
+                u32 mesh = vgeo_scene_add_mesh(&G.scene, &q->b);
+                fallback_register(mesh, &q->b, false);
+                vgeo_scene_set_mesh_materials(&G.scene, mesh, GR.mat[q->asset]);
+                vkc_set_mesh_alt(fitted_mesh, mesh);
+            }
+            fitted_mesh = ~0u;
+            vgeo_free(&q->b);
+            continue;
+        }
+        fitted_mesh = ~0u;
         if (G.ftype_count < FOLIAGE_TYPES) {
             u32 mesh = vgeo_scene_add_mesh(&G.scene, &q->b);
+            fitted_mesh = mesh;
             fallback_register(mesh, &q->b, false);
             vgeo_scene_set_mesh_materials(&G.scene, mesh, GR.mat[q->asset]);
             if (q->impostor) vgeo_foliage_impostor_upload(&G.scene, &G.tex, mesh, &q->b);

@@ -270,7 +270,53 @@ void grass_mesh_extent(const GrassAsset *a, float *height, float *radius) {
 // fan_deg along its normal (alternating sides), bends quadratically by up to bend_m at the tip; one quad
 // column per card, `segments` rows (6 triangles at 3 rows). Uvs: the card's atlas cell (mirrored at
 // random), v = 1 at the root (the cells' blades rise from their bottom edge).
-void grass_gen_mesh(VgFoliageMesh *m, const GrassAsset *a, u32 variant) {
+// The vertex uvs are stored as halves (VGEO_VERTEX_BYTES): x on the half grid (0..65504, normal
+// range), rounded to nearest even (vgeo_half), down or up.
+static float half_snap(float x, int mode) {
+    if (x <= 0.0f) return 0.0f;
+    int e;
+    frexpf(x, &e);
+    float step = ldexpf(1.0f, DG_MAX(e, -13) - 11), q = x / step;
+    return (mode < 0 ? floorf(q) : mode > 0 ? ceilf(q) : rintf(q)) * step;
+}
+
+void grass_fit_compute(const GrassAsset *a, const u8 *rgba, u32 w, u32 h, GrassFit *f) {
+    memset(f, 0, sizeof(*f));
+    int cw = (int)w / a->cols, ch = (int)h / a->rows, bands = DG_CLAMP(a->segments, 1, GRASS_FIT_BANDS);
+    if (!rgba || cw < 4 || ch < 4 || a->segments > GRASS_FIT_BANDS) return;
+    const int grow = 2 << (GRASS_FIT_LEVELS - 1);   // 2 texels of the last level the fit holds for
+    for (int cell = 0; cell < a->cols * a->rows; cell++) {
+        int x0 = cell % a->cols * cw, y0 = cell / a->cols * ch;
+        for (int b = 0; b < bands; b++) {
+            // band b: card height t in [b, b + 1] / bands; the cell's rows run top (tip) to bottom (root)
+            int ya = (int)floorf((1.0f - (float)(b + 1) / (float)bands) * (float)ch) - grow, yb = (int)ceilf((1.0f - (float)b / (float)bands) * (float)ch) + grow;
+            int lo = cw, hi = -1;
+            for (int y = DG_MAX(ya, 0); y < DG_MIN(yb, ch); y++) {
+                const u8 *row = rgba + ((size_t)(y0 + y) * w + (size_t)x0) * 4;
+                for (int x = 0; x < cw; x++)
+                    if (row[x * 4 + 3]) { lo = DG_MIN(lo, x); hi = DG_MAX(hi, x); }
+            }
+            if (hi < 0) lo = hi = cw / 2;   // nothing visible: a zero-width band
+            else lo -= grow, hi += 1 + grow;
+            f->l[cell][b] = DG_CLAMP((float)lo / (float)cw, 0.0f, 1.0f);
+            f->r[cell][b] = DG_CLAMP((float)hi / (float)cw, 0.0f, 1.0f);
+        }
+    }
+    f->bands = bands;
+    f->valid = true;
+}
+
+void grass_mesh_match_bounds(VgFoliageMesh *fitted, const VgFoliageMesh *full) {
+    if (!full->vertex_count) return;
+    float mn[3], mx[3], n[3] = { 0, 1, 0 };
+    for (int k = 0; k < 3; k++) mn[k] = mx[k] = full->pos[k];
+    for (u32 v = 1; v < full->vertex_count; v++)
+        for (int k = 0; k < 3; k++) mn[k] = fminf(mn[k], full->pos[v * 3 + k]), mx[k] = fmaxf(mx[k], full->pos[v * 3 + k]);
+    push_vertex(fitted, mn, n, 0.0f, 0.0f, 0);
+    push_vertex(fitted, mx, n, 0.0f, 0.0f, 0);
+}
+
+void grass_gen_mesh(VgFoliageMesh *m, const GrassAsset *a, u32 variant, const GrassFit *fit) {
     memset(m, 0, sizeof(*m));
     g_rng = (u32)variant * 2654435761u + 0x9E37u;
     for (const char *c = a->name; *c; c++) g_rng = g_rng * 31u + (u8)*c;
@@ -293,12 +339,30 @@ void grass_gen_mesh(VgFoliageMesh *m, const GrassAsset *a, u32 variant) {
         float phase = pos_phase(base) * 0.5f + rnd() * 0.5f;
         u32 first = m->vertex_count;
         int rows = a->segments;
+        bool fitted = fit && fit->valid && fit->bands == rows;
         for (int j = 0; j <= rows; j++) {
             float t = (float)j / (float)rows;
             // the card leans along its normal (fan) and bends further toward the tip (quadratic)
             float off = fan * h * t + bend * t * t;
+            // fitted: the row's edge spans the opaque part of both bands it bounds (a trapezoid per band
+            // holds the band's opaque rectangle), as card s = -0.5 .. 0.5 through the same uv mapping
+            float s_edge[2] = { -0.5f, 0.5f }, s_uv[2] = { u0, u1 };
+            if (fitted) {
+                int b0 = DG_MAX(j - 1, 0), b1 = DG_MIN(j, rows - 1);
+                float fl = fminf(fit->l[cell][b0], fit->l[cell][b1]), fr = fmaxf(fit->r[cell][b0], fit->r[cell][b1]);
+                // atlas u snapped outward to the half grid the vertex stores, then card s against the
+                // corners' stored (half) uvs: the fitted vertex's uv is exactly the full card's at its position
+                float ua = half_snap(((float)cx + fl) / (float)a->cols, -1), ub = half_snap(((float)cx + fr) / (float)a->cols, 1);
+                float h0 = half_snap(u0, 0), h1 = half_snap(u1, 0);
+                float sa = (ua - h0) / (h1 - h0) - 0.5f, sb = (ub - h0) / (h1 - h0) - 0.5f;   // card s (mirrored cards: swapped)
+                bool sw = sa > sb;
+                s_edge[0] = sw ? sb : sa, s_edge[1] = sw ? sa : sb;
+                s_uv[0] = sw ? ub : ua, s_uv[1] = sw ? ua : ub;
+                for (int e = 0; e < 2; e++)   // past the cell's edge: the full card's corner
+                    if (s_edge[e] < -0.5f || s_edge[e] > 0.5f) s_edge[e] = e ? 0.5f : -0.5f, s_uv[e] = e ? u1 : u0;
+            }
             for (int i = 0; i <= 1; i++) {
-                float s = (float)i - 0.5f;
+                float s = s_edge[i];
                 float p[3];
                 for (int q = 0; q < 3; q++) p[q] = base[q] + right[q] * s * w + fwd[q] * off;
                 p[1] = h * t / sqrtf(1.0f + fan * fan);   // leaning keeps the card's length, not its height
@@ -308,7 +372,7 @@ void grass_gen_mesh(VgFoliageMesh *m, const GrassAsset *a, u32 variant) {
                 float dl = sqrtf(dome[0] * dome[0] + dome[1] * dome[1] + dome[2] * dome[2]);
                 float n[3];
                 for (int q = 0; q < 3; q++) n[q] = cn[q] * (1.0f - a->normal_dome) + dome[q] / dl * a->normal_dome;
-                float u = i ? u1 : u0, v = v1 + (v0 - v1) * t;
+                float u = fitted ? s_uv[i] : (i ? u1 : u0), v = v1 + (v0 - v1) * t;
                 push_vertex(m, p, n, u, v, rgba(t, phase, 0.0f, card_hash));
             }
         }

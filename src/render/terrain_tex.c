@@ -10,6 +10,7 @@
 //   28 TerrainGpu      parameters (std430), one buffer per frame in flight
 // The maps share the material raster's grid (frame.surf_map). Until a map loads, 1-texel placeholders.
 #include "vk_internal.h"
+#include "tex_compress.h"
 #include "core/platform.h"
 #include "core/cvar.h"
 #include "core/jobs.h"
@@ -77,7 +78,8 @@ static u32 tt_mips(u32 s) {
     return m;
 }
 
-// Square RGBA8 layers with a box-filtered mip chain (mip by mip, layers contiguous: vkr_upload_image).
+// Square RGBA8 layers with a box-filtered mip chain (mip by mip, layers contiguous: vkr_upload_image),
+// block-compressed level by level (BC7, docs/TEXTURE_MIPS.md) while r_texture_compress is on.
 static TtImage tt_upload_layers(u8 *const *layers, u32 count, u32 size, VkFormat fmt, bool mips_on) {
     u32 mips = mips_on ? tt_mips(size) : 1;
     size_t offs[16], total = 0;
@@ -102,8 +104,13 @@ static TtImage tt_upload_layers(u8 *const *layers, u32 count, u32 size, VkFormat
                     }
         }
     }
-    TtImage im = tt_image(size, size, mips, count, fmt, true);
-    vkr_upload_image(im.image, size, size, mips, count, data, offs, total);
+    size_t bc_offs[16], bc_total = 0;
+    TexcKind k = fmt == VK_FORMAT_R8G8B8A8_SRGB ? TEXC_COLOR : TEXC_DATA;
+    u8 *bc = mips_on ? texc_encode_array(data, offs, mips, count, size, k, bc_offs, &bc_total) : NULL;
+    TtImage im = tt_image(size, size, mips, count, bc ? (VkFormat)texc_vk_format(k) : fmt, true);
+    if (bc) vkr_upload_image(im.image, size, size, mips, count, bc, bc_offs, bc_total);
+    else vkr_upload_image(im.image, size, size, mips, count, data, offs, total);
+    free(bc);
     free(data);
     return im;
 }
@@ -112,6 +119,19 @@ static TtImage tt_upload_2d(const u8 *px, u32 w, u32 h, VkFormat fmt) {
     size_t off = 0;
     TtImage im = tt_image(w, h, 1, 1, fmt, false);
     vkr_upload_image(im.image, w, h, 1, 1, px, &off, (size_t)w * h * 4);
+    return im;
+}
+
+// A sampled content map without mips (the scatter atlas), block-compressed like the layers.
+static TtImage tt_upload_2d_content(const u8 *px, u32 w, u32 h, VkFormat fmt) {
+    TexcImage ti = { px, w, h };
+    TexcKind k = fmt == VK_FORMAT_R8G8B8A8_SRGB ? TEXC_COLOR : TEXC_DATA;
+    size_t off = 0, total = 0;
+    u8 *bc = texc_encode(&ti, 1, k, &off, &total);
+    if (!bc) return tt_upload_2d(px, w, h, fmt);
+    TtImage im = tt_image(w, h, 1, 1, (VkFormat)texc_vk_format(k), false);
+    vkr_upload_image(im.image, w, h, 1, 1, bc, &off, total);
+    free(bc);
     return im;
 }
 
@@ -225,8 +245,8 @@ bool render_terrain_load(const char (*tex)[48], int count, const char *scatter_a
     if (sa && sn && sw == snw && sh == snh) {
         tt_destroy(&T.sc_alb);
         tt_destroy(&T.sc_nrh);
-        T.sc_alb = tt_upload_2d(sa, (u32)sw, (u32)sh, VK_FORMAT_R8G8B8A8_SRGB);
-        T.sc_nrh = tt_upload_2d(sn, (u32)snw, (u32)snh, VK_FORMAT_R8G8B8A8_UNORM);
+        T.sc_alb = tt_upload_2d_content(sa, (u32)sw, (u32)sh, VK_FORMAT_R8G8B8A8_SRGB);
+        T.sc_nrh = tt_upload_2d_content(sn, (u32)snw, (u32)snh, VK_FORMAT_R8G8B8A8_UNORM);
     }
     if (sa) stbi_image_free(sa);
     if (sn) stbi_image_free(sn);
@@ -240,7 +260,9 @@ bool render_terrain_load(const char (*tex)[48], int count, const char *scatter_a
     T.tex_size = size;
     T.dirty = true;
     double mb = (double)j->n * ((double)size * size * 4 * 1.333 + (double)size * size * 1.333 + (double)MACRO_SIZE * MACRO_SIZE * 4 * 1.333) / (1024.0 * 1024.0);
-    log_info("terrain: %d textures (%d missing) at %u px, %.0f MB, in %.0f ms", j->n, missing, size, mb, (double)(SDL_GetTicksNS() - t0) / 1e6);
+    bool bc = texc_enabled();
+    log_info("terrain: %d textures (%d missing) at %u px, %.0f MB%s, in %.0f ms", j->n, missing, size, bc ? mb / 4.0 : mb, bc ? " (BC7)" : "",
+             (double)(SDL_GetTicksNS() - t0) / 1e6);
     free(j);
     return T.loaded;
 }
