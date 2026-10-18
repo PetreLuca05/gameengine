@@ -84,7 +84,8 @@ the visibility-buffer writers (`vg_raster_hw*.frag`, `vg_raster_mesh*.frag`, `vg
 | imageViewFormatReinterpretation | none |
 | events | none |
 | samplerMipLodBias | none (0) |
-| separateStencilMaskRef / mutableComparisonSamplers | no stencil, no comparison samplers |
+| separateStencilMaskRef | no stencil |
+| mutableComparisonSamplers | the shadow compare samplers are **immutable** samplers in the set layouts (frame set bindings 1 / 11 / 16 / 18, post binding 16 for the volumetrics). The validation layer on MoltenVK flagged the earlier mutable writes |
 | vertexAttributeAccessBeyondStride | none: vgeo pulls vertices from SSBOs, the classic path uses tight strides |
 | multisampleArrayImage / imageView2DOn3DImage | none |
 | shaderSampleRateInterpolationFunctions | none |
@@ -287,6 +288,8 @@ Steam: `+connect_lobby <id>` arrives through `argv` as on Windows; nothing macOS
 | Memoryless transients | available (MoltenVK lazily allocated) | yes | yes | no | no |
 | Fidelity auto-detect cap | High (Pro / Max / Ultra: Modern) | High / Modern | High / Modern | High | Medium |
 
+A macOS VM (GitHub runners, UTM / Parallels guests) reports an "Apple Paravirtual device": auto-detect caps it at Low (`FID_GPU_APPLE_VM`).
+
 ## 5. Known differences from Windows / Linux
 
 * **vgeo raster cost** (nanite branch): every pass rasterises twice (depth, then payload). The extra cost is in the
@@ -411,6 +414,7 @@ GitHub Actions `platforms.yml`. Branch `claude/macos-port` (now `claude/nanite-m
 | vgeo GPU harness (`vgeo_raster`, `_stream`, `_skinned`, `_foliage`; nanite branch) | llvmpipe, 64-bit **and** forced 32-bit writes | no GPU on the runner (skipped) | **MoltenVK on the runner's Apple paravirtual GPU**: 32-bit writes, vertex pulling; HW / SW depth within 1e-5 of the CPU reference | no GPU (skipped) |
 | SPIR-V -> MSL (SPIRV-Cross) | 139 / 139 (7 never loaded on Metal) | — | 139 / 139, then `xcrun metal` AIR compile | — |
 | The game on MoltenVK (`--test`, dev room, 120 frames + screenshot) | — | — | runs on 'Apple Paravirtual device' (MoltenVK 1.4.2, API 1.3): portability subset logged, swapchain 1024x653 fifo, screenshot saved, exit 0 (commit `5d3085e`). One earlier run (`5d98b4f`) aborted (exit 134) before that step's log tail was reported; not reproduced since. A failure now posts the log tail as an error annotation | — |
+| The same under the validation layer (`--validation`, Engine Fidelity Modern; reported, not gated) | 0 messages on llvmpipe | — | Found the mutable compare samplers (fixed) and an intermittent Metal command buffer timeout (device loss) at Modern on the paravirtual GPU: the gated run uses Medium, and auto-detect caps a "Paravirtual" Apple device at Low. Still reported: pipeline layouts with 28..38 samplers per stage against the reported limit of 16; they work through argument buffers (`platform_preinit`), which lift Metal's 16-sampler limit | — |
 | Universal build + Deadground.app (ad-hoc signed) | — | — | `deadground` fat x86_64 + arm64 (x86_64 slice built under Rosetta); universal MoltenVK in `Contents/Frameworks`; `codesign --verify --strict` passes; uploaded as the `Deadground-macos-universal` artifact (765 MB bundle without the vgeo_test scenes) | — |
 
 Local checks in this repository's container (Linux, llvmpipe, Xvfb):
