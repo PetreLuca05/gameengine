@@ -2,6 +2,7 @@
 #ifndef DG_VK_INTERNAL_H
 #define DG_VK_INTERNAL_H
 
+#include "../../shaders/shader_layout.h"   // GPU struct sizes (the shader hot reload guard)
 #include "volk.h"
 #include "render/vk_prof.h"   // GPU scopes + command counting (docs/PERF_AUDIT.md)
 #include "vk_mem_alloc.h"
@@ -22,7 +23,7 @@
 #define MAX_UPLOADS 4096
 #define DYN_BUFFER_SIZE (16u << 20)
 #define MAX_SKIN_BONES 196608   // hordes: ~1000 characters x 65 bones + shadow draws
-#define MAX_SKIN_DRAWS 4096
+#define MAX_SKIN_DRAWS 8192   // skinned parts per frame (a zombie draws several): 1000+ zombies
 #define SKIN_RING_REGIONS (FRAMES_IN_FLIGHT + 1)   // PF-0020: the frame being written, the one in flight, its previous
 #define OBJ_SLOTS 16384                // power of two: object_id hash for previous transforms
 
@@ -259,6 +260,8 @@ typedef enum PipelineId {
 // info: first bone, material flags, previous palette's first bone + 1 (bit 31: SKIN_ROOTED), normal scale bits.
 // root / prev_root: rows of the 3x4 placing a shared model-space palette (SKIN_ROOTED only, PF-0034).
 typedef struct GpuSkinInstance { vec4 color; vec4 params; u32 info[4]; vec4 recon; vec4 root[3], prev_root[3]; } GpuSkinInstance;
+_Static_assert(sizeof(GpuSkinInstance) == DG_LAYOUT_SKIN_INSTANCE, "GpuSkinInstance changed: update shaders/shader_layout.h (and common.glsl)");
+_Static_assert(sizeof(FrameData) == DG_LAYOUT_FRAME_DATA, "FrameData changed: update shaders/shader_layout.h (and common.glsl)");
 #define SKIN_ROOTED 0x80000000u
 
 typedef struct LineBatch { VkDeviceSize offset; u32 count; } LineBatch;
@@ -373,7 +376,8 @@ typedef struct Renderer {
     u32 skin_epoch;               // bumped every frame (render_skin_palette keys)
     bool skin_direct, skin_prev_direct;   // this / last frame's palettes are in the ring
     bool skin_cpu;                // r_cpu_skinning, read once per frame
-    bool phone_views_last;        // a phone camera view rendered last frame (render_sphere_maybe_visible)
+    bool phone_views_last;        // a phone camera view rendered last frame
+    u32 phone_view_frame;         // frame_index of the last frame with a phone view (render_sphere_maybe_visible: 8 frames after)
     GpuPointLight lights[MAX_POINT_LIGHTS];
     u32 light_count;
     GpuSpotLight spots[MAX_SPOT_LIGHTS];

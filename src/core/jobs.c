@@ -180,9 +180,15 @@ static void pf_run(ParFor *p, int gen) {
         int cur = SDL_GetAtomicInt(&p->gen);
         if ((v >> PF_IDX_BITS) != ((u32)cur & PF_GEN_MASK)) return;   // an older loop's index past its end
         int c = (int)(v & PF_IDX_MASK);
-        if (c >= p->chunks) return;
-        int b = c * p->chunk;
-        p->fn(p->ctx, b, DG_MIN(p->count, b + p->chunk));
+        // An index past the end does not hold the loop open: it can end and the slot start a newer loop
+        // (fields first, then gen) while they are read. Read them, then confirm the generation (seqlock):
+        // unchanged, they are the loop of this index; changed, the index was past an older loop's end.
+        JobRangeFn fn = p->fn;
+        void *ctx = p->ctx;
+        int chunks = p->chunks, chunk = p->chunk, count = p->count;
+        if (SDL_GetAtomicInt(&p->gen) != cur || c >= chunks) return;
+        int b = c * chunk;
+        fn(ctx, b, DG_MIN(count, b + chunk));
         SDL_AddAtomicInt(&p->done, 1);
         gen = cur;
     }

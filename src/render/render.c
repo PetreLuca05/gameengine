@@ -588,7 +588,12 @@ mat4 *render_skin_palette(const void *src, u32 version, u32 variant, u32 count, 
 bool render_skin_rooted_ok(void) { return R->frame_active && !R->skin_cpu; }
 
 void render_draw_skinned(const SkinnedDraw *d) {
-    if (!d->mesh || !(d->palette || d->palette_handle) || !d->bone_count || R->skin_draw_count >= MAX_SKIN_DRAWS) return;
+    if (!d->mesh || !(d->palette || d->palette_handle) || !d->bone_count) return;
+    if (R->skin_draw_count >= MAX_SKIN_DRAWS) {   // whole characters would vanish: say so once
+        static bool warned;
+        if (!warned) { warned = true; log_warn("render: more than %d skinned draws in a frame: the rest are dropped (MAX_SKIN_DRAWS)", MAX_SKIN_DRAWS); }
+        return;
+    }
     if (!d->palette_handle && R->skin_bone_count + d->bone_count > MAX_SKIN_BONES) return;
     if (!R->meshes[d->mesh].used || !R->meshes[d->mesh].skinned) return;
     SkinnedDraw *s = &R->skin_draws[R->skin_draw_count++];
@@ -2276,7 +2281,8 @@ bool render_scope_cull(mat4 *vp, vec3 *eye, float *px_scale) {
 }
 
 bool render_sphere_maybe_visible(vec3 center, float radius) {
-    if (!R->have_prev || R->phone_views_last) return true;
+    // a phone camera renders at its own rate: everything counts as visible for a while after its last view
+    if (!R->have_prev || R->camera_cut || R->frame_index - R->phone_view_frame <= 8u) return true;
     return sphere_visible(R->frustum, center, radius);   // the main view's (compute_matrices; the PiP restores it)
 }
 
@@ -2738,6 +2744,7 @@ void render_end_frame(void) {
     // The bone SSBO holds this frame's palettes, then last frame's (previous-palette velocity).
     bool cpu_skin = R->skin_cpu;   // read once at render_begin_frame (the palettes' place depends on it)
     R->phone_views_last = phone_view_pending();
+    if (R->phone_views_last) R->phone_view_frame = R->frame_index;
     g_skin_shadow_gpu = false;
     static SkinPass skin_main, skin_shadow, skin_vm, skin_phone, skin_shadow_k[5];
     skin_main.batch_count = skin_shadow.batch_count = skin_vm.batch_count = skin_phone.batch_count = 0;

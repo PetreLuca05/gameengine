@@ -499,19 +499,55 @@ static i64 shader_sources_mtime(void) {
 #endif
 }
 
+// The source tree's GPU layouts (shaders/shader_layout.h) against this build's: a tree from another
+// revision (a merge, a checkout, edits in progress) would compile shaders that misread the exe's records.
+static bool shader_layout_matches(void) {
+#ifdef DG_SOURCE_DIR
+    char path[512];
+    snprintf(path, sizeof(path), "%s/shaders/shader_layout.h", DG_SOURCE_DIR);
+    size_t size = 0;
+    char *text = platform_read_file(path, &size);
+    if (!text) { log_error("shaders: %s unreadable: hot reload skipped", path); return false; }
+    static const struct { const char *name; long want; } k[] = { { "DG_LAYOUT_SKIN_INSTANCE", DG_LAYOUT_SKIN_INSTANCE }, { "DG_LAYOUT_FRAME_DATA", DG_LAYOUT_FRAME_DATA } };
+    bool ok = true;
+    for (int i = 0; i < ARRAY_COUNT(k); i++) {
+        const char *d = strstr(text, k[i].name);
+        long got = d ? strtol(d + strlen(k[i].name), NULL, 10) : -1;
+        if (got != k[i].want) {
+            log_error("shaders: the source tree's %s is %ld, this build's %ld: hot reload skipped (rebuild to pick up the change)", k[i].name, got, k[i].want);
+            ok = false;
+        }
+    }
+    free(text);
+    return ok;
+#else
+    return false;
+#endif
+}
+
+// Every shader compiled from the source tree into bin/shaders/.hot/, then swapped in only when all of
+// them compiled (a failed or partial set never replaces the build's SPIR-V).
 static bool compile_shaders_from_source(void) {
 #if defined(DG_SOURCE_DIR) && defined(DG_SHADER_COMPILER)
     int total = ARRAY_COUNT(k_shader_files) + g_extra_count;
+    char tmp_dir[512];
+    snprintf(tmp_dir, sizeof(tmp_dir), "%sshaders/.hot", platform_base_dir());
+    static const char *subdirs[] = { "", "/post", "/sights", "/sky", "/vgeo", "/water", "/terrain" };
+    for (int i = 0; i < ARRAY_COUNT(subdirs); i++) {
+        char d[600];
+        snprintf(d, sizeof(d), "%s%s", tmp_dir, subdirs[i]);
+        SDL_CreateDirectory(d);
+    }
     for (int i = 0; i < total; i++) {
         const char *file = i < ARRAY_COUNT(k_shader_files) ? k_shader_files[i] : g_extra_shaders[i - ARRAY_COUNT(k_shader_files)];
         char cmd[2048];
         const char *src_dir = DG_SOURCE_DIR "/shaders";
         if (strcmp(DG_SHADER_COMPILER_KIND, "glslc") == 0)
-            snprintf(cmd, sizeof(cmd), "\"\"%s\" --target-env=vulkan1.3 -O -I \"%s\" -I \"%s/post\" -I \"%s/../third_party/fsr\" -I \"%s/../third_party/smaa\" -o \"%sshaders/%s.spv\" \"%s/%s\"\"",
-                     DG_SHADER_COMPILER, src_dir, src_dir, src_dir, src_dir, platform_base_dir(), file, src_dir, file);
+            snprintf(cmd, sizeof(cmd), "\"\"%s\" --target-env=vulkan1.3 -O -I \"%s\" -I \"%s/post\" -I \"%s/../third_party/fsr\" -I \"%s/../third_party/smaa\" -o \"%s/%s.spv\" \"%s/%s\"\"",
+                     DG_SHADER_COMPILER, src_dir, src_dir, src_dir, src_dir, tmp_dir, file, src_dir, file);
         else
-            snprintf(cmd, sizeof(cmd), "\"\"%s\" -V --quiet --target-env vulkan1.3 -I\"%s\" -I\"%s/post\" -I\"%s/../third_party/fsr\" -I\"%s/../third_party/smaa\" -o \"%sshaders/%s.spv\" \"%s/%s\"\"",
-                     DG_SHADER_COMPILER, src_dir, src_dir, src_dir, src_dir, platform_base_dir(), file, src_dir, file);
+            snprintf(cmd, sizeof(cmd), "\"\"%s\" -V --quiet --target-env vulkan1.3 -I\"%s\" -I\"%s/post\" -I\"%s/../third_party/fsr\" -I\"%s/../third_party/smaa\" -o \"%s/%s.spv\" \"%s/%s\"\"",
+                     DG_SHADER_COMPILER, src_dir, src_dir, src_dir, src_dir, tmp_dir, file, src_dir, file);
 #ifndef _WIN32
         // POSIX shells don't need the outer quote pair cmd.exe wants.
         size_t n = strlen(cmd);
@@ -519,7 +555,15 @@ static bool compile_shaders_from_source(void) {
         cmd[n - 2] = 0;
 #endif
         int rc = system(cmd);
-        if (rc != 0) { log_error("shader compile failed: %s", file); return false; }
+        if (rc != 0) { log_error("shader compile failed: %s (the build's SPIR-V kept)", file); return false; }
+    }
+    for (int i = 0; i < total; i++) {   // all compiled: swap them in
+        const char *file = i < ARRAY_COUNT(k_shader_files) ? k_shader_files[i] : g_extra_shaders[i - ARRAY_COUNT(k_shader_files)];
+        char from[700], to[700];
+        snprintf(from, sizeof(from), "%s/%s.spv", tmp_dir, file);
+        snprintf(to, sizeof(to), "%sshaders/%s.spv", platform_base_dir(), file);
+        remove(to);
+        if (rename(from, to) != 0) log_error("shaders: cannot move %s into place", file);
     }
     return true;
 #else
@@ -528,6 +572,7 @@ static bool compile_shaders_from_source(void) {
 }
 
 bool render_reload_shaders(void) {
+    if (!shader_layout_matches()) return false;   // keep the running pipelines (logged)
     if (!compile_shaders_from_source()) log_warn("shaders: recompile failed or unavailable, reloading existing SPIR-V");
     vkDeviceWaitIdle(R->device);
     bool ok = vkp_create_pipelines();
