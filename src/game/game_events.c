@@ -80,19 +80,7 @@ void game_handle_event(const GameEvent *ev) {
         G->hitmarker_time = crosshair_hitmarker_duration();
         G->hitmarker_kill = (ev->id & 1u) != 0;
         G->hitmarker_head = (ev->id & 2u) != 0;
-        {
-            // One hit sound per frame (pellets / penetrations confirm several hits at once): the kill
-            // beats the headshot beats a plain hit.
-            static u64 frame;
-            static int best;
-            int rank = G->hitmarker_kill ? 2 : (G->hitmarker_head ? 1 : 0);
-            if (frame != g_engine.frame_index || rank > best) {
-                frame = g_engine.frame_index;
-                best = rank;
-                audio_play_2d(rank == 2 ? "hit_kill" : (rank == 1 ? "hit_head" : "hit"), 0.5f, SND_UI);
-            }
-        }
-        break;
+        break;   // visual only: no hit-confirm sound
     case EV_HURT: {
         for (int i = 0; i < MAX_HURT_MARKERS; i++) {
             if (G->hurt[i].time > 0) continue;
