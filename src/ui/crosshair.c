@@ -34,7 +34,7 @@ static struct {
     Cvar *style, *length, *thickness, *gap, *opacity, *color, *outline, *follow_kick, *hitmarker, *target_color;
     Cvar *obstruct, *obstruct_lerp;
     float ads_fade;    // 0 = shown, 1 = hidden (ADS)
-    // Aim model (docs/AIM.md): the crosshair's offset from the aim point to the obstruction (smoothed).
+    // Aim model (docs/AIM.md): the crosshair's offset from the screen centre to the obstruction Q (smoothed).
     vec2 obs_off;
     float obs_w;       // 0 = clear, 1 = obstructed (smoothed)
     int obs_cls;       // last obstruction class (kept while fading out)
@@ -160,7 +160,7 @@ void crosshair_init(void) {
     CH.follow_kick = cvar_reg_bool("crosshair_follow_kick", false, CVAR_LOCKED, "pin the crosshair to the screen center (follows the camera kick) instead of the true aim point");
     CH.hitmarker = cvar_reg_bool("crosshair_hitmarker", true, CVAR_ARCHIVE | CVAR_EDITABLE, "show hit markers");
     CH.target_color = cvar_reg_bool("crosshair_target_color", true, CVAR_ARCHIVE | CVAR_EDITABLE, "tint the crosshair over enemies / friendlies");
-    CH.obstruct = cvar_reg_bool("crosshair_obstruct", true, CVAR_LOCKED, "move the crosshair to where the bullet will land when something is between the muzzle and the aim point (docs/AIM.md)");
+    CH.obstruct = cvar_reg_bool("crosshair_obstruct", true, CVAR_LOCKED, "move the crosshair to where the barrel line ends when it is obstructed (hits something clearly closer than the camera ray does, docs/AIM.md)");
     CH.obstruct_lerp = cvar_reg_float("crosshair_obstruct_lerp", 0.1f, 0.0f, 1.0f, CVAR_LOCKED, "time constant (s) of the crosshair's move to and from an obstruction");
     cmd_register("crosshair_reload", cmd_reload, "re-read assets/ui/crosshair.json");
     cmd_register("crosshair_pos", cmd_pos, "crosshair_pos: where the crosshair was drawn last frame (UI px) and its obstruction state (tests)");
@@ -265,9 +265,10 @@ void crosshair_draw(float dt) {
     float cx = scr_w * 0.5f, cy = scr_h * 0.5f;
     vec2 sway = gun ? weapon_aim_offset_deg(wd, &p->sim.wpn, &p->sim.move, weapon_sway_time(vcmd->seq) + g->alpha * SIM_DT) : v2(0, 0);
     vec3 aim = dir_from_angles(g->view.yaw - sway.x * DG_DEG2RAD, g->view.pitch + sway.y * DG_DEG2RAD);
-    // Aim model (docs/AIM.md): the reticle is the aim point P of the camera ray; the bullet leaves the
-    // muzzle towards it and lands on Q when something is in between. The viewed player's solve (a
-    // spectator gets the target's from its forwarded commands: the muzzle claim and the view).
+    // Aim model (docs/AIM.md): the reticle stays on the camera ray; the bullet leaves the muzzle along
+    // the barrel with no correction, and the reticle moves to where that line ends (Q) only when it is
+    // obstructed. The viewed player's solve (a spectator gets the target's from its forwarded
+    // commands: the muzzle and barrel claims and the view).
     AimSolve as;
     bool have_aim = gun && weapon_aim_preview(w, vs, player_eye_pos(&p->sim.move), g->view.yaw, g->view.pitch, vcmd, &as);
     if (!CH.follow_kick->i) {

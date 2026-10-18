@@ -3,6 +3,7 @@
 // (mantle, sprint-vault, ledge hang with pull-up / drop), and water: wading, swimming at the
 // surface, diving, climbing out through the mantle (docs/WATER.md "Swimming").
 #include "player.h"
+#include "player/ledge_rules.h"
 #include "anim/anim_library.h"
 #include "world/world.h"
 #include "physics/physics.h"
@@ -41,6 +42,12 @@ void player_register_cvars(void) {
     t->mantle_speed = cvar_reg_float("pl_mantle_speed", 1.0f, 0.2f, 4, CVAR_SERVER | CVAR_LOCKED | CVAR_RULE, "mantle animation speed multiplier");
     t->vault_speed = cvar_reg_float("pl_vault_speed", 1.0f, 0.2f, 4, CVAR_SERVER | CVAR_LOCKED | CVAR_RULE, "vault animation speed multiplier");
     t->hang_yaw_limit = cvar_reg_float("pl_hang_yaw_limit", 110.0f, 20.0f, 180.0f, CVAR_SERVER | CVAR_LOCKED | CVAR_RULE, "ledge hang: how far the view turns away from the wall (deg); the body and the grips stay on the ledge");
+    t->climb_facing_cone = cvar_reg_float("pl_climb_facing_cone", 45.0f, 5.0f, 90.0f, CVAR_SERVER | CVAR_LOCKED | CVAR_RULE, "ledges: how far (deg) the view may face away from a wall for a grab or an auto-climb (docs/CONTROLLER.md)");
+    t->climb_hold_to_jump = cvar_reg_bool("pl_climb_hold_to_jump", false, CVAR_SERVER | CVAR_LOCKED | CVAR_RULE, "ledges: a jump held from the take-off counts as the second press of an auto-climb (0 = press jump again in reach)");
+    t->regrab_time = cvar_reg_float("pl_regrab_cooldown", 0.5f, 0.0f, 5.0f, CVAR_SERVER | CVAR_LOCKED | CVAR_RULE, "ledges: s before the ledge just climbed from or let go of can be grabbed again");
+    t->hang_stamina = cvar_reg_float("pl_hang_stamina", 0.0f, 0.0f, 600.0f, CVAR_SERVER | CVAR_LOCKED | CVAR_RULE, "ledge hang: s the grip holds before the player drops (0 = no drain, the Chapter 1 rule)");
+    t->hang_two_handed = cvar_reg_bool("pl_hang_two_handed", true, CVAR_SERVER | CVAR_LOCKED | CVAR_RULE, "ledge hang: allowed with a two-handed item out (it is slung while hanging; 0 = only a sidearm or empty hands grab)");
+    t->hang_shimmy_speed = cvar_reg_float("pl_hang_shimmy_speed", 0.8f, 0.0f, 3.0f, CVAR_SERVER | CVAR_LOCKED | CVAR_RULE, "ledge hang: sideways speed along the ledge with strafe (m/s, 0 = no shimmy)");
     t->debug_mantle = cvar_reg_bool("pl_debug_mantle", false, CVAR_LOCKED, "draw mantle/vault/hang shape casts");
     t->debug_melee = cvar_reg_bool("wpn_debug_melee", false, CVAR_LOCKED, "draw melee sweep rays");
     t->noclip_speed = cvar_reg_float("pl_noclip_speed", 10.0f, 1.0f, 100, CVAR_LOCKED, "noclip fly speed");
@@ -100,8 +107,6 @@ float player_breath_max(void) { return T ? T->swim_breath->f : 45.0f; }
 float player_fall_water_scale(float depth) { return 1.0f - smoothstepf(0.0f, 2.5f, depth); }
 
 // ------------------------------------------------------------------ ledge detection
-
-typedef enum LedgeKind { LEDGE_NONE, LEDGE_MANTLE, LEDGE_VAULT, LEDGE_HANG } LedgeKind;
 
 typedef struct LedgeResult {
     LedgeKind kind;
@@ -335,6 +340,50 @@ void movement_set_seat_pose(SeatPoseFn fn) { g_seat_pose = fn; }
 static MoveWaterFn g_water;
 void movement_set_water(MoveWaterFn fn) { g_water = fn; }
 
+static MoveTwoHandFn g_two_hand;
+void movement_set_two_handed(MoveTwoHandFn fn) { g_two_hand = fn; }
+
+static void start_hang(PlayerMove *m, PhysCharacter *ch, const LedgeResult *lr) {
+    m->mode = MOVE_HANG;
+    m->hang_pos = lr->hang_pos;
+    m->hang_normal = lr->wall_normal;
+    m->ledge_point = lr->top;
+    m->hang_time = 0;
+    m->hang_used = 0;
+    m->vel = v3(0, 0, 0);
+    m->climb_intent = 0;
+    set_hand_anchors(m, lr->wall_point, lr->wall_normal, lr->top.y);
+    phys_character_set_pos(ch, lr->hang_pos);
+    m->pos = lr->hang_pos;
+}
+
+// The ledge just left: no regrab of it for pl_regrab_cooldown.
+static void set_regrab(PlayerMove *m, vec3 ledge) {
+    m->regrab_point = ledge;
+    m->regrab_cooldown = T->regrab_time->f;
+}
+
+// Hang: strafe slides the grip along the ledge while the detector still finds a hang there.
+static void hang_shimmy(PhysicsWorld *pw, PlayerMove *m, PhysCharacter *ch, BodyId self, float mv_x, float dt, bool dbg) {
+    m->vel = v3(0, 0, 0);
+    float sp = T->hang_shimmy_speed->f;
+    if (sp <= 0.0f || fabsf(mv_x) < 0.3f) return;
+    vec3 right = v3_norm(v3_cross(v3_neg(m->hang_normal), v3(0, 1, 0)));
+    vec3 step = v3_scale(right, mv_x * sp * dt);
+    // From the shifted feet, out of the wall a little, facing it.
+    vec3 from = v3_madd(v3_add(m->hang_pos, step), m->hang_normal, 0.1f);
+    if (!cap_free(pw, from, PLAYER_HEIGHT, self)) return;
+    LedgeResult lr = detect_ledge(pw, from, from.y, player_hang_wall_yaw(m), self, false, true, dbg);
+    if (lr.kind != LEDGE_HANG || fabsf(lr.top.y - m->ledge_point.y) > 0.25f || v3_dot(lr.wall_normal, m->hang_normal) < 0.85f) return;
+    m->vel = v3_scale(v3_sub(lr.hang_pos, m->hang_pos), 1.0f / dt);
+    m->hang_pos = lr.hang_pos;
+    m->hang_normal = lr.wall_normal;
+    m->ledge_point = lr.top;
+    set_hand_anchors(m, lr.wall_point, lr.wall_normal, lr.top.y);
+    phys_character_set_pos(ch, lr.hang_pos);
+    m->pos = lr.hang_pos;
+}
+
 // The water at the player: depth at the feet, the state, oxygen, wetness (every mode but noclip).
 typedef struct WaterHere { bool in; float surface, column; vec3 flow; } WaterHere;
 
@@ -434,15 +483,7 @@ static void swim_tick(World *w, PlayerSim *sim, PhysCharacter *ch, u16 buttons, 
             return;
         }
         if (lr.kind == LEDGE_HANG) {
-            m->mode = MOVE_HANG;
-            m->hang_pos = lr.hang_pos;
-            m->hang_normal = lr.wall_normal;
-            m->ledge_point = lr.top;
-            m->hang_time = 0;
-            m->vel = v3(0, 0, 0);
-            set_hand_anchors(m, lr.wall_point, lr.wall_normal, lr.top.y);
-            phys_character_set_pos(ch, lr.hang_pos);
-            m->pos = lr.hang_pos;
+            start_hang(m, ch, &lr);
             m->jump_buffer = 0;
             return;
         }
@@ -650,25 +691,33 @@ void player_move_tick(World *w, int slot, PlayerSim *sim, PhysCharacter *ch, con
         m->yaw = player_hang_clamp_yaw(m, m->yaw);   // the client's view is clamped the same way (game.c)
         phys_character_set_pos(ch, m->hang_pos);
         m->pos = m->hang_pos;
-        m->vel = v3(0, 0, 0);
         m->on_ground = 0;
-        bool pull = ((pressed & BTN_JUMP) || (mv.y > 0.5f && m->hang_time > 0.25f));
-        bool drop = (pressed & BTN_CROUCH) || (mv.y < -0.5f);
-        if (pull && m->hang_time > 0.15f) {
-            // Re-run detection from the hang position to get a fresh clearance check.
+        m->hang_used += dt;
+        // Prompts (local HUD): [Jump] Climb, [Crouch / Back] Let go (docs/CONTROLLER.md).
+        HangAction ha = hang_decide((pressed & BTN_JUMP) != 0, (pressed & BTN_CROUCH) != 0, mv.y, m->hang_time, m->hang_used, T->hang_stamina->f);
+        if (ha == HA_CLIMB) {
+            // Re-run detection from the hang position to get a fresh clearance check: no pull-up into
+            // geometry (head room / the capsule on top).
             float wall_yaw = atan2f(m->hang_normal.x, m->hang_normal.z);
             LedgeResult lr = detect_ledge(pw, m->hang_pos, m->hang_pos.y, wall_yaw, self, false, false, dbg);
             if (lr.kind == LEDGE_MANTLE) {
                 start_mantle(m, &lr, m->hang_pos);
                 m->m_dur = (0.75f) / T->mantle_speed->f;
+                set_regrab(m, m->ledge_point);
+                sim->last_buttons = buttons;
+                return;
             }
-        } else if (drop) {
+        } else if (ha == HA_LET_GO) {
+            // Drop with the current velocity (zero, or the shimmy's along the ledge).
             m->mode = MOVE_WALK;
             m->hand_anchor_valid = 0;
-            m->vel = v3_scale(m->hang_normal, 1.2f);
-            m->regrab_cooldown = 0.5f;
+            set_regrab(m, m->ledge_point);
             m->fall_start_y = m->pos.y;
+            m->climb_intent = 0;
+            sim->last_buttons = buttons;
+            return;
         }
+        hang_shimmy(pw, m, ch, self, mv.x, dt, dbg);
         sim->last_buttons = buttons;
         return;
     }
@@ -689,35 +738,59 @@ void player_move_tick(World *w, int slot, PlayerSim *sim, PhysCharacter *ch, con
     // Ledge traversal triggers (before jumping so a jump press at a ledge mantles instead).
     bool moving_fwd = mv.y > 0.2f;
     bool jump_wanted = m->jump_buffer > 0.0f;
-    if (moving_fwd && !m->crouched && m->regrab_cooldown <= 0) {
-        // Vaults and mantles only on a jump press (never automatic from sprinting into a table).
-        bool try_ground = on_ground && jump_wanted;
-        bool try_air = !on_ground && (buttons & BTN_JUMP) && vel.y < 3.0f;
-        if (try_ground || try_air) {
-            bool allow_vault = on_ground;
-            LedgeResult lr = detect_ledge(pw, m->pos, on_ground ? m->pos.y : m->fall_start_y, m->yaw, self, allow_vault, !on_ground, dbg);
+    if (on_ground) m->climb_intent = 0;
+    if (on_ground && moving_fwd && !m->crouched && jump_wanted) {
+        // On the ground: vaults and mantles only on a jump press at the ledge (never automatic from
+        // sprinting into a table).
+        LedgeResult lr = detect_ledge(pw, m->pos, m->pos.y, m->yaw, self, true, false, dbg);
+        if (!ledge_regrab_blocked(lr.top, m->regrab_point, m->regrab_cooldown)) {
             if (lr.kind == LEDGE_VAULT) {
                 start_vault(m, &lr, m->pos);
                 m->jump_buffer = 0;
                 sim->last_buttons = buttons;
                 return;
             }
-            if (lr.kind == LEDGE_MANTLE && (jump_wanted || try_air)) {
+            if (lr.kind == LEDGE_MANTLE) {
                 start_mantle(m, &lr, m->pos);
                 m->jump_buffer = 0;
                 sim->last_buttons = buttons;
                 return;
             }
-            if (lr.kind == LEDGE_HANG && !on_ground) {
-                m->mode = MOVE_HANG;
-                m->hang_pos = lr.hang_pos;
-                m->hang_normal = lr.wall_normal;
-                m->ledge_point = lr.top;
-                m->hang_time = 0;
-                m->vel = v3(0, 0, 0);
-                set_hand_anchors(m, lr.wall_point, lr.wall_normal, lr.top.y);
-                phys_character_set_pos(ch, lr.hang_pos);
-                m->pos = lr.hang_pos;
+        }
+    }
+    if (!on_ground && !m->crouched) {
+        // Airborne (docs/CONTROLLER.md): one detector, two cases. Moving towards the ledge since the
+        // take-off + a second jump in reach = auto-climb (vault / mantle / pull-up, no hang, no
+        // prompt); otherwise falling past a hang ledge in reach = grab (hang + prompts).
+        LedgeInput li;
+        memset(&li, 0, sizeof(li));
+        li.falling = vel.y < 0.0f;
+        li.crouch_held = (buttons & BTN_CROUCH) != 0;
+        li.fwd_held = moving_fwd;
+        li.climb_intent = m->climb_intent != 0;
+        li.jump_fresh = jump_wanted;
+        li.jump_held = (buttons & BTN_JUMP) != 0;
+        li.hold_to_jump = T->climb_hold_to_jump->i != 0;
+        li.cone_cos = cosf(T->climb_facing_cone->f * DG_DEG2RAD);
+        bool climb = ledge_climb_input(&li);
+        if (climb || (li.falling && !li.crouch_held)) {
+            LedgeResult lr = detect_ledge(pw, m->pos, m->fall_start_y, m->yaw, self, climb, true, dbg);
+            li.kind = (int)lr.kind;
+            li.facing_cos = v3_dot(fwd, v3_neg(lr.wall_normal));
+            li.regrab_blocked = ledge_regrab_blocked(lr.top, m->regrab_point, m->regrab_cooldown);
+            li.grab_forbidden = !T->hang_two_handed->i && g_two_hand && g_two_hand(w, slot);
+            LedgeAction la = ledge_decide(&li);
+            if (la == LA_VAULT) {
+                start_vault(m, &lr, m->pos);
+            } else if (la == LA_MANTLE || la == LA_PULLUP) {
+                start_mantle(m, &lr, m->pos);
+                if (la == LA_PULLUP) m->m_dur = (0.75f + 0.1f * fmaxf(lr.height - 2.0f, 0.0f)) / T->mantle_speed->f;
+            } else if (la == LA_GRAB) {
+                start_hang(m, ch, &lr);
+            }
+            if (la != LA_NONE) {
+                m->jump_buffer = 0;
+                m->climb_intent = 0;
                 sim->last_buttons = buttons;
                 return;
             }
@@ -759,6 +832,7 @@ void player_move_tick(World *w, int slot, PlayerSim *sim, PhysCharacter *ch, con
         m->jump_buffer = 0;
         m->coyote = 0;
         jumped = true;
+        m->climb_intent = (u8)moving_fwd;   // the jump started towards something: a second press in reach climbs
         on_ground = false;
         m->fall_start_y = m->pos.y;
     }
@@ -782,6 +856,5 @@ void player_move_tick(World *w, int slot, PlayerSim *sim, PhysCharacter *ch, con
         m->land_tick = cmd->seq;   // the command, not the machine's world tick: identical on every machine
     }
     if (!m->on_ground && was_ground && !jumped) m->fall_start_y = m->pos.y;
-    (void)slot;
     sim->last_buttons = buttons;
 }

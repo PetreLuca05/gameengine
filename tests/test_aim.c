@@ -1,5 +1,5 @@
-// Unit tests for the aim model math (gameplay/aim.c, docs/AIM.md): muzzle claims, convergence,
-// obstruction classes, muzzle-inside-geometry recovery, the crosshair's spread ring and smoothing.
+// Unit tests for the aim model math (gameplay/aim.c, docs/AIM.md): muzzle and barrel claims, the
+// uncorrected barrel line, the obstruction rule, muzzle-inside-geometry recovery, the crosshair's spread ring and smoothing.
 // Build: part of the normal CMake build (target test_aim); run: ctest or build/bin/test_aim.
 #include "gameplay/aim.h"
 #include "gameplay/recoil.h"
@@ -53,52 +53,116 @@ static void test_frames(void) {
     }
 }
 
-// Converged bullets hit the camera ray's aim point (within the spread at that distance).
-static void test_convergence(void) {
+static float ang_deg(vec3 a, vec3 b) { return atan2f(v3_len(v3_cross(a, b)), v3_dot(a, b)) * DG_RAD2DEG; }
+
+// No correction: the bullet goes along the barrel's forward axis, whatever the camera sees. Hip
+// muzzles keep their natural offset from the camera ray (the same at every distance for a barrel
+// parallel to the view), ADS barrels lie along the view axis; every pellet stays in the cone around
+// the barrel line; the barrel claim round-trips and turns with the view.
+static void test_barrel(void) {
     const float dists[] = { 10.0f, 50.0f, 200.0f };
     for (int m = 0; m < 4; m++) {
         for (int di = 0; di < 3; di++) {
             float yaw = 0.3f * (float)m, pitch = -0.1f + 0.05f * (float)di;
             vec3 eye = v3(0, 1.6f, 0);
             vec3 cam = dir_from_angles(yaw, pitch);
-            vec3 p = v3_madd(eye, cam, dists[di]);
             vec3 mz = aim_cam_to_world(eye, yaw, pitch, k_muzzles[m]);
-            vec3 d = aim_converge(mz, p, cam);
-            float lp = v3_dist(mz, p);
-            vec3 hit = v3_madd(mz, d, lp);
-            CHECK(v3_dist(hit, p) < 1e-3f * dists[di], "muzzle %d at %.0f m: converged impact %.4f m from P", m, dists[di], v3_dist(hit, p));
-            // ADS muzzles are on the view axis: nearly parallel to the camera ray.
-            float ang = acosf(fminf(1.0f, v3_dot(d, cam))) * DG_RAD2DEG;
-            if (m == 1 || m == 3) CHECK(ang < 0.3f, "ADS convergence angle %.3f deg at %.0f m", ang, dists[di]);
-            // Spread cone around the converged direction: every pellet lands within the cone's radius of P.
+            // The barrel parallel to the view (camera space -Z), packed and unpacked like the claim.
+            i16 c[3];
+            aim_dir_pack(v3(0, 0, -1), c);
+            CHECK(aim_claim_valid(c), "barrel claim valid");
+            vec3 d = quat_rotate(aim_view_rot(yaw, pitch), aim_dir_unpack(c));
+            CHECK(ang_deg(d, cam) < 0.01f, "barrel claim round trip along the view");
+            // The impact: on the barrel ray, the muzzle's offset from the camera ray kept (no convergence).
+            vec3 hit = v3_madd(mz, d, dists[di]);
+            vec3 off = v3_sub(hit, v3_madd(eye, cam, v3_dot(v3_sub(hit, eye), cam)));
+            vec3 off0 = v3_sub(mz, v3_madd(eye, cam, v3_dot(v3_sub(mz, eye), cam)));
+            CHECK(v3_dist(off, off0) < 1e-3f, "muzzle %d at %.0f m: the offset from the camera ray stays %.3f m (no convergence)", m, dists[di], v3_len(off0));
             float cone = 2.2f;
             Rng rng = rng_make(0x51u + (u32)(m * 3 + di));
             float worst = 0.0f;
             for (int s = 0; s < 200; s++) {
                 vec3 sd = recoil_cone_dir(d, cone, &rng);
-                // Intersect with the plane through P facing the bullet.
-                float t = lp / fmaxf(v3_dot(sd, d), 1e-4f);
-                worst = fmaxf(worst, v3_dist(v3_madd(mz, sd, t), p));
+                float t = dists[di] / fmaxf(v3_dot(sd, d), 1e-4f);
+                worst = fmaxf(worst, v3_dist(v3_madd(mz, sd, t), hit));
             }
-            float allowed = tanf(cone * 0.5f * DG_DEG2RAD) * lp * 1.01f + 1e-3f;
-            CHECK(worst <= allowed, "spread at %.0f m: %.3f m off P, cone radius %.3f m", dists[di], worst, allowed);
+            float allowed = tanf(cone * 0.5f * DG_DEG2RAD) * dists[di] * 1.01f + 1e-3f;
+            CHECK(worst <= allowed, "spread at %.0f m: %.3f m off the barrel line, cone radius %.3f m", dists[di], worst, allowed);
         }
     }
-    // P at / behind the muzzle (aim point inside the barrel's reach): the camera direction.
+    // A canted hip barrel (3 deg in, 1 deg up) packs to within the i16 resolution.
+    vec3 cant = v3_norm(v3(-0.0524f, 0.0175f, -1.0f));
+    i16 q[3];
+    aim_dir_pack(cant, q);
+    CHECK(ang_deg(aim_dir_unpack(q), cant) < 0.005f, "canted barrel round trip");
+    // The recoil of earlier shots in the tick turns the barrel like the view.
+    float yaw = 0.4f, pitch = 0.1f, dy = -0.02f, dp = 0.03f;
+    vec3 b = quat_rotate(aim_view_rot(yaw, pitch), cant);
+    vec3 b2 = aim_view_delta(b, yaw, pitch, dy, dp);
+    vec3 want = quat_rotate(aim_view_rot(yaw + dy, pitch + dp), cant);
+    CHECK(v3_dist(b2, want) < 1e-5f, "view delta turns the barrel with the view");
+    CHECK(v3_dist(aim_view_delta(b, yaw, pitch, 0, 0), b) < 1e-7f, "no delta, no change");
+    // Thrown items still aim from the palm at P (the only convergence left).
     vec3 cam = v3(0, 0, -1);
-    CHECK(v3_dist(aim_converge(v3(0, 0, -0.6f), v3(0, 0, -0.3f), cam), cam) < 1e-6f, "P behind the muzzle keeps the camera direction");
-    CHECK(v3_dist(aim_converge(v3(0, 0, -0.6f), v3(0, 0, -0.61f), cam), cam) < 1e-6f, "P at the muzzle keeps the camera direction");
+    CHECK(v3_dist(aim_converge(v3(0, 0, -0.6f), v3(0, 0, -0.3f), cam), cam) < 1e-6f, "P behind the hand keeps the camera direction");
 }
 
+// Host check of the barrel direction: in tolerance verbatim, a cheat turned back onto the cone.
+static void test_validate_dir(void) {
+    vec3 host = v3_norm(v3(-0.03f, 0.01f, -1.0f));
+    vec3 near = v3_norm(v3(-0.02f, 0.015f, -1.0f));
+    AimValidateDir v = aim_validate_dir(near, true, host, true, 3.0f);
+    CHECK(!v.clamped && v.dir.x == near.x && v.dir.y == near.y && v.dir.z == near.z, "barrel claim in tolerance used as is");
+    CHECK(v.error_deg > 0.0f && v.error_deg < 1.0f, "barrel claim error %.3f deg", v.error_deg);
+    vec3 cheat = v3_norm(v3(0.5f, 0.0f, -1.0f));   // pointing 27 deg off the gun
+    v = aim_validate_dir(cheat, true, host, true, 3.0f);
+    float ang = ang_deg(v.dir, host);
+    CHECK(v.clamped && fabsf(ang - 3.0f) < 0.01f, "cheating barrel claim clamped onto the 3 deg cone (%.3f deg)", ang);
+    CHECK(v3_dot(v.dir, cheat) > v3_dot(host, cheat), "clamped towards the claim");
+    v = aim_validate_dir(v3(0, 0, 0), false, host, true, 3.0f);
+    CHECK(v3_dist(v.dir, host) < 1e-6f, "no claim: the host's barrel");
+    v = aim_validate_dir(cheat, true, host, false, 3.0f);
+    CHECK(!v.clamped && v3_dist(v.dir, cheat) < 1e-6f, "no host pose: the claim");
+}
+
+// The rule without a parallax allowance (a head-on surface).
+static AimClass aim_classify_t(float hit, float depth, float far, const AimObstructRule *r, bool friendly) { return aim_classify(hit, depth, far, 0.0f, r, friendly); }
+
+// The obstruction rule (docs/AIM.md "Obstruction").
 static void test_classify(void) {
-    CHECK(aim_classify(-1.0f, 10.0f, 0.25f, false) == AIM_CLEAR, "no hit = clear");
-    CHECK(aim_classify(10.0f, 10.0f, 0.25f, false) == AIM_CLEAR, "hit at P = clear");
-    CHECK(aim_classify(0.1f, 10.0f, 0.25f, false) == AIM_BARREL, "hit 0.1 m from the muzzle = barrel blocked");
-    CHECK(aim_classify(0.3f, 10.0f, 0.25f, false) == AIM_PARTIAL, "hit 0.3 m from the muzzle = partial");
-    CHECK(aim_classify(4.0f, 10.0f, 0.25f, false) == AIM_PARTIAL, "corner 4 m along = partial");
-    CHECK(aim_classify(4.0f, 10.0f, 0.25f, true) == AIM_FRIENDLY, "teammate = friendly");
-    CHECK(aim_classify(0.1f, 10.0f, 0.25f, true) == AIM_FRIENDLY, "teammate at the barrel = friendly");
-    CHECK(!strcmp(aim_class_name(AIM_BARREL), "barrel") && !strcmp(aim_class_name(AIM_CLEAR), "clear"), "class names");
+    AimObstructRule r = { 0.25f, 0.75f, 0.05f };
+    const float depth = 0.7f;   // the hip muzzle ~0.7 m ahead of the camera
+    CHECK(aim_classify_t(-1.0f, depth, 300.0f, &r, false) == AIM_CLEAR, "no barrel hit = clear");
+    // The camera sees a target at 50 m, the barrel line hits a wall at 1 m: obstructed.
+    float far = aim_obstruct_far(50.0f, 300.0f);
+    CHECK(aim_classify_t(1.0f, depth, far, &r, false) == AIM_OBSTRUCTED, "wall at 1 m, target at 50 m = obstructed");
+    CHECK(aim_classify_t(0.1f, depth, far, &r, false) == AIM_BARREL, "hit 0.1 m from the muzzle = barrel blocked");
+    CHECK(aim_classify_t(0.25f, depth, far, &r, false) == AIM_BARREL, "hit at obstruct_near = barrel blocked");
+    // Parallax: the camera ray hits a wall at 40 m, the barrel ray lands on it next to P (hip offset)
+    // or slightly short on an oblique face: not an obstruction.
+    far = aim_obstruct_far(40.0f, 300.0f);
+    CHECK(aim_classify_t(40.0f - depth, depth, far, &r, false) == AIM_CLEAR, "barrel ray beside P at 40 m = clear (parallax)");
+    CHECK(aim_classify_t(38.3f - depth, depth, far, &r, false) == AIM_CLEAR, "1.7 m short on an oblique wall at 40 m = clear (5 %% margin)");
+    CHECK(aim_classify_t(36.0f - depth, depth, far, &r, false) == AIM_OBSTRUCTED, "4 m short at 40 m = obstructed");
+    // Nothing for the camera to see: far = max_range.
+    far = aim_obstruct_far(-1.0f, 300.0f);
+    CHECK(far == 300.0f, "no camera hit: far = max_range");
+    CHECK(aim_classify_t(150.0f, depth, far, &r, false) == AIM_OBSTRUCTED, "barrel hits a pole the open sky camera misses = obstructed");
+    // Close range: the camera sees a wall 3 m away, the barrel hits it 2.3 m from the muzzle.
+    far = aim_obstruct_far(3.0f, 300.0f);
+    CHECK(aim_classify_t(2.3f, depth, far, &r, false) == AIM_CLEAR, "the same wall at 3 m = clear");
+    CHECK(aim_classify_t(1.2f, depth, far, &r, false) == AIM_OBSTRUCTED, "a frame 1.9 m ahead of a 3 m wall = obstructed");
+    CHECK(fabsf(aim_obstruct_margin(&r, 100.0f, 0.0f) - 5.0f) < 1e-5f && fabsf(aim_obstruct_margin(&r, 2.0f, 0.0f) - 0.75f) < 1e-6f, "margin = max(abs, rel x far)");
+    // Grazing: the camera hits the ground 15 m ahead at 6.5 deg; a hip barrel 0.12 m off the camera
+    // ray reaches the ground ~1 m sooner. Parallax, not an obstruction; a crate 4 m short still is.
+    float sg = sinf(6.5f * DG_DEG2RAD), par = aim_parallax(0.12f, sg);
+    CHECK(par > 1.0f && par < 1.1f, "parallax at 6.5 deg: %.3f m", par);
+    CHECK(aim_classify(15.0f - 1.05f - depth, depth, 15.0f, par, &r, false) == AIM_CLEAR, "barrel on the ground just short of P = clear");
+    CHECK(aim_classify(11.0f - depth, depth, 15.0f, par, &r, false) == AIM_OBSTRUCTED, "a crate 4 m short of P = obstructed");
+    CHECK(aim_parallax(0.12f, 1.0f) < 1e-6f && aim_parallax(0.5f, 0.0f) <= 3.0f, "head on: none; edge on: capped");
+    CHECK(aim_classify_t(30.0f, depth, 300.0f, &r, true) == AIM_FRIENDLY, "teammate on the barrel line = friendly");
+    CHECK(aim_classify_t(0.1f, depth, 300.0f, &r, true) == AIM_FRIENDLY, "teammate at the barrel = friendly");
+    CHECK(!strcmp(aim_class_name(AIM_BARREL), "barrel") && !strcmp(aim_class_name(AIM_CLEAR), "clear") && !strcmp(aim_class_name(AIM_OBSTRUCTED), "obstructed"), "class names");
 }
 
 // A muzzle inside a wall (the half-space x > wall) never yields an origin inside it.
@@ -170,10 +234,11 @@ static void test_crosshair(void) {
 int main(void) {
     test_claim();
     test_frames();
-    test_convergence();
+    test_barrel();
     test_classify();
     test_recovery();
     test_validate();
+    test_validate_dir();
     test_crosshair();
     printf("test_aim: %d checks, %d failed\n", g_checks, g_fail);
     return g_fail ? 1 : 0;

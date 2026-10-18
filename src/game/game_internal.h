@@ -27,6 +27,13 @@ void game_pings_event(const GameEvent *ev);
 void game_pings_tick(float dt);
 void game_pings_reset(void);
 
+// game_ledge.c: ledge grab / climb, game side (docs/CONTROLLER.md)
+void ledge_register(void);
+// The hang prompts of the local player ("[Space] Climb", "[Ctrl/S] Let go"); false = none (not hanging,
+// or spectating someone: the prompt is local UI).
+bool ledge_hang_prompts(char *climb, size_t climb_size, char *let_go, size_t let_go_size);
+void ledge_prompts_drawn(bool drawn);   // the HUD's report of the frame (tests: ledge_report)
+
 // game_peek.c: door peek through the visor
 struct PostSettings;
 void peek_register(void);

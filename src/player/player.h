@@ -63,7 +63,11 @@ typedef struct PlayerMove {
     vec3 hang_normal;   // wall normal (towards player)
     vec3 ledge_point;   // top edge point in front of the player
     float hang_time;
-    float regrab_cooldown;
+    float regrab_cooldown;  // s left in which the ledge at regrab_point cannot be grabbed again
+    vec3 regrab_point;      // the ledge last climbed from / let go of (docs/CONTROLLER.md)
+    float hang_used;        // s hung on this grab (pl_hang_stamina)
+    u8 climb_intent;        // forward was held at the take-off: a second jump in reach auto-climbs
+    u8 pad_ledge[3];
     // hand IK anchors in world space (valid during mantle / vault / hang)
     vec3 hand_anchor[2];
     u8 hand_anchor_valid;
@@ -133,6 +137,8 @@ typedef struct PlayerTuning {
     struct Cvar *coyote_time, *jump_buffer_time, *step_height, *max_slope;
     struct Cvar *mantle_min, *mantle_max, *hang_max, *air_mantle_max, *vault_max, *mantle_reach, *mantle_speed, *vault_speed;
     struct Cvar *hang_yaw_limit;
+    // ledge grab / climb rules (docs/CONTROLLER.md)
+    struct Cvar *climb_facing_cone, *climb_hold_to_jump, *regrab_time, *hang_stamina, *hang_two_handed, *hang_shimmy_speed;
     struct Cvar *debug_mantle, *debug_melee, *noclip_speed;
     struct Cvar *crouch_toggle, *sprint_toggle;
     // water (pl_swim_*)
@@ -169,6 +175,10 @@ void movement_set_seat_pose(SeatPoseFn fn);
 // (game_water.c); without it nobody swims.
 typedef bool (*MoveWaterFn)(struct World *w, float x, float z, double tick, float *surface, float *column, vec3 *flow);
 void movement_set_water(MoveWaterFn fn);
+// Whether the player holds a two-handed item (pl_hang_two_handed 0 forbids grabbing a ledge with
+// one). Set by the game; without it every item may hang.
+typedef bool (*MoveTwoHandFn)(struct World *w, int slot);
+void movement_set_two_handed(MoveTwoHandFn fn);
 // Fall damage multiplier for a landing in water of `depth` m (1 on land, 0 from ~2.5 m down): the
 // hook for a future player fall damage rule (there is none yet).
 float player_fall_water_scale(float depth);

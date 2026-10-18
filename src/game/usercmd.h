@@ -44,6 +44,9 @@ typedef struct UserCmd {
     // The first-person camera (the head's "camera" socket) relative to the simulated eye, in the same
     // camera space and units: the camera ray starts where the player's view does (validated by the host).
     i16 eye_cam[3];
+    // The barrel's forward axis of the same pose, camera space, unit x 32767 (all zero = none): the
+    // bullet's direction before spread (no convergence on the aim point; validated by the host).
+    i16 barrel_cam[3];
 } UserCmd;
 
 #endif

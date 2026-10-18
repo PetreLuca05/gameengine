@@ -1758,6 +1758,7 @@ static void post_one(World *w, CharacterInst *c, int i, float dt, vec3 cam_pos, 
     if (c->item_valid && c->item_weapon && c->item_weapon->kind != WPN_MELEE && c->is_player && c->slot >= 0 && c->slot < MAX_PLAYERS) {
         const PlayerMove *pm = &w->players[c->slot].sim.move;
         c->muzzle_cam = aim_world_to_cam(player_eye_pos(pm), pm->yaw, pm->pitch, xf_point(c->item_cur, held_sockets(c)->muzzle));
+        c->barrel_cam = quat_rotate(quat_conj(aim_view_rot(pm->yaw, pm->pitch)), quat_rotate(c->item_cur.r, v3(0, 0, -1)));
         c->muzzle_cam_valid = true;
         c->muzzle_cam_tick = w->chars->tick;
     }
@@ -2743,6 +2744,14 @@ bool chars_muzzle_cam(World *w, EntityId e, vec3 *cam, int *age_ticks) {
     CharacterInst *c = char_get(w, e);
     if (!c || !c->muzzle_cam_valid || !c->item_valid || c->dead) return false;
     *cam = c->muzzle_cam;
+    if (age_ticks) *age_ticks = (int)(w->chars->tick - c->muzzle_cam_tick);
+    return true;
+}
+
+bool chars_barrel_cam(World *w, EntityId e, vec3 *dir, int *age_ticks) {
+    CharacterInst *c = char_get(w, e);
+    if (!c || !c->muzzle_cam_valid || !c->item_valid || c->dead) return false;
+    *dir = c->barrel_cam;
     if (age_ticks) *age_ticks = (int)(w->chars->tick - c->muzzle_cam_tick);
     return true;
 }

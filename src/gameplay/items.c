@@ -630,6 +630,8 @@ static void parse_weapon(ItemDB *db, const cJSON *w, const char *file) {
     {
         const cJSON *am = cJSON_GetObjectItemCaseSensitive(w, "aim");
         d->obstruct_near = jnum(am, "obstruct_near", 0.25f);
+        d->obstruct_margin = jnum(am, "obstruct_margin", 0.75f);
+        d->obstruct_margin_rel = jnum(am, "obstruct_margin_rel", 0.05f);
         d->aim_max_range = jnum(am, "max_range", 0.0f);
         if (d->aim_max_range <= 0.0f) d->aim_max_range = d->range;
     }

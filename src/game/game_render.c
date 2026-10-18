@@ -217,6 +217,7 @@ void game_render_init(void) {
     ground_ref_register();
     weather_register();
     water_register();
+    ledge_register();
     wind_game_register();
     game_audio_register();
     foliage_register();
