@@ -18,7 +18,7 @@ on:
 
 concurrency:
   group: platforms-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false   # a newer push queues behind a running check (every result is wanted)
 
 jobs:
   linux:
@@ -108,7 +108,15 @@ jobs:
           export VK_ICD_FILENAMES="$(brew --prefix molten-vk)/etc/vulkan/icd.d/MoltenVK_icd.json"
           export DYLD_FALLBACK_LIBRARY_PATH="$(brew --prefix)/lib"
           ctest --test-dir build-mac-arm64 --output-on-failure -j 3 -E "$(tools/ci/known_failures.sh macos)"
+      - name: MoltenVK pipeline diagnostics (vgeo raster, MoltenVK log)
+        if: always()
+        continue-on-error: true
+        run: |
+          export VK_ICD_FILENAMES="$(brew --prefix molten-vk)/etc/vulkan/icd.d/MoltenVK_icd.json"
+          export DYLD_FALLBACK_LIBRARY_PATH="$(brew --prefix)/lib"
+          cd build-mac-arm64/bin && MVK_CONFIG_LOG_LEVEL=3 ./test_vgeo_raster 2>&1 | grep -iE "mvk|error|fail|compil|harness" | head -80
       - name: SPIR-V -> MSL -> AIR (SPIRV-Cross + xcrun metal)
+        if: always()
         run: |
           xcrun -sdk macosx metal --version || xcodebuild -downloadComponent MetalToolchain || true
           python3 tools/macos/msl_check.py build-mac-arm64/bin/shaders --out msl --metal

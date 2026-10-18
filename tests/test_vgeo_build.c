@@ -48,7 +48,11 @@ static double peak_mb(void) {
 #else
     struct rusage ru;
     getrusage(RUSAGE_SELF, &ru);
+#ifdef __APPLE__
+    return (double)ru.ru_maxrss / (1024.0 * 1024.0);   // bytes on macOS (KB on Linux)
+#else
     return (double)ru.ru_maxrss / 1024.0;
+#endif
 #endif
 }
 
