@@ -43,7 +43,9 @@ def log(msg):
 def run(script, validation, timeout=900):
     env = dict(os.environ)
     env['VK_ADD_LAYER_PATH'] = VVL
-    cmd = [os.path.join(BIN, 'deadground.exe'), '--test', '--nosound', '--script', script]
+    exe = os.path.join(BIN, 'deadground.exe')
+    if not os.path.exists(exe): exe = os.path.join(BIN, 'deadground')   # macOS / Linux build
+    cmd = [exe, '--test', '--nosound', '--script', script]
     if validation:
         cmd.insert(1, '--validation')
     p = subprocess.run(cmd, cwd=BIN, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=timeout)

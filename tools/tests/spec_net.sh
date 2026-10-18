@@ -9,11 +9,12 @@
 # by another game / test on this machine).
 cd "$(dirname "$0")/../../${DG_BUILD:-build}/bin"
 PORTARG=; [ -n "$DG_PORT" ] && PORTARG="+set net_port $DG_PORT"
-./deadground.exe --test --nosound --log ../spec_host.log $PORTARG --script ../../tools/tests/spec_host.cfg > /dev/null 2>&1 &
+EXE=./deadground.exe; [ -x ./deadground ] && EXE=./deadground   # macOS / Linux build
+$EXE --test --nosound --log ../spec_host.log $PORTARG --script ../../tools/tests/spec_host.cfg > /dev/null 2>&1 &
 sleep 4
-./deadground.exe --test --nosound --log ../spec_target.log $PORTARG +connect 127.0.0.1 --script ../../tools/tests/spec_target.cfg > /dev/null 2>&1 &
+$EXE --test --nosound --log ../spec_target.log $PORTARG +connect 127.0.0.1 --script ../../tools/tests/spec_target.cfg > /dev/null 2>&1 &
 sleep 2
-./deadground.exe --test --nosound --log ../spec_observer.log $PORTARG +connect 127.0.0.1 --script ../../tools/tests/spec_observer.cfg > /dev/null 2>&1
+$EXE --test --nosound --log ../spec_observer.log $PORTARG +connect 127.0.0.1 --script ../../tools/tests/spec_observer.cfg > /dev/null 2>&1
 wait
 grep -h "spectate:\|Spectate:\|net_snapstats" ../spec_host.log
 grep -h "spec_stats" ../spec_observer.log | tail -5

@@ -75,7 +75,7 @@ The original planning notes, with the survey of the old code, are in `BALLISTICS
 **Determinism**
 - float32 in a fixed operation order. `-ffp-contract=off` / `/fp:precise` on `src/gameplay/ballistics` (CMake).
 - Seeds: the shot seed (`shot_seed`: command sequence, slot, shot counter) and the pellet index.
-- Host and predicting client run the same binary on the same inputs, so their paths are bit-identical until the worlds differ.
+- Host and predicting client run the same code on the same inputs, so their paths are bit-identical until the worlds differ, also between a Mac (clang, arm64) and a PC (MSVC, x86_64): `-ffp-contract=off` on every engine target, transcendental math through `core/detmath` (`DG_DETMATH`), and one RNG draw per statement (C leaves argument order to the compiler). `test_ballistics` checks a golden trajectory hash on every CI platform (docs/PLATFORM_MACOS.md "Determinism").
 
 ### Reference check
 
@@ -357,7 +357,7 @@ camera, seen from the side, in slow motion.
 **`test_ballistics` (ctest `ballistics`)**
 - Drop, velocity, time of flight and drift at 100 / 300 / 500 m within 5 % of py-ballisticcalc, for 5.56 and 7.62×51 (and 9 mm / 7.62×39).
 - Drift against Didion; the exponential model.
-- Zero solve; determinism (bit-identical, seeded transonic walk).
+- Zero solve; determinism (bit-identical, seeded transonic walk); the cross-platform golden hash.
 - Ricochet probability and speed per material (Monte Carlo); penetration table (6 mm steel / 12 cm pine / 20 cm sandbag, 7.62×51 = 2× on steel, pistols); flesh: 9 mm stops in a torso and passes a limb, 5.56 fragments, 7.62 exits.
 - Crack geometry (whole path and tick segments) and crack → impact → report ordering with the interval.
 - Tracer spacing / phase / last rounds / all-tracer.

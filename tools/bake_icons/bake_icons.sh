@@ -8,6 +8,7 @@ here=$(cd "$(dirname "$0")/../.." && pwd)
 bin="$here/${1:-build}/bin"
 cfg="$bin/bake_icons.cfg"
 printf 'wait 30\nbake_icons quit\n' > "$cfg"
-cd "$bin" && ./deadground.exe --test --nosound --script "$cfg"
+EXE=./deadground.exe; [ -x "$bin/deadground" ] && EXE=./deadground   # macOS / Linux build
+cd "$bin" && "$EXE" --test --nosound --script "$cfg"
 rm -f "$cfg"
 ls "$here/assets/ui/icons/256" | wc -l
