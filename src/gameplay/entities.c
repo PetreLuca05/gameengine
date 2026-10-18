@@ -10,6 +10,7 @@
 #include "core/cvar.h"
 #include <stdio.h>
 #include <math.h>
+#include <string.h>
 
 static u32 col(float r, float g, float b) { return rgba8(r, g, b, 1); }
 
@@ -514,7 +515,15 @@ static void pickup_use(World *w, EntityId self, int player) {
     Pickup *pk = &w->pickup[i];
     Player *p = &w->players[player];
     const ItemDef *d = item_def(w->items, pk->item);
-    int left = inv_add_att(&p->inv, w->items, pk->item, pk->count, pk->ammo, pk->att);
+    InvTree *contents = container_tree(w, self, false);   // a dropped backpack / rig / case: whole
+    int left;
+    if (contents && inv_live_count(contents)) {
+        InvSlot s = { pk->item, pk->count, pk->ammo, { 0 }, 0 };
+        memcpy(s.att, pk->att, sizeof(s.att));
+        left = inv_add_with(&p->inv, w->items, &s, contents);
+    } else {
+        left = inv_add_att(&p->inv, w->items, pk->item, pk->count, pk->ammo, pk->att);
+    }
     int taken = pk->count - left;
     if (taken <= 0) { ev_hint(w, player, "Inventory full"); return; }
     if (taken > 1) ev_hint(w, player, "Picked up %s x%d", d->name, taken);
@@ -595,6 +604,47 @@ EntityId spawn_pickup(World *w, vec3 pos, u16 item, int count, i16 ammo, float r
     entity_setup(w, e);
     w->inter[i].focus_offset = v3_scale(v3_add(mn, mx), 0.5f);   // the model's centre (item space)
     return e;
+}
+
+EntityId spawn_pickup_tree(World *w, vec3 pos, const InvTree *t, u16 uid) {
+    const InvItem *top = inv_get_c(t, uid);
+    if (!top) return ENT_NONE;
+    EntityId pe = spawn_pickup(w, pos, top->s.item, top->s.count, top->s.ammo, 0);
+    if (!ent_valid(w, pe)) return pe;
+    int i = (int)ENT_INDEX(pe);
+    memcpy(w->pickup[i].att, top->s.att, sizeof(top->s.att));   // the dropped weapon keeps its attachments
+    memcpy(w->attach[i], top->s.att, sizeof(top->s.att));
+    int idx[INV_MAX_ITEMS];
+    int n = inv_subtree(t, uid, idx, INV_MAX_ITEMS);
+    if (n <= 1) return pe;
+    // The contents, as they lay: the container's own grid is the pickup tree's root.
+    const ItemDef *d = item_def(w->items, top->s.item);
+    w->cont[i].root = d->container;
+    InvTree *ct = container_tree(w, pe, true);
+    if (!ct) {
+        for (int k = 1; k < n; k++)
+            if (t->items[idx[k]].parent == uid) spawn_pickup_tree(w, v3_add(pos, v3(0, 0.05f * (float)k, 0)), t, t->items[idx[k]].uid);
+        return pe;
+    }
+    inv_tree_init(ct, d->container);
+    u16 old_uid[INV_MAX_ITEMS], new_uid[INV_MAX_ITEMS];
+    int m = 0;
+    for (int k = 1; k < n; k++) {
+        const InvItem *src = &t->items[idx[k]];
+        InvItem *dst = inv_alloc(ct, w->items, &src->s);
+        if (!dst) break;
+        dst->dur = src->dur;
+        dst->flags = src->flags;
+        dst->loc = src->loc;
+        dst->x = src->x;
+        dst->y = src->y;
+        dst->parent = 0;   // in the container itself: the root level
+        for (int j = 0; j < m; j++) if (old_uid[j] == src->parent) dst->parent = new_uid[j];   // parents come first (inv_subtree)
+        old_uid[m] = src->uid;
+        new_uid[m++] = dst->uid;
+    }
+    w->cont[i].revision++;
+    return pe;
 }
 
 // ------------------------------------------------------------------ props, dummies, markers

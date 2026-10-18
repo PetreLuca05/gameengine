@@ -3,8 +3,9 @@
 #include <stdlib.h>
 #include <string.h>
 
-// Sides inside an intent: the two trees plus a scratch "hand" holding what a pickup adds.
-enum { SIDE_HAND = INV_SIDES, WORK_SIDES };
+// Sides inside an intent: the two trees, a scratch "hand" holding what a pickup adds and the
+// effect's drop tree (what a discard leaves on the ground, InvEffect.dropped).
+enum { SIDE_HAND = INV_SIDES, SIDE_DROP, WORK_SIDES };
 
 typedef struct Work {
     InvTree *t[WORK_SIDES];
@@ -15,6 +16,8 @@ typedef struct Work {
     InvEffect *fx;
     u16 last_uid;      // the last transfer's new uid
     int last_side;
+    u16 arrived[INV_MAX_ITEMS];   // self uids that came over from the loot side (bound on commit, like a pickup)
+    int arrived_n;
 } Work;
 
 static InvTree g_scratch[WORK_SIDES];
@@ -101,6 +104,7 @@ static u16 transfer(Work *W, int s, u16 uid, int d, InvPlace p) {
     for (int k = 0; k < n; k++) memset(&S->items[idx[k]], 0, sizeof(InvItem));
     W->last_uid = new_uid[0];
     W->last_side = d;
+    if (s == INV_SIDE_LOOT && d == INV_SIDE_SELF && W->arrived_n < INV_MAX_ITEMS) W->arrived[W->arrived_n++] = new_uid[0];
     return new_uid[0];
 }
 
@@ -114,9 +118,9 @@ static u16 place_part(Work *W, int s, InvItem *a, int d, InvPlace p, int n) {
     it->dur = dur;
     set_place(it, p);
     a->s.count = (u16)(a->s.count - n);   // n < a's count (callers): a stays alive
-    (void)s;
     W->last_uid = it->uid;
     W->last_side = d;
+    if (s == INV_SIDE_LOOT && d == INV_SIDE_SELF && W->arrived_n < INV_MAX_ITEMS) W->arrived[W->arrived_n++] = it->uid;
     return it->uid;
 }
 
@@ -273,8 +277,22 @@ static void consume_one(Work *W, InvItem *a) {
     if (--a->s.count == 0) memset(a, 0, sizeof(*a));
 }
 
-static bool bindable(const ItemDef *d) {
+// What a hotbar slot may hold: things used from the hands. Never a worn container (a bound backpack
+// would be "held" and dropped on downed) and never the built-in phone (its own key, WPN_SLOT_PHONE).
+bool inv_bindable(const ItemDef *d) {
+    if (d->builtin) return false;
     return d->kind == ITEM_WEAPON || d->kind == ITEM_CONSUMABLE || d->kind == ITEM_THROWABLE || d->camera || d->hotbar;   // "hotbar": a held tool (the flashlight)
+}
+
+// Binds a self item to the first free hotbar slot (the pickup rule), unless it is bound already or
+// not bindable.
+static void auto_bind(Work *W, u16 uid) {
+    InvTree *T = W->t[INV_SIDE_SELF];
+    InvItem *it = T ? inv_get(T, uid) : NULL;
+    if (!it || !inv_bindable(item_def(W->db, it->s.item))) return;
+    for (int k = 0; k < W->quick_n; k++) if (W->quick[k] == uid) return;
+    for (int k = 0; k < W->quick_n; k++)
+        if (!W->quick[k] || !inv_get(T, W->quick[k])) { W->quick[k] = uid; return; }
 }
 
 // Why a can't go into container b (no free space found): its filter, the nesting rule, or room.
@@ -379,12 +397,30 @@ static int apply(Work *W, const InvCtx *ctx, const InvIntent *in) {
         if (!ctx->loot_reachable) return IIR_TOO_FAR;
         InvTree *L = W->t[INV_SIDE_LOOT];
         int moved = 0, last = IIR_NOOP;
+        bool tried[INV_MAX_ITEMS] = { false };   // by pool index (entries never move inside a tree)
         for (int i = 0; i < INV_MAX_ITEMS; i++) {
             InvItem *a = &L->items[i];
             if (!inv_alive(a) || a->parent) continue;
+            tried[i] = true;
             int r = auto_into_self(W, INV_SIDE_LOOT, a->uid, true);
             if (r == IIR_OK) moved++;
             else last = r;
+        }
+        // A container that stayed behind (a corpse's backpack when the player wears one): its
+        // contents one by one, top down (a pouch inside it after the pouch itself was tried).
+        for (bool progress = true; progress;) {
+            progress = false;
+            for (int i = 0; i < INV_MAX_ITEMS; i++) {
+                InvItem *a = &L->items[i];
+                if (tried[i] || !inv_alive(a) || !a->parent) continue;
+                const InvItem *c = inv_get_c(L, a->parent);
+                if (!c || !tried[c - L->items]) continue;
+                tried[i] = true;
+                progress = true;
+                int r = auto_into_self(W, INV_SIDE_LOOT, a->uid, true);
+                if (r == IIR_OK) moved++;
+                else last = r;
+            }
         }
         return moved ? IIR_OK : last;
     }
@@ -396,7 +432,9 @@ static int apply(Work *W, const InvCtx *ctx, const InvIntent *in) {
     if (in->type == II_BIND) {
         if (!W->quick_n || in->aux >= W->quick_n) return IIR_INVALID;
         if (!in->src) { if (!W->quick[in->aux]) return IIR_NOOP; W->quick[in->aux] = 0; return IIR_OK; }
-        if (!inv_get(W->t[INV_SIDE_SELF], in->src)) return IIR_GONE;
+        const InvItem *b = inv_get(W->t[INV_SIDE_SELF], in->src);
+        if (!b) return IIR_GONE;
+        if (!inv_bindable(item_def(db, b->s.item))) return IIR_NOT_USABLE;
         for (int k = 0; k < W->quick_n; k++) if (W->quick[k] == in->src) W->quick[k] = 0;
         W->quick[in->aux] = in->src;
         return IIR_OK;
@@ -515,17 +553,26 @@ static int apply(Work *W, const InvCtx *ctx, const InvIntent *in) {
         return place_part(W, s, a, d, p, n) ? IIR_OK : IIR_FULL;
     }
     case II_DISCARD: {
+        // Into the effect's drop tree as it was: a container keeps its contents and their layout (the
+        // host spawns it as one pickup), however many entries the subtree has.
+        InvTree *D = W->t[SIDE_DROP];
+        if (!D) return IIR_INVALID;
+        u16 lu = W->last_uid;
+        int ls = W->last_side;
         if (in->count && in->count < a->s.count) {
-            if (W->fx && W->fx->dropped_n < INV_MAX_DROPS) { W->fx->dropped[W->fx->dropped_n] = a->s; W->fx->dropped[W->fx->dropped_n++].count = in->count; }
+            InvSlot part = a->s;
+            part.count = in->count;
+            InvItem *o = inv_alloc(D, db, &part);
+            if (!o) return IIR_FULL;
+            o->dur = a->dur;
             a->s.count = (u16)(a->s.count - in->count);
             return IIR_OK;
         }
-        int idx[INV_MAX_ITEMS];
-        int n = inv_subtree(W->t[s], a->uid, idx, INV_MAX_ITEMS);
-        for (int k = 0; k < n && W->fx; k++)
-            if (W->fx->dropped_n < INV_MAX_DROPS) W->fx->dropped[W->fx->dropped_n++] = W->t[s]->items[idx[k]].s;
-        inv_free_subtree(W->t[s], a->uid);
-        return IIR_OK;
+        InvPlace p = { 0, 0, 0, 0, 0 };
+        u16 top = transfer(W, s, a->uid, SIDE_DROP, p);
+        W->last_uid = lu;   // the selection doesn't follow it to the ground
+        W->last_side = ls;
+        return top ? IIR_OK : IIR_FULL;
     }
     case II_USE: {
         if (s != INV_SIDE_SELF) return IIR_NOT_USABLE;
@@ -623,6 +670,9 @@ static void finish(Work *W) {
     for (int i = 0; i < INV_SIDES; i++) if (W->t[i]) inv_normalize(W->t[i], W->db);
     for (int k = 0; k < W->quick_n; k++)
         if (W->quick[k] && (!W->t[INV_SIDE_SELF] || !inv_get(W->t[INV_SIDE_SELF], W->quick[k]))) W->quick[k] = 0;
+    // Weapons / consumables / throwables taken from a world container bind like a pickup (after the
+    // stale binds cleared: a swap's outgoing item frees its slot first).
+    for (int k = 0; k < W->arrived_n; k++) auto_bind(W, W->arrived[k]);
 }
 
 // Scratch copies of the sides the context has; committed back by commit().
@@ -638,6 +688,10 @@ static void work_begin(Work *W, InvCtx *ctx, InvEffect *fx) {
     }
     W->t[SIDE_HAND] = &g_scratch[SIDE_HAND];
     inv_tree_init(W->t[SIDE_HAND], -1);
+    if (fx) {
+        inv_tree_init(&fx->dropped, -1);
+        W->t[SIDE_DROP] = &fx->dropped;
+    }
     W->quick_n = DG_MIN(ctx->quick_n, (int)ARRAY_COUNT(W->quick));
     if (ctx->quick) memcpy(W->quick, ctx->quick, sizeof(u16) * (size_t)W->quick_n);
 }
@@ -673,7 +727,6 @@ int inv_give(InvCtx *ctx, const InvSlot *s) {
     memset(&fx, 0, sizeof(fx));
     work_begin(&W, ctx, &fx);
     InvTree *H = W.t[SIDE_HAND];
-    const ItemDef *d = item_def(W.db, s->item);
     int ms = max_stack(&W, s->item);
     int left = s->count;
     while (left > 0) {
@@ -685,16 +738,55 @@ int inv_give(InvCtx *ctx, const InvSlot *s) {
         auto_into_self(&W, SIDE_HAND, h->uid, true);
         int stuck = inv_alive(h) ? h->s.count : 0;
         left -= part.count - stuck;
-        if (W.last_uid && W.last_side == INV_SIDE_SELF && bindable(d)) {
-            bool bound = false;
-            for (int k = 0; k < W.quick_n; k++) bound |= W.quick[k] == W.last_uid;
-            for (int k = 0; k < W.quick_n && !bound; k++)
-                if (!W.quick[k] || !inv_get(W.t[INV_SIDE_SELF], W.quick[k])) { W.quick[k] = W.last_uid; bound = true; }
-        }
+        if (W.last_uid && W.last_side == INV_SIDE_SELF) auto_bind(&W, W.last_uid);
         if (stuck) break;
     }
     commit(&W, ctx);
     return left;
+}
+
+int inv_give_with(InvCtx *ctx, const InvSlot *s, const InvTree *contents) {
+    if (!s->item || !s->count || !ctx->tree[INV_SIDE_SELF]) return s->count;
+    if (!contents || !inv_live_count(contents)) return inv_give(ctx, s);
+    Work W;
+    InvEffect fx;
+    memset(&fx, 0, sizeof(fx));
+    work_begin(&W, ctx, &fx);
+    InvTree *H = W.t[SIDE_HAND];
+    InvItem *top = inv_alloc(H, W.db, s);
+    if (!top) return s->count;
+    u16 tu = top->uid;
+    // The contents under the new top, every entry with its compartment / cell / rotation: uids mapped
+    // (the drop tree's root level is the container itself).
+    u16 old_uid[INV_MAX_ITEMS], new_uid[INV_MAX_ITEMS];
+    int n = 0;
+    for (int i = 0; i < INV_MAX_ITEMS; i++) {
+        const InvItem *c = &contents->items[i];
+        if (!inv_alive(c)) continue;
+        InvItem *h = inv_alloc(H, W.db, &c->s);
+        if (!h) return s->count;
+        h->dur = c->dur;
+        h->flags = c->flags;
+        h->loc = c->loc;
+        h->x = c->x;
+        h->y = c->y;
+        h->parent = c->parent;   // remapped below
+        old_uid[n] = c->uid;
+        new_uid[n++] = h->uid;
+    }
+    for (int i = 0; i < INV_MAX_ITEMS; i++) {
+        InvItem *h = &H->items[i];
+        if (!inv_alive(h) || h->uid == tu) continue;
+        u16 np = tu;
+        for (int k = 0; k < n && h->parent; k++) if (old_uid[k] == h->parent) np = new_uid[k];
+        h->parent = np;
+    }
+    W.last_uid = 0;
+    int r = auto_into_self(&W, SIDE_HAND, tu, true);
+    if (r != IIR_OK || inv_get(H, tu)) return s->count;   // nothing committed
+    if (W.last_side == INV_SIDE_SELF) auto_bind(&W, W.last_uid);
+    commit(&W, ctx);
+    return 0;
 }
 
 int inv_give_root(InvTree *t, const ItemDB *db, const InvSlot *s) {

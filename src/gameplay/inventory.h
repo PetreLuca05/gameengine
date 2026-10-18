@@ -29,6 +29,9 @@ InvCtx inv_ctx(Inventory *inv, const ItemDB *db, InvTree *loot);
 // could NOT be added. att NULL = the weapon's default attachments.
 int inv_add(Inventory *inv, const ItemDB *db, u16 item, int count, i16 ammo);
 int inv_add_att(Inventory *inv, const ItemDB *db, u16 item, int count, i16 ammo, const u8 *att);
+// A container with its contents (contents' root level goes into it, layout kept): all or nothing,
+// returns 0 or s->count (inv_give_with).
+int inv_add_with(Inventory *inv, const ItemDB *db, const InvSlot *s, const InvTree *contents);
 int inv_count(const Inventory *inv, u16 item);
 int inv_remove(Inventory *inv, u16 item, int count);   // returns removed (unbound stacks first)
 bool inv_has(const Inventory *inv, u16 item);

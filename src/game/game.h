@@ -190,7 +190,10 @@ const char *weather_event_name(WeatherEvent e);
 const char *weather_name(World *w);              // the current preset ("clear", "light_rain" ...; photo sidecars)
 
 enum RpcType {
-    RPC_INV_MOVE = 1, RPC_INV_DROP, RPC_CONTAINER_TAKE, RPC_CONTAINER_PUT, RPC_CONTAINER_CLOSE, RPC_INV_USE, RPC_ATTACH, RPC_INV_OP, RPC_SET_PART,
+    RPC_INV_DROP = 1,      // a = hotbar slot: the held item on the ground (G tap); inventory changes are MSG_INV_INTENT
+    RPC_CONTAINER_CLOSE,   // the inventory screen closed: the open world inventory too
+    RPC_ATTACH,            // a = inventory slot, b = attachment slot, c = attachment id (bench)
+    RPC_SET_PART,          // modular character part
     RPC_SPECTATE,    // a = SpecMode, b = target slot or SpecTargetReq, c = 1 dev (alive; host / sv_cheats)
     RPC_RESPAWN,     // respawn request (sv_respawn_mode 1)
     RPC_SPEC_POS,    // free camera position x 16 (relevance)

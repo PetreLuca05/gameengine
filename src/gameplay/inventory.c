@@ -46,6 +46,14 @@ int inv_add_att(Inventory *inv, const ItemDB *db, u16 item, int count, i16 ammo,
     return left;
 }
 
+int inv_add_with(Inventory *inv, const ItemDB *db, const InvSlot *s, const InvTree *contents) {
+    if (!s->item || s->item >= db->item_count || !s->count) return s->count;
+    InvCtx c = inv_ctx(inv, db, NULL);
+    int left = inv_give_with(&c, s, contents);
+    if (left != s->count) inv->revision++;
+    return left;
+}
+
 int inv_count(const Inventory *inv, u16 item) {
     int c = 0;
     for (int i = 0; i < INV_MAX_ITEMS; i++) {

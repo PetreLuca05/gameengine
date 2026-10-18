@@ -19,7 +19,7 @@ typedef enum InvIntentType {
     II_EQUIP,        // src -> equipment slot aux (255 = its own); the occupant swaps out
     II_QUICK_MOVE,   // src -> across (loot open) or the next player container (inv_quick_order)
     II_SPLIT,        // count (0 = half) of src -> dst place (dst INV_AUTO: the first space)
-    II_DISCARD,      // src, count (0 = all): removed, the host spawns the pickups
+    II_DISCARD,      // src, count (0 = all): removed, the host spawns the pickup (a container with its contents)
     II_USE,          // src (self): a consumable used once
     II_MOUNT,        // attachment src -> weapon dst (on dst side)
     II_UNMOUNT,      // weapon src, attachment slot aux -> dst place (dst INV_AUTO: the first space)
@@ -45,10 +45,9 @@ typedef struct InvIntent {
     u32 seq;          // client sequence (reconcile); 0 = unsequenced
 } InvIntent;
 
-#define INV_MAX_DROPS 32
 typedef struct InvEffect {
-    InvSlot dropped[INV_MAX_DROPS];   // II_DISCARD: what the host spawns as pickups (a container's contents too)
-    int dropped_n;
+    InvTree dropped;                  // II_DISCARD: what the host spawns as pickups, as it was: each top at the root,
+                                      // a container's contents under it with their layout (one pickup keeps them)
     u16 used_item;                    // II_USE: the consumed item (host: heal / armour / vehicle use)
     u16 moved_uid;                    // where the moved item ended up (the selection follows it)
     u8 moved_side;
@@ -72,10 +71,18 @@ int inv_intent_from_name(const char *s);   // II_NONE if unknown
 // goes into, or why not (IIR_NOT_WEAPON / IIR_NO_SLOT / IIR_INCOMPATIBLE).
 int inv_attach_check(const ItemDB *db, const InvSlot *weapon, u16 att_item, int *aslot_out);
 
+// What a hotbar slot may hold (II_BIND, the pickup binds): weapons, consumables, throwables, the
+// "hotbar": true tools. Never a container / wearable or the built-in phone.
+bool inv_bindable(const ItemDef *d);
+
 // Pickup rule (docs/INVENTORY.md): merge into stacks, equip a weapon / wearable into a free slot,
 // else the first space in the order; weapons, consumables and throwables bind to a free hotbar
-// slot. Returns how many could NOT be added.
+// slot (so do the ones moved over from a world container by any intent). Returns how many could
+// NOT be added.
 int inv_give(InvCtx *ctx, const InvSlot *s);
+// A container picked up with what it held (a dropped backpack's pickup): contents' root level goes
+// into it, every entry in its own place. All or nothing: returns 0 or s->count.
+int inv_give_with(InvCtx *ctx, const InvSlot *s, const InvTree *contents);
 // The same into a world container's root grids (no equipment, no binds).
 int inv_give_root(InvTree *t, const ItemDB *db, const InvSlot *s);
 

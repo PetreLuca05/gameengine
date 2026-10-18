@@ -217,7 +217,7 @@ typedef struct Player {
     struct PhysCharacter *character;
     Inventory inv;
     u32 inv_sent_revision;
-    u32 inv_ack_seq;          // host: the last RPC_INV_OP sequence applied (sent with MSG_INVENTORY)
+    u32 inv_ack_seq;          // host: the last MSG_INV_INTENT sequence applied (sent with MSG_INVENTORY)
     UserCmd last_cmd;
     u32 last_processed_seq;
     // command queue (host side)

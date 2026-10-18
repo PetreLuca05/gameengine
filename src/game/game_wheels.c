@@ -284,7 +284,9 @@ static void execute(int kind, const WheelSlot *s) {
 static void tap(int kind) {
     switch (kind) {
     case WK_HEAL: quick_heal(); break;
-    case WK_THROW: game_rpc(RPC_INV_DROP, G->hotbar_slot, 0, 0); break;
+    case WK_THROW:
+        if (!G->phone_out) game_rpc(RPC_INV_DROP, G->hotbar_slot, 0, 0);   // the held item (the phone is built in)
+        break;
     case WK_PING: game_ping_request(-1); break;
     case WK_DOOR: W.use_pulse = true; break;
     default: break;

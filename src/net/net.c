@@ -475,8 +475,10 @@ void net_host_after_tick(World *w) {
         if (!c->active || !c->welcomed) continue;
         Player *p = &w->players[c->slot];
         if (!p->active) continue;
-        if (p->inv.revision != p->inv_sent_revision) send_inventory(c);
+        // The loot tree first: the ack in MSG_INVENTORY drops the client's predicted intent, which must
+        // then already see the crate without what it took (else it flickers back for a round trip).
         send_loot(c, w, p);
+        if (p->inv.revision != p->inv_sent_revision) send_inventory(c);
         if (c->cvar_revision != rev) { send_cvars(c); c->cvar_revision = rev; }
         // Spectating: the target's local data, inventory and relevance (docs/SPECTATE.md).
         int src = spectate_source(w, c->slot);

@@ -283,7 +283,7 @@ void game_rpc(int type, int a, int b, int c) {
     else net_send_rpc(type, a, b, c);
 }
 
-static void spawn_dropped(World *w, int slot, InvSlot s);
+static void spawn_dropped(World *w, int slot, const InvTree *t, u16 uid);
 
 // Is the open world inventory within reach (crates 3.5 m, vehicles 4.5 m)?
 static bool loot_reachable(World *w, int slot, EntityId e) {
@@ -319,7 +319,10 @@ int game_sv_inv_intent_r(int slot, const InvIntent *in) {
     if (r != IIR_OK) return r;
     bool touched_loot = in->src_side == INV_SIDE_LOOT || in->dst_side == INV_SIDE_LOOT || in->type == II_TAKE_ALL || in->type == II_QUICK_MOVE;
     if (loot && touched_loot) w->cont[ENT_INDEX(oc)].revision++;
-    for (int k = 0; k < fx.dropped_n; k++) spawn_dropped(w, slot, fx.dropped[k]);
+    for (int k = 0; k < INV_MAX_ITEMS; k++) {
+        const InvItem *d = &fx.dropped.items[k];
+        if (inv_alive(d) && !d->parent) spawn_dropped(w, slot, &fx.dropped, d->uid);   // one pickup per discarded item
+    }
     if (fx.used_item) {
         const ItemDef *d = item_def(w->items, fx.used_item);
         heal(w, p->ent, d->heal, d->armor);
@@ -342,8 +345,10 @@ void game_sv_loot_close(int slot) {
     w->players[slot].loot_sent_ent = ENT_NONE;
 }
 
-static void spawn_dropped(World *w, int slot, InvSlot s) {
+static void spawn_dropped(World *w, int slot, const InvTree *t, u16 uid) {
     Player *p = &w->players[slot];
+    const InvItem *top = inv_get_c(t, uid);
+    if (!top) return;
     vec3 eye = player_eye_pos(&p->sim.move);
     vec3 fwd = forward_from_yaw(p->sim.move.yaw);
     // Let go at hand height in front of the player; the pickup falls onto whatever is below.
@@ -352,13 +357,23 @@ static void spawn_dropped(World *w, int slot, InvSlot s) {
     RayHit rh;
     if (phys_raycast(w->phys, eye, v3_sub(at, eye), PL_MASK_WORLD, phys_character_inner_body(p->character), &rh))
         at = v3_madd(rh.point, rh.normal, 0.15f);
-    EntityId pe = spawn_pickup(w, at, s.item, s.count, s.ammo, 0);
-    if (ent_valid(w, pe)) {
-        // The dropped weapon keeps its attachments.
-        memcpy(w->pickup[ENT_INDEX(pe)].att, s.att, sizeof(s.att));
-        memcpy(w->attach[ENT_INDEX(pe)], s.att, sizeof(s.att));
-    }
-    ev_hint(w, slot, "Dropped %s", item_def(w->items, s.item)->name);
+    u16 item = top->s.item;
+    spawn_pickup_tree(w, at, t, uid);   // a weapon keeps its attachments, a container its contents
+    ev_hint(w, slot, "Dropped %s", item_def(w->items, item)->name);
+}
+
+// G tap (docs/UI_WHEELS_HUD.md "Throwables"): the held item, hotbar slot k, goes on the ground in
+// front of the player, whole (the stack; a weapon with its attachments). Host-applied as a discard,
+// so the client's tree follows by MSG_INVENTORY.
+static void drop_held(int slot, int k) {
+    Player *p = &G->world->players[slot];
+    if (k < 0 || k >= INV_HOTBAR || !p->inv.quick[k]) return;
+    InvIntent in;
+    memset(&in, 0, sizeof(in));
+    in.type = II_DISCARD;
+    in.src_side = INV_SIDE_SELF;
+    in.src = p->inv.quick[k];
+    game_sv_inv_intent_r(slot, &in);
 }
 
 void game_sv_handle_rpc(int slot, int type, int a, int b, int c) {
@@ -366,6 +381,7 @@ void game_sv_handle_rpc(int slot, int type, int a, int b, int c) {
     if (!w || slot < 0 || slot >= MAX_PLAYERS || !w->players[slot].active) return;
     Player *p = &w->players[slot];
     switch (type) {
+    case RPC_INV_DROP: drop_held(slot, a); break;
     case RPC_ATTACH: game_sv_attach(w, slot, a, b, c); break;
     case RPC_SET_PART: chars_sv_player_part(w, slot, a, b); break;
     case RPC_DOOR_ACTION: door_action(w, (EntityId)(u32)a, slot, b); break;

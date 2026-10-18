@@ -256,13 +256,8 @@ static void set_flag(World *w, EntityId e, u32 f, bool on) {
 static void drop_slot(World *w, int slot, InvItem *it) {
     Player *p = &w->players[slot];
     if (!it || !inv_alive(it)) return;
-    InvSlot s = it->s;
     vec3 at = v3_add(v3_madd(p->sim.move.pos, forward_from_yaw(p->sim.move.yaw), 0.5f), v3(0, 0.6f, 0));
-    EntityId pe = spawn_pickup(w, at, s.item, s.count, s.ammo, 0);
-    if (ent_valid(w, pe)) {
-        memcpy(w->pickup[ENT_INDEX(pe)].att, s.att, sizeof(s.att));
-        memcpy(w->attach[ENT_INDEX(pe)], s.att, sizeof(s.att));
-    }
+    spawn_pickup_tree(w, at, &p->inv.t, it->uid);   // whole: a weapon with its attachments (a container with its contents)
     inv_free_subtree(&p->inv.t, it->uid);
     p->inv.revision++;
 }

@@ -1067,8 +1067,10 @@ static void cmd_give_list(int argc, const char **argv) {
     log_info("give_list: %d items (give <id> [count])", n);
 }
 
-// give_all [player slot]: one of every item (a full stack of stackables) while there is room;
-// give_ammo [player slot]: a full stack of every ammo type.
+// give_all [player slot]: one of every item (a full stack of stackables) while there is room: the
+// containers and wearables first (they bring the room), then the rest, ammo last (else the stacks fill
+// the pockets before a backpack arrives); never the built-in phone. give_ammo [player slot]: a full
+// stack of every ammo type.
 static void give_kinds(int argc, const char **argv, bool ammo_only) {
     World *w = G->world;
     if (!w || G->mode != GM_HOST) { log_info("%s: host only", ammo_only ? "give_ammo" : "give_all"); return; }
@@ -1076,15 +1078,18 @@ static void give_kinds(int argc, const char **argv, bool ammo_only) {
     if (target < 0 || target >= MAX_PLAYERS || !w->players[target].active) { log_warn("give: no player in slot %d", target); return; }
     Player *p = &w->players[target];
     int given = 0, full = 0;
-    for (int i = 1; i < G->items.item_count; i++) {
-        const ItemDef *d = &G->items.items[i];
-        if (ammo_only ? d->kind != ITEM_AMMO : d->kind == ITEM_KEY) continue;
-        int count = d->max_stack > 1 ? d->max_stack : 1;
-        const WeaponDef *wd = item_weapon(&G->items, (u16)i);
-        int left = inv_add(&p->inv, &G->items, (u16)i, count, wd ? (i16)wd->mag_size : 0);
-        if (left < count) given++;
-        else full++;
-    }
+    for (int pass = 0; pass < 3; pass++)
+        for (int i = 1; i < G->items.item_count; i++) {
+            const ItemDef *d = &G->items.items[i];
+            if (ammo_only ? d->kind != ITEM_AMMO : (d->kind == ITEM_KEY || d->builtin)) continue;
+            bool gear = d->container >= 0 || (d->equip_slot != EQ_NONE && d->kind != ITEM_WEAPON);
+            if ((pass == 0) != gear || (pass == 2) != (d->kind == ITEM_AMMO && !gear)) continue;
+            int count = d->max_stack > 1 ? d->max_stack : 1;
+            const WeaponDef *wd = item_weapon(&G->items, (u16)i);
+            int left = inv_add(&p->inv, &G->items, (u16)i, count, wd ? (i16)wd->mag_size : 0);
+            if (left < count) given++;
+            else full++;
+        }
     p->inv.revision++;
     log_info("%s: %d items given%s", ammo_only ? "give_ammo" : "give_all", given, full ? " (inventory full for the rest)" : "");
 }

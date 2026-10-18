@@ -220,6 +220,39 @@ static void cmd_inv_open(int argc, const char **argv) {
     container_send(w, e, slot);
 }
 
+// inv_wait <loot | synced | closed <player slot> | offline> [timeout frames]: scripts wait for an
+// inventory state instead of a frame count (tools/tests/inv_net.sh): loot = the open world inventory's
+// tree arrived (MSG_LOOT); synced = no unacknowledged intents (and the open loot tree received); closed
+// (host) = that player has no world inventory open any more; offline = no longer a client (the host
+// quit). One frame per retry, the rest of the script after it; a timeout logs a warning.
+static void cmd_inv_wait(int argc, const char **argv) {
+    static int frames;
+    const char *what = argc > 1 ? argv[1] : "synced";
+    bool closed = !strcmp(what, "closed");
+    int ta = closed ? 3 : 2;
+    int timeout = argc > ta ? atoi(argv[ta]) : 3600;
+    Game *g = G_();
+    bool done;
+    if (!strcmp(what, "loot")) done = g && game_loot_tree() != NULL;
+    else if (!strcmp(what, "synced")) done = g && game_inv_pending() == 0 && (!g->container_open || game_loot_tree());
+    else if (closed) {
+        int s = argc > 2 ? atoi(argv[2]) : 1;
+        World *w = g ? g->world : NULL;
+        done = w && g->mode == GM_HOST && s >= 0 && s < MAX_PLAYERS && (!w->players[s].active || w->players[s].open_container == ENT_NONE);
+    } else if (!strcmp(what, "offline")) done = !g || g->mode != GM_CLIENT;
+    else { log_warn("inv_wait: unknown state '%s' (loot, synced, closed <slot>, offline)", what); return; }
+    if (done || ++frames > timeout) {
+        if (done) log_info("inv_wait %s%s%s: after %d frames", what, closed ? " " : "", closed && argc > 2 ? argv[2] : "", frames);
+        else log_warn("inv_wait %s: timed out after %d frames", what, timeout);
+        frames = 0;
+        return;
+    }
+    char line[96];
+    if (closed) snprintf(line, sizeof(line), "inv_wait closed %s %d", argc > 2 ? argv[2] : "1", timeout);
+    else snprintf(line, sizeof(line), "inv_wait %s %d", what, timeout);
+    cbuf_retry(line);
+}
+
 static void cmd_inv_editor(int argc, const char **argv) {
     E.open = argc > 1 ? atoi(argv[1]) != 0 : !E.open;
     if (E.open) log_info("inv_editor: open the inventory (Tab) to see the panel");
@@ -233,6 +266,7 @@ void inv_editor_init(void) {
     cmd_register("inv_dump", cmd_inv_dump, "inv_dump [loot|player slot]: log the inventory tree (the open container's; host: another player's)");
     cmd_register("inv_intent", cmd_inv_intent, "inv_intent <type> <self|loot> <src> [...]: run an inventory intent (docs/INVENTORY.md)");
     cmd_register("inv_open", cmd_inv_open, "inv_open [entity id|name] [player slot]: open a world container / corpse / trunk (host; default: the focused entity, for you)");
+    cmd_register("inv_wait", cmd_inv_wait, "inv_wait <loot|synced|closed <slot>|offline> [timeout frames]: scripts wait for an inventory state (tools/tests/inv_net.sh)");
     cmd_register("inv_editor", cmd_inv_editor, "inv_editor [0|1]: the inventory editor panel (item set, fill, intents, fit map)");
 }
 

@@ -59,8 +59,13 @@ Everything here uses the game's design system: theme colours and `layout` tokens
 | Ping | middle mouse, Z: contextual ping / wheel | `ping.json` |
 | Door | E on a door: use / wheel (Open, Slam, Peek) | `door.json` |
 
-Healing items are equipped and used at once (`wheel_heal_auto_use`). From the backpack they move
-into the hotbar first (`IOP_EQUIP`). The hotbar's selected slot is white too.
+Healing items are equipped and used at once (`wheel_heal_auto_use`). One carried unbound (in the
+backpack) is bound to a free hotbar slot first (`II_BIND`, docs/INVENTORY.md). The hotbar's selected
+slot is white too.
+
+The G tap drops the held item (the selected hotbar slot's, never the built-in phone): `RPC_INV_DROP`,
+applied by the host as a discard, so it lands in front of the player as a pickup (a weapon with its
+attachments). `tools/tests/inv_drop.cfg` checks it.
 
 ## Timed ring
 

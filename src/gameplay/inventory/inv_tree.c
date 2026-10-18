@@ -138,21 +138,28 @@ void inv_normalize(InvTree *t, const ItemDB *db) {
 
 // ------------------------------------------------------------------ weight / space
 
+// One entry: the def's weight x count plus the attachments mounted on it (a mounted red dot still weighs).
+static float slot_weight(const ItemDB *db, const InvSlot *s) {
+    float kg = fmaxf(0.0f, item_def(db, s->item)->inv_weight);
+    for (int k = 0; k < ATT_SLOTS; k++) {
+        u16 ai = s->att[k] ? item_for_attachment(db, s->att[k]) : 0;
+        if (ai) kg += fmaxf(0.0f, item_def(db, ai)->inv_weight);
+    }
+    return kg * (float)s->count;
+}
+
 float inv_item_weight(const InvTree *t, const ItemDB *db, const InvItem *it) {
     int idx[INV_MAX_ITEMS];
     int n = inv_subtree(t, it->uid, idx, INV_MAX_ITEMS);
     float kg = 0;
-    for (int k = 0; k < n; k++) {
-        const InvItem *e = &t->items[idx[k]];
-        kg += fmaxf(0.0f, item_def(db, e->s.item)->inv_weight) * (float)e->s.count;
-    }
+    for (int k = 0; k < n; k++) kg += slot_weight(db, &t->items[idx[k]].s);
     return kg;
 }
 
 float inv_tree_weight(const InvTree *t, const ItemDB *db) {
     float kg = 0;
     for (int i = 0; i < INV_MAX_ITEMS; i++)
-        if (inv_alive(&t->items[i])) kg += fmaxf(0.0f, item_def(db, t->items[i].s.item)->inv_weight) * (float)t->items[i].s.count;
+        if (inv_alive(&t->items[i])) kg += slot_weight(db, &t->items[i].s);
     return kg;
 }
 

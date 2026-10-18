@@ -17,8 +17,9 @@ same trees and the same screen. Host-authoritative: every change is an intent.
 | Screen: layout + drag and drop (pure), grid panels, inspect, context menu, gamepad | `src/ui/inventory/{inv_layout,inv_dd,inv_screen}.c` |
 | Cell images (grid-aspect icons, baker) | `src/ui/inventory/inv_cells.c`, `tools/bake_icons/bake_cells.sh` |
 | Editor panel | `src/ui/inventory/inv_editor.c` (`inv_editor`) |
-| Showcase camera (the player faces the screen) | `src/game/game_render.c` (`inv_showcase`) |
-| Tests | `tests/test_inventory.c`, `tests/test_inventory_ui.c`, `tools/tests/lint_inventory.py`, `ui_inventory.cfg`, `ui_crate.cfg`, `inv_net.sh` + `inv_net_check.py` |
+| Showcase camera (the player faces the screen; collides) | `src/game/game_render.c` (`inv_showcase`, `showcase_camera`) |
+| Drops (G tap, discards, downed): one pickup per item, a container keeps its contents | `src/game/game_events.c` (`drop_held`, `spawn_dropped`), `src/gameplay/entities.c` (`spawn_pickup_tree`, `pickup_use`) |
+| Tests | `tests/test_inventory.c`, `tests/test_inventory_ui.c`, `tools/tests/lint_inventory.py`, `ui_inventory.cfg`, `ui_crate.cfg`, `inv_drop.cfg` + `inv_drop_check.py`, `inv_net.sh` + `inv_net_check.py` |
 
 ## 1. Data model
 
@@ -100,11 +101,14 @@ typedef struct Inventory {
 ```
 
 * **Footprint** = def grid + attachment deltas - fold, swapped when rotated (`inv_item_size`).
-* **Weight** of an instance = def weight × count + its contents (`inv_item_weight`); the screen
-  shows per-container and total weight. No gameplay effect.
+* **Weight** of an instance = (def weight + its mounted attachments' item weights) × count + its
+  contents (`inv_item_weight`); the screen shows per-container and total weight. No gameplay effect.
 * **Stacking:** same def, both stackable: merge up to `max_stack`, the remainder stays.
 * **Hotbar binds** reference instances, never cells: moving the item anywhere in the tree keeps
-  the bind; leaving the tree (dropped, moved to a crate, used up) clears it.
+  the bind; leaving the tree (dropped, moved to a crate, used up) clears it. Only what is used from
+  the hands binds (`inv_bindable`): weapons, consumables, throwables, `"hotbar": true` tools (the
+  flashlight). Never a worn container or wearable (a bound backpack would be "held", and dropped
+  on downed) and never the built-in phone (its own key, `WPN_SLOT_PHONE`).
 * **Secure container:** on death everything goes to the corpse except the `secure_container`
   slot's subtree; binds into what left are cleared (`inv_strip_to_corpse`).
 * **Charges:** `"use": "charges"` items count the charges used in `ammo` (a medkit: 3 uses).
@@ -125,6 +129,8 @@ typedef struct Inventory {
 | Attachments | mounting re-checks the weapon's new footprint where it lies (rejected with "No room") |
 | Quick move (Ctrl+click) | loot open: across (player → loot root, loot → player). Else to the next player container in the order `inv_quick_order` (`rig,backpack,pockets`) |
 | Pickup (`inv_add`) | merge into stacks, equip a weapon into a free matching slot, else first space in the quick order; weapons / consumables / throwables bind to a free hotbar slot |
+| Loot binds | the same bind for whatever comes over from a world container by any intent (take all, Ctrl+click, a drag onto an equipment slot or into a grid, a split): a looted rifle can be drawn at once |
+| Container pickup (`inv_add_with`) | a dropped backpack / rig / case is one pickup with its own tree (the item's grid as the root): picked up, it goes in by the pickup rule with every entry in its old place; all or nothing |
 
 ## 3. Intents (`inv_intent.h`)
 
@@ -140,13 +146,13 @@ prediction, on the client. `ctx` holds the two sides: `INV_SIDE_SELF` (the playe
 | `II_EQUIP` | src (`aux` = slot, 255 = its own) | into the equipment slot (an occupant swaps out to the source cell when it fits) |
 | `II_QUICK_MOVE` | src | the quick-move rule above |
 | `II_SPLIT` | src, count, dst | count off the stack into dst (or the first space) |
-| `II_DISCARD` | src, count | removed; the host spawns the pickup (whole subtree for containers) |
+| `II_DISCARD` | src, count | removed into `InvEffect.dropped` (a tree: the item at its root, a container's contents under it as they lay, however many entries); the host spawns one pickup per item that keeps them |
 | `II_USE` | src | consumables (heal / armour / vehicle use): host effect |
 | `II_MOUNT` / `II_UNMOUNT` | weapon uid, attachment uid / slot | as before, footprint re-checked |
 | `II_FOLD` | weapon uid | fold / unfold the stock (footprint changes) |
 | `II_UNLOAD` | weapon uid | rounds back into an ammo stack |
-| `II_BIND` | src uid (0 = clear), `aux` = hotbar slot | hotbar bind |
-| `II_TAKE_ALL` | — | everything in the loot root that fits |
+| `II_BIND` | src uid (0 = clear), `aux` = hotbar slot | hotbar bind (`IIR_NOT_USABLE` unless `inv_bindable`) |
+| `II_TAKE_ALL` | — | everything in the loot root that fits; then, container by container, the contents of what stayed behind (a corpse's pack when the player wears one of its size) |
 | `II_SORT` | dst side / container, `aux` key | re-pack one container by type / weight / size (all or nothing) |
 
 Results: `IIR_OK`, `IIR_NOOP`, `IIR_INVALID`, `IIR_NO_ROOM`, `IIR_FILTER`, `IIR_NESTING`,
@@ -162,7 +168,13 @@ for discarded items, healing).
 
 * **Client → host:** `MSG_INV_INTENT` (reliable): the packed intent (`inv_wire.c`), sequence.
 * **Host → owner:** `MSG_INVENTORY`: slot, revision, last applied sequence, hotbar binds, the
-  live instances. The client takes it, drops acknowledged intents and re-applies the rest.
+  live instances. The client takes it, drops acknowledged intents and re-applies the rest. A
+  changed `MSG_LOOT` goes out before it (the ack must not drop a predicted loot move before the
+  crate's new tree is in, or the item flickers back into the crate for a round trip).
+* **Drops:** the G tap sends `RPC_INV_DROP` (a = the selected hotbar slot; not while the phone is
+  out); the host discards the bound item (`drop_held`, an `II_DISCARD`), so it lands in front of
+  the player as a pickup and the client's tree follows by `MSG_INVENTORY`. Downed players drop the
+  held item the same way (`revive.c drop_slot`).
 * **Loot:** opening a container (`EV_CONTAINER`) sets `Player.open_container`; the host validates
   the distance (`sv_inv_reach`, 3.5 m, vehicles + 1 m) on every loot intent and sends `MSG_LOOT`
   (entity, revision, tree) to every player that has that container open whenever its revision
@@ -178,8 +190,9 @@ for discarded items, healing).
   use from behind the car) use the same path through `container_tree(w, ent)`. The fabricator's
   sample queue stays its own machine (docs/REVIVE.md); its `fabricator` root is defined for a
   later move onto a grid.
-* Protocol 30 (`DG_PROTOCOL_VERSION`; 27 on the branch it was built on). Story saves keep the trees (`tree_json`); saves from before
-  the grid inventory load with empty inventories / containers.
+* Protocol 31 (`DG_PROTOCOL_VERSION`: 30 for the grid inventory, 27 on the branch it was built on;
+  31 renumbered `RpcType` when the slot inventory's dead RPCs went). Story saves keep the trees
+  (`tree_json`); saves from before the grid inventory load with empty inventories / containers.
 
 ## 5. Screen (`src/ui/inventory/`)
 
@@ -188,12 +201,12 @@ for discarded items, healing).
 │ INVENTORY                         total 23.4 kg                         syncing…     │
 ├───────────────────────────┬───────────────────────────────┬──────────────────────────┤
 │ POCKETS      0.3 kg  4/4  │   [HEAD] [EAR]   [FACE] [EYE]  │ HOTBAR                   │
-│ ▢ ▢ ▢ ▢                   │                               │ [1] ▭▭▭▭ Assault Rifle   │
-│ TACTICAL RIG 2.1 kg 6/12  │   [ARMOR]   (player 3D,   [RIG]│ [2] ▭▭  Pistol           │
-│ ▢▢ ▢▢ ▢▢▢▢               │            live, front)       │ [3] ▢   Medkit           │
-│ BACKPACK     8.0 kg 14/30 │   [BACKPACK]           [ARMBAND]│ [4] ▢   Frag             │
-│ ▢▢▢▢▢                     │                               │ [5] ▢   —                │
-│ ▢▢▢▢▢   (scrolls)         │                               │ [6] ▢   —                │
+│ ▢ ▢ ▢ ▢                   │                               │ ▢1 ▢2 ▢3 ▢4 ▢5 ▢6        │
+│ TACTICAL RIG 2.1 kg 6/12  │   [ARMOR]   (player 3D,   [RIG]│ 1 Assault Rifle 30/30·90 │
+│ ▢▢ ▢▢ ▢▢▢▢               │            live, front)       │ 2 Pistol        12/12·24 │
+│ BACKPACK     8.0 kg 14/30 │   [BACKPACK]           [ARMBAND]│ 3 Medkit              x2 │
+│ ▢▢▢▢▢                     │                               │ 4 Frag                x1 │
+│ ▢▢▢▢▢   (scrolls)         │                               │ 5 —   6 —                │
 │                           │   [PRIMARY] [SECONDARY]        │──────────────────────────│
 │ SECURE       0.4 kg  1/4  │   [HOLSTER] [MELEE]  [SECURE] │ CRATE / BODY / TRUNK      │
 │ ▢▢                        │                               │ (loot grid when open)     │
@@ -207,11 +220,20 @@ for discarded items, healing).
 * **Centre:** the player, live (the game camera turns to face the body while the screen is open,
   `inv_showcase`), with the equipment slots around it (left: headwear, earpiece, face cover,
   eyewear, armband; right: body armour, rig, backpack, secure container; below: primary,
-  secondary, holster, melee) and the Discard zone. No backdrop behind the player.
-* **Right:** the hotbar: the six bound items as large tiles (cell image at its grid aspect, name,
-  magazine / reserve, key number). With a world container open, the hotbar compacts to a row of
-  squares and the loot grid (crate, corpse, trunk) fills the rest of the column (it scrolls; a
-  corpse shows its equipment tiles, its rig / backpack grids, then its pockets).
+  secondary, holster, melee) and the Discard zone. No backdrop behind the player: each equipment
+  slot carries its own (the theme's `panel` colour, a brighter edge, the slot name in `text_dim`)
+  and the Discard zone is a solid pill with a danger-tinted edge, so empty ones read over a bright
+  sky or floor. The showcase camera collides: a crate, a wall or a car in the way swings it 30 / 60
+  / 90 degrees to either side (along a wall), else it pulls in to the free distance (at once; it
+  eases back out).
+* **Right:** the hotbar: one row of six tiles, each one grid cell (the backpack's cell size,
+  aligned with the grids' cells), the cell image at its grid aspect, the key number and the rounds
+  / stack count. Under the row the binds are listed (key, name, magazine / reserve or the stack);
+  with a world container open, the loot grid (crate, corpse, trunk) takes that place and the rest
+  of the column (it scrolls; a corpse shows its equipment tiles, its rig / backpack grids, then its
+  pockets).
+* **Text** never goes below 10 px (`INV_MIN_TEXT_PX`: at 720p the theme's tiny type is 8 px); an
+  item's name stops left of its hotbar-key badge.
 * **No tabs.** Inspect, nested containers and the split dialog are floating windows.
 * **Footer:** key hints and the last rejection reason.
 
@@ -245,6 +267,7 @@ cycle panels (grids → equipment → hotbar → loot), A picks up / places, X r
 | `inv_dump` | log the tree (uid, def, parent, loc, cell, rot, count) |
 | `inv_intent <type> ...` | run an intent (tests) |
 | `inv_open <entity>` | open a world container / corpse / vehicle storage (dev, ignores distance) |
+| `inv_wait <loot\|synced\|closed <slot>\|offline> [frames]` | scripts wait for a state instead of a frame count: the loot tree arrived, every intent acknowledged, (host) a player closed his world inventory, the host is gone |
 | `inv_editor` | the editor panel: item set, fill, run intents, fit visualisation |
 | `bake_cells [dir] [quit]` | grid-aspect cell images into `assets/ui/cells/<id>.png` (+ `_r` rotated); `tools/bake_icons/bake_cells.sh` |
 | `ui_inv_drag <from> <to> [shift] [rot]`, `ui_inv_click <target> [ctrl\|alt\|shift\|right\|double]` | scripted gestures; targets `c:<self\|loot>:<parent uid\|pockets\|rig\|backpack\|secure>:<loc>:<x>:<y>`, `e:<slot>`, `h:<1-6>`, `a:<attachment slot>`, `discard`, `out` |
@@ -288,7 +311,11 @@ per frame), so the hotbar shows them from the start and `bake_cells` runs withou
   sort; secure container on death and the corpse tree; the wire format; weight totals; a fuzz of
   20000 random intents (garbage included: the invariants and conservation always hold); two
   clients looting one crate through a 150 ms round trip with conflicting intents (nothing
-  duplicated or lost, every copy converges, conflicts rejected).
+  duplicated or lost, every copy converges, conflicts rejected); the binds (no worn container, no
+  built-in phone, the flashlight binds); loot binds by every path (quick move, take all, onto a
+  slot, a drag) and a full hotbar; a discarded backpack of 34 entries (over the old 32-drop limit)
+  as one drop subtree, picked up whole with the same layout, all or nothing; take all emptying a
+  corpse's pack that can't come over; mounted attachments in the weights.
 * `test_inventory_ui`: the layout at 16:9 / 21:9 / 4:3 / 720p / 4K / 3440×1440 with and without
   loot (inside the safe area, no overlaps, usable cells, an 8-wide trunk fits); pad navigation
   reaches every target at 16:9 and 21:9; the drag-and-drop state machine for every source →
@@ -297,6 +324,9 @@ per frame), so the hotbar shows them from the start and `bake_cells` runs withou
 * `test_ui`: an icon and a cell image for every item.
 * `lint_inventory.py`: theme tokens only in the screen; nothing outside the inventory reads the
   weight (so speed is the same with an empty and a full inventory); items.json completeness.
-* Scripted: `ui_inventory.cfg` (every gesture, `inv_dump` after each, screenshots),
-  `ui_crate.cfg` (crate + gear locker), `ui_resolutions.cfg` (the screen per resolution),
-  `inv_net.sh` (host + two clients, `net_fakelag 150`, checked by `inv_net_check.py`).
+* Scripted: `ui_inventory.cfg` (every gesture, `inv_dump` after each, screenshots; the cell
+  addresses are the loadout's, so the mounts really mount), `ui_crate.cfg` (crate + gear locker:
+  Alt+click the pack, drag the rig onto its slot), `ui_resolutions.cfg` (the screen per resolution),
+  `inv_drop.cfg` + `inv_drop_check.py` (the G tap drops the held rifle and it comes back bound; a
+  discarded full pack comes back whole), `inv_net.sh` (host + two clients, `net_fakelag 150`,
+  checked by `inv_net_check.py`; every step waits on a state: `net_wait_clients`, `inv_wait`).

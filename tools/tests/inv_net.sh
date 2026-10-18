@@ -1,7 +1,8 @@
 #!/bin/sh
 # Two clients looting one crate over LAN with 150 ms fake lag (docs/INVENTORY.md "Networking").
 # DG_BUILD (build dir), DG_EXE (deadground.exe; deadground on Linux), SHOTDIR (screenshots),
-# DG_PORT (another LAN port). Then: python3 tools/tests/inv_net_check.py <build>/
+# DG_PORT (another LAN port). The scripts wait on states (net_wait_clients, inv_wait), not frame counts.
+# Then: python3 tools/tests/inv_net_check.py <build>/ (run at the end).
 cd "$(dirname "$0")/../../${DG_BUILD:-build}/bin"
 EXE=${DG_EXE:-./deadground.exe}
 SHOT=${SHOTDIR:-..}
@@ -14,4 +15,6 @@ $EXE --test --nosound --log ../inv_a.log $PORTARG +set cl_name LooterA +connect 
 sleep 1
 $EXE --test --nosound --log ../inv_b.log $PORTARG +set cl_name LooterB +connect 127.0.0.1 --script ../inv_net_b.run.cfg > /dev/null 2>&1 &
 wait
-python3 ../../tools/tests/inv_net_check.py ..
+# python3 (Linux) or python (Windows: python3 is only the Store alias there)
+PY=python3; python3 -c '' 2>/dev/null || PY=python
+$PY ../../tools/tests/inv_net_check.py ..
