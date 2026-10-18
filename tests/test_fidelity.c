@@ -327,6 +327,59 @@ static void test_graph_check(void) {
     CHECK(fgc_history_partner("taa_hist_a", "taa_hist_b") && fgc_history_partner("depth_prev", "depth_prev") && !fgc_history_partner("ao_hist_a", "ssr_hist_b"), "history partners");
 }
 
+// Settings > Graphics > Normal qualities (fid_group_*): at every level x era, the level's own tier
+// reads back after fid_apply; tiers up to the level apply and read back as themselves (or a tier
+// with the same values), tiers above it are greyed with the level they need; a group change makes
+// the level read Custom; re-applying the level clears it.
+static void test_groups(void) {
+    for (int e = 0; e < FID_ERAS; e++) {
+        set_era(e);
+        for (int l = 0; l < FID_LEVELS; l++) {
+            fid_custom_load("");
+            fid_apply(l);
+            for (int g = 0; g < FG_COUNT; g++) {
+                const int *fs;
+                CHECK(fid_group_features(g, &fs) > 0 && fs, "group %s has features", fid_group_id(g));
+                CHECK(fid_group_detect(g) == l, "era %s %s: group %s reads %d", fid_era_id(e), fid_level_id(l), fid_group_id(g), fid_group_detect(g));
+                for (int t = 0; t < FID_LEVELS; t++) {
+                    int req = -2;
+                    bool ok = fid_group_tier_allowed(g, t, &req);
+                    if (t <= l) CHECK(ok && req <= l, "era %s %s: %s tier %d allowed (req %d)", fid_era_id(e), fid_level_id(l), fid_group_id(g), t, req);
+                    else CHECK(ok == (req >= 0 && req <= l), "era %s %s: %s tier %d greyed with req %d", fid_era_id(e), fid_level_id(l), fid_group_id(g), t, req);
+                    if (!ok) continue;
+                    fid_group_apply(g, t);
+                    int got = fid_group_detect(g);
+                    CHECK(got >= 0, "era %s %s: %s tier %d reads back (got %d)", fid_era_id(e), fid_level_id(l), fid_group_id(g), t, got);
+                    if (got >= 0 && got != t) {   // equal values: the same tier under another name
+                        int n = fid_group_features(g, &fs);
+                        for (int i = 0; i < n; i++)
+                            CHECK(fabsf(fid_bounds(got, e, fs[i]).def - fid_bounds(t, e, fs[i]).def) < 1e-3f || fid_bounds(l, e, fs[i]).avail == FID_UNAVAILABLE,
+                                  "%s tier %d read as %d: same %s", fid_group_id(g), t, got, fid_feature(fs[i])->id);
+                    }
+                    CHECK(g_era->i == e, "era %s survives %s tier %d (r_era %d)", fid_era_id(e), fid_group_id(g), t, g_era->i);
+                }
+                fid_custom_load("");
+                fid_apply(l);
+            }
+        }
+    }
+    set_era(FID_ERA_MODERN);
+    fid_custom_load("");
+    fid_apply(FID_MODERN);
+    CHECK(fid_custom_count() == 0, "Modern: no custom values");
+    fid_group_apply(FG_SHADOWS, FID_LOW);
+    CHECK(fid_custom_count() > 0 && fid_group_detect(FG_SHADOWS) == FID_LOW, "Low shadows on Modern: Custom (%d), shadows Low", fid_custom_count());
+    CHECK(val(FF_SHADOW_RESOLUTION) == fid_bounds(FID_LOW, FID_ERA_MODERN, FF_SHADOW_RESOLUTION).def, "shadow resolution at Low's default");
+    CHECK(fid_group_detect(FG_TEXTURES) == FID_MODERN, "textures untouched");
+    fid_custom_load("");
+    fid_apply(FID_MODERN);
+    CHECK(fid_custom_count() == 0 && fid_group_detect(FG_SHADOWS) == FID_MODERN, "re-applying Modern clears it");
+    fid_apply(FID_MEDIUM);
+    int req = -1;
+    CHECK(!fid_group_tier_allowed(FG_POST, FID_MODERN, &req) && req > FID_MEDIUM, "Medium: Ultra post greyed (requires %d)", req);
+    fid_apply(FID_MODERN);
+}
+
 static void test_malformed(void) {
     char err[256];
     CHECK(!fid_load_level_text(FID_LOW, "{\"level\":\"low\",\"features\":{\"ssr2\":{\"avail\":\"no\"}}}", err, sizeof(err)) && strstr(err, "ssr2"), "unknown feature: %s", err);
@@ -354,6 +407,7 @@ int main(void) {
     test_lower_raise();
     test_levels();
     test_eras();
+    test_groups();
     test_passes();
     test_graph_check();
     test_malformed();

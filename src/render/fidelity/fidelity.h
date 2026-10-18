@@ -117,6 +117,19 @@ bool fid_user_value(int feature, float *v);
 int fid_custom_count(void);
 int fid_check_table(int level, char *report, int size);   // features whose cvar != the table's default (0 = match)
 
+// ---------------------------------------------------------------- quality groups
+// The simple options of Settings → Graphics → Normal (docs/UI.md): one quality per concept
+// (shadows, textures ...), each a set of features. Tier t of a group = every feature of the group at
+// level t's table default (this era): a sub-level of Engine Fidelity, applied through the bounds
+// like any user change (so the overall level then reads "Custom" when it differs from its own
+// defaults). A tier is selectable when the current level allows every one of its values.
+typedef enum FidGroup { FG_POST, FG_SHADOWS, FG_TEXTURES, FG_EFFECTS, FG_FOLIAGE, FG_VIEW_DISTANCE, FG_COUNT } FidGroup;
+int fid_group_features(int group, const int **features);   // count + the feature list
+const char *fid_group_id(int group);                        // "post", "shadows" ...
+bool fid_group_tier_allowed(int group, int tier, int *req_level);   // *req: lowest level allowing it (-1: not in this era)
+void fid_group_apply(int group, int tier);
+int fid_group_detect(int group);                            // the tier whose values every cvar has (the current level first, then the highest), -1 = custom
+
 // ---------------------------------------------------------------- frame graph passes
 // Scene / gameplay passes (geometry, sky, sights, phone, UI, output) vs post-processing passes.
 bool fid_pass_is_post(const char *name);
