@@ -1229,5 +1229,209 @@
    "summary": "NOT CLOSED: scope:shadow_sun 13.47 -> 13.235 (-1.74%, p=0.348); images pass; state identical",
    "machine": "DESKTOP-SN4N74U"
   }
+ },
+ "PF-0015": {
+  "title": "Classic main view instances drawn front to back from the camera",
+  "rule": "R02",
+  "finding": "Main view prepass + opaque 4 - 6 ms in the vegetation zones (audit 2026-10-18): the classic main view's instances were emitted in cell order inside each batch, so the prepass's alpha-tested leaf / grass cards behind nearer ones ran their shader before failing the depth test",
+  "effort": "S",
+  "status": "verified on DESKTOP-SN4N74U (close on the target machine)",
+  "code": [
+   "src/render/vk_classic.c emit_view_depth_order (PF-0012's light-depth ordering with the camera's clip w, log2-bucketed), cull_views / vkc_frame"
+  ],
+  "description": "The main view's instance stream is ordered like a sun cascade's (PF-0012): within each batch, 32 depth buckets nearest first, here over log2 of the camera's view depth (the clip w of the unjittered view-projection), and the batches big meshes first. The prepass's masked cards behind already written depth fail the early depth test; the lit pass at depth EQUAL runs once per kept pixel as before.",
+  "neutral": "The same instances and batches are drawn with the same pipelines and data; only the order inside the depth-tested prepass changes, which keeps the nearest fragment of every pixel whatever the order (exact depth ties between different surfaces aside, which perf_verify's image check covers). The lit pass shades at depth EQUAL exactly the surface the prepass kept. Nothing feeds the simulation.",
+  "metrics": [
+   "scope:prepass",
+   "scope:opaque",
+   "gpu_frame"
+  ],
+  "scenes": [
+   "veg_forest_pine",
+   "veg_forest_broadleaf",
+   "veg_meadow"
+  ],
+  "verification": {
+   "runs": [
+    {
+     "date": "2026-10-18",
+     "machine": "DESKTOP-SN4N74U",
+     "summary": "CLOSED: scope:prepass 1.8755 -> 1.743 (-7.06%, p=0); images pass; state identical",
+     "closed": true,
+     "timing": [
+      {
+       "metric": "scope:prepass",
+       "a_median": 1.8755,
+       "b_median": 1.743,
+       "a_mean": 2.1028,
+       "b_mean": 1.83226,
+       "delta": -0.1325,
+       "delta_pct": -7.06,
+       "p_value": 0.0,
+       "samples": [
+        1428,
+        1428
+       ],
+       "improved": true
+      },
+      {
+       "metric": "scope:opaque",
+       "a_median": 3.9995,
+       "b_median": 3.8815,
+       "a_mean": 4.44765,
+       "b_mean": 4.04329,
+       "delta": -0.118,
+       "delta_pct": -2.95,
+       "p_value": 0.0,
+       "samples": [
+        1428,
+        1428
+       ],
+       "improved": true
+      },
+      {
+       "metric": "gpu_frame",
+       "a_median": 29.405,
+       "b_median": 24.85,
+       "a_mean": 25.5479,
+       "b_mean": 23.27053,
+       "delta": -4.555,
+       "delta_pct": -15.49,
+       "p_value": 0.0,
+       "samples": [
+        1440,
+        1440
+       ],
+       "improved": true
+      }
+     ],
+     "state": "identical",
+     "images_pass": true,
+     "dir": "build/perf_out/verify/PF-0015"
+    }
+   ],
+   "summary": "CLOSED: scope:prepass 1.8755 -> 1.743 (-7.06%, p=0); images pass; state identical",
+   "machine": "DESKTOP-SN4N74U"
+  }
+ },
+ "PF-0028": {
+  "title": "Far sun cascades re-rendered every other frame, in turn",
+  "rule": "R02",
+  "finding": "R02 shadow casters in every cascade (F-b96020): the sun shadow pass (14 - 30 ms in the forest interiors at Modern, audit 2026-10-18) re-renders all four 2048^2 cascade tiles every frame; the audit estimated up to 18 ms in the far cascades 2 - 3",
+  "effort": "M",
+  "status": "verified on DESKTOP-SN4N74U (close on the target machine)",
+  "tradeoff": "With 4 cascades, cascades 2 and 3 (beyond the second split, ~30 m at Modern) are each re-rendered every r_shadow_far_interval frames (default 2: one far tile per frame) and keep their tile, matrix and bias in between. Far shadows of moving casters (wind-swayed trees, zombies) lag up to one frame at 60 fps; a cut, a settings change or a fit that moved a tenth of its radius redraws the cascade at once. Cascades 0 - 1 (the near shadows) are unchanged.",
+  "screenshots": [],
+  "code": [
+   "src/render/render.c compute_matrices (shadow_hold / shadow_redraw), the sun shadow pass (LOAD + per-tile clears when a tile is kept), cull_skin_shadow gating",
+   "src/render/vk_classic.c vkc_frame (held cascades not culled)",
+   "r_shadow_far_interval (fidelity feature shadow_far_interval, settings_audit.json)"
+  ],
+  "description": "compute_matrices decides per cascade whether it is due (frame_index phase per far cascade) or forced (no valid hold, camera cut, settings key change, centre moved > 10 % of the radius, radius changed > 2 %). A cascade not due restores the matrices, centre, radius, texel size and bias it was last drawn with; the shadow pass then loads the atlas instead of clearing it, clears only the tiles it redraws, and draws only those; the classic renderer and the skinned shadow cull skip the kept cascades.",
+  "neutral": "Not fidelity neutral (a visual trade-off): a kept tile shows its casters as they were up to interval - 1 frames earlier. The lit shaders sample it with the matrices it was drawn with, so the shadows stay in place (no swimming) and cascade selection is unchanged. Nothing feeds the simulation: the state hashes must match.",
+  "metrics": [
+   "scope:shadow_sun",
+   "scopec:shadow_sun:fs_invocations",
+   "gpu_frame",
+   "cpu_work",
+   "zone:render:prepare"
+  ],
+  "scenes": [
+   "veg_forest_pine",
+   "veg_forest_broadleaf",
+   "veg_horde_forest"
+  ],
+  "verification": {
+   "runs": [
+    {
+     "date": "2026-10-18",
+     "machine": "DESKTOP-SN4N74U",
+     "summary": "CLOSED: scope:shadow_sun 14.22 -> 12.15 (-14.56%, p=0); images pass; state identical",
+     "closed": true,
+     "timing": [
+      {
+       "metric": "scope:shadow_sun",
+       "a_median": 14.22,
+       "b_median": 12.15,
+       "a_mean": 18.18865,
+       "b_mean": 12.96075,
+       "delta": -2.07,
+       "delta_pct": -14.56,
+       "p_value": 0.0,
+       "samples": [
+        1428,
+        1428
+       ],
+       "improved": true
+      },
+      {
+       "metric": "scopec:shadow_sun:fs_invocations",
+       "a_median": 669200000.0,
+       "b_median": 593850000.0,
+       "a_mean": 757817436.97479,
+       "b_mean": 644486904.7619,
+       "delta": -75350000.0,
+       "delta_pct": -11.26,
+       "p_value": 0.0,
+       "samples": [
+        1440,
+        1440
+       ],
+       "improved": true
+      },
+      {
+       "metric": "gpu_frame",
+       "a_median": 23.12,
+       "b_median": 20.47,
+       "a_mean": 27.77764,
+       "b_mean": 21.77378,
+       "delta": -2.65,
+       "delta_pct": -11.46,
+       "p_value": 0.0,
+       "samples": [
+        1440,
+        1440
+       ],
+       "improved": true
+      },
+      {
+       "metric": "cpu_work",
+       "a_median": 4.5905,
+       "b_median": 4.32585,
+       "a_mean": 7.18857,
+       "b_mean": 6.85941,
+       "delta": -0.26465,
+       "delta_pct": -5.77,
+       "p_value": 0.0,
+       "samples": [
+        1440,
+        1440
+       ],
+       "improved": true
+      },
+      {
+       "metric": "zone:render:prepare",
+       "a_median": 1.9365,
+       "b_median": 1.815,
+       "a_mean": 1.96138,
+       "b_mean": 1.85412,
+       "delta": -0.1215,
+       "delta_pct": -6.27,
+       "p_value": 0.0,
+       "samples": [
+        1440,
+        1440
+       ],
+       "improved": true
+      }
+     ],
+     "state": "identical",
+     "images_pass": true,
+     "dir": "build/perf_out/verify/PF-0028"
+    }
+   ],
+   "summary": "CLOSED: scope:shadow_sun 14.22 -> 12.15 (-14.56%, p=0); images pass; state identical",
+   "machine": "DESKTOP-SN4N74U"
+  }
  }
 }

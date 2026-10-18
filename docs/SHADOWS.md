@@ -280,6 +280,22 @@ stalk shadows beyond 30 m (`caster_limit_wheat_1730.jpg`). Off .. Medium (mode 2
 from the old image by about the run-to-run noise: their old grass shadows already ended at 30 m in a
 2.4 cm cascade.
 
+### Far cascade staggering
+
+PF-0028 (a visual trade-off, `r_shadow_far_interval`, fidelity feature `shadow_far_interval`: default 2 at
+every level; High / Modern allow 1). With 4 cascades, cascades 2 and 3 are re-rendered every N frames,
+out of phase (at 2: one far tile per frame). In between, a far cascade keeps its atlas tile and the
+matrices, centre, radius, texel size and bias it was drawn with (`R->shadow_hold`), so its shadows stay
+where they were drawn and selection by the splits is unchanged; a receiver outside the kept box falls
+through to the next cascade as before. Forced redraws: no valid hold (first frame, the tile was inactive
+or the atlas was skip-cleared), a camera cut, a change of cascades / tile size / fit / atlas, or a fit
+whose centre moved more than a tenth of its radius (radius by 2 %). The pass loads the atlas when a
+tile is kept and clears only the tiles it redraws; the classic renderer and the skinned shadow cull skip
+kept cascades. Far shadows of moving casters (wind-swayed trees, zombies) lag up to N - 1 frames;
+cascades 0 - 1 never lag. Measured (pine / broadleaf forest, horde in the forest, Modern, 2 x A/B):
+shadow pass -14.6 %, its fragments -11 %, GPU frame -11.5 %, CPU work -5.8 %; still images pass the
+fidelity-neutral image check.
+
 ### Bias
 
 Per cascade, in metres, from its texel size t (`csm_bias`), × the low-sun factor:

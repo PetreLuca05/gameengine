@@ -399,6 +399,11 @@ typedef struct Renderer {
     vec4 shadow_bias;
     mat4 shadow_vp_moon;                        // the moon map (moon_active)
     bool shadow_active[4];                      // shadow atlas tiles drawn this frame: cascades 0..3
+    // Far cascade staggering (PF-0028, r_shadow_far_interval): a far cascade not due this frame keeps
+    // its tile and the matrices / bias it was drawn with (shadow_hold); shadow_redraw: re-rendered now.
+    bool shadow_redraw[4];
+    struct ShadowHold { bool valid; mat4 vps, vp_ndc; vec3 center; float radius, texel_m, bias, span, nbias, mpt; } shadow_hold[4];
+    u32 shadow_hold_key;                        // cascades / tile / fit / shadow image generation the holds belong to
     bool moon_active;
     // Unity-style controls (docs/SHADOWS_UNITY_MODEL.md): this frame's quality knobs, the
     // directional light's settings, its effective type / filter.
@@ -456,6 +461,7 @@ typedef struct Renderer {
     Cvar *r_shadows, *r_shadow_resolution, *r_shadow_projection, *r_shadow_cascades, *r_shadow_max_distance, *r_soft_shadow_quality;
     Cvar *r_shadow_split2, *r_shadow_split4[3], *r_shadow_border, *r_shadow_near_offset, *r_shadowmask_mode, *r_shadowmask_distance;
     Cvar *r_shadow_min_radius;
+    Cvar *r_shadow_far_interval;  // sun cascades 2..3 re-rendered every N frames, alternating (PF-0028)
     Cvar *r_shadow_caster_limit;  // classic casters: grass / small plants in the near cascades only (shadow_casters.h, PF-0013)
     Cvar *r_shadow_debug;       // sky-driven shadow views (docs/SHADOWS.md)
     Cvar *r_vm_shadow;          // the viewmodel shadow tile

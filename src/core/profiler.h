@@ -62,9 +62,11 @@ typedef enum ProfFix {
     PFX_SKIN_SHADOW_CULL,     // PF-0011: skinned shadow casters culled per sun cascade
     PFX_SHADOW_LIGHT_ORDER,   // PF-0012: classic shadow instances drawn front to back from the light
     PFX_ALPHA_MASK,           // PF-0014: shadow / prepass alpha tests sample an R8 alpha mask, not the RGBA albedo
+    PFX_VIEW_DEPTH_ORDER,     // PF-0015: classic main view instances drawn front to back from the camera
     // Visual trade-offs (not fidelity neutral: perf_verify measures them, the images differ by design):
     // perf_fix_disable "all" leaves them on, only their own id turns them off.
     PFX_SHADOW_CASTER_LIMIT,  // PF-0013: grass / small plant shadows in the near cascades only (r_shadow_caster_limit)
+    PFX_SHADOW_FAR_STAGGER,   // PF-0028: sun cascades 2..3 re-rendered every r_shadow_far_interval frames, alternating
     PFX_COUNT
 } ProfFix;
 #define PFX_TRADEOFF_FIRST PFX_SHADOW_CASTER_LIMIT
