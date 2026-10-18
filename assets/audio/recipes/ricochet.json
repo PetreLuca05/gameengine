@@ -6,6 +6,6 @@
   "layers": [
     { "patch": "ricochet", "bind": { "amp": "clamp(sqrt(energy / 1000), 0.3, 1.2)" },
       "random": { "hz": ["mul", 0.7, 1.3], "fm_dev": ["mul", 0.6, 1.4], "tumble": ["mul", 0.6, 1.6], "time": ["mul", 0.7, 1.3] } },
-    { "sample": "bullet_ricochet", "gain_db": -10, "optional": true, "pitch": [0.85, 1.15] }
+    { "sample": "bullet_ricochet", "gain_db": "5 + todb(clamp(sqrt(energy / 1000), 0.3, 1.2))", "optional": true, "pitch": [0.85, 1.15] }
   ]
 }

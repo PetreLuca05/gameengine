@@ -1,0 +1,226 @@
+{
+  "_doc": "Chapter 1 (docs/CHAPTER_01.md). Format: docs/STORY.md 'Data'. Entity / volume names refer to data/levels/story_01.json; text ids to assets/story/scripts/01.story. Lint: story_def_validate + story_script_lint (tests/test_story.c).",
+  "id": "01_tenth_floor",
+  "title": "10th Floor",
+  "map": "story_01",
+  "script": "assets/story/scripts/01.story",
+  "start": {"checkpoint": "start", "time": "05:52", "weather": "clear", "season": "spring", "inventory": []},
+  "checkpoints": ["start", "c1_phone", "c2_prepared", "c3_breaker", "c4_decision", "end"],
+
+  "roles": [
+    {"slot": 0, "id": "parent", "spawn": "spawn_bed"},
+    {"slot": 1, "id": "dana", "spawn": "spawn_hall", "replaces": ["note_dana", "voicemail_dana"]},
+    {"slot": 2, "id": "jules", "spawn": "spawn_teen", "replaces": ["note_jules", "jules_laptop"]},
+    {"slot": 3, "id": "ruth", "spawn": "spawn_10b"}
+  ],
+
+  "timeline": [
+    {"beat": "wake", "from": "05:52", "to": "06:00", "expected": 60},
+    {"beat": "phone", "from": "06:00", "to": "06:10", "expected": 90},
+    {"beat": "notes", "from": "06:10", "to": "06:45", "expected": 480},
+    {"beat": "breaker", "from": "06:50", "to": "07:00", "expected": 120},
+    {"beat": "window_setpiece", "from": "07:00", "to": "07:05", "expected": 60},
+    {"beat": "knock", "from": "07:05", "to": "07:15", "expected": 120},
+    {"beat": "first_zombie", "from": "07:15", "to": "07:25", "expected": 120},
+    {"beat": "leave", "from": "07:25", "to": "07:40", "expected": 180}
+  ],
+
+  "objectives": [
+    {"id": "wake", "text": "obj.wake", "complete_on": {"any": [{"timer": 6}, {"signal": "player_moved"}]}},
+    {"id": "phone", "text": "obj.phone", "requires": "wake", "marker": "phone_nightstand", "checkpoint": "c1_phone",
+     "complete_on": {"any": [{"signal": "phone_messages_read"}, {"timer": 120, "since": "wake"}]}},
+    {"id": "notes", "text": "obj.notes", "requires": "phone", "group": {"need": 0}, "children": [
+      {"id": "note_dana", "text": "obj.note_dana", "complete_on": {"item": "note_dana", "on": "read"}},
+      {"id": "note_jules", "text": "obj.note_jules", "complete_on": {"item": "note_jules", "on": "read"}},
+      {"id": "note_mia", "text": "obj.note_mia", "complete_on": {"any": [{"item": "note_mia_slip", "on": "read"}, {"item": "calendar", "on": "read"}]}},
+      {"id": "voicemail_dana", "text": "obj.voicemail_dana", "optional": true, "complete_on": {"signal": "voicemail_dana_played"}},
+      {"id": "jules_laptop", "text": "obj.jules_laptop", "optional": true, "hidden": true, "complete_on": {"interact": "jules_laptop"}},
+      {"id": "biscuit_collar", "text": "obj.biscuit_collar", "optional": true, "hidden": true, "complete_on": {"item": "dog_collar", "on": "pickup"}}
+    ]},
+    {"id": "supplies", "text": "obj.supplies", "requires": "phone", "children": [
+      {"id": "first_aid", "text": "obj.first_aid", "complete_on": {"any": [{"item": "medkit"}, {"item": "bandage"}]}},
+      {"id": "melee", "text": "obj.melee", "complete_on": {"any": [{"item": "knife"}, {"item": "bat"}]}},
+      {"id": "water_food", "text": "obj.water_food", "group": {"need": 2}, "children": [
+        {"id": "get_water", "text": "obj.get_water", "optional": true, "complete_on": {"item": "water_bottle"}},
+        {"id": "get_food", "text": "obj.get_food", "optional": true, "complete_on": {"item": "canned_food"}},
+        {"id": "get_snack", "text": "obj.get_snack", "optional": true, "complete_on": {"item": "energy_bar"}}
+      ]},
+      {"id": "backpack", "text": "obj.backpack", "optional": true, "complete_on": {"item": "backpack"}}
+    ]},
+    {"id": "breaker", "text": "obj.breaker", "activate": "manual", "marker": "breaker_panel", "checkpoint": "c3_breaker",
+     "complete_on": {"interact": "breaker_panel"}},
+    {"id": "window_setpiece", "text": "obj.window", "activate": "manual"},
+    {"id": "knock", "text": "obj.knock", "activate": "manual", "marker": "door_10a",
+     "complete_on": {"any": [{"interact": "peephole_10a"}, {"entity": "door_10a", "on": "opened"}]}},
+    {"id": "decide", "text": "obj.decide", "requires": "knock", "group": {"need": 1}, "checkpoint": "c4_decision", "children": [
+      {"id": "choice_open", "text": "obj.choice_open", "optional": true, "complete_on": {"any": [{"signal": "choice_open"}, {"entity": "door_10a", "on": "opened"}]}},
+      {"id": "choice_barricade", "text": "obj.choice_barricade", "optional": true, "complete_on": {"any": [{"signal": "choice_barricade"}, {"interact": "hall_cabinet"}]}}
+    ]},
+    {"id": "first_zombie", "text": "obj.first_zombie", "activate": "manual",
+     "complete_on": {"entity": "zombie_10d", "on": "killed"}},
+    {"id": "leave", "text": "obj.leave", "requires": "first_zombie", "children": [
+      {"id": "pack", "text": "obj.pack", "optional": true, "complete_on": {"signal": "pack_confirmed"}},
+      {"id": "corridor", "text": "obj.corridor", "complete_on": {"volume": "vol_corridor_10", "on": "enter"}},
+      {"id": "fire_door", "text": "obj.fire_door", "requires": "corridor", "complete_on": {"entity": "fire_door_10", "on": "opened"}},
+      {"id": "stairwell", "text": "obj.stairwell", "requires": "fire_door", "complete_on": {"volume": "vol_stair_9_5", "on": "enter"}}
+    ]}
+  ],
+
+  "collectibles": [
+    {"id": "note_dana", "kind": "document", "text": "doc.note_dana"},
+    {"id": "note_jules", "kind": "document", "text": "doc.note_jules"},
+    {"id": "note_mia_slip", "kind": "document", "text": "doc.note_mia_slip"},
+    {"id": "calendar", "kind": "document", "text": "doc.calendar"},
+    {"id": "voicemail_dana", "kind": "voicemail", "text": "vo.voicemail_dana"},
+    {"id": "jules_laptop", "kind": "message", "text": "doc.jules_laptop"},
+    {"id": "dog_collar", "kind": "item", "text": "doc.dog_collar"},
+    {"id": "rota", "kind": "document", "text": "doc.rota"},
+    {"id": "safe_code", "kind": "document", "text": "doc.safe_code"},
+    {"id": "photo_beach", "kind": "photo", "text": "photo.beach", "image": "assets/story/photos/01_beach.jpg"},
+    {"id": "photo_mia_school", "kind": "photo", "text": "photo.mia_school", "image": "assets/story/photos/01_mia_school.jpg"},
+    {"id": "photo_jules_medal", "kind": "photo", "text": "photo.jules_medal", "image": "assets/story/photos/01_jules_medal.jpg"},
+    {"id": "photo_biscuit", "kind": "photo", "text": "photo.biscuit", "image": "assets/story/photos/01_biscuit.jpg"}
+  ],
+
+  "prompts": [
+    {"id": "look", "action": "look", "text": "prompt.look", "after": "wake"},
+    {"id": "move", "action": "move", "text": "prompt.move", "after": "wake"},
+    {"id": "interact", "action": "interact", "text": "prompt.interact", "after": "wake", "until": "phone"},
+    {"id": "phone", "action": "phone", "text": "prompt.phone", "after": "phone", "until": "phone"},
+    {"id": "journal", "action": "journal", "text": "prompt.journal", "after": "notes"},
+    {"id": "inventory", "action": "inventory", "text": "prompt.inventory", "after": "supplies"},
+    {"id": "hotbar", "action": "hotbar", "text": "prompt.hotbar", "after": "supplies"},
+    {"id": "heal_wheel", "action": "heal_wheel", "text": "prompt.heal_wheel", "after": "first_aid"},
+    {"id": "melee", "action": "attack", "text": "prompt.melee", "after": "melee"},
+    {"id": "throw", "action": "throw_wheel", "text": "prompt.throw", "after": "supplies"},
+    {"id": "hold", "action": "hold_interact", "text": "prompt.hold", "after": "breaker", "until": "breaker"},
+    {"id": "peephole", "action": "interact", "text": "prompt.peephole", "after": "knock", "until": "knock"},
+    {"id": "push", "action": "push", "text": "prompt.push", "after": "decide", "until": "decide"},
+    {"id": "sprint", "action": "sprint", "text": "prompt.sprint", "after": "leave"}
+  ],
+
+  "triggers": [
+    {"id": "intro", "when": true, "do": [
+      {"fade": "in", "time": 3.0},
+      {"audio": "phone_buzz", "at": "phone_nightstand", "kind": "sfx"},
+      {"wait": 2.0},
+      {"audio": "siren_far_01", "kind": "ambient", "volume": 0.4},
+      {"subtitle": "sub.intro"}
+    ]},
+    {"id": "phone_content", "when": {"objective": "phone", "state": "active"}, "do": [
+      {"phone": "messages:01_family"},
+      {"phone": "voicemail:voicemail_dana"},
+      {"phone": "gallery:01_family_photos"},
+      {"journal": "photo_beach"}, {"journal": "photo_mia_school"}, {"journal": "photo_jules_medal"}, {"journal": "photo_biscuit"}
+    ]},
+    {"id": "reveal_laptop", "when": {"volume": "vol_teen_room", "on": "enter"}, "do": [{"objective": "jules_laptop", "set": "reveal"}]},
+    {"id": "reveal_collar", "when": {"volume": "vol_balcony", "on": "enter"}, "do": [{"objective": "biscuit_collar", "set": "reveal"}]},
+
+    {"id": "city_morning", "when": {"time": "06:20"}, "do": [{"weather": "little_cloudy", "blend": 120}, {"sequence": "traffic_build"}]},
+    {"id": "traffic_stall", "when": {"time": "06:28"}, "do": [{"sequence": "traffic_stall"}, {"audio": "horns_far", "kind": "ambient", "volume": 0.5}]},
+    {"id": "halden_flicker", "when": {"time": "06:32"}, "do": [{"sequence": "halden_flicker"}]},
+    {"id": "heli_far", "when": {"objective": "phone", "state": "done"}, "do": [{"wait": 8.0}, {"sequence": "heli_north_pass"}]},
+
+    {"id": "power_cut", "arm": [{"objective": "notes"}, {"objective": "supplies"}], "when": {"time": "06:50"}, "fallback": 20, "do": [
+      {"checkpoint": "c2_prepared"},
+      {"power": "apt_10a", "state": "flicker"},
+      {"wait": 1.5},
+      {"power": "apt_10a", "state": "off"},
+      {"audio": "power_down", "at": "breaker_panel"},
+      {"subtitle": "sub.power_cut"},
+      {"wait": 2.0},
+      {"objective": "breaker", "set": "active"}
+    ]},
+    {"id": "power_restore", "when": {"objective": "breaker"}, "do": [
+      {"power": "apt_10a", "state": "on"},
+      {"audio": "vo.broadcast_emergency", "at": "tv_living", "kind": "vo"},
+      {"subtitle": "vo.broadcast_emergency"},
+      {"wait": 4.0},
+      {"objective": "window_setpiece", "set": "active"},
+      {"wait": 116.0},
+      {"power": "apt_10a", "state": "off"},
+      {"sequence": "district_blackout"}
+    ]},
+    {"id": "setpiece", "arm": {"objective": "window_setpiece", "state": "active"}, "when": {"volume": "vol_glass_rooms"}, "fallback": 60, "do": [
+      {"camhint": "heli_crash_anchor", "strength": 0.35, "time": 2.0},
+      {"sequence": "heli_crash"},
+      {"wait": 5.2},
+      {"audio": "explosion_far_01", "at": "heli_crash_anchor", "volume": 1.0},
+      {"sequence": "birds_scatter"},
+      {"audio": "sirens_swell", "kind": "ambient", "volume": 0.8},
+      {"wait": 6.0},
+      {"subtitle": "sub.setpiece"},
+      {"objective": "window_setpiece", "set": "done"},
+      {"wait": 20.0},
+      {"weather": "smoke_haze", "blend": 120},
+      {"sequence": "smoke_aldric"}
+    ]},
+    {"id": "knock_start", "when": {"timer": 25, "since": "window_setpiece"}, "do": [
+      {"objective": "knock", "set": "active"},
+      {"audio": "knock_door", "at": "door_10a"},
+      {"audio": "vo.ruth_knock", "at": "door_10a", "kind": "vo"},
+      {"subtitle": "vo.ruth_knock"}
+    ]},
+    {"id": "knock_again", "arm": {"objective": "knock", "state": "active"}, "when": false, "fallback": 30, "do": [
+      {"audio": "knock_door", "at": "door_10a"},
+      {"audio": "vo.ruth_knock_2", "at": "door_10a", "kind": "vo"},
+      {"subtitle": "vo.ruth_knock_2"}
+    ]},
+    {"id": "knock_timeout", "arm": {"objective": "knock", "state": "active"}, "when": false, "fallback": 75, "do": [{"objective": "knock", "set": "done"}]},
+
+    {"id": "decide_timeout", "arm": {"objective": "decide", "state": "active"}, "when": false, "fallback": 90, "do": [
+      {"objective": "choice_barricade", "set": "done"}
+    ]},
+    {"id": "branch_open", "when": {"objective": "choice_open"}, "do": [
+      {"disable": "branch_barricade"},
+      {"flag": "ruth_inside", "value": 1},
+      {"audio": "vo.ruth_inside", "at": "door_10a", "kind": "vo"},
+      {"subtitle": "vo.ruth_inside"},
+      {"wait": 12.0},
+      {"door": "door_10a", "state": "open"},
+      {"audio": "vo.ruth_scream", "at": "corridor_mid", "kind": "vo"},
+      {"subtitle": "vo.ruth_scream"},
+      {"spawn": "zombie_10d", "character": "zombie_walker"},
+      {"objective": "first_zombie", "set": "active"},
+      {"marker": "zombie_10d", "label": "first_zombie", "on": true}
+    ]},
+    {"id": "branch_barricade", "when": {"objective": "choice_barricade"}, "do": [
+      {"disable": "branch_open"},
+      {"flag": "barricaded", "value": 1},
+      {"audio": "vo.ruth_pleads", "at": "door_10a", "kind": "vo"},
+      {"subtitle": "vo.ruth_pleads"},
+      {"wait": 10.0},
+      {"audio": "vo.ruth_scream", "at": "corridor_mid", "kind": "vo"},
+      {"subtitle": "vo.ruth_scream"},
+      {"spawn": "zombie_10d", "character": "zombie_walker"},
+      {"audio": "door_bang_loop", "at": "door_10a"},
+      {"wait": 90.0},
+      {"door": "door_10a", "state": "slam"},
+      {"despawn": "hall_cabinet_barricade"},
+      {"objective": "first_zombie", "set": "active"},
+      {"marker": "zombie_10d", "label": "first_zombie", "on": true}
+    ]},
+    {"id": "after_zombie", "when": {"objective": "first_zombie"}, "do": [
+      {"marker": "zombie_10d", "on": false},
+      {"wait": 3.0},
+      {"audio": "fire_alarm", "at": "corridor_mid", "kind": "sfx"},
+      {"sequence": "lift_smoke"},
+      {"sequence": "city_fires"},
+      {"subtitle": "sub.leave"},
+      {"unlock": "fire_door_10"}
+    ]},
+    {"id": "chapter_end", "when": {"objective": "leave"}, "do": [
+      {"sequence": "stair_eye_screams"},
+      {"wait": 4.0},
+      {"audio": "heli_overhead", "kind": "ambient", "volume": 0.9},
+      {"camhint": "stair_up", "strength": 0.5, "time": 2.5},
+      {"wait": 3.0},
+      {"subtitle": "sub.the_roof"},
+      {"wait": 2.5},
+      {"fade": "out", "time": 2.5},
+      {"wait": 2.5},
+      {"checkpoint": "end"},
+      {"end_chapter": true}
+    ]}
+  ]
+}

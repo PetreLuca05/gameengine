@@ -47,7 +47,7 @@ typedef struct SynNodeDef {
 } SynNodeDef;
 
 typedef struct SynPatch {
-    char name[32];
+    char name[48];
     int nnodes;
     SynNodeDef nodes[SYN_MAX_NODES];
     u8 order[SYN_MAX_NODES];     // execution order (dependencies first)

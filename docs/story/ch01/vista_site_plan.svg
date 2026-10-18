@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="1100" font-family="Segoe UI,Arial" font-size="12">
+<rect width="100%" height="100%" fill="#f4f1ea"/>
+<circle cx="550.0" cy="550.0" r="65.47619047619048" fill="none" stroke="#c96" stroke-dasharray="6 4"/>
+<text x="554.0" y="480.5238095238095" fill="#c96">near: real kit geometry 0–500 m</text>
+<circle cx="550.0" cy="550.0" r="196.42857142857144" fill="none" stroke="#69c" stroke-dasharray="6 4"/>
+<text x="554.0" y="349.57142857142856" fill="#69c">mid: vgeo + impostors to 1.5 km (zfar)</text>
+<circle cx="550.0" cy="550.0" r="523.8095238095239" fill="none" stroke="#999" stroke-dasharray="6 4"/>
+<text x="554.0" y="22.190476190476147" fill="#999">far: vista layer 1.5–8 km</text>
+<polyline points="432,550 477,508 516,491 550,488 579,488 615,495 661,510 732,524 838,540" fill="none" stroke="#5b8fc7" stroke-width="22" stroke-opacity="0.7"/>
+<text x="515.952380952381" y="475.02779393277393" fill="#2a5f9e" font-weight="bold">river (bridges at −10° and 35°)</text>
+<rect x="534.857575266372" y="462.80816918171666" width="8" height="48" fill="#555" transform="rotate(-10 538.857575266372 486.80816918171666)"/>
+<rect x="588.0622719990768" y="465.9288500854739" width="8" height="48" fill="#555" transform="rotate(35 592.0622719990768 489.9288500854739)"/>
+<ellipse cx="557.2766855403285" cy="508.73186558805986" rx="40" ry="20" fill="#8bb874"/>
+<text x="557.2766855403285" y="512.7318655880599" text-anchor="middle" fill="#355">park</text>
+<circle cx="685.2525216597447" cy="295.62700300969004" r="4.6" fill="#1f6fb0" fill-opacity="0.75"/>
+<text x="693.2525216597447" y="299.62700300969004" fill="#1f6fb0">glass spire (Meridian Needle) · 28° · 2.20 km · 310 m</text>
+<circle cx="533.5473801259639" cy="78.85861011956911" r="24.9" fill="#444" fill-opacity="0.75"/>
+<text x="541.5473801259639" y="82.85861011956911" fill="#444">financial cluster · -2° · 3.60 km · 230 m</text>
+<circle cx="596.6840660978169" cy="543.4389823833112" r="4.0" fill="#444" fill-opacity="0.75"/>
+<text x="604.6840660978169" y="547.4389823833112" fill="#444">Halden Tower (flickers) · 82° · 0.36 km · 95 m</text>
+<circle cx="717.6018899543933" cy="393.7087091523441" r="9.2" fill="#b33" fill-opacity="0.75"/>
+<text x="725.6018899543933" y="397.7087091523441" fill="#b33">St. Aldric Hospital (smoke origin) · 47° · 1.75 km · 45 m</text>
+<circle cx="578.5122234099608" cy="435.6437179746147" r="4.0" fill="#e0a000" fill-opacity="0.75"/>
+<text x="586.5122234099608" y="439.6437179746147" fill="#e0a000">crane A · 14° · 0.90 km · 85 m</text>
+<circle cx="710.3469463088892" cy="461.1182362881715" r="4.0" fill="#e0a000" fill-opacity="0.75"/>
+<text x="718.3469463088892" y="465.1182362881715" fill="#e0a000">crane B · 61° · 1.40 km · 95 m</text>
+<circle cx="862.1850417608349" cy="715.9917311278685" r="17.0" fill="#444" fill-opacity="0.75"/>
+<text x="870.1850417608349" y="719.9917311278685" fill="#444">stadium stub · 118° · 2.70 km · 40 m</text>
+<circle cx="869.9429637437736" cy="433.55028453435557" r="10.5" fill="#444" fill-opacity="0.75"/>
+<text x="877.9429637437736" y="437.55028453435557" fill="#444">modern towers E · 70° · 2.60 km · 150 m</text>
+<path d="M395.24449595522447,522.712429223768 Q550.0,458.3333333333333 684.6793086962273,389.4954500131665" fill="none" stroke="#a0a" stroke-dasharray="4 3" stroke-width="2"/>
+<text x="654.6793086962273" y="377.4954500131665" fill="#a0a">helicopter → crash (beat 5)</text>
+<line x1="550.0" y1="550.0" x2="366.3677563810993" y2="45.47455717328012" stroke="#e07020" stroke-opacity="0.6"/>
+<line x1="550.0" y1="550.0" x2="1054.5254428267199" y2="366.36775638109924" stroke="#e07020" stroke-opacity="0.6"/>
+<text x="605.9699647117474" y="307.56744816653077" fill="#e07020" font-weight="bold">sofa frame (yaw 25°)</text>
+<line x1="550.0" y1="550.0" x2="456.76746651454096" y2="21.252027847016848" stroke="#8040c0" stroke-opacity="0.6"/>
+<line x1="550.0" y1="550.0" x2="1078.747972152983" y2="456.76746651454096" stroke="#8040c0" stroke-opacity="0.6"/>
+<text x="677.9179289697028" y="248.64424440545105" fill="#8040c0" font-weight="bold">balcony frame (yaw 35°)</text>
+<rect x="545.0" y="545.0" width="10" height="10" fill="#000"/><text x="558.0" y="568.0" font-weight="bold">our tower (16 storeys, unit 10A NE corner)</text>
+<text x="550.0" y="24" text-anchor="middle" font-weight="bold" font-size="16">Vista site plan: N up, rings at 0.5 / 1.5 / 4 km</text>
+</svg>

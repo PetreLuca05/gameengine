@@ -33,6 +33,7 @@ samples.
 | Game glue: rays, foliage, listener state, footsteps, zombie calls, `audio_debug` | `src/game/game_audio.c` |
 | Recipe editor, environment preview | `src/ui/audio_editor.c` |
 | Data | `assets/audio/patches/*.json`, `assets/audio/recipes/*.json`, `assets/audio/events.json`, `assets/audio/materials.json` |
+| Recorded CC0 takes: manifest, importer, credits | `assets/audio/sample_sources.json`, `tools/audio_import/import_samples.py`, `assets/sounds/<name>_<n>.ogg`, `assets/sounds/CREDITS.md` |
 
 ## Synth graph
 
@@ -136,6 +137,10 @@ Recipe fields:
 
 Layer fields:
 - `"sample": "name"`: a fixed sample.
+- `"sample": ["a", "b", …]` + `"sample_sel": "expr"`: one name per value of the expression (rounded,
+  clamped; up to 24; `""` plays nothing), e.g. the footstep's recording per ground material.
+- Any sample name, fixed or `@`, with recorded takes `<name>_1 .. <name>_N` (≤ 16) plays one take
+  per seed (see "Recorded samples").
 - `"sample": "@"` or `"@_suffix"`: the event's sample name, plus the suffix (a weapon's
   `sound_fire`, its `_distant` variant).
 - `when`: an expression; the layer plays when it is > 0.5 at emit.
@@ -153,7 +158,7 @@ Expressions: `+ - * / % ^`, comparisons, `&& || !`, `c ? a : b`, and these funct
 - `lerp(x, x0, y0, x1, y1)` (clamped), `clamp`, `min`, `max`, `abs`, `sqrt`, `cbrt`, `pow`, `exp`,
   `log`, `log10`;
 - `db(dB)` (to linear), `todb(g)`, `step`, `floor`;
-- `sel(i, a, b, …)` (up to 23 choices);
+- `sel(i, a, b, …)` (up to 23 choices; equal constants share a slot, so a table may repeat values);
 - `mat_contact(m)`, `mat_noise(m)`, `mat_noise_hz(m)`, `mat_modes(m)`, `mat_hard(m)`: material table
   lookups.
 
@@ -166,6 +171,38 @@ loop's values change (`audio_voice_params`, `audio_loop_recipe`).
 `EV_SOUND`) to a recipe with fixed inputs. Values the caller passes win. A name not listed plays its
 sample through the same chain, so every sound gets distance, air, occlusion and rooms.
 `snd_procedural 0` plays only the samples.
+
+### Recorded samples
+
+The recipes' sample layers play real recordings: CC0 takes listed in
+`assets/audio/sample_sources.json`, imported by `tools/audio_import/import_samples.py` into
+`assets/sounds/<name>_<n>.ogg`, credited in `assets/sounds/CREDITS.md`.
+
+Source: the [CC0-Public-Domain-Sounds](https://github.com/lavenderdotpet/CC0-Public-Domain-Sounds)
+mirror at a pinned commit. It includes Kenney's Impact Sounds, OpenGameArt CC0 packs (breaking /
+falling / hits, wood and metal, water, mud, creatures) and Warfork's CC0 assets.
+
+| Takes | Played by |
+|---|---|
+| `footstep_{hard,wood,grass,snow,carpet,metal,mud}` | `footstep` (`sample_sel: material`; dirt, sand, gravel and wading stay synthesized) |
+| `impact_{hard,metal,wood,glass,water,flesh,plate_ring}`, `melee_hit(_wall)`, `shard_glass`, `debris_{hard,soft}` | `impact` and the VFX effects' `@` sample |
+| `zombie_{groan,growl,scream,attack}` | `zombie_voice` (`sample_sel: call`, pitched by the zombie's voice) |
+| `bullet_ricochet`, `rain_loop`, `hurt`, `door_{open,close,slam}` | their recipes / legacy names |
+
+- **Import** (per file): mono 48 kHz, high-pass, the leading silence trimmed, the tail cut at
+  −55 dB or `max_s`, duplicates dropped. Per set, every take is scaled to the same loudness (the
+  loudest 50 ms at −14 dBFS) and kept under −1 dBFS. Loops get an equal-power crossfade.
+- **Re-import:** `import_samples.py --fetch DIR` (clone) or `--src DIR`, then rebuild.
+  `--check` (ctest `audio_takes`) verifies that every set has its takes and credits.
+- **Hybrid balance:** each recording sits about level with its synthesized layers, measured with
+  `audio_render` against `--no-samples`. The zombie takes sit ~3 dB under. Impact takes follow
+  the energy (`todb(sqrt(energy / 400))`) and a per-material offset.
+- **Loading:** `audio.c` decodes every take named in the manifest at library load, so none
+  decodes mid-game. A name with takes ignores its old single file (the `gen_assets.py`
+  placeholder).
+- **Still placeholders:** the gunshots (`shot_*`). No CC0 firearm recordings were reachable from
+  the build machine; *The Free Firearm Sound Library* (CC0, OpenGameArt) is the candidate. Add it
+  to the manifest when it can be fetched.
 
 ## Sound families
 
@@ -327,6 +364,9 @@ The listener state (`game_audio_frame`) feeds the world-bus filter:
 - the gunshot is bit-identical per seed and varies across seeds; its level and low end grow with
   energy; the suppressor is quieter and darker, a brake brighter, a hider darker; the `@` sample
   layer plays;
+- recorded takes: counted, the same take per seed, every take picked; a name without takes plays
+  itself; `sample_sel` picks a list entry (`""` and past the end play nothing); a list with no
+  sample at all is dropped;
 - the mixer: start delay = d / c to the sample; finished voices free their slots; stealing by
   score; stop fades; **no allocation in `mixer_render`**;
 - hostile parameters stay finite, and there are no denormals after 20 s of decay;
@@ -356,7 +396,9 @@ The listener state (`game_audio_frame`) feeds the world-bus filter:
 - in the game: corridor and tiled-room estimates within 20 %;
 - the cliff echo at the pad;
 - every family plays;
-- a footstep on a floor strip is not occluded.
+- a footstep on a floor strip is not occluded;
+- the recorded takes load (> 100), and footsteps, impacts, zombies and ricochets play them (`snd_trace`
+  lists each voice's samples).
 
 ## Tuning guide
 

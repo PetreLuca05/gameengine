@@ -90,8 +90,9 @@ static int list_json(const char *dir, char names[][64], int max) {
 
 // ------------------------------------------------------------------ fake sample bank
 
-#define NSAMPLES 4
-static const char *k_sample_names[NSAMPLES] = { "shot_rifle", "bullet_crack_1", "bullet_whizz", "engine_loop" };
+#define NSAMPLES 10
+static const char *k_sample_names[NSAMPLES] = { "shot_rifle", "bullet_crack_1", "bullet_whizz", "engine_loop",
+                                                "tk_1", "tk_2", "tk_3", "solo", "mat_a_1", "mat_b" };
 static float *g_sample_data[NSAMPLES];
 static int g_sample_frames[NSAMPLES];
 static SynSampleBank g_bank = { (const float *const *)g_sample_data, g_sample_frames, NSAMPLES };
@@ -564,6 +565,46 @@ static void test_recipes(void) {
     CHECK(r < 0 && strstr(err, "zz"), "an expression with an unknown input fails (%s)", err);
 }
 
+// Recorded takes (<name>_1 .. _N, one per seed) and sample lists picked by an expression.
+static const char *layer_patch(const SynRecipe *r, const char *in, float v, u32 seed) {
+    float inputs[RCP_MAX_INPUTS];
+    for (int i = 0; i < r->ninputs; i++) inputs[i] = r->input_def[i];
+    inputs[syn_recipe_input(r, in)] = v;
+    SynRecipeOut o;
+    syn_recipe_eval(&g_lib, r, inputs, seed, NULL, &o);
+    return o.layer[0].patch ? o.layer[0].patch->name : "";
+}
+
+static void test_takes(void) {
+    CHECK(syn_lib_sample_variants(&g_lib, "tk") == 3 && syn_lib_sample_variants(&g_lib, "solo") == 0, "takes counted (tk: %d, solo: %d)",
+          syn_lib_sample_variants(&g_lib, "tk"), syn_lib_sample_variants(&g_lib, "solo"));
+    int seen[3] = { 0, 0, 0 };
+    bool stable = true;
+    for (u32 s = 0; s < 64; s++) {
+        int a = syn_lib_sample_pick(&g_lib, "tk", s, false), b = syn_lib_sample_pick(&g_lib, "tk", s, false);
+        stable = stable && a >= 0 && a == b;
+        if (a < 0) continue;
+        const char *n = g_lib.patch[a]->name;
+        int k = n[strlen(n) - 1] - '1';
+        if (!strncmp(n, "sample:tk_", 10) && k >= 0 && k < 3) seen[k]++;
+    }
+    CHECK(stable && seen[0] && seen[1] && seen[2], "a seed keeps its take, every take plays (%d / %d / %d of 64)", seen[0], seen[1], seen[2]);
+    int solo = syn_lib_sample_pick(&g_lib, "solo", 5, false);
+    CHECK(solo >= 0 && !strcmp(g_lib.patch[solo]->name, "sample:solo") && syn_lib_sample_pick(&g_lib, "nothing", 5, false) < 0,
+          "a name without takes plays itself; a missing one nothing");
+    char err[256];
+    int ri = syn_lib_add_recipe(&g_lib, "{\"name\":\"takes_t\",\"inputs\":{\"m\":0},\"layers\":[{\"sample\":[\"mat_a\",\"mat_b\",\"\"],\"sample_sel\":\"m\"}]}", err, sizeof(err));
+    CHECK(ri >= 0, "a sample list recipe loads (%s)", ri >= 0 ? "ok" : err);
+    if (ri >= 0) {
+        const SynRecipe *r = g_lib.recipe[ri];
+        CHECK(!strcmp(layer_patch(r, "m", 0, 1), "sample:mat_a_1") && !strcmp(layer_patch(r, "m", 1, 1), "sample:mat_b") &&
+                  !layer_patch(r, "m", 2, 1)[0] && !layer_patch(r, "m", 9, 1)[0],
+              "sample_sel picks the list entry (takes or the file; \"\" and past the end: nothing)");
+    }
+    ri = syn_lib_add_recipe(&g_lib, "{\"name\":\"takes_none\",\"layers\":[{\"sample\":[\"zz\",\"yy\"]}]}", err, sizeof(err));
+    CHECK(ri < 0, "a list with no sample at all is dropped (%s)", err);
+}
+
 // ------------------------------------------------------------------ mixer
 
 static void test_mixer(void) {
@@ -872,6 +913,7 @@ int main(void) {
     test_expressions();
     test_library();
     test_recipes();
+    test_takes();
     test_mixer();
     test_numeric();
     test_zipper();

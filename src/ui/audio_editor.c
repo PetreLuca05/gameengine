@@ -26,7 +26,7 @@ static struct {
     float inputs[RCP_MAX_INPUTS];
     int inputs_for;                      // recipe the inputs belong to
     int seed;
-    bool random_seed, flat;
+    nk_bool random_seed, flat;   // nuklear checkboxes
     char sample[40];
     // live patch edits: the layer whose nodes are shown
     int layer;
@@ -42,7 +42,7 @@ static struct {
     // environment preview
     float dist, azim, facing, thick, detour, room[3], reflector, humidity, temp, rain, wind;
     int walls, wall_mat, room_mat, refl_mat;
-    bool indoor;
+    nk_bool indoor;
     float out_gain_db, out_lp, out_band[3], out_delay, out_rt60, out_echo;
 } E = { .recipe = -1, .inputs_for = -1, .seed = 1, .work_for = -1, .dist = 30, .thick = 0.2f, .room = { 8, 3, 6 }, .humidity = 60, .temp = 15,
         .wall_mat = SYN_MAT_CONCRETE, .room_mat = SYN_MAT_PLASTER, .refl_mat = SYN_MAT_CONCRETE };
@@ -236,6 +236,11 @@ static bool save_patch(const SynPatch *p) {
 static void patch_rows(struct nk_context *ctx, SynLibrary *lib, const SynRecipe *r) {
     if (E.layer >= r->nlayers) E.layer = 0;
     const SynLayer *ly = &r->layer[E.layer];
+    if (ly->nsamples) {
+        nk_layout_row_dynamic(ctx, S(18), 1);
+        nk_labelf(ctx, NK_TEXT_LEFT, "(sample layer: %s%s, recorded takes picked per seed)", ly->sample[0], ly->nsamples > 1 ? " ..." : "");
+        return;
+    }
     if (ly->dyn || ly->patch < 0) { nk_layout_row_dynamic(ctx, S(18), 1); nk_label(ctx, "(sample layer: the event's sample)", NK_TEXT_LEFT); return; }
     if (E.work_for != ly->patch) { E.work = *lib->patch[ly->patch]; E.work_for = ly->patch; }
     SynPatch *p = &E.work;
@@ -319,7 +324,7 @@ static void recipe_editor(struct nk_context *ctx, SynLibrary *lib) {
     static char lnb[RCP_MAX_LAYERS][48];
     for (int i = 0; i < r->nlayers; i++) {
         const SynLayer *l = &r->layer[i];
-        snprintf(lnb[i], sizeof(lnb[i]), "%d: %s%s", i, l->dyn ? "@sample" : (l->patch >= 0 ? lib->patch[l->patch]->name : "?"), l->optional ? " (optional)" : "");
+        snprintf(lnb[i], sizeof(lnb[i]), "%d: %s%s", i, l->dyn ? "@sample" : l->nsamples ? l->sample[0] : (l->patch >= 0 ? lib->patch[l->patch]->name : "?"), l->optional ? " (optional)" : "");
         ln[i] = lnb[i];
     }
     nk_layout_row_dynamic(ctx, S(24), 1);

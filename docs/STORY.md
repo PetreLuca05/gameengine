@@ -1,0 +1,292 @@
+# Story mode
+
+**Status:** milestone 1 (the pure story core) is built: `src/story/story_{def,sim,script,save,bot}.c`, ctest `story`
+(`tests/test_story.c`), and Chapter 1's data (`assets/story/chapters/01_tenth_floor.json`, `assets/story/scripts/01.story`).
+Milestones 2–10 (§8) are still to build. This is the reusable framework for hand-authored chapters. The first chapter is docs/CHAPTER_01.md, and its levels are built from docs/BUILDING_KIT.md.
+
+## 1. Engine audit (what exists vs. what story mode needs)
+
+| Need | Exists today | Gap → plan |
+|---|---|---|
+| Objectives, triggers, scripted events, checkpoints, subtitles, journal | Nothing. The closest are `post_volumes`, `ev_hint` (64-char text, 4 s), named entities + lever→target links, and `scene_register` hooks. | New `src/story/`. |
+| Save / Continue | `profile.last_session[64]` is never written. Continue just hosts a lobby (`mm_play.c:150-156`). | Story saves + a real Continue. |
+| Level geometry | `brushes`, `vgeo` grid instancing (64 entries), `prop` = dynamic bodies, models capped at 64 | The kit instancing path (docs/BUILDING_KIT.md §5). |
+| Interactables | `InteractDef`: door, lever, switch (→ light groups), container (explicit loot), pickup, bench. A hold + timed ring exists. Hand-pose cases are auto-stubbed per def (`hp_discover.c`). | New defs: drawer, cabinet, appliance, tap, tv/radio, blinds, curtain, breaker, peephole, push-prop, note, phone-dock. Each gets a hand-pose case stub on the next scan. |
+| Phone | Apps: portal / home / camera / gallery (scans the screenshots folder). No Messages app. | A `Messages` app with scripted threads, a voicemail stub, and gallery injection of story photos (a public `phone_gallery_add` wrapper). |
+| HUD | Hints, compass (pings + teammates), wheels, timed ring | Objective line, compass objective marker, onboarding prompt card, subtitles, a journal tab in the pause menu. |
+| Time / weather | `time_set`, `time_scale`, `weather_set <preset> [s]`, sunrise hooks; all host-side and replicated | The story drives the clock directly (`time_scale 0` + set per tick) for determinism. A new `smoke_haze` preset. |
+| Interior light | One global sky env map + SH, no probes, no indoor sky occlusion. Glass is alpha-blend (`MAT_GLASS` Fresnel tint), writes no depth and casts no shadow. SSR is screen-space only. | §6 Rendering. |
+| Distant city | zfar 1500 m. Aerial perspective froxels to 3 km. Impostors exist (upper hemisphere). | A vista layer (§6). |
+| Audio | `audio_play` / `audio_play_2d` (voice category), replicated `ev_sound` (SFX only). Rooms are probed automatically (no authored zones). | A replicated `EV_STORY_AUDIO` with category; a VO stub; the city ambience bus. |
+| Zombies | `spawn_zombie`, `horde_spawn_at`, level `zombie` entity | Story actions call them. |
+
+## 2. Co-op decision
+
+**Story mode is single-player or host-authoritative co-op with 1–4 players.** It uses the existing listen-server path (`game_host_ex`). Solo is the same code with nobody connected (`GH_NO_AUTOHOST`), so there is one path to test.
+
+Roles are fixed per chapter. In Chapter 1:
+
+| Slot | Role | Spawn | Solo behaviour |
+|---|---|---|---|
+| 1 (host) | **You**, the parent | master bed | always present |
+| 2 | **Dana**, the partner, home early from a cancelled shift | hall, beat 1 | absent: their note and voicemail are the story |
+| 3 | **Jules**, the teen; practice was cancelled, they never left | teen room | absent: note + unsent text |
+| 4 | **Ruth Okafor** (10B) | locked in 10B until the knock beat. Their own mini-objectives inside 10B (barricade, find pills) keep them busy. | NPC voice through the door |
+
+Why:
+- The family of four includes an 8-year-old. Making a young child a playable melee combatant is a tone problem for a domestic-realism opening, and their absence is the series' emotional hook. So **Mia is never playable**.
+- Slot 4 goes to the neighbour, whose beat already exists. Ruth is the one person outside who becomes an insider.
+- Each role swaps its "absent" content (a note, a text) for a presence variant. The objective `notes` then counts the notes of absent members only, and is auto-satisfied for present ones. `story` JSON declares `roles[].replaces` for this.
+
+Authority and replication:
+- The host owns all story state: objectives, triggers, timers, the clock and checkpoints.
+- Clients receive:
+  - Reliable `GameEvent`s: `EV_STORY_OBJECTIVE`, `EV_STORY_SUBTITLE`, `EV_STORY_JOURNAL`, `EV_STORY_FADE`, `EV_STORY_CAMHINT`, `EV_STORY_PROMPT`, `EV_STORY_AUDIO`.
+  - World state through the existing entity snapshots.
+- Event text is a **string id**, never raw text. Clients resolve ids from their local `.story` script, which avoids the 64-char limit and makes localisation possible.
+- On join-in-progress the host sends a full `EV_STORY_SYNC` blob.
+- Interaction requests go through the existing RPC path. Any player can complete any objective.
+- **Protocol bump** to `DG_PROTOCOL_VERSION 26` (new events + phone app enum).
+
+## 3. Data
+
+### Chapter JSON: `assets/story/chapters/<id>.json`
+
+```json
+{
+  "id": "01_tenth_floor", "title": "10th Floor", "map": "story_01", "script": "assets/story/scripts/01.story",
+  "start": {"checkpoint": "start", "time": "05:52", "weather": "clear", "season": "spring", "inventory": []},
+  "roles": [{"slot": 0, "id": "parent", "spawn": "spawn_bed"},
+            {"slot": 1, "id": "dana", "spawn": "spawn_hall", "replaces": ["note_dana", "voicemail_dana"]}],
+  "timeline": [{"beat": "wake", "from": "05:52", "to": "06:00"}],
+  "objectives": [
+    {"id": "notes", "text": "obj.notes", "requires": ["phone"], "group": {"need": "all"}, "children": [
+      {"id": "note_dana", "text": "obj.note_dana", "complete_on": {"item_read": "note_dana"}},
+      {"id": "voicemail_dana", "optional": true}]},
+    {"id": "jules_laptop", "hidden": true}
+  ],
+  "triggers": [
+    {"id": "setpiece", "when": {"all": [{"objective": "breaker", "state": "done"}, {"volume": "vol_ldk_or_glass"}]},
+     "fallback": {"after": 60}, "once": true,
+     "do": [{"sequence": "heli_crash"}, {"weather": "little_cloudy", "blend": 30}, {"objective": "window_setpiece", "set": "done"}]}
+  ],
+  "checkpoints": ["start", "c1_phone", "c2_prepared", "c3_breaker", "c4_decision", "end"],
+  "prompts": [{"id": "move", "action": "move", "text": "prompt.move", "after": "wake", "until_done": true}],
+  "collectibles": [{"id": "note_dana", "kind": "document", "text": "doc.note_dana"},
+                   {"id": "photo_beach", "kind": "photo", "image": "assets/story/photos/beach.jpg"}]
+}
+```
+
+**Triggers.** A trigger fires on any of these:
+- `volume` (named box/OBB in the level, enter / exit / inside, any or all players)
+- `interact` (entity name)
+- `timer` (after N s, from an event)
+- `time` (story clock ≥)
+- `item` (picked up / used / read)
+- `objective` (state)
+- `entity` (killed / opened)
+- `flag`
+- `random` (seeded)
+
+Combine conditions with `all` / `any` / `not`. Options: `once`, `cooldown` and `fallback`.
+
+**Actions.** Actions run in a sequence and may be delayed (`wait`). Available actions:
+- `spawn` / `despawn`
+- `audio` (2D, 3D or VO, with a subtitle id)
+- `subtitle`
+- `weather` (+ blend)
+- `time`
+- `unlock` / `lock`
+- `give` / `take`
+- `objective` (activate / complete / fail / reveal)
+- `marker` (compass + world)
+- `camhint` (look-at with strength, never forced)
+- `fade`
+- `power` (a group on/off/flicker)
+- `light`
+- `door` (open/close/slam)
+- `sequence` (a named vista or VFX sequence)
+- `prompt`
+- `flag`
+- `checkpoint`
+- `end_chapter`
+
+**Evaluation rules** (`src/story/story_sim.c`, one `story_tick` per simulation tick, host only):
+- Order per tick:
+  1. Queued events are recorded.
+  2. Running sequences resume (`wait` counts down).
+  3. Objectives propagate.
+  4. Triggers are evaluated in file order. A trigger that fires runs its actions up to the first `wait` immediately, and later triggers in the same tick see the new objective states.
+  5. The clock advances.
+- Event conditions (`volume` enter / exit, `interact`, `item` pickup / use / read, `entity`, `signal`) are true only on the tick the event arrives, except with `"ever": true`.
+  - `ever` is the default inside an objective's `complete_on` / `fail_on`, so a note read before its objective was active still counts.
+  - `volume` inside and `item` has are queries (`StoryView`).
+- `arm` (optional) must hold once before `when` is checked. `fallback: N` fires N s after arming, even if `when` never holds.
+- `once` defaults to true. Repeatable triggers need a `cooldown` and cannot `wait`.
+- `"when": false` plus a fallback is a plain timer after arming.
+- `"activate": "manual"` objectives activate only through an `{"objective": id, "set": "active"}` action. They are for scripted beats whose HUD line must wait for an event (the breaker after the power cut, "Survive" after the zombie spawns).
+- `"timer": N, "since": <objective | trigger>` counts from that objective's completion or that trigger's last fire.
+
+**The beat clock.** The current beat is the last `timeline` entry whose objective is active or done.
+- Below the beat's window, the clock catches up at 2 clock-minutes per second.
+- Inside the window, it moves at `(to - from) / expected` and holds at `to`.
+- A `time` action with a `blend` overrides this until it arrives.
+- `story_time` sets the clock directly.
+
+**Objectives:**
+- States are `inactive → active → done | failed`.
+- `requires` edges make a DAG. The loader rejects cycles and unreachable required nodes.
+- Group objectives use `need: all | N`.
+- `optional` and `hidden` flags are supported.
+- A group of only optional children (`need: N`) shows as the HUD leaf itself; this is how decisions are modelled (`decide` in Chapter 1).
+- Roles complete their `replaces` objectives while that role is played (`by_role`).
+- The HUD objective line shows the deepest active required leaf. The compass shows a `marker` per active objective that has one, and players can ping it (`PING_GO` reuses the existing ping visuals).
+
+### Narrative script: `assets/story/scripts/*.story` (Markdown-like)
+
+```
+# 01 · 10th Floor
+
+## obj.notes
+Find what your family left.
+
+## doc.note_dana  [document · "Dana's note"]
+> Called in — ER is overflowing, something going round.
+> Back after the shift. Kiss the kids. — D
+> 23:40
+
+## vo.ruth_knock  [voice · Ruth · 10B · door]
+RUTH: (knocking) Hello? It's Ruth, from next door —
+RUTH: The phones are dead. Is anyone — please.
+```
+
+- `##` headings are string ids. The `[kind · title · speaker · filter]` tags are metadata.
+- `NAME:` lines become subtitle cues: their timing comes from the VO stub length, or from 60 ms per character when there is no audio.
+- `>` lines are document body text.
+- The parser is pure C (`src/story/story_script.c`), tested in isolation, and also used by the journal UI.
+
+### Saves: `<pref>/saves/story/<chapter>_<slot>.json`
+
+A save holds:
+- format version and chapter id
+- checkpoint id and story clock
+- weather state
+- objectives (state + timestamps)
+- fired-once triggers, flags and timer residues
+- per-role player state: position, yaw, health, inventory, equipped
+- **world deltas**: by entity name — doors (open/locked), containers (contents), pickups taken, lights / power groups, props moved (the barricade), blinds
+- journal and collectibles
+- the RNG seed
+
+Saving happens at checkpoints (auto) and on quit to menu. Loading:
+1. Host the chapter's map.
+2. Apply the deltas.
+3. Restore the objectives.
+4. Re-run "on enter" actions of the active beats in **restore mode**: state only, with no one-shot audio or VFX.
+
+`profile.last_session` becomes `story:<chapter>:<slot>`. **Continue** in the main menu loads it. **Story** is a new Play ▸ Story entry with a chapter select (locked or unlocked, last checkpoint, play time).
+
+## 4. Code layout
+
+```
+src/story/
+  story_types.h        ids, enums, limits
+  story_def.c   pure   chapter JSON → StoryDef (validation: DAG, references, soft-lock lint)
+  story_script.c pure  .story parser → string table + cues
+  story_obj.c   pure   objective state machine
+  story_trig.c  pure   trigger evaluation over a StoryWorldView interface (testable without the engine)
+  story_save.c  pure   save JSON read/write + delta records
+  story_clock.c pure   beat-windowed clock curve (deterministic)
+  story_run.c          host runtime: binds to world/entities/time/weather/audio; actions
+  story_net.c          events, sync blob, client mirror
+  story_ui.c           objective line, subtitles, prompts, journal tab, compass markers (src/ui/hud style)
+  story_bot.c          headless solver bot (tests)
+  story_debug.c        story_debug overlay, event log
+src/game/game_story.c  console commands, scene hooks, menu glue
+src/editor/story/      placement tool + kit browser, trigger/objective editor (dev builds)
+```
+
+Following the house pattern, pure modules carry the logic and have unit tests, and glue lives in `src/game`.
+
+## 5. Console
+
+All commands get descriptions and categories in `assets/ui/command_categories.json`.
+
+| Command | Purpose |
+|---|---|
+| `story_chapter <id>` | Load a chapter from its start (or `story_chapter <id> <checkpoint>`). |
+| `story_objective <id> complete\|fail\|activate\|reveal` | Force an objective's state. |
+| `story_time <seconds\|HH:MM>` | Scrub the scripted progression. Clock, weather and vista sequences are evaluated at that time. |
+| `story_debug [0/1]` | Overlay: objective tree, trigger states, volume outlines, event log. |
+| `story_save [slot]`, `story_load [slot]` | Manual save / load. |
+| `story_bot` | Run the solver bot on the current chapter. |
+| `story_flag <name> [0/1]`, `story_fire <trigger>` | Dev pokes. |
+| `story_edit` | Placement tool + kit browser + trigger/objective editor (scene, frozen world). |
+| `kit_reload [piece]`, `kit_validate` | Kit pipeline. |
+
+## 6. Rendering work for interiors + the vista
+
+1. **Pane glass material** (`MAT_GLASS_PANE`):
+   - Forward pass, with a depth pre-write into a separate "glass depth" so SSR and fog can treat the pane as a surface.
+   - Reflection from the room probe (or the sky by day) through a Fresnel term.
+   - A dirt / fingerprint mask texture.
+   - Rain on the outside face (reuses lens-drop maths).
+   - Night: the interior reflection dominates as the exterior luminance drops.
+2. **Reflection probes**:
+   - Per-room box-projected cubemaps, captured with the existing renderer at load and again on power-state or blinds change (amortised across frames).
+   - They feed floor and glass specular, falling back to the sky env.
+   - Probe volumes are authored in the level (`probes`), with one per room by default.
+3. **Interior sky occlusion**:
+   - `interior` volumes, defaulting to the room bounds, have portals (the glass modules). Each portal has a blinds factor.
+   - Ambient sky light inside is scaled by the portal solid angle. This removes the "bluish interior" problem noted in docs/ZOMBIE_MAP.md.
+   - Sun through the glass still comes from the cascades. The viewmodel cascade applies indoors too.
+4. **Vista layer**:
+   - The city 1.5–8 km out is drawn in its own pass before the main pass, with a separate projection (near 1000, far 10000) into the sky background.
+   - It uses low-poly generated blocks + landmarks + impostor cards and gets aerial perspective from the existing sky parameters.
+   - Window lights come from a per-building emissive mask driven by time and district power.
+   - Life (traffic sprites, birds, helicopters, smoke) runs as vista sequences keyed to the story clock.
+5. **Near city** (0–1.5 km):
+   - Real kit geometry from façade bays and prefabs, generated by `tools/vista_gen` from `assets/story/vista/vellmouth.json` (districts, roads, river, parks, landmarks, seed).
+   - Streamed as chunks, so later chapters can walk into it.
+   - 0–500 m is full kit; 0.5–1.5 km is vgeo with impostors.
+
+Budget target: Modern ≤ 16 ms at 1080p on the reference GPU, from the sofa and the balcony at dawn, noon and overcast:
+- Vista layer ≤ 1.2 ms.
+- Probes ≤ 0.3 ms amortised.
+- Glass ≤ 0.4 ms.
+
+## 7. Tests
+
+- **ctest `story`** (pure):
+  - Parsing chapter JSON and scripts.
+  - DAG / soft-lock lint.
+  - The objective state machine.
+  - Trigger evaluation against a mock world.
+  - Save round-trip.
+  - Clock curve determinism (golden values).
+- **ctest `kit_validate`**: every piece passes, and the bad fixtures are rejected with their messages. `tools/tests/kit_roundtrip.py` covers the round trip.
+- **`tools/tests/story_bot.cfg`**: `story_chapter 01_tenth_floor`, then `story_bot`. The bot completes the graph through **every decision branch** (open / barricade) and both item routes (knife / bat), asserting no soft-lock and the end trigger. Headless (`--test --nosound`).
+- **`story_save.cfg`**: save at each checkpoint, reload, then compare a state hash covering objectives, inventory, world deltas and the clock.
+- **`story_time.cfg`**: scrub to fixed times twice and compare clock, weather and sequence hashes (determinism).
+- **`tools/tests/story_interact.py`**: every interactable in the level responds (state change or prompt) and has a hand-pose case entry (`handpose_report`).
+- **`vista_frames.cfg` + `img_diff`**: the SOFA and BALCONY frames at 3 states each against goldens, with a tolerance.
+- **`perf_compare.cfg` scenes** `story_sofa_*`, `story_balcony_*` at Modern: within budget.
+- **`story_net.sh`**: host + 1 client, the bot drives both, and the per-tick objective state hash matches on both machines.
+- Every script run uses `--validation`, and the gate is zero VVL messages.
+
+## 8. Build order (milestones)
+
+Each milestone ends with its tests, a commit and a build:
+
+1. **Story core** (pure modules + ctest `story`).
+2. **Runtime + HUD + net**: objective line, markers, subtitles, prompts, journal, events, protocol 26. Dev commands. Menu Story / Continue.
+3. **Kit pipeline**: `kit.json`, the level `kit` / `prefabs` sections, the instanced static path, UCX collision, sockets, `kit_reload`, `validate_kit`, `kit_export.py`.
+4. **Kit content**: `tools/kit_gen` generates the piece set; prefabs.
+5. **Apartment + corridor + stair core** (`assets/maps/story_01`, `data/levels/story_01.json`): new interactable defs, props, loot, lights, power groups.
+6. **Rendering**: pane glass, probes, interior sky occlusion.
+7. **Vista**: `vista_gen`, landmarks, vista layer, life sequences, locked frames.
+8. **Chapter content**: the 01 script, beats, VO stubs, phone Messages / gallery, onboarding.
+9. **Tools**: placement tool + kit browser + paint mode, trigger/objective editor, `story_debug`, `story_time`.
+10. **Full test sweep**: bot, saves, determinism, frames, perf, co-op, validation.
+
+Environment note: this cloud container is Linux without the Windows toolchain or Blender. Pure modules, Python tools, the kit generator and the validator can be built and tested here. Engine, render and screenshot verification needs `.toolchain/b.sh` on the Windows machine.

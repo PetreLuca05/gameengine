@@ -711,6 +711,19 @@ else()
 endif()
 add_dependencies(test_revive dg_copy_data)
 add_test(NAME revive COMMAND test_revive WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+# Story mode core (docs/STORY.md "Tests"): chapter JSON + lint, objectives, triggers, sequences, the
+# beat clock, .story scripts, saves, and the solver bot finishing every shipped chapter on every branch.
+add_executable(test_story tests/test_story.c src/story/story_def.c src/story/story_sim.c src/story/story_script.c
+  src/story/story_save.c src/story/story_bot.c third_party/cjson/cJSON.c)
+set_target_properties(test_story PROPERTIES C_STANDARD 11)
+target_include_directories(test_story PRIVATE src third_party/cjson)
+if(MSVC)
+  target_compile_options(test_story PRIVATE /W3 /wd4100 /wd4201 /utf-8)
+else()
+  target_link_libraries(test_story PRIVATE m)
+endif()
+add_dependencies(test_story dg_copy_data)
+add_test(NAME story COMMAND test_story WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
 # Procedural audio (docs/AUDIO_PROCEDURAL.md "Tests"): the synth graph, nodes, recipes, the mixer
 # (propagation delay, no allocation in the audio callback, budget) and the environment model / chain
 # (air absorption, occlusion, room estimate in the dev room corridor, cliff echoes). Every source is
@@ -736,7 +749,7 @@ foreach(t synth audio_env)
 endforeach()
 # Offline renderer: a recipe through the real mixer + environment in a box-built scene, to a WAV
 # (docs/AUDIO_PROCEDURAL.md "Listening"; tools/audio_render/render_pack.py renders the listening pack).
-add_executable(audio_render tools/audio_render/audio_render.c ${DG_AUDIO_DSP_SOURCES} third_party/cjson/cJSON.c)
+add_executable(audio_render tools/audio_render/audio_render.c ${DG_AUDIO_DSP_SOURCES} third_party/cjson/cJSON.c third_party/stb/stb_vorbis.c)
 set_target_properties(audio_render PROPERTIES C_STANDARD 11)
 target_include_directories(audio_render PRIVATE src third_party/cjson)
 target_compile_definitions(audio_render PRIVATE DG_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
@@ -749,6 +762,8 @@ find_package(Python3 COMPONENTS Interpreter QUIET)
 if(Python3_Interpreter_FOUND)
   add_test(NAME lint_commands COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/tests/lint_commands.py)
   add_test(NAME lint_settings COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/tests/lint_settings.py)
+  # Recorded CC0 takes (docs/AUDIO_PROCEDURAL.md "Recorded samples"): every set on disk and credited.
+  add_test(NAME audio_takes COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/audio_import/import_samples.py --check)
   add_test(NAME aim_sockets COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/tests/aim_sockets.py)
   add_test(NAME lint_looks COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/tests/lint_looks.py)
   # Ground textures (docs/GROUND_REFERENCE.md): the recipes validate, the generated / placeholder sets
