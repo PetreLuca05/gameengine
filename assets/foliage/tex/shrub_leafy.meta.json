@@ -6,26 +6,28 @@
  "size": 2048,
  "cells": [
   {
-   "coverage": 0.103,
-   "bottom": 0.18,
-   "height": 0.68,
-   "root": "#4d5e33",
-   "mid": "#556839",
-   "tip": "#5c703c",
-   "residue": 0.0,
-   "source": "placeholder",
+   "coverage": 0.08,
+   "bottom": 0.017,
+   "height": 0.94,
+   "root": "#5c642f",
+   "mid": "#5e712d",
+   "tip": "#627823",
+   "residue": 0.0001,
+   "source": "generated",
    "fails": []
   },
   {
-   "coverage": 0.17,
-   "bottom": 0.269,
-   "height": 0.848,
-   "root": "#4d5e33",
-   "mid": "#556839",
-   "tip": "#5c703c",
-   "residue": 0.0,
-   "source": "placeholder",
-   "fails": []
+   "coverage": 0.052,
+   "bottom": 0.01,
+   "height": 0.939,
+   "root": "#586b39",
+   "mid": "#668b45",
+   "tip": "#77a455",
+   "residue": 0.0001,
+   "source": "generated",
+   "fails": [
+    "coverage 0.052 not in [0.08, 0.7]"
+   ]
   }
  ],
  "name": "shrub_leafy",

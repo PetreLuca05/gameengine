@@ -1,41 +1,41 @@
 # Ground texture generation report
 
-Written by `tools/vfxgen/groundgen.py` (tool v1). Images generated this run: 0, spent $0.00.
+Written by `tools/vfxgen/groundgen.py` (tool v1). Images generated this run: 58, spent $10.90.
 
 | Recipe | Kind | Source | Checks |
 |---|---|---|---|
-| fern | blade_atlas | placeholder | ok; root/mid/tip #48572e/#516333/#5a6c39 · #5e623c/#6c6e45/#79784e |
-| grass_broad | blade_atlas | placeholder | ok; root/mid/tip #595c37/#63673b/#777648 · #60613c/#6e6e44/#878055 · #5c5e3a/#65683d/#79774a · #505631/#5c6335/#666c3b |
-| grass_short | blade_atlas | placeholder | ok; root/mid/tip #7b6a49/#83704e/#877451 · #7a6948/#83704f/#8a725c · #7a6a48/#82704e/#9b8451 · #7d6c4a/#84714f/#897552 |
-| grass_tall | blade_atlas | placeholder | ok; root/mid/tip #6f6442/#786d48/#877c55 · #615a39/#6d6640/#7d734d · #605a38/#6b643f/#8c8263 · #7e6f4c/#897955/#988962 |
-| grass_tussock | blade_atlas | placeholder | ok; root/mid/tip #867d55/#92885d/#9e9164 · #857d55/#93895e/#9e9064 · #73704a/#857e55/#978b60 · #676646/#757350/#7f7a56 |
-| reed | blade_atlas | placeholder | ok; root/mid/tip #827651/#8d8059/#998b64 · #65623f/#757049/#8e835c |
-| shrub_leafy | blade_atlas | placeholder | ok; root/mid/tip #4d5e33/#556839/#5c703c · #4d5e33/#556839/#5c703c |
-| wheat | blade_atlas | placeholder | ok; root/mid/tip #7f6c4a/#8c714f/#957954 · #7f6c4a/#8b714f/#947954 |
-| dirt | terrain_layer | placeholder | mean #5e5540 (target #5e5540, max delta 0.0), seam 0.1412 |
-| dirt_dry | terrain_layer | placeholder | mean #8c7f5c (target #8c7f5c, max delta 0.0), seam 0.15 |
-| field_soil | terrain_layer | placeholder | mean #4d3a26 (target #4d3a26, max delta 0.0), seam 1.0348 |
-| field_straw | terrain_layer | placeholder | mean #6e5a3a (target #6e5a3a, max delta 0.0), seam 0.8781 |
-| forest_floor | terrain_layer | placeholder | mean #4a3d2c (target #4a3d2c, max delta 0.0), seam 1.0075 |
-| forest_needles | terrain_layer | placeholder | mean #5a4530 (target #5a4530, max delta 0.0), seam 0.9084 |
-| grass_sparse_on_dirt | transition | placeholder | mean #5f5838 (target #5f5838, max delta 0.0), seam 0.9042 |
-| gravel | terrain_layer | placeholder | mean #77716a (target #77716a, max delta 0.0), seam 1.0194 |
-| ground_litter | terrain_layer | placeholder | mean #524c2c (target #524c2c, max delta 0.0), seam 1.044 |
-| ground_litter_dry | terrain_layer | placeholder | mean #6e6440 (target #6e6440, max delta 0.0), seam 0.8992 |
-| ground_moss | terrain_layer | placeholder | mean #6b6236 (target #6b6236, max delta 0.0), seam 1.4363 |
-| ground_moss_dry | terrain_layer | placeholder | mean #75692f (target #75692f, max delta 0.0), seam 1.2786 |
-| meadow_ground | terrain_layer | placeholder | mean #6b6236 (target #6b6236, max delta 0.0), seam 1.0883 |
-| mud | terrain_layer | placeholder | mean #3d3326 (target #3d3326, max delta 0.0), seam 0.153 |
-| mud_wet_edge | transition | placeholder | mean #4a3f2e (target #4a3f2e, max delta 0.0), seam 0.4273 |
-| pale_soil | terrain_layer | placeholder | mean #77735c (target #77735c, max delta 0.0), seam 0.1585 |
-| path | terrain_layer | placeholder | mean #6a614a (target #6a614a, max delta 0.0), seam 0.7589 |
-| path_worn_edge | transition | placeholder | mean #625a40 (target #625a40, max delta 0.0), seam 0.681 |
-| pebble_band | transition | placeholder | mean #6e685a (target #6e685a, max delta 0.0), seam 1.1183 |
-| rock | terrain_layer | placeholder | mean #7a756b (target #7a756b, max delta 0.0), seam 0.089 |
-| rock_moss_edge | transition | placeholder | mean #6a6650 (target #6a6650, max delta 0.0), seam 0.1019 |
-| rock_mossy | terrain_layer | placeholder | mean #6f6f55 (target #6f6f55, max delta 0.0), seam 0.0921 |
-| sand | terrain_layer | placeholder | mean #a59a7a (target #a59a7a, max delta 0.0), seam 0.6808 |
-| sand_on_rock | transition | placeholder | mean #8e8672 (target #8e8672, max delta 0.0), seam 0.7395 |
-| scatter_ground | scatter_atlas | placeholder | ok |
+| fern | blade_atlas | generated | ok; root/mid/tip #625017/#697d3b/#6a7f34 · #697333/#9a9c4a/#8f923c |
+| grass_broad | blade_atlas | generated | ok; root/mid/tip #8e8749/#5d6d34/#6a6e3e · #5f6525/#5d682a/#697227 · #546133/#727a4a/#85953a · #867933/#877e2f/#89811d |
+| grass_short | blade_atlas | generated | 1 failing cell check(s); root/mid/tip #6c603a/#7d6f3f/#848647 · #655f2d/#6c642e/#796f31 · #696139/#797749/#867e4e · #6b6126/#788f0d/#766e1d |
+| grass_tall | blade_atlas | generated | ok; root/mid/tip #5e552b/#636c31/#5f5524 · #5a542b/#637035/#76a441 · #594f29/#605d31/#6a6c37 · #686236/#757c4d/#898d69 |
+| grass_tussock | blade_atlas | generated | ok; root/mid/tip #524b17/#67691b/#77741c · #616a31/#727230/#7a7b3e · #605d2b/#676b2c/#8b7e2c · #3f3a17/#333c26/#45573a |
+| reed | blade_atlas | generated | ok; root/mid/tip #726b3c/#6c6d43/#9aae57 · #686236/#69673c/#86834d |
+| shrub_leafy | blade_atlas | generated | 1 failing cell check(s); root/mid/tip #5c642f/#5e712d/#627823 · #586b39/#668b45/#77a455 |
+| wheat | blade_atlas | generated | ok; root/mid/tip #8a8a44/#968f52/#9c9d5a · #84832c/#979c4e/#9fa45a |
+| dirt | terrain_layer | generated | mean #645b47 (target #5e5540, max delta 0.028), seam 0.8133 |
+| dirt_dry | terrain_layer | generated | mean #8e8365 (target #8c7f5c, max delta 0.0365), seam 0.9477 |
+| field_soil | terrain_layer | generated | mean #4c3926 (target #4d3a26, max delta 0.0034), seam 0.7055 |
+| field_straw | terrain_layer | generated | mean #6b583a (target #6e5a3a, max delta 0.0121), seam 0.8446 |
+| forest_floor | terrain_layer | generated | mean #4c3e2d (target #4a3d2c, max delta 0.0059), seam 0.9693 |
+| forest_needles | terrain_layer | generated | mean #5c4630 (target #5a4530, max delta 0.0075), seam 0.8574 |
+| grass_sparse_on_dirt | transition | generated | mean #645d40 (target #5f5838, max delta 0.0326), seam 0.7348 |
+| gravel | terrain_layer | generated | mean #777169 (target #77716a, max delta 0.0027), seam 1.0724 |
+| ground_litter | terrain_layer | generated | mean #514b2c (target #524c2c, max delta 0.0048), seam 0.6426 |
+| ground_litter_dry | terrain_layer | generated | mean #756a47 (target #6e6440, max delta 0.0271), seam 0.8038 |
+| ground_moss | terrain_layer | generated | mean #6c6437 (target #6b6236, max delta 0.0095), seam 0.8771 |
+| ground_moss_dry | terrain_layer | generated | mean #7f6e2f (target #75692f, max delta 0.0385), seam 0.8472 |
+| meadow_ground | terrain_layer | generated | mean #6f653d (target #6b6236, max delta 0.0278), seam 0.821 |
+| mud | terrain_layer | generated | mean #3e3426 (target #3d3326, max delta 0.0042), seam 0.6556 |
+| mud_wet_edge | transition | generated | mean #493e2e (target #4a3f2e, max delta 0.0054), seam 0.8711 |
+| pale_soil | terrain_layer | generated | mean #7c7964 (target #77735c, max delta 0.0306), seam 0.8424 |
+| path | terrain_layer | generated | mean #706853 (target #6a614a, max delta 0.0369), seam 0.8294 |
+| path_worn_edge | transition | generated | mean #666048 (target #625a40, max delta 0.0307), seam 0.8497 |
+| pebble_band | transition | generated | mean #716a5b (target #6e685a, max delta 0.011), seam 0.8736 |
+| rock | terrain_layer | generated | mean #7b766d (target #7a756b, max delta 0.0075), seam 0.8506 |
+| rock_moss_edge | transition | generated | mean #696551 (target #6a6650, max delta 0.0051), seam 0.7956 |
+| rock_mossy | terrain_layer | generated | mean #72725b (target #6f6f55, max delta 0.0217), seam 0.7386 |
+| sand | terrain_layer | generated | mean #aa9d7d (target #a59a7a, max delta 0.0194), seam 0.8968 |
+| sand_on_rock | transition | generated | mean #938974 (target #8e8672, max delta 0.02), seam 0.6744 |
+| scatter_ground | scatter_atlas | generated | ok |
 
 Contact sheets: `gen_sheet_foliage.png`, `gen_sheet_terrain.png`.
