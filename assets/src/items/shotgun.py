@@ -19,12 +19,18 @@ RZ0, RZ1 = -0.175, 0.03
 
 def receiver():
     hw = 0.0152
-    pts = [(RZ0, 0.006), (RZ1 - 0.02, 0.006), (RZ1, 0.016), (RZ1, RAIL_BASE - 0.004), (RZ1 - 0.012, RAIL_BASE), (RZ0, RAIL_BASE)]
+    # The receiver's rear top slopes down to the stock (a flat top to the back crosses the near plane in ADS).
+    pts = [(RZ0, 0.006), (RZ1 - 0.02, 0.006), (RZ1, 0.016), (RZ1, RAIL_BASE - 0.02), (RZ1 - 0.03, RAIL_BASE), (RZ0, RAIL_BASE)]
     r = L.side_prism(pts, -hw, hw, bevel=0.0018, segs=3, mat="steel_blued")
     r.cut(L.box((hw, BORE + 0.002, -0.09), (0.005, 0.011, 0.036), 0, 0))            # ejection port (right)
     r.cut(L.box((0, 0.006, -0.11), (0.0105, 0.006, 0.05), 0, 0))                    # loading port (bottom)
     r.cut(L.cyl((0, BORE, RZ0 - 0.01), (0, BORE, -0.03), 0.0118, 32, bevel=0))
-    rail = L.picatinny(-0.1, 0.05, RAIL_BASE, mat="aluminium_anodized")
+    # The rail runs to z 0.025 (the optic slot's mounts sit on it), carried over the sloped rear by a riser;
+    # 4.5 cm ahead of the ADS eye it stays clear of the near plane.
+    rail = L.picatinny(-0.1, 0.025, RAIL_BASE, mat="aluminium_anodized")
+    riser = L.side_prism([(-0.012, RAIL_BASE), (0.025, RAIL_BASE), (0.025, RAIL_BASE - 0.006), (0.004, RAIL_BASE - 0.012)], -0.0098, 0.0098, bevel=0.0008, segs=2,
+                         mat="aluminium_anodized")
+    rail.union(riser)
     elev = L.box((0, 0.006 + 0.0015, -0.11), (0.0098, 0.0015, 0.045), 0.0004, 1, "steel_dark")   # shell lifter (elevator) in the port
     marks = [L.text("DEADGROUND  870  12 GA", (-hw, 0.045, -0.085), 0.0042, (-1, 0, 0), (0, 1, 0), 0.0002),
              L.text("3\" CHAMBER", (-hw, 0.038, -0.085), 0.0028, (-1, 0, 0), (0, 1, 0), 0.00015)]

@@ -47,7 +47,10 @@ class AR:
     def upper(self):
         hw = 0.0142
         b, rb, f, r = self.bore - 0.016, self.rail_base, self.upper_f, self.upper_r
-        pts = [(f, b), (r, b), (r, rb - 0.0136), (r + 0.005, rb - 0.0096), (r + 0.005, rb), (f, rb)]
+        # The rear top slopes down behind the rail (the charging handle area): flat to the back at rail height it
+        # would cross the camera's near plane in ADS (tools/tests/item_nearplane.cfg).
+        self.rail_end = r - 0.016
+        pts = [(f, b), (r, b), (r, rb - 0.016), (r + 0.005, rb - 0.016), (r + 0.005, rb - 0.0135), (self.rail_end, rb), (f, rb)]
         up = L.side_prism(pts, -hw, hw, bevel=0.0012, segs=2, mat=self.fin)
         port_z = self.magz + 0.044
         up.cut(L.box((hw, self.bore + 0.002, port_z), (0.006, 0.0075, 0.025), 0.0, 0))
@@ -58,8 +61,8 @@ class AR:
         out.append(defl)
         if self.c["forward_assist"]:
             out.append(L.cyl((hw + 0.001, rb - 0.0146, port_z + 0.058), (hw + 0.009, rb - 0.0146, port_z + 0.094), 0.0075, 28, self.fin, bevel=0.0008))
-        out.append(L.picatinny(f, r + 0.001, rb, mat=self.fin))
-        for k in range(0, int((r - f) / 0.01001) - 1, 2):
+        out.append(L.picatinny(f, self.rail_end, rb, mat=self.fin))
+        for k in range(0, int((self.rail_end - f) / 0.01001) - 1, 2):
             z = f + 0.007 + k * 0.01001
             out.append(L.text("T%d" % (k + 1), (-0.0107, rb + 0.0035, z), 0.0026, normal=(-1, 0, 0), up=(0, 1, 0), depth=0.00015, mat="engrave"))
         return out
@@ -195,7 +198,7 @@ class AR:
         return [bc, bolt, cam, extractor] + lugs
 
     def charging_handle(self):
-        y0, y1 = self.rail_base - 0.0101, self.rail_base - 0.0021
+        y0, y1 = self.rail_base - 0.0141, self.rail_base - 0.0061   # in the sloped rear, below the rail line
         z = self.upper_r
         ch = L.top_prism([(-0.0045, z - 0.005), (0.0045, z - 0.005), (0.0045, z + 0.011), (0.02, z + 0.012), (0.022, z + 0.019), (0.018, z + 0.023),
                           (-0.018, z + 0.023), (-0.022, z + 0.019), (-0.02, z + 0.012), (-0.0045, z + 0.011)], y0, y1, bevel=0.0012, segs=2, mat=self.fin,
@@ -270,7 +273,7 @@ class AR:
         if dev:
             it.part("muzzle_device", hide="muzzle").add(*dev)
         it.part("bolt_carrier", pivot=(0, self.bore, self.magz + 0.06), mech="bolt").add(*self.bolt_carrier())
-        it.part("charging_handle", pivot=(0, self.rail_base - 0.006, self.upper_r + 0.009), mech="charging_handle").add(*self.charging_handle())
+        it.part("charging_handle", pivot=(0, self.rail_base - 0.01, self.upper_r + 0.009), mech="charging_handle").add(*self.charging_handle())
         piv = (0.0145, self.bore - 0.008, self.magz + 0.044)
         it.part("dust_cover", pivot=piv, mech="dust_cover").add(*self.dust_cover(piv))
         it.part("trigger", pivot=(0, 0.012, -0.027), mech="trigger").add(P.ar_trigger((0, 0.012, -0.027)))
@@ -318,7 +321,7 @@ class AR:
         pz = self.magz + 0.044
         it.socket("ejection_port", (0.0142, self.bore + 0.002, pz), (0, 90, 0))
         it.socket("shell_eject", (0.02, self.bore + 0.003, pz + 0.006), (0, 70, 0))
-        it.socket("charging_handle", (0, self.rail_base - 0.006, self.upper_r + 0.019))
+        it.socket("charging_handle", (0, self.rail_base - 0.01, self.upper_r + 0.019))
         for k, z in enumerate(pos_z):
             it.socket("stock_pos_%d" % k, (0, tube_y - 0.0147, z))
         return it
