@@ -348,9 +348,9 @@ static void tt_write_sets(void) {
         frame_sets_of(&R->frames[i], sets);
         for (int s = 0; s < FRAME_SET_COUNT; s++) {
             if (!sets[s]) continue;
-            VkDescriptorImageInfo ii[8] = { { R->sampler_linear, T.alb.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL },
-                                            { R->sampler_linear, T.nrh.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL },
-                                            { R->sampler_linear, T.macro.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL },
+            VkDescriptorImageInfo ii[8] = { { R->sampler_material, T.alb.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL },
+                                            { R->sampler_material, T.nrh.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL },
+                                            { R->sampler_material, T.macro.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL },
                                             { R->sampler_clamp, T.blend.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL },
                                             { R->sampler_clamp, T.attr.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL },
                                             { R->sampler_clamp, T.paint.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL },

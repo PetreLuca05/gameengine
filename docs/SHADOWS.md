@@ -288,10 +288,12 @@ out of phase (at 2: one far tile per frame). In between, a far cascade keeps its
 matrices, centre, radius, texel size and bias it was drawn with (`R->shadow_hold`), so its shadows stay
 where they were drawn and selection by the splits is unchanged; a receiver outside the kept box falls
 through to the next cascade as before. Forced redraws: no valid hold (first frame, the tile was inactive
-or the atlas was skip-cleared), a camera cut, a change of cascades / tile size / fit / atlas, or a fit
-whose centre moved more than a tenth of its radius (radius by 2 %). The pass loads the atlas when a
-tile is kept and clears only the tiles it redraws; the classic renderer and the skinned shadow cull skip
-kept cascades. Far shadows of moving casters (wind-swayed trees, zombies) lag up to N - 1 frames;
+or the atlas was skip-cleared), a camera cut, a change of cascades / tile size / fit / atlas, a fit
+whose centre moved more than a tenth of its radius (radius by 2 %), or a fit light direction that
+turned more than 0.25 deg (a jump, not the sun's drift). The pass loads the atlas when a tile is kept
+and clears only the tiles it redraws; the classic renderer and the skinned shadow cull skip kept
+cascades. Cascades that can be kept are drawn without the PF-0006 receiver-volume cull (later views
+sample them). Far shadows of moving casters (wind-swayed trees, zombies) lag up to N - 1 frames;
 cascades 0 - 1 never lag. Measured (pine / broadleaf forest, horde in the forest, Modern, 2 x A/B):
 shadow pass -14.6 %, its fragments -11 %, GPU frame -11.5 %, CPU work -5.8 %; still images pass the
 fidelity-neutral image check.

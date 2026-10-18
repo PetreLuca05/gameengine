@@ -11,7 +11,7 @@
 #include <string.h>
 
 #define TEXC_FILE_MAGIC 0x43424744u   // "DGBC"
-#define TEXC_FILE_VERSION 1u
+#define TEXC_FILE_VERSION 2u   // 2: the key hashes every tail byte
 #define TEXC_ROWS_PER_TASK 8u         // block rows per job (a 1024-wide level: 2048 blocks)
 
 static struct {
@@ -114,6 +114,13 @@ static u64 hash_bytes(u64 seed, const u8 *p, size_t n) {
         d = mix64(d, w[3]);
         p += 32;
         n -= 32;
+    }
+    while (n >= 8) {   // the tail: every whole word, then the last bytes (all of them count)
+        u64 w;
+        memcpy(&w, p, 8);
+        b = mix64(b, w);
+        p += 8;
+        n -= 8;
     }
     u64 t = 0;
     for (size_t i = 0; i < n; i++) t = t << 8 | p[i];

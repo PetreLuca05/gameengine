@@ -103,7 +103,9 @@ read alpha, so they bind an R8 copy of the texture's alpha instead of the RGBA a
 (`src/render/vk_alpha_mask.c`, `shaders/alpha_mask.comp`): every resident level copied texel for texel on the
 GPU at the start of the frame after a draw first asks for it (until then the albedo is bound), rebuilt when
 the texture's image changes (`GpuTexture.serial`) or its sampler does. The sampled view swizzles R into A,
-so `cl_mask_alpha` is unchanged. The lit pass and the scope PiP keep the albedo. Bit-identical results
+so `cl_mask_alpha` is unchanged. The lit pass and the scope PiP keep the albedo. Block-compressed
+sources (BC7, PF-0035, the default) get no mask: they already read 1 byte per texel; neither do MoltenVK
+devices without view swizzles. Bit-identical results
 (perf_verify: images and state pass); in the forest interiors the shadow pass changed by only -1.7 %
 (not significant): it is bound by fragment / raster work, not texture bandwidth.
 

@@ -526,11 +526,12 @@ static TextureId module_texture(u32 index) {
     const VgTexEntry *e = &C.vtex->e[index];
     if (!o->used || !e->view) return 0;
     if (C.modtex[k] && C.modver[k] == C.vtex->ver[index]) return C.modtex[k];
-    if (!C.modtex[k]) C.modtex[k] = vkr_texture_wrap(o->image, e->view, o->w, o->h, VK_FORMAT_R8G8B8A8_SRGB);
+    if (!C.modtex[k]) C.modtex[k] = vkr_texture_wrap(o->image, e->view, o->w, o->h, o->format ? o->format : VK_FORMAT_R8G8B8A8_SRGB);
     else vkr_texture_rewrap(C.modtex[k], o->image, e->view, o->w, o->h);
     if (!C.modtex[k]) return 0;
     vkr_write_tex_set(R->textures[C.modtex[k]].set, e->view, e->sampler ? e->sampler : R->sampler_linear);
     R->textures[C.modtex[k]].mips = o->mips;
+    R->textures[C.modtex[k]].format = o->format ? o->format : VK_FORMAT_R8G8B8A8_SRGB;   // a rewrap keeps the first format otherwise
     C.modver[k] = C.vtex->ver[index];
     return C.modtex[k];
 }
@@ -1546,6 +1547,11 @@ static void draw_view(VkCommandBuffer cmd, const ClView *v, int pass, u32 shadow
                 }
                 PushLit pc;
                 mat_push(&pc, m, tex, maps, shadow_view);
+                if (pass == 2 && tex) {   // the bound sampler's mip bias, cancelled by the shadow alpha test (PF-0029)
+                    VkSampler s = mat_sampler(m, t);
+                    float b = s == R->sampler_world || (C.vtex && (s == C.vtex->clamp || s == C.vtex->repeat)) ? R->mip_bias : 0.0f;
+                    memcpy(&pc.flags[2], &b, 4);
+                }
                 if (fading) pc.model.m[15] = 1.0f;   // a fading part dithers whatever its material
                 vkCmdPushConstants(cmd, C.layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushLit), &pc);
                 vkCmdDrawIndexed(cmd, sec->index_count, bt->count, sec->first_index, 0, bt->first);

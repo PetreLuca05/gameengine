@@ -63,6 +63,8 @@ static void log_portability_subset(VkPhysicalDevice gpu) {
     VkPhysicalDeviceFeatures2 f2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
     f2.pNext = &ps;
     vkGetPhysicalDeviceFeatures2(gpu, &f2);
+    R->port_mip_bias = ps.samplerMipLodBias != 0;   // PF-0029's sampler bias needs it (else none)
+    R->port_swizzle = ps.imageViewFormatSwizzle != 0;   // PF-0014's R -> A mask view needs it (else no masks)
     log_info("vulkan: portability subset (MoltenVK): triangleFans %d, pointPolygons %d, events %d, formatSwizzle %d, mipLodBias %d, "
              "beyondStride %d, constantAlpha %d (none used; docs/PLATFORM_MACOS.md)",
              ps.triangleFans, ps.pointPolygons, ps.events, ps.imageViewFormatSwizzle, ps.samplerMipLodBias, ps.vertexAttributeAccessBeyondStride,
@@ -330,6 +332,7 @@ bool vkd_create_device(SDL_Window *window) {
     bool unused_att = false;
     u32 dev_ext_count = 1;
     R->portability = vkport_device(R->gpu, dev_exts, &dev_ext_count, 8);
+    R->port_mip_bias = R->port_swizzle = true;
     if (R->portability) log_portability_subset(R->gpu);
     {
         u32 n = 0;

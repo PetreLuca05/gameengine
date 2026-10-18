@@ -282,7 +282,10 @@ display and resolve with TAA-U by default (Medium used FSR 1, High native): alph
 pixel, so the prepass / opaque passes scale with the render size. Whenever a temporal resolve (TAA, TAA-U,
 FSR 2) works from below display resolution, the material samplers (renderer and vgeo module textures)
 take a mip bias of log2(render / display width), at most -1, so textures keep the display's texel density
-(`vkr_material_mip_bias`). Pine forest at High (one process, 2 x A/B, 1600 x 900): GPU frame 10.15 ->
+(`vkr_material_mip_bias`; `sampler_material` for the terrain / surface arrays, `sampler_world`, the vgeo
+module samplers; the UI and impostor atlases keep the unbiased `sampler_linear`, the shadow views cancel
+the bias in their alpha test, r_upscaler 3 / 4 (FSR 1 slots) and MoltenVK without samplerMipLodBias get
+none). Pine forest at High (one process, 2 x A/B, 1600 x 900): GPU frame 10.15 ->
 8.67 ms (-14.6 %), opaque -29 %, prepass -14 %; the image is slightly softer in the canopy
 (docs/perf_screenshots/upscale_high_native.jpg, upscale_high_taau075.jpg). Modern stays native.
 

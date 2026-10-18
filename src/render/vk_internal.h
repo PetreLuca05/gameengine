@@ -292,6 +292,7 @@ typedef struct Renderer {
     bool has_unused_attachments;   // VK_EXT_dynamic_rendering_unused_attachments: G-buffer without velocity
     bool hdr_supported, swap_hdr;
     bool portability;            // VK_KHR_portability_subset device (MoltenVK; docs/PLATFORM_MACOS.md)
+    bool port_mip_bias, port_swizzle;   // portability: samplerMipLodBias / imageViewFormatSwizzle supported (true off portability)
     VkPipelineCache pipeline_cache;   // every renderer pipeline; persisted in the pref dir (vk_device.c)
     VkDriverId driver_id;        // VK_DRIVER_ID_MOLTENVK on macOS
     int hdr_output_applied;
@@ -328,7 +329,8 @@ typedef struct Renderer {
     VkPipelineLayout layout_ui;           // set1 + push (vertex + fragment: screen scale, 1 / size)
     VkPipelineLayout layout_ui3d;         // push only (render_ui.c item views)
     VkPipeline pipes[PIPE_COUNT];
-    VkSampler sampler_linear;   // material textures (aniso; r_texture_quality as a min LOD)
+    VkSampler sampler_linear;   // material textures (aniso; r_texture_quality as a min LOD); never mip-biased (UI atlases, impostors)
+    VkSampler sampler_material; // sampler_linear with the scene's mip bias (terrain / surface arrays, PF-0029)
     VkSampler sampler_world;    // world textures (aniso; r_texture_quality dropped their top levels instead)
     VkSampler sampler_clamp;    // post / ui
     VkSampler sampler_shadow;   // compare
@@ -427,7 +429,7 @@ typedef struct Renderer {
     // Far cascade staggering (PF-0028, r_shadow_far_interval): a far cascade not due this frame keeps
     // its tile and the matrices / bias it was drawn with (shadow_hold); shadow_redraw: re-rendered now.
     bool shadow_redraw[4];
-    struct ShadowHold { bool valid; mat4 vps, vp_ndc; vec3 center; float radius, texel_m, bias, span, nbias, mpt; } shadow_hold[4];
+    struct ShadowHold { bool valid; mat4 vps, vp_ndc; vec3 center, L; float radius, texel_m, bias, span, nbias, mpt; } shadow_hold[4];
     u32 shadow_hold_key;                        // cascades / tile / fit / shadow image generation the holds belong to
     bool moon_active;
     // Unity-style controls (docs/SHADOWS_UNITY_MODEL.md): this frame's quality knobs, the

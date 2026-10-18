@@ -10,5 +10,5 @@ layout(location = 2) in vec2 v_uv;
 layout(location = 9) flat in vec4 v_fade;
 void main() {
     if (frame.lod_fade.z > 0.5 && cl_faded(v_fade, gl_FragCoord.xy)) discard;   // local light tiles: no dither (the cuts from before docs/LOD.md)
-    if (pc.model[3].y > 0.0 && cl_mask_alpha(tex, v_uv * max(pc.params.w, 1e-3)) < pc.model[3].y) discard;
+    if (pc.model[3].y > 0.0 && cl_mask_alpha_b(tex, v_uv * max(pc.params.w, 1e-3), uintBitsToFloat(pc.flags.z)) < pc.model[3].y) discard;
 }

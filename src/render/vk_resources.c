@@ -182,11 +182,12 @@ float vkr_material_anisotropy(void) {
 }
 
 float vkr_material_mip_bias(void) {
-    if (!prof_fix_enabled(PFX_UPSCALE_MIP_BIAS) || !R->hdr.w || !R->swap_extent.width) return 0.0f;
+    if (!prof_fix_enabled(PFX_UPSCALE_MIP_BIAS) || !R->hdr.w || !R->swap_extent.width || !R->port_mip_bias) return 0.0f;
     static Cvar *aa, *up;
     if (!aa) aa = cvar_find("r_aa");
     if (!up) up = cvar_find("r_upscaler");
-    bool temporal = (aa && aa->i == 3) || (up && (up->i == 1 || up->i == 3));
+    // temporal resolves only: TAA, TAA-U (r_upscaler 3 / 4 are slots that run FSR 1's spatial EASU for now)
+    bool temporal = (aa && aa->i == 3) || (up && up->i == 1);
     float ratio = (float)R->hdr.w / (float)R->swap_extent.width;
     if (!temporal || ratio >= 0.999f) return 0.0f;
     return fmaxf(log2f(ratio), -1.0f);
@@ -209,8 +210,11 @@ static void create_linear_sampler(void) {
     }
     s.minLod = (float)DG_CLAMP(2 - R->r_texture_quality->i, 0, 2);
     s.maxLod = VK_LOD_CLAMP_NONE;
-    s.mipLodBias = R->mip_bias;   // below display resolution under a temporal resolve: the display's texel density (PF-0029)
     VK_CHECK(vkCreateSampler(R->device, &s, NULL, &R->sampler_linear));
+    // the scene's materials below display resolution under a temporal resolve: the display's texel
+    // density (PF-0029); the UI and the other sampler_linear users stay unbiased
+    s.mipLodBias = R->mip_bias;
+    VK_CHECK(vkCreateSampler(R->device, &s, NULL, &R->sampler_material));
     s.minLod = 0.0f;
     VK_CHECK(vkCreateSampler(R->device, &s, NULL, &R->sampler_world));
 }
@@ -220,6 +224,7 @@ static void create_linear_sampler(void) {
 // users: the material texture sets and the vgeo texture table. The caller waits for the device.
 void vkr_recreate_linear_sampler(void) {
     vkDestroySampler(R->device, R->sampler_linear, NULL);
+    vkDestroySampler(R->device, R->sampler_material, NULL);
     vkDestroySampler(R->device, R->sampler_world, NULL);
     create_linear_sampler();
     vkr_rewrite_all_texture_sets();
@@ -254,6 +259,7 @@ void vkr_create_samplers(void) {
 
 void vkr_destroy_samplers(void) {
     vkDestroySampler(R->device, R->sampler_linear, NULL);
+    vkDestroySampler(R->device, R->sampler_material, NULL);
     vkDestroySampler(R->device, R->sampler_world, NULL);
     vkDestroySampler(R->device, R->sampler_clamp, NULL);
     vkDestroySampler(R->device, R->sampler_shadow, NULL);

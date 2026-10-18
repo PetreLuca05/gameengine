@@ -1519,11 +1519,13 @@ static void compute_matrices(FrameData *fd) {
     // PF-0028 (a visual trade-off, docs/SHADOWS.md "Far cascade staggering"): with 4 cascades, 2 and 3
     // are re-rendered every r_shadow_far_interval frames, out of phase (one far tile per frame at 2).
     // A cascade not due keeps the tile and everything it was drawn with; it is drawn anyway after a cut,
-    // a settings / map change, or once its fit moved a tenth of its radius (so its box still covers
-    // what the splits send to it).
+    // a change of cascades / tile size / fit / atlas, once its fit moved a tenth of its radius (so its
+    // box still covers what the splits send to it) or the fit light direction turned 0.25 deg. Kept
+    // cascades are drawn without the receiver-volume cull (PF-0006: later views sample them).
+    int far_interval = prof_fix_enabled(PFX_SHADOW_FAR_STAGGER) && R->r_shadow_far_interval && ncasc == 4 ? R->r_shadow_far_interval->i : 1;
     {
-        int interval = prof_fix_enabled(PFX_SHADOW_FAR_STAGGER) && R->r_shadow_far_interval ? R->r_shadow_far_interval->i : 1;
-        u32 key = (u32)ncasc | tile << 3 | (close_fit ? 1u << 2 : 0u) | (u32)R->shadow_gen << 20;
+        int interval = far_interval;
+        u32 key = (u32)ncasc | (close_fit ? 1u << 3 : 0u) | tile << 4 | (u32)R->shadow_gen << 20;
         if (key != R->shadow_hold_key || R->camera_cut) {
             for (int k = 0; k < 4; k++) R->shadow_hold[k].valid = false;
             R->shadow_hold_key = key;
@@ -1531,10 +1533,11 @@ static void compute_matrices(FrameData *fd) {
         for (int k = 0; k < 4; k++) {
             struct ShadowHold *h = &R->shadow_hold[k];
             bool due = interval < 2 || ncasc < 4 || k < 2 || (R->frame_index + (u32)((k - 2) * (interval / 2))) % (u32)interval == 0;
-            bool moved = !h->valid || v3_dist(h->center, R->shadow_center[k]) > 0.1f * h->radius || fabsf(h->radius - R->shadow_radius[k]) > 0.02f * h->radius;
+            bool moved = !h->valid || v3_dist(h->center, R->shadow_center[k]) > 0.1f * h->radius || fabsf(h->radius - R->shadow_radius[k]) > 0.02f * h->radius ||
+                         v3_dot(h->L, Lfit) < 0.99999048f;   // cos 0.25 deg: a jump of the light, not the sun's drift
             R->shadow_redraw[k] = due || moved;
             if (R->shadow_redraw[k]) {
-                *h = (struct ShadowHold){ true, R->shadow_vps[k], R->shadow_vp_ndc[k], R->shadow_center[k], R->shadow_radius[k], R->csm.texel_m[k], bias[k], span[k], nbias[k], mpt[k] };
+                *h = (struct ShadowHold){ true, R->shadow_vps[k], R->shadow_vp_ndc[k], R->shadow_center[k], Lfit, R->shadow_radius[k], R->csm.texel_m[k], bias[k], span[k], nbias[k], mpt[k] };
                 continue;
             }
             R->shadow_vps[k] = h->vps;
@@ -1674,7 +1677,7 @@ static void compute_matrices(FrameData *fd) {
         float max_tex = fmaxf(fmaxf(ss ? ss->pcss_max_texels : 32.0f, ss ? ss->min_texels : 1.0f), 7.0f);
         for (int k = 0; k < 4; k++) {
             R->shadow_rcv_n[k] = 0;
-            if (!on || k >= ncasc - 1 || !R->shadow_active[k]) continue;
+            if (!on || k >= ncasc - 1 || !R->shadow_active[k] || (far_interval >= 2 && k >= 2)) continue;   // a kept tile (PF-0028)
             vec3 pts[16];
             for (int i = 0; i < 8; i++) {
                 float d = (i & 4) ? splits[k] : fmaxf(c->znear, 0.01f), sx = (i & 1) ? 1.0f : -1.0f, sy = (i & 2) ? 1.0f : -1.0f;
@@ -2809,7 +2812,7 @@ void render_end_frame(void) {
         vkr_image_barrier(cmd, R->shadow.image, VK_IMAGE_ASPECT_DEPTH_BIT, keep ? VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL : VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
                           VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, 0,
                           VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-                          VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, 1);
+                          VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | (keep ? VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT : 0), 1);   // LOAD reads the kept tiles
         {
             VkRenderingAttachmentInfo da = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
             da.imageView = R->shadow.view;

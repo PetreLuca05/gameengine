@@ -32,7 +32,7 @@ static struct {
 
 static void am_init(void) {
     A.init = true;
-    if (!R->has_push_descriptor) return;
+    if (!R->has_push_descriptor || !R->port_swizzle) return;   // the mask view swizzles R into A
     VkFormatProperties fp;
     vkGetPhysicalDeviceFormatProperties(R->gpu, VK_FORMAT_R8_UNORM, &fp);
     const VkFormatFeatureFlags need = VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
@@ -99,6 +99,9 @@ VkDescriptorSet vkam_set(TextureId t, VkSampler sampler) {
     if (!A.init) am_init();
     if (!A.ok) return VK_NULL_HANDLE;
     const GpuTexture *g = &R->textures[t];
+    // a block-compressed source (BC7: PF-0035, the default) already reads 1 byte per texel: a mask
+    // would only add memory
+    if (g->format >= VK_FORMAT_BC1_RGB_UNORM_BLOCK && g->format <= VK_FORMAT_BC7_SRGB_BLOCK) return VK_NULL_HANDLE;
     AlphaMask *m = &A.m[t];
     if (m->state == 2 && m->serial == g->serial) {
         if (m->sampler != sampler) {   // r_aniso / r_texture_quality recreated the sampler: a fresh set (the old one may be in flight)

@@ -172,6 +172,17 @@ static void test_hard_paint(void) {
     CHECK(wide, "min_size widens the wall's paint");
     cJSON_Delete(out);
     cJSON_Delete(lv);
+    // a ground level of 2: structures stand at y = 2 (and a box at y = 0 is 2 m under the ground)
+    lv = cJSON_Parse("{\"brushes\": [{\"type\": \"box\", \"pos\": [10, 2, 0], \"size\": [4, 3, 0.3]}, {\"type\": \"box\", \"pos\": [30, 0, 0], \"size\": [4, 3, 0.3]}]}");
+    out = cJSON_CreateArray();
+    g.level = 2.0f;
+    level_footprint_pads(lv, &g, out);
+    int paints = 0;
+    float px = 0;
+    cJSON_ArrayForEach(f, out) if (!strcmp(cJSON_GetObjectItemCaseSensitive(f, "type")->valuestring, "paint")) paints++, px = (float)cJSON_GetArrayItem(cJSON_GetObjectItemCaseSensitive(f, "pos"), 0)->valuedouble;
+    CHECK(paints == 1 && px == 10.0f, "level 2: the wall standing at y = 2 is painted, the buried one not (%d)", paints);
+    cJSON_Delete(out);
+    cJSON_Delete(lv);
 }
 
 // ------------------------------------------------------------------ shipped data

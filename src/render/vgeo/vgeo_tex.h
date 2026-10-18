@@ -20,7 +20,7 @@ typedef struct VgTexEntry { VkImageView view; VkSampler sampler; VkImageLayout l
 // docs/TEXTURE_MIPS.md "Block compression"): the given RGBA8 chain's levels encoded in *vk_format
 // (malloc'd, level_sizes per level), or NULL to keep RGBA8.
 typedef u8 *(*VgTexCompressFn)(const u8 *rgba, u32 w, u32 h, u32 levels, bool srgb, u32 *vk_format, size_t *level_sizes);
-typedef struct VgOwnTex { VkImage image; VmaAllocation alloc; VkImageView view; u32 w, h, mips; bool used; } VgOwnTex;
+typedef struct VgOwnTex { VkImage image; VmaAllocation alloc; VkImageView view; u32 w, h, mips; VkFormat format; bool used; } VgOwnTex;
 
 typedef struct VgTextures {
     const VgContext *ctx;

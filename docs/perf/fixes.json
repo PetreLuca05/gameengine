@@ -939,7 +939,7 @@
   "effort": "S",
   "status": "closed",
   "code": [
-   "src/render/vk_classic.c emit_view_light_order / cmp_batch_size (cull_views, vkc_frame)"
+   "src/render/vk_classic.c emit_view_depth_order (row 2: the light NDC depth) / cmp_batch_size (cull_views, vkc_frame)"
   ],
   "description": "A sun cascade's instance stream is emitted with each batch ordered front to back from the light (32 light-depth buckets over the view's depth range, stable within a bucket) and the batches ordered by mesh size (trees before bushes and grass). Canopies are drawn first, so the alpha-tested fragments behind already written depth fail the early depth test before their shader runs.",
   "neutral": "The shadow pass is depth only: every texel ends at the minimum depth of the fragments that pass their alpha test, and which fragments exist, their depths and their alpha tests do not depend on the draw order. The same instances and batches are drawn, so the maps are bit-identical; only the order (and the number of fragment shader invocations) changes.",
@@ -1155,7 +1155,7 @@
    "src/render/vk_classic.c draw_view (alpha_only binding), mat_sampler",
    "src/render/vk_resources.c GpuTexture.serial, render.c (vkam_record after the uploads)"
   ],
-  "description": "A masked material texture drawn by the classic renderer gets an R8_UNORM copy of its alpha: every resident level, texel for texel (alpha_mask.comp, texelFetch), built on the GPU at the start of the frame after a draw first asked for it, rebuilt when the texture's image changes (GpuTexture.serial: r_texture_quality trims, reloads, rewrapped module slots) or its sampler does. The sun cascades, the local light shadow tiles and the masked prepass groups bind the mask instead of the albedo; the lit pass and the scope PiP keep the albedo (they need its colour). A quarter of the texture bytes per alpha-tested fragment.",
+  "description": "A masked material texture drawn by the classic renderer gets an R8_UNORM copy of its alpha: every resident level, texel for texel (alpha_mask.comp, texelFetch), built on the GPU at the start of the frame after a draw first asked for it, rebuilt when the texture's image changes (GpuTexture.serial: r_texture_quality trims, reloads, rewrapped module slots) or its sampler does. The sun cascades, the local light shadow tiles and the masked prepass groups bind the mask instead of the albedo; the lit pass and the scope PiP keep the albedo (they need its colour). A quarter of the texture bytes per alpha-tested fragment of an RGBA8 albedo. Block-compressed sources (BC7, PF-0035, the default) already read 1 byte per texel: they get no mask (r_texture_compress 0 brings the masks back); MoltenVK devices without view swizzles get none either.",
   "neutral": "The mask has the albedo's size, level count and the same sampler, and every texel holds the albedo texel's 8-bit alpha (UNORM in both formats; sRGB decoding never applies to alpha), so cl_mask_alpha computes the same level of detail and filters the same values: the same fragments pass the alpha test, the depth / G-buffer outputs are bit-identical. Until a mask is built the albedo is bound, as before. Nothing feeds the simulation.",
   "metrics": [
    "scope:shadow_sun",
@@ -1327,7 +1327,7 @@
    "src/render/vgeo/grass_asset.c grass_mesh_match_bounds (the fitted mesh on the full mesh's quantization grid), half_snap"
   ],
   "description": "Per atlas cell and card band (one per segment), grass_fit_compute finds the columns holding any alpha, grown by 2 texels of mip level 2 (8 texels). grass_gen_mesh moves each row's two vertices inward to cover the opaque part of both bands they bound: the same triangles, on the same plane, with the uv following the position exactly as on the full card (the card is a parallelogram with an affine uv map), so every pixel the fitted card covers is the full card's pixel and the cut area held no texel that could pass the alpha test through mip 2. The unfitted twin of every variant is registered too (no impostor) and drawn in its place while the fix is off.",
-  "neutral": "A visual trade-off only through the wind: inside the fitted shape the fragments, depths and uvs are the full card's (the same plane and affine uv mapping, uvs snapped to the half grid the vertices store, positions on the full card's quantization grid); outside it every texel the alpha test can read down to mip 2 is transparent. The WPO bend and the dome normals are not linear across the card, so under wind the displaced surface differs slightly. Nothing feeds the simulation.",
+  "neutral": "A visual trade-off through the per-vertex terms above (normals, trample, wind); inside the fitted shape the rasterised plane and uv mapping are the full card's (uvs snapped to the half grid the vertices store, positions on the full mesh's quantization grid); outside it every texel the alpha test can read down to mip 2 is transparent. Nothing feeds the simulation.",
   "metrics": [
    "scope:prepass",
    "scope:shadow_sun",
@@ -1339,7 +1339,7 @@
    "veg_wheat",
    "veg_forest_pine"
   ],
-  "tradeoff": "Without wind the fitted cards render the full cards' pixels (perf_verify with r_foliage_wind 0: images pass). With wind, the foliage WPO (a length-preserving bend, shaders/vgeo/wpo.glsl) is evaluated at the fitted card's vertices instead of the full card's corners, and the card normals blend toward the clump dome at those vertices: the blades sway through slightly different points (sub-pixel to a pixel at blade edges, no visible artifact).",
+  "tradeoff": "The fitted cards keep the full cards' plane and uv mapping, so the texels shown are the same; three things are evaluated at the fitted vertices instead of the full card's corners and so differ slightly, wind or not: the shading normals (blended toward the clump dome per vertex, then quantised to the vertex format), the trample displacement and, with wind, the WPO bend (length-preserving, shaders/vgeo/wpo.glsl). Blade edges shift by sub-pixel to a pixel, no visible artifact (perf_verify with r_foliage_wind 0 passed the image check within its envelope). The fitted mesh takes the full twin's culling / LOD sphere and impostor, so LOD and impostor switch distances are unchanged.",
   "screenshots": [],
   "verification": {
    "runs": [
@@ -1413,9 +1413,80 @@
      "state": "identical",
      "images_pass": false,
      "dir": "build/perf_out/verify/PF-0016"
+    },
+    {
+     "date": "2026-10-18",
+     "machine": "DESKTOP-SN4N74U",
+     "summary": "NOT CLOSED: scope:prepass 1.856 -> 1.8345 (-1.16%, p=0.11); images differ (visual trade-off, by design); state identical",
+     "closed": false,
+     "timing": [
+      {
+       "metric": "scope:prepass",
+       "a_median": 1.856,
+       "b_median": 1.8345,
+       "a_mean": 1.82014,
+       "b_mean": 1.79006,
+       "delta": -0.0215,
+       "delta_pct": -1.16,
+       "p_value": 0.11048,
+       "samples": [
+        476,
+        476
+       ],
+       "improved": false
+      },
+      {
+       "metric": "scope:shadow_sun",
+       "a_median": 1.2095,
+       "b_median": 1.085,
+       "a_mean": 1.20677,
+       "b_mean": 1.07756,
+       "delta": -0.1245,
+       "delta_pct": -10.29,
+       "p_value": 0.0,
+       "samples": [
+        476,
+        476
+       ],
+       "improved": true
+      },
+      {
+       "metric": "scope:opaque",
+       "a_median": 3.3,
+       "b_median": 3.2855,
+       "a_mean": 3.30588,
+       "b_mean": 3.30133,
+       "delta": -0.0145,
+       "delta_pct": -0.44,
+       "p_value": 0.35921,
+       "samples": [
+        476,
+        476
+       ],
+       "improved": false
+      },
+      {
+       "metric": "gpu_frame",
+       "a_median": 9.0365,
+       "b_median": 8.901,
+       "a_mean": 9.06422,
+       "b_mean": 8.93315,
+       "delta": -0.1355,
+       "delta_pct": -1.5,
+       "p_value": 0.01231,
+       "samples": [
+        480,
+        480
+       ],
+       "improved": true
+      }
+     ],
+     "state": "identical",
+     "images_pass": false,
+     "dir": "build/perf_out/verify/PF-0016"
     }
    ],
-   "summary": "CLOSED: scope:prepass 4.9145 -> 4.4885 (-8.67%, p=0); images differ (visual trade-off, by design); state identical",
+   "summary": "NOT CLOSED: scope:prepass 1.856 -> 1.8345 (-1.16%, p=0.11); images differ (visual trade-off, by design); state identical",
    "machine": "DESKTOP-SN4N74U"
   }
  },
@@ -1649,18 +1720,14 @@
    "src/render/vk_vgeo.c foliage_build_grass (grass_tex_job)",
    "src/core/profiler.c prof_register (+set perf_fix_disable taken before the startup loads)"
   ],
-  "description": "Each loader first lists its files, decodes them with jobs_parallel_for (stbi_load plus the loader's own resampling: the VFX fit-to-page halving, the surface layer resample and AO-into-alpha, the grass box downsample), then runs its old serial loop in the old order taking the decoded pixels. The manifest's decode happens before the loop that creates the textures (a path decoded but not consumed, e.g. listed twice, is freed and decoded again in the loop). perf_fix_disable PF-0024 runs every decode inside the loop again; a +set perf_fix_disable on the command line is applied before the startup loads, so the A side of a startup measurement loads the old way. docs/TEXTURE_MIPS.md \"Decoding on the jobs\".",
+  "description": "Each loader first lists its files, decodes them with jobs_parallel_for (stbi_load plus the loader's own resampling: the VFX fit-to-page halving, the surface layer resample and AO-into-alpha, the grass box downsample), then runs its old serial loop in the old order taking the decoded pixels. The manifest's decode happens before the loop that creates the textures (a path decoded but not consumed, e.g. listed twice, is freed and decoded again in the loop). perf_fix_disable PF-0024 runs every decode inside the loop again; a +set perf_fix_disable on the command line is applied before the startup loads, so the A side of a startup measurement loads the old way. docs/TEXTURE_MIPS.md \"Decoding on the jobs\". Measures (not perf_verify metrics, load lines and the prof startup section): the asset manifest textures, the VFX atlas, the surface layers and the grass atlases load times, startup.",
   "neutral": "The same decode and resampling functions per file with the same arguments, each writing only its own output: the pixels are identical whatever the thread count, and the consumers (texture creation, atlas packing, layer arrays, materials) run in the old order, so texture ids, atlas rects and the uploaded data are identical. Screenshots of 7 views (tools/tests/tex_bc.cfg): A vs B of one repetition never differ more than two repetitions of the same side (identical in 5 views; the wheat and ground views carry run-to-run noise).",
   "metrics": [
-   "log:assets manifest textures ms",
-   "log:vfx atlas ms",
-   "log:surfaces ms",
-   "log:grass ms",
-   "startup (prof: startup)"
+   "cpu_work"
   ],
   "scenes": [
-   "startup",
-   "map vegetation (first load)"
+   "devroom",
+   "foliage"
   ],
   "verification": {
    "runs": [
@@ -2276,7 +2343,7 @@
    "src/render/vk_classic.c vkc_frame (held cascades not culled)",
    "r_shadow_far_interval (fidelity feature shadow_far_interval, settings_audit.json)"
   ],
-  "description": "compute_matrices decides per cascade whether it is due (frame_index phase per far cascade) or forced (no valid hold, camera cut, settings key change, centre moved > 10 % of the radius, radius changed > 2 %). A cascade not due restores the matrices, centre, radius, texel size and bias it was last drawn with; the shadow pass then loads the atlas instead of clearing it, clears only the tiles it redraws, and draws only those; the classic renderer and the skinned shadow cull skip the kept cascades.",
+  "description": "compute_matrices decides per cascade whether it is due (frame_index phase per far cascade) or forced (no valid hold, camera cut, a change of cascades / tile size / fit / atlas, centre moved > 10 % of the radius, radius changed > 2 %, the fit light direction turned more than 0.25 deg). A cascade not due restores the matrices, centre, radius, texel size and bias it was last drawn with; the shadow pass then loads the atlas (the barrier makes the kept tiles readable for the load) instead of clearing it, clears only the tiles it redraws, and draws only those; the classic renderer and the skinned shadow cull skip the kept cascades. Cascades that can be kept are drawn without the PF-0006 receiver-volume cull, since later views sample them.",
   "neutral": "Not fidelity neutral (a visual trade-off): a kept tile shows its casters as they were up to interval - 1 frames earlier. The lit shaders sample it with the matrices it was drawn with, so the shadows stay in place (no swimming) and cascade selection is unchanged. Nothing feeds the simulation: the state hashes must match.",
   "metrics": [
    "scope:shadow_sun",
@@ -2377,9 +2444,95 @@
      "state": "identical",
      "images_pass": true,
      "dir": "build/perf_out/verify/PF-0028"
+    },
+    {
+     "date": "2026-10-18",
+     "machine": "DESKTOP-SN4N74U",
+     "summary": "CLOSED: scope:shadow_sun 19.395 -> 16.645 (-14.18%, p=0); images pass; state identical",
+     "closed": true,
+     "timing": [
+      {
+       "metric": "scope:shadow_sun",
+       "a_median": 19.395,
+       "b_median": 16.645,
+       "a_mean": 19.8555,
+       "b_mean": 16.28936,
+       "delta": -2.75,
+       "delta_pct": -14.18,
+       "p_value": 0.0,
+       "samples": [
+        476,
+        476
+       ],
+       "improved": true
+      },
+      {
+       "metric": "scopec:shadow_sun:fs_invocations",
+       "a_median": 651700000.0,
+       "b_median": 567200000.0,
+       "a_mean": 648313655.46218,
+       "b_mean": 571594537.81513,
+       "delta": -84500000.0,
+       "delta_pct": -12.97,
+       "p_value": 0.0,
+       "samples": [
+        480,
+        480
+       ],
+       "improved": true
+      },
+      {
+       "metric": "gpu_frame",
+       "a_median": 33.255,
+       "b_median": 31.095,
+       "a_mean": 35.38842,
+       "b_mean": 31.85006,
+       "delta": -2.16,
+       "delta_pct": -6.5,
+       "p_value": 0.27161,
+       "samples": [
+        480,
+        480
+       ],
+       "improved": false
+      },
+      {
+       "metric": "cpu_work",
+       "a_median": 6.06165,
+       "b_median": 5.82275,
+       "a_mean": 6.68973,
+       "b_mean": 6.3002,
+       "delta": -0.2389,
+       "delta_pct": -3.94,
+       "p_value": 0.06198,
+       "samples": [
+        480,
+        480
+       ],
+       "improved": false
+      },
+      {
+       "metric": "zone:render:prepare",
+       "a_median": 2.3175,
+       "b_median": 2.332,
+       "a_mean": 2.45923,
+       "b_mean": 2.37194,
+       "delta": 0.0145,
+       "delta_pct": 0.63,
+       "p_value": 0.42111,
+       "samples": [
+        480,
+        480
+       ],
+       "improved": false
+      }
+     ],
+     "state": "identical",
+     "images_pass": true,
+     "dir": "build/perf_out/verify/PF-0028"
     }
    ],
-   "summary": "CLOSED: scope:shadow_sun 14.22 -> 12.15 (-14.56%, p=0); images pass; state identical",
+   "summary": "CLOSED: scope:shadow_sun 19.395 -> 16.645 (-14.18%, p=0); images pass; state identical",
    "machine": "DESKTOP-SN4N74U"
   }
  },
@@ -2388,8 +2541,8 @@
   "rule": "T01",
   "finding": "T01 heaviest passes: alpha-tested foliage costs per pixel; the vegetation zones' prepass + opaque (4 - 6 ms at Modern) scale with the render resolution, and High rendered natively",
   "effort": "S",
-  "status": "open",
-  "tradeoff": "High (was native) and Medium (was FSR 1) render at 0.75 of the display resolution and resolve with TAA-U by default; Modern stays native, Low / Off have no temporal AA. Under any temporal resolve from below display resolution the material samplers (renderer and vgeo module textures) take a mip bias of log2(render / display width) (at most -1) so textures keep the display's texel density. The image is slightly softer in the foliage at High.",
+  "status": "open (perf_fix_disable PF-0029 turns off the mip bias only: the tier defaults are data, measured manually; see description)",
+  "tradeoff": "High (was native) and Medium (was FSR 1) render at 0.75 of the display resolution and resolve with TAA-U by default; Modern stays native, Low / Off have no temporal AA. Under any temporal resolve from below display resolution the scene's material samplers (world textures, terrain / surface arrays, vgeo module textures; not the UI or the impostor atlases) take a mip bias of log2(render / display width) (at most -1) so textures keep the display's texel density. The image is slightly softer in the foliage at High. The shadow views cancel the bias in their alpha test (a shadow map has nothing to do with the display's texel density); r_upscaler 3 / 4 (slots that run FSR 1's spatial EASU) get no bias; MoltenVK devices without samplerMipLodBias get none.",
   "screenshots": [
    "docs/perf_screenshots/upscale_high_native.jpg",
    "docs/perf_screenshots/upscale_high_taau075.jpg"
@@ -2647,7 +2800,7 @@
   "rule": "R14",
   "finding": "R14 textures stored uncompressed (F-1a9828 .. F-a94519, static): every content texture was RGBA8 (only assets/textures/hazard.ktx2 pre-encoded). The 4096^2 Ch*_1001 maps the rule names are source art (the game loads their 1024 / 2048 skin atlases); the textures actually resident are the terrain (216 MB) and surface arrays, the tree / grass / foliage / impostor module textures and the skins: 581 MB of RGBA8 levels in a vegetation session",
   "effort": "L",
-  "status": "implemented, measured A / B (VRAM, GPU, images; a load-time format change: perf_verify does not reload textures)",
+  "status": "implemented, measured A / B in fresh processes (VRAM, GPU, images). A mid-session toggle (r_texture_compress / perf_fix_disable PF-0035) replaces the world textures at once and reloads terrain at the next map, while trees, grass, foliage masks, impostors and surfaces keep their first format: a valid A / B needs one process per side.",
   "tradeoff": "Lossy: every compressed texture is BC7 (8 bits per texel), so texels differ slightly from the RGBA8 source: full frames of the vegetation map 35.5 - 37.1 dB PSNR against RGBA8 (two identical runs: 82 - 100 dB; mean 1.7 - 2.2 levels of 255; grass / leaf card silhouettes where alpha crosses the cut-off, fine grain on terrain, bark and grass), dev room views unchanged (49.3 dB, the same as two identical runs); at 2 x zoom the textures look the same (docs/TEXTURE_MIPS.md \"Block compression\"). Gains (RTX 3060 Ti): texture level data 581 -> 145 MB, VMA allocated on the vegetation map 1614 -> 1179 MB (-27%), vram_usage 1823 -> 1280 MB (-30%), dev room -31 MB; GPU frame (uncapped, 240 frames x 3 alternating runs) meadow -4.0%, view down at the ground -8.2% (its opaque pass -19%), pine forest -2.6%. Cost: the first load of a texture encodes it (vegetation map ~26 s on 12 threads, once per content change), later loads hash the levels and read the cache (warm loads: manifest +48 ms, trees +13%, grass +10%, surfaces +36%, terrain +6%).",
   "screenshots": [
    "docs/tex_bc_screenshots/bc_ground_zoom.jpg",
@@ -2664,18 +2817,16 @@
    "src/render/terrain_tex.c tt_upload_layers / tt_upload_2d_content, src/render/surface_tex.c upload_layers",
    "src/render/vgeo/vgeo_tex.c vg_tex_create (VgTextures.compress), src/render/vk_vgeo.c module_tex_compress"
   ],
-  "description": "Each loader keeps building its RGBA8 mip chain as before (the GPU blit chain's filter on the CPU for world textures, the alpha-weighted / coverage-preserving chains of the vgeo module, the box chains of the terrain and surface arrays); texc_encode encodes every level to BC7 (sRGB for colour, UNORM with the rotated modes for data maps) with jobs_parallel_for over block rows, and the image is created in BC7 with those levels. Results are cached in assets/cache/tex/<key>.bct, key = a 64-bit hash of the levels' texels and sizes, the kind and the codec version. r_texture_compress 0 (dev builds; world textures switch at once, the rest at their next load), perf_fix_disable PF-0035 and a device without BC7 sampling keep RGBA8. r_texture_quality works on BC7 chains as on RGBA8 (dropped levels skipped, lowering copies blocks, raising re-reads the cache).",
+  "description": "Each loader keeps building its RGBA8 mip chain as before (the GPU blit chain's filter on the CPU for world textures, the alpha-weighted / coverage-preserving chains of the vgeo module, the box chains of the terrain and surface arrays); texc_encode encodes every level to BC7 (sRGB for colour, UNORM with the rotated modes for data maps) with jobs_parallel_for over block rows, and the image is created in BC7 with those levels. Results are cached in assets/cache/tex/<key>.bct, key = a 64-bit hash of the levels' texels and sizes, the kind and the codec version. r_texture_compress 0 (dev builds; world textures switch at once, the rest at their next load), perf_fix_disable PF-0035 and a device without BC7 sampling keep RGBA8. r_texture_quality works on BC7 chains as on RGBA8 (dropped levels skipped, lowering copies blocks, raising re-reads the cache). VRAM measures: series vram_usage_mb / vram_allocated_mb; the encode / cache times are load lines.",
   "neutral": "The game state (no rendering decision feeds the simulation), the mip chains' filters, the texture sizes and sampling, the r_texture_quality levels; textures that are not compressed (VFX atlas, classic impostors, UI, KTX2 files, runtime data maps). The image differs by design: the BC7 approximation of each texel (codec error bounds in tests/test_bc_codec.c; bitstreams checked bit-exact against Pillow's BC7 decoder by tools/tests/bc_crosscheck.py).",
   "metrics": [
-   "vram_usage_mb",
-   "vram_allocated_mb",
    "gpu_frame",
-   "scope:opaque",
-   "log:texc sets / encode ms / cache read ms"
+   "scope:opaque"
   ],
   "scenes": [
    "devroom",
-   "foliage (vegetation map: meadow, ground, pine views)"
+   "veg_meadow",
+   "veg_forest_pine"
   ],
   "verification": {
    "runs": [

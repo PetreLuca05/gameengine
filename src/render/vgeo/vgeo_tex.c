@@ -122,6 +122,7 @@ static bool create_image(VgTextures *t, VgOwnTex *o, u32 w, u32 h, u32 levels, c
     o->w = w;
     o->h = h;
     o->mips = levels;
+    o->format = fmt;
     return true;
 }
 

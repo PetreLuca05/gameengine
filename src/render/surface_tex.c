@@ -259,8 +259,8 @@ static void write_sets(void) {
         frame_sets_of(&R->frames[i], sets);
         for (int s = 0; s < FRAME_SET_COUNT; s++) {
             if (!sets[s]) continue;
-            VkDescriptorImageInfo ii[3] = { { R->sampler_linear, S.albedo.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL },
-                                            { R->sampler_linear, S.nrh.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL },
+            VkDescriptorImageInfo ii[3] = { { R->sampler_material, S.albedo.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL },
+                                            { R->sampler_material, S.nrh.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL },
                                             { R->sampler_clamp, S.map.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL } };
             VkWriteDescriptorSet w[3];
             for (int k = 0; k < 3; k++) {

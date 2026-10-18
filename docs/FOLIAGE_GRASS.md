@@ -42,12 +42,16 @@ of mip 2); `grass_gen_mesh` then moves each row's two vertices inward to cover b
 triangles stay the same (a trapezoid per band holds the band's opaque rectangle), on the card's plane,
 with the uv following the position exactly as on the full card: uvs are snapped outward to the half grid
 the vertex format stores, positions are computed against the corners' stored uvs, and
-`grass_mesh_match_bounds` keeps the fitted mesh on the full mesh's quantization grid. Without wind the
-fitted cards draw the full cards' pixels; with wind the WPO bend and the dome normals are evaluated at
-the fitted vertices, so the blades sway through slightly different points (a visual trade-off, no
-visible artifact). Every variant's unfitted twin is built too (no impostor) and drawn instead while
-`perf_fix_disable PF-0016` is on. Measured (meadow, wheat, pine forest, Modern, 2 x A/B): prepass
--8.7 %, opaque -6.8 %, GPU frame -11 %; the meadow alone with the wind off -34 % prepass.
+`grass_mesh_match_bounds` keeps the fitted mesh on the full mesh's quantization grid. The texels shown are
+the full cards'; the per-vertex terms (normals blended toward the clump dome, the trample displacement,
+the wind's WPO bend) are evaluated at the fitted vertices, so blade edges shift by up to a pixel (a
+visual trade-off, no visible artifact; with the wind off the images pass perf_verify's check). Every
+variant's unfitted twin is built too and drawn instead while `perf_fix_disable PF-0016` is on; the fitted
+mesh takes the twin's culling / LOD sphere and its impostor (baked from the full cards), so the LOD and
+impostor switch distances are unchanged. Measured (meadow, Modern, 2 x A/B, with the twin's sphere):
+shadow pass -10 %, GPU frame -1.5 %, prepass -1 % (not significant). The first measurement (prepass
+-8.7 %, GPU frame -11 % over meadow / wheat / pine) came partly from a bug: the fitted mesh's smaller
+sphere moved the grass to its cheaper LODs and impostors nearer.
 
 The Tree It leaf cards were measured for the same fit and left as authored: in most species the leaves
 are part of 7+ triangle connected branch meshes, the two-triangle cards of beech / maple / old are bent

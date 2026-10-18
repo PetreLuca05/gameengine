@@ -233,12 +233,12 @@ static void fp_collect(FpList *l, const cJSON *lv) {
 // level.c build_brush's geometry); false for what is no structure on the ground: raised boxes (shelf
 // items on tables, beams), boxes lower than min_height (marker plates, floor strips), non-colliding
 // boxes, sighting targets.
-static bool hard_rect(const cJSON *b, float min_height, float *cx, float *cz, float *hx, float *hz, float *yaw) {
+static bool hard_rect(const cJSON *b, float level, float min_height, float *cx, float *cz, float *hx, float *hz, float *yaw) {
     const cJSON *t = cJSON_GetObjectItemCaseSensitive(b, "type");
     const char *type = cJSON_IsString(t) ? t->valuestring : "box";
     const cJSON *pos = cJSON_GetObjectItemCaseSensitive(b, "pos");
     float x = arr_f(b, "pos", 0, 0), y = cJSON_GetArraySize(pos) >= 3 ? arr_f(b, "pos", 1, 0) : 0.0f, z = arr_f(b, "pos", cJSON_GetArraySize(pos) >= 3 ? 2 : 1, 0);
-    if (y > 0.3f) return false;   // pos is the brush's base: it does not stand on the ground
+    if (fabsf(y - level) > 0.3f) return false;   // pos is the brush's base: it does not stand on the ground (the pads' level)
     *yaw = num(b, "yaw", 0);
     float lz = 0.0f;   // the rectangle's centre along the brush's local Z
     if (!strcmp(type, "box")) {
@@ -287,7 +287,7 @@ static int hard_paints(const cJSON *lv, const LevelGround *g, cJSON *features) {
     const cJSON *it;
     cJSON_ArrayForEach(it, cJSON_GetObjectItemCaseSensitive(lv, "brushes")) {
         float cx, cz, hx, hz, yaw;
-        if (!hard_rect(it, g->hard_min_height, &cx, &cz, &hx, &hz, &yaw)) continue;
+        if (!hard_rect(it, g->level, g->hard_min_height, &cx, &cz, &hx, &hz, &yaw)) continue;
         add_paint(features, cx, cz, fmaxf(2.0f * (hx + g->hard_margin), g->hard_min_size), fmaxf(2.0f * (hz + g->hard_margin), g->hard_min_size), yaw, g->hard_material);
         n++;
     }

@@ -802,35 +802,44 @@ static void foliage_build_grass(void) {
                 vgeo_foliage_source(&q->fm, &q->src);
                 q->im = (VgImpostorMaterial){ { 1, 1, 1, 1 }, alb[i], aw[i], ah[i], 1.0f, true, a->alpha_cutoff };
                 q->io = (VgImpostorOptions){ 512, 8, &q->im, 1 };
-                q->impostor = !full && a->tier[GRASS_TIERS - 1].end_m < 80.0f;   // tall crops fade before an impostor would show
+                q->impostor = full && a->tier[GRASS_TIERS - 1].end_m < 80.0f;   // tall crops fade before an impostor would show (baked from the full twin: the fitted mesh uses it)
             }
         }
     }
     render_ground_set_cover_count(GR.n);
     jobs_parallel_for(nb, 1, grass_job, gb);
-    u32 fitted_mesh = ~0u;
-    for (int k = 0; k < nb; k++) {
-        GrassBuild *q = &gb[k];
+    // pairs: the fitted mesh (k) then its full twin (k + 1). The fitted mesh takes the twin's culling /
+    // LOD sphere and impostor, so the switch distances and the far look are the full cards'; the twin
+    // is drawn in its place while PF-0016 is off.
+    for (int k = 0; k + 1 < nb; k += 2) {
+        GrassBuild *q = &gb[k], *full = &gb[k + 1];
         vgeo_foliage_mesh_free(&q->fm);
-        if (!q->ok) { log_error("grass: %s variant %u: build failed: %s", GR.a[q->asset].name, q->variant, q->err); continue; }
-        if (q->full) {   // perf_fix_disable PF-0016 draws this one in its fitted twin's place
-            if (fitted_mesh != ~0u) {
-                u32 mesh = vgeo_scene_add_mesh(&G.scene, &q->b);
-                fallback_register(mesh, &q->b, false);
-                vgeo_scene_set_mesh_materials(&G.scene, mesh, GR.mat[q->asset]);
-                vkc_set_mesh_alt(fitted_mesh, mesh);
-            }
-            fitted_mesh = ~0u;
-            vgeo_free(&q->b);
+        vgeo_foliage_mesh_free(&full->fm);
+        if (!full->ok) {
+            log_error("grass: %s variant %u: build failed: %s", GR.a[full->asset].name, full->variant, full->err);
+            if (q->ok) vgeo_free(&q->b);
             continue;
         }
-        fitted_mesh = ~0u;
+        const GrassBuild *draw = q->ok ? q : full;   // a failed fit: the full cards
+        if (!q->ok) log_error("grass: %s variant %u: fitted build failed (%s): full cards", GR.a[q->asset].name, q->variant, q->err);
+        if (q->ok) {
+            VgNode *rq = &q->b.nodes[q->b.hdr.root_node];
+            const VgNode *rf = &full->b.nodes[full->b.hdr.root_node];
+            memcpy(rq->center, rf->center, 12);
+            rq->radius = rf->radius;
+            memcpy(q->b.hdr.sphere, full->b.hdr.sphere, sizeof(q->b.hdr.sphere));
+        }
         if (G.ftype_count < FOLIAGE_TYPES) {
-            u32 mesh = vgeo_scene_add_mesh(&G.scene, &q->b);
-            fitted_mesh = mesh;
-            fallback_register(mesh, &q->b, false);
+            u32 mesh = vgeo_scene_add_mesh(&G.scene, &draw->b);
+            fallback_register(mesh, &draw->b, false);
             vgeo_scene_set_mesh_materials(&G.scene, mesh, GR.mat[q->asset]);
-            if (q->impostor) vgeo_foliage_impostor_upload(&G.scene, &G.tex, mesh, &q->b);
+            if (full->impostor) vgeo_foliage_impostor_upload(&G.scene, &G.tex, mesh, &full->b);
+            if (draw == q) {   // perf_fix_disable PF-0016 draws the full twin in its place
+                u32 alt = vgeo_scene_add_mesh(&G.scene, &full->b);
+                fallback_register(alt, &full->b, false);
+                vgeo_scene_set_mesh_materials(&G.scene, alt, GR.mat[q->asset]);
+                vkc_set_mesh_alt(mesh, alt);
+            }
             struct FoliageType *ft = &G.ftype[G.ftype_count++];
             snprintf(ft->name, sizeof(ft->name), "%s_v%u", GR.a[q->asset].name, q->variant);
             ft->mesh = mesh;
@@ -838,7 +847,8 @@ static void foliage_build_grass(void) {
             ft->role = -1;
             ft->weight = 0;
         }
-        vgeo_free(&q->b);
+        if (q->ok) vgeo_free(&q->b);
+        vgeo_free(&full->b);
     }
     for (int i = 0; i < GR.n; i++) free(alb[i]);
     free(gb);
