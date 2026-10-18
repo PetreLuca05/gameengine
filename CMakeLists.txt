@@ -706,6 +706,19 @@ else()
 endif()
 add_dependencies(test_revive dg_copy_data)
 add_test(NAME revive COMMAND test_revive WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+# Story mode core (docs/STORY.md "Tests"): chapter JSON + lint, objectives, triggers, sequences, the
+# beat clock, .story scripts, saves, and the solver bot finishing every shipped chapter on every branch.
+add_executable(test_story tests/test_story.c src/story/story_def.c src/story/story_sim.c src/story/story_script.c
+  src/story/story_save.c src/story/story_bot.c third_party/cjson/cJSON.c)
+set_target_properties(test_story PROPERTIES C_STANDARD 11)
+target_include_directories(test_story PRIVATE src third_party/cjson)
+if(MSVC)
+  target_compile_options(test_story PRIVATE /W3 /wd4100 /wd4201 /utf-8)
+else()
+  target_link_libraries(test_story PRIVATE m)
+endif()
+add_dependencies(test_story dg_copy_data)
+add_test(NAME story COMMAND test_story WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
 # Procedural audio (docs/AUDIO_PROCEDURAL.md "Tests"): the synth graph, nodes, recipes, the mixer
 # (propagation delay, no allocation in the audio callback, budget) and the environment model / chain
 # (air absorption, occlusion, room estimate in the dev room corridor, cliff echoes). Every source is

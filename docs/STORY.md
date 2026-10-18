@@ -1,6 +1,8 @@
 # Story mode
 
-**Status: design, awaiting approval.** This is the reusable framework for hand-authored chapters. The first chapter is docs/CHAPTER_01.md, and its levels are built from docs/BUILDING_KIT.md.
+**Status:** milestone 1 (the pure story core) is built: `src/story/story_{def,sim,script,save,bot}.c`, ctest `story`
+(`tests/test_story.c`), and Chapter 1's data (`assets/story/chapters/01_tenth_floor.json`, `assets/story/scripts/01.story`).
+Milestones 2–10 (§8) are still to build. This is the reusable framework for hand-authored chapters. The first chapter is docs/CHAPTER_01.md, and its levels are built from docs/BUILDING_KIT.md.
 
 ## 1. Engine audit (what exists vs. what story mode needs)
 
@@ -109,11 +111,35 @@ Combine conditions with `all` / `any` / `not`. Options: `once`, `cooldown` and `
 - `checkpoint`
 - `end_chapter`
 
+**Evaluation rules** (`src/story/story_sim.c`, one `story_tick` per simulation tick, host only):
+- Order per tick:
+  1. Queued events are recorded.
+  2. Running sequences resume (`wait` counts down).
+  3. Objectives propagate.
+  4. Triggers are evaluated in file order. A trigger that fires runs its actions up to the first `wait` immediately, and later triggers in the same tick see the new objective states.
+  5. The clock advances.
+- Event conditions (`volume` enter / exit, `interact`, `item` pickup / use / read, `entity`, `signal`) are true only on the tick the event arrives, except with `"ever": true`.
+  - `ever` is the default inside an objective's `complete_on` / `fail_on`, so a note read before its objective was active still counts.
+  - `volume` inside and `item` has are queries (`StoryView`).
+- `arm` (optional) must hold once before `when` is checked. `fallback: N` fires N s after arming, even if `when` never holds.
+- `once` defaults to true. Repeatable triggers need a `cooldown` and cannot `wait`.
+- `"when": false` plus a fallback is a plain timer after arming.
+- `"activate": "manual"` objectives activate only through an `{"objective": id, "set": "active"}` action. They are for scripted beats whose HUD line must wait for an event (the breaker after the power cut, "Survive" after the zombie spawns).
+- `"timer": N, "since": <objective | trigger>` counts from that objective's completion or that trigger's last fire.
+
+**The beat clock.** The current beat is the last `timeline` entry whose objective is active or done.
+- Below the beat's window, the clock catches up at 2 clock-minutes per second.
+- Inside the window, it moves at `(to - from) / expected` and holds at `to`.
+- A `time` action with a `blend` overrides this until it arrives.
+- `story_time` sets the clock directly.
+
 **Objectives:**
 - States are `inactive → active → done | failed`.
 - `requires` edges make a DAG. The loader rejects cycles and unreachable required nodes.
 - Group objectives use `need: all | N`.
 - `optional` and `hidden` flags are supported.
+- A group of only optional children (`need: N`) shows as the HUD leaf itself; this is how decisions are modelled (`decide` in Chapter 1).
+- Roles complete their `replaces` objectives while that role is played (`by_role`).
 - The HUD objective line shows the deepest active required leaf. The compass shows a `marker` per active objective that has one, and players can ping it (`PING_GO` reuses the existing ping visuals).
 
 ### Narrative script: `assets/story/scripts/*.story` (Markdown-like)
