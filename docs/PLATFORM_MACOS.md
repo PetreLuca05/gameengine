@@ -385,3 +385,61 @@ coordinates, not only the verdict.
   pooled sampled images: a follow-up when profiling on Apple hardware shows the bandwidth.
 * Post stack: compute passes at render resolution with no mid-pass readbacks; the frame graph
   orders them, so there are no CPU stalls.
+
+## 9. Verified (and where)
+
+GitHub Actions `platforms.yml`, branch `claude/macos-port`.
+
+| What | Linux x86_64 (gcc) | Windows x64 (MSVC) | macOS arm64 (Apple clang, macos-15) | macOS x86_64 (Apple clang, macos-15-intel) |
+|---|---|---|---|---|
+| Full build (game, tools, tests) | yes | yes | yes | yes |
+| Headless unit suite | pass | pass | pass | pass |
+| `test_detmath` golden | = | = | = | = |
+| `test_ballistics` trajectory golden | = | = | = | = |
+| `test_recoil` golden | = | = | = | = |
+| `test_mapgen` vegetation raster golden | = | = | = | = |
+| vgeo GPU harness (`vgeo_raster`, `_stream`, `_skinned`, `_foliage`) | llvmpipe, 64-bit **and** forced 32-bit writes | no GPU on the runner (skipped) | **MoltenVK on the runner's Apple paravirtual GPU**: 32-bit writes, vertex pulling; HW / SW depth within 1e-5 of the CPU reference | no GPU (skipped) |
+| SPIR-V -> MSL (SPIRV-Cross) | 139 / 139 (7 never loaded on Metal) | — | 139 / 139, then `xcrun metal` AIR compile | — |
+| Universal build + Deadground.app (ad-hoc signed) | — | — | built as an artifact | — |
+
+Local checks in this repository's container (Linux, llvmpipe, Xvfb):
+* The game runs (`--test`, dev room).
+* Dev-room image, 64-bit vs 32-bit visibility writes: 0 of 1.44 M pixels over threshold.
+* Scope picture-in-picture with the store-op change, under the validation layer: 0 messages, identical image.
+* gcc and clang trees: all tests and goldens equal.
+* `msl_check`: 0 failures.
+
+Bugs only the Mac CI could find, each fixed:
+* minih264's Apple arm64 path called a non-existent intrinsic (`vtbl2q_u8`).
+* `ffx_a.h` relied on implicit `abs` (clang errors).
+* A shader function named `bias` collided with `metal::bias` after SPIRV-Cross, so the SW raster pipelines failed to create on Metal.
+* `ru_maxrss` is in bytes on macOS.
+
+## 10. Not verified here: needs Mac hardware (manual checklist)
+
+Nothing below can run on GitHub's VMs: no real GPU, no display, no Steam client, no iPhone.
+
+- [ ] **Apple Silicon (M1 / M2 / M3+)**:
+  * `--validation` run through the loader (`SDL_VULKAN_LIBRARY`): zero errors in the dev room, horde yard and foliage yard.
+  * `vgeo_bench`: record the vgeo raster ms (two-phase cost) per family and the fidelity auto-detect result.
+  * Image-diff the perf-audit scenes against a Windows reference with `tools/img_diff`. Expected: identical but for TAA noise.
+- [ ] **Intel Mac (UHD 630 / Iris)**:
+  * vgeo must log "disabled" (tier-1 argument buffers) and draw through the classic renderer.
+  * Fidelity Low / Medium hold 60 fps at 1080p.
+  * AMD dGPU Mac: vgeo on.
+- [ ] Retina:
+  * windowed and fullscreen at 2x;
+  * `r_scale` 50-100 %;
+  * UI hit-testing at the corners;
+  * moving the window between a Retina and a 1x display.
+- [ ] Trackpad (two-finger scroll = wheel, click / right click), Magic Mouse, an Xbox / PS5 controller through SDL's GameController backend.
+- [ ] Steam:
+  * overlay (Shift-Tab) inside the signed / notarized bundle;
+  * an invite accepted from a friend (`+connect_lobby` launch);
+  * `libsteam_api.dylib` found from `Contents/Frameworks`.
+- [ ] Phone pairing from an iPhone on the same Wi-Fi. The first launch asks for Local Network: test "Don't Allow" too. Expect the log line, same-machine games listed, and the game still running.
+- [ ] HDR: `r_hdr_output 1` on an XDR / EDR display (HDR10 PQ through MoltenVK). Compare to SDR.
+- [ ] Mac <-> PC LAN session with `tools/tests/bal_net.sh` split across the machines (host on each side once): predicted vs host hits identical.
+- [ ] Notarization with a Developer ID: `tools/macos/sign.sh` + `notarize.sh`, then Gatekeeper on a clean Mac (`spctl` accepts, first launch without a warning).
+- [ ] App Nap: background the game during a lobby wait. Ticks continue (`LSAppNapIsDisabled`).
+- [ ] Crash report: `crash_segv` (or `kill -SEGV`) logs a backtrace, and macOS writes its `.ips`.
