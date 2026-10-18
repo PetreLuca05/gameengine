@@ -34,6 +34,7 @@
 #include "vk_internal.h"
 #include "lod_fade.h"
 #include "shadow_casters.h"
+#include "classic_cull_math.h"
 #include "core/platform.h"
 #include "fidelity/fidelity.h"
 #include "vgeo/vgeo_scene.h"
@@ -47,13 +48,13 @@
 #include <string.h>
 
 #define CL_MATS 8
-#define CL_IMPOSTOR 7u              // key LOD slot of the impostor bucket
+#define CL_IMPOSTOR CLC_IMPOSTOR    // key LOD slot of the impostor bucket (7)
 #define CL_KEY_FADE 8u              // key bit: a fading part (dithered pipelines)
 #define CL_KEY_SHIFT 4              // key = mesh << 4 | fade << 3 | LOD
-#define CL_PARTS 3                  // parts of one instance at most (impostor, coarser, finer)
+#define CL_PARTS CLC_PARTS          // parts of one instance at most (impostor, coarser, finer)
 #define CL_VIEWS 6                  // main view + 4 sun cascades + the scope picture-in-picture
 #define CL_VIEW_PIP 5               // after the cascades (views 1 .. 4)
-#define CL_IMPOSTOR_TRIS 256        // meshes this heavy (coarsest LOD) use r_classic_impostor_px
+#define CL_IMPOSTOR_TRIS CLC_IMPOSTOR_TRIS   // meshes this heavy (coarsest LOD) use r_classic_impostor_px
 
 typedef struct ClSection { u32 first_index, index_count, material; } ClSection;
 typedef struct ClLod {
@@ -588,9 +589,12 @@ void vkc_register_mesh(u32 mesh, const VgBuilt *b, bool persistent) {
              decode ? "decoded DAG cuts" : "exported LODs", h ? (cm->coarse_tris >= CL_IMPOSTOR_TRIS ? "r_classic_impostor_px" : "r_vgeo_impostor_px") : "none");
 }
 
-// Placement chunk loaded (after its commit): per cell, the largest fade end / shadow distance of
-// its instances' meshes (0 = one of them is unlimited), for whole-cell distance culling.
-void vkc_chunk_loaded(const VgScene *s, u32 handle) {
+// A placement chunk's whole-cell limits (cell_tasks): per cell, the largest fade end / shadow distance
+// of its instances' meshes (0 = one of them is unlimited) and their caster classes; the chunk's bounds
+// (the union of its cells') and the largest of its cells' limits. Derived from the scene as committed:
+// the commit re-bounds the cells and takes the meshes' fades, shadow distances and WPO bounds from
+// their materials.
+static void cl_chunk_limits(const VgScene *s, u32 handle) {
     if (handle >= s->pl.chunk_count) return;
     const VgPlacementChunk *ch = &s->pl.chunks[handle];
     for (u32 k = 0; k < ch->cell_count; k++) {
@@ -641,6 +645,17 @@ void vkc_chunk_loaded(const VgScene *s, u32 handle) {
     if (shadow_inf) cc->shadow = 0;
 }
 
+// Placement chunk loaded (after its commit).
+void vkc_chunk_loaded(const VgScene *s, u32 handle) { cl_chunk_limits(s, handle); }
+
+// The scene was committed again (a level, a new foliage mesh, a grass fidelity tier, a larger wind
+// bound): every live chunk's limits and bounds again, or cell_tasks would cull whole cells by the
+// fades / bounds from before.
+void vkc_scene_committed(const VgScene *s) {
+    for (u32 h = 0; h < s->pl.chunk_count; h++)
+        if (s->pl.chunks[h].used) cl_chunk_limits(s, h);
+}
+
 // ------------------------------------------------------------------ culling
 
 static void planes_of(mat4 m, vec4 out[6]) {
@@ -656,12 +671,6 @@ static void planes_of(mat4 m, vec4 out[6]) {
         float l = sqrtf(out[i].x * out[i].x + out[i].y * out[i].y + out[i].z * out[i].z);
         out[i] = v4(out[i].x / l, out[i].y / l, out[i].z / l, out[i].w / l);
     }
-}
-
-static bool sphere_in(const vec4 *pl, int n, vec3 c, float r) {
-    for (int k = 0; k < n; k++)
-        if (pl[k].x * c.x + pl[k].y * c.y + pl[k].z * c.z + pl[k].w < -r) return false;
-    return true;
 }
 
 static bool box_in(const vec4 *pl, int n, const float mn[3], const float mx[3]) {
@@ -686,42 +695,8 @@ static void tmp_reserve(u32 n) {
     C.tmp_cap = cap;
 }
 
-// What a view culls with: planes, the eye (fade / density / shadow distance are from the camera),
-// LOD scale (pixels per metre of error at distance 1, or per metre flat for ortho views).
-typedef struct ClCull {
-    vec4 planes[6];
-    vec3 eye, lod_eye;              // lod_eye: LOD distance origin (the light for local shadows)
-    float px_scale, lod_px, impostor_px, small_impostor_px, density, znear;
-    bool ortho, shadow, era2010;
-    vec4 sphere;                    // local light shadows: casters must touch it (w > 0)
-    // docs/LOD.md (legacy: the cuts from before): bands (octaves), foliage fade range / band scales,
-    // instance fade width, shrink, shadow distance scale and fade fraction, whole-cell limit scales
-    bool legacy;
-    float band, imp_band, fol_k, fol_band_k, fol_instance, fol_shrink, shadow_k, shadow_band, fade_lim_k, shadow_lim_k;
-    u32 layers;                     // shadow views: the light's culling mask (0 = every layer)
-    vec4 rcv[CSM_RCV_MAX];          // sun cascades: the receiver volume (render.c, PF-0006), nrcv planes (0: none)
-    int nrcv;
-    bool scc_on;                    // sun cascades: the caster classes' cascade limits (PF-0013)
-    SccView scc;
-} ClCull;
 static ClCull g_main_cull;          // the last frame's main view (classic_fade_probe)
 static bool g_main_cull_ok;
-
-static float clamp01f(float x) { return x < 0 ? 0 : (x > 1 ? 1 : x); }
-
-// Foliage density / distance fade (docs/LOD.md): the material's fade range and band scaled, a gentler
-// (smoothstep) falloff, each instance fading over fol_instance of it (lod_foliage_alpha: opaque before
-// the fade starts).
-static float cl_foliage_alpha(const ClCull *v, const VgMesh *m, u32 fp, float dist) {
-    if (!(m->fflags & VGMF_FOLIAGE)) return 1.0f;
-    float u = 1.0f;
-    if (m->fade_end > m->fade_start) {
-        float s0 = m->fade_start * v->fol_k, s1 = s0 + (m->fade_end - m->fade_start) * v->fol_band_k;
-        u = clamp01f((s1 - dist) / fmaxf(s1 - s0, 1e-3f));
-        u = u * u * (3.0f - 2.0f * u);
-    }
-    return lod_foliage_alpha(v->density, u, ((float)VG_INST_HASH(fp) + 0.5f) / 256.0f, v->fol_instance);
-}
 
 // One part of an instance: debug = LOD (CL_IMPOSTOR -> 4) + 8 x role (1 incoming / coarser, 2 outgoing
 // / finer, 3 alpha fade only).
@@ -738,87 +713,28 @@ static void emit_part(ClInst *out, u32 *key, u32 *n, u32 mesh, u32 lod, const fl
     key[(*n)++] = mesh << CL_KEY_SHIFT | (fading ? CL_KEY_FADE : 0u) | lod;
 }
 
-// One instance against a view: appends to out / key at *n when kept (thread-safe: reads only).
+// One instance against a view: appends to out / key at *n when kept (thread-safe: reads only). The
+// arithmetic is classic_cull_math.h's (the GPU cull's twin, tests/test_classic_cull.c).
 static void cull_instance(const ClCull *v, const VgScene *s, const VgInstance *in, ClInst *out, u32 *key, u32 *n) {
-    u32 iflags = in->flags_phase >> 16;
-    if (iflags & VGI_SKINNED) return;
-    // Unity-style Cast Shadows Off / Shadows Only, the light's culling mask (docs/SHADOWS_UNITY_MODEL.md)
-    if (v->shadow ? (iflags & VGI_NO_CAST) != 0 : (iflags & VGI_SHADOWS_ONLY) != 0) return;
-    if (v->shadow && v->layers && !((v->layers >> VGI_LAYER(iflags)) & 1u)) return;
+    if (clc_flags_out(v, in->flags_phase >> 16)) return;
     if (in->mesh >= C.mesh_cap || !C.mesh[in->mesh].used || in->mesh >= s->mesh_count) return;
     const ClMesh *cm = &C.mesh[in->mesh];
     const VgMesh *m = &s->meshes[in->mesh];
+    const ClcChain ch = { cm->lod_error, cm->lod_count, cm->coarse_tris, cm->imp_set != VK_NULL_HANDLE };
     float p[3], q[4], sc;
     vgeo_instance_decode(in, p, q, &sc);
-    quat qq = { q[0], q[1], q[2], q[3] };
-    vec3 c = v3_add(v3(p[0], p[1], p[2]), quat_rotate(qq, v3(m->center[0] * sc, m->center[1] * sc, m->center[2] * sc)));
-    float r = m->radius * sc + m->max_wpo * fmaxf(sc, 1.0f);   // vg_wpo_margin
-    if (v->sphere.w > 0) {
-        float rr = r + v->sphere.w;
-        if (v3_len2(v3_sub(c, v3(v->sphere.x, v->sphere.y, v->sphere.z))) > rr * rr) return;
-    }
-    if (!sphere_in(v->planes, 6, c, r)) return;
-    if (v->nrcv && !sphere_in(v->rcv, v->nrcv, c, r)) return;
-    float dx = p[0] - v->eye.x, dy = p[1] - v->eye.y, dz = p[2] - v->eye.z, dist = sqrtf(dx * dx + dy * dy + dz * dz);
-    float casc_a = 1.0f;   // PF-0013: the caster class's cascade limit (0: not in this cascade / beyond its end)
-    if (v->scc_on) {
-        u32 sc = VGMF_SHADOW_CLASS(m->fflags);
-        casc_a = scc_alpha(&v->scc, sc < SCC_COUNT ? (int)sc : SCC_NONE, dist);
-        if (casc_a <= 0.0f) return;
-    }
-    if (!v->legacy) {   // docs/LOD.md
-        float alpha = casc_a, shrink = 1.0f;
-        if (v->shadow && m->shadow_max_dist > 0) {   // the shadow fades out over the end of its (scaled) distance
-            float sd = m->shadow_max_dist * v->shadow_k;
-            if (dist > sd) return;
-            alpha *= v->shadow_band > 0 ? clamp01f((sd - dist) / (sd * v->shadow_band)) : 1.0f;
-        }
-        if (m->fflags & VGMF_FOLIAGE) {   // density / distance fade: dither + the blades shrink
-            float fa = cl_foliage_alpha(v, m, in->flags_phase, dist);
-            if (fa <= 0) return;
-            alpha *= fa;
-            shrink = v->fol_shrink + (1.0f - v->fol_shrink) * fa;
-        }
-        if (alpha <= 0) return;
-        float dl = fmaxf(v3_dist(c, v->lod_eye), v->znear), dcl = fmaxf(dl - r, v->znear);
-        float imp_px = cm->coarse_tris >= CL_IMPOSTOR_TRIS ? v->impostor_px : v->small_impostor_px;
-        u32 ks = m->impostor_grid >> 16;
-        if (ks) imp_px *= (float)ks / 16.0f;
-        float iw = 0;   // impostor share: fades in over imp_band octaves past the switch size
-        if (!v->shadow && cm->imp_set && imp_px > 0) {
-            float size = 2.0f * m->radius * sc * v->px_scale / dl;
-            if (size < imp_px) iw = lod_band_weight(log2f(imp_px / fmaxf(size, 1e-6f)), v->imp_band);
-        }
-        float k = v->ortho ? sc * v->px_scale : sc * v->px_scale / dcl, cw = 0;
-        int first = v->era2010 && cm->lod_count > 1 ? 1 : 0;
-        u32 lod = iw >= 1.0f ? 0u : (u32)lod_pick_band(cm->lod_error, (int)cm->lod_count, first, k, v->lod_px, v->band, &cw);
-        float phase = (float)VG_INST_PHASE(in->flags_phase) / 256.0f, sd = sc * shrink;
-        // parts: impostor [0, iw), coarser LOD [iw, mid), finer LOD [mid, 1)
-        float mid = iw + (1.0f - iw) * cw;
-        if (iw > 0) emit_part(out, key, n, in->mesh, CL_IMPOSTOR, p, q, sd, phase, alpha, iw < 1.0f ? lod_iv_pack(0, iw) : 0.0f);
-        if (iw < 1.0f) {
-            if (cw > 0) emit_part(out, key, n, in->mesh, lod + 1, p, q, sd, phase, alpha, cw < 1.0f || iw > 0 ? lod_iv_pack(iw, mid) : 0.0f);
-            if (mid < 1.0f) emit_part(out, key, n, in->mesh, lod, p, q, sd, phase, alpha, mid > 0 ? lod_iv_pack(mid, 1.0f) : 0.0f);
-        }
+    if (!v->legacy) {   // docs/LOD.md: up to three parts (impostor, coarser, finer LOD)
+        ClcParts o;
+        u32 np = clc_cull(v, m, &ch, p, q, sc, in->flags_phase, &o);
+        for (u32 i = 0; i < np; i++) emit_part(out, key, n, in->mesh, o.lod[i], p, q, o.scale, o.phase, o.alpha, o.iv[i]);
         return;
     }
-    if (v->shadow && m->shadow_max_dist > 0 && dist > m->shadow_max_dist) return;
-    float alpha = (m->fflags & VGMF_FOLIAGE) ? vgeo_foliage_alpha(m, in->flags_phase, dist, v->density) : 1.0f;
+    ClcFront f;
+    if (!clc_front(v, m, p, q, sc, &f)) return;
+    if (v->shadow && m->shadow_max_dist > 0 && f.dist > m->shadow_max_dist) return;
+    float alpha = (m->fflags & VGMF_FOLIAGE) ? vgeo_foliage_alpha(m, in->flags_phase, f.dist, v->density) : 1.0f;
     if (alpha <= 0) return;
-    u32 lod;
-    float dc = fmaxf(v3_dist(c, v->lod_eye) - r, v->znear);
-    // Impostors: trees (coarsest LOD >= CL_IMPOSTOR_TRIS) below r_classic_impostor_px, small cover
-    // (grass tufts: a few cards) below r_vgeo_impostor_px.
-    float imp_px = cm->coarse_tris >= CL_IMPOSTOR_TRIS ? v->impostor_px : v->small_impostor_px;
-    u32 ks = m->impostor_grid >> 16;   // the mesh's switch scale (1/16 units, 0 = 1x), as vgeo_use_impostor
-    if (ks) imp_px *= (float)ks / 16.0f;
-    if (!v->shadow && cm->imp_set && imp_px > 0 && 2.0f * m->radius * sc * v->px_scale / fmaxf(v3_dist(c, v->lod_eye), v->znear) < imp_px) {
-        lod = CL_IMPOSTOR;
-    } else {
-        lod = v->era2010 && cm->lod_count > 1 ? 1 : 0;
-        float k = v->ortho ? sc * v->px_scale : sc * v->px_scale / dc;
-        while (lod + 1 < cm->lod_count && cm->lod_error[lod + 1] * k <= v->lod_px) lod++;
-    }
+    u32 lod = clc_legacy_lod(v, m, &ch, &f, sc);
     ClInst *o = &out[*n];
     o->pos[0] = p[0], o->pos[1] = p[1], o->pos[2] = p[2], o->pos[3] = sc;
     memcpy(o->rot, q, 16);

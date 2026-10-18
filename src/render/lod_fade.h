@@ -108,6 +108,10 @@ bool lod_kept(float f, float n);
 // 0 = no interval (the whole coverage).
 float lod_iv_pack(float lo, float hi);
 bool lod_iv_kept(float packed, float n);
+// [lo, hi) keeps no threshold once quantized (equal steps): such a part is not drawn. Packed it would
+// read as 0 when both ends round to 0 (the whole coverage: a full extra draw), so callers test this
+// before lod_iv_pack (classic_cull_math.h clc_part).
+bool lod_iv_empty(float lo, float hi);
 #define LOD_IV_FULL 131072.0f   // [0, 1): lod_iv_pack(0, 1) = 0 + 256 x 512
 
 // Streaming: the LOD to draw when `want` may not be resident yet (bit i of ready: LOD i resident). The
