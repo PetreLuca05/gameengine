@@ -1,6 +1,7 @@
 #include "sky.h"
 #include "render/post/post_internal.h"
 #include "core/log.h"
+#include "core/profiler.h"
 #include <math.h>
 #include <string.h>
 
@@ -22,10 +23,37 @@ typedef struct SkyImage {
 #define ENV_MIPS 6
 #define SH_VEC4 20
 
+// Cached passes (PF-0026, docs/perf/FINDINGS.md): a pass whose inputs did not change since its last
+// run is skipped and its image keeps that run's texels. The key holds the exact bits of every
+// SkyParams / PostUBO field the pass's shader reads (shaders/sky/*.comp and the sky_common.glsl
+// functions they call: keep these lists in sync) and the versions of the images it samples (bumped
+// by every run of the pass writing them). Equal keys = the same arithmetic on the same values: the
+// same texels. perf_fix_disable PF-0026 runs every pass every frame again.
+#define SKY_KEY_MAX 40
+typedef struct SkyKey { u32 n; u32 v[SKY_KEY_MAX]; } SkyKey;
+typedef struct SkyCache { bool valid; SkyKey key; } SkyCache;
+
+static void key_f(SkyKey *k, const float *f, u32 n) {
+    for (u32 i = 0; i < n && k->n < SKY_KEY_MAX; i++) memcpy(&k->v[k->n++], &f[i], 4);
+}
+static void key_v4(SkyKey *k, vec4 v) { key_f(k, &v.x, 4); }
+static void key_u(SkyKey *k, u32 u) { if (k->n < SKY_KEY_MAX) k->v[k->n++] = u; }
+// The pass must run: the fix is off, it never ran, an input differs from its last run, or the key
+// filled up (a longer key would be cut short: never trust it).
+static bool cache_stale(const SkyCache *c, const SkyKey *k) {
+    return !prof_fix_enabled(PFX_SKY_CACHE) || !c->valid || k->n >= SKY_KEY_MAX || c->key.n != k->n || memcmp(c->key.v, k->v, sizeof(u32) * k->n) != 0;
+}
+
 static struct {
     bool ok, images_init, luts_valid, env_valid;
     SkyImage trans, ms, view, ap, env_next, env_cur, cshadow, clouds, milky;
     bool milky_baked, clouds_valid;
+    // PF-0026: per cached pass its last key, the image versions, this frame's decisions (sky_build)
+    SkyCache c_view, c_aerial, c_clouds, c_cshadow, c_env[4];
+    SkyKey env_key;              // this frame's environment rows key (exec_env)
+    u32 lut_ver, view_ver, clouds_ver, cshadow_ver, env_next_ver, env_finish_ver;
+    bool run_view, run_aerial, run_clouds, run_cshadow;
+    int last_pass;               // this frame's last sky pass (sky_last_pass)
     GpuBuffer params[FRAMES_IN_FLIGHT];
     GpuBuffer sh;                // host visible: readback for tests
     SkyGpu cpu;
@@ -51,6 +79,7 @@ static SkyImage image_create(VkImageType type, u32 w, u32 h, u32 d, u32 mips, Vk
     ici.samples = VK_SAMPLE_COUNT_1_BIT;
     ici.tiling = VK_IMAGE_TILING_OPTIMAL;
     ici.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    vkd_share_image(&ici);   // written on the async compute queue, read by the lit passes (PF-0027)
     VmaAllocationCreateInfo aci = { 0 };
     aci.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
     VK_CHECK(vmaCreateImage(R->vma, &ici, &aci, &im.image, &im.alloc, NULL));
@@ -142,9 +171,11 @@ float sky_sh_luminance(float *latest) {
 
 static void barrier(VkCommandBuffer cmd) {
     VkMemoryBarrier2 mb = { VK_STRUCTURE_TYPE_MEMORY_BARRIER_2 };
-    mb.srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_TRANSFER_BIT;
+    // fg_stages: the async compute queue (PF-0027) keeps only its stages (the lit passes that read
+    // these images on the graphics queue follow through the frame graph's timeline waits).
+    mb.srcStageMask = fg_stages(VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_TRANSFER_BIT);
     mb.srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT | VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_TRANSFER_WRITE_BIT;
-    mb.dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT;
+    mb.dstStageMask = fg_stages(VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT);
     mb.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT;
     VkDependencyInfo di = { VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
     di.memoryBarrierCount = 1;
@@ -208,24 +239,29 @@ static void exec_luts(VkCommandBuffer cmd, void *u) {
 static void exec_view(VkCommandBuffer cmd, void *u) {
     (void)u;
     init_images(cmd);
-    PostBind b = { 0 };
-    pb_tex_general(&b, 0, SK.trans.view, P.linear);
-    pb_tex_general(&b, 1, SK.ms.view, P.linear);
-    pb_img(&b, 8, SK.view.view);
-    bind(cmd, &b);
-    post_dispatch(cmd, "sky/skyview", 192, 108, 1, 8);
-    PostBind b2 = { 0 };
-    pb_tex_general(&b2, 0, SK.trans.view, P.linear);
-    pb_tex_general(&b2, 1, SK.ms.view, P.linear);
-    pb_img(&b2, 8, SK.ap.view);
-    bind(cmd, &b2);
-    post_dispatch(cmd, "sky/aerial", 32, 32, 1, 8);
-    barrier(cmd);
+    if (SK.run_view) {
+        PostBind b = { 0 };
+        pb_tex_general(&b, 0, SK.trans.view, P.linear);
+        pb_tex_general(&b, 1, SK.ms.view, P.linear);
+        pb_img(&b, 8, SK.view.view);
+        bind(cmd, &b);
+        post_dispatch(cmd, "sky/skyview", 192, 108, 1, 8);
+    }
+    if (SK.run_aerial) {
+        PostBind b2 = { 0 };
+        pb_tex_general(&b2, 0, SK.trans.view, P.linear);
+        pb_tex_general(&b2, 1, SK.ms.view, P.linear);
+        pb_img(&b2, 8, SK.ap.view);
+        bind(cmd, &b2);
+        post_dispatch(cmd, "sky/aerial", 32, 32, 1, 8);
+    }
+    if (SK.run_view || SK.run_aerial) barrier(cmd);
 }
 
 static void exec_clouds(VkCommandBuffer cmd, void *u) {
     (void)u;
     init_images(cmd);
+    if (!SK.run_clouds) return;
     PostBind b = { 0 };
     pb_tex_general(&b, 0, SK.trans.view, P.linear);
     pb_tex_general(&b, 2, SK.view.view, P.linear_repeat);
@@ -238,6 +274,7 @@ static void exec_clouds(VkCommandBuffer cmd, void *u) {
 static void exec_cshadow(VkCommandBuffer cmd, void *u) {
     (void)u;
     init_images(cmd);
+    if (!SK.run_cshadow) return;
     PostBind b = { 0 };
     pb_img(&b, 8, SK.cshadow.view);
     bind(cmd, &b);
@@ -324,10 +361,27 @@ static void exec_env(VkCommandBuffer cmd, void *u) {
         env_blend(cmd, true);
         SK.env_valid = true;
         SK.slice = 0;
+        for (int s = 0; s < 4; s++) SK.c_env[s] = (SkyCache){ true, SK.env_key };
+        SK.env_finish_ver = ++SK.env_next_ver;
         return;
     }
-    env_render(cmd, 32);
-    if (SK.slice == 3) env_finish_cycle(cmd);
+    // PF-0026: a quarter's rows are re-rendered only when their inputs changed since they were last
+    // written; a cycle whose rows all stayed keeps the mips and the SH projection it already has. The
+    // easing runs every frame (it converges on the GPU: no host-side test of its fixed point).
+    SkyCache *c = &SK.c_env[SK.slice];
+    if (cache_stale(c, &SK.env_key)) {
+        env_render(cmd, 32);
+        *c = (SkyCache){ true, SK.env_key };
+        SK.env_next_ver++;
+    }
+    if (SK.slice == 3) {
+        if (!prof_fix_enabled(PFX_SKY_CACHE) || SK.env_finish_ver != SK.env_next_ver) {
+            env_finish_cycle(cmd);
+            SK.env_finish_ver = SK.env_next_ver;
+        } else {
+            SK.refilters++;   // the same cycle again (sky_refilter_count counts cycles)
+        }
+    }
     env_blend(cmd, false);
     SK.slice = (SK.slice + 1) & 3;
 }
@@ -336,7 +390,16 @@ static void exec_env(VkCommandBuffer cmd, void *u) {
 
 static vec4 v4f(vec3 v, float w) { return v4(v.x, v.y, v.z, w); }
 
+// The sky passes need nothing from the frame's graphics work: they run on the async compute queue
+// (PF-0027) while the shadow maps render; the lit passes wait for the last one.
+static int sky_pass_async(int p) {
+    fg_async(p);
+    if (p >= 0) SK.last_pass = p;
+    return p;
+}
+
 void sky_build(void) {
+    SK.last_pass = -1;
     if (!sky_active()) return;
     const RenderEnvironment *e = &R->env;
     SkyGpu *g = (SkyGpu *)SK.params[R->frame_slot].mapped;
@@ -371,17 +434,91 @@ void sky_build(void) {
     SK.frame++;
     if (!SK.luts_valid || fabsf(SK.last_mie - mie_q) > 1e-4f) {
         int p = fg_pass("sky_luts", exec_luts, NULL);
-        if (p >= 0) { SK.luts_valid = true; SK.last_mie = mie_q; }
+        if (p >= 0) { SK.luts_valid = true; SK.last_mie = mie_q; SK.lut_ver++; }
+        sky_pass_async(p);
     }
-    fg_pass("sky_view", exec_view, NULL);
-    // The cloud map changes slowly: every other frame.
+    // PF-0026: each pass runs when its key (SkyKey: the fields its shader reads, the versions of what
+    // it samples) differs from its last run's. A skipped pass keeps its pass node (empty: the
+    // profiler's scope stays comparable) and its image the last run's texels.
+    // Sky view (skyview.comp): the lights, the camera altitude, the aerosols, the LUTs.
+    SkyKey kv = { 0 };
+    key_v4(&kv, g->sun_dir);
+    key_v4(&kv, g->moon_dir);
+    key_f(&kv, &g->cam.w, 1);
+    key_f(&kv, &g->ap.z, 1);
+    key_u(&kv, SK.lut_ver);
+    key_u(&kv, P.pipe_gen);
+    // Aerial perspective (aerial.comp): the same + its range / scale and the camera rays (PostUBO
+    // inv_view_proj, jittered under TAA: it changes every frame then, cam_pos).
+    SkyKey ka = kv;
+    key_f(&ka, &g->ap.x, 2);
+    key_f(&ka, P.in.inv_view_proj.m, 16);
+    key_f(&ka, &P.in.cam_pos.x, 3);
+    SK.run_view = cache_stale(&SK.c_view, &kv);
+    SK.run_aerial = cache_stale(&SK.c_aerial, &ka);
+    if (sky_pass_async(fg_pass("sky_view", exec_view, NULL)) >= 0) {
+        if (SK.run_view) { SK.c_view = (SkyCache){ true, kv }; SK.view_ver++; }
+        if (SK.run_aerial) SK.c_aerial = (SkyCache){ true, ka };
+    }
+    // Without cloud cover cloud_density() returns 0 before reading anything else (sky_common.glsl:
+    // clamp(cover) <= 0.001): the cloud map is 0 everywhere and the cloud shadow one value for the key
+    // light, whatever the drift (it never stops: cloud_wind_min), the camera or the layer. A NaN cover
+    // fails the test and keeps the full keys.
+    bool no_cover = g->clouds.x <= 0.001f;
+    // The cloud map changes slowly: every other frame (clouds.comp: the lights, the layer, the camera
+    // position (where the view rays meet the layer) and altitude, the LUTs, the sky view).
     if (!SK.clouds_valid || (SK.frame & 1u) == 0u) {
-        fg_pass("sky_clouds", exec_clouds, NULL);
+        SkyKey kc = { 0 };
+        key_u(&kc, no_cover ? 1u : 0u);
+        if (!no_cover) {
+            key_v4(&kc, g->sun_dir);
+            key_v4(&kc, g->moon_dir);
+            key_v4(&kc, g->clouds);
+            key_f(&kc, &g->clouds2.x, 1);
+            key_f(&kc, &g->clouds2.z, 1);
+            key_f(&kc, &g->clouds3.x, 2);
+            key_v4(&kc, g->cam);
+            key_u(&kc, SK.lut_ver);
+            key_u(&kc, SK.view_ver);
+        }
+        key_u(&kc, P.pipe_gen);
+        SK.run_clouds = cache_stale(&SK.c_clouds, &kc);
+        if (sky_pass_async(fg_pass("sky_clouds", exec_clouds, NULL)) >= 0 && SK.run_clouds) { SK.c_clouds = (SkyCache){ true, kc }; SK.clouds_ver++; }
         SK.clouds_valid = true;
     }
-    fg_pass("sky_cshadow", exec_cshadow, NULL);
-    fg_pass("sky_env", exec_env, NULL);
+    // Cloud shadow (cloud_shadow.comp): its snapped region, the key light, the layer.
+    SkyKey ks = { 0 };
+    key_u(&ks, no_cover ? 1u : 0u);
+    key_f(&ks, &g->key.x, 3);
+    key_f(&ks, &g->clouds2.x, 1);   // 0 x opacity x optical depth: a non-finite one would still matter
+    key_f(&ks, &g->clouds2.w, 1);
+    if (!no_cover) {
+        key_f(&ks, &g->cshadow.x, 3);
+        key_v4(&ks, g->clouds);
+        key_f(&ks, &g->clouds2.z, 1);
+        key_f(&ks, &g->clouds3.x, 1);
+    }
+    key_u(&ks, P.pipe_gen);
+    SK.run_cshadow = cache_stale(&SK.c_cshadow, &ks);
+    if (sky_pass_async(fg_pass("sky_cshadow", exec_cshadow, NULL)) >= 0 && SK.run_cshadow) { SK.c_cshadow = (SkyCache){ true, ks }; SK.cshadow_ver++; }
+    // Environment rows (env_render.comp, the slice is the cache entry): the lights, the night floor, the
+    // ground albedo, the camera altitude, everything it samples (exec_env decides).
+    SkyKey ke = { 0 };
+    key_v4(&ke, g->sun_dir);
+    key_v4(&ke, g->moon_dir);
+    key_f(&ke, &g->cel_z.w, 1);
+    key_v4(&ke, g->ground);
+    key_f(&ke, &g->cam.w, 1);
+    key_u(&ke, SK.lut_ver);
+    key_u(&ke, SK.view_ver);
+    key_u(&ke, SK.clouds_ver);
+    key_u(&ke, SK.cshadow_ver);
+    key_u(&ke, P.pipe_gen);
+    SK.env_key = ke;
+    sky_pass_async(fg_pass("sky_env", exec_env, NULL));
 }
+
+int sky_last_pass(void) { return sky_active() ? SK.last_pass : -1; }
 
 void sky_render_exec(VkCommandBuffer cmd, FgRes color, FgRes depth, mat4 inv_vp, vec3 cam, bool pip) {
     PostBind b = { 0 };

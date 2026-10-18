@@ -9,6 +9,7 @@ GpuBuffer vkr_buffer_create(VkDeviceSize size, VkBufferUsageFlags usage, bool ho
     VkBufferCreateInfo bci = { VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
     bci.size = size;
     bci.usage = usage;
+    vkd_share_buffer(&bci);   // the async compute passes read the frame's buffers (PF-0027)
     VmaAllocationCreateInfo aci = { 0 };
     aci.usage = VMA_MEMORY_USAGE_AUTO;
     if (host_visible) aci.flags = VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT | VMA_ALLOCATION_CREATE_MAPPED_BIT;
@@ -127,7 +128,7 @@ void vkr_image_barrier(VkCommandBuffer cmd, VkImage image, VkImageAspectFlags as
     vkCmdPipelineBarrier2(cmd, &dep);
 }
 
-RenderTarget vkr_target_create(u32 w, u32 h, VkFormat fmt, VkImageUsageFlags usage, VkImageAspectFlags aspect) {
+static RenderTarget target_create(u32 w, u32 h, VkFormat fmt, VkImageUsageFlags usage, VkImageAspectFlags aspect, bool shared) {
     RenderTarget t = { 0 };
     VkImageCreateInfo ici = { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
     ici.imageType = VK_IMAGE_TYPE_2D;
@@ -140,6 +141,7 @@ RenderTarget vkr_target_create(u32 w, u32 h, VkFormat fmt, VkImageUsageFlags usa
     ici.samples = VK_SAMPLE_COUNT_1_BIT;
     ici.tiling = VK_IMAGE_TILING_OPTIMAL;
     ici.usage = usage;
+    if (shared) vkd_share_image(&ici);
     VmaAllocationCreateInfo aci = { 0 };
     aci.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
     aci.flags = VMA_ALLOCATION_CREATE_DEDICATED_MEMORY_BIT;
@@ -157,6 +159,13 @@ RenderTarget vkr_target_create(u32 w, u32 h, VkFormat fmt, VkImageUsageFlags usa
     t.h = h;
     t.layout = VK_IMAGE_LAYOUT_UNDEFINED;
     return t;
+}
+
+RenderTarget vkr_target_create(u32 w, u32 h, VkFormat fmt, VkImageUsageFlags usage, VkImageAspectFlags aspect) {
+    return target_create(w, h, fmt, usage, aspect, false);
+}
+RenderTarget vkr_target_create_shared(u32 w, u32 h, VkFormat fmt, VkImageUsageFlags usage, VkImageAspectFlags aspect) {
+    return target_create(w, h, fmt, usage, aspect, true);
 }
 
 void vkr_target_destroy(RenderTarget *t) {

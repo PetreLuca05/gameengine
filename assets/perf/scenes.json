@@ -2,6 +2,8 @@
   "_doc": "perf_audit benchmark scenes (docs/PERF_AUDIT.md). setup: console lines run after the map loads (host). camera: spline keys [x, y, z, yaw deg (0 = -z), pitch deg] over the captured frames; orbit: a circle around the local player instead (maps without fixed coordinates). Every scene runs with the time paused, the weather locked, dev_fixed_fps 60 (one sim tick per frame: the same work in every run) and no vsync / frame cap.",
   "settle_frames": 120,
   "shots": 3,
+  "_reset": "console lines run before every scene's setup: what a scene's setup may change that the others do not set",
+  "reset": ["weather_clouds -1"],
   "scenes": [
     {
       "id": "devroom",
@@ -250,6 +252,13 @@
       "map": "devroom",
       "setup": ["time_set 10:00", "time_pause 1", "weather_lock 1", "weather_set clear 0", "setpos -140 0 10", "spawn_vehicle car 6", "spawn_vehicle moto 10"],
       "camera": [[-140, 3, 22, 0, -10], [-128, 3, 8, 90, -12], [-140, 4, -6, 180, -14], [-152, 3, 8, 270, -12], [-140, 3, 22, 360, -10]]
+    },
+    {
+      "id": "sky_static",
+      "desc": "dev room yard, a still camera (integer keys), no cloud layer: passes with unchanged inputs (R02)",
+      "map": "devroom",
+      "setup": ["time_set 15:00", "time_pause 1", "weather_lock 1", "weather_set clear 0", "weather_clouds 0"],
+      "camera": [[0, 2, 30, 0, 4], [0, 2, 30, 0, 4]]
     }
   ],
   "net": {

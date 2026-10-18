@@ -1423,6 +1423,12 @@
    "reason": "GTAO tuning (radius, falloff, foliage clamp, sampling, blur, temporal): engine values, not a player setting; the quality is r_ao (tier).",
    "category": "rendering"
   },
+  "r_async_compute": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Async compute queue (PF-0027): where the sky / screen-space / froxel passes run, never what they compute (the same image); a performance and driver-debug switch.",
+   "category": "rendering"
+  },
   "r_atmosphere": {
    "class": "LOCKED",
    "ui": "—",

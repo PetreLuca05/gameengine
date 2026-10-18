@@ -6,6 +6,8 @@
 // Bindings (post universal layout): 0 transmittance, 1 multiple scattering, 2 sky view,
 // 3 aerial perspective (3D), 4 environment (octahedral), 5 noise, 6 depth; 8..11 storage images;
 // 12 PostUBO; 13 SkyParams; 14 SH buffer.
+// sky.c skips the sky view, aerial, cloud, cloud shadow and environment row passes while the fields
+// they read are unchanged (PF-0026 keys): a pass that starts reading another field needs it in its key.
 #include "post_common.glsl"
 
 layout(std430, set = 0, binding = 13) readonly buffer SkyParams {

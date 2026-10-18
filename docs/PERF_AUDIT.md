@@ -50,8 +50,10 @@ Analyzer: `python tools/perf_audit/perf_audit.py analyze <profile dir>` / `scan`
    (vegetation map), 500 zombies on the vegetation map (`horde_foliage`), the vegetation map's
    density zones (`veg_*`: pine / broadleaf forest interiors, forest edge, meadow, wheat field, dead
    wood, pond shore, the valley from the south rim, hordes in the pine forest and on the meadow),
-   water + rain (water yard), night with every light, vehicle yard, plus the
-   2-client LAN run (`lan2_host` / `lan2_client`). Every run pauses the clock and the weather, sets
+   water + rain (water yard), night with every light, vehicle yard, a still camera without clouds
+   (`sky_static`: what stops changing when nothing moves, R02), plus the 2-client LAN run
+   (`lan2_host` / `lan2_client`). The file's `reset` lines run before every scene's setup (cvars a
+   setup may change that the other scenes do not set). Every run pauses the clock and the weather, sets
    `dev_fixed_fps 60` (exactly one sim tick per frame: the same work in every run whatever the frame
    rate), drops vsync and the frame cap, settles 120 frames (streaming, LOD fades, exposure, temporal
    histories), then captures N frames along the scene's camera spline (or an orbit around the player
@@ -302,6 +304,17 @@ outside the runs): absolute GPU milliseconds of separate runs varied up to 2x, s
   (docs/SHADOWS.md "Caster cascade limits", FINDINGS.md): meadow shadow pass -38 % at Modern, -84 % at
   Low; the forest interiors only -1 .. -9 % (their fragments are tree leaf cards).
 - `horde_foliage` is not deterministic between map loads (above, Verification).
+- Sky / frame graph: PF-0026 skips the sky passes whose inputs stand still (bit-identical: the key is
+  every uniform the shader reads). R02 assumed the clock and the weather freeze them all; in fact the
+  cloud layer drifts with the wind even with the weather locked, so in the benchmark scenes only the
+  sky view LUT (a constant camera altitude) stands still: `sky_view` -20 % (0.031 -> 0.025 ms, the
+  aerial perspective is jittered under TAA and runs); a still camera without a cloud layer
+  (`sky_static`) skips everything but that and the easing: the four sky passes 0.086 -> 0.057 ms
+  (measured serially, `r_async_compute 0`; the empty pass nodes keep their timestamps). The
+  savings are small: the sky was already cheap. PF-0027 runs the sky, the screen-space chain and the froxels
+  on the async compute queue next to the shadow maps / the opaque pass: GPU frame -3.6 % pooled
+  (the dev room -5 .. -10 %, the meadow -4 %, the pine forest -0.5 .. -5 %), docs/RENDERING_POST.md
+  "Async compute".
 
 ## CI
 

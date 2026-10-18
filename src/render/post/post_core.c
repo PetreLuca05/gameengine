@@ -366,6 +366,7 @@ bool post_create_pipelines(void) {
         if (P.pipes[i].pipe) vkDestroyPipeline(R->device, P.pipes[i].pipe, NULL);
         P.pipes[i].pipe = VK_NULL_HANDLE;
     }
+    P.pipe_gen++;
     return true;
 }
 

@@ -85,6 +85,7 @@ static void make_image_mips(VkImage *img, VmaAllocation *alloc, VkImageView *vie
     ici.samples = VK_SAMPLE_COUNT_1_BIT;
     ici.tiling = VK_IMAGE_TILING_OPTIMAL;
     ici.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    vkd_share_image(&ici);   // noise / white / LUT fallbacks: read by the async compute passes too (PF-0027)
     VmaAllocationCreateInfo aci = { 0 };
     aci.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
     VK_CHECK(vmaCreateImage(R->vma, &ici, &aci, img, alloc, NULL));
@@ -119,6 +120,7 @@ static void make_image(VkImage *img, VmaAllocation *alloc, VkImageView *view, Vk
     ici.samples = VK_SAMPLE_COUNT_1_BIT;
     ici.tiling = VK_IMAGE_TILING_OPTIMAL;
     ici.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    vkd_share_image(&ici);   // noise / white / LUT fallbacks: read by the async compute passes too (PF-0027)
     VmaAllocationCreateInfo aci = { 0 };
     aci.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
     VK_CHECK(vmaCreateImage(R->vma, &ici, &aci, img, alloc, NULL));

@@ -23,6 +23,7 @@ typedef struct VkpSlot {
     int frame;                        // capture frame the slot was recorded in
     int n;
     char names[VKP_MAX_SCOPES][32];
+    bool stats[VKP_MAX_SCOPES];       // a pipeline statistics query was recorded
     u64 counts[VKP_MAX_SCOPES + 1][VKP_COUNT];   // [VKP_MAX_SCOPES]: commands outside any scope
 } VkpSlot;
 
@@ -32,14 +33,17 @@ static struct {
     VkpSlot slot[FRAMES_IN_FLIGHT];
     u32 cur;
     bool rec;                         // this frame records scopes
-    int open;                         // open scope (-1 none)
+    int open[2];                      // open scope per stream (-1 none): graphics, async compute (PF-0027)
+    int stream;
+    bool stream_stats;
     VkpSeries *series;
     int series_count, frames;
 } K;
 
 void vkp_init(bool pipeline_stats) {
     memset(&K, 0, sizeof(K));
-    K.open = -1;
+    K.open[0] = K.open[1] = -1;
+    K.stream_stats = true;
     VkQueryPoolCreateInfo qi = { VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO };
     qi.queryType = VK_QUERY_TYPE_TIMESTAMP;
     qi.queryCount = VKP_MAX_SCOPES * 2 * FRAMES_IN_FLIGHT;
@@ -82,20 +86,25 @@ static void read_slot(u32 si) {
     VkpSlot *sl = &K.slot[si];
     if (!sl->active || !K.series || sl->frame < 0 || sl->frame >= K.frames) { sl->active = false; return; }
     int n = sl->n;
-    u64 ts[VKP_MAX_SCOPES * 2], ps[VKP_MAX_SCOPES * VKP_STATS];
-    bool ts_ok = n > 0 && vkGetQueryPoolResults(R->device, K.ts, si * VKP_MAX_SCOPES * 2, (u32)n * 2, sizeof(u64) * (size_t)n * 2, ts, sizeof(u64),
-                                                VK_QUERY_RESULT_64_BIT) == VK_SUCCESS;
-    bool ps_ok = n > 0 && K.stats && vkGetQueryPoolResults(R->device, K.ps, si * VKP_MAX_SCOPES, (u32)n, sizeof(u64) * VKP_STATS * (size_t)n, ps,
-                                                           sizeof(u64) * VKP_STATS, VK_QUERY_RESULT_64_BIT) == VK_SUCCESS;
+    // With availability: scopes on the async compute queue may have no statistics query (PF-0027).
+    static u64 ts[VKP_MAX_SCOPES * 2 * 2], ps[VKP_MAX_SCOPES * (VKP_STATS + 1)];
+    VkResult tr = n > 0 ? vkGetQueryPoolResults(R->device, K.ts, si * VKP_MAX_SCOPES * 2, (u32)n * 2, sizeof(u64) * 2 * (size_t)n * 2, ts, sizeof(u64) * 2,
+                                                VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT)
+                        : VK_NOT_READY;
+    VkResult pr = n > 0 && K.stats ? vkGetQueryPoolResults(R->device, K.ps, si * VKP_MAX_SCOPES, (u32)n, sizeof(u64) * (VKP_STATS + 1) * (size_t)n, ps,
+                                                           sizeof(u64) * (VKP_STATS + 1), VK_QUERY_RESULT_64_BIT | VK_QUERY_RESULT_WITH_AVAILABILITY_BIT)
+                                   : VK_NOT_READY;
+    bool ts_ok = tr == VK_SUCCESS || tr == VK_NOT_READY, ps_ok = n > 0 && K.stats && (pr == VK_SUCCESS || pr == VK_NOT_READY);
     float period = R->gpu_props.limits.timestampPeriod * 1e-6f;
     for (int i = 0; i <= n; i++) {
         VkpSeries *s = series_for(i < n ? sl->names[i] : "(unscoped)");
         if (!s) continue;
         int f = sl->frame;
         s->frames_seen++;
-        if (i < n && ts_ok) s->ms[f] += (s->ms[f] < 0 ? 1.0f : 0.0f) + (float)(ts[i * 2 + 1] - ts[i * 2]) * period;   // a name used twice adds up
-        if (i < n && ps_ok)
-            for (int k = 0; k < VKP_STATS; k++) s->stat[k][f] += (s->stat[k][f] < 0 ? 1.0f : 0.0f) + (float)ps[i * VKP_STATS + k];
+        if (i < n && ts_ok && ts[i * 4 + 1] && ts[i * 4 + 3])   // a name used twice adds up
+            s->ms[f] += (s->ms[f] < 0 ? 1.0f : 0.0f) + (float)(ts[i * 4 + 2] - ts[i * 4]) * period;
+        if (i < n && ps_ok && sl->stats[i] && ps[i * (VKP_STATS + 1) + VKP_STATS])
+            for (int k = 0; k < VKP_STATS; k++) s->stat[k][f] += (s->stat[k][f] < 0 ? 1.0f : 0.0f) + (float)ps[i * (VKP_STATS + 1) + k];
         for (int c = 0; c < VKP_COUNT; c++) s->count[c][f] += (u32)DG_MIN(sl->counts[i < n ? i : VKP_MAX_SCOPES][c], 0xFFFFFFFFull);
     }
     sl->active = false;
@@ -108,7 +117,9 @@ void vkp_frame_begin(VkCommandBuffer cmd, u32 slot) {
     VkpSlot *sl = &K.slot[K.cur];
     int frame = prof_capture_frame();
     K.rec = dg_prof_recording && frame >= 0 && K.series;
-    K.open = -1;
+    K.open[0] = K.open[1] = -1;
+    K.stream = 0;
+    K.stream_stats = true;
     sl->n = 0;
     sl->frame = frame;
     memset(sl->counts, 0, sizeof(sl->counts));
@@ -134,33 +145,40 @@ void vkp_frame_begin(VkCommandBuffer cmd, u32 slot) {
     prof_series("vram_allocated_mb", alloc / (1024.0 * 1024.0));
 }
 
+void vkp_stream(int stream, bool stats) {
+    K.stream = stream ? 1 : 0;
+    K.stream_stats = stats;
+}
+
 void vkp_scope_end(VkCommandBuffer cmd) {
-    if (!K.rec || K.open < 0) return;
+    int o = K.open[K.stream];
+    if (!K.rec || o < 0) return;
     VkpSlot *sl = &K.slot[K.cur];
-    u32 q = K.cur * VKP_MAX_SCOPES + (u32)K.open;
-    if (K.stats) (vkCmdEndQuery)(cmd, K.ps, q);
+    u32 q = K.cur * VKP_MAX_SCOPES + (u32)o;
+    if (sl->stats[o]) (vkCmdEndQuery)(cmd, K.ps, q);
     (vkCmdWriteTimestamp2)(cmd, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, K.ts, q * 2 + 1);
-    (void)sl;
-    K.open = -1;
+    K.open[K.stream] = -1;
 }
 
 void vkp_scope_begin(VkCommandBuffer cmd, const char *name) {
     if (!K.rec) return;
-    if (K.open >= 0) vkp_scope_end(cmd);
+    if (K.open[K.stream] >= 0) vkp_scope_end(cmd);
     VkpSlot *sl = &K.slot[K.cur];
     if (sl->n >= VKP_MAX_SCOPES) return;
     int i = sl->n++;
     dg_strcpy(sl->names[i], sizeof(sl->names[i]), name);
     u32 q = K.cur * VKP_MAX_SCOPES + (u32)i;
     (vkCmdWriteTimestamp2)(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, K.ts, q * 2);
-    if (K.stats) (vkCmdBeginQuery)(cmd, K.ps, q, 0);
-    K.open = i;
+    sl->stats[i] = K.stats && K.stream_stats;
+    if (sl->stats[i]) (vkCmdBeginQuery)(cmd, K.ps, q, 0);
+    K.open[K.stream] = i;
 }
 
 void vkp_note_slow(VkpCount c, u64 n) {
     if (!K.rec) return;
     VkpSlot *sl = &K.slot[K.cur];
-    sl->counts[K.open >= 0 ? K.open : VKP_MAX_SCOPES][c] += n;
+    int o = K.open[K.stream];
+    sl->counts[o >= 0 ? o : VKP_MAX_SCOPES][c] += n;
 }
 
 // ------------------------------------------------------------------ counted entry points

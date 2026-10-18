@@ -5,7 +5,9 @@ post-processing / screen-space stack (`src/render/post/`, `shaders/post/`) is a 
 passes around the lit scene. Everything after the lit pass is linear HDR until the tonemapper.
 
 ```
-vfx compute -> shadow map                                    (explicit barriers, render.c)
+vfx compute -> foliage wind -> rain occlusion                (explicit barriers, render.c)
+shadow maps: sun cascades, moon, viewmodel tile, local lights (the graph's "shadows" marker)
+sky LUTs / sky view / clouds / cloud shadow / environment    (docs/DAYNIGHT.md)
 prepass (depth + G-buffer: normal, material, velocity)
 hi-z -> contact shadows -> GTAO (+bilateral blur, temporal, upsample) -> SSGI (+temporal, upsample)
      -> SSR (+temporal) -> volumetric froxels (inject, integrate)
@@ -18,11 +20,18 @@ exposure (histogram) -> bloom -> lens flare -> tonemap + grade (or debug view)
 final (CAS, grain, dither, sRGB / PQ) + UI -> present
 ```
 
+That is the serial order. With async compute (below) the frame is declared prepass -> sky ->
+screen-space chain -> shadow maps -> froxels -> opaque ..., the sky and the screen-space chain run
+on a second queue next to the shadow maps, the froxels next to the opaque pass.
+
 ## Frame graph (`src/render/graph/fg.{h,c}`)
 
 * `fg_begin(render w/h, output w/h)`, then per pass `fg_pass(name, exec, user)` with
-  `fg_read` / `fg_write(pass, resource, access)`; `fg_execute(cmd)` allocates, inserts the
-  barriers (synchronization2), timestamps and runs every pass in registration order.
+  `fg_read` / `fg_write(pass, resource, access)`; `fg_exec_begin(cmd)` allocates and schedules,
+  `fg_exec_until(marker)` / `fg_exec_rest()` insert the barriers (synchronization2), timestamps and
+  run every pass in registration order (the caller records a marker pass's work in between:
+  render.c's shadow maps at `fg_marker("shadows")`), `fg_submit` ends and submits the command
+  buffers. `fg_async(pass)` / `fg_after(pass, dep)`: async compute, below.
 * **Resources**: `fg_texture` (transient: pooled by format / size / mips, **aliased** when the
   lifetimes don't overlap), `fg_history` (persistent by name, e.g. `taa_hist_a/b`;
   `fg_history_valid()` is false on the first frame / after a resize), `fg_import` (renderer-owned
@@ -37,6 +46,43 @@ final (CAS, grain, dither, sRGB / PQ) + UI -> present
   (two resources of one pass never share an image).
 * `r_post_disable ssr,gtao,...` skips passes by name (a skipped pass's consumers fall back to
   neutral inputs). `final` and the scene passes should stay enabled.
+
+## Async compute (PF-0027)
+
+Compute passes marked `fg_async` run on a second queue: the sky passes (`sky_luts` .. `sky_env`),
+the screen-space chain (`hiz`, `contact`, `gtao`, `ao_blur_x/y`, `gtao_temporal`,
+`gtao_upsample`, SSGI, SSR) and the froxels (`vol_inject`, `vol_integrate`). Their GPU time hides
+under the raster-bound shadow maps and opaque pass, where the compute units idle.
+
+| | |
+|---|---|
+| Queues (`vk_device.c`) | a compute-only family (its own hardware queue on NVIDIA / AMD) and a second queue of the graphics family, when the device has them; `--no-async-compute` creates neither (all resources EXCLUSIVE). The log line `vulkan: async compute:` says what was found |
+| `r_async_compute` (LOCKED, default 1) | 0 off, 1 the compute family, 2 the second graphics queue; off when the device has not that queue (macOS / MoltenVK: one family, so off by default). Read every frame; `perf_fix_disable PF-0027` turns it off. Mode 2 measured slower on the RTX 3060 Ti (GPU frame +9 .. +14 %, the async passes' scopes do not grow: the driver time-slices the graphics family's queues instead of overlapping them) |
+| Sharing | with a compute family, what both queues touch is `VK_SHARING_MODE_CONCURRENT` between the two families (`vkd_share_image` / `vkd_share_buffer`): the frame graph's pooled images, depth, the sun shadow map, the sky images, the post textures (noise / white / LUT), every `vkr_buffer_create` buffer. No ownership transfers |
+| Scheduling (`fg.c schedule`) | every pass gets a queue; a pass depends on the previous user of each of its resources and on its `fg_after` passes, an async pass also on the graphics work declared before it (only graphics passes declared after it overlap it: fewer batches). When one of those is on the other queue (and no earlier batch of its queue already waited for it or a later one), the pass starts a batch that waits for the other queue's timeline value of the batch holding it, and that batch ends with a signal. Batch 0 holds the work recorded before the graph, whose signal also follows the previous frame's graphics work (the sky images the async passes rewrite were read there). The last graphics batch waits for the last async batch (the frame's fence covers both queues) |
+| Layouts | what an async pass uses next is moved to its layout at the end of the graphics batch it waits for (`batch_handoff`): the compute queue never changes a depth layout. A resource last used on the other queue (or in an earlier frame there) needs no source access in its barrier: the timeline wait ordered and published the writes |
+| Non-graph dependencies | `fg_after`: the lit passes (`opaque`, `opaque_dynamic`, `transparent`, `sky`, `fog_apply`) after `sky_last_pass()` (the environment, SH, cloud shadow and aerial perspective images); `vol_inject` after the `shadows` marker (the shafts sample the sun shadow map). Stage masks for barriers inside an async exec go through `fg_stages` (the compute family has no fragment / vertex stages) |
+| Frame order | the shadow maps are recorded at the graph's `shadows` marker. With async compute this frame (`fg_async_frame`) the graph is declared prepass, sky, screen-space chain, `shadows`, froxels, opaque ... (`build_frame_graph`): the sky and the screen-space chain form one async batch after the prepass, next to the shadow maps; the froxels one after the shadow maps, next to the opaque pass. Without it the marker comes first and the sky before the prepass (the old order). The rain occlusion map, which the prepass reads for wet surfaces, is drawn before the graph in both |
+| Submission | one `vkQueueSubmit2` per queue (timeline semaphores allow a wait submitted before its signal); the last graphics batch waits for the swapchain image and signals the present and the slot's fence |
+| Profiling | GPU scopes per queue (`vkp_stream`; no pipeline statistics on the compute family). An async pass's scope is its elapsed time while it shares the GPU (it grows, e.g. `vol_inject` 0.08 -> 0.5 ms): compare `gpu_frame` |
+| `r_async_info` | logs the last frame's batches, e.g. `G[pre..prepass]+ C[sky_luts..ssr_temporal]+ G[shadows]+ C[vol_inject..vol_integrate]+ G[opaque..sky] G[fog_apply..final]` (G graphics, C async, + signals); the first frames and every change of shape are logged (a few times) |
+
+Measured (RTX 3060 Ti, driver 581.80, Modern, 1600 x 900, `perf_verify PF-0027`, A / B alternating
+in one process, the GPU shared with other work; docs/perf/FINDINGS.md): GPU frame, pooled, -3.6 %
+(p < 1e-4), images and state identical. Per scene over two runs: the dev room -4.8 .. -10.4 %
+(4.4 -> 4.0 ms), the meadow -3.6 .. -3.8 % (10.2 -> 9.8 ms), the pine forest -0.5 .. -5.3 % (its
+14 ms shadow pass is far longer than the ~0.8 ms of async work, the gain is bounded by that work).
+CPU work +3 .. +5 % (+0.15 ms, not significant on this machine: one more submit, six command
+buffers instead of one). The first layout (sky in its own batch next to the prepass, eight batches)
+saved about as much GPU time with more CPU time; the froxels on the graphics queue (four batches)
+saved less in the forest. `r_async_compute 2` (the second graphics queue) made the GPU frame 9 ..
+14 % slower.
+
+Validation: the core layers report nothing with async compute on (compute family and second
+graphics queue) or off; synchronization validation reports the same 164 messages with it on and
+off in the dev room (a pre-existing write-after-write report on a depth layout transition after a
+sampled read; with async compute half of them are reported at submit time, because the write and
+the transition now sit in different command buffers), none on the compute queue.
 
 ## G-buffer, velocity and jitter
 
@@ -285,3 +331,6 @@ full res): 0 messages; static frames change < 1 % of pixels, and motion changes 
 * GPU particles don't receive the volumetric fog yet (blended lit surfaces do).
 * The frame graph pool favours speed over memory (≈ 175–280 MB at 1080p); transients alias only
   within identical format / size / mip keys.
+* Async compute (PF-0027) is measured on one NVIDIA GPU only. AMD / Intel take the same compute
+  family path (CONCURRENT sharing) untested; macOS (MoltenVK, one queue family) runs it off unless
+  `r_async_compute 2`. The async passes' GPU scopes are elapsed times under overlap.

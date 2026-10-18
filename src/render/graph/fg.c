@@ -21,6 +21,7 @@ typedef struct FgPhys {
     VkPipelineStageFlags2 stage;
     VkAccessFlags2 access;
     bool last_write;
+    u8 queue;                 // the queue of the last access (0 graphics, 1 async compute; PF-0027)
     int busy_until;           // last pass index using it this frame (-1 = free)
     u32 last_frame;           // frame number of the last use (eviction)
     char history[48];         // non-empty: persistent texture of that name
@@ -47,6 +48,7 @@ typedef struct FgResource {
     VkPipelineStageFlags2 stage;
     VkAccessFlags2 access;
     bool last_write;
+    u8 queue;                 // imported: the queue of the last access this frame
     bool valid_at_begin;      // history: content was valid when the frame started
 } FgResource;
 
@@ -57,11 +59,30 @@ typedef struct FgPassRec {
     FgExecFn exec;
     void *user;
     bool enabled;
+    bool async;               // fg_async: may run on the async compute queue
+    bool marker;              // fg_marker: the caller records its work
     FgUse uses[16];
     int use_count;
+    int after[4];             // fg_after: passes it needs without a shared resource
+    int after_n;
 } FgPassRec;
 
 #define FG_POOL_MAX 128
+
+// Async compute (PF-0027): a batch is a run of one queue's passes between cross-queue sync points,
+// recorded into its own command buffer. Batch 0 is the graphics work recorded before the graph
+// (render_end_frame: uploads, particles, wind, rain occlusion), FG_PRE as a pass index.
+#define FG_MAX_BATCHES 24
+#define FG_PRE (-1)
+#define FG_NO_WAIT (-2)
+typedef struct FgBatch {
+    int queue;                // 0 graphics, 1 async compute
+    int first, last;          // pass range (FG_PRE: the pre-graph work)
+    int wait;                 // the other queue's pass whose batch completes first (FG_PRE, FG_NO_WAIT)
+    bool signal;              // signals its queue's timeline (the other queue waits for it)
+    u64 value;
+    VkCommandBuffer cmd;
+} FgBatch;
 
 static struct {
     bool init;
@@ -81,9 +102,24 @@ static struct {
     char last_names[FG_MAX_PASSES][32];
     int last_count;
     Cvar *disable;
-    int cur;                  // the executing pass (fg_store_op), -1 outside fg_execute
+    int cur;                  // the executing pass (fg_store_op, fg_stages), -1 outside a pass exec
     FgReport report;          // the last executed graph (fg_check + pool state)
-    bool report_valid;        // PF-0005: built on the first fg_last_report after fg_execute
+    bool report_valid;        // PF-0005: built on the first fg_last_report after fg_exec_begin
+    // async compute (PF-0027)
+    int async_kind;           // this frame: 0 off, 1 the compute family, 2 the second graphics queue
+    bool async_graphics;      // the async queue's family supports graphics (stage masks, statistics)
+    VkSemaphore timeline[2];  // graphics, async: the batches' signals
+    u64 timeline_value[2];
+    VkCommandPool cmd_pool[FRAMES_IN_FLIGHT][2];   // per family: [0] graphics (also the second graphics queue), [1] compute
+    VkCommandBuffer cmd_buf[FRAMES_IN_FLIGHT][2][FG_MAX_BATCHES];
+    int cmd_used[2];
+    FgBatch batch[FG_MAX_BATCHES];
+    int batch_n;
+    u8 pass_queue[FG_MAX_PASSES];
+    u8 pass_batch[FG_MAX_PASSES];
+    signed char prev_user[FG_MAX_PASSES][16];   // per use: the pass that used the resource before (-1 none)
+    int cursor;               // next pass to record
+    int open_marker;          // the marker between fg_exec_until and fg_exec_rest (-1 none)
 } G;
 
 static void write_profile(FILE *f);
@@ -98,6 +134,21 @@ void fg_init(void) {
     VK_CHECK(vkCreateQueryPool(R->device, &qi, NULL, &G.qp));
     G.disable = cvar_reg_string("r_post_disable", "", CVAR_LOCKED, "comma separated frame graph passes to skip (e.g. ssr,gtao); r_post_passes lists them");
     prof_add_section("fg", write_profile);
+    G.open_marker = -1;
+    if (R->compute_queue || R->gfx_queue2) {
+        VkSemaphoreTypeCreateInfo ti = { VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO };
+        ti.semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE;
+        VkSemaphoreCreateInfo si = { VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO };
+        si.pNext = &ti;
+        for (int q = 0; q < 2; q++) VK_CHECK(vkCreateSemaphore(R->device, &si, NULL, &G.timeline[q]));
+    }
+    for (int f = 0; f < FRAMES_IN_FLIGHT; f++)
+        for (int k = 0; k < 2; k++) {
+            if (k == 1 && !R->compute_queue) continue;
+            VkCommandPoolCreateInfo pci = { VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
+            pci.queueFamilyIndex = k ? R->compute_family : R->queue_family;
+            VK_CHECK(vkCreateCommandPool(R->device, &pci, NULL, &G.cmd_pool[f][k]));
+        }
 }
 
 static void phys_destroy(FgPhys *p, bool now) {
@@ -121,6 +172,11 @@ void fg_shutdown(void) {
     vkDeviceWaitIdle(R->device);
     for (int i = 0; i < FG_POOL_MAX; i++) phys_destroy(&G.pool[i], true);
     vkDestroyQueryPool(R->device, G.qp, NULL);
+    for (int q = 0; q < 2; q++)
+        if (G.timeline[q]) vkDestroySemaphore(R->device, G.timeline[q], NULL);
+    for (int f = 0; f < FRAMES_IN_FLIGHT; f++)
+        for (int k = 0; k < 2; k++)
+            if (G.cmd_pool[f][k]) vkDestroyCommandPool(R->device, G.cmd_pool[f][k], NULL);
     G.init = false;
 }
 
@@ -158,7 +214,17 @@ void fg_begin(u32 rw, u32 rh, u32 ow, u32 oh) {
     G.output_w = ow;
     G.output_h = oh;
     for (int i = 0; i < FG_POOL_MAX; i++) G.pool[i].busy_until = -1;
+    // Async compute this frame (PF-0027): r_async_compute 1 the compute-only family (it needs timestamps:
+    // the passes are timed), 2 the second graphics queue (measured slower on an RTX 3060 Ti: the driver
+    // time-slices the graphics family's queues); off when the device has not that queue.
+    int want = R->r_async_compute ? R->r_async_compute->i : 0;
+    bool c = R->compute_queue && R->compute_timestamps && G.cmd_pool[0][1], g2 = R->gfx_queue2 != VK_NULL_HANDLE;
+    G.async_kind = 0;
+    if (want > 0 && prof_fix_enabled(PFX_ASYNC_COMPUTE) && G.timeline[0]) G.async_kind = want == 1 ? (c ? 1 : 0) : (g2 ? 2 : 0);
+    G.async_graphics = G.async_kind == 2;
 }
+
+bool fg_async_frame(void) { return G.async_kind != 0; }
 
 static FgKey key_for(const FgTexDesc *d) {
     FgKey k;
@@ -227,6 +293,7 @@ FgRes fg_import(const char *name, VkImage image, VkImageView view, VkFormat form
     r->stage = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
     r->access = VK_ACCESS_2_MEMORY_WRITE_BIT;
     r->last_write = true;
+    r->queue = 0;
     return id;
 }
 
@@ -245,9 +312,8 @@ static bool name_in_list(const char *list, const char *name) {
 
 bool fg_pass_enabled(const char *name) { return !(G.disable && G.disable->str[0] && name_in_list(G.disable->str, name)); }
 
-int fg_pass(const char *name, FgExecFn exec, void *user) {
+static int add_pass(const char *name, FgExecFn exec, void *user) {
     if (G.pass_count >= FG_MAX_PASSES) { log_error("fg: too many passes"); return -1; }
-    if (!fg_pass_enabled(name)) return -1;
     FgPassRec *p = &G.passes[G.pass_count];
     memset(p, 0, sizeof(*p));
     snprintf(p->name, sizeof(p->name), "%s", name);
@@ -255,6 +321,33 @@ int fg_pass(const char *name, FgExecFn exec, void *user) {
     p->user = user;
     p->enabled = true;
     return G.pass_count++;
+}
+
+int fg_pass(const char *name, FgExecFn exec, void *user) {
+    if (!fg_pass_enabled(name)) return -1;
+    return add_pass(name, exec, user);
+}
+
+int fg_marker(const char *name) {
+    int p = add_pass(name, NULL, NULL);
+    if (p >= 0) G.passes[p].marker = true;
+    return p;
+}
+
+void fg_async(int pass) {
+    if (pass >= 0 && pass < G.pass_count && G.passes[pass].exec) G.passes[pass].async = true;
+}
+
+void fg_after(int pass, int dep) {
+    if (pass < 0 || pass >= G.pass_count || dep < 0 || dep >= pass) return;
+    FgPassRec *p = &G.passes[pass];
+    if (p->after_n < 4) p->after[p->after_n++] = dep;
+}
+
+int fg_find_pass(const char *name) {
+    for (int i = 0; i < G.pass_count; i++)
+        if (!strcmp(G.passes[i].name, name)) return i;
+    return -1;
 }
 
 static void use(int pass, FgRes r, FgAccess a, bool write) {
@@ -308,6 +401,7 @@ static int phys_create(const FgKey *k, VkImageAspectFlags aspect, const char *hi
     ici.samples = VK_SAMPLE_COUNT_1_BIT;
     ici.tiling = VK_IMAGE_TILING_OPTIMAL;
     ici.usage = p->usage;
+    vkd_share_image(&ici);   // any pooled image may serve an async compute pass (PF-0027)
     VmaAllocationCreateInfo aci = { 0 };
     aci.usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE;
     VmaAllocationInfo ai;
@@ -417,7 +511,7 @@ static State state_for(FgAccess a, bool depth) {
     return (State){ VK_IMAGE_LAYOUT_GENERAL, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_MEMORY_WRITE_BIT };
 }
 
-static void res_state(FgResource *r, VkImage *img, VkImageLayout **layout, VkPipelineStageFlags2 **stage, VkAccessFlags2 **access, bool **lw, u32 *mips) {
+static void res_state(FgResource *r, VkImage *img, VkImageLayout **layout, VkPipelineStageFlags2 **stage, VkAccessFlags2 **access, bool **lw, u32 *mips, u8 **queue) {
     if (r->kind == FG_IMPORT) {
         *img = r->image;
         *layout = &r->layout;
@@ -425,6 +519,7 @@ static void res_state(FgResource *r, VkImage *img, VkImageLayout **layout, VkPip
         *access = &r->access;
         *lw = &r->last_write;
         *mips = 1;
+        *queue = &r->queue;
     } else {
         FgPhys *p = &G.pool[r->phys];
         *img = p->image;
@@ -433,40 +528,67 @@ static void res_state(FgResource *r, VkImage *img, VkImageLayout **layout, VkPip
         *access = &p->access;
         *lw = &p->last_write;
         *mips = p->key.mips;
+        *queue = &p->queue;
     }
+}
+
+// Stages a queue supports: the compute-only family drops the graphics stages (PF-0027).
+static VkPipelineStageFlags2 queue_stages(VkPipelineStageFlags2 s, int q) {
+    if (q == 0 || G.async_graphics) return s;
+    const VkPipelineStageFlags2 ok = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT | VK_PIPELINE_STAGE_2_ALL_TRANSFER_BIT | VK_PIPELINE_STAGE_2_COPY_BIT |
+                                     VK_PIPELINE_STAGE_2_CLEAR_BIT | VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT | VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT |
+                                     VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT | VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_2_HOST_BIT;
+    s &= ok;
+    return s ? s : VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+}
+
+VkPipelineStageFlags2 fg_stages(VkPipelineStageFlags2 s) { return queue_stages(s, G.cur >= 0 ? G.pass_queue[G.cur] : 0); }
+
+// A pass's access to a resource it uses more than once: storage wins (GENERAL), writes add up. Returns
+// false for the uses after the first (handled by the first).
+static bool merged_use(const FgPassRec *p, int u, FgAccess *a, bool *write) {
+    *a = p->uses[u].access;
+    *write = p->uses[u].write;
+    for (int v = 0; v < p->use_count; v++)
+        if (v != u && p->uses[v].res == p->uses[u].res) {
+            if (v < u) return false;
+            if (p->uses[v].access == FG_STORAGE) *a = FG_STORAGE;
+            *write |= p->uses[v].write;
+        }
+    return true;
 }
 
 static void pass_barriers(VkCommandBuffer cmd, FgPassRec *p) {
     VkImageMemoryBarrier2 bars[16];
     int n = 0;
+    int q = G.pass_queue[p - G.passes];
     for (int u = 0; u < p->use_count; u++) {
         FgResource *r = &G.res[p->uses[u].res];
         if (r->kind != FG_IMPORT && r->phys < 0) continue;
         // Read + storage write of the same resource in one pass: GENERAL wins.
-        FgAccess a = p->uses[u].access;
-        bool write = p->uses[u].write;
-        for (int v = 0; v < p->use_count; v++)
-            if (v != u && p->uses[v].res == p->uses[u].res) {
-                if (p->uses[v].access == FG_STORAGE) a = FG_STORAGE;
-                write |= p->uses[v].write;
-                if (v < u) { a = -1; break; }   // handled by the first use
-            }
-        if ((int)a < 0) continue;
+        FgAccess a;
+        bool write;
+        if (!merged_use(p, u, &a, &write)) continue;   // handled by the first use
         State want = state_for(a, r->aspect == VK_IMAGE_ASPECT_DEPTH_BIT);
+        want.stage = queue_stages(want.stage, q);
         VkImage img;
         VkImageLayout *lay;
         VkPipelineStageFlags2 *st;
         VkAccessFlags2 *ac;
         bool *lw;
         u32 mips;
-        res_state(r, &img, &lay, &st, &ac, &lw, &mips);
-        bool hazard = *lay != want.layout || *lw || write;
+        u8 *rq;
+        res_state(r, &img, &lay, &st, &ac, &lw, &mips, &rq);
+        // Last used on the other queue (PF-0027): the timeline wait at this batch's start ordered those
+        // accesses and made them visible; only a layout change remains (chained to the wait).
+        bool cross = *rq != q;
+        bool hazard = cross ? *lay != want.layout : (*lay != want.layout || *lw || write);
         if (hazard) {
             VkImageMemoryBarrier2 *b = &bars[n++];
             memset(b, 0, sizeof(*b));
             b->sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
-            b->srcStageMask = *st ? *st : VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
-            b->srcAccessMask = *lw ? *ac : 0;
+            b->srcStageMask = cross ? VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT : (*st ? *st : VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT);
+            b->srcAccessMask = !cross && *lw ? *ac : 0;
             b->dstStageMask = want.stage;
             b->dstAccessMask = want.access;
             // Transients are re-written every frame: discard the old content (aliasing).
@@ -483,6 +605,7 @@ static void pass_barriers(VkCommandBuffer cmd, FgPassRec *p) {
         *st = want.stage;
         *ac = want.access;
         *lw = write;
+        *rq = (u8)q;
     }
     if (n) {
         VkDependencyInfo dep = { VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
@@ -532,11 +655,11 @@ static void check_graph(void) {
     PROF_END();
 }
 
-// The validation report of the last executed graph. It used to be built inside every fg_execute
+// The validation report of the last executed graph. It used to be built inside every execution
 // (pass name copies, the dead pass / unused resource analysis) although only the fidelity checks and
 // benches read it: now it is built on the first request after the frame (docs/perf/FINDINGS.md
-// PF-0005; perf_fix_disable PF-0005 builds it every frame again). Same content: between fg_execute
-// and the next fg_begin the graph and the pool state it reads are unchanged.
+// PF-0005; perf_fix_disable PF-0005 builds it every frame again). Same content: between
+// fg_exec_begin and the next fg_begin the graph and the pool state it reads are unchanged.
 const FgReport *fg_last_report(void) {
     if (!G.report_valid && G.init) {
         check_graph();
@@ -554,32 +677,273 @@ void fg_trim(void) {
         if (G.pool[k].used && G.pool[k].last_frame != G.frame) phys_destroy(&G.pool[k], false);
 }
 
-void fg_execute(VkCommandBuffer cmd) {
+// ------------------------------------------------------------------ execution (two queues, PF-0027)
+
+// Each pass's queue, the cross-queue sync points and the batches between them. The declared order
+// is a valid serial order: a pass waits for the latest pass of the other queue it depends on (the
+// previous user of each of its resources, fg_after) unless an earlier batch of its queue already
+// waited for that pass or a later one, and that pass's batch ends with a signal. An async pass also
+// waits for the graphics work declared before it (only what is declared after it overlaps it: fewer
+// batches, and the pre-graph work, whose signal follows the previous frame's graphics work too, is
+// always behind: the persistent images the async passes rewrite are no longer read). Without async
+// passes: one batch.
+static void schedule(void) {
+    static int last_user[FG_MAX_RES], need[FG_MAX_PASSES];
+    static bool cut[FG_MAX_PASSES], sig[FG_MAX_PASSES];
+    int n = G.pass_count;
+    for (int i = 0; i < G.res_count; i++) last_user[i] = -1;
+    for (int p = 0; p < n; p++) G.pass_queue[p] = (u8)(G.async_kind && G.passes[p].async ? 1 : 0);
+    int last_gfx = FG_PRE;
+    for (int p = 0; p < n; p++) {
+        FgPassRec *pr = &G.passes[p];
+        int q = G.pass_queue[p];
+        int w = q ? last_gfx : FG_NO_WAIT;
+        if (!q) last_gfx = p;
+        for (int u = 0; u < pr->use_count; u++) {
+            int i = last_user[pr->uses[u].res];
+            G.prev_user[p][u] = (signed char)i;
+            if (i >= 0 && G.pass_queue[i] != q && i > w) w = i;
+        }
+        for (int a = 0; a < pr->after_n; a++)
+            if (G.pass_queue[pr->after[a]] != q && pr->after[a] > w) w = pr->after[a];
+        for (int u = 0; u < pr->use_count; u++) last_user[pr->uses[u].res] = p;
+        need[p] = w;
+    }
+    int waited[2] = { FG_NO_WAIT, FG_NO_WAIT };
+    bool pre_signal = false;
+    for (int p = 0; p < n; p++) {
+        int q = G.pass_queue[p];
+        cut[p] = sig[p] = false;
+        if (need[p] > waited[q]) {
+            cut[p] = true;
+            waited[q] = need[p];
+            if (need[p] == FG_PRE) pre_signal = true;
+            else sig[need[p]] = true;
+        }
+    }
+    G.batch_n = 0;
+    FgBatch *pre = &G.batch[G.batch_n++];
+    memset(pre, 0, sizeof(*pre));
+    pre->first = pre->last = FG_PRE;
+    pre->wait = FG_NO_WAIT;
+    pre->signal = pre_signal;
+    int open[2] = { pre_signal ? -1 : 0, -1 };
+    for (int p = 0; p < n; p++) {
+        int q = G.pass_queue[p];
+        if (open[q] < 0 || cut[p]) {
+            if (G.batch_n >= FG_MAX_BATCHES) {
+                static int warned;
+                if (!warned++) log_warn("fg: more than %d queue batches: this frame runs on the graphics queue", FG_MAX_BATCHES);
+                G.async_kind = 0;
+                G.async_graphics = false;
+                schedule();
+                return;
+            }
+            FgBatch *b = &G.batch[G.batch_n];
+            memset(b, 0, sizeof(*b));
+            b->queue = q;
+            b->first = p;
+            b->wait = cut[p] ? need[p] : FG_NO_WAIT;
+            open[q] = G.batch_n++;
+        }
+        G.batch[open[q]].last = p;
+        G.pass_batch[p] = (u8)open[q];
+        if (sig[p]) {
+            G.batch[open[q]].signal = true;
+            open[q] = -1;
+        }
+    }
+    // The frame's last async batch signals: the last graphics batch (fence) waits for it (fg_submit).
+    for (int b = G.batch_n - 1; b > 0; b--)
+        if (G.batch[b].queue == 1) { G.batch[b].signal = true; break; }
+}
+
+// A batch's command buffer, begun on first use (per frame slot and queue family; the pools are reset
+// when the slot comes round again: its fence covered both queues).
+static VkCommandBuffer batch_cmd(int b) {
+    FgBatch *bt = &G.batch[b];
+    if (bt->cmd) return bt->cmd;
+    int fam = bt->queue == 1 && G.async_kind == 1 ? 1 : 0, slot = (int)R->frame_slot;
+    VkCommandBuffer *c = &G.cmd_buf[slot][fam][G.cmd_used[fam]++];
+    if (!*c) {
+        VkCommandBufferAllocateInfo ai = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
+        ai.commandPool = G.cmd_pool[slot][fam];
+        ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        ai.commandBufferCount = 1;
+        VK_CHECK(vkAllocateCommandBuffers(R->device, &ai, c));
+    }
+    VkCommandBufferBeginInfo bi = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+    bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    VK_CHECK(vkBeginCommandBuffer(*c, &bi));
+    bt->cmd = *c;
+    return *c;
+}
+
+// End of a graphics batch: what an async pass uses next (its previous user is in this batch) moves
+// to that pass's layout here, so the async queue never changes a layout (depth images included); the
+// batch's timeline signal orders and publishes it.
+static void batch_handoff(VkCommandBuffer cmd, int b) {
+    VkImageMemoryBarrier2 bars[32];
+    int n = 0;
+    for (int j = G.batch[b].last + 1; j < G.pass_count; j++) {
+        if (G.pass_queue[j] != 1) continue;
+        FgPassRec *pj = &G.passes[j];
+        for (int u = 0; u < pj->use_count && n < 32; u++) {
+            int i = G.prev_user[j][u];
+            FgAccess a;
+            bool write;
+            if (i < 0 || G.pass_batch[i] != b || !merged_use(pj, u, &a, &write)) continue;
+            FgResource *r = &G.res[pj->uses[u].res];
+            if (r->kind != FG_IMPORT && r->phys < 0) continue;
+            VkImage img;
+            VkImageLayout *lay;
+            VkPipelineStageFlags2 *st;
+            VkAccessFlags2 *ac;
+            bool *lw;
+            u32 mips;
+            u8 *rq;
+            res_state(r, &img, &lay, &st, &ac, &lw, &mips, &rq);
+            if (*rq != 0) continue;
+            State want = state_for(a, r->aspect == VK_IMAGE_ASPECT_DEPTH_BIT);
+            if (*lay != want.layout) {
+                VkImageMemoryBarrier2 *bb = &bars[n++];
+                memset(bb, 0, sizeof(*bb));
+                bb->sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2;
+                bb->srcStageMask = *st ? *st : VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
+                bb->srcAccessMask = *lw ? *ac : 0;
+                bb->dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+                bb->oldLayout = *lay;
+                bb->newLayout = want.layout;
+                bb->srcQueueFamilyIndex = bb->dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+                bb->image = img;
+                bb->subresourceRange.aspectMask = r->aspect;
+                bb->subresourceRange.levelCount = mips;
+                bb->subresourceRange.layerCount = 1;
+            }
+            *lay = want.layout;
+            *st = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+            *ac = 0;
+            *lw = false;
+            *rq = 1;
+        }
+    }
+    if (n) {
+        VkDependencyInfo dep = { VK_STRUCTURE_TYPE_DEPENDENCY_INFO };
+        dep.imageMemoryBarrierCount = (u32)n;
+        dep.pImageMemoryBarriers = bars;
+        vkCmdPipelineBarrier2(cmd, &dep);
+    }
+}
+
+static void pass_begin(int i, VkCommandBuffer cmd) {
+    FgPassRec *p = &G.passes[i];
+    int q = G.pass_queue[i];
+    u32 qbase = (u32)((int)R->frame_slot * FG_MAX_PASSES * 2);
+    vkp_stream(q, q == 0 || G.async_graphics);
+    vkp_scope_begin(cmd, p->name);
+    pass_barriers(cmd, p);
+    vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, G.qp, qbase + (u32)i * 2);
+    if (R->validation && vkCmdBeginDebugUtilsLabelEXT) {
+        VkDebugUtilsLabelEXT l = { VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT };
+        l.pLabelName = p->name;
+        vkCmdBeginDebugUtilsLabelEXT(cmd, &l);
+    }
+    G.cur = i;
+}
+
+static void pass_end(int i, VkCommandBuffer cmd) {
+    FgPassRec *p = &G.passes[i];
+    int slot = (int)R->frame_slot;
+    u32 qbase = (u32)(slot * FG_MAX_PASSES * 2);
+    G.cur = -1;
+    if (R->validation && vkCmdEndDebugUtilsLabelEXT) vkCmdEndDebugUtilsLabelEXT(cmd);
+    vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, G.qp, qbase + (u32)i * 2 + 1);
+    vkp_scope_end(cmd);
+    vkp_stream(0, true);
+    memcpy(G.ms_names[slot][i], p->name, 32);
+    int b = G.pass_batch[i];
+    if (G.batch[b].last == i && G.batch[b].queue == 0) batch_handoff(cmd, b);
+}
+
+static void run_to(int end) {
+    for (; G.cursor < end; G.cursor++) {
+        int i = G.cursor;
+        VkCommandBuffer cmd = batch_cmd(G.pass_batch[i]);
+        pass_begin(i, cmd);
+        if (G.passes[i].exec) G.passes[i].exec(cmd, G.passes[i].user);
+        pass_end(i, cmd);
+    }
+}
+
+// The batches of this frame, one line ("G[pre] C[sky_luts..sky_env] G[prepass..shadows] ..."): logged
+// when the shape changes (a few times), printed by r_async_info.
+static void batches_line(char *out, size_t n) {
+    size_t o = 0;
+    out[0] = 0;
+    for (int b = 0; b < G.batch_n && o + 80 < n; b++) {
+        const FgBatch *bt = &G.batch[b];
+        const char *f = bt->first == FG_PRE ? "pre" : G.passes[bt->first].name;
+        const char *l = bt->last == FG_PRE ? "pre" : G.passes[bt->last].name;
+        o += (size_t)snprintf(out + o, n - o, "%s%c[%s%s%s]%s", b ? " " : "", bt->queue ? 'C' : 'G', f, bt->first == bt->last ? "" : "..",
+                              bt->first == bt->last ? "" : l, bt->signal ? "+" : "");
+    }
+}
+
+void fg_async_info(void) {
+    char line[1024];
+    batches_line(line, sizeof(line));
+    log_info("fg: async compute %s (r_async_compute %d), %d batches: %s", G.async_kind == 1 ? "on the compute family" : (G.async_kind == 2 ? "on a second graphics queue" : "off"),
+             R->r_async_compute ? R->r_async_compute->i : 0, G.batch_n, line);
+}
+
+VkCommandBuffer fg_exec_begin(VkCommandBuffer cmd) {
     allocate();
     G.report_valid = false;
     if (!prof_fix_enabled(PFX_FG_REPORT_LAZY)) fg_last_report();
     int slot = (int)R->frame_slot;
-    u32 qbase = (u32)(slot * FG_MAX_PASSES * 2);
-    vkCmdResetQueryPool(cmd, G.qp, qbase, FG_MAX_PASSES * 2);
-    for (int i = 0; i < G.pass_count; i++) {
-        FgPassRec *p = &G.passes[i];
-        vkp_scope_begin(cmd, p->name);
-        pass_barriers(cmd, p);
-        vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, G.qp, qbase + (u32)i * 2);
-        bool label = R->validation && vkCmdBeginDebugUtilsLabelEXT;
-        if (label) {
-            VkDebugUtilsLabelEXT l = { VK_STRUCTURE_TYPE_DEBUG_UTILS_LABEL_EXT };
-            l.pLabelName = p->name;
-            vkCmdBeginDebugUtilsLabelEXT(cmd, &l);
+    vkCmdResetQueryPool(cmd, G.qp, (u32)(slot * FG_MAX_PASSES * 2), FG_MAX_PASSES * 2);
+    for (int k = 0; k < 2; k++)
+        if (G.cmd_pool[slot][k]) VK_CHECK(vkResetCommandPool(R->device, G.cmd_pool[slot][k], 0));
+    G.cmd_used[0] = G.cmd_used[1] = 0;
+    PROF_BEGIN("fg:schedule");
+    schedule();
+    PROF_END();
+    {
+        static char last[1024];
+        static int logged;
+        char line[1024];
+        batches_line(line, sizeof(line));
+        if (strcmp(line, last) && logged < 6) {
+            logged++;
+            dg_strcpy(last, sizeof(last), line);
+            fg_async_info();
         }
-        G.cur = i;
-        if (p->exec) p->exec(cmd, p->user);
-        G.cur = -1;
-        if (label) vkCmdEndDebugUtilsLabelEXT(cmd);
-        vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, G.qp, qbase + (u32)i * 2 + 1);
-        vkp_scope_end(cmd);
-        memcpy(G.ms_names[slot][i], p->name, 32);
     }
+    G.batch[0].cmd = cmd;
+    G.cursor = 0;
+    G.open_marker = -1;
+    return cmd;
+}
+
+VkCommandBuffer fg_exec_until(int marker) {
+    if (marker < G.cursor || marker >= G.pass_count || !G.passes[marker].marker) return batch_cmd(0);
+    run_to(marker);
+    VkCommandBuffer cmd = batch_cmd(G.pass_batch[marker]);
+    pass_begin(marker, cmd);
+    G.cur = -1;   // the caller's commands are graphics work outside any pass exec (fg_stages)
+    G.open_marker = marker;
+    return cmd;
+}
+
+VkCommandBuffer fg_exec_rest(void) {
+    if (G.open_marker >= 0) {
+        int m = G.open_marker;
+        pass_end(m, G.batch[G.pass_batch[m]].cmd);
+        G.cursor = m + 1;
+        G.open_marker = -1;
+    }
+    run_to(G.pass_count);
+    int slot = (int)R->frame_slot;
     G.ms_count[slot] = G.pass_count;
     G.ms_pending[slot] = true;
     // Bookkeeping: history content now valid, imported layouts written back.
@@ -594,6 +958,55 @@ void fg_execute(VkCommandBuffer cmd) {
         p->last_frame = G.frame;
         if (r->kind == FG_HISTORY && r->first >= 0) p->valid = true;
     }
+    for (int b = G.batch_n - 1; b > 0; b--)
+        if (G.batch[b].queue == 0) return batch_cmd(b);
+    return G.batch[0].cmd;
+}
+
+void fg_submit(VkSemaphore wait, VkPipelineStageFlags2 wait_stage, VkSemaphore signal, VkFence fence) {
+    PROF_BEGIN("fg:submit");
+    int lg = 0, la = -1;
+    for (int b = 0; b < G.batch_n; b++) {
+        FgBatch *bt = &G.batch[b];
+        if (bt->queue == 0) lg = b;
+        else la = b;
+        VK_CHECK(vkEndCommandBuffer(batch_cmd(b)));
+        if (bt->signal) bt->value = ++G.timeline_value[bt->queue];
+    }
+    // One vkQueueSubmit2 per queue, each queue's batches in order (timeline semaphores allow a wait
+    // submitted before its signal: the graphics queue goes first, its pre batch starts at once).
+    VkSubmitInfo2 si[2][FG_MAX_BATCHES];
+    VkSemaphoreSubmitInfo ws[FG_MAX_BATCHES][3], ss[FG_MAX_BATCHES][2];
+    VkCommandBufferSubmitInfo cb[FG_MAX_BATCHES];
+    u32 nsi[2] = { 0, 0 };
+    for (int b = 0; b < G.batch_n; b++) {
+        FgBatch *bt = &G.batch[b];
+        int nw = 0, ns = 0;
+        if (bt->wait != FG_NO_WAIT) {
+            const FgBatch *wb = &G.batch[bt->wait == FG_PRE ? 0 : G.pass_batch[bt->wait]];
+            ws[b][nw++] = (VkSemaphoreSubmitInfo){ VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, NULL, G.timeline[wb->queue], wb->value, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, 0 };
+        }
+        if (b == lg) {
+            if (la >= 0)
+                ws[b][nw++] = (VkSemaphoreSubmitInfo){ VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, NULL, G.timeline[1], G.batch[la].value, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, 0 };
+            if (wait) ws[b][nw++] = (VkSemaphoreSubmitInfo){ VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, NULL, wait, 0, wait_stage, 0 };
+        }
+        if (bt->signal)
+            ss[b][ns++] = (VkSemaphoreSubmitInfo){ VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, NULL, G.timeline[bt->queue], bt->value, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, 0 };
+        if (b == lg && signal) ss[b][ns++] = (VkSemaphoreSubmitInfo){ VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO, NULL, signal, 0, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, 0 };
+        cb[b] = (VkCommandBufferSubmitInfo){ VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO, NULL, bt->cmd, 0 };
+        VkSubmitInfo2 *i = &si[bt->queue][nsi[bt->queue]++];
+        *i = (VkSubmitInfo2){ VK_STRUCTURE_TYPE_SUBMIT_INFO_2 };
+        i->waitSemaphoreInfoCount = (u32)nw;
+        i->pWaitSemaphoreInfos = ws[b];
+        i->commandBufferInfoCount = 1;
+        i->pCommandBufferInfos = &cb[b];
+        i->signalSemaphoreInfoCount = (u32)ns;
+        i->pSignalSemaphoreInfos = ss[b];
+    }
+    VK_CHECK(vkQueueSubmit2(R->queue, nsi[0], si[0], fence));
+    if (nsi[1]) VK_CHECK(vkQueueSubmit2(G.async_kind == 1 ? R->compute_queue : R->gfx_queue2, nsi[1], si[1], VK_NULL_HANDLE));
+    PROF_END();
 }
 
 // ------------------------------------------------------------------ accessors

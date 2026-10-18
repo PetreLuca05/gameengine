@@ -34,6 +34,12 @@ static bool has_layer(const char *name) {
     return found;
 }
 
+static bool has_arg(const char *a) {
+    for (int i = 1; i < g_engine.argc; i++)
+        if (!strcmp(g_engine.argv[i], a)) return true;
+    return false;
+}
+
 static bool want_validation(void) {
     for (int i = 1; i < g_engine.argc; i++)
         if (strcmp(g_engine.argv[i], "--validation") == 0 || strcmp(g_engine.argv[i], "-validation") == 0) return true;
@@ -241,11 +247,45 @@ bool vkd_create_device(SDL_Window *window) {
     R->has_wireframe = supported.fillModeNonSolid == VK_TRUE;
     R->max_anisotropy = supported.samplerAnisotropy ? R->gpu_props.limits.maxSamplerAnisotropy : 1.0f;
 
-    float prio = 1.0f;
-    VkDeviceQueueCreateInfo qci = { VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO };
-    qci.queueFamilyIndex = R->queue_family;
-    qci.queueCount = 1;
-    qci.pQueuePriorities = &prio;
+    // Async compute (PF-0027, docs/RENDERING_POST.md "Async compute"): a compute-only family (its own
+    // hardware queue on most GPUs) and a second queue of the graphics family, when the device has
+    // them; r_async_compute picks one per frame. --no-async-compute creates neither (and keeps every
+    // resource EXCLUSIVE).
+    float prio[2] = { 1.0f, 1.0f };
+    VkDeviceQueueCreateInfo qci[2];
+    memset(qci, 0, sizeof(qci));
+    u32 qci_n = 1;
+    qci[0].sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+    qci[0].queueFamilyIndex = R->queue_family;
+    qci[0].queueCount = 1;
+    qci[0].pQueuePriorities = prio;
+    R->compute_family = VK_QUEUE_FAMILY_IGNORED;
+    bool gfx2 = false;
+    {
+        u32 qcount = 0;
+        vkGetPhysicalDeviceQueueFamilyProperties(R->gpu, &qcount, NULL);
+        VkQueueFamilyProperties qprops[16];
+        qcount = DG_MIN(qcount, 16u);
+        vkGetPhysicalDeviceQueueFamilyProperties(R->gpu, &qcount, qprops);
+        bool allow = !has_arg("--no-async-compute");
+        for (u32 q = 0; q < qcount && allow; q++)
+            if (q != R->queue_family && (qprops[q].queueFlags & VK_QUEUE_COMPUTE_BIT) && !(qprops[q].queueFlags & VK_QUEUE_GRAPHICS_BIT) &&
+                R->compute_family == VK_QUEUE_FAMILY_IGNORED) {
+                R->compute_family = q;
+                R->compute_timestamps = qprops[q].timestampValidBits > 0;
+            }
+        gfx2 = allow && R->queue_family < qcount && qprops[R->queue_family].queueCount >= 2;
+        if (gfx2) qci[0].queueCount = 2;
+        if (R->compute_family != VK_QUEUE_FAMILY_IGNORED) {
+            qci[1] = qci[0];
+            qci[1].queueFamilyIndex = R->compute_family;
+            qci[1].queueCount = 1;
+            qci_n = 2;
+        }
+        log_info("vulkan: async compute: %s%s%s", R->compute_family != VK_QUEUE_FAMILY_IGNORED ? "compute family " : "",
+                 R->compute_family != VK_QUEUE_FAMILY_IGNORED ? (R->compute_timestamps ? "(timestamps) " : "(no timestamps) ") : "",
+                 gfx2 ? "+ a second graphics queue" : (R->compute_family == VK_QUEUE_FAMILY_IGNORED ? "none" : ""));
+    }
 
     VkPhysicalDeviceVulkan13Features f13 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES };
     f13.dynamicRendering = VK_TRUE;
@@ -253,6 +293,20 @@ bool vkd_create_device(SDL_Window *window) {
     f13.shaderDemoteToHelperInvocation = VK_TRUE;
     VkPhysicalDeviceVulkan12Features f12 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES };
     f12.pNext = &f13;
+    {
+        // Timeline semaphores order the frame graph's batches across the queues (fg.c, PF-0027).
+        VkPhysicalDeviceVulkan12Features s12 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES };
+        VkPhysicalDeviceFeatures2 s2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
+        s2.pNext = &s12;
+        vkGetPhysicalDeviceFeatures2(R->gpu, &s2);
+        f12.timelineSemaphore = s12.timelineSemaphore;
+        if (!s12.timelineSemaphore) {
+            R->compute_family = VK_QUEUE_FAMILY_IGNORED;
+            qci_n = 1;
+            qci[0].queueCount = 1;
+            gfx2 = false;
+        }
+    }
     VkPhysicalDeviceFeatures2 f2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
     f2.pNext = &f12;
     f2.features.samplerAnisotropy = supported.samplerAnisotropy;
@@ -328,14 +382,21 @@ bool vkd_create_device(SDL_Window *window) {
     }
     VkDeviceCreateInfo dci = { VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO };
     dci.pNext = &f2;
-    dci.queueCreateInfoCount = 1;
-    dci.pQueueCreateInfos = &qci;
+    dci.queueCreateInfoCount = qci_n;
+    dci.pQueueCreateInfos = qci;
     dci.enabledExtensionCount = dev_ext_count;
     dci.ppEnabledExtensionNames = dev_exts;
     res = vkCreateDevice(R->gpu, &dci, NULL, &R->device);
     if (res != VK_SUCCESS) { log_error("vkCreateDevice failed (%d)", (int)res); return false; }
     volkLoadDevice(R->device);
     vkGetDeviceQueue(R->device, R->queue_family, 0, &R->queue);
+    if (gfx2) vkGetDeviceQueue(R->device, R->queue_family, 1, &R->gfx_queue2);
+    if (R->compute_family != VK_QUEUE_FAMILY_IGNORED) {
+        vkGetDeviceQueue(R->device, R->compute_family, 0, &R->compute_queue);
+        R->share_concurrent = true;
+        R->share_families[0] = R->queue_family;
+        R->share_families[1] = R->compute_family;
+    }
 
     VmaVulkanFunctions vf = { 0 };
     vf.vkGetInstanceProcAddr = vkGetInstanceProcAddr;
@@ -349,6 +410,20 @@ bool vkd_create_device(SDL_Window *window) {
     VK_CHECK(vmaCreateAllocator(&aci, &R->vma));
     pipeline_cache_load();
     return true;
+}
+
+void vkd_share_image(VkImageCreateInfo *ici) {
+    if (!R->share_concurrent) return;
+    ici->sharingMode = VK_SHARING_MODE_CONCURRENT;
+    ici->queueFamilyIndexCount = 2;
+    ici->pQueueFamilyIndices = R->share_families;
+}
+
+void vkd_share_buffer(VkBufferCreateInfo *bci) {
+    if (!R->share_concurrent) return;
+    bci->sharingMode = VK_SHARING_MODE_CONCURRENT;
+    bci->queueFamilyIndexCount = 2;
+    bci->pQueueFamilyIndices = R->share_families;
 }
 
 void vkd_destroy_device(void) {
@@ -481,8 +556,9 @@ void vkd_create_targets(void) {
                                VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_STORAGE_BIT,
                                VK_IMAGE_ASPECT_COLOR_BIT);
     // Depth is kept (STORE) and sampled: soft particles, decals and next-frame GPU particle collision.
-    R->depth = vkr_target_create(w, h, VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
-                                 VK_IMAGE_ASPECT_DEPTH_BIT);
+    // Shared: the async compute passes (hi-z, GTAO, contact shadows, SSR / SSGI) sample it (PF-0027).
+    R->depth = vkr_target_create_shared(w, h, VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT,
+                                        VK_IMAGE_ASPECT_DEPTH_BIT);
     // Viewmodel depth: separate so the world depth survives the first-person pass.
     R->vm_depth = vkr_target_create(w, h, VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_IMAGE_ASPECT_DEPTH_BIT);   // sampled: sight lens occlusion
     R->render_scale_applied = scale;
@@ -498,8 +574,9 @@ void vkd_destroy_targets(void) {
 void vkd_create_shadow_map(u32 size) {
     if (R->shadow.image) vkr_target_destroy(&R->shadow);
     R->shadow_gen++;
-    R->shadow = vkr_target_create(size, size, VK_FORMAT_D32_SFLOAT,
-                                  VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_IMAGE_ASPECT_DEPTH_BIT);
+    // Shared: the froxel injection samples it on the async compute queue (PF-0027).
+    R->shadow = vkr_target_create_shared(size, size, VK_FORMAT_D32_SFLOAT,
+                                         VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_IMAGE_ASPECT_DEPTH_BIT);
     R->shadow_size = size;
     for (int i = 0; i < FRAMES_IN_FLIGHT; i++) {
         if (!R->frames[i].frame_set) continue;

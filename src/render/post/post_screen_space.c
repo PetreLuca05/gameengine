@@ -235,6 +235,7 @@ void post_ss_build(PostLitInputs *out) {
     if (s->ssr) {
         S.hiz = tex("hiz", VK_FORMAT_R32_SFLOAT, FG_SIZE_RENDER, FG_MAX_MIPS);
         int p = fg_pass("hiz", exec_hiz, NULL);
+        fg_async(p);   // the screen-space passes read the prepass only: async compute (PF-0027)
         fg_read(p, S.depth, FG_SAMPLED);
         fg_write(p, S.hiz, FG_STORAGE);
         if (p < 0) S.hiz = FG_NONE;
@@ -242,6 +243,7 @@ void post_ss_build(PostLitInputs *out) {
     if (s->contact_shadows) {
         S.contact = tex("contact", VK_FORMAT_R8_UNORM, s->contact_shadows >= 2 ? FG_SIZE_RENDER : FG_SIZE_HALF, 1);
         int p = fg_pass("contact", exec_contact, NULL);
+        fg_async(p);
         fg_read(p, S.depth, FG_SAMPLED);
         fg_read(p, S.material, FG_SAMPLED);
         fg_read(p, S.normal, FG_SAMPLED);
@@ -255,6 +257,7 @@ void post_ss_build(PostLitInputs *out) {
         FgSize asz = s->ao_full_res ? FG_SIZE_RENDER : FG_SIZE_HALF;
         S.ao_half = tex("ao_raw", VK_FORMAT_R16_SFLOAT, asz, 1);
         int p = fg_pass("gtao", exec_gtao, NULL);
+        fg_async(p);
         fg_read(p, S.depth, FG_SAMPLED);
         fg_read(p, S.normal, FG_SAMPLED);
         fg_read(p, S.material, FG_SAMPLED);
@@ -262,6 +265,7 @@ void post_ss_build(PostLitInputs *out) {
         FgRes cur = S.ao_half;
         P.ao_raw = S.ao_half;
         int bx = p >= 0 && s->ao_blur_radius > 0 ? fg_pass("ao_blur_x", exec_ao_blur, (void *)(uintptr_t)0) : -1;
+        fg_async(bx);
         if (bx >= 0) {
             S.ao_blur_x = tex("ao_blur_x", VK_FORMAT_R16_SFLOAT, asz, 1);
             fg_read(bx, S.ao_half, FG_SAMPLED);
@@ -270,6 +274,7 @@ void post_ss_build(PostLitInputs *out) {
             fg_write(bx, S.ao_blur_x, FG_STORAGE);
             cur = S.ao_blur_x;
             int by = fg_pass("ao_blur_y", exec_ao_blur, (void *)(uintptr_t)1);
+            fg_async(by);
             if (by >= 0) {
                 S.ao_blur = tex("ao_blur", VK_FORMAT_R16_SFLOAT, asz, 1);
                 fg_read(by, S.ao_blur_x, FG_SAMPLED);
@@ -286,6 +291,7 @@ void post_ss_build(PostLitInputs *out) {
             S.ao_hist_in = hist(parity ? "ao_hist_a" : "ao_hist_b", VK_FORMAT_R16_SFLOAT, asz);
             S.ao_hist_out = hist(parity ? "ao_hist_b" : "ao_hist_a", VK_FORMAT_R16_SFLOAT, asz);
             int t = fg_pass("gtao_temporal", exec_ao_temporal, NULL);
+            fg_async(t);
             fg_read(t, S.ao_blur, FG_SAMPLED);
             fg_read(t, S.ao_hist_in, FG_SAMPLED);
             fg_read(t, S.velocity, FG_SAMPLED);
@@ -300,6 +306,7 @@ void post_ss_build(PostLitInputs *out) {
             S.ao_hist_out = cur;   // the upsample's input
             S.ao = tex("ao", VK_FORMAT_R8_UNORM, FG_SIZE_RENDER, 1);
             int u = fg_pass("gtao_upsample", exec_ao_up, NULL);
+            fg_async(u);
             fg_read(u, cur, FG_SAMPLED);
             fg_read(u, S.depth, FG_SAMPLED);
             fg_write(u, S.ao, FG_STORAGE);
@@ -315,6 +322,7 @@ void post_ss_build(PostLitInputs *out) {
         S.gi_hist_out = hist(parity ? "ssgi_hist_b" : "ssgi_hist_a", VK_FORMAT_R16G16B16A16_SFLOAT, FG_SIZE_HALF);
         S.gi = tex("ssgi", VK_FORMAT_R16G16B16A16_SFLOAT, FG_SIZE_RENDER, 1);
         int p = fg_pass("ssgi", exec_ssgi, NULL);
+        fg_async(p);
         fg_read(p, S.depth, FG_SAMPLED);
         fg_read(p, S.normal, FG_SAMPLED);
         fg_read(p, S.material, FG_SAMPLED);
@@ -322,6 +330,7 @@ void post_ss_build(PostLitInputs *out) {
         fg_read(p, S.velocity, FG_SAMPLED);
         fg_write(p, S.gi_half, FG_STORAGE);
         int t = fg_pass("ssgi_temporal", exec_gi_temporal, NULL);
+        fg_async(t);
         fg_read(t, S.gi_half, FG_SAMPLED);
         fg_read(t, S.gi_hist_in, FG_SAMPLED);
         fg_read(t, S.velocity, FG_SAMPLED);
@@ -329,6 +338,7 @@ void post_ss_build(PostLitInputs *out) {
         fg_read(t, S.depth_prev, FG_SAMPLED);
         fg_write(t, S.gi_hist_out, FG_STORAGE);
         int u = fg_pass("ssgi_upsample", exec_gi_up, NULL);
+        fg_async(u);
         fg_read(u, S.gi_hist_out, FG_SAMPLED);
         fg_read(u, S.depth, FG_SAMPLED);
         fg_write(u, S.gi, FG_STORAGE);
@@ -341,6 +351,7 @@ void post_ss_build(PostLitInputs *out) {
         S.ssr_hist_in = hist(parity ? "ssr_hist_a" : "ssr_hist_b", VK_FORMAT_R16G16B16A16_SFLOAT, sz);
         S.ssr_hist_out = hist(parity ? "ssr_hist_b" : "ssr_hist_a", VK_FORMAT_R16G16B16A16_SFLOAT, sz);
         int p = fg_pass("ssr", exec_ssr, NULL);
+        fg_async(p);
         fg_read(p, S.depth, FG_SAMPLED);
         fg_read(p, S.normal, FG_SAMPLED);
         fg_read(p, S.material, FG_SAMPLED);
@@ -349,6 +360,7 @@ void post_ss_build(PostLitInputs *out) {
         fg_read(p, S.velocity, FG_SAMPLED);
         fg_write(p, S.ssr_raw, FG_STORAGE);
         int t = fg_pass("ssr_temporal", exec_ssr_temporal, NULL);
+        fg_async(t);
         fg_read(t, S.ssr_raw, FG_SAMPLED);
         fg_read(t, S.ssr_hist_in, FG_SAMPLED);
         fg_read(t, S.velocity, FG_SAMPLED);
@@ -423,5 +435,9 @@ void post_screen_space(PostLitInputs *out) {
         return;
     }
     post_ss_build(out);
+}
+
+void post_volumetrics(void) {
+    if (!P.ok || P.set.direct_output) return;
     post_vol_build();
 }

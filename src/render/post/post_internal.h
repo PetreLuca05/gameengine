@@ -81,6 +81,7 @@ typedef struct PostCtx {
     VkPipelineLayout pl;
     PostPipe pipes[POST_MAX_PIPES];
     int pipe_count;
+    u32 pipe_gen;                     // bumped when the pipelines are dropped (hot reload): cached sky outputs are stale (sky.c, PF-0026)
     GpuBuffer ubo[FRAMES_IN_FLIGHT];
     GpuBuffer exposure_buf;           // device: [0] exposure (linear), [1] EV, [2] focus distance, [3] focus target
     GpuBuffer exposure_rb[FRAMES_IN_FLIGHT];
