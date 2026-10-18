@@ -348,6 +348,7 @@ void render_vgeo_set_level(const RenderVgeoPlacement *p, int count) {
         free(xf);
     }
     if (!vgeo_scene_commit(&G.scene)) log_error("vgeo: scene commit failed");
+    vkc_scene_committed(&G.scene);
     if (count) log_info("vgeo: level: %u instances of %u meshes, %u cells", total, G.named_count, G.scene.cell_count);
 }
 
@@ -523,10 +524,13 @@ static void foliage_region(void) {
     G.need_commit = true;
 }
 
+// The commit re-bounds the placement cells and takes the meshes' fades / shadow distances / WPO
+// bounds from their materials: the classic renderer's whole-cell limits follow.
 static void foliage_commit(void) {
     if (!G.need_commit) return;
     G.need_commit = false;
     if (!vgeo_scene_commit(&G.scene)) log_error("vgeo: scene commit failed");
+    vkc_scene_committed(&G.scene);
 }
 
 // Builds procedural foliage kinds [k0, k1) (vgeo_procgen_foliage.c): mesh, masks, impostor atlas,

@@ -927,13 +927,22 @@ add_test(NAME settings COMMAND test_settings WORKING_DIRECTORY $<TARGET_FILE_DIR
 
 # LOD ranges and cross-fades (docs/LOD.md): lod.json x tier, character px -> LOD, fades in a slow dolly,
 # camera reversal, complementary masks, streaming holds, terrain geomorph without cracks / pops.
-add_executable(test_lod tests/test_lod.c src/render/lod_fade.c src/render/fidelity/fidelity.c src/core/cvar.c)
+add_executable(test_lod tests/test_lod.c src/render/lod_fade.c src/render/shadow_casters.c src/render/fidelity/fidelity.c src/core/cvar.c)
 set_target_properties(test_lod PROPERTIES C_STANDARD 11)
 target_link_libraries(test_lod PRIVATE dg_animcore)
 if(MSVC)
   target_compile_options(test_lod PRIVATE /W3 /wd4100 /wd4201 /utf-8)
 endif()
 add_test(NAME lod COMMAND test_lod WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+# Classic instance cull arithmetic (src/render/classic_cull_math.h): bit for bit against the cull_instance
+# it was factored out of on 1M random instances and views; empty dither intervals emit no part.
+add_executable(test_classic_cull tests/test_classic_cull.c src/render/lod_fade.c src/render/shadow_casters.c src/render/fidelity/fidelity.c src/core/cvar.c)
+set_target_properties(test_classic_cull PROPERTIES C_STANDARD 11)
+target_link_libraries(test_classic_cull PRIVATE dg_animcore)
+if(MSVC)
+  target_compile_options(test_classic_cull PRIVATE /W3 /wd4100 /wd4201 /utf-8)
+endif()
+add_test(NAME classic_cull COMMAND test_classic_cull WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
 
 # Phone (docs/PHONE.md): QR round trip, pairing auth, HTTP / WebSocket, orientation math, filter +
 # reach clamp, JPEG pipeline at 30 fps, photo / video files + sidecars, headless client round trip, TLS.

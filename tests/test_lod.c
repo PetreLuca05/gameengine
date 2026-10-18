@@ -7,7 +7,8 @@
 //     bands) is a fade: the silhouette coverage of each LOD changes by less than 5 % per frame;
 //   * fades complete on camera reversal (no ping-pong half-fades);
 //   * complementary masks: coverage sums to 1 for every dither threshold (no holes, no double
-//     shadows), also for the three-way impostor / coarse / fine split;
+//     shadows), also for the three-way impostor / coarse / fine split, and the classic renderer's
+//     parts emit no empty interval (a fine iw / cw sweep near 0 and 1, random values);
 //   * foliage density / distance fade: every instance (all 256 hashes) fully opaque before its fade
 //     starts, at the shipped instance_fade; density thins by dropping instances, never by a partial
 //     alpha (a tree near the camera is never dithered);
@@ -15,6 +16,7 @@
 //   * terrain geomorph: neighbouring chunks agree on every shared edge vertex, a chunk LOD switch
 //     does not move a vertex.
 #include "render/lod_fade.h"
+#include "render/classic_cull_math.h"
 #include "render/fidelity/fidelity.h"
 #include "core/engine.h"
 #include "core/cvar.h"
@@ -210,9 +212,61 @@ static void test_masks(void) {
         }
     CHECK(bad == 0, "three-way split: %d thresholds not covered exactly once", bad);
     CHECK(lod_iv_pack(0, 1) == LOD_IV_FULL && lod_iv_kept(LOD_IV_FULL, 0.99f) && lod_iv_kept(0, 0.5f), "full interval / no interval");
+    CHECK(lod_iv_empty(0, 0.001f) && lod_iv_empty(0.999f, 1) && lod_iv_empty(0.5f, 0.5f) && !lod_iv_empty(0, 0.002f) && !lod_iv_empty(0.3f, 0.7f), "empty intervals");
 }
 
-// Foliage instance alpha (vk_classic.c cl_foliage_alpha): with instance_fade 0.3 the old mapping
+// The classic renderer's parts (classic_cull_math.h clc_split) at every iw / cw: every threshold is
+// kept by exactly one part, and no part keeps none. Before lod_iv_empty, an impostor share iw (or a
+// coarser share cw at iw = 0) in (0, 1/512) packed [0, 0) as 0, the "whole coverage" sentinel: two
+// whole draws of one instance (an impostor over the mesh, or two LODs).
+static int split_bad, split_empty;
+static void split_check(float iw, float cw) {
+    ClcParts o;
+    o.n = 0;
+    clc_split(&o, 1, iw, cw);
+    for (int k = 0; k < 256; k++) {
+        float n = ((float)k + 0.5f) / 256.0f;
+        int c = 0;
+        for (u32 i = 0; i < o.n; i++) c += lod_iv_kept(o.iv[i], n);
+        split_bad += c != 1;
+    }
+    for (u32 i = 0; i < o.n; i++) {
+        if (o.iv[i] == 0.0f) { split_empty += o.n > 1; continue; }   // 0: the whole coverage, the only part
+        int p = (int)o.iv[i], a = p % 512, b = p / 512;
+        split_empty += a >= b;
+    }
+}
+
+static void test_split_sweep(void) {
+    split_bad = split_empty = 0;
+    const float others[] = { 0.0f, 1e-6f, 0.5f / 256.0f, 1.0f / 256.0f, 0.25f, 0.5f, 1.0f - 1.0f / 256.0f, 1.0f - 1e-6f, 1.0f };
+    const int no = (int)(sizeof(others) / sizeof(others[0]));
+    for (int s = 1; s <= 3907; s++) {   // (0, 1/256] in 1e-6 steps, at both ends of [0, 1]
+        float t = (float)s * 1e-6f;
+        for (int j = 0; j < no; j++) {
+            split_check(t, others[j]);
+            split_check(others[j], t);
+            split_check(1.0f - t, others[j]);
+            split_check(others[j], 1.0f - t);
+        }
+        split_check(t, t);
+        split_check(1.0f - t, 1.0f - t);
+    }
+    u32 seed = 12345;
+    for (int i = 0; i < 200000; i++) {   // random, a third of them pushed towards the band edges
+        seed = seed * 1664525u + 1013904223u;
+        float a = (float)(seed >> 8) / 16777216.0f;
+        seed = seed * 1664525u + 1013904223u;
+        float b = (float)(seed >> 8) / 16777216.0f;
+        if (i % 3 == 1) a *= 0.01f, b *= 0.01f;
+        if (i % 3 == 2) a = 1.0f - a * 0.01f, b = b * b;
+        split_check(a, b);
+    }
+    CHECK(split_bad == 0, "classic parts: %d thresholds not covered exactly once", split_bad);
+    CHECK(split_empty == 0, "classic parts: %d empty parts emitted", split_empty);
+}
+
+// Foliage instance alpha (classic_cull_math.h clc_foliage_alpha): with instance_fade 0.3 the old mapping
 // (alpha = (density - hash x 0.9375) / width) left a quarter of the instances (hash > 0.7) at alpha
 // 0.21 .. 1 at every distance: trees and grass dithered see-through up close.
 static void test_foliage_alpha(void) {
@@ -366,6 +420,7 @@ int main(void) {
     test_char_dolly(4.0f, 0.35f);
     test_reversal();
     test_masks();
+    test_split_sweep();
     test_static_dolly();
     test_foliage_alpha();
     test_streaming();

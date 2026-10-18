@@ -116,7 +116,7 @@ spawn-rate steps; shadow casters at `shadow_max_dist`.
 | Cross-fade dither | `shaders/lod_fade.glsl`: 16 x 16 void-and-cluster blue noise (`tools/gen_lod_bluenoise.py`), shifted per frame (R2) while TAA is on |
 | Characters | `src/gameplay/characters.c` (`LodFade`, `lod_char_select`), `shaders/skin*.frag`, `skin_shadow.frag` (`PIPE_SKIN_SHADOW_FADE`) |
 | Animation tiers | `characters.c` (eased update rate), `src/anim/foot_ik.c`, `turn.c` (`ProcInput.lod_w`); outside the view the cheap rate without IK (`characters.offscreen_update` / `offscreen_margin_deg`, docs/perf/FINDINGS.md PF-0033); from `characters.shared_pose_lod` a shared sampled pose per phase bucket (`shared_pose_phases`, PF-0034; docs/ANIMATION.md "LOD") |
-| Classic renderer | `src/render/vk_classic.c` (`cull_instance`, `emit_part`, `lod_pick_band`), `shaders/classic_common.glsl` (`cl_faded`) |
+| Classic renderer | `src/render/vk_classic.c` (`cull_instance`, `emit_part`), `src/render/classic_cull_math.h` (`clc_cull`, `clc_lod_parts`, `clc_split`, `clc_foliage_alpha`; `tests/test_classic_cull.c`), `src/render/lod_fade.c` (`lod_pick_band`), `shaders/classic_common.glsl` (`cl_faded`) |
 | Terrain | `src/world/chunks.c` (`morph_target`, nearest-point levels), `shaders/lit.vert`, `shadow_morph.vert` (`PIPE_SHADOW_MORPH`), `surfaces.glsl` |
 | VFX | `src/vfx/vfx_sim.c` (`lod_smooth`, `lod_dist_scale`) |
 | Cvars | `r_lod_fade_time` (0.35 s), `r_lod_fade_band` (0.25 octaves), `r_lod_fade_debug` (tint fading draws: green in, red out, blue alpha only), `r_lod_debug` (1 character labels: LOD, fade `<from %`, pixels, update rate, IK and shadow weights; 2 + classic LOD levels as colours: white 0, green 1, yellow 2, red 3, blue impostor), `r_lod_bias` (user bias against the tier), `r_lod_legacy` (the ranges / cuts from before, for comparisons), `r_lod_scope` (the scope PiP's own LOD selection) |
@@ -165,7 +165,10 @@ is kept.
   range: time fades use a signed value (in `t` keeps `n < t`, out `-(1-t)` keeps `n >= t`); classic parts
   carry the kept interval `[lo, hi)` (`lod_iv_pack`): impostor `[0, iw)`, coarser LOD `[iw, mid)`, finer
   `[mid, 1)`. Every texel is covered by exactly one part (`test_lod` checks all 256 thresholds), in the main
-  view and in the shadow maps (the same dither in shadow-map texels): no holes, no double shadows.
+  view and in the shadow maps (the same dither in shadow-map texels): no holes, no double shadows. A part
+  whose interval quantizes empty is not drawn (`lod_iv_empty`): packed, `[0, 0)` would read as 0, the
+  "whole coverage" value, and an impostor share or coarser share below 1/512 drew a whole extra impostor or
+  LOD over the instance (`test_lod` sweeps `iw` / `cw` near 0 and 1 in 1e-6 steps).
 * **Time fades (objects with state: characters).** `LodFade`: the selector (with its hysteresis) runs on
   the LOD being faded to; a running fade always completes, a reversal mid-fade then fades back (no
   ping-pong half-fades). Shadows: one LOD coarser than each of the pair, faded with the same values.
