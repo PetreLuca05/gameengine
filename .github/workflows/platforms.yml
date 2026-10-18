@@ -87,7 +87,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Packages
-        run: brew install ninja glslang spirv-cross molten-vk vulkan-loader
+        run: brew install ninja glslang spirv-cross molten-vk vulkan-loader vulkan-validationlayers
       - name: Configure (arm64)
         run: cmake -S . -B build-mac-arm64 -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/macos-arm64.cmake
       - name: Python packages (ground texture tests)
@@ -113,32 +113,45 @@ jobs:
           export VK_ICD_FILENAMES="$(brew --prefix molten-vk)/etc/vulkan/icd.d/MoltenVK_icd.json"
           export DYLD_FALLBACK_LIBRARY_PATH="$(brew --prefix)/lib"
           printf 'set r_maxfps 60\nwait 120\nscreenshot %s/mvk_devroom.png\nwait 3\nquit\n' "$PWD" > mvk.cfg
-          # macOS has no timeout(1): a background watchdog. The result goes out as an annotation too
-          # (readable from the check-run API without the full log).
+          # macOS has no timeout(1): a background watchdog. Results go out as annotations too (readable from
+          # the check-run API without the full log): run 1 as is, run 2 under the validation layer.
           W="$GITHUB_WORKSPACE"
-          (cd build-mac-arm64/bin && exec ./deadground --test --nosound --log "$W/mvk.log" --script "$W/mvk.cfg") > "$W/mvk.out" 2>&1 &
-          pid=$!
-          (sleep 600; kill -9 $pid) > /dev/null 2>&1 &
-          wd=$!
-          rc=0; wait $pid || rc=$?
-          kill $wd 2>/dev/null || true
-          tail -40 "$W/mvk.out" || true
           enc() { sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}'; }
+          run() {   # run <tag> [args]: the game for the script, sets rc
+            tag=$1; shift
+            (cd build-mac-arm64/bin && exec ./deadground --test --nosound --log "$W/mvk$tag.log" --script "$W/mvk.cfg" "$@") > "$W/mvk$tag.out" 2>&1 &
+            pid=$!
+            (sleep 600; kill -9 $pid) > /dev/null 2>&1 &
+            wd=$!
+            rc=0; wait $pid || rc=$?
+            kill $wd 2>/dev/null || true
+          }
+          run ""
+          tail -40 "$W/mvk.out" || true
           lines=$(cat "$W/mvk.log" 2>/dev/null | grep -E "vulkan:|swapchain|fidelity|screenshot" | head -8 | enc || true)
           if [ -f "$W/mvk_devroom.png" ]; then shot=yes; else shot=no; fi
           echo "::notice title=MoltenVK game (exit $rc, screenshot $shot)::${lines:-no log lines}"
-          # the end of the log (+ stderr) without the git-ignored character textures: a crash's backtrace
-          tail=$(cat "$W/mvk.log" "$W/mvk.out" 2>/dev/null | grep -v "assets/human/" | tail -45 | enc || true)
+          # MoltenVK's own messages (a device loss names the Metal error) + the end of the log without the
+          # git-ignored character textures: a crash's backtrace
+          mvk=$(grep -E "mvk-|Metal|MTL" "$W/mvk.out" 2>/dev/null | sort | uniq -c | sort -rn | head -15 | enc || true)
+          [ -z "$mvk" ] || echo "::warning title=MoltenVK messages::$mvk"
+          tail=$(grep -v "assets/human/" "$W/mvk.log" 2>/dev/null | tail -30 | enc || true)
           [ "$rc" = 0 ] || echo "::error title=MoltenVK game log tail (exit $rc)::${tail:-empty}"
-          test "$shot" = yes
+          shot1=$shot; rc1=$rc
+          export VK_LAYER_PATH="$(brew --prefix vulkan-validationlayers)/share/vulkan/explicit_layer.d"
+          run "_val" --validation
+          val=$(grep -E "\[vk\]|validation" "$W/mvk_val.log" 2>/dev/null | sed -E 's/^\[ *[0-9.]+\] //' | cut -c1-220 | sort | uniq -c | sort -rn | head -20 | enc || true)
+          echo "::warning title=MoltenVK game under validation (exit $rc)::${val:-no validation messages}"
+          [ "$rc" = 0 ] || echo "::error title=MoltenVK validation run log tail (exit $rc)::$(grep -v "assets/human/" "$W/mvk_val.log" 2>/dev/null | tail -20 | enc || true)"
+          test "$shot1" = yes && test "$rc1" = 0
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: moltenvk-devroom
           path: |
             mvk_devroom.png
-            mvk.log
-            mvk.out
+            mvk*.log
+            mvk*.out
           retention-days: 14
       - name: SPIR-V -> MSL -> AIR (SPIRV-Cross + xcrun metal)
         if: always()
