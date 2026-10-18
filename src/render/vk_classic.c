@@ -27,6 +27,7 @@
 //            fading parts batch apart (key bit 3) and draw through the dithered pipelines. A LOD that is
 //            not resident yet draws the nearest resident one (the finer one is prefetched). The local
 //            light tiles and r_lod_legacy keep the cuts from before.
+#include "core/profiler.h"
 #include "vk_internal.h"
 #include "lod_fade.h"
 #include "fidelity/fidelity.h"
@@ -793,7 +794,7 @@ static void cull_range(void *ctx, int begin, int end) {
     }
 }
 
-static void cull_cells(const ClCull *v, const VgScene *s) {
+static void cell_tasks(const ClCull *v, const VgScene *s) {
     T.n = 0;
     T.parts = v->legacy ? 1u : CL_PARTS;
     float lim_k = v->legacy ? 1.0f : (v->shadow ? v->shadow_lim_k : v->fade_lim_k);   // docs/LOD.md: scaled distances
@@ -829,6 +830,10 @@ static void cull_cells(const ClCull *v, const VgScene *s) {
             task_add(&pl->inst[cl->first], cl->count);
         }
     }
+}
+
+static void cull_cells(const ClCull *v, const VgScene *s) {
+    cell_tasks(v, s);
     if (!T.n) return;
     tmp_reserve(T.t[T.n - 1].off + T.t[T.n - 1].n * T.parts);
     T.v = v;
@@ -844,6 +849,80 @@ static void cull_cells(const ClCull *v, const VgScene *s) {
         w += t->out;
     }
     C.tmp_n = w;
+}
+
+// docs/perf/FINDINGS.md PF-0009: the views of a frame (scope PiP, main, sun cascades) culled in one
+// parallel pass instead of one jobs_parallel_for per view, each waiting for its slowest task before
+// the next view starts. Each view keeps its own task list and output buffer; the outputs are packed
+// in task order and emitted in the old view order, so every view's instance stream (and the
+// instance buffer layout) is the one the per-view passes produce.
+typedef struct ClMulti {
+    const ClCull *v;
+    ClTask *t;
+    u32 n, cap, parts, base;
+    ClInst *tmp;
+    u32 *key, tmp_cap;
+} ClMulti;
+static struct { ClMulti m[CL_VIEWS]; int n; const VgScene *s; } MV;
+
+static void cull_range_multi(void *ctx, int begin, int end) {
+    (void)ctx;
+    int vi = 0;
+    for (int i = begin; i < end; i++) {
+        while (vi + 1 < MV.n && (u32)i >= MV.m[vi + 1].base) vi++;
+        ClMulti *m = &MV.m[vi];
+        ClTask *t = &m->t[(u32)i - m->base];
+        t->out = 0;
+        for (u32 k = 0; k < t->n; k++) cull_instance(m->v, MV.s, &t->inst[k], m->tmp + t->off, m->key + t->off, &t->out);
+    }
+}
+
+static void emit_view(ClView *out);
+
+static void cull_views(const ClCull *views, ClView *const *outs, int nv, const VgScene *s) {
+    MV.n = nv;
+    MV.s = s;
+    u32 total = 0;
+    for (int i = 0; i < nv; i++) {
+        ClMulti *m = &MV.m[i];
+        m->v = &views[i];
+        // the task list of this view in its own buffer (cell_tasks fills T)
+        ClTask *tt = T.t;
+        u32 tc = T.cap;
+        T.t = m->t, T.cap = m->cap;
+        cell_tasks(&views[i], s);
+        m->t = T.t, m->cap = T.cap, m->n = T.n, m->parts = T.parts;
+        T.t = tt, T.cap = tc, T.n = 0;
+        m->base = total;
+        total += m->n;
+        u32 need = m->n ? m->t[m->n - 1].off + m->t[m->n - 1].n * m->parts : 0;
+        if (need > m->tmp_cap) {
+            u32 cap = m->tmp_cap ? m->tmp_cap : 4096;
+            while (cap < need) cap *= 2;
+            m->tmp = (ClInst *)realloc(m->tmp, sizeof(ClInst) * cap);
+            m->key = (u32 *)realloc(m->key, sizeof(u32) * cap);
+            m->tmp_cap = cap;
+        }
+    }
+    if (total) jobs_parallel_for((int)total, 8, cull_range_multi, NULL);
+    for (int i = 0; i < nv; i++) {
+        ClMulti *m = &MV.m[i];
+        u32 w = 0;
+        for (u32 k = 0; k < m->n; k++) {
+            const ClTask *t = &m->t[k];
+            if (t->out && t->off != w) {
+                memmove(m->tmp + w, m->tmp + t->off, sizeof(ClInst) * t->out);
+                memmove(m->key + w, m->key + t->off, sizeof(u32) * t->out);
+            }
+            w += t->out;
+        }
+        // emit_view reads C.tmp / C.tmp_key / C.tmp_n: this view's buffers for the call
+        ClInst *ct = C.tmp;
+        u32 *ck = C.tmp_key, cc = C.tmp_cap;
+        C.tmp = m->tmp, C.tmp_key = m->key, C.tmp_cap = m->tmp_cap, C.tmp_n = w;
+        emit_view(outs[i]);
+        C.tmp = ct, C.tmp_key = ck, C.tmp_cap = cc, C.tmp_n = 0;
+    }
 }
 
 // Instance buffer space of this frame slot (grows; a replaced buffer stays alive until the frames
@@ -943,6 +1022,19 @@ static float without_level_scale(int feature, float cur) {
     return cur * m.def / b.def;
 }
 
+// Sun cascade k: orthographic, LOD by the cascade's texel size, shadow distance, no impostors, its
+// receiver volume (PF-0006).
+static void cascade_view(ClCull *v, u32 k, u32 tile, float shadow_px) {
+    planes_of(R->shadow_vp_ndc[k], v->planes);   // the untiled matrix (render.c)
+    v->ortho = v->shadow = true;
+    v->layers = R->sun_shadow.culling_mask == SHADOW_LAYERS_ALL ? 0u : (R->sun_shadow.culling_mask | 0x100u);
+    v->px_scale = (float)tile / (2.0f * R->shadow_radius[k]);   // the tile's half extent (render.c)
+    v->lod_px = shadow_px;
+    v->era2010 = false;
+    v->nrcv = R->shadow_rcv_n[k];
+    memcpy(v->rcv, R->shadow_rcv[k], sizeof(vec4) * (size_t)v->nrcv);
+}
+
 void vkc_frame(const VgScene *s, const VgDisplace *disp, float density, float lod_px, float shadow_lod_px, float small_impostor_px, bool era2010, bool shadows) {
     C.scene = NULL;
     C.inst_used = 0;
@@ -1011,7 +1103,39 @@ void vkc_frame(const VgScene *s, const VgDisplace *disp, float density, float lo
     mat4 pip_vp;
     vec3 pip_eye;
     float pip_px;
-    if (render_scope_cull(&pip_vp, &pip_eye, &pip_px)) {
+    bool batched = prof_fix_enabled(PFX_CLASSIC_CULL_BATCH);
+    bool cascades = shadows && (R->shadow_active[0] || R->shadow_active[1] || R->shadow_active[2] || R->shadow_active[3]);
+    u32 tile = R->shadow_size / 2;
+    if (batched) {
+        PROF_BEGIN("classic:cull_views");
+        static ClCull cv[CL_VIEWS];
+        ClView *outs[CL_VIEWS];
+        int nv = 0;
+        bool pip = render_scope_cull(&pip_vp, &pip_eye, &pip_px);
+        if (pip) {
+            ClCull *pv = &cv[nv];
+            *pv = v;
+            planes_of(pip_vp, pv->planes);
+            pv->eye = pv->lod_eye = pip_eye;
+            pv->px_scale = pip_px;
+            pv->znear = 0.3f;
+            outs[nv++] = &C.view[CL_VIEW_PIP];
+        }
+        cv[nv] = v;
+        outs[nv++] = &C.view[0];
+        if (cascades) {
+            C.ncasc = (u32)DG_CLAMP((int)R->shq.cascades, 1, 4);
+            for (u32 k = 0; k < C.ncasc; k++) {
+                cv[nv] = v;
+                cascade_view(&cv[nv], k, tile, shadow_px);
+                outs[nv++] = &C.view[1 + k];
+            }
+        }
+        cull_views(cv, outs, nv, s);
+        if (pip) build_lods(&C.view[CL_VIEW_PIP]);
+        count_view(&C.view[0]);
+        PROF_END();
+    } else if (render_scope_cull(&pip_vp, &pip_eye, &pip_px)) {
         ClCull pv = v;
         planes_of(pip_vp, pv.planes);
         pv.eye = pv.lod_eye = pip_eye;
@@ -1022,27 +1146,24 @@ void vkc_frame(const VgScene *s, const VgDisplace *disp, float density, float lo
         emit_view(&C.view[CL_VIEW_PIP]);
         build_lods(&C.view[CL_VIEW_PIP]);
     }
-    C.tmp_n = 0;
-    cull_cells(&v, s);
-    emit_view(&C.view[0]);
-    count_view(&C.view[0]);
-    // sun cascades: orthographic, LOD by the cascade's texel size, shadow distance, no impostors
-    if (shadows && (R->shadow_active[0] || R->shadow_active[1] || R->shadow_active[2] || R->shadow_active[3])) {
-        C.ncasc = (u32)DG_CLAMP((int)R->shq.cascades, 1, 4);
-        u32 tile = R->shadow_size / 2;
-        for (u32 k = 0; k < C.ncasc; k++) {
-            planes_of(R->shadow_vp_ndc[k], v.planes);   // the untiled matrix (render.c)
-            v.ortho = v.shadow = true;
-            v.layers = R->sun_shadow.culling_mask == SHADOW_LAYERS_ALL ? 0u : (R->sun_shadow.culling_mask | 0x100u);
-            v.px_scale = (float)tile / (2.0f * R->shadow_radius[k]);   // the tile's half extent (render.c)
-            v.lod_px = shadow_px;
-            v.era2010 = false;
-            v.nrcv = R->shadow_rcv_n[k];
-            memcpy(v.rcv, R->shadow_rcv[k], sizeof(vec4) * (size_t)v.nrcv);
-            C.tmp_n = 0;
-            cull_cells(&v, s);
-            emit_view(&C.view[1 + k]);
+    if (!batched) {
+        PROF_BEGIN("classic:cull_main");
+        C.tmp_n = 0;
+        cull_cells(&v, s);
+        emit_view(&C.view[0]);
+        count_view(&C.view[0]);
+        PROF_END();
+        PROF_BEGIN("classic:cull_cascades");
+        if (cascades) {
+            C.ncasc = (u32)DG_CLAMP((int)R->shq.cascades, 1, 4);
+            for (u32 k = 0; k < C.ncasc; k++) {
+                cascade_view(&v, k, tile, shadow_px);
+                C.tmp_n = 0;
+                cull_cells(&v, s);
+                emit_view(&C.view[1 + k]);
+            }
         }
+        PROF_END();
     }
     for (int i = 0; i < CL_VIEW_PIP; i++) build_lods(&C.view[i]);
     C.cpu_ms = (float)((double)(SDL_GetPerformanceCounter() - t0) / (double)SDL_GetPerformanceFrequency() * 1000.0);
