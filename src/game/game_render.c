@@ -216,6 +216,7 @@ void game_render_init(void) {
     shadow_sky_register();
     terrain_game_register();
     ground_ref_register();
+    items_game_register();
     weather_register();
     water_register();
     ledge_register();
@@ -635,6 +636,40 @@ static void draw_debug(World *w, vec3 cam) {
     }
 }
 
+// Aiming laser (docs/ITEM_PIPELINE.md): a faint red beam from the module's emitter to the first world hit,
+// a bright dot there with a little red glow.
+static void laser_render(World *w, vec3 from, vec3 dir) {
+    RayHit rh;
+    float range = 80.0f;
+    bool hit = phys_raycast(w->phys, from, v3_scale(dir, range), PL_MASK_WORLD, PHYS_INVALID_BODY, &rh);
+    vec3 to = hit ? rh.point : v3_madd(from, dir, range);
+    float len = v3_len(v3_sub(to, from));
+    if (len < 0.02f) return;
+    DrawItem d;
+    memset(&d, 0, sizeof(d));
+    d.mesh = G->meshes.cube;
+    quat q = quat_euler(atan2f(-dir.x, -dir.z), asinf(clampf(dir.y, -1.0f, 1.0f)), 0);   // -Z onto the beam (dir_from_angles)
+    d.model = mat4_trs(v3_scale(v3_add(from, to), 0.5f), q, v3(0.0012f, 0.0012f, len));
+    d.mat = material_color(v4(1.0f, 0.06f, 0.03f, 0.22f));
+    d.mat.flags = MAT_UNLIT | MAT_NO_SHADOW;
+    render_draw(&d);
+    if (!hit) return;
+    float r = 0.004f + len * 0.0006f;
+    d.mesh = G->meshes.sphere;
+    d.model = mat4_trs(v3_madd(rh.point, rh.normal, 0.002f), quat_identity(), v3s(r * 2.0f));
+    d.mat = material_color(v4(1.0f, 0.1f, 0.05f, 1));
+    d.mat.flags = MAT_UNLIT | MAT_NO_SHADOW;
+    d.mat.emissive = 6.0f;
+    render_draw(&d);
+    PointLight pl = { 0 };
+    pl.pos = v3_madd(rh.point, rh.normal, 0.03f);
+    pl.radius = 0.6f;
+    pl.color = v3(1.0f, 0.08f, 0.04f);
+    pl.intensity = 0.6f;
+    pl.flags = LIGHT_NO_SHADOW;
+    render_add_light(&pl);
+}
+
 // Flashlights (F): a cookie-projected spot light. The local one
 // sits just ahead of the eye (in front of the held gun) along the view; other players' come from
 // their eye along the replicated aim (EF_FLASHLIGHT).
@@ -664,7 +699,19 @@ static void flashlights_render(World *w, const RenderCamera *cam, const Player *
     s.color = v3(1.0f, 0.97f, 0.92f);
     // The viewed player's light rides the camera: the local toggle, or a spectated player's replicated one.
     bool own_on = view_slot == G->local_slot ? G->flashlight : (lp && (w->flags[ENT_INDEX(lp->ent)] & EF_FLASHLIGHT));
-    if (own_on && lp && !dead) {
+    vec3 ep, ef;
+    if (own_on && lp && !dead && view_slot == G->local_slot && hands_emitter(1, &ep, &ef)) {
+        // A weapon light / held flashlight (docs/ITEM_PIPELINE.md): the beam leaves its emitter along the barrel.
+        s.pos = v3_madd(ep, ef, 0.01f);
+        s.dir = ef;
+        s.inner_deg = 5.0f;
+        s.outer_deg = 20.0f;
+        s.intensity = 170.0f;
+        render_add_spot(&s);
+        s.inner_deg = 7.0f;
+        s.outer_deg = 24.0f;
+        s.intensity = 140.0f;
+    } else if (own_on && lp && !dead) {
         vec3 f = dir_from_angles(cam->yaw, cam->pitch), r = right_from_yaw(cam->yaw), u = v3_cross(r, f);
         // Off-hand side, a little ahead of the eye: the held gun (to the right, mostly behind
         // the light) isn't flooded, the beam still starts at the view.
@@ -672,6 +719,7 @@ static void flashlights_render(World *w, const RenderCamera *cam, const Player *
         s.dir = f;
         render_add_spot(&s);
     }
+    if (own_on && lp && !dead && view_slot == G->local_slot && hands_emitter(2, &ep, &ef)) laser_render(w, ep, ef);
     for (int k = 0; k < MAX_PLAYERS; k++) {
         const Player *op = &w->players[k];
         if (!op->active || k == view_slot || !ent_valid(w, op->ent)) continue;
@@ -979,6 +1027,7 @@ void game_render(void) {
     // Phone: lens view from the phone as drawn this frame, companion server, capture.
     phone_frame(w, &cam, p);
     fx_render(cam.pos);
+    items_game_draw(&cam);
     draw_debug(w, cam.pos);
     recoil_debug_draw(cam.pos);
     anim_debug_draw();

@@ -8,6 +8,7 @@
 //   * the phone model (body, a dark glass screen, lens) for hands.c: the model never shows the
 //     screen content (the user's call: the screen lives on the HUD panel / the real phone).
 #include "phone_internal.h"
+#include "assets/item_mesh.h"
 #include "core/engine.h"
 #include "core/log.h"
 #include "core/platform.h"
@@ -717,6 +718,11 @@ void phone_draw_held(const ItemDef *it, vec3 pos, quat rot, bool viewmodel, u32 
     PhoneState *s = phone_state();
     if (!s->init) return;
     ensure_meshes(s);
+    ItemMesh *im = item_mesh_get(it->model.mesh);
+    if (im) {   // the detailed model (docs/ITEM_PIPELINE.md): body, buttons, camera bump; the screen quad stays
+        item_mesh_draw(im, item_mesh_condition(it->model.condition), pos, rot, 1.0f, NULL, flags, viewmodel);
+        goto screen;
+    }
     // Body.
     Material body = material_color(v4(0.035f, 0.037f, 0.042f, 1));
     body.roughness = 0.32f;
@@ -730,6 +736,7 @@ void phone_draw_held(const ItemDef *it, vec3 pos, quat rot, bool viewmodel, u32 
     lens.flags = flags;
     vec3 lp = v3_add(pos, quat_rotate(rot, v3_add(it->cam.lens.t, v3(0, 0, -0.001f))));
     draw_part(s->cube, mat4_trs(lp, rot, v3(0.011f, 0.011f, 0.003f)), lens, viewmodel);
+screen:
     // Screen: plain dark glass. The phone's UI is only on the HUD panel (and the paired real
     // phone): the model never shows screen content (no texture, no emissive, no light).
     if (flags & MAT_SHADOW_ONLY) return;   // the screen is never in the shadow pass

@@ -13,6 +13,7 @@
 #include "gameplay/entities.h"
 #include "gameplay/revive/revive.h"
 #include "editor/handpose/hp_system.h"
+#include "assets/item_mesh.h"
 #include "cJSON.h"
 #include <stdlib.h>
 #include <math.h>
@@ -687,20 +688,59 @@ static void mech_part(int mech, vec3 *center, quat *prot) {
     }
 }
 
+// The item mesh pose of the current draw (docs/ITEM_PIPELINE.md): the mechanical layer's slide travel
+// and magazine wobble; filled attachment slots hide / fold the parts tagged with them.
+static ItemMeshPose mesh_pose(u8 filled) {
+    ItemMeshPose p = { 0 };
+    p.wobble = quat_identity();
+    if (s_mech_cur) {
+        p.slide = s_mech_cur->slide;
+        if (v3_len2(s_mech_cur->wobble) > 1e-10f) p.wobble = hp_euler_deg(s_mech_cur->wobble);
+    }
+    p.hide_slots = p.fold_slots = filled;
+    return p;
+}
+
+static u32 item_flags(bool viewmodel) { return viewmodel ? MAT_NO_SHADOW : s_world_item_flags; }
+
 // wd: an effective weapon (attach_weapon_effective): its parts without the hidden ones, plus every
-// applied attachment's parts placed on its slot.
+// applied attachment's parts placed on its slot. Detailed meshes replace the boxes where they exist.
 static void draw_weapon(const WeaponDef *wd, vec3 pos, quat rot, bool viewmodel) {
     float k = s_draw_scale > 0 ? s_draw_scale : 1.0f;
-    for (int i = 0; i < wd->part_count; i++) {
-        const WeaponModelPart *p = &wd->parts[i];
-        vec3 c = p->offset;
-        quat pr = quat_identity();
-        mech_part(p->mech, &c, &pr);
-        draw_box(v3_add(pos, quat_rotate(rot, v3_scale(c, k))), quat_mul(rot, pr), v3_scale(p->half, k), p->color, viewmodel);
+    u8 filled = 0;
+    for (int s = 0; s < ATT_SLOTS; s++)
+        if (wd->att_applied[s]) filled |= (u8)(1u << s);
+    ItemMesh *wm = item_mesh_get(wd->model.mesh);
+    if (wm) {
+        ItemMeshPose pose = mesh_pose(filled);
+        item_mesh_draw(wm, item_mesh_condition(wd->model.condition), pos, rot, k, &pose, item_flags(viewmodel), viewmodel);
+    } else {
+        for (int i = 0; i < wd->part_count; i++) {
+            const WeaponModelPart *p = &wd->parts[i];
+            vec3 c = p->offset;
+            quat pr = quat_identity();
+            mech_part(p->mech, &c, &pr);
+            draw_box(v3_add(pos, quat_rotate(rot, v3_scale(c, k))), quat_mul(rot, pr), v3_scale(p->half, k), p->color, viewmodel);
+        }
     }
     if (!H->db) return;
+    u8 boxed[ATT_SLOTS];   // applied attachments still drawn as boxes (no mesh)
+    memcpy(boxed, wd->att_applied, sizeof(boxed));
+    for (int s = 0; s < ATT_SLOTS; s++) {
+        const AttachmentDef *a = attach_def(H->db, wd->att_applied[s]);
+        const ItemModelRef *amr = a ? attach_model_for(a, wd) : NULL;
+        ItemMesh *am = a && a->slot == s && attach_allowed(wd, a) ? item_mesh_get(amr->mesh) : NULL;
+        if (!am) continue;
+        boxed[s] = 0;
+        Xform place = attach_placement(wd, a);
+        vec3 c = place.t;
+        quat pr = place.r;
+        mech_part(s == ATT_OPTIC || s == ATT_UNDERBARREL || s == ATT_MAGAZINE ? MECH_MAG : MECH_NONE, &c, &pr);
+        item_mesh_draw(am, item_mesh_condition(amr->condition), v3_add(pos, quat_rotate(rot, v3_scale(c, k))), quat_mul(rot, pr), k, NULL,
+                       item_flags(viewmodel), viewmodel);
+    }
     AttachDrawPart parts[ATT_SLOTS * ATT_MAX_PARTS];
-    int n = attach_draw_parts(H->db, wd, wd->att_applied, parts, ARRAY_COUNT(parts));
+    int n = attach_draw_parts(H->db, wd, boxed, parts, ARRAY_COUNT(parts));
     for (int i = 0; i < n; i++) {
         vec3 c = parts[i].center;
         quat pr = parts[i].rot;
@@ -715,10 +755,16 @@ static void draw_held_item(const ItemDef *it, vec3 pos, quat rot, bool viewmodel
         phone_draw_held(it, pos, rot, viewmodel, viewmodel ? MAT_NO_SHADOW : s_world_item_flags);
         return;
     }
+    float k = s_draw_scale > 0 ? s_draw_scale : 1.0f;
+    ItemMesh *im = item_mesh_get(it->model.mesh);
+    if (im) {   // detailed model, authored at real size around the grip
+        ItemMeshPose pose = mesh_pose(0);
+        item_mesh_draw(im, item_mesh_condition(it->model.condition), pos, rot, k, &pose, item_flags(viewmodel), viewmodel);
+        return;
+    }
     // Pickup sizes are world-scale; held items are palm-sized (item_held_box, also the ground model).
     vec3 center, half;
     item_held_box(it, &center, &half);
-    float k = s_draw_scale > 0 ? s_draw_scale : 1.0f;
     draw_box(v3_add(pos, quat_rotate(rot, v3_scale(center, k))), rot, v3_scale(half, k), it->color, viewmodel);
 }
 
@@ -729,6 +775,27 @@ bool hands_muzzle(vec3 *pos, vec3 *fwd) {
     if (!H || !H->initialized || !H->weapon || H->weapon->kind == WPN_MELEE) return false;
     // The viewmodel may use its own FOV: return where the barrel tip appears in the world.
     if (pos) *pos = render_viewmodel_to_world(v3_add(H->weapon_pos, quat_rotate(H->weapon_rot, H->weapon->muzzle_offset)));
+    if (fwd) *fwd = quat_rotate(H->weapon_rot, v3(0, 0, -1));
+    return true;
+}
+
+bool hands_emitter(int kind, vec3 *pos, vec3 *fwd) {
+    if (!H || !H->initialized) return false;
+    Xform sock;
+    if (H->weapon && H->db) {
+        const AttachmentDef *a = attach_def(H->db, H->weapon->att_applied[ATT_UNDERBARREL]);
+        if (!a || a->emitter != kind) return false;
+        Xform place = attach_placement(H->weapon, a);
+        ItemMesh *m = item_mesh_get(attach_model_for(a, H->weapon)->mesh);
+        if (!m || !item_mesh_socket(m, "emitter", &sock)) sock = xf_make(v3(0, -0.02f, -0.06f), quat_identity());
+        sock = xf_mul(place, sock);
+    } else if (H->held_item && kind == 1) {
+        ItemMesh *m = item_mesh_get(H->held_item->model.mesh);
+        if (!m || !item_mesh_socket(m, "emitter", &sock)) return false;
+    } else {
+        return false;
+    }
+    if (pos) *pos = render_viewmodel_to_world(v3_add(H->weapon_pos, quat_rotate(H->weapon_rot, sock.t)));
     if (fwd) *fwd = quat_rotate(H->weapon_rot, v3(0, 0, -1));
     return true;
 }

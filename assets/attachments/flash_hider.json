@@ -17,6 +17,7 @@
   "modifiers": {
     "camera_kick": 0.97
   },
+  "mesh": "assets/items/meshes/att_flash_hider.dgim",
   "model": [
       {"offset": [0, 0, -0.0275], "half": [0.011, 0.011, 0.0275], "color": [0.08, 0.08, 0.085]},
       {"offset": [0, 0, -0.045], "half": [0.012, 0.012, 0.01], "color": [0.05, 0.05, 0.05]}

@@ -34,6 +34,7 @@
       }
     }
   },
+  "mesh": "assets/items/meshes/bat.dgim",
   "model": [
     { "offset": [0, 0.3, 0], "half": [0.03, 0.3, 0.03], "color": [0.6, 0.45, 0.25] },
     { "offset": [0, -0.02, 0], "half": [0.02, 0.08, 0.02], "color": [0.15, 0.12, 0.1] }

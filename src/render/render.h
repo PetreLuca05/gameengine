@@ -92,6 +92,11 @@ enum MaterialFlags {
 #define MAT_COVER_ID_SHIFT 29u
 #define MAT_COVER_ID(flags) (((flags) >> MAT_COVER_ID_SHIFT) & 7u)
 #define MAT_PBR_MAPS (MAT_MR_TEX | MAT_NORMAL_TEX | MAT_OCCLUSION_TEX | MAT_EMISSIVE_TEX)
+// Item meshes (docs/ITEM_PIPELINE.md, assets/item_mesh.c): Material.roughness = MAT_ROUGHNESS_VERTEX (any
+// negative value) makes the vertex uv the (roughness, metallic) and the vertex colour sqrt(layered albedo)
+// + baked AO (with ao_vertex), so one draw carries every material. A sentinel, not a flag: every flag bit is
+// taken (bit 27, where this started, is MAT_WINDOWS in draw items), and item meshes never use the scalars.
+#define MAT_ROUGHNESS_VERTEX (-1.0f)
 // Terrain chunk geomorph (docs/LOD.md, chunks.c): uv.x = height delta to the next coarser LOD, uv.y = its
 // normal (12 + 12 bit x / z), tex_scale = chunk LOD + 8 x LOD distance (m); lit.vert / shadow_morph.vert.
 #define MAT_TERRAIN_MORPH (1u << 24)
@@ -266,6 +271,7 @@ void render_surface_map(const u8 *ids, int n, float origin_x, float origin_z, fl
 // Frame
 bool render_begin_frame(void);
 void render_set_camera(const RenderCamera *cam);
+void render_camera_info(vec3 *pos, float *fov_deg);   // this frame's camera (after overrides): item mesh LODs
 // Classic renderer, last frame's main view: instances per LOD 0..3 and impostors (n[4]), and
 // those in a cross-fade band (drawn twice, docs/LOD.md).
 void render_classic_lod_counts(u32 n[5], u32 *fading);
@@ -478,6 +484,8 @@ typedef struct RenderUi3dPart {
     vec4 color;               // linear albedo
     u32 shape;                // 0 box, 1 cylinder (Y axis)
     float emissive, metallic, highlight;
+    MeshId mesh;              // item mesh part (docs/ITEM_PIPELINE.md): drawn instead of the shape, scaled by half.x,
+                              // with its per-vertex material (color = tint)
 } RenderUi3dPart;
 typedef struct RenderUi3dView {
     TextureId target;         // render_ui3d_target_create
@@ -620,6 +628,8 @@ bool render_world_to_screen(vec3 world, vec2 *out_px); // false if behind camera
 vec3 render_viewmodel_to_world(vec3 viewmodel_point);   // same pixel under the world FOV (muzzle flash / tracers)
 float render_vm_fov(void);   // the viewmodel (arms + held item) projection FOV this frame
 mat4 render_view_proj(void);
+mat4 render_view_matrix(void);     // this frame's world -> view
+#define RENDER_VM_ZNEAR 0.01f      // the viewmodel pass's near plane (m; the world's is the camera's znear)
 int render_width(void);
 int render_height(void);
 // LOD / impostor / character LOD decisions measure projected sizes against this height, not the

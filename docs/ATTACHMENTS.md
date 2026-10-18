@@ -125,6 +125,11 @@ Generates the sight parts and the sight socket from one line of sight (item spac
   sets how far the rear sight is from the eye. Red dots and auto-rail scopes keep the same weld.
 - The parts are flagged in `WeaponDef.iron_parts` and fold away (hidden) while an optic is mounted.
 - Weapons have up to `WPN_MAX_PARTS` (16) model parts, counting the generated ones.
+- A weapon with a detailed mesh (`"mesh"`, docs/ITEM_PIPELINE.md) models its sights on the same line:
+  the rear notch / aperture centre and the front post top sit at `line` (`rear_sight` / `front_sight`
+  parts, folding or hiding under an optic). `iron_sights` then only places the sight socket; no box
+  parts are generated. `test_item_mesh` checks the mesh's `sight` socket and the front post top
+  against `line`.
 
 ## Placement and exact ADS
 

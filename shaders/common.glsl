@@ -35,6 +35,9 @@
 // stripped before shading (vg_resolve, vk_classic), so runtime / draw flags may reuse them.
 #define MAT_NO_RECEIVE       33554432u   // Receive Shadows off
 #define MAT_SHADOW_TWO_SIDED 67108864u
+// Item meshes (render.h MAT_ROUGHNESS_VERTEX): a negative material roughness = vertex uv (roughness, metallic),
+// vertex rgb sqrt(albedo).
+bool mat_vertex_pbr(float roughness) { return roughness < 0.0; }
 // Ground cover (render.h MAT_COVER, MAT_COVER_ID)
 #define MAT_COVER      268435456u
 #define MAT_COVER_ID(f) (((f) >> 29u) & 7u)

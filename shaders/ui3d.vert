@@ -7,11 +7,15 @@ layout(location = 3) in vec4 in_color;
 layout(push_constant) uniform Push {
     mat4 mvp;
     vec4 color;        // linear albedo, a = emissive
-    vec4 r0, r1, r2;   // view-space rotation columns; r0.w highlight, r1.w metallic
+    vec4 r0, r1, r2;   // view-space rotation columns; r0.w highlight, r1.w metallic, r2.w 1 = item mesh (vertex PBR)
 } pc;
 layout(location = 0) out vec3 v_normal;
 layout(location = 1) out vec3 v_pos;
+layout(location = 2) out vec4 v_color;
+layout(location = 3) out vec2 v_uv;
 void main() {
+    v_color = in_color;
+    v_uv = in_uv;
     v_normal = mat3(pc.r0.xyz, pc.r1.xyz, pc.r2.xyz) * in_normal;
     gl_Position = pc.mvp * vec4(in_pos, 1.0);
     v_pos = gl_Position.xyz / gl_Position.w;

@@ -457,6 +457,11 @@ bool render_begin_frame(void) {
     return true;
 }
 
+void render_camera_info(vec3 *pos, float *fov_deg) {
+    *pos = R->cam.pos;
+    *fov_deg = R->cam.fov_deg;
+}
+
 void render_set_camera(const RenderCamera *cam) {
     R->cam = *cam;
     vkg_frame_update();          // grass fades / shadows follow the fidelity level (outside the frame's recording)
@@ -1305,7 +1310,7 @@ static void compute_matrices(FrameData *fd) {
     R->proj = mat4_perspective(c->fov_deg * DG_DEG2RAD, aspect, c->znear, c->zfar);
     R->view_proj = mat4_mul(R->proj, R->view);
     float vm_fov = render_vm_fov();
-    R->vm_proj = mat4_perspective(vm_fov * DG_DEG2RAD, aspect, 0.01f, 100.0f);
+    R->vm_proj = mat4_perspective(vm_fov * DG_DEG2RAD, aspect, RENDER_VM_ZNEAR, 100.0f);
     extract_frustum(R->view_proj, R->frustum);
 
     // Sub-pixel jitter (Halton 2,3) for TAA / TAA-U: an NDC translation after the projection.
@@ -3030,6 +3035,7 @@ vec3 render_viewmodel_to_world(vec3 p) {
 }
 
 mat4 render_view_proj(void) { return R->view_proj; }
+mat4 render_view_matrix(void) { return R->view; }
 int render_width(void) { return (int)R->swap_extent.width; }
 int render_height(void) { return (int)R->swap_extent.height; }
 RenderStats render_stats(void) { return R->last_stats; }

@@ -32,6 +32,8 @@ u8 attach_find(const ItemDB *db, const char *id);
 int attach_slot_from_name(const char *s);                    // -1 if unknown
 const char *attach_slot_name(int slot);
 bool attach_allowed(const WeaponDef *wd, const AttachmentDef *a);
+// The attachment's detailed model on this weapon ("mesh_for" variant, else its "mesh"; docs/ITEM_PIPELINE.md).
+const ItemModelRef *attach_model_for(const AttachmentDef *a, const WeaponDef *wd);
 // Attachment space -> item space for attachment a on weapon wd (identity if the slot is missing).
 Xform attach_placement(const WeaponDef *wd, const AttachmentDef *a);
 // Copy of base with the attachments applied: stats, muzzle, sight socket + eye relief, left grip,

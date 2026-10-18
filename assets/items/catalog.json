@@ -1,0 +1,982 @@
+{
+  "_comment": "Detailed item catalog (docs/ITEM_PIPELINE.md): every item built to the standard, its kind (budget tier), LOD 0 triangle budget, the modelling path (procedural = parametric Blender script, assets/src/items/<id>.py), and the parts / sockets the systems expect beyond the ones tools/validate_item derives from the JSON.",
+  "items": {
+    "rifle": {
+      "kind": "weapon",
+      "budget": [
+        40000,
+        150000
+      ],
+      "path": "procedural",
+      "parts": [
+        "bolt_carrier",
+        "charging_handle",
+        "magazine",
+        "mag_follower",
+        "top_round",
+        "trigger",
+        "safety",
+        "mag_release",
+        "bolt_catch",
+        "dust_cover",
+        "front_sight",
+        "rear_sight",
+        "stock",
+        "serial_plate",
+        "upper_receiver",
+        "lower_receiver",
+        "handguard",
+        "barrel",
+        "muzzle_device",
+        "forward_assist"
+      ],
+      "sockets": [
+        "ejection_port",
+        "shell_eject",
+        "charging_handle"
+      ]
+    },
+    "pistol": {
+      "kind": "weapon",
+      "budget": [
+        25000,
+        150000
+      ],
+      "path": "procedural",
+      "parts": [
+        "slide",
+        "frame",
+        "trigger",
+        "magazine",
+        "rear_sight",
+        "front_sight",
+        "barrel"
+      ],
+      "sockets": [
+        "ejection_port",
+        "shell_eject",
+        "underbarrel"
+      ]
+    },
+    "dmr": {
+      "kind": "weapon",
+      "budget": [
+        40000,
+        150000
+      ],
+      "path": "procedural",
+      "parts": [
+        "bolt_carrier",
+        "charging_handle",
+        "magazine",
+        "mag_follower",
+        "top_round",
+        "trigger",
+        "safety",
+        "mag_release",
+        "bolt_catch",
+        "dust_cover",
+        "front_sight",
+        "rear_sight",
+        "stock",
+        "serial_plate",
+        "upper_receiver",
+        "lower_receiver",
+        "handguard",
+        "barrel",
+        "muzzle_device",
+        "forward_assist"
+      ],
+      "sockets": [
+        "ejection_port",
+        "shell_eject",
+        "charging_handle"
+      ]
+    },
+    "smg": {
+      "kind": "weapon",
+      "budget": [
+        40000,
+        150000
+      ],
+      "path": "procedural",
+      "parts": [
+        "bolt_carrier",
+        "charging_handle",
+        "magazine",
+        "mag_follower",
+        "top_round",
+        "trigger",
+        "safety",
+        "mag_release",
+        "bolt_catch",
+        "dust_cover",
+        "front_sight",
+        "rear_sight",
+        "stock",
+        "serial_plate",
+        "upper_receiver",
+        "lower_receiver",
+        "handguard",
+        "barrel",
+        "muzzle_device"
+      ],
+      "sockets": [
+        "ejection_port",
+        "shell_eject",
+        "charging_handle"
+      ]
+    },
+    "lmg": {
+      "kind": "weapon",
+      "budget": [
+        40000,
+        150000
+      ],
+      "path": "procedural",
+      "parts": [
+        "receiver",
+        "feed_cover",
+        "belt_box",
+        "charging_handle",
+        "barrel",
+        "carry_handle",
+        "bipod",
+        "handguard",
+        "trigger",
+        "safety",
+        "rear_sight",
+        "front_sight",
+        "muzzle_device",
+        "stock"
+      ],
+      "sockets": [
+        "ejection_port",
+        "shell_eject",
+        "feed_tray",
+        "charging_handle"
+      ]
+    },
+    "sniper": {
+      "kind": "weapon",
+      "budget": [
+        40000,
+        150000
+      ],
+      "path": "procedural",
+      "parts": [
+        "receiver",
+        "bolt",
+        "barrel",
+        "stock",
+        "bottom_metal",
+        "trigger",
+        "safety",
+        "rear_sight",
+        "front_sight"
+      ],
+      "sockets": [
+        "ejection_port",
+        "shell_eject",
+        "bolt_handle"
+      ]
+    },
+    "shotgun": {
+      "kind": "weapon",
+      "budget": [
+        40000,
+        150000
+      ],
+      "path": "procedural",
+      "parts": [
+        "receiver",
+        "barrel",
+        "mag_tube",
+        "pump",
+        "bolt",
+        "trigger_group",
+        "trigger",
+        "safety",
+        "rear_sight",
+        "front_sight",
+        "stock"
+      ],
+      "sockets": [
+        "ejection_port",
+        "shell_eject",
+        "loading_port"
+      ]
+    },
+    "crossbow": {
+      "kind": "weapon",
+      "budget": [
+        20000,
+        150000
+      ],
+      "path": "procedural",
+      "parts": [
+        "rail",
+        "riser_limbs",
+        "string",
+        "bolt",
+        "trigger_box",
+        "trigger",
+        "safety",
+        "stock",
+        "rear_sight",
+        "front_sight"
+      ],
+      "sockets": [
+        "string_latch",
+        "bolt_nock"
+      ]
+    },
+    "bat": {
+      "kind": "weapon",
+      "budget": [
+        10000,
+        60000
+      ],
+      "path": "procedural",
+      "parts": [
+        "bat",
+        "grip_tape"
+      ],
+      "sockets": [
+        "tip",
+        "sweet_spot"
+      ]
+    },
+    "knife": {
+      "kind": "weapon",
+      "budget": [
+        5000,
+        60000
+      ],
+      "path": "procedural",
+      "parts": [
+        "blade",
+        "handle"
+      ],
+      "sockets": [
+        "tip",
+        "edge"
+      ]
+    },
+    "att_red_dot": {
+      "kind": "attachment",
+      "budget": [
+        5000,
+        60000
+      ],
+      "path": "procedural",
+      "parts": [
+        "mount",
+        "body",
+        "controls",
+        "caps"
+      ],
+      "sockets": [
+        "lens",
+        "emitter"
+      ]
+    },
+    "att_scope_4x": {
+      "kind": "attachment",
+      "budget": [
+        10000,
+        80000
+      ],
+      "path": "procedural",
+      "parts": [
+        "mount",
+        "rings",
+        "body",
+        "lens_stack",
+        "caps"
+      ],
+      "sockets": [
+        "lens",
+        "objective",
+        "reticle"
+      ]
+    },
+    "att_scope_8x": {
+      "kind": "attachment",
+      "budget": [
+        10000,
+        80000
+      ],
+      "path": "procedural",
+      "parts": [
+        "mount",
+        "rings",
+        "body",
+        "lens_stack",
+        "caps"
+      ],
+      "sockets": [
+        "lens",
+        "objective",
+        "reticle"
+      ]
+    },
+    "att_suppressor": {
+      "kind": "attachment",
+      "budget": [
+        5000,
+        60000
+      ],
+      "path": "procedural",
+      "parts": [
+        "collar",
+        "tube",
+        "baffles"
+      ],
+      "sockets": []
+    },
+    "att_compensator": {
+      "kind": "attachment",
+      "budget": [
+        3000,
+        40000
+      ],
+      "path": "procedural",
+      "parts": [
+        "body"
+      ],
+      "sockets": []
+    },
+    "att_flash_hider": {
+      "kind": "attachment",
+      "budget": [
+        3000,
+        40000
+      ],
+      "path": "procedural",
+      "parts": [
+        "body"
+      ],
+      "sockets": []
+    },
+    "att_muzzle_brake": {
+      "kind": "attachment",
+      "budget": [
+        3000,
+        40000
+      ],
+      "path": "procedural",
+      "parts": [
+        "body"
+      ],
+      "sockets": []
+    },
+    "att_vertical_grip": {
+      "kind": "attachment",
+      "budget": [
+        5000,
+        60000
+      ],
+      "path": "procedural",
+      "parts": [
+        "clamp",
+        "grip",
+        "cap"
+      ],
+      "sockets": []
+    },
+    "att_heavy_stock": {
+      "kind": "attachment",
+      "budget": [
+        5000,
+        60000
+      ],
+      "path": "procedural",
+      "parts": [
+        "tube",
+        "chassis",
+        "cheek_riser",
+        "butt_pad"
+      ],
+      "sockets": []
+    },
+    "att_extended_mag": {
+      "kind": "attachment",
+      "budget": [
+        2500,
+        60000
+      ],
+      "path": "procedural",
+      "parts": [
+        "magazine",
+        "follower",
+        "top_round"
+      ],
+      "sockets": [
+        "floorplate"
+      ],
+      "attachment": "extended_mag"
+    },
+    "att_extended_mag_smg": {
+      "kind": "attachment",
+      "budget": [
+        2500,
+        60000
+      ],
+      "path": "procedural",
+      "parts": [
+        "magazine",
+        "follower",
+        "top_round"
+      ],
+      "sockets": [
+        "floorplate"
+      ],
+      "attachment": "extended_mag"
+    },
+    "att_extended_mag_dmr": {
+      "kind": "attachment",
+      "budget": [
+        2500,
+        60000
+      ],
+      "path": "procedural",
+      "parts": [
+        "magazine",
+        "follower",
+        "top_round"
+      ],
+      "sockets": [
+        "floorplate"
+      ],
+      "attachment": "extended_mag"
+    },
+    "att_weapon_light": {
+      "kind": "attachment",
+      "budget": [
+        5000,
+        60000
+      ],
+      "path": "procedural",
+      "parts": [
+        "clamp",
+        "body",
+        "switch"
+      ],
+      "sockets": [
+        "emitter"
+      ]
+    },
+    "att_weapon_light_pistol": {
+      "kind": "attachment",
+      "budget": [
+        3000,
+        60000
+      ],
+      "path": "procedural",
+      "parts": [
+        "clamp",
+        "body",
+        "switch"
+      ],
+      "sockets": [
+        "emitter"
+      ],
+      "attachment": "weapon_light"
+    },
+    "att_laser": {
+      "kind": "attachment",
+      "budget": [
+        5000,
+        60000
+      ],
+      "path": "procedural",
+      "parts": [
+        "clamp",
+        "body",
+        "button"
+      ],
+      "sockets": [
+        "emitter",
+        "ir_emitter"
+      ]
+    },
+    "flashlight": {
+      "kind": "item",
+      "budget": [
+        8000,
+        40000
+      ],
+      "path": "procedural",
+      "parts": [
+        "body",
+        "tail_switch"
+      ],
+      "sockets": [
+        "emitter"
+      ]
+    },
+    "syringe": {
+      "kind": "item",
+      "budget": [
+        3000,
+        40000
+      ],
+      "path": "procedural",
+      "parts": [
+        "barrel",
+        "plunger",
+        "needle"
+      ],
+      "sockets": [
+        "needle",
+        "plunger"
+      ]
+    },
+    "dna_sample": {
+      "kind": "item",
+      "budget": [
+        3000,
+        40000
+      ],
+      "path": "procedural",
+      "parts": [
+        "tube",
+        "cap"
+      ],
+      "sockets": [
+        "cap"
+      ]
+    },
+    "medkit": {
+      "kind": "item",
+      "budget": [
+        3000,
+        40000
+      ],
+      "path": "procedural",
+      "parts": [
+        "body",
+        "lid",
+        "zipper"
+      ],
+      "sockets": [
+        "lid"
+      ]
+    },
+    "bandage": {
+      "kind": "item",
+      "budget": [
+        3000,
+        40000
+      ],
+      "path": "procedural",
+      "parts": [
+        "roll",
+        "tail"
+      ],
+      "sockets": []
+    },
+    "painkillers": {
+      "kind": "item",
+      "budget": [
+        3000,
+        40000
+      ],
+      "path": "procedural",
+      "parts": [
+        "bottle",
+        "cap"
+      ],
+      "sockets": [
+        "cap"
+      ]
+    },
+    "frag_grenade": {
+      "kind": "item",
+      "budget": [
+        3000,
+        40000
+      ],
+      "path": "procedural",
+      "parts": [
+        "body",
+        "fuze",
+        "spoon",
+        "pin_ring"
+      ],
+      "sockets": [
+        "pin",
+        "spoon"
+      ]
+    },
+    "flare": {
+      "kind": "item",
+      "budget": [
+        3000,
+        40000
+      ],
+      "path": "procedural",
+      "parts": [
+        "tube",
+        "cap"
+      ],
+      "sockets": [
+        "ignition"
+      ]
+    },
+    "molotov": {
+      "kind": "item",
+      "budget": [
+        3000,
+        40000
+      ],
+      "path": "procedural",
+      "parts": [
+        "bottle",
+        "wick"
+      ],
+      "sockets": [
+        "wick"
+      ]
+    },
+    "canned_food": {
+      "kind": "item",
+      "budget": [
+        3000,
+        40000
+      ],
+      "path": "procedural",
+      "parts": [
+        "can",
+        "lid"
+      ],
+      "sockets": [
+        "pull_ring"
+      ]
+    },
+    "water_bottle": {
+      "kind": "item",
+      "budget": [
+        3000,
+        40000
+      ],
+      "path": "procedural",
+      "parts": [
+        "bottle",
+        "cap"
+      ],
+      "sockets": [
+        "cap"
+      ]
+    },
+    "energy_bar": {
+      "kind": "item",
+      "budget": [
+        3000,
+        40000
+      ],
+      "path": "procedural",
+      "parts": [
+        "wrapper"
+      ],
+      "sockets": [
+        "tear_notch"
+      ]
+    },
+    "phone": {
+      "kind": "item",
+      "budget": [
+        3000,
+        40000
+      ],
+      "path": "procedural",
+      "parts": [
+        "body",
+        "screen",
+        "buttons"
+      ],
+      "sockets": [
+        "screen",
+        "camera_lens",
+        "front_lens"
+      ]
+    },
+    "fuel_can": {
+      "kind": "item",
+      "budget": [
+        3000,
+        40000
+      ],
+      "path": "procedural",
+      "parts": [
+        "body",
+        "cap",
+        "spout"
+      ],
+      "sockets": [
+        "spout",
+        "pour"
+      ]
+    },
+    "tire_repair": {
+      "kind": "item",
+      "budget": [
+        3000,
+        40000
+      ],
+      "path": "procedural",
+      "parts": [
+        "case",
+        "lid",
+        "reamer",
+        "plug_tool"
+      ],
+      "sockets": [
+        "lid"
+      ]
+    },
+    "spare_tire": {
+      "kind": "item",
+      "budget": [
+        3000,
+        40000
+      ],
+      "path": "procedural",
+      "parts": [
+        "tire",
+        "wheel"
+      ],
+      "sockets": [
+        "hub"
+      ]
+    },
+    "key_red": {
+      "kind": "item",
+      "budget": [
+        3000,
+        40000
+      ],
+      "path": "procedural",
+      "parts": [
+        "ring",
+        "tag",
+        "key"
+      ],
+      "sockets": [
+        "key_tip"
+      ]
+    },
+    "key_blue": {
+      "kind": "item",
+      "budget": [
+        3000,
+        40000
+      ],
+      "path": "procedural",
+      "parts": [
+        "ring",
+        "tag",
+        "key"
+      ],
+      "sockets": [
+        "key_tip"
+      ]
+    },
+    "ammo_9mm": {
+      "kind": "item",
+      "tier": "cheap",
+      "budget": [
+        500,
+        20000
+      ],
+      "path": "procedural",
+      "parts": [
+        "box",
+        "flap",
+        "rounds"
+      ],
+      "sockets": []
+    },
+    "ammo_rifle": {
+      "kind": "item",
+      "tier": "cheap",
+      "budget": [
+        500,
+        20000
+      ],
+      "path": "procedural",
+      "parts": [
+        "box",
+        "flap",
+        "rounds"
+      ],
+      "sockets": []
+    },
+    "ammo_shell": {
+      "kind": "item",
+      "tier": "cheap",
+      "budget": [
+        500,
+        20000
+      ],
+      "path": "procedural",
+      "parts": [
+        "box",
+        "flap",
+        "rounds"
+      ],
+      "sockets": []
+    },
+    "ammo_bolt": {
+      "kind": "item",
+      "tier": "cheap",
+      "budget": [
+        500,
+        20000
+      ],
+      "path": "procedural",
+      "parts": [
+        "bolts",
+        "bands"
+      ],
+      "sockets": []
+    },
+    "ammo_762": {
+      "kind": "item",
+      "tier": "cheap",
+      "budget": [
+        500,
+        20000
+      ],
+      "path": "procedural",
+      "parts": [
+        "can",
+        "lid",
+        "latch"
+      ],
+      "sockets": []
+    },
+    "armor": {
+      "kind": "item",
+      "tier": "cheap",
+      "budget": [
+        500,
+        20000
+      ],
+      "path": "procedural",
+      "parts": [
+        "plate"
+      ],
+      "sockets": []
+    },
+    "scrap": {
+      "kind": "item",
+      "tier": "cheap",
+      "budget": [
+        500,
+        20000
+      ],
+      "path": "procedural",
+      "parts": [
+        "scrap"
+      ],
+      "sockets": []
+    },
+    "battery": {
+      "kind": "item",
+      "tier": "cheap",
+      "budget": [
+        500,
+        20000
+      ],
+      "path": "procedural",
+      "parts": [
+        "cell"
+      ],
+      "sockets": []
+    },
+    "cloth": {
+      "kind": "item",
+      "tier": "cheap",
+      "budget": [
+        500,
+        20000
+      ],
+      "path": "procedural",
+      "parts": [
+        "stack"
+      ],
+      "sockets": []
+    },
+    "duct_tape": {
+      "kind": "item",
+      "tier": "cheap",
+      "budget": [
+        500,
+        20000
+      ],
+      "path": "procedural",
+      "parts": [
+        "roll",
+        "end"
+      ],
+      "sockets": []
+    },
+    "mech_parts": {
+      "kind": "item",
+      "tier": "cheap",
+      "budget": [
+        500,
+        20000
+      ],
+      "path": "procedural",
+      "parts": [
+        "parts"
+      ],
+      "sockets": []
+    },
+    "seeds": {
+      "kind": "item",
+      "tier": "cheap",
+      "budget": [
+        500,
+        20000
+      ],
+      "path": "procedural",
+      "parts": [
+        "packet"
+      ],
+      "sockets": []
+    },
+    "fishing_kit": {
+      "kind": "item",
+      "tier": "cheap",
+      "budget": [
+        500,
+        20000
+      ],
+      "path": "procedural",
+      "parts": [
+        "box",
+        "lid"
+      ],
+      "sockets": []
+    },
+    "backpack": {
+      "kind": "item",
+      "tier": "cheap",
+      "budget": [
+        500,
+        20000
+      ],
+      "path": "procedural",
+      "parts": [
+        "body",
+        "straps",
+        "handle"
+      ],
+      "sockets": []
+    }
+  }
+}
