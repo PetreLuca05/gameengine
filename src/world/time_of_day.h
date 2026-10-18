@@ -2,10 +2,17 @@
 // positions for a latitude and date, time-of-day curves, events and light schedules.
 //
 // Pure module: no engine state. The host owns a TimeState (World.tod) and re-anchors it on every
-// change (time_set / time_scale / time_pause / time_days); clients receive it in every snapshot
-// and evaluate it at their interpolated server tick, so every machine shows the same sky.
+// change (time_set / time_scale / time_pause / time_days) at the fractional tick it renders, so the
+// clock never jumps; clients receive it in every snapshot and evaluate it on their own slewed clock
+// (TodClock) behind the host, through the states' history (TodTimeline), so a change happens on
+// their timeline at the host tick it was made at. Every machine shows the same sky.
 //
-//   time (days) = ref_day + ref_ms / 86 400 000 + (tick - ref_tick) / SIM_HZ / day_length
+// World time is a double: game seconds since the epoch (day 0, 00:00), a continuous function of
+// the (fractional) server tick, evaluated per render frame (docs/DAYNIGHT.md "Continuity"):
+//
+//   tick >= ref_tick: sec = ref_sec + (tick - ref_tick) / SIM_HZ x 86400 / day_length
+//                           + blend_sec x (1 - smoothstep((tick - ref_tick) / blend_ticks))
+//   tick <  ref_tick: sec = ref_sec + blend_sec + (tick - ref_tick) / SIM_HZ x 86400 / prev_length
 //
 // Conventions: world axes Y up, -Z north, +X east. Local apparent solar time (no longitude /
 // time zone / equation of time): 12:00 is solar noon. Angles in radians unless named _deg.
@@ -17,20 +24,42 @@
 
 struct cJSON;
 
-#define TOD_MS_PER_DAY 86400000u
+#define TOD_SEC_PER_DAY 86400.0
 #define TOD_MAX_CURVE_KEYS 24
 #define TOD_SYNODIC_MONTH 29.530589
+#define TOD_WIRE_BYTES 40
+#define TOD_TIMELINE_MAX 4
 
-// Replicated world-state field (snapshot header, 20 bytes on the wire).
+// Replicated world-state field (snapshot header, TOD_WIRE_BYTES on the wire): the clock as a
+// function of the server tick with one breakpoint, the anchor. Before it, the clock the host showed
+// until the change (a client rendering behind the host still sees that); from it on, the new rate
+// and, for a time_set blend, the old time eased into the new over blend_ticks.
 typedef struct TimeState {
-    u32 ref_tick;          // server tick of the anchor
-    u32 ref_ms;            // time of day at the anchor (ms since midnight)
-    u16 ref_day;           // day number at the anchor (0 = first day)
+    double ref_tick;       // server tick of the anchor (fractional: the rendered moment of the change)
+    double ref_sec;        // world time at the anchor, game seconds since the epoch (the target of a blend)
+    double blend_sec;      // the clock before the change minus ref_sec, at the anchor
+    float day_length;      // real seconds per in-game day from the anchor on (0 = frozen / paused)
+    float prev_length;     // ... before the anchor
+    u16 blend_ticks;       // the ease of blend_sec to 0 (smoothstep); 0 = a step at the anchor (instant)
     u16 day_of_year;       // calendar day of day 0 (1..365)
-    float day_length;      // real seconds per in-game day (0 = frozen / paused)
-    u16 version;           // bumped on every change
+    u16 version;           // bumped on every change; 0 = no state yet (never 0 once set: wraps to 1)
     u16 pad;
 } TimeState;
+
+// Client: the states received, oldest first, kept until the clock passes the next one's anchor.
+typedef struct TodTimeline {
+    TimeState s[TOD_TIMELINE_MAX];
+    int n;
+} TodTimeline;
+
+// Client clock: the server tick it renders, advanced by the frame's real time and slewed towards
+// the interpolated server tick (net_client_render_tick) by at most `slew` of each frame's advance.
+typedef struct TodClock {
+    double tick;
+    double corr;                 // the last frame's correction / its advance (|corr| <= slew)
+    int snaps;                   // jumps to the target (error > snap threshold: a join, a stall)
+    bool init;
+} TodClock;
 
 typedef enum TodCurve {
     TOD_FOG_DENSITY, TOD_EXPOSURE_COMP, TOD_CLOUD_COVER, TOD_STAR_BRIGHTNESS, TOD_MOON_SIZE, TOD_SUN_SIZE,
@@ -64,9 +93,10 @@ typedef struct TodConfig {
     char level[32];              // level the overrides were applied for
 } TodConfig;
 
-// Celestial state at a time.
+// Celestial state at a time (every angle from the double day count: no float hours inside).
 typedef struct TodSky {
     double days;                 // continuous day count (fraction = time of day)
+    double hour_angle;           // the sun's hour angle (rad, 0 = solar noon)
     float hours;                 // 0..24
     vec3 sun_dir, moon_dir;      // towards the body (world)
     float sun_elev, sun_azim;    // radians; azimuth from north, clockwise (east = +90 deg)
@@ -89,16 +119,29 @@ char *tod_config_to_json(const TodConfig *c);   // caller frees (cJSON_free)
 float tod_curve(const TodConfig *c, TodCurve curve, float hours);   // piecewise linear, wraps at 24 h
 const char *tod_curve_name(int curve);
 
-// State (host).
-void tod_state_init(TimeState *s, const TodConfig *c, u32 tick);
+// State (host). `tick` is fractional: the host re-anchors at the tick it renders (tick + alpha).
+void tod_state_init(TimeState *s, const TodConfig *c, double tick);
+double tod_seconds(const TimeState *s, double tick);               // world time: game seconds since the epoch
 double tod_days(const TimeState *s, double tick);                  // continuous day count
 float tod_hours(const TimeState *s, double tick);
-void tod_set_time(TimeState *s, double tick, float hours);          // keeps the day number
-void tod_set_day_length(TimeState *s, double tick, float seconds);  // 0 = pause
-void tod_add_days(TimeState *s, double tick, int days);
-// Wire format (20 bytes).
-void tod_pack(const TimeState *s, u8 out[20]);
-void tod_unpack(TimeState *s, const u8 in[20]);
+double tod_rate(const TimeState *s, double tick);                  // game seconds per real second (no blend), 0 paused
+bool tod_blending(const TimeState *s, double tick);                // inside a time_set blend
+double tod_target_seconds(const TimeState *s, double tick);        // the clock without the blend's ease
+void tod_set_time(TimeState *s, double tick, float hours);          // instant; keeps the day number
+void tod_blend_time(TimeState *s, double tick, float hours, float blend_s);   // eased over blend_s real seconds (0 = instant)
+void tod_set_day_length(TimeState *s, double tick, float seconds);  // 0 = pause; no jump
+void tod_add_days(TimeState *s, double tick, int days);            // instant
+// Wire format (TOD_WIRE_BYTES).
+void tod_pack(const TimeState *s, u8 out[TOD_WIRE_BYTES]);
+void tod_unpack(TimeState *s, const u8 in[TOD_WIRE_BYTES]);
+// Client: every state with a new version is pushed; the one owning a tick is the newest whose
+// anchor is at or before it (else the oldest: its segment before the anchor), older ones dropped.
+void tod_timeline_reset(TodTimeline *q);
+void tod_timeline_push(TodTimeline *q, const TimeState *s);
+const TimeState *tod_timeline_at(TodTimeline *q, double tick);     // NULL when empty
+// Client clock: one frame of dt real seconds towards `target` (server ticks). The clock runs at
+// tick_hz x (1 + corr), |corr| <= slew; it snaps only when off by more than snap_ticks.
+double tod_clock_step(TodClock *c, double target, double dt, double tick_hz, double slew, double tau_s, double snap_ticks);
 
 // Sky positions for a time.
 void tod_sky(const TodConfig *c, double days, TodSky *out);

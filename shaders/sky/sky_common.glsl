@@ -18,15 +18,20 @@ layout(std430, set = 0, binding = 13) readonly buffer SkyParams {
     vec4 cel_x;         // world -> celestial row X, w star brightness
     vec4 cel_y;         // row Y, w milky way brightness
     vec4 cel_z;         // row Z (north celestial pole), w night sky floor
-    vec4 clouds;        // x coverage 0..1, y altitude m, zw wind offset (m)
+    vec4 clouds;        // x coverage 0..1, y altitude m, zw wind offset (m, float copy: the noise uses cloud_oct)
     vec4 clouds2;       // x opacity, y time, z feature scale (m), w cloud shadow optical depth (Beer-Lambert)
     vec4 cam;           // xyz camera (world m), w camera altitude (km, >= 1 m)
     vec4 ground;        // rgb ground albedo, w ambient scale
-    vec4 ap;            // x aerial perspective max distance (m), y world -> atmosphere distance scale, z mie density scale, w frame
+    vec4 ap;            // x aerial perspective max distance (m), y world -> atmosphere distance scale, z mie density scale (continuous), w frame
     vec4 cshadow;       // xy origin (world xz), z size (m), w 1 / size
-    vec4 env;           // x SH blend k, y env slice (0..3), z env mips, w debug view
+    vec4 env;           // x the environment's blend phase (0 = the previous refilter, 1 = the latest), y env slice (0..3), z env mips, w debug view
     vec4 key;           // xyz key light direction (shadowed light), w moon is the key light
     vec4 clouds3;       // x edge softness (weather), y darkness (storm), zw unused
+    // The drifting cloud noise per octave (sky.c cloud_octaves, from the double drift): octave i's
+    // lattice offset (exact, mod 2^32) and fractional offset in element i / 2, .xy for even i, .zw for
+    // odd. Octaves 0..4: the first fbm, 5..7: the second.
+    uvec4 cloud_cell[4];
+    vec4 cloud_frac[4];
 } SK;
 
 const float R_BOTTOM = 6360.0;
@@ -88,6 +93,10 @@ float phase_mie(float c) {
     float k = 3.0 / (8.0 * PI) * (1.0 - g2) / (2.0 + g2);
     return k * (1.0 + c * c) / pow(max(1.0 + g2 - 2.0 * g * c, 1e-4), 1.5);
 }
+
+// The transmittance LUT holds optical depths (rgb Rayleigh + ozone, a Mie at unit density): the
+// transmittance for this frame's aerosols is exact and continuous (no rebuild when they change).
+vec3 trans_eval(vec4 od) { return exp(-(od.rgb + od.a * max(SK.ap.z, 0.0))); }
 
 // Transmittance LUT parametrization (Bruneton): uv <-> (r, mu).
 vec2 trans_params(vec2 uv) {
@@ -174,13 +183,19 @@ vec3 oct_decode_dir(vec2 uv) {
 // Light reaching altitude r from direction L: the transmittance LUT, zero in the planet's shadow
 // (the LUT has no below-horizon rays).
 float earth_vis(float r, vec3 L) { return ray_sphere(vec3(0.0, r, 0.0), L, R_BOTTOM) > 0.0 ? 0.0 : 1.0; }
+// The same as the disc (angular radius `rad`) sets behind the geometric horizon at altitude r: a
+// fade over the disc, not a switch in one frame.
+float earth_vis_disc(float r, vec3 L, float rad) {
+    float dip = -sqrt(max(1.0 - (R_BOTTOM / r) * (R_BOTTOM / r), 0.0));
+    return smoothstep(dip - rad, dip + rad, L.y);
+}
 
 // Which lights matter for the scattering: the moon only while the sun is down, the sun until
-// 20 deg below the horizon (no measurable twilight beyond).
+// 20 deg below the horizon (no measurable twilight beyond). Faded, so no frame switches.
 float light_weight(int k) {
     float sun_up = normalize(SK.sun_dir.xyz).y;
-    if (k == 0) return (SK.sun_dir.w > 0.0 && sun_up > -0.35) ? SK.sun_dir.w : 0.0;
-    return (SK.moon_dir.w > 0.0 && sun_up < 0.05) ? SK.moon_dir.w : 0.0;
+    if (k == 0) return SK.sun_dir.w > 0.0 ? SK.sun_dir.w * smoothstep(-0.37, -0.33, sun_up) : 0.0;
+    return SK.moon_dir.w > 0.0 ? SK.moon_dir.w * (1.0 - smoothstep(0.03, 0.07, sun_up)) : 0.0;
 }
 
 // Camera position on the planet (km): the world origin sits on the ground.
@@ -193,7 +208,8 @@ uint sk_pcg(uint v) {
     uint w = ((s >> ((s >> 28u) + 4u)) ^ s) * 277803737u;
     return (w >> 22u) ^ w;
 }
-float sk_hashi(ivec2 c) { return float(sk_pcg(uint(c.x) + sk_pcg(uint(c.y)))) / 4294967295.0; }
+float sk_hashu(uvec2 c) { return float(sk_pcg(c.x + sk_pcg(c.y))) / 4294967295.0; }
+float sk_hashi(ivec2 c) { return sk_hashu(uvec2(c)); }
 float sk_hash(vec2 p) { return sk_hashi(ivec2(floor(p))); }
 float sk_vnoise(vec2 p) {
     vec2 fl = floor(p), f = p - fl;
@@ -206,12 +222,31 @@ float sk_fbm(vec2 p, int oct) {
     for (int i = 0; i < oct; i++) { s += a * sk_vnoise(p); p = p * 2.03 + vec2(17.1, 9.7); a *= 0.5; }
     return s;
 }
+// One octave of the drifting layer: q (the camera-near part of the noise coordinate, small) plus the
+// octave's offset, split on the CPU in double into a lattice cell (exact uint) and a fraction. The
+// same noise as sk_vnoise((xz + drift) / scale x 2.03^i + ...), but exact at any drift (no wrap).
+float sk_vnoise_oct(vec2 q, int oct) {
+    uvec4 cc = SK.cloud_cell[oct >> 1];
+    vec4 ff = SK.cloud_frac[oct >> 1];
+    bool odd = (oct & 1) != 0;
+    vec2 p = q + (odd ? ff.zw : ff.xy);
+    vec2 fl = floor(p), f = p - fl;
+    uvec2 i = uvec2(ivec2(fl)) + (odd ? cc.zw : cc.xy);
+    vec2 u = f * f * (3.0 - 2.0 * f);
+    return mix(mix(sk_hashu(i), sk_hashu(i + uvec2(1u, 0u)), u.x), mix(sk_hashu(i + uvec2(0u, 1u)), sk_hashu(i + uvec2(1u, 1u)), u.x), u.y);
+}
+// The two fbm of the layer at q = xz / scale: octaves x 2.03 (the second fbm starts at x 2.6).
+float sk_fbm_drift(vec2 q, int oct, int first, float k0) {
+    float a = 0.5, s = 0.0, k = k0;
+    for (int i = 0; i < oct; i++) { s += a * sk_vnoise_oct(q * k, first + i); k *= 2.03; a *= 0.5; }
+    return s;
+}
 // Cloud density 0..1 at a world xz point on the layer.
 float cloud_density(vec2 xz, int oct) {
     float cov = clamp(SK.clouds.x, 0.0, 1.0);
     if (cov <= 0.001) return 0.0;
-    vec2 p = (xz + SK.clouds.zw) / max(SK.clouds2.z, 1.0);
-    float n = sk_fbm(p, oct) * 0.7 + sk_fbm(p * 2.6 + vec2(3.1, 1.7), max(oct - 2, 1)) * 0.3;
+    vec2 q = xz / max(SK.clouds2.z, 1.0);
+    float n = sk_fbm_drift(q, min(oct, 5), 0, 1.0) * 0.7 + sk_fbm_drift(q, min(max(oct - 2, 1), 3), 5, 2.6) * 0.3;
     float soft = clamp(SK.clouds3.x, 0.0, 1.0) * 0.25;
     return smoothstep(0.92 - cov * 0.75 - soft, 1.08 - cov * 0.75 + soft * 0.4, n);
 }

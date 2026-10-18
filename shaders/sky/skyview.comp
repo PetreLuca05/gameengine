@@ -9,7 +9,7 @@ layout(set = 0, binding = 0) uniform sampler2D trans_lut;
 layout(set = 0, binding = 1) uniform sampler2D ms_lut;
 layout(set = 0, binding = 8, rgba16f) uniform writeonly image2D out_lut;
 
-vec3 transmittance(float r, float mu) { return textureLod(trans_lut, trans_uv(r, mu), 0.0).rgb; }
+vec3 transmittance(float r, float mu) { return trans_eval(textureLod(trans_lut, trans_uv(r, mu), 0.0)); }
 
 void main() {
     ivec2 p = ivec2(gl_GlobalInvocationID.xy);

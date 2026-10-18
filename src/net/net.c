@@ -403,6 +403,10 @@ int net_host_client_count(void) {
 }
 
 double net_client_render_tick(void) { return N ? N->render_tick : 0.0; }
+double net_client_render_tick_at(double local_time) {
+    if (!N || N->role != NET_CLIENT || !N->time_init) return 0.0;
+    return (local_time + N->server_time_offset - N->cl_interp->f / 1000.0) / SIM_DT;
+}
 
 void net_host_send_events(World *w) {
     if (N->role != NET_HOST) return;
@@ -480,8 +484,8 @@ void net_host_after_tick(World *w) {
         netprof_section(s, NS_SPECTATE, wr.buf + sec_at, wr.len - sec_at);
         sec_at = wr.len;
         {
-            // World time (every snapshot: 20 bytes, late joiners are in sync at once).
-            u8 tw[20];
+            // World time (every snapshot: TOD_WIRE_BYTES, late joiners are in sync at once).
+            u8 tw[TOD_WIRE_BYTES];
             tod_pack(&w->tod, tw);
             w_bytes(&wr, tw, sizeof(tw));
             netprof_section(s, NS_TIME, tw, sizeof(tw));
@@ -544,7 +548,7 @@ static void client_handle_snapshot(Reader *r) {
     spec_read_block(r, &sb);
     bool own = sb.data_slot == N->local_slot;   // else the spectated player's (docs/SPECTATE.md)
     u32 ack_seq = own ? ld.ack_seq : 0;
-    u8 tw[20];
+    u8 tw[TOD_WIRE_BYTES];
     r_bytes(r, tw, sizeof(tw));
     u8 has_wx = r_u8(r);
     u8 wx[WEATHER_PACK_SIZE];

@@ -175,6 +175,7 @@ void daynight_host_tick(World *w);
 void daynight_handle_event(const GameEvent *ev);
 bool daynight_active(World *w);
 void daynight_environment(World *w, const RenderCamera *cam, RenderEnvironment *env);
+void daynight_client_frame(World *w);   // client, after net_client_interpolate: the slewed time-of-day clock
 void daynight_post(struct PostSettings *s);
 bool daynight_preset_time(World *w, float elev_deg, bool moon_full);   // shadow presets: evening sun elevation / full moon midnight
 bool daynight_preset_morning(World *w, float elev_deg);                 // shadow presets: the morning sun first above elev_deg
@@ -190,6 +191,7 @@ typedef struct TodProbeIn {
     double blend_sec, blend_s;
     bool authority;
     double clock_corr;           // client clock: this frame's correction / its advance (0 on the host)
+    double clock_target;         // client clock: the interpolated server tick it follows
     double clock_slew;           // its limit
     int clock_snaps;             // client clock snaps so far
 } TodProbeIn;

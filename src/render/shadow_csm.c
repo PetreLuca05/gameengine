@@ -42,10 +42,22 @@ void csm_layout(const CsmParams *p, CsmLayout *out) {
     }
 }
 
-mat4 csm_light_view(vec3 to_light) {
+mat4 csm_light_view(vec3 to_light) { return csm_light_view_at(to_light, v3(0, 0, 0)); }
+
+mat4 csm_light_view_at(vec3 to_light, vec3 pivot) {
     vec3 L = v3_norm(to_light);
     vec3 up = fabsf(L.y) > 0.99f ? v3(0, 0, 1) : v3(0, 1, 0);
-    return mat4_look_at(v3(0, 0, 0), v3_neg(L), up);
+    return mat4_look_at(pivot, v3_sub(pivot, L), up);
+}
+
+vec3 csm_pivot(vec3 pivot, bool valid, vec3 cam, float cell) {
+    if (valid && fabsf(cam.x - pivot.x) <= cell && fabsf(cam.y - pivot.y) <= cell && fabsf(cam.z - pivot.z) <= cell) return pivot;
+    return v3(roundf(cam.x), roundf(cam.y), roundf(cam.z));
+}
+
+float csm_hold_max_turn(float texel_m, float light_elev) {
+    float s = fmaxf(sinf(light_elev), sinf(3.0f * DG_DEG2RAD));
+    return fminf(0.5f * texel_m * s * s / CSM_HOLD_REF_CASTER, CSM_HOLD_MAX_TURN_DEG * DG_DEG2RAD);
 }
 
 void csm_fit(const mat4 *lview, vec3 center, float radius, u32 texels, float back, CsmTile *out) { csm_fit_reach(lview, center, radius, texels, back, CSM_REACH, out); }

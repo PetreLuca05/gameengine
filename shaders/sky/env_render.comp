@@ -12,7 +12,7 @@ layout(set = 0, binding = 5) uniform sampler2D clouds_tex;
 layout(set = 0, binding = 7) uniform sampler2D cshadow_tex;
 layout(set = 0, binding = 8, rgba16f) uniform writeonly image2D out_env;
 
-vec3 transmittance(float r, float mu) { return textureLod(trans_lut, trans_uv(r, mu), 0.0).rgb; }
+vec3 transmittance(float r, float mu) { return trans_eval(textureLod(trans_lut, trans_uv(r, mu), 0.0)); }
 vec3 sky_lut(vec3 dir) {
     float r = length(planet_pos());
     vec2 uv = skyview_uv(r, dir);

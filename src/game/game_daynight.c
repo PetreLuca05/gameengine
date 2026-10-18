@@ -2,10 +2,12 @@
 // reload, per-level overrides), the host's time state (World.tod, replicated in every snapshot),
 // events (sunrise / sunset / midnight / noon -> EV_TOD -> scripts, callbacks, ambience), light
 // schedules, the per-frame sky / lighting environment for the renderer (sun / moon positions,
-// key + fill light colours through the atmosphere transmittance, stable shadow direction,
-// clouds, stars, IBL scale), exposure / fog curves, the gameplay API, the clock HUD, the
-// time-of-day editor and the tests. The shadows (key / second light, softness, cutoff, cloud
-// optical depth) come from the sky-driven shadow driver (game_shadow_sky.c, docs/SHADOWS.md).
+// key + fill light colours through the atmosphere transmittance, the exact light directions,
+// clouds, stars, IBL scale), exposure / fog curves, the gameplay API, the client's slewed clock,
+// the clock HUD, the time-of-day editor and the tests. Every time-of-day quantity is evaluated
+// per render frame from the continuous clock (docs/DAYNIGHT.md "Continuity"). The shadows (key /
+// second light, softness, cutoff, cloud optical depth) come from the sky-driven shadow driver
+// (game_shadow_sky.c, docs/SHADOWS.md).
 #include "game_internal.h"
 #include "render/shadow_sky.h"
 #include "ui/hud.h"
@@ -30,6 +32,13 @@
 
 #define G (g_engine.game)
 #define DN_MAX_CB 8
+// The client clock (docs/DAYNIGHT.md "Time model and networking"): it runs on real time and catches up
+// with the interpolated server tick by at most DN_CLOCK_SLEW of each frame's advance; it jumps only
+// when off by more than DN_CLOCK_SNAP ticks (joining, a stall).
+#define DN_CLOCK_SLEW 0.02
+#define DN_CLOCK_TAU 0.5
+#define DN_CLOCK_SNAP 30.0
+#define DN_TIME_SET_BLEND 1.5f   // s: time_set eases the time over this ("time_set HH:MM instant": a step)
 
 static struct {
     TodConfig cfg;
@@ -45,10 +54,15 @@ static struct {
     float daylight;            // 0 night .. 1 full sun (daynight_daylight)
     double host_last_days;
     bool host_init;
-    vec3 key_dir;                // shadowed light direction (stable steps)
-    vec3 second_dir;             // the moon's tile while the sun owns the cascades (stable steps)
-    bool key_moon, key_init, second_init;
     float cloud_cover;
+    // client: the clock it renders and the states received (a change happens at its host tick)
+    TodClock cclock;
+    double cclock_time;          // the frame start it was last advanced at (real seconds)
+    TodTimeline tl;
+    u16 tl_ver;
+    // cloud drift: the clock at the previous frame
+    double drift_prev_sec;
+    bool drift_init;
     // demo
     bool demo;
     float demo_prev_len;
@@ -76,10 +90,43 @@ static struct {
     Cvar *disc_zoom;
 } DN;
 
+// The tick this frame renders: the host's tick + alpha (its interpolation fraction), a client's
+// slewed clock (daynight_client_frame). Host commands re-anchor here: the moment on screen.
 static double now_tick(World *w) {
     if (!w) return 0.0;
-    if (!w->authority) return net_client_render_tick();
+    if (!w->authority) return DN.cclock.init ? DN.cclock.tick : net_client_render_tick();
     return (double)w->tick + (G ? (double)G->alpha : 0.0);
+}
+
+// The state that owns `tick`: the host's own; on a client the newest received whose anchor its
+// clock has reached (the host's changes take effect on the client's timeline at their host tick).
+static const TimeState *clock_state(World *w, double tick) {
+    if (w->authority) return &w->tod;
+    if (w->tod.version && w->tod.version != DN.tl_ver) {
+        tod_timeline_push(&DN.tl, &w->tod);
+        DN.tl_ver = w->tod.version;
+    }
+    const TimeState *s = tod_timeline_at(&DN.tl, tick);
+    return s ? s : &w->tod;
+}
+
+static double world_days(World *w) {
+    double t = now_tick(w);
+    return tod_days(clock_state(w, t), t);
+}
+
+// Client, once per frame after the snapshot interpolation: the clock follows the interpolated
+// server tick (the offset estimate jumps when a packet arrives early and drifts back) at real time
+// plus a correction of at most DN_CLOCK_SLEW. Both on one time base: the target sampled at the frame
+// start, the clock advanced by the real time between frame starts (not the clamped frame_dt).
+void daynight_client_frame(World *w) {
+    if (!w || w->authority) return;
+    double now = g_engine.real_time;
+    double target = net_client_render_tick_at(now);
+    if (target <= 0.0) return;
+    double dt = DN.cclock.init ? now - DN.cclock_time : 0.0;
+    DN.cclock_time = now;
+    tod_clock_step(&DN.cclock, target, dt, (double)SIM_HZ, DN_CLOCK_SLEW, DN_CLOCK_TAU, DN_CLOCK_SNAP);
 }
 
 // ------------------------------------------------------------------ config
@@ -177,11 +224,13 @@ static vec3 transmittance_cpu(float elev, float mie_scale) {
 }
 
 // Light reaching the ground from a body at elevation `elev` (rgb, engine illuminance): the disc
-// fades in over its own size around the horizon.
+// fades in over its own size around the horizon (gone below CS_HANDOVER_ELEV: the sun hands the
+// cascades to the moon there, shadow_sky.c).
+#define CS_HANDOVER_ELEV (-0.015f)
 static vec3 body_light(float elev, float illuminance, float mie) {
     float e = fmaxf(elev, -0.02f);
     vec3 t = transmittance_cpu(fmaxf(e, 0.0f), mie);
-    float horizon = smoothstepf(-0.015f, 0.01f, elev);
+    float horizon = smoothstepf(CS_HANDOVER_ELEV, 0.01f, elev);
     return v3_scale(t, illuminance * horizon);
 }
 
@@ -191,12 +240,14 @@ void daynight_level_loaded(World *w) {
     const char *lvl = w ? w->level.name : "";
     load_config(lvl);
     if (w && w->authority) {
-        tod_state_init(&w->tod, &DN.cfg, w->tick);
+        tod_state_init(&w->tod, &DN.cfg, (double)w->tick);
         DN.host_last_days = tod_days(&w->tod, w->tick);
         DN.host_init = true;
     }
-    DN.key_init = false;
-    DN.second_init = false;
+    memset(&DN.cclock, 0, sizeof(DN.cclock));
+    tod_timeline_reset(&DN.tl);
+    DN.tl_ver = 0;
+    DN.drift_init = false;
     DN.demo = false;
     shadow_sky_level_loaded();
     char b[16];
@@ -219,7 +270,7 @@ void daynight_host_tick(World *w) {
     if (!w || !w->authority) return;
     if (!DN.cfg_loaded) load_config(w->level.name);
     if (!DN.host_init || w->tod.version == 0) {
-        tod_state_init(&w->tod, &DN.cfg, w->tick);
+        tod_state_init(&w->tod, &DN.cfg, (double)w->tick);
         DN.host_last_days = tod_days(&w->tod, w->tick);
         DN.host_init = true;
     }
@@ -230,7 +281,7 @@ void daynight_host_tick(World *w) {
         if (ev & bit) fire_event(w, bit, (float)((days - floor(days)) * 24.0));
     // Demo: one day, then back to the previous speed.
     if (DN.demo && days >= DN.demo_end_days) {
-        tod_set_day_length(&w->tod, (double)w->tick, DN.demo_prev_len);
+        tod_set_day_length(&w->tod, now_tick(w), DN.demo_prev_len);
         DN.demo = false;
         log_info("daynight: 24 h demo done");
     }
@@ -277,12 +328,16 @@ void daynight_add_listener(TodEventFn fn, void *user) {
 
 static bool sky_now(World *w, TodSky *out) {
     if (!w || !w->tod.version) return false;
-    tod_sky(&DN.cfg, tod_days(&w->tod, now_tick(w)), out);
+    tod_sky(&DN.cfg, world_days(w), out);
     return true;
 }
 
-float world_time_hours(World *w) { return w && w->tod.version ? tod_hours(&w->tod, now_tick(w)) : 12.0f; }
-int world_day_number(World *w) { return w && w->tod.version ? (int)tod_days(&w->tod, now_tick(w)) : 0; }
+float world_time_hours(World *w) {
+    if (!w || !w->tod.version) return 12.0f;
+    double d = world_days(w);
+    return (float)((d - floor(d)) * 24.0);
+}
+int world_day_number(World *w) { return w && w->tod.version ? (int)world_days(w) : 0; }
 bool world_is_night(World *w) {
     TodSky s;
     return sky_now(w, &s) && tod_is_night(&s);
@@ -335,7 +390,10 @@ void daynight_environment(World *w, const RenderCamera *cam, RenderEnvironment *
     poll_reload();
     DN.have_sky = false;
     if (!daynight_active(w)) return;
-    double days = tod_days(&w->tod, now_tick(w));
+    double tick = now_tick(w);
+    const TimeState *ts = clock_state(w, tick);
+    double sec = tod_seconds(ts, tick);
+    double days = sec / TOD_SEC_PER_DAY;
     TodSky s;
     tod_sky(&DN.cfg, days, &s);
     DN.sky = s;
@@ -360,6 +418,16 @@ void daynight_environment(World *w, const RenderCamera *cam, RenderEnvironment *
     ShadowSkyInput sin_;
     memset(&sin_, 0, sizeof(sin_));
     sin_.dt = (float)g_engine.frame_dt;
+    // The clock's speed against the default day (time_scale) and the cloud drift of this frame: the
+    // clock's advance in real seconds of the default day, so the clouds pause with the clock and
+    // time-lapse with it; a jump (time_set instant, time_days) moves nothing.
+    double rate = tod_rate(ts, tick), def_rate = TOD_SEC_PER_DAY / fmax(DN.cfg.day_length_minutes * 60.0, 1.0);
+    float clock_speed = (float)(rate / def_rate);
+    sin_.clock_speed = clock_speed;
+    double dsec = DN.drift_init ? sec - DN.drift_prev_sec : 0.0;
+    sin_.drift_dt = fabs(dsec) <= 3600.0 ? dsec / def_rate : 0.0;
+    DN.drift_prev_sec = sec;
+    DN.drift_init = true;
     sin_.sun_elev = s.sun_elev;
     sin_.moon_elev = s.moon_elev;
     sin_.sun_light = sun_atm;
@@ -379,22 +447,12 @@ void daynight_environment(World *w, const RenderCamera *cam, RenderEnvironment *
     ShadowSkyOut sso;
     shadow_sky_frame(&sin_, &sso, wx ? 0.0f : DN.cfg.cloud_wind_mps);
     bool moon_key = sso.key_is_moon;
-    vec3 key_target = moon_key ? s.moon_dir : s.sun_dir;
-    // Stable shadows: the shadowed direction moves in small steps (sub-texel at the shadow map's
-    // resolution), coarser for the moon; the sun hands the cascades to the moon once its disc is
-    // gone (shadow_sky.c: nothing of the sun is left to change on screen).
-    float step_deg = moon_key ? 0.25f : 0.04f;
-    if (!DN.key_init || moon_key != DN.key_moon || acosf(clampf(v3_dot(key_target, DN.key_dir), -1.0f, 1.0f)) * DG_RAD2DEG > step_deg) {
-        DN.key_dir = key_target;
-        DN.key_moon = moon_key;
-        DN.key_init = true;
-    }
-    if (!DN.second_init || acosf(clampf(v3_dot(s.moon_dir, DN.second_dir), -1.0f, 1.0f)) * DG_RAD2DEG > 0.25f) {
-        DN.second_dir = s.moon_dir;
-        DN.second_init = true;
-    }
-    // A body below the horizon lights nothing (its direction would light from below).
-    vec3 kd = DN.key_dir;
+    // The shadowed light follows its body exactly, every frame (docs/DAYNIGHT.md "Continuity"): the
+    // cascades stay stable by snapping their light-space origin to whole texels about a pivot near
+    // the camera (render.c compute_matrices), never by holding the direction. The sun hands the
+    // cascades to the moon once its disc is gone (shadow_sky.c: nothing of the sun is left to change
+    // on screen). A body below the horizon lights nothing (its direction would light from below).
+    vec3 kd = moon_key ? s.moon_dir : s.sun_dir;
     if (kd.y < 0.02f) kd = v3_norm(v3(kd.x, 0.02f, kd.z));
     env->sun_dir = kd;
     env->sun_color = sso.key.color;
@@ -404,7 +462,7 @@ void daynight_environment(World *w, const RenderCamera *cam, RenderEnvironment *
     DN.daylight = smoothstepf(0.0f, 1.0f, ls / fmaxf(DN.cfg.sun_illuminance * 0.35f, 1e-6f));
     // Second light: the moon while the sun owns the cascades, shadowed in atlas tile 3 on the
     // tiers with moon shadows (no unshadowed fill: it lit through roofs and filled every shadow).
-    vec3 sd = DN.second_dir;
+    vec3 sd = s.moon_dir;
     env->fill_dir = sd.y > 0.02f ? sd : v3_norm(v3(sd.x, 0.02f, sd.z));
     env->fill_color = sso.second.color;
     env->fill_intensity = moon_key ? 0.0f : sso.second.intensity;
@@ -432,9 +490,18 @@ void daynight_environment(World *w, const RenderCamera *cam, RenderEnvironment *
     env->cloud_cover = DN.cloud_cover;
     env->cloud_altitude = DN.cfg.cloud_altitude_m;
     env->cloud_scale = 3000.0f;
-    // Cloud shadow map: Beer-Lambert through the patches; drift at the wind aloft (real seconds).
-    env->cloud_shadow_tau = sso.cumulus_tau;
+    // Cloud shadow map: Beer-Lambert through the patches along the key light; the drift follows the
+    // clock. The map fades out while the key is low (its projection L.xz / L.y x altitude races
+    // across the ground) and around the sun / moon handover, where the key changes body: the moon
+    // as the second light has no cloud shadow, so nothing steps when it takes the cascades.
+    float key_elev = moon_key ? s.moon_elev : s.sun_elev;
+    float cs_low = smoothstepf(1.0f * DG_DEG2RAD, 5.0f * DG_DEG2RAD, key_elev);
+    float cs_hand = smoothstepf(0.0f, 2.0f * DG_DEG2RAD, fabsf(s.sun_elev - CS_HANDOVER_ELEV));
+    env->cloud_shadow_tau = sso.cumulus_tau * cs_low * cs_hand;
     env->cloud_offset = sso.cloud_offset;
+    env->cloud_offset_d[0] = sso.cloud_offset_d[0];
+    env->cloud_offset_d[1] = sso.cloud_offset_d[1];
+    env->clock_speed = clock_speed;
     env->ambient_scale = ambient_scale;
     env->aerial_scale = DN.aerial_scale->f;
     env->aerial_max = DN.aerial_max->f;
@@ -449,8 +516,9 @@ void daynight_environment(World *w, const RenderCamera *cam, RenderEnvironment *
     env->fog_density = fog;
     env->shadow_center = v3_madd(cam->pos, dir_from_angles(cam->yaw, 0), 12.0f);
     weather_environment(w, env);
-    TodProbeIn pin = { now_tick(w), days * 86400.0, w->tod.day_length > 0 ? 86400.0 / w->tod.day_length : 0.0, w->tod.day_length, w->tod.version, false, 0.0, 0.0,
-                       w->authority, 0.0, 0.0, 0 };
+    bool blending = tod_blending(ts, tick);
+    TodProbeIn pin = { tick, sec, rate, ts->day_length, ts->version, blending, blending ? ts->blend_sec : 0.0, ts->blend_ticks / (double)SIM_HZ,
+                       w->authority, w->authority ? 0.0 : DN.cclock.corr, w->authority ? tick : net_client_render_tick_at(g_engine.real_time), DN_CLOCK_SLEW, DN.cclock.snaps };
     tod_probe_frame(w, &DN.cfg, &s, env, &pin);
 }
 
@@ -490,40 +558,46 @@ void daynight_set_calendar(World *w, int day_of_year, float hours) {
     if (!w || !w->authority) return;
     DN.cfg.day_of_year = DG_CLAMP(day_of_year, 1, 365);
     w->tod.day_of_year = (u16)DN.cfg.day_of_year;
-    float h = hours >= 0 ? hours : tod_hours(&w->tod, (double)w->tick);
-    tod_set_time(&w->tod, (double)w->tick, h);   // re-anchors and bumps the version (replicated)
+    double t = now_tick(w);
+    float h = hours >= 0 ? hours : tod_hours(&w->tod, t);
+    tod_set_time(&w->tod, t, h);   // re-anchors and bumps the version (replicated); a new calendar: a step
     DN.host_last_days = tod_days(&w->tod, w->tick);
-    DN.key_init = false;
 }
 
 // Story mode (src/story/story_run.c): host, the time (hours) and the clock rate in game minutes per
-// real second (0 = frozen). Only touches the replicated state when something changed.
+// real second (0 = frozen). Only touches the replicated state when something changed: the rate when
+// it differs, the time when the story clock is off by more than 2 game seconds (its float clock
+// drifts from the exact one): eased over 2 s, a step only beyond 30 game minutes (scrubs, saves).
 void daynight_story_drive(World *w, float hours, float minutes_per_second) {
     if (!w || !w->authority) return;
+    double t = now_tick(w);
     float len = minutes_per_second > 1e-4f ? 1440.0f / minutes_per_second : 0.0f;
-    float now = tod_hours(&w->tod, (double)w->tick);
+    if (fabsf(w->tod.day_length - len) > 1e-4f * fmaxf(len, 1.0f)) tod_set_day_length(&w->tod, t, len);
+    if (tod_blending(&w->tod, t)) return;   // a correction is easing in
+    double tgt = tod_target_seconds(&w->tod, t);
+    float now = (float)(fmod(tgt, TOD_SEC_PER_DAY) / 3600.0);
     float drift = fabsf(now - hours);
     if (drift > 12.0f) drift = 24.0f - drift;
-    if (fabsf(w->tod.day_length - len) > fmaxf(0.01f * len, 0.5f)) tod_set_day_length(&w->tod, (double)w->tick, len);
-    if (drift * 60.0f > 0.25f) {   // more than 15 game seconds off: snap (scrubs, saves, blends)
-        tod_set_time(&w->tod, (double)w->tick, hours);
-        DN.host_last_days = tod_days(&w->tod, w->tick);
-        DN.key_init = false;
-    }
+    if (drift * 3600.0f > 1800.0f) tod_set_time(&w->tod, t, hours);
+    else if (drift * 3600.0f > 2.0f) tod_blend_time(&w->tod, t, hours, 2.0f);
+    else return;
+    DN.host_last_days = tod_days(&w->tod, w->tick);
 }
 
+// time_set HH:MM [seconds|instant]: the time eases there over DN_TIME_SET_BLEND s (or the given
+// seconds; 0 / instant = a step), on the same day; the sun and the shadows sweep, never jump.
 static void cmd_time_set(int argc, const char **argv) {
     World *w = host_world("time_set");
     if (!w) return;
-    if (argc < 2) { log_info("usage: time_set HH:MM"); return; }
+    if (argc < 2) { log_info("usage: time_set HH:MM [seconds|instant]"); return; }
     float h = tod_parse_hours(argv[1]);
     if (h < 0) h = (float)atof(argv[1]);
-    tod_set_time(&w->tod, (double)w->tick, h);
+    float blend = argc > 2 ? (!strcmp(argv[2], "instant") ? 0.0f : fmaxf((float)atof(argv[2]), 0.0f)) : DN_TIME_SET_BLEND;
+    tod_blend_time(&w->tod, now_tick(w), h, blend);
     DN.host_last_days = tod_days(&w->tod, w->tick);
-    DN.key_init = false;
     char b[16];
     tod_format_hours(h, b, sizeof(b));
-    log_info("time_set %s", b);
+    log_info("time_set %s (%s)", b, blend > 0.0f ? "eased" : "instant");
 }
 
 static void cmd_time_scale(int argc, const char **argv) {
@@ -532,7 +606,7 @@ static void cmd_time_scale(int argc, const char **argv) {
     if (argc < 2) { log_info("usage: time_scale <x>  (1 = %.0f min per day, 0 = pause)", DN.cfg.day_length_minutes); return; }
     float k = (float)atof(argv[1]);
     float len = k > 0 ? DN.cfg.day_length_minutes * 60.0f / k : 0.0f;
-    tod_set_day_length(&w->tod, (double)w->tick, len);
+    tod_set_day_length(&w->tod, now_tick(w), len);   // from the moment on screen: no jump
     log_info("time_scale %.2f: %.1f s per day", k, len);
 }
 
@@ -541,8 +615,8 @@ static void cmd_time_pause(int argc, const char **argv) {
     if (!w) return;
     bool pause = argc > 1 ? atoi(argv[1]) != 0 : w->tod.day_length > 0;
     static float resume = 0;
-    if (pause) { resume = w->tod.day_length > 0 ? w->tod.day_length : DN.cfg.day_length_minutes * 60.0f; tod_set_day_length(&w->tod, w->tick, 0.0f); }
-    else tod_set_day_length(&w->tod, w->tick, resume > 0 ? resume : DN.cfg.day_length_minutes * 60.0f);
+    if (pause) { resume = w->tod.day_length > 0 ? w->tod.day_length : DN.cfg.day_length_minutes * 60.0f; tod_set_day_length(&w->tod, now_tick(w), 0.0f); }
+    else tod_set_day_length(&w->tod, now_tick(w), resume > 0 ? resume : DN.cfg.day_length_minutes * 60.0f);
     log_info("time %s", pause ? "paused" : "running");
 }
 
@@ -550,7 +624,7 @@ static void cmd_time_days(int argc, const char **argv) {
     World *w = host_world("time_days");
     if (!w) return;
     int n = argc > 1 ? atoi(argv[1]) : 1;
-    tod_add_days(&w->tod, (double)w->tick, n);
+    tod_add_days(&w->tod, now_tick(w), n);
     DN.host_last_days = tod_days(&w->tod, w->tick);
     log_info("time_days %+d: day %d", n, (int)DN.host_last_days);
 }
@@ -559,7 +633,8 @@ static void cmd_time_days(int argc, const char **argv) {
 // (evening side), or a full moon night (moon_full: skips days to the next full moon, midnight).
 bool daynight_preset_time(World *w, float elev_deg, bool moon_full) {
     if (!w || !w->authority || !w->tod.version) return false;
-    double day = floor(tod_days(&w->tod, (double)w->tick));
+    double t = now_tick(w);
+    double day = floor(tod_days(&w->tod, t));
     TodSky sk;
     if (moon_full) {
         int best = 0;
@@ -568,8 +643,8 @@ bool daynight_preset_time(World *w, float elev_deg, bool moon_full) {
             tod_sky(&DN.cfg, day + d + 0.999, &sk);
             if (sk.moon_illum > best_illum) { best_illum = sk.moon_illum; best = d; }
         }
-        if (best) tod_add_days(&w->tod, (double)w->tick, best);
-        tod_set_time(&w->tod, (double)w->tick, 23.99f);
+        if (best) tod_add_days(&w->tod, t, best);
+        tod_set_time(&w->tod, t, 23.99f);
     } else {
         // from noon towards the evening: the first time the sun drops under elev_deg
         float found = 12.0f;
@@ -577,28 +652,25 @@ bool daynight_preset_time(World *w, float elev_deg, bool moon_full) {
             tod_sky(&DN.cfg, day + hh / 24.0, &sk);
             if (sk.sun_elev * DG_RAD2DEG <= elev_deg) { found = hh; break; }
         }
-        tod_set_time(&w->tod, (double)w->tick, found);
+        tod_set_time(&w->tod, t, found);
     }
     DN.host_last_days = tod_days(&w->tod, w->tick);
-    DN.key_init = false;
-    DN.second_init = false;
     return true;
 }
 
 // The morning sun: from noon backwards, the last time the sun is still above elev_deg.
 bool daynight_preset_morning(World *w, float elev_deg) {
     if (!w || !w->authority || !w->tod.version) return false;
-    double day = floor(tod_days(&w->tod, (double)w->tick));
+    double t = now_tick(w);
+    double day = floor(tod_days(&w->tod, t));
     TodSky sk;
     float found = 12.0f;
     for (float hh = 12.0f; hh > 0.1f; hh -= 1.0f / 120.0f) {
         tod_sky(&DN.cfg, day + hh / 24.0, &sk);
         if (sk.sun_elev * DG_RAD2DEG <= elev_deg) { found = hh + 1.0f / 120.0f; break; }
     }
-    tod_set_time(&w->tod, (double)w->tick, found);
+    tod_set_time(&w->tod, t, found);
     DN.host_last_days = tod_days(&w->tod, w->tick);
-    DN.key_init = false;
-    DN.second_init = false;
     return true;
 }
 
@@ -607,15 +679,15 @@ static void cmd_tod_demo(int argc, const char **argv) {
     World *w = host_world("tod_demo");
     if (!w) return;
     if (argc > 1 && !strcmp(argv[1], "stop")) {
-        if (DN.demo) tod_set_day_length(&w->tod, w->tick, DN.demo_prev_len);
+        if (DN.demo) tod_set_day_length(&w->tod, now_tick(w), DN.demo_prev_len);
         DN.demo = false;
         return;
     }
     float secs = argc > 1 ? (float)atof(argv[1]) : 60.0f;
     if (!DN.demo) DN.demo_prev_len = w->tod.day_length;
-    tod_set_day_length(&w->tod, (double)w->tick, fmaxf(secs, 5.0f));
+    tod_set_day_length(&w->tod, now_tick(w), fmaxf(secs, 5.0f));
     DN.demo = true;
-    DN.demo_end_days = tod_days(&w->tod, w->tick) + 1.0;
+    DN.demo_end_days = tod_days(&w->tod, now_tick(w)) + 1.0;
     log_info("tod_demo: 24 h in %.0f s", secs);
 }
 
@@ -674,7 +746,7 @@ static void cmd_tod_test(int argc, const char **argv) {
         DN.t.floor_ev = DN.cfg.night_floor_ev;
         DN.t.quit = argc > 2 && !strcmp(argv[2], "quit");
         DN.t.refilters_start = (int)render_sky_refilters();
-        tod_set_time(&w->tod, w->tick, 12.1f);
+        tod_set_time(&w->tod, now_tick(w), 12.1f);
         const char *a[2] = { "tod_demo", "60" };
         cmd_tod_demo(2, a);
         DN.t.start_days = tod_days(&w->tod, w->tick);
@@ -686,9 +758,9 @@ static void cmd_tod_test(int argc, const char **argv) {
         // (identical on the host and every client), plus the time shown right now.
         if (!w) return;
         const TimeState *t = &w->tod;
-        log_info("tod_test dump: %s v%u ref_tick %u ref_ms %u day %u doy %u len %.3f | hours at tick 100000 %.6f, at 200000 %.6f | now %.4f",
-                 w->authority ? "host" : "client", t->version, t->ref_tick, t->ref_ms, t->ref_day, t->day_of_year, t->day_length, tod_hours(t, 100000.0),
-                 tod_hours(t, 200000.0), world_time_hours(w));
+        log_info("tod_test dump: %s v%u ref_tick %.4f ref_sec %.4f blend %.3f s / %u ticks doy %u len %.3f (before %.3f) | hours at tick 100000 %.6f, at 200000 %.6f | now %.4f",
+                 w->authority ? "host" : "client", t->version, t->ref_tick, t->ref_sec, t->blend_sec, t->blend_ticks, t->day_of_year, t->day_length, t->prev_length,
+                 tod_hours(t, 100000.0), tod_hours(t, 200000.0), world_time_hours(w));
         return;
     }
     log_info("usage: tod_test cycle [quit] | continuity <seconds> [quit] [tag] | trace <frames> <csv> | shots <frames> <dir> | dump");
@@ -775,7 +847,7 @@ static void draw_editor(void) {
         float before = hh;
         nk_layout_row_dynamic(ctx, 22 * s, 1);
         nk_slider_float(ctx, 0.0f, &hh, 23.99f, 0.05f);
-        if (host && fabsf(hh - before) > 1e-4f) tod_set_time(&w->tod, w->tick, hh);
+        if (host && fabsf(hh - before) > 1e-4f) tod_set_time(&w->tod, now_tick(w), hh);   // a scrub: a step
         nk_layout_row_dynamic(ctx, 20 * s, 1);
         snprintf(b + 5, 40, "  day %d", DN.have_sky ? (int)DN.frame_days + 1 : 0);
         nk_label(ctx, b, NK_TEXT_LEFT);
@@ -864,7 +936,7 @@ void daynight_register(void) {
     DN.on_noon = cvar_reg_string("tod_on_noon", "", CVAR_LOCKED, "console commands run at noon");
     DN.night_ambience = cvar_reg_string("tod_night_ambience", "", CVAR_LOCKED, "ambient track started at sunset (empty = keep)");
     DN.day_ambience = cvar_reg_string("tod_day_ambience", "", CVAR_LOCKED, "ambient track started at sunrise (empty = keep)");
-    cmd_register("time_set", cmd_time_set, "time_set HH:MM (host)");
+    cmd_register("time_set", cmd_time_set, "time_set HH:MM [seconds|instant]: eases the time there over 1.5 s (or the seconds; instant = a step), host");
     cmd_register("time_scale", cmd_time_scale, "time_scale <x>: day speed multiplier, 0 pauses (host)");
     cmd_register("time_pause", cmd_time_pause, "time_pause [0|1] (host)");
     cmd_register("time_days", cmd_time_days, "time_days <n>: skip days (moon phases, host)");

@@ -25,7 +25,7 @@
 #include <string.h>
 
 #define TP_TOL 0.05          // +-5 % of the expected per-frame step
-#define TP_REF_CASTER 4.0    // m: the reference caster of the far-cascade lag (as render.c's hold test)
+#define TP_REF_CASTER 10.0   // m: the reference caster of the far-cascade lag (shadow_csm.h CSM_HOLD_REF_CASTER)
 #define TP_TWO_PI 6.283185307179586
 
 typedef struct TpStat {
@@ -41,16 +41,18 @@ static struct {
     bool have_prev;
     int settle;
     double prev_sec, prev_rate;
-    vec3 prev_sun, prev_key, prev_fill;
-    bool prev_moon_key;
+    vec3 prev_sun, prev_moon, prev_key, prev_fill;
+    bool prev_moon_key, prev_blending;
+    double prev_blend_sec, prev_blend_s;
     u16 prev_ver;
     u32 prev_luts, prev_refilters;
-    TpStat clock, sun, key, moon, tip, key_lut, key_ibl;
+    TpStat clock, sun, key, moon, tip, key_lut, key_ibl, clouds;
+    double prev_cloud[2];
     int changes, change_bad, blend_frames, blend_bad;
     double blend_worst;
     int az_back, el_back, frames;
     double dt_sum, dt_max;
-    double lag_texels[4], lag_deg[4];
+    double lag_texels[4], lag_deg[4], lag_over[4];   // the last: lag / the allowed turn (render.c's hold rule)
     int held[4], casc_frames;
     double corr_max;
     int snaps0;
@@ -109,6 +111,7 @@ static void tip(vec3 L, double *x, double *z) {
 
 static void continuity_start(int argc, const char **argv) {
     stat_reset(&TP.clock), stat_reset(&TP.sun), stat_reset(&TP.key), stat_reset(&TP.moon), stat_reset(&TP.tip), stat_reset(&TP.key_lut), stat_reset(&TP.key_ibl);
+    stat_reset(&TP.clouds);
     float secs = argc > 2 ? (float)atof(argv[2]) : 10.0f;
     TP.mode = 1;
     TP.end_time = g_engine.real_time + fmax(secs, 1.0f);
@@ -124,7 +127,7 @@ static void continuity_start(int argc, const char **argv) {
     TP.blend_worst = 0;
     TP.az_back = TP.el_back = TP.frames = 0;
     TP.dt_sum = TP.dt_max = 0;
-    for (int k = 0; k < 4; k++) TP.lag_texels[k] = TP.lag_deg[k] = 0, TP.held[k] = 0;
+    for (int k = 0; k < 4; k++) TP.lag_texels[k] = TP.lag_deg[k] = TP.lag_over[k] = 0, TP.held[k] = 0;
     TP.casc_frames = 0;
     TP.corr_max = 0;
     TP.snaps0 = -1;
@@ -151,6 +154,7 @@ static void continuity_finish(const TodProbeIn *in) {
     stat_log("pole tip", &TP.tip);
     stat_log("key@LUT", &TP.key_lut);
     stat_log("key@IBL", &TP.key_ibl);
+    stat_log("clouds", &TP.clouds);
     log_info("tod_test continuity %s: sky sun azimuth backwards %d, elevation reversals %d -> %s", TP.tag, TP.az_back, TP.el_back,
              TP.az_back == 0 && TP.el_back == 0 ? "ok" : "FAIL");
     log_info("tod_test continuity %s: rate changes %d, stepped outside the old / new rate %d -> %s", TP.tag, TP.changes, TP.change_bad, TP.change_bad == 0 ? "ok" : "FAIL");
@@ -159,17 +163,17 @@ static void continuity_finish(const TodProbeIn *in) {
     bool casc_ok = true;
     for (int k = 0; k < 4; k++) {
         if (!TP.casc_frames) break;
-        bool ok = TP.lag_texels[k] <= 0.5 + 1e-6;
+        bool ok = TP.lag_over[k] <= 1.0 + 1e-4;
         casc_ok = casc_ok && ok;
-        log_info("tod_test continuity %s: cascade %d kept %d / %d frames, light lag max %.4f deg = %.3f texels of a %.0f m caster -> %s", TP.tag, k, TP.held[k],
-                 TP.casc_frames, TP.lag_deg[k], TP.lag_texels[k], TP_REF_CASTER, ok ? "ok" : "FAIL");
+        log_info("tod_test continuity %s: cascade %d kept %d / %d frames, light lag max %.4f deg = %.3f texels of a %.0f m caster's shadow (%.3f of the allowed) -> %s", TP.tag, k,
+                 TP.held[k], TP.casc_frames, TP.lag_deg[k], TP.lag_texels[k], TP_REF_CASTER, TP.lag_over[k], ok ? "ok" : "FAIL");
     }
     int snaps = TP.snaps0 >= 0 ? in->clock_snaps - TP.snaps0 : 0;
     bool clock_ok = in->authority || (TP.corr_max <= in->clock_slew + 1e-6 && snaps == 0);
     if (!in->authority)
         log_info("tod_test continuity %s: client clock correction max %.4f of the frame's advance (slew %.4f), snaps %d -> %s", TP.tag, TP.corr_max, in->clock_slew, snaps,
                  clock_ok ? "ok" : "FAIL");
-    bool ok = stat_ok(&TP.clock) && stat_ok(&TP.sun) && stat_ok(&TP.key) && stat_ok(&TP.moon) && stat_ok(&TP.tip) && TP.az_back == 0 && TP.el_back == 0 &&
+    bool ok = stat_ok(&TP.clock) && stat_ok(&TP.sun) && stat_ok(&TP.key) && stat_ok(&TP.moon) && stat_ok(&TP.tip) && stat_ok(&TP.clouds) && TP.az_back == 0 && TP.el_back == 0 &&
               TP.change_bad == 0 && TP.blend_bad == 0 && casc_ok && clock_ok && TP.sun.n + TP.key.n + TP.moon.n > 0;
     log_info("tod_test continuity %s: %s", TP.tag, ok ? "PASS" : "FAIL");
     if (TP.quit) cbuf_add("quit");
@@ -198,10 +202,11 @@ static void continuity_frame(const TodConfig *cfg, const TodSky *s, const Render
     else if (TP.have_prev) {
         double step = in->sec - TP.prev_sec;
         double r_lo = fmin(TP.prev_rate, in->rate), r_hi = fmax(TP.prev_rate, in->rate);
-        if (in->blending || in->blend_sec != 0.0) {
-            // A time_set blend: the ease (smoothstep) of its offset never steps more than 1.5 x the
-            // offset / the duration per second on top of the rate.
-            double bound = (r_hi + 1.5 * fabs(in->blend_sec) / fmax(in->blend_s, 1e-3)) * dt * (1.0 + TP_TOL) + 1e-6;
+        if (in->blending || TP.prev_blending) {
+            // A time_set blend (and the frame its ease ends in): the ease (smoothstep) of its offset
+            // never steps more than 1.5 x the offset / the duration per second on top of the rate.
+            double off = in->blending ? in->blend_sec : TP.prev_blend_sec, dur = in->blending ? in->blend_s : TP.prev_blend_s;
+            double bound = (r_hi + 1.5 * fabs(off) / fmax(dur, 1e-3)) * dt * (1.0 + TP_TOL) + 1e-6;
             TP.blend_frames++;
             TP.blend_worst = fmax(TP.blend_worst, fabs(step) / bound);
             if (fabs(step) > bound) TP.blend_bad++;
@@ -235,12 +240,14 @@ static void continuity_frame(const TodConfig *cfg, const TodSky *s, const Render
             double H = (s->days - floor(s->days) - 0.5) * TP_TWO_PI;
             double de = elev_d(s->sun_dir) - elev_d(TP.prev_sun);
             if (fabs(sin(H)) > 0.02 && de * -sin(H) < 0.0) TP.el_back++;
-            // The shading / shadow key and the moon's light (the second light by day, the key at night).
+            // The shading / shadow key and the moon's light (the second light by day, the key at night),
+            // while the body is up (below 1.15 deg its light direction is held at the horizon).
             TodSky e;
             tod_sky(cfg, s->days - dsec / 86400.0, &e);
             double exp_moon = ang(e.moon_dir, s->moon_dir);
             bool same_body = env->moon_key == TP.prev_moon_key;
-            if (same_body && !env->moon_key && env->sun_dir.y > 0.03f && TP.prev_key.y > 0.03f) {
+            bool sun_up = s->sun_dir.y > 0.03f && TP.prev_sun.y > 0.03f, moon_up = s->moon_dir.y > 0.03f && TP.prev_moon.y > 0.03f;
+            if (same_body && !env->moon_key && sun_up) {
                 double r = ang(TP.prev_key, env->sun_dir) / exp_sun;
                 stat_add(&TP.key, r);
                 if (lut_frame) stat_add(&TP.key_lut, r);
@@ -252,15 +259,15 @@ static void continuity_frame(const TodConfig *cfg, const TodSky *s, const Render
                     double m = hypot(x1 - x0, z1 - z0), x = hypot(ex1 - ex0, ez1 - ez0);
                     if (x > 1e-7) stat_add(&TP.tip, m / x);
                 }
-                if (env->fill_dir.y > 0.03f && TP.prev_fill.y > 0.03f && exp_moon > 1e-9) stat_add(&TP.moon, ang(TP.prev_fill, env->fill_dir) / exp_moon);
-            } else if (same_body && env->moon_key && env->sun_dir.y > 0.03f && TP.prev_key.y > 0.03f && exp_moon > 1e-9) {
+                if (moon_up && exp_moon > 1e-9) stat_add(&TP.moon, ang(TP.prev_fill, env->fill_dir) / exp_moon);
+            } else if (same_body && env->moon_key && moon_up && exp_moon > 1e-9) {
                 stat_add(&TP.moon, ang(TP.prev_key, env->sun_dir) / exp_moon);
             }
             // Far cascades (PF-0028): the light direction a kept tile was drawn with vs this frame's, as
             // the shadow motion of the reference caster in texels of the tile.
-            float lag[4], texel[4];
+            float lag[4], allow[4], texel[4];
             bool held[4];
-            int nc = render_shadow_cascade_lag(lag, texel, held);
+            int nc = render_shadow_cascade_lag(lag, allow, texel, held);
             if (nc > 0) {
                 TP.casc_frames++;
                 double se = fmax(sin(elev_d(env->sun_dir)), sin(3.0 * DG_DEG2RAD));
@@ -269,9 +276,18 @@ static void continuity_frame(const TodConfig *cfg, const TodSky *s, const Render
                     double t = (double)lag[k] * DG_DEG2RAD * TP_REF_CASTER / (se * se) / fmax((double)texel[k], 1e-6);
                     if (t > TP.lag_texels[k]) TP.lag_texels[k] = t;
                     if (lag[k] > TP.lag_deg[k]) TP.lag_deg[k] = lag[k];
+                    if (held[k] && lag[k] / fmax(allow[k], 1e-9) > TP.lag_over[k]) TP.lag_over[k] = lag[k] / fmax(allow[k], 1e-9);
                 }
             }
             if (!in->authority) TP.corr_max = fmax(TP.corr_max, fabs(in->clock_corr));
+            // The cloud drift follows the clock: |wind| x the clock's advance in real seconds of the
+            // default day (game_daynight.c drift_dt), every frame.
+            if (env->shadow_sky_valid) {
+                double v = hypot((double)env->shadow_sky.cloud_vel.x, (double)env->shadow_sky.cloud_vel.y);
+                double want = v * step * (double)cfg->day_length_minutes * 60.0 / 86400.0;
+                double got = hypot(env->cloud_offset_d[0] - TP.prev_cloud[0], env->cloud_offset_d[1] - TP.prev_cloud[1]);
+                if (want > 1e-6) stat_add(&TP.clouds, got / want);
+            }
         }
     }
     if (!hitch) {
@@ -279,23 +295,30 @@ static void continuity_frame(const TodConfig *cfg, const TodSky *s, const Render
         TP.prev_sec = in->sec;
         TP.prev_rate = in->rate;
         TP.prev_sun = s->sun_dir;
+        TP.prev_moon = s->moon_dir;
         TP.prev_key = env->sun_dir;
         TP.prev_fill = env->fill_dir;
         TP.prev_moon_key = env->moon_key;
+        TP.prev_cloud[0] = env->cloud_offset_d[0];
+        TP.prev_cloud[1] = env->cloud_offset_d[1];
+        TP.prev_blending = in->blending;
+        TP.prev_blend_sec = in->blend_sec;
+        TP.prev_blend_s = in->blend_s;
     }
     if (g_engine.real_time >= TP.end_time) continuity_finish(in);
 }
 
 static void trace_frame(const TodSky *s, const RenderEnvironment *env, const TodProbeIn *in) {
-    float lag[4] = { 0 }, texel[4] = { 0 };
+    float lag[4] = { 0 }, allow[4] = { 0 }, texel[4] = { 0 };
     bool held[4] = { 0 };
-    render_shadow_cascade_lag(lag, texel, held);
-    fprintf(TP.f, "%llu,%.6f,%d,%.6f,%.6f,%.7f,%.7f,%.7f,%.7f,%.7f,%d,%.7f,%.7f,%.7f,%.7f,%.5f,%.5f,%.4f,%u,%u,%.4f,%.4f,%.5f,%.5f,%.5f,%.5f,%d,%d,%d,%d,%u,%.6f,%d,%.4f\n",
+    render_shadow_cascade_lag(lag, allow, texel, held);
+    fprintf(TP.f, "%llu,%.6f,%d,%.6f,%.6f,%.7f,%.7f,%.7f,%.7f,%.7f,%d,%.7f,%.7f,%.7f,%.7f,%.5f,%.5f,%.4f,%u,%u,%.4f,%.4f,%.5f,%.5f,%.5f,%.5f,%d,%d,%d,%d,%u,%.6f,%d,%.4f,"
+                  "%.5f,%.5f,%.5f,%.5f,%.6f\n",
             (unsigned long long)g_engine.frame_index, g_engine.frame_dt, (int)in->authority, in->tick, in->sec, s->hours, elev_d(s->sun_dir) * DG_RAD2DEG,
             azim_d(s->sun_dir) * DG_RAD2DEG, elev_d(env->sun_dir) * DG_RAD2DEG, azim_d(env->sun_dir) * DG_RAD2DEG, (int)env->moon_key, elev_d(s->moon_dir) * DG_RAD2DEG,
             azim_d(s->moon_dir) * DG_RAD2DEG, elev_d(env->fill_dir) * DG_RAD2DEG, azim_d(env->fill_dir) * DG_RAD2DEG, env->sun_intensity, env->fill_intensity,
             env->mie_scale, render_sky_lut_builds(), render_sky_refilters(), env->cloud_offset.x, env->cloud_offset.y, lag[0], lag[1], lag[2], lag[3], (int)held[0],
-            (int)held[1], (int)held[2], (int)held[3], (unsigned)in->version, in->clock_corr, in->clock_snaps, in->rate);
+            (int)held[1], (int)held[2], (int)held[3], (unsigned)in->version, in->clock_corr, in->clock_snaps, in->rate, texel[0], texel[1], texel[2], texel[3], in->clock_target);
     if (--TP.left <= 0) {
         fclose(TP.f);
         TP.f = NULL;
@@ -328,7 +351,7 @@ bool tod_probe_command(int argc, const char **argv) {
         TP.left = atoi(argv[2]);
         if (!TP.f) { log_info("tod_test trace: cannot open %s", argv[3]); return true; }
         fprintf(TP.f, "frame,dt,auth,tick,sec,hours,sun_e,sun_a,key_e,key_a,key_moon,moon_e,moon_a,fill_e,fill_a,key_i,fill_i,mie,luts,refilters,cloud_x,cloud_y,"
-                      "lag0,lag1,lag2,lag3,held0,held1,held2,held3,ver,clock_corr,clock_snaps,rate\n");
+                      "lag0,lag1,lag2,lag3,held0,held1,held2,held3,ver,clock_corr,clock_snaps,rate,tex0,tex1,tex2,tex3,target\n");
         log_info("tod_test trace: %d frames -> %s", TP.left, argv[3]);
         return true;
     }
