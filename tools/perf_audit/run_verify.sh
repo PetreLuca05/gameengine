@@ -15,9 +15,12 @@ BIN="$ROOT/${DG_BUILD:-build}/bin"
 EXE=${DG_EXE:-$( [ -x "$BIN/deadground.exe" ] && echo ./deadground.exe || echo ./deadground )}
 OUT=${PERF_OUT:-$ROOT/${DG_BUILD:-build}/perf_out/verify}
 SETTLE=${PERF_SETTLE:-120}
+PORTARG=; [ -n "$DG_PORT" ] && PORTARG="+set net_port $DG_PORT"
+# Git Bash: the game reads the console line, not the shell's /c/... spelling.
+command -v cygpath > /dev/null 2>&1 && OUT=$(cygpath -m "$OUT")
 mkdir -p "$OUT/$FIX"
 cd "$BIN"
 printf 'perf_verify %s %s %s %s reps=%s settle=%s quit\n' "$FIX" "$SCENES" "$FRAMES" "$OUT" "$REPS" "$SETTLE" > "$OUT/$FIX/verify.cfg"
 echo "perf_verify $FIX: $SCENES, $FRAMES frames, $REPS x A/B -> $OUT/$FIX"
-$DG_DISPLAY_WRAP $EXE --test --nosound --log "$OUT/$FIX/verify.log" --script "$OUT/$FIX/verify.cfg" > /dev/null 2>&1 || echo "perf_verify: the game exited with $?"
+$DG_DISPLAY_WRAP $EXE --test --nosound --log "$OUT/$FIX/verify.log" $PORTARG --script "$OUT/$FIX/verify.cfg" > /dev/null 2>&1 || echo "perf_verify: the game exited with $?"
 "$PY" "$ROOT/tools/perf_audit/perf_audit.py" verify "$OUT/$FIX" --update ${PERF_TARGET:+--target}
