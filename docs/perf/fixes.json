@@ -1675,6 +1675,594 @@
    "machine": "DESKTOP-SN4N74U"
   }
  },
+ "PF-0026": {
+  "title": "Sky passes skipped while their inputs are unchanged",
+  "rule": "R02",
+  "finding": "R02 'sky_view' / 'sky_cshadow' / 'sky_clouds' recomputed with unchanged inputs (F-c4fd8c, F-a7f6ca, F-b0d253): the sky view LUT, the aerial perspective froxels, the cloud map, the cloud shadow map and the environment refilter ran every frame (the cloud map every other frame) with the clock and the weather frozen",
+  "effort": "M",
+  "status": "closed",
+  "code": [
+   "src/render/sky/sky.c sky_build (SkyKey / SkyCache, cache_stale), exec_view / exec_clouds / exec_cshadow / exec_env",
+   "src/render/post/post_core.c post_create_pipelines (P.pipe_gen)",
+   "assets/perf/scenes.json sky_static, \"reset\" (src/game/game_perf.c: lines run before every scene's setup)"
+  ],
+  "description": "Every cached sky pass keeps a key: the exact bits of each SkyParams / PostUBO field its shader reads (the sky view: the sun / moon vectors, the camera altitude, the aerosols; the aerial perspective: those + its range / scale and the camera rays; the cloud map: the lights, the layer, the camera position; the cloud shadow: its snapped region, the key light, the layer; the environment rows: the lights, the night floor, the ground albedo, the camera altitude), the versions of the images it samples (bumped by every run of the pass writing them) and the pipeline generation (shader hot reload). A pass whose key equals its last run's records nothing; its image keeps that run's texels. Without cloud cover the cloud map and the cloud shadow drop the drift, the camera and the layer from their keys (cloud_density returns 0 first). An environment quarter is re-rendered only when its key changed since that quarter was last written, the mips + SH projection of a cycle only when a quarter changed; the easing runs every frame. The pass nodes stay (empty), so their scopes compare. The keys are the exact bits (nothing is quantized for a hit): while the clock runs the sun moves every frame and everything misses; the cloud layer drifts with the wind even with the weather locked (cloud_wind_min), so with clouds the cloud map, the cloud shadow and the environment rows run every frame. Measured serially (r_async_compute 0, RTX 3060 Ti): sky_view 0.031 -> 0.025 ms where the camera altitude stands still (the aerial perspective, jittered under TAA, runs), the four sky passes 0.086 -> 0.057 ms with a still camera and no cloud layer (sky_static): small, the sky was already cheap.",
+  "neutral": "A skipped dispatch would compute the same function of the same input bits (the key lists every uniform the shader and the sky_common.glsl functions it calls read; every sampled image is the same version, i.e. the same texels, since nothing else writes these persistent images): its image already holds those texels. With no cover the shaders' outputs (0, and the same transmittance for every texel) do not depend on the dropped fields. The easing (env_blend) and every other pass run unchanged, in the same order. perf_fix_disable PF-0026 runs every pass every frame; the keys are kept in both paths.",
+  "metrics": [
+   "scope:sky_view",
+   "scopec:sky_view:dispatches",
+   "scope:sky_clouds",
+   "scope:sky_cshadow",
+   "scope:sky_env",
+   "scopec:sky_env:dispatches",
+   "gpu_frame"
+  ],
+  "scenes": [
+   "sky_static",
+   "devroom",
+   "veg_meadow"
+  ],
+  "verification": {
+   "runs": [
+    {
+     "date": "2026-10-18",
+     "machine": "DESKTOP-SN4N74U",
+     "summary": "CLOSED: scope:sky_view 0.03686 -> 0.02662 (-27.78%, p=0); images pass; state identical",
+     "closed": true,
+     "timing": [
+      {
+       "metric": "scope:sky_view",
+       "a_median": 0.03686,
+       "b_median": 0.02662,
+       "a_mean": 0.0631,
+       "b_mean": 0.05506,
+       "delta": -0.01024,
+       "delta_pct": -27.78,
+       "p_value": 0.0,
+       "samples": [
+        1428,
+        1428
+       ],
+       "improved": true
+      },
+      {
+       "metric": "scopec:sky_view:dispatches",
+       "a_median": 2.0,
+       "b_median": 1.0,
+       "a_mean": 1.98333,
+       "b_mean": 1.32083,
+       "delta": -1.0,
+       "delta_pct": -50.0,
+       "p_value": 0.0,
+       "samples": [
+        1440,
+        1440
+       ],
+       "improved": true
+      },
+      {
+       "metric": "scope:sky_clouds",
+       "a_median": 0.03789,
+       "b_median": 0.03789,
+       "a_mean": 0.07925,
+       "b_mean": 0.05864,
+       "delta": 0.0,
+       "delta_pct": 0.0,
+       "p_value": 0.0,
+       "samples": [
+        714,
+        714
+       ],
+       "improved": false
+      },
+      {
+       "metric": "scope:sky_cshadow",
+       "a_median": 0.01331,
+       "b_median": 0.01331,
+       "a_mean": 0.02887,
+       "b_mean": 0.01921,
+       "delta": 0.0,
+       "delta_pct": 0.0,
+       "p_value": 0.0,
+       "samples": [
+        1428,
+        1428
+       ],
+       "improved": false
+      },
+      {
+       "metric": "scope:sky_env",
+       "a_median": 0.02355,
+       "b_median": 0.01741,
+       "a_mean": 0.07574,
+       "b_mean": 0.06867,
+       "delta": -0.00614,
+       "delta_pct": -26.07,
+       "p_value": 0.0,
+       "samples": [
+        1428,
+        1428
+       ],
+       "improved": true
+      },
+      {
+       "metric": "scopec:sky_env:dispatches",
+       "a_median": 8.0,
+       "b_median": 8.0,
+       "a_mean": 9.40833,
+       "b_mean": 8.58611,
+       "delta": 0.0,
+       "delta_pct": 0.0,
+       "p_value": 0.0,
+       "samples": [
+        1440,
+        1440
+       ],
+       "improved": true
+      },
+      {
+       "metric": "gpu_frame",
+       "a_median": 4.8975,
+       "b_median": 8.871,
+       "a_mean": 6.84661,
+       "b_mean": 9.99643,
+       "delta": 3.9735,
+       "delta_pct": 81.13,
+       "p_value": 1.0,
+       "samples": [
+        1440,
+        1440
+       ],
+       "improved": false
+      }
+     ],
+     "state": "identical",
+     "images_pass": true,
+     "dir": "build/perf_out/final26/PF-0026"
+    },
+    {
+     "date": "2026-10-18",
+     "machine": "DESKTOP-SN4N74U",
+     "summary": "CLOSED: scope:sky_view 0.05427 -> 0.02765 (-49.05%, p=0); images pass; state identical",
+     "closed": true,
+     "timing": [
+      {
+       "metric": "scope:sky_view",
+       "a_median": 0.05427,
+       "b_median": 0.02765,
+       "a_mean": 0.09197,
+       "b_mean": 0.05334,
+       "delta": -0.02662,
+       "delta_pct": -49.05,
+       "p_value": 0.0,
+       "samples": [
+        1428,
+        1428
+       ],
+       "improved": true
+      },
+      {
+       "metric": "scopec:sky_view:dispatches",
+       "a_median": 2.0,
+       "b_median": 1.0,
+       "a_mean": 1.98333,
+       "b_mean": 1.32083,
+       "delta": -1.0,
+       "delta_pct": -50.0,
+       "p_value": 0.0,
+       "samples": [
+        1440,
+        1440
+       ],
+       "improved": true
+      },
+      {
+       "metric": "scope:sky_clouds",
+       "a_median": 0.06656,
+       "b_median": 0.04608,
+       "a_mean": 0.33272,
+       "b_mean": 0.32513,
+       "delta": -0.02048,
+       "delta_pct": -30.77,
+       "p_value": 0.0,
+       "samples": [
+        714,
+        714
+       ],
+       "improved": true
+      },
+      {
+       "metric": "scope:sky_cshadow",
+       "a_median": 0.01638,
+       "b_median": 0.01536,
+       "a_mean": 0.11979,
+       "b_mean": 0.06841,
+       "delta": -0.00102,
+       "delta_pct": -6.23,
+       "p_value": 0.0,
+       "samples": [
+        1428,
+        1428
+       ],
+       "improved": true
+      },
+      {
+       "metric": "scope:sky_env",
+       "a_median": 0.02765,
+       "b_median": 0.06144,
+       "a_mean": 0.08084,
+       "b_mean": 0.17847,
+       "delta": 0.03379,
+       "delta_pct": 122.21,
+       "p_value": 1.0,
+       "samples": [
+        1428,
+        1428
+       ],
+       "improved": false
+      },
+      {
+       "metric": "scopec:sky_env:dispatches",
+       "a_median": 8.0,
+       "b_median": 8.0,
+       "a_mean": 9.40833,
+       "b_mean": 8.58611,
+       "delta": 0.0,
+       "delta_pct": 0.0,
+       "p_value": 0.0,
+       "samples": [
+        1440,
+        1440
+       ],
+       "improved": true
+      },
+      {
+       "metric": "gpu_frame",
+       "a_median": 3.922,
+       "b_median": 3.983,
+       "a_mean": 5.78852,
+       "b_mean": 5.7263,
+       "delta": 0.061,
+       "delta_pct": 1.56,
+       "p_value": 0.68365,
+       "samples": [
+        1440,
+        1440
+       ],
+       "improved": false
+      }
+     ],
+     "state": "identical",
+     "images_pass": true,
+     "dir": "build/perf_out/final26b/PF-0026"
+    },
+    {
+     "date": "2026-10-18",
+     "machine": "DESKTOP-SN4N74U",
+     "summary": "CLOSED: scope:sky_view 0.03072 -> 0.02458 (-19.99%, p=0); images pass; state identical",
+     "closed": true,
+     "timing": [
+      {
+       "metric": "scope:sky_view",
+       "a_median": 0.03072,
+       "b_median": 0.02458,
+       "a_mean": 0.03482,
+       "b_mean": 0.03661,
+       "delta": -0.00614,
+       "delta_pct": -19.99,
+       "p_value": 0.0,
+       "samples": [
+        1428,
+        1428
+       ],
+       "improved": true
+      },
+      {
+       "metric": "scopec:sky_view:dispatches",
+       "a_median": 2.0,
+       "b_median": 1.0,
+       "a_mean": 1.98333,
+       "b_mean": 1.32083,
+       "delta": -1.0,
+       "delta_pct": -50.0,
+       "p_value": 0.0,
+       "samples": [
+        1440,
+        1440
+       ],
+       "improved": true
+      },
+      {
+       "metric": "scope:sky_clouds",
+       "a_median": 0.04096,
+       "b_median": 0.04096,
+       "a_mean": 0.04003,
+       "b_mean": 0.03865,
+       "delta": 0.0,
+       "delta_pct": 0.0,
+       "p_value": 3e-05,
+       "samples": [
+        714,
+        714
+       ],
+       "improved": false
+      },
+      {
+       "metric": "scope:sky_cshadow",
+       "a_median": 0.01843,
+       "b_median": 0.01843,
+       "a_mean": 0.02173,
+       "b_mean": 0.01836,
+       "delta": 0.0,
+       "delta_pct": 0.0,
+       "p_value": 0.0,
+       "samples": [
+        1428,
+        1428
+       ],
+       "improved": false
+      },
+      {
+       "metric": "scope:sky_env",
+       "a_median": 0.02458,
+       "b_median": 0.02253,
+       "a_mean": 0.03343,
+       "b_mean": 0.03472,
+       "delta": -0.00205,
+       "delta_pct": -8.34,
+       "p_value": 0.0,
+       "samples": [
+        1428,
+        1428
+       ],
+       "improved": true
+      },
+      {
+       "metric": "scopec:sky_env:dispatches",
+       "a_median": 8.0,
+       "b_median": 8.0,
+       "a_mean": 9.40833,
+       "b_mean": 8.58611,
+       "delta": 0.0,
+       "delta_pct": 0.0,
+       "p_value": 0.0,
+       "samples": [
+        1440,
+        1440
+       ],
+       "improved": true
+      },
+      {
+       "metric": "gpu_frame",
+       "a_median": 8.2405,
+       "b_median": 8.4725,
+       "a_mean": 9.55918,
+       "b_mean": 9.61345,
+       "delta": 0.232,
+       "delta_pct": 2.82,
+       "p_value": 0.73461,
+       "samples": [
+        1440,
+        1440
+       ],
+       "improved": false
+      }
+     ],
+     "state": "identical",
+     "images_pass": true,
+     "dir": "build/perf_out/final26c/PF-0026"
+    }
+   ],
+   "summary": "CLOSED: scope:sky_view 0.03072 -> 0.02458 (-19.99%, p=0); images pass; state identical",
+   "machine": "DESKTOP-SN4N74U"
+  }
+ },
+ "PF-0027": {
+  "title": "Async compute: sky, screen-space and froxel passes on a second queue",
+  "rule": "R07",
+  "finding": "GPU work serialized on one queue: the sky LUT / cloud / environment passes, the screen-space lighting chain (hi-z, contact shadows, GTAO + blur + temporal + upsample, SSR / SSGI) and the froxel injection / integration (compute only) ran in line with the raster-bound shadow maps and the opaque pass, leaving the compute units idle while the shadow pass rasterizes depth",
+  "effort": "L",
+  "status": "closed",
+  "code": [
+   "src/render/graph/fg.c schedule / batch_handoff / pass_barriers (queue state) / fg_exec_begin / fg_exec_until / fg_exec_rest / fg_submit, fg_async / fg_after / fg_marker / fg_stages",
+   "src/render/vk_device.c (compute family + second graphics queue, timeline semaphores, vkd_share_image / vkd_share_buffer)",
+   "src/render/render.c render_end_frame (shadow maps at the graph's \"shadows\" marker, rain occlusion before the graph), build_frame_graph, r_async_compute, r_async_info",
+   "src/render/sky/sky.c, src/render/post/post_screen_space.c, post_volumetrics.c (fg_async, fg_after)",
+   "src/render/vk_prof.c vkp_stream (scopes per queue)"
+  ],
+  "description": "Compute passes marked fg_async (the sky passes; hi-z, contact shadows, the GTAO chain, SSGI, SSR; the froxel injection and integration) run on a compute-only queue family (r_async_compute 1, the default; 2 = a second queue of the graphics family, measured slower on the RTX 3060 Ti: time-sliced, not overlapped). The frame graph assigns every pass a queue and splits each queue's work into batches at the cross-queue dependencies (the previous user of each resource, fg_after for the persistent sky images and the shadow maps; an async pass also waits for the graphics work declared before it): a batch waits on the other queue's timeline value of the batch holding the latest pass it depends on, and that batch signals. With async compute the graph is declared prepass, sky, screen-space chain, the shadow maps (a graphics marker pass render.c records), froxels, opaque: G[pre..prepass] C[sky..ssr_temporal] G[shadows] C[vol_inject..vol_integrate] G[opaque..sky] G[fog_apply..final], so the sky and the screen-space chain overlap the shadow maps and the froxels (which sample the sun shadow map) overlap the opaque pass. Layout transitions an async pass needs are recorded at the end of the graphics batch it waits for (depth never changes layout on the compute queue); what both queues touch is CONCURRENT between the two families (frame graph images, depth, the sun shadow map, the sky images, the post textures, buffers). The rain occlusion map, which the prepass reads for wet surfaces, is drawn before the graph. One vkQueueSubmit2 per queue. With the fix off (perf_fix_disable PF-0027), r_async_compute 0 or no compute family: one batch on the graphics queue, the shadow maps first as before.",
+  "neutral": "The same passes run the same shaders on the same inputs: only the queue and the time they execute change. Every read follows its writer and every write follows the earlier readers (resource ownership by the last user, fg_after for the non-graph images), across the queues through timeline semaphores that also make the writes visible, within a queue through the frame graph's barriers. The prepass reads nothing the shadow maps write (the rain occlusion map it samples is drawn before the graph); the first async batch of a frame follows the previous frame's graphics work (the persistent sky images it rewrites are read there). CONCURRENT sharing and the batch split change no value. Validation (core) reports nothing in every mode.",
+  "metrics": [
+   "gpu_frame",
+   "scope:shadow_sun",
+   "scope:gtao",
+   "scope:opaque",
+   "cpu_work"
+  ],
+  "scenes": [
+   "devroom",
+   "veg_meadow",
+   "veg_forest_pine"
+  ],
+  "verification": {
+   "runs": [
+    {
+     "date": "2026-10-18",
+     "machine": "DESKTOP-SN4N74U",
+     "summary": "CLOSED: gpu_frame 10.4 -> 9.792 (-5.85%, p=0); images pass; state identical",
+     "closed": true,
+     "timing": [
+      {
+       "metric": "gpu_frame",
+       "a_median": 10.4,
+       "b_median": 9.792,
+       "a_mean": 13.30342,
+       "b_mean": 12.11625,
+       "delta": -0.608,
+       "delta_pct": -5.85,
+       "p_value": 0.0,
+       "samples": [
+        2160,
+        2160
+       ],
+       "improved": true
+      },
+      {
+       "metric": "scope:shadow_sun",
+       "a_median": 1.688,
+       "b_median": 1.381,
+       "a_mean": 5.52708,
+       "b_mean": 5.39402,
+       "delta": -0.307,
+       "delta_pct": -18.19,
+       "p_value": 0.46319,
+       "samples": [
+        2142,
+        2142
+       ],
+       "improved": false
+      },
+      {
+       "metric": "scope:gtao",
+       "a_median": 0.2826,
+       "b_median": 0.2847,
+       "a_mean": 0.33387,
+       "b_mean": 1.5251,
+       "delta": 0.0021,
+       "delta_pct": 0.74,
+       "p_value": 1.0,
+       "samples": [
+        2142,
+        2142
+       ],
+       "improved": false
+      },
+      {
+       "metric": "scope:opaque",
+       "a_median": 3.0985,
+       "b_median": 3.1805,
+       "a_mean": 2.85015,
+       "b_mean": 2.70227,
+       "delta": 0.082,
+       "delta_pct": 2.65,
+       "p_value": 0.79827,
+       "samples": [
+        2142,
+        2142
+       ],
+       "improved": false
+      },
+      {
+       "metric": "cpu_work",
+       "a_median": 4.292,
+       "b_median": 4.49365,
+       "a_mean": 5.91706,
+       "b_mean": 5.06962,
+       "delta": 0.20165,
+       "delta_pct": 4.7,
+       "p_value": 0.99999,
+       "samples": [
+        2160,
+        2160
+       ],
+       "improved": false
+      }
+     ],
+     "state": "identical",
+     "images_pass": true,
+     "dir": "build/perf_out/final27/PF-0027"
+    },
+    {
+     "date": "2026-10-18",
+     "machine": "DESKTOP-SN4N74U",
+     "summary": "CLOSED: gpu_frame 10.235 -> 9.8625 (-3.64%, p=0); images pass; state identical",
+     "closed": true,
+     "timing": [
+      {
+       "metric": "gpu_frame",
+       "a_median": 10.235,
+       "b_median": 9.8625,
+       "a_mean": 12.97697,
+       "b_mean": 12.642,
+       "delta": -0.3725,
+       "delta_pct": -3.64,
+       "p_value": 0.0,
+       "samples": [
+        2160,
+        2160
+       ],
+       "improved": true
+      },
+      {
+       "metric": "scope:shadow_sun",
+       "a_median": 1.738,
+       "b_median": 1.343,
+       "a_mean": 5.75171,
+       "b_mean": 5.7837,
+       "delta": -0.395,
+       "delta_pct": -22.73,
+       "p_value": 0.00078,
+       "samples": [
+        2142,
+        2142
+       ],
+       "improved": true
+      },
+      {
+       "metric": "scope:gtao",
+       "a_median": 0.2652,
+       "b_median": 0.2944,
+       "a_mean": 0.32605,
+       "b_mean": 1.69452,
+       "delta": 0.0292,
+       "delta_pct": 11.01,
+       "p_value": 1.0,
+       "samples": [
+        2142,
+        2142
+       ],
+       "improved": false
+      },
+      {
+       "metric": "scope:opaque",
+       "a_median": 3.275,
+       "b_median": 3.2315,
+       "a_mean": 2.62099,
+       "b_mean": 2.68367,
+       "delta": -0.0435,
+       "delta_pct": -1.33,
+       "p_value": 0.89762,
+       "samples": [
+        2142,
+        2142
+       ],
+       "improved": false
+      },
+      {
+       "metric": "cpu_work",
+       "a_median": 4.8479,
+       "b_median": 5.0101,
+       "a_mean": 5.38389,
+       "b_mean": 5.47374,
+       "delta": 0.1622,
+       "delta_pct": 3.35,
+       "p_value": 1.0,
+       "samples": [
+        2160,
+        2160
+       ],
+       "improved": false
+      }
+     ],
+     "state": "identical",
+     "images_pass": true,
+     "dir": "build/perf_out/final27b/PF-0027"
+    }
+   ],
+   "summary": "CLOSED: gpu_frame 10.235 -> 9.8625 (-3.64%, p=0); images pass; state identical",
+   "machine": "DESKTOP-SN4N74U"
+  }
+ },
  "PF-0028": {
   "title": "Far sun cascades re-rendered every other frame, in turn",
   "rule": "R02",

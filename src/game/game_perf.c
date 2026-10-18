@@ -55,6 +55,8 @@ static struct {
     bool loaded;
     PerfScene scenes[PERF_MAX_SCENES];
     int scene_count, settle, settle_default, shots;
+    char reset[PERF_MAX_SETUP][96];   // scenes.json "reset": console lines before every scene's setup
+    int reset_count;
     // the run
     bool active, verify, refs, quit;
     PerfStep plan[PERF_MAX_PLAN];
@@ -85,6 +87,8 @@ static bool load_scenes(void) {
     if (!root) { log_error("perf: assets/perf/scenes.json missing or invalid"); return false; }
     PF.settle_default = cJSON_GetObjectItem(root, "settle_frames") ? cJSON_GetObjectItem(root, "settle_frames")->valueint : 120;
     PF.shots = cJSON_GetObjectItem(root, "shots") ? DG_CLAMP(cJSON_GetObjectItem(root, "shots")->valueint, 0, PERF_MAX_SHOTS) : 3;
+    cJSON *rl;
+    cJSON_ArrayForEach(rl, cJSON_GetObjectItem(root, "reset")) if (cJSON_IsString(rl) && PF.reset_count < PERF_MAX_SETUP) dg_strcpy(PF.reset[PF.reset_count++], 96, rl->valuestring);
     cJSON *sc;
     cJSON_ArrayForEach(sc, cJSON_GetObjectItem(root, "scenes")) {
         if (PF.scene_count >= PERF_MAX_SCENES) break;
@@ -324,6 +328,7 @@ void game_perf_frame(void) {
         char line[128];
         snprintf(line, sizeof(line), "map %s", s->map);
         cmd_execute_line(line);   // loads now (game_host)
+        for (int i = 0; i < PF.reset_count; i++) cmd_execute_line(PF.reset[i]);   // what an earlier scene's setup may have changed
         for (int i = 0; i < s->setup_count; i++) cmd_execute_line(s->setup[i]);
         Player *p = game_local_player();
         PF.center = p ? p->sim.move.pos : v3(0, 0, 0);

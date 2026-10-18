@@ -6,7 +6,18 @@
 //   FgRes i = fg_import(...)                     externally owned image (HDR, depth, swapchain)
 //   int p = fg_pass("ssr", exec, user)           pass (skipped when disabled: r_post_disable)
 //   fg_read(p, r, FG_SAMPLED) / fg_write(p, r, FG_STORAGE) ...
-//   fg_execute(cmd)                              allocate, barrier, time and run every pass in order
+//   cmd = fg_exec_begin(cmd)                     allocate, schedule (the work recorded so far is the "pre" batch)
+//   cmd = fg_exec_until(marker) ... fg_exec_rest()   barrier, time and run every pass in order (the caller
+//                                                records a marker pass's work in between)
+//   fg_submit(...)                               end and submit every batch of both queues
+//
+// Async compute (PF-0027, docs/RENDERING_POST.md "Async compute", r_async_compute): compute passes
+// marked fg_async run on a second queue (a compute-only family or a second graphics queue). Every
+// cross-queue dependency (a resource used on both queues, fg_after; an async pass also follows the
+// graphics passes declared before it) splits the queues' work into batches ordered by timeline
+// semaphores; layout transitions for the async queue are recorded at the end of the graphics batch
+// it waits for. The declared order stays the serial order: with the fix off (perf_fix_disable
+// PF-0027) or no second queue everything runs on the graphics queue as before.
 //
 // Transient textures with the same description share physical images when their lifetimes (first
 // to last use pass) don't overlap. Every pass gets GPU timestamps (fg_pass_ms) and resources can
@@ -61,7 +72,27 @@ void fg_write(int pass, FgRes r, FgAccess a);
 // A binding that is not read by this pass (bound early, written / read later): keeps the image alive
 // and in state like fg_read, ignored by the frame graph validation (fg_check).
 void fg_reference(int pass, FgRes r, FgAccess a);
-void fg_execute(VkCommandBuffer cmd);
+// Async compute (PF-0027): a compute-only pass (push descriptors, dispatches, compute barriers through
+// fg_stages) that may run on the async queue.
+void fg_async(int pass);
+// `pass` needs `dep` (declared earlier) complete without sharing a frame graph resource (persistent
+// images, the shadow maps): orders them across the queues.
+void fg_after(int pass, int dep);
+// A graphics pass whose work the caller records between fg_exec_until and fg_exec_rest (the shadow
+// maps); never disabled.
+int fg_marker(const char *name);
+int fg_find_pass(const char *name);   // this frame's pass by name, -1 if none
+bool fg_async_frame(void);            // this frame runs async passes on the second queue (fg_begin decides)
+void fg_async_info(void);             // logs the last frame's queue batches (r_async_info)
+// Stage masks for barriers recorded by a pass's exec: limited to what the queue running it supports.
+VkPipelineStageFlags2 fg_stages(VkPipelineStageFlags2 stages);
+VkCommandBuffer fg_exec_begin(VkCommandBuffer cmd);
+VkCommandBuffer fg_exec_until(int marker);
+VkCommandBuffer fg_exec_rest(void);
+// Ends every command buffer of the frame and submits the batches (one submit per queue, in order).
+// The last graphics batch also waits `wait` (binary, at wait_stage), signals `signal` (binary) and
+// `fence`.
+void fg_submit(VkSemaphore wait, VkPipelineStageFlags2 wait_stage, VkSemaphore signal, VkFence fence);
 
 // Inside exec callbacks (and after fg_execute for debug views).
 VkImageView fg_view(FgRes r);

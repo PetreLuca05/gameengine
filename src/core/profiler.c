@@ -75,7 +75,7 @@ static const char *k_counter_names[PC_COUNT] = {
     "audio_voices_silent", "ui_text", "ui_verts", "draw_items", "shadow_items", "anim_eval_outside", "anim_pose_shared", "anim_pose_samples",
 };
 static const char *k_fix_ids[PFX_COUNT] = { "PF-0001", "PF-0002", "PF-0005", "PF-0006", "PF-0007", "PF-0009", "PF-0010", "PF-0011", "PF-0012", "PF-0014", "PF-0015",
-                                             "PF-0024", "PF-0020", "PF-0021", "PF-0013", "PF-0016", "PF-0029", "PF-0028", "PF-0035", "PF-0033", "PF-0034" };
+                                             "PF-0024", "PF-0020", "PF-0021", "PF-0026", "PF-0027", "PF-0013", "PF-0016", "PF-0029", "PF-0028", "PF-0035", "PF-0033", "PF-0034" };
 
 static struct {
     bool init;

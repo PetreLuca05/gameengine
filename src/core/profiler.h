@@ -68,6 +68,8 @@ typedef enum ProfFix {
     PFX_TEX_DECODE_JOBS,      // PF-0024: texture files decoded on the jobs at load (the same pixels)
     PFX_SKIN_PALETTE_DIRECT,  // PF-0020: skinning palettes written straight into the mapped GPU ring
     PFX_CHAR_POSE_JOBS,       // PF-0021: character draw poses and palettes on the job system
+    PFX_SKY_CACHE,            // PF-0026: sky passes skipped while their inputs are unchanged (sky.c)
+    PFX_ASYNC_COMPUTE,        // PF-0027: sky / GTAO / volumetrics on the async compute queue (fg.c, r_async_compute)
     // Visual trade-offs (not fidelity neutral: perf_verify measures them, the images differ by design):
     // perf_fix_disable "all" leaves them on, only their own id turns them off.
     PFX_SHADOW_CASTER_LIMIT,  // PF-0013: grass / small plant shadows in the near cascades only (r_shadow_caster_limit)

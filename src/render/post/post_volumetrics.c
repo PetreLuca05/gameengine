@@ -61,9 +61,13 @@ void post_vol_build(void) {
     FgTexDesc id = { "froxel", VK_FORMAT_R16G16B16A16_SFLOAT, FG_SIZE_ABS, V.w, V.h, V.d, 1, 0 };
     V.integrated = fg_texture(&id);
     int p = fg_pass("vol_inject", exec_inject, NULL);
+    // Async compute (PF-0027): after the sun shadow map (the shafts sample it), overlapping the opaque pass.
+    fg_async(p);
+    fg_after(p, fg_find_pass("shadows"));
     fg_read(p, V.hist_in, FG_SAMPLED);
     fg_write(p, V.hist_out, FG_STORAGE);
     int i = fg_pass("vol_integrate", exec_integrate, NULL);
+    fg_async(i);
     fg_read(i, V.hist_out, FG_SAMPLED);
     fg_write(i, V.integrated, FG_STORAGE);
     if (p >= 0 && i >= 0) P.froxels = V.integrated;
@@ -121,6 +125,7 @@ void post_sky(void) {
     if (!P.ok || (!P.in.sky_on && !sky_active())) return;
     g_sky_main = (SkyTarget){ P.in.hdr, P.in.depth, P.in.inv_view_proj, P.in.cam_pos };
     int p = fg_pass("sky", exec_sky, &g_sky_main);
+    fg_after(p, sky_last_pass());   // the sky images (async compute queue: PF-0027)
     fg_read(p, P.in.depth, FG_SAMPLED);
     fg_write(p, P.in.hdr, FG_STORAGE);
 }
@@ -188,6 +193,7 @@ void post_fog_apply(void) {
     *t = (FogTarget){ P.in.hdr, P.in.depth, P.in.inv_view_proj, P.in.cam_pos, P.froxels != FG_NONE, sky_active(), analytic_fog(), false };
     if (!t->vol && !t->ap && !t->analytic) return;
     int p = fg_pass("fog_apply", exec_fog_apply, t);
+    fg_after(p, sky_last_pass());   // the aerial perspective froxels
     if (t->vol) fg_read(p, P.froxels, FG_SAMPLED);
     fg_read(p, P.in.depth, FG_SAMPLED);
     fg_write(p, P.in.hdr, FG_STORAGE);

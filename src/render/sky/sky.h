@@ -19,6 +19,7 @@ bool sky_init(void);
 void sky_shutdown(void);
 bool sky_active(void);                       // atmosphere on this frame
 void sky_build(void);                        // frame graph passes, after post_begin_frame (before the prepass)
+int sky_last_pass(void);                     // this frame's last sky pass (-1 none): the passes reading the sky images follow it (fg_after)
 // The sky into a colour target where depth = 1 (main view or the scope PiP).
 void sky_render_exec(VkCommandBuffer cmd, FgRes color, FgRes depth, mat4 inv_vp, vec3 cam, bool pip);
 void sky_bind_aerial(struct PostBind *b, u32 binding);

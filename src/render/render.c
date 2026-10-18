@@ -1,5 +1,6 @@
-// Frame orchestration: particle compute -> shadow pass -> frame graph (G-buffer prepass,
-// screen-space lighting, lit scene, fog, transparency, viewmodel, post stack, final + UI) -> present.
+// Frame orchestration: particle compute, foliage wind, rain occlusion -> frame graph (shadow maps at
+// its "shadows" marker, G-buffer prepass, screen-space lighting, lit scene, fog, transparency,
+// viewmodel, post stack, final + UI; async compute passes on a second queue, PF-0027) -> present.
 #include "render/phone_view.h"
 #include "render/shadow_csm.h"
 #include "vk_internal.h"
@@ -42,6 +43,12 @@ static bool g_ui_hidden;   // perf_audit reference captures: the 3D image alone
 void render_set_ui_hidden(bool hidden) { g_ui_hidden = hidden; }
 u32 render_frame_index(void) { return R ? (u32)R->frame_index : 0; }
 static size_t obj_slot_size(void);
+
+static void cmd_async_info(int argc, const char **argv) {
+    (void)argc;
+    (void)argv;
+    fg_async_info();
+}
 
 void render_register_cvars(void) {
     Renderer *r = R;
@@ -93,6 +100,10 @@ void render_register_cvars(void) {
                                             "sun cascades 2 and 3 (of 4) re-rendered every N frames, alternating (the others keep last frame's tile): 1 every frame, 2 each far cascade every other frame (PF-0028)");
     r->r_shadow_caster_limit = cvar_reg_int("r_shadow_caster_limit", 1, 0, 2, CVAR_TIER,
                                             "sun cascades: grass / ground cover and small plants cast into the near cascade(s) only, trees into all (assets/render/shadow_casters.json): 0 off, 1 High / Modern, 2 Off .. Medium (cascade 0 + distance caps)");
+    r->r_async_compute = cvar_reg_int("r_async_compute", 1, 0, 2, CVAR_LOCKED,
+                                      "async compute (PF-0027): the sky, screen-space (hi-z, contact, GTAO, SSR / SSGI) and froxel passes on a second queue, "
+                                      "overlapping the shadow maps: 0 off, 1 the compute-only queue family (off without one), 2 a second graphics queue (slower on NVIDIA)");
+    cmd_register("r_async_info", cmd_async_info, "log the last frame's queue batches (async compute, PF-0027: G graphics / C async queue, + signals)");
     r->r_vsync->on_change = on_render_cvar_changed;
 }
 
@@ -1793,6 +1804,7 @@ static struct {
     bool any_skin_vm;
     VkDeviceSize line_off[2], text_off, ui_voff, ui_ioff;
     FgRes hdr, depth, vm_depth, normal, material, velocity, swap, scene_copy, ldr;
+    int shadows;            // the shadow maps' marker pass (render_end_frame records them there)
     PostLitInputs lit;
     // Scope picture-in-picture (RSIGHT_SCOPE_PIP while aiming)
     FgRes pip_color, pip_depth;
@@ -2406,6 +2418,13 @@ static void build_frame_graph(FrameData *fd) {
         F.velocity = fg_texture(&gd);
     }
 
+    // The sun / moon / viewmodel / local light shadow maps (recorded at this marker by render_end_frame):
+    // first, as before, or after the prepass when this frame runs async compute (PF-0027), so the
+    // screen-space passes overlap them on the async queue. Nothing the prepass reads comes from them
+    // (the rain occlusion map, which wet surfaces read, is drawn before the graph).
+    bool async_order = fg_async_frame();
+    F.shadows = async_order ? -1 : fg_marker("shadows");
+
     PostFrameIn in;
     memset(&in, 0, sizeof(in));
     in.hdr = F.hdr;
@@ -2450,21 +2469,27 @@ static void build_frame_graph(FrameData *fd) {
     in.ads = R->fx_ads;
     in.ads_focus_dist = R->fx_ads_focus;
     post_begin_frame(&in);
-    sky_build();   // atmosphere LUTs, sky view, aerial perspective, cloud shadow, environment refilter
+    if (!async_order) sky_build();   // atmosphere LUTs, sky view, aerial perspective, cloud shadow, environment refilter
 
     int p = fg_pass("prepass", exec_prepass, NULL);
     fg_write(p, F.depth, FG_DEPTH);
     fg_write(p, F.normal, FG_COLOR);
     fg_write(p, F.material, FG_COLOR);
     fg_write(p, F.velocity, FG_COLOR);
+    // Async compute: an async pass starts after the graphics work declared before it, so the sky and
+    // the screen-space chain (one batch after the prepass) overlap the shadow maps declared next.
+    if (async_order) sky_build();
 
     post_screen_space(&F.lit);
+    if (async_order) F.shadows = fg_marker("shadows");
+    post_volumetrics();   // after the marker (the shafts sample the sun shadow map)
     const PostSettings *ps = post_settings();
     fd->post_flags = v4(F.lit.ao_on ? 1.0f : 0.0f, F.lit.contact_on ? 1.0f : 0.0f, F.lit.ssr_on ? 1.0f : 0.0f, F.lit.ssgi_on ? 1.0f : 0.0f);
     // z: AO intensity as the lit pass' lerp weight (above 1 the GTAO power strengthens it instead, gtao.comp)
     fd->post_params = v4(ps->ssr_intensity, ps->ssgi_intensity, fminf(ps->ao_intensity, 1.0f), 1.0f);
 
     p = fg_pass("opaque", exec_opaque, NULL);
+    fg_after(p, sky_last_pass());   // the environment / SH / cloud shadow (async queue: PF-0027)
     fg_write(p, F.hdr, FG_COLOR);
     fg_write(p, F.depth, FG_DEPTH);
     if (F.lit.ao_on) fg_read(p, F.lit.ao, FG_SAMPLED);
@@ -2478,6 +2503,7 @@ static void build_frame_graph(FrameData *fd) {
     fg_read(p, F.depth, FG_DEPTH_READ);
 
     p = fg_pass("opaque_dynamic", exec_opaque_dynamic, NULL);
+    fg_after(p, sky_last_pass());
     fg_write(p, F.hdr, FG_COLOR);
     fg_write(p, F.depth, FG_DEPTH);
     if (F.lit.ao_on) fg_read(p, F.lit.ao, FG_SAMPLED);
@@ -2502,6 +2528,7 @@ static void build_frame_graph(FrameData *fd) {
     }
 
     p = fg_pass("transparent", exec_transparent, NULL);
+    fg_after(p, sky_last_pass());
     fg_write(p, F.hdr, FG_COLOR);
     fg_read(p, F.depth, FG_DEPTH_READ);
     fg_read(p, F.scene_copy, FG_SAMPLED);
@@ -2610,6 +2637,49 @@ static void draw_sun_casters(VkCommandBuffer cmd, FrameResources *f, int k, cons
     }
 }
 
+// The rain occlusion map (weather): static + dynamic opaque draws from straight above, depth only
+// (cascade 3 of the shadow shaders = frame.occl_vp). Re-rendered when the weather asks (the player
+// moved / periodically). Before the frame graph: the G-buffer prepass reads it (wet surfaces).
+static void record_rain_occlusion(VkCommandBuffer cmd, FrameResources *f) {
+    if (!R->occl_valid && R->occl.image && R->occl.layout == VK_IMAGE_LAYOUT_UNDEFINED) {
+        vkr_image_barrier(cmd, R->occl.image, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                          VK_PIPELINE_STAGE_2_NONE, 0, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT,
+                          VK_ACCESS_2_SHADER_SAMPLED_READ_BIT, 1);
+        R->occl.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    }
+    if (R->weather.occlusion_update && R->occl.image && R->weather.occlusion_extent > 1.0f) {
+        vkr_image_barrier(cmd, R->occl.image, VK_IMAGE_ASPECT_DEPTH_BIT, R->occl.layout, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+                          VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
+                          VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT, VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, 1);
+        VkRenderingAttachmentInfo da = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
+        da.imageView = R->occl.view;
+        da.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+        da.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        da.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        da.clearValue.depthStencil.depth = 1.0f;
+        VkRenderingInfo ri = { VK_STRUCTURE_TYPE_RENDERING_INFO };
+        ri.renderArea.extent.width = R->occl.w;
+        ri.renderArea.extent.height = R->occl.h;
+        ri.layerCount = 1;
+        ri.pDepthAttachment = &da;
+        vkCmdBeginRendering(cmd, &ri);
+        set_viewport(cmd, R->occl.w, R->occl.h);
+        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_SHADOW]);
+        vkCmdSetDepthBias(cmd, 0.0f, 0.0f, 0.0f);
+        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 0, 1, &f->frame_set, 0, NULL);
+        g_shadow_cascade = SHADOW_PASS_OCCL;
+        draw_items(cmd, R->draws, R->draw_count, true, false, 0, PIPE_SHADOW);
+        g_shadow_cascade = 0;
+        vkCmdEndRendering(cmd);
+        vkr_image_barrier(cmd, R->occl.image, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                          VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT, VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
+                          VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                          VK_ACCESS_2_SHADER_SAMPLED_READ_BIT, 1);
+        R->occl.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+        R->occl_valid = true;
+    }
+}
+
 void render_end_frame(void) {
     if (!R->frame_active) return;
     write_cookie_binding();
@@ -2708,10 +2778,25 @@ void render_end_frame(void) {
     vkx_begin_frame_queries(cmd);
     vkx_record_compute(cmd);
 
-    // ---------------------------------------------------------- shadow pass
-    R->shadow_drawn = 0;
+    // ---------------------------------------------------------- foliage wind, rain occlusion
     vkp_scope_begin(cmd, "foliage_wind");
     vkg_record_foliage(cmd);   // foliage wind, displacement buffer (the classic renderer's WPO inputs)
+    vkp_scope_begin(cmd, "rain_occlusion");
+    record_rain_occlusion(cmd, f);
+    vkp_scope_end(cmd);
+    PROF_END();
+
+    // ---------------------------------------------------------- frame graph: shadows, scene, post, UI
+    // Declared first; the shadow maps are recorded at its "shadows" marker on the graphics queue, the
+    // async passes into the async queue's batches (fg.c, PF-0027). Everything above is the pre batch.
+    PROF_BEGIN("render:frame_graph");
+    build_frame_graph(fd);
+    cmd = fg_exec_begin(cmd);
+    cmd = fg_exec_until(F.shadows);
+    PROF_BEGIN("render:shadows");
+
+    // ---------------------------------------------------------- shadow pass
+    R->shadow_drawn = 0;
     vkp_scope_begin(cmd, "shadow_sun");
     bool skip_clear = shadow_clear_skip(0, R->shadow.image, R->shadow_active[0] || R->shadow_active[1] || R->shadow_active[2] || R->shadow_active[3]);
     // PF-0028: tiles kept from an earlier frame (an active cascade not re-rendered) keep the atlas contents:
@@ -2881,55 +2966,8 @@ void render_end_frame(void) {
     // ---------------------------------------------------------- point / spot light shadows
     vkp_scope_begin(cmd, "light_shadows");
     vkls_record(cmd, f);
-    vkp_scope_begin(cmd, "rain_occlusion");
-
-    // ---------------------------------------------------------- rain occlusion map (weather)
-    // Static + dynamic opaque draws from straight above, depth only (cascade 3 of the shadow
-    // shaders = frame.occl_vp). Re-rendered when the weather asks (the player moved / periodically).
-    if (!R->occl_valid && R->occl.image && R->occl.layout == VK_IMAGE_LAYOUT_UNDEFINED) {
-        vkr_image_barrier(cmd, R->occl.image, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                          VK_PIPELINE_STAGE_2_NONE, 0, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT,
-                          VK_ACCESS_2_SHADER_SAMPLED_READ_BIT, 1);
-        R->occl.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-    }
-    if (R->weather.occlusion_update && R->occl.image && R->weather.occlusion_extent > 1.0f) {
-        vkr_image_barrier(cmd, R->occl.image, VK_IMAGE_ASPECT_DEPTH_BIT, R->occl.layout, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-                          VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT,
-                          VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT, VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, 1);
-        VkRenderingAttachmentInfo da = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
-        da.imageView = R->occl.view;
-        da.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
-        da.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-        da.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-        da.clearValue.depthStencil.depth = 1.0f;
-        VkRenderingInfo ri = { VK_STRUCTURE_TYPE_RENDERING_INFO };
-        ri.renderArea.extent.width = R->occl.w;
-        ri.renderArea.extent.height = R->occl.h;
-        ri.layerCount = 1;
-        ri.pDepthAttachment = &da;
-        vkCmdBeginRendering(cmd, &ri);
-        set_viewport(cmd, R->occl.w, R->occl.h);
-        vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_SHADOW]);
-        vkCmdSetDepthBias(cmd, 0.0f, 0.0f, 0.0f);
-        vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 0, 1, &f->frame_set, 0, NULL);
-        g_shadow_cascade = SHADOW_PASS_OCCL;
-        draw_items(cmd, R->draws, R->draw_count, true, false, 0, PIPE_SHADOW);
-        g_shadow_cascade = 0;
-        vkCmdEndRendering(cmd);
-        vkr_image_barrier(cmd, R->occl.image, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                          VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT, VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT,
-                          VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                          VK_ACCESS_2_SHADER_SAMPLED_READ_BIT, 1);
-        R->occl.layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        R->occl_valid = true;
-    }
-
-    // ---------------------------------------------------------- frame graph: scene + post + UI
-    vkp_scope_end(cmd);
     PROF_END();
-    PROF_BEGIN("render:frame_graph");
-    build_frame_graph(fd);
-    fg_execute(cmd);
+    cmd = fg_exec_rest();
     PROF_END();
     vkp_scope_begin(cmd, "post_graph");
 
@@ -2971,24 +3009,9 @@ void render_end_frame(void) {
         vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, g_frame_qp, slot * 2 + 1);
         g_frame_qp_written[slot] = true;
     }
-    VK_CHECK(vkEndCommandBuffer(cmd));
-
-    VkSemaphoreSubmitInfo wait = { VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO };
-    wait.semaphore = f->image_available;
-    wait.stageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
-    VkSemaphoreSubmitInfo signal = { VK_STRUCTURE_TYPE_SEMAPHORE_SUBMIT_INFO };
-    signal.semaphore = R->render_done[R->image_index];
-    signal.stageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
-    VkCommandBufferSubmitInfo cbi = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO };
-    cbi.commandBuffer = cmd;
-    VkSubmitInfo2 si = { VK_STRUCTURE_TYPE_SUBMIT_INFO_2 };
-    si.waitSemaphoreInfoCount = 1;
-    si.pWaitSemaphoreInfos = &wait;
-    si.commandBufferInfoCount = 1;
-    si.pCommandBufferInfos = &cbi;
-    si.signalSemaphoreInfoCount = 1;
-    si.pSignalSemaphoreInfos = &signal;
-    VK_CHECK(vkQueueSubmit2(R->queue, 1, &si, f->fence));
+    // Every batch of both queues (one graphics batch without async compute); the last graphics batch
+    // waits for the swapchain image, signals the present and the slot's fence.
+    fg_submit(f->image_available, VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT, R->render_done[R->image_index], f->fence);
 
     VkPresentInfoKHR pi = { VK_STRUCTURE_TYPE_PRESENT_INFO_KHR };
     pi.waitSemaphoreCount = 1;

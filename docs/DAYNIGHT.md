@@ -53,11 +53,38 @@ g 0.8), ozone. The aerosol density varies with weather and dawn mist (`mie_scale
 |---|---|---|
 | Transmittance | 256 × 64 | Only when the aerosols change |
 | Multiple scattering | 32 × 32 | Only when the aerosols change |
-| Sky view | 192 × 108 | Every frame; absolute azimuth, so the sun and the moon share it |
-| Aerial perspective froxels | 32 × 32 × 32, quadratic slices up to `sky_aerial_max` m | Every frame; `sky_aerial_scale` exaggerates the distance (2 by default) |
+| Sky view | 192 × 108 | Every frame whose inputs changed (below); absolute azimuth, so the sun and the moon share it |
+| Aerial perspective froxels | 32 × 32 × 32, quadratic slices up to `sky_aerial_max` m | Every frame whose inputs changed; `sky_aerial_scale` exaggerates the distance (2 by default) |
 
 The aerial perspective is applied to geometry in `fog_apply`, together with the volumetric fog
 froxels.
+
+### Cached passes (PF-0026)
+
+Every sky pass keeps a key: the exact bits of each `SkyParams` / `PostUBO` field its shader reads,
+the versions of the images it samples and the pipeline generation (shader hot reload). A pass whose
+key equals its last run's records no dispatch and its image keeps those texels (bit-identical by
+construction); the pass node stays, empty. `perf_fix_disable PF-0026` runs everything every frame.
+
+| Pass | Key |
+|---|---|
+| Sky view | the sun / moon vectors and illuminances, the camera altitude, the aerosols, the LUTs |
+| Aerial perspective | the same + its range / scale and the camera rays (`inv_view_proj`, jittered under TAA: then it runs every frame) |
+| Cloud map (every other frame) | the lights, the layer (cover, altitude, drift, opacity, scale, softness, darkness), the camera position and altitude, the LUTs, the sky view |
+| Cloud shadow | its snapped region, the key light, the layer |
+| Environment rows (per quarter) | the lights, the night floor, the ground albedo, the camera altitude, the LUTs, the sky view, the cloud map, the cloud shadow; the mips + SH projection of a cycle only when a quarter changed. The easing runs every frame |
+
+Without cloud cover (`clamp(cover) <= 0.001`: `cloud_density` returns 0 first) the cloud map and
+the cloud shadow drop the drift, the camera and the layer from their keys. What it saves depends on
+what stands still: the clock running moves the sun every frame (nothing is cached), and the cloud
+layer drifts with the weather wind even with the weather locked (`cloud_wind_min` 2 m/s), so with
+clouds the cloud map, the cloud shadow and the environment change every frame. A paused clock with
+a constant camera altitude caches the sky view; a still camera without clouds (perf scene
+`sky_static`) caches everything but the aerial perspective (TAA) and the easing. Measured serially
+(RTX 3060 Ti, `perf_verify PF-0026` with `r_async_compute 0`): `sky_view` 0.031 -> 0.025 ms in the
+meadow (the LUT skipped, the aerial perspective kept), the four sky passes 0.086 -> 0.057 ms in
+`sky_static`. A new field read by one of these shaders must join its key (`sky.c` sky_build; a note
+in `sky_common.glsl`). The keys are the exact bits: nothing is quantized to get a hit.
 
 ### The sky pass (`sky_render.comp`)
 
@@ -257,6 +284,9 @@ Measured on an RTX 3060 Ti at 1600 × 900, averaged over a 24 h cycle (`tod_test
 | Cloud shadows | 0.023 ms (budget 0.2) |
 | LUTs | Rare: 0.009 ms on average |
 | Aerial perspective in `fog_apply` (with the volumetric fog) | 0.13 ms |
+
+The sky passes run on the async compute queue (docs/RENDERING_POST.md "Async compute", PF-0027),
+next to the shadow maps. PF-0026 numbers: docs/perf/FINDINGS.md.
 
 ## Tests
 

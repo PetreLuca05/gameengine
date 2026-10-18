@@ -47,7 +47,8 @@ void post_targets_changed(void);
 
 // Frame graph construction (called by render_end_frame in order).
 void post_begin_frame(const PostFrameIn *in);
-void post_screen_space(PostLitInputs *out);        // hi-z, contact, gtao, ssgi, ssr, volumetric froxels
+void post_screen_space(PostLitInputs *out);        // hi-z, contact, gtao, ssgi, ssr
+void post_volumetrics(void);                       // volumetric froxels (they sample the sun shadow map: after its marker)
 void post_sky(void);                               // after the opaque scene: procedural sky on empty pixels
 void post_scope_sky(FgRes color, FgRes depth, mat4 inv_vp, vec3 cam);
 void post_view_sky(int view, FgRes color, FgRes depth, mat4 inv_vp, vec3 cam);   // phone camera views   // the same sky into the scope PiP target

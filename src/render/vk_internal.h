@@ -272,6 +272,16 @@ typedef struct Renderer {
     VkDevice device;
     VkQueue queue;
     u32 queue_family;
+    // Async compute (PF-0027, docs/RENDERING_POST.md "Async compute"): the frame graph's sky,
+    // screen-space and froxel passes run on a second queue (fg.c), r_async_compute picks which.
+    // compute_queue: a compute-only family (CONCURRENT sharing of what both queues touch:
+    // share_concurrent, vkd_share_*); gfx_queue2: a second queue of the graphics family.
+    VkQueue compute_queue, gfx_queue2;
+    u32 compute_family;
+    bool compute_timestamps;      // the compute family writes timestamps
+    bool share_concurrent;        // resources the async passes touch are CONCURRENT (compute_queue exists)
+    u32 share_families[2];
+    Cvar *r_async_compute;
     VmaAllocator vma;
     bool validation;
     bool pipe_stats;          // pipelineStatisticsQuery enabled (profiler: per pass invocations)
@@ -507,6 +517,10 @@ void vkd_destroy_targets(void);
 void vkd_create_shadow_map(u32 size);
 void vkd_create_vm_shadow_map(u32 size);   // the viewmodel tile (bindings 16 / 17)
 void vkd_create_moon_shadow_map(u32 size); // the moon map (bindings 18 / 19)
+// What the async compute queue touches (PF-0027): CONCURRENT between the graphics and the compute
+// family when that queue is another family (R->share_concurrent), unchanged otherwise.
+void vkd_share_image(VkImageCreateInfo *ici);
+void vkd_share_buffer(VkBufferCreateInfo *bci);
 
 // vk_resources.c
 GpuBuffer vkr_buffer_create(VkDeviceSize size, VkBufferUsageFlags usage, bool host_visible);
@@ -521,6 +535,8 @@ void vkr_image_barrier(VkCommandBuffer cmd, VkImage image, VkImageAspectFlags as
                        VkPipelineStageFlags2 src_stage, VkAccessFlags2 src_access,
                        VkPipelineStageFlags2 dst_stage, VkAccessFlags2 dst_access, u32 mips);
 RenderTarget vkr_target_create(u32 w, u32 h, VkFormat fmt, VkImageUsageFlags usage, VkImageAspectFlags aspect);
+// A target the async compute queue samples too (depth, the sun shadow map: vkd_share_image).
+RenderTarget vkr_target_create_shared(u32 w, u32 h, VkFormat fmt, VkImageUsageFlags usage, VkImageAspectFlags aspect);
 void vkr_target_destroy(RenderTarget *t);
 void vkr_create_samplers(void);
 void vkr_destroy_samplers(void);

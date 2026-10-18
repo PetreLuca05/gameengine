@@ -22,6 +22,10 @@ void vkp_shutdown(void);
 void vkp_frame_begin(VkCommandBuffer cmd, u32 slot);   // after vkBeginCommandBuffer: read back the slot, reset its queries
 void vkp_scope_begin(VkCommandBuffer cmd, const char *name);   // flat (a begin closes an open scope)
 void vkp_scope_end(VkCommandBuffer cmd);
+// Async compute (PF-0027): the command buffer stream the next scopes and command counts belong to
+// (0 graphics, 1 the async queue; each has its own open scope), stats = pipeline statistics queries
+// allowed there (the queue's family supports graphics).
+void vkp_stream(int stream, bool stats);
 
 #ifdef DG_PROFILE
 extern volatile int dg_prof_recording;
