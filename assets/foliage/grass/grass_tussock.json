@@ -1,5 +1,6 @@
 {
   "_doc": "Fountain tussocks, mostly dry cream / straw ribbon blades (reference b3 / b4 / b5): 4 fanned cards, 0.3-0.5 m.",
+  "shadow_class": "ground",
   "atlas": "grass_tussock",
   "grid": [
     2,

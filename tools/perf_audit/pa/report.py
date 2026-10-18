@@ -113,14 +113,17 @@ def write_findings_md(path, registry):
     lines = ["# Tracked performance findings", "",
              "Generated from `docs/perf/fixes.json` by `tools/perf_audit/perf_audit.py findings`. A finding is **closed** only when "
              "`perf_verify` showed the timing improvement AND every reference image pair passed AND the gameplay state hashes matched "
-             "(docs/PERF_AUDIT.md \"Closing a finding\"). Fixes are switched off for A/B runs with `perf_fix_disable <id>`.", "",
+             "(docs/PERF_AUDIT.md \"Closing a finding\"). Fixes are switched off for A/B runs with `perf_fix_disable <id>`. "
+             "A **visual trade-off** (marked in the title) changes the image by design: its image pairs are recorded but do not decide, "
+             "its visual difference is documented with screenshots, and `perf_fix_disable all` leaves it on.", "",
              "| Fix | Finding | Title | Status | Effort | Verified on | Result |", "|---|---|---|---|---|---|---|"]
     for fid, f in sorted(registry.items()):
         if fid.startswith("_"):
             continue
         v = f.get("verification") or {}
         res = v.get("summary", "-")
-        lines.append("| %s | %s | %s | %s | %s | %s | %s |" % (fid, f.get("finding", "-"), f.get("title", ""), f.get("status", "open"), f.get("effort", "-"),
+        title = f.get("title", "") + (" **(visual trade-off)**" if f.get("tradeoff") else "")
+        lines.append("| %s | %s | %s | %s | %s | %s | %s |" % (fid, f.get("finding", "-"), title, f.get("status", "open"), f.get("effort", "-"),
                                                           v.get("machine", "-"), res.replace("|", "/")))
     lines.append("")
     for fid, f in sorted(registry.items()):
@@ -130,8 +133,13 @@ def write_findings_md(path, registry):
                   "- Rule / finding: %s %s" % (f.get("rule", "-"), f.get("finding", "-")),
                   "- Code: %s" % ", ".join("`%s`" % c for c in f.get("code", [])),
                   "- Metrics (perf_verify): %s" % ", ".join("`%s`" % m for m in f.get("metrics", [])),
-                  "- Scenes: %s" % ", ".join(f.get("scenes", [])),
-                  "- Why fidelity-neutral: %s" % f.get("neutral", "-"), ""]
+                  "- Scenes: %s" % ", ".join(f.get("scenes", []))]
+        if f.get("tradeoff"):
+            lines += ["- **Visual trade-off** (not fidelity neutral): %s" % f["tradeoff"]]
+            lines += ["- Screenshots: %s" % ", ".join("`%s`" % s for s in f.get("screenshots", []))] if f.get("screenshots") else []
+            lines += ["- What stays identical: %s" % f.get("neutral", "-"), ""]
+        else:
+            lines += ["- Why fidelity-neutral: %s" % f.get("neutral", "-"), ""]
         for run in (f.get("verification") or {}).get("runs", []):
             lines.append("- Verification run (%s, %s): %s" % (run.get("machine", "?"), run.get("date", "?"), run.get("summary", "")))
         lines.append("")

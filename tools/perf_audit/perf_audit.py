@@ -127,9 +127,10 @@ def cmd_scan(a):
 
 def summarize(res):
     t = res["timing"][0] if res["timing"] else {}
+    img = "pass" if res["images_pass"] else ("differ (visual trade-off, by design)" if res.get("tradeoff") else "FAIL")
     return "%s: %s %s -> %s (%+.2f%%, p=%.3g); images %s; state %s" % (
         "CLOSED" if res["closed"] else "NOT CLOSED", t.get("metric", "?"), t.get("a_median"), t.get("b_median"), t.get("delta_pct", 0.0), t.get("p_value", 1.0),
-        "pass" if res["images_pass"] else "FAIL", res["state"]["verdict"])
+        img, res["state"]["verdict"])
 
 
 def cmd_verify(a):
@@ -204,7 +205,7 @@ def cmd_ci(a):
             print("ci: %-28s %-12s %8.3f -> %8.3f (%+.1f%%) %s" % (k, key, b[key], m[key], d, "REGRESSION" if bad else "ok"))
     for vd in a.verify or []:
         res = verify.verify_dir(vd, load_registry(), heat=False)
-        ok = res["images_pass"] and res["state"]["pass"]
+        ok = (res["images_pass"] or res.get("tradeoff")) and res["state"]["pass"]   # a visual trade-off differs by design
         fail += not ok
         print("ci: verify %s: images %s, state %s" % (vd, "pass" if res["images_pass"] else "FAIL", res["state"]["verdict"]))
     print("ci: %s" % ("FAIL (%d)" % fail if fail else "pass"))

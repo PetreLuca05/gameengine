@@ -1,5 +1,6 @@
 {
   "_doc": "Tall thin grass, straw stems and seed plumes (reference b6 / b7): 3 cards, 0.45-0.8 m.",
+  "shadow_class": "ground",
   "atlas": "grass_tall",
   "grid": [
     2,

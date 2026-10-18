@@ -1,5 +1,6 @@
 {
   "_doc": "Reeds / sedges on wet ground (mud, pond edges): 3 tall cards, 0.8-1.4 m.",
+  "shadow_class": "small",
   "atlas": "reed",
   "grid": [
     2,

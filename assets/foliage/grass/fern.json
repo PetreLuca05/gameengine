@@ -1,5 +1,6 @@
 {
   "_doc": "Fern fronds on forest floors: 3 arching cards, 0.4-0.8 m.",
+  "shadow_class": "small",
   "atlas": "fern",
   "grid": [
     2,

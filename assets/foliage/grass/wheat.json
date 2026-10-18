@@ -1,5 +1,6 @@
 {
   "_doc": "Wheat (reference b8): 6 crossed cards, 0.8-1.0 m, on fields.",
+  "shadow_class": "small",
   "atlas": "wheat",
   "grid": [
     2,

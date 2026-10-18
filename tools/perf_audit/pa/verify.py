@@ -191,9 +191,13 @@ def verify_dir(path, fixes_registry=None, heat=True):
     images = image_verdict(man, hd)
     images_ok = bool(images) and all(i["pass"] for i in images)
     regressed = any(g["b_regressed"] for g in guards)
-    closed = bool(primary.get("improved")) and images_ok and state["pass"] and not regressed
+    # A visual trade-off (fixes.json "tradeoff": what changes on screen) changes the image by design: the
+    # image pairs are recorded (and the heat maps written) but do not decide; timing, the state hashes
+    # and the guards still do.
+    tradeoff = bool(reg.get("tradeoff"))
+    closed = bool(primary.get("improved")) and (images_ok or tradeoff) and state["pass"] and not regressed
     res = {"fix": fix, "finding": reg.get("finding"), "closed": closed, "timing": timings, "guards": guards, "state": state,
-           "images": images, "images_pass": images_ok, "passes": {"A": len(a_prof), "B": len(b_prof)}}
+           "images": images, "images_pass": images_ok, "tradeoff": tradeoff, "passes": {"A": len(a_prof), "B": len(b_prof)}}
     with open(os.path.join(path, "verify_result.json"), "w", encoding="utf-8") as f:
         json.dump(res, f, indent=1)
     return res

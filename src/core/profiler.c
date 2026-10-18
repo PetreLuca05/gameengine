@@ -74,7 +74,7 @@ static const char *k_counter_names[PC_COUNT] = {
     "anim_eval", "anim_eval_offscreen", "skin_palettes", "skin_palette_bytes", "skin_poses", "vfx_emitters", "vfx_emitters_culled", "audio_voices",
     "audio_voices_silent", "ui_text", "ui_verts", "draw_items", "shadow_items",
 };
-static const char *k_fix_ids[PFX_COUNT] = { "PF-0001", "PF-0002", "PF-0005", "PF-0006", "PF-0007", "PF-0009", "PF-0010", "PF-0011", "PF-0012" };
+static const char *k_fix_ids[PFX_COUNT] = { "PF-0001", "PF-0002", "PF-0005", "PF-0006", "PF-0007", "PF-0009", "PF-0010", "PF-0011", "PF-0012", "PF-0013" };
 
 static struct {
     bool init;
@@ -901,7 +901,7 @@ void prof_init(void) {
 static void fix_disable_changed(Cvar *cv) {
     u32 m = 0;
     for (int f = 0; f < PFX_COUNT; f++)
-        if (strstr(cv->str, k_fix_ids[f]) || !strcmp(cv->str, "all")) m |= 1u << f;
+        if (strstr(cv->str, k_fix_ids[f]) || (!strcmp(cv->str, "all") && f < PFX_TRADEOFF_FIRST)) m |= 1u << f;   // "all": the fidelity-neutral ones
     dg_prof_fix_off = m;
 }
 
@@ -921,7 +921,7 @@ static void cmd_capture(int argc, const char **argv) {
 
 void prof_register(void) {
     P.fix_disable = cvar_reg_string("perf_fix_disable", "", CVAR_LOCKED,
-                                    "perf audit A/B: comma separated fix ids switched off (PF-0001..; all), docs/perf/FINDINGS.md; the fixes are fidelity neutral");
+                                    "perf audit A/B: comma separated fix ids switched off (PF-0001..; all = every fidelity-neutral one), docs/perf/FINDINGS.md; the visual trade-offs (PF-0013) only by their id");
     P.fix_disable->on_change = fix_disable_changed;
     fix_disable_changed(P.fix_disable);
     cmd_register("prof_capture", cmd_capture, "prof_capture <frames> <path.json> [label] [warmup=30] [scene=manual]: record a JSON profile (tools/perf_audit)");

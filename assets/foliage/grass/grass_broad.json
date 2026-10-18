@@ -1,5 +1,6 @@
 {
   "_doc": "Broad flat meadow grass (reference b1 / b2): 3 crossed cards, 0.25-0.45 m.",
+  "shadow_class": "ground",
   "atlas": "grass_broad",
   "grid": [
     2,

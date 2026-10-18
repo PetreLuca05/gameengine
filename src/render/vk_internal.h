@@ -401,6 +401,7 @@ typedef struct Renderer {
     vec4 shadow_rcv[4][CSM_RCV_MAX];            // per cascade: its receiver volume (csm_receiver_planes, PF-0006)
     int shadow_rcv_n[4];                        // plane count (0: cull by the light box only)
     float shadow_dist;                         // m: the smoothed shadow distance (r_shadow_distance x level reach)
+    float shadow_near_w;                        // the near cascade weight (ssky0.z: < 1 while it fades into cascade 1, PCSS wide mode)
     CsmTile shadow_vm_tile;
     bool shadow_vm_active, shadow_taa;
     float shadow_vm_pcss;                       // viewmodel tile PCSS weight (crossfades on a tier change)
@@ -441,6 +442,7 @@ typedef struct Renderer {
     Cvar *r_shadows, *r_shadow_resolution, *r_shadow_projection, *r_shadow_cascades, *r_shadow_max_distance, *r_soft_shadow_quality;
     Cvar *r_shadow_split2, *r_shadow_split4[3], *r_shadow_border, *r_shadow_near_offset, *r_shadowmask_mode, *r_shadowmask_distance;
     Cvar *r_shadow_min_radius;
+    Cvar *r_shadow_caster_limit;  // classic casters: grass / small plants in the near cascades only (shadow_casters.h, PF-0013)
     Cvar *r_shadow_debug;       // sky-driven shadow views (docs/SHADOWS.md)
     Cvar *r_vm_shadow;          // the viewmodel shadow tile
     float contact_scale;        // contact shadow ray length scale (penumbra-limited, compute_matrices)

@@ -417,7 +417,7 @@ target_link_libraries(fbx_textures PRIVATE dg_animcore)
 
 # Virtualized geometry builder (pure C): the game compiles the same sources through the src glob.
 add_library(dg_vgeo STATIC src/render/vgeo/vgeo_build.c src/render/vgeo/vgeo_procgen.c src/render/vgeo/vgeo_procgen_building.c src/render/vgeo/vgeo_procgen_skinned.c src/render/vgeo/vgeo_import.c src/render/vgeo/vgeo_impostor.c src/render/vgeo/vgeo_procgen_foliage.c src/render/vgeo/vgeo_tree.c
-  src/render/vgeo/foliage_wind.c src/render/vgeo/grass_asset.c)
+  src/render/vgeo/foliage_wind.c src/render/vgeo/grass_asset.c src/render/shadow_casters.c)
 set_target_properties(dg_vgeo PROPERTIES C_STANDARD 11)
 target_link_libraries(dg_vgeo PUBLIC dg_animcore meshopt)
 if(MSVC)
@@ -540,6 +540,17 @@ else()
   target_link_libraries(test_shadow_settings PRIVATE m)
 endif()
 add_test(NAME shadow_settings COMMAND test_shadow_settings WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+# Sun shadow caster cascade limits (docs/SHADOWS.md "Caster cascade limits", PF-0013): the table, the
+# per-cascade selection, the fade, the reach per fidelity level.
+add_executable(test_shadow_casters tests/test_shadow_casters.c src/render/shadow_casters.c src/render/shadow_settings.c third_party/cjson/cJSON.c)
+set_target_properties(test_shadow_casters PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
+target_include_directories(test_shadow_casters PRIVATE src third_party/cjson)
+if(MSVC)
+  target_compile_options(test_shadow_casters PRIVATE /W3 /wd4201 /utf-8)
+else()
+  target_link_libraries(test_shadow_casters PRIVATE m)
+endif()
+add_test(NAME shadow_casters COMMAND test_shadow_casters WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
 
 # Foliage wind (docs/FOLIAGE_WIND.md): the wind field (gust fronts, tile, springs, sources), the Crysis
 # vegetation WPO CPU mirror (trunk length, layer linearity, phase decorrelation, bounds), the Tree It

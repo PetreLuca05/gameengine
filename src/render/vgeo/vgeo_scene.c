@@ -1,6 +1,7 @@
 #include "vgeo_scene.h"
 #include "vgeo_skin.h"
 #include "foliage_support.h"
+#include "render/shadow_casters.h"
 #include "core/log.h"
 #include "core/platform.h"
 #include <float.h>
@@ -291,6 +292,7 @@ static void mesh_foliage(VgScene *s) {
         m->max_wpo = m->fade_start = m->fade_end = m->shadow_max_dist = 0;
         m->fflags = 0;
         bool unlimited_shadow = false;
+        int scc = -1;   // sun shadow caster class: the least limited of the materials (shadow_casters.h)
         for (u32 k = 0; k < s->mesh_mat_count[mi]; k++) {
             u32 idx = m->material_base + k;
             if (idx >= s->material_count) break;
@@ -303,8 +305,11 @@ static void mesh_foliage(VgScene *s) {
             if (mt->fade_end > m->fade_end) { m->fade_end = mt->fade_end; m->fade_start = mt->fade_start; }
             if (mt->shadow_max_dist <= 0) unlimited_shadow = true;
             else m->shadow_max_dist = fmaxf(m->shadow_max_dist, mt->shadow_max_dist);
+            int mc = mt->shadow_class < SCC_COUNT ? (int)mt->shadow_class : SCC_NONE;
+            scc = scc < 0 ? mc : scc_merge(scc, mc);
         }
         if (unlimited_shadow) m->shadow_max_dist = 0;
+        m->fflags |= (u32)(scc < 0 ? SCC_NONE : scc) << VGMF_SHADOW_CLASS_SHIFT;
         if (m->fflags & VGMF_TWO_SIDED) s->has_two_sided = true;
         if (m->fflags & (VGMF_MASKED | VGMF_DITHER)) s->has_masked = true;
         if (m->impostor != ~0u) s->has_impostors = true;

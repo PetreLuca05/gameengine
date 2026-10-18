@@ -45,8 +45,9 @@ typedef enum ProfCounter {
     PC_COUNT
 } ProfCounter;
 
-// Fidelity-neutral fixes from the audit (docs/perf/FINDINGS.md), on by default; perf_fix_disable
-// "PF-0001,PF-0005" turns them off for the A side of a perf_verify run.
+// Fixes from the audit (docs/perf/FINDINGS.md), on by default; perf_fix_disable "PF-0001,PF-0005"
+// turns them off for the A side of a perf_verify run. All are fidelity neutral except the trade-offs
+// at the end (PFX_TRADEOFF_FIRST ..), which "all" does not include.
 typedef enum ProfFix {
     PFX_SHADOW_CLEAR_SKIP,    // PF-0001: empty shadow maps not re-cleared every frame
     PFX_CVAR_HASH,            // PF-0002: cvar_find through a hash index
@@ -60,8 +61,12 @@ typedef enum ProfFix {
     PFX_WIND_TILE_JOBS,       // PF-0010: the wind tile window rows on the job system
     PFX_SKIN_SHADOW_CULL,     // PF-0011: skinned shadow casters culled per sun cascade
     PFX_SHADOW_LIGHT_ORDER,   // PF-0012: classic shadow instances drawn front to back from the light
+    // Visual trade-offs (not fidelity neutral: perf_verify measures them, the images differ by design):
+    // perf_fix_disable "all" leaves them on, only their own id turns them off.
+    PFX_SHADOW_CASTER_LIMIT,  // PF-0013: grass / small plant shadows in the near cascades only (r_shadow_caster_limit)
     PFX_COUNT
 } ProfFix;
+#define PFX_TRADEOFF_FIRST PFX_SHADOW_CASTER_LIMIT
 
 #ifdef DG_PROFILE   // the engine target; unit tests compiling engine files get the no-op probes below
 
