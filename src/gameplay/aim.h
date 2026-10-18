@@ -1,12 +1,12 @@
-// Aim model (docs/AIM.md): bullets leave the weapon's muzzle socket and converge on the point the
-// camera ray hits, so the reticle stays true at any distance while the shot is physically fired
-// from the barrel. When something sits between the muzzle and that aim point the shot lands on it
-// instead, and the crosshair moves there.
-//   P  aim point: first hit of the camera ray (eye + view dir), or eye + dir * max_range
+// Aim model (docs/AIM.md): bullets leave the weapon's muzzle socket along the barrel's forward axis,
+// with no correction towards the camera's aim point. The crosshair stays at the screen centre unless
+// the barrel line is obstructed: then it moves to where that line ends.
 //   M  muzzle: the shooter's held-weapon muzzle socket (replicated as a camera-space claim in the
 //      UserCmd, validated by the host against its own copy of the pose)
-//   d  bullet direction: normalize(P - M), spread / recoil cones around it
-//   Q  obstruction: first hit of M -> P before P (barrel blocked within obstruct_near, else partial)
+//   B  barrel forward: the held item's -Z axis in the same pose (camera-space claim, validated too);
+//      the spread / recoil cones are applied around it
+//   F  obstruct_far: distance of the camera ray's first hit, or max_range
+//   Q  first hit of M + B * t (t <= max_range); obstructed when it is clearly closer than F
 // This header is pure (no world, no physics): the traces live in gameplay/weapons.c.
 #ifndef DG_AIM_H
 #define DG_AIM_H
@@ -15,10 +15,10 @@
 #include "core/dgmath.h"
 
 typedef enum AimClass {
-    AIM_CLEAR,        // muzzle -> P is free
-    AIM_PARTIAL,      // something farther along the line (corner, window frame, bodywork)
-    AIM_BARREL,       // within obstruct_near of the muzzle (barrel against a wall)
-    AIM_FRIENDLY,     // a teammate in the line of fire (any distance)
+    AIM_CLEAR,        // the barrel line ends at (or past) what the camera sees: nothing to show
+    AIM_OBSTRUCTED,   // the barrel line hits something clearly closer than the camera ray does
+    AIM_BARREL,       // a hit within obstruct_near of the muzzle (barrel against a wall)
+    AIM_FRIENDLY,     // a teammate on the barrel line (any distance)
 } AimClass;
 
 const char *aim_class_name(int c);
@@ -44,13 +44,51 @@ typedef struct AimValidate {
 // cap whatever the host has). have_host false: only the reach cap applies.
 AimValidate aim_validate_muzzle(vec3 claim, bool have_claim, vec3 host, bool have_host, float tolerance, float reach);
 
-// Bullet direction from the muzzle to the aim point; falls back to the camera direction when P is
-// (nearly) at the muzzle.
+// UserCmd barrel claim: the barrel's forward axis in camera space, unit vector x 32767 (i16 each).
+// All zero = no claim (aim_claim_valid).
+void aim_dir_pack(vec3 cam_dir, i16 out[3]);
+vec3 aim_dir_unpack(const i16 in[3]);
+
+// Host check of a claimed barrel direction against its own pose's: within tol_deg it is used as is,
+// beyond it is turned back onto the tolerance cone around the host's. No claim: the host's.
+typedef struct AimValidateDir {
+    vec3 dir;
+    float error_deg;   // angle claim <-> host (0 without a host pose)
+    bool clamped;
+} AimValidateDir;
+AimValidateDir aim_validate_dir(vec3 claim, bool have_claim, vec3 host, bool have_host, float tol_deg);
+
+// A direction turned by a change of the view angles (yaw / pitch, radians) about the view it is
+// relative to: the recoil already applied within this tick (multiple shots per tick) moves the barrel
+// the way it moves the camera.
+vec3 aim_view_delta(vec3 dir, float yaw, float pitch, float dyaw, float dpitch);
+
+// Thrown items only (they leave the palm, which has no barrel): the direction from the hand to the
+// camera ray's aim point; falls back to the camera direction when P is (nearly) at the hand.
 vec3 aim_converge(vec3 muzzle, vec3 p, vec3 cam_dir);
 
-// Obstruction classification of the muzzle -> P segment: hit at t (m along it, < 0 = none), segment
-// length len; friendly: what was hit is a teammate.
-AimClass aim_classify(float t, float len, float obstruct_near, bool friendly);
+// The obstruction rule (docs/AIM.md "Obstruction"):
+//   far   = the camera ray's first hit distance, or max_range without one (cam_hit < 0)
+//   depth = the barrel hit's distance from the muzzle + the muzzle's depth ahead of the camera, so
+//           both distances are measured from the camera
+//   barrel     hit within obstruct_near of the muzzle (whatever the camera sees)
+//   friendly   the hit is a teammate (any distance)
+//   obstructed depth < far - margin, margin = max(margin_abs, margin_rel * far, parallax): a barrel
+//              ray landing beside the aim point at range is parallax, not an obstruction
+//   clear      otherwise, and without a hit (hit < 0)
+// parallax: how much sooner a line offset by the muzzle's distance from the camera ray reaches the
+// surface the camera sees, at its grazing angle (the ground ahead, a wall seen edge on).
+typedef struct AimObstructRule {
+    float near;          // obstruct_near (m from the muzzle)
+    float margin_abs;    // obstruct_margin (m)
+    float margin_rel;    // obstruct_margin_rel (fraction of far)
+} AimObstructRule;
+float aim_obstruct_far(float cam_hit, float max_range);
+float aim_obstruct_margin(const AimObstructRule *r, float far, float parallax);
+// offset: the muzzle's distance from the camera ray (m); sin_graze: |dot(camera dir, surface normal)|
+// at the camera's hit (1 = head on). Capped at 3 m (sin_graze floored at 0.05).
+float aim_parallax(float offset, float sin_graze);
+AimClass aim_classify(float hit, float muzzle_depth, float far, float parallax, const AimObstructRule *r, bool friendly);
 
 // Muzzle inside geometry: a cast from the eye (inside the player's capsule, always free) to the
 // muzzle hit at fraction f of the way: the origin is pulled back to the last free point, margin m

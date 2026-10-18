@@ -557,11 +557,13 @@ static UserCmd build_cmd(void) {
     c.use_target = G->focus;
     c.view_tick = net_client_view_tick256();
     phone_fill_cmd(&c);
-    // Aim model (docs/AIM.md): where the muzzle is in the pose this player sees (the host checks it).
+    // Aim model (docs/AIM.md): where the muzzle is and where the barrel points in the pose this player
+    // sees (the host checks both).
     {
         Player *lp = game_local_player();
         vec3 mc;
         if (lp && chars_muzzle_cam(G->world, lp->ent, &mc, NULL)) aim_claim_pack(mc, c.muzzle_cam);
+        if (lp && chars_barrel_cam(G->world, lp->ent, &mc, NULL)) aim_dir_pack(mc, c.barrel_cam);
         if (lp && chars_eye_cam(G->world, lp->ent, &mc, NULL)) aim_claim_pack(mc, c.eye_cam);
     }
     return c;

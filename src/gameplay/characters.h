@@ -68,6 +68,7 @@ typedef struct CharacterInst {
     bool veh_valid;
     Xform item_cam_prev, item_cam_cur;   // hold point item in camera space (owner re-places per frame)
     vec3 muzzle_cam;                     // aim model: the muzzle socket relative to the player's simulated eye / view (docs/AIM.md)
+    vec3 barrel_cam;                     // the barrel's forward axis (item -Z) in the same camera space
     bool muzzle_cam_valid;
     u32 muzzle_cam_tick;                 // chars tick of that pose
     vec3 eye_cam;                        // aim model: the head's camera socket, same frame (the camera ray's origin)
@@ -169,6 +170,8 @@ bool chars_item_muzzle(World *w, EntityId e, vec3 *pos, vec3 *dir);
 // relative to the player's simulated eye and view angles, from the latest evaluated tick pose, and its
 // age in ticks. The shooter claims it in its UserCmd; the host checks the claim against its own copy.
 bool chars_muzzle_cam(World *w, EntityId e, vec3 *cam, int *age_ticks);
+// The barrel's forward axis (item -Z) of the same pose, same camera space (unit): the bullet's direction.
+bool chars_barrel_cam(World *w, EntityId e, vec3 *dir, int *age_ticks);
 // The same for the first-person camera (the head's "camera" socket): where the player's view really
 // starts. The capsule eye (player_eye_pos) can be 10 cm (standing) to 30 cm (crouched) away from it.
 bool chars_eye_cam(World *w, EntityId e, vec3 *cam, int *age_ticks);

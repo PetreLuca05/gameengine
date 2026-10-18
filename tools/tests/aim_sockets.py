@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Aim model data check (docs/AIM.md): every gun in data/weapons has a muzzle socket in its "hold"
 block that agrees with the first-person "muzzle" (the same socket in first and third person), lies
-in front of the grip along the barrel (-Z), and has a valid "aim" block (obstruct_near, max_range).
+in front of the grip along the barrel (-Z), and has a valid "aim" block (obstruct_near, obstruct_margin(_rel), max_range).
 Run: python3 tools/tests/aim_sockets.py. Exit 1 on a failure."""
 import glob, json, os, sys
 
@@ -32,6 +32,9 @@ def main():
             fails.append("%s: aim.obstruct_near %s out of 0.02..1" % (name, near))
         if rng < 10:
             fails.append("%s: aim.max_range %s < 10 m" % (name, rng))
+        margin, rel = aim.get("obstruct_margin", 0.75), aim.get("obstruct_margin_rel", 0.05)
+        if not (0.1 <= margin <= 5.0) or not (0.0 <= rel <= 0.3):
+            fails.append("%s: aim.obstruct_margin %s / obstruct_margin_rel %s out of 0.1..5 / 0..0.3" % (name, margin, rel))
     for f in fails:
         print("FAIL " + f)
     print("aim_sockets: %d guns, %d failure(s)" % (n, len(fails)))

@@ -15,6 +15,7 @@
 #include "core/engine.h"
 #include "core/cvar.h"
 #include "game/game.h"
+#include "game/game_internal.h"
 #include "gameplay/weapons.h"
 #include "gameplay/effects.h"
 #include "gameplay/attachments.h"
@@ -211,16 +212,11 @@ static void draw_hotbar(Game *g, World *w, GuiRect safe) {
     }
 }
 
-static void draw_prompt(Game *g) {
-    if (game_view_slot() != g->local_slot) {
-        // A spectated player's hold interaction: its progress ring (the prompt text is theirs).
-        if (g->hold_progress > 0.001f) gd_ring(gui_w() * 0.5f, gui_h() * 0.5f + gui_s(77), gui_s(22), gui_s(2.5f), g->hold_progress, TH->accent);
-        return;
-    }
-    if (!g->focus_prompt[0]) return;
-    float cx = gui_w() * 0.5f, y = gui_h() * 0.5f + gui_s(64);
+// "[key] text" centred at y: the key in a chip, an optional hold ring around it.
+static void key_prompt(const char *prompt, float y, float progress) {
+    float cx = gui_w() * 0.5f;
     char key[32] = "";
-    const char *text = g->focus_prompt;
+    const char *text = prompt;
     if (text[0] == '[') {
         const char *e = strchr(text, ']');
         if (e) {
@@ -240,10 +236,32 @@ static void draw_prompt(Game *g) {
         GuiRect kr = { x, y, kw, ks };
         gd_round(kr, gui_s(4), UI_RGBA(236, 236, 230, 235));
         gd_text(&kt, kr.x + kr.w * 0.5f, kr.y + (ks - gd_line_height(kt.size)) * 0.5f, key);
-        if (g->hold_progress > 0.001f) gd_ring(kr.x + kr.w * 0.5f, kr.y + ks * 0.5f, ks * 0.85f, gui_s(2.5f), g->hold_progress, TH->accent);
+        if (progress > 0.001f) gd_ring(kr.x + kr.w * 0.5f, kr.y + ks * 0.5f, ks * 0.85f, gui_s(2.5f), progress, TH->accent);
         x += kw + gui_s(10);
     }
     gd_text(&t, x, y + (ks - gd_line_height(t.size)) * 0.5f, text);
+}
+
+static void draw_prompt(Game *g) {
+    if (game_view_slot() != g->local_slot) {
+        // A spectated player's hold interaction: its progress ring (the prompt text is theirs).
+        if (g->hold_progress > 0.001f) gd_ring(gui_w() * 0.5f, gui_h() * 0.5f + gui_s(77), gui_s(22), gui_s(2.5f), g->hold_progress, TH->accent);
+        return;
+    }
+    if (!g->focus_prompt[0]) return;
+    key_prompt(g->focus_prompt, gui_h() * 0.5f + gui_s(64), g->hold_progress);
+}
+
+// Hanging from a ledge (docs/CONTROLLER.md): climb / let go, local UI only.
+static void draw_hang_prompts(void) {
+    char climb[64], let_go[64];
+    bool on = ledge_hang_prompts(climb, sizeof(climb), let_go, sizeof(let_go));
+    if (on) {
+        float y = gui_h() * 0.5f + gui_s(64);
+        key_prompt(climb, y, 0.0f);
+        key_prompt(let_go, y + gui_s(34), 0.0f);
+    }
+    ledge_prompts_drawn(on);
 }
 
 static void draw_hints(Game *g, GuiRect safe) {
@@ -478,6 +496,7 @@ void hud_draw(void) {
     fx_draw_hud();
     if (!phone_holding()) crosshair_draw((float)g_engine.frame_dt);   // the raised phone is the aim (docs/PHONE.md)
     draw_prompt(g);
+    draw_hang_prompts();
     draw_damage_indicators(g);
     draw_vitals(w, safe);
     draw_ammo(g, w, safe);

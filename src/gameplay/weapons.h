@@ -5,6 +5,7 @@
 #define DG_WEAPONS_H
 
 #include "world/world.h"
+#include "gameplay/aim.h"
 
 typedef struct WeaponOutput {
     vec2 view_kick;      // aim recoil + recovery (yaw, pitch) radians to add to the local view
@@ -42,7 +43,7 @@ void weapons_set_local_flash(LocalFlashFn fn);
 
 typedef struct WeaponCvars {
     struct Cvar *recoil_scale, *visual_scale, *spread_scale, *recoil_debug, *infinite_ammo, *sway_scale, *kick_scale, *bob_scale, *ads_sway, *ads_bob, *sway_ads_scale, *sway_cosmetic;
-    struct Cvar *block_barrel, *muzzle_tolerance, *aim_debug;
+    struct Cvar *block_barrel, *muzzle_tolerance, *barrel_tolerance, *aim_debug;
 } WeaponCvars;
 void weapons_register_cvars(void);
 const WeaponCvars *weapons_cvars(void);
@@ -74,8 +75,9 @@ BodyId weapon_shooter_ignore_body(World *w, int shooter);
 // one is closer than h->dist (or than range when !h->hit).
 bool weapon_trace_legacy_hitboxes(World *w, int shooter, vec3 origin, vec3 dir, float range, u32 view_tick256, HitResult *h);
 
-// Aim model (docs/AIM.md, gameplay/aim.h): a shot leaves the muzzle socket and converges on the
-// aim point P of the camera ray; whatever is between the muzzle and P is hit first (Q).
+// Aim model (docs/AIM.md, gameplay/aim.h): a shot leaves the muzzle socket along the barrel's forward
+// axis (no convergence on the camera's aim point P); Q is where that line ends, and the crosshair moves
+// there only when Q is clearly closer than what the camera sees (obstructed).
 typedef struct AimQuery {
     vec3 eye;                 // the simulated eye (player_eye_pos: inside the capsule, the frame of the claims)
     float yaw, pitch;         // the view the muzzle claim is relative to (command angles)
@@ -84,9 +86,12 @@ typedef struct AimQuery {
     vec3 claim;               // the shooter's camera-space muzzle (UserCmd.muzzle_cam)
     bool have_eye_claim;
     vec3 eye_claim;           // the shooter's first-person camera, same frame (UserCmd.eye_cam)
-    bool hand;                // thrown items: the hand socket; no claim / pose = a point beside the eye
-    float max_range;          // camera ray length (no hit: P = eye + cam_dir * max_range)
-    float obstruct_near;      // obstruction closer than this to the muzzle = barrel blocked
+    bool have_barrel;
+    vec3 barrel_claim;        // the shooter's camera-space barrel forward (UserCmd.barrel_cam, unit)
+    float kick_yaw, kick_pitch; // view change since the pose (recoil of earlier shots this tick, rad): turns the barrel too
+    bool hand;                // thrown items: the hand socket, converging on P (a palm has no barrel)
+    float max_range;          // camera ray and barrel line length (no hit: P = eye + cam_dir * max_range)
+    AimObstructRule rule;     // obstruct_near / obstruct_margin / obstruct_margin_rel of the weapon
     u32 view_tick256;         // host lag compensation of the traces (0 = the present world)
 } AimQuery;
 typedef struct AimSolve {
@@ -96,17 +101,22 @@ typedef struct AimSolve {
     vec3 muzzle;              // the (validated) muzzle socket
     vec3 origin;              // where the bullet starts: the muzzle, or the last free point when it is inside geometry
     bool recovered;           // the muzzle was inside geometry (origin pulled back towards the eye)
-    vec3 dir;                 // bullet direction (origin -> P), before the spread cone
-    int cls;                  // AimClass (clear / partial / barrel / friendly)
-    vec3 q;                   // where the bullet lands when obstructed (= P when clear)
+    vec3 dir;                 // bullet direction: the barrel's forward axis, before the spread cone
+    int cls;                  // AimClass (clear / obstructed / barrel / friendly)
+    vec3 q;                   // where the barrel line ends (first hit, or origin + dir * max_range)
     float q_dist;             // |Q - origin|
+    bool q_hit;
+    float far;                // obstruct_far: the camera ray's hit distance, or max_range
+    float parallax;           // the rule's parallax allowance at the camera's hit (m)
     EntityId q_ent;
     float claim_error;        // |claim - the host's reconstruction| (m; 0 = not checked)
     bool claim_clamped;       // out of tolerance: moved onto the host's tolerance sphere
     float eye_error;          // the same for the camera eye claim
     bool eye_clamped;
+    float barrel_error;       // degrees between the barrel claim and the host's pose (0 = not checked)
+    bool barrel_clamped;
 } AimSolve;
-AimQuery weapon_aim_query(World *w, int slot, const PlayerMove *m, const UserCmd *cmd, vec3 cam_dir, float max_range, float obstruct_near, u32 view_tick256);
+AimQuery weapon_aim_query(World *w, int slot, const PlayerMove *m, const UserCmd *cmd, vec3 cam_dir, const WeaponDef *d, u32 view_tick256);
 void weapon_aim_solve(World *w, int slot, const AimQuery *q, AimSolve *out);
 // The viewed player's aim this frame (crosshair, aim_debug): view angles + sight offset of the frame.
 bool weapon_aim_preview(World *w, int slot, vec3 eye, float yaw, float pitch, const UserCmd *cmd, AimSolve *out);
@@ -116,7 +126,7 @@ u16 weapons_take_aim_claim(void);
 // aim_debug: draws the viewed player's aim of this frame (per frame, from the game's debug pass).
 void weapons_aim_debug_frame(World *w);
 // Host aim checks (aim_stats): shots, claims clamped, worst claim error (m), aim point mismatches.
-typedef struct AimStats { u32 shots, checked, clamped, p_checked, p_mismatch, recovered, blocked, eye_checked, eye_clamped; float max_error, max_p_error, max_eye_error; } AimStats;
+typedef struct AimStats { u32 shots, checked, clamped, p_checked, p_mismatch, recovered, blocked, eye_checked, eye_clamped, dir_checked, dir_clamped; float max_error, max_p_error, max_eye_error, max_dir_error; } AimStats;
 const AimStats *weapons_aim_stats(void);
 void weapons_aim_stats_reset(void);
 

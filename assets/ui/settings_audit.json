@@ -1129,6 +1129,18 @@
    "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting.",
    "category": "player"
   },
+  "pl_climb_facing_cone": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting.",
+   "category": "player"
+  },
+  "pl_climb_hold_to_jump": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting.",
+   "category": "player"
+  },
   "pl_coyote_time": {
    "class": "LOCKED+RULE",
    "ui": "Lobby rules",
@@ -1160,6 +1172,24 @@
    "category": "player"
   },
   "pl_hang_reach": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting.",
+   "category": "player"
+  },
+  "pl_hang_shimmy_speed": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting.",
+   "category": "player"
+  },
+  "pl_hang_stamina": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting.",
+   "category": "player"
+  },
+  "pl_hang_two_handed": {
    "class": "LOCKED+RULE",
    "ui": "Lobby rules",
    "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting.",
@@ -1217,6 +1247,12 @@
    "class": "LOCKED",
    "ui": "—",
    "reason": "Noclip speed: dev.",
+   "category": "player"
+  },
+  "pl_regrab_cooldown": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting.",
    "category": "player"
   },
   "pl_slow_walk_speed": {
@@ -2762,6 +2798,12 @@
    "category": "weapons"
   },
   "wpn_ads_sway": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting.",
+   "category": "weapons"
+  },
+  "wpn_barrel_tolerance": {
    "class": "LOCKED+RULE",
    "ui": "Lobby rules",
    "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting.",
