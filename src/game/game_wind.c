@@ -11,6 +11,8 @@
 #include "ui/ui.h"
 #include "core/log.h"
 #include "core/engine.h"
+#include "core/jobs.h"
+#include "core/profiler.h"
 #include "nuklear_config.h"
 #include <math.h>
 #include <stdio.h>
@@ -70,6 +72,12 @@ float wind_game_leaf_rate(vec3 pos) {
 
 // Every frame (weather_frame), weather active or not: base = the weather's wind (or the wind_* overrides,
 // or a light breeze when the level has no weather).
+typedef struct WindRowsJob { WindField *f; const WindTileStep *st; } WindRowsJob;
+static void wind_rows_range(void *u, int begin, int end) {
+    WindRowsJob *j = (WindRowsJob *)u;
+    wind_tile_rows(j->f, j->st, begin, end);
+}
+
 void wind_game_frame(const WeatherParams *cur, double tick_time, vec3 cam, float dt, RenderWeather *rw) {
     WindBase b = { 60.0f, 3.0f, 0.3f };
     if (cur) b = (WindBase){ cur->v[WP_WIND_DIR], cur->v[WP_WIND], cur->v[WP_GUST] };
@@ -82,7 +90,17 @@ void wind_game_frame(const WeatherParams *cur, double tick_time, vec3 cam, float
     wind_set(&WG.f, &b, tick_time + WG.time_offset);
     wind_sources_step(&WG.f, dt * ts);
     float c[3] = { cam.x, cam.y, cam.z };
-    wind_tile_update(&WG.f, c, dt * ts);
+    if (prof_fix_enabled(PFX_WIND_TILE_JOBS)) {
+        // docs/perf/FINDINGS.md PF-0010: the 64 x 64 window (a wind_at + spring per texel, ~1.6 ms
+        // on one thread) row by row on the job system; the same texels whatever the thread count.
+        WindTileStep st;
+        wind_tile_begin(&WG.f, c, dt * ts, &st);
+        WindRowsJob j = { &WG.f, &st };
+        jobs_parallel_for(WIND_TEX, 4, wind_rows_range, &j);
+        wind_tile_end(&WG.f, &st);
+    } else {
+        wind_tile_update(&WG.f, c, dt * ts);
+    }
     WG.cam = cam;
     WG.have = true;
     WG.wind_time = (float)fmod(WG.f.time, 3600.0);

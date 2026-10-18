@@ -90,6 +90,13 @@ void wind_sources_step(WindField *f, float dt);
 // spring at the instant wind), evaluates the instant wind per texel, steps the springs (dt s) and
 // packs `texels`. Window texel (i, j) covers world [(ox + i) * WIND_TEXEL, +WIND_TEXEL).
 void wind_tile_update(WindField *f, const float cam[3], float dt);
+// The same in three steps (game_wind.c runs the rows on the job system, docs/perf/FINDINGS.md
+// PF-0010): begin (window origin, global spring), rows [j0, j1) of the window (each row writes only
+// its own texels and reads only the field and the previous window), end (the new origin).
+typedef struct WindTileStep { i32 ox, oz; bool moved; float dt, cam_y; } WindTileStep;
+void wind_tile_begin(WindField *f, const float cam[3], float dt, WindTileStep *st);
+void wind_tile_rows(WindField *f, const WindTileStep *st, int j0, int j1);
+void wind_tile_end(WindField *f, const WindTileStep *st);
 // Bilinear sample of the packed tile exactly as the shader does (texel centres, toroidal wrap, the
 // half-precision values): out = (instant x, z, bend x, z). False outside the window (out = the global
 // spring / the instant wind at pos).

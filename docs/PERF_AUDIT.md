@@ -47,7 +47,10 @@ Analyzer: `python tools/perf_audit/perf_audit.py analyze <profile dir>` / `scan`
    probe is one predictable branch on `dg_prof_recording`. The probe cost while recording is measured at
    every capture start (`meta.prof_overhead_ns`, ~65-105 ns per begin / end pair).
 2. **Fixed scenes, deterministic workload.** `assets/perf/scenes.json`: dev room, horde 500, foliage
-   (vegetation map), water + rain (water yard), night with every light, vehicle yard, plus the
+   (vegetation map), 500 zombies on the vegetation map (`horde_foliage`), the vegetation map's
+   density zones (`veg_*`: pine / broadleaf forest interiors, forest edge, meadow, wheat field, dead
+   wood, pond shore, the valley from the south rim, hordes in the pine forest and on the meadow),
+   water + rain (water yard), night with every light, vehicle yard, plus the
    2-client LAN run (`lan2_host` / `lan2_client`). Every run pauses the clock and the weather, sets
    `dev_fixed_fps 60` (exactly one sim tick per frame: the same work in every run whatever the frame
    rate), drops vsync and the frame cap, settles 120 frames (streaming, LOD fades, exposure, temporal
@@ -214,6 +217,9 @@ decides:
   (the same build twice: animation timing, histories) with 1.5 x slack. Diff heat maps go to `<dir>/diff`.
 - **State**: the per-tick hashes of every B pass must equal A's, and the A passes must agree with each
   other (else the scene is not deterministic and the check is *inconclusive*, which does not close).
+  Compared per scene / level (different scenes never share hashes). `horde_foliage` is not
+  deterministic between map loads (the second load of a process differs from tick 0): prove fixes on
+  the deterministic scenes and time them there.
 
 `closed` = timing improved AND every image pair passes AND the state is identical AND no guard
 regressed. `--update` records the run in `docs/perf/fixes.json` and regenerates `docs/perf/FINDINGS.md`;
@@ -266,6 +272,30 @@ Report: [perf/AUDIT_2026-10-18.md](perf/AUDIT_2026-10-18.md); fixes: [perf/FINDI
   time gain is below this machine's noise: not closed.
 - On the target machine: `tools/perf_audit/first_run.sh` (the full audit, then `run_verify.sh` for
   every fix with `PERF_TARGET=1`) replaces these numbers and closes the findings there.
+
+## Target run (2026-10-18, Windows, RTX 3060 Ti)
+
+The first run on real hardware (Windows 11, RTX 3060 Ti, driver 581.80, 12 threads, 1600 x 900);
+its report replaced the lavapipe one in [perf/AUDIT_2026-10-18.md](perf/AUDIT_2026-10-18.md). The
+machine was shared (other builds and games ran at the same time, the GPU at 30 - 40 % load from
+outside the runs): absolute GPU milliseconds of separate runs varied up to 2x, so every claim rests on
+`perf_verify`'s alternating A / B passes in one process. CPU work was stable to a few percent.
+
+- Focus: big hordes in dense vegetation. The vegetation map's zones (`veg_*`) showed the sun shadow
+  pass as the dominant GPU cost in the forest interiors: ~660 M alpha-tested fragment invocations per
+  frame for the 4 x 2048^2 cascade tiles (~40 x overdraw of leaf cards), 14 - 30 ms at Modern; the main
+  view's opaque + prepass 4 - 6 ms. On the CPU: the classic cull (5 views, ~15 ms of worker time per
+  frame), the wind tile, the skinning palettes and the character draw poses of a horde.
+- Fixes PF-0006, PF-0007, PF-0009, PF-0010, PF-0011, PF-0012 closed (images and state identical);
+  PF-0008 (character poses on the jobs) was dropped: CPU -21 % but GPU frame +11 % in every B pass.
+  All fixes on vs all off (one process, alternating): CPU work -20 .. -33 % in every vegetation zone
+  and in the hordes (FINDINGS.md has each fix's numbers).
+- Visible trade-offs, not applied (measured in the pine forest at Modern, shadow pass): 2 cascades
+  instead of 4: -58 % (fragment invocations 663 M -> 268 M); the 2048 atlas (Shadow Resolution
+  High instead of Very High): -53 % (159 M); `r_vgeo_shadow_error_px` 2 -> 8 and Soft Shadow
+  Quality Low: no measurable change. Grass / bush casters limited to the near cascades would cut the
+  same fragments without the resolution loss on trees (needs a per-mesh cascade limit: not built).
+- `horde_foliage` is not deterministic between map loads (above, Verification).
 
 ## CI
 

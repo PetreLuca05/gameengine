@@ -28,7 +28,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define PERF_MAX_SCENES 16
+#define PERF_MAX_SCENES 32
 #define PERF_MAX_SETUP 16
 #define PERF_MAX_KEYS 16
 #define PERF_MAX_PLAN 256

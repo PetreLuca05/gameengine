@@ -132,6 +132,48 @@ void csm_fit_vm(const mat4 *lview, vec3 rig_center, u32 texels, CsmTile *out) {
     csm_fit(lview, rig_center, CSM_VM_RADIUS, texels, CSM_VM_RADIUS + 0.5f, out);
 }
 
+static float hull_cross(const float *o, const float *a, const float *b) { return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0]); }
+
+int csm_receiver_planes(const mat4 *vp, const vec3 *pts, int n, float margin_m, vec4 out[CSM_RCV_MAX]) {
+    if (n < 3 || n > CSM_RCV_MAX) return 0;
+    const float *m = vp->m;   // column-major: rows 0 / 1 give the light-space x / y (ortho: w = 1)
+    float q[CSM_RCV_MAX][2];
+    for (int i = 0; i < n; i++) {
+        q[i][0] = m[0] * pts[i].x + m[4] * pts[i].y + m[8] * pts[i].z + m[12];
+        q[i][1] = m[1] * pts[i].x + m[5] * pts[i].y + m[9] * pts[i].z + m[13];
+    }
+    // Andrew's monotone chain (insertion sort: at most 16 points), counter-clockwise.
+    for (int i = 1; i < n; i++)
+        for (int j = i; j > 0 && (q[j][0] < q[j - 1][0] || (q[j][0] == q[j - 1][0] && q[j][1] < q[j - 1][1])); j--) {
+            float t0 = q[j][0], t1 = q[j][1];
+            q[j][0] = q[j - 1][0], q[j][1] = q[j - 1][1];
+            q[j - 1][0] = t0, q[j - 1][1] = t1;
+        }
+    float h[2 * CSM_RCV_MAX][2];
+    int k = 0;
+    for (int i = 0; i < n; i++) {
+        while (k >= 2 && hull_cross(h[k - 2], h[k - 1], q[i]) <= 0) k--;
+        h[k][0] = q[i][0], h[k][1] = q[i][1], k++;
+    }
+    for (int i = n - 2, lo = k + 1; i >= 0; i--) {
+        while (k >= lo && hull_cross(h[k - 2], h[k - 1], q[i]) <= 0) k--;
+        h[k][0] = q[i][0], h[k][1] = q[i][1], k++;
+    }
+    int nh = k - 1;   // the last point repeats the first
+    if (nh < 3 || nh > CSM_RCV_MAX) return 0;
+    for (int i = 0; i < nh; i++) {
+        const float *a = h[i], *b = h[i + 1];
+        float nx = -(b[1] - a[1]), ny = b[0] - a[0];   // inward normal of a counter-clockwise edge (NDC)
+        // nx (x - ax) + ny (y - ay) >= 0 with x / y the rows of vp: a world plane parallel to the light
+        vec3 wn = v3(nx * m[0] + ny * m[1], nx * m[4] + ny * m[5], nx * m[8] + ny * m[9]);
+        float w = nx * (m[12] - a[0]) + ny * (m[13] - a[1]);
+        float l = v3_len(wn);
+        if (l < 1e-12f) return 0;
+        out[i] = v4(wn.x / l, wn.y / l, wn.z / l, w / l + margin_m);
+    }
+    return nh;
+}
+
 bool csm_validate(const CsmParams *p, float min_tpm, float max_ratio, char *err, int err_size) {
     CsmLayout l;
     csm_layout(p, &l);

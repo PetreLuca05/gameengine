@@ -150,7 +150,7 @@ static void create_frames(void) {
         for (int k = 0; k < 2; k++) f->ubo_phone[k] = vkr_buffer_create(sizeof(FrameData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, true);
         f->dyn = vkr_buffer_create(DYN_BUFFER_SIZE, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, true);
         f->bones = vkr_buffer_create(sizeof(mat4) * MAX_SKIN_BONES * 2, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);   // + last frame's
-        f->instances = vkr_buffer_create(sizeof(GpuSkinInstance) * MAX_SKIN_DRAWS * 3, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);   // main + shadow / vm + phone
+        f->instances = vkr_buffer_create(sizeof(GpuSkinInstance) * MAX_SKIN_DRAWS * 8, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);   // main + shadow + 5 culled shadow (PF-0011) + vm / phone
         f->prev_models = vkr_buffer_create(sizeof(mat4) * (MAX_DRAWS + MAX_VM_DRAWS), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);
 
         VkDescriptorSetAllocateInfo ai = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
@@ -475,13 +475,31 @@ void render_draw_skinned(const SkinnedDraw *d) {
     if (!d->mesh || !d->palette || !d->bone_count || R->skin_draw_count >= MAX_SKIN_DRAWS) return;
     if (R->skin_bone_count + d->bone_count > MAX_SKIN_BONES) return;
     if (!R->meshes[d->mesh].used || !R->meshes[d->mesh].skinned) return;
-    // Parts of one modular character pass the same palette: a distinct pose when it changes.
-    static const mat4 *last_palette;
-    if (R->skin_draw_count == 0 || d->palette != last_palette) prof_count(PC_SKIN_POSES, 1);
-    last_palette = d->palette;
     SkinnedDraw *s = &R->skin_draws[R->skin_draw_count++];
     *s = *d;
     if (!s->object_id && (s->flags & MAT_VIEWMODEL)) s->object_id = 0x40000000u | R->skin_draw_count;
+    // docs/perf/FINDINGS.md PF-0007: the parts of a modular character (and its shadow LOD) gather
+    // their palettes from its one skeleton (characters.c draw_part); parts with the same bone table
+    // get the same matrices. A palette equal (bit for bit) to one of the last copies of this frame
+    // reuses that copy: the instance reads the same matrices at its offset, the previous-palette
+    // lookup (velocity) gets the same offset / count, so every pass sees identical bones.
+    enum { PAL_RECENT = 8 };
+    static struct { u32 off, n, frame; } recent[PAL_RECENT];
+    static u32 recent_next;
+    if (prof_fix_enabled(PFX_SKIN_PALETTE_SHARE)) {
+        for (u32 k = 0; k < PAL_RECENT; k++) {
+            u32 j = (recent_next + PAL_RECENT - 1 - k) % PAL_RECENT;   // newest first
+            if (recent[j].frame != R->frame_index + 1u || recent[j].n != d->bone_count) continue;
+            if (memcmp(R->skin_bones + recent[j].off, d->palette, sizeof(mat4) * d->bone_count)) continue;
+            s->palette = NULL;
+            s->bone_count = recent[j].off | ((u32)d->bone_count << 20);
+            return;
+        }
+        recent[recent_next].off = R->skin_bone_count;
+        recent[recent_next].n = d->bone_count;
+        recent[recent_next].frame = R->frame_index + 1u;   // 0 = never written
+        recent_next = (recent_next + 1) % PAL_RECENT;
+    }
     memcpy(R->skin_bones + R->skin_bone_count, d->palette, sizeof(mat4) * d->bone_count);
     // The palette pointer is replaced by its offset into this frame's bone buffer.
     s->palette = NULL;
@@ -656,11 +674,13 @@ static void extract_frustum(mat4 m, vec4 out[6]) {
     }
 }
 
-static bool sphere_visible(const vec4 planes[6], vec3 c, float r) {
-    for (int i = 0; i < 6; i++)
+static bool sphere_in_n(const vec4 *planes, int n, vec3 c, float r) {
+    for (int i = 0; i < n; i++)
         if (planes[i].x * c.x + planes[i].y * c.y + planes[i].z * c.z + planes[i].w < -r) return false;
     return true;
 }
+
+static bool sphere_visible(const vec4 planes[6], vec3 c, float r) { return sphere_in_n(planes, 6, c, r); }
 
 static void item_bounds(const DrawItem *d, vec3 *center, float *radius) {
     AABB b = R->meshes[d->mesh].bounds;
@@ -702,6 +722,8 @@ static u32 g_shadow_cascade;   // shadow pass: the cascade being drawn (push con
 static float g_shadow_min_radius;   // sun cascades: smaller casters skipped (r_shadow_min_radius)
 static bool g_shadow_cull;          // sun / viewmodel tiles: casters outside the tile's light frustum skipped
 static vec4 g_shadow_planes[6];     // that frustum (the box reaches CSM_REACH towards the light)
+static const vec4 *g_shadow_rcv;    // the cascade's receiver volume (PF-0006), g_shadow_rcv_n planes (0: none)
+static int g_shadow_rcv_n;
 static bool g_shadow_vm_pass;       // the viewmodel tile is being drawn (CPU-skinned viewmodel draws take its view)
 static u32 g_shadow_layers = SHADOW_LAYERS_ALL;   // the light's culling mask (DrawItem / SkinnedDraw layer bits)
 
@@ -752,6 +774,7 @@ static void draw_items(VkCommandBuffer cmd, DrawItem *items, u32 count, bool sha
             item_bounds(d, &c, &r);
             if (r < g_shadow_min_radius) continue;
             if (g_shadow_cull && !sphere_visible(g_shadow_planes, c, r)) { R->stats.culled++; continue; }
+            if (g_shadow_cull && g_shadow_rcv_n && !sphere_in_n(g_shadow_rcv, g_shadow_rcv_n, c, r)) { R->stats.culled++; continue; }
         }
         if (cull) {
             vec3 c; float r;
@@ -861,6 +884,8 @@ static bool skin_in_pass(const SkinnedDraw *d, int pass) {
 
 static bool prev_palette(u32 id, u32 *off, u32 *count);
 static u32 g_skin_shadow_inst[MAX_SKIN_DRAWS];   // skinned draw -> its instance record in the shadow pass (~0: none)
+static u32 g_skin_shadow_order[MAX_SKIN_DRAWS];  // the shadow pass's records in order: their skinned draw (PF-0011)
+static u32 g_skin_shadow_base;                   // the shadow pass's first record
 static bool g_skin_shadow_gpu;                   // this frame's shadow pass instances are valid (GPU skinning)
 
 // Writes instance records for one pass (culled, sorted by mesh) starting at `base`.
@@ -884,10 +909,11 @@ static u32 build_skin_pass(FrameResources *f, int pass, u32 base, SkinPass *out)
     // Instanced batches per (texture, mesh): modular characters sharing parts batch per (part, LOD).
     u32 nb = skin_batch_build(keys, n, order, runs);
     GpuSkinInstance *inst = (GpuSkinInstance *)f->instances.mapped;
+    if (shadow) g_skin_shadow_base = base;
     for (u32 k = 0; k < n; k++) {
         const SkinnedDraw *d = &R->skin_draws[draw_of[order[k]]];
         GpuSkinInstance *g = &inst[base + k];
-        if (shadow) g_skin_shadow_inst[draw_of[order[k]]] = base + k;
+        if (shadow) g_skin_shadow_inst[draw_of[order[k]]] = base + k, g_skin_shadow_order[k] = draw_of[order[k]];
         g->color = d->color;
         g->params = v4(d->roughness, d->metallic, d->emissive, d->fade);
         g->recon = d->recon;
@@ -920,6 +946,47 @@ static u32 build_skin_pass(FrameResources *f, int pass, u32 base, SkinPass *out)
         out->batches[b].mat_set = vkr_material_set(&mm);
     }
     arena_pop_to(mark);
+    return n;
+}
+
+// docs/perf/FINDINGS.md PF-0011: the shadow pass's batches were drawn into every sun cascade (and the
+// moon map) whole: every zombie of a horde was skinned 4 - 5 times. Cascade k gets its own copy of the
+// pass holding only the casters whose bounds touch its light box and its receiver volume (PF-0006):
+// the same batches in the same order, the same records (a shadow record depends on its draw only)
+// for the instances kept. A dropped instance lies outside the tile's light box (it rasterizes no
+// texel of the tile) or outside the receiver volume (no receiver reads its texels).
+static u32 cull_skin_shadow(FrameResources *f, int k, u32 base, const SkinPass *all, SkinPass *out) {
+    vec4 pl[6];
+    extract_frustum(R->shadow_vp_ndc[k], pl);
+    const vec4 *rcv = k < 4 ? R->shadow_rcv[k] : NULL;
+    int nrcv = k < 4 ? R->shadow_rcv_n[k] : 0;
+    GpuSkinInstance *inst = (GpuSkinInstance *)f->instances.mapped;
+    u32 n = 0;
+    out->batch_count = 0;
+    for (u32 b = 0; b < all->batch_count; b++) {
+        const SkinBatch *sb = &all->batches[b];
+        u32 first = n;
+        for (u32 j = 0; j < sb->count; j++) {
+            u32 di = g_skin_shadow_order[sb->first - g_skin_shadow_base + j];
+            const SkinnedDraw *d = &R->skin_draws[di];
+            if (d->radius > 0 && (!sphere_visible(pl, d->center, d->radius) || (nrcv && !sphere_in_n(rcv, nrcv, d->center, d->radius)))) continue;
+            GpuSkinInstance *g = &inst[base + n];
+            g->color = d->color;
+            g->params = v4(d->roughness, d->metallic, d->emissive, d->fade);
+            g->recon = d->recon;
+            g->info[0] = d->bone_count & 0xFFFFFu;
+            g->info[1] = d->flags;
+            g->info[2] = 0;
+            float ns = d->normal_scale != 0.0f ? d->normal_scale : 1.0f;
+            memcpy(&g->info[3], &ns, sizeof(ns));
+            n++;
+        }
+        if (n == first) continue;
+        SkinBatch *ob = &out->batches[out->batch_count++];
+        *ob = *sb;
+        ob->first = base + first;
+        ob->count = n - first;
+    }
     return n;
 }
 
@@ -1418,6 +1485,32 @@ static void compute_matrices(FrameData *fd) {
         fd->shadow_vm = v4(vt->texel_m, vt->span, R->shadow_vm_active ? 1.0f : 0.0f, vb.normal_m);
         fd->shadow_vm2 = v4(1.0f / (float)DG_MAX(R->vm_shadow_size, 1u), vt->span > 0.0f ? vb.const_m / vt->span : 0.0f, CSM_VM_SKIP, pcss_w);
         R->shadow_dbg_bias_m = bias[0] * span[0];
+    }
+    // Receiver volumes (docs/perf/FINDINGS.md PF-0006). lighting.glsl samples cascade k < last only
+    // for receivers at a selection distance <= split k (its own range, the blend from k - 1, the
+    // fallback from a tile k - 1 missed): visible points of the view slice up to split k, plus the
+    // first-person rig (sh_vm_apparent, within a few metres of the eye). A caster whose light-space
+    // footprint misses that slice by more than the filter's reach (PCSS search / tent / normal
+    // offset, in texels of the cascade) writes no texel any receiver reads: skipping it leaves every
+    // sampled depth identical. The last cascade is also read by particles, decals and the froxels
+    // anywhere in its tile: never culled. Neither are the cascades while a second camera samples them
+    // (scope PiP, phone views).
+    {
+        bool second_view = (R->sight.kind == RSIGHT_SCOPE_PIP && R->sight.ads_t >= 0.02f) || phone_view_pending();
+        bool on = prof_fix_enabled(PFX_SHADOW_RCV_CULL) && !second_view;
+        float max_tex = fmaxf(fmaxf(ss ? ss->pcss_max_texels : 32.0f, ss ? ss->min_texels : 1.0f), 7.0f);
+        for (int k = 0; k < 4; k++) {
+            R->shadow_rcv_n[k] = 0;
+            if (!on || k >= ncasc - 1 || !R->shadow_active[k]) continue;
+            vec3 pts[16];
+            for (int i = 0; i < 8; i++) {
+                float d = (i & 4) ? splits[k] : fmaxf(c->znear, 0.01f), sx = (i & 1) ? 1.0f : -1.0f, sy = (i & 2) ? 1.0f : -1.0f;
+                pts[i] = v3_add(c->pos, v3_add(v3_scale(fwd, d), v3_add(v3_scale(right, sx * tan_h * d), v3_scale(upv, sy * tan_v * d))));
+                pts[8 + i] = v3_add(c->pos, v3((i & 1) ? 3.0f : -3.0f, (i & 2) ? 3.0f : -3.0f, (i & 4) ? 3.0f : -3.0f));
+            }
+            float margin = nbias[k] + (1.5f * max_tex + 6.0f) * mpt[k] + 0.25f;
+            R->shadow_rcv_n[k] = csm_receiver_planes(&R->shadow_vp_ndc[k], pts, 16, margin, R->shadow_rcv[k]);
+        }
     }
     {
         // LOD cross-fades (docs/LOD.md): the dither turns per frame where TAA resolves it into a blend
@@ -2389,8 +2482,10 @@ void render_end_frame(void) {
     // The bone SSBO holds this frame's palettes, then last frame's (previous-palette velocity).
     bool cpu_skin = R->r_cpu_skinning->i != 0;
     g_skin_shadow_gpu = false;
-    static SkinPass skin_main, skin_shadow, skin_vm, skin_phone;
+    static SkinPass skin_main, skin_shadow, skin_vm, skin_phone, skin_shadow_k[5];
     skin_main.batch_count = skin_shadow.batch_count = skin_vm.batch_count = skin_phone.batch_count = 0;
+    for (int k = 0; k < 5; k++) skin_shadow_k[k].batch_count = 0;
+    bool skin_shadow_cull = false;
     F.skin_main = &skin_main;
     F.skin_vm = &skin_vm;
     F.skin_phone = &skin_phone;
@@ -2408,6 +2503,11 @@ void render_end_frame(void) {
             g_skin_shadow_gpu = true;
             u32 used = build_skin_pass(f, 0, 0, &skin_main);
             used += build_skin_pass(f, 1, used, &skin_shadow);
+            // Per-cascade casters (PF-0011); the culling-mask path draws per draw from the whole pass.
+            skin_shadow_cull = prof_fix_enabled(PFX_SKIN_SHADOW_CULL) && skin_shadow.batch_count &&
+                               (R->sun_shadow.culling_mask & SHADOW_LAYERS_ALL) == SHADOW_LAYERS_ALL;
+            for (int k = 0; k < 5 && skin_shadow_cull; k++)
+                if (k < 4 ? R->shadow_active[k] : R->moon_active) used += cull_skin_shadow(f, k, used, &skin_shadow, &skin_shadow_k[k]);
             used += build_skin_pass(f, 2, used, &skin_vm);
             if (phone_view_pending()) build_skin_pass(f, 3, used, &skin_phone);
         }
@@ -2464,8 +2564,11 @@ void render_end_frame(void) {
                     vkCmdSetViewport(cmd, 0, 1, &vp);
                     vkCmdSetScissor(cmd, 0, 1, &sc);
                     g_shadow_cascade = (u32)k;
-                    draw_sun_casters(cmd, f, k, &skin_shadow);
+                    g_shadow_rcv = R->shadow_rcv[k];
+                    g_shadow_rcv_n = R->shadow_rcv_n[k];
+                    draw_sun_casters(cmd, f, k, skin_shadow_cull ? &skin_shadow_k[k] : &skin_shadow);
                 }
+                g_shadow_rcv_n = 0;
                 g_shadow_cascade = 0;
                 g_shadow_min_radius = 0.0f;
                 g_shadow_cull = false;
@@ -2508,7 +2611,7 @@ void render_end_frame(void) {
                 g_shadow_layers = R->sun_shadow.culling_mask;
                 extract_frustum(R->shadow_vp_ndc[4], g_shadow_planes);
                 g_shadow_cascade = SHADOW_PASS_MOON;
-                draw_sun_casters(cmd, f, 4, &skin_shadow);
+                draw_sun_casters(cmd, f, 4, skin_shadow_cull ? &skin_shadow_k[4] : &skin_shadow);
                 g_shadow_cascade = 0;
                 g_shadow_min_radius = 0.0f;
                 g_shadow_cull = false;

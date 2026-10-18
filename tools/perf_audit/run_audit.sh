@@ -16,6 +16,8 @@ OUT=${PERF_OUT:-$ROOT/${DG_BUILD:-build}/perf_out/$DATE}
 SETTLE=${PERF_SETTLE:-120}
 PY=$(command -v python3 || command -v python)
 PORTARG=; [ -n "$DG_PORT" ] && PORTARG="+set net_port $DG_PORT"
+# Git Bash: the game reads the console lines, not the shell's /c/... spelling.
+command -v cygpath > /dev/null 2>&1 && OUT=$(cygpath -m "$OUT")
 mkdir -p "$OUT/lan2"
 cd "$BIN"
 

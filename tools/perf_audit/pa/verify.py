@@ -94,6 +94,28 @@ def timing_verdict(a_profiles, b_profiles, metric, min_gain=0.0):
 
 
 def state_verdict(a_profiles, b_profiles):
+    """Per scene / level (the hashes of different scenes never match): every group must be identical."""
+    groups = {}
+    for p in a_profiles:
+        groups.setdefault(getattr(p, "key", ""), ([], []))[0].append(p)
+    for p in b_profiles:
+        groups.setdefault(getattr(p, "key", ""), ([], []))[1].append(p)
+    if len(groups) <= 1:
+        return _state_verdict_one(a_profiles, b_profiles)
+    out = {"verdict": "identical", "ticks": 0, "pass": True, "scenes": {}}
+    for key in sorted(groups):
+        v = _state_verdict_one(*groups[key])
+        out["scenes"][key] = v
+        out["ticks"] += v.get("ticks", 0)
+        if not v["pass"] and out["pass"]:
+            out["verdict"] = "%s: %s" % (key, v["verdict"])
+            out["pass"] = False
+            if "first_diff_tick" in v:
+                out["first_diff_tick"] = v["first_diff_tick"]
+    return out
+
+
+def _state_verdict_one(a_profiles, b_profiles):
     def hashes(p):
         s = p.state()
         return s.get("hashes") if isinstance(s, dict) else None

@@ -448,5 +448,571 @@
    "summary": "CLOSED: zone:fg:validate 0.01746 -> 0.0 (-100.00%, p=0); images pass; state identical",
    "machine": "Linux container, Mesa lavapipe 25.2 (software Vulkan), 4 cores"
   }
+ },
+ "PF-0006": {
+  "title": "Sun cascade casters culled to the cascade's receiver volume",
+  "rule": "R11",
+  "finding": "R11 shadow caster items far above the scene items / R02 static casters in every cascade (F-7b209b, F-b96020): every caster inside a cascade's light box was drawn, also those whose shadow falls only on ground outside the view",
+  "effort": "M",
+  "status": "closed",
+  "code": [
+   "src/render/shadow_csm.c csm_receiver_planes",
+   "src/render/render.c compute_matrices (shadow_rcv), draw_items",
+   "src/render/vk_classic.c cull_cells / cull_instance (ClCull.rcv)"
+  ],
+  "description": "Per cascade k below the last, the light-space convex hull of the view slice up to split k (and a 3 m box around the eye: the first-person rig) is extruded along the light into world planes, grown by the filter's reach (normal offset + (1.5 x PCSS max texels + 6) texels + 0.25 m). Classic instances, placement cells / chunks and raster draws whose bounds lie outside it are skipped in that cascade.",
+  "neutral": "lighting.glsl samples cascade k < last only for receivers at a selection distance <= split k (its range, the blend from k - 1, the fallback from k - 1), i.e. visible points of the view slice, plus the rig near the eye (shadow_factor_vm). Every tap of every filter (hard, tent, PCSS search and disc) lies within the margin of the receiver's projection, and a caster outside the extruded hull projects outside it: no texel any receiver reads changes. The last cascade (particles, decals, froxels sample it anywhere in its tile) is never culled, nor any cascade while the scope PiP or a phone camera samples them. tests/test_shadow_csm.c: 36000 receiver / caster pairs, none culled.",
+  "metrics": [
+   "scope:shadow_sun",
+   "scopec:shadow_sun:vs_invocations",
+   "gpu_frame",
+   "zone:render:prepare"
+  ],
+  "scenes": [
+   "foliage",
+   "devroom"
+  ],
+  "verification": {
+   "runs": [
+    {
+     "date": "2026-10-18",
+     "machine": "DESKTOP-SN4N74U",
+     "summary": "CLOSED: scope:shadow_sun 1.687 -> 1.5465 (-8.33%, p=0); images pass; state identical",
+     "closed": true,
+     "timing": [
+      {
+       "metric": "scope:shadow_sun",
+       "a_median": 1.687,
+       "b_median": 1.5465,
+       "a_mean": 1.50354,
+       "b_mean": 1.34771,
+       "delta": -0.1405,
+       "delta_pct": -8.33,
+       "p_value": 0.0,
+       "samples": [
+        952,
+        952
+       ],
+       "improved": true
+      },
+      {
+       "metric": "scopec:shadow_sun:vs_invocations",
+       "a_median": 1338650.0,
+       "b_median": 1135250.0,
+       "a_mean": 1473136.97479,
+       "b_mean": 1252607.77311,
+       "delta": -203400.0,
+       "delta_pct": -15.19,
+       "p_value": 0.0,
+       "samples": [
+        960,
+        960
+       ],
+       "improved": true
+      },
+      {
+       "metric": "gpu_frame",
+       "a_median": 7.5665,
+       "b_median": 7.516,
+       "a_mean": 7.68774,
+       "b_mean": 7.56986,
+       "delta": -0.0505,
+       "delta_pct": -0.67,
+       "p_value": 0.0203,
+       "samples": [
+        960,
+        960
+       ],
+       "improved": true
+      },
+      {
+       "metric": "zone:render:prepare",
+       "a_median": 1.54705,
+       "b_median": 1.32395,
+       "a_mean": 1.56143,
+       "b_mean": 1.41362,
+       "delta": -0.2231,
+       "delta_pct": -14.42,
+       "p_value": 0.0,
+       "samples": [
+        960,
+        960
+       ],
+       "improved": true
+      }
+     ],
+     "state": "identical",
+     "images_pass": true,
+     "dir": "build2/perf_out/verify/PF-0006"
+    }
+   ],
+   "summary": "CLOSED: scope:shadow_sun 1.687 -> 1.5465 (-8.33%, p=0); images pass; state identical",
+   "machine": "DESKTOP-SN4N74U"
+  }
+ },
+ "PF-0007": {
+  "title": "Parts of one character share one palette copy",
+  "rule": "R10",
+  "finding": "R10 duplicate skinning palettes (F-5c8ab1): every part of a modular character copied the same matrices into the frame's bone buffer (1927 copies, 3.4 MB per frame with 500 zombies), then again into the GPU buffer, the previous-palette buffer and its GPU copy",
+  "effort": "S",
+  "status": "closed",
+  "code": [
+   "src/render/render.c render_draw_skinned",
+   "src/gameplay/characters.c draw_char / draw_char_fp (PC_SKIN_POSES)"
+  ],
+  "description": "render_draw_skinned compares the palette with the copy it made for the previous draw (same bone count, memcmp); when equal, the draw takes that copy's offset instead of appending a new one. The bone buffer, its GPU upload and the previous-palette copies shrink by the duplicates. skin_poses now counts character poses drawn (draw_char), so R10 compares uploads with poses.",
+  "neutral": "Only bit-identical palettes are shared: the skinning shaders read the same matrices at the shared offset. The previous-palette lookup (velocity) stores the offset / count each draw got, so last frame's matrices of every part are the same values too.",
+  "metrics": [
+   "zone:render:prepare",
+   "counter:skin_palette_bytes",
+   "counter:memcpy_bytes",
+   "cpu_work"
+  ],
+  "scenes": [
+   "horde500"
+  ],
+  "verification": {
+   "runs": [
+    {
+     "date": "2026-10-18",
+     "machine": "DESKTOP-SN4N74U",
+     "summary": "CLOSED: zone:render:prepare 1.2605 -> 0.75955 (-39.74%, p=0); images pass; state identical",
+     "closed": true,
+     "timing": [
+      {
+       "metric": "zone:render:prepare",
+       "a_median": 1.2605,
+       "b_median": 0.75955,
+       "a_mean": 1.27586,
+       "b_mean": 0.76343,
+       "delta": -0.50095,
+       "delta_pct": -39.74,
+       "p_value": 0.0,
+       "samples": [
+        480,
+        480
+       ],
+       "improved": true
+      },
+      {
+       "metric": "counter:skin_palette_bytes",
+       "a_median": 3454208.0,
+       "b_median": 1749760.0,
+       "a_mean": 3464541.33333,
+       "b_mean": 1749760.0,
+       "delta": -1704448.0,
+       "delta_pct": -49.34,
+       "p_value": 0.0,
+       "samples": [
+        480,
+        480
+       ],
+       "improved": true
+      },
+      {
+       "metric": "counter:memcpy_bytes",
+       "a_median": 19753573.0,
+       "b_median": 12874850.0,
+       "a_mean": 19811217.47917,
+       "b_mean": 12952225.47917,
+       "delta": -6878723.0,
+       "delta_pct": -34.82,
+       "p_value": 0.0,
+       "samples": [
+        480,
+        480
+       ],
+       "improved": true
+      },
+      {
+       "metric": "cpu_work",
+       "a_median": 8.957,
+       "b_median": 8.24095,
+       "a_mean": 9.11288,
+       "b_mean": 8.40882,
+       "delta": -0.71605,
+       "delta_pct": -7.99,
+       "p_value": 0.0,
+       "samples": [
+        480,
+        480
+       ],
+       "improved": true
+      }
+     ],
+     "state": "identical",
+     "images_pass": true,
+     "dir": "build2/perf_out/verify/PF-0007"
+    }
+   ],
+   "summary": "CLOSED: zone:render:prepare 1.2605 -> 0.75955 (-39.74%, p=0); images pass; state identical",
+   "machine": "DESKTOP-SN4N74U"
+  }
+ },
+ "PF-0008": {
+  "title": "Character draw poses on the job system",
+  "rule": "R07",
+  "finding": "R07 workers idle while the main thread runs serial zones (F-66ec5c): game_render is the largest main-thread zone with a horde (5.2 ms, 500 zombies), most of it chars_render interpolating every bone of every drawn character and building its skinning matrices one character after the other",
+  "effort": "M",
+  "status": "dropped",
+  "code": [
+   "src/gameplay/characters.c chars_render / pose_for_draw / pose_range"
+  ],
+  "description": "chars_render first reads the interpolation instant and the seat fix (vehicles) of every drawn character on the main thread, then interpolates the poses and builds the skinning matrices (skel_inst_set_pose) with jobs_parallel_for over the characters (ragdolls stay on the main thread: they read the physics world). The part selection, LOD choice and every draw call stay serial, in the same entity order. Dropped: perf_verify (horde500, 3 x A/B) measured game_render -39 % and CPU work -21 %, but the GPU frame +11 % in every B pass (shadow_sun +0.16 ms; the GPU reads the host-visible bone / instance buffers while 11 workers run), so the guard failed. The code was reverted; the id is not reused.",
+  "neutral": "Each job writes only its own character's pose_draw and skeleton instance from inputs no job writes (pose_prev / pose_cur, the tick, the seat fix taken before), with the same arithmetic as the serial loop: the poses, palettes and the draw order are identical whatever the thread count.",
+  "metrics": [
+   "zone:game_render",
+   "cpu_work"
+  ],
+  "scenes": [
+   "horde500"
+  ],
+  "verification": {
+   "runs": [
+    {
+     "date": "2026-10-18",
+     "machine": "DESKTOP-SN4N74U",
+     "summary": "NOT CLOSED: zone:game_render 5.803 -> 3.5205 (-39.33%, p=0); images pass; state identical",
+     "closed": false,
+     "timing": [
+      {
+       "metric": "zone:game_render",
+       "a_median": 5.803,
+       "b_median": 3.5205,
+       "a_mean": 5.96681,
+       "b_mean": 3.60614,
+       "delta": -2.2825,
+       "delta_pct": -39.33,
+       "p_value": 0.0,
+       "samples": [
+        720,
+        720
+       ],
+       "improved": true
+      },
+      {
+       "metric": "cpu_work",
+       "a_median": 11.383,
+       "b_median": 9.03255,
+       "a_mean": 11.68957,
+       "b_mean": 9.28331,
+       "delta": -2.35045,
+       "delta_pct": -20.65,
+       "p_value": 0.0,
+       "samples": [
+        720,
+        720
+       ],
+       "improved": true
+      }
+     ],
+     "state": "identical",
+     "images_pass": true,
+     "dir": "build2/perf_out/verify/PF-0008"
+    }
+   ],
+   "summary": "NOT CLOSED: zone:game_render 5.803 -> 3.5205 (-39.33%, p=0); images pass; state identical",
+   "machine": "DESKTOP-SN4N74U"
+  }
+ },
+ "PF-0009": {
+  "title": "The classic renderer's views culled in one parallel pass",
+  "rule": "R07",
+  "finding": "R07 main thread stalls waiting for jobs (F-37a7e1): in the vegetation scenes the classic cull ran one jobs_parallel_for per view (main view, up to 4 sun cascades, the scope PiP), each ending in a tail wait for its slowest cell before the next view could start (0.5 - 0.7 ms of wait:parfor_tail per frame, render:prepare 3.8 ms)",
+  "effort": "M",
+  "status": "closed",
+  "code": [
+   "src/render/vk_classic.c cull_views / cull_range_multi / cell_tasks / cascade_view (vkc_frame)"
+  ],
+  "description": "vkc_frame builds every view's cull state first (the same ClCull per view as before), the cell tests of each view into its own task list, then culls the instances of every view in one jobs_parallel_for over the concatenated task lists, each view writing into its own output buffer. The outputs are packed per view in task order and emitted in the old order (PiP, main, cascades).",
+  "neutral": "cull_instance is unchanged and reads only shared, frame-constant data; every view's tasks are the same cells in the same order with the same output offsets, packed the same way, so each view's instance stream, batch list and the frame's instance buffer layout are identical to the per-view passes whatever the thread count.",
+  "metrics": [
+   "zone:render:prepare",
+   "cpu_work"
+  ],
+  "scenes": [
+   "foliage"
+  ],
+  "verification": {
+   "runs": [
+    {
+     "date": "2026-10-18",
+     "machine": "DESKTOP-SN4N74U",
+     "summary": "CLOSED: zone:render:prepare 3.258 -> 2.646 (-18.78%, p=0); images pass; state identical",
+     "closed": true,
+     "timing": [
+      {
+       "metric": "zone:render:prepare",
+       "a_median": 3.258,
+       "b_median": 2.646,
+       "a_mean": 3.3008,
+       "b_mean": 2.67442,
+       "delta": -0.612,
+       "delta_pct": -18.78,
+       "p_value": 0.0,
+       "samples": [
+        480,
+        480
+       ],
+       "improved": true
+      },
+      {
+       "metric": "cpu_work",
+       "a_median": 5.37235,
+       "b_median": 4.69355,
+       "a_mean": 5.50378,
+       "b_mean": 4.77615,
+       "delta": -0.6788,
+       "delta_pct": -12.64,
+       "p_value": 0.0,
+       "samples": [
+        480,
+        480
+       ],
+       "improved": true
+      }
+     ],
+     "state": "identical",
+     "images_pass": true,
+     "dir": "build2/perf_out/verify/PF-0009"
+    }
+   ],
+   "summary": "CLOSED: zone:render:prepare 3.258 -> 2.646 (-18.78%, p=0); images pass; state identical",
+   "machine": "DESKTOP-SN4N74U"
+  }
+ },
+ "PF-0010": {
+  "title": "Wind tile rows on the job system",
+  "rule": "R07",
+  "finding": "R07 workers idle while the main thread runs serial zones (F-66ec5c): weather_frame -> wind_game_frame -> wind_tile_update evaluated the 64 x 64 wind window (wind_at: gust fronts, three turbulence noises, sources; a damped spring per texel) on the main thread every frame, ~1.6 ms of game_render in every scene (found by zoning game_render on the vegetation map)",
+  "effort": "S",
+  "status": "closed",
+  "code": [
+   "src/world/wind.c wind_tile_begin / wind_tile_rows / wind_tile_end (wind_tile_update = the three in a row)",
+   "src/game/game_wind.c wind_game_frame"
+  ],
+  "description": "wind_tile_update is split into begin (window origin, the global bend spring), rows and end (the new origin). wind_game_frame runs the 64 rows with jobs_parallel_for; the pure module keeps the one-call form (tests/test_wind.c).",
+  "neutral": "Row j writes only the texels of world row oz + j (64 consecutive rows map to 64 distinct slots) and reads the field and the previous window origin, which only end changes: every texel gets the same wind_at / spring arithmetic, so the uploaded RGBA16F window is identical whatever the thread count.",
+  "metrics": [
+   "zone:game_render",
+   "cpu_work"
+  ],
+  "scenes": [
+   "foliage",
+   "devroom"
+  ],
+  "verification": {
+   "runs": [
+    {
+     "date": "2026-10-18",
+     "machine": "DESKTOP-SN4N74U",
+     "summary": "CLOSED: zone:game_render 1.594 -> 0.96035 (-39.75%, p=0); images pass; state identical",
+     "closed": true,
+     "timing": [
+      {
+       "metric": "zone:game_render",
+       "a_median": 1.594,
+       "b_median": 0.96035,
+       "a_mean": 1.643,
+       "b_mean": 0.99513,
+       "delta": -0.63365,
+       "delta_pct": -39.75,
+       "p_value": 0.0,
+       "samples": [
+        960,
+        960
+       ],
+       "improved": true
+      },
+      {
+       "metric": "cpu_work",
+       "a_median": 4.86625,
+       "b_median": 4.2667,
+       "a_mean": 4.53858,
+       "b_mean": 3.90148,
+       "delta": -0.59955,
+       "delta_pct": -12.32,
+       "p_value": 0.0,
+       "samples": [
+        960,
+        960
+       ],
+       "improved": true
+      }
+     ],
+     "state": "identical",
+     "images_pass": true,
+     "dir": "build2/perf_out/verify/PF-0010"
+    }
+   ],
+   "summary": "CLOSED: zone:game_render 1.594 -> 0.96035 (-39.75%, p=0); images pass; state identical",
+   "machine": "DESKTOP-SN4N74U"
+  }
+ },
+ "PF-0011": {
+  "title": "Skinned shadow casters culled per sun cascade",
+  "rule": "R11",
+  "finding": "R11 shadow casters drawn into cascades (F-7b209b): the skinned shadow pass (every zombie's parts, instanced) was drawn whole into each of the 4 sun cascades and the moon map, so a 500-zombie horde was skinned 5 times for the shadows; the raster and classic casters were already culled per tile",
+  "effort": "M",
+  "status": "closed",
+  "code": [
+   "src/render/render.c cull_skin_shadow / render_end_frame (skin_shadow_k)",
+   "render.c build_skin_pass (g_skin_shadow_order)"
+  ],
+  "description": "After the shadow pass's instance records, each active cascade (and the moon map) gets its own copy of the pass with only the casters whose bounding sphere (hips, character height) touches the cascade's light box and its receiver volume (PF-0006): the same batches in the same order, with the instances kept. The culling-mask path (per-draw shadow draws) and the local light tiles keep the whole pass. The skinning instance buffer grows to 8 x MAX_SKIN_DRAWS records.",
+  "neutral": "A shadow record depends on its draw only, so a kept instance draws exactly as before; a dropped one lies outside the tile's light box (it rasterizes no texel of the tile: the tile scissor and the box clip it) or outside the receiver volume (no receiver reads the texels it would write). Depth is a min over the kept fragments: identical.",
+  "metrics": [
+   "scope:shadow_sun",
+   "gpu_frame",
+   "scopec:shadow_sun:vs_invocations"
+  ],
+  "scenes": [
+   "horde500"
+  ],
+  "verification": {
+   "runs": [
+    {
+     "date": "2026-10-18",
+     "machine": "DESKTOP-SN4N74U",
+     "summary": "CLOSED: scope:shadow_sun 0.3625 -> 0.3092 (-14.70%, p=0); images pass; state identical",
+     "closed": true,
+     "timing": [
+      {
+       "metric": "scope:shadow_sun",
+       "a_median": 0.3625,
+       "b_median": 0.3092,
+       "a_mean": 0.36375,
+       "b_mean": 0.30619,
+       "delta": -0.0533,
+       "delta_pct": -14.7,
+       "p_value": 0.0,
+       "samples": [
+        476,
+        476
+       ],
+       "improved": true
+      },
+      {
+       "metric": "gpu_frame",
+       "a_median": 3.9075,
+       "b_median": 3.833,
+       "a_mean": 3.90093,
+       "b_mean": 3.82662,
+       "delta": -0.0745,
+       "delta_pct": -1.91,
+       "p_value": 2e-05,
+       "samples": [
+        480,
+        480
+       ],
+       "improved": true
+      },
+      {
+       "metric": "scopec:shadow_sun:vs_invocations",
+       "a_median": 1865000.0,
+       "b_median": 924450.0,
+       "a_mean": 1926075.63025,
+       "b_mean": 913200.84034,
+       "delta": -940550.0,
+       "delta_pct": -50.43,
+       "p_value": 0.0,
+       "samples": [
+        480,
+        480
+       ],
+       "improved": true
+      }
+     ],
+     "state": "identical",
+     "images_pass": true,
+     "dir": "build2/perf_out/verify/PF-0011"
+    }
+   ],
+   "summary": "CLOSED: scope:shadow_sun 0.3625 -> 0.3092 (-14.70%, p=0); images pass; state identical",
+   "machine": "DESKTOP-SN4N74U"
+  }
+ },
+ "PF-0012": {
+  "title": "Classic shadow instances drawn front to back from the light",
+  "rule": "R02",
+  "finding": "R02 shadow casters in every cascade (F-b96020) / alpha-test overdraw in the dense vegetation zones: the pine forest interior's sun shadow pass ran 670 M alpha-tested fragment invocations per frame (~40 x the 4 tiles' 16.7 M texels; 14 - 21 ms of GPU at Modern), instances in cell order, small meshes before trees",
+  "effort": "S",
+  "status": "closed",
+  "code": [
+   "src/render/vk_classic.c emit_view_light_order / cmp_batch_size (cull_views, vkc_frame)"
+  ],
+  "description": "A sun cascade's instance stream is emitted with each batch ordered front to back from the light (32 light-depth buckets over the view's depth range, stable within a bucket) and the batches ordered by mesh size (trees before bushes and grass). Canopies are drawn first, so the alpha-tested fragments behind already written depth fail the early depth test before their shader runs.",
+  "neutral": "The shadow pass is depth only: every texel ends at the minimum depth of the fragments that pass their alpha test, and which fragments exist, their depths and their alpha tests do not depend on the draw order. The same instances and batches are drawn, so the maps are bit-identical; only the order (and the number of fragment shader invocations) changes.",
+  "metrics": [
+   "scope:shadow_sun",
+   "scopec:shadow_sun:fs_invocations",
+   "gpu_frame"
+  ],
+  "scenes": [
+   "veg_forest_pine",
+   "veg_forest_broadleaf"
+  ],
+  "verification": {
+   "runs": [
+    {
+     "date": "2026-10-18",
+     "machine": "DESKTOP-SN4N74U",
+     "summary": "CLOSED: scope:shadow_sun 29.5 -> 27.49 (-6.81%, p=1e-05); images pass; state identical",
+     "closed": true,
+     "timing": [
+      {
+       "metric": "scope:shadow_sun",
+       "a_median": 29.5,
+       "b_median": 27.49,
+       "a_mean": 29.79604,
+       "b_mean": 28.52166,
+       "delta": -2.01,
+       "delta_pct": -6.81,
+       "p_value": 1e-05,
+       "samples": [
+        952,
+        952
+       ],
+       "improved": true
+      },
+      {
+       "metric": "scopec:shadow_sun:fs_invocations",
+       "a_median": 821600000.0,
+       "b_median": 800900000.0,
+       "a_mean": 861232247.89916,
+       "b_mean": 837164285.71429,
+       "delta": -20700000.0,
+       "delta_pct": -2.52,
+       "p_value": 0.0,
+       "samples": [
+        960,
+        960
+       ],
+       "improved": true
+      },
+      {
+       "metric": "gpu_frame",
+       "a_median": 51.32,
+       "b_median": 47.275,
+       "a_mean": 53.97084,
+       "b_mean": 50.25598,
+       "delta": -4.045,
+       "delta_pct": -7.88,
+       "p_value": 0.0,
+       "samples": [
+        960,
+        960
+       ],
+       "improved": true
+      }
+     ],
+     "state": "identical",
+     "images_pass": true,
+     "dir": "build2/perf_out/verify/PF-0012"
+    }
+   ],
+   "summary": "CLOSED: scope:shadow_sun 29.5 -> 27.49 (-6.81%, p=1e-05); images pass; state identical",
+   "machine": "DESKTOP-SN4N74U"
+  }
  }
 }

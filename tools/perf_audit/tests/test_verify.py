@@ -119,6 +119,20 @@ class StateAndTiming(unittest.TestCase):
         self.assertFalse(v["pass"])
         self.assertIn("inconclusive", v["verdict"])
 
+    def test_state_per_scene(self):
+        # Two scenes in one run: their hashes differ from each other, each matches its own A.
+        h, g = list(range(S.N)), [x * 7 for x in range(S.N)]
+        pa, pb, qa, qb = self.prof(h), self.prof(h), self.prof(g), self.prof(g)
+        for p, sc in ((pa, "one"), (pb, "one"), (qa, "two"), (qb, "two")):
+            p.key = sc + "/modern"
+        v = verify.state_verdict([pa, qa], [pb, qb])
+        self.assertTrue(v["pass"], v)
+        qc = self.prof(g[:10] + [999] + g[11:])
+        qc.key = "two/modern"
+        v = verify.state_verdict([pa, qa], [pb, qc])
+        self.assertFalse(v["pass"])
+        self.assertIn("behaviour changed", v["verdict"])
+
     def test_mann_whitney(self):
         a = [10.0 + 0.1 * (i % 7) for i in range(60)]
         b = [9.5 + 0.1 * (i % 7) for i in range(60)]

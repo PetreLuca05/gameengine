@@ -1,8 +1,8 @@
 {
  "meta": {
   "date": "2026-10-18",
-  "profiles": 8,
-  "machine": "Linux container, Mesa lavapipe 25.2 (software Vulkan), 4 cores",
+  "profiles": 36,
+  "machine": "DESKTOP-SN4N74U",
   "rules_runtime": [
    "R01",
    "R02",
@@ -17,7 +17,6 @@
    "R10",
    "R12",
    "R13",
-   "R15",
    "R18",
    "R19",
    "R23",
@@ -41,14 +40,42 @@
   ]
  },
  "profiles": [
-  "/tmp/claude-0/-home-user-gameengine/ce674441-9067-5382-a7b4-35a05beb6d57/scratchpad/run/final/night_lights/night_lights_low.json",
-  "/tmp/claude-0/-home-user-gameengine/ce674441-9067-5382-a7b4-35a05beb6d57/scratchpad/run/final/night_lights/night_lights_modern.json",
-  "/tmp/claude-0/-home-user-gameengine/ce674441-9067-5382-a7b4-35a05beb6d57/scratchpad/run/final/devroom/devroom_low.json",
-  "/tmp/claude-0/-home-user-gameengine/ce674441-9067-5382-a7b4-35a05beb6d57/scratchpad/run/final/devroom/devroom_modern.json",
-  "/tmp/claude-0/-home-user-gameengine/ce674441-9067-5382-a7b4-35a05beb6d57/scratchpad/run/final/horde500/horde500_low.json",
-  "/tmp/claude-0/-home-user-gameengine/ce674441-9067-5382-a7b4-35a05beb6d57/scratchpad/run/final/horde500/horde500_modern.json",
-  "/tmp/claude-0/-home-user-gameengine/ce674441-9067-5382-a7b4-35a05beb6d57/scratchpad/run/final/vehicle_yard/vehicle_yard_low.json",
-  "/tmp/claude-0/-home-user-gameengine/ce674441-9067-5382-a7b4-35a05beb6d57/scratchpad/run/final/vehicle_yard/vehicle_yard_modern.json"
+  "C:/C/Game/.claude/worktrees/agent-ad164f18b70562cc5/build2/perf_out/after2/devroom/devroom_low.json",
+  "C:/C/Game/.claude/worktrees/agent-ad164f18b70562cc5/build2/perf_out/after2/devroom/devroom_modern.json",
+  "C:/C/Game/.claude/worktrees/agent-ad164f18b70562cc5/build2/perf_out/after2/foliage/foliage_low.json",
+  "C:/C/Game/.claude/worktrees/agent-ad164f18b70562cc5/build2/perf_out/after2/foliage/foliage_modern.json",
+  "C:/C/Game/.claude/worktrees/agent-ad164f18b70562cc5/build2/perf_out/after2/horde500/horde500_low.json",
+  "C:/C/Game/.claude/worktrees/agent-ad164f18b70562cc5/build2/perf_out/after2/horde500/horde500_modern.json",
+  "C:/C/Game/.claude/worktrees/agent-ad164f18b70562cc5/build2/perf_out/after2/horde_foliage/horde_foliage_low.json",
+  "C:/C/Game/.claude/worktrees/agent-ad164f18b70562cc5/build2/perf_out/after2/horde_foliage/horde_foliage_modern.json",
+  "C:/C/Game/.claude/worktrees/agent-ad164f18b70562cc5/build2/perf_out/after2/lan2/lan2_client.json",
+  "C:/C/Game/.claude/worktrees/agent-ad164f18b70562cc5/build2/perf_out/after2/lan2/lan2_host.json",
+  "C:/C/Game/.claude/worktrees/agent-ad164f18b70562cc5/build2/perf_out/after2/night_lights/night_lights_low.json",
+  "C:/C/Game/.claude/worktrees/agent-ad164f18b70562cc5/build2/perf_out/after2/night_lights/night_lights_modern.json",
+  "C:/C/Game/.claude/worktrees/agent-ad164f18b70562cc5/build2/perf_out/after2/veg_deadwood/veg_deadwood_low.json",
+  "C:/C/Game/.claude/worktrees/agent-ad164f18b70562cc5/build2/perf_out/after2/veg_deadwood/veg_deadwood_modern.json",
+  "C:/C/Game/.claude/worktrees/agent-ad164f18b70562cc5/build2/perf_out/after2/veg_forest_broadleaf/veg_forest_broadleaf_low.json",
+  "C:/C/Game/.claude/worktrees/agent-ad164f18b70562cc5/build2/perf_out/after2/veg_forest_broadleaf/veg_forest_broadleaf_modern.json",
+  "C:/C/Game/.claude/worktrees/agent-ad164f18b70562cc5/build2/perf_out/after2/veg_forest_edge/veg_forest_edge_low.json",
+  "C:/C/Game/.claude/worktrees/agent-ad164f18b70562cc5/build2/perf_out/after2/veg_forest_edge/veg_forest_edge_modern.json",
+  "C:/C/Game/.claude/worktrees/agent-ad164f18b70562cc5/build2/perf_out/after2/veg_forest_pine/veg_forest_pine_low.json",
+  "C:/C/Game/.claude/worktrees/agent-ad164f18b70562cc5/build2/perf_out/after2/veg_forest_pine/veg_forest_pine_modern.json",
+  "C:/C/Game/.claude/worktrees/agent-ad164f18b70562cc5/build2/perf_out/after2/veg_horde_forest/veg_horde_forest_low.json",
+  "C:/C/Game/.claude/worktrees/agent-ad164f18b70562cc5/build2/perf_out/after2/veg_horde_forest/veg_horde_forest_modern.json",
+  "C:/C/Game/.claude/worktrees/agent-ad164f18b70562cc5/build2/perf_out/after2/veg_horde_meadow/veg_horde_meadow_low.json",
+  "C:/C/Game/.claude/worktrees/agent-ad164f18b70562cc5/build2/perf_out/after2/veg_horde_meadow/veg_horde_meadow_modern.json",
+  "C:/C/Game/.claude/worktrees/agent-ad164f18b70562cc5/build2/perf_out/after2/veg_meadow/veg_meadow_low.json",
+  "C:/C/Game/.claude/worktrees/agent-ad164f18b70562cc5/build2/perf_out/after2/veg_meadow/veg_meadow_modern.json",
+  "C:/C/Game/.claude/worktrees/agent-ad164f18b70562cc5/build2/perf_out/after2/veg_overlook/veg_overlook_low.json",
+  "C:/C/Game/.claude/worktrees/agent-ad164f18b70562cc5/build2/perf_out/after2/veg_overlook/veg_overlook_modern.json",
+  "C:/C/Game/.claude/worktrees/agent-ad164f18b70562cc5/build2/perf_out/after2/veg_pond/veg_pond_low.json",
+  "C:/C/Game/.claude/worktrees/agent-ad164f18b70562cc5/build2/perf_out/after2/veg_pond/veg_pond_modern.json",
+  "C:/C/Game/.claude/worktrees/agent-ad164f18b70562cc5/build2/perf_out/after2/veg_wheat/veg_wheat_low.json",
+  "C:/C/Game/.claude/worktrees/agent-ad164f18b70562cc5/build2/perf_out/after2/veg_wheat/veg_wheat_modern.json",
+  "C:/C/Game/.claude/worktrees/agent-ad164f18b70562cc5/build2/perf_out/after2/vehicle_yard/vehicle_yard_low.json",
+  "C:/C/Game/.claude/worktrees/agent-ad164f18b70562cc5/build2/perf_out/after2/vehicle_yard/vehicle_yard_modern.json",
+  "C:/C/Game/.claude/worktrees/agent-ad164f18b70562cc5/build2/perf_out/after2/water_weather/water_weather_low.json",
+  "C:/C/Game/.claude/worktrees/agent-ad164f18b70562cc5/build2/perf_out/after2/water_weather/water_weather_modern.json"
  ],
  "findings": [
   {
@@ -61,50 +88,175 @@
     "file": "src/render/render.c"
    },
    "evidence": {
-    "night_lights/low": {
-     "gpu_ms": 16.2826,
-     "draws": 86.9,
-     "shadow_items": 797.5
-    },
-    "night_lights/modern": {
-     "gpu_ms": 113.6105,
-     "draws": 1086.2,
-     "shadow_items": 1575.5
-    },
-    "devroom/low": {
-     "gpu_ms": 18.9553,
-     "draws": 97.1,
-     "shadow_items": 797.5
-    },
     "devroom/modern": {
-     "gpu_ms": 138.8579,
-     "draws": 1118.9,
-     "shadow_items": 1575.5
+     "gpu_ms": 0.5292,
+     "draws": 649.2,
+     "shadow_items": 1597.2
     },
-    "horde500/low": {
-     "gpu_ms": 13.8232,
-     "draws": 45.9,
-     "shadow_items": 797.5
+    "foliage/low": {
+     "gpu_ms": 0.897,
+     "draws": 216.7,
+     "shadow_items": 368.0
+    },
+    "foliage/modern": {
+     "gpu_ms": 6.7252,
+     "draws": 332.2,
+     "shadow_items": 730.0
     },
     "horde500/modern": {
-     "gpu_ms": 129.1816,
-     "draws": 924.3,
-     "shadow_items": 1575.5
+     "gpu_ms": 0.9104,
+     "draws": 553.1,
+     "shadow_items": 1597.2
+    },
+    "horde_foliage/low": {
+     "gpu_ms": 1.5992,
+     "draws": 247.9,
+     "shadow_items": 368.0
+    },
+    "horde_foliage/modern": {
+     "gpu_ms": 3.8115,
+     "draws": 392.6,
+     "shadow_items": 730.0
+    },
+    "lan2_client/4": {
+     "gpu_ms": 1.9287,
+     "draws": 1018.3,
+     "shadow_items": 1573.0
+    },
+    "lan2_host/4": {
+     "gpu_ms": 2.0502,
+     "draws": 961.2,
+     "shadow_items": 1597.2
+    },
+    "night_lights/low": {
+     "gpu_ms": 0.196,
+     "draws": 146.8,
+     "shadow_items": 805.2
+    },
+    "night_lights/modern": {
+     "gpu_ms": 0.6664,
+     "draws": 755.1,
+     "shadow_items": 1597.2
+    },
+    "veg_deadwood/low": {
+     "gpu_ms": 1.0385,
+     "draws": 196.4,
+     "shadow_items": 246.0
+    },
+    "veg_deadwood/modern": {
+     "gpu_ms": 5.1755,
+     "draws": 314.2,
+     "shadow_items": 488.0
+    },
+    "veg_forest_broadleaf/low": {
+     "gpu_ms": 4.8398,
+     "draws": 225.3,
+     "shadow_items": 307.0
+    },
+    "veg_forest_broadleaf/modern": {
+     "gpu_ms": 30.4289,
+     "draws": 372.9,
+     "shadow_items": 609.0
+    },
+    "veg_forest_edge/low": {
+     "gpu_ms": 1.3418,
+     "draws": 240.2,
+     "shadow_items": 337.5
+    },
+    "veg_forest_edge/modern": {
+     "gpu_ms": 13.354,
+     "draws": 380.7,
+     "shadow_items": 669.5
+    },
+    "veg_forest_pine/low": {
+     "gpu_ms": 1.8641,
+     "draws": 207.8,
+     "shadow_items": 307.0
+    },
+    "veg_forest_pine/modern": {
+     "gpu_ms": 21.1685,
+     "draws": 346.7,
+     "shadow_items": 609.0
+    },
+    "veg_horde_forest/low": {
+     "gpu_ms": 1.6536,
+     "draws": 242.5,
+     "shadow_items": 307.0
+    },
+    "veg_horde_forest/modern": {
+     "gpu_ms": 20.4054,
+     "draws": 408.3,
+     "shadow_items": 609.0
+    },
+    "veg_horde_meadow/low": {
+     "gpu_ms": 1.3062,
+     "draws": 248.7,
+     "shadow_items": 429.0
+    },
+    "veg_horde_meadow/modern": {
+     "gpu_ms": 6.0329,
+     "draws": 387.2,
+     "shadow_items": 851.0
+    },
+    "veg_meadow/low": {
+     "gpu_ms": 0.7736,
+     "draws": 215.9,
+     "shadow_items": 429.0
+    },
+    "veg_meadow/modern": {
+     "gpu_ms": 3.7322,
+     "draws": 324.5,
+     "shadow_items": 851.0
+    },
+    "veg_overlook/low": {
+     "gpu_ms": 0.5573,
+     "draws": 175.4,
+     "shadow_items": 246.0
+    },
+    "veg_overlook/modern": {
+     "gpu_ms": 3.1344,
+     "draws": 259.0,
+     "shadow_items": 488.0
+    },
+    "veg_pond/low": {
+     "gpu_ms": 0.9026,
+     "draws": 253.4,
+     "shadow_items": 368.0
+    },
+    "veg_pond/modern": {
+     "gpu_ms": 5.7984,
+     "draws": 380.4,
+     "shadow_items": 730.0
+    },
+    "veg_wheat/low": {
+     "gpu_ms": 0.5759,
+     "draws": 170.4,
+     "shadow_items": 368.0
+    },
+    "veg_wheat/modern": {
+     "gpu_ms": 3.8354,
+     "draws": 231.0,
+     "shadow_items": 730.0
     },
     "vehicle_yard/low": {
-     "gpu_ms": 11.1574,
-     "draws": 49.6,
-     "shadow_items": 864.7
+     "gpu_ms": 0.1917,
+     "draws": 88.5,
+     "shadow_items": 882.5
     },
     "vehicle_yard/modern": {
-     "gpu_ms": 133.6211,
-     "draws": 862.4,
-     "shadow_items": 1718.7
+     "gpu_ms": 1.2493,
+     "draws": 449.6,
+     "shadow_items": 1750.5
+    },
+    "water_weather/modern": {
+     "gpu_ms": 2.3102,
+     "draws": 254.7,
+     "shadow_items": 422.9
     }
    },
    "savings": {
     "cpu_ms": 0.0,
-    "gpu_ms": 83.31473684210528,
+    "gpu_ms": 18.257335570469795,
     "mb": 0.0,
     "bytes_s": 0.0
    },
@@ -115,45 +267,110 @@
    "verify": "verify by image + state diff after implementation (perf_verify)",
    "fix_id": null,
    "scenes": [
+    "devroom/modern",
+    "foliage/low",
+    "foliage/modern",
+    "horde500/modern",
+    "horde_foliage/low",
+    "horde_foliage/modern",
+    "lan2_client/4",
+    "lan2_host/4",
     "night_lights/low",
     "night_lights/modern",
-    "devroom/low",
-    "devroom/modern",
-    "horde500/low",
-    "horde500/modern",
+    "veg_deadwood/low",
+    "veg_deadwood/modern",
+    "veg_forest_broadleaf/low",
+    "veg_forest_broadleaf/modern",
+    "veg_forest_edge/low",
+    "veg_forest_edge/modern",
+    "veg_forest_pine/low",
+    "veg_forest_pine/modern",
+    "veg_horde_forest/low",
+    "veg_horde_forest/modern",
+    "veg_horde_meadow/low",
+    "veg_horde_meadow/modern",
+    "veg_meadow/low",
+    "veg_meadow/modern",
+    "veg_overlook/low",
+    "veg_overlook/modern",
+    "veg_pond/low",
+    "veg_pond/modern",
+    "veg_wheat/low",
+    "veg_wheat/modern",
     "vehicle_yard/low",
-    "vehicle_yard/modern"
+    "vehicle_yard/modern",
+    "water_weather/modern"
    ],
    "source": "runtime",
    "below_noise": false,
-   "score": 6.24861
+   "score": 1.3693
   },
   {
    "id": "F-7b209b",
    "rule": "R11",
-   "title": "1575 shadow caster items per frame for 551 scene draw items",
+   "title": "1597 shadow caster items per frame for 596 scene draw items",
    "system": "render/shadows",
    "location": {
     "file": "src/render/render.c",
     "function": "draw_sun_casters"
    },
    "evidence": {
-    "night_lights/modern": {
-     "shadow_items": 1575,
-     "draw_items": 551
-    },
     "devroom/modern": {
-     "shadow_items": 1575,
-     "draw_items": 551
+     "shadow_items": 1597,
+     "draw_items": 596
+    },
+    "foliage/modern": {
+     "shadow_items": 730,
+     "draw_items": 185
+    },
+    "night_lights/modern": {
+     "shadow_items": 1597,
+     "draw_items": 596
+    },
+    "veg_deadwood/modern": {
+     "shadow_items": 488,
+     "draw_items": 125
+    },
+    "veg_forest_broadleaf/modern": {
+     "shadow_items": 609,
+     "draw_items": 155
+    },
+    "veg_forest_edge/modern": {
+     "shadow_items": 670,
+     "draw_items": 170
+    },
+    "veg_forest_pine/modern": {
+     "shadow_items": 609,
+     "draw_items": 155
+    },
+    "veg_meadow/modern": {
+     "shadow_items": 851,
+     "draw_items": 215
+    },
+    "veg_overlook/modern": {
+     "shadow_items": 488,
+     "draw_items": 125
+    },
+    "veg_pond/modern": {
+     "shadow_items": 730,
+     "draw_items": 185
+    },
+    "veg_wheat/modern": {
+     "shadow_items": 730,
+     "draw_items": 185
     },
     "vehicle_yard/modern": {
-     "shadow_items": 1719,
-     "draw_items": 547
+     "shadow_items": 1750,
+     "draw_items": 554
+    },
+    "water_weather/modern": {
+     "shadow_items": 423,
+     "draw_items": 169
     }
    },
    "savings": {
     "cpu_ms": 0.0,
-    "gpu_ms": 27.771578947368425,
+    "gpu_ms": 6.085778523489933,
     "mb": 0.0,
     "bytes_s": 0.0
    },
@@ -164,260 +381,70 @@
    "verify": "verify by image + state diff after implementation (perf_verify)",
    "fix_id": null,
    "scenes": [
-    "night_lights/modern",
     "devroom/modern",
-    "vehicle_yard/modern"
+    "foliage/modern",
+    "night_lights/modern",
+    "veg_deadwood/modern",
+    "veg_forest_broadleaf/modern",
+    "veg_forest_edge/modern",
+    "veg_forest_pine/modern",
+    "veg_meadow/modern",
+    "veg_overlook/modern",
+    "veg_pond/modern",
+    "veg_wheat/modern",
+    "vehicle_yard/modern",
+    "water_weather/modern"
    ],
    "source": "runtime",
    "below_noise": false,
-   "score": 2.77716
-  },
-  {
-   "id": "F-c4fd8c",
-   "rule": "R02",
-   "title": "'sky_view' recomputed every frame with unchanged inputs",
-   "system": "render/sky",
-   "location": {
-    "pass": "sky_view"
-   },
-   "evidence": {
-    "night_lights/low": {
-     "runs_per_frame": 0.95,
-     "gpu_ms": 4.5204,
-     "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
-    },
-    "night_lights/modern": {
-     "runs_per_frame": 0.95,
-     "gpu_ms": 4.8326,
-     "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
-    },
-    "devroom/low": {
-     "runs_per_frame": 0.95,
-     "gpu_ms": 4.5625,
-     "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
-    },
-    "devroom/modern": {
-     "runs_per_frame": 0.95,
-     "gpu_ms": 5.504,
-     "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
-    },
-    "horde500/low": {
-     "runs_per_frame": 0.95,
-     "gpu_ms": 4.2821,
-     "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
-    },
-    "horde500/modern": {
-     "runs_per_frame": 0.95,
-     "gpu_ms": 5.1896,
-     "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
-    },
-    "vehicle_yard/low": {
-     "runs_per_frame": 0.95,
-     "gpu_ms": 4.2742,
-     "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
-    },
-    "vehicle_yard/modern": {
-     "runs_per_frame": 0.95,
-     "gpu_ms": 4.7062,
-     "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
-    }
-   },
-   "savings": {
-    "cpu_ms": 0.0,
-    "gpu_ms": 5.22877,
-    "mb": 0.0,
-    "bytes_s": 0.0
-   },
-   "confidence": "medium",
-   "effort": "M",
-   "fix": "Hash the pass inputs (the uniforms it reads, quantized as the shader reads them) and skip the dispatch when the hash matches the content already in the target. The output is bit-identical by construction.",
-   "fidelity_impact": "none",
-   "verify": "verify by image + state diff after implementation (perf_verify)",
-   "fix_id": null,
-   "scenes": [
-    "night_lights/low",
-    "night_lights/modern",
-    "devroom/low",
-    "devroom/modern",
-    "horde500/low",
-    "horde500/modern",
-    "vehicle_yard/low",
-    "vehicle_yard/modern"
-   ],
-   "source": "runtime",
-   "below_noise": false,
-   "score": 1.04575
-  },
-  {
-   "id": "F-a7f6ca",
-   "rule": "R02",
-   "title": "'sky_cshadow' recomputed every frame with unchanged inputs",
-   "system": "render/sky",
-   "location": {
-    "pass": "sky_cshadow"
-   },
-   "evidence": {
-    "night_lights/low": {
-     "runs_per_frame": 0.95,
-     "gpu_ms": 0.5891,
-     "inputs": "cloud shadow map (cloud map + camera texel snap)"
-    },
-    "night_lights/modern": {
-     "runs_per_frame": 0.95,
-     "gpu_ms": 2.2842,
-     "inputs": "cloud shadow map (cloud map + camera texel snap)"
-    },
-    "devroom/low": {
-     "runs_per_frame": 0.95,
-     "gpu_ms": 0.6044,
-     "inputs": "cloud shadow map (cloud map + camera texel snap)"
-    },
-    "devroom/modern": {
-     "runs_per_frame": 0.95,
-     "gpu_ms": 2.6679,
-     "inputs": "cloud shadow map (cloud map + camera texel snap)"
-    },
-    "horde500/low": {
-     "runs_per_frame": 0.95,
-     "gpu_ms": 0.6348,
-     "inputs": "cloud shadow map (cloud map + camera texel snap)"
-    },
-    "horde500/modern": {
-     "runs_per_frame": 0.95,
-     "gpu_ms": 1.6649,
-     "inputs": "cloud shadow map (cloud map + camera texel snap)"
-    },
-    "vehicle_yard/low": {
-     "runs_per_frame": 0.95,
-     "gpu_ms": 0.5931,
-     "inputs": "cloud shadow map (cloud map + camera texel snap)"
-    },
-    "vehicle_yard/modern": {
-     "runs_per_frame": 0.95,
-     "gpu_ms": 1.6933,
-     "inputs": "cloud shadow map (cloud map + camera texel snap)"
-    }
-   },
-   "savings": {
-    "cpu_ms": 0.0,
-    "gpu_ms": 2.5345225,
-    "mb": 0.0,
-    "bytes_s": 0.0
-   },
-   "confidence": "medium",
-   "effort": "M",
-   "fix": "Hash the pass inputs (the uniforms it reads, quantized as the shader reads them) and skip the dispatch when the hash matches the content already in the target. The output is bit-identical by construction.",
-   "fidelity_impact": "none",
-   "verify": "verify by image + state diff after implementation (perf_verify)",
-   "fix_id": null,
-   "scenes": [
-    "night_lights/low",
-    "night_lights/modern",
-    "devroom/low",
-    "devroom/modern",
-    "horde500/low",
-    "horde500/modern",
-    "vehicle_yard/low",
-    "vehicle_yard/modern"
-   ],
-   "source": "runtime",
-   "below_noise": false,
-   "score": 0.5069
-  },
-  {
-   "id": "F-b0d253",
-   "rule": "R02",
-   "title": "'sky_clouds' recomputed every other frame with unchanged inputs",
-   "system": "render/sky",
-   "location": {
-    "pass": "sky_clouds"
-   },
-   "evidence": {
-    "night_lights/low": {
-     "runs_per_frame": 0.47,
-     "gpu_ms": 1.5378,
-     "inputs": "cloud map (cloud cover, wind offset, time)"
-    },
-    "night_lights/modern": {
-     "runs_per_frame": 0.47,
-     "gpu_ms": 2.8376,
-     "inputs": "cloud map (cloud cover, wind offset, time)"
-    },
-    "devroom/low": {
-     "runs_per_frame": 0.47,
-     "gpu_ms": 1.7523,
-     "inputs": "cloud map (cloud cover, wind offset, time)"
-    },
-    "devroom/modern": {
-     "runs_per_frame": 0.47,
-     "gpu_ms": 3.1421,
-     "inputs": "cloud map (cloud cover, wind offset, time)"
-    },
-    "horde500/low": {
-     "runs_per_frame": 0.47,
-     "gpu_ms": 1.8894,
-     "inputs": "cloud map (cloud cover, wind offset, time)"
-    },
-    "horde500/modern": {
-     "runs_per_frame": 0.47,
-     "gpu_ms": 2.5917,
-     "inputs": "cloud map (cloud cover, wind offset, time)"
-    },
-    "vehicle_yard/low": {
-     "runs_per_frame": 0.47,
-     "gpu_ms": 1.4858,
-     "inputs": "cloud map (cloud cover, wind offset, time)"
-    },
-    "vehicle_yard/modern": {
-     "runs_per_frame": 0.47,
-     "gpu_ms": 2.4357,
-     "inputs": "cloud map (cloud cover, wind offset, time)"
-    }
-   },
-   "savings": {
-    "cpu_ms": 0.0,
-    "gpu_ms": 1.4925,
-    "mb": 0.0,
-    "bytes_s": 0.0
-   },
-   "confidence": "medium",
-   "effort": "M",
-   "fix": "Hash the pass inputs (the uniforms it reads, quantized as the shader reads them) and skip the dispatch when the hash matches the content already in the target. The output is bit-identical by construction.",
-   "fidelity_impact": "none",
-   "verify": "verify by image + state diff after implementation (perf_verify)",
-   "fix_id": null,
-   "scenes": [
-    "night_lights/low",
-    "night_lights/modern",
-    "devroom/low",
-    "devroom/modern",
-    "horde500/low",
-    "horde500/modern",
-    "vehicle_yard/low",
-    "vehicle_yard/modern"
-   ],
-   "source": "runtime",
-   "below_noise": false,
-   "score": 0.2985
+   "score": 0.60858
   },
   {
    "id": "F-7519d1",
    "rule": "R23",
-   "title": "16.3 MB copied per frame by wrapped memcpy",
+   "title": "12.4 MB copied per frame by wrapped memcpy",
    "system": "core",
    "location": {},
    "evidence": {
     "horde500/low": {
-     "memcpy_mb": 16.31,
-     "calls": 7560
+     "memcpy_mb": 12.4,
+     "calls": 8086
     },
     "horde500/modern": {
-     "memcpy_mb": 16.33,
-     "calls": 10240
+     "memcpy_mb": 12.41,
+     "calls": 9728
+    },
+    "horde_foliage/low": {
+     "memcpy_mb": 13.2,
+     "calls": 151887
+    },
+    "horde_foliage/modern": {
+     "memcpy_mb": 13.52,
+     "calls": 177484
+    },
+    "lan2_host/4": {
+     "memcpy_mb": 9.2,
+     "calls": 12082
+    },
+    "veg_horde_forest/low": {
+     "memcpy_mb": 12.1,
+     "calls": 67750
+    },
+    "veg_horde_forest/modern": {
+     "memcpy_mb": 12.18,
+     "calls": 74322
+    },
+    "veg_horde_meadow/low": {
+     "memcpy_mb": 13.41,
+     "calls": 169149
+    },
+    "veg_horde_meadow/modern": {
+     "memcpy_mb": 13.8,
+     "calls": 200451
     }
    },
    "savings": {
-    "cpu_ms": 1.3060347785949709,
+    "cpu_ms": 1.1039890594482422,
     "gpu_ms": 0.0,
     "mb": 0.0,
     "bytes_s": 0.0
@@ -430,273 +457,788 @@
    "fix_id": null,
    "scenes": [
     "horde500/low",
-    "horde500/modern"
+    "horde500/modern",
+    "horde_foliage/low",
+    "horde_foliage/modern",
+    "lan2_host/4",
+    "veg_horde_forest/low",
+    "veg_horde_forest/modern",
+    "veg_horde_meadow/low",
+    "veg_horde_meadow/modern"
    ],
    "source": "runtime",
    "below_noise": false,
-   "score": 0.26121
+   "score": 0.2208
   },
   {
-   "id": "F-76a2e9",
-   "rule": "R05",
-   "title": "11.0 MB of pooled frame graph images unused by the current graph",
-   "system": "render/fg",
+   "id": "F-c4fd8c",
+   "rule": "R02",
+   "title": "'sky_view' recomputed every frame with unchanged inputs",
+   "system": "render/sky",
    "location": {
-    "file": "src/render/graph/fg.c"
+    "pass": "sky_view"
    },
    "evidence": {
+    "devroom/low": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.0923,
+     "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
+    },
+    "devroom/modern": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.0747,
+     "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
+    },
+    "foliage/low": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.0817,
+     "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
+    },
+    "foliage/modern": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.0328,
+     "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
+    },
+    "horde500/low": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.0327,
+     "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
+    },
+    "horde500/modern": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.1738,
+     "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
+    },
+    "horde_foliage/low": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.1325,
+     "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
+    },
+    "horde_foliage/modern": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.0447,
+     "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
+    },
+    "lan2_client/4": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.073,
+     "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
+    },
+    "lan2_host/4": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.1542,
+     "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
+    },
+    "night_lights/low": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.1826,
+     "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
+    },
     "night_lights/modern": {
-     "stale_images": 3,
-     "stale_mb": 11.04
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.1845,
+     "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
+    },
+    "veg_deadwood/low": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.064,
+     "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
+    },
+    "veg_deadwood/modern": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.0402,
+     "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
+    },
+    "veg_forest_broadleaf/low": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.953,
+     "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
+    },
+    "veg_forest_broadleaf/modern": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.0335,
+     "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
+    },
+    "veg_forest_edge/low": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.0798,
+     "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
+    },
+    "veg_forest_edge/modern": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.0331,
+     "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
+    },
+    "veg_forest_pine/low": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.0326,
+     "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
+    },
+    "veg_forest_pine/modern": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.0359,
+     "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
+    },
+    "veg_horde_forest/low": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.0389,
+     "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
+    },
+    "veg_horde_forest/modern": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.0332,
+     "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
+    },
+    "veg_horde_meadow/low": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.0479,
+     "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
+    },
+    "veg_horde_meadow/modern": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.0917,
+     "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
+    },
+    "veg_meadow/low": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.0804,
+     "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
+    },
+    "veg_meadow/modern": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.0327,
+     "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
+    },
+    "veg_overlook/low": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.0583,
+     "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
+    },
+    "veg_overlook/modern": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.0885,
+     "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
+    },
+    "veg_pond/low": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.0549,
+     "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
+    },
+    "veg_pond/modern": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.0492,
+     "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
+    },
+    "veg_wheat/low": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.1512,
+     "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
+    },
+    "veg_wheat/modern": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.0332,
+     "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
+    },
+    "vehicle_yard/low": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.3784,
+     "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
+    },
+    "vehicle_yard/modern": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.1546,
+     "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
+    },
+    "water_weather/low": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.0564,
+     "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
+    },
+    "water_weather/modern": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.0875,
+     "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
     }
    },
    "savings": {
     "cpu_ms": 0.0,
-    "gpu_ms": 0.0,
-    "mb": 11.04,
+    "gpu_ms": 0.9466617999999999,
+    "mb": 0.0,
     "bytes_s": 0.0
    },
    "confidence": "medium",
-   "effort": "S",
-   "fix": "fg_trim after level / setting changes (the 240-frame eviction keeps them meanwhile).",
+   "effort": "M",
+   "fix": "Hash the pass inputs (the uniforms it reads, quantized as the shader reads them) and skip the dispatch when the hash matches the content already in the target. The output is bit-identical by construction.",
    "fidelity_impact": "none",
    "verify": "verify by image + state diff after implementation (perf_verify)",
    "fix_id": null,
    "scenes": [
-    "night_lights/modern"
+    "devroom/low",
+    "devroom/modern",
+    "foliage/low",
+    "foliage/modern",
+    "horde500/low",
+    "horde500/modern",
+    "horde_foliage/low",
+    "horde_foliage/modern",
+    "lan2_client/4",
+    "lan2_host/4",
+    "night_lights/low",
+    "night_lights/modern",
+    "veg_deadwood/low",
+    "veg_deadwood/modern",
+    "veg_forest_broadleaf/low",
+    "veg_forest_broadleaf/modern",
+    "veg_forest_edge/low",
+    "veg_forest_edge/modern",
+    "veg_forest_pine/low",
+    "veg_forest_pine/modern",
+    "veg_horde_forest/low",
+    "veg_horde_forest/modern",
+    "veg_horde_meadow/low",
+    "veg_horde_meadow/modern",
+    "veg_meadow/low",
+    "veg_meadow/modern",
+    "veg_overlook/low",
+    "veg_overlook/modern",
+    "veg_pond/low",
+    "veg_pond/modern",
+    "veg_wheat/low",
+    "veg_wheat/modern",
+    "vehicle_yard/low",
+    "vehicle_yard/modern",
+    "water_weather/low",
+    "water_weather/modern"
    ],
    "source": "runtime",
    "below_noise": false,
-   "score": 0.13248
+   "score": 0.18933
   },
   {
    "id": "F-66ec5c",
    "rule": "R07",
-   "title": "Workers busy 0% of the frame while the main thread runs serial zones",
+   "title": "Workers busy 13% of the frame while the main thread runs serial zones",
    "system": "core/jobs",
    "location": {
-    "zone": "game_render"
+    "zone": "classic:cull_views"
    },
    "evidence": {
-    "night_lights/low": {
-     "workers": 3,
-     "worker_busy_ms": 0.001,
-     "frame_ms": 229.824,
+    "foliage/low": {
+     "workers": 11,
+     "worker_busy_ms": 1.24,
+     "frame_ms": 9.642,
      "top_main_zones_ms": [
       [
+       "classic:cull_views",
+       1.266
+      ],
+      [
        "game_render",
-       1.49
-      ],
-      [
-       "input",
-       1.46
-      ],
-      [
-       "render_end",
-       0.771
-      ],
-      [
-       "vgeo:palettes_record",
-       0.444
+       0.804
       ],
       [
        "render:frame_graph",
-       0.407
-      ]
-     ]
-    },
-    "night_lights/modern": {
-     "workers": 3,
-     "worker_busy_ms": 0.005,
-     "frame_ms": 841.907,
-     "top_main_zones_ms": [
-      [
-       "input",
-       1.604
+       0.41
       ],
       [
        "render:record_pre",
-       1.568
-      ],
-      [
-       "game_render",
-       1.559
+       0.3
       ],
       [
        "render_end",
-       1.196
-      ],
-      [
-       "vgeo:palettes_record",
-       1.031
+       0.158
       ]
      ]
     },
-    "devroom/low": {
-     "workers": 3,
-     "worker_busy_ms": 0.001,
-     "frame_ms": 240.045,
+    "foliage/modern": {
+     "workers": 11,
+     "worker_busy_ms": 1.511,
+     "frame_ms": 37.319,
      "top_main_zones_ms": [
       [
+       "classic:cull_views",
+       1.671
+      ],
+      [
        "game_render",
-       1.667
-      ],
-      [
-       "input",
-       1.506
-      ],
-      [
-       "render_end",
-       0.885
-      ],
-      [
-       "vgeo:palettes_record",
-       0.472
+       0.824
       ],
       [
        "render:frame_graph",
-       0.446
-      ]
-     ]
-    },
-    "devroom/modern": {
-     "workers": 3,
-     "worker_busy_ms": 0.003,
-     "frame_ms": 919.894,
-     "top_main_zones_ms": [
-      [
-       "game_render",
-       1.606
-      ],
-      [
-       "input",
-       1.408
-      ],
-      [
-       "render_end",
-       1.218
+       0.582
       ],
       [
        "render:record_pre",
-       1.12
+       0.347
       ],
       [
-       "vgeo:palettes_record",
-       0.945
+       "render_end",
+       0.188
       ]
      ]
     },
     "horde500/low": {
-     "workers": 3,
-     "worker_busy_ms": 0.68,
-     "frame_ms": 236.219,
+     "workers": 11,
+     "worker_busy_ms": 0.55,
+     "frame_ms": 9.303,
      "top_main_zones_ms": [
       [
        "game_render",
-       4.171
+       4.502
       ],
       [
        "render:prepare",
-       2.948
-      ],
-      [
-       "input",
-       1.172
-      ],
-      [
-       "render_end",
-       1.038
+       0.862
       ],
       [
        "sim:anim_hitboxes",
-       0.769
+       0.69
+      ],
+      [
+       "render_end",
+       0.399
+      ],
+      [
+       "sim:horde",
+       0.394
       ]
      ]
     },
     "horde500/modern": {
-     "workers": 3,
-     "worker_busy_ms": 0.781,
-     "frame_ms": 816.813,
+     "workers": 11,
+     "worker_busy_ms": 0.527,
+     "frame_ms": 11.171,
      "top_main_zones_ms": [
       [
        "game_render",
-       4.362
+       4.745
       ],
       [
        "render:prepare",
-       3.073
-      ],
-      [
-       "render_end",
-       1.39
-      ],
-      [
-       "input",
-       1.388
-      ],
-      [
-       "render:record_pre",
-       0.954
-      ]
-     ]
-    },
-    "vehicle_yard/low": {
-     "workers": 3,
-     "worker_busy_ms": 0.001,
-     "frame_ms": 222.775,
-     "top_main_zones_ms": [
-      [
-       "game_render",
-       1.741
-      ],
-      [
-       "input",
-       1.556
-      ],
-      [
-       "render_end",
-       0.828
+       0.915
       ],
       [
        "sim:anim_hitboxes",
-       0.455
-      ],
-      [
-       "render:frame_graph",
-       0.447
-      ]
-     ]
-    },
-    "vehicle_yard/modern": {
-     "workers": 3,
-     "worker_busy_ms": 0.003,
-     "frame_ms": 865.776,
-     "top_main_zones_ms": [
-      [
-       "game_render",
-       1.616
-      ],
-      [
-       "input",
-       1.469
+       0.698
       ],
       [
        "render_end",
-       1.144
+       0.465
+      ],
+      [
+       "render:frame_graph",
+       0.458
+      ]
+     ]
+    },
+    "horde_foliage/low": {
+     "workers": 11,
+     "worker_busy_ms": 1.648,
+     "frame_ms": 15.764,
+     "top_main_zones_ms": [
+      [
+       "game_render",
+       4.671
+      ],
+      [
+       "classic:cull_views",
+       1.245
+      ],
+      [
+       "render:prepare",
+       0.812
+      ],
+      [
+       "sim:horde",
+       0.53
+      ],
+      [
+       "render_end",
+       0.464
+      ]
+     ]
+    },
+    "horde_foliage/modern": {
+     "workers": 11,
+     "worker_busy_ms": 1.89,
+     "frame_ms": 18.142,
+     "top_main_zones_ms": [
+      [
+       "game_render",
+       4.74
+      ],
+      [
+       "classic:cull_views",
+       1.6
+      ],
+      [
+       "render:prepare",
+       0.849
+      ],
+      [
+       "render:frame_graph",
+       0.575
+      ],
+      [
+       "sim:horde",
+       0.525
+      ]
+     ]
+    },
+    "lan2_client/4": {
+     "workers": 11,
+     "worker_busy_ms": 0.143,
+     "frame_ms": 14.538,
+     "top_main_zones_ms": [
+      [
+       "game_render",
+       3.896
+      ],
+      [
+       "anim:post_pass",
+       1.192
+      ],
+      [
+       "render:frame_graph",
+       1.005
+      ],
+      [
+       "sim:client_chars",
+       0.867
+      ],
+      [
+       "render_end",
+       0.807
+      ]
+     ]
+    },
+    "lan2_host/4": {
+     "workers": 11,
+     "worker_busy_ms": 0.631,
+     "frame_ms": 16.177,
+     "top_main_zones_ms": [
+      [
+       "game_render",
+       3.404
+      ],
+      [
+       "anim:post_pass",
+       0.843
+      ],
+      [
+       "render:prepare",
+       0.714
       ],
       [
        "render:record_pre",
-       0.976
+       0.681
       ],
       [
-       "vgeo:palettes_record",
-       0.83
+       "render:frame_graph",
+       0.633
+      ]
+     ]
+    },
+    "night_lights/modern": {
+     "workers": 11,
+     "worker_busy_ms": 0.141,
+     "frame_ms": 12.143,
+     "top_main_zones_ms": [
+      [
+       "game_render",
+       1.129
+      ],
+      [
+       "render:record_pre",
+       0.681
+      ],
+      [
+       "sim:anim_hitboxes",
+       0.557
+      ],
+      [
+       "render:frame_graph",
+       0.55
+      ],
+      [
+       "sim:physics",
+       0.264
+      ]
+     ]
+    },
+    "veg_forest_broadleaf/modern": {
+     "workers": 11,
+     "worker_busy_ms": 0.681,
+     "frame_ms": 48.604,
+     "top_main_zones_ms": [
+      [
+       "classic:cull_views",
+       1.173
+      ],
+      [
+       "game_render",
+       1.054
+      ],
+      [
+       "render:frame_graph",
+       0.688
+      ],
+      [
+       "render:record_pre",
+       0.364
+      ],
+      [
+       "game_frame",
+       0.255
+      ]
+     ]
+    },
+    "veg_forest_edge/modern": {
+     "workers": 11,
+     "worker_busy_ms": 1.018,
+     "frame_ms": 27.973,
+     "top_main_zones_ms": [
+      [
+       "classic:cull_views",
+       1.331
+      ],
+      [
+       "game_render",
+       0.851
+      ],
+      [
+       "render:frame_graph",
+       0.635
+      ],
+      [
+       "render:record_pre",
+       0.379
+      ],
+      [
+       "render_end",
+       0.207
+      ]
+     ]
+    },
+    "veg_forest_pine/low": {
+     "workers": 11,
+     "worker_busy_ms": 0.647,
+     "frame_ms": 7.744,
+     "top_main_zones_ms": [
+      [
+       "game_render",
+       1.025
+      ],
+      [
+       "classic:cull_views",
+       0.905
+      ],
+      [
+       "render:frame_graph",
+       0.493
+      ],
+      [
+       "render:record_pre",
+       0.436
+      ],
+      [
+       "sim:physics",
+       0.281
+      ]
+     ]
+    },
+    "veg_horde_forest/low": {
+     "workers": 11,
+     "worker_busy_ms": 1.06,
+     "frame_ms": 10.053,
+     "top_main_zones_ms": [
+      [
+       "game_render",
+       4.437
+      ],
+      [
+       "render:prepare",
+       0.789
+      ],
+      [
+       "sim:horde",
+       0.568
+      ],
+      [
+       "classic:cull_views",
+       0.54
+      ],
+      [
+       "render_end",
+       0.373
+      ]
+     ]
+    },
+    "veg_horde_forest/modern": {
+     "workers": 11,
+     "worker_busy_ms": 1.125,
+     "frame_ms": 35.263,
+     "top_main_zones_ms": [
+      [
+       "game_render",
+       4.63
+      ],
+      [
+       "render:prepare",
+       0.846
+      ],
+      [
+       "classic:cull_views",
+       0.757
+      ],
+      [
+       "sim:horde",
+       0.59
+      ],
+      [
+       "render:frame_graph",
+       0.539
+      ]
+     ]
+    },
+    "veg_horde_meadow/low": {
+     "workers": 11,
+     "worker_busy_ms": 1.835,
+     "frame_ms": 13.622,
+     "top_main_zones_ms": [
+      [
+       "game_render",
+       4.994
+      ],
+      [
+       "classic:cull_views",
+       1.414
+      ],
+      [
+       "render:prepare",
+       0.861
+      ],
+      [
+       "sim:horde",
+       0.613
+      ],
+      [
+       "render_end",
+       0.488
+      ]
+     ]
+    },
+    "veg_horde_meadow/modern": {
+     "workers": 11,
+     "worker_busy_ms": 2.076,
+     "frame_ms": 29.805,
+     "top_main_zones_ms": [
+      [
+       "game_render",
+       4.865
+      ],
+      [
+       "classic:cull_views",
+       1.871
+      ],
+      [
+       "render:prepare",
+       0.882
+      ],
+      [
+       "sim:horde",
+       0.639
+      ],
+      [
+       "render:frame_graph",
+       0.624
+      ]
+     ]
+    },
+    "veg_meadow/low": {
+     "workers": 11,
+     "worker_busy_ms": 1.403,
+     "frame_ms": 6.952,
+     "top_main_zones_ms": [
+      [
+       "classic:cull_views",
+       1.295
+      ],
+      [
+       "game_render",
+       0.743
+      ],
+      [
+       "render:frame_graph",
+       0.403
+      ],
+      [
+       "render:record_pre",
+       0.273
+      ],
+      [
+       "render_end",
+       0.157
+      ]
+     ]
+    },
+    "veg_meadow/modern": {
+     "workers": 11,
+     "worker_busy_ms": 1.704,
+     "frame_ms": 17.89,
+     "top_main_zones_ms": [
+      [
+       "classic:cull_views",
+       1.725
+      ],
+      [
+       "game_render",
+       0.746
+      ],
+      [
+       "render:frame_graph",
+       0.558
+      ],
+      [
+       "render:record_pre",
+       0.329
+      ],
+      [
+       "render_end",
+       0.171
+      ]
+     ]
+    },
+    "veg_pond/modern": {
+     "workers": 11,
+     "worker_busy_ms": 1.095,
+     "frame_ms": 20.554,
+     "top_main_zones_ms": [
+      [
+       "classic:cull_views",
+       1.221
+      ],
+      [
+       "game_render",
+       0.8
+      ],
+      [
+       "render:frame_graph",
+       0.555
+      ],
+      [
+       "render:record_pre",
+       0.344
+      ],
+      [
+       "render_end",
+       0.182
       ]
      ]
     }
    },
    "savings": {
-    "cpu_ms": 2.181075,
+    "cpu_ms": 2.4971066666666664,
     "gpu_ms": 0.0,
     "mb": 0.0,
     "bytes_s": 0.0
@@ -708,70 +1250,903 @@
    "verify": "verify by image + state diff after implementation (perf_verify)",
    "fix_id": null,
    "scenes": [
-    "night_lights/low",
-    "night_lights/modern",
-    "devroom/low",
-    "devroom/modern",
+    "foliage/low",
+    "foliage/modern",
     "horde500/low",
     "horde500/modern",
-    "vehicle_yard/low",
-    "vehicle_yard/modern"
+    "horde_foliage/low",
+    "horde_foliage/modern",
+    "lan2_client/4",
+    "lan2_host/4",
+    "night_lights/modern",
+    "veg_forest_broadleaf/modern",
+    "veg_forest_edge/modern",
+    "veg_forest_pine/low",
+    "veg_horde_forest/low",
+    "veg_horde_forest/modern",
+    "veg_horde_meadow/low",
+    "veg_horde_meadow/modern",
+    "veg_meadow/low",
+    "veg_meadow/modern",
+    "veg_pond/modern"
    ],
    "source": "runtime",
    "below_noise": false,
-   "score": 0.08179
+   "score": 0.09364
   },
   {
-   "id": "F-25e1c0",
+   "id": "F-37a7e1",
    "rule": "R07",
-   "title": "Job cull_range (vk_classic.c) runs 2616 times for 0.6 us each (queue overhead dominates)",
+   "title": "Main thread stalls 0.25 ms per frame waiting for jobs (nothing left to help with)",
    "system": "core/jobs",
    "location": {
-    "function": "cull_range (vk_classic.c)"
+    "file": "src/core/jobs.c"
    },
    "evidence": {
-    "night_lights/modern": {
-     "count": 2616,
-     "avg_us": 0.57,
-     "queue_ms_avg": 0.0
+    "foliage/low": {
+     "jobs_wait_ms": 0.0,
+     "parfor_tail_ms": 0.252
     },
-    "devroom/modern": {
-     "count": 1380,
-     "avg_us": 0.65,
-     "queue_ms_avg": 0.0
+    "horde_foliage/low": {
+     "jobs_wait_ms": 0.0,
+     "parfor_tail_ms": 0.469
     },
-    "horde500/modern": {
-     "count": 1848,
-     "avg_us": 0.99,
-     "queue_ms_avg": 0.0
+    "horde_foliage/modern": {
+     "jobs_wait_ms": 0.0,
+     "parfor_tail_ms": 0.812
     },
-    "vehicle_yard/modern": {
-     "count": 912,
-     "avg_us": 0.63,
-     "queue_ms_avg": 0.0
+    "lan2_host/4": {
+     "jobs_wait_ms": 0.0,
+     "parfor_tail_ms": 0.26
+    },
+    "veg_deadwood/low": {
+     "jobs_wait_ms": 0.0,
+     "parfor_tail_ms": 0.219
+    },
+    "veg_deadwood/modern": {
+     "jobs_wait_ms": 0.0,
+     "parfor_tail_ms": 0.221
+    },
+    "veg_forest_edge/low": {
+     "jobs_wait_ms": 0.0,
+     "parfor_tail_ms": 0.23
+    },
+    "veg_forest_pine/low": {
+     "jobs_wait_ms": 0.0,
+     "parfor_tail_ms": 0.273
+    },
+    "veg_horde_forest/low": {
+     "jobs_wait_ms": 0.0,
+     "parfor_tail_ms": 0.242
+    },
+    "veg_horde_forest/modern": {
+     "jobs_wait_ms": 0.0,
+     "parfor_tail_ms": 0.216
+    },
+    "veg_horde_meadow/low": {
+     "jobs_wait_ms": 0.0,
+     "parfor_tail_ms": 0.305
+    },
+    "veg_horde_meadow/modern": {
+     "jobs_wait_ms": 0.0,
+     "parfor_tail_ms": 0.286
+    },
+    "veg_meadow/low": {
+     "jobs_wait_ms": 0.0,
+     "parfor_tail_ms": 0.261
+    },
+    "veg_meadow/modern": {
+     "jobs_wait_ms": 0.0,
+     "parfor_tail_ms": 0.286
+    },
+    "veg_overlook/low": {
+     "jobs_wait_ms": 0.0,
+     "parfor_tail_ms": 0.252
+    },
+    "veg_overlook/modern": {
+     "jobs_wait_ms": 0.0,
+     "parfor_tail_ms": 0.27
+    },
+    "veg_pond/low": {
+     "jobs_wait_ms": 0.0,
+     "parfor_tail_ms": 0.236
+    },
+    "veg_pond/modern": {
+     "jobs_wait_ms": 0.0,
+     "parfor_tail_ms": 0.272
+    },
+    "veg_wheat/low": {
+     "jobs_wait_ms": 0.0,
+     "parfor_tail_ms": 0.24
+    },
+    "veg_wheat/modern": {
+     "jobs_wait_ms": 0.0,
+     "parfor_tail_ms": 0.247
+    },
+    "water_weather/low": {
+     "jobs_wait_ms": 0.0,
+     "parfor_tail_ms": 0.279
+    },
+    "water_weather/modern": {
+     "jobs_wait_ms": 0.0,
+     "parfor_tail_ms": 0.29
     }
    },
    "savings": {
-    "cpu_ms": 0.13080000000000003,
+    "cpu_ms": 0.40614500000000003,
     "gpu_ms": 0.0,
     "mb": 0.0,
     "bytes_s": 0.0
    },
    "confidence": "medium",
-   "effort": "S",
-   "fix": "Batch the work into fewer, larger jobs.",
+   "effort": "M",
+   "fix": "Smaller chunks at the end of parallel_for (guided scheduling) or start independent main-thread work before waiting.",
    "fidelity_impact": "none",
    "verify": "verify by image + state diff after implementation (perf_verify)",
    "fix_id": null,
    "scenes": [
-    "night_lights/modern",
-    "devroom/modern",
-    "horde500/modern",
-    "vehicle_yard/modern"
+    "foliage/low",
+    "horde_foliage/low",
+    "horde_foliage/modern",
+    "lan2_host/4",
+    "veg_deadwood/low",
+    "veg_deadwood/modern",
+    "veg_forest_edge/low",
+    "veg_forest_pine/low",
+    "veg_horde_forest/low",
+    "veg_horde_forest/modern",
+    "veg_horde_meadow/low",
+    "veg_horde_meadow/modern",
+    "veg_meadow/low",
+    "veg_meadow/modern",
+    "veg_overlook/low",
+    "veg_overlook/modern",
+    "veg_pond/low",
+    "veg_pond/modern",
+    "veg_wheat/low",
+    "veg_wheat/modern",
+    "water_weather/low",
+    "water_weather/modern"
    ],
    "source": "runtime",
    "below_noise": false,
-   "score": 0.07848
+   "score": 0.08123
+  },
+  {
+   "id": "F-a7f6ca",
+   "rule": "R02",
+   "title": "'sky_cshadow' recomputed every frame with unchanged inputs",
+   "system": "render/sky",
+   "location": {
+    "pass": "sky_cshadow"
+   },
+   "evidence": {
+    "devroom/low": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.0203,
+     "inputs": "cloud shadow map (cloud map + camera texel snap)"
+    },
+    "devroom/modern": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.0258,
+     "inputs": "cloud shadow map (cloud map + camera texel snap)"
+    },
+    "foliage/low": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.0364,
+     "inputs": "cloud shadow map (cloud map + camera texel snap)"
+    },
+    "foliage/modern": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.0237,
+     "inputs": "cloud shadow map (cloud map + camera texel snap)"
+    },
+    "horde500/low": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.0761,
+     "inputs": "cloud shadow map (cloud map + camera texel snap)"
+    },
+    "horde500/modern": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.0399,
+     "inputs": "cloud shadow map (cloud map + camera texel snap)"
+    },
+    "horde_foliage/low": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.0883,
+     "inputs": "cloud shadow map (cloud map + camera texel snap)"
+    },
+    "horde_foliage/modern": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.0228,
+     "inputs": "cloud shadow map (cloud map + camera texel snap)"
+    },
+    "lan2_client/4": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.0728,
+     "inputs": "cloud shadow map (cloud map + camera texel snap)"
+    },
+    "lan2_host/4": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.2765,
+     "inputs": "cloud shadow map (cloud map + camera texel snap)"
+    },
+    "night_lights/low": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.0627,
+     "inputs": "cloud shadow map (cloud map + camera texel snap)"
+    },
+    "night_lights/modern": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.0629,
+     "inputs": "cloud shadow map (cloud map + camera texel snap)"
+    },
+    "veg_deadwood/low": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.0313,
+     "inputs": "cloud shadow map (cloud map + camera texel snap)"
+    },
+    "veg_deadwood/modern": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.0222,
+     "inputs": "cloud shadow map (cloud map + camera texel snap)"
+    },
+    "veg_forest_broadleaf/low": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.0253,
+     "inputs": "cloud shadow map (cloud map + camera texel snap)"
+    },
+    "veg_forest_broadleaf/modern": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.0245,
+     "inputs": "cloud shadow map (cloud map + camera texel snap)"
+    },
+    "veg_forest_edge/low": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.0337,
+     "inputs": "cloud shadow map (cloud map + camera texel snap)"
+    },
+    "veg_forest_edge/modern": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.019,
+     "inputs": "cloud shadow map (cloud map + camera texel snap)"
+    },
+    "veg_forest_pine/low": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.0209,
+     "inputs": "cloud shadow map (cloud map + camera texel snap)"
+    },
+    "veg_forest_pine/modern": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.0188,
+     "inputs": "cloud shadow map (cloud map + camera texel snap)"
+    },
+    "veg_horde_forest/low": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.0327,
+     "inputs": "cloud shadow map (cloud map + camera texel snap)"
+    },
+    "veg_horde_forest/modern": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.019,
+     "inputs": "cloud shadow map (cloud map + camera texel snap)"
+    },
+    "veg_horde_meadow/low": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.0371,
+     "inputs": "cloud shadow map (cloud map + camera texel snap)"
+    },
+    "veg_horde_meadow/modern": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.1711,
+     "inputs": "cloud shadow map (cloud map + camera texel snap)"
+    },
+    "veg_meadow/low": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.028,
+     "inputs": "cloud shadow map (cloud map + camera texel snap)"
+    },
+    "veg_meadow/modern": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.0231,
+     "inputs": "cloud shadow map (cloud map + camera texel snap)"
+    },
+    "veg_overlook/low": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.0395,
+     "inputs": "cloud shadow map (cloud map + camera texel snap)"
+    },
+    "veg_overlook/modern": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.021,
+     "inputs": "cloud shadow map (cloud map + camera texel snap)"
+    },
+    "veg_pond/low": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.0543,
+     "inputs": "cloud shadow map (cloud map + camera texel snap)"
+    },
+    "veg_pond/modern": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.0264,
+     "inputs": "cloud shadow map (cloud map + camera texel snap)"
+    },
+    "veg_wheat/low": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.0333,
+     "inputs": "cloud shadow map (cloud map + camera texel snap)"
+    },
+    "veg_wheat/modern": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.0494,
+     "inputs": "cloud shadow map (cloud map + camera texel snap)"
+    },
+    "vehicle_yard/low": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.1535,
+     "inputs": "cloud shadow map (cloud map + camera texel snap)"
+    },
+    "vehicle_yard/modern": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.1466,
+     "inputs": "cloud shadow map (cloud map + camera texel snap)"
+    },
+    "water_weather/low": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.137,
+     "inputs": "cloud shadow map (cloud map + camera texel snap)"
+    },
+    "water_weather/modern": {
+     "runs_per_frame": 0.99,
+     "gpu_ms": 0.0259,
+     "inputs": "cloud shadow map (cloud map + camera texel snap)"
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 0.27465476666666666,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "M",
+   "fix": "Hash the pass inputs (the uniforms it reads, quantized as the shader reads them) and skip the dispatch when the hash matches the content already in the target. The output is bit-identical by construction.",
+   "fidelity_impact": "none",
+   "verify": "verify by image + state diff after implementation (perf_verify)",
+   "fix_id": null,
+   "scenes": [
+    "devroom/low",
+    "devroom/modern",
+    "foliage/low",
+    "foliage/modern",
+    "horde500/low",
+    "horde500/modern",
+    "horde_foliage/low",
+    "horde_foliage/modern",
+    "lan2_client/4",
+    "lan2_host/4",
+    "night_lights/low",
+    "night_lights/modern",
+    "veg_deadwood/low",
+    "veg_deadwood/modern",
+    "veg_forest_broadleaf/low",
+    "veg_forest_broadleaf/modern",
+    "veg_forest_edge/low",
+    "veg_forest_edge/modern",
+    "veg_forest_pine/low",
+    "veg_forest_pine/modern",
+    "veg_horde_forest/low",
+    "veg_horde_forest/modern",
+    "veg_horde_meadow/low",
+    "veg_horde_meadow/modern",
+    "veg_meadow/low",
+    "veg_meadow/modern",
+    "veg_overlook/low",
+    "veg_overlook/modern",
+    "veg_pond/low",
+    "veg_pond/modern",
+    "veg_wheat/low",
+    "veg_wheat/modern",
+    "vehicle_yard/low",
+    "vehicle_yard/modern",
+    "water_weather/low",
+    "water_weather/modern"
+   ],
+   "source": "runtime",
+   "below_noise": false,
+   "score": 0.05493
+  },
+  {
+   "id": "F-b0d253",
+   "rule": "R02",
+   "title": "'sky_clouds' recomputed every other frame with unchanged inputs",
+   "system": "render/sky",
+   "location": {
+    "pass": "sky_clouds"
+   },
+   "evidence": {
+    "devroom/low": {
+     "runs_per_frame": 0.5,
+     "gpu_ms": 0.0529,
+     "inputs": "cloud map (cloud cover, wind offset, time)"
+    },
+    "devroom/modern": {
+     "runs_per_frame": 0.5,
+     "gpu_ms": 0.073,
+     "inputs": "cloud map (cloud cover, wind offset, time)"
+    },
+    "foliage/low": {
+     "runs_per_frame": 0.5,
+     "gpu_ms": 0.0827,
+     "inputs": "cloud map (cloud cover, wind offset, time)"
+    },
+    "foliage/modern": {
+     "runs_per_frame": 0.5,
+     "gpu_ms": 0.0523,
+     "inputs": "cloud map (cloud cover, wind offset, time)"
+    },
+    "horde500/low": {
+     "runs_per_frame": 0.5,
+     "gpu_ms": 0.0827,
+     "inputs": "cloud map (cloud cover, wind offset, time)"
+    },
+    "horde500/modern": {
+     "runs_per_frame": 0.5,
+     "gpu_ms": 0.0984,
+     "inputs": "cloud map (cloud cover, wind offset, time)"
+    },
+    "horde_foliage/low": {
+     "runs_per_frame": 0.5,
+     "gpu_ms": 0.193,
+     "inputs": "cloud map (cloud cover, wind offset, time)"
+    },
+    "horde_foliage/modern": {
+     "runs_per_frame": 0.5,
+     "gpu_ms": 0.0453,
+     "inputs": "cloud map (cloud cover, wind offset, time)"
+    },
+    "lan2_client/4": {
+     "runs_per_frame": 0.5,
+     "gpu_ms": 0.1304,
+     "inputs": "cloud map (cloud cover, wind offset, time)"
+    },
+    "lan2_host/4": {
+     "runs_per_frame": 0.5,
+     "gpu_ms": 0.5345,
+     "inputs": "cloud map (cloud cover, wind offset, time)"
+    },
+    "night_lights/low": {
+     "runs_per_frame": 0.5,
+     "gpu_ms": 0.1089,
+     "inputs": "cloud map (cloud cover, wind offset, time)"
+    },
+    "night_lights/modern": {
+     "runs_per_frame": 0.5,
+     "gpu_ms": 0.2322,
+     "inputs": "cloud map (cloud cover, wind offset, time)"
+    },
+    "veg_deadwood/low": {
+     "runs_per_frame": 0.5,
+     "gpu_ms": 0.0928,
+     "inputs": "cloud map (cloud cover, wind offset, time)"
+    },
+    "veg_deadwood/modern": {
+     "runs_per_frame": 0.5,
+     "gpu_ms": 0.0583,
+     "inputs": "cloud map (cloud cover, wind offset, time)"
+    },
+    "veg_forest_broadleaf/low": {
+     "runs_per_frame": 0.5,
+     "gpu_ms": 0.0769,
+     "inputs": "cloud map (cloud cover, wind offset, time)"
+    },
+    "veg_forest_broadleaf/modern": {
+     "runs_per_frame": 0.5,
+     "gpu_ms": 0.0435,
+     "inputs": "cloud map (cloud cover, wind offset, time)"
+    },
+    "veg_forest_edge/low": {
+     "runs_per_frame": 0.5,
+     "gpu_ms": 0.0734,
+     "inputs": "cloud map (cloud cover, wind offset, time)"
+    },
+    "veg_forest_edge/modern": {
+     "runs_per_frame": 0.5,
+     "gpu_ms": 0.0513,
+     "inputs": "cloud map (cloud cover, wind offset, time)"
+    },
+    "veg_forest_pine/low": {
+     "runs_per_frame": 0.5,
+     "gpu_ms": 0.0428,
+     "inputs": "cloud map (cloud cover, wind offset, time)"
+    },
+    "veg_forest_pine/modern": {
+     "runs_per_frame": 0.5,
+     "gpu_ms": 0.043,
+     "inputs": "cloud map (cloud cover, wind offset, time)"
+    },
+    "veg_horde_forest/low": {
+     "runs_per_frame": 0.5,
+     "gpu_ms": 0.0725,
+     "inputs": "cloud map (cloud cover, wind offset, time)"
+    },
+    "veg_horde_forest/modern": {
+     "runs_per_frame": 0.5,
+     "gpu_ms": 0.043,
+     "inputs": "cloud map (cloud cover, wind offset, time)"
+    },
+    "veg_horde_meadow/low": {
+     "runs_per_frame": 0.5,
+     "gpu_ms": 0.0818,
+     "inputs": "cloud map (cloud cover, wind offset, time)"
+    },
+    "veg_horde_meadow/modern": {
+     "runs_per_frame": 0.5,
+     "gpu_ms": 0.4588,
+     "inputs": "cloud map (cloud cover, wind offset, time)"
+    },
+    "veg_meadow/low": {
+     "runs_per_frame": 0.5,
+     "gpu_ms": 0.058,
+     "inputs": "cloud map (cloud cover, wind offset, time)"
+    },
+    "veg_meadow/modern": {
+     "runs_per_frame": 0.5,
+     "gpu_ms": 0.0633,
+     "inputs": "cloud map (cloud cover, wind offset, time)"
+    },
+    "veg_overlook/low": {
+     "runs_per_frame": 0.5,
+     "gpu_ms": 0.0883,
+     "inputs": "cloud map (cloud cover, wind offset, time)"
+    },
+    "veg_overlook/modern": {
+     "runs_per_frame": 0.5,
+     "gpu_ms": 0.0495,
+     "inputs": "cloud map (cloud cover, wind offset, time)"
+    },
+    "veg_pond/low": {
+     "runs_per_frame": 0.5,
+     "gpu_ms": 0.1074,
+     "inputs": "cloud map (cloud cover, wind offset, time)"
+    },
+    "veg_pond/modern": {
+     "runs_per_frame": 0.5,
+     "gpu_ms": 0.048,
+     "inputs": "cloud map (cloud cover, wind offset, time)"
+    },
+    "veg_wheat/low": {
+     "runs_per_frame": 0.5,
+     "gpu_ms": 0.0701,
+     "inputs": "cloud map (cloud cover, wind offset, time)"
+    },
+    "veg_wheat/modern": {
+     "runs_per_frame": 0.5,
+     "gpu_ms": 0.0917,
+     "inputs": "cloud map (cloud cover, wind offset, time)"
+    },
+    "vehicle_yard/low": {
+     "runs_per_frame": 0.5,
+     "gpu_ms": 0.2204,
+     "inputs": "cloud map (cloud cover, wind offset, time)"
+    },
+    "vehicle_yard/modern": {
+     "runs_per_frame": 0.5,
+     "gpu_ms": 0.4972,
+     "inputs": "cloud map (cloud cover, wind offset, time)"
+    },
+    "water_weather/low": {
+     "runs_per_frame": 0.5,
+     "gpu_ms": 0.4209,
+     "inputs": "cloud map (cloud cover, wind offset, time)"
+    },
+    "water_weather/modern": {
+     "runs_per_frame": 0.5,
+     "gpu_ms": 0.1223,
+     "inputs": "cloud map (cloud cover, wind offset, time)"
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 0.26547533333333334,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "M",
+   "fix": "Hash the pass inputs (the uniforms it reads, quantized as the shader reads them) and skip the dispatch when the hash matches the content already in the target. The output is bit-identical by construction.",
+   "fidelity_impact": "none",
+   "verify": "verify by image + state diff after implementation (perf_verify)",
+   "fix_id": null,
+   "scenes": [
+    "devroom/low",
+    "devroom/modern",
+    "foliage/low",
+    "foliage/modern",
+    "horde500/low",
+    "horde500/modern",
+    "horde_foliage/low",
+    "horde_foliage/modern",
+    "lan2_client/4",
+    "lan2_host/4",
+    "night_lights/low",
+    "night_lights/modern",
+    "veg_deadwood/low",
+    "veg_deadwood/modern",
+    "veg_forest_broadleaf/low",
+    "veg_forest_broadleaf/modern",
+    "veg_forest_edge/low",
+    "veg_forest_edge/modern",
+    "veg_forest_pine/low",
+    "veg_forest_pine/modern",
+    "veg_horde_forest/low",
+    "veg_horde_forest/modern",
+    "veg_horde_meadow/low",
+    "veg_horde_meadow/modern",
+    "veg_meadow/low",
+    "veg_meadow/modern",
+    "veg_overlook/low",
+    "veg_overlook/modern",
+    "veg_pond/low",
+    "veg_pond/modern",
+    "veg_wheat/low",
+    "veg_wheat/modern",
+    "vehicle_yard/low",
+    "vehicle_yard/modern",
+    "water_weather/low",
+    "water_weather/modern"
+   ],
+   "source": "runtime",
+   "below_noise": false,
+   "score": 0.0531
+  },
+  {
+   "id": "F-fe51d0",
+   "rule": "R01",
+   "title": "'transparent' records work that invokes no shader",
+   "system": "render",
+   "location": {
+    "pass": "transparent"
+   },
+   "evidence": {
+    "foliage/modern": {
+     "runs": 298,
+     "frames": 300,
+     "ms": 0.026861409395973153,
+     "draws": 3.0,
+     "dispatches": 0.0,
+     "fs": 0.0,
+     "cs": 0.0,
+     "vs": 0.0,
+     "clears": 0.0,
+     "clear_px": 0.0,
+     "barriers": 1.0,
+     "image_barriers": 3.0,
+     "pipelines": 4.0,
+     "descsets": 4.0,
+     "copies": 0.0,
+     "copy_bytes": 0.0,
+     "renderings": 1.0
+    },
+    "horde_foliage/low": {
+     "runs": 298,
+     "frames": 300,
+     "ms": 0.08524430201342283,
+     "draws": 3.0,
+     "dispatches": 0.0,
+     "fs": 0.0,
+     "cs": 0.0,
+     "vs": 0.0,
+     "clears": 0.0,
+     "clear_px": 0.0,
+     "barriers": 1.0,
+     "image_barriers": 3.0,
+     "pipelines": 4.0,
+     "descsets": 4.0,
+     "copies": 0.0,
+     "copy_bytes": 0.0,
+     "renderings": 1.0
+    },
+    "veg_forest_broadleaf/low": {
+     "runs": 298,
+     "frames": 300,
+     "ms": 0.033632053691275164,
+     "draws": 3.0,
+     "dispatches": 0.0,
+     "fs": 0.0,
+     "cs": 0.0,
+     "vs": 0.0,
+     "clears": 0.0,
+     "clear_px": 0.0,
+     "barriers": 1.0,
+     "image_barriers": 3.0,
+     "pipelines": 4.0,
+     "descsets": 4.0,
+     "copies": 0.0,
+     "copy_bytes": 0.0,
+     "renderings": 1.0
+    },
+    "veg_forest_edge/low": {
+     "runs": 298,
+     "frames": 300,
+     "ms": 0.021371308724832214,
+     "draws": 3.0,
+     "dispatches": 0.0,
+     "fs": 0.0,
+     "cs": 0.0,
+     "vs": 0.0,
+     "clears": 0.0,
+     "clear_px": 0.0,
+     "barriers": 1.0,
+     "image_barriers": 3.0,
+     "pipelines": 4.0,
+     "descsets": 4.0,
+     "copies": 0.0,
+     "copy_bytes": 0.0,
+     "renderings": 1.0
+    },
+    "veg_forest_pine/modern": {
+     "runs": 298,
+     "frames": 300,
+     "ms": 0.022987986577181208,
+     "draws": 3.0,
+     "dispatches": 0.0,
+     "fs": 0.0,
+     "cs": 0.0,
+     "vs": 0.0,
+     "clears": 0.0,
+     "clear_px": 0.0,
+     "barriers": 1.0,
+     "image_barriers": 3.0,
+     "pipelines": 4.0,
+     "descsets": 4.0,
+     "copies": 0.0,
+     "copy_bytes": 0.0,
+     "renderings": 1.0
+    },
+    "veg_horde_meadow/low": {
+     "runs": 298,
+     "frames": 300,
+     "ms": 0.02136328187919463,
+     "draws": 3.0,
+     "dispatches": 0.0,
+     "fs": 0.0,
+     "cs": 0.0,
+     "vs": 0.0,
+     "clears": 0.0,
+     "clear_px": 0.0,
+     "barriers": 1.0,
+     "image_barriers": 3.0,
+     "pipelines": 4.0,
+     "descsets": 4.0,
+     "copies": 0.0,
+     "copy_bytes": 0.0,
+     "renderings": 1.0
+    },
+    "veg_meadow/low": {
+     "runs": 298,
+     "frames": 300,
+     "ms": 0.020053241610738255,
+     "draws": 3.0,
+     "dispatches": 0.0,
+     "fs": 0.0,
+     "cs": 0.0,
+     "vs": 0.0,
+     "clears": 0.0,
+     "clear_px": 0.0,
+     "barriers": 1.0,
+     "image_barriers": 3.0,
+     "pipelines": 4.0,
+     "descsets": 4.0,
+     "copies": 0.0,
+     "copy_bytes": 0.0,
+     "renderings": 1.0
+    },
+    "veg_meadow/modern": {
+     "runs": 298,
+     "frames": 300,
+     "ms": 0.05772839597315436,
+     "draws": 3.0,
+     "dispatches": 0.0,
+     "fs": 0.0,
+     "cs": 0.0,
+     "vs": 0.0,
+     "clears": 0.0,
+     "clear_px": 0.0,
+     "barriers": 1.0,
+     "image_barriers": 3.0,
+     "pipelines": 4.0,
+     "descsets": 4.0,
+     "copies": 0.0,
+     "copy_bytes": 0.0,
+     "renderings": 1.0
+    },
+    "veg_overlook/modern": {
+     "runs": 298,
+     "frames": 300,
+     "ms": 0.027205006711409394,
+     "draws": 3.0,
+     "dispatches": 0.0,
+     "fs": 0.0,
+     "cs": 0.0,
+     "vs": 0.0,
+     "clears": 0.0,
+     "clear_px": 0.0,
+     "barriers": 1.0,
+     "image_barriers": 3.0,
+     "pipelines": 4.0,
+     "descsets": 4.0,
+     "copies": 0.0,
+     "copy_bytes": 0.0,
+     "renderings": 1.0
+    },
+    "veg_pond/modern": {
+     "runs": 298,
+     "frames": 300,
+     "ms": 0.03354413422818792,
+     "draws": 3.0,
+     "dispatches": 0.0,
+     "fs": 0.0,
+     "cs": 0.0,
+     "vs": 0.0,
+     "clears": 0.0,
+     "clear_px": 0.0,
+     "barriers": 1.0,
+     "image_barriers": 3.0,
+     "pipelines": 4.0,
+     "descsets": 4.0,
+     "copies": 0.0,
+     "copy_bytes": 0.0,
+     "renderings": 1.0
+    },
+    "veg_wheat/modern": {
+     "runs": 298,
+     "frames": 300,
+     "ms": 0.05826608724832215,
+     "draws": 3.0,
+     "dispatches": 0.0,
+     "fs": 0.0,
+     "cs": 0.0,
+     "vs": 0.0,
+     "clears": 0.0,
+     "clear_px": 0.0,
+     "barriers": 1.0,
+     "image_barriers": 3.0,
+     "pipelines": 4.0,
+     "descsets": 4.0,
+     "copies": 0.0,
+     "copy_bytes": 0.0,
+     "renderings": 1.0
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 0.08524430201342283,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "S",
+   "fix": "Every draw / dispatch of the pass is empty (culled to nothing / zero groups): skip the recording when its count is 0.",
+   "fidelity_impact": "none",
+   "verify": "verify by image + state diff after implementation (perf_verify)",
+   "fix_id": null,
+   "scenes": [
+    "foliage/modern",
+    "horde_foliage/low",
+    "veg_forest_broadleaf/low",
+    "veg_forest_edge/low",
+    "veg_forest_pine/modern",
+    "veg_horde_meadow/low",
+    "veg_meadow/low",
+    "veg_meadow/modern",
+    "veg_overlook/modern",
+    "veg_pond/modern",
+    "veg_wheat/modern"
+   ],
+   "source": "runtime",
+   "below_noise": false,
+   "score": 0.05115
   },
   {
    "id": "F-d084cd",
@@ -783,17 +2158,17 @@
     "function": "cvar_find"
    },
    "evidence": {
-    "night_lights/low": {
-     "calls_per_frame": 16.0
-    },
-    "night_lights/modern": {
-     "calls_per_frame": 17.0
-    },
     "devroom/low": {
      "calls_per_frame": 16.0
     },
     "devroom/modern": {
      "calls_per_frame": 17.0
+    },
+    "foliage/low": {
+     "calls_per_frame": 17.0
+    },
+    "foliage/modern": {
+     "calls_per_frame": 18.0
     },
     "horde500/low": {
      "calls_per_frame": 17.0
@@ -801,15 +2176,99 @@
     "horde500/modern": {
      "calls_per_frame": 18.0
     },
+    "horde_foliage/low": {
+     "calls_per_frame": 18.0
+    },
+    "horde_foliage/modern": {
+     "calls_per_frame": 19.0
+    },
+    "lan2_client/4": {
+     "calls_per_frame": 16.9
+    },
+    "lan2_host/4": {
+     "calls_per_frame": 19.0
+    },
+    "night_lights/low": {
+     "calls_per_frame": 16.0
+    },
+    "night_lights/modern": {
+     "calls_per_frame": 17.0
+    },
+    "veg_deadwood/low": {
+     "calls_per_frame": 17.0
+    },
+    "veg_deadwood/modern": {
+     "calls_per_frame": 18.0
+    },
+    "veg_forest_broadleaf/low": {
+     "calls_per_frame": 17.0
+    },
+    "veg_forest_broadleaf/modern": {
+     "calls_per_frame": 18.0
+    },
+    "veg_forest_edge/low": {
+     "calls_per_frame": 17.0
+    },
+    "veg_forest_edge/modern": {
+     "calls_per_frame": 18.0
+    },
+    "veg_forest_pine/low": {
+     "calls_per_frame": 17.0
+    },
+    "veg_forest_pine/modern": {
+     "calls_per_frame": 18.0
+    },
+    "veg_horde_forest/low": {
+     "calls_per_frame": 18.0
+    },
+    "veg_horde_forest/modern": {
+     "calls_per_frame": 19.0
+    },
+    "veg_horde_meadow/low": {
+     "calls_per_frame": 18.0
+    },
+    "veg_horde_meadow/modern": {
+     "calls_per_frame": 19.0
+    },
+    "veg_meadow/low": {
+     "calls_per_frame": 17.0
+    },
+    "veg_meadow/modern": {
+     "calls_per_frame": 18.0
+    },
+    "veg_overlook/low": {
+     "calls_per_frame": 17.0
+    },
+    "veg_overlook/modern": {
+     "calls_per_frame": 18.0
+    },
+    "veg_pond/low": {
+     "calls_per_frame": 17.0
+    },
+    "veg_pond/modern": {
+     "calls_per_frame": 18.0
+    },
+    "veg_wheat/low": {
+     "calls_per_frame": 17.0
+    },
+    "veg_wheat/modern": {
+     "calls_per_frame": 18.0
+    },
     "vehicle_yard/low": {
      "calls_per_frame": 16.0
     },
     "vehicle_yard/modern": {
      "calls_per_frame": 17.0
+    },
+    "water_weather/low": {
+     "calls_per_frame": 17.0
+    },
+    "water_weather/modern": {
+     "calls_per_frame": 18.0
     }
    },
    "savings": {
-    "cpu_ms": 0.045,
+    "cpu_ms": 0.04754166666666666,
     "gpu_ms": 0.0,
     "mb": 0.0,
     "bytes_s": 0.0
@@ -821,18 +2280,111 @@
    "verify": "perf_verify PF-0002 (perf_fix_disable A/B)",
    "fix_id": "PF-0002",
    "scenes": [
-    "night_lights/low",
-    "night_lights/modern",
     "devroom/low",
     "devroom/modern",
+    "foliage/low",
+    "foliage/modern",
     "horde500/low",
     "horde500/modern",
+    "horde_foliage/low",
+    "horde_foliage/modern",
+    "lan2_client/4",
+    "lan2_host/4",
+    "night_lights/low",
+    "night_lights/modern",
+    "veg_deadwood/low",
+    "veg_deadwood/modern",
+    "veg_forest_broadleaf/low",
+    "veg_forest_broadleaf/modern",
+    "veg_forest_edge/low",
+    "veg_forest_edge/modern",
+    "veg_forest_pine/low",
+    "veg_forest_pine/modern",
+    "veg_horde_forest/low",
+    "veg_horde_forest/modern",
+    "veg_horde_meadow/low",
+    "veg_horde_meadow/modern",
+    "veg_meadow/low",
+    "veg_meadow/modern",
+    "veg_overlook/low",
+    "veg_overlook/modern",
+    "veg_pond/low",
+    "veg_pond/modern",
+    "veg_wheat/low",
+    "veg_wheat/modern",
+    "vehicle_yard/low",
+    "vehicle_yard/modern",
+    "water_weather/low",
+    "water_weather/modern"
+   ],
+   "source": "runtime",
+   "below_noise": false,
+   "score": 0.04279
+  },
+  {
+   "id": "F-5c8ab1",
+   "rule": "R10",
+   "title": "102 palette uploads per frame for 71 distinct palettes (30% duplicates, 44 kB)",
+   "system": "anim/skinning",
+   "location": {
+    "file": "src/render/render.c",
+    "function": "render_draw_skinned"
+   },
+   "evidence": {
+    "devroom/low": {
+     "palette_sets": 102.0,
+     "distinct": 71.1,
+     "bytes_per_frame": 149760
+    },
+    "devroom/modern": {
+     "palette_sets": 102.0,
+     "distinct": 71.1,
+     "bytes_per_frame": 149760
+    },
+    "night_lights/low": {
+     "palette_sets": 102.0,
+     "distinct": 71.1,
+     "bytes_per_frame": 149760
+    },
+    "night_lights/modern": {
+     "palette_sets": 102.0,
+     "distinct": 71.1,
+     "bytes_per_frame": 149760
+    },
+    "vehicle_yard/low": {
+     "palette_sets": 102.0,
+     "distinct": 42.0,
+     "bytes_per_frame": 149760
+    },
+    "vehicle_yard/modern": {
+     "palette_sets": 102.0,
+     "distinct": 42.0,
+     "bytes_per_frame": 149760
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.12,
+    "gpu_ms": 0.0,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "high",
+   "effort": "M",
+   "fix": "Copy each character's palette once and let its parts (and the shadow / viewmodel passes) share the bone offset: the same matrices, uploaded once.",
+   "fidelity_impact": "none",
+   "verify": "verify by image + state diff after implementation (perf_verify)",
+   "fix_id": null,
+   "scenes": [
+    "devroom/low",
+    "devroom/modern",
+    "night_lights/low",
+    "night_lights/modern",
     "vehicle_yard/low",
     "vehicle_yard/modern"
    ],
    "source": "runtime",
    "below_noise": false,
-   "score": 0.0405
+   "score": 0.036
   },
   {
    "id": "F-82429b",
@@ -877,25 +2429,45 @@
   {
    "id": "F-b6ea0c",
    "rule": "R24",
-   "title": "'light_shadows' rebinds a pipeline for 62% of its draws",
+   "title": "'light_shadows' rebinds a pipeline for 63% of its draws",
    "system": "render",
    "location": {
     "pass": "light_shadows"
    },
    "evidence": {
-    "night_lights/modern": {
-     "draws": 107.6842105263158,
-     "pipeline_binds": 66.60526315789474,
-     "descriptor_binds": 5.684210526315789
+    "devroom/low": {
+     "draws": 54.69798657718121,
+     "pipeline_binds": 34.4496644295302,
+     "descriptor_binds": 1.5906040268456376
     },
     "devroom/modern": {
-     "draws": 51.026315789473685,
-     "pipeline_binds": 33.8421052631579,
-     "descriptor_binds": 1.3157894736842106
+     "draws": 54.69798657718121,
+     "pipeline_binds": 34.4496644295302,
+     "descriptor_binds": 1.5906040268456376
+    },
+    "lan2_client/4": {
+     "draws": 130.35570469798657,
+     "pipeline_binds": 75.0,
+     "descriptor_binds": 3.0
+    },
+    "lan2_host/4": {
+     "draws": 130.00671140939596,
+     "pipeline_binds": 74.86912751677852,
+     "descriptor_binds": 2.8691275167785233
+    },
+    "night_lights/low": {
+     "draws": 104.18120805369128,
+     "pipeline_binds": 62.59731543624161,
+     "descriptor_binds": 6.043624161073826
+    },
+    "night_lights/modern": {
+     "draws": 113.24161073825503,
+     "pipeline_binds": 68.81208053691275,
+     "descriptor_binds": 6.466442953020135
     }
    },
    "savings": {
-    "cpu_ms": 0.03330263157894737,
+    "cpu_ms": 0.0375,
     "gpu_ms": 0.0,
     "mb": 0.0,
     "bytes_s": 0.0
@@ -907,27 +2479,215 @@
    "verify": "verify by image + state diff after implementation (perf_verify)",
    "fix_id": null,
    "scenes": [
-    "night_lights/modern",
-    "devroom/modern"
+    "devroom/low",
+    "devroom/modern",
+    "lan2_client/4",
+    "lan2_host/4",
+    "night_lights/low",
+    "night_lights/modern"
    ],
    "source": "runtime",
    "below_noise": false,
-   "score": 0.00666
+   "score": 0.0075
+  },
+  {
+   "id": "F-a39b09",
+   "rule": "R16",
+   "title": "Snapshot section 'time' (20 B) changes in 0.7% of snapshots but is always sent",
+   "system": "net",
+   "location": {
+    "file": "src/net/net.c",
+    "function": "net_host_send_snapshots"
+   },
+   "evidence": {
+    "lan2_host/4": {
+     "sent": 150,
+     "changed": 1,
+     "bytes_per_snapshot": 20.0
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 0.0,
+    "mb": 0.0,
+    "bytes_s": 629.3194438167675
+   },
+   "confidence": "high",
+   "effort": "M",
+   "fix": "Send it on change (a version byte + resend until acked) like the weather block. Protocol change: bump DG_PROTOCOL_VERSION.",
+   "fidelity_impact": "none",
+   "verify": "verify by image + state diff after implementation (perf_verify)",
+   "fix_id": null,
+   "scenes": [
+    "lan2_host/4"
+   ],
+   "source": "runtime",
+   "below_noise": false,
+   "score": 0.00378
+  },
+  {
+   "id": "F-131fa4",
+   "rule": "R09",
+   "title": "anim:post_pass: 37.9 us per item (1 items, 0.04 ms)",
+   "system": "cpu/layout",
+   "location": {
+    "zone": "anim:post_pass",
+    "file": "src/gameplay/characters.c"
+   },
+   "evidence": {
+    "foliage/low": {
+     "ms": 0.038,
+     "items": 1.0,
+     "us_per_item": 37.93
+    },
+    "foliage/modern": {
+     "ms": 0.039,
+     "items": 1.0,
+     "us_per_item": 39.39
+    },
+    "veg_deadwood/low": {
+     "ms": 0.038,
+     "items": 1.0,
+     "us_per_item": 37.79
+    },
+    "veg_deadwood/modern": {
+     "ms": 0.037,
+     "items": 1.0,
+     "us_per_item": 36.88
+    },
+    "veg_forest_broadleaf/low": {
+     "ms": 0.035,
+     "items": 1.0,
+     "us_per_item": 35.26
+    },
+    "veg_forest_broadleaf/modern": {
+     "ms": 0.073,
+     "items": 1.0,
+     "us_per_item": 72.78
+    },
+    "veg_forest_edge/low": {
+     "ms": 0.037,
+     "items": 1.0,
+     "us_per_item": 36.54
+    },
+    "veg_forest_edge/modern": {
+     "ms": 0.037,
+     "items": 1.0,
+     "us_per_item": 37.2
+    },
+    "veg_forest_pine/low": {
+     "ms": 0.056,
+     "items": 1.0,
+     "us_per_item": 55.85
+    },
+    "veg_forest_pine/modern": {
+     "ms": 0.038,
+     "items": 1.0,
+     "us_per_item": 37.86
+    },
+    "veg_meadow/low": {
+     "ms": 0.035,
+     "items": 1.0,
+     "us_per_item": 34.97
+    },
+    "veg_meadow/modern": {
+     "ms": 0.036,
+     "items": 1.0,
+     "us_per_item": 35.99
+    },
+    "veg_overlook/low": {
+     "ms": 0.037,
+     "items": 1.0,
+     "us_per_item": 36.94
+    },
+    "veg_overlook/modern": {
+     "ms": 0.036,
+     "items": 1.0,
+     "us_per_item": 35.64
+    },
+    "veg_pond/low": {
+     "ms": 0.038,
+     "items": 1.0,
+     "us_per_item": 38.49
+    },
+    "veg_pond/modern": {
+     "ms": 0.034,
+     "items": 1.0,
+     "us_per_item": 34.3
+    },
+    "veg_wheat/low": {
+     "ms": 0.036,
+     "items": 1.0,
+     "us_per_item": 36.41
+    },
+    "veg_wheat/modern": {
+     "ms": 0.036,
+     "items": 1.0,
+     "us_per_item": 35.88
+    },
+    "water_weather/low": {
+     "ms": 0.04,
+     "items": 1.0,
+     "us_per_item": 39.7
+    },
+    "water_weather/modern": {
+     "ms": 0.039,
+     "items": 1.0,
+     "us_per_item": 39.33
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.018195916666666666,
+    "gpu_ms": 0.0,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "low",
+   "effort": "L",
+   "fix": "Profile with a sampling profiler (cache-miss counters need admin rights on Windows: not available here) and move the fields the loop touches into hot SoA arrays; the math is unchanged.",
+   "fidelity_impact": "none",
+   "verify": "verify by image + state diff after implementation (perf_verify)",
+   "fix_id": null,
+   "scenes": [
+    "foliage/low",
+    "foliage/modern",
+    "veg_deadwood/low",
+    "veg_deadwood/modern",
+    "veg_forest_broadleaf/low",
+    "veg_forest_broadleaf/modern",
+    "veg_forest_edge/low",
+    "veg_forest_edge/modern",
+    "veg_forest_pine/low",
+    "veg_forest_pine/modern",
+    "veg_meadow/low",
+    "veg_meadow/modern",
+    "veg_overlook/low",
+    "veg_overlook/modern",
+    "veg_pond/low",
+    "veg_pond/modern",
+    "veg_wheat/low",
+    "veg_wheat/modern",
+    "water_weather/low",
+    "water_weather/modern"
+   ],
+   "source": "runtime",
+   "below_noise": false,
+   "score": 0.00068
   },
   {
    "id": "F-a9afc1",
    "rule": "R08",
-   "title": "vg_palettes_record() calls malloc in the frame loop (fixed: persistent buffer)",
+   "title": "vg_palettes_record() calls malloc in the frame loop",
    "system": "core/alloc",
    "location": {
     "file": "src/render/vgeo/vgeo_skin.c",
-    "line": 124,
+    "line": 117,
     "function": "vg_palettes_record"
    },
    "evidence": {
     "static": {
      "call": "malloc",
-     "fixed": true
+     "fixed": false
     }
    },
    "savings": {
@@ -940,43 +2700,8 @@
    "effort": "S",
    "fix": "Keep the buffer for the owner's lifetime (sized at init) or take it from g_engine.frame_arena.",
    "fidelity_impact": "none",
-   "verify": "perf_verify PF-0003 (perf_fix_disable A/B)",
-   "fix_id": "PF-0003",
-   "scenes": [
-    "static"
-   ],
-   "source": "static",
-   "below_noise": false,
-   "score": 0.0006
-  },
-  {
-   "id": "F-e93490",
-   "rule": "R08",
-   "title": "vg_stream_update() calls malloc in the frame loop (fixed: persistent buffer)",
-   "system": "core/alloc",
-   "location": {
-    "file": "src/render/vgeo/vgeo_stream.c",
-    "line": 423,
-    "function": "vg_stream_update"
-   },
-   "evidence": {
-    "static": {
-     "call": "malloc",
-     "fixed": true
-    }
-   },
-   "savings": {
-    "cpu_ms": 0.0005,
-    "gpu_ms": 0.0,
-    "mb": 0.0,
-    "bytes_s": 0.0
-   },
-   "confidence": "medium",
-   "effort": "S",
-   "fix": "Keep the buffer for the owner's lifetime (sized at init) or take it from g_engine.frame_arena.",
-   "fidelity_impact": "none",
-   "verify": "perf_verify PF-0004 (perf_fix_disable A/B)",
-   "fix_id": "PF-0004",
+   "verify": "verify by image + state diff after implementation (perf_verify)",
+   "fix_id": null,
    "scenes": [
     "static"
    ],
@@ -987,49 +2712,161 @@
   {
    "id": "F-a3573f",
    "rule": "R04",
-   "title": "9 adjacent frame graph passes are independent but barrier separately",
+   "title": "5 adjacent frame graph passes are independent but barrier separately",
    "system": "render/fg",
    "location": {
     "file": "src/render/graph/fg.c",
     "function": "pass_barriers"
    },
    "evidence": {
-    "night_lights/low": {
-     "independent_adjacent_pairs": 9,
-     "barrier_calls_per_frame": 192.5
-    },
-    "night_lights/modern": {
-     "independent_adjacent_pairs": 16,
-     "barrier_calls_per_frame": 263.8
-    },
     "devroom/low": {
-     "independent_adjacent_pairs": 9,
-     "barrier_calls_per_frame": 192.5
+     "independent_adjacent_pairs": 5,
+     "barrier_calls_per_frame": 105.3
     },
     "devroom/modern": {
-     "independent_adjacent_pairs": 17,
-     "barrier_calls_per_frame": 264.2
+     "independent_adjacent_pairs": 13,
+     "barrier_calls_per_frame": 145.3
+    },
+    "foliage/low": {
+     "independent_adjacent_pairs": 5,
+     "barrier_calls_per_frame": 103.6
+    },
+    "foliage/modern": {
+     "independent_adjacent_pairs": 13,
+     "barrier_calls_per_frame": 143.6
     },
     "horde500/low": {
-     "independent_adjacent_pairs": 9,
-     "barrier_calls_per_frame": 192.5
+     "independent_adjacent_pairs": 5,
+     "barrier_calls_per_frame": 104.3
     },
     "horde500/modern": {
-     "independent_adjacent_pairs": 17,
-     "barrier_calls_per_frame": 263.2
+     "independent_adjacent_pairs": 13,
+     "barrier_calls_per_frame": 144.3
+    },
+    "horde_foliage/low": {
+     "independent_adjacent_pairs": 5,
+     "barrier_calls_per_frame": 103.6
+    },
+    "horde_foliage/modern": {
+     "independent_adjacent_pairs": 13,
+     "barrier_calls_per_frame": 143.6
+    },
+    "lan2_client/4": {
+     "independent_adjacent_pairs": 13,
+     "barrier_calls_per_frame": 145.6
+    },
+    "lan2_host/4": {
+     "independent_adjacent_pairs": 14,
+     "barrier_calls_per_frame": 145.6
+    },
+    "night_lights/low": {
+     "independent_adjacent_pairs": 5,
+     "barrier_calls_per_frame": 104.9
+    },
+    "night_lights/modern": {
+     "independent_adjacent_pairs": 13,
+     "barrier_calls_per_frame": 144.9
+    },
+    "veg_deadwood/low": {
+     "independent_adjacent_pairs": 5,
+     "barrier_calls_per_frame": 103.6
+    },
+    "veg_deadwood/modern": {
+     "independent_adjacent_pairs": 13,
+     "barrier_calls_per_frame": 143.6
+    },
+    "veg_forest_broadleaf/low": {
+     "independent_adjacent_pairs": 5,
+     "barrier_calls_per_frame": 103.6
+    },
+    "veg_forest_broadleaf/modern": {
+     "independent_adjacent_pairs": 13,
+     "barrier_calls_per_frame": 143.6
+    },
+    "veg_forest_edge/low": {
+     "independent_adjacent_pairs": 5,
+     "barrier_calls_per_frame": 103.6
+    },
+    "veg_forest_edge/modern": {
+     "independent_adjacent_pairs": 13,
+     "barrier_calls_per_frame": 143.6
+    },
+    "veg_forest_pine/low": {
+     "independent_adjacent_pairs": 5,
+     "barrier_calls_per_frame": 103.6
+    },
+    "veg_forest_pine/modern": {
+     "independent_adjacent_pairs": 13,
+     "barrier_calls_per_frame": 143.6
+    },
+    "veg_horde_forest/low": {
+     "independent_adjacent_pairs": 5,
+     "barrier_calls_per_frame": 103.6
+    },
+    "veg_horde_forest/modern": {
+     "independent_adjacent_pairs": 13,
+     "barrier_calls_per_frame": 143.6
+    },
+    "veg_horde_meadow/low": {
+     "independent_adjacent_pairs": 5,
+     "barrier_calls_per_frame": 103.6
+    },
+    "veg_horde_meadow/modern": {
+     "independent_adjacent_pairs": 13,
+     "barrier_calls_per_frame": 143.6
+    },
+    "veg_meadow/low": {
+     "independent_adjacent_pairs": 5,
+     "barrier_calls_per_frame": 103.6
+    },
+    "veg_meadow/modern": {
+     "independent_adjacent_pairs": 13,
+     "barrier_calls_per_frame": 143.6
+    },
+    "veg_overlook/low": {
+     "independent_adjacent_pairs": 5,
+     "barrier_calls_per_frame": 103.6
+    },
+    "veg_overlook/modern": {
+     "independent_adjacent_pairs": 13,
+     "barrier_calls_per_frame": 143.6
+    },
+    "veg_pond/low": {
+     "independent_adjacent_pairs": 5,
+     "barrier_calls_per_frame": 103.6
+    },
+    "veg_pond/modern": {
+     "independent_adjacent_pairs": 13,
+     "barrier_calls_per_frame": 143.6
+    },
+    "veg_wheat/low": {
+     "independent_adjacent_pairs": 5,
+     "barrier_calls_per_frame": 103.6
+    },
+    "veg_wheat/modern": {
+     "independent_adjacent_pairs": 13,
+     "barrier_calls_per_frame": 143.6
     },
     "vehicle_yard/low": {
-     "independent_adjacent_pairs": 9,
-     "barrier_calls_per_frame": 192.5
+     "independent_adjacent_pairs": 5,
+     "barrier_calls_per_frame": 104.3
     },
     "vehicle_yard/modern": {
-     "independent_adjacent_pairs": 17,
-     "barrier_calls_per_frame": 263.3
+     "independent_adjacent_pairs": 13,
+     "barrier_calls_per_frame": 144.3
+    },
+    "water_weather/low": {
+     "independent_adjacent_pairs": 6,
+     "barrier_calls_per_frame": 102.2
+    },
+    "water_weather/modern": {
+     "independent_adjacent_pairs": 14,
+     "barrier_calls_per_frame": 145.6
     }
    },
    "savings": {
     "cpu_ms": 0.0,
-    "gpu_ms": 0.051000000000000004,
+    "gpu_ms": 0.042,
     "mb": 0.0,
     "bytes_s": 0.0
    },
@@ -1040,18 +2877,46 @@
    "verify": "verify by image + state diff after implementation (perf_verify)",
    "fix_id": null,
    "scenes": [
-    "night_lights/low",
-    "night_lights/modern",
     "devroom/low",
     "devroom/modern",
+    "foliage/low",
+    "foliage/modern",
     "horde500/low",
     "horde500/modern",
+    "horde_foliage/low",
+    "horde_foliage/modern",
+    "lan2_client/4",
+    "lan2_host/4",
+    "night_lights/low",
+    "night_lights/modern",
+    "veg_deadwood/low",
+    "veg_deadwood/modern",
+    "veg_forest_broadleaf/low",
+    "veg_forest_broadleaf/modern",
+    "veg_forest_edge/low",
+    "veg_forest_edge/modern",
+    "veg_forest_pine/low",
+    "veg_forest_pine/modern",
+    "veg_horde_forest/low",
+    "veg_horde_forest/modern",
+    "veg_horde_meadow/low",
+    "veg_horde_meadow/modern",
+    "veg_meadow/low",
+    "veg_meadow/modern",
+    "veg_overlook/low",
+    "veg_overlook/modern",
+    "veg_pond/low",
+    "veg_pond/modern",
+    "veg_wheat/low",
+    "veg_wheat/modern",
     "vehicle_yard/low",
-    "vehicle_yard/modern"
+    "vehicle_yard/modern",
+    "water_weather/low",
+    "water_weather/modern"
    ],
    "source": "runtime",
    "below_noise": true,
-   "score": 0.00051
+   "score": 0.00042
   },
   {
    "id": "F-87756e",
@@ -1060,7 +2925,7 @@
    "system": "core/log",
    "location": {
     "file": "src/game/game_post.c",
-    "line": 324,
+    "line": 327,
     "function": "perf_stop_frame"
    },
    "evidence": {
@@ -1094,7 +2959,7 @@
    "system": "core/log",
    "location": {
     "file": "src/render/vk_vgeo.c",
-    "line": 1943,
+    "line": 823,
     "function": "grass_update_tier"
    },
    "evidence": {
@@ -1128,7 +2993,7 @@
    "system": "core/log",
    "location": {
     "file": "src/render/vk_vgeo.c",
-    "line": 2053,
+    "line": 933,
     "function": "render_foliage_map_types"
    },
    "evidence": {
@@ -1336,47 +3201,47 @@
   {
    "id": "F-0714da",
    "rule": "R27",
-   "title": "Main thread blocked 358 ms on file reads during startup (23518 ms to the first frame)",
+   "title": "Main thread blocked 682 ms on file reads during startup (4864 ms to the first frame)",
    "system": "startup",
    "location": {
     "zone": "startup"
    },
    "evidence": {
     "startup": {
-     "io_ms": 358.0,
-     "total_ms": 23518.1,
+     "io_ms": 681.6,
+     "total_ms": 4863.6,
      "top_init_ms": [
       [
        "render_init",
-       21029.7
+       1980.1
       ],
       [
        "game_init",
-       1934.9
-      ],
-      [
-       "ui_init",
-       245.0
+       1854.9
       ],
       [
        "assets_init",
-       181.4
+       426.1
+      ],
+      [
+       "ui_init",
+       239.0
       ],
       [
        "boot_map",
-       88.6
+       64.5
       ],
       [
        "lobby_init",
-       1.4
+       9.3
       ],
       [
-       "cvar_find",
-       0.0
+       "io",
+       0.1
       ],
       [
-       "cvar_find",
-       0.0
+       "io",
+       0.1
       ]
      ]
     }
@@ -1405,34 +3270,106 @@
   {
    "id": "F-df14d5",
    "rule": "T01",
-   "title": "'shadow_sun' costs 16.28 ms: a lower setting would save part of it",
+   "title": "'shadow_sun' costs 0.53 ms: a lower setting would save part of it",
    "system": "render",
    "location": {
     "pass": "shadow_sun"
    },
    "evidence": {
-    "night_lights/low": {
-     "gpu_ms": 16.283
-    },
-    "night_lights/modern": {
-     "gpu_ms": 113.611
-    },
-    "devroom/low": {
-     "gpu_ms": 18.955
-    },
     "devroom/modern": {
-     "gpu_ms": 138.858
+     "gpu_ms": 0.529
+    },
+    "foliage/low": {
+     "gpu_ms": 0.897
+    },
+    "foliage/modern": {
+     "gpu_ms": 6.725
     },
     "horde500/modern": {
-     "gpu_ms": 129.182
+     "gpu_ms": 0.91
     },
-    "vehicle_yard/modern": {
-     "gpu_ms": 133.621
+    "horde_foliage/low": {
+     "gpu_ms": 1.599
+    },
+    "horde_foliage/modern": {
+     "gpu_ms": 3.811
+    },
+    "lan2_client/4": {
+     "gpu_ms": 1.929
+    },
+    "lan2_host/4": {
+     "gpu_ms": 2.05
+    },
+    "night_lights/modern": {
+     "gpu_ms": 0.666
+    },
+    "veg_deadwood/low": {
+     "gpu_ms": 1.038
+    },
+    "veg_deadwood/modern": {
+     "gpu_ms": 5.175
+    },
+    "veg_forest_broadleaf/low": {
+     "gpu_ms": 4.84
+    },
+    "veg_forest_broadleaf/modern": {
+     "gpu_ms": 30.429
+    },
+    "veg_forest_edge/low": {
+     "gpu_ms": 1.342
+    },
+    "veg_forest_edge/modern": {
+     "gpu_ms": 13.354
+    },
+    "veg_forest_pine/low": {
+     "gpu_ms": 1.864
+    },
+    "veg_forest_pine/modern": {
+     "gpu_ms": 21.168
+    },
+    "veg_horde_forest/low": {
+     "gpu_ms": 1.654
+    },
+    "veg_horde_forest/modern": {
+     "gpu_ms": 20.405
+    },
+    "veg_horde_meadow/low": {
+     "gpu_ms": 1.306
+    },
+    "veg_horde_meadow/modern": {
+     "gpu_ms": 6.033
+    },
+    "veg_meadow/low": {
+     "gpu_ms": 0.774
+    },
+    "veg_meadow/modern": {
+     "gpu_ms": 3.732
+    },
+    "veg_overlook/low": {
+     "gpu_ms": 0.557
+    },
+    "veg_overlook/modern": {
+     "gpu_ms": 3.134
+    },
+    "veg_pond/low": {
+     "gpu_ms": 0.903
+    },
+    "veg_pond/modern": {
+     "gpu_ms": 5.798
+    },
+    "veg_wheat/low": {
+     "gpu_ms": 0.576
+    },
+    "veg_wheat/modern": {
+     "gpu_ms": 3.835
+    },
+    "water_weather/modern": {
+     "gpu_ms": 2.31
     }
    },
    "savings": {
     "cpu_ms": 0.0,
-    "gpu_ms": 55.54315789473685,
+    "gpu_ms": 12.171557046979865,
     "mb": 0.0,
     "bytes_s": 0.0
    },
@@ -1443,98 +3380,159 @@
    "verify": "changes the image: not a fidelity-neutral fix",
    "fix_id": null,
    "scenes": [
-    "night_lights/low",
-    "night_lights/modern",
-    "devroom/low",
     "devroom/modern",
+    "foliage/low",
+    "foliage/modern",
     "horde500/modern",
-    "vehicle_yard/modern"
+    "horde_foliage/low",
+    "horde_foliage/modern",
+    "lan2_client/4",
+    "lan2_host/4",
+    "night_lights/modern",
+    "veg_deadwood/low",
+    "veg_deadwood/modern",
+    "veg_forest_broadleaf/low",
+    "veg_forest_broadleaf/modern",
+    "veg_forest_edge/low",
+    "veg_forest_edge/modern",
+    "veg_forest_pine/low",
+    "veg_forest_pine/modern",
+    "veg_horde_forest/low",
+    "veg_horde_forest/modern",
+    "veg_horde_meadow/low",
+    "veg_horde_meadow/modern",
+    "veg_meadow/low",
+    "veg_meadow/modern",
+    "veg_overlook/low",
+    "veg_overlook/modern",
+    "veg_pond/low",
+    "veg_pond/modern",
+    "veg_wheat/low",
+    "veg_wheat/modern",
+    "water_weather/modern"
    ],
    "source": "runtime",
    "below_noise": false,
-   "score": 33.32589
-  },
-  {
-   "id": "F-a3994d",
-   "rule": "T01",
-   "title": "'mb_blur' costs 125.41 ms: a lower setting would save part of it",
-   "system": "render",
-   "location": {
-    "pass": "mb_blur"
-   },
-   "evidence": {
-    "night_lights/modern": {
-     "gpu_ms": 125.412
-    },
-    "devroom/modern": {
-     "gpu_ms": 129.279
-    },
-    "horde500/modern": {
-     "gpu_ms": 132.359
-    },
-    "vehicle_yard/modern": {
-     "gpu_ms": 123.717
-    }
-   },
-   "savings": {
-    "cpu_ms": 0.0,
-    "gpu_ms": 52.94378666666667,
-    "mb": 0.0,
-    "bytes_s": 0.0
-   },
-   "confidence": "medium",
-   "effort": "S",
-   "fix": "Lower its resolution / sample count / distance (changes the image: Engine Fidelity's job, not this audit's).",
-   "fidelity_impact": "tradeoff",
-   "verify": "changes the image: not a fidelity-neutral fix",
-   "fix_id": null,
-   "scenes": [
-    "night_lights/modern",
-    "devroom/modern",
-    "horde500/modern",
-    "vehicle_yard/modern"
-   ],
-   "source": "runtime",
-   "below_noise": false,
-   "score": 31.76627
+   "score": 7.30293
   },
   {
    "id": "F-e5de9a",
    "rule": "T01",
-   "title": "'opaque' costs 22.90 ms: a lower setting would save part of it",
+   "title": "'opaque' costs 0.41 ms: a lower setting would save part of it",
    "system": "render",
    "location": {
     "pass": "opaque"
    },
    "evidence": {
-    "night_lights/low": {
-     "gpu_ms": 22.897
-    },
-    "night_lights/modern": {
-     "gpu_ms": 75.078
-    },
     "devroom/low": {
-     "gpu_ms": 22.493
+     "gpu_ms": 0.407
     },
     "devroom/modern": {
-     "gpu_ms": 77.345
+     "gpu_ms": 0.877
     },
-    "horde500/low": {
-     "gpu_ms": 23.077
+    "foliage/low": {
+     "gpu_ms": 3.377
+    },
+    "foliage/modern": {
+     "gpu_ms": 10.003
     },
     "horde500/modern": {
-     "gpu_ms": 85.433
+     "gpu_ms": 1.281
+    },
+    "horde_foliage/low": {
+     "gpu_ms": 5.015
+    },
+    "horde_foliage/modern": {
+     "gpu_ms": 5.456
+    },
+    "lan2_client/4": {
+     "gpu_ms": 1.839
+    },
+    "lan2_host/4": {
+     "gpu_ms": 1.585
+    },
+    "night_lights/low": {
+     "gpu_ms": 0.5
+    },
+    "night_lights/modern": {
+     "gpu_ms": 1.555
+    },
+    "veg_deadwood/low": {
+     "gpu_ms": 1.851
+    },
+    "veg_deadwood/modern": {
+     "gpu_ms": 5.011
+    },
+    "veg_forest_broadleaf/low": {
+     "gpu_ms": 5.003
+    },
+    "veg_forest_broadleaf/modern": {
+     "gpu_ms": 6.27
+    },
+    "veg_forest_edge/low": {
+     "gpu_ms": 2.381
+    },
+    "veg_forest_edge/modern": {
+     "gpu_ms": 5.602
+    },
+    "veg_forest_pine/low": {
+     "gpu_ms": 2.071
+    },
+    "veg_forest_pine/modern": {
+     "gpu_ms": 5.07
+    },
+    "veg_horde_forest/low": {
+     "gpu_ms": 1.999
+    },
+    "veg_horde_forest/modern": {
+     "gpu_ms": 4.9
+    },
+    "veg_horde_meadow/low": {
+     "gpu_ms": 3.698
+    },
+    "veg_horde_meadow/modern": {
+     "gpu_ms": 7.903
+    },
+    "veg_meadow/low": {
+     "gpu_ms": 2.469
+    },
+    "veg_meadow/modern": {
+     "gpu_ms": 5.548
+    },
+    "veg_overlook/low": {
+     "gpu_ms": 3.196
+    },
+    "veg_overlook/modern": {
+     "gpu_ms": 6.928
+    },
+    "veg_pond/low": {
+     "gpu_ms": 2.459
+    },
+    "veg_pond/modern": {
+     "gpu_ms": 6.241
+    },
+    "veg_wheat/low": {
+     "gpu_ms": 2.143
+    },
+    "veg_wheat/modern": {
+     "gpu_ms": 4.738
     },
     "vehicle_yard/low": {
-     "gpu_ms": 21.749
+     "gpu_ms": 0.833
     },
     "vehicle_yard/modern": {
-     "gpu_ms": 67.836
+     "gpu_ms": 2.338
+    },
+    "water_weather/low": {
+     "gpu_ms": 1.851
+    },
+    "water_weather/modern": {
+     "gpu_ms": 3.801
     }
    },
    "savings": {
     "cpu_ms": 0.0,
-    "gpu_ms": 34.17336842105263,
+    "gpu_ms": 4.001045637583893,
     "mb": 0.0,
     "bytes_s": 0.0
    },
@@ -1545,44 +3543,137 @@
    "verify": "changes the image: not a fidelity-neutral fix",
    "fix_id": null,
    "scenes": [
-    "night_lights/low",
-    "night_lights/modern",
     "devroom/low",
     "devroom/modern",
-    "horde500/low",
+    "foliage/low",
+    "foliage/modern",
     "horde500/modern",
+    "horde_foliage/low",
+    "horde_foliage/modern",
+    "lan2_client/4",
+    "lan2_host/4",
+    "night_lights/low",
+    "night_lights/modern",
+    "veg_deadwood/low",
+    "veg_deadwood/modern",
+    "veg_forest_broadleaf/low",
+    "veg_forest_broadleaf/modern",
+    "veg_forest_edge/low",
+    "veg_forest_edge/modern",
+    "veg_forest_pine/low",
+    "veg_forest_pine/modern",
+    "veg_horde_forest/low",
+    "veg_horde_forest/modern",
+    "veg_horde_meadow/low",
+    "veg_horde_meadow/modern",
+    "veg_meadow/low",
+    "veg_meadow/modern",
+    "veg_overlook/low",
+    "veg_overlook/modern",
+    "veg_pond/low",
+    "veg_pond/modern",
+    "veg_wheat/low",
+    "veg_wheat/modern",
     "vehicle_yard/low",
-    "vehicle_yard/modern"
+    "vehicle_yard/modern",
+    "water_weather/low",
+    "water_weather/modern"
    ],
    "source": "runtime",
    "below_noise": false,
-   "score": 20.50402
+   "score": 2.40063
   },
   {
-   "id": "F-237107",
+   "id": "F-4ec5fe",
    "rule": "T01",
-   "title": "'taa' costs 57.99 ms: a lower setting would save part of it",
+   "title": "'prepass' costs 2.86 ms: a lower setting would save part of it",
    "system": "render",
    "location": {
-    "pass": "taa"
+    "pass": "prepass"
    },
    "evidence": {
-    "night_lights/modern": {
-     "gpu_ms": 57.993
+    "foliage/low": {
+     "gpu_ms": 2.864
     },
-    "devroom/modern": {
-     "gpu_ms": 59.458
+    "foliage/modern": {
+     "gpu_ms": 5.617
     },
-    "horde500/modern": {
-     "gpu_ms": 54.976
+    "horde_foliage/low": {
+     "gpu_ms": 4.432
     },
-    "vehicle_yard/modern": {
-     "gpu_ms": 59.077
+    "horde_foliage/modern": {
+     "gpu_ms": 2.718
+    },
+    "veg_deadwood/low": {
+     "gpu_ms": 1.428
+    },
+    "veg_deadwood/modern": {
+     "gpu_ms": 1.703
+    },
+    "veg_forest_broadleaf/low": {
+     "gpu_ms": 4.511
+    },
+    "veg_forest_broadleaf/modern": {
+     "gpu_ms": 4.163
+    },
+    "veg_forest_edge/low": {
+     "gpu_ms": 1.871
+    },
+    "veg_forest_edge/modern": {
+     "gpu_ms": 3.015
+    },
+    "veg_forest_pine/low": {
+     "gpu_ms": 1.704
+    },
+    "veg_forest_pine/modern": {
+     "gpu_ms": 3.109
+    },
+    "veg_horde_forest/low": {
+     "gpu_ms": 1.744
+    },
+    "veg_horde_forest/modern": {
+     "gpu_ms": 3.348
+    },
+    "veg_horde_meadow/low": {
+     "gpu_ms": 3.379
+    },
+    "veg_horde_meadow/modern": {
+     "gpu_ms": 4.229
+    },
+    "veg_meadow/low": {
+     "gpu_ms": 2.142
+    },
+    "veg_meadow/modern": {
+     "gpu_ms": 2.497
+    },
+    "veg_overlook/low": {
+     "gpu_ms": 2.716
+    },
+    "veg_overlook/modern": {
+     "gpu_ms": 3.082
+    },
+    "veg_pond/low": {
+     "gpu_ms": 1.981
+    },
+    "veg_pond/modern": {
+     "gpu_ms": 2.549
+    },
+    "veg_wheat/low": {
+     "gpu_ms": 1.747
+    },
+    "veg_wheat/modern": {
+     "gpu_ms": 2.298
+    },
+    "water_weather/low": {
+     "gpu_ms": 0.793
+    },
+    "water_weather/modern": {
+     "gpu_ms": 1.062
     }
    },
    "savings": {
     "cpu_ms": 0.0,
-    "gpu_ms": 23.783368421052632,
+    "gpu_ms": 2.2467710067114095,
     "mb": 0.0,
     "bytes_s": 0.0
    },
@@ -1593,40 +3684,295 @@
    "verify": "changes the image: not a fidelity-neutral fix",
    "fix_id": null,
    "scenes": [
-    "night_lights/modern",
+    "foliage/low",
+    "foliage/modern",
+    "horde_foliage/low",
+    "horde_foliage/modern",
+    "veg_deadwood/low",
+    "veg_deadwood/modern",
+    "veg_forest_broadleaf/low",
+    "veg_forest_broadleaf/modern",
+    "veg_forest_edge/low",
+    "veg_forest_edge/modern",
+    "veg_forest_pine/low",
+    "veg_forest_pine/modern",
+    "veg_horde_forest/low",
+    "veg_horde_forest/modern",
+    "veg_horde_meadow/low",
+    "veg_horde_meadow/modern",
+    "veg_meadow/low",
+    "veg_meadow/modern",
+    "veg_overlook/low",
+    "veg_overlook/modern",
+    "veg_pond/low",
+    "veg_pond/modern",
+    "veg_wheat/low",
+    "veg_wheat/modern",
+    "water_weather/low",
+    "water_weather/modern"
+   ],
+   "source": "runtime",
+   "below_noise": false,
+   "score": 1.34806
+  },
+  {
+   "id": "F-a3994d",
+   "rule": "T01",
+   "title": "'mb_blur' costs 0.70 ms: a lower setting would save part of it",
+   "system": "render",
+   "location": {
+    "pass": "mb_blur"
+   },
+   "evidence": {
+    "devroom/modern": {
+     "gpu_ms": 0.7
+    },
+    "foliage/modern": {
+     "gpu_ms": 1.855
+    },
+    "horde500/modern": {
+     "gpu_ms": 1.121
+    },
+    "horde_foliage/modern": {
+     "gpu_ms": 0.875
+    },
+    "night_lights/modern": {
+     "gpu_ms": 1.317
+    },
+    "veg_deadwood/modern": {
+     "gpu_ms": 0.928
+    },
+    "veg_forest_edge/modern": {
+     "gpu_ms": 0.854
+    },
+    "veg_forest_pine/modern": {
+     "gpu_ms": 0.812
+    },
+    "veg_horde_forest/modern": {
+     "gpu_ms": 0.811
+    },
+    "veg_horde_meadow/modern": {
+     "gpu_ms": 1.494
+    },
+    "veg_meadow/modern": {
+     "gpu_ms": 0.955
+    },
+    "veg_overlook/modern": {
+     "gpu_ms": 0.723
+    },
+    "veg_pond/modern": {
+     "gpu_ms": 0.882
+    },
+    "veg_wheat/modern": {
+     "gpu_ms": 0.895
+    },
+    "vehicle_yard/modern": {
+     "gpu_ms": 1.888
+    },
+    "water_weather/modern": {
+     "gpu_ms": 1.429
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 0.7550197315436242,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "S",
+   "fix": "Lower its resolution / sample count / distance (changes the image: Engine Fidelity's job, not this audit's).",
+   "fidelity_impact": "tradeoff",
+   "verify": "changes the image: not a fidelity-neutral fix",
+   "fix_id": null,
+   "scenes": [
     "devroom/modern",
+    "foliage/modern",
     "horde500/modern",
+    "horde_foliage/modern",
+    "night_lights/modern",
+    "veg_deadwood/modern",
+    "veg_forest_edge/modern",
+    "veg_forest_pine/modern",
+    "veg_horde_forest/modern",
+    "veg_horde_meadow/modern",
+    "veg_meadow/modern",
+    "veg_overlook/modern",
+    "veg_pond/modern",
+    "veg_wheat/modern",
+    "vehicle_yard/modern",
+    "water_weather/modern"
+   ],
+   "source": "runtime",
+   "below_noise": false,
+   "score": 0.45301
+  },
+  {
+   "id": "F-edcb12",
+   "rule": "T01",
+   "title": "'vfx_sim' costs 1.19 ms: a lower setting would save part of it",
+   "system": "render",
+   "location": {
+    "pass": "vfx_sim"
+   },
+   "evidence": {
+    "lan2_host/4": {
+     "gpu_ms": 1.194
+    },
+    "night_lights/modern": {
+     "gpu_ms": 0.725
+    },
+    "vehicle_yard/modern": {
+     "gpu_ms": 1.634
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 0.6534449664429531,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "S",
+   "fix": "Lower its resolution / sample count / distance (changes the image: Engine Fidelity's job, not this audit's).",
+   "fidelity_impact": "tradeoff",
+   "verify": "changes the image: not a fidelity-neutral fix",
+   "fix_id": null,
+   "scenes": [
+    "lan2_host/4",
+    "night_lights/modern",
     "vehicle_yard/modern"
    ],
    "source": "runtime",
    "below_noise": false,
-   "score": 14.27002
+   "score": 0.39207
+  },
+  {
+   "id": "F-7d1de6",
+   "rule": "T01",
+   "title": "'final' costs 1.33 ms: a lower setting would save part of it",
+   "system": "render",
+   "location": {
+    "pass": "final"
+   },
+   "evidence": {
+    "lan2_client/4": {
+     "gpu_ms": 1.328
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 0.531337422818792,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "S",
+   "fix": "Lower its resolution / sample count / distance (changes the image: Engine Fidelity's job, not this audit's).",
+   "fidelity_impact": "tradeoff",
+   "verify": "changes the image: not a fidelity-neutral fix",
+   "fix_id": null,
+   "scenes": [
+    "lan2_client/4"
+   ],
+   "source": "runtime",
+   "below_noise": false,
+   "score": 0.3188
+  },
+  {
+   "id": "F-e5e8df",
+   "rule": "T01",
+   "title": "'gtao' costs 0.42 ms: a lower setting would save part of it",
+   "system": "render",
+   "location": {
+    "pass": "gtao"
+   },
+   "evidence": {
+    "devroom/modern": {
+     "gpu_ms": 0.422
+    },
+    "lan2_client/4": {
+     "gpu_ms": 1.322
+    },
+    "veg_forest_broadleaf/modern": {
+     "gpu_ms": 1.039
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 0.5288955704697987,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "S",
+   "fix": "Lower its resolution / sample count / distance (changes the image: Engine Fidelity's job, not this audit's).",
+   "fidelity_impact": "tradeoff",
+   "verify": "changes the image: not a fidelity-neutral fix",
+   "fix_id": null,
+   "scenes": [
+    "devroom/modern",
+    "lan2_client/4",
+    "veg_forest_broadleaf/modern"
+   ],
+   "source": "runtime",
+   "below_noise": false,
+   "score": 0.31734
+  },
+  {
+   "id": "F-6323f3",
+   "rule": "T01",
+   "title": "'color_pyramid' costs 1.31 ms: a lower setting would save part of it",
+   "system": "render",
+   "location": {
+    "pass": "color_pyramid"
+   },
+   "evidence": {
+    "vehicle_yard/modern": {
+     "gpu_ms": 1.305
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 0.5220475973154363,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "S",
+   "fix": "Lower its resolution / sample count / distance (changes the image: Engine Fidelity's job, not this audit's).",
+   "fidelity_impact": "tradeoff",
+   "verify": "changes the image: not a fidelity-neutral fix",
+   "fix_id": null,
+   "scenes": [
+    "vehicle_yard/modern"
+   ],
+   "source": "runtime",
+   "below_noise": false,
+   "score": 0.31323
   },
   {
    "id": "F-852ca1",
    "rule": "T01",
-   "title": "'tonemap' costs 35.04 ms: a lower setting would save part of it",
+   "title": "'tonemap' costs 0.38 ms: a lower setting would save part of it",
    "system": "render",
    "location": {
     "pass": "tonemap"
    },
    "evidence": {
     "night_lights/low": {
-     "gpu_ms": 35.043
-    },
-    "devroom/low": {
-     "gpu_ms": 37.966
-    },
-    "horde500/low": {
-     "gpu_ms": 33.918
+     "gpu_ms": 0.379
     },
     "vehicle_yard/low": {
-     "gpu_ms": 35.964
+     "gpu_ms": 0.564
+    },
+    "water_weather/low": {
+     "gpu_ms": 1.07
     }
    },
    "savings": {
     "cpu_ms": 0.0,
-    "gpu_ms": 15.18642105263158,
+    "gpu_ms": 0.42813288590604026,
     "mb": 0.0,
     "bytes_s": 0.0
    },
@@ -1638,93 +3984,12 @@
    "fix_id": null,
    "scenes": [
     "night_lights/low",
-    "devroom/low",
-    "horde500/low",
-    "vehicle_yard/low"
+    "vehicle_yard/low",
+    "water_weather/low"
    ],
    "source": "runtime",
    "below_noise": false,
-   "score": 9.11185
-  },
-  {
-   "id": "F-a7049f",
-   "rule": "T01",
-   "title": "'bloom' costs 31.74 ms: a lower setting would save part of it",
-   "system": "render",
-   "location": {
-    "pass": "bloom"
-   },
-   "evidence": {
-    "night_lights/low": {
-     "gpu_ms": 31.74
-    },
-    "devroom/low": {
-     "gpu_ms": 32.593
-    },
-    "horde500/low": {
-     "gpu_ms": 30.322
-    },
-    "vehicle_yard/low": {
-     "gpu_ms": 30.972
-    }
-   },
-   "savings": {
-    "cpu_ms": 0.0,
-    "gpu_ms": 13.037052631578948,
-    "mb": 0.0,
-    "bytes_s": 0.0
-   },
-   "confidence": "medium",
-   "effort": "S",
-   "fix": "Lower its resolution / sample count / distance (changes the image: Engine Fidelity's job, not this audit's).",
-   "fidelity_impact": "tradeoff",
-   "verify": "changes the image: not a fidelity-neutral fix",
-   "fix_id": null,
-   "scenes": [
-    "night_lights/low",
-    "devroom/low",
-    "horde500/low",
-    "vehicle_yard/low"
-   ],
-   "source": "runtime",
-   "below_noise": false,
-   "score": 7.82223
-  },
-  {
-   "id": "F-99fa9d",
-   "rule": "T01",
-   "title": "'fxaa' costs 21.84 ms: a lower setting would save part of it",
-   "system": "render",
-   "location": {
-    "pass": "fxaa"
-   },
-   "evidence": {
-    "horde500/low": {
-     "gpu_ms": 21.845
-    },
-    "vehicle_yard/low": {
-     "gpu_ms": 17.596
-    }
-   },
-   "savings": {
-    "cpu_ms": 0.0,
-    "gpu_ms": 8.737894736842106,
-    "mb": 0.0,
-    "bytes_s": 0.0
-   },
-   "confidence": "medium",
-   "effort": "S",
-   "fix": "Lower its resolution / sample count / distance (changes the image: Engine Fidelity's job, not this audit's).",
-   "fidelity_impact": "tradeoff",
-   "verify": "changes the image: not a fidelity-neutral fix",
-   "fix_id": null,
-   "scenes": [
-    "horde500/low",
-    "vehicle_yard/low"
-   ],
-   "source": "runtime",
-   "below_noise": false,
-   "score": 5.24274
+   "score": 0.25688
   },
   {
    "id": "F-1a9828",
@@ -1989,6 +4254,198 @@
    "source": "static",
    "below_noise": false,
    "score": 0.25536
+  },
+  {
+   "id": "F-dec82a",
+   "rule": "T01",
+   "title": "'contact' costs 1.04 ms: a lower setting would save part of it",
+   "system": "render",
+   "location": {
+    "pass": "contact"
+   },
+   "evidence": {
+    "lan2_host/4": {
+     "gpu_ms": 1.037
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 0.41470442953020137,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "S",
+   "fix": "Lower its resolution / sample count / distance (changes the image: Engine Fidelity's job, not this audit's).",
+   "fidelity_impact": "tradeoff",
+   "verify": "changes the image: not a fidelity-neutral fix",
+   "fix_id": null,
+   "scenes": [
+    "lan2_host/4"
+   ],
+   "source": "runtime",
+   "below_noise": false,
+   "score": 0.24882
+  },
+  {
+   "id": "F-f664c2",
+   "rule": "T01",
+   "title": "'sky_view' costs 0.95 ms: a lower setting would save part of it",
+   "system": "render",
+   "location": {
+    "pass": "sky_view"
+   },
+   "evidence": {
+    "veg_forest_broadleaf/low": {
+     "gpu_ms": 0.953
+    },
+    "vehicle_yard/low": {
+     "gpu_ms": 0.378
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 0.38120609395973154,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "S",
+   "fix": "Lower its resolution / sample count / distance (changes the image: Engine Fidelity's job, not this audit's).",
+   "fidelity_impact": "tradeoff",
+   "verify": "changes the image: not a fidelity-neutral fix",
+   "fix_id": null,
+   "scenes": [
+    "veg_forest_broadleaf/low",
+    "vehicle_yard/low"
+   ],
+   "source": "runtime",
+   "below_noise": false,
+   "score": 0.22872
+  },
+  {
+   "id": "F-a7049f",
+   "rule": "T01",
+   "title": "'bloom' costs 0.56 ms: a lower setting would save part of it",
+   "system": "render",
+   "location": {
+    "pass": "bloom"
+   },
+   "evidence": {
+    "foliage/low": {
+     "gpu_ms": 0.562
+    },
+    "horde_foliage/low": {
+     "gpu_ms": 0.58
+    },
+    "night_lights/low": {
+     "gpu_ms": 0.458
+    },
+    "veg_forest_edge/low": {
+     "gpu_ms": 0.304
+    },
+    "veg_horde_meadow/low": {
+     "gpu_ms": 0.334
+    },
+    "veg_overlook/low": {
+     "gpu_ms": 0.434
+    },
+    "veg_wheat/low": {
+     "gpu_ms": 0.35
+    },
+    "vehicle_yard/low": {
+     "gpu_ms": 0.778
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 0.3113377181208054,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "S",
+   "fix": "Lower its resolution / sample count / distance (changes the image: Engine Fidelity's job, not this audit's).",
+   "fidelity_impact": "tradeoff",
+   "verify": "changes the image: not a fidelity-neutral fix",
+   "fix_id": null,
+   "scenes": [
+    "foliage/low",
+    "horde_foliage/low",
+    "night_lights/low",
+    "veg_forest_edge/low",
+    "veg_horde_meadow/low",
+    "veg_overlook/low",
+    "veg_wheat/low",
+    "vehicle_yard/low"
+   ],
+   "source": "runtime",
+   "below_noise": false,
+   "score": 0.1868
+  },
+  {
+   "id": "F-237107",
+   "rule": "T01",
+   "title": "'taa' costs 0.55 ms: a lower setting would save part of it",
+   "system": "render",
+   "location": {
+    "pass": "taa"
+   },
+   "evidence": {
+    "horde500/modern": {
+     "gpu_ms": 0.555
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 0.22180939597315438,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "S",
+   "fix": "Lower its resolution / sample count / distance (changes the image: Engine Fidelity's job, not this audit's).",
+   "fidelity_impact": "tradeoff",
+   "verify": "changes the image: not a fidelity-neutral fix",
+   "fix_id": null,
+   "scenes": [
+    "horde500/modern"
+   ],
+   "source": "runtime",
+   "below_noise": false,
+   "score": 0.13309
+  },
+  {
+   "id": "F-6690cc",
+   "rule": "T01",
+   "title": "'transparent' costs 0.46 ms: a lower setting would save part of it",
+   "system": "render",
+   "location": {
+    "pass": "transparent"
+   },
+   "evidence": {
+    "water_weather/low": {
+     "gpu_ms": 0.461
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 0.184385033557047,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "S",
+   "fix": "Lower its resolution / sample count / distance (changes the image: Engine Fidelity's job, not this audit's).",
+   "fidelity_impact": "tradeoff",
+   "verify": "changes the image: not a fidelity-neutral fix",
+   "fix_id": null,
+   "scenes": [
+    "water_weather/low"
+   ],
+   "source": "runtime",
+   "below_noise": false,
+   "score": 0.11063
   }
  ],
  "errors": []
