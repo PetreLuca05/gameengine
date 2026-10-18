@@ -623,6 +623,16 @@ if(MSVC)
 endif()
 add_test(NAME recoil_ads COMMAND test_recoil_ads WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
 
+# Detailed item meshes (docs/ITEM_PIPELINE.md): the .dgim loader on every shipped mesh, layering per
+# condition, posing, and the mesh sockets against the gameplay data (ADS alignment, hand glue).
+add_executable(test_item_mesh tests/test_item_mesh.c src/assets/item_mesh.c)
+set_target_properties(test_item_mesh PROPERTIES C_STANDARD 11)
+target_link_libraries(test_item_mesh PRIVATE dg_animcore)
+if(MSVC)
+  target_compile_options(test_item_mesh PRIVATE /W3 /wd4100 /wd4201 /utf-8)
+endif()
+add_test(NAME item_mesh COMMAND test_item_mesh WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+
 add_executable(test_characters tests/test_characters.c)
 set_target_properties(test_characters PROPERTIES C_STANDARD 11)
 target_link_libraries(test_characters PRIVATE dg_animcore)

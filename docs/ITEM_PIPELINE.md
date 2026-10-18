@@ -206,7 +206,18 @@ validator checks they exist.
 
 ## Tests
 
-- `validate_items` (ctest, Python): every catalog item, as described in the validator's header.
+- `validate_items` (ctest, Python): every catalog item, as described in the validator's header,
+  plus the **hand glue**. Every hand socket (`grip_r`, `grip_l`) must lie within 30 mm of the LOD 0
+  surface (point-to-triangle distance), so a hand never floats off the new geometry.
+- `item_mesh` (ctest, `tests/test_item_mesh.c`, C):
+  - The engine loader runs on every shipped `.dgim`, and every condition composes with values in
+    range.
+  - Posing works: bolt travel, the front sight fold, hidden magazine groups. Static parts merge
+    into at most 12 draws.
+  - Every weapon's mesh sockets match what `items.c` derives: the muzzle from the box model, the
+    sight from `iron_sights` (ADS alignment), the slot sockets and the support hand.
+  - Every attachment's mesh sockets match `attachments.c`: mount, sight point, lens, grip, emitter.
+  - Every allowed weapon x attachment combination has a mesh.
 - `tools/tests/item_nearplane.cfg` + `item_nearplane.py`: every weapon in first person at the
   default FOV, hip and ADS. It counts viewmodel pixels clipped by the near plane (the nearest depth
   of the viewmodel pass).
