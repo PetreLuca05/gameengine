@@ -169,10 +169,10 @@ void game_handle_event(const GameEvent *ev) {
     case EV_REVIVE:
     case EV_DNA: revive_handle_event(ev); break;
     case EV_CONTAINER:
+        // The screen opens with the loot side; the tree follows (MSG_LOOT, or the host's own).
         G->container_open = true;
         G->container_ent = ev->ent;
-        memcpy(G->container_slots, ev->data, sizeof(G->container_slots));
-        G->inv_selected = -1;
+        if (G->mode != GM_HOST && G->loot_ent != ev->ent) { G->loot_ent = ENT_NONE; inv_tree_init(&G->loot, -1); }
         break;
     case EV_CONTAINER_CLOSE: G->container_open = false; break;
     case EV_TOD: daynight_handle_event(ev); break;
@@ -196,52 +196,86 @@ void game_handle_event(const GameEvent *ev) {
 
 // ------------------------------------------------------------------ RPCs
 
-int game_inv_op(InvOp *op) {
-    if (!G || !G->world) return IOR_INVALID;
+static const ItemDB *db_of(World *w) { return w->items; }
+
+// Client: the predicted trees = the host's last trees + the unacknowledged intents re-applied.
+static void cl_repredict(void) {
+    World *w = G->world;
     Player *p = game_local_player();
-    if (!p) return IOR_INVALID;
+    if (!w || !p) return;
+    if (G->inv_base_valid) {
+        p->inv.t = G->inv_base.t;
+        memcpy(p->inv.quick, G->inv_base.quick, sizeof(p->inv.quick));
+        p->inv.revision = G->inv_base.revision;
+    }
+    G->loot = G->loot_base;
+    InvTree *loot = G->loot_ent ? &G->loot : NULL;
+    for (int i = 0; i < G->inv_pending_count; i++) {
+        InvCtx c = inv_ctx(&p->inv, db_of(w), loot);
+        inv_intent_apply(&c, &G->inv_pending[i], NULL);
+    }
+}
+
+int game_inv_intent(InvIntent *in) {
+    if (!G || !G->world) return IIR_INVALID;
+    Player *p = game_local_player();
+    if (!p) return IIR_INVALID;
     if (G->mode == GM_HOST) {
         // Authoritative right away: the result is the real one.
-        Inventory before = p->inv;
-        InvOpEffect fx;
-        int r = inv_op_apply(&before, G->world->items, op, &fx);
-        int a, b, c;
-        op->seq = 0;
-        inv_op_pack(op, &a, &b, &c);
-        game_sv_handle_rpc(G->local_slot, RPC_INV_OP, a, b, c);
-        return r;
+        in->seq = 0;
+        return game_sv_inv_intent_r(G->local_slot, in);
     }
-    // Client: predict on the local copy, remember it until the host acknowledges it.
-    if (G->inv_pending_count >= (int)ARRAY_COUNT(G->inv_pending)) return IOR_INVALID;
-    op->seq = ++G->inv_seq;
-    InvOpEffect fx;
-    int r = inv_op_apply(&p->inv, G->world->items, op, &fx);
-    G->inv_pending[G->inv_pending_count++] = *op;
-    int a, b, c;
-    inv_op_pack(op, &a, &b, &c);
-    net_send_rpc(RPC_INV_OP, a, b, c);
+    // Client: predict on the local copies, remember it until the host acknowledges it.
+    if (G->inv_pending_count >= (int)ARRAY_COUNT(G->inv_pending)) return IIR_INVALID;
+    in->seq = ++G->inv_seq;
+    InvCtx c = inv_ctx(&p->inv, db_of(G->world), G->loot_ent ? &G->loot : NULL);
+    int r = inv_intent_apply(&c, in, NULL);
+    G->inv_pending[G->inv_pending_count++] = *in;
+    net_send_inv_intent(in);
     return r;
 }
 
 int game_inv_pending(void) { return G ? G->inv_pending_count : 0; }
 
-// Client: the host's inventory (acknowledging intents up to ack_seq): take it, drop the
-// acknowledged intents and re-apply the rest on top (their predicted results).
-void game_cl_inventory(int slot, u32 revision, u32 ack_seq, const InvSlot *slots) {
+// Client: the host's inventory (acknowledging intents up to ack_seq): keep it as the base, drop
+// the acknowledged intents and re-apply the rest on top (their predicted results).
+void game_cl_inventory(int slot, u32 revision, u32 ack_seq, const u16 *quick, const InvTree *tree) {
     World *w = G ? G->world : NULL;
     if (!w || slot < 0 || slot >= MAX_PLAYERS) return;
-    Player *p = &w->players[slot];
-    memcpy(p->inv.slots, slots, sizeof(p->inv.slots));
-    p->inv.revision = revision;
+    G->inv_base.t = *tree;
+    memcpy(G->inv_base.quick, quick, sizeof(G->inv_base.quick));
+    G->inv_base.revision = revision;
+    G->inv_base_valid = true;
     int n = 0;
     for (int i = 0; i < G->inv_pending_count; i++)
         if (G->inv_pending[i].seq > ack_seq) G->inv_pending[n++] = G->inv_pending[i];
     G->inv_pending_count = n;
-    for (int i = 0; i < n; i++) {
-        InvOpEffect fx;
-        inv_op_apply(&p->inv, w->items, &G->inv_pending[i], &fx);
-    }
+    cl_repredict();
 }
+
+void game_cl_loot(EntityId e, u32 revision, const InvTree *tree) {
+    if (!G || !G->world) return;
+    if (!tree) {
+        G->loot_ent = ENT_NONE;
+        inv_tree_init(&G->loot_base, -1);
+    } else {
+        G->loot_ent = e;
+        G->loot_rev = revision;
+        G->loot_base = *tree;
+    }
+    cl_repredict();
+}
+
+InvTree *game_loot_tree(void) {
+    if (!G || !G->world || !G->container_open) return NULL;
+    if (G->mode == GM_HOST) {
+        Player *p = game_local_player();
+        return p ? container_tree(G->world, p->open_container, false) : NULL;
+    }
+    return G->loot_ent ? &G->loot : NULL;
+}
+
+EntityId game_loot_ent(void) { return G && G->container_open ? G->container_ent : ENT_NONE; }
 
 void game_rpc(int type, int a, int b, int c) {
     if (!G || !G->world) return;
@@ -249,46 +283,63 @@ void game_rpc(int type, int a, int b, int c) {
     else net_send_rpc(type, a, b, c);
 }
 
-static void send_container(World *w, int slot, EntityId cont) {
-    GameEvent ev;
-    memset(&ev, 0, sizeof(ev));
-    ev.type = EV_CONTAINER;
-    ev.target = (u8)slot;
-    ev.except = EVENT_ALL;
-    ev.ent = cont;
-    memcpy(ev.data, w->cont[ENT_INDEX(cont)].slots, sizeof(w->cont[0].slots));
-    ev_push(w, &ev);
-}
-
 static void spawn_dropped(World *w, int slot, InvSlot s);
 
-static void drop_item(World *w, int slot, int inv_slot) {
-    Player *p = &w->players[slot];
-    if (inv_slot < 0 || inv_slot >= INV_SLOTS) return;
-    InvSlot s = p->inv.slots[inv_slot];
-    if (!s.item) return;
-    memset(&p->inv.slots[inv_slot], 0, sizeof(InvSlot));
-    p->inv.revision++;
-    spawn_dropped(w, slot, s);
+// Is the open world inventory within reach (crates 3.5 m, vehicles 4.5 m)?
+static bool loot_reachable(World *w, int slot, EntityId e) {
+    if (!ent_valid(w, e)) return false;
+    return v3_dist(w->players[slot].sim.move.pos, w->xf[ENT_INDEX(e)].pos) <= game_loot_reach(w, e);
 }
 
-// Host: an inventory intent (gameplay/inv_ops.c) plus its world effects. Every intent is
-// acknowledged with an inventory message (even a rejected one), so the client's prediction
-// always converges on the host's result.
-static void sv_inv_op(World *w, int slot, const InvOp *op) {
+static Cvar *g_inv_reach;
+
+void game_loot_register(void) {
+    g_inv_reach = cvar_reg_float("sv_inv_reach", 3.5f, 0.5f, 1000.0f, CVAR_LOCKED, "inventory: how far (m) a player may be from an open world container (vehicles + 1 m); tests raise it");
+}
+
+float game_loot_reach(World *w, EntityId e) {
+    return (g_inv_reach ? g_inv_reach->f : 3.5f) + (ent_valid(w, e) && w->type[ENT_INDEX(e)] == ET_VEHICLE ? 1.0f : 0.0f);
+}
+
+// Host: an inventory intent (gameplay/inventory/inv_intent.c) plus its world effects. Every
+// intent is acknowledged with an inventory message (even a rejected one), so the client's
+// prediction always converges on the host's result; a changed world inventory is resent to
+// everyone who has it open (net.c).
+int game_sv_inv_intent_r(int slot, const InvIntent *in) {
+    World *w = G->world;
     Player *p = &w->players[slot];
-    InvOpEffect fx;
-    int r = inv_op_apply(&p->inv, w->items, op, &fx);
-    if (op->seq > p->inv_ack_seq) p->inv_ack_seq = op->seq;
+    EntityId oc = p->open_container;
+    InvTree *loot = container_tree(w, oc, false);
+    InvCtx c = inv_ctx(&p->inv, w->items, loot);
+    c.loot_reachable = loot && loot_reachable(w, slot, oc);
+    InvEffect fx;
+    int r = inv_intent_apply(&c, in, &fx);
+    if (in->seq > p->inv_ack_seq) p->inv_ack_seq = in->seq;
     p->inv.revision++;
-    if (r != IOR_OK) return;
-    if (op->type == IOP_DROP && fx.dropped.item) spawn_dropped(w, slot, fx.dropped);
-    if (op->type == IOP_USE && fx.used_item) {
+    if (r != IIR_OK) return r;
+    bool touched_loot = in->src_side == INV_SIDE_LOOT || in->dst_side == INV_SIDE_LOOT || in->type == II_TAKE_ALL || in->type == II_QUICK_MOVE;
+    if (loot && touched_loot) w->cont[ENT_INDEX(oc)].revision++;
+    for (int k = 0; k < fx.dropped_n; k++) spawn_dropped(w, slot, fx.dropped[k]);
+    if (fx.used_item) {
         const ItemDef *d = item_def(w->items, fx.used_item);
         heal(w, p->ent, d->heal, d->armor);
         ev_hint(w, slot, "Used %s", d->name);
         ev_sound(w, "heal", p->sim.move.pos, 0.8f, EVENT_ALL);
     }
+    return r;
+}
+
+void game_sv_inv_intent(int slot, const InvIntent *in) {
+    World *w = G ? G->world : NULL;
+    if (!w || slot < 0 || slot >= MAX_PLAYERS || !w->players[slot].active) return;
+    game_sv_inv_intent_r(slot, in);
+}
+
+void game_sv_loot_close(int slot) {
+    World *w = G ? G->world : NULL;
+    if (!w || slot < 0 || slot >= MAX_PLAYERS) return;
+    w->players[slot].open_container = ENT_NONE;
+    w->players[slot].loot_sent_ent = ENT_NONE;
 }
 
 static void spawn_dropped(World *w, int slot, InvSlot s) {
@@ -315,49 +366,11 @@ void game_sv_handle_rpc(int slot, int type, int a, int b, int c) {
     if (!w || slot < 0 || slot >= MAX_PLAYERS || !w->players[slot].active) return;
     Player *p = &w->players[slot];
     switch (type) {
-    case RPC_INV_MOVE: inv_move(&p->inv, w->items, a, b); break;
-    case RPC_INV_DROP: drop_item(w, slot, a); break;
     case RPC_ATTACH: game_sv_attach(w, slot, a, b, c); break;
     case RPC_SET_PART: chars_sv_player_part(w, slot, a, b); break;
     case RPC_DOOR_ACTION: door_action(w, (EntityId)(u32)a, slot, b); break;
     case RPC_PING: game_sv_ping(w, slot, a, b, c); break;
-    case RPC_INV_OP: {
-        InvOp op;
-        inv_op_unpack(a, b, c, &op);
-        sv_inv_op(w, slot, &op);
-        break;
-    }
-    case RPC_CONTAINER_TAKE: {
-        EntityId ce = p->open_container;
-        if (!ent_valid(w, ce) || w->type[ENT_INDEX(ce)] != ET_CONTAINER) return;
-        if (v3_dist(p->sim.move.pos, w->xf[ENT_INDEX(ce)].pos) > 3.5f) return; // validate proximity
-        Container *ct = &w->cont[ENT_INDEX(ce)];
-        int first = a == 255 ? 0 : a, last = a == 255 ? CONTAINER_SLOTS - 1 : a;
-        for (int s = DG_MAX(0, first); s <= DG_MIN(CONTAINER_SLOTS - 1, last); s++) {
-            InvSlot *cs = &ct->slots[s];
-            if (!cs->item) continue;
-            int left = inv_add_att(&p->inv, w->items, cs->item, cs->count, cs->ammo, cs->att);
-            if (left == cs->count) { ev_hint(w, slot, "Inventory full"); break; }
-            if (left > 0) cs->count = (u16)left;
-            else memset(cs, 0, sizeof(*cs));
-        }
-        ct->revision++;
-        send_container(w, slot, ce);
-        break;
-    }
-    case RPC_CONTAINER_PUT: {
-        EntityId ce = p->open_container;
-        if (!ent_valid(w, ce) || a < 0 || a >= INV_SLOTS) return;
-        InvSlot *s = &p->inv.slots[a];
-        if (!s->item) return;
-        int left = slots_add_att(w->cont[ENT_INDEX(ce)].slots, CONTAINER_SLOTS, w->items, s->item, s->count, s->ammo, s->att, 0, CONTAINER_SLOTS);
-        if (left > 0) s->count = (u16)left;
-        else memset(s, 0, sizeof(*s));
-        p->inv.revision++;
-        send_container(w, slot, ce);
-        break;
-    }
-    case RPC_CONTAINER_CLOSE: p->open_container = ENT_NONE; break;
+    case RPC_CONTAINER_CLOSE: game_sv_loot_close(slot); break;
     case RPC_SPECTATE: {
         // Dev spectating (alive): the host's own player, or anyone with sv_cheats.
         Cvar *cheats = cvar_find("sv_cheats");

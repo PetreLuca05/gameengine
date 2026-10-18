@@ -140,7 +140,10 @@ void main() {
     if (!LIT_FRONT_FACING) n = -n;
     // MAT_AO_BYTE_VERTEX: the vertex alpha is baked AO (applied to the indirect light below), not opacity.
     bool vertex_ao = (ao_b & MAT_AO_BYTE_VERTEX) != 0u;
-    vec4 base = MAT_COLOR * vec4(v_color.rgb, vertex_ao ? 1.0 : v_color.a);
+    // MAT_ROUGHNESS_VERTEX (item meshes): the vertex rgb is sqrt(albedo) (8 bits keep dark gun steel precise).
+    bool vertex_pbr = mat_vertex_pbr(MAT_PARAMS.x);
+    vec3 vrgb = vertex_pbr ? v_color.rgb * v_color.rgb : v_color.rgb;
+    vec4 base = MAT_COLOR * vec4(vrgb, vertex_ao ? 1.0 : v_color.a);
 
     if ((flags & MAT_TEXTURED) != 0u) {
         vec4 t;
@@ -202,6 +205,7 @@ void main() {
         vec3 v = normalize(frame.camera_pos.xyz - v_world);
         float rough = clamp(surf_rough >= 0.0 ? surf_rough : MAT_PARAMS.x, 0.04, 1.0);
         float metal = clamp(surf_metal >= 0.0 ? surf_metal : MAT_PARAMS.y, 0.0, 1.0);
+        if (vertex_pbr) { rough = clamp(v_uv.x, 0.04, 1.0); metal = clamp(v_uv.y, 0.0, 1.0); }
 #ifdef PBR_MAPS
         pbr_metal_rough(flags, map_uv, rough, metal);
         rough = max(rough, 0.04);

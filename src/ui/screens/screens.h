@@ -46,12 +46,13 @@ void screens_confirm_expired(void);        // the display countdown ran out with
 // Multiplayer (scr_multiplayer.c)
 bool multiplayer_draw(GuiRect r);
 
-// Inventory (scr_inventory.c)
+// Inventory (ui/inventory/inv_screen.c, docs/INVENTORY.md)
 void inventory_open(void);
 void inventory_register_commands(void);
 void inventory_close(void);
 bool inventory_draw(GuiRect area, bool as_modal);
 void inventory_confirm_drop(bool yes);
+bool inventory_showcase(void);             // the camera faces the player while it is open (inv_showcase)
 bool inventory_wants_back(void);           // false while a drag / context menu takes the back press
 
 // Weapon bench (scr_bench.c)

@@ -63,7 +63,9 @@ static void reset_slot(World *w, int i, EntityType type) {
     memset(&w->door[i], 0, sizeof(Door));
     memset(&w->lever[i], 0, sizeof(Lever));
     memset(&w->light[i], 0, sizeof(LightComp));
+    if (w->cont[i].tree && w->cont[i].tree <= MAX_LOOT_TREES) w->loot_tree_used[w->cont[i].tree - 1] = 0;
     memset(&w->cont[i], 0, sizeof(Container));
+    w->cont[i].root = -1;
     memset(&w->pickup[i], 0, sizeof(Pickup));
     memset(&w->proj[i], 0, sizeof(Projectile));
     memset(&w->hitbox[i], 0, sizeof(Hitbox));
@@ -114,6 +116,8 @@ void ent_destroy(World *w, EntityId e) {
     if (w->chars) char_detach(w, e);
     if (w->body[i].body != PHYS_INVALID_BODY) phys_remove_body(w->phys, w->body[i].body);
     w->body[i].body = PHYS_INVALID_BODY;
+    if (w->cont[i].tree && w->cont[i].tree <= MAX_LOOT_TREES) w->loot_tree_used[w->cont[i].tree - 1] = 0;   // its inventory
+    w->cont[i].tree = 0;
     w->alive[i] = 0;
     w->comps[i] = 0;
     while (w->max_used > 1 && !w->alive[w->max_used - 1]) w->max_used--;

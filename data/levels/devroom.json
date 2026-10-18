@@ -3,8 +3,8 @@
   "_comment": "Units are meters, yaw in degrees. Y up, yaw 0 looks towards -Z (north). Box pos = bottom center. Open room (no walls / ceiling) under the procedural sky (env sky_zenith / sky_horizon / clouds).",
   "env": {"sun_dir": [0.32, 1.0, 0.22], "sun_color": [1.0, 0.96, 0.9], "sun_intensity": 2.4, "sky": [0.55, 0.6, 0.7], "ground": [0.32, 0.3, 0.27], "fog": [0.42, 0.45, 0.5], "fog_density": 0.0, "sky_zenith": [0.22, 0.42, 0.78], "sky_horizon": [0.72, 0.8, 0.9], "clouds": 0.45},
   "room": {"size": [60, 10, 60], "wall": 0.5, "floor_material": "concrete", "wall_material": "plaster", "floor_color": [0.6, 0.6, 0.6], "wall_color": [0.68, 0.68, 0.68], "walls": false, "ceiling": false, "floor_size": [4000, 0, 4000]},
-  "_footprint_areas": "Ground the dev room needs where no brush stands (level_include.h): a map that includes the dev room with \"ground\" (devroom_vegetation) flattens and clears these besides every brush / entity footprint. [x0, z0, x1, z1]: the sighting lane, the ballistics range, the flesh range lanes, the horde yard ring (spawn_horde: 30 m around (0, 50)), the aim stand's down range, the vehicle yard, the vehicle_test ground west of the room (vehicles.cfg), the foliage yard (foliage_test_scatter / foliage_grove), the audio range from its cliff to its car (flat ground between the pad and the cliff, docs/AUDIO_PROCEDURAL.md 'Audio range'). Keep them in step when an area moves.",
-  "footprint_areas": [[28, -14, 236, 4], [28, -62, 536, -30], [-16, -82, 16, -30], [-34, 16, 34, 84], [98, 20, 132, 46], [-176, -26, -100, 26], [-112, -90, -86, 52], [60, 80, 380, 400], [-390, -336, -182, -144]],
+  "_footprint_areas": "Ground the dev room needs where no brush stands (level_include.h): a map that includes the dev room with \"ground\" (devroom_vegetation) flattens and clears these besides every brush / entity footprint. [x0, z0, x1, z1]: the sighting lane, the ballistics range, the flesh range lanes, the horde yard ring (spawn_horde: 30 m around (0, 50)), the aim stand's down range, the vehicle yard, the vehicle_test ground west of the room (vehicles.cfg), the foliage yard (foliage_test_scatter / foliage_grove), the audio range from its cliff to its car (flat ground between the pad and the cliff, docs/AUDIO_PROCEDURAL.md 'Audio range'), the item showcase (docs/ITEM_PIPELINE.md). Keep them in step when an area moves.",
+  "footprint_areas": [[28, -14, 236, 4], [28, -62, 536, -30], [-16, -82, 16, -30], [-34, 16, 34, 84], [98, 20, 132, 46], [-176, -26, -100, 26], [-112, -90, -86, 52], [60, 80, 380, 400], [-390, -336, -182, -144], [-64, 49, -44, 78]],
   "spawns": [
     {"pos": [0, 0.05, 24], "yaw": 0},
     {"pos": [2, 0.05, 24.5], "yaw": 0},
@@ -483,6 +483,7 @@
   ],
   "labels": [
     {"pos": [115, 0, 43.4], "yaw": 0, "floor": true, "size": 0.18, "text": "aim stand: wall edge / window / car / low wall / thin wall. aim_debug 1, crosshair_obstruct, block_fire_when_barrel_blocked, aim_report, aim_stats"},
+    {"pos": [-46.5, 0, 49.6], "yaw": 180, "floor": true, "size": 0.18, "text": "item showcase: every detailed item on a turntable (item_showcase). item_inspect <id> [wire|matid|wear|ao|dirt|sockets], item_condition new|worn|rusty, item_meshes 0|1"},
     {"pos": [-50, 0, -29.9], "yaw": 0, "floor": true, "size": 0.12, "text": "AO foliage corner: bushes 0.3 + vertex AO (legacy, by the wall / 4 m out) | reference 1.0 multiply | vgeo | step. r_post_debug 18 raw, 19 blur, 20 final"},
     {"pos": [33.5, 0, -42.0], "yaw": -90, "floor": true, "size": 0.18, "text": "ballistics range: ballistics_debug 1, fire_tracers_only 1, bal_wind <m/s>, shutter_preview, muzzle_preview <weapon> <device>"},
     {"pos": [33.5, 0, -57.5], "yaw": -90, "floor": true, "size": 0.18, "text": "penetration: steel / pine / sandbag / brick / plaster, witness panels behind"},
@@ -559,13 +560,42 @@
       ]
     },
     {
+      "_comment": "The two-client loot race (tools/tests/inv_net.sh, docs/INVENTORY.md).",
       "type": "container",
+      "name": "inv_crate",
       "pos": [17, 0, 7],
       "yaw": 0,
       "loot": [
         ["rifle", 1],
         ["ammo_rifle", 60],
-        ["armor", 1]
+        ["armor", 1],
+        ["medkit", 2],
+        ["bandage", 3],
+        ["pistol", 1],
+        ["scrap", 6]
+      ]
+    },
+    {
+      "_comment": "Gear locker by the weapon bench: wearables, containers and cases for the grid inventory (docs/INVENTORY.md).",
+      "type": "container",
+      "name": "gear_locker",
+      "grid": "stash",
+      "pos": [9.2, 0, 27.6],
+      "yaw": 180,
+      "loot": [
+        ["backpack_hiking", 1],
+        ["backpack", 1],
+        ["sling_bag", 1],
+        ["rig_chest", 1],
+        ["plate_carrier", 1],
+        ["helmet", 1],
+        ["headset", 1],
+        ["balaclava", 1],
+        ["glasses", 1],
+        ["armband", 1],
+        ["secure_alpha", 1],
+        ["ammo_case", 1],
+        ["med_case", 1]
       ]
     },
     {

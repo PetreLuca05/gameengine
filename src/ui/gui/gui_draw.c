@@ -594,6 +594,28 @@ void gd_image(GuiRect r, TextureId tex, vec4 uv, u32 tint) {
     quad_uv(tex, r.x, r.y, r.x + r.w, r.y + r.h, v2(uv.x, uv.y), v2(uv.z, uv.w), col(tint));
 }
 
+// Rotated a quarter turn clockwise: r's top-left shows the image's bottom-left (grid items lying rotated).
+void gd_image_rot90(GuiRect r, TextureId tex, vec4 uv, u32 tint) {
+    if (!tex || r.w <= 0 || r.h <= 0) return;
+    GuiRect cl = D.clip[D.clip_n - 1];
+    if (r.x + r.w < cl.x || r.y + r.h < cl.y || r.x > cl.x + cl.w || r.y > cl.y + cl.h) return;
+    Layer *L = prim(tex, 4, 6);
+    if (!L) return;
+    u32 c = col(tint);
+    u32 b = L->vc;
+    UiVertex *v = L->v + b;
+    float x0 = r.x, y0 = r.y, x1 = r.x + r.w, y1 = r.y + r.h;
+    v[0] = (UiVertex){ v2(x0, y0), v2(uv.x, uv.w), c };
+    v[1] = (UiVertex){ v2(x1, y0), v2(uv.x, uv.y), c };
+    v[2] = (UiVertex){ v2(x1, y1), v2(uv.z, uv.y), c };
+    v[3] = (UiVertex){ v2(x0, y1), v2(uv.z, uv.w), c };
+    L->vc += 4;
+    u32 *i = L->i + L->ic;
+    i[0] = b; i[1] = b + 1; i[2] = b + 2; i[3] = b; i[4] = b + 2; i[5] = b + 3;
+    L->ic += 6;
+    L->cmd[L->cc - 1].index_count += 6;
+}
+
 // The image's alpha filled with one colour (ui.frag: uv.y + 2 selects the silhouette mode).
 void gd_image_mask(GuiRect r, TextureId tex, vec4 uv, u32 color) {
     if (!tex) return;

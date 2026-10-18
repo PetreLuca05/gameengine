@@ -225,6 +225,8 @@ static void interact_tick(World *w, int slot, const UserCmd *cmd, u16 pressed, f
     bool use_down = (cmd->buttons & BTN_USE) != 0;
     // Timed actions (revive, extract DNA, insert into a fabricator) run in revive_sim_pre.
     bool timed = ent_valid(w, target) && (w->comps[ENT_INDEX(target)] & C_INTERACT) && w->inter[ENT_INDEX(target)].def && w->inter[ENT_INDEX(target)].def->action;
+    // A timed interactable's tap goes to its on_use too (a corpse searched when no extraction is on offer).
+    if ((pressed & BTN_USE) && timed && interact_valid(w, slot, target)) w->inter[ENT_INDEX(target)].def->on_use(w, target, slot);
     if ((pressed & BTN_USE) && !timed && interact_valid(w, slot, target)) {
         const InteractDef *def = w->inter[ENT_INDEX(target)].def;
         if (def->hold_time > 0 && !(def == interact_def_for(ET_CONTAINER) && w->cont[ENT_INDEX(target)].opened)) {
@@ -263,9 +265,11 @@ static void interact_tick(World *w, int slot, const UserCmd *cmd, u16 pressed, f
             }
         }
     }
-    // Close the container window when walking away.
-    if (p->open_container && ent_valid(w, p->open_container)) {
-        if (v3_dist(p->sim.move.pos, w->xf[ENT_INDEX(p->open_container)].pos) > 3.5f) {
+    // Close the container window when walking away (or when the container / corpse / vehicle is gone).
+    if (p->open_container) {
+        bool gone = !ent_valid(w, p->open_container);
+        float reach = game_loot_reach(w, p->open_container);
+        if (gone || v3_dist(p->sim.move.pos, w->xf[ENT_INDEX(p->open_container)].pos) > reach) {
             GameEvent ev;
             memset(&ev, 0, sizeof(ev));
             ev.type = EV_CONTAINER_CLOSE;
@@ -1099,18 +1103,29 @@ static void cmd_inv_clear(int argc, const char **argv) {
 static void cmd_give_ammo(int argc, const char **argv) { give_kinds(argc, argv, true); }
 
 // Host: put attachment id `att` (0 = remove) into attachment slot `aslot` of the weapon in
-// inventory slot `inv_slot` of player `slot`. Validated against the weapon's slots.
+// hotbar slot `inv_slot` of player `slot`. Validated against the weapon's slots and, for a weapon
+// lying in a grid, its new footprint (docs/INVENTORY.md).
 bool game_sv_attach(World *w, int slot, int inv_slot, int aslot, int att) {
     if (!w || slot < 0 || slot >= MAX_PLAYERS || !w->players[slot].active) return false;
     Player *p = &w->players[slot];
-    if (inv_slot < 0 || inv_slot >= INV_SLOTS || aslot < 0 || aslot >= ATT_SLOTS) return false;
-    InvSlot *s = &p->inv.slots[inv_slot];
+    if (inv_slot < 0 || inv_slot >= INV_HOTBAR || aslot < 0 || aslot >= ATT_SLOTS) return false;
+    InvSlot *s = inv_hot(&p->inv, inv_slot);
     const WeaponDef *wd = item_weapon(w->items, s->item);
     if (!wd || !wd->att_slots[aslot].present) { ev_hint(w, slot, "No %s slot on this weapon", attach_slot_name(aslot)); return false; }
     const AttachmentDef *a = attach_def(w->items, (u8)att);
     if (att && (!a || a->slot != aslot || !attach_allowed(wd, a))) { ev_hint(w, slot, "Doesn't fit"); return false; }
     if (s->att[aslot] == (u8)att) return true;
+    u8 before = s->att[aslot];
     s->att[aslot] = (u8)att;
+    InvItem *it = inv_item_of(&p->inv, s);
+    if (it && it->loc < INV_LOC_EQUIP) {
+        InvPlace pl = { it->parent, it->loc, it->x, it->y, (u8)((it->flags & INVF_ROT) ? 1 : 0) };
+        if (inv_check_place(&p->inv.t, w->items, it, pl, 0, NULL) != IIR_OK) {
+            s->att[aslot] = before;
+            ev_hint(w, slot, "No room for it where the weapon lies");
+            return false;
+        }
+    }
     // Capacity may have shrunk (extended magazine removed): the extra rounds go back to the reserve.
     WeaponDef eff;
     attach_weapon_effective(w->items, wd, s->att, &eff);
@@ -1130,7 +1145,7 @@ static void cmd_attach(int argc, const char **argv) {
     Player *p = game_local_player();
     if (!w || !p) return;
     int inv_slot = DG_CLAMP((int)p->sim.wpn.slot, 0, INV_HOTBAR - 1);
-    const InvSlot *s = &p->inv.slots[inv_slot];
+    const InvSlot *s = inv_hot_c(&p->inv, inv_slot);
     const WeaponDef *wd = item_weapon(&G->items, s->item);
     if (argc < 3) {
         log_info("usage: attach <optic|muzzle|underbarrel|magazine|stock> <attachment id|none>");
@@ -1228,10 +1243,11 @@ static void cmd_phone_out(int argc, const char **argv) {
 static void cmd_inv(int argc, const char **argv) {
     Player *p = game_local_player();
     if (!p) return;
-    for (int i = 0; i < INV_SLOTS; i++) {
-        InvSlot *s = &p->inv.slots[i];
-        if (s->item) log_info("  slot %2d: %-14s x%d ammo %d", i, item_def(&G->items, s->item)->id, s->count, s->ammo);
+    for (int i = 0; i < INV_HOTBAR; i++) {
+        const InvSlot *s = inv_hot_c(&p->inv, i);
+        if (s->item) log_info("  hotbar %d: %-14s x%d ammo %d", i + 1, item_def(&G->items, s->item)->id, s->count, s->ammo);
     }
+    log_info("  %d items in the tree, %.1f kg (inv_dump: the tree)", inv_live_count(&p->inv.t), inv_tree_weight(&p->inv.t, &G->items));
     log_info("  equipped mag (predicted) %d", p->sim.wpn.mag);
     Health *h = &G->world->health[ENT_INDEX(p->ent)];
     log_info("  hp %.0f armor %.0f, hotbar %d, focus %u", h->hp, h->armor, G->hotbar_slot + 1, G->focus);
@@ -1263,16 +1279,15 @@ static void cmd_magdump(int argc, const char **argv) {
         u16 item = item_find(&G->items, argv[1]);
         const WeaponDef *wd = item ? item_weapon(&G->items, item) : NULL;
         if (!wd || wd->kind == WPN_MELEE) { log_warn("wpn_magdump: %s is not a gun", argv[1]); return; }
-        int at = -1;
-        for (int i = 0; i < INV_HOTBAR; i++) if (p->inv.slots[i].item == item) at = i;
+        int at = inv_hot_find(&p->inv, item);
         if (at < 0) {
             inv_add(&p->inv, &G->items, item, 1, (i16)wd->mag_size);
-            for (int i = 0; i < INV_HOTBAR; i++) if (p->inv.slots[i].item == item) at = i;
+            at = inv_hot_find(&p->inv, item);
         }
         if (at < 0) { log_warn("wpn_magdump: no free hotbar slot"); return; }
         G->hotbar_slot = (u8)at;
     }
-    InvSlot *s = &p->inv.slots[G->hotbar_slot];
+    InvSlot *s = inv_hot(&p->inv, G->hotbar_slot);
     const WeaponDef *wd = item_weapon(&G->items, s->item);
     if (!wd || wd->kind == WPN_MELEE) { log_warn("wpn_magdump: equip a gun first"); return; }
     s->ammo = (i16)wd->mag_size;
@@ -1654,7 +1669,9 @@ void game_init(void) {
     cvar_reg_int("cfg_migration", 0, 0, 1000, CVAR_ARCHIVE | CVAR_EDITABLE, "settings migration level (internal)");
     G = (Game *)calloc(1, sizeof(Game));
     G->local_slot = -1;
-    G->inv_selected = -1;
+    G->inv_pending_count = 0;
+    G->inv_base_valid = false;
+    G->loot_ent = ENT_NONE;
     G->g_map = cvar_reg_string("g_map", "devroom", CVAR_ARCHIVE | CVAR_EDITABLE, "boot map: devroom | streaming | flat");
     G->sv_hostname = cvar_reg_string("sv_hostname", "Deadground Dev Server", CVAR_ARCHIVE | CVAR_EDITABLE, "server name shown in LAN browser");
     G->cl_name = cvar_reg_string("cl_name", "Survivor", CVAR_ARCHIVE | CVAR_EDITABLE, "player name");
@@ -1685,6 +1702,7 @@ void game_init(void) {
     cmd_register("bench", cmd_bench, "toggle the weapon bench (attachments) UI");
     cmd_register("attach", cmd_attach, "attach <slot> <attachment|none>: weapon attachments of the equipped weapon (no args: list)");
     cmd_register("noclip", cmd_noclip, "toggle noclip (sv_cheats)");
+    game_loot_register();
     cmd_register("kill", cmd_kill, "kill [player slot]: suicide (host: or another player)");
     cmd_register("damage", cmd_damage, "damage <amount>: hurt yourself (testing)");
     cmd_register("setpos", cmd_setpos, "teleport: setpos x y z [yaw] [pitch]");
@@ -1766,6 +1784,7 @@ void game_shutdown(void) {
     phone_shutdown();
     destroy_world();
     hands_shutdown();
+    items_game_shutdown();
     fx_shutdown();
     free(G);
     G = NULL;

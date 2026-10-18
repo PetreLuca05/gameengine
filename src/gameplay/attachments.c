@@ -137,11 +137,38 @@ static void parse_attachment(AttachmentDef *a, const cJSON *j, const char *file)
     a->mag_mult = jnum(m, "mag_size", 1.0f);
     a->reload_time = jnum(m, "reload_time", 1.0f);
     a->muzzle_len = jnum(j, "muzzle_length", 0.0f);
+    // Inventory footprint change of the weapon (docs/INVENTORY.md): long muzzle devices add a column.
+    {
+        const cJSON *g = cJSON_GetObjectItemCaseSensitive(j, "grid");
+        if (cJSON_IsArray(g) && cJSON_GetArraySize(g) >= 2) {
+            a->grid_dw = (i8)DG_CLAMP(cJSON_GetArrayItem(g, 0)->valueint, -2, 4);
+            a->grid_dh = (i8)DG_CLAMP(cJSON_GetArrayItem(g, 1)->valueint, -2, 4);
+        } else {
+            a->grid_dw = a->muzzle_len > 0.1f ? 1 : 0;
+            a->grid_dh = 0;
+        }
+    }
     const cJSON *md = cJSON_GetObjectItemCaseSensitive(j, "muzzle_device");
     a->bal_device = cJSON_IsObject(md);
     a->muzzle_device = vfx_muzzle_device_from_name(a->bal_device ? jstr(md, "kind", "") : jstr(j, "muzzle_device", ""));
     const cJSON *gl = cJSON_GetObjectItemCaseSensitive(j, "grip_l");
     if (gl) { a->has_grip_l = true; a->grip_l = jxform(j, "grip_l", xf_identity()); }
+    item_model_parse(&a->model, j, a->id);
+    {
+        const char *em = jstr(j, "emitter", "");
+        a->emitter = !strcmp(em, "light") ? 1 : !strcmp(em, "laser") ? 2 : 0;
+    }
+    const cJSON *mf;
+    cJSON_ArrayForEach(mf, cJSON_GetObjectItemCaseSensitive(j, "mesh_for")) {
+        if (a->mesh_for_count >= 4 || !cJSON_IsString(mf)) continue;
+        int k = a->mesh_for_count++;
+        dg_strcpy(a->mesh_for_weapon[k], sizeof(a->mesh_for_weapon[k]), mf->string);
+        cJSON *tmp = cJSON_CreateObject();
+        cJSON_AddStringToObject(tmp, "mesh", mf->valuestring);
+        item_model_parse(&a->mesh_for[k], tmp, a->id);
+        a->mesh_for[k].condition = a->model.condition;
+        cJSON_Delete(tmp);
+    }
     const cJSON *p;
     cJSON_ArrayForEach(p, cJSON_GetObjectItemCaseSensitive(j, "model")) {
         if (a->part_count >= ATT_MAX_PARTS) break;
@@ -272,6 +299,12 @@ static float rail_position(const WeaponDef *wd, const AttachmentDef *a) {
     Xform at0 = xf_mul(s->socket, xf_inverse(a->mount));
     float z0 = xf_point(at0, a->sight_pt).z;                  // sight point z with no offset
     return (weld - a->eye_relief) - z0;
+}
+
+const ItemModelRef *attach_model_for(const AttachmentDef *a, const WeaponDef *wd) {
+    for (int k = 0; wd && k < a->mesh_for_count; k++)
+        if (!strcmp(a->mesh_for_weapon[k], wd->id)) return &a->mesh_for[k];
+    return &a->model;
 }
 
 Xform attach_placement(const WeaponDef *wd, const AttachmentDef *a) {

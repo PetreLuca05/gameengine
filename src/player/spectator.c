@@ -259,10 +259,11 @@ void spectator_cl_cmds(World *w, Reader *r) {
     spec_read_cmds(r, SP.target, &SP.ring, NULL);
 }
 
-void spectator_cl_inventory(World *w, int slot, u32 revision, const InvSlot *slots) {
+void spectator_cl_inventory(World *w, int slot, u32 revision, const u16 *quick, const InvTree *tree) {
     Player *p = slot_player(w, slot);
     if (!p || p->local) return;
-    memcpy(p->inv.slots, slots, sizeof(p->inv.slots));
+    p->inv.t = *tree;
+    memcpy(p->inv.quick, quick, sizeof(p->inv.quick));
     p->inv.revision = revision;
 }
 

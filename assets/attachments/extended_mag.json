@@ -12,6 +12,8 @@
     "reload_time": 1.12,
     "ads_time": 1.05
   },
+  "mesh": "assets/items/meshes/att_extended_mag.dgim",
+  "mesh_for": { "smg": "assets/items/meshes/att_extended_mag_smg.dgim", "dmr": "assets/items/meshes/att_extended_mag_dmr.dgim" },
   "model": [
       {"offset": [0, -0.085, 0.008], "half": [0.0135, 0.085, 0.028], "color": [0.09, 0.09, 0.09]},
       {"offset": [0, -0.172, 0.01], "half": [0.016, 0.004, 0.031], "color": [0.06, 0.06, 0.06]}

@@ -180,6 +180,10 @@ bool daynight_preset_time(World *w, float elev_deg, bool moon_full);   // shadow
 bool daynight_preset_morning(World *w, float elev_deg);                 // shadow presets: the morning sun first above elev_deg
 // game_terrain.c: terrain shading level / debug / reload / paint tool (docs/TERRAIN_SHADING.md)
 void terrain_game_register(void);
+// game_items.c: item meshes in game: item_reload, item_inspect, the dev room showcase (docs/ITEM_PIPELINE.md)
+void items_game_register(void);
+void items_game_draw(const RenderCamera *cam);
+void items_game_shutdown(void);
 // game_ground_ref.c: reference viewer, camera presets, colour sampler (docs/GROUND_REFERENCE.md)
 void ground_ref_register(void);
 void ground_ref_draw(void);

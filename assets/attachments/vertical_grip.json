@@ -17,6 +17,7 @@
     "recoil_horizontal": 0.9,
     "ads_time": 1.08
   },
+  "mesh": "assets/items/meshes/att_vertical_grip.dgim",
   "model": [
       {"offset": [0, -0.005, 0], "half": [0.014, 0.005, 0.026], "color": [0.08, 0.08, 0.085]},
       {"offset": [0, -0.055, 0.004], "half": [0.013, 0.045, 0.014], "color": [0.1, 0.1, 0.1]}

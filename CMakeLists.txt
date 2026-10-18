@@ -655,6 +655,16 @@ if(MSVC)
 endif()
 add_test(NAME recoil_ads COMMAND test_recoil_ads WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
 
+# Detailed item meshes (docs/ITEM_PIPELINE.md): the .dgim loader on every shipped mesh, layering per
+# condition, posing, and the mesh sockets against the gameplay data (ADS alignment, hand glue).
+add_executable(test_item_mesh tests/test_item_mesh.c src/assets/item_mesh.c)
+set_target_properties(test_item_mesh PROPERTIES C_STANDARD 11)
+target_link_libraries(test_item_mesh PRIVATE dg_animcore)
+if(MSVC)
+  target_compile_options(test_item_mesh PRIVATE /W3 /wd4100 /wd4201 /utf-8)
+endif()
+add_test(NAME item_mesh COMMAND test_item_mesh WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+
 add_executable(test_characters tests/test_characters.c)
 set_target_properties(test_characters PROPERTIES C_STANDARD 11)
 target_link_libraries(test_characters PRIVATE dg_animcore)
@@ -702,14 +712,35 @@ if(MSVC)
 endif()
 add_test(NAME ragdoll COMMAND test_ragdoll WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
 
-# Game UI: layout engine, inventory drag and drop / intents / reconcile, attachments, icons.
-add_executable(test_ui tests/test_ui.c src/ui/gui/gui_layout.c src/ui/inv_dragdrop.c src/gameplay/inv_ops.c src/gameplay/inventory.c)
+# Game UI: layout engine, icons and cell images.
+add_executable(test_ui tests/test_ui.c src/ui/gui/gui_layout.c)
 set_target_properties(test_ui PROPERTIES C_STANDARD 11)
 target_link_libraries(test_ui PRIVATE dg_animcore)
 if(MSVC)
   target_compile_options(test_ui PRIVATE /W3 /wd4100 /wd4201 /utf-8)
 endif()
 add_test(NAME ui COMMAND test_ui WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+
+# Grid inventory (docs/INVENTORY.md): rules matrix, intents, attachments, death / corpse, wire,
+# random-intent fuzz, two clients looting one crate through a 150 ms round trip.
+set(DG_INVENTORY_SOURCES src/gameplay/inventory.c src/gameplay/inventory/inv_tree.c src/gameplay/inventory/inv_rules.c
+  src/gameplay/inventory/inv_intent.c src/gameplay/inventory/inv_wire.c)
+add_executable(test_inventory tests/test_inventory.c ${DG_INVENTORY_SOURCES})
+set_target_properties(test_inventory PROPERTIES C_STANDARD 11)
+target_link_libraries(test_inventory PRIVATE dg_animcore)
+if(MSVC)
+  target_compile_options(test_inventory PRIVATE /W3 /wd4100 /wd4201 /utf-8)
+endif()
+add_test(NAME inventory COMMAND test_inventory WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+
+# Inventory screen, pure parts: layout at 16:9 / 21:9 / 4:3, drag and drop for every source -> target, pad navigation.
+add_executable(test_inventory_ui tests/test_inventory_ui.c src/ui/inventory/inv_layout.c src/ui/inventory/inv_dd.c ${DG_INVENTORY_SOURCES})
+set_target_properties(test_inventory_ui PROPERTIES C_STANDARD 11)
+target_link_libraries(test_inventory_ui PRIVATE dg_animcore)
+if(MSVC)
+  target_compile_options(test_inventory_ui PRIVATE /W3 /wd4100 /wd4201 /utf-8)
+endif()
+add_test(NAME inventory_ui COMMAND test_inventory_ui WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
 
 # Main menu + lobby (docs/MENU_LOBBY.md): lobby state machine, membership / kick / ready / start,
 # chat, version check, wire, maps, cosmetics round trip, profile, seasons + weather bias, screen lint.
@@ -811,10 +842,12 @@ endif()
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if(Python3_Interpreter_FOUND)
   add_test(NAME lint_commands COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/tests/lint_commands.py)
+  add_test(NAME lint_inventory COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/tests/lint_inventory.py)
   add_test(NAME lint_settings COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/tests/lint_settings.py)
   # Recorded CC0 takes (docs/AUDIO_PROCEDURAL.md "Recorded samples"): every set on disk and credited.
   add_test(NAME audio_takes COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/audio_import/import_samples.py --check)
   add_test(NAME aim_sockets COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/tests/aim_sockets.py)
+  add_test(NAME validate_items COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/validate_item/validate_item.py)
   add_test(NAME lint_looks COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/tests/lint_looks.py)
   # Ground textures (docs/GROUND_REFERENCE.md): the recipes validate, the generated / placeholder sets
   # meet their colour, coverage, gradient, silhouette and seam checks (needs numpy + Pillow).

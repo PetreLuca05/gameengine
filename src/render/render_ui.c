@@ -262,7 +262,7 @@ static void exec_ui3d(VkCommandBuffer cmd, void *u) {
         MeshId bound = 0;
         for (int k = 0; k < j->v.part_count; k++) {
             const RenderUi3dPart *p = &UR.parts[j->first_part + k];
-            MeshId mid = p->shape == 1 ? UR.cyl : UR.cube;
+            MeshId mid = p->mesh ? p->mesh : p->shape == 1 ? UR.cyl : UR.cube;
             GpuMesh *m = &R->meshes[mid];
             if (!m->used) continue;
             if (mid != bound) {
@@ -271,14 +271,14 @@ static void exec_ui3d(VkCommandBuffer cmd, void *u) {
                 vkCmdBindIndexBuffer(cmd, m->ib.buffer, 0, VK_INDEX_TYPE_UINT32);
                 bound = mid;
             }
-            mat4 model = mat4_trs(p->center, p->rot, v3_scale(p->half, 2.0f));
+            mat4 model = mat4_trs(p->center, p->rot, p->mesh ? v3s(p->half.x) : v3_scale(p->half, 2.0f));
             mat4 mv = mat4_mul(j->v.view, mat4_trs(p->center, p->rot, v3(1, 1, 1)));
             Ui3dPush pc;
             pc.mvp = mat4_mul(vpm, model);
             pc.color = v4(p->color.x, p->color.y, p->color.z, p->emissive);
             pc.r0 = v4(mv.m[0], mv.m[1], mv.m[2], p->highlight);
             pc.r1 = v4(mv.m[4], mv.m[5], mv.m[6], p->metallic);
-            pc.r2 = v4(mv.m[8], mv.m[9], mv.m[10], 0);
+            pc.r2 = v4(mv.m[8], mv.m[9], mv.m[10], p->mesh ? 1.0f : 0.0f);
             vkCmdPushConstants(cmd, R->layout_ui3d, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(pc), &pc);
             vkCmdDrawIndexed(cmd, m->index_count, 1, 0, 0, 0);
             R->stats.draw_calls++;
