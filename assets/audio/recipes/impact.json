@@ -24,6 +24,6 @@
         "time": "lerp(energy, 200, 0.4, 3000, 1.2) * (material == 11 ? 1.6 : 1)"
       } },
     { "patch": "splash", "when": "material == 12", "bind": { "amp": "clamp(sqrt(energy / 1000), 0.2, 1.5)", "size": "lerp(energy, 100, 0.6, 3000, 1.6)", "bubbles": "lerp(energy, 100, 30, 3000, 160)" } },
-    { "sample": "@", "gain_db": -9, "optional": true, "pitch": [0.95, 1.05] }
+    { "sample": "@", "gain_db": "sel(material, 2, 2, 2, 2, -1, -1, -1, 2, 2, 2, 2, -5.5, 3, -9, 2, 2, 2, 2, 2, 2, -1, 2) + todb(sqrt(clamp(energy / 400, 0.02, 10)))", "optional": true, "pitch": [0.95, 1.05] }
   ]
 }

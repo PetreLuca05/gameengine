@@ -1,5 +1,5 @@
 {
-  "_doc": "Footstep (characters.c chars_take_steps -> game_audio.c): the ground under the foot (material incl. snow / mud / leaves), speed, weight, crouch; water when wading.",
+  "_doc": "Footstep (characters.c chars_take_steps -> game_audio.c): the ground under the foot (material incl. snow / mud / leaves), speed, weight, crouch; water when wading. The recorded layer picks the ground's takes (assets/audio/sample_sources.json); dirt / sand / gravel / water stay synthesized.",
   "name": "footstep",
   "bus": "sfx",
   "priority": 0.3,
@@ -67,6 +67,50 @@
           3
         ]
       }
+    },
+    {
+      "sample": [
+        "footstep_hard",
+        "footstep_hard",
+        "footstep_hard",
+        "footstep_hard",
+        "footstep_metal",
+        "footstep_metal",
+        "footstep_wood",
+        "",
+        "",
+        "",
+        "footstep_grass",
+        "footstep_hard",
+        "",
+        "",
+        "footstep_carpet",
+        "footstep_hard",
+        "footstep_hard",
+        "footstep_snow",
+        "footstep_mud",
+        "footstep_grass",
+        "footstep_metal",
+        "footstep_grass"
+      ],
+      "sample_sel": "material",
+      "when": "water < 0.5",
+      "gain_db": "sel(material, 0, 0, 0, 0, 12, 12, 3, 0, 0, 0, -12, 0, 0, 0, -17, 0, 0, -11, -20, -12, 12, -12) + (zombie > 0.5 ? -3 : 0)",
+      "bind": {
+        "amp": "clamp(speed / 4, 0.3, 1.4) * (crouch > 0.5 ? 0.45 : 1) * sqrt(weight / 80) * (local > 0.5 ? 0.6 : 1)",
+        "pitch": "lerp(weight, 60, 1.05, 120, 0.92) * (crouch > 0.5 ? 1.04 : 1)"
+      },
+      "random": {
+        "amp": [
+          "db",
+          -2.5,
+          2.5
+        ]
+      },
+      "pitch": [
+        0.95,
+        1.05
+      ]
     },
     {
       "patch": "splash",

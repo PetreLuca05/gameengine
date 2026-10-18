@@ -56,7 +56,7 @@ int syn_lib_add_patch(SynLibrary *lib, const char *json, char *err, int err_size
 }
 
 int syn_lib_sample_patch(SynLibrary *lib, const char *sample, bool loop) {
-    char name[32];
+    char name[48];
     snprintf(name, sizeof(name), "sample:%s%s", sample, loop ? ":loop" : "");
     int idx = syn_lib_find_patch(lib, name);
     if (idx >= 0) return idx;
@@ -108,6 +108,40 @@ int syn_lib_sample_patch(SynLibrary *lib, const char *sample, bool loop) {
     int r = syn_lib_put_patch(lib, p, err, sizeof(err));
     free(p);
     return r;
+}
+
+static u32 name_hash(const char *s) {
+    u32 h = 2166136261u;
+    while (*s) h = (h ^ (u8)*s++) * 16777619u;
+    return h;
+}
+
+int syn_lib_sample_variants(SynLibrary *lib, const char *sample) {
+    u32 h = name_hash(sample);
+    for (int i = 0; i < lib->nvar; i++) if (lib->var_hash[i] == h) return lib->var_count[i];
+    int n = 0;
+    while (n < SYN_MAX_VARIANTS && lib->resolve) {
+        char take[40];
+        snprintf(take, sizeof(take), "%s_%d", sample, n + 1);
+        if (lib->resolve(take, lib->user) < 0) break;
+        n++;
+    }
+    if (lib->nvar < SYN_LIB_VARIANTS) {
+        lib->var_hash[lib->nvar] = h;
+        lib->var_count[lib->nvar++] = (u8)n;
+    }
+    return n;
+}
+
+int syn_lib_sample_pick(SynLibrary *lib, const char *sample, u32 seed, bool loop) {
+    int n = syn_lib_sample_variants(lib, sample);
+    if (n <= 0) return syn_lib_sample_patch(lib, sample, loop);
+    SynRng rng = syn_rng(seed ^ 0x6A09E667u);
+    int k = 1 + (int)(syn_rng01(&rng) * (float)n);
+    if (k > n) k = n;
+    char take[40];
+    snprintf(take, sizeof(take), "%s_%d", sample, k);
+    return syn_lib_sample_patch(lib, take, loop);
 }
 
 int syn_recipe_input(const SynRecipe *r, const char *name) {
@@ -212,16 +246,28 @@ int syn_lib_add_recipe(SynLibrary *lib, const char *json, char *err, int err_siz
             l->dyn = true;
             snprintf(l->dyn_suffix, sizeof(l->dyn_suffix), "%s", sn->valuestring + 1);
             l->patch = -1;
-        } else if (cJSON_IsString(sn)) l->patch = syn_lib_sample_patch(lib, sn->valuestring, r->loop);
-        else l->patch = -1;
-        if (l->patch < 0 && !l->dyn) {
-            if (cJSON_IsString(sn)) continue;   // a missing sample layer is dropped (the synth layers carry the sound)
+        } else if (cJSON_IsString(sn) || cJSON_IsArray(sn)) {
+            const cJSON *it;
+            bool any = false;
+            if (cJSON_IsString(sn)) snprintf(l->sample[l->nsamples++], sizeof(l->sample[0]), "%s", sn->valuestring);
+            else cJSON_ArrayForEach(it, sn) {
+                if (!cJSON_IsString(it) || l->nsamples >= RCP_MAX_SAMPLES) { snprintf(err, err_size, "%s: bad sample list", r->name); goto done; }
+                snprintf(l->sample[l->nsamples++], sizeof(l->sample[0]), "%s", it->valuestring);
+            }
+            for (int k = 0; k < l->nsamples; k++) any |= syn_lib_sample_pick(lib, l->sample[k], 0, r->loop) >= 0;
+            if (!any) continue;   // a missing sample layer is dropped (the synth layers carry the sound)
+            const cJSON *sel = cJSON_GetObjectItemCaseSensitive(ly, "sample_sel");
+            l->has_sel = sel != NULL;
+            if (!compile_expr(&l->sel, sel, r, 0.0f, err, err_size)) goto done;
+            l->patch = -1;
+        } else l->patch = -1;
+        if (l->patch < 0 && !l->dyn && !l->nsamples) {
             snprintf(err, err_size, "%s: layer %d: no patch '%s'", r->name, r->nlayers, cJSON_IsString(pn) ? pn->valuestring : "?");
             goto done;
         }
         // Dynamic sample layers bind against the generic sample patch (pitch, amp, gate).
         static const SynPatch k_sample_params = { .nparams = 3, .param_name = { "pitch", "amp", "gate" }, .param_def = { 1, 1, 1 } };
-        const SynPatch *p = l->dyn ? &k_sample_params : lib->patch[l->patch];
+        const SynPatch *p = l->dyn || l->nsamples ? &k_sample_params : lib->patch[l->patch];
         l->optional = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(ly, "optional"));
         const cJSON *w = cJSON_GetObjectItemCaseSensitive(ly, "when");
         l->has_when = w != NULL;
@@ -280,7 +326,7 @@ int syn_lib_sample_recipe(SynLibrary *lib, const char *sample, bool loop, bool s
     snprintf(name, sizeof(name), "~%s%s%s", sample, loop ? ":l" : "", spatial ? "" : ":2d");
     int idx = syn_lib_find_recipe(lib, name);
     if (idx >= 0) return idx;
-    int pi = syn_lib_sample_patch(lib, sample, loop);
+    int pi = syn_lib_sample_pick(lib, sample, 0, loop);
     if (pi < 0 || lib->nrecipes >= SYN_LIB_RECIPES) return -1;
     SynRecipe *r = (SynRecipe *)malloc(sizeof(SynRecipe));
     if (!r) return -1;
@@ -295,7 +341,9 @@ int syn_lib_sample_recipe(SynLibrary *lib, const char *sample, bool loop, bool s
     snprintf(r->input_name[1], sizeof(r->input_name[1]), "seed01");
     r->ninputs = 2;
     r->nlayers = 1;
-    r->layer[0].patch = pi;
+    r->layer[0].patch = -1;   // picked per voice: a take when the sample has some
+    r->layer[0].nsamples = 1;
+    snprintf(r->layer[0].sample[0], sizeof(r->layer[0].sample[0]), "%s", sample);
     syn_expr_const(&r->layer[0].when, 1.0f);
     syn_expr_const(&r->layer[0].gain_db, 0.0f);
     lib->recipe[lib->nrecipes] = r;
@@ -309,11 +357,18 @@ void syn_recipe_eval(SynLibrary *lib, const SynRecipe *r, const float *inputs, u
         const SynLayer *l = &r->layer[li];
         SynLayerOut *o = &out->layer[li];
         int pi = l->patch;
-        if (l->dyn) {
-            if (!sample || !sample[0]) continue;
+        if (l->dyn || l->nsamples) {
             char name[48];
-            snprintf(name, sizeof(name), "%s%s", sample, l->dyn_suffix);
-            pi = syn_lib_sample_patch(lib, name, r->loop);
+            if (l->dyn) {
+                if (!sample || !sample[0]) continue;
+                snprintf(name, sizeof(name), "%s%s", sample, l->dyn_suffix);
+            } else {
+                int k = l->has_sel ? (int)floorf(syn_expr_eval(&l->sel, inputs) + 0.5f) : 0;
+                k = k < 0 ? 0 : k >= l->nsamples ? l->nsamples - 1 : k;
+                snprintf(name, sizeof(name), "%s", l->sample[k]);
+            }
+            // The take: one draw per (seed, layer), so a re-evaluation keeps it.
+            pi = syn_lib_sample_pick(lib, name, seed ^ ((u32)li * 0x9E3779B9u), r->loop);
         }
         if (pi < 0 || pi >= lib->npatches) continue;
         const SynPatch *p = lib->patch[pi];

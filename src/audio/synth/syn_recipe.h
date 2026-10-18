@@ -27,6 +27,9 @@
 #define RCP_MAX_BINDS 20
 #define SYN_LIB_PATCHES 160
 #define SYN_LIB_RECIPES 128
+#define RCP_MAX_SAMPLES 24       // names in one "sample": [...] list (one per material)
+#define SYN_MAX_VARIANTS 16      // recorded takes <name>_1 .. <name>_16
+#define SYN_LIB_VARIANTS 256     // sample names whose takes were counted
 
 typedef enum SynRandKind { SYN_RAND_NONE, SYN_RAND_DB, SYN_RAND_MUL, SYN_RAND_ADD } SynRandKind;
 typedef enum SynBus { SYN_BUS_SFX, SYN_BUS_VOICE, SYN_BUS_UI, SYN_BUS_AMBIENCE, SYN_BUS_COUNT } SynBus;
@@ -43,6 +46,12 @@ typedef struct SynLayer {
     int patch;                   // library index (-1 for a dynamic sample layer until resolved)
     bool dyn;                    // "sample": "@<suffix>": the event's sample name + suffix (a weapon's sound_fire)
     char dyn_suffix[16];
+    // "sample": "name" or ["a", "b", ...] picked by "sample_sel" (rounded, clamped): a fixed sample.
+    // Any name, fixed or dynamic, with recorded takes <name>_1 .. <name>_N plays one take per seed.
+    int nsamples;
+    char sample[RCP_MAX_SAMPLES][24];
+    bool has_sel;
+    SynExpr sel;
     bool optional;               // dropped first under load
     bool has_when;
     SynExpr when, gain_db;
@@ -80,6 +89,9 @@ typedef struct SynLibrary {
     int ngrave;
     int nrecipes;
     SynRecipe *recipe[SYN_LIB_RECIPES];
+    int nvar;                    // take counts per sample name (counted once: the bank only grows)
+    u32 var_hash[SYN_LIB_VARIANTS];
+    u8 var_count[SYN_LIB_VARIANTS];
 } SynLibrary;
 
 void syn_lib_init(SynLibrary *lib, float sr, SynSampleResolveFn resolve, void *user);
@@ -91,6 +103,11 @@ int syn_lib_put_patch(SynLibrary *lib, const SynPatch *p, char *err, int err_siz
 int syn_lib_find_patch(const SynLibrary *lib, const char *name);
 // The implicit one-node patch "sample:<name>" (pitch, amp, gate); -1 when the sample is missing.
 int syn_lib_sample_patch(SynLibrary *lib, const char *sample, bool loop);
+// The number of recorded takes <sample>_1 .. <sample>_N (0: none, the sample is a single file).
+int syn_lib_sample_variants(SynLibrary *lib, const char *sample);
+// The sample patch for a name and seed: one of its takes when it has some (the same take for the
+// same seed), else the sample itself; -1 when neither exists.
+int syn_lib_sample_pick(SynLibrary *lib, const char *sample, u32 seed, bool loop);
 int syn_lib_add_recipe(SynLibrary *lib, const char *json, char *err, int err_size);
 int syn_lib_find_recipe(const SynLibrary *lib, const char *name);
 // A one-layer recipe around a sample with the legacy defaults (audio_play): created on first use.

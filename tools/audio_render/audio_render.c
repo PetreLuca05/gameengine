@@ -28,7 +28,7 @@
 #endif
 
 #define SR 48000
-#define MAX_SAMPLES 128
+#define MAX_SAMPLES 512
 
 // ------------------------------------------------------------------ samples (16-bit PCM WAV)
 
@@ -38,6 +38,9 @@ static int g_sample_frames[MAX_SAMPLES];
 static int g_nsamples;
 static bool g_no_samples;
 static SynSampleBank g_bank = { (const float *const *)g_sample_data, g_sample_frames, 0 };
+
+static float *to_mono(const short *data, int in_frames, int ch, int rate, int *frames);
+int stb_vorbis_decode_filename(const char *filename, int *channels, int *sample_rate, short **output);   // third_party/stb/stb_vorbis.c
 
 static float *read_wav(const char *path, int *frames) {
     FILE *f = fopen(path, "rb");
@@ -65,7 +68,13 @@ static float *read_wav(const char *path, int *frames) {
         p += 8 + len + (len & 1);
     }
     if (!data || bits != 16 || rate <= 0 || ch < 1) { free(b); return NULL; }
-    int in_frames = (int)(dlen / (unsigned)(2 * ch));
+    float *out = to_mono((const short *)data, (int)(dlen / (unsigned)(2 * ch)), ch, rate, frames);
+    free(b);
+    return out;
+}
+
+// Interleaved 16-bit (little endian) at any rate -> mono float at SR (linear interpolation).
+static float *to_mono(const short *data, int in_frames, int ch, int rate, int *frames) {
     int out_frames = (int)((double)in_frames * SR / rate);
     float *out = (float *)malloc(sizeof(float) * (size_t)(out_frames > 0 ? out_frames : 1));
     for (int i = 0; i < out_frames; i++) {
@@ -76,13 +85,22 @@ static float *read_wav(const char *path, int *frames) {
         for (int k = 0; k < 2; k++) {
             int j = i0 + k < in_frames ? i0 + k : in_frames - 1;
             float acc = 0;
-            for (int c = 0; c < ch; c++) acc += (float)(short)(data[(j * ch + c) * 2] | data[(j * ch + c) * 2 + 1] << 8) / 32768.0f;
+            for (int c = 0; c < ch; c++) acc += (float)data[j * ch + c] / 32768.0f;
             v[k] = acc / (float)ch;
         }
         out[i] = (float)(v[0] + fr * (v[1] - v[0]));
     }
-    free(b);
     *frames = out_frames;
+    return out;
+}
+
+static float *read_ogg(const char *path, int *frames) {
+    int ch = 0, rate = 0;
+    short *pcm = NULL;
+    int n = stb_vorbis_decode_filename(path, &ch, &rate, &pcm);
+    if (n <= 0 || !pcm) return NULL;
+    float *out = to_mono(pcm, n, ch, rate, frames);
+    free(pcm);
     return out;
 }
 
@@ -95,6 +113,10 @@ static int resolve(const char *name, void *user) {
     snprintf(path, sizeof(path), "%s/assets/sounds/%s.wav", DG_SOURCE_DIR, name);
     int frames = 0;
     float *d = read_wav(path, &frames);
+    if (!d) {
+        snprintf(path, sizeof(path), "%s/assets/sounds/%s.ogg", DG_SOURCE_DIR, name);
+        d = read_ogg(path, &frames);
+    }
     if (!d) return -1;
     int i = g_nsamples++;
     snprintf(g_sample_name[i], sizeof(g_sample_name[i]), "%s", name);

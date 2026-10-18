@@ -44,6 +44,8 @@ static void emit(Parser *p, int op, int arg) {
 }
 
 static void emit_const(Parser *p, float v) {
+    // Equal constants share a slot (a sel() table repeats values).
+    for (int i = 0; i < p->e->nk; i++) if (p->e->k[i] == v) { emit(p, OP_CONST, i); return; }
     if (p->e->nk >= SYN_EXPR_CONSTS) { fail(p, "too many constants"); return; }
     p->e->k[p->e->nk] = v;
     emit(p, OP_CONST, p->e->nk++);

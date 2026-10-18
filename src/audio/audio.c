@@ -15,7 +15,7 @@
 #include <math.h>
 
 #define AUDIO_RATE 48000          // the mixer and every patch run at 48 kHz (miniaudio resamples to the device)
-#define MAX_SAMPLES 256
+#define MAX_SAMPLES 512
 #define MAX_GVOICES MIX_VOICES
 #define MAX_EVENTS 160
 #define MAX_ECHOES 6
@@ -206,7 +206,23 @@ static void load_events(void) {
     cJSON_Delete(root);
 }
 
+// Decodes every recorded take named in sample_sources.json now, so the first footstep or impact of a
+// kind does not decode on the game thread mid-fight. Returns the number of takes.
+static int load_takes(void) {
+    char buf[512];
+    size_t sz;
+    char *txt = platform_read_file(platform_data_path("assets/audio/sample_sources.json", buf, sizeof(buf)), &sz);
+    cJSON *root = txt ? cJSON_Parse(txt) : NULL;
+    free(txt);
+    int n = 0;
+    const cJSON *it;
+    cJSON_ArrayForEach(it, cJSON_GetObjectItemCaseSensitive(root, "samples")) n += syn_lib_sample_variants(&A->lib, it->string);
+    cJSON_Delete(root);
+    return n;
+}
+
 static void load_library(void) {
+    A->lib.nvar = 0;   // take counts are probed again (a re-import may change them)
     syn_material_defaults(&A->materials);
     char buf[512], err[160];
     size_t sz;
@@ -217,7 +233,8 @@ static void load_library(void) {
     load_dir("assets/audio/patches", true);
     load_dir("assets/audio/recipes", false);
     load_events();
-    log_info("audio: %d patches, %d recipes, %d events", A->lib.npatches, A->lib.nrecipes, A->event_count);
+    int takes = load_takes();
+    log_info("audio: %d patches, %d recipes, %d events, %d recorded takes", A->lib.npatches, A->lib.nrecipes, A->event_count, takes);
 }
 
 void audio_reload(void) {
@@ -506,9 +523,16 @@ static int start_voice(int ri, const AudioEmit *e, const AudioParams *p, const E
     v->h = mixer_start(A->mixer, &ms);
     if (!v->h) { v->used = false; return -1; }
     v->used = true;
-    if (A->trace && A->trace->i)
-        log_info("snd: %s%s starts in %.3f s (%.0f m, gain %.3f, lp %.0f Hz, occl %.0f/%.0f/%.0f dB, zone %d)", r->name, echo ? " echo" : "", ms.start_delay, dist, ep.gain,
-                 ep.lp_hz, ep.band_db[0], ep.band_db[1], ep.band_db[2], v->env.info.zone);
+    if (A->trace && A->trace->i) {
+        char smp[128] = "";
+        for (int i = 0; i < ms.nlayers; i++)
+            if (!strncmp(ms.layer[i].patch->name, "sample:", 7)) {
+                size_t k = strlen(smp);
+                snprintf(smp + k, sizeof(smp) - k, " %s", ms.layer[i].patch->name + 7);
+            }
+        log_info("snd: %s%s starts in %.3f s (%.0f m, gain %.3f, lp %.0f Hz, occl %.0f/%.0f/%.0f dB, zone %d)%s%s", r->name, echo ? " echo" : "", ms.start_delay, dist, ep.gain,
+                 ep.lp_hz, ep.band_db[0], ep.band_db[1], ep.band_db[2], v->env.info.zone, smp[0] ? ", samples" : "", smp);
+    }
     return slot;
 }
 

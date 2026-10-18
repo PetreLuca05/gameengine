@@ -1,0 +1,51 @@
+{
+  "_doc": "Recorded takes behind the recipes' sample layers (docs/AUDIO_PROCEDURAL.md 'Recorded samples'). Every source is CC0 1.0. tools/audio_import/import_samples.py fetches the mirror, cleans each file (mono 48 kHz, high-pass, trim, fades, level match per set) and writes assets/sounds/<name>_<n>.ogg plus assets/sounds/CREDITS.md. A name with takes plays one take per seed; its old single file (gen_assets.py placeholder) is then unused.",
+  "mirror": {
+    "repo": "https://github.com/lavenderdotpet/CC0-Public-Domain-Sounds.git",
+    "commit": "f2b6264f9ab89fabc266914c3654685d68c5a39b"
+  },
+  "sources": {
+    "kenney_impact": { "title": "Impact Sounds 1.0", "author": "Kenney (www.kenney.nl)", "license": "CC0-1.0", "path": "kenney_impactsounds/Audio" },
+    "bfh": { "title": "75 CC0 breaking / falling / hit SFX (OpenGameArt pack)", "author": "not named in the mirror", "license": "CC0-1.0", "path": "75-cc0-breaking-falling-hit-sfx" },
+    "wood_metal": { "title": "100 CC0 wood / metal SFX (OpenGameArt pack)", "author": "not named in the mirror", "license": "CC0-1.0", "path": "100-CC0-wood-metal-SFX" },
+    "water": { "title": "40 CC0 water / splash / slime SFX (OpenGameArt pack)", "author": "not named in the mirror", "license": "CC0-1.0", "path": "40-cc0-water-splash-slime-sfx" },
+    "mud": { "title": "25 CC0 mud SFX (OpenGameArt pack)", "author": "not named in the mirror", "license": "CC0-1.0", "path": "25-CC0-mud-sfx" },
+    "creature": { "title": "80 CC0 creature SFX (OpenGameArt pack)", "author": "not named in the mirror", "license": "CC0-1.0", "path": "80-CC0-creature-SFX" },
+    "creature2": { "title": "80 CC0 creature SFX 2 (OpenGameArt pack)", "author": "not named in the mirror", "license": "CC0-1.0", "path": "80-CC0-creature-sfx-2" },
+    "warfork": { "title": "Warfork CC0 assets", "author": "Team Forbidden (Warfork)", "license": "CC0-1.0", "path": "warfork-cc0/sounds" }
+  },
+  "samples": {
+    "footstep_hard":   { "src": "kenney_impact", "files": ["footstep_concrete_*.ogg"], "hp": 70 },
+    "footstep_wood":   { "src": "kenney_impact", "files": ["footstep_wood_*.ogg"], "hp": 40 },
+    "footstep_grass":  { "src": "kenney_impact", "files": ["footstep_grass_*.ogg"], "hp": 60, "max_s": 0.5 },
+    "footstep_snow":   { "src": "kenney_impact", "files": ["footstep_snow_*.ogg"], "hp": 60 },
+    "footstep_carpet": { "src": "kenney_impact", "files": ["footstep_carpet_*.ogg"], "hp": 60 },
+    "footstep_metal":  { "src": "warfork", "files": ["world/ft_step_met*.ogg"], "hp": 80, "max_s": 0.4 },
+    "footstep_mud":    { "src": "mud", "files": ["mud_0[1-8].ogg"], "hp": 60, "max_s": 0.45 },
+
+    "impact_hard":  { "src": "bfh", "files": ["bfh1_rock_hit_01.ogg", "bfh1_hit_04.ogg", "bfh1_hit_05.ogg", "bfh1_hit_09.ogg", "bfh1_hit_10.ogg", "bfh1_hit_13.ogg"], "max_s": 0.6 },
+    "impact_metal": { "src": "bfh", "files": ["bfh1_metal_hit_*.ogg"], "extra": { "wood_metal": ["metal_hit_0[1-5].ogg"] }, "max_s": 0.8 },
+    "impact_wood":  { "src": "wood_metal", "files": ["wood_hit_0*.ogg"], "extra": { "bfh": ["bfh1_wood_hit_*.ogg"] }, "max_s": 0.6 },
+    "impact_glass": { "src": "bfh", "files": ["bfh1_glass_hit_*.ogg"], "extra": { "kenney_impact": ["impactGlass_light_*.ogg"] }, "max_s": 0.5 },
+    "impact_water": { "src": "water", "files": ["splash_*.ogg"], "max_s": 1.2 },
+    "impact_flesh": { "src": "kenney_impact", "files": ["impactPunch_medium_*.ogg"], "hp": 50, "max_s": 0.45 },
+    "impact_plate_ring": { "src": "wood_metal", "files": ["metal_sheet_0[1-6].ogg"], "max_s": 1.0 },
+    "melee_hit":      { "src": "kenney_impact", "files": ["impactPunch_heavy_*.ogg"], "hp": 40, "max_s": 0.6 },
+    "melee_hit_wall": { "src": "wood_metal", "files": ["wood_hammer_*.ogg", "hammer_0*.ogg"], "max_s": 0.5 },
+    "shard_glass":  { "src": "bfh", "files": ["bfh1_glass_breaking_*.ogg", "bfh1_glass_falling_*.ogg"], "max_s": 1.0 },
+    "debris_hard":  { "src": "bfh", "files": ["bfh1_rock_falling_*.ogg", "bfh1_rock_breaking_*.ogg"], "max_s": 1.2 },
+    "debris_soft":  { "src": "bfh", "files": ["bfh1_wood_falling_*.ogg", "bfh1_wood_breaking_*.ogg"], "max_s": 1.0 },
+    "door_open":  { "src": "wood_metal", "files": ["door_open_01.ogg", "wood_squeak_*.ogg"], "max_s": 1.0 },
+    "door_close": { "src": "wood_metal", "files": ["wood_close_*.ogg"], "max_s": 0.8 },
+    "door_slam":  { "src": "wood_metal", "files": ["wood_slam_*.ogg"], "max_s": 0.8 },
+    "bullet_ricochet": { "src": "warfork", "files": ["weapons/ric1.ogg", "weapons/ric2.ogg"], "hp": 200 },
+    "hurt": { "src": "warfork", "files": ["players/male/pain25.ogg", "players/male/pain50.ogg", "players/male/pain75.ogg", "players/male/pain100.ogg"], "hp": 90 },
+
+    "zombie_groan":  { "src": "creature2", "files": ["human_0*.ogg"], "extra": { "creature": ["monster_03.ogg", "monster_06.ogg", "grunt_01.ogg", "grunt_03.ogg"] }, "hp": 70 },
+    "zombie_growl":  { "src": "creature2", "files": ["roar_0[4-6].ogg", "grunt_0[689].ogg", "monster_09.ogg", "monster_15.ogg"], "extra": { "creature": ["roar_02.ogg", "troll_02.ogg"] }, "hp": 60 },
+    "zombie_scream": { "src": "creature", "files": ["scream_0*.ogg", "roar_03.ogg"], "extra": { "creature2": ["die_04.ogg"] }, "hp": 120 },
+    "zombie_attack": { "src": "creature2", "files": ["attack_02.ogg", "die_0[1-3].ogg"], "extra": { "creature": ["hurt_01.ogg", "hurt_02.ogg", "hurt_05.ogg"] }, "hp": 90 },
+
+    "rain_loop": { "src": "water", "files": ["loop_rain.ogg"], "loop": true, "hp": 120 }
+  }
+}

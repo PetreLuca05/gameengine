@@ -20,6 +20,7 @@
 #include "ui/audio_editor.h"
 #include "core/engine.h"
 #include "core/cvar.h"
+#include "core/platform.h"
 #include "gameplay/weapons.h"
 #include "gameplay/characters.h"
 #include "audio/synth/syn_material.h"

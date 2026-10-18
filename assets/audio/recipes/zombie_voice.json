@@ -1,5 +1,5 @@
 {
-  "_doc": "Zombie calls (game_audio.c): call 0 groan, 1 growl, 2 scream, 3 attack bark. 'pitch' and 'tract' are per zombie (from its entity id: the same zombie keeps its voice on every machine), 'rough' its rasp.",
+  "_doc": "Zombie calls (game_audio.c): call 0 groan, 1 growl, 2 scream, 3 attack bark. 'pitch' and 'tract' are per zombie (from its entity id: the same zombie keeps its voice on every machine), 'rough' its rasp. The recorded layer (one take per call, pitched by the zombie's voice) gives the synthesized larynx a real throat.",
   "name": "zombie_voice",
   "bus": "voice",
   "priority": 0.55,
@@ -50,6 +50,24 @@
           0.15
         ]
       }
+    },
+    {
+      "sample": [
+        "zombie_groan",
+        "zombie_growl",
+        "zombie_scream",
+        "zombie_attack"
+      ],
+      "sample_sel": "call",
+      "gain_db": "sel(call, -1, 2.5, 14, 6)",
+      "bind": {
+        "pitch": "pitch * sel(call, 0.92, 0.95, 1, 1)",
+        "amp": "sel(call, 0.8, 0.9, 1, 1)"
+      },
+      "pitch": [
+        0.9,
+        1.1
+      ]
     }
   ]
 }

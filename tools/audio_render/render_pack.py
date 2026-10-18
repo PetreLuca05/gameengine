@@ -39,8 +39,11 @@ PACK = [
     ("24_whizz_subsonic", "bullet_whizz", ["speed=300", "miss=1.5", "--scene", "field", "--dist", "1", "--dur", "1"], "A subsonic round passing close."),
     ("25_ricochet", "ricochet", ["energy=900", "--scene", "field", "--dist", "8", "--dur", "1.5", "--repeat", "3", "--every", "0.5"], "Three ricochet whines: each one different."),
 ]
-for m, name, e in [(1, "concrete", 1500), (4, "metal_thin", 1500), (5, "metal_thick", 1500), (6, "wood", 1500), (11, "glass", 1500), (7, "dirt", 1500), (12, "water", 1500), (13, "flesh", 1200)]:
-    PACK.append(("3%d_impact_%s" % (len([p for p in PACK if "impact" in p[0]]), name), "impact", ["material=%d" % m, "energy=%d" % e, "--scene", "field", "--dist", "5", "--dur", "1.5", "--repeat", "3", "--every", "0.45"],
+for m, name, e, smp in [(1, "concrete", 1500, "impact_hard"), (4, "metal_thin", 1500, "impact_metal"), (5, "metal_thick", 1500, "impact_metal"), (6, "wood", 1500, "impact_wood"),
+                        (11, "glass", 1500, "impact_glass"), (7, "dirt", 1500, None), (12, "water", 1500, "impact_water"), (13, "flesh", 1200, "impact_flesh")]:
+    # The VFX effect's sample name, as vfx_game_impact passes it (dirt has no recording: synthesized).
+    sa = ["--sample", smp] if smp else []
+    PACK.append(("3%d_impact_%s" % (len([p for p in PACK if "impact" in p[0]]), name), "impact", ["material=%d" % m, "energy=%d" % e] + sa + ["--scene", "field", "--dist", "5", "--dur", "1.5", "--repeat", "3", "--every", "0.45"],
                  "Bullet impacts on %s at 5 m: the material's ring / thud, debris falling back; three hits, each different." % name))
 PACK.append(("38_impact_metal_grazing", "impact", ["material=4", "energy=1500", "cosi=0.15", "--scene", "field", "--dist", "5", "--dur", "1.5", "--repeat", "3", "--every", "0.45"], "Grazing hits on thin metal: scrape more than ring."))
 for i, (name, args, what) in enumerate([
@@ -77,6 +80,9 @@ PACK += [
     ("74_zombie_crowd_80m", "zombie_crowd", ["count=40", "--scene", "field", "--dist", "80", "--dur", "6"], "A horde of ~40, 80 m away."),
     ("80_ui_click", "ui_click", ["--dur", "0.5"], "UI click."),
     ("81_ui_confirm", "ui_confirm", ["--dur", "0.6"], "UI confirm."),
+    ("75_AB_impact_metal_synth_only", "impact", ["material=4", "energy=1500", "--sample", "impact_metal", "--scene", "field", "--dist", "5", "--dur", "1.5", "--repeat", "3", "--every", "0.45", "-samples"], "A/B with 31: the same metal hits, synthesized layers only (no recorded take)."),
+    ("76_AB_footsteps_concrete_synth_only", "footstep", ["material=1", "speed=6", "--every", "0.33", "--scene", "field", "--dist", "3", "--hs", "0.05", "--dur", "4", "--repeat", "8", "-samples"], "A/B with 43: running on concrete, synthesized only."),
+    ("77_AB_zombie_scream_synth_only", "zombie_voice", ["call=2", "pitch=1.1", "tract=1.1", "rough=0.6", "--scene", "urban", "--dist", "12", "--dur", "3", "-samples"], "A/B with 72: the scream, synthesized only."),
 ]
 
 
@@ -88,10 +94,13 @@ def main(args):
     os.makedirs(out, exist_ok=True)
     lines = ["# Procedural audio listening pack", "", "Rendered offline by `tools/audio_render` through the game's mixer, environment chain and environment logic "
              "(box-built scenes; listener 1.7 m up facing the source). Each file is peak-normalized to -3 dBFS unless its note says the level is kept. "
-             "Synthesized layers only, except 21 (A/B with the current placeholder samples). Headphones show the spatial cues (head shadow, ITD, reflections) best.", ""]
+             "Impacts, footsteps, zombies, ricochets and rain mix the recorded CC0 takes (assets/sounds/CREDITS.md) under the synthesized layers; 75-77 are the same sounds synthesized only. "
+             "Gunshots are synthesized only, except 21 (A/B with the placeholder samples). Headphones show the spatial cues (head shadow, ITD, reflections) best.", ""]
     for name, recipe, a, what in PACK:
-        cmd = [EXE, recipe] + [x for x in a if x != "+samples"]
-        if "+samples" not in a:
+        cmd = [EXE, recipe] + [x for x in a if x not in ("+samples", "-samples")]
+        # The recorded CC0 takes play by default; gunshots stay synthesized (their samples are
+        # tools/gen_assets.py placeholders) unless "+samples"; "-samples" makes a synth-only A/B.
+        if "-samples" in a or (recipe == "gunshot" and "+samples" not in a):
             cmd.append("--no-samples")
         if "--normalize" not in a:
             cmd += ["--normalize", "-3"]
