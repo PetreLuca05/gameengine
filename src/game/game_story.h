@@ -26,6 +26,7 @@ typedef enum StoryEvKind {
     SEVT_SEQUENCE,      // text = sequence name (vista / VFX; presentation, docs/STORY.md §6)
     SEVT_PHONE,         // text = phone content id (messages / voicemail / gallery unlock)
     SEVT_END,           // the chapter ended: value = seconds until the host returns to the menu
+    SEVT_TITLE,         // text = script id (title + line), value = seconds: the centred card ("Day 3")
 } StoryEvKind;
 
 #define STORY_UI_SUBS 8
@@ -65,10 +66,13 @@ typedef struct StoryUi {
     float end_time;
     bool journal_open;
     bool debug;                 // story_debug overlay
+    char title[STORY_ARG];      // the title card's script id ("" = none)
+    float title_time, title_len;
 } StoryUi;
 
 void story_register(void);
 bool story_active(void);                         // host: a chapter is running
+bool story_solo(void);                           // host: a single-player chapter is running (joins are refused)
 const StoryUi *story_ui(void);
 void story_level_loaded(World *w, const char *map);   // host + client, after the level loads
 void story_host_tick(World *w);                  // host, per sim tick (after entities_tick)

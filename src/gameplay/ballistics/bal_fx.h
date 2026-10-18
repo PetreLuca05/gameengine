@@ -1,5 +1,5 @@
 // Ballistics visuals (docs/BALLISTICS.md): the muzzle flash composed from physics (bal_muzzle.c)
-// into component effects, tracers (head, curved tail, smoke, night light, ricochet sputter),
+// into component effects, tracers (head, curved tail, smoke, night light),
 // bullet traces through magnified optics and vapour trails, the tracer fire hook, debug drawing.
 #ifndef DG_BAL_FX_H
 #define DG_BAL_FX_H

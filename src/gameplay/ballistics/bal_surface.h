@@ -1,14 +1,14 @@
-// What a bullet does when it meets a surface: ricochet, penetrate (exit with less energy and a
-// wider cone) or stop. Driven by incidence angle, the material table and the cartridge's
-// penetration factors; flesh adds fragmentation and yaw. Pure and deterministic (bullet RNG).
+// What a bullet does when it meets a surface: penetrate (exit with less energy and a wider cone)
+// or stop. Bullets never ricochet. Driven by the material table and the cartridge's penetration
+// factors; flesh adds fragmentation and yaw. Pure and deterministic (bullet RNG).
 #ifndef DG_BAL_SURFACE_H
 #define DG_BAL_SURFACE_H
 
 #include "gameplay/ballistics/bal_sim.h"
 
-#define BAL_MAX_EVENTS 4   // ricochets + penetrations per bullet
+#define BAL_MAX_EVENTS 4   // penetrations per bullet
 
-typedef enum BalOutcome { BAL_STOP, BAL_RICOCHET, BAL_PENETRATE } BalOutcome;
+typedef enum BalOutcome { BAL_STOP, BAL_PENETRATE } BalOutcome;
 
 typedef struct BalHitResult {
     u8 outcome;            // BalOutcome
@@ -16,12 +16,12 @@ typedef struct BalHitResult {
     bool yawed;            // flesh: turned sideways before exiting
     float incidence;       // rad from the surface
     float energy_in;       // J at the entry face
-    float energy_out;      // J leaving (exit or ricochet), 0 when stopped
+    float energy_out;      // J leaving the exit face, 0 when stopped
     float energy_deposit;  // J left in the target
     float capacity;        // m of this material the bullet could defeat
     float thickness;       // m used
     float cavity;          // flesh: wound / exit-spray scale (1 = 5.56 at 1 kJ deposit, point-on)
-    vec3 out_pos;          // exit point (penetration) or the ricochet point
+    vec3 out_pos;          // exit point (penetration)
     vec3 out_dir;          // new unit direction
     float out_speed;
     float bc_mul;          // multiply the bullet BC (tumble / yaw)
@@ -30,8 +30,6 @@ typedef struct BalHitResult {
 float bal_incidence(vec3 dir, vec3 normal);   // rad between the path and the surface plane
 // Penetration capacity in metres of the material for a bullet with this energy (J).
 float bal_capacity(const BalMaterial *m, const BalCartridge *c, float energy);
-// Probability of a skip at this incidence (0 above ricochet_deg).
-float bal_ricochet_chance(const BalMaterial *m, float incidence);
 
 // World surfaces. thickness < 0: unknown, use the material's assumed thickness. Consumes
 // random numbers from the bullet's stream only, so host and client agree.

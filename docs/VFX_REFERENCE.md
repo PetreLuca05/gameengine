@@ -109,7 +109,7 @@ the sun).
 | `lighting` | none | none · simple (sun + shadow + point lights + ambient, per particle) · sixway (needs `_lm0/_lm1` maps, else simple) |
 | `texture` | – | texture name (`assets/vfx/tex/<name>.meta.json`); empty = soft round sprite |
 | `normal` | – | normal map texture (distortion; decals use the effect's `decal.normal`) |
-| `mesh` | – | mesh particles: `casing_pistol`, `casing_rifle`, `shell_shotgun`, `shard_*`, `splinter_*`; also the sound key `<kind>_<class>` |
+| `mesh` | – | mesh particles: `casing_pistol`, `casing_rifle`, `shell_shotgun`, `shard_*`, `splinter_*`; also the collision sound key `<kind>_<class>` (`debris_<class>`; casings never collide and are silent) |
 | `emissive` | add: 1 | HDR multiplier |
 | `exposure_aware` | false | alpha × exposure visibility (fades flashes in daylight) |
 | `soft` | 0.15 | soft particle fade distance against the scene depth (m) |

@@ -14,7 +14,8 @@ Conventions it enforces before exporting (the validator re-checks the file):
     origin (0, 0, 0) at its corner. Its front, the side people see, faces +Y (Blender's Back view looks at
     it). The stock glTF exporter (+Y up) turns that into the engine's x 0..w, y 0..h, z -d..0, front -Z.
   * Objects: the render mesh named exactly like the piece, optional <id>_LOD1..3, collision UCX_<id>_NN
-    (convex) / UBX_<id>_NN (box), socket empties S_<type>[_n]. Anything else is not exported.
+    (convex) / UBX_<id>_NN (box) / UCL_<id>_NN (box blocking characters only: an open window's opening),
+    socket empties S_<type>[_n]. Anything else is not exported.
   * Material slots named M_<set>; two UV maps (UV0 world scale, UV1 unwrapped without overlaps).
   * Scale / rotation applied (they are applied on the exported copy; the .blend is not saved).
 """
@@ -38,7 +39,7 @@ def _kind(name, pid):
         return "lod0"
     if name.startswith(pid + "_LOD") and name[len(pid) + 4:] in ("1", "2", "3"):
         return "lod"
-    if name.startswith("UCX_") or name.startswith("UBX_"):
+    if name.startswith("UCX_") or name.startswith("UBX_") or name.startswith("UCL_"):
         return "collision"
     if name.startswith("S_"):
         return "socket"

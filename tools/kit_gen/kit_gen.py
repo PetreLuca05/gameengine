@@ -43,6 +43,7 @@ class Piece:
     def __init__(self, pid, cat, **meta):
         self.id, self.cat, self.meta = pid, cat, meta
         self.boxes = []      # (lo, hi, slot, collide, lod1)
+        self.hulls = []      # (lo, hi): collision only, characters only (UCL_ boxes, PL_CLIP)
         self.sockets = []    # (name, pos, yaw_deg)
 
     def box(self, x0, y0, z0, x1, y1, z1, slot, collide=True, lod1=None):
@@ -50,6 +51,10 @@ class Piece:
         if lod1 is None:   # small trims vanish at LOD1
             lod1 = min(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) >= 0.05 or max(hi[0] - lo[0], hi[1] - lo[1], hi[2] - lo[2]) >= 0.6
         self.boxes.append((lo, hi, slot, collide, lod1))
+        return self
+
+    def hull(self, x0, y0, z0, x1, y1, z1):
+        self.hulls.append(((min(x0, x1), min(y0, y1), min(z0, z1)), (max(x0, x1), max(y0, y1), max(z0, z1))))
         return self
 
     def socket(self, stype, x, y, z, yaw=0.0):
@@ -205,7 +210,7 @@ def write_glb(path, piece, slot_colors, uv_scale=1.0, extra_hulls=(), post=None)
     if 0 < len(lod1) < len(piece.boxes):
         add_mesh_node(piece.id + "_LOD1", mesh_from_boxes(lod1))
     k = 1
-    for lo, hi, slot, collide, _ in piece.boxes:
+    for lo, hi, slot, collide, _ in piece.boxes + [(lo, hi, "UCL", True, False) for lo, hi in piece.hulls]:
         if not collide:
             continue
         P, I = [], []
@@ -214,8 +219,9 @@ def write_glb(path, piece, slot_colors, uv_scale=1.0, extra_hulls=(), post=None)
             for q in quad:
                 P.extend(q)
             I.extend([base, base + 1, base + 2, base, base + 2, base + 3])
-        meshes.append({"name": "UBX_%s_%02d" % (piece.id, k), "primitives": [{"attributes": {"POSITION": add_acc(P, 3, minmax=True)}, "indices": add_acc(I, 1, True)}]})
-        nodes.append({"name": "UBX_%s_%02d" % (piece.id, k), "mesh": len(meshes) - 1})
+        kind = "UCL" if slot == "UCL" else "UBX"   # UCL_: blocks characters only (kit_piece.h)
+        meshes.append({"name": "%s_%s_%02d" % (kind, piece.id, k), "primitives": [{"attributes": {"POSITION": add_acc(P, 3, minmax=True)}, "indices": add_acc(I, 1, True)}]})
+        nodes.append({"name": "%s_%s_%02d" % (kind, piece.id, k), "mesh": len(meshes) - 1})
         k += 1
     for name, P_, I_ in extra_hulls:
         meshes.append({"name": name, "primitives": [{"attributes": {"POSITION": add_acc(P_, 3, minmax=True)}, "indices": add_acc(I_, 1, True)}]})
@@ -292,6 +298,14 @@ p.socket("number_plate", 1.32, 1.6, -T_EXT)
 p = P("glass_panel_150", "glass", snap="mullion")
 p.box(0, 0, -0.03, 0.03, H_INT, 0, "M_metal").box(1.47, 0, -0.03, 1.5, H_INT, 0, "M_metal")   # glazing beads (the pane spans mullion to mullion)
 p.box(0.03, 0, -0.02, 1.47, H_INT, 0, "M_glass").socket("blinds_rail", 0.75, H_INT - 0.05, -0.12).socket("curtain_rail", 0.75, H_INT - 0.02, -0.2)
+# Casement: fixed lower and top lights, an opening sash between sill rail and transom (a "window"
+# entity: the sash swings out, the lean spot sits on the room side), a collision-only hull in the opening.
+p = P("glass_casement_150", "glass", snap="mullion")
+p.box(0, 0, -0.03, 0.03, H_INT, 0, "M_metal").box(1.47, 0, -0.03, 1.5, H_INT, 0, "M_metal")
+p.box(0.03, 0, -0.02, 1.47, 0.9, 0, "M_glass").box(0.03, 0.9, -0.06, 1.47, 0.98, 0, "M_metal")
+p.box(0.03, 2.4, -0.04, 1.47, 2.46, 0, "M_metal").box(0.03, 2.46, -0.02, 1.47, H_INT, 0, "M_glass")
+p.hull(0.03, 0.98, -0.03, 1.47, 2.4, 0.0)
+p.socket("door", 0.75, 0.98, -0.02).socket("lean", 0.75, 1.62, -0.02).socket("blinds_rail", 0.75, H_INT - 0.05, -0.12)
 P("glass_mullion", "glass", snap="mullion").box(0, 0, -0.15, 0.06, 3.0, 0, "M_metal")
 P("glass_mullion_corner", "glass", snap="mullion").box(0, 0, -0.15, 0.15, 3.0, 0, "M_metal")
 P("glass_head_150", "glass_trim", snap="mullion").box(0, 0, -0.15, 1.5, 0.3, 0, "M_metal", collide=False)
@@ -302,8 +316,8 @@ p.box(0, 0.04, -0.15, 0.04, H_INT - 0.06, 0, "M_metal").box(1.46, 0.04, -0.15, 1
 P("glass_slider_leaf_075", "door_leaf", snap="socket").box(0, 0, -0.05, 0.75, 2.6, 0, "M_glass").box(0, 0, -0.06, 0.05, 2.6, 0, "M_metal").socket("handle", 0.68, 1.0, -0.06).socket("hinge", 0, 0, -0.025)
 P("glass_slider_track_150", "glass_trim", snap="mullion").box(0, 0, -0.15, 1.5, 0.02, 0, "M_metal", collide=False)
 P("glass_spandrel_150", "glass", snap="mullion").box(0, 0, -0.02, 1.5, 0.3, 0, "M_glass").box(0, 0, -0.04, 1.5, 0.3, -0.02, "M_metal")
-P("balustrade_glass_150", "balcony", snap="grid").box(0, 0, -0.03, 0.02, 1.1, 0, "M_metal").box(1.48, 0, -0.03, 1.5, 1.1, 0, "M_metal").box(0.02, 0, -0.02, 1.48, 1.1, 0, "M_glass")
-P("balustrade_glass_120", "balcony", snap="grid").box(0, 0, -0.03, 0.02, 1.1, 0, "M_metal").box(1.18, 0, -0.03, 1.2, 1.1, 0, "M_metal").box(0.02, 0, -0.02, 1.18, 1.1, 0, "M_glass")
+P("balustrade_glass_150", "balcony", snap="grid").box(0, 0, -0.03, 0.02, 1.1, 0, "M_metal").box(1.48, 0, -0.03, 1.5, 1.1, 0, "M_metal").box(0.02, 0, -0.02, 1.48, 1.1, 0, "M_glass").socket("lean", 0.75, 1.1, -0.02)
+P("balustrade_glass_120", "balcony", snap="grid").box(0, 0, -0.03, 0.02, 1.1, 0, "M_metal").box(1.18, 0, -0.03, 1.2, 1.1, 0, "M_metal").box(0.02, 0, -0.02, 1.18, 1.1, 0, "M_glass").socket("lean", 0.6, 1.1, -0.02)
 P("balustrade_post", "balcony", snap="grid").box(0, 0, -0.06, 0.06, 1.12, 0, "M_metal")
 P("balustrade_corner_post", "balcony", snap="grid").box(0, 0, -0.08, 0.08, 1.12, 0, "M_metal")
 P("handrail_150", "balcony", snap="grid").box(0, 0, -0.06, 1.5, 0.04, 0, "M_metal")
@@ -571,6 +585,9 @@ ENTITIES = {   # piece -> the entity spawned at its socket (instances override p
     "door_frame_double_160": {"type": "door", "socket": "door", "width": 1.58, "height": 2.08},
     "door_frame_slide_090": {"type": "door", "socket": "door", "width": 1.38, "height": 2.08, "color": [0.75, 0.88, 0.95]},
     "glass_slider_frame_150": {"type": "door", "socket": "door", "width": 1.4, "height": 2.6, "color": [0.75, 0.88, 0.95], "glass": True},
+    "glass_casement_150": {"type": "window", "socket": "door", "width": 1.42, "height": 1.4, "color": [0.75, 0.88, 0.95]},
+    "balustrade_glass_150": {"type": "lean", "socket": "lean"},
+    "balustrade_glass_120": {"type": "lean", "socket": "lean"},
     "corridor_wall_door_recess_150": {"type": "door", "socket": "door", "width": 0.95, "height": 2.1, "locked": True},
     "light_downlight": {"type": "light", "socket": "light", "radius": 5, "intensity": 6, "offset": [0, -0.08, 0]},
     "light_pendant": {"type": "light", "socket": "light", "radius": 6, "intensity": 8, "offset": [0, -0.1, 0]},

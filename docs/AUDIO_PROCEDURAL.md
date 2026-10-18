@@ -187,7 +187,7 @@ falling / hits, wood and metal, water, mud, creatures) and Warfork's CC0 assets.
 | `footstep_{hard,wood,grass,snow,carpet,metal,mud}` | `footstep` (`sample_sel: material`; dirt, sand, gravel and wading stay synthesized) |
 | `impact_{hard,metal,wood,glass,water,flesh,plate_ring}`, `melee_hit(_wall)`, `shard_glass`, `debris_{hard,soft}` | `impact` and the VFX effects' `@` sample |
 | `zombie_{groan,growl,scream,attack}` | `zombie_voice` (`sample_sel: call`, pitched by the zombie's voice) |
-| `bullet_ricochet`, `rain_loop`, `hurt`, `door_{open,close,slam}` | their recipes / legacy names |
+| `rain_loop`, `hurt`, `door_{open,close,slam}` | their recipes / legacy names |
 
 - **Import** (per file): mono 48 kHz, high-pass, the leading silence trimmed, the tail cut at
   −55 dB or `max_s`, duplicates dropped. Per set, every take is scaled to the same loudness (the
@@ -212,7 +212,6 @@ falling / hits, wood and metal, water, mud, creatures) and Warfork's CC0 assets.
 | `bullet_crack` | N-wave, duration ∝ calibre · miss^¼, rise from miss | `listen_step` at `bal_crack_segment`'s arrival |
 | `bullet_whizz` | band-passed noise sweeping down over the pass | subsonic `bal_whizz_segment` |
 | `impact` | material modal bank excited by an impulse of the contact width (√E, head-on rings, grazing scrapes), noise burst, thud for soft ground / flesh; debris grains above ~200 J; splash + Minnaert bubbles on water; the effect's sample layer | `vfx_game_impact`: material, energy that arrived, cos(incidence) |
-| `ricochet` | falling sine whine + band noise with tumbling AM | ballistic ricochet impacts |
 | `footstep` | heel + toe into the ground's modes, weight thud, granular crunch (gravel / snow / leaves), grass swish, splash when wading; snow / mud from the weather | `chars_take_steps` (anim foot plants; horde zombies by speed), ground ray |
 | `vehicle_engine` | firing pulses at rpm · cyl / 120 → asymmetric drive by throttle → exhaust waveguide + body modes, intake roar; `engine_loop` sample pitched by rpm; doppler, exhaust radiates back | `game_vehicles.c` vehicle_audio |
 | `vehicle_tires`, `vehicle_wind`, `vehicle_thump` | surface-filtered rolling noise + gravel grains + skid band / squeal; body wind by speed (louder inside); suspension bottoming and a flat tire once per turn | the same |
@@ -397,7 +396,7 @@ The listener state (`game_audio_frame`) feeds the world-bus filter:
 - the cliff echo at the pad;
 - every family plays;
 - a footstep on a floor strip is not occluded;
-- the recorded takes load (> 100), and footsteps, impacts, zombies and ricochets play them (`snd_trace`
+- the recorded takes load (> 100), and footsteps, impacts and zombies play them (`snd_trace`
   lists each voice's samples).
 
 ## Tuning guide

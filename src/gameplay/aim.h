@@ -76,8 +76,9 @@ vec3 aim_converge(vec3 muzzle, vec3 p, vec3 cam_dir);
 //   obstructed depth < far - margin, margin = max(margin_abs, margin_rel * far, parallax): a barrel
 //              ray landing beside the aim point at range is parallax, not an obstruction
 //   clear      otherwise, and without a hit (hit < 0)
-// parallax: how much sooner a line offset by the muzzle's distance from the camera ray reaches the
-// surface the camera sees, at its grazing angle (the ground ahead, a wall seen edge on).
+// parallax: how much sooner a line beside the camera ray reaches the surface the camera sees, at its
+// grazing angle (the ground ahead, far terrain, a wall seen edge on). The line's separation at P is
+// the muzzle's distance from the camera ray plus far x tan(angle between the barrel and the ray).
 typedef struct AimObstructRule {
     float near;          // obstruct_near (m from the muzzle)
     float margin_abs;    // obstruct_margin (m)
@@ -85,9 +86,9 @@ typedef struct AimObstructRule {
 } AimObstructRule;
 float aim_obstruct_far(float cam_hit, float max_range);
 float aim_obstruct_margin(const AimObstructRule *r, float far, float parallax);
-// offset: the muzzle's distance from the camera ray (m); sin_graze: |dot(camera dir, surface normal)|
-// at the camera's hit (1 = head on). Capped at 3 m (sin_graze floored at 0.05).
-float aim_parallax(float offset, float sin_graze);
+// separation: the barrel line's distance from P (m); sin_graze: |dot(camera dir, surface normal)| at
+// the camera's hit (1 = head on). Capped at max(3 m, 25 % of far) (sin_graze floored at 0.005).
+float aim_parallax(float separation, float sin_graze, float far);
 AimClass aim_classify(float hit, float muzzle_depth, float far, float parallax, const AimObstructRule *r, bool friendly);
 
 // Muzzle inside geometry: a cast from the eye (inside the player's capsule, always free) to the

@@ -51,7 +51,7 @@ The first piece set is **generated** by `tools/kit_gen/` (Python, writes `.glb` 
 | UV1 | Second UV set, non-overlapping, 0..1, with a 2 px margin at 512². Kept for future lightmaps and validated now. |
 | Material slots | Named `M_<set>` or `M_<set>_<variant>` (e.g. `M_paint`, `M_wood_oak`, `M_glass`). They map to `materials/<set>.json` → engine materials (PBR maps per docs/PBR.md). Instances override per slot and can tint. |
 | Sockets | Empties named `S_<type>[_<n>]`. Types: `hinge`, `handle`, `light`, `switch`, `outlet`, `frame`, `blinds_rail`, `curtain_rail`, `sink`, `tap`, `snap_l`, `snap_r`, `snap_t`, `open` (an opening's centre/size), `mullion`, `prop` (generic). The empty's −Z axis is the socket's forward. |
-| Collision | `UCX_<piece>_<nn>` convex meshes, or `UBX_` boxes. If there are none, the validator generates hulls (`collision: auto` in kit.json) or rejects the piece (`collision: required`, the default for walls, floors and stairs). Glass gets a thin box. |
+| Collision | `UCX_<piece>_<nn>` convex meshes, or `UBX_` boxes. `UCL_` boxes block characters only (layer `PL_CLIP`: rays, bullets and props pass), e.g. the opening of a casement window. If there are none, the validator generates hulls (`collision: auto` in kit.json) or rejects the piece (`collision: required`, the default for walls, floors and stairs). Glass gets a thin box. |
 | LODs | `<piece>_LOD1..3` objects in the same file. If they are missing, `build_vgeo` generates DAG LODs (docs/VGEO.md). Façade bays always ship LOD3 as a card for impostor baking. |
 | Naming | `<category>_<kind>[_<variant>]_<size>`. Sizes are in cm: width, or w×h. Examples: `wall_int_100`, `wall_ext_win_150`, `door_leaf_int_090`, `glass_panel_150`. Lowercase, `[a-z0-9_]`. |
 
@@ -213,10 +213,25 @@ Prefabs nest. An instance may `mirror` (x) and `override` pieces by path. The le
 | Hot reload | None for models | mtime poll on `assets/kits/building/*.glb` (like `hp_system.c`) + `kit_reload [piece]`. It rebuilds the piece's GPU mesh, LODs, collision and socket table and re-instances in place. Dev builds run the vgeo builder in-process. |
 | Validation | n/a | `tools/validate_kit` + ctest `kit_validate` over the whole folder. |
 
+### Windows
+
+- **`glass_casement_150`**: a full-height glass module with fixed lights below 0.9 m and above 2.4 m and an opening sash between them.
+  - kit.json hooks it as `"type": "window"`.
+  - The sash spawns at `S_door` as a door entity whose colour alpha is `DOOR_ALPHA_WINDOW` (`spawn_window`, gameplay/entities.c). The alpha replicates with the colour.
+  - The sash prompts "Open Window" / "Close Window" and swings away from the user (out of the room) by 80°. It gets no door wheel and no viewer.
+  - A `UCL_` box fills the opening. It blocks characters only (`PL_CLIP`), so nobody climbs or vaults out, while rays reach the open sash.
+- **Lean spot**: a marker named `lean` at `S_lean`, in the opening.
+  - While the window is closed it stands in for the sash ("Open Window").
+  - Once the window is open, use leans out: a client camera (`src/game/game_lean.c`, like the door peek).
+    - The head goes `lean_distance` out past the glass and drops `lean_drop`.
+    - The view stays in the outside half-space, `lean_yaw_limit` either way, down to `lean_pitch_down`.
+    - Use, moving, jumping, attacking, damage, walking away or the window closing end it.
+- **Balcony balustrades** (`balustrade_glass_150` / `_120`) carry a `lean_over` spot at their top rail: "Lean Over", always open.
+
 ## 6. Blender workflow
 
 1. Open `assets/kits/building/src/<piece>.blend`, or import the `.glb`.
-2. Model at real scale in the positive octant, with the front facing +Y and the origin at the corner. Name slots `M_*`, sockets `S_*` (empties), collision `UCX_*` / `UBX_*`, and LODs `_LOD1..3`. Add two UV maps: UV0 at world scale (1 unit = 1 m) and UV1 unwrapped without overlaps.
+2. Model at real scale in the positive octant, with the front facing +Y and the origin at the corner. Name slots `M_*`, sockets `S_*` (empties), collision `UCX_*` / `UBX_*` / `UCL_*`, and LODs `_LOD1..3`. Add two UV maps: UV0 at world scale (1 unit = 1 m) and UV1 unwrapped without overlaps.
 3. Export with **`tools/blender/kit_export.py`**: `blender -b src/wall_int_300.blend -P tools/blender/kit_export.py`, or from the N-panel "Deadground Kit ▸ Export". The script:
    - applies transforms
    - checks the pivot

@@ -8,7 +8,7 @@
   "checkpoints": ["start", "c1_phone", "c2_prepared", "c3_breaker", "c4_decision", "end"],
 
   "roles": [
-    {"slot": 0, "id": "parent", "spawn": "spawn_bed"},
+    {"slot": 0, "id": "parent", "spawn": "spawn_sofa"},
     {"slot": 1, "id": "dana", "spawn": "spawn_hall", "replaces": ["note_dana", "voicemail_dana"]},
     {"slot": 2, "id": "jules", "spawn": "spawn_teen", "replaces": ["note_jules", "jules_laptop"]},
     {"slot": 3, "id": "ruth", "spawn": "spawn_10b"}
@@ -27,7 +27,7 @@
 
   "objectives": [
     {"id": "wake", "text": "obj.wake", "complete_on": {"any": [{"timer": 6}, {"signal": "player_moved"}]}},
-    {"id": "phone", "text": "obj.phone", "requires": "wake", "marker": "phone_nightstand", "checkpoint": "c1_phone",
+    {"id": "phone", "text": "obj.phone", "requires": "wake", "marker": "phone_sofa", "checkpoint": "c1_phone",
      "complete_on": {"any": [{"signal": "phone_messages_read"}, {"timer": 120, "since": "wake"}]}},
     {"id": "notes", "text": "obj.notes", "requires": "phone", "group": {"need": 0}, "children": [
       {"id": "note_dana", "text": "obj.note_dana", "complete_on": {"item": "note_dana", "on": "read"}},
@@ -102,7 +102,7 @@
   "triggers": [
     {"id": "intro", "when": true, "do": [
       {"fade": "in", "time": 3.0},
-      {"audio": "phone_buzz", "at": "phone_nightstand", "kind": "sfx"},
+      {"audio": "phone_buzz", "at": "phone_sofa", "kind": "sfx"},
       {"wait": 2.0},
       {"audio": "siren_far_01", "kind": "ambient", "volume": 0.4},
       {"subtitle": "sub.intro"}

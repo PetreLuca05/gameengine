@@ -44,7 +44,8 @@ enum { BAL_SHOT_TRACER = 1, BAL_SHOT_FORCED_TRACER = 2 };
 // EV_IMPACT id bits 16..31 (and fx flags passed to the impact effects).
 #define BAL_IMPACT_EXTRA(energy_j, outcome_bits) ((((u32)bal_energy_code(energy_j)) << 16) | ((u32)(outcome_bits) << 24))
 // Energy: J arriving at the surface (flesh: J deposited in the body).
-enum { BAL_IMP_RICOCHET = 1, BAL_IMP_PENETRATE = 2, BAL_IMP_EXIT = 4, BAL_IMP_FRAGMENT = 8, BAL_IMP_BALLISTIC = 16, BAL_IMP_TRACER = 32, BAL_IMP_YAWED = 64 };
+// Bit 0 is free (it was the ricochet; bullets no longer ricochet).
+enum { BAL_IMP_PENETRATE = 2, BAL_IMP_EXIT = 4, BAL_IMP_FRAGMENT = 8, BAL_IMP_BALLISTIC = 16, BAL_IMP_TRACER = 32, BAL_IMP_YAWED = 64 };
 // Flesh wound scale from an impact id (the same rule as bal_hit_flesh's cavity).
 float bal_impact_cavity(u32 id);
 u8 bal_energy_code(float joules);       // log scale 0..255 (0 = none, 255 ≈ 40 kJ)

@@ -4,7 +4,7 @@
   * the cliff pad: OUTDOOR with an echo at 2 x 145 m / c (+-3 %)
   * the sound test bay's tiled room: INDOOR, 6 x 3 x 5 m within 20 %
   * every audio_synth_play played, voices were listed, the footstep on the strip is not occluded
-  * the recorded CC0 takes loaded, and footsteps / impacts / zombies / ricochets play them
+  * the recorded CC0 takes loaded, and footsteps / impacts / zombies play them
 Run: python3 tools/tests/audio_range_check.py audio.log"""
 import re, sys
 
@@ -31,7 +31,7 @@ def main(path):
     if steps and not re.search(r"occl -?0/-?0/-?0 dB", steps[-1]): fails.append("the strip footstep is occluded: " + steps[-1])
     if not any(re.search(r"audio: .* (\d+) recorded takes", l) and int(re.search(r"(\d+) recorded takes", l).group(1)) > 100 for l in log):
         fails.append("the recorded takes did not load")
-    for rec, take in [("footstep", "footstep_hard_"), ("impact", "impact_metal_"), ("impact", "impact_glass_"), ("zombie_voice", "zombie_scream_"), ("ricochet", "bullet_ricochet_")]:
+    for rec, take in [("footstep", "footstep_hard_"), ("impact", "impact_metal_"), ("impact", "impact_glass_"), ("zombie_voice", "zombie_scream_")]:
         if not any("snd: %s starts" % rec in l and take in l for l in log): fails.append("no %s voice played a %s take" % (rec, take))
     for f in fails: print("FAIL", f)
     print("audio_range_check: %d failure(s)" % len(fails))

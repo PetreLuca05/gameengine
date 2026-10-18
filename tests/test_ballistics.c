@@ -240,50 +240,50 @@ static void test_cross_platform_golden(void) {
 
 // ------------------------------------------------------------------ surfaces
 
-static void test_ricochet(void) {
-    const BalCartridge *c = cart("556_m855");
-    for (int m = 0; m < SURF_COUNT; m++) {
-        const BalMaterial *mat = &g_data.mat[m];
-        float th = mat->ricochet_deg;
-        if (th <= 0.0f) {
-            CHECK(bal_ricochet_chance(mat, 1.0f * DEG2RAD) == 0.0f, "%s never skips", bal_material_name(m));
-            continue;
-        }
-        CHECK(bal_ricochet_chance(mat, th * 1.01f * DEG2RAD) == 0.0f, "%s: no skip above %g deg", bal_material_name(m), th);
-        CHECK(fabsf(bal_ricochet_chance(mat, th * 0.5f * DEG2RAD) - 0.75f) < 1e-4f, "%s: 75 %% at half the angle", bal_material_name(m));
-        // Monte Carlo through the full surface resolve at half the ricochet angle.
-        int skips = 0, n = 2000;
-        float keep_min = 1, keep_max = 0;
-        for (int i = 0; i < n; i++) {
-            BalBullet b;
-            float a = th * 0.5f * DEG2RAD;
-            vec3 dir = v3(cosf(a), -sinf(a), 0);
-            bal_launch(&b, c, 0, v3(0, 0, 0), dir, 800.0f, (u32)(i * 7919 + m), 0, false);
-            BalHitResult r = bal_hit_surface(&b, c, mat, v3(0, 0, 0), dir, v3(0, 1, 0), 10.0f);
-            if (r.outcome == BAL_RICOCHET) {
-                skips++;
-                float keep = r.out_speed / 800.0f;
-                keep_min = fminf(keep_min, keep);
-                keep_max = fmaxf(keep_max, keep);
-                CHECK(r.out_dir.y > 0.0f, "ricochet leaves the surface");
-                CHECK(bal_incidence(r.out_dir, v3(0, 1, 0)) < a + 8.5f * DEG2RAD, "leaves flatter (plus tumble)");
+// Bullets never ricochet: on every material, at every incidence down to a 0.5 deg graze, a hit
+// stops in the surface or goes through it (the exit beyond the entry face), never back off it.
+static void test_never_ricochets(void) {
+    const char *carts[] = { "556_m855", "762x51_m80", "9x19_fmj" };
+    const float angles[] = { 0.5f, 2.0f, 5.0f, 10.0f, 20.0f, 45.0f, 89.0f };
+    const float thick[] = { 0.002f, 0.02f, 10.0f };
+    int n = 0, stops = 0, through = 0;
+    for (int ci = 0; ci < 3; ci++) {
+        const BalCartridge *c = cart(carts[ci]);
+        for (int m = 0; m < SURF_COUNT; m++) {
+            for (int ai = 0; ai < 7; ai++) {
+                float a = angles[ai] * DEG2RAD;
+                vec3 dir = v3(cosf(a), -sinf(a), 0);
+                for (int ti = 0; ti < 3; ti++) {
+                    for (u32 s = 1; s <= 40; s++) {
+                        BalBullet b;
+                        bal_launch(&b, c, 0, v3(0, 0, 0), dir, 900.0f, s * 7919u + (u32)m, 0, false);
+                        BalHitResult r = bal_hit_surface(&b, c, &g_data.mat[m], v3(0, 0, 0), dir, v3(0, 1, 0), thick[ti]);
+                        n++;
+                        CHECK(r.outcome == BAL_STOP || r.outcome == BAL_PENETRATE, "%s %s %.1f deg: outcome %d", carts[ci], bal_material_name(m), angles[ai], r.outcome);
+                        if (r.outcome == BAL_STOP) {
+                            stops++;
+                            CHECK(r.energy_out == 0.0f && r.energy_deposit == r.energy_in, "a stop keeps all the energy in the target");
+                            CHECK(!bal_apply_hit(&b, &r) && (b.flags & BF_DEAD), "a stopped bullet is gone");
+                        } else {
+                            through++;
+                            CHECK(r.out_pos.y < 0.0f, "%s %s %.1f deg: the exit is beyond the entry face", carts[ci], bal_material_name(m), angles[ai]);
+                            CHECK(r.energy_out < r.energy_in, "an exit carries less energy");
+                            CHECK(bal_apply_hit(&b, &r) && (b.flags & BF_PENETRATED), "a penetration continues, flagged");
+                        }
+                    }
+                }
             }
         }
-        float f = (float)skips / (float)n;
-        CHECK(fabsf(f - 0.75f) < 0.04f, "%s ricochet rate %.3f at half angle", bal_material_name(m), f);
-        CHECK(skips == 0 || (keep_min >= 0.299f && keep_max <= 0.601f), "%s speed kept %.2f..%.2f", bal_material_name(m), keep_min, keep_max);
     }
-    // A ricochet keeps flying (tumbling, flagged) and can hit again.
-    BalBullet b;
-    float a = 5.0f * DEG2RAD;
-    vec3 dir = v3(cosf(a), -sinf(a), 0);
-    for (u32 s = 1;; s++) {
-        bal_launch(&b, c, 0, v3(0, 0, 0), dir, 900.0f, s, 0, false);
-        BalHitResult r = bal_hit_surface(&b, c, &g_data.mat[SURF_METAL_THICK], v3(0, 0, 0), dir, v3(0, 1, 0), 0.02f);
-        if (r.outcome != BAL_RICOCHET) continue;
-        CHECK(bal_apply_hit(&b, &r), "ricochet continues");
-        CHECK((b.flags & BF_RICOCHET) && b.bc < c->bc, "ricochet flag + tumble drag");
-        break;
+    CHECK(stops > 0 && through > 0, "both outcomes occur (%d stops, %d through of %d)", stops, through, n);
+    // The old ricochet case (5.56 at 5 deg on thick steel, 2 cm): it stops in the plate, every seed.
+    for (u32 s = 1; s <= 500; s++) {
+        BalBullet b;
+        float a = 5.0f * DEG2RAD;
+        vec3 dir = v3(cosf(a), -sinf(a), 0);
+        bal_launch(&b, cart("556_m855"), 0, v3(0, 0, 0), dir, 900.0f, s, 0, false);
+        BalHitResult r = bal_hit_surface(&b, cart("556_m855"), &g_data.mat[SURF_METAL_THICK], v3(0, 0, 0), dir, v3(0, 1, 0), 0.02f);
+        CHECK(r.outcome == BAL_STOP, "grazing steel: seed %u does not stop", s);
     }
 }
 
@@ -544,7 +544,7 @@ int main(void) {
     test_zero_and_mv();
     test_determinism();
     test_cross_platform_golden();
-    test_ricochet();
+    test_never_ricochets();
     test_penetration();
     test_acoustics();
     test_tracers();

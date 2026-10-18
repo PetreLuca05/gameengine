@@ -38,7 +38,8 @@ typedef struct KitSocket {
 } KitSocket;
 
 typedef struct KitHull {
-    bool box;                    // UBX_: an axis-aligned box (min / max)
+    bool box;                    // UBX_ / UCL_: an axis-aligned box (min / max)
+    bool clip;                   // UCL_: blocks characters only (PL_CLIP: an open window's opening)
     float *verts;                // UCX_: piece-space vertices (3 floats each)
     u32 *idx;
     u32 vcount, icount;
@@ -54,7 +55,7 @@ typedef struct KitPiece {
     KitHull hulls[KIT_MAX_HULLS];
     int hull_n;
     float mn[3], mx[3];          // LOD0 bounds
-    int unnamed_nodes;           // mesh nodes that are not <id>, <id>_LODn, UCX_ / UBX_ (validation)
+    int unnamed_nodes;           // mesh nodes that are not <id>, <id>_LODn, UCX_ / UBX_ / UCL_ (validation)
     bool missing_normals;        // a render primitive without NORMAL (validation)
     char first_unnamed[64];
 } KitPiece;

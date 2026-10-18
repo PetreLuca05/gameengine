@@ -206,6 +206,7 @@ int story_script_lint(const StoryDef *d, const StoryScript *s, char *out, int ou
     for (int i = 0; i < d->act_n; i++) {
         const StoryAction *a = &d->act[i];
         if (a->type == SA_SUBTITLE) need(&m, s, a->arg, "subtitle");
+        if (a->type == SA_TITLE) need(&m, s, a->arg, "title");
         if (a->type == SA_AUDIO && a->ival == SAK_VO) need(&m, s, a->arg, "vo");
     }
     return m.n;
