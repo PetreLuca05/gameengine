@@ -16,6 +16,7 @@ layout(location = 0) flat out float v_fade;   // LOD / shadow-distance cross-fad
 void main() {
     SkinInstance si = skin_inst.inst[gl_InstanceIndex];
     vec4 world = skin_matrix(si.info.x, in_joints, in_weights) * vec4(in_pos, 1.0);
+    if ((si.info.z & SKIN_ROOTED) != 0u) world = skin_root(si.root[0], si.root[1], si.root[2]) * world;   // a shared pose (PF-0034)
     gl_Position = shadow_pass_vp(pc.flags.w) * world;
     v_fade = si.params.w;
     // A body still being reconstructed casts no shadow until it is mostly there (docs/REVIVE.md).

@@ -32,8 +32,8 @@ tools/perf_audit/run_verify.sh PF-0001        # A/B proof of one fix -> docs/per
 tools/perf_audit/first_run.sh                 # both, for every implemented fix (the first run on a new machine)
 ```
 
-In game (console): `perf_scenes`, `perf_audit [all|scene,..] [frames] [out] [levels=modern,low] [settle=120] [refs] [quit]`,
-`perf_verify <PF-xxxx|all> [scenes] [frames] [out] [reps=2] [levels=modern] [settle=120] [quit]`,
+In game (console): `perf_scenes`, `perf_audit [all|scene,..] [frames] [out] [levels=modern,low] [settle=120] [cap=fps] [refs] [quit]`,
+`perf_verify <PF-xxxx|all> [scenes] [frames] [out] [reps=2] [levels=modern] [settle=120] [cap=fps] [quit]`,
 `prof_capture <frames> <path.json> [label] [warmup] [scene]` (any moment of play),
 `perf_fix_disable PF-0001,PF-0005` (A side of a manual comparison; `all` = every fix).
 
@@ -86,12 +86,12 @@ savings figure for the target). Reports made that way say so in their header. Ta
 | Main loop zones: `input`, `cbuf`, `menus`, `net`, `game_frame`, `job_completions`, `render_begin`, `game_render`, `ui_render`, `render_end` | `src/app/main.c` |
 | Sim tick phases: `sim_tick`, `sim:host_tick`, `sim:players`, `sim:daynight_weather`, `sim:spectate`, `sim:entities`, `sim:projectiles`, `sim:horde`, `sim:anim_hitboxes`, `sim:chunks`, `sim:openworld`, `sim:water`, `sim:physics`, `sim:lagcomp`, `sim:events_net`, `sim:client_chars`, `sim:anim_present`, `focus_hud` | `src/game/game.c` |
 | Render CPU: `render:prepare`, `render:record_pre`, `render:frame_graph`, `fg:validate` | `render.c`, `fg.c` |
-| `anim:post_pass` (pose evaluations), `vfx:update` | `characters.c`, `vfx.c` |
+| `anim:post_pass` (pose evaluations), `chars:prep` / `chars:draws` (draw poses: sources, draw calls; PF-0021), `vfx:update` | `characters.c`, `vfx.c` |
 | Jobs: `job:<fn>` per job (queue latency = submit -> start), `parfor:<fn>` per `jobs_parallel_for` participant; worker busy time per frame | `src/core/jobs.c` |
 | Blocking waits: `wait:gpu_fence`, `acquire`, `present`, `readback`, `jobs_wait` (nothing left to help with: a dependency stall), `parfor_tail`, `io`, `fps_cap` | `render.c`, `jobs.c`, `platform.c`, `main.c` |
 | Allocations: count / bytes per frame, call site (`file:line`) + innermost zone, frames seen | `prof_alloc.h` wraps `malloc`/`calloc`/`realloc`/`free` in every engine `.c` (`DG_PROFILE_ALLOC`, CMake option, default on) |
 | `memcpy` calls / bytes per frame | `prof_alloc.h` |
-| Counters: `cvar_find`, `log_lines`, `io_reads` / `io_bytes`, `jobs`, `parfor`, `anim_eval`, `anim_eval_offscreen` (clients), `skin_palettes`, `vfx_emitters`, `audio_voices`, `ui_text`, `draw_items`, `shadow_items` | `profiler.h` `PC_*` |
+| Counters: `cvar_find`, `log_lines`, `io_reads` / `io_bytes`, `jobs`, `parfor`, `anim_eval`, `anim_eval_offscreen` (clients), `anim_eval_outside` (outside the view, PF-0033), `anim_pose_shared` / `anim_pose_samples` (shared pose cache, PF-0034), `skin_palettes`, `vfx_emitters`, `audio_voices`, `ui_text`, `draw_items`, `shadow_items` | `profiler.h` `PC_*` |
 | Process private bytes every 4 frames (`series.process_mb`) | `profiler.c` |
 | Startup critical path: zones from `prof_init` to the first frame (`startup` section) | `main.c` |
 
@@ -221,6 +221,14 @@ decides:
   deterministic between map loads (the second load of a process differs from tick 0): prove fixes on
   the deterministic scenes and time them there.
 
+**GPU frame and the submission rate.** `gpu_frame` is the span between a TOP_OF_PIPE timestamp at the
+start of the frame's command buffer and a BOTTOM_OF_PIPE one at its end. When a fix only speeds up the
+CPU, B submits more frames per second, and on a shared GPU the span then also holds queueing behind
+the previous frame and other processes' GPU work inside it: PF-0008 (dropped for GPU frame +11 % under
+30 - 40 % outside GPU load) and PF-0021 (the same change with the same GPU input: +3.9 % uncapped,
++0.2 % n.s. with `cap=60`) are the cases. `cap=<fps>` keeps a frame cap on both sides (the same
+submission rate) to tell such a span change from GPU work; the closing run stays uncapped.
+
 `closed` = timing improved AND every image pair passes AND the state is identical AND no guard
 regressed. A **visual trade-off** (a `fixes.json` entry with `"tradeoff"`: what changes on screen, and
 `"screenshots"`) is the exception: it changes the image by design, so its image pairs are recorded
@@ -302,6 +310,14 @@ outside the runs): absolute GPU milliseconds of separate runs varied up to 2x, s
   (docs/SHADOWS.md "Caster cascade limits", FINDINGS.md): meadow shadow pass -38 % at Modern, -84 % at
   Low; the forest interiors only -1 .. -9 % (their fragments are tree leaf cards).
 - `horde_foliage` is not deterministic between map loads (above, Verification).
+- Characters / skinning (FINDINGS.md): PF-0020 (palettes written in place, no copies), PF-0021 (the
+  PF-0008 retry: draw poses and palette gathers on the jobs; the GPU frame regression was the span's
+  sensitivity to the submission rate, see Verification), and the visual trade-offs PF-0033
+  (characters outside the view at the cheap pose rate without IK) and PF-0034 (far characters share
+  one sampled pose per phase bucket: palettes -48 %, pose work -85 % with 500 zombies). While doing
+  them, `jobs_parallel_for` was fixed: a helper late enough for its slot to start a newer loop compared
+  an index of the old loop with the new loop's chunk count, ran that chunk twice and ended the new loop
+  early (its caller went on while a chunk still ran).
 
 ## CI
 

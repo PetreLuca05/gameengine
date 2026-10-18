@@ -35,6 +35,10 @@ void lod_table_default(LodTable *t) {
     memcpy(t->char_update, up, sizeof(up));
     t->char_ramp_s = 1.5f;
     t->char_ik_band = 0.3f;
+    t->char_offscreen_update = 8;
+    t->char_offscreen_margin_deg = 10.0f;
+    t->char_shared_lod = 2;
+    t->char_shared_phases = 32;
     t->imp_band = 0.35f;
     t->imp_gain = 1.2f;
     t->fol_band = 1.5f;
@@ -91,6 +95,10 @@ bool lod_table_parse(LodTable *t, const char *json, char *err, int n) {
     t->char_shadow_px = jnum(ch, "shadow_px", t->char_shadow_px);
     t->char_ramp_s = jnum(ch, "update_ramp_s", t->char_ramp_s);
     t->char_ik_band = jnum(ch, "ik_band", t->char_ik_band);
+    t->char_offscreen_update = DG_MAX(1, (int)(jnum(ch, "offscreen_update", (float)t->char_offscreen_update) + 0.5f));
+    t->char_offscreen_margin_deg = jnum(ch, "offscreen_margin_deg", t->char_offscreen_margin_deg);
+    t->char_shared_lod = DG_CLAMP((int)(jnum(ch, "shared_pose_lod", (float)t->char_shared_lod) + 0.5f), 0, LOD_CHAR_COUNT);
+    t->char_shared_phases = DG_CLAMP((int)(jnum(ch, "shared_pose_phases", (float)t->char_shared_phases) + 0.5f), 4, 256);
     const cJSON *im = cJSON_GetObjectItemCaseSensitive(root, "impostor");
     t->imp_band = jnum(im, "band", t->imp_band);
     t->imp_gain = jnum(im, "gain", t->imp_gain);

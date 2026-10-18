@@ -272,6 +272,9 @@ void render_classic_lod_counts(u32 n[5], u32 *fading);
 // The scope picture-in-picture view of the last frame (docs/LOD.md "Scopes"): objective position, axis,
 // tan of the half FOV, target size (px). false: not scoped.
 bool render_scope_view(vec3 *eye, vec3 *fwd, float *tan_half, float *size_px);
+// Could the last frame's views have seen this sphere (docs/perf/FINDINGS.md PF-0033)? false only when
+// it lies outside the main view's frustum and no phone camera rendered (its lens looks anywhere).
+bool render_sphere_maybe_visible(vec3 center, float radius);
 void render_set_camera_override(bool (*fn)(RenderCamera *cam));   // adds an override: replaces the camera while fn returns true (bench_fidelity, perf_audit)
 void render_set_ui_hidden(bool hidden);                           // drop the 2D UI (perf_audit reference captures compare the 3D image)
 u32 render_frame_index(void);                                     // rendered frames (TAA jitter phase = index % 8)
@@ -282,8 +285,9 @@ void render_draw(const DrawItem *item);
 // by mesh. palette[i] = bone_world[i] * inverse_bind[i] (vertices are in bind model space).
 typedef struct SkinnedDraw {
     MeshId mesh;            // from render_skinned_mesh_create
-    const mat4 *palette;
+    const mat4 *palette;    // copied at the draw; or NULL with palette_handle
     u32 bone_count;
+    u32 palette_handle;     // from render_skin_palette (written in place, shared by the draws passing it)
     vec4 color;
     float roughness, metallic, emissive;
     u32 flags;              // MaterialFlags (MAT_SHADOW_ONLY, MAT_HIGHLIGHT, ...)
@@ -300,9 +304,21 @@ typedef struct SkinnedDraw {
     TextureId mr_tex, normal_tex, occlusion_tex, emissive_tex;
     float normal_scale;     // with MAT_NORMAL_TEX (0 is taken as 1)
     u8 layer;               // 0 .. 7 (light culling masks)
+    // docs/perf/FINDINGS.md PF-0034: the palette is in model space (a pose shared by several
+    // characters) and `root` places it (last frame's `prev_root` for velocity; object_id 0).
+    bool rooted;
+    mat4 root, prev_root;
 } SkinnedDraw;
 MeshId render_skinned_mesh_create(const SkinVertex *verts, u32 vcount, const u32 *indices, u32 icount);
 void render_draw_skinned(const SkinnedDraw *d);
+// A palette written in place (docs/perf/FINDINGS.md PF-0020): (src, version, variant) name its
+// content within the frame (a skeleton instance, its pose version, the part's bone table class). The
+// first request reserves `count` matrices of this frame's bone buffer and returns where to write
+// them before render_end_frame: WRITE ONLY (it may be the mapped GPU buffer), from any thread. A
+// repeat of the key returns NULL with the first request's handle. *handle = 0: the buffer is full.
+// Pass the handle as SkinnedDraw.palette_handle (palette NULL). Main thread.
+mat4 *render_skin_palette(const void *src, u32 version, u32 variant, u32 count, u32 *handle);
+bool render_skin_rooted_ok(void);   // this frame skins on the GPU (SkinnedDraw.rooted is honoured)
 void render_draw_viewmodel(const DrawItem *item);
 void render_add_light(const PointLight *light);
 // Spot lights (flashlights): cone from pos along dir, projected cookie (render_set_spot_cookie),

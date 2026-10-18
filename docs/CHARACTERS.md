@@ -203,6 +203,24 @@ An alias table maps file bone names to Skeleton names. Put it in the model's sid
   by every character wearing them the same way.
 - Instanced batches are per (texture, GPU part LOD): 200 placeholder zombies give 800 part draws in
   40 batches (10 GPU parts × 4 LODs).
+- **Palettes in place** (docs/perf/FINDINGS.md PF-0020). `draw_part` asks `render_skin_palette` for room
+  in this frame's bone buffer and `skm_gather_palette` writes there directly: a mapped ring of
+  3 × `MAX_SKIN_BONES` matrices shared by the frame slots (device-local BAR memory where the driver
+  offers it; `render: skinning palette ring` in the log). Frame N writes region N mod 3; its
+  previous-palette (velocity) lookups read region N - 1 where last frame left them. The request is
+  keyed by (skeleton instance, pose version, the GPU part's palette class): parts whose bone tables
+  are equal (`skm_palette_equal`, decided once per GPU part) and every LOD / shadow draw of the same pose
+  get one copy (the PF-0007 sharing without a compare: the ring is write-only memory). No CPU bone
+  array, upload copy or previous-palette copy remain. `perf_fix_disable PF-0020` (and `r_cpu_skinning`)
+  goes back to the per-slot buffer and the copies.
+- **Draw poses on the jobs** (PF-0021). `chars_render` takes every drawn character's pose source on the
+  main thread (interpolation instant, seat fix, ragdoll poses: they read the physics world), interpolates
+  the poses and builds the skeleton palettes with `jobs_parallel_for`, then issues every draw on the main
+  thread in entity order (each part reserving its palette) and gathers the reserved palettes on the jobs.
+  Poses, palettes, offsets and draw order are those of the serial loop (`perf_fix_disable PF-0021`).
+- **Shared poses** (PF-0034, docs/ANIMATION.md "LOD"). A far character in a plain base-layer state draws
+  its phase bucket's cached model-space palette (`SkinnedDraw.rooted`: the instance's `root` /
+  `prev_root` rows place it, `SKIN_ROOTED` in `info.z`; `skin.vert` / `skin_shadow.vert` apply them).
 
 **Seams.** Parts cut from one mesh share their seam vertices exactly. Authored parts should share
 edge vertices at the seams; `hide` covers overlaps.
@@ -346,6 +364,7 @@ normal + one ORM RGBA8 atlas per skin (2048 x 1024 with mips: 11 MB each for two
 
 - deterministic skeleton bake and round trip;
 - subset palette gather equals the full evaluation;
+- equal bone tables gather equal palettes (`skm_palette_equal`: what the parts of a pose share);
 - a part skins exactly like the same vertices on the full body;
 - mesh-only leaves follow their parent, and the leaf override only moves the leaf;
 - aliases resolve renamed bones;

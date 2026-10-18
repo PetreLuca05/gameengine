@@ -246,6 +246,19 @@ int skm_gather_palette(const SkeletalMesh *m, const SkeletonInstance *si, const 
     return m->bone_count;
 }
 
+bool skm_palette_equal(const SkeletalMesh *a, const SkeletalMesh *b) {
+    if (a == b) return true;
+    if (a->bone_count != b->bone_count) return false;
+    for (int j = 0; j < a->bone_count; j++) {
+        const SkmBone *x = &a->bones[j], *y = &b->bones[j];
+        if (x->skel != y->skel || x->has_fix != y->has_fix) return false;
+        if (x->has_fix && memcmp(&x->bind_fix, &y->bind_fix, sizeof(mat4))) return false;
+        if (x->skel >= 0) continue;   // a skeleton bone: si->skin[skel] (bound meshes index the instance's skeleton)
+        if (x->parent != y->parent || memcmp(&x->local, &y->local, sizeof(Xform)) || memcmp(&x->bind_model, &y->bind_model, sizeof(Xform))) return false;
+    }
+    return true;
+}
+
 Xform skm_bone_world(const SkeletalMesh *m, const SkeletonInstance *si, int mesh_bone) {
     Xform mo[SKM_MAX_BONES];
     for (int j = 0; j <= mesh_bone && j < m->bone_count; j++) {

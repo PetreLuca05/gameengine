@@ -43,6 +43,10 @@ typedef struct LodTable {
     int char_update[LOD_CHAR_COUNT];     // pose update interval (ticks) per LOD
     float char_ramp_s;                   // s per octave of update interval change (no halving in one step)
     float char_ik_band;                  // fraction of the LOD0 threshold over which foot IK / lean fade
+    int char_offscreen_update;           // pose update interval (ticks, at least) outside the view (PF-0033)
+    float char_offscreen_margin_deg;     // the view grown by this angle before a character counts as outside
+    int char_shared_lod;                 // from this LOD on, characters may draw a shared sampled pose (PF-0034)
+    int char_shared_phases;              // phase buckets per animation cycle of those poses
     // impostors
     float imp_band;                      // octaves of projected size over which mesh and impostor cross-fade
     float imp_gain;                      // impostor albedo gain matching the mesh's mean colour (classic)

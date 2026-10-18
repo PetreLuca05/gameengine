@@ -27,9 +27,16 @@ void main() {
     SkinInstance si = skin_inst.inst[gl_InstanceIndex];
     // Palettes are bone_world * inverse_bind: the skinned vertex is already in world space.
     mat4 m = skin_matrix(si.info.x, in_joints, in_weights);
+    vec4 prev_world;
+    if ((si.info.z & SKIN_ROOTED) != 0u) {
+        // A shared model-space pose (PF-0034) placed by this instance's root; last frame's root for
+        // the velocity (the pose's own motion is not in it).
+        prev_world = skin_root(si.prev_root[0], si.prev_root[1], si.prev_root[2]) * (m * vec4(in_pos, 1.0));
+        m = skin_root(si.root[0], si.root[1], si.root[2]) * m;
+    }
     vec4 world = m * vec4(in_pos, 1.0);
     // Previous frame's palette (velocity of skinned characters): info.z = its first bone + 1.
-    vec4 prev_world = si.info.z != 0u ? skin_matrix(si.info.z - 1u, in_joints, in_weights) * vec4(in_pos, 1.0) : world;
+    if ((si.info.z & SKIN_ROOTED) == 0u) prev_world = si.info.z != 0u ? skin_matrix(si.info.z - 1u, in_joints, in_weights) * vec4(in_pos, 1.0) : world;
     v_world = world.xyz;
     v_normal = normalize(mat3(m) * in_normal);
     v_uv = in_uv;
