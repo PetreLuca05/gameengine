@@ -321,7 +321,7 @@ static void draw_box_local(vec3 pos, quat rot, vec3 offset, vec3 half, Material 
 static void draw_fabricator(World *w, int i, vec3 pos, quat rot, u32 hl) {
     FabView fv;
     revive_fab_view(w, ENT_MAKE(i, w->gen[i]), &fv);
-    float t = (float)g_engine.real_time;
+    float t = (float)g_engine.render_time;
     bool recon = fv.m.state == FAB_RECONSTRUCTING, open = fv.m.state == FAB_OPENING;
     float pulse = recon ? 0.6f + 0.4f * sinf(t * (3.0f + 6.0f * fv.progress)) : (open ? 1.0f : 0.35f);
     if (!fv.m.powered) pulse = 0.0f;
@@ -463,7 +463,7 @@ static void render_entity(World *w, int i, float alpha, bool focused) {
             // Scheduled lamps may flicker (cosmetic, deterministic per lamp).
             float k = 1.0f;
             if (w->light[i].flicker > 0) {
-                float t = (float)g_engine.real_time * 9.0f + (float)i * 3.17f;
+                float t = (float)g_engine.render_time * 9.0f + (float)i * 3.17f;
                 float n = 0.5f + 0.5f * sinf(t) * sinf(t * 2.31f + 1.3f) * sinf(t * 0.37f + 0.7f);
                 k = 1.0f - w->light[i].flicker * (n > 0.82f ? 0.85f : n * 0.25f);
             }

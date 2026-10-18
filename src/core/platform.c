@@ -3,27 +3,33 @@
 #endif
 #include "platform.h"
 #include "log.h"
+#include "profiler.h"
 #include <stdio.h>
 #include <stdlib.h>
 
 char *platform_read_file(const char *path, size_t *out_size) {
+    PROF_WAIT_BEGIN(PW_IO);
     FILE *f = fopen(path, "rb");
-    if (!f) return NULL;
+    if (!f) { PROF_WAIT_END(); return NULL; }
     fseek(f, 0, SEEK_END);
     long len = ftell(f);
     fseek(f, 0, SEEK_SET);
-    if (len < 0) { fclose(f); return NULL; }
+    if (len < 0) { fclose(f); PROF_WAIT_END(); return NULL; }
     char *data = (char *)malloc((size_t)len + 1);
     size_t got = fread(data, 1, (size_t)len, f);
     fclose(f);
+    PROF_WAIT_END();
+    prof_count(PC_IO_READS, 1);
+    prof_count(PC_IO_BYTES, (i64)got);
     data[got] = 0;
     if (out_size) *out_size = got;
     return data;
 }
 
 bool platform_read_file_range(const char *path, u64 offset, void *dst, size_t size) {
+    PROF_WAIT_BEGIN(PW_IO);
     FILE *f = fopen(path, "rb");
-    if (!f) return false;
+    if (!f) { PROF_WAIT_END(); return false; }
 #ifdef _WIN32
     int r = _fseeki64(f, (long long)offset, SEEK_SET);
 #else
@@ -31,6 +37,9 @@ bool platform_read_file_range(const char *path, u64 offset, void *dst, size_t si
 #endif
     size_t got = r == 0 ? fread(dst, 1, size, f) : 0;
     fclose(f);
+    PROF_WAIT_END();
+    prof_count(PC_IO_READS, 1);
+    prof_count(PC_IO_BYTES, (i64)got);
     return got == size;
 }
 

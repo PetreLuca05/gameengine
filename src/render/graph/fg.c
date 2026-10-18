@@ -2,6 +2,7 @@
 #include "fg_check.h"
 #include "render/fidelity/fidelity.h"
 #include "core/cvar.h"
+#include "core/profiler.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -81,7 +82,10 @@ static struct {
     int last_count;
     Cvar *disable;
     FgReport report;          // the last executed graph (fg_check + pool state)
+    bool report_valid;        // PF-0005: built on the first fg_last_report after fg_execute
 } G;
+
+static void write_profile(FILE *f);
 
 void fg_init(void) {
     memset(&G, 0, sizeof(G));
@@ -91,6 +95,7 @@ void fg_init(void) {
     qi.queryCount = FG_MAX_PASSES * 2 * FRAMES_IN_FLIGHT;
     VK_CHECK(vkCreateQueryPool(R->device, &qi, NULL, &G.qp));
     G.disable = cvar_reg_string("r_post_disable", "", CVAR_LOCKED, "comma separated frame graph passes to skip (e.g. ssr,gtao); r_post_passes lists them");
+    prof_add_section("fg", write_profile);
 }
 
 static void phys_destroy(FgPhys *p, bool now) {
@@ -119,6 +124,7 @@ void fg_shutdown(void) {
 
 void fg_targets_changed(void) {
     if (!G.init) return;
+    fg_last_report();   // the report describes the pool before it is dropped
     vkDeviceWaitIdle(R->device);
     for (int i = 0; i < FG_POOL_MAX; i++) phys_destroy(&G.pool[i], true);
 }
@@ -487,6 +493,7 @@ static void pass_barriers(VkCommandBuffer cmd, FgPassRec *p) {
 // Validation of the graph just allocated (fg_check.h): dead passes, unused resources, undefined
 // reads, post-processing passes (Engine Fidelity Off schedules none), pool images this frame doesn't use.
 static void check_graph(void) {
+    PROF_BEGIN("fg:validate");
     static FgcUse uses[FG_MAX_PASSES][16];
     FgcPass passes[FG_MAX_PASSES];
     FgcRes res[FG_MAX_RES];
@@ -520,26 +527,41 @@ static void check_graph(void) {
             r->pool_bytes += G.pool[k].bytes;
             if (G.pool[k].busy_until < 0) { r->stale_images++; r->stale_bytes += G.pool[k].bytes; }
         }
+    PROF_END();
 }
 
-const FgReport *fg_last_report(void) { return &G.report; }
+// The validation report of the last executed graph. It used to be built inside every fg_execute
+// (pass name copies, the dead pass / unused resource analysis) although only the fidelity checks and
+// benches read it: now it is built on the first request after the frame (docs/perf/FINDINGS.md
+// PF-0005; perf_fix_disable PF-0005 builds it every frame again). Same content: between fg_execute
+// and the next fg_begin the graph and the pool state it reads are unchanged.
+const FgReport *fg_last_report(void) {
+    if (!G.report_valid && G.init) {
+        check_graph();
+        G.report_valid = true;
+    }
+    return &G.report;
+}
 
 // Drops pooled images the last frame didn't use (a settings change: Engine Fidelity level switch)
 // instead of waiting for the 240-frame eviction. Deferred destruction (frames in flight).
 void fg_trim(void) {
     if (!G.init) return;
+    fg_last_report();
     for (int k = 0; k < FG_POOL_MAX; k++)
         if (G.pool[k].used && G.pool[k].last_frame != G.frame) phys_destroy(&G.pool[k], false);
 }
 
 void fg_execute(VkCommandBuffer cmd) {
     allocate();
-    check_graph();
+    G.report_valid = false;
+    if (!prof_fix_enabled(PFX_FG_REPORT_LAZY)) fg_last_report();
     int slot = (int)R->frame_slot;
     u32 qbase = (u32)(slot * FG_MAX_PASSES * 2);
     vkCmdResetQueryPool(cmd, G.qp, qbase, FG_MAX_PASSES * 2);
     for (int i = 0; i < G.pass_count; i++) {
         FgPassRec *p = &G.passes[i];
+        vkp_scope_begin(cmd, p->name);
         pass_barriers(cmd, p);
         vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, G.qp, qbase + (u32)i * 2);
         bool label = R->validation && vkCmdBeginDebugUtilsLabelEXT;
@@ -551,6 +573,7 @@ void fg_execute(VkCommandBuffer cmd) {
         if (p->exec) p->exec(cmd, p->user);
         if (label) vkCmdEndDebugUtilsLabelEXT(cmd);
         vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, G.qp, qbase + (u32)i * 2 + 1);
+        vkp_scope_end(cmd);
         memcpy(G.ms_names[slot][i], p->name, 32);
     }
     G.ms_count[slot] = G.pass_count;
@@ -637,4 +660,52 @@ int fg_pool_images(void) {
     int n = 0;
     for (int k = 0; k < FG_POOL_MAX; k++) n += G.pool[k].used;
     return n;
+}
+
+// ------------------------------------------------------------------ profile (docs/PERF_AUDIT.md)
+
+// Bytes per texel of the formats the graph uses (bandwidth / over-allocation estimates).
+static u32 format_bytes(VkFormat f) {
+    switch (f) {
+    case VK_FORMAT_R8_UNORM: case VK_FORMAT_R8_UINT: return 1;
+    case VK_FORMAT_R8G8_UNORM: case VK_FORMAT_R16_SFLOAT: case VK_FORMAT_R16_UNORM: case VK_FORMAT_R16_UINT: case VK_FORMAT_D16_UNORM: return 2;
+    case VK_FORMAT_R16G16B16A16_SFLOAT: case VK_FORMAT_R16G16B16A16_UNORM: case VK_FORMAT_R32G32_SFLOAT: case VK_FORMAT_R32G32_UINT: return 8;
+    case VK_FORMAT_R32G32B32A32_SFLOAT: case VK_FORMAT_R32G32B32A32_UINT: return 16;
+    default: return 4;
+    }
+}
+
+// The last executed graph: passes with their accesses, resources with size / format / lifetime and
+// the validation report. Written by the profiler between frames (the graph is still the last one).
+static void write_profile(FILE *f) {
+    static const char *acc[] = { "sampled", "storage", "color", "depth", "depth_read", "transfer_src", "transfer_dst" };
+    static const char *kinds[] = { "transient", "history", "import" };
+    const FgReport *rep = fg_last_report();
+    fprintf(f, "{\"render_w\":%u,\"render_h\":%u,\"output_w\":%u,\"output_h\":%u,\"pool_images\":%d,\"pool_mb\":%.2f,\"stale_images\":%d,\"stale_mb\":%.2f,", G.render_w,
+            G.render_h, G.output_w, G.output_h, rep->pool_images, (double)rep->pool_bytes / 1048576.0, rep->stale_images, (double)rep->stale_bytes / 1048576.0);
+    fprintf(f, "\"dead_passes\":[");
+    for (int i = 0; i < DG_MIN(rep->dead_passes, 12); i++) { if (i) fputc(',', f); prof_json_str(f, rep->dead[i]); }
+    fprintf(f, "],\"unused_res\":[");
+    for (int i = 0; i < DG_MIN(rep->unused_res, 12); i++) { if (i) fputc(',', f); prof_json_str(f, rep->unused[i]); }
+    fprintf(f, "],\"resources\":[");
+    for (int i = 0; i < G.res_count; i++) {
+        const FgResource *r = &G.res[i];
+        fprintf(f, "%s\n {\"name\":", i ? "," : "");
+        prof_json_str(f, r->name);
+        u64 bytes = r->kind != FG_IMPORT && r->phys >= 0 ? G.pool[r->phys].bytes : (u64)r->key.w * r->key.h * format_bytes(r->key.format);
+        fprintf(f, ",\"kind\":\"%s\",\"format\":%d,\"bpp\":%u,\"w\":%u,\"h\":%u,\"d\":%u,\"mips\":%u,\"bytes\":%llu,\"first\":%d,\"last\":%d,\"phys\":%d}", kinds[r->kind],
+                (int)r->key.format, format_bytes(r->key.format), r->key.w, r->key.h, r->key.d, r->key.mips, (unsigned long long)bytes, r->first, r->last, r->phys);
+    }
+    fprintf(f, "],\"passes\":[");
+    for (int p = 0; p < G.pass_count; p++) {
+        const FgPassRec *pr = &G.passes[p];
+        fprintf(f, "%s\n {\"name\":", p ? "," : "");
+        prof_json_str(f, pr->name);
+        fprintf(f, ",\"post\":%s,\"uses\":[", fid_pass_is_post(pr->name) ? "true" : "false");
+        for (int u = 0; u < pr->use_count; u++)
+            fprintf(f, "%s{\"res\":%d,\"access\":\"%s\",\"write\":%s,\"ref\":%s}", u ? "," : "", pr->uses[u].res, acc[pr->uses[u].access], pr->uses[u].write ? "true" : "false",
+                    pr->uses[u].ref ? "true" : "false");
+        fprintf(f, "]}");
+    }
+    fprintf(f, "]}");
 }

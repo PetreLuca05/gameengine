@@ -7,6 +7,7 @@
 #include "protocol.h"
 #include "bitbuf.h"
 #include "replication.h"
+#include "net_prof.h"
 #include "lobby_net.h"
 #include "ui/mainmenu/mainmenu.h"
 #include "spectate.h"
@@ -109,6 +110,7 @@ static bool send_msg(PeerId peer, int channel, const Writer *w) {
     if (!N->t || w->overflow) { if (w->overflow) log_error("net: message overflow"); return false; }
     N->bytes_out += w->len;
     N->win_out += w->len;
+    if (w->len) netprof_message(w->buf[0], w->len, channel == CH_RELIABLE);
     return N->t->send(N->t, peer, channel, w->buf, w->len);
 }
 
@@ -440,6 +442,8 @@ void net_host_after_tick(World *w) {
         w_u8(&wr, MSG_SNAPSHOT);
         w_u32(&wr, w->tick);
         w_u32(&wr, base ? base->tick : 0);
+        u32 sec_at = wr.len;   // profiler: bytes of every section and whether they changed (net_prof.c)
+        netprof_section(s, NS_HEADER, wr.buf, sec_at);
         // Local data (prediction / reconciliation) of the client's player, or of the player it
         // spectates (the observer runs it through the same pipeline), then the spectator block.
         SpecLocalData ld;
@@ -448,12 +452,18 @@ void net_host_after_tick(World *w) {
         ld.hold_progress = sp->hold_progress;
         ld.open_container = src == c->slot ? sp->open_container : ENT_NONE;
         spec_write_local(&wr, &ld);
+        netprof_section(s, NS_LOCAL, wr.buf + sec_at, wr.len - sec_at);
+        sec_at = wr.len;
         spec_write_block(&wr, &sb);
+        netprof_section(s, NS_SPECTATE, wr.buf + sec_at, wr.len - sec_at);
+        sec_at = wr.len;
         {
             // World time (every snapshot: 20 bytes, late joiners are in sync at once).
             u8 tw[20];
             tod_pack(&w->tod, tw);
             w_bytes(&wr, tw, sizeof(tw));
+            netprof_section(s, NS_TIME, tw, sizeof(tw));
+            sec_at = wr.len;
             // Weather (120 bytes): a few snapshots after every change, then every 10th (late
             // joiners: the first snapshot carries it, version 0 never matches).
             if (c->weather_version != w->weather.version) { c->weather_version = w->weather.version; c->weather_resend = 3; }
@@ -466,9 +476,14 @@ void net_host_after_tick(World *w) {
                 weather_pack(&w->weather, wx);
                 w_bytes(&wr, wx, sizeof(wx));
             }
+            netprof_section(s, NS_WEATHER, wr.buf + sec_at, wr.len - sec_at);
+            sec_at = wr.len;
             vehicles_net_write(w, &wr);   // every snapshot: pose, velocity, fuel, tires, seats
+            netprof_section(s, NS_VEHICLES, wr.buf + sec_at, wr.len - sec_at);
+            sec_at = wr.len;
         }
         repl_write_delta(&wr, base, cur);
+        netprof_section(s, NS_ENTITIES, wr.buf + sec_at, wr.len - sec_at);
         N->snap_bytes = N->snap_bytes * 0.9f + (float)wr.len * 0.1f;
         c->bytes_sent += wr.len;
         send_msg(c->peer, CH_UNRELIABLE, &wr);
@@ -1063,6 +1078,7 @@ static bool can_set_rules(void) { return !N || N->role != NET_CLIENT; }
 bool net_init(void) {
     N = (NetSystem *)calloc(1, sizeof(NetSystem));
     cvar_set_rule_gate(can_set_rules);
+    netprof_register();   // profile section "net" (docs/PERF_AUDIT.md)
     if (enet_initialize() != 0) { log_error("net: enet_initialize failed"); return false; }
     N->port = cvar_reg_int("net_port", DG_DEFAULT_PORT, 1, 65535, CVAR_ARCHIVE | CVAR_EDITABLE, "UDP port for LAN hosting");
     N->snaprate = cvar_reg_int("sv_snaprate", 30, 5, 60, CVAR_ARCHIVE | CVAR_LOCKED | CVAR_RULE, "snapshots per second sent to clients");

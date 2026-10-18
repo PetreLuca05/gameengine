@@ -1,5 +1,6 @@
 #include "vfx_sim.h"
 #include "vfx_curve.h"
+#include "core/profiler.h"
 #include <math.h>
 #include <string.h>
 #include <stdio.h>
@@ -684,6 +685,7 @@ void vfx_sys_tick(VfxSystem *s, float dt) {
         live++;
     }
     s->inst_live = live;
+    prof_count(PC_VFX_EMITTERS, live);
     for (int i = s->decal_live_n - 1; i >= 0; i--) {
         int slot = s->decal_live[i];
         VfxDecal *d = &s->decals[slot];

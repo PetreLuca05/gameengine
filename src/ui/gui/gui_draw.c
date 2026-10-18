@@ -2,6 +2,7 @@
 #include "gui_theme.h"
 #include "core/log.h"
 #include "core/platform.h"
+#include "core/profiler.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -691,6 +692,7 @@ static void emit(const GuiText *t, float x, float y, const char *s, int n, bool 
 
 float gd_text(const GuiText *t, float x, float y, const char *s) {
     if (!s || !*s || !D.ok) return 0;
+    prof_count(PC_UI_TEXT, 1);
     float w = measure(t, s, -1);
     int n = -1;
     char buf[512];

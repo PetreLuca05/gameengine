@@ -1,0 +1,54 @@
+{
+  "_doc": "perf_audit benchmark scenes (docs/PERF_AUDIT.md). setup: console lines run after the map loads (host). camera: spline keys [x, y, z, yaw deg (0 = -z), pitch deg] over the captured frames; orbit: a circle around the local player instead (maps without fixed coordinates). Every scene runs with the time paused, the weather locked, dev_fixed_fps 60 (one sim tick per frame: the same work in every run) and no vsync / frame cap.",
+  "settle_frames": 120,
+  "shots": 3,
+  "scenes": [
+    {
+      "id": "devroom",
+      "desc": "dev room hall, post corner, firing line (the bench_fidelity route)",
+      "map": "devroom",
+      "setup": ["time_set 12:00", "time_pause 1", "weather_lock 1", "weather_set clear 0"],
+      "camera": [[0, 1.8, 20, 0, -3], [0, 2.0, 2, -30, -4], [-12, 1.8, -14, -57, -5], [-22, 1.8, -24, -90, -3], [-18, 3.0, -5, -180, -6], [-10, 4, 30, -200, -10], [0, 1.8, 20, -360, -3]]
+    },
+    {
+      "id": "horde500",
+      "desc": "500 horde zombies converging on a point in the horde yard",
+      "map": "devroom",
+      "setup": ["time_set 12:00", "time_pause 1", "weather_lock 1", "weather_set clear 0", "setpos 0 0 62", "spawn_horde 500 30 ring", "horde_target point 0 0 50"],
+      "camera": [[0, 8, 85, 0, -18], [25, 10, 70, 40, -22], [30, 12, 45, 90, -25], [0, 14, 20, 180, -28], [-28, 10, 50, 270, -20], [0, 8, 85, 360, -18]]
+    },
+    {
+      "id": "foliage",
+      "desc": "vegetation map: trees, grass, ground cover, wind",
+      "map": "vegetation",
+      "setup": ["time_set 15:00", "time_pause 1", "weather_lock 1", "weather_set little_cloudy 0"],
+      "orbit": { "radius": 18, "height": 3.5, "pitch": -8 }
+    },
+    {
+      "id": "water_weather",
+      "desc": "water yard in rain: water surfaces, wet shading, precipitation, rain occlusion",
+      "map": "wateryard",
+      "setup": ["time_set 17:00", "time_pause 1", "weather_lock 1", "weather_set rain 0"],
+      "orbit": { "radius": 14, "height": 4, "pitch": -12 }
+    },
+    {
+      "id": "night_lights",
+      "desc": "dev room at night: every local light, point / spot shadows, moon, no sun cascades",
+      "map": "devroom",
+      "setup": ["time_set 23:30", "time_pause 1", "weather_lock 1", "weather_set clear 0"],
+      "camera": [[0, 1.8, 20, 0, -3], [0, 2.0, 2, -30, -4], [-12, 1.8, -14, -57, -5], [-50, 2.0, -5, -150, -5], [-50, 2.0, 18, -200, -6], [0, 1.8, 20, -360, -3]]
+    },
+    {
+      "id": "vehicle_yard",
+      "desc": "vehicle yard with a car and a motorbike",
+      "map": "devroom",
+      "setup": ["time_set 10:00", "time_pause 1", "weather_lock 1", "weather_set clear 0", "setpos -140 0 10", "spawn_vehicle car 6", "spawn_vehicle moto 10"],
+      "camera": [[-140, 3, 22, 0, -10], [-128, 3, 8, 90, -12], [-140, 4, -6, 180, -14], [-152, 3, 8, 270, -12], [-140, 3, 22, 360, -10]]
+    }
+  ],
+  "net": {
+    "_doc": "2-client LAN: tools/perf_audit/run_audit.sh runs a host with this scene and a client (+connect 127.0.0.1); both write profiles (the client's net section is empty, the host's holds the snapshot statistics).",
+    "id": "lan2",
+    "host_scene": "horde500"
+  }
+}

@@ -23,6 +23,7 @@
 #include "game/game.h"
 #include "gameplay/revive/revive.h"
 #include "game/game_water.h"
+#include "core/profiler.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1904,8 +1905,11 @@ void chars_present_tick(World *w, vec3 cam_pos, float fov_deg, float screen_h, f
         }
     }
     int evals = due_count < budget ? due_count : budget;
+    PROF_BEGIN("anim:post_pass");
     for (int n = 0; n < evals; n++) {
         CharacterInst *c = w->chars->c[due[n]];
+        prof_count(PC_ANIM_EVAL, 1);
+        if (c->culled && !w->authority) prof_count(PC_ANIM_EVAL_OFFSCREEN, 1);   // a client poses it for nothing it shows (no hitboxes there)
         if (lod_new) {
             // the post-pass integrates the ticks since the last one; the render pose then interpolates
             // over the gap to the next eval (span: the accumulator's next crossing)
@@ -1920,6 +1924,7 @@ void chars_present_tick(World *w, vec3 cam_pos, float fov_deg, float screen_h, f
             c->interval = c->span;
         }
     }
+    PROF_END();
     g->last_evals = evals;
     g->last_deferred = due_count - evals;
     // Clients step their replica physics for cosmetic ragdolls and a locally predicted vehicle.

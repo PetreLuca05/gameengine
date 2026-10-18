@@ -5,6 +5,7 @@
 #define DG_VGEO_CTX_H
 
 #include "volk.h"
+#include "render/vk_prof.h"
 #include "vk_mem_alloc.h"
 #include "vgeo_gpu.h"
 

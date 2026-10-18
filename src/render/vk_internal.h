@@ -3,6 +3,7 @@
 #define DG_VK_INTERNAL_H
 
 #include "volk.h"
+#include "render/vk_prof.h"   // GPU scopes + command counting (docs/PERF_AUDIT.md)
 #include "vk_mem_alloc.h"
 #include "render.h"
 #include "render/shadow_csm.h"
@@ -255,6 +256,8 @@ typedef struct Renderer {
     u32 queue_family;
     VmaAllocator vma;
     bool validation;
+    bool pipe_stats;          // pipelineStatisticsQuery enabled (profiler: per pass invocations)
+    u32 shadow_gen;           // bumped when a sun / moon / viewmodel shadow map is (re)created (render.c shadow_clear_skip)
     bool has_wireframe;
     bool has_push_descriptor, has_colorspace_ext;
     bool has_device_fault;         // VK_EXT_device_fault: fault addresses / vendor info on a lost device

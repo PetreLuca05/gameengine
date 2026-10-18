@@ -1,5 +1,6 @@
 #include "engine.h"
 #include "log.h"
+#include "profiler.h"
 #include <stdio.h>
 #include <stdarg.h>
 #include <stdlib.h>
@@ -43,6 +44,7 @@ void log_msg(LogLevel level, const char *fmt, ...) {
     va_end(ap);
     if (!g_engine.log) { fputs(buf, stderr); fputc('\n', stderr); if (level == LOG_FATAL) abort(); return; }
     if (level < s_log.min_level) return;
+    prof_count(PC_LOG_LINES, 1);   // logging in the frame loop is a finding (docs/PERF_AUDIT.md R19)
 
     if (s_log.mutex) SDL_LockMutex(s_log.mutex);
     double t = (double)SDL_GetTicks() / 1000.0;

@@ -2,6 +2,7 @@
 #include "vfx_curve.h"
 #include "core/engine.h"
 #include "core/cvar.h"
+#include "core/profiler.h"
 #include "core/log.h"
 #include "core/platform.h"
 #include "render/render.h"
@@ -479,11 +480,13 @@ void vfx_game_update(float dt) {
     if (!V->enable->i) { V->accum = 0; return; }
     // Fixed 60 Hz steps: emitter scheduling and the CPU tier are deterministic per tick.
     V->accum += fminf(dt, 0.25f) * V->timescale->f;
+    PROF_BEGIN("vfx:update");
     while (V->accum >= VFX_TICK) {
         pedestal_tick(VFX_TICK);
         vfx_sys_tick(&V->sys, VFX_TICK);
         V->accum -= VFX_TICK;
     }
+    PROF_END();
 }
 
 // ------------------------------------------------------------------ render

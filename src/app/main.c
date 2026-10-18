@@ -19,6 +19,7 @@
 #include "core/platform.h"
 #include "core/jobs.h"
 #include "core/crash.h"
+#include "core/profiler.h"
 #include "assets/anim_cache.h"
 #include "render/render.h"
 #include "render/debug_draw.h"
@@ -155,12 +156,15 @@ int main(int argc, char **argv) {
     // --log <path>: a separate log (scripted tests next to a running game).
     for (int i = 1; i + 1 < argc; i++) if (!strcmp(argv[i], "--log")) snprintf(log_path, sizeof(log_path), "%s", argv[i + 1]);
     log_init(log_path);
+    prof_init();   // records the startup critical path until the first frame (docs/PERF_AUDIT.md)
+    PROF_BEGIN("startup");
     crash_install();
     log_info("Deadground %s starting (log: %s)", DG_VERSION, log_path);
     cvar_system_init();
     // --release-locks: the release build's settings locks in a dev build (docs/SETTINGS_AUDIT.md).
     for (int i = 1; i < argc; i++) if (!strcmp(argv[i], "--release-locks")) cvar_set_release_locks(true);
     consistency_load(CONSISTENCY_PATH);   // the shared values: their hash goes into the lobby build hash
+    prof_register();
     arena_init(&g_engine.perm_arena, MB(16), "perm");
     arena_init(&g_engine.frame_arena, MB(32), "frame");
     arena_init(&g_engine.level_arena, MB(64), "level");
@@ -178,19 +182,31 @@ int main(int argc, char **argv) {
     Cvar *cw = cvar_find("r_width"), *ch = cvar_find("r_height");
     g_engine.window = SDL_CreateWindow("Deadground - DevRoom", cw->i, ch->i, SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
     if (!g_engine.window) log_fatal("SDL_CreateWindow failed: %s", SDL_GetError());
+    PROF_BEGIN("render_init");
     if (!render_init(g_engine.window)) log_fatal("Vulkan renderer failed to initialize (Vulkan 1.3 GPU + driver required)");
+    PROF_END();
     dbg_init();
+    PROF_BEGIN("ui_init");
     if (!ui_init()) log_fatal("UI init failed");
     console_init();
     menus_init();
+    PROF_END();
     input_init();
+    PROF_BEGIN("audio_init");
     audio_init();
+    PROF_END();
     net_init();
+    PROF_BEGIN("assets_init");
     assets_init("data/assets.json");
+    PROF_END();
     for (int i = 1; i < argc; i++) if (!strcmp(argv[i], "--rebuild-cache")) anim_cache_set_rebuild(true);   // before the anim library loads
+    PROF_BEGIN("game_init");
     game_init();
+    PROF_END();
+    PROF_BEGIN("lobby_init");
     lobby_net_init();    // maps, cosmetics, profile (docs/MENU_LOBBY.md)
     mainmenu_init();
+    PROF_END();
 
     // The consistency set over every registered cvar (as the host's values), checked: a bad entry is
     // a broken build (docs/SETTINGS_AUDIT.md).
@@ -218,10 +234,13 @@ int main(int argc, char **argv) {
     parse_args(argc, argv, &opt);
     // Players start in the main menu (a +connect_lobby from a Steam invite then joins from it);
     // --test runs (scripts) boot straight into the boot map as before.
+    PROF_BEGIN("boot_map");
     if (mainmenu_enabled()) mainmenu_boot();
     else if (!boot_commands_connect(argc, argv)) game_host(game()->g_map->str);
     cbuf_execute();
     if (!game_world() && net_role() != NET_CLIENT) game_host("devroom");
+    PROF_END();
+    PROF_END();   // startup
     lobby_profile_changed();   // equipped cosmetics onto the character (cl_skin / cl_parts)
 
     g_engine.has_focus = true;
@@ -232,6 +251,7 @@ int main(int argc, char **argv) {
     double last = platform_time();
     double worst_dt = 0, total_time = 0, smoothed_dt = 0;
     while (!g_engine.quit) {
+        prof_frame_mark();
         double frame_start = platform_time();
         double dt = frame_start - last;
         last = frame_start;
@@ -241,11 +261,13 @@ int main(int argc, char **argv) {
         // (one sim tick at 60), whatever the wall clock did.
         if (fixed_fps && fixed_fps->f > 0.0f) dt = 1.0 / fixed_fps->f;
         g_engine.real_time = frame_start;
+        g_engine.render_time = fixed_fps && fixed_fps->f > 0.0f ? g_engine.render_time + dt : frame_start;
         g_engine.frame_dt = dt;
         // Smooth the frame time (not 1/dt, which outliers dominate).
         if (dt > 0) { smoothed_dt = smoothed_dt > 0 ? smoothed_dt * 0.95 + dt * 0.05 : dt; g_engine.fps_smoothed = 1.0 / smoothed_dt; }
         arena_reset(&g_engine.frame_arena);
 
+        PROF_BEGIN("input");
         input_begin_frame();
         ui_input_begin();
         SDL_Event ev;
@@ -255,22 +277,43 @@ int main(int argc, char **argv) {
         ui_input_end();
         input_end_frame((float)dt);
         if (input_consume_press(ACT_NETSTATS)) game()->show_netstats = !game()->show_netstats;
+        PROF_END();
 
+        PROF_BEGIN("cbuf");
         cbuf_execute();
         config_autosave(video_config_path());
+        game_perf_frame();
+        PROF_END();
+        PROF_BEGIN("menus");
         menus_tick((float)dt);
+        PROF_END();
+        PROF_BEGIN("net");
         net_update((float)dt);
         lobby_net_update((float)dt);
+        PROF_END();
+        PROF_BEGIN("game_frame");
         game_frame((float)dt);
+        PROF_END();
+        PROF_BEGIN("job_completions");
         jobs_pump_completions(8);
         render_poll_shader_hot_reload();
         assets_reload_textures();
+        PROF_END();
 
-        if (render_begin_frame()) {
+        PROF_BEGIN("render_begin");
+        bool rendering = render_begin_frame();
+        PROF_END();
+        if (rendering) {
+            PROF_BEGIN("game_render");
             game_render();
+            PROF_END();
+            PROF_BEGIN("ui_render");
             ui_render();
+            PROF_END();
             if (opt.screenshot && opt.max_frames && g_engine.frame_index + 1 == (u64)opt.max_frames) render_screenshot(opt.screenshot);
+            PROF_BEGIN("render_end");
             render_end_frame();
+            PROF_END();
         } else {
             ui_render();
             platform_sleep_ms(10);
@@ -283,7 +326,11 @@ int main(int argc, char **argv) {
         if (cap > 0) {
             double target = 1.0 / cap;
             double spent = platform_time() - frame_start;
-            if (spent < target) platform_sleep_ms((u32)((target - spent) * 1000.0));
+            if (spent < target) {
+                PROF_WAIT_BEGIN(PW_FPS_CAP);
+                platform_sleep_ms((u32)((target - spent) * 1000.0));
+                PROF_WAIT_END();
+            }
         }
     }
 
@@ -303,6 +350,7 @@ int main(int argc, char **argv) {
     render_shutdown();
     phys_global_shutdown();
     jobs_shutdown();
+    prof_shutdown();
     SDL_DestroyWindow(g_engine.window);
     SDL_Quit();
     cvar_system_shutdown();

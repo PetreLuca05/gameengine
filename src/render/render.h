@@ -250,7 +250,9 @@ void render_classic_lod_counts(u32 n[5], u32 *fading);
 // The scope picture-in-picture view of the last frame (docs/LOD.md "Scopes"): objective position, axis,
 // tan of the half FOV, target size (px). false: not scoped.
 bool render_scope_view(vec3 *eye, vec3 *fwd, float *tan_half, float *size_px);
-void render_set_camera_override(bool (*fn)(RenderCamera *cam));   // replaces the camera while fn returns true (bench_fidelity flythrough)
+void render_set_camera_override(bool (*fn)(RenderCamera *cam));   // adds an override: replaces the camera while fn returns true (bench_fidelity, perf_audit)
+void render_set_ui_hidden(bool hidden);                           // drop the 2D UI (perf_audit reference captures compare the 3D image)
+u32 render_frame_index(void);                                     // rendered frames (TAA jitter phase = index % 8)
 void render_set_environment(const RenderEnvironment *env);
 void render_draw(const DrawItem *item);
 

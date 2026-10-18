@@ -3,6 +3,7 @@
 #include "game.h"
 #include "ui/mainmenu/mainmenu.h"
 #include "game_internal.h"
+#include "core/profiler.h"
 #include "game_water.h"
 #include "editor/handpose/hp_system.h"
 #include "editor/handpose/hp_editor.h"
@@ -344,8 +345,11 @@ static void host_tick(World *w, const UserCmd *local_cmd) {
     world_store_prev(w);
     // Frozen world (the hand pose editor): only the players (and their animation) run.
     bool frozen = game_world_frozen();
+    PROF_BEGIN("sim:daynight_weather");
     daynight_host_tick(w);
     weather_host_tick(w);
+    PROF_END();
+    PROF_BEGIN("sim:players");
     for (int s = 0; s < MAX_PLAYERS; s++) {
         Player *p = &w->players[s];
         if (!p->active) continue;
@@ -375,22 +379,43 @@ static void host_tick(World *w, const UserCmd *local_cmd) {
         // Fell out of the world.
         if (p->sim.move.pos.y < -60.0f && p->sim.move.mode != MOVE_NOCLIP) game_respawn_player(w, s);
     }
+    PROF_END();
+    PROF_BEGIN("sim:spectate");
     spectate_host_tick(w);   // observers: targets still legal, auto-advance
+    PROF_END();
     if (!frozen) {
+        PROF_BEGIN("sim:entities");
         entities_tick(w, SIM_DT);
+        PROF_END();
         revive_host_tick(w);   // corpses, fabricators, DNA samples (docs/REVIVE.md)
+        PROF_BEGIN("sim:projectiles");
         projectiles_tick(w, SIM_DT);
+        PROF_END();
+        PROF_BEGIN("sim:horde");
         horde_host_tick(w, SIM_DT);   // horde zombies: tiers, steering, mover, attacks (before their animation)
+        PROF_END();
     }
+    PROF_BEGIN("sim:anim_hitboxes");
     chars_host_tick(w, SIM_DT);   // sim-only animation -> per-part hitboxes (before the lag-comp record)
+    PROF_END();
     if (!frozen) bal_world_tick(w, SIM_DT);   // bullets in flight against this tick's (and rewound) hitboxes
     if (!frozen) horde_post_tick(w);
-    if (w->chunks) chunks_update(w, SIM_DT);
+    if (w->chunks) {
+        PROF_BEGIN("sim:chunks");
+        chunks_update(w, SIM_DT);
+        PROF_END();
+    }
     if (!frozen) {
+        PROF_BEGIN("sim:openworld");
         openworld_tick(w, SIM_DT);   // open-world maps: deep water, POI zombie spawner
+        PROF_END();
         vehicles_host_tick(w);
+        PROF_BEGIN("sim:water");
         water_tick(w);   // swell wind, buoyancy impulses on props (before the step)
+        PROF_END();
+        PROF_BEGIN("sim:physics");
         phys_step(w->phys, SIM_DT);
+        PROF_END();
         vehicles_host_post(w);
         vehicles_test_tick(w);
     }
@@ -398,7 +423,9 @@ static void host_tick(World *w, const UserCmd *local_cmd) {
     ENT_FOREACH(w, i) {
         if (w->type[i] == ET_PROP) ent_sync_from_body(w, ENT_MAKE(i, w->gen[i]));
     }
+    PROF_BEGIN("sim:lagcomp");
     world_record_lagcomp(w);
+    PROF_END();
     w->tick++;
     w->time += SIM_DT;
 }
@@ -583,9 +610,13 @@ static void tick(void) {
     if (G->mode == GM_HOST) {
         // The host's own commands go to its spectators like a remote player's (docs/SPECTATE.md).
         spectate_host_cmds(w, G->local_slot, &cmd, 1, platform_wall_ms());
+        PROF_BEGIN("sim:host_tick");
         host_tick(w, &cmd);
+        PROF_END();
+        PROF_BEGIN("sim:events_net");
         dispatch_events(w);
         net_host_after_tick(w);
+        PROF_END();
         spectator_tick(w);
     } else if (G->mode == GM_CLIENT) {
         G->cmd_history[cmd.seq % CMD_HISTORY] = cmd;
@@ -600,7 +631,9 @@ static void tick(void) {
         net_client_send_cmds(G->cmd_history, CMD_HISTORY, cmd.seq);
         spectator_tick(w);   // the watched player: relayed commands through the same path
         g_chars_force_phys_step = vehicles_client_tick(w, &cmd);
+        PROF_BEGIN("sim:client_chars");
         chars_client_tick(w, net_client_render_tick(), SIM_DT);
+        PROF_END();
         bal_world_tick(w, SIM_DT);   // own predicted bullets + replays of the others' shots
         vehicles_client_post(w, cmd.seq);
         if (w->chunks) chunks_update(w, SIM_DT);
@@ -612,7 +645,9 @@ static void tick(void) {
     game_fire_tick();
     dolly_tick(SIM_DT);   // lod_dolly (docs/LOD.md)
     // Render-side character work at tick rate (LOD-scaled post-pass, ragdolls).
+    PROF_BEGIN("sim:anim_present");
     chars_present_tick(w, G->view.eye, G->view.fov > 1 ? G->view.fov : 75.0f, RENDER_LOD_REF_H, SIM_DT, game_view_slot());   // resolution independent (docs/SETTINGS_AUDIT.md V14)
+    PROF_END();
     weapon_feel_tick();
     spectator_dump_tick(w, cmd.seq);
 }
@@ -736,7 +771,9 @@ void game_frame(float dt) {
     if (G->paused) G->accumulator = 0;   // the pause menu (single player / host alone) stops the simulation
     int steps = 0;
     while (G->accumulator >= SIM_DT && steps < 8) {
+        PROF_BEGIN("sim_tick");
         tick();
+        PROF_END();
         G->accumulator -= SIM_DT;
         steps++;
     }
@@ -751,8 +788,10 @@ void game_frame(float dt) {
         G->error_offset = tsm > 1e-4f ? v3_scale(G->error_offset, 1.0f - exp_decay(3.0f / tsm, dt)) : v3(0, 0, 0);
     }
     if (G->mode == GM_CLIENT) net_client_interpolate(G->world, dt);
+    PROF_BEGIN("focus_hud");
     update_focus();
     game_hud_tick(dt);
+    PROF_END();
 }
 
 // ------------------------------------------------------------------ setup / teardown
@@ -1697,6 +1736,7 @@ void game_init(void) {
     game_render_init();
     handpose_system_startup();   // items, attachments, vehicles and interactables are registered now
     game_fidelity_init();   // last: every graphics cvar is registered
+    game_perf_init();       // perf_audit / perf_verify (docs/PERF_AUDIT.md)
 }
 
 void game_shutdown(void) {
