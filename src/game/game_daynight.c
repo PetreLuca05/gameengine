@@ -449,6 +449,9 @@ void daynight_environment(World *w, const RenderCamera *cam, RenderEnvironment *
     env->fog_density = fog;
     env->shadow_center = v3_madd(cam->pos, dir_from_angles(cam->yaw, 0), 12.0f);
     weather_environment(w, env);
+    TodProbeIn pin = { now_tick(w), days * 86400.0, w->tod.day_length > 0 ? 86400.0 / w->tod.day_length : 0.0, w->tod.day_length, w->tod.version, false, 0.0, 0.0,
+                       w->authority, 0.0, 0.0, 0 };
+    tod_probe_frame(w, &DN.cfg, &s, env, &pin);
 }
 
 float daynight_daylight(void) { return DN.have_sky ? DN.daylight : 1.0f; }
@@ -661,6 +664,7 @@ bool daynight_editor_open(void) { return DN.editor; }
 static void cmd_tod_test(int argc, const char **argv) {
     World *w = G ? G->world : NULL;
     const char *what = argc > 1 ? argv[1] : "";
+    if (tod_probe_command(argc, argv)) return;   // continuity / trace / shots (game_tod_probe.c)
     if (!strcmp(what, "cycle")) {
         if (!w || !w->authority) { log_info("tod_test: host only"); return; }
         memset(&DN.t, 0, sizeof(DN.t));
@@ -687,7 +691,7 @@ static void cmd_tod_test(int argc, const char **argv) {
                  tod_hours(t, 200000.0), world_time_hours(w));
         return;
     }
-    log_info("usage: tod_test cycle [quit] | dump");
+    log_info("usage: tod_test cycle [quit] | continuity <seconds> [quit] [tag] | trace <frames> <csv> | shots <frames> <dir> | dump");
 }
 
 static void test_frame(void) {
@@ -869,6 +873,8 @@ void daynight_register(void) {
     cmd_register("sky_look", cmd_sky_look, "sky_look sun|moon: aim the view at the sun / moon");
     cmd_register("tod_info", cmd_tod_info, "time of day, sun / moon, light level");
     cmd_register("tod_editor", cmd_tod_editor, "toggle the time-of-day editor");
-    cmd_register("tod_test", cmd_tod_test, "tod_test cycle [quit]: exposure floor, IBL continuity, events, sky budget over 24 h in 60 s");
+    cmd_register("tod_test", cmd_tod_test,
+                 "tod_test cycle [quit]: exposure floor, IBL continuity, events, sky budget over 24 h in 60 s | continuity <s> [quit] [tag]: per-frame clock / sun / "
+                 "light / shadow continuity | trace <frames> <csv> | shots <frames> <dir> | dump");
     load_config("");
 }

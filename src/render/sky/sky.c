@@ -158,6 +158,7 @@ VkBuffer sky_sh_buffer(void) { return SK.sh.buffer; }
 VkDeviceSize sky_sh_size(void) { return sizeof(vec4) * SH_VEC4; }
 int sky_env_mips(void) { return ENV_MIPS; }
 u32 sky_refilter_count(void) { return SK.refilters; }
+u32 sky_lut_builds(void) { return SK.lut_ver; }
 void sky_cloud_shadow_region(vec2 *origin, float *size) { *origin = SK.cs_origin; *size = SK.cs_size; }
 
 float sky_sh_luminance(float *latest) {

@@ -600,6 +600,11 @@ float render_scope_pip_fov(void);              // last PiP camera FOV (deg), 0 =
 vec3 render_sky_irradiance(vec3 dir);
 float render_sky_luminance(float *latest);
 u32 render_sky_refilters(void);
+u32 render_sky_lut_builds(void);                              // transmittance / multiple-scattering rebuilds
+// Per sun cascade (last compute_matrices): the angle between the light direction its tile was drawn
+// with and that frame's (deg; > 0 only for a kept tile, PF-0028), its texel (m), kept. Returns the
+// cascade count (0 = no time-of-day sky).
+int render_shadow_cascade_lag(float lag_deg[4], float texel_m[4], bool held[4]);
 void render_camera_cut(void);                                 // teleport / respawn: reset temporal history
 bool render_capture_hdr(const char *exr_path);                // next frame: linear HDR EXR
 bool render_load_lut(const char *cube_path);                  // grading LUT (.cube); NULL / "" = neutral

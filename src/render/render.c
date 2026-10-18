@@ -1421,6 +1421,14 @@ static void shadow_check_sampled(const FrameData *fd) {
     }
 }
 
+// The time-of-day probe's view of the cascades (render_shadow_cascade_lag): the last frame's.
+static struct { int n; float lag_deg[4], texel_m[4]; bool held[4]; } s_casc_probe;
+
+int render_shadow_cascade_lag(float lag_deg[4], float texel_m[4], bool held[4]) {
+    for (int k = 0; k < 4; k++) lag_deg[k] = s_casc_probe.lag_deg[k], texel_m[k] = s_casc_probe.texel_m[k], held[k] = s_casc_probe.held[k];
+    return s_casc_probe.n;
+}
+
 static void compute_matrices(FrameData *fd) {
     float aspect = view_aspect();
     RenderCamera *c = &R->cam;
@@ -1541,6 +1549,8 @@ static void compute_matrices(FrameData *fd) {
             bool moved = !h->valid || v3_dist(h->center, R->shadow_center[k]) > 0.1f * h->radius || fabsf(h->radius - R->shadow_radius[k]) > 0.02f * h->radius ||
                          v3_dot(h->L, Lfit) < 0.99999048f;   // cos 0.25 deg: a jump of the light, not the sun's drift
             R->shadow_redraw[k] = due || moved;
+            s_casc_probe.held[k] = !R->shadow_redraw[k];
+            s_casc_probe.lag_deg[k] = R->shadow_redraw[k] ? 0.0f : 2.0f * asinf(fminf(v3_len(v3_sub(h->L, Lfit)) * 0.5f, 1.0f)) * DG_RAD2DEG;
             if (R->shadow_redraw[k]) {
                 *h = (struct ShadowHold){ true, R->shadow_vps[k], R->shadow_vp_ndc[k], R->shadow_center[k], Lfit, R->shadow_radius[k], R->csm.texel_m[k], bias[k], span[k], nbias[k], mpt[k] };
                 continue;
@@ -1553,6 +1563,8 @@ static void compute_matrices(FrameData *fd) {
             bias[k] = h->bias, span[k] = h->span, nbias[k] = h->nbias, mpt[k] = h->mpt;
         }
     }
+    s_casc_probe.n = ncasc;
+    for (int k = 0; k < 4; k++) s_casc_probe.texel_m[k] = k < ncasc ? mpt[k] : 0.0f;
     // Unused cascade slots repeat the last one (shadow_vp / bias.w users: decals, froxels, particles).
     for (int k = ncasc; k < 4; k++) {
         R->shadow_vps[k] = R->shadow_vps[ncasc - 1];
@@ -3091,6 +3103,7 @@ float render_scope_pip_fov(void) { return R->pip_fov; }
 vec3 render_sky_irradiance(vec3 dir) { return sky_irradiance_cpu(dir); }
 float render_sky_luminance(float *latest) { return sky_sh_luminance(latest); }
 u32 render_sky_refilters(void) { return sky_refilter_count(); }
+u32 render_sky_lut_builds(void) { return sky_lut_builds(); }
 bool render_load_lut(const char *cube_path) {
     vkDeviceWaitIdle(R->device);   // the LUT image may be in flight
     return post_lut_load_cube(cube_path && cube_path[0] ? cube_path : NULL, 0);

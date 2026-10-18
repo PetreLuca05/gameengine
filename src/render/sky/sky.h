@@ -34,6 +34,7 @@ int sky_env_mips(void);
 // readback, a frame or two late), the refilter cycle count.
 float sky_sh_luminance(float *latest);
 u32 sky_refilter_count(void);
+u32 sky_lut_builds(void);
 vec3 sky_irradiance_cpu(vec3 dir);           // the SH in use (host copy, a frame late)
 void sky_cloud_shadow_region(vec2 *origin, float *size);
 
