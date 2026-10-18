@@ -57,7 +57,8 @@ camera (`max_range` when the camera ray hits nothing):
 ```
 depth    = hit + the muzzle's depth ahead of the camera   (both distances from the camera)
 margin   = max(obstruct_margin, obstruct_margin_rel × far, parallax)
-parallax = (muzzle's distance from the camera ray) × cot(grazing angle at P), at most 3 m
+parallax = separation × cot(grazing angle at P), at most max(3 m, 25 % of far)
+separation = the muzzle's distance from the camera ray + far × tan(angle between B and the ray)
 ```
 
 | Class | Rule (in this order) | Crosshair |
@@ -74,6 +75,9 @@ parallax = (muzzle's distance from the camera ray) × cot(grazing angle at P), a
   at 40 m).
 - Aiming at the ground ahead: a barrel 12 cm under the camera ray reaches the ground ~1 m before P at
   a 6.5° grazing angle. The `parallax` term covers it.
+- ADS at far terrain: P on a slope 145 m out at a 0.6° grazing angle. A barrel 0.07° off the ray
+  lands ~21 m short on the same slope. That is parallax again; a wall 60 m short is still an
+  obstruction.
 - Hip fire in the open: the hip barrel can point ~1–2° off the camera ray. At range its line may end
   on something well short of what the camera sees (a post 140 m out, P on a hill at 220 m). By the
   rule that is obstructed and the crosshair shows it: the bullet really lands there.
@@ -170,7 +174,7 @@ tells the truth about where that line ends, it changes nothing.
     keeps the muzzle's offset from the camera ray, and every spread pellet is within the cone radius
     of the barrel line; the in-tick recoil turns B like the view;
   - the obstruction rule: no hit, wall at 1 m with a target at 50 m (obstructed), barrel within
-    `obstruct_near`, the 40 m parallax cases (clear), the grazing ground case (clear), a crate short of
+    `obstruct_near`, the 40 m parallax cases (clear), the grazing ground and far-terrain ADS cases (clear), a crate short of
     P (obstructed), friendly;
   - muzzle-inside-wall recovery never inside the wall (64 poses);
   - validation: muzzle and barrel claims in tolerance verbatim, cheats clamped, the reach cap, host

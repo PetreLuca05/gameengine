@@ -585,7 +585,9 @@ void weapon_aim_solve(World *w, int slot, const AimQuery *q, AimSolve *out) {
     vec3 rel = v3_sub(out->origin, out->eye);
     float depth = v3_dot(rel, q->cam_dir);
     float offset = v3_len(v3_sub(rel, v3_scale(q->cam_dir, depth)));
-    out->parallax = hp.hit ? aim_parallax(offset, fabsf(v3_dot(q->cam_dir, hp.normal))) : 0.0f;
+    float diverge = atan2f(v3_len(v3_cross(out->dir, q->cam_dir)), v3_dot(out->dir, q->cam_dir));
+    float sep = offset + out->far * tanf(fminf(diverge, 0.2f));
+    out->parallax = hp.hit ? aim_parallax(sep, fabsf(v3_dot(q->cam_dir, hp.normal)), out->far) : 0.0f;
     out->cls = (int)aim_classify(ho.hit ? ho.dist : -1.0f, depth, out->far, out->parallax, &q->rule, ho.hit && is_friendly(w, slot, ho.ent));
 }
 
