@@ -152,7 +152,7 @@
       {"subtitle": "sub.setpiece"},
       {"objective": "window_setpiece", "set": "done"},
       {"wait": 20.0},
-      {"weather": "smoke_haze", "blend": 120},
+      {"weather": "cloudy+fog", "blend": 120},
       {"sequence": "smoke_aldric"}
     ]},
     {"id": "knock_start", "when": {"timer": 25, "since": "window_setpiece"}, "do": [

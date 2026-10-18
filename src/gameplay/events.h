@@ -34,6 +34,7 @@ typedef enum EventType {
     EV_REVIVE,         // revive loop (gameplay/revive/revive.h ReviveEvent): id = kind, ent = subject, ent2 = other, value, pos, text = names
     EV_DNA,            // DNA registry entry (gameplay/revive): id = sample id, data = DnaSample (status DNA_FREE = removed)
     EV_SHOT,           // ballistic shot: ent = shooter, ent2 = slot + 1, pos = launch point, dir = aim, data = BalShotRecord (gameplay/ballistics/bal_world.h)
+    EV_STORY,          // story mode (src/story/story_net.h StoryEvKind): id = kind, text = chapter / script / sound id, ent / ent2 / value / pos / dir / data per kind
 } EventType;
 
 // EV_KILL payload (data): names as shown in the kill feed and the killer's weapon item.

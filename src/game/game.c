@@ -22,6 +22,7 @@
 #include "gameplay/health.h"
 #include "gameplay/revive/revive.h"
 #include "game_revive.h"
+#include "game_story.h"
 #include "gameplay/weapons.h"
 #include "gameplay/ballistics/bal_world.h"
 #include "gameplay/ballistics/bal_fx.h"
@@ -230,6 +231,7 @@ static void interact_tick(World *w, int slot, const UserCmd *cmd, u16 pressed, f
             p->hold_progress = 0;
         } else {
             def->on_use(w, target, slot);
+            story_on_interact(w, target, slot);   // story mode: named interactables (docs/STORY.md)
             GameEvent ev;
             memset(&ev, 0, sizeof(ev));
             ev.type = EV_USE_ANIM;
@@ -253,6 +255,7 @@ static void interact_tick(World *w, int slot, const UserCmd *cmd, u16 pressed, f
             if (def->on_hold) def->on_hold(w, p->hold_target, slot, p->hold_progress);
             if (p->hold_progress >= 1.0f) {
                 def->on_use(w, p->hold_target, slot);
+                story_on_interact(w, p->hold_target, slot);
                 p->hold_target = ENT_NONE;
                 p->hold_progress = 0;
             }
@@ -386,6 +389,7 @@ static void host_tick(World *w, const UserCmd *local_cmd) {
     if (!frozen) {
         PROF_BEGIN("sim:entities");
         entities_tick(w, SIM_DT);
+        story_host_tick(w);   // story mode: the chapter's objectives, triggers, clock (docs/STORY.md)
         PROF_END();
         revive_host_tick(w);   // corpses, fabricators, DNA samples (docs/REVIVE.md)
         PROF_BEGIN("sim:projectiles");
@@ -782,6 +786,7 @@ void game_frame(float dt) {
     G->alpha = (float)(G->accumulator / SIM_DT);
     game_death_frame(dt);   // death sequence: post / mix / HUD from this frame's state (docs/REVIVE.md)
     game_revive_frame(G->world, dt);   // reconstruction bodies + particles
+    story_frame(G->world, dt);         // story presentation, interactable bindings, deferred reloads
     // Reconciliation corrections fade over cam_recon_smooth_time (the head stabilizer adds its own spring).
     {
         float tsm = camera_fp_cvars()->recon_smooth ? camera_fp_cvars()->recon_smooth->f : 0.08f;
@@ -864,6 +869,7 @@ bool game_host_ex(const char *map, u32 flags) {
     memset(&G->view, 0, sizeof(G->view));
     game_spawn_player(G->world, 0, G->cl_name->str, true, -1);
     G->view.yaw = G->world->players[0].sim.move.yaw;
+    story_level_loaded(G->world, G->map);   // the level's story block; starts a pending chapter (roles, saves)
     if (G->net_autohost->i && !(flags & (GH_KEEP_NET | GH_NO_AUTOHOST))) net_host(TRANSPORT_LAN, (u16)cvar_find("net_port")->i);
     log_info("game: hosting '%s'", G->map);
     return true;
@@ -881,6 +887,7 @@ void game_cl_welcome(int slot, const char *map, u32 seed, u32 server_tick) {
     water_level_loaded(G->world, map);     // the same bodies as the host (nothing replicated)
     vehicles_level_loaded(G->world, map);   // spike zones; vehicles replicate
     handpose_system_scan(G->world, false);   // interactables placed in this level
+    story_level_loaded(G->world, map);       // the level's story block (story interactables, points)
     flesh_fx_clear();
     bal_world_clear();
     bal_fx_clear();
@@ -926,6 +933,7 @@ int game_sv_player_join(int peer, const char *name) {
         game_spawn_player(w, s, name, false, peer);
         ev_hint(w, -1, "%s joined", name);
         revive_sv_player_joined(w, s);   // the DNA registry (events are not replayed to late joiners)
+        story_sv_player_joined(w, s);    // the chapter + its state, the role's spawn
         if (join_dead) {
             // Late joiner: dead and hidden until the respawn rules let it in, spectating meanwhile.
             Player *p = &w->players[s];
@@ -947,6 +955,7 @@ void game_sv_player_leave(int slot) {
     char name[32];
     dg_strcpy(name, sizeof(name), w->players[slot].name);
     spectate_player_left(slot);
+    story_sv_player_left(w, slot);
     game_remove_player(w, slot);
     ev_hint(w, -1, "%s left", name);
 }
@@ -1651,6 +1660,7 @@ void game_init(void) {
     cmd_register("map", cmd_map, "map <name>: host a new game on a level / menu entry; map: list every level, menu entry and scene");
     wheels_register();
     revive_register();
+    story_register();
     game_death_register();
     game_pings_register();
     hud_register();

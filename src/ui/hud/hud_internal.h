@@ -29,6 +29,8 @@ bool hud_copy_coords(void);   // to the clipboard; false without a position
 float hud_kills_draw(Game *g, GuiRect safe);           // returns the bottom (killfeed)
 float hud_compass_draw(Game *g, GuiRect safe);         // returns the bottom (coordinates)
 void hud_pings_draw(Game *g, GuiRect safe);
+void hud_story_draw(GuiRect safe);                    // story mode (hud_story.c, docs/STORY.md)
+void hud_story_draw_fade(void);
 // Caps label in the HUD style (hud.c).
 void hud_caps(float x, float y, float size, u32 c, int align, const char *s);
 // Item / vector icon in a box, one colour (the silhouette of the item's baked icon, else the named vector icon).

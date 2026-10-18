@@ -1,0 +1,13 @@
+{
+  "schema": 2,
+  "id": "backpack",
+  "label": "School Backpack",
+  "category": "item",
+  "source": "data/items.json",
+  "inherits": "style/item_large",
+  "hands": ["right"],
+  "reviewed": false,
+  "auto_placed": false,
+  "left": {},
+  "right": {}
+}

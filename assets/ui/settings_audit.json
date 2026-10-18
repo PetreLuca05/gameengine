@@ -2347,6 +2347,18 @@
    "reason": "Spectator delay readout.",
    "category": "player"
   },
+  "story_autosave": {
+   "class": "EDITABLE",
+   "ui": "Console",
+   "reason": "Story mode: save to slot 'auto' at every checkpoint (Continue); a player preference.",
+   "category": "story"
+  },
+  "story_save_dir": {
+   "class": "EDITABLE",
+   "ui": "Console",
+   "reason": "Story saves folder (empty = the user's pref dir); tests point it at a scratch folder.",
+   "category": "story"
+  },
   "sv_cheats": {
    "class": "LOCKED+RULE",
    "ui": "Lobby rules",

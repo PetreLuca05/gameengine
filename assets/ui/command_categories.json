@@ -16,7 +16,8 @@
         { "id": "network", "label": "Network", "prefixes": ["net_", "sv_", "lobby", "connect", "host", "disconnect", "lan_"] },
         { "id": "audio", "label": "Audio", "prefixes": ["snd_", "s_", "audio_"] },
         { "id": "phone", "label": "Phone", "prefixes": ["phone"] },
-        { "id": "revive", "label": "Revive & Death", "prefixes": ["revive", "death_", "fab_", "reconstruction_"] }
+        { "id": "revive", "label": "Revive & Death", "prefixes": ["revive", "death_", "fab_", "reconstruction_"] },
+        { "id": "story", "label": "Story", "prefixes": ["story_", "kit_"] }
     ],
     "names": {
         "settings_audit": "system",

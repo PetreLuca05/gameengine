@@ -493,6 +493,22 @@ void daynight_set_calendar(World *w, int day_of_year, float hours) {
     DN.key_init = false;
 }
 
+// Story mode (src/story/story_run.c): host, the time (hours) and the clock rate in game minutes per
+// real second (0 = frozen). Only touches the replicated state when something changed.
+void daynight_story_drive(World *w, float hours, float minutes_per_second) {
+    if (!w || !w->authority) return;
+    float len = minutes_per_second > 1e-4f ? 1440.0f / minutes_per_second : 0.0f;
+    float now = tod_hours(&w->tod, (double)w->tick);
+    float drift = fabsf(now - hours);
+    if (drift > 12.0f) drift = 24.0f - drift;
+    if (fabsf(w->tod.day_length - len) > fmaxf(0.01f * len, 0.5f)) tod_set_day_length(&w->tod, (double)w->tick, len);
+    if (drift * 60.0f > 0.25f) {   // more than 15 game seconds off: snap (scrubs, saves, blends)
+        tod_set_time(&w->tod, (double)w->tick, hours);
+        DN.host_last_days = tod_days(&w->tod, w->tick);
+        DN.key_init = false;
+    }
+}
+
 static void cmd_time_set(int argc, const char **argv) {
     World *w = host_world("time_set");
     if (!w) return;

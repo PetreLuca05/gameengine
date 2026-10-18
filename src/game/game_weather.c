@@ -680,6 +680,20 @@ static World *host_world(const char *cmd) {
     return w;
 }
 
+// Story mode (src/story/story_run.c): host, a preset or composition ("cloudy+fog") over seconds.
+bool weather_set_preset(World *w, const char *spec, float seconds) {
+    if (!w || !w->authority || !w->weather.version) return false;
+    ensure_lib();
+    WeatherParams tgt;
+    float tr = 0;
+    if (!weather_compose(&WX.lib, spec, &w->weather.to, &tgt, &tr)) {
+        log_warn("weather: unknown preset '%s'", spec);
+        return false;
+    }
+    set_preset(w, spec, seconds);
+    return true;
+}
+
 static void cmd_weather_set(int argc, const char **argv) {
     World *w = host_world("weather_set");
     if (!w) return;
