@@ -484,6 +484,21 @@ static TextureId cl_texture_mips(const u8 *rgba, u32 size, u32 keep_levels, bool
 }
 
 void vkc_set_textures(const VgTextures *t) { C.vtex = t; }
+
+// PF-0016: the unfitted twin of a fitted card mesh (grass), drawn instead while the fix is off.
+static struct { u32 *alt, cap; } CA;
+void vkc_set_mesh_alt(u32 mesh, u32 alt) {
+    if (mesh >= CA.cap) {
+        u32 cap = DG_MAX(mesh + 1, CA.cap ? CA.cap * 2 : 256u);
+        CA.alt = (u32 *)realloc(CA.alt, sizeof(u32) * cap);
+        memset(CA.alt + CA.cap, 0, sizeof(u32) * (cap - CA.cap));
+        CA.cap = cap;
+    }
+    CA.alt[mesh] = alt + 1;   // 0: none
+}
+static u32 mesh_drawn(u32 mesh) {
+    return mesh < CA.cap && CA.alt[mesh] && !prof_fix_enabled(PFX_CARD_FIT) && CA.alt[mesh] - 1 < C.mesh_cap ? CA.alt[mesh] - 1 : mesh;
+}
 // The renderer recreated its material sampler (r_aniso / r_texture_quality) and rewrote every texture
 // set (wrapped ones with its clamp sampler): re-apply the slots' samplers, and rewrite this module's own
 // sets, which hold the material sampler too (the default / displacement sets, the impostor atlases;
@@ -1110,7 +1125,7 @@ static void emit_view_depth_order(ClView *out, const mat4 *vp, int row) {
 
 static void build_lods(const ClView *v) {
     for (u32 b = 0; b < v->batch_count; b++) {
-        u32 mesh = v->batches[b].key >> CL_KEY_SHIFT, lod = v->batches[b].key & 7u;
+        u32 mesh = mesh_drawn(v->batches[b].key >> CL_KEY_SHIFT), lod = v->batches[b].key & 7u;
         ClMesh *cm = &C.mesh[mesh];
         if (lod != CL_IMPOSTOR && !cm->lods[lod].gpu && cm->verts) cl_build_exported(cm, lod);
         // docs/LOD.md: prefetch the next finer LOD, so it is resident before the band reaches it
@@ -1474,6 +1489,7 @@ static void draw_view(VkCommandBuffer cmd, const ClView *v, int pass, u32 shadow
             u32 mesh = bt->key >> CL_KEY_SHIFT, lod = bt->key & 7u;
             bool fading = (bt->key & CL_KEY_FADE) != 0;
             if (lod == CL_IMPOSTOR) continue;
+            mesh = mesh_drawn(mesh);
             const ClMesh *cm = &C.mesh[mesh];
             const ClLod *L = &cm->lods[lod];
             if (!lod_ready(L)) {

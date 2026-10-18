@@ -77,8 +77,26 @@ bool grass_asset_load(GrassAsset *a, const char *path, const char *name);
 // Every assets/foliage/grass/*.json (sorted by name, at most max). Returns the count.
 int grass_assets_load_dir(GrassAsset *out, int max);
 
-// The clump mesh of variant v (deterministic). Card uvs address the atlas cells.
-void grass_gen_mesh(VgFoliageMesh *m, const GrassAsset *a, u32 variant);
+// Card fitting (PF-0016, docs/FOLIAGE_GRASS.md "Fitted cards"): per atlas cell and card band (one per
+// segment, root first) the part of the cell's width (0..1) holding every texel whose alpha could pass the
+// test down to mip level GRASS_FIT_LEVELS - 1: the texels with any alpha, grown by 2 texels of that level.
+#define GRASS_FIT_BANDS 16
+#define GRASS_FIT_LEVELS 3
+typedef struct GrassFit {
+    bool valid;
+    int bands;
+    float l[GRASS_MAX_CELLS * GRASS_MAX_CELLS][GRASS_FIT_BANDS], r[GRASS_MAX_CELLS * GRASS_MAX_CELLS][GRASS_FIT_BANDS];
+} GrassFit;
+// From the atlas as uploaded (RGBA8, w x h, the asset's cols x rows cells).
+void grass_fit_compute(const GrassAsset *a, const u8 *rgba, u32 w, u32 h, GrassFit *f);
+
+// The clump mesh of variant v (deterministic). Card uvs address the atlas cells. fit (NULL: full cards)
+// narrows every card to its cell's opaque part per band: the same triangles, plane and uv mapping, so
+// the pixels that stay are unchanged and the ones cut away were transparent.
+void grass_gen_mesh(VgFoliageMesh *m, const GrassAsset *a, u32 variant, const GrassFit *fit);
+// Two unreferenced vertices at full's bounds appended to fitted: the vgeo build quantizes positions on a
+// grid of the mesh's extent, so the fitted card's vertices land on the full card's grid points.
+void grass_mesh_match_bounds(VgFoliageMesh *fitted, const VgFoliageMesh *full);
 // Mesh bounds the generator can reach (m): max height, max horizontal radius.
 void grass_mesh_extent(const GrassAsset *a, float *height, float *radius);
 // The asset's material for fidelity level tier (0 Off .. 4 Modern): flags, cutoff, roughness, WPO, fades,

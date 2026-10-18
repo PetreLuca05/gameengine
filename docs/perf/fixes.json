@@ -1314,6 +1314,111 @@
    "machine": "DESKTOP-SN4N74U"
   }
  },
+ "PF-0016": {
+  "title": "Grass cards cut to their cells' opaque part",
+  "rule": "R02",
+  "finding": "Alpha-test overdraw in the dense vegetation zones (audit 2026-10-18): grass / ground cover cards are full atlas cells, mostly transparent around the blades, so the prepass, the lit pass and the shadow tiles run the alpha-test shader over area that always discards",
+  "effort": "M",
+  "status": "verified on DESKTOP-SN4N74U (close on the target machine)",
+  "code": [
+   "src/render/vgeo/grass_asset.c grass_fit_compute / grass_gen_mesh(fit)",
+   "src/render/vk_vgeo.c foliage_build_grass (fitted mesh + unfitted twin per variant)",
+   "src/render/vk_classic.c vkc_set_mesh_alt / mesh_drawn (the twin drawn while PF-0016 is off)",
+   "src/render/vgeo/grass_asset.c grass_mesh_match_bounds (the fitted mesh on the full mesh's quantization grid), half_snap"
+  ],
+  "description": "Per atlas cell and card band (one per segment), grass_fit_compute finds the columns holding any alpha, grown by 2 texels of mip level 2 (8 texels). grass_gen_mesh moves each row's two vertices inward to cover the opaque part of both bands they bound: the same triangles, on the same plane, with the uv following the position exactly as on the full card (the card is a parallelogram with an affine uv map), so every pixel the fitted card covers is the full card's pixel and the cut area held no texel that could pass the alpha test through mip 2. The unfitted twin of every variant is registered too (no impostor) and drawn in its place while the fix is off.",
+  "neutral": "A visual trade-off only through the wind: inside the fitted shape the fragments, depths and uvs are the full card's (the same plane and affine uv mapping, uvs snapped to the half grid the vertices store, positions on the full card's quantization grid); outside it every texel the alpha test can read down to mip 2 is transparent. The WPO bend and the dome normals are not linear across the card, so under wind the displaced surface differs slightly. Nothing feeds the simulation.",
+  "metrics": [
+   "scope:prepass",
+   "scope:shadow_sun",
+   "scope:opaque",
+   "gpu_frame"
+  ],
+  "scenes": [
+   "veg_meadow",
+   "veg_wheat",
+   "veg_forest_pine"
+  ],
+  "tradeoff": "Without wind the fitted cards render the full cards' pixels (perf_verify with r_foliage_wind 0: images pass). With wind, the foliage WPO (a length-preserving bend, shaders/vgeo/wpo.glsl) is evaluated at the fitted card's vertices instead of the full card's corners, and the card normals blend toward the clump dome at those vertices: the blades sway through slightly different points (sub-pixel to a pixel at blade edges, no visible artifact).",
+  "screenshots": [],
+  "verification": {
+   "runs": [
+    {
+     "date": "2026-10-18",
+     "machine": "DESKTOP-SN4N74U",
+     "summary": "CLOSED: scope:prepass 4.9145 -> 4.4885 (-8.67%, p=0); images differ (visual trade-off, by design); state identical",
+     "closed": true,
+     "timing": [
+      {
+       "metric": "scope:prepass",
+       "a_median": 4.9145,
+       "b_median": 4.4885,
+       "a_mean": 5.20013,
+       "b_mean": 4.83832,
+       "delta": -0.426,
+       "delta_pct": -8.67,
+       "p_value": 0.0,
+       "samples": [
+        1428,
+        1428
+       ],
+       "improved": true
+      },
+      {
+       "metric": "scope:shadow_sun",
+       "a_median": 4.1405,
+       "b_median": 4.0725,
+       "a_mean": 9.64808,
+       "b_mean": 9.09327,
+       "delta": -0.068,
+       "delta_pct": -1.64,
+       "p_value": 0.0,
+       "samples": [
+        1428,
+        1428
+       ],
+       "improved": true
+      },
+      {
+       "metric": "scope:opaque",
+       "a_median": 8.483,
+       "b_median": 7.903,
+       "a_mean": 8.75455,
+       "b_mean": 8.39247,
+       "delta": -0.58,
+       "delta_pct": -6.84,
+       "p_value": 9e-05,
+       "samples": [
+        1428,
+        1428
+       ],
+       "improved": true
+      },
+      {
+       "metric": "gpu_frame",
+       "a_median": 34.01,
+       "b_median": 30.225,
+       "a_mean": 35.68295,
+       "b_mean": 33.70252,
+       "delta": -3.785,
+       "delta_pct": -11.13,
+       "p_value": 3e-05,
+       "samples": [
+        1440,
+        1440
+       ],
+       "improved": true
+      }
+     ],
+     "state": "identical",
+     "images_pass": false,
+     "dir": "build/perf_out/verify/PF-0016"
+    }
+   ],
+   "summary": "CLOSED: scope:prepass 4.9145 -> 4.4885 (-8.67%, p=0); images differ (visual trade-off, by design); state identical",
+   "machine": "DESKTOP-SN4N74U"
+  }
+ },
  "PF-0028": {
   "title": "Far sun cascades re-rendered every other frame, in turn",
   "rule": "R02",

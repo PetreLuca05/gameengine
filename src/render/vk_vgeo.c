@@ -643,6 +643,7 @@ static void foliage_build_kinds(int k0, int k1, u32 atlas) {
 typedef struct GrassBuild {
     int asset;
     u32 variant;
+    bool full;                       // the unfitted twin of the previous entry (PF-0016's A side: no foliage type, no impostor)
     VgFoliageMesh fm;
     VgSource src;
     VgBuilt b;
@@ -726,7 +727,7 @@ static void foliage_build_grass(void) {
     GR.tier = grass_fidelity_tier();
     u32 div = GR.r_grass_tex && GR.r_grass_tex->i ? 1u : 2u;
     int total = 0;
-    for (int i = 0; i < GR.n; i++) total += GR.a[i].variants;
+    for (int i = 0; i < GR.n; i++) total += GR.a[i].variants * 2;   // fitted + full (PF-0016)
     GrassBuild *gb = (GrassBuild *)calloc((size_t)DG_MAX(total, 1), sizeof(GrassBuild));
     u8 *alb[GRASS_MAX_ASSETS] = { 0 };
     u32 aw[GRASS_MAX_ASSETS] = { 0 }, ah[GRASS_MAX_ASSETS] = { 0 };
@@ -747,25 +748,48 @@ static void foliage_build_grass(void) {
         float p[12];
         grass_cover_params(a, p);
         render_ground_set_cover(i, p);
-        for (int v = 0; v < a->variants; v++, nb++) {
-            GrassBuild *q = &gb[nb];
-            q->asset = i;
-            q->variant = (u32)v;
-            grass_gen_mesh(&q->fm, a, (u32)v);
-            vgeo_foliage_source(&q->fm, &q->src);
-            q->im = (VgImpostorMaterial){ { 1, 1, 1, 1 }, alb[i], aw[i], ah[i], 1.0f, true, a->alpha_cutoff };
-            q->io = (VgImpostorOptions){ 512, 8, &q->im, 1 };
-            q->impostor = a->tier[GRASS_TIERS - 1].end_m < 80.0f;   // tall crops fade before an impostor would show
+        static GrassFit fit;
+        grass_fit_compute(a, alb[i], aw[i], ah[i], &fit);   // cards cut to the cells' opaque part (PF-0016)
+        for (int v = 0; v < a->variants; v++) {
+            for (int full = 0; full < 2; full++, nb++) {
+                GrassBuild *q = &gb[nb];
+                q->asset = i;
+                q->variant = (u32)v;
+                q->full = full != 0;
+                grass_gen_mesh(&q->fm, a, (u32)v, full ? NULL : &fit);
+                if (full) {   // the fitted mesh (previous entry) on this one's quantization grid
+                    grass_mesh_match_bounds(&q[-1].fm, &q->fm);
+                    vgeo_foliage_source(&q[-1].fm, &q[-1].src);
+                }
+                vgeo_foliage_source(&q->fm, &q->src);
+                q->im = (VgImpostorMaterial){ { 1, 1, 1, 1 }, alb[i], aw[i], ah[i], 1.0f, true, a->alpha_cutoff };
+                q->io = (VgImpostorOptions){ 512, 8, &q->im, 1 };
+                q->impostor = !full && a->tier[GRASS_TIERS - 1].end_m < 80.0f;   // tall crops fade before an impostor would show
+            }
         }
     }
     render_ground_set_cover_count(GR.n);
     jobs_parallel_for(nb, 1, grass_job, gb);
+    u32 fitted_mesh = ~0u;
     for (int k = 0; k < nb; k++) {
         GrassBuild *q = &gb[k];
         vgeo_foliage_mesh_free(&q->fm);
         if (!q->ok) { log_error("grass: %s variant %u: build failed: %s", GR.a[q->asset].name, q->variant, q->err); continue; }
+        if (q->full) {   // perf_fix_disable PF-0016 draws this one in its fitted twin's place
+            if (fitted_mesh != ~0u) {
+                u32 mesh = vgeo_scene_add_mesh(&G.scene, &q->b);
+                fallback_register(mesh, &q->b, false);
+                vgeo_scene_set_mesh_materials(&G.scene, mesh, GR.mat[q->asset]);
+                vkc_set_mesh_alt(fitted_mesh, mesh);
+            }
+            fitted_mesh = ~0u;
+            vgeo_free(&q->b);
+            continue;
+        }
+        fitted_mesh = ~0u;
         if (G.ftype_count < FOLIAGE_TYPES) {
             u32 mesh = vgeo_scene_add_mesh(&G.scene, &q->b);
+            fitted_mesh = mesh;
             fallback_register(mesh, &q->b, false);
             vgeo_scene_set_mesh_materials(&G.scene, mesh, GR.mat[q->asset]);
             if (q->impostor) vgeo_foliage_impostor_upload(&G.scene, &G.tex, mesh, &q->b);

@@ -569,7 +569,9 @@ void vkr_cancel_image_upload(VkImage image);
 VkDescriptorSet vkam_set(TextureId t, VkSampler sampler);
 void vkam_record(VkCommandBuffer cmd);
 void vkam_texture_destroyed(TextureId t);
-void vkam_samplers_changed(void);   // vkc_samplers_changed: no mask keeps a destroyed sampler
+void vkam_samplers_changed(void);
+// vk_classic.c: mesh `alt` is drawn in `mesh`'s place while PF-0016 (fitted cards) is off (perf_verify's A side).
+void vkc_set_mesh_alt(u32 mesh, u32 alt);   // vkc_samplers_changed: no mask keeps a destroyed sampler
 void vkam_shutdown(void);
 
 // vk_light_shadow.c: shadows of point / spot lights (docs/LIGHT_SHADOWS.md)
