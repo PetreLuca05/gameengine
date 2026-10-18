@@ -119,6 +119,12 @@ void icons_reload(void) {
     I.ready = false;
 }
 
+void icons_rerender(void) {
+    // Item meshes changed (item_reload): every tile is re-rendered live from the current models, one per
+    // frame (bake_icons writes them back to the PNGs).
+    for (int i = 1; I.ready && i < I.item_count; i++) I.src[i] = ICON_LIVE_PENDING;
+}
+
 static void view_for(u16 item, TextureId target, int size, RenderUi3dView *v, RenderUi3dPart *parts, int *n) {
     const ItemDB *d = db();
     vec3 mn, mx;

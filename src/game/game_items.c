@@ -49,7 +49,12 @@ static ItemMesh *mesh_for_id(const char *id, int *cond) {
             if (!strcmp(db->attachments[a].id, id + 4)) { *cond = db->attachments[a].model.condition; return item_mesh_get(db->attachments[a].model.mesh); }
     }
     u16 it = item_find(db, id);
-    if (!it) return NULL;
+    if (!it) {   // a mesh with no item of its own (a "mesh_for" variant): by file name
+        char path[96];
+        snprintf(path, sizeof(path), "assets/items/meshes/%s.dgim", id);
+        *cond = ITEM_COND_WORN;
+        return item_mesh_get(path);
+    }
     const WeaponDef *wd = item_weapon(db, it);
     const ItemModelRef *mr = wd ? &wd->model : &db->items[it].model;
     if (db->items[it].kind == ITEM_ATTACHMENT) {
@@ -62,8 +67,8 @@ static ItemMesh *mesh_for_id(const char *id, int *cond) {
 
 static void cmd_item_reload(int argc, const char **argv) {
     int n = item_mesh_reload_all(argc > 1 && !strcmp(argv[1], "all"));
-    icons_reload();
-    log_info("item_reload: %d mesh(es) re-read, materials re-layered, icons re-baking", n);
+    icons_rerender();
+    log_info("item_reload: %d mesh(es) re-read, materials re-layered, icons re-rendering (bake_icons writes the PNGs)", n);
     game_add_hint("Item meshes reloaded");
 }
 
@@ -229,23 +234,22 @@ static void draw_showcase(const RenderCamera *cam) {
     for (int i = 0; i < n; i++) {
         int row = i / SHOWCASE_COLS, col = i % SHOWCASE_COLS;
         vec3 base = v3(k_showcase.x + col * SHOWCASE_SPACING, 0, k_showcase.z + row * SHOWCASE_SPACING * 1.4f);
-        // Turntable: a plinth, a dark top disc stand-in (box), the item centred 25 cm above it.
+        // Turntable: a plinth, a dark top disc stand-in (box), the item resting 3 cm above it.
         draw_box(v3(base.x, 0.45f, base.z), v3(0.45f, 0.45f, 0.45f), v4(0.16f, 0.16f, 0.17f, 1), 0.8f, 0.0f);
         draw_box(v3(base.x, 0.915f, base.z), v3(0.4f, 0.015f, 0.4f), v4(0.05f, 0.05f, 0.055f, 1), 0.35f, 0.6f);
         ItemMesh *m = meshes[i];
         vec3 ctr = v3_scale(v3_add(m->bmax, m->bmin), 0.5f);
         float r = v3_len(v3_scale(v3_sub(m->bmax, m->bmin), 0.5f));
-        float scale = r > 0.42f ? 0.42f / r : 1.0f;   // long guns shrink to the plinth; real size otherwise
+        float scale = clampf(0.3f / fmaxf(r, 1e-3f), 0.5f, 6.0f);   // one display size: long guns shrink, a pill bottle grows (the label says by how much)
         quat rot = quat_axis_angle(v3(0, 1, 0), spin + i * 0.7f);
-        // Resting just over the turntable: a spin about +Y keeps the item's lowest point (bmin.y).
-        vec3 c = v3(base.x, 0.93f + 0.02f + (ctr.y - m->bmin.y) * scale, base.z);
+        vec3 c = v3(base.x, 0.93f + 0.03f + (ctr.y - m->bmin.y) * scale, base.z);   // a yaw turn keeps the height extent
         vec3 pos = v3_sub(c, quat_rotate(rot, v3_scale(ctr, scale)));
         ItemMeshPose pose = { 0 };
         pose.wobble = quat_identity();
         item_mesh_draw(m, item_mesh_condition(conds[i]), pos, rot, scale, &pose, 0, false);
         char label[64];
-        snprintf(label, sizeof(label), "%s  %uk tris", names[i], (m->tris[0] + 500) / 1000);
-        dbg_text(v3(base.x, 0.2f, base.z - 0.47f), label, DBG_WHITE, 0.07f, 0);   // world size: fits the plinth
+        snprintf(label, sizeof(label), "%s  %uk tris  x%.1f", names[i], (m->tris[0] + 500) / 1000, scale);
+        dbg_text(v3(base.x, 0.86f, base.z - 0.47f), label, DBG_WHITE, 0.07f, 0);
     }
     // Lighting rig: warm key / cool fill / rim per row.
     int rows = (n + SHOWCASE_COLS - 1) / SHOWCASE_COLS;

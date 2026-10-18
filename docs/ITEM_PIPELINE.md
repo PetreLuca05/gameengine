@@ -101,6 +101,10 @@ an `emitter` socket (the flashlight item).
 
 Other players still see the eye-mounted flashlight (no protocol change).
 
+The flashlight item is `"kind": "misc"` with `"hotbar": true` (`items.json`). Misc items normally go to
+the backpack and can never be held, so the flag lets it equip from the hotbar (`inventory.c
+hotbar_first`).
+
 ## Budgets (LOD 0 triangles, `assets/items/catalog.json`)
 
 | Tier | Budget | This pass |
@@ -223,11 +227,25 @@ validator checks they exist.
     under the sight line the view meets the front post's top through the rear notch / aperture, just
     over it the view is clear, and the post stands centred with light on both sides.
 - `tools/tests/item_nearplane.cfg` + `item_nearplane.py`: every weapon in first person at the
-  default FOV, hip and ADS (`+aim`). It counts the triangles the viewmodel pass's near plane
-  (`RENDER_VM_ZNEAR`, 1 cm) visibly cuts: an edge crossing the plane inside its on-screen rectangle,
-  or a triangle between the eye and the plane in view. A stock reaching back past the eye, beside or
-  below it, crosses the plane off screen and does not count.
+  default FOV, hip and ADS (`+aim`; `item_nearplane <state>`, `game_items.c`).
+  - It walks the LOD 0 triangles of the posed weapon and its attachments in view space and counts
+    the triangles the viewmodel pass's near plane (`RENDER_VM_ZNEAR`, 1 cm) visibly cuts: an edge
+    crossing the plane inside its on-screen rectangle, or a triangle between the eye and the plane
+    in view. Those are the visible cuts, where a hole opens in the model.
+  - A stock reaching back past the eye, beside or below it, crosses the plane off screen and does
+    not count.
+  - The log line names the part with the most cuts. Every weapon reads 0 in both states.
+  - The fixes this took were all in the models, never the camera:
+    - The AR uppers slope down behind a shorter rail.
+    - The shotgun receiver slopes to the stock, with its rail on a riser.
+    - The shotgun comb and the PDW cheek bar sit lower.
+    - The bat is 28".
 - `tools/tests/sight_align.cfg` (`sight_test align all`): every weapon x optic keeps the sight on the
   view axis.
+  - Under lavapipe (about 1 fps) every combination reports FAIL only because it gathers fewer than
+    100 samples.
+  - The measured errors are 0.000 mm / 0.0000 deg, except crossbow + 4x scope, whose eye relief spreads
+    3.4 mm.
+  - Run it on a real GPU for a pass / fail verdict.
 - `test_recoil_ads` and `test_handpose`: unchanged gameplay sockets. The glue tests run against the
   JSON sockets the meshes were built on.

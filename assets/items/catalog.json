@@ -504,7 +504,7 @@
     "flashlight": {
       "kind": "item",
       "budget": [
-        8000,
+        3000,
         40000
       ],
       "path": "procedural",
@@ -526,7 +526,8 @@
       "parts": [
         "barrel",
         "plunger",
-        "needle"
+        "needle",
+        "needle_cap"
       ],
       "sockets": [
         "needle",

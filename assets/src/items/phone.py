@@ -13,9 +13,9 @@ def build(ctx):
     it = L.Item("phone", "item")
     cx, cy, cz = C
     hx, hy, hz = H
-    outline = [(x + cx, y + cy) for (x, y) in L.rounded_rect(hx * 2, hy * 2, 0.0085, 8)]
+    outline = [(x + cx, y + cy) for (x, y) in L.rounded_rect(hx * 2, hy * 2, 0.0085, 16)]
     frame = L._extrude_poly(outline, lambda p: L.Vector((p[0], p[1], cz - hz)), L.Vector((0, 0, hz * 2)), "aluminium_anodized", 0.0012, 3)
-    inner = [(x + cx, y + cy) for (x, y) in L.rounded_rect(hx * 2 - 0.0016, hy * 2 - 0.0016, 0.0078, 8)]
+    inner = [(x + cx, y + cy) for (x, y) in L.rounded_rect(hx * 2 - 0.0016, hy * 2 - 0.0016, 0.0078, 16)]
     glass_f = L._extrude_poly(inner, lambda p: L.Vector((p[0], p[1], cz + hz - 0.0006)), L.Vector((0, 0, 0.0006)), "screen_glass", 0.0003, 1)
     glass_b = L._extrude_poly(inner, lambda p: L.Vector((p[0], p[1], cz - hz)), L.Vector((0, 0, 0.0006)), "glass_lens", 0.0003, 1)
     frame.cut(L._extrude_poly(inner, lambda p: L.Vector((p[0], p[1], cz + hz - 0.0006)), L.Vector((0, 0, 0.002)), "aluminium_anodized", 0, 0))
@@ -35,7 +35,12 @@ def build(ctx):
     port = L.box((cx, cy - hy, cz), (0.0045, 0.0012, 0.0016), 0.0006, 1, "webbing_black")
     grille = [L.cyl((cx + sx * (0.009 + k * 0.0022), cy - hy - 0.0002, cz), (cx + sx * (0.009 + k * 0.0022), cy - hy + 0.0012, cz), 0.0006, 8, "webbing_black", bevel=0)
               for sx in (1, -1) for k in range(5)]
-    it.part("body").add(frame, glass_b, ear, bump, flash, logo, port, *lenses, *grille)
+    sim = L.box((cx - hx - 0.0001, cy - 0.03, cz), (0.0003, 0.008, 0.0013), 0.0002, 1, "aluminium_anodized")
+    sim_hole = L.cyl((cx - hx - 0.0006, cy - 0.024, cz), (cx - hx + 0.0004, cy - 0.024, cz), 0.0004, 8, "webbing_black", bevel=0)
+    bands = [L.box((cx + sx * (hx + 0.00005), cy + dy, cz), (0.00025, 0.0006, hz * 0.9), 0, 0, "plastic_black") for sx in (1, -1) for dy in (hy - 0.012, -hy + 0.012)]
+    bands += [L.box((cx, cy + sy * (hy + 0.00005), cz), (0.0006, 0.00025, hz * 0.9), 0, 0, "plastic_black").move((sx * (hx - 0.012), 0, 0)) for sy in (1, -1) for sx in (1, -1)]
+    mics = [L.cyl((cx + 0.016 + k * 0.0018, cy + hy - 0.0002, cz), (cx + 0.016 + k * 0.0018, cy + hy + 0.0012, cz), 0.0004, 8, "webbing_black", bevel=0) for k in range(2)]
+    it.part("body").add(frame, glass_b, ear, bump, flash, logo, port, *lenses, *grille, sim, sim_hole, *bands, *mics)
     it.part("screen").add(glass_f)
     btn = [L.box((cx + hx + 0.0004, cy + 0.03, cz), (0.0006, 0.009, 0.0012), 0.0004, 1, "aluminium_anodized"),
            L.box((cx - hx - 0.0004, cy + 0.04, cz), (0.0006, 0.007, 0.0012), 0.0004, 1, "aluminium_anodized"),

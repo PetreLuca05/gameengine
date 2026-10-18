@@ -98,6 +98,7 @@ typedef struct ItemDef {
     // for weapons (origin = grip_r, -Z = the lens direction, +Z = the screen side, +Y = top).
     bool camera;
     bool builtin;              // always carried, outside the inventory (taken out with its own key)
+    bool hotbar;               // "hotbar": true: goes to the hotbar like weapons / consumables (a tool held in the hands: the flashlight)
     char hold_style_alt[16];   // "hold": { "style_landscape" }: two-handed landscape hold style
     struct {
         vec3 body_center, body_half;   // the phone body (box)

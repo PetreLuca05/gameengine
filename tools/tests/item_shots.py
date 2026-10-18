@@ -54,8 +54,8 @@ def main(argv):
                 continue
             for state in ("1", "0") if before else ("1",):
                 lines += ["item_meshes %s" % state, "inv_clear", "give %s" % i, "slot 1", "wait 20", "screenshot %s/%s_fp_%s.png" % (out, i, "after" if state == "1" else "before"),
-                          "wait 2", "+attack2", "wait 25", "screenshot %s/%s_ads_%s.png" % (out, i, "after" if state == "1" else "before"), "wait 2",
-                          "-attack2", "wait 4"]
+                          "wait 2", "+aim", "wait 25", "screenshot %s/%s_ads_%s.png" % (out, i, "after" if state == "1" else "before"), "wait 2",
+                          "-aim", "wait 4"]
         lines.append("item_meshes 1")
     lines.append("quit")
     print("\n".join(lines))

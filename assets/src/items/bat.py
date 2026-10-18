@@ -1,4 +1,5 @@
-"""Baseball bat (data/weapons/05_bat.json): turned ash, 28", cupped end, flared knob, cloth tape wrap on
+"""Baseball bat (data/weapons/05_bat.json): turned ash, 28" (0.72 m, the length of the gameplay box: a
+longer bat reaches the camera's near plane in the melee hold), cupped end, flared knob, cloth tape wrap on
 the handle (overlapping turns), burned-in brand oval, dents and chips from use. Procedural (path b).
 Melee item space: the bat runs along +Y from the grip (origin = the right hand), the left hand at
 (0, -0.09, 0) just above the knob."""
@@ -45,13 +46,17 @@ def brand():
     return out
 
 
+K = 0.865   # the turned profile below is a 33" bat: shortened along its axis to 28" (radii unchanged)
+
+
 def build(ctx):
     it = L.Item("bat", "weapon")
-    it.part("bat").add(body())
-    it.part("grip_tape").add(*tape())
-    it.part("brand", detail=True).add(*brand())
+    for name, solids, detail in (("bat", [body()], False), ("grip_tape", tape(), False), ("brand", brand(), True)):
+        for s in solids:
+            s.scale((1.0, K, 1.0))
+        it.part(name, detail=detail).add(*solids)
     it.socket("grip_r", (0, 0, 0))
     it.socket("grip_l", (0, -0.09, 0.0))
-    it.socket("tip", (0, 0.716, 0))
-    it.socket("sweet_spot", (0, 0.6, 0))
+    it.socket("tip", (0, 0.716 * K, 0))
+    it.socket("sweet_spot", (0, 0.6 * K, 0))
     return it

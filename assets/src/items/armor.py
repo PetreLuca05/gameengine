@@ -12,12 +12,13 @@ def build(ctx):
     # Single curve: bend the plate about Y (x -> z offset).
     for v in plate.bm.verts:
         v.co.z += (v.co.x / (w * 0.5)) ** 2 * 0.022
-    binding = L.merge(*[L.box(((a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5, -t * 0.5 - 0.0004), (abs(a[0] - b[0]) * 0.5 + 0.004, abs(a[1] - b[1]) * 0.5 + 0.004, 0.0006), 0.001, 1,
-                              "webbing_black") for (a, b) in zip(pts, pts[1:] + pts[:1])])
+    plate.bm.normal_update()
+    # Edge binding: the cover's perimeter seam, a band round the plate's side faces.
+    plate.paint("webbing_black", lambda c, n: abs(n.z) < 0.5)
     label = L.box((0, -h * 0.55, -t * 0.5 - 0.0012), (0.06, 0.04, 0.0005), 0.001, 1, "label_white")
     txt = [L.text("LEVEL IV  STAND ALONE", (0, -h * 0.52, -t * 0.5 - 0.0018), 0.0075, (0, 0, -1), (0, 1, 0), 0.0001, "label_black"),
            L.text("DG ARMOR  SAPI M", (0, -h * 0.58, -t * 0.5 - 0.0018), 0.006, (0, 0, -1), (0, 1, 0), 0.0001, "label_black"),
            L.text("STRIKE FACE  THIS SIDE OUT", (0, -h * 0.66, -t * 0.5 - 0.0018), 0.0045, (0, 0, -1), (0, 1, 0), 0.0001, "label_red")]
-    it.part("plate").add(plate, binding, label, *txt)
+    it.part("plate").add(plate, label, *txt)
     it.socket("grip_r", (0, 0, 0))
     return it

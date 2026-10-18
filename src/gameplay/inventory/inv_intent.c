@@ -274,7 +274,7 @@ static void consume_one(Work *W, InvItem *a) {
 }
 
 static bool bindable(const ItemDef *d) {
-    return d->kind == ITEM_WEAPON || d->kind == ITEM_CONSUMABLE || d->kind == ITEM_THROWABLE || d->camera;
+    return d->kind == ITEM_WEAPON || d->kind == ITEM_CONSUMABLE || d->kind == ITEM_THROWABLE || d->camera || d->hotbar;   // "hotbar": a held tool (the flashlight)
 }
 
 // Why a can't go into container b (no free space found): its filter, the nesting rule, or room.

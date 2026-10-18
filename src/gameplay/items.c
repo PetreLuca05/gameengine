@@ -975,6 +975,7 @@ bool items_load(ItemDB *db, const char *items_path, const char *weapons_path) {
         const cJSON *hold = cJSON_GetObjectItemCaseSensitive(it, "hold");
         dg_strcpy(d->hold_style_alt, sizeof(d->hold_style_alt), jstr(hold, "style_landscape", ""));
         d->builtin = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(it, "builtin"));
+        d->hotbar = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(it, "hotbar"));
         parse_camera(d, cJSON_GetObjectItemCaseSensitive(it, "camera"));
         const cJSON *sk = cJSON_GetObjectItemCaseSensitive(hold, "sockets");
         apply_sockets(&d->sockets, sk);

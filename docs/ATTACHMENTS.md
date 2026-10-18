@@ -83,6 +83,21 @@ Shipped attachments:
 | `vertical_grip` | underbarrel | Left hand moves onto the grip; 0.85 recoil, 0.9 sway |
 | `extended_mag` | magazine | 1.5x capacity, slower reload |
 | `heavy_stock` | stock | 0.88 recoil, 0.8 camera kick, 0.8 sway, slower ADS |
+| `weapon_light` | underbarrel | `"emitter": "light"`: the flashlight (F) shines from it along the barrel; slightly slower ADS |
+| `laser` | underbarrel | `"emitter": "laser"`: the flashlight toggle shows a beam and a dot; 0.85 hip spread |
+
+**Detailed models** (docs/ITEM_PIPELINE.md):
+
+- `"mesh"` names the attachment's `.dgim`, drawn instead of the `"model"` boxes.
+- `"mesh_for": { "<weapon id>": "<mesh>" }` gives a variant that fits a particular weapon:
+  - the extended magazine per magazine well (`smg`, `dmr`);
+  - the compact weapon light on the `pistol`.
+
+  `attach_model_for` picks the variant.
+- Weapon meshes tag their parts with the slots that hide or fold them:
+  - the magazine and the stock under their replacements;
+  - the integral muzzle device under a muzzle attachment;
+  - the iron sights under an optic. The front sight flips down.
 
 ### Weapon slots: `data/weapons/*.json`, `"attachment_slots"`
 
