@@ -203,10 +203,12 @@ def headshot():
 
 def shell(name, mesh, size, color):
     return {"duration": 0.05, "priority": 1, "max_instances": 64, "cull_distance": 60, "emitters": [
+        # Visual only (docs/VFX.md "Casings"): no collision, no sound; they shrink away about when a
+        # hip-height casing reaches the ground (they would fall through it).
         {"name": "casing", "tier": "cpu",
-         "spawn": {"mode": "burst", "count": 1, "life": [3.0, 4.0], "size": [size, size], "speed": [0.0, 0.3], "inherit": 1.0,
+         "spawn": {"mode": "burst", "count": 1, "life": [0.55, 0.7], "size": [size, size], "speed": [0.0, 0.3], "inherit": 1.0,
                    "spin": [-1400, 1400], "color": color + [1.0]},
-         "update": {"gravity": 1.0, "drag": 0.15, "collide": "physics", "bounce": 0.35, "friction": 0.45, "alpha_curve": [[0, 1], [0.9, 1], [1, 0]]},
+         "update": {"gravity": 1.0, "drag": 0.15, "size_curve": [[0, 1], [0.75, 1], [1, 0]]},
          "render": {"mode": "mesh", "mesh": mesh}},
         {"name": "wisp", "tier": "gpu",
          "spawn": {"mode": "burst", "count": 1, "life": [0.3, 0.5], "size": [0.03, 0.05], "inherit": 0.6, "color": [0.75, 0.75, 0.75, 0.18]},

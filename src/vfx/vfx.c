@@ -73,7 +73,7 @@ static bool cb_raycast(void *ctx, vec3 from, vec3 delta, vec3 *hit, vec3 *normal
     return true;
 }
 
-// Material -> sound class (impacts, casings, debris): hard / metal / wood / soft / glass / water / flesh.
+// Material -> sound class (impacts, debris): hard / metal / wood / soft / glass / water / flesh.
 static const char *surface_sound_class(int m) {
     switch (m) {
     case SURF_METAL_THIN: case SURF_METAL_THICK: return "metal";
@@ -86,7 +86,8 @@ static const char *surface_sound_class(int m) {
     }
 }
 
-// "<mesh>_<material>" from the CPU tier ("casing_rifle_concrete") -> "<kind>_<class>" ("casing_hard").
+// "<mesh>_<material>" from the CPU tier ("shard_concrete") -> "debris_<class>" ("debris_hard").
+// Casings never collide, so they never get here (they are silent).
 static void cb_sound(void *ctx, const char *name, vec3 pos, float volume) {
     (void)ctx;
     char kind[32];
@@ -102,12 +103,9 @@ static void cb_sound(void *ctx, const char *name, vec3 pos, float volume) {
     }
     const char *cls = surface_sound_class(m < 0 ? SURF_DEFAULT : m);
     if (!strcmp(kind, "shard") && m == SURF_GLASS) { audio_play("shard_glass", pos, volume, SND_SFX); return; }
-    if (!strcmp(kind, "shell")) cls = (m == SURF_DIRT || m == SURF_SAND || m == SURF_GRASS || m == SURF_WATER) ? "soft" : "hard";
-    if (!strcmp(kind, "casing") && m == SURF_FLESH) cls = "soft";
-    if (strcmp(kind, "casing") && strcmp(kind, "shell")) {
-        strcpy(kind, "debris");
-        cls = (!strcmp(cls, "soft") || !strcmp(cls, "water") || !strcmp(cls, "flesh")) ? "soft" : "hard";
-    }
+    if (!strcmp(kind, "casing") || !strcmp(kind, "shell")) return;   // casings are silent
+    strcpy(kind, "debris");
+    cls = (!strcmp(cls, "soft") || !strcmp(cls, "water") || !strcmp(cls, "flesh")) ? "soft" : "hard";
     char snd[64];
     snprintf(snd, sizeof(snd), "%s_%s", kind, cls);
     audio_play(snd, pos, volume, SND_SFX);
@@ -488,20 +486,20 @@ static int cmp_sort(const void *a, const void *b) {
     return da < db ? 1 : (da > db ? -1 : 0);   // far first
 }
 
-static void push_mesh(const VfxCpuParticle *p, const VfxEmitterDef *e, vec4 col) {
-    if (!V->meshes) return;
-    // Casings / shards: small boxes (shape from the mesh name).
-    vec3 half = v3(p->size * 0.5f, p->size * 0.5f, p->size * 0.5f);
+static void push_mesh(const VfxCpuParticle *p, const VfxEmitterDef *e, vec4 col, float size) {
+    if (!V->meshes || size <= 0.0f) return;
+    // Casings / shards: small boxes (shape from the mesh name); size includes the size curve.
+    vec3 half = v3(size * 0.5f, size * 0.5f, size * 0.5f);
     const char *m = e->render.mesh;
     MeshId mesh = V->meshes->cube;
     if (!strncmp(m, "casing", 6) || !strncmp(m, "shell", 5)) {
         mesh = V->meshes->cylinder;
-        half = v3(p->size * 0.18f, p->size * 0.5f, p->size * 0.18f);
-        if (strstr(m, "shotgun")) half = v3(p->size * 0.3f, p->size * 0.5f, p->size * 0.3f);
+        half = v3(size * 0.18f, size * 0.5f, size * 0.18f);
+        if (strstr(m, "shotgun")) half = v3(size * 0.3f, size * 0.5f, size * 0.3f);
     } else if (strstr(m, "glass")) {
-        half = v3(p->size * 0.5f, p->size * 0.04f, p->size * 0.35f);
+        half = v3(size * 0.5f, size * 0.04f, size * 0.35f);
     } else if (strstr(m, "wood") || strstr(m, "splinter")) {
-        half = v3(p->size * 0.12f, p->size * 0.1f, p->size * 0.5f);
+        half = v3(size * 0.12f, size * 0.1f, size * 0.5f);
     }
     DrawItem di;
     memset(&di, 0, sizeof(di));
@@ -566,7 +564,7 @@ static int build_sprites(vec3 cam, int *out_add) {
         vec4 cc = vfx_curve_eval(&u->color_curve, tl);
         vec4 col = v4(p->color.x * cc.x, p->color.y * cc.y, p->color.z * cc.z, p->color.w * cc.w);
         u8 mode = e->render.mode;
-        if (mode == VFX_RENDER_MESH) { push_mesh(p, e, col); continue; }
+        if (mode == VFX_RENDER_MESH) { push_mesh(p, e, col, size); continue; }
         if (mode == VFX_RENDER_NONE) continue;
         float frame = p->frame;
         if (u->frame_over_life && e->render.texture_id >= 0) {

@@ -7,7 +7,7 @@
 // Two simulation tiers:
 //   GPU  mass particles: spawned by records the CPU queues each frame, simulated in compute
 //        (vk_vfx.c, shaders/vfx_*.comp), never read back
-//   CPU  few physics-interacting particles (casings, large debris, ribbons, deterministic
+//   CPU  few physics-interacting particles (large debris, ribbons, mesh casings, deterministic
 //        emitters): simulated here at the fixed tick with Jolt raycasts, rendered as meshes or as
 //        CPU sprites through the same particle shaders
 #ifndef DG_VFX_TYPES_H
