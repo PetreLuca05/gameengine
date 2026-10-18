@@ -410,7 +410,8 @@ GitHub Actions `platforms.yml`. Branch `claude/macos-port` (now `claude/nanite-m
 | `test_mapgen` vegetation raster golden | = | = | = | = |
 | vgeo GPU harness (`vgeo_raster`, `_stream`, `_skinned`, `_foliage`; nanite branch) | llvmpipe, 64-bit **and** forced 32-bit writes | no GPU on the runner (skipped) | **MoltenVK on the runner's Apple paravirtual GPU**: 32-bit writes, vertex pulling; HW / SW depth within 1e-5 of the CPU reference | no GPU (skipped) |
 | SPIR-V -> MSL (SPIRV-Cross) | 139 / 139 (7 never loaded on Metal) | — | 139 / 139, then `xcrun metal` AIR compile | — |
-| Universal build + Deadground.app (ad-hoc signed) | — | — | `deadground` fat x86_64 + arm64 (x86_64 slice built under Rosetta); universal MoltenVK in `Contents/Frameworks`; `codesign --verify --strict` passes; uploaded as the `Deadground-macos-universal` artifact | — |
+| The game on MoltenVK (`--test`, dev room, 120 frames + screenshot) | — | — | runs on 'Apple Paravirtual device' (MoltenVK 1.4.2, API 1.3): portability subset logged, swapchain 1024x653 fifo, screenshot saved, exit 0 (commit `5d3085e`). One earlier run (`5d98b4f`) aborted (exit 134) before that step's log tail was reported; not reproduced since. A failure now posts the log tail as an error annotation | — |
+| Universal build + Deadground.app (ad-hoc signed) | — | — | `deadground` fat x86_64 + arm64 (x86_64 slice built under Rosetta); universal MoltenVK in `Contents/Frameworks`; `codesign --verify --strict` passes; uploaded as the `Deadground-macos-universal` artifact (765 MB bundle without the vgeo_test scenes) | — |
 
 Local checks in this repository's container (Linux, llvmpipe, Xvfb):
 * The game runs (`--test`, dev room).
@@ -425,6 +426,8 @@ Bugs only the Mac / clang / MSVC CI could find, each fixed:
 * A shader function named `bias` collided with `metal::bias` after SPIRV-Cross, so the SW raster pipelines failed to create on Metal.
 * `ru_maxrss` is in bytes on macOS.
 * Jolt's Visual Studio project has no RelWithDebInfo configuration (CI builds Release with that generator).
+* macOS has no `timeout(1)`: the first MoltenVK game step never started the game (a background watchdog now).
+* The buoyancy budget averaged ticks, so preemption spikes on the shared Intel VM (7.6 ms worst) failed it; it now checks the median tick.
 * The portable math made the ballistic step 50 % slower; the bit-exact `floor` / `ldexp` / `frexp` brought it back to +25 % (0.25 us per step).
 
 ## 10. Not verified here: needs Mac hardware (manual checklist)
