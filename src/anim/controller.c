@@ -104,6 +104,7 @@ static int parse_node(Parse *p, const cJSON *o) {
         if (id < 0) return -1;
         BlendNode *n = &p->d->nodes[id];
         n->kind = NK_CLIP;
+        n->hand_ik = 1.0f;
         if (strchr(o->valuestring, '{')) dg_strcpy(n->slot_pattern, sizeof(n->slot_pattern), o->valuestring);
         else n->slot = (i16)add_slot(p->d, o->valuestring);
         return id;
@@ -118,6 +119,8 @@ static int parse_node(Parse *p, const cJSON *o) {
         BlendNode *n = &p->d->nodes[id];
         n->kind = NK_CLIP;
         n->speed = jf(o, "speed", 1.0f);
+        // An authored clip that carries the arms (sprint): the hand IK fades out with its blend weight.
+        n->hand_ik = jb(o, "hand_ik", true) ? 1.0f : 0.0f;
         if (strchr(clip, '{')) dg_strcpy(n->slot_pattern, sizeof(n->slot_pattern), clip);
         else n->slot = (i16)add_slot(p->d, clip);
         return id;
@@ -400,7 +403,7 @@ bool ctrl_bind(AnimBinding *b, const ControllerDef *def, const char *set_json, c
 
 // ------------------------------------------------------------------ blend weights
 
-typedef struct Leaf { i16 clip; bool mirror, reverse; float weight; float speed; float r0, r1; } Leaf;
+typedef struct Leaf { i16 clip; bool mirror, reverse; float weight; float speed; float r0, r1; float ikw; } Leaf;
 typedef struct LeafSet { Leaf l[24]; int n; } LeafSet;
 
 static float pv(const ControllerInst *c, int p) { return (p >= 0) ? c->params[p] : 0.0f; }
@@ -525,6 +528,7 @@ static void collect(const ControllerInst *c, int node, float weight, float speed
         }
         l->weight = weight;
         l->speed = speed;
+        l->ikw = n->hand_ik;
         out->n++;
         return;
     }
@@ -553,12 +557,25 @@ static void resolve_leaves_ex(const ControllerInst *c, int node, LeafSet *ls, bo
         ls->l[0].mirror = ls->l[0].reverse = false;
         ls->l[0].r0 = 0.0f;
         ls->l[0].r1 = 1.0f;
+        ls->l[0].ikw = 1.0f;
         return;
     }
     for (int i = 0; i < m; i++) ls->l[i].weight /= sum;
 }
 
 static void resolve_leaves(const ControllerInst *c, int node, LeafSet *ls) { resolve_leaves_ex(c, node, ls, true); }
+
+// Hand IK share of a state's blend: the weight of its leaves that leave the hands to the procedural
+// hold (a sprint clip that carries the arms has "hand_ik": false).
+static float state_hand_ik(const ControllerInst *c, const StateDef *st) {
+    if (!st->hand_ik) return 0.0f;
+    if (st->node < 0) return 1.0f;
+    LeafSet ls;
+    resolve_leaves(c, st->node, &ls);
+    float ik = 0.0f;
+    for (int i = 0; i < ls.n; i++) ik += ls.l[i].weight * ls.l[i].ikw;
+    return ls.n ? saturate(ik) : 1.0f;
+}
 
 static float leaves_duration(const LeafSet *ls, const ClipLookup *cl) {
     float d = 0;
@@ -759,10 +776,10 @@ bool ctrl_hand_ik_weight(const ControllerInst *c, float *w) {
     for (int li = 0; li < c->def->layer_count; li++) {
         const LayerDef *L = &c->def->layers[li];
         const LayerState *S = &c->layer[li];
-        float cur = L->states[S->state].hand_ik ? 1.0f : 0.0f;
+        float cur = state_hand_ik(c, &L->states[S->state]);
         if (S->blend_total && S->prev_state >= 0) {
             float a = (float)S->blend_ticks / (float)S->blend_total;
-            float prev = L->states[S->prev_state].hand_ik ? 1.0f : 0.0f;
+            float prev = state_hand_ik(c, &L->states[S->prev_state]);
             cur = lerpf(prev, cur, a);
         }
         float lw = L->weight * (L->weight_param >= 0 ? c->params[L->weight_param] : 1.0f);

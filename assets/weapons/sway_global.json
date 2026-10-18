@@ -2,7 +2,7 @@
   "_comment": "The ONE weapon sway profile (docs/FIRE_ANIM.md 'Global sway'): every held item sways exactly the same. Weapons, their mass and their attachments never change it; only an optic's own steadiness (assets/attachments sway_scale) scales the ADS sway, and the hip / ADS multipliers below. Weight and character come from the fire animation only.",
   "breathing": { "rot": 0.35, "freq": 0.55, "pos": 0.0025, "pos_freq": 0.25 },
   "look_lag": { "rot": 1.6, "pos": 0.004, "max": 5.0, "stiffness": 140, "damping": 18 },
-  "bob": { "pos": 0.012, "rot": 1.2, "freq": 1.0, "sprint": 1.4 },
+  "bob": { "pos": 0.012, "rot": 1.2, "freq": 1.0 },
   "landing": { "stiffness": 110, "damping": 13, "gain": 0.06, "max": 0.9, "pitch": 55 },
   "hip": { "breathing": 1.0, "look_lag": 1.0, "bob": 1.0, "landing": 1.0 },
   "ads": { "breathing": 0.35, "look_lag": 0.25, "bob": 0.15, "landing": 0.5 },

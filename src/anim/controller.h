@@ -50,6 +50,7 @@ typedef struct BlendNode {
     i16 slot;                      // NK_CLIP: clip slot
     char slot_pattern[32];         // NK_CLIP: "reload_{weapon}" resolved per weapon type
     float speed;
+    float hand_ik;                 // NK_CLIP: 1 = the procedural hold owns the hands, 0 = the clip does ("hand_ik": false)
     i16 param_x, param_y;
     int child_count;
     i16 child[AC_MAX_CHILDREN];

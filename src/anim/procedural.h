@@ -86,7 +86,7 @@ typedef struct ProcParams {
     // foot IK
     float foot_ray_up, foot_ray_down, pelvis_max_drop, foot_align, foot_smooth, foot_height;
     // lean
-    float slope_lean, accel_lean;
+    float slope_lean;
     // hold
     HoldStyle styles[HOLD_STYLE_MAX];
     int style_count;

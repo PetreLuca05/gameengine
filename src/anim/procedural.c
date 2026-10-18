@@ -84,7 +84,6 @@ bool proc_params_load(ProcParams *p, const cJSON *root) {
     p->foot_smooth = 18.0f;
     p->foot_height = 0.08f;
     p->slope_lean = 0.35f;
-    p->accel_lean = 0.012f;
     p->style_blend_time = 0.2f;
     for (int i = 0; i < HOLD_COUNT; i++) p->styles[i] = default_style(i);
     p->style_count = HOLD_COUNT;
@@ -119,7 +118,7 @@ bool proc_params_load(ProcParams *p, const cJSON *root) {
                 p->foot_height = jf(fo, "foot_height", p->foot_height);
             }
             const cJSON *le = cJSON_GetObjectItemCaseSensitive(pr, "lean");
-            if (le) { p->slope_lean = jf(le, "slope", p->slope_lean); p->accel_lean = jf(le, "accel", p->accel_lean); }
+            if (le) p->slope_lean = jf(le, "slope", p->slope_lean);
         }
         const cJSON *hs = cJSON_GetObjectItemCaseSensitive(root, "hold_styles");
         const cJSON *e;
