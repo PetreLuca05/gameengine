@@ -33,15 +33,15 @@ SDL3, Vulkan-Headers, Jolt / joltc and ENet are downloaded by CMake FetchContent
 (network needed on the first configure); everything else is vendored in `third_party/`.
 
 
-| | Windows | Linux |
-|---|---|---|
-| Compiler | MSVC 2019 16.11+ (`cl`), or clang-cl | GCC 11+ or Clang 14+ |
-| CMake | 3.24+ (4.x works) | 3.24+ |
-| Generator | Ninja (recommended) or Visual Studio | Ninja or Make |
-| GLSL compiler | `glslc` (Vulkan SDK) **or** `glslang`/`glslangValidator` | same |
-| GPU | Vulkan 1.3 driver | Vulkan 1.3 driver |
-| Optional | Vulkan SDK (validation layers) | `libvulkan-dev`, validation layers |
-| Linux packages | — | SDL3 build deps: `libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxss-dev libwayland-dev libxkbcommon-dev libdecor-0-dev libasound2-dev libpulse-dev` |
+| | Windows | Linux | macOS (11+, x86_64 / arm64) |
+|---|---|---|---|
+| Compiler | MSVC 2019 16.11+ (`cl`), or clang-cl | GCC 11+ or Clang 14+ | Apple clang (Xcode 15+ command line tools) |
+| CMake | 3.24+ (4.x works) | 3.24+ | 3.24+ |
+| Generator | Ninja (recommended) or Visual Studio | Ninja or Make | Ninja (recommended) |
+| GLSL compiler | `glslc` (Vulkan SDK) **or** `glslang`/`glslangValidator` | same | `glslc` / `glslang` (Homebrew or Vulkan SDK) |
+| GPU | Vulkan 1.3 driver | Vulkan 1.3 driver | Metal GPU via MoltenVK 1.3+ (Apple M1+, Intel / AMD Macs) |
+| Optional | Vulkan SDK (validation layers) | `libvulkan-dev`, validation layers | LunarG Vulkan SDK (universal MoltenVK, loader, validation) |
+| Linux packages | — | SDL3 build deps: `libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxss-dev libwayland-dev libxkbcommon-dev libdecor-0-dev libasound2-dev libpulse-dev` | — (see [docs/PLATFORM_MACOS.md](docs/PLATFORM_MACOS.md)) |
 
 All other dependencies are fetched or vendored:
 

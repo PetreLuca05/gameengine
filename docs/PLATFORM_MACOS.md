@@ -305,35 +305,58 @@ Steam: `+connect_lobby <id>` arrives through `argv` as on Windows; nothing macOS
 
 ## 6. Determinism (Mac <-> PC)
 
-Requirements:
-* Host and predicting client must compute bit-identical results from the same inputs: ballistics, recoil, sway, fire animation, aim.
-* Water swell is required to match as well (water uses only `sqrtf`).
+Contract:
+* Host and predicting client run these on the same inputs and must agree **bit for bit** on any platform pair:
+  * ballistics (`gameplay/ballistics`: sim, surfaces, data fit);
+  * recoil;
+  * sway;
+  * fire animation;
+  * aim.
+* Every peer also generates the open-world map (terrain raster and POI build) from its seed.
+* Everything else replicated is either integer-tick logic (the animation controller) or checked with
+  tolerances: the muzzle claim within `wpn_muzzle_tolerance` 0.3 m, and vehicles reconciled to the host.
 
-Two things broke that across platforms:
-1. **FMA contraction.** arm64 clang fuses `a * b + c` by default; x86_64 builds without `-mfma` do
-   not. `-ffp-contract=off` now applies to every engine target on clang / gcc. MSVC `/fp:precise`
-   does not contract.
-2. **libm.** `sinf` / `expf` / `powf` / `tanf` / ... are not correctly rounded and differ between
-   Apple libm, glibc and the MSVC CRT. The deterministic modules now call `src/core/detmath`.
-   * It evaluates in double with IEEE-exact operations and fixed polynomials, then rounds once.
-   * The result is 0 ulp from correctly rounded over the test sweeps.
-   * `sqrtf` is exact everywhere and stays.
+What broke it, and the fixes:
+1. **FMA contraction.**
+   * arm64 clang fuses `a * b + c` by default; x86_64 without `-mfma` does not.
+   * Fix: `-ffp-contract=off` for every engine target on clang / gcc. MSVC `/fp:precise` does not contract.
+2. **libm.**
+   * `sinf` / `expf` / `powf` / `tanf` / ... differ in the last bits between Apple libm, glibc and the MSVC CRT.
+   * Fix: the contract modules and the map generator call `src/core/detmath`.
+     * It evaluates in double with IEEE-exact operations and fixed polynomials, then rounds once.
+     * The result is 0 ulp from correctly rounded over the test sweeps.
+   * Translation units that `#define DG_DETMATH` before their includes get the `core/dgmath.h`
+     helpers (`exp_decay`, `dir_from_angles`, `quat_axis_angle`, ...) on detmath too.
+   * Everything else keeps the fast libm.
+3. **Unspecified evaluation order.**
+   * C leaves the order of function arguments and of `+` / `|` operands open: clang goes left to right, gcc / MSVC usually right to left.
+   * RNG draws inside one argument list therefore drew in a different order on a Mac:
+     * the transonic random walk (`bal_sim.c`);
+     * the Irwin-Hall sums (`bal_sim.c`, `recoil.c`);
+     * 18 statements of the POI generator. Zombieland built 38,052 primitives with gcc and 38,040 with clang.
+   * Fix: one draw per statement, in the gcc / MSVC order, so existing layouts are kept.
+   * A scan of `src/` finds no other case outside cosmetic local particles (`gameplay/effects.c`).
 
-`test_detmath` runs a golden hash over 20k inputs.
-* It is identical with gcc and clang at -O0 / -O3 and on x86-32 SSE.
-* `-ffp-contract=fast -march=haswell` changes it, and the test catches that.
-* CI runs it on Linux x86_64, Windows MSVC, macOS arm64 and macOS x86_64.
+Tests: golden hashes from Linux x86_64 gcc. CI checks them with MSVC (Windows), arm64 clang and x86_64 clang (macOS).
 
-Jolt is not bit-identical across architectures by default: NEON vs SSE, plus FMA. Vehicles are predicted by the driver and
+| Test | What is hashed |
+|---|---|
+| `test_detmath` | 20k inputs through every kernel |
+| `test_ballistics` | every cartridge x both drag models, wind, transonic walk, zero solve |
+| `test_recoil` | pattern steps, shots, recovery ticks, spread |
+| `test_mapgen` | vegetation raster; the POI hash is printed for any map (Zombieland checked locally: gcc == clang) |
+
+Locally, gcc and clang trees produce identical hashes and pass every test.
+
+Jolt is not bit-identical across architectures by default: NEON vs SSE, and FMA. Vehicles are predicted by the driver and
 reconciled, so this costs corrections, not desyncs.
-* `-DDG_JOLT_CROSS_PLATFORM_DETERMINISTIC=ON` (all platforms of a session) turns on
-  `JPH_CROSS_PLATFORM_DETERMINISTIC`. Its cost is a few % of physics time.
+* `-DDG_JOLT_CROSS_PLATFORM_DETERMINISTIC=ON`, set on every platform of a session, turns on `JPH_CROSS_PLATFORM_DETERMINISTIC`. Its cost is a few % of physics time.
 * The macOS x86_64 slice builds Jolt without FMA in either case.
 
-Cross-machine LAN check (manual, needs a Mac and a PC): `tools/tests/bal_net.sh` with the host on one machine and
-`+connect <ip>` on the other.
-* `bal_net_compare.py` compares the host's and the client's predicted trajectories.
-* They must be identical, as between two PCs.
+Manual Mac <-> PC session: `tools/tests/bal_net.sh` with the host on one machine and the client
+`+connect <ip>` on the other. `bal_net_compare.py` checks predicted vs authoritative hits within 0.25 m. With the
+fixes above the two logs' `predict` / `host` positions should match exactly. Compare the printed
+coordinates, not only the verdict.
 
 ## 7. Shaders on Metal
 
