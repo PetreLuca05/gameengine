@@ -13,11 +13,11 @@
   "motion_vectors": false,
   "lighting": "none",
   "premultiplied": false,
-  "placeholder": true,
+  "placeholder": false,
   "kind": "normal",
-  "source": "procedural",
+  "source": "higgsfield-ai/soul/standard",
   "recipe": "assets/vfx/gen/blood_stain.json",
-  "recipe_hash": "93003872106dd4f76d53d8d2",
-  "generated": "2026-10-15T22:46:39",
+  "recipe_hash": "8e56bfc9cd8a7f240c608a41",
+  "generated": "2026-10-18T02:48:41",
   "tool_version": 3
 }

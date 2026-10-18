@@ -1,0 +1,23 @@
+{
+  "file": "blood_splatter.png",
+  "width": 512,
+  "height": 512,
+  "grid": [
+    4,
+    4
+  ],
+  "frames": 16,
+  "variants": 16,
+  "fps": 30,
+  "loop": false,
+  "motion_vectors": false,
+  "lighting": "none",
+  "premultiplied": true,
+  "placeholder": true,
+  "kind": "decal",
+  "source": "procedural",
+  "recipe": "assets/vfx/gen/blood_splatter.json",
+  "recipe_hash": "631665df4d8885a6b44a9048",
+  "generated": "2026-10-15T22:46:38",
+  "tool_version": 3
+}

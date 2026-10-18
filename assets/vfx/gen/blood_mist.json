@@ -19,5 +19,30 @@
     "density": 0.9,
     "detail": 7.0
   },
-  "name": "blood_mist"
+  "name": "blood_mist",
+  "model": "kling-video/v2.5-turbo/pro/text-to-video",
+  "duration": 5,
+  "aspect_ratio": "1:1",
+  "cfg_scale": 0.6,
+  "negative_prompt": "camera movement, zoom, text, watermark, logo, people, gun, background objects, ground, colored background, cartoon",
+  "prompt": "high speed footage of a sudden burst of fine white aerosol spray mist exploding outward from the center and quickly dispersing into a thin haze, static locked-off camera, the mist stays centered and fully inside the frame, evenly lit, pure black background",
+  "background": "black",
+  "alpha": {
+    "black": 0.04,
+    "white": 0.95,
+    "gamma": 1.6,
+    "albedo": [
+      1.0,
+      1.0,
+      1.0
+    ]
+  },
+  "trim": [
+    0.02,
+    0.5
+  ],
+  "vignette": {
+    "inner": 0.55,
+    "outer": 1.0
+  }
 }

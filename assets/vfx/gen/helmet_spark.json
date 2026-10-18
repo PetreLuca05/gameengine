@@ -20,5 +20,8 @@
   },
   "api_variants": 1,
   "prompt": "long exposure photograph of a single bright orange metal spark streak from a bullet ricochet, centered, pure black background, no text",
-  "name": "helmet_spark"
+  "name": "helmet_spark",
+  "augment_ops": [
+    "h"
+  ]
 }

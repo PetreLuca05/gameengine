@@ -13,11 +13,11 @@
   "motion_vectors": false,
   "lighting": "none",
   "premultiplied": true,
-  "placeholder": true,
+  "placeholder": false,
   "kind": "decal",
-  "source": "procedural",
+  "source": "higgsfield-ai/soul/standard",
   "recipe": "assets/vfx/gen/blood_stain_cloth.json",
-  "recipe_hash": "da22ac774855464e54fc60d7",
-  "generated": "2026-10-15T22:46:39",
+  "recipe_hash": "aee883e2db267115a015ae39",
+  "generated": "2026-10-18T02:46:56",
   "tool_version": 3
 }

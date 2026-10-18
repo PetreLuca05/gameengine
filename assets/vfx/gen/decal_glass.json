@@ -14,5 +14,26 @@
     "kind": "glass"
   },
   "edge_margin": 0.04,
-  "name": "decal_glass"
+  "name": "decal_glass",
+  "model": "higgsfield-ai/soul/standard",
+  "aspect_ratio": "1:1",
+  "resolution": "1080p",
+  "background": "black",
+  "alpha": {
+    "black": 0.05,
+    "white": 0.7,
+    "gamma": 1.0
+  },
+  "api_variants": 1,
+  "prompt": "macro photograph of a single bullet hole in a pane of clear glass, a small hole with a white spiderweb of radial and concentric cracks around it, centered, filling most of the frame, photographed against a pure black background, no text, realistic photograph, not cartoon, not illustration",
+  "crop": [
+    0.27,
+    0.31,
+    0.63,
+    0.71
+  ],
+  "vignette": {
+    "inner": 0.55,
+    "outer": 0.98
+  }
 }

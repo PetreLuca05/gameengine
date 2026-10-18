@@ -8,5 +8,30 @@
   "placeholder": {
     "type": "ember"
   },
-  "name": "ember"
+  "name": "ember",
+  "model": "higgsfield-ai/soul/standard",
+  "aspect_ratio": "1:1",
+  "resolution": "1080p",
+  "background": "black",
+  "alpha": {
+    "black": 0.08,
+    "white": 0.9,
+    "gamma": 0.55,
+    "albedo": [
+      1.0,
+      0.94,
+      0.85
+    ],
+    "channel": "max",
+    "floor": 0.0
+  },
+  "api_variants": 1,
+  "pad": 0.0,
+  "prompt": "macro photograph of a single tiny glowing round hot ember spark with a soft glow halo, centered, small in the frame, pure black background, no text, realistic photograph, not cartoon, not illustration",
+  "crop": [
+    0.37,
+    0.37,
+    0.63,
+    0.63
+  ]
 }

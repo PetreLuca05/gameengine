@@ -25,5 +25,6 @@
   },
   "name": "decal_concrete",
   "fill_holes": true,
-  "api_variants": 1
+  "api_variants": 1,
+  "height_from": "luma"
 }

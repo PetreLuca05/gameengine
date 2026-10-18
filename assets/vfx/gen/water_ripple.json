@@ -8,5 +8,10 @@
   "placeholder": {
     "type": "ripple"
   },
-  "name": "water_ripple"
+  "name": "water_ripple",
+  "_rejected_generation": {
+    "model": "higgsfield-ai/soul/standard",
+    "prompt": "orthographic top down photograph of a single set of two concentric circular ripple rings spreading on perfectly calm black water at night, the ring crests glint white, centered, the rings fully inside the frame, the water around them pure black, no text, realistic photograph, not cartoon, not illustration",
+    "reason": "perspective ellipse (about 6:1); stretched to a circle it is a fat streaky single ring, worse than the procedural double ring"
+  }
 }

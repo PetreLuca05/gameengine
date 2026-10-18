@@ -16,12 +16,23 @@
   "model": "higgsfield-ai/soul/standard",
   "aspect_ratio": "1:1",
   "resolution": "1080p",
-  "background": "green",
+  "background": "corners",
   "alpha": {
-    "tol": 0.1,
-    "soft": 0.12
+    "tol": 0.12,
+    "soft": 0.12,
+    "floor": 0.04
   },
   "api_variants": 1,
-  "prompt": "orthographic photograph of a soft irregular blood stain soaked into skin, darker edges, centered, isolated on a solid flat pure green (#00FF00) chroma key background, even soft lighting, no shadows, no text, forensic reference photograph, realistic, not cartoon",
-  "name": "blood_stain"
+  "prompt": "close up photograph of a soft irregular smear of dark blood soaked into pale smooth skin, darker at the edges, centered, the plain flat surface fills the entire frame edge to edge, shot straight on, flat even soft lighting, realistic photograph, not cartoon, not illustration, no text",
+  "name": "blood_stain",
+  "vignette": {
+    "inner": 0.5,
+    "outer": 0.95
+  },
+  "crop": [
+    0.16,
+    0.03,
+    0.84,
+    0.97
+  ]
 }

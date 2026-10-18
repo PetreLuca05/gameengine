@@ -1,0 +1,23 @@
+{
+  "file": "flash_side.png",
+  "width": 512,
+  "height": 512,
+  "grid": [
+    2,
+    2
+  ],
+  "frames": 4,
+  "variants": 4,
+  "fps": 30,
+  "loop": false,
+  "motion_vectors": false,
+  "lighting": "none",
+  "premultiplied": true,
+  "placeholder": false,
+  "kind": "emissive",
+  "source": "higgsfield-ai/soul/standard",
+  "recipe": "assets/vfx/gen/flash_side.json",
+  "recipe_hash": "1ad7d836c2de6d67804e7353",
+  "generated": "2026-10-15T16:14:30",
+  "tool_version": 3
+}

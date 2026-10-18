@@ -16,12 +16,21 @@
   "model": "higgsfield-ai/soul/standard",
   "aspect_ratio": "1:1",
   "resolution": "1080p",
-  "background": "green",
+  "background": "corners",
   "alpha": {
-    "tol": 0.1,
+    "tol": 0.09,
     "soft": 0.12
   },
   "api_variants": 1,
-  "prompt": "orthographic top down photograph of a pool of thick dark blood on the floor, smooth glossy irregular outline, centered, filling two thirds of the frame, isolated on a solid flat pure green (#00FF00) chroma key background, even soft lighting, no shadows, no text, forensic reference photograph, realistic, not cartoon",
-  "name": "blood_pool"
+  "prompt": "close up photograph of top down view of a single pool of thick dark glossy blood on a plain smooth white floor, one irregular rounded mass filling two thirds of the frame, centered, the plain flat surface fills the entire frame edge to edge, shot straight on, flat even soft lighting, realistic photograph, not cartoon, not illustration, no text",
+  "name": "blood_pool",
+  "vignette": {
+    "inner": 0.6,
+    "outer": 1.0
+  },
+  "sheet": {
+    "merge": 2,
+    "min_rel": 0.2
+  },
+  "pad": 0.06
 }

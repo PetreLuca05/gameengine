@@ -19,5 +19,21 @@
     "model": "higgsfield-ai/soul/standard",
     "prompt": "macro photograph, orthographic top-down view, of a single bullet hole punched through painted steel plate with a bright bare metal rim and a dent, centered, filling about two thirds of the frame, isolated on a solid flat pure green (#00FF00) chroma key background, even soft lighting, no shadows, no text",
     "reason": "model returned a pipe / plank, not a hole decal"
+  },
+  "model": "higgsfield-ai/soul/standard",
+  "aspect_ratio": "1:1",
+  "resolution": "1080p",
+  "background": "corners",
+  "alpha": {
+    "tol": 0.16,
+    "soft": 0.12,
+    "floor": 0.3
+  },
+  "prompt": "close up photograph of a single small round bullet hole punched through a plain flat grey painted steel plate, a dark hole with a narrow ring of bright scratched bare steel where the paint flaked off, the hole is small, about one tenth of the frame, centered, the plain flat surface fills the entire frame edge to edge, shot straight on, flat even soft lighting, realistic photograph, not cartoon, not illustration, no text",
+  "api_variants": 1,
+  "height_from": "luma",
+  "vignette": {
+    "inner": 0.1,
+    "outer": 0.22
   }
 }

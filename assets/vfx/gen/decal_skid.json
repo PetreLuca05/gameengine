@@ -1,0 +1,34 @@
+{
+  "name": "decal_skid",
+  "kind": "decal",
+  "grid": [
+    1,
+    1
+  ],
+  "variants": 1,
+  "cell": 128,
+  "model": "higgsfield-ai/soul/standard",
+  "aspect_ratio": "1:1",
+  "resolution": "1080p",
+  "background": "corners",
+  "alpha": {
+    "tol": 0.09,
+    "soft": 0.12
+  },
+  "api_variants": 1,
+  "fit": "stretch",
+  "pad": 0.0,
+  "edge_margin": 0.04,
+  "crop": [
+    0.0,
+    0.2,
+    1.0,
+    0.8
+  ],
+  "prompt": "top down photograph of a straight black rubber tyre skid mark running horizontally across the whole frame from the left edge to the right edge on plain light grey concrete, a streaky dark band about one third of the frame tall with soft frayed edges and fine lines along its length, the concrete fills the frame, flat even lighting, realistic photograph, not cartoon, not illustration, no text",
+  "vignette": {
+    "inner": 0.55,
+    "outer": 1.0,
+    "axis": "v"
+  }
+}

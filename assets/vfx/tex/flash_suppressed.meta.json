@@ -13,11 +13,11 @@
   "motion_vectors": false,
   "lighting": "none",
   "premultiplied": true,
-  "placeholder": true,
+  "placeholder": false,
   "kind": "emissive",
-  "source": "procedural",
+  "source": "higgsfield-ai/soul/standard",
   "recipe": "assets/vfx/gen/flash_suppressed.json",
-  "recipe_hash": "f031fcb0aa9dd569e6e25255",
-  "generated": "2026-10-15T16:14:30",
+  "recipe_hash": "67b85c2db7a2252f6f685797",
+  "generated": "2026-10-18T02:46:59",
   "tool_version": 3
 }

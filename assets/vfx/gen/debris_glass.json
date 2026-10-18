@@ -17,5 +17,17 @@
     "translucent": 0.6,
     "roughness": 0.1
   },
-  "name": "debris_glass"
+  "name": "debris_glass",
+  "model": "higgsfield-ai/soul/standard",
+  "aspect_ratio": "1:1",
+  "resolution": "1080p",
+  "background": "corners",
+  "alpha": {
+    "tol": 0.06,
+    "soft": 0.14
+  },
+  "api_variants": 1,
+  "sheet": {},
+  "pad": 0.08,
+  "prompt": "macro photograph, orthographic top-down view, of about twenty small sharp shards of broken clear glass with bright glinting edges scattered apart, every piece separate with clear space around it, no piece touching another or the edge of the frame, pure black background, no text, realistic photograph, not cartoon, not illustration"
 }

@@ -13,11 +13,11 @@
   "motion_vectors": false,
   "lighting": "none",
   "premultiplied": true,
-  "placeholder": true,
+  "placeholder": false,
   "kind": "decal",
-  "source": "procedural",
+  "source": "higgsfield-ai/soul/standard",
   "recipe": "assets/vfx/gen/decal_tile.json",
-  "recipe_hash": "56dc9bb0ccd6a5bc9027dfb0",
-  "generated": "2026-10-15T16:10:29",
+  "recipe_hash": "d0691461ab6bc735965388f5",
+  "generated": "2026-10-18T02:52:36",
   "tool_version": 3
 }

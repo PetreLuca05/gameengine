@@ -13,11 +13,11 @@
   "motion_vectors": false,
   "lighting": "none",
   "premultiplied": true,
-  "placeholder": true,
+  "placeholder": false,
   "kind": "emissive",
-  "source": "procedural",
+  "source": "higgsfield-ai/soul/standard",
   "recipe": "assets/vfx/gen/ember.json",
-  "recipe_hash": "5d9eb49238ae10a50e624448",
-  "generated": "2026-10-15T16:10:56",
+  "recipe_hash": "b5e7447675c5867a68dcae44",
+  "generated": "2026-10-18T02:49:49",
   "tool_version": 3
 }

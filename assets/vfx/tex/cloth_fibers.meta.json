@@ -13,11 +13,11 @@
   "motion_vectors": false,
   "lighting": "none",
   "premultiplied": true,
-  "placeholder": true,
+  "placeholder": false,
   "kind": "sprite",
-  "source": "procedural",
+  "source": "higgsfield-ai/soul/standard",
   "recipe": "assets/vfx/gen/cloth_fibers.json",
-  "recipe_hash": "8417a3c27e311d1b7f3360c6",
-  "generated": "2026-10-15T16:10:22",
+  "recipe_hash": "435a24ffc606b95e80224979",
+  "generated": "2026-10-18T02:42:26",
   "tool_version": 3
 }

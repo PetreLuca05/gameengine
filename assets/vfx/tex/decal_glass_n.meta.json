@@ -13,11 +13,11 @@
   "motion_vectors": false,
   "lighting": "none",
   "premultiplied": false,
-  "placeholder": true,
+  "placeholder": false,
   "kind": "normal",
-  "source": "procedural",
+  "source": "higgsfield-ai/soul/standard",
   "recipe": "assets/vfx/gen/decal_glass.json",
-  "recipe_hash": "922390751536793785e74a9f",
-  "generated": "2026-10-15T16:10:28",
+  "recipe_hash": "6a4bf16a4490ea3a1efed332",
+  "generated": "2026-10-18T02:48:48",
   "tool_version": 3
 }

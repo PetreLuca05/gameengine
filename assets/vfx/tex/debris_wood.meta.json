@@ -13,11 +13,11 @@
   "motion_vectors": false,
   "lighting": "none",
   "premultiplied": true,
-  "placeholder": true,
+  "placeholder": false,
   "kind": "sprite",
-  "source": "procedural",
+  "source": "higgsfield-ai/soul/standard",
   "recipe": "assets/vfx/gen/debris_wood.json",
-  "recipe_hash": "b5bb91078ec57e9aed029376",
-  "generated": "2026-10-15T16:10:23",
+  "recipe_hash": "9a4ff8147645a9493f5eb61d",
+  "generated": "2026-10-18T02:44:12",
   "tool_version": 3
 }

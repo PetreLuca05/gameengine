@@ -19,5 +19,18 @@
     "model": "higgsfield-ai/soul/standard",
     "prompt": "macro photograph, orthographic top-down view, of a single bullet hole in a wooden plank with splintered torn wood fibers around it, centered, filling about two thirds of the frame, isolated on a solid flat pure green (#00FF00) chroma key background, even soft lighting, no shadows, no text",
     "reason": "model returned a pipe / plank, not a hole decal"
-  }
+  },
+  "model": "higgsfield-ai/soul/standard",
+  "aspect_ratio": "1:1",
+  "resolution": "1080p",
+  "background": "green",
+  "alpha": {
+    "tol": 0.1,
+    "soft": 0.12
+  },
+  "prompt": "macro photograph, orthographic top-down view, of a single bullet hole surrounded by a ring of torn splintered pale wood fibers, a dark hole in the middle, only the hole and its splinters are visible like a cut out sticker, centered, filling about two thirds of the frame, isolated on a solid flat pure green (#00FF00) chroma key background, even soft lighting, no shadows, no text, realistic photograph, not cartoon, not illustration",
+  "fill_holes": true,
+  "api_variants": 1,
+  "height_from": "luma",
+  "pad": 0.3
 }

@@ -7,12 +7,28 @@
   "variants": 4,
   "cell": 128,
   "normal_map": true,
-  "normal_strength": 7.0,
+  "normal_strength": 1.5,
   "placeholder": {
     "type": "decal_hole",
     "seed": 60,
     "kind": "scorch"
   },
   "edge_margin": 0.04,
-  "name": "decal_scorch"
+  "name": "decal_scorch",
+  "model": "higgsfield-ai/soul/standard",
+  "aspect_ratio": "1:1",
+  "resolution": "1080p",
+  "background": "corners",
+  "alpha": {
+    "tol": 0.03,
+    "soft": 0.75,
+    "floor": 0.03
+  },
+  "api_variants": 1,
+  "prompt": "close up photograph of a soft black soot scorch mark burned onto a plain white painted wall, an irregular smudged burn darker in the middle and fading out to nothing at the edges, centered, the plain flat surface fills the entire frame edge to edge, shot straight on, flat even soft lighting, realistic photograph, not cartoon, not illustration, no text",
+  "vignette": {
+    "inner": 0.35,
+    "outer": 0.8
+  },
+  "pad": 0.16
 }

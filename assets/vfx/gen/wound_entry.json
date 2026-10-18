@@ -17,12 +17,17 @@
   "model": "higgsfield-ai/soul/standard",
   "aspect_ratio": "1:1",
   "resolution": "1080p",
-  "background": "green",
+  "background": "corners",
   "alpha": {
-    "tol": 0.1,
+    "tol": 0.09,
     "soft": 0.12
   },
   "api_variants": 1,
-  "prompt": "medical reference photograph, close up of a small round bullet entry wound on skin with an abrasion ring, centered, isolated on a solid flat pure green (#00FF00) chroma key background, even soft lighting, no shadows, no text, forensic reference photograph, realistic, not cartoon",
-  "name": "wound_entry"
+  "prompt": "close up photograph of a small round gunshot entry wound on pale smooth skin, a dark red hole with a thin bruised abrasion ring, the wound small in the middle, medical forensic reference photograph, centered, the plain flat surface fills the entire frame edge to edge, shot straight on, flat even soft lighting, realistic photograph, not cartoon, not illustration, no text",
+  "name": "wound_entry",
+  "vignette": {
+    "inner": 0.4,
+    "outer": 0.85
+  },
+  "height_from": "luma"
 }

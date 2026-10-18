@@ -13,5 +13,30 @@
     "type": "splash",
     "seed": 24
   },
-  "name": "water_splash"
+  "name": "water_splash",
+  "model": "kling-video/v2.5-turbo/pro/text-to-video",
+  "duration": 5,
+  "aspect_ratio": "1:1",
+  "cfg_scale": 0.6,
+  "negative_prompt": "camera movement, zoom, text, watermark, logo, people, gun, background objects, colored background, cartoon, pool, horizon",
+  "prompt": "slow motion side view footage of a single tall white water splash shooting up from a point and falling back down, a column of water with a crown of droplets, static locked-off camera, the splash centered and fully inside the frame, lit from the side, pure black background",
+  "background": "black",
+  "alpha": {
+    "black": 0.05,
+    "white": 0.55,
+    "gamma": 1.0,
+    "albedo": [
+      1.0,
+      1.0,
+      1.0
+    ]
+  },
+  "trim": [
+    0.0,
+    0.9
+  ],
+  "vignette": {
+    "inner": 0.7,
+    "outer": 1.05
+  }
 }

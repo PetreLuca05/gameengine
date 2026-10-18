@@ -149,10 +149,16 @@ half-texel inset). Textures larger than a page are halved until they fit.
 | `model` | Higgsfield model id; absent = procedural only |
 | `prompt`, `negative_prompt`, `duration`, `aspect_ratio`, `resolution`, `cfg_scale` | API parameters (images: `resolution` 720p / 1080p; video: `duration` 5 / 10) |
 | `api_variants`, `images_per_request` | how many image requests to pay for (variants); images per request |
-| `background` | black (luma key) · green / white / magenta (chroma key with despill) |
-| `alpha` | `{black, white, gamma, albedo}` luma key or `{tol, soft}` chroma key |
-| `crop` | `[x0, y0, x1, y1]` fractions kept (drops props the model added) |
+| `background` | black (luma key) · green / white / magenta (chroma key with despill) · corners (key whatever surface the image corners show: skin, a wall) |
+| `alpha` | `{black, white, gamma, albedo, channel}` luma key (`channel: max` keys dark saturated subjects by their brightest channel) or `{tol, soft}` chroma key; `floor` drops faint keyer noise |
+| `crop` | `[x0, y0, x1, y1]` fractions kept, applied before keying (drops props the model added, or the border of a "photo of a photo") |
+| `vignette` | `{inner, outer, axis}`: radial fade (or across v only, `axis: v`) in units of the half size, so surface texture far from a decal's centre goes away |
 | `fill_holes` | fill keyed-out regions not connected to the border (bullet hole centres) |
+| `sheet` | `{thresh, merge, grow, min_rel, keep_border}`: split one image of many pieces (debris, petals, drops) into the variant cells, largest first, round robin over the requests |
+| `fit`, `anchor` | `fit: stretch` resizes the content box to the whole cell (skid strips); `anchor: bottom` puts the content's base on the cell's bottom edge (axis flames) |
+| `augment_ops`, `mirror` | copies used to fill missing variants: subset of `h v r90 r270 r180` (directional sprites); `mirror` flips every source left-right |
+| `height_from` | `luma`: the normal map's height comes from darkness (crater deep, untouched surface flat) instead of alpha |
+| `blur` | soften keyed video frames (px at cell size): speckled spray becomes haze |
 | `trim` | `[t0, t1]` fraction of a video kept |
 | `pad`, `edge_fade`, `edge_margin` | fit padding, border fade |
 | `motion_vectors`, `lighting` (`sixway`/`simple`), `normal_map`, `normal_strength`, `raw` | outputs |
@@ -233,10 +239,10 @@ Budgets (measured, `flesh_test`): entry 0.012 ms average, a whole killing hit 0.
 sustained; `test_flesh` covers exit direction and thickness per part, splats behind the target,
 per-character budgets and gore off.
 
-Textures (placeholders now, Higgsfield recipes ready in `assets/vfx/gen`): `flesh_mist` (8 x 8,
-6-way), `blood_droplet`, `blood_strand`, `blood_splatter` (16 + normal), `blood_drip`, `blood_pool`,
-`wound_entry` / `wound_exit` / `wound_slash` (4 + normal), `blood_stain(_cloth)`, `bone_frag`,
-`helmet_spark`. Generate with `python tools/vfxgen/vfxgen.py <names> --max-usd <cap>`; effects
+Textures (generated with Higgsfield from the recipes in `assets/vfx/gen`; procedural originals in
+`assets/vfx/tex_placeholder`): `flesh_mist` (8 x 8, 6-way), `blood_droplet`, `blood_strand`,
+`blood_splatter` (16 + normal), `blood_drip`, `blood_pool`, `wound_entry` / `wound_exit` /
+`wound_slash` (4 + normal), `blood_stain(_cloth)`, `bone_frag`, `helmet_spark`. Generate with `python tools/vfxgen/vfxgen.py <names> --max-usd <cap>`; effects
 come from `tools/vfxgen/make_flesh_effects.py`.
 
 ### Flesh checklist

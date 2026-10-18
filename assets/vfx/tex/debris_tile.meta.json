@@ -13,11 +13,11 @@
   "motion_vectors": false,
   "lighting": "none",
   "premultiplied": true,
-  "placeholder": true,
+  "placeholder": false,
   "kind": "sprite",
-  "source": "procedural",
+  "source": "higgsfield-ai/soul/standard",
   "recipe": "assets/vfx/gen/debris_tile.json",
-  "recipe_hash": "64cb0c78e332671c4774ff5d",
-  "generated": "2026-10-15T16:10:23",
+  "recipe_hash": "61f52e6f2eaf84ee108db249",
+  "generated": "2026-10-18T02:44:11",
   "tool_version": 3
 }

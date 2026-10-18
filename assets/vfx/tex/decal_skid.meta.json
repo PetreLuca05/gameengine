@@ -13,8 +13,11 @@
   "motion_vectors": false,
   "lighting": "none",
   "premultiplied": true,
-  "placeholder": true,
+  "placeholder": false,
   "kind": "decal",
-  "source": "procedural (vehicle skid, see docs/VEHICLES.md)",
+  "source": "higgsfield-ai/soul/standard",
+  "recipe": "assets/vfx/gen/decal_skid.json",
+  "recipe_hash": "24f3536137b1d228323b66a2",
+  "generated": "2026-10-18T02:46:54",
   "tool_version": 3
 }

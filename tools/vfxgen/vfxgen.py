@@ -160,15 +160,152 @@ def _key(r, rgb, bg_ref=None):
         bl = float(np.percentile(P.luma(corners), 95))
         black = max(a.get("black", 0.04), bl + a.get("black_margin", 0.035))
         white = max(a.get("white", 0.6), black + 0.15)
+        if a.get("channel") == "max" and col is not None:
+            # Dark saturated subjects (red blood mist, an orange ember's halo): alpha from the
+            # brightest channel instead of luma, colour from the constant albedo.
+            rgb = np.repeat(rgb[..., :3].max(axis=2, keepdims=True), 3, axis=2)
         return P.alpha_from_luma(rgb, black, white, a.get("gamma", 1.0), color=col)
     keys = {"white": (1.0, 1.0, 1.0), "green": (0.0, 1.0, 0.0), "magenta": (1.0, 0.0, 1.0)}
     key = np.array(keys.get(bg, keys["green"]), np.float32)
     measured = np.median(corners, axis=0)
     spread = float(np.percentile(np.linalg.norm(corners - measured, axis=1), 90))
-    if spread < 0.12:
+    if spread < 0.12 or bg == "corners":   # corners: key whatever the background is (skin around a wound)
         key = measured   # uniform screen: key exactly its colour
     tol = a.get("tol", 0.1) + spread * 0.5
     return P.chroma_key(rgb, tuple(key), tol, a.get("soft", 0.12))
+
+
+def _floor(r, img):
+    """alpha.floor: alpha below it becomes 0 (and the rest is rescaled): drops faint keyer noise
+    (surface texture specks) so the fit's bounding box hugs the real content. Premultiplied."""
+    f = r.get("alpha", {}).get("floor", 0.0)
+    if f <= 0:
+        return img
+    a = img[..., 3:4]
+    na = np.clip((a - f) / (1.0 - f), 0, 1)
+    return img * np.where(a > 1e-4, na / np.maximum(a, 1e-4), 0)
+
+
+def _vignette(r, img):
+    """vignette {inner, outer, axis}: radial (or, with axis v, across v only) fade around the crop
+    centre, in units of the crop half size: keys away surface texture far from a decal's centre."""
+    vg = r.get("vignette")
+    if not vg:
+        return img
+    h, w = img.shape[:2]
+    c = [0.0, 0.0, 1.0, 1.0]   # images are cropped before keying, so the crop centre is the image centre
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+    dx = (xx - (c[0] + c[2]) * 0.5 * w) / max((c[2] - c[0]) * 0.5 * w, 1.0)
+    dy = (yy - (c[1] + c[3]) * 0.5 * h) / max((c[3] - c[1]) * 0.5 * h, 1.0)
+    d = np.abs(dy) if vg.get("axis") == "v" else np.sqrt(dx * dx + dy * dy)
+    t = np.clip((d - vg.get("inner", 0.5)) / max(vg.get("outer", 0.95) - vg.get("inner", 0.5), 1e-3), 0, 1)
+    return img * (1 - t * t * (3 - 2 * t))[..., None]
+
+
+def _components(a, thresh=0.12, merge=2, max_dim=384, grow=0):
+    """Connected pieces of an alpha mask (sheets: many debris chunks / flames in one image).
+    Labels a downsampled mask (merge = dilation in downsampled pixels, joins a piece's crumbs).
+    Returns [(area, (x0, y0, x1, y1) full res, mask (h, w) bool full res, touches_border)]."""
+    from collections import deque
+    h, w = a.shape
+    f = max(1, -(-max(h, w) // max_dim))
+    hs, ws = -(-h // f), -(-w // f)
+    pad = np.zeros((hs * f, ws * f), np.float32)
+    pad[:h, :w] = a
+    small = pad.reshape(hs, f, ws, f).max(axis=(1, 3)) > thresh
+    grown = small.copy()
+    for _ in range(merge):
+        g = grown.copy()
+        g[1:] |= grown[:-1]
+        g[:-1] |= grown[1:]
+        g[:, 1:] |= grown[:, :-1]
+        g[:, :-1] |= grown[:, 1:]
+        grown = g
+    lab = np.zeros((hs, ws), np.int32)
+    out = []
+    n = 0
+    for y0, x0 in zip(*np.nonzero(grown)):
+        if lab[y0, x0]:
+            continue
+        n += 1
+        lab[y0, x0] = n
+        q = deque([(y0, x0)])
+        pts = []
+        while q:
+            y, x = q.popleft()
+            pts.append((y, x))
+            for dy, dx in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                ny, nx = y + dy, x + dx
+                if 0 <= ny < hs and 0 <= nx < ws and grown[ny, nx] and not lab[ny, nx]:
+                    lab[ny, nx] = n
+                    q.append((ny, nx))
+        ys = np.array([p[0] for p in pts])
+        xs = np.array([p[1] for p in pts])
+        m = lab == n
+        area = int((m & small).sum())
+        for _ in range(grow):   # include a piece's faint fringe (spray) without merging labels
+            g = m.copy()
+            g[1:] |= m[:-1]
+            g[:-1] |= m[1:]
+            g[:, 1:] |= m[:, :-1]
+            g[:, :-1] |= m[:, 1:]
+            m = g
+        if area == 0:
+            continue
+        border = ys.min() == 0 or xs.min() == 0 or ys.max() == hs - 1 or xs.max() == ws - 1
+        full = np.repeat(np.repeat(m, f, axis=0), f, axis=1)[:h, :w]
+        box = (int(xs.min()) * f, int(ys.min()) * f, min(w, (int(xs.max()) + 1) * f), min(h, (int(ys.max()) + 1) * f))
+        out.append((area, box, full, bool(border)))
+    out.sort(key=lambda c: -c[0])
+    return out
+
+
+def _fit(r, img, cell):
+    """Fits keyed content (premultiplied) into a cell. fit: square (default, centred) | stretch
+    (bbox resized to the whole cell: skid strips); anchor: bottom puts the content's base on the
+    cell's bottom edge (axis quads: flames grow up out of the bore at the bottom)."""
+    pad = r.get("pad", 0.05)
+    mode = r.get("fit", "square")
+    anchor = r.get("anchor", "center")
+    if mode == "square" and anchor == "center":
+        return P.fit_cell(img, cell, pad=pad)
+    ys, xs = np.nonzero(img[..., 3] > 0.02)
+    if len(xs) == 0:
+        return np.zeros((cell, cell, 4), np.float32)
+    crop = img[ys.min():ys.max() + 1, xs.min():xs.max() + 1]
+    h, w = crop.shape[:2]
+    if mode == "stretch":
+        py, px = int(h * pad), int(w * pad)
+        canvas = np.zeros((h + 2 * py, w + 2 * px, 4), np.float32)
+        canvas[py:py + h, px:px + w] = crop
+        return P.resize(canvas, cell, cell)
+    s = int(max(h, w) * (1 + 2 * pad))
+    canvas = np.zeros((s, s, 4), np.float32)
+    ox = (s - w) // 2
+    oy = s - h - int(max(h, w) * r.get("anchor_pad", 0.01))
+    canvas[oy:oy + h, ox:ox + w] = crop
+    return P.resize(canvas, cell, cell)
+
+
+def _sheet_pieces(r, keyed):
+    """Splits one keyed sheet image into separate pieces (largest first)."""
+    sh = r["sheet"] if isinstance(r["sheet"], dict) else {}
+    comps = _components(keyed[..., 3], sh.get("thresh", 0.12), sh.get("merge", 2), grow=sh.get("grow", 0))
+    if not comps:
+        return []
+    if not sh.get("keep_border", False):
+        inner = [c for c in comps if not c[3]]
+        comps = inner or comps
+    biggest = comps[0][0]
+    comps = [c for c in comps if c[0] >= biggest * sh.get("min_rel", 0.08)]
+    pieces = []
+    for area, (x0, y0, x1, y1), m, _ in comps:
+        g = max(4, int(0.02 * max(keyed.shape[:2])))
+        x0, y0 = max(0, x0 - g), max(0, y0 - g)
+        x1, y1 = min(keyed.shape[1], x1 + g), min(keyed.shape[0], y1 + g)
+        piece = keyed[y0:y1, x0:x1] * m[y0:y1, x0:x1, None]
+        pieces.append(piece)
+    return pieces
 
 
 def frames_api(r, client, regen, budget):
@@ -215,12 +352,13 @@ def frames_api(r, client, regen, budget):
     raws = sorted(glob.glob(os.path.join(cdir, "raw_*")))
     cell = r.get("cell", 128)
     frames = []
+    image_pieces = []   # sheets: per image, its pieces largest first
     for raw in sorted(raws):
         if raw.endswith(".mp4") or raw.endswith(".webm") or raw.endswith(".mov"):
             src = _decode_video(raw)
             # One background reference for the whole clip (first frame corners: the puff starts small).
             ref = np.concatenate([_corners(src[0]), _corners(src[-1])])
-            vid = [_key(r, f, ref) for f in src]
+            vid = [_vignette(r, _floor(r, _key(r, f, ref))) for f in src]
             t0, t1 = r.get("trim", [0.0, 1.0])
             n = len(vid)
             vid = vid[int(t0 * n):max(int(t1 * n), int(t0 * n) + 1)]
@@ -229,18 +367,38 @@ def frames_api(r, client, regen, budget):
             frames.extend(P.resample_frames(fitted, r.get("frames", 16)))
         else:
             img = P.load_rgba(raw)[..., :3]
-            keyed = _key(r, img)
             cut = r.get("crop", None)   # [x0, y0, x1, y1] fractions: drop props the model added (lighter, barrel)
             if cut:
-                h, w = keyed.shape[:2]
-                m = np.zeros((h, w, 1), np.float32)
-                m[int(cut[1] * h):int(cut[3] * h), int(cut[0] * w):int(cut[2] * w)] = 1
-                keyed = keyed * m
+                # Cropped before keying: the background is then measured from the crop's corners
+                # (generated "photos of a photo" have a white border around the real surface).
+                h, w = img.shape[:2]
+                img = img[int(cut[1] * h):int(cut[3] * h), int(cut[0] * w):int(cut[2] * w)]
+            keyed = _floor(r, _key(r, img))
+            keyed = _vignette(r, keyed)
             if r.get("fill_holes"):
                 keyed = P.fill_enclosed(keyed)
-            frames.append(P.fit_cell(keyed, cell, pad=r.get("pad", 0.05)))
+            if r.get("sheet") is not None:
+                image_pieces.append([_fit(r, p, cell) for p in _sheet_pieces(r, keyed)])
+            else:
+                frames.append(_fit(r, keyed, cell))
+    if image_pieces:
+        # Round robin over the images (largest pieces first) up to the variant count.
+        want = max(1, r.get("variants", 1))
+        k = 0
+        while len(frames) < want and any(len(p) > k for p in image_pieces):
+            for p in image_pieces:
+                if len(p) > k and len(frames) < want:
+                    frames.append(p[k])
+            k += 1
+        print(f"  sheet: {sum(len(p) for p in image_pieces)} piece(s) found, {len(frames)} used")
     if not frames:
         raise RuntimeError(f"{r['name']}: no frames decoded")
+    if r.get("mirror"):
+        # The model drew it facing the other way (splatter: the mass belongs at -u, spray to +u).
+        frames = [np.ascontiguousarray(f[:, ::-1]) for f in frames]
+    if r.get("blur"):
+        # Haze flipbooks: fine keyed spray turns into speckle at small cells; soften it (premultiplied).
+        frames = [P.blur(f, r["blur"]) for f in frames]
     # Keyed sources are premultiplied: convert to straight alpha for the shared pipeline.
     return [P.unpremultiply(f) for f in frames], None
 
@@ -255,7 +413,12 @@ def build(r, frames, heights, placeholder_src, ktx2):
         # Fewer generated images than variants: fill the rest with mirrored / rotated copies
         # (decals and debris read as distinct; flashes should pay for real variants instead).
         if r.get("augment", True):
-            ops = [lambda f: f[:, ::-1], lambda f: f[::-1, :], lambda f: np.rot90(f, 1), lambda f: np.rot90(f, 3), lambda f: f[::-1, ::-1]]
+            named = {"h": lambda f: f[:, ::-1], "v": lambda f: f[::-1, :], "r90": lambda f: np.rot90(f, 1),
+                     "r270": lambda f: np.rot90(f, 3), "r180": lambda f: f[::-1, ::-1]}
+            # augment_ops limits the copies for directional textures: ["h"] keeps a flame's base at
+            # the bottom, ["v"] keeps a drip / splat running along +u.
+            want = r.get("augment_ops", ["h", "v", "r90", "r270", "r180"])
+            ops = [named[o] for o in (["h"] if want == "mirror" else want)]
             src = list(frames)
             k = 0
             while len(frames) < r["variants"]:
@@ -303,7 +466,18 @@ def build(r, frames, heights, placeholder_src, ktx2):
             P.write_png(p, P.pack_grid(ims, cols, rows))
             out_files.append(p)
     if r.get("normal_map"):
-        hs = heights if heights is not None else [P.blur(f[..., 3], 1.0) for f in frames]
+        if heights is not None:
+            hs = heights
+        elif r.get("height_from") == "luma":
+            # Bullet holes / wounds: depth from darkness. Transparent texels are the untouched surface
+            # (height 1), dark opaque ones the crater (low), lit opaque rims stay near the surface.
+            hs = []
+            for f in frames:
+                l = P.luma(f[..., :3])
+                ref = max(float(np.percentile(l[f[..., 3] > 0.5], 95)) if (f[..., 3] > 0.5).any() else 1.0, 1e-3)
+                hs.append(P.blur(1.0 - f[..., 3] * (1.0 - np.clip(l / ref, 0, 1)), 1.0))
+        else:
+            hs = [P.blur(f[..., 3], 1.0) for f in frames]
         hs = hs + [np.zeros((cell, cell), np.float32)] * (count - len(hs))
         nm = [np.concatenate([P.normal_from_height(h, r.get("normal_strength", 6.0)), f[..., 3:4]], axis=2) for h, f in zip(hs, frames)]
         p = os.path.join(TEX_DIR, name + "_n.png")
@@ -403,6 +577,9 @@ def main():
         r = recipes[n]
         use_api = client is not None and "model" in r
         print(f"[{n}] {'higgsfield ' + r['model'] if use_api else 'placeholder'}")
+        if not use_api and "placeholder" not in r:
+            print("  no placeholder generator: existing texture kept")
+            continue
         try:
             if use_api:
                 frames, heights = frames_api(r, client, args.regen, budget)

@@ -10,5 +10,25 @@
     "type": "grass_bits",
     "seed": 40
   },
-  "name": "cloth_fibers"
+  "name": "cloth_fibers",
+  "model": "higgsfield-ai/soul/standard",
+  "aspect_ratio": "1:1",
+  "resolution": "1080p",
+  "background": "black",
+  "alpha": {
+    "black": 0.05,
+    "white": 0.6,
+    "gamma": 1.0,
+    "albedo": [
+      0.92,
+      0.92,
+      0.92
+    ]
+  },
+  "api_variants": 1,
+  "sheet": {
+    "merge": 3
+  },
+  "pad": 0.06,
+  "prompt": "macro photograph, orthographic top-down view, of about twenty small loose torn white cotton threads and fluffy lint fibers scattered apart, every piece separate with clear space around it, no piece touching another or the edge of the frame, pure black background, no text, realistic photograph, not cartoon, not illustration"
 }

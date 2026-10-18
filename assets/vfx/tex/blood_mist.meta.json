@@ -13,11 +13,11 @@
   "motion_vectors": true,
   "lighting": "simple",
   "premultiplied": true,
-  "placeholder": true,
+  "placeholder": false,
   "kind": "volume",
-  "source": "procedural",
+  "source": "kling-video/v2.5-turbo/pro/text-to-video",
   "recipe": "assets/vfx/gen/blood_mist.json",
-  "recipe_hash": "f6844d03097bdc5f7e556e27",
-  "generated": "2026-10-15T16:10:22",
+  "recipe_hash": "ab6d91469a319d136e48ba96",
+  "generated": "2026-10-18T02:45:50",
   "tool_version": 3
 }

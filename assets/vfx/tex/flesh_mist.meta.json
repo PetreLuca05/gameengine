@@ -13,11 +13,11 @@
   "motion_vectors": true,
   "lighting": "sixway",
   "premultiplied": true,
-  "placeholder": true,
+  "placeholder": false,
   "kind": "volume",
-  "source": "procedural",
+  "source": "kling-video/v2.5-turbo/pro/text-to-video",
   "recipe": "assets/vfx/gen/flesh_mist.json",
-  "recipe_hash": "e107e1b4c30e42cae765a483",
-  "generated": "2026-10-15T22:46:17",
+  "recipe_hash": "9f91e0b9581e1ca53461488b",
+  "generated": "2026-10-18T02:55:18",
   "tool_version": 3
 }

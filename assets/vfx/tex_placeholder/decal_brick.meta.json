@@ -1,0 +1,23 @@
+{
+  "file": "decal_brick.png",
+  "width": 256,
+  "height": 256,
+  "grid": [
+    2,
+    2
+  ],
+  "frames": 4,
+  "variants": 4,
+  "fps": 30,
+  "loop": false,
+  "motion_vectors": false,
+  "lighting": "none",
+  "premultiplied": true,
+  "placeholder": true,
+  "kind": "decal",
+  "source": "procedural",
+  "recipe": "assets/vfx/gen/decal_brick.json",
+  "recipe_hash": "6ad29ae8da39ac082f9f5cf2",
+  "generated": "2026-10-15T16:10:23",
+  "tool_version": 3
+}

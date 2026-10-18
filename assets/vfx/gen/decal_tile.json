@@ -14,5 +14,20 @@
     "kind": "concrete"
   },
   "edge_margin": 0.04,
-  "name": "decal_tile"
+  "name": "decal_tile",
+  "model": "higgsfield-ai/soul/standard",
+  "aspect_ratio": "1:1",
+  "resolution": "1080p",
+  "background": "corners",
+  "alpha": {
+    "tol": 0.09,
+    "soft": 0.12
+  },
+  "prompt": "close up photograph of a single bullet impact in a plain glossy white ceramic tile, a small dark hole with sharp radiating cracks and chipped glaze exposing grey clay, centered, the plain flat surface fills the entire frame edge to edge, shot straight on, flat even soft lighting, realistic photograph, not cartoon, not illustration, no text",
+  "api_variants": 1,
+  "height_from": "luma",
+  "vignette": {
+    "inner": 0.45,
+    "outer": 0.9
+  }
 }

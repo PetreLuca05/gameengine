@@ -13,11 +13,11 @@
   "motion_vectors": true,
   "lighting": "simple",
   "premultiplied": true,
-  "placeholder": true,
+  "placeholder": false,
   "kind": "volume",
-  "source": "procedural",
+  "source": "kling-video/v2.5-turbo/pro/text-to-video",
   "recipe": "assets/vfx/gen/water_splash.json",
-  "recipe_hash": "f6903f01831b7859168a60a4",
-  "generated": "2026-10-15T16:14:54",
+  "recipe_hash": "259b009bbbf39a885dcd36fc",
+  "generated": "2026-10-18T02:46:34",
   "tool_version": 3
 }

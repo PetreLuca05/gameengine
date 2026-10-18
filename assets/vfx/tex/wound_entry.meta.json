@@ -13,11 +13,11 @@
   "motion_vectors": false,
   "lighting": "none",
   "premultiplied": true,
-  "placeholder": true,
+  "placeholder": false,
   "kind": "decal",
-  "source": "procedural",
+  "source": "higgsfield-ai/soul/standard",
   "recipe": "assets/vfx/gen/wound_entry.json",
-  "recipe_hash": "4aa3d20a118c143e8c25d264",
-  "generated": "2026-10-15T22:46:38",
+  "recipe_hash": "2dfa0e946738d6d19a551858",
+  "generated": "2026-10-18T02:52:42",
   "tool_version": 3
 }

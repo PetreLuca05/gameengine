@@ -9,5 +9,28 @@
   "placeholder": {
     "type": "flash_mach",
     "seed": 72
-  }
+  },
+  "model": "higgsfield-ai/soul/standard",
+  "aspect_ratio": "1:1",
+  "resolution": "1080p",
+  "background": "black",
+  "alpha": {
+    "black": 0.03,
+    "white": 0.55,
+    "gamma": 1.0
+  },
+  "api_variants": 1,
+  "sheet": {
+    "merge": 3,
+    "min_rel": 0.2
+  },
+  "pad": 0.06,
+  "prompt": "high speed photograph of four separate gun muzzle flashes seen exactly head-on from the front, each a round symmetric intensely bright white-yellow disc of glowing gas with short sharp radial spikes all around, arranged in a two by two grid, well spaced apart, pure black background, no gun, no smoke, no text",
+  "name": "flash_mach",
+  "augment_ops": [
+    "h",
+    "v",
+    "r90",
+    "r180"
+  ]
 }

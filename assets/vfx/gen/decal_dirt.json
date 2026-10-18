@@ -14,5 +14,17 @@
     "kind": "dirt"
   },
   "edge_margin": 0.04,
-  "name": "decal_dirt"
+  "name": "decal_dirt",
+  "model": "higgsfield-ai/soul/standard",
+  "aspect_ratio": "1:1",
+  "resolution": "1080p",
+  "background": "green",
+  "alpha": {
+    "tol": 0.1,
+    "soft": 0.12
+  },
+  "prompt": "macro photograph, orthographic top-down view, of a single bullet impact crater in dry brown soil, a small dark pit with loose dirt and clods thrown outward around it, centered, filling about two thirds of the frame, isolated on a solid flat pure green (#00FF00) chroma key background, even soft lighting, no shadows, no text, realistic photograph, not cartoon, not illustration",
+  "fill_holes": true,
+  "api_variants": 1,
+  "height_from": "luma"
 }

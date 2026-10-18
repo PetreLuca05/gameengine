@@ -13,11 +13,11 @@
   "motion_vectors": false,
   "lighting": "none",
   "premultiplied": true,
-  "placeholder": true,
+  "placeholder": false,
   "kind": "emissive",
-  "source": "procedural",
+  "source": "higgsfield-ai/soul/standard",
   "recipe": "assets/vfx/gen/flash_prong.json",
-  "recipe_hash": "6a97902d459ba5dab2e426c5",
-  "generated": "2026-10-17T13:37:52",
+  "recipe_hash": "792ab374216e50a60fcf7ae1",
+  "generated": "2026-10-18T02:37:39",
   "tool_version": 3
 }

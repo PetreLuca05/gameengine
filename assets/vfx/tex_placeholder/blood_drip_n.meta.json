@@ -1,0 +1,23 @@
+{
+  "file": "blood_drip_n.png",
+  "width": 256,
+  "height": 256,
+  "grid": [
+    2,
+    2
+  ],
+  "frames": 4,
+  "variants": 4,
+  "fps": 30,
+  "loop": false,
+  "motion_vectors": false,
+  "lighting": "none",
+  "premultiplied": false,
+  "placeholder": true,
+  "kind": "normal",
+  "source": "procedural",
+  "recipe": "assets/vfx/gen/blood_drip.json",
+  "recipe_hash": "c7a072f4068f154d0747e81e",
+  "generated": "2026-10-15T22:46:38",
+  "tool_version": 3
+}

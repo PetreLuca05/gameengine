@@ -10,5 +10,21 @@
     "type": "flash_suppressed",
     "seed": 13
   },
-  "name": "flash_suppressed"
+  "name": "flash_suppressed",
+  "model": "higgsfield-ai/soul/standard",
+  "aspect_ratio": "1:1",
+  "resolution": "1080p",
+  "background": "black",
+  "alpha": {
+    "black": 0.02,
+    "white": 0.45,
+    "gamma": 1.0
+  },
+  "api_variants": 1,
+  "sheet": {
+    "merge": 4,
+    "min_rel": 0.2
+  },
+  "pad": 0.08,
+  "prompt": "photograph of four separate faint dim round soft orange glows, blurry out of focus circular spots of warm light with no hard edges, arranged in a two by two grid, well spaced apart, pure black background, no gun, no smoke, no text"
 }

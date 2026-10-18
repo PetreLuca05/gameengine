@@ -1,0 +1,23 @@
+{
+  "file": "flesh_mist.png",
+  "width": 512,
+  "height": 512,
+  "grid": [
+    8,
+    8
+  ],
+  "frames": 64,
+  "variants": 1,
+  "fps": 30,
+  "loop": false,
+  "motion_vectors": true,
+  "lighting": "sixway",
+  "premultiplied": true,
+  "placeholder": true,
+  "kind": "volume",
+  "source": "procedural",
+  "recipe": "assets/vfx/gen/flesh_mist.json",
+  "recipe_hash": "e107e1b4c30e42cae765a483",
+  "generated": "2026-10-15T22:46:17",
+  "tool_version": 3
+}

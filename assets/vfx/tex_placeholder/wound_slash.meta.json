@@ -1,0 +1,23 @@
+{
+  "file": "wound_slash.png",
+  "width": 256,
+  "height": 256,
+  "grid": [
+    2,
+    2
+  ],
+  "frames": 4,
+  "variants": 4,
+  "fps": 30,
+  "loop": false,
+  "motion_vectors": false,
+  "lighting": "none",
+  "premultiplied": true,
+  "placeholder": true,
+  "kind": "decal",
+  "source": "procedural",
+  "recipe": "assets/vfx/gen/wound_slash.json",
+  "recipe_hash": "ca60aee3208c8154577e1013",
+  "generated": "2026-10-15T22:46:39",
+  "tool_version": 3
+}

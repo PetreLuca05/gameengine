@@ -9,5 +9,24 @@
   "placeholder": {
     "type": "flash_prong",
     "seed": 73
-  }
+  },
+  "model": "higgsfield-ai/soul/standard",
+  "aspect_ratio": "1:1",
+  "resolution": "1080p",
+  "background": "black",
+  "alpha": {
+    "black": 0.03,
+    "white": 0.5,
+    "gamma": 1.0
+  },
+  "api_variants": 1,
+  "sheet": {
+    "merge": 2,
+    "min_rel": 0.2
+  },
+  "anchor": "bottom",
+  "augment_ops": "mirror",
+  "pad": 0.04,
+  "prompt": "high speed photograph of four separate thin dim orange flame spikes standing side by side, each a narrow tapered tongue of fire pointing straight up with its base at the bottom, well spaced apart, pure black background, no text, no gun, no smoke",
+  "name": "flash_prong"
 }

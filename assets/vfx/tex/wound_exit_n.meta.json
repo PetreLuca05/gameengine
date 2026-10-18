@@ -13,11 +13,11 @@
   "motion_vectors": false,
   "lighting": "none",
   "premultiplied": false,
-  "placeholder": true,
+  "placeholder": false,
   "kind": "normal",
-  "source": "procedural",
+  "source": "higgsfield-ai/soul/standard",
   "recipe": "assets/vfx/gen/wound_exit.json",
-  "recipe_hash": "c3e70a0b042cd8f164a8e290",
-  "generated": "2026-10-15T22:46:39",
+  "recipe_hash": "88c8fe2961ff4d97c9bc52bf",
+  "generated": "2026-10-18T02:52:42",
   "tool_version": 3
 }

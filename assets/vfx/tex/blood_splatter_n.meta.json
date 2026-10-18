@@ -13,11 +13,11 @@
   "motion_vectors": false,
   "lighting": "none",
   "premultiplied": false,
-  "placeholder": true,
+  "placeholder": false,
   "kind": "normal",
-  "source": "procedural",
+  "source": "higgsfield-ai/soul/standard",
   "recipe": "assets/vfx/gen/blood_splatter.json",
-  "recipe_hash": "631665df4d8885a6b44a9048",
-  "generated": "2026-10-15T22:46:38",
+  "recipe_hash": "3d850bcf641b238c66543f1b",
+  "generated": "2026-10-18T03:03:59",
   "tool_version": 3
 }

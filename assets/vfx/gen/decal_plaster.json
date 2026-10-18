@@ -14,5 +14,20 @@
     "kind": "concrete"
   },
   "edge_margin": 0.04,
-  "name": "decal_plaster"
+  "name": "decal_plaster",
+  "model": "higgsfield-ai/soul/standard",
+  "aspect_ratio": "1:1",
+  "resolution": "1080p",
+  "background": "corners",
+  "alpha": {
+    "tol": 0.09,
+    "soft": 0.12
+  },
+  "prompt": "close up photograph of a single bullet hole in a plain white painted plaster wall, a crumbled dark crater exposing grey gypsum and flaked paint around the rim, centered, the plain flat surface fills the entire frame edge to edge, shot straight on, flat even soft lighting, realistic photograph, not cartoon, not illustration, no text",
+  "api_variants": 1,
+  "height_from": "luma",
+  "vignette": {
+    "inner": 0.45,
+    "outer": 0.9
+  }
 }

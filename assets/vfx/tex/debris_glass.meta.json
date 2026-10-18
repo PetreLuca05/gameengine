@@ -13,11 +13,11 @@
   "motion_vectors": false,
   "lighting": "none",
   "premultiplied": true,
-  "placeholder": true,
+  "placeholder": false,
   "kind": "sprite",
-  "source": "procedural",
+  "source": "higgsfield-ai/soul/standard",
   "recipe": "assets/vfx/gen/debris_glass.json",
-  "recipe_hash": "db69e88de74a9f747f87379b",
-  "generated": "2026-10-15T16:10:22",
+  "recipe_hash": "a48846e7382faf80ec05b24b",
+  "generated": "2026-10-18T02:48:45",
   "tool_version": 3
 }

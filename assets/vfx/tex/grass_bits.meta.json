@@ -13,11 +13,11 @@
   "motion_vectors": false,
   "lighting": "none",
   "premultiplied": true,
-  "placeholder": true,
+  "placeholder": false,
   "kind": "sprite",
-  "source": "procedural",
+  "source": "higgsfield-ai/soul/standard",
   "recipe": "assets/vfx/gen/grass_bits.json",
-  "recipe_hash": "c6fa9c469dea815b49c0b4ee",
-  "generated": "2026-10-15T16:14:30",
+  "recipe_hash": "64ddc5f6733033cff5a1e0f5",
+  "generated": "2026-10-18T02:44:13",
   "tool_version": 3
 }

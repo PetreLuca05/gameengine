@@ -9,5 +9,23 @@
   "placeholder": {
     "type": "flash_petal",
     "seed": 71
-  }
+  },
+  "model": "higgsfield-ai/soul/standard",
+  "aspect_ratio": "1:1",
+  "resolution": "1080p",
+  "background": "white",
+  "alpha": {
+    "tol": 0.06,
+    "soft": 0.2
+  },
+  "api_variants": 2,
+  "sheet": {
+    "merge": 3,
+    "min_rel": 0.15
+  },
+  "anchor": "bottom",
+  "augment_ops": "mirror",
+  "pad": 0.04,
+  "prompt": "high speed photograph of eight separate small gunshot fireballs in two rows of four, each a petal shaped burst of orange and yellow flame with ragged edges blooming upward from a narrow base, well spaced apart, pure black background, no text, no gun, no smoke",
+  "name": "flash_petal"
 }

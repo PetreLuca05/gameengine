@@ -13,11 +13,11 @@
   "motion_vectors": false,
   "lighting": "none",
   "premultiplied": true,
-  "placeholder": true,
+  "placeholder": false,
   "kind": "sprite",
-  "source": "procedural",
+  "source": "higgsfield-ai/soul/standard",
   "recipe": "assets/vfx/gen/debris_plaster.json",
-  "recipe_hash": "19eda73b82f6d477ead03b60",
-  "generated": "2026-10-15T16:10:22",
+  "recipe_hash": "c98a400ce7e39e0996bdfbd1",
+  "generated": "2026-10-18T02:51:33",
   "tool_version": 3
 }

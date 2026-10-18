@@ -13,11 +13,11 @@
   "motion_vectors": false,
   "lighting": "none",
   "premultiplied": true,
-  "placeholder": true,
+  "placeholder": false,
   "kind": "decal",
-  "source": "procedural",
+  "source": "higgsfield-ai/soul/standard",
   "recipe": "assets/vfx/gen/blood_pool.json",
-  "recipe_hash": "9a8050a27a17684277d85b12",
-  "generated": "2026-10-15T22:46:38",
+  "recipe_hash": "933b3d24a0f61b3a0518a131",
+  "generated": "2026-10-18T02:48:44",
   "tool_version": 3
 }

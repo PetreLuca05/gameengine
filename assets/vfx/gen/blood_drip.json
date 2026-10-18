@@ -23,5 +23,8 @@
   },
   "api_variants": 1,
   "prompt": "photograph of a single run of dark blood dripping down a wall, the run goes horizontally from left to right with a drop at the end, centered, isolated on a solid flat pure green (#00FF00) chroma key background, even soft lighting, no shadows, no text, forensic reference photograph, realistic, not cartoon",
-  "name": "blood_drip"
+  "name": "blood_drip",
+  "augment_ops": [
+    "v"
+  ]
 }

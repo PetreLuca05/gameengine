@@ -1,0 +1,20 @@
+{
+  "file": "decal_skid.png",
+  "width": 128,
+  "height": 128,
+  "grid": [
+    1,
+    1
+  ],
+  "frames": 1,
+  "variants": 1,
+  "fps": 30,
+  "loop": false,
+  "motion_vectors": false,
+  "lighting": "none",
+  "premultiplied": true,
+  "placeholder": true,
+  "kind": "decal",
+  "source": "procedural (vehicle skid, see docs/VEHICLES.md)",
+  "tool_version": 3
+}

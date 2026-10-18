@@ -13,11 +13,11 @@
   "motion_vectors": false,
   "lighting": "none",
   "premultiplied": true,
-  "placeholder": true,
+  "placeholder": false,
   "kind": "sprite",
-  "source": "procedural",
+  "source": "higgsfield-ai/soul/standard",
   "recipe": "assets/vfx/gen/debris_dirt.json",
-  "recipe_hash": "581cdcd65b0c36c72a52dee8",
-  "generated": "2026-10-15T16:10:22",
+  "recipe_hash": "887223970a10a037fe13c658",
+  "generated": "2026-10-18T02:44:10",
   "tool_version": 3
 }

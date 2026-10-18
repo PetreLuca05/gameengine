@@ -13,11 +13,11 @@
   "motion_vectors": false,
   "lighting": "none",
   "premultiplied": false,
-  "placeholder": true,
+  "placeholder": false,
   "kind": "normal",
-  "source": "procedural",
+  "source": "higgsfield-ai/soul/standard",
   "recipe": "assets/vfx/gen/decal_plaster.json",
-  "recipe_hash": "25ab9319d2d129832d4016bf",
-  "generated": "2026-10-15T16:10:29",
+  "recipe_hash": "ef7f6c4d5887afd14ea5b1b2",
+  "generated": "2026-10-18T02:52:35",
   "tool_version": 3
 }

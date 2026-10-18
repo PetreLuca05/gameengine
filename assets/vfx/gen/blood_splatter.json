@@ -16,12 +16,24 @@
   "model": "higgsfield-ai/soul/standard",
   "aspect_ratio": "1:1",
   "resolution": "1080p",
-  "background": "green",
+  "background": "corners",
   "alpha": {
-    "tol": 0.1,
-    "soft": 0.12
+    "tol": 0.09,
+    "soft": 0.12,
+    "floor": 0.12
   },
   "api_variants": 1,
-  "prompt": "orthographic top down photograph of a directional spatter of dark dried and wet blood on a flat surface, a main mass with satellite droplets and spines thrown to the right, centered, filling the frame, isolated on a solid flat pure green (#00FF00) chroma key background, even soft lighting, no shadows, no text, forensic reference photograph, realistic, not cartoon",
-  "name": "blood_splatter"
+  "prompt": "close up photograph of about ten separate gunshot blood spatter stains on a plain white painted wall, each an elongated teardrop shaped dark red stain with a spiky edge and a tail of fine spray and tiny satellite droplets, all of them pointing towards the right, spaced well apart and not touching, the plain flat wall fills the entire frame, flat even soft lighting, crime scene forensic photograph, realistic photograph, not cartoon, no text",
+  "name": "blood_splatter",
+  "augment_ops": [
+    "v"
+  ],
+  "sheet": {
+    "merge": 0,
+    "thresh": 0.5,
+    "min_rel": 0.3,
+    "grow": 6
+  },
+  "pad": 0.06,
+  "mirror": true
 }

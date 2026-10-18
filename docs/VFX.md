@@ -184,13 +184,33 @@ covers only what the API sees, so post-processing tweaks never trigger a paid re
 `kling-video/v2.5-turbo/pro/text-to-video` (video, 5 s).
 
 **Current set:**
-- The hero textures are generated: flash core, side flame and the concrete decal, plus the smoke and
-  dust flipbooks when the video requests succeed.
-- The rest are procedural placeholders. Their `meta.json` says `"placeholder": true`, so you can
-  find them and regenerate them.
+- Generated (Higgsfield):
+  - flashes: core, side, mach, prong, petal, suppressed;
+  - video flipbooks: smoke, dust, blood mist, flesh mist, water splash;
+  - all impact decals (concrete, brick, plaster, tile, metal, wood, dirt, glass, scorch, blood) and
+    the tyre skid (`decal_skid`, new recipe);
+  - debris sheets (brick, concrete, plaster, tile, wood, dirt, glass), cloth fibres, grass bits,
+    blood drops, ember;
+  - every flesh texture (droplet, strand, drip, splatter, pool, stains, wounds, bone, helmet spark).
+- Procedural: `glow`, `spark`, `tracer_head`, `heat_distort`, and `water_ripple` (the generated
+  ripple was a perspective ellipse; the procedural double ring reads better).
+- `assets/vfx/tex_placeholder/` keeps the full procedural set. To compare, copy it over
+  `build/bin/assets/vfx/tex`, then rebuild to restore.
+- `meta.json` says `"placeholder": true` for procedural textures.
 
-Committed textures stay small (about 5 MB). The tool warns above 50 MB; above that, ask before
-committing.
+**Recipe techniques that worked** (fields: [VFX_REFERENCE.md](VFX_REFERENCE.md#recipe-assetsvfxgennamejson)):
+- Surface decals: a full-frame photo of the damaged surface keyed against its own colour
+  (`background: corners`, `vignette`). An "isolated on green" prompt returns a whole brick, tile or
+  plank instead.
+- Debris, petals, drops: one image of many pieces split into the variant cells (`sheet`). It is
+  cheaper than one request per variant, and every variant is real.
+- Thin or dark flesh: blood on a white wall or white cloth, wounds on pale skin (`corners` key).
+  Wounds need "no knife, no hands"; the model likes to add the blade.
+- Directional sprites limit the augmented copies (`augment_ops`): drips and splats along u, flames
+  with their base at the bottom (`anchor: bottom`).
+
+Committed textures stay small: `tex` is about 8 MB and `tex_placeholder` about 7 MB. The tool warns
+above 50 MB; above that, ask before committing.
 
 ## Editor and dev room
 

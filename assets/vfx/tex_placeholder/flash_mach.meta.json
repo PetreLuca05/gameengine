@@ -1,0 +1,23 @@
+{
+  "file": "flash_mach.png",
+  "width": 256,
+  "height": 256,
+  "grid": [
+    2,
+    2
+  ],
+  "frames": 4,
+  "variants": 4,
+  "fps": 30,
+  "loop": false,
+  "motion_vectors": false,
+  "lighting": "none",
+  "premultiplied": true,
+  "placeholder": true,
+  "kind": "emissive",
+  "source": "procedural",
+  "recipe": "assets/vfx/gen/flash_mach.json",
+  "recipe_hash": "d3058558c9353690bd7d0ba7",
+  "generated": "2026-10-17T13:37:52",
+  "tool_version": 3
+}

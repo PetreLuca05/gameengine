@@ -1,0 +1,23 @@
+{
+  "file": "flash_petal.png",
+  "width": 512,
+  "height": 512,
+  "grid": [
+    4,
+    4
+  ],
+  "frames": 16,
+  "variants": 16,
+  "fps": 30,
+  "loop": false,
+  "motion_vectors": false,
+  "lighting": "none",
+  "premultiplied": true,
+  "placeholder": true,
+  "kind": "emissive",
+  "source": "procedural",
+  "recipe": "assets/vfx/gen/flash_petal.json",
+  "recipe_hash": "423a9a80f88e0d3085dcfbaa",
+  "generated": "2026-10-17T13:37:52",
+  "tool_version": 3
+}

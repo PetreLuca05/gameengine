@@ -28,18 +28,25 @@
   "prompt": "high speed footage of a fine aerosol mist of dark blood bursting from the center and slowly dispersing into a thin haze, static locked off camera, centered and fully inside the frame, evenly lit, pure black background",
   "background": "black",
   "alpha": {
-    "black": 0.04,
-    "white": 0.5,
-    "gamma": 1.0,
+    "black": 0.05,
+    "white": 0.6,
+    "gamma": 0.8,
     "albedo": [
       1.0,
       1.0,
       1.0
-    ]
+    ],
+    "channel": "max",
+    "floor": 0.06
   },
   "trim": [
     0.0,
-    0.8
+    0.45
   ],
-  "name": "flesh_mist"
+  "name": "flesh_mist",
+  "vignette": {
+    "inner": 0.4,
+    "outer": 0.85
+  },
+  "blur": 1.2
 }

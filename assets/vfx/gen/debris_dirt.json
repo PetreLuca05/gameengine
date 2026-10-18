@@ -16,5 +16,17 @@
     ],
     "roughness": 0.6
   },
-  "name": "debris_dirt"
+  "name": "debris_dirt",
+  "model": "higgsfield-ai/soul/standard",
+  "aspect_ratio": "1:1",
+  "resolution": "1080p",
+  "background": "green",
+  "alpha": {
+    "tol": 0.1,
+    "soft": 0.12
+  },
+  "api_variants": 1,
+  "sheet": {},
+  "pad": 0.12,
+  "prompt": "macro photograph, orthographic top-down view, of about twenty small clods of dry brown dirt and little pebbles scattered apart, every piece separate with clear space around it, no piece touching another or the edge of the frame, isolated on a solid flat pure green (#00FF00) chroma key background, even soft lighting, no shadows, no text, realistic photograph, not cartoon, not illustration"
 }

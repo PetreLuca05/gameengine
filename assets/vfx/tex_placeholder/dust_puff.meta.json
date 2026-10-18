@@ -1,0 +1,23 @@
+{
+  "file": "dust_puff.png",
+  "width": 768,
+  "height": 768,
+  "grid": [
+    6,
+    6
+  ],
+  "frames": 36,
+  "variants": 1,
+  "fps": 30,
+  "loop": false,
+  "motion_vectors": true,
+  "lighting": "sixway",
+  "premultiplied": true,
+  "placeholder": false,
+  "kind": "volume",
+  "source": "kling-video/v2.5-turbo/pro/text-to-video",
+  "recipe": "assets/vfx/gen/dust_puff.json",
+  "recipe_hash": "3d3a9bb3694c6e453c449392",
+  "generated": "2026-10-15T16:10:56",
+  "tool_version": 3
+}

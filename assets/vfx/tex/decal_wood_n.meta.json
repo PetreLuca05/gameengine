@@ -13,11 +13,11 @@
   "motion_vectors": false,
   "lighting": "none",
   "premultiplied": false,
-  "placeholder": true,
+  "placeholder": false,
   "kind": "normal",
-  "source": "procedural",
+  "source": "higgsfield-ai/soul/standard",
   "recipe": "assets/vfx/gen/decal_wood.json",
-  "recipe_hash": "41c2766cad3eaaa4ea6f2d1e",
-  "generated": "2026-10-15T16:15:15",
+  "recipe_hash": "4744d58575e1e2fe26f4c998",
+  "generated": "2026-10-18T03:02:09",
   "tool_version": 3
 }

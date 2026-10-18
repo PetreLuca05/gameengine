@@ -13,11 +13,11 @@
   "motion_vectors": false,
   "lighting": "none",
   "premultiplied": true,
-  "placeholder": true,
+  "placeholder": false,
   "kind": "sprite",
-  "source": "procedural",
+  "source": "higgsfield-ai/soul/standard",
   "recipe": "assets/vfx/gen/blood_drops.json",
-  "recipe_hash": "7b2645656f12bfd0887f91d7",
-  "generated": "2026-10-15T16:10:21",
+  "recipe_hash": "628ca845826014570b35cad0",
+  "generated": "2026-10-18T02:50:52",
   "tool_version": 3
 }

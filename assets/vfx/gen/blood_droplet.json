@@ -25,5 +25,8 @@
   },
   "api_variants": 1,
   "prompt": "macro photograph of a single falling droplet of dark blood, slightly elongated, centered, isolated on a solid flat pure green (#00FF00) chroma key background, even soft lighting, no shadows, no text, forensic reference photograph, realistic, not cartoon",
-  "name": "blood_droplet"
+  "name": "blood_droplet",
+  "augment_ops": [
+    "h"
+  ]
 }

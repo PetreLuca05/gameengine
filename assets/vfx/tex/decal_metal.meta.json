@@ -13,11 +13,11 @@
   "motion_vectors": false,
   "lighting": "none",
   "premultiplied": true,
-  "placeholder": true,
+  "placeholder": false,
   "kind": "decal",
-  "source": "procedural",
+  "source": "higgsfield-ai/soul/standard",
   "recipe": "assets/vfx/gen/decal_metal.json",
-  "recipe_hash": "3e392b368cbbe8f2c8e21556",
-  "generated": "2026-10-15T16:15:15",
+  "recipe_hash": "578c96ad5a6c3485ada91715",
+  "generated": "2026-10-18T02:52:35",
   "tool_version": 3
 }
