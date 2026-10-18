@@ -294,7 +294,9 @@ void post_ss_build(PostLitInputs *out) {
             fg_write(t, S.ao_hist_out, FG_STORAGE);
             if (t >= 0) cur = S.ao_hist_out;
         }
-        if (!s->ao_full_res) {
+        if (!ok) {
+            // gtao disabled (r_post_disable): nothing to blur / upsample; the lit pass gets white
+        } else if (!s->ao_full_res) {
             S.ao_hist_out = cur;   // the upsample's input
             S.ao = tex("ao", VK_FORMAT_R8_UNORM, FG_SIZE_RENDER, 1);
             int u = fg_pass("gtao_upsample", exec_ao_up, NULL);
@@ -358,10 +360,12 @@ void post_ss_build(PostLitInputs *out) {
         S.ssr = S.ssr_hist_out;
         if (p >= 0 && t >= 0 && S.ssr != FG_NONE && fg_history_valid(S.color_prev)) { out->ssr = S.ssr; out->ssr_on = true; }
     }
-    P.ao = out->ao;
-    P.contact = out->contact;
-    P.ssr = out->ssr;
-    P.ssgi = out->ssgi;
+    // Only valid outputs (out is zero-filled: resource 0 is some other texture; the debug views read these)
+    P.ao = out->ao_on ? out->ao : FG_NONE;
+    P.contact = out->contact_on ? out->contact : FG_NONE;
+    P.ssr = out->ssr_on ? out->ssr : FG_NONE;
+    P.ssgi = out->ssgi_on ? out->ssgi : FG_NONE;
+    if (!out->ao_on) P.ao_raw = P.ao_blur = FG_NONE;
 }
 
 // ------------------------------------------------------------------ scene capture (end of the world passes)
