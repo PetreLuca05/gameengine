@@ -1,4 +1,4 @@
-// Ricochet / penetration / flesh (docs/BALLISTICS.md "Surfaces").
+// Penetration / flesh (docs/BALLISTICS.md "Surfaces"); bullets never ricochet.
 #define DG_DETMATH   // cross-platform bit-identical math (core/dgmath.h)
 #include "gameplay/ballistics/bal_surface.h"
 #include "core/detmath.h"
@@ -14,13 +14,6 @@ float bal_capacity(const BalMaterial *m, const BalCartridge *c, float energy) {
     // density), and the capacity falls linearly with the energy the bullet has left.
     float pen = m->cls == BAL_SOFT ? c->pen_soft : c->pen_hard;
     return m->depth_ref * pen * (energy / fmaxf(c->e_ref, 1.0f));
-}
-
-float bal_ricochet_chance(const BalMaterial *m, float incidence) {
-    float th = m->ricochet_deg * DEG2RAD;
-    if (th <= 0.0f || incidence >= th) return 0.0f;
-    float f = incidence / th;
-    return 1.0f - f * f;
 }
 
 static float speed_for_energy(float mass, float e) { return e > 0.0f ? sqrtf(2.0f * e / mass) : 0.0f; }
@@ -39,25 +32,7 @@ BalHitResult bal_hit_surface(BalBullet *b, const BalCartridge *c, const BalMater
     if (v3_dot(dir, normal) > 0.0f) normal = v3_neg(normal);   // the face we came through
     r.capacity = bal_capacity(m, c, e);
     r.thickness = thickness >= 0.0f ? thickness : m->thickness;
-    // The skip roll comes first (always drawn, so the stream stays aligned on every path).
-    float roll = rng_float(&b->rng);
-    if (b->events < BAL_MAX_EVENTS && roll < bal_ricochet_chance(m, r.incidence)) {
-        float f = r.incidence / (m->ricochet_deg * DEG2RAD);
-        float keep = lerpf(0.60f, 0.30f, f);   // speed retained: grazing hits lose least
-        float out_ang = r.incidence * rng_range(&b->rng, 0.3f, 0.8f);
-        vec3 t = v3_norm(v3_madd(dir, normal, -v3_dot(dir, normal)));
-        vec3 nd = v3_add(v3_scale(t, dm_cosf(out_ang)), v3_scale(normal, dm_sinf(out_ang)));
-        nd = bal_cone_dir(nd, rng_range(&b->rng, 2.0f, 8.0f) * DEG2RAD, &b->rng);   // tumble
-        if (v3_dot(nd, normal) < 0.02f) nd = v3_norm(v3_madd(nd, normal, 0.03f - v3_dot(nd, normal)));
-        r.outcome = BAL_RICOCHET;
-        r.out_dir = nd;
-        r.out_speed = speed * keep;
-        r.energy_out = 0.5f * b->mass * r.out_speed * r.out_speed;
-        r.energy_deposit = e - r.energy_out;
-        r.out_pos = v3_madd(point, normal, 0.002f);
-        r.bc_mul = 0.35f;   // a tumbling, deformed bullet
-        return r;
-    }
+    // No ricochet at any incidence: the bullet goes through (capacity > thickness) or stops in it.
     if (b->events < BAL_MAX_EVENTS && r.capacity > r.thickness) {
         float left = 1.0f - r.thickness / r.capacity;
         r.outcome = BAL_PENETRATE;
@@ -121,12 +96,7 @@ bool bal_apply_hit(BalBullet *b, const BalHitResult *r) {
     b->vel = v3_scale(r->out_dir, r->out_speed);
     b->bc *= r->bc_mul;
     b->events++;
-    if (r->outcome == BAL_RICOCHET) {
-        b->flags |= BF_RICOCHET;
-        b->yaw = fmaxf(b->yaw, 0.3f);
-    } else {
-        b->flags |= BF_PENETRATED;
-        if (r->fragment) b->flags |= BF_FRAGMENTED;
-    }
+    b->flags |= BF_PENETRATED;
+    if (r->fragment) b->flags |= BF_FRAGMENTED;
     return true;
 }

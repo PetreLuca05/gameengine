@@ -8,7 +8,6 @@ Writes into assets/sounds:
                             of 0.2 / 0.45 / 0.63 ms (the length grows with r^1/4 of the miss
                             distance), its ground reflection and a short airy tail. 48 kHz.
   bullet_whizz.wav          subsonic pass-by: band-passed noise swept down (Doppler).
-  bullet_ricochet.wav       ricochet "zing": a tumbling fragment's falling whistle.
   impact_plate_ring.wav     a steel plate struck by a rifle round: inharmonic modes ringing down.
   shot_<gun>_distant.wav    the existing reports through ~600 m of air: low-passed, the attack
                             softened, a long reflection tail (the far report layer past 150 m).
@@ -106,17 +105,6 @@ def whizz():
     write("bullet_whizz", y * envl, rate)
 
 
-def ricochet():
-    rate = 48000
-    n = int(0.55 * rate)
-    t = np.arange(n) / rate
-    f = 3600 * np.exp(-t / 0.45) + 900
-    phase = 2 * np.pi * np.cumsum(f * (1 + 0.04 * np.sin(2 * np.pi * 31 * t))) / rate
-    tone = np.sin(phase) * np.exp(-t / 0.18)
-    hit = highpass(RNG.standard_normal(n), rate, 1500) * np.exp(-t / 0.012) * 0.8
-    write("bullet_ricochet", tone * 0.7 + hit, rate)
-
-
 def plate_ring():
     rate = 48000
     n = int(1.2 * rate)
@@ -149,7 +137,6 @@ def main():
     for v in range(3):
         crack(v)
     whizz()
-    ricochet()
     plate_ring()
     for gun in ["pistol", "smg", "rifle", "lmg", "dmr", "sniper", "shotgun"]:
         distant(gun)

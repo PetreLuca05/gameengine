@@ -10,7 +10,6 @@
     "impact_water": { "recipe": "impact", "inputs": { "material": 12, "energy": 400 } },
     "impact_flesh": { "recipe": "impact", "inputs": { "material": 13, "energy": 300 } },
     "melee_hit_wall": { "recipe": "impact", "inputs": { "material": 1, "energy": 120, "cosi": 0.8 } },
-    "bullet_ricochet": { "recipe": "ricochet" },
     "thunder": { "recipe": "thunder" }
   }
 }

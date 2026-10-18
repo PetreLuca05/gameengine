@@ -300,12 +300,6 @@ void bal_fx_frame(World *w, vec3 cam, float dt) {
             continue;
         }
         float k = look.intensity;
-        if (l->b.flags & BF_RICOCHET) {
-            // A ricocheting tracer tumbles: the burning base faces us on and off, it sputters.
-            u32 s = dg_hash_u32((u32)(now * 40.0) ^ key);
-            k *= 0.35f + 0.65f * (float)(s & 0xFF) / 255.0f;
-            if ((s >> 8 & 7) == 0) k *= 0.15f;
-        }
         vec3 rgb = bal_tracer_rgb(c->tracer.color);
         vec4 col = v4(rgb.x * k, rgb.y * k, rgb.z * k, 1.0f);
         // Width: a few cm, never thinner than ~2 px so a distant tracer stays visible.

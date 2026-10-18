@@ -342,30 +342,16 @@ void vfx_game_impact(vec3 pos, vec3 normal, vec3 incoming, int material, int cal
     sp.intensity = 1.0f - graze * 0.3f;
     sp.decal_ok = (flags & 4u) != 0;
     // Ballistic impacts (gameplay/ballistics): everything scales with the energy that arrived
-    // (crater volume ~ E, so sizes ~ E^1/3), plus ricochet / exit / steel / pyrophoric extras.
+    // (crater volume ~ E, so sizes ~ E^1/3), plus exit / steel / pyrophoric extras.
     u32 bo = (flags >> 24) & 0xFFu;
     float energy = bal_energy_decode((u8)(flags >> 16));
     if ((bo & BAL_IMP_BALLISTIC) && !flesh) {
         const BalMaterial *bm = &bal_data()->mat[DG_CLAMP(material, 0, SURF_COUNT - 1)];
         float es = clampf(cbrtf(fmaxf(energy, 1.0f) / 1500.0f), 0.3f, 2.6f);
         sp.scale = es * ((bo & BAL_IMP_EXIT) ? 1.3f : 1.0f);
-        sp.count_mul = es * ((bo & BAL_IMP_EXIT) ? 1.5f : 1.0f) * ((bo & BAL_IMP_RICOCHET) ? 0.5f : 1.0f);
+        sp.count_mul = es * ((bo & BAL_IMP_EXIT) ? 1.5f : 1.0f);
         sp.energy = clampf(sqrtf(energy / 1500.0f), 0.4f, 2.0f);
-        sp.decal_scale = bm->decal_scale * ((bo & BAL_IMP_RICOCHET) ? 0.6f : 1.0f);
-        if (bo & BAL_IMP_RICOCHET) {
-            VfxSpawnParams rp = sp;
-            rp.scale = 1.0f;
-            rp.count_mul = es;
-            vfx_game_spawn("impact_ricochet", &rp);
-            // The whine (assets/audio/recipes/ricochet.json): pitch, sweep and tumble vary per hit.
-            AudioEmit re;
-            audio_emit_init(&re, "ricochet", pos);
-            re.volume = 0.7f;
-            re.seed = vfx_hash((u32)(pos.x * 997.0f) ^ (u32)(pos.z * 131.0f) ^ (u32)(pos.y * 61.0f));
-            AudioParams rpa = { 0 };
-            audio_param(&rpa, "energy", energy);
-            audio_emit(&re, &rpa);
-        }
+        sp.decal_scale = bm->decal_scale;
         if (bo & BAL_IMP_EXIT) {
             VfxSpawnParams xp = sp;
             xp.scale = es * 1.8f;   // the exit cone is wider than the entry
@@ -409,7 +395,6 @@ void vfx_game_impact(vec3 pos, vec3 normal, vec3 incoming, int material, int cal
         audio_param(&ipa, "material", (float)material);
         audio_param(&ipa, "energy", energy > 0.0f ? energy : 1500.0f * cs.energy);
         audio_param(&ipa, "cosi", fabsf(v3_dot(sp.normal, sp.incoming)));
-        audio_param(&ipa, "ricochet", (bo & BAL_IMP_RICOCHET) ? 1.0f : 0.0f);
         audio_param(&ipa, "exit", (bo & BAL_IMP_EXIT) ? 1.0f : 0.0f);
         audio_emit(&ie, &ipa);
     }

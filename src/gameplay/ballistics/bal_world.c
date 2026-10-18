@@ -1,5 +1,5 @@
 // Ballistics in the game world: bullet pool, launch, per-tick swept hits with lag compensation,
-// ricochet / penetration, events, replays (docs/BALLISTICS.md "In the game").
+// penetration (no ricochets), events, replays (docs/BALLISTICS.md "In the game").
 #include "gameplay/ballistics/bal_world.h"
 #include "gameplay/ballistics/bal_tracer.h"
 #include "gameplay/ballistics/bal_drag.h"
@@ -382,7 +382,7 @@ static bool trace_segment(World *w, BalLive *l, vec3 o, vec3 dir, float len, Seg
     B.stats.rays++;
     Player *sp = &w->players[l->slot];
     // The shooter's own body / vehicle only while the bullet is leaving the muzzle.
-    BodyId ignore = (l->b.dist < 3.0f && !(l->b.flags & BF_RICOCHET)) ? weapon_shooter_ignore_body(w, l->slot) : PHYS_INVALID_BODY;
+    BodyId ignore = l->b.dist < 3.0f ? weapon_shooter_ignore_body(w, l->slot) : PHYS_INVALID_BODY;
     RayHit rh;
     if (phys_raycast(w->phys, o, v3_scale(dir, len), PL_MASK_WORLD, ignore, &rh)) {
         r->hit = true;
@@ -425,7 +425,7 @@ static bool trace_segment(World *w, BalLive *l, vec3 o, vec3 dir, float len, Seg
     }
     for (int i = 0; i < n; i++) {
         CharacterInst *c = w->chars->c[cand[i]];
-        if (!c || (c->ent == sp->ent && !(l->b.flags & BF_RICOCHET))) continue;
+        if (!c || c->ent == sp->ent) continue;
         HitboxRayHit hh;
         float chord = 0;
         if (!chars_raycast_one(w, c, o, dir, best, view256, &hh, &chord)) continue;
@@ -476,7 +476,6 @@ static float measure_thickness(World *w, const SegHit *s, vec3 dir, float reach)
 static u8 outcome_bits(const BalHitResult *r, bool exit) {
     u8 b = BAL_IMP_BALLISTIC;
     if (r->yawed) b |= BAL_IMP_YAWED;
-    if (r->outcome == BAL_RICOCHET) b |= BAL_IMP_RICOCHET;
     if (r->outcome == BAL_PENETRATE) b |= BAL_IMP_PENETRATE;
     if (r->fragment) b |= BAL_IMP_FRAGMENT;
     if (exit) b |= BAL_IMP_EXIT;
@@ -490,7 +489,7 @@ static const WeaponDef *effective_def(World *w, const BalLive *l, WeaponDef *tmp
     return tmp;
 }
 
-// Resolves one hit. Returns true when the bullet continues (ricochet / penetration).
+// Resolves one hit. Returns true when the bullet continues (penetration).
 static bool resolve_hit(World *w, BalLive *l, const SegHit *s, vec3 dir, float path_before) {
     const BalCartridge *c = &B.data.cart[l->b.cart];
     BalHitResult r;
@@ -521,7 +520,6 @@ static bool resolve_hit(World *w, BalLive *l, const SegHit *s, vec3 dir, float p
             float before = l->b.events ? fminf(r.energy_in / fmaxf(e_launch, 1.0f), 1.0f) : 1.0f;
             float deposit = r.energy_in > 0.0f ? r.energy_deposit / r.energy_in : 1.0f;
             float scale = before * lerpf(0.75f, 1.0f, saturate(deposit));
-            if (r.outcome == BAL_RICOCHET) scale *= 0.25f;   // a glancing skip barely pushes
             bool was_alive = h.character && ent_valid(w, h.ent) && !(w->flags[ENT_INDEX(h.ent)] & EF_DEAD);
             weapon_apply_hit(w, l->slot, d, &h, dir, scale);
             bool killed = was_alive && (w->flags[ENT_INDEX(h.ent)] & EF_DEAD);
@@ -560,14 +558,14 @@ static bool resolve_hit(World *w, BalLive *l, const SegHit *s, vec3 dir, float p
         }
     }
     if (B.debug && B.debug->i) {
-        u32 col = r.outcome == BAL_RICOCHET ? DBG_YELLOW : (r.outcome == BAL_PENETRATE ? DBG_CYAN : DBG_RED);
+        u32 col = r.outcome == BAL_PENETRATE ? DBG_CYAN : DBG_RED;
         dbg_cross(h.point, 0.08f, col, 8.0f);
         if (r.outcome == BAL_PENETRATE) dbg_cross(r.out_pos, 0.08f, DBG_MAGENTA, 8.0f);
         if (B.debug->i >= 2)
             log_info("ballistics: %s shot %04x %s %s at %.1f m (%.2f %.2f %.2f), %.0f J in, %.0f J out, incidence %.1f deg, cap %.3f m, thick %.3f m",
                      l->role == BAL_ROLE_HOST ? "host" : (l->role == BAL_ROLE_PREDICT ? "predict" : "replay"), l->shot_id,
                      h.character ? "flesh" : bal_material_name(h.material),
-                     r.outcome == BAL_RICOCHET ? "ricochet" : (r.outcome == BAL_PENETRATE ? "penetrate" : "stop"), h.dist, h.point.x, h.point.y, h.point.z,
+                     r.outcome == BAL_PENETRATE ? "penetrate" : "stop", h.dist, h.point.x, h.point.y, h.point.z,
                      r.energy_in, r.energy_out, r.incidence * DG_RAD2DEG, r.capacity, r.thickness);
     }
     return bal_apply_hit(&l->b, &r);
@@ -700,8 +698,8 @@ static void step_bullet(World *w, BalLive *l, float dt) {
     bool alive = bal_step(&l->b, c, &env, dt);
     B.stats.steps++;
     vec3 to = l->b.pos;
-    // Sweep the step; a ricochet / penetration continues along the new direction for the rest of
-    // the step's length.
+    // Sweep the step; a penetration continues along the new direction for the rest of the step's
+    // length.
     for (int guard = 0; guard < BAL_MAX_EVENTS + 1; guard++) {
         vec3 seg = v3_sub(to, from);
         float len = v3_len(seg);
@@ -712,7 +710,7 @@ static void step_bullet(World *w, BalLive *l, float dt) {
         if (!resolve_hit(w, l, &s, dir, path_before)) { alive = false; break; }
         float rest = fmaxf(len - s.t, 0.0f);
         path_before += s.t;
-        from = l->b.pos;   // exit point / ricochet point
+        from = l->b.pos;   // exit point
         to = v3_madd(from, v3_norm(l->b.vel), rest);
         l->b.pos = to;
     }
@@ -863,13 +861,13 @@ static void cmd_range(int argc, const char **argv) {
 
 void bal_world_register(void) {
     cmd_register("bal_range", cmd_range, "bal_range [pen]: go to the ballistics range firing point (dev room; pen = the penetration stacks)");
-    B.enable = cvar_reg_bool("bal_enable", true, CVAR_SERVER | CVAR_LOCKED | CVAR_RULE, "projectile ballistics: guns with a cartridge fire simulated bullets (drop, drag, wind, ricochet, penetration); 0 = instant hitscan");
+    B.enable = cvar_reg_bool("bal_enable", true, CVAR_SERVER | CVAR_LOCKED | CVAR_RULE, "projectile ballistics: guns with a cartridge fire simulated bullets (drop, drag, wind, penetration); 0 = instant hitscan");
     B.drag_model = cvar_reg_int("bal_drag_model", -1, -1, 1, CVAR_SERVER | CVAR_LOCKED | CVAR_RULE, "bullet drag: -1 auto (G1/G7 tables), 0 exponential approximation, 1 G1/G7 drag tables (host, replicated)");
     B.wind_cv = cvar_reg_float("bal_wind", -1.0f, -1.0f, 40.0f, CVAR_SERVER | CVAR_LOCKED | CVAR_RULE, "steady wind for bullets in m/s (-1 = the weather's wind with gusts; host, replicated)");
     B.wind_dir_cv = cvar_reg_float("bal_wind_dir", 90.0f, 0.0f, 360.0f, CVAR_SERVER | CVAR_LOCKED | CVAR_RULE, "bal_wind direction: degrees the wind blows towards (0 = -Z, 90 = +X)");
     B.spin = cvar_reg_bool("bal_spin_drift", true, CVAR_SERVER | CVAR_LOCKED | CVAR_RULE, "spin drift of rifled bullets (Litz, tiny, long range only)");
     B.tracers_only = cvar_reg_bool("fire_tracers_only", false, CVAR_SERVER | CVAR_CHEAT | CVAR_LOCKED | CVAR_RULE, "every round is a tracer (ballistics range / debugging)");
-    B.debug = cvar_reg_int("ballistics_debug", 0, 0, 2, CVAR_LOCKED, "draw bullet paths (red supersonic, orange transonic, blue subsonic), ricochet / penetration points, crack timing; 2 = also log every hit");
+    B.debug = cvar_reg_int("ballistics_debug", 0, 0, 2, CVAR_LOCKED, "draw bullet paths (red supersonic, orange transonic, blue subsonic), penetration points, crack timing; 2 = also log every hit");
     B.watch = cvar_reg_bool("bal_watch", true, CVAR_LOCKED, "reload assets/ballistics and the attachment muzzle devices when the files change");
     B.ignition = cvar_reg_bool("bal_tracer_ignition", true, CVAR_LOCKED, "tracers: dim igniter for the first tens of metres (0 = arcade: bright from the muzzle)");
     B.crack_radius = cvar_reg_float("bal_crack_radius", 120.0f, 0.0f, 1000.0f, CVAR_LOCKED, "supersonic bullets passing within this many metres of you make a crack");

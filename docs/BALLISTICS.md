@@ -1,7 +1,7 @@
 # Ballistics, muzzle flash, tracers
 
 Every gun with a cartridge fires simulated bullets. Bullets drop and slow down with drag, drift
-in the wind, wobble through the transonic band, ricochet or penetrate depending on the surface,
+in the wind, wobble through the transonic band, penetrate or stop depending on the surface (they never ricochet),
 and crack past listeners. The muzzle flash is assembled from physical components (cartridge,
 barrel, muzzle device). Tracers are ammunition, not a visual on every shot.
 
@@ -17,7 +17,7 @@ The original planning notes, with the survey of the old code, are in `BALLISTICS
 | `src/gameplay/ballistics/bal_data.c` | Parses `assets/ballistics/cartridges.json`, `materials.json` and the attachments' `muzzle_device` blocks. Pure. |
 | `bal_drag.c` | G1 / G7 / GS (sphere) Cd-vs-Mach tables (79 / 84 / 81 points) and the point-mass retardation. Pure. |
 | `bal_sim.c` | `BalBullet` step: RK2 sub-steps, drag on air-relative velocity, transonic yaw, spin drift, zero solver. Pure. |
-| `bal_surface.c` | Ricochet / penetration / flesh decisions. Pure, deterministic (bullet RNG). |
+| `bal_surface.c` | Penetration / flesh decisions (no ricochets). Pure, deterministic (bullet RNG). |
 | `bal_acoustics.c` | Crack (Mach cone) arrival, whizz, report delay, air-absorption low-pass, N-wave level. Pure. |
 | `bal_tracer.c` | Tracer rounds per magazine, igniter / burn / burnout states, streak length. Pure. |
 | `bal_muzzle.c` | The flash composer, exposure gain, blackbody colours, heat / suppressor pop. Pure. |
@@ -25,7 +25,7 @@ The original planning notes, with the survey of the old code, are in `BALLISTICS
 | `bal_fx.c` | Spawns the composed flash, draws tracers (head + curved tail + smoke + night light), bullet trace / vapour trails, `muzzle_preview`, the fire hook. |
 | `tests/test_ballistics.c` | Unit tests (ctest `ballistics`). |
 | `tools/ballistics_ref.py` | Reference trajectories (py-ballisticcalc) → `tests/data/ballistics_ref.json`. |
-| `tools/sfxgen_ballistics.py` | Crack / whizz / ricochet / plate ring / distant-report sounds. |
+| `tools/sfxgen_ballistics.py` | Crack / whizz / plate ring / distant-report sounds. |
 | `tools/vfxgen/make_ballistic_effects.py` | Component muzzle effects, tracer, ballistic impact effects. |
 | `tools/tests/bal_range.cfg` | Range test with screenshots. |
 
@@ -95,12 +95,9 @@ From `test_ballistics`: bore line, ICAO atmosphere, 5 m/s full-value crosswind, 
 **Incidence**
 - `θ = asin(|dir·n|)`, measured from the surface.
 
-**Ricochet**
-- Possible only when `θ < ricochet_deg`.
-- Probability: `1 − (θ/θr)²`.
-- Speed kept: `lerp(60 %, 30 %, θ/θr)`.
-- Leaves flatter (`θ·U(0.3, 0.8)`), plus a 2–8° tumble cone.
-- BC × 0.35 and `BF_RICOCHET`. The bullet keeps flying and can hit again.
+**No ricochet**
+- Bullets never ricochet, at any incidence or on any material: every hit penetrates (below) or
+  stops in the surface. A grazing hit stops where it lands.
 
 **Penetration**
 - Capacity: `D = depth_ref · pen[class] · E / E_ref`.
@@ -109,7 +106,7 @@ From `test_ballistics`: bore line, ICAO atmosphere, 5 m/s full-value crosswind, 
   - `pen` is what this cartridge defeats at its own muzzle, relative to that.
 - Thickness: measured by casting the ray back from `entry + dir·D` against the same body. A ray starting inside a solid means "thicker than D". Fallback: the material's `thickness_mm`.
 - Exit: `E_out = E·(1 − t/D)`, cone `exit_spread_deg·(t/D)`, BC × `lerp(0.6, 1, E_out/E)`, plus an exit-side event.
-- At most 4 ricochets + penetrations per bullet.
+- At most 4 penetrations per bullet.
 
 **Flesh**
 - Thickness is the chord through the hit capsule (`chars_raycast_one`).
@@ -121,7 +118,6 @@ From `test_ballistics`: bore line, ICAO atmosphere, 5 m/s full-value crosswind, 
 **Damage keeps the weapon balance**
 - `damage × part_mult × falloff`, unchanged.
 - Scaled by the energy left after earlier penetrations, and by `lerp(0.75, 1, deposit fraction)`.
-- A ricochet that still hits does a quarter.
 
 ## Data
 
@@ -144,17 +140,17 @@ From `test_ballistics`: bore line, ICAO atmosphere, 5 m/s full-value crosswind, 
 
 ### `assets/ballistics/materials.json` (keys = SurfaceMaterial names)
 
-| Material | Class | Ricochet ° | depth_ref | Hardness | Porosity | Basis |
-|---|---|---|---|---|---|---|
-| metal_thin / metal_thick | hard | 20 | 6 mm | 1.0 | 0.05 | 5.56 M855 ≈ 6 mm mild steel at the muzzle; steel skips below about 20°. |
-| concrete / brick / tile / asphalt | hard | 10–15 | 40 / 60 / 30 / 60 mm | 0.5–0.8 | 0.2–0.6 | Masonry spalls; repeated hits are needed. |
-| glass | hard | 25 | 80 mm | 0.8 | 0 | |
-| wood (pine) | soft | 8 | 120 mm | 0.3 | 0.3 | About 12 cm of pine. |
-| plaster (drywall) | soft | 6 | 400 mm | 0.2 | 0.9 | A 13 mm sheet barely slows a rifle round. |
-| sand (sandbag) / dirt / grass / gravel | soft | 5–10 | 200–300 mm | 0.1–0.3 | 0.8–1 | About 20 cm of sandbag; bullets skip off flat ground at grazing angles. |
-| water | soft | 7 | 900 mm | 0 | 0 | Water skips; rifle rounds break up within about 1 m. |
-| flesh | soft | 0 | 450 mm | 0 | 0 | Torso chord 25–30 cm: rifles exit, a 9 mm often stays. |
-| cloth | soft | 0 | 1 m | 0 | 0.2 | |
+| Material | Class | depth_ref | Hardness | Porosity | Basis |
+|---|---|---|---|---|---|
+| metal_thin / metal_thick | hard | 6 mm | 1.0 | 0.05 | 5.56 M855 ≈ 6 mm mild steel at the muzzle. |
+| concrete / brick / tile / asphalt | hard | 40 / 60 / 30 / 60 mm | 0.5–0.8 | 0.2–0.6 | Masonry spalls; repeated hits are needed. |
+| glass | hard | 80 mm | 0.8 | 0 | |
+| wood (pine) | soft | 120 mm | 0.3 | 0.3 | About 12 cm of pine. |
+| plaster (drywall) | soft | 400 mm | 0.2 | 0.9 | A 13 mm sheet barely slows a rifle round. |
+| sand (sandbag) / dirt / grass / gravel | soft | 200–300 mm | 0.1–0.3 | 0.8–1 | About 20 cm of sandbag. |
+| water | soft | 900 mm | 0 | 0 | Rifle rounds break up within about 1 m. |
+| flesh | soft | 450 mm | 0 | 0 | Torso chord 25–30 cm: rifles exit, a 9 mm often stays. |
+| cloth | soft | 1 m | 0 | 0.2 | |
 
 `hardness` drives impact sparks and pyrophoric flashes. `porosity` drives dust. `decal_scale`
 scales the hole. `thickness_mm` is the fallback thickness.
@@ -251,7 +247,6 @@ camera, seen from the side, in slow motion.
 - Width at least about 1.5 px.
 - A faint smoke trail while burning (`tracer_smoke`).
 - At night the 6 nearest tracers are small point lights.
-- A ricocheting tracer keeps burning, flickers and sputters.
 - Tracers that stop in dry grass call `fire_try_ignite`, a stub until foliage burns.
 
 **Non-tracer rounds**
@@ -276,7 +271,7 @@ camera, seen from the side, in slow motion.
 
 **Impacts**
 - Every impact sound is delayed by its travel time and low-passed.
-- Steel plates also ring (`impact_plate_ring`); ricochets "zing" (`bullet_ricochet`).
+- Steel plates also ring (`impact_plate_ring`).
 
 **Resulting order**
 - For a distant listener off the line of fire: crack → impact → report. For example, 300 m away and 5 m off the line: 0.42 s, 0.50 s, 0.87 s.
@@ -300,7 +295,7 @@ camera, seen from the side, in slow motion.
 - `EV_SHOT`, once per shot rather than per pellet, carries a `BalShotRecord` (seed, tick, weapon + attachments, cartridge, device, spread, speed, zero, POI, tracer flag).
   - It replaces the per-pellet `EV_TRACER` and the shot `EV_SOUND`.
   - Observers flash at the shooter's visible barrel, eject the casing, play the report, and replay the bullets on their render clock for tracers and cracks.
-- `EV_IMPACT` (reliable) carries the hits. Id bits 16–31 hold the energy (log scale) and the outcome (ricochet / penetrate / exit / fragment / yaw / tracer).
+- `EV_IMPACT` (reliable) carries the hits. Id bits 16–31 hold the energy (log scale) and the outcome (penetrate / exit / fragment / yaw / tracer; bit 0, once the ricochet, is free).
 
 **Shooter**
 - The shooter predicts its own bullets with the same seed, spawning impact effects when they land. The host's copy of a predicted impact is skipped, as before (`cl_predict_impacts`).
@@ -320,13 +315,12 @@ camera, seen from the side, in slow motion.
 
 **`ballistics_debug`**
 - 1 draws the paths: red supersonic, orange transonic, blue subsonic.
-- Ricochet points yellow, penetration entry cyan / exit magenta, the fire hook orange.
+- Stops red, penetration entry cyan / exit magenta, the fire hook orange.
 - 2 also logs every hit (outcome, energy in / out, incidence, capacity, thickness) and every crack / whizz / report with its timing.
 
 **Ballistics range** (dev room, east, `bal_range`)
 - Firing point (32, 0, −40), facing +X.
 - Steel gongs at 25 / 100 / 300 / 500 m (0.3 / 0.5 / 1 / 1.5 m).
-- 6 mm ricochet plates at 30 m, turned to 5 / 10 / 15 / 20 / 30° incidence from the firing point.
 - `bal_range pen` → (32, 0, −56): penetration stacks at 15 m, each with a plaster witness panel 0.6 m behind:
   - steel 3 / 6 / 12 mm,
   - pine 10 / 12 / 15 cm,
@@ -358,7 +352,7 @@ camera, seen from the side, in slow motion.
 - Drop, velocity, time of flight and drift at 100 / 300 / 500 m within 5 % of py-ballisticcalc, for 5.56 and 7.62×51 (and 9 mm / 7.62×39).
 - Drift against Didion; the exponential model.
 - Zero solve; determinism (bit-identical, seeded transonic walk); the cross-platform golden hash.
-- Ricochet probability and speed per material (Monte Carlo); penetration table (6 mm steel / 12 cm pine / 20 cm sandbag, 7.62×51 = 2× on steel, pistols); flesh: 9 mm stops in a torso and passes a limb, 5.56 fragments, 7.62 exits.
+- Never a ricochet: every material, cartridge, thickness and incidence down to 0.5° stops or exits beyond the entry face; penetration table (6 mm steel / 12 cm pine / 20 cm sandbag, 7.62×51 = 2× on steel, pistols); flesh: 9 mm stops in a torso and passes a limb, 5.56 fragments, 7.62 exits.
 - Crack geometry (whole path and tick segments) and crack → impact → report ordering with the interval.
 - Tracer spacing / phase / last rounds / all-tracer.
 - Device component multipliers, blackbody, day ≤ 0.2× night, first-round pop once per cold can.
@@ -368,6 +362,6 @@ camera, seen from the side, in slow motion.
 - Range overview.
 - Flashes per device, day and night.
 - Tracers in slow motion.
-- Ricochet plates.
+- Grazing hits on the ground (3° / 1.5°): only stop / penetrate outcomes.
 - Penetration witness panels.
 - Run with `--validation`; screenshots go to `screenshots/ballistics/`.

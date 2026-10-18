@@ -37,7 +37,6 @@ PACK = [
     ("22_crack_near_miss_2m", "bullet_crack", ["miss=2", "caliber=7.62", "speed=800", "--scene", "field", "--dist", "2", "--dur", "1.5"], "A supersonic bullet passing 2 m away: the N-wave crack."),
     ("23_crack_far_miss_20m", "bullet_crack", ["miss=20", "caliber=7.62", "speed=800", "--scene", "forest", "--dist", "20", "--dur", "1.5"], "Passing 20 m away in a forest: longer, softer crack and its scatter."),
     ("24_whizz_subsonic", "bullet_whizz", ["speed=300", "miss=1.5", "--scene", "field", "--dist", "1", "--dur", "1"], "A subsonic round passing close."),
-    ("25_ricochet", "ricochet", ["energy=900", "--scene", "field", "--dist", "8", "--dur", "1.5", "--repeat", "3", "--every", "0.5"], "Three ricochet whines: each one different."),
 ]
 for m, name, e, smp in [(1, "concrete", 1500, "impact_hard"), (4, "metal_thin", 1500, "impact_metal"), (5, "metal_thick", 1500, "impact_metal"), (6, "wood", 1500, "impact_wood"),
                         (11, "glass", 1500, "impact_glass"), (7, "dirt", 1500, None), (12, "water", 1500, "impact_water"), (13, "flesh", 1200, "impact_flesh")]:
@@ -94,7 +93,7 @@ def main(args):
     os.makedirs(out, exist_ok=True)
     lines = ["# Procedural audio listening pack", "", "Rendered offline by `tools/audio_render` through the game's mixer, environment chain and environment logic "
              "(box-built scenes; listener 1.7 m up facing the source). Each file is peak-normalized to -3 dBFS unless its note says the level is kept. "
-             "Impacts, footsteps, zombies, ricochets and rain mix the recorded CC0 takes (assets/sounds/CREDITS.md) under the synthesized layers; 75-77 are the same sounds synthesized only. "
+             "Impacts, footsteps, zombies and rain mix the recorded CC0 takes (assets/sounds/CREDITS.md) under the synthesized layers; 75-77 are the same sounds synthesized only. "
              "Gunshots are synthesized only, except 21 (A/B with the placeholder samples). Headphones show the spatial cues (head shadow, ITD, reflections) best.", ""]
     for name, recipe, a, what in PACK:
         cmd = [EXE, recipe] + [x for x in a if x not in ("+samples", "-samples")]
