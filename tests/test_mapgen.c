@@ -332,6 +332,12 @@ int main(int argc, char **argv) {
     } else {
         CHECK(a.p.prim_count >= 0 && raster_hash(&a.r) != 0, "%s: raster built", path);
     }
+    // Cross-platform golden of the shipped open-world map (Linux x86_64; CI: Windows MSVC, macOS arm64 /
+    // x86_64): every peer generates the terrain itself (docs/PLATFORM_MACOS.md "Determinism").
+    if (!strcmp(path, "data/levels/vegetation.json")) {
+        const u64 golden = 0xA690DD81FE64036Cull;
+        CHECK(raster_hash(&a.r) == golden, "vegetation raster %016llx differs from the golden %016llx", (unsigned long long)raster_hash(&a.r), (unsigned long long)golden);
+    }
     destroy(&a);
     cJSON_Delete(root);
     printf("%d checks, %d failed\n", g_checks, g_fail);

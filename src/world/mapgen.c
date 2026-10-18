@@ -1,4 +1,6 @@
+#define DG_DETMATH   // every peer generates the map: bit-identical on every platform (core/dgmath.h)
 #include "mapgen.h"
+#include "core/detmath.h"
 #include "cJSON.h"
 #include <math.h>
 #include <stdio.h>
@@ -23,14 +25,14 @@ static float seg_dist(vec2 p, vec2 a, vec2 b, float *t) {
 
 // Point in a rotated rectangle's frame: returns the outside distance (0 inside), *inside depth.
 static float rect_dist(vec2 p, vec2 c, vec2 half, float yaw) {
-    float cs = cosf(yaw), sn = sinf(yaw), dx = p.x - c.x, dz = p.y - c.y;
+    float cs = dm_cosf(yaw), sn = dm_sinf(yaw), dx = p.x - c.x, dz = p.y - c.y;
     float lx = fabsf(dx * cs - dz * sn) - half.x, lz = fabsf(dx * sn + dz * cs) - half.y;
     float ox = fmaxf(lx, 0.0f), oz = fmaxf(lz, 0.0f);
     return sqrtf(ox * ox + oz * oz);
 }
 
 static float ellipse_d(vec2 p, vec2 c, vec2 r, float yaw) {
-    float cs = cosf(yaw), sn = sinf(yaw), dx = p.x - c.x, dz = p.y - c.y;
+    float cs = dm_cosf(yaw), sn = dm_sinf(yaw), dx = p.x - c.x, dz = p.y - c.y;
     float lx = (dx * cs - dz * sn) / fmaxf(r.x, 1e-3f), lz = (dx * sn + dz * cs) / fmaxf(r.y, 1e-3f);
     return sqrtf(lx * lx + lz * lz);
 }
@@ -451,7 +453,7 @@ static float height_pre(const MapGen *g, float x, float z, u8 *mat_out) {
             if (d >= 2.0f) continue;
             float pulled = lerpf(f->level + 1.6f, h, smoothstepf(1.15f, 2.0f, d));
             if (d < 1.15f) {
-                float hb = d < 1.0f ? f->level - 0.4f - f->depth * powf(1.0f - d * d, 0.7f) : lerpf(f->level - 0.4f, f->level + 1.6f, (d - 1.0f) / 0.15f);
+                float hb = d < 1.0f ? f->level - 0.4f - f->depth * dm_powf(1.0f - d * d, 0.7f) : lerpf(f->level - 0.4f, f->level + 1.6f, (d - 1.0f) / 0.15f);
                 h = fminf(pulled, hb);
                 mat = d < 1.0f ? MGM_MUD : (noise2(&g->n_detail, x * 0.3f, z * 0.3f) > 0.1f ? MGM_SAND : MGM_DIRT);
             } else {
@@ -827,7 +829,7 @@ void mapgen_finalize(MapGen *g) {
         if (f->kind != MGF_PAD || !f->auto_level) continue;
         float s = 0;
         int c = 0;
-        float cs = cosf(f->yaw), sn = sinf(f->yaw);
+        float cs = dm_cosf(f->yaw), sn = dm_sinf(f->yaw);
         f->kind = MGF_PAINT;   // evaluated without itself
         for (int a = -4; a <= 4; a++)
             for (int b = -4; b <= 4; b++) {

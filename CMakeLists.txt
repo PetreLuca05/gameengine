@@ -452,7 +452,7 @@ add_dependencies(dg_vgeo_content build_vgeo)
 
 # Open-world map generator (docs/ZOMBIE_MAP.md): the pure terrain / road / POI generator and loot
 # tables as a library for the preview tool and the unit tests (the game compiles the same sources).
-add_library(dg_mapgen STATIC src/world/mapgen.c src/world/mapgen_poi.c src/gameplay/loot.c)
+add_library(dg_mapgen STATIC src/world/mapgen.c src/world/mapgen_poi.c src/gameplay/loot.c src/core/detmath.c)
 set_target_properties(dg_mapgen PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
 target_include_directories(dg_mapgen PUBLIC src)
 target_link_libraries(dg_mapgen PUBLIC dg_thirdparty)

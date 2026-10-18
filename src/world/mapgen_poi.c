@@ -1,4 +1,6 @@
+#define DG_DETMATH   // every peer generates the map: bit-identical on every platform (core/dgmath.h)
 #include "mapgen_poi.h"
+#include "core/detmath.h"
 #include "cJSON.h"
 #include <math.h>
 #include <stdio.h>
@@ -60,10 +62,10 @@ static u32 Cv(vec3 c) { return C(c.x, c.y, c.z); }
 static vec3 jitter_col(Rng *r, vec3 c, float amt) { float k = 1.0f + rng_range(r, -amt, amt); return v3_scale(c, k); }
 
 static vec2 rot2(vec2 v, float yaw) {   // local (x, z) -> world offset, same convention as quat_yaw
-    float c = cosf(yaw), s = sinf(yaw);
+    float c = dm_cosf(yaw), s = dm_sinf(yaw);
     return v2(v.x * c + v.y * s, -v.x * s + v.y * c);
 }
-static float yaw_facing(vec2 dir) { return atan2f(dir.x, dir.y); }   // local +Z along dir
+static float yaw_facing(vec2 dir) { return dm_atan2f(dir.x, dir.y); }   // local +Z along dir
 
 static float jnum(const cJSON *o, const char *k, float def) {
     const cJSON *v = cJSON_GetObjectItemCaseSensitive(o, k);
@@ -273,7 +275,7 @@ static void plan_suburbs(Plan *pl) {
         float ph = rng_range(&pl->rng, 0, 6.28f), amp = rng_range(&pl->rng, 10, 22);
         for (int k = 0; k < 9; k++) {
             float x = c.x - h.x + 2.0f * h.x * (float)k / 8.0f;
-            pts[k] = v2(x, zc + sinf(ph + (float)k * 0.9f) * amp);
+            pts[k] = v2(x, zc + dm_sinf(ph + (float)k * 0.9f) * amp);
         }
         mapgen_add_road(g, MGR_STREET, 7.5f, pts, 9, true, false, "suburb street");
     }
@@ -283,7 +285,7 @@ static void plan_suburbs(Plan *pl) {
         vec2 pts[5];
         for (int i = 0; i < 5; i++) {
             float z = c.y - h.y + 2.0f * h.y * (float)i / 4.0f;
-            pts[i] = v2(xc + sinf((float)i * 1.3f + (float)k) * 14.0f, z);
+            pts[i] = v2(xc + dm_sinf((float)i * 1.3f + (float)k) * 14.0f, z);
         }
         pts[0].y += 14.0f;
         pts[4].y -= 14.0f;
@@ -351,7 +353,7 @@ static void plan_fence_rect(Plan *pl, vec2 c, vec2 size, float yaw, vec2 gate_wo
         vec2 a = v2_add(c, rot2(corners[e], yaw)), b = v2_add(c, rot2(corners[(e + 1) % 4], yaw));
         vec2 mid = v2_scale(v2_add(a, b), 0.5f), d = v2_sub(b, a);
         float len = v2_len(d);
-        MpLot *f = add_lot(pl->p, LK_FENCE, pl->poi, mid, v2(len, 2.4f), atan2f(d.x, d.y) - DG_PI * 0.5f, 0, 0, rng_next(&pl->rng), "");
+        MpLot *f = add_lot(pl->p, LK_FENCE, pl->poi, mid, v2(len, 2.4f), dm_atan2f(d.x, d.y) - DG_PI * 0.5f, 0, 0, rng_next(&pl->rng), "");
         f->variant = (u8)style;
         // the gate: an opening where the gate point projects onto this edge
         vec2 ad = v2_scale(d, 1.0f / len), ag = v2_sub(gate_world, a);
@@ -473,7 +475,7 @@ static void plan_airfield(Plan *pl) {
     vec2 dir = v2_scale(d, 1.0f / len), nrm = v2(-dir.y, dir.x);   // nrm: to the left of a->b
     float side = jnum(pl->j, "apron_side", 1.0f);                  // +1: apron on the left side
     vec2 mid = v2_scale(v2_add(a, b), 0.5f);
-    float ryaw = atan2f(dir.x, dir.y);
+    float ryaw = dm_atan2f(dir.x, dir.y);
     // one flat pad under it all so runway, taxiway and apron share a level
     add_pad(g, v2_add(mid, v2_scale(nrm, side * 45)), v2(130, len + 40), ryaw, 60, -1, 0, true);
     road2(g, MGR_RUNWAY, 40, a, b, "runway");
@@ -565,7 +567,7 @@ static void plan_quarry(Plan *pl) {
     for (int k = 0; k < 24; k++) {
         float t = (float)k / 23.0f;
         float ang = a0 + t * 5.2f, rr = pr * lerpf(1.08f, 0.2f, t);
-        ramp[k] = v2_add(pit, v2(sinf(ang) * rr * 1.05f, cosf(ang) * rr * 0.95f));
+        ramp[k] = v2_add(pit, v2(dm_sinf(ang) * rr * 1.05f, dm_cosf(ang) * rr * 0.95f));
     }
     int rr = mapgen_add_road(g, MGR_DIRT, 7.0f, ramp, 24, true, false, "quarry ramp");
     if (rr >= 0) g->roads[rr].shoulder = 3.0f;
@@ -621,8 +623,8 @@ static void plan_camp(Plan *pl) {
     add_lot(pl->p, LK_CAMPFIRE, pl->poi, AT(0, 0), v2(3, 3), 0, 1, 0, 91, "");
     for (int k = 0; k < 6; k++) {
         float a = (float)k / 6.0f * 6.283f + 0.3f;
-        vec2 p = AT(cosf(a) * 32.0f, sinf(a) * 22.0f);
-        keep_lot(pl, add_lot(pl->p, LK_CABIN, pl->poi, p, v2(7, 6), atan2f(c.x - p.x, c.y - p.y), 1, k < 4 ? MPL_ENTERABLE : 0, 92 + (u32)k, "camping"), 1);
+        vec2 p = AT(dm_cosf(a) * 32.0f, dm_sinf(a) * 22.0f);
+        keep_lot(pl, add_lot(pl->p, LK_CABIN, pl->poi, p, v2(7, 6), dm_atan2f(c.x - p.x, c.y - p.y), 1, k < 4 ? MPL_ENTERABLE : 0, 92 + (u32)k, "camping"), 1);
     }
     for (int k = 0; k < 4; k++) keep_lot(pl, add_lot(pl->p, LK_TENT, pl->poi, AT(-14 + 9 * (float)k, 12 + (k & 1) * 3), v2(2.6f, 3.2f), yaw + 0.3f * (float)k, 1, 0, 100 + (u32)k, "camping"), 0.5f);
     keep_lot(pl, add_lot(pl->p, LK_SHED, pl->poi, AT(16, -12), v2(5, 4), yaw, 1, MPL_ENTERABLE, 105, "camping"), 0.5f);
@@ -759,7 +761,7 @@ static quat quat_from_up(vec3 dir) {
     float c = v3_dot(up, d);
     if (c > 0.9999f) return quat_identity();
     if (c < -0.9999f) return quat_axis_angle(v3(1, 0, 0), DG_PI);
-    return quat_axis_angle(v3_norm(v3_cross(up, d)), acosf(c));
+    return quat_axis_angle(v3_norm(v3_cross(up, d)), dm_acosf(c));
 }
 // Beam (box) between two local points.
 static void kbeam(Kit *k, const Frame *f, vec3 a, vec3 b, float hw, u32 col, u16 fl, const char *s) {
@@ -896,7 +898,7 @@ static void kstairs(Kit *k, const Frame *f, float x, float z0, float dz, float y
         kblock(k, f, x, zc, wd * 0.5f, run * 0.5f, y0 + rs * (float)i, y0 + rs * (float)(i + 1), col, MPF_DETAIL, "wood");
     }
     float L = run * (float)n;
-    float ang = atanf(rise / L), hyp = sqrtf(L * L + rise * rise);
+    float ang = dm_atanf(rise / L), hyp = sqrtf(L * L + rise * rise);
     // ramp plane through the step nosings: from (z0, y0) to (z0 + dz L, y0 + rise), 0.12 thick below it
     vec3 mid = v3(x, y0 + rise * 0.5f, z0 + dz * L * 0.5f);
     quat q = quat_axis_angle(v3(1, 0, 0), -dz * ang);
@@ -1125,7 +1127,7 @@ static void kit_fence(Kit *k, const MpLot *l) {
         float h0 = ground(k, p0), h1 = ground(k, p1), hm = fminf(h0, h1);
         Frame f = frame(v3(pm.x, hm, pm.y), l->yaw);
         float seg = (u1 - u0) * 0.5f;
-        float pitch = atan2f(h1 - h0, u1 - u0);
+        float pitch = dm_atan2f(h1 - h0, u1 - u0);
         quat q = quat_axis_angle(v3(0, 0, 1), pitch);
         float lift = fabsf(h1 - h0) * 0.5f;
         if (l->variant == 0) {
@@ -1172,7 +1174,7 @@ static void kit_campfire(Kit *k, vec2 p) {
     Frame f = frame(v3(p.x, h, p.y), 0);
     for (int i = 0; i < 8; i++) {
         float a = (float)i / 8.0f * 6.283f;
-        kblock(k, &f, cosf(a) * 0.8f, sinf(a) * 0.8f, 0.18f, 0.15f, -0.05f, 0.2f, C(0.35f, 0.34f, 0.32f), MPF_DETAIL, "concrete");
+        kblock(k, &f, dm_cosf(a) * 0.8f, dm_sinf(a) * 0.8f, 0.18f, 0.15f, -0.05f, 0.2f, C(0.35f, 0.34f, 0.32f), MPF_DETAIL, "concrete");
     }
     kcyl(k, &f, v3(0, 0.15f, 0), 0.08f, 0.5f, 1.0f, quat_axis_angle(v3(1, 0, 0), 1.3f), C(0.1f, 0.07f, 0.05f), MPF_DETAIL, "wood");
     kcyl(k, &f, v3(0, 0.15f, 0), 0.08f, 0.5f, 1.0f, quat_mul(quat_yaw(1.6f), quat_axis_angle(v3(1, 0, 0), 1.3f)), C(0.1f, 0.07f, 0.05f), MPF_DETAIL, "wood");
@@ -1180,7 +1182,7 @@ static void kit_campfire(Kit *k, vec2 p) {
     klight(k, fp(&f, v3(0, 0.8f, 0)), v3(1.0f, 0.55f, 0.25f), 10, 40, false, true);
     for (int i = 0; i < 3; i++) {   // log benches
         float a = (float)i * 2.1f;
-        Frame b = frame(fp(&f, v3(cosf(a) * 2.6f, 0, sinf(a) * 2.6f)), -a);
+        Frame b = frame(fp(&f, v3(dm_cosf(a) * 2.6f, 0, dm_sinf(a) * 2.6f)), -a);
         kcyl(k, &b, v3(0, 0.25f, 0), 0.25f, 0.9f, 1.0f, quat_axis_angle(v3(1, 0, 0), DG_PI * 0.5f), C(0.3f, 0.22f, 0.14f), MPF_COLLIDE, "wood");
     }
 }
@@ -1269,7 +1271,7 @@ static void kit_house(Kit *k, const MpLot *l) {
             memset(&fl, 0, sizeof(fl));
             fl.pos = v2_scale(v2_add(wa, wb), 0.5f);
             fl.size = v2(v2_len(d), 1.1f);
-            fl.yaw = atan2f(d.x, d.y) - DG_PI * 0.5f;
+            fl.yaw = dm_atan2f(d.x, d.y) - DG_PI * 0.5f;
             fl.variant = 1;
             kit_fence(k, &fl);
         }
@@ -2098,7 +2100,7 @@ static void build_markings(Kit *k) {
             vec2 m = v2_scale(v2_add(a->p, b->p), 0.5f);
             float len = v2_len(v2_sub(b->p, a->p));
             float yaw = yaw_facing(v2_sub(b->p, a->p));
-            float pitch = atanf((b->h - a->h) / fmaxf(len, 0.1f));
+            float pitch = dm_atanf((b->h - a->h) / fmaxf(len, 0.1f));
             float hm = mapgen_raster_height(k->r, m.x, m.y);
             Frame f = frame(v3(m.x, hm + 0.075f, m.y), yaw);
             kbox_r(k, &f, v3(0, 0, 0), v3(wid, 0.015f, len * 0.5f), quat_axis_angle(v3(1, 0, 0), -pitch), col, MPF_NO_SHADOW | MPF_DETAIL, "asphalt");
@@ -2321,7 +2323,7 @@ void mappoi_build(MapPois *p, const MapGen *g, const MgRaster *r) {
             const MgRoadSample *m = &g->rs[rd->first + rd->count / 2];
             if (mappoi_find(p, m->p.x, m->p.y) != i) continue;
             k.poi = (u8)(i + 1);
-            kent(&k, MPE_SPAWN, v3(m->p.x, m->h + 0.2f, m->p.y), atan2f(-m->dir.x, -m->dir.y), NULL);
+            kent(&k, MPE_SPAWN, v3(m->p.x, m->h + 0.2f, m->p.y), dm_atan2f(-m->dir.x, -m->dir.y), NULL);
             n++;
         }
     }
