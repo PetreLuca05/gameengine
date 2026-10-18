@@ -260,6 +260,11 @@ All HUD elements sit in the safe area:
 * attachment items: the attachment's parts;
 * other items: their box or cylinder.
 
+Where the JSON names a detailed `"mesh"` (docs/ITEM_PIPELINE.md), the part list carries one entry per
+draw group of the mesh (`RenderUi3dPart.mesh`). The ui3d shader then reads the per-vertex albedo, AO,
+roughness and metallic. Filled slots hide or fold their parts as in the hands. So the inventory
+preview and the baked icons show the detailed models.
+
 `render_ui3d` renders such a part list into an offscreen RGBA8 target (`src/render/render_ui.c`,
 pass `ui_views`):
 * its own camera;
