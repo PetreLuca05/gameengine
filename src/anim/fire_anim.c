@@ -1,4 +1,5 @@
 #include "fire_anim.h"
+#include "core/detmath.h"
 #include "cJSON.h"
 #include <math.h>
 #include <stdio.h>
@@ -617,7 +618,7 @@ void fire_anim_step(FireAnimState *s, const FireAnimDef *d, float dt, bool trigg
     s->heat = fmaxf(0.0f, s->heat - d->heat_decay * dt);
     float gun[FA_CH], hand[FA_CH];
     if (!s->firing) {
-        float kr = expf(-dt / fmaxf(1e-3f, d->ride_release * fmaxf(0.2f, d->time_stretch)));
+        float kr = dm_expf(-dt / fmaxf(1e-3f, d->ride_release * fmaxf(0.2f, d->time_stretch)));
         for (int ch = 0; ch < FA_CH; ch++) s->ride[ch] *= kr;
     }
     for (int ch = 0; ch < FA_CH; ch++) {
@@ -679,7 +680,7 @@ void fire_anim_step(FireAnimState *s, const FireAnimDef *d, float dt, bool trigg
         roll *= s->roll_sign;
     }
     float screen = s->screen;
-    s->screen *= expf(-dt / fmaxf(1e-3f, d->screen_release / 3.0f));
+    s->screen *= dm_expf(-dt / fmaxf(1e-3f, d->screen_release / 3.0f));
     float blur = 0.0f;
     if (s->blur_left > 0) { blur = s->blur_left >= (int)(d->blur_ticks + 0.5f) ? 1.0f : 0.5f; s->blur_left--; }
 

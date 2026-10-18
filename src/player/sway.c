@@ -1,4 +1,5 @@
 #include "sway.h"
+#include "core/detmath.h"
 #include "cJSON.h"
 #include <math.h>
 #include <stdio.h>
@@ -129,7 +130,7 @@ void sway_eval(SwayState *st, const SwayProfile *p, const SwayInput *in, SwayOut
     // Hold breath: steadies quickly; letting go (or running out) gives a short shaky overshoot.
     if (st->breath_s <= 0.0f) st->breath_s = 1.0f;
     if (st->breath_s < 0.5f && breath_k > 0.5f) st->shake = 1.0f;
-    st->breath_s += (breath_k - st->breath_s) * (1.0f - expf(-dt / 0.2f));
+    st->breath_s += (breath_k - st->breath_s) * (1.0f - dm_expf(-dt / 0.2f));
     st->shake = fmaxf(0.0f, st->shake - dt / 0.9f);
     float wy = dt > 1e-6f ? wrap_pi(in->aim_yaw - st->prev_yaw) / dt : 0.0f;
     float wp = dt > 1e-6f ? (in->aim_pitch - st->prev_pitch) / dt : 0.0f;
@@ -142,21 +143,21 @@ void sway_eval(SwayState *st, const SwayProfile *p, const SwayInput *in, SwayOut
     st->t = in->phase_valid ? (float)fmod(in->clock, 3600.0) : st->t + dt;
     // Breathing: slow layered sines (figure-eight + breath), plus the extra wobble.
     float sw = p->sway_rot * S;
-    vec3 breath_rot = v3(sinf(st->t * p->sway_freq * 2.0f * DG_PI) * sw * 0.6f + sinf(st->t * 0.37f * 2.0f * DG_PI + 1.7f) * sw * 0.25f,
-                         sinf(st->t * p->sway_freq * DG_PI) * sw + sinf(st->t * 0.23f * 2.0f * DG_PI + 0.4f) * sw * 0.2f, 0);
+    vec3 breath_rot = v3(dm_sinf(st->t * p->sway_freq * 2.0f * DG_PI) * sw * 0.6f + dm_sinf(st->t * 0.37f * 2.0f * DG_PI + 1.7f) * sw * 0.25f,
+                         dm_sinf(st->t * p->sway_freq * DG_PI) * sw + dm_sinf(st->t * 0.23f * 2.0f * DG_PI + 0.4f) * sw * 0.2f, 0);
     float wob = (in->wobble + st->shake * 0.8f) * S;
-    breath_rot.x += (sinf(st->t * 2.3f * 2.0f * DG_PI) * 0.5f + sinf(st->t * 3.7f * 2.0f * DG_PI + 1.0f) * 0.35f) * wob;
-    breath_rot.y += (sinf(st->t * 2.9f * 2.0f * DG_PI + 0.5f) * 0.45f + sinf(st->t * 4.3f * 2.0f * DG_PI + 2.1f) * 0.3f) * wob;
-    vec3 breath_pos = v3(0, sinf(st->t * p->breath_freq * 2.0f * DG_PI) * p->breath_pos * S, 0);
+    breath_rot.x += (dm_sinf(st->t * 2.3f * 2.0f * DG_PI) * 0.5f + dm_sinf(st->t * 3.7f * 2.0f * DG_PI + 1.0f) * 0.35f) * wob;
+    breath_rot.y += (dm_sinf(st->t * 2.9f * 2.0f * DG_PI + 0.5f) * 0.45f + dm_sinf(st->t * 4.3f * 2.0f * DG_PI + 2.1f) * 0.3f) * wob;
+    vec3 breath_pos = v3(0, dm_sinf(st->t * p->breath_freq * 2.0f * DG_PI) * p->breath_pos * S, 0);
     // Movement bob, scaled with the speed (the camera's own bob comes from the head animation).
     float speed = sqrtf(in->vel_cam.x * in->vel_cam.x + in->vel_cam.z * in->vel_cam.z);
     float bob_target = in->grounded ? clampf(speed / 6.0f, 0, 1) : 0.0f;
-    st->bob_amt += (bob_target - st->bob_amt) * (1.0f - expf(-8.0f * dt));
+    st->bob_amt += (bob_target - st->bob_amt) * (1.0f - dm_expf(-8.0f * dt));
     if (in->phase_valid) st->bob_phase = in->stride * p->bob_freq;
     else st->bob_phase += dt * (4.5f + speed * 1.1f) * p->bob_freq;
     float bob = st->bob_amt * S * (in->sprint ? p->sprint_bob : in->bob_scale);
-    vec3 bob_pos = v3(sinf(st->bob_phase) * p->bob_pos * bob, -fabsf(cosf(st->bob_phase)) * p->bob_pos * 1.2f * bob, 0);
-    vec3 bob_rot = v3(0, 0, sinf(st->bob_phase) * p->bob_rot * bob);
+    vec3 bob_pos = v3(dm_sinf(st->bob_phase) * p->bob_pos * bob, -fabsf(dm_cosf(st->bob_phase)) * p->bob_pos * 1.2f * bob, 0);
+    vec3 bob_rot = v3(0, 0, dm_sinf(st->bob_phase) * p->bob_rot * bob);
     // Landing: a dip on touchdown, stronger for harder landings, settling on a spring.
     if (!in->grounded) st->air_vy = fminf(st->air_vy, in->vel_world_y);
     if (in->grounded && !st->was_grounded && st->air_vy < -1.5f) st->land_v += clampf(-st->air_vy * p->land_gain, 0.0f, p->land_max) * S;

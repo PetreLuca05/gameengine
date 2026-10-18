@@ -1,5 +1,6 @@
 // Aim model math (docs/AIM.md). Pure: unit tested by tests/test_aim.c.
 #include "gameplay/aim.h"
+#include "core/detmath.h"
 #include <math.h>
 
 const char *aim_class_name(int c) {
@@ -80,7 +81,7 @@ vec3 aim_recover_origin(vec3 eye, vec3 muzzle, float f, float margin) {
 
 float aim_spread_px(float spread_deg, float dist, float cam_dist, float fov_v_rad, float screen_h) {
     // World radius of the cone at the impact, then its angular size from the camera.
-    float r = tanf(spread_deg * 0.5f * DG_DEG2RAD) * fmaxf(dist, 0.0f);
-    float ang = atanf(r / fmaxf(cam_dist, 0.05f));
-    return tanf(ang) * (screen_h * 0.5f) / tanf(fov_v_rad * 0.5f);
+    float r = dm_tanf(spread_deg * 0.5f * DG_DEG2RAD) * fmaxf(dist, 0.0f);
+    float ang = dm_atanf(r / fmaxf(cam_dist, 0.05f));
+    return dm_tanf(ang) * (screen_h * 0.5f) / dm_tanf(fov_v_rad * 0.5f);
 }

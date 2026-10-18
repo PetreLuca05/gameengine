@@ -1,5 +1,6 @@
 // Point-mass projectile integration (docs/BALLISTICS.md "Physics model").
 #include "gameplay/ballistics/bal_sim.h"
+#include "core/detmath.h"
 #include "gameplay/ballistics/bal_drag.h"
 #include <math.h>
 
@@ -8,7 +9,7 @@ float bal_sound_speed(float temp_c) { return 331.3f + 0.606f * temp_c; }
 float bal_air_density(float temp_c, float altitude_m) {
     // Ideal gas at the standard-atmosphere pressure for the altitude (barometric formula,
     // 8.4 km scale height), dry air R = 287.05 J/(kg·K).
-    float p = 101325.0f * expf(-altitude_m / 8434.0f);
+    float p = 101325.0f * dm_expf(-altitude_m / 8434.0f);
     return p / (287.05f * (temp_c + 273.15f));
 }
 
@@ -38,9 +39,9 @@ vec3 bal_cone_dir(vec3 dir, float cone_rad, Rng *rng) {
     vec3 u = any_perp(dir);
     vec3 v = v3_cross(dir, u);
     // Uniform over the disc of the cone's tangent plane (small angles).
-    float r = sqrtf(rng_float(rng)) * tanf(cone_rad);
+    float r = sqrtf(rng_float(rng)) * dm_tanf(cone_rad);
     float a = rng_float(rng) * 6.2831853f;
-    vec3 o = v3_add(v3_scale(u, r * cosf(a)), v3_scale(v, r * sinf(a)));
+    vec3 o = v3_add(v3_scale(u, r * dm_cosf(a)), v3_scale(v, r * dm_sinf(a)));
     return v3_norm(v3_add(dir, o));
 }
 
@@ -124,8 +125,8 @@ bool bal_step(BalBullet *b, const BalCartridge *c, const BalEnv *e, float dt) {
         // Spin drift (Litz): drift = 1.25·(Sg + 1.2)·t^1.83 inches for a right-hand twist. Applied as
         // its time derivative, to the right of the flight path, once the bullet has flown 0.3 s.
         if (e->spin_drift && c->spin_sg > 0.0f && b->time > 0.3f && !(b->flags & BF_RICOCHET)) {
-            float rate = 1.25f * (c->spin_sg + 1.2f) * 1.83f * powf(b->time, 0.83f) * 0.0254f;   // m/s
-            float rate0 = 1.25f * (c->spin_sg + 1.2f) * 1.83f * powf(b->time - h, 0.83f) * 0.0254f;
+            float rate = 1.25f * (c->spin_sg + 1.2f) * 1.83f * dm_powf(b->time, 0.83f) * 0.0254f;   // m/s
+            float rate0 = 1.25f * (c->spin_sg + 1.2f) * 1.83f * dm_powf(b->time - h, 0.83f) * 0.0254f;
             vec3 dir = v3_scale(b->vel, 1.0f / fmaxf(s, 1e-3f));
             vec3 right = v3_norm(v3_cross(dir, v3(0, 1, 0)));
             b->vel = v3_madd(b->vel, right, rate - rate0);
@@ -149,7 +150,7 @@ float bal_zero_angle(const BalCartridge *c, float speed, float zero_m, float sig
     for (int it = 0; it < 40; it++) {
         float ang = 0.5f * (lo + hi);
         BalBullet b;
-        bal_launch(&b, c, 0, v3(0, -sight_height, 0), v3(0, sinf(ang), -cosf(ang)), speed, 1, 0, false);
+        bal_launch(&b, c, 0, v3(0, -sight_height, 0), v3(0, dm_sinf(ang), -dm_cosf(ang)), speed, 1, 0, false);
         float y = -1e9f;
         while (bal_step(&b, c, &e, 1.0f / 240.0f)) {
             if (-b.pos.z >= zero_m) { y = b.pos.y; break; }

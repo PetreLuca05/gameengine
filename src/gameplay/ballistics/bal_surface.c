@@ -1,10 +1,11 @@
 // Ricochet / penetration / flesh (docs/BALLISTICS.md "Surfaces").
 #include "gameplay/ballistics/bal_surface.h"
+#include "core/detmath.h"
 #include <math.h>
 
 #define DEG2RAD 0.017453293f
 
-float bal_incidence(vec3 dir, vec3 normal) { return asinf(clampf(fabsf(v3_dot(dir, normal)), 0.0f, 1.0f)); }
+float bal_incidence(vec3 dir, vec3 normal) { return dm_asinf(clampf(fabsf(v3_dot(dir, normal)), 0.0f, 1.0f)); }
 
 float bal_capacity(const BalMaterial *m, const BalCartridge *c, float energy) {
     // depth_ref is what 5.56 M855 defeats at its muzzle; the cartridge's hard / soft factor is what
@@ -44,7 +45,7 @@ BalHitResult bal_hit_surface(BalBullet *b, const BalCartridge *c, const BalMater
         float keep = lerpf(0.60f, 0.30f, f);   // speed retained: grazing hits lose least
         float out_ang = r.incidence * rng_range(&b->rng, 0.3f, 0.8f);
         vec3 t = v3_norm(v3_madd(dir, normal, -v3_dot(dir, normal)));
-        vec3 nd = v3_add(v3_scale(t, cosf(out_ang)), v3_scale(normal, sinf(out_ang)));
+        vec3 nd = v3_add(v3_scale(t, dm_cosf(out_ang)), v3_scale(normal, dm_sinf(out_ang)));
         nd = bal_cone_dir(nd, rng_range(&b->rng, 2.0f, 8.0f) * DEG2RAD, &b->rng);   // tumble
         if (v3_dot(nd, normal) < 0.02f) nd = v3_norm(v3_madd(nd, normal, 0.03f - v3_dot(nd, normal)));
         r.outcome = BAL_RICOCHET;
@@ -105,7 +106,7 @@ BalHitResult bal_hit_flesh(BalBullet *b, const BalCartridge *c, const BalMateria
     }
     r.energy_deposit = e - r.energy_out;
     // Temporary cavity scales with the energy deposited (volume ∝ E, so linear size ∝ E^(1/3)).
-    r.cavity = cbrtf(r.energy_deposit / 1000.0f) * cavity_mul;
+    r.cavity = dm_cbrtf(r.energy_deposit / 1000.0f) * cavity_mul;
     return r;
 }
 

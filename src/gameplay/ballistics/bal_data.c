@@ -1,5 +1,6 @@
 // Ballistics data parsing (cartridges, materials, muzzle devices).
 #include "gameplay/ballistics/bal_data.h"
+#include "core/detmath.h"
 #include "gameplay/ballistics/bal_drag.h"
 #include "gameplay/ballistics/bal_sim.h"
 #include "cJSON.h"
@@ -108,7 +109,7 @@ void bal_cartridge_finalize(BalCartridge *c) {
         while (bal_step(&b, c, &e, 1.0f / 240.0f)) {
             if (b.pos.x >= fit_x) { v_fit = v3_len(b.vel); break; }
         }
-        if (v_fit > 0.0f) c->exp_k = logf(c->mv_ref / v_fit) / fit_x;
+        if (v_fit > 0.0f) c->exp_k = dm_logf(c->mv_ref / v_fit) / fit_x;
     }
 }
 

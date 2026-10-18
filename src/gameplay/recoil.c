@@ -1,4 +1,5 @@
 #include "recoil.h"
+#include "core/detmath.h"
 #include <math.h>
 
 void recoil_params_default(RecoilParams *p) {
@@ -174,7 +175,7 @@ RecoilKick recoil_tick(const RecoilParams *p, RecoilState *s, float dt) {
     }
     if (!s->recovering) return out;
     // Exponential return; the initial rate equals recovery_speed (deg/s).
-    float k = 1.0f - expf(-dt * p->recovery_speed / s->pool_start);
+    float k = 1.0f - dm_expf(-dt * p->recovery_speed / s->pool_start);
     float step_p = s->pool_pitch * k, step_y = s->pool_yaw * k;
     if (fabsf(s->pool_pitch - step_p) < 0.005f && fabsf(s->pool_yaw - step_y) < 0.005f) {
         step_p = s->pool_pitch;
@@ -215,8 +216,8 @@ vec3 recoil_cone_dir(vec3 dir, float cone_deg, Rng *rng) {
     float r = fabsf(g - 0.5f) * 2.0f * 1.35f;                              // ~half the shots in the inner 40%
     r = fminf(r, 1.0f);
     float a = rng_float(rng) * 2.0f * DG_PI;
-    float rad = tanf(cone_deg * 0.5f * DG_DEG2RAD) * r;
-    return v3_norm(v3_add(dir, v3_add(v3_scale(t, cosf(a) * rad), v3_scale(b, sinf(a) * rad))));
+    float rad = dm_tanf(cone_deg * 0.5f * DG_DEG2RAD) * r;
+    return v3_norm(v3_add(dir, v3_add(v3_scale(t, dm_cosf(a) * rad), v3_scale(b, dm_sinf(a) * rad))));
 }
 
 int recoil_preview(const RecoilParams *p, u32 seed, vec2 *out, int n) {
