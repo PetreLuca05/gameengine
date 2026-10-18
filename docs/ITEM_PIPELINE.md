@@ -101,6 +101,10 @@ an `emitter` socket (the flashlight item).
 
 Other players still see the eye-mounted flashlight (no protocol change).
 
+The flashlight item is `"kind": "misc"` with `"hotbar": true` (`items.json`). Misc items normally go to
+the backpack and can never be held, so the flag lets it equip from the hotbar (`inventory.c
+hotbar_first`).
+
 ## Budgets (LOD 0 triangles, `assets/items/catalog.json`)
 
 | Tier | Budget | This pass |
@@ -219,9 +223,24 @@ validator checks they exist.
   - Every attachment's mesh sockets match `attachments.c`: mount, sight point, lens, grip, emitter.
   - Every allowed weapon x attachment combination has a mesh.
 - `tools/tests/item_nearplane.cfg` + `item_nearplane.py`: every weapon in first person at the
-  default FOV, hip and ADS. It counts viewmodel pixels clipped by the near plane (the nearest depth
-  of the viewmodel pass).
+  default FOV, hip and ADS (`item_nearplane <state>`, `game_items.c`).
+  - It walks the LOD 0 triangles of the posed weapon and its attachments in view space and counts
+    the edges that cross the near plane (0.04 m) inside the near rectangle. Those are the visible
+    cuts, where a hole opens in the model.
+  - Geometry behind the near plane but outside the view (the stock behind the eye) is only
+    reported, not counted.
+  - The log line names the part with the most cuts.
+  - The fixes this took were all in the models, never the camera:
+    - The AR uppers slope down behind a shorter rail.
+    - The shotgun receiver slopes to the stock, with its rail on a riser.
+    - The shotgun comb and the PDW cheek bar sit lower.
+    - The bat is 28".
 - `tools/tests/sight_align.cfg` (`sight_test align all`): every weapon x optic keeps the sight on the
   view axis.
+  - Under lavapipe (about 1 fps) every combination reports FAIL only because it gathers fewer than
+    100 samples.
+  - The measured errors are 0.000 mm / 0.0000 deg, except crossbow + 4x scope, whose eye relief spreads
+    3.4 mm.
+  - Run it on a real GPU for a pass / fail verdict.
 - `test_recoil_ads` and `test_handpose`: unchanged gameplay sockets. The glue tests run against the
   JSON sockets the meshes were built on.
