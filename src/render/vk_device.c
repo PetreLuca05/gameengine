@@ -1,5 +1,6 @@
 // Instance, device, swapchain and render target management.
 #include "vk_internal.h"
+#include "vk_portability.h"
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
 #include <stdlib.h>
@@ -38,8 +39,35 @@ static bool want_validation(void) {
     return env && env[0] == '1';
 }
 
+// VkPhysicalDevicePortabilitySubsetFeaturesKHR (vulkan_beta.h, which the headers only expose under
+// VK_ENABLE_BETA_EXTENSIONS): logged at device creation, the engine uses none of the restricted features.
+typedef struct PortabilitySubsetFeatures {
+    VkStructureType sType;
+    void *pNext;
+    VkBool32 constantAlphaColorBlendFactors, events, imageViewFormatReinterpretation, imageViewFormatSwizzle, imageView2DOn3DImage,
+        multisampleArrayImage, mutableComparisonSamplers, pointPolygons, samplerMipLodBias, separateStencilMaskRef,
+        shaderSampleRateInterpolationFunctions, tessellationIsolines, tessellationPointMode, triangleFans, vertexAttributeAccessBeyondStride;
+} PortabilitySubsetFeatures;
+#define STYPE_PORTABILITY_SUBSET_FEATURES ((VkStructureType)1000163000)
+
+static void log_portability_subset(VkPhysicalDevice gpu) {
+    PortabilitySubsetFeatures ps = { STYPE_PORTABILITY_SUBSET_FEATURES };
+    VkPhysicalDeviceFeatures2 f2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
+    f2.pNext = &ps;
+    vkGetPhysicalDeviceFeatures2(gpu, &f2);
+    log_info("vulkan: portability subset (MoltenVK): triangleFans %d, pointPolygons %d, events %d, formatSwizzle %d, mipLodBias %d, "
+             "beyondStride %d, constantAlpha %d (none used; docs/PLATFORM_MACOS.md)",
+             ps.triangleFans, ps.pointPolygons, ps.events, ps.imageViewFormatSwizzle, ps.samplerMipLodBias, ps.vertexAttributeAccessBeyondStride,
+             ps.constantAlphaColorBlendFactors);
+}
+
 bool vkd_create_device(SDL_Window *window) {
-    VK_CHECK(volkInitialize());
+    // volk and SDL's surface creation must use one Vulkan library: on macOS SDL prefers the bundled
+    // libMoltenVK.dylib, then the loader (SDL_VULKAN_LIBRARY overrides), volk only knows the loader.
+    // The window (SDL_WINDOW_VULKAN) has loaded SDL's choice already.
+    PFN_vkGetInstanceProcAddr gipa = (PFN_vkGetInstanceProcAddr)SDL_Vulkan_GetVkGetInstanceProcAddr();
+    if (gipa) volkInitializeCustom(gipa);
+    else VK_CHECK(volkInitialize());
 
     u32 sdl_ext_count = 0;
     const char *const *sdl_exts = SDL_Vulkan_GetInstanceExtensions(&sdl_ext_count);
@@ -81,6 +109,7 @@ bool vkd_create_device(SDL_Window *window) {
 
     VkInstanceCreateInfo ici = { VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO };
     ici.pApplicationInfo = &app;
+    if (vkport_instance(exts, &ext_count, 16, &ici.flags)) log_info("vulkan: portability enumeration enabled");
     ici.enabledExtensionCount = ext_count;
     ici.ppEnabledExtensionNames = exts;
     ici.enabledLayerCount = layer_count;
@@ -116,7 +145,12 @@ bool vkd_create_device(SDL_Window *window) {
     for (u32 i = 0; i < gpu_count; i++) {
         VkPhysicalDeviceProperties p;
         vkGetPhysicalDeviceProperties(gpus[i], &p);
-        if (p.apiVersion < VK_API_VERSION_1_3) continue;
+        if (p.apiVersion < VK_API_VERSION_1_3) {
+            // MoltenVK reports 1.3 from 1.3.0 (Vulkan SDK 1.4.309); older ones report 1.2
+            log_warn("vulkan: '%s' skipped: api %u.%u < 1.3 (on macOS: update MoltenVK / the Vulkan SDK)", p.deviceName, VK_API_VERSION_MAJOR(p.apiVersion),
+                     VK_API_VERSION_MINOR(p.apiVersion));
+            continue;
+        }
         u32 qcount = 0;
         vkGetPhysicalDeviceQueueFamilyProperties(gpus[i], &qcount, NULL);
         VkQueueFamilyProperties qprops[16];
@@ -136,8 +170,16 @@ bool vkd_create_device(SDL_Window *window) {
     R->gpu = gpus[best];
     R->queue_family = best_family;
     vkGetPhysicalDeviceProperties(R->gpu, &R->gpu_props);
-    log_info("vulkan: GPU '%s' (api %u.%u.%u)", R->gpu_props.deviceName, VK_API_VERSION_MAJOR(R->gpu_props.apiVersion),
-             VK_API_VERSION_MINOR(R->gpu_props.apiVersion), VK_API_VERSION_PATCH(R->gpu_props.apiVersion));
+    {
+        VkPhysicalDeviceVulkan12Properties p12 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_PROPERTIES };
+        VkPhysicalDeviceProperties2 p2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2 };
+        p2.pNext = &p12;
+        vkGetPhysicalDeviceProperties2(R->gpu, &p2);
+        R->driver_id = p12.driverID;
+        log_info("vulkan: GPU '%s' (api %u.%u.%u, vendor %04x, driver %s %s)", R->gpu_props.deviceName, VK_API_VERSION_MAJOR(R->gpu_props.apiVersion),
+                 VK_API_VERSION_MINOR(R->gpu_props.apiVersion), VK_API_VERSION_PATCH(R->gpu_props.apiVersion), R->gpu_props.vendorID, p12.driverName,
+                 p12.driverInfo);
+    }
 
     VkPhysicalDeviceFeatures supported;
     vkGetPhysicalDeviceFeatures(R->gpu, &supported);
@@ -201,6 +243,8 @@ bool vkd_create_device(SDL_Window *window) {
     const char *dev_exts[8] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME };
     bool unused_att = false;
     u32 dev_ext_count = 1;
+    R->portability = vkport_device(R->gpu, dev_exts, &dev_ext_count, 8);
+    if (R->portability) log_portability_subset(R->gpu);
     {
         u32 n = 0;
         vkEnumerateDeviceExtensionProperties(R->gpu, NULL, &n, NULL);

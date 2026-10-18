@@ -1,6 +1,7 @@
 #include "vgeo_gpu_harness.h"
 #include "core/log.h"
 #include "core/platform.h"
+#include "render/vk_portability.h"
 #include <SDL3/SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -51,7 +52,7 @@ bool vgh_init(VgHarness *h, bool validation) {
     g_vgh_current = h;
     if (volkInitialize() != VK_SUCCESS) { printf("harness: no Vulkan loader\n"); return false; }
     const char *layers[1] = { "VK_LAYER_KHRONOS_validation" };
-    const char *exts[1] = { VK_EXT_DEBUG_UTILS_EXTENSION_NAME };
+    const char *exts[2] = { VK_EXT_DEBUG_UTILS_EXTENSION_NAME };
     if (validation) {
         u32 n = 0;
         vkEnumerateInstanceLayerProperties(&n, NULL);
@@ -71,7 +72,9 @@ bool vgh_init(VgHarness *h, bool validation) {
     ici.pApplicationInfo = &app;
     ici.enabledLayerCount = validation ? 1 : 0;
     ici.ppEnabledLayerNames = layers;
-    ici.enabledExtensionCount = validation ? 1 : 0;
+    u32 next = validation ? 1 : 0;
+    vkport_instance(exts, &next, 2, &ici.flags);   // MoltenVK through the loader
+    ici.enabledExtensionCount = next;
     ici.ppEnabledExtensionNames = exts;
     if (vkCreateInstance(&ici, NULL, &h->instance) != VK_SUCCESS) { printf("harness: vkCreateInstance failed\n"); return false; }
     volkLoadInstance(h->instance);
@@ -153,8 +156,10 @@ bool vgh_init(VgHarness *h, bool validation) {
     dci.pNext = &f2;
     dci.queueCreateInfoCount = 1;
     dci.pQueueCreateInfos = &qci;
-    const char *dev_exts[1] = { VK_EXT_MESH_SHADER_EXTENSION_NAME };
-    dci.enabledExtensionCount = mesh ? 1 : 0;
+    const char *dev_exts[2] = { VK_EXT_MESH_SHADER_EXTENSION_NAME };
+    u32 ndev = mesh ? 1 : 0;
+    if (vkport_device(c->gpu, dev_exts, &ndev, 2)) printf("harness: portability subset device (MoltenVK)\n");
+    dci.enabledExtensionCount = ndev;
     dci.ppEnabledExtensionNames = dev_exts;
     if (vkCreateDevice(c->gpu, &dci, NULL, &c->device) != VK_SUCCESS) { printf("harness: vkCreateDevice failed\n"); return false; }
     volkLoadDevice(c->device);

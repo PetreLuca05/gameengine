@@ -257,6 +257,8 @@ typedef struct Renderer {
     bool has_unused_attachments;   // VK_EXT_dynamic_rendering_unused_attachments: G-buffer without velocity
     bool hdr_supported, swap_hdr;
     bool vg_scalar, vg_int64, vg_atomic64, vg_indirect_count, vg_descriptor_indexing, vg_mesh_shader;   // vgeo device features
+    bool portability;            // VK_KHR_portability_subset device (MoltenVK; docs/PLATFORM_MACOS.md)
+    VkDriverId driver_id;        // VK_DRIVER_ID_MOLTENVK on macOS
     int hdr_output_applied;
     float max_anisotropy;
 

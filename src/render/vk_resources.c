@@ -523,6 +523,15 @@ TextureId render_texture_create(int w, int h, const void *rgba8, bool srgb, bool
 
 TextureId render_texture_create_raw(int w, int h, int levels, u32 vk_format, const void *data, const size_t *level_sizes) {
     levels = DG_CLAMP(levels, 1, 16);
+    // Pre-encoded data (KTX2) in a format the device cannot sample: BC on a GPU without
+    // textureCompressionBC, ASTC on Intel / AMD Macs (docs/PLATFORM_MACOS.md "Textures / formats").
+    VkFormatProperties fp;
+    vkGetPhysicalDeviceFormatProperties(R->gpu, (VkFormat)vk_format, &fp);
+    VkFormatFeatureFlags need = VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
+    if ((fp.optimalTilingFeatures & need) != need) {
+        log_error("texture: format %u is not sampleable on this GPU (%dx%d skipped)", vk_format, w, h);
+        return 0;
+    }
     TextureId id = texture_alloc(w, h, (u32)levels, (VkFormat)vk_format);
     if (!id) return 0;
     size_t total = 0;
