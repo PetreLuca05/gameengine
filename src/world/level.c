@@ -212,6 +212,9 @@ static void build_brush(LevelBuild *b, const cJSON *br) {
     // Greybox glass (story levels before the building kit, docs/STORY.md): a transparent bucket with the
     // Fresnel glass look; no shadow (sun reaches through), still collides.
     if (jb(br, "glass", false)) flags = (flags & ~(u32)(MAT_GRID | MAT_GRID_FINE)) | MAT_GLASS | MAT_NO_SHADOW;
+    // City boxes (docs/STORY.md "Vista"): a procedural window grid lit at night ("facade"), or window panes ("windows").
+    if (jb(br, "facade", false)) flags = (flags & ~(u32)(MAT_GRID | MAT_GRID_FINE)) | MAT_FACADE;
+    if (jb(br, "windows", false)) flags = (flags & ~(u32)(MAT_GRID | MAT_GRID_FINE)) | MAT_WINDOWS;
     b->material = surface_from_name(mat_name);
     if (b->material < 0) { log_warn("level: unknown material '%s'", mat_name); b->material = SURF_DEFAULT; }
 
@@ -737,6 +740,11 @@ bool level_load(World *w, const char *path) {
                     if (cJSON_IsString(g) && !strcmp(g->valuestring, faces[f])) r->open_faces |= 1u << f;
         }
         render_set_interiors(iv, ni);
+        // City windows ("city": {"base", "intensity", "center": [x, z]}); levels without one turn them off.
+        const cJSON *city = cJSON_GetObjectItemCaseSensitive(root, "city");
+        const cJSON *cc = cJSON_GetObjectItemCaseSensitive(city, "center");
+        vec2 center = cJSON_IsArray(cc) && cJSON_GetArraySize(cc) >= 2 ? v2((float)cJSON_GetArrayItem(cc, 0)->valuedouble, (float)cJSON_GetArrayItem(cc, 1)->valuedouble) : v2(0, 0);
+        render_set_city(jf(city, "base", 0.45f), city ? jf(city, "intensity", 2.5f) : 0.0f, center, NULL);
     }
     phys_optimize(w->phys);
     cJSON_Delete(root);

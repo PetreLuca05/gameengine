@@ -26,6 +26,8 @@
 #define MAT_RECON_FX   2097152u
 #define MAT_GLASS      4194304u
 #define MAT_CAUSTICS   8388608u
+#define MAT_FACADE     2048u        // city boxes: a procedural window grid (lit at night; render_set_city)
+#define MAT_WINDOWS    134217728u   // window panes (lit at night; DrawItems only: vgeo materials use the bit for VGM_FOLIAGE, stripped before shading)
 // Terrain geomorph (render.h, shaders/lod_fade.glsl lod_terrain_vertex): classic draw materials only; the
 // same bit is VGM_MASKED in vgeo material tables, which never carry it (vk_vgeo.c masks the flags).
 #define MAT_TERRAIN_MORPH 16777216u
@@ -144,6 +146,8 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 interior_min[16];      // xyz min, w sky factor deep inside
     vec4 interior_max[16];      // xyz max, w glass faces (bits -x +x -y +y -z +z)
     vec4 interior_params[16];   // x falloff from the glass (m), y edge blend (m)
+    vec4 city;            // city windows: x lit fraction, y intensity (0 off), zw district centre (xz)
+    vec4 city_power[2];   // 8 districts: 0..1 power level, 1..2 flicker (the off share)
 } frame;
 
 // Where a world point lies in the screen-space inputs (AO, contact, SSR, SSGI, froxels): this

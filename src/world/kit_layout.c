@@ -38,6 +38,7 @@ typedef struct Frame {
     char prefix[48];
     const cJSON *overrides[KIT_LAYOUT_DEPTH];   // outermost first
     int override_n;
+    bool batch;
 } Frame;
 
 static void child_frame(const Frame *f, const cJSON *e, Frame *out) {
@@ -87,6 +88,7 @@ static void place(KitLayout *L, const Frame *parent, const cJSON *e, int depth) 
     k->yaw = f.yaw;
     k->entry = copy;
     k->prefab_depth = depth;
+    k->batch = parent->batch || cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(e, "batch"));
 }
 
 static void expand(KitLayout *L, const Frame *parent, const cJSON *list, KitPrefabLoader load, void *user, int depth);
@@ -106,6 +108,7 @@ static void use_prefab(KitLayout *L, const Frame *parent, const cJSON *e, KitPre
         snprintf(full, sizeof(full), "%s%s", parent->prefix, pre);
         dg_strcpy(f.prefix, sizeof(f.prefix), full);
     }
+    if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(e, "batch"))) f.batch = true;
     const cJSON *ov = cJSON_GetObjectItemCaseSensitive(e, "override");
     if (ov && f.override_n < KIT_LAYOUT_DEPTH) f.overrides[f.override_n++] = ov;
     expand(L, &f, cJSON_GetObjectItemCaseSensitive(pf, "pieces"), load, user, depth + 1);

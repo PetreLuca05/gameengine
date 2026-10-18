@@ -82,6 +82,12 @@ enum MaterialFlags {
     // Ground cover (docs/FOLIAGE_GRASS.md, grass_asset.h): root -> tip shading, colour variation, ground
     // colour matching, translucency; the asset's parameters are frame cover table entry MAT_COVER_ID.
     MAT_COVER    = 1u << 28,
+    // City windows (render_set_city, docs/STORY.md "Vista"): MAT_WINDOWS panes light up at night by district
+    // power (DrawItems only: vgeo materials use bit 27 for VGM_FOLIAGE, stripped before shading); MAT_FACADE
+    // draws a procedural window grid on plain boxes (bit 11 = MAT_SELF, which only ever comes with
+    // MAT_SHADOW_ONLY: never in lit shading).
+    MAT_WINDOWS  = 1u << 27,
+    MAT_FACADE   = 1u << 11,
 };
 #define MAT_COVER_ID_SHIFT 29u
 #define MAT_COVER_ID(flags) (((flags) >> MAT_COVER_ID_SHIFT) & 7u)
@@ -157,6 +163,10 @@ typedef struct RenderInterior {
     float falloff, blend;
 } RenderInterior;
 void render_set_interiors(const RenderInterior *v, int n);   // n 0 = none (the level load replaces them)
+// City windows (MAT_WINDOWS / MAT_FACADE): base = lit share at night (0..1; scaled by darkness from the sun),
+// intensity 0 = off; the 8 power districts (bearing sectors around center, from north clockwise):
+// 0..1 = power level, 1..2 = flicker (the off share). power NULL = all 1.
+void render_set_city(float base, float intensity, vec2 center, const float power[8]);
 
 typedef struct RenderEnvironment {
     vec3 sun_dir;       // direction towards the sun

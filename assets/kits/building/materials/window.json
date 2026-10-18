@@ -1,0 +1,23 @@
+{
+ "_doc": "Kit material set (docs/BUILDING_KIT.md 'Materials'): slot M_window. Variants: [r, g, b, roughness, metallic(, emissive)]; instances pick one per slot (\"mat\": {\"M_window\": \"<variant>\"}) and may tint.",
+ "slot": "M_window",
+ "surface": "glass",
+ "glass": false,
+ "windows": true,
+ "variants": {
+  "default": [
+   0.1,
+   0.12,
+   0.14,
+   0.08,
+   0.6
+  ],
+  "warm": [
+   0.14,
+   0.12,
+   0.1,
+   0.1,
+   0.5
+  ]
+ }
+}

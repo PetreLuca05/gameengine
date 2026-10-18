@@ -23,6 +23,7 @@ typedef struct KitMatSet {
     char slot[32];
     int surface;                       // SurfaceMaterial
     bool glass;
+    bool windows;                      // MAT_WINDOWS: lit at night (city façades, docs/STORY.md "Vista")
     char names[KIT_MAX_VARIANTS][24];
     float v[KIT_MAX_VARIANTS][6];      // r g b roughness metallic emissive
     int n;
@@ -40,6 +41,8 @@ typedef struct KitGpu {
 
 typedef struct KitInst {
     int piece;
+    bool batch;                        // merged into the level's batch meshes (no entity)
+    bool collide;
     vec3 pos;
     float yaw;                         // radians
     u8 variant[KIT_MAX_SLOTS];
@@ -58,6 +61,8 @@ static struct {
     KitInst *inst;
     int inst_n, inst_cap;
     int draw_first, body_first;
+    MeshId batch_mesh[256];            // static batches of the current level (destroyed on rebuild)
+    int batch_n;
     double poll_t;
     Cvar *hot_reload, *validate;
 } KW;
@@ -78,7 +83,7 @@ static void load_sets(void) {
     KW.manifest = mt ? cJSON_Parse(mt) : NULL;
     free(mt);
     if (!KW.manifest) log_warn("kit: %s/kit.json missing or invalid (no entity hooks, no rules)", KIT_DIR);
-    static const char *const names[] = { "paint", "wallpaper", "wood", "tile", "concrete", "brick", "stone", "render", "glass", "metal", "trim", "fabric", "plastic", "carpet", "emissive" };
+    static const char *const names[] = { "paint", "wallpaper", "wood", "tile", "concrete", "brick", "stone", "render", "glass", "metal", "trim", "fabric", "plastic", "carpet", "emissive", "window" };
     for (int i = 0; i < ARRAY_COUNT(names) && KW.set_n < KIT_MAX_SETS; i++) {
         char path[160];
         snprintf(path, sizeof(path), KIT_DIR "/materials/%s.json", names[i]);
@@ -93,6 +98,7 @@ static void load_sets(void) {
         s->surface = surf ? surface_from_name(surf) : -1;
         if (s->surface < 0) s->surface = SURF_DEFAULT;
         s->glass = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(j, "glass"));
+        s->windows = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(j, "windows"));
         const cJSON *v;
         cJSON_ArrayForEach(v, cJSON_GetObjectItemCaseSensitive(j, "variants")) {
             if (s->n >= KIT_MAX_VARIANTS) break;
@@ -176,6 +182,26 @@ static int piece_index(const char *id) {
 
 // ------------------------------------------------------------------ instances -> draws / bodies
 
+static u32 rgba_pack(vec3 c) {
+    return (u32)(DG_CLAMP(c.x, 0, 1) * 255.0f + 0.5f) | (u32)(DG_CLAMP(c.y, 0, 1) * 255.0f + 0.5f) << 8 | (u32)(DG_CLAMP(c.z, 0, 1) * 255.0f + 0.5f) << 16;
+}
+
+// A slot's material: its set's variant (colour, roughness, metallic, emissive) x the instance tint.
+static void slot_material(Material *out, int set_i, int variant, vec3 tint) {
+    const KitMatSet *set = set_i >= 0 ? &KW.sets[set_i] : NULL;
+    const float *v = set && set->n ? set->v[variant < set->n ? variant : 0] : NULL;
+    vec3 c = v3_mul(v ? v3(v[0], v[1], v[2]) : v3(0.7f, 0.7f, 0.7f), tint);
+    *out = material_color(v4(c.x, c.y, c.z, 1));
+    out->roughness = v ? v[3] : 0.8f;
+    out->metallic = v ? v[4] : 0.0f;
+    out->emissive = v ? v[5] : 0.0f;
+    if (set && set->windows) out->flags |= MAT_WINDOWS;
+    if (set && set->glass) {
+        out->flags |= MAT_GLASS | MAT_NO_SHADOW;
+        out->color.w = 0.12f;
+    }
+}
+
 static vec3 inst_point(const KitInst *in, const float *p) {
     return v3_add(in->pos, quat_rotate(quat_yaw(in->yaw), v3(p[0], p[1], p[2])));
 }
@@ -185,28 +211,17 @@ static void build_instance(World *w, const KitInst *in) {
     const KitGpu *g = &KW.pieces[in->piece];
     quat rot = quat_yaw(in->yaw);
     mat4 model = mat4_trs(in->pos, rot, v3s(1));
-    for (int s = 0; s < g->slot_n; s++) {
+    for (int s = 0; s < g->slot_n && !in->batch; s++) {   // batched instances draw through build_batches
         if (!g->mesh[s] || ls->draw_count >= MAX_STATIC_DRAWS) continue;
         StaticDraw *d = &ls->draws[ls->draw_count++];
         memset(d, 0, sizeof(*d));
         d->mesh = g->mesh[s];
         d->model = model;
-        const KitMatSet *set = g->set[s] >= 0 ? &KW.sets[g->set[s]] : NULL;
-        const float *v = set && set->n ? set->v[in->variant[s] < set->n ? in->variant[s] : 0] : NULL;
-        vec3 c = v ? v3(v[0], v[1], v[2]) : v3(0.7f, 0.7f, 0.7f);
-        c = v3_mul(c, in->tint);
-        d->mat = material_color(v4(c.x, c.y, c.z, 1));
-        d->mat.roughness = v ? v[3] : 0.8f;
-        d->mat.metallic = v ? v[4] : 0.0f;
-        d->mat.emissive = v ? v[5] : 0.0f;
-        if (set && set->glass) {
-            d->mat.flags |= MAT_GLASS | MAT_NO_SHADOW;
-            d->mat.color.w = 0.12f;
-        }
+        slot_material(&d->mat, g->set[s], in->variant[s], in->tint);
     }
     const KitPiece *p = g->cpu;
     int surface = g->slot_n && g->set[0] >= 0 ? KW.sets[g->set[0]].surface : SURF_DEFAULT;
-    for (int h = 0; p && h < p->hull_n && ls->body_count < MAX_STATIC_BODIES; h++) {
+    for (int h = 0; p && in->collide && h < p->hull_n && ls->body_count < MAX_STATIC_BODIES; h++) {
         const KitHull *hu = &p->hulls[h];
         BodyDesc bd;
         memset(&bd, 0, sizeof(bd));
@@ -240,12 +255,73 @@ static void build_instance(World *w, const KitInst *in) {
     }
 }
 
+// Static batching: the batched instances' slots merged per (material set, variant, tint), world space.
+typedef struct KitBatch { int set, variant; u32 tint; MeshBuilder mb; } KitBatch;
+
+static void build_batches(World *w) {
+    KitBatch *b = calloc(256, sizeof(KitBatch));
+    int bn = 0;
+    for (int i = 0; i < KW.inst_n; i++) {
+        const KitInst *in = &KW.inst[i];
+        if (!in->batch) continue;
+        const KitGpu *g = &KW.pieces[in->piece];
+        quat rot = quat_yaw(in->yaw);
+        u32 tint = rgba_pack(in->tint);
+        for (int s = 0; s < g->slot_n; s++) {
+            int k = 0;
+            for (; k < bn; k++)
+                if (b[k].set == g->set[s] && b[k].variant == in->variant[s] && b[k].tint == tint) break;
+            if (k == bn) {
+                if (bn >= 256) continue;
+                b[bn].set = g->set[s];
+                b[bn].variant = in->variant[s];
+                b[bn].tint = tint;
+                mb_init(&b[bn].mb);
+                bn++;
+            }
+            const KitSlotMesh *m = &g->cpu->lods[0].slots[s];
+            u32 base = b[k].mb.vcount;
+            for (u32 v = 0; v < m->vcount; v++) {
+                vec3 p = v3_add(in->pos, quat_rotate(rot, v3(m->pos[3 * v], m->pos[3 * v + 1], m->pos[3 * v + 2])));
+                vec3 n = quat_rotate(rot, v3(m->nrm[3 * v], m->nrm[3 * v + 1], m->nrm[3 * v + 2]));
+                mb_vertex(&b[k].mb, p, n, v2(m->uv0[2 * v], m->uv0[2 * v + 1]), 0xFFFFFFFFu);
+            }
+            for (u32 t = 0; t + 2 < m->icount; t += 3) mb_tri(&b[k].mb, base + m->idx[t], base + m->idx[t + 1], base + m->idx[t + 2]);
+        }
+    }
+    LevelStatic *ls = &w->level;
+    for (int k = 0; k < bn; k++) {
+        if (b[k].mb.vcount && ls->draw_count < MAX_STATIC_DRAWS && KW.batch_n < 256) {
+            MeshId id = mb_upload(&b[k].mb);
+            KW.batch_mesh[KW.batch_n++] = id;
+            StaticDraw *d = &ls->draws[ls->draw_count++];
+            memset(d, 0, sizeof(*d));
+            d->mesh = id;
+            d->model = mat4_identity();
+            KitInst fake;
+            memset(&fake, 0, sizeof(fake));
+            vec3 tint = v3((float)(b[k].tint & 255) / 255.0f, (float)((b[k].tint >> 8) & 255) / 255.0f, (float)((b[k].tint >> 16) & 255) / 255.0f);
+            slot_material(&d->mat, b[k].set, b[k].variant, tint);
+        }
+        mb_free(&b[k].mb);
+    }
+    free(b);
+}
+
+static void free_batches(void) {
+    if (KW.batch_n) render_wait_idle();
+    for (int k = 0; k < KW.batch_n; k++) render_mesh_destroy(KW.batch_mesh[k]);
+    KW.batch_n = 0;
+}
+
 static void rebuild_all(World *w) {
     LevelStatic *ls = &w->level;
     for (int b = KW.body_first; b < ls->body_count; b++) phys_remove_body(w->phys, ls->bodies[b]);
     ls->draw_count = KW.draw_first;
     ls->body_count = KW.body_first;
+    free_batches();
     for (int i = 0; i < KW.inst_n; i++) build_instance(w, &KW.inst[i]);
+    build_batches(w);
     phys_optimize(w->phys);
 }
 
@@ -329,6 +405,7 @@ static char *prefab_loader(void *user, const char *name) {
 void kit_world_level(World *w, const cJSON *root) {
     KW.world = w;
     KW.inst_n = 0;
+    free_batches();   // the previous level's
     KW.draw_first = w->level.draw_count;
     KW.body_first = w->level.body_count;
     if (!cJSON_GetObjectItemCaseSensitive(root, "kit") && !cJSON_GetObjectItemCaseSensitive(root, "prefabs")) return;
@@ -350,6 +427,8 @@ void kit_world_level(World *w, const cJSON *root) {
         in->pos = v3(pl->pos[0], pl->pos[1], pl->pos[2]);
         in->yaw = pl->yaw * DG_DEG2RAD;
         in->tint = jv3(pl->entry, "tint", v3(1, 1, 1));
+        in->batch = pl->batch;
+        in->collide = jb(pl->entry, "collide", true);
         const cJSON *mat = cJSON_GetObjectItemCaseSensitive(pl->entry, "mat");
         const KitGpu *g = &KW.pieces[pi];
         for (int s = 0; s < g->slot_n; s++) {
@@ -361,9 +440,10 @@ void kit_world_level(World *w, const cJSON *root) {
                 if (!strcmp(set->names[k], vn)) in->variant[s] = (u8)k;
         }
         build_instance(w, in);
-        if (w->authority) spawn_hooked(w, in, pl->entry);
+        if (w->authority && !in->batch) spawn_hooked(w, in, pl->entry);
     }
     kit_layout_free(&L);
+    build_batches(w);
     log_info("kit: %d instances of %d pieces: %d draws, %d bodies", KW.inst_n, KW.piece_n, w->level.draw_count - KW.draw_first, w->level.body_count - KW.body_first);
 }
 

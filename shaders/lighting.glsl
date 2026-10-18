@@ -52,6 +52,27 @@ vec3 interior_bounce(vec3 c, float isky) {
     float lum = dot(c, vec3(0.2126, 0.7152, 0.0722));
     return mix(lum * vec3(1.06, 0.96, 0.84), c, isky) * isky;
 }
+// City windows (render_set_city): xyz the light of a lit window here, w the window coverage (1 inside a
+// window). grid: plain boxes get a 1.5 m x 3 m window grid (MAT_FACADE); panes are windows throughout.
+float city_hash(vec3 c) { return fract(sin(dot(c, vec3(12.9898, 78.233, 37.719))) * 43758.5453); }
+vec4 city_window(vec3 p, vec3 n, bool grid) {
+    if (frame.city.y <= 0.0 || abs(n.y) > 0.5) return vec4(0.0);
+    bool xface = abs(n.x) > abs(n.z);
+    vec2 g = vec2((xface ? p.z : p.x) / 1.5, p.y / 3.0);
+    vec2 f = fract(g);
+    float cover = grid ? step(0.18, f.x) * step(f.x, 0.82) * step(0.3, f.y) * step(f.y, 0.85) : 1.0;
+    if (cover <= 0.0) return vec4(0.0);
+    vec3 cell = vec3(floor(g), floor((xface ? p.x : p.z) * 0.25)) + sign(n) * 7.0;
+    float h = city_hash(cell);
+    vec2 d = p.xz - frame.city.zw;
+    int sector = int(floor(fract(atan(d.x, -d.y) / 6.2831853 + 1.0) * 8.0)) & 7;
+    float pw = frame.city_power[sector >> 2][sector & 3];
+    float on = frame.city.x * clamp(pw, 0.0, 1.0);
+    if (pw > 1.0) on *= step(pw - 1.0, city_hash(cell + floor(frame.camera_pos.w * 9.0)));   // flickering district
+    float lit = step(h, on);
+    vec3 tint = mix(vec3(1.0, 0.78, 0.5), vec3(0.75, 0.85, 1.0), step(0.75, fract(h * 13.7)));
+    return vec4(tint * lit * frame.city.y * (0.6 + 0.8 * fract(h * 7.3)), cover);
+}
 float cloud_shadow_at(vec3 p) {
     if (frame.sky_flags.w < 0.5) return 1.0;
     vec2 uv = (p.xz - frame.cshadow.xy) * frame.cshadow.z;

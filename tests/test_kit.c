@@ -98,7 +98,7 @@ static void test_shipped(void) {
     const cJSON *pieces = cJSON_GetObjectItemCaseSensitive(kit, "pieces"), *cats = cJSON_GetObjectItemCaseSensitive(kit, "categories");
     // Material slots from the material sets the manifest's pieces may use.
     char slots[2048] = "";
-    static const char *const sets[] = { "paint", "wallpaper", "wood", "tile", "concrete", "brick", "stone", "render", "glass", "metal", "trim", "fabric", "plastic", "carpet", "emissive" };
+    static const char *const sets[] = { "paint", "wallpaper", "wood", "tile", "concrete", "brick", "stone", "render", "glass", "metal", "trim", "fabric", "plastic", "carpet", "emissive", "window" };
     for (int i = 0; i < ARRAY_COUNT(sets); i++) {
         char path[128];
         snprintf(path, sizeof(path), "assets/kits/building/materials/%s.json", sets[i]);

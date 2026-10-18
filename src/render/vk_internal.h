@@ -225,6 +225,11 @@ typedef struct FrameData {
     vec4 interior_min[RENDER_MAX_INTERIORS];
     vec4 interior_max[RENDER_MAX_INTERIORS];
     vec4 interior_params[RENDER_MAX_INTERIORS];
+    // City windows (render_set_city, docs/STORY.md "Vista"): x lit fraction now (night x base), y intensity
+    // (0 = off), zw the city centre (xz) the 8 power districts turn around; city_power: per district 0..1
+    // level, 1..2 flicker (the off share).
+    vec4 city;
+    vec4 city_power[2];
 } FrameData;
 
 typedef struct PushLit {

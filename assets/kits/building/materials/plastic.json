@@ -3,6 +3,7 @@
  "slot": "M_plastic",
  "surface": "default",
  "glass": false,
+ "windows": false,
  "variants": {
   "default": [
    0.12,
