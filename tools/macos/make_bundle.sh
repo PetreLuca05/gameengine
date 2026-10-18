@@ -8,13 +8,15 @@
 #   Contents/Info.plist                   tools/macos/Info.plist.in
 #
 # usage: tools/macos/make_bundle.sh <bin dir> <output dir> [--moltenvk <libMoltenVK.dylib>]
-#        [--bundle-id com.example.deadground] [--version 0.1.0] [--build N] [--steam-appid 480]
+#        [--bundle-id com.example.deadground] [--version 0.1.0] [--build N] [--steam-appid 480] [--with-test-content]
+# The generated vgeo test scenes of the dev map vgeo_test (assets/vgeo/{rock_field,statue,building}.vgeo,
+# about 680 MB, rebuilt by every build) are left out unless --with-test-content.
 # MoltenVK: --moltenvk, else $VULKAN_SDK/macOS/lib/libMoltenVK.dylib, else Homebrew's. A universal app
 # needs a universal MoltenVK (the Vulkan SDK's is; Homebrew's is the host architecture only).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 BIN="$1"; OUT="$2"; shift 2
-MVK=""; BUNDLE_ID="com.deadground.game"; BUILD="1"; STEAM_APPID=""
+MVK=""; BUNDLE_ID="com.deadground.game"; BUILD="1"; STEAM_APPID=""; TEST_CONTENT=0
 VERSION="$(sed -n 's/^project(Deadground VERSION \([0-9.]*\).*/\1/p' "$ROOT/CMakeLists.txt")"
 while [ $# -gt 0 ]; do
     case "$1" in
@@ -23,6 +25,7 @@ while [ $# -gt 0 ]; do
         --version) VERSION="$2"; shift 2 ;;
         --build) BUILD="$2"; shift 2 ;;
         --steam-appid) STEAM_APPID="$2"; shift 2 ;;
+        --with-test-content) TEST_CONTENT=1; shift ;;
         *) echo "unknown option $1"; exit 2 ;;
     esac
 done
@@ -43,6 +46,9 @@ for d in shaders assets data web; do
     [ -d "$BIN/$d" ] && cp -R "$BIN/$d" "$APP/Contents/Resources/"
 done
 rm -rf "$APP/Contents/Resources/assets/cache"   # per-user, rebuilt into ~/Library/Application Support
+if [ "$TEST_CONTENT" = 0 ]; then
+    rm -f "$APP/Contents/Resources/assets/vgeo/rock_field.vgeo" "$APP/Contents/Resources/assets/vgeo/statue.vgeo" "$APP/Contents/Resources/assets/vgeo/building.vgeo"
+fi
 cp "$MVK" "$APP/Contents/Frameworks/libMoltenVK.dylib"
 install_name_tool -id "@rpath/libMoltenVK.dylib" "$APP/Contents/Frameworks/libMoltenVK.dylib"
 
@@ -70,4 +76,4 @@ fi
 sed -e "s/@BUNDLE_ID@/$BUNDLE_ID/" -e "s/@VERSION@/$VERSION/" -e "s/@BUILD@/$BUILD/" \
     "$ROOT/tools/macos/Info.plist.in" > "$APP/Contents/Info.plist"
 plutil -lint "$APP/Contents/Info.plist" > /dev/null
-echo "bundle: $APP ($(lipo -archs "$APP/Contents/MacOS/deadground"), MoltenVK $(lipo -archs "$APP/Contents/Frameworks/libMoltenVK.dylib"))"
+echo "bundle: $APP ($(lipo -archs "$APP/Contents/MacOS/deadground"), MoltenVK $(lipo -archs "$APP/Contents/Frameworks/libMoltenVK.dylib"), $(du -sh "$APP" | cut -f1))"
