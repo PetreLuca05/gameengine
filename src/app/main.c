@@ -195,6 +195,7 @@ int main(int argc, char **argv) {
     bool first_run = false;
     cvar_reg_float("dev_fixed_fps", 0.0f, 0.0f, 1000.0f, 0, "frame time fixed to 1 / this (0 = real time): deterministic captures on slow machines");
     if (opt.test) cvar_set("r_maxfps", "60");
+    if (opt.test) cvar_set("developer", "1");   // test runs keep the developer HUD, Debug settings and Commands tab (players default to 0)
     else if (config_exec_file(video_config_path())) log_info("config loaded from %s", video_config_path());
     else { log_info("no config yet: settings will be saved to %s", video_config_path()); first_run = true; }
     game_fidelity_settings_loaded(first_run);   // Engine Fidelity: saved level + user choices in force

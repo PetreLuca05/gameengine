@@ -1599,7 +1599,7 @@ void game_init(void) {
     G->g_map = cvar_reg_string("g_map", "devroom", CVAR_ARCHIVE, "boot map: devroom | streaming | flat");
     G->sv_hostname = cvar_reg_string("sv_hostname", "Deadground Dev Server", CVAR_ARCHIVE, "server name shown in LAN browser");
     G->cl_name = cvar_reg_string("cl_name", "Survivor", CVAR_ARCHIVE, "player name");
-    G->dev_mode = cvar_reg_bool("developer", true, CVAR_ARCHIVE, "developer HUD info");
+    G->dev_mode = cvar_reg_bool("developer", false, CVAR_ARCHIVE, "developer mode: dev HUD info, the Settings > Graphics Debug tab and developer-only rows, the pause Commands tab (off for players; --test turns it on)");
     G->r_drawhitboxes = cvar_reg_bool("r_drawhitboxes", false, 0, "draw hitbox capsules");
     G->r_drawcollision = cvar_reg_bool("r_drawcollision", false, 0, "draw physics collision shapes");
     G->cl_showfps = cvar_reg_bool("cl_showfps", true, CVAR_ARCHIVE, "show FPS counter");

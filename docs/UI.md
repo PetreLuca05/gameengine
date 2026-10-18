@@ -61,7 +61,8 @@ Nuklear.
 The Graphics tab has two sub-tabs (`gw_tabs` under the main tab bar, `k_gfx_pages` in
 `scr_settings.c`). **Debug is shown only in developer mode** (the `developer` cvar, the same switch
 as the dev HUD and the pause Commands tab); with `developer 0` there is no sub-tab bar and the
-page is Normal. The rule: options a PC player expects in a commercial game are Normal; engine
+page is Normal. `developer` defaults to 0 for players (saved; `developer 1` in the console turns it on)
+and `--test` runs force it on. The rule: options a PC player expects in a commercial game are Normal; engine
 internals, diagnostics and per-feature tuning are Debug.
 
 **Normal** (a player's page, one control per concept):
