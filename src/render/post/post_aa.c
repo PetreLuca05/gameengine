@@ -7,6 +7,7 @@
 //   FSR 2/3, DLSS: slots in PostUpscaler; the SDKs are not integrated (fall back to FSR1, logged).
 #include "post_internal.h"
 #include <math.h>
+#include <stdlib.h>   // abs / labs in ffx_a.h (clang: no implicit declarations)
 #include <string.h>
 
 #define A_CPU 1

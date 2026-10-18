@@ -1,7 +1,10 @@
 # macOS (Intel x86_64 + Apple Silicon arm64, Vulkan via MoltenVK)
 
-Status: gap analysis (this commit), then the port. Sections below the analysis are filled in as the
-work lands; "Verified" says what has actually been run, and where.
+Status: ported.
+* Section 1 is the gap analysis written before any change.
+* Sections 2-8 describe what was built.
+* Section 9 says what has actually been run, and where.
+* Section 10 lists what remains for hardware.
 
 ## 1. Gap analysis
 
@@ -163,3 +166,199 @@ attachment-only lifetime (documented as follow-up).
 The following are listed in the manual checklist (section 6):
 * GitHub's macOS runners are VMs. arm64 runners expose a paravirtual Metal device; Intel runners expose none.
 * Real-GPU image diffs, perf numbers per family, the Steam overlay, an iPhone pairing, EDR output and the LAN Mac↔PC session all need hardware.
+
+## 2. Setup and build
+
+Requirements:
+* macOS 13+ to build. The game runs on macOS 11+.
+* Xcode command line tools: Apple clang, `lipo`, `codesign`, `xcrun metal`.
+* CMake 3.24+ and Ninja.
+* A GLSL compiler (`glslc` or `glslang`).
+* MoltenVK. Either the LunarG Vulkan SDK for macOS (universal MoltenVK, loader, validation layers), or Homebrew:
+
+```sh
+brew install cmake ninja glslang spirv-cross molten-vk vulkan-loader   # host-arch MoltenVK
+```
+
+Single-architecture developer build (the fast path; the host architecture by default):
+
+```sh
+cmake -S . -B build-mac-arm64 -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+      -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/macos-arm64.cmake
+cmake --build build-mac-arm64
+cd build-mac-arm64/bin && ./deadground                  # SDL finds MoltenVK / the loader itself
+ctest --test-dir build-mac-arm64                         # headless unit tests
+```
+
+Where Vulkan comes from:
+* SDL loads `@executable_path/../Frameworks/libMoltenVK.dylib`, then `libvulkan.1.dylib`, then `libMoltenVK.dylib`.
+* volk is driven from the same library (`vkd_create_device`).
+* To use the Khronos loader in a build tree (validation layers), point SDL at it:
+
+```sh
+export SDL_VULKAN_LIBRARY=$(brew --prefix)/lib/libvulkan.1.dylib
+export VK_ICD_FILENAMES=$(brew --prefix molten-vk)/etc/vulkan/icd.d/MoltenVK_icd.json
+./deadground --validation
+```
+
+The window-less vgeo test harness (`test_vgeo_*`, `bench_vgeo`) uses volk's own loader search. Set
+`DYLD_FALLBACK_LIBRARY_PATH=$(brew --prefix)/lib` and `VK_ICD_FILENAMES` as above.
+
+Universal build (on Apple Silicon; the x86_64 tree runs its build-time vgeo tools under Rosetta):
+
+```sh
+tools/macos/build_universal.sh Release -DDG_DISTRIBUTION=ON    # build-mac-{arm64,x86_64} -> build-mac-universal/bin
+ARCHS=arm64 tools/macos/build_universal.sh RelWithDebInfo       # one slice through the same script
+```
+
+Notes:
+* One architecture per build tree is enforced. Jolt's SIMD flags are chosen per architecture:
+  * NEON on arm64.
+  * SSE4.2 + AVX + F16C on x86_64, with AVX2 / BMI / LZCNT / FMA off because macOS 11 still runs on Ivy Bridge (Mac Pro 2013).
+* `DG_DISTRIBUTION=ON` leaves out the source-tree paths, so there is no shader hot reload and no `DG_SOURCE_DIR` fallback in a shipped build.
+
+Tools: the Python tools run with the system / Homebrew `python3`. `.env` (Higgsfield key) is read from
+the repository root as on Windows. The `.bat` launchers have shell equivalents where they matter
+(`tools/macos/*.sh`). `.toolchain/` is the Windows portable toolchain and is not used on macOS.
+
+## 3. App bundle, signing, notarization
+
+```sh
+tools/macos/make_bundle.sh build-mac-universal/bin dist --moltenvk $VULKAN_SDK/macOS/lib/libMoltenVK.dylib \
+    [--bundle-id com.studio.deadground] [--version 0.1.0] [--build 42] [--steam-appid 480]
+tools/macos/sign.sh dist/Deadground.app                         # ad-hoc (dev / CI)
+DG_SIGN_IDENTITY="Developer ID Application: Studio (TEAMID)" tools/macos/sign.sh dist/Deadground.app
+DG_NOTARY_PROFILE=deadground-notary tools/macos/notarize.sh dist/Deadground.app
+```
+
+| Path | Content |
+|---|---|
+| `Contents/MacOS/deadground` | universal executable; rpath `@executable_path/../Frameworks` |
+| `Contents/Resources/{shaders,assets,data,web}` | `SDL_GetBasePath()` inside a bundle |
+| `Contents/Resources/Deadground.icns` | from `tools/macos/AppIcon.png`, a placeholder (`gen_icon.py`) |
+| `Contents/Frameworks/libMoltenVK.dylib` | universal (Vulkan SDK / MoltenVK release); SDL loads it first |
+| `Contents/Frameworks/libsteam_api.dylib` | Steam builds. The executable's `@loader_path` reference is rewritten to `@rpath`. |
+| `Contents/MacOS/steam_appid.txt` | only with `--steam-appid`, for runs outside Steam |
+| `Contents/Info.plist` | from `tools/macos/Info.plist.in` |
+
+Info.plist keys:
+* `LSMinimumSystemVersion` 11.0.
+* `NSHighResolutionCapable`.
+* `LSAppNapIsDisabled`: a lobby host in the background keeps ticking.
+* `LSSupportsGameMode`.
+* `NSLocalNetworkUsageDescription`: the macOS 15+ prompt for LAN discovery and phone pairing.
+* `LSArchitecturePriority` arm64 first.
+
+Entitlements (hardened runtime):
+* `cs.disable-library-validation` and `cs.allow-dyld-environment-variables`, both for the Steam overlay. It is injected with `DYLD_INSERT_LIBRARIES` and signed by Valve.
+* The game is not sandboxed (Steam titles are not), so network access needs no entitlement.
+
+Writable data in a bundle: `Contents/Resources` is read-only once signed.
+* Logs, config, saves and screenshots already live in `~/Library/Application Support/Deadground/Deadground/`.
+* Caches (anim, vgeo builds, trees) and HDR screenshots move there too (`platform_writable_dir`).
+* So does `pipeline_cache.bin`.
+
+Steam: `+connect_lobby <id>` arrives through `argv` as on Windows; nothing macOS-specific is needed.
+
+## 4. Feature matrix per GPU family
+
+| Feature | Apple7 (M1) | Apple8 (M2) | Apple9+ (M3 / M4) | Mac2 AMD (Radeon Pro) | Mac2 Intel (UHD / Iris) |
+|---|---|---|---|---|---|
+| Vulkan 1.3 via MoltenVK 1.3+ | yes | yes | yes | yes | yes |
+| vgeo (virtualized geometry) | yes, 32-bit two-phase visibility writes | same | same | same | **no**: tier-1 argument buffers, the classic renderer (`r_vgeo 0`) |
+| vgeo HW raster | vertex pulling (no `VK_EXT_mesh_shader`) | same | same | same | — |
+| 64-bit buffer atomics | not exposed by MoltenVK | not exposed | not exposed | not exposed | not exposed |
+| Bindless 1152 textures / stage | argument buffers tier 2 | tier 2 | tier 2 | tier 2 (macOS 13+) | tier 1: vgeo off |
+| BC1-7 textures | yes | yes | yes | yes | yes |
+| ASTC | yes | yes | yes | no | no |
+| Push descriptors, dynamic rendering, sync2 | yes | yes | yes | yes | yes |
+| Subgroup size | 32 | 32 | 32 | 32 / 64 | 8-32 |
+| HDR output (HDR10 PQ, EDR) | yes on XDR / EDR displays | yes | yes | external HDR displays | external HDR displays |
+| Memoryless transients | available (MoltenVK lazily allocated) | yes | yes | no | no |
+| Fidelity auto-detect cap | High (Pro / Max / Ultra: Modern) | High / Modern | High / Modern | High | Medium |
+
+## 5. Known differences from Windows / Linux
+
+* **vgeo raster cost**: every pass rasterises twice (depth, then payload). The extra cost is in the
+  HW / SW raster passes only. On llvmpipe the two phases each take roughly the one-phase time.
+  Expect +40-100 % raster time on Apple GPUs; the culling, resolve and shading passes are unchanged.
+  Image: identical (sections 1.4 and 9).
+* **Timestamps**: Apple GPUs sample at encoder boundaries. Pass-level GPU times (frame graph, vgeo
+  pass totals) are meaningful. Splits inside one render pass (the vgeo HW / SW split, `vgeo_stats`)
+  can read 0 / total. The fidelity auto-detect uses whole-frame times.
+* **Present**: no MAILBOX. `r_vsync 0` is IMMEDIATE (`CAMetalLayer.displaySyncEnabled = NO`).
+* **Math**: MoltenVK fast math is off (`MVK_CONFIG_FAST_MATH_ENABLED=0`, `platform_preinit`), so
+  the shaders' NaN guards (TAA, exposure) behave as on the other drivers. Override it in the
+  environment to measure fast math.
+* **Mesh shaders**: none (MoltenVK). `--vgeo-no-mesh` / `DG_VGEO_NO_MESH=1` reproduces the Mac HW
+  raster path on any GPU, and `--vgeo-vis32` / `DG_VGEO_VIS32=1` the visibility writes.
+* **Crash handling**: a signal handler logs a backtrace, then macOS writes its own `.ips` report
+  (`~/Library/Logs/DiagnosticReports`). There is no hang watchdog yet (the Windows `DG_WATCHDOG`
+  uses thread suspension).
+* **Threads**: no affinity on macOS. Job workers run at `QOS_CLASS_USER_INTERACTIVE` (performance
+  cores on Apple Silicon).
+* **LAN**: discovery sends the limited broadcast plus each interface's subnet broadcast
+  (`lan_ifaddr.c`). A refused broadcast (Local Network permission denied, firewall) is logged once,
+  and same-machine games are still listed.
+* **Audio**: miniaudio's CoreAudio backend (runtime-linked, the frameworks are linked as well);
+  default buffer sizes. HRTF is the engine's own and platform-independent.
+
+## 6. Determinism (Mac <-> PC)
+
+Requirements:
+* Host and predicting client must compute bit-identical results from the same inputs: ballistics, recoil, sway, fire animation, aim.
+* Water swell is required to match as well (water uses only `sqrtf`).
+
+Two things broke that across platforms:
+1. **FMA contraction.** arm64 clang fuses `a * b + c` by default; x86_64 builds without `-mfma` do
+   not. `-ffp-contract=off` now applies to every engine target on clang / gcc. MSVC `/fp:precise`
+   does not contract.
+2. **libm.** `sinf` / `expf` / `powf` / `tanf` / ... are not correctly rounded and differ between
+   Apple libm, glibc and the MSVC CRT. The deterministic modules now call `src/core/detmath`.
+   * It evaluates in double with IEEE-exact operations and fixed polynomials, then rounds once.
+   * The result is 0 ulp from correctly rounded over the test sweeps.
+   * `sqrtf` is exact everywhere and stays.
+
+`test_detmath` runs a golden hash over 20k inputs.
+* It is identical with gcc and clang at -O0 / -O3 and on x86-32 SSE.
+* `-ffp-contract=fast -march=haswell` changes it, and the test catches that.
+* CI runs it on Linux x86_64, Windows MSVC, macOS arm64 and macOS x86_64.
+
+Jolt is not bit-identical across architectures by default: NEON vs SSE, plus FMA. Vehicles are predicted by the driver and
+reconciled, so this costs corrections, not desyncs.
+* `-DDG_JOLT_CROSS_PLATFORM_DETERMINISTIC=ON` (all platforms of a session) turns on
+  `JPH_CROSS_PLATFORM_DETERMINISTIC`. Its cost is a few % of physics time.
+* The macOS x86_64 slice builds Jolt without FMA in either case.
+
+Cross-machine LAN check (manual, needs a Mac and a PC): `tools/tests/bal_net.sh` with the host on one machine and
+`+connect <ip>` on the other.
+* `bal_net_compare.py` compares the host's and the client's predicted trajectories.
+* They must be identical, as between two PCs.
+
+## 7. Shaders on Metal
+
+* The same SPIR-V on every platform. MoltenVK translates it to MSL with SPIRV-Cross at pipeline creation.
+* `tools/macos/msl_check.py` translates every shader the way MoltenVK does (MSL 3.0, argument buffers).
+  * With `--metal` (macOS) it also compiles each MSL file to AIR with `xcrun metal`.
+  * It skips the 7 shaders MoltenVK never loads: the 64-bit atomic visibility writers and their mesh pairs.
+  * CI gates on it (Linux: SPIRV-Cross; macOS: SPIRV-Cross + Metal).
+* Startup cost:
+  * The persistent `VkPipelineCache` (`<pref>/pipeline_cache.bin`) keeps MoltenVK's translated MSL between launches.
+  * Metal's system shader cache keeps the compiled MSL.
+  * `MVK_CONFIG_SHOULD_MAXIMIZE_CONCURRENT_COMPILATION=1` compiles on every core.
+  * A pipeline cache is tied to the GPU and driver (vendor / device / UUID), so it is built on the first launch rather than shipped.
+
+## 8. TBDR (Apple GPUs)
+
+* Load ops: every pass already clears or loads explicitly. The first write of a transient starts
+  from `UNDEFINED` (the frame graph), which MoltenVK maps to `MTLLoadActionDontCare`.
+* Store ops: `fg_store_op(r)` gives `DONT_CARE` for a transient attachment that no later pass of
+  the frame uses. The tile is then never written back. It is used by the scope picture-in-picture
+  depth (its last pass) and the phone-camera scene depth. Imports (the main HDR / depth / G-buffer)
+  and histories are always stored.
+* Memoryless: the main targets are all sampled later (SSAO / SSR / TAA / sights), so none can be
+  memoryless as the graph is today. The candidates are attachment-only transients. The graph would
+  have to allocate them with `TRANSIENT_ATTACHMENT` usage and lazily allocated memory instead of
+  pooled sampled images: a follow-up when profiling on Apple hardware shows the bandwidth.
+* Post stack: compute passes at render resolution with no mid-pass readbacks; the frame graph
+  orders them, so there are no CPU stalls.
