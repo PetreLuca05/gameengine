@@ -290,13 +290,34 @@ where they were drawn and selection by the splits is unchanged; a receiver outsi
 through to the next cascade as before. Forced redraws: no valid hold (first frame, the tile was inactive
 or the atlas was skip-cleared), a camera cut, a change of cascades / tile size / fit / atlas, a fit
 whose centre moved more than a tenth of its radius (radius by 2 %), or a fit light direction that
-turned more than 0.25 deg (a jump, not the sun's drift). The pass loads the atlas when a tile is kept
+turned enough to move a 10 m caster's shadow tip by half a texel of the tile (`csm_hold_max_turn`:
+turn x 10 m / sin²(elevation, at least 3°) > texel / 2), and never more than 0.02°. The sun of the
+default day (0.004° per frame at 60 fps) keeps a far tile above ~8° of elevation (6° for cascade 3);
+a low sun, a time-lapse (time_scale 5 and more) and any jump (the sun / moon handover) redraw it every
+frame, so far shadows never judder at half the frame rate while the light moves (the old 0.25° rule
+held them at time_scale 60, docs/DAYNIGHT.md "Continuity"). The pass loads the atlas when a tile is kept
 and clears only the tiles it redraws; the classic renderer and the skinned shadow cull skip kept
 cascades. Cascades that can be kept are drawn without the PF-0006 receiver-volume cull (later views
 sample them). Far shadows of moving casters (wind-swayed trees, zombies) lag up to N - 1 frames;
 cascades 0 - 1 never lag. Measured (pine / broadleaf forest, horde in the forest, Modern, 2 x A/B):
 shadow pass -14.6 %, its fragments -11 %, GPU frame -11.5 %, CPU work -5.8 %; still images pass the
 fidelity-neutral image check.
+
+### A turning light
+
+The light direction is exact every frame (docs/DAYNIGHT.md "Continuity"); stability comes from the
+fit alone. `csm_fit_reach` snaps the light-space origin of each tile to whole texels (translation
+only: a camera move shifts the grid by whole texels, so no edge swims) and never touches the
+direction. A turning light still moves the texel grid under a world point X by |X − pivot| × dθ: with
+the light views about the world origin a camera 2 km out saw every edge re-rasterized at a new
+sub-texel phase every frame (0.47 texel per frame at the default day, `test_shadow_csm`). The light
+views (cascades, the moon tile, the viewmodel tile) now pivot about a point near the camera
+(`csm_light_view_at`, `csm_pivot`): kept until the camera is 16 m from it on an axis, then moved onto
+the camera (rounded to 1 m; a one-frame sub-texel re-phase while moving). Near the camera the grid
+then drifts smoothly, 0.05 texel per frame at the default day (0.25 at the cell's corner), and the
+light-space coordinates stay small (better float precision far from the origin). What remains is the
+shadow map's own quantization: a rasterized edge advances by whole texels as the light turns (the
+filter smooths it; under TAA the rotating kernel averages it).
 
 ### Bias
 
@@ -379,10 +400,13 @@ Each frame:
    - **State:** one state per body (fade, radius). The handover continues the moon's history, so it
      never pops: when the sun's light reaches 0, nothing of the sun is left to change.
    - **Per light:** contrast C, cutoff state with hysteresis, smoothed fade, smoothed source radius
-     (time constant `smooth_s`).
+     (time constant `smooth_s`, run `clock_speed` times faster in a time-lapse: the shadows keep up
+     with the sun at time_scale 60 instead of lagging an hour of game time; the tier crossfade below
+     stays in real seconds).
    - **Wide mode** (PCSS tier): above `wide_deg`, the cascade 0 weight fades to 0 and the pass stops.
    - **Filter:** the PCSS weight and the max half width approach the tier's targets over `mode_s`.
-   - **Also:** cloud drift (integrated), exposure compensation, ground albedo.
+   - **Also:** cloud drift (integrated in double over the world clock's advance, `drift_dt`: it pauses
+     with the clock, docs/DAYNIGHT.md "Clouds"), exposure compensation, ground albedo.
 3. `compute_matrices` (render.c):
    - the cascade layout and fit (above), the moon tile (cascade 1's sphere along the moon), the
      viewmodel tile
@@ -555,7 +579,8 @@ Change one curve, watch `r_shadow_debug 1` in the corner, then run the tests.
 - the 2 min clear→overcast transition: one toggle, exactly under the cutoff; the shaded luminance
   step stays under 0.5 % per frame; re-enable only above the hysteresis; no chatter
 - the moon handover: continuous fade and intensity; dawn cut; new moon
-- cloud drift = wind × aloft; wide mode hysteresis
+- cloud drift = wind × aloft; it stands while the clock is paused; a frame's step at 1.2e6 m of drift
+  is exact (double); wide mode hysteresis
 - the tiers: one filter (PCSS weight 1 / 0, max width per tier); tier changes every 0.4 s never
   move the effective penumbra more than 15 % in a frame, the search runs while PCSS fades
 - cloud sweeps 0 → 1 → 0 (60 s per half) on every tier: at most one cutoff toggle per half, the
@@ -581,6 +606,12 @@ Change one curve, watch `r_shadow_debug 1` in the corner, then run the tests.
   resizes a cascade
 - texel snapping: 10 frames of 0.37-texel translation (half with a 0.3°/frame turn): < 0.02 texel
   of drift of a fixed point
+- a turning light (the default day's 0.004° per frame): the sub-texel phase of a point near the
+  camera drifts < 0.1 texel per frame about the camera pivot (89 m out; < 0.2 at 2 km, the float
+  noise of world coordinates there), < 0.4 at the pivot cell's corner, against ~0.5 (random) about
+  the world origin 2 km out; the pivot keeps / moves by the cell; the far-tile hold allowance grows
+  with the elevation, holds the default day at 30° but not at 5°, never time_scale 60, capped at
+  0.02°
 - casters 5 m .. 1 km towards the light at 1 .. 89.5° elevation, every heading: inside the depth
   range
 - the shadow is full to 90 % of D and gone at D; the cascade index + blend is continuous (no seam
