@@ -219,6 +219,16 @@ class Page:
                     pass
             time.sleep(1 / 60)
 
+    def wait_log(self, path, pattern, timeout):
+        """wait_log that keeps the page alive (pongs, samples): the server drops a silent page after 20 s."""
+        t0 = time.time()
+        while time.time() - t0 < timeout:
+            m = re.search(pattern, log_text(path))
+            if m:
+                return m
+            self.pump(0.25)
+        return None
+
     def wait_status(self, cond, timeout):
         t0 = time.time()
         while time.time() - t0 < timeout:
@@ -264,18 +274,24 @@ def main():
         session = pg.session
         check(bool(session), "session key issued")
         check(code == 200 and http_get(host, port, "/ping?s=" + urllib.parse.quote(session or ""))[0] == 200, "/ping with the session: 200")
-        m = wait_log(a.log, r"phone_card: card=connected[^\n]*", 600)
+        m = pg.wait_log(a.log, r"phone_card: card=connected[^\n]*", 600)
         check(bool(m) and 'device="iPhone \xc2\xb7 Safari"'.encode("latin-1").decode("utf-8") in m.group(0) and "ctx=menu" in m.group(0), "card: Connected (iPhone \u00b7 Safari) in the menu")
-        check(bool(wait_log(a.log, r"mm_dump: [^\n]*phone 'Connected \(iPhone", 300)), "the main menu footer shows the phone status")
-        check(bool(wait_log(a.log, r"phone_status: flow=paired[^\n]*portal=0 screen=mainmenu", 300)), "the portal closed by itself after Connected")
+        check(bool(pg.wait_log(a.log, r"mm_dump: [^\n]*phone 'Connected \(iPhone", 300)), "the main menu footer shows the phone status")
+        check(bool(pg.wait_log(a.log, r"phone_status: flow=paired[^\n]*portal=0 screen=mainmenu", 300)), "the portal closed by itself after Connected")
         # ---- the match
         check(pg.wait_status(lambda s: s.get("ctx") == "match", 900), "entering the match: the page's ctx becomes match")
-        m = wait_log(a.log, r"#\d+ [^\n]* phone ping", 600)
+        m = pg.wait_log(a.log, r"#\d+ [^\n]* phone ping", 600)
         check(bool(m), "the lobby member list carries the phone flag")
         check(pg.wait_status(lambda s: s.get("holding") is True, 900), "the phone comes out in the match")
         check(pg.status.get("flow") == "paired" and pg.status.get("app") == "home", "equip with the device: paired, home (%s / %s)" % (pg.status.get("flow"), pg.status.get("app")))
+        # Step-locked with the script (the game may render slowly): each page action waits for the
+        # script's previous step, so its phone_wait sees every state.
+        def after(pattern):
+            while not re.search(pattern, log_text(a.log)) and game.poll() is None:
+                pg.pump(0.5)
+        after(r"screenshot saved: phone_ws_match\.png")
         ws.text({"c": "app", "v": "camera"})
-        pg.pump(8.0)
+        after(r"screenshot saved: phone_ws_camera\.png")
         check(pg.frames > 0, "camera app: live frames streamed to the page (%d)" % pg.frames)
         check(bool(pg.status) and pg.status.get("driven") is True, "orientation samples drive the in-game phone")
         ws.text({"c": "shutter"})
@@ -292,13 +308,15 @@ def main():
         if listed:
             code, hdrs, body = http_get(host, port, pg.gallery[0]["url"] + "?s=" + urllib.parse.quote(session))
             check(code == 200 and hdrs.get("content-type") == "image/jpeg" and body[:2] == b"\xff\xd8", "photo downloads with the session")
+        after(r"phone_wait: gallery reached")
         # ---- the device drops mid-match, then the page resumes
         ws.s.close()
         m = wait_log(a.log, r"phone_wait: local (reached|TIMEOUT)", 600)
         check(bool(m) and m.group(1) == "reached", "device dropped: the in-game phone")
         check(bool(wait_log(a.log, r"Phone disconnected \S+ using in-game phone", 30)), "toast: Phone disconnected - using in-game phone")
-        time.sleep(3)
         check(http_get(host, port, "/ping?s=" + urllib.parse.quote(session))[0] == 200, "/ping after the drop: the session is still good")
+        while not re.search(r"screenshot saved: phone_ws_dropped\.png", log_text(a.log)) and game.poll() is None:
+            time.sleep(0.5)
         ws = Ws(host, port, "/ws?s=" + urllib.parse.quote(session))
         check(ws.ok, "the page resumes with its session key")
         pg = Page(ws)
