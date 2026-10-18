@@ -229,7 +229,7 @@ validator checks they exist.
     cuts, where a hole opens in the model.
   - Geometry behind the near plane but outside the view (the stock behind the eye) is only
     reported, not counted.
-  - The log line names the part with the most cuts.
+  - The log line names the part with the most cuts. Every weapon reads 0 in both states.
   - The fixes this took were all in the models, never the camera:
     - The AR uppers slope down behind a shorter rail.
     - The shotgun receiver slopes to the stock, with its rail on a riser.
