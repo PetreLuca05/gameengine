@@ -291,6 +291,13 @@ typedef struct Renderer {
     u32 shadow_gen;           // bumped when a sun / moon / viewmodel shadow map is (re)created (render.c shadow_clear_skip)
     bool has_wireframe;
     bool has_push_descriptor, has_colorspace_ext;
+    bool has_mdi, has_first_instance;   // multiDrawIndirect / drawIndirectFirstInstance enabled (GPU-written classic draws)
+    // The classic GPU cull may run (PF-0018 / PF-0019): indirect draws with a GPU-written firstInstance
+    // and push descriptors; off on portability (MoltenVK) unless --gpu-cull. Else the CPU cull.
+    bool gpu_cull_ok;
+    // Two-pass Hi-Z occlusion may run (PF-0031 / PF-0032): off on portability (the TBDR depth +
+    // G-buffer store / load round trip of a second prepass) unless --occlusion.
+    bool occl_ok;
     bool has_device_fault;         // VK_EXT_device_fault: fault addresses / vendor info on a lost device
     bool has_unused_attachments;   // VK_EXT_dynamic_rendering_unused_attachments: G-buffer without velocity
     bool hdr_supported, swap_hdr;
@@ -648,6 +655,7 @@ struct VgTextures;
 void vkc_set_textures(const struct VgTextures *t);
 void vkc_samplers_changed(void);                              // the vgeo texture table (module-owned slots)
 void vkc_chunk_loaded(const struct VgScene *s, u32 handle);                    // placement chunk: per-cell distance limits
+void vkc_scene_committed(const struct VgScene *s);                              // after every vgeo_scene_commit: every live chunk's limits again
 // The frame's batches: main view, sun cascades, scope PiP; the scene for the local light tiles.
 void vkc_frame(const struct VgScene *s, const struct VgDisplace *disp, float density, float lod_px, float shadow_lod_px, float small_impostor_px, bool era2010,
                bool shadows);

@@ -165,7 +165,10 @@ is kept.
   range: time fades use a signed value (in `t` keeps `n < t`, out `-(1-t)` keeps `n >= t`); classic parts
   carry the kept interval `[lo, hi)` (`lod_iv_pack`): impostor `[0, iw)`, coarser LOD `[iw, mid)`, finer
   `[mid, 1)`. Every texel is covered by exactly one part (`test_lod` checks all 256 thresholds), in the main
-  view and in the shadow maps (the same dither in shadow-map texels): no holes, no double shadows.
+  view and in the shadow maps (the same dither in shadow-map texels): no holes, no double shadows. A part
+  whose interval quantizes empty is not drawn (`lod_iv_empty`): packed, `[0, 0)` would read as 0, the
+  "whole coverage" value, and an impostor share or coarser share below 1/512 drew a whole extra impostor or
+  LOD over the instance (`test_lod` sweeps `iw` / `cw` near 0 and 1 in 1e-6 steps).
 * **Time fades (objects with state: characters).** `LodFade`: the selector (with its hysteresis) runs on
   the LOD being faded to; a running fade always completes, a reversal mid-fade then fades back (no
   ping-pong half-fades). Shadows: one LOD coarser than each of the pair, faded with the same values.

@@ -42,6 +42,7 @@ All are reached through Metal 3 (macOS 13+) or Metal 2.x (macOS 11-12).
 | apiVersion | devices `< 1.3` skipped | 1.3 since MoltenVK 1.3.0 (May 2025) | Require the MoltenVK of Vulkan SDK ≥ 1.4.309. Log a clear message when only a 1.2 MoltenVK is found. |
 | dynamicRendering, synchronization2, demote | required (1.3 core) | supported | none |
 | `VK_KHR_push_descriptor` | required by the post stack | supported | none |
+| `multiDrawIndirect`, `drawIndirectFirstInstance` | enabled when supported (`R->has_mdi`, `R->has_first_instance`; log line `vulkan: indirect draws:`) | supported; multi-draw is encoded per command (to be checked in `MVKDevice.mm`) | The classic GPU cull (`R->gpu_cull_ok`) and the Hi-Z occlusion (`R->occl_ok`) are off on portability unless `--gpu-cull` / `--occlusion`: the CPU cull draws the same instances. Without multiDrawIndirect every sub-draw is its own indirect draw (drawCount 1). No `drawIndirectCount`. |
 | `VK_EXT_swapchain_colorspace` | optional (HDR10) | supported. HDR10_ST2084 maps to `CAMetalLayer` PQ with EDR. | HDR10 path works as-is on EDR displays. Extended-sRGB (scRGB) is not used, so no gap. |
 | `VK_EXT_mesh_shader` | optional (vgeo HW raster) | **not exposed** | Vertex-pulling path is already automatic (`vgeo_raster.c`). Add a cvar to force it elsewhere for testing (`r_vgeo_mesh`). |
 | `VK_EXT_dynamic_rendering_unused_attachments` | optional | not exposed | Existing fallback: velocity always written. |
@@ -300,6 +301,10 @@ A macOS VM (GitHub runners, UTM / Parallels guests) reports an "Apple Paravirtua
   pass totals) are meaningful. Splits inside one render pass (the vgeo HW / SW split, `vgeo_stats`)
   can read 0 / total. The fidelity auto-detect uses whole-frame times.
 * **Present**: no MAILBOX. `r_vsync 0` is IMMEDIATE (`CAMetalLayer.displaySyncEnabled = NO`).
+* **GPU-driven classic draws**: the classic GPU cull and the two-pass Hi-Z occlusion stay off on
+  portability devices (`R->gpu_cull_ok`, `R->occl_ok`; the second prepass would add a TBDR depth +
+  G-buffer store / load round trip); `--gpu-cull` / `--occlusion` turn them on for measurements. The
+  CPU cull draws the same instances.
 * **Math**: MoltenVK fast math is off (`MVK_CONFIG_FAST_MATH_ENABLED=0`, `platform_preinit`), so
   the shaders' NaN guards (TAA, exposure) behave as on the other drivers. Override it in the
   environment to measure fast math.

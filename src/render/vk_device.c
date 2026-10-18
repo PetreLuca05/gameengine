@@ -349,6 +349,16 @@ bool vkd_create_device(SDL_Window *window) {
         free(props);
         if (!R->has_push_descriptor) log_error("vulkan: VK_KHR_push_descriptor missing - post-processing disabled");
     }
+    // GPU-driven classic draws (docs/CLASSIC_RENDERER.md): what the GPU cull (PF-0018 / 0019) and the
+    // Hi-Z occlusion (PF-0031 / 0032) may use. No feature beyond the two above is requested; without
+    // multiDrawIndirect every sub-draw is its own indirect draw (drawCount 1). On portability both
+    // stay off unless asked for (--gpu-cull / --occlusion, the --no-async-compute precedent).
+    R->has_mdi = supported.multiDrawIndirect == VK_TRUE;
+    R->has_first_instance = supported.drawIndirectFirstInstance == VK_TRUE;
+    R->gpu_cull_ok = R->has_first_instance && R->has_push_descriptor && (!R->portability || has_arg("--gpu-cull"));
+    R->occl_ok = !R->portability || has_arg("--occlusion");
+    log_info("vulkan: indirect draws: multiDrawIndirect %d, drawIndirectFirstInstance %d; classic GPU cull %s, occlusion %s", R->has_mdi, R->has_first_instance,
+             R->gpu_cull_ok ? "allowed" : "off (CPU cull)", R->occl_ok ? "allowed" : "off");
     // Engine Fidelity: levels without temporal passes render the G-buffer without its velocity target
     // (a null attachment view under a pipeline that has the format): needs this extension.
     VkPhysicalDeviceDynamicRenderingUnusedAttachmentsFeaturesEXT ua = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DYNAMIC_RENDERING_UNUSED_ATTACHMENTS_FEATURES_EXT };

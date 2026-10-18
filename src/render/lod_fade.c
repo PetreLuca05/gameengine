@@ -198,10 +198,14 @@ float lod_coverage(float f) { return f == 0.0f ? 1.0f : (f > 0.0f ? f : -f); }
 
 bool lod_kept(float f, float n) { return f == 0.0f || (f > 0.0f ? n < f : n >= 1.0f + f); }
 
+static int iv_step(float x) { return DG_CLAMP((int)floorf(x * 256.0f + 0.5f), 0, 256); }
+
 float lod_iv_pack(float lo, float hi) {
-    int a = DG_CLAMP((int)floorf(lo * 256.0f + 0.5f), 0, 256), b = DG_CLAMP((int)floorf(hi * 256.0f + 0.5f), 0, 256);
+    int a = iv_step(lo), b = iv_step(hi);
     return (float)a + (float)b * 512.0f;
 }
+
+bool lod_iv_empty(float lo, float hi) { return iv_step(lo) >= iv_step(hi); }
 
 bool lod_iv_kept(float packed, float n) {
     if (packed == 0.0f) return true;   // 0: no interval (whole coverage)
