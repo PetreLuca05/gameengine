@@ -2702,8 +2702,8 @@ void vehicles_draw(void) {
 }
 
 void vehicles_register(void) {
-    VG.debug = cvar_reg_int("vehicle_debug", 0, 0, 2, 0, "vehicle overlay: 1 state, 2 + wheels / grips / exits");
-    VG.fuel_scale = cvar_reg_float("vehicle_fuel_scale", 1.0f, 0.0f, 1000.0f, CVAR_SERVER, "fuel consumption multiplier (0 = infinite fuel)");
+    VG.debug = cvar_reg_int("vehicle_debug", 0, 0, 2, CVAR_LOCKED, "vehicle overlay: 1 state, 2 + wheels / grips / exits");
+    VG.fuel_scale = cvar_reg_float("vehicle_fuel_scale", 1.0f, 0.0f, 1000.0f, CVAR_SERVER | CVAR_LOCKED | CVAR_RULE, "fuel consumption multiplier (0 = infinite fuel)");
     cmd_register("spawn_vehicle", cmd_spawn_vehicle, "spawn_vehicle <car|moto> [distance]: in front of you (host)");
     cmd_register("vehicle_fuel", cmd_vehicle_fuel, "vehicle_fuel [litres | N%]: current / nearest vehicle (host)");
     cmd_register("vehicle_tire", cmd_vehicle_tire, "vehicle_tire <wheel> <pressure> [health] (host)");

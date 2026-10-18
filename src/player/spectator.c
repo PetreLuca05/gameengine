@@ -659,14 +659,14 @@ static void cmd_respawn(int argc, const char **argv) {
 }
 
 void spectator_init(void) {
-    SP.death_cam_time = cvar_reg_float("spec_death_cam_time", 3.0f, 0.0f, 30.0f, CVAR_ARCHIVE, "seconds the death camera stays on your body before spectating the killer / nearest player");
-    SP.show_delay = cvar_reg_bool("spec_show_delay", true, CVAR_ARCHIVE, "show the spectator delay readout (input of the watched player -> your screen)");
-    SP.extrap = cvar_reg_int("spec_extrap_ticks", 6, 0, 30, CVAR_ARCHIVE, "ticks a watched player is extrapolated with its last input while its commands are late");
-    SP.blend_time = cvar_reg_float("spec_blend_time", 0.15f, 0.0f, 1.0f, CVAR_ARCHIVE, "camera blend (s) when the spectated player changes");
-    SP.pop_warn = cvar_reg_float("spec_pop_warn", 0.05f, 0.0f, 5.0f, 0, "spectator corrections above this (m) are counted / logged (developer)");
-    SP.free_speed = cvar_reg_float("spec_free_speed", 8.0f, 0.5f, 100.0f, CVAR_ARCHIVE, "spectator free camera speed (m/s, sprint x3)");
-    SP.free_collide = cvar_reg_bool("spec_free_collide", true, CVAR_ARCHIVE, "spectator free camera collides with the world");
-    SP.dump = cvar_reg_int("spec_dump", 0, 0, 1, 0, "log a per-tick state hash of the local / watched player (determinism test, tools/tests/spec_compare.py)");
+    SP.death_cam_time = cvar_reg_float("spec_death_cam_time", 3.0f, 0.0f, 30.0f, CVAR_ARCHIVE | CVAR_EDITABLE, "seconds the death camera stays on your body before spectating the killer / nearest player");
+    SP.show_delay = cvar_reg_bool("spec_show_delay", true, CVAR_ARCHIVE | CVAR_EDITABLE, "show the spectator delay readout (input of the watched player -> your screen)");
+    SP.extrap = cvar_reg_int("spec_extrap_ticks", 6, 0, 30, CVAR_LOCKED, "ticks a watched player is extrapolated with its last input while its commands are late");
+    SP.blend_time = cvar_reg_float("spec_blend_time", 0.15f, 0.0f, 1.0f, CVAR_ARCHIVE | CVAR_EDITABLE, "camera blend (s) when the spectated player changes");
+    SP.pop_warn = cvar_reg_float("spec_pop_warn", 0.05f, 0.0f, 5.0f, CVAR_LOCKED, "spectator corrections above this (m) are counted / logged (developer)");
+    SP.free_speed = cvar_reg_float("spec_free_speed", 8.0f, 0.5f, 100.0f, CVAR_ARCHIVE | CVAR_LOCKED | CVAR_RULE, "spectator free camera speed (m/s, sprint x3)");
+    SP.free_collide = cvar_reg_bool("spec_free_collide", true, CVAR_ARCHIVE | CVAR_LOCKED | CVAR_RULE, "spectator free camera collides with the world");
+    SP.dump = cvar_reg_int("spec_dump", 0, 0, 1, CVAR_LOCKED, "log a per-tick state hash of the local / watched player (determinism test, tools/tests/spec_compare.py)");
     cmd_register("spectate", cmd_spectate, "spectate <player|next|prev|off|free|auto> [eye|third|free]: watch a player (host / sv_cheats while alive)");
     cmd_register("respawn", cmd_respawn, "respawn now when the server allows it (sv_respawn_mode 1)");
     repl_set_owned_hook(owned_hook);

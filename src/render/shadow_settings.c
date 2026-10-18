@@ -25,13 +25,16 @@ void shs_quality_default(QualityShadowSettings *q) { shs_quality_for_tier(q, 4);
 
 void shs_quality_for_tier(QualityShadowSettings *q, int level) {
     // Off / Low / Medium / High / Modern (fidelity.h FID_*); assets/render/fidelity/*.json mirror it
-    // (tests/test_shadow_settings.c checks they agree).
+    // (tests/test_shadow_settings.c checks they agree). The distance is the same for every tier
+    // (SHADOW_LOCKED_DISTANCE, docs/SETTINGS_AUDIT.md: enemy shadows reach as far for everyone), and no
+    // tier disables the sun shadows; Off / Low pay for the reach with 1024 px maps (cascade 0 keeps
+    // its texel density).
     static const struct { ShadowsMode mode; ShadowRes res; int casc; float dist; SoftQuality soft; } k[5] = {
-        { SHADOWS_DISABLE, SHADOW_RES_LOW, 1, 50.0f, SOFT_LOW },
-        { SHADOWS_HARD_ONLY, SHADOW_RES_LOW, 2, 50.0f, SOFT_LOW },
-        { SHADOWS_HARD_AND_SOFT, SHADOW_RES_MEDIUM, 2, 100.0f, SOFT_LOW },
-        { SHADOWS_HARD_AND_SOFT, SHADOW_RES_HIGH, 4, 200.0f, SOFT_MEDIUM },
-        { SHADOWS_HARD_AND_SOFT, SHADOW_RES_VERY_HIGH, 4, 300.0f, SOFT_ULTRA },
+        { SHADOWS_HARD_ONLY, SHADOW_RES_MEDIUM, 1, SHADOW_LOCKED_DISTANCE, SOFT_LOW },
+        { SHADOWS_HARD_ONLY, SHADOW_RES_MEDIUM, 2, SHADOW_LOCKED_DISTANCE, SOFT_LOW },
+        { SHADOWS_HARD_AND_SOFT, SHADOW_RES_MEDIUM, 2, SHADOW_LOCKED_DISTANCE, SOFT_LOW },
+        { SHADOWS_HARD_AND_SOFT, SHADOW_RES_HIGH, 4, SHADOW_LOCKED_DISTANCE, SOFT_MEDIUM },
+        { SHADOWS_HARD_AND_SOFT, SHADOW_RES_VERY_HIGH, 4, SHADOW_LOCKED_DISTANCE, SOFT_ULTRA },
     };
     int l = level < 0 ? 0 : (level > 4 ? 4 : level);
     memset(q, 0, sizeof(*q));
@@ -43,7 +46,7 @@ void shs_quality_for_tier(QualityShadowSettings *q, int level) {
     q->shadowmask_distance = 150.0f;
     q->near_plane_offset = 3000.0f;
     q->cascades = k[l].casc;
-    q->split2 = 1.0f / 3.0f;            // Unity: 33.3 %
+    q->split2 = 0.25f;                  // Unity: 33.3 %; 25 % keeps cascade 0 dense at the locked 150 m (Low / Medium)
     q->split4[0] = 0.067f;              // Unity: 6.7 / 20 / 46.7 %
     q->split4[1] = 0.2f;
     q->split4[2] = 0.467f;

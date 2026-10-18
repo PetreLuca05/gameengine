@@ -13,16 +13,16 @@ void camera_register_cvars(void) {
     // The world camera FOV is the player's (Settings -> Graphics -> View): vertical degrees, Hor+ up
     // to sv_fov_max_aspect, wider screens keep that aspect's horizontal FOV. A host may force one FOV
     // for everyone (sv_fov) or cap it (sv_fov_max). Hands / weapon FOV: cam_weapon_fov.
-    c->fov = cvar_reg_float("cl_fov", 75.0f, 50.0f, 120.0f, CVAR_ARCHIVE, "world camera vertical FOV (deg; 75 = 107 deg horizontal at 16:9)");
-    c->sv_fov = cvar_reg_float("sv_fov", 0.0f, 0.0f, 120.0f, CVAR_SERVER, "host override of every player's world FOV (vertical deg, replicated; 0 = each player's cl_fov)");
-    c->sv_fov_max = cvar_reg_float("sv_fov_max", 0.0f, 0.0f, 120.0f, CVAR_SERVER, "host cap of the players' cl_fov (vertical deg, replicated; 0 = no cap)");
-    c->max_aspect = cvar_reg_float("sv_fov_max_aspect", 16.0f / 9.0f, 0.0f, 4.0f, CVAR_SERVER,
+    c->fov = cvar_reg_float("cl_fov", 75.0f, 60.0f, 120.0f, CVAR_ARCHIVE | CVAR_EDITABLE, "world camera vertical FOV (deg; 75 = 107 deg horizontal at 16:9)");
+    c->sv_fov = cvar_reg_float("sv_fov", 0.0f, 0.0f, 120.0f, CVAR_SERVER | CVAR_LOCKED | CVAR_RULE, "host override of every player's world FOV (vertical deg, replicated; 0 = each player's cl_fov)");
+    c->sv_fov_max = cvar_reg_float("sv_fov_max", 0.0f, 0.0f, 120.0f, CVAR_SERVER | CVAR_LOCKED | CVAR_RULE, "host cap of the players' cl_fov (vertical deg, replicated; 0 = no cap)");
+    c->max_aspect = cvar_reg_float("sv_fov_max_aspect", 16.0f / 9.0f, 0.0f, 4.0f, CVAR_SERVER | CVAR_LOCKED | CVAR_RULE,
                                    "widest aspect that sees more to the sides; wider screens keep its horizontal FOV (0 = unlimited Hor+)");
-    c->ads_world_zoom = cvar_reg_float("cl_ads_world_zoom", 1.5f, 1.0f, 1.5f, 0,
+    c->ads_world_zoom = cvar_reg_float("cl_ads_world_zoom", 1.5f, 1.0f, 1.5f, CVAR_LOCKED,
                                        "ADS: the world camera narrows by this (tangent ratio) when fully aimed, on top of the hands / weapon zoom (1 = off; a sight's \"world_zoom\" overrides it)");
-    c->headbob = cvar_reg_bool("cl_headbob", true, CVAR_ARCHIVE, "camera head bob");
-    c->bob_amount = cvar_reg_float("cl_headbob_amount", 1.0f, 0.0f, 3.0f, CVAR_ARCHIVE, "head bob strength");
-    c->sprint_fov = cvar_reg_float("cl_sprint_fov", 7.0f, 0.0f, 20.0f, CVAR_ARCHIVE, "extra FOV while sprinting (deg)");
+    c->headbob = cvar_reg_bool("cl_headbob", true, CVAR_ARCHIVE | CVAR_EDITABLE, "camera head bob");
+    c->bob_amount = cvar_reg_float("cl_headbob_amount", 1.0f, 0.0f, 1.0f, CVAR_ARCHIVE | CVAR_EDITABLE, "head bob strength");
+    c->sprint_fov = cvar_reg_float("cl_sprint_fov", 7.0f, 0.0f, 7.0f, CVAR_ARCHIVE | CVAR_EDITABLE, "extra FOV while sprinting (deg)");
 }
 
 float camera_fov_for_aspect(float fov_v, float max_aspect, float aspect) {

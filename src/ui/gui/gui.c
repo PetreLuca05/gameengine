@@ -65,8 +65,8 @@ static const char *find_sound(const char *n) { return n && n[0] ? n : NULL; }
 void gui_init(void) {
     memset(&G, 0, sizeof(G));
     G.ui_scale = cvar_find("ui_scale");
-    G.ui_debug = cvar_reg_int("ui_debug", 0, 0, 2, 0, "UI debug overlay: 1 widget / layout rects + focus, 2 + draw stats");
-    G.ui_safe = cvar_reg_float("ui_safe_area", -1.0f, -1.0f, 0.15f, CVAR_ARCHIVE, "UI safe area margin (fraction of the smaller side, -1 = theme)");
+    G.ui_debug = cvar_reg_int("ui_debug", 0, 0, 2, CVAR_LOCKED, "UI debug overlay: 1 widget / layout rects + focus, 2 + draw stats");
+    G.ui_safe = cvar_reg_float("ui_safe_area", -1.0f, -1.0f, 0.15f, CVAR_ARCHIVE | CVAR_EDITABLE, "UI safe area margin (fraction of the smaller side, -1 = theme)");
     G.init = true;
 }
 

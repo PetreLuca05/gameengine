@@ -911,19 +911,19 @@ void weather_draw(void) {
 // ------------------------------------------------------------------ registration
 
 void weather_register(void) {
-    WX.debug = cvar_reg_int("weather_debug", 0, 0, 2, 0, "weather overlay: 1 parameters, 2 + exposure probes around the player");
-    WX.quality = cvar_reg_int("r_precip_quality", -1, -1, 3, CVAR_ARCHIVE, "rain / snow quality: 0 off, 1 low, 2 medium, 3 high, -1 = from the post preset");
-    WX.puddle_refl = cvar_reg_bool("r_puddle_reflections", true, CVAR_ARCHIVE, "mirror-smooth puddles (screen-space reflections)");
-    WX.lens_cv = cvar_reg_bool("r_lens_drops", true, CVAR_ARCHIVE, "rain droplets on the camera lens (first person)");
-    WX.lens_k = cvar_reg_float("r_lens_drops_intensity", 0.8f, 0.0f, 1.0f, CVAR_ARCHIVE, "lens droplet strength");
-    WX.cloud_shadows = cvar_reg_bool("r_cloud_shadows", true, CVAR_ARCHIVE, "cloud shadows on the ground");
-    WX.audio_vol = cvar_reg_float("snd_weather", 0.8f, 0.0f, 1.0f, CVAR_ARCHIVE, "rain / wind / thunder volume");
-    WX.on_rain_start = cvar_reg_string("weather_on_rain_start", "", 0, "console commands run when rain starts");
-    WX.on_rain_stop = cvar_reg_string("weather_on_rain_stop", "", 0, "console commands run when rain stops");
-    WX.on_snow_start = cvar_reg_string("weather_on_snow_start", "", 0, "console commands run when snow starts");
-    WX.on_snow_stop = cvar_reg_string("weather_on_snow_stop", "", 0, "console commands run when snow stops");
-    WX.on_storm_start = cvar_reg_string("weather_on_storm_start", "", 0, "console commands run when a storm starts");
-    WX.on_storm_stop = cvar_reg_string("weather_on_storm_stop", "", 0, "console commands run when a storm ends");
+    WX.debug = cvar_reg_int("weather_debug", 0, 0, 2, CVAR_LOCKED, "weather overlay: 1 parameters, 2 + exposure probes around the player");
+    WX.quality = cvar_reg_int("r_precip_quality", -1, -1, 3, CVAR_TIER, "rain / snow quality: 0 off, 1 low, 2 medium, 3 high, -1 = from the post preset");
+    WX.puddle_refl = cvar_reg_bool("r_puddle_reflections", true, CVAR_TIER, "mirror-smooth puddles (screen-space reflections)");
+    WX.lens_cv = cvar_reg_bool("r_lens_drops", true, CVAR_LOCKED, "rain droplets on the camera lens (first person)");
+    WX.lens_k = cvar_reg_float("r_lens_drops_intensity", 0.8f, 0.0f, 1.0f, CVAR_LOCKED, "lens droplet strength");
+    WX.cloud_shadows = cvar_reg_bool("r_cloud_shadows", true, CVAR_LOCKED, "cloud shadows on the ground");
+    WX.audio_vol = cvar_reg_float("snd_weather", 0.8f, 0.0f, 1.0f, CVAR_ARCHIVE | CVAR_EDITABLE, "rain / wind / thunder volume");
+    WX.on_rain_start = cvar_reg_string("weather_on_rain_start", "", CVAR_LOCKED, "console commands run when rain starts");
+    WX.on_rain_stop = cvar_reg_string("weather_on_rain_stop", "", CVAR_LOCKED, "console commands run when rain stops");
+    WX.on_snow_start = cvar_reg_string("weather_on_snow_start", "", CVAR_LOCKED, "console commands run when snow starts");
+    WX.on_snow_stop = cvar_reg_string("weather_on_snow_stop", "", CVAR_LOCKED, "console commands run when snow stops");
+    WX.on_storm_start = cvar_reg_string("weather_on_storm_start", "", CVAR_LOCKED, "console commands run when a storm starts");
+    WX.on_storm_stop = cvar_reg_string("weather_on_storm_stop", "", CVAR_LOCKED, "console commands run when a storm ends");
     cmd_register("weather_set", cmd_weather_set, "weather_set <preset[+preset]> [seconds] (host)");
     cmd_register("season", cmd_season, "season [spring|summer|autumn|winter|off] [start preset|random] [static]: the season drives the calendar day and the weather (host); no args: list");
     cmd_register("weather_lock", cmd_weather_lock, "weather_lock [0|1]: no random changes (host)");

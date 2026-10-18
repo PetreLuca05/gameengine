@@ -63,10 +63,10 @@ static void create_atlas(u32 tile) {
 }
 
 void vkls_init(void) {
-    R->r_light_shadows = cvar_reg_bool("r_light_shadows", true, CVAR_ARCHIVE, "point / spot light shadows (every light but muzzle flashes)");
-    R->r_light_shadow_count = cvar_reg_int("r_light_shadow_count", MAX_SHADOW_POINTS, 0, MAX_SHADOW_POINTS, CVAR_ARCHIVE,
+    R->r_light_shadows = cvar_reg_bool("r_light_shadows", true, CVAR_LOCKED, "point / spot light shadows (every light but muzzle flashes)");
+    R->r_light_shadow_count = cvar_reg_int("r_light_shadow_count", MAX_SHADOW_POINTS, 0, MAX_SHADOW_POINTS, CVAR_LOCKED,
                                            "shadowed point lights per frame (the most important visible ones)");
-    R->r_light_shadow_quality = cvar_reg_int("r_light_shadow_quality", 2, 1, 2, CVAR_ARCHIVE, "light shadow tiles: 1 = 256 px, 2 = 512 px");
+    R->r_light_shadow_quality = cvar_reg_int("r_light_shadow_quality", 2, 1, 2, CVAR_TIER, "light shadow tiles: 1 = 256 px, 2 = 512 px");
     create_atlas(tile_size_for(R->r_light_shadow_quality->i));
 }
 

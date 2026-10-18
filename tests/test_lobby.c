@@ -318,6 +318,7 @@ static void test_wire(void) {
     L->settings.start_hour = 21;
     L->settings.pvp = true;
     L->settings.dynamic_weather = false;
+    L->settings.foliage_pct = 70;   // a server rule (docs/SETTINGS_AUDIT.md): replicated with the settings
     u8 buf[4096];
     Writer w = writer_make(buf, sizeof(buf));
     lobby_write_snapshot(&w, L, a);
@@ -331,6 +332,7 @@ static void test_wire(void) {
     CHECK(C.local_id == a && lobby_count(&C) == 2 && lobby_member(&C, a)->ready && lobby_member(&C, a)->ping_ms == 42, "members replicated");
     CHECK(lobby_member(&C, a)->steam_id == 76561198000000002ull && lobby_member(&C, 0)->host, "steam id + host flag");
     CHECK(!memcmp(&C.settings, &L->settings, sizeof(LobbySettings)), "settings replicated (season, hour, weather, flags)");
+    CHECK(C.settings.foliage_pct == 70, "foliage density rule replicated (%d)", C.settings.foliage_pct);
     CHECK(C.chat_count == 1, "local chat kept");
     // Countdown follows the host.
     C.state = LS_LOBBY;

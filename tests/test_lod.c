@@ -1,7 +1,7 @@
 // LOD ranges and cross-fades (src/render/lod_fade.c, docs/LOD.md), on the shipped tables
 // (assets/render/lod.json, assets/render/fidelity):
 //   * lod.json parses and matches the built-in defaults; malformed tables are rejected;
-//   * thresholds = lod.json x the Engine Fidelity tier (lod_bias: Off 0.3 .. Modern 1) x the era;
+//   * thresholds = lod.json, the same at every Engine Fidelity level and era (docs/SETTINGS_AUDIT.md);
 //   * character px -> LOD at the new targets (140 / 60 / 25 px) and the line-up distances;
 //   * every LOD switch of a slow dolly (characters: time fades; static chains, impostors: distance
 //     bands) is a fade: the silhouette coverage of each LOD changes by less than 5 % per frame;
@@ -35,7 +35,7 @@ static int g_fail, g_checks;
     } while (0)
 
 #define MAX_COVER_STEP 0.05f   // per-frame silhouette coverage change bound of a fade (5 %)
-static const float k_tier[FID_LEVELS] = { 0.3f, 0.4f, 0.6f, 0.85f, 1.0f };   // Off .. Modern
+static const float k_tier[FID_LEVELS] = { 1.0f, 1.0f, 1.0f, 1.0f, 1.0f };   // Off .. Modern: the same ranges (docs/SETTINGS_AUDIT.md)
 
 // Character projected height at 1080p, 75 deg vertical FOV, 1.72 m tall (characters.c).
 static float char_px(float d) { return 1080.0f * 1.72f / (2.0f * d * tanf(37.5f * 3.14159265f / 180.0f)); }
@@ -87,12 +87,14 @@ static void test_tiers(void) {
         CHECK(fabsf(lod_px - 2.0f / (2.0f * k_tier[l])) < 1e-4f, "level %d: static LOD px %.3f", l, (double)lod_px);
     }
     // eras keep their own table on top
-    CHECK(fabsf(lod_scale_of(&t, LODC_STATIC, FID_MODERN, 1.0f, 3) - 2.0f * 0.7f) < 1e-5f, "2010 era multiplier");
-    CHECK(fabsf(lod_scale_of(&t, LODC_FOLIAGE, FID_MODERN, 1.0f, 2) - 1.5f * 0.85f) < 1e-5f, "2015 era multiplier");
+    CHECK(fabsf(lod_scale_of(&t, LODC_STATIC, FID_MODERN, 1.0f, 3) - 2.0f) < 1e-5f, "2010 era: the same ranges");
+    CHECK(fabsf(lod_scale_of(&t, LODC_FOLIAGE, FID_MODERN, 1.0f, 2) - 1.5f) < 1e-5f, "2015 era: the same ranges");
     // the user's r_lod_bias against the level default multiplies in
-    CHECK(fabsf(lod_scale_of(&t, LODC_STATIC, FID_HIGH, 2.0f, 0) - 2.0f * 0.85f * 2.0f) < 1e-5f, "user bias x2 at High");
-    // the tier table may not decrease with the level
-    CHECK(!lod_table_parse(&t, "{\"tiers\": {\"high\": 1.2}}", err, sizeof(err)), "a tier above the next level is rejected");
+    CHECK(fabsf(lod_scale_of(&t, LODC_STATIC, FID_HIGH, 2.0f, 0) - 2.0f * 2.0f) < 1e-5f, "bias x2 (dev builds) at High");
+    // the tier / era multipliers must be 1: shorter ranges on a low level would hide what others see
+    CHECK(!lod_table_parse(&t, "{\"tiers\": {\"high\": 1.2}}", err, sizeof(err)), "a tier multiplier other than 1 is rejected");
+    CHECK(!lod_table_parse(&t, "{\"tiers\": {\"off\": 0.3}}", err, sizeof(err)), "a shorter Off range is rejected");
+    CHECK(!lod_table_parse(&t, "{\"eras\": {\"2010\": {\"all\": 0.7}}}", err, sizeof(err)), "an era multiplier other than 1 is rejected");
 }
 
 static void test_char_mapping(void) {

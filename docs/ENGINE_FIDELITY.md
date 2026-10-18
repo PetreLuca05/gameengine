@@ -1,5 +1,12 @@
 # Engine Fidelity
 
+> **Settings audit (docs/SETTINGS_AUDIT.md) supersedes parts of this page.** Levels trade cost for
+> quality only: foliage density, LOD / impostor / grass ranges, shadow distance and shadow types,
+> fog, exposure, lens effects and decal budgets are no longer features; they are locked values in
+> `assets/render/consistency.json`, the same at every level and era. No level disables sun shadows
+> or rain; Off / Low use 1024 px shadow maps for the locked 150 m. The per-feature tables below
+> predate that and still list the removed entries for history.
+
 Five levels, **Off, Low, Medium, High, Modern**, form the base layer of the graphics settings. A
 level decides which systems the frame graph contains and their internal cost tiers. Every other
 graphics control (post-processing & effects, resolution / upscaler, shadows, geometry / foliage,

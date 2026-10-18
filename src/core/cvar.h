@@ -14,7 +14,21 @@ enum {
     CVAR_SERVER     = 1 << 2, // owned by the host; replicated to clients
     CVAR_READONLY   = 1 << 3,
     CVAR_NOTIFY     = 1 << 4, // print when changed
+    // Classification (docs/SETTINGS_AUDIT.md): every registration carries exactly one of the first
+    // three (tools/tests/lint_settings.py). Release builds enforce them (cvar_release_locks).
+    CVAR_EDITABLE   = 1 << 5, // a player setting (menus, console, config.cfg)
+    CVAR_TIER       = 1 << 6, // set by Engine Fidelity only (hidden, never saved)
+    CVAR_LOCKED     = 1 << 7, // one value for everyone (assets/render/consistency.json, never saved)
+    CVAR_RULE       = 1 << 8, // with CVAR_LOCKED: the host's server rules may set it (replicated)
 };
+#define CVAR_CLASS_MASK (CVAR_EDITABLE | CVAR_TIER | CVAR_LOCKED)
+
+// Who writes a cvar. A user write (menu, console, config, game code) of a TIER / LOCKED cvar is
+// rejected (and logged) while the release locks are on; Engine Fidelity writes TIER cvars as
+// CVAR_SRC_FIDELITY, the consistency set and the host's replicated values come as CVAR_SRC_HOST.
+// A LOCKED | RULE cvar takes user writes while this machine is not a client of someone else's
+// server (cvar_set_rule_gate): its host sets the rules, and they replicate to every client.
+typedef enum CvarSource { CVAR_SRC_USER, CVAR_SRC_FIDELITY, CVAR_SRC_HOST } CvarSource;
 
 #define CVAR_NAME_MAX 48
 #define CVAR_STR_MAX 128
@@ -50,6 +64,19 @@ Cvar *cvar_reg_bool(const char *name, bool def, u32 flags, const char *desc);
 Cvar *cvar_reg_int(const char *name, int def, int min, int max, u32 flags, const char *desc);
 Cvar *cvar_reg_float(const char *name, float def, float min, float max, u32 flags, const char *desc);
 Cvar *cvar_reg_string(const char *name, const char *def, u32 flags, const char *desc);
+
+// Release locks: on in release builds (DG_DEV_BUILD 0), off in dev builds; --release-locks and
+// the tests turn them on. cvar_source_push / pop bracket privileged writes.
+bool cvar_dev_build(void);
+void cvar_set_release_locks(bool on);
+bool cvar_release_locks(void);
+CvarSource cvar_source_push(CvarSource src);   // returns the previous source
+void cvar_source_pop(CvarSource prev);
+void cvar_set_rule_gate(bool (*can_set_rules)(void));
+bool cvar_writable(const Cvar *cv, CvarSource src);   // would a write from src go through now
+int cvar_rejected_count(void);                         // writes rejected by the locks so far
+const char *cvar_class_name(u32 flags);                // "EDITABLE" / "TIER" / "LOCKED" / "LOCKED+RULE" / "?"
+bool cvar_saved(const Cvar *cv);                       // written to config.cfg
 
 Cvar *cvar_find(const char *name);
 bool cvar_set(const char *name, const char *value);
@@ -93,5 +120,9 @@ void config_clear_dirty(void);
 bool config_save_if_dirty(const char *path);
 bool config_autosave(const char *path);
 bool config_exec_file(const char *path);
+// The user's config.cfg: like config_exec_file, but entries of TIER / LOCKED cvars (no longer
+// saved; older configs have them) are dropped with one log line.
+bool config_load_file(const char *path);
+int config_load_dropped(void);   // entries the last config_load_file dropped (the file is rewritten)
 
 #endif

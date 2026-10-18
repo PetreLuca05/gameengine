@@ -8,20 +8,20 @@ static CamFpCvars g_cv;
 
 void camera_fp_register_cvars(void) {
     CamFpCvars *c = &g_cv;
-    c->stiffness = cvar_reg_float("cam_head_stiffness", 260.0f, 1.0f, 5000.0f, CVAR_ARCHIVE, "head camera spring stiffness (1/s^2)");
-    c->damping = cvar_reg_float("cam_head_damping", 30.0f, 0.0f, 500.0f, CVAR_ARCHIVE, "head camera spring damping (1/s)");
-    c->follow = cvar_reg_float("cam_head_follow", 0.8f, 0.0f, 1.0f, CVAR_ARCHIVE, "0 = camera locked to the ideal eye, 1 = fully follows the animated head");
-    c->follow_lateral = cvar_reg_float("cam_head_follow_lateral", 0.35f, 0.0f, 1.0f, CVAR_ARCHIVE, "extra factor on horizontal head motion (sway is the motion-sickness axis)");
-    c->clamp = cvar_reg_float("cam_head_clamp", 0.07f, 0.0f, 0.5f, CVAR_ARCHIVE, "max camera displacement from the ideal eye (m)");
-    c->bob_scale = cvar_reg_float("cam_bob_scale", 0.0f, 0.0f, 2.0f, CVAR_ARCHIVE, "first-person camera stabilizer / landing dip / bob offset from the head eye (0 = camera exactly on the head)");
-    c->kick_scale = cvar_reg_float("cam_kick_scale", 1.0f, 0.0f, 3.0f, CVAR_ARCHIVE, "visual camera kick on shots (aim recoil is separate)");
-    c->recon_smooth = cvar_reg_float("cam_recon_smooth_time", 0.1f, 0.0f, 1.0f, CVAR_ARCHIVE, "seconds to smooth prediction corrections of the camera");
-    c->third = cvar_reg_bool("cam_third", false, 0, "third-person debug camera (same body / hold point math)");
-    c->debug = cvar_reg_int("cam_debug", 0, 0, 2, 0, "1: draw eye / head / hold point / pivot / sockets / IK targets / collision + stats, 2: also log");
-    c->radius = cvar_reg_float("cam_collision_radius", 0.11f, 0.0f, 0.5f, CVAR_ARCHIVE, "camera keeps this distance from walls (m)");
-    c->death_follow = cvar_reg_float("cam_death_follow", 6.0f, 0.1f, 50.0f, CVAR_ARCHIVE, "death camera follow rate on the ragdoll head");
-    c->death_spectate = cvar_reg_float("cam_death_spectate", 0.0f, 0.0f, 60.0f, CVAR_ARCHIVE, "seconds on the ragdoll head before lifting into a spectator view (0 = stay)");
-    c->weapon_fov = cvar_reg_float("cam_weapon_fov", 0.0f, 0.0f, 120.0f, CVAR_ARCHIVE, "FOV of the arms / held item (0 = same as the camera)");
+    c->stiffness = cvar_reg_float("cam_head_stiffness", 260.0f, 1.0f, 5000.0f, CVAR_LOCKED, "head camera spring stiffness (1/s^2)");
+    c->damping = cvar_reg_float("cam_head_damping", 30.0f, 0.0f, 500.0f, CVAR_LOCKED, "head camera spring damping (1/s)");
+    c->follow = cvar_reg_float("cam_head_follow", 0.8f, 0.0f, 1.0f, CVAR_LOCKED, "0 = camera locked to the ideal eye, 1 = fully follows the animated head");
+    c->follow_lateral = cvar_reg_float("cam_head_follow_lateral", 0.35f, 0.0f, 1.0f, CVAR_LOCKED, "extra factor on horizontal head motion (sway is the motion-sickness axis)");
+    c->clamp = cvar_reg_float("cam_head_clamp", 0.07f, 0.0f, 0.5f, CVAR_LOCKED, "max camera displacement from the ideal eye (m)");
+    c->bob_scale = cvar_reg_float("cam_bob_scale", 0.0f, 0.0f, 2.0f, CVAR_LOCKED, "first-person camera stabilizer / landing dip / bob offset from the head eye (0 = camera exactly on the head)");
+    c->kick_scale = cvar_reg_float("cam_kick_scale", 1.0f, 0.25f, 1.0f, CVAR_ARCHIVE | CVAR_EDITABLE, "visual camera kick on shots (aim recoil is separate)");
+    c->recon_smooth = cvar_reg_float("cam_recon_smooth_time", 0.1f, 0.0f, 1.0f, CVAR_LOCKED, "seconds to smooth prediction corrections of the camera");
+    c->third = cvar_reg_bool("cam_third", false, CVAR_LOCKED, "third-person debug camera (same body / hold point math)");
+    c->debug = cvar_reg_int("cam_debug", 0, 0, 2, CVAR_LOCKED, "1: draw eye / head / hold point / pivot / sockets / IK targets / collision + stats, 2: also log");
+    c->radius = cvar_reg_float("cam_collision_radius", 0.11f, 0.0f, 0.5f, CVAR_LOCKED, "camera keeps this distance from walls (m)");
+    c->death_follow = cvar_reg_float("cam_death_follow", 6.0f, 0.1f, 50.0f, CVAR_LOCKED, "death camera follow rate on the ragdoll head");
+    c->death_spectate = cvar_reg_float("cam_death_spectate", 0.0f, 0.0f, 60.0f, CVAR_LOCKED, "seconds on the ragdoll head before lifting into a spectator view (0 = stay)");
+    c->weapon_fov = cvar_reg_float("cam_weapon_fov", 0.0f, 0.0f, 120.0f, CVAR_LOCKED, "FOV of the arms / held item (0 = same as the camera)");
 }
 
 const CamFpCvars *camera_fp_cvars(void) { return &g_cv; }

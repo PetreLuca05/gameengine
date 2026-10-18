@@ -16,9 +16,9 @@
 
 #define LOD_CHAR_COUNT 4
 
-// Range categories: a distance multiplier each (x the ranges before docs/LOD.md), x the Engine Fidelity
-// tier's multiplier (lod.json "tiers": Modern 1, High 0.85, Medium 0.6, Low 0.4, Off 0.3) x the user's
-// r_lod_bias against the level's default (1 untouched) x the era's multiplier.
+// Range categories: a distance multiplier each (x the ranges before docs/LOD.md) x r_lod_bias (locked 1).
+// The per-level "tiers" and per-era multipliers of lod.json must be 1: the ranges decide what a player
+// can see, so they are the same at every Engine Fidelity level and era (docs/SETTINGS_AUDIT.md).
 typedef enum LodCat {
     LODC_CHARACTER,   // skinned characters (the pixel table already holds the new targets: 1)
     LODC_STATIC,      // classic discrete LOD chains (props, level meshes, tree / bush LODs)

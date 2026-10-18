@@ -70,12 +70,12 @@ typedef struct ChunkGlobals { Cvar *radius, *uploads, *debug, *lod_dist, *grid, 
 static void ensure_globals(void) {
     if (CG) return;
     CG = ARENA_PUSH(&g_engine.perm_arena, ChunkGlobals);
-    CG->radius = cvar_reg_int("world_chunk_radius", 4, 1, 12, CVAR_ARCHIVE, "chunks loaded around each player (radius, in chunks)");
-    CG->uploads = cvar_reg_int("world_chunk_uploads", 3, 1, 32, 0, "chunks finalized (mesh + collision) per frame");
-    CG->debug = cvar_reg_bool("world_debug_chunks", false, 0, "draw chunk bounds and streaming state");
-    CG->lod_dist = cvar_reg_float("world_lod_distance", 70.0f, 10.0f, 1000.0f, CVAR_ARCHIVE, "distance of the first terrain LOD switch (m)");
-    CG->grid = cvar_reg_bool("world_terrain_grid", true, CVAR_ARCHIVE, "draw the unit grid on terrain");
-    CG->foliage = cvar_reg_bool("world_foliage_test", false, 0, "streamed terrain: procedural test foliage per chunk as vgeo placement chunks (set before the map)");
+    CG->radius = cvar_reg_int("world_chunk_radius", 4, 1, 12, CVAR_ARCHIVE | CVAR_LOCKED | CVAR_RULE, "chunks loaded around each player (radius, in chunks)");
+    CG->uploads = cvar_reg_int("world_chunk_uploads", 3, 1, 32, CVAR_TIER, "chunks finalized (mesh + collision) per frame");
+    CG->debug = cvar_reg_bool("world_debug_chunks", false, CVAR_LOCKED, "draw chunk bounds and streaming state");
+    CG->lod_dist = cvar_reg_float("world_lod_distance", 70.0f, 10.0f, 1000.0f, CVAR_ARCHIVE | CVAR_LOCKED | CVAR_RULE, "distance of the first terrain LOD switch (m)");
+    CG->grid = cvar_reg_bool("world_terrain_grid", true, CVAR_LOCKED, "draw the unit grid on terrain");
+    CG->foliage = cvar_reg_bool("world_foliage_test", false, CVAR_LOCKED, "streamed terrain: procedural test foliage per chunk as vgeo placement chunks (set before the map)");
 }
 
 void chunks_register_cvars(void) { ensure_globals(); }

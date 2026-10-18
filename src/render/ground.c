@@ -26,9 +26,9 @@ void vkgr_init(void) {
     }
     const float macro[6] = { 1.0f / 220.0f, 1.0f / 65.0f, 0.12f, 0.08f, 0.1f, 1.0f };
     memcpy(GD.macro, macro, sizeof(macro));
-    GD.r_grass_sss = cvar_reg_int("r_grass_sss", 1, 0, 1, CVAR_ARCHIVE, "ground cover translucency (light through backlit blades)");
-    GD.r_grass_debug = cvar_reg_int("r_grass_debug", 0, 0, 5, 0, "ground cover debug view: 1 root -> tip, 2 matched ground colour, 3 clump / card variation, 4 thickness, 5 macro field");
-    GD.r_ground_macro = cvar_reg_int("r_ground_macro", 1, 0, 1, 0, "shared ground macro variation (grass + terrain hue / saturation / value fields)");
+    GD.r_grass_sss = cvar_reg_int("r_grass_sss", 1, 0, 1, CVAR_TIER, "ground cover translucency (light through backlit blades)");
+    GD.r_grass_debug = cvar_reg_int("r_grass_debug", 0, 0, 5, CVAR_LOCKED, "ground cover debug view: 1 root -> tip, 2 matched ground colour, 3 clump / card variation, 4 thickness, 5 macro field");
+    GD.r_ground_macro = cvar_reg_int("r_ground_macro", 1, 0, 1, CVAR_LOCKED, "shared ground macro variation (grass + terrain hue / saturation / value fields)");
 }
 
 void render_ground_set_cover(int id, const float p[12]) {

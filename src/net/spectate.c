@@ -22,11 +22,11 @@ typedef struct SpecHost {
 static SpecHost S;
 
 void spectate_register(void) {
-    S.allowed = cvar_reg_bool("sv_spec_allowed", true, CVAR_ARCHIVE | CVAR_SERVER, "dead players may spectate living players (docs/SPECTATE.md)");
-    S.fp_enemies = cvar_reg_bool("sv_spec_fp_enemies", true, CVAR_ARCHIVE | CVAR_SERVER, "first-person spectating of players on another team (PvP: 0)");
-    S.respawn_time = cvar_reg_float("sv_respawn_time", PLAYER_RESPAWN_TIME, 0.0f, 600.0f, CVAR_ARCHIVE | CVAR_SERVER, "seconds a dead player waits before respawning");
-    S.respawn_mode = cvar_reg_int("sv_respawn_mode", 0, 0, 1, CVAR_ARCHIVE | CVAR_SERVER, "0 = respawn automatically after sv_respawn_time, 1 = on request (Respawn button) once it has passed");
-    S.join_dead = cvar_reg_bool("sv_join_dead", false, CVAR_ARCHIVE | CVAR_SERVER, "late joiners join dead and start spectating (while anyone is alive)");
+    S.allowed = cvar_reg_bool("sv_spec_allowed", true, CVAR_ARCHIVE | CVAR_SERVER | CVAR_LOCKED | CVAR_RULE, "dead players may spectate living players (docs/SPECTATE.md)");
+    S.fp_enemies = cvar_reg_bool("sv_spec_fp_enemies", true, CVAR_ARCHIVE | CVAR_SERVER | CVAR_LOCKED | CVAR_RULE, "first-person spectating of players on another team (PvP: 0)");
+    S.respawn_time = cvar_reg_float("sv_respawn_time", PLAYER_RESPAWN_TIME, 0.0f, 600.0f, CVAR_ARCHIVE | CVAR_SERVER | CVAR_LOCKED | CVAR_RULE, "seconds a dead player waits before respawning");
+    S.respawn_mode = cvar_reg_int("sv_respawn_mode", 0, 0, 1, CVAR_ARCHIVE | CVAR_SERVER | CVAR_LOCKED | CVAR_RULE, "0 = respawn automatically after sv_respawn_time, 1 = on request (Respawn button) once it has passed");
+    S.join_dead = cvar_reg_bool("sv_join_dead", false, CVAR_ARCHIVE | CVAR_SERVER | CVAR_LOCKED | CVAR_RULE, "late joiners join dead and start spectating (while anyone is alive)");
 }
 
 void spectate_reset(void) {

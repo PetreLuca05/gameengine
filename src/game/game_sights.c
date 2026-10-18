@@ -644,18 +644,18 @@ bool sights_dof_managed(void) { return S.ads_dof && S.ads_dof->i; }
 // ------------------------------------------------------------------ registration
 
 void sights_register(void) {
-    S.look_lag = cvar_reg_float("wpn_look_lag", 0.5f, 0.0f, 2.0f, CVAR_ARCHIVE, "how far the weapon trails mouse turns at the hip (x the hold style's look lag; 0 = locked to the view)");
-    S.relief_scale = cvar_reg_float("ads_eye_relief_scale", 0.5f, 0.2f, 1.5f, CVAR_ARCHIVE, "ADS: sight distance from the eye x this (1 = the stock weld / the scope eye relief)");
-    S.pip_scale = cvar_reg_float("r_scope_pip_scale", 1.0f, 0.2f, 2.0f, CVAR_ARCHIVE, "scope picture-in-picture resolution (fraction of the render height; > 1 supersamples, max 2048 px)");
-    S.brightness = cvar_reg_float("sight_brightness", 1.0f, 0.0f, 4.0f, CVAR_ARCHIVE, "red dot / illuminated reticle brightness");
-    S.ads_debug = cvar_reg_bool("ads_debug", false, 0, "ADS overlay: the sight socket projected against the exact screen centre, world / hands FOV, sight zoom, sensitivity");
-    S.sight_debug = cvar_reg_int("sight_debug", 0, 0, 6, 0, "sight shader views: 1 lens mask, 2 PiP raw, 3 eye box, 4 reticle only, 5 glass only");
-    S.sens_mode = cvar_reg_string("ads_sens_mode", "monitor_distance", CVAR_ARCHIVE, "ADS sensitivity scaling: monitor_distance | fov_ratio | off");
-    S.sens_coef = cvar_reg_float("ads_sens_coef", 1.0f, 0.0f, 3.0f, CVAR_ARCHIVE, "ADS sensitivity coefficient (monitor distance: fraction of the half screen height; fov_ratio: multiplier)");
-    S.ads_dof = cvar_reg_bool("ads_dof", true, CVAR_ARCHIVE, "ADS depth of field once fully aimed: the world stays sharp, the weapon gets a slight blur");
-    S.dof_focus = cvar_reg_float("ads_dof_focus", 80.0f, 5.0f, 1000.0f, CVAR_ARCHIVE, "ADS depth of field: fixed focus distance (m)");
-    S.dof_fstop = cvar_reg_float("ads_dof_fstop", 4.0f, 0.5f, 32.0f, CVAR_ARCHIVE, "ADS depth of field: f-stop");
-    S.iron_blur = cvar_reg_float("ads_dof_near_blur", 1.5f, 0.0f, 16.0f, CVAR_ARCHIVE, "ADS near-field (weapon) blur with iron sights, CoC pixels (optics: their own value)");
+    S.look_lag = cvar_reg_float("wpn_look_lag", 0.5f, 0.0f, 2.0f, CVAR_LOCKED, "how far the weapon trails mouse turns at the hip (x the hold style's look lag; 0 = locked to the view)");
+    S.relief_scale = cvar_reg_float("ads_eye_relief_scale", 0.5f, 0.2f, 1.5f, CVAR_LOCKED, "ADS: sight distance from the eye x this (1 = the stock weld / the scope eye relief)");
+    S.pip_scale = cvar_reg_float("r_scope_pip_scale", 1.0f, 0.2f, 2.0f, CVAR_TIER, "scope picture-in-picture resolution (fraction of the render height; > 1 supersamples, max 2048 px)");
+    S.brightness = cvar_reg_float("sight_brightness", 1.0f, 0.25f, 2.0f, CVAR_ARCHIVE | CVAR_EDITABLE, "red dot / illuminated reticle brightness");
+    S.ads_debug = cvar_reg_bool("ads_debug", false, CVAR_LOCKED, "ADS overlay: the sight socket projected against the exact screen centre, world / hands FOV, sight zoom, sensitivity");
+    S.sight_debug = cvar_reg_int("sight_debug", 0, 0, 6, CVAR_LOCKED, "sight shader views: 1 lens mask, 2 PiP raw, 3 eye box, 4 reticle only, 5 glass only");
+    S.sens_mode = cvar_reg_string("ads_sens_mode", "monitor_distance", CVAR_ARCHIVE | CVAR_EDITABLE, "ADS sensitivity scaling: monitor_distance | fov_ratio | off");
+    S.sens_coef = cvar_reg_float("ads_sens_coef", 1.0f, 0.0f, 3.0f, CVAR_ARCHIVE | CVAR_EDITABLE, "ADS sensitivity coefficient (monitor distance: fraction of the half screen height; fov_ratio: multiplier)");
+    S.ads_dof = cvar_reg_bool("ads_dof", true, CVAR_TIER, "ADS depth of field once fully aimed: the world stays sharp, the weapon gets a slight blur");
+    S.dof_focus = cvar_reg_float("ads_dof_focus", 80.0f, 5.0f, 1000.0f, CVAR_LOCKED, "ADS depth of field: fixed focus distance (m)");
+    S.dof_fstop = cvar_reg_float("ads_dof_fstop", 4.0f, 0.5f, 32.0f, CVAR_LOCKED, "ADS depth of field: f-stop");
+    S.iron_blur = cvar_reg_float("ads_dof_near_blur", 1.5f, 0.0f, 16.0f, CVAR_LOCKED, "ADS near-field (weapon) blur with iron sights, CoC pixels (optics: their own value)");
     cmd_register("sight_test", cmd_sight_test, "sight_test align [weapon|all] [quit] | sweep | fov | parallax | aspect | net | dump: attachment / sight tests");
     cmd_register("sight_test_report", cmd_sight_test_report, "end sight_test fov and print the result");
     cmd_register("fov_report", cmd_fov_report, "fov_report: cl_fov / sv_fov / base / current world and hands FOV (tests)");

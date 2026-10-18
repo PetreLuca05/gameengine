@@ -150,18 +150,18 @@ static void cmd_pos(int argc, const char **argv) {
 }
 
 void crosshair_init(void) {
-    CH.style = cvar_reg_int("crosshair_style", 0, 0, 3, CVAR_ARCHIVE, "0 cross, 1 cross + dot, 2 dot, 3 circle");
-    CH.length = cvar_reg_float("crosshair_length", 8, 1, 40, CVAR_ARCHIVE, "crosshair line length (px at 1080p)");
-    CH.thickness = cvar_reg_float("crosshair_thickness", 2, 1, 8, CVAR_ARCHIVE, "crosshair line thickness (px at 1080p)");
-    CH.gap = cvar_reg_float("crosshair_gap", 0, 0, 30, CVAR_ARCHIVE, "extra gap added to the spread gap (px at 1080p)");
-    CH.opacity = cvar_reg_float("crosshair_opacity", 0.9f, 0.1f, 1, CVAR_ARCHIVE, "crosshair opacity");
-    CH.color = cvar_reg_int("crosshair_color", 0, 0, MAX_COLORS - 1, CVAR_ARCHIVE, "crosshair color preset (assets/ui/crosshair.json)");
-    CH.outline = cvar_reg_bool("crosshair_outline", true, CVAR_ARCHIVE, "dark outline around the crosshair");
-    CH.follow_kick = cvar_reg_bool("crosshair_follow_kick", false, CVAR_ARCHIVE, "pin the crosshair to the screen center (follows the camera kick) instead of the true aim point");
-    CH.hitmarker = cvar_reg_bool("crosshair_hitmarker", true, CVAR_ARCHIVE, "show hit markers");
-    CH.target_color = cvar_reg_bool("crosshair_target_color", true, CVAR_ARCHIVE, "tint the crosshair over enemies / friendlies");
-    CH.obstruct = cvar_reg_bool("crosshair_obstruct", true, CVAR_ARCHIVE, "move the crosshair to where the bullet will land when something is between the muzzle and the aim point (docs/AIM.md)");
-    CH.obstruct_lerp = cvar_reg_float("crosshair_obstruct_lerp", 0.1f, 0.0f, 1.0f, CVAR_ARCHIVE, "time constant (s) of the crosshair's move to and from an obstruction");
+    CH.style = cvar_reg_int("crosshair_style", 0, 0, 3, CVAR_ARCHIVE | CVAR_EDITABLE, "0 cross, 1 cross + dot, 2 dot, 3 circle");
+    CH.length = cvar_reg_float("crosshair_length", 8, 1, 40, CVAR_ARCHIVE | CVAR_EDITABLE, "crosshair line length (px at 1080p)");
+    CH.thickness = cvar_reg_float("crosshair_thickness", 2, 1, 8, CVAR_ARCHIVE | CVAR_EDITABLE, "crosshair line thickness (px at 1080p)");
+    CH.gap = cvar_reg_float("crosshair_gap", 0, 0, 30, CVAR_ARCHIVE | CVAR_EDITABLE, "extra gap added to the spread gap (px at 1080p)");
+    CH.opacity = cvar_reg_float("crosshair_opacity", 0.9f, 0.1f, 1, CVAR_ARCHIVE | CVAR_EDITABLE, "crosshair opacity");
+    CH.color = cvar_reg_int("crosshair_color", 0, 0, MAX_COLORS - 1, CVAR_ARCHIVE | CVAR_EDITABLE, "crosshair color preset (assets/ui/crosshair.json)");
+    CH.outline = cvar_reg_bool("crosshair_outline", true, CVAR_ARCHIVE | CVAR_EDITABLE, "dark outline around the crosshair");
+    CH.follow_kick = cvar_reg_bool("crosshair_follow_kick", false, CVAR_LOCKED, "pin the crosshair to the screen center (follows the camera kick) instead of the true aim point");
+    CH.hitmarker = cvar_reg_bool("crosshair_hitmarker", true, CVAR_ARCHIVE | CVAR_EDITABLE, "show hit markers");
+    CH.target_color = cvar_reg_bool("crosshair_target_color", true, CVAR_ARCHIVE | CVAR_EDITABLE, "tint the crosshair over enemies / friendlies");
+    CH.obstruct = cvar_reg_bool("crosshair_obstruct", true, CVAR_LOCKED, "move the crosshair to where the bullet will land when something is between the muzzle and the aim point (docs/AIM.md)");
+    CH.obstruct_lerp = cvar_reg_float("crosshair_obstruct_lerp", 0.1f, 0.0f, 1.0f, CVAR_LOCKED, "time constant (s) of the crosshair's move to and from an obstruction");
     cmd_register("crosshair_reload", cmd_reload, "re-read assets/ui/crosshair.json");
     cmd_register("crosshair_pos", cmd_pos, "crosshair_pos: where the crosshair was drawn last frame (UI px) and its obstruction state (tests)");
     crosshair_reload();

@@ -60,28 +60,28 @@
   },
   "tiers": {
     "off": {
-      "full_m": 15,
-      "end_m": 30,
-      "shadow_m": 0,
-      "density": 0.4
+      "full_m": 60,
+      "end_m": 95,
+      "shadow_m": 20,
+      "density": 1.0
     },
     "low": {
-      "full_m": 25,
-      "end_m": 45,
-      "shadow_m": 0,
-      "density": 0.55
+      "full_m": 60,
+      "end_m": 95,
+      "shadow_m": 20,
+      "density": 1.0
     },
     "medium": {
-      "full_m": 40,
-      "end_m": 70,
-      "shadow_m": 12,
-      "density": 0.75
+      "full_m": 60,
+      "end_m": 95,
+      "shadow_m": 20,
+      "density": 1.0
     },
     "high": {
-      "full_m": 55,
-      "end_m": 85,
+      "full_m": 60,
+      "end_m": 95,
       "shadow_m": 20,
-      "density": 0.9
+      "density": 1.0
     },
     "modern": {
       "full_m": 60,

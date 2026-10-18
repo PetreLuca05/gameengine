@@ -62,6 +62,7 @@ void lobby_settings_default(LobbySettings *s) {
     s->season = 1;            // summer
     s->dynamic_weather = true;
     s->late_join = true;
+    s->foliage_pct = 100;
 }
 
 void lobby_init(Lobby *L) {
@@ -511,6 +512,7 @@ void lobby_write_settings(Writer *w, const LobbySettings *s) {
     w_u8(w, s->season);
     w_str(w, s->weather);
     w_u8(w, (u8)((s->pvp ? 1 : 0) | (s->late_join ? 2 : 0) | (s->dynamic_weather ? 4 : 0)));
+    w_u8(w, s->foliage_pct);
 }
 
 void lobby_read_settings(Reader *r, LobbySettings *s) {
@@ -526,6 +528,8 @@ void lobby_read_settings(Reader *r, LobbySettings *s) {
     s->pvp = (f & 1) != 0;
     s->late_join = (f & 2) != 0;
     s->dynamic_weather = (f & 4) != 0;
+    u8 fol = r_u8(r);   // (one read: DG_CLAMP evaluates its argument more than once)
+    s->foliage_pct = (u8)DG_CLAMP(fol, LOBBY_FOLIAGE_MIN, 100);
 }
 
 void lobby_write_snapshot(Writer *w, const Lobby *L, u8 to_id) {

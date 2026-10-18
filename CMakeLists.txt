@@ -19,6 +19,9 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO ${CMAKE_BINARY_DIR}/bin)
 
 set(STEAM_SDK_DIR "$ENV{STEAM_SDK_DIR}" CACHE PATH "Path to the Steamworks SDK 'sdk' folder (optional)")
 option(DG_ENABLE_STEAM "Build the Steam transport (requires STEAM_SDK_DIR)" ON)
+# Settings locks (docs/SETTINGS_AUDIT.md): OFF for the shipped build, where TIER / LOCKED cvars reject
+# player writes. Dev builds (ON) keep every cvar writable; --release-locks turns the locks on at run time.
+option(DG_DEV_BUILD "Dev build: settings locks off unless --release-locks" ON)
 
 include(FetchContent)
 set(FETCHCONTENT_QUIET ON)
@@ -216,6 +219,7 @@ target_compile_definitions(deadground PRIVATE
   DG_SHADER_COMPILER="${DG_SHADER_COMPILER}"
   DG_SHADER_COMPILER_KIND="${DG_SHADER_COMPILER_KIND}"
   DG_VERSION="${PROJECT_VERSION}"
+  DG_DEV_BUILD=$<BOOL:${DG_DEV_BUILD}>
   # Looks (docs/LOOKS.md): the live tuning tools (look_tune / look_dump) exist in dev builds only.
   $<$<NOT:$<CONFIG:Release>>:DG_LOOK_TUNE=1>)
 if(DG_HAVE_STEAM)
@@ -625,6 +629,7 @@ add_test(NAME revive COMMAND test_revive WORKING_DIRECTORY $<TARGET_FILE_DIR:dea
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if(Python3_Interpreter_FOUND)
   add_test(NAME lint_commands COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/tests/lint_commands.py)
+  add_test(NAME lint_settings COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/tests/lint_settings.py)
   add_test(NAME aim_sockets COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/tests/aim_sockets.py)
   add_test(NAME lint_looks COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/tests/lint_looks.py)
   # Ground textures (docs/GROUND_REFERENCE.md): the recipes validate, the generated / placeholder sets
@@ -659,6 +664,16 @@ if(MSVC)
   target_compile_options(test_fidelity PRIVATE /W3 /wd4100 /wd4201 /utf-8)
 endif()
 add_test(NAME fidelity COMMAND test_fidelity WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+
+# Settings audit (docs/SETTINGS_AUDIT.md): release locks, config.cfg filtering, the consistency set and
+# its join hash, the same locked values at every Engine Fidelity level, the audited settings places.
+add_executable(test_settings tests/test_settings.c src/core/cvar.c src/core/consistency.c src/render/fidelity/fidelity.c)
+set_target_properties(test_settings PROPERTIES C_STANDARD 11)
+target_link_libraries(test_settings PRIVATE dg_animcore)
+if(MSVC)
+  target_compile_options(test_settings PRIVATE /W3 /wd4100 /wd4201 /utf-8)
+endif()
+add_test(NAME settings COMMAND test_settings WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
 
 # LOD ranges and cross-fades (docs/LOD.md): lod.json x tier, character px -> LOD, fades in a slow dolly,
 # camera reversal, complementary masks, streaming holds, terrain geomorph without cracks / pops.

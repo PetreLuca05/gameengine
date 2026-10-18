@@ -114,9 +114,9 @@ static void cmd_pair(int argc, const char **argv) {
 }
 
 void terrain_game_register(void) {
-    TG.debug = cvar_reg_int("r_terrain_debug", 0, 0, 11, 0,
+    TG.debug = cvar_reg_int("r_terrain_debug", 0, 0, 11, CVAR_LOCKED,
                             "terrain debug view: 1 weights, 2 bombing cells, 3 macro field, 4 curvature, 5 moisture, 6 variants, 7 transition band, 8 tiling frequency, 9 scatter, 10 grass term, 11 border distance");
-    TG.watch = cvar_reg_int("r_terrain_watch", 1, 0, 1, 0, "reload assets/terrain JSON when it changes (checked once a second)");
+    TG.watch = cvar_reg_int("r_terrain_watch", 1, 0, 1, CVAR_LOCKED, "reload assets/terrain JSON when it changes (checked once a second)");
     cmd_register("terrain_reload", cmd_reload, "reload assets/terrain (terrain.json, layers, transitions; textures only when their list changed)");
     cmd_register("terrain_status", cmd_status, "terrain shading: level, slots, textures, pairs");
     cmd_register("terrain_paint", cmd_paint, "terrain_paint <tint_r|tint_g|tint_b|tint|variant|wear|moisture> <value> [radius] [strength]: paint brush at the camera");

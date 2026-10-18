@@ -86,14 +86,14 @@ void vkg_samplers_changed(void) { vkc_samplers_changed(); }
 // ------------------------------------------------------------------ lifetime
 
 void vkg_init(void) {
-    G.shadow_error_px = cvar_reg_float("r_vgeo_shadow_error_px", 2.0f, 0.25f, 32.0f, CVAR_ARCHIVE,
+    G.shadow_error_px = cvar_reg_float("r_vgeo_shadow_error_px", 2.0f, 0.25f, 32.0f, CVAR_TIER,
                                        "classic renderer: projected LOD error of the sun shadow cascades (pixels)");
-    G.shadows = cvar_reg_bool("r_vgeo_shadows", true, CVAR_ARCHIVE, "classic renderer: draw the scene content (level meshes, foliage) into the sun / light shadows");
-    G.impostor_px = cvar_reg_float("r_vgeo_impostor_px", 16.0f, 0.0f, 256.0f, CVAR_ARCHIVE,
+    G.shadows = cvar_reg_bool("r_vgeo_shadows", true, CVAR_TIER, "classic renderer: draw the scene content (level meshes, foliage) into the sun / light shadows");
+    G.impostor_px = cvar_reg_float("r_vgeo_impostor_px", 16.0f, 0.0f, 256.0f, CVAR_LOCKED,
                                    "small cover (grass tufts, bushes) with an impostor atlas draws it below this projected size (pixels across, 0 = never)");
-    G.foliage_wind = cvar_reg_int("r_foliage_wind", 3, 0, 3, CVAR_ARCHIVE,
+    G.foliage_wind = cvar_reg_int("r_foliage_wind", 3, 0, 3, CVAR_TIER,
                                   "foliage wind animation (docs/FOLIAGE_WIND.md): 0 none, 1 main bending, 2 + branch bending, 3 + leaf flutter and bent normals");
-    G.foliage_wind_solo = cvar_reg_int("r_foliage_wind_solo", 0, 0, 3, 0, "foliage wind debug: 0 every layer (r_foliage_wind), 1 main bending only, 2 detail only, 3 flutter only");
+    G.foliage_wind_solo = cvar_reg_int("r_foliage_wind_solo", 0, 0, 3, CVAR_LOCKED, "foliage wind debug: 0 every layer (r_foliage_wind), 1 main bending only, 2 detail only, 3 flutter only");
     cmd_register("foliage_push_test", cmd_foliage_push_test, "foliage_push_test [seconds=10]: a ring of displacement-buffer pushes circling the camera");
     cmd_register("foliage_stats", cmd_foliage_stats, "foliage: placement chunks, region allocator audit");
     cmd_register("foliage_query", cmd_foliage_query, "foliage_query [radius=2]: placement instances around the camera (foliage_query API)");
@@ -315,20 +315,22 @@ void render_vgeo_set_level(const RenderVgeoPlacement *p, int count) {
 
 // ------------------------------------------------------------------ era presets
 
-// r_era: every value is a plain cvar the preset sets; any other combination reads back as Custom (4).
-// The era's discrete LOD errors, shadow LOD error and foliage density (the 2010 era also drops the
-// finest LOD: vk_classic.c era2010).
-typedef struct EraDef { float shadow_px, lod_px, foliage; } EraDef;
+// r_era: the shadow-view geometry error per era; any other combination reads back as Custom (4)
+// (the era owning the current value wins a tie: 2015 shares modern's). r_era is locked (modern)
+// outside dev builds; the era's old foliage density and LOD columns are gone: one locked value for
+// every era and level (assets/render/consistency.json, docs/SETTINGS_AUDIT.md). What else an era
+// changes is its capability matrix (assets/render/fidelity/eras.json) and, for 2010, the dropped
+// finest LOD (vk_classic.c era2010).
+typedef struct EraDef { float shadow_px; } EraDef;
 static const EraDef k_eras[4] = {
-    { 2.0f, 2.0f, 1.0f },    // modern: LODs at 2 px
-    { 4.0f, 3.0f, 0.7f },    // 2020: LODs at 3 px
-    { 2.0f, 4.0f, 0.4f },    // 2015: 4 discrete LODs, CPU LOD by screen size
-    { 2.0f, 12.0f, 0.2f },   // 2010: 3 LODs, more aggressive distances
+    { 2.0f },   // modern
+    { 4.0f },   // 2020: coarser shadow geometry
+    { 2.0f },   // 2015: 4 discrete LODs
+    { 3.0f },   // 2010: 3 LODs
 };
 
-// Compared after the Engine Fidelity bounds (docs/ENGINE_FIDELITY.md): Low scales the era's error
-// thresholds, caps its foliage; the era still reads back as itself. So does a lower level's own value
-// of the era (Settings > Graphics > Normal: the Foliage / View distance qualities, fid_group_apply).
+// Compared after the Engine Fidelity bounds (docs/ENGINE_FIDELITY.md): a lower level's own value of
+// the era still reads back as the era.
 static bool era_eq(int f, float v, float era_v) {
     if (fabsf(v - fid_clamp_current(f, era_v)) < 1e-4f) return true;
     for (int l = 0; l < fid_level(); l++) {
@@ -339,11 +341,12 @@ static bool era_eq(int f, float v, float era_v) {
 }
 
 static int era_detect(void) {
+    // The current era first: 2015 and modern share their value.
+    int cur = G.era ? G.era->i : -1;
+    if (cur >= 0 && cur <= 3 && era_eq(FF_VGEO_SHADOW_ERROR_PX, G.shadow_error_px->f, k_eras[cur].shadow_px)) return cur;
     for (int e = 0; e < 4; e++) {
         const EraDef *d = &k_eras[e];
-        if (era_eq(FF_VGEO_SHADOW_ERROR_PX, G.shadow_error_px->f, d->shadow_px) && era_eq(FF_VGEO_LOD_PX, G.lod_px->f, d->lod_px) &&
-            era_eq(FF_FOLIAGE_DENSITY, G.foliage_density->f, d->foliage))
-            return e;
+        if (era_eq(FF_VGEO_SHADOW_ERROR_PX, G.shadow_error_px->f, d->shadow_px)) return e;
     }
     return 4;
 }
@@ -351,9 +354,9 @@ static int era_detect(void) {
 static void era_apply(int e) {
     const EraDef *d = &k_eras[DG_CLAMP(e, 0, 3)];
     G.applying_era = true;
+    CvarSource src = cvar_source_push(CVAR_SRC_FIDELITY);   // tier cvars
     cvar_set_float(G.shadow_error_px, d->shadow_px);
-    cvar_set_float(G.lod_px, d->lod_px);
-    cvar_set_float(G.foliage_density, d->foliage);
+    cvar_source_pop(src);
     G.applying_era = false;
 }
 
@@ -369,25 +372,24 @@ static void on_era_value(Cvar *c) {
     int e = era_detect();
     if (G.era->i != e) {
         G.applying_era = true;
+        CvarSource src = cvar_source_push(CVAR_SRC_HOST);   // r_era is locked: the read-back is the game's
         cvar_set_int(G.era, e);
+        cvar_source_pop(src);
         G.applying_era = false;
     }
 }
 
 static void vkg_register_era(void) {
-    G.lod_px = cvar_reg_float("r_vgeo_lod_px", 2.0f, 0.25f, 64.0f, CVAR_ARCHIVE, "classic renderer: projected error of the discrete LOD pick (pixels)");
-    G.foliage_density = cvar_reg_float("r_foliage_density", 1.0f, 0.0f, 1.0f, CVAR_ARCHIVE, "foliage instance density");
-    GR.r_grass_tex = cvar_reg_int("r_grass_tex", 0, 0, 1, CVAR_ARCHIVE, "grass atlases at full size (1: 2048 px, about 4x the memory; 0: half, at the next map load)");
-    G.era = cvar_reg_int("r_era", 0, 0, 4, CVAR_ARCHIVE, "geometry era preset: 0 modern (LODs 2 px), 1 2020 (3 px), 2 2015 (4 px, 4 discrete LODs), 3 2010 (3 LODs), 4 custom");
+    G.lod_px = cvar_reg_float("r_vgeo_lod_px", 2.0f, 0.25f, 64.0f, CVAR_LOCKED, "classic renderer: projected error of the discrete LOD pick (pixels)");
+    G.foliage_density = cvar_reg_float("r_foliage_density", 1.0f, 0.0f, 1.0f, CVAR_ARCHIVE | CVAR_LOCKED | CVAR_RULE, "foliage instance density");
+    GR.r_grass_tex = cvar_reg_int("r_grass_tex", 0, 0, 1, CVAR_TIER, "grass atlases at full size (1: 2048 px, about 4x the memory; 0: half, at the next map load)");
+    G.era = cvar_reg_int("r_era", 0, 0, 4, CVAR_LOCKED, "geometry era preset: 0 modern, 1 2020 (coarser shadow geometry), 2 2015 (4 discrete LODs), 3 2010 (3 LODs), 4 custom");
     G.era->on_change = on_era;
     // Era-owned Engine Fidelity features take their defaults from this table.
     for (int e = 0; e < 4; e++) {
         fid_set_era_value(e, FF_VGEO_SHADOW_ERROR_PX, k_eras[e].shadow_px);
-        fid_set_era_value(e, FF_VGEO_LOD_PX, k_eras[e].lod_px);
-        fid_set_era_value(e, FF_FOLIAGE_DENSITY, k_eras[e].foliage);
     }
-    Cvar *dep[3] = { G.shadow_error_px, G.lod_px, G.foliage_density };
-    for (int i = 0; i < 3; i++) dep[i]->on_change = on_era_value;
+    G.shadow_error_px->on_change = on_era_value;
     on_era_value(NULL);
 }
 

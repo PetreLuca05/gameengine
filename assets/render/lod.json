@@ -1,5 +1,5 @@
 {
-    "_comment": "LOD ranges and cross-fades (docs/LOD.md, src/render/lod_fade.c). Applies to the classic renderer and the systems it shares (characters, terrain, VFX spawn LOD); r_lod_legacy 1 keeps the ranges from before. Every range = the value below x the Engine Fidelity tier (tiers) x the user's r_lod_bias against the level default x the era's multiplier. Reload: r_lod_reload.",
+    "_comment": "LOD ranges and cross-fades (docs/LOD.md, src/render/lod_fade.c). Applies to the classic renderer and the systems it shares (characters, terrain, VFX spawn LOD); r_lod_legacy 1 keeps the ranges from before. Every range = the value below x r_lod_bias (locked 1); the same at every Engine Fidelity level and era (docs/SETTINGS_AUDIT.md). Reload: r_lod_reload.",
 
     "fade": {
         "_comment": "time: s, time-based cross-fades (characters, their shadows; r_lod_fade_time). band: octaves of projected size over which stateless instances cross-fade (classic LOD chains; r_lod_fade_band).",
@@ -19,20 +19,20 @@
     },
 
     "tiers": {
-        "_comment": "per Engine Fidelity level (r_fidelity): the Modern targets x this. Adjusted per tier when a tier exceeds its budget (docs/LOD.md).",
-        "off": 0.3,
-        "low": 0.4,
-        "medium": 0.6,
-        "high": 0.85,
+        "_comment": "per Engine Fidelity level: must be 1 (docs/SETTINGS_AUDIT.md: the ranges decide what a player can see, so every level has the same; a level over budget renders cheaper, not shorter).",
+        "off": 1.0,
+        "low": 1.0,
+        "medium": 1.0,
+        "high": 1.0,
         "modern": 1.0
     },
 
     "eras": {
-        "_comment": "per-era multipliers on top of the tier (the 2015 / 2010 presets keep their own pixel errors and densities, docs/CLASSIC_RENDERER.md); 'all' or per category.",
+        "_comment": "per-era multipliers: must be 1, like the tiers (docs/SETTINGS_AUDIT.md).",
         "modern": { "all": 1.0 },
         "2020": { "all": 1.0 },
-        "2015": { "all": 0.85 },
-        "2010": { "all": 0.7 }
+        "2015": { "all": 1.0 },
+        "2010": { "all": 1.0 }
     },
 
     "characters": {

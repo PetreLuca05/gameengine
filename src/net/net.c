@@ -14,6 +14,7 @@
 #include "gameplay/zombies/horde.h"
 #include "core/engine.h"
 #include "core/cvar.h"
+#include "core/consistency.h"
 #include "core/log.h"
 #include "core/platform.h"
 #include "game/game.h"
@@ -97,7 +98,7 @@ static u32 server_cvar_revision(void) {
     u32 sum = 0;
     for (int i = 0; i < cvar_count(); i++) {
         Cvar *c = cvar_at(i);
-        if (c->flags & CVAR_SERVER) sum += c->modified + (u32)i;
+        if (c->flags & (CVAR_SERVER | CVAR_RULE)) sum += c->modified + (u32)i;
     }
     return sum;
 }
@@ -139,7 +140,7 @@ static void send_cvars(RemoteClient *c) {
     u16 n = 0;
     for (int i = 0; i < cvar_count(); i++) {
         Cvar *cv = cvar_at(i);
-        if (!(cv->flags & CVAR_SERVER)) continue;
+        if (!(cv->flags & (CVAR_SERVER | CVAR_RULE))) continue;   // gameplay rules + the server rules of the consistency set
         w_str(&w, cv->name);
         w_str(&w, cv->str);
         n++;
@@ -193,6 +194,20 @@ static void host_handle_hello(PeerId peer, Reader *r) {
                                     asset_category_name(k), mine->hash[k], k < cats ? theirs.hash[k] : 0);
         }
         if (len > 0) {
+            log_warn("net: rejecting '%s': %s", name, reason);
+            Writer w = writer_make(N->buf, NET_BUF);
+            w_u8(&w, MSG_REJECT);
+            w_str(&w, reason);
+            send_msg(peer, CH_RELIABLE, &w);
+            N->t->disconnect(N->t, peer);
+            return;
+        }
+    }
+    // Consistency set (docs/SETTINGS_AUDIT.md): the values that decide what a player can see must be
+    // the host's, or the client could see more than everyone else.
+    {
+        char reason[160];
+        if (!consistency_join_ok(r_u32(r), reason, sizeof(reason))) {
             log_warn("net: rejecting '%s': %s", name, reason);
             Writer w = writer_make(N->buf, NET_BUF);
             w_u8(&w, MSG_REJECT);
@@ -476,6 +491,7 @@ static void client_send_hello(void) {
     w_str(&w, lobby_local_name());
     w_u8(&w, AC_CATEGORY_COUNT);
     for (int k = 0; k < AC_CATEGORY_COUNT; k++) w_u32(&w, g_engine.anim ? g_engine.anim->manifest.hash[k] : 0);
+    w_u32(&w, consistency_hash());   // the shared values (assets/render/consistency.json)
     lobby_write_hello_ext(&w);
     send_msg(N->server_peer, CH_RELIABLE, &w);
 }
@@ -639,11 +655,13 @@ static void client_handle(const NetEvent *e) {
             r_str(&r, name, sizeof(name));
             r_str(&r, value, sizeof(value));
             Cvar *cv = cvar_find(name);
-            if (cv && (cv->flags & CVAR_SERVER)) {
-                // Host-owned value: bypass local cheat protection.
+            if (cv && (cv->flags & (CVAR_SERVER | CVAR_RULE))) {
+                // Host-owned value: bypass local cheat protection and the settings locks.
                 u32 flags = cv->flags;
                 cv->flags &= ~(u32)CVAR_CHEAT;
+                CvarSource src = cvar_source_push(CVAR_SRC_HOST);
                 cvar_set_cv(cv, value);
+                cvar_source_pop(src);
                 cv->flags = flags;
             }
         }
@@ -1038,15 +1056,20 @@ static void cmd_snapstats(int argc, const char **argv) {
     repl_debug_dump();
 }
 
+// CVAR_LOCKED | CVAR_RULE cvars (docs/SETTINGS_AUDIT.md): the host's server rules. A client takes them
+// from the host (MSG_CVARS) and may not set them itself.
+static bool can_set_rules(void) { return !N || N->role != NET_CLIENT; }
+
 bool net_init(void) {
     N = (NetSystem *)calloc(1, sizeof(NetSystem));
+    cvar_set_rule_gate(can_set_rules);
     if (enet_initialize() != 0) { log_error("net: enet_initialize failed"); return false; }
-    N->port = cvar_reg_int("net_port", DG_DEFAULT_PORT, 1, 65535, CVAR_ARCHIVE, "UDP port for LAN hosting");
-    N->snaprate = cvar_reg_int("sv_snaprate", 30, 5, 60, CVAR_ARCHIVE, "snapshots per second sent to clients");
-    N->cl_interp = cvar_reg_float("cl_interp", 100.0f, 0.0f, 500.0f, CVAR_ARCHIVE, "remote entity interpolation delay (ms)");
-    N->maxplayers = cvar_reg_int("sv_maxplayers", 4, 1, MAX_PLAYERS, CVAR_ARCHIVE, "maximum players when hosting");
-    N->showstats = cvar_reg_bool("net_showstats", false, CVAR_ARCHIVE, "show network statistics overlay");
-    N->relevance = cvar_reg_float("sv_relevance", 120.0f, 10.0f, 2000.0f, CVAR_ARCHIVE, "entity relevance distance (m)");
+    N->port = cvar_reg_int("net_port", DG_DEFAULT_PORT, 1, 65535, CVAR_ARCHIVE | CVAR_EDITABLE, "UDP port for LAN hosting");
+    N->snaprate = cvar_reg_int("sv_snaprate", 30, 5, 60, CVAR_ARCHIVE | CVAR_LOCKED | CVAR_RULE, "snapshots per second sent to clients");
+    N->cl_interp = cvar_reg_float("cl_interp", 100.0f, 0.0f, 500.0f, CVAR_LOCKED, "remote entity interpolation delay (ms)");
+    N->maxplayers = cvar_reg_int("sv_maxplayers", 4, 1, MAX_PLAYERS, CVAR_ARCHIVE | CVAR_LOCKED | CVAR_RULE, "maximum players when hosting");
+    N->showstats = cvar_reg_bool("net_showstats", false, CVAR_ARCHIVE | CVAR_EDITABLE, "show network statistics overlay");
+    N->relevance = cvar_reg_float("sv_relevance", 120.0f, 10.0f, 2000.0f, CVAR_ARCHIVE | CVAR_LOCKED | CVAR_RULE, "entity relevance distance (m)");
     N->interp = (InterpBuffer *)calloc(MAX_ENTITIES, sizeof(InterpBuffer));
     spectate_register();
     spectate_reset();

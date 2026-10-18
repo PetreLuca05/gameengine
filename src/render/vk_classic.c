@@ -136,6 +136,7 @@ static struct {
     Cvar *impostor_px;
     bool lod_new;                   // this frame's main view / cascades use docs/LOD.md
     u32 lod_n[5], lod_fading;       // main view parts per LOD 0..3 / impostor, parts in a fade (render_classic_lod_counts)
+    bool counted;                   // lod_n holds a culled main view (render_vgeo_counts)
     float eff_lod_px, eff_shadow_px, eff_imp_px, eff_small_px;   // this frame's effective thresholds (classic_stats)
 } C;
 
@@ -250,7 +251,7 @@ static VkDescriptorSet cl_alloc_set(VkImageView v0, VkImageLayout l0, VkImageVie
 }
 
 void vkc_init(void) {
-    C.impostor_px = cvar_reg_float("r_classic_impostor_px", 64.0f, 0.0f, 1024.0f, CVAR_ARCHIVE,
+    C.impostor_px = cvar_reg_float("r_classic_impostor_px", 64.0f, 0.0f, 1024.0f, CVAR_LOCKED,
                                    "classic renderer: trees with an impostor atlas draw it below this projected size (pixels across, 0 = never)");
     VkDescriptorSetLayoutBinding b[2];
     memset(b, 0, sizeof(b));
@@ -903,6 +904,7 @@ static void build_lods(const ClView *v) {
 static void count_view(const ClView *v) {
     memset(C.lod_n, 0, sizeof(C.lod_n));
     C.lod_fading = 0;
+    C.counted = true;
     for (u32 b = 0; b < v->batch_count; b++) {
         u32 lod = v->batches[b].key & 7u;
         C.lod_n[lod == CL_IMPOSTOR ? 4 : DG_MIN(lod, 3u)] += v->batches[b].count;
@@ -913,6 +915,16 @@ static void count_view(const ClView *v) {
 void render_classic_lod_counts(u32 n[5], u32 *fading) {
     memcpy(n, C.lod_n, sizeof(C.lod_n));
     *fading = C.lod_fading;
+}
+
+// visibility_probe (docs/SETTINGS_AUDIT.md): the last main view's parts (every LOD and impostor),
+// the ones in a fade, the impostors.
+bool render_vgeo_counts(u32 *visible, u32 *faded, u32 *impostors) {
+    if (!C.counted) return false;
+    *visible = C.lod_n[0] + C.lod_n[1] + C.lod_n[2] + C.lod_n[3] + C.lod_n[4];
+    *faded = C.lod_fading;
+    *impostors = C.lod_n[4];
+    return true;
 }
 
 // A threshold with the Engine Fidelity level's own scaling taken out (docs/LOD.md: the tier comes from
@@ -956,7 +968,7 @@ void vkc_frame(const VgScene *s, const VgDisplace *disp, float density, float lo
     memset(&v, 0, sizeof(v));
     planes_of(R->view_proj_nj, v.planes);
     v.eye = v.lod_eye = R->cam.pos;
-    v.px_scale = (float)R->hdr.h / (2.0f * tanf(R->cam.fov_deg * DG_DEG2RAD * 0.5f));
+    v.px_scale = RENDER_LOD_REF_H / (2.0f * tanf(R->cam.fov_deg * DG_DEG2RAD * 0.5f));   // resolution independent (V14)
     v.lod_px = lod_px;
     v.impostor_px = C.impostor_px->f;
     v.small_impostor_px = small_impostor_px;
@@ -966,14 +978,14 @@ void vkc_frame(const VgScene *s, const VgDisplace *disp, float density, float lo
     v.legacy = !C.lod_new;
     float shadow_px = shadow_lod_px;
     if (C.lod_new) {
-        // docs/LOD.md: lod.json x tier x era; the fidelity level's own scaling of the shared thresholds
-        // is replaced by the tier (without_level_scale), the user's deviation from it is kept
+        // docs/LOD.md: lod.json ranges (the same at every level); the shadow-view geometry error is
+        // still a fidelity tier: its level scaling is taken out (without_level_scale)
         const LodTable *lt = lod_table();
         float band_k = lt->band > 0 ? lod_band() / lt->band : 1.0f;
         float s_st = lod_scale(LODC_STATIC), s_im = lod_scale(LODC_IMPOSTOR), s_fo = lod_scale(LODC_FOLIAGE), s_sh = lod_scale(LODC_SHADOW);
-        v.lod_px = without_level_scale(FF_VGEO_LOD_PX, lod_px) / s_st;
+        v.lod_px = lod_px / s_st;   // locked (docs/SETTINGS_AUDIT.md): no level scale to take out
         v.impostor_px = C.impostor_px->f / s_im;
-        v.small_impostor_px = without_level_scale(FF_IMPOSTOR_PX, small_impostor_px) / s_im;
+        v.small_impostor_px = small_impostor_px / s_im;
         shadow_px = without_level_scale(FF_VGEO_SHADOW_ERROR_PX, shadow_lod_px) / s_sh;
         v.band = lod_band();
         v.imp_band = lt->imp_band * band_k;
