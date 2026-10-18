@@ -728,7 +728,14 @@ static void fire(World *w, int slot, PlayerSim *sim, const WeaponDef *d, const U
     aq.kick_pitch = kick.y;
     weapon_aim_solve(w, slot, &aq, as);
     vec3 muzzle = as->muzzle, origin = as->origin, dir = as->dir;
-    if (w->authority) aim_host_check(w, slot, cmd, as, local_view);
+    if (w->authority) {
+        aim_host_check(w, slot, cmd, as, local_view);
+        // aim_debug 2: a remote shooter's shot as the host fires it (tools/tests/bal_net_compare.py
+        // matches it with the shooter's own "aim: shot" line: the same origin and barrel direction).
+        if (!local_view && WC.aim_debug && WC.aim_debug->i >= 2)
+            log_info("aim: host p%d shot class %s origin %.4f %.4f %.4f dir %.5f %.5f %.5f barrel err %.3f deg%s", slot, aim_class_name(as->cls), as->origin.x,
+                     as->origin.y, as->origin.z, as->dir.x, as->dir.y, as->dir.z, as->barrel_error, as->barrel_clamped ? " (clamped)" : "");
+    }
     if (local_view && first) {
         if (!w->authority && !g_aim_claim) g_aim_claim = (u16)DG_CLAMP((int)lrintf(v3_dist(as->eye, as->p) * 100.0f), 1, 65535);
         if (WC.aim_debug && WC.aim_debug->i) {
