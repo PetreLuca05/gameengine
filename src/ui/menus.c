@@ -514,7 +514,7 @@ static void cmd_ui_screen(int argc, const char **argv) {
     if (argc < 2) {
         char line[160] = "";
         for (int i = 0; i < M->depth; i++) { strncat(line, " ", sizeof(line) - strlen(line) - 1); strncat(line, screen_name(M->stack[i]), sizeof(line) - strlen(line) - 1); }
-        log_info("ui_screen <pause|settings[:tab]|multiplayer|inventory|bench|commands|copypos|confirm_quit|confirm_leave|close>  stack:%s", line[0] ? line : " (none)");
+        log_info("ui_screen <pause|settings[:tab|:normal|:debug]|multiplayer|inventory|bench|commands|copypos|confirm_quit|confirm_leave|close>  stack:%s", line[0] ? line : " (none)");
         return;
     }
     const char *n = argv[1];
@@ -524,7 +524,10 @@ static void cmd_ui_screen(int argc, const char **argv) {
     if (!strncmp(n, "settings", 8)) {
         if (!M->depth || M->stack[0] != SCR_PAUSE) { menus_close_all(); screens_push(SCR_PAUSE); }
         do_action("settings");
-        if (n[8] == ':') settings_open(atoi(n + 9));
+        // settings:<tab>, settings:debug / settings:normal (the Graphics sub-tabs)
+        if (n[8] == ':' && !strcmp(n + 9, "debug")) { settings_open(0); settings_graphics_page(1); }
+        else if (n[8] == ':' && !strcmp(n + 9, "normal")) { settings_open(0); settings_graphics_page(0); }
+        else if (n[8] == ':') settings_open(atoi(n + 9));
         return;
     }
     if (!strcmp(n, "commands") || !strcmp(n, "copypos")) {

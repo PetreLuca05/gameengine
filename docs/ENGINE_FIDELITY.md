@@ -13,7 +13,7 @@ the level allows and can never exceed it.
 | Game side | `src/game/game_fidelity.c` (level cvar, detection, `bench_fidelity`, checks, overlay) |
 | Frame graph check | `src/render/graph/fg_check.{h,c}` (run on every graph by `fg.c`) |
 | Off output | `shaders/post/final_direct.frag`, `post_direct.glsl` |
-| UI | Settings → Graphics: "Engine Fidelity" card on top (`src/ui/screens/scr_settings.c`) |
+| UI | Settings → Graphics → Normal: "Overall graphics quality" (the level as a preset) + the simple qualities (`fid_group_*`); Debug (developer mode): the "Engine Fidelity" card and every per-feature row (`src/ui/screens/scr_settings.c`, docs/UI.md) |
 | Tests | `tests/test_fidelity.c` (ctest `fidelity`), `tools/tests/run_fidelity_tests.py` |
 | Tables as Markdown | `python tools/fidelity_table.py` (the tables below are its output) |
 
