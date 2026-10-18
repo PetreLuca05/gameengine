@@ -1014,5 +1014,134 @@
    "summary": "CLOSED: scope:shadow_sun 29.5 -> 27.49 (-6.81%, p=1e-05); images pass; state identical",
    "machine": "DESKTOP-SN4N74U"
   }
+ },
+ "PF-0013": {
+  "title": "Grass and small plant shadows in the near cascades only (per-class caster cascade limit)",
+  "rule": "R02",
+  "finding": "R02 shadow casters in every cascade (F-b96020) / alpha-test overdraw in the dense vegetation zones: after PF-0012 the pine forest's sun shadow pass still ran ~660 M alpha-tested fragment invocations per frame (~40 x overdraw of leaf / grass cards in the 4 x 2048^2 tiles, 14 - 30 ms at Modern); 2 cascades instead of 4 cut 58 % but blurred every tree shadow",
+  "effort": "M",
+  "status": "closed",
+  "tradeoff": "Grass / ground cover casts sun shadows only into cascade 0 (to ~10 m at High / Modern, capped at 15 m on Off .. Medium) and small plants (bushes, ferns, reeds, wheat, small Tree It bushes) into cascades 0 - 1 (~30 m, capped at 30 m), each dithering out over the last 30 % of that distance; before, grass shadows reached 30 m and bushes 60 m. Tree, character, building and terrain shadows and every plant itself are unchanged. Visible only as fewer grass / bush shadow speckles on open ground beyond 10 / 30 m (docs/SHADOWS.md \"Caster cascade limits\"). Measured (one process, A / B alternating, 2 reps, Modern + Low, RTX 3060 Ti): the meadow's shadow pass -38 % at Modern (fragments -52 %, GPU frame -5 %) and -84 % at Low, horde_foliage -28 % / -47 %, wheat -8 % / -16 %; in the forest interiors fragments only -1 .. -3 % (their ~660 M fragments are tree leaf cards, which keep every cascade), shadow pass -1 .. -9 % at Modern, -2 .. -20 % at Low; CPU work -4 .. -26 % (fewer cascade instances to cull). docs/SHADOWS.md has the table.",
+  "screenshots": [
+   "docs/shadow_screenshots/caster_limit_meadow_1730.jpg",
+   "docs/shadow_screenshots/caster_limit_meadow_1300.jpg",
+   "docs/shadow_screenshots/caster_limit_wheat_1730.jpg",
+   "docs/shadow_screenshots/caster_limit_pine_1300_close.jpg"
+  ],
+  "code": [
+   "src/render/shadow_casters.c scc_view / scc_alpha (assets/render/shadow_casters.json)",
+   "src/render/vk_classic.c caster_limits / cascade_view / cull_instance / cell_tasks (cell_scc)",
+   "src/render/vgeo/vgeo_scene.c mesh_foliage (VGMF_SHADOW_CLASS)",
+   "src/render/vgeo/grass_asset.c, vgeo_procgen_foliage.c, vgeo_tree.c, src/assets/assets.c (shadow_class)"
+  ],
+  "description": "Every vgeo material carries a sun shadow caster class (ground / small / tree / none) from its asset: grass assets' and model foliage blocks' \"shadow_class\", the procedural kinds (tuft ground, bush and crop small), the Tree It roles (bush small, flower ground, the rest tree); a mesh takes the least limited class of its materials. Per Engine Fidelity tier (r_shadow_caster_limit, TIER: 1 at High / Modern, 2 at Off .. Medium) assets/render/shadow_casters.json gives each class its last cascade and a distance cap. A sun cascade view skips the classes that do not cast into it (whole placement cells / chunks by their class mask, then per instance) and dithers the limited classes out over the last 30 % of their end distance (the shadow-distance fade path). In PCSS wide mode the limited classes also cast into the next cascade, so their reach stays.",
+  "neutral": "The game state (no rendering decision feeds the simulation: the state hashes must match), every non-foliage shadow, tree shadows in every cascade, every main-view / PiP / local-light draw. The image differs by design where grass / small plant shadows fall beyond their end distance.",
+  "metrics": [
+   "scope:shadow_sun",
+   "scopec:shadow_sun:fs_invocations",
+   "gpu_frame",
+   "cpu_work",
+   "zone:render:prepare"
+  ],
+  "scenes": [
+   "veg_forest_pine",
+   "veg_forest_broadleaf",
+   "veg_forest_edge",
+   "veg_meadow",
+   "veg_wheat",
+   "veg_horde_forest"
+  ],
+  "verification": {
+   "runs": [
+    {
+     "date": "2026-10-18",
+     "machine": "DESKTOP-SN4N74U",
+     "summary": "CLOSED: scope:shadow_sun 3.009 -> 2.546 (-15.39%, p=0); images differ (visual trade-off, by design); state identical",
+     "closed": true,
+     "timing": [
+      {
+       "metric": "scope:shadow_sun",
+       "a_median": 3.009,
+       "b_median": 2.546,
+       "a_mean": 8.51594,
+       "b_mean": 7.96493,
+       "delta": -0.463,
+       "delta_pct": -15.39,
+       "p_value": 0.0,
+       "samples": [
+        5712,
+        5712
+       ],
+       "improved": true
+      },
+      {
+       "metric": "scopec:shadow_sun:fs_invocations",
+       "a_median": 40190000.0,
+       "b_median": 26460000.0,
+       "a_mean": 243198921.02591,
+       "b_mean": 235895361.9923,
+       "delta": -13730000.0,
+       "delta_pct": -34.16,
+       "p_value": 0.0,
+       "samples": [
+        5760,
+        5760
+       ],
+       "improved": true
+      },
+      {
+       "metric": "gpu_frame",
+       "a_median": 13.03,
+       "b_median": 12.61,
+       "a_mean": 19.09923,
+       "b_mean": 18.665,
+       "delta": -0.42,
+       "delta_pct": -3.22,
+       "p_value": 0.0064,
+       "samples": [
+        5760,
+        5760
+       ],
+       "improved": true
+      },
+      {
+       "metric": "cpu_work",
+       "a_median": 5.0657,
+       "b_median": 4.44,
+       "a_mean": 6.37939,
+       "b_mean": 5.70313,
+       "delta": -0.6257,
+       "delta_pct": -12.35,
+       "p_value": 0.0,
+       "samples": [
+        5760,
+        5760
+       ],
+       "improved": true
+      },
+      {
+       "metric": "zone:render:prepare",
+       "a_median": 2.1015,
+       "b_median": 1.699,
+       "a_mean": 2.27257,
+       "b_mean": 1.69479,
+       "delta": -0.4025,
+       "delta_pct": -19.15,
+       "p_value": 0.0,
+       "samples": [
+        5760,
+        5760
+       ],
+       "improved": true
+      }
+     ],
+     "state": "identical",
+     "images_pass": false,
+     "dir": "(scratch) perf_verify PF-0013 veg_forest_pine,veg_forest_broadleaf,veg_forest_edge,veg_meadow,veg_wheat,veg_horde_forest 240 levels=modern,low reps=2"
+    }
+   ],
+   "summary": "CLOSED: scope:shadow_sun 3.009 -> 2.546 (-15.39%, p=0); images differ (visual trade-off, by design); state identical",
+   "machine": "DESKTOP-SN4N74U"
+  }
  }
 }

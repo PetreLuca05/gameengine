@@ -97,7 +97,7 @@ allow is greyed "requires &lt;level&gt;"; a row reads Custom when the cvars matc
 | quality | features |
 |---|---|
 | Post-processing | ao, contact_shadows, ssr, ssgi, puddle_reflections, volumetrics, vol_local_lights, dof, dof_quality, ads_dof, bloom, bloom_quality |
-| Shadows | shadows, shadow_resolution, shadow_cascades, shadow_distance, soft_shadow_quality, shadow_min_radius, light_shadows, light_shadow_quality, cloud_shadows, moon_shadows |
+| Shadows | shadows, shadow_resolution, shadow_cascades, shadow_distance, soft_shadow_quality, shadow_min_radius, shadow_caster_limit, light_shadows, light_shadow_quality, cloud_shadows, moon_shadows |
 | Textures | texture_quality, aniso, terrain_quality |
 | Effects | vfx_quality, vfx_lighting, decal_max, precip_quality, water, lens_drops |
 | Foliage | foliage_density, foliage_wind |

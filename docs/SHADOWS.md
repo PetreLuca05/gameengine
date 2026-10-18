@@ -17,6 +17,7 @@ with the same texel-scaled bias.
 |---|---|
 | `src/render/shadow_sky.c/.h` | Pure driver: config, curves, contrast, cutoff with hysteresis, source radius, wide mode, the filter's PCSS weight / max width (tier crossfade), moon handover, cloud drift, exposure, ground albedo |
 | `src/render/shadow_csm.c/.h` | Pure cascade layout: practical splits, sector bounding spheres, texel snapping, the light-space reach, bias and kernel from the texel size, the viewmodel tile, the preset-table check |
+| `src/render/shadow_casters.c/.h`, `assets/render/shadow_casters.json` | Pure caster cascade limits: per caster class (ground / small / tree / none) and `r_shadow_caster_limit` mode, the last cascade it casts into, a distance cap, the dither fade ([Caster cascade limits](#caster-cascade-limits)) |
 | `assets/render/shadows_sky.json` | Every tuning value; hot reload (saved changes apply within a second, `shadows_sky_reload`) |
 | `src/game/game_shadow_sky.c` | Steps the driver from `daynight_environment`; fidelity inputs, `shadow_preset` (and the test corner's switches), `shadow_info`, `r_shadow_debug` readout / fit drawing, `shadow_switch_stress`, `shadow_orbit` |
 | `src/game/game_daynight.c` | Fills the driver input (sun / moon through the atmosphere, sky SH, clouds, fog, rain, snow, wind) |
@@ -26,7 +27,7 @@ with the same texel-scaled bias.
 | `shaders/sky/cloud_shadow.comp`, `env_render.comp` | Beer-Lambert cloud shadows, the sky probe's ground (snow / wet albedo, cosine quadrature) |
 | `shaders/post/contact.comp` | Contact shadows: ray length limited by the penumbra |
 | `data/levels/devroom.json` | The shadow reference corner and test corner |
-| `tests/test_shadow_sky.c`, `tests/test_shadow_csm.c` | Unit tests (the filter on the CPU, tier crossfades, cloud sweeps, the cascade layout) |
+| `tests/test_shadow_sky.c`, `tests/test_shadow_csm.c`, `tests/test_shadow_casters.c` | Unit tests (the filter on the CPU, tier crossfades, cloud sweeps, the cascade layout, the caster cascade limits) |
 | `tools/tests/shadow_ref.py`, `tools/tests/shadow_stability.py` | In-game tests |
 
 ## Root causes (October 2026 fix)
@@ -196,6 +197,88 @@ and the kernel follow the new texel size in that same frame, so the change is on
 - **Casters.** Raster casters are culled per tile against its light box; vgeo / classic cull with
   the same matrices and pick the LOD by the tile's texel size (`R->shadow_radius`). Masked casters
   alpha-test (`PIPE_SHADOW_MASK`). Characters cast with this frame's palette, one LOD coarser.
+  Grass and small plants cast only into the near cascades ([Caster cascade limits](#caster-cascade-limits)).
+
+### Caster cascade limits
+
+A dense forest's sun shadow pass is mostly alpha-tested grass and leaf cards: ~660 M fragment
+invocations per frame in the pine forest at Modern, ~40x overdraw of the shadow atlas
+(docs/perf/AUDIT_2026-10-18.md). Two cascades instead of four cut that by 58 % but blur every tree
+shadow. Instead, every scene caster has a **class** and each class casts only into some cascades
+(docs/perf/FINDINGS.md PF-0013, a visual trade-off):
+
+| Class | What | Mode 1 (High / Modern, 4 cascades) | Mode 2 (Off / Low / Medium, 1 - 2 cascades) |
+|---|---|---|---|
+| `ground` | grass assets (short, broad, tall, tussock), the `test_tuft` kind, flowers (Tree It flower role) | cascade 0: to ~10 m | cascade 0, capped at 15 m |
+| `small` | ferns, reeds, leafy shrubs, wheat (grass assets / `crop_wheat`), procedural bushes, Tree It bushes (juniper, bamboo, acacia) | cascades 0 - 1: to ~30 m | cascade 0, capped at 30 m |
+| `tree` | Tree It trees (conifer, broadleaf, dead) | every cascade | every cascade |
+| `none` | everything unclassified (level meshes, props, buildings) | every cascade | every cascade |
+
+- **Where the class comes from.** Grass assets' `"shadow_class"` (assets/foliage/grass/*.json,
+  default `ground`), model foliage blocks' `"shadow_class"` (data/assets.json, default `none`), the
+  procedural kinds (tuft ground, bush and crop small) and the Tree It roles (bush small, flower
+  ground, the rest tree). It is a `VgMaterial` field; a mesh takes the least limited class of its
+  materials (ground < small < tree < none) in `VgMesh.fflags` bits 8..11 (`VGMF_SHADOW_CLASS`).
+- **Where a limited class ends.** At the smaller of its last cascade's selection distance (the
+  split: 10 / 30 m at the locked 150 m with four cascades) and its cap, dithering out over the last
+  `fade` (30 %) of that distance through the same dithered shadow pipelines as the per-mesh shadow
+  distance fade. The receivers' own cascade blend (the last `border` of cascade 0) sits inside that
+  fade, so there is no line where grass shadows end. The per-mesh `shadow_max_dist` (grass 30 m,
+  bushes 60 m after the LOD scale) still applies on top.
+- **Fair across levels.** Off .. Medium have one or two cascades whose cascade 0 reaches 37.5 or
+  150 m; their caps keep the reach in metres close to High / Modern's (ground cover 10 - 15 m,
+  small plants 30 m at every level; `test_shadow_casters` checks every level's table). The plants
+  themselves, trees, characters and buildings are unchanged, so `r_shadow_caster_limit` is a TIER
+  (docs/SETTINGS_AUDIT.md): a missing grass shadow 15 m away hides or reveals nothing.
+- **Wide mode.** While the near cascade fades into cascade 1 (PCSS wide mode, `R->shadow_near_w`
+  < 1), the limited classes also cast into the next cascade with the same end distance: their reach
+  does not change with the sky.
+- **Culling.** `vk_classic.c caster_limits` builds the per-cascade view (`scc_view`); placement
+  cells and chunks carry the class mask of their meshes, so a cascade skips a cell / chunk none of
+  whose classes cast into it, or which lies beyond their largest end; then per instance
+  (`scc_alpha`). Impostors never draw into the cascades. Point / spot light tiles are not limited.
+- **Switches.** `r_shadow_caster_limit` 0 (off: every caster in every cascade), 1, 2 (TIER: the
+  Engine Fidelity level's `shadow_caster_limit`); `perf_fix_disable PF-0013` turns it off for an A /
+  B run (`perf_fix_disable all` leaves this trade-off on). `classic_stats` prints the mode and each
+  class's last cascade and end distance.
+
+**Measured** (`perf_verify PF-0013`, the vegetation zones, 240 frames, 2 x A / B alternating in one
+process, RTX 3060 Ti, 1600 x 900; A = limits off, B = on; medians; the GPU was shared with other work,
+so compare A with B, not with other reports):
+
+| Zone | Level | Shadow pass ms | Shadow fragments (M) | GPU frame ms | CPU work ms | FPS |
+|---|---|---|---|---|---|---|
+| veg_forest_pine | Modern | 21.64 / 20.93 (-3 %) | 664 / 654 (-1 %) | 37.05 / 36.84 (-1 %) | 4.52 / 4.02 (-11 %) | 27 / 27 |
+| veg_forest_broadleaf | Modern | 28.98 / 28.64 (-1 %) | 986 / 974 (-1 %) | 47.31 / 46.53 (-2 %) | 4.50 / 4.18 (-7 %) | 21 / 21 |
+| veg_forest_edge | Modern | 13.99 / 12.76 (-9 %) | 399 / 386 (-3 %) | 29.10 / 28.33 (-3 %) | 5.27 / 4.35 (-17 %) | 34 / 35 |
+| veg_horde_forest | Modern | 20.57 / 19.89 (-3 %) | 631 / 620 (-2 %) | 35.46 / 34.39 (-3 %) | 13.03 / 12.53 (-4 %) | 28 / 29 |
+| veg_meadow | Modern | 3.80 / 2.35 (-38 %) | 57.6 / 27.6 (-52 %) | 17.76 / 16.81 (-5 %) | 6.54 / 4.86 (-26 %) | 56 / 60 |
+| veg_wheat | Modern | 3.49 / 3.23 (-8 %) | 88.1 / 81.7 (-7 %) | 16.85 / 16.67 (-1 %) | 4.98 / 4.43 (-11 %) | 59 / 60 |
+| horde_foliage | Modern | 2.61 / 1.89 (-28 %) | 53.6 / 29.1 (-46 %) | 14.99 / 14.61 (-3 %) | 13.43 / 12.43 (-7 %) | 67 / 69 |
+| veg_forest_pine | Low | 1.85 / 1.48 (-20 %) | 15.3 / 15.0 (-2 %) | 7.90 / 7.51 (-5 %) | 3.89 / 3.80 (-2 %) | 127 / 133 |
+| veg_forest_broadleaf | Low | 2.50 / 2.44 (-2 %) | 25.9 / 25.5 (-2 %) | 9.09 / 9.01 (-1 %) | 3.65 / 3.66 (0 %) | 109 / 110 |
+| veg_forest_edge | Low | 1.31 / 1.08 (-18 %) | 8.2 / 7.8 (-4 %) | 7.67 / 7.38 (-4 %) | 4.49 / 3.80 (-15 %) | 128 / 135 |
+| veg_horde_forest | Low | 1.36 / 1.21 (-11 %) | 15.1 / 14.8 (-2 %) | 6.11 / 5.90 (-3 %) | 11.51 / 11.08 (-4 %) | 86 / 90 |
+| veg_meadow | Low | 0.66 / 0.11 (-84 %) | 1.03 / 0.35 (-66 %) | 7.03 / 6.87 (-2 %) | 5.58 / 4.63 (-17 %) | 140 / 142 |
+| veg_wheat | Low | 0.45 / 0.38 (-16 %) | 1.07 / 0.97 (-10 %) | 6.04 / 5.99 (-1 %) | 4.39 / 3.99 (-9 %) | 166 / 169 |
+| horde_foliage | Low | 0.32 / 0.17 (-47 %) | 0.98 / 0.52 (-47 %) | 4.85 / 4.55 (-6 %) | 12.45 / 11.31 (-9 %) | 80 / 88 |
+
+Game state identical in every deterministic scene (`horde_foliage` is not deterministic between map
+loads, docs/PERF_AUDIT.md). Reading it: open ground (meadow, the horde on the vegetation map) gains
+most; in the forest interiors the ~660 M shadow fragments are tree leaf cards, which keep every
+cascade, so the shadow pass only drops 1 - 9 % there (the CPU still saves the culling of the grass
+instances in three cascades). A variant with ground cover in cascades 0 - 1 capped at 20 m (one line
+in shadow_casters.json) measured meadow -31 % shadow pass / -25 % fragments, pine forest -5 %.
+
+**Visual difference** (`docs/shadow_screenshots/caster_limit_*.jpg`: top limits off, bottom on;
+Modern, wind and cloud shadows off for clean pairs): within ~7 m nothing changes (near grass and
+bush shadows, the player's shadow, every tree shadow stay); from 7 to 10 m the grass shadows dither
+out, with no line where they end; beyond 10 m (ground cover) / 30 m (small plants) the plants lose
+their own small shadows, so a meadow or the forest floor reads a little flatter, most visibly at a
+low sun (`caster_limit_meadow_1730.jpg`: luma +6 / 255 in the 10 - 20 m band). The wheat field loses its
+stalk shadows beyond 30 m (`caster_limit_wheat_1730.jpg`). Off .. Medium (mode 2) differ
+from the old image by about the run-to-run noise: their old grass shadows already ended at 30 m in a
+2.4 cm cascade.
 
 ### Bias
 
@@ -460,6 +543,16 @@ Change one curve, watch `r_shadow_debug 1` in the corner, then run the tests.
 - cloud sweeps 0 → 1 → 0 (60 s per half) on every tier: at most one cutoff toggle per half, the
   fade steps < 2 % per frame, the shadows come back
 - the era keeps contrast; exposure, ground albedo; TAA on a softening edge
+
+**Unit tests (`test_shadow_casters`):**
+- `assets/render/shadow_casters.json` equals the C defaults; malformed tables (class, mode, key,
+  range) are rejected
+- per mode / cascade count / cascade: which classes cast and where they end; mode 0 limits nothing;
+  a limit at or past the last cascade is no limit; the wide-mode shift keeps the reach; a cap that
+  ends before a cascade's receivers start skips that cascade
+- the caster weight is 1 before the fade, monotonic and continuous down to 0 at the end
+- every Engine Fidelity level: ground cover ends within 8 .. 16 m, small plants within 25 .. 31 m,
+  trees unlimited; the class merge (least limited wins)
 
 **Unit tests (`test_shadow_csm`):**
 - every preset table (default, max, era overrides) satisfies the formula assertion (splits end at
