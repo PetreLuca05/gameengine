@@ -11,7 +11,7 @@
 #define SCAN_TTL 4.0f
 
 typedef struct RoomCache { bool used; int cx, cy, cz; float age; EnvRoom room; } RoomCache;
-typedef struct ScanCache { bool used; int cx, cz; float age; vec3 origin; EnvEchoRay rays[ENV_ECHO_RAYS]; float urban, trunks; } ScanCache;
+typedef struct ScanCache { bool used; int cx, cz; float age; vec3 origin; EnvEchoRay rays[ENV_ECHO_RAYS]; float urban, trunks, hits, mean_dist; } ScanCache;
 
 static struct {
     EnvWorldQuery q;
@@ -24,8 +24,10 @@ static struct {
     EnvRoom remote;
     float remote_score;
     bool remote_valid, remote_seen;
-    float forest, urban, env_age;
+    float forest, urban, env_age, hits, mean_dist;
     vec3 lis_probe_pos;
+    float lis_ground_y;          // NAN: no ground under the listener
+    int lis_ground_mat;
     vec3 probe_origin, probe_end[ENV_PROBE_RAYS];
     bool probe_hit[ENV_PROBE_RAYS];
     vec3 scan_origin, scan_end[ENV_ECHO_RAYS];
@@ -123,7 +125,8 @@ static ScanCache *scan_at(vec3 p) {
     // Near-horizontal rays from 1.5 m above the source, 3 degrees up (over the ground it stands on,
     // into valley walls, cliffs, facades, tree lines).
     vec3 o = v3(p.x, p.y + 1.5f, p.z);
-    int hard = 0, near = 0, wood = 0;
+    int hard = 0, near = 0, wood = 0, any = 0;
+    float dsum = 0.0f;
     for (int i = 0; i < ENV_ECHO_RAYS; i++) {
         float a = 6.2831853f * (float)i / (float)ENV_ECHO_RAYS;
         vec3 d = v3_norm(v3(cosf(a), 0.0524f, sinf(a)));
@@ -133,6 +136,7 @@ static ScanCache *scan_at(vec3 p) {
         r->hit = cast(o, v3_scale(d, ENV_ECHO_RANGE), &h);
         r->dist = r->hit ? h.dist : ENV_ECHO_RANGE;
         r->material = h.material;
+        if (r->hit) { any++; dsum += r->dist; }
         if (r->hit && r->dist < 80.0f) {
             near++;
             hard += syn_material(r->material)->reflect > 0.75f;
@@ -151,6 +155,9 @@ static ScanCache *scan_at(vec3 p) {
     slot->urban = syn_clampf(((float)hard / (float)ENV_ECHO_RAYS) * 1.6f * ((float)near / (float)ENV_ECHO_RAYS + 0.3f), 0.0f, 1.0f);
     // Trunks: many wooden hits close around scatter like a stand of trees (a forest without foliage data).
     slot->trunks = syn_clampf((float)wood / (float)ENV_ECHO_RAYS * 1.5f, 0.0f, 1.0f);
+    // Terrain: the share of the horizon that returns sound, and how far.
+    slot->hits = (float)any / (float)ENV_ECHO_RAYS;
+    slot->mean_dist = any ? dsum / (float)any : 0.0f;
     return slot;
 }
 
@@ -194,11 +201,17 @@ void env_world_begin_frame(float dt) {
                 ScanCache *sc = scan_at(W.lis.pos);
                 W.urban = sc->urban;
                 W.forest = fmaxf(W.forest, sc->trunks);
+                W.hits = sc->hits;
+                W.mean_dist = sc->mean_dist;
             }
         }
     }
     W.remote_seen = false;
     W.remote_score = 0.0f;
+    // The ground under the listener (the outdoor ground reflection).
+    EnvRayHit g;
+    W.lis_ground_y = NAN;
+    if (W.have_q && cast(v3_add(W.lis.pos, v3(0, 0.1f, 0)), v3(0, -40.0f, 0), &g)) { W.lis_ground_y = g.point.y; W.lis_ground_mat = g.material; }
 }
 
 // ------------------------------------------------------------------ occlusion
@@ -246,6 +259,10 @@ static void occlusion(EnvVoiceState *v) {
         from = v3_madd(exit, dir, 0.02f);
     }
     v->info.walls = n;
+    // The ground under the source, refreshed with its rays.
+    EnvRayHit g;
+    v->ground_y = NAN;
+    if (cast(v3_add(S, v3(0, 0.1f, 0)), v3(0, -40.0f, 0), &g)) { v->ground_y = g.point.y; v->ground_mat = g.material; }
     if (!n) return;
     float trans[ENV_BANDS];
     env_transmission(walls, n, trans);
@@ -278,6 +295,7 @@ void env_world_voice_start(EnvVoiceState *v, const EnvSource *s) {
     memset(v, 0, sizeof(*v));
     v->src = *s;
     v->occl_frames = -1;
+    v->ground_y = NAN;
     if (s->spatial && !s->echo_child) occlusion(v);
 }
 
@@ -337,11 +355,10 @@ float env_world_voice_eval(EnvVoiceState *v, bool rays, EnvParams *p) {
     if (s->doppler) p->delay_s = delay;
     // Reverb and early reflections. The diffuse field barely falls with distance, so the send undoes
     // the distance law (capped); occlusion still applies (the chain sends after its gain).
-    float dif = s->reverb * 0.3f * fminf(1.0f / fmaxf(gd, 1e-3f), 6.0f);
     in->same_room = same;
     in->zone = -1;
     if (same) {
-        p->send[0] = dif;
+        p->send[0] = s->reverb * env_reverb_send(d, lr->volume, 1.0f);
         in->zone = 0;
         int nt = s->max_taps > 0 ? s->max_taps : 4;
         p->ntaps = env_room_taps(lr, S, L, W.lis.right, c, p->tap, nt < ENV_MAX_TAPS ? nt : ENV_MAX_TAPS);
@@ -350,13 +367,23 @@ float env_world_voice_eval(EnvVoiceState *v, bool rays, EnvParams *p) {
         const EnvRoom *sr = W.have_q ? probe_room(S, false, false) : NULL;
         in->src_indoor = sr && sr->indoor;
         if (sr && sr->indoor) {
-            p->send[1] = dif;
+            p->send[1] = s->reverb * env_reverb_send(fminf(d, cbrtf(sr->volume)), sr->volume, 1.0f);
             in->zone = 1;
             float score = s->volume * g;
             if (score > W.remote_score) { W.remote_score = score; W.remote = *sr; W.remote_seen = true; }
         } else {
-            p->send[2] = dif * 0.8f;
+            EnvField f = { W.forest, W.urban, W.hits, W.mean_dist, W.lis.weather.snow };
+            p->send[2] = s->reverb * env_outdoor_send(&f, d);
             in->zone = 2;
+            // Both out under the sky: the ground reflection reaches the ear just after the direct sound.
+            if (!lis_in && !isnan(v->ground_y) && !isnan(W.lis_ground_y)) {
+                float dh = sqrtf((S.x - L.x) * (S.x - L.x) + (S.z - L.z) * (S.z - L.z));
+                int mat = v->ground_mat;
+                if (env_ground_tap(S.y - v->ground_y, L.y - W.lis_ground_y, dh, mat, c, &p->tap[0])) {
+                    p->tap[0].pan = p->pan;
+                    p->ntaps = 1;
+                }
+            }
         }
     }
     in->gain = g;
@@ -372,7 +399,8 @@ void env_world_reverbs(EnvReverbParams out[ENV_ZONES]) {
     if (W.remote_seen) { env_room_reverb(&W.remote, &out[1]); W.remote_valid = true; }
     else if (!W.remote_valid) memset(&out[1], 0, sizeof(out[1])), out[1].rt60_low = out[1].rt60_high = 0.5f, out[1].size = 1.0f;
     else { env_room_reverb(&W.remote, &out[1]); out[1].wet *= 0.5f; }
-    env_outdoor_reverb(W.forest, W.urban, W.lis.weather.snow, &out[2]);
+    EnvField f = { W.forest, W.urban, W.hits, W.mean_dist, W.lis.weather.snow };
+    env_outdoor_reverb(&f, &out[2]);
 }
 
 void env_world_field(float *forest, float *urban) {

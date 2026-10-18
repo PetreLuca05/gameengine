@@ -363,8 +363,9 @@ static void drain(Mixer *m) {
     long t = mix_load(&m->tail), h = mix_load(&m->head);
     while (t != h) {
         const MixCmd *c = &m->ring[t];
-        AVoice *v = &m->voice[c->slot];
-        bool mine = v->active && v->gen == c->gen;
+        // Global commands (bus, master, listener, reverb, degrade) leave slot unset.
+        AVoice *v = &m->voice[c->slot < MIX_VOICES ? c->slot : 0];
+        bool mine = c->type <= CMD_VIRTUAL && c->slot < MIX_VOICES && v->active && v->gen == c->gen;
         switch (c->type) {
         case CMD_START: start_voice(m, c); break;
         case CMD_PARAMS:

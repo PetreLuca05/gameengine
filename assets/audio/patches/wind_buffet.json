@@ -6,7 +6,7 @@
   "nodes": [
     { "id": "n", "type": "noise", "color": "pink" },
     { "id": "lp", "type": "svf", "mode": "lp", "hz": "$hz", "q": 0.6, "in": "n" },
-    { "id": "am", "type": "am", "hz": "$gust", "depth": 0.45, "in": "lp" },
+    { "id": "am", "type": "am", "lfo": "noise", "hz": "$gust", "depth": 0.45, "in": "lp" },
     { "id": "out", "type": "gain", "amp": "$amp", "in": "am" }
   ],
   "out": "out"

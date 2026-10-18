@@ -7,7 +7,7 @@
     { "id": "c", "type": "grains", "src": "click", "rate": 600, "decay": 4, "hz": 3000, "spread": 0.7, "dur_ms": 2, "q": 2 },
     { "id": "ce", "type": "env", "in": "c", "stages": [[2, 1], [500, 0, 3]], "amp": "$crackle" },
     { "id": "b", "type": "noise", "color": "brown" },
-    { "id": "am", "type": "am", "hz": "$roll_hz", "depth": 0.6, "in": "b" },
+    { "id": "am", "type": "am", "lfo": "noise", "hz": "$roll_hz", "depth": 0.6, "in": "b" },
     { "id": "e", "type": "env", "in": "am", "stages": [[80, 1, 0], [600, 0.8, 1], [3500, 0, 2.5]], "time": "$time" },
     { "id": "m", "type": "mix", "in": ["ce", "e"] },
     { "id": "lp", "type": "biquad", "mode": "lp", "hz": "$lp", "q": 0.6, "in": "m" },

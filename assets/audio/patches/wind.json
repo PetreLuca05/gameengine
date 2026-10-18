@@ -12,7 +12,7 @@
     { "id": "g2", "type": "gain", "amp": "$mid", "in": "b2" },
     { "id": "g3", "type": "gain", "amp": "$high", "in": "b3" },
     { "id": "mx", "type": "mix", "in": ["g1", "g2", "g3"] },
-    { "id": "am", "type": "am", "hz": "$gust_hz", "depth": "$gust", "in": "mx" },
+    { "id": "am", "type": "am", "lfo": "noise", "hz": "$gust_hz", "depth": "$gust", "in": "mx" },
     { "id": "out", "type": "gain", "amp": "$amp", "in": "am" }
   ],
   "out": "out"

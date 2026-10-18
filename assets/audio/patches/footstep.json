@@ -1,25 +1,262 @@
 {
-  "_doc": "Footstep: heel then toe ('gap_ms' apart, shorter when running) into the ground's modal bank, a weight thud, granular crunch (gravel, snow, leaves), a grass swish; heavier = darker.",
+  "_doc": "Footstep: heel then toe ('gap_ms' apart, shorter when running) into the ground's modal bank, a weight thud, granular crunch (gravel, snow, leaves), a grass swish, clothing / gear rustle, a scuff (zombies drag their feet); heavier = darker.",
   "name": "footstep",
   "params": {
-    "material": [1, -1, 23], "amp": [1, 0, 3], "contact_ms": [1, 0.1, 10], "gap_ms": [70, 20, 140], "modal": [0.6, 0, 2], "thud": [0.6, 0, 2],
-    "crunch": [0, 0, 2], "crunch_hz": [3000, 500, 8000], "crunch_rate": [500, 0, 2000], "swish": [0, 0, 2], "lp": [8000, 1000, 20000]
+    "material": [
+      1,
+      -1,
+      23
+    ],
+    "amp": [
+      1,
+      0,
+      3
+    ],
+    "contact_ms": [
+      1,
+      0.1,
+      10
+    ],
+    "gap_ms": [
+      70,
+      20,
+      140
+    ],
+    "modal": [
+      0.6,
+      0,
+      2
+    ],
+    "thud": [
+      0.6,
+      0,
+      2
+    ],
+    "crunch": [
+      0,
+      0,
+      2
+    ],
+    "crunch_hz": [
+      3000,
+      500,
+      8000
+    ],
+    "crunch_rate": [
+      500,
+      0,
+      2000
+    ],
+    "swish": [
+      0,
+      0,
+      2
+    ],
+    "lp": [
+      8000,
+      1000,
+      20000
+    ],
+    "cloth": [
+      0.12,
+      0,
+      1
+    ],
+    "scuff": [
+      0.05,
+      0,
+      2
+    ],
+    "scuff_hz": [
+      3000,
+      500,
+      8000
+    ]
   },
   "nodes": [
-    { "id": "heel", "type": "impulse", "amp": 1, "width_ms": "$contact_ms" },
-    { "id": "toe", "type": "impulse", "amp": 0.6, "width_ms": "$contact_ms*0.7", "delay_ms": "$gap_ms" },
-    { "id": "ex", "type": "mix", "in": ["heel", "toe"] },
-    { "id": "md", "type": "modal", "in": "ex", "material": "$material", "amp": "$modal", "spread": 1 },
-    { "id": "th", "type": "onepole", "mode": "lp", "hz": 220, "in": "ex" },
-    { "id": "thg", "type": "gain", "amp": "$thud*5", "in": "th" },
-    { "id": "cr", "type": "grains", "src": "click", "rate": "$crunch_rate", "decay": 14, "hz": "$crunch_hz", "spread": 0.5, "dur_ms": 3, "q": 3 },
-    { "id": "cre", "type": "env", "in": "cr", "stages": [[1, 1], [150, 0, 3]], "amp": "$crunch*0.5" },
-    { "id": "sn", "type": "noise", "color": "pink" },
-    { "id": "sb", "type": "svf", "mode": "bp", "hz": 2800, "q": 0.8, "in": "sn" },
-    { "id": "se", "type": "env", "in": "sb", "stages": [[25, 1, 0], [140, 0, 3]], "amp": "$swish" },
-    { "id": "m", "type": "mix", "in": ["md", "thg", "cre", "se"] },
-    { "id": "lp", "type": "onepole", "mode": "lp", "hz": "$lp", "in": "m" },
-    { "id": "out", "type": "gain", "amp": "$amp", "in": "lp" }
+    {
+      "id": "heel",
+      "type": "impulse",
+      "amp": 1,
+      "width_ms": "$contact_ms"
+    },
+    {
+      "id": "toe",
+      "type": "impulse",
+      "amp": 0.6,
+      "width_ms": "$contact_ms*0.7",
+      "delay_ms": "$gap_ms"
+    },
+    {
+      "id": "ex",
+      "type": "mix",
+      "in": [
+        "heel",
+        "toe"
+      ]
+    },
+    {
+      "id": "md",
+      "type": "modal",
+      "in": "ex",
+      "material": "$material",
+      "amp": "$modal",
+      "spread": 1
+    },
+    {
+      "id": "th",
+      "type": "onepole",
+      "mode": "lp",
+      "hz": 220,
+      "in": "ex"
+    },
+    {
+      "id": "thg",
+      "type": "gain",
+      "amp": "$thud*5",
+      "in": "th"
+    },
+    {
+      "id": "cr",
+      "type": "grains",
+      "src": "click",
+      "rate": "$crunch_rate",
+      "decay": 14,
+      "hz": "$crunch_hz",
+      "spread": 0.5,
+      "dur_ms": 3,
+      "q": 3
+    },
+    {
+      "id": "cre",
+      "type": "env",
+      "in": "cr",
+      "stages": [
+        [
+          1,
+          1
+        ],
+        [
+          150,
+          0,
+          3
+        ]
+      ],
+      "amp": "$crunch*0.5"
+    },
+    {
+      "id": "sn",
+      "type": "noise",
+      "color": "pink"
+    },
+    {
+      "id": "sb",
+      "type": "svf",
+      "mode": "bp",
+      "hz": 2800,
+      "q": 0.8,
+      "in": "sn"
+    },
+    {
+      "id": "se",
+      "type": "env",
+      "in": "sb",
+      "stages": [
+        [
+          25,
+          1,
+          0
+        ],
+        [
+          140,
+          0,
+          3
+        ]
+      ],
+      "amp": "$swish"
+    },
+    {
+      "id": "cn",
+      "type": "noise",
+      "color": "pink"
+    },
+    {
+      "id": "cb",
+      "type": "svf",
+      "mode": "bp",
+      "hz": 2200,
+      "q": 0.7,
+      "in": "cn"
+    },
+    {
+      "id": "ce",
+      "type": "env",
+      "in": "cb",
+      "stages": [
+        [
+          30,
+          1,
+          0
+        ],
+        [
+          110,
+          0,
+          3
+        ]
+      ],
+      "amp": "$cloth"
+    },
+    {
+      "id": "sc",
+      "type": "svf",
+      "mode": "bp",
+      "hz": "$scuff_hz",
+      "q": 1.2,
+      "in": "cn"
+    },
+    {
+      "id": "sce",
+      "type": "env",
+      "in": "sc",
+      "stages": [
+        [
+          40,
+          1,
+          0
+        ],
+        [
+          220,
+          0,
+          2
+        ]
+      ],
+      "amp": "$scuff"
+    },
+    {
+      "id": "m",
+      "type": "mix",
+      "in": [
+        "md",
+        "thg",
+        "cre",
+        "se",
+        "ce",
+        "sce"
+      ]
+    },
+    {
+      "id": "lp",
+      "type": "onepole",
+      "mode": "lp",
+      "hz": "$lp",
+      "in": "m"
+    },
+    {
+      "id": "out",
+      "type": "gain",
+      "amp": "$amp",
+      "in": "lp"
+    }
   ],
   "out": "out"
 }

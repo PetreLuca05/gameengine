@@ -530,11 +530,16 @@ static void test_recipes(void) {
     CHECK(mono_rms, "gunshot level grows with energy");
     CHECK(mono_low, "gunshot low end grows with energy");
     // Muzzle devices: the suppressor is far quieter and darker; a brake brighter, a flash hider darker.
+    // Its level is the device's report_db (-28 dB) on the voice as the game plays it: measured
+    // suppressors take 20-35 dB off the peak.
     shot(2000, 0, 9, a);
-    float bare_r = rms(a, SHOT_FRAMES), bare_c = centroid(a, SHOT_FRAMES);
+    float bare_c = centroid(a, SHOT_FRAMES), bare_pk = 0, sup_pk = 0;
+    for (int i = 0; i < SHOT_FRAMES; i++) bare_pk = fmaxf(bare_pk, fabsf(a[i]));
     shot(2000, 3, 9, b);
-    float sup_r = rms(b, SHOT_FRAMES), sup_c = centroid(b, SHOT_FRAMES);
-    CHECK(20.0f * log10f(sup_r / bare_r) < -12.0f, "suppressor %.1f dB vs bare", 20.0f * log10f(sup_r / bare_r));
+    float sup_c = centroid(b, SHOT_FRAMES);
+    for (int i = 0; i < SHOT_FRAMES; i++) sup_pk = fmaxf(sup_pk, fabsf(b[i]) * syn_db(-28.0f));
+    float sup_db = 20.0f * log10f(sup_pk / bare_pk);
+    CHECK(sup_db < -20.0f && sup_db > -40.0f, "suppressed peak %.1f dB vs bare (measured: -20 .. -35)", sup_db);
     CHECK(sup_c < 0.7f * bare_c, "suppressor darker (centroid %.0f vs %.0f Hz)", sup_c, bare_c);
     shot(2000, 2, 9, b);
     float comp_c = centroid(b, SHOT_FRAMES);

@@ -399,25 +399,55 @@ static void test_chain(void) {
     p.spread = 0;
     env_chain_init(&c, SR, NULL, 0, &p);
     float g = sine_gain(&c, 1000);
-    CHECK(fabsf(g) < 0.1f, "neutral chain is transparent (%.2f dB)", g);
+    CHECK(fabsf(g) < 1.0f, "centred source: within 1 dB of unity per ear at 1 kHz (%.2f dB; the head shadows a frontal source a little)", g);
     p.band_db[0] = -6, p.band_db[1] = -12, p.band_db[2] = -24;
     env_chain_init(&c, SR, NULL, 0, &p);
     float lo = sine_gain(&c, 40), hi = sine_gain(&c, 14000), mid = sine_gain(&c, 700);
     // One-pole crossovers are gentle: the high band leaks some mid at 14 kHz.
     CHECK(fabsf(lo + 6) < 1.5f && fabsf(hi + 24) < 3.5f, "band gains at the extremes (%.1f dB low, %.1f dB high)", lo, hi);
     CHECK(mid < lo - 3 && mid > hi + 5, "mid band in between (%.1f dB)", mid);
-    // Pan: hard right silences the left ear's direct path except the ITD-delayed, shadowed far ear.
-    env_params_neutral(&p);
-    p.spread = 0, p.pan = 1.0f;
-    env_chain_init(&c, SR, NULL, 0, &p);
+    // Spherical head (Brown-Duda): a source hard right. Lows barely differ between the ears, highs a
+    // lot (measured heads: ~3-6 dB at 500 Hz, > 10 dB at 4 kHz); the left ear hears it Woodworth's
+    // ITD later, (a / c)(pi / 2 + 1) = 0.66 ms. A centred source is symmetric.
     static float in[9600], l[9600], r[9600];
-    for (int i = 0; i < 9600; i++) in[i] = sinf(6.2831853f * 500.0f * (float)i / SR);
+    float ild[2];
+    const float hz2[2] = { 500.0f, 4000.0f };
+    for (int k = 0; k < 2; k++) {
+        env_params_neutral(&p);
+        p.spread = 0, p.pan = 1.0f, p.front = 0.0f;
+        env_chain_init(&c, SR, NULL, 0, &p);
+        for (int i = 0; i < 9600; i++) in[i] = sinf(6.2831853f * hz2[k] * (float)i / SR);
+        memset(l, 0, sizeof(l));
+        memset(r, 0, sizeof(r));
+        for (int off = 0; off < 9600; off += SYN_BLOCK) env_chain_process(&c, in + off, SYN_BLOCK, l + off, r + off, NULL);
+        float el = 0, er = 0;
+        for (int i = 4800; i < 9600; i++) { el += l[i] * l[i]; er += r[i] * r[i]; }
+        ild[k] = 10.0f * log10f(er / el);
+    }
+    CHECK(ild[0] > 2.5f && ild[0] < 9.0f, "ILD at 500 Hz %.1f dB (heads: ~3-6)", ild[0]);
+    CHECK(ild[1] > 10.0f && ild[1] > ild[0] + 5.0f, "ILD at 4 kHz %.1f dB (heads: > 10)", ild[1]);
+    // ITD from a click: the onset in each ear.
+    env_params_neutral(&p);
+    p.spread = 0, p.pan = 1.0f, p.front = 0.0f;
+    env_chain_init(&c, SR, NULL, 0, &p);
+    memset(in, 0, sizeof(in));
+    in[100] = 1.0f;
     memset(l, 0, sizeof(l));
     memset(r, 0, sizeof(r));
-    for (int off = 0; off < 9600; off += SYN_BLOCK) env_chain_process(&c, in + off, SYN_BLOCK, l + off, r + off, NULL);
-    float el = 0, er = 0;
-    for (int i = 4800; i < 9600; i++) { el += l[i] * l[i]; er += r[i] * r[i]; }
-    CHECK(er > 1000.0f * el, "hard right pans right (L/R %.2g)", el / er);
+    for (int off = 0; off < 1024; off += SYN_BLOCK) env_chain_process(&c, in + off, SYN_BLOCK, l + off, r + off, NULL);
+    int pl = 0, pr = 0;
+    for (int i = 0; i < 1024; i++) { if (fabsf(l[i]) > fabsf(l[pl])) pl = i; if (fabsf(r[i]) > fabsf(r[pr])) pr = i; }
+    float itd_ms = (float)(pl - pr) / SR * 1000.0f;
+    CHECK(fabsf(itd_ms - 0.656f) < 0.06f, "ITD %.3f ms (Woodworth 0.656)", itd_ms);
+    env_params_neutral(&p);
+    p.spread = 0;
+    env_chain_init(&c, SR, NULL, 0, &p);
+    memset(l, 0, sizeof(l));
+    memset(r, 0, sizeof(r));
+    for (int off = 0; off < 1024; off += SYN_BLOCK) env_chain_process(&c, in + off, SYN_BLOCK, l + off, r + off, NULL);
+    float asym = 0;
+    for (int i = 0; i < 1024; i++) asym = fmaxf(asym, fabsf(l[i] - r[i]));
+    CHECK(asym < 1e-6f, "a centred source is symmetric (%.2g)", asym);
     // Doppler: the delay shrinking 0.1 s over 1 s raises the pitch ~10 %.
     static float dop[65536];
     env_params_neutral(&p);
@@ -479,6 +509,22 @@ static void test_reverb(void) {
     CHECK(finite, "reverb finite");
 }
 
+// The ground reflection and the calibrated reverb sends (D/R ordering outdoors, Sabine indoors).
+static void test_field(void) {
+    EnvTap hard, soft;
+    bool ok = env_ground_tap(1.5f, 1.7f, 20.0f, SYN_MAT_CONCRETE, 343.0f, &hard) &&
+              env_ground_tap(1.5f, 1.7f, 20.0f, SYN_MAT_GRASS, 343.0f, &soft);
+    float extra = (sqrtf(400.0f + 3.2f * 3.2f) - sqrtf(400.0f + 0.2f * 0.2f)) / 343.0f;
+    CHECK(ok && fabsf(hard.delay_s - extra) < 2e-5f, "ground tap delay is the image path difference (%.3f vs %.3f ms)", hard.delay_s * 1000.0f, extra * 1000.0f);
+    CHECK(ok && soft.gain < hard.gain && soft.lp_hz < hard.lp_hz && hard.gain < 1.0f, "grass absorbs the ground reflection's highs (%.2f / %.0f Hz vs %.2f / %.0f Hz)", soft.gain, soft.lp_hz, hard.gain, hard.lp_hz);
+    float s5 = env_reverb_send(5, 300, 1), s10 = env_reverb_send(10, 300, 1), sbig = env_reverb_send(5, 3000, 1);
+    CHECK(fabsf(s10 / s5 - 2.0f) < 0.01f && sbig < s5, "room send grows with distance, falls with volume (%.2f %.2f %.2f)", s5, s10, sbig);
+    EnvField field = {0}, forest = {.forest = 0.8f}, street = {.urban = 0.9f, .hits = 0.5f};
+    float sf = env_outdoor_send(&field, 15), sw = env_outdoor_send(&forest, 15), su = env_outdoor_send(&street, 15);
+    CHECK(sf < sw && sw < su, "outdoors the open field is driest, a street wettest (%.3f %.3f %.3f)", sf, sw, su);
+    CHECK(env_outdoor_send(&forest, 60) > 3.0f * sw, "outdoor send grows with distance");
+}
+
 int main(void) {
     test_air();
     test_walls();
@@ -487,6 +533,7 @@ int main(void) {
     test_world_voices();
     test_chain();
     test_reverb();
+    test_field();
     printf("test_audio_env: %d checks, %d failed\n", g_checks, g_fail);
     return g_fail ? 1 : 0;
 }

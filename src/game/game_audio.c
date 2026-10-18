@@ -141,6 +141,7 @@ static void footsteps(World *w, vec3 cam, float dt) {
         audio_param(&p, "crouch", st[i].crouch ? 1.0f : 0.0f);
         audio_param(&p, "water", water ? 1.0f : 0.0f);
         audio_param(&p, "local", lp && lp->ent == st[i].ent ? 1.0f : 0.0f);
+        audio_param(&p, "zombie", st[i].zombie ? 1.0f : 0.0f);
         audio_emit(&e, &p);
     }
 }

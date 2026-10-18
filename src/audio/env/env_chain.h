@@ -3,7 +3,7 @@
 //
 //   [doppler delay] -> 2x one-pole LP (air absorption, off-axis, transmission) -> 3 bands (< 250,
 //   250..2k, > 2k: occlusion, ground, air per band) -> gain -> early-reflection ring
-//      -> direct: equal-power pan + ITD + head shadow on the far ear
+//      -> direct: spherical-head model (Brown-Duda shelf per ear, Woodworth ITD), pinna darkening behind
 //      -> taps (<= ENV_MAX_TAPS): delay, gain, one-pole LP, pan (image sources of the room)
 //      -> sends to the zone reverbs (listener room, remote room, outdoor diffuse)
 //
@@ -42,7 +42,7 @@ typedef struct EnvChain {
     float sr;
     EnvParams target;
     SynSmooth gain, lp, band[ENV_BANDS], pan, front, spread, send[ENV_ZONES], delay;
-    float lp1, lp2, x250, x2k, shadow_l, shadow_r, er_lp[2];
+    float lp1, lp2, x250, x2k, shadow_l, shadow_r, head_x[2], er_lp[2];
     int ntaps, tap_limit;        // tap_limit: the mixer's degradation (fewer reflections under load)
     EnvTapState tap[ENV_MAX_TAPS];
     float ring[ENV_RING];

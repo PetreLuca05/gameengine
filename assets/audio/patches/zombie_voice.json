@@ -1,16 +1,180 @@
 {
-  "_doc": "Zombie voice (source-filter): a rough glottal source (jitter, shimmer, vocal fry, breath) through a five-formant vocal tract whose vowel glides with the call's contour, a rasp shaper, the call's envelope. Per zombie: f0, tract length (shift), roughness come from its seed.",
+  "_doc": "Zombie voice (source-filter): a rough glottal source (jitter, shimmer, vocal fry, breath) through a five-formant vocal tract whose vowel glides with the call's contour and a pitch contour (groans sag, screams rise and break), a rasp shaper, the call's envelope. Per zombie: f0, tract length (shift), roughness come from its seed.",
   "name": "zombie_voice",
   "params": {
-    "f0": [70, 30, 400], "open": [0.6, 0.3, 0.9], "jitter": [0.04, 0, 0.3], "shimmer": [0.15, 0, 0.6], "fry": [0.3, 0, 1], "fry_hz": [28, 5, 80], "breath": [0.15, 0, 1],
-    "vowel_from": [3, 0, 5], "vowel_to": [5, 0, 5], "shift": [1, 0.6, 1.5], "bw": [1.2, 0.5, 3], "rasp": [2, 0.5, 8], "time": [1, 0.2, 4], "amp": [1, 0, 3]
+    "f0": [
+      70,
+      30,
+      400
+    ],
+    "open": [
+      0.6,
+      0.3,
+      0.9
+    ],
+    "jitter": [
+      0.04,
+      0,
+      0.3
+    ],
+    "shimmer": [
+      0.15,
+      0,
+      0.6
+    ],
+    "fry": [
+      0.3,
+      0,
+      1
+    ],
+    "fry_hz": [
+      28,
+      5,
+      80
+    ],
+    "breath": [
+      0.15,
+      0,
+      1
+    ],
+    "vowel_from": [
+      3,
+      0,
+      5
+    ],
+    "vowel_to": [
+      5,
+      0,
+      5
+    ],
+    "shift": [
+      1,
+      0.6,
+      1.5
+    ],
+    "bw": [
+      1.2,
+      0.5,
+      3
+    ],
+    "rasp": [
+      2,
+      0.5,
+      8
+    ],
+    "time": [
+      1,
+      0.2,
+      4
+    ],
+    "amp": [
+      1,
+      0,
+      3
+    ],
+    "bend": [
+      -0.3,
+      -2,
+      2
+    ]
   },
   "nodes": [
-    { "id": "ct", "type": "env", "stages": [[150, 1, 1], [900, 0, 1.5]], "time": "$time" },
-    { "id": "g", "type": "glottal", "hz": "$f0", "open": "$open", "jitter": "$jitter", "shimmer": "$shimmer", "fry": "$fry", "fry_hz": "$fry_hz", "breath": "$breath" },
-    { "id": "f", "type": "formant", "in": "g", "vowel": { "mod": "ct", "scale": 2, "offset": 3 }, "shift": "$shift", "bw": "$bw" },
-    { "id": "sh", "type": "shaper", "mode": "tanh", "drive": "$rasp", "mix": 0.7, "in": "f" },
-    { "id": "e", "type": "env", "in": "sh", "stages": [[90, 1, 0], [700, 0.75, 1], [350, 0, 3]], "time": "$time", "amp": "$amp" }
+    {
+      "id": "ct",
+      "type": "env",
+      "stages": [
+        [
+          150,
+          1,
+          1
+        ],
+        [
+          900,
+          0,
+          1.5
+        ]
+      ],
+      "time": "$time"
+    },
+    {
+      "id": "pc",
+      "type": "env",
+      "stages": [
+        [
+          120,
+          1,
+          1
+        ],
+        [
+          500,
+          0.6,
+          0
+        ],
+        [
+          700,
+          0,
+          1.5
+        ]
+      ],
+      "time": "$time",
+      "amp": "$bend"
+    },
+    {
+      "id": "g",
+      "type": "glottal",
+      "hz": "$f0",
+      "open": "$open",
+      "jitter": "$jitter",
+      "shimmer": "$shimmer",
+      "fry": "$fry",
+      "fry_hz": "$fry_hz",
+      "breath": "$breath",
+      "in": "pc"
+    },
+    {
+      "id": "f",
+      "type": "formant",
+      "in": "g",
+      "vowel": {
+        "mod": "ct",
+        "scale": 2,
+        "offset": 3
+      },
+      "shift": "$shift",
+      "bw": "$bw"
+    },
+    {
+      "id": "sh",
+      "type": "shaper",
+      "mode": "tanh",
+      "drive": "$rasp",
+      "mix": 0.7,
+      "in": "f"
+    },
+    {
+      "id": "e",
+      "type": "env",
+      "in": "sh",
+      "stages": [
+        [
+          90,
+          1,
+          0
+        ],
+        [
+          700,
+          0.75,
+          1
+        ],
+        [
+          350,
+          0,
+          3
+        ]
+      ],
+      "time": "$time",
+      "amp": "$amp"
+    }
   ],
   "out": "e"
 }

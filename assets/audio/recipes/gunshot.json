@@ -1,5 +1,5 @@
 {
-  "_doc": "Gunshot (docs/AUDIO_PROCEDURAL.md 'Gunshots'): synthesized blast + mechanism over the weapon's own generated sample (its mechanical character) and its distant sample past ~100 m. The tail is not baked: the environment chain makes it (room, slapback, valley echo). Inputs come from the shot record (bal_world.c play_report).",
+  "_doc": "Gunshot (docs/AUDIO_PROCEDURAL.md 'Gunshots'): the device changes the shape and colour here; its level is the shot record's report_db (suppressor -28 dB) applied as the voice volume. Synthesized blast + mechanism over the weapon's own generated sample (its mechanical character) and its distant sample past ~100 m. The tail is not baked: the environment chain makes it (room, slapback, valley echo). Inputs come from the shot record (bal_world.c play_report).",
   "name": "gunshot",
   "bus": "sfx", "priority": 0.95, "echo": true, "max_instances": 24, "reverb": 1.0,
   "distance": { "min": 6, "max": 2500, "rolloff": 0.6 },
@@ -10,9 +10,9 @@
       "bind": {
         "amp": "sqrt(max(energy, 50) / 2000)",
         "thump_ms": "0.6 * cbrt(max(energy, 50) / 100)",
-        "thump_amp": "device == 3 ? 0.05 + 0.2 * pop : 0.9",
-        "burst_amp": "sel(device, 1, 0.9, 1.25, 0.06 + 0.25 * pop) * db(lerp(barrel, 0.25, 3, 0.6, 0))",
-        "burst_scale": "sel(device, 1, 0.95, 1.05, 0.4) * lerp(barrel, 0.25, 1.4, 0.6, 0.9) * lerp(caliber, 5, 0.8, 12, 1.3)",
+        "thump_amp": "device == 3 ? 0.3 + 0.3 * pop : 0.9",
+        "burst_amp": "sel(device, 1, 0.9, 1.25, 0.35 + 0.25 * pop) * db(lerp(barrel, 0.25, 3, 0.6, 0))",
+        "burst_scale": "sel(device, 1, 0.95, 1.05, 2.2) * lerp(barrel, 0.25, 1.4, 0.6, 0.9) * lerp(caliber, 5, 0.8, 12, 1.3)",
         "tilt": "sel(device, 0, -1.5, 2.5, -6)",
         "lp_hz": "sel(device, 14000, 12000, 16000, 2600)",
         "hp_hz": "lerp(energy, 400, 120, 4000, 45)",

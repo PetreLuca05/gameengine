@@ -6,7 +6,7 @@
   "nodes": [
     { "id": "n", "type": "noise", "color": "pink" },
     { "id": "lp", "type": "svf", "mode": "lp", "hz": 600, "q": 0.8, "in": "n" },
-    { "id": "am", "type": "am", "hz": "$lap_hz", "depth": 0.8, "in": "lp" },
+    { "id": "am", "type": "am", "lfo": "noise", "hz": "$lap_hz", "depth": 0.8, "in": "lp" },
     { "id": "b", "type": "grains", "src": "sine", "rate": "$bubbles", "hz": 800, "spread": 0.5, "dur_ms": 30 },
     { "id": "m", "type": "mix", "in": ["am", "b"], "gains": [1, 0.3], "amp": "$amp" }
   ],

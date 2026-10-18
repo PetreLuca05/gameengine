@@ -6,7 +6,7 @@
   "nodes": [
     { "id": "g", "type": "grains", "src": "noise", "rate": "$rate", "hz": 4500, "spread": 0.5, "dur_ms": 4, "q": 2 },
     { "id": "hp", "type": "biquad", "mode": "hp", "hz": 1800, "in": "g" },
-    { "id": "am", "type": "am", "hz": "$sway", "depth": 0.5, "in": "hp" },
+    { "id": "am", "type": "am", "lfo": "noise", "hz": "$sway", "depth": 0.5, "in": "hp" },
     { "id": "out", "type": "gain", "amp": "$amp", "in": "am" }
   ],
   "out": "out"

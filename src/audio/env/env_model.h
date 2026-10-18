@@ -75,7 +75,16 @@ bool env_room_contains(const EnvRoom *r, vec3 p, float margin);
 int env_room_taps(const EnvRoom *r, vec3 src, vec3 lis, vec3 lis_right, float c, EnvTap *out, int max);
 // Late reverb for a room estimate (indoor) or the outdoor diffuse field (forest density 0..1, urban 0..1).
 void env_room_reverb(const EnvRoom *r, EnvReverbParams *out);
-void env_outdoor_reverb(float forest, float urban, float snow, EnvReverbParams *out);
+// The outdoor diffuse field around the listener: vegetation (forest 0..1), hard facades (urban 0..1),
+// and terrain: the share of the horizon that returns sound (hits 0..1) and how far (mean_dist m).
+typedef struct EnvField { float forest, urban, hits, mean_dist, snow; } EnvField;
+void env_outdoor_reverb(const EnvField *f, EnvReverbParams *out);
+// Its send at distance d: the direct-to-diffuse ratio measured outdoors at 15 m (~+25 dB in an open
+// field, ~+6 dB in a forest, ~+2 dB in a street, ~+8 dB in a valley) growing like a room's with d.
+float env_outdoor_send(const EnvField *f, float d);
+// The send to a calibrated room reverb that gives the physical direct-to-reverberant ratio at r m
+// from the source in a room of `volume` m3 (Sabine; q: the source's directivity factor, 1 omni).
+float env_reverb_send(float r, float volume, float q);
 
 // ------------------------------------------------------------------ outdoor echoes
 
@@ -88,6 +97,11 @@ typedef struct EnvEcho { vec3 point; float extra_s, gain, lp_hz; int rays, mater
 // sound merge into it and are skipped.
 int env_outdoor_echoes(vec3 src, vec3 lis, const EnvEchoRay *rays, int nrays, float c, float snow,
                        float temp_c, float rh, EnvEcho *out, int max);
+
+// The ground reflection outdoors: the image source below the ground. hs / hl: source / listener
+// heights above it, dh: horizontal distance. Hard ground reflects ~all (a comb of notches high up),
+// soft ground (grass, snow, sand) absorbs the highs. Returns false when the path is degenerate.
+bool env_ground_tap(float hs, float hl, float dh, int ground_mat, float c, EnvTap *out);
 
 // Listener-relative pan (-1 left .. 1 right) and front (cos of the azimuth) of a point.
 void env_pan(vec3 lis, vec3 lis_right, vec3 lis_fwd, vec3 p, float *pan, float *front);
