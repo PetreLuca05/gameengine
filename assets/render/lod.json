@@ -19,20 +19,20 @@
     },
 
     "tiers": {
-        "_comment": "per Engine Fidelity level (r_fidelity): the Modern targets x this. Adjusted per tier when a tier exceeds its budget (docs/LOD.md).",
-        "off": 0.3,
-        "low": 0.4,
-        "medium": 0.6,
-        "high": 0.85,
+        "_comment": "per Engine Fidelity level (r_fidelity): the Modern targets x this. 1 at every level: LOD ranges are a visibility outcome, the same for every player (docs/SETTINGS_AUDIT.md; they were 0.3 / 0.4 / 0.6 / 0.85 / 1). A tier over its budget sheds cost elsewhere, never range.",
+        "off": 1.0,
+        "low": 1.0,
+        "medium": 1.0,
+        "high": 1.0,
         "modern": 1.0
     },
 
     "eras": {
-        "_comment": "per-era multipliers on top of the tier (the 2015 / 2010 presets keep their own pixel errors and densities, docs/CLASSIC_RENDERER.md); 'all' or per category.",
+        "_comment": "per-era multipliers on top of the tier; 'all' or per category. 1 for every era (docs/SETTINGS_AUDIT.md: an era never changes what is visible; 2015 / 2010 were 0.85 / 0.7).",
         "modern": { "all": 1.0 },
         "2020": { "all": 1.0 },
-        "2015": { "all": 0.85 },
-        "2010": { "all": 0.7 }
+        "2015": { "all": 1.0 },
+        "2010": { "all": 1.0 }
     },
 
     "characters": {

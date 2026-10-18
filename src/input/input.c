@@ -244,12 +244,12 @@ static void write_binds(FILE *f) {
 
 void input_init(void) {
     IN = (InputSystem *)calloc(1, sizeof(InputSystem));
-    IN->sens = cvar_reg_float("cl_sensitivity", 2.5f, 0.05f, 20.0f, CVAR_ARCHIVE, "mouse sensitivity (X)");
-    IN->sens_y = cvar_reg_float("cl_sensitivity_y", 2.5f, 0.05f, 20.0f, CVAR_ARCHIVE, "mouse sensitivity (Y)");
-    IN->ads_mult = cvar_reg_float("cl_ads_sensitivity", 0.7f, 0.1f, 2.0f, CVAR_ARCHIVE, "sensitivity multiplier while aiming");
-    IN->invert_y = cvar_reg_bool("cl_invert_y", false, CVAR_ARCHIVE, "invert mouse/stick Y");
-    IN->pad_sens = cvar_reg_float("pad_sensitivity", 3.0f, 0.1f, 10.0f, CVAR_ARCHIVE, "gamepad look speed");
-    IN->pad_deadzone = cvar_reg_float("pad_deadzone", 0.15f, 0.0f, 0.9f, CVAR_ARCHIVE, "gamepad stick deadzone");
+    IN->sens = cvar_reg_float("cl_sensitivity", 2.5f, 0.05f, 20.0f, CVAR_ARCHIVE | CVAR_EDITABLE, "mouse sensitivity (X)");
+    IN->sens_y = cvar_reg_float("cl_sensitivity_y", 2.5f, 0.05f, 20.0f, CVAR_ARCHIVE | CVAR_EDITABLE, "mouse sensitivity (Y)");
+    IN->ads_mult = cvar_reg_float("cl_ads_sensitivity", 0.7f, 0.1f, 2.0f, CVAR_ARCHIVE | CVAR_EDITABLE, "sensitivity multiplier while aiming");
+    IN->invert_y = cvar_reg_bool("cl_invert_y", false, CVAR_ARCHIVE | CVAR_EDITABLE, "invert mouse/stick Y");
+    IN->pad_sens = cvar_reg_float("pad_sensitivity", 3.0f, 0.1f, 10.0f, CVAR_ARCHIVE | CVAR_EDITABLE, "gamepad look speed");
+    IN->pad_deadzone = cvar_reg_float("pad_deadzone", 0.15f, 0.0f, 0.9f, CVAR_ARCHIVE | CVAR_EDITABLE, "gamepad stick deadzone");
     input_reset_bindings();
     cmd_register("bind", cmd_bind, "bind <key> <action> [slot]");
     cmd_register("unbindall", cmd_unbindall, "clear all bindings");

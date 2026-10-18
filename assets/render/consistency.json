@@ -1,0 +1,269 @@
+{
+  "_comment": "Locked values every player shares (docs/SETTINGS_AUDIT.md). Each entry names a CVAR_LOCKED cvar (lint_settings.py); consistency_init applies them at startup, release builds reject other writes, and the hash of this set is part of the build identity and the join handshake (a client with a different set is rejected). 'why': the fairness reason.",
+  "values": {
+    "r_foliage_density": {
+      "value": 1.0,
+      "why": "Grass / plant instance density, one value for everyone (Low used to draw a tenth of the grass: prone players were visible only there). Host rule (lobby 'Foliage density')."
+    },
+    "r_vgeo_impostor_px": {
+      "value": 32,
+      "why": "Trees switch to impostor cards below this projected size: the same range for every level and both renderers (was 96 .. 16 px by level, 64 px classic)."
+    },
+    "r_classic_impostor_px": {
+      "value": 32,
+      "why": "Classic renderer impostor switch: the same as vgeo's (r_vgeo_impostor_px)."
+    },
+    "r_vgeo_error_px": {
+      "value": 1.0,
+      "why": "vgeo projected LOD error: silhouettes at range are the same at every level and era (was x4 .. x1 by level, 2 px in the 2020 era)."
+    },
+    "r_vgeo_lod_px": {
+      "value": 2.0,
+      "why": "Classic renderer discrete LOD pick: the same at every level and era (was x8 .. x1 by level, up to 12 px in the 2010 era)."
+    },
+    "r_lod_bias": {
+      "value": 1.0,
+      "why": "Character LOD bias: distant players keep the same detail at every level (was 0.25 .. 1.0)."
+    },
+    "r_char_quality": {
+      "value": 2,
+      "why": "Character quality only scaled the character LOD thresholds (0.5 .. 1.25x by level): fixed at 2 (x1)."
+    },
+    "r_vgeo_occlusion": {
+      "value": 2,
+      "why": "Two-pass occlusion culling: mode 1 (last frame's Hi-Z) drew a player stepping out of cover one frame late."
+    },
+    "r_culling": {
+      "value": true,
+      "why": "Frustum culling stays on (dev switch)."
+    },
+    "r_shadow_max_distance": {
+      "value": 150,
+      "why": "Sun shadows reach the same distance at every level (was 50 .. 300 m, up to 1000); levels keep resolution, cascades and filter."
+    },
+    "r_cloud_shadows": {
+      "value": true,
+      "why": "Cloud shadows darken the same patches of the map for everyone (they were off on Off / Low)."
+    },
+    "r_moon_shadows": {
+      "value": true,
+      "why": "Twilight moon shadows: the same darkness at dusk at every level (missing below High)."
+    },
+    "r_light_shadows": {
+      "value": true,
+      "why": "Lamp / flashlight shadows: without them a lamp lights a player behind a wall (they were off on Off / Low). The tile size stays a tier."
+    },
+    "r_light_shadow_count": {
+      "value": 10,
+      "why": "Shadowed lamps per frame: every level shadows the same lamps."
+    },
+    "r_fog_scale": {
+      "value": 1.0,
+      "why": "Fog density multiplier (was archived, 0 .. 10): the weather and the level set the fog. Host rule."
+    },
+    "r_atmosphere": {
+      "value": true,
+      "why": "Atmosphere / aerial perspective on: the distant haze is part of the visibility."
+    },
+    "sky_aerial_scale": {
+      "value": 2.0,
+      "why": "Aerial perspective distance multiplier (was archived, 0 .. 20): distant haze is the same for everyone."
+    },
+    "sky_aerial_max": {
+      "value": 3000,
+      "why": "Aerial perspective froxel depth."
+    },
+    "r_auto_exposure": {
+      "value": true,
+      "why": "Auto exposure with the day / night EV floor at every level (the Off level used to run a fixed exposure)."
+    },
+    "r_exposure": {
+      "value": 0.0,
+      "why": "Exposure compensation (+-4 EV) moved the night darkness floor."
+    },
+    "r_gamma": {
+      "value": 1.0,
+      "why": "Gamma 0.5 .. 2 lifted the shadows like a cheat; brightness keeps a narrow 0.85 .. 1.15 band."
+    },
+    "r_lut": {
+      "value": "",
+      "why": "No user grading LUT: it could flatten the darkness."
+    },
+    "r_bloom_intensity": {
+      "value": 0.05,
+      "why": "Bloom strength is the Look's: glare around lamps, muzzle flashes and the sun is the same for everyone."
+    },
+    "r_lens_flare": {
+      "value": 0.0,
+      "why": "Lens flare: 0 at every level (the Look's finish owns any flare)."
+    },
+    "r_lens_dirt": {
+      "value": 0.0,
+      "why": "Lens dirt: 0 at every level."
+    },
+    "r_lens_distortion": {
+      "value": 0.0,
+      "why": "Lens distortion: 0 (it bends the picture the crosshair sits on)."
+    },
+    "r_tonemapper": {
+      "value": 1,
+      "why": "The tonemapper belongs to the Look (r_tonemapper only drives the A/B compare and photo mode)."
+    },
+    "r_lens_drops": {
+      "value": true,
+      "why": "Rain droplets on the lens at every level: switching them off cleared the view in rain (fairness default: hard-coded on)."
+    },
+    "r_lens_drops_intensity": {
+      "value": 0.8,
+      "why": "Lens droplet strength."
+    },
+    "r_stretch": {
+      "value": 0.0,
+      "why": "No stretched resolution: the 4:3-stretch trick makes targets wider on screen."
+    },
+    "vfx_decal_max": {
+      "value": 256,
+      "why": "Impact decal budget: the same bullet holes / blood for everyone (was 16 .. 4096 by level)."
+    },
+    "vfx_max_particles": {
+      "value": 1048576,
+      "why": "GPU particle pool: a small pool silently dropped smoke and impact particles."
+    },
+    "vfx_enable": {
+      "value": true,
+      "why": "Particle effects (muzzle flashes, impacts) on."
+    },
+    "fx_tracers": {
+      "value": true,
+      "why": "Bullet tracers are visible to everyone."
+    },
+    "bal_bullet_trace": {
+      "value": true,
+      "why": "The heat / shock ripple of supersonic bullets (through optics)."
+    },
+    "bal_vapor_trails": {
+      "value": true,
+      "why": "Vapour trails behind supersonic bullets."
+    },
+    "bal_tracer_ignition": {
+      "value": true,
+      "why": "Tracer ignition model (dim for the first tens of metres) for everyone."
+    },
+    "bal_crack_radius": {
+      "value": 120,
+      "why": "Supersonic crack radius: the audio cue of incoming fire."
+    },
+    "world_chunk_radius": {
+      "value": 4,
+      "why": "Terrain chunks streamed around the player (draw distance). Host rule."
+    },
+    "world_lod_distance": {
+      "value": 70,
+      "why": "First terrain LOD switch (m). Host rule."
+    },
+    "r_viewmodel_fov": {
+      "value": 0.0,
+      "why": "Viewmodel FOV follows the camera (0)."
+    },
+    "cam_weapon_fov": {
+      "value": 0.0,
+      "why": "Hands / weapon FOV follows the camera (0); the sight's ADS zoom still applies."
+    },
+    "cl_ads_world_zoom": {
+      "value": 1.5,
+      "why": "ADS world zoom: the sight data owns it."
+    },
+    "ads_eye_relief_scale": {
+      "value": 0.5,
+      "why": "ADS eye relief: how big the sight picture is."
+    },
+    "peek_fov": {
+      "value": 100,
+      "why": "Door peek field of view."
+    },
+    "peek_distortion": {
+      "value": 0.55,
+      "why": "Door peek fisheye distortion."
+    },
+    "crosshair_obstruct": {
+      "value": true,
+      "why": "The crosshair moves to where the bullet will land when something blocks the muzzle (docs/AIM.md)."
+    },
+    "crosshair_follow_kick": {
+      "value": false,
+      "why": "The crosshair shows the true aim point, not the screen centre."
+    },
+    "cl_interp": {
+      "value": 100,
+      "why": "Remote entity interpolation delay (ms): the same timing for everyone."
+    },
+    "death_sequence": {
+      "value": true,
+      "why": "First-person death sequence."
+    },
+    "cl_healthbars": {
+      "value": false,
+      "why": "No health bars over characters (enemy health is game state)."
+    },
+    "dev_damage_numbers": {
+      "value": false,
+      "why": "No floating damage numbers by default (game state). Host rule."
+    },
+    "r_wireframe": {
+      "value": false,
+      "why": "No wireframe (wallhack-class view)."
+    },
+    "r_drawhitboxes": {
+      "value": false,
+      "why": "No hitbox overlay."
+    },
+    "r_drawcollision": {
+      "value": false,
+      "why": "No collision overlay."
+    },
+    "cl_thirdperson": {
+      "value": false,
+      "why": "First person only."
+    },
+    "cam_third": {
+      "value": false,
+      "why": "First person only."
+    },
+    "anim_lean": {
+      "value": true,
+      "why": "Remote players lean visibly (off would hide a peeking head)."
+    },
+    "anim_foot_ik": {
+      "value": true,
+      "why": "Remote players' feet on the ground."
+    },
+    "anim_ragdoll": {
+      "value": true,
+      "why": "Ragdolls (corpses are cover and a DNA source)."
+    },
+    "anim_ragdoll_time": {
+      "value": 45,
+      "why": "Corpse lifetime (s)."
+    },
+    "anim_max_ragdolls": {
+      "value": 24,
+      "why": "Simultaneous ragdolls."
+    },
+    "cl_predict_impacts": {
+      "value": true,
+      "why": "Own impacts shown at once: the same hit feedback timing for everyone."
+    },
+    "cl_predict_hit_reactions": {
+      "value": true,
+      "why": "Predicted hit reactions: the same hit feedback timing for everyone."
+    },
+    "r_terrain": {
+      "value": 1,
+      "why": "Terrain shading on (vertex colours change the ground contrast)."
+    },
+    "r_surfaces": {
+      "value": 1,
+      "why": "Surface textures on."
+    }
+  }
+}

@@ -13,6 +13,7 @@
 #include "protocol.h"
 #include "core/engine.h"
 #include "core/cvar.h"
+#include "core/consistency.h"
 #include "core/log.h"
 #include "core/platform.h"
 #include "game/game.h"
@@ -216,6 +217,13 @@ void lobby_apply_environment(World *w, const LobbySettings *s) {
     int season = s->season < SEASON_COUNT ? s->season : SEASON_SUMMER;
     daynight_set_calendar(w, t->s[season].day_of_year, (float)s->start_hour);
     weather_apply_season(w, season, s->weather, s->dynamic_weather);
+    // Server rules (CVAR_RULE): the host's values replicate to every client (MSG_CVARS).
+    Cvar *fd = cvar_find("r_foliage_density");
+    if (fd) {
+        CvarSource src = cvar_source_push(CVAR_SRC_HOST);
+        cvar_set_float(fd, s->foliage_pct ? (float)DG_CLAMP(s->foliage_pct, 50, 100) / 100.0f : 1.0f);
+        cvar_source_pop(src);
+    }
 }
 
 // ------------------------------------------------------------------ session
@@ -1042,12 +1050,13 @@ static void cmd_lobby_status(int argc, const char **argv) {
 void lobby_net_init(void) {
     S = (LobbySys *)calloc(1, sizeof(LobbySys));
     lobby_init(&S->L);
-    S->privacy = cvar_reg_int("lobby_privacy", LP_FRIENDS, 0, LP_COUNT - 1, 0, "Steam lobby type for the next hosted lobby (0 public, 1 friends, 2 invite only; set by the lobby)");
+    S->privacy = cvar_reg_int("lobby_privacy", LP_FRIENDS, 0, LP_COUNT - 1, CVAR_EDITABLE, "Steam lobby type for the next hosted lobby (0 public, 1 friends, 2 invite only; set by the lobby)");
     maplist_load(&S->maps, "assets/maps");
     cosmetics_load(&S->cos, "assets/cosmetics");
     if (!profile_load(&S->prof)) log_info("profile: none yet (%s)", profile_path());
     if (!maplist_find(&S->maps, S->prof.lobby.map) && S->maps.count) dg_strcpy(S->prof.lobby.map, sizeof(S->prof.lobby.map), S->maps.maps[0].id);
-    S->version_hash = lobby_version_hash(DG_VERSION, DG_PROTOCOL_VERSION, maplist_hash(&S->maps) ^ cosmetics_hash(&S->cos));
+    // The consistency set (assets/render/consistency.json) is part of the content identity.
+    S->version_hash = lobby_version_hash(DG_VERSION, DG_PROTOCOL_VERSION, maplist_hash(&S->maps) ^ cosmetics_hash(&S->cos) ^ consistency_hash());
     log_info("lobby: version %s, build hash %08x", DG_VERSION, S->version_hash);
     cmd_register("lobby_host", cmd_lobby_host, "lobby_host [lan|steam]: open a lobby (main menu Host game)");
     cmd_register("lobby_join", cmd_lobby_join, "lobby_join <ip[:port] | lobby:<id> | steamid64>: join a lobby");

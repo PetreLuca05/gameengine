@@ -250,7 +250,7 @@ static VkDescriptorSet cl_alloc_set(VkImageView v0, VkImageLayout l0, VkImageVie
 }
 
 void vkc_init(void) {
-    C.impostor_px = cvar_reg_float("r_classic_impostor_px", 64.0f, 0.0f, 1024.0f, CVAR_ARCHIVE,
+    C.impostor_px = cvar_reg_float("r_classic_impostor_px", 64.0f, 0.0f, 1024.0f, CVAR_LOCKED,
                                    "classic renderer: trees with an impostor atlas draw it below this projected size (pixels across, 0 = never)");
     VkDescriptorSetLayoutBinding b[2];
     memset(b, 0, sizeof(b));

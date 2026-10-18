@@ -408,8 +408,8 @@ static void cmd_commands(int argc, const char **argv) {
 }
 
 void commands_tab_register(void) {
-    CT.favorites = cvar_reg_string("con_favorites", "*", CVAR_ARCHIVE, "Commands tab: favorite commands and settings (space separated; * = the defaults)");
-    CT.recent_cv = cvar_reg_string("con_recent", "", CVAR_ARCHIVE, "Commands tab: recently run commands (newest first)");
-    CT.enable = cvar_reg_bool("con_enable", false, CVAR_ARCHIVE, "the pause menu's Commands tab without developer mode");
+    CT.favorites = cvar_reg_string("con_favorites", "*", CVAR_ARCHIVE | CVAR_EDITABLE, "Commands tab: favorite commands and settings (space separated; * = the defaults)");
+    CT.recent_cv = cvar_reg_string("con_recent", "", CVAR_ARCHIVE | CVAR_EDITABLE, "Commands tab: recently run commands (newest first)");
+    CT.enable = cvar_reg_bool("con_enable", false, CVAR_ARCHIVE | CVAR_EDITABLE, "the pause menu's Commands tab without developer mode");
     cmd_register("commands_filter", cmd_commands, "Commands tab: commands_filter <all|favorites|recent|category> [search]: filter the list (tests)");
 }

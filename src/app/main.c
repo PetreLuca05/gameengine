@@ -15,6 +15,7 @@
 #include "core/engine.h"
 #include "core/log.h"
 #include "core/cvar.h"
+#include "core/consistency.h"
 #include "core/platform.h"
 #include "core/jobs.h"
 #include "core/crash.h"
@@ -157,6 +158,8 @@ int main(int argc, char **argv) {
     crash_install();
     log_info("Deadground %s starting (log: %s)", DG_VERSION, log_path);
     cvar_system_init();
+    // --release-locks: the release build's settings locks in a dev build (docs/SETTINGS_AUDIT.md).
+    for (int i = 1; i < argc; i++) if (!strcmp(argv[i], "--release-locks")) cvar_set_release_locks(true);
     arena_init(&g_engine.perm_arena, MB(16), "perm");
     arena_init(&g_engine.frame_arena, MB(32), "frame");
     arena_init(&g_engine.level_arena, MB(64), "level");
@@ -185,6 +188,7 @@ int main(int argc, char **argv) {
     assets_init("data/assets.json");
     for (int i = 1; i < argc; i++) if (!strcmp(argv[i], "--rebuild-cache")) anim_cache_set_rebuild(true);   // before the anim library loads
     game_init();
+    consistency_init();  // the locked values (docs/SETTINGS_AUDIT.md): before the config and the lobby's build hash
     lobby_net_init();    // maps, cosmetics, profile (docs/MENU_LOBBY.md)
     mainmenu_init();
 
@@ -193,14 +197,15 @@ int main(int argc, char **argv) {
     // Test runs never read or write the user's settings (they used to overwrite them on exit).
     config_set_enabled(!opt.test);
     bool first_run = false;
-    cvar_reg_float("dev_fixed_fps", 0.0f, 0.0f, 1000.0f, 0, "frame time fixed to 1 / this (0 = real time): deterministic captures on slow machines");
+    cvar_reg_float("dev_fixed_fps", 0.0f, 0.0f, 1000.0f, CVAR_LOCKED, "frame time fixed to 1 / this (0 = real time): deterministic captures on slow machines");
     if (opt.test) cvar_set("r_maxfps", "60");
     if (opt.test) cvar_set("developer", "1");   // test runs keep the developer HUD, Debug settings and Commands tab (players default to 0)
-    else if (config_exec_file(video_config_path())) log_info("config loaded from %s", video_config_path());
+    else if (config_load_file(video_config_path())) log_info("config loaded from %s", video_config_path());
     else { log_info("no config yet: settings will be saved to %s", video_config_path()); first_run = true; }
     game_fidelity_settings_loaded(first_run);   // Engine Fidelity: saved level + user choices in force
     input_bind_missing_defaults();
     config_clear_dirty();   // loading the config is not a change
+    if (config_load_dropped()) config_mark_dirty();   // ... unless it held settings that are no longer saved
     if (!opt.test) game_config_loaded();   // migrations are changes: saved on exit
     if (cvar_find("r_mode")->i != 0 || cw->i != 1600 || ch->i != 900) video_apply();
     parse_args(argc, argv, &opt);

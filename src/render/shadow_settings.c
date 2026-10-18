@@ -26,12 +26,15 @@ void shs_quality_default(QualityShadowSettings *q) { shs_quality_for_tier(q, 4);
 void shs_quality_for_tier(QualityShadowSettings *q, int level) {
     // Off / Low / Medium / High / Modern (fidelity.h FID_*); assets/render/fidelity/*.json mirror it
     // (tests/test_shadow_settings.c checks they agree).
+    // The distance is locked (assets/render/consistency.json r_shadow_max_distance, docs/
+    // SETTINGS_AUDIT.md): every level shadows out to 150 m and has at least hard shadows; the levels
+    // trade resolution, cascades and the filter.
     static const struct { ShadowsMode mode; ShadowRes res; int casc; float dist; SoftQuality soft; } k[5] = {
-        { SHADOWS_DISABLE, SHADOW_RES_LOW, 1, 50.0f, SOFT_LOW },
-        { SHADOWS_HARD_ONLY, SHADOW_RES_LOW, 2, 50.0f, SOFT_LOW },
-        { SHADOWS_HARD_AND_SOFT, SHADOW_RES_MEDIUM, 2, 100.0f, SOFT_LOW },
-        { SHADOWS_HARD_AND_SOFT, SHADOW_RES_HIGH, 4, 200.0f, SOFT_MEDIUM },
-        { SHADOWS_HARD_AND_SOFT, SHADOW_RES_VERY_HIGH, 4, 300.0f, SOFT_ULTRA },
+        { SHADOWS_HARD_ONLY, SHADOW_RES_LOW, 2, 150.0f, SOFT_LOW },
+        { SHADOWS_HARD_ONLY, SHADOW_RES_LOW, 4, 150.0f, SOFT_LOW },
+        { SHADOWS_HARD_AND_SOFT, SHADOW_RES_MEDIUM, 4, 150.0f, SOFT_LOW },
+        { SHADOWS_HARD_AND_SOFT, SHADOW_RES_HIGH, 4, 150.0f, SOFT_MEDIUM },
+        { SHADOWS_HARD_AND_SOFT, SHADOW_RES_VERY_HIGH, 4, 150.0f, SOFT_ULTRA },
     };
     int l = level < 0 ? 0 : (level > 4 ? 4 : level);
     memset(q, 0, sizeof(*q));

@@ -20,10 +20,10 @@ void lod_table_default(LodTable *t) {
     t->band = 0.25f;
     const float cat[LODC_COUNT] = { 1.0f, 2.0f, 2.0f, 1.5f, 1.5f, 1.5f, 1.5f };
     memcpy(t->cat, cat, sizeof(cat));
-    const float tier[5] = { 0.3f, 0.4f, 0.6f, 0.85f, 1.0f };
-    memcpy(t->tier, tier, sizeof(tier));
+    // 1 at every level and era: LOD ranges are a visibility outcome (docs/SETTINGS_AUDIT.md).
+    for (int l = 0; l < 5; l++) t->tier[l] = 1.0f;
     for (int e = 0; e < 4; e++)
-        for (int c = 0; c < LODC_COUNT; c++) t->era[e][c] = e == 2 ? 0.85f : (e == 3 ? 0.7f : 1.0f);
+        for (int c = 0; c < LODC_COUNT; c++) t->era[e][c] = 1.0f;
     t->char_px[0] = 140.0f;
     t->char_px[1] = 60.0f;
     t->char_px[2] = 25.0f;
@@ -289,12 +289,12 @@ void lod_init(void) {
     L.init = true;
     lod_table_default(&L.t);
     load_shipped();
-    L.fade_time = cvar_reg_float("r_lod_fade_time", L.t.fade_time, 0.0f, 3.0f, CVAR_ARCHIVE, "LOD cross-fade time of characters and their shadows (s, 0 = cut; docs/LOD.md)");
-    L.band = cvar_reg_float("r_lod_fade_band", L.t.band, 0.0f, 2.0f, CVAR_ARCHIVE,
+    L.fade_time = cvar_reg_float("r_lod_fade_time", L.t.fade_time, 0.0f, 3.0f, CVAR_LOCKED, "LOD cross-fade time of characters and their shadows (s, 0 = cut; docs/LOD.md)");
+    L.band = cvar_reg_float("r_lod_fade_band", L.t.band, 0.0f, 2.0f, CVAR_LOCKED,
                             "distance band of the stateless LOD / impostor cross-fades (octaves of projected size, 0 = cut; docs/LOD.md)");
-    L.fade_debug = cvar_reg_int("r_lod_fade_debug", 0, 0, 1, 0, "tint fading LODs (green: fading in, red: fading out)");
-    L.legacy = cvar_reg_bool("r_lod_legacy", false, 0, "the LOD ranges and transitions from before docs/LOD.md (comparisons; r_vgeo 1 always uses them)");
-    L.scope = cvar_reg_bool("r_lod_scope", true, 0, "scope picture-in-picture LOD (docs/LOD.md): its own classic culling / LOD pick, characters at their magnified size (0: before)");
+    L.fade_debug = cvar_reg_int("r_lod_fade_debug", 0, 0, 1, CVAR_LOCKED, "tint fading LODs (green: fading in, red: fading out)");
+    L.legacy = cvar_reg_bool("r_lod_legacy", false, CVAR_LOCKED, "the LOD ranges and transitions from before docs/LOD.md (comparisons; r_vgeo 1 always uses them)");
+    L.scope = cvar_reg_bool("r_lod_scope", true, CVAR_LOCKED, "scope picture-in-picture LOD (docs/LOD.md): its own classic culling / LOD pick, characters at their magnified size (0: before)");
     cmd_register("r_lod_reload", cmd_lod_reload, "reload assets/render/lod.json (LOD ranges, docs/LOD.md)");
 }
 

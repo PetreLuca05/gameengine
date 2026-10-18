@@ -27,10 +27,10 @@ static struct {
 } PK;
 
 void peek_register(void) {
-    PK.fov = cvar_reg_float("peek_fov", 100.0f, 60.0f, 140.0f, CVAR_ARCHIVE, "door peek: field of view through the visor (deg)");
-    PK.distortion = cvar_reg_float("peek_distortion", 0.55f, 0.0f, 1.0f, CVAR_ARCHIVE, "door peek: fisheye lens distortion");
-    PK.yaw_limit = cvar_reg_float("peek_yaw_limit", 40.0f, 0.0f, 80.0f, 0, "door peek: look left / right limit around the visor axis (deg)");
-    PK.pitch_limit = cvar_reg_float("peek_pitch_limit", 28.0f, 0.0f, 80.0f, 0, "door peek: look up / down limit (deg)");
+    PK.fov = cvar_reg_float("peek_fov", 100.0f, 60.0f, 140.0f, CVAR_LOCKED, "door peek: field of view through the visor (deg)");
+    PK.distortion = cvar_reg_float("peek_distortion", 0.55f, 0.0f, 1.0f, CVAR_LOCKED, "door peek: fisheye lens distortion");
+    PK.yaw_limit = cvar_reg_float("peek_yaw_limit", 40.0f, 0.0f, 80.0f, CVAR_LOCKED, "door peek: look left / right limit around the visor axis (deg)");
+    PK.pitch_limit = cvar_reg_float("peek_pitch_limit", 28.0f, 0.0f, 80.0f, CVAR_LOCKED, "door peek: look up / down limit (deg)");
 }
 
 bool peek_active(void) { return PK.active; }

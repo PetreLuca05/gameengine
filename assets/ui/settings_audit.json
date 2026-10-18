@@ -1,0 +1,2295 @@
+{
+ "_comment": "Settings audit (docs/SETTINGS_AUDIT.md): the reason and settings-UI place of every registered cvar. Its class must match the CVAR_EDITABLE / CVAR_TIER / CVAR_LOCKED (+ CVAR_RULE) flag of the registration (tools/tests/lint_settings.py); settings_audit prints it.",
+ "cvars": {
+  "ads_debug": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Debug view / log: dev builds only (debug views can expose geometry and entities through walls)."
+  },
+  "ads_dof": {
+   "class": "TIER",
+   "ui": "—",
+   "reason": "ADS weapon blur: availability by level, and r_dof 0 turns it off."
+  },
+  "ads_dof_focus": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "ADS DoF tuning (focus / f-stop / near blur): tuning values, not choices."
+  },
+  "ads_dof_fstop": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "ADS DoF tuning (focus / f-stop / near blur): tuning values, not choices."
+  },
+  "ads_dof_near_blur": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "ADS DoF tuning (focus / f-stop / near blur): tuning values, not choices."
+  },
+  "ads_eye_relief_scale": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "ADS FOV per sight: world zoom and eye relief come from the sight data."
+  },
+  "ads_sens_coef": {
+   "class": "EDITABLE",
+   "ui": "Controls",
+   "reason": "Input: sensitivities, inversion, ADS scaling, deadzone, toggles."
+  },
+  "ads_sens_mode": {
+   "class": "EDITABLE",
+   "ui": "Controls",
+   "reason": "Input: sensitivities, inversion, ADS scaling, deadzone, toggles."
+  },
+  "aim_debug": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Debug view / log: dev builds only (debug views can expose geometry and entities through walls)."
+  },
+  "anim_corpse_collision": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Test foliage / corpse collision / hold point state / sound trace: dev switches."
+  },
+  "anim_damage": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Character animation features (foot IK, spine, turn, hold, lean, damage reactions, ragdolls): remote players must look the same to everyone; lean off would hide a peeking head."
+  },
+  "anim_debug": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Debug view / log: dev builds only (debug views can expose geometry and entities through walls)."
+  },
+  "anim_eval_budget": {
+   "class": "TIER",
+   "ui": "—",
+   "reason": "Streaming / animation budgets: cost spread over frames; final state identical."
+  },
+  "anim_foot_ik": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Character animation features (foot IK, spine, turn, hold, lean, damage reactions, ragdolls): remote players must look the same to everyone; lean off would hide a peeking head."
+  },
+  "anim_forearm_twist": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Character animation features (foot IK, spine, turn, hold, lean, damage reactions, ragdolls): remote players must look the same to everyone; lean off would hide a peeking head."
+  },
+  "anim_hold": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Character animation features (foot IK, spine, turn, hold, lean, damage reactions, ragdolls): remote players must look the same to everyone; lean off would hide a peeking head."
+  },
+  "anim_hold_assert": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Debug view / log: dev builds only (debug views can expose geometry and entities through walls)."
+  },
+  "anim_hold_debug": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Debug view / log: dev builds only (debug views can expose geometry and entities through walls)."
+  },
+  "anim_ik_shoulders": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Character animation features (foot IK, spine, turn, hold, lean, damage reactions, ragdolls): remote players must look the same to everyone; lean off would hide a peeking head."
+  },
+  "anim_lean": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Character animation features (foot IK, spine, turn, hold, lean, damage reactions, ragdolls): remote players must look the same to everyone; lean off would hide a peeking head."
+  },
+  "anim_local_resim": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Spectator extrapolation / pop warning: netcode tuning."
+  },
+  "anim_max_ragdolls": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Corpse lifetime / ragdoll cap: corpses are cover and a DNA source (REVIVE.md)."
+  },
+  "anim_net_debug": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Debug view / log: dev builds only (debug views can expose geometry and entities through walls)."
+  },
+  "anim_ragdoll": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Character animation features (foot IK, spine, turn, hold, lean, damage reactions, ragdolls): remote players must look the same to everyone; lean off would hide a peeking head."
+  },
+  "anim_ragdoll_debug": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Debug view / log: dev builds only (debug views can expose geometry and entities through walls)."
+  },
+  "anim_ragdoll_time": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Corpse lifetime / ragdoll cap: corpses are cover and a DNA source (REVIVE.md)."
+  },
+  "anim_resync_ticks": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Spectator extrapolation / pop warning: netcode tuning."
+  },
+  "anim_sample_rate": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Shader hot reload, fixed frame time, anim bake rate: dev tools."
+  },
+  "anim_spine": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Character animation features (foot IK, spine, turn, hold, lean, damage reactions, ragdolls): remote players must look the same to everyone; lean off would hide a peeking head."
+  },
+  "anim_turn": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Character animation features (foot IK, spine, turn, hold, lean, damage reactions, ragdolls): remote players must look the same to everyone; lean off would hide a peeking head."
+  },
+  "bal_bullet_trace": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Visibility: changes what you can see relative to other players. Tracers / bullet trace / vapour trails / tracer ignition: muzzle and tracer visibility."
+  },
+  "bal_crack_radius": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Supersonic crack radius: an audio cue of incoming fire."
+  },
+  "bal_drag_model": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "bal_enable": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "bal_spin_drift": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "bal_tracer_ignition": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Visibility: changes what you can see relative to other players. Tracers / bullet trace / vapour trails / tracer ignition: muzzle and tracer visibility."
+  },
+  "bal_vapor_trails": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Visibility: changes what you can see relative to other players. Tracers / bullet trace / vapour trails / tracer ignition: muzzle and tracer visibility."
+  },
+  "bal_watch": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Debug view / log: dev builds only (debug views can expose geometry and entities through walls)."
+  },
+  "bal_wind": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "bal_wind_dir": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "ballistics_debug": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Debug view / log: dev builds only (debug views can expose geometry and entities through walls)."
+  },
+  "block_fire_when_barrel_blocked": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "cam_bob_scale": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "First-person camera rig tuning (head follow / spring / clamp / socket bob): changes aim stability and what peeks over cover. One rig for all."
+  },
+  "cam_collision_radius": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "First-person camera rig tuning (head follow / spring / clamp / socket bob): changes aim stability and what peeks over cover. One rig for all."
+  },
+  "cam_death_follow": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Death / downed sequence and its camera (task: death / downed sequences)."
+  },
+  "cam_death_spectate": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Death / downed sequence and its camera (task: death / downed sequences)."
+  },
+  "cam_debug": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Debug view / log: dev builds only (debug views can expose geometry and entities through walls)."
+  },
+  "cam_head_clamp": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "First-person camera rig tuning (head follow / spring / clamp / socket bob): changes aim stability and what peeks over cover. One rig for all."
+  },
+  "cam_head_damping": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "First-person camera rig tuning (head follow / spring / clamp / socket bob): changes aim stability and what peeks over cover. One rig for all."
+  },
+  "cam_head_follow": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "First-person camera rig tuning (head follow / spring / clamp / socket bob): changes aim stability and what peeks over cover. One rig for all."
+  },
+  "cam_head_follow_lateral": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "First-person camera rig tuning (head follow / spring / clamp / socket bob): changes aim stability and what peeks over cover. One rig for all."
+  },
+  "cam_head_stiffness": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "First-person camera rig tuning (head follow / spring / clamp / socket bob): changes aim stability and what peeks over cover. One rig for all."
+  },
+  "cam_kick_scale": {
+   "class": "EDITABLE",
+   "ui": "Graphics > Comfort",
+   "reason": "Camera shake: visual camera kick on shots, 0.25 .. 1 (accessibility). Aim recoil is separate (wpn_recoil_scale, host). Also scales cl_fire_punch."
+  },
+  "cam_recon_smooth_time": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "First-person camera rig tuning (head follow / spring / clamp / socket bob): changes aim stability and what peeks over cover. One rig for all."
+  },
+  "cam_third": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Visibility: changes what you can see relative to other players. Wireframe / hitboxes / collision / CPU skinning / third person: wallhack-class views, dev only."
+  },
+  "cam_weapon_fov": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Viewmodel FOV (task: viewmodel FOV locked). Hands follow the camera FOV; the sight's ADS zoom still applies."
+  },
+  "cfg_migration": {
+   "class": "EDITABLE",
+   "ui": "—",
+   "reason": "Config migration counter: bookkeeping the game writes (saved, so migrations run once)."
+  },
+  "char_inspect": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Hand pose editor / hands rig tuning: dev tools."
+  },
+  "cl_ads_sensitivity": {
+   "class": "EDITABLE",
+   "ui": "Controls",
+   "reason": "Input: sensitivities, inversion, ADS scaling, deadzone, toggles."
+  },
+  "cl_ads_world_zoom": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "ADS FOV per sight: world zoom and eye relief come from the sight data."
+  },
+  "cl_camera_socket": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "First-person camera rig tuning (head follow / spring / clamp / socket bob): changes aim stability and what peeks over cover. One rig for all."
+  },
+  "cl_camera_socket_follow": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "First-person camera rig tuning (head follow / spring / clamp / socket bob): changes aim stability and what peeks over cover. One rig for all."
+  },
+  "cl_camera_socket_roll": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "First-person camera rig tuning (head follow / spring / clamp / socket bob): changes aim stability and what peeks over cover. One rig for all."
+  },
+  "cl_clock": {
+   "class": "EDITABLE",
+   "ui": "HUD",
+   "reason": "HUD layout / visibility: scale, opacity, compass, coordinates, kill counter / feed, pings, phone panel, timed ring, clock."
+  },
+  "cl_crouch_toggle": {
+   "class": "EDITABLE",
+   "ui": "Controls",
+   "reason": "Input: sensitivities, inversion, ADS scaling, deadzone, toggles."
+  },
+  "cl_fire_punch": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Fire animation tuning (FIRE_ANIM.md, ONE global sway): the item kick, master scale, punch, item bob, look lag. Player-facing control is Weapon kick / sway / Camera shake."
+  },
+  "cl_fov": {
+   "class": "EDITABLE",
+   "ui": "Graphics > Comfort",
+   "reason": "World FOV: personal comfort within the band 60 .. 120 deg vertical (was 50 .. 120). sv_fov / sv_fov_max still override."
+  },
+  "cl_fp_body": {
+   "class": "EDITABLE",
+   "ui": "—",
+   "reason": "Own body in first person: only your view of yourself."
+  },
+  "cl_fp_debug": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Debug view / log: dev builds only (debug views can expose geometry and entities through walls)."
+  },
+  "cl_headbob": {
+   "class": "EDITABLE",
+   "ui": "Graphics > Comfort",
+   "reason": "Head bob amount 0 .. 1 (was 0 .. 3; above 1 only makes it worse). cl_headbob stays as its on/off alias."
+  },
+  "cl_headbob_amount": {
+   "class": "EDITABLE",
+   "ui": "Graphics > Comfort",
+   "reason": "Head bob amount 0 .. 1 (was 0 .. 3; above 1 only makes it worse). cl_headbob stays as its on/off alias."
+  },
+  "cl_healthbars": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Health bars over characters: shows enemy health (game state). Off; a lobby rule may turn them on for everyone."
+  },
+  "cl_interact_range": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Interaction ray length: gameplay."
+  },
+  "cl_interp": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Networking (task: interp exposed as a knob): entity interpolation delay, archived and client-set today."
+  },
+  "cl_invert_y": {
+   "class": "EDITABLE",
+   "ui": "Controls",
+   "reason": "Input: sensitivities, inversion, ADS scaling, deadzone, toggles."
+  },
+  "cl_name": {
+   "class": "EDITABLE",
+   "ui": "—",
+   "reason": "Identity / networking preferences / console."
+  },
+  "cl_parts": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Hand pose editor / hands rig tuning: dev tools."
+  },
+  "cl_predict_hit_reactions": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Hit feedback prediction (own impacts / reactions shown before the host confirms): timing of game state; on for all."
+  },
+  "cl_predict_impacts": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Hit feedback prediction (own impacts / reactions shown before the host confirms): timing of game state; on for all."
+  },
+  "cl_sensitivity": {
+   "class": "EDITABLE",
+   "ui": "Controls",
+   "reason": "Input: sensitivities, inversion, ADS scaling, deadzone, toggles."
+  },
+  "cl_sensitivity_y": {
+   "class": "EDITABLE",
+   "ui": "Controls",
+   "reason": "Input: sensitivities, inversion, ADS scaling, deadzone, toggles."
+  },
+  "cl_showfps": {
+   "class": "EDITABLE",
+   "ui": "Graphics > Display",
+   "reason": "FPS overlay toggle (kept as asked)."
+  },
+  "cl_skin": {
+   "class": "EDITABLE",
+   "ui": "Character",
+   "reason": "Skin: cosmetic, seen by everyone (same set for all)."
+  },
+  "cl_sprint_fov": {
+   "class": "EDITABLE",
+   "ui": "Graphics > Comfort",
+   "reason": "Sprint FOV kick: comfort (motion sickness); bounded 0 .. 7 deg, it can only narrow the change."
+  },
+  "cl_sprint_toggle": {
+   "class": "EDITABLE",
+   "ui": "Controls",
+   "reason": "Input: sensitivities, inversion, ADS scaling, deadzone, toggles."
+  },
+  "cl_thirdperson": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Visibility: changes what you can see relative to other players. Wireframe / hitboxes / collision / CPU skinning / third person: wallhack-class views, dev only."
+  },
+  "cl_thirdperson_dist": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Visibility: changes what you can see relative to other players. Wireframe / hitboxes / collision / CPU skinning / third person: wallhack-class views, dev only."
+  },
+  "cl_weapon_sway": {
+   "class": "EDITABLE",
+   "ui": "Graphics > Comfort",
+   "reason": "Weapon sway (cosmetic: aiming stays exact, crosshair tab note): 0 .. 1."
+  },
+  "con_enable": {
+   "class": "EDITABLE",
+   "ui": "—",
+   "reason": "Identity / networking preferences / console."
+  },
+  "con_favorites": {
+   "class": "EDITABLE",
+   "ui": "—",
+   "reason": "Identity / networking preferences / console."
+  },
+  "con_recent": {
+   "class": "EDITABLE",
+   "ui": "—",
+   "reason": "Identity / networking preferences / console."
+  },
+  "crosshair_color": {
+   "class": "EDITABLE",
+   "ui": "HUD > Crosshair",
+   "reason": "Crosshair style / colour / size / opacity / outline: style only (the gap stays the exact spread plus this)."
+  },
+  "crosshair_follow_kick": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Crosshair follow-kick changes the crosshair from the true aim point to the screen centre: spread / aim behaviour, not style."
+  },
+  "crosshair_gap": {
+   "class": "EDITABLE",
+   "ui": "HUD > Crosshair",
+   "reason": "Crosshair style / colour / size / opacity / outline: style only (the gap stays the exact spread plus this)."
+  },
+  "crosshair_hitmarker": {
+   "class": "EDITABLE",
+   "ui": "HUD > Crosshair",
+   "reason": "Hit markers / target tint: turning them off only removes information from yourself; their timing / accuracy is fixed in code."
+  },
+  "crosshair_length": {
+   "class": "EDITABLE",
+   "ui": "HUD > Crosshair",
+   "reason": "Crosshair style / colour / size / opacity / outline: style only (the gap stays the exact spread plus this)."
+  },
+  "crosshair_obstruct": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Crosshair obstruction (task: obstruction crosshair behaviour): where the bullet will land."
+  },
+  "crosshair_obstruct_lerp": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Crosshair obstruction (task: obstruction crosshair behaviour): where the bullet will land."
+  },
+  "crosshair_opacity": {
+   "class": "EDITABLE",
+   "ui": "HUD > Crosshair",
+   "reason": "Crosshair style / colour / size / opacity / outline: style only (the gap stays the exact spread plus this)."
+  },
+  "crosshair_outline": {
+   "class": "EDITABLE",
+   "ui": "HUD > Crosshair",
+   "reason": "Crosshair style / colour / size / opacity / outline: style only (the gap stays the exact spread plus this)."
+  },
+  "crosshair_style": {
+   "class": "EDITABLE",
+   "ui": "HUD > Crosshair",
+   "reason": "Crosshair style / colour / size / opacity / outline: style only (the gap stays the exact spread plus this)."
+  },
+  "crosshair_target_color": {
+   "class": "EDITABLE",
+   "ui": "HUD > Crosshair",
+   "reason": "Hit markers / target tint: turning them off only removes information from yourself; their timing / accuracy is fixed in code."
+  },
+  "crosshair_thickness": {
+   "class": "EDITABLE",
+   "ui": "HUD > Crosshair",
+   "reason": "Crosshair style / colour / size / opacity / outline: style only (the gap stays the exact spread plus this)."
+  },
+  "death_impact_debug": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Debug view / log: dev builds only (debug views can expose geometry and entities through walls)."
+  },
+  "death_sequence": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Death / downed sequence and its camera (task: death / downed sequences)."
+  },
+  "dev_damage_numbers": {
+   "class": "LOCKED+RULE",
+   "ui": "—",
+   "reason": "Damage numbers (archived, on by default): game state; a lobby rule."
+  },
+  "dev_fixed_fps": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Shader hot reload, fixed frame time, anim bake rate: dev tools."
+  },
+  "developer": {
+   "class": "EDITABLE",
+   "ui": "—",
+   "reason": "Identity / networking preferences / console."
+  },
+  "env_night": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Shutter preview / VFX time scale / sky disc zoom: dev views."
+  },
+  "fire_tracers_only": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "fx_tracers": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Visibility: changes what you can see relative to other players. Tracers / bullet trace / vapour trails / tracer ignition: muzzle and tracer visibility."
+  },
+  "g_map": {
+   "class": "EDITABLE",
+   "ui": "—",
+   "reason": "Identity / networking preferences / console."
+  },
+  "gore_bleed": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Gore follows gore_level: wounds bleeding (blood trails are information)."
+  },
+  "gore_level": {
+   "class": "EDITABLE",
+   "ui": "Character > Content",
+   "reason": "Gore (moved from Graphics): content / age rating, must stay a choice. Gore Off keeps neutral impact puffs, so hits stay readable."
+  },
+  "handpose_autoreg": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Hand pose editor / hands rig tuning: dev tools."
+  },
+  "handpose_editor_dir": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Hand pose editor / hands rig tuning: dev tools."
+  },
+  "handpose_watch": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Hand pose editor / hands rig tuning: dev tools."
+  },
+  "hands_debug": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Debug view / log: dev builds only (debug views can expose geometry and entities through walls)."
+  },
+  "hands_forearm": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Hand pose editor / hands rig tuning: dev tools."
+  },
+  "hands_upper_arm": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Hand pose editor / hands rig tuning: dev tools."
+  },
+  "hitbox_debug": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Debug view / log: dev builds only (debug views can expose geometry and entities through walls)."
+  },
+  "holdpoint_force_state": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Test foliage / corpse collision / hold point state / sound trace: dev switches."
+  },
+  "holdpoint_static": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Hand pose editor / hands rig tuning: dev tools."
+  },
+  "horde_debug": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Debug view / log: dev builds only (debug views can expose geometry and entities through walls)."
+  },
+  "horde_enable": {
+   "class": "LOCKED+RULE",
+   "ui": "—",
+   "reason": "Open-world zombies / horde: host / dev."
+  },
+  "horde_jobs": {
+   "class": "LOCKED+RULE",
+   "ui": "—",
+   "reason": "Open-world zombies / horde: host / dev."
+  },
+  "host_timescale": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Time scale: cheat."
+  },
+  "hud_compass": {
+   "class": "EDITABLE",
+   "ui": "HUD",
+   "reason": "HUD layout / visibility: scale, opacity, compass, coordinates, kill counter / feed, pings, phone panel, timed ring, clock."
+  },
+  "hud_coords": {
+   "class": "EDITABLE",
+   "ui": "HUD",
+   "reason": "HUD layout / visibility: scale, opacity, compass, coordinates, kill counter / feed, pings, phone panel, timed ring, clock."
+  },
+  "hud_killcount": {
+   "class": "EDITABLE",
+   "ui": "HUD",
+   "reason": "HUD layout / visibility: scale, opacity, compass, coordinates, kill counter / feed, pings, phone panel, timed ring, clock."
+  },
+  "hud_killcount_split": {
+   "class": "EDITABLE",
+   "ui": "HUD",
+   "reason": "HUD layout / visibility: scale, opacity, compass, coordinates, kill counter / feed, pings, phone panel, timed ring, clock."
+  },
+  "hud_killfeed": {
+   "class": "EDITABLE",
+   "ui": "HUD",
+   "reason": "HUD layout / visibility: scale, opacity, compass, coordinates, kill counter / feed, pings, phone panel, timed ring, clock."
+  },
+  "hud_opacity": {
+   "class": "EDITABLE",
+   "ui": "HUD",
+   "reason": "HUD layout / visibility: scale, opacity, compass, coordinates, kill counter / feed, pings, phone panel, timed ring, clock."
+  },
+  "hud_phone_corner": {
+   "class": "EDITABLE",
+   "ui": "HUD",
+   "reason": "HUD layout / visibility: scale, opacity, compass, coordinates, kill counter / feed, pings, phone panel, timed ring, clock."
+  },
+  "hud_phone_size": {
+   "class": "EDITABLE",
+   "ui": "HUD",
+   "reason": "HUD layout / visibility: scale, opacity, compass, coordinates, kill counter / feed, pings, phone panel, timed ring, clock."
+  },
+  "hud_ping_compass": {
+   "class": "EDITABLE",
+   "ui": "HUD",
+   "reason": "HUD layout / visibility: scale, opacity, compass, coordinates, kill counter / feed, pings, phone panel, timed ring, clock."
+  },
+  "hud_ping_markers": {
+   "class": "EDITABLE",
+   "ui": "HUD",
+   "reason": "HUD layout / visibility: scale, opacity, compass, coordinates, kill counter / feed, pings, phone panel, timed ring, clock."
+  },
+  "hud_scale": {
+   "class": "EDITABLE",
+   "ui": "HUD",
+   "reason": "HUD layout / visibility: scale, opacity, compass, coordinates, kill counter / feed, pings, phone panel, timed ring, clock."
+  },
+  "hud_timed_ring": {
+   "class": "EDITABLE",
+   "ui": "HUD",
+   "reason": "HUD layout / visibility: scale, opacity, compass, coordinates, kill counter / feed, pings, phone panel, timed ring, clock."
+  },
+  "lobby_privacy": {
+   "class": "EDITABLE",
+   "ui": "—",
+   "reason": "Identity / networking preferences / console."
+  },
+  "net_autohost": {
+   "class": "EDITABLE",
+   "ui": "—",
+   "reason": "Identity / networking preferences / console."
+  },
+  "net_fakejitter": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Network condition simulator: dev only."
+  },
+  "net_fakelag": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Network condition simulator: dev only."
+  },
+  "net_fakeloss": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Network condition simulator: dev only."
+  },
+  "net_port": {
+   "class": "EDITABLE",
+   "ui": "—",
+   "reason": "Identity / networking preferences / console."
+  },
+  "net_showstats": {
+   "class": "EDITABLE",
+   "ui": "—",
+   "reason": "Identity / networking preferences / console."
+  },
+  "ow_zombies": {
+   "class": "LOCKED+RULE",
+   "ui": "—",
+   "reason": "Open-world zombies / horde: host / dev."
+  },
+  "pad_deadzone": {
+   "class": "EDITABLE",
+   "ui": "Controls",
+   "reason": "Input: sensitivities, inversion, ADS scaling, deadzone, toggles."
+  },
+  "pad_sensitivity": {
+   "class": "EDITABLE",
+   "ui": "Controls",
+   "reason": "Input: sensitivities, inversion, ADS scaling, deadzone, toggles."
+  },
+  "peek_distortion": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Door peek FOV / fisheye: how much you see through the visor is game state."
+  },
+  "peek_fov": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Door peek FOV / fisheye: how much you see through the visor is game state."
+  },
+  "peek_pitch_limit": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Door peek FOV / fisheye: how much you see through the visor is game state."
+  },
+  "peek_yaw_limit": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Door peek FOV / fisheye: how much you see through the visor is game state."
+  },
+  "phone_auto_pair": {
+   "class": "EDITABLE",
+   "ui": "Phone",
+   "reason": "Phone companion: personal device / stream preferences; the in-game item behaves the same for everyone."
+  },
+  "phone_battery_drain": {
+   "class": "EDITABLE",
+   "ui": "Phone",
+   "reason": "Phone companion: personal device / stream preferences; the in-game item behaves the same for everyone."
+  },
+  "phone_bind": {
+   "class": "EDITABLE",
+   "ui": "Phone (dev)",
+   "reason": "Phone companion transport (PHONE.md): personal device setup."
+  },
+  "phone_exposure": {
+   "class": "EDITABLE",
+   "ui": "Phone",
+   "reason": "Phone companion: personal device / stream preferences; the in-game item behaves the same for everyone."
+  },
+  "phone_filter": {
+   "class": "EDITABLE",
+   "ui": "Phone",
+   "reason": "Phone companion: personal device / stream preferences; the in-game item behaves the same for everyone."
+  },
+  "phone_fps": {
+   "class": "EDITABLE",
+   "ui": "Phone",
+   "reason": "Phone companion: personal device / stream preferences; the in-game item behaves the same for everyone."
+  },
+  "phone_invert_pitch": {
+   "class": "EDITABLE",
+   "ui": "Phone",
+   "reason": "Phone companion: personal device / stream preferences; the in-game item behaves the same for everyone."
+  },
+  "phone_invert_roll": {
+   "class": "EDITABLE",
+   "ui": "Phone",
+   "reason": "Phone companion: personal device / stream preferences; the in-game item behaves the same for everyone."
+  },
+  "phone_invert_yaw": {
+   "class": "EDITABLE",
+   "ui": "Phone",
+   "reason": "Phone companion: personal device / stream preferences; the in-game item behaves the same for everyone."
+  },
+  "phone_pair_timeout": {
+   "class": "EDITABLE",
+   "ui": "Phone",
+   "reason": "Phone companion: personal device / stream preferences; the in-game item behaves the same for everyone."
+  },
+  "phone_pairing": {
+   "class": "EDITABLE",
+   "ui": "Phone",
+   "reason": "Phone companion: personal device / stream preferences; the in-game item behaves the same for everyone."
+  },
+  "phone_photo_hires": {
+   "class": "EDITABLE",
+   "ui": "Phone",
+   "reason": "Phone companion: personal device / stream preferences; the in-game item behaves the same for everyone."
+  },
+  "phone_port": {
+   "class": "EDITABLE",
+   "ui": "Phone",
+   "reason": "Phone companion: personal device / stream preferences; the in-game item behaves the same for everyone."
+  },
+  "phone_quality": {
+   "class": "EDITABLE",
+   "ui": "Phone",
+   "reason": "Phone companion: personal device / stream preferences; the in-game item behaves the same for everyone."
+  },
+  "phone_record_max": {
+   "class": "EDITABLE",
+   "ui": "Phone",
+   "reason": "Phone companion: personal device / stream preferences; the in-game item behaves the same for everyone."
+  },
+  "phone_res_h": {
+   "class": "EDITABLE",
+   "ui": "Phone (dev)",
+   "reason": "Phone companion transport (PHONE.md): personal device setup."
+  },
+  "phone_res_w": {
+   "class": "EDITABLE",
+   "ui": "Phone (dev)",
+   "reason": "Phone companion transport (PHONE.md): personal device setup."
+  },
+  "phone_sensitivity": {
+   "class": "EDITABLE",
+   "ui": "Phone",
+   "reason": "Phone companion: personal device / stream preferences; the in-game item behaves the same for everyone."
+  },
+  "phone_server": {
+   "class": "EDITABLE",
+   "ui": "Phone",
+   "reason": "Phone companion: personal device / stream preferences; the in-game item behaves the same for everyone."
+  },
+  "phone_smoothing": {
+   "class": "EDITABLE",
+   "ui": "Phone",
+   "reason": "Phone companion: personal device / stream preferences; the in-game item behaves the same for everyone."
+  },
+  "phone_tls": {
+   "class": "EDITABLE",
+   "ui": "Phone (dev)",
+   "reason": "Phone companion transport (PHONE.md): personal device setup."
+  },
+  "phone_token_ttl": {
+   "class": "EDITABLE",
+   "ui": "Phone (dev)",
+   "reason": "Phone companion transport (PHONE.md): personal device setup."
+  },
+  "phone_video_kbps": {
+   "class": "EDITABLE",
+   "ui": "Phone",
+   "reason": "Phone companion: personal device / stream preferences; the in-game item behaves the same for everyone."
+  },
+  "ping_chat": {
+   "class": "EDITABLE",
+   "ui": "HUD",
+   "reason": "Pings: personal filters of teammates' pings."
+  },
+  "ping_enable": {
+   "class": "EDITABLE",
+   "ui": "HUD",
+   "reason": "Pings: personal filters of teammates' pings."
+  },
+  "ping_sound": {
+   "class": "EDITABLE",
+   "ui": "HUD",
+   "reason": "Pings: personal filters of teammates' pings."
+  },
+  "pl_accel": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "pl_air_accel": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "pl_air_control": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "pl_air_mantle_max": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "pl_coyote_time": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "pl_crouch_speed": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "pl_debug_mantle": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Debug view / log: dev builds only (debug views can expose geometry and entities through walls)."
+  },
+  "pl_friction": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "pl_gravity": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "pl_hang_reach": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "pl_hang_yaw_limit": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "pl_jump_buffer": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "pl_jump_speed": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "pl_mantle_max": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "pl_mantle_min": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "pl_mantle_reach": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "pl_mantle_speed": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "pl_max_slope": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "pl_noclip_speed": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "pl_slow_walk_speed": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "pl_sprint_speed": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "pl_step_height": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "pl_swim_accel": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "pl_swim_breath": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "pl_swim_depth": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "pl_swim_dive_speed": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "pl_swim_exit_depth": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "pl_swim_eye": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "pl_swim_rise": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "pl_swim_speed": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "pl_swim_spring": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "pl_swim_sprint_speed": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "pl_swim_stamina": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "pl_vault_max": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "pl_vault_speed": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "pl_wade_crouch_max": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "pl_wade_slow": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "pl_wade_sprint_max": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "pl_walk_speed": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "r_aa": {
+   "class": "TIER",
+   "ui": "—",
+   "reason": "Anti-aliasing mode: a quality / cost trade at the same visibility; picked by the level."
+  },
+  "r_aniso": {
+   "class": "TIER",
+   "ui": "—",
+   "reason": "Texture mips / anisotropic filtering: quality only."
+  },
+  "r_ao": {
+   "class": "TIER",
+   "ui": "—",
+   "reason": "AO / contact shadows / SSR / SSGI: lighting quality tiers. SSR only reflects pixels already on screen (no new information)."
+  },
+  "r_atmosphere": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Visibility: changes what you can see relative to other players. Atmosphere / aerial perspective: distant haze. sky_aerial_scale was archived and player-settable 0 .. 20."
+  },
+  "r_auto_exposure": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Visibility: changes what you can see relative to other players. Exposure: compensation (+-4 EV) and auto-exposure on/off move the night darkness floor; the Off level has fixed exposure today (V10)."
+  },
+  "r_bloom": {
+   "class": "TIER",
+   "ui": "—",
+   "reason": "Bloom on / off follows the level; its strength is locked to the Look (r_bloom_intensity)."
+  },
+  "r_bloom_intensity": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Look-owned: tonemapper and bloom / flare / dirt / distortion strength belong to the Look; a glare or distortion slider changes what you see near lights and the sun. Flare / dirt / distortion are 0 at every level today."
+  },
+  "r_bloom_quality": {
+   "class": "TIER",
+   "ui": "—",
+   "reason": "DoF / bloom gather quality."
+  },
+  "r_brightness": {
+   "class": "EDITABLE",
+   "ui": "Graphics > Display",
+   "reason": "Brightness: kept for display calibration but narrowed to 0.85 .. 1.15 (was 0.3 .. 3.0, which lifted the night darkness floor). Applied after tonemapping like before."
+  },
+  "r_char_maps": {
+   "class": "TIER",
+   "ui": "—",
+   "reason": "Character skin PBR maps: shading quality."
+  },
+  "r_char_normal_scale": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Character normal map strength: authored value."
+  },
+  "r_char_quality": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Visibility: changes what you can see relative to other players. Character quality only scaled the character LOD thresholds (0.5 .. 1.25x by level, V4): fixed at 2 (x1)."
+  },
+  "r_chromatic": {
+   "class": "EDITABLE",
+   "ui": "Graphics > Comfort",
+   "reason": "Film grain, chromatic aberration, vignette, sharpening: cosmetic, each bounded by the level and the Look."
+  },
+  "r_classic_impostor_px": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Visibility: changes what you can see relative to other players. Impostor switch size decides when trees turn into cards; vgeo 16 px vs classic 64 px today, and tiers 96 .. 16 px (V2); locked 32 px for both renderers."
+  },
+  "r_cloud_shadows": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Visibility: changes what you can see relative to other players. Cloud shadows darken patches of the map: Off / Low drop them (V5)."
+  },
+  "r_colorblind": {
+   "class": "EDITABLE",
+   "ui": "Graphics > Display",
+   "reason": "Colour-blind correction: accessibility; remaps hues, not luminance, at every level (Off included)."
+  },
+  "r_contact_shadows": {
+   "class": "TIER",
+   "ui": "—",
+   "reason": "AO / contact shadows / SSR / SSGI: lighting quality tiers. SSR only reflects pixels already on screen (no new information)."
+  },
+  "r_cpu_skinning": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Visibility: changes what you can see relative to other players. Wireframe / hitboxes / collision / CPU skinning / third person: wallhack-class views, dev only."
+  },
+  "r_culling": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Visibility: changes what you can see relative to other players. Frustum culling on/off (dev toggle)."
+  },
+  "r_dof": {
+   "class": "EDITABLE",
+   "ui": "Graphics > Comfort",
+   "reason": "Depth of field Off / When aiming / Always: cosmetic, only ever blurs your own view. Off also disables the ADS weapon blur (ads_dof)."
+  },
+  "r_dof_quality": {
+   "class": "TIER",
+   "ui": "—",
+   "reason": "DoF / bloom gather quality."
+  },
+  "r_drawcollision": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Visibility: changes what you can see relative to other players. Wireframe / hitboxes / collision / CPU skinning / third person: wallhack-class views, dev only."
+  },
+  "r_drawhitboxes": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Visibility: changes what you can see relative to other players. Wireframe / hitboxes / collision / CPU skinning / third person: wallhack-class views, dev only."
+  },
+  "r_era": {
+   "class": "EDITABLE",
+   "ui": "Graphics (top)",
+   "reason": "Era: kept editable, but eras may only change geometry *style* and cost (vgeo vs classic, shading). Their foliage density and LOD columns move to the locked set (see violations V1 / V3)."
+  },
+  "r_exposure": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Visibility: changes what you can see relative to other players. Exposure: compensation (+-4 EV) and auto-exposure on/off move the night darkness floor; the Off level has fixed exposure today (V10)."
+  },
+  "r_fb_underwater": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Post compare / profile / volumes / underwater hook / disabled passes: dev tools (r_post_disable can drop the fog pass)."
+  },
+  "r_fidelity": {
+   "class": "EDITABLE",
+   "ui": "Graphics (top)",
+   "reason": "Engine Fidelity level: the one quality choice a player makes."
+  },
+  "r_fidelity_autodetect": {
+   "class": "EDITABLE",
+   "ui": "—",
+   "reason": "Fidelity bookkeeping written by the game (benchmark results, recommendation, auto-detect, target fps)."
+  },
+  "r_fidelity_bench": {
+   "class": "EDITABLE",
+   "ui": "—",
+   "reason": "Fidelity bookkeeping written by the game (benchmark results, recommendation, auto-detect, target fps)."
+  },
+  "r_fidelity_custom": {
+   "class": "EDITABLE",
+   "ui": "—",
+   "reason": "Player tweaks of EDITABLE fidelity features only (render scale, upscaler, motion blur, DoF, grain, CA, vignette, sharpen). TIER / LOCKED features are no longer stored here; old entries are dropped on load."
+  },
+  "r_fidelity_recommended": {
+   "class": "EDITABLE",
+   "ui": "—",
+   "reason": "Fidelity bookkeeping written by the game (benchmark results, recommendation, auto-detect, target fps)."
+  },
+  "r_fidelity_target_fps": {
+   "class": "EDITABLE",
+   "ui": "—",
+   "reason": "Fidelity bookkeeping written by the game (benchmark results, recommendation, auto-detect, target fps)."
+  },
+  "r_film_grain": {
+   "class": "EDITABLE",
+   "ui": "Graphics > Comfort",
+   "reason": "Film grain, chromatic aberration, vignette, sharpening: cosmetic, each bounded by the level and the Look."
+  },
+  "r_fog_scale": {
+   "class": "LOCKED+RULE",
+   "ui": "—",
+   "reason": "Visibility: changes what you can see relative to other players. Fog density multiplier (0 .. 10, archived!): fixed 1.0; weather_fog / lobby rule set the weather instead."
+  },
+  "r_foliage_density": {
+   "class": "LOCKED+RULE",
+   "ui": "—",
+   "reason": "Visibility: changes what you can see relative to other players. Foliage density is one value for everyone (consistency.json); a lobby rule may change it for the whole session. Today tiers cap it at 0.1 / 0.25 / 0.5 / 0.8 / 1.0 and eras at 1.0 / 0.7 / 0.4 / 0.2 (V1)."
+  },
+  "r_foliage_wind": {
+   "class": "TIER",
+   "ui": "—",
+   "reason": "Foliage *shading* tier: wind layers. Density / fade distances are locked."
+  },
+  "r_foliage_wind_solo": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Debug view / log: dev builds only (debug views can expose geometry and entities through walls)."
+  },
+  "r_gamma": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Visibility: changes what you can see relative to other players. Gamma 0.5 .. 2.0 lifts shadows like a cheat; folded into the narrow brightness band, gamma fixed at 1.0."
+  },
+  "r_grass_debug": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Debug view / log: dev builds only (debug views can expose geometry and entities through walls)."
+  },
+  "r_grass_sss": {
+   "class": "TIER",
+   "ui": "—",
+   "reason": "Terrain / ground shading tiers (TERRAIN_SHADING.md): texture variation, parallax, transitions; no effect on what stands on it."
+  },
+  "r_grass_tex": {
+   "class": "TIER",
+   "ui": "—",
+   "reason": "Terrain / ground shading tiers (TERRAIN_SHADING.md): texture variation, parallax, transitions; no effect on what stands on it."
+  },
+  "r_grid": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Visibility: changes what you can see relative to other players. Unit grid drawn on dev geometry / terrain."
+  },
+  "r_ground_macro": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Visibility: changes what you can see relative to other players. Terrain / building texturing on/off: dev switches (vertex colours change ground contrast)."
+  },
+  "r_hdr_max_nits": {
+   "class": "EDITABLE",
+   "ui": "—",
+   "reason": "HDR display peak: a property of the monitor (tone-map shoulder), not of the scene; console only, defaults from the display's reported HDR headroom."
+  },
+  "r_hdr_output": {
+   "class": "EDITABLE",
+   "ui": "Graphics > Display",
+   "reason": "HDR10 output: a display capability, purely tonal."
+  },
+  "r_hdr_paper_white": {
+   "class": "EDITABLE",
+   "ui": "Graphics > Display",
+   "reason": "HDR paper white: the HDR equivalent of brightness; bounded to 100 .. 300 nits so it cannot lift night scenes past the SDR brightness band."
+  },
+  "r_height": {
+   "class": "EDITABLE",
+   "ui": "Graphics > Display",
+   "reason": "Display mode: personal hardware choice, applied with Apply / confirm."
+  },
+  "r_lens_dirt": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Look-owned: tonemapper and bloom / flare / dirt / distortion strength belong to the Look; a glare or distortion slider changes what you see near lights and the sun. Flare / dirt / distortion are 0 at every level today."
+  },
+  "r_lens_distortion": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Look-owned: tonemapper and bloom / flare / dirt / distortion strength belong to the Look; a glare or distortion slider changes what you see near lights and the sun. Flare / dirt / distortion are 0 at every level today."
+  },
+  "r_lens_drops": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Visibility: changes what you can see relative to other players. Lens droplets: fairness default, hard-coded on (switching them off clears the view in rain); missing below High today (V11)."
+  },
+  "r_lens_drops_intensity": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Visibility: changes what you can see relative to other players. Lens droplets: fairness default, hard-coded on (switching them off clears the view in rain); missing below High today (V11)."
+  },
+  "r_lens_flare": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Look-owned: tonemapper and bloom / flare / dirt / distortion strength belong to the Look; a glare or distortion slider changes what you see near lights and the sun. Flare / dirt / distortion are 0 at every level today."
+  },
+  "r_light_shadow_count": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Visibility: changes what you can see relative to other players. Lamp / flashlight shadows: without them lamps light through walls and players behind cover; Off / Low drop them (V5). Tile size stays a tier."
+  },
+  "r_light_shadow_quality": {
+   "class": "TIER",
+   "ui": "—",
+   "reason": "Lamp / flashlight shadow tile size (256 / 512 px). Whether lamps are shadowed is locked."
+  },
+  "r_light_shadows": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Visibility: changes what you can see relative to other players. Lamp / flashlight shadows: without them lamps light through walls and players behind cover; Off / Low drop them (V5). Tile size stays a tier."
+  },
+  "r_lod_bias": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Visibility: changes what you can see relative to other players. Character LOD bias: tiers 0.25 .. 1.0 (V4)."
+  },
+  "r_lod_debug": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Debug view / log: dev builds only (debug views can expose geometry and entities through walls)."
+  },
+  "r_lod_fade_band": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Visibility: changes what you can see relative to other players. LOD / impostor cross-fade band and time: part of the LOD ranges."
+  },
+  "r_lod_fade_debug": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Debug view / log: dev builds only (debug views can expose geometry and entities through walls)."
+  },
+  "r_lod_fade_time": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Visibility: changes what you can see relative to other players. LOD / impostor cross-fade band and time: part of the LOD ranges."
+  },
+  "r_lod_force": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Debug view / log: dev builds only (debug views can expose geometry and entities through walls)."
+  },
+  "r_lod_legacy": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Visibility: changes what you can see relative to other players. Scope LOD rule and the legacy LOD path: dev switches."
+  },
+  "r_lod_scope": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Visibility: changes what you can see relative to other players. Scope LOD rule and the legacy LOD path: dev switches."
+  },
+  "r_look": {
+   "class": "EDITABLE",
+   "ui": "Graphics (top)",
+   "reason": "Look: five fixed grading presets (LOOKS.md). They grade colour; exposure floor / fog / bloom strength are locked underneath, and lint_looks checks no look lifts the night floor."
+  },
+  "r_look_modulators": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Look modulators: dev switch."
+  },
+  "r_lut": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Visibility: changes what you can see relative to other players. User LUT file: could flatten the darkness; dev only."
+  },
+  "r_maxfps": {
+   "class": "EDITABLE",
+   "ui": "Graphics > Display",
+   "reason": "Frame cap: personal; no effect on what is drawn."
+  },
+  "r_mode": {
+   "class": "EDITABLE",
+   "ui": "Graphics > Display",
+   "reason": "Display mode: personal hardware choice, applied with Apply / confirm."
+  },
+  "r_moon_shadows": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Visibility: changes what you can see relative to other players. Twilight moon shadows: darkness at dusk; missing below High (V5)."
+  },
+  "r_motion_blur": {
+   "class": "EDITABLE",
+   "ui": "Graphics > Comfort",
+   "reason": "Motion blur (camera / camera + objects): comfort; the viewmodel is masked out of the velocity buffer so blur can never hide the weapon's recoil (hard-coded)."
+  },
+  "r_motion_blur_strength": {
+   "class": "EDITABLE",
+   "ui": "Graphics > Comfort",
+   "reason": "Motion blur (camera / camera + objects): comfort; the viewmodel is masked out of the velocity buffer so blur can never hide the weapon's recoil (hard-coded)."
+  },
+  "r_perf_overlay": {
+   "class": "EDITABLE",
+   "ui": "—",
+   "reason": "Performance overlay (frame times + budget): diagnostics only, shows nothing about the world. Developer page."
+  },
+  "r_post_compare": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Post compare / profile / volumes / underwater hook / disabled passes: dev tools (r_post_disable can drop the fog pass)."
+  },
+  "r_post_debug": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Debug view / log: dev builds only (debug views can expose geometry and entities through walls)."
+  },
+  "r_post_disable": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Post compare / profile / volumes / underwater hook / disabled passes: dev tools (r_post_disable can drop the fog pass)."
+  },
+  "r_post_feedback": {
+   "class": "EDITABLE",
+   "ui": "Graphics > Comfort",
+   "reason": "Screen effects (damage / flash / low health): photosensitivity accessibility, bounded 0.5 .. 1 (was 0 .. 1: zero hid every flashbang)."
+  },
+  "r_post_preset": {
+   "class": "TIER",
+   "ui": "—",
+   "reason": "Post preset: follows the level."
+  },
+  "r_post_profile": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Post compare / profile / volumes / underwater hook / disabled passes: dev tools (r_post_disable can drop the fog pass)."
+  },
+  "r_post_volumes_draw": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Post compare / profile / volumes / underwater hook / disabled passes: dev tools (r_post_disable can drop the fog pass)."
+  },
+  "r_precip_quality": {
+   "class": "TIER",
+   "ui": "—",
+   "reason": "Rain / snow shading tier. Particle density is locked (violation V8): tiers change shading, never count."
+  },
+  "r_puddle_reflections": {
+   "class": "TIER",
+   "ui": "—",
+   "reason": "AO / contact shadows / SSR / SSGI: lighting quality tiers. SSR only reflects pixels already on screen (no new information)."
+  },
+  "r_render_scale": {
+   "class": "EDITABLE",
+   "ui": "Graphics > Display",
+   "reason": "Resolution of the 3D view, bounded by the level (fidelity bounds). Fewer pixels look softer but never remove objects (LOD / culling no longer depend on it, see locked rows)."
+  },
+  "r_scope_pip_scale": {
+   "class": "TIER",
+   "ui": "—",
+   "reason": "Scope picture resolution: like render scale for the scope (sharpness, not content; the scope's LOD is locked)."
+  },
+  "r_shader_hotreload": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Shader hot reload, fixed frame time, anim bake rate: dev tools."
+  },
+  "r_shadow_cascade_border": {
+   "class": "TIER",
+   "ui": "—",
+   "reason": "Shadow filter / resolution / cascades / projection / splits / border / near offset / shadowmask: quality of the same shadows. Distance and on/off are locked."
+  },
+  "r_shadow_cascades": {
+   "class": "TIER",
+   "ui": "—",
+   "reason": "Shadow filter / resolution / cascades / projection / splits / border / near offset / shadowmask: quality of the same shadows. Distance and on/off are locked."
+  },
+  "r_shadow_debug": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Debug view / log: dev builds only (debug views can expose geometry and entities through walls)."
+  },
+  "r_shadow_max_distance": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Visibility: changes what you can see relative to other players. Sun shadow distance: tiers 50 .. 300 m (max 1000) today (V5). One distance for everyone; tiers keep resolution / cascades."
+  },
+  "r_shadow_min_radius": {
+   "class": "TIER",
+   "ui": "—",
+   "reason": "Small props (< radius) skip the sun shadow: cost only; characters, vehicles and doors are exempt (to verify in the shadow caster filter)."
+  },
+  "r_shadow_near_offset": {
+   "class": "TIER",
+   "ui": "—",
+   "reason": "Shadow filter / resolution / cascades / projection / splits / border / near offset / shadowmask: quality of the same shadows. Distance and on/off are locked."
+  },
+  "r_shadow_projection": {
+   "class": "TIER",
+   "ui": "—",
+   "reason": "Shadow filter / resolution / cascades / projection / splits / border / near offset / shadowmask: quality of the same shadows. Distance and on/off are locked."
+  },
+  "r_shadow_resolution": {
+   "class": "TIER",
+   "ui": "—",
+   "reason": "Shadow filter / resolution / cascades / projection / splits / border / near offset / shadowmask: quality of the same shadows. Distance and on/off are locked."
+  },
+  "r_shadow_split2": {
+   "class": "TIER",
+   "ui": "—",
+   "reason": "Shadow filter / resolution / cascades / projection / splits / border / near offset / shadowmask: quality of the same shadows. Distance and on/off are locked."
+  },
+  "r_shadow_split4_1": {
+   "class": "TIER",
+   "ui": "—",
+   "reason": "Shadow filter / resolution / cascades / projection / splits / border / near offset / shadowmask: quality of the same shadows. Distance and on/off are locked."
+  },
+  "r_shadow_split4_2": {
+   "class": "TIER",
+   "ui": "—",
+   "reason": "Shadow filter / resolution / cascades / projection / splits / border / near offset / shadowmask: quality of the same shadows. Distance and on/off are locked."
+  },
+  "r_shadow_split4_3": {
+   "class": "TIER",
+   "ui": "—",
+   "reason": "Shadow filter / resolution / cascades / projection / splits / border / near offset / shadowmask: quality of the same shadows. Distance and on/off are locked."
+  },
+  "r_shadowmask_distance": {
+   "class": "TIER",
+   "ui": "—",
+   "reason": "Shadow filter / resolution / cascades / projection / splits / border / near offset / shadowmask: quality of the same shadows. Distance and on/off are locked."
+  },
+  "r_shadowmask_mode": {
+   "class": "TIER",
+   "ui": "—",
+   "reason": "Shadow filter / resolution / cascades / projection / splits / border / near offset / shadowmask: quality of the same shadows. Distance and on/off are locked."
+  },
+  "r_shadows": {
+   "class": "TIER",
+   "ui": "—",
+   "reason": "Shadow mode: Hard vs Soft is a quality tier, but every level has at least Hard: Disable removed every sun shadow (enemy shadows, dark interiors), an advantage (V5)."
+  },
+  "r_sharpen": {
+   "class": "EDITABLE",
+   "ui": "Graphics > Comfort",
+   "reason": "Film grain, chromatic aberration, vignette, sharpening: cosmetic, each bounded by the level and the Look."
+  },
+  "r_soft_shadow_quality": {
+   "class": "TIER",
+   "ui": "—",
+   "reason": "Shadow filter / resolution / cascades / projection / splits / border / near offset / shadowmask: quality of the same shadows. Distance and on/off are locked."
+  },
+  "r_ssgi": {
+   "class": "TIER",
+   "ui": "—",
+   "reason": "AO / contact shadows / SSR / SSGI: lighting quality tiers. SSR only reflects pixels already on screen (no new information)."
+  },
+  "r_ssr": {
+   "class": "TIER",
+   "ui": "—",
+   "reason": "AO / contact shadows / SSR / SSGI: lighting quality tiers. SSR only reflects pixels already on screen (no new information)."
+  },
+  "r_stretch": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Visibility: changes what you can see relative to other players. Stretched resolution makes targets wider on screen (the 4:3 stretch trick): fixed 0."
+  },
+  "r_surfaces": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Visibility: changes what you can see relative to other players. Terrain / building texturing on/off: dev switches (vertex colours change ground contrast)."
+  },
+  "r_terrain": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Visibility: changes what you can see relative to other players. Terrain / building texturing on/off: dev switches (vertex colours change ground contrast)."
+  },
+  "r_terrain_debug": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Debug view / log: dev builds only (debug views can expose geometry and entities through walls)."
+  },
+  "r_terrain_quality": {
+   "class": "TIER",
+   "ui": "—",
+   "reason": "Terrain / ground shading tiers (TERRAIN_SHADING.md): texture variation, parallax, transitions; no effect on what stands on it."
+  },
+  "r_terrain_tex_size": {
+   "class": "TIER",
+   "ui": "—",
+   "reason": "Terrain / ground shading tiers (TERRAIN_SHADING.md): texture variation, parallax, transitions; no effect on what stands on it."
+  },
+  "r_terrain_watch": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Debug view / log: dev builds only (debug views can expose geometry and entities through walls)."
+  },
+  "r_texture_quality": {
+   "class": "TIER",
+   "ui": "—",
+   "reason": "Texture mips / anisotropic filtering: quality only."
+  },
+  "r_tonemapper": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Look-owned: tonemapper and bloom / flare / dirt / distortion strength belong to the Look; a glare or distortion slider changes what you see near lights and the sun. Flare / dirt / distortion are 0 at every level today."
+  },
+  "r_upscale_ratio": {
+   "class": "EDITABLE",
+   "ui": "Graphics > Display",
+   "reason": "Resolution of the 3D view, bounded by the level (fidelity bounds). Fewer pixels look softer but never remove objects (LOD / culling no longer depend on it, see locked rows)."
+  },
+  "r_upscaler": {
+   "class": "EDITABLE",
+   "ui": "Graphics > Display",
+   "reason": "Resolution of the 3D view, bounded by the level (fidelity bounds). Fewer pixels look softer but never remove objects (LOD / culling no longer depend on it, see locked rows)."
+  },
+  "r_vgeo": {
+   "class": "TIER",
+   "ui": "—",
+   "reason": "Renderer choice (vgeo vs classic) and its internal budgets: picked by Era / level; both paths must reach the same locked LOD / impostor outcome."
+  },
+  "r_vgeo_characters": {
+   "class": "TIER",
+   "ui": "—",
+   "reason": "Renderer choice (vgeo vs classic) and its internal budgets: picked by Era / level; both paths must reach the same locked LOD / impostor outcome."
+  },
+  "r_vgeo_debug": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Debug view / log: dev builds only (debug views can expose geometry and entities through walls)."
+  },
+  "r_vgeo_debug_spheres": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Debug view / log: dev builds only (debug views can expose geometry and entities through walls)."
+  },
+  "r_vgeo_error_px": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Visibility: changes what you can see relative to other players. LOD error / pick thresholds decide silhouettes at range (task: vgeo error threshold, LOD bias). Tiers scale them x4 .. x1 (vgeo) and x8 .. x1 (classic), eras 2 .. 12 px (V3)."
+  },
+  "r_vgeo_freeze": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Debug view / log: dev builds only (debug views can expose geometry and entities through walls)."
+  },
+  "r_vgeo_impostor_px": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Visibility: changes what you can see relative to other players. Impostor switch size decides when trees turn into cards; vgeo 16 px vs classic 64 px today, and tiers 96 .. 16 px (V2); locked 32 px for both renderers."
+  },
+  "r_vgeo_lod_px": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Visibility: changes what you can see relative to other players. LOD error / pick thresholds decide silhouettes at range (task: vgeo error threshold, LOD bias). Tiers scale them x4 .. x1 (vgeo) and x8 .. x1 (classic), eras 2 .. 12 px (V3)."
+  },
+  "r_vgeo_occlusion": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Visibility: changes what you can see relative to other players. Occlusion culling mode: mode 1 (last frame's Hi-Z) shows a player stepping out from cover one frame late; two-pass (2) for everyone."
+  },
+  "r_vgeo_pool_mb": {
+   "class": "TIER",
+   "ui": "—",
+   "reason": "Renderer choice (vgeo vs classic) and its internal budgets: picked by Era / level; both paths must reach the same locked LOD / impostor outcome."
+  },
+  "r_vgeo_shadow_error_px": {
+   "class": "TIER",
+   "ui": "—",
+   "reason": "Renderer choice (vgeo vs classic) and its internal budgets: picked by Era / level; both paths must reach the same locked LOD / impostor outcome."
+  },
+  "r_vgeo_shadows": {
+   "class": "TIER",
+   "ui": "—",
+   "reason": "Renderer choice (vgeo vs classic) and its internal budgets: picked by Era / level; both paths must reach the same locked LOD / impostor outcome."
+  },
+  "r_vgeo_stream_pages_per_frame": {
+   "class": "TIER",
+   "ui": "—",
+   "reason": "Renderer choice (vgeo vs classic) and its internal budgets: picked by Era / level; both paths must reach the same locked LOD / impostor outcome."
+  },
+  "r_vgeo_sw_px": {
+   "class": "TIER",
+   "ui": "—",
+   "reason": "Renderer choice (vgeo vs classic) and its internal budgets: picked by Era / level; both paths must reach the same locked LOD / impostor outcome."
+  },
+  "r_viewmodel_fov": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Viewmodel FOV (task: viewmodel FOV locked). Hands follow the camera FOV; the sight's ADS zoom still applies."
+  },
+  "r_vignette": {
+   "class": "EDITABLE",
+   "ui": "Graphics > Comfort",
+   "reason": "Film grain, chromatic aberration, vignette, sharpening: cosmetic, each bounded by the level and the Look."
+  },
+  "r_vm_shadow": {
+   "class": "TIER",
+   "ui": "—",
+   "reason": "Viewmodel shadow tile: only your own arms."
+  },
+  "r_vol_local_lights": {
+   "class": "TIER",
+   "ui": "—",
+   "reason": "Volumetric fog quality (froxel tiers, lamp scattering). Fog *density* is locked (r_fog_scale) and the distance-fog fallback must match it (violation V6)."
+  },
+  "r_volumetrics": {
+   "class": "TIER",
+   "ui": "—",
+   "reason": "Volumetric fog quality (froxel tiers, lamp scattering). Fog *density* is locked (r_fog_scale) and the distance-fog fallback must match it (violation V6)."
+  },
+  "r_vsync": {
+   "class": "EDITABLE",
+   "ui": "Graphics > Display",
+   "reason": "Display mode: personal hardware choice, applied with Apply / confirm."
+  },
+  "r_water": {
+   "class": "TIER",
+   "ui": "—",
+   "reason": "Water shading tier (ripples, caustics, waves). Transparency / turbidity are locked (violation V7: tier 0 drops refraction)."
+  },
+  "r_water_debug": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Debug view / log: dev builds only (debug views can expose geometry and entities through walls)."
+  },
+  "r_width": {
+   "class": "EDITABLE",
+   "ui": "Graphics > Display",
+   "reason": "Display mode: personal hardware choice, applied with Apply / confirm."
+  },
+  "r_wireframe": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Visibility: changes what you can see relative to other players. Wireframe / hitboxes / collision / CPU skinning / third person: wallhack-class views, dev only."
+  },
+  "revive_debug": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Debug view / log: dev builds only (debug views can expose geometry and entities through walls)."
+  },
+  "shutter_preview": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Shutter preview / VFX time scale / sky disc zoom: dev views."
+  },
+  "sight_brightness": {
+   "class": "EDITABLE",
+   "ui": "HUD > Crosshair",
+   "reason": "Red dot brightness (moved from Graphics): bounded 0.25 .. 2 (was 0 .. 4)."
+  },
+  "sight_debug": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Debug view / log: dev builds only (debug views can expose geometry and entities through walls)."
+  },
+  "sky_aerial_max": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Visibility: changes what you can see relative to other players. Atmosphere / aerial perspective: distant haze. sky_aerial_scale was archived and player-settable 0 .. 20."
+  },
+  "sky_aerial_scale": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Visibility: changes what you can see relative to other players. Atmosphere / aerial perspective: distant haze. sky_aerial_scale was archived and player-settable 0 .. 20."
+  },
+  "sky_debug": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Debug view / log: dev builds only (debug views can expose geometry and entities through walls)."
+  },
+  "sky_disc_zoom": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Shutter preview / VFX time scale / sky disc zoom: dev views."
+  },
+  "snd_master": {
+   "class": "EDITABLE",
+   "ui": "Audio",
+   "reason": "Volumes."
+  },
+  "snd_music": {
+   "class": "EDITABLE",
+   "ui": "Audio",
+   "reason": "Volumes."
+  },
+  "snd_sfx": {
+   "class": "EDITABLE",
+   "ui": "Audio",
+   "reason": "Volumes."
+  },
+  "snd_trace": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Test foliage / corpse collision / hold point state / sound trace: dev switches."
+  },
+  "snd_ui": {
+   "class": "EDITABLE",
+   "ui": "Audio",
+   "reason": "Volumes."
+  },
+  "snd_voice": {
+   "class": "EDITABLE",
+   "ui": "Audio",
+   "reason": "Volumes."
+  },
+  "snd_weather": {
+   "class": "EDITABLE",
+   "ui": "Audio",
+   "reason": "Volumes."
+  },
+  "spec_blend_time": {
+   "class": "EDITABLE",
+   "ui": "Character > Spectating",
+   "reason": "Death cam time / blend: personal pacing of your own spectator camera."
+  },
+  "spec_death_cam_time": {
+   "class": "EDITABLE",
+   "ui": "Character > Spectating",
+   "reason": "Death cam time / blend: personal pacing of your own spectator camera."
+  },
+  "spec_dump": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Debug view / log: dev builds only (debug views can expose geometry and entities through walls)."
+  },
+  "spec_extrap_ticks": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Spectator extrapolation / pop warning: netcode tuning."
+  },
+  "spec_free_collide": {
+   "class": "LOCKED+RULE",
+   "ui": "—",
+   "reason": "Spectator free camera collision / speed: a ghost flying through walls can call out positions. Host rule."
+  },
+  "spec_free_speed": {
+   "class": "LOCKED+RULE",
+   "ui": "—",
+   "reason": "Spectator free camera collision / speed: a ghost flying through walls can call out positions. Host rule."
+  },
+  "spec_pop_warn": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Spectator extrapolation / pop warning: netcode tuning."
+  },
+  "spec_show_delay": {
+   "class": "EDITABLE",
+   "ui": "Character (dev)",
+   "reason": "Spectator delay readout."
+  },
+  "sv_cheats": {
+   "class": "LOCKED+RULE",
+   "ui": "—",
+   "reason": "Cheats switch: host-owned; defaults to 0 in release builds (registered with 1 today, 'dev build default on')."
+  },
+  "sv_fov": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "sv_fov_max": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "sv_fov_max_aspect": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "sv_hostname": {
+   "class": "EDITABLE",
+   "ui": "—",
+   "reason": "Identity / networking preferences / console."
+  },
+  "sv_infinite_ammo": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "sv_join_dead": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "sv_maxplayers": {
+   "class": "LOCKED+RULE",
+   "ui": "—",
+   "reason": "Host networking: snapshot rate / relevance distance (what is sent at all) / max players."
+  },
+  "sv_relevance": {
+   "class": "LOCKED+RULE",
+   "ui": "—",
+   "reason": "Host networking: snapshot rate / relevance distance (what is sent at all) / max players."
+  },
+  "sv_respawn_mode": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "sv_respawn_time": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "sv_snaprate": {
+   "class": "LOCKED+RULE",
+   "ui": "—",
+   "reason": "Host networking: snapshot rate / relevance distance (what is sent at all) / max players."
+  },
+  "sv_spec_allowed": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "sv_spec_fp_enemies": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "tod_day_ambience": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Ambience sound overrides: audio cues are the same for everyone."
+  },
+  "tod_night_ambience": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Ambience sound overrides: audio cues are the same for everyone."
+  },
+  "tod_on_midnight": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Day / night and weather script hooks (run console text on events): tests only."
+  },
+  "tod_on_noon": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Day / night and weather script hooks (run console text on events): tests only."
+  },
+  "tod_on_sunrise": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Day / night and weather script hooks (run console text on events): tests only."
+  },
+  "tod_on_sunset": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Day / night and weather script hooks (run console text on events): tests only."
+  },
+  "ui_debug": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Debug view / log: dev builds only (debug views can expose geometry and entities through walls)."
+  },
+  "ui_safe_area": {
+   "class": "EDITABLE",
+   "ui": "Character > Interface",
+   "reason": "UI scale / safe area: display."
+  },
+  "ui_scale": {
+   "class": "EDITABLE",
+   "ui": "Character > Interface",
+   "reason": "UI scale / safe area: display."
+  },
+  "vehicle_debug": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Debug view / log: dev builds only (debug views can expose geometry and entities through walls)."
+  },
+  "vehicle_fuel_scale": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "vfx_debug": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Debug view / log: dev builds only (debug views can expose geometry and entities through walls)."
+  },
+  "vfx_decal_max": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Visibility: changes what you can see relative to other players. Impact decal budget: tiers keep 16 .. 4096 decals (V9); one budget."
+  },
+  "vfx_enable": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Visibility: changes what you can see relative to other players. Particle effects on/off (muzzle flashes, impacts): dev only."
+  },
+  "vfx_half_res": {
+   "class": "TIER",
+   "ui": "—",
+   "reason": "Particle shading: half-res pass, lighting, sort budget. Emission counts are locked (violation V9)."
+  },
+  "vfx_lighting": {
+   "class": "TIER",
+   "ui": "—",
+   "reason": "Particle shading: half-res pass, lighting, sort budget. Emission counts are locked (violation V9)."
+  },
+  "vfx_max_particles": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Visibility: changes what you can see relative to other players. Particle pool size: a small pool silently drops smoke / impact particles."
+  },
+  "vfx_quality": {
+   "class": "TIER",
+   "ui": "—",
+   "reason": "Particle shading: half-res pass, lighting, sort budget. Emission counts are locked (violation V9)."
+  },
+  "vfx_timescale": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Shutter preview / VFX time scale / sky disc zoom: dev views."
+  },
+  "water_debug": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Debug view / log: dev builds only (debug views can expose geometry and entities through walls)."
+  },
+  "water_drown_damage": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "water_wave_wind_scale": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Water wave wind scale: cheat tuning."
+  },
+  "weather_clouds": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "weather_debug": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Debug view / log: dev builds only (debug views can expose geometry and entities through walls)."
+  },
+  "weather_fog": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "weather_on_rain_start": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Day / night and weather script hooks (run console text on events): tests only."
+  },
+  "weather_on_rain_stop": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Day / night and weather script hooks (run console text on events): tests only."
+  },
+  "weather_on_snow_start": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Day / night and weather script hooks (run console text on events): tests only."
+  },
+  "weather_on_snow_stop": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Day / night and weather script hooks (run console text on events): tests only."
+  },
+  "weather_on_storm_start": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Day / night and weather script hooks (run console text on events): tests only."
+  },
+  "weather_on_storm_stop": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Day / night and weather script hooks (run console text on events): tests only."
+  },
+  "wheel_enable": {
+   "class": "EDITABLE",
+   "ui": "HUD",
+   "reason": "Radial wheels: input comfort (slow motion only applies alone)."
+  },
+  "wheel_heal_auto_use": {
+   "class": "EDITABLE",
+   "ui": "HUD",
+   "reason": "Radial wheels: input comfort (slow motion only applies alone)."
+  },
+  "wheel_hold_time": {
+   "class": "EDITABLE",
+   "ui": "HUD",
+   "reason": "Radial wheels: input comfort (slow motion only applies alone)."
+  },
+  "wheel_timescale": {
+   "class": "EDITABLE",
+   "ui": "HUD",
+   "reason": "Radial wheels: input comfort (slow motion only applies alone)."
+  },
+  "wind_debug": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Debug view / log: dev builds only (debug views can expose geometry and entities through walls)."
+  },
+  "wind_dir": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Wind overrides (dev): foliage motion and the ballistic wind must come from the weather."
+  },
+  "wind_gust": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Wind overrides (dev): foliage motion and the ballistic wind must come from the weather."
+  },
+  "wind_solo": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Debug view / log: dev builds only (debug views can expose geometry and entities through walls)."
+  },
+  "wind_speed": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Wind overrides (dev): foliage motion and the ballistic wind must come from the weather."
+  },
+  "wind_timescale": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Wind overrides (dev): foliage motion and the ballistic wind must come from the weather."
+  },
+  "wind_view": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Debug view / log: dev builds only (debug views can expose geometry and entities through walls)."
+  },
+  "world_chunk_radius": {
+   "class": "LOCKED+RULE",
+   "ui": "—",
+   "reason": "Visibility: changes what you can see relative to other players. Draw distance: chunks loaded around the player and the first terrain LOD switch (archived, player-settable today). Host rule only."
+  },
+  "world_chunk_uploads": {
+   "class": "TIER",
+   "ui": "—",
+   "reason": "Streaming / animation budgets: cost spread over frames; final state identical."
+  },
+  "world_debug_chunks": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Debug view / log: dev builds only (debug views can expose geometry and entities through walls)."
+  },
+  "world_foliage_test": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Test foliage / corpse collision / hold point state / sound trace: dev switches."
+  },
+  "world_lod_distance": {
+   "class": "LOCKED+RULE",
+   "ui": "—",
+   "reason": "Visibility: changes what you can see relative to other players. Draw distance: chunks loaded around the player and the first terrain LOD switch (archived, player-settable today). Host rule only."
+  },
+  "world_seed": {
+   "class": "LOCKED+RULE",
+   "ui": "—",
+   "reason": "World generation seed: the host's."
+  },
+  "world_terrain_grid": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Visibility: changes what you can see relative to other players. Unit grid drawn on dev geometry / terrain."
+  },
+  "wpn_ads_bob": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "wpn_ads_sway": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "wpn_bob_scale": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Fire animation tuning (FIRE_ANIM.md, ONE global sway): the item kick, master scale, punch, item bob, look lag. Player-facing control is Weapon kick / sway / Camera shake."
+  },
+  "wpn_debug_melee": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Debug view / log: dev builds only (debug views can expose geometry and entities through walls)."
+  },
+  "wpn_fire_anim_scale": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Fire animation tuning (FIRE_ANIM.md, ONE global sway): the item kick, master scale, punch, item bob, look lag. Player-facing control is Weapon kick / sway / Camera shake."
+  },
+  "wpn_fire_debug": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Debug view / log: dev builds only (debug views can expose geometry and entities through walls)."
+  },
+  "wpn_kick_scale": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Fire animation tuning (FIRE_ANIM.md, ONE global sway): the item kick, master scale, punch, item bob, look lag. Player-facing control is Weapon kick / sway / Camera shake."
+  },
+  "wpn_look_lag": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Fire animation tuning (FIRE_ANIM.md, ONE global sway): the item kick, master scale, punch, item bob, look lag. Player-facing control is Weapon kick / sway / Camera shake."
+  },
+  "wpn_muzzle_tolerance": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "wpn_recoil_debug": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Debug view / log: dev builds only (debug views can expose geometry and entities through walls)."
+  },
+  "wpn_recoil_scale": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "wpn_spread_scale": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "wpn_sway_ads_scale": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "wpn_sway_scale": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  },
+  "wpn_visual_scale": {
+   "class": "EDITABLE",
+   "ui": "Graphics > Comfort",
+   "reason": "Weapon kick (visual camera + viewmodel kick): bounded 0.5 .. 1 (was 0 .. 3). Zero kick would give a still sight picture while the aim recoils, an advantage when spraying."
+  },
+  "zombie_speed": {
+   "class": "LOCKED+RULE",
+   "ui": "Lobby rules",
+   "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting."
+  }
+ }
+}

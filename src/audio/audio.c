@@ -86,12 +86,12 @@ static void death_mix_init(void) {
 
 bool audio_init(void) {
     A = (AudioSystem *)calloc(1, sizeof(AudioSystem));
-    A->master = cvar_reg_float("snd_master", 0.8f, 0, 1, CVAR_ARCHIVE, "master volume");
-    A->music_vol = cvar_reg_float("snd_music", 0.4f, 0, 1, CVAR_ARCHIVE, "music volume");
-    A->sfx = cvar_reg_float("snd_sfx", 0.9f, 0, 1, CVAR_ARCHIVE, "effects volume");
-    A->voice = cvar_reg_float("snd_voice", 1.0f, 0, 1, CVAR_ARCHIVE, "voice chat volume (reserved)");
-    A->ui = cvar_reg_float("snd_ui", 0.8f, 0, 1, CVAR_ARCHIVE, "interface sounds volume");
-    A->trace = cvar_reg_bool("snd_trace", false, 0, "log every delayed / filtered sound (gunfire timing tests; works with --nosound)");
+    A->master = cvar_reg_float("snd_master", 0.8f, 0, 1, CVAR_ARCHIVE | CVAR_EDITABLE, "master volume");
+    A->music_vol = cvar_reg_float("snd_music", 0.4f, 0, 1, CVAR_ARCHIVE | CVAR_EDITABLE, "music volume");
+    A->sfx = cvar_reg_float("snd_sfx", 0.9f, 0, 1, CVAR_ARCHIVE | CVAR_EDITABLE, "effects volume");
+    A->voice = cvar_reg_float("snd_voice", 1.0f, 0, 1, CVAR_ARCHIVE | CVAR_EDITABLE, "voice chat volume (reserved)");
+    A->ui = cvar_reg_float("snd_ui", 0.8f, 0, 1, CVAR_ARCHIVE | CVAR_EDITABLE, "interface sounds volume");
+    A->trace = cvar_reg_bool("snd_trace", false, CVAR_LOCKED, "log every delayed / filtered sound (gunfire timing tests; works with --nosound)");
     for (int i = 1; i < g_engine.argc; i++)
         if (!strcmp(g_engine.argv[i], "--nosound") || !strcmp(g_engine.argv[i], "--test")) { log_info("audio: disabled by --nosound"); return false; }
     ma_engine_config cfg = ma_engine_config_init();

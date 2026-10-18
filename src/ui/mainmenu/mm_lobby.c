@@ -219,6 +219,10 @@ static void draw_center(GuiRect r) {
     if (gw_toggle(gui_id("lb_late_t"), rr, &late)) { s.late_join = late; changed = true; }
     rr = gw_setting_row(&c, "Player damage (PvP)", "Stub: not wired into damage yet.", gui_id("lb_pvp"));
     if (gw_toggle(gui_id("lb_pvp_t"), rr, &pvp)) { s.pvp = pvp; changed = true; }
+    // Server rule (docs/SETTINGS_AUDIT.md): the same foliage density for every player in the session.
+    float fp = (float)(s.foliage_pct ? s.foliage_pct : 100);
+    rr = gw_setting_row(&c, "Foliage density", "A server rule: grass and plant density for every player in this game (the same for everyone, whatever their graphics settings).", gui_id("lb_foliage"));
+    if (gw_slider(gui_id("lb_foliage_s"), rr, &fp, 50, 100, 5, "%.0f%%")) { s.foliage_pct = (u8)fp; changed = true; }
     gw_disabled(false);
     // Season / start time / start weather / dynamic weather (the Maps tab's rows).
     if (mm_environment_rows(&c, &s, host)) changed = true;

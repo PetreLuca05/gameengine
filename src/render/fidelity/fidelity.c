@@ -77,6 +77,17 @@ static const FidFeatureDef k_features[FF_COUNT] = {
 #undef I
 #undef F
 
+// Locked features (docs/SETTINGS_AUDIT.md): their cvars are CVAR_LOCKED, one value for every level
+// and era (assets/render/consistency.json). The tables must not list them (fid_tables_complete);
+// their bounds are that single value, and nothing here writes them.
+static const int k_locked[] = { FF_FOLIAGE_DENSITY, FF_IMPOSTOR_PX, FF_VGEO_ERROR_PX, FF_VGEO_LOD_PX, FF_LOD_BIAS, FF_CHAR_QUALITY, FF_SHADOW_DISTANCE,
+                                FF_CLOUD_SHADOWS, FF_LIGHT_SHADOWS, FF_MOON_SHADOWS, FF_DECAL_MAX, FF_LENS_DROPS, FF_AUTO_EXPOSURE, FF_LENS_FLARE,
+                                FF_LENS_DIRT, FF_LENS_DISTORTION, FF_TONEMAPPER };
+bool fid_feature_locked(int f) {
+    for (int i = 0; i < ARRAY_COUNT(k_locked); i++) if (k_locked[i] == f) return true;
+    return false;
+}
+
 // Features whose values have no cost order (a choice, not a tier): an explicit user choice is kept
 // when the new level allows it.
 static bool unordered(int f) { return f == FF_UPSCALER || f == FF_TONEMAPPER || f == FF_PRECIP_QUALITY || f == FF_LENS_DISTORTION; }
@@ -348,6 +359,15 @@ FidBounds fid_bounds(int level, int era, int f) {
     memset(&b, 0, sizeof(b));
     if (f < 0 || f >= FF_COUNT) return b;
     const FidFeatureDef *d = &k_features[f];
+    if (fid_feature_locked(f)) {
+        // The locked value (its cvar's default once the consistency set is applied).
+        Cvar *c = S.cv[f] ? S.cv[f] : cvar_find(d->cvar);
+        float v = c ? (float)atof(c->default_str) : d->hi;
+        b.avail = FID_DEFAULT_ON;
+        b.lo = b.hi = b.def = v;
+        b.allowed = masked(d) ? bit(v) : ~0u;
+        return b;
+    }
     level = DG_CLAMP(level, 0, FID_LEVELS - 1);
     era = DG_CLAMP(era, 0, FID_ERAS - 1);
     FidEntry e = S.lv[level].base[f];
@@ -434,6 +454,12 @@ bool fid_tables_complete(char *err, int n) {
         for (int f = 0; f < FF_COUNT; f++) {
             const FidEntry *e = &S.lv[l].base[f];
             const FidFeatureDef *d = &k_features[f];
+            bool in_era = false;
+            for (int era = 0; era < FID_ERAS; era++) in_era |= S.lv[l].era[era][f].set != 0 || S.limit[era][f].set != 0 || S.lacks[era][f];
+            if (fid_feature_locked(f)) {
+                if (e->set || in_era) { errf(err, n, "%s: '%s' is locked (assets/render/consistency.json): a tier table must not set it", k_level_ids[l], d->id); return false; }
+                continue;
+            }
             if (!e->set) { errf(err, n, "%s: no entry for '%s'", k_level_ids[l], d->id); return false; }
             bool avail = !(e->set & E_AVAIL) || e->avail != FID_UNAVAILABLE;
             if (avail && e->avail != FID_DEFAULT_OFF && !d->era_owned && d->kind != FID_BOOL && !(e->set & E_DEF)) {
@@ -444,6 +470,7 @@ bool fid_tables_complete(char *err, int n) {
     for (int era = 0; era < FID_ERAS; era++)
         for (int f = 0; f < FF_COUNT; f++) {
             const FidFeatureDef *d = &k_features[f];
+            if (fid_feature_locked(f)) continue;
             for (int l = 0; l < FID_LEVELS; l++) {
                 FidBounds b = fid_bounds(l, era, f);
                 const FidEntry *e = &S.lv[l].base[f];
@@ -518,7 +545,7 @@ static void bound_hook(Cvar *cv) {
     if (!fid_loaded()) return;
     int f = -1;
     for (int i = 0; i < FF_COUNT; i++) if (S.cv[i] == cv) { f = i; break; }
-    if (f < 0) return;
+    if (f < 0 || fid_feature_locked(f)) return;
     const FidFeatureDef *d = &k_features[f];
     float v = d->kind == FID_FLOAT ? cv->f : (float)cv->i;
     FidBounds b = fid_bounds(S.level, fid_era(), f);
@@ -566,7 +593,7 @@ void fid_custom_load(const char *s) {
         while (*s && *s != ';') s++;
         if (*s == ';') s++;
         int f = fid_feature_find(id);
-        if (f >= 0 && have && !k_features[f].era_owned) { S.user_set[f] = true; S.user_val[f] = v; }
+        if (f >= 0 && have && !k_features[f].era_owned && !fid_feature_locked(f)) { S.user_set[f] = true; S.user_val[f] = v; }
     }
 }
 
@@ -580,7 +607,7 @@ void fid_attach_cvars(void) {
     S.r_era = cvar_find("r_era");
     for (int f = 0; f < FF_COUNT; f++) {
         S.cv[f] = cvar_find(k_features[f].cvar);
-        if (S.cv[f]) S.cv[f]->bound = bound_hook;
+        if (S.cv[f] && !fid_feature_locked(f)) S.cv[f]->bound = bound_hook;
     }
     S.attached = true;
 }
@@ -595,12 +622,14 @@ void fid_detach_cvars(void) {
 }
 
 static void set_value(int f, float v) {
-    if (!S.cv[f]) return;
+    if (!S.cv[f] || fid_feature_locked(f)) return;
     char buf[32];
     fmt_value(&k_features[f], v, buf, sizeof(buf));
     bool in = S.internal;
     S.internal = true;
+    CvarSource src = cvar_source_push(CVAR_SRC_FIDELITY);   // tier cvars (docs/SETTINGS_AUDIT.md)
     cvar_set_cv(S.cv[f], buf);
+    cvar_source_pop(src);
     S.internal = in;
 }
 
@@ -613,7 +642,7 @@ void fid_enforce_all(void) {
     if (!fid_loaded()) return;
     for (int f = 0; f < FF_COUNT; f++) {
         float v = fid_cvar_value(f);
-        if (isnan(v)) continue;
+        if (isnan(v) || fid_feature_locked(f)) continue;
         float c = fid_clamp_current(f, v);
         if (fabsf(c - v) > 1e-5f) set_value(f, c);
     }
@@ -631,7 +660,7 @@ void fid_apply(int level) {
     for (int f = 0; f < FF_COUNT; f++) {
         const FidFeatureDef *d = &k_features[f];
         float v = fid_cvar_value(f);
-        if (isnan(v)) continue;
+        if (isnan(v) || fid_feature_locked(f)) continue;
         FidBounds nb = fid_bounds(level, era, f), ob = fid_bounds(old, era, f);
         (void)ob;
         float target;
@@ -653,7 +682,7 @@ int fid_check_table(int level, char *report, int size) {
     if (report && size > 0) report[0] = 0;
     for (int f = 0; f < FF_COUNT; f++) {
         float v = fid_cvar_value(f);
-        if (isnan(v)) continue;
+        if (isnan(v) || fid_feature_locked(f)) continue;
         FidBounds b = fid_bounds(level, era, f);
         if (fabsf(v - b.def) < 1e-3f) continue;
         if (b.avail == FID_UNAVAILABLE && !k_features[f].has_off) continue;   // locked, value irrelevant
@@ -699,6 +728,7 @@ const char *fid_group_id(int g) { return g >= 0 && g < FG_COUNT ? k_groups[g].id
 
 // A feature the current level locks without an off state (render scale style) takes no part.
 static bool group_locked(int f) {
+    if (fid_feature_locked(f)) return true;
     FidBounds b = fid_bounds(S.level, fid_era(), f);
     return b.avail == FID_UNAVAILABLE && !k_features[f].has_off;
 }
@@ -729,7 +759,9 @@ void fid_group_apply(int g, int tier) {
         if (fabsf(v - fid_cvar_value(f)) < 1e-5f) continue;
         char buf[32];
         fmt_value(&k_features[f], v, buf, sizeof(buf));
+        CvarSource src = cvar_source_push(CVAR_SRC_FIDELITY);
         cvar_set_cv(S.cv[f], buf);
+        cvar_source_pop(src);
     }
 }
 

@@ -34,50 +34,50 @@ static size_t obj_slot_size(void);
 
 void render_register_cvars(void) {
     Renderer *r = R;
-    r->r_vsync = cvar_reg_bool("r_vsync", true, CVAR_ARCHIVE, "vertical sync");
-    r->r_wireframe = cvar_reg_bool("r_wireframe", false, 0, "wireframe rendering");
-    r->r_render_scale = cvar_reg_float("r_render_scale", 1.0f, 0.25f, 2.0f, CVAR_ARCHIVE, "3D resolution scale");
-    r->r_aniso = cvar_reg_int("r_aniso", 8, 1, 16, CVAR_ARCHIVE, "anisotropic filtering level");
-    r->r_texture_quality = cvar_reg_int("r_texture_quality", 2, 0, 2, CVAR_ARCHIVE, "0 low, 1 medium, 2 high");
-    r->r_aa = cvar_reg_int("r_aa", 3, 0, 3, CVAR_ARCHIVE, "anti-aliasing: 0 none, 1 FXAA, 2 SMAA 1x, 3 TAA");
-    r->r_brightness = cvar_reg_float("r_brightness", 1.0f, 0.3f, 3.0f, CVAR_ARCHIVE, "display brightness (after the tonemapper)");
-    r->r_gamma = cvar_reg_float("r_gamma", 1.0f, 0.5f, 2.0f, CVAR_ARCHIVE, "gamma adjustment");
-    r->r_grid = cvar_reg_bool("r_grid", true, CVAR_ARCHIVE, "draw unit grid on dev geometry");
-    r->r_vignette = cvar_reg_float("r_vignette", 0.25f, 0.0f, 1.0f, CVAR_ARCHIVE, "vignette strength");
-    r->r_shader_hotreload = cvar_reg_bool("r_shader_hotreload", true, 0, "watch shader sources and reload on change");
-    r->r_culling = cvar_reg_bool("r_culling", true, 0, "frustum culling");
-    r->r_vm_fov = cvar_reg_float("r_viewmodel_fov", 0.0f, 0.0f, 120.0f, CVAR_ARCHIVE, "viewmodel FOV (0 = same as world, keeps IK hands aligned)");
-    r->r_cpu_skinning = cvar_reg_bool("r_cpu_skinning", false, 0, "skin characters on the CPU (fallback / debugging)");
-    r->r_bloom = cvar_reg_bool("r_bloom", true, CVAR_ARCHIVE, "bloom (HDR mip chain)");
-    r->r_hdr_output = cvar_reg_bool("r_hdr_output", false, CVAR_ARCHIVE, "HDR10 output (PQ) when the display supports it");
-    r->r_bloom_intensity = cvar_reg_float("r_bloom_intensity", 0.05f, 0.0f, 0.5f, CVAR_ARCHIVE, "bloom strength (energy conserving mix)");
+    r->r_vsync = cvar_reg_bool("r_vsync", true, CVAR_ARCHIVE | CVAR_EDITABLE, "vertical sync");
+    r->r_wireframe = cvar_reg_bool("r_wireframe", false, CVAR_LOCKED, "wireframe rendering");
+    r->r_render_scale = cvar_reg_float("r_render_scale", 1.0f, 0.25f, 2.0f, CVAR_ARCHIVE | CVAR_EDITABLE, "3D resolution scale");
+    r->r_aniso = cvar_reg_int("r_aniso", 8, 1, 16, CVAR_TIER, "anisotropic filtering level");
+    r->r_texture_quality = cvar_reg_int("r_texture_quality", 2, 0, 2, CVAR_TIER, "0 low, 1 medium, 2 high");
+    r->r_aa = cvar_reg_int("r_aa", 3, 0, 3, CVAR_TIER, "anti-aliasing: 0 none, 1 FXAA, 2 SMAA 1x, 3 TAA");
+    r->r_brightness = cvar_reg_float("r_brightness", 1.0f, 0.85f, 1.15f, CVAR_ARCHIVE | CVAR_EDITABLE, "display brightness (after the tonemapper)");
+    r->r_gamma = cvar_reg_float("r_gamma", 1.0f, 0.5f, 2.0f, CVAR_LOCKED, "gamma adjustment");
+    r->r_grid = cvar_reg_bool("r_grid", true, CVAR_LOCKED, "draw unit grid on dev geometry");
+    r->r_vignette = cvar_reg_float("r_vignette", 0.25f, 0.0f, 1.0f, CVAR_ARCHIVE | CVAR_EDITABLE, "vignette strength");
+    r->r_shader_hotreload = cvar_reg_bool("r_shader_hotreload", true, CVAR_LOCKED, "watch shader sources and reload on change");
+    r->r_culling = cvar_reg_bool("r_culling", true, CVAR_LOCKED, "frustum culling");
+    r->r_vm_fov = cvar_reg_float("r_viewmodel_fov", 0.0f, 0.0f, 120.0f, CVAR_LOCKED, "viewmodel FOV (0 = same as world, keeps IK hands aligned)");
+    r->r_cpu_skinning = cvar_reg_bool("r_cpu_skinning", false, CVAR_LOCKED, "skin characters on the CPU (fallback / debugging)");
+    r->r_bloom = cvar_reg_bool("r_bloom", true, CVAR_TIER, "bloom (HDR mip chain)");
+    r->r_hdr_output = cvar_reg_bool("r_hdr_output", false, CVAR_ARCHIVE | CVAR_EDITABLE, "HDR10 output (PQ) when the display supports it");
+    r->r_bloom_intensity = cvar_reg_float("r_bloom_intensity", 0.05f, 0.0f, 0.5f, CVAR_LOCKED, "bloom strength (energy conserving mix)");
     // Unity-style shadow quality (docs/SHADOWS_UNITY_MODEL.md; Engine Fidelity sets defaults / bounds).
     QualityShadowSettings dq;
     shs_quality_default(&dq);
-    r->r_shadows = cvar_reg_int("r_shadows", dq.mode, 0, 2, CVAR_ARCHIVE, "Shadows: 0 Disable, 1 Hard Only (Soft lights render Hard), 2 Hard and Soft");
-    r->r_shadow_resolution = cvar_reg_int("r_shadow_resolution", dq.resolution, 0, 3, CVAR_ARCHIVE,
+    r->r_shadows = cvar_reg_int("r_shadows", dq.mode, 0, 2, CVAR_TIER, "Shadows: 0 Disable, 1 Hard Only (Soft lights render Hard), 2 Hard and Soft");
+    r->r_shadow_resolution = cvar_reg_int("r_shadow_resolution", dq.resolution, 0, 3, CVAR_TIER,
                                           "Shadow Resolution for lights on 'Use Quality Settings': 0 Low, 1 Medium, 2 High, 3 Very High (sun cascades 512 .. 4096, spot / point 256 .. 2048)");
-    r->r_shadow_projection = cvar_reg_int("r_shadow_projection", dq.projection, 0, 1, CVAR_ARCHIVE, "Shadow Projection: 0 Close Fit (denser, swims), 1 Stable Fit (sphere fit + texel snapping)");
-    r->r_shadow_cascades = cvar_reg_int("r_shadow_cascades", dq.cascades, 1, 4, CVAR_ARCHIVE, "Shadow Cascades: 1 No Cascades, 2 Two, 4 Four (3 = 4)");
-    r->r_shadow_max_distance = cvar_reg_float("r_shadow_max_distance", dq.distance, 10.0f, 1000.0f, CVAR_ARCHIVE, "Shadow Distance (m): the last cascade ends here, fading over the cascade border");
-    r->r_soft_shadow_quality = cvar_reg_int("r_soft_shadow_quality", dq.soft_quality, 0, 3, CVAR_ARCHIVE,
+    r->r_shadow_projection = cvar_reg_int("r_shadow_projection", dq.projection, 0, 1, CVAR_TIER, "Shadow Projection: 0 Close Fit (denser, swims), 1 Stable Fit (sphere fit + texel snapping)");
+    r->r_shadow_cascades = cvar_reg_int("r_shadow_cascades", dq.cascades, 1, 4, CVAR_TIER, "Shadow Cascades: 1 No Cascades, 2 Two, 4 Four (3 = 4)");
+    r->r_shadow_max_distance = cvar_reg_float("r_shadow_max_distance", dq.distance, 10.0f, 1000.0f, CVAR_LOCKED, "Shadow Distance (m): the last cascade ends here, fading over the cascade border");
+    r->r_soft_shadow_quality = cvar_reg_int("r_soft_shadow_quality", dq.soft_quality, 0, 3, CVAR_TIER,
                                             "Soft Shadow Quality: 0 Low (tent 3x3), 1 Medium (5x5), 2 High (7x7), 3 Ultra (PCSS, contact hardening; sun and viewmodel)");
-    r->r_shadow_split2 = cvar_reg_float("r_shadow_split2", dq.split2 * 100.0f, 1.0f, 99.0f, CVAR_ARCHIVE, "two-cascade split (% of the shadow distance; Unity default 33.3)");
-    r->r_shadow_split4[0] = cvar_reg_float("r_shadow_split4_1", dq.split4[0] * 100.0f, 1.0f, 97.0f, CVAR_ARCHIVE, "four-cascade split 1 (% of the shadow distance; Unity default 6.7)");
-    r->r_shadow_split4[1] = cvar_reg_float("r_shadow_split4_2", dq.split4[1] * 100.0f, 2.0f, 98.0f, CVAR_ARCHIVE, "four-cascade split 2 (%; Unity default 20)");
-    r->r_shadow_split4[2] = cvar_reg_float("r_shadow_split4_3", dq.split4[2] * 100.0f, 3.0f, 99.0f, CVAR_ARCHIVE, "four-cascade split 3 (%; Unity default 46.7)");
-    r->r_shadow_border = cvar_reg_float("r_shadow_cascade_border", dq.border * 100.0f, 0.0f, 50.0f, CVAR_ARCHIVE,
+    r->r_shadow_split2 = cvar_reg_float("r_shadow_split2", dq.split2 * 100.0f, 1.0f, 99.0f, CVAR_TIER, "two-cascade split (% of the shadow distance; Unity default 33.3)");
+    r->r_shadow_split4[0] = cvar_reg_float("r_shadow_split4_1", dq.split4[0] * 100.0f, 1.0f, 97.0f, CVAR_TIER, "four-cascade split 1 (% of the shadow distance; Unity default 6.7)");
+    r->r_shadow_split4[1] = cvar_reg_float("r_shadow_split4_2", dq.split4[1] * 100.0f, 2.0f, 98.0f, CVAR_TIER, "four-cascade split 2 (%; Unity default 20)");
+    r->r_shadow_split4[2] = cvar_reg_float("r_shadow_split4_3", dq.split4[2] * 100.0f, 3.0f, 99.0f, CVAR_TIER, "four-cascade split 3 (%; Unity default 46.7)");
+    r->r_shadow_border = cvar_reg_float("r_shadow_cascade_border", dq.border * 100.0f, 0.0f, 50.0f, CVAR_TIER,
                                         "Cascade Border: blend band at the end of each cascade, and the shadow distance fade (% of the cascade)");
-    r->r_shadow_near_offset = cvar_reg_float("r_shadow_near_offset", dq.near_plane_offset, 2.0f, 5000.0f, CVAR_ARCHIVE,
+    r->r_shadow_near_offset = cvar_reg_float("r_shadow_near_offset", dq.near_plane_offset, 2.0f, 5000.0f, CVAR_TIER,
                                              "Shadow Near Plane Offset (m): how far each cascade's light box reaches towards the light beyond its receivers (casters outside the view)");
-    r->r_shadowmask_mode = cvar_reg_int("r_shadowmask_mode", dq.shadowmask, 0, 1, CVAR_ARCHIVE, "Shadowmask Mode (stub, no baked data yet): 0 Shadowmask, 1 Distance Shadowmask");
-    r->r_shadowmask_distance = cvar_reg_float("r_shadowmask_distance", dq.shadowmask_distance, 0.0f, 2000.0f, CVAR_ARCHIVE, "Distance Shadowmask cut-over (m; stub)");
-    r->r_shadow_debug = cvar_reg_int("r_shadow_debug", 0, 0, 8, 0,
+    r->r_shadowmask_mode = cvar_reg_int("r_shadowmask_mode", dq.shadowmask, 0, 1, CVAR_TIER, "Shadowmask Mode (stub, no baked data yet): 0 Shadowmask, 1 Distance Shadowmask");
+    r->r_shadowmask_distance = cvar_reg_float("r_shadowmask_distance", dq.shadowmask_distance, 0.0f, 2000.0f, CVAR_TIER, "Distance Shadowmask cut-over (m; stub)");
+    r->r_shadow_debug = cvar_reg_int("r_shadow_debug", 0, 0, 8, CVAR_LOCKED,
                                      "shadow views: 1 readout (sky, cascades, bias, filter, jitter), 2 penumbra width, 3 blocker distance, 4 cascade / mode, 5 cloud shadow, 6 texel size, 7 viewmodel tile coverage, 8 fitting spheres + light frustums");
-    r->r_vm_shadow = cvar_reg_bool("r_vm_shadow", true, CVAR_ARCHIVE, "first-person rig (arms, held item) in its own high-resolution shadow tile (docs/SHADOWS.md)");
-    r->r_stretch = cvar_reg_float("r_stretch", 0.0f, 0.0f, 1.0f, CVAR_ARCHIVE,
+    r->r_vm_shadow = cvar_reg_bool("r_vm_shadow", true, CVAR_TIER, "first-person rig (arms, held item) in its own high-resolution shadow tile (docs/SHADOWS.md)");
+    r->r_stretch = cvar_reg_float("r_stretch", 0.0f, 0.0f, 1.0f, CVAR_LOCKED,
                                   "stretched resolution simulator: 0 normal .. 1 extreme (the 3D view squeezed into a narrower aspect, stretched to the screen)");
-    r->r_shadow_min_radius = cvar_reg_float("r_shadow_min_radius", 0.0f, 0.0f, 4.0f, CVAR_ARCHIVE, "props smaller than this radius (m) cast no sun shadow");
+    r->r_shadow_min_radius = cvar_reg_float("r_shadow_min_radius", 0.0f, 0.0f, 4.0f, CVAR_TIER, "props smaller than this radius (m) cast no sun shadow");
     r->r_vsync->on_change = on_render_cvar_changed;
 }
 
@@ -1678,12 +1678,13 @@ static void exec_transparent(VkCommandBuffer cmd, void *u) {
 }
 
 // Precipitation (shaders/precip.vert): rain / snow streaks around the camera + splashes, after the
-// particles. Counts scale with the intensity and the quality.
+// particles. The streak count scales with the intensity only: rain / snow is cover, the same for
+// every Engine Fidelity level (docs/SETTINGS_AUDIT.md V8); the quality scales the ground splashes.
 static void draw_precip(VkCommandBuffer cmd, VkDescriptorSet frame_set) {
     const RenderWeather *wx = &R->weather;
     float amount = fmaxf(wx->rain, wx->snowfall);
     if (wx->precip_quality <= 0 || amount < 0.01f || !R->pipes[PIPE_PRECIP]) return;
-    static const u32 streaks[4] = { 0, 4000, 9000, 16000 }, splashes[4] = { 0, 300, 700, 1300 };
+    static const u32 streaks[4] = { 9000, 9000, 9000, 9000 }, splashes[4] = { 0, 300, 700, 1300 };
     int q = DG_CLAMP(wx->precip_quality, 0, 3);
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_PRECIP]);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 0, 1, &frame_set, 0, NULL);

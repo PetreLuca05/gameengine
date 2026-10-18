@@ -19,6 +19,9 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO ${CMAKE_BINARY_DIR}/bin)
 
 set(STEAM_SDK_DIR "$ENV{STEAM_SDK_DIR}" CACHE PATH "Path to the Steamworks SDK 'sdk' folder (optional)")
 option(DG_ENABLE_STEAM "Build the Steam transport (requires STEAM_SDK_DIR)" ON)
+# Settings locks (docs/SETTINGS_AUDIT.md): OFF for the shipped build, where TIER / LOCKED cvars reject
+# player writes. Dev builds (ON) keep every cvar writable; --release-locks turns the locks on at run time.
+option(DG_DEV_BUILD "Dev build: settings locks off unless --release-locks" ON)
 
 include(FetchContent)
 set(FETCHCONTENT_QUIET ON)
@@ -217,6 +220,7 @@ target_compile_definitions(deadground PRIVATE
   DG_SHADER_COMPILER="${DG_SHADER_COMPILER}"
   DG_SHADER_COMPILER_KIND="${DG_SHADER_COMPILER_KIND}"
   DG_VERSION="${PROJECT_VERSION}"
+  DG_DEV_BUILD=$<BOOL:${DG_DEV_BUILD}>
   # Looks (docs/LOOKS.md): the live tuning tools (look_tune / look_dump) exist in dev builds only.
   $<$<NOT:$<CONFIG:Release>>:DG_LOOK_TUNE=1>)
 if(DG_HAVE_STEAM)
@@ -680,7 +684,7 @@ add_test(NAME looks COMMAND test_looks)
 add_test(NAME looks_release COMMAND test_looks_release)
 # Engine Fidelity (docs/ENGINE_FIDELITY.md): tables, bounds, apply / clamp on the real cvar system, era
 # matrix, frame graph validation.
-add_executable(test_fidelity tests/test_fidelity.c src/render/fidelity/fidelity.c src/render/graph/fg_check.c src/core/cvar.c)
+add_executable(test_fidelity tests/test_fidelity.c src/render/fidelity/fidelity.c src/render/graph/fg_check.c src/core/cvar.c src/core/consistency.c)
 set_target_properties(test_fidelity PROPERTIES C_STANDARD 11)
 target_link_libraries(test_fidelity PRIVATE dg_animcore)
 if(MSVC)

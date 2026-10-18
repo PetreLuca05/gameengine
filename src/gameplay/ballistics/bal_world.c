@@ -833,17 +833,17 @@ static void cmd_range(int argc, const char **argv) {
 
 void bal_world_register(void) {
     cmd_register("bal_range", cmd_range, "bal_range [pen]: go to the ballistics range firing point (dev room; pen = the penetration stacks)");
-    B.enable = cvar_reg_bool("bal_enable", true, CVAR_SERVER, "projectile ballistics: guns with a cartridge fire simulated bullets (drop, drag, wind, ricochet, penetration); 0 = instant hitscan");
-    B.drag_model = cvar_reg_int("bal_drag_model", -1, -1, 1, CVAR_SERVER, "bullet drag: -1 auto (G1/G7 tables), 0 exponential approximation, 1 G1/G7 drag tables (host, replicated)");
-    B.wind_cv = cvar_reg_float("bal_wind", -1.0f, -1.0f, 40.0f, CVAR_SERVER, "steady wind for bullets in m/s (-1 = the weather's wind with gusts; host, replicated)");
-    B.wind_dir_cv = cvar_reg_float("bal_wind_dir", 90.0f, 0.0f, 360.0f, CVAR_SERVER, "bal_wind direction: degrees the wind blows towards (0 = -Z, 90 = +X)");
-    B.spin = cvar_reg_bool("bal_spin_drift", true, CVAR_SERVER, "spin drift of rifled bullets (Litz, tiny, long range only)");
-    B.tracers_only = cvar_reg_bool("fire_tracers_only", false, CVAR_SERVER | CVAR_CHEAT, "every round is a tracer (ballistics range / debugging)");
-    B.debug = cvar_reg_int("ballistics_debug", 0, 0, 2, 0, "draw bullet paths (red supersonic, orange transonic, blue subsonic), ricochet / penetration points, crack timing; 2 = also log every hit");
-    B.watch = cvar_reg_bool("bal_watch", true, 0, "reload assets/ballistics and the attachment muzzle devices when the files change");
-    B.ignition = cvar_reg_bool("bal_tracer_ignition", true, CVAR_ARCHIVE, "tracers: dim igniter for the first tens of metres (0 = arcade: bright from the muzzle)");
-    B.crack_radius = cvar_reg_float("bal_crack_radius", 120.0f, 0.0f, 1000.0f, CVAR_ARCHIVE, "supersonic bullets passing within this many metres of you make a crack");
-    B.shutter = cvar_reg_float("shutter_preview", 0.0f, 0.0f, 0.25f, 0, "tracer streak shutter time in s (0 = the frame time): streak length = speed x shutter");
+    B.enable = cvar_reg_bool("bal_enable", true, CVAR_SERVER | CVAR_LOCKED | CVAR_RULE, "projectile ballistics: guns with a cartridge fire simulated bullets (drop, drag, wind, ricochet, penetration); 0 = instant hitscan");
+    B.drag_model = cvar_reg_int("bal_drag_model", -1, -1, 1, CVAR_SERVER | CVAR_LOCKED | CVAR_RULE, "bullet drag: -1 auto (G1/G7 tables), 0 exponential approximation, 1 G1/G7 drag tables (host, replicated)");
+    B.wind_cv = cvar_reg_float("bal_wind", -1.0f, -1.0f, 40.0f, CVAR_SERVER | CVAR_LOCKED | CVAR_RULE, "steady wind for bullets in m/s (-1 = the weather's wind with gusts; host, replicated)");
+    B.wind_dir_cv = cvar_reg_float("bal_wind_dir", 90.0f, 0.0f, 360.0f, CVAR_SERVER | CVAR_LOCKED | CVAR_RULE, "bal_wind direction: degrees the wind blows towards (0 = -Z, 90 = +X)");
+    B.spin = cvar_reg_bool("bal_spin_drift", true, CVAR_SERVER | CVAR_LOCKED | CVAR_RULE, "spin drift of rifled bullets (Litz, tiny, long range only)");
+    B.tracers_only = cvar_reg_bool("fire_tracers_only", false, CVAR_SERVER | CVAR_CHEAT | CVAR_LOCKED | CVAR_RULE, "every round is a tracer (ballistics range / debugging)");
+    B.debug = cvar_reg_int("ballistics_debug", 0, 0, 2, CVAR_LOCKED, "draw bullet paths (red supersonic, orange transonic, blue subsonic), ricochet / penetration points, crack timing; 2 = also log every hit");
+    B.watch = cvar_reg_bool("bal_watch", true, CVAR_LOCKED, "reload assets/ballistics and the attachment muzzle devices when the files change");
+    B.ignition = cvar_reg_bool("bal_tracer_ignition", true, CVAR_LOCKED, "tracers: dim igniter for the first tens of metres (0 = arcade: bright from the muzzle)");
+    B.crack_radius = cvar_reg_float("bal_crack_radius", 120.0f, 0.0f, 1000.0f, CVAR_LOCKED, "supersonic bullets passing within this many metres of you make a crack");
+    B.shutter = cvar_reg_float("shutter_preview", 0.0f, 0.0f, 0.25f, CVAR_LOCKED, "tracer streak shutter time in s (0 = the frame time): streak length = speed x shutter");
     cmd_register("bal_reload", cmd_reload, "bal_reload: reload the cartridges, materials and muzzle devices");
     cmd_register("bal_info", cmd_info, "bal_info: cartridges, muzzle devices and the bullet budget of the last tick");
     cmd_register("ballistics_bench", cmd_bench, "ballistics_bench [n] [cartridge]: launch n bullets (host) to measure the per-tick cost (bal_info)");

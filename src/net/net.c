@@ -14,6 +14,7 @@
 #include "gameplay/zombies/horde.h"
 #include "core/engine.h"
 #include "core/cvar.h"
+#include "core/consistency.h"
 #include "core/log.h"
 #include "core/platform.h"
 #include "game/game.h"
@@ -97,12 +98,67 @@ static u32 server_cvar_revision(void) {
     u32 sum = 0;
     for (int i = 0; i < cvar_count(); i++) {
         Cvar *c = cvar_at(i);
-        if (c->flags & CVAR_SERVER) sum += c->modified + (u32)i;
+        if (c->flags & (CVAR_SERVER | CVAR_RULE)) sum += c->modified + (u32)i;
     }
     return sum;
 }
 
 // ------------------------------------------------------------------ helpers
+
+bool net_consistency_ok(u32 host_hash, u32 client_hash, bool missing, char *why, int why_size) {
+    if (!missing && host_hash == client_hash) return true;
+    snprintf(why, (size_t)why_size, "consistency set mismatch (host %08x, you %08x): locked graphics / fair-play values differ (assets/render/consistency.json)", host_hash,
+             missing ? 0u : client_hash);
+    return false;
+}
+
+// Server rules (CVAR_LOCKED | CVAR_RULE): a client takes the host's values (MSG_CVARS) and gets its
+// own back when it leaves; only a machine that is not someone else's client sets them.
+#define MAX_RULE_SAVE 128
+static struct { char name[CVAR_NAME_MAX]; char value[CVAR_STR_MAX]; } s_rule_save[MAX_RULE_SAVE];
+static int s_rule_save_n;
+
+static bool rules_writable(void) { return !N || N->role != NET_CLIENT; }
+
+static void rules_save(void) {
+    s_rule_save_n = 0;
+    for (int i = 0; i < cvar_count() && s_rule_save_n < MAX_RULE_SAVE; i++) {
+        Cvar *c = cvar_at(i);
+        if (!(c->flags & (CVAR_SERVER | CVAR_RULE))) continue;
+        dg_strcpy(s_rule_save[s_rule_save_n].name, CVAR_NAME_MAX, c->name);
+        dg_strcpy(s_rule_save[s_rule_save_n].value, CVAR_STR_MAX, c->str);
+        s_rule_save_n++;
+    }
+}
+
+static void rules_restore(void) {
+    CvarSource src = cvar_source_push(CVAR_SRC_HOST);
+    for (int i = 0; i < s_rule_save_n; i++) {
+        Cvar *c = cvar_find(s_rule_save[i].name);
+        if (c && strcmp(c->str, s_rule_save[i].value)) cvar_set_cv(c, s_rule_save[i].value);
+    }
+    cvar_source_pop(src);
+    s_rule_save_n = 0;
+}
+
+// sv_rule [name value]: set a server rule (host / offline only), or list them.
+static void cmd_sv_rule(int argc, const char **argv) {
+    if (argc < 3) {
+        log_info("server rules (CVAR_RULE, replicated to every client):");
+        for (int i = 0; i < cvar_count(); i++) {
+            Cvar *c = cvar_at(i);
+            if (c->flags & CVAR_RULE) log_info("  %-28s = %-10s %s", c->name, c->str, c->desc);
+        }
+        return;
+    }
+    Cvar *c = cvar_find(argv[1]);
+    if (!c || !(c->flags & CVAR_RULE)) { log_warn("sv_rule: '%s' is not a server rule (sv_rule lists them)", argv[1]); return; }
+    if (!rules_writable()) { log_warn("sv_rule: only the host sets the rules"); return; }
+    CvarSource src = cvar_source_push(CVAR_SRC_HOST);
+    cvar_set_cv(c, argv[2]);
+    cvar_source_pop(src);
+    log_info("sv_rule: %s = %s", c->name, c->str);
+}
 
 static bool send_msg(PeerId peer, int channel, const Writer *w) {
     if (!N->t || w->overflow) { if (w->overflow) log_error("net: message overflow"); return false; }
@@ -139,7 +195,7 @@ static void send_cvars(RemoteClient *c) {
     u16 n = 0;
     for (int i = 0; i < cvar_count(); i++) {
         Cvar *cv = cvar_at(i);
-        if (!(cv->flags & CVAR_SERVER)) continue;
+        if (!(cv->flags & (CVAR_SERVER | CVAR_RULE))) continue;   // gameplay cvars + server rules
         w_str(&w, cv->name);
         w_str(&w, cv->str);
         n++;
@@ -208,7 +264,10 @@ static void host_handle_hello(PeerId peer, Reader *r) {
     lobby_read_hello_ext(r, &lh);
     dg_strcpy(lh.name, sizeof(lh.name), name);
     char why[160];
-    int join = lobby_on_hello(peer, &lh, why, sizeof(why));
+    // The consistency set (docs/SETTINGS_AUDIT.md): the locked values (foliage, fog, distances ...)
+    // must match the host's, whatever the build.
+    u32 theirs = r_u32(r), mine = consistency_hash_effective();
+    int join = net_consistency_ok(mine, theirs, r->overflow, why, sizeof(why)) ? lobby_on_hello(peer, &lh, why, sizeof(why)) : LJ_REJECT;
     if (join == LJ_REJECT) {
         log_warn("net: rejecting '%s': %s", name, why);
         Writer w = writer_make(N->buf, NET_BUF);
@@ -477,6 +536,7 @@ static void client_send_hello(void) {
     w_u8(&w, AC_CATEGORY_COUNT);
     for (int k = 0; k < AC_CATEGORY_COUNT; k++) w_u32(&w, g_engine.anim ? g_engine.anim->manifest.hash[k] : 0);
     lobby_write_hello_ext(&w);
+    w_u32(&w, consistency_hash_effective());   // the locked values this client renders with
     send_msg(N->server_peer, CH_RELIABLE, &w);
 }
 
@@ -639,11 +699,13 @@ static void client_handle(const NetEvent *e) {
             r_str(&r, name, sizeof(name));
             r_str(&r, value, sizeof(value));
             Cvar *cv = cvar_find(name);
-            if (cv && (cv->flags & CVAR_SERVER)) {
+            if (cv && (cv->flags & (CVAR_SERVER | CVAR_RULE))) {
                 // Host-owned value: bypass local cheat protection.
                 u32 flags = cv->flags;
                 cv->flags &= ~(u32)CVAR_CHEAT;
+                CvarSource src = cvar_source_push(CVAR_SRC_HOST);
                 cvar_set_cv(cv, value);
+                cvar_source_pop(src);
                 cv->flags = flags;
             }
         }
@@ -852,6 +914,7 @@ bool net_connect(TransportKind kind, const char *address) {
         game_add_hint("Connection failed");
         return false;
     }
+    rules_save();
     N->role = NET_CLIENT;
     N->kind = kind;
     N->connected = N->welcomed = N->lobby_seen = false;
@@ -880,7 +943,9 @@ void net_stop(void) {
     }
     close_transport();
     discovery_close(&N->disc);
+    bool was_client = N->role == NET_CLIENT;
     N->role = NET_OFF;
+    if (was_client) rules_restore();
     N->connected = N->welcomed = N->lobby_seen = false;
     N->time_init = false;
 }
@@ -1041,18 +1106,20 @@ static void cmd_snapstats(int argc, const char **argv) {
 bool net_init(void) {
     N = (NetSystem *)calloc(1, sizeof(NetSystem));
     if (enet_initialize() != 0) { log_error("net: enet_initialize failed"); return false; }
-    N->port = cvar_reg_int("net_port", DG_DEFAULT_PORT, 1, 65535, CVAR_ARCHIVE, "UDP port for LAN hosting");
-    N->snaprate = cvar_reg_int("sv_snaprate", 30, 5, 60, CVAR_ARCHIVE, "snapshots per second sent to clients");
-    N->cl_interp = cvar_reg_float("cl_interp", 100.0f, 0.0f, 500.0f, CVAR_ARCHIVE, "remote entity interpolation delay (ms)");
-    N->maxplayers = cvar_reg_int("sv_maxplayers", 4, 1, MAX_PLAYERS, CVAR_ARCHIVE, "maximum players when hosting");
-    N->showstats = cvar_reg_bool("net_showstats", false, CVAR_ARCHIVE, "show network statistics overlay");
-    N->relevance = cvar_reg_float("sv_relevance", 120.0f, 10.0f, 2000.0f, CVAR_ARCHIVE, "entity relevance distance (m)");
+    N->port = cvar_reg_int("net_port", DG_DEFAULT_PORT, 1, 65535, CVAR_ARCHIVE | CVAR_EDITABLE, "UDP port for LAN hosting");
+    N->snaprate = cvar_reg_int("sv_snaprate", 30, 5, 60, CVAR_ARCHIVE | CVAR_LOCKED | CVAR_RULE, "snapshots per second sent to clients");
+    N->cl_interp = cvar_reg_float("cl_interp", 100.0f, 0.0f, 500.0f, CVAR_LOCKED, "remote entity interpolation delay (ms)");
+    N->maxplayers = cvar_reg_int("sv_maxplayers", 4, 1, MAX_PLAYERS, CVAR_ARCHIVE | CVAR_LOCKED | CVAR_RULE, "maximum players when hosting");
+    N->showstats = cvar_reg_bool("net_showstats", false, CVAR_ARCHIVE | CVAR_EDITABLE, "show network statistics overlay");
+    N->relevance = cvar_reg_float("sv_relevance", 120.0f, 10.0f, 2000.0f, CVAR_ARCHIVE | CVAR_LOCKED | CVAR_RULE, "entity relevance distance (m)");
     N->interp = (InterpBuffer *)calloc(MAX_ENTITIES, sizeof(InterpBuffer));
     spectate_register();
     spectate_reset();
     spectate_set_sender(spec_send);
     snap_history_init(&N->cl_history);
     N->stats_time = platform_time();
+    cvar_set_rule_gate(rules_writable);
+    cmd_register("sv_rule", cmd_sv_rule, "sv_rule [name value]: set a server rule (host only; replicated to every client), or list them");
     cmd_register("net_snapstats", cmd_snapstats, "host: per-client snapshot kB/s since the last call, held zombie updates");
     cmd_register("connect", cmd_connect, "connect <ip[:port]> to a LAN/direct host");
     cmd_register("host", cmd_host, "host [lan|steam]: accept players into this game");

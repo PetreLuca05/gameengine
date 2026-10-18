@@ -1565,6 +1565,7 @@ static void cmd_status(int argc, const char **argv) {
 void game_config_loaded(void) {
     Cvar *ver = cvar_find("cfg_migration");
     if (!ver) return;
+    CvarSource src = cvar_source_push(CVAR_SRC_HOST);   // resets of locked tuning cvars
     if (ver->i < 1) {
         Cvar *bob = cvar_find("cam_bob_scale");
         if (bob) cvar_reset(bob);
@@ -1589,24 +1590,25 @@ void game_config_loaded(void) {
         log_info("config: weapon sway enabled (bob, look lag reset to their defaults)");
     }
     cvar_set_int(ver, 4);
+    cvar_source_pop(src);
 }
 
 void game_init(void) {
-    cvar_reg_int("cfg_migration", 0, 0, 1000, CVAR_ARCHIVE, "settings migration level (internal)");
+    cvar_reg_int("cfg_migration", 0, 0, 1000, CVAR_ARCHIVE | CVAR_EDITABLE, "settings migration level (internal)");
     G = (Game *)calloc(1, sizeof(Game));
     G->local_slot = -1;
     G->inv_selected = -1;
-    G->g_map = cvar_reg_string("g_map", "devroom", CVAR_ARCHIVE, "boot map: devroom | streaming | flat");
-    G->sv_hostname = cvar_reg_string("sv_hostname", "Deadground Dev Server", CVAR_ARCHIVE, "server name shown in LAN browser");
-    G->cl_name = cvar_reg_string("cl_name", "Survivor", CVAR_ARCHIVE, "player name");
-    G->dev_mode = cvar_reg_bool("developer", false, CVAR_ARCHIVE, "developer mode: dev HUD info, the Settings > Graphics Debug tab and developer-only rows, the pause Commands tab (off for players; --test turns it on)");
-    G->r_drawhitboxes = cvar_reg_bool("r_drawhitboxes", false, 0, "draw hitbox capsules");
-    G->r_drawcollision = cvar_reg_bool("r_drawcollision", false, 0, "draw physics collision shapes");
-    G->cl_showfps = cvar_reg_bool("cl_showfps", true, CVAR_ARCHIVE, "show FPS counter");
-    G->net_autohost = cvar_reg_bool("net_autohost", true, CVAR_ARCHIVE, "accept LAN connections when hosting");
-    G->host_timescale = cvar_reg_float("host_timescale", 1.0f, 0.01f, 4.0f, CVAR_CHEAT, "simulation speed (slow motion for the ballistics range / screenshots; single player or hosting alone)");
-    G->interact_range = cvar_reg_float("cl_interact_range", 3.0f, 0.5f, 10.0f, 0, "interaction focus raycast length (m); each interactable also has its own range");
-    G->world_seed = cvar_reg_int("world_seed", 1337, 0, 999999999, CVAR_ARCHIVE, "procedural world seed");
+    G->g_map = cvar_reg_string("g_map", "devroom", CVAR_ARCHIVE | CVAR_EDITABLE, "boot map: devroom | streaming | flat");
+    G->sv_hostname = cvar_reg_string("sv_hostname", "Deadground Dev Server", CVAR_ARCHIVE | CVAR_EDITABLE, "server name shown in LAN browser");
+    G->cl_name = cvar_reg_string("cl_name", "Survivor", CVAR_ARCHIVE | CVAR_EDITABLE, "player name");
+    G->dev_mode = cvar_reg_bool("developer", false, CVAR_ARCHIVE | CVAR_EDITABLE, "developer mode: dev HUD info, the Settings > Graphics Debug tab and developer-only rows, the pause Commands tab (off for players; --test turns it on)");
+    G->r_drawhitboxes = cvar_reg_bool("r_drawhitboxes", false, CVAR_LOCKED, "draw hitbox capsules");
+    G->r_drawcollision = cvar_reg_bool("r_drawcollision", false, CVAR_LOCKED, "draw physics collision shapes");
+    G->cl_showfps = cvar_reg_bool("cl_showfps", true, CVAR_ARCHIVE | CVAR_EDITABLE, "show FPS counter");
+    G->net_autohost = cvar_reg_bool("net_autohost", true, CVAR_ARCHIVE | CVAR_EDITABLE, "accept LAN connections when hosting");
+    G->host_timescale = cvar_reg_float("host_timescale", 1.0f, 0.01f, 4.0f, CVAR_CHEAT | CVAR_LOCKED, "simulation speed (slow motion for the ballistics range / screenshots; single player or hosting alone)");
+    G->interact_range = cvar_reg_float("cl_interact_range", 3.0f, 0.5f, 10.0f, CVAR_LOCKED, "interaction focus raycast length (m); each interactable also has its own range");
+    G->world_seed = cvar_reg_int("world_seed", 1337, 0, 999999999, CVAR_ARCHIVE | CVAR_LOCKED | CVAR_RULE, "procedural world seed");
     cmd_register("map", cmd_map, "map <name>: host a new game on a level / menu entry; map: list every level, menu entry and scene");
     wheels_register();
     revive_register();
@@ -1667,13 +1669,13 @@ void game_init(void) {
     player_register_cvars();
     // Animation assets (shared skeleton) before anything spawns characters.
     characters_register_cvars();
-    cvar_reg_bool("cl_thirdperson", false, 0, "debug: camera behind the local player (full body visible)");
-    cvar_reg_float("cl_thirdperson_dist", 3.0f, 0.5f, 10.0f, 0, "debug third-person camera distance");
-    cvar_reg_bool("cl_camera_socket", true, CVAR_ARCHIVE, "first-person camera on the player model's head socket (assets/characters/player.json \"sockets\")");
-    cvar_reg_float("cl_camera_socket_follow", 0.35f, 0.0f, 1.0f, CVAR_ARCHIVE, "how much of the head socket's vertical bob the first-person camera takes (0 = none, rock steady)");
-    cvar_reg_float("cl_camera_socket_roll", 0.0f, 0.0f, 1.0f, CVAR_ARCHIVE, "how much of the head socket's roll the camera takes (0 = none)");
-    cvar_reg_bool("cl_healthbars", false, CVAR_ARCHIVE, "health bars and names above characters / dummies (HUD code kept, hidden by default)");
-    G->anim_rate = cvar_reg_int("anim_sample_rate", SIM_HZ, 30, 120, 0, "FBX bake sample rate (Hz); defaults to the simulation rate");
+    cvar_reg_bool("cl_thirdperson", false, CVAR_LOCKED, "debug: camera behind the local player (full body visible)");
+    cvar_reg_float("cl_thirdperson_dist", 3.0f, 0.5f, 10.0f, CVAR_LOCKED, "debug third-person camera distance");
+    cvar_reg_bool("cl_camera_socket", true, CVAR_LOCKED, "first-person camera on the player model's head socket (assets/characters/player.json \"sockets\")");
+    cvar_reg_float("cl_camera_socket_follow", 0.35f, 0.0f, 1.0f, CVAR_LOCKED, "how much of the head socket's vertical bob the first-person camera takes (0 = none, rock steady)");
+    cvar_reg_float("cl_camera_socket_roll", 0.0f, 0.0f, 1.0f, CVAR_LOCKED, "how much of the head socket's roll the camera takes (0 = none)");
+    cvar_reg_bool("cl_healthbars", false, CVAR_LOCKED, "health bars and names above characters / dummies (HUD code kept, hidden by default)");
+    G->anim_rate = cvar_reg_int("anim_sample_rate", SIM_HZ, 30, 120, CVAR_LOCKED, "FBX bake sample rate (Hz); defaults to the simulation rate");
     g_engine.anim = (AnimLibrary *)calloc(1, sizeof(AnimLibrary));
     if (!anim_lib_load(g_engine.anim, (float)G->anim_rate->i)) {
         log_error("game: animation assets failed to load (characters fall back to capsules)");

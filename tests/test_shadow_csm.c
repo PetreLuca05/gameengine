@@ -97,6 +97,17 @@ static void check_table(const char *level, const char *variant, int res, int cas
     CHECK(ok, "%s %s: %s", level, variant, err);
 }
 
+static float locked_distance(void) {
+    char *txt = read_text("assets/render/consistency.json");
+    cJSON *r = txt ? cJSON_Parse(txt) : NULL;
+    free(txt);
+    const cJSON *v = cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(r, "values"), "r_shadow_max_distance"), "value");
+    float d = cJSON_IsNumber(v) ? (float)v->valuedouble : 0.0f;
+    CHECK(d >= 50.0f, "consistency.json r_shadow_max_distance (%g)", d);
+    cJSON_Delete(r);
+    return d > 0 ? d : 150.0f;
+}
+
 static void test_tables(void) {
     printf("shadow_csm: preset tables (Unity knobs, one formula)\n");
     static const char *levels[5] = { "off", "low", "medium", "high", "modern" };
@@ -112,7 +123,8 @@ static void test_tables(void) {
         const cJSON *f = cJSON_GetObjectItemCaseSensitive(r, "features");
         int q = (int)feat(f, "shadow_resolution", "default", 2), qmax = (int)feat(f, "shadow_resolution", "max", (float)q);
         int c = (int)feat(f, "shadow_cascades", "default", 4);
-        float d = feat(f, "shadow_distance", "default", 100.0f), dmax = feat(f, "shadow_distance", "max", d);
+        // The distance is locked (assets/render/consistency.json, docs/SETTINGS_AUDIT.md): one value.
+        float d = locked_distance(), dmax = d;
         check_table(levels[i], "default", q, c, d, min_tpm[i]);
         check_table(levels[i], "max", qmax, c, dmax, min_tpm[i] * 0.4f);   // max distance at the max resolution
         // The pure tier table (shadow_settings.c) equals the JSON defaults.

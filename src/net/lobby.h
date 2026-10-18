@@ -85,6 +85,7 @@ typedef struct LobbySettings {
     char weather[24];         // start weather preset ("" = a weighted pick of the season's presets)
     bool pvp;                 // stub
     bool late_join;           // players may join a running game
+    u8 foliage_pct;           // server rule r_foliage_density x 100 (50 .. 100, 0 = 100; docs/SETTINGS_AUDIT.md)
 } LobbySettings;
 
 typedef struct LobbyMember {

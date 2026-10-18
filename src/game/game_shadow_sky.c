@@ -559,7 +559,7 @@ static void cmd_light_shadow(int argc, const char **argv) {
 }
 
 void shadow_sky_register(void) {
-    SS.moon_shadows = cvar_reg_bool("r_moon_shadows", true, CVAR_ARCHIVE, "moon shadows while the sun still owns the cascades (the moon's own map; Engine Fidelity High / Modern)");
+    SS.moon_shadows = cvar_reg_bool("r_moon_shadows", true, CVAR_LOCKED, "moon shadows while the sun still owns the cascades (the moon's own map; Engine Fidelity High / Modern)");
     cmd_register("shadows_sky_reload", cmd_reload, "reload assets/render/shadows_sky.json (also automatic on save)");
     cmd_register("shadow_info", cmd_info, "sky-driven shadows: key light, direct vs sky irradiance, contrast, source radius, mode, moon tile");
     cmd_register("shadow_preset", cmd_preset,

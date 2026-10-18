@@ -204,8 +204,8 @@ void bal_fx_init(void) {
     cmd_register("muzzle_preview", cmd_muzzle_preview, "muzzle_preview <weapon> [device] [timescale] | off: a composed muzzle flash every 0.8 s in front of the camera, seen from the side, in slow motion (vfx_timescale)");
     F.em_head = F.em_tail = -1;
     vfx_game_set_muzzle_composer(compose_legacy);
-    F.trace = cvar_reg_bool("bal_bullet_trace", true, CVAR_ARCHIVE, "bullet trace: the heat / shock ripple along supersonic bullets, seen through magnified optics");
-    F.vapor = cvar_reg_bool("bal_vapor_trails", true, CVAR_ARCHIVE, "vapour trails behind supersonic bullets in humid or freezing air");
+    F.trace = cvar_reg_bool("bal_bullet_trace", true, CVAR_LOCKED, "bullet trace: the heat / shock ripple along supersonic bullets, seen through magnified optics");
+    F.vapor = cvar_reg_bool("bal_vapor_trails", true, CVAR_LOCKED, "vapour trails behind supersonic bullets in humid or freezing air");
 }
 
 void bal_fx_clear(void) {

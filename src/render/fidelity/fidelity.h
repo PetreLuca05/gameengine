@@ -63,6 +63,8 @@ int fid_feature_count(void);
 const FidFeatureDef *fid_feature(int f);
 int fid_feature_find(const char *id);
 int fid_feature_by_cvar(const char *cvar);
+// A feature whose cvar is CVAR_LOCKED (docs/SETTINGS_AUDIT.md): one value at every level and era.
+bool fid_feature_locked(int f);
 const char *fid_level_id(int level);          // "off" .. "modern"
 const char *fid_level_name(int level);        // "Off" .. "Modern"
 const char *fid_level_desc(int level);        // one line (JSON "description")

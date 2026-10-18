@@ -2010,6 +2010,6 @@ static void cmd_hpe(int argc, const char **argv) {
 
 void hp_editor_register(void) {
     scene_register(&k_scene);
-    E.save_dir = cvar_reg_string("handpose_editor_dir", "", 0, "hand pose editor: save into this directory only (tests); empty = assets/handposes in the source tree + the runtime copy");
+    E.save_dir = cvar_reg_string("handpose_editor_dir", "", CVAR_LOCKED, "hand pose editor: save into this directory only (tests); empty = assets/handposes in the source tree + the runtime copy");
     cmd_register("hpe", cmd_hpe, "hand pose editor (scene handpose) commands for scripts: hpe with no arguments lists them");
 }

@@ -737,10 +737,12 @@ void game_render(void) {
         static u32 seen_cam, seen_r;
         Cvar *cw = camera_fp_cvars()->weapon_fov, *rv = cvar_find("r_viewmodel_fov");
         if (cw && rv) {
+            CvarSource src = cvar_source_push(CVAR_SRC_HOST);   // both locked (follow the camera FOV)
             if (cw->modified != seen_cam && cw->f != rv->f) cvar_set_float(rv, cw->f);
             else if (rv->modified != seen_r && cw->f != rv->f) cvar_set_float(cw, rv->f);
             seen_cam = cw->modified;
             seen_r = rv->modified;
+            cvar_source_pop(src);
         }
     }
     // True first-person camera. Order of operations (nothing after the arm IK moves the camera,
@@ -892,6 +894,13 @@ void game_render(void) {
         env.sun_color = v3(0.6f, 0.7f, 1.0f);
         env.ambient_intensity *= 0.08f;
         env.fog_color = v3_scale(env.fog_color, 0.05f);
+    }
+    // One fog for every Engine Fidelity level (docs/SETTINGS_AUDIT.md V6): without volumetrics the lit
+    // shaders' analytic fog takes the froxels' density (time of day, weather and r_fog_scale
+    // included), not the bare level / time-of-day density, which was thinner, and in fog far thinner.
+    {
+        float fog = game_post_fog_density();
+        if (fog > 0.0f) env.fog_density = fog;
     }
     render_set_environment(&env);
     vfx_game_set_environment(env.sun_intensity, wind_game_at(cam.pos));   // particles drift with the local wind (gusts)

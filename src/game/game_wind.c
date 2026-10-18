@@ -313,13 +313,13 @@ static void cmd_wind_info(int argc, const char **argv) {
 }
 
 void wind_game_register(void) {
-    WG.debug = cvar_reg_int("wind_debug", 0, 0, 1, 0, "wind field debug: arrows on the ground, the next gust front, every foliage instance's bend (docs/FOLIAGE_WIND.md)");
-    WG.view = cvar_reg_int("wind_view", 0, 0, 2, 0, "foliage wind debug view: 0 shaded, 1 wind channels as colours (R flutter, G phase, B branch), 2 bend amount");
-    WG.solo = cvar_reg_int("wind_solo", 0, 0, 3, 0, "foliage wind layer solo: 0 all (r_foliage_wind), 1 main bending, 2 detail bending, 3 edge flutter");
-    WG.timescale = cvar_reg_float("wind_timescale", 1.0f, 0.0f, 4.0f, 0, "foliage wind time scale (slow motion; 1 = in step with every other machine)");
-    WG.dir = cvar_reg_float("wind_dir", -1.0f, -1.0f, 360.0f, 0, "wind override: direction (deg towards, 0 = -Z), -1 = the weather's");
-    WG.speed = cvar_reg_float("wind_speed", -1.0f, -1.0f, 60.0f, 0, "wind override: mean speed (m/s), -1 = the weather's");
-    WG.gust = cvar_reg_float("wind_gust", -1.0f, -1.0f, 1.0f, 0, "wind override: gust amount 0..1, -1 = the weather's");
+    WG.debug = cvar_reg_int("wind_debug", 0, 0, 1, CVAR_LOCKED, "wind field debug: arrows on the ground, the next gust front, every foliage instance's bend (docs/FOLIAGE_WIND.md)");
+    WG.view = cvar_reg_int("wind_view", 0, 0, 2, CVAR_LOCKED, "foliage wind debug view: 0 shaded, 1 wind channels as colours (R flutter, G phase, B branch), 2 bend amount");
+    WG.solo = cvar_reg_int("wind_solo", 0, 0, 3, CVAR_LOCKED, "foliage wind layer solo: 0 all (r_foliage_wind), 1 main bending, 2 detail bending, 3 edge flutter");
+    WG.timescale = cvar_reg_float("wind_timescale", 1.0f, 0.0f, 4.0f, CVAR_LOCKED, "foliage wind time scale (slow motion; 1 = in step with every other machine)");
+    WG.dir = cvar_reg_float("wind_dir", -1.0f, -1.0f, 360.0f, CVAR_LOCKED, "wind override: direction (deg towards, 0 = -Z), -1 = the weather's");
+    WG.speed = cvar_reg_float("wind_speed", -1.0f, -1.0f, 60.0f, CVAR_LOCKED, "wind override: mean speed (m/s), -1 = the weather's");
+    WG.gust = cvar_reg_float("wind_gust", -1.0f, -1.0f, 1.0f, CVAR_LOCKED, "wind override: gust amount 0..1, -1 = the weather's");
     cmd_register("wind_panel", cmd_wind_panel, "wind_panel [0|1]: foliage wind tuning panel (override, gust, layers, views, per-type parameters)");
     cmd_register("wind_gust_now", cmd_wind_gust, "wind_gust_now [m/s]: a gust front sweeping past the camera from 120 m upwind");
     cmd_register("wind_blast", cmd_wind_blast, "wind_blast [radius=25] [m/s=25]: an explosion's wind ring 10 m along +z of the camera");

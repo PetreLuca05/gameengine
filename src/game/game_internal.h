@@ -216,6 +216,9 @@ bool game_fire_loop_trigger(void);   // the loop holds the trigger this tick
 bool game_fire_save_class(const struct FireAnimDef *d);
 struct FireAnimState *game_fire_state(void);
 void game_post_frame(const PostFrameInfo *fi);
+// This frame's fog density (1/m) after the time of day, the weather and the post volumes: the froxel
+// volumetrics and the analytic fog of every level without them share it (docs/SETTINGS_AUDIT.md V6).
+float game_post_fog_density(void);
 void game_post_draw_overlay(void);
 void game_post_draw_photo_ui(void);
 void game_post_flash(float strength);

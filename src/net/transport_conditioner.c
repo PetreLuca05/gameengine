@@ -99,9 +99,9 @@ NetTransport *transport_conditioner_wrap(NetTransport *inner) {
     NetTransport *t = (NetTransport *)calloc(1, sizeof(NetTransport));
     CondImpl *c = (CondImpl *)calloc(1, sizeof(CondImpl));
     c->inner = inner;
-    c->lag = cvar_reg_float("net_fakelag", 0, 0, 2000, 0, "artificial outgoing latency (ms)");
-    c->jitter = cvar_reg_float("net_fakejitter", 0, 0, 500, 0, "artificial jitter on unreliable packets (ms)");
-    c->loss = cvar_reg_float("net_fakeloss", 0, 0, 100, 0, "artificial unreliable packet loss (%)");
+    c->lag = cvar_reg_float("net_fakelag", 0, 0, 2000, CVAR_LOCKED, "artificial outgoing latency (ms)");
+    c->jitter = cvar_reg_float("net_fakejitter", 0, 0, 500, CVAR_LOCKED, "artificial jitter on unreliable packets (ms)");
+    c->loss = cvar_reg_float("net_fakeloss", 0, 0, 100, CVAR_LOCKED, "artificial unreliable packet loss (%)");
     c->rng = rng_make((u64)(platform_time() * 1e6));
     t->name = inner->name;
     t->impl = c;

@@ -369,23 +369,23 @@ static void cmd_vgeo_clear(int argc, const char **argv) {
 // ------------------------------------------------------------------ lifetime
 
 void vkg_init(void) {
-    G.r_vgeo = cvar_reg_bool("r_vgeo", true, CVAR_ARCHIVE, "virtualized geometry (docs/VGEO.md); 0: the classic instanced renderer (docs/CLASSIC_RENDERER.md)");
-    G.error_px = cvar_reg_float("r_vgeo_error_px", 1.0f, 0.25f, 16.0f, CVAR_ARCHIVE, "vgeo: allowed projected LOD error (pixels)");
-    G.shadow_error_px = cvar_reg_float("r_vgeo_shadow_error_px", 2.0f, 0.25f, 32.0f, CVAR_ARCHIVE, "vgeo: projected LOD error in shadow views (pixels, Phase 3)");
-    G.sw_px = cvar_reg_float("r_vgeo_sw_px", 32.0f, 0.0f, 512.0f, CVAR_ARCHIVE, "vgeo: clusters smaller than this (pixels across) go to the software rasteriser");
-    G.occlusion = cvar_reg_int("r_vgeo_occlusion", 2, 0, 2, CVAR_ARCHIVE, "vgeo: occlusion culling 0 off, 1 last frame's Hi-Z, 2 two-pass (pass 2 from Phase 3)");
-    G.freeze = cvar_reg_bool("r_vgeo_freeze", false, 0, "vgeo: freeze the culling camera");
-    G.debug = cvar_reg_int("r_vgeo_debug", 0, 0, 8, 0, "vgeo debug view (Phase 3): 1 cluster, 2 triangle, 3 LOD, 4 error, 5 SW/HW, 6 residency, 7 overdraw, 8 instance");
-    G.debug_spheres = cvar_reg_bool("r_vgeo_debug_spheres", false, 0, "vgeo: draw the culling spheres of up to 4096 visible clusters (HW green, SW cyan)");
-    G.shadows = cvar_reg_bool("r_vgeo_shadows", true, CVAR_ARCHIVE, "vgeo: draw vgeo clusters into the sun shadow cascades");
-    G.skinned = cvar_reg_bool("r_vgeo_characters", true, CVAR_ARCHIVE, "vgeo: draw skinned characters (main view) through vgeo");
-    G.pool_mb = cvar_reg_int("r_vgeo_pool_mb", 512, 16, 8192, CVAR_ARCHIVE, "vgeo: GPU page pool budget (MB of 128 KiB pages; applied on the next scene upload)");
-    G.pages_per_frame = cvar_reg_int("r_vgeo_stream_pages_per_frame", 64, 1, 1024, CVAR_ARCHIVE, "vgeo: pages streamed in per frame");
-    G.impostor_px = cvar_reg_float("r_vgeo_impostor_px", 16.0f, 0.0f, 256.0f, CVAR_ARCHIVE,
+    G.r_vgeo = cvar_reg_bool("r_vgeo", true, CVAR_TIER, "virtualized geometry (docs/VGEO.md); 0: the classic instanced renderer (docs/CLASSIC_RENDERER.md)");
+    G.error_px = cvar_reg_float("r_vgeo_error_px", 1.0f, 0.25f, 16.0f, CVAR_LOCKED, "vgeo: allowed projected LOD error (pixels)");
+    G.shadow_error_px = cvar_reg_float("r_vgeo_shadow_error_px", 2.0f, 0.25f, 32.0f, CVAR_TIER, "vgeo: projected LOD error in shadow views (pixels, Phase 3)");
+    G.sw_px = cvar_reg_float("r_vgeo_sw_px", 32.0f, 0.0f, 512.0f, CVAR_TIER, "vgeo: clusters smaller than this (pixels across) go to the software rasteriser");
+    G.occlusion = cvar_reg_int("r_vgeo_occlusion", 2, 0, 2, CVAR_LOCKED, "vgeo: occlusion culling 0 off, 1 last frame's Hi-Z, 2 two-pass (pass 2 from Phase 3)");
+    G.freeze = cvar_reg_bool("r_vgeo_freeze", false, CVAR_LOCKED, "vgeo: freeze the culling camera");
+    G.debug = cvar_reg_int("r_vgeo_debug", 0, 0, 8, CVAR_LOCKED, "vgeo debug view (Phase 3): 1 cluster, 2 triangle, 3 LOD, 4 error, 5 SW/HW, 6 residency, 7 overdraw, 8 instance");
+    G.debug_spheres = cvar_reg_bool("r_vgeo_debug_spheres", false, CVAR_LOCKED, "vgeo: draw the culling spheres of up to 4096 visible clusters (HW green, SW cyan)");
+    G.shadows = cvar_reg_bool("r_vgeo_shadows", true, CVAR_TIER, "vgeo: draw vgeo clusters into the sun shadow cascades");
+    G.skinned = cvar_reg_bool("r_vgeo_characters", true, CVAR_TIER, "vgeo: draw skinned characters (main view) through vgeo");
+    G.pool_mb = cvar_reg_int("r_vgeo_pool_mb", 512, 16, 8192, CVAR_TIER, "vgeo: GPU page pool budget (MB of 128 KiB pages; applied on the next scene upload)");
+    G.pages_per_frame = cvar_reg_int("r_vgeo_stream_pages_per_frame", 64, 1, 1024, CVAR_TIER, "vgeo: pages streamed in per frame");
+    G.impostor_px = cvar_reg_float("r_vgeo_impostor_px", 16.0f, 0.0f, 256.0f, CVAR_LOCKED,
                                    "vgeo: instances with an impostor atlas draw it below this projected size (pixels across, 0 = never)");
-    G.foliage_wind = cvar_reg_int("r_foliage_wind", 3, 0, 3, CVAR_ARCHIVE,
+    G.foliage_wind = cvar_reg_int("r_foliage_wind", 3, 0, 3, CVAR_TIER,
                                   "foliage wind animation (docs/FOLIAGE_WIND.md): 0 none, 1 main bending, 2 + branch bending, 3 + leaf flutter and bent normals");
-    G.foliage_wind_solo = cvar_reg_int("r_foliage_wind_solo", 0, 0, 3, 0, "foliage wind debug: 0 every layer (r_foliage_wind), 1 main bending only, 2 detail only, 3 flutter only");
+    G.foliage_wind_solo = cvar_reg_int("r_foliage_wind_solo", 0, 0, 3, CVAR_LOCKED, "foliage wind debug: 0 every layer (r_foliage_wind), 1 main bending only, 2 detail only, 3 flutter only");
     cmd_register("foliage_push_test", cmd_foliage_push_test, "foliage_push_test [seconds=10]: a ring of displacement-buffer pushes circling the camera");
     cmd_register("foliage_stats", cmd_foliage_stats, "foliage: placement chunks, region allocator audit, last frame's foliage counters");
     cmd_register("foliage_query", cmd_foliage_query, "foliage_query [radius=2]: placement instances around the camera (foliage_query API)");
@@ -1065,19 +1065,22 @@ void render_vgeo_set_level(const RenderVgeoPlacement *p, int count) {
 
 // ------------------------------------------------------------------ era presets + discrete LOD fallback
 
-// r_era (docs/VGEO_PLAN.md section 6): every value is a plain cvar the preset sets; any other combination
-// reads back as Custom (4).
-typedef struct EraDef { int vgeo; float error_px, shadow_px, lod_px, foliage; } EraDef;
+// r_era (docs/VGEO_PLAN.md section 6): the renderer and the shadow-view error are plain cvars the
+// preset sets; any other combination reads back as Custom (4). The LOD error / pick thresholds and
+// the foliage density are locked (assets/render/consistency.json, docs/SETTINGS_AUDIT.md): an era
+// changes how the geometry is built and drawn, never what is visible (they used to be 1 / 2 / 1 / 1
+// px, 2 / 3 / 4 / 12 px and 1.0 / 0.7 / 0.4 / 0.2 by era). 2015 and 2010 differ in the classic
+// renderer's LOD chain (r_era 3: three LODs), not in a cvar.
+typedef struct EraDef { int vgeo; float shadow_px; } EraDef;
 static const EraDef k_eras[4] = {
-    { 1, 1.0f, 2.0f, 2.0f, 1.0f },   // modern: vgeo, 1 px (r_vgeo 0: classic LODs at 2 px)
-    { 1, 2.0f, 4.0f, 3.0f, 0.7f },   // 2020: vgeo, 2 px (r_vgeo 0: classic LODs at 3 px)
-    { 0, 1.0f, 2.0f, 4.0f, 0.4f },   // 2015: classic renderer, discrete DAG LODs (4), CPU LOD by screen size
-    { 0, 1.0f, 2.0f, 12.0f, 0.2f },  // 2010: classic renderer, 3 LODs, more aggressive distances
+    { 1, 2.0f },   // modern: vgeo
+    { 1, 4.0f },   // 2020: vgeo, coarser shadow views
+    { 0, 2.0f },   // 2015: classic renderer, discrete DAG LODs (4), CPU LOD by screen size
+    { 0, 2.0f },   // 2010: classic renderer, 3 LODs
 };
 
-// Compared after the Engine Fidelity bounds (docs/ENGINE_FIDELITY.md): Low scales the era's error
-// thresholds, caps its foliage; the era still reads back as itself. So does a lower level's own value
-// of the era (Settings > Graphics > Normal: the Foliage / View distance qualities, fid_group_apply).
+// Compared after the Engine Fidelity bounds (docs/ENGINE_FIDELITY.md): Low scales the era's shadow
+// error threshold; the era still reads back as itself. So does a lower level's own value of the era.
 static bool era_eq(int f, float v, float era_v) {
     if (fabsf(v - fid_clamp_current(f, era_v)) < 1e-4f) return true;
     for (int l = 0; l < fid_level(); l++) {
@@ -1090,10 +1093,10 @@ static bool era_eq(int f, float v, float era_v) {
 static int era_detect(void) {
     for (int e = 0; e < 4; e++) {
         const EraDef *d = &k_eras[e];
-        if (era_eq(FF_VGEO, (float)G.r_vgeo->i, (float)d->vgeo) && era_eq(FF_VGEO_ERROR_PX, G.error_px->f, d->error_px) &&
-            era_eq(FF_VGEO_SHADOW_ERROR_PX, G.shadow_error_px->f, d->shadow_px) && era_eq(FF_VGEO_LOD_PX, G.lod_px->f, d->lod_px) &&
-            era_eq(FF_FOLIAGE_DENSITY, G.foliage_density->f, d->foliage))
+        if (era_eq(FF_VGEO, (float)G.r_vgeo->i, (float)d->vgeo) && era_eq(FF_VGEO_SHADOW_ERROR_PX, G.shadow_error_px->f, d->shadow_px)) {
+            if (e == 2 && G.era && G.era->i == 3) return 3;   // the classic eras share their cvars
             return e;
+        }
     }
     return 4;
 }
@@ -1101,11 +1104,10 @@ static int era_detect(void) {
 static void era_apply(int e) {
     const EraDef *d = &k_eras[DG_CLAMP(e, 0, 3)];
     G.applying_era = true;
+    CvarSource src = cvar_source_push(CVAR_SRC_FIDELITY);   // tier cvars (docs/SETTINGS_AUDIT.md)
     cvar_set_int(G.r_vgeo, d->vgeo);
-    cvar_set_float(G.error_px, d->error_px);
     cvar_set_float(G.shadow_error_px, d->shadow_px);
-    cvar_set_float(G.lod_px, d->lod_px);
-    cvar_set_float(G.foliage_density, d->foliage);
+    cvar_source_pop(src);
     G.applying_era = false;
 }
 
@@ -1121,27 +1123,24 @@ static void on_era_value(Cvar *c) {
     int e = era_detect();
     if (G.era->i != e) {
         G.applying_era = true;
-        cvar_set_int(G.era, e);
+        if (G.era->i != 3 || e != 2) cvar_set_int(G.era, e);   // 2010 reads back as 2015 by its cvars
         G.applying_era = false;
     }
 }
 
 static void vkg_register_era(void) {
-    G.lod_px = cvar_reg_float("r_vgeo_lod_px", 2.0f, 0.25f, 64.0f, CVAR_ARCHIVE, "classic renderer (r_vgeo 0): projected error of the discrete LOD pick (pixels)");
-    G.foliage_density = cvar_reg_float("r_foliage_density", 1.0f, 0.0f, 1.0f, CVAR_ARCHIVE, "foliage instance density (Phase 7)");
-    GR.r_grass_tex = cvar_reg_int("r_grass_tex", 0, 0, 1, CVAR_ARCHIVE, "grass atlases at full size (1: 2048 px, about 4x the memory; 0: half, at the next map load)");
-    G.era = cvar_reg_int("r_era", 0, 0, 4, CVAR_ARCHIVE, "geometry era preset: 0 modern (vgeo 1 px), 1 2020 (vgeo 2 px), 2 2015 (4 discrete LODs), 3 2010 (3 LODs), 4 custom");
+    G.lod_px = cvar_reg_float("r_vgeo_lod_px", 2.0f, 0.25f, 64.0f, CVAR_LOCKED, "classic renderer (r_vgeo 0): projected error of the discrete LOD pick (pixels)");
+    G.foliage_density = cvar_reg_float("r_foliage_density", 1.0f, 0.0f, 1.0f, CVAR_ARCHIVE | CVAR_LOCKED | CVAR_RULE, "foliage instance density (Phase 7)");
+    GR.r_grass_tex = cvar_reg_int("r_grass_tex", 0, 0, 1, CVAR_TIER, "grass atlases at full size (1: 2048 px, about 4x the memory; 0: half, at the next map load)");
+    G.era = cvar_reg_int("r_era", 0, 0, 4, CVAR_ARCHIVE | CVAR_EDITABLE, "geometry era preset: 0 modern (vgeo), 1 2020 (vgeo, coarser shadow views), 2 2015 (4 discrete LODs), 3 2010 (3 LODs), 4 custom; never changes what is visible (docs/SETTINGS_AUDIT.md)");
     G.era->on_change = on_era;
     // Era-owned Engine Fidelity features take their defaults from this table.
     for (int e = 0; e < 4; e++) {
         fid_set_era_value(e, FF_VGEO, (float)k_eras[e].vgeo);
-        fid_set_era_value(e, FF_VGEO_ERROR_PX, k_eras[e].error_px);
         fid_set_era_value(e, FF_VGEO_SHADOW_ERROR_PX, k_eras[e].shadow_px);
-        fid_set_era_value(e, FF_VGEO_LOD_PX, k_eras[e].lod_px);
-        fid_set_era_value(e, FF_FOLIAGE_DENSITY, k_eras[e].foliage);
     }
-    Cvar *dep[5] = { G.r_vgeo, G.error_px, G.shadow_error_px, G.lod_px, G.foliage_density };
-    for (int i = 0; i < 5; i++) dep[i]->on_change = on_era_value;
+    Cvar *dep[2] = { G.r_vgeo, G.shadow_error_px };
+    for (int i = 0; i < 2; i++) dep[i]->on_change = on_era_value;
     on_era_value(NULL);
 }
 
