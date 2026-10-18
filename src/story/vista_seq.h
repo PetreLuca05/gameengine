@@ -8,12 +8,17 @@
 //   "power":   [{"t": s, "sector": 0..7, "to": v, "fade": s}]   v: 0 dark .. 1 normal, > 1 flickering
 //   "traffic": {"density": 0..1, "stall": 0..1, "dark": 0..1, "ramp": s}
 //   "heli":    {"path": [point, point], "duration": s}  or  {"from": point, "to": point, "approach": m,
-//              "duration": s, "crash": true}  (spirals down onto "to")
+//              "duration": s, "crash": true}  (spirals down onto "to")  or  {"path": [...], "duration": s,
+//              "land": true}  (flies in high, settles onto "to" over the last quarter and stays there)
 //   "smoke":   [{"at": point, "t": s, "grow": s, "rise": m/s, "life": s, "size": [m, m], "rate": /s,
-//              "shade": [base, top], "spread": m, "drift": [x, z] m/s}]
+//              "shade": [base, top], "spread": m, "drift": [x, z] m/s, "prewarm": s}]  (prewarm: already burning
+//              that long when the sequence starts: a column that grew while the family slept)
 //   "fire":    [{"at": point, "t": s, "size": m}]
 //   "flash":   [{"at": point, "t": s, "time": s, "size": m}]
 //   "birds":   {"scatter": true}   (the idle flocks over the park and the river scatter and leave)
+//              {"gone": true}      (none left)
+//   "day":     N                   (the world state the city shows: the damage layer up to day N, game_vista.c)
+//   "crowd":   {"count": N}        (the dead walking the streets below: dots on the city roads)
 #ifndef DG_VISTA_SEQ_H
 #define DG_VISTA_SEQ_H
 
@@ -27,7 +32,7 @@
 typedef struct VistaPowerKey { float t, to, fade; int sector; } VistaPowerKey;
 typedef struct VistaSmokeDef {
     char at[VISTA_NAME];
-    float t, grow, rise, life, size0, size1, rate, shade0, shade1, spread, drift[2];
+    float t, grow, rise, life, size0, size1, rate, shade0, shade1, spread, drift[2], prewarm;
 } VistaSmokeDef;
 typedef struct VistaSpotDef { char at[VISTA_NAME]; float t, time, size; } VistaSpotDef;   // fires, flashes
 
@@ -37,14 +42,16 @@ typedef struct VistaSeqDef {
     int power_n;
     bool traffic;
     float density, stall, dark, ramp;      // density / stall / dark < 0: unchanged
-    bool heli, crash;
+    bool heli, crash, land;
     char heli_from[VISTA_NAME], heli_to[VISTA_NAME];
     float heli_time, approach;
     VistaSmokeDef smoke[VISTA_MAX_ITEMS];
     int smoke_n;
     VistaSpotDef fire[VISTA_MAX_ITEMS], flash[VISTA_MAX_ITEMS];
     int fire_n, flash_n;
-    bool birds_scatter;
+    bool birds_scatter, birds_gone;
+    int day;                               // 0 = no day state
+    int crowd;                             // -1 = unchanged
 } VistaSeqDef;
 
 typedef struct VistaSeqLib {
@@ -73,6 +80,8 @@ typedef struct VistaFrame {
     VistaSpot fire[16], flash[8];
     int fire_n, flash_n;
     float birds_scatter_age;               // < 0: the flocks circle
+    int day;                               // the latest day state (0 = none)
+    int crowd;                             // dots walking the roads
 } VistaFrame;
 
 // JSON text -> lib (false on a parse error; err gets a message).

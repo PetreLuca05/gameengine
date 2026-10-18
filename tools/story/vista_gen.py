@@ -33,6 +33,8 @@ class City:
         self.brushes, self.kit, self.points, self.roads = [], [], {}, []
         self.stats = {"kit_buildings": 0, "boxes": 0, "landmarks": 0}
         self.exclude = []   # (x, z, radius): landmark sites the blocks keep clear of
+        self.buildings = []  # (x, z, w, d, h, yaw): candidates for the damage layer
+        self.damage = []
         rv = cfg["river"]
         self.river = []   # centre line (x, z, bearing)
         b = rv["from"]
@@ -229,6 +231,7 @@ class City:
         j = self.rng.uniform(0.9, 1.08)
         col = [min(1.0, c * j) for c in col]
         self.box(x, 0, z, w, h, d, col, "brick" if col[0] > col[2] + 0.1 else "concrete", facade=True)
+        self.buildings.append((x, z, w, d, h, 0.0))
         if self.rng.random() < 0.35 and h > 20:   # setback / penthouse
             self.box(x + self.rng.uniform(-2, 2), h, z + self.rng.uniform(-2, 2), w * 0.6, self.rng.uniform(3, 9), d * 0.6, col, "concrete", facade=True)
         if near or dist < 700:
@@ -286,6 +289,7 @@ class City:
         if rngb.random() < 0.6:
             self.box((x0 + x1) / 2 + rngb.uniform(-2, 2), top + 0.4, (z0 + z1) / 2 + rngb.uniform(-2, 2), 3.0, 2.6, 3.0, [0.5, 0.5, 0.5], "concrete")
         self.stats["kit_buildings"] += 1
+        self.buildings.append(((x0 + x1) / 2, (z0 + z1) / 2, x1 - x0 + 0.4, z1 - z0 + 0.4, top, 0.0))
         return top
 
     # ---------------------------------------------------------------- landmarks
@@ -454,7 +458,8 @@ class City:
         P["vista_hospital"] = {"pos": self.tf_point(hosp_k, hx, hy, hz), "yaw": 0}
         P["heli_crash_anchor"] = P["vista_hospital"]
         P["smoke_hospital"] = {"pos": self.tf_point(hosp_k, hx, 0, hz), "yaw": 0}
-        for name, b, d in (("smoke_2", -32, 900), ("smoke_3", 104, 700)):
+        for name, b, d in (("smoke_2", -32, 900), ("smoke_3", 104, 700), ("smoke_4", 15, 600), ("smoke_5", 62, 450), ("smoke_6", -48, 760),
+                           ("smoke_7", 92, 950), ("smoke_8", 30, 380), ("smoke_9", -12, 1150), ("smoke_10", 74, 1250)):
             x, z = self.at(b, d)
             P[name] = {"pos": [r2(x), 0.0, r2(z)], "yaw": 0}
         # Helicopter paths (beat 2 far north, west to east; beat 5 in from the north-east to the hospital).
@@ -467,6 +472,42 @@ class City:
             P[name] = {"pos": [r2(x), 2.0, r2(z)], "yaw": 0}
         x, z = self.at(-10, self.river_r(-10))
         P["vista_birds_river"] = {"pos": [r2(x), 25.0, r2(z)], "yaw": 0}
+
+    def city_damage(self):
+        """The damage layer (day-gated boxes, game_vista.c): scorched upper floors, abandoned cars."""
+        cfg = self.cfg.get("damage")
+        if not cfg:
+            return
+        rng = random.Random(self.cfg["seed"] + 77)
+        near = [b for b in self.buildings if self.polar(b[0], b[1])[1] < cfg["radius"] and b[4] > 9]
+        rng.shuffle(near)
+        k = 0
+        for day, n in enumerate(cfg["scorch"]):
+            for _ in range(n):
+                if k >= len(near):
+                    break
+                x, z, w, d, h, yaw = near[k]
+                k += 1
+                y0 = h * rng.uniform(0.35, 0.7)
+                self.damage.append({"day": day, "p": [r2(x), r2(y0), r2(z)], "s": [r2(w + 0.3), r2(h - y0 + 0.1), r2(d + 0.3)], "yaw": yaw,
+                                    "c": cfg.get("scorch_color", [0.06, 0.055, 0.05])})
+                if rng.random() < 0.4:   # the roof fell in: rubble at the foot
+                    self.damage.append({"day": day, "p": [r2(x + rng.uniform(-w / 3, w / 3)), 0.0, r2(z + d / 2 + 2.5)], "s": [r2(w * 0.6), 1.6, 4.0],
+                                        "yaw": rng.uniform(-15, 15), "c": [0.38, 0.35, 0.32]})
+        cols = [[0.7, 0.7, 0.72], [0.1, 0.1, 0.11], [0.5, 0.1, 0.08], [0.18, 0.25, 0.4], [0.07, 0.065, 0.06]]
+        for day, n in enumerate(cfg["cars"]):
+            for _ in range(n):
+                if not self.roads:
+                    break
+                road = rng.choice(self.roads)["points"]
+                i = rng.randrange(len(road) - 1)
+                (ax, ay, az), (bx, by, bz) = road[i], road[i + 1]
+                t = rng.random()
+                x, z = ax + (bx - ax) * t + rng.uniform(-4, 4), az + (bz - az) * t + rng.uniform(-4, 4)
+                yaw = -math.degrees(math.atan2(bx - ax, -(bz - az))) + rng.uniform(-35, 35)
+                c = rng.choice(cols)
+                self.damage.append({"day": day, "p": [r2(x), 0.25, r2(z)], "s": [1.8, 0.75, 4.4], "yaw": r2(yaw), "c": c})
+                self.damage.append({"day": day, "p": [r2(x), 1.0, r2(z)], "s": [1.5, 0.55, 2.4], "yaw": r2(yaw), "c": [v * 0.7 for v in c]})
 
     def generate(self):
         self.water()
@@ -482,6 +523,7 @@ class City:
         self.arterials()
         hosp = [v for kk, v in lm_k.items() if kk.startswith("hospital:")][0]
         self.anchors(*hosp)
+        self.city_damage()
         return self
 
 
@@ -492,7 +534,7 @@ def generate(path=SRC):
     city_block = {"_doc": "City window lights (src/world/level.c, render_set_city): base lit fraction at night, intensity, "
                           "power sectors are 45 deg of bearing from 'center' (0 = N..45, 1 = 45..90 (Halden), ...). "
                           "Roads: polylines for vista traffic. GENERATED by tools/story/vista_gen.py.",
-                  "base": 0.32, "intensity": 1.6, "center": [cfg["view"][0], cfg["view"][2]], "roads": c.roads}
+                  "base": 0.32, "intensity": 1.6, "center": [cfg["view"][0], cfg["view"][2]], "roads": c.roads, "damage": c.damage}
     prefab = {"prefab": NEAR_PREFAB, "_doc": "The near city's kit facade buildings (Vellmouth, assets/story/vista/vellmouth.json). "
                                              "GENERATED by tools/story/vista_gen.py; placed with \"batch\": true.", "pieces": c.kit}
     return {"brushes": c.brushes, "prefab": prefab, "city": city_block, "points": c.points, "stats": c.stats}

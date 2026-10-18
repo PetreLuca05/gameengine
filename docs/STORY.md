@@ -31,7 +31,14 @@
 
 **Story mode is single-player or host-authoritative co-op with 1–4 players.** It uses the existing listen-server path (`game_host_ex`). Solo is the same code with nobody connected (`GH_NO_AUTOHOST`), so there is one path to test.
 
-Roles are fixed per chapter. In Chapter 1:
+**Single-player chapters** (`"players": 1`, Chapter 1):
+- `story_start` hosts with `GH_NO_AUTOHOST`, so the game is not on the LAN.
+- `game_sv_player_join` refuses anyone who connects anyway (`story_solo()`; the client reads "server full").
+- The lint rejects roles beyond the player count.
+
+Co-op chapters come with the crew-assembly chapters later; the role mechanism below is for them.
+
+Roles are fixed per chapter. The original Chapter 1 draft, kept as the example:
 
 | Slot | Role | Spawn | Solo behaviour |
 |---|---|---|---|
@@ -53,7 +60,7 @@ Authority and replication:
 - Event text is a **string id**, never raw text. Clients resolve ids from their local `.story` script, which avoids the 64-char limit and makes localisation possible.
 - On join-in-progress the host sends a full `EV_STORY_SYNC` blob.
 - Interaction requests go through the existing RPC path. Any player can complete any objective.
-- **Protocol bump** to `DG_PROTOCOL_VERSION 26` (new events + phone app enum).
+- **Protocol bump** to `DG_PROTOCOL_VERSION 26` (new events + phone app enum); 27 adds `SEVT_TITLE` (the day card).
 
 ## 3. Data
 
@@ -62,10 +69,11 @@ Authority and replication:
 ```json
 {
   "id": "01_tenth_floor", "title": "10th Floor", "map": "story_01", "script": "assets/story/scripts/01.story",
+  "players": 1, "zombie_sense": 9,
   "start": {"checkpoint": "start", "time": "05:52", "weather": "clear", "season": "spring", "inventory": []},
   "roles": [{"slot": 0, "id": "parent", "spawn": "spawn_sofa"},
             {"slot": 1, "id": "dana", "spawn": "spawn_hall", "replaces": ["note_dana", "voicemail_dana"]}],
-  "timeline": [{"beat": "wake", "from": "05:52", "to": "06:00"}],
+  "timeline": [{"beat": "wake", "day": 1, "from": "05:52", "to": "06:00"}],
   "objectives": [
     {"id": "notes", "text": "obj.notes", "requires": ["phone"], "group": {"need": "all"}, "children": [
       {"id": "note_dana", "text": "obj.note_dana", "complete_on": {"item_read": "note_dana"}},
@@ -98,7 +106,7 @@ Authority and replication:
 Combine conditions with `all` / `any` / `not`. Options: `once`, `cooldown` and `fallback`.
 
 **Actions.** Actions run in a sequence and may be delayed (`wait`). Available actions:
-- `spawn` / `despawn`
+- `spawn` / `despawn` (`spawn` takes `character` or `item`, `count`, and `wander`: a story zombie's idle radius in m)
 - `audio` (2D, 3D or VO, with a subtitle id)
 - `subtitle`
 - `weather` (+ blend)
@@ -113,6 +121,9 @@ Combine conditions with `all` / `any` / `not`. Options: `once`, `cooldown` and `
 - `light`
 - `door` (open/close/slam)
 - `sequence` (a named vista or VFX sequence)
+- `teleport` (every player stands at a story point: waking up after a night, +25 health)
+- `title` (a script id with a title and one line: the centred card, "Day 3", in the end card's style; `time` seconds; drawn over the fade)
+- `chase` (a name prefix: the story's idle zombies so named join the horde; they sense within the chapter's `zombie_sense`, chase and attack)
 - `prompt`
 - `flag`
 - `checkpoint`
@@ -135,6 +146,7 @@ Combine conditions with `all` / `any` / `not`. Options: `once`, `cooldown` and `
 - `"timer": N, "since": <objective | trigger>` counts from that objective's completion or that trigger's last fire.
 
 **The beat clock.** The current beat is the last `timeline` entry whose objective is active or done.
+- Multi-day chapters give beats a `"day"` (it carries over from the beat before). The lint orders beats by (day, from), so the clock can restart each morning. A night is a `time` action (instant) to the morning, then the next day's objective.
 - Below the beat's window, the clock catches up at 2 clock-minutes per second.
 - Inside the window, it moves at `(to - from) / expected` and holds at `to`.
 - A `time` action with a `blend` overrides this until it arrives.
@@ -148,6 +160,16 @@ Combine conditions with `all` / `any` / `not`. Options: `once`, `cooldown` and `
 - A group of only optional children (`need: N`) shows as the HUD leaf itself; this is how decisions are modelled (`decide` in Chapter 1).
 - Roles complete their `replaces` objectives while that role is played (`by_role`).
 - The HUD objective line shows the deepest active required leaf. The compass shows a `marker` per active objective that has one, and players can ping it (`PING_GO` reuses the existing ping visuals).
+
+### The level's `"story"` block (`data/levels/<map>.json`, src/game/game_story.c)
+
+- `points`: named positions + yaw (spawns, spawn points for `spawn`, `teleport` targets, vista anchors).
+- `volumes`: named boxes; the same name more than once means their union.
+- `interact`: markers made usable, by name. `kind` is `read` / `use` / `hold` (`hold`: seconds) / `pickup`. Effects:
+  - `signal` (a story event), `show` (a script id in the document panel), `audio`, `subtitle`, `read` (an item id reported as read);
+  - `peek` (a door to look through), `move` (push a prop to a point).
+  - Gating: `when` is an objective that must be active (`"sleep_*"`: any objective so named). `blocked` is the prompt otherwise ("Not tired yet").
+- `power`: named groups of light groups (`power` actions).
 
 ### Narrative script: `assets/story/scripts/*.story` (Markdown-like)
 
@@ -256,7 +278,15 @@ All commands get descriptions and categories in `assets/ui/command_categories.js
      - Dark glass by day.
    - **Life**: vista sequences (below).
 5. **Vista sequences**: `assets/story/vista/sequences.json`, evaluated by `src/story/vista_seq.c` (pure) and drawn by `src/game/game_vista.c`.
-   - What a sequence can do: per-sector power keys with fades, traffic density / stall / dark cars, a helicopter pass or a crash spiral, smoke columns, fires, flashes, birds scattering.
+   - What a sequence can do:
+     - per-sector power keys with fades;
+     - traffic density / stall / dark cars;
+     - a helicopter pass, a crash spiral, or a landing that stays (`"land": true`);
+     - smoke columns (`prewarm`: already burning when the sequence starts), fires, flashes;
+     - birds scattering or `gone`;
+     - a `crowd` of the dead walking the roads (dots);
+     - a `day` state.
+   - **Day states** (`"day": N`, multi-day chapters): the city block's `damage` boxes (wrecks, burnt-out floors, rubble, barricades; tools/story/vista_gen.py `city_damage` and the chapter's street site) are grouped into one mesh per day. They are drawn up to the latest day state, even with `story_vista_life 0`.
    - The state is a function of each started sequence's **age**, so `story_time`, saves and late joiners agree:
      - The host records each start (`story.now`) and saves it in the world blob (`"sequences"`).
      - `SEVT_SEQUENCE` carries the age and the host clock (`pos.x`).

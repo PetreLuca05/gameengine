@@ -251,6 +251,17 @@ bool horde_spawn_at(World *w, vec3 feet, float yaw, const char *character) {
     return true;
 }
 
+bool horde_adopt(World *w, u32 e) {
+    if (!H || !w || !w->authority || !ent_valid(w, e)) return false;
+    CharacterInst *c = char_get(w, e);
+    if (!c || c->is_player || c->dead) return false;
+    if (c->horde) return true;
+    int s = slot_alloc();
+    if (s < 0) return false;
+    register_zombie(w, e, s);
+    return true;
+}
+
 void horde_set_water(float (*fn)(void *user, float x, float z), void *user) {
     if (!H) return;
     H->water = fn;

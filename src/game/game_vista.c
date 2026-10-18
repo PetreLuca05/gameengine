@@ -2,9 +2,11 @@
 //
 // Everything here is a function of the vista clock (the host's story seconds; clients advance it by
 // frame dt between resyncs) and the started sequences' ages: src/story/vista_seq.c evaluates them
-// (power per district, helicopters, smoke / fire / flash spots, traffic, birds), this file draws:
-// window lights through render_set_city, helicopter bodies as draw items, everything else as sprites
-// of the story_vista effect (assets/vfx/effects/story_vista.json: smoke, glow, dot).
+// (power per district, helicopters, smoke / fire / flash spots, traffic, birds, the day state, crowds),
+// this file draws: window lights through render_set_city, helicopter bodies as draw items, the damage
+// layer (the city block's "damage" boxes: wrecks, scorched facades, rubble; one mesh per day, drawn up
+// to the current day state), everything else as sprites of the story_vista effect
+// (assets/vfx/effects/story_vista.json: smoke, glow, dot).
 #include "game_vista.h"
 #include "game_internal.h"
 #include "game_story.h"
@@ -14,6 +16,7 @@
 #include "core/log.h"
 #include "core/platform.h"
 #include "render/render.h"
+#include "render/mesh_gen.h"
 #include "vfx/vfx.h"
 #include "cJSON.h"
 #include <math.h>
@@ -25,6 +28,7 @@
 #define VISTA_ROADS 64
 #define VISTA_ROAD_PTS 48
 #define VISTA_CARS 140
+#define VISTA_DAYS 10
 
 typedef struct VistaRoad {
     vec3 p[VISTA_ROAD_PTS];
@@ -45,6 +49,8 @@ static struct {
     int n;
     float clock;
     VistaFrame f;
+    MeshId damage[VISTA_DAYS + 1];   // per day: everything that appeared overnight (0 = none)
+    int damage_boxes;
     Cvar *enable;
 } VS;
 
@@ -82,7 +88,40 @@ static float jnum(const cJSON *o, const char *k, float def) {
     return cJSON_IsNumber(v) ? (float)v->valuedouble : def;
 }
 
+static void free_damage(void) {
+    bool any = false;
+    for (int d = 0; d <= VISTA_DAYS; d++) any |= VS.damage[d] != 0;
+    if (any) render_wait_idle();
+    for (int d = 0; d <= VISTA_DAYS; d++) {
+        if (VS.damage[d]) render_mesh_destroy(VS.damage[d]);
+        VS.damage[d] = 0;
+    }
+    VS.damage_boxes = 0;
+}
+
+// "damage": [{"day": d, "p": [x, y, z] (base centre), "s": [w, h, d], "yaw": deg, "c": [r, g, b]}]
+static void build_damage(const cJSON *list) {
+    MeshBuilder mb[VISTA_DAYS + 1];
+    for (int d = 0; d <= VISTA_DAYS; d++) mb_init(&mb[d]);
+    const cJSON *it;
+    cJSON_ArrayForEach(it, list) {
+        int day = DG_CLAMP((int)jnum(it, "day", 1), 0, VISTA_DAYS);
+        const cJSON *p = cJSON_GetObjectItemCaseSensitive(it, "p"), *s = cJSON_GetObjectItemCaseSensitive(it, "s"), *c = cJSON_GetObjectItemCaseSensitive(it, "c");
+        if (cJSON_GetArraySize(p) < 3 || cJSON_GetArraySize(s) < 3) continue;
+        vec3 half = v3((float)cJSON_GetArrayItem(s, 0)->valuedouble * 0.5f, (float)cJSON_GetArrayItem(s, 1)->valuedouble * 0.5f, (float)cJSON_GetArrayItem(s, 2)->valuedouble * 0.5f);
+        vec3 pos = v3((float)cJSON_GetArrayItem(p, 0)->valuedouble, (float)cJSON_GetArrayItem(p, 1)->valuedouble + half.y, (float)cJSON_GetArrayItem(p, 2)->valuedouble);
+        vec3 col = cJSON_GetArraySize(c) >= 3 ? v3((float)cJSON_GetArrayItem(c, 0)->valuedouble, (float)cJSON_GetArrayItem(c, 1)->valuedouble, (float)cJSON_GetArrayItem(c, 2)->valuedouble) : v3(0.2f, 0.2f, 0.2f);
+        mb_box_transformed(&mb[day], mat4_trs(pos, quat_yaw(jnum(it, "yaw", 0) * DG_DEG2RAD), v3s(1)), half, rgba8(col.x, col.y, col.z, 1));
+        VS.damage_boxes++;
+    }
+    for (int d = 0; d <= VISTA_DAYS; d++) {
+        if (mb[d].vcount) VS.damage[d] = mb_upload(&mb[d]);
+        mb_free(&mb[d]);
+    }
+}
+
 void vista_level_loaded(const char *map) {
+    free_damage();
     VS.city = false;
     VS.n = 0;
     VS.clock = 0;
@@ -118,6 +157,7 @@ void vista_level_loaded(const char *map) {
                 VS.road_n++;
             }
         }
+        build_damage(cJSON_GetObjectItemCaseSensitive(c, "damage"));
     }
     cJSON_Delete(root);
 }
@@ -163,13 +203,14 @@ static void box(vec3 pos, quat rot, vec3 size, vec3 color, float rough, float em
 }
 
 static void draw_heli(const VistaHeli *h, int em_glow, int em_smoke) {
-    vec3 pos = v3(h->pos[0], h->pos[1], h->pos[2]);
+    vec3 pos = v3(h->pos[0], h->pos[1] + 1.6f, h->pos[2]);   // the path is where the skids are (a landed one stands on its pad)
     quat rot = quat_mul(quat_yaw(h->yaw), quat_axis_angle(v3(0, 0, 1), h->roll));
     vec3 body = v3(0.13f, 0.14f, 0.15f);
     box(pos, rot, v3(2.4f, 2.3f, 6.5f), body, 0.5f, 0);
     box(v3_add(pos, quat_rotate(rot, v3(0, 0.3f, 6.0f))), rot, v3(0.6f, 0.6f, 6.0f), body, 0.5f, 0);
     box(v3_add(pos, quat_rotate(rot, v3(0, 1.0f, 8.6f))), rot, v3(0.2f, 2.2f, 1.2f), body, 0.5f, 0);
     box(v3_add(pos, quat_rotate(rot, v3(0, -0.4f, -2.8f))), rot, v3(2.0f, 1.2f, 1.4f), v3(0.25f, 0.32f, 0.38f), 0.1f, 0);   // canopy
+    for (int s = -1; s <= 1; s += 2) box(v3_add(pos, quat_rotate(rot, v3((float)s * 1.1f, -1.5f, 0))), rot, v3(0.12f, 0.12f, 4.5f), body, 0.5f, 0);   // skids
     for (int b = 0; b < 2; b++) {   // main rotor: two blades, spinning
         quat br = quat_mul(rot, quat_yaw(h->rotor + (float)b * DG_PI * 0.5f));
         box(v3_add(pos, quat_rotate(rot, v3(0, 1.5f, 0))), br, v3(11.0f, 0.08f, 0.45f), v3(0.08f, 0.08f, 0.08f), 0.6f, 0);
@@ -235,6 +276,44 @@ static void draw_traffic(vec3 cam, float night, int em_glow, int em_dot) {
     }
 }
 
+// The damage layer up to today (static boxes, vertex coloured like the level's brushes).
+static void draw_damage(void) {
+    for (int d = 0; d <= VISTA_DAYS && d <= VS.f.day; d++) {
+        if (!VS.damage[d]) continue;
+        DrawItem it;
+        memset(&it, 0, sizeof(it));
+        it.mesh = VS.damage[d];
+        it.model = mat4_identity();
+        it.mat = material_color(v4(1, 1, 1, 1));
+        it.mat.roughness = 0.9f;
+        render_draw(&it);
+    }
+}
+
+// The dead walking the streets below: slow dots along the city roads, spread across the carriageway.
+static void draw_crowd(vec3 cam, float night, int em_dot) {
+    if (!VS.road_n || VS.road_total <= 0 || VS.f.crowd <= 0) return;
+    for (int i = 0; i < VS.f.crowd; i++) {
+        float pick = hashf(i, 31) * VS.road_total;
+        int r = 0;
+        while (r < VS.road_n - 1 && pick > VS.roads[r].cum[VS.roads[r].n - 1]) {
+            pick -= VS.roads[r].cum[VS.roads[r].n - 1];
+            r++;
+        }
+        const VistaRoad *rd = &VS.roads[r];
+        float len = rd->cum[rd->n - 1];
+        float s = fmodf(hashf(i, 32) * len + (hashf(i, 33) < 0.5f ? 1.0f : -1.0f) * (0.3f + 0.5f * hashf(i, 34)) * VS.clock, len);
+        if (s < 0) s += len;
+        vec3 p, d;
+        road_at(rd, s, &p, &d);
+        float side = (hashf(i, 35) - 0.5f) * 14.0f;
+        p = v3_add(p, v3(-d.z * side, 0, d.x * side));
+        if (v3_len(v3_sub(p, cam)) > 700.0f) continue;
+        float sway = 0.9f + 0.1f * sinf(VS.clock * 3.0f + (float)i);
+        vfx_game_push_sprite(em_dot, v3_add(p, v3(0, 0.9f, 0)), v3(0, 0, 0), 1.1f * sway, v4(0.05f, 0.045f, 0.04f, 0.9f - 0.5f * night));
+    }
+}
+
 static void draw_birds(float night, int em_dot) {
     if (night > 0.6f) return;
     float sa = VS.f.birds_scatter_age;
@@ -262,7 +341,9 @@ static void draw_birds(float night, int em_dot) {
 }
 
 void vista_render(vec3 cam, float night) {
-    if (!VS.city || !VS.enable->i || !vfx_game_active()) return;
+    if (!VS.city) return;
+    draw_damage();   // the world's state: drawn even with story_vista_life 0
+    if (!VS.enable->i || !vfx_game_active()) return;
     int em_smoke = vfx_game_emitter("story_vista", 0), em_glow = vfx_game_emitter("story_vista", 1), em_dot = vfx_game_emitter("story_vista", 2);
     if (em_smoke < 0 || em_glow < 0 || em_dot < 0) return;
     const VistaFrame *f = &VS.f;
@@ -290,6 +371,7 @@ void vista_render(vec3 cam, float night) {
     }
     for (int i = 0; i < f->heli_n; i++) draw_heli(&f->heli[i], em_glow, em_smoke);
     draw_traffic(cam, night, em_glow, em_dot);
+    draw_crowd(cam, night, em_dot);
     draw_birds(night, em_dot);
 }
 
@@ -299,9 +381,9 @@ static void cmd_story_vista(int argc, const char **argv) {
     if (argc < 2) {
         log_info("story_vista: %s, clock %.1f s, %d sequence(s):", VS.city ? "city" : "no city block", VS.clock, VS.n);
         for (int i = 0; i < VS.n; i++) log_info("  %s  age %.1f s", VS.act[i].name, VS.clock - VS.act[i].t0);
-        log_info("  power %.2f %.2f %.2f %.2f %.2f %.2f %.2f %.2f, traffic %.2f stall %.2f, %d heli, %d smoke, %d fire",
+        log_info("  power %.2f %.2f %.2f %.2f %.2f %.2f %.2f %.2f, traffic %.2f stall %.2f, %d heli, %d smoke, %d fire, day %d (%d damage boxes), crowd %d",
                  VS.f.power[0], VS.f.power[1], VS.f.power[2], VS.f.power[3], VS.f.power[4], VS.f.power[5], VS.f.power[6], VS.f.power[7],
-                 VS.f.traffic_density, VS.f.traffic_stall, VS.f.heli_n, VS.f.smoke_n, VS.f.fire_n);
+                 VS.f.traffic_density, VS.f.traffic_stall, VS.f.heli_n, VS.f.smoke_n, VS.f.fire_n, VS.f.day, VS.damage_boxes, VS.f.crowd);
         return;
     }
     if (!strcmp(argv[1], "clear")) { vista_sequence("", 0, VS.clock); return; }

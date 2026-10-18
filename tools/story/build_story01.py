@@ -405,8 +405,10 @@ def story_obj(name, x, y, z, kind, prompt, size=(0.12, 0.01, 0.09), color=(0.95,
 EXT = [0.62, 0.6, 0.58]
 kit = []
 prefabs = [{"prefab": "apt_unit_corner_10a", "pos": [0, FLOOR, 0]}, {"prefab": "corridor_10", "pos": [0, FLOOR, 0]}]
-for k, y in enumerate((FLOOR - 3.0, FLOOR, FLOOR + 3.0)):
-    prefabs.append({"prefab": "stair_core_dogleg", "pos": [0, y, 0], "prefix": "f%d_" % (9 + k), "override": {"fire_door": {"locked": y != FLOOR}}})
+# The stair core, ground floor to the 11th: every fire door locked but the ground floor's (into the lobby)
+# and the 10th's, which the chapter locks until the rescue morning.
+for k in range(12):
+    prefabs.append({"prefab": "stair_core_dogleg", "pos": [0, k * 3.0, 0], "prefix": "f%d_" % k, "override": {"fire_door": {"locked": k not in (0, 10)}}})
 # Storey slabs (top at the floor; ceiling slab above) over the flat, corridor, lobby.
 slabs(kit, 0.0, 12.0, 0.0, 12.0, FLOOR)
 slabs(kit, -8.0, 12.0, 12.0, 18.0, FLOOR)
@@ -418,37 +420,27 @@ box(0.0, 3.0, 7.15, 11.85, FLOOR, FLOOR + 3.0, [0.6, 0.58, 0.55])
 box(-8.5, -0.15, 14.4, 24.0, FLOOR, FLOOR + 3.0, [0.6, 0.58, 0.55])
 box(6.15, 12.0, 17.5, 24.0, FLOOR, FLOOR + 3.0, [0.6, 0.58, 0.55])
 box(0.0, 6.0, 17.8, 24.0, FLOOR, FLOOR + 3.0, [0.6, 0.58, 0.55])
-box(-12.3, 12.15, 0.0, 24.3, 0.0, FLOOR - 0.3, EXT, "concrete", collide=False)
-box(-12.3, 12.15, 0.0, 24.3, FLOOR + 3.3, 48.0, EXT, "concrete", collide=False)
+box(-12.35, 12.15, 0.0, 24.3, 3.3, FLOOR - 0.3, EXT, "concrete", collide=False, facade=True)   # the ground storey: site01.py
+box(-12.35, 12.15, 0.0, 24.3, FLOOR + 3.3, 48.0, EXT, "concrete", collide=False, facade=True)
 box(-12.0, -8.5, 6.0, 6.3, FLOOR + 1.5, FLOOR + 3.0, [0.35, 0.3, 0.25], "metal_thin", label="CLOSED")   # roof: chapter 2
 
-# Story entities (not kit pieces): the bat, story interactables, the barricade cabinet.
+# Story entities (not kit pieces): the bat, the story interactables (docs/CHAPTER_01.md "Interactables").
 ent("pickup", (10.2, FLOOR + 0.8, 9.25), item="bat", name="pickup_bat")
-story_obj("phone_sofa", 9.0, 0.46, 3.1, "use", "Check phone", size=(0.04, 0.005, 0.075), color=(0.05, 0.05, 0.06), signal="phone_messages_read", show="msg.01_family")
-story_obj("note_dana", 6.2, 0.93, 5.55, "read", "Read note", show="doc.note_dana")
-story_obj("note_jules", 4.9, 1.4, 5.34, "read", "Read note", size=(0.08, 0.1, 0.005), show="doc.note_jules")
-story_obj("note_mia_slip", 9.8, 0.76, 11.4, "read", "Read permission slip", show="doc.note_mia_slip")
-story_obj("calendar", 4.62, 1.5, 3.5, "read", "Read calendar", size=(0.005, 0.2, 0.15), color=(0.95, 0.9, 0.8), show="doc.calendar")
-story_obj("rota", 5.2, 1.3, 5.34, "read", "Read rota", size=(0.08, 0.1, 0.005), show="doc.rota")
-story_obj("safe_code", 7.4, 0.76, 6.35, "read", "Read sticky note", size=(0.04, 0.005, 0.04), color=(1.0, 0.9, 0.3), show="doc.safe_code")
-story_obj("answering_machine", 8.8, 0.95, 4.3, "use", "Play messages", size=(0.08, 0.04, 0.06), color=(0.1, 0.1, 0.1),
-          signal="voicemail_dana_played", audio="vo.voicemail_dana", subtitle="vo.voicemail_dana", read="voicemail_dana")
-story_obj("jules_laptop", 10.2, 0.76, 8.55, "use", "Look at the laptop", size=(0.17, 0.01, 0.12), color=(0.2, 0.2, 0.22), show="doc.jules_laptop", read="jules_laptop")
-story_obj("dog_collar", 12.6, 0.02, 3.5, "pickup", "Pick up collar", size=(0.06, 0.01, 0.06), color=(0.8, 0.15, 0.1), show="doc.dog_collar", read="dog_collar")
-story_obj("breaker_panel", 3.25, 1.4, 9.95, "hold", "Hold to reset the breaker", size=(0.03, 0.25, 0.18), color=(0.6, 0.62, 0.65), hold=2.5)
+story_obj("phone_sofa", 9.0, 0.46, 3.1, "use", "Check phone", size=(0.04, 0.005, 0.075), color=(0.05, 0.05, 0.06), signal="phone_checked", show="msg.phone_day1")
+story_obj("tv_living", 11.0, 0.9, 5.8, "use", "Turn on the TV", size=(0.6, 0.35, 0.03), color=(0.05, 0.05, 0.06), signal="tv_on")
+story_obj("coffee_maker", 5.9, 0.95, 5.62, "use", "Make coffee", size=(0.12, 0.16, 0.12), color=(0.15, 0.15, 0.16), signal="coffee_made", audio="coffee_maker")
+story_obj("radio_kitchen", 8.6, 0.95, 5.68, "use", "Listen to the radio", size=(0.14, 0.08, 0.06), color=(0.3, 0.22, 0.15), signal="radio_listened")
+story_obj("bed_master", 2.2, 0.55, 2.05, "hold", "Sleep", size=(0.7, 0.05, 0.9), color=(0.85, 0.85, 0.82), hold=2.0, signal="slept",
+          when="sleep_*", blocked="Not tired yet")
+story_obj("door_lock_10a", 5.72, 1.05, 11.86, "use", "Lock the door", size=(0.03, 0.05, 0.02), color=(0.75, 0.68, 0.3), signal="door_locked", when="lock_door")
 story_obj("peephole_10a", 5.25, 1.6, 11.8, "use", "Look through the peephole", size=(0.02, 0.02, 0.01), color=(0.7, 0.7, 0.6), peek="door_10a")
-story_obj("hall_cabinet", 4.85, 0.5, 9.1, "hold", "Hold to push the cabinet against the door", size=(0.05, 0.4, 0.4), color=(0.45, 0.35, 0.25),
-          hold=3.0, move={"entity": "hall_cabinet_barricade", "to": "barricade_pos"})
-story_obj("pack_bag", 5.4, 0.45, 9.6, "use", "Pack and go", size=(0.15, 0.2, 0.1), color=(0.2, 0.3, 0.55), signal="pack_confirmed")
 story_obj("lift_call", 3.0, 1.2, 17.45, "use", "Call the lift", size=(0.06, 0.1, 0.01), color=(0.3, 0.3, 0.3), signal="lift_dead", subtitle="sub.lift_dead")
-ent("prop", (4.85, FLOOR, 8.7), name="hall_cabinet_barricade", shape="box", size=[0.45, 1.0, 0.9], color=[0.45, 0.35, 0.25], mass=60)
 
 point("spawn_sofa", 10.3, 3.8, -162.7)   # in front of the L-sofa seat, facing the TV (11.0, 5.8)
 point("spawn_hall", 5.25, 9.0, 0)
 point("spawn_teen", 9.5, 7.0, 90)
 point("spawn_10b", -4.0, 6.0, 0)
-point("barricade_pos", 5.25, 11.3, 0)
-point("zombie_10d", -4.05, 15.2, 0)
+point("spawn_bed", 3.6, 2.7, 0)          # waking up: beside the bed, the city through the north glass
 point("corridor_mid", 2.0, 13.2, 0)
 point("stair_up", -10.2, 7.0, 0, y=FLOOR + 3.0)
 point("tv_living", 11.0, 5.8, 0, y=FLOOR + 0.9)
@@ -467,10 +459,15 @@ volume("vol_unit_10a", 0.0, 12.0, 0.0, 12.0)
 volume("vol_corridor_10", -8.5, 12.0, 12.3, 14.1)
 volume("vol_stair_9_5", CX0, CX1, 6.0, 8.5, FLOOR - 1.7, FLOOR - 0.2)
 
+# The street site (docs/CHAPTER_01.md "Escape route"): ground storey, streets, Orchard House, the damage layer.
+import site01  # noqa: E402
+site_damage = site01.build(box, ent, point, volume, prefabs, lambda f: f * 3.0)
+
 # Vellmouth (docs/CHAPTER_01.md §5): tools/story/vista_gen.py from assets/story/vista/vellmouth.json.
 import vista_gen  # noqa: E402
 vista = vista_gen.generate()
 brushes.extend(vista["brushes"])
+vista["city"]["damage"] = site_damage + vista["city"].get("damage", [])   # the street's wrecks first, then the city's
 points.update(vista["points"])
 with open(os.path.join(PREFABS, vista_gen.NEAR_PREFAB + ".json"), "w", newline="") as f:
     json.dump(vista["prefab"], f, indent=0, separators=(",", ":"))

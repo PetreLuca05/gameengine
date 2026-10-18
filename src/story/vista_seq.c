@@ -79,6 +79,7 @@ bool vista_seq_parse(VistaSeqLib *lib, const char *json, char *err, int err_size
             d->heli_time = jnum(h, "duration", 30);
             d->approach = jnum(h, "approach", 250);
             d->crash = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(h, "crash"));
+            d->land = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(h, "land"));
         }
         cJSON_ArrayForEach(e, cJSON_GetObjectItemCaseSensitive(q, "smoke")) {
             if (d->smoke_n >= VISTA_MAX_ITEMS) break;
@@ -99,11 +100,15 @@ bool vista_seq_parse(VistaSeqLib *lib, const char *json, char *err, int err_size
             s->drift[0] = 2.0f;
             s->drift[1] = -0.8f;
             jpair(e, "drift", &s->drift[0], &s->drift[1]);
+            s->prewarm = jnum(e, "prewarm", 0);
         }
         parse_spots(cJSON_GetObjectItemCaseSensitive(q, "fire"), d->fire, &d->fire_n, 0, 14);
         parse_spots(cJSON_GetObjectItemCaseSensitive(q, "flash"), d->flash, &d->flash_n, 2.5f, 50);
         const cJSON *b = cJSON_GetObjectItemCaseSensitive(q, "birds");
         d->birds_scatter = b && cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(b, "scatter"));
+        d->birds_gone = b && cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(b, "gone"));
+        d->day = (int)jnum(q, "day", 0);
+        d->crowd = (int)jnum(cJSON_GetObjectItemCaseSensitive(q, "crowd"), "count", -1);
     }
     cJSON_Delete(root);
     return true;
@@ -121,10 +126,20 @@ static void heli_eval(const VistaSeqDef *d, float age, VistaPointFn point, void 
     float a[3], b[3];
     if (out->heli_n >= 4 || !point(user, d->heli_from, a) || !point(user, d->heli_to, b)) return;
     float u = age / (d->heli_time > 0.01f ? d->heli_time : 0.01f);
-    if (u < 0 || u >= 1) return;
+    if (u < 0 || (u >= 1 && !d->land)) return;
     VistaHeli *h = &out->heli[out->heli_n++];
     memset(h, 0, sizeof(*h));
     h->rotor = age * 40.0f;
+    if (d->land) {
+        // In high over the first three quarters (40 m above the pad), then down onto it; it stays.
+        float above = 40.0f, v = u < 0.75f ? u / 0.75f : 1.0f, dn = u < 0.75f ? 0.0f : (u >= 1.0f ? 1.0f : (u - 0.75f) / 0.25f);
+        float e = v * v * (3.0f - 2.0f * v);
+        for (int i = 0; i < 3; i++) h->pos[i] = a[i] + (b[i] - a[i]) * e;
+        h->pos[1] = a[1] + (b[1] + above - a[1]) * e - above * dn * dn * (3.0f - 2.0f * dn);
+        h->yaw = atan2f(-(b[0] - a[0]), -(b[2] - a[2]));
+        h->roll = u < 0.75f ? 0.06f : 0.0f;
+        return;
+    }
     if (!d->crash) {
         for (int i = 0; i < 3; i++) h->pos[i] = a[i] + (b[i] - a[i]) * u;
         h->yaw = atan2f(-(b[0] - a[0]), -(b[2] - a[2]));   // engine yaw: 0 looks -Z
@@ -151,6 +166,7 @@ void vista_eval(const VistaSeqLib *lib, const VistaActive *act, int n, VistaPoin
     out->traffic_density = 0.25f;
     out->stall_age = -1;
     out->birds_scatter_age = -1;
+    out->crowd = 0;
     for (int i = 0; i < n; i++) {
         const VistaSeqDef *d = vista_seq_find(lib, act[i].name);
         float age = act[i].age;
@@ -178,7 +194,7 @@ void vista_eval(const VistaSeqLib *lib, const VistaActive *act, int n, VistaPoin
             const VistaSmokeDef *sd = &d->smoke[k];
             VistaSmoke *sm = &out->smoke[out->smoke_n];
             if (age < sd->t || !point(user, sd->at, sm->pos)) continue;
-            sm->age = age - sd->t;
+            sm->age = age - sd->t + sd->prewarm;
             sm->def = sd;
             out->smoke_n++;
         }
@@ -200,6 +216,9 @@ void vista_eval(const VistaSeqLib *lib, const VistaActive *act, int n, VistaPoin
             out->flash_n++;
         }
         if (d->birds_scatter) out->birds_scatter_age = age;
+        if (d->birds_gone) out->birds_scatter_age = 1e6f;
+        if (d->day > out->day) out->day = d->day;
+        if (d->crowd >= 0) out->crowd = d->crowd;
     }
 }
 

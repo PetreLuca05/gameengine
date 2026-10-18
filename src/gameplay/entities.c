@@ -45,8 +45,9 @@ static void door_focus(World *w, EntityId self, int player, char *prompt, int si
     int i = (int)ENT_INDEX(self);
     if (w->flags[i] & EF_LOCKED) {
         // key_item travels in the replicated item field so clients can name the key too.
-        const ItemDef *key = item_def(w->items, w->door[i].key_item ? w->door[i].key_item : w->item[i]);
-        snprintf(prompt, (size_t)size, "Locked - requires %s", key->name);
+        u16 key_item = w->door[i].key_item ? w->door[i].key_item : w->item[i];
+        if (!key_item) { snprintf(prompt, (size_t)size, "Locked"); return; }   // no key opens it (story doors, jammed fire doors)
+        snprintf(prompt, (size_t)size, "Locked - requires %s", item_def(w->items, key_item)->name);
         return;
     }
     if ((w->vis[i].color >> 24) == DOOR_ALPHA_WINDOW) snprintf(prompt, (size_t)size, (w->flags[i] & EF_OPEN) ? "Close Window" : "Open Window");
@@ -63,7 +64,8 @@ static void door_use(World *w, EntityId self, int player) {
             ev_hint(w, player, "Unlocked with %s", item_def(w->items, d->key_item)->name);
             ev_sound(w, "unlock", w->xf[i].pos, 1.0f, EVENT_ALL);
         } else {
-            ev_hint(w, player, "Locked. Requires %s", item_def(w->items, d->key_item)->name);
+            if (d->key_item) ev_hint(w, player, "Locked. Requires %s", item_def(w->items, d->key_item)->name);
+            else ev_hint(w, player, "Locked");
             ev_sound(w, "locked", w->xf[i].pos, 1.0f, EVENT_ALL);
             return;
         }

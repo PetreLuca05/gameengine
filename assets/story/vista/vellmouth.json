@@ -5,7 +5,7 @@
  "zfar": 1500,
  "compress": {"_doc": "Landmarks farther than 'from' move in to from + span (1 - exp(-(d - from) / scale)), scaled by d'/d about the eye (same angular size), bases extended to the ground, colours fogged for the missing distance.",
               "from": 1100, "span": 330, "scale": 1200, "fog": [0.62, 0.66, 0.72], "fog_density": 0.0004},
- "own_tower": {"min": [-40, -30], "max": [45, 55]},
+ "own_tower": {"_doc": "The street site around the tower (tools/story/site01.py SITE_RECT): no city lots here.", "min": [-55, -75], "max": [80, 45]},
  "grid": {"pitch": 90, "street": 18, "sidewalk": 3, "origin": [6, 6]},
  "bands": {"near": [55, 340], "mid": [340, 1250], "skyline": [1290, 1420]},
  "river": {"_doc": "Centre line: r(b) = base + quad b^2 + bend max(0, b - bend_from)^2 for bearings from..to.",
@@ -27,6 +27,8 @@
  },
  "near_kit": {"_doc": "Near buildings in this bearing window are real kit facades (batched); the rest are facade boxes.",
               "bearings": [-50, 100], "max": 16, "max_distance": 280},
+ "damage": {"_doc": "The city falling apart, day by day (the vista's damage layer, game_vista.c): scorched upper floors on buildings within 'radius', abandoned cars on the roads.",
+            "radius": 650, "scorch": [0, 0, 0, 3, 5, 8, 11, 14, 16], "cars": [0, 0, 24, 18, 14, 10, 8, 6, 0], "scorch_color": [0.1, 0.09, 0.085]},
  "landmarks": [
   {"kind": "kit_tower", "name": "Halden Tower", "bearing": 82, "distance": 360, "height": 95, "bays": [6, 5], "material": "concrete", "window": "c", "sector_note": "sector 1 (45..90) flickers from beat 3"},
   {"kind": "crane", "name": "Crane A", "bearing": 14, "distance": 900, "height": 85, "jib": 55, "jib_yaw": 30, "site": true},

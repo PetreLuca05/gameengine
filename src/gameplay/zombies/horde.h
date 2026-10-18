@@ -39,6 +39,9 @@ int horde_spawn(struct World *w, vec3 center, int count, float radius, int mode,
 void horde_despawn(struct World *w);
 // One zombie at exactly these feet (indoor spots: no search from above); false when blocked.
 bool horde_spawn_at(struct World *w, vec3 feet, float yaw, const char *character);
+// An existing (idle, wandering) zombie joins the horde: it senses, chases and attacks from now on
+// (story zombies waking up as the player comes near). False when not a zombie or the horde is full.
+bool horde_adopt(struct World *w, u32 e);   // e: an EntityId (world/world.h)
 // Open-world maps: water surface lookup (deep water stops zombies; NULL = none) and the sense radius
 // (0 = always chase the nearest player, the horde default).
 void horde_set_water(float (*fn)(void *user, float x, float z), void *user);

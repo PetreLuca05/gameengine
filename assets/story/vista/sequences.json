@@ -1,32 +1,680 @@
 {
  "_doc": "Vista sequences (src/story/vista_seq.h has the schema; docs/STORY.md 'Vista'). Started by the chapter's {\"sequence\": name} actions; every name a chapter uses must exist here (tests/test_story.c). Points are the level's story points (tools/story/vista_gen.py writes the city ones). Power sectors: 45 deg of bearing from the city centre, 0 = N..NE, 1 = NE..E (Halden Tower, St. Aldric), 2 = E..SE, 7 = NW..N.",
- "traffic_build": {"traffic": {"density": 0.8, "ramp": 240}},
- "traffic_stall": {"traffic": {"stall": 0.85, "dark": 0.5, "ramp": 90}},
- "halden_flicker": {"power": [{"t": 0, "sector": 1, "to": 1.6}]},
- "heli_north_pass": {"heli": {"path": ["heli1_a", "heli1_b"], "duration": 45}},
+ "traffic_build": {
+  "traffic": {
+   "density": 0.8,
+   "ramp": 240
+  }
+ },
+ "traffic_stall": {
+  "traffic": {
+   "stall": 0.85,
+   "dark": 0.5,
+   "ramp": 90
+  }
+ },
+ "halden_flicker": {
+  "power": [
+   {
+    "t": 0,
+    "sector": 1,
+    "to": 1.6
+   }
+  ]
+ },
+ "heli_north_pass": {
+  "heli": {
+   "path": [
+    "heli1_a",
+    "heli1_b"
+   ],
+   "duration": 45
+  }
+ },
  "heli_crash": {
-  "heli": {"from": "heli2_a", "to": "vista_hospital", "approach": 260, "duration": 5.2, "crash": true},
-  "flash": [{"at": "vista_hospital", "t": 5.2, "time": 3.0, "size": 70}],
-  "fire": [{"at": "vista_hospital", "t": 5.2, "size": 18}],
-  "smoke": [{"at": "vista_hospital", "t": 5.2, "grow": 20, "rise": 2.5, "life": 40, "size": [8, 35], "rate": 1.2, "spread": 4}]
+  "heli": {
+   "from": "heli2_a",
+   "to": "vista_hospital",
+   "approach": 260,
+   "duration": 5.2,
+   "crash": true
+  },
+  "flash": [
+   {
+    "at": "vista_hospital",
+    "t": 5.2,
+    "time": 3.0,
+    "size": 70
+   }
+  ],
+  "fire": [
+   {
+    "at": "vista_hospital",
+    "t": 5.2,
+    "size": 18
+   }
+  ],
+  "smoke": [
+   {
+    "at": "vista_hospital",
+    "t": 5.2,
+    "grow": 20,
+    "rise": 2.5,
+    "life": 40,
+    "size": [
+     8,
+     35
+    ],
+    "rate": 1.2,
+    "spread": 4
+   }
+  ]
  },
- "birds_scatter": {"birds": {"scatter": true}},
- "district_blackout": {"power": [
-  {"t": 0, "sector": 2, "to": 0.0, "fade": 2},
-  {"t": 4, "sector": 1, "to": 0.0, "fade": 1},
-  {"t": 9, "sector": 7, "to": 0.1, "fade": 3},
-  {"t": 15, "sector": 0, "to": 0.15, "fade": 3},
-  {"t": 20, "sector": 3, "to": 0.1, "fade": 4},
-  {"t": 20, "sector": 4, "to": 0.1, "fade": 4},
-  {"t": 22, "sector": 5, "to": 0.1, "fade": 4},
-  {"t": 24, "sector": 6, "to": 0.1, "fade": 4}
- ]},
- "smoke_aldric": {"smoke": [{"at": "smoke_hospital", "grow": 120, "rise": 3.5, "life": 80, "size": [20, 110], "rate": 1.4, "shade": [0.08, 0.32], "spread": 10}]},
+ "birds_scatter": {
+  "birds": {
+   "scatter": true
+  }
+ },
+ "district_blackout": {
+  "power": [
+   {
+    "t": 0,
+    "sector": 2,
+    "to": 0.0,
+    "fade": 2
+   },
+   {
+    "t": 4,
+    "sector": 1,
+    "to": 0.0,
+    "fade": 1
+   },
+   {
+    "t": 9,
+    "sector": 7,
+    "to": 0.1,
+    "fade": 3
+   },
+   {
+    "t": 15,
+    "sector": 0,
+    "to": 0.15,
+    "fade": 3
+   },
+   {
+    "t": 20,
+    "sector": 3,
+    "to": 0.1,
+    "fade": 4
+   },
+   {
+    "t": 20,
+    "sector": 4,
+    "to": 0.1,
+    "fade": 4
+   },
+   {
+    "t": 22,
+    "sector": 5,
+    "to": 0.1,
+    "fade": 4
+   },
+   {
+    "t": 24,
+    "sector": 6,
+    "to": 0.1,
+    "fade": 4
+   }
+  ]
+ },
+ "smoke_aldric": {
+  "smoke": [
+   {
+    "at": "smoke_hospital",
+    "grow": 120,
+    "rise": 3.5,
+    "life": 80,
+    "size": [
+     20,
+     110
+    ],
+    "rate": 1.4,
+    "shade": [
+     0.08,
+     0.32
+    ],
+    "spread": 10
+   }
+  ]
+ },
  "city_fires": {
-  "smoke": [{"at": "smoke_2", "grow": 90, "rise": 3.0, "life": 70, "size": [14, 80], "rate": 1.0, "spread": 8},
-            {"at": "smoke_3", "t": 25, "grow": 90, "rise": 3.0, "life": 70, "size": [12, 70], "rate": 1.0, "spread": 8}],
-  "fire": [{"at": "smoke_2", "size": 16}, {"at": "smoke_3", "t": 25, "size": 14}]
+  "smoke": [
+   {
+    "at": "smoke_2",
+    "grow": 90,
+    "rise": 3.0,
+    "life": 70,
+    "size": [
+     14,
+     80
+    ],
+    "rate": 1.0,
+    "spread": 8
+   },
+   {
+    "at": "smoke_3",
+    "t": 25,
+    "grow": 90,
+    "rise": 3.0,
+    "life": 70,
+    "size": [
+     12,
+     70
+    ],
+    "rate": 1.0,
+    "spread": 8
+   }
+  ],
+  "fire": [
+   {
+    "at": "smoke_2",
+    "size": 16
+   },
+   {
+    "at": "smoke_3",
+    "t": 25,
+    "size": 14
+   }
+  ]
  },
- "lift_smoke": {"smoke": [{"at": "lift_smoke", "grow": 10, "rise": 0.25, "life": 14, "size": [0.4, 2.2], "rate": 3, "spread": 0.4, "drift": [0, 0.05], "shade": [0.15, 0.3]}]},
- "stair_eye_screams": {"_doc": "Audio only (the chapter's actions); nothing in the vista."}
+ "lift_smoke": {
+  "smoke": [
+   {
+    "at": "lift_smoke",
+    "grow": 10,
+    "rise": 0.25,
+    "life": 14,
+    "size": [
+     0.4,
+     2.2
+    ],
+    "rate": 3,
+    "spread": 0.4,
+    "drift": [
+     0,
+     0.05
+    ],
+    "shade": [
+     0.15,
+     0.3
+    ]
+   }
+  ]
+ },
+ "stair_eye_screams": {
+  "_doc": "Audio only (the chapter's actions); nothing in the vista."
+ },
+ "day_1": {
+  "_doc": "An ordinary day (the chapter's first morning).",
+  "day": 1,
+  "crowd": {
+   "count": 0
+  }
+ },
+ "day_2": {
+  "_doc": "Morning after the broadcast: the traffic is dead, first fires, the first of them in the streets.",
+  "day": 2,
+  "power": [
+   {
+    "t": 0,
+    "sector": 3,
+    "to": 0.3
+   },
+   {
+    "t": 0,
+    "sector": 4,
+    "to": 0.4
+   }
+  ],
+  "traffic": {
+   "density": 0.3,
+   "stall": 0.95,
+   "dark": 0.5
+  },
+  "smoke": [
+   {
+    "at": "smoke_2",
+    "grow": 1,
+    "rise": 3.0,
+    "life": 70,
+    "size": [
+     14,
+     70
+    ],
+    "rate": 1.0,
+    "spread": 8,
+    "prewarm": 400
+   },
+   {
+    "at": "smoke_8",
+    "grow": 1,
+    "rise": 2.4,
+    "life": 70,
+    "size": [
+     8,
+     40
+    ],
+    "rate": 1.0,
+    "spread": 8,
+    "prewarm": 400
+   }
+  ],
+  "fire": [
+   {
+    "at": "smoke_8",
+    "size": 10
+   }
+  ],
+  "crowd": {
+   "count": 25
+  },
+  "birds": {
+   "scatter": true
+  }
+ },
+ "day_3": {
+  "_doc": "The east district goes dark; St. Aldric burns.",
+  "day": 3,
+  "power": [
+   {
+    "t": 0,
+    "sector": 2,
+    "to": 0.0
+   },
+   {
+    "t": 0,
+    "sector": 7,
+    "to": 0.5
+   },
+   {
+    "t": 0,
+    "sector": 3,
+    "to": 0.1
+   }
+  ],
+  "traffic": {
+   "density": 0.15,
+   "stall": 1.0,
+   "dark": 0.7
+  },
+  "smoke": [
+   {
+    "at": "smoke_hospital",
+    "grow": 1,
+    "rise": 3.5,
+    "life": 80,
+    "size": [
+     20,
+     110
+    ],
+    "rate": 1.4,
+    "spread": 10,
+    "prewarm": 400
+   },
+   {
+    "at": "smoke_3",
+    "grow": 1,
+    "rise": 3.0,
+    "life": 70,
+    "size": [
+     12,
+     70
+    ],
+    "rate": 1.0,
+    "spread": 8,
+    "prewarm": 400
+   }
+  ],
+  "fire": [
+   {
+    "at": "smoke_3",
+    "size": 14
+   }
+  ],
+  "crowd": {
+   "count": 60
+  },
+  "birds": {
+   "gone": true
+  }
+ },
+ "day_4": {
+  "_doc": "Halden Tower's district flickers; more fires north.",
+  "day": 4,
+  "power": [
+   {
+    "t": 0,
+    "sector": 1,
+    "to": 1.6
+   },
+   {
+    "t": 0,
+    "sector": 0,
+    "to": 0.4
+   },
+   {
+    "t": 0,
+    "sector": 6,
+    "to": 0.2
+   },
+   {
+    "t": 0,
+    "sector": 5,
+    "to": 0.3
+   }
+  ],
+  "traffic": {
+   "density": 0.08,
+   "stall": 1.0,
+   "dark": 0.85
+  },
+  "smoke": [
+   {
+    "at": "smoke_4",
+    "grow": 1,
+    "rise": 3.0,
+    "life": 70,
+    "size": [
+     14,
+     80
+    ],
+    "rate": 1.0,
+    "spread": 8,
+    "prewarm": 400
+   },
+   {
+    "at": "smoke_5",
+    "grow": 1,
+    "rise": 2.6,
+    "life": 70,
+    "size": [
+     10,
+     60
+    ],
+    "rate": 1.0,
+    "spread": 8,
+    "prewarm": 400
+   }
+  ],
+  "fire": [
+   {
+    "at": "smoke_4",
+    "size": 16
+   },
+   {
+    "at": "smoke_5",
+    "size": 12
+   }
+  ],
+  "crowd": {
+   "count": 100
+  }
+ },
+ "day_5": {
+  "_doc": "Most of the city is dark at night.",
+  "day": 5,
+  "power": [
+   {
+    "t": 0,
+    "sector": 0,
+    "to": 0.12
+   },
+   {
+    "t": 0,
+    "sector": 1,
+    "to": 0.0
+   },
+   {
+    "t": 0,
+    "sector": 7,
+    "to": 0.1
+   },
+   {
+    "t": 0,
+    "sector": 6,
+    "to": 0.05
+   }
+  ],
+  "traffic": {
+   "density": 0.04,
+   "stall": 1.0,
+   "dark": 0.95
+  },
+  "smoke": [
+   {
+    "at": "smoke_6",
+    "grow": 1,
+    "rise": 3.0,
+    "life": 70,
+    "size": [
+     16,
+     90
+    ],
+    "rate": 1.0,
+    "spread": 8,
+    "prewarm": 400
+   },
+   {
+    "at": "smoke_7",
+    "grow": 1,
+    "rise": 3.4,
+    "life": 70,
+    "size": [
+     18,
+     100
+    ],
+    "rate": 1.0,
+    "spread": 8,
+    "prewarm": 400
+   }
+  ],
+  "fire": [
+   {
+    "at": "smoke_6",
+    "size": 16
+   }
+  ],
+  "crowd": {
+   "count": 150
+  }
+ },
+ "day_6": {
+  "_doc": "A few generators left; the north block caught fire.",
+  "day": 6,
+  "power": [
+   {
+    "t": 0,
+    "sector": 0,
+    "to": 0.05
+   },
+   {
+    "t": 0,
+    "sector": 5,
+    "to": 0.15
+   },
+   {
+    "t": 0,
+    "sector": 4,
+    "to": 0.05
+   },
+   {
+    "t": 0,
+    "sector": 3,
+    "to": 0.0
+   },
+   {
+    "t": 0,
+    "sector": 2,
+    "to": 0.0
+   }
+  ],
+  "traffic": {
+   "density": 0.02,
+   "stall": 1.0,
+   "dark": 1.0
+  },
+  "smoke": [
+   {
+    "at": "smoke_9",
+    "grow": 1,
+    "rise": 3.8,
+    "life": 85,
+    "size": [
+     24,
+     130
+    ],
+    "rate": 1.2,
+    "spread": 8,
+    "prewarm": 400
+   },
+   {
+    "at": "smoke_8",
+    "grow": 1,
+    "rise": 2.6,
+    "life": 70,
+    "size": [
+     10,
+     55
+    ],
+    "rate": 1.0,
+    "spread": 8,
+    "prewarm": 400
+   }
+  ],
+  "fire": [
+   {
+    "at": "smoke_9",
+    "size": 22
+   },
+   {
+    "at": "smoke_8",
+    "size": 12
+   }
+  ],
+  "crowd": {
+   "count": 210
+  },
+  "heli": {
+   "path": [
+    "heli3_a",
+    "heli3_b"
+   ],
+   "duration": 50
+  }
+ },
+ "day_7": {
+  "_doc": "Darkness; the city burns; a military helicopter far off.",
+  "day": 7,
+  "power": [
+   {
+    "t": 0,
+    "sector": 0,
+    "to": 0.02
+   },
+   {
+    "t": 0,
+    "sector": 1,
+    "to": 0.02
+   },
+   {
+    "t": 0,
+    "sector": 2,
+    "to": 0.02
+   },
+   {
+    "t": 0,
+    "sector": 3,
+    "to": 0.02
+   },
+   {
+    "t": 0,
+    "sector": 4,
+    "to": 0.02
+   },
+   {
+    "t": 0,
+    "sector": 5,
+    "to": 0.02
+   },
+   {
+    "t": 0,
+    "sector": 6,
+    "to": 0.02
+   },
+   {
+    "t": 0,
+    "sector": 7,
+    "to": 0.02
+   }
+  ],
+  "traffic": {
+   "density": 0.0,
+   "stall": 1.0,
+   "dark": 1.0
+  },
+  "smoke": [
+   {
+    "at": "smoke_10",
+    "grow": 1,
+    "rise": 4.0,
+    "life": 85,
+    "size": [
+     26,
+     140
+    ],
+    "rate": 1.2,
+    "spread": 8,
+    "prewarm": 400
+   }
+  ],
+  "fire": [
+   {
+    "at": "smoke_10",
+    "size": 24
+   },
+   {
+    "at": "smoke_7",
+    "size": 14
+   }
+  ],
+  "crowd": {
+   "count": 260
+  }
+ },
+ "day_8": {
+  "_doc": "The rescue morning (the world as on day 7).",
+  "day": 8,
+  "crowd": {
+   "count": 240
+  }
+ },
+ "rescue_heli": {
+  "_doc": "The rescue helicopter flies in over the river and lands on Orchard House's roof; it stays.",
+  "heli": {
+   "path": [
+    "heli_rescue_a",
+    "heli_pad"
+   ],
+   "duration": 45,
+   "land": true
+  },
+  "flash": [],
+  "fire": [
+   {
+    "at": "heli_pad",
+    "t": 44,
+    "size": 1.2
+   }
+  ]
+ }
 }

@@ -33,6 +33,7 @@ typedef struct LevelBuild {
     vec3 surf;                       // surface of the brush being built (PBR test geometry)
     float spacing;                   // grid spacing of the brush being built (sighting targets)
     bool open_world;                 // the level has generated terrain (a "room" is then just its floor)
+    bool no_render;                  // the brush being built is collision only ("render": false)
 } LevelBuild;
 
 // ------------------------------------------------------------------ json helpers
@@ -83,7 +84,7 @@ static void add_static_body(LevelBuild *b, const BodyDesc *d) {
 
 static void add_box(LevelBuild *b, vec3 center, vec3 half, float yaw, u32 color, u32 flags, bool collide) {
     quat rot = quat_yaw(yaw);
-    mb_box_transformed(bucket(b, flags), mat4_trs(center, rot, v3s(1)), half, color);
+    if (!b->no_render) mb_box_transformed(bucket(b, flags), mat4_trs(center, rot, v3s(1)), half, color);
     if (collide) {
         BodyDesc d;
         memset(&d, 0, sizeof(d));
@@ -249,7 +250,10 @@ static void build_brush(LevelBuild *b, const cJSON *br) {
         vec3 size = jv3(br, "size", v3(1, 1, 1));
         vec3 half = v3_scale(size, 0.5f);
         vec3 center = v3_add(pos, v3(0, half.y, 0));
+        // "render": false = collision only (story levels: wrecks drawn by the vista's day layer, game_vista.c).
+        b->no_render = !jb(br, "render", true);
         add_box(b, center, half, yaw, color, flags, jb(br, "collide", true));
+        b->no_render = false;
         if (label) {
             // Label on the face pointing towards the reader (local +Z), near the top.
             vec3 face = v3_add(center, quat_rotate(quat_yaw(yaw), v3(0, half.y - 0.18f, half.z)));
@@ -463,7 +467,12 @@ static void spawn_entity(World *w, const cJSON *e) {
     vec3 pos = jv3(e, "pos", v3(0, 0, 0));
     float yaw = jf(e, "yaw", 0) * DG_DEG2RAD;
     EntityId id = ENT_NONE;
-    if (!strcmp(type, "gate")) {
+    if (!strcmp(type, "door")) {
+        // A door leaf on its own (story levels: entrances in brush walls); "glass": a glass leaf.
+        u32 col = jcol(e, "color", rgba8(0.55f, 0.4f, 0.25f, 1));
+        if (jb(e, "glass", false)) col = (col & 0x00FFFFFFu) | (DOOR_ALPHA_GLASS << 24);
+        id = spawn_door(w, pos, yaw, jf(e, "width", 0.88f), jf(e, "height", 2.08f), jb(e, "locked", false), item_find(w->items, js(e, "key", "")), col);
+    } else if (!strcmp(type, "gate")) {
         id = spawn_gate(w, pos, yaw, jf(e, "width", 3), jf(e, "height", 3), jf(e, "lift", 2.9f), jcol(e, "color", rgba8(0.35f, 0.4f, 0.45f, 1)));
     } else if (!strcmp(type, "lever")) {
         id = spawn_lever(w, pos, yaw, js(e, "target", ""));

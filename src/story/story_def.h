@@ -72,7 +72,7 @@ typedef enum StoryActType {
     SA_END_CHAPTER,
     SA_TIME,                    // num[0] = minutes of day, num[1] = blend seconds (the clock is story state)
     // forwarded to the runtime (StoryOut)
-    SA_SPAWN,                   // name = marker / entity template, arg = character or item
+    SA_SPAWN,                   // name = marker / entity template, arg = character or item, ival = count, num[0] = wander radius (m, 0 = default)
     SA_DESPAWN,                 // name
     SA_AUDIO,                   // arg = sound / VO id, name = emitter entity (empty = 2D), ival = StoryAudioKind, num[0] = volume
     SA_SUBTITLE,                // arg = script id
@@ -90,6 +90,7 @@ typedef enum StoryActType {
     SA_PHONE,                   // arg = message / photo / voicemail id (phone content unlock)
     SA_TELEPORT,                // name = story point: every player stands there (waking up after a night)
     SA_TITLE,                   // arg = script id (title + one line), num[0] = seconds: the centred card ("Day 3")
+    SA_CHASE,                   // name = prefix: the story's idle zombies named so join the horde (sense, chase, attack)
     SA_COUNT
 } StoryActType;
 
@@ -202,6 +203,7 @@ typedef struct StoryDef {
     StoryRole role[STORY_MAX_ROLE];
     int role_n;
     int players;                // "players": 1 = single player (the host refuses joins), up to 4
+    float zombie_sense;         // "zombie_sense": m, the horde's sense radius while the chapter runs (0 = engine default)
 } StoryDef;
 
 // Parses the chapter JSON into *d (zeroed first). Returns false with a message on a syntax or

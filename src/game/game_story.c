@@ -15,6 +15,7 @@
 #include "gameplay/entities.h"
 #include "gameplay/characters.h"
 #include "gameplay/health.h"
+#include "gameplay/zombies/horde.h"
 #include "anim/anim_library.h"
 #include "audio/audio.h"
 #include "input/input.h"
@@ -33,7 +34,7 @@
 #define STORY_MAX_VOLUMES 64
 #define STORY_MAX_INTERACT 64
 #define STORY_MAX_POWER 8
-#define STORY_MAX_SPAWNED 16
+#define STORY_MAX_SPAWNED 64   // story zombies / items alive at once (saved by name; chapter 1 ends with 31)
 
 typedef struct StoryPoint { char name[STORY_ID]; vec3 pos; float yaw; } StoryPoint;
 typedef struct StoryVolume { char name[STORY_ID]; vec3 mn, mx; } StoryVolume;
@@ -59,7 +60,7 @@ typedef struct StoryInteract {
 
 typedef struct StoryPowerGroup { char name[STORY_ID]; u32 groups[16]; int group_n; u8 state; } StoryPowerGroup;
 
-typedef struct StorySpawned { char name[STORY_ID]; char character[STORY_ID]; } StorySpawned;
+typedef struct StorySpawned { char name[STORY_ID]; char character[STORY_ID]; bool chase; float wander; } StorySpawned;
 
 static struct {
     // the level's story block (host + client)
@@ -274,14 +275,20 @@ static void bind_interactables(World *w) {
     }
 }
 
-// "when": the objective that has to be active (host: the story state; clients: the replicated mirror).
+// "when": the objective that has to be active, or "prefix_*": any objective so named (one per day:
+// "sleep_*"). Host: the story state; clients: the replicated mirror.
 static bool inter_open(const StoryInteract *s) {
     if (!s || !s->when[0]) return true;
     const StoryDef *d = SR.def ? SR.def : SR.ui.def;
     const StoryState *st = SR.st ? SR.st : SR.ui_mirror;
     if (!d || !st) return false;
-    int o = story_find_objective(d, s->when);
-    return o != STORY_NONE && st->obj[o].state == SOS_ACTIVE;
+    size_t n = strlen(s->when);
+    bool prefix = n > 0 && s->when[n - 1] == '*';
+    for (int o = 0; o < d->obj_n; o++) {
+        bool match = prefix ? !strncmp(d->obj[o].id, s->when, n - 1) : !strcmp(d->obj[o].id, s->when);
+        if (match && st->obj[o].state == SOS_ACTIVE) return true;
+    }
+    return false;
 }
 
 static void story_focus(World *w, EntityId self, int player, char *prompt, int size) {
@@ -428,7 +435,7 @@ static void door_set(World *w, const char *name, int op) {
     ev_sound(w, op == SDO_SLAM ? "door_slam" : (open ? "door_open" : "door_close"), w->xf[i].pos, op == SDO_SLAM ? 1.6f : 1.0f, EVENT_ALL);
 }
 
-static EntityId spawn_named(World *w, const char *name, const char *what, int count) {
+static EntityId spawn_named(World *w, const char *name, const char *what, int count, float wander) {
     vec3 pos;
     const StoryPoint *pt = find_point(name);
     if (!pt) { log_warn("story: spawn '%s': no story point of that name", name); return ENT_NONE; }
@@ -438,6 +445,8 @@ static EntityId spawn_named(World *w, const char *name, const char *what, int co
         const CharacterDef *cd = g_engine.anim ? anim_lib_char_by_id(g_engine.anim, what[0] ? what : "zombie_placeholder") : NULL;
         if (!cd && g_engine.anim) cd = anim_lib_char_by_id(g_engine.anim, "zombie_placeholder");
         e = spawn_zombie(w, pos, pt->yaw, cd ? cd->net_id : 2);
+        CharacterInst *ci = e ? char_get(w, e) : NULL;
+        if (ci && wander > 0) ci->ai.wander_radius = wander;   // stays near its spot (the corridor's crowd at 10A's door)
     } else {
         u16 item = item_find(w->items, what);
         if (!item) { log_warn("story: spawn '%s': unknown item / character '%s'", name, what); return ENT_NONE; }
@@ -446,10 +455,13 @@ static EntityId spawn_named(World *w, const char *name, const char *what, int co
     if (e) {
         dg_strcpy(w->names[ENT_INDEX(e)], sizeof(w->names[0]), name);
         SR.named_alive[ENT_INDEX(e)] = 1;
+        if (SR.spawned_n >= STORY_MAX_SPAWNED) log_warn("story: spawn '%s': more than %d story spawns (not saved, never woken)", name, STORY_MAX_SPAWNED);
         if (SR.spawned_n < STORY_MAX_SPAWNED) {
             StorySpawned *s = &SR.spawned[SR.spawned_n++];
             dg_strcpy(s->name, sizeof(s->name), name);
             dg_strcpy(s->character, sizeof(s->character), what);
+            s->chase = false;
+            s->wander = wander;
         }
     }
     return e;
@@ -473,7 +485,7 @@ static void apply_action(World *w, const StoryAction *a) {
     vec3 pos = v3(0, 0, 0);
     EntityId ent = ENT_NONE;
     switch ((StoryActType)a->type) {
-    case SA_SPAWN: spawn_named(w, a->name, a->arg, a->ival); break;
+    case SA_SPAWN: spawn_named(w, a->name, a->arg, a->ival, a->num[0]); break;
     case SA_DESPAWN: {
         EntityId e = ent_find_by_name(w, a->name);
         if (e) ent_destroy(w, e);
@@ -531,6 +543,19 @@ static void apply_action(World *w, const StoryAction *a) {
     case SA_SEQUENCE: vseq_start(w, a->name); break;
     case SA_PHONE: send(w, -1, SEVT_PHONE, a->arg, 0, 0, 0, pos); break;
     case SA_TITLE: send(w, -1, SEVT_TITLE, a->arg, 0, 0, a->num[0], pos); break;
+    case SA_CHASE: {
+        // The story's idle zombies named <prefix>... wake up: the horde senses, chases and attacks with them.
+        size_t n = strlen(a->name);
+        int woke = 0;
+        for (int k = 0; k < SR.spawned_n; k++) {
+            StorySpawned *sp = &SR.spawned[k];
+            if (sp->chase || strncmp(sp->name, a->name, n)) continue;
+            EntityId z = ent_find_by_name(w, sp->name);
+            if (z && horde_adopt(w, z)) { sp->chase = true; woke++; }
+        }
+        log_info("story: chase '%s': %d zombie(s)", a->name, woke);
+        break;
+    }
     case SA_TELEPORT: {
         // Waking up somewhere else (a night passed): every player, a little rested.
         const StoryPoint *pt = find_point(a->name);
@@ -776,6 +801,8 @@ static cJSON *world_blob(World *w) {
         cJSON *o = cJSON_CreateObject();
         cJSON_AddStringToObject(o, "name", SR.spawned[k].name);
         cJSON_AddStringToObject(o, "what", SR.spawned[k].character);
+        if (SR.spawned[k].chase) cJSON_AddBoolToObject(o, "chase", true);
+        if (SR.spawned[k].wander > 0) cJSON_AddNumberToObject(o, "wander", SR.spawned[k].wander);
         cJSON_AddItemToArray(sp, o);
     }
     cJSON_AddStringToObject(root, "weather", weather_name(w));
@@ -828,7 +855,10 @@ static void apply_world_blob(World *w, const cJSON *root) {
             if (!strcmp(SR.power[p].name, e->string) && cJSON_IsNumber(e)) set_power(w, e->string, e->valueint);
     }
     SR.spawned_n = 0;
-    cJSON_ArrayForEach(e, cJSON_GetObjectItemCaseSensitive(root, "spawned")) spawn_named(w, jstr(e, "name"), jstr(e, "what"), 1);
+    cJSON_ArrayForEach(e, cJSON_GetObjectItemCaseSensitive(root, "spawned")) {
+        EntityId z = spawn_named(w, jstr(e, "name"), jstr(e, "what"), 1, jnum(e, "wander", 0));
+        if (z && cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(e, "chase")) && horde_adopt(w, z)) SR.spawned[SR.spawned_n - 1].chase = true;
+    }
     const char *wx = jstr(root, "weather");
     if (wx[0] && strcmp(wx, "custom")) weather_set_preset(w, wx, 0);
     SR.vseq_n = 0;
@@ -924,6 +954,7 @@ static void free_chapter(void) {
 
 void story_stop(void) {
     if (SR.active) log_info("story: stopped");
+    if (SR.active && SR.def && SR.def->zombie_sense > 0) horde_set_sense(0);
     free_chapter();
     free(SR.pending_save);
     SR.pending_save = NULL;
@@ -965,6 +996,7 @@ static void activate(World *w) {
     SR.out = malloc(sizeof(StoryOut));
     story_init(SR.st, SR.def, (u64)dg_hash_str(SR.def->id));
     SR.active = true;
+    if (SR.def->zombie_sense > 0) horde_set_sense(SR.def->zombie_sense);   // story zombies wake up near the player
     SR.pending[0] = 0;
     SR.spawned_n = 0;
     SR.vseq_n = 0;

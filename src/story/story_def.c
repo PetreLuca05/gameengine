@@ -105,7 +105,7 @@ const char *story_cond_name(StoryCondType t) { return t < SC_COUNT ? COND_NAMES[
 static const char *const ACT_NAMES[SA_COUNT] = {
     "wait", "objective", "flag", "enable", "disable", "journal", "checkpoint", "end_chapter", "time",
     "spawn", "despawn", "audio", "subtitle", "weather", "unlock", "lock", "give", "take", "marker",
-    "camhint", "fade", "power", "light", "door", "sequence", "prompt", "phone", "teleport", "title",
+    "camhint", "fade", "power", "light", "door", "sequence", "prompt", "phone", "teleport", "title", "chase",
 };
 const char *story_act_name(StoryActType t) { return t < SA_COUNT ? ACT_NAMES[t] : "?"; }
 
@@ -315,7 +315,7 @@ static void parse_action(Parse *p, StoryAction *a, const cJSON *j, const char *w
     case SA_SUBTITLE: case SA_PHONE:
         dg_strcpy(a->arg, sizeof(a->arg), s);
         break;
-    case SA_TELEPORT: dg_strcpy(a->name, sizeof(a->name), s); break;
+    case SA_TELEPORT: case SA_CHASE: dg_strcpy(a->name, sizeof(a->name), s); break;
     case SA_TITLE:
         dg_strcpy(a->arg, sizeof(a->arg), s);
         a->num[0] = (float)jnum(j, "time", 4.0);
@@ -328,6 +328,7 @@ static void parse_action(Parse *p, StoryAction *a, const cJSON *j, const char *w
         dg_strcpy(a->name, sizeof(a->name), s);
         dg_strcpy(a->arg, sizeof(a->arg), jstr(j, "character", jstr(j, "item", "")));
         a->ival = (i32)jnum(j, "count", 1);
+        a->num[0] = (float)jnum(j, "wander", 0);
         break;
     case SA_GIVE: case SA_TAKE:
         dg_strcpy(a->arg, sizeof(a->arg), s);
@@ -596,6 +597,7 @@ bool story_def_parse(StoryDef *d, const char *json, char *err, int err_size) {
         }
     }
     d->players = (int)jnum(root, "players", 4);
+    d->zombie_sense = (float)jnum(root, "zombie_sense", 0);
     if (d->players < 1 || d->players > STORY_MAX_ROLE) perr(&p, "players must be 1..%d", STORY_MAX_ROLE);
     const cJSON *start = cJSON_GetObjectItemCaseSensitive(root, "start");
     dg_strcpy(d->start_checkpoint, sizeof(d->start_checkpoint), jstr(start, "checkpoint", "start"));

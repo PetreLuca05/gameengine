@@ -429,7 +429,6 @@ typedef struct BotRun {
     float time;
     u32 hash;
     int steps;
-    i32 flags_open, flags_barricade;
     int checkpoints;
 } BotRun;
 
@@ -444,7 +443,7 @@ static BotRun bot_run(const StoryDef *d, u32 choice, bool save_every_checkpoint,
     StoryView v = story_bot_view(&bot);
     BotRun r = {0};
     const float dt = 1.0f / 30.0f;
-    for (int i = 0; i < 30 * 3600 && !s->ended; i++) {
+    for (int i = 0; i < 30 * 7200 && !s->ended; i++) {   // two hours of story time at most
         int t = story_bot_step(&bot, s, d, dt);
         if (verbose && t != STORY_NONE) printf("  %7.1fs %-24s %s\n", s->now, d->trig[t].id, bot.last_target);
         story_tick(s, d, &v, dt, o);
@@ -466,8 +465,6 @@ static BotRun bot_run(const StoryDef *d, u32 choice, bool save_every_checkpoint,
     r.time = s->now;
     r.hash = story_state_hash(s, d);
     r.steps = bot.steps;
-    r.flags_open = story_flag(s, "ruth_inside");
-    r.flags_barricade = story_flag(s, "barricaded");
     if (!r.ended) {
         printf("  bot stuck at %.0f s (choice %u); active:", s->now, choice);
         for (int i = 0; i < d->obj_n; i++)
@@ -503,7 +500,6 @@ static void test_chapter_file(const char *path) {
         free(script);
     }
     // The bot finishes every branch, deterministically, and checkpoints do not change the outcome.
-    bool saw_open = false, saw_barricade = false;
     for (u32 choice = 0; choice < 16; choice++) {
         BotRun r = bot_run(d, choice, false, false);
         CHECK(r.ended, "%s: bot (choice %u) finished (%.0f s, %d steps)", d->id, choice, r.time, r.steps);
@@ -511,17 +507,15 @@ static void test_chapter_file(const char *path) {
             bot_run(d, choice, false, true);
             continue;
         }
-        CHECK(r.time < 40 * 60, "%s: bot (choice %u) within 40 min (%.0f s)", d->id, choice, r.time);
-        saw_open |= r.flags_open == 1;
-        saw_barricade |= r.flags_barricade == 1;
-        CHECK(!(r.flags_open && r.flags_barricade), "branches are exclusive (choice %u)", choice);
+        CHECK(r.time < 90 * 60, "%s: bot (choice %u) within 90 min (%.0f s)", d->id, choice, r.time);
+        // Chapter 1: every morning is a checkpoint (days 2..8), then the street and the end.
+        if (!strcmp(d->id, "01_tenth_floor")) CHECK(r.checkpoints == 9, "01: all 7 nights slept, the street, the end (%d checkpoints)", r.checkpoints);
         BotRun again = bot_run(d, choice, false, false);
         CHECK(again.hash == r.hash && again.time == r.time, "deterministic (choice %u)", choice);
         BotRun saved = bot_run(d, choice, true, false);
         CHECK(saved.ended && saved.hash == r.hash && saved.time == r.time && saved.checkpoints == r.checkpoints && r.checkpoints >= 4,
               "save / load at every checkpoint (choice %u: %d checkpoints)", choice, r.checkpoints);
     }
-    if (!strcmp(d->id, "01_tenth_floor")) CHECK(saw_open && saw_barricade, "both door branches covered (open %d barricade %d)", saw_open, saw_barricade);
     free(d);
 }
 
