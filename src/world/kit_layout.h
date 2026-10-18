@@ -4,7 +4,8 @@
 // src/world/kit_world.c turns the list into draws, collision and entities; tests/test_kit.c tests it.
 //
 // Instance: {"piece": id, "pos": [x, y, z], "yaw": deg, "name": "...", <entity params>, "mat": {...}}
-// Prefab use: {"prefab": name, "pos", "yaw", "prefix": "10c_" (child names), "override": {child name: {params}}}
+// Prefab use: {"prefab": name, "pos", "yaw", "prefix": "10c_" (child names), "override": {child name: {params}},
+//              "batch": true (static batching: the children merge into big meshes, no entities)}
 #ifndef DG_KIT_LAYOUT_H
 #define DG_KIT_LAYOUT_H
 
@@ -20,6 +21,7 @@ typedef struct KitPlaced {
     float yaw;                   // degrees
     struct cJSON *entry;         // the instance's parameters (merged overrides; owned by the layout)
     int prefab_depth;            // 0 = placed by the level itself
+    bool batch;                  // merged with its kind into one mesh per material ("batch": true on it or an enclosing prefab use)
 } KitPlaced;
 
 typedef struct KitLayout {

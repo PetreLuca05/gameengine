@@ -3,6 +3,7 @@
  "slot": "M_brick",
  "surface": "brick",
  "glass": false,
+ "windows": false,
  "variants": {
   "default": [
    0.55,

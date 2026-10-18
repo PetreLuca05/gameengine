@@ -35,6 +35,7 @@ MATERIALS = {   # set -> surface (impacts / footsteps) + variants (colour, rough
     "plastic":  ("default", {"default": [0.12, 0.12, 0.13, 0.4, 0.0], "white": [0.92, 0.92, 0.92, 0.4, 0.0], "toy": [0.85, 0.30, 0.25, 0.4, 0.0]}),
     "carpet":   ("cloth", {"default": [0.50, 0.46, 0.42, 1.0, 0.0]}),
     "emissive": ("glass", {"default": [1.00, 0.96, 0.88, 0.5, 0.0, 2.5], "screen": [0.30, 0.45, 0.70, 0.3, 0.0, 1.2], "exit": [0.10, 0.85, 0.30, 0.5, 0.0, 3.0]}),
+    "window":   ("glass", {"default": [0.10, 0.12, 0.14, 0.08, 0.6], "warm": [0.14, 0.12, 0.10, 0.1, 0.5]}),   # opaque façade panes, lit at night
 }
 
 # ------------------------------------------------------------------ geometry
@@ -444,17 +445,17 @@ for mat in ("brick", "stone", "concrete", "render"):
         p = P("fac_%s_win_%s" % (mat, v), "facade", snap="facade")
         j = (3.0 - ww) / 2.0
         p.box(0, 0, -0.3, j, 3.0, 0, slot).box(3.0 - j, 0, -0.3, 3.0, 3.0, 0, slot).box(j, 0, -0.3, 3.0 - j, sill, 0, slot).box(j, sill + wh, -0.3, 3.0 - j, 3.0, 0, slot)
-        p.box(j, sill, -0.22, 3.0 - j, sill + wh, -0.2, "M_glass", collide=False).box(j - 0.05, sill - 0.06, -0.38, 3.0 - j + 0.05, sill, -0.3, "M_stone", collide=False)
+        p.box(j, sill, -0.22, 3.0 - j, sill + wh, -0.2, "M_window", collide=False).box(j, sill - 0.06, -0.3, 3.0 - j, sill, -0.26, "M_stone", collide=False)
         p.socket("interior_card", 1.5, sill, -0.1)
     P("fac_%s_blank" % mat, "facade", snap="facade").box(0, 0, -0.3, 3.0, 3.0, 0, slot)
     p = P("fac_%s_balcony" % mat, "facade", snap="facade")
     p.box(0, 0, -0.3, 0.6, 3.0, 0, slot).box(2.4, 0, -0.3, 3.0, 3.0, 0, slot).box(0.6, 2.4, -0.3, 2.4, 3.0, 0, slot)
-    p.box(0.6, 0, -0.22, 2.4, 2.4, -0.2, "M_glass", collide=False).box(0, 0, -1.3, 3.0, 0.2, -0.3, "M_concrete").box(0, 0.2, -1.3, 3.0, 1.1, -1.26, "M_metal", collide=False)
+    p.box(0.6, 0, -0.22, 2.4, 2.4, -0.2, "M_window", collide=False).box(0, 0, -1.3, 3.0, 0.2, -0.3, "M_concrete").box(0, 0.2, -1.3, 3.0, 1.1, -1.26, "M_metal", collide=False)
     P("fac_%s_corner" % mat, "facade", snap="facade").box(0, 0, -0.3, 0.3, 3.0, 0, slot)
 for v in "abc":
     p = P("fac_shopfront_%s" % v, "facade", snap="facade")
     p.box(0, 0, -0.3, 0.3, 4.0, 0, "M_stone").box(2.7, 0, -0.3, 3.0, 4.0, 0, "M_stone").box(0.3, 3.0, -0.3, 2.7, 4.0, 0, "M_render")
-    p.box(0.3, 0.4, -0.2, 2.7, 3.0, -0.18, "M_glass", collide=False).box(0.3, 0, -0.3, 2.7, 0.4, 0, "M_stone").box(0.2, 3.0, -0.9, 2.8, 3.1, -0.3, "M_fabric" if v != "b" else "M_metal", collide=False)
+    p.box(0.3, 0.4, -0.2, 2.7, 3.0, -0.18, "M_window", collide=False).box(0.3, 0, -0.3, 2.7, 0.4, 0, "M_stone").box(0.2, 3.0, -0.9, 2.8, 3.1, -0.3, "M_fabric" if v != "b" else "M_metal", collide=False)
 for v in "ab":
     p = P("fac_entrance_%s" % v, "facade", snap="facade")
     p.box(0, 0, -0.3, 0.8, 4.0, 0, "M_stone").box(2.2, 0, -0.3, 3.0, 4.0, 0, "M_stone").box(0.8, 2.6, -0.3, 2.2, 4.0, 0, "M_stone").socket("door", 1.5, 0, -0.15)
@@ -589,7 +590,7 @@ def main():
     for s, (surf, variants) in MATERIALS.items():
         doc = {"_doc": "Kit material set (docs/BUILDING_KIT.md 'Materials'): slot M_%s. Variants: [r, g, b, roughness, metallic(, emissive)]; "
                        "instances pick one per slot (\"mat\": {\"M_%s\": \"<variant>\"}) and may tint." % (s, s),
-               "slot": "M_" + s, "surface": surf, "glass": s == "glass", "variants": variants}
+               "slot": "M_" + s, "surface": surf, "glass": s == "glass", "windows": s == "window", "variants": variants}
         with open(os.path.join(OUT, "materials", s + ".json"), "w", newline="") as f:
             json.dump(doc, f, indent=1)
     ids = set()

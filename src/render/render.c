@@ -466,6 +466,16 @@ void render_set_camera(const RenderCamera *cam) {
 }
 void render_set_environment(const RenderEnvironment *env) { R->env = *env; }
 
+// City windows (render_set_city).
+static struct { float base, intensity, power[8]; vec2 center; } g_city = { 0.45f, 0.0f, { 1, 1, 1, 1, 1, 1, 1, 1 }, { 0, 0 } };
+
+void render_set_city(float base, float intensity, vec2 center, const float power[8]) {
+    g_city.base = base;
+    g_city.intensity = intensity;
+    g_city.center = center;
+    for (int i = 0; i < 8; i++) g_city.power[i] = power ? power[i] : 1.0f;
+}
+
 // Interior volumes (render_set_interiors): copied into every frame's FrameData.
 static RenderInterior g_interiors[RENDER_MAX_INTERIORS];
 static int g_interior_n;
@@ -1568,6 +1578,14 @@ static void compute_matrices(FrameData *fd) {
         fd->fill_dir = v4(fd_dir.x, fd_dir.y, fd_dir.z, atmo ? e->fill_intensity : 0.0f);
         fd->fill_color = v4(e->fill_color.x, e->fill_color.y, e->fill_color.z, 0.0f);
         fd->sky_flags = v4(atmo ? 1.0f : 0.0f, e->ambient_scale > 0 ? e->ambient_scale : 1.0f, (float)(sky_env_mips() - 1), atmo && e->cloud_cover > 0.001f ? 1.0f : 0.0f);
+        {
+            // Windows light as the sky darkens (sun elevation), a few stay lit by day.
+            float sy = atmo ? e->sun_true_dir.y : 0.5f;
+            float night = saturate((0.12f - sy) / 0.24f);
+            fd->city = v4(g_city.base * (0.06f + 0.94f * night), g_city.intensity, g_city.center.x, g_city.center.y);
+            fd->city_power[0] = v4(g_city.power[0], g_city.power[1], g_city.power[2], g_city.power[3]);
+            fd->city_power[1] = v4(g_city.power[4], g_city.power[5], g_city.power[6], g_city.power[7]);
+        }
         fd->interior_info = v4((float)g_interior_n, 0, 0, 0);
         for (int k = 0; k < g_interior_n; k++) {
             const RenderInterior *iv = &g_interiors[k];

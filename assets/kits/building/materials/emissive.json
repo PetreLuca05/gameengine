@@ -3,6 +3,7 @@
  "slot": "M_emissive",
  "surface": "glass",
  "glass": false,
+ "windows": false,
  "variants": {
   "default": [
    1.0,

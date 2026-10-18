@@ -303,6 +303,12 @@ void main() {
 #ifdef LIT_EMISSIVE_HOOK
     color += LIT_EMISSIVE_HOOK;
 #endif
+    if ((flags & (MAT_WINDOWS | MAT_FACADE)) != 0u) {
+        bool grid = (flags & MAT_FACADE) != 0u;
+        vec4 cw = city_window(v_world, normalize(v_normal), grid);
+        if (grid) color *= 1.0 - 0.55 * cw.w;   // window rectangles read as dark glass by day
+        color += cw.rgb;
+    }
 
     if ((flags & MAT_HIGHLIGHT) != 0u) {
         vec3 v = normalize(frame.camera_pos.xyz - v_world);
