@@ -49,6 +49,13 @@ visible artifact). Every variant's unfitted twin is built too (no impostor) and 
 `perf_fix_disable PF-0016` is on. Measured (meadow, wheat, pine forest, Modern, 2 x A/B): prepass
 -8.7 %, opaque -6.8 %, GPU frame -11 %; the meadow alone with the wind off -34 % prepass.
 
+The Tree It leaf cards were measured for the same fit and left as authored: in most species the leaves
+are part of 7+ triangle connected branch meshes, the two-triangle cards of beech / maple / old are bent
+(not one plane), and the convex hull of the visible texels (an octagon grown for mip 2) keeps 85 - 100 %
+of the area of every species' masked triangles, per card or per triangle: the leaf atlases fill their
+cards to the edges and the gaps between leaves are not convex. Cutting them would need concave outlines
+(many more triangles) or the textures re-cropped.
+
 ## Placement
 
 `grass_cover` (per streamed 32 m chunk): a jittered 0.35 m grid; a cell holds a clump with probability
