@@ -21,7 +21,7 @@
   "avoid": "soil, pot, vase, hands, flowers, berries, shadows on the background, gradient background, blur, bokeh, cartoon, illustration, frame, text, watermark",
   "checks": {
     "coverage": [
-      0.08,
+      0.05,
       0.7
     ],
     "bottom": 0.005,

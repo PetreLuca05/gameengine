@@ -10,7 +10,7 @@ Written by `tools/vfxgen/groundgen.py` (tool v2). Images generated this run: 0, 
 | grass_tall | blade_atlas | generated | ok; root/mid/tip #565535/#62613c/#65633b · #51512f/#5a5a31/#6e6b41 · #50502f/#5c5c35/- · #4f4f2f/#61613d/#656339 |
 | grass_tussock | blade_atlas | generated | ok; root/mid/tip #67674e/#76744c/#817d55 · #696b48/#707046/#7f7c55 · #656544/#76754d/#83815a · #565a40/#66694a/#787554 |
 | reed | blade_atlas | generated | ok; root/mid/tip #515334/#5e623a/- · #535536/#5f623a/#737048 |
-| shrub_leafy | blade_atlas | generated | 1 failing cell check(s); root/mid/tip #505b33/#566a3a/#62763f · #4d5c30/#5a6c3d/#677843 |
+| shrub_leafy | blade_atlas | generated | ok; root/mid/tip #525e33/#566b39/#63783e · #4d5c30/#5a6c3d/#677843 |
 | wheat | blade_atlas | generated | ok; root/mid/tip #73724c/#807e51/- · -/-/- |
 | dirt | terrain_layer | generated | mean #635a45 (target #5e5540, max delta 0.02), seam 0.8135 |
 | dirt_dry | terrain_layer | generated | mean #8e8361 (target #8c7f5c, max delta 0.02), seam 0.9477 |

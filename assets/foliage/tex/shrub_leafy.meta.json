@@ -6,13 +6,13 @@
  "size": 2048,
  "cells": [
   {
-   "coverage": 0.084,
-   "bottom": 0.018,
+   "coverage": 0.086,
+   "bottom": 0.012,
    "height": 0.94,
-   "root": "#505b33",
-   "mid": "#566a3a",
-   "tip": "#62763f",
-   "residue": 0.0,
+   "root": "#525e33",
+   "mid": "#566b39",
+   "tip": "#63783e",
+   "residue": 0.0001,
    "source": "generated",
    "fails": []
   },
@@ -25,9 +25,7 @@
    "tip": "#677843",
    "residue": 0.0,
    "source": "generated",
-   "fails": [
-    "coverage 0.057 not in [0.08, 0.7]"
-   ]
+   "fails": []
   }
  ],
  "name": "shrub_leafy",
