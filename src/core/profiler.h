@@ -58,6 +58,7 @@ typedef enum ProfFix {
     // PF-0008 (character draw poses on the job system) was dropped: the GPU frame regressed; the id is not reused.
     PFX_CLASSIC_CULL_BATCH,   // PF-0009: the classic renderer's views culled in one parallel pass
     PFX_WIND_TILE_JOBS,       // PF-0010: the wind tile window rows on the job system
+    PFX_SKIN_SHADOW_CULL,     // PF-0011: skinned shadow casters culled per sun cascade
     PFX_COUNT
 } ProfFix;
 

@@ -150,7 +150,7 @@ static void create_frames(void) {
         for (int k = 0; k < 2; k++) f->ubo_phone[k] = vkr_buffer_create(sizeof(FrameData), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, true);
         f->dyn = vkr_buffer_create(DYN_BUFFER_SIZE, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT, true);
         f->bones = vkr_buffer_create(sizeof(mat4) * MAX_SKIN_BONES * 2, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);   // + last frame's
-        f->instances = vkr_buffer_create(sizeof(GpuSkinInstance) * MAX_SKIN_DRAWS * 3, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);   // main + shadow / vm + phone
+        f->instances = vkr_buffer_create(sizeof(GpuSkinInstance) * MAX_SKIN_DRAWS * 8, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);   // main + shadow + 5 culled shadow (PF-0011) + vm / phone
         f->prev_models = vkr_buffer_create(sizeof(mat4) * (MAX_DRAWS + MAX_VM_DRAWS), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, true);
 
         VkDescriptorSetAllocateInfo ai = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO };
@@ -884,6 +884,8 @@ static bool skin_in_pass(const SkinnedDraw *d, int pass) {
 
 static bool prev_palette(u32 id, u32 *off, u32 *count);
 static u32 g_skin_shadow_inst[MAX_SKIN_DRAWS];   // skinned draw -> its instance record in the shadow pass (~0: none)
+static u32 g_skin_shadow_order[MAX_SKIN_DRAWS];  // the shadow pass's records in order: their skinned draw (PF-0011)
+static u32 g_skin_shadow_base;                   // the shadow pass's first record
 static bool g_skin_shadow_gpu;                   // this frame's shadow pass instances are valid (GPU skinning)
 
 // Writes instance records for one pass (culled, sorted by mesh) starting at `base`.
@@ -907,10 +909,11 @@ static u32 build_skin_pass(FrameResources *f, int pass, u32 base, SkinPass *out)
     // Instanced batches per (texture, mesh): modular characters sharing parts batch per (part, LOD).
     u32 nb = skin_batch_build(keys, n, order, runs);
     GpuSkinInstance *inst = (GpuSkinInstance *)f->instances.mapped;
+    if (shadow) g_skin_shadow_base = base;
     for (u32 k = 0; k < n; k++) {
         const SkinnedDraw *d = &R->skin_draws[draw_of[order[k]]];
         GpuSkinInstance *g = &inst[base + k];
-        if (shadow) g_skin_shadow_inst[draw_of[order[k]]] = base + k;
+        if (shadow) g_skin_shadow_inst[draw_of[order[k]]] = base + k, g_skin_shadow_order[k] = draw_of[order[k]];
         g->color = d->color;
         g->params = v4(d->roughness, d->metallic, d->emissive, d->fade);
         g->recon = d->recon;
@@ -943,6 +946,47 @@ static u32 build_skin_pass(FrameResources *f, int pass, u32 base, SkinPass *out)
         out->batches[b].mat_set = vkr_material_set(&mm);
     }
     arena_pop_to(mark);
+    return n;
+}
+
+// docs/perf/FINDINGS.md PF-0011: the shadow pass's batches were drawn into every sun cascade (and the
+// moon map) whole: every zombie of a horde was skinned 4 - 5 times. Cascade k gets its own copy of the
+// pass holding only the casters whose bounds touch its light box and its receiver volume (PF-0006):
+// the same batches in the same order, the same records (a shadow record depends on its draw only)
+// for the instances kept. A dropped instance lies outside the tile's light box (it rasterizes no
+// texel of the tile) or outside the receiver volume (no receiver reads its texels).
+static u32 cull_skin_shadow(FrameResources *f, int k, u32 base, const SkinPass *all, SkinPass *out) {
+    vec4 pl[6];
+    extract_frustum(R->shadow_vp_ndc[k], pl);
+    const vec4 *rcv = k < 4 ? R->shadow_rcv[k] : NULL;
+    int nrcv = k < 4 ? R->shadow_rcv_n[k] : 0;
+    GpuSkinInstance *inst = (GpuSkinInstance *)f->instances.mapped;
+    u32 n = 0;
+    out->batch_count = 0;
+    for (u32 b = 0; b < all->batch_count; b++) {
+        const SkinBatch *sb = &all->batches[b];
+        u32 first = n;
+        for (u32 j = 0; j < sb->count; j++) {
+            u32 di = g_skin_shadow_order[sb->first - g_skin_shadow_base + j];
+            const SkinnedDraw *d = &R->skin_draws[di];
+            if (d->radius > 0 && (!sphere_visible(pl, d->center, d->radius) || (nrcv && !sphere_in_n(rcv, nrcv, d->center, d->radius)))) continue;
+            GpuSkinInstance *g = &inst[base + n];
+            g->color = d->color;
+            g->params = v4(d->roughness, d->metallic, d->emissive, d->fade);
+            g->recon = d->recon;
+            g->info[0] = d->bone_count & 0xFFFFFu;
+            g->info[1] = d->flags;
+            g->info[2] = 0;
+            float ns = d->normal_scale != 0.0f ? d->normal_scale : 1.0f;
+            memcpy(&g->info[3], &ns, sizeof(ns));
+            n++;
+        }
+        if (n == first) continue;
+        SkinBatch *ob = &out->batches[out->batch_count++];
+        *ob = *sb;
+        ob->first = base + first;
+        ob->count = n - first;
+    }
     return n;
 }
 
@@ -2438,8 +2482,10 @@ void render_end_frame(void) {
     // The bone SSBO holds this frame's palettes, then last frame's (previous-palette velocity).
     bool cpu_skin = R->r_cpu_skinning->i != 0;
     g_skin_shadow_gpu = false;
-    static SkinPass skin_main, skin_shadow, skin_vm, skin_phone;
+    static SkinPass skin_main, skin_shadow, skin_vm, skin_phone, skin_shadow_k[5];
     skin_main.batch_count = skin_shadow.batch_count = skin_vm.batch_count = skin_phone.batch_count = 0;
+    for (int k = 0; k < 5; k++) skin_shadow_k[k].batch_count = 0;
+    bool skin_shadow_cull = false;
     F.skin_main = &skin_main;
     F.skin_vm = &skin_vm;
     F.skin_phone = &skin_phone;
@@ -2457,6 +2503,11 @@ void render_end_frame(void) {
             g_skin_shadow_gpu = true;
             u32 used = build_skin_pass(f, 0, 0, &skin_main);
             used += build_skin_pass(f, 1, used, &skin_shadow);
+            // Per-cascade casters (PF-0011); the culling-mask path draws per draw from the whole pass.
+            skin_shadow_cull = prof_fix_enabled(PFX_SKIN_SHADOW_CULL) && skin_shadow.batch_count &&
+                               (R->sun_shadow.culling_mask & SHADOW_LAYERS_ALL) == SHADOW_LAYERS_ALL;
+            for (int k = 0; k < 5 && skin_shadow_cull; k++)
+                if (k < 4 ? R->shadow_active[k] : R->moon_active) used += cull_skin_shadow(f, k, used, &skin_shadow, &skin_shadow_k[k]);
             used += build_skin_pass(f, 2, used, &skin_vm);
             if (phone_view_pending()) build_skin_pass(f, 3, used, &skin_phone);
         }
@@ -2515,7 +2566,7 @@ void render_end_frame(void) {
                     g_shadow_cascade = (u32)k;
                     g_shadow_rcv = R->shadow_rcv[k];
                     g_shadow_rcv_n = R->shadow_rcv_n[k];
-                    draw_sun_casters(cmd, f, k, &skin_shadow);
+                    draw_sun_casters(cmd, f, k, skin_shadow_cull ? &skin_shadow_k[k] : &skin_shadow);
                 }
                 g_shadow_rcv_n = 0;
                 g_shadow_cascade = 0;
@@ -2560,7 +2611,7 @@ void render_end_frame(void) {
                 g_shadow_layers = R->sun_shadow.culling_mask;
                 extract_frustum(R->shadow_vp_ndc[4], g_shadow_planes);
                 g_shadow_cascade = SHADOW_PASS_MOON;
-                draw_sun_casters(cmd, f, 4, &skin_shadow);
+                draw_sun_casters(cmd, f, 4, skin_shadow_cull ? &skin_shadow_k[4] : &skin_shadow);
                 g_shadow_cascade = 0;
                 g_shadow_min_radius = 0.0f;
                 g_shadow_cull = false;
