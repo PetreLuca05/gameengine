@@ -226,7 +226,7 @@ static void build_instance(World *w, const KitInst *in) {
         BodyDesc bd;
         memset(&bd, 0, sizeof(bd));
         bd.motion = PM_STATIC;
-        bd.layer = PL_STATIC;
+        bd.layer = hu->clip ? PL_CLIP : PL_STATIC;
         bd.friction = 0.8f;
         bd.material = (u8)surface;
         bd.rot = rot;
@@ -370,6 +370,13 @@ static void spawn_hooked(World *w, const KitInst *in, const cJSON *entry) {
         u32 col = rgba(jv3(entry, "color", jv3(def, "color", v3(0.92f, 0.9f, 0.86f))));
         if (cJSON_IsTrue(param(entry, def, "glass"))) col = (col & 0x00FFFFFFu) | 0x60000000u;   // alpha < 1: a glass leaf (game_render.c)
         e = spawn_door(w, pos, yaw, jf(def, "width", 0.88f), jf(def, "height", 2.08f), cJSON_IsTrue(lk), key_item, col);
+    } else if (!strcmp(type, "window")) {
+        // A casement: the sash at the "door" socket, the lean-out spot at the "lean" socket.
+        e = spawn_window(w, pos, yaw, jf(def, "width", 1.4f), jf(def, "height", 1.4f), rgba(jv3(entry, "color", jv3(def, "color", v3(0.75f, 0.88f, 0.95f)))));
+        const KitSocket *ls = kit_piece_socket(KW.pieces[in->piece].cpu, "lean", 0);
+        if (ls) spawn_lean_spot(w, inst_point(in, ls->pos), in->yaw + 2.0f * atan2f(ls->rot[1], ls->rot[3]), false);
+    } else if (!strcmp(type, "lean")) {
+        e = spawn_lean_spot(w, pos, yaw, true);   // a railing: lean over it any time
     } else if (!strcmp(type, "light")) {
         const cJSON *on = param(entry, def, "on");
         e = spawn_light(w, pos, jv3(entry, "color", jv3(def, "color", v3(1.0f, 0.92f, 0.8f))), jf(entry, "radius", jf(def, "radius", 6)), jf(entry, "intensity", jf(def, "intensity", 6)),

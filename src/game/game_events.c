@@ -103,6 +103,7 @@ void game_handle_event(const GameEvent *ev) {
         G->damage_flash = fminf(1.0f, G->damage_flash + ev->value / 40.0f);
         audio_play_2d("hurt", 0.7f, SND_SFX);
         wheels_on_hurt();   // ends a door peek, stops auto-use of interruptible items
+        lean_on_hurt();     // and a lean out of a window
         break;
     }
     case EV_IMPACT: {

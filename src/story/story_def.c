@@ -105,7 +105,7 @@ const char *story_cond_name(StoryCondType t) { return t < SC_COUNT ? COND_NAMES[
 static const char *const ACT_NAMES[SA_COUNT] = {
     "wait", "objective", "flag", "enable", "disable", "journal", "checkpoint", "end_chapter", "time",
     "spawn", "despawn", "audio", "subtitle", "weather", "unlock", "lock", "give", "take", "marker",
-    "camhint", "fade", "power", "light", "door", "sequence", "prompt", "phone",
+    "camhint", "fade", "power", "light", "door", "sequence", "prompt", "phone", "teleport", "title",
 };
 const char *story_act_name(StoryActType t) { return t < SA_COUNT ? ACT_NAMES[t] : "?"; }
 
@@ -314,6 +314,11 @@ static void parse_action(Parse *p, StoryAction *a, const cJSON *j, const char *w
     }
     case SA_SUBTITLE: case SA_PHONE:
         dg_strcpy(a->arg, sizeof(a->arg), s);
+        break;
+    case SA_TELEPORT: dg_strcpy(a->name, sizeof(a->name), s); break;
+    case SA_TITLE:
+        dg_strcpy(a->arg, sizeof(a->arg), s);
+        a->num[0] = (float)jnum(j, "time", 4.0);
         break;
     case SA_WEATHER:
         dg_strcpy(a->arg, sizeof(a->arg), s);
@@ -574,6 +579,7 @@ bool story_def_parse(StoryDef *d, const char *json, char *err, int err_size) {
         b->from = jclock(&p, cJSON_GetObjectItemCaseSensitive(e, "from"), "timeline");
         b->to = jclock(&p, cJSON_GetObjectItemCaseSensitive(e, "to"), "timeline");
         b->expected = (float)jnum(e, "expected", 180);
+        b->day = (i16)jnum(e, "day", d->beat_n > 1 ? d->beat[d->beat_n - 2].day : 1);
     }
     const cJSON *roles = cJSON_GetObjectItemCaseSensitive(root, "roles");
     cJSON_ArrayForEach(e, roles) {
@@ -589,6 +595,8 @@ bool story_def_parse(StoryDef *d, const char *json, char *err, int err_size) {
             r->replaces[r->replace_n++] = (i16)need_objective(&p, cJSON_IsString(rep) ? rep->valuestring : "", "role replaces");
         }
     }
+    d->players = (int)jnum(root, "players", 4);
+    if (d->players < 1 || d->players > STORY_MAX_ROLE) perr(&p, "players must be 1..%d", STORY_MAX_ROLE);
     const cJSON *start = cJSON_GetObjectItemCaseSensitive(root, "start");
     dg_strcpy(d->start_checkpoint, sizeof(d->start_checkpoint), jstr(start, "checkpoint", "start"));
     dg_strcpy(d->start_weather, sizeof(d->start_weather), jstr(start, "weather", "clear"));
@@ -697,9 +705,13 @@ int story_def_validate(const StoryDef *d, char *out, int out_size) {
     for (int b = 0; b < d->beat_n; b++) {
         const StoryBeat *bt = &d->beat[b];
         if (bt->to < bt->from) lint(&l, "timeline beat %s: 'to' before 'from'", d->obj[bt->objective].id);
-        if (b > 0 && bt->from < d->beat[b - 1].from) lint(&l, "timeline beat %s: starts before the previous beat", d->obj[bt->objective].id);
+        if (b > 0 && bt->day * 1440.0f + bt->from < d->beat[b - 1].day * 1440.0f + d->beat[b - 1].from)
+            lint(&l, "timeline beat %s: starts before the previous beat (day %d)", d->obj[bt->objective].id, bt->day);
+        if (b > 0 && bt->day < d->beat[b - 1].day) lint(&l, "timeline beat %s: day goes back", d->obj[bt->objective].id);
         if (bt->expected <= 0) lint(&l, "timeline beat %s: expected must be > 0", d->obj[bt->objective].id);
     }
+    for (int r = 0; r < d->role_n; r++)
+        if (d->role[r].slot >= d->players) lint(&l, "role %s: slot %d, but the chapter is for %d player(s)", d->role[r].id, d->role[r].slot, d->players);
     if (d->checkpoint_n && story_find_checkpoint(d, d->start_checkpoint) == STORY_NONE)
         lint(&l, "start: unknown checkpoint '%s'", d->start_checkpoint);
     for (int t = 0; t < d->trig_n; t++) {

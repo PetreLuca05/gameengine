@@ -750,6 +750,7 @@ void game_frame(float dt) {
     bool wheel_look = wheels_frame(dt, ui_blocking);
     G->frame_look = ui_blocking || peek_look || wheel_look ? v2(0, 0) : f.look_delta;
     camera_apply_look(&G->view, G->frame_look);
+    lean_frame(dt, ui_blocking);   // leaning out of a window: ends it, keeps the view outside (game_lean.c)
     vehicles_view_frame(&G->view);
     {
         // Hanging from a ledge: the view turns within pl_hang_yaw_limit of the wall (movement clamps the same).
@@ -761,6 +762,8 @@ void game_frame(float dt) {
     G->use_pressed_frame = !ui_blocking && input_peek_press(ACT_USE);
     // The interaction may finish inside this frame's tick (pickups vanish): remember its target
     // for the hand reach.
+    // An open window's lean spot: the lean is this machine's camera (the host's use changes nothing).
+    if (G->use_pressed_frame && ent_is_lean_spot(G->world, G->focus) && lean_spot_open(G->world, G->focus)) lean_start(G->focus);
     if (G->use_pressed_frame) {
         G->use_focus = G->focus;
         G->use_focus_hands = -1;
@@ -930,6 +933,7 @@ void game_disconnect_to_local(const char *reason) {
 int game_sv_player_join(int peer, const char *name) {
     World *w = G->world;
     if (!w || G->mode != GM_HOST) return -1;
+    if (story_solo()) { log_info("game: %s refused: a single-player story chapter is running", name); return -1; }
     bool join_dead = spectate_join_dead(w);   // sv_join_dead: before the joiner counts as alive
     for (int s = 0; s < MAX_PLAYERS; s++) {
         if (w->players[s].active) continue;

@@ -49,7 +49,8 @@ static void door_focus(World *w, EntityId self, int player, char *prompt, int si
         snprintf(prompt, (size_t)size, "Locked - requires %s", key->name);
         return;
     }
-    snprintf(prompt, (size_t)size, (w->flags[i] & EF_OPEN) ? "Close Door" : "Open Door");
+    if ((w->vis[i].color >> 24) == DOOR_ALPHA_WINDOW) snprintf(prompt, (size_t)size, (w->flags[i] & EF_OPEN) ? "Close Window" : "Open Window");
+    else snprintf(prompt, (size_t)size, (w->flags[i] & EF_OPEN) ? "Close Door" : "Open Door");
 }
 
 static void door_use(World *w, EntityId self, int player) {
@@ -157,6 +158,78 @@ EntityId spawn_door(World *w, vec3 base, float yaw, float width, float height, b
     d->speed_mult = 1.0f;
     if (locked) w->flags[i] |= EF_LOCKED;
     ent_set_pos(w, e, center, rot, true);
+    entity_setup(w, e);
+    return e;
+}
+
+// A casement sash: hinged on its left edge like a door, swings away from the user (out of the room),
+// faster and less far; the handle sits mid-height on the free edge.
+EntityId spawn_window(World *w, vec3 base, float yaw, float width, float height, u32 color) {
+    EntityId e = spawn_door(w, base, yaw, width, height, false, 0, (color & 0x00FFFFFFu) | (DOOR_ALPHA_WINDOW << 24));
+    int i = (int)ENT_INDEX(e);
+    Door *d = &w->door[i];
+    d->open_angle = 80.0f * DG_DEG2RAD;
+    d->speed = 2.4f;
+    d->knob_local = v3(width * 0.5f - 0.07f, 0, 0.04f);
+    w->vis[i].half.z = 0.02f;
+    w->inter[i].focus_offset = v3(width * 0.5f - 0.07f, 0, 0);
+    return e;
+}
+
+bool door_is_window(const World *w, EntityId e) {
+    return ent_valid(w, e) && w->type[ENT_INDEX(e)] == ET_DOOR && (w->vis[ENT_INDEX(e)].color >> 24) == DOOR_ALPHA_WINDOW;
+}
+
+static bool is_railing(const World *w, EntityId e) { return !strcmp(w->names[ENT_INDEX(e)], "lean_over"); }
+
+bool ent_is_lean_spot(const World *w, EntityId e) {
+    return ent_valid(w, e) && w->type[ENT_INDEX(e)] == ET_MARKER && (!strcmp(w->names[ENT_INDEX(e)], "lean") || is_railing(w, e));
+}
+
+EntityId lean_spot_window(const World *w, EntityId spot) {
+    if (!ent_is_lean_spot(w, spot) || is_railing(w, spot)) return ENT_NONE;
+    vec3 p = w->xf[ENT_INDEX(spot)].pos;
+    EntityId best = ENT_NONE;
+    float bd = 1.3f;   // the sash swings out of the opening: its centre moves ~1 m
+    ENT_FOREACH(w, i) {
+        if (w->type[i] != ET_DOOR || (w->vis[i].color >> 24) != DOOR_ALPHA_WINDOW) continue;
+        float d = v3_dist(w->door[i].closed_pos.x != 0 || w->door[i].closed_pos.z != 0 ? w->door[i].closed_pos : w->xf[i].pos, p);
+        if (d < bd) { bd = d; best = ENT_MAKE(i, w->gen[i]); }
+    }
+    return best;
+}
+
+bool lean_spot_open(const World *w, EntityId spot) {
+    if (ent_is_lean_spot(w, spot) && is_railing(w, spot)) return true;
+    EntityId win = lean_spot_window(w, spot);
+    return win && (w->flags[ENT_INDEX(win)] & EF_OPEN) && w->anim[ENT_INDEX(win)] > 0.6f;
+}
+
+static void lean_focus(World *w, EntityId self, int player, char *prompt, int size) {
+    DG_UNUSED(player);
+    if (is_railing(w, self)) { snprintf(prompt, (size_t)size, "Lean Over"); return; }
+    EntityId win = lean_spot_window(w, self);
+    if (!win) { snprintf(prompt, (size_t)size, "Window"); return; }
+    snprintf(prompt, (size_t)size, lean_spot_open(w, self) ? "Lean Out" : (w->flags[ENT_INDEX(win)] & EF_OPEN) ? "Close Window" : "Open Window");
+}
+
+// Host: a closed window opens; an open one is leaned out of (the client's camera, game_lean.c), which
+// changes nothing here.
+static void lean_use(World *w, EntityId self, int player) {
+    EntityId win = lean_spot_window(w, self);
+    if (win && !lean_spot_open(w, self)) door_use(w, win, player);
+}
+
+static const InteractDef k_lean_def = { "lean", lean_focus, NULL, lean_use, NULL, NULL, 0.0f, HANDS_RIGHT };
+
+EntityId spawn_lean_spot(World *w, vec3 pos, float yaw, bool railing) {
+    EntityId e = ent_spawn(w, ET_MARKER);
+    int i = (int)ENT_INDEX(e);
+    dg_strcpy(w->names[i], sizeof(w->names[0]), railing ? "lean_over" : "lean");   // entity_setup gives it the definition (replicas too)
+    w->vis[i].shape = VIS_NONE;
+    w->vis[i].half = v3(0.12f, 0.12f, 0.02f);
+    w->comps[i] |= C_VISUAL;
+    ent_set_pos(w, e, pos, quat_yaw(yaw), true);
     entity_setup(w, e);
     return e;
 }
@@ -589,7 +662,15 @@ void entity_setup(World *w, EntityId e) {
         }
         w->inter[i].enabled = !(w->flags[i] & EF_HIDDEN);
         if (t == ET_DOOR) w->inter[i].focus_offset = v3(w->vis[i].half.x - 0.09f, -w->vis[i].half.y + 1.0f, 0);
+        if (t == ET_DOOR && (w->vis[i].color >> 24) == DOOR_ALPHA_WINDOW) w->inter[i].focus_offset = v3(w->vis[i].half.x - 0.07f, 0, 0);
         if (t == ET_LEVER) w->inter[i].focus_offset = v3(0, 0.6f, 0);
+    }
+    if (t == ET_MARKER && (!strcmp(w->names[i], "lean") || !strcmp(w->names[i], "lean_over"))) {
+        w->comps[i] |= C_INTERACT;
+        w->inter[i].def = &k_lean_def;
+        w->inter[i].range = 1.7f;
+        w->inter[i].enabled = true;
+        w->inter[i].focus_offset = v3(0, 0, 0);
     }
     if (t == ET_CORPSE || t == ET_FABRICATOR) revive_entity_setup(w, e);   // control column body, ranges, focus points
     bool replica = !w->authority;

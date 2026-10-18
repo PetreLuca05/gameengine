@@ -51,6 +51,8 @@ typedef struct StoryInteract {
     char subtitle[STORY_ARG];
     char read[STORY_ID];        // collectible / item id reported as read
     char peek[STORY_ID];        // door to peek through
+    char when[STORY_ID];        // usable only while this objective is active ("" = always)
+    char blocked[STORY_ARG];    // the prompt otherwise ("" = no prompt)
     char move_ent[STORY_ID], move_to[STORY_ID];   // push a prop to a point (barricade)
     InteractDef def;            // per object (hold time)
 } StoryInteract;
@@ -110,6 +112,7 @@ static struct {
 } SR;
 
 bool story_active(void) { return SR.active; }
+bool story_solo(void) { return SR.active && SR.def && SR.def->players <= 1; }
 const StoryUi *story_ui(void) { return &SR.ui; }
 
 // ------------------------------------------------------------------ files
@@ -187,6 +190,7 @@ static vec3 jvec(const cJSON *o, const char *k) {
 }
 
 static void story_focus(World *w, EntityId self, int player, char *prompt, int size);
+static bool story_can_use(World *w, EntityId self, int player);
 static void story_use(World *w, EntityId self, int player);
 
 static void parse_level_block(const char *map) {
@@ -229,11 +233,14 @@ static void parse_level_block(const char *map) {
         dg_strcpy(s->read, sizeof(s->read), jstr(e, "read"));
         if (s->kind == SIK_READ && !s->read[0]) dg_strcpy(s->read, sizeof(s->read), s->name);
         dg_strcpy(s->peek, sizeof(s->peek), jstr(e, "peek"));
+        dg_strcpy(s->when, sizeof(s->when), jstr(e, "when"));
+        dg_strcpy(s->blocked, sizeof(s->blocked), jstr(e, "blocked"));
         const cJSON *mv = cJSON_GetObjectItemCaseSensitive(e, "move");
         dg_strcpy(s->move_ent, sizeof(s->move_ent), jstr(mv, "entity"));
         dg_strcpy(s->move_to, sizeof(s->move_to), jstr(mv, "to"));
         s->def.name = s->kind == SIK_READ ? "story_read" : s->kind == SIK_HOLD ? "story_hold" : s->kind == SIK_PICKUP ? "story_pickup" : "story_use";
         s->def.on_focus = story_focus;
+        s->def.can_use = story_can_use;
         s->def.on_use = story_use;
         s->def.hold_time = s->kind == SIK_HOLD ? jnum(e, "hold", 2.0f) : 0.0f;
         s->def.hands = s->kind == SIK_HOLD ? HANDS_BOTH : HANDS_RIGHT;
@@ -267,10 +274,26 @@ static void bind_interactables(World *w) {
     }
 }
 
+// "when": the objective that has to be active (host: the story state; clients: the replicated mirror).
+static bool inter_open(const StoryInteract *s) {
+    if (!s || !s->when[0]) return true;
+    const StoryDef *d = SR.def ? SR.def : SR.ui.def;
+    const StoryState *st = SR.st ? SR.st : SR.ui_mirror;
+    if (!d || !st) return false;
+    int o = story_find_objective(d, s->when);
+    return o != STORY_NONE && st->obj[o].state == SOS_ACTIVE;
+}
+
 static void story_focus(World *w, EntityId self, int player, char *prompt, int size) {
     DG_UNUSED(player);
     StoryInteract *s = find_inter(w->names[ENT_INDEX(self)]);
+    if (!inter_open(s)) { snprintf(prompt, (size_t)size, "%s", s->blocked); return; }
     snprintf(prompt, (size_t)size, "%s", s && s->prompt[0] ? s->prompt : "Use");
+}
+
+static bool story_can_use(World *w, EntityId self, int player) {
+    DG_UNUSED(player);
+    return inter_open(find_inter(w->names[ENT_INDEX(self)]));
 }
 
 // ------------------------------------------------------------------ events out
@@ -507,6 +530,20 @@ static void apply_action(World *w, const StoryAction *a) {
     case SA_DOOR: door_set(w, a->name, a->ival); break;
     case SA_SEQUENCE: vseq_start(w, a->name); break;
     case SA_PHONE: send(w, -1, SEVT_PHONE, a->arg, 0, 0, 0, pos); break;
+    case SA_TITLE: send(w, -1, SEVT_TITLE, a->arg, 0, 0, a->num[0], pos); break;
+    case SA_TELEPORT: {
+        // Waking up somewhere else (a night passed): every player, a little rested.
+        const StoryPoint *pt = find_point(a->name);
+        if (!pt) { log_warn("story: teleport '%s': no story point of that name", a->name); break; }
+        for (int s = 0; s < MAX_PLAYERS; s++) {
+            Player *p = &w->players[s];
+            if (!p->active || (w->flags[ENT_INDEX(p->ent)] & EF_DEAD)) continue;
+            float hp = w->health[ENT_INDEX(p->ent)].hp;
+            game_respawn_player_at(w, s, pt->pos, pt->yaw, fminf(100.0f, hp + 25.0f));
+            if (p->local && G) G->view.yaw = pt->yaw, G->view.pitch = 0;
+        }
+        break;
+    }
     default: break;
     }
 }
@@ -908,13 +945,15 @@ bool story_start(const char *chapter, const char *slot) {
     }
     char map[STORY_ID];
     dg_strcpy(map, sizeof(map), d->map);
+    bool solo = d->players <= 1;
     free(d);
     if (tmp_ok) story_script_free(&tmp);
     story_stop();
     dg_strcpy(SR.pending, sizeof(SR.pending), chapter);
     SR.pending_save = save;
     if (mainmenu_active()) mainmenu_session_started();
-    if (!game_host(map)) { story_stop(); return false; }
+    // A single-player chapter is not reachable on the LAN (and game_sv_player_join refuses joins).
+    if (!game_host_ex(map, solo ? GH_NO_AUTOHOST : 0)) { story_stop(); return false; }
     return SR.active;
 }
 
@@ -1203,6 +1242,11 @@ void story_handle_event(const GameEvent *ev) {
     case SEVT_END:
         SR.ui.ended = true;
         SR.ui.end_time = SR.ui.time;
+        break;
+    case SEVT_TITLE:
+        dg_strcpy(SR.ui.title, sizeof(SR.ui.title), ev->text);
+        SR.ui.title_time = SR.ui.time;
+        SR.ui.title_len = ev->value > 0 ? ev->value : 4.0f;
         break;
     case SEVT_CHAPTER: break;
     }

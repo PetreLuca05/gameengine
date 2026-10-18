@@ -197,19 +197,25 @@ wall_run(U, 9.0, 12.0, 8.4, "z", openings=[(10.1, 0.9, "door_frame_int_090", {"n
 wall_run(U, 8.4, 12.0, 9.0, "x")
 
 # Full-height glass: north (z = 0, front faces north) and east (x = 12, front faces east), 1.5 m modules.
+# Casements (openable, lean out) where no balcony is in front: the master bedroom north, the teen and
+# child rooms east (docs/CHAPTER_01.md "Windows").
+NORTH_CASEMENTS = {1: "win_master"}
+EAST_CASEMENTS = {5: "win_teen", 7: "win_child"}
 for k in range(8):
     x = k * 1.5
     if k:
         inst(U, "glass_mullion", x - 0.03, 0, 0.075)
     if k == 7:
         inst(U, "glass_slider_frame_150", x, 0, 0.075, name="balcony_door")
+    elif k in NORTH_CASEMENTS:
+        inst(U, "glass_casement_150", x, 0, 0.015, name=NORTH_CASEMENTS[k])
     else:
         inst(U, "glass_panel_150", x, 0, 0.015)
 for k in range(8):
     z = k * 1.5
     if k:
         inst(U, "glass_mullion", 12.0 - 0.075, 0, z - 0.03, -90)
-    inst(U, "glass_panel_150", 12.0 - 0.015, 0, z, -90)
+    inst(U, "glass_casement_150" if k in EAST_CASEMENTS else "glass_panel_150", 12.0 - 0.015, 0, z, -90, **({"name": EAST_CASEMENTS[k]} if k in EAST_CASEMENTS else {}))
 inst(U, "glass_mullion_corner", 11.925, 0, 0.075)
 inst(U, "glass_mullion", -0.03, 0, 0.075)
 

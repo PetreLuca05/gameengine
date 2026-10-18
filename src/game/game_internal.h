@@ -41,6 +41,17 @@ bool peek_camera(World *w, RenderCamera *cam);
 void peek_post(struct PostSettings *s);
 void peek_draw(void);
 
+// game_lean.c: leaning out of an open window (client camera)
+void lean_register(void);
+bool lean_active(void);
+float lean_amount(void);
+bool lean_start(EntityId spot);
+void lean_stop(void);
+void lean_on_hurt(void);
+void lean_frame(float dt, bool ui_blocking);
+bool lean_camera(World *w, RenderCamera *cam);
+void lean_draw(void);
+
 // game_wheels.c: radial wheels (healing, throwables, ping, door), the HUD timed ring
 void wheels_register(void);
 bool wheels_frame(float dt, bool ui_blocking);  // before the look: true = the look is the wheel's

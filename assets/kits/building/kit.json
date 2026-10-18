@@ -261,6 +261,21 @@
    "category": "glass",
    "snap": "mullion"
   },
+  "glass_casement_150": {
+   "category": "glass",
+   "snap": "mullion",
+   "entity": {
+    "type": "window",
+    "socket": "door",
+    "width": 1.42,
+    "height": 1.4,
+    "color": [
+     0.75,
+     0.88,
+     0.95
+    ]
+   }
+  },
   "glass_mullion": {
    "category": "glass",
    "snap": "mullion"
@@ -307,11 +322,19 @@
   },
   "balustrade_glass_150": {
    "category": "balcony",
-   "snap": "grid"
+   "snap": "grid",
+   "entity": {
+    "type": "lean",
+    "socket": "lean"
+   }
   },
   "balustrade_glass_120": {
    "category": "balcony",
-   "snap": "grid"
+   "snap": "grid",
+   "entity": {
+    "type": "lean",
+    "socket": "lean"
+   }
   },
   "balustrade_post": {
    "category": "balcony",

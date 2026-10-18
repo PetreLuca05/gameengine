@@ -117,11 +117,12 @@ bool kit_piece_load(KitPiece *p, const char *path, const char *id, char *err, in
             }
             continue;
         }
-        bool ucx = !strncmp(name, "UCX_", 4), ubx = !strncmp(name, "UBX_", 4);
-        if (ucx || ubx) {
+        bool ucx = !strncmp(name, "UCX_", 4), ubx = !strncmp(name, "UBX_", 4), ucl = !strncmp(name, "UCL_", 4);
+        if (ucx || ubx || ucl) {
             if (p->hull_n >= KIT_MAX_HULLS) continue;
             KitHull *h = &p->hulls[p->hull_n++];
-            h->box = ubx;
+            h->box = ubx || ucl;
+            h->clip = ucl;
             KitSlotMesh tmp;
             memset(&tmp, 0, sizeof(tmp));
             bool a = true, b = true;
@@ -257,7 +258,7 @@ int kit_piece_validate(const KitPiece *p, const KitRules *r, const char *known_s
     Report rep = { out, out_size, 0, 0, p->id };
     if (out_size > 0) out[0] = 0;
     if (!valid_id(p->id)) problem(&rep, "name '%s' - piece ids are lower case [a-z0-9_] (the file stem)", p->id);
-    if (p->unnamed_nodes) problem(&rep, "%d mesh object(s) with an unknown name ('%s') - use %s, %s_LOD1..3, UCX_%s_NN or UBX_%s_NN", p->unnamed_nodes, p->first_unnamed, p->id, p->id, p->id, p->id);
+    if (p->unnamed_nodes) problem(&rep, "%d mesh object(s) with an unknown name ('%s') - use %s, %s_LOD1..3, UCX_%s_NN, UBX_%s_NN or UCL_%s_NN", p->unnamed_nodes, p->first_unnamed, p->id, p->id, p->id, p->id, p->id);
     if (!p->lod_n || !p->lods[0].slot_n) {
         problem(&rep, "no render mesh named '%s' - name the LOD0 object exactly like the file", p->id);
         return rep.n;

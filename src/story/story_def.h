@@ -88,6 +88,8 @@ typedef enum StoryActType {
     SA_SEQUENCE,                // name = vista / vfx sequence
     SA_PROMPT,                  // ref = prompt (force show)
     SA_PHONE,                   // arg = message / photo / voicemail id (phone content unlock)
+    SA_TELEPORT,                // name = story point: every player stands there (waking up after a night)
+    SA_TITLE,                   // arg = script id (title + one line), num[0] = seconds: the centred card ("Day 3")
     SA_COUNT
 } StoryActType;
 
@@ -139,6 +141,7 @@ typedef struct StoryBeat {
     i16 objective;              // the beat is current while this objective is active (or the last done)
     float from, to;             // minutes of day
     float expected;             // seconds of play the window is spread over
+    i16 day;                    // "day": 1.. (multi-day chapters; the clock restarts each morning), else the previous beat's
 } StoryBeat;
 
 typedef struct StoryPromptDef {
@@ -198,6 +201,7 @@ typedef struct StoryDef {
     int collect_n;
     StoryRole role[STORY_MAX_ROLE];
     int role_n;
+    int players;                // "players": 1 = single player (the host refuses joins), up to 4
 } StoryDef;
 
 // Parses the chapter JSON into *d (zeroed first). Returns false with a message on a syntax or
