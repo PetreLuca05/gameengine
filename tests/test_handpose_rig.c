@@ -371,6 +371,22 @@ static void test_xform(void) {
     hpx_axis(&x, 0, false);
     CHECK(x.axis == -1, "third press: free");
     hpx_end(&x);
+    // Precision (Shift held): the motion while it is on counts a tenth, no jump when it ends;
+    // with Ctrl the snap is 1 mm.
+    hpx_begin(&x, HPX_GRAB, v2(400, 300), 2, ids, st, 0, basis, HPX_GLOBAL, HPX_PIVOT_MEDIAN);
+    hpx_axis(&x, 0, false);
+    hpx_update(&x, v2(500, 300), &view, false);
+    float full = x.delta.x;
+    x.precise = true;
+    hpx_update(&x, v2(600, 300), &view, false);
+    CHECK(full > 0.1f && fabsf(x.delta.x - full * 1.1f) < 1e-4f, "precision: a tenth (%.5f, %.5f)", x.delta.x, full);
+    x.precise = false;
+    hpx_update(&x, v2(600, 300), &view, false);
+    CHECK(fabsf(x.delta.x - full * 1.1f) < 1e-4f, "precision released: no jump (%.5f)", x.delta.x);
+    x.precise = true;
+    hpx_update(&x, v2(613, 300), &view, true);
+    CHECK(fabsf(x.delta.x / 0.001f - roundf(x.delta.x / 0.001f)) < 1e-3f && fabsf(x.delta.x / 0.005f - roundf(x.delta.x / 0.005f)) > 1e-3f, "Ctrl+Shift snaps 1 mm (%.5f)", x.delta.x);
+    hpx_end(&x);
     // Rotate z 90 typed about the median pivot vs individual origins.
     hpx_begin(&x, HPX_ROTATE, v2(400, 300), 2, ids, st, 0, basis, HPX_GLOBAL, HPX_PIVOT_MEDIAN);
     hpx_axis(&x, 2, false);

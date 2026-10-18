@@ -186,9 +186,10 @@ static u32 target_hash(const HandPoseDB *db, HpTarget t) {
     return 0;
 }
 
-static bool snap(HpUndoSnap *s, const HandPoseDB *db, bool is_case, u32 hash) {
+static bool snap(HpUndoSnap *s, const HpSocketIO *io, const HandPoseDB *db, bool is_case, u32 hash) {
     s->is_case = is_case;
     s->hash = hash;
+    s->sock.valid = false;
     if (is_case) {
         int i = handpose_case_find_hash(db, hash);
         if (i < 0) return false;
@@ -197,17 +198,23 @@ static bool snap(HpUndoSnap *s, const HandPoseDB *db, bool is_case, u32 hash) {
         int i = handpose_find_hash(db, hash);
         if (i < 0) return false;
         s->e = db->e[i];
+        if (io && io->get && io->get(io->ctx, hash, &s->sock)) s->sock.valid = true;
     }
     return true;
 }
 
+void hp_undo_snap(const HpUndo *u, const HandPoseDB *db, HpTarget t, HpUndoSnap *out) {
+    memset(out, 0, sizeof(*out));
+    if (db && hp_target_valid(db, t)) snap(out, u ? &u->io : NULL, db, t.entry < 0, target_hash(db, t));
+}
+
 // Push onto a bounded stack (the oldest step drops off).
-static void stack_push(HpUndoSnap *v, int *count, const HandPoseDB *db, bool is_case, u32 hash) {
+static void stack_push(HpUndo *u, HpUndoSnap *v, int *count, const HandPoseDB *db, bool is_case, u32 hash) {
     if (*count >= HP_UNDO_MAX) {
         memmove(v, v + 1, sizeof(HpUndoSnap) * (HP_UNDO_MAX - 1));
         *count = HP_UNDO_MAX - 1;
     }
-    if (snap(&v[*count], db, is_case, hash)) (*count)++;
+    if (snap(&v[*count], &u->io, db, is_case, hash)) (*count)++;
 }
 
 static bool ensure(HpUndo *u) {
@@ -221,7 +228,7 @@ void hp_undo_push(HpUndo *u, const HandPoseDB *db, HpTarget t, u32 key) {
     bool is_case = t.entry < 0;
     u32 h = target_hash(db, t);
     if (key && key == u->last_key && h == u->last_hash) return;   // same drag
-    stack_push(u->undo, &u->undo_count, db, is_case, h);
+    stack_push(u, u->undo, &u->undo_count, db, is_case, h);
     u->redo_count = 0;
     u->last_key = key;
     u->last_hash = h;
@@ -235,7 +242,7 @@ static HpTarget swap_step(HpUndo *u, HandPoseDB *db, HpUndoSnap *from, int *from
         if (s->is_case) {
             int i = handpose_case_find_hash(db, s->hash);
             if (i < 0) continue;   // the case is gone (reload): skip the step
-            stack_push(to, to_count, db, true, s->hash);
+            stack_push(u, to, to_count, db, true, s->hash);
             bool on_disk = db->c[i].on_disk, seen = db->c[i].seen, orphan = db->c[i].orphan;
             i16 parent = db->c[i].parent;
             db->c[i] = s->c;
@@ -247,12 +254,13 @@ static HpTarget swap_step(HpUndo *u, HandPoseDB *db, HpUndoSnap *from, int *from
         }
         int i = handpose_find_hash(db, s->hash);
         if (i < 0) continue;
-        stack_push(to, to_count, db, false, s->hash);
+        stack_push(u, to, to_count, db, false, s->hash);
         HandPoseEntry *e = &db->e[i];
         memcpy(e->grip, s->e.grip, sizeof(e->grip));
         e->has_root = s->e.has_root;
         e->root = s->e.root;
         e->reviewed = s->e.reviewed;
+        if (s->sock.valid && u->io.set) u->io.set(u->io.ctx, s->hash, &s->sock);
         return hp_target_grip(i);
     }
     return none;

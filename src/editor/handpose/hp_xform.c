@@ -26,7 +26,7 @@ void hpx_begin(HpXform *x, int mode, vec2 mouse, int n, const int *ids, const Xf
     x->axis = -1;
     x->orient = DG_CLAMP(orient, 0, HPX_ORIENT_COUNT - 1);
     x->pivot_mode = DG_CLAMP(pivot_mode, 0, HPX_PIVOT_COUNT - 1);
-    x->mouse0 = mouse;
+    x->mouse0 = x->mouse_last = mouse;
     x->factor = 1.0f;
     for (int i = 0; i < HPX_ORIENT_COUNT; i++) x->basis[i] = basis ? quat_norm(basis[i]) : quat_identity();
     x->basis[HPX_GLOBAL] = quat_identity();
@@ -99,6 +99,15 @@ static vec2 jmul(const vec2 J[3], vec3 w) { return v2(J[0].x * w.x + J[1].x * w.
 
 void hpx_update(HpXform *x, vec2 mouse, const HpxView *v, bool snap) {
     if (!hpx_active(x) || !v || !v->project) return;
+    // Precision: the motion made while it is on counts a tenth; the offset keeps the transform where
+    // it was when it is released (no jump).
+    if (x->precise) {
+        x->mouse_off.x -= (mouse.x - x->mouse_last.x) * 0.9f;
+        x->mouse_off.y -= (mouse.y - x->mouse_last.y) * 0.9f;
+    }
+    x->mouse_last = mouse;
+    mouse = v2(mouse.x + x->mouse_off.x, mouse.y + x->mouse_off.y);
+    float fine = x->precise ? 0.2f : 1.0f;
     vec2 J[3], ps;
     if (!jacobian(v, x->pivot, J, &ps)) return;
     float tv_val;
@@ -114,7 +123,7 @@ void hpx_update(HpXform *x, vec2 mouse, const HpxView *v, bool snap) {
             vec2 ja = jmul(J, axis);
             float l2 = ja.x * ja.x + ja.y * ja.y;
             float t = l2 > 1e-9f ? (d.x * ja.x + d.y * ja.y) / l2 : 0.0f;
-            if (snap) t = snapf(t, SNAP_T);
+            if (snap) t = snapf(t, SNAP_T * fine);
             w = v3_scale(axis, t);
         } else if (x->axis >= 0) {
             vec3 b1 = hpx_axis_world(x, (x->axis + 1) % 3), b2 = hpx_axis_world(x, (x->axis + 2) % 3);
@@ -122,7 +131,7 @@ void hpx_update(HpXform *x, vec2 mouse, const HpxView *v, bool snap) {
             float det = m1.x * m2.y - m2.x * m1.y;
             if (fabsf(det) > 1e-9f) {
                 float c1 = (d.x * m2.y - m2.x * d.y) / det, c2 = (m1.x * d.y - d.x * m1.y) / det;
-                if (snap) { c1 = snapf(c1, SNAP_T); c2 = snapf(c2, SNAP_T); }
+                if (snap) { c1 = snapf(c1, SNAP_T * fine); c2 = snapf(c2, SNAP_T * fine); }
                 w = v3_add(v3_scale(b1, c1), v3_scale(b2, c2));
             }
         } else {
@@ -134,7 +143,7 @@ void hpx_update(HpXform *x, vec2 mouse, const HpxView *v, bool snap) {
             if (fabsf(det) > 1e-12f) {
                 float l0 = (c * d.x - b * d.y) / det, l1 = (a * d.y - b * d.x) / det;
                 w = v3(J[0].x * l0 + J[0].y * l1, J[1].x * l0 + J[1].y * l1, J[2].x * l0 + J[2].y * l1);
-                if (snap) w = v3(snapf(w.x, SNAP_T), snapf(w.y, SNAP_T), snapf(w.z, SNAP_T));
+                if (snap) w = v3(snapf(w.x, SNAP_T * fine), snapf(w.y, SNAP_T * fine), snapf(w.z, SNAP_T * fine));
             }
         }
         x->delta = w;
@@ -155,7 +164,7 @@ void hpx_update(HpXform *x, vec2 mouse, const HpxView *v, bool snap) {
             ang *= s < 0 ? -1.0f : 1.0f;
         }
         if (has_num) ang = tv_val;
-        else if (snap) ang = snapf(ang, SNAP_R);
+        else if (snap) ang = snapf(ang, SNAP_R * fine);
         x->angle_deg = ang;
         quat q = quat_axis_angle(ax, ang * DG_DEG2RAD);
         for (int i = 0; i < x->count; i++) {
@@ -170,7 +179,7 @@ void hpx_update(HpXform *x, vec2 mouse, const HpxView *v, bool snap) {
         float l0 = sqrtf(v0.x * v0.x + v0.y * v0.y), l1 = sqrtf(v1.x * v1.x + v1.y * v1.y);
         float f = l0 > 1.0f ? l1 / l0 : 1.0f;
         if (has_num) f = tv_val;
-        else if (snap) f = snapf(f, SNAP_S);
+        else if (snap) f = snapf(f, SNAP_S * fine);
         x->factor = f;
         for (int i = 0; i < x->count; i++) {
             Xform o = x->start[i];
@@ -198,5 +207,5 @@ void hpx_status(const HpXform *x, char *out, int size) {
     else if (x->mode == HPX_ROTATE) snprintf(val, sizeof(val), "%.2f deg", x->angle_deg);
     else if (x->mode == HPX_SCALE) snprintf(val, sizeof(val), "x %.3f (uniform)", x->factor);
     else val[0] = 0;
-    snprintf(out, (size_t)size, "%s%s  %s%s%s", hpx_mode_name(x->mode), ax, val, x->num[0] ? "  typed: " : "", x->num);
+    snprintf(out, (size_t)size, "%s%s  %s%s%s%s", hpx_mode_name(x->mode), ax, val, x->num[0] ? "  typed: " : "", x->num, x->precise ? "  (precision)" : "");
 }

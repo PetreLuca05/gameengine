@@ -2,10 +2,13 @@
 // provenance (override / inherited), seeding an override keeps the resolved pose, reset to
 // inherited, joint limits on edits, presets, mirror, contacts, the canonical file only holds
 // overrides, case keys as targets, undo / redo (coalescing, bounds, redo cleared by a new edit, DB
-// reorder, cases).
+// reorder, cases, a grip's item sockets), the weapon muzzle socket (hp_muzzle.c: the weapon file
+// patch, number format, bore helpers, every shipped weapon file).
 #include "editor/handpose/hp_edit.h"
+#include "editor/handpose/hp_muzzle.h"
 #include "core/engine.h"
 #include "core/log.h"
+#include "core/platform.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -277,6 +280,177 @@ static void test_undo(void) {
     handpose_db_free(&db);
 }
 
+// A grip step carries its item sockets through the accessors (the editor's weapon muzzle): undo /
+// redo restore them in order with the grip edits; grips without sockets and stacks without
+// accessors behave as before.
+static vec3 g_mz;
+static u32 g_mz_grip;
+static bool io_get(void *ctx, u32 grip, HpItemSockets *out) {
+    (void)ctx;
+    if (grip != g_mz_grip) return false;
+    out->muzzle = g_mz;
+    return true;
+}
+static void io_set(void *ctx, u32 grip, const HpItemSockets *in) {
+    (void)ctx;
+    if (grip == g_mz_grip) g_mz = in->muzzle;
+}
+
+static void test_undo_sockets(void) {
+    HandPoseDB db;
+    build(&db);
+    HpUndo u;
+    memset(&u, 0, sizeof(u));
+    u.io = (HpSocketIO){ io_get, io_set, NULL };
+    int r = handpose_find(&db, "rifle"), p = handpose_find(&db, "pistol");
+    g_mz_grip = db.e[r].hash;
+    vec3 a = v3(0, 0.06f, -0.62f), b = v3(0, 0.05f, -0.53f);
+    g_mz = a;
+    float c0 = index_curl(&db, r);
+    hp_undo_push(&u, &db, hp_target_grip(r), 0);   // a muzzle step
+    g_mz = b;
+    set_curl(&db, &u, r, 40, 0);                   // then a hand edit
+    CHECK(hp_undo(&u, &db).entry == r && index_curl(&db, r) == c0 && v3_dist(g_mz, b) == 0, "undo the hand edit: the muzzle stays");
+    CHECK(hp_undo(&u, &db).entry == r && v3_dist(g_mz, a) == 0 && index_curl(&db, r) == c0, "undo the muzzle step");
+    CHECK(hp_redo(&u, &db).entry == r && v3_dist(g_mz, b) == 0 && index_curl(&db, r) == c0, "redo the muzzle step");
+    CHECK(hp_redo(&u, &db).entry == r && index_curl(&db, r) == 40 && v3_dist(g_mz, b) == 0, "redo the hand edit");
+    static HpUndoSnap snap;
+    hp_undo_snap(&u, &db, hp_target_grip(r), &snap);
+    CHECK(!snap.is_case && snap.hash == db.e[r].hash && snap.sock.valid && v3_dist(snap.sock.muzzle, b) == 0, "a snapshot holds the muzzle");
+    hp_undo_snap(&u, &db, hp_target_grip(p), &snap);
+    CHECK(!snap.sock.valid, "a grip without sockets");
+    // No accessors: the grip alone (the muzzle is left as it is).
+    hp_undo_free(&u);
+    CHECK(!u.io.get && !u.io.set, "free forgets the accessors");
+    hp_undo_push(&u, &db, hp_target_grip(r), 0);
+    g_mz = a;
+    hp_edit_set_joint(&db, hp_target_grip(r), 1, HF_INDEX, 0, (HandJoint){ 60, 0, 0 });
+    CHECK(hp_undo(&u, &db).entry == r && index_curl(&db, r) == 40 && v3_dist(g_mz, a) == 0, "no accessors: grip only");
+    hp_undo_free(&u);
+    handpose_db_free(&db);
+}
+
+// Lines of a and b that differ (both as text), the last differing line of b in *line.
+static int diff_lines(const char *a, const char *b, char *line, int size) {
+    int n = 0;
+    while (*a || *b) {
+        const char *ea = strchr(a, '\n'), *eb = strchr(b, '\n');
+        size_t la = ea ? (size_t)(ea - a) : strlen(a), lb = eb ? (size_t)(eb - b) : strlen(b);
+        if (la != lb || memcmp(a, b, la)) {
+            n++;
+            snprintf(line, (size_t)size, "%.*s", (int)lb, b);
+        }
+        a += la + (ea ? 1 : 0);
+        b += lb + (eb ? 1 : 0);
+    }
+    return n;
+}
+
+static void check_patch(const char *src, vec3 v, const char *want, const char *what) {
+    char *p = hp_muzzle_json_patch(src, v);
+    CHECK(p && !strcmp(p, want), "%s:\n%s\nwanted:\n%s", what, p ? p : "(null)", want);
+    vec3 back;
+    CHECK(p && hp_muzzle_json_read(p, &back) && v3_dist(back, hp_muzzle_round(v)) < 1e-7f, "%s: reads back", what);
+    free(p);
+}
+
+static void test_muzzle(void) {
+    char b[96];
+    hp_muzzle_format(v3(0, 0.06f, -0.62f), b, sizeof(b));
+    CHECK(!strcmp(b, "[0, 0.06, -0.62]"), "format %s", b);
+    hp_muzzle_format(v3(-0.00001f, 0.0612345f, -0.5f), b, sizeof(b));
+    CHECK(!strcmp(b, "[0, 0.0612, -0.5]"), "format: 0.1 mm, no -0 (%s)", b);
+    hp_muzzle_format(v3(0.01f, -1.25f, 0.00015f), b, sizeof(b));
+    CHECK(!strcmp(b, "[0.01, -1.25, 0.0002]"), "format %s", b);
+    vec3 r = hp_muzzle_round(v3(0.06004f, -0.00004f, -0.61996f));
+    CHECK(r.x == 0.06f && r.y == 0.0f && !signbit(r.y) && r.z == -0.62f, "round to what the file keeps");
+
+    // In place: only the value of hold.sockets.muzzle (not the top-level "muzzle", not a string
+    // holding braces / quotes) changes.
+    const char *src = "{\n"
+                      "  \"id\": \"rifle\",\n"
+                      "  \"muzzle\": [0, 0.06, -0.62],\n"
+                      "  \"hold\": {\n"
+                      "    \"style\": \"rifle\",\n"
+                      "    \"sockets\": {\n"
+                      "      \"grip_r\": { \"pos\": [0, 0, 0], \"name\": \"a } \\\" ]\" },\n"
+                      "      \"muzzle\": [0, 0.06, -0.62]\n"
+                      "    }\n"
+                      "  },\n"
+                      "  \"model\": [{ \"offset\": [0, 0.05, -0.2] }]\n"
+                      "}\n";
+    vec3 m;
+    CHECK(hp_muzzle_json_read(src, &m) && m.x == 0 && m.y == 0.06f && m.z == -0.62f, "read");
+    const char *want = "{\n"
+                       "  \"id\": \"rifle\",\n"
+                       "  \"muzzle\": [0, 0.06, -0.62],\n"
+                       "  \"hold\": {\n"
+                       "    \"style\": \"rifle\",\n"
+                       "    \"sockets\": {\n"
+                       "      \"grip_r\": { \"pos\": [0, 0, 0], \"name\": \"a } \\\" ]\" },\n"
+                       "      \"muzzle\": [0, 0.05, -0.5305]\n"
+                       "    }\n"
+                       "  },\n"
+                       "  \"model\": [{ \"offset\": [0, 0.05, -0.2] }]\n"
+                       "}\n";
+    check_patch(src, v3(0, 0.05f, -0.5305f), want, "replace in place");
+    // Added: the last member of "sockets" (indented like it), a "sockets" in "hold", one-line and
+    // empty objects, CRLF files.
+    check_patch("{\n  \"hold\": {\n    \"sockets\": {\n      \"grip_r\": { \"pos\": [0, 0, 0] }\n    }\n  }\n}\n", v3(0, 0.05f, -0.5f),
+                "{\n  \"hold\": {\n    \"sockets\": {\n      \"grip_r\": { \"pos\": [0, 0, 0] },\n      \"muzzle\": [0, 0.05, -0.5]\n    }\n  }\n}\n", "added to sockets");
+    check_patch("{\n  \"hold\": {\n    \"style\": \"pistol\"\n  }\n}\n", v3(0, 0.05f, -0.5f),
+                "{\n  \"hold\": {\n    \"style\": \"pistol\",\n    \"sockets\": { \"muzzle\": [0, 0.05, -0.5] }\n  }\n}\n", "sockets added to hold");
+    check_patch("{ \"hold\": { \"style\": \"x\" } }", v3(0, 0, -0.1f), "{ \"hold\": { \"style\": \"x\", \"sockets\": { \"muzzle\": [0, 0, -0.1] } } }", "one-line object");
+    check_patch("{\"hold\": {\"sockets\": {}}}", v3(0, 0, -0.1f), "{\"hold\": {\"sockets\": { \"muzzle\": [0, 0, -0.1] }}}", "empty sockets");
+    check_patch("{\r\n  \"hold\": {\r\n    \"style\": \"x\"\r\n  }\r\n}\r\n", v3(0, 0, -0.1f),
+                "{\r\n  \"hold\": {\r\n    \"style\": \"x\",\r\n    \"sockets\": { \"muzzle\": [0, 0, -0.1] }\r\n  }\r\n}\r\n", "CRLF kept");
+    // Refused: no "hold" object, malformed text.
+    CHECK(!hp_muzzle_json_patch("{ \"id\": \"bat\" }", v3(0, 0, 0)), "no hold");
+    CHECK(!hp_muzzle_json_patch("{ \"hold\": 3 }", v3(0, 0, 0)), "hold is not an object");
+    CHECK(!hp_muzzle_json_patch("{ \"hold\": { \"sockets\": { \"muzzle\": [0, 0 ", v3(0, 0, 0)), "malformed");
+    CHECK(!hp_muzzle_json_read("{ \"hold\": { \"sockets\": { \"muzzle\": [0, 1] } } }", &m), "a muzzle needs 3 numbers");
+
+    // Bore helpers: the forward-most model part (iron sights left out): its centre line, its front face.
+    static WeaponDef wd;
+    memset(&wd, 0, sizeof(wd));
+    wd.parts[0] = (WeaponModelPart){ v3(0, 0.05f, -0.2f), v3(0.022f, 0.035f, 0.32f), v4(1, 1, 1, 1), 0 };
+    wd.parts[1] = (WeaponModelPart){ v3(0, -0.02f, 0), v3(0.016f, 0.05f, 0.025f), v4(1, 1, 1, 1), 0 };
+    wd.parts[2] = (WeaponModelPart){ v3(0, 0.11f, -0.9f), v3(0.001f, 0.005f, 0.003f), v4(1, 1, 1, 1), 0 };   // a front sight post
+    wd.part_count = 3;
+    wd.iron_parts = 1u << 2;
+    CHECK(hp_muzzle_barrel_part(&wd) == 0, "barrel part %d", hp_muzzle_barrel_part(&wd));
+    vec3 bo = hp_muzzle_snap(&wd, v3(0.01f, 0.06f, -0.62f), HPM_BORE), tp = hp_muzzle_snap(&wd, v3(0.01f, 0.06f, -0.62f), HPM_TIP);
+    CHECK(bo.x == 0 && bo.y == 0.05f && bo.z == -0.62f, "bore: on the centre line, z kept");
+    CHECK(tp.x == 0 && tp.y == 0.05f && fabsf(tp.z + 0.52f) < 1e-6f, "tip: the front face (%.4f)", tp.z);
+    wd.part_count = 0;
+    CHECK(hp_muzzle_barrel_part(&wd) < 0 && hp_muzzle_snap(&wd, v3(1, 2, 3), HPM_TIP).z == 3, "no parts: unchanged");
+
+    // Every shipped weapon file with a muzzle: a patch changes that one line only and reads back;
+    // the old value goes back the same way.
+    char dir[600];
+    snprintf(dir, sizeof(dir), "%s/data/weapons", DG_SOURCE_DIR);
+    int count = 0, with = 0;
+    char **files = SDL_GlobDirectory(dir, "*.json", 0, &count);
+    for (int i = 0; files && i < count; i++) {
+        char path[800], line[256] = "";
+        snprintf(path, sizeof(path), "%s/%s", dir, files[i]);
+        char *text = platform_read_file(path, NULL);
+        vec3 old, back;
+        if (!text || !hp_muzzle_json_read(text, &old)) { free(text); continue; }
+        with++;
+        char *p = hp_muzzle_json_patch(text, v3_add(old, v3(0.001f, -0.002f, -0.0105f)));
+        CHECK(p && diff_lines(text, p, line, sizeof(line)) == 1 && strstr(line, "\"muzzle\""), "%s: one line changed (%s)", files[i], line);
+        CHECK(p && hp_muzzle_json_read(p, &back) && v3_dist(back, hp_muzzle_round(v3_add(old, v3(0.001f, -0.002f, -0.0105f)))) < 1e-6f, "%s: reads back", files[i]);
+        char *q = p ? hp_muzzle_json_patch(p, old) : NULL;
+        CHECK(q && hp_muzzle_json_read(q, &back) && v3_dist(back, hp_muzzle_round(old)) < 1e-6f && diff_lines(text, q, line, sizeof(line)) <= 1, "%s: the old value back", files[i]);
+        free(q);
+        free(p);
+        free(text);
+    }
+    SDL_free(files);
+    CHECK(with >= 8, "weapon files with hold.sockets.muzzle: %d", with);
+}
+
 int main(int argc, char **argv) {
     (void)argc;
     (void)argv;
@@ -286,6 +460,8 @@ int main(int argc, char **argv) {
     test_touch_reset();
     test_case_target();
     test_undo();
+    test_undo_sockets();
+    test_muzzle();
     printf("%d checks, %d failed\n", g_checks, g_fail);
     return g_fail ? 1 : 0;
 }
