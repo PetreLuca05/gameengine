@@ -450,7 +450,7 @@ add_dependencies(dg_vgeo_content build_vgeo)
 
 # Open-world map generator (docs/ZOMBIE_MAP.md): the pure terrain / road / POI generator and loot
 # tables as a library for the preview tool and the unit tests (the game compiles the same sources).
-add_library(dg_mapgen STATIC src/world/mapgen.c src/world/mapgen_poi.c src/gameplay/loot.c src/core/detmath.c)
+add_library(dg_mapgen STATIC src/world/mapgen.c src/world/mapgen_poi.c src/world/level_include.c src/gameplay/loot.c src/core/detmath.c)
 set_target_properties(dg_mapgen PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
 target_include_directories(dg_mapgen PUBLIC src)
 target_link_libraries(dg_mapgen PUBLIC dg_thirdparty)
@@ -465,6 +465,11 @@ set_target_properties(test_mapgen PROPERTIES C_STANDARD 11)
 target_link_libraries(test_mapgen PRIVATE dg_mapgen)
 add_dependencies(test_mapgen dg_copy_data)
 add_test(NAME mapgen COMMAND test_mapgen WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+add_executable(test_level_include tests/test_level_include.c)
+set_target_properties(test_level_include PROPERTIES C_STANDARD 11)
+target_link_libraries(test_level_include PRIVATE dg_mapgen)
+add_dependencies(test_level_include dg_copy_data)
+add_test(NAME level_include COMMAND test_level_include WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
 
 # Character pipeline (docs/CHARACTERS.md): Skeleton / SkeletalMesh bakes, part splitting, retargeting.
 foreach(tool bake_skeleton bake_mesh split_parts retarget)

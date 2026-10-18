@@ -1,0 +1,38 @@
+{
+  "name": "DevRoom_Vegetation",
+  "comment": "The dev room in the vegetation valley (map devroom_vegetation): the vegetation map's generator world (seed, terrain, every foliage kind: pine forest, broadleaf forest, dead wood, mixed forest, meadow, wheat field, pond) laid out around the whole dev room, which comes in by \"include\" (level_include.h, docs/ZOMBIE_MAP.md 'Level includes') and so always tracks data/levels/devroom.json: its brushes, entities, labels, spawns, vehicles, pumps, spikes, water pool, puddles, post volumes and weather, at the dev room's own coordinates. \"ground\" flattens the terrain to y = 0 (concrete, no trees or grass) under its footprint, so every dev room command and script coordinate works unchanged. The terrain is the vegetation map's lowered by 14 m (ground at 0) and 2.8 km across, so the 1.3 km landmark tower and the 500 m ballistics range fit. Engine coordinates: X east, Z south (north = -Z). Format: docs/ZOMBIE_MAP.md.",
+  "env": {"sun_dir": [0.45, 0.8, 0.35], "sun_color": [1.0, 0.95, 0.86], "sun_intensity": 3.0, "sky": [0.45, 0.55, 0.72], "ground": [0.28, 0.27, 0.22], "fog": [0.62, 0.68, 0.75], "fog_density": 0.0012, "sky_zenith": [0.24, 0.42, 0.72], "sky_horizon": [0.7, 0.76, 0.84], "clouds": 0.35},
+  "include": [
+    {"level": "devroom", "ground": {"level": 0, "cell": 4, "margin": 6, "blend": 12, "material": "concrete", "room_sink": 0.08}}
+  ],
+  "world": {
+    "seed": 4242,
+    "half_size": 1400,
+    "raster_half": 1408,
+    "terrain": {"base": 0, "hill_amp": 3, "hill_freq": 0.006},
+    "features": [
+      {"type": "rim", "edges": "WNES", "height": 60, "width": 90},
+      {"type": "mountain", "pos": [-850, -750], "radius": [360, 300], "height": 110, "ridge": 0.6},
+      {"type": "mountain", "pos": [-800, 850], "radius": [320, 280], "height": 85, "ridge": 0.5},
+      {"type": "hill", "pos": [500, -950], "radius": [260, 200], "height": 40},
+      {"type": "hill", "pos": [350, 950], "radius": [300, 220], "height": 45},
+      {"type": "hill", "pos": [-330, -300], "radius": [70, 60], "height": 6},
+      {"type": "hill", "pos": [430, -300], "radius": [60, 70], "height": 5},
+      {"type": "lake", "pos": [0, -205], "radius": [48, 30], "yaw": 10, "level": -1.4, "depth": 4, "shore_noise": 10},
+      {"type": "paint", "pos": [-330, -110], "size": [160, 120], "material": "meadow"},
+      {"type": "paint", "pos": [-90, 360], "size": [150, 70], "material": "field"},
+      {"type": "forest", "pos": [-140, -215], "radius": [85, 70], "density": 3.6, "pine": 1.0, "dead": 0.02},
+      {"type": "forest", "pos": [150, -215], "radius": [85, 70], "density": 3.0, "pine": 0.0, "dead": 0.02},
+      {"type": "forest", "pos": [-300, 80], "radius": [65, 75], "density": 2.2, "pine": 0.3, "dead": 0.85},
+      {"type": "forest", "pos": [-120, 230], "radius": [65, 70], "density": 2.8, "pine": 0.5, "dead": 0.12}
+    ],
+    "roads": [
+      {"class": "trail", "name": "Pond trail", "points": [[0, -95], [-10, -150], [-60, -180], [-140, -215], [-200, -170], [-300, -120]], "smooth": true},
+      {"class": "trail", "name": "Broadleaf trail", "points": [[-10, -150], [60, -175], [150, -215]], "smooth": true},
+      {"class": "trail", "name": "South trail", "points": [[0, 100], [-50, 150], [-120, 230], [-100, 310], [-90, 325]], "smooth": true},
+      {"class": "trail", "name": "Dead wood trail", "points": [[-185, 20], [-240, 50], [-300, 80]], "smooth": true}
+    ],
+    "zombies": {"wild_density": 0, "wild_max": 0, "cap": 0, "despawn": 100000, "spawn_min": 40, "spawn_max": 95, "sense": 0}
+  },
+  "pois": []
+}

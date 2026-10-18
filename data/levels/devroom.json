@@ -3,6 +3,8 @@
   "_comment": "Units are meters, yaw in degrees. Y up, yaw 0 looks towards -Z (north). Box pos = bottom center. Open room (no walls / ceiling) under the procedural sky (env sky_zenith / sky_horizon / clouds).",
   "env": {"sun_dir": [0.32, 1.0, 0.22], "sun_color": [1.0, 0.96, 0.9], "sun_intensity": 2.4, "sky": [0.55, 0.6, 0.7], "ground": [0.32, 0.3, 0.27], "fog": [0.42, 0.45, 0.5], "fog_density": 0.0, "sky_zenith": [0.22, 0.42, 0.78], "sky_horizon": [0.72, 0.8, 0.9], "clouds": 0.45},
   "room": {"size": [60, 10, 60], "wall": 0.5, "floor_material": "concrete", "wall_material": "plaster", "floor_color": [0.6, 0.6, 0.6], "wall_color": [0.68, 0.68, 0.68], "walls": false, "ceiling": false, "floor_size": [4000, 0, 4000]},
+  "_footprint_areas": "Ground the dev room needs where no brush stands (level_include.h): a map that includes the dev room with \"ground\" (devroom_vegetation) flattens and clears these besides every brush / entity footprint. [x0, z0, x1, z1]: the sighting lane, the ballistics range, the flesh range lanes, the horde yard ring (spawn_horde: 30 m around (0, 50)), the aim stand's down range, the vehicle yard, the vehicle_test ground west of the room (vehicles.cfg), the foliage yard (foliage_test_scatter / foliage_grove). Keep them in step when an area moves.",
+  "footprint_areas": [[28, -14, 236, 4], [28, -62, 536, -30], [-16, -82, 16, -30], [-34, 16, 34, 84], [98, 20, 132, 46], [-176, -26, -100, 26], [-112, -90, -86, 52], [60, 80, 380, 400]],
   "spawns": [
     {"pos": [0, 0.05, 24], "yaw": 0},
     {"pos": [2, 0.05, 24.5], "yaw": 0},

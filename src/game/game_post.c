@@ -21,6 +21,7 @@
 #include "ui/ui.h"
 #include "ui/crosshair.h"
 #include "cJSON.h"
+#include "world/level.h"
 #include <SDL3/SDL.h>
 #include <math.h>
 #include <stdio.h>
@@ -187,12 +188,7 @@ static void parse_overrides(PostVolume *v, const cJSON *o) {
 static void load_volumes(const char *map) {
     GP.vol_count = 0;
     dg_strcpy(GP.vol_level, sizeof(GP.vol_level), map);
-    char rel[128], buf[512];
-    snprintf(rel, sizeof(rel), "data/levels/%s.json", map);
-    char *text = platform_read_file(platform_data_path(rel, buf, sizeof(buf)), NULL);
-    if (!text) return;
-    cJSON *root = cJSON_Parse(text);
-    free(text);
+    cJSON *root = level_json_load(map);   // includes resolved: their volumes too
     if (!root) return;
     const cJSON *glob = cJSON_GetObjectItemCaseSensitive(root, "post");
     if (cJSON_IsObject(glob)) {

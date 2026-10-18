@@ -3,6 +3,7 @@
 // and labels' anchor crosses. The same generator code as the game (src/world/mapgen*.c), no engine.
 #include "world/mapgen.h"
 #include "world/mapgen_poi.h"
+#include "world/level_include.h"
 #include "cJSON.h"
 #include "stb_image_write.h"
 #include <math.h>
@@ -24,6 +25,18 @@ static char *read_file(const char *path) {
     return s;
 }
 
+// Included levels (level_include.h) are read next to the level file.
+static char g_dir[512];
+static cJSON *read_level(const char *level, void *user) {
+    (void)user;
+    char path[700];
+    snprintf(path, sizeof(path), "%s%s.json", g_dir, level);
+    char *text = read_file(path);
+    cJSON *r = text ? cJSON_Parse(text) : NULL;
+    free(text);
+    return r;
+}
+
 static void put(u8 *img, int w, int h, int x, int y, vec3 c) {
     if (x < 0 || y < 0 || x >= w || y >= h) return;
     u8 *p = img + ((size_t)y * w + x) * 3;
@@ -41,6 +54,13 @@ int main(int argc, char **argv) {
     cJSON *root = cJSON_Parse(text);
     free(text);
     if (!root) { printf("JSON parse error\n"); return 1; }
+    snprintf(g_dir, sizeof(g_dir), "%s", argv[1]);
+    char *slash = strrchr(g_dir, '/'), *bslash = strrchr(g_dir, '\\');
+    if (bslash > slash) slash = bslash;
+    if (slash) slash[1] = 0;
+    else g_dir[0] = 0;
+    char ierr[256];
+    if (!level_include_resolve(root, read_level, NULL, ierr, sizeof(ierr))) { printf("%s\n", ierr); return 1; }
     const cJSON *world = cJSON_GetObjectItemCaseSensitive(root, "world");
     const cJSON *seed = cJSON_GetObjectItemCaseSensitive(world, "seed");
     static MapGen g;

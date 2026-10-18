@@ -66,6 +66,10 @@ NetStats net_stats(void);
 bool net_send_reliable(int peer, const void *data, u32 size);
 void net_flush(void);
 bool net_host_welcome(int peer, const char *name);
+// A peer is not dropped for NET_LOAD_GRACE_MS of silence: someone is loading a map. Host: per client
+// from net_host_welcome (or the lobby's start) to its first commands. Client: the host's peer from the
+// lobby's start / the welcome to the first snapshot (a client's peer argument is ignored).
+void net_peer_load_grace(int peer);
 void net_drop_peer(int peer);
 bool net_peer_address(int peer, char *out, int size);   // client: the host's
 float net_peer_ping(int peer);                          // ms, < 0 unknown (client: the host's)

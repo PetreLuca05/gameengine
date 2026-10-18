@@ -28,10 +28,15 @@
 #include <stdio.h>
 
 #define NET_BUF 131072
+// A peer that loads a map answers nothing until its load ends (a large open world: 15 s and more), and
+// the loading side reads the other's answers only after it: the peer is not dropped for this long
+// (net_peer_load_grace), then the transport's timeout again.
+#define NET_LOAD_GRACE_MS 90000
 
 typedef struct RemoteClient {
     bool active;
     bool welcomed;
+    bool loading;                  // welcomed, no commands yet (the map is loading): the load grace
     PeerId peer;
     int slot;
     SnapHistory history;
@@ -68,6 +73,7 @@ typedef struct NetSystem {
     // client
     PeerId server_peer;
     bool connected, welcomed;
+    bool cl_loading;            // the host's peer has the load grace until the first snapshot
     bool lobby_seen;            // the host answered with the lobby (we wait there: no connect timeout)
     double connect_started;
     int local_slot;
@@ -276,8 +282,19 @@ bool net_host_welcome(int peer, const char *name) {
     send_cvars(c);
     send_inventory(c);
     c->cvar_revision = server_cvar_revision();
+    c->loading = true;
+    net_peer_load_grace(peer);
     log_info("net: '%s' joined as slot %d (peer %d)", name, slot, peer);
     return true;
+}
+
+void net_peer_load_grace(int peer) {
+    if (!N || !N->t || !N->t->set_peer_timeout) return;
+    if (N->role == NET_CLIENT) {   // the host's peer, whatever is passed
+        peer = N->server_peer;
+        N->cl_loading = true;
+    }
+    N->t->set_peer_timeout(N->t, peer, NET_LOAD_GRACE_MS);
 }
 
 static void host_handle_cmds(RemoteClient *c, Reader *r) {
@@ -287,6 +304,10 @@ static void host_handle_cmds(RemoteClient *c, Reader *r) {
     u8 count = r_u8(r);
     if (ack > c->acked_tick) c->acked_tick = ack;
     c->view_tick = view_tick;
+    if (c->loading) {   // loaded: the normal timeout again
+        c->loading = false;
+        if (N->t->set_peer_timeout) N->t->set_peer_timeout(N->t, c->peer, 0);
+    }
     UserCmd cmds[CMDS_PER_PACKET];
     int n = 0;
     for (int i = 0; i < count && i < CMDS_PER_PACKET; i++) {
@@ -614,6 +635,7 @@ static void client_handle(const NetEvent *e) {
         N->time_init = false;
         for (int i = 0; i < SNAP_HISTORY; i++) N->cl_history.frames[i].tick = 0;
         memset(N->interp, 0, sizeof(InterpBuffer) * MAX_ENTITIES);
+        net_peer_load_grace(e->peer);   // the map load blocks: the host's unanswered packets wait
         game_cl_welcome(slot, map, seed, tick);
         lobby_on_welcome();
         break;
@@ -629,7 +651,12 @@ static void client_handle(const NetEvent *e) {
         N->lobby_seen = true;
         lobby_on_client_msg(&r);
         break;
-    case MSG_SNAPSHOT: client_handle_snapshot(&r); break;
+    case MSG_SNAPSHOT:
+        // The first snapshot after a load: the acks that waited behind it are in, the normal timeout again.
+        if (N->cl_loading && N->t->set_peer_timeout) N->t->set_peer_timeout(N->t, e->peer, 0);
+        N->cl_loading = false;
+        client_handle_snapshot(&r);
+        break;
     case MSG_EVENT: {
         GameEvent ev;
         r_bytes(&r, &ev, sizeof(ev));

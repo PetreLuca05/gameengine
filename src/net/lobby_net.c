@@ -83,6 +83,7 @@ static void set_state(LobbyEvent e) {
     log_info("lobby: %s + %s -> %s", lobby_state_name(S->L.state), lobby_event_name(e), lobby_state_name(n));
     S->L.state = n;
     S->state_time = now();
+    if (n == LS_LOADING && !S->L.is_host) net_peer_load_grace(-1);   // the host loads
 }
 
 const Lobby *lobby_get(void) { return &S->L; }
@@ -694,6 +695,10 @@ static void host_load_map(void) {
     const char *level = mi ? mi->level : S->L.settings.map;
     log_info("lobby: loading '%s' (%s)", S->L.settings.map, level);
     mainmenu_leave_scene();
+    // The load blocks: the members' unanswered packets must not drop them meanwhile (their acks are
+    // read only after it), nor during their own load after the welcome.
+    for (int i = 0; i < LOBBY_MAX_MEMBERS; i++)
+        if (S->L.members[i].active && S->L.members[i].peer >= 0) net_peer_load_grace(S->L.members[i].peer);
     if (!game_host_ex(level, GH_KEEP_NET)) { net_stop(); close_with(LE_TRANSPORT_FAIL, "The map failed to load"); go_menu(NULL); return; }
     lobby_apply_environment(game_world(), &S->L.settings);
     lobby_apply_rules(&S->L.settings);

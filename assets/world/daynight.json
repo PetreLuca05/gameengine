@@ -25,6 +25,7 @@
     "ambient_scale":   [["00:00", 1.0]]
   },
   "levels": {
-    "devroom": { "start_time": "16:45" }
+    "devroom": { "start_time": "16:45" },
+    "devroom_vegetation": { "start_time": "16:45" }
   }
 }

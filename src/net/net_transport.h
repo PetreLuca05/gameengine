@@ -32,6 +32,10 @@ struct NetTransport {
     bool (*peer_stats)(NetTransport *t, PeerId peer, float *rtt_ms, float *loss_pct);
     // Who a peer is: "ip" (LAN) or the SteamID64 (Steam). Lobby kick bans and host migration.
     bool (*peer_address)(NetTransport *t, PeerId peer, char *out, int size);
+    // Optional (NULL: the transport keeps its own): how long an unanswered reliable packet waits before
+    // the peer is dropped, ms; 0 restores the default. A joining client loading a large map answers
+    // nothing until its load ends (net.c net_peer_load_grace).
+    void (*set_peer_timeout)(NetTransport *t, PeerId peer, u32 ms);
     void (*destroy)(NetTransport *t);
 };
 

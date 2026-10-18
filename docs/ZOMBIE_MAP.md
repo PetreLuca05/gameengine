@@ -1,6 +1,6 @@
 # Zombieland: the 2 km open-world map
 
-> The Zombieland map itself (data/levels/zombieland.json, its reference images in docs/reference/zombie_map and the zl_* test scripts) moved to branch `zombieland`. The generator described here stays on main and builds `map vegetation` and `map wateryard`.
+> The Zombieland map itself (data/levels/zombieland.json, its reference images in docs/reference/zombie_map and the zl_* test scripts) moved to branch `zombieland`. The generator described here stays on main and builds `map vegetation`, `map wateryard` and `map devroom_vegetation`.
 
 `map zombieland` loads a 2 km × 2 km zombie-survival world built from
 [docs/reference/zombie_map/SPEC.md](reference/zombie_map/SPEC.md). Nothing is hand-modelled. A data file
@@ -33,6 +33,64 @@ weighted pick within the role by a position hash (`openworld_foliage.c` `role_pi
 `render_foliage_role_types`). Every machine places the same species, and the trunk capsules match.
 Its height is picked in the species' real-world range (pines 18-32 m, broadleaves 14-34 m, bushes
 2.5-8 m: docs/VGEO.md "Tree models", "Heights").
+
+## Dev room in the vegetation valley
+
+`map devroom_vegetation` (`data/levels/devroom_vegetation.json`, a dev entry in the main menu) is the
+whole dev room on flat ground in a vegetation world: every brush, entity, label, spawn, vehicle, pump,
+spike strip, the water pool, the puddles, the post volumes and the weather of `data/levels/devroom.json`,
+at the dev room's own coordinates (y = 0 included). Every dev room command and script coordinate works
+unchanged (`spawn_horde` at (0, 0, 50), `bal_range`, the aim stand, the shadow corner, the fabricator...),
+so the dev room scripts run on it with the map on the command line, without edits:
+
+```
+deadground --test --nosound --log aim.log +map devroom_vegetation --script ../../tools/tests/aim_obstruct.cfg
+```
+
+The dev room comes in by an include (below), so the map tracks `devroom.json` by itself. The world is
+the vegetation map's generator world (seed 4242, the same terrain noise, all its foliage kinds: pine,
+broadleaf, dead and mixed forests, a meadow, a wheat field, the pond) lowered by 14 m so the ground is at
+y = 0, laid out around the dev room, and 2.8 km across (rim mountains at ±1.4 km) so the 1302 m landmark
+tower and the 500 m ballistics range stand on the ground. The open-world zombie spawner is off and the
+horde has no sense radius or despawn distance, as in the dev room.
+
+| | |
+|---|---|
+| Load | about 21 s from start to the first frame against 11.6 s for `vegetation` (the 2817² terrain maps bake in 5.6 s, `terrain_world_load`) |
+| Frame (RTX 3060 Ti shared with other jobs, 1600 × 900, uncapped, `tools/tests/devroom_veg_perf.cfg`) | hall 15.5 ms, horde yard 17.6 ms, sighting lane 17.4 ms, pine forest edge 30.0 ms, aerial 14.1 ms; `vegetation` spawn 32.4 ms, pine forest 43.3 ms, aerial 18.1 ms; the plain dev room hall 5.8 ms |
+| Network | a client joins and plays (it loads for about 14 s: the host's load grace, "Load" below) |
+| Tests | `ctest -R level_include` (merge rules; every dev room anchor and footprint area on flat concrete at y = 0 without trees); `tools/tests/devroom_veg_tour.cfg` (screenshots of every area, a drive) |
+
+## Level includes
+
+A level file pulls other levels' content into itself (`src/world/level_include.c`):
+
+```jsonc
+"include": ["devroom"]                                     // or one name / object
+"include": [{"level": "devroom", "ground": {"level": 0, "cell": 4, "margin": 6, "blend": 12, "material": "concrete", "room_sink": 0.08}}]
+```
+
+Every reader of a level file loads it through `level_json_load` (`src/world/level.h`): the brushes /
+entities / labels / spawns of `level_load`, the post volumes (`game_post.c`), the water bodies
+(`game_water.c`), vehicles / pumps / spikes (`game_vehicles.c`), the weather and the puddles
+(`game_weather.c`) and the sun shadow (`game_shadow_sky.c`), so included content reaches all of them.
+`mapgen_preview` resolves includes too (the files next to the level). The merge:
+- arrays are appended after the including level's own entries;
+- objects merge key by key, the including level's values winning (`env`, `world`);
+- other values are taken only where the including level has none (`room`, `weather`, `post`);
+- the content keeps its coordinates (no offset); an included level's own includes come first (at most
+  4 deep: a cycle fails).
+
+`ground` (open-world levels only) flattens the terrain under the included content: its footprint
+(brush boxes, rotated; ramps / stairs / tunnels as the square that holds them; entities, vehicles, pumps,
+spikes, puddles, water bodies, post volumes, the room's size, and the level's `"footprint_areas"`
+`[[x0, z0, x1, z1], ...]` for ground without brushes: firing lanes, the horde ring, the foliage yard),
+grown by `margin` on a `cell` grid and covered with rectangles, becomes pad features (`level`, `blend`,
+`material`) appended to the world's features. Pads keep trees and (on concrete) grass and bushes off.
+The room's pad comes last, `room_sink` lower, under its floor box. On an open world a `room` is only its
+floor at the room's size (no `floor_size`, no invisible boundary: the world's edge walls bound it), and
+the water ground under the level file's own bodies is baked from the physics like a brush level's.
+Keep `devroom.json`'s `footprint_areas` in step when a dev room area without brushes moves.
 
 ## Coordinates
 
@@ -337,8 +395,11 @@ cast. With every lamp shadowed, the night city took 36 ms a frame.
 **Load.** The generator, raster and uploads take about 1 s. The foliage types take about 0.4 s: the tree
 models load from the build's `assets/vgeo/trees/*.dgtree` (0.23 s for the 9 trees, textures included),
 the grass tuft and wheat are built procedurally. Without those files the game builds the species itself
-(about 1.1 s more, once: cached in `assets/cache`). A client therefore joins well inside the 4 s ENet
-timeout.
+(about 1.1 s more, once: cached in `assets/cache`). A loading peer answers nothing, and ENet drops a peer
+after 4..8 s without answers, so the host gives a peer a 90 s load grace (`net_peer_load_grace`,
+`NetTransport.set_peer_timeout`): from its welcome until its first commands, and for every lobby member
+while the host itself loads the lobby's map. Larger worlds load for longer (`devroom_vegetation`: about
+14 s on a client).
 
 ## What is placeholder
 

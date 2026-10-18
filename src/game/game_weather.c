@@ -19,6 +19,7 @@
 #include "core/engine.h"
 #include "core/platform.h"
 #include "cJSON.h"
+#include "world/level.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -271,11 +272,7 @@ static void bake_puddles(World *w, const char *map) {
         }
     // Authored areas.
     if (map && map[0]) {
-        char rel[160], buf[512];
-        snprintf(rel, sizeof(rel), "data/levels/%s.json", map);
-        char *text = platform_read_file(platform_data_path(rel, buf, sizeof(buf)), NULL);
-        cJSON *root = text ? cJSON_Parse(text) : NULL;
-        free(text);
+        cJSON *root = level_json_load(map);   // includes resolved
         const cJSON *pz;
         int count = 0;
         cJSON_ArrayForEach(pz, root ? cJSON_GetObjectItemCaseSensitive(root, "puddles") : NULL) {
@@ -410,11 +407,7 @@ void weather_level_loaded(World *w, const char *map) {
         // Level default: "weather": "preset" or {"preset": "...", "random": true}.
         char spec[64] = "little_cloudy";
         bool random = false;
-        char rel[160], buf[512];
-        snprintf(rel, sizeof(rel), "data/levels/%s.json", map ? map : "");
-        char *text = map && map[0] ? platform_read_file(platform_data_path(rel, buf, sizeof(buf)), NULL) : NULL;
-        cJSON *root = text ? cJSON_Parse(text) : NULL;
-        free(text);
+        cJSON *root = level_json_load(map);   // includes resolved
         const cJSON *wj = root ? cJSON_GetObjectItemCaseSensitive(root, "weather") : NULL;
         if (cJSON_IsString(wj)) dg_strcpy(spec, sizeof(spec), wj->valuestring);
         else if (cJSON_IsObject(wj)) {

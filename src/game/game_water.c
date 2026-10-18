@@ -23,6 +23,7 @@
 #include "world/openworld.h"
 #include "world/weather.h"
 #include "cJSON.h"
+#include "world/level.h"
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -42,7 +43,9 @@ static struct {
     WaterParams presets[GW_MAX_PRESETS];
     int preset_count;
     bool presets_loaded;
-    // ground (levels without a terrain raster): a downward raycast bake over the bodies' bounds
+    // ground (levels without a terrain raster, and the level file's bodies of an open world): a
+    // downward raycast bake over the bodies' bounds
+    int level_bodies;               // bodies [0, level_bodies) come from the level file
     float *ground;
     int gw, gh;
     float gx0, gz0;
@@ -129,8 +132,6 @@ const WaterParams *game_water_preset(const char *name) {
 
 // ------------------------------------------------------------------ ground
 
-static float ground_open(void *user, float x, float z) { return openworld_ground((const World *)user, x, z); }
-
 static float ground_baked(void *user, float x, float z) {
     (void)user;
     if (!GW.ground) return GW.ground_default;
@@ -142,6 +143,16 @@ static float ground_baked(void *user, float x, float z) {
     return lerpf(lerpf(r0[0], r0[1], tx), lerpf(r1[0], r1[1], tx), tz);
 }
 
+// Open worlds: the generated terrain, except over the level file's own bodies (a dev room pool brought
+// in by an include: its tank floor), baked like a brush level's.
+static float ground_open(void *user, float x, float z) {
+    if (GW.ground) {
+        float fx = (x - GW.gx0) / GW_GROUND_TEXEL - 0.5f, fz = (z - GW.gz0) / GW_GROUND_TEXEL - 0.5f;
+        if (fx >= 0 && fz >= 0 && fx < (float)(GW.gw - 1) && fz < (float)(GW.gh - 1)) return ground_baked(NULL, x, z);
+    }
+    return openworld_ground((const World *)user, x, z);
+}
+
 // Downward casts from just under each body's surface (a dock or a roof above the water is not its
 // bottom) over the union of the finite bodies' bounds.
 static void bake_ground(World *w) {
@@ -149,7 +160,7 @@ static void bake_ground(World *w) {
     GW.ground = NULL;
     GW.ground_default = -1000.0f;
     float lo[2] = { 1e30f, 1e30f }, hi[2] = { -1e30f, -1e30f }, top = -1e30f;
-    for (int i = 0; i < GW.world.count; i++) {
+    for (int i = 0; i < GW.level_bodies; i++) {   // the level file's bodies (open worlds: not the generated ones)
         const WaterBody *b = &GW.world.body[i];
         if (b->shape == WSHAPE_INFINITE) continue;
         for (int k = 0; k < 2; k++) { lo[k] = fminf(lo[k], b->bmin[k] - 2.0f); hi[k] = fmaxf(hi[k], b->bmax[k] + 2.0f); }
@@ -370,11 +381,7 @@ void water_level_loaded(World *w, const char *map) {
     GW.wind_tick = 0xFFFFFFFFu;
     if (!w) return;
     // Level JSON "water": [{type, name, preset, level, polygon | box | ellipse, ...}]
-    char rel[160], buf[512];
-    snprintf(rel, sizeof(rel), "data/levels/%s.json", map ? map : "");
-    char *text = map && map[0] ? platform_read_file(platform_data_path(rel, buf, sizeof(buf)), NULL) : NULL;
-    cJSON *root = text ? cJSON_Parse(text) : NULL;
-    free(text);
+    cJSON *root = level_json_load(map);   // includes resolved
     const cJSON *arr = root ? cJSON_GetObjectItemCaseSensitive(root, "water") : NULL;
     const cJSON *e;
     cJSON_ArrayForEach(e, arr) {
@@ -389,7 +396,9 @@ void water_level_loaded(World *w, const char *map) {
         if (water_add_body(&GW.world, &b) < 0) { log_warn("water: more than %d bodies", WATER_MAX_BODIES); break; }
     }
     cJSON_Delete(root);
+    GW.level_bodies = GW.world.count;
     if (openworld_active(w)) {
+        bake_ground(w);   // nothing without level-file bodies: the terrain alone
         add_mapgen_bodies(w);
         water_set_ground(&GW.world, ground_open, w);
     } else {
@@ -909,7 +918,7 @@ static void cmd_water_level(int argc, const char **argv) {
 void game_water_set_level(int body, float level) {
     if (body < 0 || body >= GW.world.count) return;
     GW.world.body[body].level = level;
-    if (G && G->world && !openworld_active(G->world)) bake_ground(G->world);
+    if (G && G->world && body < GW.level_bodies) bake_ground(G->world);
 }
 
 // wind_set <m/s> [dir_deg] [seconds]: the weather wind (drives waves, foliage, rain).

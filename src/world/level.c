@@ -14,6 +14,7 @@
 #include "cJSON.h"
 #include "assets/assets.h"
 #include "openworld.h"
+#include "level_include.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <math.h>
@@ -30,6 +31,7 @@ typedef struct LevelBuild {
     int bucket_count;
     vec3 surf;                       // surface of the brush being built (PBR test geometry)
     float spacing;                   // grid spacing of the brush being built (sighting targets)
+    bool open_world;                 // the level has generated terrain (a "room" is then just its floor)
 } LevelBuild;
 
 // ------------------------------------------------------------------ json helpers
@@ -329,7 +331,9 @@ static void build_room(LevelBuild *b, const cJSON *room) {
     // Open rooms: "walls" / "ceiling" false (outdoor test area under the sky); the floor can be
     // larger than the room ("floor_size") and invisible boundary walls keep players on it.
     bool walls = jb(room, "walls", true), ceiling = jb(room, "ceiling", true);
-    vec3 fsz = jv3(room, "floor_size", v3(size.x, 0, size.z));
+    // On an open world (a room brought in by an include) the terrain is the ground beyond the room:
+    // the floor stays the room's size and the world's edge walls bound it.
+    vec3 fsz = b->open_world ? size : jv3(room, "floor_size", v3(size.x, 0, size.z));
     float fx = fmaxf(fsz.x * 0.5f, hx), fz = fmaxf(fsz.z * 0.5f, hz);
     b->material = fm >= 0 ? fm : SURF_CONCRETE;
     add_box(b, v3(0, -t * 0.5f, 0), v3(fx + t, t * 0.5f, fz + t), 0, floor_col, MAT_GRID, true);
@@ -340,7 +344,7 @@ static void build_room(LevelBuild *b, const cJSON *room) {
         add_box(b, v3(hx + t * 0.5f, h * 0.5f, 0), v3(t * 0.5f, h * 0.5f, hz), 0, wall_col, MAT_GRID, true);
         add_box(b, v3(0, h * 0.5f, -hz - t * 0.5f), v3(hx, h * 0.5f, t * 0.5f), 0, wall_col, MAT_GRID, true);
         add_box(b, v3(0, h * 0.5f, hz + t * 0.5f), v3(hx, h * 0.5f, t * 0.5f), 0, wall_col, MAT_GRID, true);
-    } else {
+    } else if (!b->open_world) {
         // Invisible boundary at the floor edge (collision only, 6 m tall).
         const float bh = 3.0f, bt = 0.5f;
         vec3 c[4] = { v3(-fx - bt, bh, 0), v3(fx + bt, bh, 0), v3(0, bh, -fz - bt), v3(0, bh, fz + bt) };
@@ -590,13 +594,45 @@ static void spawn_entity(World *w, const cJSON *e) {
     if (id) dg_strcpy(w->names[ENT_INDEX(id)], sizeof(w->names[0]), js(e, "name", ""));
 }
 
-bool level_load(World *w, const char *path) {
+// ------------------------------------------------------------------ level files
+
+static cJSON *read_json(const char *path, bool quiet) {
     char buf[512];
     char *text = platform_read_file(platform_data_path(path, buf, sizeof(buf)), NULL);
-    if (!text) { log_error("level: cannot read %s", path); return false; }
+    if (!text) {
+        if (!quiet) log_error("level: cannot read %s", path);
+        return NULL;
+    }
     cJSON *root = cJSON_Parse(text);
     free(text);
-    if (!root) { log_error("level: JSON parse error in %s near '%.40s'", path, cJSON_GetErrorPtr() ? cJSON_GetErrorPtr() : "?"); return false; }
+    if (!root) log_error("level: JSON parse error in %s near '%.40s'", path, cJSON_GetErrorPtr() ? cJSON_GetErrorPtr() : "?");
+    return root;
+}
+
+static cJSON *read_level(const char *level, void *user) {
+    (void)user;
+    char rel[160];
+    snprintf(rel, sizeof(rel), "data/levels/%s.json", level);
+    return read_json(rel, false);
+}
+
+cJSON *level_json_load_file(const char *path, bool quiet) {
+    cJSON *root = read_json(path, quiet);
+    char err[256];
+    if (root && !level_include_resolve(root, read_level, NULL, err, sizeof(err))) log_error("level: %s: %s", path, err);
+    return root;
+}
+
+cJSON *level_json_load(const char *map) {
+    if (!map || !map[0]) return NULL;
+    char rel[160];
+    snprintf(rel, sizeof(rel), "data/levels/%s.json", map);
+    return level_json_load_file(rel, true);
+}
+
+bool level_load(World *w, const char *path) {
+    cJSON *root = level_json_load_file(path, false);
+    if (!root) return false;
 
     LevelStatic *ls = &w->level;
     memset(ls, 0, sizeof(*ls));
@@ -626,6 +662,7 @@ bool level_load(World *w, const char *path) {
     memset(&b, 0, sizeof(b));
     b.w = w;
     b.surf = v3(0.85f, 0.0f, 0.0f);
+    b.open_world = w->openworld != NULL;
     const cJSON *room = cJSON_GetObjectItemCaseSensitive(root, "room");
     if (room) build_room(&b, room);
     const cJSON *br;
