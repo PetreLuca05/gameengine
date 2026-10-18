@@ -73,6 +73,7 @@ static struct {
     TextureId blur_tex;
     bool blur_wanted;
     FgRes blur_res, blur_tmp, ldr;
+    int blur_source;                    // >= 0: the offscreen UI target (Ui3dTarget index) the backdrop is made from
     // item views
     Ui3dTarget targets[UI3D_MAX_TARGETS];
     RenderTarget depth;
@@ -107,10 +108,11 @@ static void exec_blur(VkCommandBuffer cmd, void *u) {
     u32 w = UR.blur.w, h = UR.blur.h;
     PostBind b = { 0 };
     pb_ubo(&b);
-    pb_tex_fg(&b, 0, UR.ldr, P.linear);
+    pb_tex_fg(&b, 0, UR.blur_source >= 0 ? UR.targets[UR.blur_source].res : UR.ldr, P.linear);
     pb_img(&b, 8, UR.blur.view);
     pb_push(cmd, &b, VK_PIPELINE_BIND_POINT_COMPUTE);
-    if (post_direct()) {   // Engine Fidelity Off: the source is the lit HDR (the same output transform)
+    if (UR.blur_source >= 0) pc.u[0] = 2;   // an offscreen UI layer: already display-encoded
+    else if (post_direct()) {   // Engine Fidelity Off: the source is the lit HDR (the same output transform)
         pc.u[0] = 1;
         pc.p[0] = post_direct_exposure();
     }
@@ -139,6 +141,36 @@ static void exec_blur(VkCommandBuffer cmd, void *u) {
         pc.u[0] = horiz ? 0u : 1u;
         post_push_constants(cmd, &pc, 128);
         post_dispatch(cmd, "ui_blur", w, h, 1, 8);
+    }
+}
+
+// ------------------------------------------------------------------ offscreen UI
+
+static Ui3dTarget *target_of(TextureId t);
+
+static void exec_ui_offscreen(VkCommandBuffer cmd, void *u) {
+    (void)u;
+    for (u32 k = 0; k < R->ui_off_count; k++) {
+        const struct UiOffscreenJob *j = &R->ui_off[k];
+        Ui3dTarget *t = target_of(j->target);
+        if (!t) continue;
+        VkRenderingAttachmentInfo ca = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
+        ca.imageView = t->color.view;
+        ca.imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        ca.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        ca.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        for (int c = 0; c < 4; c++) ca.clearValue.color.float32[c] = (float)((j->clear >> (8 * c)) & 0xFF) / 255.0f;
+        VkRenderingInfo ri = { VK_STRUCTURE_TYPE_RENDERING_INFO };
+        ri.renderArea.extent.width = t->color.w;
+        ri.renderArea.extent.height = t->color.h;
+        ri.layerCount = 1;
+        ri.colorAttachmentCount = 1;
+        ri.pColorAttachments = &ca;
+        vkCmdBeginRendering(cmd, &ri);
+        VkViewport vp = { 0, 0, (float)t->color.w, (float)t->color.h, 0, 1 };
+        vkCmdSetViewport(cmd, 0, 1, &vp);
+        vkr_ui_draw_cmds(cmd, R->ui_cmds + j->first_cmd, j->cmd_count, t->color.w, t->color.h, PIPE_UI_RGBA8);
+        vkCmdEndRendering(cmd);
     }
 }
 
@@ -351,6 +383,23 @@ static void exec_ui3d(VkCommandBuffer cmd, void *u) {
 void render_ui_build(FgRes ldr, u32 out_w, u32 out_h) {
     UR.blur_res = UR.blur_tmp = FG_NONE;
     UR.ldr = ldr;
+    UR.blur_source = -1;
+    for (int i = 0; i < UI3D_MAX_TARGETS; i++) {
+        Ui3dTarget *t = &UR.targets[i];
+        t->res = t->used ? fg_import("ui_view", t->color.image, t->color.view, t->color.format, t->color.w, t->color.h, VK_IMAGE_ASPECT_COLOR_BIT,
+                                     &t->color.layout)
+                         : FG_NONE;
+    }
+    // Offscreen UI layers first: the backdrop blur and the final pass sample them.
+    if (R->ui_off_count) {
+        int p = fg_pass("ui_offscreen", exec_ui_offscreen, NULL);
+        for (u32 k = 0; k < R->ui_off_count; k++) {
+            Ui3dTarget *t = target_of(R->ui_off[k].target);
+            if (!t || t->res == FG_NONE) continue;
+            fg_write(p, t->res, FG_COLOR);
+            if (R->ui_off[k].backdrop) UR.blur_source = (int)(t - UR.targets);
+        }
+    }
     if (UR.blur_wanted && UR.blur_tex && ldr != FG_NONE) {   // (fg_valid is false for transients until execution)
         u32 bw = DG_MAX(1u, out_w / 4), bh = DG_MAX(1u, out_h / 4);
         if (UR.blur.w != bw || UR.blur.h != bh) {
@@ -363,19 +412,13 @@ void render_ui_build(FgRes ldr, u32 out_w, u32 out_h) {
         FgTexDesc td = { "ui_blur_tmp", VK_FORMAT_R16G16B16A16_SFLOAT, FG_SIZE_ABS, bw, bh, 1, 1, 0 };
         UR.blur_tmp = fg_texture(&td);
         int p = fg_pass("ui_blur", exec_blur, NULL);
-        fg_read(p, ldr, FG_SAMPLED);
+        fg_read(p, UR.blur_source >= 0 ? UR.targets[UR.blur_source].res : ldr, FG_SAMPLED);
         fg_write(p, UR.blur_res, FG_STORAGE);
         fg_write(p, UR.blur_tmp, FG_STORAGE);
         if (p < 0) UR.blur_res = FG_NONE;
     }
     UR.blur_wanted = false;
 
-    for (int i = 0; i < UI3D_MAX_TARGETS; i++) {
-        Ui3dTarget *t = &UR.targets[i];
-        t->res = t->used ? fg_import("ui_view", t->color.image, t->color.view, t->color.format, t->color.w, t->color.h, VK_IMAGE_ASPECT_COLOR_BIT,
-                                     &t->color.layout)
-                         : FG_NONE;
-    }
     UR.depth_res = FG_NONE;
     if (UR.job_count) {
         ensure_meshes();

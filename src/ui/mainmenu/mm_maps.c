@@ -3,7 +3,9 @@
 // look is picked here too: the season (calendar day, temperature and which weather it brings:
 // autumn rain, winter snow), the start time and the start weather (one of the season's presets or
 // a pick), and whether the weather changes during the game (the season-biased scheduler).
+// Behind the panels: the globe (src/ui/globe, docs/MENU_GLOBE.md) flies to the selected map's place.
 #include "mm_internal.h"
+#include "ui/globe/globe.h"
 #include "world/season.h"
 #include "game/game_internal.h"
 #include "world/weather.h"
@@ -116,6 +118,17 @@ static void map_row(int i, const MapInfo *m, GuiRect row) {
     if (in.double_clicked) host_map(m);
 }
 
+// The globe fills the screen behind the tab (drawn before the menu's shading and the panels, which
+// blur it); centred between the list and the details, dragged there.
+void mm_maps_background(GuiRect content, float alpha) {
+    MainMenu *M = mm();
+    MmLayout *L = &M->maps;
+    mm_layout_solve(L, content);
+    globe_select(lobby_map_info(M->map));
+    GuiRect sp = mm_node(L, "spacer");
+    globe_draw(sp.x + sp.w * 0.5f, content.y + content.h * 0.5f, sp, alpha);
+}
+
 void mm_maps_draw(GuiRect content) {
     MainMenu *M = mm();
     MmLayout *L = &M->maps;
@@ -183,5 +196,14 @@ void mm_maps_draw(GuiRect content) {
     const MapInfo *sel = lobby_map_info(M->map);
     const char *label = sel && sel->chapter[0] ? "Play this chapter" : "Host on this map";
     if (c.y + TOK("mm_gap") < br.y && gw_button(gui_id("mm_maps_host"), br, label, GB_PRIMARY, true)) host_map(sel);
-    mm_footer_hint(gui_rect(content.x, content.y + content.h, content.w, TOK("mm_row_h")), "Enter / A  select     double click  host");
+    char hint[160];
+    snprintf(hint, sizeof(hint), "Enter / A  select     double click  host     drag  turn the globe     %s", globe_phase_text());
+    mm_footer_hint(gui_rect(content.x, content.y + content.h, content.w, TOK("mm_row_h")), hint);
+    // The globe's data sources, under it (between the panels).
+    GuiRect sp = mm_node(L, "spacer");
+    GuiText ct = { gui_s(TH->t_tiny), GW_REGULAR, TH->text_faint, GUI_CENTER, 0, false, true, 0 };
+    float pad = TOK("mm_gap_lg");
+    float ch = gd_text_wrap(&ct, sp.x + pad, 0, sp.w - pad * 2, globe_credits(), false);
+    ct.align = GUI_LEFT;
+    gd_text_wrap(&ct, sp.x + pad, sp.y + sp.h - ch, sp.w - pad * 2, globe_credits(), true);
 }

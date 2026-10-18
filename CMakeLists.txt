@@ -752,6 +752,18 @@ if(MSVC)
 endif()
 add_dependencies(test_lobby dg_copy_data)
 add_test(NAME lobby COMMAND test_lobby WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+# Maps tab globe (docs/MENU_GLOBE.md): projection, flights, tile levels, visible box; the shipped tile
+# pack, vectors and regions.
+add_executable(test_globe tests/test_globe.c src/ui/globe/globe_math.c)
+set_target_properties(test_globe PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
+target_include_directories(test_globe PRIVATE src)
+if(MSVC)
+  target_compile_options(test_globe PRIVATE /W3 /utf-8)
+else()
+  target_link_libraries(test_globe PRIVATE m)
+endif()
+add_dependencies(test_globe dg_copy_data)
+add_test(NAME globe COMMAND test_globe WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
 # HUD (docs/UI_WHEELS_HUD.md): radial wheel math + JSON, timed ring, pings, kill stats, compass, the
 # console registry categories; the registry lint (descriptions + categories of every registration).
 add_executable(test_hud tests/test_hud.c src/ui/widgets/radial_math.c src/ui/widgets/wheel_def.c src/gameplay/ping.c src/core/cmd_registry.c)

@@ -25,6 +25,11 @@ typedef struct MapInfo {
     char scene[32];           // optional dev scene opened once the level is up ("handpose"; "" = none)
     char chapter[48];         // story chapter (assets/story/chapters/<id>.json): hosting it starts the chapter ("" = none)
     int order;                // list order
+    // Where the Maps tab globe flies to (docs/MENU_GLOBE.md; "globe": { "place", "lon", "lat", "region" })
+    bool has_geo;
+    double geo_lon, geo_lat;  // degrees
+    char geo_region[24];      // assets/globe/regions.json key ("" = no region: the globe only turns there)
+    char geo_place[48];       // the selection label ("Constanta")
 } MapInfo;
 
 typedef struct MapList {

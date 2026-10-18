@@ -11,6 +11,7 @@ pause menu's look (thin lines, semi-transparent blurred panels, small-caps label
 | Lobby model + state machine (pure) | `src/net/lobby.c` | |
 | Lobby glue: session, replication, Steam lobby / LAN discovery, migration, loading | `src/net/lobby_net.c` | |
 | Maps | `src/world/maplist.c` | `assets/maps/*.json`, `assets/maps/thumbs/` (`tools/gen_map_thumbs.py`) |
+| Maps tab globe (docs/MENU_GLOBE.md) | `src/ui/globe/`, `mm_maps_background` | `assets/globe/`, `tools/globe/build_globe.py` |
 | Seasons | `src/world/season.c`, `weather_apply_season` (`src/game/game_weather.c`), `daynight_set_calendar` | `assets/world/seasons.json` |
 | Cosmetics | `src/gameplay/cosmetics.c`; `cl_parts` in `src/gameplay/characters.c` | `assets/cosmetics/*.json`, `assets/characters/player.json` `parts` |
 | Profile | `src/game/profile.c` | `<pref dir>/saves/profile.json` |
@@ -38,6 +39,7 @@ launch ── splash (1.6 s, any key / click skips) ──▶ MAIN MENU
   ├─ Cosmetics  categories ▸ item grid (inventory slot widget, rarity strip, LOCKED) ▸ equip
   ├─ Maps       list (thumbnail, biome, size, players; test maps toggle) ▸ details ▸ Session:
   │             Season · Start time · Start weather · Dynamic weather ▸ Host on this map
+  │             background: the globe (docs/MENU_GLOBE.md), flying to the selected map's place
   ├─ Settings   the game's settings screen (Engine Fidelity, Graphics, Controls, Crosshair,
   │             Audio, Character, Phone), applying live
   └─ Credits    rolling credits + third-party licences
@@ -177,11 +179,13 @@ Console: `season [spring|summer|autumn|winter|off] [start preset|random] [static
    ```json
    { "name": "Forest", "level": "forest", "thumbnail": "assets/maps/thumbs/forest.png",
      "size_m": 1500, "biome": "Forest", "players": [1, 4], "season": "autumn", "time_of_day": 7.5,
-     "weather": "", "order": 30, "description": "..." }
+     "weather": "", "order": 30, "description": "...",
+     "globe": { "place": "Hârșova", "lon": 27.953, "lat": 44.685, "region": "ro_ct" } }
    ```
    `level` is what `game_host` loads (`data/levels/<level>.json`, or `streaming` / `flat`);
    `weather` "" = the season's pick; `"dev": true` marks a test map ("Show test maps", on by default,
-   hides them when turned off); `"scene": "handpose"` opens that dev scene once the level is up (the
+   hides them when turned off); `"globe"` is where the Maps tab globe flies (docs/MENU_GLOBE.md;
+   `region` names an `assets/globe/regions.json` entry); `"scene": "handpose"` opens that dev scene once the level is up (the
    Hand Pose Editor entry); `size_m` 0 = unbounded. The console's `map` (no argument) lists every level,
    menu entry and scene; `map <menu id>` resolves an entry to its level / scene.
 2. A 384 × 216 thumbnail: `python tools/gen_map_thumbs.py` (brush levels are drawn top-down;

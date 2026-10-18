@@ -11,5 +11,6 @@
   "weather": "clear",
   "dev": true,
   "order": 90,
-  "description": "The engine's test hall and yards: horde yard, weather yard, vehicle yard, sighting lane, flesh range and the post-processing corner."
+  "description": "The engine's test hall and yards: horde yard, weather yard, vehicle yard, sighting lane, flesh range and the post-processing corner.",
+  "globe": { "place": "Constanța", "lon": 28.634, "lat": 44.173, "region": "ro_ct" }
 }

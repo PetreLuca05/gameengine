@@ -10,5 +10,6 @@
   "weather": "",
   "dev": true,
   "order": 95,
-  "description": "Endless seeded noise terrain streamed in 32 m chunks around every player (world_seed). For streaming and network relevance tests."
+  "description": "Endless seeded noise terrain streamed in 32 m chunks around every player (world_seed). For streaming and network relevance tests.",
+  "globe": { "place": "Mangalia", "lon": 28.583, "lat": 43.817, "region": "ro_ct" }
 }

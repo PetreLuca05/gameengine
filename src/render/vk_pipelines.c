@@ -392,6 +392,8 @@ bool vkp_create_pipelines(void) {
     d[PIPE_PREPASS_MASK].frag = "gbuffer_mask.frag";
     d[PIPE_UI] = (PipeDesc){ "ui.vert", "ui.frag", VL_UI, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, VK_POLYGON_MODE_FILL,
                              VK_CULL_MODE_NONE, false, false, true, R->swap_format, VK_FORMAT_UNDEFINED, false, R->layout_ui };
+    d[PIPE_UI_RGBA8] = d[PIPE_UI];
+    d[PIPE_UI_RGBA8].color_format = VK_FORMAT_R8G8B8A8_UNORM;
     d[PIPE_PRECIP] = (PipeDesc){ "precip.vert", "precip.frag", VL_NONE, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, VK_POLYGON_MODE_FILL,
                                  VK_CULL_MODE_NONE, true, false, true, hdr, depth, false, R->layout_lit };
     d[PIPE_UI3D] = (PipeDesc){ "ui3d.vert", "ui3d.frag", VL_MESH, VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, VK_POLYGON_MODE_FILL,

@@ -11,5 +11,6 @@
   "season": "spring",
   "weather": "clear",
   "order": 5,
-  "description": "Chapter 1. Dawn on the tenth floor of a corner flat over the city. The family is gone, the phones are dead, and the city through the glass is starting to burn."
+  "description": "Chapter 1. Dawn on the tenth floor of a corner flat over the city. The family is gone, the phones are dead, and the city through the glass is starting to burn.",
+  "globe": { "place": "New York", "lon": -74.006, "lat": 40.713, "region": "us_ny" }
 }

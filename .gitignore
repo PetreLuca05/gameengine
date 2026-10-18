@@ -52,3 +52,6 @@ Thumbs.db
 # (tools/blender/build_items.py regenerates them); the scripts are the source.
 /assets/src/items/*.blend
 /assets/src/items/*.blend1
+
+# Maps tab globe: downloaded source data (tools/globe/build_globe.py re-fetches it)
+/tools/globe/cache/

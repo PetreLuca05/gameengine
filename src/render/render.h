@@ -498,6 +498,15 @@ void render_ui(const UiVertex *verts, u32 vcount, const u32 *indices, u32 icount
 // UI vertex uv ranges select the fragment mode (shaders/ui.frag): [0, 1] textured, +2 SDF text,
 // +4 soft SDF (shadow / glow), uv.x < -0.5 the blurred scene behind the UI (screen space).
 TextureId render_ui_backdrop(void);   // requests the blurred scene this frame; draw it with this texture
+// Offscreen UI (docs/MENU_GLOBE.md "Rendering"): UI draw commands (clip rects in target pixels)
+// into an item view target (render_ui3d_target_create), cleared to `clear` (RGBA8, display-encoded)
+// first, drawn before the backdrop blur and the final pass. backdrop_source: the target covers the
+// screen, so this frame's blurred backdrop is made from it instead of the scene (panels over a
+// full-screen offscreen layer blur what they cover).
+void render_ui_offscreen(TextureId target, u32 clear, const UiVertex *verts, u32 vcount, const u32 *indices, u32 icount, const UiDrawCmd *cmds,
+                         u32 ccount, bool backdrop_source);
+// A single-channel texture (VK_FORMAT_R8_UNORM levels, tightly packed) sampled as (r, r, r, 1).
+TextureId render_texture_create_gray(int w, int h, int levels, const void *data, const size_t *level_sizes);
 // Offscreen item views (inventory preview, icons): parts are unit meshes scaled by 2 * half.
 typedef struct RenderUi3dPart {
     vec3 center; quat rot; vec3 half;

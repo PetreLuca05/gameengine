@@ -901,6 +901,36 @@
    "reason": "Identity / network preferences / console.",
    "category": "network"
   },
+  "mm_globe_detail": {
+   "class": "EDITABLE",
+   "ui": "—",
+   "reason": "Maps tab globe look (docs/MENU_GLOBE.md): idle turning, texture opacity, line weight, flight time, water / admin detail. Menu only, no gameplay effect.",
+   "category": "hud"
+  },
+  "mm_globe_lines": {
+   "class": "EDITABLE",
+   "ui": "—",
+   "reason": "Maps tab globe look (docs/MENU_GLOBE.md): idle turning, texture opacity, line weight, flight time, water / admin detail. Menu only, no gameplay effect.",
+   "category": "hud"
+  },
+  "mm_globe_rotate": {
+   "class": "EDITABLE",
+   "ui": "—",
+   "reason": "Maps tab globe look (docs/MENU_GLOBE.md): idle turning, texture opacity, line weight, flight time, water / admin detail. Menu only, no gameplay effect.",
+   "category": "hud"
+  },
+  "mm_globe_texture": {
+   "class": "EDITABLE",
+   "ui": "—",
+   "reason": "Maps tab globe look (docs/MENU_GLOBE.md): idle turning, texture opacity, line weight, flight time, water / admin detail. Menu only, no gameplay effect.",
+   "category": "hud"
+  },
+  "mm_globe_travel": {
+   "class": "EDITABLE",
+   "ui": "—",
+   "reason": "Maps tab globe look (docs/MENU_GLOBE.md): idle turning, texture opacity, line weight, flight time, water / admin detail. Menu only, no gameplay effect.",
+   "category": "hud"
+  },
   "net_autohost": {
    "class": "EDITABLE",
    "ui": "—",

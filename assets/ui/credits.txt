@@ -30,6 +30,15 @@ volk: Vulkan loader. Licence: MIT
 Vulkan Memory Allocator: GPU memory. Licence: MIT
 Vulkan-Headers: Vulkan API headers. Licence: Apache-2.0 / MIT
 
+## Map data
+The Maps tab globe (docs/MENU_GLOBE.md) is built from open data:
+
+Copernicus Sentinel-2 L2A (ESA), via the AWS Open Data registry: regional satellite imagery (modified: grey, mosaicked, cloud-masked). Licence: Copernicus data licence (free, attribution)
+NASA Blue Marble: world imagery. Licence: public domain
+Natural Earth: coasts, borders, lakes, rivers, land cover raster. Licence: public domain
+AWS Terrain Tiles (Mapzen: SRTM, GMTED2010, ETOPO1, NED and others): height map and ocean depths. Licence: attribution, see the AWS registry
+geoBoundaries (William & Mary geoLab; US Census TIGER, Romania ADM1 / ADM2): states, counties, judete, communes. Licence: CC BY 4.0
+
 ## Licence texts
 The full licence texts ship next to the libraries in third_party/ and assets/ui/fonts/OFL.txt.
 

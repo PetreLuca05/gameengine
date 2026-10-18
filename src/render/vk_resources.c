@@ -700,6 +700,28 @@ TextureId render_texture_create_raw(int w, int h, int levels, u32 vk_format, con
     return id;
 }
 
+TextureId render_texture_create_gray(int w, int h, int levels, const void *data, const size_t *level_sizes) {
+    levels = DG_CLAMP(levels, 1, 16);
+    if (!raw_format_ok(VK_FORMAT_R8_UNORM, w, h)) return 0;
+    TextureId id = texture_alloc(w, h, (u32)levels, VK_FORMAT_R8_UNORM, false);
+    if (!id) return 0;
+    // The view replicates the channel: (r, r, r, 1) like an opaque grey RGBA texture.
+    GpuTexture *t = &R->textures[id];
+    vkDestroyImageView(R->device, t->view, NULL);
+    VkImageViewCreateInfo vci = { VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
+    vci.image = t->image;
+    vci.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    vci.format = VK_FORMAT_R8_UNORM;
+    vci.components = (VkComponentMapping){ VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_R, VK_COMPONENT_SWIZZLE_ONE };
+    vci.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    vci.subresourceRange.levelCount = t->mips;
+    vci.subresourceRange.layerCount = 1;
+    VK_CHECK(vkCreateImageView(R->device, &vci, NULL, &t->view));
+    vkr_write_tex_set(t->set, t->view, vkr_texture_sampler(id));
+    texture_queue_raw(id, levels, (const u8 *)data, level_sizes);
+    return id;
+}
+
 // World textures start as a 1x1 slot (texture_alloc's set needs a view), replaced by their image at
 // the current quality before anything can sample them.
 static TextureId world_alloc(VkFormat fmt) {

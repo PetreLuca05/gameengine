@@ -17,3 +17,20 @@ docs/PHONE.md, docs/UI.md for the font). This file lists third-party art.
   512 px at load. The files' own LOD meshes were not used and are not in the repository.
   `birch leaf_Transmission.png` is derived from `birch leaf.png` (a desaturated, brightened copy); the
   export did not include one.
+
+## Globe data (`assets/globe`)
+
+- **What:** the Maps tab globe's tile pyramid, vectors and height maps (docs/MENU_GLOBE.md "Data").
+- **Sources and licences:**
+  - Contains modified Copernicus Sentinel-2 data (2023 / 2024), from the Sentinel-2 L2A COGs on the
+    AWS Open Data registry. Copernicus data licence: free use with attribution.
+  - NASA Blue Marble (public domain).
+  - Natural Earth vectors and the NE1_HR_LC raster (public domain), <https://www.naturalearthdata.com>.
+  - AWS Terrain Tiles (Mapzen): SRTM, GMTED2010, ETOPO1, USGS NED and others, attributed as the AWS
+    Open Data registry asks.
+  - geoBoundaries (William & Mary geoLab; the US layers from US Census TIGER), CC BY 4.0,
+    <https://www.geoboundaries.org>.
+- **Modified:** reprojected to equirectangular and turned grey. The Sentinel-2 scenes are
+  mosaicked, cloud-masked and tone-matched. Everything is relief-shaded from the height map,
+  simplified and cut into tiles and levels of detail. `tools/globe/build_globe.py` rebuilds it all
+  from the sources.
