@@ -724,6 +724,24 @@ else()
 endif()
 add_dependencies(test_story dg_copy_data)
 add_test(NAME story COMMAND test_story WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+# Building kit (docs/BUILDING_KIT.md): the validator tool over every shipped piece, and the unit tests
+# (broken fixtures rejected with their messages, piece loading, prefab expansion).
+add_executable(validate_kit tools/validate_kit/validate_kit.c src/assets/kit_piece.c third_party/impl/tp_cgltf.c third_party/cjson/cJSON.c)
+set_target_properties(validate_kit PROPERTIES C_STANDARD 11)
+target_include_directories(validate_kit PRIVATE src third_party/cjson third_party/cgltf)
+add_executable(test_kit tests/test_kit.c src/assets/kit_piece.c src/world/kit_layout.c third_party/impl/tp_cgltf.c third_party/cjson/cJSON.c)
+set_target_properties(test_kit PROPERTIES C_STANDARD 11)
+target_include_directories(test_kit PRIVATE src third_party/cjson third_party/cgltf)
+foreach(t validate_kit test_kit)
+  if(MSVC)
+    target_compile_options(${t} PRIVATE /W3 /wd4100 /wd4201 /utf-8)
+  else()
+    target_link_libraries(${t} PRIVATE m)
+  endif()
+  add_dependencies(${t} dg_copy_data)
+endforeach()
+add_test(NAME kit_validate COMMAND validate_kit WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})   # the source assets (the bin mirror keeps deleted files)
+add_test(NAME kit COMMAND test_kit WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
 # Procedural audio (docs/AUDIO_PROCEDURAL.md "Tests"): the synth graph, nodes, recipes, the mixer
 # (propagation delay, no allocation in the audio callback, budget) and the environment model / chain
 # (air absorption, occlusion, room estimate in the dev room corridor, cliff echoes). Every source is

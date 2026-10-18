@@ -11,6 +11,7 @@ EntityId spawn_lever(World *w, vec3 base, float yaw, const char *target);
 EntityId spawn_switch(World *w, vec3 pos, float yaw, u32 group);
 EntityId spawn_light(World *w, vec3 pos, vec3 color, float radius, float intensity, u32 group, bool on);
 EntityId spawn_container(World *w, vec3 base, float yaw);
+EntityId spawn_container_ex(World *w, vec3 base, float yaw, vec3 half, bool visible);
 EntityId spawn_pickup(World *w, vec3 pos, u16 item, int count, i16 ammo, float respawn);
 EntityId spawn_bench(World *w, vec3 pos, float yaw);   // weapon bench interaction (attachments UI)
 EntityId spawn_prop(World *w, vec3 pos, quat rot, VisShape shape, vec3 half, u32 color, float mass);

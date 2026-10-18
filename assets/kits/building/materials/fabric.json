@@ -1,0 +1,36 @@
+{
+ "_doc": "Kit material set (docs/BUILDING_KIT.md 'Materials'): slot M_fabric. Variants: [r, g, b, roughness, metallic(, emissive)]; instances pick one per slot (\"mat\": {\"M_fabric\": \"<variant>\"}) and may tint.",
+ "slot": "M_fabric",
+ "surface": "cloth",
+ "glass": false,
+ "variants": {
+  "default": [
+   0.4,
+   0.42,
+   0.48,
+   0.95,
+   0.0
+  ],
+  "cream": [
+   0.82,
+   0.78,
+   0.7,
+   0.95,
+   0.0
+  ],
+  "red": [
+   0.6,
+   0.2,
+   0.18,
+   0.95,
+   0.0
+  ],
+  "teal": [
+   0.2,
+   0.45,
+   0.48,
+   0.95,
+   0.0
+  ]
+ }
+}

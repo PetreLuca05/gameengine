@@ -1,0 +1,22 @@
+{
+ "_doc": "Kit material set (docs/BUILDING_KIT.md 'Materials'): slot M_wallpaper. Variants: [r, g, b, roughness, metallic(, emissive)]; instances pick one per slot (\"mat\": {\"M_wallpaper\": \"<variant>\"}) and may tint.",
+ "slot": "M_wallpaper",
+ "surface": "plaster",
+ "glass": false,
+ "variants": {
+  "default": [
+   0.8,
+   0.74,
+   0.64,
+   0.9,
+   0.0
+  ],
+  "stars": [
+   0.3,
+   0.36,
+   0.55,
+   0.9,
+   0.0
+  ]
+ }
+}

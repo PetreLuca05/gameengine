@@ -23,6 +23,7 @@
 #include "gameplay/revive/revive.h"
 #include "game_revive.h"
 #include "game_story.h"
+#include "world/kit_world.h"
 #include "gameplay/weapons.h"
 #include "gameplay/ballistics/bal_world.h"
 #include "gameplay/ballistics/bal_fx.h"
@@ -787,6 +788,7 @@ void game_frame(float dt) {
     game_death_frame(dt);   // death sequence: post / mix / HUD from this frame's state (docs/REVIVE.md)
     game_revive_frame(G->world, dt);   // reconstruction bodies + particles
     story_frame(G->world, dt);         // story presentation, interactable bindings, deferred reloads
+    if (G->world) kit_world_poll(G->world);   // building kit pieces re-exported on disk (docs/BUILDING_KIT.md)
     // Reconciliation corrections fade over cam_recon_smooth_time (the head stabilizer adds its own spring).
     {
         float tsm = camera_fp_cvars()->recon_smooth ? camera_fp_cvars()->recon_smooth->f : 0.08f;
@@ -1661,6 +1663,7 @@ void game_init(void) {
     wheels_register();
     revive_register();
     story_register();
+    kit_world_register();
     game_death_register();
     game_pings_register();
     hud_register();

@@ -1,0 +1,32 @@
+{
+ "_doc": "Kit material set (docs/BUILDING_KIT.md 'Materials'): slot M_emissive. Variants: [r, g, b, roughness, metallic(, emissive)]; instances pick one per slot (\"mat\": {\"M_emissive\": \"<variant>\"}) and may tint.",
+ "slot": "M_emissive",
+ "surface": "glass",
+ "glass": false,
+ "variants": {
+  "default": [
+   1.0,
+   0.96,
+   0.88,
+   0.5,
+   0.0,
+   2.5
+  ],
+  "screen": [
+   0.3,
+   0.45,
+   0.7,
+   0.3,
+   0.0,
+   1.2
+  ],
+  "exit": [
+   0.1,
+   0.85,
+   0.3,
+   0.5,
+   0.0,
+   3.0
+  ]
+ }
+}

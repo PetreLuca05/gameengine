@@ -14,6 +14,7 @@
 #include "cJSON.h"
 #include "assets/assets.h"
 #include "openworld.h"
+#include "kit_world.h"
 #include "level_include.h"
 #include <stdlib.h>
 #include <stdio.h>
@@ -714,6 +715,7 @@ bool level_load(World *w, const char *path) {
         d->model = mat4_identity();
         mb_free(&b.buckets[i]);
     }
+    kit_world_level(w, root);   // building kit instances + prefabs (docs/BUILDING_KIT.md): the draw / body tail
     phys_optimize(w->phys);
     cJSON_Delete(root);
     log_info("level '%s': %d static bodies, %d labels, %d draws, %d spawns", ls->name, ls->body_count, ls->label_count, ls->draw_count, ls->spawn_count);
