@@ -80,11 +80,13 @@ static struct {
     char last_names[FG_MAX_PASSES][32];
     int last_count;
     Cvar *disable;
+    int cur;                  // the executing pass (fg_store_op), -1 outside fg_execute
     FgReport report;          // the last executed graph (fg_check + pool state)
 } G;
 
 void fg_init(void) {
     memset(&G, 0, sizeof(G));
+    G.cur = -1;
     G.init = true;
     VkQueryPoolCreateInfo qi = { VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO };
     qi.queryType = VK_QUERY_TYPE_TIMESTAMP;
@@ -548,7 +550,9 @@ void fg_execute(VkCommandBuffer cmd) {
             l.pLabelName = p->name;
             vkCmdBeginDebugUtilsLabelEXT(cmd, &l);
         }
+        G.cur = i;
         if (p->exec) p->exec(cmd, p->user);
+        G.cur = -1;
         if (label) vkCmdEndDebugUtilsLabelEXT(cmd);
         vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, G.qp, qbase + (u32)i * 2 + 1);
         memcpy(G.ms_names[slot][i], p->name, 32);
@@ -570,6 +574,14 @@ void fg_execute(VkCommandBuffer cmd) {
 }
 
 // ------------------------------------------------------------------ accessors
+
+VkAttachmentStoreOp fg_store_op(FgRes r) {
+    if (r < 0 || r >= G.res_count || G.res[r].kind != FG_TRANSIENT || G.cur < 0) return VK_ATTACHMENT_STORE_OP_STORE;
+    for (int i = G.cur + 1; i < G.pass_count; i++)
+        for (int u = 0; u < G.passes[i].use_count; u++)
+            if (G.passes[i].uses[u].res == r) return VK_ATTACHMENT_STORE_OP_STORE;
+    return VK_ATTACHMENT_STORE_OP_DONT_CARE;
+}
 
 bool fg_valid(FgRes r) { return r >= 0 && r < G.res_count && (G.res[r].kind == FG_IMPORT || G.res[r].phys >= 0); }
 VkImageView fg_view(FgRes r) {

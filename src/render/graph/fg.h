@@ -73,6 +73,10 @@ u32 fg_mips(FgRes r);
 bool fg_history_valid(FgRes r);   // false on the first frame / after a resize (reset temporal state)
 void fg_mip_barrier(VkCommandBuffer cmd, FgRes r);   // compute -> compute on the whole image (GENERAL)
 bool fg_valid(FgRes r);
+// The store op of an attachment of the executing pass: DONT_CARE for a transient texture no later
+// pass of this frame uses (on tile-based GPUs, Apple / MoltenVK: the tile is never written back;
+// docs/PLATFORM_MACOS.md "TBDR"), STORE otherwise (imports, histories, anything used later).
+VkAttachmentStoreOp fg_store_op(FgRes r);
 
 // Diagnostics.
 FgRes fg_find(const char *name);  // this frame's resource by name (debug views)

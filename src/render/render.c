@@ -1787,7 +1787,7 @@ static void exec_scope_pip(VkCommandBuffer cmd, void *u) {
     da.imageView = fg_view(F.pip_depth);
     da.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
     da.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    da.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    da.storeOp = fg_store_op(F.pip_depth);
     da.clearValue.depthStencil.depth = 1.0f;
     VkRenderingInfo ri = { VK_STRUCTURE_TYPE_RENDERING_INFO };
     ri.renderArea.extent.width = F.pip_size;
@@ -1824,7 +1824,7 @@ static void exec_scope_pip_decals(VkCommandBuffer cmd, void *u) {
     da.imageView = fg_view(F.pip_depth);
     da.imageLayout = VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL;
     da.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
-    da.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    da.storeOp = fg_store_op(F.pip_depth);
     VkRenderingInfo ri = { VK_STRUCTURE_TYPE_RENDERING_INFO };
     ri.renderArea.extent.width = F.pip_size;
     ri.renderArea.extent.height = F.pip_size;
@@ -1853,7 +1853,7 @@ static void exec_scope_pip_fx(VkCommandBuffer cmd, void *u) {
     da.imageView = fg_view(F.pip_depth);
     da.imageLayout = VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL;
     da.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
-    da.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    da.storeOp = fg_store_op(F.pip_depth);
     VkRenderingInfo ri = { VK_STRUCTURE_TYPE_RENDERING_INFO };
     ri.renderArea.extent.width = F.pip_size;
     ri.renderArea.extent.height = F.pip_size;
@@ -1904,7 +1904,7 @@ static void exec_alt_scene(VkCommandBuffer cmd, void *u) {
     da.imageView = fg_view(a->depth);
     da.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
     da.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    da.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    da.storeOp = fg_store_op(a->depth);
     da.clearValue.depthStencil.depth = 1.0f;
     VkRenderingInfo ri = { VK_STRUCTURE_TYPE_RENDERING_INFO };
     ri.renderArea.extent.width = a->w;
