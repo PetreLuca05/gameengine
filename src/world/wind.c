@@ -271,19 +271,27 @@ static void spring(float x[2], float v[2], const float target[2], float dt) {
         }
 }
 
-void wind_tile_update(WindField *f, const float cam[3], float dt) {
+void wind_tile_begin(WindField *f, const float cam[3], float dt, WindTileStep *st) {
     if (dt < 0) dt = 0;
     if (dt > 0.25f) dt = 0.25f;
-    i32 ox = (i32)floorf(cam[0] / WIND_TEXEL) - WIND_TEX / 2, oz = (i32)floorf(cam[2] / WIND_TEXEL) - WIND_TEX / 2;
-    bool moved = !f->tile_valid || ox != f->ox || oz != f->oz;
+    st->dt = dt;
+    st->cam_y = cam[1];
+    st->ox = (i32)floorf(cam[0] / WIND_TEXEL) - WIND_TEX / 2, st->oz = (i32)floorf(cam[2] / WIND_TEXEL) - WIND_TEX / 2;
+    st->moved = !f->tile_valid || st->ox != f->ox || st->oz != f->oz;
     float gtarget[2] = { f->dir[0] * f->base.speed, f->dir[1] * f->base.speed };
     if (!f->tile_valid) { memcpy(f->global_bend, gtarget, 8); memset(f->global_bend_v, 0, 8); }
     spring(f->global_bend, f->global_bend_v, gtarget, dt);
-    for (int j = 0; j < WIND_TEX; j++)
+}
+
+void wind_tile_rows(WindField *f, const WindTileStep *st, int j0, int j1) {
+    i32 ox = st->ox, oz = st->oz;
+    bool moved = st->moved;
+    float dt = st->dt;
+    for (int j = j0; j < j1; j++)
         for (int i = 0; i < WIND_TEX; i++) {
             i32 wx = ox + i, wz = oz + j;
             int slot = wrap(wz) * WIND_TEX + wrap(wx);
-            float p[3] = { ((float)wx + 0.5f) * WIND_TEXEL, cam[1], ((float)wz + 0.5f) * WIND_TEXEL }, w[3];
+            float p[3] = { ((float)wx + 0.5f) * WIND_TEXEL, st->cam_y, ((float)wz + 0.5f) * WIND_TEXEL }, w[3];
             wind_at(f, p, w);
             f->inst[slot][0] = w[0];
             f->inst[slot][1] = w[2];
@@ -300,9 +308,19 @@ void wind_tile_update(WindField *f, const float cam[3], float dt) {
             t[2] = wind_f2h(f->bend[slot][0]);
             t[3] = wind_f2h(f->bend[slot][1]);
         }
-    f->ox = ox;
-    f->oz = oz;
+}
+
+void wind_tile_end(WindField *f, const WindTileStep *st) {
+    f->ox = st->ox;
+    f->oz = st->oz;
     f->tile_valid = true;
+}
+
+void wind_tile_update(WindField *f, const float cam[3], float dt) {
+    WindTileStep st;
+    wind_tile_begin(f, cam, dt, &st);
+    wind_tile_rows(f, &st, 0, WIND_TEX);
+    wind_tile_end(f, &st);
 }
 
 bool wind_tile_sample(const WindField *f, float x, float z, float out[4]) {
