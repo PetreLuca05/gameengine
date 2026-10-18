@@ -57,7 +57,8 @@ camera (`max_range` when the camera ray hits nothing):
 ```
 depth    = hit + the muzzle's depth ahead of the camera   (both distances from the camera)
 margin   = max(obstruct_margin, obstruct_margin_rel × far, parallax)
-parallax = (muzzle's distance from the camera ray) × cot(grazing angle at P), at most 3 m
+parallax = separation × cot(grazing angle at P), at most max(3 m, 25 % of far)
+separation = the muzzle's distance from the camera ray + far × tan(angle between B and the ray)
 ```
 
 | Class | Rule (in this order) | Crosshair |
@@ -74,6 +75,12 @@ parallax = (muzzle's distance from the camera ray) × cot(grazing angle at P), a
   at 40 m).
 - Aiming at the ground ahead: a barrel 12 cm under the camera ray reaches the ground ~1 m before P at
   a 6.5° grazing angle. The `parallax` term covers it.
+- ADS at far terrain: P on a slope 145 m out at a 0.6° grazing angle. A barrel 0.07° off the ray
+  lands ~21 m short on the same slope. That is parallax again; a wall 60 m short is still an
+  obstruction.
+- Hip fire in the open: the hip barrel can point ~1–2° off the camera ray. At range its line may end
+  on something well short of what the camera sees (a post 140 m out, P on a hill at 220 m). By the
+  rule that is obstructed and the crosshair shows it: the bullet really lands there.
 - When the obstruction clears, the crosshair eases back to the centre (`crosshair_obstruct_lerp`).
 
 When the crosshair is moved it shows where the bullet goes. Bullets always fly along B: the crosshair
@@ -167,7 +174,7 @@ tells the truth about where that line ends, it changes nothing.
     keeps the muzzle's offset from the camera ray, and every spread pellet is within the cone radius
     of the barrel line; the in-tick recoil turns B like the view;
   - the obstruction rule: no hit, wall at 1 m with a target at 50 m (obstructed), barrel within
-    `obstruct_near`, the 40 m parallax cases (clear), the grazing ground case (clear), a crate short of
+    `obstruct_near`, the 40 m parallax cases (clear), the grazing ground and far-terrain ADS cases (clear), a crate short of
     P (obstructed), friendly;
   - muzzle-inside-wall recovery never inside the wall (64 poses);
   - validation: muzzle and barrel claims in tolerance verbatim, cheats clamped, the reach cap, host
@@ -175,9 +182,11 @@ tells the truth about where that line ends, it changes nothing.
   - spread ring and the crosshair's smoothing (within 1 px of Q after 1 s at 60 and 144 Hz).
 - `aim_sockets` (ctest, Python): the muzzle socket and `aim` block of every gun.
 - `tools/tests/aim_obstruct.cfg` + `aim_check.py` (game): the dev room aim stand.
-  - Open field hip (clear: the crosshair at the centre, the shot along the barrel line, Q on it) and
-    ADS (clear, B within 0.3° of the camera axis).
-  - Wall edge (obstructed), barrel on the wall (barrel), the barrel rule (trigger held), back in the
+  - Hip at a panel 16 m out (clear: the crosshair at the centre, the shot along the barrel line, Q on
+    it) and ADS in the open field (clear, B within 0.3° of the camera axis). The script runs
+    with weapon sway off: the cases are geometry.
+  - A corner at range (the camera ray passes a panel's edge 16 m out, the toed-in hip barrel line
+    lands on it: obstructed), barrel on the wall (barrel), the barrel rule (trigger held), back in the
     open (the crosshair returns to the centre), the ground 15 m ahead (parallax: clear).
   - Window crouched, low wall, thin wall (recovered), car bonnet, a teammate (friendly).
   - Each obstructed case checks the crosshair within 1 px of Q's projection; each shot checks its
