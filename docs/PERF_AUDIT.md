@@ -253,11 +253,14 @@ on 4 CPU cores) under Xvfb, 1600 x 900. CPU zones, counters, allocation sites, f
 counts, screenshots and state hashes are real; GPU milliseconds are the software rasterizer's.
 Report: [perf/AUDIT_2026-10-18.md](perf/AUDIT_2026-10-18.md); fixes: [perf/FINDINGS.md](perf/FINDINGS.md).
 
-- Scenes captured: devroom, horde500, night_lights, vehicle_yard (Modern and Low), lan2 with a
-  reduced load (Engine Fidelity Off, 60 zombies: lavapipe frames are too slow for the 8 s ENet
-  handshake under the full load). `foliage` and `water_weather` (the open-world maps) crash inside
-  lavapipe's JIT; the unmodified base commit (2cd1d95) crashes the same way on `map vegetation`
-  without any capture, so it is the software driver, not the instrumentation.
+- Scenes captured: devroom, horde500, night_lights, vehicle_yard (Modern and Low). `foliage` and
+  `water_weather` (the open-world maps) crash inside lavapipe's JIT; the unmodified base commit
+  (2cd1d95) crashes the same way on `map vegetation` without any capture, so it is the software
+  driver, not the instrumentation. `lan2` was not exercised: on this Linux container the client never
+  completes the ENet connect to a local host (loopback UDP works; the host, running at ~100 ms frames
+  and waiting with `net_wait_clients`, logs no incoming peer). The LAN tests (`tools/tests/*_net.sh`)
+  run on Windows, where the first run captures `lan2`; the net section's rule (R16) is tested on
+  synthetic profiles.
 - The five fixes were verified A/B (2 x A/B, 40 frames, the dev room): state hashes identical in
   every pass, every reference image inside the A vs A' envelope (lavapipe frames differ run to run by
   ~0.3 % of the pixels), timings as recorded in FINDINGS.md. PF-0003 removes its allocation but its
