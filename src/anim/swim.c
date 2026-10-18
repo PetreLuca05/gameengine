@@ -1,4 +1,5 @@
-// Procedural swimming (docs/WATER.md "Swim animation"): no clips. The body tips from upright
+// Procedural swimming (docs/WATER.md "Swim animation"), used when the anim set binds no swim clips
+// (swim_idle / swim_f; with them only the surface ride and the dive pitch). The body tips from upright
 // (treading water) towards prone with the swim speed; under water it follows the dive direction.
 // Arms: front crawl at the surface (hand targets on an ellipse around the shoulder, recovery arc held
 // above the waterline, the pull below it: the hands meet the surface), breaststroke under water,
@@ -22,6 +23,24 @@ void proc_swim(ProcState *st, const ProcInput *in, Pose *pose, Xform *model) {
     if (in->swim_phase_valid) st->swim_phase = in->swim_phase;
     else st->swim_phase = fmodf(st->swim_phase + in->dt * (1.6f + in->swim_speed * 1.9f), 2.0f * DG_PI * 1024.0f);
     float ph = st->swim_phase;
+
+    if (in->swim_clips) {
+        // The swim clips (controller state 'swim': treading water, the front crawl) own the body and
+        // the strokes. Left here: while swimming the pelvis rides just under the surface (the crawl
+        // lies flat in the water), and under water the body pitches along the dive.
+        int hips = s->role[BR_HIPS];
+        if (hips < 0) return;
+        if (!under && in->water_y > -1e8f) {
+            Xform n = model[hips];
+            n.t.y = lerpf(n.t.y, in->water_y - 0.22f - in->root.t.y, w * moving);
+            pose_set_model(s, pose, model, hips, n);
+            pose_update_children(s, pose, model, hips);
+        }
+        float dive = under ? clampf(-5.0f - in->aim_pitch * DG_RAD2DEG, -80.0f, 75.0f) * moving : 0.0f;
+        st->swim_tilt = approach_f(st->swim_tilt, dive, in->dt * 140.0f);
+        if (fabsf(st->swim_tilt) > 0.01f) proc_rotate_bone(s, pose, model, hips, quat_axis_angle(v3(1, 0, 0), -st->swim_tilt * w * DG_DEG2RAD));
+        return;
+    }
 
     // ---- body tilt (degrees forward from upright), smoothed
     float tilt;

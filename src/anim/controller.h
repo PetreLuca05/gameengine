@@ -69,6 +69,8 @@ typedef struct StateDef {
     bool hand_ik;                  // procedural weapon hold active in this state
     bool sync;                     // keep phase when transitioning between sync states
     bool speed_match;              // playback rate follows `speed` / the clips' root speed (no foot sliding)
+    bool clip_root_y;              // "root_y": "clip": the clip carries the vertical travel (a climb); the
+                                   // rendered root keeps its height from the state's start (characters.c)
 } StateDef;
 
 typedef struct Condition { i16 param; u8 op; float value; } Condition;
@@ -189,6 +191,9 @@ float ctrl_state_time(const ControllerInst *c, int layer);
 bool ctrl_hand_ik_weight(const ControllerInst *c, float *w);   // procedural hold weight from upper layer
 // Root motion of the base layer for this tick (model space XZ + yaw), only clips flagged root_motion.
 void ctrl_root_delta(const ControllerInst *c, const ClipLookup *clips, float dt, vec3 *dpos, float *dyaw);
+// Height of the root bone (the hips) in the first frame a state plays (its heaviest clip at the
+// start of its range); false for an empty state.
+bool ctrl_state_start_hips_y(const ControllerInst *c, const ClipLookup *clips, int layer, int state, float *y);
 const char *ctrl_state_name(const ControllerInst *c, int layer, int state);
 
 #endif

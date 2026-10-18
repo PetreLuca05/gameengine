@@ -154,6 +154,7 @@ typedef struct ProcState {
     vec3 prev_vel;
     vec3 lean;                 // smoothed lean angles
     float ads_lean;            // 0..1: looking up in ADS leans the upper body back with the gun (smoothed ads_t)
+    float clip_chest_yaw;      // the clip's chest yaw off the body this tick (deg, + = left): the hold's bladed stance turns the chest to its twist from it
     // hold style blend
     int style, prev_style;
     float style_t;             // 0..1 blend from prev to style
@@ -254,6 +255,7 @@ typedef struct ProcInput {
     // the stroke on hand h).
     u8 swim;
     u8 swim_hold_mask;
+    bool swim_clips;           // the swim clips play (controller state 'swim'): no procedural stroke
     bool swim_phase_valid;
     float swim_speed, swim_phase, water_y;
 } ProcInput;

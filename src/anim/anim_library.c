@@ -83,9 +83,41 @@ static void clip_turn(const Skeleton *s, Clip *c, float deg) {
     }
 }
 
+// A jump played with the movement's own rise: every frame's hips are capped at their highest
+// height with a toe down (within 3 cm of its lowest; a running jump never has both down), so the
+// clip keeps the take-off crouch, the tuck and the landing squat but the body rises only with the
+// character.
+static void clip_air_in_place(const Skeleton *s, Clip *c) {
+    int hips = s->role[BR_HIPS], toe[2] = { s->role[BR_L_TOE], s->role[BR_R_TOE] };
+    if (hips < 0 || s->parent[hips] >= 0 || toe[0] < 0 || toe[1] < 0 || c->bones != s->count || c->frames < 2) return;
+    float *ty = (float *)malloc(sizeof(float) * 2 * (size_t)c->frames);
+    float lo[2] = { 1e9f, 1e9f };
+    Pose p;
+    Xform m[ANIM_MAX_BONES];
+    p.count = c->bones;
+    for (int f = 0; f < c->frames; f++) {
+        memcpy(p.local, &c->data[(size_t)f * (size_t)c->bones], sizeof(Xform) * (size_t)c->bones);
+        pose_to_model(s, &p, m);
+        for (int k = 0; k < 2; k++) {
+            ty[f * 2 + k] = m[toe[k]].t.y;
+            lo[k] = fminf(lo[k], m[toe[k]].t.y);
+        }
+    }
+    float stand = -1e9f;
+    for (int f = 0; f < c->frames; f++)
+        if (ty[f * 2] <= lo[0] + 0.03f || ty[f * 2 + 1] <= lo[1] + 0.03f) stand = fmaxf(stand, c->data[(size_t)f * (size_t)c->bones + (size_t)hips].t.y);
+    free(ty);
+    if (stand <= -1e8f) return;
+    for (int f = 0; f < c->frames; f++) {
+        Xform *x = &c->data[(size_t)f * (size_t)c->bones + (size_t)hips];
+        x->t.y = fminf(x->t.y, stand);
+    }
+}
+
 static void apply_clip_meta(AnimLibrary *lib) {
     char rel[300];
     float yaw[LIB_MAX_CLIPS] = { 0 };
+    bool air[LIB_MAX_CLIPS] = { 0 };
     snprintf(rel, sizeof(rel), "%s/clips.json", lib->human_dir);
     char *text = read_text(rel);
     u32 h = ANIM_HASH_SEED;
@@ -114,6 +146,8 @@ static void apply_clip_meta(AnimLibrary *lib) {
             // "yaw": the clip's body turned about the vertical (degrees, negative = to the right), for
             // clips authored facing off the forward axis.
             if (cJSON_IsNumber(v = cJSON_GetObjectItemCaseSensitive(e, "yaw"))) yaw[ci] = (float)v->valuedouble;
+            // "air_in_place": a jump whose rise comes from the movement (clip_air_in_place).
+            air[ci] = cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(e, "air_in_place"));
             if (cJSON_IsString(v = cJSON_GetObjectItemCaseSensitive(e, "reference"))) c->additive_ref = anim_lib_find_clip(lib, v->valuestring);
             v = cJSON_GetObjectItemCaseSensitive(e, "markers");
             if (cJSON_IsArray(v) && cJSON_GetArraySize(v) >= 2) {
@@ -142,6 +176,9 @@ static void apply_clip_meta(AnimLibrary *lib) {
     for (int i = 0; i < lib->clip_count; i++) {
         if (fabsf(yaw[i] - lib->clip_yaw[i]) > 1e-4f) clip_turn(&lib->skel, &lib->clips[i], yaw[i] - lib->clip_yaw[i]);
         lib->clip_yaw[i] = yaw[i];
+        // Capping is not undone by a meta reload (anim_rebake / a restart restores the clip).
+        if (air[i] && !lib->clip_air[i]) clip_air_in_place(&lib->skel, &lib->clips[i]);
+        lib->clip_air[i] |= air[i];
     }
     lib->manifest.hash[AC_CLIPS] = h;
 }
@@ -503,6 +540,7 @@ static bool load_clips(AnimLibrary *lib) {
     for (int i = 0; i < lib->clip_count; i++) clip_free(&lib->clips[i]);
     lib->clip_count = 0;
     memset(lib->clip_yaw, 0, sizeof(lib->clip_yaw));
+    memset(lib->clip_air, 0, sizeof(lib->clip_air));
     int n = 0;
     char **files = list_files(lib->human_dir, "*.fbx", &n);
     for (int i = 0; i < n && lib->clip_count < LIB_MAX_CLIPS; i++) {

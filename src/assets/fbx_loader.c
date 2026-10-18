@@ -29,8 +29,9 @@ static bool contains_ci(const char *s, const char *sub) {
 }
 
 bool fbx_guess_loop(const char *name) {
+    // " to ": Mixamo transitions ("Braced Hang To Crouch", "Crouch To Stand") play once.
     static const char *once[] = { "turn", "jump", "death", "die", "hit", "land", "mantle", "vault", "pull", "reload", "fire",
-                                  "melee", "attack", "equip", "holster", "climb", "start", "stop" };
+                                  "melee", "attack", "equip", "holster", "climb", "start", "stop", " to " };
     for (int i = 0; i < ARRAY_COUNT(once); i++)
         if (contains_ci(name, once[i])) return false;
     return true;
@@ -626,6 +627,11 @@ int fbx_bake_clips(const char *path, const Skeleton *canon, const FbxBakeOptions
             }
         }
         // ---- root motion extraction on the root bone (index 0)
+        // Clips keep the facing they were authored with: the file's forward is the canonical forward
+        // (Mixamo clips and the canonical rig share it). The hips' own yaw is part of the motion: a
+        // bladed rifle stance has them 40 deg off the aim, a diagonal jog's start frame 10-20 deg off
+        // its travel, so turning each clip until its first-frame hips face forward would point guns
+        // and diagonals the wrong way.
         vec3 fwd_local = quat_rotate(quat_conj(canon->bind_model[0].r), v3(0, 0, -1));
         Xform *first = c->data, *last = c->data + (size_t)(frames - 1) * canon->count;
         vec3 p0 = first[0].t, pend = last[0].t;
@@ -642,11 +648,14 @@ int fbx_bake_clips(const char *path, const Skeleton *canon, const FbxBakeOptions
             yaw[f] = unwrap;
         }
         float yend = yaw[frames - 1];
+        // A one-shot whose hips end 45 deg or more from where they started is a turn: its yaw is
+        // root motion. Less is the body's own sway (a jump squaring up, a climb), which stays.
+        bool turn = fabsf(yend) >= 0.25f * DG_PI;
         for (int f = 0; f < frames; f++) {
             float u = (float)f / (float)(frames - 1);
             vec3 p = c->data[(size_t)f * canon->count].t;
             vec3 travel = c->loop ? v3_scale(v3_flat(v3_sub(pend, p0)), u) : v3_flat(v3_sub(p, p0));
-            float ytrack = c->loop ? yend * u : yaw[f];
+            float ytrack = c->loop ? yend * u : (turn ? yaw[f] : 0.0f);
             c->root_t[f] = travel;
             c->root_yaw[f] = ytrack;
         }
@@ -654,9 +663,7 @@ int fbx_bake_clips(const char *path, const Skeleton *canon, const FbxBakeOptions
         vec3 mean = v3(0, 0, 0);
         for (int f = 0; f < frames; f++) {
             Xform *r = &c->data[(size_t)f * canon->count];
-            // Also align the start facing to the canonical bind (rigs exported with a rotated
-            // armature / root face another way; y0 = 0 for clips authored on the canonical rig).
-            quat unyaw = quat_yaw(-c->root_yaw[f] - y0);
+            quat unyaw = quat_yaw(-c->root_yaw[f]);
             vec3 rel = v3_sub(v3_sub(r->t, p0), c->root_t[f]);
             rel = quat_rotate(unyaw, rel);
             r->t = v3_add(p0, rel);

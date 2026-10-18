@@ -1593,9 +1593,9 @@ static void cmd_char_list(int argc, const char **argv) {
         CharacterInst *c = w->chars->c[k];
         if (!c) continue;
         const ControllerInst *ct = &c->rt.ctrl;
-        log_info("  ent %5u %-18s %-7s state %s/%s phase %.2f legs %+.0f/%+.0f mv %.2f,%.2f lod %d %.0fpx resyncs %d events hit %u die %u%s", c->ent, c->def->id,
+        log_info("  ent %5u %-18s %-7s state %s/%s phase %.2f mv %.2f,%.2f lod %d %.0fpx resyncs %d events hit %u die %u%s", c->ent, c->def->id,
                  ent_type_name((EntityType)w->type[ENT_INDEX(c->ent)]), ctrl_state_name(ct, 0, ct->layer[0].state), ctrl_state_name(ct, 1, ct->layer[1].state),
-                 ct->layer[0].phase, c->rt.leg_yaw * DG_RAD2DEG, c->rt.leg_yaw_target * DG_RAD2DEG, c->rt.in.move_local.x, c->rt.in.move_local.y, c->lod, c->pixels, c->resyncs, c->events_received[AEV_HIT], c->events_received[AEV_DIE],
+                 ct->layer[0].phase, c->rt.in.move_local.x, c->rt.in.move_local.y, c->lod, c->pixels, c->resyncs, c->events_received[AEV_HIT], c->events_received[AEV_DIE],
                  c->dead ? (c->rag.active ? " DEAD ragdoll" : (c->settled ? " DEAD settled" : " DEAD")) : "");
     }
     int ev, df;

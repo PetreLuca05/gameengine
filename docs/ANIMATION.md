@@ -31,8 +31,13 @@ of cache entry in `assets/cache/`, named `<stem>.<kind>.<key>.dgc`: the skeleton
 
 * `--rebuild-cache` on the game's command line ignores every cache entry once.
 * `anim_rebake` re-bakes changed FBX files in a running game.
-* `tools/bake_anim [--rate 30|60] [--rebuild] [files|dirs]` bakes offline and prints one line per clip
-  (frames, duration, loop, root travel and speed, turn, foot-plant markers, hash).
+* `tools/bake_anim [--rate 30|60] [--rebuild] [--survey] [files|dirs]` bakes offline and prints one line
+  per clip (frames, duration, loop, root travel and speed, turn, foot-plant markers, hash). `--survey`
+  adds the chest / hips facing, the hips height range and the planted toes' slide: its direction tells a
+  left diagonal from a right one, its speed is an in-place clip's `root_speed` (within 1-5 % of clips
+  that carry their travel).
+* `tools/anim_probe <clip> [bone] [steps]` prints a bone's model-space position over a clip: where a
+  jump takes off and lands, where a hand catches a ledge (sub-ranges for anim sets).
 * `tools/validate_rig [--canon rig.fbx] [--tolerance 0.25] <fbx|dir>...` checks rigs (see below).
 
 **Space conversion.** Every transform is converted to game space: Y up, −Z forward, metres, using
@@ -42,39 +47,80 @@ is 1.80 m tall and faces −Z.
 **Clip baking.** Clips are sampled at `anim_sample_rate` (30 or 60 Hz, archived) by evaluating each
 frame's node transforms with ufbx and storing local TRS per bone. Root motion is taken from the Hips:
 * Loops lose their linear travel and yaw, so they play in place, and the travel becomes `avg_speed`.
-* One-shots lose all root travel.
+* One-shots lose all horizontal root travel. Their yaw is removed only when the hips end 45° or more
+  from where they started (a turn clip, whose yaw is root motion); smaller yaw is the body's own sway
+  (a jump squaring up, a climb) and stays.
 * The per-frame root track is kept for `root_motion` clips. Only the host applies it, to NPCs.
+* `" to "` in a file name (Mixamo transitions: `Braced Hang To Crouch`) bakes a one-shot, like `jump`,
+  `turn`, `climb` ... (`fbx_guess_loop`).
 
 Foot-plant markers are detected from foot heights unless `clips.json` provides them.
 
 **Clip names** are the FBX file stem, or `file:take` for multi-take files. `assets/human/clips.json`
-adds per-clip metadata: `loop`, `speed`, `root_motion`, `markers`, `events`, `blend_in`,
-`blend_out`, `additive` and `reference`.
+adds per-clip metadata: `name` (the alias anim sets use), `loop`, `speed`, `root_speed`,
+`root_motion`, `markers`, `events`, `blend_in`, `blend_out`, `additive`, `reference`, `yaw` and
+`air_in_place` (a jump played with the movement's rise: the hips are capped at their highest height
+with a toe down, so the clip keeps the take-off crouch, the tuck and the landing squat but rises
+only with the character).
 
 ### Clips in use
 
-Locomotion and idles come from the takes in `assets/human/Animations.fbx`. `clips.json` gives them
-short names (`idle`, `idle_rifle`, `jog_forward`, `jog_backward`, `jog_strafe_left`, `sprint`, ...)
-and a `root_speed` for these in-place clips, so playback rate follows the move speed. Strafe right
-is `jog_strafe_left@mirror`. `jump` and `Hanging Idle` stay separate files.
+One Mixamo FBX per clip in `assets/human/` (git-ignored source art, like the meshes). `clips.json`
+names them; the anim sets bind them to slots:
 
-**Diagonals.** There are no diagonal clips. On a forward or backward diagonal, the legs (Hips and
-below) turn toward the move direction, up to 60°, while the spine counter-rotates so the upper body
-keeps facing the aim. The blend tree gets the remaining direction (pure forward or backward). The
-leg yaw is smoothed per tick, and so are the blend-tree direction and speed (about 0.15 s), so
-changing direction or speed cross-fades the clips instead of popping (`CharRuntime.leg_yaw`,
-`blend_dir`, `character_rt.c`). `test_anim` checks the hip angle, chest facing and blend direction
-for every diagonal.
+| File | Clip | Slots (player set) |
+|---|---|---|
+| `Idle` | `idle` | `idle`, the strafes (missing clips, below) |
+| `Pistol Idle`, `Rifle Aiming Idle` | `pistol_idle`, `rifle_idle` | `idle_pistol`; `idle_rifle` / `_smg` / `_shotgun` / `_lmg` |
+| `Jog Forward`, `Jog Backward` | `jog_f`, `jog_b` (`root_speed` 2.5, 2.15) | `walk_f` / `run_f`, `walk_b` / `run_b` |
+| `Jog Forward Diagonal Left / Right` | `jog_fl`, `jog_fr` (2.8) | `walk_fl` / `run_fl`, `walk_fr` / `run_fr` |
+| `Jog Backward Diagonal Left / Right` | `jog_bl`, `jog_br` (their travel: 2.51) | `walk_bl` / `run_bl`, `walk_br` / `run_br` |
+| `Sprint`, `Sprint Forward` | `sprint` (5.93), `sprint_forward` (6.4) | `sprint` (players), `sprint` (zombies) |
+| `Jump` | `jump` (`air_in_place`) | `jump_start` 0 .. 0.4 (take-off to just before touchdown), `jump_loop` 0.38 .. 0.4 (held), `jump_land` 0.42 .. 0.75, `jump_land_hard` 0.42 .. 1 |
+| `Jumping` (a running jump) | `jump_run` (`air_in_place`) | `jump_run` 0.26 .. 0.74 (take-off to touchdown), `jump_land_run` 0.75 .. 1 |
+| `Jumping To Hanging` | `jump_to_hang` | `hang_grab` |
+| `Hanging Idle` | `hang_idle` | `hang_idle` |
+| `Braced Hang To Crouch` | `hang_climb` | `mantle_high` (the pull-up from a hang) |
+| `Swimming`, `Treading Water` | `swim` (1.0), `tread_water` | `swim_f`, `swim_idle` |
+| `Crawling` | `crawl` (0.55) | `downed_crawl` |
+
+The jump sub-ranges come from the clips themselves (`anim_probe jump LeftToeBase`): the standing jump
+starts at its take-off and lands after 0.63 s, the game's flat-ground jump (`pl_jump_speed` 6,
+`pl_gravity` 18) after 0.67 s, so it plays at its own rate; the running jump's run-up (0 .. 0.26)
+is skipped because the jump press is the take-off. `jump_run` plays above 3 m/s.
+
+**Locomotion.** `idle_{weapon}` at 0, the 8-way jog at the slow-walk (1.6) and run (4.2) bands, the
+sprint at 6.8; `speed_match` plays the jog at the move speed (0.7x slow-walking, 1.7x running). The
+blend tree gets the move direction itself (0 forward, 90 right): forward, back and the four diagonals
+have clips. Speed and direction are smoothed per tick (about 0.15 s), so changing direction or speed
+cross-fades the clips instead of popping (`blend_dir`, `character_rt.c`). `test_anim` checks, for
+every direction with a clip, that the planted toes carry the body that way (within 8°; they measure
+within 1.5°) at the move speed (no foot sliding), and reports the ones that play idle.
 
 **Smooth locomotion.** Speed and move direction go through critically damped springs (no
-velocity kinks), and the direction is split continuously into hip yaw plus blend direction:
-exactly 45° on a diagonal, untwisting through the strafe band, with no cut-off angles. Every
-looping clip's feet are synced to one shared reference (phase 0 = left-foot plant; mirror and
-reverse aware), so leaves can join or leave a blend without a phase jump. Blend spaces only use
-bound children, so unbound slots never take weight. Loops are made seamless at bake (bake
-version 5), and foot locking eases in and out. `test_anim` drives a full accelerate / diagonal /
-strafe / back / stop sequence through the runtime and fails on any acceleration spike, and checks
-every loop seam.
+velocity kinks). Every looping clip's feet are synced to one shared reference (phase 0 = left-foot
+plant; mirror and reverse aware), so leaves can join or leave a blend without a phase jump. Blend
+spaces only use bound children, so unbound slots never take weight. Loops are made seamless at bake
+(bake version 5), and foot locking eases in and out. `test_anim` drives a full accelerate /
+diagonal / strafe / back / stop sequence through the runtime and fails on any acceleration spike
+(strafe phases that play idle stay out of the mean), and checks every loop seam.
+
+**Ledges.** Falling past a ledge grabs it (docs/CONTROLLER.md): `hang_grab` (the hands catch, the body
+swings and settles) then `hang`; the hand anchors keep the palms on the ledge. The pull-up from a hang
+is `mantle_high` with `"root_y": "clip"`: the climb clip carries the height, so the rendered root keeps
+the height it had when the state began, moved so the clip's first frame puts the hips where the hang
+had them, eased in over the cross-fade and back to the movement's over the next one
+(`clip_root_apply`, characters.c; the same on every machine). The ledge anchors let go of the hands
+gradually (mantle_t 0.4 .. 0.72) so the clip's hands take over. A mantle or pull-up without a hang is
+`mantle_low`.
+
+**Swimming.** State `swim` (param `is_swimming`, from the replicated swim / under-water entity flags):
+`tread_water` still, `swim` moving. With the swim clips bound, `swim.c` only keeps the pelvis just
+under the surface while swimming and pitches the body along the dive under water; without them the
+state plays idle and `swim.c` strokes procedurally.
+
+**Downed.** Still: idle + the procedural kneel. Moving: the crawl clip (on hands and knees), and the
+kneel steps aside (`charrt_proc_input`).
 
 **First-person camera.** The camera is the capsule eye plus the view's spine bend. It takes only a
 filtered, clamped share of the head socket's vertical bob (`cl_camera_socket_follow`, 0.35;
@@ -84,8 +130,35 @@ filtered, clamped share of the head socket's vertical bob (`cl_camera_socket_fol
 animation advances one baked frame per game tick. `cl_thirdperson 1` shows your own body from
 behind, for checking locomotion.
 
-**Facing.** At bake, each clip's start facing is aligned with the canonical bind, and `test_anim`
-checks every clip's chest faces forward. Bake version 4.
+**Facing.** Clips keep the facing they were authored with: Mixamo clips and the canonical rig share
+the forward axis, and the hips' own yaw is part of the motion (a bladed rifle idle has them 40° off
+the aim, a diagonal jog's first frame 10-20° off its travel). Bake version 9 dropped the old
+alignment of every clip's first-frame hips to forward, which pointed guns and diagonals the wrong way.
+`test_anim` checks every clip's chest, averaged over the clip, faces within 50° of forward (a rotated
+armature would be 90° or 180° off; `clips.json` `yaw` turns such a clip).
+
+### Missing clips
+
+A slot without a clip plays **idle**: unbound base-layer states fall back to it, the strafe slots are
+bound to it (blending the two diagonals does not carry the feet sideways: `test_anim` measured 0.6 m/s
+at 55° for a 3 m/s strafe), upper-body states stay procedural. Bind a new clip by dropping its FBX in
+`assets/human/`, naming it in `clips.json` (with `root_speed` from `bake_anim --survey` for an in-place
+loop) and setting the slot in `anim_sets/player.json` / `zombie.json`.
+
+| Needed for | Slots | Mixamo clip (search) | Now |
+|---|---|---|---|
+| Strafing (A / D) | `walk_l` / `walk_r`, `run_l` / `run_r` | Jog Strafe Left, Jog Strafe Right | idle, sliding |
+| Crouching (idle and walking, 8-way) | `crouch_idle`, `crouch_f` / `_b` / `_l` / `_r` / `_fl` / `_fr` / `_bl` / `_br` | Crouch Idle, Crouched Walking (forward / backward / left / right / diagonals) | idle (the procedural crouch drop) |
+| Zombie attacks | `attack_1` .. `attack_3` (full body), `attack_upper` (upper body) | Zombie Attack (two variants: swipe, two-handed smash), Zombie Punching (two variants: lunge, upper-body punch) | idle (the hits still land at `k_attack_hit`, characters.c: retune it to the new clips) |
+| Mantle / pull-up without a hang, vault | `mantle_low`, `vault` | Climbing (Freehang Climb), Jumping Over Obstacle / Vault | idle (the hands on the ledge by IK) |
+| Downed, still | (the `downed` tree's 0 child) | Kneeling Idle / Wounded Idle | idle + the procedural kneel |
+| Zombie locomotion (optional) | zombie set `walk_*` / `run_*` / `sprint` | Zombie Walk, Zombie Run | the player's jog / sprint |
+| Walk and run bands (optional) | `walk_*` (1.6 m/s), `run_*` (4.2 m/s) | Walking / Running 8-way (Forward, Backward, Strafe, Diagonals) | the jog at 0.7x / 1.7x |
+| Armed run (optional) | `run_f_{weapon}` | Pistol Run, Rifle Run | the jog (the arms are on the item by IK) |
+| Turn in place (optional) | `turn_l90`, `turn_r90` | Left Turn 90, Right Turn 90 | procedural turn (`turn.mode` procedural) |
+| Deaths, hit reactions (optional) | `death_*`, `hit_*` | Dying (front / back / left / right), Hit Reaction | ragdoll, procedural reactions |
+| Reload / fire / melee / equip (optional) | `reload_{weapon}`, `fire_{weapon}`, `melee_{weapon}`, `equip_{weapon}` | Reloading, Rifle / Pistol Firing, Melee | procedural (the first-person hands) |
+| Prone (not used by the movement) | `prone_idle`, `prone_f` | Prone Idle, Prone Forward | idle |
 
 ## Canonical skeleton and rig validation
 
@@ -190,6 +263,8 @@ parameter, set from events.
 * **Blend trees.** `blend1d` (thresholds) and `blend2d` (`"mode": "cartesian"` uses inverse-distance
   weights; `"directional"` uses gradient-band weights, good for 8-way locomotion). Trees nest.
   Synchronized children are phase-locked with foot-plant markers.
+* **`"root_y": "clip"`** on a state: its clip carries the vertical travel (the hang climb); see
+  "Ledges" above.
 * **Transitions.** Fields:
   * `from` (state, or `"*"` for any state) and `to`;
   * up to 4 `when` conditions (`[param, op, value]`, or `[trigger, "trigger"]`);
@@ -258,6 +333,13 @@ Styles: `none`, `pistol`, `rifle`, `shotgun`, `smg`, `lmg`, `melee_1h`, `melee_2
 * `ads_weight`: 0 for melee, which has no ADS pose.
 
 Style changes blend over `blend_time`.
+
+**Bladed stance.** With an item in hand the hold turns the chest so the support shoulder comes
+forward: to the style's `twist` (holdpoint.json, 22° for long guns, 10° for the pistol) off the body,
+from wherever the clip holds the chest this tick (`ProcState.clip_chest_yaw`, measured before the spine
+look). A weapon idle authored bladed (the rifle idle turns the whole body 40°) gets less, a run's chest
+sway is held still, so the upper body, the shoulders and the first-person arms are the same whatever the
+clip; the legs keep the clip's stance.
 
 ### Ledge hang
 

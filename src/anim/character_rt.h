@@ -11,6 +11,7 @@ typedef struct CharInputs {
     vec2 move_local;        // unit direction in body space (x right, y forward)
     bool grounded, crouch, prone, sprint, ads, mantling, vaulting, hanging, dead, attacking;
     bool downed;            // knocked down (docs/REVIVE.md): controller state 'downed' + the procedural kneel
+    bool swimming;          // at the surface or under water (EF_SWIM / EF_UNDERWATER): controller state 'swim'
     float mantle_t;
     float vertical_vel;
     float aim_pitch, aim_yaw, body_yaw;   // radians (world yaw)
@@ -37,11 +38,8 @@ typedef struct CharRuntime {
     Xform final_model[ANIM_MAX_BONES];
     bool base_valid;
     u32 evals;
-    // Diagonal movement: the legs (Hips down) turn towards the move direction and the spine
-    // counter-rotates so the upper body keeps facing the aim; the blend tree sees the remaining
-    // (cardinal) direction. Smoothed per tick (deterministic).
-    float leg_yaw, leg_yaw_target;
-    // Smoothed move direction (spring) -> blend-tree direction + hip yaw; smoothed speed.
+    // Smoothed move direction (spring) -> blend-tree direction (the diagonal clips cover the
+    // diagonals); smoothed speed.
     float dir_ang, dir_ang_v, dir_target;
     bool dir_init;
     vec2 blend_dir;
