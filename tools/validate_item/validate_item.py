@@ -108,6 +108,83 @@ def vertex(m, i):
     return VERT.unpack_from(m["data"], m["vo"] + VERT.size * i)
 
 
+def item_triangles(m):
+    """LOD 0 triangles in item space (rest pose)."""
+    tris = []
+    for p in m["parts"]:
+        if p["lod_count"] == 0:
+            continue
+        lo, hi = p["bmin"], p["bmax"]
+        pts = []
+        for i in range(p["v0"][0], p["v0"][0] + p["vn"][0]):
+            v = vertex(m, i)
+            q = tuple(lo[k] + (hi[k] - lo[k]) * v[k] / 65535.0 for k in range(3))
+            r = qrot(p["rest_rot"], q)
+            pts.append((r[0] + p["rest_pos"][0], r[1] + p["rest_pos"][1], r[2] + p["rest_pos"][2]))
+        idx = m["idx"][p["i0"][0]:p["i0"][0] + p["inn"][0]]
+        for t in range(0, len(idx) - 2, 3):
+            tris.append((pts[idx[t]], pts[idx[t + 1]], pts[idx[t + 2]]))
+    return tris
+
+
+def _sub(a, b):
+    return (a[0] - b[0], a[1] - b[1], a[2] - b[2])
+
+
+def _dot(a, b):
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+
+
+def point_tri(p, a, b, c):
+    """Closest point on triangle abc to p (Ericson, Real-Time Collision Detection 5.1.5)."""
+    ab, ac, ap = _sub(b, a), _sub(c, a), _sub(p, a)
+    d1, d2 = _dot(ab, ap), _dot(ac, ap)
+    if d1 <= 0 and d2 <= 0:
+        return a
+    bp = _sub(p, b)
+    d3, d4 = _dot(ab, bp), _dot(ac, bp)
+    if d3 >= 0 and d4 <= d3:
+        return b
+    vc = d1 * d4 - d3 * d2
+    if vc <= 0 and d1 >= 0 and d3 <= 0:
+        v = d1 / (d1 - d3) if d1 != d3 else 0.0
+        return (a[0] + ab[0] * v, a[1] + ab[1] * v, a[2] + ab[2] * v)
+    cp = _sub(p, c)
+    d5, d6 = _dot(ab, cp), _dot(ac, cp)
+    if d6 >= 0 and d5 <= d6:
+        return c
+    vb = d5 * d2 - d1 * d6
+    if vb <= 0 and d2 >= 0 and d6 <= 0:
+        w = d2 / (d2 - d6) if d2 != d6 else 0.0
+        return (a[0] + ac[0] * w, a[1] + ac[1] * w, a[2] + ac[2] * w)
+    va = d3 * d6 - d5 * d4
+    if va <= 0 and (d4 - d3) >= 0 and (d5 - d6) >= 0:
+        den2 = (d4 - d3) + (d5 - d6)
+        w = (d4 - d3) / den2 if den2 else 0.0
+        return (b[0] + (c[0] - b[0]) * w, b[1] + (c[1] - b[1]) * w, b[2] + (c[2] - b[2]) * w)
+    if va + vb + vc == 0:
+        return a   # degenerate (zero-area) triangle
+    den = 1.0 / (va + vb + vc)
+    v, w = vb * den, vc * den
+    return (a[0] + ab[0] * v + ac[0] * w, a[1] + ab[1] * v + ac[1] * w, a[2] + ab[2] * v + ac[2] * w)
+
+
+def glue(socket_pos, tris):
+    """Distance from a hand socket to the mesh surface (the hand has to sit on the model)."""
+    best = 1e9
+    for (a, b, c) in tris:
+        # cheap reject on the triangle's bounding sphere
+        cx, cy, cz = (a[0] + b[0] + c[0]) / 3, (a[1] + b[1] + c[1]) / 3, (a[2] + b[2] + c[2]) / 3
+        r = max(math.dist((cx, cy, cz), a), math.dist((cx, cy, cz), b), math.dist((cx, cy, cz), c))
+        if math.dist((cx, cy, cz), socket_pos) - r > best:
+            continue
+        best = min(best, math.dist(socket_pos, point_tri(socket_pos, a, b, c)))
+    return best
+
+
+GLUE_TOL = 0.03   # m: a palm socket sits on the surface (grip / handguard / foregrip), the palm is ~2 cm thick
+
+
 def load_json_objects():
     weapons, items, atts = {}, {}, {}
     wd = os.path.join(ROOT, "data", "weapons")
@@ -206,6 +283,16 @@ def check(item_id, cat, objs, lib, verbose=False):
         if d > tol:
             errs.append("socket %s at (%.4f %.4f %.4f), the JSON says (%.4f %.4f %.4f): %.1f mm off" % ((name,) + tuple(s["item_pos"]) + tuple(want) + (d * 1000,)))
 
+    # Hand glue: the hand sockets sit on the detailed geometry (tests the meshes against the hold data).
+    hands = [h for h in ("grip_r", "grip_l") if h in socks and h not in cat.get("no_glue", [])]
+    if hands:
+        tris_ = item_triangles(m)
+        for h in hands:
+            d = glue(socks[h]["item_pos"], tris_)
+            if d > GLUE_TOL:
+                errs.append("hand glue: socket %s is %.1f mm from the mesh (> %.0f mm): the hand would float" % (h, d * 1000, GLUE_TOL * 1000))
+            elif verbose:
+                print("    glue %s: %.1f mm" % (h, d * 1000))
     for s in cat.get("sockets", []):
         if s not in socks:
             errs.append("socket %s missing (catalog)" % s)

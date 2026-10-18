@@ -599,12 +599,13 @@ class Item:
         self.sockets = [(n, pt, pos if n in keep else pos + d, rot) for (n, pt, pos, rot) in self.sockets]
 
     def hold_small(self):
-        """Places a palm-held item where the old held box sat: bounds centre at (0, min(hy, 0.07) + 0.03, -0.05)
-        (src/gameplay/items.c item_held_box), the hand (grip_r) at the origin."""
+        """Places a palm-held item against the right palm: grip_r (the origin) is the palm centre and the
+        palm faces -X in item space (items.c item_palm_frame: back of the hand +X), so the item's +X face
+        sits on the origin, the palm a little below its middle, centred front to back."""
         mn, mx = self.bounds()
         c = (mn + mx) * 0.5
-        hy = (mx.y - mn.y) * 0.5
-        self.translate(Vector((0.0, min(hy, 0.07) + 0.03, -0.05)) - c, keep=("grip_r",))
+        hx, hy = (mx.x - mn.x) * 0.5, (mx.y - mn.y) * 0.5
+        self.translate(Vector((-hx + 0.002, hy * 0.2, 0.0)) - c, keep=("grip_r",))
 
     def socket(self, name, pos, rot=(0, 0, 0), part=None):
         """rot: engine-space Euler degrees (x pitch, y yaw, z roll) of the socket frame."""
