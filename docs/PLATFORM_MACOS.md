@@ -442,4 +442,4 @@ Nothing below can run on GitHub's VMs: no real GPU, no display, no Steam client,
 - [ ] Mac <-> PC LAN session with `tools/tests/bal_net.sh` split across the machines (host on each side once): predicted vs host hits identical.
 - [ ] Notarization with a Developer ID: `tools/macos/sign.sh` + `notarize.sh`, then Gatekeeper on a clean Mac (`spctl` accepts, first launch without a warning).
 - [ ] App Nap: background the game during a lobby wait. Ticks continue (`LSAppNapIsDisabled`).
-- [ ] Crash report: `crash_segv` (or `kill -SEGV`) logs a backtrace, and macOS writes its `.ips`.
+- [ ] Crash report: `kill -SEGV <pid>` logs a backtrace, and macOS writes its `.ips`.
