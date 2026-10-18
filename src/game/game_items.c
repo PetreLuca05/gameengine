@@ -62,8 +62,8 @@ static ItemMesh *mesh_for_id(const char *id, int *cond) {
 
 static void cmd_item_reload(int argc, const char **argv) {
     int n = item_mesh_reload_all(argc > 1 && !strcmp(argv[1], "all"));
-    icons_reload();
-    log_info("item_reload: %d mesh(es) re-read, materials re-layered, icons re-baking", n);
+    icons_rerender();
+    log_info("item_reload: %d mesh(es) re-read, materials re-layered, icons re-rendering (bake_icons writes the PNGs)", n);
     game_add_hint("Item meshes reloaded");
 }
 
@@ -262,10 +262,12 @@ static void draw_showcase(const RenderCamera *cam) {
     }
 }
 
-// Near-plane check (tools/tests/item_nearplane.cfg): every LOD 0 vertex of the first-person weapon and its
-// attachments, posed as drawn, in view space against the camera near plane the viewmodel pass uses.
-static int nearplane_count(ItemMesh *m, Xform root, const ItemMeshPose *pose, mat4 view, float znear, int *total, float *min_depth) {
-    int bad = 0;
+// Near-plane check (tools/tests/item_nearplane.cfg): the LOD 0 triangles of the first-person weapon and its
+// attachments, posed as drawn, in view space. A visible clip is an edge crossing the camera near plane
+// inside the view's near rectangle (a stock behind the eye, outside the frustum, is never seen).
+typedef struct NearStats { int cuts, behind, total; float min_depth; } NearStats;
+
+static void nearplane_mesh(ItemMesh *m, Xform root, const ItemMeshPose *pose, mat4 view, float zn, float tx, float ty, NearStats *st) {
     for (int p = 0; p < m->part_count; p++) {
         const DgimPart *dp = &m->dparts[p];
         if (dp->lod_count == 0) continue;
@@ -274,15 +276,26 @@ static int nearplane_count(ItemMesh *m, Xform root, const ItemMeshPose *pose, ma
             if (pose && m->parts[q].hide_slot >= 0 && (pose->hide_slots >> m->parts[q].hide_slot & 1u)) hidden = true;
         if (hidden) continue;
         Xform x = xf_mul(root, item_mesh_part_xform(m, p, pose));
+        vec3 *vs = malloc(sizeof(vec3) * dp->lod_vn[0]);
         for (u32 i = 0; i < dp->lod_vn[0]; i++) {
             vec3 w = render_viewmodel_to_world(xf_point(x, item_mesh_vertex_pos(dp, &m->verts[dp->lod_v0[0] + i])));
-            float depth = -mat4_mul_point(view, w).z;
-            *min_depth = fminf(*min_depth, depth);
-            (*total)++;
-            if (depth < znear) bad++;
+            vs[i] = mat4_mul_point(view, w);
+            float depth = -vs[i].z;
+            st->min_depth = fminf(st->min_depth, depth);
+            st->total++;
+            if (depth < zn) st->behind++;
         }
+        const u16 *ix = m->indices + dp->lod_i0[0];
+        for (u32 t = 0; t + 2 < dp->lod_in[0]; t += 3)
+            for (int e = 0; e < 3; e++) {
+                vec3 a = vs[ix[t + e]], b = vs[ix[t + (e + 1) % 3]];
+                float da = -a.z - zn, db = -b.z - zn;
+                if ((da < 0) == (db < 0)) continue;
+                vec3 c = v3_lerp(a, b, da / (da - db));
+                if (fabsf(c.x) <= zn * tx && fabsf(c.y) <= zn * ty) st->cuts++;
+            }
+        free(vs);
     }
-    return bad;
 }
 
 static void cmd_item_nearplane(int argc, const char **argv) {
@@ -294,21 +307,24 @@ static void cmd_item_nearplane(int argc, const char **argv) {
     ItemMesh *m = item_mesh_get(wd->model.mesh);
     if (!m) { log_info("item_nearplane %s %s: no mesh", wd->id, state); return; }
     mat4 view = render_view_matrix();
-    float znear = render_camera_znear(), min_depth = 1e9f;
-    int total = 0;
+    vec3 cp;
+    float fov;
+    render_camera_info(&cp, &fov);
+    float zn = render_camera_znear(), ty = tanf(fov * 0.5f * DG_DEG2RAD), tx = ty * (float)render_width() / (float)DG_MAX(render_height(), 1);
+    NearStats st = { 0, 0, 0, 1e9f };
     ItemMeshPose pose = { 0 };
     pose.wobble = quat_identity();
     for (int s = 0; s < ATT_SLOTS; s++)
         if (wd->att_applied[s]) pose.hide_slots |= (u8)(1u << s);
     pose.fold_slots = pose.hide_slots;
-    int bad = nearplane_count(m, xf_make(pos, rot), &pose, view, znear, &total, &min_depth);
+    nearplane_mesh(m, xf_make(pos, rot), &pose, view, zn, tx, ty, &st);
     for (int s = 0; s < ATT_SLOTS; s++) {
         const AttachmentDef *a = attach_def(&G->items, wd->att_applied[s]);
         ItemMesh *am = a ? item_mesh_get(attach_model_for(a, wd)->mesh) : NULL;
-        if (am) bad += nearplane_count(am, xf_mul(xf_make(pos, rot), attach_placement(wd, a)), NULL, view, znear, &total, &min_depth);
+        if (am) nearplane_mesh(am, xf_mul(xf_make(pos, rot), attach_placement(wd, a)), NULL, view, zn, tx, ty, &st);
     }
-    log_info("item_nearplane %s %s: %d / %d vertices inside the near plane (%.3f m), nearest %.3f m -> %s", wd->id, state, bad, total, znear, min_depth,
-             bad ? "CLIPS" : "ok");
+    log_info("item_nearplane %s %s: %d visible near-plane cuts (%d / %d vertices nearer than %.3f m, outside the view), nearest %.3f m -> %s", wd->id, state, st.cuts,
+             st.behind, st.total, zn, st.min_depth, st.cuts ? "CLIPS" : "ok");
 }
 
 void items_game_register(void) {
