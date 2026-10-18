@@ -801,6 +801,8 @@ void vgeo_tree_materials(const VgTree *t, VgMaterial out[VG_TREE_MAX_MATERIALS])
         m->fade_start = sp->fade_start;
         m->fade_end = sp->fade_end;
         m->shadow_max_dist = sp->shadow_max;
+        // AO (render/material_ao.h): leaf / needle cards 0.3, min with their baked AO; bark full, x its ORM AO
+        vg_material_set_ao(m, 0.0f, MAT_AO_COMBINE_AUTO, false);
     }
 }
 

@@ -206,7 +206,7 @@ void render_surface_map(const u8 *ids, int n, float origin_x, float origin_z, fl
 
 void vks_init(void) {
     memset(&S, 0, sizeof(S));
-    S.r_surfaces = cvar_reg_int("r_surfaces", 1, 0, 1, CVAR_ARCHIVE, "terrain / building surface textures (0: vertex colours)");
+    S.r_surfaces = cvar_reg_int("r_surfaces", 1, 0, 1, CVAR_LOCKED, "terrain / building surface textures (0: vertex colours)");
     static const u8 white[4] = { 255, 255, 255, 255 }, flat[4] = { 128, 128, 255, 128 };
     u8 *a = (u8 *)white, *b = (u8 *)flat;
     S.albedo = upload_layers(&a, 1, 1, VK_FORMAT_R8G8B8A8_SRGB);

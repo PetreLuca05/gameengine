@@ -20,7 +20,7 @@
 #ifndef DG_VGEO_SKIN_H
 #define DG_VGEO_SKIN_H
 
-#include "vgeo_cull.h"
+#include "vgeo_scene.h"
 
 typedef struct VgPalettes {
     const VgContext *ctx;

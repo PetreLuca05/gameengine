@@ -1,10 +1,11 @@
-// Virtualized geometry: the data layout shared by the builder, the .vgeo file, the renderer and the
-// shaders (docs/VGEO.md "Data layout"). std430-compatible; mirrored in shaders/vgeo/vgeo_common.glsl.
-// Every size is asserted: change a struct here and in the GLSL mirror together.
+// vgeo: the data layout shared by the builder, the .vgeo file, the scene tables and the classic
+// renderer (docs/VGEO.md). std430-compatible (the GLSL mirror, vgeo_common.glsl, lives on branch nanite).
+// Every size is asserted.
 #ifndef DG_VGEO_GPU_H
 #define DG_VGEO_GPU_H
 
 #include "core/base.h"
+#include "render/material_ao.h"
 #include <math.h>
 
 #define VGEO_MAGIC 0x4F454756u           // 'VGEO'
@@ -267,12 +268,27 @@ typedef struct VgMaterial {
     float wpo_params[4];             // snippet parameters (wpo.glsl; foliage_wind.h vgeo_wind_pack)
     float shadow_max_dist;           // m: sun cascades skip the mesh beyond this distance from the camera (0 = always)
     // glTF PBR maps (docs/PBR.md, shaders/pbr_maps.glsl): texture indices (0 = none; the MAT_*_TEX flags
-    // say which are meant), normal_scale, occlusion_strength, emissive colour RGBA8 (with MAT_EMISSIVE_TEX).
+    // say which are meant), normal_scale, occlusion_strength, emissive colour RGB8 (with MAT_EMISSIVE_TEX);
+    // the alpha byte of emissive_rgb is the material's AO byte (render/material_ao.h, vg_material_set_ao).
     u32 mr_tex, normal_tex, occlusion_tex, emissive_tex;
     float normal_scale, occlusion_strength;
     u32 emissive_rgb;
     float wind_params[8];            // vegetation wind parameters, second half (foliage_wind.h vgeo_wind_pack)
 } VgMaterial;
+
+// The material's AO (render/material_ao.h). The alpha-tested ones (VGM_MASKED: leaf / needle / grass cards)
+// are the thin occluders, 0.3 by default; the opaque parts of foliage meshes (bark, trunks) are not.
+DG_INLINE void vg_material_set_ao(VgMaterial *m, float ao_strength, int combine, bool vertex_ao) {
+    bool foliage = (m->flags & VGM_MASKED) != 0;
+    m->emissive_rgb = material_ao_word(m->emissive_rgb, material_ao_byte(ao_strength, combine, vertex_ao, foliage));
+}
+// A material whose AO byte disagrees with its class (foliage without the thin bit: never set; an opaque
+// one with it) or is 0xFF (an RGBA8 colour's opaque alpha, never set) gets the defaults of its class.
+DG_INLINE void vg_material_ao_check(VgMaterial *m) {
+    u32 b = m->emissive_rgb >> 24;
+    bool foliage = (m->flags & VGM_MASKED) != 0, thin = (b & MAT_AO_BYTE_THIN) != 0;
+    if (foliage != thin || b == 0xFFu) vg_material_set_ao(m, 0.0f, MAT_AO_COMBINE_AUTO, false);
+}
 
 // Push constants of every cull kernel (48 B).
 typedef struct VgPush { u32 pass, in_region, out_region, view; u32 a[8]; } VgPush;

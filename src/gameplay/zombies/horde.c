@@ -816,9 +816,9 @@ void horde_init(void) {
     H = (Horde *)calloc(1, sizeof(Horde));
     load_config();
     hgrid_init(&H->grid, HMAX, 2.0f);
-    H->debug = cvar_reg_int("horde_debug", 0, 0, 3, 0, "horde debug: 1 tiers + velocity + bodies, 2 + wall casts, 3 + grid cells");
-    H->enable = cvar_reg_bool("horde_enable", true, 0, "run the horde simulation (host)");
-    cvar_reg_bool("horde_jobs", true, 0, "horde zombies: steering and animation in parallel jobs");
+    H->debug = cvar_reg_int("horde_debug", 0, 0, 3, CVAR_LOCKED, "horde debug: 1 tiers + velocity + bodies, 2 + wall casts, 3 + grid cells");
+    H->enable = cvar_reg_bool("horde_enable", true, CVAR_LOCKED | CVAR_RULE, "run the horde simulation (host)");
+    cvar_reg_bool("horde_jobs", true, CVAR_LOCKED | CVAR_RULE, "horde zombies: steering and animation in parallel jobs");
     cmd_register("spawn_horde", cmd_spawn_horde, "spawn_horde <count> [radius] [ring|random|cluster] [character_id|mixed] (host)");
     cmd_register("despawn_horde", cmd_despawn_horde, "remove every horde zombie (host)");
     cmd_register("horde_stats", cmd_horde_stats, "horde count, tiers, per-phase tick cost");

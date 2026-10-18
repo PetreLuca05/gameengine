@@ -201,9 +201,9 @@ static HandClipPose pose_lerp(const HandClipPose *a, const HandClipPose *b, floa
 
 bool hands_init(void) {
     H = (HandsSystem *)calloc(1, sizeof(HandsSystem));
-    H->debug = cvar_reg_bool("hands_debug", false, 0, "draw hand IK chains, targets and pole vectors");
-    H->upper_len = cvar_reg_float("hands_upper_arm", 0.30f, 0.1f, 1.0f, 0, "upper arm length (m)");
-    H->fore_len = cvar_reg_float("hands_forearm", 0.29f, 0.1f, 1.0f, 0, "forearm length (m)");
+    H->debug = cvar_reg_bool("hands_debug", false, CVAR_LOCKED, "draw hand IK chains, targets and pole vectors");
+    H->upper_len = cvar_reg_float("hands_upper_arm", 0.30f, 0.1f, 1.0f, CVAR_LOCKED, "upper arm length (m)");
+    H->fore_len = cvar_reg_float("hands_forearm", 0.29f, 0.1f, 1.0f, CVAR_LOCKED, "forearm length (m)");
     cmd_register("hands_reload", cmd_reload_poses, "reload data/hand_poses.json");
     H->clip = H->prev_clip = -1;
     MeshBuilder mb;

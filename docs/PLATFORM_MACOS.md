@@ -1,6 +1,15 @@
 # macOS (Intel x86_64 + Apple Silicon arm64, Vulkan via MoltenVK)
 
 Status: ported.
+
+> **Engine change during the port.** `main` became classic-only (commit `9fce3a1`, "Remove the
+> virtualized geometry renderer"). The nanite / vgeo GPU path now lives on branch `nanite`.
+> * Everything vgeo-specific below (sections 1.4, 4, 5 and 9: the 32-bit two-phase visibility
+>   writes, vertex pulling instead of mesh shaders, the vgeo harness on MoltenVK) is on
+>   **`claude/nanite-macos`**. That branch is `nanite` plus this whole port, verified green on all
+>   four CI platforms, including the vgeo raster tests on the macOS runner's Apple GPU through MoltenVK.
+> * On `main`, the classic instanced renderer draws everything. It needs none of the vgeo features,
+>   so every Mac GPU family, Intel included, runs the same renderer.
 * Section 1 is the gap analysis written before any change.
 * Sections 2-8 describe what was built.
 * Section 9 says what has actually been run, and where.
@@ -201,7 +210,7 @@ export VK_ICD_FILENAMES=$(brew --prefix molten-vk)/etc/vulkan/icd.d/MoltenVK_icd
 ./deadground --validation
 ```
 
-The window-less vgeo test harness (`test_vgeo_*`, `bench_vgeo`) uses volk's own loader search. Set
+On the nanite branch, the window-less vgeo test harness (`test_vgeo_*`, `bench_vgeo`) uses volk's own loader search. Set
 `DYLD_FALLBACK_LIBRARY_PATH=$(brew --prefix)/lib` and `VK_ICD_FILENAMES` as above.
 
 Universal build (on Apple Silicon; the x86_64 tree runs its build-time vgeo tools under Rosetta):
@@ -265,10 +274,11 @@ Steam: `+connect_lobby <id>` arrives through `argv` as on Windows; nothing macOS
 | Feature | Apple7 (M1) | Apple8 (M2) | Apple9+ (M3 / M4) | Mac2 AMD (Radeon Pro) | Mac2 Intel (UHD / Iris) |
 |---|---|---|---|---|---|
 | Vulkan 1.3 via MoltenVK 1.3+ | yes | yes | yes | yes | yes |
-| vgeo (virtualized geometry) | yes, 32-bit two-phase visibility writes | same | same | same | **no**: tier-1 argument buffers, the classic renderer (`r_vgeo 0`) |
-| vgeo HW raster | vertex pulling (no `VK_EXT_mesh_shader`) | same | same | same | — |
+| Renderer on `main` | classic instanced | same | same | same | same |
+| vgeo / nanite (branch `claude/nanite-macos`) | yes, 32-bit two-phase visibility writes | same | same | same | **no**: tier-1 argument buffers, the classic renderer (`r_vgeo 0`) |
+| vgeo HW raster (nanite branch) | vertex pulling (no `VK_EXT_mesh_shader`) | same | same | same | — |
 | 64-bit buffer atomics | not exposed by MoltenVK | not exposed | not exposed | not exposed | not exposed |
-| Bindless 1152 textures / stage | argument buffers tier 2 | tier 2 | tier 2 | tier 2 (macOS 13+) | tier 1: vgeo off |
+| Bindless 1152 textures / stage (nanite branch) | argument buffers tier 2 | tier 2 | tier 2 | tier 2 (macOS 13+) | tier 1: vgeo off |
 | BC1-7 textures | yes | yes | yes | yes | yes |
 | ASTC | yes | yes | yes | no | no |
 | Push descriptors, dynamic rendering, sync2 | yes | yes | yes | yes | yes |
@@ -279,7 +289,7 @@ Steam: `+connect_lobby <id>` arrives through `argv` as on Windows; nothing macOS
 
 ## 5. Known differences from Windows / Linux
 
-* **vgeo raster cost**: every pass rasterises twice (depth, then payload). The extra cost is in the
+* **vgeo raster cost** (nanite branch): every pass rasterises twice (depth, then payload). The extra cost is in the
   HW / SW raster passes only. On llvmpipe the two phases each take roughly the one-phase time.
   Expect +40-100 % raster time on Apple GPUs; the culling, resolve and shading passes are unchanged.
   Image: identical (sections 1.4 and 9).
@@ -290,7 +300,7 @@ Steam: `+connect_lobby <id>` arrives through `argv` as on Windows; nothing macOS
 * **Math**: MoltenVK fast math is off (`MVK_CONFIG_FAST_MATH_ENABLED=0`, `platform_preinit`), so
   the shaders' NaN guards (TAA, exposure) behave as on the other drivers. Override it in the
   environment to measure fast math.
-* **Mesh shaders**: none (MoltenVK). `--vgeo-no-mesh` / `DG_VGEO_NO_MESH=1` reproduces the Mac HW
+* **Mesh shaders** (nanite branch): none (MoltenVK). `--vgeo-no-mesh` / `DG_VGEO_NO_MESH=1` reproduces the Mac HW
   raster path on any GPU, and `--vgeo-vis32` / `DG_VGEO_VIS32=1` the visibility writes.
 * **Crash handling**: a signal handler logs a backtrace, then macOS writes its own `.ips` report
   (`~/Library/Logs/DiagnosticReports`). There is no hang watchdog yet (the Windows `DG_WATCHDOG`
@@ -388,17 +398,17 @@ coordinates, not only the verdict.
 
 ## 9. Verified (and where)
 
-GitHub Actions `platforms.yml`, branch `claude/macos-port`. First all-green run: run 11 (commit `928133e`), all four jobs.
+GitHub Actions `platforms.yml`. Branch `claude/macos-port` (now `claude/nanite-macos` for the vgeo rows) was all green in run 11 (commit `928133e`) and run 12, all four jobs. After the merge into the classic-only `main`, the vgeo rows no longer apply there. The macOS arm64 job runs the game itself on MoltenVK instead: 120 frames of the dev room, with a screenshot artifact (`moltenvk-devroom`).
 
 | What | Linux x86_64 (gcc) | Windows x64 (MSVC) | macOS arm64 (Apple clang, macos-15) | macOS x86_64 (Apple clang, macos-15-intel) |
 |---|---|---|---|---|
 | Full build (game, tools, tests) | yes | yes | yes | yes |
-| Headless unit suite (47 tests; `ground_textures` / `phone` / `vgeo_gpu` fail on `main` already, run non-gating) | pass | pass | pass | pass |
+| Headless unit suite (`phone` fails on `main` already and runs non-gating, `tools/ci/known_failures.sh`) | pass | pass | pass | pass |
 | `test_detmath` golden | = | = | = | = |
 | `test_ballistics` trajectory golden | = | = | = | = |
 | `test_recoil` golden | = | = | = | = |
 | `test_mapgen` vegetation raster golden | = | = | = | = |
-| vgeo GPU harness (`vgeo_raster`, `_stream`, `_skinned`, `_foliage`) | llvmpipe, 64-bit **and** forced 32-bit writes | no GPU on the runner (skipped) | **MoltenVK on the runner's Apple paravirtual GPU**: 32-bit writes, vertex pulling; HW / SW depth within 1e-5 of the CPU reference | no GPU (skipped) |
+| vgeo GPU harness (`vgeo_raster`, `_stream`, `_skinned`, `_foliage`; nanite branch) | llvmpipe, 64-bit **and** forced 32-bit writes | no GPU on the runner (skipped) | **MoltenVK on the runner's Apple paravirtual GPU**: 32-bit writes, vertex pulling; HW / SW depth within 1e-5 of the CPU reference | no GPU (skipped) |
 | SPIR-V -> MSL (SPIRV-Cross) | 139 / 139 (7 never loaded on Metal) | — | 139 / 139, then `xcrun metal` AIR compile | — |
 | Universal build + Deadground.app (ad-hoc signed) | — | — | `deadground` fat x86_64 + arm64 (x86_64 slice built under Rosetta); universal MoltenVK in `Contents/Frameworks`; `codesign --verify --strict` passes; uploaded as the `Deadground-macos-universal` artifact | — |
 
@@ -423,12 +433,13 @@ Nothing below can run on GitHub's VMs: no real GPU, no display, no Steam client,
 
 - [ ] **Apple Silicon (M1 / M2 / M3+)**:
   * `--validation` run through the loader (`SDL_VULKAN_LIBRARY`): zero errors in the dev room, horde yard and foliage yard.
-  * `vgeo_bench`: record the vgeo raster ms (two-phase cost) per family and the fidelity auto-detect result.
+  * Record the fidelity auto-detect result and frame times per family (classic renderer).
+  * On `claude/nanite-macos`, also run `vgeo_bench` to record the two-phase raster cost.
   * Image-diff the perf-audit scenes against a Windows reference with `tools/img_diff`. Expected: identical but for TAA noise.
 - [ ] **Intel Mac (UHD 630 / Iris)**:
-  * vgeo must log "disabled" (tier-1 argument buffers) and draw through the classic renderer.
+  * On the nanite branch, vgeo must log "disabled" (tier-1 argument buffers) and draw through the classic renderer.
   * Fidelity Low / Medium hold 60 fps at 1080p.
-  * AMD dGPU Mac: vgeo on.
+  * AMD dGPU Mac (nanite branch): vgeo on.
 - [ ] Retina:
   * windowed and fullscreen at 2x;
   * `r_scale` 50-100 %;

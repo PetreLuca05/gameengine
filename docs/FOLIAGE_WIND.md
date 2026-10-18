@@ -10,11 +10,11 @@ wind (particles, audio, the lens droplets, `weather_at`) samples the same field.
 |---|---|
 | Wind field: gust fronts, lulls, turbulence, sources, render tile + settled-bend springs, `wind_at` | `src/world/wind.c` / `.h` (pure, unit tested) |
 | Vegetation model, CPU side: three layers, normals, bounds, per-asset parameters | `src/render/vgeo/foliage_wind.c` / `.h` (pure) |
-| Vegetation model, GPU side (every raster path, the shadows, the resolve) | `shaders/vgeo/wpo.glsl` (`wpo_veg`), `vg_decode.glsl` (`vg_wind_at`, `vg_wpo_n`, `vg_vertex_normal_world`) |
+| Vegetation model, GPU side (the classic renderer's vertex shaders: every pass and the shadows) | `shaders/vgeo/wpo.glsl` (`wpo_veg`), `shaders/classic_vert.glsl` (wind at the pivot, bent normals) |
 | Tree It import: wind channels kept / inferred, channel detection, per-species wind tuning | `src/render/vgeo/vgeo_tree.c` / `.h` (the one tree import, docs/VGEO.md "Tree models": species table, heights, textures, cache) |
 | Wind tile on the GPU (ring of 3 images) | `src/render/vgeo/foliage_support.c` (`vg_wind_*`) |
 | Game glue: the field per frame, consumers, sources, debug, tuning panel | `src/game/game_wind.c`; hooks in `game_weather.c`, `game_render.c`, `game_vehicles.c` |
-| Tests | `tests/test_wind.c` (ctest `wind`), `tests/test_vgeo_foliage.c` (ctest `vgeo_foliage`), `tools/tests/wind.cfg` |
+| Tests | `tests/test_wind.c` (ctest `wind`), `tools/tests/wind.cfg` |
 
 ## Tree It vertex colours
 
@@ -76,8 +76,9 @@ connected file vertices (a branch, a card).
 
 ## The model (as implemented)
 
-All three layers run per vertex inside `vg_vertex_world`. That is the one vertex path of both
-rasterisers (HW mesh / vertex pulling, SW compute), the sun shadow cascades, and the resolve.
+All three layers run per vertex in the classic renderer's vertex shader (`classic_vert.glsl`), the one
+vertex path of its prepass, lit, PiP and shadow draws (the nanite rasterisers / resolve that also ran it
+live on branch `nanite`).
 `wpo_veg` in `wpo.glsl` is the GPU side; `vgeo_wind_eval` mirrors it operation for operation. The
 inputs are:
 - the undisplaced world position *p*, the world normal *n*, the instance pivot *ip* and scale *s*;
@@ -128,8 +129,7 @@ variation from its phase. With the position-based phases, neighbours don't move 
 - a single pair of 0.2 Hz sways over 10 s correlates by |cos(phase difference)| whatever the model,
   so per-pair values are reported but not asserted.
 
-**Normals.** These are evaluated in the resolve for the three vertices of the pixel's triangle
-(`vg_vertex_normal_world`), High / Modern only:
+**Normals.** These are evaluated per vertex in the vertex shader (`VGW_NORMALS`), High / Modern only:
 - main bending rotates the normal about cross(up, b) by atan(2 h |b|), the slope of the bent stem;
 - flutter tilts it towards the wind with a quarter-period-shifted wave (leaves catch the light as
   they flap);
@@ -140,7 +140,7 @@ bent part) and take the wind out of the pushed plant: k = 1 − 0.85 · |push| /
 A player walking through a bush is never cancelled by the wind. Grass and bushes use the buffer;
 trees don't.
 
-**Motion vectors.** The resolve evaluates the previous position with last frame's wind tile (its own
+**Motion vectors.** The vertex shader evaluates the previous position with last frame's wind tile (its own
 window origin), last frame's fallback wind and last frame's time; nothing is re-evaluated at the
 current time. It matches the CPU mirror to 1e-6 m (test).
 
@@ -184,7 +184,7 @@ preset. Zero vertices fall outside on the GPU.
     rebounds once (max 1.05–1.6× the instant value in the test) and settles;
   - texels entering the window start settled; texels that stay keep their spring across window
     moves (test).
-- **The shader** samples the tile at each instance's pivot (`vg_wind_at`):
+- **The shader** samples the tile at each instance's pivot (`classic_vert.glsl`; nanite: `vg_wind_at`):
   - REPEAT addressing at uv = world / 256 m;
   - blended over the outer 2 texels into the field outside the window (the mean wind and its
     spring, `VgViewGpu.wind`);
@@ -322,7 +322,7 @@ The layers are a uniform bitmask in the view (`wind_misc.z`), so every tier is t
   at max wind (30–60 m/s, any direction, random time / scale / phase) every vertex stays inside its
   bound (worst use 0.49–0.79).
 
-**`ctest vgeo_foliage`** (`--validation`, 501 checks): the GPU WPO kernel (`vg_test_wpo.comp`) against
+**`ctest vgeo_foliage`** (on branch `nanite`: removed with the nanite renderer; `--validation`, 501 checks): the GPU WPO kernel (`vg_test_wpo.comp`) against
 the CPU mirror. This covers 128 wind / time / displacement-buffer / tile states, every vertex of every
 cluster of every level of 8 instances:
 - positions 1e-6 m;
@@ -339,13 +339,13 @@ cluster of every level of 8 instances:
   motion, the panel;
 - 401 frames, 0 validation messages (llvmpipe, Linux; RTX 3060 Ti, Windows, VVL).
 
-The `vgeo_uv_plane_lod` fix (below) keeps the `vgeo_foliage` masked-raster checks passing.
+The `vgeo_uv_plane_lod` fix (below, nanite raster) kept the `vgeo_foliage` masked-raster checks passing.
 
 First written on Mesa llvmpipe (Vulkan 1.4, software) in a Linux container; merged onto the tree
 import and run on Windows (RTX 3060 Ti): every ctest passes, `wind.cfg` and `map vegetation` in a
 24 m/s wind with `--validation` give 0 messages, `tools/tests/tex_veg.cfg` / `tree_scale.cfg` keep the
-tree sizes and textures. `r_vgeo 0` (the classic renderer, docs/CLASSIC_RENDERER.md) runs the same
-`wpo_veg` in its vertex shader.
+tree sizes and textures. The classic renderer (docs/CLASSIC_RENDERER.md) runs `wpo_veg` in its vertex
+shader.
 
 **Cost** (`map vegetation`, 1600 x 900, the same cameras, `r_foliage_wind 0` vs `3` in one run,
 `post_bench` "all passes" minus "post"): about +0.4 ms (broadleaf edge 1.55 -> 2.0 ms, pine edge 1.45

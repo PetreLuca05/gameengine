@@ -54,6 +54,8 @@ static struct {
         *bloom_int, *flare, *chromatic, *vignette, *grain, *tonemap, *exp_comp, *auto_exp, *brightness, *gamma, *colorblind, *lut,
         *debug, *compare, *paper, *maxnits, *feedback, *profile, *volumes_draw, *distortion, *underwater, *lens_dirt, *fog_scale,
         *dof_quality, *vol_lights;
+    Cvar *ao_full, *ao_radius, *ao_intensity, *ao_falloff, *ao_thickness, *ao_foliage_radius, *ao_slices, *ao_steps, *ao_blur,
+        *ao_blur_sharp, *ao_temporal;   // GTAO detail (docs/RENDERING_POST.md "Foliage-aware AO")
     PostVolume vols[MAX_POST_VOLUMES];
     int vol_count;
     char vol_level[64];
@@ -90,6 +92,7 @@ static const char *k_preset_names[5] = { "Low", "Medium", "High", "Ultra", "Cust
 static void apply_preset(int p) {
     if (p < 0 || p > 3) return;
     const PresetDef *d = &k_presets[p];
+    CvarSource src = cvar_source_push(CVAR_SRC_FIDELITY);   // tier cvars (docs/SETTINGS_AUDIT.md)
     cvar_set_int(GP.aa, d->aa);
     cvar_set_int(GP.ao, d->ao);
     cvar_set_int(GP.contact, d->contact);
@@ -99,8 +102,9 @@ static void apply_preset(int p) {
     cvar_set_int(GP.mb, d->mb);
     cvar_set_int(GP.dof, d->dof);
     cvar_set_int(GP.bloom_q, d->bloom_q);
-    cvar_set_float(GP.flare, d->flare ? 0.6f : 0.0f);
+    // (d->flare: the lens flare strength is the Look's, locked for every preset.)
     cvar_set_int(GP.preset, p);
+    cvar_source_pop(src);
 }
 
 // Presets are applied through the Engine Fidelity bounds (docs/ENGINE_FIDELITY.md); one only reads
@@ -124,11 +128,10 @@ int game_post_detect_preset(void) {
 bool game_post_preset_allowed(int p, int *req) {
     if (p < 0 || p > 3) return false;
     const PresetDef *d = &k_presets[p];
-    const int f[10] = { FF_AA, FF_AO, FF_CONTACT_SHADOWS, FF_SSR, FF_SSGI, FF_VOLUMETRICS, FF_MOTION_BLUR, FF_DOF, FF_BLOOM_QUALITY, FF_LENS_FLARE };
-    const float v[10] = { (float)d->aa, (float)d->ao, (float)d->contact, (float)d->ssr, (float)d->ssgi, (float)d->vol, (float)d->mb, (float)d->dof,
-                          (float)d->bloom_q, d->flare ? 0.6f : 0.0f };
+    const int f[9] = { FF_AA, FF_AO, FF_CONTACT_SHADOWS, FF_SSR, FF_SSGI, FF_VOLUMETRICS, FF_MOTION_BLUR, FF_DOF, FF_BLOOM_QUALITY };
+    const float v[9] = { (float)d->aa, (float)d->ao, (float)d->contact, (float)d->ssr, (float)d->ssgi, (float)d->vol, (float)d->mb, (float)d->dof, (float)d->bloom_q };
     int need = 0, era = fid_era();
-    for (int i = 0; i < 10; i++) {
+    for (int i = 0; i < 9; i++) {
         int l = fid_min_level_for(era, f[i], v[i]);
         if (l < 0) { need = -1; break; }
         need = DG_MAX(need, l);
@@ -397,47 +400,60 @@ static void cmd_post_status(int argc, const char **argv) {
 void game_post_init(void) {
     memset(&GP, 0, sizeof(GP));
     const u32 A = CVAR_ARCHIVE;
-    GP.preset = cvar_reg_int("r_post_preset", 2, 0, 4, A, "post quality preset: 0 low, 1 medium, 2 high, 3 ultra, 4 custom");
+    GP.preset = cvar_reg_int("r_post_preset", 2, 0, 4, CVAR_TIER, "post quality preset: 0 low, 1 medium, 2 high, 3 ultra, 4 custom");
     GP.preset->on_change = on_preset;
     GP.aa = cvar_find("r_aa");
-    GP.upscaler = cvar_reg_int("r_upscaler", 0, 0, 4, A, "upscaler: 0 off, 1 TAA-U, 2 FSR 1, 3 FSR 2 (slot), 4 DLSS (slot)");
-    GP.upscale = cvar_reg_float("r_upscale_ratio", 0.67f, 0.5f, 1.0f, A, "render resolution / output with an upscaler");
-    GP.sharpen = cvar_reg_float("r_sharpen", 0.35f, 0.0f, 1.0f, A, "contrast adaptive sharpening");
-    GP.ao = cvar_reg_int("r_ao", 2, 0, 2, A, "ambient occlusion (GTAO): 0 off, 1 low, 2 high");
-    GP.contact = cvar_reg_int("r_contact_shadows", 2, 0, 2, A, "screen-space contact shadows: 0 off, 1 low (8 steps), 2 high (14 steps)");
-    GP.ssr = cvar_reg_int("r_ssr", 2, 0, 2, A, "screen-space reflections: 0 off, 1 half res, 2 full res");
-    GP.ssgi = cvar_reg_int("r_ssgi", 0, 0, 1, A, "screen-space diffuse GI");
-    GP.vol = cvar_reg_int("r_volumetrics", 2, 0, 3, A, "volumetric fog / light shafts: 0 off .. 3 ultra");
-    GP.mb = cvar_reg_int("r_motion_blur", 1, 0, 2, A, "motion blur: 0 off, 1 camera, 2 camera + objects");
-    GP.mb_strength = cvar_reg_float("r_motion_blur_strength", 0.5f, 0.0f, 1.0f, A, "shutter fraction (0.5 = 180 degrees)");
-    GP.dof = cvar_reg_int("r_dof", 1, 0, 2, A, "depth of field: 0 off, 1 aiming down sights, 2 always");
+    GP.upscaler = cvar_reg_int("r_upscaler", 0, 0, 4, A | CVAR_EDITABLE, "upscaler: 0 off, 1 TAA-U, 2 FSR 1, 3 FSR 2 (slot), 4 DLSS (slot)");
+    GP.upscale = cvar_reg_float("r_upscale_ratio", 0.67f, 0.5f, 1.0f, A | CVAR_EDITABLE, "render resolution / output with an upscaler");
+    GP.sharpen = cvar_reg_float("r_sharpen", 0.35f, 0.0f, 1.0f, A | CVAR_EDITABLE, "contrast adaptive sharpening");
+    GP.ao = cvar_reg_int("r_ao", 2, 0, 2, CVAR_TIER, "ambient occlusion (GTAO): 0 off, 1 low, 2 high");
+    GP.ao_full = cvar_reg_bool("r_ao_full_res", false, CVAR_LOCKED, "GTAO at full render resolution (default half: blurred and upsampled)");
+    GP.ao_radius = cvar_reg_float("r_ao_radius", 0.9f, 0.1f, 4.0f, CVAR_LOCKED, "GTAO world-space radius (m)");
+    GP.ao_intensity = cvar_reg_float("r_ao_intensity", 1.0f, 0.0f, 3.0f, CVAR_LOCKED, "GTAO intensity: below 1 fades the AO, above 1 deepens it (power)");
+    GP.ao_falloff = cvar_reg_float("r_ao_falloff", 0.4f, 0.05f, 1.0f, CVAR_LOCKED, "GTAO distance falloff: the fraction of the radius occluders fade out over");
+    GP.ao_thickness = cvar_reg_float("r_ao_thickness", 0.25f, 0.02f, 2.0f, CVAR_LOCKED,
+                                     "GTAO thin-occluder heuristic (m): alpha-tested cards further in front of a surface than this fade out over as much again");
+    GP.ao_foliage_radius = cvar_reg_float("r_ao_foliage_radius", 0.35f, 0.05f, 2.0f, CVAR_LOCKED,
+                                          "GTAO radius clamp (m) for thin occluders and thin receivers (alpha-tested foliage): no dark halos");
+    GP.ao_slices = cvar_reg_int("r_ao_slices", 0, 0, 8, CVAR_LOCKED, "GTAO slices (directions) per pixel; 0 = by quality (low 2, high 3)");
+    GP.ao_steps = cvar_reg_int("r_ao_steps", 0, 0, 16, CVAR_LOCKED, "GTAO horizon samples per slice side; 0 = by quality (low 3, high 6)");
+    GP.ao_blur = cvar_reg_int("r_ao_blur", 3, 0, 8, CVAR_LOCKED, "AO bilateral blur radius (AO pixels per side, 2 separable passes); 0 = off");
+    GP.ao_blur_sharp = cvar_reg_float("r_ao_blur_sharpness", 40.0f, 0.0f, 200.0f, CVAR_LOCKED, "AO bilateral blur depth sharpness (higher = stops at smaller depth steps)");
+    GP.ao_temporal = cvar_reg_float("r_ao_temporal", 0.9f, 0.0f, 0.97f, CVAR_LOCKED, "AO temporal accumulation: history weight (velocity reprojection, depth rejection); 0 = off");
+    GP.contact = cvar_reg_int("r_contact_shadows", 2, 0, 2, CVAR_TIER, "screen-space contact shadows: 0 off, 1 low (8 steps), 2 high (14 steps)");
+    GP.ssr = cvar_reg_int("r_ssr", 2, 0, 2, CVAR_TIER, "screen-space reflections: 0 off, 1 half res, 2 full res");
+    GP.ssgi = cvar_reg_int("r_ssgi", 0, 0, 1, CVAR_TIER, "screen-space diffuse GI");
+    GP.vol = cvar_reg_int("r_volumetrics", 2, 0, 3, CVAR_TIER, "volumetric fog / light shafts: 0 off .. 3 ultra");
+    GP.mb = cvar_reg_int("r_motion_blur", 1, 0, 2, A | CVAR_EDITABLE, "motion blur: 0 off, 1 camera, 2 camera + objects");
+    GP.mb_strength = cvar_reg_float("r_motion_blur_strength", 0.5f, 0.0f, 1.0f, A | CVAR_EDITABLE, "shutter fraction (0.5 = 180 degrees)");
+    GP.dof = cvar_reg_int("r_dof", 1, 0, 2, A | CVAR_EDITABLE, "depth of field: 0 off, 1 aiming down sights, 2 always");
     GP.bloom = cvar_find("r_bloom");
-    GP.bloom_q = cvar_reg_int("r_bloom_quality", 2, 0, 2, A, "bloom mip chain: 0 tiny (4 mips), 1 low (5), 2 high (7)");
+    GP.bloom_q = cvar_reg_int("r_bloom_quality", 2, 0, 2, CVAR_TIER, "bloom mip chain: 0 tiny (4 mips), 1 low (5), 2 high (7)");
     GP.bloom_int = cvar_find("r_bloom_intensity");
-    GP.flare = cvar_reg_float("r_lens_flare", 0.0f, 0.0f, 2.0f, A, "lens flare ghosts / halo");
-    GP.lens_dirt = cvar_reg_float("r_lens_dirt", 0.0f, 0.0f, 2.0f, A, "lens dirt on bloom");
-    GP.chromatic = cvar_reg_float("r_chromatic", 0.15f, 0.0f, 2.0f, A, "chromatic aberration");
+    GP.flare = cvar_reg_float("r_lens_flare", 0.0f, 0.0f, 2.0f, CVAR_LOCKED, "lens flare ghosts / halo");
+    GP.lens_dirt = cvar_reg_float("r_lens_dirt", 0.0f, 0.0f, 2.0f, CVAR_LOCKED, "lens dirt on bloom");
+    GP.chromatic = cvar_reg_float("r_chromatic", 0.15f, 0.0f, 2.0f, A | CVAR_EDITABLE, "chromatic aberration");
     GP.vignette = cvar_find("r_vignette");
-    GP.grain = cvar_reg_float("r_film_grain", 0.04f, 0.0f, 1.0f, A, "film grain");
-    GP.distortion = cvar_reg_float("r_lens_distortion", 0.0f, -1.0f, 1.0f, A, "lens distortion (barrel > 0)");
-    GP.tonemap = cvar_reg_int("r_tonemapper", 1, 0, 2, A, "tonemapper: 0 ACES (fit), 1 AgX, 2 Khronos PBR Neutral");
-    GP.exp_comp = cvar_reg_float("r_exposure", 0.0f, -4.0f, 4.0f, A, "exposure compensation (EV)");
-    GP.auto_exp = cvar_reg_bool("r_auto_exposure", true, A, "automatic exposure (histogram eye adaptation)");
+    GP.grain = cvar_reg_float("r_film_grain", 0.04f, 0.0f, 1.0f, A | CVAR_EDITABLE, "film grain");
+    GP.distortion = cvar_reg_float("r_lens_distortion", 0.0f, -1.0f, 1.0f, CVAR_LOCKED, "lens distortion (barrel > 0)");
+    GP.tonemap = cvar_reg_int("r_tonemapper", 1, 0, 2, CVAR_LOCKED, "tonemapper: 0 ACES (fit), 1 AgX, 2 Khronos PBR Neutral");
+    GP.exp_comp = cvar_reg_float("r_exposure", 0.0f, -4.0f, 4.0f, CVAR_LOCKED, "exposure compensation (EV)");
+    GP.auto_exp = cvar_reg_bool("r_auto_exposure", true, CVAR_LOCKED, "automatic exposure (histogram eye adaptation)");
     GP.brightness = cvar_find("r_brightness");
     GP.gamma = cvar_find("r_gamma");
-    GP.colorblind = cvar_reg_int("r_colorblind", 0, 0, 3, A, "colour-blind correction: 0 off, 1 protanopia, 2 deuteranopia, 3 tritanopia");
-    GP.lut = cvar_reg_string("r_lut", "", A, "grading LUT (.cube, relative to the game folder); empty = neutral");
-    GP.debug = cvar_reg_int("r_post_debug", 0, 0, 32, 0, "post debug view: 1 ao 2 contact 3 ssr 4 ssgi 5 velocity 6 normal 7 material 8 depth 9 hiz 10 coc 11 luminance 12 taa 13 froxel 14 bloom 15 flare 16 mb tiles 17 fog");
-    GP.compare = cvar_reg_bool("r_post_compare", false, 0, "split A/B: left raw (exposure + tonemap), right full stack");
-    GP.paper = cvar_reg_float("r_hdr_paper_white", 200.0f, 80.0f, 500.0f, A, "HDR10: paper white (nits)");
-    GP.maxnits = cvar_reg_float("r_hdr_max_nits", 1000.0f, 400.0f, 10000.0f, A, "HDR10: display peak (nits)");
-    GP.feedback = cvar_reg_float("r_post_feedback", 1.0f, 0.0f, 1.0f, A, "strength of the gameplay screen effects (damage, low health, flash ...)");
-    GP.profile = cvar_reg_int("r_post_profile", 0, 0, 2, 0, "post profiler overlay: 1 passes, 2 passes + memory");
-    GP.volumes_draw = cvar_reg_bool("r_post_volumes_draw", false, 0, "draw the post volumes");
-    GP.underwater = cvar_reg_float("r_fb_underwater", 0.0f, 0.0f, 1.0f, 0, "underwater screen effect (test hook)");
-    GP.fog_scale = cvar_reg_float("r_fog_scale", 1.0f, 0.0f, 10.0f, A, "volumetric fog density multiplier");
-    GP.dof_quality = cvar_reg_int("r_dof_quality", 2, 0, 2, A, "depth of field gather: 0 16 taps (disk), 1 32 (hybrid), 2 48 (bokeh)");
-    GP.vol_lights = cvar_reg_bool("r_vol_local_lights", true, A, "point lights scatter in the volumetric fog (off: fog only)");
+    GP.colorblind = cvar_reg_int("r_colorblind", 0, 0, 3, A | CVAR_EDITABLE, "colour-blind correction: 0 off, 1 protanopia, 2 deuteranopia, 3 tritanopia");
+    GP.lut = cvar_reg_string("r_lut", "", CVAR_LOCKED, "grading LUT (.cube, relative to the game folder); empty = neutral");
+    GP.debug = cvar_reg_int("r_post_debug", 0, 0, 32, CVAR_LOCKED, "post debug view: 1 ao 2 contact 3 ssr 4 ssgi 5 velocity 6 normal 7 material 8 depth 9 hiz 10 coc 11 luminance 12 taa 13 froxel 14 bloom 15 flare 16 mb tiles 17 fog");
+    GP.compare = cvar_reg_bool("r_post_compare", false, CVAR_LOCKED, "split A/B: left raw (exposure + tonemap), right full stack");
+    GP.paper = cvar_reg_float("r_hdr_paper_white", 200.0f, 100.0f, 300.0f, A | CVAR_EDITABLE, "HDR10: paper white (nits)");
+    GP.maxnits = cvar_reg_float("r_hdr_max_nits", 1000.0f, 400.0f, 10000.0f, A | CVAR_EDITABLE, "HDR10: display peak (nits)");
+    GP.feedback = cvar_reg_float("r_post_feedback", 1.0f, 0.5f, 1.0f, A | CVAR_EDITABLE, "strength of the gameplay screen effects (damage, low health, flash ...)");
+    GP.profile = cvar_reg_int("r_post_profile", 0, 0, 2, CVAR_LOCKED, "post profiler overlay: 1 passes, 2 passes + memory");
+    GP.volumes_draw = cvar_reg_bool("r_post_volumes_draw", false, CVAR_LOCKED, "draw the post volumes");
+    GP.underwater = cvar_reg_float("r_fb_underwater", 0.0f, 0.0f, 1.0f, CVAR_LOCKED, "underwater screen effect (test hook)");
+    GP.fog_scale = cvar_reg_float("r_fog_scale", 1.0f, 0.0f, 10.0f, A | CVAR_LOCKED | CVAR_RULE, "volumetric fog density multiplier");
+    GP.dof_quality = cvar_reg_int("r_dof_quality", 2, 0, 2, CVAR_TIER, "depth of field gather: 0 16 taps (disk), 1 32 (hybrid), 2 48 (bokeh)");
+    GP.vol_lights = cvar_reg_bool("r_vol_local_lights", true, CVAR_TIER, "point lights scatter in the volumetric fog (off: fog only)");
     GP.photo_focus = 5.0f;
     GP.photo_fstop = 2.8f;
     GP.photo_focal = 50.0f;
@@ -478,6 +494,17 @@ static void build_settings(PostSettings *s, const PostFrameInfo *fi) {
     s->render_scale = GP.upscale->f;
     s->sharpen = GP.sharpen->f;
     s->ao = GP.ao->i;
+    s->ao_full_res = GP.ao_full->i != 0;
+    s->ao_radius = GP.ao_radius->f;
+    s->ao_intensity = GP.ao_intensity->f;
+    s->ao_falloff = GP.ao_falloff->f;
+    s->ao_thickness = GP.ao_thickness->f;
+    s->ao_foliage_radius = GP.ao_foliage_radius->f;
+    s->ao_slices = GP.ao_slices->i;
+    s->ao_steps = GP.ao_steps->i;
+    s->ao_blur_radius = GP.ao_blur->i;
+    s->ao_blur_sharpness = GP.ao_blur_sharp->f;
+    s->ao_temporal = GP.ao_temporal->f;
     s->contact_shadows = GP.contact->i;
     s->ssr = GP.ssr->i;
     s->ssgi = GP.ssgi->i;

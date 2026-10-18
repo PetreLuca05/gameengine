@@ -23,20 +23,43 @@ typedef struct AssetSystem {
 
 // ------------------------------------------------------------------ textures
 
-TextureId texture_load_file(const char *path, bool srgb) {
-    size_t n = strlen(path);
-    if (n > 5 && SDL_strcasecmp(path + n - 5, ".ktx2") == 0) return texture_load_ktx2(path);
-    int w, h, comp;
-    stbi_uc *px = stbi_load(path, &w, &h, &comp, 4);
-    if (!px) { log_error("texture: cannot load %s (%s)", path, stbi_failure_reason()); return 0; }
-    TextureId id = render_texture_create(w, h, px, srgb, true);
-    stbi_image_free(px);
-    log_info("texture: %s (%dx%d)", path, w, h);
-    return id;
+// World textures (glTF maps, the manifest; docs/TEXTURE_MIPS.md) remember their source: a higher
+// r_texture_quality needs the levels the renderer dropped, decoded again (assets_reload_textures).
+// image >= 0: that image of the glTF file at path (embedded or next to it), else the file itself.
+// World textures live for the session (never destroyed), so an id always names its source.
+typedef struct TexSource { TextureId id; int image; bool srgb; char path[512]; } TexSource;
+static TexSource *g_tex_src;
+static int g_tex_src_count, g_tex_src_cap;
+
+static void tex_source_add(TextureId id, const char *path, int image, bool srgb) {
+    if (!id) return;
+    if (g_tex_src_count == g_tex_src_cap) {
+        int cap = g_tex_src_cap ? g_tex_src_cap * 2 : 64;
+        TexSource *n = (TexSource *)realloc(g_tex_src, sizeof(TexSource) * (size_t)cap);
+        if (!n) return;
+        g_tex_src = n;
+        g_tex_src_cap = cap;
+    }
+    TexSource *t = &g_tex_src[g_tex_src_count++];
+    t->id = id;
+    t->image = image;
+    t->srgb = srgb;
+    dg_strcpy(t->path, sizeof(t->path), path);
 }
 
-// KTX2: header + level index, no supercompression. Any VkFormat the device supports.
-TextureId texture_load_ktx2(const char *path) {
+// Decoded pixels to the renderer: a texture (world: r_texture_quality applies), or world texture
+// `reload` again.
+static TextureId upload_rgba(int w, int h, const u8 *px, bool srgb, bool world, TextureId reload) {
+    if (reload) { render_texture_reload(reload, w, h, px); return reload; }
+    return world ? render_texture_create_world(w, h, px, srgb) : render_texture_create(w, h, px, srgb, true);
+}
+
+#define KTX_VK_R8G8B8A8_UNORM 37u
+#define KTX_VK_R8G8B8A8_SRGB 43u
+
+// KTX2: header + level index, no supercompression. Any VkFormat the device supports. levelCount 0
+// means "generate the chain at load": done for RGBA8; other formats keep their one level.
+static TextureId ktx2_load(const char *path, bool world, TextureId reload) {
     size_t size = 0;
     u8 *data = (u8 *)platform_read_file(path, &size);
     if (!data) { log_error("ktx2: cannot read %s", path); return 0; }
@@ -58,6 +81,7 @@ TextureId texture_load_ktx2(const char *path) {
         log_error("ktx2: %s uses unsupported features (supercompression %u, depth %u, layers %u, faces %u)", path, supercomp, depth, layers, faces);
         goto done;
     }
+    bool gen_mips = levels == 0;
     if (levels == 0) levels = 1;
     levels = DG_MIN(levels, 16u);
     const u8 *index = data + 80;
@@ -72,6 +96,14 @@ TextureId texture_load_ktx2(const char *path) {
         level_sizes[l] = (size_t)len;
         total += (size_t)len;
     }
+    if (gen_mips && (vk_format == KTX_VK_R8G8B8A8_UNORM || vk_format == KTX_VK_R8G8B8A8_SRGB) && level_sizes[0] == (size_t)w * h * 4) {
+        u64 off;
+        memcpy(&off, index, 8);
+        id = upload_rgba((int)w, (int)h, data + off, vk_format == KTX_VK_R8G8B8A8_SRGB, world, reload);
+        log_info("ktx2: %s (%ux%u, format %u, mips generated)", path, w, h, vk_format);
+        goto done;
+    }
+    if (gen_mips) log_warn("ktx2: %s asks for generated mips, format %u cannot be blitted at load: one level", path, vk_format);
     u8 *packed = (u8 *)malloc(total);
     size_t at = 0;
     for (u32 l = 0; l < levels; l++) {
@@ -80,11 +112,39 @@ TextureId texture_load_ktx2(const char *path) {
         memcpy(packed + at, data + off, level_sizes[l]);
         at += level_sizes[l];
     }
-    id = render_texture_create_raw((int)w, (int)h, (int)levels, vk_format, packed, level_sizes);
+    if (reload) {
+        render_texture_reload_raw(reload, (int)w, (int)h, (int)levels, vk_format, packed, level_sizes);
+        id = reload;
+    } else {
+        id = world ? render_texture_create_raw_world((int)w, (int)h, (int)levels, vk_format, packed, level_sizes)
+                   : render_texture_create_raw((int)w, (int)h, (int)levels, vk_format, packed, level_sizes);
+    }
     free(packed);
     log_info("ktx2: %s (%ux%u, format %u, %u mips)", path, w, h, vk_format, levels);
 done:
     free(data);
+    return id;
+}
+
+static TextureId texture_load_path(const char *path, bool srgb, bool world, TextureId reload) {
+    size_t n = strlen(path);
+    if (n > 5 && SDL_strcasecmp(path + n - 5, ".ktx2") == 0) return ktx2_load(path, world, reload);
+    int w, h, comp;
+    stbi_uc *px = stbi_load(path, &w, &h, &comp, 4);
+    if (!px) { log_error("texture: cannot load %s (%s)", path, stbi_failure_reason()); return 0; }
+    TextureId id = upload_rgba(w, h, px, srgb, world, reload);
+    stbi_image_free(px);
+    log_info("texture: %s (%dx%d)", path, w, h);
+    return id;
+}
+
+TextureId texture_load_file(const char *path, bool srgb) { return texture_load_path(path, srgb, false, 0); }
+TextureId texture_load_ktx2(const char *path) { return ktx2_load(path, false, 0); }
+
+// A world texture from a file (the manifest; glTF images register with their image index instead).
+static TextureId texture_load_world(const char *path, bool srgb) {
+    TextureId id = texture_load_path(path, srgb, true, 0);
+    tex_source_add(id, path, -1, srgb);
     return id;
 }
 
@@ -94,11 +154,11 @@ static void read_accessor_vec(const cgltf_accessor *a, u32 i, float *out, int n)
     cgltf_accessor_read_float(a, i, out, (cgltf_size)n);
 }
 
-static TextureId texture_load_memory(const void *data, size_t size, bool srgb, const char *what) {
+static TextureId texture_load_memory(const void *data, size_t size, bool srgb, const char *what, TextureId reload) {
     int w, h, comp;
     stbi_uc *px = stbi_load_from_memory((const stbi_uc *)data, (int)size, &w, &h, &comp, 4);
     if (!px) { log_error("texture: cannot decode %s (%s)", what, stbi_failure_reason()); return 0; }
-    TextureId id = render_texture_create(w, h, px, srgb, true);
+    TextureId id = upload_rgba(w, h, px, srgb, true, reload);
     stbi_image_free(px);
     log_info("texture: %s (%dx%d, embedded)", what, w, h);
     return id;
@@ -108,7 +168,39 @@ static TextureId texture_load_memory(const void *data, size_t size, bool srgb, c
 // buffer views (.glb) and base64 data: uris. Each image is loaded once per file and colour space
 // (one image as occlusion + metallic-roughness is common).
 typedef struct GltfTexCache { const cgltf_image *img; bool srgb; TextureId id; } GltfTexCache;
-typedef struct GltfTexLoad { const char *path; GltfTexCache c[32]; int n; } GltfTexLoad;
+typedef struct GltfTexLoad { const char *path; const cgltf_data *data; GltfTexCache c[32]; int n; } GltfTexLoad;
+
+// A glTF image as a world texture (or world texture `reload` again): a buffer view (.glb), a base64
+// data: uri, or a file next to the .gltf (percent-decoded uri).
+static TextureId gltf_image_load(const char *gltf_path, const cgltf_image *img, bool srgb, const char *name, TextureId reload) {
+    TextureId id = 0;
+    if (img->buffer_view) {
+        const u8 *data = cgltf_buffer_view_data(img->buffer_view);
+        if (data) id = texture_load_memory(data, img->buffer_view->size, srgb, name, reload);
+    } else if (img->uri && !strncmp(img->uri, "data:", 5)) {
+        const char *comma = strchr(img->uri, ',');
+        if (comma && comma - img->uri >= 7 && !strncmp(comma - 7, ";base64", 7)) {
+            size_t n = strlen(comma + 1), pad = n >= 2 && comma[n] == '=' ? (comma[n - 1] == '=' ? 2 : 1) : 0;
+            cgltf_options o;
+            memset(&o, 0, sizeof(o));
+            void *data = NULL;
+            if (n >= 4 && cgltf_load_buffer_base64(&o, n / 4 * 3 - pad, comma + 1, &data) == cgltf_result_success) {
+                id = texture_load_memory(data, n / 4 * 3 - pad, srgb, name, reload);
+                free(data);
+            }
+        }
+    } else if (img->uri) {
+        char tpath[512];
+        const char *slash = strrchr(gltf_path, '/');
+        const char *bslash = strrchr(gltf_path, '\\');
+        if (bslash > slash) slash = bslash;
+        int dir_len = slash ? (int)(slash - gltf_path + 1) : 0;
+        snprintf(tpath, sizeof(tpath), "%.*s%s", dir_len, gltf_path, img->uri);
+        cgltf_decode_uri(tpath + dir_len);
+        id = texture_load_path(tpath, srgb, true, reload);
+    }
+    return id;
+}
 
 static TextureId gltf_texture(GltfTexLoad *L, const cgltf_texture_view *tv, bool srgb, const char *what) {
     const cgltf_image *img = tv->texture ? tv->texture->image : NULL;
@@ -118,35 +210,23 @@ static TextureId gltf_texture(GltfTexLoad *L, const cgltf_texture_view *tv, bool
     if (tv->texcoord != 0) log_warn("gltf: %s: %s texture uses TEXCOORD_%d, only TEXCOORD_0 is imported", L->path, what, tv->texcoord);
     char name[512];
     snprintf(name, sizeof(name), "%s %s", L->path, what);
-    TextureId id = 0;
-    if (img->buffer_view) {
-        const u8 *data = cgltf_buffer_view_data(img->buffer_view);
-        if (data) id = texture_load_memory(data, img->buffer_view->size, srgb, name);
-    } else if (img->uri && !strncmp(img->uri, "data:", 5)) {
-        const char *comma = strchr(img->uri, ',');
-        if (comma && comma - img->uri >= 7 && !strncmp(comma - 7, ";base64", 7)) {
-            size_t n = strlen(comma + 1), pad = n >= 2 && comma[n] == '=' ? (comma[n - 1] == '=' ? 2 : 1) : 0;
-            cgltf_options o;
-            memset(&o, 0, sizeof(o));
-            void *data = NULL;
-            if (n >= 4 && cgltf_load_buffer_base64(&o, n / 4 * 3 - pad, comma + 1, &data) == cgltf_result_success) {
-                id = texture_load_memory(data, n / 4 * 3 - pad, srgb, name);
-                free(data);
-            }
-        }
-    } else if (img->uri) {
-        char tpath[512];
-        const char *slash = strrchr(L->path, '/');
-        const char *bslash = strrchr(L->path, '\\');
-        if (bslash > slash) slash = bslash;
-        int dir_len = slash ? (int)(slash - L->path + 1) : 0;
-        snprintf(tpath, sizeof(tpath), "%.*s%s", dir_len, L->path, img->uri);
-        cgltf_decode_uri(tpath + dir_len);
-        id = texture_load_file(tpath, srgb);
-    }
+    TextureId id = gltf_image_load(L->path, img, srgb, name, 0);
     if (!id) log_warn("gltf: %s: %s texture not loaded", L->path, what);
+    else tex_source_add(id, L->path, (int)cgltf_image_index(L->data, img), srgb);
     if (L->n < (int)(sizeof(L->c) / sizeof(L->c[0]))) L->c[L->n++] = (GltfTexCache){ img, srgb, id };
     return id;
+}
+
+// AO settings of a material from a JSON object (glTF extras, the manifest's "ao" block); absent keys keep
+// the material's. ao_strength 0 in data means "no screen-space AO" (MATERIAL_AO_OFF), not automatic.
+static void model_parse_ao(Material *mat, const cJSON *o, const char *k_strength, const char *k_combine, const char *k_vertex) {
+    if (!cJSON_IsObject(o)) return;
+    const cJSON *v = cJSON_GetObjectItemCaseSensitive(o, k_strength);
+    if (cJSON_IsNumber(v)) mat->ao_strength = v->valuedouble <= 0.0 ? MATERIAL_AO_OFF : (float)v->valuedouble;
+    v = cJSON_GetObjectItemCaseSensitive(o, k_combine);
+    if (cJSON_IsString(v)) mat->ao_combine = (u8)material_ao_combine_parse(v->valuestring);
+    v = cJSON_GetObjectItemCaseSensitive(o, k_vertex);
+    if (cJSON_IsBool(v)) mat->ao_vertex = cJSON_IsTrue(v);
 }
 
 // KHR_texture_transform: one uv for every map, so only a uniform scale without offset / rotation on
@@ -208,6 +288,12 @@ static void gltf_material(GltfTexLoad *L, const cgltf_material *gm, Material *ma
         log_warn("gltf: %s: alphaMode BLEND with an opaque base colour factor is drawn opaque", L->path);
     }
     if (gm->double_sided) mat->flags |= MAT_TWO_SIDED;
+    // Ambient occlusion (render/material_ao.h): "extras": { "ao_strength", "ao_combine", "ao_vertex" }.
+    if (gm->extras.data) {
+        cJSON *x = cJSON_Parse(gm->extras.data);
+        model_parse_ao(mat, x, "ao_strength", "ao_combine", "ao_vertex");
+        cJSON_Delete(x);
+    }
 }
 
 bool model_load_gltf(const char *path, Model *out) {
@@ -221,6 +307,7 @@ bool model_load_gltf(const char *path, Model *out) {
     GltfTexLoad tl;
     memset(&tl, 0, sizeof(tl));
     tl.path = path;
+    tl.data = data;
     for (cgltf_size ni = 0; ni < data->nodes_count; ni++) {
         cgltf_node *node = &data->nodes[ni];
         if (!node->mesh) continue;
@@ -352,7 +439,7 @@ bool assets_init(const char *manifest_path) {
         dg_strcpy(t->name, sizeof(t->name), cJSON_IsString(n) ? n->valuestring : "");
         dg_strcpy(t->path, sizeof(t->path), cJSON_IsString(p) ? p->valuestring : "");
         t->srgb = !cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(it, "srgb"));
-        t->id = texture_load_file(platform_data_path(t->path, buf, sizeof(buf)), t->srgb);
+        t->id = texture_load_world(platform_data_path(t->path, buf, sizeof(buf)), t->srgb);
     }
     cJSON_ArrayForEach(it, cJSON_GetObjectItemCaseSensitive(root, "models")) {
         if (AS->model_count >= MAX_ASSET_MODELS) break;
@@ -360,6 +447,9 @@ bool assets_init(const char *manifest_path) {
         Model *m = &AS->models[AS->model_count];
         if (model_load_gltf(platform_data_path(cJSON_IsString(p) ? p->valuestring : "", buf, sizeof(buf)), m)) {
             dg_strcpy(m->name, sizeof(m->name), cJSON_IsString(n) ? n->valuestring : "");
+            // "ao": { "strength", "combine", "vertex" } on every material of the model (render/material_ao.h).
+            const cJSON *ao = cJSON_GetObjectItemCaseSensitive(it, "ao");
+            for (int k = 0; k < m->mesh_count; k++) model_parse_ao(&m->meshes[k].mat, ao, "strength", "combine", "vertex");
             if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(it, "vgeo"))) model_load_vgeo(m, buf);
             model_parse_foliage(m, it);
         }
@@ -375,6 +465,50 @@ void assets_shutdown(void) {
         if (AS->models[i].vgeo) { vgeo_free(AS->models[i].vgeo); free(AS->models[i].vgeo); }
     free(AS);
     AS = NULL;
+    free(g_tex_src);
+    g_tex_src = NULL;
+    g_tex_src_count = g_tex_src_cap = 0;
+}
+
+void assets_reload_textures(void) {
+    if (!render_textures_reload_wanted()) return;
+    u64 t0 = SDL_GetTicksNS();
+    render_textures_reload_begin();
+    cgltf_data *g = NULL;   // the glTF of the previous source (a model's maps are registered together)
+    const char *g_path = NULL;
+    bool g_buffers = false;
+    int n = 0;
+    for (int i = 0; i < g_tex_src_count; i++) {
+        const TexSource *t = &g_tex_src[i];
+        if (!render_texture_reload_needed(t->id)) continue;
+        if (t->image < 0) {
+            texture_load_path(t->path, t->srgb, true, t->id);
+            n++;
+            continue;
+        }
+        cgltf_options opt;
+        memset(&opt, 0, sizeof(opt));
+        if (!g_path || strcmp(g_path, t->path) != 0) {
+            if (g) cgltf_free(g);
+            g = NULL;
+            g_path = t->path;
+            g_buffers = false;
+            if (cgltf_parse_file(&opt, t->path, &g) != cgltf_result_success) { log_error("gltf: cannot parse %s (texture reload)", t->path); g = NULL; }
+        }
+        if (!g || t->image >= (int)g->images_count) continue;
+        const cgltf_image *img = &g->images[t->image];
+        if (img->buffer_view && !g_buffers) {   // geometry buffers only when an image lives in one
+            if (cgltf_load_buffers(&opt, g, t->path) != cgltf_result_success) { log_error("gltf: cannot load buffers for %s (texture reload)", t->path); continue; }
+            g_buffers = true;
+        }
+        char name[560];
+        snprintf(name, sizeof(name), "%s image %d", t->path, t->image);
+        gltf_image_load(t->path, img, t->srgb, name, t->id);
+        n++;
+    }
+    if (g) cgltf_free(g);
+    render_textures_reload_end();
+    log_info("texture quality: %d world textures reloaded in %.0f ms", n, (double)(SDL_GetTicksNS() - t0) / 1e6);
 }
 
 u16 assets_model_id(const char *name) {

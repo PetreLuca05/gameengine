@@ -1,7 +1,23 @@
 #version 450
-// GTAO (Jimenez et al. 2016, XeGTAO-style), half resolution: per pixel 2-3 slices rotated by blue
-// noise, horizon search on both sides within a view-space radius, cosine-weighted visible arc
-// integrated against the projected normal. Output = ambient visibility (1 = unoccluded).
+// GTAO (Jimenez et al. 2016, XeGTAO-style), half (or full, r_ao_full_res) resolution: per pixel N slices
+// rotated by blue noise, horizon search on both sides within a world-space radius, cosine-weighted visible
+// arc integrated against the projected normal. Output = raw ambient visibility (1 = unoccluded); the
+// bilateral blur (ao_blur.comp) and the temporal pass follow (docs/RENDERING_POST.md "Foliage-aware AO").
+//
+// Thin occluders (G-buffer GB_THIN: alpha-tested leaf / grass / cutout cards, src/render/material_ao.h):
+//   * thickness heuristic: the depth buffer holds only a card's front, so a thin sample more than
+//     `thickness` in front of the receiving point (along the view) is assumed to have air behind it; its
+//     weight fades out over a second `thickness`. A leaf card thus darkens what touches it, not the wall
+//     metres behind it.
+//   * radius clamp: thin samples count only within min(radius, foliage radius) of the receiver, and a thin
+//     receiver searches that clamped radius itself: no large dark halos around / on vegetation.
+//   * a thin receiver integrates against its geometric normal (from the depth buffer), not the shading
+//     normal: foliage normals are authored (bush spheres, grass pointing up) and would make the card's own
+//     plane occlude it.
+// Every position is reconstructed at a depth texel centre (half resolution samples snap to the full
+// resolution texel they read): otherwise a grazing plane reconstructs off itself and occludes itself.
+//   U.s_ao  radius (m), intensity (power), quality, steps per side
+//   U.s_ao2 falloff (fraction of the radius it fades over), thickness (m), slices, foliage radius (m)
 #extension GL_GOOGLE_include_directive : require
 #include "post_common.glsl"
 layout(local_size_x = 8, local_size_y = 8) in;
@@ -11,26 +27,46 @@ layout(set = 0, binding = 2) uniform sampler2D material_tex;
 layout(set = 0, binding = 3) uniform sampler2D noise_tex;
 layout(set = 0, binding = 8) uniform writeonly image2D dst;
 
+vec2 g_dsz;   // depth texture size
+vec2 snap_uv(vec2 uv) { return (floor(uv * g_dsz) + 0.5) / g_dsz; }
+vec3 depth_pos(vec2 uv) { return view_pos(uv, textureLod(depth_tex, uv, 0.0).r); }
+
+// Normal of the depth surface at p (uv a texel centre): per axis the neighbour on the side with the
+// smaller depth step (card edges: the other side may be the background), facing the camera.
+vec3 geometric_normal(vec2 uv, vec3 p) {
+    vec2 t = 1.0 / g_dsz;
+    vec3 r = depth_pos(uv + vec2(t.x, 0.0)), l = depth_pos(uv - vec2(t.x, 0.0));
+    vec3 d = depth_pos(uv + vec2(0.0, t.y)), u = depth_pos(uv - vec2(0.0, t.y));
+    vec3 dx = abs(r.z - p.z) < abs(p.z - l.z) ? r - p : p - l;
+    vec3 dy = abs(d.z - p.z) < abs(p.z - u.z) ? d - p : p - u;
+    vec3 n = normalize(cross(dx, dy));
+    return dot(n, -p) < 0.0 ? -n : n;
+}
+
 void main() {
     ivec2 hp = ivec2(gl_GlobalInvocationID.xy);
     ivec2 hs = imageSize(dst);
     if (hp.x >= hs.x || hp.y >= hs.y) return;
-    vec2 uv = (vec2(hp) + 0.5) / vec2(hs);
+    g_dsz = vec2(textureSize(depth_tex, 0));
+    vec2 uv = snap_uv((vec2(hp) + 0.5) / vec2(hs));
     float d = textureLod(depth_tex, uv, 0.0).r;
-    vec4 mat = textureLod(material_tex, uv, 0.0);
-    if (d >= 1.0 || (gb_flags(mat) & (GB_VIEWMODEL | GB_UNLIT)) != 0u) { imageStore(dst, hp, vec4(1.0)); return; }
+    uint gf = gb_flags(textureLod(material_tex, uv, 0.0));
+    if (d >= 1.0 || (gf & (GB_VIEWMODEL | GB_UNLIT)) != 0u) { imageStore(dst, hp, vec4(1.0)); return; }
     vec3 vp = view_pos(uv, d);
-    vec3 N = normalize((U.view * vec4(oct_decode(textureLod(normal_tex, uv, 0.0).rg), 0.0)).xyz);
+    vec3 N = (gf & GB_THIN) != 0u ? geometric_normal(uv, vp) : normalize((U.view * vec4(oct_decode(textureLod(normal_tex, uv, 0.0).rg), 0.0)).xyz);
     vec3 V = normalize(-vp);
-    float radius = U.s_ao.x;
-    // Screen radius in half-res pixels.
+    float falloff = clamp(U.s_ao2.x, 0.05, 1.0);
+    float thickness = max(U.s_ao2.y, 0.01);
+    float thin_radius = min(U.s_ao.x, max(U.s_ao2.w, 0.05));
+    // A thin receiver (a leaf / blade) searches the clamped radius: its neighbourhood is mostly air.
+    float radius = (gf & GB_THIN) != 0u ? thin_radius : U.s_ao.x;
+    // Screen radius in AO pixels; capped to a fifth of the screen height (cost, cache).
     float rpx = radius * abs(U.proj[1][1]) / max(-vp.z, 0.05) * 0.5 * float(hs.y);
     if (rpx < 1.0) { imageStore(dst, hp, vec4(1.0)); return; }
-    rpx = min(rpx, 96.0);
-    int slices = U.s_ao.z >= 2.0 ? 3 : 2;
-    int steps = int(U.s_ao.w) / 2;
+    rpx = min(rpx, 0.18 * float(hs.y));
+    int slices = clamp(int(U.s_ao2.z + 0.5), 1, 8);
+    int steps = clamp(int(U.s_ao.w + 0.5), 1, 32);
     vec4 noise = blue_noise(noise_tex, hp);
-    float falloff_from = radius * 0.6, falloff_mul = -1.0 / (radius - falloff_from), falloff_add = falloff_from / (radius - falloff_from) + 1.0;
     float vis = 0.0;
     for (int s = 0; s < slices; s++) {
         float phi = (float(s) + noise.x) / float(slices) * PI;
@@ -52,11 +88,17 @@ void main() {
                 vec2 off = dir * sgn * max(t * rpx, 1.0 + float(i));
                 vec2 suv = uv + off / vec2(hs) * vec2(1.0, -1.0);   // view y up = screen y down
                 if (any(lessThan(suv, vec2(0.0))) || any(greaterThan(suv, vec2(1.0)))) break;
-                vec3 sp = view_pos(suv, textureLod(depth_tex, suv, 0.0).r);
+                suv = snap_uv(suv);
+                vec3 sp = depth_pos(suv);
                 vec3 delta = sp - vp;
                 float dist = length(delta);
                 float hc = dot(delta / max(dist, 1e-4), V);
-                float w = clamp(dist * falloff_mul + falloff_add, 0.0, 1.0);
+                bool thin = (gb_flags(textureLod(material_tex, suv, 0.0)) & GB_THIN) != 0u;
+                // Distance falloff over the last `falloff` of the radius (the clamped radius for thin samples).
+                float r = thin ? thin_radius : radius;
+                float w = clamp((r - dist) / (r * falloff), 0.0, 1.0);
+                // Thickness: how far the thin sample lies in front of the receiver along the view (+ = nearer).
+                if (thin) w *= clamp(2.0 - (sp.z - vp.z) / thickness, 0.0, 1.0);
                 hc = mix(-1.0, hc, w);
                 if (side == 0) hc0 = max(hc0, hc); else hc1 = max(hc1, hc);
             }
@@ -68,6 +110,6 @@ void main() {
         vis += pn_len * (iarc0 + iarc1);
     }
     vis = clamp(vis / float(slices), 0.0, 1.0);
-    vis = pow(vis, U.s_ao.y);
+    vis = pow(vis, max(U.s_ao.y, 0.0));
     imageStore(dst, hp, vec4(vis));
 }

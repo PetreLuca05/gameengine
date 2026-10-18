@@ -173,8 +173,8 @@ static void cmd_look_tune(int argc, const char **argv) {
 void game_look_init(void) {
     memset(&GL, 0, sizeof(GL));
     GL.last_level = -1;
-    GL.look = cvar_reg_string("r_look", "realism", 0, "post-processing Look: realism (always at start; not in Settings or the config), pubg, cinematic, vibrant, gritty for dev (docs/LOOKS.md)");
-    GL.modulators = cvar_reg_bool("r_look_modulators", true, 0, "the Look's time-of-day / weather modulation (0 = the static grade, tests)");
+    GL.look = cvar_reg_string("r_look", "realism", CVAR_LOCKED, "post-processing Look: realism (always at start; not in Settings or the config), pubg, cinematic, vibrant, gritty for dev (docs/LOOKS.md)");
+    GL.modulators = cvar_reg_bool("r_look_modulators", true, CVAR_LOCKED, "the Look's time-of-day / weather modulation (0 = the static grade, tests)");
     GL.bloom = cvar_find("r_bloom");
     GL.bloom_int = cvar_find("r_bloom_intensity");
     GL.vignette = cvar_find("r_vignette");

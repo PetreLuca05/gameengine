@@ -326,7 +326,7 @@ What the map holds:
   and local-light caster lists short.
 - **Collision:** 2036 static bodies.
 - **Trees and bushes:** 16.2k imported models (13 species). They LOD, fade (850–1100 m) and switch to
-  impostors on the vgeo path (trees at 96 px across).
+  impostors (the classic renderer, docs/CLASSIC_RENDERER.md).
 - **Grass and crops:** on the streamed chunks, fading at 65 / 95 m.
 - **Terrain:** about 160 visual chunks and 256 far tiles.
 

@@ -6,33 +6,31 @@
  "size": 2048,
  "cells": [
   {
-   "coverage": 0.08,
-   "bottom": 0.017,
+   "coverage": 0.086,
+   "bottom": 0.012,
    "height": 0.94,
-   "root": "#5c642f",
-   "mid": "#5e712d",
-   "tip": "#627823",
+   "root": "#525e33",
+   "mid": "#566b39",
+   "tip": "#63783e",
    "residue": 0.0001,
    "source": "generated",
    "fails": []
   },
   {
-   "coverage": 0.052,
-   "bottom": 0.01,
-   "height": 0.939,
-   "root": "#586b39",
-   "mid": "#668b45",
-   "tip": "#77a455",
-   "residue": 0.0001,
+   "coverage": 0.057,
+   "bottom": 0.019,
+   "height": 0.94,
+   "root": "#4d5c30",
+   "mid": "#5a6c3d",
+   "tip": "#677843",
+   "residue": 0.0,
    "source": "generated",
-   "fails": [
-    "coverage 0.052 not in [0.08, 0.7]"
-   ]
+   "fails": []
   }
  ],
  "name": "shrub_leafy",
  "kind": "blade_atlas",
- "tool_version": 1,
+ "tool_version": 2,
  "recipe": "assets/foliage/gen/shrub_leafy.json",
  "card": {
   "height_m": [

@@ -253,33 +253,11 @@ bool vkd_create_device(SDL_Window *window) {
     f13.shaderDemoteToHelperInvocation = VK_TRUE;
     VkPhysicalDeviceVulkan12Features f12 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES };
     f12.pNext = &f13;
-    // Virtualized geometry (docs/VGEO.md): scalar layouts, int64, indirect count draws, descriptor
-    // indexing. Enabled when present; vgeo stays off without scalar layouts / int64 / non-uniform
-    // texture indexing. 64-bit buffer atomics are optional: without them (MoltenVK) the visibility
-    // buffer takes the 32-bit two-phase writes (vgeo_raster.h).
-    {
-        VkPhysicalDeviceVulkan12Features s12 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES };
-        VkPhysicalDeviceFeatures2 s2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
-        s2.pNext = &s12;
-        vkGetPhysicalDeviceFeatures2(R->gpu, &s2);
-        f12.scalarBlockLayout = s12.scalarBlockLayout;
-        f12.shaderBufferInt64Atomics = s12.shaderBufferInt64Atomics;
-        f12.drawIndirectCount = s12.drawIndirectCount;
-        f12.runtimeDescriptorArray = s12.runtimeDescriptorArray;
-        f12.descriptorBindingPartiallyBound = s12.descriptorBindingPartiallyBound;
-        f12.shaderSampledImageArrayNonUniformIndexing = s12.shaderSampledImageArrayNonUniformIndexing;
-        R->vg_scalar = s12.scalarBlockLayout;
-        R->vg_int64 = s2.features.shaderInt64;
-        R->vg_atomic64 = s12.shaderBufferInt64Atomics && s2.features.shaderInt64;
-        R->vg_indirect_count = s12.drawIndirectCount && s2.features.multiDrawIndirect;
-        R->vg_descriptor_indexing = s12.runtimeDescriptorArray && s12.descriptorBindingPartiallyBound && s12.shaderSampledImageArrayNonUniformIndexing;
-        supported.shaderInt64 = s2.features.shaderInt64;
-        supported.multiDrawIndirect = s2.features.multiDrawIndirect;
-        supported.drawIndirectFirstInstance = s2.features.drawIndirectFirstInstance;
-    }
     VkPhysicalDeviceFeatures2 f2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
     f2.pNext = &f12;
     f2.features.samplerAnisotropy = supported.samplerAnisotropy;
+    f2.features.pipelineStatisticsQuery = supported.pipelineStatisticsQuery;   // profiler only (vk_prof.c)
+    R->pipe_stats = supported.pipelineStatisticsQuery;
     f2.features.fillModeNonSolid = supported.fillModeNonSolid;
     f2.features.textureCompressionBC = supported.textureCompressionBC;
     // Post-processing: storage images of every format (r8, rg16f, r11g11b10...) without format
@@ -289,8 +267,7 @@ bool vkd_create_device(SDL_Window *window) {
     f2.features.shaderStorageImageWriteWithoutFormat = supported.shaderStorageImageWriteWithoutFormat;
     f2.features.independentBlend = supported.independentBlend;
     f2.features.fragmentStoresAndAtomics = supported.fragmentStoresAndAtomics;
-    f2.features.vertexPipelineStoresAndAtomics = supported.vertexPipelineStoresAndAtomics;   // vgeo vertex pulling (shared writable set)
-    f2.features.shaderInt64 = supported.shaderInt64;
+    f2.features.vertexPipelineStoresAndAtomics = supported.vertexPipelineStoresAndAtomics;   // storage buffers in sets the vertex stage sees
     f2.features.multiDrawIndirect = supported.multiDrawIndirect;
     f2.features.drawIndirectFirstInstance = supported.drawIndirectFirstInstance;
     if (!supported.shaderStorageImageExtendedFormats) log_warn("vulkan: shaderStorageImageExtendedFormats missing - some post effects disabled");
@@ -306,8 +283,7 @@ bool vkd_create_device(SDL_Window *window) {
         VkExtensionProperties *props = (VkExtensionProperties *)malloc(sizeof(VkExtensionProperties) * n);
         vkEnumerateDeviceExtensionProperties(R->gpu, NULL, &n, props);
         for (u32 i = 0; i < n; i++)
-            if (!strcmp(props[i].extensionName, VK_EXT_MESH_SHADER_EXTENSION_NAME)) R->vg_mesh_shader = true;
-            else if (!strcmp(props[i].extensionName, VK_EXT_DYNAMIC_RENDERING_UNUSED_ATTACHMENTS_EXTENSION_NAME)) unused_att = true;
+            if (!strcmp(props[i].extensionName, VK_EXT_DYNAMIC_RENDERING_UNUSED_ATTACHMENTS_EXTENSION_NAME)) unused_att = true;
             else if (!strcmp(props[i].extensionName, VK_EXT_DEVICE_FAULT_EXTENSION_NAME)) R->has_device_fault = true;
             else if (!strcmp(props[i].extensionName, VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME)) {
                 dev_exts[dev_ext_count++] = VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME;
@@ -315,25 +291,6 @@ bool vkd_create_device(SDL_Window *window) {
             }
         free(props);
         if (!R->has_push_descriptor) log_error("vulkan: VK_KHR_push_descriptor missing - post-processing disabled");
-    }
-    // vgeo HW rasteriser (vgeo_raster.c): VK_EXT_mesh_shader without task shaders, maintenance4
-    // (glslang's LocalSizeId in mesh shaders); vertex pulling otherwise.
-    VkPhysicalDeviceMeshShaderFeaturesEXT mesh = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT };
-    if (R->vg_mesh_shader) {
-        VkPhysicalDeviceMeshShaderFeaturesEXT sm = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MESH_SHADER_FEATURES_EXT };
-        VkPhysicalDeviceVulkan13Features s13 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES };
-        s13.pNext = &sm;
-        VkPhysicalDeviceFeatures2 s2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
-        s2.pNext = &s13;
-        vkGetPhysicalDeviceFeatures2(R->gpu, &s2);
-        R->vg_mesh_shader = sm.meshShader && s13.maintenance4;
-        if (R->vg_mesh_shader) {
-            mesh.meshShader = VK_TRUE;
-            f13.maintenance4 = VK_TRUE;
-            mesh.pNext = f13.pNext;
-            f13.pNext = &mesh;
-            dev_exts[dev_ext_count++] = VK_EXT_MESH_SHADER_EXTENSION_NAME;
-        }
     }
     // Engine Fidelity: levels without temporal passes render the G-buffer without its velocity target
     // (a null attachment view under a pipeline that has the format): needs this extension.
@@ -540,6 +497,7 @@ void vkd_destroy_targets(void) {
 
 void vkd_create_shadow_map(u32 size) {
     if (R->shadow.image) vkr_target_destroy(&R->shadow);
+    R->shadow_gen++;
     R->shadow = vkr_target_create(size, size, VK_FORMAT_D32_SFLOAT,
                                   VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_IMAGE_ASPECT_DEPTH_BIT);
     R->shadow_size = size;
@@ -570,6 +528,7 @@ void vkd_create_shadow_map(u32 size) {
 // Always allocated (8 x 8 with shadows off) so every frame set binds a valid image.
 void vkd_create_vm_shadow_map(u32 size) {
     if (R->vm_shadow.image) vkr_target_destroy(&R->vm_shadow);
+    R->shadow_gen++;
     R->vm_shadow = vkr_target_create(size, size, VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
                                      VK_IMAGE_ASPECT_DEPTH_BIT);
     R->vm_shadow_size = size;
@@ -598,6 +557,7 @@ void vkd_create_vm_shadow_map(u32 size) {
 // The moon's map: D32, bindings 18 (compare) / 19 (raw). Always allocated (16 x 16 when unused).
 void vkd_create_moon_shadow_map(u32 size) {
     if (R->moon_shadow.image) vkr_target_destroy(&R->moon_shadow);
+    R->shadow_gen++;
     R->moon_shadow = vkr_target_create(size, size, VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
                                        VK_IMAGE_ASPECT_DEPTH_BIT);
     R->moon_shadow_size = size;

@@ -8,7 +8,7 @@
  "tile_m": 3.0,
  "name": "mud",
  "kind": "terrain_layer",
- "tool_version": 1,
+ "tool_version": 2,
  "recipe": "assets/terrain/gen/mud.json",
  "replaces": 13
 }

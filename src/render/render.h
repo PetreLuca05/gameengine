@@ -9,6 +9,7 @@
 #include "anim/anim_mesh.h"
 #include "render/post/post_settings.h"
 #include "render/shadow_sky.h"
+#include "render/material_ao.h"
 
 struct SDL_Window;
 
@@ -101,6 +102,12 @@ typedef struct Material {
     TextureId mr_tex, normal_tex, occlusion_tex, emissive_tex;
     float normal_scale, occlusion_strength, alpha_cutoff;
     u32 emissive_rgb;       // RGBA8 emissive colour (glTF emissiveFactor / its largest channel), with MAT_EMISSIVE_TEX
+    // Ambient occlusion (render/material_ao.h, docs/RENDERING_POST.md "Foliage-aware AO"): the weight of the
+    // screen-space AO (0 = automatic: 1, or 0.3 for MAT_ALPHA_MASK; MATERIAL_AO_OFF = none), how the baked AO
+    // combines with it (MaterialAoCombine), and whether the vertex colour alpha is baked AO.
+    float ao_strength;
+    u8 ao_combine;
+    bool ao_vertex;
 } Material;
 
 typedef struct DrawItem {
@@ -209,6 +216,19 @@ AABB render_mesh_bounds(MeshId id);
 TextureId render_texture_create(int w, int h, const void *rgba8, bool srgb, bool mips);
 // Raw compressed or uncompressed upload (KTX2); levels are tightly packed in data.
 TextureId render_texture_create_raw(int w, int h, int levels, u32 vk_format, const void *data, const size_t *level_sizes);
+// World material textures (glTF maps, the asset manifest; docs/TEXTURE_MIPS.md): mipmapped, and
+// r_texture_quality keeps their top levels out of memory. Lowering the quality trims them on the GPU;
+// raising it needs their pixels again: when render_textures_reload_wanted, the owner calls
+// render_texture_reload(_raw) between _begin and _end for every texture render_texture_reload_needed
+// names (same size and format as at creation).
+TextureId render_texture_create_world(int w, int h, const void *rgba8, bool srgb);
+TextureId render_texture_create_raw_world(int w, int h, int levels, u32 vk_format, const void *data, const size_t *level_sizes);
+bool render_textures_reload_wanted(void);
+bool render_texture_reload_needed(TextureId id);
+void render_textures_reload_begin(void);
+void render_texture_reload(TextureId id, int w, int h, const void *rgba8);
+void render_texture_reload_raw(TextureId id, int w, int h, int levels, u32 vk_format, const void *data, const size_t *level_sizes);
+void render_textures_reload_end(void);
 void render_texture_destroy(TextureId id);
 // Surface textures (docs/TEXTURES.md): the layer arrays (assets/textures/surfaces, loaded on first
 // use) and the terrain material map: n x n samples of SurfTexLayer ids (spacing m, min corner origin);
@@ -224,13 +244,15 @@ void render_surface_map(const u8 *ids, int n, float origin_x, float origin_z, fl
 // Frame
 bool render_begin_frame(void);
 void render_set_camera(const RenderCamera *cam);
-// Classic renderer (r_vgeo 0), last frame's main view: instances per LOD 0..3 and impostors (n[4]), and
+// Classic renderer, last frame's main view: instances per LOD 0..3 and impostors (n[4]), and
 // those in a cross-fade band (drawn twice, docs/LOD.md).
 void render_classic_lod_counts(u32 n[5], u32 *fading);
 // The scope picture-in-picture view of the last frame (docs/LOD.md "Scopes"): objective position, axis,
 // tan of the half FOV, target size (px). false: not scoped.
 bool render_scope_view(vec3 *eye, vec3 *fwd, float *tan_half, float *size_px);
-void render_set_camera_override(bool (*fn)(RenderCamera *cam));   // replaces the camera while fn returns true (bench_fidelity flythrough)
+void render_set_camera_override(bool (*fn)(RenderCamera *cam));   // adds an override: replaces the camera while fn returns true (bench_fidelity, perf_audit)
+void render_set_ui_hidden(bool hidden);                           // drop the 2D UI (perf_audit reference captures compare the 3D image)
+u32 render_frame_index(void);                                     // rendered frames (TAA jitter phase = index % 8)
 void render_set_environment(const RenderEnvironment *env);
 void render_draw(const DrawItem *item);
 
@@ -269,8 +291,8 @@ typedef struct SpotLight { vec3 pos, dir; float range, inner_deg, outer_deg, int
 void render_set_sun_shadow(const LightShadowSettings *s);
 void render_get_sun_shadow(LightShadowSettings *out);
 
-// Virtualized geometry placements of the loaded level (docs/VGEO.md "Levels"; mirrors LevelVgeo):
-// replaces every level vgeo instance (vgeo_test_scene instances are cleared too).
+// vgeo placements of the loaded level (docs/VGEO.md "Levels and eras"; mirrors LevelVgeo):
+// replaces every level vgeo instance.
 typedef struct RenderVgeoPlacement {
     const char *mesh;            // "assets/vgeo/x.vgeo" or a model name with "vgeo": true
     vec3 pos, color;
@@ -550,6 +572,10 @@ float render_pass_ms(int i);
 u64 render_post_memory(void);
 float render_exposure_ev(void);
 // Engine Fidelity (docs/ENGINE_FIDELITY.md) diagnostics.
+// The fog extinction (1/m) of this frame: the froxel volumetrics' base density (time of day, weather,
+// post volumes). The analytic distance fog without volumetrics (Engine Fidelity Off / Low, the 2010
+// era) uses the same value, so fog hides the same at every level (docs/SETTINGS_AUDIT.md V6).
+float render_fog_extinction(void);
 float render_direct_exposure_ev(void);                        // Engine Fidelity Off: the fixed (metered) exposure as EV100
 float render_stretch_factor(void);                            // r_stretch: horizontal stretch of the 3D view (1 = none)
 float render_gpu_frame_ms(void);                              // whole command buffer, GPU timestamps (last completed frame)
@@ -574,6 +600,14 @@ float render_vm_fov(void);   // the viewmodel (arms + held item) projection FOV 
 mat4 render_view_proj(void);
 int render_width(void);
 int render_height(void);
+// LOD / impostor / character LOD decisions measure projected sizes against this height, not the
+// render or display resolution: render scale, upscaling and a 4K screen never move a switch, so every
+// player sees the same detail at the same distance (docs/SETTINGS_AUDIT.md V14).
+#define RENDER_LOD_REF_H 1080.0f
+// The last frame's scene content counts in the main view (visibility_probe; the classic renderer's
+// instance parts): visible (every LOD and impostor), in a density / distance / LOD fade, drawn as
+// impostors. false: no culled frame yet.
+bool render_vgeo_counts(u32 *visible, u32 *faded, u32 *impostors);
 RenderStats render_stats(void);
 // Sun shadow state of the last built frame (docs/SHADOWS.md: shadow_info, r_shadow_debug 1 / 8,
 // shadow_switch_stress).
@@ -614,6 +648,12 @@ DG_INLINE u32 rgba8(float r, float g, float b, float a) {
     return R | (G << 8) | (B << 16) | (A << 24);
 }
 DG_INLINE u32 rgba8v(vec4 c) { return rgba8(c.x, c.y, c.z, c.w); }
+
+// The pbr emissive word of a draw (PushLit.pbr.z, VgMaterial.emissive_rgb): the emissive colour, the
+// material's AO byte in the alpha (render/material_ao.h).
+DG_INLINE u32 material_gpu_emissive(const Material *m) {
+    return material_ao_word(m->emissive_rgb, material_ao_byte(m->ao_strength, m->ao_combine, m->ao_vertex, (m->flags & MAT_ALPHA_MASK) != 0));
+}
 
 DG_INLINE Material material_color(vec4 color) {
     Material m;

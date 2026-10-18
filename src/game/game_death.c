@@ -182,8 +182,8 @@ static void cmd_death_dump(int argc, const char **argv) {
 void game_death_register(void) {
     load_params();
     D.fx = deathfx_neutral(&D.P);
-    D.impact_debug = cvar_reg_bool("death_impact_debug", false, 0, "log the ragdoll contact that triggers the death cut and the time since death");
-    D.enable = cvar_reg_bool("death_sequence", true, CVAR_ARCHIVE, "first-person death sequence (desaturate, ear ring, black cut on impact)");
+    D.impact_debug = cvar_reg_bool("death_impact_debug", false, CVAR_LOCKED, "log the ragdoll contact that triggers the death cut and the time since death");
+    D.enable = cvar_reg_bool("death_sequence", true, CVAR_LOCKED, "first-person death sequence (desaturate, ear ring, black cut on impact)");
     cmd_register("die", cmd_die, "die [fall_height]: kill the local player with the death sequence (host; a height drops the ragdoll from there)");
     cmd_register("death_preview", cmd_death_preview, "death_preview <1 fall|2 black|3 downed> <0..1>: scrub the death sequence without dying (0 = off)");
     cmd_register("death_reload", cmd_death_reload, "reload assets/vfx/death_sequence.json and assets/audio/death_ring.json");

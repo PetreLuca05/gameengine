@@ -982,10 +982,10 @@ static void cmd_water_test(int argc, const char **argv) {
 }
 
 void water_register(void) {
-    GW.debug = cvar_reg_int("water_debug", 0, 0, 2, 0, "Water debug view: 1 bodies + buoyancy probes / forces, 2 + surface samples");
-    GW.drown_dps = cvar_reg_float("water_drown_damage", 10.0f, 0.0f, 1000.0f, CVAR_SERVER, "Drowning damage per second once a player's breath runs out");
+    GW.debug = cvar_reg_int("water_debug", 0, 0, 2, CVAR_LOCKED, "Water debug view: 1 bodies + buoyancy probes / forces, 2 + surface samples");
+    GW.drown_dps = cvar_reg_float("water_drown_damage", 10.0f, 0.0f, 1000.0f, CVAR_SERVER | CVAR_LOCKED | CVAR_RULE, "Drowning damage per second once a player's breath runs out");
     movement_set_water(move_water);
-    GW.wave_scale = cvar_reg_float("water_wave_wind_scale", 1.0f, 0.0f, 4.0f, CVAR_CHEAT, "Multiplier on the weather wind fed to the ocean swell (tests)");
+    GW.wave_scale = cvar_reg_float("water_wave_wind_scale", 1.0f, 0.0f, 4.0f, CVAR_CHEAT | CVAR_LOCKED, "Multiplier on the weather wind fed to the ocean swell (tests)");
     cmd_register("water_level", cmd_water_level, "water_level [<body|index> <level>]: list the water bodies / move one's surface (host)");
     cmd_register("wind_set", cmd_wind_set, "wind_set <m/s> [dir_deg] [seconds]: set the weather wind (waves, foliage, rain) (host)");
     cmd_register("spawn_float", cmd_spawn_float, "spawn_float <density> [size] [box|plank|sphere|barrel]: buoyant prop in front of you (host)");

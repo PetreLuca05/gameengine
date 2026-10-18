@@ -326,8 +326,8 @@ static void cmd_report(int argc, const char **argv) {
 
 void handpose_system_init(void) {
     dirs();
-    HS.autoreg = cvar_reg_bool("handpose_autoreg", true, 0, "dev builds: write a stub assets/handposes/<id>.json for every new holdable / interactable");
-    HS.watch = cvar_reg_bool("handpose_watch", true, 0, "reload assets/handposes when its files change on disk");
+    HS.autoreg = cvar_reg_bool("handpose_autoreg", true, CVAR_LOCKED, "dev builds: write a stub assets/handposes/<id>.json for every new holdable / interactable");
+    HS.watch = cvar_reg_bool("handpose_watch", true, CVAR_LOCKED, "reload assets/handposes when its files change on disk");
     cmd_register("handpose_reload", cmd_reload, "re-read assets/handposes and rescan for new entries (docs/HANDPOSE.md)");
     cmd_register("handpose_scan", cmd_scan, "scan items, attachments, vehicles and interactables for new grips / cases");
     cmd_register("handpose_report", cmd_report, "list unreviewed, auto-placed and orphaned grips and cases");

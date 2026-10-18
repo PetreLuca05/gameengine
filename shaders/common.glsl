@@ -36,6 +36,12 @@
 // Ground cover (render.h MAT_COVER, MAT_COVER_ID)
 #define MAT_COVER      268435456u
 #define MAT_COVER_ID(f) (((f) >> 29u) & 7u)
+// Per-material AO byte (src/render/material_ao.h): the alpha of the pbr emissive word (PBR_PARAMS.z).
+#define MAT_AO_BYTE_STRENGTH 31u
+#define MAT_AO_BYTE_THIN     32u    // alpha-tested / foliage: thin occluder (GTAO thickness heuristic)
+#define MAT_AO_BYTE_MIN      64u    // baked AO and screen-space AO combine as min() (else multiply)
+#define MAT_AO_BYTE_VERTEX   128u   // the vertex colour alpha is baked AO (not opacity)
+float mat_ao_strength(uint b) { return 1.0 - float(b & MAT_AO_BYTE_STRENGTH) / 31.0; }
 
 struct PointLight {
     vec4 pos_radius;

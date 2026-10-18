@@ -161,9 +161,9 @@ static void cmd_ping_list(int argc, const char **argv) {
 }
 
 void game_pings_register(void) {
-    PG.enable = cvar_reg_bool("ping_enable", true, CVAR_ARCHIVE, "pings: show other players' pings (markers, compass, chat)");
-    PG.sound = cvar_reg_bool("ping_sound", true, CVAR_ARCHIVE, "pings: play the ping sound");
-    PG.chat = cvar_reg_bool("ping_chat", true, CVAR_ARCHIVE, "pings: a chat line for each new ping");
+    PG.enable = cvar_reg_bool("ping_enable", true, CVAR_ARCHIVE | CVAR_EDITABLE, "pings: show other players' pings (markers, compass, chat)");
+    PG.sound = cvar_reg_bool("ping_sound", true, CVAR_ARCHIVE | CVAR_EDITABLE, "pings: play the ping sound");
+    PG.chat = cvar_reg_bool("ping_chat", true, CVAR_ARCHIVE | CVAR_EDITABLE, "pings: a chat line for each new ping");
     cmd_register("ping", cmd_ping, "ping what the crosshair is on (contextual), or a type: ping enemy");
     cmd_register("ping_list", cmd_ping_list, "list the live pings");
 }

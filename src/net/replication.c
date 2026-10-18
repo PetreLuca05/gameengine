@@ -7,6 +7,7 @@
 #include "core/log.h"
 #include "core/engine.h"
 #include "gameplay/zombies/horde.h"
+#include "net_prof.h"
 #include <stdlib.h>
 
 void snap_history_init(SnapHistory *h) {
@@ -262,9 +263,11 @@ void repl_write_delta(Writer *wr, const SnapFrame *base, SnapFrame *cur) {
         g_write_base = NULL;
         changes++;
         for (int k = 0; k < 16; k++) if (m & (1u << k)) g_field_count[k]++;
+        netprof_entity(b, &e, m, wr->len - before);
         g_bytes_by_type[DG_MIN(e.type, 31)] += wr->len - before;
     }
     memcpy(wr->buf + count_pos, &changes, 2);
+    netprof_entities_considered(cur->count);
     // Removals: baseline entities not present (by id) in the current frame.
     u32 rem_pos = wr->len;
     w_u16(wr, 0);

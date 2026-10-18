@@ -9,6 +9,7 @@
 #include "skeletal_mesh.h"
 #include "lod_fade.h"
 #include "core/platform.h"
+#include "core/profiler.h"
 #include <SDL3/SDL.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -28,56 +29,65 @@ static float view_aspect(void) {
 static VkQueryPool g_frame_qp;
 static bool g_frame_qp_written[FRAMES_IN_FLIGHT];
 static float g_gpu_frame_ms;
-static bool (*g_cam_override)(RenderCamera *cam);
-void render_set_camera_override(bool (*fn)(RenderCamera *cam)) { g_cam_override = fn; }
+// Camera overrides (bench_fidelity, perf_audit): the first that returns true replaces the camera.
+static bool (*g_cam_override[4])(RenderCamera *cam);
+void render_set_camera_override(bool (*fn)(RenderCamera *cam)) {
+    for (int k = 0; k < 4; k++) {
+        if (g_cam_override[k] == fn) return;
+        if (!g_cam_override[k]) { g_cam_override[k] = fn; return; }
+    }
+}
+static bool g_ui_hidden;   // perf_audit reference captures: the 3D image alone
+void render_set_ui_hidden(bool hidden) { g_ui_hidden = hidden; }
+u32 render_frame_index(void) { return R ? (u32)R->frame_index : 0; }
 static size_t obj_slot_size(void);
 
 void render_register_cvars(void) {
     Renderer *r = R;
-    r->r_vsync = cvar_reg_bool("r_vsync", true, CVAR_ARCHIVE, "vertical sync");
-    r->r_wireframe = cvar_reg_bool("r_wireframe", false, 0, "wireframe rendering");
-    r->r_render_scale = cvar_reg_float("r_render_scale", 1.0f, 0.25f, 2.0f, CVAR_ARCHIVE, "3D resolution scale");
-    r->r_aniso = cvar_reg_int("r_aniso", 8, 1, 16, CVAR_ARCHIVE, "anisotropic filtering level");
-    r->r_texture_quality = cvar_reg_int("r_texture_quality", 2, 0, 2, CVAR_ARCHIVE, "0 low, 1 medium, 2 high");
-    r->r_aa = cvar_reg_int("r_aa", 3, 0, 3, CVAR_ARCHIVE, "anti-aliasing: 0 none, 1 FXAA, 2 SMAA 1x, 3 TAA");
-    r->r_brightness = cvar_reg_float("r_brightness", 1.0f, 0.3f, 3.0f, CVAR_ARCHIVE, "display brightness (after the tonemapper)");
-    r->r_gamma = cvar_reg_float("r_gamma", 1.0f, 0.5f, 2.0f, CVAR_ARCHIVE, "gamma adjustment");
-    r->r_grid = cvar_reg_bool("r_grid", true, CVAR_ARCHIVE, "draw unit grid on dev geometry");
-    r->r_vignette = cvar_reg_float("r_vignette", 0.25f, 0.0f, 1.0f, CVAR_ARCHIVE, "vignette strength");
-    r->r_shader_hotreload = cvar_reg_bool("r_shader_hotreload", true, 0, "watch shader sources and reload on change");
-    r->r_culling = cvar_reg_bool("r_culling", true, 0, "frustum culling");
-    r->r_vm_fov = cvar_reg_float("r_viewmodel_fov", 0.0f, 0.0f, 120.0f, CVAR_ARCHIVE, "viewmodel FOV (0 = same as world, keeps IK hands aligned)");
-    r->r_cpu_skinning = cvar_reg_bool("r_cpu_skinning", false, 0, "skin characters on the CPU (fallback / debugging)");
-    r->r_bloom = cvar_reg_bool("r_bloom", true, CVAR_ARCHIVE, "bloom (HDR mip chain)");
-    r->r_hdr_output = cvar_reg_bool("r_hdr_output", false, CVAR_ARCHIVE, "HDR10 output (PQ) when the display supports it");
-    r->r_bloom_intensity = cvar_reg_float("r_bloom_intensity", 0.05f, 0.0f, 0.5f, CVAR_ARCHIVE, "bloom strength (energy conserving mix)");
+    r->r_vsync = cvar_reg_bool("r_vsync", true, CVAR_ARCHIVE | CVAR_EDITABLE, "vertical sync");
+    r->r_wireframe = cvar_reg_bool("r_wireframe", false, CVAR_LOCKED, "wireframe rendering");
+    r->r_render_scale = cvar_reg_float("r_render_scale", 1.0f, 0.25f, 2.0f, CVAR_ARCHIVE | CVAR_EDITABLE, "3D resolution scale");
+    r->r_aniso = cvar_reg_int("r_aniso", 8, 1, 16, CVAR_TIER, "anisotropic filtering level");
+    r->r_texture_quality = cvar_reg_int("r_texture_quality", 2, 0, 2, CVAR_TIER, "0 low, 1 medium, 2 high");
+    r->r_aa = cvar_reg_int("r_aa", 3, 0, 3, CVAR_TIER, "anti-aliasing: 0 none, 1 FXAA, 2 SMAA 1x, 3 TAA");
+    r->r_brightness = cvar_reg_float("r_brightness", 1.0f, 0.85f, 1.15f, CVAR_ARCHIVE | CVAR_EDITABLE, "display brightness (after the tonemapper)");
+    r->r_gamma = cvar_reg_float("r_gamma", 1.0f, 0.5f, 2.0f, CVAR_LOCKED, "gamma adjustment");
+    r->r_grid = cvar_reg_bool("r_grid", true, CVAR_LOCKED, "draw unit grid on dev geometry");
+    r->r_vignette = cvar_reg_float("r_vignette", 0.25f, 0.0f, 1.0f, CVAR_ARCHIVE | CVAR_EDITABLE, "vignette strength");
+    r->r_shader_hotreload = cvar_reg_bool("r_shader_hotreload", true, CVAR_LOCKED, "watch shader sources and reload on change");
+    r->r_culling = cvar_reg_bool("r_culling", true, CVAR_LOCKED, "frustum culling");
+    r->r_vm_fov = cvar_reg_float("r_viewmodel_fov", 0.0f, 0.0f, 120.0f, CVAR_LOCKED, "viewmodel FOV (0 = same as world, keeps IK hands aligned)");
+    r->r_cpu_skinning = cvar_reg_bool("r_cpu_skinning", false, CVAR_LOCKED, "skin characters on the CPU (fallback / debugging)");
+    r->r_bloom = cvar_reg_bool("r_bloom", true, CVAR_TIER, "bloom (HDR mip chain)");
+    r->r_hdr_output = cvar_reg_bool("r_hdr_output", false, CVAR_ARCHIVE | CVAR_EDITABLE, "HDR10 output (PQ) when the display supports it");
+    r->r_bloom_intensity = cvar_reg_float("r_bloom_intensity", 0.05f, 0.0f, 0.5f, CVAR_LOCKED, "bloom strength (energy conserving mix)");
     // Unity-style shadow quality (docs/SHADOWS_UNITY_MODEL.md; Engine Fidelity sets defaults / bounds).
     QualityShadowSettings dq;
     shs_quality_default(&dq);
-    r->r_shadows = cvar_reg_int("r_shadows", dq.mode, 0, 2, CVAR_ARCHIVE, "Shadows: 0 Disable, 1 Hard Only (Soft lights render Hard), 2 Hard and Soft");
-    r->r_shadow_resolution = cvar_reg_int("r_shadow_resolution", dq.resolution, 0, 3, CVAR_ARCHIVE,
+    r->r_shadows = cvar_reg_int("r_shadows", dq.mode, 0, 2, CVAR_TIER, "Shadows: 0 Disable, 1 Hard Only (Soft lights render Hard), 2 Hard and Soft");
+    r->r_shadow_resolution = cvar_reg_int("r_shadow_resolution", dq.resolution, 0, 3, CVAR_TIER,
                                           "Shadow Resolution for lights on 'Use Quality Settings': 0 Low, 1 Medium, 2 High, 3 Very High (sun cascades 512 .. 4096, spot / point 256 .. 2048)");
-    r->r_shadow_projection = cvar_reg_int("r_shadow_projection", dq.projection, 0, 1, CVAR_ARCHIVE, "Shadow Projection: 0 Close Fit (denser, swims), 1 Stable Fit (sphere fit + texel snapping)");
-    r->r_shadow_cascades = cvar_reg_int("r_shadow_cascades", dq.cascades, 1, 4, CVAR_ARCHIVE, "Shadow Cascades: 1 No Cascades, 2 Two, 4 Four (3 = 4)");
-    r->r_shadow_max_distance = cvar_reg_float("r_shadow_max_distance", dq.distance, 10.0f, 1000.0f, CVAR_ARCHIVE, "Shadow Distance (m): the last cascade ends here, fading over the cascade border");
-    r->r_soft_shadow_quality = cvar_reg_int("r_soft_shadow_quality", dq.soft_quality, 0, 3, CVAR_ARCHIVE,
+    r->r_shadow_projection = cvar_reg_int("r_shadow_projection", dq.projection, 0, 1, CVAR_TIER, "Shadow Projection: 0 Close Fit (denser, swims), 1 Stable Fit (sphere fit + texel snapping)");
+    r->r_shadow_cascades = cvar_reg_int("r_shadow_cascades", dq.cascades, 1, 4, CVAR_TIER, "Shadow Cascades: 1 No Cascades, 2 Two, 4 Four (3 = 4)");
+    r->r_shadow_max_distance = cvar_reg_float("r_shadow_max_distance", dq.distance, 10.0f, 1000.0f, CVAR_LOCKED, "Shadow Distance (m): the last cascade ends here, fading over the cascade border");
+    r->r_soft_shadow_quality = cvar_reg_int("r_soft_shadow_quality", dq.soft_quality, 0, 3, CVAR_TIER,
                                             "Soft Shadow Quality: 0 Low (tent 3x3), 1 Medium (5x5), 2 High (7x7), 3 Ultra (PCSS, contact hardening; sun and viewmodel)");
-    r->r_shadow_split2 = cvar_reg_float("r_shadow_split2", dq.split2 * 100.0f, 1.0f, 99.0f, CVAR_ARCHIVE, "two-cascade split (% of the shadow distance; Unity default 33.3)");
-    r->r_shadow_split4[0] = cvar_reg_float("r_shadow_split4_1", dq.split4[0] * 100.0f, 1.0f, 97.0f, CVAR_ARCHIVE, "four-cascade split 1 (% of the shadow distance; Unity default 6.7)");
-    r->r_shadow_split4[1] = cvar_reg_float("r_shadow_split4_2", dq.split4[1] * 100.0f, 2.0f, 98.0f, CVAR_ARCHIVE, "four-cascade split 2 (%; Unity default 20)");
-    r->r_shadow_split4[2] = cvar_reg_float("r_shadow_split4_3", dq.split4[2] * 100.0f, 3.0f, 99.0f, CVAR_ARCHIVE, "four-cascade split 3 (%; Unity default 46.7)");
-    r->r_shadow_border = cvar_reg_float("r_shadow_cascade_border", dq.border * 100.0f, 0.0f, 50.0f, CVAR_ARCHIVE,
+    r->r_shadow_split2 = cvar_reg_float("r_shadow_split2", dq.split2 * 100.0f, 1.0f, 99.0f, CVAR_TIER, "two-cascade split (% of the shadow distance; 25: cascade 0 stays dense at the locked distance)");
+    r->r_shadow_split4[0] = cvar_reg_float("r_shadow_split4_1", dq.split4[0] * 100.0f, 1.0f, 97.0f, CVAR_TIER, "four-cascade split 1 (% of the shadow distance; Unity default 6.7)");
+    r->r_shadow_split4[1] = cvar_reg_float("r_shadow_split4_2", dq.split4[1] * 100.0f, 2.0f, 98.0f, CVAR_TIER, "four-cascade split 2 (%; Unity default 20)");
+    r->r_shadow_split4[2] = cvar_reg_float("r_shadow_split4_3", dq.split4[2] * 100.0f, 3.0f, 99.0f, CVAR_TIER, "four-cascade split 3 (%; Unity default 46.7)");
+    r->r_shadow_border = cvar_reg_float("r_shadow_cascade_border", dq.border * 100.0f, 0.0f, 50.0f, CVAR_TIER,
                                         "Cascade Border: blend band at the end of each cascade, and the shadow distance fade (% of the cascade)");
-    r->r_shadow_near_offset = cvar_reg_float("r_shadow_near_offset", dq.near_plane_offset, 2.0f, 5000.0f, CVAR_ARCHIVE,
+    r->r_shadow_near_offset = cvar_reg_float("r_shadow_near_offset", dq.near_plane_offset, 2.0f, 5000.0f, CVAR_TIER,
                                              "Shadow Near Plane Offset (m): how far each cascade's light box reaches towards the light beyond its receivers (casters outside the view)");
-    r->r_shadowmask_mode = cvar_reg_int("r_shadowmask_mode", dq.shadowmask, 0, 1, CVAR_ARCHIVE, "Shadowmask Mode (stub, no baked data yet): 0 Shadowmask, 1 Distance Shadowmask");
-    r->r_shadowmask_distance = cvar_reg_float("r_shadowmask_distance", dq.shadowmask_distance, 0.0f, 2000.0f, CVAR_ARCHIVE, "Distance Shadowmask cut-over (m; stub)");
-    r->r_shadow_debug = cvar_reg_int("r_shadow_debug", 0, 0, 8, 0,
+    r->r_shadowmask_mode = cvar_reg_int("r_shadowmask_mode", dq.shadowmask, 0, 1, CVAR_TIER, "Shadowmask Mode (stub, no baked data yet): 0 Shadowmask, 1 Distance Shadowmask");
+    r->r_shadowmask_distance = cvar_reg_float("r_shadowmask_distance", dq.shadowmask_distance, 0.0f, 2000.0f, CVAR_TIER, "Distance Shadowmask cut-over (m; stub)");
+    r->r_shadow_debug = cvar_reg_int("r_shadow_debug", 0, 0, 8, CVAR_LOCKED,
                                      "shadow views: 1 readout (sky, cascades, bias, filter, jitter), 2 penumbra width, 3 blocker distance, 4 cascade / mode, 5 cloud shadow, 6 texel size, 7 viewmodel tile coverage, 8 fitting spheres + light frustums");
-    r->r_vm_shadow = cvar_reg_bool("r_vm_shadow", true, CVAR_ARCHIVE, "first-person rig (arms, held item) in its own high-resolution shadow tile (docs/SHADOWS.md)");
-    r->r_stretch = cvar_reg_float("r_stretch", 0.0f, 0.0f, 1.0f, CVAR_ARCHIVE,
+    r->r_vm_shadow = cvar_reg_bool("r_vm_shadow", true, CVAR_TIER, "first-person rig (arms, held item) in its own high-resolution shadow tile (docs/SHADOWS.md)");
+    r->r_stretch = cvar_reg_float("r_stretch", 0.0f, 0.0f, 1.0f, CVAR_LOCKED,
                                   "stretched resolution simulator: 0 normal .. 1 extreme (the 3D view squeezed into a narrower aspect, stretched to the screen)");
-    r->r_shadow_min_radius = cvar_reg_float("r_shadow_min_radius", 0.0f, 0.0f, 4.0f, CVAR_ARCHIVE, "props smaller than this radius (m) cast no sun shadow");
+    r->r_shadow_min_radius = cvar_reg_float("r_shadow_min_radius", 0.0f, 0.0f, 4.0f, CVAR_TIER, "props smaller than this radius (m) cast no sun shadow");
     r->r_vsync->on_change = on_render_cvar_changed;
 }
 
@@ -244,6 +254,8 @@ bool render_init(SDL_Window *window) {
     if (!vkp_create_pipelines()) { log_error("render: pipeline creation failed"); return false; }
     if (!vkx_init()) log_warn("render: VFX pipelines unavailable (particles disabled)");
     fg_init();
+    vkp_init(R->pipe_stats);
+    vkp_register();
     {
         VkQueryPoolCreateInfo qi = { VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO };
         qi.queryType = VK_QUERY_TYPE_TIMESTAMP;
@@ -251,7 +263,7 @@ bool render_init(SDL_Window *window) {
         VK_CHECK(vkCreateQueryPool(R->device, &qi, NULL, &g_frame_qp));
     }
     vkg_init();
-    lod_init();   // LOD ranges / cross-fades (docs/LOD.md): after r_vgeo
+    lod_init();   // LOD ranges / cross-fades (docs/LOD.md)
     if (!post_init()) { log_error("render: post-processing stack unavailable"); return false; }
     vkw_init();   // after the post stack (its descriptor layout, samplers)
     sky_init();
@@ -315,6 +327,7 @@ void render_shutdown(void) {
         post_shutdown();
         vkg_shutdown();
         fg_shutdown();
+        vkp_shutdown();
         vkx_shutdown();
         vkw_shutdown();
         render_ui_shutdown();
@@ -399,7 +412,11 @@ static void apply_setting_changes(void) {
         R->aniso_mod = R->r_aniso->modified;
         R->texq_mod = R->r_texture_quality->modified;
         vkDeviceWaitIdle(R->device);
+        vkr_textures_quality_changed();   // world textures drop levels (or want a reload) first: new views
         vkr_recreate_linear_sampler();
+    } else if (R->texq_retry) {
+        vkDeviceWaitIdle(R->device);
+        vkr_textures_quality_changed();
     }
 }
 
@@ -419,12 +436,16 @@ bool render_begin_frame(void) {
     if (R->swap_dirty || !R->swapchain) return false;
 
     FrameResources *f = &R->frames[R->frame_slot];
+    PROF_WAIT_BEGIN(PW_GPU_FENCE);
     VK_CHECK(vkWaitForFences(R->device, 1, &f->fence, VK_TRUE, UINT64_MAX));
+    PROF_WAIT_END();
     vkr_flush_deferred(f);
     f->dyn_used = 0;
     phone_view_frame_begin(R->frame_slot);   // this slot's phone camera copies are complete
 
+    PROF_WAIT_BEGIN(PW_ACQUIRE);
     VkResult res = vkAcquireNextImageKHR(R->device, R->swapchain, UINT64_MAX, f->image_available, VK_NULL_HANDLE, &R->image_index);
+    PROF_WAIT_END();
     if (res == VK_ERROR_OUT_OF_DATE_KHR) { R->swap_dirty = true; return false; }
     if (res != VK_SUCCESS && res != VK_SUBOPTIMAL_KHR) { log_error("acquire failed %d", (int)res); return false; }
     VK_CHECK(vkResetFences(R->device, 1, &f->fence));
@@ -434,9 +455,9 @@ bool render_begin_frame(void) {
 
 void render_set_camera(const RenderCamera *cam) {
     R->cam = *cam;
-    vkg_bench_camera(&R->cam);   // vgeo_bench flythrough
     vkg_frame_update();          // grass fades / shadows follow the fidelity level (outside the frame's recording)
-    if (g_cam_override) g_cam_override(&R->cam);   // bench_fidelity flythrough
+    for (int k = 0; k < 4 && g_cam_override[k]; k++)
+        if (g_cam_override[k](&R->cam)) break;   // bench_fidelity / perf_audit flythroughs
     cam = &R->cam;
     float aspect = view_aspect();
     R->view = mat4_fps_view(cam->pos, cam->yaw, cam->pitch, cam->roll);
@@ -462,6 +483,8 @@ void render_draw_skinned(const SkinnedDraw *d) {
     s->palette = NULL;
     s->bone_count = R->skin_bone_count | ((u32)d->bone_count << 20);
     R->skin_bone_count += d->bone_count;
+    prof_count(PC_SKIN_PALETTES, 1);   // docs/PERF_AUDIT.md R10: palettes vs evaluated poses
+    prof_count(PC_SKIN_PALETTE_BYTES, (i64)(sizeof(mat4) * d->bone_count));
 }
 
 void render_draw_viewmodel(const DrawItem *item) {
@@ -594,6 +617,7 @@ TextVertex *render_text_alloc(u32 count) {
 void render_set_text_atlas(TextureId atlas) { R->text_atlas = atlas ? atlas : R->white_tex; }
 
 void render_ui(const UiVertex *verts, u32 vcount, const u32 *indices, u32 icount, const UiDrawCmd *cmds, u32 ccount) {
+    if (g_ui_hidden) return;
     if (R->ui_vcount + vcount > R->ui_vcap || R->ui_icount + icount > R->ui_icap || R->ui_ccount + ccount > R->ui_ccap) return;
     u32 vbase = R->ui_vcount, ibase = R->ui_icount;
     memcpy(R->ui_verts + vbase, verts, sizeof(UiVertex) * vcount);
@@ -706,6 +730,7 @@ static u32 f32_bits(float f) {
 static void draw_items(VkCommandBuffer cmd, DrawItem *items, u32 count, bool shadow_pass, bool cull, int alpha_mode, PipelineId pipe) {
     // alpha_mode: 0 = opaque only, 1 = blended only, 2 = all
     if (!count) return;
+    if (shadow_pass) prof_count(PC_SHADOW_ITEMS, count);
     ArenaMark mark = arena_mark(&g_engine.frame_arena);
     SortKey *keys = ARENA_PUSH_N(&g_engine.frame_arena, SortKey, count);
     u32 n = 0;
@@ -800,7 +825,7 @@ static void draw_items(VkCommandBuffer cmd, DrawItem *items, u32 count, bool sha
         pc.flags[3] = shadow_pass ? g_shadow_cascade : 0;
         pc.pbr[0] = f32_bits(d->mat.normal_scale);
         pc.pbr[1] = f32_bits(d->mat.occlusion_strength);
-        pc.pbr[2] = d->mat.emissive_rgb;
+        pc.pbr[2] = material_gpu_emissive(&d->mat);   // + the AO byte (render/material_ao.h)
         pc.pbr[3] = f32_bits(d->mat.alpha_cutoff);
         vkCmdPushConstants(cmd, R->layout_lit, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushLit), &pc);
         vkCmdDrawIndexed(cmd, m->index_count, 1, 0, 0, 0);
@@ -822,11 +847,8 @@ typedef struct CpuSkin { VkDeviceSize offset; bool ok; } CpuSkin;
 
 // Skinned passes: 0 = main (world), 1 = shadow, 2 = viewmodel (first-person arms, after the depth
 // clear), 3 = phone cameras (the world + the local player's own body, MAT_SELF: selfies).
-static u8 g_skin_routed[MAX_SKIN_DRAWS];   // this frame's skinned draws vgeo takes (main view, vkg_route_skinned)
-
 static bool skin_in_pass(const SkinnedDraw *d, int pass) {
     bool vm = (d->flags & MAT_VIEWMODEL) != 0;
-    if (pass == 0 && g_skin_routed[d - R->skin_draws]) return false;
     if (pass == 1) return d->cast_shadow && !vm;
     if (pass == 2) return vm;
     if (pass == 3) return !vm && (!(d->flags & MAT_SHADOW_ONLY) || (d->flags & MAT_SELF));
@@ -1144,6 +1166,24 @@ static bool prev_palette(u32 id, u32 *off, u32 *count) {
     return true;
 }
 
+// Empty shadow maps (docs/perf/FINDINGS.md PF-0001): the sun atlas with no active cascade (night,
+// sun shadows off), the moon map by day and the viewmodel tile without a rig were cleared to depth 1
+// every frame although nothing is drawn into them. A map that was cleared and left empty last frame
+// and draws nothing this frame still holds exactly that clear (same image, still in
+// SHADER_READ_ONLY, the earlier barrier made the clear visible to every later read): its clear,
+// barriers and empty rendering are skipped. perf_fix_disable PF-0001 clears every frame again.
+typedef struct ShadowClearState { VkImage image; u32 gen; bool empty; } ShadowClearState;
+static ShadowClearState g_shadow_clear[3];   // sun atlas, moon, viewmodel tile
+
+static bool shadow_clear_skip(int k, VkImage image, bool draws) {
+    ShadowClearState *s = &g_shadow_clear[k];
+    bool skip = prof_fix_enabled(PFX_SHADOW_CLEAR_SKIP) && !draws && s->empty && s->image == image && s->gen == R->shadow_gen;
+    s->image = image;
+    s->gen = R->shadow_gen;
+    s->empty = !draws;
+    return skip;
+}
+
 // ------------------------------------------------------------------ frame matrices
 
 // Validation (docs/SHADOWS.md "Tests"): every tile the lit shaders will sample this frame
@@ -1404,14 +1444,14 @@ static void compute_matrices(FrameData *fd) {
     fd->ss_view_proj = mat4_mul(R->proj_j, R->view);   // used only by a second camera (ss_info.x, the scope PiP)
     fd->ss_view = R->view;
     fd->ss_info = v4(0, 0, 0, 0);
-    fd->camera_pos = v4(c->pos.x, c->pos.y, c->pos.z, (float)g_engine.real_time);
+    fd->camera_pos = v4(c->pos.x, c->pos.y, c->pos.z, (float)g_engine.render_time);
     fd->sun_dir = v4(L.x, L.y, L.z, e->sun_intensity);
     fd->sun_color = v4(e->sun_color.x, e->sun_color.y, e->sun_color.z, R->shadow_active[0] || R->shadow_active[1] ? 1.0f : 0.0f);
     fd->sky_ambient = v4(e->sky_ambient.x, e->sky_ambient.y, e->sky_ambient.z, e->ambient_intensity);
     fd->ground_ambient = v4(e->ground_ambient.x, e->ground_ambient.y, e->ground_ambient.z, (float)R->light_count);
     // Volumetric fog replaces the analytic per-pixel fog of the lit shaders.
     bool vol = post_settings()->volumetrics > 0 && fg_pass_enabled("vol_inject");
-    fd->fog = v4(e->fog_color.x, e->fog_color.y, e->fog_color.z, vol ? 0.0f : e->fog_density);
+    fd->fog = v4(e->fog_color.x, e->fog_color.y, e->fog_color.z, vol ? 0.0f : render_fog_extinction());
     // z: unused (the filter follows the sky: ssky0 / ssky1)
     fd->params = v4(R->r_grid->i ? 1.0f : 0.0f, 1.0f / (float)R->shadow_size, 0.0f, 0.0f);
     fd->screen = v4((float)R->hdr.w, (float)R->hdr.h, 1.0f / (float)R->hdr.w, 1.0f / (float)R->hdr.h);
@@ -1570,37 +1610,10 @@ static void exec_prepass(VkCommandBuffer cmd, void *u) {
     bind_frame(cmd);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 1, 1, &R->textures[R->white_tex].set, 0, NULL);
     post_push_lit_inputs(cmd, NULL, false);
-    vkg_draw_gbuffer(cmd);   // vgeo surfaces first (depth export), the legacy draws test against them
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_PREPASS]);
     draw_items(cmd, R->draws, R->draw_count, false, R->r_culling->i != 0, 0, PIPE_PREPASS);
-    vkc_draw_gbuffer(cmd);   // classic instanced vgeo content (r_vgeo 0)
+    vkc_draw_gbuffer(cmd);   // classic instanced vgeo content
     draw_skinned(cmd, 0, PIPE_PREPASS_SKIN, PIPE_PREPASS, F.skin_main);
-    vkCmdEndRendering(cmd);
-}
-
-// vgeo (docs/VGEO.md "Foliage support"): the depth of the large static legacy surfaces (walls, level
-// brushes) before this frame's vgeo Hi-Z, so pass 2 occlusion counts them; the prepass clears and
-// redraws everything after.
-static void exec_vgeo_occluders(VkCommandBuffer cmd, void *u) {
-    (void)u;
-    begin_gbuffer(cmd, R->depth.view, true);
-    bind_frame(cmd);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 1, 1, &R->textures[R->white_tex].set, 0, NULL);
-    post_push_lit_inputs(cmd, NULL, false);
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_PREPASS]);
-    ArenaMark mark = arena_mark(&g_engine.frame_arena);
-    DrawItem *occ = ARENA_PUSH_N(&g_engine.frame_arena, DrawItem, R->draw_count + 1);
-    u32 n = 0;
-    for (u32 i = 0; i < R->draw_count; i++) {
-        const DrawItem *d = &R->draws[i];
-        if (d->object_id || d->mat.color.w < 0.999f || (d->mat.flags & (MAT_SHADOW_ONLY | MAT_VIEWMODEL)) || !R->meshes[d->mesh].used) continue;
-        vec3 c;
-        float r;
-        item_bounds(d, &c, &r);
-        if (r >= 2.0f) occ[n++] = *d;
-    }
-    draw_items(cmd, occ, n, false, true, 0, PIPE_PREPASS);
-    arena_pop_to(mark);
     vkCmdEndRendering(cmd);
 }
 
@@ -1613,7 +1626,6 @@ static void exec_opaque(VkCommandBuffer cmd, void *u) {
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[R->r_wireframe->i ? PIPE_LIT_WIRE : PIPE_LIT]);
     draw_items(cmd, R->draws, R->draw_count, false, R->r_culling->i != 0, 0, R->r_wireframe->i ? PIPE_LIT_WIRE : PIPE_LIT);
     vkc_draw_lit(cmd);   // classic instanced vgeo content (depth EQUAL to its prepass)
-    vkg_draw_lit(cmd);   // vgeo pixels (depth equal to the exported depth)
     vkCmdEndRendering(cmd);
 }
 
@@ -1683,8 +1695,11 @@ static void draw_precip(VkCommandBuffer cmd, VkDescriptorSet frame_set) {
     const RenderWeather *wx = &R->weather;
     float amount = fmaxf(wx->rain, wx->snowfall);
     if (wx->precip_quality <= 0 || amount < 0.01f || !R->pipes[PIPE_PRECIP]) return;
-    static const u32 streaks[4] = { 0, 4000, 9000, 16000 }, splashes[4] = { 0, 300, 700, 1300 };
-    int q = DG_CLAMP(wx->precip_quality, 0, 3);
+    // The streaks around the camera hide what is behind them: one count for every quality tier
+    // (docs/SETTINGS_AUDIT.md V8); the tier only buys splash detail on the ground.
+    static const u32 splashes[4] = { 0, 300, 700, 1300 };
+    const u32 streaks_n = 9000;
+    int q = DG_CLAMP(wx->precip_quality, 1, 3);
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_PRECIP]);
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 0, 1, &frame_set, 0, NULL);
     PushLit pc;
@@ -1692,7 +1707,7 @@ static void draw_precip(VkCommandBuffer cmd, VkDescriptorSet frame_set) {
     pc.model = mat4_identity();
     float snow_frac = wx->rain + wx->snowfall > 1e-4f ? wx->snowfall / (wx->rain + wx->snowfall) : 0.0f;
     pc.params = v4(snow_frac, amount, 14.0f, 16.0f);
-    u32 n = (u32)((float)streaks[q] * amount);
+    u32 n = (u32)((float)streaks_n * amount);
     if (n) {
         vkCmdPushConstants(cmd, R->layout_lit, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushLit), &pc);
         vkCmdDraw(cmd, 6, n, 0, 0);
@@ -1767,7 +1782,7 @@ static void exec_viewmodel(VkCommandBuffer cmd, void *u) {
     vkCmdEndRendering(cmd);
 }
 
-// Scope picture-in-picture: the opaque scene (static + characters + the classic / vgeo content,
+// Scope picture-in-picture: the opaque scene (static + characters + the classic vgeo content,
 // lit forward like the main opaque pass, with the main view's AO / contact / SSR / SSGI through its
 // projection) from the objective lens at the scope FOV into a square target; then its decals, the
 // sky and fog (post_scope_sky) and its transparency (scope_pip_fx). The local player's own weapon
@@ -1950,7 +1965,7 @@ int render_alt_scene_pass(int slot, const char *name, FgRes color, FgRes depth, 
     pd->jitter = v4(0, 0, 0, 0);
     pd->post_flags = v4(0, 0, 0, 0);
     pd->post_fog = v4(0, 80, 0, 0);
-    pd->fog = v4(R->env.fog_color.x, R->env.fog_color.y, R->env.fog_color.z, R->env.fog_density);
+    pd->fog = v4(R->env.fog_color.x, R->env.fog_color.y, R->env.fog_color.z, render_fog_extinction());
     pd->camera_pos = v4(cam.x, cam.y, cam.z, fd->camera_pos.w);
     pd->screen = v4((float)w, (float)h, 1.0f / (float)w, 1.0f / (float)h);
     int p = fg_pass(name, exec_alt_scene, a);
@@ -2146,7 +2161,7 @@ static void build_frame_graph(FrameData *fd) {
     in.ground = R->env.ground_ambient;
     in.ambient = R->env.ambient_intensity;
     in.dt = (float)g_engine.frame_dt;
-    in.time = (float)g_engine.real_time;
+    in.time = (float)g_engine.render_time;
     in.frame = R->frame_index;
     in.camera_cut = R->camera_cut;
     in.sky_on = R->env.sky;
@@ -2158,27 +2173,17 @@ static void build_frame_graph(FrameData *fd) {
     post_begin_frame(&in);
     sky_build();   // atmosphere LUTs, sky view, aerial perspective, cloud shadow, environment refilter
 
-    vkg_graph_cull(F.depth);   // vgeo culling (docs/VGEO.md), against last frame's Hi-Z
-    int p;
-    if (vkg_wants_occluders()) {   // static legacy occluders' depth: vgeo pass 2 occlusion counts walls
-        p = fg_pass("vgeo_occluders", exec_vgeo_occluders, NULL);
-        fg_write(p, F.depth, FG_DEPTH);
-        fg_write(p, F.normal, FG_COLOR);
-        fg_write(p, F.material, FG_COLOR);
-        fg_write(p, F.velocity, FG_COLOR);
-    }
-    vkg_graph_cull_pass2(F.depth);
-    p = fg_pass("prepass", exec_prepass, NULL);
+    int p = fg_pass("prepass", exec_prepass, NULL);
     fg_write(p, F.depth, FG_DEPTH);
     fg_write(p, F.normal, FG_COLOR);
     fg_write(p, F.material, FG_COLOR);
     fg_write(p, F.velocity, FG_COLOR);
-    vkg_graph_hiz(F.depth, F.velocity);    // this frame's occlusion Hi-Z
 
     post_screen_space(&F.lit);
     const PostSettings *ps = post_settings();
     fd->post_flags = v4(F.lit.ao_on ? 1.0f : 0.0f, F.lit.contact_on ? 1.0f : 0.0f, F.lit.ssr_on ? 1.0f : 0.0f, F.lit.ssgi_on ? 1.0f : 0.0f);
-    fd->post_params = v4(ps->ssr_intensity, ps->ssgi_intensity, ps->ao_intensity, 1.0f);
+    // z: AO intensity as the lit pass' lerp weight (above 1 the GTAO power strengthens it instead, gtao.comp)
+    fd->post_params = v4(ps->ssr_intensity, ps->ssgi_intensity, fminf(ps->ao_intensity, 1.0f), 1.0f);
 
     p = fg_pass("opaque", exec_opaque, NULL);
     fg_write(p, F.hdr, FG_COLOR);
@@ -2281,7 +2286,7 @@ static void build_frame_graph(FrameData *fd) {
 }
 
 // The sun's casters into one cascade tile (k 0..3) or the moon map (k 4): raster draws (culled
-// against the tile's light box, Cast Shadows / culling mask in draw_items), vgeo / classic
+// against the tile's light box, Cast Shadows / culling mask in draw_items), the classic
 // instances, skinned characters (batched; per draw when the culling mask excludes a layer).
 static void draw_sun_casters(VkCommandBuffer cmd, FrameResources *f, int k, const SkinPass *skin_shadow) {
     const LightShadowSettings *sl = &R->sun_shadow;
@@ -2289,7 +2294,6 @@ static void draw_sun_casters(VkCommandBuffer cmd, FrameResources *f, int k, cons
     vkCmdSetDepthBias(cmd, 1.25f * sl->bias, 0.0f, 1.75f * sl->bias);   // Unity's Bias scales the hardware terms too
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 0, 1, &f->frame_set, 0, NULL);
     draw_items(cmd, R->draws, R->draw_count, true, false, 0, PIPE_SHADOW);
-    vkg_draw_shadow(cmd, (u32)k);
     if (k < 4) vkc_draw_shadow(cmd, (u32)k);
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_SHADOW]);
     if (F.cpu_skinned) draw_cpu_skinned(cmd, f, F.cpu_skinned, 1);
@@ -2348,12 +2352,14 @@ void render_end_frame(void) {
         vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, g_frame_qp, slot * 2);
     }
 
+    vkp_frame_begin(cmd, slot);
+    vkp_scope_begin(cmd, "uploads");
     vkr_record_uploads(cmd);
 
+    PROF_BEGIN("render:prepare");
     FrameData *fd = (FrameData *)f->ubo.mapped;
     compute_matrices(fd);
-    vkg_submit_fallback();   // the classic renderer's culling / LOD / instance batches (r_vgeo 0; r_vgeo 1: local light tiles only)
-    vkg_bench_frame();
+    vkg_classic_frame();   // the classic renderer's culling / LOD / instance batches
     memset(&F, 0, sizeof(F));
     F.f = f;
 
@@ -2386,8 +2392,6 @@ void render_end_frame(void) {
     F.skin_phone = &skin_phone;
     for (u32 i = 0; i < R->skin_draw_count; i++) F.any_skin_vm |= (R->skin_draws[i].flags & MAT_VIEWMODEL) != 0;
     ArenaMark skin_mark = arena_mark(&g_engine.frame_arena);
-    memset(g_skin_routed, 0, R->skin_draw_count);
-    if (R->skin_draw_count && !cpu_skin) vkg_route_skinned(R->skin_draws, R->skin_draw_count, R->skin_bones, g_skin_routed);
     if (R->skin_draw_count) {
         if (cpu_skin) {
             F.cpu_skinned = ARENA_PUSH_N(&g_engine.frame_arena, CpuSkin, R->skin_draw_count);
@@ -2405,150 +2409,171 @@ void render_end_frame(void) {
         }
     }
 
+    prof_count(PC_DRAW_ITEMS, (i64)(R->draw_count + R->vm_draw_count + R->skin_draw_count));
+    PROF_END();
+
     // ---------------------------------------------------------- GPU particle simulation
+    PROF_BEGIN("render:record_pre");
+    vkp_scope_begin(cmd, "vfx_sim");
     vkx_begin_frame_queries(cmd);
     vkx_record_compute(cmd);
 
     // ---------------------------------------------------------- shadow pass
     R->shadow_drawn = 0;
-    vkg_record_shadow_cull(cmd);   // vgeo cascade views (docs/VGEO.md)
-    vkr_image_barrier(cmd, R->shadow.image, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-                      VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, 0,
-                      VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-                      VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, 1);
-    {
-        VkRenderingAttachmentInfo da = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
-        da.imageView = R->shadow.view;
-        da.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
-        da.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-        da.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-        da.clearValue.depthStencil.depth = 1.0f;
-        VkRenderingInfo ri = { VK_STRUCTURE_TYPE_RENDERING_INFO };
-        ri.renderArea.extent.width = R->shadow.w;
-        ri.renderArea.extent.height = R->shadow.h;
-        ri.layerCount = 1;
-        ri.pDepthAttachment = &da;
-        vkCmdBeginRendering(cmd, &ri);
-        if (R->shadow_active[0] || R->shadow_active[1] || R->shadow_active[2] || R->shadow_active[3]) {
-            // One atlas tile per cascade (the cascade index rides in the push constants). The
-            // cascade matrices already map into their tile: full viewport, scissored to the tile.
-            // Tiles the sky does not need are skipped (compute_matrices: the sun's type None, under
-            // the cutoff, wide mode's cascade 0).
-            u32 tile = R->shadow.w / 2;
-            g_shadow_min_radius = R->r_shadow_min_radius->f;
-            g_shadow_cull = R->r_culling->i != 0;
-            g_shadow_layers = R->sun_shadow.culling_mask;
-            for (int k = 0; k < 4; k++) {
-                if (!R->shadow_active[k]) continue;
-                extract_frustum(R->shadow_vp_ndc[k], g_shadow_planes);   // casters outside this tile's light box are skipped
-                R->shadow_drawn |= 1u << k;
-                VkViewport vp = { 0.0f, 0.0f, (float)R->shadow.w, (float)R->shadow.h, 0.0f, 1.0f };
-                VkRect2D sc = { { (int)((k & 1) * tile), (int)((k >> 1) * tile) }, { tile, tile } };
-                vkCmdSetViewport(cmd, 0, 1, &vp);
-                vkCmdSetScissor(cmd, 0, 1, &sc);
-                g_shadow_cascade = (u32)k;
-                draw_sun_casters(cmd, f, k, &skin_shadow);
+    vkp_scope_begin(cmd, "foliage_wind");
+    vkg_record_foliage(cmd);   // foliage wind, displacement buffer (the classic renderer's WPO inputs)
+    vkp_scope_begin(cmd, "shadow_sun");
+    bool skip_clear = shadow_clear_skip(0, R->shadow.image, R->shadow_active[0] || R->shadow_active[1] || R->shadow_active[2] || R->shadow_active[3]);
+    if (!skip_clear) {
+        vkr_image_barrier(cmd, R->shadow.image, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+                          VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, 0,
+                          VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                          VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, 1);
+        {
+            VkRenderingAttachmentInfo da = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
+            da.imageView = R->shadow.view;
+            da.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+            da.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+            da.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+            da.clearValue.depthStencil.depth = 1.0f;
+            VkRenderingInfo ri = { VK_STRUCTURE_TYPE_RENDERING_INFO };
+            ri.renderArea.extent.width = R->shadow.w;
+            ri.renderArea.extent.height = R->shadow.h;
+            ri.layerCount = 1;
+            ri.pDepthAttachment = &da;
+            vkCmdBeginRendering(cmd, &ri);
+            if (R->shadow_active[0] || R->shadow_active[1] || R->shadow_active[2] || R->shadow_active[3]) {
+                // One atlas tile per cascade (the cascade index rides in the push constants). The
+                // cascade matrices already map into their tile: full viewport, scissored to the tile.
+                // Tiles the sky does not need are skipped (compute_matrices: the sun's type None, under
+                // the cutoff, wide mode's cascade 0).
+                u32 tile = R->shadow.w / 2;
+                g_shadow_min_radius = R->r_shadow_min_radius->f;
+                g_shadow_cull = R->r_culling->i != 0;
+                g_shadow_layers = R->sun_shadow.culling_mask;
+                for (int k = 0; k < 4; k++) {
+                    if (!R->shadow_active[k]) continue;
+                    extract_frustum(R->shadow_vp_ndc[k], g_shadow_planes);   // casters outside this tile's light box are skipped
+                    R->shadow_drawn |= 1u << k;
+                    VkViewport vp = { 0.0f, 0.0f, (float)R->shadow.w, (float)R->shadow.h, 0.0f, 1.0f };
+                    VkRect2D sc = { { (int)((k & 1) * tile), (int)((k >> 1) * tile) }, { tile, tile } };
+                    vkCmdSetViewport(cmd, 0, 1, &vp);
+                    vkCmdSetScissor(cmd, 0, 1, &sc);
+                    g_shadow_cascade = (u32)k;
+                    draw_sun_casters(cmd, f, k, &skin_shadow);
+                }
+                g_shadow_cascade = 0;
+                g_shadow_min_radius = 0.0f;
+                g_shadow_cull = false;
+                g_shadow_layers = SHADOW_LAYERS_ALL;
             }
-            g_shadow_cascade = 0;
-            g_shadow_min_radius = 0.0f;
-            g_shadow_cull = false;
-            g_shadow_layers = SHADOW_LAYERS_ALL;
+            vkCmdEndRendering(cmd);
         }
-        vkCmdEndRendering(cmd);
+        vkr_image_barrier(cmd, R->shadow.image, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+                          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                          VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                          VK_ACCESS_2_SHADER_SAMPLED_READ_BIT, 1);
     }
-    vkr_image_barrier(cmd, R->shadow.image, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-                      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-                      VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                      VK_ACCESS_2_SHADER_SAMPLED_READ_BIT, 1);
 
     // ---------------------------------------------------------- moon shadow map
     // The moon while the sun still owns the cascades (its own map since the atlas holds 4 cascades):
-    // cleared every frame, drawn only while its fade is above 0.
-    vkr_image_barrier(cmd, R->moon_shadow.image, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-                      VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, 0, VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-                      VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, 1);
-    {
-        VkRenderingAttachmentInfo da = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
-        da.imageView = R->moon_shadow.view;
-        da.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
-        da.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-        da.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-        da.clearValue.depthStencil.depth = 1.0f;
-        VkRenderingInfo ri = { VK_STRUCTURE_TYPE_RENDERING_INFO };
-        ri.renderArea.extent.width = R->moon_shadow.w;
-        ri.renderArea.extent.height = R->moon_shadow.h;
-        ri.layerCount = 1;
-        ri.pDepthAttachment = &da;
-        vkCmdBeginRendering(cmd, &ri);
-        if (R->moon_active) {
-            set_viewport(cmd, R->moon_shadow.w, R->moon_shadow.h);
-            g_shadow_min_radius = R->r_shadow_min_radius->f;
-            g_shadow_cull = R->r_culling->i != 0;
-            g_shadow_layers = R->sun_shadow.culling_mask;
-            extract_frustum(R->shadow_vp_ndc[4], g_shadow_planes);
-            g_shadow_cascade = SHADOW_PASS_MOON;
-            draw_sun_casters(cmd, f, 4, &skin_shadow);
-            g_shadow_cascade = 0;
-            g_shadow_min_radius = 0.0f;
-            g_shadow_cull = false;
-            g_shadow_layers = SHADOW_LAYERS_ALL;
-            R->shadow_drawn |= 1u << 5;
+    // cleared, drawn only while its fade is above 0 (an empty map is not re-cleared: shadow_clear_skip).
+    vkp_scope_begin(cmd, "shadow_moon");
+    skip_clear = shadow_clear_skip(1, R->moon_shadow.image, R->moon_active);
+    if (!skip_clear) {
+        vkr_image_barrier(cmd, R->moon_shadow.image, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+                          VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, 0, VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                          VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, 1);
+        {
+            VkRenderingAttachmentInfo da = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
+            da.imageView = R->moon_shadow.view;
+            da.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+            da.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+            da.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+            da.clearValue.depthStencil.depth = 1.0f;
+            VkRenderingInfo ri = { VK_STRUCTURE_TYPE_RENDERING_INFO };
+            ri.renderArea.extent.width = R->moon_shadow.w;
+            ri.renderArea.extent.height = R->moon_shadow.h;
+            ri.layerCount = 1;
+            ri.pDepthAttachment = &da;
+            vkCmdBeginRendering(cmd, &ri);
+            if (R->moon_active) {
+                set_viewport(cmd, R->moon_shadow.w, R->moon_shadow.h);
+                g_shadow_min_radius = R->r_shadow_min_radius->f;
+                g_shadow_cull = R->r_culling->i != 0;
+                g_shadow_layers = R->sun_shadow.culling_mask;
+                extract_frustum(R->shadow_vp_ndc[4], g_shadow_planes);
+                g_shadow_cascade = SHADOW_PASS_MOON;
+                draw_sun_casters(cmd, f, 4, &skin_shadow);
+                g_shadow_cascade = 0;
+                g_shadow_min_radius = 0.0f;
+                g_shadow_cull = false;
+                g_shadow_layers = SHADOW_LAYERS_ALL;
+                R->shadow_drawn |= 1u << 5;
+            }
+            vkCmdEndRendering(cmd);
         }
-        vkCmdEndRendering(cmd);
+        vkr_image_barrier(cmd, R->moon_shadow.image, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+                          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                          VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT, 1);
     }
-    vkr_image_barrier(cmd, R->moon_shadow.image, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-                      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-                      VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT, 1);
 
     // ---------------------------------------------------------- viewmodel shadow tile
-    // The first-person rig (arms, held item, attachments) alone, in its own map: cleared every frame
-    // (an inactive tile reads lit), drawn with this frame's matrices and palettes.
-    vkr_image_barrier(cmd, R->vm_shadow.image, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-                      VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, 0, VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-                      VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, 1);
-    {
-        VkRenderingAttachmentInfo da = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
-        da.imageView = R->vm_shadow.view;
-        da.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
-        da.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-        da.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-        da.clearValue.depthStencil.depth = 1.0f;
-        VkRenderingInfo ri = { VK_STRUCTURE_TYPE_RENDERING_INFO };
-        ri.renderArea.extent.width = R->vm_shadow.w;
-        ri.renderArea.extent.height = R->vm_shadow.h;
-        ri.layerCount = 1;
-        ri.pDepthAttachment = &da;
-        vkCmdBeginRendering(cmd, &ri);
-        if (R->shadow_vm_active) {
-            set_viewport(cmd, R->vm_shadow.w, R->vm_shadow.h);
-            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_SHADOW]);
-            vkCmdSetDepthBias(cmd, 1.0f, 0.0f, 1.5f);
-            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 0, 1, &f->frame_set, 0, NULL);
-            g_shadow_cascade = SHADOW_PASS_VM;
-            g_shadow_vm_pass = true;
-            draw_items(cmd, R->vm_draws, R->vm_draw_count, true, false, 0, PIPE_SHADOW);
-            if (F.cpu_skinned) draw_cpu_skinned(cmd, f, F.cpu_skinned, 2);
-            else if (skin_vm.batch_count) {
-                vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_SKIN_SHADOW]);
-                PushLit pc;
-                memset(&pc, 0, sizeof(pc));
-                pc.flags[3] = SHADOW_PASS_VM;
-                vkCmdPushConstants(cmd, R->layout_lit, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushLit), &pc);
-                draw_skin_pass(cmd, &skin_vm);
+    // The first-person rig (arms, held item, attachments) alone, in its own map: cleared
+    // (an inactive tile reads lit; an empty one is not re-cleared: shadow_clear_skip), drawn with this
+    // frame's matrices and palettes.
+    vkp_scope_begin(cmd, "shadow_vm");
+    skip_clear = shadow_clear_skip(2, R->vm_shadow.image, R->shadow_vm_active);
+    if (!skip_clear) {
+        vkr_image_barrier(cmd, R->vm_shadow.image, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+                          VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, 0, VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                          VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, 1);
+        {
+            VkRenderingAttachmentInfo da = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
+            da.imageView = R->vm_shadow.view;
+            da.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+            da.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+            da.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+            da.clearValue.depthStencil.depth = 1.0f;
+            VkRenderingInfo ri = { VK_STRUCTURE_TYPE_RENDERING_INFO };
+            ri.renderArea.extent.width = R->vm_shadow.w;
+            ri.renderArea.extent.height = R->vm_shadow.h;
+            ri.layerCount = 1;
+            ri.pDepthAttachment = &da;
+            vkCmdBeginRendering(cmd, &ri);
+            if (R->shadow_vm_active) {
+                set_viewport(cmd, R->vm_shadow.w, R->vm_shadow.h);
+                vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_SHADOW]);
+                vkCmdSetDepthBias(cmd, 1.0f, 0.0f, 1.5f);
+                vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 0, 1, &f->frame_set, 0, NULL);
+                g_shadow_cascade = SHADOW_PASS_VM;
+                g_shadow_vm_pass = true;
+                draw_items(cmd, R->vm_draws, R->vm_draw_count, true, false, 0, PIPE_SHADOW);
+                if (F.cpu_skinned) draw_cpu_skinned(cmd, f, F.cpu_skinned, 2);
+                else if (skin_vm.batch_count) {
+                    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_SKIN_SHADOW]);
+                    PushLit pc;
+                    memset(&pc, 0, sizeof(pc));
+                    pc.flags[3] = SHADOW_PASS_VM;
+                    vkCmdPushConstants(cmd, R->layout_lit, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushLit), &pc);
+                    draw_skin_pass(cmd, &skin_vm);
+                }
+                g_shadow_vm_pass = false;
+                g_shadow_cascade = 0;
+                R->shadow_drawn |= 1u << 4;
             }
-            g_shadow_vm_pass = false;
-            g_shadow_cascade = 0;
-            R->shadow_drawn |= 1u << 4;
+            vkCmdEndRendering(cmd);
         }
-        vkCmdEndRendering(cmd);
+        vkr_image_barrier(cmd, R->vm_shadow.image, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+                          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                          VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT, 1);
     }
-    vkr_image_barrier(cmd, R->vm_shadow.image, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-                      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-                      VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT, 1);
     shadow_check_sampled(fd);
 
     // ---------------------------------------------------------- point / spot light shadows
+    vkp_scope_begin(cmd, "light_shadows");
     vkls_record(cmd, f);
+    vkp_scope_begin(cmd, "rain_occlusion");
 
     // ---------------------------------------------------------- rain occlusion map (weather)
     // Static + dynamic opaque draws from straight above, depth only (cascade 3 of the shadow
@@ -2592,8 +2617,13 @@ void render_end_frame(void) {
     }
 
     // ---------------------------------------------------------- frame graph: scene + post + UI
+    vkp_scope_end(cmd);
+    PROF_END();
+    PROF_BEGIN("render:frame_graph");
     build_frame_graph(fd);
     fg_execute(cmd);
+    PROF_END();
+    vkp_scope_begin(cmd, "post_graph");
 
     // Depth stays readable for next frame's particle collision compute (VFX set binding 19).
     if (R->depth.layout != VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL) {
@@ -2628,6 +2658,7 @@ void render_end_frame(void) {
     }
 
     arena_pop_to(skin_mark);
+    vkp_scope_end(cmd);
     if (g_frame_qp) {
         vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, g_frame_qp, slot * 2 + 1);
         g_frame_qp_written[slot] = true;
@@ -2657,13 +2688,19 @@ void render_end_frame(void) {
     pi.swapchainCount = 1;
     pi.pSwapchains = &R->swapchain;
     pi.pImageIndices = &R->image_index;
+    PROF_WAIT_BEGIN(PW_PRESENT);
     VkResult pres = vkQueuePresentKHR(R->queue, &pi);
+    PROF_WAIT_END();
     if (pres == VK_ERROR_OUT_OF_DATE_KHR || pres == VK_SUBOPTIMAL_KHR) R->swap_dirty = true;
     else if (pres != VK_SUCCESS) log_error("present failed %d", (int)pres);
 
     bool want_exr = post_exr_capture_armed();
     bool want_ui = render_ui_wants_wait();
-    if (want_shot || want_exr || want_ui) VK_CHECK(vkWaitForFences(R->device, 1, &f->fence, VK_TRUE, UINT64_MAX));
+    if (want_shot || want_exr || want_ui) {
+        PROF_WAIT_BEGIN(PW_READBACK);
+        VK_CHECK(vkWaitForFences(R->device, 1, &f->fence, VK_TRUE, UINT64_MAX));
+        PROF_WAIT_END();
+    }
     render_ui_frame_done();
     if (want_shot) {
         vmaInvalidateAllocation(R->vma, shot.alloc, 0, VK_WHOLE_SIZE);
@@ -2720,6 +2757,11 @@ const char *render_pass_name(int i) { return fg_pass_name(i); }
 float render_pass_ms(int i) { return fg_pass_ms(i); }
 u64 render_post_memory(void) { return fg_memory_bytes(); }
 float render_gpu_frame_ms(void) { return g_gpu_frame_ms; }
+float render_fog_extinction(void) {
+    const PostSettings *s = post_settings();
+    if (R->env.fog_density <= 0.0f) return 0.0f;   // a level without fog
+    return s && s->fog_density > 0.0f ? s->fog_density : R->env.fog_density;
+}
 float render_direct_exposure_ev(void) {
     float e = post_direct_exposure();
     return e > 0.0f ? log2f(0.18f / (e * 0.125f)) + post_settings()->exposure_comp : 0.0f;

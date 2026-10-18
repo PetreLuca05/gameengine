@@ -1,5 +1,12 @@
 # Engine Fidelity
 
+> **Settings audit (docs/SETTINGS_AUDIT.md) supersedes parts of this page.** Levels trade cost for
+> quality only: foliage density, LOD / impostor / grass ranges, shadow distance and shadow types,
+> fog, exposure, lens effects and decal budgets are no longer features; they are locked values in
+> `assets/render/consistency.json`, the same at every level and era. No level disables sun shadows
+> or rain; Off / Low use 1024 px shadow maps for the locked 150 m. The per-feature tables below
+> predate that and still list the removed entries for history.
+
 Five levels, **Off, Low, Medium, High, Modern**, form the base layer of the graphics settings. A
 level decides which systems the frame graph contains and their internal cost tiers. Every other
 graphics control (post-processing & effects, resolution / upscaler, shadows, geometry / foliage,
@@ -27,11 +34,11 @@ internal), `r_fidelity_recommended`, `r_fidelity_bench` (last measured ms per le
 
 | level | what it is |
 |---|---|
-| **Modern** | Everything the renderer has, at full: GTAO, contact shadows, full-res SSR, SSGI, froxel volumetrics up to ultra with lamp scattering, 3 cascades of 2048 (up to 4096) per cascade with sky-driven PCSS, TAA / TAA-U / FSR, bokeh DoF (48 taps), camera + object motion blur, lens flare / dirt / chromatic aberration / distortion / droplets, HDR10 output, lit 6-way particles, full foliage, vgeo at the era's error. **Defaults = the engine's defaults before Engine Fidelity existed** (so Modern changes nothing for existing configs). Every control unlocked. |
-| **High** | The same feature set at cheaper tiers: SSR half res (max), SSGI unavailable, volumetrics "high" froxel grid (160x90x64) max, shadows 2048 per cascade by default with 3 cascades, PCSS, reach -25 %, bloom 5 mips (max), hybrid DoF (32 taps), foliage cap 0.8, LOD bias +0.5 (characters x0.71, vgeo error x1.41), decals 256 (max 512). |
+| **Modern** | Everything the renderer has, at full: GTAO, contact shadows, full-res SSR, SSGI, froxel volumetrics up to ultra with lamp scattering, 3 cascades of 2048 (up to 4096) per cascade with sky-driven PCSS, TAA / TAA-U / FSR, bokeh DoF (48 taps), camera + object motion blur, lens flare / dirt / chromatic aberration / distortion / droplets, HDR10 output, lit 6-way particles, full foliage, discrete LODs at the era's error. **Defaults = the engine's defaults before Engine Fidelity existed** (so Modern changes nothing for existing configs). Every control unlocked. |
+| **High** | The same feature set at cheaper tiers: SSR half res (max), SSGI unavailable, volumetrics "high" froxel grid (160x90x64) max, shadows 2048 per cascade by default with 3 cascades, PCSS, reach -25 %, bloom 5 mips (max), hybrid DoF (32 taps), foliage cap 0.8, LOD bias +0.5 (characters x0.71, discrete LOD error x1.41), decals 256 (max 512). |
 | **Medium** | Drops the expensive screen-space work: SSR unavailable (sky / ground environment reflections), GTAO low tier, fog-only volumetrics (80x45x48, no lamp scattering), 3 cascades at 1024, camera-only motion blur, aiming-only gaussian-style DoF (16 taps), lens flare / dirt / CA / distortion / droplets unavailable, FSR 1 at 0.75 by default (TAA by default, FXAA / SMAA selectable), unlit particles, foliage cap 0.5, impostors from 24 px, LOD bias +1, decals 128, textures one mip down (max), particles "medium". |
-| **Low** | The minimum that still looks like the game: AO / SSR / volumetrics unavailable (the lit shaders' analytic distance fog), 2 cascades of 1024 with half the reach (12-tap PCF), tiny bloom (4 mips), DoF / motion blur unavailable, FXAA only, render scale 0.66 with a bilinear upscale (FSR 1 selectable), ACES / Neutral tonemapper + LUT, unlit "low" particles, foliage cap 0.25, impostors from 48 px, LOD bias +2, vgeo error x3, discrete LOD error x4, textures two mips down, props under 0.5 m cast no sun shadow. |
-| **Off** | **No post-processing at all.** The frame graph schedules the scene passes and the final pass, which tonemaps the lit HDR straight to the swapchain (`final_direct.frag`): no AA, TAA jitter, velocity, bloom, AO, SSR, SSGI, volumetrics, DoF, motion blur, exposure adaptation (a fixed metered exposure), lens effects, sharpening, grain or vignette. The Look's colour grade stays as its baked LUT in place of the plain tonemap (one fetch, docs/LOOKS.md); its finish effects are dropped. One short hard cascade at 1024, render scale 0.6 (0.5 .. 0.66), foliage cap 0.1 with impostors from 96 px, LOD bias +3, vgeo error x4, decals 16, low particles, textures two mips down, props under 1 m cast no sun shadow. Every effect control is locked. Plain but correct lighting (sun, shadow, sky / IBL ambient, lamps, analytic fog). |
+| **Low** | The minimum that still looks like the game: AO / SSR / volumetrics unavailable (the lit shaders' analytic distance fog), 2 cascades of 1024 with half the reach (12-tap PCF), tiny bloom (4 mips), DoF / motion blur unavailable, FXAA only, render scale 0.66 with a bilinear upscale (FSR 1 selectable), ACES / Neutral tonemapper + LUT, unlit "low" particles, foliage cap 0.25, impostors from 48 px, LOD bias +2, discrete LOD error x4, textures two mips down, props under 0.5 m cast no sun shadow. |
+| **Off** | **No post-processing at all.** The frame graph schedules the scene passes and the final pass, which tonemaps the lit HDR straight to the swapchain (`final_direct.frag`): no AA, TAA jitter, velocity, bloom, AO, SSR, SSGI, volumetrics, DoF, motion blur, exposure adaptation (a fixed metered exposure), lens effects, sharpening, grain or vignette. The Look's colour grade stays as its baked LUT in place of the plain tonemap (one fetch, docs/LOOKS.md); its finish effects are dropped. One short hard cascade at 1024, render scale 0.6 (0.5 .. 0.66), foliage cap 0.1 with impostors from 96 px, LOD bias +3, discrete LOD error x8, decals 16, low particles, textures two mips down, props under 1 m cast no sun shadow. Every effect control is locked. Plain but correct lighting (sun, shadow, sky / IBL ambient, lamps, analytic fog). |
 
 ## Per-feature table (modern era)
 
@@ -86,8 +93,6 @@ era preset (`r_era`): `era x3` = three times the era's own error threshold, also
 | `moon_shadows` | - | - | off | on | on |
 | `texture_quality` | 0, max 0 | 0, max 0 | 1, max 1 | 2, max 2 | 2, max 2 |
 | `aniso` | 1, {1,2} | 2, {1,2,4} | 4, {1,2,4,8} | 8, {1,2,4,8,16} | 8, {1,2,4,8,16} |
-| `vgeo` (off: the classic renderer, docs/CLASSIC_RENDERER.md) | on | on | on | on | on |
-| `vgeo_error_px` | era x4 | era x3 | era x2 | era x1.41 | era x1 |
 | `vgeo_shadow_error_px` | era x4 | era x3 | era x2 | era x1.41 | era x1 |
 | `vgeo_lod_px` | era x8 | era x4 | era x2 | era x1.41 | era x1 |
 | `foliage_density` | era, max 0.1 | era, max 0.25 | era, max 0.5 | era, max 0.8 | era, max 1 |
@@ -124,8 +129,8 @@ Budgets (1080p, mid-range GPU): Off 3 ms, Low 5 ms, Medium 8 ms, High 12 ms, Mod
 |---|---|---|
 | modern | - | - |
 | 2020 | - | - |
-| 2015 | `vgeo`, `vgeo_error_px`, `vgeo_shadow_error_px`, `ssgi` | - |
-| 2010 | `vgeo`, `vgeo_error_px`, `vgeo_shadow_error_px`, `ssgi`, `ssr`, `puddle_reflections`, `volumetrics`, `vol_local_lights`, `hdr_output` | `aa` {0,1,2}; `upscaler` {0}; `motion_blur` max 1; `dof_quality` max 1 |
+| 2015 | `vgeo_shadow_error_px`, `ssgi` | - |
+| 2010 | `vgeo_shadow_error_px`, `ssgi`, `ssr`, `puddle_reflections`, `volumetrics`, `vol_local_lights`, `hdr_output` | `aa` {0,1,2}; `upscaler` {0}; `motion_blur` max 1; `dof_quality` max 1 |
 
 
 ### Feature → cvar
@@ -140,7 +145,7 @@ Budgets (1080p, mid-range GPU): Off 3 ms, Low 5 ms, Medium 8 ms, High 12 ms, Mod
 | ao / contact_shadows | `r_ao` / `r_contact_shadows` | | light_shadows / _quality | `r_light_shadows` / `r_light_shadow_quality` |
 | ssr / ssgi | `r_ssr` / `r_ssgi` | | cloud_shadows / moon_shadows | `r_cloud_shadows` / `r_moon_shadows` **new** |
 | puddle_reflections | `r_puddle_reflections` | | texture_quality / aniso | `r_texture_quality` / `r_aniso` |
-| volumetrics | `r_volumetrics` | | vgeo, vgeo_error_px, vgeo_shadow_error_px, vgeo_lod_px | `r_vgeo`, `r_vgeo_error_px`, `r_vgeo_shadow_error_px`, `r_vgeo_lod_px` |
+| volumetrics | `r_volumetrics` | | vgeo_shadow_error_px, vgeo_lod_px | `r_vgeo_shadow_error_px`, `r_vgeo_lod_px` (the classic renderer's shadow / discrete LOD errors) |
 | vol_local_lights | `r_vol_local_lights` **new** | | foliage_density / foliage_wind / impostor_px | `r_foliage_density` / `r_foliage_wind` (0 none, 1 main bending, 2 + branches, 3 + leaf flutter, bent normals; docs/FOLIAGE_WIND.md) / `r_vgeo_impostor_px` |
 | | | | terrain_quality | `r_terrain_quality` **new** (0 minimal .. 4 ultra: tiling breakers, colour variation, transitions, parallax, scatter; docs/TERRAIN_SHADING.md) |
 | motion_blur | `r_motion_blur` | | lod_bias / char_quality | `r_lod_bias` / `r_char_quality` |
@@ -209,7 +214,7 @@ bilinear upscale from the render resolution, a **fixed exposure**, a hue-preserv
 luminance, the colour-blind filter and the user's brightness / gamma, sRGB with a blue-noise dither.
 The UI backdrop blur takes the same transform (`ui_blur_down.comp` with `pc.u0.x`).
 
-What stays: the scene passes (vgeo cull / raster / Hi-Z, prepass without velocity, opaque, decals,
+What stays: the scene passes (prepass without velocity, opaque, decals,
 characters, the sky and its LUTs, `fog_apply` for the analytic fog over the sky, scene copy,
 transparency, viewmodel), the weapon sights (red dot / scope: aiming is gameplay), the scope /
 phone picture-in-picture, the UI. The gameplay screen effects (damage tint, low health, flash) live
@@ -238,8 +243,7 @@ Every frame `fg_execute` runs `fgc_analyze` on the graph it is about to execute
   passes (buffer / readback work: exposure, autofocus, EXR capture).
 * **unused resource**: a transient / history declared but used by no scheduled pass.
 * **undefined read**: a transient read before any pass wrote it. `fg_reference()` marks a binding
-  that keeps an image alive without reading it (vgeo's this-frame Hi-Z, bound by the cull pass and
-  written later).
+  that keeps an image alive without reading it (bound by one pass and written later).
 * **stale images**: pool images the graph doesn't use (freed by `fg_trim` after a level switch and
   by the 240-frame eviction otherwise).
 
@@ -258,7 +262,7 @@ Every preset's shadow entries follow one formula (docs/SHADOWS.md "Per-preset ta
 - `r_shadows`: Disable / Hard Only / Hard and Soft.
 - `r_shadow_resolution`: the tile size per cascade, 512 .. 4096 (the atlas is 2 x 2 tiles).
 - `r_shadow_cascades`: 1 / 2 / 4 at Unity's split percentages up to the shadow distance. Unused
-  tiles aren't drawn and vgeo doesn't cull them.
+  tiles aren't drawn and the classic renderer doesn't cull them.
 - `r_shadow_max_distance`: metres; the last cascade ends there and fades over the cascade border.
 - `r_soft_shadow_quality`: tent 3 / 5 / 7, or Ultra = PCSS + wide mode.
 - `r_moon_shadows`: the moon's own map while the sun still owns the cascades.
@@ -273,11 +277,11 @@ keeps a fixed-hardness kernel; its shadows still lighten and vanish with the sky
 * **Per-era tables.** Each level file has a base table and per-era differences (`"eras"`). The
   2015 / 2010 eras render discrete LODs (cheaper geometry), so their Low affords soft shadows (and
   SMAA in 2010), their Medium full GTAO; 2010-era Off has a longer shadow reach.
-* **Era-owned features** take the era's own value: Low's vgeo error is 3x the era's (modern 1 px →
-  3 px, 2020 2 px → 6 px), its foliage the era's density capped at 0.25 (2010: 0.2 stays 0.2). The
+* **Era-owned features** take the era's own value: Low's discrete LOD error is 4x the era's (modern 2 px →
+  8 px, 2020 3 px → 12 px), its foliage the era's density capped at 0.25 (2010: 0.2 stays 0.2). The
   era preset's detection compares against the bounded values, so `r_era` still reads back as the era.
 * **Capability matrix** (`eras.json`, table above). What an era lacks is unavailable at every level
-  and its fidelity entry is ignored: the 2015 era has no vgeo / SSGI; the 2010 era also no SSR (nor
+  and its fidelity entry is ignored: the 2015 era has no SSGI; the 2010 era also no SSR (nor
   puddle mirrors), froxel volumetrics, HDR10, TAA (FXAA / SMAA only) or upscalers, at most camera
   motion blur and hybrid DoF. Custom (`r_era 4`) has the modern capabilities.
 
@@ -337,14 +341,14 @@ level and the switches.
   have no global scale; "shorter fade / short grass / grass off" is approximated by the density cap
   (Off 0.1) and earlier impostors.
 * **LOD bias.** Characters: `r_lod_bias` = 2^-bias (+0.5 → 0.71, +1 → 0.5, +2 / +3 → 0.25, the
-  cvar's minimum); vgeo error x1.41 / x2 / x3 / x4, discrete LODs x1.41 / x2 / x4 / x8. With `r_vgeo 0`
-  the classic renderer and the shared systems take their ranges from `assets/render/lod.json` x its tier
+  cvar's minimum); shadow LOD error x1.41 / x2 / x3 / x4, discrete LODs x1.41 / x2 / x4 / x8. The classic
+  renderer and the shared systems take their ranges from `assets/render/lod.json` x its tier
   multipliers (Off 0.3, Low 0.4, Medium 0.6, High 0.85, Modern 1) instead, `r_lod_bias` against the
   level's default as the user's bias (docs/LOD.md).
 * **Medium AA.** There is no separate "TAA-low": Medium defaults to TAA, FXAA / SMAA selectable.
 * **DoF.** "Gaussian" / "hybrid" / "bokeh" are the gather's 16 / 32 / 48 taps (hexagonal bokeh only
   at 48).
-* **"Low may reuse the 2015-era pipeline".** Not forced: the era decides vgeo vs discrete LODs
+* **"Low may reuse the 2015-era pipeline".** Not forced: the era decides the discrete LOD errors
   (the 2015 / 2010 eras get their own, cheaper Low tables).
 * **Benchmark "offscreen".** The measured frames go to the swapchain behind an opaque cover (the
   renderer has no headless path inside the game loop).

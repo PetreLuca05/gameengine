@@ -66,7 +66,7 @@ The exact prompts and the style line are in `tools/vfxgen/texgen_recipes.json`.
 
 ## Shading (`shaders/surfaces.glsl`, legacy lit pass only)
 
-`lit.frag` defines `LIT_SURFACES`; the vgeo resolve and the skinned pass do not include it.
+`lit.frag` defines `LIT_SURFACES`; the classic renderer and the skinned pass do not include it.
 
 - **Terrain** (`surf_terrain`):
   - 4 material-map samples around the pixel, jittered by value noise (no grid-aligned borders);
@@ -167,9 +167,9 @@ the files, the procedural masks of `vgeo_gen_foliage_mask` stay. Tree kinds are 
 
 Screenshots: `tools/tests/tex_zl.cfg` (zombieland: streets, ground, forest, farms, aerials),
 `tex_veg.cfg` (vegetation map: meadow, tufts, wheat), `tex_dev.cfg` (devroom unchanged), `tex_fallback.cfg`
-(r_vgeo 0). Perf: `tex_perf.cfg`. Run from `build/bin` with `--test --nosound --log <path> --script`.
+(the classic renderer). Perf: `tex_perf.cfg`. Run from `build/bin` with `--test --nosound --log <path> --script`.
 AO / metal / bark maps: `pbr_surf.cfg` (port containers, cranes, warehouse, factory hall, city walls,
-suburbs, forest at a low sun, r_vgeo 0), `pbr_bark.cfg` (vegetation trunk close-ups), `pbr_perf.cfg` (bark
+suburbs, forest at a low sun), `pbr_bark.cfg` (vegetation trunk close-ups), `pbr_perf.cfg` (bark
 map cost). For a before / after on one build, move the `*_ao.png` / `*_metal.png` files (from both
 `assets/textures/surfaces` and `build/bin/assets/textures/surfaces`: `platform_data_path` falls back to
 the source tree) or `build/bin/assets/treepbr` aside: the shading then is exactly the old one.

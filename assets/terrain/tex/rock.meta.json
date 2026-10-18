@@ -8,7 +8,7 @@
  "tile_m": 6.0,
  "name": "rock",
  "kind": "terrain_layer",
- "tool_version": 1,
+ "tool_version": 2,
  "recipe": "assets/terrain/gen/rock.json",
  "replaces": 4
 }

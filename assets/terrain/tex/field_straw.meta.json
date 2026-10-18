@@ -1,14 +1,14 @@
 {
  "size": 2048,
  "source": "generated",
- "mean": "#6b583a",
+ "mean": "#6c583a",
  "target_mean": "#6e5a3a",
- "mean_delta": 0.0121,
- "seam": 0.8446,
+ "mean_delta": 0.0093,
+ "seam": 0.8447,
  "tile_m": 3.0,
  "name": "field_straw",
  "kind": "terrain_layer",
- "tool_version": 1,
+ "tool_version": 2,
  "recipe": "assets/terrain/gen/field_straw.json",
  "variant_of": "field_soil"
 }

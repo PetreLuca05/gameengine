@@ -70,7 +70,7 @@ static void apply_style(struct nk_context *ctx) {
 
 bool ui_init(void) {
     U = (UiSystem *)calloc(1, sizeof(UiSystem));
-    U->ui_scale = cvar_reg_float("ui_scale", 0.0f, 0.0f, 3.0f, CVAR_ARCHIVE, "UI scale (0 = auto from resolution, needs restart)");
+    U->ui_scale = cvar_reg_float("ui_scale", 0.0f, 0.0f, 3.0f, CVAR_ARCHIVE | CVAR_EDITABLE, "UI scale (0 = auto from resolution, needs restart)");
     float scale = U->ui_scale->f;
     if (scale <= 0.01f) scale = clampf((float)render_height() / 1080.0f, 0.75f, 2.5f);
     U->scale = scale;

@@ -553,7 +553,7 @@ void anim_debug_init(void) {
     cmd_register("anim_stand_hit", cmd_stand_hit, "anim_stand_hit <part|all> [damage]: hit the stand on a body part (host)");
     cmd_register("anim_stand_drop", cmd_stand_drop, "ragdoll the stand character");
     cmd_register("anim_stand_push", cmd_stand_push, "anim_stand_push [N]: push the stand ragdoll along the view");
-    I.on = cvar_reg_bool("char_inspect", false, 0, "character inspector: modular parts, bone subsets, mesh-only bones, sockets, virtual bones");
+    I.on = cvar_reg_bool("char_inspect", false, CVAR_LOCKED, "character inspector: modular parts, bone subsets, mesh-only bones, sockets, virtual bones");
     cmd_register("char_inspect_slot", cmd_inspect_slot, "char_inspect_slot <slot|all>: highlight one part's bone subset in the character inspector");
     cmd_register("char_inspect_swap", cmd_inspect_swap, "char_inspect_swap <slot> [next|prev|none|id]: swap a part of the inspected character");
 }

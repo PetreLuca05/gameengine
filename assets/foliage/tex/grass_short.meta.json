@@ -6,55 +6,49 @@
  "size": 2048,
  "cells": [
   {
-   "coverage": 0.186,
-   "bottom": 0.214,
-   "height": 0.612,
-   "root": "#6c603a",
-   "mid": "#7d6f3f",
-   "tip": "#848647",
-   "residue": 0.0027,
+   "coverage": 0.246,
+   "bottom": 0.011,
+   "height": 0.723,
+   "root": "#5c5b3f",
+   "mid": "#68653e",
+   "tip": "#72714d",
+   "residue": 0.0,
    "source": "generated",
    "fails": []
   },
   {
-   "coverage": 0.075,
-   "bottom": 0.069,
+   "coverage": 0.108,
+   "bottom": 0.082,
    "height": 0.94,
-   "root": "#655f2d",
-   "mid": "#6c642e",
-   "tip": "#796f31",
-   "residue": 0.0016,
+   "root": "#5a5834",
+   "mid": "#66633c",
+   "residue": 0.0,
    "source": "generated",
    "fails": []
   },
   {
-   "coverage": 0.096,
-   "bottom": 0.031,
+   "coverage": 0.115,
+   "bottom": 0.074,
    "height": 0.939,
-   "root": "#696139",
-   "mid": "#797749",
-   "tip": "#867e4e",
-   "residue": 0.0025,
+   "root": "#585733",
+   "mid": "#6a6841",
+   "residue": 0.0,
    "source": "generated",
    "fails": []
   },
   {
-   "coverage": 0.028,
-   "bottom": 0.092,
+   "coverage": 0.125,
+   "bottom": 0.121,
    "height": 0.94,
-   "root": "#6b6126",
-   "mid": "#788f0d",
-   "tip": "#766e1d",
-   "residue": 0.0006,
+   "root": "#5a5a36",
+   "residue": 0.0,
    "source": "generated",
-   "fails": [
-    "coverage 0.028 not in [0.03, 0.5]"
-   ]
+   "fails": []
   }
  ],
  "name": "grass_short",
  "kind": "blade_atlas",
- "tool_version": 1,
+ "tool_version": 2,
  "recipe": "assets/foliage/gen/grass_short.json",
  "card": {
   "height_m": [

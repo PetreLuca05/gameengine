@@ -1242,7 +1242,7 @@ void revive_register(void) {
     entities_set_interact_def(ET_PLAYER, &k_revive_def);
     entities_set_interact_def(ET_CORPSE, &k_corpse_def);
     entities_set_interact_def(ET_FABRICATOR, &k_fab_def);
-    RV.debug = cvar_reg_bool("revive_debug", false, 0, "log revive / extraction / fabricator transitions");
+    RV.debug = cvar_reg_bool("revive_debug", false, CVAR_LOCKED, "log revive / extraction / fabricator transitions");
     cmd_register("down", cmd_down, "down [slot]: knock a player down (host, revive test)");
     cmd_register("revive", cmd_revive, "revive [slot]: revive from downed, or respawn from dead (host)");
     cmd_register("spawn_corpse", cmd_spawn_corpse, "spawn_corpse [player slot] [distance]: a DNA corpse in front of you (host)");

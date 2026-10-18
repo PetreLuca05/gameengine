@@ -22,7 +22,9 @@ static void cvar_swap(const char *name, float *saved, float value) {
     Cvar *c = cvar_find(name);
     if (!c) return;
     if (saved) *saved = c->f;
+    CvarSource src = cvar_source_push(CVAR_SRC_HOST);   // locked dev time scales
     cvar_set_float(c, value);
+    cvar_source_pop(src);
 }
 
 void game_world_freeze(World *w, bool on, bool neutral_light) {

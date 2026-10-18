@@ -347,11 +347,11 @@ The local player sees their own, undistorted body, Unreal "true first person" st
 
 `lod_select` picks a LOD from the projected height in pixels, with hysteresis 0.15, moving one
 boundary per tick. Thresholds are 260 / 120 / 50 px. `r_lod_bias` and per-character `lod_bias`
-scale them, and `r_lod_force` overrides the choice. With `r_vgeo 0` the ranges and transitions of
-docs/LOD.md apply instead: 140 / 60 / 25 px (`assets/render/lod.json` x the fidelity tier), a 0.35 s
+scale them, and `r_lod_force` overrides the choice. The ranges and transitions of docs/LOD.md apply
+instead (unless `r_lod_legacy 1`): 140 / 60 / 25 px (`assets/render/lod.json` x the fidelity tier), a 0.35 s
 cross-fade that always completes (`LodFade`), shadows cross-faded and faded out below 20 px, update rates
 eased one octave per 1.5 s, foot IK / lean / turn weighted over a pixel band below the LOD0 threshold, and
-inside a scope the magnified PiP pixel size. The table below is the legacy (`r_vgeo 1`) behaviour.
+inside a scope the magnified PiP pixel size. The table below is the legacy (`r_lod_legacy 1`) behaviour.
 
 | LOD | Mesh | Update | Procedural | Ragdoll | Shadow |
 |---|---|---|---|---|---|

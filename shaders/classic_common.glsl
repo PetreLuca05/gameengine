@@ -1,4 +1,4 @@
-// Classic instanced renderer of the vgeo scene content (src/render/vk_classic.c, docs/NO_NANITE.md).
+// Classic instanced renderer of the vgeo scene content (src/render/vk_classic.c, docs/CLASSIC_RENDERER.md).
 // Include after common.glsl. Push constants (PushLit layout, per material draw):
 //   model[0]  wpo_params (trunk, branch, leaf stiffness, full wind)   impostors: mesh-space centre xyz, radius
 //   model[1]  wind_params a (height, main / detail / flutter Hz)      impostors: x frames per side
@@ -9,7 +9,7 @@
 // Instance stream (binding 1): i_pos (xyz, uniform scale), i_rot (quaternion), i_misc (x wind phase, y fade alpha,
 // z the kept dither interval of a LOD cross-fade part (lo + 512 hi in 1/256, 0 = all; docs/LOD.md), w debug:
 // LOD + 8 x role).
-// Set 4 (per frame slot): the wind field as the vgeo views see it (VgViewGpu wind / wind_tile / foliage /
+// Set 4 (per frame slot): the frame's wind field (VgViewGpu wind / wind_tile / foliage /
 // disp / wind_misc) and the wind tile ring (docs/FOLIAGE_WIND.md).
 #define WPO_DISPLACE 256u
 #define VG_DISPLACE_MAX 0.6

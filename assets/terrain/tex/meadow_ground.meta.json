@@ -1,14 +1,14 @@
 {
  "size": 2048,
  "source": "generated",
- "mean": "#6f653d",
+ "mean": "#6f653b",
  "target_mean": "#6b6236",
- "mean_delta": 0.0278,
- "seam": 0.821,
+ "mean_delta": 0.02,
+ "seam": 0.8209,
  "tile_m": 3.0,
  "name": "meadow_ground",
  "kind": "terrain_layer",
- "tool_version": 1,
+ "tool_version": 2,
  "recipe": "assets/terrain/gen/meadow_ground.json",
  "replaces": 1
 }

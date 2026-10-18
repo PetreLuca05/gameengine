@@ -39,6 +39,9 @@ option(DG_DISTRIBUTION "Shipping build: no DG_SOURCE_DIR / shader compiler paths
 # few % slower). Vehicles are predicted by the driving client and reconciled, so it only reduces
 # corrections in mixed Mac / PC sessions; off by default (docs/PLATFORM_MACOS.md "Determinism").
 option(DG_JOLT_CROSS_PLATFORM_DETERMINISTIC "Build Jolt cross-platform deterministic" OFF)
+# Settings locks (docs/SETTINGS_AUDIT.md): OFF for the shipped build, where TIER / LOCKED cvars reject
+# player writes. Dev builds (ON) keep every cvar writable; --release-locks turns the locks on at run time.
+option(DG_DEV_BUILD "Dev build: settings locks off unless --release-locks" ON)
 
 include(FetchContent)
 set(FETCHCONTENT_QUIET ON)
@@ -198,7 +201,6 @@ file(GLOB DG_SHADER_SOURCES CONFIGURE_DEPENDS
   ${CMAKE_SOURCE_DIR}/shaders/post/*.vert ${CMAKE_SOURCE_DIR}/shaders/post/*.frag ${CMAKE_SOURCE_DIR}/shaders/post/*.comp
   ${CMAKE_SOURCE_DIR}/shaders/sights/*.frag ${CMAKE_SOURCE_DIR}/shaders/sights/*.comp
   ${CMAKE_SOURCE_DIR}/shaders/sky/*.comp ${CMAKE_SOURCE_DIR}/shaders/vgeo/*.comp
-  ${CMAKE_SOURCE_DIR}/shaders/vgeo/*.vert ${CMAKE_SOURCE_DIR}/shaders/vgeo/*.frag ${CMAKE_SOURCE_DIR}/shaders/vgeo/*.mesh
   ${CMAKE_SOURCE_DIR}/shaders/water/*.vert ${CMAKE_SOURCE_DIR}/shaders/water/*.frag ${CMAKE_SOURCE_DIR}/shaders/water/*.comp)
 file(GLOB DG_SHADER_INCLUDES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/shaders/*.glsl ${CMAKE_SOURCE_DIR}/shaders/post/*.glsl ${CMAKE_SOURCE_DIR}/shaders/sights/*.glsl ${CMAKE_SOURCE_DIR}/shaders/sky/*.glsl ${CMAKE_SOURCE_DIR}/shaders/vgeo/*.glsl ${CMAKE_SOURCE_DIR}/shaders/terrain/*.glsl ${CMAKE_SOURCE_DIR}/shaders/water/*.glsl ${CMAKE_SOURCE_DIR}/third_party/fsr/*.h
   ${CMAKE_SOURCE_DIR}/shaders/post/*.h)
@@ -258,8 +260,22 @@ if(NOT DG_DISTRIBUTION)
 endif()
 target_compile_definitions(deadground PRIVATE
   DG_VERSION="${PROJECT_VERSION}"
+  DG_DEV_BUILD=$<BOOL:${DG_DEV_BUILD}>
   # Looks (docs/LOOKS.md): the live tuning tools (look_tune / look_dump) exist in dev builds only.
-  $<$<NOT:$<CONFIG:Release>>:DG_LOOK_TUNE=1>)
+  $<$<NOT:$<CONFIG:Release>>:DG_LOOK_TUNE=1>
+  # Profiler probes (src/core/profiler.h, docs/PERF_AUDIT.md): in every config, one branch while off.
+  DG_PROFILE=1)
+# Allocation / memcpy accounting for perf_audit: src/core/prof_alloc.h force-included into every
+# engine .c file (third_party is not wrapped). -DDG_PROFILE_ALLOC=OFF builds without it.
+option(DG_PROFILE_ALLOC "count malloc / memcpy per call site in profiles (docs/PERF_AUDIT.md)" ON)
+if(DG_PROFILE_ALLOC)
+  target_compile_definitions(deadground PRIVATE DG_PROFILE_ALLOC=1)
+  if(MSVC)
+    target_compile_options(deadground PRIVATE "$<$<COMPILE_LANGUAGE:C>:/FIcore/prof_alloc.h>")
+  else()
+    target_compile_options(deadground PRIVATE "$<$<COMPILE_LANGUAGE:C>:SHELL:-include core/prof_alloc.h>")
+  endif()
+endif()
 if(DG_HAVE_STEAM)
   target_compile_definitions(deadground PRIVATE DG_HAVE_STEAM=1)
   target_link_libraries(deadground PRIVATE steam_shim)
@@ -313,6 +329,15 @@ else()
   target_link_libraries(test_recoil PRIVATE m)
 endif()
 add_test(NAME recoil COMMAND test_recoil)
+add_executable(test_material_ao tests/test_material_ao.c)
+set_target_properties(test_material_ao PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
+target_include_directories(test_material_ao PRIVATE src)
+if(MSVC)
+  target_compile_options(test_material_ao PRIVATE /W3 /utf-8)
+else()
+  target_link_libraries(test_material_ao PRIVATE m)
+endif()
+add_test(NAME material_ao COMMAND test_material_ao)
 add_executable(test_spectate tests/test_spectate.c src/net/spectate_core.c src/gameplay/recoil.c src/core/spring.c src/core/detmath.c)
 set_target_properties(test_spectate PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
 target_include_directories(test_spectate PRIVATE src)
@@ -399,21 +424,6 @@ if(MSVC)
   target_compile_options(dg_vgeo PRIVATE /W3 /wd4100 /wd4201 /utf-8)
 endif()
 
-# Virtualized geometry GPU module (culling / Hi-Z) on a VgContext: the game builds it through the src glob,
-# the harness tests and tools/bench_vgeo through this library.
-add_library(dg_vgeo_gpu STATIC src/render/vgeo/vgeo_ctx.c src/render/vgeo/vgeo_scene.c src/render/vgeo/vgeo_cull.c src/render/vgeo/vgeo_raster.c src/render/vgeo/vgeo_stream.c src/render/vgeo/vgeo_skin.c src/render/vgeo/vgeo_tex.c src/render/vgeo/foliage_support.c)
-set_target_properties(dg_vgeo_gpu PROPERTIES C_STANDARD 11)
-target_link_libraries(dg_vgeo_gpu PUBLIC dg_vgeo volk vma)
-if(MSVC)
-  target_compile_options(dg_vgeo_gpu PRIVATE /W3 /wd4100 /wd4201 /utf-8)
-endif()
-
-add_executable(bench_vgeo tools/bench_vgeo/bench_vgeo.c tests/vgeo_gpu_harness.c)
-set_target_properties(bench_vgeo PROPERTIES C_STANDARD 11)
-target_include_directories(bench_vgeo PRIVATE tests)
-target_link_libraries(bench_vgeo PRIVATE dg_vgeo_gpu)
-add_dependencies(bench_vgeo dg_shaders)
-
 add_executable(img_diff tools/img_diff/img_diff.c)
 set_target_properties(img_diff PROPERTIES C_STANDARD 11)
 target_link_libraries(img_diff PRIVATE dg_thirdparty)
@@ -422,20 +432,8 @@ add_executable(build_vgeo tools/build_vgeo/build_vgeo.c)
 set_target_properties(build_vgeo PROPERTIES C_STANDARD 11)
 target_link_libraries(build_vgeo PRIVATE dg_vgeo)
 
-# vgeo test scene content (data/levels/vgeo_test.json): generated once into bin/assets/vgeo (never
-# committed). Only regenerated when missing: delete the files after a builder format change.
 set(DG_VGEO_OUT ${CMAKE_BINARY_DIR}/bin/assets/vgeo)
 set(DG_VGEO_CONTENT)
-foreach(item "rock_field;field;10000000" "statue;statue;500000" "building;building;2000000")
-  list(GET item 0 vg_name)
-  list(GET item 1 vg_gen)
-  list(GET item 2 vg_tris)
-  add_custom_command(OUTPUT ${DG_VGEO_OUT}/${vg_name}.vgeo
-    COMMAND ${CMAKE_COMMAND} -E make_directory ${DG_VGEO_OUT}
-    COMMAND $<TARGET_FILE:build_vgeo> --gen ${vg_gen} --tris ${vg_tris} --out ${DG_VGEO_OUT}/${vg_name}.vgeo
-    COMMENT "vgeo content ${vg_name}.vgeo" VERBATIM)
-  list(APPEND DG_VGEO_CONTENT ${DG_VGEO_OUT}/${vg_name}.vgeo)
-endforeach()
 # Imported trees (docs/VGEO.md "Tree models"): the assets/treefbx species built (clusters, DAG,
 # impostors) into bin/assets/vgeo/trees/<name>.dgtree; the game rebuilds into assets/cache when a
 # file is missing or its key is stale.
@@ -711,6 +709,7 @@ add_test(NAME revive COMMAND test_revive WORKING_DIRECTORY $<TARGET_FILE_DIR:dea
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if(Python3_Interpreter_FOUND)
   add_test(NAME lint_commands COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/tests/lint_commands.py)
+  add_test(NAME lint_settings COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/tests/lint_settings.py)
   add_test(NAME aim_sockets COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/tests/aim_sockets.py)
   add_test(NAME lint_looks COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/tests/lint_looks.py)
   # Ground textures (docs/GROUND_REFERENCE.md): the recipes validate, the generated / placeholder sets
@@ -736,6 +735,27 @@ foreach(t test_looks test_looks_release)
 endforeach()
 add_test(NAME looks COMMAND test_looks)
 add_test(NAME looks_release COMMAND test_looks_release)
+# Profiler (docs/PERF_AUDIT.md): a capture with zones, jobs, parallel_for, waits, counters, series and
+# wrapped allocations writes a valid profile; perf_fix_disable ids; the cvar_find hash index (PF-0002).
+# tools/perf_audit/tests (the analyzer, image / state diffs) run under the same ctest.
+add_executable(test_profiler tests/test_profiler.c src/core/profiler.c src/core/jobs.c src/core/cvar.c src/core/log.c src/core/platform.c)
+set_target_properties(test_profiler PROPERTIES C_STANDARD 11)
+target_include_directories(test_profiler PRIVATE src)
+target_compile_definitions(test_profiler PRIVATE DG_PROFILE=1 DG_PROFILE_ALLOC=1 DG_VERSION="test")
+target_link_libraries(test_profiler PRIVATE SDL3::SDL3-static)
+if(MSVC)
+  target_compile_options(test_profiler PRIVATE /W3 /wd4100 /wd4201 /utf-8 /FIcore/prof_alloc.h)
+  target_compile_definitions(test_profiler PRIVATE _CRT_SECURE_NO_WARNINGS)
+  target_link_libraries(test_profiler PRIVATE dbghelp)
+else()
+  target_compile_options(test_profiler PRIVATE -include core/prof_alloc.h)
+endif()
+add_test(NAME profiler COMMAND test_profiler WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_FOUND)
+  add_test(NAME perf_audit_tools COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/perf_audit/tests/run_tests.py)
+endif()
+
 # Engine Fidelity (docs/ENGINE_FIDELITY.md): tables, bounds, apply / clamp on the real cvar system, era
 # matrix, frame graph validation.
 add_executable(test_fidelity tests/test_fidelity.c src/render/fidelity/fidelity.c src/render/graph/fg_check.c src/core/cvar.c)
@@ -745,6 +765,16 @@ if(MSVC)
   target_compile_options(test_fidelity PRIVATE /W3 /wd4100 /wd4201 /utf-8)
 endif()
 add_test(NAME fidelity COMMAND test_fidelity WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+
+# Settings audit (docs/SETTINGS_AUDIT.md): release locks, config.cfg filtering, the consistency set and
+# its join hash, the same locked values at every Engine Fidelity level, the audited settings places.
+add_executable(test_settings tests/test_settings.c src/core/cvar.c src/core/consistency.c src/render/fidelity/fidelity.c)
+set_target_properties(test_settings PROPERTIES C_STANDARD 11)
+target_link_libraries(test_settings PRIVATE dg_animcore)
+if(MSVC)
+  target_compile_options(test_settings PRIVATE /W3 /wd4100 /wd4201 /utf-8)
+endif()
+add_test(NAME settings COMMAND test_settings WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
 
 # LOD ranges and cross-fades (docs/LOD.md): lod.json x tier, character px -> LOD, fades in a slow dolly,
 # camera reversal, complementary masks, streaming holds, terrain geomorph without cracks / pops.
@@ -787,71 +817,3 @@ endif()
 add_test(NAME vgeo_build COMMAND test_vgeo_build WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
 add_test(NAME vgeo_build_long COMMAND test_vgeo_build --long WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
 set_tests_properties(vgeo_build_long PROPERTIES LABELS long TIMEOUT 600)
-
-# Virtualized geometry GPU culling on the window-less harness (needs a Vulkan 1.3 device; validation
-# when the portable layer is present).
-add_executable(test_vgeo_gpu tests/test_vgeo_gpu.c tests/vgeo_gpu_harness.c)
-set_target_properties(test_vgeo_gpu PROPERTIES C_STANDARD 11)
-target_link_libraries(test_vgeo_gpu PRIVATE dg_vgeo_gpu)
-add_dependencies(test_vgeo_gpu dg_shaders)
-if(MSVC)
-  target_compile_options(test_vgeo_gpu PRIVATE /W3 /wd4100 /wd4201 /utf-8)
-endif()
-add_test(NAME vgeo_gpu COMMAND test_vgeo_gpu --validation WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
-if(EXISTS "${CMAKE_SOURCE_DIR}/.toolchain/vvl/install/bin")
-  set_tests_properties(vgeo_gpu PROPERTIES ENVIRONMENT "VK_ADD_LAYER_PATH=${CMAKE_SOURCE_DIR}/.toolchain/vvl/install/bin")
-endif()
-
-# Virtualized geometry rasterisers (HW mesh / vertex pulling vs SW compute) on the harness.
-add_executable(test_vgeo_raster tests/test_vgeo_raster.c tests/vgeo_gpu_harness.c)
-set_target_properties(test_vgeo_raster PROPERTIES C_STANDARD 11)
-target_link_libraries(test_vgeo_raster PRIVATE dg_vgeo_gpu)
-add_dependencies(test_vgeo_raster dg_shaders)
-if(MSVC)
-  target_compile_options(test_vgeo_raster PRIVATE /W3 /wd4100 /wd4201 /utf-8)
-endif()
-add_test(NAME vgeo_raster COMMAND test_vgeo_raster --validation WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
-if(EXISTS "${CMAKE_SOURCE_DIR}/.toolchain/vvl/install/bin")
-  set_tests_properties(vgeo_raster PROPERTIES ENVIRONMENT "VK_ADD_LAYER_PATH=${CMAKE_SOURCE_DIR}/.toolchain/vvl/install/bin")
-endif()
-
-# Virtualized geometry page streaming (cold start, convergence, small pool, eviction audit).
-add_executable(test_vgeo_stream tests/test_vgeo_stream.c tests/vgeo_gpu_harness.c)
-set_target_properties(test_vgeo_stream PROPERTIES C_STANDARD 11)
-target_link_libraries(test_vgeo_stream PRIVATE dg_vgeo_gpu)
-add_dependencies(test_vgeo_stream dg_shaders)
-if(MSVC)
-  target_compile_options(test_vgeo_stream PRIVATE /W3 /wd4100 /wd4201 /utf-8)
-endif()
-add_test(NAME vgeo_stream COMMAND test_vgeo_stream --validation WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
-if(EXISTS "${CMAKE_SOURCE_DIR}/.toolchain/vvl/install/bin")
-  set_tests_properties(vgeo_stream PROPERTIES ENVIRONMENT "VK_ADD_LAYER_PATH=${CMAKE_SOURCE_DIR}/.toolchain/vvl/install/bin")
-endif()
-
-# Virtualized geometry skinned meshes (Phase 6): animated bounds, crack-free animated cuts, GPU cut vs
-# the CPU reference, HW vs SW raster and the shared skinning helper on the harness.
-add_executable(test_vgeo_skinned tests/test_vgeo_skinned.c tests/vgeo_gpu_harness.c)
-set_target_properties(test_vgeo_skinned PROPERTIES C_STANDARD 11)
-target_link_libraries(test_vgeo_skinned PRIVATE dg_vgeo_gpu)
-add_dependencies(test_vgeo_skinned dg_shaders)
-if(MSVC)
-  target_compile_options(test_vgeo_skinned PRIVATE /W3 /wd4100 /wd4201 /utf-8)
-endif()
-add_test(NAME vgeo_skinned COMMAND test_vgeo_skinned --validation WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
-if(EXISTS "${CMAKE_SOURCE_DIR}/.toolchain/vvl/install/bin")
-  set_tests_properties(vgeo_skinned PROPERTIES ENVIRONMENT "VK_ADD_LAYER_PATH=${CMAKE_SOURCE_DIR}/.toolchain/vvl/install/bin")
-endif()
-
-# Virtualized geometry foliage support (Phase 7): masked SW / HW agreement + CPU alpha reference, WPO
-# bounds, density hash, cell culling vs brute force, impostor switch, placement streaming, Hi-Z.
-add_executable(test_vgeo_foliage tests/test_vgeo_foliage.c tests/vgeo_gpu_harness.c)
-set_target_properties(test_vgeo_foliage PROPERTIES C_STANDARD 11)
-target_link_libraries(test_vgeo_foliage PRIVATE dg_vgeo_gpu)
-add_dependencies(test_vgeo_foliage dg_shaders)
-if(MSVC)
-  target_compile_options(test_vgeo_foliage PRIVATE /W3 /wd4100 /wd4201 /utf-8)
-endif()
-add_test(NAME vgeo_foliage COMMAND test_vgeo_foliage --validation WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
-if(EXISTS "${CMAKE_SOURCE_DIR}/.toolchain/vvl/install/bin")
-  set_tests_properties(vgeo_foliage PROPERTIES ENVIRONMENT "VK_ADD_LAYER_PATH=${CMAKE_SOURCE_DIR}/.toolchain/vvl/install/bin")
-endif()

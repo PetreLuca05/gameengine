@@ -9,6 +9,8 @@
 //   * lowering fidelity clamps higher settings, raising restores the level defaults, values the user
 //     set below a default are kept;
 //   * era matrix: what an era lacks is unavailable, era-owned features scale the era's own values;
+//   * fair play (docs/SETTINGS_AUDIT.md): no level disables sun shadows or rain, and no visibility
+//     parameter (foliage density, LOD / impostor ranges, shadow distance, fog, lens) is a feature;
 //   * Off: no post-processing; frame graph pass classification;
 //   * frame graph validation (fg_check): dead passes, unused resources, undefined reads, history
 //     ping-pong;
@@ -35,14 +37,14 @@ static int g_fail, g_checks;
         }                                                       \
     } while (0)
 
-// Era preset values (vk_vgeo.c k_eras): vgeo, error px, shadow error px, discrete LOD px, foliage.
-static const float k_era_vals[FID_ERAS][5] = { { 1, 1, 2, 2, 1 }, { 1, 2, 4, 3, 0.7f }, { 0, 1, 2, 4, 0.4f }, { 0, 1, 2, 12, 0.2f } };
+// Era preset values (vk_vgeo.c k_eras): shadow error px.
+static const float k_era_vals[FID_ERAS][1] = { { 2 }, { 4 }, { 2 }, { 3 } };
 static Cvar *g_era;
 
 static void register_cvars(void) {
-    const int owned[5] = { FF_VGEO, FF_VGEO_ERROR_PX, FF_VGEO_SHADOW_ERROR_PX, FF_VGEO_LOD_PX, FF_FOLIAGE_DENSITY };
+    const int owned[1] = { FF_VGEO_SHADOW_ERROR_PX };
     for (int e = 0; e < FID_ERAS; e++)
-        for (int k = 0; k < 5; k++) fid_set_era_value(e, owned[k], k_era_vals[e][k]);
+        for (int k = 0; k < 1; k++) fid_set_era_value(e, owned[k], k_era_vals[e][k]);
     // Every feature cvar with its engine range and the Modern default (= the engine default).
     for (int f = 0; f < fid_feature_count(); f++) {
         const FidFeatureDef *d = fid_feature(f);
@@ -65,8 +67,8 @@ static void set(int f, float v) {
 static void set_era(int e) {
     cvar_set_int(g_era, e);
     // The era preset sets its own values (vk_vgeo.c era_apply), then the bounds clamp everything.
-    const int owned[5] = { FF_VGEO, FF_VGEO_ERROR_PX, FF_VGEO_SHADOW_ERROR_PX, FF_VGEO_LOD_PX, FF_FOLIAGE_DENSITY };
-    for (int k = 0; k < 5; k++) set(owned[k], k_era_vals[e][k]);
+    const int owned[1] = { FF_VGEO_SHADOW_ERROR_PX };
+    for (int k = 0; k < 1; k++) set(owned[k], k_era_vals[e][k]);
     fid_enforce_all();
 }
 
@@ -116,7 +118,6 @@ static void test_options(void) {
                 const FidFeatureDef *d = fid_feature(f);
                 FidBounds b = fid_bounds(l, e, f);
                 int steps = d->kind == FID_FLOAT ? 20 : (int)(d->hi - d->lo);
-                if (f == FF_DECAL_MAX) steps = 64;
                 for (int s = 0; s <= steps; s++) {
                     float v = d->lo + (d->hi - d->lo) * (float)s / (float)DG_MAX(steps, 1);
                     if (d->kind != FID_FLOAT) v = roundf(v);
@@ -125,14 +126,14 @@ static void test_options(void) {
                     if (allowed) CHECK(req >= 0 && req <= l, "%s=%g allowed at %s but requires %d", d->id, v, fid_level_id(l), req);
                     else CHECK(req < 0 || req > l, "%s=%g greyed at %s but requires %d", d->id, v, fid_level_id(l), req);
                     // Monotonic: allowed here -> allowed one level up (every option keeps working).
-                    if (allowed && l + 1 < FID_LEVELS && f != FF_UPSCALER && f != FF_TONEMAPPER && f != FF_PRECIP_QUALITY && f != FF_LENS_DISTORTION)
+                    if (allowed && l + 1 < FID_LEVELS && f != FF_UPSCALER && f != FF_PRECIP_QUALITY)
                         CHECK(fid_value_allowed(l + 1, e, f, v), "%s=%g allowed at %s but not at %s (era %s)", d->id, v, fid_level_id(l), fid_level_id(l + 1), fid_era_id(e));
                     set(f, v);
                     float got = val(f);
                     if (allowed) CHECK(fabsf(got - v) < 1e-3f, "%s=%g allowed at %s but stored %g", d->id, v, fid_level_id(l), got);
                     else {
                         CHECK(fid_allowed(&b, d, got) || (b.avail == FID_UNAVAILABLE && !d->has_off), "%s=%g clamped to %g (not allowed) at %s", d->id, v, got, fid_level_id(l));
-                        bool choice = f == FF_UPSCALER || f == FF_TONEMAPPER || f == FF_PRECIP_QUALITY;
+                        bool choice = f == FF_UPSCALER || f == FF_PRECIP_QUALITY;
                         if (!choice && b.avail != FID_UNAVAILABLE) CHECK(fid_cost_cmp(d, got, v) <= 0 || fid_cost_cmp(d, got, b.lo) == 0 || d->cheaper_high, "%s=%g clamped up to %g at %s", d->id, v, got, fid_level_id(l));
                     }
                 }
@@ -153,11 +154,10 @@ static void test_lower_raise(void) {
     set(FF_VOLUMETRICS, 3);
     set(FF_RENDER_SCALE, 1.75f);
     set(FF_SSGI, 1);
-    set(FF_LENS_FLARE, 1.2f);
     CHECK(val(FF_VOLUMETRICS) == 3 && val(FF_SSGI) == 1 && fabsf(val(FF_RENDER_SCALE) - 1.75f) < 1e-4f, "Modern allows ultra volumetrics, SSGI, 1.75x");
     // ... lowering clamps them,
     fid_apply(FID_LOW);
-    CHECK(val(FF_SSR) == 0 && val(FF_MOTION_BLUR) == 0 && val(FF_VOLUMETRICS) == 0 && val(FF_SSGI) == 0 && val(FF_LENS_FLARE) == 0, "Low: screen-space / camera / lens effects off");
+    CHECK(val(FF_SSR) == 0 && val(FF_MOTION_BLUR) == 0 && val(FF_VOLUMETRICS) == 0 && val(FF_SSGI) == 0, "Low: screen-space / camera effects off");
     CHECK(val(FF_RENDER_SCALE) <= 1.0f + 1e-4f, "Low: render scale <= 1 (%g)", val(FF_RENDER_SCALE));
     CHECK(val(FF_AA) <= 1, "Low: FXAA at most");
     // the console / config can't push past the bounds,
@@ -187,11 +187,12 @@ static void test_lower_raise(void) {
     CHECK(val(FF_VOLUMETRICS) == 2, "High: volumetrics back to its default (%g)", val(FF_VOLUMETRICS));
     // An explicit choice (unordered) is kept where allowed.
     fid_apply(FID_MODERN);
-    set(FF_TONEMAPPER, 2);
-    fid_apply(FID_LOW);
-    CHECK(val(FF_TONEMAPPER) == 2, "Low keeps the chosen Neutral tonemapper (allowed)");
-    set(FF_TONEMAPPER, 1);
-    CHECK(val(FF_TONEMAPPER) != 1, "Low: AgX greyed");
+    set(FF_UPSCALER, 2);
+    fid_apply(FID_MEDIUM);
+    CHECK(val(FF_UPSCALER) == 2, "Medium keeps the chosen FSR 1 (allowed)");
+    set(FF_UPSCALER, 3);
+    CHECK(val(FF_UPSCALER) != 3, "Medium: the FSR 2 slot greyed");
+    set(FF_UPSCALER, 0);
     // The user's choices persist (r_fidelity_custom) and come back after a restart.
     fid_apply(FID_MODERN);
     set(FF_SSR, 1);
@@ -217,14 +218,24 @@ static void test_levels(void) {
     set_era(FID_ERA_MODERN);
     fid_apply(FID_OFF);
     const int post[] = { FF_AA, FF_UPSCALER, FF_SHARPEN, FF_AO, FF_CONTACT_SHADOWS, FF_SSR, FF_SSGI, FF_VOLUMETRICS, FF_MOTION_BLUR, FF_DOF, FF_ADS_DOF,
-                         FF_BLOOM, FF_LENS_FLARE, FF_LENS_DIRT, FF_CHROMATIC, FF_LENS_DISTORTION, FF_LENS_DROPS, FF_VIGNETTE, FF_FILM_GRAIN, FF_AUTO_EXPOSURE, FF_HDR_OUTPUT };
+                         FF_BLOOM, FF_CHROMATIC, FF_VIGNETTE, FF_FILM_GRAIN, FF_HDR_OUTPUT };
     for (int i = 0; i < ARRAY_COUNT(post); i++) {
         CHECK(val(post[i]) == 0, "Off: %s off (%g)", fid_feature(post[i])->id, val(post[i]));
         CHECK(fid_bounds(FID_OFF, 0, post[i]).avail == FID_UNAVAILABLE, "Off: %s locked", fid_feature(post[i])->id);
     }
-    CHECK(fid_bounds(FID_OFF, 0, FF_TONEMAPPER).avail == FID_UNAVAILABLE, "Off: tonemapper locked (direct output)");
-    CHECK(val(FF_SHADOWS) == 0 && val(FF_SHADOW_CASCADES) == 1 && val(FF_RENDER_SCALE) >= 0.5f && val(FF_RENDER_SCALE) <= 0.66f + 1e-4f, "Off: shadows Disable, 0.5-0.66 scale");
-    CHECK(fabsf(val(FF_VGEO_ERROR_PX) - 4.0f) < 1e-4f, "Off: vgeo error x4");
+    CHECK(val(FF_SHADOWS) == 1 && val(FF_SHADOW_CASCADES) == 1 && val(FF_RENDER_SCALE) >= 0.5f && val(FF_RENDER_SCALE) <= 0.66f + 1e-4f, "Off: hard shadows (one cascade), 0.5-0.66 scale");
+    CHECK(fabsf(val(FF_VGEO_SHADOW_ERROR_PX) - 8.0f) < 1e-4f, "Off: shadow geometry error x4 (%g)", val(FF_VGEO_SHADOW_ERROR_PX));
+    // Fair play (docs/SETTINGS_AUDIT.md): every level and era keeps sun shadows and the rain.
+    for (int e = 0; e < FID_ERAS; e++)
+        for (int l = 0; l < FID_LEVELS; l++) {
+            CHECK(!fid_value_allowed(l, e, FF_SHADOWS, 0) && fid_bounds(l, e, FF_SHADOWS).def >= 1, "%s/%s: sun shadows cannot be disabled", fid_level_id(l), fid_era_id(e));
+            CHECK(!fid_value_allowed(l, e, FF_PRECIP_QUALITY, 0) && fid_bounds(l, e, FF_PRECIP_QUALITY).def != 0, "%s/%s: rain / snow cannot be switched off", fid_level_id(l), fid_era_id(e));
+        }
+    // No visibility parameter is a fidelity feature: the consistency set owns them.
+    static const char *const locked[] = { "r_foliage_density", "r_vgeo_impostor_px", "r_classic_impostor_px", "r_vgeo_error_px", "r_vgeo_lod_px", "r_lod_bias", "r_char_quality",
+                                          "r_shadow_max_distance", "r_cloud_shadows", "r_light_shadows", "r_moon_shadows", "r_fog_scale", "r_auto_exposure", "r_exposure", "r_tonemapper",
+                                          "r_lens_flare", "r_lens_dirt", "r_lens_distortion", "r_lens_drops", "vfx_decal_max", "r_bloom_intensity", "r_gamma" };
+    for (int i = 0; i < ARRAY_COUNT(locked); i++) CHECK(fid_feature_by_cvar(locked[i]) < 0, "%s is a visibility parameter, not a fidelity feature", locked[i]);
     // Internal consistency: TAA (and TAA-U) only where the level has TAA; HDR output only High / Modern.
     for (int e = 0; e < FID_ERAS; e++)
         for (int l = 0; l < FID_LEVELS; l++) {
@@ -233,19 +244,18 @@ static void test_levels(void) {
             CHECK(fid_value_allowed(l, e, FF_HDR_OUTPUT, 1) == ((l >= FID_HIGH) && e != FID_ERA_2010), "%s/%s: HDR output", fid_level_id(l), fid_era_id(e));
             CHECK(!fid_value_allowed(l, e, FF_PUDDLE_REFLECTIONS, 1) || fid_value_allowed(l, e, FF_SSR, 1), "%s/%s: puddles need SSR", fid_level_id(l), fid_era_id(e));
             CHECK(!fid_value_allowed(l, e, FF_ADS_DOF, 1) || fid_value_allowed(l, e, FF_DOF, 1), "%s/%s: ADS DoF needs DoF", fid_level_id(l), fid_era_id(e));
-            CHECK(!fid_value_allowed(l, e, FF_LENS_DIRT, 1) || fid_value_allowed(l, e, FF_BLOOM, 1), "%s/%s: lens dirt needs bloom", fid_level_id(l), fid_era_id(e));
         }
     // The spec's per-level points.
     fid_apply(FID_LOW);
-    CHECK(val(FF_AA) == 1 && val(FF_SHADOW_CASCADES) == 2 && val(FF_SHADOWS) == 1 && val(FF_SHADOW_RESOLUTION) == 0 && fabsf(val(FF_SHADOW_DISTANCE) - 50.0f) < 1e-3f && fabsf(val(FF_RENDER_SCALE) - 0.66f) < 1e-3f, "Low: FXAA, Hard Only, Low resolution, 2 cascades, 50 m, 0.66");
-    CHECK(fabsf(val(FF_FOLIAGE_DENSITY) - 0.25f) < 1e-4f && fabsf(val(FF_VGEO_ERROR_PX) - 3.0f) < 1e-4f && val(FF_TEXTURE_QUALITY) == 0, "Low: foliage 0.25, vgeo x3, mips -2");
+    CHECK(val(FF_AA) == 1 && val(FF_SHADOW_CASCADES) == 2 && val(FF_SHADOWS) == 1 && val(FF_SHADOW_RESOLUTION) == 1 && fabsf(val(FF_RENDER_SCALE) - 0.66f) < 1e-3f, "Low: FXAA, Hard Only, 1024 px (the locked 150 m), 2 cascades, 0.66");
+    CHECK(fabsf(val(FF_VGEO_SHADOW_ERROR_PX) - 6.0f) < 1e-4f && val(FF_TEXTURE_QUALITY) == 0, "Low: shadow geometry x3, mips -2");
     fid_apply(FID_MEDIUM);
     CHECK(val(FF_SSR) == 0 && val(FF_MOTION_BLUR) == 1 && val(FF_DOF) == 1 && val(FF_UPSCALER) == 2 && fabsf(val(FF_UPSCALE_RATIO) - 0.75f) < 1e-4f, "Medium: no SSR, camera MB, ADS DoF, FSR 1 0.75");
-    CHECK(val(FF_VOL_LOCAL_LIGHTS) == 0 && val(FF_VOLUMETRICS) == 1 && val(FF_VFX_LIGHTING) == 0 && val(FF_DECAL_MAX) == 128, "Medium: fog-only, unlit particles, decals halved");
-    CHECK(!fid_value_allowed(FID_MEDIUM, 0, FF_CHROMATIC, 0.5f) && !fid_value_allowed(FID_MEDIUM, 0, FF_LENS_FLARE, 0.5f), "Medium: CA / flare greyed");
+    CHECK(val(FF_VOL_LOCAL_LIGHTS) == 0 && val(FF_VOLUMETRICS) == 1 && val(FF_VFX_LIGHTING) == 0, "Medium: fog-only, unlit particles");
+    CHECK(!fid_value_allowed(FID_MEDIUM, 0, FF_CHROMATIC, 0.5f), "Medium: CA greyed");
     fid_apply(FID_HIGH);
     CHECK(val(FF_SSR) == 1 && val(FF_SSGI) == 0 && !fid_value_allowed(FID_HIGH, 0, FF_SSGI, 1) && val(FF_BLOOM_QUALITY) == 1 && val(FF_DOF_QUALITY) == 1, "High: SSR half, SSGI greyed, fewer bloom mips, hybrid DoF");
-    CHECK(fabsf(val(FF_SHADOW_DISTANCE) - 200.0f) < 1e-3f && val(FF_SHADOW_CASCADES) == 4 && val(FF_SOFT_SHADOW_QUALITY) == 1 && fabsf(val(FF_FOLIAGE_DENSITY) - 0.8f) < 1e-4f, "High: 200 m, 4 cascades, soft Medium, foliage 0.8");
+    CHECK(val(FF_SHADOW_CASCADES) == 4 && val(FF_SOFT_SHADOW_QUALITY) == 1, "High: 4 cascades, soft Medium");
     fid_apply(FID_MODERN);
     for (int f = 0; f < fid_feature_count(); f++)
         if (f != FF_HDR_OUTPUT) CHECK(fid_bounds(FID_MODERN, 0, f).avail != FID_UNAVAILABLE, "Modern: %s unlocked", fid_feature(f)->id);
@@ -254,20 +264,18 @@ static void test_levels(void) {
 static void test_eras(void) {
     set_era(FID_ERA_2010);
     fid_apply(FID_MODERN);
-    CHECK(val(FF_SSR) == 0 && val(FF_SSGI) == 0 && val(FF_VOLUMETRICS) == 0 && val(FF_VGEO) == 0, "2010: no SSR / SSGI / froxels / vgeo");
+    CHECK(val(FF_SSR) == 0 && val(FF_SSGI) == 0 && val(FF_VOLUMETRICS) == 0, "2010: no SSR / SSGI / froxels");
     CHECK(fid_bounds(FID_MODERN, FID_ERA_2010, FF_SSR).era_lacks && fid_min_level_for(FID_ERA_2010, FF_SSR, 1) < 0, "2010 lacks SSR at every level");
     CHECK(val(FF_AA) == 2, "2010 Modern: SMAA (no TAA in the era): %g", val(FF_AA));
     cvar_set("r_aa", "3");
     CHECK(val(FF_AA) != 3, "2010: TAA greyed");
     fid_apply(FID_LOW);
     CHECK(val(FF_AA) == 2 && val(FF_SHADOWS) == 2, "2010-era Low differs from modern-era Low (SMAA, soft shadows)");
-    CHECK(fabsf(val(FF_VGEO_LOD_PX) - 48.0f) < 1e-3f, "2010-era Low: discrete LOD error 12 px x4 = %g", val(FF_VGEO_LOD_PX));
-    CHECK(fabsf(val(FF_FOLIAGE_DENSITY) - 0.2f) < 1e-4f, "2010-era Low: the era's foliage (0.2) under the cap (0.25): %g", val(FF_FOLIAGE_DENSITY));
     set_era(FID_ERA_2020);
     fid_apply(FID_LOW);
-    CHECK(fabsf(val(FF_VGEO_ERROR_PX) - 6.0f) < 1e-3f, "2020-era Low: vgeo error 2 px x3 = %g", val(FF_VGEO_ERROR_PX));
+    CHECK(fabsf(val(FF_VGEO_SHADOW_ERROR_PX) - 12.0f) < 1e-3f, "2020-era Low: shadow geometry 4 px x3 = %g", val(FF_VGEO_SHADOW_ERROR_PX));
     fid_apply(FID_MEDIUM);
-    CHECK(fabsf(val(FF_FOLIAGE_DENSITY) - 0.5f) < 1e-4f && val(FF_SSR) == 0, "2020-era Medium: foliage 0.7 capped at 0.5");
+    CHECK(val(FF_SSR) == 0, "2020-era Medium: no SSR");
     // Custom era (4) behaves as modern.
     cvar_set_int(g_era, 4);
     CHECK(fid_era() == FID_ERA_MODERN, "custom era = modern capabilities");
@@ -278,10 +286,10 @@ static void test_eras(void) {
 static void test_passes(void) {
     const char *post[] = { "hiz", "contact", "gtao", "gtao_temporal", "gtao_upsample", "ssgi", "ssgi_temporal", "ssr", "ssr_temporal", "vol_inject",
                            "vol_integrate", "color_pyramid", "depth_history", "taa", "taau", "fxaa", "smaa_prep", "smaa_blend", "fsr_easu", "mb_tiles",
-                           "mb_blur", "dof_focus", "dof_gather", "lens_drops", "lens_apply", "post_buffers_init", "exposure", "bloom", "flare", "tonemap" };
-    const char *scene[] = { "prepass", "vgeo_cull", "vgeo_raster", "vgeo_hiz", "opaque", "decals", "opaque_dynamic", "decals_dynamic", "sky", "sky_luts",
+                           "mb_blur", "dof_focus", "dof_gather", "post_buffers_init", "exposure", "bloom", "flare", "tonemap" };
+    const char *scene[] = { "prepass", "opaque", "decals", "opaque_dynamic", "decals_dynamic", "sky", "sky_luts",
                             "sky_view", "fog_apply", "scene_copy", "transparent", "vm_prepass", "viewmodel", "scope_pip", "scope_pip_fx", "sight_scope",
-                            "sight_reddot", "phone_post0", "ui_blur", "ui_views", "final", "exr_capture" };
+                            "sight_reddot", "phone_post0", "ui_blur", "ui_views", "final", "exr_capture", "lens_drops", "lens_apply" };
     for (int i = 0; i < ARRAY_COUNT(post); i++) CHECK(fid_pass_is_post(post[i]), "%s is a post pass", post[i]);
     for (int i = 0; i < ARRAY_COUNT(scene); i++) CHECK(!fid_pass_is_post(scene[i]), "%s is a scene pass", scene[i]);
 }

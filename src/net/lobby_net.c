@@ -13,6 +13,7 @@
 #include "protocol.h"
 #include "core/engine.h"
 #include "core/cvar.h"
+#include "core/consistency.h"
 #include "core/log.h"
 #include "core/platform.h"
 #include "game/game.h"
@@ -23,6 +24,7 @@
 #include "ui/mainmenu/mainmenu.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
 #include <string.h>
 #ifdef DG_HAVE_STEAM
 #include "steam_shim.h"
@@ -218,6 +220,17 @@ void lobby_apply_environment(World *w, const LobbySettings *s) {
     weather_apply_season(w, season, s->weather, s->dynamic_weather);
 }
 
+// The lobby's server rules (docs/SETTINGS_AUDIT.md): CVAR_LOCKED | CVAR_RULE cvars the host sets for
+// the whole session; MSG_CVARS replicates them and clients take no other value.
+void lobby_apply_rules(const LobbySettings *s) {
+    Cvar *fd = cvar_find("r_foliage_density");
+    int pct = s->foliage_pct ? DG_CLAMP(s->foliage_pct, LOBBY_FOLIAGE_MIN, 100) : 100;
+    if (fd && fabsf(fd->f - (float)pct * 0.01f) > 1e-4f) {
+        cvar_set_float(fd, (float)pct * 0.01f);
+        log_info("lobby: server rule foliage density %d %%", pct);
+    }
+}
+
 // ------------------------------------------------------------------ session
 
 static void reset_session(void) {
@@ -380,7 +393,7 @@ static void apply_outcome(u8 from, const LobbyOutcome *o) {
     if (o->changed) {
         if (S->L.state == LS_COUNTDOWN && S->L.countdown < 0) set_state(LE_COUNTDOWN_CANCEL);
         Cvar *mp = cvar_find("sv_maxplayers");
-        if (mp && mp->i != S->L.settings.max_players) cvar_set_int(mp, S->L.settings.max_players);
+        if (lobby_is_host() && mp && mp->i != S->L.settings.max_players) cvar_set_int(mp, S->L.settings.max_players);   // a host rule
         broadcast_snapshot();
         mainmenu_lobby_settings_changed();
     }
@@ -683,6 +696,7 @@ static void host_load_map(void) {
     mainmenu_leave_scene();
     if (!game_host_ex(level, GH_KEEP_NET)) { net_stop(); close_with(LE_TRANSPORT_FAIL, "The map failed to load"); go_menu(NULL); return; }
     lobby_apply_environment(game_world(), &S->L.settings);
+    lobby_apply_rules(&S->L.settings);
     if (mi && mi->scene[0]) scene_enter(mi->scene);   // a scene entry ("handpose"): its level, then the scene
     // Everyone in the lobby joins the game now.
     for (int i = 0; i < LOBBY_MAX_MEMBERS; i++) {
@@ -1042,12 +1056,13 @@ static void cmd_lobby_status(int argc, const char **argv) {
 void lobby_net_init(void) {
     S = (LobbySys *)calloc(1, sizeof(LobbySys));
     lobby_init(&S->L);
-    S->privacy = cvar_reg_int("lobby_privacy", LP_FRIENDS, 0, LP_COUNT - 1, 0, "Steam lobby type for the next hosted lobby (0 public, 1 friends, 2 invite only; set by the lobby)");
+    S->privacy = cvar_reg_int("lobby_privacy", LP_FRIENDS, 0, LP_COUNT - 1, CVAR_EDITABLE, "Steam lobby type for the next hosted lobby (0 public, 1 friends, 2 invite only; set by the lobby)");
     maplist_load(&S->maps, "assets/maps");
     cosmetics_load(&S->cos, "assets/cosmetics");
     if (!profile_load(&S->prof)) log_info("profile: none yet (%s)", profile_path());
     if (!maplist_find(&S->maps, S->prof.lobby.map) && S->maps.count) dg_strcpy(S->prof.lobby.map, sizeof(S->prof.lobby.map), S->maps.maps[0].id);
-    S->version_hash = lobby_version_hash(DG_VERSION, DG_PROTOCOL_VERSION, maplist_hash(&S->maps) ^ cosmetics_hash(&S->cos));
+    // The consistency set is content: a client with other shared values shows as another version.
+    S->version_hash = lobby_version_hash(DG_VERSION, DG_PROTOCOL_VERSION, maplist_hash(&S->maps) ^ cosmetics_hash(&S->cos) ^ consistency_hash());
     log_info("lobby: version %s, build hash %08x", DG_VERSION, S->version_hash);
     cmd_register("lobby_host", cmd_lobby_host, "lobby_host [lan|steam]: open a lobby (main menu Host game)");
     cmd_register("lobby_join", cmd_lobby_join, "lobby_join <ip[:port] | lobby:<id> | steamid64>: join a lobby");

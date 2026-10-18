@@ -1,5 +1,6 @@
 // GPU resources: buffers, meshes, textures, samplers, deferred deletion and staged uploads.
 #include "vk_internal.h"
+#include "vgeo/vgeo_tex.h"
 #include <stdlib.h>
 #include <math.h>
 
@@ -164,28 +165,39 @@ void vkr_target_destroy(RenderTarget *t) {
     memset(t, 0, sizeof(*t));
 }
 
+float vkr_material_anisotropy(void) {
+    float aniso = (float)R->r_aniso->i;
+    return aniso > 1.0f && R->max_anisotropy > 1.0f ? fminf(aniso, R->max_anisotropy) : 0.0f;
+}
+
+// The material samplers: trilinear + anisotropic. sampler_linear skips the top mip levels for
+// r_texture_quality (0 = high, 1 = medium, 2 = low) as a min LOD (texture arrays, impostors, UI
+// atlases: their levels stay resident); sampler_world does not: world textures dropped those levels
+// from memory (texture_drop), their level 0 is already the quality's top.
 static void create_linear_sampler(void) {
     VkSamplerCreateInfo s = { VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
     s.magFilter = VK_FILTER_LINEAR;
     s.minFilter = VK_FILTER_LINEAR;
     s.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
     s.addressModeU = s.addressModeV = s.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-    float aniso = (float)R->r_aniso->i;
-    if (aniso > 1.0f && R->max_anisotropy > 1.0f) {
+    float aniso = vkr_material_anisotropy();
+    if (aniso > 0.0f) {
         s.anisotropyEnable = VK_TRUE;
-        s.maxAnisotropy = fminf(aniso, R->max_anisotropy);
+        s.maxAnisotropy = aniso;
     }
-    // Texture quality skips top mip levels (0 = high, 1 = medium, 2 = low).
     s.minLod = (float)DG_CLAMP(2 - R->r_texture_quality->i, 0, 2);
     s.maxLod = VK_LOD_CLAMP_NONE;
     VK_CHECK(vkCreateSampler(R->device, &s, NULL, &R->sampler_linear));
+    s.minLod = 0.0f;
+    VK_CHECK(vkCreateSampler(R->device, &s, NULL, &R->sampler_world));
 }
 
-// r_aniso / r_texture_quality only shape the material sampler: recreate that one (the clamp /
-// shadow samplers stay, with every frame set, VFX and vgeo binding that holds them) and rewrite its
+// r_aniso / r_texture_quality only shape the material samplers: recreate those (the clamp /
+// shadow samplers stay, with every frame set, VFX and vgeo binding that holds them) and rewrite their
 // users: the material texture sets and the vgeo texture table. The caller waits for the device.
 void vkr_recreate_linear_sampler(void) {
     vkDestroySampler(R->device, R->sampler_linear, NULL);
+    vkDestroySampler(R->device, R->sampler_world, NULL);
     create_linear_sampler();
     vkr_rewrite_all_texture_sets();
     vkg_samplers_changed();
@@ -219,6 +231,7 @@ void vkr_create_samplers(void) {
 
 void vkr_destroy_samplers(void) {
     vkDestroySampler(R->device, R->sampler_linear, NULL);
+    vkDestroySampler(R->device, R->sampler_world, NULL);
     vkDestroySampler(R->device, R->sampler_clamp, NULL);
     vkDestroySampler(R->device, R->sampler_shadow, NULL);
     vkDestroySampler(R->device, R->sampler_depth, NULL);
@@ -248,7 +261,7 @@ VkDescriptorSet vkr_alloc_tex_set(VkImageView view, VkSampler sampler) {
 
 static void write_mat_set(const struct MatSet *ms) {
     VkDescriptorImageInfo ii[4];
-    for (int k = 0; k < 4; k++) ii[k] = (VkDescriptorImageInfo){ R->sampler_linear, R->textures[ms->tex[k]].view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
+    for (int k = 0; k < 4; k++) ii[k] = (VkDescriptorImageInfo){ vkr_texture_sampler(ms->tex[k]), R->textures[ms->tex[k]].view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL };
     VkWriteDescriptorSet w = { VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET };
     w.dstSet = ms->set;
     w.dstBinding = 0;
@@ -258,10 +271,15 @@ static void write_mat_set(const struct MatSet *ms) {
     vkUpdateDescriptorSets(R->device, 1, &w, 0, NULL);
 }
 
+VkSampler vkr_texture_sampler(u32 id) {
+    const GpuTexture *t = &R->textures[id < MAX_TEXTURES ? id : 0];
+    return t->wrapped ? R->sampler_clamp : t->world ? R->sampler_world : R->sampler_linear;
+}
+
 void vkr_rewrite_all_texture_sets(void) {
     for (u32 i = 1; i < MAX_TEXTURES; i++) {
         GpuTexture *t = &R->textures[i];
-        if (t->used) vkr_write_tex_set(t->set, t->view, t->wrapped ? R->sampler_clamp : R->sampler_linear);
+        if (t->used) vkr_write_tex_set(t->set, t->view, vkr_texture_sampler(i));
     }
     for (u32 i = 0; i < R->mat_set_count; i++) write_mat_set(&R->mat_sets[i]);
 }
@@ -468,11 +486,8 @@ static u32 mip_count(int w, int h) {
     return m;
 }
 
-static TextureId texture_alloc(int w, int h, u32 mips, VkFormat fmt) {
-    u32 slot = alloc_texture_slot();
-    if (!slot) return 0;
-    GpuTexture *t = &R->textures[slot];
-    memset(t, 0, sizeof(*t));
+// The texture's image and view (all levels); w / h / mips / format follow.
+static void texture_image(GpuTexture *t, int w, int h, u32 mips, VkFormat fmt) {
     VkImageCreateInfo ici = { VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
     ici.imageType = VK_IMAGE_TYPE_2D;
     ici.format = fmt;
@@ -495,49 +510,147 @@ static TextureId texture_alloc(int w, int h, u32 mips, VkFormat fmt) {
     vci.subresourceRange.levelCount = mips;
     vci.subresourceRange.layerCount = 1;
     VK_CHECK(vkCreateImageView(R->device, &vci, NULL, &t->view));
-    t->set = vkr_alloc_tex_set(t->view, R->sampler_linear);
     t->w = (u32)w;
     t->h = (u32)h;
     t->mips = mips;
     t->format = fmt;
+}
+
+static TextureId texture_alloc(int w, int h, u32 mips, VkFormat fmt, bool world) {
+    u32 slot = alloc_texture_slot();
+    if (!slot) return 0;
+    GpuTexture *t = &R->textures[slot];
+    memset(t, 0, sizeof(*t));
+    texture_image(t, w, h, mips, fmt);
+    t->world = world;
+    t->full_w = (u32)w;
+    t->full_h = (u32)h;
+    t->full_mips = mips;
+    t->set = vkr_alloc_tex_set(t->view, vkr_texture_sampler(slot));
     t->used = true;
     R->stats.textures_live++;
     return slot;
 }
 
-TextureId render_texture_create(int w, int h, const void *rgba8, bool srgb, bool mips) {
-    u32 levels = mips ? mip_count(w, h) : 1;
-    TextureId id = texture_alloc(w, h, levels, srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM);
-    if (!id) return 0;
-    Upload *u = push_upload();
-    if (!u) return id;
-    VkDeviceSize size = (VkDeviceSize)w * (VkDeviceSize)h * 4;
-    u->kind = UPLOAD_TEXTURE;
-    u->staging = vkr_buffer_create(size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, true);
-    memcpy(u->staging.mapped, rgba8, (size_t)size);
-    u->texture = id;
-    u->levels_in_data = 1;
-    u->gen_mips = levels > 1;
-    return id;
+// r_texture_quality (docs/TEXTURE_MIPS.md): the top levels of a world texture's chain of `mips` that
+// stay out of memory (high 0, medium 1, low 2; the last level always stays).
+static u32 texture_drop(u32 mips) {
+    u32 d = (u32)DG_CLAMP(2 - R->r_texture_quality->i, 0, 2);
+    return mips > 1 ? DG_MIN(d, mips - 1) : 0;
 }
 
-TextureId render_texture_create_raw(int w, int h, int levels, u32 vk_format, const void *data, const size_t *level_sizes) {
-    levels = DG_CLAMP(levels, 1, 16);
-    // Pre-encoded data (KTX2) in a format the device cannot sample: BC on a GPU without
-    // textureCompressionBC, ASTC on Intel / AMD Macs (docs/PLATFORM_MACOS.md "Textures / formats").
-    VkFormatProperties fp;
-    vkGetPhysicalDeviceFormatProperties(R->gpu, (VkFormat)vk_format, &fp);
-    VkFormatFeatureFlags need = VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
-    if ((fp.optimalTilingFeatures & need) != need) {
-        log_error("texture: format %u is not sampleable on this GPU (%dx%d skipped)", vk_format, w, h);
-        return 0;
+// One 2x2 box level of an RGBA8 image (floor sizes, as the mip chain). sRGB colour is averaged in
+// linear light, as the GPU's mip blits filter it; alpha and UNORM data as they are.
+static u8 *halve_rgba(const u8 *src, int w, int h, bool srgb, int *ow, int *oh) {
+    static float to_linear[256];
+    static u8 to_srgb[4096];
+    static bool tables;
+    if (!tables) {
+        for (int i = 0; i < 256; i++) {
+            float c = (float)i / 255.0f;
+            to_linear[i] = c <= 0.04045f ? c / 12.92f : powf((c + 0.055f) / 1.055f, 2.4f);
+        }
+        for (int i = 0; i < 4096; i++) {
+            float l = (float)i / 4095.0f;
+            float c = l <= 0.0031308f ? l * 12.92f : 1.055f * powf(l, 1.0f / 2.4f) - 0.055f;
+            to_srgb[i] = (u8)DG_CLAMP((int)(c * 255.0f + 0.5f), 0, 255);
+        }
+        tables = true;
     }
-    TextureId id = texture_alloc(w, h, (u32)levels, (VkFormat)vk_format);
-    if (!id) return 0;
+    int nw = DG_MAX(1, w / 2), nh = DG_MAX(1, h / 2);
+    u8 *dst = (u8 *)malloc((size_t)nw * (size_t)nh * 4);
+    for (int y = 0; y < nh; y++)
+        for (int x = 0; x < nw; x++) {
+            float c[3] = { 0, 0, 0 };
+            u32 a = 0;
+            for (int k = 0; k < 4; k++) {
+                int sx = DG_MIN(x * 2 + (k & 1), w - 1), sy = DG_MIN(y * 2 + (k >> 1), h - 1);
+                const u8 *p = &src[((size_t)sy * (size_t)w + (size_t)sx) * 4];
+                for (int i = 0; i < 3; i++) c[i] += srgb ? to_linear[p[i]] : (float)p[i];
+                a += p[3];
+            }
+            u8 *o = &dst[((size_t)y * (size_t)nw + (size_t)x) * 4];
+            for (int i = 0; i < 3; i++)
+                o[i] = srgb ? to_srgb[DG_CLAMP((int)(c[i] * 0.25f * 4095.0f + 0.5f), 0, 4095)] : (u8)DG_CLAMP((int)(c[i] * 0.25f + 0.5f), 0, 255);
+            o[3] = (u8)((a + 2) / 4);
+        }
+    *ow = nw;
+    *oh = nh;
+    return dst;
+}
+
+// Mip generation by blits needs blit support and linear filtering for the format (RGBA8: everywhere
+// in practice); without it the chain is built on the CPU (vg_tex_build_mips) and uploaded as is.
+static bool blit_mips_ok(VkFormat fmt) {
+    VkFormatProperties p;
+    vkGetPhysicalDeviceFormatProperties(R->gpu, fmt, &p);
+    VkFormatFeatureFlags need = VK_FORMAT_FEATURE_BLIT_SRC_BIT | VK_FORMAT_FEATURE_BLIT_DST_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_FILTER_LINEAR_BIT;
+    return (p.optimalTilingFeatures & need) == need;
+}
+
+// Queues level 0 of texture `id` (its resident size) and the rest of its chain.
+static void texture_queue_rgba(TextureId id, const u8 *rgba8) {
+    GpuTexture *t = &R->textures[id];
+    Upload *u = push_upload();
+    if (!u) return;
+    u->kind = UPLOAD_TEXTURE;
+    u->texture = id;
+    if (t->mips > 1 && !blit_mips_ok(t->format)) {
+        static bool warned;
+        if (!warned) { warned = true; log_warn("render: format %d has no linear blits: mip chains built on the CPU", (int)t->format); }
+        u32 levels;
+        size_t bytes = vg_tex_mip_bytes(t->w, t->h, &levels);
+        u->staging = vkr_buffer_create(bytes, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, true);
+        vg_tex_build_mips(rgba8, t->w, t->h, (u8 *)u->staging.mapped);
+        size_t off = 0;
+        u->levels_in_data = (int)DG_MIN(DG_MIN(levels, t->mips), 16u);
+        for (int l = 0; l < u->levels_in_data; l++) {
+            u->level_offsets[l] = off;
+            off += (size_t)DG_MAX(1u, t->w >> l) * DG_MAX(1u, t->h >> l) * 4;
+        }
+        u->gen_mips = false;
+        return;
+    }
+    VkDeviceSize size = (VkDeviceSize)t->w * (VkDeviceSize)t->h * 4;
+    u->staging = vkr_buffer_create(size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, true);
+    memcpy(u->staging.mapped, rgba8, (size_t)size);
+    u->levels_in_data = 1;
+    u->gen_mips = t->mips > 1;
+}
+
+// The image of world texture `id` at the current quality from its full-size pixels (w x h): the
+// dropped levels are box-filtered away on the CPU, the rest is uploaded (and mipmapped) as usual.
+static void world_fill_rgba(TextureId id, int w, int h, const u8 *rgba8, VkFormat fmt) {
+    GpuTexture *t = &R->textures[id];
+    u32 full = mip_count(w, h), drop = texture_drop(full);
+    bool srgb = fmt == VK_FORMAT_R8G8B8A8_SRGB;
+    const u8 *px = rgba8;
+    u8 *tmp = NULL;
+    int rw = w, rh = h;
+    for (u32 i = 0; i < drop; i++) {
+        int nw, nh;
+        u8 *n = halve_rgba(px, rw, rh, srgb, &nw, &nh);
+        free(tmp);
+        px = tmp = n;
+        rw = nw;
+        rh = nh;
+    }
+    texture_image(t, rw, rh, full - drop, fmt);
+    t->full_w = (u32)w;
+    t->full_h = (u32)h;
+    t->full_mips = full;
+    t->dropped = drop;
+    t->ready = false;
+    texture_queue_rgba(id, px);
+    free(tmp);
+}
+
+// Queues `levels` tightly packed levels (level_sizes) as the whole chain of texture `id`.
+static void texture_queue_raw(TextureId id, int levels, const u8 *data, const size_t *level_sizes) {
     size_t total = 0;
     for (int i = 0; i < levels; i++) total += level_sizes[i];
     Upload *u = push_upload();
-    if (!u) return id;
+    if (!u) return;
     u->kind = UPLOAD_TEXTURE;
     u->staging = vkr_buffer_create(total, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, true);
     memcpy(u->staging.mapped, data, total);
@@ -546,7 +659,232 @@ TextureId render_texture_create_raw(int w, int h, int levels, u32 vk_format, con
     u->texture = id;
     u->levels_in_data = levels;
     u->gen_mips = false;
+}
+
+// World texture `id` from a pre-built chain (KTX2): the dropped levels are skipped.
+static void world_fill_raw(TextureId id, int w, int h, int levels, VkFormat fmt, const u8 *data, const size_t *level_sizes) {
+    GpuTexture *t = &R->textures[id];
+    u32 drop = texture_drop((u32)levels);
+    size_t skip = 0;
+    for (u32 i = 0; i < drop; i++) skip += level_sizes[i];
+    texture_image(t, DG_MAX(1, w >> drop), DG_MAX(1, h >> drop), (u32)levels - drop, fmt);
+    t->full_w = (u32)w;
+    t->full_h = (u32)h;
+    t->full_mips = (u32)levels;
+    t->dropped = drop;
+    t->ready = false;
+    texture_queue_raw(id, levels - (int)drop, data + skip, level_sizes + drop);
+}
+
+TextureId render_texture_create(int w, int h, const void *rgba8, bool srgb, bool mips) {
+    u32 levels = mips ? mip_count(w, h) : 1;
+    TextureId id = texture_alloc(w, h, levels, srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM, false);
+    if (id) texture_queue_rgba(id, (const u8 *)rgba8);
     return id;
+}
+
+// Pre-encoded data (KTX2) in a format the device cannot sample: BC on a GPU without
+// textureCompressionBC, ASTC on Intel / AMD Macs (docs/PLATFORM_MACOS.md "Textures / formats").
+static bool raw_format_ok(u32 vk_format, int w, int h) {
+    VkFormatProperties fp;
+    vkGetPhysicalDeviceFormatProperties(R->gpu, (VkFormat)vk_format, &fp);
+    VkFormatFeatureFlags need = VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT | VK_FORMAT_FEATURE_TRANSFER_DST_BIT;
+    if ((fp.optimalTilingFeatures & need) == need) return true;
+    log_error("texture: format %u is not sampleable on this GPU (%dx%d skipped)", vk_format, w, h);
+    return false;
+}
+
+TextureId render_texture_create_raw(int w, int h, int levels, u32 vk_format, const void *data, const size_t *level_sizes) {
+    levels = DG_CLAMP(levels, 1, 16);
+    if (!raw_format_ok(vk_format, w, h)) return 0;
+    TextureId id = texture_alloc(w, h, (u32)levels, (VkFormat)vk_format, false);
+    if (id) texture_queue_raw(id, levels, (const u8 *)data, level_sizes);
+    return id;
+}
+
+// World textures start as a 1x1 slot (texture_alloc's set needs a view), replaced by their image at
+// the current quality before anything can sample them.
+static TextureId world_alloc(VkFormat fmt) {
+    TextureId id = texture_alloc(1, 1, 1, fmt, true);
+    if (!id) return 0;
+    GpuTexture *t = &R->textures[id];
+    vkDestroyImageView(R->device, t->view, NULL);
+    vmaDestroyImage(R->vma, t->image, t->alloc);
+    return id;
+}
+
+TextureId render_texture_create_world(int w, int h, const void *rgba8, bool srgb) {
+    VkFormat fmt = srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
+    TextureId id = world_alloc(fmt);
+    if (!id) return 0;
+    world_fill_rgba(id, w, h, (const u8 *)rgba8, fmt);
+    vkr_write_tex_set(R->textures[id].set, R->textures[id].view, R->sampler_world);
+    return id;
+}
+
+TextureId render_texture_create_raw_world(int w, int h, int levels, u32 vk_format, const void *data, const size_t *level_sizes) {
+    levels = DG_CLAMP(levels, 1, 16);
+    if (!raw_format_ok(vk_format, w, h)) return 0;
+    TextureId id = world_alloc((VkFormat)vk_format);
+    if (!id) return 0;
+    world_fill_raw(id, w, h, levels, (VkFormat)vk_format, (const u8 *)data, level_sizes);
+    vkr_write_tex_set(R->textures[id].set, R->textures[id].view, R->sampler_world);
+    return id;
+}
+
+// ------------------------------------------------------------------ texture quality
+
+// Queued copies into texture `id`'s image are for the image it is about to lose: dropped (the record
+// skips entries of the unused slot 0).
+static void cancel_texture_uploads(TextureId id) {
+    for (int i = 0; i < R->upload_count; i++)
+        if (R->uploads[i].kind == UPLOAD_TEXTURE && R->uploads[i].texture == id) R->uploads[i].texture = 0;
+}
+
+static VkCommandBuffer once_begin(VkCommandPool *pool) {
+    VkCommandPoolCreateInfo pci = { VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO };
+    pci.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
+    pci.queueFamilyIndex = R->queue_family;
+    VK_CHECK(vkCreateCommandPool(R->device, &pci, NULL, pool));
+    VkCommandBufferAllocateInfo ai = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO };
+    ai.commandPool = *pool;
+    ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    ai.commandBufferCount = 1;
+    VkCommandBuffer cmd;
+    VK_CHECK(vkAllocateCommandBuffers(R->device, &ai, &cmd));
+    VkCommandBufferBeginInfo bi = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
+    bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    VK_CHECK(vkBeginCommandBuffer(cmd, &bi));
+    return cmd;
+}
+
+static void once_end(VkCommandPool pool, VkCommandBuffer cmd) {
+    VK_CHECK(vkEndCommandBuffer(cmd));
+    VkCommandBufferSubmitInfo cbi = { VK_STRUCTURE_TYPE_COMMAND_BUFFER_SUBMIT_INFO };
+    cbi.commandBuffer = cmd;
+    VkSubmitInfo2 si = { VK_STRUCTURE_TYPE_SUBMIT_INFO_2 };
+    si.commandBufferInfoCount = 1;
+    si.pCommandBufferInfos = &cbi;
+    VK_CHECK(vkQueueSubmit2(R->queue, 1, &si, VK_NULL_HANDLE));
+    VK_CHECK(vkQueueWaitIdle(R->queue));
+    vkDestroyCommandPool(R->device, pool, NULL);
+}
+
+// Lower quality: each world texture's resident chain loses its top levels, copied on the GPU into a
+// smaller image (one submit for all, waited; the old images go right after). Higher quality: the
+// levels are gone, the owner decodes the source again (render_textures_reload_wanted). A texture
+// whose upload is still queued is trimmed next frame (texq_retry).
+void vkr_textures_quality_changed(void) {
+    R->texq_retry = false;
+    VkCommandPool pool = VK_NULL_HANDLE;
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
+    typedef struct OldImage { VkImage image; VkImageView view; VmaAllocation alloc; } OldImage;
+    OldImage *old = NULL;
+    u32 old_n = 0, trimmed = 0;
+    VkDeviceSize saved = 0;
+    for (u32 i = 1; i < MAX_TEXTURES; i++) {
+        GpuTexture *t = &R->textures[i];
+        if (!t->used || !t->world) continue;
+        u32 want = texture_drop(t->full_mips);
+        if (want < t->dropped) { R->tex_reload = true; continue; }
+        if (want == t->dropped) continue;
+        if (!t->ready) { R->texq_retry = true; continue; }
+        if (!cmd) {
+            cmd = once_begin(&pool);
+            old = (OldImage *)malloc(sizeof(OldImage) * MAX_TEXTURES);
+        }
+        u32 k = want - t->dropped;
+        old[old_n++] = (OldImage){ t->image, t->view, t->alloc };
+        VkImage src = t->image;
+        u32 ow = t->w, oh = t->h;
+        texture_image(t, (int)DG_MAX(1u, ow >> k), (int)DG_MAX(1u, oh >> k), t->mips - k, t->format);
+        saved += (VkDeviceSize)ow * oh - (VkDeviceSize)t->w * t->h;
+        vkr_image_barrier(cmd, src, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                          VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, 0, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_READ_BIT, 0);
+        vkr_image_barrier(cmd, t->image, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                          VK_PIPELINE_STAGE_2_NONE, 0, VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT, t->mips);
+        VkImageCopy regions[16];
+        u32 n = DG_MIN(t->mips, 16u);
+        for (u32 l = 0; l < n; l++) {
+            VkImageCopy *r = &regions[l];
+            memset(r, 0, sizeof(*r));
+            r->srcSubresource.aspectMask = r->dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            r->srcSubresource.mipLevel = l + k;
+            r->dstSubresource.mipLevel = l;
+            r->srcSubresource.layerCount = r->dstSubresource.layerCount = 1;
+            r->extent.width = DG_MAX(1u, t->w >> l);
+            r->extent.height = DG_MAX(1u, t->h >> l);
+            r->extent.depth = 1;
+        }
+        vkCmdCopyImage(cmd, src, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, t->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, n, regions);
+        vkr_image_barrier(cmd, t->image, VK_IMAGE_ASPECT_COLOR_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                          VK_PIPELINE_STAGE_2_TRANSFER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT,
+                          VK_ACCESS_2_SHADER_SAMPLED_READ_BIT, t->mips);
+        t->dropped = want;
+        vkg_texture_replaced(i);
+        trimmed++;
+    }
+    if (!cmd) return;
+    once_end(pool, cmd);
+    for (u32 i = 0; i < old_n; i++) {
+        vkDestroyImageView(R->device, old[i].view, NULL);
+        vmaDestroyImage(R->vma, old[i].image, old[i].alloc);
+    }
+    free(old);
+    vkr_rewrite_all_texture_sets();
+    vkg_samplers_changed();
+    log_info("texture quality %d: %u world textures trimmed (~%.1f Mtexels of level 0 freed)", R->r_texture_quality->i, trimmed, (double)saved / 1e6);
+}
+
+bool render_textures_reload_wanted(void) { return R && R->tex_reload; }
+
+bool render_texture_reload_needed(TextureId id) {
+    if (!id || id >= MAX_TEXTURES || !R->textures[id].used || !R->textures[id].world) return false;
+    const GpuTexture *t = &R->textures[id];
+    return texture_drop(t->full_mips) < t->dropped;
+}
+
+// The images replaced below may be in use by frames in flight.
+void render_textures_reload_begin(void) { vkDeviceWaitIdle(R->device); }
+
+// World texture `id` loses its image (the device is idle: render_textures_reload_begin).
+static GpuTexture *reload_slot(TextureId id, int w, int h) {
+    if (!render_texture_reload_needed(id)) return NULL;
+    GpuTexture *t = &R->textures[id];
+    if ((u32)w != t->full_w || (u32)h != t->full_h) {
+        log_warn("render: texture %u reload is %dx%d, was %ux%u (source changed): kept", id, w, h, t->full_w, t->full_h);
+        return NULL;
+    }
+    cancel_texture_uploads(id);
+    vkDestroyImageView(R->device, t->view, NULL);
+    vmaDestroyImage(R->vma, t->image, t->alloc);
+    return t;
+}
+
+void render_texture_reload(TextureId id, int w, int h, const void *rgba8) {
+    GpuTexture *t = reload_slot(id, w, h);
+    if (!t) return;
+    world_fill_rgba(id, w, h, (const u8 *)rgba8, t->format);
+    vkg_texture_replaced(id);
+}
+
+void render_texture_reload_raw(TextureId id, int w, int h, int levels, u32 vk_format, const void *data, const size_t *level_sizes) {
+    levels = DG_CLAMP(levels, 1, 16);
+    if (render_texture_reload_needed(id) && ((VkFormat)vk_format != R->textures[id].format || (u32)levels != R->textures[id].full_mips)) {
+        log_warn("render: texture %u reload changed format / levels (source changed): kept", id);
+        return;
+    }
+    GpuTexture *t = reload_slot(id, w, h);
+    if (!t) return;
+    world_fill_raw(id, w, h, levels, t->format, (const u8 *)data, level_sizes);
+    vkg_texture_replaced(id);
+}
+
+// The replaced images' sets (texture, glTF map sets) and the vgeo texture table follow.
+void render_textures_reload_end(void) {
+    R->tex_reload = false;
+    vkr_rewrite_all_texture_sets();
+    vkg_samplers_changed();
 }
 
 void render_texture_destroy(TextureId id) {

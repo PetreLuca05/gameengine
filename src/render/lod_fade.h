@@ -7,9 +7,8 @@
 // fade value f, 0 = fully visible, (0, 1) fading in with coverage f, (-1, 0) fading out with coverage
 // -f. The two draws of one fade use f_in = t and f_out = -(1 - t): coverage sums to 1.
 //
-// Applies to the classic renderer (r_vgeo 0) and the systems it shares (characters, terrain, VFX
-// spawn LOD); with r_vgeo 1 (or r_lod_legacy 1) those keep their behaviour from before docs/LOD.md
-// (lod_active() false).
+// Applies to the classic renderer and the systems it shares (characters, terrain, VFX spawn LOD);
+// with r_lod_legacy 1 those keep their behaviour from before docs/LOD.md (lod_active() false).
 #ifndef DG_LOD_FADE_H
 #define DG_LOD_FADE_H
 
@@ -17,9 +16,9 @@
 
 #define LOD_CHAR_COUNT 4
 
-// Range categories: a distance multiplier each (x the ranges before docs/LOD.md), x the Engine Fidelity
-// tier's multiplier (lod.json "tiers": Modern 1, High 0.85, Medium 0.6, Low 0.4, Off 0.3) x the user's
-// r_lod_bias against the level's default (1 untouched) x the era's multiplier.
+// Range categories: a distance multiplier each (x the ranges before docs/LOD.md) x r_lod_bias (locked 1).
+// The per-level "tiers" and per-era multipliers of lod.json must be 1: the ranges decide what a player
+// can see, so they are the same at every Engine Fidelity level and era (docs/SETTINGS_AUDIT.md).
 typedef enum LodCat {
     LODC_CHARACTER,   // skinned characters (the pixel table already holds the new targets: 1)
     LODC_STATIC,      // classic discrete LOD chains (props, level meshes, tree / bush LODs)
@@ -120,7 +119,7 @@ float lod_terrain_morph(float dist, int level, float lod_d, float band, float di
 void lod_init(void);                       // cvars + assets/render/lod.json (after the render cvars)
 bool lod_load(const char *path);           // reload (r_lod_reload)
 const LodTable *lod_table(void);
-bool lod_active(void);                     // the new ranges / fades apply (r_vgeo 0, not r_lod_legacy)
+bool lod_active(void);                     // the new ranges / fades apply (not r_lod_legacy)
 float lod_scale(LodCat c);                 // tier x user bias x category x era, 1 when !lod_active()
 float lod_user_bias(void);                 // r_lod_bias / the level's default (1 untouched)
 float lod_fade_time(void);                 // r_lod_fade_time

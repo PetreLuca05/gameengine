@@ -45,6 +45,8 @@ typedef struct Engine {
 
     // timing
     double real_time;     // seconds since boot
+    double render_time;   // shader / cosmetic animation clock: real_time, or under dev_fixed_fps the sum of the
+                          // fixed steps (captures and perf_verify passes render the same time values)
     double frame_dt;      // last render frame duration (clamped)
     u64 frame_index;
     float sim_alpha;      // interpolation factor between previous and current sim tick

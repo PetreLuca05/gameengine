@@ -8,7 +8,7 @@ usage: msl_check.py <shader .spv dir> [--out <dir>] [--metal] [--msl-version 300
 """
 import argparse, os, shutil, subprocess, sys
 
-# Never created on MoltenVK: the 64-bit atomic visibility writers (MoltenVK reports no
+# Never created on MoltenVK (nanite branch only; absent on the classic-only main): the 64-bit atomic visibility writers (MoltenVK reports no
 # shaderBufferInt64Atomics, vgeo_raster.c takes the *_v32 variants) and their mesh shader pairs.
 NOT_ON_METAL = {
     "vgeo/vg_raster_hw.frag.spv", "vgeo/vg_raster_hw_masked.frag.spv",

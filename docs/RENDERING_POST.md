@@ -7,7 +7,7 @@ passes around the lit scene. Everything after the lit pass is linear HDR until t
 ```
 vfx compute -> shadow map                                    (explicit barriers, render.c)
 prepass (depth + G-buffer: normal, material, velocity)
-hi-z -> contact shadows -> GTAO (+temporal, upsample) -> SSGI (+temporal, upsample)
+hi-z -> contact shadows -> GTAO (+bilateral blur, temporal, upsample) -> SSGI (+temporal, upsample)
      -> SSR (+temporal) -> volumetric froxels (inject, integrate)
 opaque (lit, consumes AO / contact / SSR / SSGI) -> decals -> opaque_dynamic (characters)
 fog_apply -> scene_copy ("hdr_opaque") -> transparent (blended, lines, text, particles)
@@ -43,7 +43,7 @@ final (CAS, grain, dither, sRGB / PQ) + UI -> present
 | target | format | content |
 |---|---|---|
 | `gb_normal` | RG16_SNORM | octahedral world normal |
-| `gb_material` | RGBA8 | r roughness, g metallic, b flags/255 (1 viewmodel, 2 dynamic, 4 unlit), a emissive/8 |
+| `gb_material` | RGBA8 | r roughness, g metallic, b flags/255 (1 viewmodel, 2 dynamic, 4 unlit, 8 thin occluder; bits 4-7 (1 − ao_strength) × 15), a emissive/8 |
 | `gb_velocity` | RG16F | (current − previous) unjittered position in UV units |
 | depth | D32 | written by the prepass; the lit passes shade at LESS_OR_EQUAL (`invariant gl_Position`) |
 
@@ -65,7 +65,7 @@ final (CAS, grain, dither, sRGB / PQ) + UI -> present
 |---|---|---|
 | Hi-Z | `hiz.comp` | min-depth pyramid (SSR) |
 | contact shadows | `contact.comp` | sun ray march in clip space; N·L ≤ 0 and > 50 m skipped; low = 8 steps at half res, high = 14 steps full res |
-| GTAO | `gtao.comp` + `temporal` + `upsample` | XeGTAO style, half res, 2–3 slices, blue-noise rotated; AO only darkens indirect light (+ specular occlusion) |
+| GTAO | `gtao.comp` + `ao_blur` (×2) + `temporal` + `upsample` | XeGTAO style, half (or full) res, blue-noise rotated, thin-occluder aware, per-material weight; AO only darkens indirect light (+ specular occlusion). See "Foliage-aware AO" |
 | SSGI | `ssgi.comp` | half res, previous frame's colour pyramid, temporal + bilateral upsample (Ultra) |
 | SSR | `ssr.comp` + `temporal` | Hi-Z march, roughness-dependent mip of the colour pyramid, fallback to the sky / ground env; half res (low) is sampled bilinearly by the lit pass |
 | volumetrics | `vol_inject`, `vol_integrate`, `fog_apply` | froxels (80×45×48 … 240×135×96, 80 m log depth), height fog, sun with shadow-map visibility (light shafts), point lights, HG phase, temporal reprojection; blended surfaces and particles apply the integrated volume themselves (lit set 2 binding 4, `vfx_particle.frag` set 2 binding 0). `fog_apply` also fogs the sky: sky pixels take the full froxel range (as the geometry beyond 80 m, no horizon seam); without froxels it puts the lit shaders' analytic fog over the sky through the height-fog layer up to the far plane (full at the horizon, only the layer towards the zenith). The scope PiP gets the same fog: each PiP pixel's world point is looked up in these froxels / the aerial perspective through the main projection (`scope_pip_fog`, docs/ATTACHMENTS.md "The PiP pass") |
@@ -172,7 +172,8 @@ hook: wobble + absorption tint), night vision (`nightvision`), death (desaturati
 
 * `r_post_debug N`: 1 ao, 2 contact, 3 ssr, 4 ssgi, 5 velocity, 6 normal, 7 material, 8 depth,
   9 hi-z, 10 CoC, 11 luminance (EV false colour), 12 TAA history weight, 13 froxel slice,
-  14 bloom, 15 flare, 16 motion blur tiles, 17 fog opacity.
+  14 bloom, 15 flare, 16 motion blur tiles, 17 fog opacity, 18 raw GTAO, 19 blurred GTAO,
+  20 final AO (the lit pass' input × intensity × the material weight; thin occluders tinted green).
 * `r_post_compare 1`: A/B split (left = raw lit HDR, exposed + tonemapped only).
 * `r_post_profile 1|2`: per-pass GPU ms overlay with the preset budget (+ memory);
   `post_bench [frames] [label]` logs averages; `post_status` prints the active settings.
@@ -185,6 +186,83 @@ hook: wobble + absorption tint), night vision (`nightvision`), death (desaturati
   room with a slit roof and a fog volume (volumetrics), dark corridor with a cold grade
   (auto exposure, volumes). Brushes accept `roughness`, `metallic`, `emissive`, `unlit`.
   `tools/tests/post_corner.cfg` captures it.
+
+## Foliage-aware AO
+
+Screen-space AO that leaves vegetation alone: alpha-tested cards neither go black themselves nor throw
+dark halos onto what stands behind them, and each material says how much screen-space AO it takes.
+
+**Pass order** (`post_screen_space.c`, every stage its own frame graph pass):
+
+```
+gtao (raw, half or full res, R16F "ao_raw")
+  -> ao_blur_x -> ao_blur_y   separable bilateral blur (depth + normal weights, R16F)
+  -> gtao_temporal            ping-pong history "ao_hist_a/b": velocity reprojection, 3x3 clamp,
+                              depth rejection against last frame's depth ("depth_prev")
+  -> gtao_upsample            depth-aware 2x bilateral to the R8 "ao" (half res only; at full res
+                              the lit pass samples the last stage directly)
+lit opaque: ao = combine(lerp(1, ss_ao, ao_strength), baked AO), indirect light only
+```
+
+The targets are transients / histories of the frame graph, so its barriers / layout transitions cover
+them (storage writes in GENERAL, sampled reads in SHADER_READ_ONLY_OPTIMAL; history invalidated on a
+resize, camera cut or a resolution toggle). `r_post_disable ao_blur_x,gtao_temporal,...` skips a
+stage; the next one reads its input. No new attachment: the G-buffer's flags byte had 5 spare bits.
+
+**Thin occluders** (`gtao.comp`): materials flagged thin (alpha-tested: glTF MASK, `VGM_MASKED`) write
+`GB_THIN`. In the horizon search a thin sample more than `r_ao_thickness` in front of the receiver
+(along the view) fades out over another `r_ao_thickness`: the depth buffer only has a card's front,
+and behind it is air. Thin samples only count within `r_ao_foliage_radius` of the receiver, and a thin
+receiver searches that clamped radius itself (no halos). A thin receiver integrates against its
+geometric normal (from the depth buffer), because foliage shading normals are authored (bush spheres,
+grass pointing up) and would let the card's own plane occlude it. Every sample is reconstructed at
+the depth texel it reads: a half-res UV between texels put grazing planes off themselves, which showed
+as grey noise and 1-pixel white columns on walls seen at an angle.
+
+**Per-material** (`src/render/material_ao.h`): `Material.ao_strength` (0 = automatic: 1, or 0.3 for
+alpha-tested; `MATERIAL_AO_OFF` = none), `ao_combine` (auto / min / multiply), `ao_vertex` (vertex
+colour alpha = baked AO, not opacity). They travel as one byte, the alpha of the pbr emissive word
+(`PushLit.pbr.z`, `VgMaterial.emissive_rgb`), on the legacy, classic and vgeo paths alike. The lit pass
+applies `lerp(1, ao, ao_strength)` from the material itself (exact); the G-buffer keeps a 4-bit copy
+for the debug view and the thin bit for GTAO. Data: glTF material `extras`
+(`ao_strength`, `ao_combine`, `ao_vertex`), a model's `"ao": { "strength", "combine", "vertex" }`
+in `data/assets.json`, grass assets' `shading.ao_strength` / `ao_combine`
+(`assets/foliage/grass/*.json`). Trees and procedural foliage set the defaults in code. In data, 0 means
+none.
+
+**Baked AO** (vertex alpha with `ao_vertex`, the glTF occlusion map, surface-layer AO, the grass
+clump AO) multiplies indirect light only (ambient, SSGI, specular occlusion), never the sun / lamps.
+Against the screen-space term it is `min()` for foliage (default: the card's baked term already holds
+the self-occlusion GTAO sees) and multiplied otherwise. The vgeo glTF importer now reads `COLOR_0`.
+Limitation: for WPO (wind) foliage the vertex colour is the wind weights, so vertex AO is 1 there
+(their textures' AO is used instead).
+
+**Uniforms / cvars** (Settings > Graphics > Debug, under Ambient occlusion; `PostUBO s_ao / s_ao2 / s_ao3`):
+
+| cvar | default | |
+|---|---|---|
+| `r_ao` | 2 | 0 off, 1 low (2 slices × 3 steps), 2 high (3 × 6) |
+| `r_ao_full_res` | 0 | full render resolution instead of half |
+| `r_ao_radius` | 0.9 m | world-space radius |
+| `r_ao_intensity` | 1 | < 1 fades the AO (lit lerp), > 1 deepens it (power) |
+| `r_ao_falloff` | 0.4 | the share of the radius occluders fade out over |
+| `r_ao_thickness` | 0.25 m | thin-occluder heuristic (above) |
+| `r_ao_foliage_radius` | 0.35 m | radius clamp for thin occluders / receivers |
+| `r_ao_slices`, `r_ao_steps` | 0 | 0 = by quality |
+| `r_ao_blur`, `r_ao_blur_sharpness` | 3 px, 40 | blur taps per side (0 = off), depth sharpness |
+| `r_ao_temporal` | 0.9 | history weight (0 = off) |
+
+**Recommended for foliage**: `ao_strength` 0.25–0.35 on leaf / grass cards with `min` against their
+baked AO (vertex alpha or the clump / nta map); thickness 0.2–0.3 m (a leaf clump's depth), foliage
+radius 0.3–0.5 m (below the global radius); keep bark / trunks at 1 (opaque, not thin). Dense crops
+(wheat) can go to 0.2.
+
+**Test**: dev room **AO foliage corner** (-50, 0, -32; `tools/gen_foliage_ao_test.py` makes the
+models): legacy-path bushes by a wall and 4 m out, a reference bush at 1.0 / multiply, the same bush
+and a grass patch through vgeo, a solid step. `tools/tests/ao_foliage.cfg` captures lit / raw / blurred
+/ final / AO off and a camera strafe; `test_material_ao` checks the byte encoding and the composite.
+Checked on lavapipe with validation (dev room, `map vegetation`, `map wateryard`, classic renderer,
+full res): 0 messages; static frames change < 1 % of pixels, and motion changes only parallax edges.
 
 ## Tests
 

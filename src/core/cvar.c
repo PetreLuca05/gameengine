@@ -2,21 +2,27 @@
 #include "cvar.h"
 #include "log.h"
 #include "platform.h"
+#include "profiler.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <ctype.h>
 
-#define MAX_CVARS 512
+#define MAX_CVARS 768
+#define CVAR_INDEX 2048           // hash index slots (power of two, > 2 x MAX_CVARS)
 #define MAX_CMDS 1024
 #define MAX_WRITERS 8
 #define CBUF_SIZE (512 * 1024)   // long generated test scripts (tools/tests/weapon_sway.cfg)
 #define MAX_ARGS 32
+#ifndef DG_DEV_BUILD
+#define DG_DEV_BUILD 1   // CMake option DG_DEV_BUILD; the unit tests are dev builds
+#endif
 
 typedef struct Cmd { char name[CVAR_NAME_MAX]; char desc[CVAR_STR_MAX]; CmdFn fn; } Cmd;
 
 typedef struct CvarSystem {
     Cvar *cvars[MAX_CVARS];
     int cvar_count;
+    u16 index[CVAR_INDEX];        // case-insensitive name hash -> cvar index + 1 (0 = empty); PF-0002
     Cmd cmds[MAX_CMDS];
     int cmd_count;
     ConfigWriterFn writers[MAX_WRITERS];
@@ -30,6 +36,13 @@ typedef struct CvarSystem {
     bool cfg_dirty;
     double cfg_dirty_time;
     bool cfg_backed_up;
+    // Classification locks (docs/SETTINGS_AUDIT.md).
+    bool locks;
+    CvarSource src;
+    bool (*rule_gate)(void);
+    int rejected;
+    bool loading_config;
+    int config_dropped;
 } CvarSystem;
 #define s_cv (*g_engine.cvars)
 
@@ -134,7 +147,8 @@ void cvar_system_init(void) {
     cmd_register("exec", cmd_exec, "execute a config file");
     cmd_register("reset", cmd_reset, "reset cvar to default");
     cmd_register("toggle", cmd_toggle, "toggle a boolean cvar");
-    s_cv.sv_cheats = cvar_reg_bool("sv_cheats", true, CVAR_SERVER, "allow cheat cvars (dev build default on)");
+    s_cv.locks = !DG_DEV_BUILD;
+    s_cv.sv_cheats = cvar_reg_bool("sv_cheats", DG_DEV_BUILD != 0, CVAR_SERVER | CVAR_LOCKED | CVAR_RULE, "allow cheat cvars (host rule; on in dev builds, off in release builds)");
 }
 
 void cvar_system_shutdown(void) {
@@ -143,10 +157,33 @@ void cvar_system_shutdown(void) {
     g_engine.cvars = NULL;
 }
 
-Cvar *cvar_find(const char *name) {
+static u32 name_hash(const char *s) {
+    u32 h = 2166136261u;
+    while (*s) { h ^= (u8)tolower((u8)*s++); h *= 16777619u; }
+    return h;
+}
+
+// cvar_find is called from per-frame code (114 call sites): a hash index instead of a case-insensitive
+// scan over every cvar (docs/perf/FINDINGS.md PF-0002). Same result; perf_fix_disable PF-0002 scans.
+static Cvar *find(const char *name) {
+    if (prof_fix_enabled(PFX_CVAR_HASH)) {
+        for (u32 h = name_hash(name) & (CVAR_INDEX - 1);; h = (h + 1) & (CVAR_INDEX - 1)) {
+            int k = s_cv.index[h];
+            if (!k) return NULL;
+            if (SDL_strcasecmp(s_cv.cvars[k - 1]->name, name) == 0) return s_cv.cvars[k - 1];
+        }
+    }
     for (int i = 0; i < s_cv.cvar_count; i++)
         if (SDL_strcasecmp(s_cv.cvars[i]->name, name) == 0) return s_cv.cvars[i];
     return NULL;
+}
+
+Cvar *cvar_find(const char *name) {
+    prof_count(PC_CVAR_FIND, 1);
+    PROF_BEGIN("cvar_find");   // its own zone: the per-call cost is what PF-0002 changes
+    Cvar *cv = find(name);
+    PROF_END();
+    return cv;
 }
 
 Cvar *cvar_reg(const char *name, const char *def, CvarType type, u32 flags, const char *desc) {
@@ -162,6 +199,9 @@ Cvar *cvar_reg(const char *name, const char *def, CvarType type, u32 flags, cons
     cv->flags = flags;
     parse_value(cv);
     dg_strcpy(cv->default_str, sizeof(cv->default_str), cv->str);
+    u32 h = name_hash(cv->name) & (CVAR_INDEX - 1);
+    while (s_cv.index[h]) h = (h + 1) & (CVAR_INDEX - 1);
+    s_cv.index[h] = (u16)(s_cv.cvar_count + 1);
     s_cv.cvars[s_cv.cvar_count++] = cv;
     return cv;
 }
@@ -192,8 +232,52 @@ Cvar *cvar_reg_string(const char *name, const char *def, u32 flags, const char *
     return cvar_reg(name, def, CVAR_STRING, flags, desc);
 }
 
+// ------------------------------------------------------------------ classification locks
+
+bool cvar_dev_build(void) { return DG_DEV_BUILD != 0; }
+void cvar_set_release_locks(bool on) { if (g_engine.cvars) s_cv.locks = on; }
+bool cvar_release_locks(void) { return g_engine.cvars && s_cv.locks; }
+CvarSource cvar_source_push(CvarSource src) {
+    CvarSource prev = s_cv.src;
+    s_cv.src = src;
+    return prev;
+}
+void cvar_source_pop(CvarSource prev) { s_cv.src = prev; }
+void cvar_set_rule_gate(bool (*fn)(void)) { s_cv.rule_gate = fn; }
+int cvar_rejected_count(void) { return g_engine.cvars ? s_cv.rejected : 0; }
+
+const char *cvar_class_name(u32 flags) {
+    u32 c = flags & CVAR_CLASS_MASK;
+    if (c == CVAR_EDITABLE) return "EDITABLE";
+    if (c == CVAR_TIER) return "TIER";
+    if (c == CVAR_LOCKED) return (flags & CVAR_RULE) ? "LOCKED+RULE" : "LOCKED";
+    return "?";
+}
+
+bool cvar_writable(const Cvar *cv, CvarSource src) {
+    if (src == CVAR_SRC_HOST || !s_cv.locks) return true;
+    u32 c = cv->flags & CVAR_CLASS_MASK;
+    if (c == CVAR_TIER) return src == CVAR_SRC_FIDELITY;
+    if (c == CVAR_LOCKED) return (cv->flags & CVAR_RULE) && (!s_cv.rule_gate || s_cv.rule_gate());
+    return true;   // EDITABLE (or unclassified: the tests' own cvars)
+}
+
+// Saved to config.cfg: archived player settings and the host's archived rules.
+bool cvar_saved(const Cvar *cv) {
+    if (!(cv->flags & CVAR_ARCHIVE)) return false;
+    u32 c = cv->flags & CVAR_CLASS_MASK;
+    return c != CVAR_TIER && (c != CVAR_LOCKED || (cv->flags & CVAR_RULE));
+}
+
 void cvar_set_cv(Cvar *cv, const char *value) {
     if (cv->flags & CVAR_READONLY) { log_warn("%s is read-only", cv->name); return; }
+    if (s_cv.loading_config && (cv->flags & (CVAR_TIER | CVAR_LOCKED)) && !cvar_saved(cv)) { s_cv.config_dropped++; return; }
+    if (!cvar_writable(cv, s_cv.src)) {
+        s_cv.rejected++;
+        log_warn("%s is %s (docs/SETTINGS_AUDIT.md): write \"%s\" rejected", cv->name,
+                 (cv->flags & CVAR_TIER) ? "set by Engine Fidelity" : ((cv->flags & CVAR_RULE) ? "a server rule of the host" : "fixed for fair play"), value);
+        return;
+    }
     if ((cv->flags & CVAR_CHEAT) && s_cv.sv_cheats && !s_cv.sv_cheats->i) { log_warn("%s is cheat protected", cv->name); return; }
     char old[CVAR_STR_MAX];
     dg_strcpy(old, sizeof(old), cv->str);
@@ -202,7 +286,7 @@ void cvar_set_cv(Cvar *cv, const char *value) {
     if (cv->bound) cv->bound(cv);
     if (strcmp(old, cv->str) != 0) {
         cv->modified++;
-        if (cv->flags & CVAR_ARCHIVE) config_mark_dirty();
+        if (cvar_saved(cv)) config_mark_dirty();
         if (cv->flags & CVAR_NOTIFY) log_info("%s changed to %s", cv->name, cv->str);
         if (cv->on_change) cv->on_change(cv);
     }
@@ -409,7 +493,7 @@ bool config_save(const char *path) {
     fprintf(f, "// Deadground config - generated, edits are kept for known cvars\n");
     for (int i = 0; i < s_cv.cvar_count; i++) {
         Cvar *cv = s_cv.cvars[i];
-        if (cv->flags & CVAR_ARCHIVE) fprintf(f, "set %s \"%s\"\n", cv->name, cv->str);
+        if (cvar_saved(cv)) fprintf(f, "set %s \"%s\"\n", cv->name, cv->str);
     }
     for (int i = 0; i < s_cv.writer_count; i++) s_cv.writers[i](f);
     fclose(f);
@@ -434,3 +518,15 @@ bool config_exec_file(const char *path) {
     free(text);
     return true;
 }
+
+bool config_load_file(const char *path) {
+    s_cv.loading_config = true;
+    s_cv.config_dropped = 0;
+    bool ok = config_exec_file(path);
+    s_cv.loading_config = false;
+    if (s_cv.config_dropped)
+        log_info("config: %d entries of graphics / fair-play settings that are no longer saved were dropped (docs/SETTINGS_AUDIT.md)", s_cv.config_dropped);
+    return ok;
+}
+
+int config_load_dropped(void) { return s_cv.config_dropped; }

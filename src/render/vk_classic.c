@@ -1,6 +1,6 @@
-// Classic renderer of the vgeo scene content (docs/CLASSIC_RENDERER.md, r_vgeo 0): the same meshes,
-// materials, instances and placement chunks as the virtualized geometry path, drawn the traditional
-// way. With r_vgeo 1 it still draws the point / spot light shadow tiles of that content.
+// Classic renderer of the vgeo scene content (docs/CLASSIC_RENDERER.md): the meshes, materials,
+// instances and placement chunks of the vgeo scene tables (vk_vgeo.c), drawn the traditional way.
+// The only renderer of that content (the virtualized geometry path lives on branch `nanite`).
 //
 //   load     every mesh's LOD chain as plain vertex / index buffers: cuts of its DAG at the exported
 //            discrete LOD errors, decoded with vertex colours (wind weights) and split per material
@@ -17,7 +17,7 @@
 //            (shaders/vgeo/wpo.glsl, the same snippets) and the grass displacement buffer run in
 //            the vertex shader (shaders/classic_vert.glsl); impostors are camera-facing quads that
 //            blend the 3 nearest atlas frames (shaders/classic_impostor.glsl).
-//   wind     the vgeo path's foliage wind (docs/FOLIAGE_WIND.md): wpo_veg with the material's wind
+//   wind     the foliage wind (docs/FOLIAGE_WIND.md): wpo_veg with the material's wind
 //            parameters (push constants), the wind field (fallback + tile ring, this frame's and last
 //            frame's for velocity, layers, debug view) in a per-frame-slot uniform buffer (set 4)
 //   LOD      docs/LOD.md (lod_active): ranges from assets/render/lod.json x tier x era; LOD, impostor,
@@ -26,7 +26,7 @@
 //            dither threshold range [0, 1) between them (ClInst misc.z), so their coverage sums to 1;
 //            fading parts batch apart (key bit 3) and draw through the dithered pipelines. A LOD that is
 //            not resident yet draws the nearest resident one (the finer one is prefetched). The local
-//            light tiles (shared with r_vgeo 1) and r_lod_legacy keep the cuts from before.
+//            light tiles and r_lod_legacy keep the cuts from before.
 #include "vk_internal.h"
 #include "lod_fade.h"
 #include "fidelity/fidelity.h"
@@ -136,6 +136,7 @@ static struct {
     Cvar *impostor_px;
     bool lod_new;                   // this frame's main view / cascades use docs/LOD.md
     u32 lod_n[5], lod_fading;       // main view parts per LOD 0..3 / impostor, parts in a fade (render_classic_lod_counts)
+    bool counted;                   // lod_n holds a culled main view (render_vgeo_counts)
     float eff_lod_px, eff_shadow_px, eff_imp_px, eff_small_px;   // this frame's effective thresholds (classic_stats)
 } C;
 
@@ -250,7 +251,7 @@ static VkDescriptorSet cl_alloc_set(VkImageView v0, VkImageLayout l0, VkImageVie
 }
 
 void vkc_init(void) {
-    C.impostor_px = cvar_reg_float("r_classic_impostor_px", 64.0f, 0.0f, 1024.0f, CVAR_ARCHIVE,
+    C.impostor_px = cvar_reg_float("r_classic_impostor_px", 64.0f, 0.0f, 1024.0f, CVAR_LOCKED,
                                    "classic renderer: trees with an impostor atlas draw it below this projected size (pixels across, 0 = never)");
     VkDescriptorSetLayoutBinding b[2];
     memset(b, 0, sizeof(b));
@@ -332,7 +333,7 @@ void vkc_init(void) {
     for (int i = 0; i < CP_COUNT; i++)
         if (!C.pipe[i]) { log_error("classic: renderer unavailable (pipeline %d)", i); return; }
     C.ok = true;   // the default set 3 (white) is written at the first frame (the white texture comes later)
-    log_info("classic: instanced renderer ready (r_vgeo 0 draws the vgeo content through it)");
+    log_info("classic: instanced renderer ready");
 }
 
 void vkc_shutdown(void) {
@@ -462,9 +463,10 @@ void vkc_set_textures(const VgTextures *t) { C.vtex = t; }
 // The renderer recreated its material sampler (r_aniso / r_texture_quality) and rewrote every texture
 // set (wrapped ones with its clamp sampler): re-apply the slots' samplers, and rewrite this module's own
 // sets, which hold the material sampler too (the default / displacement sets, the impostor atlases;
-// the local light shadow tiles draw through them even with r_vgeo 1). The caller waited for the device.
+// the local light shadow tiles draw through them too). The caller waited for the device.
 void vkc_samplers_changed(void) {
     memset(C.modver, 0xFF, sizeof(C.modver));
+    memset(C.set4_views, 0, sizeof(C.set4_views));   // the wind ring's sets hold the module's repeat sampler
     VkImageView white = R->textures[R->white_tex].view;
     if (C.set_default) cl_write_set(C.set_default, white, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, white, R->sampler_linear);
     if (C.set_disp && C.disp_view) cl_write_set(C.set_disp, C.disp_view, VK_IMAGE_LAYOUT_GENERAL, white, R->sampler_linear);
@@ -746,7 +748,7 @@ static void cull_instance(const ClCull *v, const VgScene *s, const VgInstance *i
     u32 lod;
     float dc = fmaxf(v3_dist(c, v->lod_eye) - r, v->znear);
     // Impostors: trees (coarsest LOD >= CL_IMPOSTOR_TRIS) below r_classic_impostor_px, small cover
-    // (grass tufts: a few cards) only where vgeo switches (r_vgeo_impostor_px).
+    // (grass tufts: a few cards) below r_vgeo_impostor_px.
     float imp_px = cm->coarse_tris >= CL_IMPOSTOR_TRIS ? v->impostor_px : v->small_impostor_px;
     u32 ks = m->impostor_grid >> 16;   // the mesh's switch scale (1/16 units, 0 = 1x), as vgeo_use_impostor
     if (ks) imp_px *= (float)ks / 16.0f;
@@ -903,6 +905,7 @@ static void build_lods(const ClView *v) {
 static void count_view(const ClView *v) {
     memset(C.lod_n, 0, sizeof(C.lod_n));
     C.lod_fading = 0;
+    C.counted = true;
     for (u32 b = 0; b < v->batch_count; b++) {
         u32 lod = v->batches[b].key & 7u;
         C.lod_n[lod == CL_IMPOSTOR ? 4 : DG_MIN(lod, 3u)] += v->batches[b].count;
@@ -915,6 +918,16 @@ void render_classic_lod_counts(u32 n[5], u32 *fading) {
     *fading = C.lod_fading;
 }
 
+// visibility_probe (docs/SETTINGS_AUDIT.md): the last main view's parts (every LOD and impostor),
+// the ones in a fade, the impostors.
+bool render_vgeo_counts(u32 *visible, u32 *faded, u32 *impostors) {
+    if (!C.counted) return false;
+    *visible = C.lod_n[0] + C.lod_n[1] + C.lod_n[2] + C.lod_n[3] + C.lod_n[4];
+    *faded = C.lod_fading;
+    *impostors = C.lod_n[4];
+    return true;
+}
+
 // A threshold with the Engine Fidelity level's own scaling taken out (docs/LOD.md: the tier comes from
 // lod.json instead): cur x modern default / level default.
 static float without_level_scale(int feature, float cur) {
@@ -924,12 +937,11 @@ static float without_level_scale(int feature, float cur) {
     return cur * m.def / b.def;
 }
 
-void vkc_frame(const VgScene *s, const VgDisplace *disp, float density, float lod_px, float shadow_lod_px, float small_impostor_px, bool era2010, bool shadows,
-               bool views) {
+void vkc_frame(const VgScene *s, const VgDisplace *disp, float density, float lod_px, float shadow_lod_px, float small_impostor_px, bool era2010, bool shadows) {
     C.scene = NULL;
     C.inst_used = 0;
     C.draws = C.tris = C.tris_shadow = C.local_instances = 0;
-    C.lod_new = views && lod_active();
+    C.lod_new = lod_active();
     for (int v = 0; v < CL_VIEWS; v++) C.view[v].batch_count = C.view[v].instances = 0;
     if (!C.ok || !s || !C.mesh_cap) return;
     if (!C.set_default) {
@@ -957,7 +969,7 @@ void vkc_frame(const VgScene *s, const VgDisplace *disp, float density, float lo
     memset(&v, 0, sizeof(v));
     planes_of(R->view_proj_nj, v.planes);
     v.eye = v.lod_eye = R->cam.pos;
-    v.px_scale = (float)R->hdr.h / (2.0f * tanf(R->cam.fov_deg * DG_DEG2RAD * 0.5f));
+    v.px_scale = RENDER_LOD_REF_H / (2.0f * tanf(R->cam.fov_deg * DG_DEG2RAD * 0.5f));   // resolution independent (V14)
     v.lod_px = lod_px;
     v.impostor_px = C.impostor_px->f;
     v.small_impostor_px = small_impostor_px;
@@ -967,14 +979,14 @@ void vkc_frame(const VgScene *s, const VgDisplace *disp, float density, float lo
     v.legacy = !C.lod_new;
     float shadow_px = shadow_lod_px;
     if (C.lod_new) {
-        // docs/LOD.md: lod.json x tier x era; the fidelity level's own scaling of the shared thresholds
-        // is replaced by the tier (without_level_scale), the user's deviation from it is kept
+        // docs/LOD.md: lod.json ranges (the same at every level); the shadow-view geometry error is
+        // still a fidelity tier: its level scaling is taken out (without_level_scale)
         const LodTable *lt = lod_table();
         float band_k = lt->band > 0 ? lod_band() / lt->band : 1.0f;
         float s_st = lod_scale(LODC_STATIC), s_im = lod_scale(LODC_IMPOSTOR), s_fo = lod_scale(LODC_FOLIAGE), s_sh = lod_scale(LODC_SHADOW);
-        v.lod_px = without_level_scale(FF_VGEO_LOD_PX, lod_px) / s_st;
+        v.lod_px = lod_px / s_st;   // locked (docs/SETTINGS_AUDIT.md): no level scale to take out
         v.impostor_px = C.impostor_px->f / s_im;
-        v.small_impostor_px = without_level_scale(FF_IMPOSTOR_PX, small_impostor_px) / s_im;
+        v.small_impostor_px = small_impostor_px / s_im;
         shadow_px = without_level_scale(FF_VGEO_SHADOW_ERROR_PX, shadow_lod_px) / s_sh;
         v.band = lod_band();
         v.imp_band = lt->imp_band * band_k;
@@ -988,9 +1000,8 @@ void vkc_frame(const VgScene *s, const VgDisplace *disp, float density, float lo
         v.shadow_lim_k = s_sh;
     }
     C.eff_lod_px = v.lod_px, C.eff_shadow_px = shadow_px, C.eff_imp_px = v.impostor_px, C.eff_small_px = v.small_impostor_px;
-    // Scope picture-in-picture (both paths: vgeo has no PiP view): its own LOD / impostor / foliage
-    // selection from the PiP projection, so a magnified distant object gets the detail the lens shows
-    // (docs/LOD.md "Scopes").
+    // Scope picture-in-picture: its own LOD / impostor / foliage selection from the PiP projection, so
+    // a magnified distant object gets the detail the lens shows (docs/LOD.md "Scopes").
     mat4 pip_vp;
     vec3 pip_eye;
     float pip_px;
@@ -1004,12 +1015,6 @@ void vkc_frame(const VgScene *s, const VgDisplace *disp, float density, float lo
         cull_cells(&pv, s);
         emit_view(&C.view[CL_VIEW_PIP]);
         build_lods(&C.view[CL_VIEW_PIP]);
-    }
-    if (!views) {   // r_vgeo 1: vgeo draws the main view and the cascades, only local light tiles (and the scope PiP) come here
-        C.cpu_ms = 0;
-        memset(C.lod_n, 0, sizeof(C.lod_n));
-        C.lod_fading = 0;
-        return;
     }
     C.tmp_n = 0;
     cull_cells(&v, s);
@@ -1144,8 +1149,8 @@ static void mat_push(PushLit *pc, const VgMaterial *m, TextureId tex, u32 maps, 
     if (maps) {
         memcpy(&pc->pbr[0], &m->normal_scale, 4);
         memcpy(&pc->pbr[1], &m->occlusion_strength, 4);
-        pc->pbr[2] = m->emissive_rgb;
     }
+    pc->pbr[2] = m->emissive_rgb;   // its alpha: the AO byte (render/material_ao.h), with or without maps
 }
 
 static bool lod_ready(const ClLod *L) { return L->gpu && R->meshes[L->gpu].used && R->frame_index >= L->ready_frame; }
@@ -1300,7 +1305,7 @@ u32 vkc_draw_local_shadow(VkCommandBuffer cmd, vec4 sphere, const vec4 planes[6]
     v.density = C.density;
     v.znear = 0.05f;
     v.shadow = true;
-    v.legacy = true;   // shared with r_vgeo 1: the cuts from before docs/LOD.md
+    v.legacy = true;   // the cuts from before docs/LOD.md
     v.layers = (layers & SHADOW_LAYERS_ALL) == SHADOW_LAYERS_ALL ? 0u : (layers | 0x100u);
     C.tmp_n = 0;
     cull_cells(&v, C.scene);
@@ -1319,7 +1324,7 @@ void vkc_stats(void) {
         meshes += C.mesh[i].used;
         imp += C.mesh[i].imp_set != VK_NULL_HANDLE;
     }
-    log_info("classic: GPU %.1f MB (LOD buffers + impostor atlases, every vgeo mesh: kept with r_vgeo 1 too), CPU %.1f MB (exported LOD copies)", (double)C.gpu_bytes / 1048576.0,
+    log_info("classic: GPU %.1f MB (LOD buffers + impostor atlases, every vgeo mesh), CPU %.1f MB (exported LOD copies)", (double)C.gpu_bytes / 1048576.0,
              (double)C.cpu_bytes / 1048576.0);
     log_info("classic: %u meshes (%u with impostors); last frame: main %u instances in %u batches, cascades %u / %u / %u / %u instances, local shadows %u; %u draws, %.2fM tris (%.2fM in shadow views), "
              "CPU cull %.3f ms",

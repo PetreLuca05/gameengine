@@ -1,6 +1,6 @@
 // World-position-offset snippets of vgeo foliage materials (docs/FOLIAGE_WIND.md, docs/VGEO.md "Foliage
-// support"). Pure functions, included by vg_decode.glsl (vg_vertex_world: every raster path, the shadows
-// and the resolve displace the same way); CPU mirror: vgeo_wind_eval (src/render/vgeo/foliage_wind.c),
+// support"). Pure functions, included by classic_common.glsl (the classic renderer's vertex shaders: every
+// pass and the shadows displace the same way); CPU mirror: vgeo_wind_eval (src/render/vgeo/foliage_wind.c),
 // bound: vgeo_wpo_max (foliage_support.c).
 //
 // One model for every snippet id (grass, bush, tree: the id only names the parameter preset): GPU Gems 3

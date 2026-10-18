@@ -188,7 +188,7 @@ void game_revive_frame(World *w, float dt) {
             continue;
         }
         // The body floats a little above the chamber floor, breathing up and down.
-        float t = (float)g_engine.real_time;
+        float t = (float)g_engine.render_time;
         vec3 feet = v3_add(spawn, v3(0, RP.float_height + RP.bob_amp * sinf(t * RP.bob_hz * 6.2831853f), 0));
         if (!ent_valid(w, ph->ent) || ph->slot != slot) {
             if (ent_valid(w, ph->ent)) ent_destroy(w, ph->ent);

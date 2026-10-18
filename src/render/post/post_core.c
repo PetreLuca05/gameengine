@@ -16,6 +16,12 @@ void post_settings_default(PostSettings *s) {
     s->ao = 2;
     s->ao_radius = 0.9f;
     s->ao_intensity = 1.0f;
+    s->ao_falloff = 0.4f;
+    s->ao_thickness = 0.25f;
+    s->ao_foliage_radius = 0.35f;
+    s->ao_blur_sharpness = 40.0f;
+    s->ao_blur_radius = 3;
+    s->ao_temporal = 0.9f;
     s->ssgi = 0;
     s->ssgi_intensity = 1.0f;
     s->ssr = 2;
@@ -451,7 +457,7 @@ void post_targets_changed(void) { P.exposure_init = false; }
 // ------------------------------------------------------------------ per frame
 
 static const char *k_debug_names[] = { "off", "ao", "contact", "ssr", "ssgi", "velocity", "normal", "material", "depth", "hiz", "coc",
-                                       "luminance", "taa_weight", "froxel", "bloom", "flare", "mb_tiles", "fog" };
+                                       "luminance", "taa_weight", "froxel", "bloom", "flare", "mb_tiles", "fog", "ao_raw", "ao_blur", "ao_final" };
 const char *post_debug_name(int i) { return i >= 0 && i < (int)ARRAY_COUNT(k_debug_names) ? k_debug_names[i] : "off"; }
 int post_debug_count(void) { return (int)ARRAY_COUNT(k_debug_names); }
 
@@ -462,6 +468,7 @@ void post_begin_frame(const PostFrameIn *in) {
     P.set = P.pending;
     post_looks_update();
     P.hiz = P.ao = P.contact = P.ssr = P.ssgi = P.froxels = P.color_prev = P.depth_prev = P.vol_history = FG_NONE;
+    P.ao_raw = P.ao_blur = FG_NONE;
     // Host readback of the exposure written two frames ago (UI / tests only).
     float *rb = (float *)P.exposure_rb[R->frame_slot].mapped;
     if (rb && P.exposure_init) P.last_ev = rb[1];
@@ -489,7 +496,11 @@ void post_begin_frame(const PostFrameIn *in) {
     u->sky = v4(in->sky.x, in->sky.y, in->sky.z, in->ambient);
     u->ground = v4(in->ground.x, in->ground.y, in->ground.z, (float)R->light_count);
     u->misc = v4(in->dt, in->camera_cut ? 1.0f : 0.0f, in->ads ? 1.0f : 0.0f, (float)in->output_w / (float)DG_MAX(1u, in->output_h));
-    u->s_ao = v4(s->ao_radius, s->ao_intensity, (float)s->ao, s->ao >= 2 ? 12.0f : 6.0f);
+    // GTAO (docs/RENDERING_POST.md "Foliage-aware AO"): slices / steps 0 = by quality (low 2 x 3, high 3 x 6)
+    int ao_slices = s->ao_slices > 0 ? s->ao_slices : (s->ao >= 2 ? 3 : 2), ao_steps = s->ao_steps > 0 ? s->ao_steps : (s->ao >= 2 ? 6 : 3);
+    u->s_ao = v4(s->ao_radius, s->ao_intensity, (float)s->ao, (float)ao_steps);
+    u->s_ao2 = v4(s->ao_falloff, s->ao_thickness, (float)ao_slices, s->ao_foliage_radius);
+    u->s_ao3 = v4(s->ao_blur_sharpness, (float)s->ao_blur_radius, s->ao_full_res ? 1.0f : 0.0f, 0.0f);
     u->s_ssr = v4(s->ssr_intensity, s->ssr_max_roughness, (float)s->ssr, 0.15f);
     // contact ray length: 0.35 m for a clear sun, shorter under a wider source (docs/SHADOWS.md); steps by quality
     u->s_gi = v4(s->ssgi_intensity, (float)s->ssgi, 0.35f * (R->contact_scale > 0.0f ? R->contact_scale : 1.0f), s->contact_shadows >= 2 ? 14.0f : 8.0f);

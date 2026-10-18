@@ -12,7 +12,7 @@ layout(location = 10) flat in uint v_normal_scale;
 
 // PBR maps of textured skins (set 3, docs/CHARACTERS.md "PBR maps"): normal_scale per instance;
 // occlusion strength 1, emissive colour white, no alpha cutoff.
-#define PBR_PARAMS uvec4(v_normal_scale, floatBitsToUint(1.0), 0xFFFFFFFFu, 0u)
+#define PBR_PARAMS uvec4(v_normal_scale, floatBitsToUint(1.0), 0x00FFFFFFu, 0u)   // AO byte 0 (render/material_ao.h)
 #define PBR_MAPS
 
 #define MAT_COLOR v_mat_color

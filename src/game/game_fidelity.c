@@ -90,7 +90,9 @@ static void store_bench_ms(int level, float ms) {
 static void after_level_change(int level) {
     // The post preset reads back what the new level left (Custom when nothing matches).
     Cvar *pp = cvar_find("r_post_preset");
+    CvarSource src = cvar_source_push(CVAR_SRC_FIDELITY);
     if (pp) cvar_set_int(pp, game_post_detect_preset());
+    cvar_source_pop(src);
     F.trim_in = 3;   // once the new graph has run: drop the pool images it no longer uses
 }
 
@@ -129,10 +131,12 @@ static void restore(void) {
     F.quiet = true;
     cvar_set_int(F.level, F.saved_level);
     fid_set_level(F.saved_level);
+    CvarSource src = cvar_source_push(CVAR_SRC_FIDELITY);
     for (int f = 0; f < FF_COUNT; f++) {
         Cvar *c = cvar_find(fid_feature(f)->cvar);
         if (c && F.saved_values[f][0]) cvar_set_cv(c, F.saved_values[f]);
     }
+    cvar_source_pop(src);
     fid_custom_load(F.saved_custom);
     cvar_set_cv(F.custom, F.saved_custom);
     F.quiet = false;
@@ -449,13 +453,13 @@ static void cmd_status(int argc, const char **argv) {
 void game_fidelity_init(void) {
     memset(&F, 0, sizeof(F));
     const u32 A = CVAR_ARCHIVE;
-    F.level = cvar_reg_int("r_fidelity", FID_MODERN, 0, FID_LEVELS - 1, A, "Engine Fidelity: 0 off (no post-processing), 1 low, 2 medium, 3 high, 4 modern");
-    F.custom = cvar_reg_string("r_fidelity_custom", "", A, "Engine Fidelity: settings the user chose away from the level defaults (internal)");
-    F.recommended = cvar_reg_int("r_fidelity_recommended", -1, -1, FID_LEVELS - 1, A, "Engine Fidelity level recommended by the last detection (-1 none)");
-    F.bench = cvar_reg_string("r_fidelity_bench", "", A, "Engine Fidelity: last measured GPU frame ms per level (internal)");
-    F.autodetect = cvar_reg_bool("r_fidelity_autodetect", true, A, "detect a recommended Engine Fidelity level at the next start (first run)");
-    F.target_fps = cvar_reg_float("r_fidelity_target_fps", 60.0f, 20.0f, 360.0f, A, "frame rate the Engine Fidelity recommendation aims for");
-    F.overlay = cvar_reg_bool("r_perf_overlay", false, A, "FPS / frame time overlay with the Engine Fidelity budget");
+    F.level = cvar_reg_int("r_fidelity", FID_MODERN, 0, FID_LEVELS - 1, A | CVAR_EDITABLE, "Engine Fidelity: 0 off (no post-processing), 1 low, 2 medium, 3 high, 4 modern");
+    F.custom = cvar_reg_string("r_fidelity_custom", "", A | CVAR_EDITABLE, "Engine Fidelity: settings the user chose away from the level defaults (internal)");
+    F.recommended = cvar_reg_int("r_fidelity_recommended", -1, -1, FID_LEVELS - 1, A | CVAR_EDITABLE, "Engine Fidelity level recommended by the last detection (-1 none)");
+    F.bench = cvar_reg_string("r_fidelity_bench", "", A | CVAR_EDITABLE, "Engine Fidelity: last measured GPU frame ms per level (internal)");
+    F.autodetect = cvar_reg_bool("r_fidelity_autodetect", true, A | CVAR_EDITABLE, "detect a recommended Engine Fidelity level at the next start (first run)");
+    F.target_fps = cvar_reg_float("r_fidelity_target_fps", 60.0f, 20.0f, 360.0f, A | CVAR_EDITABLE, "frame rate the Engine Fidelity recommendation aims for");
+    F.overlay = cvar_reg_bool("r_perf_overlay", false, A | CVAR_EDITABLE, "FPS / frame time overlay with the Engine Fidelity budget");
     cmd_register("bench_fidelity", cmd_bench, "bench_fidelity <off|low|medium|high|modern|all> [frames] [quit]: fixed flythrough, GPU ms per pass");
     cmd_register("fidelity_detect", cmd_detect, "fidelity_detect [popup]: measure every Engine Fidelity level, recommend one");
     cmd_register("fidelity_check", cmd_check, "validate this frame's graph and the cvars against the current Engine Fidelity level");

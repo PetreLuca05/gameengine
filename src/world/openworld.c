@@ -805,7 +805,7 @@ static void cmd_ow_zombies(int argc, const char **argv) {
 
 void openworld_register_commands(void) {
     cmd_register("ow_zombie_list", cmd_ow_zombies, "open-world map: the zombies near the player (debug)");
-    cvar_reg_bool("ow_zombies", true, 0, "open-world maps: the POI zombie spawner keeps zombies around the players");
+    cvar_reg_bool("ow_zombies", true, CVAR_LOCKED | CVAR_RULE, "open-world maps: the POI zombie spawner keeps zombies around the players");
     cmd_register("poi_list", cmd_poi_list, "open-world map: list the points of interest");
     cmd_register("poi_goto", cmd_poi_goto, "open-world map: teleport to a POI (poi_goto <id> [height])");
     cmd_register("ow_stats", cmd_ow_stats, "open-world map: zombies, chunks, draws, bodies");

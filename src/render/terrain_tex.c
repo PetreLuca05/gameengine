@@ -357,9 +357,9 @@ static void tt_write_sets(void) {
 
 void vkt_init(void) {
     memset(&T, 0, sizeof(T));
-    T.r_terrain = cvar_reg_int("r_terrain", 1, 0, 1, CVAR_ARCHIVE, "terrain shading (docs/TERRAIN_SHADING.md; 0: the older surface layer blend)");
-    cvar_reg_int("r_terrain_quality", 4, 0, 4, CVAR_ARCHIVE, "terrain detail (0 minimal .. 4 ultra; bounded by Engine Fidelity, docs/TERRAIN_SHADING.md)");
-    T.r_terrain_tex_size = cvar_reg_int("r_terrain_tex_size", 1024, 256, 2048, CVAR_ARCHIVE, "terrain layer texture size (px; 2048 about 4x the memory; at the next map load)");
+    T.r_terrain = cvar_reg_int("r_terrain", 1, 0, 1, CVAR_LOCKED, "terrain shading (docs/TERRAIN_SHADING.md; 0: the older surface layer blend)");
+    cvar_reg_int("r_terrain_quality", 4, 0, 4, CVAR_TIER, "terrain detail (0 minimal .. 4 ultra; bounded by Engine Fidelity, docs/TERRAIN_SHADING.md)");
+    T.r_terrain_tex_size = cvar_reg_int("r_terrain_tex_size", 1024, 256, 2048, CVAR_TIER, "terrain layer texture size (px; 2048 about 4x the memory; at the next map load)");
     tt_placeholders();
     float zero[64] = { 0 };
     render_terrain_params(zero, sizeof(zero));   // a valid buffer before the first map

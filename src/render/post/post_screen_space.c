@@ -1,7 +1,8 @@
 // Screen-space lighting passes (frame graph nodes, before the lit opaque pass):
 //   hiz       closest-depth pyramid (SSR traversal)
 //   contact   sun contact shadows (full res)
-//   gtao      ambient occlusion, half res -> temporal (ping-pong history) -> bilateral upsample
+//   gtao      ambient occlusion, half (or full) res, thin-occluder aware -> separable bilateral blur
+//             (depth + normal, x then y) -> temporal (ping-pong history) -> bilateral upsample (half res)
 //   ssgi      diffuse GI (Ultra), half res -> temporal -> upsample
 //   ssr       reflections, half (Low) / full (High) res -> temporal -> (upsample)
 // They read the G-buffer prepass and last frame's colour pyramid / depth (post_capture_scene).
@@ -10,7 +11,7 @@
 
 typedef struct SsCtx {
     FgRes depth, normal, material, velocity, hiz, contact;
-    FgRes ao_half, ao_hist_in, ao_hist_out, ao;
+    FgRes ao_half, ao_blur_x, ao_blur, ao_hist_in, ao_hist_out, ao;
     FgRes gi_half, gi_hist_in, gi_hist_out, gi;
     FgRes ssr_raw, ssr_hist_in, ssr_hist_out, ssr;
     FgRes color_prev, depth_prev;
@@ -116,9 +117,24 @@ static void exec_gtao(VkCommandBuffer cmd, void *u) {
     fg_extent(S.ao_half, &w, &h);
     post_dispatch(cmd, "gtao", w, h, 1, 8);
 }
+// Separable bilateral blur (ao_blur.comp): u = 0 horizontal (raw -> blur_x), 1 vertical (blur_x -> blur).
+static void exec_ao_blur(VkCommandBuffer cmd, void *u) {
+    u32 axis = (u32)(uintptr_t)u;
+    PostBind b = { 0 };
+    pb_ubo(&b);
+    pb_tex_fg(&b, 0, axis ? S.ao_blur_x : S.ao_half, P.point);
+    pb_tex_fg(&b, 1, S.depth, P.point);
+    pb_tex_fg(&b, 2, S.normal, P.point);
+    pb_img_fg(&b, 8, axis ? S.ao_blur : S.ao_blur_x);
+    pb_push(cmd, &b, VK_PIPELINE_BIND_POINT_COMPUTE);
+    push2(cmd, axis, 0, 0, 0);
+    u32 w, h;
+    fg_extent(S.ao_blur, &w, &h);
+    post_dispatch(cmd, "ao_blur", w, h, 1, 8);
+}
 static void exec_ao_temporal(VkCommandBuffer cmd, void *u) {
     (void)u;
-    TempJob j = { S.ao_half, S.ao_hist_in, S.ao_hist_out, 0.9f, 0.08f, true };
+    TempJob j = { S.ao_blur, S.ao_hist_in, S.ao_hist_out, P.set.ao_temporal, 0.08f, true };
     run_temporal(cmd, &j);
 }
 static void exec_ao_up(VkCommandBuffer cmd, void *u) {
@@ -233,27 +249,65 @@ void post_ss_build(PostLitInputs *out) {
         if (p >= 0) { out->contact = S.contact; out->contact_on = true; }
     }
     if (s->ao) {
-        S.ao_half = tex("ao_half", VK_FORMAT_R16_SFLOAT, FG_SIZE_HALF, 1);
-        S.ao_hist_in = hist(parity ? "ao_hist_a" : "ao_hist_b", VK_FORMAT_R16_SFLOAT, FG_SIZE_HALF);
-        S.ao_hist_out = hist(parity ? "ao_hist_b" : "ao_hist_a", VK_FORMAT_R16_SFLOAT, FG_SIZE_HALF);
-        S.ao = tex("ao", VK_FORMAT_R8_UNORM, FG_SIZE_RENDER, 1);
+        // GTAO (raw) -> blur x -> blur y -> temporal -> upsample; at full resolution the lit pass samples the
+        // last stage (the temporal history, or the blur without temporal accumulation). r_post_disable
+        // ao_blur_x / ao_blur_y / gtao_temporal skips a stage (its input goes on unchanged).
+        FgSize asz = s->ao_full_res ? FG_SIZE_RENDER : FG_SIZE_HALF;
+        S.ao_half = tex("ao_raw", VK_FORMAT_R16_SFLOAT, asz, 1);
         int p = fg_pass("gtao", exec_gtao, NULL);
         fg_read(p, S.depth, FG_SAMPLED);
         fg_read(p, S.normal, FG_SAMPLED);
         fg_read(p, S.material, FG_SAMPLED);
         fg_write(p, S.ao_half, FG_STORAGE);
-        int t = fg_pass("gtao_temporal", exec_ao_temporal, NULL);
-        fg_read(t, S.ao_half, FG_SAMPLED);
-        fg_read(t, S.ao_hist_in, FG_SAMPLED);
-        fg_read(t, S.velocity, FG_SAMPLED);
-        fg_read(t, S.depth, FG_SAMPLED);
-        fg_read(t, S.depth_prev, FG_SAMPLED);
-        fg_write(t, S.ao_hist_out, FG_STORAGE);
-        int u = fg_pass("gtao_upsample", exec_ao_up, NULL);
-        fg_read(u, S.ao_hist_out, FG_SAMPLED);
-        fg_read(u, S.depth, FG_SAMPLED);
-        fg_write(u, S.ao, FG_STORAGE);
-        if (p >= 0 && t >= 0 && u >= 0) { out->ao = S.ao; out->ao_on = true; }
+        FgRes cur = S.ao_half;
+        P.ao_raw = S.ao_half;
+        int bx = p >= 0 && s->ao_blur_radius > 0 ? fg_pass("ao_blur_x", exec_ao_blur, (void *)(uintptr_t)0) : -1;
+        if (bx >= 0) {
+            S.ao_blur_x = tex("ao_blur_x", VK_FORMAT_R16_SFLOAT, asz, 1);
+            fg_read(bx, S.ao_half, FG_SAMPLED);
+            fg_read(bx, S.depth, FG_SAMPLED);
+            fg_read(bx, S.normal, FG_SAMPLED);
+            fg_write(bx, S.ao_blur_x, FG_STORAGE);
+            cur = S.ao_blur_x;
+            int by = fg_pass("ao_blur_y", exec_ao_blur, (void *)(uintptr_t)1);
+            if (by >= 0) {
+                S.ao_blur = tex("ao_blur", VK_FORMAT_R16_SFLOAT, asz, 1);
+                fg_read(by, S.ao_blur_x, FG_SAMPLED);
+                fg_read(by, S.depth, FG_SAMPLED);
+                fg_read(by, S.normal, FG_SAMPLED);
+                fg_write(by, S.ao_blur, FG_STORAGE);
+                cur = S.ao_blur;
+            }
+        }
+        S.ao_blur = cur;
+        P.ao_blur = cur;
+        bool ok = p >= 0;
+        if (p >= 0 && s->ao_temporal > 0.0f && S.depth_prev != FG_NONE) {
+            S.ao_hist_in = hist(parity ? "ao_hist_a" : "ao_hist_b", VK_FORMAT_R16_SFLOAT, asz);
+            S.ao_hist_out = hist(parity ? "ao_hist_b" : "ao_hist_a", VK_FORMAT_R16_SFLOAT, asz);
+            int t = fg_pass("gtao_temporal", exec_ao_temporal, NULL);
+            fg_read(t, S.ao_blur, FG_SAMPLED);
+            fg_read(t, S.ao_hist_in, FG_SAMPLED);
+            fg_read(t, S.velocity, FG_SAMPLED);
+            fg_read(t, S.depth, FG_SAMPLED);
+            fg_read(t, S.depth_prev, FG_SAMPLED);
+            fg_write(t, S.ao_hist_out, FG_STORAGE);
+            if (t >= 0) cur = S.ao_hist_out;
+        }
+        if (!ok) {
+            // gtao disabled (r_post_disable): nothing to blur / upsample; the lit pass gets white
+        } else if (!s->ao_full_res) {
+            S.ao_hist_out = cur;   // the upsample's input
+            S.ao = tex("ao", VK_FORMAT_R8_UNORM, FG_SIZE_RENDER, 1);
+            int u = fg_pass("gtao_upsample", exec_ao_up, NULL);
+            fg_read(u, cur, FG_SAMPLED);
+            fg_read(u, S.depth, FG_SAMPLED);
+            fg_write(u, S.ao, FG_STORAGE);
+            ok = ok && u >= 0;
+        } else {
+            S.ao = cur;
+        }
+        if (ok) { out->ao = S.ao; out->ao_on = true; }
     }
     if (s->ssgi) {
         S.gi_half = tex("ssgi_half", VK_FORMAT_R16G16B16A16_SFLOAT, FG_SIZE_HALF, 1);
@@ -306,10 +360,12 @@ void post_ss_build(PostLitInputs *out) {
         S.ssr = S.ssr_hist_out;
         if (p >= 0 && t >= 0 && S.ssr != FG_NONE && fg_history_valid(S.color_prev)) { out->ssr = S.ssr; out->ssr_on = true; }
     }
-    P.ao = out->ao;
-    P.contact = out->contact;
-    P.ssr = out->ssr;
-    P.ssgi = out->ssgi;
+    // Only valid outputs (out is zero-filled: resource 0 is some other texture; the debug views read these)
+    P.ao = out->ao_on ? out->ao : FG_NONE;
+    P.contact = out->contact_on ? out->contact : FG_NONE;
+    P.ssr = out->ssr_on ? out->ssr : FG_NONE;
+    P.ssgi = out->ssgi_on ? out->ssgi : FG_NONE;
+    if (!out->ao_on) P.ao_raw = P.ao_blur = FG_NONE;
 }
 
 // ------------------------------------------------------------------ scene capture (end of the world passes)

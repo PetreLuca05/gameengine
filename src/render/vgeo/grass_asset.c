@@ -49,6 +49,8 @@ static void defaults(GrassAsset *a) {
     a->var_hue = 4.0f, a->var_sat = 0.08f, a->var_val = 0.07f;
     a->macro = 1.0f;
     a->ao_root = 0.55f;
+    a->ao_strength = MATERIAL_AO_FOLIAGE;
+    a->ao_combine = MAT_AO_COMBINE_MIN;
     a->top_color[0] = 0.16f, a->top_color[1] = 0.17f, a->top_color[2] = 0.06f;
     a->coverage = 0.5f;
     static const GrassTier t[GRASS_TIERS] = { { 8, 18, 0, 0.35f }, { 12, 30, 0, 0.5f }, { 20, 45, 10, 0.75f }, { 25, 60, 20, 0.9f }, { 30, 70, 20, 1.0f } };
@@ -139,6 +141,10 @@ bool grass_asset_parse(GrassAsset *a, const char *json, const char *name) {
         a->var_val = jf(s, "var_val", a->var_val);
         a->macro = jf(s, "macro", a->macro);
         a->ao_root = jf(s, "ao_root", a->ao_root);
+        a->ao_strength = jf(s, "ao_strength", a->ao_strength);
+        if (a->ao_strength <= 0.0f) a->ao_strength = MATERIAL_AO_OFF;
+        const cJSON *aoc = cJSON_GetObjectItemCaseSensitive(s, "ao_combine");
+        if (cJSON_IsString(aoc)) a->ao_combine = material_ao_combine_parse(aoc->valuestring);
     }
     const cJSON *t = cJSON_GetObjectItemCaseSensitive(root, "terrain");
     if (t) {
@@ -329,6 +335,7 @@ void grass_material(const GrassAsset *a, int tier, u32 cover_id, VgMaterial *out
     out->fade_end = t->end_m;
     // shadow_max_dist 0 means "always": a level without grass shadows gets a distance nothing is under
     out->shadow_max_dist = t->shadow_m > 0 ? t->shadow_m : 0.01f;
+    vg_material_set_ao(out, a->ao_strength, a->ao_combine, false);
 }
 
 void grass_cover_params(const GrassAsset *a, float out[12]) {

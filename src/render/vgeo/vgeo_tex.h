@@ -1,12 +1,10 @@
-// Virtualized geometry textures (docs/VGEO.md "Foliage support"): one array of combined image samplers
-// at binding 23 of every cull set, so the cull kernels, both rasterisers (alpha masks), the shadow
-// passes and the resolve sample the same textures through the same index:
-//   [0, VG_TEX_GAME)            the renderer's texture ids (vk_vgeo.c writes the ones materials use)
-//   [VG_TEX_GAME, VG_TEX_COUNT) textures the vgeo module creates: impostor atlases, test masks, the
-//                                foliage displacement buffer
-// Every entry starts as a 1x1 white texture. vg_tex_set changes an entry; the change reaches a cull
-// set the next time that set is recorded (vg_cull_record writes it then: a frame slot's sets are not
-// in use while the slot records), so no descriptor is updated under a frame in flight.
+// vgeo textures (docs/VGEO.md "Foliage support"): one index space for the textures a VgMaterial names:
+//   [0, VG_TEX_GAME)            the renderer's texture ids (the classic renderer uses them directly)
+//   [VG_TEX_GAME, VG_TEX_COUNT) textures the vgeo module creates: impostor atlases, masks, tree maps,
+//                                the foliage displacement buffer (the classic renderer wraps them as
+//                                renderer textures)
+// Every entry starts as a 1x1 white texture. vg_tex_set changes an entry (ver / gen bump: users that
+// cache an entry re-read it); vg_tex_write_set writes the changed entries into an array binding.
 #ifndef DG_VGEO_TEX_H
 #define DG_VGEO_TEX_H
 
@@ -29,11 +27,16 @@ typedef struct VgTextures {
     VkImage white;
     VmaAllocation white_alloc;
     VkImageView white_view;
-    VkSampler clamp, repeat;     // trilinear, clamp to edge / repeat
+    VkSampler clamp, repeat;     // trilinear (+ anisotropic: vg_tex_set_anisotropy), clamp to edge / repeat
+    float anisotropy;            // 0 = off
 } VgTextures;
 
 bool vg_tex_init(VgTextures *t, const VgContext *ctx);
 void vg_tex_shutdown(VgTextures *t);
+// Anisotropic filtering on clamp / repeat (0: off; the creator enabled samplerAnisotropy): both are
+// recreated and the entries holding the old ones switch over. The caller waited for the device (the
+// old samplers are destroyed; whoever copied t->clamp / t->repeat elsewhere rewrites them).
+void vg_tex_set_anisotropy(VgTextures *t, float anisotropy);
 // Entry `index` samples `view` (NULL: white again) with `sampler` (NULL: t->repeat) in `layout`.
 void vg_tex_set(VgTextures *t, u32 index, VkImageView view, VkSampler sampler, VkImageLayout layout);
 // An RGBA8 texture of the module (index >= VG_TEX_GAME, 0 when full): `levels` mips packed one after

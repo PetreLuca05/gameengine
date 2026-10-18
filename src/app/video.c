@@ -16,10 +16,10 @@ typedef struct VideoState {
 
 void video_register_cvars(void) {
     V = (VideoState *)calloc(1, sizeof(VideoState));
-    V->width = cvar_reg_int("r_width", 1600, 320, 16384, CVAR_ARCHIVE, "window / fullscreen width");
-    V->height = cvar_reg_int("r_height", 900, 200, 16384, CVAR_ARCHIVE, "window / fullscreen height");
-    V->mode = cvar_reg_int("r_mode", 0, 0, 2, CVAR_ARCHIVE, "0 windowed, 1 borderless fullscreen, 2 exclusive fullscreen");
-    V->maxfps = cvar_reg_int("r_maxfps", 0, 0, 1000, CVAR_ARCHIVE, "frame rate cap (0 = unlimited)");
+    V->width = cvar_reg_int("r_width", 1600, 320, 16384, CVAR_ARCHIVE | CVAR_EDITABLE, "window / fullscreen width");
+    V->height = cvar_reg_int("r_height", 900, 200, 16384, CVAR_ARCHIVE | CVAR_EDITABLE, "window / fullscreen height");
+    V->mode = cvar_reg_int("r_mode", 0, 0, 2, CVAR_ARCHIVE | CVAR_EDITABLE, "0 windowed, 1 borderless fullscreen, 2 exclusive fullscreen");
+    V->maxfps = cvar_reg_int("r_maxfps", 0, 0, 1000, CVAR_ARCHIVE | CVAR_EDITABLE, "frame rate cap (0 = unlimited)");
     snprintf(V->config_path, sizeof(V->config_path), "%sconfig.cfg", platform_pref_dir());
 }
 

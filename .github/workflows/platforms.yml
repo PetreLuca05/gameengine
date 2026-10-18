@@ -1,9 +1,9 @@
 # Platform builds (docs/PLATFORM_MACOS.md "CI"): macOS arm64 + x86_64 + universal .app, Linux, Windows.
 #   every job: configure + build + the headless unit tests; test_detmath's golden hash is the
 #              cross-platform determinism check (the same bits on every OS / arch / compiler).
-#   linux:     + the vgeo GPU tests on llvmpipe in both visibility write modes, the SPIR-V -> MSL check
-#   macos-arm64: + the MSL check compiled to AIR with xcrun metal, the vgeo GPU tests on MoltenVK
-#              (the runner's paravirtual Metal device, when it exposes one), the universal build
+#   linux:     + the SPIR-V -> MSL check
+#   macos-arm64: + the MSL check compiled to AIR with xcrun metal, the game itself on MoltenVK (the
+#              runner's paravirtual Metal device: 120 frames + a screenshot artifact), the universal build
 #              (x86_64 slice under Rosetta), Deadground.app (ad-hoc signed) as an artifact
 #   macos-x86_64: native Intel build + tests (no GPU on these runners)
 # Tests that also fail on main (content tolerances, llvmpipe culling) run in a separate step that
@@ -42,10 +42,6 @@ jobs:
           grep -E "error[: ]" build.log | grep -v "validity error" | sort -u | head -60
       - name: Tests
         run: ctest --test-dir build --output-on-failure -j 4 -E "$(tools/ci/known_failures.sh linux)"
-      - name: vgeo GPU tests, 32-bit visibility writes (MoltenVK's path)
-        env:
-          DG_VGEO_VIS32: "1"
-        run: ctest --test-dir build --output-on-failure -R "vgeo_(raster|stream|skinned|foliage)"
       - name: SPIR-V -> MSL (SPIRV-Cross)
         run: python3 tools/macos/msl_check.py build/bin/shaders
       - name: Known failures (not gating)
@@ -110,13 +106,24 @@ jobs:
           export VK_ICD_FILENAMES="$(brew --prefix molten-vk)/etc/vulkan/icd.d/MoltenVK_icd.json"
           export DYLD_FALLBACK_LIBRARY_PATH="$(brew --prefix)/lib"
           ctest --test-dir build-mac-arm64 --output-on-failure -j 3 -E "$(tools/ci/known_failures.sh macos)"
-      - name: MoltenVK pipeline diagnostics (vgeo raster, MoltenVK log)
+      - name: Game on MoltenVK (the runner's Apple GPU, 120 frames, screenshot)
         if: always()
         continue-on-error: true
         run: |
           export VK_ICD_FILENAMES="$(brew --prefix molten-vk)/etc/vulkan/icd.d/MoltenVK_icd.json"
           export DYLD_FALLBACK_LIBRARY_PATH="$(brew --prefix)/lib"
-          cd build-mac-arm64/bin && MVK_CONFIG_LOG_LEVEL=3 ./test_vgeo_raster 2>&1 | grep -iE "mvk|error|fail|compil|harness" | head -80
+          printf 'set r_maxfps 60\nwait 120\nscreenshot %s/mvk_devroom.png\nwait 3\nquit\n' "$PWD" > mvk.cfg
+          cd build-mac-arm64/bin && (timeout 600 ./deadground --test --nosound --log "$GITHUB_WORKSPACE/mvk.log" --script "$GITHUB_WORKSPACE/mvk.cfg"; echo "exit $?")
+          grep -E "vulkan:|portability|swapchain|fidelity|error|crash" "$GITHUB_WORKSPACE/mvk.log" | head -40
+          test -f "$GITHUB_WORKSPACE/mvk_devroom.png"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: moltenvk-devroom
+          path: |
+            mvk_devroom.png
+            mvk.log
+          retention-days: 14
       - name: SPIR-V -> MSL -> AIR (SPIRV-Cross + xcrun metal)
         if: always()
         run: |

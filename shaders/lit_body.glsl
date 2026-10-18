@@ -14,6 +14,12 @@ layout(location = 3) in vec4 v_color;
 #ifndef LIT_TEX
 #define LIT_TEX(uv) texture(tex, (uv))
 #endif
+// A triplanar sample: uv from v_world, dx / dy its screen gradients from LIT_DPDX / LIT_DPDY (the vgeo
+// lit resolve's analytic dP; it has no valid quad derivatives). Default: LIT_TEX (implicit derivatives,
+// the gradient arguments are dropped unexpanded).
+#ifndef LIT_TEX_W
+#define LIT_TEX_W(uv, dx, dy) LIT_TEX(uv)
+#endif
 
 layout(set = 1, binding = 0) uniform sampler2D tex;
 #ifdef LIT_SURFACES
@@ -22,6 +28,14 @@ layout(set = 1, binding = 0) uniform sampler2D tex;
 #endif
 #ifdef PBR_MAPS
 #include "pbr_maps.glsl"
+#endif
+// MAT_AO_BYTE: the material's AO byte (src/render/material_ao.h; default the pbr emissive word's alpha).
+#ifndef MAT_AO_BYTE
+#ifdef PBR_MAPS
+#define MAT_AO_BYTE (PBR_PARAMS.z >> 24u)
+#else
+#define MAT_AO_BYTE 0u
+#endif
 #endif
 // Screen-space inputs from the post stack (push descriptor, render resolution): ambient occlusion
 // (indirect only), sun contact shadows, reflections (rgb + confidence), diffuse GI.
@@ -121,9 +135,12 @@ void main() {
     LIT_PRE_MAIN
 #endif
     uint flags = MAT_FLAGS;
+    uint ao_b = MAT_AO_BYTE;
     vec3 n = normalize(v_normal);
     if (!LIT_FRONT_FACING) n = -n;
-    vec4 base = MAT_COLOR * v_color;
+    // MAT_AO_BYTE_VERTEX: the vertex alpha is baked AO (applied to the indirect light below), not opacity.
+    bool vertex_ao = (ao_b & MAT_AO_BYTE_VERTEX) != 0u;
+    vec4 base = MAT_COLOR * vec4(v_color.rgb, vertex_ao ? 1.0 : v_color.a);
 
     if ((flags & MAT_TEXTURED) != 0u) {
         vec4 t;
@@ -131,7 +148,8 @@ void main() {
             float s = MAT_PARAMS.w;
             vec3 w = abs(n);
             w /= (w.x + w.y + w.z);
-            t = LIT_TEX(v_world.zy * s) * w.x + LIT_TEX(v_world.xz * s) * w.y + LIT_TEX(v_world.xy * s) * w.z;
+            t = LIT_TEX_W(v_world.zy * s, LIT_DPDX.zy * s, LIT_DPDY.zy * s) * w.x + LIT_TEX_W(v_world.xz * s, LIT_DPDX.xz * s, LIT_DPDY.xz * s) * w.y +
+                LIT_TEX_W(v_world.xy * s, LIT_DPDX.xy * s, LIT_DPDY.xy * s) * w.z;
         } else {
             t = LIT_TEX(v_uv * max(MAT_PARAMS.w, 1e-3));
         }
@@ -194,17 +212,25 @@ void main() {
         // Weather: wet / puddles / snow (shaders/weather.glsl; the G-buffer applies the same terms).
         float wx_snow = weather_surface(v_world, n, albedo, rough, metal, vm);
         vec2 suv = ss_main_uv(v_world, gl_FragCoord.xy * frame.screen.zw);
-        float ao = (!vm && frame.post_flags.x > 0.5) ? mix(1.0, texture(post_ao, suv).r, frame.post_params.z) : 1.0;
+        // Ambient occlusion (docs/RENDERING_POST.md "Foliage-aware AO"), indirect light only (diffuse ambient,
+        // SSGI, specular occlusion): the screen-space AO at the global intensity, weighted per material
+        // (lerp(1, ao, ao_strength)), then the baked AO (vertex alpha, occlusion map, surface layers, grass
+        // clump) multiplied in, or for foliage taken as min() (the card's baked term already holds the
+        // self-occlusion GTAO sees; multiplying would count it twice).
+        float ss_ao = (!vm && frame.post_flags.x > 0.5) ? mix(1.0, texture(post_ao, suv).r, frame.post_params.z) : 1.0;
+        ss_ao = mix(1.0, ss_ao, mat_ao_strength(ao_b));
+        float baked_ao = vertex_ao ? v_color.a : 1.0;
 #ifdef PBR_MAPS
-        ao *= pbr_occlusion(flags, map_uv);   // material AO x SSAO (indirect diffuse + specular occlusion)
+        baked_ao *= pbr_occlusion(flags, map_uv);   // material AO map
 #endif
-        ao *= surf_ao;                        // the surface layers' baked AO, the same way
+        baked_ao *= surf_ao;                        // the surface layers' baked AO
 #ifdef LIT_COVER
         if (g_cv.on) {
-            ao *= g_cv.ao;                    // clump AO (indirect only, as the material AO)
+            baked_ao *= g_cv.ao;                    // clump AO
             g_spec_scale = g_cv.spec;
         }
 #endif
+        float ao = (ao_b & MAT_AO_BYTE_MIN) != 0u ? min(ss_ao, baked_ao) : ss_ao * baked_ao;
         float contact = (!vm && frame.post_flags.y > 0.5) ? texture(post_contact, suv).r : 1.0;
         contact = mix(1.0, contact, frame.ssky0.y * frame.shadow_cfg3.w);   // contact shadows leave with the cast shadows (sky cutoff, Strength)
         bool receive = (flags & MAT_NO_RECEIVE) == 0u;   // Receive Shadows (docs/SHADOWS_UNITY_MODEL.md)

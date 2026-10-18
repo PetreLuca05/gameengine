@@ -1,11 +1,11 @@
-// Virtualized geometry, GPU side: the small device context the vgeo module runs on (docs/VGEO.md
-// "GPU module"). The renderer fills it from its device (src/render/vk_vgeo.c); the window-less test
-// harness and tools/bench_vgeo fill it from a device of their own. Nothing in the vgeo module touches
-// the renderer's globals.
+// The vgeo module's GPU side: the small device context its GPU helpers run on (the foliage
+// displacement buffer, the wind tile, the module textures). The renderer fills it from its device
+// (src/render/vk_vgeo.c). Nothing in the vgeo module touches the renderer's globals.
 #ifndef DG_VGEO_CTX_H
 #define DG_VGEO_CTX_H
 
 #include "volk.h"
+#include "render/vk_prof.h"
 #include "vk_mem_alloc.h"
 #include "vgeo_gpu.h"
 
@@ -17,16 +17,12 @@ typedef struct VgContext {
     VmaAllocator vma;
     u32 frames;                  // frames in flight: per-frame descriptor sets / readbacks
     float timestamp_period;      // ns per tick (VkPhysicalDeviceLimits)
-    // "vgeo/vg_traverse.comp" -> module (NULL on failure); the caller owns the returned module.
+    // "vgeo/vg_displace.comp" -> module (NULL on failure); the caller owns the returned module.
     VkShaderModule (*load_shader)(const char *name);
     VkPipelineCache pipeline_cache;   // the renderer's (VK_NULL_HANDLE: none)
-    // Capabilities (the creator enables them on the device when present).
-    bool int64_atomics;          // shaderBufferInt64Atomics: one-pass visibility writes; else the 32-bit two-phase writes (vgeo_raster.h)
-    bool vis32;                  // force the 32-bit visibility writes (r_vgeo_vis32, tests)
-    bool draw_indirect_count;
-    bool mesh_shader;            // VK_EXT_mesh_shader (optional HW raster path)
-    bool descriptor_indexing;
 } VgContext;
+
+#define VG_MAX_FRAMES 3          // frames in flight the per-frame resources are sized for
 
 typedef enum VgMem { VGM_DEVICE, VGM_UPLOAD, VGM_READBACK } VgMem;
 typedef struct VgBuffer { VkBuffer buffer; VmaAllocation alloc; void *mapped; VkDeviceSize size; } VgBuffer;
