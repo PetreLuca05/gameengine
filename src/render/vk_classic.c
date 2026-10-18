@@ -362,6 +362,7 @@ void vkc_init(void) {
 void vkc_shutdown(void) {
     if (!C.layout) return;
     vkDeviceWaitIdle(R->device);
+    vkam_shutdown();
     for (int i = 0; i < CP_COUNT; i++) if (C.pipe[i]) vkDestroyPipeline(R->device, C.pipe[i], NULL);
     vkDestroyPipelineLayout(R->device, C.layout, NULL);
     vkDestroyDescriptorSetLayout(R->device, C.set3_layout, NULL);
@@ -1372,6 +1373,13 @@ static TextureId mat_texture(const VgMaterial *m) {
     return a;
 }
 
+// The sampler the texture set of a material draw holds: a module slot's own (repeat / clamp), else the renderer's.
+static VkSampler mat_sampler(const VgMaterial *m, TextureId t) {
+    u32 src = resolve_texture(m->albedo_tex) == t ? m->albedo_tex : m->mask_tex;
+    if (src >= VG_TEX_GAME && C.vtex && src < VG_TEX_COUNT && C.vtex->e[src].sampler) return C.vtex->e[src].sampler;
+    return src >= VG_TEX_GAME ? R->sampler_linear : vkr_texture_sampler(t);
+}
+
 // The glTF maps of a material (docs/PBR.md) as renderer textures: the MAT_*_TEX flags whose texture
 // resolves (a map that does not, e.g. still uploading, is dropped: no undefined index reaches a shader)
 // and the descriptor set of the combination (vkr_material_set; 0 = all white).
@@ -1485,9 +1493,14 @@ static void draw_view(VkCommandBuffer cmd, const ClView *v, int pass, u32 shadow
                     mesh_bound = true;
                 }
                 TextureId t = tex ? tex : R->white_tex;
-                if (t != bound_tex) {
-                    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, C.layout, 1, 1, &R->textures[t].set, 0, NULL);
-                    bound_tex = t;
+                // the shadow views and the prepass only read the alpha: its R8 mask once built (PF-0014)
+                bool alpha_only = (m->flags & VGM_MASKED) && tex && (pass == 2 || (pass == 0 && g >= 2));
+                TextureId bind_key = alpha_only ? t | 0x80000000u : t;
+                if (bind_key != bound_tex) {
+                    VkDescriptorSet ts = alpha_only ? vkam_set(t, mat_sampler(m, t)) : VK_NULL_HANDLE;
+                    if (!ts) ts = R->textures[t].set;
+                    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, C.layout, 1, 1, &ts, 0, NULL);
+                    bound_tex = bind_key;
                 }
                 VkDescriptorSet want3 = (m->wpo & WPO_DISPLACE) && C.set_disp && C.disp[3] > 0.5f ? C.set_disp : C.set_default;
                 if (want3 != bound3) {

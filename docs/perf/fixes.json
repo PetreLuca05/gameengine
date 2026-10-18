@@ -1143,5 +1143,91 @@
    "summary": "CLOSED: scope:shadow_sun 3.009 -> 2.546 (-15.39%, p=0); images differ (visual trade-off, by design); state identical",
    "machine": "DESKTOP-SN4N74U"
   }
+ },
+ "PF-0014": {
+  "title": "Shadow and prepass alpha tests sample an R8 alpha mask",
+  "rule": "R02",
+  "finding": "R02 shadow casters in every cascade (F-b96020) / alpha-test overdraw in the dense vegetation zones: the forest interiors' sun shadow pass runs ~660 M alpha-tested fragment invocations per frame, each sampling the material's full RGBA8 albedo (4 bytes a texel) only for its alpha; the prepass of masked materials the same",
+  "effort": "S",
+  "status": "open",
+  "code": [
+   "src/render/vk_alpha_mask.c vkam_set / vkam_record, shaders/alpha_mask.comp",
+   "src/render/vk_classic.c draw_view (alpha_only binding), mat_sampler",
+   "src/render/vk_resources.c GpuTexture.serial, render.c (vkam_record after the uploads)"
+  ],
+  "description": "A masked material texture drawn by the classic renderer gets an R8_UNORM copy of its alpha: every resident level, texel for texel (alpha_mask.comp, texelFetch), built on the GPU at the start of the frame after a draw first asked for it, rebuilt when the texture's image changes (GpuTexture.serial: r_texture_quality trims, reloads, rewrapped module slots) or its sampler does. The sun cascades, the local light shadow tiles and the masked prepass groups bind the mask instead of the albedo; the lit pass and the scope PiP keep the albedo (they need its colour). A quarter of the texture bytes per alpha-tested fragment.",
+  "neutral": "The mask has the albedo's size, level count and the same sampler, and every texel holds the albedo texel's 8-bit alpha (UNORM in both formats; sRGB decoding never applies to alpha), so cl_mask_alpha computes the same level of detail and filters the same values: the same fragments pass the alpha test, the depth / G-buffer outputs are bit-identical. Until a mask is built the albedo is bound, as before. Nothing feeds the simulation.",
+  "metrics": [
+   "scope:shadow_sun",
+   "scope:prepass",
+   "gpu_frame"
+  ],
+  "scenes": [
+   "veg_forest_pine",
+   "veg_forest_broadleaf",
+   "veg_meadow"
+  ],
+  "verification": {
+   "runs": [
+    {
+     "date": "2026-10-18",
+     "machine": "DESKTOP-SN4N74U",
+     "summary": "NOT CLOSED: scope:shadow_sun 13.47 -> 13.235 (-1.74%, p=0.348); images pass; state identical",
+     "closed": false,
+     "timing": [
+      {
+       "metric": "scope:shadow_sun",
+       "a_median": 13.47,
+       "b_median": 13.235,
+       "a_mean": 11.97067,
+       "b_mean": 12.11488,
+       "delta": -0.235,
+       "delta_pct": -1.74,
+       "p_value": 0.3481,
+       "samples": [
+        1428,
+        1428
+       ],
+       "improved": false
+      },
+      {
+       "metric": "scope:prepass",
+       "a_median": 1.525,
+       "b_median": 1.5095,
+       "a_mean": 1.54105,
+       "b_mean": 1.54915,
+       "delta": -0.0155,
+       "delta_pct": -1.02,
+       "p_value": 0.48886,
+       "samples": [
+        1428,
+        1428
+       ],
+       "improved": false
+      },
+      {
+       "metric": "gpu_frame",
+       "a_median": 21.44,
+       "b_median": 21.135,
+       "a_mean": 20.45181,
+       "b_mean": 20.66863,
+       "delta": -0.305,
+       "delta_pct": -1.42,
+       "p_value": 0.64161,
+       "samples": [
+        1440,
+        1440
+       ],
+       "improved": false
+      }
+     ],
+     "state": "identical",
+     "images_pass": true,
+     "dir": "build/perf_out/verify/PF-0014"
+    }
+   ],
+   "summary": "NOT CLOSED: scope:shadow_sun 13.47 -> 13.235 (-1.74%, p=0.348); images pass; state identical",
+   "machine": "DESKTOP-SN4N74U"
+  }
  }
 }
