@@ -1,0 +1,251 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="1360" font-family="Segoe UI,Arial" font-size="12">
+<rect width="100%" height="100%" fill="#fbfaf7"/>
+<defs><pattern id="hatch" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><line x1="0" y1="0" x2="0" y2="8" stroke="#9ab" stroke-width="2"/></pattern><pattern id="hatch2" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(-45)"><line x1="0" y1="0" x2="0" y2="6" stroke="#bbb" stroke-width="1.5"/></pattern></defs>
+<line x1="29.999999999999982" y1="5.000000000000004" x2="29.999999999999982" y2="1350.0" stroke="#eee"/>
+<line x1="79.99999999999999" y1="5.000000000000004" x2="79.99999999999999" y2="1350.0" stroke="#eee"/>
+<line x1="129.99999999999997" y1="5.000000000000004" x2="129.99999999999997" y2="1350.0" stroke="#eee"/>
+<line x1="179.99999999999997" y1="5.000000000000004" x2="179.99999999999997" y2="1350.0" stroke="#eee"/>
+<line x1="229.99999999999997" y1="5.000000000000004" x2="229.99999999999997" y2="1350.0" stroke="#eee"/>
+<line x1="280.0" y1="5.000000000000004" x2="280.0" y2="1350.0" stroke="#eee"/>
+<line x1="330.0" y1="5.000000000000004" x2="330.0" y2="1350.0" stroke="#eee"/>
+<line x1="380.0" y1="5.000000000000004" x2="380.0" y2="1350.0" stroke="#eee"/>
+<line x1="430.0" y1="5.000000000000004" x2="430.0" y2="1350.0" stroke="#eee"/>
+<line x1="480.0" y1="5.000000000000004" x2="480.0" y2="1350.0" stroke="#eee"/>
+<line x1="530.0" y1="5.000000000000004" x2="530.0" y2="1350.0" stroke="#eee"/>
+<line x1="580.0" y1="5.000000000000004" x2="580.0" y2="1350.0" stroke="#eee"/>
+<line x1="630.0" y1="5.000000000000004" x2="630.0" y2="1350.0" stroke="#eee"/>
+<line x1="680.0" y1="5.000000000000004" x2="680.0" y2="1350.0" stroke="#eee"/>
+<line x1="730.0" y1="5.000000000000004" x2="730.0" y2="1350.0" stroke="#eee"/>
+<line x1="780.0" y1="5.000000000000004" x2="780.0" y2="1350.0" stroke="#eee"/>
+<line x1="830.0000000000001" y1="5.000000000000004" x2="830.0000000000001" y2="1350.0" stroke="#eee"/>
+<line x1="880.0000000000001" y1="5.000000000000004" x2="880.0000000000001" y2="1350.0" stroke="#eee"/>
+<line x1="930.0000000000001" y1="5.000000000000004" x2="930.0000000000001" y2="1350.0" stroke="#eee"/>
+<line x1="980.0000000000001" y1="5.000000000000004" x2="980.0000000000001" y2="1350.0" stroke="#eee"/>
+<line x1="1030.0" y1="5.000000000000004" x2="1030.0" y2="1350.0" stroke="#eee"/>
+<line x1="1080.0" y1="5.000000000000004" x2="1080.0" y2="1350.0" stroke="#eee"/>
+<line x1="1130.0" y1="5.000000000000004" x2="1130.0" y2="1350.0" stroke="#eee"/>
+<line x1="1180.0" y1="5.000000000000004" x2="1180.0" y2="1350.0" stroke="#eee"/>
+<line x1="1230.0" y1="5.000000000000004" x2="1230.0" y2="1350.0" stroke="#eee"/>
+<line x1="1280.0" y1="5.000000000000004" x2="1280.0" y2="1350.0" stroke="#eee"/>
+<line x1="1330.0" y1="5.000000000000004" x2="1330.0" y2="1350.0" stroke="#eee"/>
+<line x1="1380.0" y1="5.000000000000004" x2="1380.0" y2="1350.0" stroke="#eee"/>
+<line x1="1430.0" y1="5.000000000000004" x2="1430.0" y2="1350.0" stroke="#eee"/>
+<line x1="1480.0" y1="5.000000000000004" x2="1480.0" y2="1350.0" stroke="#eee"/>
+<line x1="1530.0" y1="5.000000000000004" x2="1530.0" y2="1350.0" stroke="#eee"/>
+<line x1="1580.0" y1="5.000000000000004" x2="1580.0" y2="1350.0" stroke="#eee"/>
+<line x1="1630.0" y1="5.000000000000004" x2="1630.0" y2="1350.0" stroke="#eee"/>
+<line x1="1680.0" y1="5.000000000000004" x2="1680.0" y2="1350.0" stroke="#eee"/>
+<line x1="1730.0" y1="5.000000000000004" x2="1730.0" y2="1350.0" stroke="#eee"/>
+<line x1="1780.0" y1="5.000000000000004" x2="1780.0" y2="1350.0" stroke="#eee"/>
+<line x1="4.999999999999982" y1="30.000000000000004" x2="1789.9999999999998" y2="30.000000000000004" stroke="#eee"/>
+<line x1="4.999999999999982" y1="80.0" x2="1789.9999999999998" y2="80.0" stroke="#eee"/>
+<line x1="4.999999999999982" y1="130.0" x2="1789.9999999999998" y2="130.0" stroke="#eee"/>
+<line x1="4.999999999999982" y1="180.0" x2="1789.9999999999998" y2="180.0" stroke="#eee"/>
+<line x1="4.999999999999982" y1="229.99999999999997" x2="1789.9999999999998" y2="229.99999999999997" stroke="#eee"/>
+<line x1="4.999999999999982" y1="280.0" x2="1789.9999999999998" y2="280.0" stroke="#eee"/>
+<line x1="4.999999999999982" y1="330.0" x2="1789.9999999999998" y2="330.0" stroke="#eee"/>
+<line x1="4.999999999999982" y1="380.0" x2="1789.9999999999998" y2="380.0" stroke="#eee"/>
+<line x1="4.999999999999982" y1="430.0" x2="1789.9999999999998" y2="430.0" stroke="#eee"/>
+<line x1="4.999999999999982" y1="480.0" x2="1789.9999999999998" y2="480.0" stroke="#eee"/>
+<line x1="4.999999999999982" y1="530.0" x2="1789.9999999999998" y2="530.0" stroke="#eee"/>
+<line x1="4.999999999999982" y1="580.0" x2="1789.9999999999998" y2="580.0" stroke="#eee"/>
+<line x1="4.999999999999982" y1="630.0" x2="1789.9999999999998" y2="630.0" stroke="#eee"/>
+<line x1="4.999999999999982" y1="680.0" x2="1789.9999999999998" y2="680.0" stroke="#eee"/>
+<line x1="4.999999999999982" y1="730.0" x2="1789.9999999999998" y2="730.0" stroke="#eee"/>
+<line x1="4.999999999999982" y1="780.0" x2="1789.9999999999998" y2="780.0" stroke="#eee"/>
+<line x1="4.999999999999982" y1="830.0000000000001" x2="1789.9999999999998" y2="830.0000000000001" stroke="#eee"/>
+<line x1="4.999999999999982" y1="880.0000000000001" x2="1789.9999999999998" y2="880.0000000000001" stroke="#eee"/>
+<line x1="4.999999999999982" y1="930.0000000000001" x2="1789.9999999999998" y2="930.0000000000001" stroke="#eee"/>
+<line x1="4.999999999999982" y1="980.0000000000001" x2="1789.9999999999998" y2="980.0000000000001" stroke="#eee"/>
+<line x1="4.999999999999982" y1="1030.0" x2="1789.9999999999998" y2="1030.0" stroke="#eee"/>
+<line x1="4.999999999999982" y1="1080.0" x2="1789.9999999999998" y2="1080.0" stroke="#eee"/>
+<line x1="4.999999999999982" y1="1130.0" x2="1789.9999999999998" y2="1130.0" stroke="#eee"/>
+<line x1="4.999999999999982" y1="1180.0" x2="1789.9999999999998" y2="1180.0" stroke="#eee"/>
+<line x1="4.999999999999982" y1="1230.0" x2="1789.9999999999998" y2="1230.0" stroke="#eee"/>
+<line x1="4.999999999999982" y1="1280.0" x2="1789.9999999999998" y2="1280.0" stroke="#eee"/>
+<line x1="4.999999999999982" y1="1330.0" x2="1789.9999999999998" y2="1330.0" stroke="#eee"/>
+<rect x="855.0000000000001" y="70.0" width="434.99999999999994" height="60.0" fill="url(#hatch)" stroke="#6a8"/>
+<rect x="1230.0" y="130.0" width="59.999999999999964" height="300.0" fill="url(#hatch)" stroke="#6a8"/>
+<text x="1030.0" y="107.5" text-anchor="middle" fill="#365">BALCONY 1.2 m (glass balustrade)</text>
+<rect x="204.99999999999997" y="130.0" width="425.0" height="350.0" fill="url(#hatch2)" stroke="#999"/>
+<rect x="204.99999999999997" y="480.0" width="575.0" height="250.0" fill="url(#hatch2)" stroke="#999"/>
+<text x="455.0" y="440.00000000000006" text-anchor="middle" fill="#666">10B (neighbour: knocks; co-op slot 4)</text>
+<rect x="204.99999999999997" y="745.0" width="1025.0" height="89.99999999999994" fill="#e8e8e8" stroke="#999"/>
+<text x="505.0" y="797.5" text-anchor="middle" fill="#555">SHARED CORRIDOR (10th floor)</text>
+<rect x="29.999999999999982" y="530.0" width="175.0" height="600.0" fill="#e0d6c8" stroke="#888"/>
+<text x="117.49999999999999" y="830.0000000000001" text-anchor="middle" font-weight="bold">STAIR</text>
+<text x="117.49999999999999" y="860.0" text-anchor="middle" fill="#666">core</text>
+<rect x="39.99999999999994" y="580.0" width="70.00000000000001" height="13.499999999999979" fill="#cbbfae" stroke="#a99"/>
+<rect x="125.0" y="1005.0000000000001" width="70.00000000000001" height="13.499999999999979" fill="#cbbfae" stroke="#a99"/>
+<rect x="39.99999999999994" y="594.0" width="70.00000000000001" height="13.499999999999979" fill="#cbbfae" stroke="#a99"/>
+<rect x="125.0" y="991.0" width="70.00000000000001" height="13.499999999999979" fill="#cbbfae" stroke="#a99"/>
+<rect x="39.99999999999994" y="608.0" width="70.00000000000001" height="13.499999999999979" fill="#cbbfae" stroke="#a99"/>
+<rect x="125.0" y="977.0000000000001" width="70.00000000000001" height="13.499999999999979" fill="#cbbfae" stroke="#a99"/>
+<rect x="39.99999999999994" y="622.0" width="70.00000000000001" height="13.499999999999979" fill="#cbbfae" stroke="#a99"/>
+<rect x="125.0" y="963.0000000000001" width="70.00000000000001" height="13.499999999999979" fill="#cbbfae" stroke="#a99"/>
+<rect x="39.99999999999994" y="636.0" width="70.00000000000001" height="13.499999999999979" fill="#cbbfae" stroke="#a99"/>
+<rect x="125.0" y="949.0" width="70.00000000000001" height="13.499999999999979" fill="#cbbfae" stroke="#a99"/>
+<rect x="39.99999999999994" y="650.0" width="70.00000000000001" height="13.499999999999979" fill="#cbbfae" stroke="#a99"/>
+<rect x="125.0" y="935.0000000000001" width="70.00000000000001" height="13.499999999999979" fill="#cbbfae" stroke="#a99"/>
+<rect x="630.0" y="850.0" width="300.0" height="154.99999999999997" fill="#e8e3da" stroke="#999"/>
+<text x="780.0" y="925.0" text-anchor="middle" fill="#555">ELEVATOR LOBBY</text>
+<rect x="680.0" y="1005.0000000000001" width="60.00000000000001" height="55.00000000000007" fill="#bbb" stroke="#777"/>
+<rect x="819.9999999999999" y="1005.0000000000001" width="60.00000000000001" height="55.00000000000007" fill="#bbb" stroke="#777"/>
+<text x="780.0" y="1090.0" text-anchor="middle" fill="#666">2 lifts (dead)</text>
+<rect x="204.99999999999997" y="850.0" width="425.0" height="480.0" fill="url(#hatch2)" stroke="#999"/>
+<text x="419.99999999999994" y="1105.0" text-anchor="middle" fill="#666">10D</text>
+<rect x="930.0000000000001" y="1005.0000000000001" width="300.0" height="325.0" fill="url(#hatch2)" stroke="#999"/>
+<text x="1080.0" y="1180.0" text-anchor="middle" fill="#666">10C (openable later)</text>
+<line x1="660.0" y1="745.0" x2="705.0" y2="745.0" stroke="#a33" stroke-width="5"/>
+<line x1="405.0" y1="835.0" x2="450.0" y2="835.0" stroke="#a33" stroke-width="5"/>
+<line x1="1055.0" y1="835.0" x2="1100.0" y2="835.0" stroke="#a33" stroke-width="5"/>
+<line x1="204.99999999999997" y1="765.0" x2="204.99999999999997" y2="810.0" stroke="#c60" stroke-width="6"/>
+<text x="280.0" y="777.5" text-anchor="middle" fill="#c60" font-size="11">fire door</text>
+<line x1="1230.0" y1="745.0" x2="1230.0" y2="835.0" stroke="#39c" stroke-width="6"/>
+<text x="1295.0" y="800.0" text-anchor="middle" fill="#39c" font-size="11">end window (E)</text>
+<rect x="730.0" y="730.0" width="50.0" height="15.000000000000036" fill="#999"/>
+<rect x="630.0" y="130.0" width="225.0" height="225.0" fill="#e9dcc9" stroke="#555" stroke-width="1"/>
+<rect x="630.0" y="355.0" width="120.0" height="125.0" fill="#cfe3ea" stroke="#555" stroke-width="1"/>
+<rect x="750.0" y="355.0" width="105.0" height="125.0" fill="#e6dccd" stroke="#555" stroke-width="1"/>
+<rect x="855.0000000000001" y="130.0" width="150.0" height="150.0" fill="#efe6d2" stroke="#555" stroke-width="1"/>
+<rect x="855.0000000000001" y="280.0" width="254.99999999999997" height="150.0" fill="#efe6d2" stroke="#555" stroke-width="1"/>
+<rect x="1005.0000000000001" y="130.0" width="225.0" height="150.0" fill="#efe6d2" stroke="#555" stroke-width="1"/>
+<rect x="1110.0" y="280.0" width="120.00000000000001" height="150.0" fill="#efe6d2" stroke="#555" stroke-width="1"/>
+<rect x="855.0000000000001" y="430.0" width="75.0" height="300.0" fill="#dedede" stroke="#555" stroke-width="1"/>
+<rect x="930.0000000000001" y="430.0" width="120.00000000000001" height="60.00000000000001" fill="#e4ddd0" stroke="#555" stroke-width="1"/>
+<rect x="930.0000000000001" y="490.00000000000006" width="120.00000000000001" height="119.99999999999997" fill="#cfe3ea" stroke="#555" stroke-width="1"/>
+<rect x="930.0000000000001" y="610.0" width="120.00000000000001" height="50.0" fill="#dedede" stroke="#555" stroke-width="1"/>
+<rect x="930.0000000000001" y="660.0" width="120.00000000000001" height="70.00000000000001" fill="#d6d0c4" stroke="#555" stroke-width="1"/>
+<rect x="780.0" y="480.0" width="75.0" height="175.0" fill="#d8dde0" stroke="#555" stroke-width="1"/>
+<rect x="780.0" y="655.0" width="75.0" height="75.0" fill="#d6d0c4" stroke="#555" stroke-width="1"/>
+<rect x="1050.0" y="430.0" width="179.99999999999997" height="150.0" fill="#dfe6d4" stroke="#555" stroke-width="1"/>
+<rect x="1050.0" y="580.0" width="179.99999999999997" height="150.0" fill="#f1e0e3" stroke="#555" stroke-width="1"/>
+<path d="M855.0000000000001,130.0 H1230.0 V430.0 H855.0000000000001 Z" fill="none" stroke="#c84" stroke-dasharray="6 4" stroke-width="2"/>
+<rect x="690.0" y="180.0" width="100.0" height="105.0" fill="#fff" fill-opacity="0.5" stroke="#888" stroke-dasharray="3 2"/>
+<text x="740.0" y="238.49999999999997" text-anchor="middle" fill="#777" font-size="9">bed</text>
+<rect x="1060.0" y="250.0" width="129.99999999999997" height="44.99999999999999" fill="#fff" fill-opacity="0.5" stroke="#888" stroke-dasharray="3 2"/>
+<text x="1125.0" y="278.5" text-anchor="middle" fill="#777" font-size="9">sofa L</text>
+<rect x="1150.0" y="175.0" width="39.99999999999994" height="75.0" fill="#fff" fill-opacity="0.5" stroke="#888" stroke-dasharray="3 2"/>
+<rect x="940.0" y="334.99999999999994" width="119.99999999999997" height="45.000000000000014" fill="#fff" fill-opacity="0.5" stroke="#888" stroke-dasharray="3 2"/>
+<text x="1000.0" y="363.5" text-anchor="middle" fill="#777" font-size="9">island</text>
+<rect x="860.0" y="397.49999999999994" width="250.0" height="30.00000000000003" fill="#fff" fill-opacity="0.5" stroke="#888" stroke-dasharray="3 2"/>
+<text x="985.0" y="418.50000000000006" text-anchor="middle" fill="#777" font-size="9">kitchen run</text>
+<rect x="900.0" y="180.0" width="79.99999999999999" height="50.0" fill="#fff" fill-opacity="0.5" stroke="#888" stroke-dasharray="3 2"/>
+<text x="940.0" y="211.00000000000003" text-anchor="middle" fill="#777" font-size="9">table</text>
+<rect x="1139.9999999999998" y="415.00000000000006" width="80.00000000000007" height="12.5" fill="#fff" fill-opacity="0.5" stroke="#888" stroke-dasharray="3 2"/>
+<text x="1180.0" y="427.25" text-anchor="middle" fill="#777" font-size="9">TV</text>
+<rect x="935.0" y="432.5" width="110.00000000000006" height="27.499999999999993" fill="#fff" fill-opacity="0.5" stroke="#888" stroke-dasharray="3 2"/>
+<text x="990.0" y="452.25" text-anchor="middle" fill="#777" font-size="9">desk</text>
+<rect x="782.4999999999999" y="610.0" width="10.000000000000009" height="35.00000000000006" fill="#fff" fill-opacity="0.5" stroke="#888" stroke-dasharray="3 2"/>
+<text x="787.5" y="633.4999999999999" text-anchor="middle" fill="#777" font-size="9">breaker</text>
+<rect x="782.4999999999999" y="484.99999999999994" width="32.500000000000014" height="35.00000000000001" fill="#fff" fill-opacity="0.5" stroke="#888" stroke-dasharray="3 2"/>
+<text x="798.75" y="508.5" text-anchor="middle" fill="#777" font-size="9">W/D</text>
+<rect x="1150.0" y="590.0" width="75.0" height="95.00000000000001" fill="#fff" fill-opacity="0.5" stroke="#888" stroke-dasharray="3 2"/>
+<text x="1187.5" y="643.4999999999999" text-anchor="middle" fill="#777" font-size="9">bunk</text>
+<rect x="1130.0" y="440.00000000000006" width="95.00000000000001" height="69.99999999999997" fill="#fff" fill-opacity="0.5" stroke="#888" stroke-dasharray="3 2"/>
+<text x="1177.4999999999998" y="481.00000000000006" text-anchor="middle" fill="#777" font-size="9">bed</text>
+<rect x="932.4999999999999" y="572.5" width="82.50000000000001" height="35.00000000000006" fill="#fff" fill-opacity="0.5" stroke="#888" stroke-dasharray="3 2"/>
+<text x="973.7500000000001" y="595.9999999999999" text-anchor="middle" fill="#777" font-size="9">tub</text>
+<rect x="632.5" y="420.0" width="52.5" height="57.500000000000014" fill="#fff" fill-opacity="0.5" stroke="#888" stroke-dasharray="3 2"/>
+<text x="658.75" y="454.75000000000006" text-anchor="middle" fill="#777" font-size="9">shower</text>
+<rect x="1010.0" y="140.0" width="40.000000000000036" height="40.0" fill="#fff" fill-opacity="0.5" stroke="#888" stroke-dasharray="3 2"/>
+<text x="1030.0" y="166.0" text-anchor="middle" fill="#777" font-size="9">reading</text>
+<text x="742.5" y="242.49999999999997" text-anchor="middle" font-weight="bold" font-size="13">Master bedroom</text>
+<text x="742.5" y="261.5" text-anchor="middle" fill="#666" font-size="10">20.2 m²</text>
+<text x="690.0" y="417.5" text-anchor="middle" font-weight="normal" font-size="13">En-suite</text>
+<text x="690.0" y="436.5" text-anchor="middle" fill="#666" font-size="10">6.0 m²</text>
+<text x="802.5" y="417.5" text-anchor="middle" font-weight="normal" font-size="13">Walk-in closet</text>
+<text x="802.5" y="436.5" text-anchor="middle" fill="#666" font-size="10">5.2 m²</text>
+<text x="892.5000000000001" y="580.0" text-anchor="middle" font-weight="normal" font-size="13">Hall</text>
+<text x="892.5000000000001" y="599.0" text-anchor="middle" fill="#666" font-size="10">9.0 m²</text>
+<text x="990.0" y="459.99999999999994" text-anchor="middle" font-weight="normal" font-size="10">Study nook</text>
+<text x="990.0" y="479.0" text-anchor="middle" fill="#666" font-size="10">2.9 m²</text>
+<text x="990.0" y="550.0" text-anchor="middle" font-weight="normal" font-size="13">Family bath</text>
+<text x="990.0" y="569.0" text-anchor="middle" fill="#666" font-size="10">5.8 m²</text>
+<text x="990.0" y="635.0" text-anchor="middle" font-weight="normal" font-size="10">Side hall</text>
+<text x="990.0" y="654.0" text-anchor="middle" fill="#666" font-size="10">2.4 m²</text>
+<text x="990.0" y="695.0" text-anchor="middle" font-weight="normal" font-size="10">Storage</text>
+<text x="990.0" y="714.0" text-anchor="middle" fill="#666" font-size="10">3.4 m²</text>
+<text x="817.5000000000001" y="567.5" text-anchor="middle" font-weight="normal" font-size="13">Utility</text>
+<text x="817.5000000000001" y="586.5" text-anchor="middle" fill="#666" font-size="10">5.2 m²</text>
+<text x="817.5000000000001" y="692.5" text-anchor="middle" font-weight="normal" font-size="10">Coats</text>
+<text x="817.5000000000001" y="711.5" text-anchor="middle" fill="#666" font-size="10">2.2 m²</text>
+<text x="1139.9999999999998" y="505.0" text-anchor="middle" font-weight="bold" font-size="13">Teen room</text>
+<text x="1139.9999999999998" y="524.0" text-anchor="middle" fill="#666" font-size="10">10.8 m²</text>
+<text x="1139.9999999999998" y="655.0" text-anchor="middle" font-weight="bold" font-size="13">Child room</text>
+<text x="1139.9999999999998" y="674.0" text-anchor="middle" fill="#666" font-size="10">10.8 m²</text>
+<text x="930.0000000000001" y="267.5" text-anchor="middle" font-weight="bold">DINING</text>
+<text x="1139.9999999999998" y="215.0" text-anchor="middle" font-weight="bold">LIVING</text>
+<text x="1145.0" y="359.99999999999994" text-anchor="middle" fill="#a63" font-size="11">living / dining / kitchen 45.0 m²</text>
+<text x="910.0" y="345.0" text-anchor="middle" font-weight="bold" font-size="11">KITCHEN</text>
+<rect x="627.0" y="127.0" width="6" height="6" fill="#246"/>
+<rect x="702.0" y="127.0" width="6" height="6" fill="#246"/>
+<rect x="777.0" y="127.0" width="6" height="6" fill="#246"/>
+<rect x="852.0000000000001" y="127.0" width="6" height="6" fill="#246"/>
+<rect x="927.0000000000001" y="127.0" width="6" height="6" fill="#246"/>
+<rect x="1002.0000000000001" y="127.0" width="6" height="6" fill="#246"/>
+<rect x="1077.0" y="127.0" width="6" height="6" fill="#246"/>
+<rect x="1152.0" y="127.0" width="6" height="6" fill="#246"/>
+<rect x="1227.0" y="127.0" width="6" height="6" fill="#246"/>
+<rect x="1227.0" y="127.0" width="6" height="6" fill="#246"/>
+<rect x="1227.0" y="201.99999999999997" width="6" height="6" fill="#246"/>
+<rect x="1227.0" y="277.0" width="6" height="6" fill="#246"/>
+<rect x="1227.0" y="352.0" width="6" height="6" fill="#246"/>
+<rect x="1227.0" y="427.0" width="6" height="6" fill="#246"/>
+<rect x="1227.0" y="502.0" width="6" height="6" fill="#246"/>
+<rect x="1227.0" y="577.0" width="6" height="6" fill="#246"/>
+<rect x="1227.0" y="652.0" width="6" height="6" fill="#246"/>
+<rect x="1227.0" y="727.0" width="6" height="6" fill="#246"/>
+<line x1="630.0" y1="130.0" x2="1230.0" y2="130.0" stroke="#2aa7d8" stroke-width="5" stroke-opacity="0.8"/>
+<line x1="1230.0" y1="130.0" x2="1230.0" y2="730.0" stroke="#2aa7d8" stroke-width="5" stroke-opacity="0.8"/>
+<line x1="1155.0" y1="124.0" x2="1230.0" y2="124.0" stroke="#d33" stroke-width="3"/>
+<text x="1192.5" y="92.5" text-anchor="middle" fill="#d33" font-size="11">sliding door</text>
+<text x="930.0000000000001" y="52.5" text-anchor="middle" fill="#1b7fae" font-weight="bold">NORTH WALL: FULL-HEIGHT GLASS, 8 × 1.5 m modules (mullions ■)</text>
+<text x="1330.0" y="430.0" fill="#1b7fae" font-weight="bold" transform="rotate(90 1330.0 430.0)" text-anchor="middle">EAST WALL: FULL-HEIGHT GLASS, 8 × 1.5 m modules</text>
+<path d="M630.0,130.0 V480.0 H780.0 V730.0 H1230.0" fill="none" stroke="#333" stroke-width="5"/>
+<line x1="869.9999999999999" y1="730.0" x2="915.0" y2="730.0" stroke="#fbfaf7" stroke-width="6"/>
+<path d="M869.9999999999999,730.0 A45.0,45.0 0 0 1 915.0,685.0" fill="none" stroke="#a33"/>
+<text x="902.5" y="755.0" text-anchor="middle" fill="#a33" font-size="10">entrance (security)</text>
+<line x1="855.0000000000001" y1="430.0" x2="855.0000000000001" y2="475.0" stroke="#fbfaf7" stroke-width="6"/>
+<path d="M855.0000000000001,430.0 A45.0,45.0 0 0 1 900.0,475.0" fill="none" stroke="#a33"/>
+<text x="887.5" y="495.0" text-anchor="middle" fill="#a33" font-size="10">WIC</text>
+<line x1="794.9999999999999" y1="355.0" x2="840.0" y2="355.0" stroke="#fbfaf7" stroke-width="6"/>
+<path d="M794.9999999999999,355.0 A45.0,45.0 0 0 1 840.0,310.0" fill="none" stroke="#a33"/>
+<line x1="660.0" y1="355.0" x2="700.0" y2="355.0" stroke="#fbfaf7" stroke-width="6"/>
+<path d="M660.0,355.0 A40.0,40.0 0 0 1 700.0,315.00000000000006" fill="none" stroke="#a33"/>
+<line x1="930.0000000000001" y1="520.0" x2="930.0000000000001" y2="560.0" stroke="#fbfaf7" stroke-width="6"/>
+<path d="M930.0000000000001,520.0 A40.0,40.0 0 0 1 969.9999999999999,560.0" fill="none" stroke="#a33"/>
+<line x1="855.0000000000001" y1="530.0" x2="855.0000000000001" y2="570.0" stroke="#fbfaf7" stroke-width="6"/>
+<path d="M855.0000000000001,530.0 A40.0,40.0 0 0 1 894.9999999999999,570.0" fill="none" stroke="#a33"/>
+<line x1="855.0000000000001" y1="670.0" x2="855.0000000000001" y2="715.0" stroke="#fbfaf7" stroke-width="6"/>
+<path d="M855.0000000000001,670.0 A45.0,45.0 0 0 1 900.0,715.0" fill="none" stroke="#a33"/>
+<text x="887.5" y="735.0" text-anchor="middle" fill="#a33" font-size="10">bi-fold</text>
+<line x1="1050.0" y1="437.5" x2="1050.0" y2="482.5" stroke="#fbfaf7" stroke-width="6"/>
+<path d="M1050.0,437.5 A45.0,45.0 0 0 1 1095.0,482.5" fill="none" stroke="#a33"/>
+<line x1="1050.0" y1="612.5" x2="1050.0" y2="657.5" stroke="#fbfaf7" stroke-width="6"/>
+<path d="M1050.0,612.5 A45.0,45.0 0 0 1 1095.0,657.5" fill="none" stroke="#a33"/>
+<line x1="955.0000000000001" y1="660.0" x2="994.9999999999999" y2="660.0" stroke="#fbfaf7" stroke-width="6"/>
+<path d="M955.0000000000001,660.0 A40.0,40.0 0 0 1 994.9999999999999,619.9999999999999" fill="none" stroke="#a33"/>
+<path d="M1100.0,310.0 L1023.0454677517246,98.5691603231706 A225.0,225.0 0 0 1 1311.4308396768295,233.04546775172454 Z" fill="#e07020" fill-opacity="0.12" stroke="#e07020"/>
+<circle cx="1100.0" cy="310.0" r="5" fill="#e07020"/>
+<text x="1110.0" y="337.5" text-anchor="middle" fill="#e07020" font-weight="bold" font-size="11">SOFA frame</text>
+<path d="M1275.0,85.00000000000001 L1235.9291600249408,-136.58174442774683 A225.0,225.0 0 0 1 1496.581744427747,45.92916002494065 Z" fill="#8040c0" fill-opacity="0.12" stroke="#8040c0"/>
+<circle cx="1275.0" cy="85.00000000000001" r="5" fill="#8040c0"/>
+<text x="1285.0" y="112.5" text-anchor="middle" fill="#8040c0" font-weight="bold" font-size="11">BALCONY frame</text>
+<text x="740.0" y="207.50000000000003" text-anchor="middle" fill="#06c" font-weight="bold" font-size="11">① spawn (bed)</text>
+<text x="787.5" y="605.0" text-anchor="middle" fill="#c00" font-weight="bold" font-size="11">④ breaker</text>
+<text x="892.5000000000001" y="687.5" text-anchor="middle" fill="#c00" font-weight="bold" font-size="11">⑥ peephole</text>
+<text x="220.00000000000003" y="765.0" text-anchor="middle" fill="#c00" font-weight="bold" font-size="11">⑧ exit</text>
+<line x1="254.99999999999997" y1="1305.0" x2="505.0" y2="1305.0" stroke="#000" stroke-width="3"/>
+<text x="380.0" y="1290.0" text-anchor="middle" >5 m</text>
+<path d="M1630.0,105.0 l-10,30 l10,-8 l10,8 Z" fill="#000"/>
+<text x="1630.0" y="95.0" text-anchor="middle" font-weight="bold">N (−Z)</text>
+<text x="1339.9999999999998" y="980.0000000000001" font-size="20" font-weight="bold">Unit 10A, 10th floor (floor top y = 30.0)</text>
+<text x="1339.9999999999998" y="1020.0000000000001" font-size="12" fill="#444">Corner unit, 129 m² gross (12 × 12 minus the 3 × 5 m notch to 10B)</text>
+<text x="1339.9999999999998" y="1047.5000000000002" font-size="12" fill="#444">Ceiling 2.7 m; walls 0.2 m interior / 0.3 m exterior</text>
+<text x="1339.9999999999998" y="1075.0000000000002" font-size="12" fill="#444">Every partition that meets the glass lands on a mullion (1.5 m)</text>
+<text x="1339.9999999999998" y="1102.5" font-size="12" fill="#444">Unit-local coords: origin = NW interior corner, +x east, +z south</text>
+<text x="1339.9999999999998" y="1130.0" font-size="12" fill="#444">Glass walls: cyan; solid party/corridor walls: black</text>
+<text x="1339.9999999999998" y="1157.5" font-size="12" fill="#444">Dashed boxes: key props; red arcs: door swings</text>
+<text x="1339.9999999999998" y="1185.0000000000002" font-size="12" fill="#444">Orange/purple cones: the two locked vista frames (hfov 90°)</text>
+</svg>

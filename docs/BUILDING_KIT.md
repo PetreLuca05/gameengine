@@ -1,0 +1,221 @@
+# Building kit
+
+**Status: design, awaiting approval.** This is the modular architecture kit that story levels and the near city are assembled from. Chapter 1 is the first user (docs/CHAPTER_01.md).
+
+Rule: **no one-off architecture meshes**. Apartments, corridors, stair cores, storeys, towers and near-city façades are JSON instance lists of kit pieces and prefabs. Editing a piece in Blender and re-exporting updates every instance.
+
+## 1. Format and why
+
+Pieces are **glTF binary (`.glb`)**, not FBX:
+- The engine has no static-mesh FBX path. FBX is loaded for characters only (`src/assets/fbx_loader.c`).
+- The static path is already glTF (`data/assets.json` models, `build_vgeo`).
+- Blender's glTF exporter is built-in and scriptable, and it keeps custom properties (sockets, slots).
+
+The `.blend` sources live next to the exports so the round trip is lossless:
+
+```
+assets/kits/building/
+  kit.json                    manifest: auto-scanned; per-piece category, tags, snap class, default materials
+  src/<piece>.blend           Blender source (optional; generated pieces start without one)
+  <piece>.glb                 exported piece (LOD0..3, UCX_*, sockets, material slots)
+  materials/<set>.json        shared material sets: paint, wallpaper, wood, tile, concrete, brick, glass, metal, trim
+  prefabs/<name>.json         furniture groups, room templates, building templates (instance lists)
+  decals/                     separate decal pieces (stains, cracks, posters, scuffs)
+```
+
+The first piece set is **generated** by `tools/kit_gen/` (Python, writes `.glb` directly) because this environment has no Blender. Every generated piece passes the same validator as hand-made ones. You can open any of them in Blender (File ▸ Import ▸ glTF), edit, save the `.blend` under `src/` and export with `kit_export.py`.
+
+## 2. Conventions
+
+| Item | Rule |
+|---|---|
+| Units | Metres, real scale. 1 m plan grid, 0.1 m sub-grid. Heights snap to 0.05 m. |
+| Axes (engine) | +Y up. A piece's front faces **−Z**, the engine's yaw-0 direction. |
+| Axes (Blender) | Z up, model the front facing **−Y** (Blender's Front view looks at it). The exporter converts. |
+| Pivot | **Bottom-left-back** corner on the grid. Seen from the front: min x, min y, and the back face, which is max z in engine space. The piece extends +X (length), +Y (height) and −Z (depth/thickness). |
+| Wall thickness | 0.2 interior, 0.3 exterior/party. The placement tool aligns `back` / `center` / `front` to the grid line. Plans in docs/CHAPTER_01.md are centrelines. |
+| Storey | Floor-to-floor 3.0. Slab 0.3 (top at storey y). Ceiling 2.7 above the floor top. Wall pieces are 2.7 tall (interior) or 3.0 (exterior/party, covering the slab edge). |
+| Openings | Doors 0.9 × 2.1 (double 1.6 × 2.1, bi-fold 1.2 × 2.1). Window module 1.5 wide. The glass module is 1.5 × 2.7. |
+| Texel density | **10.24 px/cm** (1024 px/m) on UV0. Tileable sets use world-scaled UVs. |
+| UV1 | Second UV set, non-overlapping, 0..1, with a 2 px margin at 512². Kept for future lightmaps and validated now. |
+| Material slots | Named `M_<set>` or `M_<set>_<variant>` (e.g. `M_paint`, `M_wood_oak`, `M_glass`). They map to `materials/<set>.json` → engine materials (PBR maps per docs/PBR.md). Instances override per slot and can tint. |
+| Sockets | Empties named `S_<type>[_<n>]`. Types: `hinge`, `handle`, `light`, `switch`, `outlet`, `frame`, `blinds_rail`, `curtain_rail`, `sink`, `tap`, `snap_l`, `snap_r`, `snap_t`, `open` (an opening's centre/size), `mullion`, `prop` (generic). The empty's −Z axis is the socket's forward. |
+| Collision | `UCX_<piece>_<nn>` convex meshes, or `UBX_` boxes. If there are none, the validator generates hulls (`collision: auto` in kit.json) or rejects the piece (`collision: required`, the default for walls, floors and stairs). Glass gets a thin box. |
+| LODs | `<piece>_LOD1..3` objects in the same file. If they are missing, `build_vgeo` generates DAG LODs (docs/VGEO.md). Façade bays always ship LOD3 as a card for impostor baking. |
+| Naming | `<category>_<kind>[_<variant>]_<size>`. Sizes are in cm: width, or w×h. Examples: `wall_int_100`, `wall_ext_win_150`, `door_leaf_int_090`, `glass_panel_150`. Lowercase, `[a-z0-9_]`. |
+
+`tools/validate_kit` (C, shares the loader with the engine) rejects a piece with a message that names the piece, the rule and the fix. For example:
+
+```
+wall_int_300.glb: pivot off grid: bbox min (0.012, 0, -0.2) - move origin to the bottom-left-back corner (Blender: Object > Set Origin, then snap to 0)
+door_frame_int_090.glb: socket S_hinge missing - doors need S_hinge and S_handle
+glass_panel_150.glb: material slot 'Material.001' unmapped - rename to M_glass or M_<set>
+```
+
+It checks:
+- pivot / bbox on grid
+- scale (no unapplied transforms)
+- naming
+- slots mapped
+- required sockets per category
+- collision present and convex
+- LOD triangle ratios
+- UV1 non-overlap
+- texel density within ±15%
+- normals / degenerate triangles
+- triangle budgets per category
+
+## 3. Piece list (minimum set for Chapter 1 + the near city)
+
+Counts are distinct pieces. Variants are material or slot swaps, not new meshes, unless the geometry differs.
+
+**Walls** (thickness 0.2 int / 0.3 ext; height 2.7 int / 3.0 ext):
+- `wall_{int,ext}_{100,200,300,400}`: straight runs.
+- `wall_{int,ext}_050`, `_010`: fillers, for sub-grid closure.
+- `wall_{int,ext}_corner_in`, `_corner_out`, `_t`, `_end`: junctions and caps.
+- `wall_int_half_100` (1.1 m high, kitchen pass / balustrade), `wall_int_pass_150` (pass-through hatch).
+- `wall_{int,ext}_door_{090,120,160}`: openings with sockets `S_open`, `S_frame`.
+- `wall_ext_win_150` (sill 0.9, head 2.1), `wall_ext_win_tall_150`.
+- `wall_party_300` (between units, 0.3, acoustic).
+- `wall_corridor_recess_150`: door recess, number plate socket.
+- **Total: 34**
+
+**Full-height glass / façade** (the hero element):
+- `glass_panel_150`: fixed, 1.5 × 2.7, between mullions. `S_blinds_rail`, `S_curtain_rail` on the head.
+- `glass_mullion` and `glass_mullion_corner`: 0.06 × 0.15 profile, 3.0 tall, covers the slab edge.
+- `glass_head_150` and `glass_sill_150`: trims hiding the slab, with blinds pocket.
+- `glass_slider_frame_150`, `glass_slider_leaf_075` ×2 (animated, `S_handle`), `glass_slider_track_150`.
+- `glass_spandrel_150`: outside, slab edge, façade line.
+- `balustrade_glass_150`, `balustrade_post`, `balustrade_corner_post`, `handrail_150`.
+- `balcony_slab_150x120`, `balcony_slab_corner_120`, `balcony_soffit_150x120`, `balcony_drip_150`.
+- **Total: 18**
+
+**Floors / ceilings:**
+- `floor_slab_{100,200,400}` (square, 0.3 thick), `floor_slab_100x050`.
+- `floor_finish_{wood,tile,carpet}_{100,200}`: 0.02 overlays. Optional: material variants on the slab usually suffice.
+- `ceiling_{100,200,400}` with a light socket grid, `ceiling_bulkhead_100` (dropped soffit for kitchens and bathrooms).
+- `ceiling_tile_corridor_060`: 600 mm grid.
+- `landing_slab_stair`.
+- **Total: 15**
+
+**Stairs:**
+- `stair_flight_150x150`: 1.5 wide, 1.5 rise = half storey, 9 risers at 0.167. Collision is a ramp + steps.
+- `stair_half_landing_300x150`.
+- `stair_rail_flight`, `stair_rail_landing`, `stair_rail_end`.
+- `stair_newel`, `stair_stringer_flight`, `stair_eye_impostor`: a card for the "looking down" depth.
+- **Total: 8**
+
+**Doors** (frames separate from leaves; leaves carry `S_hinge`, `S_handle`):
+- `door_frame_{int,entr,fire}_090`, `door_frame_slide_090`, `door_frame_bifold_120`, `door_frame_double_160`.
+- `door_leaf_int_090` (panel/flush variants via slots), `door_leaf_entr_090` (security, `S_peephole`, `S_chain`), `door_leaf_fire_090` (vision panel, push bar), `door_leaf_slide_090`, `door_leaf_bifold_060`.
+- `door_handle_lever`, `door_handle_knob`, `door_pushbar`.
+- **Total: 14**
+
+**Windows / soft furnishing** (windows for near-city façades and corridor ends):
+- `win_fixed_150`, `win_casement_150` (animated leaf), `win_corridor_end_180`.
+- `blinds_roller_150` (animated extent 0..1, light-blocking factor), `blinds_venetian_150` (tilt).
+- `curtain_150` (2 states + cloth-like vertex anim), `curtain_rail_150`.
+- **Total: 7**
+
+**Trims:**
+- `skirting_{050,100,200}`, `skirting_corner_{in,out}`.
+- `cornice_{100,200}`, `cornice_corner_{in,out}`.
+- `casing_door_090`, `casing_door_120`, `casing_win_150`.
+- **Total: 12**
+
+**Structure:**
+- `column_sq_030`, `column_round_030`.
+- `beam_{200,400}`, `beam_down_stand_300`: visible on the corridor ceiling.
+- **Total: 5**
+
+**Elevator:**
+- `lift_door_pair` (animated), `lift_frame`, `lift_call_panel` (`S_switch`), `lift_cab` (for later chapters), `lift_shaft_300`.
+- **Total: 5**
+
+**Corridor:**
+- `corridor_wall_door_recess_150`, `corridor_number_plate` (text decal slot).
+- `corridor_fire_extinguisher_cab`, `corridor_light_ceiling`, `corridor_exit_sign` (emissive).
+- `riser_access_panel`.
+- **Total: 6**
+
+**Roof** (for later chapters and visible tower tops):
+- `roof_parapet_{100,300}`, `roof_parapet_corner`.
+- `roof_access_hut` (prefab of pieces + door).
+- `roof_ac_pad`, `roof_ac_unit`, `roof_water_tank`, `roof_vent`, `roof_antenna`, `roof_chimney_brick`.
+- **Total: 10**
+
+**Façade bays** (near city, 0–500 m; 3.0 × 3.0, one storey; LOD3 card; `S_snap_*` for stacking):
+- `fac_{brick,stone,concrete,render}_win_{a,b,c}`.
+- `fac_*_blank`.
+- `fac_*_balcony`.
+- `fac_*_corner`.
+- `fac_shopfront_{a,b,c}` (ground floor, 4.0 high).
+- `fac_entrance_{a,b}`.
+- `fac_cornice_top`, `fac_rooftop_{flat,pitched_a}`.
+- Interior "peek" cards: `fac_interior_card_{a..d}`. These are parallax-free room boxes for the few visible interiors.
+- **Total: 30**
+
+**Furniture / fixtures** (also kit pieces, so they follow the same conventions; the interactable comes from sockets + kit.json `interact`):
+- Kitchen run: `kit_base_060`, `kit_base_drawers_060`, `kit_sink_090`, `kit_hob_060`, `kit_oven_060`, `kit_dw_060`, `kit_fridge_tall_060`, `kit_wall_060`, `kit_wall_090`, `kit_island_240`.
+- Bathroom: `bath_vanity_090`, `bath_wc`, `bath_shower_090`, `bath_tub_170`, `bath_mirror_cab`.
+- Bedroom / living: `bed_double`, `bed_single`, `bed_loft_child`, `wardrobe_120`, `dresser_100`, `nightstand`, `sofa_l`, `armchair`, `tv_credenza`, `tv_55`, `table_dining_4`, `chair_dining`, `stool_bar`, `desk_120`, `chair_office`, `shelf_100`.
+- Utility: `washer`, `dryer`, `water_heater`, `breaker_panel` (`S_switch_*` ×12 + main).
+- Small: `lamp_floor`, `lamp_table`, `light_downlight`, `light_pendant`, `switch_plate`, `outlet_plate`, `radiator_100`, `coat_rack`, `shoe_bench`.
+- About 45 pieces, plus small props (toys, crockery, photos) as kit `prop_*` pieces with no collision requirement.
+
+**Total at minimum: about 164 architectural pieces + about 45 furniture/fixtures + small props.**
+
+## 4. Prefabs (JSON instance lists, never merged meshes)
+
+```json
+{ "prefab": "room_kitchen_run_510", "_doc": "...",
+  "pieces": [
+    {"piece": "kit_fridge_tall_060", "pos": [0, 0, 0]},
+    {"piece": "kit_base_drawers_060", "pos": [0.6, 0, 0], "mat": {"M_wood": "wood_oak_light"}},
+    {"prefab": "kit_sink_run_150", "pos": [1.2, 0, 0]}
+  ],
+  "params": {"length": {"min": 2.4, "max": 6.0, "step": 0.6}}
+}
+```
+
+- **Furniture groups:** `grp_dining_4`, `grp_sofa_corner`, `grp_bed_master`, `grp_desk_teen`, `grp_bunk_child`.
+- **Room templates:** `room_kitchen_run_*` (parametric length), `room_bathroom_family`, `room_ensuite`, `room_child`, `room_teen`, `room_master`, `room_utility`.
+- **Building templates:**
+  - `apt_unit_corner_10a`: the Chapter 1 unit.
+  - `apt_unit_std_a/b`: neighbours, shells only.
+  - `corridor_segment_150`.
+  - `stair_core_dogleg`.
+  - `storey_tower_a`: 4 units + core + corridor.
+  - `tower_a`: storeys ×16 + roof. Upper/lower floors are shells with interior cards.
+
+Prefabs nest. An instance may `mirror` (x) and `override` pieces by path. The level stores prefab instances plus per-instance overrides, so editing `apt_unit_corner_10a` updates the level.
+
+## 5. Engine integration (new work)
+
+| Need | Today | Plan |
+|---|---|---|
+| Place hundreds of pieces with arbitrary transforms | `vgeo` entities: grid-only instancing, 64 entries per level. Models are capped at 64. | New level sections `kit` and `prefabs`. The resolver expands prefabs into a flat instance list, then **one instance buffer per piece per material** in the classic renderer (`src/render/vk_classic.c`). The kit registry is separate from `MAX_ASSET_MODELS`. |
+| Static collision | Brushes / vgeo mesh | UCX hulls → static Jolt convex bodies (compound per prefab instance). |
+| Glass | Legacy alpha `DrawItem` only (the vgeo path is opaque/masked) | Glass pieces go through the forward path with the new pane material (docs/STORY.md §Rendering). |
+| Sockets | n/a | Kept on the instance and queryable by name. Interactables spawn at sockets (`door_leaf` at `S_hinge`, switches at `S_switch`). |
+| Hot reload | None for models | mtime poll on `assets/kits/building/*.glb` (like `hp_system.c`) + `kit_reload [piece]`. It rebuilds the piece's GPU mesh, LODs, collision and socket table and re-instances in place. Dev builds run the vgeo builder in-process. |
+| Validation | n/a | `tools/validate_kit` + ctest `kit_validate` over the whole folder. |
+
+## 6. Blender workflow
+
+1. Open `assets/kits/building/src/<piece>.blend`, or import the `.glb`.
+2. Model at real scale with the front facing −Y and the origin at the bottom-left-back corner. Name slots `M_*`, sockets `S_*`, collision `UCX_*`, and LODs `_LOD1..3`.
+3. Export with **`tools/blender/kit_export.py`**: `blender -b src/wall_int_300.blend -P tools/blender/kit_export.py`, or from the N-panel "Deadground Kit ▸ Export". The script:
+   - applies transforms
+   - checks the pivot
+   - converts axes
+   - writes the `.glb` with custom props
+   - runs `validate_kit` on the result and prints its messages
+4. If the game is running, every instance updates within about 1 s (or run `kit_reload wall_int_300`).
+
+Round-trip test (`tools/tests/kit_roundtrip.py`):
+1. Modify a piece programmatically: offset a vertex, add a socket.
+2. Export it.
+3. Run `kit_reload`.
+4. Assert that every instance's bounds changed, collision bodies are rebuilt, sockets resolve, and the validator passes.
+5. Feed deliberately wrong pivot, scale and name variants and assert the validator rejects each one with its specific message.
