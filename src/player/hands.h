@@ -99,6 +99,9 @@ void hands_set_draw_scale(float s);
 void hands_fp_set_item_scale(float s);
 // World-space barrel tip of the local viewmodel weapon (last hands_update). False if no gun.
 bool hands_muzzle(vec3 *pos, vec3 *fwd);
+// The first-person emitter of a kind (1 light, 2 laser; docs/ITEM_PIPELINE.md): the underbarrel attachment's
+// "emitter" socket, or (lights) a held item whose mesh has one (the flashlight). World position / direction.
+bool hands_emitter(int kind, vec3 *pos, vec3 *fwd);
 // The first-person weapon this frame (viewmodel world space) and its effective definition
 // (attachments applied). False when no weapon is held.
 bool hands_fp_item(vec3 *pos, quat *rot, const struct WeaponDef **wd);

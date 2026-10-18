@@ -71,6 +71,7 @@
     "stock": {"pos": [0, 0.01, 0.03], "allow": ["heavy_stock"], "hide_parts": [2]}
   },
   "iron_sights": { "type": "notch", "line": 0.087, "rear_z": -0.06, "front_z": -0.6, "rear_base": 0.077, "post": 0.004, "notch": 0.0055, "rear_half": 0.009 },
+  "mesh": "assets/items/meshes/shotgun.dgim",
   "model": [
     { "offset": [0, 0.055, -0.25], "half": [0.02, 0.022, 0.38], "color": [0.15, 0.15, 0.15] },
     { "offset": [0, 0.02, -0.3], "half": [0.026, 0.024, 0.12], "color": [0.35, 0.22, 0.12], "mech": "pump" },

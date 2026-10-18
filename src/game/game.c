@@ -1755,6 +1755,7 @@ void game_shutdown(void) {
     phone_shutdown();
     destroy_world();
     hands_shutdown();
+    items_game_shutdown();
     fx_shutdown();
     free(G);
     G = NULL;

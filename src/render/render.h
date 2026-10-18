@@ -78,6 +78,9 @@ enum MaterialFlags {
     // (28..31 are the cover flag / id, and level.c's brush layer in its own bucket flags).
     MAT_NO_RECEIVE       = 1u << 25,
     MAT_SHADOW_TWO_SIDED = 1u << 26,
+    // Item meshes (docs/ITEM_PIPELINE.md, assets/item_mesh.c): the vertex uv is (roughness, metallic) and
+    // the vertex colour sqrt(layered albedo) + baked AO (with ao_vertex), so one draw carries every material.
+    MAT_VERTEX_PBR       = 1u << 27,
     // (bits 24..27: the vgeo material flags VGM_*, vgeo_gpu.h)
     // Ground cover (docs/FOLIAGE_GRASS.md, grass_asset.h): root -> tip shading, colour variation, ground
     // colour matching, translucency; the asset's parameters are frame cover table entry MAT_COVER_ID.
@@ -244,6 +247,7 @@ void render_surface_map(const u8 *ids, int n, float origin_x, float origin_z, fl
 // Frame
 bool render_begin_frame(void);
 void render_set_camera(const RenderCamera *cam);
+void render_camera_info(vec3 *pos, float *fov_deg);   // this frame's camera (after overrides): item mesh LODs
 // Classic renderer, last frame's main view: instances per LOD 0..3 and impostors (n[4]), and
 // those in a cross-fade band (drawn twice, docs/LOD.md).
 void render_classic_lod_counts(u32 n[5], u32 *fading);
@@ -456,6 +460,8 @@ typedef struct RenderUi3dPart {
     vec4 color;               // linear albedo
     u32 shape;                // 0 box, 1 cylinder (Y axis)
     float emissive, metallic, highlight;
+    MeshId mesh;              // item mesh part (docs/ITEM_PIPELINE.md): drawn instead of the shape, scaled by half.x,
+                              // with its per-vertex material (color = tint)
 } RenderUi3dPart;
 typedef struct RenderUi3dView {
     TextureId target;         // render_ui3d_target_create
@@ -598,6 +604,8 @@ bool render_world_to_screen(vec3 world, vec2 *out_px); // false if behind camera
 vec3 render_viewmodel_to_world(vec3 viewmodel_point);   // same pixel under the world FOV (muzzle flash / tracers)
 float render_vm_fov(void);   // the viewmodel (arms + held item) projection FOV this frame
 mat4 render_view_proj(void);
+mat4 render_view_matrix(void);     // this frame's world -> view
+float render_camera_znear(void);   // this frame's near plane (the viewmodel shares it)
 int render_width(void);
 int render_height(void);
 // LOD / impostor / character LOD decisions measure projected sizes against this height, not the

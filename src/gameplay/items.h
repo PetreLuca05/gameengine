@@ -20,6 +20,16 @@ typedef enum DamageType { DMG_GENERIC, DMG_BULLET, DMG_MELEE, DMG_EXPLOSIVE, DMG
 typedef enum WeaponKind { WPN_MELEE, WPN_HITSCAN, WPN_PROJECTILE } WeaponKind;
 typedef enum VisShape { VIS_NONE, VIS_BOX, VIS_CYLINDER, VIS_SPHERE, VIS_CAPSULE } VisShape;
 
+// Detailed model (docs/ITEM_PIPELINE.md): "mesh": "assets/items/meshes/<id>.dgim" replaces the box
+// placeholder in every draw (hands, third person, ground, inventory, icons); "condition": "new" | "worn" |
+// "rusty" picks the wear layering. Gameplay keeps the JSON sockets; the mesh bounds rest pickups on the ground.
+typedef struct ItemModelRef {
+    char mesh[64];
+    i8 condition;           // ItemCondition (assets/item_mesh.h), default worn
+    bool has_bounds;
+    vec3 bmin, bmax;        // the mesh's rest-pose bounds (file header)
+} ItemModelRef;
+
 typedef struct ItemDef {
     char id[32];
     char name[48];
@@ -47,6 +57,7 @@ typedef struct ItemDef {
     bool has_hold;         // the JSON has a "hold" block (hand pose discovery, docs/HANDPOSE.md)
     u8 attachment;         // ITEM_ATTACHMENT: the attachment id it mounts (gameplay/inv_ops.c)
     char icon[64];         // UI icon override (assets path, "icon" in the item JSON); empty = baked icon
+    ItemModelRef model;    // "mesh" / "condition" (non-weapons; weapons and attachments carry their own)
     u8 vehicle_use;        // VehicleUse: consumables used on a vehicle (docs/VEHICLES.md)
     float fuel;            // VUSE_FUEL: litres
     // Camera items (the phone, docs/PHONE.md): aiming raises it into camera mode. Item space as
@@ -131,11 +142,17 @@ typedef struct AttachmentDef {
     float reload_time;        // multiplier
     float muzzle_len;         // m the muzzle moves forward (muzzle devices)
     int muzzle_device;        // VfxMuzzleDevice, -1 = keep ("muzzle_device" string, or the "kind" of its object)
+    int emitter;              // "emitter": "light" (1) | "laser" (2): the flashlight toggle drives it (its mesh's emitter socket)
     bool bal_device;          // the "muzzle_device" object is a ballistics device block (gameplay/ballistics)
     bool has_grip_l;
     Xform grip_l;             // underbarrel grips: left hand socket (attachment space)
     WeaponModelPart parts[ATT_MAX_PARTS];
     int part_count;
+    ItemModelRef model;       // "mesh" (replaces the parts in every draw)
+    // "mesh_for": { "<weapon id>": "<mesh>" }: a variant that fits that weapon (an extended magazine per well).
+    char mesh_for_weapon[4][32];
+    ItemModelRef mesh_for[4];
+    int mesh_for_count;
     bool emissive_parts;      // unused (lens glow is drawn by the sight pass)
 } AttachmentDef;
 
@@ -171,6 +188,7 @@ typedef struct WeaponDef {
     char sound_fire[32], sound_reload[32];
     WeaponModelPart parts[WPN_MAX_PARTS];   // "model" boxes, then the generated iron sights
     int part_count;
+    ItemModelRef model;       // "mesh" / "condition": the detailed model drawn instead of the parts (they stay the gameplay shape)
     vec3 grip_offset;         // where the right hand holds it (model space)
     vec3 support_offset;      // where the left hand supports it (model space)
     vec3 muzzle_offset;
@@ -227,6 +245,8 @@ u16 item_find(const ItemDB *db, const char *id);
 // are world-scale, held items are capped at 7 cm half extent) offset from the grip; weapons are
 // their part boxes. Bounds are in the item's own space (-Z forward, +Y up, origin = the grip).
 void item_held_box(const ItemDef *it, vec3 *center, vec3 *half);
+// "mesh" / "condition" keys of an item, weapon or attachment JSON object (reads the .dgim header for the bounds).
+void item_model_parse(ItemModelRef *m, const struct cJSON *j, const char *owner);
 bool item_model_bounds(const ItemDB *db, u16 item, vec3 *mn, vec3 *mx);
 const ItemDef *item_def(const ItemDB *db, u16 item);
 const WeaponDef *item_weapon(const ItemDB *db, u16 item); // NULL if not a weapon

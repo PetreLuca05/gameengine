@@ -453,6 +453,11 @@ bool render_begin_frame(void) {
     return true;
 }
 
+void render_camera_info(vec3 *pos, float *fov_deg) {
+    *pos = R->cam.pos;
+    *fov_deg = R->cam.fov_deg;
+}
+
 void render_set_camera(const RenderCamera *cam) {
     R->cam = *cam;
     vkg_frame_update();          // grass fades / shadows follow the fidelity level (outside the frame's recording)
@@ -2944,6 +2949,8 @@ vec3 render_viewmodel_to_world(vec3 p) {
 }
 
 mat4 render_view_proj(void) { return R->view_proj; }
+mat4 render_view_matrix(void) { return R->view; }
+float render_camera_znear(void) { return R->cam.znear; }
 int render_width(void) { return (int)R->swap_extent.width; }
 int render_height(void) { return (int)R->swap_extent.height; }
 RenderStats render_stats(void) { return R->last_stats; }
