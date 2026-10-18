@@ -9,6 +9,7 @@
 // Reads every triangle primitive of a glTF (node transforms applied) into owned arrays.
 typedef struct VgImported {
     float *pos, *normal, *uv;
+    u32 *color;                  // COLOR_0 as RGBA8 (NULL when no primitive has one; white where missing)
     u32 *indices;
     u16 *tri_material;
     u32 vertex_count, index_count, material_count;

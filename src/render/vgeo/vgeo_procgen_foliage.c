@@ -248,6 +248,7 @@ u32 vgeo_foliage_materials(int kind, VgMaterial out[2]) {
             out[i].fade_start = 100.0f;
             out[i].fade_end = 150.0f;
             out[i].shadow_max_dist = 40.0f;
+            vg_material_set_ao(&out[i], 0.0f, MAT_AO_COMBINE_AUTO, false);   // leaves 0.3 (thin), the trunk full
         }
         return 2;
     }
@@ -268,6 +269,7 @@ u32 vgeo_foliage_materials(int kind, VgMaterial out[2]) {
         g->fade_end = 95.0f;
         g->shadow_max_dist = 20.0f;
     }
+    vg_material_set_ao(g, MATERIAL_AO_FOLIAGE, MAT_AO_COMBINE_MIN, false);   // thin cards (render/material_ao.h)
     return 1;
 }
 

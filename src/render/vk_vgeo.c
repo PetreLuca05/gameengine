@@ -1024,6 +1024,7 @@ static u32 level_mesh(const RenderVgeoPlacement *pl) {
                 m.fade_end = fo->fade_end;
                 m.shadow_max_dist = fo->shadow_max_dist;
             }
+            vg_material_set_ao(&m, mm->ao_strength, mm->ao_combine, mm->ao_vertex);   // with the final VGM_MASKED
         }
         u32 idx = vgeo_scene_add_material(&G.scene, &m);
         if (k == 0) base = idx;
@@ -1515,7 +1516,7 @@ u32 vkg_route_skinned(const SkinnedDraw *draws, u32 n, const mat4 *bones, u8 *ro
         }
         m.normal_scale = d->normal_scale != 0.0f ? d->normal_scale : 1.0f;
         m.occlusion_strength = 1.0f;
-        m.emissive_rgb = 0xFFFFFFFFu;
+        m.emissive_rgb = material_ao_word(0xFFFFFFFFu, 0);   // AO byte 0: the full screen-space AO
         if (memcmp(&m, &G.slot_mat[slot], sizeof(m))) { G.slot_mat[slot] = m; G.slot_mat_dirty[slot] = 1; }
         routed[i] = 1;
         routed_n++;

@@ -59,6 +59,8 @@ typedef struct GrassAsset {
     float var_hue, var_sat, var_val; // per clump / card variation (deg, fraction, fraction)
     float macro;                     // strength of the shared macro variation (terrain macro noise)
     float ao_root;                   // clump AO at the root (1 at 40 % height)
+    float ao_strength;               // weight of the screen-space AO (render/material_ao.h; 0.3, 0 in JSON = none)
+    int ao_combine;                  // MaterialAoCombine of the clump AO against it ("min" default, "multiply")
     // terrain grass term beyond the fade (shaders/terrain): the grass tops' colour and how much of the
     // ground they cover at full density
     float top_color[3];              // linear

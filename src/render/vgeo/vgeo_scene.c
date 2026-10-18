@@ -32,6 +32,7 @@ void vgeo_scene_init(VgScene *s, const VgContext *ctx) {
 u32 vgeo_scene_add_material(VgScene *s, const VgMaterial *m) {
     GROW(s->materials, s->material_count, s->material_cap, 1);
     s->materials[s->material_count] = *m;
+    vg_material_ao_check(&s->materials[s->material_count]);
     return s->material_count++;
 }
 

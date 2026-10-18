@@ -800,7 +800,7 @@ static void draw_items(VkCommandBuffer cmd, DrawItem *items, u32 count, bool sha
         pc.flags[3] = shadow_pass ? g_shadow_cascade : 0;
         pc.pbr[0] = f32_bits(d->mat.normal_scale);
         pc.pbr[1] = f32_bits(d->mat.occlusion_strength);
-        pc.pbr[2] = d->mat.emissive_rgb;
+        pc.pbr[2] = material_gpu_emissive(&d->mat);   // + the AO byte (render/material_ao.h)
         pc.pbr[3] = f32_bits(d->mat.alpha_cutoff);
         vkCmdPushConstants(cmd, R->layout_lit, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushLit), &pc);
         vkCmdDrawIndexed(cmd, m->index_count, 1, 0, 0, 0);
@@ -2178,7 +2178,8 @@ static void build_frame_graph(FrameData *fd) {
     post_screen_space(&F.lit);
     const PostSettings *ps = post_settings();
     fd->post_flags = v4(F.lit.ao_on ? 1.0f : 0.0f, F.lit.contact_on ? 1.0f : 0.0f, F.lit.ssr_on ? 1.0f : 0.0f, F.lit.ssgi_on ? 1.0f : 0.0f);
-    fd->post_params = v4(ps->ssr_intensity, ps->ssgi_intensity, ps->ao_intensity, 1.0f);
+    // z: AO intensity as the lit pass' lerp weight (above 1 the GTAO power strengthens it instead, gtao.comp)
+    fd->post_params = v4(ps->ssr_intensity, ps->ssgi_intensity, fminf(ps->ao_intensity, 1.0f), 1.0f);
 
     p = fg_pass("opaque", exec_opaque, NULL);
     fg_write(p, F.hdr, FG_COLOR);

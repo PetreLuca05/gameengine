@@ -1,0 +1,49 @@
+#version 450
+// Separable bilateral blur of the raw GTAO term (docs/RENDERING_POST.md "Foliage-aware AO"), at the AO
+// resolution, run twice (horizontal, then vertical). Gaussian taps weighted by
+//   depth: the relative view-depth difference to the centre (x U.s_ao3.x sharpness), so the AO of a leaf
+//          card never smears onto the ground behind it and silhouettes stay crisp;
+//   normal: pow(max(dot(n, n0), 0), 8), so creases / card orientation changes keep their own AO.
+//   pc.u0.x direction (0 = x, 1 = y)    U.s_ao3.y radius (AO pixels, 1..8)
+#extension GL_GOOGLE_include_directive : require
+#include "post_common.glsl"
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0) uniform sampler2D ao_tex;
+layout(set = 0, binding = 1) uniform sampler2D depth_tex;
+layout(set = 0, binding = 2) uniform sampler2D normal_tex;
+layout(set = 0, binding = 8) uniform writeonly image2D dst;
+
+void main() {
+    ivec2 p = ivec2(gl_GlobalInvocationID.xy);
+    ivec2 sz = imageSize(dst);
+    if (p.x >= sz.x || p.y >= sz.y) return;
+    vec2 uv = (vec2(p) + 0.5) / vec2(sz);
+    float d0 = textureLod(depth_tex, uv, 0.0).r;
+    float a0 = sanitize4(texelFetch(ao_tex, p, 0)).r;
+    if (d0 >= 1.0) { imageStore(dst, p, vec4(a0)); return; }
+    float z0 = linear_depth(d0);
+    vec3 n0 = oct_decode(textureLod(normal_tex, uv, 0.0).rg);
+    ivec2 dir = pc.u0.x == 0u ? ivec2(1, 0) : ivec2(0, 1);
+    int radius = clamp(int(U.s_ao3.y + 0.5), 1, 8);
+    float sigma = float(radius) * 0.5 + 0.5;
+    float sharp = max(U.s_ao3.x, 0.0);
+    float acc = a0, wsum = 1.0;
+    for (int i = -radius; i <= radius; i++) {
+        if (i == 0) continue;
+        ivec2 q = clamp(p + dir * i, ivec2(0), sz - 1);
+        vec2 quv = (vec2(q) + 0.5) / vec2(sz);
+        float d = textureLod(depth_tex, quv, 0.0).r;
+        if (d >= 1.0) continue;
+        float z = linear_depth(d);
+        vec3 n = oct_decode(textureLod(normal_tex, quv, 0.0).rg);
+        float wd = exp(-abs(z - z0) / max(z0, 1e-3) * sharp);
+        float nd = max(dot(n, n0), 0.0);
+        float wn = nd * nd;
+        wn *= wn;
+        wn *= wn;   // ^8
+        float w = exp(-float(i * i) / (2.0 * sigma * sigma)) * wd * wn;
+        acc += sanitize4(texelFetch(ao_tex, q, 0)).r * w;
+        wsum += w;
+    }
+    imageStore(dst, p, vec4(acc / wsum));
+}

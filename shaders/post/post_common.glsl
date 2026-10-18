@@ -22,6 +22,8 @@ layout(std140, set = 0, binding = 12) uniform PostUBO {
     vec4 s_look2;        // bloom tint rgb
     vec4 s_look3;        // damage edge tint rgb
     vec4 s_look4;        // low-health vignette colour rgb
+    vec4 s_ao2;          // GTAO: falloff (fraction of the radius), thickness (m), slices, foliage radius (m)
+    vec4 s_ao3;          // AO blur: depth sharpness, radius (px); z full resolution, w unused
     vec4 lights[MAX_POINT_LIGHTS * 2];
 } U;
 
@@ -58,11 +60,14 @@ vec3 sanitize(vec3 c) { return (any(isnan(c)) || any(isinf(c))) ? vec3(0.0) : cl
 vec4 sanitize4(vec4 c) { return (any(isnan(c)) || any(isinf(c))) ? vec4(0.0) : clamp(c, vec4(-65000.0), vec4(65000.0)); }
 vec3 rgb_to_ycocg(vec3 c) { return vec3(dot(c, vec3(0.25, 0.5, 0.25)), dot(c, vec3(0.5, 0.0, -0.5)), dot(c, vec3(-0.25, 0.5, -0.25))); }
 vec3 ycocg_to_rgb(vec3 c) { return vec3(c.x + c.y - c.z, c.x + c.z, c.x - c.y - c.z); }
-// G-buffer material flags (gbuffer_body.glsl)
+// G-buffer material flags (gbuffer_body.glsl): bits 0-3, the material's AO weight in bits 4-7.
 #define GB_VIEWMODEL 1u
 #define GB_DYNAMIC 2u
 #define GB_UNLIT 4u
+#define GB_THIN 8u          // alpha-tested / foliage card (src/render/material_ao.h): thin occluder
 uint gb_flags(vec4 m) { return uint(m.b * 255.0 + 0.5); }
+// The material's ao_strength (4 bits; the lit pass uses the exact value from the material).
+float gb_ao_strength(vec4 m) { return 1.0 - float((gb_flags(m) >> 4u) & 15u) / 15.0; }
 
 // Blue noise (64x64 RGBA, 4 independent channels) with a per-frame offset (R2 sequence) so the
 // stochastic passes converge under temporal filtering.

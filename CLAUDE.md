@@ -42,6 +42,7 @@ Windows, no admin; tools are portable, in `.toolchain/` (git-ignored).
 | glTF PBR maps (metal-rough, normal, AO, emissive, MASK, doubleSided) | PBR.md | src/assets/assets.c gltf_material, shaders/pbr_maps.glsl, render.c draw_items (set 3), vg_resolve.glsl; test: tools/gen_pbr_test.py, tools/tests/pbr_shelf.cfg |
 | Looks (five fixed grading presets Realism / PUBG-style / Cinematic / Vibrant / Gritty; `look <name>`, dev `look_tune` / `look_dump`) | LOOKS.md | src/render/post/{look,looks,post_look}.c, shaders/post/{look.glsl,look_preview.comp}, src/game/game_look.c, scr_settings.c look_section; tests: test_looks(_release), tools/tests/lint_looks.py, run_looks_tests.py, looks.cfg |
 | Engine Fidelity (Off .. Modern, bounds every graphics setting) | ENGINE_FIDELITY.md | assets/render/fidelity, src/render/fidelity, src/game/game_fidelity.c, scr_settings.c; tests: test_fidelity, tools/tests/run_fidelity_tests.py |
+| Foliage-aware AO (GTAO thin occluders, bilateral blur, temporal, per-material `ao_strength` / combine / vertex AO byte, `r_ao_*`, `r_post_debug 18/19/20`, dev room AO foliage corner (-50, 0, -32)) | RENDERING_POST.md "Foliage-aware AO" | shaders/post/{gtao,ao_blur}.comp, post_screen_space.c, src/render/material_ao.h, lit_body.glsl, gbuffer_body.glsl; tests: test_material_ao, tools/tests/ao_foliage.cfg, tools/gen_foliage_ao_test.py |
 | VFX / flesh | VFX*.md | src/vfx, src/gameplay/flesh_fx.c, assets/vfx |
 | UI | UI.md | src/ui/gui, src/ui/screens, assets/ui |
 | Zombies | ZOMBIES.md | src/gameplay/zombies |

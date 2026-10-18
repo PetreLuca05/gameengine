@@ -58,6 +58,7 @@ static void exec_debug(VkCommandBuffer cmd, void *u) {
     if (vol && fg_valid(T.dbg_src)) pb_tex_fg(&b, 1, T.dbg_src, P.linear);
     else pb_tex(&b, 1, P.lut, P.linear);   // any 3D texture
     pb_tex_fg(&b, 2, P.in.depth, P.point);
+    pb_tex_fg(&b, 3, P.in.material, P.point);   // ao_final: the per-material AO weight
     pb_img_fg(&b, 8, T.ldr);
     pb_buf(&b, 13, P.exposure_buf.buffer, 64, false);
     pb_push(cmd, &b, VK_PIPELINE_BIND_POINT_COMPUTE);
@@ -66,6 +67,7 @@ static void exec_debug(VkCommandBuffer cmd, void *u) {
     pc.u[0] = (u32)T.dbg_view;
     pc.u[1] = T.dbg_level;
     pc.p[0] = 1.0f;
+    pc.p[1] = fminf(P.set.ao_intensity, 1.0f);   // ao_final: the lit pass' AO lerp weight
     post_push_constants(cmd, &pc, 128);
     u32 w, h;
     fg_extent(T.ldr, &w, &h);
@@ -102,6 +104,9 @@ static FgRes debug_source(int v, FgRes aa_out) {
     case 14: return T.bloom;
     case 15: return T.flare;
     case 16: return post_debug_mb_tiles();
+    case 18: return P.ao_raw;
+    case 19: return P.ao_blur;
+    case 20: return P.ao;
     default: return FG_NONE;
     }
 }
@@ -167,6 +172,7 @@ FgRes post_resolve(void) {
             int d = fg_pass("debug_view", exec_debug, NULL);
             fg_read(d, T.dbg_src, v == 9 ? FG_STORAGE : FG_SAMPLED);
             fg_read(d, P.in.depth, FG_SAMPLED);
+            fg_read(d, P.in.material, FG_SAMPLED);
             fg_write(d, T.ldr, FG_STORAGE);
         }
     }

@@ -54,6 +54,8 @@ static struct {
         *bloom_int, *flare, *chromatic, *vignette, *grain, *tonemap, *exp_comp, *auto_exp, *brightness, *gamma, *colorblind, *lut,
         *debug, *compare, *paper, *maxnits, *feedback, *profile, *volumes_draw, *distortion, *underwater, *lens_dirt, *fog_scale,
         *dof_quality, *vol_lights;
+    Cvar *ao_full, *ao_radius, *ao_intensity, *ao_falloff, *ao_thickness, *ao_foliage_radius, *ao_slices, *ao_steps, *ao_blur,
+        *ao_blur_sharp, *ao_temporal;   // GTAO detail (docs/RENDERING_POST.md "Foliage-aware AO")
     PostVolume vols[MAX_POST_VOLUMES];
     int vol_count;
     char vol_level[64];
@@ -403,6 +405,19 @@ void game_post_init(void) {
     GP.upscale = cvar_reg_float("r_upscale_ratio", 0.67f, 0.5f, 1.0f, A, "render resolution / output with an upscaler");
     GP.sharpen = cvar_reg_float("r_sharpen", 0.35f, 0.0f, 1.0f, A, "contrast adaptive sharpening");
     GP.ao = cvar_reg_int("r_ao", 2, 0, 2, A, "ambient occlusion (GTAO): 0 off, 1 low, 2 high");
+    GP.ao_full = cvar_reg_bool("r_ao_full_res", false, A, "GTAO at full render resolution (default half: blurred and upsampled)");
+    GP.ao_radius = cvar_reg_float("r_ao_radius", 0.9f, 0.1f, 4.0f, A, "GTAO world-space radius (m)");
+    GP.ao_intensity = cvar_reg_float("r_ao_intensity", 1.0f, 0.0f, 3.0f, A, "GTAO intensity: below 1 fades the AO, above 1 deepens it (power)");
+    GP.ao_falloff = cvar_reg_float("r_ao_falloff", 0.4f, 0.05f, 1.0f, A, "GTAO distance falloff: the fraction of the radius occluders fade out over");
+    GP.ao_thickness = cvar_reg_float("r_ao_thickness", 0.25f, 0.02f, 2.0f, A,
+                                     "GTAO thin-occluder heuristic (m): alpha-tested cards further in front of a surface than this fade out over as much again");
+    GP.ao_foliage_radius = cvar_reg_float("r_ao_foliage_radius", 0.35f, 0.05f, 2.0f, A,
+                                          "GTAO radius clamp (m) for thin occluders and thin receivers (alpha-tested foliage): no dark halos");
+    GP.ao_slices = cvar_reg_int("r_ao_slices", 0, 0, 8, A, "GTAO slices (directions) per pixel; 0 = by quality (low 2, high 3)");
+    GP.ao_steps = cvar_reg_int("r_ao_steps", 0, 0, 16, A, "GTAO horizon samples per slice side; 0 = by quality (low 3, high 6)");
+    GP.ao_blur = cvar_reg_int("r_ao_blur", 3, 0, 8, A, "AO bilateral blur radius (AO pixels per side, 2 separable passes); 0 = off");
+    GP.ao_blur_sharp = cvar_reg_float("r_ao_blur_sharpness", 40.0f, 0.0f, 200.0f, A, "AO bilateral blur depth sharpness (higher = stops at smaller depth steps)");
+    GP.ao_temporal = cvar_reg_float("r_ao_temporal", 0.9f, 0.0f, 0.97f, A, "AO temporal accumulation: history weight (velocity reprojection, depth rejection); 0 = off");
     GP.contact = cvar_reg_int("r_contact_shadows", 2, 0, 2, A, "screen-space contact shadows: 0 off, 1 low (8 steps), 2 high (14 steps)");
     GP.ssr = cvar_reg_int("r_ssr", 2, 0, 2, A, "screen-space reflections: 0 off, 1 half res, 2 full res");
     GP.ssgi = cvar_reg_int("r_ssgi", 0, 0, 1, A, "screen-space diffuse GI");
@@ -426,7 +441,7 @@ void game_post_init(void) {
     GP.gamma = cvar_find("r_gamma");
     GP.colorblind = cvar_reg_int("r_colorblind", 0, 0, 3, A, "colour-blind correction: 0 off, 1 protanopia, 2 deuteranopia, 3 tritanopia");
     GP.lut = cvar_reg_string("r_lut", "", A, "grading LUT (.cube, relative to the game folder); empty = neutral");
-    GP.debug = cvar_reg_int("r_post_debug", 0, 0, 32, 0, "post debug view: 1 ao 2 contact 3 ssr 4 ssgi 5 velocity 6 normal 7 material 8 depth 9 hiz 10 coc 11 luminance 12 taa 13 froxel 14 bloom 15 flare 16 mb tiles 17 fog");
+    GP.debug = cvar_reg_int("r_post_debug", 0, 0, 32, 0, "post debug view: 1 ao 2 contact 3 ssr 4 ssgi 5 velocity 6 normal 7 material 8 depth 9 hiz 10 coc 11 luminance 12 taa 13 froxel 14 bloom 15 flare 16 mb tiles 17 fog 18 ao raw 19 ao blurred 20 ao final (x material weight)");
     GP.compare = cvar_reg_bool("r_post_compare", false, 0, "split A/B: left raw (exposure + tonemap), right full stack");
     GP.paper = cvar_reg_float("r_hdr_paper_white", 200.0f, 80.0f, 500.0f, A, "HDR10: paper white (nits)");
     GP.maxnits = cvar_reg_float("r_hdr_max_nits", 1000.0f, 400.0f, 10000.0f, A, "HDR10: display peak (nits)");
@@ -477,6 +492,17 @@ static void build_settings(PostSettings *s, const PostFrameInfo *fi) {
     s->render_scale = GP.upscale->f;
     s->sharpen = GP.sharpen->f;
     s->ao = GP.ao->i;
+    s->ao_full_res = GP.ao_full->i != 0;
+    s->ao_radius = GP.ao_radius->f;
+    s->ao_intensity = GP.ao_intensity->f;
+    s->ao_falloff = GP.ao_falloff->f;
+    s->ao_thickness = GP.ao_thickness->f;
+    s->ao_foliage_radius = GP.ao_foliage_radius->f;
+    s->ao_slices = GP.ao_slices->i;
+    s->ao_steps = GP.ao_steps->i;
+    s->ao_blur_radius = GP.ao_blur->i;
+    s->ao_blur_sharpness = GP.ao_blur_sharp->f;
+    s->ao_temporal = GP.ao_temporal->f;
     s->contact_shadows = GP.contact->i;
     s->ssr = GP.ssr->i;
     s->ssgi = GP.ssgi->i;

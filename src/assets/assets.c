@@ -149,6 +149,18 @@ static TextureId gltf_texture(GltfTexLoad *L, const cgltf_texture_view *tv, bool
     return id;
 }
 
+// AO settings of a material from a JSON object (glTF extras, the manifest's "ao" block); absent keys keep
+// the material's. ao_strength 0 in data means "no screen-space AO" (MATERIAL_AO_OFF), not automatic.
+static void model_parse_ao(Material *mat, const cJSON *o, const char *k_strength, const char *k_combine, const char *k_vertex) {
+    if (!cJSON_IsObject(o)) return;
+    const cJSON *v = cJSON_GetObjectItemCaseSensitive(o, k_strength);
+    if (cJSON_IsNumber(v)) mat->ao_strength = v->valuedouble <= 0.0 ? MATERIAL_AO_OFF : (float)v->valuedouble;
+    v = cJSON_GetObjectItemCaseSensitive(o, k_combine);
+    if (cJSON_IsString(v)) mat->ao_combine = (u8)material_ao_combine_parse(v->valuestring);
+    v = cJSON_GetObjectItemCaseSensitive(o, k_vertex);
+    if (cJSON_IsBool(v)) mat->ao_vertex = cJSON_IsTrue(v);
+}
+
 // KHR_texture_transform: one uv for every map, so only a uniform scale without offset / rotation on
 // the base colour is honoured (as tex_scale); anything else is reported and ignored.
 static float gltf_uv_scale(const char *path, const cgltf_texture_view *tv) {
@@ -208,6 +220,12 @@ static void gltf_material(GltfTexLoad *L, const cgltf_material *gm, Material *ma
         log_warn("gltf: %s: alphaMode BLEND with an opaque base colour factor is drawn opaque", L->path);
     }
     if (gm->double_sided) mat->flags |= MAT_TWO_SIDED;
+    // Ambient occlusion (render/material_ao.h): "extras": { "ao_strength", "ao_combine", "ao_vertex" }.
+    if (gm->extras.data) {
+        cJSON *x = cJSON_Parse(gm->extras.data);
+        model_parse_ao(mat, x, "ao_strength", "ao_combine", "ao_vertex");
+        cJSON_Delete(x);
+    }
 }
 
 bool model_load_gltf(const char *path, Model *out) {
@@ -360,6 +378,9 @@ bool assets_init(const char *manifest_path) {
         Model *m = &AS->models[AS->model_count];
         if (model_load_gltf(platform_data_path(cJSON_IsString(p) ? p->valuestring : "", buf, sizeof(buf)), m)) {
             dg_strcpy(m->name, sizeof(m->name), cJSON_IsString(n) ? n->valuestring : "");
+            // "ao": { "strength", "combine", "vertex" } on every material of the model (render/material_ao.h).
+            const cJSON *ao = cJSON_GetObjectItemCaseSensitive(it, "ao");
+            for (int k = 0; k < m->mesh_count; k++) model_parse_ao(&m->meshes[k].mat, ao, "strength", "combine", "vertex");
             if (cJSON_IsTrue(cJSON_GetObjectItemCaseSensitive(it, "vgeo"))) model_load_vgeo(m, buf);
             model_parse_foliage(m, it);
         }

@@ -1,7 +1,7 @@
 // Post-processing / screen-space stack (frame graph nodes, src/render/post/*.c, shaders/post/*).
 //
 // Pass order (see docs/RENDERING_POST.md for the reasoning and budgets):
-//   prepass (depth, normals, material, velocity)  ->  hi-z  ->  contact shadows  ->  GTAO  ->
+//   prepass (depth, normals, material, velocity)  ->  hi-z  ->  contact shadows  ->  GTAO (+ blur)  ->
 //   SSGI  ->  SSR  ->  volumetric froxels  ->  lit opaque (consumes AO / contact / SSR / SSGI)  ->
 //   fog apply  ->  transparency + particles  ->  viewmodel  ->  TAA / TAA-U / FXAA / SMAA / FSR1  ->
 //   motion blur  ->  depth of field  ->  bloom  ->  auto exposure  ->  lens flare  ->  tonemap +

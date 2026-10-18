@@ -20,7 +20,16 @@ typedef struct PostSettings {
     // screen-space lighting
     int contact_shadows;
     int ao;                        // 0 off, 1 low, 2 high
-    float ao_radius, ao_intensity;
+    float ao_radius, ao_intensity; // world radius (m); intensity: power on the visibility, < 1 also fades it
+    // GTAO detail (docs/RENDERING_POST.md "Foliage-aware AO")
+    bool ao_full_res;              // full render resolution (default half)
+    int ao_slices, ao_steps;       // slices per pixel, horizon steps per side
+    float ao_falloff;              // fraction of the radius the distance falloff spans
+    float ao_thickness;            // m: thin occluders (alpha-tested cards) further in front fade out over as much again
+    float ao_foliage_radius;       // m: radius clamp for thin occluders / thin receivers (no foliage halos)
+    float ao_blur_sharpness;       // bilateral blur depth weight (relative depth difference x this)
+    int ao_blur_radius;            // bilateral blur taps per side (0 = no blur)
+    float ao_temporal;             // history weight of the temporal accumulation (0 = off)
     int ssgi;
     float ssgi_intensity;
     int ssr;                       // 0 off, 1 low, 2 high
