@@ -218,7 +218,20 @@ target_compile_definitions(deadground PRIVATE
   DG_SHADER_COMPILER_KIND="${DG_SHADER_COMPILER_KIND}"
   DG_VERSION="${PROJECT_VERSION}"
   # Looks (docs/LOOKS.md): the live tuning tools (look_tune / look_dump) exist in dev builds only.
-  $<$<NOT:$<CONFIG:Release>>:DG_LOOK_TUNE=1>)
+  $<$<NOT:$<CONFIG:Release>>:DG_LOOK_TUNE=1>
+  # Profiler probes (src/core/profiler.h, docs/PERF_AUDIT.md): in every config, one branch while off.
+  DG_PROFILE=1)
+# Allocation / memcpy accounting for perf_audit: src/core/prof_alloc.h force-included into every
+# engine .c file (third_party is not wrapped). -DDG_PROFILE_ALLOC=OFF builds without it.
+option(DG_PROFILE_ALLOC "count malloc / memcpy per call site in profiles (docs/PERF_AUDIT.md)" ON)
+if(DG_PROFILE_ALLOC)
+  target_compile_definitions(deadground PRIVATE DG_PROFILE_ALLOC=1)
+  if(MSVC)
+    target_compile_options(deadground PRIVATE "$<$<COMPILE_LANGUAGE:C>:/FIcore/prof_alloc.h>")
+  else()
+    target_compile_options(deadground PRIVATE "$<$<COMPILE_LANGUAGE:C>:SHELL:-include core/prof_alloc.h>")
+  endif()
+endif()
 if(DG_HAVE_STEAM)
   target_compile_definitions(deadground PRIVATE DG_HAVE_STEAM=1)
   target_link_libraries(deadground PRIVATE steam_shim)
@@ -678,6 +691,27 @@ foreach(t test_looks test_looks_release)
 endforeach()
 add_test(NAME looks COMMAND test_looks)
 add_test(NAME looks_release COMMAND test_looks_release)
+# Profiler (docs/PERF_AUDIT.md): a capture with zones, jobs, parallel_for, waits, counters, series and
+# wrapped allocations writes a valid profile; perf_fix_disable ids; the cvar_find hash index (PF-0002).
+# tools/perf_audit/tests (the analyzer, image / state diffs) run under the same ctest.
+add_executable(test_profiler tests/test_profiler.c src/core/profiler.c src/core/jobs.c src/core/cvar.c src/core/log.c src/core/platform.c)
+set_target_properties(test_profiler PROPERTIES C_STANDARD 11)
+target_include_directories(test_profiler PRIVATE src)
+target_compile_definitions(test_profiler PRIVATE DG_PROFILE=1 DG_PROFILE_ALLOC=1 DG_VERSION="test")
+target_link_libraries(test_profiler PRIVATE SDL3::SDL3-static)
+if(MSVC)
+  target_compile_options(test_profiler PRIVATE /W3 /wd4100 /wd4201 /utf-8 /FIcore/prof_alloc.h)
+  target_compile_definitions(test_profiler PRIVATE _CRT_SECURE_NO_WARNINGS)
+  target_link_libraries(test_profiler PRIVATE dbghelp)
+else()
+  target_compile_options(test_profiler PRIVATE -include core/prof_alloc.h)
+endif()
+add_test(NAME profiler COMMAND test_profiler WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+find_package(Python3 COMPONENTS Interpreter QUIET)
+if(Python3_FOUND)
+  add_test(NAME perf_audit_tools COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/perf_audit/tests/run_tests.py)
+endif()
+
 # Engine Fidelity (docs/ENGINE_FIDELITY.md): tables, bounds, apply / clamp on the real cvar system, era
 # matrix, frame graph validation.
 add_executable(test_fidelity tests/test_fidelity.c src/render/fidelity/fidelity.c src/render/graph/fg_check.c src/core/cvar.c)

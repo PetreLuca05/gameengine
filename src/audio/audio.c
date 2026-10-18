@@ -1,6 +1,7 @@
 #include "audio.h"
 #include "core/engine.h"
 #include "core/cvar.h"
+#include "core/profiler.h"
 #include "core/log.h"
 #include "core/platform.h"
 #include "miniaudio.h"
@@ -374,6 +375,7 @@ void audio_update(vec3 pos, vec3 fwd, vec3 up) {
     ma_sound_group_set_volume(&A->groups[2], A->voice->f * wg);
     ma_sound_group_set_volume(&A->groups[3], A->ui->f);
     // Recycle finished voices.
+    int live = 0;
     for (int i = 0; i < MAX_VOICES; i++) {
         Voice *v = &A->voices[i];
         if (v->used && ma_sound_at_end(&v->sound)) {
@@ -381,5 +383,7 @@ void audio_update(vec3 pos, vec3 fwd, vec3 up) {
             v->used = false;
             if (v->lpf_on) { ma_node_detach_output_bus(&v->lpf, 0); v->lpf_on = false; }
         }
+        live += v->used;
     }
+    prof_count(PC_AUDIO_VOICES, live);
 }

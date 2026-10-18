@@ -126,6 +126,9 @@ void game_disconnect_to_local(const char *reason);
 Game *game(void);
 World *game_world(void);
 Player *game_local_player(void);
+// Performance audit runs (game_perf.c, docs/PERF_AUDIT.md): perf_audit / perf_verify.
+void game_perf_init(void);
+void game_perf_frame(void);   // main loop, after the command buffer
 float game_ads_vis(void);       // the viewed player's ADS progress interpolated to this frame (zoom, sight presentation)
 // Spectating (docs/SPECTATE.md): whose eyes the first-person presentation uses. The watched player
 // in first / third person, else the local player. Input, prediction and RPCs stay on local_slot.

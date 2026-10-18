@@ -1,12 +1,13 @@
 #include "engine.h"
 #include "jobs.h"
 #include "log.h"
+#include "profiler.h"
 #include <SDL3/SDL.h>
 
 #define JOB_QUEUE_SIZE 1024
 #define MAX_WORKERS 16
 
-typedef struct Job { JobFn fn, done; void *user; JobCounter *counter; } Job;
+typedef struct Job { JobFn fn, done; void *user; JobCounter *counter; u64 submitted; } Job;   // submitted: prof_ticks (queue latency)
 
 typedef struct JobQueue {
     Job items[JOB_QUEUE_SIZE];
@@ -41,8 +42,13 @@ static bool queue_pop(JobQueue *q, Job *out) {
     return true;
 }
 
+static void pf_helper(void *u);
+
 static void run_job(Job *j) {
+    bool rec = j->fn != pf_helper;   // parallel_for helpers record themselves (parfor:<fn>)
+    if (rec) prof_job_begin((const void *)j->fn, j->submitted, false);
     j->fn(j->user);
+    if (rec) prof_job_end();
     if (j->done) {
         SDL_LockMutex(s_jobs.done_mutex);
         if (!queue_push(&s_jobs.completed, *j)) log_error("jobs: completion queue full");
@@ -52,7 +58,9 @@ static void run_job(Job *j) {
 }
 
 static int worker_main(void *arg) {
-    (void)arg;
+    char name[32];
+    SDL_snprintf(name, sizeof(name), "dg_worker_%d", (int)(intptr_t)arg);
+    prof_thread_name(name);
     for (;;) {
         // Bursty frame work: spin briefly for more before sleeping (a condition wake costs
         // tens of microseconds, longer than most chunks).
@@ -79,7 +87,7 @@ void jobs_init(int worker_count) {
     for (int i = 0; i < worker_count; i++) {
         char name[32];
         SDL_snprintf(name, sizeof(name), "dg_worker_%d", i);
-        s_jobs.threads[i] = SDL_CreateThread(worker_main, name, NULL);
+        s_jobs.threads[i] = SDL_CreateThread(worker_main, name, (void *)(intptr_t)i);
     }
     log_info("jobs: %d worker threads", worker_count);
 }
@@ -101,7 +109,8 @@ void jobs_shutdown(void) {
 int jobs_worker_count(void) { return s_jobs.worker_count; }
 
 void jobs_submit(JobFn fn, JobFn done, void *user, JobCounter *counter) {
-    Job j = { fn, done, user, counter };
+    Job j = { fn, done, user, counter, prof_ticks() };
+    prof_count(PC_JOBS, 1);
     if (counter) SDL_AtomicIncRef((SDL_AtomicInt *)&counter->pending);
     SDL_LockMutex(s_jobs.mutex);
     bool ok = queue_push(&s_jobs.pending, j);
@@ -111,14 +120,21 @@ void jobs_submit(JobFn fn, JobFn done, void *user, JobCounter *counter) {
 }
 
 void jobs_wait(JobCounter *counter) {
+    bool waiting = false;   // profiler: time with nothing left to help with (a dependency stall)
     while (SDL_GetAtomicInt((SDL_AtomicInt *)&counter->pending) > 0) {
         SDL_LockMutex(s_jobs.mutex);
         Job j;
         bool got = queue_pop(&s_jobs.pending, &j);
         SDL_UnlockMutex(s_jobs.mutex);
-        if (got) run_job(&j);
-        else SDL_Delay(0);
+        if (got) {
+            if (waiting) { PROF_WAIT_END(); waiting = false; }
+            run_job(&j);
+        } else {
+            if (!waiting && dg_prof_recording_on()) { PROF_WAIT_BEGIN(PW_JOBS_WAIT); waiting = true; }
+            SDL_Delay(0);
+        }
     }
+    if (waiting) PROF_WAIT_END();
 }
 
 // ------------------------------------------------------------------ parallel for
@@ -148,13 +164,16 @@ typedef struct PfHelper { ParFor *p; int gen; } PfHelper;
 static PfHelper g_pf_helpers[PARFOR_SLOTS][MAX_WORKERS];
 static void pf_helper(void *u) {
     PfHelper *h = (PfHelper *)u;
+    prof_job_begin((const void *)h->p->fn, 0, true);
     pf_run(h->p, h->gen);
+    prof_job_end();
 }
 
 void jobs_parallel_for(int count, int chunk, JobRangeFn fn, void *ctx) {
     if (count <= 0) return;
     chunk = DG_MAX(1, chunk);
     int chunks = (count + chunk - 1) / chunk;
+    prof_count(PC_PARFOR, 1);
     if (!g_engine.jobs || s_jobs.worker_count <= 0 || chunks <= 1) { fn(ctx, 0, count); return; }
     int slot = (int)((u32)SDL_AddAtomicInt(&g_pf_seq, 1) % PARFOR_SLOTS);
     ParFor *p = &g_pf[slot];
@@ -173,13 +192,17 @@ void jobs_parallel_for(int count, int chunk, JobRangeFn fn, void *ctx) {
         PfHelper *h = &g_pf_helpers[slot][k];
         h->p = p;
         h->gen = gen;
-        Job j = { pf_helper, NULL, h, NULL };
+        Job j = { pf_helper, NULL, h, NULL, 0 };
         queue_push(&s_jobs.pending, j);
     }
     SDL_BroadcastCondition(s_jobs.cond);
     SDL_UnlockMutex(s_jobs.mutex);
+    prof_job_begin((const void *)fn, 0, true);
     pf_run(p, gen);
+    prof_job_end();
+    PROF_WAIT_BEGIN(PW_PARFOR_TAIL);
     while (SDL_GetAtomicInt(&p->done) < chunks) SDL_CPUPauseInstruction();
+    PROF_WAIT_END();
     // Helpers that never got a chunk see the generation change and leave.
     SDL_SetAtomicInt(&p->gen, gen + 1);
 }

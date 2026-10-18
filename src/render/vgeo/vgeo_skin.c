@@ -1,5 +1,6 @@
 #include "vgeo_skin.h"
 #include "core/log.h"
+#include "core/profiler.h"
 #include <float.h>
 #include <math.h>
 #include <stdlib.h>
@@ -24,7 +25,8 @@ bool vg_palettes_init(VgPalettes *p, const VgContext *ctx, u32 max_slots) {
     p->set = (u8 *)calloc(p->max_slots, 1);
     p->bone_bounds = calloc(p->max_slots, sizeof(*p->bone_bounds));
     p->has_bounds = (u8 *)calloc(p->max_slots, 1);
-    if (!p->bones.buffer || !p->slots.buffer || !p->cpu_bones) { log_error("vgeo: palette buffers failed"); return false; }
+    p->regions = (VkBufferCopy *)malloc(sizeof(VkBufferCopy) * (p->max_slots + 1));
+    if (!p->bones.buffer || !p->slots.buffer || !p->cpu_bones || !p->regions) { log_error("vgeo: palette buffers failed"); return false; }
     for (u32 f = 0; f < ctx->frames; f++)
         if (!p->staging[f].buffer) return false;
     vgc_upload(ctx, &p->slots, 0, p->cpu_slots, ns);   // every slot empty
@@ -44,6 +46,7 @@ void vg_palettes_shutdown(VgPalettes *p) {
     free(p->set);
     free(p->bone_bounds);
     free(p->has_bounds);
+    free(p->regions);
     memset(p, 0, sizeof(*p));
 }
 
@@ -115,7 +118,10 @@ void vg_palettes_record(VgPalettes *p, VkCommandBuffer cmd) {
     if (!p->ok) return;
     VgBuffer *st = &p->staging[p->frame];
     VkDeviceSize table = PAL_SLOT_BYTES * p->max_slots;
-    VkBufferCopy *rg = (VkBufferCopy *)malloc(sizeof(VkBufferCopy) * (p->max_slots + 1));
+    // The copy regions: a buffer kept for the palettes' lifetime instead of a malloc / free every
+    // frame (docs/perf/FINDINGS.md PF-0003; perf_fix_disable PF-0003 restores the per-frame one).
+    bool scratch = prof_fix_enabled(PFX_PALETTE_SCRATCH) && p->regions;
+    VkBufferCopy *rg = scratch ? p->regions : (VkBufferCopy *)malloc(sizeof(VkBufferCopy) * (p->max_slots + 1));
     u32 n = 0;
     for (u32 s = 0; s < p->max_slots; s++) {
         VgPaletteSlot *sl = &p->cpu_slots[s];
@@ -137,7 +143,8 @@ void vg_palettes_record(VgPalettes *p, VkCommandBuffer cmd) {
     VkBufferCopy tc = { table, 0, sizeof(VgPaletteSlot) * (VkDeviceSize)p->max_slots };
     vkCmdCopyBuffer(cmd, st->buffer, p->slots.buffer, 1, &tc);
     barrier(cmd, VK_PIPELINE_STAGE_2_COPY_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, VK_ACCESS_2_SHADER_STORAGE_READ_BIT);
-    free(rg);
+    prof_count(PC_SKIN_PALETTES, n);
+    if (!scratch) free(rg);
 }
 
 // ------------------------------------------------------------------ CPU mirror

@@ -34,6 +34,7 @@ typedef struct VgPalettes {
     u8 *set;                     // per slot: set this frame
     float (*bone_bounds)[VGEO_MAX_BONES][4];   // per slot: bind-space bone influence spheres (has_bounds)
     u8 *has_bounds;
+    VkBufferCopy *regions;       // max_slots + 1 copy regions, reused every frame (PF-0003)
     u32 frame;
     bool ok;
 } VgPalettes;

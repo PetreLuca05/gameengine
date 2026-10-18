@@ -2,11 +2,13 @@
 #include "cvar.h"
 #include "log.h"
 #include "platform.h"
+#include "profiler.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <ctype.h>
 
-#define MAX_CVARS 512
+#define MAX_CVARS 768
+#define CVAR_INDEX 2048           // hash index slots (power of two, > 2 x MAX_CVARS)
 #define MAX_CMDS 1024
 #define MAX_WRITERS 8
 #define CBUF_SIZE (512 * 1024)   // long generated test scripts (tools/tests/weapon_sway.cfg)
@@ -17,6 +19,7 @@ typedef struct Cmd { char name[CVAR_NAME_MAX]; char desc[CVAR_STR_MAX]; CmdFn fn
 typedef struct CvarSystem {
     Cvar *cvars[MAX_CVARS];
     int cvar_count;
+    u16 index[CVAR_INDEX];        // case-insensitive name hash -> cvar index + 1 (0 = empty); PF-0002
     Cmd cmds[MAX_CMDS];
     int cmd_count;
     ConfigWriterFn writers[MAX_WRITERS];
@@ -143,7 +146,23 @@ void cvar_system_shutdown(void) {
     g_engine.cvars = NULL;
 }
 
+static u32 name_hash(const char *s) {
+    u32 h = 2166136261u;
+    while (*s) { h ^= (u8)tolower((u8)*s++); h *= 16777619u; }
+    return h;
+}
+
+// cvar_find is called from per-frame code (114 call sites): a hash index instead of a case-insensitive
+// scan over every cvar (docs/perf/FINDINGS.md PF-0002). Same result; perf_fix_disable PF-0002 scans.
 Cvar *cvar_find(const char *name) {
+    prof_count(PC_CVAR_FIND, 1);
+    if (prof_fix_enabled(PFX_CVAR_HASH)) {
+        for (u32 h = name_hash(name) & (CVAR_INDEX - 1);; h = (h + 1) & (CVAR_INDEX - 1)) {
+            int k = s_cv.index[h];
+            if (!k) return NULL;
+            if (SDL_strcasecmp(s_cv.cvars[k - 1]->name, name) == 0) return s_cv.cvars[k - 1];
+        }
+    }
     for (int i = 0; i < s_cv.cvar_count; i++)
         if (SDL_strcasecmp(s_cv.cvars[i]->name, name) == 0) return s_cv.cvars[i];
     return NULL;
@@ -162,6 +181,9 @@ Cvar *cvar_reg(const char *name, const char *def, CvarType type, u32 flags, cons
     cv->flags = flags;
     parse_value(cv);
     dg_strcpy(cv->default_str, sizeof(cv->default_str), cv->str);
+    u32 h = name_hash(cv->name) & (CVAR_INDEX - 1);
+    while (s_cv.index[h]) h = (h + 1) & (CVAR_INDEX - 1);
+    s_cv.index[h] = (u16)(s_cv.cvar_count + 1);
     s_cv.cvars[s_cv.cvar_count++] = cv;
     return cv;
 }

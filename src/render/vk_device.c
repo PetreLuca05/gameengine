@@ -180,6 +180,8 @@ bool vkd_create_device(SDL_Window *window) {
     VkPhysicalDeviceFeatures2 f2 = { VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2 };
     f2.pNext = &f12;
     f2.features.samplerAnisotropy = supported.samplerAnisotropy;
+    f2.features.pipelineStatisticsQuery = supported.pipelineStatisticsQuery;   // profiler only (vk_prof.c)
+    R->pipe_stats = supported.pipelineStatisticsQuery;
     f2.features.fillModeNonSolid = supported.fillModeNonSolid;
     f2.features.textureCompressionBC = supported.textureCompressionBC;
     // Post-processing: storage images of every format (r8, rg16f, r11g11b10...) without format
@@ -436,6 +438,7 @@ void vkd_destroy_targets(void) {
 
 void vkd_create_shadow_map(u32 size) {
     if (R->shadow.image) vkr_target_destroy(&R->shadow);
+    R->shadow_gen++;
     R->shadow = vkr_target_create(size, size, VK_FORMAT_D32_SFLOAT,
                                   VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_IMAGE_ASPECT_DEPTH_BIT);
     R->shadow_size = size;
@@ -466,6 +469,7 @@ void vkd_create_shadow_map(u32 size) {
 // Always allocated (8 x 8 with shadows off) so every frame set binds a valid image.
 void vkd_create_vm_shadow_map(u32 size) {
     if (R->vm_shadow.image) vkr_target_destroy(&R->vm_shadow);
+    R->shadow_gen++;
     R->vm_shadow = vkr_target_create(size, size, VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
                                      VK_IMAGE_ASPECT_DEPTH_BIT);
     R->vm_shadow_size = size;
@@ -494,6 +498,7 @@ void vkd_create_vm_shadow_map(u32 size) {
 // The moon's map: D32, bindings 18 (compare) / 19 (raw). Always allocated (16 x 16 when unused).
 void vkd_create_moon_shadow_map(u32 size) {
     if (R->moon_shadow.image) vkr_target_destroy(&R->moon_shadow);
+    R->shadow_gen++;
     R->moon_shadow = vkr_target_create(size, size, VK_FORMAT_D32_SFLOAT, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
                                        VK_IMAGE_ASPECT_DEPTH_BIT);
     R->moon_shadow_size = size;

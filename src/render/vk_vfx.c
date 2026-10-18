@@ -982,7 +982,7 @@ void vkx_record_compute(VkCommandBuffer cmd) {
     quat q = quat_euler(c->yaw, c->pitch, c->roll);
     vec3 right = quat_rotate(q, v3(1, 0, 0)), up = quat_rotate(q, v3(0, 1, 0)), fwd = quat_rotate(q, v3(0, 0, -1));
     float dt = X.in.dt;
-    u->cam_pos = v4(c->pos.x, c->pos.y, c->pos.z, (float)g_engine.real_time);
+    u->cam_pos = v4(c->pos.x, c->pos.y, c->pos.z, (float)g_engine.render_time);
     u->cam_right = v4(right.x, right.y, right.z, dt);
     u->cam_up = v4(up.x, up.y, up.z, X.in.timescale);
     u->cam_fwd = v4(fwd.x, fwd.y, fwd.z, 0);

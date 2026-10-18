@@ -1,5 +1,6 @@
 #include "vgeo_stream.h"
 #include "core/log.h"
+#include "core/profiler.h"
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
@@ -211,6 +212,7 @@ bool vg_stream_init(VgStream *st, VgScene *scene, VgCuller *cull, const VgStream
     st->loads = (VgStreamLoad *)calloc((size_t)VG_STREAM_RING * st->ppf_cap, sizeof(VgStreamLoad));
     st->work_cap = VG_STREAM_RING * st->ppf_cap;
     st->work_queue = (u32 *)malloc(sizeof(u32) * st->work_cap);
+    st->copy_scratch = (VkBufferCopy *)malloc(sizeof(VkBufferCopy) * 2 * st->ppf_cap);
     if (c->timestamp_period > 0) {
         VkQueryPoolCreateInfo qi = { VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO };
         qi.queryType = VK_QUERY_TYPE_TIMESTAMP;
@@ -238,6 +240,7 @@ void vg_stream_shutdown(VgStream *st) {
     free_state(st);
     free(st->loads);
     free(st->work_queue);
+    free(st->copy_scratch);
     vgc_buffer_free(st->ctx, &st->staging);
     if (st->qp) vkDestroyQueryPool(d, st->qp, NULL);
     if (st->p_patch) vkDestroyPipeline(d, st->p_patch, NULL);
@@ -414,7 +417,10 @@ void vg_stream_update(VgStream *st, VkCommandBuffer cmd, u32 frame) {
     x.region = x.cur % VG_STREAM_RING;
     x.budget = DG_MIN(DG_MAX(1u, st->cfg.pages_per_frame), st->ppf_cap);
     x.patch = (u32 *)((u8 *)st->staging.mapped + x.region * st->region_size + st->patch_offset);
-    x.copies = (VkBufferCopy *)malloc(sizeof(VkBufferCopy) * 2 * st->ppf_cap);
+    // The page copy list: one buffer for the stream's lifetime instead of a malloc / free per frame
+    // (docs/perf/FINDINGS.md PF-0004; perf_fix_disable PF-0004 restores the per-frame one).
+    bool scratch = prof_fix_enabled(PFX_STREAM_SCRATCH) && st->copy_scratch;
+    x.copies = scratch ? st->copy_scratch : (VkBufferCopy *)malloc(sizeof(VkBufferCopy) * 2 * st->ppf_cap);
     st->stats.loaded = st->stats.evicted = st->stats.requested = st->stats.waiting = 0;
     u32 prev = (x.cur + VG_STREAM_RING - 1) % VG_STREAM_RING;
     st->batch_count[x.region] = 0;
@@ -532,7 +538,7 @@ void vg_stream_update(VgStream *st, VkCommandBuffer cmd, u32 frame) {
     barrier(cmd, VK_PIPELINE_STAGE_2_TRANSFER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, VK_ACCESS_2_TRANSFER_WRITE_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
             VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT | VK_PIPELINE_STAGE_2_HOST_BIT, VK_ACCESS_2_MEMORY_READ_BIT | VK_ACCESS_2_HOST_READ_BIT);
     if (st->qp) vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT, st->qp, frame * 2 + 1);
-    free(x.copies);
+    if (!scratch) free(x.copies);
 
     u32 resident = 0, free_slots = 0, pending = 0;
     for (u32 i = 0; i < st->slots; i++) {
@@ -545,4 +551,12 @@ void vg_stream_update(VgStream *st, VkCommandBuffer cmd, u32 frame) {
     st->stats.free = free_slots;
     st->stats.pending = pending;
     st->stats.cpu_ms = (float)((double)(SDL_GetPerformanceCounter() - t0) * 1000.0 / (double)SDL_GetPerformanceFrequency());
+    // Profiles (docs/PERF_AUDIT.md R15): requests vs loads vs pages still waiting (late prefetch),
+    // evictions (early prefetch / thrash), pool occupancy.
+    prof_series("vgeo_stream_requested", st->stats.requested);
+    prof_series("vgeo_stream_loaded", st->stats.loaded);
+    prof_series("vgeo_stream_waiting", st->stats.waiting);
+    prof_series("vgeo_stream_evicted", st->stats.evicted);
+    prof_series("vgeo_stream_resident", resident);
+    prof_series("vgeo_stream_slots", st->slots);
 }

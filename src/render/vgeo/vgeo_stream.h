@@ -67,6 +67,7 @@ typedef struct VgStream {
     VkDeviceSize region_size, patch_offset;
     u32 patch_cap;
     VgStreamLoad *loads;         // VG_STREAM_RING * ppf_cap
+    VkBufferCopy *copy_scratch;  // 2 * ppf_cap page copies, reused by every vg_stream_update (PF-0004)
     u32 batch_count[VG_STREAM_RING];   // loads of the batch issued into a region
     SDL_AtomicInt batch_left[VG_STREAM_RING];   // file reads of the batch not done yet (copied by the next update)
     // readback per frame slot: stamps[slots], then per view { count, pad, requests[cap] }

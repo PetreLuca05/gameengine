@@ -9,6 +9,7 @@
 #include "skeletal_mesh.h"
 #include "lod_fade.h"
 #include "core/platform.h"
+#include "core/profiler.h"
 #include <SDL3/SDL.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -28,8 +29,17 @@ static float view_aspect(void) {
 static VkQueryPool g_frame_qp;
 static bool g_frame_qp_written[FRAMES_IN_FLIGHT];
 static float g_gpu_frame_ms;
-static bool (*g_cam_override)(RenderCamera *cam);
-void render_set_camera_override(bool (*fn)(RenderCamera *cam)) { g_cam_override = fn; }
+// Camera overrides (bench_fidelity, perf_audit): the first that returns true replaces the camera.
+static bool (*g_cam_override[4])(RenderCamera *cam);
+void render_set_camera_override(bool (*fn)(RenderCamera *cam)) {
+    for (int k = 0; k < 4; k++) {
+        if (g_cam_override[k] == fn) return;
+        if (!g_cam_override[k]) { g_cam_override[k] = fn; return; }
+    }
+}
+static bool g_ui_hidden;   // perf_audit reference captures: the 3D image alone
+void render_set_ui_hidden(bool hidden) { g_ui_hidden = hidden; }
+u32 render_frame_index(void) { return R ? (u32)R->frame_index : 0; }
 static size_t obj_slot_size(void);
 
 void render_register_cvars(void) {
@@ -244,6 +254,8 @@ bool render_init(SDL_Window *window) {
     if (!vkp_create_pipelines()) { log_error("render: pipeline creation failed"); return false; }
     if (!vkx_init()) log_warn("render: VFX pipelines unavailable (particles disabled)");
     fg_init();
+    vkp_init(R->pipe_stats);
+    vkp_register();
     {
         VkQueryPoolCreateInfo qi = { VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO };
         qi.queryType = VK_QUERY_TYPE_TIMESTAMP;
@@ -315,6 +327,7 @@ void render_shutdown(void) {
         post_shutdown();
         vkg_shutdown();
         fg_shutdown();
+        vkp_shutdown();
         vkx_shutdown();
         vkw_shutdown();
         render_ui_shutdown();
@@ -419,12 +432,16 @@ bool render_begin_frame(void) {
     if (R->swap_dirty || !R->swapchain) return false;
 
     FrameResources *f = &R->frames[R->frame_slot];
+    PROF_WAIT_BEGIN(PW_GPU_FENCE);
     VK_CHECK(vkWaitForFences(R->device, 1, &f->fence, VK_TRUE, UINT64_MAX));
+    PROF_WAIT_END();
     vkr_flush_deferred(f);
     f->dyn_used = 0;
     phone_view_frame_begin(R->frame_slot);   // this slot's phone camera copies are complete
 
+    PROF_WAIT_BEGIN(PW_ACQUIRE);
     VkResult res = vkAcquireNextImageKHR(R->device, R->swapchain, UINT64_MAX, f->image_available, VK_NULL_HANDLE, &R->image_index);
+    PROF_WAIT_END();
     if (res == VK_ERROR_OUT_OF_DATE_KHR) { R->swap_dirty = true; return false; }
     if (res != VK_SUCCESS && res != VK_SUBOPTIMAL_KHR) { log_error("acquire failed %d", (int)res); return false; }
     VK_CHECK(vkResetFences(R->device, 1, &f->fence));
@@ -436,7 +453,8 @@ void render_set_camera(const RenderCamera *cam) {
     R->cam = *cam;
     vkg_bench_camera(&R->cam);   // vgeo_bench flythrough
     vkg_frame_update();          // grass fades / shadows follow the fidelity level (outside the frame's recording)
-    if (g_cam_override) g_cam_override(&R->cam);   // bench_fidelity flythrough
+    for (int k = 0; k < 4 && g_cam_override[k]; k++)
+        if (g_cam_override[k](&R->cam)) break;   // bench_fidelity / perf_audit flythroughs
     cam = &R->cam;
     float aspect = view_aspect();
     R->view = mat4_fps_view(cam->pos, cam->yaw, cam->pitch, cam->roll);
@@ -594,6 +612,7 @@ TextVertex *render_text_alloc(u32 count) {
 void render_set_text_atlas(TextureId atlas) { R->text_atlas = atlas ? atlas : R->white_tex; }
 
 void render_ui(const UiVertex *verts, u32 vcount, const u32 *indices, u32 icount, const UiDrawCmd *cmds, u32 ccount) {
+    if (g_ui_hidden) return;
     if (R->ui_vcount + vcount > R->ui_vcap || R->ui_icount + icount > R->ui_icap || R->ui_ccount + ccount > R->ui_ccap) return;
     u32 vbase = R->ui_vcount, ibase = R->ui_icount;
     memcpy(R->ui_verts + vbase, verts, sizeof(UiVertex) * vcount);
@@ -706,6 +725,7 @@ static u32 f32_bits(float f) {
 static void draw_items(VkCommandBuffer cmd, DrawItem *items, u32 count, bool shadow_pass, bool cull, int alpha_mode, PipelineId pipe) {
     // alpha_mode: 0 = opaque only, 1 = blended only, 2 = all
     if (!count) return;
+    if (shadow_pass) prof_count(PC_SHADOW_ITEMS, count);
     ArenaMark mark = arena_mark(&g_engine.frame_arena);
     SortKey *keys = ARENA_PUSH_N(&g_engine.frame_arena, SortKey, count);
     u32 n = 0;
@@ -1144,6 +1164,24 @@ static bool prev_palette(u32 id, u32 *off, u32 *count) {
     return true;
 }
 
+// Empty shadow maps (docs/perf/FINDINGS.md PF-0001): the sun atlas with no active cascade (night,
+// sun shadows off), the moon map by day and the viewmodel tile without a rig were cleared to depth 1
+// every frame although nothing is drawn into them. A map that was cleared and left empty last frame
+// and draws nothing this frame still holds exactly that clear (same image, still in
+// SHADER_READ_ONLY, the earlier barrier made the clear visible to every later read): its clear,
+// barriers and empty rendering are skipped. perf_fix_disable PF-0001 clears every frame again.
+typedef struct ShadowClearState { VkImage image; u32 gen; bool empty; } ShadowClearState;
+static ShadowClearState g_shadow_clear[3];   // sun atlas, moon, viewmodel tile
+
+static bool shadow_clear_skip(int k, VkImage image, bool draws) {
+    ShadowClearState *s = &g_shadow_clear[k];
+    bool skip = prof_fix_enabled(PFX_SHADOW_CLEAR_SKIP) && !draws && s->empty && s->image == image && s->gen == R->shadow_gen;
+    s->image = image;
+    s->gen = R->shadow_gen;
+    s->empty = !draws;
+    return skip;
+}
+
 // ------------------------------------------------------------------ frame matrices
 
 // Validation (docs/SHADOWS.md "Tests"): every tile the lit shaders will sample this frame
@@ -1404,7 +1442,7 @@ static void compute_matrices(FrameData *fd) {
     fd->ss_view_proj = mat4_mul(R->proj_j, R->view);   // used only by a second camera (ss_info.x, the scope PiP)
     fd->ss_view = R->view;
     fd->ss_info = v4(0, 0, 0, 0);
-    fd->camera_pos = v4(c->pos.x, c->pos.y, c->pos.z, (float)g_engine.real_time);
+    fd->camera_pos = v4(c->pos.x, c->pos.y, c->pos.z, (float)g_engine.render_time);
     fd->sun_dir = v4(L.x, L.y, L.z, e->sun_intensity);
     fd->sun_color = v4(e->sun_color.x, e->sun_color.y, e->sun_color.z, R->shadow_active[0] || R->shadow_active[1] ? 1.0f : 0.0f);
     fd->sky_ambient = v4(e->sky_ambient.x, e->sky_ambient.y, e->sky_ambient.z, e->ambient_intensity);
@@ -2146,7 +2184,7 @@ static void build_frame_graph(FrameData *fd) {
     in.ground = R->env.ground_ambient;
     in.ambient = R->env.ambient_intensity;
     in.dt = (float)g_engine.frame_dt;
-    in.time = (float)g_engine.real_time;
+    in.time = (float)g_engine.render_time;
     in.frame = R->frame_index;
     in.camera_cut = R->camera_cut;
     in.sky_on = R->env.sky;
@@ -2348,8 +2386,11 @@ void render_end_frame(void) {
         vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT, g_frame_qp, slot * 2);
     }
 
+    vkp_frame_begin(cmd, slot);
+    vkp_scope_begin(cmd, "uploads");
     vkr_record_uploads(cmd);
 
+    PROF_BEGIN("render:prepare");
     FrameData *fd = (FrameData *)f->ubo.mapped;
     compute_matrices(fd);
     vkg_submit_fallback();   // the classic renderer's culling / LOD / instance batches (r_vgeo 0; r_vgeo 1: local light tiles only)
@@ -2405,150 +2446,170 @@ void render_end_frame(void) {
         }
     }
 
+    prof_count(PC_DRAW_ITEMS, (i64)(R->draw_count + R->vm_draw_count + R->skin_draw_count));
+    PROF_END();
+
     // ---------------------------------------------------------- GPU particle simulation
+    PROF_BEGIN("render:record_pre");
+    vkp_scope_begin(cmd, "vfx_sim");
     vkx_begin_frame_queries(cmd);
     vkx_record_compute(cmd);
 
     // ---------------------------------------------------------- shadow pass
     R->shadow_drawn = 0;
+    vkp_scope_begin(cmd, "shadow_sun");
     vkg_record_shadow_cull(cmd);   // vgeo cascade views (docs/VGEO.md)
-    vkr_image_barrier(cmd, R->shadow.image, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-                      VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, 0,
-                      VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-                      VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, 1);
-    {
-        VkRenderingAttachmentInfo da = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
-        da.imageView = R->shadow.view;
-        da.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
-        da.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-        da.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-        da.clearValue.depthStencil.depth = 1.0f;
-        VkRenderingInfo ri = { VK_STRUCTURE_TYPE_RENDERING_INFO };
-        ri.renderArea.extent.width = R->shadow.w;
-        ri.renderArea.extent.height = R->shadow.h;
-        ri.layerCount = 1;
-        ri.pDepthAttachment = &da;
-        vkCmdBeginRendering(cmd, &ri);
-        if (R->shadow_active[0] || R->shadow_active[1] || R->shadow_active[2] || R->shadow_active[3]) {
-            // One atlas tile per cascade (the cascade index rides in the push constants). The
-            // cascade matrices already map into their tile: full viewport, scissored to the tile.
-            // Tiles the sky does not need are skipped (compute_matrices: the sun's type None, under
-            // the cutoff, wide mode's cascade 0).
-            u32 tile = R->shadow.w / 2;
-            g_shadow_min_radius = R->r_shadow_min_radius->f;
-            g_shadow_cull = R->r_culling->i != 0;
-            g_shadow_layers = R->sun_shadow.culling_mask;
-            for (int k = 0; k < 4; k++) {
-                if (!R->shadow_active[k]) continue;
-                extract_frustum(R->shadow_vp_ndc[k], g_shadow_planes);   // casters outside this tile's light box are skipped
-                R->shadow_drawn |= 1u << k;
-                VkViewport vp = { 0.0f, 0.0f, (float)R->shadow.w, (float)R->shadow.h, 0.0f, 1.0f };
-                VkRect2D sc = { { (int)((k & 1) * tile), (int)((k >> 1) * tile) }, { tile, tile } };
-                vkCmdSetViewport(cmd, 0, 1, &vp);
-                vkCmdSetScissor(cmd, 0, 1, &sc);
-                g_shadow_cascade = (u32)k;
-                draw_sun_casters(cmd, f, k, &skin_shadow);
+    bool skip_clear = shadow_clear_skip(0, R->shadow.image, R->shadow_active[0] || R->shadow_active[1] || R->shadow_active[2] || R->shadow_active[3]);
+    if (!skip_clear) {
+        vkr_image_barrier(cmd, R->shadow.image, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+                          VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT, 0,
+                          VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                          VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, 1);
+        {
+            VkRenderingAttachmentInfo da = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
+            da.imageView = R->shadow.view;
+            da.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+            da.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+            da.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+            da.clearValue.depthStencil.depth = 1.0f;
+            VkRenderingInfo ri = { VK_STRUCTURE_TYPE_RENDERING_INFO };
+            ri.renderArea.extent.width = R->shadow.w;
+            ri.renderArea.extent.height = R->shadow.h;
+            ri.layerCount = 1;
+            ri.pDepthAttachment = &da;
+            vkCmdBeginRendering(cmd, &ri);
+            if (R->shadow_active[0] || R->shadow_active[1] || R->shadow_active[2] || R->shadow_active[3]) {
+                // One atlas tile per cascade (the cascade index rides in the push constants). The
+                // cascade matrices already map into their tile: full viewport, scissored to the tile.
+                // Tiles the sky does not need are skipped (compute_matrices: the sun's type None, under
+                // the cutoff, wide mode's cascade 0).
+                u32 tile = R->shadow.w / 2;
+                g_shadow_min_radius = R->r_shadow_min_radius->f;
+                g_shadow_cull = R->r_culling->i != 0;
+                g_shadow_layers = R->sun_shadow.culling_mask;
+                for (int k = 0; k < 4; k++) {
+                    if (!R->shadow_active[k]) continue;
+                    extract_frustum(R->shadow_vp_ndc[k], g_shadow_planes);   // casters outside this tile's light box are skipped
+                    R->shadow_drawn |= 1u << k;
+                    VkViewport vp = { 0.0f, 0.0f, (float)R->shadow.w, (float)R->shadow.h, 0.0f, 1.0f };
+                    VkRect2D sc = { { (int)((k & 1) * tile), (int)((k >> 1) * tile) }, { tile, tile } };
+                    vkCmdSetViewport(cmd, 0, 1, &vp);
+                    vkCmdSetScissor(cmd, 0, 1, &sc);
+                    g_shadow_cascade = (u32)k;
+                    draw_sun_casters(cmd, f, k, &skin_shadow);
+                }
+                g_shadow_cascade = 0;
+                g_shadow_min_radius = 0.0f;
+                g_shadow_cull = false;
+                g_shadow_layers = SHADOW_LAYERS_ALL;
             }
-            g_shadow_cascade = 0;
-            g_shadow_min_radius = 0.0f;
-            g_shadow_cull = false;
-            g_shadow_layers = SHADOW_LAYERS_ALL;
+            vkCmdEndRendering(cmd);
         }
-        vkCmdEndRendering(cmd);
+        vkr_image_barrier(cmd, R->shadow.image, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+                          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                          VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                          VK_ACCESS_2_SHADER_SAMPLED_READ_BIT, 1);
     }
-    vkr_image_barrier(cmd, R->shadow.image, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-                      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-                      VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                      VK_ACCESS_2_SHADER_SAMPLED_READ_BIT, 1);
 
     // ---------------------------------------------------------- moon shadow map
     // The moon while the sun still owns the cascades (its own map since the atlas holds 4 cascades):
-    // cleared every frame, drawn only while its fade is above 0.
-    vkr_image_barrier(cmd, R->moon_shadow.image, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-                      VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, 0, VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-                      VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, 1);
-    {
-        VkRenderingAttachmentInfo da = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
-        da.imageView = R->moon_shadow.view;
-        da.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
-        da.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-        da.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-        da.clearValue.depthStencil.depth = 1.0f;
-        VkRenderingInfo ri = { VK_STRUCTURE_TYPE_RENDERING_INFO };
-        ri.renderArea.extent.width = R->moon_shadow.w;
-        ri.renderArea.extent.height = R->moon_shadow.h;
-        ri.layerCount = 1;
-        ri.pDepthAttachment = &da;
-        vkCmdBeginRendering(cmd, &ri);
-        if (R->moon_active) {
-            set_viewport(cmd, R->moon_shadow.w, R->moon_shadow.h);
-            g_shadow_min_radius = R->r_shadow_min_radius->f;
-            g_shadow_cull = R->r_culling->i != 0;
-            g_shadow_layers = R->sun_shadow.culling_mask;
-            extract_frustum(R->shadow_vp_ndc[4], g_shadow_planes);
-            g_shadow_cascade = SHADOW_PASS_MOON;
-            draw_sun_casters(cmd, f, 4, &skin_shadow);
-            g_shadow_cascade = 0;
-            g_shadow_min_radius = 0.0f;
-            g_shadow_cull = false;
-            g_shadow_layers = SHADOW_LAYERS_ALL;
-            R->shadow_drawn |= 1u << 5;
+    // cleared, drawn only while its fade is above 0 (an empty map is not re-cleared: shadow_clear_skip).
+    vkp_scope_begin(cmd, "shadow_moon");
+    skip_clear = shadow_clear_skip(1, R->moon_shadow.image, R->moon_active);
+    if (!skip_clear) {
+        vkr_image_barrier(cmd, R->moon_shadow.image, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+                          VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, 0, VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                          VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, 1);
+        {
+            VkRenderingAttachmentInfo da = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
+            da.imageView = R->moon_shadow.view;
+            da.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+            da.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+            da.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+            da.clearValue.depthStencil.depth = 1.0f;
+            VkRenderingInfo ri = { VK_STRUCTURE_TYPE_RENDERING_INFO };
+            ri.renderArea.extent.width = R->moon_shadow.w;
+            ri.renderArea.extent.height = R->moon_shadow.h;
+            ri.layerCount = 1;
+            ri.pDepthAttachment = &da;
+            vkCmdBeginRendering(cmd, &ri);
+            if (R->moon_active) {
+                set_viewport(cmd, R->moon_shadow.w, R->moon_shadow.h);
+                g_shadow_min_radius = R->r_shadow_min_radius->f;
+                g_shadow_cull = R->r_culling->i != 0;
+                g_shadow_layers = R->sun_shadow.culling_mask;
+                extract_frustum(R->shadow_vp_ndc[4], g_shadow_planes);
+                g_shadow_cascade = SHADOW_PASS_MOON;
+                draw_sun_casters(cmd, f, 4, &skin_shadow);
+                g_shadow_cascade = 0;
+                g_shadow_min_radius = 0.0f;
+                g_shadow_cull = false;
+                g_shadow_layers = SHADOW_LAYERS_ALL;
+                R->shadow_drawn |= 1u << 5;
+            }
+            vkCmdEndRendering(cmd);
         }
-        vkCmdEndRendering(cmd);
+        vkr_image_barrier(cmd, R->moon_shadow.image, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+                          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                          VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT, 1);
     }
-    vkr_image_barrier(cmd, R->moon_shadow.image, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-                      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-                      VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT, 1);
 
     // ---------------------------------------------------------- viewmodel shadow tile
-    // The first-person rig (arms, held item, attachments) alone, in its own map: cleared every frame
-    // (an inactive tile reads lit), drawn with this frame's matrices and palettes.
-    vkr_image_barrier(cmd, R->vm_shadow.image, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-                      VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, 0, VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-                      VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, 1);
-    {
-        VkRenderingAttachmentInfo da = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
-        da.imageView = R->vm_shadow.view;
-        da.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
-        da.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-        da.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-        da.clearValue.depthStencil.depth = 1.0f;
-        VkRenderingInfo ri = { VK_STRUCTURE_TYPE_RENDERING_INFO };
-        ri.renderArea.extent.width = R->vm_shadow.w;
-        ri.renderArea.extent.height = R->vm_shadow.h;
-        ri.layerCount = 1;
-        ri.pDepthAttachment = &da;
-        vkCmdBeginRendering(cmd, &ri);
-        if (R->shadow_vm_active) {
-            set_viewport(cmd, R->vm_shadow.w, R->vm_shadow.h);
-            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_SHADOW]);
-            vkCmdSetDepthBias(cmd, 1.0f, 0.0f, 1.5f);
-            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 0, 1, &f->frame_set, 0, NULL);
-            g_shadow_cascade = SHADOW_PASS_VM;
-            g_shadow_vm_pass = true;
-            draw_items(cmd, R->vm_draws, R->vm_draw_count, true, false, 0, PIPE_SHADOW);
-            if (F.cpu_skinned) draw_cpu_skinned(cmd, f, F.cpu_skinned, 2);
-            else if (skin_vm.batch_count) {
-                vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_SKIN_SHADOW]);
-                PushLit pc;
-                memset(&pc, 0, sizeof(pc));
-                pc.flags[3] = SHADOW_PASS_VM;
-                vkCmdPushConstants(cmd, R->layout_lit, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushLit), &pc);
-                draw_skin_pass(cmd, &skin_vm);
+    // The first-person rig (arms, held item, attachments) alone, in its own map: cleared
+    // (an inactive tile reads lit; an empty one is not re-cleared: shadow_clear_skip), drawn with this
+    // frame's matrices and palettes.
+    vkp_scope_begin(cmd, "shadow_vm");
+    skip_clear = shadow_clear_skip(2, R->vm_shadow.image, R->shadow_vm_active);
+    if (!skip_clear) {
+        vkr_image_barrier(cmd, R->vm_shadow.image, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+                          VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, 0, VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                          VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, 1);
+        {
+            VkRenderingAttachmentInfo da = { VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO };
+            da.imageView = R->vm_shadow.view;
+            da.imageLayout = VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL;
+            da.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+            da.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+            da.clearValue.depthStencil.depth = 1.0f;
+            VkRenderingInfo ri = { VK_STRUCTURE_TYPE_RENDERING_INFO };
+            ri.renderArea.extent.width = R->vm_shadow.w;
+            ri.renderArea.extent.height = R->vm_shadow.h;
+            ri.layerCount = 1;
+            ri.pDepthAttachment = &da;
+            vkCmdBeginRendering(cmd, &ri);
+            if (R->shadow_vm_active) {
+                set_viewport(cmd, R->vm_shadow.w, R->vm_shadow.h);
+                vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_SHADOW]);
+                vkCmdSetDepthBias(cmd, 1.0f, 0.0f, 1.5f);
+                vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->layout_lit, 0, 1, &f->frame_set, 0, NULL);
+                g_shadow_cascade = SHADOW_PASS_VM;
+                g_shadow_vm_pass = true;
+                draw_items(cmd, R->vm_draws, R->vm_draw_count, true, false, 0, PIPE_SHADOW);
+                if (F.cpu_skinned) draw_cpu_skinned(cmd, f, F.cpu_skinned, 2);
+                else if (skin_vm.batch_count) {
+                    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, R->pipes[PIPE_SKIN_SHADOW]);
+                    PushLit pc;
+                    memset(&pc, 0, sizeof(pc));
+                    pc.flags[3] = SHADOW_PASS_VM;
+                    vkCmdPushConstants(cmd, R->layout_lit, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(PushLit), &pc);
+                    draw_skin_pass(cmd, &skin_vm);
+                }
+                g_shadow_vm_pass = false;
+                g_shadow_cascade = 0;
+                R->shadow_drawn |= 1u << 4;
             }
-            g_shadow_vm_pass = false;
-            g_shadow_cascade = 0;
-            R->shadow_drawn |= 1u << 4;
+            vkCmdEndRendering(cmd);
         }
-        vkCmdEndRendering(cmd);
+        vkr_image_barrier(cmd, R->vm_shadow.image, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
+                          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
+                          VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT, 1);
     }
-    vkr_image_barrier(cmd, R->vm_shadow.image, VK_IMAGE_ASPECT_DEPTH_BIT, VK_IMAGE_LAYOUT_DEPTH_ATTACHMENT_OPTIMAL,
-                      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT,
-                      VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT, VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT, VK_ACCESS_2_SHADER_SAMPLED_READ_BIT, 1);
     shadow_check_sampled(fd);
 
     // ---------------------------------------------------------- point / spot light shadows
+    vkp_scope_begin(cmd, "light_shadows");
     vkls_record(cmd, f);
+    vkp_scope_begin(cmd, "rain_occlusion");
 
     // ---------------------------------------------------------- rain occlusion map (weather)
     // Static + dynamic opaque draws from straight above, depth only (cascade 3 of the shadow
@@ -2592,8 +2653,13 @@ void render_end_frame(void) {
     }
 
     // ---------------------------------------------------------- frame graph: scene + post + UI
+    vkp_scope_end(cmd);
+    PROF_END();
+    PROF_BEGIN("render:frame_graph");
     build_frame_graph(fd);
     fg_execute(cmd);
+    PROF_END();
+    vkp_scope_begin(cmd, "post_graph");
 
     // Depth stays readable for next frame's particle collision compute (VFX set binding 19).
     if (R->depth.layout != VK_IMAGE_LAYOUT_DEPTH_READ_ONLY_OPTIMAL) {
@@ -2628,6 +2694,7 @@ void render_end_frame(void) {
     }
 
     arena_pop_to(skin_mark);
+    vkp_scope_end(cmd);
     if (g_frame_qp) {
         vkCmdWriteTimestamp2(cmd, VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT, g_frame_qp, slot * 2 + 1);
         g_frame_qp_written[slot] = true;
@@ -2657,13 +2724,19 @@ void render_end_frame(void) {
     pi.swapchainCount = 1;
     pi.pSwapchains = &R->swapchain;
     pi.pImageIndices = &R->image_index;
+    PROF_WAIT_BEGIN(PW_PRESENT);
     VkResult pres = vkQueuePresentKHR(R->queue, &pi);
+    PROF_WAIT_END();
     if (pres == VK_ERROR_OUT_OF_DATE_KHR || pres == VK_SUBOPTIMAL_KHR) R->swap_dirty = true;
     else if (pres != VK_SUCCESS) log_error("present failed %d", (int)pres);
 
     bool want_exr = post_exr_capture_armed();
     bool want_ui = render_ui_wants_wait();
-    if (want_shot || want_exr || want_ui) VK_CHECK(vkWaitForFences(R->device, 1, &f->fence, VK_TRUE, UINT64_MAX));
+    if (want_shot || want_exr || want_ui) {
+        PROF_WAIT_BEGIN(PW_READBACK);
+        VK_CHECK(vkWaitForFences(R->device, 1, &f->fence, VK_TRUE, UINT64_MAX));
+        PROF_WAIT_END();
+    }
     render_ui_frame_done();
     if (want_shot) {
         vmaInvalidateAllocation(R->vma, shot.alloc, 0, VK_WHOLE_SIZE);
