@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Hardened-runtime entitlements for the notarized Deadground.app (tools/macos/sign.sh). The game is not
+  sandboxed (Steam games are not), so network access needs no entitlement; the two below are for Steam:
+  the overlay is injected with DYLD_INSERT_LIBRARIES and is signed by Valve, not by us.
+  docs/PLATFORM_MACOS.md "Signing / notarization".
+-->
+<plist version="1.0">
+<dict>
+	<key>com.apple.security.cs.disable-library-validation</key>
+	<true/>
+	<key>com.apple.security.cs.allow-dyld-environment-variables</key>
+	<true/>
+</dict>
+</plist>

@@ -1,5 +1,18 @@
 cmake_minimum_required(VERSION 3.24)
+# macOS (docs/PLATFORM_MACOS.md): macOS 11 for both slices; one architecture per build tree
+# (cmake/toolchains/macos-*.cmake, the host's by default), tools/macos/build_universal.sh lipos them.
+set(CMAKE_OSX_DEPLOYMENT_TARGET "11.0" CACHE STRING "Minimum macOS version")
 project(Deadground VERSION 0.1.0 LANGUAGES C CXX)
+if(APPLE)
+  if(NOT CMAKE_OSX_ARCHITECTURES)
+    set(CMAKE_OSX_ARCHITECTURES "${CMAKE_SYSTEM_PROCESSOR}" CACHE STRING "macOS architecture of this build tree (x86_64 or arm64)" FORCE)
+  endif()
+  list(LENGTH CMAKE_OSX_ARCHITECTURES DG_OSX_ARCH_COUNT)
+  if(DG_OSX_ARCH_COUNT GREATER 1)
+    message(FATAL_ERROR "One architecture per build tree (Jolt's SIMD flags are per architecture): build x86_64 and arm64 separately, tools/macos/build_universal.sh lipos them")
+  endif()
+  message(STATUS "Deadground: macOS ${CMAKE_OSX_ARCHITECTURES}, deployment target ${CMAKE_OSX_DEPLOYMENT_TARGET}")
+endif()
 
 if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
   set(CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "Build type" FORCE)
@@ -19,6 +32,13 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO ${CMAKE_BINARY_DIR}/bin)
 
 set(STEAM_SDK_DIR "$ENV{STEAM_SDK_DIR}" CACHE PATH "Path to the Steamworks SDK 'sdk' folder (optional)")
 option(DG_ENABLE_STEAM "Build the Steam transport (requires STEAM_SDK_DIR)" ON)
+# Shipping builds (the macOS .app, a Steam depot): no source-tree paths baked in, so no shader hot
+# reload and no source-dir fallbacks (docs/PLATFORM_MACOS.md "Distribution").
+option(DG_DISTRIBUTION "Shipping build: no DG_SOURCE_DIR / shader compiler paths" OFF)
+# Jolt bit-identical across x86_64 / arm64 / compilers (JPH_CROSS_PLATFORM_DETERMINISTIC: no FMA, a
+# few % slower). Vehicles are predicted by the driving client and reconciled, so it only reduces
+# corrections in mixed Mac / PC sessions; off by default (docs/PLATFORM_MACOS.md "Determinism").
+option(DG_JOLT_CROSS_PLATFORM_DETERMINISTIC "Build Jolt cross-platform deterministic" OFF)
 
 include(FetchContent)
 set(FETCHCONTENT_QUIET ON)
@@ -55,6 +75,14 @@ set(PROFILER_IN_DEBUG_AND_RELEASE OFF CACHE BOOL "" FORCE)
 set(DEBUG_RENDERER_IN_DEBUG_AND_RELEASE OFF CACHE BOOL "" FORCE)
 set(DEBUG_RENDERER_IN_DISTRIBUTION OFF CACHE BOOL "" FORCE)
 set(USE_AVX512 OFF CACHE BOOL "" FORCE)
+set(CROSS_PLATFORM_DETERMINISTIC ${DG_JOLT_CROSS_PLATFORM_DETERMINISTIC} CACHE BOOL "" FORCE)
+if(APPLE AND CMAKE_OSX_ARCHITECTURES STREQUAL "x86_64")
+  # macOS 11 runs on Ivy Bridge (Mac Pro 2013): AVX + F16C, no AVX2 / BMI / LZCNT / FMA.
+  set(USE_AVX2 OFF CACHE BOOL "" FORCE)
+  set(USE_LZCNT OFF CACHE BOOL "" FORCE)
+  set(USE_TZCNT OFF CACHE BOOL "" FORCE)
+  set(USE_FMADD OFF CACHE BOOL "" FORCE)
+endif()
 set(OVERRIDE_CXX_FLAGS OFF CACHE BOOL "" FORCE)
 set(INTERPROCEDURAL_OPTIMIZATION OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(joltc
@@ -80,6 +108,12 @@ FetchContent_Declare(mbedtls
   DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
 
 FetchContent_MakeAvailable(SDL3 VulkanHeaders joltc enet mbedtls)
+# Our code: no FMA contraction anywhere (arm64 clang contracts a * b + c by default, x86_64 does not:
+# the deterministic modules would differ between a Mac and a PC; docs/PLATFORM_MACOS.md "Determinism").
+# MSVC's /fp:precise does not contract. Applies to every target below (not the fetched libraries).
+if(NOT MSVC)
+  add_compile_options(-ffp-contract=off)
+endif()
 target_include_directories(enet PUBLIC ${enet_SOURCE_DIR}/include)
 
 # ---------------------------------------------------------------- vendored single-file libs
@@ -129,6 +163,10 @@ if(DG_ENABLE_STEAM AND STEAM_SDK_DIR AND EXISTS "${STEAM_SDK_DIR}/public/steam/s
   if(WIN32)
     set(STEAM_LIB "${STEAM_SDK_DIR}/redistributable_bin/win64/steam_api64.lib")
     set(STEAM_DLL "${STEAM_SDK_DIR}/redistributable_bin/win64/steam_api64.dll")
+  elseif(APPLE)
+    # universal (x86_64 + arm64); the .app carries it in Contents/Frameworks (tools/macos/make_bundle.sh)
+    set(STEAM_LIB "${STEAM_SDK_DIR}/redistributable_bin/osx/libsteam_api.dylib")
+    set(STEAM_DLL "${STEAM_LIB}")
   else()
     set(STEAM_LIB "${STEAM_SDK_DIR}/redistributable_bin/linux64/libsteam_api.so")
     set(STEAM_DLL "${STEAM_LIB}")
@@ -212,10 +250,13 @@ set_target_properties(deadground PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON
 add_dependencies(deadground dg_shaders)
 target_include_directories(deadground PRIVATE src third_party/smaa third_party/fsr)
 target_link_libraries(deadground PRIVATE SDL3::SDL3-static volk vma dg_thirdparty joltc jolt_shim enet meshopt mbedtls mbedx509 mbedcrypto)
+if(NOT DG_DISTRIBUTION)
+  target_compile_definitions(deadground PRIVATE
+    DG_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
+    DG_SHADER_COMPILER="${DG_SHADER_COMPILER}"
+    DG_SHADER_COMPILER_KIND="${DG_SHADER_COMPILER_KIND}")
+endif()
 target_compile_definitions(deadground PRIVATE
-  DG_SOURCE_DIR="${CMAKE_SOURCE_DIR}"
-  DG_SHADER_COMPILER="${DG_SHADER_COMPILER}"
-  DG_SHADER_COMPILER_KIND="${DG_SHADER_COMPILER_KIND}"
   DG_VERSION="${PROJECT_VERSION}"
   # Looks (docs/LOOKS.md): the live tuning tools (look_tune / look_dump) exist in dev builds only.
   $<$<NOT:$<CONFIG:Release>>:DG_LOOK_TUNE=1>)
@@ -225,6 +266,13 @@ if(DG_HAVE_STEAM)
   add_custom_command(TARGET deadground POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E copy_if_different "${STEAM_DLL}" $<TARGET_FILE_DIR:deadground>
     COMMAND ${CMAKE_COMMAND} -E echo 480 > $<TARGET_FILE_DIR:deadground>/steam_appid.txt)
+endif()
+if(APPLE)
+  # SDL3 brings Cocoa / Metal / QuartzCore / IOKit / GameController; miniaudio runtime-links CoreAudio
+  # (linked here too, so a stripped dlopen path cannot lose audio). Vulkan is dlopen'd (SDL / volk):
+  # @executable_path/../Frameworks finds the bundled libMoltenVK.dylib / libsteam_api.dylib.
+  target_link_libraries(deadground PRIVATE "-framework CoreFoundation" "-framework CoreAudio" "-framework AudioToolbox")
+  set_target_properties(deadground PROPERTIES BUILD_RPATH "@executable_path;@executable_path/../Frameworks" INSTALL_RPATH "@executable_path/../Frameworks")
 endif()
 if(WIN32)
   target_link_libraries(deadground PRIVATE ws2_32 winmm dbghelp iphlpapi)
@@ -256,7 +304,7 @@ add_dependencies(deadground dg_copy_data)
 # ---------------------------------------------------------------- unit tests (ctest)
 # Pure modules only: no SDL / Vulkan / Jolt, so this builds and runs anywhere.
 enable_testing()
-add_executable(test_recoil tests/test_recoil.c src/gameplay/recoil.c src/core/spring.c)
+add_executable(test_recoil tests/test_recoil.c src/gameplay/recoil.c src/core/spring.c src/core/detmath.c)
 set_target_properties(test_recoil PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
 target_include_directories(test_recoil PRIVATE src)
 if(MSVC)
@@ -265,7 +313,7 @@ else()
   target_link_libraries(test_recoil PRIVATE m)
 endif()
 add_test(NAME recoil COMMAND test_recoil)
-add_executable(test_spectate tests/test_spectate.c src/net/spectate_core.c src/gameplay/recoil.c src/core/spring.c)
+add_executable(test_spectate tests/test_spectate.c src/net/spectate_core.c src/gameplay/recoil.c src/core/spring.c src/core/detmath.c)
 set_target_properties(test_spectate PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
 target_include_directories(test_spectate PRIVATE src)
 if(MSVC)
@@ -274,7 +322,7 @@ else()
   target_link_libraries(test_spectate PRIVATE m)
 endif()
 add_test(NAME spectate COMMAND test_spectate)
-add_executable(test_aim tests/test_aim.c src/gameplay/aim.c src/gameplay/recoil.c src/core/spring.c)
+add_executable(test_aim tests/test_aim.c src/gameplay/aim.c src/gameplay/recoil.c src/core/spring.c src/core/detmath.c)
 set_target_properties(test_aim PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
 target_include_directories(test_aim PRIVATE src)
 if(MSVC)
@@ -283,7 +331,7 @@ else()
   target_link_libraries(test_aim PRIVATE m)
 endif()
 add_test(NAME aim COMMAND test_aim)
-add_executable(test_ballistics tests/test_ballistics.c src/gameplay/ballistics/bal_data.c src/gameplay/ballistics/bal_drag.c
+add_executable(test_ballistics tests/test_ballistics.c src/core/detmath.c src/gameplay/ballistics/bal_data.c src/gameplay/ballistics/bal_drag.c
   src/gameplay/ballistics/bal_sim.c src/gameplay/ballistics/bal_surface.c src/gameplay/ballistics/bal_acoustics.c
   src/gameplay/ballistics/bal_tracer.c src/gameplay/ballistics/bal_muzzle.c third_party/cjson/cJSON.c)
 set_target_properties(test_ballistics PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
@@ -296,13 +344,23 @@ else()
   target_link_libraries(test_ballistics PRIVATE m)
 endif()
 add_test(NAME ballistics COMMAND test_ballistics)
+# Deterministic float math (docs/PLATFORM_MACOS.md "Determinism"): accuracy + the cross-platform golden hash.
+add_executable(test_detmath tests/test_detmath.c src/core/detmath.c)
+set_target_properties(test_detmath PROPERTIES C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
+target_include_directories(test_detmath PRIVATE src)
+if(MSVC)
+  target_compile_options(test_detmath PRIVATE /W3 /utf-8 /fp:precise)
+else()
+  target_link_libraries(test_detmath PRIVATE m)
+endif()
+add_test(NAME detmath COMMAND test_detmath)
 
 # ---------------------------------------------------------------- animation tools
 # Engine-free subset: anim core + FBX import + cache (+ log / platform helpers).
 set(DG_ANIMCORE_SOURCES
   src/anim/anim.c src/anim/skeleton.c src/anim/retarget.c src/anim/anim_mesh.c src/anim/controller.c src/anim/procedural.c src/anim/turn.c src/anim/spine.c
   src/anim/weapon_hold.c src/anim/handpose.c src/editor/handpose/hp_discover.c src/editor/handpose/hp_edit.c src/editor/handpose/hp_rig.c src/editor/handpose/hp_xform.c src/anim/damage_additive.c src/anim/foot_ik.c src/anim/swim.c src/anim/anim_net.c src/anim/ragdoll_def.c
-  src/anim/anim_library.c src/anim/character_rt.c src/gameplay/hitboxes.c src/gameplay/items.c src/gameplay/attachments.c src/gameplay/recoil.c src/core/spring.c
+  src/anim/anim_library.c src/anim/character_rt.c src/gameplay/hitboxes.c src/gameplay/items.c src/gameplay/attachments.c src/gameplay/recoil.c src/core/spring.c src/core/detmath.c
   src/world/time_of_day.c src/world/weather.c src/world/wind.c src/world/water/water.c src/world/water/water_waves.c src/gameplay/vehicle_def.c src/vfx/vfx_curve.c src/vfx/vfx_library.c src/vfx/vfx_sim.c src/vfx/vfx_flesh.c src/vfx/vfx_atlas.c src/player/holdpoint.c src/player/sway.c src/anim/fire_anim.c src/player/camera_fp_math.c src/gameplay/phone/phone_orient.c
   src/assets/fbx_loader.c src/assets/anim_cache.c src/assets/character.c src/render/skeletal_mesh.c
   src/core/log.c src/core/platform.c)

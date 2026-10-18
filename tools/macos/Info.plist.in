@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- Deadground.app Info.plist (tools/macos/make_bundle.sh fills @VARS@; docs/PLATFORM_MACOS.md "App bundle"). -->
+<plist version="1.0">
+<dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>en</string>
+	<key>CFBundleDisplayName</key>
+	<string>Deadground</string>
+	<key>CFBundleName</key>
+	<string>Deadground</string>
+	<key>CFBundleExecutable</key>
+	<string>deadground</string>
+	<key>CFBundleIdentifier</key>
+	<string>@BUNDLE_ID@</string>
+	<key>CFBundleIconFile</key>
+	<string>Deadground</string>
+	<key>CFBundlePackageType</key>
+	<string>APPL</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleShortVersionString</key>
+	<string>@VERSION@</string>
+	<key>CFBundleVersion</key>
+	<string>@BUILD@</string>
+	<key>LSMinimumSystemVersion</key>
+	<string>11.0</string>
+	<key>LSApplicationCategoryType</key>
+	<string>public.app-category.action-games</string>
+	<key>LSArchitecturePriority</key>
+	<array>
+		<string>arm64</string>
+		<string>x86_64</string>
+	</array>
+	<!-- Retina: the drawable is the backing size; r_scale stays relative to it. -->
+	<key>NSHighResolutionCapable</key>
+	<true/>
+	<!-- A game in the background (a host waiting in the lobby, a dedicated session) must keep ticking. -->
+	<key>LSAppNapIsDisabled</key>
+	<true/>
+	<key>NSSupportsAutomaticGraphicsSwitching</key>
+	<true/>
+	<key>GCSupportsControllerUserInteraction</key>
+	<true/>
+	<key>LSSupportsGameMode</key>
+	<true/>
+	<!-- macOS 15+ asks before the first LAN broadcast / phone pairing connection. -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Deadground finds LAN games on your network and pairs the in-game phone with your iPhone.</string>
+	<key>NSHumanReadableCopyright</key>
+	<string>Deadground</string>
+</dict>
+</plist>
