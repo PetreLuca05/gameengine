@@ -2,6 +2,7 @@
 // polynomials), only IEEE-exact libm calls (sqrt, floor, frexp, ldexp, fmod), one rounding to float.
 #include "detmath.h"
 #include <math.h>
+#include <string.h>
 
 static const double PI = 3.14159265358979311600e+00;
 static const double PIO2 = 1.57079632679489655800e+00;
@@ -22,6 +23,29 @@ static const double SQRT3 = 1.73205080756887719318e+00;
 static const double TAN_PI_12 = 2.67949192431122696e-01;
 
 static int dm_isnan(double x) { return x != x; }
+
+// Exact replacements for floor / ldexp / frexp on the kernels' ranges, by bit manipulation: no libm
+// calls in the hot paths (the ballistic step calls pow per substep), same bits everywhere.
+static double bits_to_d(unsigned long long u) { double d; memcpy(&d, &u, 8); return d; }
+static unsigned long long d_to_bits(double d) { unsigned long long u; memcpy(&u, &d, 8); return u; }
+// floor(x) for |x| < 2^52
+static double floor_fast(double x) {
+    double t = (double)(long long)x;   // truncation toward zero, exact in this range
+    return t > x ? t - 1.0 : t;
+}
+// x * 2^k: one exact power-of-two multiply for k in [-1022, 1023] (the same result as ldexp)
+static double ldexp_fast(double x, int k) {
+    if (k < -1022 || k > 1023) return ldexp(x, k);   // subnormal / overflow edge: libm's ldexp (exact, IEEE scalbn)
+    return x * bits_to_d((unsigned long long)(k + 1023) << 52);
+}
+// x = m 2^e, m in [0.5, 1), for positive finite x
+static double frexp_fast(double x, int *e) {
+    int adj = 0;
+    if (x < 2.2250738585072014e-308) { x *= 18014398509481984.0; adj = -54; }   // subnormal: scale by 2^54
+    unsigned long long u = d_to_bits(x);
+    *e = (int)((u >> 52) & 0x7FF) - 1022 + adj;
+    return bits_to_d((u & ~(0x7FFull << 52)) | (1022ull << 52));
+}
 static int dm_isinf(double x) { return x - x != x - x && x == x; }
 
 // sin / cos of r, |r| <= pi / 4 (+ rounding): Taylor to r^13 / r^14 (truncation < 3e-14).
@@ -37,7 +61,7 @@ static double k_cos(double r) {
 // x = k * pi / 2 + r, |r| <= pi / 4; returns k mod 4.
 static int reduce(double x, double *r) {
     if (fabs(x) > 1.0e6) x = fmod(x, TWO_PI);   // exact; angles this large carry no precision anyway
-    double k = floor(x * TWO_OVER_PI + 0.5);
+    double k = floor_fast(x * TWO_OVER_PI + 0.5);
     *r = (x - k * PIO2_HI) - k * PIO2_LO;
     long long q = (long long)k;
     return (int)(((q % 4) + 4) % 4);
@@ -101,22 +125,34 @@ static double d_exp(double x) {
     if (dm_isnan(x)) return x;
     if (x > 709.78) return HUGE_VAL;
     if (x < -745.2) return 0.0;
-    double k = floor(x * LOG2E + 0.5);
+    double k = floor_fast(x * LOG2E + 0.5);
     double r = (x - k * LN2_HI) - k * LN2_LO;
     double p = 1.0 / 6227020800.0;
     static const double inv_fact[13] = { 1.0, 1.0, 1.0 / 2.0, 1.0 / 6.0, 1.0 / 24.0, 1.0 / 120.0, 1.0 / 720.0, 1.0 / 5040.0, 1.0 / 40320.0,
                                          1.0 / 362880.0, 1.0 / 3628800.0, 1.0 / 39916800.0, 1.0 / 479001600.0 };
     for (int n = 12; n >= 0; n--) p = p * r + inv_fact[n];
-    return ldexp(p, (int)k);
+    return ldexp_fast(p, (int)k);
+}
+
+// exp for the float results: Taylor to r^10 (truncation < 1e-11 relative, far below a float ulp).
+static double d_exp_f(double x) {
+    if (dm_isnan(x)) return x;
+    if (x > 709.78) return HUGE_VAL;
+    if (x < -745.2) return 0.0;
+    double k = floor_fast(x * LOG2E + 0.5);
+    double r = (x - k * LN2_HI) - k * LN2_LO;
+    double p = 1.0 + r * (1.0 + r * (1.0 / 2.0 + r * (1.0 / 6.0 + r * (1.0 / 24.0 + r * (1.0 / 120.0 + r * (1.0 / 720.0 + r * (1.0 / 5040.0 +
+               r * (1.0 / 40320.0 + r * (1.0 / 362880.0 + r * (1.0 / 3628800.0))))))))));
+    return ldexp_fast(p, (int)k);
 }
 
 // log: x = m 2^e, m in [sqrt(1/2), sqrt(2)), log m = 2 atanh(s), s = (m - 1) / (m + 1), series to
-// s^21 (|s| <= 0.1716, truncation < 1e-18). Returns e and log m separately (log2 keeps e exact).
+// s^17 (|s| <= 0.1716, truncation < 1e-15). Returns e and log m separately (log2 keeps e exact).
 static double k_logm(double x, int *e) {
-    double m = frexp(x, e);
+    double m = frexp_fast(x, e);
     if (m < SQRT_HALF) { m *= 2.0; (*e)--; }
-    double s = (m - 1.0) / (m + 1.0), z = s * s, p = 0.0;
-    for (int n = 21; n >= 3; n -= 2) p = z * (1.0 / (double)n + p);
+    double s = (m - 1.0) / (m + 1.0), z = s * s;
+    double p = z * (1.0 / 3.0 + z * (1.0 / 5.0 + z * (1.0 / 7.0 + z * (1.0 / 9.0 + z * (1.0 / 11.0 + z * (1.0 / 13.0 + z * (1.0 / 15.0 + z * (1.0 / 17.0))))))));
     return 2.0 * (s + s * p);
 }
 static double d_log(double x) {
@@ -150,11 +186,11 @@ float dm_acosf(float x) {
     return (float)d_atan2(sqrt((1.0 - d) * (1.0 + d)), d);
 }
 double dm_exp(double x) { return d_exp(x); }
-float dm_expf(float x) { return (float)d_exp((double)x); }
+float dm_expf(float x) { return (float)d_exp_f((double)x); }
 float dm_exp2f(float x) {
     double d = (double)x, k = floor(d);
     if (d == k && fabs(d) < 1100.0) return (float)ldexp(1.0, (int)k);   // exact powers of two
-    return (float)d_exp(d * LN2);
+    return (float)d_exp_f(d * LN2);
 }
 float dm_logf(float x) { return (float)d_log((double)x); }
 float dm_log2f(float x) {
@@ -178,7 +214,7 @@ float dm_powf(float x, float y) {
     }
     if (dx == 0.0) return (float)(dy > 0.0 ? sign * 0.0 : sign * HUGE_VAL);
     if (dm_isinf(dx)) return (float)(dy > 0.0 ? sign * HUGE_VAL : sign * 0.0);
-    return (float)(sign * d_exp(dy * d_log(dx)));
+    return (float)(sign * d_exp_f(dy * d_log(dx)));
 }
 float dm_cbrtf(float x) {
     double d = (double)x;
