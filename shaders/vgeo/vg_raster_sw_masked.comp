@@ -1,5 +1,0 @@
-#version 450
-// SW raster, masked / dithered clusters (vg_raster_sw.glsl).
-#define VG_SW_KIND 1
-#extension GL_GOOGLE_include_directive : require
-#include "vg_raster_sw.glsl"

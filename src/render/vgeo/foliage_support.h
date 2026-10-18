@@ -12,7 +12,8 @@
 #ifndef DG_FOLIAGE_SUPPORT_H
 #define DG_FOLIAGE_SUPPORT_H
 
-#include "vgeo_cull.h"
+#include "vgeo_scene.h"
+#include "vgeo_tex.h"
 #include "foliage_wind.h"
 
 // ------------------------------------------------------------------ WPO (wpo.glsl)

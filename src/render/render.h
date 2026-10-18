@@ -224,7 +224,7 @@ void render_surface_map(const u8 *ids, int n, float origin_x, float origin_z, fl
 // Frame
 bool render_begin_frame(void);
 void render_set_camera(const RenderCamera *cam);
-// Classic renderer (r_vgeo 0), last frame's main view: instances per LOD 0..3 and impostors (n[4]), and
+// Classic renderer, last frame's main view: instances per LOD 0..3 and impostors (n[4]), and
 // those in a cross-fade band (drawn twice, docs/LOD.md).
 void render_classic_lod_counts(u32 n[5], u32 *fading);
 // The scope picture-in-picture view of the last frame (docs/LOD.md "Scopes"): objective position, axis,

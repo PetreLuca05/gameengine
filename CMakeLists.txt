@@ -160,7 +160,6 @@ file(GLOB DG_SHADER_SOURCES CONFIGURE_DEPENDS
   ${CMAKE_SOURCE_DIR}/shaders/post/*.vert ${CMAKE_SOURCE_DIR}/shaders/post/*.frag ${CMAKE_SOURCE_DIR}/shaders/post/*.comp
   ${CMAKE_SOURCE_DIR}/shaders/sights/*.frag ${CMAKE_SOURCE_DIR}/shaders/sights/*.comp
   ${CMAKE_SOURCE_DIR}/shaders/sky/*.comp ${CMAKE_SOURCE_DIR}/shaders/vgeo/*.comp
-  ${CMAKE_SOURCE_DIR}/shaders/vgeo/*.vert ${CMAKE_SOURCE_DIR}/shaders/vgeo/*.frag ${CMAKE_SOURCE_DIR}/shaders/vgeo/*.mesh
   ${CMAKE_SOURCE_DIR}/shaders/water/*.vert ${CMAKE_SOURCE_DIR}/shaders/water/*.frag ${CMAKE_SOURCE_DIR}/shaders/water/*.comp)
 file(GLOB DG_SHADER_INCLUDES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/shaders/*.glsl ${CMAKE_SOURCE_DIR}/shaders/post/*.glsl ${CMAKE_SOURCE_DIR}/shaders/sights/*.glsl ${CMAKE_SOURCE_DIR}/shaders/sky/*.glsl ${CMAKE_SOURCE_DIR}/shaders/vgeo/*.glsl ${CMAKE_SOURCE_DIR}/shaders/terrain/*.glsl ${CMAKE_SOURCE_DIR}/shaders/water/*.glsl ${CMAKE_SOURCE_DIR}/third_party/fsr/*.h
   ${CMAKE_SOURCE_DIR}/shaders/post/*.h)
@@ -341,21 +340,6 @@ if(MSVC)
   target_compile_options(dg_vgeo PRIVATE /W3 /wd4100 /wd4201 /utf-8)
 endif()
 
-# Virtualized geometry GPU module (culling / Hi-Z) on a VgContext: the game builds it through the src glob,
-# the harness tests and tools/bench_vgeo through this library.
-add_library(dg_vgeo_gpu STATIC src/render/vgeo/vgeo_ctx.c src/render/vgeo/vgeo_scene.c src/render/vgeo/vgeo_cull.c src/render/vgeo/vgeo_raster.c src/render/vgeo/vgeo_stream.c src/render/vgeo/vgeo_skin.c src/render/vgeo/vgeo_tex.c src/render/vgeo/foliage_support.c)
-set_target_properties(dg_vgeo_gpu PROPERTIES C_STANDARD 11)
-target_link_libraries(dg_vgeo_gpu PUBLIC dg_vgeo volk vma)
-if(MSVC)
-  target_compile_options(dg_vgeo_gpu PRIVATE /W3 /wd4100 /wd4201 /utf-8)
-endif()
-
-add_executable(bench_vgeo tools/bench_vgeo/bench_vgeo.c tests/vgeo_gpu_harness.c)
-set_target_properties(bench_vgeo PROPERTIES C_STANDARD 11)
-target_include_directories(bench_vgeo PRIVATE tests)
-target_link_libraries(bench_vgeo PRIVATE dg_vgeo_gpu)
-add_dependencies(bench_vgeo dg_shaders)
-
 add_executable(img_diff tools/img_diff/img_diff.c)
 set_target_properties(img_diff PROPERTIES C_STANDARD 11)
 target_link_libraries(img_diff PRIVATE dg_thirdparty)
@@ -364,20 +348,8 @@ add_executable(build_vgeo tools/build_vgeo/build_vgeo.c)
 set_target_properties(build_vgeo PROPERTIES C_STANDARD 11)
 target_link_libraries(build_vgeo PRIVATE dg_vgeo)
 
-# vgeo test scene content (data/levels/vgeo_test.json): generated once into bin/assets/vgeo (never
-# committed). Only regenerated when missing: delete the files after a builder format change.
 set(DG_VGEO_OUT ${CMAKE_BINARY_DIR}/bin/assets/vgeo)
 set(DG_VGEO_CONTENT)
-foreach(item "rock_field;field;10000000" "statue;statue;500000" "building;building;2000000")
-  list(GET item 0 vg_name)
-  list(GET item 1 vg_gen)
-  list(GET item 2 vg_tris)
-  add_custom_command(OUTPUT ${DG_VGEO_OUT}/${vg_name}.vgeo
-    COMMAND ${CMAKE_COMMAND} -E make_directory ${DG_VGEO_OUT}
-    COMMAND $<TARGET_FILE:build_vgeo> --gen ${vg_gen} --tris ${vg_tris} --out ${DG_VGEO_OUT}/${vg_name}.vgeo
-    COMMENT "vgeo content ${vg_name}.vgeo" VERBATIM)
-  list(APPEND DG_VGEO_CONTENT ${DG_VGEO_OUT}/${vg_name}.vgeo)
-endforeach()
 # Imported trees (docs/VGEO.md "Tree models"): the assets/treefbx species built (clusters, DAG,
 # impostors) into bin/assets/vgeo/trees/<name>.dgtree; the game rebuilds into assets/cache when a
 # file is missing or its key is stale.
@@ -729,71 +701,3 @@ endif()
 add_test(NAME vgeo_build COMMAND test_vgeo_build WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
 add_test(NAME vgeo_build_long COMMAND test_vgeo_build --long WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
 set_tests_properties(vgeo_build_long PROPERTIES LABELS long TIMEOUT 600)
-
-# Virtualized geometry GPU culling on the window-less harness (needs a Vulkan 1.3 device; validation
-# when the portable layer is present).
-add_executable(test_vgeo_gpu tests/test_vgeo_gpu.c tests/vgeo_gpu_harness.c)
-set_target_properties(test_vgeo_gpu PROPERTIES C_STANDARD 11)
-target_link_libraries(test_vgeo_gpu PRIVATE dg_vgeo_gpu)
-add_dependencies(test_vgeo_gpu dg_shaders)
-if(MSVC)
-  target_compile_options(test_vgeo_gpu PRIVATE /W3 /wd4100 /wd4201 /utf-8)
-endif()
-add_test(NAME vgeo_gpu COMMAND test_vgeo_gpu --validation WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
-if(EXISTS "${CMAKE_SOURCE_DIR}/.toolchain/vvl/install/bin")
-  set_tests_properties(vgeo_gpu PROPERTIES ENVIRONMENT "VK_ADD_LAYER_PATH=${CMAKE_SOURCE_DIR}/.toolchain/vvl/install/bin")
-endif()
-
-# Virtualized geometry rasterisers (HW mesh / vertex pulling vs SW compute) on the harness.
-add_executable(test_vgeo_raster tests/test_vgeo_raster.c tests/vgeo_gpu_harness.c)
-set_target_properties(test_vgeo_raster PROPERTIES C_STANDARD 11)
-target_link_libraries(test_vgeo_raster PRIVATE dg_vgeo_gpu)
-add_dependencies(test_vgeo_raster dg_shaders)
-if(MSVC)
-  target_compile_options(test_vgeo_raster PRIVATE /W3 /wd4100 /wd4201 /utf-8)
-endif()
-add_test(NAME vgeo_raster COMMAND test_vgeo_raster --validation WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
-if(EXISTS "${CMAKE_SOURCE_DIR}/.toolchain/vvl/install/bin")
-  set_tests_properties(vgeo_raster PROPERTIES ENVIRONMENT "VK_ADD_LAYER_PATH=${CMAKE_SOURCE_DIR}/.toolchain/vvl/install/bin")
-endif()
-
-# Virtualized geometry page streaming (cold start, convergence, small pool, eviction audit).
-add_executable(test_vgeo_stream tests/test_vgeo_stream.c tests/vgeo_gpu_harness.c)
-set_target_properties(test_vgeo_stream PROPERTIES C_STANDARD 11)
-target_link_libraries(test_vgeo_stream PRIVATE dg_vgeo_gpu)
-add_dependencies(test_vgeo_stream dg_shaders)
-if(MSVC)
-  target_compile_options(test_vgeo_stream PRIVATE /W3 /wd4100 /wd4201 /utf-8)
-endif()
-add_test(NAME vgeo_stream COMMAND test_vgeo_stream --validation WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
-if(EXISTS "${CMAKE_SOURCE_DIR}/.toolchain/vvl/install/bin")
-  set_tests_properties(vgeo_stream PROPERTIES ENVIRONMENT "VK_ADD_LAYER_PATH=${CMAKE_SOURCE_DIR}/.toolchain/vvl/install/bin")
-endif()
-
-# Virtualized geometry skinned meshes (Phase 6): animated bounds, crack-free animated cuts, GPU cut vs
-# the CPU reference, HW vs SW raster and the shared skinning helper on the harness.
-add_executable(test_vgeo_skinned tests/test_vgeo_skinned.c tests/vgeo_gpu_harness.c)
-set_target_properties(test_vgeo_skinned PROPERTIES C_STANDARD 11)
-target_link_libraries(test_vgeo_skinned PRIVATE dg_vgeo_gpu)
-add_dependencies(test_vgeo_skinned dg_shaders)
-if(MSVC)
-  target_compile_options(test_vgeo_skinned PRIVATE /W3 /wd4100 /wd4201 /utf-8)
-endif()
-add_test(NAME vgeo_skinned COMMAND test_vgeo_skinned --validation WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
-if(EXISTS "${CMAKE_SOURCE_DIR}/.toolchain/vvl/install/bin")
-  set_tests_properties(vgeo_skinned PROPERTIES ENVIRONMENT "VK_ADD_LAYER_PATH=${CMAKE_SOURCE_DIR}/.toolchain/vvl/install/bin")
-endif()
-
-# Virtualized geometry foliage support (Phase 7): masked SW / HW agreement + CPU alpha reference, WPO
-# bounds, density hash, cell culling vs brute force, impostor switch, placement streaming, Hi-Z.
-add_executable(test_vgeo_foliage tests/test_vgeo_foliage.c tests/vgeo_gpu_harness.c)
-set_target_properties(test_vgeo_foliage PROPERTIES C_STANDARD 11)
-target_link_libraries(test_vgeo_foliage PRIVATE dg_vgeo_gpu)
-add_dependencies(test_vgeo_foliage dg_shaders)
-if(MSVC)
-  target_compile_options(test_vgeo_foliage PRIVATE /W3 /wd4100 /wd4201 /utf-8)
-endif()
-add_test(NAME vgeo_foliage COMMAND test_vgeo_foliage --validation WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
-if(EXISTS "${CMAKE_SOURCE_DIR}/.toolchain/vvl/install/bin")
-  set_tests_properties(vgeo_foliage PROPERTIES ENVIRONMENT "VK_ADD_LAYER_PATH=${CMAKE_SOURCE_DIR}/.toolchain/vvl/install/bin")
-endif()

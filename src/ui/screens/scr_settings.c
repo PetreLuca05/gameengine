@@ -663,8 +663,6 @@ static void tab_graphics_debug(GuiCursor *c) {
     row_fid_toggle(c, "Moon shadows at twilight", FF_MOON_SHADOWS, "The moon casts its own shadows while the sun is still up.");
 
     section(c, "Geometry, textures & foliage");
-    row_fid_toggle(c, "Virtualized geometry (Nanite)", FF_VGEO,
-                   "On: GPU cluster culling, continuous LOD, occlusion culling. Off: the classic instanced renderer (discrete LODs, impostors; often faster on foliage). Applies at once.");
     static const char *const texq[] = { "Low (mips -2)", "Medium (mips -1)", "High" };
     row_fid_combo(c, "Textures", FF_TEXTURE_QUALITY, texq, NULL, 3, NULL);
     {

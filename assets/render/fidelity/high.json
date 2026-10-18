@@ -46,8 +46,6 @@
     "moon_shadows": {"avail": "on"},
     "texture_quality": {"avail": "on", "default": 2, "max": 2},
     "aniso": {"avail": "on", "default": 8, "allowed": [1, 2, 4, 8, 16]},
-    "vgeo": {"avail": "on"},
-    "vgeo_error_px": {"avail": "on", "scale": 1.41},
     "vgeo_shadow_error_px": {"avail": "on", "scale": 1.41},
     "vgeo_lod_px": {"avail": "on", "scale": 1.41},
     "foliage_density": {"avail": "on", "max": 0.8},
