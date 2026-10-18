@@ -15,7 +15,7 @@ The family is the Marlowes:
 
 | Who | Where they are at 05:52 | What they left |
 |---|---|---|
-| **You** (parent; name and gender are never stated) | asleep, master bedroom | |
+| **You** (parent; name and gender are never stated) | asleep on the living-room sofa, the TV on | |
 | **Dana** (partner, ER nurse) | **at work**: called in to St. Aldric Hospital at 23:40 | Note on the kitchen counter. Voicemail at 02:14 ("Stay inside. Don't open the door for anyone. I love you."). |
 | **Jules** (16, swimmer) | **left early**, at 05:30, for swim practice | Note on the fridge ("Swim 6, back 9, took the last yoghurt, sorry"). A text at 05:41 that never sent. |
 | **Mia** (8) | **at school**: the class's overnight "sleepover at the museum" | Permission slip and calendar entry. A drawing taped to her door. |
@@ -33,7 +33,7 @@ Each beat has a time window. The clock eases toward the window's end while the p
 
 | # | Beat | Clock | Weather | Through the glass | Teaches |
 |---|---|---|---|---|---|
-| 1 | **Wake up**: the phone buzzes on the nightstand. | 05:52–06:00 | clear | Pre-dawn blue. City lights on. One distant siren. | look, move |
+| 1 | **Wake up** on the sofa, facing the TV: the phone buzzes on the seat beside you. | 05:52–06:00 | clear | Pre-dawn blue. City lights on. One distant siren. | look, move |
 | 2 | **Check the phone**: no signal, 3 missed calls, Messages (Dana, Jules), Gallery holds family photos. | 06:00–06:10 | clear | Sunrise on the east glass. The first helicopter crosses far north. | phone, interact |
 | 3 | **Find the family's notes**: the three notes in any order, plus optional extras (calendar, voicemail, Jules's laptop). | 06:10–06:35 | clear → little_cloudy | Traffic thickens, then **stalls** on the bridge at 35°. Halden Tower (360 m east) **flickers**. | journal, interact |
 | 4 | **Gather supplies**: kitchen (knife, food, water), bathroom (first-aid kit), closet (bat in Jules's room, backpack). | 06:20–06:50 (runs parallel to 3) | little_cloudy | Sirens layer in. Birds circle the park. | inventory, heal wheel, melee, throw wheel (a bottle) |
@@ -107,7 +107,7 @@ Plan: `docs/story/ch01/layout_plan.svg`.
 | Living | 7.5–12 | 0–6 (open) | 45 (open plan) | N + E (hero corner) | L-sofa facing the NE corner, chaise along the east glass. TV on a low credenza on the south partition (switchable, broadcasts). Reading chair + lamp at the NW. Rug, plants, toys, dog bed. Sliding door. Blinds on every module. |
 | Dining | 4.5–7.5 | 0–3 | (in 45) | N | Table for 4, half-finished breakfast (Jules's bowl, Dana's mug from last night), fruit bowl. |
 | Kitchen | 4.5–9.6 | 3–6 | (in 45) | | 5.1 m run on the south partition (tall fridge, oven, hob, sink, dishwasher, 6 drawers, 8 cabinets). Island with 2 stools and 3 drawers. Knife block, kettle, radio, calendar (Mia's trip). Notes on the fridge and the counter. Taps (water). |
-| Master bedroom | 0–4.5 | 0–4.5 | 20.3 | N | Bed (spawn), 2 nightstands (phone, lamp), dresser (4 drawers), curtains, family photos, Dana's work lanyard (missing). |
+| Master bedroom | 0–4.5 | 0–4.5 | 20.3 | N | Bed, 2 nightstands (lamp), dresser (4 drawers), curtains, family photos, Dana's work lanyard (missing). |
 | En-suite | 0–2.4 | 4.5–7 | 6.0 | | Shower, WC, vanity + mirror cabinet (first-aid kit #1), towel rail, taps. |
 | Walk-in closet | 2.4–4.5 | 4.5–7 | 5.3 | | Walk-through from the hall to the master. Rails, shelves, shoe rack, safe (code is on a note in the study, optional). |
 | Hall | 4.5–6.0 | 6–12 | 9.0 | | Entrance (security door, peephole, chain, deadbolt), key bowl, mirror, shoe bench, leash hook, intercom (dead). Hall cabinet (the barricade prop). |
@@ -155,11 +155,12 @@ Site plan: `docs/story/ch01/vista_site_plan.svg`. Bearings are clockwise from no
 | Modern towers E | 70 | 2.6 km | ≤150 m | vista |
 | Stadium stub | 118 | 2.7 km | 40 m | vista |
 
-**Locked frames.** The eye is 1.65 m above the floor (y = 31.65), with 16:9 and hfov 90°. The tests diff these frames against golden captures (docs/STORY.md §Tests).
+**Locked frames.** The eye is 1.65 m above the floor (y = 31.65), at 16:9 with `cl_fov 60` (vertical; 91.5° horizontal; the engine's minimum). The tests diff these frames against golden captures (docs/STORY.md §Tests).
 
 - **SOFA**: (9.4, 31.65, 3.6), yaw 25°, pitch −4°. Mullions at x 9.0 and 10.5 frame the spire. The river cuts across the lower-left third, the financial cluster sits at the left edge, and the smoke column (after beat 5) is on the right third. Sketch: `vista_sofa.svg`.
 - **BALCONY**: (12.9, 31.65, −0.9), yaw 35°, pitch −6°. This matches reference photo 2: river and bridge at the left foreground, spire just left of centre, mid-rise brick blocks filling the lower half, and cranes. Sketch: `vista_balcony.svg`.
-- Each frame is captured at 3 states: dawn 06:05, noon-equivalent (the `story_time` override at 12:00) and `overcast`/`smoke_haze`.
+- Each frame is captured at 4 states: dawn 06:05, noon, the `cloudy+fog` haze, and night (22:30, window lights). See `tools/tests/vista_frames.cfg`.
+- **Start**: the chapter opens at `spawn_sofa` (10.3, 30, 3.8), in front of the L-sofa seat, facing the TV (yaw −162.7). The phone (`phone_sofa`) buzzes on the seat.
 
 Life in the view (vista layer, docs/STORY.md §Vista):
 - **Traffic** on spline roads: headlight/taillight sprites and low-poly cars. Density follows the clock. Traffic **stalls** after beat 3 and some cars go dark.

@@ -65,11 +65,11 @@
  "spawns": [
   {
    "pos": [
-    2.2,
+    10.3,
     30.0,
-    3.4
+    3.8
    ],
-   "yaw": 0
+   "yaw": -162.7
   },
   {
    "pos": [
@@ -3864,11 +3864,11 @@
   {
    "type": "marker",
    "pos": [
-    1.0,
-    30.56,
-    1.0
+    9.0,
+    30.46,
+    3.1
    ],
-   "name": "phone_nightstand",
+   "name": "phone_sofa",
    "shape": "box",
    "half": [
     0.04,
@@ -4201,13 +4201,13 @@
  "story": {
   "_doc": "src/game/game_story.c: points (spawn / action targets), volumes (boxes; same name = union), interactables (markers made usable: read / use / hold / pickup), power groups (light groups).",
   "points": {
-   "spawn_bed": {
+   "spawn_sofa": {
     "pos": [
-     2.2,
+     10.3,
      30.0,
-     3.4
+     3.8
     ],
-    "yaw": 0
+    "yaw": -162.7
    },
    "spawn_hall": {
     "pos": [
@@ -4637,7 +4637,7 @@
   ],
   "interact": [
    {
-    "name": "phone_nightstand",
+    "name": "phone_sofa",
     "kind": "use",
     "prompt": "Check phone",
     "signal": "phone_messages_read",
