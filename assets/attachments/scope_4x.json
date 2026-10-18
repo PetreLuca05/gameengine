@@ -12,6 +12,7 @@
   "eye_relief": 0.09,
   "zoom": 4.0,
   "main_zoom": 1.15,
+  "pip_resolution": 0.75,
   "rail_offset": "auto",
   "reticle": {
     "shape": "duplex",

@@ -151,7 +151,7 @@ Budgets (1080p, mid-range GPU): Off 3 ms, Low 5 ms, Medium 8 ms, High 12 ms, Mod
 | vol_local_lights | `r_vol_local_lights` **new** | | foliage_density / foliage_wind / impostor_px | `r_foliage_density` / `r_foliage_wind` (0 none, 1 main bending, 2 + branches, 3 + leaf flutter, bent normals; docs/FOLIAGE_WIND.md) / `r_vgeo_impostor_px` |
 | | | | terrain_quality | `r_terrain_quality` **new** (0 minimal .. 4 ultra: tiling breakers, colour variation, transitions, parallax, scatter; docs/TERRAIN_SHADING.md) |
 | motion_blur | `r_motion_blur` | | lod_bias / char_quality | `r_lod_bias` / `r_char_quality` |
-| dof / dof_quality | `r_dof` / `r_dof_quality` (16 / 32 / 48 taps) **new** | | scope_pip_scale | `r_scope_pip_scale` |
+| dof / dof_quality | `r_dof` / `r_dof_quality` (16 / 32 / 48 taps) **new** | | scope_pip_scale | `r_scope_pip_scale` (× the optic's `pip_resolution`, e.g. 4x 0.75, 8x 1.5; the product is clamped to the level's range, docs/ATTACHMENTS.md "PiP resolution per sight") |
 | ads_dof | `ads_dof` | | vfx_quality / vfx_lighting | `vfx_quality` / `vfx_lighting` |
 | bloom / bloom_quality | `r_bloom` / `r_bloom_quality` (0 tiny 4 mips **new**, 1 low, 2 high) | | decal_max | `vfx_decal_max` |
 | lens_flare, lens_dirt, chromatic, lens_distortion, lens_drops | `r_lens_flare`, `r_lens_dirt`, `r_chromatic`, `r_lens_distortion`, `r_lens_drops` | | precip_quality | `r_precip_quality` (-1 auto .. 3) |

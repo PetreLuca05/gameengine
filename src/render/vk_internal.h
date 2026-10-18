@@ -476,6 +476,8 @@ typedef struct Renderer {
     float fx_ads_focus;
     RenderSight sight;                          // this frame's weapon sight (render_set_sight)
     float pip_fov;                              // scope PiP camera FOV (deg)
+    u32 pip_size;                               // scope PiP target size (px, 0 = none this frame)
+    float pip_screen_frac;                      // the PiP picture's extent on screen (fraction of the view height)
     mat4 *prev_models_cpu;                      // this frame's previous-model list (index = DrawItem.prev_slot - 1)
     u32 prev_model_count;
     struct ObjSlot *obj_slots;                  // object_id -> last model / palette (hash, OBJ_SLOTS)
