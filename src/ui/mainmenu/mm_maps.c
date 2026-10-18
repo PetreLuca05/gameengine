@@ -7,6 +7,7 @@
 #include "world/season.h"
 #include "game/game_internal.h"
 #include "world/weather.h"
+#include "game/game_story.h"
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
@@ -14,6 +15,12 @@
 static GuiScroll g_scroll;
 
 // A season in a few words, from its weights: "mostly rain", "mostly snow", "mostly fair" ...
+// Story chapter maps start their chapter (docs/STORY.md); every other map hosts a lobby.
+static void host_map(const MapInfo *m) {
+    if (m && m->chapter[0]) story_start(m->chapter, NULL);
+    else lobby_host(lobby_steam_running() ? TRANSPORT_STEAM : TRANSPORT_LAN);
+}
+
 static void season_summary(const SeasonDef *sd, char *out, int size) {
     float rain = 0, snow = 0, fair = 0, fog = 0, total = 0;
     for (int i = 0; i < sd->weather_count; i++) {
@@ -106,7 +113,7 @@ static void map_row(int i, const MapInfo *m, GuiRect row) {
     snprintf(sub, sizeof(sub), "%s  ·  %s  ·  %d-%d players%s", m->biome, size, m->players_min, m->players_max, m->dev ? "  ·  test" : "");
     gw_label(gui_rect(x, row.y + row.h * 0.5f, row.x + row.w - x - pad, row.h * 0.4f), sub, gui_s(TH->t_small), GW_REGULAR, TH->text_faint, GUI_LEFT);
     if (in.clicked && !sel) { mm_select_map(m->id); gui_sound(TH->snd_click); }
-    if (in.double_clicked) lobby_host(lobby_steam_running() ? TRANSPORT_STEAM : TRANSPORT_LAN);
+    if (in.double_clicked) host_map(m);
 }
 
 void mm_maps_draw(GuiRect content) {
@@ -173,6 +180,8 @@ void mm_maps_draw(GuiRect content) {
         p->lobby.dynamic_weather = s.dynamic_weather;
     }
     GuiRect br = { in.x, in.y + in.h - TOK("mm_button_h"), in.w, TOK("mm_button_h") };
-    if (c.y + TOK("mm_gap") < br.y && gw_button(gui_id("mm_maps_host"), br, "Host on this map", GB_PRIMARY, true)) lobby_host(lobby_steam_running() ? TRANSPORT_STEAM : TRANSPORT_LAN);
+    const MapInfo *sel = lobby_map_info(M->map);
+    const char *label = sel && sel->chapter[0] ? "Play this chapter" : "Host on this map";
+    if (c.y + TOK("mm_gap") < br.y && gw_button(gui_id("mm_maps_host"), br, label, GB_PRIMARY, true)) host_map(sel);
     mm_footer_hint(gui_rect(content.x, content.y + content.h, content.w, TOK("mm_row_h")), "Enter / A  select     double click  host");
 }

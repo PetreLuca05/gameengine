@@ -19,6 +19,7 @@
 #include "input/input.h"
 #include "ui/mainmenu/mainmenu.h"
 #include "game/profile.h"
+#include "net/lobby_net.h"
 #include "cJSON.h"
 #include <SDL3/SDL.h>
 #include <math.h>
@@ -809,10 +810,9 @@ static bool save_slot(World *w, const char *slot) {
     free(text);
     if (ok) {
         log_info("story: saved %s", path);
-        Profile prof;
-        profile_load(&prof);
-        snprintf(prof.last_session, sizeof(prof.last_session), "story:%s:%s", SR.def->id, slot);
-        profile_save(&prof);   // no-op in --test runs
+        Profile *prof = lobby_profile();   // the menu's profile (it saves itself too: keep it in step)
+        snprintf(prof->last_session, sizeof(prof->last_session), "story:%s:%s", SR.def->id, slot);
+        profile_save(prof);   // no-op in --test runs
     } else {
         log_warn("story: save to slot '%s' failed", slot);
     }
@@ -820,10 +820,10 @@ static bool save_slot(World *w, const char *slot) {
 }
 
 bool story_continue_available(char *chapter, int size) {
-    Profile prof;
-    if (!profile_load(&prof) || strncmp(prof.last_session, "story:", 6)) return false;
+    const Profile *prof = lobby_profile();
+    if (strncmp(prof->last_session, "story:", 6)) return false;
     char ch[STORY_ID] = "", slot[32] = "";
-    if (sscanf(prof.last_session + 6, "%47[^:]:%31s", ch, slot) != 2) return false;
+    if (sscanf(prof->last_session + 6, "%47[^:]:%31s", ch, slot) != 2) return false;
     char path[600];
     if (!story_save_path(ch, slot, path, sizeof(path)) || !platform_file_exists(path)) return false;
     if (chapter) dg_strcpy(chapter, (size_t)size, ch);

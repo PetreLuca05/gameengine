@@ -1,0 +1,15 @@
+{
+  "_doc": "Story chapter map (docs/STORY.md, docs/CHAPTER_01.md): \"chapter\" makes Host / double click start the chapter (story_chapter) instead of a lobby.",
+  "name": "Story: 10th Floor",
+  "level": "story_01",
+  "chapter": "01_tenth_floor",
+  "thumbnail": "assets/maps/thumbs/story_01.png",
+  "size_m": 140,
+  "biome": "City tower",
+  "players": [1, 4],
+  "time_of_day": 6,
+  "season": "spring",
+  "weather": "clear",
+  "order": 5,
+  "description": "Chapter 1. Dawn on the tenth floor of a corner flat over the city. The family is gone, the phones are dead, and the city through the glass is starting to burn."
+}

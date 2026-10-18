@@ -4,9 +4,10 @@
     { "id": "root" },
     { "id": "stack", "parent": "root", "anchor": "bottom_left", "dir": "column", "align": "stretch", "w": "@mm_side_w", "gap": "@mm_gap_sm" },
     { "id": "title", "parent": "stack", "h": "@mm_title_h", "label": "Play" },
+    { "id": "continue", "parent": "stack", "h": "@mm_item_h", "label": "Continue", "action": "continue" },
+    { "id": "story", "parent": "stack", "h": "@mm_item_h", "label": "Story: 10th Floor", "action": "story" },
     { "id": "host", "parent": "stack", "h": "@mm_item_h", "label": "Host game", "action": "host" },
     { "id": "join", "parent": "stack", "h": "@mm_item_h", "label": "Join", "action": "join" },
-    { "id": "continue", "parent": "stack", "h": "@mm_item_h", "label": "Continue", "action": "continue" },
     { "id": "quick", "parent": "stack", "h": "@mm_item_h", "label": "Quick play", "action": "quick" },
     { "id": "transport", "parent": "stack", "h": "@mm_row_h" },
     { "id": "side", "parent": "root", "anchor": "right", "w": "@mm_panel_w", "h_pct": 0.72, "max_h": "@mm_panel_max_h" }
