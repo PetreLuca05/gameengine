@@ -48,7 +48,7 @@ typedef struct GVoice {
     double started;
     EnvVoiceState env;
     EnvParams last;
-    bool flat;
+    bool flat, fixed;                 // fixed: the preview's chain parameters, no world updates
 } GVoice;
 
 typedef struct AudioSystem {
@@ -86,7 +86,8 @@ typedef struct AudioSystem {
     int ray_cursor;
     AudioListenerState state;
     float ambience_gain;
-    EnvReverbParams rev_applied[ENV_ZONES];
+    EnvReverbParams rev_applied[ENV_ZONES], rev_pin[ENV_ZONES];
+    double rev_pin_until[ENV_ZONES];
     MixListener lis_applied;
     // scope (editor): the last rendered output, mono
     float scope[SCOPE_LEN];
@@ -224,6 +225,12 @@ void audio_reload(void) {
     // Patches are replaced in place (old copies stay alive for voices still rendering them); recipes
     // are game-thread data.
     load_library();
+}
+
+void audio_preview_reverb(int zone, const EnvReverbParams *p, float hold_s) {
+    if (!A || zone < 0 || zone >= ENV_ZONES) return;
+    A->rev_pin[zone] = *p;
+    A->rev_pin_until[zone] = platform_time() + hold_s;
 }
 
 bool audio_has_recipe(const char *name) { return A && name && syn_lib_find_recipe(&A->lib, name) >= 0; }
@@ -475,6 +482,11 @@ static int start_voice(int ri, const AudioEmit *e, const AudioParams *p, const E
     env_world_voice_start(&v->env, src);
     EnvParams ep;
     float delay = env_world_voice_eval(&v->env, false, &ep);
+    if (e->env) {
+        ep = *e->env;
+        v->fixed = true;
+        delay = 0.0f;
+    }
     apply_caps(e, &ep);
     if (!A->env_on->i && src->spatial) {
         // Chain off: the distance law and pan only (A / B against the full environment).
@@ -557,7 +569,7 @@ static AudioVoice emit(const AudioEmit *e, const AudioParams *p, u32 loop_key) {
     v->key = loop_key;
     // Outdoor impulsive sounds: the surroundings give the tail. Each echo is the same recipe and seed
     // started later from its reflector, with that path's level and top cut (docs/AUDIO_PROCEDURAL.md "Echoes").
-    if (r->echo && spatial && !e->no_echo && A->echoes->i && A->env_on->i && env_world_query()) {
+    if (r->echo && spatial && !e->no_echo && !e->env && A->echoes->i && A->env_on->i && env_world_query()) {
         const EnvRoom *room = env_world_room(e->pos, false);
         if (room && !room->indoor) {
             EnvEcho ech[MAX_ECHOES];
@@ -883,7 +895,7 @@ void audio_update(vec3 pos, vec3 fwd, vec3 up) {
             v->key = 0;
             v->loop = false;
         }
-        if (v->flat) continue;
+        if (v->flat || v->fixed) continue;
         bool rays = A->env_on->i && budget > 0 && !v->echo;
         if (rays) {
             budget--;
@@ -914,6 +926,7 @@ void audio_update(vec3 pos, vec3 fwd, vec3 up) {
     }
     EnvReverbParams rev[ENV_ZONES];
     env_world_reverbs(rev);
+    for (int z = 0; z < ENV_ZONES; z++) if (platform_time() < A->rev_pin_until[z]) rev[z] = A->rev_pin[z];
     for (int z = 0; z < ENV_ZONES; z++)
         if (reverb_changed(&rev[z], &A->rev_applied[z])) { mixer_set_reverb(A->mixer, z, &rev[z]); A->rev_applied[z] = rev[z]; }
     listener_mix();

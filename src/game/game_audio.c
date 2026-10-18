@@ -17,6 +17,7 @@
 #include "render/debug_draw.h"
 #include "ui/ui.h"
 #include "ui/gui/gui_draw.h"
+#include "ui/audio_editor.h"
 #include "core/engine.h"
 #include "core/cvar.h"
 #include "gameplay/weapons.h"
@@ -68,6 +69,7 @@ void game_audio_register(void) {
     EnvWorldQuery q = { ray, foliage, NULL };
     env_world_set_query(&q);
     GA.debug = cvar_find("audio_debug");
+    audio_editor_init();
 }
 
 static void footsteps(World *w, vec3 cam, float dt);

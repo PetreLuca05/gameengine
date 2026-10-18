@@ -72,6 +72,7 @@ typedef struct AudioEmit {
     float self_radius;    // m: the emitter's own geometry around it (a vehicle's body), not occluding
     bool flat;            // force 2D (UI)
     bool no_echo;
+    const struct EnvParams *env;   // fixed chain parameters (audio_env_preview), no world updates
     u8 bus;               // 0: the recipe's; else SynBus + 1
 } AudioEmit;
 void audio_emit_init(AudioEmit *e, const char *recipe, vec3 pos);
@@ -87,6 +88,9 @@ AudioVoice audio_loop_recipe(u32 key, const AudioEmit *e, const AudioParams *p);
 bool audio_has_recipe(const char *name);
 // Recipes + patches + materials + events again from disk (the editor's save, a JSON edit).
 void audio_reload(void);
+// audio_env_preview: holds a zone's late reverb for a few seconds against the world's.
+struct EnvReverbParams;
+void audio_preview_reverb(int zone, const struct EnvReverbParams *p, float hold_s);
 
 // Listener state for the environment chain (game/game_audio.c, each frame before audio_update).
 typedef struct AudioListenerState {
