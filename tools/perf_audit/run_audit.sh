@@ -37,9 +37,9 @@ if [ "$SCENES" = "all" ] || [ "$SCENES" = "lan2" ]; then
   sed "s|@OUT@|$OUT/lan2|g; s|@FRAMES@|$FRAMES|g" "$ROOT/tools/perf_audit/lan2_client.cfg" > "$OUT/lan2/client.cfg"
   $DG_DISPLAY_WRAP $EXE --test --nosound --log "$OUT/lan2/host.log" $PORTARG --script "$OUT/lan2/host.cfg" > /dev/null 2>&1 &
   HOST=$!
-  # The client joins once the host is listening (its log says so), not after a guessed delay.
+  # The client joins once the host runs its frame loop (frame 50 in its log), not after a guessed delay.
   n=0
-  until grep -q "net: hosting" "$OUT/lan2/host.log" 2>/dev/null || [ $n -ge 600 ]; do sleep 1; n=$((n + 1)); done
+  until grep -q "frame 50 done" "$OUT/lan2/host.log" 2>/dev/null || [ $n -ge 600 ]; do sleep 1; n=$((n + 1)); done
   sleep 2
   $DG_DISPLAY_WRAP $EXE --test --nosound --log "$OUT/lan2/client.log" $PORTARG +connect 127.0.0.1 --script "$OUT/lan2/client.cfg" > /dev/null 2>&1 || true
   wait $HOST || true
