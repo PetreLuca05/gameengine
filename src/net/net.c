@@ -4,6 +4,7 @@
 #include "anim/anim_net.h"
 #include "gameplay/characters.h"
 #include "net_transport.h"
+#include "lan_ifaddr.h"
 #include "protocol.h"
 #include "bitbuf.h"
 #include "replication.h"
@@ -756,7 +757,22 @@ void net_lan_refresh(void) {
     const char *q = "DGQ1";
     ENetBuffer b = { .data = (void *)q, .dataLength = 4 };
     ENetAddress bcast = { ENET_HOST_BROADCAST, DG_DISCOVERY_PORT };
-    enet_socket_send(d->sock, &bcast, &b, 1);
+    int sent = enet_socket_send(d->sock, &bcast, &b, 1);
+    // each interface's subnet broadcast too (macOS: the limited broadcast leaves on one interface)
+    u32 nets[8];
+    int nn = lan_broadcast_addrs(nets, 8);
+    for (int i = 0; i < nn; i++) {
+        ENetAddress a = { ENET_HOST_TO_NET_32(nets[i]), DG_DISCOVERY_PORT };
+        int r = enet_socket_send(d->sock, &a, &b, 1);
+        if (r > sent) sent = r;
+    }
+    // A refused broadcast: macOS 15+ without the Local Network permission (System Settings > Privacy &
+    // Security > Local Network), or a firewall. Same-machine games are still found (127.0.0.1 below).
+    static bool warned;
+    if (sent < 0 && !warned) {
+        warned = true;
+        log_warn("net: LAN broadcast refused (macOS: allow Deadground under Privacy & Security > Local Network); only this machine's games are listed");
+    }
     ENetAddress local;
     enet_address_set_host(&local, "127.0.0.1");
     local.port = DG_DISCOVERY_PORT;
