@@ -14,10 +14,13 @@ def build(ctx):
     flange = L.top_prism(L.rounded_rect(0.034, 0.016, 0.006, 4), -0.0015, 0.0005, bevel=0.0005, segs=2, mat="plastic_clear")
     flange.cut(L.cyl((0, -0.01, 0), (0, 0.01, 0), R - 0.0008, 32, bevel=0))
     grads = []
-    for k in range(11):
-        y = 0.008 + k * 0.006
-        w = 0.004 if k % 5 == 0 else 0.0022
-        grads.append(L.box((0, y, -R - 0.0001), (w * 0.5, 0.00025, 0.00015), 0, 0, "label_black"))
+    for k in range(21):
+        y = 0.008 + k * 0.003
+        w = 0.0042 if k % 5 == 0 else (0.003 if k % 2 == 0 else 0.0018)
+        grads.append(L.box((0, y, -R - 0.0001), (w * 0.5, 0.0002, 0.00015), 0, 0, "label_black"))
+        if k % 5 == 0 and k:
+            grads.append(L.text(str(k // 2), (0.0035, y, -R - 0.00015), 0.0016, (0, 0, -1), (0, 1, 0), 0.0001, "label_black"))
+    ridges = [L.box((x, -0.0005, z), (0.0004, 0.0006, 0.007), 0, 0, "plastic_clear") for x in (-0.014, -0.012, -0.010, 0.010, 0.012, 0.014) for z in (0.0,)]
     grads.append(L.text("10 ml", (0.0, 0.074, -R - 0.0002), 0.0022, (0, 0, -1), (0, 1, 0), 0.0001, "label_black"))
     draw = L.cyl((0, 0.031, 0), (0, 0.072, 0), R - 0.0011, 32, "liquid_red", bevel=0)
     hub = L.lathe([(0.0012, 0), (0.0032, 0), (0.0032, 0.004), (0.0022, 0.009), (0.0008, 0.0095), (0.0008, 0)], (0, 0.0812, 0), (0, 1, 0), 24, "plastic_green")
@@ -30,7 +33,10 @@ def build(ctx):
     thumb = L.cyl((0, -0.021, 0), (0, -0.023, 0), 0.0085, 32, "plastic_white", bevel=0.0004)
     stopper = L.lathe([(0, 0), (R - 0.0011, 0), (R - 0.0009, 0.002), (R - 0.0011, 0.004), (R - 0.0009, 0.006), (R * 0.5, 0.0085), (0, 0.009)], (0, 0.0215, 0), (0, 1, 0), 32,
                       "rubber")
-    it.part("barrel").add(barrel, flange, draw, *grads)
+    cap = L.lathe([(0.0, 0.0), (0.0021, 0.0), (0.0026, 0.0015), (0.0021, 0.032), (0.0, 0.033)], (0, 0.0905, 0), (0, 1, 0), 24, "plastic_orange")
+    cap.cut(L.merge(*[L.box((0, 0.093 + k * 0.004, 0), (0.0028, 0.0004, 0.0004), 0, 0).rotate((0, 1, 0), a) for k in range(3) for a in (0, 90)]))
+    it.part("barrel").add(barrel, flange, draw, *grads, *ridges)
+    it.part("needle_cap", mech="cap", detail=False).add(cap)
     it.part("plunger", pivot=(0, 0.0215, 0), mech="plunger").add(rod_x, rod_z, thumb, stopper)
     it.part("needle", mech="needle").add(hub, needle, tip)
     it.socket("grip_r", (0, 0, 0))

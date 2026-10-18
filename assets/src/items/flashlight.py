@@ -18,7 +18,11 @@ def build(ctx):
     ring = L.torus((0, y - 0.016, 0.07), (1, 0, 0), 0.006, 0.0011, 24, 8, "steel_stainless")
     lanyard = L.torus((0, y - 0.03, 0.074), (1, 0, 0.3), 0.013, 0.0016, 32, 8, "webbing_black")
     marks = [L.text("DEADGROUND  TL-2", (0.0129, y, -0.005), 0.0038, (1, 0, 0), (0, 1, 0), 0.0001, "paint_white")]
-    it.part("body").add(body, *hd, tail, clip, ring, lanyard, *marks)
+    fins = L.cyl((0, y, -0.05), (0, y, -0.062), 0.0158, 48, "aluminium_anodized", bevel=0.0004)
+    fins.cut(L.merge(*[L.torus((0, y, -0.052 - k * 0.002), (0, 0, 1), 0.0158, 0.0006, 48, 6) for k in range(5)]))
+    oring = L.torus((0, y, 0.0598), (0, 0, 1), 0.0129, 0.0006, 48, 8, "rubber")
+    clip_screws = [L.screw((0, 0.0128 + y + 0.0036, z), (0, 1, 0), 0.0011, 0.0004, slot=False, hexsock=True) for z in (0.062, 0.056)]
+    it.part("body").add(body, *hd, tail, clip, ring, lanyard, *marks, fins, oring, *clip_screws)
     it.part("tail_switch", mech="switch").add(boot)
     it.socket("grip_r", (0, 0, 0))
     it.socket("emitter", em)
