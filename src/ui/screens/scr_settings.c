@@ -302,101 +302,6 @@ static void row_fid_slider(GuiCursor *c, const char *label, int f, float lo, flo
     if (gw_slider(rid(fid_feature(f)->cvar), r, &f_val, blo, bhi, step, fmt)) cvar_set_float(v, f_val);
 }
 
-// ------------------------------------------------------------------ Engine Fidelity section
-
-static void fidelity_section(GuiCursor *c) {
-    if (!fid_loaded()) {
-        section(c, "Engine Fidelity");
-        gw_label(gc_row(c, gui_s(22)), "Fidelity tables missing (assets/render/fidelity): every setting is unbounded.", gui_s(TH->t_body - 2), GW_REGULAR, TH->text_faint, GUI_LEFT);
-        return;
-    }
-    c->y += gui_s(10);
-    float row = gui_s(TH->row_h), line = gui_s(22), bh = gui_s(TH->button_h + 4);
-    float card_h = gui_s(26) + row + line * 2 + bh + gui_s(30);
-    GuiRect card = { c->area.x - gui_s(10), c->y - gui_s(4), c->area.w + gui_s(20), card_h };
-    gd_round_border(card, gui_s(TH->radius_panel), 1, UI_RGBA(255, 255, 255, 10), gui_rgba_mul(TH->accent, 0.55f));
-    gw_section(gc_row(c, gui_s(26)), "Engine Fidelity");
-    int lvl = fid_level(), rec = game_fidelity_recommended();
-    const char *items[FID_LEVELS];
-    const char *notes[FID_LEVELS];
-    for (int l = 0; l < FID_LEVELS; l++) { items[l] = fid_level_name(l); notes[l] = l == rec ? "Recommended" : ""; }
-    int sel = lvl;
-    GuiRect r = gw_setting_row(c, "Engine Fidelity", "The base of every graphics setting: which systems the renderer runs and how far the settings below can go. Applied live.",
-                               rid("r_fidelity"));
-    r.y += gui_s(3);
-    r.h -= gui_s(6);
-    if (gw_dropdown_ex(rid("r_fidelity"), r, items, FID_LEVELS, &sel, NULL, notes) && sel != lvl) game_fidelity_set(sel);
-    gw_label(gc_row(c, line), fid_level_desc(lvl), gui_s(TH->t_body - 2), GW_REGULAR, TH->text_dim, GUI_LEFT);
-    char buf[200];
-    float ms = game_fidelity_bench_ms(lvl);
-    if (game_fidelity_busy()) snprintf(buf, sizeof(buf), "Measuring...");
-    else if (ms > 0) snprintf(buf, sizeof(buf), "Last benchmark: %.0f fps (%.1f ms GPU)  \xC2\xB7  budget %.0f ms at 1080p%s%s", 1000.0f / ms, ms, fid_level_budget_ms(lvl),
-                              rec >= 0 ? "  \xC2\xB7  recommended: " : "", rec >= 0 ? fid_level_name(rec) : "");
-    else snprintf(buf, sizeof(buf), "Not measured yet  \xC2\xB7  budget %.0f ms at 1080p", fid_level_budget_ms(lvl));
-    gw_label(gc_row(c, line), buf, gui_s(TH->t_body - 2), GW_REGULAR, TH->text_faint, GUI_LEFT);
-    GuiRect br = gc_row(c, bh);
-    float bw = gui_s(190), gap = gui_s(10);
-    GuiRect b1 = { br.x, br.y, bw, br.h }, b2 = { br.x + bw + gap, br.y, bw, br.h }, b3 = { br.x + (bw + gap) * 2, br.y, bw, br.h };
-    if (gw_button(rid("fid_detect"), b1, "Run benchmark", GB_SECONDARY, !game_fidelity_busy())) game_fidelity_detect(false);
-    if (gw_button(rid("fid_apply_rec"), b2, "Apply recommended", GB_PRIMARY, rec >= 0 && rec != lvl && !game_fidelity_busy())) game_fidelity_apply_recommended();
-    int custom = fid_custom_count();
-    char reset[48];
-    snprintf(reset, sizeof(reset), custom ? "Reset %d tweak%s" : "Level defaults", custom, custom == 1 ? "" : "s");
-    if (gw_button(rid("fid_reset"), b3, reset, GB_SECONDARY, custom > 0)) {
-        fid_custom_load("");
-        cvar_set("r_fidelity_custom", "");
-        fid_apply(lvl);
-    }
-    c->y = card.y + card.h + gui_s(6);
-}
-
-// ------------------------------------------------------------------ Look
-
-// The post-processing Look (docs/LOOKS.md): one dropdown, its line of description, the live
-// preview strip (the scene under each look; a click picks it) and hold-to-compare with Realism.
-// Looks are fixed: no sliders, no parameters here.
-static void look_section(GuiCursor *c) {
-    const char *items[LOOK_COUNT];
-    for (int i = 0; i < LOOK_COUNT; i++) items[i] = look_display_name(i);
-    int sel = game_look_selected();
-    GuiRect r = gw_setting_row(c, "Look", "How the image is graded and finished. Independent of Engine Fidelity (what runs) and of the era look.", rid("r_look"));
-    r.y += gui_s(3);
-    r.h -= gui_s(6);
-    if (gw_dropdown(rid("r_look"), r, items, LOOK_COUNT, &sel)) game_look_set(sel);
-    gw_label(gc_row(c, gui_s(22)), look_desc(sel), gui_s(TH->t_body - 2), GW_REGULAR, TH->text_dim, GUI_LEFT);
-
-    int tiles = LOOK_COUNT;
-    float aspect = 16.0f / 9.0f;
-    TextureId tex = render_look_preview(&tiles, &aspect);
-    float gap = gui_s(8), cap = gui_s(18);
-    float tw = (c->area.w - gap * (float)(tiles - 1)) / (float)tiles, th = tw / aspect;
-    GuiRect strip = gc_row(c, th + cap + gui_s(4));
-    int shown = game_look_current();
-    for (int i = 0; i < tiles && i < LOOK_COUNT; i++) {
-        GuiRect t = gui_rect(strip.x + (float)i * (tw + gap), strip.y, tw, th);
-        GuiInteract in = gui_interact(gui_idi("look_tile", i), t, 0);
-        if (tex) gd_image(t, tex, v4((float)i / (float)tiles, 0.0f, (float)(i + 1) / (float)tiles, 1.0f), UI_RGBA(255, 255, 255, 255));
-        else gd_rect(t, UI_RGBA(20, 22, 26, 255));
-        u32 border = i == sel ? TH->accent : (in.hovered ? UI_RGBA(255, 255, 255, 90) : UI_RGBA(255, 255, 255, 24));
-        gd_round_border(t, gui_s(2), i == sel ? gui_s(2) : 1.0f, 0, border);
-        u32 tc = i == shown ? TH->text : TH->text_dim;
-        gw_label(gui_rect(t.x, t.y + th + gui_s(2), tw, cap), look_display_name(i), gui_s(TH->t_small), i == sel ? GW_SEMIBOLD : GW_REGULAR, tc, GUI_CENTER);
-        if (in.clicked) game_look_set(i);
-    }
-
-    GuiRect br = gc_row(c, gui_s(TH->button_h + 4));
-    GuiRect b = gui_rect(br.x, br.y, gui_s(300), br.h);
-    bool can = sel != LOOK_REALISM;
-    GuiInteract in = gui_interact(rid("look_ab"), b, can ? GUI_FOCUSABLE : GUI_DISABLED);
-    bool held = can && in.held;
-    gd_alpha_push(can ? 1.0f : 0.4f);
-    gd_round_border(b, gui_s(TH->radius), 1.0f, held ? gui_rgba_mul(TH->accent, 0.35f) : UI_RGBA(255, 255, 255, in.hovered ? 30 : 12),
-                    held ? TH->accent : TH->panel_border);
-    gw_label(b, held ? "Showing Realism (release to go back)" : "Hold to compare with Realism", gui_s(TH->t_small + 1), GW_SEMIBOLD, TH->text, GUI_CENTER);
-    gd_alpha_pop();
-    if (held) game_look_compare_hold(true);
-}
-
 // ------------------------------------------------------------------ tabs
 
 // ------------------------------------------------------------------ Graphics > Normal
@@ -604,7 +509,6 @@ static void tab_graphics_normal(GuiCursor *c) {
     row_fid_combo(c, "Motion blur", FF_MOTION_BLUR, mb, NULL, 3, NULL);
 
     section(c, "Picture");
-    look_section(c);
     row_slider_cvar(c, "Brightness", "r_brightness", 0.5f, 2.0f, 0.05f, "%.2f", NULL);
     row_slider_cvar(c, "Gamma", "r_gamma", 0.6f, 1.6f, 0.02f, "%.2f", NULL);
     if (render_hdr_supported()) {
@@ -624,11 +528,9 @@ static void tab_graphics_normal(GuiCursor *c) {
 }
 
 // ------------------------------------------------------------------ Graphics > Debug
-// Everything else (developer mode only): the plain Engine Fidelity switch and its tweaks, the
-// diagnostics, every per-feature control behind the simple qualities, the renderer switch.
+// Everything else (developer mode only): the diagnostics, every per-feature control behind the simple qualities, the renderer switch.
 
 static void tab_graphics_debug(GuiCursor *c) {
-    fidelity_section(c);
     section(c, "Diagnostics");
     row_toggle_cvar(c, "Performance overlay", "r_perf_overlay", "FPS, CPU / GPU frame time and the Engine Fidelity budget.");
 
@@ -761,14 +663,6 @@ static void tab_graphics_debug(GuiCursor *c) {
     row_fid_toggle(c, "Moon shadows at twilight", FF_MOON_SHADOWS, "The moon casts its own shadows while the sun is still up.");
 
     section(c, "Geometry, textures & foliage");
-    {
-        Cvar *era = cv("r_era");
-        if (era) {
-            static const char *const eras[] = { "Modern", "2020", "2015", "2010", "Custom" };
-            int sel = DG_CLAMP(era->i, 0, 4);
-            if (row_combo(c, "Era look", eras, 5, &sel, "The geometry / foliage of an era (and the features it had). Engine Fidelity bounds its cost.") && sel < 4) cvar_set_int(era, sel);
-        }
-    }
     row_fid_toggle(c, "Virtualized geometry (Nanite)", FF_VGEO,
                    "On: GPU cluster culling, continuous LOD, occlusion culling. Off: the classic instanced renderer (discrete LODs, impostors; often faster on foliage). Applies at once.");
     static const char *const texq[] = { "Low (mips -2)", "Medium (mips -1)", "High" };

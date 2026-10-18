@@ -77,7 +77,7 @@ internals, diagnostics and per-feature tuning are Debug.
   Run benchmark, Apply recommended. Below it: render scale, upscaling (Off / TAA-U / FSR 1 and its
   resolution), anti-aliasing, sharpening, then the simple qualities **Post-processing, Shadows,
   Textures, Effects, Foliage, View distance** and motion blur.
-* Picture: Look (dropdown, previews, compare), brightness, gamma, HDR10 + paper white / peak when
+* Picture: brightness, gamma, HDR10 + paper white / peak when
   the display supports it.
 * Accessibility & content: colour-blind filter, screen effects, gore.
 
@@ -99,12 +99,11 @@ allow is greyed "requires &lt;level&gt;"; a row reads Custom when the cvars matc
 Foliage density and the vgeo thresholds are era-owned: the era preset (`r_era`, `vk_vgeo.c
 era_detect`) also accepts a lower level's own value of the era, so these tiers keep the era.
 
-**Debug** (developer mode): the Engine Fidelity card (the plain level switch that keeps the user's
-explicitly lower choices, Reset tweaks, the budget), Diagnostics (performance overlay), the full
+**Debug** (developer mode): Diagnostics (performance overlay), the full
 upscaler list (FSR 2 / DLSS slots), Post-processing & Effects (the legacy post preset, every
 screen-space / fog / DoF / bloom / lens / grain / exposure control, motion blur strength),
 Shadows & lighting (cascades, splits and the split bar, near plane, shadowmask, min caster, lamp /
-cloud / moon shadows), Geometry / textures / foliage (era look, the vgeo renderer switch, textures,
+cloud / moon shadows), Geometry / textures / foliage (no Engine Fidelity card or era look any more: the Normal tab's Overall graphics quality picks the level; the vgeo renderer switch, textures,
 aniso, density, impostors, terrain, character LOD / quality), Effects (particles, lit particles,
 decals), Sights (scope picture resolution, aiming DoF), Weather (rain / snow, puddles, water).
 

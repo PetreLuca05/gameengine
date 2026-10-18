@@ -252,7 +252,8 @@ overlay make the steepest mids.
 
 ## UI
 
-Settings > Graphics > Post-processing & Effects > **Look**:
+There is no Look picker in Settings any more: every session starts on **Realism** (`r_look` is not saved).
+The console `look <name>` still switches it for development. The former Settings row was:
 - A dropdown with the five Looks and the selected one's description.
 - The **preview strip**: the current scene graded by each Look, in five low-res tiles (about 108 px
   high, the output aspect). The selected tile is outlined, and a click picks it. The strip comes
