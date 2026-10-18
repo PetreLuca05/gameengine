@@ -560,13 +560,42 @@
       ]
     },
     {
+      "_comment": "The two-client loot race (tools/tests/inv_net.sh, docs/INVENTORY.md).",
       "type": "container",
+      "name": "inv_crate",
       "pos": [17, 0, 7],
       "yaw": 0,
       "loot": [
         ["rifle", 1],
         ["ammo_rifle", 60],
-        ["armor", 1]
+        ["armor", 1],
+        ["medkit", 2],
+        ["bandage", 3],
+        ["pistol", 1],
+        ["scrap", 6]
+      ]
+    },
+    {
+      "_comment": "Gear locker by the weapon bench: wearables, containers and cases for the grid inventory (docs/INVENTORY.md).",
+      "type": "container",
+      "name": "gear_locker",
+      "grid": "stash",
+      "pos": [9.2, 0, 27.6],
+      "yaw": 180,
+      "loot": [
+        ["backpack_hiking", 1],
+        ["backpack", 1],
+        ["sling_bag", 1],
+        ["rig_chest", 1],
+        ["plate_carrier", 1],
+        ["helmet", 1],
+        ["headset", 1],
+        ["balaclava", 1],
+        ["glasses", 1],
+        ["armband", 1],
+        ["secure_alpha", 1],
+        ["ammo_case", 1],
+        ["med_case", 1]
       ]
     },
     {

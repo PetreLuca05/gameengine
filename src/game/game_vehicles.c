@@ -1422,11 +1422,21 @@ void vehicles_handle_event(const GameEvent *ev) {
 
 // ------------------------------------------------------------------ interactions
 
+// Standing behind a car (more than a metre past its centre, against its forward): E opens the
+// trunk, the vehicle's world inventory (docs/INVENTORY.md). Motorbikes (one seat) have none.
+static bool at_trunk(World *w, EntityId self, int player, const VehicleDef *d) {
+    if (d->seat_count < 2) return false;
+    int i = (int)ENT_INDEX(self);
+    vec3 fwd = forward_from_yaw(quat_get_yaw(w->xf[i].rot));
+    vec3 to = v3_sub(w->players[player].sim.move.pos, w->xf[i].pos);
+    return v3_dot(to, fwd) < -1.0f;
+}
+
 static void veh_focus(World *w, EntityId self, int player, char *prompt, int size) {
-    (void)player;
     Vehicle *v = veh_of(w, self);
     if (!v) { snprintf(prompt, (size_t)size, "Vehicle"); return; }
     const VehicleDef *d = vdef(v);
+    if (at_trunk(w, self, player, d)) { snprintf(prompt, (size_t)size, "Open %s trunk", d->display); return; }
     int free_seats = 0, free_driver = 0;
     for (int s = 0; s < d->seat_count; s++) if (!v->occ[s]) { free_seats++; if (d->seats[s].driver) free_driver = 1; }
     if (v->wrecked) snprintf(prompt, (size_t)size, "%s (wrecked)", d->display);
@@ -1441,7 +1451,14 @@ static bool veh_can_use(World *w, EntityId self, int player) {
 
 static void veh_use(World *w, EntityId self, int player) {
     Vehicle *v = veh_of(w, self);
-    if (v) vehicle_enter(w, player, v, -1);
+    if (!v) return;
+    if (at_trunk(w, self, player, vdef(v))) {
+        if (!w->authority) return;
+        if (w->cont[ENT_INDEX(self)].root < 0) container_set_root(w, self, "trunk");
+        container_send(w, self, player);
+        return;
+    }
+    vehicle_enter(w, player, v, -1);
 }
 
 static const InteractDef k_vehicle_def = { "vehicle", veh_focus, veh_can_use, veh_use, NULL, NULL, 0.0f, HANDS_RIGHT };
@@ -2350,7 +2367,7 @@ void vehicles_test_tick(World *w) {
         }
         if (f == 5)
             for (int k = 0; k < INV_HOTBAR; k++) {
-                const WeaponDef *wd = item_weapon(w->items, p->inv.slots[k].item);
+                const WeaponDef *wd = item_weapon(w->items, inv_hot_c(&p->inv, k)->item);
                 if (wd && wd->one_hand_capable) { G->hotbar_slot = (u8)k; break; }
             }
         v = test_vehicle(w);

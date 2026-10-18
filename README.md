@@ -197,7 +197,7 @@ Steam friends list or via **Invite Friends** (the overlay invite dialog), or wit
 | Reload | R |
 | Drop held item | G |
 | Hotbar | 1–6, mouse wheel |
-| Inventory | Tab (click two slots to move, right-click to drop) |
+| Inventory | Tab / I (grid: drag to move, R rotates while dragging, Ctrl+click quick-moves, right-click menu; docs/INVENTORY.md) |
 | Net stats | F3 |
 | Console | ~ |
 | Pause menu | Esc |

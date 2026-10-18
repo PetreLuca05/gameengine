@@ -977,6 +977,185 @@
         "handle"
       ],
       "sockets": []
+    },
+    "backpack_hiking": {
+      "kind": "item",
+      "budget": [
+        3000,
+        40000
+      ],
+      "path": "procedural",
+      "parts": [
+        "body",
+        "lid",
+        "straps",
+        "hip_belt",
+        "handle"
+      ],
+      "sockets": []
+    },
+    "sling_bag": {
+      "kind": "item",
+      "budget": [
+        3000,
+        40000
+      ],
+      "path": "procedural",
+      "parts": [
+        "body",
+        "sling"
+      ],
+      "sockets": []
+    },
+    "rig_chest": {
+      "kind": "item",
+      "budget": [
+        3000,
+        40000
+      ],
+      "path": "procedural",
+      "parts": [
+        "placard",
+        "pouches",
+        "harness",
+        "drag_loop"
+      ],
+      "sockets": []
+    },
+    "plate_carrier": {
+      "kind": "item",
+      "budget": [
+        3000,
+        40000
+      ],
+      "path": "procedural",
+      "parts": [
+        "front",
+        "back",
+        "straps",
+        "cummerbund",
+        "handle"
+      ],
+      "sockets": [
+        "front_plate",
+        "back_plate"
+      ]
+    },
+    "helmet": {
+      "kind": "item",
+      "budget": [
+        3000,
+        40000
+      ],
+      "path": "procedural",
+      "parts": [
+        "shell",
+        "chin_strap"
+      ],
+      "sockets": []
+    },
+    "headset": {
+      "kind": "item",
+      "budget": [
+        3000,
+        40000
+      ],
+      "path": "procedural",
+      "parts": [
+        "cups",
+        "headband"
+      ],
+      "sockets": []
+    },
+    "balaclava": {
+      "kind": "item",
+      "tier": "cheap",
+      "budget": [
+        500,
+        20000
+      ],
+      "path": "procedural",
+      "parts": [
+        "body"
+      ],
+      "sockets": []
+    },
+    "glasses": {
+      "kind": "item",
+      "tier": "cheap",
+      "budget": [
+        500,
+        20000
+      ],
+      "path": "procedural",
+      "parts": [
+        "frame",
+        "temple_r",
+        "temple_l"
+      ],
+      "sockets": []
+    },
+    "armband": {
+      "kind": "item",
+      "tier": "cheap",
+      "budget": [
+        500,
+        20000
+      ],
+      "path": "procedural",
+      "parts": [
+        "band"
+      ],
+      "sockets": []
+    },
+    "secure_alpha": {
+      "kind": "item",
+      "budget": [
+        3000,
+        40000
+      ],
+      "path": "procedural",
+      "parts": [
+        "case",
+        "lid",
+        "latches"
+      ],
+      "sockets": [
+        "lid"
+      ]
+    },
+    "ammo_case": {
+      "kind": "item",
+      "budget": [
+        3000,
+        40000
+      ],
+      "path": "procedural",
+      "parts": [
+        "can",
+        "lid",
+        "latch"
+      ],
+      "sockets": [
+        "lid"
+      ]
+    },
+    "med_case": {
+      "kind": "item",
+      "budget": [
+        3000,
+        40000
+      ],
+      "path": "procedural",
+      "parts": [
+        "case",
+        "lid",
+        "latches",
+        "handle"
+      ],
+      "sockets": [
+        "lid"
+      ]
     }
   }
 }

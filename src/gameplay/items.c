@@ -100,6 +100,9 @@ static void attachment_items_create(ItemDB *db) {
         d->max_stack = 1;
         d->weapon = -1;
         d->attachment = (u8)a;
+        d->container = -1;
+        d->equip_slot = EQ_NONE;
+        d->inv_weight = -1;
         d->shape = VIS_BOX;
         vec3 mn = v3s(1e9f), mx = v3s(-1e9f);
         for (int p = 0; p < ad->part_count; p++) {
@@ -116,6 +119,162 @@ static void attachment_items_create(ItemDB *db) {
         WeaponModelPart part = { v3(0, d->size.y, -0.03f), d->size, d->color };
         default_sockets(&d->sockets, d->hold_style, v3(0, 0, 0), v3(0, 0, -d->size.z), &part, 1);
     }
+}
+
+// ------------------------------------------------------------------ grid inventory (docs/INVENTORY.md)
+
+const char *equip_slot_name(int slot) {
+    static const char *n[EQ_COUNT] = { "primary", "secondary", "holster", "melee", "headwear", "earpiece", "face_cover", "eyewear",
+                                       "body_armor", "tactical_rig", "backpack", "armband", "secure_container" };
+    return slot >= 0 && slot < EQ_COUNT ? n[slot] : "none";
+}
+
+int equip_slot_from_name(const char *s) {
+    for (int i = 0; i < EQ_COUNT; i++) if (!strcmp(s, equip_slot_name(i))) return i;
+    if (!strcmp(s, "rig")) return EQ_RIG;
+    if (!strcmp(s, "secure")) return EQ_SECURE;
+    return EQ_NONE;
+}
+
+int container_find(const ItemDB *db, const char *id) {
+    for (int i = 0; i < db->container_count; i++) if (!strcmp(db->containers[i].id, id)) return i;
+    return -1;
+}
+
+const InvContainerDef *item_container(const ItemDB *db, u16 item) {
+    const ItemDef *d = item_def(db, item);
+    return d->container >= 0 && d->container < db->container_count ? &db->containers[d->container] : NULL;
+}
+
+static u16 kind_mask(const cJSON *arr) {
+    u16 m = 0;
+    const cJSON *e;
+    cJSON_ArrayForEach(e, arr) if (cJSON_IsString(e)) m |= (u16)(1u << kind_from(e->valuestring));
+    return m;
+}
+
+// A "container" block (items.json) or a root container (data/containers.json); returns its index.
+// deny_items are resolved after every item is known (container_resolve).
+static const cJSON *g_deny_json[MAX_CONTAINER_DEFS];
+static int container_parse(ItemDB *db, const char *id, const cJSON *c) {
+    if (!cJSON_IsObject(c)) return -1;
+    int idx = container_find(db, id);
+    if (idx < 0) {
+        if (db->container_count >= MAX_CONTAINER_DEFS) { log_warn("items: no room for container %s", id); return -1; }
+        idx = db->container_count++;
+    }
+    InvContainerDef *cd = &db->containers[idx];
+    memset(cd, 0, sizeof(*cd));
+    dg_strcpy(cd->id, sizeof(cd->id), id);
+    const cJSON *e;
+    cJSON_ArrayForEach(e, cJSON_GetObjectItemCaseSensitive(c, "compartments")) {
+        if (cd->comp_count >= INV_MAX_COMPS) break;
+        InvCompDef *k = &cd->comp[cd->comp_count++];
+        k->w = (u8)DG_CLAMP((int)jnum(e, "w", 1), 1, 16);
+        k->h = (u8)DG_CLAMP((int)jnum(e, "h", 1), 1, 32);
+        const cJSON *at = cJSON_GetObjectItemCaseSensitive(e, "at");
+        if (cJSON_IsArray(at) && cJSON_GetArraySize(at) >= 2) {
+            k->at_x = (u8)DG_CLAMP(cJSON_GetArrayItem(at, 0)->valueint, 0, 63);
+            k->at_y = (u8)DG_CLAMP(cJSON_GetArrayItem(at, 1)->valueint, 0, 63);
+        } else if (cd->comp_count > 1) {   // default: left to right
+            const InvCompDef *p = &cd->comp[cd->comp_count - 2];
+            k->at_x = (u8)(p->at_x + p->w);
+            k->at_y = p->at_y;
+        }
+        cd->capacity += k->w * k->h;
+    }
+    cd->allow_kinds = kind_mask(cJSON_GetObjectItemCaseSensitive(c, "allow"));
+    cd->deny_kinds = kind_mask(cJSON_GetObjectItemCaseSensitive(c, "deny"));
+    const cJSON *di = cJSON_GetObjectItemCaseSensitive(c, "deny_items");
+    if (g_deny_json[idx]) cJSON_Delete((cJSON *)g_deny_json[idx]);
+    g_deny_json[idx] = di ? cJSON_Duplicate(di, true) : NULL;   // item ids: resolved once every item exists
+    cd->no_containers = jbool(c, "no_containers", false);
+    cd->equip = jbool(c, "equip", false);
+    const cJSON *mx = cJSON_GetObjectItemCaseSensitive(c, "max_item");
+    if (cJSON_IsArray(mx) && cJSON_GetArraySize(mx) >= 2) {
+        cd->max_w = (u8)DG_CLAMP(cJSON_GetArrayItem(mx, 0)->valueint, 0, 16);
+        cd->max_h = (u8)DG_CLAMP(cJSON_GetArrayItem(mx, 1)->valueint, 0, 16);
+    }
+    return idx;
+}
+
+static void containers_load(ItemDB *db, const char *path) {
+    char buf[512];
+    char *text = platform_read_file(platform_data_path(path, buf, sizeof(buf)), NULL);
+    if (!text) { log_warn("items: no %s (world containers fall back to a 6x4 crate)", path); return; }
+    cJSON *root = cJSON_Parse(text);
+    free(text);
+    if (!root) { log_error("items: JSON parse error in %s", path); return; }
+    const cJSON *c;
+    cJSON_ArrayForEach(c, cJSON_GetObjectItemCaseSensitive(root, "containers")) {
+        container_parse(db, jstr(c, "id", "container"), c);
+    }
+    cJSON_Delete(root);
+}
+
+// Grid defaults per class (docs/INVENTORY.md "Class defaults") for items that don't give "grid".
+static void grid_defaults(ItemDB *db, ItemDef *d) {
+    const WeaponDef *wd = d->kind == ITEM_WEAPON && d->weapon >= 0 ? &db->weapons[d->weapon] : NULL;
+    int w = 1, h = 1;
+    float kg = 0.2f;
+    u8 eq = EQ_NONE;
+    if (wd) {
+        if (wd->kind == WPN_MELEE) {
+            bool small = fmaxf(d->size.x, fmaxf(d->size.y, d->size.z)) < 0.2f;
+            w = 1; h = small ? 2 : 3; kg = small ? 0.3f : 1.0f; eq = EQ_MELEE;
+        } else if (!strcmp(wd->hold_style, "pistol")) {
+            w = 2; h = 1; kg = 0.9f; eq = EQ_HOLSTER;
+        } else {
+            float len = 2.0f * fmaxf(d->size.x, fmaxf(d->size.y, d->size.z));
+            w = len < 0.7f ? 3 : len < 1.0f ? 4 : 5; h = 2; kg = 1.0f + len * 3.5f; eq = EQ_PRIMARY;
+        }
+    } else {
+        switch (d->kind) {
+        case ITEM_CONSUMABLE:
+            if (d->vehicle_use == VUSE_FUEL) { w = 2; h = 3; kg = 12.0f; }
+            else if (d->vehicle_use == VUSE_SPARE_TIRE) { w = 3; h = 3; kg = 9.0f; }
+            else if (d->vehicle_use == VUSE_TIRE_REPAIR || d->heal >= 40.0f || d->armor > 0) { w = 2; h = 2; kg = 1.2f; }
+            else kg = 0.15f;
+            break;
+        case ITEM_ATTACHMENT: {
+            const AttachmentDef *a = attach_def(db, d->attachment);
+            if (a && a->slot == ATT_OPTIC && a->zoom > 1.01f) w = 2;
+            kg = 0.3f;
+            break;
+        }
+        case ITEM_AMMO: kg = 0.012f; break;
+        case ITEM_THROWABLE: kg = 0.5f; break;
+        default: {
+            float m = fmaxf(d->size.x, fmaxf(d->size.y, d->size.z));
+            if (m > 0.25f) { w = 2; h = 2; kg = 1.5f; }
+            break;
+        }
+        }
+    }
+    if (!d->grid_w) { d->grid_w = (u8)w; d->grid_h = (u8)h; }
+    if (d->inv_weight < 0) d->inv_weight = kg;
+    if (d->equip_slot == EQ_NONE && eq != EQ_NONE && d->container < 0) d->equip_slot = eq;
+}
+
+// After items, weapons and attachments: class defaults, container deny lists.
+static void inventory_defs_resolve(ItemDB *db) {
+    for (int i = 1; i < db->item_count; i++) {
+        ItemDef *d = &db->items[i];
+        if (d->kind == ITEM_ATTACHMENT && !d->grid_w) { d->container = -1; d->equip_slot = EQ_NONE; d->inv_weight = -1; }
+        grid_defaults(db, d);
+        if (d->rotatable && d->grid_w == d->grid_h) d->rotatable = false;
+        if (d->kind == ITEM_CONSUMABLE && d->use_type == INV_USE_NONE) d->use_type = INV_USE_CONSUME;
+    }
+    for (int c = 0; c < db->container_count; c++) {
+        InvContainerDef *cd = &db->containers[c];
+        cd->deny_count = 0;
+        const cJSON *e;
+        cJSON_ArrayForEach(e, g_deny_json[c]) {
+            u16 it = cJSON_IsString(e) ? item_find(db, e->valuestring) : 0;
+            if (it && cd->deny_count < (int)ARRAY_COUNT(cd->deny_items)) cd->deny_items[cd->deny_count++] = it;
+        }
+    }
+    for (int c = 0; c < MAX_CONTAINER_DEFS; c++) { if (g_deny_json[c]) cJSON_Delete((cJSON *)g_deny_json[c]); g_deny_json[c] = NULL; }
 }
 
 static DamageType dmg_from(const char *s) {
@@ -738,7 +897,10 @@ bool items_load(ItemDB *db, const char *items_path, const char *weapons_path) {
     dg_strcpy(db->items[0].id, sizeof(db->items[0].id), "none");
     dg_strcpy(db->items[0].name, sizeof(db->items[0].name), "Empty");
     db->items[0].weapon = -1;
+    db->items[0].container = -1;
+    db->items[0].equip_slot = EQ_NONE;
     db->item_count = 1;
+    containers_load(db, "data/containers.json");   // the roots first: body, crate, ... (docs/INVENTORY.md)
 
     cJSON *iroot = load_json(items_path);
     if (!iroot) return false;
@@ -781,6 +943,24 @@ bool items_load(ItemDB *db, const char *items_path, const char *weapons_path) {
         d->weapon = -1;
         dg_strcpy(d->icon, sizeof(d->icon), jstr(it, "icon", ""));
         item_model_parse(&d->model, it, d->id);
+        // Grid inventory (docs/INVENTORY.md); missing values take the class defaults (inventory_defs_resolve).
+        {
+            const cJSON *g = cJSON_GetObjectItemCaseSensitive(it, "grid");
+            if (cJSON_IsArray(g) && cJSON_GetArraySize(g) >= 2) {
+                d->grid_w = (u8)DG_CLAMP(cJSON_GetArrayItem(g, 0)->valueint, 1, 16);
+                d->grid_h = (u8)DG_CLAMP(cJSON_GetArrayItem(g, 1)->valueint, 1, 16);
+            }
+            d->rotatable = jbool(it, "rotatable", true);
+            d->inv_weight = jnum(it, "weight", -1.0f);
+            d->equip_slot = (u8)equip_slot_from_name(jstr(it, "equip", ""));
+            const char *use = jstr(it, "use", "");
+            d->use_type = !strcmp(use, "charges") ? INV_USE_CHARGES : !strcmp(use, "consume") ? INV_USE_CONSUME : INV_USE_NONE;
+            d->charges = (u8)DG_CLAMP((int)jnum(it, "charges", 0), 0, 255);
+            d->durability = (u16)DG_CLAMP((int)jnum(it, "durability", 0), 0, 65535);
+            d->fold_dw = (u8)DG_CLAMP((int)jnum(it, "fold", 0), 0, 4);
+            dg_strcpy(d->cell_image, sizeof(d->cell_image), jstr(it, "cell_image", ""));
+            d->container = (i16)container_parse(db, d->id, cJSON_GetObjectItemCaseSensitive(it, "container"));
+        }
         if (d->kind == ITEM_ATTACHMENT) {
             // Resolved after the attachments load (attachment_items_create).
             const char *aid = jstr(it, "attachment", "");
@@ -815,7 +995,8 @@ bool items_load(ItemDB *db, const char *items_path, const char *weapons_path) {
     bool ok = load_weapons(db, weapons_path);
     attachments_resolve(db);
     attachment_items_create(db);
-    log_info("items: %d item defs, %d weapon defs", db->item_count - 1, db->weapon_count);
+    inventory_defs_resolve(db);
+    log_info("items: %d item defs, %d weapon defs, %d containers", db->item_count - 1, db->weapon_count, db->container_count);
     return ok;
 }
 

@@ -1,0 +1,13 @@
+{
+  "_comment": "Root containers (docs/INVENTORY.md): what an inventory tree is. 'body' must stay first (a zeroed tree's root). Item containers (rigs, backpacks, cases) live in items.json.",
+  "containers": [
+    { "id": "body", "equip": true, "no_containers": true,
+      "compartments": [ { "w": 1, "h": 1, "at": [0, 0] }, { "w": 1, "h": 1, "at": [1, 0] }, { "w": 1, "h": 1, "at": [2, 0] }, { "w": 1, "h": 1, "at": [3, 0] } ] },
+    { "id": "crate", "compartments": [ { "w": 6, "h": 4 } ] },
+    { "id": "crate_small", "compartments": [ { "w": 4, "h": 3 } ] },
+    { "id": "cabinet", "compartments": [ { "w": 4, "h": 2, "at": [0, 0] }, { "w": 4, "h": 2, "at": [0, 2] }, { "w": 4, "h": 2, "at": [0, 4] } ] },
+    { "id": "trunk", "compartments": [ { "w": 8, "h": 5 } ] },
+    { "id": "fabricator", "compartments": [ { "w": 4, "h": 2 } ], "allow": ["misc"] },
+    { "id": "stash", "compartments": [ { "w": 10, "h": 12 } ] }
+  ]
+}

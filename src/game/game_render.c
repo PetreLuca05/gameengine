@@ -27,6 +27,7 @@
 #include "ui/ui.h"
 #include "ui/hud.h"
 #include "ui/menus.h"
+#include "ui/screens/screens.h"
 #include "ui/console.h"
 #include "audio/audio.h"
 #include "assets/assets.h"
@@ -834,6 +835,19 @@ void game_render(void) {
         pcam = pcam || (!fcam && lp && lean_camera(w, &cam));   // leaning out of a window (game_lean.c): the body stays whole too
         // A dev scene's camera (src/game/scene.h): third person, the body drawn whole.
         bool scam = !fcam && !pcam && lp && scene_camera(w, &cam);
+        // The inventory screen (docs/INVENTORY.md): the camera turns to face the player, who stands
+        // in the middle of the screen between the grids and the hotbar (inv_showcase).
+        bool icam = !fcam && !pcam && !scam && lp && !dead && G->inventory_open && inventory_showcase() && lp->sim.move.mode != MOVE_SEATED;
+        if (icam) {
+            float by = lp->sim.move.body_yaw;
+            vec3 fwd = forward_from_yaw(by);
+            vec3 chest = v3_add(interp.pos, v3(0, 1.05f, 0));
+            cam.pos = v3_madd(chest, fwd, 2.7f);
+            cam.yaw = by + 3.14159265f;
+            cam.pitch = -0.06f;
+            cam.roll = 0;
+            scam = true;
+        }
         int vcam = lp && !scam && !fcam && !pcam ? vehicles_camera(w, &cam) : 0;
         if (fcam || pcam) {
             chars_set_thirdperson(true);   // free camera / door peek (the camera is on the far side of the door): the body stays whole

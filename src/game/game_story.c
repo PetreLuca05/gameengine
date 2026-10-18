@@ -711,28 +711,44 @@ static void track_named(World *w) {
 
 // ------------------------------------------------------------------ saves: the world blob
 
-static cJSON *slots_json(const InvSlot *slots, int n) {
+// A grid tree (docs/INVENTORY.md) as [root, next_uid, [item, count, ammo, uid, parent, loc, x, y,
+// flags, dur, att0..att4] ...].
+static cJSON *tree_json(const InvTree *t) {
     cJSON *a = cJSON_CreateArray();
-    for (int k = 0; k < n; k++) {
-        cJSON *e = cJSON_CreateArray();
-        cJSON_AddItemToArray(e, cJSON_CreateNumber(slots[k].item));
-        cJSON_AddItemToArray(e, cJSON_CreateNumber(slots[k].count));
-        cJSON_AddItemToArray(e, cJSON_CreateNumber(slots[k].ammo));
-        cJSON_AddItemToArray(a, e);
+    cJSON_AddItemToArray(a, cJSON_CreateNumber(t->root));
+    cJSON_AddItemToArray(a, cJSON_CreateNumber(t->next_uid));
+    for (int k = 0; k < INV_MAX_ITEMS; k++) {
+        const InvItem *it = &t->items[k];
+        if (!inv_alive(it)) continue;
+        int v[15] = { it->s.item, it->s.count, it->s.ammo, it->uid, it->parent, it->loc, it->x, it->y, it->flags, it->dur,
+                      it->s.att[0], it->s.att[1], it->s.att[2], it->s.att[3], it->s.att[4] };
+        cJSON_AddItemToArray(a, cJSON_CreateIntArray(v, 15));
     }
     return a;
 }
 
-static void slots_read(const cJSON *a, InvSlot *slots, int n) {
-    memset(slots, 0, sizeof(InvSlot) * (size_t)n);
+static void tree_read(const cJSON *a, InvTree *t) {
+    if (!cJSON_IsArray(a) || cJSON_GetArraySize(a) < 2) return;
+    inv_tree_init(t, cJSON_GetArrayItem(a, 0)->valueint);
+    t->next_uid = (u16)cJSON_GetArrayItem(a, 1)->valueint;
     int k = 0;
     const cJSON *e;
     cJSON_ArrayForEach(e, a) {
-        if (k >= n) break;
-        slots[k].item = (u16)cJSON_GetArrayItem(e, 0)->valueint;
-        slots[k].count = (u16)cJSON_GetArrayItem(e, 1)->valueint;
-        slots[k].ammo = (i16)cJSON_GetArrayItem(e, 2)->valueint;
-        k++;
+        if (!cJSON_IsArray(e) || cJSON_GetArraySize(e) < 15 || k >= INV_MAX_ITEMS) continue;
+        int v[15];
+        for (int j = 0; j < 15; j++) v[j] = cJSON_GetArrayItem(e, j)->valueint;
+        InvItem *it = &t->items[k++];
+        it->s.item = (u16)v[0];
+        it->s.count = (u16)v[1];
+        it->s.ammo = (i16)v[2];
+        it->uid = (u16)v[3];
+        it->parent = (u16)v[4];
+        it->loc = (u8)v[5];
+        it->x = (u8)v[6];
+        it->y = (u8)v[7];
+        it->flags = (u8)v[8];
+        it->dur = (u16)v[9];
+        for (int j = 0; j < ATT_SLOTS; j++) it->s.att[j] = (u8)v[10 + j];
     }
 }
 
@@ -753,7 +769,11 @@ static cJSON *world_blob(World *w) {
             cJSON_AddBoolToObject(d, "locked", (w->flags[i] & EF_LOCKED) != 0);
             break;
         }
-        case ET_CONTAINER: cJSON_AddItemToObject(conts, n, slots_json(w->cont[i].slots, CONTAINER_SLOTS)); break;
+        case ET_CONTAINER: {
+            InvTree *t = container_tree(w, ent_from_index(w, i), false);
+            if (t) cJSON_AddItemToObject(conts, n, tree_json(t));
+            break;
+        }
         case ET_LIGHT: cJSON_AddBoolToObject(lights, n, (w->flags[i] & EF_ON) || (SR.light_saved[i] & 1)); break;
         case ET_PROP: {
             cJSON *p = cJSON_CreateArray();
@@ -810,7 +830,8 @@ static void apply_world_blob(World *w, const cJSON *root) {
             else w->flags[i] &= ~(u32)EF_LOCKED;
         }
         if (w->type[i] == ET_CONTAINER && (e = cJSON_GetObjectItemCaseSensitive(conts, n))) {
-            slots_read(e, w->cont[i].slots, CONTAINER_SLOTS);
+            InvTree *t = container_tree(w, ent_from_index(w, i), true);
+            if (t) tree_read(e, t);
             w->cont[i].revision++;
         }
         if (w->type[i] == ET_LIGHT && (e = cJSON_GetObjectItemCaseSensitive(lights, n))) {
@@ -852,7 +873,10 @@ static cJSON *players_blob(World *w) {
         cJSON_AddItemToArray(pos, cJSON_CreateNumber(p->sim.move.pos.z));
         cJSON_AddNumberToObject(o, "yaw", p->sim.move.yaw);
         cJSON_AddNumberToObject(o, "hp", w->health[ENT_INDEX(p->ent)].hp);
-        cJSON_AddItemToObject(o, "inventory", slots_json(p->inv.slots, INV_SLOTS));
+        cJSON_AddItemToObject(o, "inventory", tree_json(&p->inv.t));
+        int q[INV_HOTBAR];
+        for (int k = 0; k < INV_HOTBAR; k++) q[k] = p->inv.quick[k];
+        cJSON_AddItemToObject(o, "hotbar", cJSON_CreateIntArray(q, INV_HOTBAR));
         cJSON_AddItemToArray(arr, o);
     }
     return arr;
@@ -866,7 +890,11 @@ static void apply_player(World *w, int s, const cJSON *players) {
         if (!p->active) return;
         float hp = jnum(o, "hp", 100);
         game_respawn_player_at(w, s, jvec(o, "pos"), jnum(o, "yaw", 0), hp > 1 ? hp : 100);
-        slots_read(cJSON_GetObjectItemCaseSensitive(o, "inventory"), p->inv.slots, INV_SLOTS);
+        inv_clear(&p->inv);
+        tree_read(cJSON_GetObjectItemCaseSensitive(o, "inventory"), &p->inv.t);
+        const cJSON *q = cJSON_GetObjectItemCaseSensitive(o, "hotbar");
+        for (int k = 0; k < INV_HOTBAR && k < cJSON_GetArraySize(q); k++) p->inv.quick[k] = (u16)cJSON_GetArrayItem(q, k)->valueint;
+        inv_normalize(&p->inv.t, w->items);
         p->inv.revision++;
         if (p->local && G) G->view.yaw = p->sim.move.yaw;
         SR.spawn_pos[s] = p->sim.move.pos;

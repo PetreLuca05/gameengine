@@ -7,7 +7,7 @@ engine layers at load. There are no textures (by design: colours, roughness and 
 
 | What | Where |
 |---|---|
-| Item scripts (the source) | `assets/src/items/<id>.py` (shared: `_parts.py`, `_ar.py`, `_optics.py`, `_scope.py`, `_muzzle.py`, `_extmag.py`, `_light.py`, `_keys.py`, `_boxes.py`) |
+| Item scripts (the source) | `assets/src/items/<id>.py` (shared: `_parts.py`, `_ar.py`, `_optics.py`, `_scope.py`, `_muzzle.py`, `_extmag.py`, `_light.py`, `_keys.py`, `_boxes.py`, `_gear.py` for the grid inventory's wearables and cases) |
 | Modelling kit | `tools/blender/item_lib.py` |
 | Build (script -> .blend -> .dgim -> validate) | `tools/blender/build_items.py` |
 | Export conventions / writer | `tools/blender/item_export.py` |

@@ -67,7 +67,7 @@ wake ──► phone ─┬─► notes (group, 3 of 3) ────────
                       ├ first_aid (bathroom cabinet) → heal-wheel prompt │
                       ├ melee (knife: kitchen block | bat: teen room)    │
                       ├ water_food (kitchen/fridge, any 2)               │
-                      └ [opt] backpack (coat closet) +6 slots            │
+                      └ [opt] backpack (coat closet) +4x4 grid           │
                                                                          ▼
                                        power_cut (timer 20 s after both groups, or story_time ≥ 06:50)
                                          └─► breaker (hold 2.5 s, timed ring) ─► broadcast (TV/radio, 120 s)

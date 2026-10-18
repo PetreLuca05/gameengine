@@ -125,8 +125,8 @@ static InvSlot *phone_slot(const World *w, int slot) {
 const InvSlot *weapon_equipped(const World *w, int slot) {
     const Player *p = &w->players[slot];
     if (p->sim.wpn.slot == WPN_SLOT_PHONE) return w->items->builtin_phone ? phone_slot(w, slot) : NULL;
-    int s = DG_CLAMP((int)p->sim.wpn.slot, 0, INV_HOTBAR - 1);
-    return p->inv.slots[s].item ? &p->inv.slots[s] : NULL;
+    const InvSlot *s = inv_hot_c(&p->inv, DG_CLAMP((int)p->sim.wpn.slot, 0, INV_HOTBAR - 1));
+    return s->item ? s : NULL;
 }
 
 // The equipped weapon with its attachments applied (per player slot storage: valid until the next
@@ -1027,7 +1027,7 @@ void weapons_tick(World *w, int slot, PlayerSim *sim, const UserCmd *cmd, u16 pr
     ws->equip_t += dt;
     ws->recoil_kick = fmaxf(0.0f, ws->recoil_kick - dt * 6.0f);
 
-    InvSlot *s = ws->slot == WPN_SLOT_PHONE ? phone_slot(w, slot) : &p->inv.slots[ws->slot];
+    InvSlot *s = ws->slot == WPN_SLOT_PHONE ? phone_slot(w, slot) : inv_hot(&p->inv, ws->slot);   // the bound instance (docs/INVENTORY.md)
     const ItemDef *idef = item_def(w->items, s->item);
     const WeaponDef *d = item_weapon(w->items, s->item);
     // Attachments: the host and the predicting client apply the same modifiers (same inventory).
@@ -1101,8 +1101,7 @@ void weapons_tick(World *w, int slot, PlayerSim *sim, const UserCmd *cmd, u16 pr
                         ev_sound(w, "heal", sim->move.pos, 0.8f, EVENT_ALL);
                     }
                     if (used) {
-                        s->count--;
-                        if (s->count == 0) memset(s, 0, sizeof(*s));
+                        inv_use_one(w->items, s);   // a charge, or one of the stack
                         p->inv.revision++;
                     }
                 }
