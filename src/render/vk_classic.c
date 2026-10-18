@@ -656,21 +656,23 @@ typedef struct ClCull {
     vec4 rcv[CSM_RCV_MAX];          // sun cascades: the receiver volume (render.c, PF-0006), nrcv planes (0: none)
     int nrcv;
 } ClCull;
+static ClCull g_main_cull;          // the last frame's main view (classic_fade_probe)
+static bool g_main_cull_ok;
 
 static float clamp01f(float x) { return x < 0 ? 0 : (x > 1 ? 1 : x); }
 
 // Foliage density / distance fade (docs/LOD.md): the material's fade range and band scaled, a gentler
-// (smoothstep) density falloff, each instance fading over fol_instance of it (vgeo: 1/16).
+// (smoothstep) falloff, each instance fading over fol_instance of it (lod_foliage_alpha: opaque before
+// the fade starts).
 static float cl_foliage_alpha(const ClCull *v, const VgMesh *m, u32 fp, float dist) {
     if (!(m->fflags & VGMF_FOLIAGE)) return 1.0f;
-    float t = v->density;
+    float u = 1.0f;
     if (m->fade_end > m->fade_start) {
         float s0 = m->fade_start * v->fol_k, s1 = s0 + (m->fade_end - m->fade_start) * v->fol_band_k;
-        float u = clamp01f((s1 - dist) / fmaxf(s1 - s0, 1e-3f));
-        t *= u * u * (3.0f - 2.0f * u);
+        u = clamp01f((s1 - dist) / fmaxf(s1 - s0, 1e-3f));
+        u = u * u * (3.0f - 2.0f * u);
     }
-    float h = ((float)VG_INST_HASH(fp) + 0.5f) * (0.9375f / 256.0f);
-    return clamp01f((t - h) / fmaxf(v->fol_instance, 1e-3f));
+    return lod_foliage_alpha(v->density, u, ((float)VG_INST_HASH(fp) + 0.5f) / 256.0f, v->fol_instance);
 }
 
 // One part of an instance: debug = LOD (CL_IMPOSTOR -> 4) + 8 x role (1 incoming / coarser, 2 outgoing
@@ -1098,6 +1100,7 @@ void vkc_frame(const VgScene *s, const VgDisplace *disp, float density, float lo
         v.shadow_lim_k = s_sh;
     }
     C.eff_lod_px = v.lod_px, C.eff_shadow_px = shadow_px, C.eff_imp_px = v.impostor_px, C.eff_small_px = v.small_impostor_px;
+    g_main_cull = v, g_main_cull_ok = true;
     // Scope picture-in-picture: its own LOD / impostor / foliage selection from the PiP projection, so
     // a magnified distant object gets the detail the lens shows (docs/LOD.md "Scopes").
     mat4 pip_vp;
@@ -1444,6 +1447,56 @@ u32 vkc_draw_local_shadow(VkCommandBuffer cmd, vec4 sphere, const vec4 planes[6]
     u32 before = C.draws;
     draw_view(cmd, &lv, 2, view);
     return C.draws - before;
+}
+
+// classic_fade_probe (docs/LOD.md "Tests", tools/tests/lod_check.py): every scene instance (level and
+// placements) within `radius` of the last main view's eye, in every direction, through that view's
+// cull_instance. Counts the parts drawn with alpha < 1 (density / distance / shadow fade: dithered)
+// outside a LOD cross-fade, split into trees (impostor-sized meshes) and other foliage, and the parts
+// inside a cross-fade (a kept interval: impostor / LOD band).
+typedef struct ClProbe { u32 kept, parts, alpha_tree, alpha_other, xfade; float min_alpha, min_d; } ClProbe;
+
+static void probe_range(const ClCull *v, const VgScene *s, const VgInstance *inst, u32 count, float radius, ClProbe *pr) {
+    for (u32 i = 0; i < count; i++) {
+        const VgInstance *in = &inst[i];
+        if (in->mesh >= C.mesh_cap || !C.mesh[in->mesh].used) continue;
+        float p[3], q[4], sc;
+        vgeo_instance_decode(in, p, q, &sc);
+        float d = v3_dist(v3(p[0], p[1], p[2]), v->eye);
+        if (d > radius) continue;
+        ClInst out[CL_PARTS];
+        u32 key[CL_PARTS], n = 0;
+        cull_instance(v, s, in, out, key, &n);
+        pr->kept += n > 0;
+        for (u32 k = 0; k < n; k++) {
+            pr->parts++;
+            if (out[k].misc[2] != 0.0f) { pr->xfade++; continue; }
+            if (out[k].misc[1] >= 1.0f) continue;
+            if (C.mesh[in->mesh].coarse_tris >= CL_IMPOSTOR_TRIS) pr->alpha_tree++;
+            else pr->alpha_other++;
+            if (out[k].misc[1] < pr->min_alpha) pr->min_alpha = out[k].misc[1], pr->min_d = d;
+        }
+    }
+}
+
+void vkc_fade_probe(float radius) {
+    if (!C.ok || !C.scene || !g_main_cull_ok) { log_info("classic_fade_probe: no frame"); return; }
+    ClCull v = g_main_cull;
+    memset(v.planes, 0, sizeof(v.planes));   // every direction
+    const VgScene *s = C.scene;
+    ClProbe pr = { 0, 0, 0, 0, 0, 1.0f, 0 };
+    probe_range(&v, s, s->instances, s->instance_count, radius, &pr);
+    const VgPlacements *pl = &s->pl;
+    for (u32 h = 0; h < pl->chunk_count; h++) {
+        const VgPlacementChunk *ch = &pl->chunks[h];
+        if (!ch->used) continue;
+        for (u32 k = 0; k < ch->cell_count; k++) {
+            const VgCell *cl = &pl->cells[ch->cells[k]];
+            if (cl->count) probe_range(&v, s, &pl->inst[cl->first], cl->count, radius, &pr);
+        }
+    }
+    log_info("classic_fade_probe: radius %.0f m: %u instances, %u parts; alpha < 1 outside a cross-fade: trees / bushes %u, other %u (min alpha %.3f at %.1f m); in a cross-fade %u",
+             (double)radius, pr.kept, pr.parts, pr.alpha_tree, pr.alpha_other, (double)pr.min_alpha, (double)pr.min_d, pr.xfade);
 }
 
 void vkc_stats(void) {

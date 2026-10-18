@@ -80,6 +80,7 @@ static void cmd_foliage_push_test(int argc, const char **argv);
 static void cmd_foliage_stats(int argc, const char **argv);
 static void cmd_foliage_query(int argc, const char **argv);
 static void cmd_classic_stats(int argc, const char **argv) { (void)argc; (void)argv; vkc_stats(); }
+static void cmd_classic_fade_probe(int argc, const char **argv) { vkc_fade_probe(argc > 1 ? (float)atof(argv[1]) : 30.0f); }
 
 // The material sampler changed: r_aniso on the module textures too, the classic renderer re-wraps them.
 void vkg_samplers_changed(void) {
@@ -108,6 +109,8 @@ void vkg_init(void) {
     cmd_register("foliage_stats", cmd_foliage_stats, "foliage: placement chunks, region allocator audit");
     cmd_register("foliage_query", cmd_foliage_query, "foliage_query [radius=2]: placement instances around the camera (foliage_query API)");
     cmd_register("classic_stats", cmd_classic_stats, "classic instanced renderer: meshes, GPU memory, last frame's instances / batches / draws, CPU cull ms");
+    cmd_register("classic_fade_probe", cmd_classic_fade_probe,
+                 "classic_fade_probe [radius=30]: scene instances near the camera drawn dithered (alpha < 1) outside a LOD cross-fade (docs/LOD.md, lod_check.py)");
     vkg_register_era();
     VgContext *c = &G.ctx;
     c->gpu = R->gpu;

@@ -587,6 +587,7 @@ bool render_scope_cull(mat4 *vp, vec3 *eye, float *px_scale);
 void vkc_draw_shadow(VkCommandBuffer cmd, u32 cascade);   // inside the sun shadow pass
 u32 vkc_draw_local_shadow(VkCommandBuffer cmd, vec4 sphere, const vec4 planes[6], u32 view, u32 tile_px, u32 layers);
 void vkc_stats(void);
+void vkc_fade_probe(float radius);   // classic_fade_probe
 
 // vk_vfx.c: GPU particles, decals, distortion
 bool vkx_init(void);
