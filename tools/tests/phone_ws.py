@@ -270,7 +270,7 @@ def main():
         check(bool(wait_log(a.log, r"phone_status: flow=paired[^\n]*portal=0 screen=mainmenu", 300)), "the portal closed by itself after Connected")
         # ---- the match
         check(pg.wait_status(lambda s: s.get("ctx") == "match", 900), "entering the match: the page's ctx becomes match")
-        m = wait_log(a.log, r"lobby: [^\n]*\n\s*#\d+ [^\n]* phone", 600)
+        m = wait_log(a.log, r"#\d+ [^\n]* phone ping", 600)
         check(bool(m), "the lobby member list carries the phone flag")
         check(pg.wait_status(lambda s: s.get("holding") is True, 900), "the phone comes out in the match")
         check(pg.status.get("flow") == "paired" and pg.status.get("app") == "home", "equip with the device: paired, home (%s / %s)" % (pg.status.get("flow"), pg.status.get("app")))

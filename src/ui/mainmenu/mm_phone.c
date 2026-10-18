@@ -188,7 +188,7 @@ bool mainmenu_phone_portal_draw(bool top) {
         GuiText ut = { gui_s(TH->t_body - 1), GW_MEDIUM, TH->accent, GUI_LEFT, 0, false, true, ur.w };
         char host[200];
         // The address without the one-time code reads better; the code is in the QR (and the console).
-        snprintf(host, sizeof(host), "%.*s", (int)(strchr(p.url, '?') ? strchr(p.url, '?') - p.url : (long)strlen(p.url)), p.url);
+        snprintf(host, sizeof(host), "%.*s", (int)strcspn(p.url, "?"), p.url);
         gd_text(&ut, ur.x, ur.y, host);
         char ex[64];
         int s = (int)p.token_left;
