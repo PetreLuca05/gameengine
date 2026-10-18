@@ -33,6 +33,12 @@ def main():
         return 2
     bad = []
     skipped = 0
+    plain = []
+    # MoltenVK's own setup first (argument buffers, tier 2 on Apple GPUs / tier 1 elsewhere); some
+    # SPIRV-Cross builds throw on these without MoltenVK's resource bindings: then plain MSL, which still
+    # exercises every name / feature for the Metal compile (but not the bindless slot counts)
+    variants = [["--msl-argument-buffers", "--msl-argument-buffer-tier", "2"],
+                ["--msl-argument-buffers", "--msl-argument-buffer-tier", "1"], []]
     for f in files:
         rel = os.path.relpath(f, a.spv_dir).replace(os.sep, "/")
         if rel in NOT_ON_METAL:
@@ -40,28 +46,32 @@ def main():
             continue
         out = os.path.join(a.out, rel[:-4] + ".metal") if a.out else None
         if out: os.makedirs(os.path.dirname(out), exist_ok=True)
-        cmd = [a.spirv_cross, f, "--msl", "--msl-version", a.msl_version, "--msl-argument-buffers",
-               "--msl-argument-buffer-tier", "1", "--msl-decoration-binding", "--msl-force-native-arrays"]
-        if out: cmd += ["--output", out]
-        r = subprocess.run(cmd, capture_output=True, text=True)
-        if r.returncode != 0:
-            # some SPIRV-Cross builds throw on the argument-buffer layout without MoltenVK's resource
-            # bindings: the plain MSL translation still exercises every name / feature for the compile
-            cmd = [x for x in cmd if x not in ("--msl-argument-buffers", "--msl-decoration-binding", "--msl-force-native-arrays")]
-            if "--msl-argument-buffer-tier" in cmd:
-                k = cmd.index("--msl-argument-buffer-tier")
-                del cmd[k:k + 2]
+        r = None
+        for v in variants:
+            cmd = [a.spirv_cross, f, "--msl", "--msl-version", a.msl_version] + v + (["--output", out] if out else [])
             r = subprocess.run(cmd, capture_output=True, text=True)
+            if r.returncode == 0:
+                break
         if r.returncode != 0:
             bad.append((rel, (r.stderr or r.stdout).strip().splitlines()[-1:] or ["?"]))
             continue
+        is_plain = not v
+        if is_plain: plain.append(rel)
         if a.metal and out:
             air = out[:-6] + ".air"
             m = subprocess.run(["xcrun", "-sdk", "macosx", "metal", "-c", "-std=metal3.0", out, "-o", air], capture_output=True, text=True)
             if m.returncode != 0:
-                bad.append((rel + " (metal)", [l for l in m.stderr.splitlines() if "error" in l][:3] or ["?"]))
+                errs = [l for l in m.stderr.splitlines() if "error" in l]
+                # plain MSL binds every array element to its own slot: Metal's 16 sampler / 128 texture
+                # stage limits, which MoltenVK's argument buffers lift (not a shader problem)
+                slot = [e for e in errs if "out of bounds: must be between" in e or "cannot reserve" in e]
+                if is_plain and errs and len(slot) == len(errs):
+                    continue
+                bad.append((rel + " (metal)", errs[:3] or ["?"]))
     for rel, why in bad:
         print("FAIL", rel, ":", " | ".join(why))
+    if plain:
+        print("msl_check: %d shaders translated without argument buffers (this SPIRV-Cross rejects MoltenVK's options standalone; bindless slot limits not checked)" % len(plain))
     print("msl_check: %d shaders, %d skipped (not used on MoltenVK), %d failed" % (len(files), skipped, len(bad)))
     return 1 if bad else 0
 
