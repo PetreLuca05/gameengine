@@ -139,6 +139,11 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 ground_top[16];     // per terrain material: grass tops' colour (linear)
     vec4 ground_macro;    // x, y 1 / scales (m), z hue swing (rad), w value swing
     vec4 ground_macro2;   // x saturation swing, y strength (0 off)
+    // Interior volumes (src/render/vk_internal.h FrameData, lighting.glsl interior_sky)
+    vec4 interior_info;   // x volume count
+    vec4 interior_min[16];      // xyz min, w sky factor deep inside
+    vec4 interior_max[16];      // xyz max, w glass faces (bits -x +x -y +y -z +z)
+    vec4 interior_params[16];   // x falloff from the glass (m), y edge blend (m)
 } frame;
 
 // Where a world point lies in the screen-space inputs (AO, contact, SSR, SSGI, froxels): this

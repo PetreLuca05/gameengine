@@ -466,6 +466,15 @@ void render_set_camera(const RenderCamera *cam) {
 }
 void render_set_environment(const RenderEnvironment *env) { R->env = *env; }
 
+// Interior volumes (render_set_interiors): copied into every frame's FrameData.
+static RenderInterior g_interiors[RENDER_MAX_INTERIORS];
+static int g_interior_n;
+
+void render_set_interiors(const RenderInterior *v, int n) {
+    g_interior_n = DG_CLAMP(n, 0, RENDER_MAX_INTERIORS);
+    if (g_interior_n) memcpy(g_interiors, v, sizeof(RenderInterior) * (size_t)g_interior_n);
+}
+
 void render_draw(const DrawItem *item) {
     if (!item->mesh || R->draw_count >= MAX_DRAWS) return;
     R->draws[R->draw_count++] = *item;
@@ -1559,6 +1568,13 @@ static void compute_matrices(FrameData *fd) {
         fd->fill_dir = v4(fd_dir.x, fd_dir.y, fd_dir.z, atmo ? e->fill_intensity : 0.0f);
         fd->fill_color = v4(e->fill_color.x, e->fill_color.y, e->fill_color.z, 0.0f);
         fd->sky_flags = v4(atmo ? 1.0f : 0.0f, e->ambient_scale > 0 ? e->ambient_scale : 1.0f, (float)(sky_env_mips() - 1), atmo && e->cloud_cover > 0.001f ? 1.0f : 0.0f);
+        fd->interior_info = v4((float)g_interior_n, 0, 0, 0);
+        for (int k = 0; k < g_interior_n; k++) {
+            const RenderInterior *iv = &g_interiors[k];
+            fd->interior_min[k] = v4(iv->mn.x, iv->mn.y, iv->mn.z, iv->sky);
+            fd->interior_max[k] = v4(iv->mx.x, iv->mx.y, iv->mx.z, (float)iv->open_faces);
+            fd->interior_params[k] = v4(fmaxf(iv->falloff, 0.05f), fmaxf(iv->blend, 0.01f), 0, 0);
+        }
         vec2 co;
         float csz;
         sky_cloud_shadow_region(&co, &csz);

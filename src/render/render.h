@@ -146,6 +146,18 @@ typedef struct RenderCamera {
 // vm_ads_zoom (the weapon's / sight's ads_fov), the same whatever cl_fov or the hands FOV is.
 float render_vm_fov_for(const RenderCamera *c, float r_viewmodel_fov);
 
+// Interior volumes (docs/STORY.md "Rendering"): inside a box the sky ambient and the environment
+// reflections fall to `sky` (0..1), rising to 1 towards its glass faces (open_faces bits: -x +x -y +y -z +z)
+// over `falloff` m; the box edges blend over `blend` m. Level JSON "interiors" (src/world/level.c).
+#define RENDER_MAX_INTERIORS 16
+typedef struct RenderInterior {
+    vec3 mn, mx;
+    float sky;
+    u32 open_faces;
+    float falloff, blend;
+} RenderInterior;
+void render_set_interiors(const RenderInterior *v, int n);   // n 0 = none (the level load replaces them)
+
 typedef struct RenderEnvironment {
     vec3 sun_dir;       // direction towards the sun
     vec3 sun_color;

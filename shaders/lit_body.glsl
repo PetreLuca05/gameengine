@@ -240,6 +240,8 @@ void main() {
         vec3 ambient = mix(frame.ground_ambient.rgb, frame.sky_ambient.rgb, hemi) * frame.sky_ambient.w;
         bool sky_env_on = frame.sky_flags.x > 0.5;
         if (sky_env_on) ambient = sky_irradiance(n) / PI * frame.sky_flags.y;   // time-of-day sky (Lambert: E / pi)
+        float isky = interior_sky(vm ? frame.camera_pos.xyz : v_world);   // rooms see the sky through their glass only
+        ambient = interior_bounce(ambient, isky);
         if (!vm && frame.post_flags.w > 0.5) ambient += texture(post_ssgi, suv).rgb * frame.post_params.y;
         color = ambient * albedo * (1.0 - metal) * ao;
         // indirect specular: sky / ground by the reflection vector, replaced by SSR where it hit
@@ -249,6 +251,7 @@ void main() {
         vec3 fr = f0 + (max(vec3(1.0 - rough), f0) - f0) * pow(1.0 - ndv0, 5.0);
         vec3 env = mix(frame.ground_ambient.rgb, frame.sky_ambient.rgb, rv.y * 0.5 + 0.5) * frame.sky_ambient.w;
         if (sky_env_on) env = textureLod(sky_env, sky_env_uv(rv), rough * frame.sky_flags.z).rgb * frame.sky_flags.y;
+        env = interior_bounce(env, isky);
         vec3 spec_ind = env;
         if (!vm && frame.post_flags.z > 0.5) {
             vec4 ssr = texture(post_ssr, suv);

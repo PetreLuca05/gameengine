@@ -716,6 +716,28 @@ bool level_load(World *w, const char *path) {
         mb_free(&b.buckets[i]);
     }
     kit_world_level(w, root);   // building kit instances + prefabs (docs/BUILDING_KIT.md): the draw / body tail
+    // Interior volumes (render_set_interiors, docs/STORY.md "Rendering"): every level sets (or clears) them.
+    {
+        RenderInterior iv[RENDER_MAX_INTERIORS];
+        int ni = 0;
+        const cJSON *it;
+        cJSON_ArrayForEach(it, cJSON_GetObjectItemCaseSensitive(root, "interiors")) {
+            if (ni >= RENDER_MAX_INTERIORS) { log_warn("level: more than %d interiors", RENDER_MAX_INTERIORS); break; }
+            RenderInterior *r = &iv[ni++];
+            r->mn = jv3(it, "min", v3(0, 0, 0));
+            r->mx = jv3(it, "max", v3(0, 0, 0));
+            r->sky = jf(it, "sky", 0.2f);
+            r->falloff = jf(it, "falloff", 2.5f);
+            r->blend = jf(it, "blend", 0.4f);
+            r->open_faces = 0;
+            static const char *const faces[6] = { "-x", "+x", "-y", "+y", "-z", "+z" };
+            const cJSON *g;
+            cJSON_ArrayForEach(g, cJSON_GetObjectItemCaseSensitive(it, "glass"))
+                for (int f = 0; f < 6; f++)
+                    if (cJSON_IsString(g) && !strcmp(g->valuestring, faces[f])) r->open_faces |= 1u << f;
+        }
+        render_set_interiors(iv, ni);
+    }
     phys_optimize(w->phys);
     cJSON_Delete(root);
     log_info("level '%s': %d static bodies, %d labels, %d draws, %d spawns", ls->name, ls->body_count, ls->label_count, ls->draw_count, ls->spawn_count);
