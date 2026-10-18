@@ -532,7 +532,7 @@ bool anim_lib_load(AnimLibrary *lib, float rate) {
     lib->sample_rate = rate > 0 ? rate : ANIM_DEFAULT_RATE;
     dg_strcpy(lib->human_dir, sizeof(lib->human_dir), "assets/human");
     char buf[512];
-    if (!anim_cache_dir()[0]) anim_cache_set_dir(platform_data_path("assets/cache/", buf, sizeof(buf)));
+    if (!anim_cache_dir()[0]) anim_cache_set_dir(platform_writable_dir("assets/cache/", buf, sizeof(buf)));
     double t0 = platform_time();
     char rig[300], err[512] = { 0 };
     if (!find_canonical(lib, rig, sizeof(rig))) dg_strcpy(rig, sizeof(rig), "assets/human/Dummy.fbx");   // a baked .skel may still exist

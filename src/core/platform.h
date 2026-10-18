@@ -18,6 +18,14 @@ i64 platform_file_mtime(const char *path); // 0 if missing
 const char *platform_data_path(const char *rel, char *buf, size_t buf_size);
 const char *platform_pref_dir(void);   // writable user dir, ends with separator
 const char *platform_base_dir(void);   // exe dir, ends with separator
+// A directory the game writes into (caches, HDR screenshots): `rel` (ends with '/') under the data
+// path (build tree, install dir) when that is writable, else under the pref dir (a signed macOS .app
+// bundle, a read-only install: docs/PLATFORM_MACOS.md). Created when missing.
+const char *platform_writable_dir(const char *rel, char *buf, size_t buf_size);
+
+// Process setup before SDL / Vulkan (main): the MoltenVK configuration on macOS (environment
+// defaults the user can still override; docs/PLATFORM_MACOS.md "MoltenVK configuration").
+void platform_preinit(void);
 
 double platform_time(void);            // seconds since start, high resolution
 u32 platform_wall_ms(void);            // wall clock in ms (wraps): comparable between processes on one machine

@@ -281,7 +281,7 @@ bool model_load_gltf(const char *path, Model *out) {
 // model; the GPU path consumes it from Phase 2 on (docs/VGEO.md).
 static void model_load_vgeo(Model *m, const char *gltf_path) {
     char cache[512];
-    platform_data_path("assets/cache/", cache, sizeof(cache));
+    platform_writable_dir("assets/cache/", cache, sizeof(cache));
     VgBuildOptions opt;
     memset(&opt, 0, sizeof(opt));
     VgBuilt *b = (VgBuilt *)calloc(1, sizeof(VgBuilt));

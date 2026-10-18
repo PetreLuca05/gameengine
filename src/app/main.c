@@ -154,6 +154,7 @@ int main(int argc, char **argv) {
     // --log <path>: a separate log (scripted tests next to a running game).
     for (int i = 1; i + 1 < argc; i++) if (!strcmp(argv[i], "--log")) snprintf(log_path, sizeof(log_path), "%s", argv[i + 1]);
     log_init(log_path);
+    platform_preinit();
     crash_install();
     log_info("Deadground %s starting (log: %s)", DG_VERSION, log_path);
     cvar_system_init();

@@ -216,8 +216,10 @@ static int io_send(void *ctx, u8 *buf, size_t len) {
     Conn *c = (Conn *)ctx;
 #if defined(_WIN32)
     int n = send(c->fd, (const char *)buf, (int)len, 0);
-#else
+#elif defined(MSG_NOSIGNAL)
     int n = (int)send(c->fd, buf, len, MSG_NOSIGNAL);
+#else
+    int n = (int)send(c->fd, buf, len, 0);   // macOS: no MSG_NOSIGNAL, SO_NOSIGPIPE on the socket (accept_on)
 #endif
     if (n >= 0) return n == 0 ? -1 : n;
     return sock_would_block() ? 0 : -1;
@@ -533,6 +535,12 @@ static void accept_on(HwsServer *s, sock_t lfd, bool helper) {
         socklen_t al = sizeof(a);
         sock_t fd = accept(lfd, (struct sockaddr *)&a, &al);
         if (fd == SOCK_BAD) return;
+#ifdef SO_NOSIGPIPE
+        {   // a phone closing mid-response must not SIGPIPE the game (Darwin has no MSG_NOSIGNAL)
+            int one = 1;
+            setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, sizeof(one));
+        }
+#endif
         u32 ip = ntohl(a.sin_addr.s_addr);
         s->stats.connections++;
         if (!s->cfg.allow_public && !hws_ipv4_is_private(ip) && !hws_ipv4_is_loopback(ip)) {

@@ -1987,7 +1987,7 @@ static int foliage_build_trees(u32 role_mask) {
     char dir[512], built[512], cache[512];
     platform_data_path("assets/treefbx/", dir, sizeof(dir));
     platform_data_path("assets/vgeo/trees/", built, sizeof(built));
-    platform_data_path("assets/cache/", cache, sizeof(cache));
+    platform_writable_dir("assets/cache/", cache, sizeof(cache));
     u32 ns = vgeo_tree_species_count();
     TreeBuild *tb = (TreeBuild *)calloc(ns, sizeof(TreeBuild));
     int n = 0;

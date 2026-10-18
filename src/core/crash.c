@@ -1,4 +1,9 @@
-// Crash handler: logs a symbolized stack trace on unhandled exceptions (Windows / DbgHelp).
+// Crash handler: logs a symbolized stack trace on unhandled exceptions (Windows / DbgHelp), or on
+// fatal signals (macOS / Linux: backtrace(), then the default action so macOS still writes its
+// .ips crash report; docs/PLATFORM_MACOS.md).
+#if !defined(_WIN32) && !defined(_POSIX_C_SOURCE)
+#define _POSIX_C_SOURCE 200809L   // sigaction under strict C11 (glibc)
+#endif
 #include "crash.h"
 #include "log.h"
 #include "engine.h"
@@ -92,5 +97,34 @@ void crash_install(void) {
     }
 }
 #else
-void crash_install(void) {}
+#include <execinfo.h>
+#include <signal.h>
+#include <string.h>
+#include <unistd.h>
+
+static void on_fatal_signal(int sig, siginfo_t *info, void *uctx) {
+    (void)uctx;
+    log_error("crash: signal %d (%s) at address %p", sig, sig == SIGSEGV ? "SIGSEGV" : sig == SIGBUS ? "SIGBUS" : sig == SIGILL ? "SIGILL" : sig == SIGFPE ? "SIGFPE" : "SIGABRT",
+              info ? info->si_addr : NULL);
+    void *frames[64];
+    int n = backtrace(frames, 64);
+    char **sym = backtrace_symbols(frames, n);
+    for (int i = 0; i < n; i++) log_error("  #%d %s", i, sym ? sym[i] : "?");
+    // the default action (core dump / the macOS crash reporter) with the same signal
+    signal(sig, SIG_DFL);
+    raise(sig);
+}
+
+void crash_install(void) {
+    // A peer closing a socket mid-write (phone server, LAN) must not kill the game.
+    signal(SIGPIPE, SIG_IGN);
+    if (getenv("DG_NO_CRASH_HANDLER")) return;   // let a debugger / sanitizer see the raw signal
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_sigaction = on_fatal_signal;
+    sa.sa_flags = SA_SIGINFO | SA_RESETHAND;
+    sigemptyset(&sa.sa_mask);
+    const int sigs[] = { SIGSEGV, SIGBUS, SIGILL, SIGFPE, SIGABRT };
+    for (size_t i = 0; i < sizeof(sigs) / sizeof(sigs[0]); i++) sigaction(sigs[i], &sa, NULL);
+}
 #endif

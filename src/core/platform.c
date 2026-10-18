@@ -5,6 +5,7 @@
 #include "log.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 char *platform_read_file(const char *path, size_t *out_size) {
     FILE *f = fopen(path, "rb");
@@ -73,6 +74,40 @@ const char *platform_data_path(const char *rel, char *buf, size_t buf_size) {
 #endif
     snprintf(buf, buf_size, "%s", rel);
     return buf;
+}
+
+// The base dir is writable (probed once): false inside a macOS .app (Contents/Resources, signed and
+// read-only for a notarized build) and in read-only installs.
+static bool base_dir_writable(void) {
+    static int state = -1;
+    if (state < 0) {
+        char probe[1024];
+        snprintf(probe, sizeof(probe), "%s.dg_write_probe", platform_base_dir());
+        bool bundle = strstr(platform_base_dir(), ".app/Contents/Resources") != NULL;
+        state = !bundle && platform_write_file(probe, "", 0);
+        if (state) SDL_RemovePath(probe);
+    }
+    return state == 1;
+}
+
+const char *platform_writable_dir(const char *rel, char *buf, size_t buf_size) {
+    if (base_dir_writable()) platform_data_path(rel, buf, buf_size);
+    else snprintf(buf, buf_size, "%s%s", platform_pref_dir(), rel);
+    // create every level (SDL_CreateDirectory makes the parents)
+    SDL_CreateDirectory(buf);
+    return buf;
+}
+
+void platform_preinit(void) {
+#ifdef __APPLE__
+    // Metal fast math assumes no NaN / Inf: the NaN guards of TAA, exposure and the phone tonemap
+    // would compile away. Precise math keeps the image the Windows / Linux drivers produce.
+    setenv("MVK_CONFIG_FAST_MATH_ENABLED", "0", 0);
+    // The bindless vgeo textures (1152 combined image samplers per stage) need argument buffers.
+    setenv("MVK_CONFIG_USE_METAL_ARGUMENT_BUFFERS", "1", 0);
+    // Pipeline creation on every core (macOS 13.3+): shorter first-launch shader compilation.
+    setenv("MVK_CONFIG_SHOULD_MAXIMIZE_CONCURRENT_COMPILATION", "1", 0);
+#endif
 }
 
 double platform_time(void) {

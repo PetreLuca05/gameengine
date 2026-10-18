@@ -2,6 +2,10 @@
 #include "jobs.h"
 #include "log.h"
 #include <SDL3/SDL.h>
+#ifdef __APPLE__
+#include <pthread.h>
+#include <pthread/qos.h>
+#endif
 
 #define JOB_QUEUE_SIZE 1024
 #define MAX_WORKERS 16
@@ -53,6 +57,11 @@ static void run_job(Job *j) {
 
 static int worker_main(void *arg) {
     (void)arg;
+#ifdef __APPLE__
+    // macOS has no affinity API: the QoS class keeps the workers on the performance cores of Apple
+    // Silicon (the default class may land them on the efficiency cores; docs/PLATFORM_MACOS.md).
+    pthread_set_qos_class_self_np(QOS_CLASS_USER_INTERACTIVE, 0);
+#endif
     for (;;) {
         // Bursty frame work: spin briefly for more before sleeping (a condition wake costs
         // tens of microseconds, longer than most chunks).

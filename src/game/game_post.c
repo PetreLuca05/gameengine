@@ -358,8 +358,9 @@ static void bench_frame(void) {
 }
 
 static void screenshot_dir(char *out, size_t n) {
-    snprintf(out, n, "%sscreenshots", platform_base_dir());
-    SDL_CreateDirectory(out);
+    platform_writable_dir("screenshots/", out, n);
+    size_t len = strlen(out);
+    if (len && out[len - 1] == '/') out[len - 1] = 0;
 }
 
 // screenshot_hdr [name]: PNG (display) + EXR (linear HDR) of the next frame.
