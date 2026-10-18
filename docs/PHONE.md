@@ -7,47 +7,69 @@ While it is out it is **always raised** in the focused, camera-ready pose (hold 
 
 The phone's **screen is not on the phone model**. It is shown in two places only:
 - the **HUD phone panel** (the simulated phone screen, bottom right), for the local player;
-- the **companion web page** on your real phone, once it is paired. Then the panel slides away and
-  the real phone's orientation drives the in-game phone.
+- the **companion web page** on your real phone, once it is paired (in the menus: see "Phone
+  flow"). Then there is no panel and the real phone's orientation drives the in-game phone.
 
 The held model's screen is plain dark glass (no texture, no glow, no light), for everyone. Other
 players and spectators only see the pose (raised, portrait / landscape, the real phone's rotation).
 
 Everything stays on the local network: the game is the server, and nothing goes through the cloud.
 
-## Phone flow
+## Phone flow (pairing lives in the menus)
+
+Pairing is a **session decision made in the main menu**, not something that happens when the phone
+item comes out. The HTTPS / WebSocket server starts at menu start (`phone_auto_pair 1`, the default)
+or when the Connect portal opens, and stays up for the whole run: maps, lobbies and "Leave to main
+menu" never stop it.
 
 ```
-equip (X / hotbar) ──> server up + pairing code + Connect portal (same frame) ──┬─ device connects ──> PAIRED
-        │                                                                       │   (panel slides out; the page has the UI)
-        │                                                                       ├─ "Use in-game phone instead" / timeout /
-        │                                                                       │   no server ──> LOCAL (home screen in the panel)
-        │                                                                       └─ "Cancel" ──> the phone goes away
-PAIRED ── device disconnects ──> LOST: the panel comes back on the portal with "Reconnect"
+MAIN MENU  Player tab: Phone card  /  footer: phone icon + status
+   │  click (card, footer icon, pause card, "Connect your phone" on the in-game home screen)
+   v
+CONNECT PORTAL (centred modal: QR, URL, "Waiting for device…", Use in-game phone, Close)
+   ├─ device connects ─────> mode DEVICE  (card: Connected (iPhone) · Disconnect · Forget device)
+   ├─ Use in-game phone ───> mode INGAME  (card: In-game phone · "Connect a device")
+   └─ Close ───────────────> nothing decided (card: Not connected)
+
+MATCH   equip (X / hotbar) never opens the portal:
+   device connected ──> the phone just comes up; the real phone drives it (no HUD panel)
+   no device ─────────> the in-game phone (HUD panel), as before
+   device drops ──────> toast "Phone disconnected — using in-game phone", the panel slides back
+   page reconnects ───> real-phone mode again, silently (also from the pause menu's Phone card)
 ```
 
-- **Equip = pairing.** Equipping starts the HTTPS / WebSocket server if needed, issues a one-time
-  code and its QR, and shows the **Connect portal** at once: the QR, the URL as text, "Waiting for
-  device…", `Use in-game phone instead` (decline) and `Cancel`.
-- **Declined, no connection within `phone_pair_timeout` (60 s), or no server** (port in use,
-  `phone_server 0`, pairing disabled): the panel becomes the in-game phone and opens the home
-  screen. The home screen keeps a "Connect your phone" button that opens the portal again.
-- **Connected:** the panel slides out and fades; the page shows the same phone OS (home, Camera,
-  Gallery) and the device's orientation drives the phone. **Disconnected:** the panel slides back in
-  on the portal (`Phone disconnected`, `Reconnect`). A page that resumes with its session reconnects
-  on its own.
-- **Per session:** re-equipping a paired or declined phone skips the portal (the last app opens).
-- `phone_auto_pair 0`: equipping goes straight to the in-game phone.
+- **Card states** (`phone_os_card`): `Not connected`, `Waiting…` (the portal is open),
+  `Connected (<device>)`, `In-game phone`. The same card is on the main menu's Player tab and in the
+  pause menu (top right, hidden while a sub-menu is open); the footer of the main menu shows a small
+  phone glyph with the same status next to the Steam status (click: the portal).
+- **Session `phone_mode`** (`phone_mode` prints / sets it): `unset` until the portal is answered,
+  `ingame` after "Use in-game phone" or `Disconnect`, `device` while a device is (or was last)
+  connected. It is per run and per client: nothing about it goes over the network.
+- **Disconnect** closes the page's socket (close code 4002: the page shows "Disconnected" with a
+  Reconnect button, it does not retry by itself) and switches the session to the in-game phone; the
+  stored device stays, so the next launch reconnects it. **Forget device** revokes the session
+  (4001: the page forgets it) and deletes the stored device.
+- **Persisted pairing.** A paired device's session key is stored in `<pref dir>/phone/device.json`
+  (key, device name, expiry; `phone_device_days`, 30 days, sliding on every connect, 0 = never
+  stored). The server restores it when it starts, and the page keeps the key in `localStorage`: a
+  page left open on the phone reconnects on its own as soon as the game is back (it probes
+  `/ping?s=<key>`; a 403 means the session ended and it asks for a new QR scan).
+- **The companion page in the menu** shows the **menu companion screen**: a "Connected to <PC
+  name>" banner, Home with Camera / Gallery greyed out ("Available in a match"). In a match the
+  apps unlock and the page behaves as before.
+- **Lobby:** members with a connected device get a tiny phone icon in the lobby's player list (one
+  flag bit in the member flags of the lobby snapshot, set by the `LI_PHONE` intent; cosmetic).
+- `phone_auto_pair 0`: the server starts only when the portal opens (or `phone_server 1`).
 
-The flow is a pure state machine (`phone_os.c`: `PhoneOs`, `phone_os_equip / tick / connected /
-disconnected / decline / cancel / reconnect`), unit tested.
+The flow is pure (`phone_os.c`: `PhoneOs`, `phone_os_portal_open / portal_close / decline /
+connected / disconnected / disconnect / equip / card`), unit tested.
 
 ## The phone OS
 
 | App | In the HUD panel / on the page |
 |---|---|
-| **Connect portal** | QR + URL + status + decline / cancel (+ Reconnect after a disconnect). The page's portal shows "Connected" and asks for motion access ("Allow motion & continue"). |
-| **Home** | status bar (in-game clock, LINK when paired, cosmetic signal, battery), the big clock, day + part of day, the weather glyph + name from the weather system, the app grid, the home bar. |
+| **Connect portal** | not on the phone any more: a centred menu modal (`SCR_PHONE`, `src/ui/mainmenu/mm_phone.c`, `assets/ui/screens/mainmenu_phone_portal.json`): QR, URL, code expiry, status, `Use in-game phone`, `Close` (`Disconnect` with a device). The page's own portal shows "Connected" and asks for motion access ("Allow motion & continue"), "Disconnected" + Reconnect after the game's Disconnect, "Pairing ended" when the session is gone. |
+| **Home** | status bar (in-game clock, LINK when paired, cosmetic signal, battery), the big clock, day + part of day, the weather glyph + name from the weather system, the app grid, the home bar; "Connect your phone" (in-game phone only) opens the Connect portal. On the page: a "Connected to <PC name>" pill; in the menus (status `ctx` "menu") Camera / Gallery are greyed out ("available in a match"). |
 | **Camera** | the live lens view, zoom chips 1x / 2x / 5x + log slider (wheel / pinch), shutter, record, last-shot thumbnail, front / back switch. |
 | **Gallery** | thumbnails grid (photos + videos, newest first, wheel scroll), viewer (prev / next or swipe, wheel / pinch zoom), Delete; Download / Share on the page. |
 
@@ -97,8 +119,10 @@ left edge for back, swipes in the viewer for prev / next, pinch to zoom.
 
 | Area | Code | Data |
 |---|---|---|
-| Phone module: server lifecycle, page messages, orientation, capture, commands | `src/gameplay/phone/phone.c` | |
-| Phone OS (pure): flow, apps, layout + hit tests, assets, HUD panel rect, page injection | `src/gameplay/phone/phone_os.c` | `assets/phone/apps.json`, `theme.json`, `icons.png` (`tools/phone_icons.py`) |
+| Phone module: server lifecycle (`phone_tick`, every frame from the main loop), page messages, pairing API for the menus (`phone_pair_info`, `phone_portal_show / hide`, `phone_decline / disconnect / forget`), the stored device, orientation, capture, commands | `src/gameplay/phone/phone.c` | |
+| Phone card, Connect portal modal, footer chip, phone glyph | `src/ui/mainmenu/mm_phone.c`, `SCR_PHONE` in `src/ui/menus.c` (pause menu card) | `assets/ui/screens/mainmenu_phone_{card,portal}.json`, `mainmenu_player.json` (`phone`), `pause.json` (`phone`), theme tokens `ph_*` |
+| Lobby phone flag (`LI_PHONE`, member flag bit 3) | `src/net/lobby.c`, `lobby_net.c`, `src/ui/mainmenu/mm_lobby.c` | |
+| Phone OS (pure): flow, session mode, card state, device names, the stored device, apps, layout + hit tests, assets, HUD panel rect, page injection | `src/gameplay/phone/phone_os.c` | `assets/phone/apps.json`, `theme.json`, `icons.png` (`tools/phone_icons.py`) |
 | Screen UI (CPU canvas), HUD panel + hints, the phone model (dark glass) | `src/gameplay/phone/phone_ui.c` | |
 | Orientation math (pure) | `src/gameplay/phone/phone_orient.c` | |
 | Stream rate control + JPEG (pure), the JPEG-over-WebSocket sink | `src/gameplay/phone/phone_stream.c`, `phone_stream_ws.c` | |
@@ -116,26 +140,32 @@ left edge for back, swipes in the viewer for prev / next, pinch to zoom.
 
 ## Pairing details
 
-
-1. Take the phone out (X). The Connect portal opens in the HUD panel at once.
+1. In the main menu, open **Player › Phone › Connect** (or click the phone in the footer; in a match:
+   the pause menu's Phone card, or "Connect your phone" on the in-game phone's home screen). The
+   Connect portal opens with a QR code.
 2. Its QR code encodes `https://<lan-ip>:47820/?t=<token>`; the address is also shown as text, in
    case your camera can't read the code.
 3. Scan the code with the real phone. It must be on the same Wi-Fi.
 4. The first time, the browser warns about the certificate (see the next section). Accept it.
 5. The page's portal says **Connected**: tap **Allow motion & continue**. On iOS, allow **Motion &
-   Orientation** access when asked. The page opens the home screen.
-6. Hold the phone upright, facing the direction your character is looking. The first sample
-   calibrates automatically. Later, use **Calibrate** in the page's menu, or double-tap the picture.
+   Orientation** access when asked. The page opens the home screen; the game's portal shows
+   "Phone connected" and closes, the card shows **Connected (iPhone · Safari)**.
+6. In a match, take the phone out (X) and hold the real phone upright, facing the direction your
+   character is looking. The first sample calibrates automatically. Later, use **Calibrate** in the
+   page's menu, or double-tap the picture.
 
 Pairing rules:
-- The token is good for **one use** and **expires after 2 minutes** (`phone_token_ttl`).
-- Using it creates a session key, which the page keeps in `sessionStorage`. Reloads (iOS forgets the
-  motion permission on every reload) and media downloads use the session.
+- The token is good for **one use** and **expires after 2 minutes** (`phone_token_ttl`); an expired
+  code on an open portal is replaced by a new one automatically.
+- Using it creates a session key, which the page keeps in `localStorage` and the game in
+  `<pref dir>/phone/device.json` (`phone_device_days`, sliding). Reloads (iOS forgets the motion
+  permission on every reload), media downloads and the next launch use the session.
 - Each player has one phone. Pairing another phone, or opening the page in a second tab, replaces the
   first one, which sees "Paired elsewhere".
-- **Unpair** (on the page, or `phone_unpair`) revokes the session.
-- Pairing again later: **Reconnect** on the portal, "Connect your phone" on the home screen, or
-  `phone_pair`. An expired code on an open portal is replaced by a new one automatically.
+- **Disconnect** (card) closes the page's socket for this session; **Forget device** (card, the
+  page's "Forget this phone", `phone_forget` / `phone_unpair`) revokes the session.
+- Pairing is per client and local: nothing about it goes over the network except the cosmetic
+  lobby flag.
 
 ## HTTPS and permissions (read this before blaming the code)
 
@@ -365,18 +395,23 @@ returns to the mouse.
 | Command | |
 |---|---|
 | `phone_out [0|1]` | take the phone out / put it away (X) |
-| `phone_server on|off` | start / stop the server (`phone_server` cvar: 0 off, 1 on, 2 automatic — starts the first time the phone comes out) |
-| `phone_pair` | new pairing code: the Connect portal (Reconnect), URL printed to the console |
-| `phone_unpair` | revoke the session |
+| `phone_server on|off` | start / stop the server (`phone_server` cvar: 0 off, 1 on, 2 automatic — with the main menu when `phone_auto_pair` is on, else the first Connect portal) |
+| `phone_pair`, `phone_portal [open|close|decline]` | the Connect portal (modal), URL printed to the console |
+| `phone_decline`, `phone_mode [ingame]` | "Use in-game phone" for the session; `phone_mode` prints unset / ingame / device |
+| `phone_disconnect` | the card's Disconnect (the in-game phone this session; the stored device stays) |
+| `phone_forget` (= `phone_unpair`) | Forget device: revoke the session, delete the stored device |
+| `phone_card` | the Phone card as one log line (tests) |
 | `phone_fake_orientation <pitch> <yaw> <roll>` / `off` | drive the phone without a device |
 | `phone_stream_stats` | resolution, quality, fps, kbps, encode ms, RTT, glass-to-glass, server counters, orientation source |
 | `phone_photo`, `phone_record`, `phone_zoom <x>`, `phone_selfie [0|1]`, `phone_landscape [0|1]`, `phone_screen home|camera|gallery|pair`, `phone_calibrate` | the same as the keys / page buttons |
-| `phone_decline`, `phone_back`, `phone_ui [0|1]` | portal decline, back, free the cursor for the panel |
+| `phone_back`, `phone_ui [0|1]` | back, free the cursor for the panel |
 | `phone_button <name> [index]`, `phone_tap <x> <y>` | press a screen button / tap at design px (the same path as a click on the panel) |
-| `phone_status`, `phone_wait <flow|app> [frames]` | one status line; hold a script until the phone gets there (tests) |
+| `phone_status`, `phone_wait <flow|app|card> [frames]` | one status line (flow, app, panel, mode, portal, the top screen ...); hold a script until the phone gets there (tests) |
 
 Cvars:
-- `phone_port`, `phone_tls`, `phone_bind`, `phone_pairing`, `phone_token_ttl`, `phone_auto_pair`, `phone_pair_timeout`
+- `phone_port`, `phone_tls`, `phone_bind`, `phone_pairing`, `phone_token_ttl`, `phone_auto_pair` (the server
+  starts with the main menu, so a remembered phone reconnects by itself; the request's
+  "phone_autopair"), `phone_device_days` (30; 0 = nothing stored)
 - `phone_res_w`, `phone_res_h`, `phone_fps`, `phone_quality`
 - `phone_smoothing`, `phone_sensitivity`, `phone_invert_yaw`, `phone_invert_pitch`,
   `phone_invert_roll`
@@ -402,9 +437,10 @@ is GPLv2 or commercial; civetweb because its TLS needs OpenSSL DLLs.
 
 ## Tests
 
-- **`ctest -R phone`** (`tests/test_phone.c`, 843 checks):
+- **`ctest -R phone`** (`tests/test_phone.c`, 890 checks):
   - QR encode → decode with quirc;
   - token auth: wrong, empty, prefix, expired at exactly 2 minutes, replayed, re-pair, unpair;
+    session lifetime (sliding on resume, expiry), stored sessions restored (malformed keys refused);
     rate limit + bans;
   - HTTP parsing, the RFC 6455 accept-key example, fragmented frames + an interleaved ping fed byte
     by byte, unmasked / oversized frames rejected;
@@ -416,11 +452,16 @@ is GPLv2 or commercial; civetweb because its TLS needs OpenSSL DLLs.
   - photo JPEG + sidecar parsed back; a 2 s MP4 with its boxes, duration and size parsed back;
   - a headless WebSocket client against the real server: page, no file system, pair, orientation
     sample, 100 streamed frames, photo download, 2 s video download, resume with the session,
-    unpair;
+    unpair; `/ping` (200 / 403), the game's Disconnect (close 4002, the session stays, the page
+    resumes), a second server (the next launch) refusing the key until the stored device is
+    restored, then resuming it;
   - TLS: certificate generation, a handshake that verifies the IP SAN against the CA, the CA over
     the HTTP helper, CA reuse, a new server certificate for a new IP;
-  - phone OS: the flow (equip → pairing, timeout at 60 s, decline, cancel, no server, auto-pair
-    off, connect / lose / reconnect, per-session skip of the portal, back), every app's buttons on
+  - phone OS: the flow (equip never pairs: the in-game phone; the portal opens / closes / declines,
+    no server, connect in the menu, equip with a device = no panel, a mid-match drop → panel +
+    toast with the mode kept, silent reconnect, Disconnect, Forget), the card states, device names
+    from user agents (iPhone, iPad, Pixel, the model hint, Samsung Internet), the stored device
+    JSON (round trip, expiry, malformed), every app's buttons on
     screen and hit-tested at their centres, the gallery paging, the zoom slider round trip,
     `apps.json` (exactly Camera + Gallery, atlas tiles, a glyph per weather preset, a data-only
     extra app), the atlas size, `theme.json`, the page injection (`</` escaped, missing assets),
@@ -434,30 +475,39 @@ is GPLv2 or commercial; civetweb because its TLS needs OpenSSL DLLs.
   - Left hand glued: 0.04 mm.
   - Item drift: 1e-7.
   - The camera-space rotation never leaves the reach cone.
-- **`tools/tests/phone_e2e.sh`** (from `build/bin`): the game plus headless Chromium driving the
-  real page.
-  - Covers: HTTPS secure context, token removed from the URL, live frames decoded, gyro driving the
-    in-game phone, calibration, the photo blob, 2 s video, gallery, MP4 download, 403 without the
-    session, unpair.
-  - Screenshots: `phone_page_*.png`.
-- **`tools/tests/phone_flow.py`** (from `build/bin`, runs `phone_flow.cfg`): equip → one frame later
-  server + code + portal + panel; raised without any aim input; decline → home; Camera → photo →
-  Gallery → viewer → back; re-equip skips the portal; the HUD panel measured in screenshots at
-  1600×900 / 2100×900 / 1200×900; static: no phone focus bind, the phone never reads aim.
-  Screenshots `phone_flow_*.png`.
-- **`tools/tests/phone_ws.py`**: a simulated device in Python's stdlib (TLS + WebSocket): the page
-  carries the injected assets, pairing, panel removed, orientation drives the phone, the page opens
-  Camera (frames), takes a photo (blob), opens Gallery (listed, downloads with the session),
-  disconnects → the panel is back on the portal. Screenshots `phone_ws_*.png`.
+- **`ctest -R lobby`**: `LI_PHONE` (accepted in any state, no chat line, ignored twice), the phone
+  flag in the snapshot; the theme-token lint covers `mainmenu_phone_card.json` and
+  `mainmenu_phone_portal.json` (tokens only, inside the root at six resolutions, no overlaps).
+- **`tools/tests/phone_flow.py`** (from `build/bin`, runs `phone_flow.cfg`, no device): equip → one
+  frame later the in-game phone (home, panel), no portal, no code; raised without any aim input;
+  "Connect your phone" → the portal modal (server + code); decline → `phone_mode ingame`, the
+  portal closes; Camera → photo → Gallery → viewer → back; re-equip: no portal; equipping never
+  showed the portal; the HUD panel measured in screenshots at 1600×900 / 2100×900 / 1200×900;
+  static: no phone focus bind, the phone never reads aim. Screenshots `phone_flow_*.png`.
+- **`tools/tests/phone_ws.py`** (from `build/bin`, `--menu`, runs `phone_ws.cfg` then
+  `phone_ws_relaunch.cfg`): a simulated device in Python's stdlib (TLS + WebSocket).
+  - The main menu: the server is up (auto-pair), card Not connected → the Player tab's portal
+    (modal, code; card Waiting…) → pairing; the page's status says `ctx` menu, card Connected
+    (iPhone · Safari), the footer shows it.
+  - A LAN lobby lists the phone flag; in the match the status says `ctx` match, equipping goes
+    straight to the device (no portal, no panel), orientation drives it, Camera (frames), photo
+    (blob), Gallery (listed, downloads with the session).
+  - The socket drops: the in-game phone + the toast; `/ping` still 200; the page resumes: paired
+    again. The pause menu's card opens the portal; closing it keeps the device.
+  - Relaunch: the stored device is restored, the page reconnects with its key (no code), Forget
+    device closes it with 4001 and deletes the file.
+  - Screenshots `phone_ws_*.png` (card, portal, card connected, lobby, match, camera, dropped,
+    pause, pause portal).
 - **`tools/tests/phone_screen.py`**: the model's screen is dark glass day / night and in the camera
   app (`model_screen=0/n`), no glow, while the panel shows the white UI.
 - **`tools/tests/phone_e2e.sh`**: the game plus headless Chromium driving the real page.
   - Needs an existing Playwright module (`PLAYWRIGHT_PATH`) and Chromium (`CHROMIUM`); nothing is
     installed.
-  - Covers: HTTPS secure context, the injected assets, token removed from the URL, the portal's
-    Connected, the light home screen with two apps, Camera frames, the in-game app following, gyro,
-    calibration, the photo blob, 2 s video, MP4 download, 403 without the session, Gallery grid +
-    viewer + delete, unpair → the game's panel back on the portal.
+  - Covers: HTTPS secure context, the injected assets, token removed from the URL, the key in
+    `localStorage`, the portal's Connected, the light home screen with two apps and "Connected to
+    <PC>", Camera frames, the in-game app following, gyro, calibration, the photo blob, 2 s video,
+    MP4 download, 403 without the session, Gallery grid + viewer + delete, the game's Disconnect →
+    the page's Reconnect, Forget this phone → the game's in-game phone, card Not connected.
   - Screenshots: `phone_page_*.png`.
 - **`tools/tests/phone_net.sh`**: host + client: the client sees the host's phone raised in portrait
   with a dark screen.

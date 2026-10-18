@@ -1,7 +1,8 @@
 // Player tab (docs/MENU_LOBBY.md): the 3D preview is the menu scene (mm_scene.c frames the real
 // character - shared skeleton, equipped cosmetics, idle animation, the item on its hold point -
 // inside the preview rect; drag to orbit, wheel to zoom), name, stats, loadout, and the "Preview in
-// map lighting" toggle (the selected map's season / time / weather, else neutral daylight).
+// map lighting" toggle (the selected map's season / time / weather, else neutral daylight), and
+// the Phone card (mm_phone.c).
 #include "mm_internal.h"
 #include "game/game.h"
 #include "gameplay/items.h"
@@ -100,4 +101,6 @@ void mm_player_draw(GuiRect content) {
         mm_kv(&c, "In hand", def ? def->name : "Nothing");
     }
     if (gw_button(gui_id("mm_to_cos"), gc_row(&c, TOK("mm_button_h")), "Change cosmetics", GB_SECONDARY, true)) { M->tab = MT_COSMETICS; gui_set_focus(0); }
+    // The Phone card (docs/PHONE.md "Phone flow"): pairing happens here, not when the phone comes out.
+    mainmenu_phone_card(mm_node(L, "phone"));
 }

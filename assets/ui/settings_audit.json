@@ -967,6 +967,12 @@
    "reason": "Phone companion transport (PHONE.md): personal device setup.",
    "category": "phone"
   },
+  "phone_device_days": {
+   "class": "EDITABLE",
+   "ui": "Phone",
+   "reason": "Phone companion: personal device / stream preferences; the in-game item behaves the same for everyone.",
+   "category": "phone"
+  },
   "phone_exposure": {
    "class": "EDITABLE",
    "ui": "Phone",
@@ -998,12 +1004,6 @@
    "category": "phone"
   },
   "phone_invert_yaw": {
-   "class": "EDITABLE",
-   "ui": "Phone",
-   "reason": "Phone companion: personal device / stream preferences; the in-game item behaves the same for everyone.",
-   "category": "phone"
-  },
-  "phone_pair_timeout": {
    "class": "EDITABLE",
    "ui": "Phone",
    "reason": "Phone companion: personal device / stream preferences; the in-game item behaves the same for everyone.",

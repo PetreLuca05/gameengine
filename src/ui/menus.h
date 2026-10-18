@@ -14,6 +14,7 @@ void menus_toggle_inventory(void);
 void menus_close_all(void);
 bool menus_wants_mouse(void);   // any menu that needs a free cursor is open
 bool menus_open(void);          // any game screen is open (the HUD hides)
+void menus_open_phone_portal(void);   // the Connect portal (SCR_PHONE) over whatever is open (docs/PHONE.md)
 bool menus_paused(void);        // the pause menu stops the simulation (single player / host alone)
 bool menus_can_pause(void);
 void menus_tick(float dt);      // UI frame start, global keys, settings countdown

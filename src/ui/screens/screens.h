@@ -11,6 +11,7 @@ typedef enum ScreenId {
     SCR_CHAT,       // in-game chat line (Enter)
     SCR_LOBBY,      // pause > Lobby: players, chat, invite, kick
     SCR_COMMANDS,   // pause > Commands: the console registry + embedded console (src/ui/pause)
+    SCR_PHONE,      // the Connect portal (src/ui/mainmenu/mm_phone.c): main menu, pause menu, the in-game phone
     SCR_COUNT
 } ScreenId;
 

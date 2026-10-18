@@ -83,6 +83,8 @@ static void load_layouts(void) {
     mm_layout_load(&M->lobby, "mainmenu_lobby");
     mm_layout_load(&M->loading, "mainmenu_loading");
     mm_layout_load(&M->chat, "mainmenu_chat");
+    mm_layout_load(&M->phone_card, "mainmenu_phone_card");
+    mm_layout_load(&M->phone_portal, "mainmenu_phone_portal");
 }
 
 // ------------------------------------------------------------------ shared drawing
@@ -159,7 +161,9 @@ static void draw_status(GuiRect r) {
     GuiText nt = { gui_s(TH->t_body), GW_SEMIBOLD, TH->text, GUI_LEFT, 0, false, true, r.w - av - TOK("mm_gap") * 2 };
     float lh = gd_line_height(nt.size);
     float y = r.y + r.h * 0.5f - lh;
-    gd_text(&nt, x, y, name);
+    float nw = gd_text(&nt, x, y, name);
+    // The phone (docs/PHONE.md "Phone flow"): glyph + status; a click opens the Connect portal.
+    mm_phone_status_chip(gui_rect(x + nw + TOK("mm_gap"), y, r.x + r.w - (x + nw + TOK("mm_gap")), lh));
     char line[160];
     u32 dot;
     const char *status;
@@ -479,9 +483,10 @@ static void cmd_mm_dump(int argc, const char **argv) {
     (void)argc;
     (void)argv;
     LobbyState st = lobby_state();
-    log_info("mm_dump: active %d tab %s page %s lobby %s splash %d map %s season %d hour %d weather '%s' top %s preview %.0fx%.0f",
+    char phone[96];
+    log_info("mm_dump: active %d tab %s page %s lobby %s splash %d map %s season %d hour %d weather '%s' top %s preview %.0fx%.0f phone '%s'",
              mainmenu_active() ? 1 : 0, k_tab_names[M->tab], M->play_page == PP_BROWSER ? "browser" : "main", lobby_state_name(st), M->splash ? 1 : 0,
-             M->map, M->season, M->hour, M->weather, screen_name(screens_top()), M->preview_rect.w, M->preview_rect.h);
+             M->map, M->season, M->hour, M->weather, screen_name(screens_top()), M->preview_rect.w, M->preview_rect.h, mm_phone_status_text(phone, sizeof(phone)));
 }
 
 void mainmenu_init(void) {

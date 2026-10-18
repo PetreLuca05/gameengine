@@ -94,6 +94,7 @@ typedef struct LobbyMember {
     bool ready;
     bool host;
     bool talking;             // mic icon (stub)
+    bool phone;               // a real phone is paired with this member's game (cosmetic icon, docs/PHONE.md)
     u8 id;                    // stable for the session (never reused)
     u32 join_order;           // migration order
     char name[LOBBY_NAME_MAX];
@@ -175,6 +176,7 @@ typedef enum LobbyIntentType {
     LI_PROMOTE,       // a = member id
     LI_START,         // a = 1: force (countdown) when not everyone is ready
     LI_CANCEL,        // cancel the countdown
+    LI_PHONE,         // a = 0 / 1: the member's phone is connected (any state, cosmetic)
 } LobbyIntentType;
 
 typedef struct LobbyIntent {

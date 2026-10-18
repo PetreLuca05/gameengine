@@ -2,10 +2,11 @@
 """Phone flow without a device (docs/PHONE.md "Tests"): runs tools/tests/phone_flow.cfg and checks
 its phone_status lines + screenshots.
 
-  * equip -> one frame later: server up, a pairing code, the Connect portal, the HUD panel, and the
-    phone already raised (the script never presses aim: there is no "hold right mouse" path);
-  * decline -> the in-game phone on the home screen (the panel stays); Camera -> photo -> Gallery
-    lists it -> the viewer -> back, back -> home; re-equip skips the portal;
+  * equip -> one frame later: the in-game phone (home, HUD panel), no portal, no server (equip never
+    pairs), and the phone already raised (the script never presses aim: no "hold right mouse");
+  * "Connect your phone" -> the Connect portal (modal, server + code); decline -> phone_mode ingame,
+    the portal closes, the panel stays; Camera -> photo -> Gallery lists it -> the viewer -> back,
+    back -> home; re-equip: no portal;
   * the HUD panel at 16:9 / 21:9 / 4:3: ~22 % of the height, phone aspect, bottom right above
     the item readout (PIL + numpy; skipped without them);
   * static: no phone focus bind in the input map, the phone code never reads aim.
@@ -49,27 +50,33 @@ def main():
         if os.path.exists(log):
             os.remove(log)
         subprocess.run([exe, "--test", "--nosound", "--log", log, "+set", "net_port", "27391", "+set", "phone_port", "47391",
-                        "--script", os.path.join(HERE, "phone_flow.cfg")], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=600)
+                        "--script", os.path.join(HERE, "phone_flow.cfg")], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=3600)
     txt = open(log, encoding="utf-8", errors="replace").read()
     st = [dict(re.findall(r"(\w+)=(\"[^\"]*\"|\S+)", l)) for l in txt.splitlines() if "phone_status:" in l]
-    check(len(st) >= 11, "phone_status lines (%d)" % len(st))
-    if len(st) < 11:
+    check(len(st) >= 12, "phone_status lines (%d)" % len(st))
+    if len(st) < 12:
         return
-    g0 = int(st[0]["gallery"])
     check(st[0]["flow"] == "idle" and st[0]["app"] == "off" and st[0]["panel"] == "0", "before equip: idle, no panel")
     s = st[1]
-    check(s["flow"] == "pairing" and s["app"] == "portal" and s["server"] == "1" and s["token"] == "1" and s["panel"] == "1",
-          "one frame after equip: server up, pairing code, portal, panel")
-    check(st[2]["raised"] == "1" and all(x["raised"] == "1" for x in st[2:9]), "the phone is raised (focused pose) without any aim input, and stays raised")
+    check(s["flow"] == "local" and s["app"] == "home" and s["panel"] == "1" and s["portal"] == "0" and s["screen"] == "none" and s["token"] == "0",
+          "one frame after equip: the in-game phone (home, panel), no portal, no code")
+    check(st[2]["raised"] == "1" and all(x["raised"] == "1" for x in st[4:10]), "the phone is raised (focused pose) without any aim input, and stays raised")
     check(st[2]["panel_t"] == "1.00", "the panel has slid in")
-    check(st[3]["flow"] == "local" and st[3]["app"] == "home" and st[3]["panel"] == "1" and st[3]["token"] == "0", "decline -> in-game phone, home, panel stays")
-    check(st[4]["app"] == "camera" and st[4]["camera"] == "1", "home -> Camera")
-    check(int(st[5]["gallery"]) == int(st[4]["gallery"]) + 1, "shutter -> a photo in the gallery (%s -> %s)" % (st[4]["gallery"], st[5]["gallery"]))
-    check(st[6]["app"] == "gallery" and st[6]["viewer"] == "-1", "Camera -> Home -> Gallery")
-    check(st[7]["viewer"] == "0", "the first cell (the new photo) opens in the viewer")
-    check(st[8]["app"] == "home", "back, back -> home")
-    check(st[9]["app"] == "off" and st[9]["panel"] == "0", "put away: screen off, no panel")
-    check(st[10]["flow"] == "local" and st[10]["app"] == "home", "re-equip: no portal (declined this session)")
+    s = st[3]
+    check(s["flow"] == "pairing" and s["portal"] == "1" and s["screen"] == "phone" and s["server"] == "1" and s["token"] == "1",
+          "Connect your phone -> the Connect portal (modal), server up, a code")
+    s = st[4]
+    check(s["flow"] == "local" and s["app"] == "home" and s["panel"] == "1" and s["token"] == "0" and s["portal"] == "0" and s["mode"] == "ingame" and s["screen"] == "none",
+          "decline -> phone_mode ingame, the portal closes, home, panel stays")
+    check("phone_card: card=ingame mode=ingame" in txt, "card: In-game phone")
+    check(st[5]["app"] == "camera" and st[5]["camera"] == "1", "home -> Camera")
+    check(int(st[6]["gallery"]) == int(st[5]["gallery"]) + 1, "shutter -> a photo in the gallery (%s -> %s)" % (st[5]["gallery"], st[6]["gallery"]))
+    check(st[7]["app"] == "gallery" and st[7]["viewer"] == "-1", "Camera -> Home -> Gallery")
+    check(st[8]["viewer"] == "0", "the first cell (the new photo) opens in the viewer")
+    check(st[9]["app"] == "home", "back, back -> home")
+    check(st[10]["app"] == "off" and st[10]["panel"] == "0", "put away: screen off, no panel")
+    check(st[11]["flow"] == "local" and st[11]["app"] == "home" and st[11]["portal"] == "0" and st[11]["screen"] == "none", "re-equip: no portal")
+    check(not any(x["screen"] == "phone" for i, x in enumerate(st) if i != 3), "equipping never opened the portal")
     check("photo " in txt and "phone: deleted" not in txt, "photo saved")
     try:
         from PIL import Image

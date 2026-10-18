@@ -789,10 +789,10 @@ static void tab_hud(GuiCursor *c) {
 static void tab_phone(GuiCursor *c) {
     static const char *const server[] = { "Off", "On", "Automatic" };
     section(c, "Companion page");
-    row_combo_cvar(c, "Phone server", "phone_server", server, 3, "Automatic: starts the first time you take the phone out (X).");
-    row_toggle_cvar(c, "Allow pairing", "phone_pairing", "Scan the QR code on the Connect portal with your real phone.");
-    row_toggle_cvar(c, "Pair on equip", "phone_auto_pair", "Equipping the phone opens the Connect portal at once. Off: the in-game phone.");
-    row_slider_cvar(c, "Pairing timeout", "phone_pair_timeout", 0, 300, 5, "%.0f s", "No device by then: the in-game phone (0 = keep waiting).");
+    row_combo_cvar(c, "Phone server", "phone_server", server, 3, "Automatic: starts with the main menu (auto-pair) or when the Connect portal opens.");
+    row_toggle_cvar(c, "Allow pairing", "phone_pairing", "Scan the QR code on the Connect portal (Player tab, pause menu) with your real phone.");
+    row_toggle_cvar(c, "Auto-pair", "phone_auto_pair", "Start the phone server with the main menu: a paired phone reconnects by itself.");
+    row_slider_cvar(c, "Remember device", "phone_device_days", 0, 365, 1, "%.0f days", "The paired phone reconnects on the next launch (0 = forget it when the game closes).");
     row_slider_cvar(c, "Server port", "phone_port", 1024, 65000, 1, "%.0f", "HTTPS port; the certificate helper uses the next one. Same Wi-Fi as the phone.");
     section(c, "Stream");
     row_slider_cvar(c, "Frame rate", "phone_fps", 5, 60, 1, "%.0f Hz", "Camera render and stream rate.");

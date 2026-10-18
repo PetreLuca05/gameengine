@@ -136,8 +136,8 @@ static void test_auth(void) {
     CHECK(fabsf(hws_auth_token_remaining(&a, 0, 61000) - 60.0f) < 0.01f, "remaining time");
     CHECK(hws_auth_pair(&a, tok, 2000, r, &owner, sess) == HWS_AUTH_OK && owner == 0, "right token accepted");
     CHECK(hws_auth_pair(&a, tok, 2500, r, &owner, sess) == HWS_AUTH_BAD, "token is one-time (replay rejected)");
-    CHECK(hws_auth_session(&a, sess) == 0, "session valid");
-    CHECK(hws_auth_session(&a, "nope") < 0, "bad session");
+    CHECK(hws_auth_session(&a, sess, 30000, false) == 0, "session valid");
+    CHECK(hws_auth_session(&a, "nope", 30000, false) < 0, "bad session");
     // Expiry.
     rnd_fill(r, 3);
     dg_strcpy(tok, sizeof(tok), hws_auth_issue(&a, 1, r, 10000));
@@ -148,12 +148,31 @@ static void test_auth(void) {
     memcpy(old, a.owner[0].session, sizeof(old));
     rnd_fill(r, 4);
     dg_strcpy(tok, sizeof(tok), hws_auth_issue(&a, 0, r, 20000));
-    CHECK(hws_auth_session(&a, old) == 0, "old session still valid while re-pairing");
+    CHECK(hws_auth_session(&a, old, 30000, false) == 0, "old session still valid while re-pairing");
     rnd_fill(r, 5);
     CHECK(hws_auth_pair(&a, tok, 21000, r, &owner, sess) == HWS_AUTH_OK, "re-pair");
-    CHECK(hws_auth_session(&a, old) < 0 && hws_auth_session(&a, sess) == 0, "the old phone's session is revoked");
+    CHECK(hws_auth_session(&a, old, 30000, false) < 0 && hws_auth_session(&a, sess, 30000, false) == 0, "the old phone's session is revoked");
     hws_auth_unpair(&a, 0);
-    CHECK(hws_auth_session(&a, sess) < 0, "unpair revokes the session");
+    CHECK(hws_auth_session(&a, sess, 30000, false) < 0, "unpair revokes the session");
+    // Session lifetime (sliding) and the stored device restored on the next run.
+    {
+        HwsAuth b;
+        hws_auth_init(&b, 120000);
+        b.session_ttl_ms = 10000;
+        u8 rr[16];
+        rnd_fill(rr, 9);
+        char t2[HWS_KEY_CHARS + 1], s2[HWS_KEY_CHARS + 1];
+        dg_strcpy(t2, sizeof(t2), hws_auth_issue(&b, 0, rr, 1000));
+        int o2 = -1;
+        CHECK(hws_auth_pair(&b, t2, 1000, rr, &o2, s2) == HWS_AUTH_OK && b.owner[0].session_expires_ms == 11000, "session lifetime from the pairing");
+        CHECK(hws_auth_session(&b, s2, 9000, true) == 0 && b.owner[0].session_expires_ms == 19000, "a resume renews the lifetime (sliding)");
+        CHECK(hws_auth_session(&b, s2, 18000, false) == 0 && b.owner[0].session_expires_ms == 19000, "a check without touch does not");
+        CHECK(hws_auth_session(&b, s2, 19000, false) < 0 && !b.owner[0].paired, "expired session: gone");
+        CHECK(!hws_auth_restore(&b, 0, "short", 0, 0) && !hws_auth_restore(&b, 0, "AAAAAAAAAAAAAAAAAAAA!A", 0, 0), "malformed stored keys refused");
+        CHECK(hws_auth_restore(&b, 0, s2, 50000, 5000) && hws_auth_session(&b, s2, 54000, false) == 0, "restored session valid");
+        CHECK(hws_auth_session(&b, s2, 55000, false) < 0, "restored session expires with the stored lifetime");
+        CHECK(hws_auth_restore(&b, 0, s2, 60000, 0) && hws_auth_session(&b, s2, 9000000, false) == 0, "restored without expiry");
+    }
     // Rate limiting: burst of 20 then throttled; refills at 10 / s; 5 failures -> ban.
     u32 ip = 0xC0A80105u;
     int allowed = 0;
@@ -854,6 +873,75 @@ static void test_server_roundtrip(const char *dir) {
     hws_stop(s);
 }
 
+// The menus' pairing (docs/PHONE.md "Phone flow"): /ping, the card's Disconnect (4002, the session
+// stays), and the stored device resuming on a new server (the next launch).
+static void test_server_persist(void) {
+    const char page[] = "<!doctype html><title>phone</title>";
+    HwsConfig cfg;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.port = 47894;
+    cfg.bind_ip = cfg.lan_ip = 0x7F000001u;
+    cfg.page = page;
+    cfg.page_len = sizeof(page) - 1;
+    cfg.session_ttl_ms = 30ull * 86400000ull;
+    char err[256] = "";
+    HwsServer *s = hws_start(&cfg, err, sizeof(err));
+    CHECK(s != NULL, "persist: server start: %s", err);
+    if (!s) return;
+    Client *c = (Client *)calloc(1, sizeof(Client));
+    char tok[HWS_KEY_CHARS + 1], q[64], session[64] = "";
+    hws_issue_token(s, 0, tok);
+    snprintf(q, sizeof(q), "t=%s", tok);
+    CHECK(ws_open(c, cfg.port, q) == 101, "persist: pair");
+    u8 *p;
+    int n;
+    if (ws_next(c, &p, &n) == HWS_OP_TEXT) {
+        cJSON *j = cJSON_ParseWithLength((const char *)p, (size_t)n);
+        const cJSON *sv = cJSON_GetObjectItem(j, "s");
+        if (cJSON_IsString(sv)) dg_strcpy(session, sizeof(session), sv->valuestring);
+        cJSON_Delete(j);
+    }
+    HwsEvent ev;
+    CHECK(wait_event(s, HWS_EV_CONNECT, &ev, 2.0), "persist: connect event");
+    char key[HWS_KEY_CHARS + 1];
+    CHECK(hws_session_key(s, 0, key) && !strcmp(key, session), "the game reads the session key (to store it)");
+    char path[128];
+    snprintf(path, sizeof(path), "/ping?s=%s", session);
+    CHECK(http_get(cfg.port, path, NULL, NULL) == 200, "/ping: the session is good");
+    CHECK(http_get(cfg.port, "/ping?s=AAAAAAAAAAAAAAAAAAAAAA", NULL, NULL) == 403, "/ping: an unknown session is refused");
+    // Disconnect (the card): close 4002, the session stays.
+    hws_disconnect(s, 0);
+    int code = 0;
+    for (int i = 0; i < 6; i++) {
+        int op = ws_next(c, &p, &n);
+        if (op == HWS_OP_CLOSE) { code = n >= 2 ? p[0] << 8 | p[1] : 0; break; }
+        if (op < 0) break;
+    }
+    CHECK(code == 4002, "disconnect: close code 4002 (%d)", code);
+    CHECK(wait_event(s, HWS_EV_DISCONNECT, &ev, 2.0), "disconnect event");
+    tclose(c->fd);
+    CHECK(http_get(cfg.port, path, NULL, NULL) == 200, "disconnect keeps the session");
+    char sq[64];
+    snprintf(sq, sizeof(sq), "s=%s", session);
+    CHECK(ws_open(c, cfg.port, sq) == 101 && wait_event(s, HWS_EV_CONNECT, &ev, 2.0) && ev.resumed, "the page reconnects after a disconnect");
+    tclose(c->fd);
+    hws_stop(s);
+    // The next launch: a new server with the stored key; the same page resumes.
+    s = hws_start(&cfg, err, sizeof(err));
+    CHECK(s != NULL, "persist: second server: %s", err);
+    if (!s) { free(c); return; }
+    CHECK(ws_open(c, cfg.port, sq) == 403, "a new server does not know the session ...");
+    tclose(c->fd);
+    CHECK(hws_restore_session(s, 0, session, 3600000ull), "... until the stored device is restored");
+    CHECK(http_get(cfg.port, path, NULL, NULL) == 200, "/ping after the restore");
+    CHECK(ws_open(c, cfg.port, sq) == 101 && wait_event(s, HWS_EV_CONNECT, &ev, 2.0) && ev.resumed && ev.owner == 0, "the stored device reconnects (resumed)");
+    tclose(c->fd);
+    hws_unpair(s, 0);
+    CHECK(http_get(cfg.port, path, NULL, NULL) == 403, "forget: /ping 403");
+    free(c);
+    hws_stop(s);
+}
+
 // ------------------------------------------------------------------ TLS
 
 typedef struct TlsSock { tsock fd; } TlsSock;
@@ -964,72 +1052,109 @@ static char *read_asset(const char *rel) {
 static void test_phone_os_flow(void) {
     PhoneOs os;
     phone_os_init(&os);
-    CHECK(os.flow == PFLOW_IDLE && os.app == PAPP_OFF && !phone_os_panel(&os), "idle: no panel");
-    // Equip: pairing at once (the caller starts the server + issues a code), the portal, the panel.
-    CHECK(phone_os_equip(&os, true, false), "equip asks for a pairing code");
-    CHECK(os.flow == PFLOW_PAIRING && os.app == PAPP_PORTAL && phone_os_panel(&os), "equip -> pairing, portal, panel");
-    CHECK(!phone_os_ui_only(PAPP_CAMERA) && phone_os_ui_only(PAPP_PORTAL) && phone_os_ui_only(PAPP_HOME), "only the camera renders the lens");
-    phone_os_open(&os, PAPP_CAMERA);
-    CHECK(os.app == PAPP_PORTAL, "apps do not open over the portal");
-    // Timeout -> the in-game phone (home).
-    for (int i = 0; i < 59; i++) phone_os_tick(&os, 1.0f, 60.0f, 0.0f);
-    CHECK(os.flow == PFLOW_PAIRING, "59 s: still pairing");
-    phone_os_tick(&os, 1.0f, 60.0f, 0.0f);
-    CHECK(os.flow == PFLOW_LOCAL && os.app == PAPP_HOME && phone_os_panel(&os) && os.reason[0], "60 s: in-game phone (%s)", os.reason);
-    // Session memory: a declined / timed-out phone skips the portal on re-equip.
+    CHECK(os.flow == PFLOW_IDLE && os.app == PAPP_OFF && !phone_os_panel(&os) && os.mode == PMODE_UNSET, "idle: no panel, mode unset");
+    CHECK(phone_os_card(&os) == PCARD_NOT_CONNECTED, "card: not connected");
+    // Equip never pairs: no device -> the in-game phone (home, HUD panel).
+    phone_os_equip(&os);
+    CHECK(os.flow == PFLOW_LOCAL && os.app == PAPP_HOME && phone_os_panel(&os) && !os.portal, "equip without a device: in-game phone, no portal");
+    CHECK(!phone_os_ui_only(PAPP_CAMERA) && phone_os_ui_only(PAPP_HOME), "only the camera renders the lens");
     phone_os_open(&os, PAPP_GALLERY);
     phone_os_unequip(&os);
-    CHECK(os.app == PAPP_OFF && !phone_os_panel(&os), "unequipped: off, no panel");
-    CHECK(!phone_os_equip(&os, true, false) && os.app == PAPP_GALLERY, "re-equip: no portal, the last app");
+    CHECK(os.app == PAPP_OFF && !phone_os_panel(&os) && os.flow == PFLOW_IDLE, "unequipped: off, no panel");
+    phone_os_equip(&os);
+    CHECK(os.app == PAPP_GALLERY, "re-equip: the last app");
     // Back: viewer -> grid -> home -> nothing.
     os.viewer = 2;
     CHECK(phone_os_back(&os) && os.viewer == -1 && os.app == PAPP_GALLERY, "back: viewer -> grid");
     CHECK(phone_os_back(&os) && os.app == PAPP_HOME, "back: grid -> home");
     CHECK(!phone_os_back(&os), "back on home: nothing");
-    // Connect portal from the home screen ("Connect your phone"), then a device.
-    CHECK(phone_os_reconnect(&os) && os.flow == PFLOW_PAIRING && os.app == PAPP_PORTAL, "connect: the portal again");
-    phone_os_connected(&os);
-    CHECK(os.flow == PFLOW_PAIRED && os.app == PAPP_HOME && !phone_os_panel(&os), "device connected: paired, home, panel removed");
-    phone_os_open(&os, PAPP_CAMERA);
-    phone_os_disconnected(&os);
-    CHECK(os.flow == PFLOW_LOST && os.app == PAPP_PORTAL && phone_os_panel(&os), "device lost: the portal (Reconnect), panel back");
-    PhoneLayoutIn li = { os.app, os.flow, -1, 0, 2, 4, 0 };
-    PhoneHit h[PHONE_MAX_HITS];
-    int n = phone_os_layout(&li, h, PHONE_MAX_HITS);
-    CHECK(phone_os_find(h, n, PB_RECONNECT, 0) && phone_os_find(h, n, PB_DECLINE, 0) && phone_os_find(h, n, PB_CANCEL, 0), "lost portal: Reconnect, decline, cancel");
-    phone_os_connected(&os);
-    CHECK(os.app == PAPP_CAMERA, "reconnected: back to the app it was on");
-    // Paired + unequip + re-equip with the device still there: no portal.
     phone_os_unequip(&os);
-    CHECK(!phone_os_equip(&os, true, true) && os.flow == PFLOW_PAIRED && os.app == PAPP_CAMERA, "re-equip paired: skips the portal");
-    // The device left while the phone was down: the portal on the next equip.
-    phone_os_unequip(&os);
-    CHECK(!phone_os_equip(&os, true, false) && os.flow == PFLOW_LOST && os.app == PAPP_PORTAL, "re-equip after the device left: portal");
-    // Decline from the portal; cancel; no server; auto-pair off.
+    // The Connect portal (main menu): a code is needed, the card waits; Close decides nothing.
+    CHECK(phone_os_portal_open(&os) && os.flow == PFLOW_PAIRING && phone_os_card(&os) == PCARD_WAITING, "portal: a code, card waiting");
+    phone_os_tick(&os, 2.5f, 0.0f);
+    CHECK(fabsf(os.portal_t - 2.5f) < 1e-4f, "portal timer");
+    phone_os_portal_close(&os);
+    CHECK(!os.portal && os.mode == PMODE_UNSET && phone_os_card(&os) == PCARD_NOT_CONNECTED, "close: nothing decided");
+    // Decline: the in-game phone for the session.
+    phone_os_portal_open(&os);
     phone_os_decline(&os);
-    CHECK(os.flow == PFLOW_LOCAL && os.app == PAPP_CAMERA && !os.reason[0], "decline: in-game phone, no reason");
+    CHECK(!os.portal && os.mode == PMODE_INGAME && phone_os_card(&os) == PCARD_INGAME, "decline: mode ingame, card in-game phone");
+    phone_os_equip(&os);
+    CHECK(os.flow == PFLOW_LOCAL && phone_os_panel(&os), "declined + equip: the HUD panel");
+    phone_os_unequip(&os);
+    // Connect a device from the portal ("Connect a device" link).
+    phone_os_portal_open(&os);
+    phone_os_server_failed(&os, "port in use");
+    CHECK(!strcmp(os.reason, "port in use") && os.portal, "no server: the portal says why");
+    phone_os_tick(&os, 1.0f, 0.0f);
+    phone_os_connected(&os);
+    CHECK(os.device && os.mode == PMODE_DEVICE && os.flow == PFLOW_PAIRED && phone_os_card(&os) == PCARD_CONNECTED && !os.reason[0], "device connected: mode device, card connected");
+    CHECK(fabsf(os.portal_connected_t - os.portal_t) < 1e-5f && os.portal_connected_t > 0.5f, "connected on the open portal (it closes a moment later)");
+    CHECK(!phone_os_portal_open(&os) && os.portal_connected_t < 0, "portal with a device: no code needed (and no auto-close)");
+    phone_os_portal_close(&os);
+    // Entering a match: equip goes straight to the device (no portal, no panel).
+    phone_os_equip(&os);
+    CHECK(os.flow == PFLOW_PAIRED && !phone_os_panel(&os) && !os.portal && os.app == PAPP_HOME, "match equip with a device: real phone, no panel, no portal");
+    phone_os_open(&os, PAPP_CAMERA);
+    // Mid-match disconnect: the in-game phone takes over (toast), the mode stays device.
+    CHECK(phone_os_disconnected(&os) && os.flow == PFLOW_LOCAL && phone_os_panel(&os) && os.app == PAPP_CAMERA, "device lost: the panel returns on the same app");
+    CHECK(os.mode == PMODE_DEVICE && phone_os_card(&os) == PCARD_NOT_CONNECTED && !strcmp(os.reason, "Phone disconnected"), "lost: mode stays device, card not connected");
+    CHECK(!phone_os_disconnected(&os), "a second disconnect is nothing");
+    // The page reconnects: silently back to the device.
+    phone_os_connected(&os);
+    CHECK(os.flow == PFLOW_PAIRED && !phone_os_panel(&os) && os.app == PAPP_CAMERA, "reconnected: real phone again, same app");
+    // Not equipped when it drops: no toast.
+    phone_os_unequip(&os);
+    CHECK(!phone_os_disconnected(&os), "dropped while put away: no fallback toast");
+    phone_os_connected(&os);
+    // The card's Disconnect and Forget device.
+    phone_os_disconnect(&os);
+    CHECK(!os.device && os.mode == PMODE_INGAME && phone_os_card(&os) == PCARD_INGAME, "disconnect: the in-game phone for the session");
+    phone_os_connected(&os);
+    phone_os_forget(&os);
+    CHECK(!os.device && os.mode == PMODE_UNSET && phone_os_card(&os) == PCARD_NOT_CONNECTED, "forget: mode unset");
+    phone_os_decline(&os);
+    phone_os_connected(&os);
+    phone_os_decline(&os);
+    CHECK(os.mode == PMODE_DEVICE, "decline with a device connected: ignored");
+    // Battery: cosmetic drain while equipped, never below 5 %.
     PhoneOs b;
     phone_os_init(&b);
-    phone_os_equip(&b, true, false);
-    phone_os_cancel(&b);
-    CHECK(b.flow == PFLOW_IDLE, "cancel: pairing stops");
-    phone_os_unequip(&b);
-    CHECK(phone_os_equip(&b, true, false) && b.flow == PFLOW_PAIRING, "after cancel: equip pairs again");
-    phone_os_server_failed(&b, "port in use");
-    CHECK(b.flow == PFLOW_LOCAL && b.app == PAPP_HOME && !strcmp(b.reason, "port in use"), "no server: in-game phone at once");
-    phone_os_init(&b);
-    CHECK(!phone_os_equip(&b, false, false) && b.flow == PFLOW_LOCAL && b.app == PAPP_HOME, "auto-pair off: straight to the in-game phone");
-    // Battery: cosmetic drain while equipped, never below 5 %.
+    phone_os_equip(&b);
     float b0 = b.battery;
-    phone_os_tick(&b, 600.0f, 0.0f, 0.005f / 60.0f);
+    phone_os_tick(&b, 600.0f, 0.005f / 60.0f);
     CHECK(b.battery < b0 && b.battery >= 0.05f, "battery drains while equipped (%.3f -> %.3f)", b0, b.battery);
     CHECK(phone_app_from_name("gallery") == PAPP_GALLERY && !strcmp(phone_app_name(PAPP_PORTAL), "portal") && phone_app_from_name("x") < 0, "app names");
+    CHECK(phone_mode_from_name("ingame") == PMODE_INGAME && !strcmp(phone_mode_name(PMODE_DEVICE), "device") && !strcmp(phone_card_name(PCARD_WAITING), "waiting"), "mode / card names");
+    // Device names from user agents.
+    static const struct { const char *ua, *model, *want; } names[] = {
+        { "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1", NULL, "iPhone \xC2\xB7 Safari" },
+        { "Mozilla/5.0 (Linux; Android 14; Pixel 7 Build/UQ1A.240205.002) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Mobile Safari/537.36", NULL, "Pixel 7 \xC2\xB7 Chrome" },
+        { "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36", "SM-S918B", "SM-S918B \xC2\xB7 Chrome" },
+        { "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36", NULL, "Android phone \xC2\xB7 Chrome" },
+        { "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1", NULL, "iPad \xC2\xB7 Safari" },
+        { "Mozilla/5.0 (Linux; Android 13; SM-A536B) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/23.0 Chrome/115.0 Mobile Safari/537.36", NULL, "SM-A536B \xC2\xB7 Samsung Internet" },
+        { "", NULL, "Phone" },
+    };
+    for (int i = 0; i < ARRAY_COUNT(names); i++) {
+        char nm[64];
+        phone_device_name(names[i].ua, names[i].model, nm, sizeof(nm));
+        CHECK(!strcmp(nm, names[i].want), "device name %d: '%s' (want '%s')", i, nm, names[i].want);
+    }
+    // The stored device round trip; expiry; malformed files.
+    PhoneDeviceStore d = { "abcdefghijklmnopqrstuv", "iPhone \xC2\xB7 Safari", 1000, 2000 }, r;
+    char *js = phone_device_store_write(&d);
+    CHECK(js && phone_device_store_read(js, &r, 1500) && !strcmp(r.session, d.session) && !strcmp(r.name, d.name) && r.paired == 1000 && r.expires == 2000, "stored device round trip");
+    CHECK(!phone_device_store_read(js, &r, 2000), "stored device expires");
+    free(js);
+    CHECK(phone_device_store_read("{\"session\":\"abc\",\"expires\":0}", &r, 99999999) && !r.name[0], "no expiry");
+    CHECK(!phone_device_store_read("{\"device\":\"x\"}", &r, 0) && !phone_device_store_read("not json", &r, 0) && !phone_device_store_read(NULL, &r, 0), "malformed stored device refused");
 }
 
 static void test_phone_os_layout(void) {
     // Every app's buttons stay on the 640 x 1136 screen, do not overlap (except the home bar strip
     // under full-height areas) and hit-test back to themselves.
-    static const PhoneApp apps[] = { PAPP_PORTAL, PAPP_HOME, PAPP_CAMERA, PAPP_GALLERY, PAPP_GALLERY };
+    static const PhoneApp apps[] = { PAPP_HOME, PAPP_HOME, PAPP_CAMERA, PAPP_GALLERY, PAPP_GALLERY };
     for (int a = 0; a < 5; a++) {
         for (int f = PFLOW_PAIRING; f <= PFLOW_LOST; f++) {
             PhoneLayoutIn li = { apps[a], (PhoneFlow)f, a == 4 ? 1 : -1, 0, 2, 4, 14 };
@@ -1204,6 +1329,7 @@ int main(int argc, char **argv) {
     test_jpeg_pipeline();
     test_photo_video_files(dir);
     test_server_roundtrip(dir);
+    test_server_persist();
     test_tls(dir);
     test_phone_os_flow();
     test_phone_os_layout();

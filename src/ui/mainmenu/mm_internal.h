@@ -49,7 +49,7 @@ typedef struct MainMenu {
     int cos_slot;
     int cos_selected;              // item index, -1 none
     // layouts
-    MmLayout shell, play, browser, player, cosmetics, maps, settings, credits, lobby, loading, chat;
+    MmLayout shell, play, browser, player, cosmetics, maps, settings, credits, lobby, loading, chat, phone_card, phone_portal;
     // Steam avatar
     TextureId avatar;
     u64 avatar_id;
@@ -73,6 +73,11 @@ void mm_scene_register(void);
 void mm_scene_enter(void);
 void mm_scene_apply_environment(void); // the selection's season / time / weather on the background world
 void mm_select_map(const char *id);    // Maps tab / lobby: selection, defaults from the map, background
+
+// phone (mm_phone.c, docs/PHONE.md "Phone flow"): the glyph, the footer chip (returns its width)
+void mm_phone_glyph(GuiRect r, u32 col, bool lit);
+float mm_phone_status_chip(GuiRect r);
+const char *mm_phone_status_text(char *b, size_t n);
 
 // shared drawing
 void mm_panel(GuiRect r);              // the pause menu's panel (blurred, semi-transparent, hairline)

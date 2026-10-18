@@ -60,6 +60,7 @@ HwsAuthResult hws_auth_pair(HwsAuth *a, const char *token, u64 now_ms, const u8 
         hws_key_from_bytes(rnd, p->session);
         p->paired = true;
         p->generation++;
+        p->session_expires_ms = a->session_ttl_ms ? now_ms + a->session_ttl_ms : 0;
         if (owner) *owner = i;
         if (session_out) memcpy(session_out, p->session, HWS_KEY_CHARS + 1);
         return HWS_AUTH_OK;
@@ -67,11 +68,37 @@ HwsAuthResult hws_auth_pair(HwsAuth *a, const char *token, u64 now_ms, const u8 
     return HWS_AUTH_BAD;
 }
 
-int hws_auth_session(const HwsAuth *a, const char *session) {
+int hws_auth_session(HwsAuth *a, const char *session, u64 now_ms, bool touch) {
     if (!session) return -1;
-    for (int i = 0; i < HWS_MAX_OWNERS; i++)
-        if (a->owner[i].paired && key_eq(a->owner[i].session, session)) return i;
+    for (int i = 0; i < HWS_MAX_OWNERS; i++) {
+        HwsPairing *p = &a->owner[i];
+        if (!p->paired || !key_eq(p->session, session)) continue;
+        if (p->session_expires_ms && now_ms >= p->session_expires_ms) {
+            // Expired: the session is gone (the page has to scan a new code).
+            p->paired = false;
+            memset(p->session, 0, sizeof(p->session));
+            p->generation++;
+            return -1;
+        }
+        if (touch && p->session_expires_ms && a->session_ttl_ms) p->session_expires_ms = now_ms + a->session_ttl_ms;
+        return i;
+    }
     return -1;
+}
+
+bool hws_auth_restore(HwsAuth *a, int owner, const char *session, u64 now_ms, u64 ttl_ms) {
+    if (owner < 0 || owner >= HWS_MAX_OWNERS || !session || strlen(session) != HWS_KEY_CHARS) return false;
+    for (int i = 0; i < HWS_KEY_CHARS; i++) {
+        char c = session[i];
+        bool ok = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '_';
+        if (!ok) return false;
+    }
+    HwsPairing *p = &a->owner[owner];
+    memcpy(p->session, session, HWS_KEY_CHARS + 1);
+    p->paired = true;
+    p->generation++;
+    p->session_expires_ms = ttl_ms ? now_ms + ttl_ms : 0;
+    return true;
 }
 
 void hws_auth_unpair(HwsAuth *a, int owner) {
