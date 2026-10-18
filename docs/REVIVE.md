@@ -23,7 +23,7 @@ Status:
 |---|---|
 | Pure state machines | `src/gameplay/revive/revive_core.{c,h}`: rules, downed / bleed-out, timed actions, corpse, DNA registry, fabricator |
 | Death sequence timeline | `src/gameplay/revive/death_seq.{c,h}`: stages, curves, impact detector |
-| Ring / heartbeat synth | `src/audio/death_synth.{c,h}` (pure DSP), miniaudio nodes in `src/audio/audio.c` |
+| Ring / heartbeat synth | the `death_ring` patch / recipe (`assets/audio/{patches,recipes}/death_ring.json`, docs/AUDIO_PROCEDURAL.md) on the UI bus of the DG mixer; `audio_set_death_mix` in `src/audio/audio.c`; tested in `tests/test_synth.c` |
 | Game integration | `src/gameplay/revive/revive.{c,h}`: host effects, interactables, replication fields, commands |
 | Death sequence (local) | `src/game/game_death.c`: post, mix, HUD, impact probe, `die` / `death_preview` |
 | Chamber + reconstruction | `src/game/game_revive.c`, `draw_fabricator` in `src/game/game_render.c`, `shaders/recon.glsl` |
