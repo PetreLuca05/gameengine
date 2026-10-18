@@ -4281,6 +4281,14 @@
     ],
     "yaw": 0
    },
+   "lift_smoke": {
+    "pos": [
+     2.2,
+     30.3,
+     17.2
+    ],
+    "yaw": 0
+   },
    "vista_vell_bridge": {
     "pos": [
      -75.96,

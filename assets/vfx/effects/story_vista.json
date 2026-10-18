@@ -1,0 +1,106 @@
+{
+  "duration": 0.01,
+  "priority": 3,
+  "max_instances": 1,
+  "cull_distance": 3000,
+  "lod": [
+    [
+      3000,
+      1.0
+    ]
+  ],
+  "emitters": [
+    {
+      "name": "smoke",
+      "tier": "cpu",
+      "spawn": {
+        "mode": "burst",
+        "count": 0,
+        "life": [
+          0.1,
+          0.1
+        ],
+        "size": [
+          1,
+          1
+        ],
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ]
+      },
+      "update": {},
+      "render": {
+        "mode": "alpha",
+        "texture": "smoke_puff",
+        "soft": 0.0,
+        "near_fade": 0.0,
+        "lighting": "sixway"
+      }
+    },
+    {
+      "name": "glow",
+      "tier": "cpu",
+      "spawn": {
+        "mode": "burst",
+        "count": 0,
+        "life": [
+          0.1,
+          0.1
+        ],
+        "size": [
+          1,
+          1
+        ],
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ]
+      },
+      "update": {},
+      "render": {
+        "mode": "add",
+        "texture": "glow",
+        "soft": 0.0,
+        "near_fade": 0.0,
+        "emissive": 6.0,
+        "exposure_aware": true
+      }
+    },
+    {
+      "name": "dot",
+      "tier": "cpu",
+      "spawn": {
+        "mode": "burst",
+        "count": 0,
+        "life": [
+          0.1,
+          0.1
+        ],
+        "size": [
+          1,
+          1
+        ],
+        "color": [
+          1,
+          1,
+          1,
+          1
+        ]
+      },
+      "update": {},
+      "render": {
+        "mode": "alpha",
+        "texture": "glow",
+        "soft": 0.0,
+        "near_fade": 0.0
+      }
+    }
+  ],
+  "name": "story_vista",
+  "_generated": "docs/STORY.md 'Vista' (hand-made): sprite-only emitters src/game/game_vista.c pushes each frame (smoke columns, lights / fires / flashes, birds / far cars)"
+}

@@ -23,6 +23,7 @@
 #include "gameplay/revive/revive.h"
 #include "game_revive.h"
 #include "game_story.h"
+#include "game_vista.h"
 #include "world/kit_world.h"
 #include "gameplay/weapons.h"
 #include "gameplay/ballistics/bal_world.h"
@@ -1663,6 +1664,7 @@ void game_init(void) {
     wheels_register();
     revive_register();
     story_register();
+    vista_register();
     kit_world_register();
     game_death_register();
     game_pings_register();

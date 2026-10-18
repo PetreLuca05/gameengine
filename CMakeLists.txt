@@ -725,7 +725,7 @@ add_test(NAME revive COMMAND test_revive WORKING_DIRECTORY $<TARGET_FILE_DIR:dea
 # Story mode core (docs/STORY.md "Tests"): chapter JSON + lint, objectives, triggers, sequences, the
 # beat clock, .story scripts, saves, and the solver bot finishing every shipped chapter on every branch.
 add_executable(test_story tests/test_story.c src/story/story_def.c src/story/story_sim.c src/story/story_script.c
-  src/story/story_save.c src/story/story_bot.c third_party/cjson/cJSON.c)
+  src/story/story_save.c src/story/story_bot.c src/story/vista_seq.c third_party/cjson/cJSON.c)
 set_target_properties(test_story PROPERTIES C_STANDARD 11)
 target_include_directories(test_story PRIVATE src third_party/cjson)
 if(MSVC)

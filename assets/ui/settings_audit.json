@@ -2377,6 +2377,12 @@
    "reason": "Story saves folder (empty = the user's pref dir); tests point it at a scratch folder.",
    "category": "story"
   },
+  "story_vista_life": {
+   "class": "EDITABLE",
+   "ui": "Console",
+   "reason": "Story vista life (helicopters, smoke, traffic, birds) on or off; cosmetic, this machine only (the story does not depend on it).",
+   "category": "story"
+  },
   "sv_cheats": {
    "class": "LOCKED+RULE",
    "ui": "Lobby rules",
