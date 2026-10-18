@@ -475,13 +475,31 @@ void render_draw_skinned(const SkinnedDraw *d) {
     if (!d->mesh || !d->palette || !d->bone_count || R->skin_draw_count >= MAX_SKIN_DRAWS) return;
     if (R->skin_bone_count + d->bone_count > MAX_SKIN_BONES) return;
     if (!R->meshes[d->mesh].used || !R->meshes[d->mesh].skinned) return;
-    // Parts of one modular character pass the same palette: a distinct pose when it changes.
-    static const mat4 *last_palette;
-    if (R->skin_draw_count == 0 || d->palette != last_palette) prof_count(PC_SKIN_POSES, 1);
-    last_palette = d->palette;
     SkinnedDraw *s = &R->skin_draws[R->skin_draw_count++];
     *s = *d;
     if (!s->object_id && (s->flags & MAT_VIEWMODEL)) s->object_id = 0x40000000u | R->skin_draw_count;
+    // docs/perf/FINDINGS.md PF-0007: the parts of a modular character (and its shadow LOD) gather
+    // their palettes from its one skeleton (characters.c draw_part); parts with the same bone table
+    // get the same matrices. A palette equal (bit for bit) to one of the last copies of this frame
+    // reuses that copy: the instance reads the same matrices at its offset, the previous-palette
+    // lookup (velocity) gets the same offset / count, so every pass sees identical bones.
+    enum { PAL_RECENT = 8 };
+    static struct { u32 off, n, frame; } recent[PAL_RECENT];
+    static u32 recent_next;
+    if (prof_fix_enabled(PFX_SKIN_PALETTE_SHARE)) {
+        for (u32 k = 0; k < PAL_RECENT; k++) {
+            u32 j = (recent_next + PAL_RECENT - 1 - k) % PAL_RECENT;   // newest first
+            if (recent[j].frame != R->frame_index + 1u || recent[j].n != d->bone_count) continue;
+            if (memcmp(R->skin_bones + recent[j].off, d->palette, sizeof(mat4) * d->bone_count)) continue;
+            s->palette = NULL;
+            s->bone_count = recent[j].off | ((u32)d->bone_count << 20);
+            return;
+        }
+        recent[recent_next].off = R->skin_bone_count;
+        recent[recent_next].n = d->bone_count;
+        recent[recent_next].frame = R->frame_index + 1u;   // 0 = never written
+        recent_next = (recent_next + 1) % PAL_RECENT;
+    }
     memcpy(R->skin_bones + R->skin_bone_count, d->palette, sizeof(mat4) * d->bone_count);
     // The palette pointer is replaced by its offset into this frame's bone buffer.
     s->palette = NULL;

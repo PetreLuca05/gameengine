@@ -1987,6 +1987,7 @@ static void draw_part(const CharacterInst *c, const SkeletonInstance *si, const 
 // Every part of a character at one LOD, from the pose already in c->si (one palette for all parts).
 static void draw_char(World *w, CharacterInst *c, int lod, float fade, u32 flags, bool shadow) {
     lod = DG_CLAMP(lod, 0, CHAR_LOD_COUNT - 1);
+    prof_count(PC_SKIN_POSES, 1);   // one pose for every part (docs/PERF_AUDIT.md R10)
     for (int sl = 0; sl < CSLOT_COUNT; sl++) {
         if (!c->part_gpu[sl]) continue;
         const GpuPart *gp = &CG->parts[c->part_gpu[sl] - 1];
@@ -2000,6 +2001,7 @@ static void draw_char(World *w, CharacterInst *c, int lod, float fade, u32 flags
 // First person: each part's body (no arms) or arm-only mesh from a given skeleton instance.
 static bool draw_char_fp(CharacterInst *c, const SkeletonInstance *si, bool arms, u32 flags) {
     bool any = false;
+    prof_count(PC_SKIN_POSES, 1);
     for (int sl = 0; sl < CSLOT_COUNT; sl++) {
         if (!c->part_gpu[sl]) continue;
         const GpuPart *gp = &CG->parts[c->part_gpu[sl] - 1];
