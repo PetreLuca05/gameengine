@@ -191,6 +191,8 @@ tells the truth about where that line ends, it changes nothing.
   - Window crouched, low wall, thin wall (recovered), car bonnet, a teammate (friendly).
   - Each obstructed case checks the crosshair within 1 px of Q's projection; each shot checks its
     direction against the barrel's and that Q lies on its line.
-- `tools/tests/bal_net.sh` (LAN, `FAKELAG=100` for `net_fakelag 100`): the client's predicted impacts
-  (ADS and hip) match the host's within 0.25 m. Both fire from the claimed muzzle along the claimed
-  barrel.
+- `tools/tests/bal_net.sh` (LAN, both machines with `net_fakelag 100`, `aim_debug 2`):
+  - every client shot leaves from the same origin (within 2 mm) along the same barrel direction
+    (within 0.02°) on the host;
+  - the client's predicted impacts (ADS and hip) match the host's within 0.25 m (0.5 m for a later
+    impact of the same bullet, after a ricochet or a penetration).
