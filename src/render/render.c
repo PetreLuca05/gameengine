@@ -475,6 +475,10 @@ void render_draw_skinned(const SkinnedDraw *d) {
     if (!d->mesh || !d->palette || !d->bone_count || R->skin_draw_count >= MAX_SKIN_DRAWS) return;
     if (R->skin_bone_count + d->bone_count > MAX_SKIN_BONES) return;
     if (!R->meshes[d->mesh].used || !R->meshes[d->mesh].skinned) return;
+    // Parts of one modular character pass the same palette: a distinct pose when it changes.
+    static const mat4 *last_palette;
+    if (R->skin_draw_count == 0 || d->palette != last_palette) prof_count(PC_SKIN_POSES, 1);
+    last_palette = d->palette;
     SkinnedDraw *s = &R->skin_draws[R->skin_draw_count++];
     *s = *d;
     if (!s->object_id && (s->flags & MAT_VIEWMODEL)) s->object_id = 0x40000000u | R->skin_draw_count;
@@ -483,7 +487,7 @@ void render_draw_skinned(const SkinnedDraw *d) {
     s->palette = NULL;
     s->bone_count = R->skin_bone_count | ((u32)d->bone_count << 20);
     R->skin_bone_count += d->bone_count;
-    prof_count(PC_SKIN_PALETTES, 1);   // docs/PERF_AUDIT.md R10: palettes vs evaluated poses
+    prof_count(PC_SKIN_PALETTES, 1);   // docs/PERF_AUDIT.md R10: palettes vs distinct poses
     prof_count(PC_SKIN_PALETTE_BYTES, (i64)(sizeof(mat4) * d->bone_count));
 }
 

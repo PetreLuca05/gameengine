@@ -20,6 +20,7 @@ The sun cascade atlas, the moon map and the viewmodel shadow tile were transitio
 - Scenes: night_lights, devroom
 - Why fidelity-neutral: The skipped map holds exactly the clear the next sample expects (depth 1, read as lit), in the same SHADER_READ_ONLY layout; the earlier barrier made that clear visible to every later read in submission order. A re-created map (resize, resolution change) bumps shadow_gen and is cleared again. shadow_drawn bits (validation) are unchanged.
 
+- Verification run (Linux container, Mesa lavapipe 25.2 (software Vulkan), 4 cores, 2026-10-18): CLOSED: scopec:shadow_moon:clear_px 4194304.0 -> 0.0 (-100.00%, p=0); images pass; state identical
 
 ## PF-0002: cvar_find through a case-insensitive hash index
 
@@ -31,6 +32,7 @@ cvar_find scanned every registered cvar with SDL_strcasecmp; 114 call sites, sev
 - Scenes: devroom, horde500
 - Why fidelity-neutral: Returns the same pointer for every name (the index probes compare with the same SDL_strcasecmp; a name longer than the stored one misses in both paths). tests/test_profiler.c checks hash == scan, case-insensitive, and the miss.
 
+- Verification run (Linux container, Mesa lavapipe 25.2 (software Vulkan), 4 cores, 2026-10-18): CLOSED: zone_all:cvar_find 0.08996 -> 0.01043 (-88.41%, p=0); images pass; state identical
 
 ## PF-0003: vgeo palette upload regions without a per-frame malloc
 
@@ -42,6 +44,7 @@ The VkBufferCopy region list of the skinning palette upload was malloc'd and fre
 - Scenes: horde500, devroom
 - Why fidelity-neutral: vkCmdCopyBuffer copies the regions into the command buffer at record time: the same regions, the same copies, the same data.
 
+- Verification run (Linux container, Mesa lavapipe 25.2 (software Vulkan), 4 cores, 2026-10-18): NOT CLOSED: zone_all:vgeo:palettes_record 0.88855 -> 0.91525 (+3.00%, p=0.628); images pass; state identical
 
 ## PF-0004: vgeo streaming copy list without a per-frame malloc
 
@@ -53,6 +56,7 @@ The page copy list of the virtualized geometry streamer (2 x pages_per_frame VkB
 - Scenes: foliage, devroom
 - Why fidelity-neutral: Same capacity (ppf_cap never changes after init), same contents, consumed by vkCmdCopyBuffer at record time.
 
+- Verification run (Linux container, Mesa lavapipe 25.2 (software Vulkan), 4 cores, 2026-10-18): CLOSED: zone_all:vgeo:stream_update 0.97765 -> 0.0366 (-96.26%, p=0); images pass; state identical
 
 ## PF-0005: Frame graph validation report built on demand
 
@@ -64,3 +68,4 @@ fg_execute built the validation report every frame. It is now built by the first
 - Scenes: devroom
 - Why fidelity-neutral: Validation only: no rendering decision reads it. Between fg_execute and the next fg_begin the graph, the resources and the pool state it reads are unchanged, so an on-demand report is identical to the eager one.
 
+- Verification run (Linux container, Mesa lavapipe 25.2 (software Vulkan), 4 cores, 2026-10-18): CLOSED: zone:fg:validate 0.01746 -> 0.0 (-100.00%, p=0); images pass; state identical

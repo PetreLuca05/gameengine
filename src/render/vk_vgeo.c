@@ -8,6 +8,7 @@
 // The scene is CPU only (no GPU context: vgeo_scene_commit bins and derives, uploads nothing); the
 // vgeo module context still runs the displacement buffer, the wind tile and the module textures.
 #include "vk_internal.h"
+#include "core/profiler.h"
 #include <SDL3/SDL.h>
 #include "vgeo/vgeo_scene.h"
 #include "vgeo/vgeo_tex.h"

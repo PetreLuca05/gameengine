@@ -1,0 +1,1995 @@
+{
+ "meta": {
+  "date": "2026-10-18",
+  "profiles": 8,
+  "machine": "Linux container, Mesa lavapipe 25.2 (software Vulkan), 4 cores",
+  "rules_runtime": [
+   "R01",
+   "R02",
+   "R03",
+   "R04",
+   "R05",
+   "R24",
+   "R25",
+   "R06",
+   "R07",
+   "R08",
+   "R10",
+   "R12",
+   "R13",
+   "R15",
+   "R18",
+   "R19",
+   "R23",
+   "R11",
+   "R09",
+   "R20",
+   "R26",
+   "R27",
+   "R16",
+   "T01"
+  ],
+  "rules_static": [
+   "R08",
+   "R19",
+   "R26",
+   "R20",
+   "R17",
+   "R21",
+   "R14",
+   "R22"
+  ]
+ },
+ "profiles": [
+  "/tmp/claude-0/-home-user-gameengine/ce674441-9067-5382-a7b4-35a05beb6d57/scratchpad/run/final/night_lights/night_lights_low.json",
+  "/tmp/claude-0/-home-user-gameengine/ce674441-9067-5382-a7b4-35a05beb6d57/scratchpad/run/final/night_lights/night_lights_modern.json",
+  "/tmp/claude-0/-home-user-gameengine/ce674441-9067-5382-a7b4-35a05beb6d57/scratchpad/run/final/devroom/devroom_low.json",
+  "/tmp/claude-0/-home-user-gameengine/ce674441-9067-5382-a7b4-35a05beb6d57/scratchpad/run/final/devroom/devroom_modern.json",
+  "/tmp/claude-0/-home-user-gameengine/ce674441-9067-5382-a7b4-35a05beb6d57/scratchpad/run/final/horde500/horde500_low.json",
+  "/tmp/claude-0/-home-user-gameengine/ce674441-9067-5382-a7b4-35a05beb6d57/scratchpad/run/final/horde500/horde500_modern.json",
+  "/tmp/claude-0/-home-user-gameengine/ce674441-9067-5382-a7b4-35a05beb6d57/scratchpad/run/final/vehicle_yard/vehicle_yard_low.json",
+  "/tmp/claude-0/-home-user-gameengine/ce674441-9067-5382-a7b4-35a05beb6d57/scratchpad/run/final/vehicle_yard/vehicle_yard_modern.json"
+ ],
+ "findings": [
+  {
+   "id": "F-b96020",
+   "rule": "R02",
+   "title": "Static shadow casters re-rendered into every cascade every frame",
+   "system": "render/shadows",
+   "location": {
+    "pass": "shadow_sun",
+    "file": "src/render/render.c"
+   },
+   "evidence": {
+    "night_lights/low": {
+     "gpu_ms": 16.2826,
+     "draws": 86.9,
+     "shadow_items": 797.5
+    },
+    "night_lights/modern": {
+     "gpu_ms": 113.6105,
+     "draws": 1086.2,
+     "shadow_items": 1575.5
+    },
+    "devroom/low": {
+     "gpu_ms": 18.9553,
+     "draws": 97.1,
+     "shadow_items": 797.5
+    },
+    "devroom/modern": {
+     "gpu_ms": 138.8579,
+     "draws": 1118.9,
+     "shadow_items": 1575.5
+    },
+    "horde500/low": {
+     "gpu_ms": 13.8232,
+     "draws": 45.9,
+     "shadow_items": 797.5
+    },
+    "horde500/modern": {
+     "gpu_ms": 129.1816,
+     "draws": 924.3,
+     "shadow_items": 1575.5
+    },
+    "vehicle_yard/low": {
+     "gpu_ms": 11.1574,
+     "draws": 49.6,
+     "shadow_items": 864.7
+    },
+    "vehicle_yard/modern": {
+     "gpu_ms": 133.6211,
+     "draws": 862.4,
+     "shadow_items": 1718.7
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 83.31473684210528,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "L",
+   "fix": "Cache the static casters per cascade (re-render a cascade only when its snapped matrix or a static caster changes) and draw only the dynamic casters over a copy of the cached depth. Identical depth by construction.",
+   "fidelity_impact": "none",
+   "verify": "verify by image + state diff after implementation (perf_verify)",
+   "fix_id": null,
+   "scenes": [
+    "night_lights/low",
+    "night_lights/modern",
+    "devroom/low",
+    "devroom/modern",
+    "horde500/low",
+    "horde500/modern",
+    "vehicle_yard/low",
+    "vehicle_yard/modern"
+   ],
+   "source": "runtime",
+   "below_noise": false,
+   "score": 6.24861
+  },
+  {
+   "id": "F-7b209b",
+   "rule": "R11",
+   "title": "1575 shadow caster items per frame for 551 scene draw items",
+   "system": "render/shadows",
+   "location": {
+    "file": "src/render/render.c",
+    "function": "draw_sun_casters"
+   },
+   "evidence": {
+    "night_lights/modern": {
+     "shadow_items": 1575,
+     "draw_items": 551
+    },
+    "devroom/modern": {
+     "shadow_items": 1575,
+     "draw_items": 551
+    },
+    "vehicle_yard/modern": {
+     "shadow_items": 1719,
+     "draw_items": 547
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 27.771578947368425,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "low",
+   "effort": "M",
+   "fix": "Cull casters against the receiver volume (camera frustum extruded towards the light) per cascade, not only the light box.",
+   "fidelity_impact": "none",
+   "verify": "verify by image + state diff after implementation (perf_verify)",
+   "fix_id": null,
+   "scenes": [
+    "night_lights/modern",
+    "devroom/modern",
+    "vehicle_yard/modern"
+   ],
+   "source": "runtime",
+   "below_noise": false,
+   "score": 2.77716
+  },
+  {
+   "id": "F-c4fd8c",
+   "rule": "R02",
+   "title": "'sky_view' recomputed every frame with unchanged inputs",
+   "system": "render/sky",
+   "location": {
+    "pass": "sky_view"
+   },
+   "evidence": {
+    "night_lights/low": {
+     "runs_per_frame": 0.95,
+     "gpu_ms": 4.5204,
+     "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
+    },
+    "night_lights/modern": {
+     "runs_per_frame": 0.95,
+     "gpu_ms": 4.8326,
+     "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
+    },
+    "devroom/low": {
+     "runs_per_frame": 0.95,
+     "gpu_ms": 4.5625,
+     "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
+    },
+    "devroom/modern": {
+     "runs_per_frame": 0.95,
+     "gpu_ms": 5.504,
+     "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
+    },
+    "horde500/low": {
+     "runs_per_frame": 0.95,
+     "gpu_ms": 4.2821,
+     "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
+    },
+    "horde500/modern": {
+     "runs_per_frame": 0.95,
+     "gpu_ms": 5.1896,
+     "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
+    },
+    "vehicle_yard/low": {
+     "runs_per_frame": 0.95,
+     "gpu_ms": 4.2742,
+     "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
+    },
+    "vehicle_yard/modern": {
+     "runs_per_frame": 0.95,
+     "gpu_ms": 4.7062,
+     "inputs": "sky view LUT (depends on the sun / moon direction, the camera height and the aerosols)"
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 5.22877,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "M",
+   "fix": "Hash the pass inputs (the uniforms it reads, quantized as the shader reads them) and skip the dispatch when the hash matches the content already in the target. The output is bit-identical by construction.",
+   "fidelity_impact": "none",
+   "verify": "verify by image + state diff after implementation (perf_verify)",
+   "fix_id": null,
+   "scenes": [
+    "night_lights/low",
+    "night_lights/modern",
+    "devroom/low",
+    "devroom/modern",
+    "horde500/low",
+    "horde500/modern",
+    "vehicle_yard/low",
+    "vehicle_yard/modern"
+   ],
+   "source": "runtime",
+   "below_noise": false,
+   "score": 1.04575
+  },
+  {
+   "id": "F-a7f6ca",
+   "rule": "R02",
+   "title": "'sky_cshadow' recomputed every frame with unchanged inputs",
+   "system": "render/sky",
+   "location": {
+    "pass": "sky_cshadow"
+   },
+   "evidence": {
+    "night_lights/low": {
+     "runs_per_frame": 0.95,
+     "gpu_ms": 0.5891,
+     "inputs": "cloud shadow map (cloud map + camera texel snap)"
+    },
+    "night_lights/modern": {
+     "runs_per_frame": 0.95,
+     "gpu_ms": 2.2842,
+     "inputs": "cloud shadow map (cloud map + camera texel snap)"
+    },
+    "devroom/low": {
+     "runs_per_frame": 0.95,
+     "gpu_ms": 0.6044,
+     "inputs": "cloud shadow map (cloud map + camera texel snap)"
+    },
+    "devroom/modern": {
+     "runs_per_frame": 0.95,
+     "gpu_ms": 2.6679,
+     "inputs": "cloud shadow map (cloud map + camera texel snap)"
+    },
+    "horde500/low": {
+     "runs_per_frame": 0.95,
+     "gpu_ms": 0.6348,
+     "inputs": "cloud shadow map (cloud map + camera texel snap)"
+    },
+    "horde500/modern": {
+     "runs_per_frame": 0.95,
+     "gpu_ms": 1.6649,
+     "inputs": "cloud shadow map (cloud map + camera texel snap)"
+    },
+    "vehicle_yard/low": {
+     "runs_per_frame": 0.95,
+     "gpu_ms": 0.5931,
+     "inputs": "cloud shadow map (cloud map + camera texel snap)"
+    },
+    "vehicle_yard/modern": {
+     "runs_per_frame": 0.95,
+     "gpu_ms": 1.6933,
+     "inputs": "cloud shadow map (cloud map + camera texel snap)"
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 2.5345225,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "M",
+   "fix": "Hash the pass inputs (the uniforms it reads, quantized as the shader reads them) and skip the dispatch when the hash matches the content already in the target. The output is bit-identical by construction.",
+   "fidelity_impact": "none",
+   "verify": "verify by image + state diff after implementation (perf_verify)",
+   "fix_id": null,
+   "scenes": [
+    "night_lights/low",
+    "night_lights/modern",
+    "devroom/low",
+    "devroom/modern",
+    "horde500/low",
+    "horde500/modern",
+    "vehicle_yard/low",
+    "vehicle_yard/modern"
+   ],
+   "source": "runtime",
+   "below_noise": false,
+   "score": 0.5069
+  },
+  {
+   "id": "F-b0d253",
+   "rule": "R02",
+   "title": "'sky_clouds' recomputed every other frame with unchanged inputs",
+   "system": "render/sky",
+   "location": {
+    "pass": "sky_clouds"
+   },
+   "evidence": {
+    "night_lights/low": {
+     "runs_per_frame": 0.47,
+     "gpu_ms": 1.5378,
+     "inputs": "cloud map (cloud cover, wind offset, time)"
+    },
+    "night_lights/modern": {
+     "runs_per_frame": 0.47,
+     "gpu_ms": 2.8376,
+     "inputs": "cloud map (cloud cover, wind offset, time)"
+    },
+    "devroom/low": {
+     "runs_per_frame": 0.47,
+     "gpu_ms": 1.7523,
+     "inputs": "cloud map (cloud cover, wind offset, time)"
+    },
+    "devroom/modern": {
+     "runs_per_frame": 0.47,
+     "gpu_ms": 3.1421,
+     "inputs": "cloud map (cloud cover, wind offset, time)"
+    },
+    "horde500/low": {
+     "runs_per_frame": 0.47,
+     "gpu_ms": 1.8894,
+     "inputs": "cloud map (cloud cover, wind offset, time)"
+    },
+    "horde500/modern": {
+     "runs_per_frame": 0.47,
+     "gpu_ms": 2.5917,
+     "inputs": "cloud map (cloud cover, wind offset, time)"
+    },
+    "vehicle_yard/low": {
+     "runs_per_frame": 0.47,
+     "gpu_ms": 1.4858,
+     "inputs": "cloud map (cloud cover, wind offset, time)"
+    },
+    "vehicle_yard/modern": {
+     "runs_per_frame": 0.47,
+     "gpu_ms": 2.4357,
+     "inputs": "cloud map (cloud cover, wind offset, time)"
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 1.4925,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "M",
+   "fix": "Hash the pass inputs (the uniforms it reads, quantized as the shader reads them) and skip the dispatch when the hash matches the content already in the target. The output is bit-identical by construction.",
+   "fidelity_impact": "none",
+   "verify": "verify by image + state diff after implementation (perf_verify)",
+   "fix_id": null,
+   "scenes": [
+    "night_lights/low",
+    "night_lights/modern",
+    "devroom/low",
+    "devroom/modern",
+    "horde500/low",
+    "horde500/modern",
+    "vehicle_yard/low",
+    "vehicle_yard/modern"
+   ],
+   "source": "runtime",
+   "below_noise": false,
+   "score": 0.2985
+  },
+  {
+   "id": "F-7519d1",
+   "rule": "R23",
+   "title": "16.3 MB copied per frame by wrapped memcpy",
+   "system": "core",
+   "location": {},
+   "evidence": {
+    "horde500/low": {
+     "memcpy_mb": 16.31,
+     "calls": 7560
+    },
+    "horde500/modern": {
+     "memcpy_mb": 16.33,
+     "calls": 10240
+    }
+   },
+   "savings": {
+    "cpu_ms": 1.3060347785949709,
+    "gpu_ms": 0.0,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "M",
+   "fix": "Write the data where it is consumed (mapped buffers) instead of staging copies.",
+   "fidelity_impact": "none",
+   "verify": "verify by image + state diff after implementation (perf_verify)",
+   "fix_id": null,
+   "scenes": [
+    "horde500/low",
+    "horde500/modern"
+   ],
+   "source": "runtime",
+   "below_noise": false,
+   "score": 0.26121
+  },
+  {
+   "id": "F-76a2e9",
+   "rule": "R05",
+   "title": "11.0 MB of pooled frame graph images unused by the current graph",
+   "system": "render/fg",
+   "location": {
+    "file": "src/render/graph/fg.c"
+   },
+   "evidence": {
+    "night_lights/modern": {
+     "stale_images": 3,
+     "stale_mb": 11.04
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 0.0,
+    "mb": 11.04,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "S",
+   "fix": "fg_trim after level / setting changes (the 240-frame eviction keeps them meanwhile).",
+   "fidelity_impact": "none",
+   "verify": "verify by image + state diff after implementation (perf_verify)",
+   "fix_id": null,
+   "scenes": [
+    "night_lights/modern"
+   ],
+   "source": "runtime",
+   "below_noise": false,
+   "score": 0.13248
+  },
+  {
+   "id": "F-66ec5c",
+   "rule": "R07",
+   "title": "Workers busy 0% of the frame while the main thread runs serial zones",
+   "system": "core/jobs",
+   "location": {
+    "zone": "game_render"
+   },
+   "evidence": {
+    "night_lights/low": {
+     "workers": 3,
+     "worker_busy_ms": 0.001,
+     "frame_ms": 229.824,
+     "top_main_zones_ms": [
+      [
+       "game_render",
+       1.49
+      ],
+      [
+       "input",
+       1.46
+      ],
+      [
+       "render_end",
+       0.771
+      ],
+      [
+       "vgeo:palettes_record",
+       0.444
+      ],
+      [
+       "render:frame_graph",
+       0.407
+      ]
+     ]
+    },
+    "night_lights/modern": {
+     "workers": 3,
+     "worker_busy_ms": 0.005,
+     "frame_ms": 841.907,
+     "top_main_zones_ms": [
+      [
+       "input",
+       1.604
+      ],
+      [
+       "render:record_pre",
+       1.568
+      ],
+      [
+       "game_render",
+       1.559
+      ],
+      [
+       "render_end",
+       1.196
+      ],
+      [
+       "vgeo:palettes_record",
+       1.031
+      ]
+     ]
+    },
+    "devroom/low": {
+     "workers": 3,
+     "worker_busy_ms": 0.001,
+     "frame_ms": 240.045,
+     "top_main_zones_ms": [
+      [
+       "game_render",
+       1.667
+      ],
+      [
+       "input",
+       1.506
+      ],
+      [
+       "render_end",
+       0.885
+      ],
+      [
+       "vgeo:palettes_record",
+       0.472
+      ],
+      [
+       "render:frame_graph",
+       0.446
+      ]
+     ]
+    },
+    "devroom/modern": {
+     "workers": 3,
+     "worker_busy_ms": 0.003,
+     "frame_ms": 919.894,
+     "top_main_zones_ms": [
+      [
+       "game_render",
+       1.606
+      ],
+      [
+       "input",
+       1.408
+      ],
+      [
+       "render_end",
+       1.218
+      ],
+      [
+       "render:record_pre",
+       1.12
+      ],
+      [
+       "vgeo:palettes_record",
+       0.945
+      ]
+     ]
+    },
+    "horde500/low": {
+     "workers": 3,
+     "worker_busy_ms": 0.68,
+     "frame_ms": 236.219,
+     "top_main_zones_ms": [
+      [
+       "game_render",
+       4.171
+      ],
+      [
+       "render:prepare",
+       2.948
+      ],
+      [
+       "input",
+       1.172
+      ],
+      [
+       "render_end",
+       1.038
+      ],
+      [
+       "sim:anim_hitboxes",
+       0.769
+      ]
+     ]
+    },
+    "horde500/modern": {
+     "workers": 3,
+     "worker_busy_ms": 0.781,
+     "frame_ms": 816.813,
+     "top_main_zones_ms": [
+      [
+       "game_render",
+       4.362
+      ],
+      [
+       "render:prepare",
+       3.073
+      ],
+      [
+       "render_end",
+       1.39
+      ],
+      [
+       "input",
+       1.388
+      ],
+      [
+       "render:record_pre",
+       0.954
+      ]
+     ]
+    },
+    "vehicle_yard/low": {
+     "workers": 3,
+     "worker_busy_ms": 0.001,
+     "frame_ms": 222.775,
+     "top_main_zones_ms": [
+      [
+       "game_render",
+       1.741
+      ],
+      [
+       "input",
+       1.556
+      ],
+      [
+       "render_end",
+       0.828
+      ],
+      [
+       "sim:anim_hitboxes",
+       0.455
+      ],
+      [
+       "render:frame_graph",
+       0.447
+      ]
+     ]
+    },
+    "vehicle_yard/modern": {
+     "workers": 3,
+     "worker_busy_ms": 0.003,
+     "frame_ms": 865.776,
+     "top_main_zones_ms": [
+      [
+       "game_render",
+       1.616
+      ],
+      [
+       "input",
+       1.469
+      ],
+      [
+       "render_end",
+       1.144
+      ],
+      [
+       "render:record_pre",
+       0.976
+      ],
+      [
+       "vgeo:palettes_record",
+       0.83
+      ]
+     ]
+    }
+   },
+   "savings": {
+    "cpu_ms": 2.181075,
+    "gpu_ms": 0.0,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "low",
+   "effort": "L",
+   "fix": "The largest main-thread zones are candidates for jobs_parallel_for (per-index outputs keep results thread-count independent: no behaviour change).",
+   "fidelity_impact": "none",
+   "verify": "verify by image + state diff after implementation (perf_verify)",
+   "fix_id": null,
+   "scenes": [
+    "night_lights/low",
+    "night_lights/modern",
+    "devroom/low",
+    "devroom/modern",
+    "horde500/low",
+    "horde500/modern",
+    "vehicle_yard/low",
+    "vehicle_yard/modern"
+   ],
+   "source": "runtime",
+   "below_noise": false,
+   "score": 0.08179
+  },
+  {
+   "id": "F-25e1c0",
+   "rule": "R07",
+   "title": "Job cull_range (vk_classic.c) runs 2616 times for 0.6 us each (queue overhead dominates)",
+   "system": "core/jobs",
+   "location": {
+    "function": "cull_range (vk_classic.c)"
+   },
+   "evidence": {
+    "night_lights/modern": {
+     "count": 2616,
+     "avg_us": 0.57,
+     "queue_ms_avg": 0.0
+    },
+    "devroom/modern": {
+     "count": 1380,
+     "avg_us": 0.65,
+     "queue_ms_avg": 0.0
+    },
+    "horde500/modern": {
+     "count": 1848,
+     "avg_us": 0.99,
+     "queue_ms_avg": 0.0
+    },
+    "vehicle_yard/modern": {
+     "count": 912,
+     "avg_us": 0.63,
+     "queue_ms_avg": 0.0
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.13080000000000003,
+    "gpu_ms": 0.0,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "S",
+   "fix": "Batch the work into fewer, larger jobs.",
+   "fidelity_impact": "none",
+   "verify": "verify by image + state diff after implementation (perf_verify)",
+   "fix_id": null,
+   "scenes": [
+    "night_lights/modern",
+    "devroom/modern",
+    "horde500/modern",
+    "vehicle_yard/modern"
+   ],
+   "source": "runtime",
+   "below_noise": false,
+   "score": 0.07848
+  },
+  {
+   "id": "F-d084cd",
+   "rule": "R26",
+   "title": "16 cvar_find calls per frame",
+   "system": "core/cvar",
+   "location": {
+    "file": "src/core/cvar.c",
+    "function": "cvar_find"
+   },
+   "evidence": {
+    "night_lights/low": {
+     "calls_per_frame": 16.0
+    },
+    "night_lights/modern": {
+     "calls_per_frame": 17.0
+    },
+    "devroom/low": {
+     "calls_per_frame": 16.0
+    },
+    "devroom/modern": {
+     "calls_per_frame": 17.0
+    },
+    "horde500/low": {
+     "calls_per_frame": 17.0
+    },
+    "horde500/modern": {
+     "calls_per_frame": 18.0
+    },
+    "vehicle_yard/low": {
+     "calls_per_frame": 16.0
+    },
+    "vehicle_yard/modern": {
+     "calls_per_frame": 17.0
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.045,
+    "gpu_ms": 0.0,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "high",
+   "effort": "S",
+   "fix": "Index the cvars by a case-insensitive name hash (same result), and cache Cvar* at init in the per-frame callers.",
+   "fidelity_impact": "none",
+   "verify": "perf_verify PF-0002 (perf_fix_disable A/B)",
+   "fix_id": "PF-0002",
+   "scenes": [
+    "night_lights/low",
+    "night_lights/modern",
+    "devroom/low",
+    "devroom/modern",
+    "horde500/low",
+    "horde500/modern",
+    "vehicle_yard/low",
+    "vehicle_yard/modern"
+   ],
+   "source": "runtime",
+   "below_noise": false,
+   "score": 0.0405
+  },
+  {
+   "id": "F-82429b",
+   "rule": "R22",
+   "title": "7 byte-identical files duplicated across assets/vfx/tex / assets/vfx/tex_placeholder (3.7 MB): smoke_puff_lm0.png, smoke_puff_mv.png, smoke_puff.png, dust_puff_lm0.png, dust_puff.png",
+   "system": "assets",
+   "location": {
+    "file": "assets/vfx/tex / assets/vfx/tex_placeholder"
+   },
+   "evidence": {
+    "static": {
+     "files": [
+      "smoke_puff_lm0.png",
+      "smoke_puff_mv.png",
+      "smoke_puff.png",
+      "dust_puff_lm0.png",
+      "dust_puff.png",
+      "smoke_puff_lm1.png",
+      "dust_puff_lm1.png"
+     ]
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 0.0,
+    "mb": 3.7038955688476562,
+    "bytes_s": 0.0
+   },
+   "confidence": "low",
+   "effort": "S",
+   "fix": "Reference one copy. If only one directory is ever loaded (check the asset cache keys), the duplicate costs disk / package size only.",
+   "fidelity_impact": "none",
+   "verify": "verify by image + state diff after implementation (perf_verify)",
+   "fix_id": null,
+   "scenes": [
+    "static"
+   ],
+   "source": "static",
+   "below_noise": false,
+   "score": 0.02222
+  },
+  {
+   "id": "F-b6ea0c",
+   "rule": "R24",
+   "title": "'light_shadows' rebinds a pipeline for 62% of its draws",
+   "system": "render",
+   "location": {
+    "pass": "light_shadows"
+   },
+   "evidence": {
+    "night_lights/modern": {
+     "draws": 107.6842105263158,
+     "pipeline_binds": 66.60526315789474,
+     "descriptor_binds": 5.684210526315789
+    },
+    "devroom/modern": {
+     "draws": 51.026315789473685,
+     "pipeline_binds": 33.8421052631579,
+     "descriptor_binds": 1.3157894736842106
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.03330263157894737,
+    "gpu_ms": 0.0,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "M",
+   "fix": "Sort the draw list by pipeline (then material) and bind on change only. Draw order inside one depth-tested opaque pass does not change the image; keep blended draws in their order.",
+   "fidelity_impact": "none",
+   "verify": "verify by image + state diff after implementation (perf_verify)",
+   "fix_id": null,
+   "scenes": [
+    "night_lights/modern",
+    "devroom/modern"
+   ],
+   "source": "runtime",
+   "below_noise": false,
+   "score": 0.00666
+  },
+  {
+   "id": "F-a9afc1",
+   "rule": "R08",
+   "title": "vg_palettes_record() calls malloc in the frame loop (fixed: persistent buffer)",
+   "system": "core/alloc",
+   "location": {
+    "file": "src/render/vgeo/vgeo_skin.c",
+    "line": 124,
+    "function": "vg_palettes_record"
+   },
+   "evidence": {
+    "static": {
+     "call": "malloc",
+     "fixed": true
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0005,
+    "gpu_ms": 0.0,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "S",
+   "fix": "Keep the buffer for the owner's lifetime (sized at init) or take it from g_engine.frame_arena.",
+   "fidelity_impact": "none",
+   "verify": "perf_verify PF-0003 (perf_fix_disable A/B)",
+   "fix_id": "PF-0003",
+   "scenes": [
+    "static"
+   ],
+   "source": "static",
+   "below_noise": false,
+   "score": 0.0006
+  },
+  {
+   "id": "F-e93490",
+   "rule": "R08",
+   "title": "vg_stream_update() calls malloc in the frame loop (fixed: persistent buffer)",
+   "system": "core/alloc",
+   "location": {
+    "file": "src/render/vgeo/vgeo_stream.c",
+    "line": 423,
+    "function": "vg_stream_update"
+   },
+   "evidence": {
+    "static": {
+     "call": "malloc",
+     "fixed": true
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0005,
+    "gpu_ms": 0.0,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "S",
+   "fix": "Keep the buffer for the owner's lifetime (sized at init) or take it from g_engine.frame_arena.",
+   "fidelity_impact": "none",
+   "verify": "perf_verify PF-0004 (perf_fix_disable A/B)",
+   "fix_id": "PF-0004",
+   "scenes": [
+    "static"
+   ],
+   "source": "static",
+   "below_noise": false,
+   "score": 0.0006
+  },
+  {
+   "id": "F-a3573f",
+   "rule": "R04",
+   "title": "9 adjacent frame graph passes are independent but barrier separately",
+   "system": "render/fg",
+   "location": {
+    "file": "src/render/graph/fg.c",
+    "function": "pass_barriers"
+   },
+   "evidence": {
+    "night_lights/low": {
+     "independent_adjacent_pairs": 9,
+     "barrier_calls_per_frame": 192.5
+    },
+    "night_lights/modern": {
+     "independent_adjacent_pairs": 16,
+     "barrier_calls_per_frame": 263.8
+    },
+    "devroom/low": {
+     "independent_adjacent_pairs": 9,
+     "barrier_calls_per_frame": 192.5
+    },
+    "devroom/modern": {
+     "independent_adjacent_pairs": 17,
+     "barrier_calls_per_frame": 264.2
+    },
+    "horde500/low": {
+     "independent_adjacent_pairs": 9,
+     "barrier_calls_per_frame": 192.5
+    },
+    "horde500/modern": {
+     "independent_adjacent_pairs": 17,
+     "barrier_calls_per_frame": 263.2
+    },
+    "vehicle_yard/low": {
+     "independent_adjacent_pairs": 9,
+     "barrier_calls_per_frame": 192.5
+    },
+    "vehicle_yard/modern": {
+     "independent_adjacent_pairs": 17,
+     "barrier_calls_per_frame": 263.3
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 0.051000000000000004,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "low",
+   "effort": "M",
+   "fix": "Emit the barriers of a run of independent passes as one vkCmdPipelineBarrier2 before the run (fg_execute look-ahead).",
+   "fidelity_impact": "none",
+   "verify": "verify by image + state diff after implementation (perf_verify)",
+   "fix_id": null,
+   "scenes": [
+    "night_lights/low",
+    "night_lights/modern",
+    "devroom/low",
+    "devroom/modern",
+    "horde500/low",
+    "horde500/modern",
+    "vehicle_yard/low",
+    "vehicle_yard/modern"
+   ],
+   "source": "runtime",
+   "below_noise": true,
+   "score": 0.00051
+  },
+  {
+   "id": "F-87756e",
+   "rule": "R19",
+   "title": "perf_stop_frame() logs unconditionally (log_info) at its top level",
+   "system": "core/log",
+   "location": {
+    "file": "src/game/game_post.c",
+    "line": 324,
+    "function": "perf_stop_frame"
+   },
+   "evidence": {
+    "static": {
+     "call": "log_info"
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.01,
+    "gpu_ms": 0.0,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "low",
+   "effort": "S",
+   "fix": "Check it is not reached every frame; log on change / once.",
+   "fidelity_impact": "none",
+   "verify": "verify by image + state diff after implementation (perf_verify)",
+   "fix_id": null,
+   "scenes": [
+    "static"
+   ],
+   "source": "static",
+   "below_noise": true,
+   "score": 0.0003
+  },
+  {
+   "id": "F-9e6403",
+   "rule": "R19",
+   "title": "grass_update_tier() logs unconditionally (log_info) at its top level",
+   "system": "core/log",
+   "location": {
+    "file": "src/render/vk_vgeo.c",
+    "line": 1943,
+    "function": "grass_update_tier"
+   },
+   "evidence": {
+    "static": {
+     "call": "log_info"
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.01,
+    "gpu_ms": 0.0,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "low",
+   "effort": "S",
+   "fix": "Check it is not reached every frame; log on change / once.",
+   "fidelity_impact": "none",
+   "verify": "verify by image + state diff after implementation (perf_verify)",
+   "fix_id": null,
+   "scenes": [
+    "static"
+   ],
+   "source": "static",
+   "below_noise": true,
+   "score": 0.0003
+  },
+  {
+   "id": "F-88d204",
+   "rule": "R19",
+   "title": "render_foliage_map_types() logs unconditionally (log_info) at its top level",
+   "system": "core/log",
+   "location": {
+    "file": "src/render/vk_vgeo.c",
+    "line": 2053,
+    "function": "render_foliage_map_types"
+   },
+   "evidence": {
+    "static": {
+     "call": "log_info"
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.01,
+    "gpu_ms": 0.0,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "low",
+   "effort": "S",
+   "fix": "Check it is not reached every frame; log on change / once.",
+   "fidelity_impact": "none",
+   "verify": "verify by image + state diff after implementation (perf_verify)",
+   "fix_id": null,
+   "scenes": [
+    "static"
+   ],
+   "source": "static",
+   "below_noise": true,
+   "score": 0.0003
+  },
+  {
+   "id": "F-34957e",
+   "rule": "R19",
+   "title": "console_submit() logs unconditionally (log_info) at its top level",
+   "system": "core/log",
+   "location": {
+    "file": "src/ui/console.c",
+    "line": 113,
+    "function": "console_submit"
+   },
+   "evidence": {
+    "static": {
+     "call": "log_info"
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.01,
+    "gpu_ms": 0.0,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "low",
+   "effort": "S",
+   "fix": "Check it is not reached every frame; log on change / once.",
+   "fidelity_impact": "none",
+   "verify": "verify by image + state diff after implementation (perf_verify)",
+   "fix_id": null,
+   "scenes": [
+    "static"
+   ],
+   "source": "static",
+   "below_noise": true,
+   "score": 0.0003
+  },
+  {
+   "id": "F-f042a5",
+   "rule": "R26",
+   "title": "fov_frame() looks up 1 cvar(s) by name: r_viewmodel_fov",
+   "system": "core/cvar",
+   "location": {
+    "file": "src/game/game_sights.c",
+    "line": 584,
+    "function": "fov_frame"
+   },
+   "evidence": {
+    "static": {
+     "cvars": [
+      "r_viewmodel_fov"
+     ]
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0025,
+    "gpu_ms": 0.0,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "high",
+   "effort": "S",
+   "fix": "Cache the Cvar* at init (the hash index of PF-0002 already makes each lookup cheap).",
+   "fidelity_impact": "none",
+   "verify": "verify by image + state diff after implementation (perf_verify)",
+   "fix_id": null,
+   "scenes": [
+    "static"
+   ],
+   "source": "static",
+   "below_noise": true,
+   "score": 0.00023
+  },
+  {
+   "id": "F-35ee3f",
+   "rule": "R26",
+   "title": "terrain_game_frame() looks up 1 cvar(s) by name: r_terrain_quality",
+   "system": "core/cvar",
+   "location": {
+    "file": "src/game/game_terrain.c",
+    "line": 127,
+    "function": "terrain_game_frame"
+   },
+   "evidence": {
+    "static": {
+     "cvars": [
+      "r_terrain_quality"
+     ]
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0025,
+    "gpu_ms": 0.0,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "high",
+   "effort": "S",
+   "fix": "Cache the Cvar* at init (the hash index of PF-0002 already makes each lookup cheap).",
+   "fidelity_impact": "none",
+   "verify": "verify by image + state diff after implementation (perf_verify)",
+   "fix_id": null,
+   "scenes": [
+    "static"
+   ],
+   "source": "static",
+   "below_noise": true,
+   "score": 0.00023
+  },
+  {
+   "id": "F-7677d8",
+   "rule": "R26",
+   "title": "flesh_fx_update() looks up 1 cvar(s) by name: vfx_timescale",
+   "system": "core/cvar",
+   "location": {
+    "file": "src/gameplay/flesh_fx.c",
+    "line": 562,
+    "function": "flesh_fx_update"
+   },
+   "evidence": {
+    "static": {
+     "cvars": [
+      "vfx_timescale"
+     ]
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0025,
+    "gpu_ms": 0.0,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "high",
+   "effort": "S",
+   "fix": "Cache the Cvar* at init (the hash index of PF-0002 already makes each lookup cheap).",
+   "fidelity_impact": "none",
+   "verify": "verify by image + state diff after implementation (perf_verify)",
+   "fix_id": null,
+   "scenes": [
+    "static"
+   ],
+   "source": "static",
+   "below_noise": true,
+   "score": 0.00023
+  },
+  {
+   "id": "F-0a7c78",
+   "rule": "R26",
+   "title": "draw_world_bars() looks up 1 cvar(s) by name: cl_healthbars",
+   "system": "core/cvar",
+   "location": {
+    "file": "src/ui/hud.c",
+    "line": 393,
+    "function": "draw_world_bars"
+   },
+   "evidence": {
+    "static": {
+     "cvars": [
+      "cl_healthbars"
+     ]
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0025,
+    "gpu_ms": 0.0,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "high",
+   "effort": "S",
+   "fix": "Cache the Cvar* at init (the hash index of PF-0002 already makes each lookup cheap).",
+   "fidelity_impact": "none",
+   "verify": "verify by image + state diff after implementation (perf_verify)",
+   "fix_id": null,
+   "scenes": [
+    "static"
+   ],
+   "source": "static",
+   "below_noise": true,
+   "score": 0.00023
+  },
+  {
+   "id": "F-0714da",
+   "rule": "R27",
+   "title": "Main thread blocked 358 ms on file reads during startup (23518 ms to the first frame)",
+   "system": "startup",
+   "location": {
+    "zone": "startup"
+   },
+   "evidence": {
+    "startup": {
+     "io_ms": 358.0,
+     "total_ms": 23518.1,
+     "top_init_ms": [
+      [
+       "render_init",
+       21029.7
+      ],
+      [
+       "game_init",
+       1934.9
+      ],
+      [
+       "ui_init",
+       245.0
+      ],
+      [
+       "assets_init",
+       181.4
+      ],
+      [
+       "boot_map",
+       88.6
+      ],
+      [
+       "lobby_init",
+       1.4
+      ],
+      [
+       "cvar_find",
+       0.0
+      ],
+      [
+       "cvar_find",
+       0.0
+      ]
+     ]
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 0.0,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "M",
+   "fix": "Read the assets the first frame does not need on jobs (assets_init / game_init order), overlap pipeline creation with loading. Startup only: not a per-frame saving.",
+   "fidelity_impact": "none",
+   "verify": "verify by image + state diff after implementation (perf_verify)",
+   "fix_id": null,
+   "scenes": [
+    "startup"
+   ],
+   "source": "runtime",
+   "below_noise": false,
+   "score": 0.0002
+  }
+ ],
+ "tradeoffs": [
+  {
+   "id": "F-df14d5",
+   "rule": "T01",
+   "title": "'shadow_sun' costs 16.28 ms: a lower setting would save part of it",
+   "system": "render",
+   "location": {
+    "pass": "shadow_sun"
+   },
+   "evidence": {
+    "night_lights/low": {
+     "gpu_ms": 16.283
+    },
+    "night_lights/modern": {
+     "gpu_ms": 113.611
+    },
+    "devroom/low": {
+     "gpu_ms": 18.955
+    },
+    "devroom/modern": {
+     "gpu_ms": 138.858
+    },
+    "horde500/modern": {
+     "gpu_ms": 129.182
+    },
+    "vehicle_yard/modern": {
+     "gpu_ms": 133.621
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 55.54315789473685,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "S",
+   "fix": "Lower its resolution / sample count / distance (changes the image: Engine Fidelity's job, not this audit's).",
+   "fidelity_impact": "tradeoff",
+   "verify": "changes the image: not a fidelity-neutral fix",
+   "fix_id": null,
+   "scenes": [
+    "night_lights/low",
+    "night_lights/modern",
+    "devroom/low",
+    "devroom/modern",
+    "horde500/modern",
+    "vehicle_yard/modern"
+   ],
+   "source": "runtime",
+   "below_noise": false,
+   "score": 33.32589
+  },
+  {
+   "id": "F-a3994d",
+   "rule": "T01",
+   "title": "'mb_blur' costs 125.41 ms: a lower setting would save part of it",
+   "system": "render",
+   "location": {
+    "pass": "mb_blur"
+   },
+   "evidence": {
+    "night_lights/modern": {
+     "gpu_ms": 125.412
+    },
+    "devroom/modern": {
+     "gpu_ms": 129.279
+    },
+    "horde500/modern": {
+     "gpu_ms": 132.359
+    },
+    "vehicle_yard/modern": {
+     "gpu_ms": 123.717
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 52.94378666666667,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "S",
+   "fix": "Lower its resolution / sample count / distance (changes the image: Engine Fidelity's job, not this audit's).",
+   "fidelity_impact": "tradeoff",
+   "verify": "changes the image: not a fidelity-neutral fix",
+   "fix_id": null,
+   "scenes": [
+    "night_lights/modern",
+    "devroom/modern",
+    "horde500/modern",
+    "vehicle_yard/modern"
+   ],
+   "source": "runtime",
+   "below_noise": false,
+   "score": 31.76627
+  },
+  {
+   "id": "F-e5de9a",
+   "rule": "T01",
+   "title": "'opaque' costs 22.90 ms: a lower setting would save part of it",
+   "system": "render",
+   "location": {
+    "pass": "opaque"
+   },
+   "evidence": {
+    "night_lights/low": {
+     "gpu_ms": 22.897
+    },
+    "night_lights/modern": {
+     "gpu_ms": 75.078
+    },
+    "devroom/low": {
+     "gpu_ms": 22.493
+    },
+    "devroom/modern": {
+     "gpu_ms": 77.345
+    },
+    "horde500/low": {
+     "gpu_ms": 23.077
+    },
+    "horde500/modern": {
+     "gpu_ms": 85.433
+    },
+    "vehicle_yard/low": {
+     "gpu_ms": 21.749
+    },
+    "vehicle_yard/modern": {
+     "gpu_ms": 67.836
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 34.17336842105263,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "S",
+   "fix": "Lower its resolution / sample count / distance (changes the image: Engine Fidelity's job, not this audit's).",
+   "fidelity_impact": "tradeoff",
+   "verify": "changes the image: not a fidelity-neutral fix",
+   "fix_id": null,
+   "scenes": [
+    "night_lights/low",
+    "night_lights/modern",
+    "devroom/low",
+    "devroom/modern",
+    "horde500/low",
+    "horde500/modern",
+    "vehicle_yard/low",
+    "vehicle_yard/modern"
+   ],
+   "source": "runtime",
+   "below_noise": false,
+   "score": 20.50402
+  },
+  {
+   "id": "F-237107",
+   "rule": "T01",
+   "title": "'taa' costs 57.99 ms: a lower setting would save part of it",
+   "system": "render",
+   "location": {
+    "pass": "taa"
+   },
+   "evidence": {
+    "night_lights/modern": {
+     "gpu_ms": 57.993
+    },
+    "devroom/modern": {
+     "gpu_ms": 59.458
+    },
+    "horde500/modern": {
+     "gpu_ms": 54.976
+    },
+    "vehicle_yard/modern": {
+     "gpu_ms": 59.077
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 23.783368421052632,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "S",
+   "fix": "Lower its resolution / sample count / distance (changes the image: Engine Fidelity's job, not this audit's).",
+   "fidelity_impact": "tradeoff",
+   "verify": "changes the image: not a fidelity-neutral fix",
+   "fix_id": null,
+   "scenes": [
+    "night_lights/modern",
+    "devroom/modern",
+    "horde500/modern",
+    "vehicle_yard/modern"
+   ],
+   "source": "runtime",
+   "below_noise": false,
+   "score": 14.27002
+  },
+  {
+   "id": "F-852ca1",
+   "rule": "T01",
+   "title": "'tonemap' costs 35.04 ms: a lower setting would save part of it",
+   "system": "render",
+   "location": {
+    "pass": "tonemap"
+   },
+   "evidence": {
+    "night_lights/low": {
+     "gpu_ms": 35.043
+    },
+    "devroom/low": {
+     "gpu_ms": 37.966
+    },
+    "horde500/low": {
+     "gpu_ms": 33.918
+    },
+    "vehicle_yard/low": {
+     "gpu_ms": 35.964
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 15.18642105263158,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "S",
+   "fix": "Lower its resolution / sample count / distance (changes the image: Engine Fidelity's job, not this audit's).",
+   "fidelity_impact": "tradeoff",
+   "verify": "changes the image: not a fidelity-neutral fix",
+   "fix_id": null,
+   "scenes": [
+    "night_lights/low",
+    "devroom/low",
+    "horde500/low",
+    "vehicle_yard/low"
+   ],
+   "source": "runtime",
+   "below_noise": false,
+   "score": 9.11185
+  },
+  {
+   "id": "F-a7049f",
+   "rule": "T01",
+   "title": "'bloom' costs 31.74 ms: a lower setting would save part of it",
+   "system": "render",
+   "location": {
+    "pass": "bloom"
+   },
+   "evidence": {
+    "night_lights/low": {
+     "gpu_ms": 31.74
+    },
+    "devroom/low": {
+     "gpu_ms": 32.593
+    },
+    "horde500/low": {
+     "gpu_ms": 30.322
+    },
+    "vehicle_yard/low": {
+     "gpu_ms": 30.972
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 13.037052631578948,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "S",
+   "fix": "Lower its resolution / sample count / distance (changes the image: Engine Fidelity's job, not this audit's).",
+   "fidelity_impact": "tradeoff",
+   "verify": "changes the image: not a fidelity-neutral fix",
+   "fix_id": null,
+   "scenes": [
+    "night_lights/low",
+    "devroom/low",
+    "horde500/low",
+    "vehicle_yard/low"
+   ],
+   "source": "runtime",
+   "below_noise": false,
+   "score": 7.82223
+  },
+  {
+   "id": "F-99fa9d",
+   "rule": "T01",
+   "title": "'fxaa' costs 21.84 ms: a lower setting would save part of it",
+   "system": "render",
+   "location": {
+    "pass": "fxaa"
+   },
+   "evidence": {
+    "horde500/low": {
+     "gpu_ms": 21.845
+    },
+    "vehicle_yard/low": {
+     "gpu_ms": 17.596
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 8.737894736842106,
+    "mb": 0.0,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "S",
+   "fix": "Lower its resolution / sample count / distance (changes the image: Engine Fidelity's job, not this audit's).",
+   "fidelity_impact": "tradeoff",
+   "verify": "changes the image: not a fidelity-neutral fix",
+   "fix_id": null,
+   "scenes": [
+    "horde500/low",
+    "vehicle_yard/low"
+   ],
+   "source": "runtime",
+   "below_noise": false,
+   "score": 5.24274
+  },
+  {
+   "id": "F-1a9828",
+   "rule": "R14",
+   "title": "assets/human/textures/Ch38_1001_Diffuse.png: 4096x4096 RGBA8 PNG (85 MB with mips in VRAM), no BC sibling",
+   "system": "assets/textures",
+   "location": {
+    "file": "assets/human/textures/Ch38_1001_Diffuse.png"
+   },
+   "evidence": {
+    "static": {
+     "w": 4096,
+     "h": 4096
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 0.0,
+    "mb": 63.84,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "M",
+   "fix": "BC7 / BC5 compression (or a smaller size where the texel density is never reached). Lossy: changes the image.",
+   "fidelity_impact": "tradeoff",
+   "verify": "changes the image: not a fidelity-neutral fix",
+   "fix_id": null,
+   "scenes": [
+    "static"
+   ],
+   "source": "static",
+   "below_noise": false,
+   "score": 0.25536
+  },
+  {
+   "id": "F-b68f06",
+   "rule": "R14",
+   "title": "assets/human/textures/Ch38_1001_Glossiness.png: 4096x4096 RGBA8 PNG (85 MB with mips in VRAM), no BC sibling",
+   "system": "assets/textures",
+   "location": {
+    "file": "assets/human/textures/Ch38_1001_Glossiness.png"
+   },
+   "evidence": {
+    "static": {
+     "w": 4096,
+     "h": 4096
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 0.0,
+    "mb": 63.84,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "M",
+   "fix": "BC7 / BC5 compression (or a smaller size where the texel density is never reached). Lossy: changes the image.",
+   "fidelity_impact": "tradeoff",
+   "verify": "changes the image: not a fidelity-neutral fix",
+   "fix_id": null,
+   "scenes": [
+    "static"
+   ],
+   "source": "static",
+   "below_noise": false,
+   "score": 0.25536
+  },
+  {
+   "id": "F-fcfa27",
+   "rule": "R14",
+   "title": "assets/human/textures/Ch38_1001_Normal.png: 4096x4096 RGBA8 PNG (85 MB with mips in VRAM), no BC sibling",
+   "system": "assets/textures",
+   "location": {
+    "file": "assets/human/textures/Ch38_1001_Normal.png"
+   },
+   "evidence": {
+    "static": {
+     "w": 4096,
+     "h": 4096
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 0.0,
+    "mb": 63.84,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "M",
+   "fix": "BC7 / BC5 compression (or a smaller size where the texel density is never reached). Lossy: changes the image.",
+   "fidelity_impact": "tradeoff",
+   "verify": "changes the image: not a fidelity-neutral fix",
+   "fix_id": null,
+   "scenes": [
+    "static"
+   ],
+   "source": "static",
+   "below_noise": false,
+   "score": 0.25536
+  },
+  {
+   "id": "F-af693b",
+   "rule": "R14",
+   "title": "assets/human/textures/Ch38_1001_Specular.png: 4096x4096 RGBA8 PNG (85 MB with mips in VRAM), no BC sibling",
+   "system": "assets/textures",
+   "location": {
+    "file": "assets/human/textures/Ch38_1001_Specular.png"
+   },
+   "evidence": {
+    "static": {
+     "w": 4096,
+     "h": 4096
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 0.0,
+    "mb": 63.84,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "M",
+   "fix": "BC7 / BC5 compression (or a smaller size where the texel density is never reached). Lossy: changes the image.",
+   "fidelity_impact": "tradeoff",
+   "verify": "changes the image: not a fidelity-neutral fix",
+   "fix_id": null,
+   "scenes": [
+    "static"
+   ],
+   "source": "static",
+   "below_noise": false,
+   "score": 0.25536
+  },
+  {
+   "id": "F-4e2a25",
+   "rule": "R14",
+   "title": "assets/human/textures/Ch42_1001_Diffuse.png: 4096x4096 RGBA8 PNG (85 MB with mips in VRAM), no BC sibling",
+   "system": "assets/textures",
+   "location": {
+    "file": "assets/human/textures/Ch42_1001_Diffuse.png"
+   },
+   "evidence": {
+    "static": {
+     "w": 4096,
+     "h": 4096
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 0.0,
+    "mb": 63.84,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "M",
+   "fix": "BC7 / BC5 compression (or a smaller size where the texel density is never reached). Lossy: changes the image.",
+   "fidelity_impact": "tradeoff",
+   "verify": "changes the image: not a fidelity-neutral fix",
+   "fix_id": null,
+   "scenes": [
+    "static"
+   ],
+   "source": "static",
+   "below_noise": false,
+   "score": 0.25536
+  },
+  {
+   "id": "F-8c1cbb",
+   "rule": "R14",
+   "title": "assets/human/textures/Ch42_1001_Glossiness.png: 4096x4096 RGBA8 PNG (85 MB with mips in VRAM), no BC sibling",
+   "system": "assets/textures",
+   "location": {
+    "file": "assets/human/textures/Ch42_1001_Glossiness.png"
+   },
+   "evidence": {
+    "static": {
+     "w": 4096,
+     "h": 4096
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 0.0,
+    "mb": 63.84,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "M",
+   "fix": "BC7 / BC5 compression (or a smaller size where the texel density is never reached). Lossy: changes the image.",
+   "fidelity_impact": "tradeoff",
+   "verify": "changes the image: not a fidelity-neutral fix",
+   "fix_id": null,
+   "scenes": [
+    "static"
+   ],
+   "source": "static",
+   "below_noise": false,
+   "score": 0.25536
+  },
+  {
+   "id": "F-d36958",
+   "rule": "R14",
+   "title": "assets/human/textures/Ch42_1001_Normal.png: 4096x4096 RGBA8 PNG (85 MB with mips in VRAM), no BC sibling",
+   "system": "assets/textures",
+   "location": {
+    "file": "assets/human/textures/Ch42_1001_Normal.png"
+   },
+   "evidence": {
+    "static": {
+     "w": 4096,
+     "h": 4096
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 0.0,
+    "mb": 63.84,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "M",
+   "fix": "BC7 / BC5 compression (or a smaller size where the texel density is never reached). Lossy: changes the image.",
+   "fidelity_impact": "tradeoff",
+   "verify": "changes the image: not a fidelity-neutral fix",
+   "fix_id": null,
+   "scenes": [
+    "static"
+   ],
+   "source": "static",
+   "below_noise": false,
+   "score": 0.25536
+  },
+  {
+   "id": "F-a94519",
+   "rule": "R14",
+   "title": "assets/human/textures/Ch42_1001_Specular.png: 4096x4096 RGBA8 PNG (85 MB with mips in VRAM), no BC sibling",
+   "system": "assets/textures",
+   "location": {
+    "file": "assets/human/textures/Ch42_1001_Specular.png"
+   },
+   "evidence": {
+    "static": {
+     "w": 4096,
+     "h": 4096
+    }
+   },
+   "savings": {
+    "cpu_ms": 0.0,
+    "gpu_ms": 0.0,
+    "mb": 63.84,
+    "bytes_s": 0.0
+   },
+   "confidence": "medium",
+   "effort": "M",
+   "fix": "BC7 / BC5 compression (or a smaller size where the texel density is never reached). Lossy: changes the image.",
+   "fidelity_impact": "tradeoff",
+   "verify": "changes the image: not a fidelity-neutral fix",
+   "fix_id": null,
+   "scenes": [
+    "static"
+   ],
+   "source": "static",
+   "below_noise": false,
+   "score": 0.25536
+  }
+ ],
+ "errors": []
+}

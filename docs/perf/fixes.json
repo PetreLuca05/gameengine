@@ -5,7 +5,7 @@
   "rule": "R01",
   "finding": "R01 clear-only shadow passes (shadow_sun at night / sun shadows off, shadow_moon by day, shadow_vm without a rig)",
   "effort": "S",
-  "status": "implemented",
+  "status": "verified on Linux container, Mesa lavapipe 25.2 (software Vulkan), 4 cores (close on the target machine)",
   "code": [
    "src/render/render.c shadow_clear_skip",
    "src/render/vk_device.c (shadow_gen)"
@@ -23,14 +23,121 @@
   "scenes": [
    "night_lights",
    "devroom"
-  ]
+  ],
+  "verification": {
+   "runs": [
+    {
+     "date": "2026-10-18",
+     "machine": "Linux container, Mesa lavapipe 25.2 (software Vulkan), 4 cores",
+     "summary": "CLOSED: scopec:shadow_moon:clear_px 4194304.0 -> 0.0 (-100.00%, p=0); images pass; state identical",
+     "closed": true,
+     "timing": [
+      {
+       "metric": "scopec:shadow_moon:clear_px",
+       "a_median": 4194304.0,
+       "b_median": 0.0,
+       "a_mean": 3984588.8,
+       "b_mean": 0.0,
+       "delta": -4194304.0,
+       "delta_pct": -100.0,
+       "p_value": 0.0,
+       "samples": [
+        80,
+        80
+       ],
+       "improved": true
+      },
+      {
+       "metric": "scope:shadow_moon",
+       "a_median": 2.2455,
+       "b_median": 5.288,
+       "a_mean": 2.29791,
+       "b_mean": 5.21475,
+       "delta": 3.0425,
+       "delta_pct": 135.49,
+       "p_value": 1.0,
+       "samples": [
+        76,
+        76
+       ],
+       "improved": false
+      },
+      {
+       "metric": "scopec:shadow_sun:clear_px",
+       "a_median": 67108864.0,
+       "b_median": 67108864.0,
+       "a_mean": 63753420.8,
+       "b_mean": 63753420.8,
+       "delta": 0.0,
+       "delta_pct": 0.0,
+       "p_value": 0.5,
+       "samples": [
+        80,
+        80
+       ],
+       "improved": false
+      },
+      {
+       "metric": "scope:shadow_sun",
+       "a_median": 131.25,
+       "b_median": 132.8,
+       "a_mean": 132.98947,
+       "b_mean": 132.99737,
+       "delta": 1.55,
+       "delta_pct": 1.18,
+       "p_value": 0.56513,
+       "samples": [
+        76,
+        76
+       ],
+       "improved": false
+      },
+      {
+       "metric": "scope:shadow_vm",
+       "a_median": 2.8525,
+       "b_median": 2.8455,
+       "a_mean": 3.32646,
+       "b_mean": 3.35099,
+       "delta": -0.007,
+       "delta_pct": -0.25,
+       "p_value": 0.66211,
+       "samples": [
+        76,
+        76
+       ],
+       "improved": false
+      },
+      {
+       "metric": "gpu_frame",
+       "a_median": 855.15,
+       "b_median": 853.95,
+       "a_mean": 851.195,
+       "b_mean": 854.3475,
+       "delta": -1.2,
+       "delta_pct": -0.14,
+       "p_value": 0.50204,
+       "samples": [
+        80,
+        80
+       ],
+       "improved": false
+      }
+     ],
+     "state": "identical",
+     "images_pass": true,
+     "dir": "../../../tmp/claude-0/-home-user-gameengine/ce674441-9067-5382-a7b4-35a05beb6d57/scratchpad/run/verify/PF-0001"
+    }
+   ],
+   "summary": "CLOSED: scopec:shadow_moon:clear_px 4194304.0 -> 0.0 (-100.00%, p=0); images pass; state identical",
+   "machine": "Linux container, Mesa lavapipe 25.2 (software Vulkan), 4 cores"
+  }
  },
  "PF-0002": {
   "title": "cvar_find through a case-insensitive hash index",
   "rule": "R26",
   "finding": "R26 cvar_find calls per frame (31 / frame in the dev room: a case-insensitive scan of ~700 cvars each)",
   "effort": "S",
-  "status": "implemented",
+  "status": "verified on Linux container, Mesa lavapipe 25.2 (software Vulkan), 4 cores (close on the target machine)",
   "code": [
    "src/core/cvar.c cvar_find / cvar_reg (index[])"
   ],
@@ -44,7 +151,69 @@
   "scenes": [
    "devroom",
    "horde500"
-  ]
+  ],
+  "verification": {
+   "runs": [
+    {
+     "date": "2026-10-18",
+     "machine": "Linux container, Mesa lavapipe 25.2 (software Vulkan), 4 cores",
+     "summary": "CLOSED: zone_all:cvar_find 0.08996 -> 0.01043 (-88.41%, p=0); images pass; state identical",
+     "closed": true,
+     "timing": [
+      {
+       "metric": "zone_all:cvar_find",
+       "a_median": 0.08996,
+       "b_median": 0.01043,
+       "a_mean": 0.10034,
+       "b_mean": 0.01071,
+       "delta": -0.07953,
+       "delta_pct": -88.41,
+       "p_value": 0.0,
+       "samples": [
+        80,
+        80
+       ],
+       "improved": true
+      },
+      {
+       "metric": "counter:cvar_find",
+       "a_median": 17.0,
+       "b_median": 17.0,
+       "a_mean": 17.0,
+       "b_mean": 17.0,
+       "delta": 0.0,
+       "delta_pct": 0.0,
+       "p_value": 0.5,
+       "samples": [
+        80,
+        80
+       ],
+       "improved": false
+      },
+      {
+       "metric": "cpu_work",
+       "a_median": 8.19152,
+       "b_median": 7.99072,
+       "a_mean": 8.47987,
+       "b_mean": 8.12866,
+       "delta": -0.2008,
+       "delta_pct": -2.45,
+       "p_value": 0.0403,
+       "samples": [
+        80,
+        80
+       ],
+       "improved": true
+      }
+     ],
+     "state": "identical",
+     "images_pass": true,
+     "dir": "../../../tmp/claude-0/-home-user-gameengine/ce674441-9067-5382-a7b4-35a05beb6d57/scratchpad/run/verify/PF-0002"
+    }
+   ],
+   "summary": "CLOSED: zone_all:cvar_find 0.08996 -> 0.01043 (-88.41%, p=0); images pass; state identical",
+   "machine": "Linux container, Mesa lavapipe 25.2 (software Vulkan), 4 cores"
+  }
  },
  "PF-0003": {
   "title": "vgeo palette upload regions without a per-frame malloc",
@@ -66,7 +235,69 @@
   "scenes": [
    "horde500",
    "devroom"
-  ]
+  ],
+  "verification": {
+   "runs": [
+    {
+     "date": "2026-10-18",
+     "machine": "Linux container, Mesa lavapipe 25.2 (software Vulkan), 4 cores",
+     "summary": "NOT CLOSED: zone_all:vgeo:palettes_record 0.88855 -> 0.91525 (+3.00%, p=0.628); images pass; state identical",
+     "closed": false,
+     "timing": [
+      {
+       "metric": "zone_all:vgeo:palettes_record",
+       "a_median": 0.88855,
+       "b_median": 0.91525,
+       "a_mean": 0.92596,
+       "b_mean": 0.9422,
+       "delta": 0.0267,
+       "delta_pct": 3.0,
+       "p_value": 0.6284,
+       "samples": [
+        80,
+        80
+       ],
+       "improved": false
+      },
+      {
+       "metric": "site:vgeo_skin.c",
+       "a_median": 1.0,
+       "b_median": 0.0,
+       "a_mean": 1.0,
+       "b_mean": 0.0,
+       "delta": -1.0,
+       "delta_pct": -100.0,
+       "p_value": 0.0,
+       "samples": [
+        80,
+        80
+       ],
+       "improved": true
+      },
+      {
+       "metric": "cpu_work",
+       "a_median": 7.83868,
+       "b_median": 7.81867,
+       "a_mean": 8.14211,
+       "b_mean": 7.9946,
+       "delta": -0.02001,
+       "delta_pct": -0.26,
+       "p_value": 0.25616,
+       "samples": [
+        80,
+        80
+       ],
+       "improved": false
+      }
+     ],
+     "state": "identical",
+     "images_pass": true,
+     "dir": "../../../tmp/claude-0/-home-user-gameengine/ce674441-9067-5382-a7b4-35a05beb6d57/scratchpad/run/verify/PF-0003"
+    }
+   ],
+   "summary": "NOT CLOSED: zone_all:vgeo:palettes_record 0.88855 -> 0.91525 (+3.00%, p=0.628); images pass; state identical",
+   "machine": "Linux container, Mesa lavapipe 25.2 (software Vulkan), 4 cores"
+  }
  },
  "PF-0004": {
   "title": "vgeo streaming copy list without a per-frame malloc",
@@ -88,14 +319,76 @@
   "scenes": [
    "foliage",
    "devroom"
-  ]
+  ],
+  "verification": {
+   "runs": [
+    {
+     "date": "2026-10-18",
+     "machine": "Linux container, Mesa lavapipe 25.2 (software Vulkan), 4 cores",
+     "summary": "CLOSED: zone_all:vgeo:stream_update 0.97765 -> 0.0366 (-96.26%, p=0); images pass; state identical",
+     "closed": true,
+     "timing": [
+      {
+       "metric": "zone_all:vgeo:stream_update",
+       "a_median": 0.97765,
+       "b_median": 0.0366,
+       "a_mean": 0.95057,
+       "b_mean": 0.04494,
+       "delta": -0.94105,
+       "delta_pct": -96.26,
+       "p_value": 0.0,
+       "samples": [
+        80,
+        80
+       ],
+       "improved": true
+      },
+      {
+       "metric": "site:vgeo_stream.c",
+       "a_median": 1.0,
+       "b_median": 0.0,
+       "a_mean": 1.0,
+       "b_mean": 0.0,
+       "delta": -1.0,
+       "delta_pct": -100.0,
+       "p_value": 0.0,
+       "samples": [
+        80,
+        80
+       ],
+       "improved": true
+      },
+      {
+       "metric": "cpu_work",
+       "a_median": 7.75681,
+       "b_median": 7.88928,
+       "a_mean": 8.01116,
+       "b_mean": 8.15238,
+       "delta": 0.13247,
+       "delta_pct": 1.71,
+       "p_value": 0.77051,
+       "samples": [
+        80,
+        80
+       ],
+       "improved": false
+      }
+     ],
+     "state": "identical",
+     "images_pass": true,
+     "dir": "../../../tmp/claude-0/-home-user-gameengine/ce674441-9067-5382-a7b4-35a05beb6d57/scratchpad/run/verify/PF-0004"
+    }
+   ],
+   "summary": "CLOSED: zone_all:vgeo:stream_update 0.97765 -> 0.0366 (-96.26%, p=0); images pass; state identical",
+   "machine": "Linux container, Mesa lavapipe 25.2 (software Vulkan), 4 cores"
+  }
  },
  "PF-0005": {
   "title": "Frame graph validation report built on demand",
   "rule": "R20",
   "finding": "R20 fg:validate (check_graph: pass name copies, dead pass / unused resource analysis, pool scan) every frame although only the fidelity checks and benches read it",
   "effort": "S",
-  "status": "implemented",
+  "status": "verified on Linux container, Mesa lavapipe 25.2 (software Vulkan), 4 cores (close on the target machine)",
   "code": [
    "src/render/graph/fg.c fg_last_report / fg_execute / fg_trim / fg_targets_changed"
   ],
@@ -107,6 +400,53 @@
   ],
   "scenes": [
    "devroom"
-  ]
+  ],
+  "verification": {
+   "runs": [
+    {
+     "date": "2026-10-18",
+     "machine": "Linux container, Mesa lavapipe 25.2 (software Vulkan), 4 cores",
+     "summary": "CLOSED: zone:fg:validate 0.01746 -> 0.0 (-100.00%, p=0); images pass; state identical",
+     "closed": true,
+     "timing": [
+      {
+       "metric": "zone:fg:validate",
+       "a_median": 0.01746,
+       "b_median": 0.0,
+       "a_mean": 0.01812,
+       "b_mean": 0.0,
+       "delta": -0.01746,
+       "delta_pct": -100.0,
+       "p_value": 0.0,
+       "samples": [
+        80,
+        80
+       ],
+       "improved": true
+      },
+      {
+       "metric": "cpu_work",
+       "a_median": 7.96702,
+       "b_median": 8.76533,
+       "a_mean": 8.15025,
+       "b_mean": 8.95362,
+       "delta": 0.79831,
+       "delta_pct": 10.02,
+       "p_value": 0.99964,
+       "samples": [
+        80,
+        80
+       ],
+       "improved": false
+      }
+     ],
+     "state": "identical",
+     "images_pass": true,
+     "dir": "../../../tmp/claude-0/-home-user-gameengine/ce674441-9067-5382-a7b4-35a05beb6d57/scratchpad/run/verify/PF-0005"
+    }
+   ],
+   "summary": "CLOSED: zone:fg:validate 0.01746 -> 0.0 (-100.00%, p=0); images pass; state identical",
+   "machine": "Linux container, Mesa lavapipe 25.2 (software Vulkan), 4 cores"
+  }
  }
 }

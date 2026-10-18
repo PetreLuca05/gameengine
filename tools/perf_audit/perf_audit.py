@@ -48,6 +48,8 @@ def cmd_analyze(a):
         profiles += load_dir(d) if os.path.isdir(d) else [Profile.load(d)]
     if not profiles and not a.static_only:
         print("analyze: no profiles under %s" % ", ".join(a.dirs))
+    if a.symbols:
+        resolve_symbols(profiles, a.symbols)
     fs = rules_runtime.run(profiles)
     if not a.no_static:
         fs += rules_static.run(ROOT)
@@ -59,13 +61,23 @@ def cmd_analyze(a):
             for x in fs:
                 if x.fix_id == fid:
                     status[x.id] = f.get("status", "implemented")
+    notes = list(a.note or [])
+    try:
+        with open(os.path.join(ROOT, "assets", "perf", "scenes.json"), encoding="utf-8") as f:
+            ids = [s["id"] for s in json.load(f)["scenes"]] + ["lan2_host", "lan2_client"]
+        have = {p.scene for p in profiles}
+        missing = [i for i in ids if i not in have]
+        if profiles and missing:
+            notes.append("Coverage: no profile for %s (crashed, skipped or not run; see each scene's audit.log)." % ", ".join(missing))
+    except (OSError, ValueError, KeyError):
+        pass
     date = a.date or datetime.date.today().isoformat()
     os.makedirs(a.out, exist_ok=True)
     md = os.path.join(a.out, "AUDIT_%s.md" % date)
     js = os.path.join(a.out, "AUDIT_%s.json" % date)
     meta = {"date": date, "profiles": len(profiles), "machine": a.machine, "rules_runtime": [r.rid for r in rules_runtime.RULES],
             "rules_static": [r.rid for r in rules_static.RULES]}
-    main, trade = report.write_audit(md, js, fs, profiles, meta, a.note, status, a.top)
+    main, trade = report.write_audit(md, js, fs, profiles, meta, notes, status, a.top, reg)
     tdir = os.path.join(a.out, "timeline")
     os.makedirs(tdir, exist_ok=True)
     for p in profiles:
@@ -74,6 +86,36 @@ def cmd_analyze(a):
     for i, f in enumerate(main[:a.top], 1):
         print("  %2d. %s %s %-60s %s" % (i, f.id, f.rule, f.title[:60], report.fmt_savings(f.savings)))
     return 0
+
+
+def resolve_symbols(profiles, exe):
+    """Non-Windows profiles name jobs fn_+0x<offset> (no symbols at run time): addr2line -f -e <exe>."""
+    import re
+    import subprocess
+    offs = set()
+    for p in profiles:
+        for j in p.jobs():
+            offs.update(re.findall(r"fn_\+(0x[0-9a-f]+)", j["fn"]))
+        for z in p.d.get("zones", []):
+            offs.update(re.findall(r"fn_\+(0x[0-9a-f]+)", z["name"]))
+    if not offs:
+        return
+    offs = sorted(offs)
+    try:
+        out = subprocess.run(["addr2line", "-f", "-e", exe] + offs, capture_output=True, text=True, timeout=60).stdout.split("\n")
+    except (OSError, subprocess.SubprocessError):
+        print("analyze: addr2line unavailable, job names stay offsets")
+        return
+    names = {o: "%s (%s)" % (out[2 * i], os.path.basename(out[2 * i + 1].split(":")[0])) for i, o in enumerate(offs) if 2 * i + 1 < len(out) and out[2 * i] != "??"}
+
+    def sub(t):
+        return re.sub(r"fn_\+(0x[0-9a-f]+)", lambda m: names.get(m.group(1), m.group(0)), t)
+    for p in profiles:
+        for j in p.jobs():
+            j["fn"] = sub(j["fn"])
+        for z in p.d.get("zones", []):
+            z["name"] = sub(z["name"])
+        p._zones = {(z["name"], z.get("thread", "main")): z for z in p.d.get("zones", [])}
 
 
 def cmd_scan(a):
@@ -188,6 +230,7 @@ def main(argv=None):
     p.add_argument("--no-static", action="store_true")
     p.add_argument("--static-only", action="store_true")
     p.add_argument("--label-in-name", action="store_true")
+    p.add_argument("--symbols", help="the engine binary: resolve fn_+0x.. job names with addr2line (non-Windows profiles)")
     p.set_defaults(fn=cmd_analyze)
     p = sub.add_parser("scan")
     p.set_defaults(fn=cmd_scan)
