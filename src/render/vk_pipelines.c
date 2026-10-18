@@ -112,12 +112,12 @@ bool vkp_create_layouts(void) {
 
     VkDescriptorPoolSize sizes[3] = {
         { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 16 },
-        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, MAX_TEXTURES + 256 + MAX_MAT_SETS * 4 },   // frame sets: 23 samplers each
+        { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, MAX_TEXTURES + 512 + MAX_MAT_SETS * 4 },   // frame sets: 23 samplers each; 256 alpha masks
         { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 80 },
     };
     VkDescriptorPoolCreateInfo pi = { VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO };
     pi.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-    pi.maxSets = MAX_TEXTURES + 64 + MAX_MAT_SETS;
+    pi.maxSets = MAX_TEXTURES + 64 + 256 + MAX_MAT_SETS;   // + the alpha masks (vk_alpha_mask.c)
     pi.poolSizeCount = 3;
     pi.pPoolSizes = sizes;
     VK_CHECK(vkCreateDescriptorPool(R->device, &pi, NULL, &R->pool));

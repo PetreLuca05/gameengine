@@ -82,7 +82,7 @@ void vkr_defer_image(VkImage image, VkImageView view, VmaAllocation alloc) {
     d->alloc = alloc;
 }
 
-static void defer_descriptor(VkDescriptorSet set) {
+void vkr_defer_descriptor(VkDescriptorSet set) {
     Deferred *d = push_deferred();
     memset(d, 0, sizeof(*d));
     d->kind = DEFER_DESCRIPTOR;
@@ -329,7 +329,7 @@ static void mat_sets_forget(TextureId id) {
     for (u32 i = 1; i < R->mat_set_count;) {
         struct MatSet *ms = &R->mat_sets[i];
         if (ms->tex[0] == id || ms->tex[1] == id || ms->tex[2] == id || ms->tex[3] == id) {
-            defer_descriptor(ms->set);
+            vkr_defer_descriptor(ms->set);
             *ms = R->mat_sets[--R->mat_set_count];
         } else {
             i++;
@@ -346,6 +346,7 @@ TextureId vkr_texture_wrap(VkImage image, VkImageView view, u32 w, u32 h, VkForm
     memset(t, 0, sizeof(*t));
     t->image = image;
     t->view = view;
+    t->serial = ++R->tex_serial;
     t->set = vkr_alloc_tex_set(view, R->sampler_clamp);
     t->w = w;
     t->h = h;
@@ -362,6 +363,7 @@ void vkr_texture_rewrap(TextureId id, VkImage image, VkImageView view, u32 w, u3
     GpuTexture *t = &R->textures[id];
     t->image = image;
     t->view = view;
+    t->serial = ++R->tex_serial;
     t->w = w;
     t->h = h;
     vkr_write_tex_set(t->set, view, R->sampler_clamp);
@@ -369,7 +371,8 @@ void vkr_texture_rewrap(TextureId id, VkImage image, VkImageView view, u32 w, u3
 
 void vkr_texture_unwrap(TextureId id) {
     if (!id || id >= MAX_TEXTURES || !R->textures[id].used || !R->textures[id].wrapped) return;
-    defer_descriptor(R->textures[id].set);
+    vkam_texture_destroyed(id);
+    vkr_defer_descriptor(R->textures[id].set);
     memset(&R->textures[id], 0, sizeof(GpuTexture));
 }
 
@@ -514,6 +517,7 @@ static void texture_image(GpuTexture *t, int w, int h, u32 mips, VkFormat fmt) {
     t->h = (u32)h;
     t->mips = mips;
     t->format = fmt;
+    t->serial = ++R->tex_serial;
 }
 
 static TextureId texture_alloc(int w, int h, u32 mips, VkFormat fmt, bool world) {
@@ -891,7 +895,8 @@ void render_texture_destroy(TextureId id) {
     if (!id || id >= MAX_TEXTURES || !R->textures[id].used) return;
     GpuTexture *t = &R->textures[id];
     mat_sets_forget(id);
-    defer_descriptor(t->set);
+    vkam_texture_destroyed(id);
+    vkr_defer_descriptor(t->set);
     vkr_defer_image(t->image, t->view, t->alloc);
     t->used = false;
     R->stats.textures_live--;

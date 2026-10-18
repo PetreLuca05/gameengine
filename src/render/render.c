@@ -2489,6 +2489,7 @@ void render_end_frame(void) {
     vkp_frame_begin(cmd, slot);
     vkp_scope_begin(cmd, "uploads");
     vkr_record_uploads(cmd);
+    vkam_record(cmd);   // alpha masks asked for last frame (PF-0014)
 
     PROF_BEGIN("render:prepare");
     FrameData *fd = (FrameData *)f->ubo.mapped;

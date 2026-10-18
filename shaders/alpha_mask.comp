@@ -1,0 +1,12 @@
+#version 450
+// Alpha mask of a masked material texture (vk_alpha_mask.c, PF-0014): one resident level's alpha into
+// the same level of an R8 image, texel for texel, for the shadow / prepass alpha tests.
+layout(local_size_x = 8, local_size_y = 8) in;
+layout(set = 0, binding = 0) uniform sampler2D src;
+layout(set = 0, binding = 1, r8) uniform writeonly image2D dst;
+layout(push_constant) uniform Push { ivec4 p; } pc;   // x level, y / z level size
+void main() {
+    ivec2 q = ivec2(gl_GlobalInvocationID.xy);
+    if (q.x >= pc.p.y || q.y >= pc.p.z) return;
+    imageStore(dst, q, vec4(texelFetch(src, q, pc.p.x).a));
+}

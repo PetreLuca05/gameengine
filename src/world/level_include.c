@@ -40,6 +40,14 @@ static void parse_ground(const cJSON *o, LevelGround *g) {
     g->room_sink = fmaxf(num(o, "room_sink", g->room_sink), 0.0f);
     const cJSON *m = cJSON_GetObjectItemCaseSensitive(o, "material");
     if (cJSON_IsString(m)) snprintf(g->material, sizeof(g->material), "%s", m->valuestring);
+    const cJSON *h = cJSON_GetObjectItemCaseSensitive(o, "hard");
+    if (cJSON_IsObject(h)) {
+        const cJSON *hm = cJSON_GetObjectItemCaseSensitive(h, "material");
+        snprintf(g->hard_material, sizeof(g->hard_material), "%s", cJSON_IsString(hm) ? hm->valuestring : "rock");
+        g->hard_margin = fmaxf(num(h, "margin", g->hard_margin), 0.0f);
+        g->hard_min_height = fmaxf(num(h, "min_height", g->hard_min_height), 0.0f);
+        g->hard_min_size = fmaxf(num(h, "min_size", g->hard_min_size), 0.0f);
+    }
 }
 
 static bool resolve(cJSON *root, LevelReadFn read, void *user, int depth, char *err, size_t err_size) {
@@ -104,6 +112,9 @@ void level_ground_defaults(LevelGround *g) {
     g->blend = 12.0f;
     g->room_sink = 0.08f;
     snprintf(g->material, sizeof(g->material), "concrete");
+    g->hard_margin = 1.5f;
+    g->hard_min_height = 0.15f;
+    g->hard_min_size = 6.0f;
 }
 
 typedef struct FpRect { float x0, z0, x1, z1; } FpRect;
@@ -216,6 +227,73 @@ static void fp_collect(FpList *l, const cJSON *lv) {
     }
 }
 
+// ------------------------------------------------------------------ hard structures
+
+// The ground a structure brush stands on as a rotated rectangle (centre, half extents, yaw in degrees;
+// level.c build_brush's geometry); false for what is no structure on the ground: raised boxes (shelf
+// items on tables, beams), boxes lower than min_height (marker plates, floor strips), non-colliding
+// boxes, sighting targets.
+static bool hard_rect(const cJSON *b, float min_height, float *cx, float *cz, float *hx, float *hz, float *yaw) {
+    const cJSON *t = cJSON_GetObjectItemCaseSensitive(b, "type");
+    const char *type = cJSON_IsString(t) ? t->valuestring : "box";
+    const cJSON *pos = cJSON_GetObjectItemCaseSensitive(b, "pos");
+    float x = arr_f(b, "pos", 0, 0), y = cJSON_GetArraySize(pos) >= 3 ? arr_f(b, "pos", 1, 0) : 0.0f, z = arr_f(b, "pos", cJSON_GetArraySize(pos) >= 3 ? 2 : 1, 0);
+    if (y > 0.3f) return false;   // pos is the brush's base: it does not stand on the ground
+    *yaw = num(b, "yaw", 0);
+    float lz = 0.0f;   // the rectangle's centre along the brush's local Z
+    if (!strcmp(type, "box")) {
+        const cJSON *c = cJSON_GetObjectItemCaseSensitive(b, "collide");
+        if (arr_f(b, "size", 1, 1) < min_height || cJSON_IsFalse(c)) return false;
+        *hx = arr_f(b, "size", 0, 1) * 0.5f;
+        *hz = arr_f(b, "size", 2, 1) * 0.5f;
+    } else if (!strcmp(type, "ramp")) {   // centred on pos along local Z, the platform behind (-Z)
+        float plat = num(b, "platform", 0);
+        *hx = num(b, "width", 2) * 0.5f;
+        *hz = num(b, "length", 4) * 0.5f + plat * 0.5f;
+        lz = -plat * 0.5f;
+    } else if (!strcmp(type, "stairs")) {   // from pos towards local -Z, then the platform
+        float len = num(b, "count", 8) * num(b, "run", 0.3f) + num(b, "platform", 0);
+        *hx = num(b, "width", 2) * 0.5f;
+        *hz = len * 0.5f;
+        lz = -len * 0.5f;
+    } else if (!strcmp(type, "doorway")) {
+        *hx = num(b, "length", 6) * 0.5f;
+        *hz = num(b, "thickness", 0.25f) * 0.5f;
+    } else if (!strcmp(type, "tunnel")) {
+        *hx = num(b, "inner_width", 1.4f) * 0.5f + 0.25f;
+        *hz = num(b, "length", 6) * 0.5f;
+    } else {
+        return false;
+    }
+    float r = *yaw * 0.017453293f;   // local (0, lz) through quat_yaw: x += lz sin, z += lz cos
+    *cx = x + lz * sinf(r);
+    *cz = z + lz * cosf(r);
+    return true;
+}
+
+static void add_paint(cJSON *features, float cx, float cz, float w, float d, float yaw, const char *material) {
+    cJSON *p = cJSON_CreateObject();
+    cJSON_AddStringToObject(p, "type", "paint");
+    const float pos[2] = { cx, cz }, size[2] = { w, d };
+    cJSON_AddItemToObject(p, "pos", cJSON_CreateFloatArray(pos, 2));
+    cJSON_AddItemToObject(p, "size", cJSON_CreateFloatArray(size, 2));
+    if (yaw != 0.0f) cJSON_AddNumberToObject(p, "yaw", yaw);
+    cJSON_AddStringToObject(p, "material", material);
+    cJSON_AddItemToArray(features, p);
+}
+
+static int hard_paints(const cJSON *lv, const LevelGround *g, cJSON *features) {
+    int n = 0;
+    const cJSON *it;
+    cJSON_ArrayForEach(it, cJSON_GetObjectItemCaseSensitive(lv, "brushes")) {
+        float cx, cz, hx, hz, yaw;
+        if (!hard_rect(it, g->hard_min_height, &cx, &cz, &hx, &hz, &yaw)) continue;
+        add_paint(features, cx, cz, fmaxf(2.0f * (hx + g->hard_margin), g->hard_min_size), fmaxf(2.0f * (hz + g->hard_margin), g->hard_min_size), yaw, g->hard_material);
+        n++;
+    }
+    return n;
+}
+
 static void add_pad(cJSON *features, float cx, float cz, float w, float d, float level, float blend, const char *material) {
     cJSON *p = cJSON_CreateObject();
     cJSON_AddStringToObject(p, "type", "pad");
@@ -232,6 +310,7 @@ int level_footprint_pads(const cJSON *lv, const LevelGround *g, cJSON *features)
     FpList l = { 0 };
     fp_collect(&l, lv);
     if (!l.n) return 0;
+    int pads = 0;
     // Rasterize the grown rectangles on a cell grid, then cover the marked cells with rectangles
     // (greedy: widest run, then as many rows as it spans).
     float x0 = 1e30f, z0 = 1e30f, x1 = -1e30f, z1 = -1e30f;
@@ -245,7 +324,10 @@ int level_footprint_pads(const cJSON *lv, const LevelGround *g, cJSON *features)
     x0 = floorf(x0 / c) * c;
     z0 = floorf(z0 / c) * c;
     int nx = (int)ceilf((x1 - x0) / c), nz = (int)ceilf((z1 - z0) / c);
-    if (nx <= 0 || nz <= 0 || (double)nx * nz > 64e6) { free(l.r); return 0; }
+    if (nx <= 0 || nz <= 0 || (double)nx * nz > 64e6) {
+        free(l.r);
+        return g->hard_material[0] ? hard_paints(lv, g, features) : 0;
+    }
     unsigned char *m = (unsigned char *)calloc((size_t)nx * (size_t)nz, 1);
     for (int i = 0; i < l.n; i++) {
         int a = (int)floorf((l.r[i].x0 - g->margin - x0) / c), b = (int)ceilf((l.r[i].x1 + g->margin - x0) / c);
@@ -253,7 +335,6 @@ int level_footprint_pads(const cJSON *lv, const LevelGround *g, cJSON *features)
         for (int z = e < 0 ? 0 : e; z < f && z < nz; z++)
             for (int x = a < 0 ? 0 : a; x < b && x < nx; x++) m[(size_t)z * nx + x] = 1;
     }
-    int pads = 0;
     for (int z = 0; z < nz; z++)
         for (int x = 0; x < nx; x++) {
             if (m[(size_t)z * nx + x] != 1) continue;
@@ -277,5 +358,7 @@ int level_footprint_pads(const cJSON *lv, const LevelGround *g, cJSON *features)
         add_pad(features, 0, 0, arr_f(room, "size", 0, 60) + 2.0f * t, arr_f(room, "size", 2, 60) + 2.0f * t, g->level - g->room_sink, 0.6f, g->material);
         pads++;
     }
+    // the hard structures' ground (paint wins over the pads whatever the order)
+    if (g->hard_material[0]) pads += hard_paints(lv, g, features);
     return pads;
 }

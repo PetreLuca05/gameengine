@@ -66,6 +66,7 @@ typedef struct GpuTexture {
     // keeps their top `dropped` levels out of memory; w / h / mips are what is resident.
     bool world;
     u32 full_w, full_h, full_mips, dropped;
+    u32 serial;       // R->tex_serial at the last image change (derived data keys on it: vk_alpha_mask.c)
 } GpuTexture;
 
 typedef struct RenderTarget {
@@ -307,6 +308,7 @@ typedef struct Renderer {
     VkDescriptorSetLayout lit_post_layout; // set 2 of layout_lit (push descriptor: AO, contact, SSR, SSGI)
     VkDescriptorSetLayout mat_layout;     // set 3 of layout_lit: glTF PBR maps (metallic-roughness, normal, occlusion, emissive)
     VkDescriptorPool pool;
+    u32 tex_serial;                       // bumped on every texture image change (GpuTexture.serial)
     VkPipelineLayout layout_lit;          // set0 + set1 + push lit
     VkPipelineLayout layout_ui;           // set1 + push (vertex + fragment: screen scale, 1 / size)
     VkPipelineLayout layout_ui3d;         // push only (render_ui.c item views)
@@ -510,6 +512,7 @@ void vkg_samplers_changed(void);          // vk_vgeo.c: the classic renderer re-
 void vkg_texture_replaced(u32 id);        // vk_vgeo.c: texture `id` has a new image (the classic renderer re-wraps its slots)
 VkDescriptorSet vkr_alloc_tex_set(VkImageView view, VkSampler sampler);
 void vkr_write_tex_set(VkDescriptorSet set, VkImageView view, VkSampler sampler);
+void vkr_defer_descriptor(VkDescriptorSet set);   // a set of R->pool freed once the frame slot's GPU work is done
 void vkr_rewrite_all_texture_sets(void);
 // Set 3 of layout_lit for a material's glTF maps (index into R->mat_sets, 0 = no maps / table full);
 // maps that are not ready yet sample white (flat for the normal map) until they are.
@@ -549,6 +552,14 @@ void vkt_samplers_changed(void);
 void vkt_frame_data(FrameData *fd, int slot);
 void vkr_upload_image(VkImage image, u32 w, u32 h, u32 mips, u32 layers, const void *data, const size_t *mip_offsets, size_t size);
 void vkr_cancel_image_upload(VkImage image);
+
+// vk_alpha_mask.c: R8 alpha copies of masked material textures for the shadow / prepass alpha tests
+// (PF-0014). vkam_set: the mask's set 1 (sampler: the one the draw would bind), or NULL until built
+// (it is queued; vkam_record builds it at the next frame's start, after the uploads).
+VkDescriptorSet vkam_set(TextureId t, VkSampler sampler);
+void vkam_record(VkCommandBuffer cmd);
+void vkam_texture_destroyed(TextureId t);
+void vkam_shutdown(void);
 
 // vk_light_shadow.c: shadows of point / spot lights (docs/LIGHT_SHADOWS.md)
 void vkls_init(void);

@@ -96,6 +96,17 @@ cull time.
 - A multi-material model mesh whose page data is not in memory falls back to the exported LODs with its
   first material only (no such content today).
 
+### Alpha masks (PF-0014)
+
+The alpha tests of masked materials in the sun cascades, the local light shadow tiles and the prepass only
+read alpha, so they bind an R8 copy of the texture's alpha instead of the RGBA albedo
+(`src/render/vk_alpha_mask.c`, `shaders/alpha_mask.comp`): every resident level copied texel for texel on the
+GPU at the start of the frame after a draw first asks for it (until then the albedo is bound), rebuilt when
+the texture's image changes (`GpuTexture.serial`) or its sampler does. The sampled view swizzles R into A,
+so `cl_mask_alpha` is unchanged. The lit pass and the scope PiP keep the albedo. Bit-identical results
+(perf_verify: images and state pass); in the forest interiors the shadow pass changed by only -1.7 %
+(not significant): it is bound by fragment / raster work, not texture bandwidth.
+
 ### Dense forest cost (after the realistic tree heights)
 
 `tree_scale.cfg`'s zombieland forest stop (`setpos -100 120 600 0 6`, third person, 1600 x 900, uncapped,

@@ -92,6 +92,13 @@ floor at the room's size (no `floor_size`, no invisible boundary: the world's ed
 the water ground under the level file's own bodies is baked from the physics like a brush level's.
 Keep `devroom.json`'s `footprint_areas` in step when a dev room area without brushes moves.
 The including level's own `room` keys win over the included room's: devroom_vegetation sets `"room": {"floor": false}`: no floor slab, the dev room stands on the valley's ground (its pads are `grass`, no room sink). `"floor_grid": false` keeps a slab without the grid.
+`ground.hard` paints the ground under the included content's hard structures: `{"material": "rock", "margin": 1.5,
+"min_height": 0.15, "min_size": 6}` adds one rotated `paint` rectangle per brush standing on the ground (base
+at most 0.3 m up: boxes at least `min_height` tall that collide, ramps / stairs with their platforms,
+doorways, tunnels; not raised boxes such as shelf items, marker plates, floor strips or sighting targets),
+grown by `margin`, each side at least `min_size` (the terrain blend map keeps the dominant material of a
+7 m box, `blend_radius_m` 3: a narrower strip along a thin wall would vanish). devroom_vegetation paints
+rock under its walls and blocks. Paint changes only the material: the pads still decide height and trees.
 **Paint features win over pads** (the generator applies them after): keep `paint` rectangles and other
 material features off the included footprint. devroom_vegetation also keeps the audio range's surroundings
 clear (no forest / hill near the pad, a flat empty field within 450 m of (-700, 300)); test_level_include checks it.
