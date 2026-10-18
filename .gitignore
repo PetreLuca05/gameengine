@@ -55,3 +55,6 @@ Thumbs.db
 
 # Maps tab globe: downloaded source data (tools/globe/build_globe.py re-fetches it)
 /tools/globe/cache/
+
+# Cell images turned a quarter (bake_cells writes them for tools; docs/INVENTORY.md "Cell images")
+/assets/ui/cells/*_r.png

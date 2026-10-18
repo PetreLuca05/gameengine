@@ -78,7 +78,13 @@ The sight pass draws the window and the scope image at the JSON lens position (d
 so a mesh must keep the view path clear:
 
 - No opaque geometry inside the window radius in front of the eye-side lens plane.
-- A red dot is an open tube. The glass and the dot are the sight pass's.
+- A red dot is an open tube. The glass and the dot are the sight pass's. It has no eye-side lid: a
+  few cm from the eye an opened flip cap fills the view beside the window whatever its hinge
+  (`_optics.flip_cap(lid=False)` keeps the ring).
+- The weapon's own parts that stand on the optic's sight line hide or fold with the `optic` slot:
+  iron sights (the sniper's front post hides with its hood), the LMG's carry handle (folds down to
+  the left about the barrel, as on the real gun). A rear sight leaf is an open frame (the LMG's
+  aperture ring on two side bars), so the view below the aperture stays clear in ADS.
 - In a scope, the ocular lens sits 4 mm forward of the lens plane. The full lens stack (objective,
   erector pair, ocular) is real geometry, and the `reticle` socket marks the focal plane.
 

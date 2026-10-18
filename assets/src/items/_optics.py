@@ -65,18 +65,22 @@ def lens(center, axis, r, mat="glass_lens", bulge=0.0015, segs=40):
     return L.lathe(prof, c, a, segs, mat)
 
 
-def flip_cap(center, axis, r, hinge_side=(0, 1, 0), open_deg=100, mat="polymer_matte"):
-    """Flip-up lens cap, open: a ring on the tube end, the lid swung about a hinge on hinge_side."""
+def flip_cap(center, axis, r, hinge_side=(0, 1, 0), open_deg=100, mat="polymer_matte", lid=True):
+    """Flip-up lens cap, open: a ring on the tube end, the lid swung about a hinge on hinge_side. lid False:
+    the ring only (an eye-side cap taken off: open, its lid stands within a few cm of the eye and fills the
+    view beside the window wherever it is hinged)."""
     from mathutils import Vector
     a = Vector(axis).normalized()
     c = Vector(center)
     ring = L.ring_lathe([(r + 0.0005, 0), (r + 0.003, 0), (r + 0.003, 0.008), (r + 0.0005, 0.008)], c - a * 0.004, a, 40, mat, bevel=0.0004)
+    if not lid:
+        return [ring]
     hs = Vector(hinge_side).normalized()
     hinge = c + hs * (r + 0.004) + a * 0.004
-    lid = L.lathe([(0, 0), (r + 0.003, 0), (r + 0.003, 0.004), (r + 0.001, 0.005), (0, 0.005)], c + a * 0.004, a, 40, mat)
+    cap = L.lathe([(0, 0), (r + 0.003, 0), (r + 0.003, 0.004), (r + 0.001, 0.005), (0, 0.005)], c + a * 0.004, a, 40, mat)
     tab = L.box(hinge + hs * 0.002, (0.004, 0.004, 0.004), 0.001, 2, mat)
-    lid.union(tab)
+    cap.union(tab)
     # Swing the lid about the hinge axis (perpendicular to the optic axis and the hinge side).
     ax = a.cross(hs).normalized()
-    lid.rotate(tuple(ax), open_deg, tuple(hinge))
-    return [ring, lid]
+    cap.rotate(tuple(ax), open_deg, tuple(hinge))
+    return [ring, cap]

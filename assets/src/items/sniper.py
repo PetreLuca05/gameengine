@@ -65,7 +65,7 @@ def front_sight():
     hood = L.ring_lathe([(0.0062, 0), (0.0072, 0), (0.0072, 0.016), (0.0062, 0.016)], (0, LINE - 0.002, z + 0.008), (0, 0, -1), 24, "steel_blued")
     post = L.front_prism([(-0.001, BORE + 0.019), (0.001, BORE + 0.019), (0.0008, LINE), (-0.0008, LINE)], z - 0.001, z + 0.001, 0.0002, 1, "steel_blued")
     hood_leg = L.box((0, BORE + 0.022, z), (0.0028, 0.004, 0.006), 0.0005, 1, "steel_blued")
-    return [band, ramp, post], [hood, hood_leg]
+    return [band, ramp], [hood, hood_leg, post]   # the post reaches the sight line: it hides with the hood under an optic
 
 
 def stock():

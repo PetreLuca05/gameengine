@@ -1,6 +1,6 @@
 """Red dot (assets/attachments/red_dot.json): micro tube reflex sight (T-2 pattern) on a low cantilever
 Picatinny mount: 30 mm tube body with the open window (the sight pass draws the glass and the dot at the
-JSON lens: (0, 0.027, -0.012), r 10.5 mm), flip-up caps (open), elevation / windage turrets with caps,
+JSON lens: (0, 0.027, -0.012), r 10.5 mm), flip-up front cap (open; the eye-side cap off, its ring kept), elevation / windage turrets with caps,
 brightness dial and battery cap on the right, LED emitter housing under the window. Procedural (path b)."""
 import _optics as O
 import item_lib as L
@@ -38,7 +38,9 @@ def build(ctx):
     it.part("mount").add(*O.rail_clamp(-0.026, 0.02, knob_side=-1), L.box((0, 0.006, -0.003), (0.0105, 0.004, 0.022), 0.0012, 2, "aluminium_anodized"))
     it.part("body").add(*body())
     it.part("controls").add(*controls())
-    caps = O.flip_cap((0, AX_Y, LENS_Z - 0.0235), (0, 0, -1), 0.0142, (0, 1, 0), 105) + O.flip_cap((0, AX_Y, LENS_Z + 0.0175), (0, 0, 1), 0.0142, (0, -1, 0), 100)
+    # The front cap flips up; the eye-side cap is off (its ring stays on the tube): opened about any hinge,
+    # its lid stood a few cm from the eye as a large disc beside the window in ADS.
+    caps = O.flip_cap((0, AX_Y, LENS_Z - 0.0235), (0, 0, -1), 0.0142, (0, 1, 0), 105) + O.flip_cap((0, AX_Y, LENS_Z + 0.0175), (0, 0, 1), 0.0142, lid=False)
     it.part("caps", mech="lens_caps").add(*caps)
     it.socket("mount", (0, 0, 0))
     it.socket("sight", (0, AX_Y, -0.006))

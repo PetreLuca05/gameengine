@@ -58,11 +58,15 @@ def feed_cover():
 
 
 def rear_sight():
-    # Tall folding leaf with elevation drum (the sight line is 5 cm above the rail).
+    # Tall folding leaf with elevation drum (the sight line is 5 cm above the rail): an open frame, the
+    # aperture ring on two side bars, so in ADS the view below the aperture stays clear (a solid plate
+    # covered the lower centre of the screen).
     base = L.box((0, RAIL_TOP + 0.004, 0.02), (0.0115, 0.004, 0.012), 0.0008, 2, "steel_parkerized")
     leaf = L.front_prism([(-0.008, RAIL_TOP + 0.006), (0.008, RAIL_TOP + 0.006), (0.006, LINE + 0.006), (-0.006, LINE + 0.006)], 0.018, 0.022, bevel=0.0006,
                          segs=2, mat="steel_parkerized")
     leaf.cut(L.cyl((0, LINE, 0.015), (0, LINE, 0.025), 0.0017, 16, bevel=0))
+    win_lo, win_hi = RAIL_TOP + 0.012, LINE - 0.0045
+    leaf.cut(L.box((0, (win_lo + win_hi) * 0.5, 0.02), (0.0042, (win_hi - win_lo) * 0.5, 0.004), 0.0008, 2))
     drum = L.cyl((0.0115, RAIL_TOP + 0.012, 0.022), (0.019, RAIL_TOP + 0.012, 0.022), 0.0065, 24, "steel_parkerized", bevel=0.0005)
     drum.cut(L.knurl((0.012, RAIL_TOP + 0.012, 0.022), (0.019, RAIL_TOP + 0.012, 0.022), 0.0065, 24, 0.0004))
     return [base, leaf, drum]
@@ -202,7 +206,9 @@ def build(ctx):
     it.part("pistol_grip").add(g, cap)
     it.part("trigger", pivot=(0, 0.012, -0.027), mech="trigger").add(P.ar_trigger((0, 0.012, -0.027)))
     it.part("barrel").add(*barrel())
-    it.part("carry_handle", detail=False).add(*carry_handle())
+    # The carry handle folds down to the left side under an optic (as on the real gun): upright, its grip
+    # stood on the red dot's sight line and covered the aim point.
+    it.part("carry_handle", pivot=(0, BORE + 0.017, RZ0 - 0.06), fold="optic", fold_axis=(0, 0, 1), fold_angle=90.0, detail=False).add(*carry_handle())
     it.part("front_sight", hide="optic").add(*front_sight())
     it.part("muzzle_device", hide="muzzle").add(*flash_hider())
     it.part("handguard").add(*handguard())
