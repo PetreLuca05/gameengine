@@ -12,6 +12,7 @@
 // (vk_classic.c) draws the same scene tables, foliage placements and displacement buffer. Both paths
 // keep every mesh registered, so r_vgeo switches at run time (console, settings, fidelity, era).
 #include "vk_internal.h"
+#include "core/profiler.h"
 #include <SDL3/SDL.h>
 #include "graph/fg.h"
 #include "debug_draw.h"
@@ -1471,6 +1472,7 @@ u32 vkg_route_skinned(const SkinnedDraw *draws, u32 n, const mat4 *bones, u8 *ro
     u32 frame_id = ++G.route_frame, routed_n = 0;
     for (u32 k = 0; k < G.skin_count; k++) G.skin[k].need = 0;
     vg_palettes_begin(&G.pal, R->frame_slot);
+    u32 last_off = ~0u;   // profiler: parts of one character arrive together with the same palette offset
     for (u32 i = 0; i < n && !scope; i++) {
         const SkinnedDraw *d = &draws[i];
         if ((d->flags & (MAT_VIEWMODEL | MAT_SHADOW_ONLY | MAT_HIGHLIGHT | MAT_RECON)) || d->fade != 0.0f || !d->object_id) continue;   // reconstruction: skin.frag dissolve
@@ -1493,6 +1495,9 @@ u32 vkg_route_skinned(const SkinnedDraw *draws, u32 n, const mat4 *bones, u8 *ro
         G.uses[slot].rec = (u16)ri;
         G.uses[slot].frame = frame_id;
         vg_palettes_set(&G.pal, slot, &bones[off].m[0], bc);
+        prof_count(PC_SKIN_PALETTE_BYTES, (i64)bc * 64);
+        if (off != last_off) prof_count(PC_SKIN_POSES, 1);
+        last_off = off;
         VgMaterial m = G.slot_mat[slot];
         m.color[0] = d->color.x;
         m.color[1] = d->color.y;

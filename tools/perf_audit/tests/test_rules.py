@@ -127,9 +127,14 @@ class Cpu(unittest.TestCase):
 
     def test_r10_palettes(self):
         d = S.base()
-        S.counter(d, "anim_eval", 50)
         S.counter(d, "skin_palettes", 120)
+        S.counter(d, "skin_poses", 50)
+        S.counter(d, "skin_palette_bytes", 120 * 50 * 64)
         self.assertIn("R10", rules_of(run(d)))
+        d2 = S.base()
+        S.counter(d2, "skin_palettes", 50)
+        S.counter(d2, "skin_poses", 50)
+        self.assertNotIn("R10", rules_of(run(d2)))
 
     def test_r12_offscreen_client_anim(self):
         d = S.base()

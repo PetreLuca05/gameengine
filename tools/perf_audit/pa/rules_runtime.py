@@ -309,16 +309,20 @@ def r08_hot_alloc(p, ctx):
     return out
 
 
-@rule("R10", "Redundant skinning palette work")
+@rule("R10", "Redundant skinning palette uploads")
 def r10_skinning(p, ctx):
-    evals, pals = p.counter_mean("anim_eval"), p.counter_mean("skin_palettes")
-    if evals <= 0 or pals <= evals * 1.1:
+    """Every part of a modular character is its own vgeo palette slot and uploads the same palette
+    (the parts share one bone offset): sets vs distinct palettes per frame."""
+    sets, poses, bytes_ = p.counter_mean("skin_palettes"), p.counter_mean("skin_poses"), p.counter_mean("skin_palette_bytes")
+    if poses <= 0 or sets <= poses * 1.1:
         return []
-    return [Finding("R10", "palettes_vs_evals", "%.0f palettes uploaded per frame for %.0f evaluated poses" % (pals, evals), "anim/skinning",
-                    {"file": "src/render/vgeo/vgeo_skin.c"}, {p.key: {"palettes": round(pals, 1), "anim_evals": round(evals, 1)}},
-                    {"cpu_ms": (pals - evals) * 0.002}, "medium", "M",
-                    "Upload a palette once per pose and let the main, shadow and viewmodel passes share the slot (the bone SSBO already holds "
-                    "this frame's palettes).", scene=p.key)]
+    dup = (sets - poses) / sets
+    return [Finding("R10", "duplicate_palettes", "%.0f palette uploads per frame for %.0f distinct palettes (%.0f%% duplicates, %.0f kB)" % (
+        sets, poses, 100 * dup, bytes_ * dup / 1024.0), "anim/skinning", {"file": "src/render/vk_vgeo.c", "function": "vkg_route_skinned"},
+        {p.key: {"palette_sets": round(sets, 1), "distinct": round(poses, 1), "bytes_per_frame": round(bytes_)}},
+        {"cpu_ms": p.zone_mean("vgeo:palettes_record") * dup, "mb": 0.0}, "high", "M",
+        "Give each character one palette slot shared by its parts (slot keyed by object id + bone offset instead of per part "
+        "mesh): the same matrices, uploaded once.", scene=p.key)]
 
 
 @rule("R12", "Off-screen animation on clients")

@@ -69,7 +69,7 @@ typedef struct ProfSection { char key[24]; ProfSectionFn fn; } ProfSection;
 static const char *k_wait_names[PW_COUNT] = { "gpu_fence", "acquire", "present", "readback", "jobs_wait", "parfor_tail", "io", "fps_cap" };
 static const char *k_counter_names[PC_COUNT] = {
     "alloc_count", "alloc_bytes", "free_count", "memcpy_calls", "memcpy_bytes", "cvar_find", "log_lines", "io_reads", "io_bytes", "jobs", "parfor",
-    "anim_eval", "anim_eval_offscreen", "skin_palettes", "skin_palette_bytes", "vfx_emitters", "vfx_emitters_culled", "audio_voices",
+    "anim_eval", "anim_eval_offscreen", "skin_palettes", "skin_palette_bytes", "skin_poses", "vfx_emitters", "vfx_emitters_culled", "audio_voices",
     "audio_voices_silent", "ui_text", "ui_verts", "draw_items", "shadow_items",
 };
 static const char *k_fix_ids[PFX_COUNT] = { "PF-0001", "PF-0002", "PF-0003", "PF-0004", "PF-0005" };
@@ -329,6 +329,12 @@ static const char *symbol_name(const void *fn, char *buf, size_t size) {
         dg_strcpy(buf, size, sym.info.Name);
         return buf;
     }
+#elif defined(__GNUC__) && defined(__linux__)
+    // No symbol table at run time: the offset from the executable's start is stable across runs
+    // (ASLR moves the base) and resolves with addr2line -e deadground.
+    extern char __executable_start;
+    snprintf(buf, size, "fn_+0x%llx", (unsigned long long)((uintptr_t)fn - (uintptr_t)&__executable_start));
+    return buf;
 #endif
     snprintf(buf, size, "fn_%p", fn);
     return buf;
