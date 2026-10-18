@@ -422,12 +422,14 @@ static void env_preview(struct nk_context *ctx, SynLibrary *lib) {
         vec3 Si = v3_max(v3_min(Sp, v3_sub(room.mx, v3s(0.3f))), v3_add(room.mn, v3s(0.3f)));
         ep.ntaps = env_room_taps(&room, Si, L, right, c, ep.tap, ENV_MAX_TAPS);
         env_room_reverb(&room, &rv);
-        ep.send[0] = r->reverb * 0.3f * fminf(1.0f / fmaxf(g, 1e-3f), 6.0f);
+        ep.send[0] = r->reverb * env_reverb_send(v3_dist(Si, L), room.volume, 1.0f);
         audio_preview_reverb(0, &rv, 6.0f);
         E.out_rt60 = room.rt60[1];
     } else {
-        env_outdoor_reverb(0, 0, 0, &rv);
-        ep.send[2] = r->reverb * 0.24f * fminf(1.0f / fmaxf(g, 1e-3f), 6.0f);
+        EnvField fld = { 0, 0, E.reflector > 0 ? 0.25f : 0.0f, E.reflector, 0 };
+        env_outdoor_reverb(&fld, &rv);
+        ep.send[2] = r->reverb * env_outdoor_send(&fld, d);
+        audio_preview_reverb(2, &rv, 6.0f);
     }
     E.out_gain_db = syn_todb(g);
     E.out_lp = lp;

@@ -10,7 +10,7 @@
     { "id": "hg", "type": "gain", "amp": "$hiss*0.4", "in": "hp" },
     { "id": "b", "type": "noise", "color": "brown" },
     { "id": "lp", "type": "biquad", "mode": "lp", "hz": 200, "in": "b" },
-    { "id": "am", "type": "am", "hz": 1.7, "depth": 0.4, "in": "lp" },
+    { "id": "am", "type": "am", "lfo": "noise", "hz": 1.7, "depth": 0.4, "in": "lp" },
     { "id": "rg", "type": "gain", "amp": "$roar", "in": "am" },
     { "id": "m", "type": "mix", "in": ["c", "hg", "rg"], "amp": "$amp" }
   ],

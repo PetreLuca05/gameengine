@@ -24,7 +24,7 @@
 
 #define RCP_MAX_INPUTS 24
 #define RCP_MAX_LAYERS 4
-#define RCP_MAX_BINDS 12
+#define RCP_MAX_BINDS 20
 #define SYN_LIB_PATCHES 160
 #define SYN_LIB_RECIPES 128
 

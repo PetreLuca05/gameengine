@@ -1,23 +1,211 @@
 {
-  "_doc": "Engine: cylinder firing pulses at rpm x cylinders / 120 (4-stroke) with per-cylinder variation and jitter, driven harder under load, through a waveguide exhaust and a small body resonance; intake roar by throttle.",
+  "_doc": "Engine: cylinder firing pulses at rpm x cylinders / 120 (4-stroke) with per-cylinder variation and jitter, driven harder under load, through a waveguide exhaust and a small body resonance; intake roar by throttle; gearbox whine locked to the rpm, the valve train's tick.",
   "name": "engine",
   "loop": true,
   "params": {
-    "fire_hz": [30, 2, 600], "amp": [1, 0, 3], "drive": [1.5, 0.5, 6], "decay_ms": [4, 0.5, 20], "width_ms": [0.6, 0.1, 5], "rough": [0.03, 0, 0.3],
-    "pipe": [1.4, 0.2, 4], "lp": [3000, 300, 16000], "intake": [0.1, 0, 1], "intake_hz": [400, 60, 4000]
+    "fire_hz": [
+      30,
+      2,
+      600
+    ],
+    "amp": [
+      1,
+      0,
+      3
+    ],
+    "drive": [
+      1.5,
+      0.5,
+      6
+    ],
+    "decay_ms": [
+      4,
+      0.5,
+      20
+    ],
+    "width_ms": [
+      0.6,
+      0.1,
+      5
+    ],
+    "rough": [
+      0.03,
+      0,
+      0.3
+    ],
+    "pipe": [
+      1.4,
+      0.2,
+      4
+    ],
+    "lp": [
+      3000,
+      300,
+      16000
+    ],
+    "intake": [
+      0.1,
+      0,
+      1
+    ],
+    "intake_hz": [
+      400,
+      60,
+      4000
+    ],
+    "whine_hz": [
+      600,
+      50,
+      6000
+    ],
+    "whine": [
+      0.02,
+      0,
+      0.5
+    ],
+    "tick_rate": [
+      30,
+      0,
+      400
+    ],
+    "tick": [
+      0.02,
+      0,
+      0.5
+    ]
   },
   "nodes": [
-    { "id": "pu", "type": "pulses", "hz": "$fire_hz", "width_ms": "$width_ms", "decay_ms": "$decay_ms", "jitter": "$rough", "count": 4, "spread": 0.15 },
-    { "id": "sh", "type": "shaper", "mode": "asym", "drive": "$drive", "mix": 0.8, "in": "pu" },
-    { "id": "wg", "type": "waveguide", "in": "sh", "length": "$pipe", "reflect": -0.85, "loss": 0.35 },
-    { "id": "body", "type": "modal", "in": "wg", "modes": [[85, 0.08, 1], [160, 0.06, 0.7], [310, 0.05, 0.5]], "amp": 0.002, "_amp": "driven continuously: a mode gains ~ 1 / (1 - r) at resonance" },
-    { "id": "n", "type": "noise", "color": "pink" },
-    { "id": "ib", "type": "svf", "mode": "bp", "hz": "$intake_hz", "q": 1.5, "in": "n" },
-    { "id": "ig", "type": "gain", "amp": "$intake", "in": "ib" },
-    { "id": "m", "type": "mix", "in": ["wg", "body", "ig"], "gains": [0.6, 1, 1] },
-    { "id": "lp", "type": "biquad", "mode": "lp", "hz": "$lp", "q": 0.7, "in": "m" },
-    { "id": "hp", "type": "biquad", "mode": "hp", "hz": 30, "in": "lp" },
-    { "id": "out", "type": "gain", "amp": "$amp", "in": "hp" }
+    {
+      "id": "pu",
+      "type": "pulses",
+      "hz": "$fire_hz",
+      "width_ms": "$width_ms",
+      "decay_ms": "$decay_ms",
+      "jitter": "$rough",
+      "count": 4,
+      "spread": 0.15
+    },
+    {
+      "id": "sh",
+      "type": "shaper",
+      "mode": "asym",
+      "drive": "$drive",
+      "mix": 0.8,
+      "in": "pu"
+    },
+    {
+      "id": "wg",
+      "type": "waveguide",
+      "in": "sh",
+      "length": "$pipe",
+      "reflect": -0.85,
+      "loss": 0.35
+    },
+    {
+      "id": "body",
+      "type": "modal",
+      "in": "wg",
+      "modes": [
+        [
+          85,
+          0.08,
+          1
+        ],
+        [
+          160,
+          0.06,
+          0.7
+        ],
+        [
+          310,
+          0.05,
+          0.5
+        ]
+      ],
+      "amp": 0.002,
+      "_amp": "driven continuously: a mode gains ~ 1 / (1 - r) at resonance"
+    },
+    {
+      "id": "n",
+      "type": "noise",
+      "color": "pink"
+    },
+    {
+      "id": "ib",
+      "type": "svf",
+      "mode": "bp",
+      "hz": "$intake_hz",
+      "q": 1.5,
+      "in": "n"
+    },
+    {
+      "id": "ig",
+      "type": "gain",
+      "amp": "$intake",
+      "in": "ib"
+    },
+    {
+      "id": "wh",
+      "type": "osc",
+      "wave": "sine",
+      "hz": "$whine_hz",
+      "amp": "$whine"
+    },
+    {
+      "id": "tk",
+      "type": "grains",
+      "src": "click",
+      "rate": "$tick_rate",
+      "hz": 5500,
+      "spread": 0.3,
+      "dur_ms": 1.5,
+      "q": 4
+    },
+    {
+      "id": "tg",
+      "type": "gain",
+      "amp": "$tick",
+      "in": "tk"
+    },
+    {
+      "id": "m",
+      "type": "mix",
+      "in": [
+        "wg",
+        "body",
+        "ig",
+        "wh",
+        "tg"
+      ],
+      "gains": [
+        0.6,
+        1,
+        1,
+        1,
+        1
+      ]
+    },
+    {
+      "id": "lp",
+      "type": "biquad",
+      "mode": "lp",
+      "hz": "$lp",
+      "q": 0.7,
+      "in": "m"
+    },
+    {
+      "id": "hp",
+      "type": "biquad",
+      "mode": "hp",
+      "hz": 30,
+      "in": "lp"
+    },
+    {
+      "id": "out",
+      "type": "gain",
+      "amp": "$amp",
+      "in": "hp"
+    }
   ],
   "out": "out"
 }

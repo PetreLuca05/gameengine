@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-static const char *k_opt_keys[] = { "wave", "color", "mode", "src", "play" };
+static const char *k_opt_keys[] = { "wave", "color", "mode", "src", "play", "lfo" };
 
 static bool parse_value(SynPatch *p, const cJSON *v, SynParamSrc *dst, const char **pending_mod, char *err, int err_size) {
     dst->scale = 1.0f;
@@ -223,7 +223,7 @@ static const char *opt_name(int type, int opt, char *buf, size_t n) {
 char *syn_patch_write(const SynPatch *p, const char *const *sample_names, int sample_count) {
     static const char *k_opt_key_of[SN_COUNT] = {
         [SN_OSC] = "wave", [SN_NOISE] = "color", [SN_GRAINS] = "src", [SN_BIQUAD] = "mode", [SN_SVF] = "mode",
-        [SN_ONEPOLE] = "mode", [SN_SHAPER] = "mode", [SN_SAMPLE] = "play",
+        [SN_ONEPOLE] = "mode", [SN_SHAPER] = "mode", [SN_SAMPLE] = "play", [SN_AM] = "lfo",
     };
     cJSON *root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "name", p->name);

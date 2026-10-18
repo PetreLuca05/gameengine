@@ -13,7 +13,7 @@ static const SynNodeInfo k_info[SN_COUNT] = {
     [SN_FRIEDLANDER] = { "friedlander", { "amp", "dur_ms", "b", "delay_ms" }, { 1, 2, 1.5f, 0 }, NULL, 0, 0 },
     [SN_NWAVE] = { "nwave", { "amp", "dur_ms", "rise_us", "delay_ms" }, { 1, 0.3f, 20, 0 }, NULL, 0, 0 },
     [SN_PULSES] = { "pulses", { "hz", "amp", "jitter", "width_ms", "decay_ms", "count", "spread" }, { 30, 1, 0, 0.5f, 3, 4, 0.2f }, NULL, 0, 0 },
-    [SN_GLOTTAL] = { "glottal", { "hz", "amp", "open", "jitter", "shimmer", "fry", "fry_hz", "breath" }, { 110, 1, 0.6f, 0.01f, 0.05f, 0, 30, 0.1f }, NULL, 0, 0 },
+    [SN_GLOTTAL] = { "glottal", { "hz", "amp", "open", "jitter", "shimmer", "fry", "fry_hz", "breath" }, { 110, 1, 0.6f, 0.01f, 0.05f, 0, 30, 0.1f }, NULL, 0, 1 },
     [SN_GRAINS] = { "grains", { "rate", "amp", "hz", "spread", "dur_ms", "decay", "q" }, { 100, 1, 3000, 0.5f, 5, 0, 4 }, "noise|sine|click|sample", 0, 0 },
     [SN_ENV] = { "env", { "amp", "time", "gate" }, { 1, 1, 1 }, NULL, 0, 1 },
     [SN_BIQUAD] = { "biquad", { "hz", "q", "gain_db" }, { 1000, 0.707f, 0 }, "lp|hp|bp|notch|peak|lshelf|hshelf|ap", 1, 1 },
@@ -24,7 +24,7 @@ static const SynNodeInfo k_info[SN_COUNT] = {
     [SN_TILT] = { "tilt", { "db", "pivot" }, { 0, 1000 }, NULL, 1, 1 },
     [SN_SHAPER] = { "shaper", { "drive", "mix", "amp", "bias" }, { 1, 1, 1, 0 }, "tanh|fold|clip|asym", 1, 1 },
     [SN_RING] = { "ring", { "amp" }, { 1 }, NULL, 2, 2 },
-    [SN_AM] = { "am", { "hz", "depth", "amp" }, { 30, 0.5f, 1 }, NULL, 1, 2 },
+    [SN_AM] = { "am", { "hz", "depth", "amp" }, { 30, 0.5f, 1 }, "sine|noise", 1, 2 },
     [SN_GAIN] = { "gain", { "amp", "db" }, { 1, 0 }, NULL, 1, 1 },
     [SN_MIX] = { "mix", { "amp" }, { 1 }, NULL, 1, SYN_MAX_INPUTS },
     [SN_MODAL] = { "modal", { "pitch", "damp", "amp", "material", "spread", "bright" }, { 1, 1, 1, -1, 0, 0 }, NULL, 1, 1 },
@@ -93,7 +93,7 @@ typedef struct StBiquad { SynBiquad f; float hz, q, gain; bool init; } StBiquad;
 typedef struct StSvf { SynSvf f; float hz, q; bool init; } StSvf;
 typedef struct StOnePole { float z; } StOnePole;
 typedef struct StLine { int len, pos; float lp, ms; float buf[]; } StLine;   // comb / allpass / delay / karplus / waveguide
-typedef struct StAm { float ph; } StAm;
+typedef struct StAm { float ph, a, b, period; SynRng r; } StAm;   // noise: smooth random between a and b
 typedef struct StModal { int n; bool init; float pitch, damp, bright, spread; float a1[MODES_MAX], a2[MODES_MAX], b[MODES_MAX], y1[MODES_MAX], y2[MODES_MAX]; float detune[MODES_MAX]; } StModal;
 typedef struct StFormant { SynBiquad f[SYN_FORMANTS]; float vowel, shift, bw; bool init; } StFormant;
 typedef struct StConv { int n, pos; bool init; float ir[CONV_TAPS], hist[CONV_TAPS]; } StConv;
@@ -225,6 +225,13 @@ void syn_voice_init(SynVoice *v, const SynPatch *p, void *arena, const float *pa
         case SN_PULSES: ((StPulses *)st)->r = syn_rng(s); ((StPulses *)st)->period_mul = 1.0f; ((StPulses *)st)->ph = 0.99999f; break;   // the first pulse fires at once
         case SN_GLOTTAL: ((StGlottal *)st)->r = syn_rng(s); ((StGlottal *)st)->amp_mul = ((StGlottal *)st)->hz_mul = 1.0f; break;
         case SN_GRAINS: ((StGrains *)st)->r = syn_rng(s); break;
+        case SN_AM: {
+            StAm *a = (StAm *)st;
+            a->r = syn_rng(s);
+            a->a = syn_rngbi(&a->r);
+            a->b = syn_rngbi(&a->r);
+            a->period = 1.0f;
+        } break;
         case SN_COMB: case SN_ALLPASS: case SN_DELAY: case SN_KARPLUS: case SN_WAVEGUIDE: ((StLine *)st)->len = (int)line_floats(d, p->sr); break;
         case SN_MODAL: {
             SynRng r = syn_rng(s);
@@ -405,7 +412,9 @@ static bool proc_node(const SynNodeDef *d, void *st, const float *const *in, flo
         StGlottal *s = (StGlottal *)st;
         float oq = syn_clampf(b[2], 0.2f, 0.95f), rise = 0.6f * oq;
         for (int i = 0; i < n; i++) {
-            float hz = (a[0] + (b[0] - a[0]) * (float)i / (float)n) * s->hz_mul;
+            // An input bends the pitch: f0 x 2^(in) (in octaves; a call's contour).
+            float bend = d->nin ? exp2f(syn_clampf(in[0][i], -3.0f, 3.0f)) : 1.0f;
+            float hz = (a[0] + (b[0] - a[0]) * (float)i / (float)n) * s->hz_mul * bend;
             s->ph += hz / sr;
             if (s->ph >= 1.0f) {
                 s->ph -= 1.0f;
@@ -660,7 +669,18 @@ static bool proc_node(const SynNodeDef *d, void *st, const float *const *in, flo
         for (int i = 0; i < n; i++) {
             float m;
             if (d->nin > 1) m = in[1][i];
-            else {
+            else if (d->opt == 1) {
+                // Smooth random (cosine-interpolated value noise, jittered periods): gusts, swells,
+                // a crowd's swell - never a periodic wobble.
+                m = s->a + (s->b - s->a) * (0.5f - 0.5f * cosf(SYN_PI * s->ph));
+                s->ph += b[0] / (sr * s->period);
+                if (s->ph >= 1.0f) {
+                    s->ph -= 1.0f;
+                    s->a = s->b;
+                    s->b = syn_rngbi(&s->r);
+                    s->period = 0.5f + syn_rng01(&s->r);
+                }
+            } else {
                 m = syn_fast_sin(s->ph);
                 s->ph += b[0] / sr;
                 if (s->ph >= 1.0f) s->ph -= 1.0f;

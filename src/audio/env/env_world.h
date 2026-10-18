@@ -60,6 +60,8 @@ typedef struct EnvVoiceState {
     int occl_frames;             // frames since its rays were cast (-1: never)
     EnvVoiceInfo info;
     vec3 occl_path;              // diffraction point (debug)
+    float ground_y;              // the ground under the source (ground reflection), NAN unknown
+    int ground_mat;
 } EnvVoiceState;
 
 typedef struct EnvWorldStats { int rays, probes, occl_updates, echo_scans; } EnvWorldStats;

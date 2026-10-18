@@ -201,13 +201,19 @@ These are the per-voice DSP stages, in order (`env_chain.c`):
 4. **Gain.** Distance law × directivity × weather masking × volume.
 5. **Early reflections.** Up to 6 taps from a 170 ms ring, each a delay, gain and pan; one
    gain-weighted low-pass per ear. The tap loops vectorize.
-6. **Direct path.** Equal-power pan, ITD of 0..0.66 ms, a head-shadow low-pass on the far ear,
-   darker from behind.
+6. **Direct path.** A spherical-head model per ear (Brown–Duda): a one-pole/one-zero shelf with
+   α = 1.05 + 0.95 cos(θ · 180/150) (+6 dB facing the ear, about −20 dB at 8 kHz on the far side,
+   less with `spread`, −30 % highs from behind), the Woodworth ITD a/c (|ψ| + sin|ψ|) (0..0.66 ms)
+   and a mild broadband ILD of ±22 %.
 7. **Sends** to three shared 8-line FDN reverbs (Householder matrix, two-band decay, pre-delay,
    allpass diffusion):
    - zone 0: the listener's room;
    - zone 1: another room (the loudest remote source's);
-   - zone 2: the outdoor diffuse field (forest, urban).
+   - zone 2: the outdoor diffuse field (forest, urban, reflectors).
+
+   The FDN's output is normalized so that a unit impulse sent in leaves RT60 / 13.8 of energy, the
+   energy of a diffuse field with that decay. The sends can then be set from physics (below)
+   instead of by ear.
 
 Every parameter is a target smoothed at block rate and ramped inside the block. Tap delays glide;
 new taps fade in.
@@ -225,6 +231,9 @@ new taps fade in.
 | Diffraction | Maekawa: 10 log10(3 + 20 N) − 4.77, N = 2 δ f / c (capped at 25 dB). Power-summed with transmission. |
 | Masking | noise floor from rain × exposure and wind; gain × r / √(r² + 1), r = level / floor (not for ambience) |
 | Room | box fitted to the 6 axis rays, narrowed by the diagonals; indoor = roof + ≥ 6 of 8 horizontal hits; absorption = mean of the hit materials (open = 1) + 0.05 clutter; Eyring RT60 per band (≤ 4 s) |
+| Ground reflection | outdoors, the image source below the ground as an extra tap: delay = (\|S′L\| − \|SL\|) / c; hard ground (concrete, asphalt, water) reflects 0.95 with the full band, soft ground (grass, dirt, snow, sand) 0.8 under a 1.6 kHz low-pass. It gives the comb and the low boost of a real open field. |
+| Room send | Sabine critical distance r_c = 0.057 √(Q V / RT60); the send gives D/R = 20 log10(r_c / r) at r m (Q: directivity factor) |
+| Outdoor field | `EnvField` (forest, urban, reflector hits, mean distance, snow) → scatter s; RT60 0.3..2.3 s; D/R at 15 m = 26 − 22 s dB (field ~+25, forest ~+6, street ~+2), falling like a room's with distance |
 | Early reflections | first-order image sources of the box (closed walls only): delay = (\|S′L\| − \|SL\|) / c, gain = √(1 − α) × \|SL\| / \|S′L\| |
 | Outdoor echoes | 24 rays (3° up, 450 m) around the source, clustered by azimuth and distance into reflectors; delay = (\|SR\| + \|RL\| − \|SL\|) / c; gain = reflectivity × size(√rays) × spreading × air, less with snow; ≥ 25 ms after the direct sound. Each echo is a **child voice**: the same recipe and seed, its optional layers dropped, started at the echo's delay, arriving from the reflector. |
 
@@ -279,6 +288,9 @@ The listener state (`game_audio_frame`) feeds the world-bus filter:
 | `audio_env_probe` | Logs the room estimate and the discrete echoes at the listener. |
 | `audio_record <file.wav> <s>` | Captures the last ≤ 4 s of output. |
 | `snd_trace 1` | Logs each voice's start: delay, gain, top cut, occlusion, zone. |
+| `audio_render` (host tool, `tools/audio_render`) | Renders any recipe offline through the real chain and mixer to a stereo WAV, in a mock scene: `--scene field\|valley\|forest\|urban\|corridor\|room\|wall\|indoor_out\|anechoic`, `--dist`, `--az`, `--hs`, `--dur`, `--seed`, `--repeat n --every s`, `--ramp key=a:b` (loops: rpm, wind), `--chain off`, `--normalize dB`, `--no-samples`. |
+| `analyze.py` | Objective measures of a WAV: peak / RMS / crest, onset and rise, time above −20 / −40 dB, octave-band shares and T60 (causal filters + Schroeder), centroid, ILD, D/R. |
+| `render_pack.py <dir>` | The listening pack: ~60 renders (every family, distances, scenes, A/B) as MP3 + a README of what to listen for. |
 | A/B switches | `snd_env 0` (chain off: distance law and pan only), `snd_echoes`, `snd_echo_max`, `snd_procedural 0` (samples only). |
 
 ## Dev room
@@ -334,7 +346,11 @@ The listener state (`game_audio_frame`) feeds the world-bus filter:
 - the delay = d / c of a world voice; occlusion through a wide wall matches the table, a narrow
   wall diffracts; same room gives taps and the room send;
 - the chain's band gains, pan, doppler pitch, a click-free gain step; the FDN's −30 dB per 0.5 s at
-  RT60 1 s.
+  RT60 1 s;
+- the head model: far-ear highs shadowed, ITD sign and size, left / right symmetry;
+- the ground tap's delay is the image path difference, grass darker and weaker than concrete;
+- the room send grows with distance and falls with volume; outdoors the field is driest, then a
+  forest, then a street; the outdoor send grows with distance.
 
 `tools/tests/audio_range.cfg` + `audio_range_check.py`:
 - in the game: corridor and tiled-room estimates within 20 %;

@@ -192,17 +192,45 @@ void env_room_reverb(const EnvRoom *r, EnvReverbParams *o) {
     float mean = cbrtf(fmaxf(r->volume, 1.0f));
     o->size = syn_clampf(mean / 6.0f, 0.3f, 2.5f);
     o->predelay_ms = syn_clampf(mean * 1.5f, 2.0f, 60.0f);
-    // A big hard room returns more diffuse energy than a small padded one.
-    o->wet = syn_clampf(0.25f + 0.25f * logf(1.0f + o->rt60_low), 0.1f, 0.7f) * r->enclosed;
+    // The level is physical: the network is calibrated and each voice's send sets its direct-to-
+    // reverberant ratio (env_reverb_send); a partly open room keeps less.
+    o->wet = r->enclosed;
 }
 
-void env_outdoor_reverb(float forest, float urban, float snow, EnvReverbParams *o) {
-    // Forest: dense, short, dark scattering from trunks and leaves. Urban: brighter, longer.
-    o->rt60_low = 0.6f + 0.8f * forest + 1.2f * urban;
-    o->rt60_high = 0.3f + 0.3f * forest + 0.8f * urban;
-    o->size = 1.4f + 0.8f * urban;
-    o->predelay_ms = 15.0f + 25.0f * urban;
-    o->wet = (0.25f * forest + 0.2f * urban) * (1.0f - 0.6f * snow);
+float env_reverb_send(float r, float volume, float q) {
+    // Sabine: reverberant / direct energy = 16 pi r^2 / (Q A), RT60 = 0.161 V / A, and the network's
+    // impulse integral is RT60 / 13.8: send^2 RT60 / 13.8 = 16 pi r^2 / (Q A) -> send = 65.6 r / sqrt(Q V).
+    if (r < 0.5f) r = 0.5f;
+    if (volume < 1.0f) volume = 1.0f;
+    float s = 65.6f * r / sqrtf(fmaxf(q, 0.5f) * volume);
+    return s < 40.0f ? s : 40.0f;
+}
+
+static float outdoor_scatter(const EnvField *f) {
+    return syn_clampf(1.2f * f->forest + 1.3f * f->urban + 0.9f * f->hits, 0.0f, 1.2f) * (1.0f - 0.4f * f->snow);
+}
+
+void env_outdoor_reverb(const EnvField *f, EnvReverbParams *o) {
+    // Forest: dense, dark scattering from trunks and leaves; streets: bright, longer flutter between
+    // facades; terrain: a long low roll the farther it is (a valley's walls 150 m off ~1.5 s).
+    float terrain = f->hits * (0.5f + f->mean_dist / 90.0f);
+    o->rt60_low = fmaxf(fmaxf(0.3f, 0.6f + 0.8f * f->forest), fmaxf(f->urban > 0.05f ? 0.8f + 0.7f * f->urban : 0.0f, terrain));
+    o->rt60_low = fminf(o->rt60_low, 4.0f);
+    float bright = f->forest > f->urban ? 0.45f : (f->urban > 0.05f ? 0.75f : 0.6f);
+    o->rt60_high = o->rt60_low * bright * (1.0f - 0.4f * f->snow);
+    o->size = 1.4f + 0.8f * f->urban + 0.5f * f->hits;
+    o->predelay_ms = syn_clampf(10.0f + f->mean_dist * f->hits * 0.15f, 5.0f, 80.0f);
+    o->wet = 1.0f;   // calibrated network: the send sets the level
+}
+
+float env_outdoor_send(const EnvField *f, float d) {
+    float s = outdoor_scatter(f);
+    if (s < 0.03f) return 0.0f;
+    EnvReverbParams rv;
+    env_outdoor_reverb(f, &rv);
+    float dr15 = 26.0f - 22.0f * s;   // dB at 15 m
+    float send = sqrtf(13.8f * powf(10.0f, -dr15 / 10.0f) / rv.rt60_low) * syn_clampf(d / 15.0f, 0.2f, 10.0f);
+    return send < 40.0f ? send : 40.0f;
 }
 
 // ------------------------------------------------------------------ outdoor echoes
@@ -269,4 +297,21 @@ void env_pan(vec3 lis, vec3 right, vec3 fwd, vec3 p, float *pan, float *front) {
     *pan = syn_clampf(v3_dot(d, right), -1.0f, 1.0f);
     float f = v3_dot(d, fwd);
     *front = v3_len2(fwd) > 0 ? f : 1.0f;
+}
+
+bool env_ground_tap(float hs, float hl, float dh, int ground_mat, float c, EnvTap *out) {
+    hs = hs < 0.02f ? 0.02f : hs;
+    hl = hl < 0.02f ? 0.02f : hl;
+    float r1 = sqrtf(dh * dh + (hs - hl) * (hs - hl)), r2 = sqrtf(dh * dh + (hs + hl) * (hs + hl));
+    if (r1 < 0.05f) return false;
+    bool soft = ground_mat == SYN_MAT_GRASS || ground_mat == SYN_MAT_DIRT || ground_mat == SYN_MAT_SAND || ground_mat == SYN_MAT_SNOW ||
+                ground_mat == SYN_MAT_MUD || ground_mat == SYN_MAT_LEAVES || ground_mat == SYN_MAT_FOLIAGE;
+    // Pressure reflection: hard ground ~0.95 flat; porous ground keeps the lows (still ~0.85 below
+    // ~500 Hz near grazing) and swallows the highs.
+    float q = soft ? 0.8f : 0.95f;
+    out->delay_s = (r2 - r1) / c;
+    out->gain = q * r1 / r2;
+    out->lp_hz = soft ? 1600.0f : 16000.0f;
+    out->pan = 0.0f;   // set by the caller: the image is in the source's direction
+    return true;
 }

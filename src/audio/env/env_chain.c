@@ -111,22 +111,36 @@ void env_chain_process(EnvChain *c, const float *in, int n, float *out_l, float 
     float lp1 = c->lp1, lp2 = c->lp2, x250 = c->x250, x2k = c->x2k;
     // Complementary split: low + mid + high == s; each band and the gain ramp across the block.
     float d0 = (b1[0] - b0[0]) * inv, d1 = (b1[1] - b0[1]) * inv, d2 = (b1[2] - b0[2]) * inv, dg = (g1 - g0) * inv;
-    // Direct: equal-power pan, ITD (the far ear later), head shadow (far ear darker), behind darker.
-    float pan = p1 * (1.0f - s1);
-    float th = (pan + 1.0f) * (SYN_PI * 0.25f);
-    float gl1 = cosf(th), gr1 = sinf(th);
-    float pa = p0 * (1.0f - s0), tha = (pa + 1.0f) * (SYN_PI * 0.25f);
-    float gl0 = cosf(tha), gr0 = sinf(tha);
-    float itd = fabsf(pan) * 0.00066f * sr;
-    float rear = f1 < 0 ? -f1 : 0.0f;
-    float shadow_hz = 20000.0f - 17000.0f * fabsf(pan) - 8000.0f * rear;
-    float ks = syn_onepole_coef(shadow_hz < 2500.0f ? 2500.0f : shadow_hz, sr);
-    float kn = syn_onepole_coef(20000.0f - 9000.0f * rear, sr);
+    // Direct: the spherical-head model (Brown & Duda 1998). Each ear is a first-order shelf
+    // H(s) = (alpha s + beta) / (s + beta), beta = 2c / a (head radius a = 8.75 cm): alpha ~ 2 on the
+    // ear facing the source (+6 dB highs), ~0.1 in its shadow, the bright spot right behind the head.
+    // The far ear hears it later by Woodworth's ITD, (a / c)(psi + sin psi). Plus a mild broadband
+    // level difference, and the pinna's darkening from behind. Spread (2D, very close) blends to centre.
+    float pan = p1 * (1.0f - s1), front = f1;
+    float az = atan2f(pan, fabsf(front) > 1e-4f || fabsf(pan) > 1e-4f ? front : 1.0f);   // 0 ahead, +pi/2 right
+    float rear = front < 0 ? -front : 0.0f;
+    const float head_a = 0.0875f, beta = 2.0f * 343.0f / head_a, K = 2.0f * sr;
+    float hb0[2], hb1[2], ha1[2];
+    for (int e = 0; e < 2; e++) {
+        float ear = e == 0 ? -SYN_PI * 0.5f : SYN_PI * 0.5f;   // left, right ear axis
+        float th = fabsf(az - ear);
+        if (th > SYN_PI) th = 2.0f * SYN_PI - th;
+        float alpha = 1.05f + 0.95f * cosf(th * (180.0f / 150.0f));
+        alpha = 1.0f + (alpha - 1.0f) * (1.0f - s1);
+        alpha *= 1.0f - 0.3f * rear;
+        hb0[e] = (alpha * K + beta) / (K + beta);
+        hb1[e] = (beta - alpha * K) / (K + beta);
+        ha1[e] = (beta - K) / (K + beta);
+    }
+    float psi = asinf(syn_clampf(pan, -1.0f, 1.0f));
+    float itd = head_a / 343.0f * (fabsf(psi) + sinf(fabsf(psi))) * sr;
+    float gl1 = 0.72f * (1.0f - 0.22f * pan), gr1 = 0.72f * (1.0f + 0.22f * pan);
+    float pa = p0 * (1.0f - s0);
+    float gl0 = 0.72f * (1.0f - 0.22f * pa), gr0 = 0.72f * (1.0f + 0.22f * pa);
     bool right_far = pan < 0;   // source on the left: the right ear is far
     int di = (int)itd;
     float fr = itd - (float)di;
-    float kl = right_far ? kn : ks, kr = right_far ? ks : kn;
-    float shl = c->shadow_l, shr = c->shadow_r;
+    float shl = c->shadow_l, shr = c->shadow_r, xl1 = c->head_x[0], xr1 = c->head_x[1];
     float dgl = (gl1 - gl0) * inv, dgr = (gr1 - gr0) * inv;
     bool out = out_l && out_r;
     int base = c->ring_pos;
@@ -149,14 +163,16 @@ void env_chain_process(EnvChain *c, const float *in, int n, float *out_l, float 
         int q0 = (pos - di) & (ENV_RING - 1), q1 = (q0 - 1) & (ENV_RING - 1);
         float far = c->ring[q0] + fr * (c->ring[q1] - c->ring[q0]);
         float sl = right_far ? y : far, srr = right_far ? far : y;
-        shl += kl * (sl - shl);
-        shr += kr * (srr - shr);
-        out_l[i] += (gl0 + dgl * t) * shl;
-        out_r[i] += (gr0 + dgr * t) * shr;
+        float yl = hb0[0] * sl + hb1[0] * xl1 - ha1[0] * shl;
+        float yr = hb0[1] * srr + hb1[1] * xr1 - ha1[1] * shr;
+        xl1 = sl, xr1 = srr, shl = yl, shr = yr;
+        out_l[i] += (gl0 + dgl * t) * yl;
+        out_r[i] += (gr0 + dgr * t) * yr;
     }
     c->lp1 = lp1, c->lp2 = lp2, c->x250 = x250, c->x2k = x2k;
     c->shadow_l = shl;
     c->shadow_r = shr;
+    c->head_x[0] = xl1, c->head_x[1] = xr1;
     // 7. Early reflections: each tap is a gain / pan of the ring at its delay (one read offset per
     // block: the delay glides a fraction of a sample per block), summed per ear, then one low-pass per
     // ear at the taps' gain-weighted cutoff (wall absorption colours them alike). The tap loops have
@@ -254,12 +270,19 @@ void env_reverb_process(EnvReverb *r, const float *in, int n, float *out_l, floa
     // Always runs (a few us): a muted zone keeps decaying instead of replaying stale energy later.
     float scale = syn_clampf(sz, 0.3f, 2.5f) * r->sr / 48000.0f;
     int len[ENV_FDN];
-    float glo[ENV_FDN], ghi[ENV_FDN];
+    float glo[ENV_FDN], ghi[ENV_FDN], circ = 0.0f;
     for (int l = 0; l < ENV_FDN; l++) {
         len[l] = DG_CLAMP((int)((float)k_fdn_len[l] * scale), 64, ENV_FDN_MAX - 1);
         glo[l] = powf(10.0f, -3.0f * (float)len[l] / (r->sr * fmaxf(rlo, 0.05f)));
         ghi[l] = powf(10.0f, -3.0f * (float)len[l] / (r->sr * fmaxf(rhi, 0.05f)));
+        float g2 = 0.5f * (glo[l] * glo[l] + ghi[l] * ghi[l]);
+        circ += g2 / (1.0f - g2 + 1e-6f);
     }
+    // Calibrated output: a unit impulse decays like an ideal diffuse field, its energy integral
+    // RT60 / 13.8 whatever the size (the network's own energy ~ 0.17 x mean g^2 / (1 - g^2), measured),
+    // so a send sets the direct-to-reverberant ratio physically (env_world_voice_eval).
+    float rt_mean = 0.5f * (fmaxf(rlo, 0.05f) + fmaxf(rhi, 0.05f));
+    float norm = sqrtf((rt_mean / 13.8f) / (0.17f * circ / (float)ENV_FDN + 1e-6f));
     int pre = DG_CLAMP((int)(r->target.predelay_ms * 0.001f * r->sr), 0, 4095);
     float kd = syn_onepole_coef(1500.0f, r->sr);
     float inv = 1.0f / (float)n;
@@ -295,7 +318,7 @@ void env_reverb_process(EnvReverb *r, const float *in, int n, float *out_l, floa
             if (++r->pos[l] >= ENV_FDN_MAX) r->pos[l] = 0;
             if (l & 1) wr += o[l]; else wl += o[l];
         }
-        float g = a + (b - a) * (float)(i + 1) * inv;
+        float g = (a + (b - a) * (float)(i + 1) * inv) * norm;
         out_l[i] += g * wl * 0.35f;
         out_r[i] += g * wr * 0.35f;
     }
