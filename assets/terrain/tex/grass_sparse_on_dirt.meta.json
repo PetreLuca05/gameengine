@@ -1,14 +1,14 @@
 {
  "size": 2048,
  "source": "generated",
- "mean": "#645d40",
+ "mean": "#645d3d",
  "target_mean": "#5f5838",
- "mean_delta": 0.0326,
- "seam": 0.7348,
+ "mean_delta": 0.02,
+ "seam": 0.7349,
  "tile_m": 2.5,
  "name": "grass_sparse_on_dirt",
  "kind": "transition",
- "tool_version": 1,
+ "tool_version": 2,
  "recipe": "assets/terrain/gen/grass_sparse_on_dirt.json",
  "pair": [
   "ground_litter",

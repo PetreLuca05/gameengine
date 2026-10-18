@@ -8,7 +8,7 @@
  "tile_m": 4.0,
  "name": "sand",
  "kind": "terrain_layer",
- "tool_version": 1,
+ "tool_version": 2,
  "recipe": "assets/terrain/gen/sand.json",
  "replaces": 5
 }

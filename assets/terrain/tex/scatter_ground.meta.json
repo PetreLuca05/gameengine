@@ -7,37 +7,37 @@
  "cells": [
   {
    "source": "generated",
-   "coverage": 0.256,
+   "coverage": 0.266,
    "type": "pebble"
   },
   {
    "source": "generated",
-   "coverage": 0.208,
+   "coverage": 0.207,
    "type": "pebble"
   },
   {
    "source": "generated",
-   "coverage": 0.19,
+   "coverage": 0.178,
    "type": "leaf"
   },
   {
    "source": "generated",
-   "coverage": 0.023,
+   "coverage": 0.026,
    "type": "twig"
   },
   {
    "source": "generated",
-   "coverage": 0.088,
+   "coverage": 0.268,
    "type": "grass_bits"
   },
   {
    "source": "generated",
-   "coverage": 0.212,
+   "coverage": 0.168,
    "type": "twig"
   }
  ],
  "name": "scatter_ground",
  "kind": "scatter_atlas",
- "tool_version": 1,
+ "tool_version": 2,
  "recipe": "assets/terrain/gen/scatter_ground.json"
 }

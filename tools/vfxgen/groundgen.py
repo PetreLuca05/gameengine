@@ -61,7 +61,7 @@ REPORT = os.path.join(ROOT, "docs", "ground_match", "gen_report.md")
 SHEET = os.path.join(ROOT, "docs", "ground_match", "gen_sheet_{}.png")
 DEFAULT_MODEL = "higgsfield-ai/soul/standard"
 KINDS = ("blade_atlas", "terrain_layer", "transition", "scatter_atlas")
-TOOL_VERSION = 1
+TOOL_VERSION = 2   # 2: backdrop from the border, luminance / chromaticity gradient transfer, exact surface means
 
 
 # ------------------------------------------------------------------ colour helpers
@@ -93,6 +93,16 @@ def hue_of(lin):
     r, g, b = s[..., 0], s[..., 1], s[..., 2]
     h = np.where(mx == r, ((g - b) / d) % 6, np.where(mx == g, (b - r) / d + 2, (r - g) / d + 4))
     return h * 60.0
+
+
+LUM = np.array([0.2126, 0.7152, 0.0722])
+
+
+def hsv_parts(lin):
+    """(hue degrees, saturation, value) of linear RGB via sRGB, as ground_ref measures."""
+    s = l2s(lin)
+    mx, mn = s.max(-1), s.min(-1)
+    return hue_of(lin), (mx - mn) / np.maximum(mx, 1e-6), mx
 
 
 def save_srgb(path, lin, alpha=None, quality=92):
@@ -339,8 +349,13 @@ def key_out(r, lin):
     n = 10
     border = np.concatenate([srgb[:n].reshape(-1, 3), srgb[-n:].reshape(-1, 3), srgb[:, :n].reshape(-1, 3), srgb[:, -n:].reshape(-1, 3)])
     bg = np.median(border, axis=0)
-    ref = np.array(KEYS.get(r.get("background", "magenta")))
-    if np.linalg.norm(bg - ref) > 0.45:
+    kind = r.get("background", "magenta")
+    ref = np.array(KEYS.get(kind))
+    # the generated screens are far from pure (magenta comes back as #a00068 .. #c02078): the measured border
+    # colour is the backdrop whenever it is of the requested family; pure magenta as the backdrop instead
+    # raised the key tolerance to ~0.45 and keyed out half of every plant (straw, lit leaves)
+    family = {"magenta": min(bg[0], bg[2]) - bg[1] > 0.2, "white": bg.min() > 0.7, "black": bg.max() < 0.3}[kind]
+    if not family and np.linalg.norm(bg - ref) > 0.45:
         bg = ref
     spread = float(np.percentile(np.linalg.norm(border - bg, axis=1), 90))
     al = r.get("alpha", {})
@@ -355,8 +370,14 @@ def key_out(r, lin):
         col[..., 0] = np.minimum(col[..., 0], np.maximum(g * 1.25, g + 0.08))
     # un-mix the backdrop from the soft edge
     col = np.clip((col - (1 - a[..., None]) * bg) / np.maximum(a[..., None], 0.08), 0, 1)
-    # specks: open the mask (erode then dilate) and keep only what survives
+    # soft edge texels: the un-mix overshoots there (green / white fringes on plumes and thin blades); take
+    # the colour of the solid plant next to them instead
     solid = a > 0.5
+    core = (a > 0.9).astype(np.float64)
+    near = blur(col * core[..., None], 2) / np.maximum(blur(core, 2), 1e-4)[..., None]
+    w_edge = (PH.smooth(0.9, 0.4, a) * (blur(core, 2) > 0.02))[..., None]
+    col = col * (1 - w_edge) + near * w_edge
+    # specks: open the mask (erode then dilate) and keep only what survives
     keep = dilate(erode(solid, 1), 2)
     a = a * keep
     return np.concatenate([s2l(col), a[..., None]], axis=2)
@@ -399,53 +420,189 @@ def center_fit(rgba, size, pad=0.08):
 
 # ------------------------------------------------------------------ blade processing
 
-def gradient_match(cell, target, strength, dry_hue=54.0, bands=16):
-    """Per height band gains so the green blades (hue >= dry_hue) follow root -> mid -> tip of the target
-    and the dry ones dry_root -> dry_mid -> dry_tip. Means are measured on the plant pixels of the cell, in
-    linear RGB; gains are smoothed over the bands and limited to 0.4 .. 2.5. strength 0 keeps the source."""
+# The gradient statistic of tools/tests/ground_tex_check.py: green-hue plant pixels (alpha > 0.5, hue 54 .. 110;
+# dry straw and flowers fall outside), sRGB mean in three bands of their vertical extent (fractions from the top).
+GREEN_HUE = (54.0, 110.0)
+GRAD_BANDS = (("root", (5 / 6, 1.0)), ("mid", (5 / 12, 7 / 12)), ("tip", (0.0, 1 / 6)))
+GRAD_TOL = 0.07   # the test's limit, per sRGB channel
+
+
+def green_gradient(cell):
+    """{band: (sRGB mean, pixel count)} of the green blades, measured exactly as the test does (on the 8-bit
+    values the PNG will hold), plus the rows (top, bot) of their extent. Empty when there are too few."""
+    s = np.round(l2s(cell[..., :3]) * 255) / 255
+    a = np.round(cell[..., 3] * 255) / 255
+    hue = hue_of(s2l(s))
+    green = (a > 0.5) & (hue >= GREEN_HUE[0]) & (hue <= GREEN_HUE[1])
+    rws = np.nonzero(green.any(1))[0]
+    if len(rws) <= 8 or green.sum() <= 400:
+        return {}, None
+    top, bot = rws.min(), rws.max() + 1
+    out = {}
+    for k, (p, q) in GRAD_BANDS:
+        r0, r1 = top + int((bot - top) * p), top + int((bot - top) * q)
+        px = s[r0:r1][green[r0:r1]]
+        if len(px) >= 50:
+            out[k] = (px.mean(0), len(px))
+    return out, (top, bot)
+
+
+def gradient_curve(t, root, mid, tip):
+    """root -> mid -> tip along t (0 = plant bottom, 1 = top): flat over the three measured bands (bottom
+    1/6, the middle 1/6, top 1/6), smoothstep between them. Values (3,) -> (len(t), 3)."""
+    w_mid = PH.smooth(1 / 6, 5 / 12, t)[:, None]
+    w_tip = PH.smooth(7 / 12, 5 / 6, t)[:, None]
+    return root + (mid - root) * w_mid + (tip - mid) * w_tip
+
+
+def plant_classes(rgb, dry_hue=54.0):
+    """Soft class weights (green, dry, flower) of the plant pixels from their hue. Flowers (pink / purple /
+    blue / red, or vivid bright yellow) and the reddish soil clods at the root keep their colour."""
+    hue, sat, val = hsv_parts(rgb)
+    off = np.maximum(PH.smooth(22, 16, hue), PH.smooth(125, 135, hue)) * PH.smooth(0.15, 0.25, sat)
+    yellow = PH.smooth(0.55, 0.65, sat) * PH.smooth(0.70, 0.80, val) * PH.smooth(36, 40, hue) * PH.smooth(58, 54, hue)
+    flower = np.maximum(off, yellow)
+    dry = PH.smooth(dry_hue + 3, dry_hue - 3, hue)
+    return (1 - dry) * (1 - flower), dry * (1 - flower), flower
+
+
+def _chroma_frame(c):
+    """For chromaticities c (rgb / luminance, (..., 3)): the unit saturation direction (away from white) and
+    the hue direction across it, both in the plane of constant luminance."""
+    d = c - 1.0
+    u = d / np.maximum(np.linalg.norm(d, axis=-1, keepdims=True), 1e-6)
+    v = np.cross(LUM / np.linalg.norm(LUM), u)
+    return u, v / np.maximum(np.linalg.norm(v, axis=-1, keepdims=True), 1e-6)
+
+
+def _band_rows(tb, bands, values, weight, n):
+    """Weighted per-band means of `values` (H, W, k) over the height bands of tb (per row, 0 bottom .. 1 top),
+    gaps interpolated, lightly smoothed, then interpolated back to one row each: (H, k). None if empty."""
+    k = values.shape[-1]
+    stats = np.zeros((bands, k))
+    valid = np.zeros(bands, bool)
+    band = np.clip((tb * bands).astype(int), 0, bands - 1)
+    for b in range(bands):
+        rows = np.nonzero(band == b)[0]
+        w = weight[rows]
+        if w.sum() < 20:
+            continue
+        stats[b] = (values[rows] * w[..., None]).sum((0, 1)) / w.sum()
+        valid[b] = True
+    if not valid.any():
+        return None
+    idx = np.arange(bands)
+    for ch in range(k):
+        stats[:, ch] = np.interp(idx, idx[valid], stats[valid, ch])
+    stats = np.array([np.convolve(np.pad(stats[:, ch], 1, mode="edge"), np.ones(3) / 3, mode="valid") for ch in range(k)]).T
+    bi = np.clip(tb * bands - 0.5, 0, bands - 1)
+    return np.stack([np.interp(bi, idx, stats[:, ch]) for ch in range(k)], 1)
+
+
+def _height(rows, n):
+    top, bot = rows.min(), rows.max() + 1
+    return np.clip((bot - np.arange(n) - 0.5) / max(1, bot - top), 0, 1)
+
+
+def gradient_match(cell, target, strength, dry_hue=54.0, bands=16, refine=10, hue_keep=0.25):
+    """Root -> mid -> tip colour transfer, per class: the green blades to target root / mid / tip, the dry
+    ones (hue below dry_hue) to dry_root / dry_mid / dry_tip; flowers and soil clods are kept (plant_classes).
+
+    Works on log luminance + chromaticity (linear rgb / luminance): scaling a pixel's brightness leaves its
+    hue alone there, so light and shade along a blade do not move it in or out of the green hue range the
+    test measures. Per height band (over the class' own extent) the class' mean log luminance and mean
+    chromaticity move to the target curve (gradient_curve); the luminance variation is kept, the chromaticity
+    deviations are scaled by the target / source saturation ratio (0.4 .. 1), their hue part further by
+    hue_keep, and turned to the target hue: a vivid source keeps its relative variation at the target's muted
+    saturation. strength scales the transfer (0 keeps the source).
+
+    Then up to `refine` damped passes measure the test's statistic (green_gradient) and move the green class
+    by what is left (a smooth luminance / chromaticity offset along the height), keeping the best pass; they
+    stop once root / mid / tip are within 0.6 x GRAD_TOL."""
     rgb, a = cell[..., :3], cell[..., 3]
     n = cell.shape[0]
     m = a > 0.5
-    rows = np.nonzero(m.any(1))[0]
-    if len(rows) < 4 or strength <= 0:
+    if m.sum() < 50 or strength <= 0:
         return cell
-    top, bot = rows.min(), rows.max() + 1
-    hue = hue_of(rgb)
-    w_dry = PH.smooth(dry_hue + 3, dry_hue - 3, hue)
-    out = np.zeros_like(rgb)
-    for cls, keys in (("green", ("root", "mid", "tip")), ("dry", ("dry_root", "dry_mid", "dry_tip"))):
-        cw = w_dry if cls == "dry" else 1 - w_dry
+    w_green, w_dry, _ = plant_classes(rgb, dry_hue)
+    lum = np.maximum(rgb @ LUM, 1e-4)
+    logy = np.log(lum)
+    chrom = rgb / lum[..., None]
+    sat = np.linalg.norm(chrom - 1, axis=-1)
+    vals = np.concatenate([logy[..., None], chrom, sat[..., None]], -1)
+    out = rgb.copy()
+    for cw, keys in ((w_green, ("root", "mid", "tip")), (w_dry, ("dry_root", "dry_mid", "dry_tip"))):
         if keys[0] not in target:
-            out += rgb * cw[..., None]
             continue
-        tc = [hex_lin(target[k]) for k in keys]
-        gains = np.ones((bands, 3))
-        valid = np.zeros(bands, bool)
-        for b in range(bands):
-            r1 = bot - int((bot - top) * b / bands)
-            r0 = bot - int((bot - top) * (b + 1) / bands)
-            ww = (m[r0:r1] * cw[r0:r1])
-            if ww.sum() < 20:
-                continue
-            mean = (rgb[r0:r1] * ww[..., None]).sum((0, 1)) / ww.sum()
-            t = (b + 0.5) / bands
-            want = tc[0] * (1 - PH.smooth(0, 0.5, t)) + tc[1] * PH.smooth(0, 0.5, t) * (1 - PH.smooth(0.5, 1, t)) + tc[2] * PH.smooth(0.5, 1, t)
-            gains[b] = np.clip(want / np.maximum(mean, 1e-4), 0.4, 2.5)
-            valid[b] = True
-        if not valid.any():
-            out += rgb * cw[..., None]
+        sel = m & (cw > 0.5)
+        rows = np.nonzero(sel.any(1))[0]
+        if len(rows) < 4 or sel.sum() < 50:
             continue
-        idx = np.arange(bands)
-        for ch in range(3):
-            gains[:, ch] = np.interp(idx, idx[valid], gains[valid, ch])
-        gains = np.array([np.convolve(np.pad(gains[:, ch], 2, mode="edge"), np.ones(5) / 5, mode="valid") for ch in range(3)]).T
-        # per row gain (row -> band, linear interpolation)
-        yy = np.arange(n)
-        tb = np.clip((bot - yy - 0.5) / max(1, bot - top) * bands - 0.5, 0, bands - 1)
-        grow = np.stack([np.interp(tb, idx, gains[:, ch]) for ch in range(3)], 1)
-        g = 1 + (grow[:, None, :] - 1) * strength
-        out += np.clip(rgb * g, 0, 1) * cw[..., None]
-    return np.concatenate([np.clip(out, 0, 1), cell[..., 3:]], axis=2)
+        tb = _height(rows, n)
+        srow = _band_rows(tb, bands, vals, m * cw, n)
+        if srow is None:
+            continue
+        trow = gradient_curve(tb, *[hex_lin(target[k]) for k in keys])
+        ty = np.maximum(trow @ LUM, 1e-4)
+        tc = trow / ty[:, None]
+        us, vs = _chroma_frame(srow[:, 1:4])
+        ut, vt = _chroma_frame(tc)
+        k = np.clip(np.linalg.norm(tc - 1, axis=-1) / np.maximum(srow[:, 4], 1e-4), 0.4, 1.0)
+        d = chrom - srow[:, None, 1:4]
+        rad = (d * us[:, None]).sum(-1) * k[:, None]
+        tan = (d * vs[:, None]).sum(-1) * (k * hue_keep)[:, None]
+        c2 = tc[:, None] + rad[..., None] * ut[:, None] + tan[..., None] * vt[:, None]
+        y2 = np.exp(logy + (np.log(ty) - srow[:, 0])[:, None])
+        out += (c2 * y2[..., None] - rgb) * (cw * strength)[..., None]
+    res = np.concatenate([np.clip(out, 0, 1), cell[..., 3:]], axis=2)
+    if not all(k in target for k in ("root", "mid", "tip")):
+        return res
+    goal = {k: l2s(hex_lin(target[k])) for k in ("root", "mid", "tip")}
+
+    def score(meas):
+        return max((float(np.abs(goal[k] - meas[k][0]).max()) for k in goal if k in meas), default=0.0)
+
+    meas, ext = green_gradient(res)
+    if not meas:
+        return res
+    best, best_s, nb = res, score(meas), len(meas)
+    for _ in range(refine):
+        if best_s <= GRAD_TOL * 0.6:
+            break
+        rgb = res[..., :3]
+        lum = np.maximum(rgb @ LUM, 1e-4)
+        logy, chrom = np.log(lum), rgb / lum[..., None]
+        tb = _height(np.arange(*ext), n)
+        w = w_green[..., None]
+        # luminance in full; chromaticity along the measured saturation direction, plus candidates with part
+        # or all of the hue offset (it can push the measured pixels out of the green range one by one) and
+        # with a luminance bias on the bands still off (the test takes the worst channel, not luminance):
+        # the best one goes on
+        cands = []
+        for hue_frac, bias in ((0.0, 0.0), (0.5, 0.0), (1.0, 0.0), (0.0, 0.08), (0.0, -0.08), (0.5, 0.08), (0.5, -0.08)):
+            err = {}
+            for k in goal:
+                if k in meas:
+                    g, h = hex_lin(target[k]), s2l(meas[k][0])
+                    gy, hy = max(float(g @ LUM), 1e-4), max(float(h @ LUM), 1e-4)
+                    u, v = _chroma_frame(h / hy)
+                    dc = g / gy - h / hy
+                    off_bias = bias if np.abs(goal[k] - meas[k][0]).max() > GRAD_TOL * 0.6 else 0.0
+                    err[k] = np.concatenate([[math.log(gy / hy) + off_bias], u * float(dc @ u) + v * float(dc @ v) * hue_frac])
+            fill = np.mean(list(err.values()), 0)
+            e = {k: err.get(k, fill) for k in goal}
+            off = gradient_curve(tb, e["root"], e["mid"], e["tip"]) * 0.7
+            cand = res.copy()
+            cand[..., :3] = np.clip((chrom + off[:, None, 1:] * w) * np.exp(logy + off[:, None, 0] * w[..., 0])[..., None], 0, 1)
+            cm, ce = green_gradient(cand)
+            if cm:
+                cands.append((score(cm) + (1.0 if len(cm) < nb else 0.0), cand, cm, ce))
+        if not cands:
+            break
+        s, res, meas, ext = min(cands, key=lambda c: c[0])
+        if s < best_s:
+            best, best_s = res, s
+    return best
 
 
 def blade_maps(cell, rib_px=1.5):
@@ -505,18 +662,19 @@ def cell_metrics(cell):
         return {"coverage": 0, "bottom": 0}
     top, bot = rows.min(), rows.max() + 1
     out = {"coverage": round(cov, 3), "bottom": round(bottom, 3), "height": round((bot - top) / n, 3)}
-    for name, (p, q) in (("root", (2 / 3, 1)), ("mid", (1 / 3, 2 / 3)), ("tip", (0, 1 / 3))):
-        r0, r1 = top + int((bot - top) * p), top + int((bot - top) * q)
-        sub = cell[r0:r1, :, :3][m[r0:r1]]
-        if len(sub):
-            out[name] = lin_hex(sub.mean(0))
+    # the green blades' root / mid / tip as the test measures them (green_gradient)
+    meas, _ = green_gradient(cell)
+    for name, (col, _) in meas.items():
+        out[name] = lin_hex(s2l(col))
     # magenta residue: plant pixels with B > G + 0.05 (sRGB) and R > G
     s = l2s(cell[..., :3])
     out["residue"] = round(float(((s[..., 2] > s[..., 1] + 0.05) & (s[..., 0] > s[..., 1]) & m).sum() / max(1, m.sum())), 4)
     return out
 
 
-def check_cell(r, met):
+def check_cell(r, met, target=None):
+    """The cell's failing checks: coverage, bottom contact, backdrop residue and the green root / mid / tip
+    within GRAD_TOL (sRGB, per channel) of the target (the test's gradient check)."""
     chk = r.get("checks", {})
     lo, hi = chk.get("coverage", [0.05, 0.6])
     fails = []
@@ -526,6 +684,11 @@ def check_cell(r, met):
         fails.append(f"blades do not reach the bottom ({met.get('bottom')})")
     if met.get("residue", 0) > chk.get("residue", 0.03):
         fails.append(f"backdrop residue {met.get('residue')}")
+    for k in ("root", "mid", "tip"):
+        if target and k in target and k in met:
+            d = float(np.abs(l2s(hex_lin(met[k])) - l2s(hex_lin(target[k]))).max())
+            if d > GRAD_TOL:
+                fails.append(f"{k} {met[k]} off {target[k]} by {d:.3f}")
     return fails
 
 
@@ -549,7 +712,8 @@ def process_blade_atlas(r, raws, placeholder_only):
             cell = gradient_match(cell, spec["target"], r.get("color_match", 0.85))
             source = "placeholder"
         met = cell_metrics(cell)
-        meta_cells.append(dict(met, source=source, fails=check_cell(r, met) if source == "generated" else []))
+        tgt = dict(r.get("target", {}), **c.get("target", {}))
+        meta_cells.append(dict(met, source=source, fails=check_cell(r, met, tgt) if source == "generated" else []))
         y, x = divmod(i, cols)
         atlas[y * cw:(y + 1) * cw, x * cw:(x + 1) * cw] = cell
     atlas = bleed(atlas)
@@ -584,18 +748,26 @@ def make_tileable(lin):
     return np.clip(out, 0, 1)
 
 
-def match_mean(lin, target_lin, strength=1.0, keep_chroma=1.0):
+def match_mean(lin, target_lin, strength=1.0, keep_chroma=1.0, tol=0.02):
     """Scale to the target mean (linear, per channel) keeping the relative variation; keep_chroma < 1
-    pulls the per-pixel chroma toward the mean chroma (removes off-hue spots)."""
+    pulls the per-pixel chroma toward the mean chroma (removes off-hue spots). strength < 1 keeps part of
+    the source mean, but never more than tol (sRGB, per channel; the test allows 0.03) away from the
+    target. The gain is iterated so the clipped highlights do not leave the mean short."""
     mean = lin.reshape(-1, 3).mean(0)
-    g = 1 + (target_lin / np.maximum(mean, 1e-5) - 1) * strength
-    out = lin * g
+    goal = mean + (target_lin - mean) * strength
+    ts = l2s(target_lin)
+    goal = s2l(np.clip(l2s(goal), ts - tol, ts + tol))
+    out = lin
     if keep_chroma < 1:
         lum = out @ np.array([0.2126, 0.7152, 0.0722])
         mlum = max(float(lum.mean()), 1e-5)
         mc = out.reshape(-1, 3).mean(0) / mlum
         out = out * keep_chroma + (lum[..., None] * mc) * (1 - keep_chroma)
-    return np.clip(out, 0, 1)
+    g = np.ones(3)
+    for _ in range(6):
+        res = np.clip(out * g, 0, 1)
+        g = g * goal / np.maximum(res.reshape(-1, 3).mean(0), 1e-5)
+    return np.clip(out * g, 0, 1)
 
 
 def surface_maps(lin, r):

@@ -3,12 +3,12 @@
  "source": "generated",
  "mean": "#4c3926",
  "target_mean": "#4d3a26",
- "mean_delta": 0.0034,
- "seam": 0.7055,
+ "mean_delta": 0.0032,
+ "seam": 0.7054,
  "tile_m": 3.0,
  "name": "field_soil",
  "kind": "terrain_layer",
- "tool_version": 1,
+ "tool_version": 2,
  "recipe": "assets/terrain/gen/field_soil.json",
  "replaces": 10
 }

@@ -1,14 +1,14 @@
 {
  "size": 2048,
  "source": "generated",
- "mean": "#8e8365",
+ "mean": "#8e8361",
  "target_mean": "#8c7f5c",
- "mean_delta": 0.0365,
+ "mean_delta": 0.02,
  "seam": 0.9477,
  "tile_m": 2.5,
  "name": "dirt_dry",
  "kind": "terrain_layer",
- "tool_version": 1,
+ "tool_version": 2,
  "recipe": "assets/terrain/gen/dirt_dry.json",
  "variant_of": "dirt"
 }
