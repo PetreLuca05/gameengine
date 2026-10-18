@@ -488,19 +488,13 @@ static void build_terrain_collision(World *w, OpenWorld *o) {
 // ------------------------------------------------------------------ entities
 
 static void fill_container(World *w, OpenWorld *o, EntityId id, const char *tier, u32 seed) {
-    LootItem items[CONTAINER_SLOTS];
-    int n = loot_roll(&o->loot, tier, seed, items, CONTAINER_SLOTS);
-    int slot = 0;
-    for (int i = 0; i < n && slot < CONTAINER_SLOTS; i++) {
+    LootItem items[16];
+    int n = loot_roll(&o->loot, tier, seed, items, 16);
+    for (int i = 0; i < n; i++) {
         u16 item = item_find(w->items, items[i].item);
         if (!item) continue;
-        const WeaponDef *wd = item_weapon(w->items, item);
-        InvSlot *s = &w->cont[ENT_INDEX(id)].slots[slot++];
-        s->item = item;
         int stack = w->items->items[item].max_stack > 0 ? w->items->items[item].max_stack : 1;
-        s->count = (u16)DG_CLAMP(items[i].count, 1, stack);
-        s->ammo = wd ? (i16)wd->mag_size : 0;
-        attach_defaults(wd, s->att);
+        container_add(w, id, item, DG_CLAMP(items[i].count, 1, stack));
     }
 }
 

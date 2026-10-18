@@ -32,7 +32,7 @@
 
 #define COL_PANEL UI_RGBA(10, 12, 14, 150)
 
-void inventory_slot_view(const InvSlot *s, const ItemDB *db, int mag_override, GuiSlotView *v);   // scr_inventory.c
+void inventory_slot_view(const InvSlot *s, const ItemDB *db, int mag_override, GuiSlotView *v);   // ui/inventory/inv_screen.c
 
 static float s_compass_bottom;
 float hud_compass_bottom(void) { return s_compass_bottom; }
@@ -190,7 +190,7 @@ static void draw_hotbar(Game *g, World *w, GuiRect safe) {
         float lift = gui_tween(gui_idi("hud_hot", i), sel ? 1.0f : 0.0f, 0.1f);
         r.y -= lift * gui_s(6);
         GuiSlotView v;
-        inventory_slot_view(&p->inv.slots[i], w->items, i == p->sim.wpn.slot ? p->sim.wpn.mag : -1, &v);
+        inventory_slot_view(inv_hot_c(&p->inv, i), w->items, i == p->sim.wpn.slot ? p->sim.wpn.mag : -1, &v);
         v.hotkey = i + 1;
         v.selected = sel;
         gd_alpha_push(sel ? 1.0f : 0.78f);
@@ -199,7 +199,7 @@ static void draw_hotbar(Game *g, World *w, GuiRect safe) {
         gd_alpha_pop();
     }
     // Name of the selected item, fading out after a switch.
-    const InvSlot *s = &p->inv.slots[hot];
+    const InvSlot *s = inv_hot_c(&p->inv, hot);
     static int last = -1;
     static double since;
     if (last != hot || !s->item) { last = hot; since = gui_time(); }

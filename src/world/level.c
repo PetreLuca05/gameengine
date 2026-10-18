@@ -499,20 +499,15 @@ static void spawn_entity(World *w, const cJSON *e) {
         }
     } else if (!strcmp(type, "container")) {
         id = spawn_container(w, pos, yaw);
+        // "grid": the root container def (data/containers.json, default "crate"); "loot": [[item, count], ...].
+        if (js(e, "grid", "")[0]) container_set_root(w, id, js(e, "grid", ""));
         const cJSON *loot = cJSON_GetObjectItemCaseSensitive(e, "loot");
         const cJSON *it;
-        int slot = 0;
         cJSON_ArrayForEach(it, loot) {
-            if (slot >= CONTAINER_SLOTS || !cJSON_IsArray(it)) break;
-            u16 item = item_find(w->items, cJSON_GetArrayItem(it, 0)->valuestring);
+            if (!cJSON_IsArray(it)) continue;
+            u16 item = item_find(w->items, cJSON_GetStringValue(cJSON_GetArrayItem(it, 0)));
             int count = cJSON_GetArraySize(it) > 1 ? cJSON_GetArrayItem(it, 1)->valueint : 1;
-            if (!item) continue;
-            const WeaponDef *wd = item_weapon(w->items, item);
-            InvSlot *s = &w->cont[ENT_INDEX(id)].slots[slot++];
-            s->item = item;
-            s->count = (u16)count;
-            s->ammo = wd ? (i16)wd->mag_size : 0;
-            attach_defaults(wd, s->att);
+            if (item && container_add(w, id, item, count) > 0) log_warn("level: container loot doesn't fit (%s)", item_def(w->items, item)->id);
         }
     } else if (!strcmp(type, "pickup")) {
         u16 item = item_find(w->items, js(e, "item", ""));

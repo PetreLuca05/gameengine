@@ -289,7 +289,7 @@ void sights_draw(void) {
 // ------------------------------------------------------------------ tests
 
 static void put_weapon(Player *p, u16 item, u8 optic) {
-    InvSlot *s = &p->inv.slots[0];
+    InvSlot *s = inv_dev_hot(&p->inv, &G->items, 0);
     const WeaponDef *wd = item_weapon(&G->items, item);
     memset(s, 0, sizeof(*s));
     s->item = item;

@@ -26,9 +26,7 @@
 
 typedef struct CorpseRec {
     EntityId ent;
-    CorpseState st;
-    Inventory stash;                 // what the player carried (stays on the body)
-    bool has_stash;
+    CorpseState st;                  // what the player carried is the corpse entity's world inventory (docs/INVENTORY.md)
 } CorpseRec;
 
 typedef struct FabRec {
@@ -148,13 +146,14 @@ bool revive_fab_view(const World *w, EntityId fab, FabView *out) {
     return true;
 }
 
-static int find_dna_slot(const Player *p) {
-    if (!RV.dna_item) return -1;
-    // The equipped slot first, then the hotbar, then the backpack.
+static bool has_dna(const Player *p) { return RV.dna_item && inv_has(&p->inv, RV.dna_item); }
+
+static InvItem *find_dna(Player *p) {
+    if (!RV.dna_item) return NULL;
+    // The equipped hotbar slot first, then anywhere in the inventory.
     int eq = p->sim.wpn.slot;
-    if (eq < INV_SLOTS && p->inv.slots[eq].item == RV.dna_item) return eq;
-    for (int s = 0; s < INV_SLOTS; s++) if (p->inv.slots[s].item == RV.dna_item) return s;
-    return -1;
+    if (eq < INV_HOTBAR && inv_hot(&p->inv, eq)->item == RV.dna_item) return inv_item_of(&p->inv, inv_hot(&p->inv, eq));
+    return inv_find(&p->inv, RV.dna_item);
 }
 
 // ------------------------------------------------------------------ action affordance (shared)
@@ -185,7 +184,7 @@ static ActKind afford(const World *w, int slot, EntityId t, u16 *dur) {
         return RACT_EXTRACT;
     }
     case ET_FABRICATOR: {
-        if (find_dna_slot(p) < 0) return RACT_NONE;
+        if (!has_dna(p)) return RACT_NONE;
         FabView fv;
         revive_fab_view(w, t, &fv);
         if (fv.m.qn >= r->queue_max || (r->require_power && !fv.m.powered)) return RACT_NONE;
@@ -254,17 +253,17 @@ static void set_flag(World *w, EntityId e, u32 f, bool on) {
     else w->flags[i] &= ~f;
 }
 
-static void drop_slot(World *w, int slot, int inv_slot) {
+static void drop_slot(World *w, int slot, InvItem *it) {
     Player *p = &w->players[slot];
-    InvSlot s = p->inv.slots[inv_slot];
-    if (!s.item) return;
+    if (!it || !inv_alive(it)) return;
+    InvSlot s = it->s;
     vec3 at = v3_add(v3_madd(p->sim.move.pos, forward_from_yaw(p->sim.move.yaw), 0.5f), v3(0, 0.6f, 0));
     EntityId pe = spawn_pickup(w, at, s.item, s.count, s.ammo, 0);
     if (ent_valid(w, pe)) {
         memcpy(w->pickup[ENT_INDEX(pe)].att, s.att, sizeof(s.att));
         memcpy(w->attach[ENT_INDEX(pe)], s.att, sizeof(s.att));
     }
-    memset(&p->inv.slots[inv_slot], 0, sizeof(InvSlot));
+    inv_free_subtree(&p->inv.t, it->uid);
     p->inv.revision++;
 }
 
@@ -290,7 +289,8 @@ bool revive_sv_down(World *w, int slot, EntityId attacker) {
     RV.downed_by[slot] = attacker;
     // The held item drops, unless it is a sidearm the rules let the player keep.
     int eq = p->sim.wpn.slot;
-    if (eq < INV_HOTBAR && p->inv.slots[eq].item && !(r->keep_sidearm && is_sidearm(w, p->inv.slots[eq].item))) drop_slot(w, slot, eq);
+    if (eq < INV_HOTBAR && inv_hot(&p->inv, eq)->item && !(r->keep_sidearm && is_sidearm(w, inv_hot(&p->inv, eq)->item)))
+        drop_slot(w, slot, inv_item_of(&p->inv, inv_hot(&p->inv, eq)));
     push_event(w, RVE_DOWNED, p->ent, attacker, RV.rules.bleed_time, p->sim.move.pos, p->name, EVENT_ALL);
     ev_sound(w, "downed", p->sim.move.pos, 0.9f, EVENT_ALL);
     if (r->auto_ping_down) game_sv_auto_ping(w, slot, PING_HELP, v3_add(p->sim.move.pos, v3(0, 0.9f, 0)));
@@ -377,21 +377,33 @@ void revive_sv_on_death(World *w, int slot) {
         if (o->active && o->sim.act.phase == ACTP_RUNNING && o->sim.act.target == p->ent) act_cancel(&o->sim.act, ACTC_TARGET);
     }
     // Carried DNA samples (rule): dropped where the carrier fell, lost, or kept on the body.
-    for (int s = 0; s < INV_SLOTS && RV.dna_item; s++) {
-        InvSlot *is = &p->inv.slots[s];
-        if (is->item != RV.dna_item) continue;
-        DnaSample *ds = dna_get(&RV.dna, is->ammo);
+    for (int s = 0; s < INV_MAX_ITEMS && RV.dna_item; s++) {
+        InvItem *it = &p->inv.t.items[s];
+        if (!inv_alive(it) || it->s.item != RV.dna_item) continue;
+        if (inv_is_ancestor(&p->inv.t, inv_equipped(&p->inv.t, EQ_SECURE) ? inv_equipped(&p->inv.t, EQ_SECURE)->uid : 0xFFFF, it->uid)) continue;   // safe
+        DnaSample *ds = dna_get(&RV.dna, it->s.ammo);
         if (r->sample_on_death == SAMPLE_LOST) {
-            if (ds) dna_free(&RV.dna, is->ammo);
-            memset(is, 0, sizeof(*is));
+            if (ds) dna_free(&RV.dna, it->s.ammo);
+            memset(it, 0, sizeof(*it));
             p->inv.revision++;
         } else if (r->sample_on_death == SAMPLE_DROP) {
-            drop_slot(w, slot, s);
+            drop_slot(w, slot, it);
             if (ds) { ds->status = DNA_DROPPED; ds->carrier = REVIVE_NOBODY; }
         }
     }
     float yaw = p->sim.move.body_yaw;
     EntityId c = revive_spawn_corpse(w, slot, p->sim.move.pos, yaw);
+    // What the player carried stays on the body (lootable, docs/INVENTORY.md), except the secure
+    // container and its contents.
+    if (ent_valid(w, c)) {
+        container_set_root(w, c, "body");
+        InvTree *ct = container_tree(w, c, true);
+        if (ct) {
+            inv_strip_to_corpse(&p->inv.t, p->inv.quick, INV_HOTBAR, ct, w->items);
+            w->cont[ENT_INDEX(c)].revision++;
+            p->inv.revision++;
+        }
+    }
     if (r->auto_ping_death && ent_valid(w, c)) game_sv_auto_ping(w, slot, PING_HELP, v3_add(p->sim.move.pos, v3(0, 0.3f, 0)));
     if (was_downed) push_event(w, RVE_BLED_OUT, p->ent, ENT_NONE, 0, p->sim.move.pos, p->name, EVENT_ALL);
     sync_dna(w);
@@ -465,12 +477,12 @@ static void action_done(World *w, int slot, const ActionState *a) {
     }
     case RACT_INSERT: {
         FabRec *fr = fab_rec(a->target);
-        int s = find_dna_slot(p);
-        if (!fr || s < 0) break;
-        int id = p->inv.slots[s].ammo;
+        InvItem *dit = find_dna(p);
+        if (!fr || !dit) break;
+        int id = dit->s.ammo;
         DnaSample *ds = dna_get(&RV.dna, id);
         if (!ds || !fab_enqueue(&fr->m, r, id)) { ev_hint(w, slot, "The fabricator can't take it"); break; }
-        memset(&p->inv.slots[s], 0, sizeof(InvSlot));
+        inv_free_subtree(&p->inv.t, dit->uid);
         p->inv.revision++;
         ds->status = DNA_IN_FABRICATOR;
         ds->carrier = REVIVE_NOBODY;
@@ -583,14 +595,8 @@ static void fab_respawn(World *w, FabRec *fr, int slot) {
     vec3 pos;
     quat rot;
     revive_fab_socket(w, fr->ent, "spawn_point", &pos, &rot);
-    // The old inventory stays on the body (the corpse stash); the new body gets the rule items.
-    CorpseRec *body = NULL;
-    for (int k = 0; k < MAX_CORPSES; k++) {
-        CorpseRec *c = &RV.corpses[k];
-        if (c->ent && ent_valid(w, c->ent) && c->st.owner_slot == slot && (!body || c->st.death_tick > body->st.death_tick)) body = c;
-    }
-    if (body) { body->stash = p->inv; body->has_stash = true; }
-    inv_clear(&p->inv);
+    // The old inventory went onto the body at death (the corpse's world inventory); the secure
+    // container stays; the new body gets the rule items.
     for (int k = 0; k < r->respawn_item_n; k++) {
         u16 it = item_find(w->items, r->respawn_items[k]);
         if (it) inv_add(&p->inv, w->items, it, r->respawn_item_counts[k], 0);
@@ -690,9 +696,9 @@ static void refresh_carriers(World *w) {
     for (int s = 0; s < MAX_PLAYERS; s++) {
         const Player *p = &w->players[s];
         if (!p->active) continue;
-        for (int k = 0; k < INV_SLOTS; k++) {
-            const InvSlot *is = &p->inv.slots[k];
-            if (is->item != RV.dna_item) continue;
+        for (int k = 0; k < INV_MAX_ITEMS; k++) {
+            const InvSlot *is = &p->inv.t.items[k].s;
+            if (!inv_alive(&p->inv.t.items[k]) || is->item != RV.dna_item) continue;
             DnaSample *ds = dna_get(&RV.dna, is->ammo);
             if (!ds || seen[is->ammo - 1]) continue;
             seen[is->ammo - 1] = 1;
@@ -705,10 +711,11 @@ static void refresh_carriers(World *w) {
             DnaSample *ds = dna_get(&RV.dna, w->pickup[i].ammo);
             if (ds && !seen[w->pickup[i].ammo - 1]) { seen[w->pickup[i].ammo - 1] = 1; ds->status = DNA_DROPPED; ds->carrier = REVIVE_NOBODY; }
         }
-        if (w->type[i] == ET_CONTAINER) {
-            for (int k = 0; k < CONTAINER_SLOTS; k++) {
-                const InvSlot *is = &w->cont[i].slots[k];
-                DnaSample *ds = is->item == RV.dna_item ? dna_get(&RV.dna, is->ammo) : NULL;
+        InvTree *ct = container_tree(w, ent_from_index(w, i), false);   // crates, corpses, trunks
+        if (ct) {
+            for (int k = 0; k < INV_MAX_ITEMS; k++) {
+                const InvSlot *is = &ct->items[k].s;
+                DnaSample *ds = inv_alive(&ct->items[k]) && is->item == RV.dna_item ? dna_get(&RV.dna, is->ammo) : NULL;
                 if (ds && !seen[is->ammo - 1]) { seen[is->ammo - 1] = 1; ds->status = DNA_DROPPED; ds->carrier = REVIVE_NOBODY; }
             }
         }
@@ -832,11 +839,26 @@ static void revive_focus(World *w, EntityId self, int player, char *prompt, int 
     else snprintf(prompt, (size_t)size, "%s is down: get closer", w->names[i]);
 }
 
+// A body is searched with a tap of use (its world inventory: what the player carried, docs/INVENTORY.md)
+// whenever the DNA extraction isn't on offer (taken, your own body, too far for the syringe).
+static void corpse_use(World *w, EntityId self, int player) {
+    u16 dur;
+    if (!w->authority || afford(w, player, self, &dur) == RACT_EXTRACT) return;   // host; the timed action runs instead
+    InvTree *t = container_tree(w, self, false);
+    if (t && inv_live_count(t)) container_send(w, self, player);
+}
+
 static void corpse_focus(World *w, EntityId self, int player, char *prompt, int size) {
     int i = (int)ENT_INDEX(self);
     u16 dur;
-    if (!(w->flags[i] & EF_DNA)) { snprintf(prompt, (size_t)size, "%s (DNA taken)", w->names[i]); return; }
-    if (corpse_owner(w, i) == player) { prompt[0] = 0; return; }
+    InvTree *t = container_tree(w, self, false);
+    bool loot = t && inv_live_count(t) > 0;
+    if (!(w->flags[i] & EF_DNA) || corpse_owner(w, i) == player) {
+        if (loot) snprintf(prompt, (size_t)size, "Search %s", w->names[i]);
+        else if (corpse_owner(w, i) == player) prompt[0] = 0;
+        else snprintf(prompt, (size_t)size, "%s (DNA taken)", w->names[i]);
+        return;
+    }
     if (afford(w, player, self, &dur) == RACT_EXTRACT) snprintf(prompt, (size_t)size, "Extract DNA: %s (hold)", w->names[i]);
     else snprintf(prompt, (size_t)size, "Extract DNA: get closer");
 }
@@ -848,7 +870,7 @@ static void fab_focus(World *w, EntityId self, int player, char *prompt, int siz
     const char *st = fab_state_name((FabStateId)fv.m.state);
     if (afford(w, player, self, &dur) == RACT_INSERT) { snprintf(prompt, (size_t)size, "Insert DNA (hold 5 s)"); return; }
     if (fv.m.state == FAB_RECONSTRUCTING) snprintf(prompt, (size_t)size, "Fabricator: %s %.0f s", fv.current_name, fv.remaining);
-    else if (find_dna_slot(&w->players[player]) >= 0) snprintf(prompt, (size_t)size, "Fabricator (%s): get closer", st);
+    else if (has_dna(&w->players[player])) snprintf(prompt, (size_t)size, "Fabricator (%s): get closer", st);
     else snprintf(prompt, (size_t)size, "Fabricator (%s): needs a DNA sample", st);
 }
 
@@ -886,7 +908,7 @@ static bool fab_hand(World *w, EntityId self, int player, int hand, vec3 *pos, q
 }
 
 static const InteractDef k_revive_def = { "revive_assist", revive_focus, NULL, noop_use, NULL, revive_hand, 0.0f, HANDS_BOTH, RACT_REVIVE };
-static const InteractDef k_corpse_def = { "extract_blood", corpse_focus, NULL, noop_use, NULL, corpse_hand, 0.0f, HANDS_BOTH, RACT_EXTRACT };
+static const InteractDef k_corpse_def = { "extract_blood", corpse_focus, NULL, corpse_use, NULL, corpse_hand, 0.0f, HANDS_BOTH, RACT_EXTRACT };
 static const InteractDef k_fab_def = { "fabricator_insert", fab_focus, NULL, noop_use, NULL, fab_hand, 0.0f, HANDS_BOTH, RACT_INSERT };
 
 // ------------------------------------------------------------------ status (HUD / spectator bar)

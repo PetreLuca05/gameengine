@@ -137,6 +137,17 @@ static void parse_attachment(AttachmentDef *a, const cJSON *j, const char *file)
     a->mag_mult = jnum(m, "mag_size", 1.0f);
     a->reload_time = jnum(m, "reload_time", 1.0f);
     a->muzzle_len = jnum(j, "muzzle_length", 0.0f);
+    // Inventory footprint change of the weapon (docs/INVENTORY.md): long muzzle devices add a column.
+    {
+        const cJSON *g = cJSON_GetObjectItemCaseSensitive(j, "grid");
+        if (cJSON_IsArray(g) && cJSON_GetArraySize(g) >= 2) {
+            a->grid_dw = (i8)DG_CLAMP(cJSON_GetArrayItem(g, 0)->valueint, -2, 4);
+            a->grid_dh = (i8)DG_CLAMP(cJSON_GetArrayItem(g, 1)->valueint, -2, 4);
+        } else {
+            a->grid_dw = a->muzzle_len > 0.1f ? 1 : 0;
+            a->grid_dh = 0;
+        }
+    }
     const cJSON *md = cJSON_GetObjectItemCaseSensitive(j, "muzzle_device");
     a->bal_device = cJSON_IsObject(md);
     a->muzzle_device = vfx_muzzle_device_from_name(a->bal_device ? jstr(md, "kind", "") : jstr(j, "muzzle_device", ""));

@@ -95,7 +95,7 @@ void mm_player_draw(GuiRect content) {
     Player *lp = game_local_player();
     if (lp) {
         int slot = lp->sim.wpn.slot;
-        const InvSlot *is = slot >= 0 && slot < INV_SLOTS ? &lp->inv.slots[slot] : NULL;
+        const InvSlot *is = slot >= 0 && slot < INV_HOTBAR ? inv_hot_c(&lp->inv, slot) : NULL;
         const ItemDef *def = is && is->item && g_engine.items ? item_def(g_engine.items, is->item) : NULL;
         mm_kv(&c, "In hand", def ? def->name : "Nothing");
     }

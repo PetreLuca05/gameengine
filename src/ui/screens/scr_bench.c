@@ -33,7 +33,7 @@ bool bench_draw(GuiRect r) {
     if (!p || !w) return true;
     if (ent_valid(w, g->bench_ent) && v3_dist(p->sim.move.pos, w->xf[ENT_INDEX(g->bench_ent)].pos) > 3.5f) return true;   // walked away
     int inv_slot = DG_CLAMP((int)p->sim.wpn.slot, 0, INV_HOTBAR - 1);
-    const InvSlot *s = &p->inv.slots[inv_slot];
+    const InvSlot *s = inv_hot_c(&p->inv, inv_slot);
     const WeaponDef *wd = item_weapon(w->items, s->item);
     GuiRect c = screens_modal_frame(r, "Weapon bench", wd ? item_def(w->items, s->item)->name : NULL);
     GuiCursor cur = gc_make(c, gui_s(4));

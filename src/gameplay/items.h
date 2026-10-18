@@ -20,6 +20,30 @@ typedef enum DamageType { DMG_GENERIC, DMG_BULLET, DMG_MELEE, DMG_EXPLOSIVE, DMG
 typedef enum WeaponKind { WPN_MELEE, WPN_HITSCAN, WPN_PROJECTILE } WeaponKind;
 typedef enum VisShape { VIS_NONE, VIS_BOX, VIS_CYLINDER, VIS_SPHERE, VIS_CAPSULE } VisShape;
 
+// Grid inventory (docs/INVENTORY.md): the equipment slots of a body tree.
+typedef enum InvEquipSlot {
+    EQ_PRIMARY, EQ_SECONDARY, EQ_HOLSTER, EQ_MELEE, EQ_HEADWEAR, EQ_EARPIECE, EQ_FACE_COVER, EQ_EYEWEAR,
+    EQ_BODY_ARMOR, EQ_RIG, EQ_BACKPACK, EQ_ARMBAND, EQ_SECURE, EQ_COUNT, EQ_NONE = 255
+} InvEquipSlot;
+typedef enum InvUseType { INV_USE_NONE, INV_USE_CONSUME, INV_USE_CHARGES } InvUseType;
+
+// A container's grids ("container" block in items.json, roots in data/containers.json).
+#define INV_MAX_COMPS 12
+#define MAX_CONTAINER_DEFS 64
+typedef struct InvCompDef { u8 w, h; u8 at_x, at_y; } InvCompDef;   // at: placement in the panel (cells)
+typedef struct InvContainerDef {
+    char id[32];
+    InvCompDef comp[INV_MAX_COMPS];
+    int comp_count;
+    u16 allow_kinds, deny_kinds;   // ItemKind bit masks (allow 0 = any)
+    u16 deny_items[8];
+    int deny_count;
+    bool no_containers;            // holds no container items
+    bool equip;                    // a body: has the equipment slots (root containers only)
+    u8 max_w, max_h;               // largest footprint it takes (0 = any)
+    int capacity;                  // cells (sum of the compartments)
+} InvContainerDef;
+
 typedef struct ItemDef {
     char id[32];
     char name[48];
@@ -45,8 +69,19 @@ typedef struct ItemDef {
     char hold_style[16];   // third-person hold style for non-weapon items ("item_small", "item_large")
     ItemSockets sockets;   // held-item sockets (non-weapons)
     bool has_hold;         // the JSON has a "hold" block (hand pose discovery, docs/HANDPOSE.md)
-    u8 attachment;         // ITEM_ATTACHMENT: the attachment id it mounts (gameplay/inv_ops.c)
+    u8 attachment;         // ITEM_ATTACHMENT: the attachment id it mounts (II_MOUNT, gameplay/inventory/inv_intent.c)
     char icon[64];         // UI icon override (assets path, "icon" in the item JSON); empty = baked icon
+    // Grid inventory (docs/INVENTORY.md). weight is informational only (no gameplay effect).
+    u8 grid_w, grid_h;     // cells, unrotated ("grid"; 0 in the JSON = the class default)
+    bool rotatable;
+    float inv_weight;      // kg ("weight"); never read by movement, stamina or physics (lint_inventory.py)
+    u8 equip_slot;         // InvEquipSlot (EQ_NONE: not wearable)
+    u8 use_type;           // InvUseType
+    u8 charges;            // INV_USE_CHARGES: uses per item
+    u16 durability;        // max points (0 = none)
+    u8 fold_dw;            // weapons: columns lost with the stock folded (0 = doesn't fold)
+    i16 container;         // index into ItemDB.containers, -1 = not a container
+    char cell_image[64];   // grid image override (assets path); empty = baked / live
     u8 vehicle_use;        // VehicleUse: consumables used on a vehicle (docs/VEHICLES.md)
     float fuel;            // VUSE_FUEL: litres
     // Camera items (the phone, docs/PHONE.md): aiming raises it into camera mode. Item space as
@@ -130,6 +165,7 @@ typedef struct AttachmentDef {
     float mag_mult;           // magazine capacity multiplier
     float reload_time;        // multiplier
     float muzzle_len;         // m the muzzle moves forward (muzzle devices)
+    i8 grid_dw, grid_dh;      // inventory footprint change of the weapon carrying it ("grid", docs/INVENTORY.md)
     int muzzle_device;        // VfxMuzzleDevice, -1 = keep ("muzzle_device" string, or the "kind" of its object)
     bool bal_device;          // the "muzzle_device" object is a ballistics device block (gameplay/ballistics)
     bool has_grip_l;
@@ -213,6 +249,8 @@ typedef struct ItemDB {
     AttachmentDef attachments[MAX_ATTACHMENTS + 1];   // [0] unused (id 0 = none)
     int attachment_count;                             // highest valid id
     u16 builtin_phone;     // the camera item every player always carries ("builtin": true), 0 = none
+    InvContainerDef containers[MAX_CONTAINER_DEFS];   // item grids + the roots (data/containers.json)
+    int container_count;
 } ItemDB;
 
 // weapons_path: a directory of per-weapon JSON files (loaded sorted by file name so weapon
@@ -238,6 +276,11 @@ const char *item_kind_name(ItemKind k);
 // Attachment items (ITEM_ATTACHMENT): one per attachment definition ("att_<id>"), created after
 // loading unless items.json defines one ("kind": "attachment", "attachment": "<id>").
 u16 item_for_attachment(const ItemDB *db, u8 att_id);
+// Containers (docs/INVENTORY.md): by id (-1 none); the def of an item's grid (NULL: not a container).
+int container_find(const ItemDB *db, const char *id);
+const InvContainerDef *item_container(const ItemDB *db, u16 item);
+const char *equip_slot_name(int slot);   // "primary", ...
+int equip_slot_from_name(const char *s);  // EQ_NONE if unknown
 // Palm frame from finger / back-of-hand directions (-Z = fingers, +Y = back), orthonormalized.
 quat item_palm_frame(vec3 fingers, vec3 back);
 

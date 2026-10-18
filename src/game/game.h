@@ -14,7 +14,7 @@
 #include "player/camera.h"
 #include "render/mesh_gen.h"
 #include "gameplay/items.h"
-#include "gameplay/inv_ops.h"
+#include "gameplay/inventory.h"
 #include "gameplay/kill_stats.h"
 #include "gameplay/ping.h"
 #include "usercmd.h"
@@ -73,10 +73,15 @@ typedef struct Game {
     EntityId container_ent;
     bool bench_open;                 // weapon bench attachment UI (EV_BENCH)
     EntityId bench_ent;
-    InvSlot container_slots[CONTAINER_SLOTS];
-    int inv_selected;            // slot picked up for moving (-1 none)
-    // inventory intents (client prediction)
-    InvOp inv_pending[64];
+    // Grid inventory (docs/INVENTORY.md). Client: the host's last trees (bases) and the predicted
+    // copies (bases + the unacknowledged intents re-applied). The host's own player uses the real trees.
+    Inventory inv_base;
+    bool inv_base_valid;
+    InvTree loot;                // the open world inventory (predicted)
+    InvTree loot_base;
+    EntityId loot_ent;           // ENT_NONE: no tree received yet
+    u32 loot_rev;
+    InvIntent inv_pending[64];
     int inv_pending_count;
     u32 inv_seq;
     bool paused;                 // single player / host alone: the pause menu stops the simulation
@@ -193,11 +198,21 @@ enum RpcType {
     RPC_PING,        // a / b / c = ping_pack (gameplay/ping.h)
 };
 
-// Inventory intents (gameplay/inv_ops.h, docs/UI.md): applied at once on the host; a client predicts
-// them on its copy and re-applies the unacknowledged ones on every inventory the host sends.
-struct InvOp;
-int game_inv_op(struct InvOp *op);   // returns the (predicted) InvOpResult
-void game_cl_inventory(int slot, u32 revision, u32 ack_seq, const InvSlot *slots);
-int game_inv_pending(void);          // client: intents not yet acknowledged
+// Inventory intents (gameplay/inventory/inv_intent.h, docs/INVENTORY.md): applied at once on the
+// host; a client predicts them on its copies and re-applies the unacknowledged ones on every
+// inventory / loot tree the host sends.
+int game_inv_intent(InvIntent *in);   // returns the (predicted) InvResult; fills in->seq
+int game_inv_pending(void);           // client: intents not yet acknowledged
+void game_cl_inventory(int slot, u32 revision, u32 ack_seq, const u16 *quick, const InvTree *tree);
+void game_cl_loot(EntityId e, u32 revision, const InvTree *tree);   // tree NULL: closed
+// The open world inventory as this machine sees it (host: the real tree; client: the predicted
+// copy), NULL when none is open / not received yet.
+InvTree *game_loot_tree(void);
+EntityId game_loot_ent(void);
+void game_sv_inv_intent(int slot, const InvIntent *in);   // host: validate + apply + world effects
+int game_sv_inv_intent_r(int slot, const InvIntent *in);  // the same, returning the InvResult
+void game_sv_loot_close(int slot);
+float game_loot_reach(World *w, EntityId e);   // sv_inv_reach (+ 1 m for vehicles)
+void game_loot_register(void);
 
 #endif

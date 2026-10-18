@@ -95,9 +95,11 @@ static void equip(int wi) {
     u16 item = 0;
     for (int i = 1; i < G->items.item_count; i++) if (G->items.items[i].weapon == wi) item = (u16)i;
     if (!item) item = item_find(&G->items, wd->id);
-    p->inv.slots[0].item = item;
-    p->inv.slots[0].count = 1;
-    p->inv.slots[0].ammo = (i16)wd->mag_size;
+    InvSlot *s = inv_dev_hot(&p->inv, &G->items, 0);
+    memset(s, 0, sizeof(*s));
+    s->item = item;
+    s->count = 1;
+    s->ammo = (i16)wd->mag_size;
     p->inv.revision++;
     G->hotbar_slot = 0;
 }
@@ -109,7 +111,7 @@ static void cmd_holdpoint_test(int argc, const char **argv) {
     if (!p || G->mode != GM_HOST) { log_warn("holdpoint_test: needs a local host player"); return; }
     memset(&T, 0, sizeof(T));
     T.active = true;
-    T.saved = p->inv.slots[0];
+    T.saved = *inv_hot(&p->inv, 0);
     equip(0);
     cvar_set_int(cvar_find("holdpoint_force_state"), 0);
     cvar_set_int(cvar_find("holdpoint_static"), 1);
@@ -162,7 +164,7 @@ void game_holdpoint_test_frame(void) {
             T.active = false;
             cvar_set_int(cvar_find("holdpoint_force_state"), -1);
             cvar_set_int(cvar_find("holdpoint_static"), 0);
-            p->inv.slots[0] = T.saved;
+            *inv_dev_hot(&p->inv, &G->items, 0) = T.saved;
             p->inv.revision++;
             report();
             return;

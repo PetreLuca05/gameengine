@@ -14,7 +14,6 @@
 #include "gameplay/entities.h"
 #include "gameplay/weapons.h"
 #include "gameplay/throwables.h"
-#include "gameplay/inv_ops.h"
 #include "input/input.h"
 #include "net/net.h"
 #include "ui/console.h"
@@ -122,9 +121,9 @@ static int build_inventory_slots(const WheelDef *def, WheelSlot *out, int max) {
     Player *p = game_local_player();
     if (!p) return 0;
     int n = 0;
-    for (int i = 0; i < INV_SLOTS && n < max; i++) {
-        const InvSlot *s = &p->inv.slots[i];
-        if (!s->item) continue;
+    for (int i = 0; i < INV_MAX_ITEMS && n < max; i++) {
+        const InvSlot *s = &p->inv.t.items[i].s;
+        if (!inv_alive(&p->inv.t.items[i]) || p->inv.t.items[i].loc == INV_LOC_NONE) continue;
         const ItemDef *d = item_def(w->items, s->item);
         if (!item_matches(def, d)) continue;
         int k = 0;
@@ -222,22 +221,23 @@ static bool open_kind(int kind) { return open_def(kind, def_for(kind)); }
 
 // ------------------------------------------------------------------ actions
 
-// Selects (or moves into the hotbar and selects) the first stack of an item.
+// Selects the hotbar slot bound to an item, or binds its first stack to a free hotbar slot (the
+// selected one when all are taken) and selects that (docs/INVENTORY.md: binds are to instances).
 static bool equip_item(u16 item) {
     Player *p = game_local_player();
     if (!p || !item) return false;
-    int at = -1;
-    for (int i = 0; i < INV_SLOTS && at < 0; i++) if (p->inv.slots[i].item == item) at = i;
-    if (at < 0) return false;
-    if (at >= INV_HOTBAR) {
-        int to = inv_first_empty(&p->inv, 0, INV_HOTBAR);
-        if (to < 0) to = G->hotbar_slot;
-        InvOp op;
-        memset(&op, 0, sizeof(op));
-        op.type = IOP_EQUIP;
-        op.a = (u8)at;
-        op.b = (u8)to;
-        if (game_inv_op(&op) != IOR_OK) return false;
+    int at = inv_hot_find(&p->inv, item);
+    if (at < 0) {
+        InvItem *it = inv_find(&p->inv, item);
+        if (!it) return false;
+        int to = G->hotbar_slot;
+        for (int k = INV_HOTBAR - 1; k >= 0; k--) if (!inv_hot_c(&p->inv, k)->item) to = k;
+        InvIntent in;
+        memset(&in, 0, sizeof(in));
+        in.type = II_BIND;
+        in.src = it->uid;
+        in.aux = (u8)to;
+        if (game_inv_intent(&in) != IIR_OK) return false;
         at = to;
     }
     G->hotbar_slot = (u8)at;

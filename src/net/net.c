@@ -23,6 +23,7 @@
 #include "game/game_internal.h"
 #include "world/chunks.h"
 #include "gameplay/entities.h"
+#include "gameplay/inventory/inv_wire.h"
 #include <enet/enet.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -167,13 +168,41 @@ static void send_inventory_of(RemoteClient *c, int slot) {
     w_u8(&wr, (u8)slot);
     w_u32(&wr, p->inv.revision);
     w_u32(&wr, p->inv_ack_seq);
-    w_bytes(&wr, p->inv.slots, sizeof(p->inv.slots));
+    for (int k = 0; k < INV_HOTBAR; k++) w_u16(&wr, p->inv.quick[k]);
+    static u8 tree[INV_WIRE_TREE_MAX];
+    int n = inv_wire_write_tree(&p->inv.t, tree, sizeof(tree));
+    w_u16(&wr, (u16)n);
+    w_bytes(&wr, tree, (u32)n);
     send_msg(c->peer, CH_RELIABLE, &wr);
     if (slot == c->slot) p->inv_sent_revision = p->inv.revision;
     else { c->spec_inv_slot = slot; c->spec_inv_rev = p->inv.revision; }
 }
 
 static void send_inventory(RemoteClient *c) { send_inventory_of(c, c->slot); }
+
+// MSG_LOOT: the world inventory the client's player has open (relevance: only open containers'
+// trees travel), resent whenever its revision changes; a closed / gone one is sent once as closed.
+static void send_loot(RemoteClient *c, World *w, Player *p) {
+    EntityId oc = p->open_container;
+    InvTree *t = container_tree(w, oc, false);
+    if (!t) oc = ENT_NONE;
+    u32 rev = oc ? w->cont[ENT_INDEX(oc)].revision : 0;
+    if (p->loot_sent_ent == oc && p->loot_sent_rev == rev) return;
+    Writer wr = writer_make(N->buf, NET_BUF);
+    w_u8(&wr, MSG_LOOT);
+    w_u32(&wr, oc);
+    w_u32(&wr, rev);
+    w_u8(&wr, t ? 1 : 0);
+    if (t) {
+        static u8 tree[INV_WIRE_TREE_MAX];
+        int n = inv_wire_write_tree(t, tree, sizeof(tree));
+        w_u16(&wr, (u16)n);
+        w_bytes(&wr, tree, (u32)n);
+    }
+    send_msg(c->peer, CH_RELIABLE, &wr);
+    p->loot_sent_ent = oc;
+    p->loot_sent_rev = rev;
+}
 
 static void host_handle_hello(PeerId peer, Reader *r) {
     u16 version = r_u16(r);
@@ -367,6 +396,16 @@ static void host_handle(const NetEvent *e) {
         game_sv_handle_rpc(c->slot, rt, a, b, cc);
         break;
     }
+    case MSG_INV_INTENT: {
+        if (!c) break;
+        u8 b[INV_WIRE_INTENT];
+        r_bytes(&r, b, sizeof(b));
+        if (r.overflow) break;
+        InvIntent in;
+        inv_wire_read_intent(&in, b);
+        game_sv_inv_intent(c->slot, &in);
+        break;
+    }
     case MSG_BYE: N->t->disconnect(N->t, e->peer); break;
     case MSG_LOBBY: lobby_on_host_msg(e->peer, &r); break;
     default: break;
@@ -437,6 +476,7 @@ void net_host_after_tick(World *w) {
         Player *p = &w->players[c->slot];
         if (!p->active) continue;
         if (p->inv.revision != p->inv_sent_revision) send_inventory(c);
+        send_loot(c, w, p);
         if (c->cvar_revision != rev) { send_cvars(c); c->cvar_revision = rev; }
         // Spectating: the target's local data, inventory and relevance (docs/SPECTATE.md).
         int src = spectate_source(w, c->slot);
@@ -679,11 +719,30 @@ static void client_handle(const NetEvent *e) {
         int slot = r_u8(&r);
         u32 rev = r_u32(&r);
         u32 ack = r_u32(&r);
-        static InvSlot slots[INV_SLOTS];
-        r_bytes(&r, slots, sizeof(slots));
-        if (r.overflow || slot >= MAX_PLAYERS) break;
-        if (slot == N->local_slot) game_cl_inventory(N->local_slot, rev, ack, slots);   // reconcile with the predicted intents
-        else spectator_cl_inventory(w, slot, rev, slots);                              // the spectated player's (HUD)
+        u16 quick[INV_HOTBAR];
+        for (int k = 0; k < INV_HOTBAR; k++) quick[k] = r_u16(&r);
+        u16 n = r_u16(&r);
+        static u8 buf[INV_WIRE_TREE_MAX];
+        static InvTree tree;
+        if (n > sizeof(buf)) break;
+        r_bytes(&r, buf, n);
+        if (r.overflow || slot >= MAX_PLAYERS || !inv_wire_read_tree(&tree, buf, n)) break;
+        if (slot == N->local_slot) game_cl_inventory(N->local_slot, rev, ack, quick, &tree);   // reconcile with the predicted intents
+        else spectator_cl_inventory(w, slot, rev, quick, &tree);                            // the spectated player's (HUD)
+        break;
+    }
+    case MSG_LOOT: {
+        EntityId e = r_u32(&r);
+        u32 rev = r_u32(&r);
+        u8 open = r_u8(&r);
+        static u8 buf[INV_WIRE_TREE_MAX];
+        static InvTree tree;
+        if (!open) { if (!r.overflow) game_cl_loot(e, rev, NULL); break; }
+        u16 n = r_u16(&r);
+        if (n > sizeof(buf)) break;
+        r_bytes(&r, buf, n);
+        if (r.overflow || !inv_wire_read_tree(&tree, buf, n)) break;
+        game_cl_loot(e, rev, &tree);
         break;
     }
     case MSG_SPEC_CMDS: {
@@ -740,6 +799,16 @@ void net_client_interpolate(World *w, float dt) {
 u32 net_client_view_tick256(void) {
     if (!N || N->role != NET_CLIENT) return 0;
     return (u32)(N->render_tick * 256.0);
+}
+
+void net_send_inv_intent(const InvIntent *in) {
+    if (N->role != NET_CLIENT || !N->welcomed) return;
+    Writer w = writer_make(N->buf, NET_BUF);
+    w_u8(&w, MSG_INV_INTENT);
+    u8 b[INV_WIRE_INTENT];
+    inv_wire_write_intent(in, b);
+    w_bytes(&w, b, sizeof(b));
+    send_msg(N->server_peer, CH_RELIABLE, &w);
 }
 
 void net_send_rpc(int type, int a, int b, int c) {

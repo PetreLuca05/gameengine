@@ -7,7 +7,7 @@
 #include "core/dgmath.h"
 
 #define EVENT_ALL 0xFF
-#define EVENT_DATA_SIZE 144   // container contents: CONTAINER_SLOTS x InvSlot
+#define EVENT_DATA_SIZE 144
 #define MAX_PENDING_EVENTS 512
 
 typedef enum EventType {
@@ -21,7 +21,7 @@ typedef enum EventType {
     EV_TRACER,         // pos = from, dir = to
     EV_MUZZLE,         // ent = shooter
     EV_KILL,           // ent = victim, ent2 = killer, text = message, id = KILLF_* (kill_stats.h), data = KillEventData
-    EV_CONTAINER,      // ent = container, data = InvSlot[CONTAINER_SLOTS]
+    EV_CONTAINER,      // ent = the world inventory opened for target (contents: MSG_LOOT, docs/INVENTORY.md)
     EV_CONTAINER_CLOSE,
     EV_RESPAWN,        // ent = player entity
     EV_USE_ANIM,       // ent = user player entity, ent2 = target (for remote hand animation)
