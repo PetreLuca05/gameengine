@@ -1,0 +1,20 @@
+{
+  "_doc": "Impact: an impulse as wide as the contact time (soft = wide = dark) excites the material's modal bank (assets/audio/materials.json); a band-passed noise burst carries the scrape / crumble share; a low thud for soft ground and flesh.",
+  "name": "impact_modal",
+  "params": {
+    "material": [1, -1, 23], "amp": [1, 0, 4], "contact_ms": [0.6, 0.05, 8], "pitch": [1, 0.5, 2], "damp": [1, 0.2, 3],
+    "noise_amp": [0.5, 0, 2], "noise_hz": [2500, 200, 9000], "noise_time": [1, 0.2, 4], "thud": [0.2, 0, 2], "bright": [0, -1, 1]
+  },
+  "nodes": [
+    { "id": "imp", "type": "impulse", "amp": 1, "width_ms": "$contact_ms" },
+    { "id": "md", "type": "modal", "in": "imp", "material": "$material", "pitch": "$pitch", "damp": "$damp", "bright": "$bright", "spread": 1 },
+    { "id": "nz", "type": "noise", "color": "white" },
+    { "id": "ne", "type": "env", "in": "nz", "stages": [[0.1, 1], [10, 0, 4]], "time": "$noise_time", "amp": "$noise_amp" },
+    { "id": "nb", "type": "svf", "mode": "bp", "hz": "$noise_hz", "q": 0.8, "in": "ne" },
+    { "id": "th", "type": "onepole", "mode": "lp", "hz": 300, "in": "imp" },
+    { "id": "thg", "type": "gain", "amp": "$thud*6", "in": "th" },
+    { "id": "m", "type": "mix", "in": ["md", "nb", "thg"], "gains": [0.6, 1, 1] },
+    { "id": "out", "type": "gain", "amp": "$amp", "in": "m" }
+  ],
+  "out": "out"
+}

@@ -1,0 +1,15 @@
+{
+  "_doc": "A distant crowd of zombies: overlapping formant-filtered grains (a murmur of groans) whose density follows the cluster size.",
+  "name": "zombie_crowd",
+  "loop": true,
+  "params": { "amp": [1, 0, 3], "density": [6, 0, 80], "shift": [0.9, 0.6, 1.4] },
+  "nodes": [
+    { "id": "g", "type": "glottal", "hz": 75, "jitter": 0.08, "shimmer": 0.3, "fry": 0.6, "fry_hz": 20, "breath": 0.3 },
+    { "id": "gr", "type": "grains", "src": "noise", "rate": "$density", "hz": 500, "spread": 0.6, "dur_ms": 260, "q": 2 },
+    { "id": "rm", "type": "ring", "in": ["g", "gr"], "amp": 1.5 },
+    { "id": "f", "type": "formant", "in": "rm", "vowel": 5, "shift": "$shift", "bw": 1.6 },
+    { "id": "am", "type": "am", "hz": 0.6, "depth": 0.4, "in": "f" },
+    { "id": "out", "type": "gain", "amp": "$amp", "in": "am" }
+  ],
+  "out": "out"
+}

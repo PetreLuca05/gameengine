@@ -1,0 +1,14 @@
+{
+  "_doc": "Water: a low-passed noise splash and Minnaert bubbles (sine grains, f ~ 3.26 / r: small bubbles ring high).",
+  "name": "splash",
+  "params": { "amp": [1, 0, 3], "size": [1, 0.2, 4], "bubbles": [60, 0, 400] },
+  "nodes": [
+    { "id": "n", "type": "noise", "color": "pink" },
+    { "id": "e", "type": "env", "in": "n", "stages": [[2, 1, 0], [180, 0, 3]], "time": "$size" },
+    { "id": "lp", "type": "svf", "mode": "lp", "hz": 1400, "q": 0.6, "in": "e" },
+    { "id": "b", "type": "grains", "src": "sine", "rate": "$bubbles", "decay": 6, "hz": 900, "spread": 0.6, "dur_ms": 25 },
+    { "id": "be", "type": "env", "in": "b", "stages": [[5, 1], [500, 0, 2]], "time": "$size", "amp": 0.5 },
+    { "id": "m", "type": "mix", "in": ["lp", "be"], "amp": "$amp" }
+  ],
+  "out": "m"
+}

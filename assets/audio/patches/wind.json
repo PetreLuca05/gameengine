@@ -1,0 +1,19 @@
+{
+  "_doc": "Wind at the ear: three bands of pink noise (low roar, mid, high whistle of gusts) set from the local wind, a slow gust envelope.",
+  "name": "wind",
+  "loop": true,
+  "params": { "low": [0, 0, 2], "mid": [0, 0, 2], "high": [0, 0, 2], "gust": [0.3, 0, 1], "gust_hz": [0.25, 0.02, 3], "amp": [1, 0, 3] },
+  "nodes": [
+    { "id": "n", "type": "noise", "color": "pink" },
+    { "id": "b1", "type": "svf", "mode": "bp", "hz": 220, "q": 0.7, "in": "n" },
+    { "id": "b2", "type": "svf", "mode": "bp", "hz": 900, "q": 0.8, "in": "n" },
+    { "id": "b3", "type": "svf", "mode": "bp", "hz": 3200, "q": 1.2, "in": "n" },
+    { "id": "g1", "type": "gain", "amp": "$low", "in": "b1" },
+    { "id": "g2", "type": "gain", "amp": "$mid", "in": "b2" },
+    { "id": "g3", "type": "gain", "amp": "$high", "in": "b3" },
+    { "id": "mx", "type": "mix", "in": ["g1", "g2", "g3"] },
+    { "id": "am", "type": "am", "hz": "$gust_hz", "depth": "$gust", "in": "mx" },
+    { "id": "out", "type": "gain", "amp": "$amp", "in": "am" }
+  ],
+  "out": "out"
+}

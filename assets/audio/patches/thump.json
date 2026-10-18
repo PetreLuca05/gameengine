@@ -1,0 +1,10 @@
+{
+  "_doc": "Suspension bottoming / a flat tire's thump: a wide impulse into a low body resonance.",
+  "name": "thump",
+  "params": { "amp": [1, 0, 3], "width_ms": [6, 1, 30], "pitch": [1, 0.5, 2] },
+  "nodes": [
+    { "id": "i", "type": "impulse", "amp": 1, "width_ms": "$width_ms" },
+    { "id": "m", "type": "modal", "in": "i", "pitch": "$pitch", "amp": "$amp", "modes": [[45, 0.15, 1], [70, 0.1, 0.6], [120, 0.06, 0.4], [260, 0.04, 0.3]] }
+  ],
+  "out": "m"
+}

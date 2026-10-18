@@ -1,0 +1,7 @@
+{
+  "name": "vehicle_wind",
+  "bus": "sfx", "priority": 0.3, "loop": true, "max_instances": 4,
+  "distance": { "min": 2, "max": 40, "rolloff": 1 },
+  "inputs": { "speed": 0, "inside": 0 },
+  "layers": [ { "patch": "wind_buffet", "bind": { "amp": "clamp((speed - 5) / 30, 0, 1) * (inside > 0.5 ? 0.6 : 0.35)", "hz": "lerp(speed, 5, 200, 40, 2500)", "gust": "inside > 0.5 ? 2.5 : 1.0" } } ]
+}

@@ -12,6 +12,7 @@
 #include "render/post/post_settings.h"
 #include "physics/physics.h"
 #include "audio/audio.h"
+#include "vfx/vfx_types.h"
 #include "net/net.h"
 #include "ui/ui.h"
 #include "core/log.h"
@@ -52,8 +53,9 @@ static struct {
     int cb_count;
     int counts[WEV_COUNT];
     // thunder (delayed by the distance)
-    struct { double at; float vol; } thunder[8];
-    int thunder_n;
+    // Audio: the roof over the listener (rain drums on metal), re-cast twice a second.
+    float roof_t;
+    bool roof_metal;
     u32 last_strike_tick;
     // weather_at cache
     ProbeEntry cache[WX_CACHE];
@@ -136,6 +138,8 @@ float weather_exposure(World *w, vec3 p) {
     e->exposed = open / 5.0f;
     return e->exposed;
 }
+
+static void weather_audio(World *w, const RenderCamera *cam, float rain, float snowfall, vec3 wind, float gust, float rustle, float exposed, float dt);
 
 WeatherLocal weather_at(World *w, vec3 pos) {
     WeatherLocal l;
@@ -399,7 +403,6 @@ void weather_level_loaded(World *w, const char *map) {
     WX.occl_init = false;
     WX.have = false;
     WX.raining = WX.snowing = WX.storm = false;
-    WX.thunder_n = 0;
     WX.demo = false;
     weather_lens_init(&WX.lens, 0x1234u);
     if (!w) return;
@@ -518,8 +521,7 @@ void weather_frame(World *w, const RenderCamera *cam, const Player *lp) {
         WX.have = false;
         wind_game_frame(NULL, now_tick(w) * SIM_DT, cam->pos, dt, &rw);   // foliage still moves: a light breeze
         render_set_weather(&rw);
-        audio_loop_set("rain_loop", 0);
-        audio_loop_set("wind_loop", 0);
+        weather_audio(w, cam, 0, 0, v3(0, 0, 0), 0, 0, 1.0f, dt);
         return;
     }
     double tick = now_tick(w);
@@ -534,16 +536,18 @@ void weather_frame(World *w, const RenderCamera *cam, const Player *lp) {
     if (strike && itick != WX.last_strike_tick) {
         WX.last_strike_tick = itick;
         fire(WEV_LIGHTNING);
-        if (WX.thunder_n < 8) {
-            WX.thunder[WX.thunder_n].at = platform_time() + dist / 343.0;
-            WX.thunder[WX.thunder_n++].vol = clampf(1.6f - dist / 3000.0f, 0.25f, 1.0f);
-        }
-    }
-    for (int i = 0; i < WX.thunder_n;) {
-        if (platform_time() >= WX.thunder[i].at) {
-            audio_play_2d("thunder", WX.thunder[i].vol * WX.audio_vol->f, SND_SFX);
-            WX.thunder[i] = WX.thunder[--WX.thunder_n];
-        } else i++;
+        // Thunder from the strike (assets/audio/recipes/thunder.json): placed `dist` away in a direction
+        // drawn from the strike tick, it arrives d / c later by itself and rolls in the surroundings.
+        u32 hs = dg_hash_u32(itick ^ 0x7A11u);
+        float a = (float)(hs & 0xFFFFu) / 65536.0f * 6.2831853f;
+        float h = fminf(1200.0f, dist * 0.5f), horiz = sqrtf(fmaxf(dist * dist - h * h, 1.0f));
+        AudioEmit te;
+        audio_emit_init(&te, "thunder", v3_add(cam->pos, v3(cosf(a) * horiz, h, sinf(a) * horiz)));
+        te.volume = WX.audio_vol->f;
+        te.seed = hs;
+        AudioParams tp = { 0 };
+        audio_param(&tp, "strike", dist);
+        audio_emit(&te, &tp);
     }
     WX.have = true;
     WX.rain = precip_rain(&WX.cur);
@@ -588,12 +592,52 @@ void weather_frame(World *w, const RenderCamera *cam, const Player *lp) {
     rw.lens_strength = WX.lens_cv->i ? WX.lens_k->f : 0.0f;
     render_set_weather(&rw);
 
-    // Ambience: rain loop (muffled under a roof), wind loop by strength.
+    weather_audio(w, cam, WX.rain, WX.snowfall, WX.wind, WX.gust, wind_game_rustle(cam->pos), WX.exposed_cam, dt);
+}
+
+// Ambience (docs/AUDIO_PROCEDURAL.md "Weather"): synthesized wind (bands from the local wind and the
+// sky exposure, gusts from the wind field) and rain (hiss, drops around, drumming on the roof above:
+// metal rings) over the recorded loops, leaf rustle among trees. Loops by key on the ambience bus.
+static void weather_audio(World *w, const RenderCamera *cam, float rain, float snowfall, vec3 wind, float gust, float rustle, float exposed, float dt) {
     float v = WX.audio_vol->f;
-    audio_loop_set("rain_loop", v * WX.rain * (0.35f + 0.65f * WX.exposed_cam));
-    // the wind loop follows the local wind (gusts sweep past), louder among trees (rustle)
-    float rustle = wind_game_rustle(cam->pos);
-    audio_loop_set("wind_loop", v * clampf((v3_len(WX.wind) - 2.0f) / 14.0f, 0.0f, 1.0f) * (0.4f + 0.6f * WX.exposed_cam) * (0.75f + 0.5f * rustle) + v * WX.snowfall * 0.2f);
+    WX.roof_t -= dt;
+    if (rain > 0.01f && exposed < 0.95f && WX.roof_t <= 0.0f && w->phys) {
+        RayHit rh;
+        WX.roof_metal = phys_raycast(w->phys, cam->pos, v3(0, 25, 0), PL_MASK_WORLD, PHYS_INVALID_BODY, &rh) && (rh.material == SURF_METAL_THIN || rh.material == SURF_METAL_THICK);
+        WX.roof_t = 0.5f;
+    }
+    AudioEmit e;
+    AudioParams p = { 0 };
+    float ws = v3_len(wind);
+    audio_emit_init(&e, "wind", cam->pos);
+    e.volume = v;
+    e.seed = 0x31DDu;
+    audio_param(&p, "wind", ws);
+    audio_param(&p, "gust", gust);
+    audio_param(&p, "exposure", exposed);
+    audio_param(&p, "rustle", rustle);
+    audio_param(&p, "snow", snowfall);
+    if (ws > 2.0f || snowfall > 0.01f) audio_loop_recipe(0x57A1Du, &e, &p);
+    if (rain > 0.005f) {
+        AudioParams rp = { 0 };
+        audio_emit_init(&e, "rain", cam->pos);
+        e.volume = v;
+        e.seed = 0x2A1Bu;
+        audio_param(&rp, "rain", rain);
+        audio_param(&rp, "exposure", exposed);
+        audio_param(&rp, "roof", 1.0f - exposed);
+        audio_param(&rp, "roof_metal", WX.roof_metal ? 1.0f : 0.0f);
+        audio_loop_recipe(0x2A1B1u, &e, &rp);
+    }
+    if (rustle > 0.05f && ws > 1.5f) {
+        AudioParams lp = { 0 };
+        audio_emit_init(&e, "leaves", cam->pos);
+        e.volume = v;
+        e.seed = 0x1EAFu;
+        audio_param(&lp, "density", rustle);
+        audio_param(&lp, "wind", ws);
+        audio_loop_recipe(0x1EAF5u, &e, &lp);
+    }
 }
 
 // Sky hooks (daynight_environment): cloud cover / density / softness / darkness, light loss.

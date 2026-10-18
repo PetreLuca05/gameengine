@@ -1,0 +1,13 @@
+{
+  "name": "ui_click",
+  "params": { "amp": [0.6, 0, 2], "hz": [3500, 500, 9000] },
+  "nodes": [
+    { "id": "i", "type": "impulse", "amp": 1 },
+    { "id": "n", "type": "noise", "color": "white" },
+    { "id": "ne", "type": "env", "in": "n", "stages": [[0.1, 1], [6, 0, 4]], "amp": 0.3 },
+    { "id": "m", "type": "mix", "in": ["i", "ne"] },
+    { "id": "bp", "type": "svf", "mode": "bp", "hz": "$hz", "q": 2, "in": "m" },
+    { "id": "e", "type": "env", "in": "bp", "stages": [[0.1, 1], [14, 0, 4]], "amp": "$amp*4" }
+  ],
+  "out": "e"
+}

@@ -59,7 +59,7 @@ static struct {
     Cvar *enable, *drag_model, *wind_cv, *wind_dir_cv, *spin, *tracers_only, *debug, *watch, *ignition, *shutter, *crack_radius;
 } B;
 
-static void play_report(const char *sound, const BalDevice *dev, vec3 muzzle, vec3 aim, float extra_delay);
+static void play_report(const BalShotRecord *rec, const WeaponDef *wd, const BalDevice *dev, vec3 muzzle, vec3 aim, float extra_delay);
 
 // ------------------------------------------------------------------ data
 
@@ -305,7 +305,7 @@ void bal_on_shot_event(World *w, const GameEvent *ev, vec3 muzzle) {
     float early = 0.0f;
     if (!w->authority) early = (float)(((double)rec.fire_tick - net_client_render_tick()) * SIM_DT);
     if (w->items && rec.weapon < w->items->weapon_count)
-        play_report(w->items->weapons[rec.weapon].sound_fire, &B.data.dev[DG_MIN(rec.device, B.data.dev_count - 1)], muzzle, ev->dir, early);
+        play_report(&rec, &w->items->weapons[rec.weapon], &B.data.dev[DG_MIN(rec.device, B.data.dev_count - 1)], muzzle, ev->dir, early);
     if (w->authority) return;   // the host has the real bullets
     if (B.pending_count >= MAX_PENDING) memmove(B.pending, B.pending + 1, sizeof(B.pending[0]) * (MAX_PENDING - 1)), B.pending_count--;
     B.pending[B.pending_count].rec = rec;
@@ -587,18 +587,22 @@ static void listen_step(BalLive *l, const BalEnv *env, vec3 from, float dt) {
     float half = 0.5f * v3_dist(from, l->b.pos) + radius;
     if (v3_len2(v3_sub(c, B.listener)) > half * half) return;
     float delay;
-    AudioFx fx;
-    memset(&fx, 0, sizeof(fx));
+    const BalCartridge *cart = &B.data.cart[l->b.cart];
+    AudioParams ap = { 0 };
+    AudioEmit e;
     if (speed > env->sound_speed) {
         if (!bal_crack_segment(from, l->b.pos, t0, speed, env->sound_speed, B.listener, &arrival, &miss) || miss > radius) return;
-        char name[32];
-        snprintf(name, sizeof(name), "bullet_crack_%d", bal_crack_variant(miss));
+        // The N-wave (assets/audio/recipes/bullet_crack.json): its length from the miss distance and the
+        // bullet's size, heard exactly at the shock's arrival (the environment adds the rest).
         delay = arrival - l->b.time;
-        fx.delay = fmaxf(delay, 0.0f);
-        fx.lowpass_hz = bal_lowpass_hz(miss * 4.0f);
-        fx.min_dist = 2.0f;
-        fx.max_dist = 400.0f;
-        if (delay > -0.1f) audio_play_fx(name, v3_lerp(from, l->b.pos, 0.5f), bal_crack_gain(miss), SND_SFX, &fx);
+        audio_emit_init(&e, "bullet_crack", v3_lerp(from, l->b.pos, 0.5f));
+        e.delay = fmaxf(delay, 0.0f);
+        e.volume = bal_crack_gain(miss);
+        e.seed = dg_hash_u32((u32)l->shot_id * 2654435761u ^ 0xC4AC4u);
+        audio_param(&ap, "miss", miss);
+        audio_param(&ap, "caliber", cart->diameter * 1000.0f);
+        audio_param(&ap, "speed", speed);
+        if (delay > -0.1f) audio_emit(&e, &ap);
         if (B.debug && B.debug->i) {
             // The supersonic radius around the path where it passed, and when the crack is heard.
             char txt[64];
@@ -610,18 +614,37 @@ static void listen_step(BalLive *l, const BalEnv *env, vec3 from, float dt) {
     } else {
         if (!bal_whizz_segment(from, l->b.pos, t0, speed, env->sound_speed, B.listener, &arrival, &miss) || miss > 8.0f) return;
         delay = arrival - l->b.time;
-        fx.delay = fmaxf(delay, 0.0f);
-        fx.pitch = clampf(speed / 300.0f, 0.6f, 1.3f);
-        if (delay > -0.1f) audio_play_fx("bullet_whizz", B.listener, clampf(1.5f / fmaxf(miss, 0.5f), 0.1f, 1.0f), SND_SFX, &fx);
+        audio_emit_init(&e, "bullet_whizz", B.listener);
+        e.delay = fmaxf(delay, 0.0f);
+        e.volume = clampf(1.5f / fmaxf(miss, 0.5f), 0.1f, 1.0f);
+        e.pitch = clampf(speed / 300.0f, 0.6f, 1.3f);
+        e.seed = dg_hash_u32((u32)l->shot_id * 2654435761u ^ 0x3122u);
+        audio_param(&ap, "speed", speed);
+        audio_param(&ap, "miss", miss);
+        if (delay > -0.1f) audio_emit(&e, &ap);
         if (B.debug && B.debug->i >= 2) log_info("ballistics: whizz shot %04x miss %.1f m, heard in %.3f s", l->shot_id, miss, delay);
     }
     l->crack_done = 1;
 }
 
-// A shot's report for listeners away from the gun: travel time, air absorption, the device's
-// level (suppressor -28 dB, brake +3 / +6 dB to the side), a distant layer past 150 m.
-static void play_report(const char *sound, const BalDevice *dev, vec3 muzzle, vec3 aim, float extra_delay) {
-    if (!sound || !sound[0]) return;
+// The shot's physical values for the gunshot recipe (assets/audio/recipes/gunshot.json): muzzle
+// energy of every pellet, calibre, barrel, muzzle device; the replicated shot seed varies it the same
+// way on every machine.
+static void shot_params(AudioParams *ap, const BalCartridge *c, const WeaponDef *wd, const BalDevice *dev, float speed, int pellets, bool local) {
+    float energy = 0.5f * c->mass * speed * speed * (float)(pellets > 0 ? pellets : 1);
+    audio_param(ap, "energy", energy);
+    audio_param(ap, "caliber", c->diameter * 1000.0f);
+    audio_param(ap, "barrel", wd->barrel_length > 0 ? wd->barrel_length : c->ref_barrel);
+    audio_param(ap, "device", (float)dev->kind);
+    audio_param(ap, "pellets", (float)pellets);
+    audio_param(ap, "auto", wd->bolt_action ? 0.0f : 1.0f);
+    audio_param(ap, "local", local ? 1.0f : 0.0f);
+}
+
+// A shot's report for listeners away from the gun: travel time (and the shooter's head start on a
+// client), the device's level (suppressor -28 dB, brake +3 / +6 dB to the side); the recipe and the
+// environment do the rest (blast, air absorption, the distant layer, echoes, rooms).
+static void play_report(const BalShotRecord *rec, const WeaponDef *wd, const BalDevice *dev, vec3 muzzle, vec3 aim, float extra_delay) {
     vec3 L = B.have_listener ? B.listener : audio_listener_pos();
     float d = v3_dist(muzzle, L);
     float c = B.sound_speed > 100.0f ? B.sound_speed : 343.0f;
@@ -630,32 +653,39 @@ static void play_report(const char *sound, const BalDevice *dev, vec3 muzzle, ve
         float side = 1.0f - fabsf(v3_dot(v3_norm(v3_sub(L, muzzle)), aim));   // 1 beside the muzzle, 0 ahead / behind
         db += dev->report_db_side * side;
     }
-    char name[48];
-    snprintf(name, sizeof(name), "%s_distant", sound);
-    bool distant = d > 150.0f && audio_has_sound(name);
-    AudioFx fx;
-    memset(&fx, 0, sizeof(fx));
-    fx.delay = fmaxf(bal_report_delay(d, c) + extra_delay, 0.0f);
-    fx.lowpass_hz = bal_lowpass_hz(d);
-    if (dev->kind == BAL_DEV_SUPPRESSOR) fx.lowpass_hz = fminf(fx.lowpass_hz, 3500.0f);
-    fx.min_dist = 6.0f;
-    fx.max_dist = 2500.0f;
-    fx.rolloff = 0.6f;
-    audio_play_fx(distant ? name : sound, muzzle, bal_db_gain(db), SND_SFX, &fx);
+    AudioParams ap = { 0 };
+    shot_params(&ap, &B.data.cart[rec->cart], wd, dev, rec->speed, rec->pellets, false);
+    AudioEmit e;
+    audio_emit_init(&e, "gunshot", muzzle);
+    e.fwd = aim;
+    e.sample = wd->sound_fire;
+    e.volume = bal_db_gain(db);
+    e.seed = rec->seed ^ ((u32)rec->shot_id << 16);
+    e.delay = fmaxf(bal_report_delay(d, c) + extra_delay, 0.0f);
+    audio_emit(&e, &ap);
     if (B.debug && B.debug->i) {
         char txt[64];
-        snprintf(txt, sizeof(txt), "report +%.2f s (%.0f m)", fx.delay, d);
+        snprintf(txt, sizeof(txt), "report +%.2f s (%.0f m)", e.delay, d);
         dbg_text(v3_add(L, v3(0, 0.3f, 0)), txt, DBG_YELLOW, 0.05f, 4.0f);
     }
-    if (B.debug && B.debug->i >= 2) log_info("ballistics: report %s at %.0f m, heard in %.3f s (%+.0f dB)", distant ? name : sound, d, fx.delay, db);
+    if (B.debug && B.debug->i >= 2) log_info("ballistics: report %s at %.0f m, heard in %.3f s (%+.0f dB)", wd->sound_fire, d, e.delay, db);
 }
 
 void bal_shooter_report(const WeaponDef *d, vec3 eye) {
     const BalDevice *dev = &bal_data()->dev[bal_weapon_device(d)];
-    AudioFx fx;
-    memset(&fx, 0, sizeof(fx));
-    if (dev->kind == BAL_DEV_SUPPRESSOR) fx.lowpass_hz = 4000.0f;
-    audio_play_fx(d->sound_fire, eye, bal_db_gain(dev->report_db), SND_SFX, &fx);
+    int ci = bal_weapon_cartridge(d);
+    AudioEmit e;
+    audio_emit_init(&e, "gunshot", eye);
+    e.sample = d->sound_fire;
+    e.volume = bal_db_gain(dev->report_db);
+    e.seed = dg_hash_u32((u32)(platform_time() * 1000.0));
+    e.delay = 0.0f;
+    AudioParams ap = { 0 };
+    if (ci >= 0) {
+        const BalCartridge *c = &bal_data()->cart[ci];
+        shot_params(&ap, c, d, dev, bal_cartridge_mv(c, d->barrel_length) * dev->velocity_mul, d->pellets > 1 ? d->pellets : c->pellets, true);
+    }
+    audio_emit(&e, &ap);
 }
 
 // ------------------------------------------------------------------ tick

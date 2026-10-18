@@ -144,12 +144,14 @@ void env_room_estimate(vec3 o, const EnvProbeHit h[ENV_PROBE_RAYS], float max_di
     for (int i = 0; i < 8; i++) horiz += h[hz_idx[i]].hit;
     r->indoor = h[2].hit && horiz >= 6;
     for (int b = 0; b < ENV_BANDS; b++) {
-        float a = r->absorb[b];
+        // Bare walls: real rooms add furniture, people, openings and scattering (+0.05, measured hard
+        // rooms ring 1-2 s, not the 5-8 s of their bare surfaces).
+        float a = r->absorb[b] + 0.05f;
         if (a > 0.99f) a = 0.99f;
         if (a < 0.01f) a = 0.01f;
         float air = 4.0f * 0.0001f * (float)(b + 1) * (float)(b + 1) * r->volume;   // 4 m V, m grows with frequency
         float rt = 0.161f * r->volume / (-r->surface * logf(1.0f - a) + air);
-        r->rt60[b] = rt < 0.05f ? 0.05f : (rt > 8.0f ? 8.0f : rt);
+        r->rt60[b] = rt < 0.05f ? 0.05f : (rt > 4.0f ? 4.0f : rt);
     }
 }
 

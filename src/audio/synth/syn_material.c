@@ -21,7 +21,7 @@ typedef struct MatInit {
 // 4k Hz. Transmission: mass law, a 10 cm concrete wall ~45 dB mid, a 12 mm drywall ~25 dB, a 4 mm pane ~22 dB.
 static const MatInit k_init[] = {
     { SYN_MAT_CONCRETE, { 180, 420, 760, 1300, 2100 }, { 0.06f, 0.04f, 0.03f, 0.02f, 0.015f }, { 1, 0.7f, 0.5f, 0.35f, 0.25f },
-      0.6f, 0.8f, 2500, { 0.01f, 0.02f, 0.03f }, 0.9f, { 10, 15, 20 }, { 1.5f, 2.2f, 2.8f }, 60 },
+      0.6f, 0.8f, 2500, { 0.03f, 0.04f, 0.06f }, 0.9f, { 10, 15, 20 }, { 1.5f, 2.2f, 2.8f }, 60 },   // painted, with the usual clutter
     { SYN_MAT_BRICK, { 150, 360, 690, 1150, 1900 }, { 0.07f, 0.05f, 0.035f, 0.025f, 0.02f }, { 1, 0.7f, 0.5f, 0.3f, 0.2f },
       0.7f, 0.75f, 2200, { 0.02f, 0.03f, 0.05f }, 0.85f, { 9, 14, 19 }, { 1.2f, 1.8f, 2.4f }, 58 },
     { SYN_MAT_PLASTER, { 90, 220, 480, 900 }, { 0.10f, 0.07f, 0.05f, 0.03f }, { 1, 0.6f, 0.4f, 0.2f },

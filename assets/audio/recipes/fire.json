@@ -1,0 +1,7 @@
+{
+  "name": "fire",
+  "bus": "sfx", "priority": 0.5, "loop": true, "max_instances": 8,
+  "distance": { "min": 1.5, "max": 50, "rolloff": 1 },
+  "inputs": { "size": 1 },
+  "layers": [ { "patch": "fire", "gain_db": -10, "bind": { "amp": "clamp(size, 0.2, 2)", "crackle": "20 + 60 * size", "hiss": "0.2 + 0.3 * size", "roar": "0.2 + 0.6 * size" } } ]
+}

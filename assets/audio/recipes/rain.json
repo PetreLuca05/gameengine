@@ -1,0 +1,15 @@
+{
+  "name": "rain",
+  "bus": "ambience", "loop": true, "spatial": false, "env": false, "priority": 0.5, "max_instances": 1,
+  "inputs": { "rain": 0, "exposure": 1, "roof": 0, "roof_metal": 0 },
+  "layers": [
+    { "patch": "rain", "bind": {
+        "hiss": "rain * (0.25 + 0.75 * exposure) * 0.6",
+        "rate": "rain * 900 * (0.3 + 0.7 * exposure)",
+        "drop": "rain * 0.5 * exposure",
+        "roof": "rain * roof * (roof_metal > 0.5 ? 0.9 : 0.4)",
+        "roof_mat": "roof_metal > 0.5 ? 20 : 6"
+      } },
+    { "sample": "rain_loop", "optional": true, "gain_db": -3, "bind": { "amp": "rain * (0.35 + 0.65 * exposure)" } }
+  ]
+}

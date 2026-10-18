@@ -357,13 +357,14 @@ void vfx_game_impact(vec3 pos, vec3 normal, vec3 incoming, int material, int cal
             rp.scale = 1.0f;
             rp.count_mul = es;
             vfx_game_spawn("impact_ricochet", &rp);
-            AudioFx fx;
-            memset(&fx, 0, sizeof(fx));
-            fx.delay = audio_travel_delay(pos);
-            fx.lowpass_hz = bal_lowpass_hz(v3_dist(pos, audio_listener_pos()));
-            fx.pitch = 0.85f + 0.3f * (float)(vfx_hash((u32)(pos.x * 997.0f) ^ (u32)(pos.z * 131.0f)) & 0xFF) / 255.0f;
-            fx.max_dist = 200.0f;
-            audio_play_fx("bullet_ricochet", pos, 0.7f, SND_SFX, &fx);
+            // The whine (assets/audio/recipes/ricochet.json): pitch, sweep and tumble vary per hit.
+            AudioEmit re;
+            audio_emit_init(&re, "ricochet", pos);
+            re.volume = 0.7f;
+            re.seed = vfx_hash((u32)(pos.x * 997.0f) ^ (u32)(pos.z * 131.0f) ^ (u32)(pos.y * 61.0f));
+            AudioParams rpa = { 0 };
+            audio_param(&rpa, "energy", energy);
+            audio_emit(&re, &rpa);
         }
         if (bo & BAL_IMP_EXIT) {
             VfxSpawnParams xp = sp;
@@ -377,10 +378,9 @@ void vfx_game_impact(vec3 pos, vec3 normal, vec3 incoming, int material, int cal
             lp.count_mul = es;
             vfx_game_spawn("impact_lead_splash", &lp);
             if (material == SURF_METAL_THICK && energy > 500.0f) {
+                // Steel plate: the recorded ring carries far (the modal impact rings too).
                 AudioFx fx;
                 memset(&fx, 0, sizeof(fx));
-                fx.delay = audio_travel_delay(pos);
-                fx.lowpass_hz = bal_lowpass_hz(v3_dist(pos, audio_listener_pos()));
                 fx.max_dist = 600.0f;
                 fx.rolloff = 0.5f;
                 audio_play_fx("impact_plate_ring", pos, clampf(energy / 2000.0f, 0.3f, 1.0f), SND_SFX, &fx);
@@ -397,14 +397,21 @@ void vfx_game_impact(vec3 pos, vec3 normal, vec3 incoming, int material, int cal
         const char *snd = e >= 0 && V->lib.effects[e].sound[0] ? V->lib.effects[e].sound : NULL;
         char def[32];
         if (!snd) { snprintf(def, sizeof(def), "impact_%s", surface_sound_class(material)); snd = def; }
-        // Heard when the sound gets here (a distant hit after its crack, before the report).
-        AudioFx fx;
-        memset(&fx, 0, sizeof(fx));
-        float dist = v3_dist(pos, audio_listener_pos());
-        fx.delay = audio_travel_delay(pos);
-        fx.lowpass_hz = bal_lowpass_hz(dist);
-        fx.max_dist = 150.0f;
-        audio_play_fx(snd, pos, 0.55f * fminf(1.0f, cs.energy), SND_SFX, &fx);
+        // The impact recipe (assets/audio/recipes/impact.json): the surface's modes excited by the energy
+        // that arrived, head-on rings / grazing scrapes, debris, the effect's sample as a layer. Heard
+        // when the sound gets here (the environment: a distant hit after its crack, before the report).
+        AudioEmit ie;
+        audio_emit_init(&ie, "impact", pos);
+        ie.sample = snd;
+        ie.volume = 0.55f * fminf(1.0f, fmaxf(cs.energy, 0.3f));
+        ie.seed = vfx_hash((u32)(pos.x * 997.0f) ^ (u32)(pos.z * 131.0f) ^ (u32)(pos.y * 53.0f) ^ (u32)material);
+        AudioParams ipa = { 0 };
+        audio_param(&ipa, "material", (float)material);
+        audio_param(&ipa, "energy", energy > 0.0f ? energy : 1500.0f * cs.energy);
+        audio_param(&ipa, "cosi", fabsf(v3_dot(sp.normal, sp.incoming)));
+        audio_param(&ipa, "ricochet", (bo & BAL_IMP_RICOCHET) ? 1.0f : 0.0f);
+        audio_param(&ipa, "exit", (bo & BAL_IMP_EXIT) ? 1.0f : 0.0f);
+        audio_emit(&ie, &ipa);
     }
 }
 

@@ -19,11 +19,13 @@ static struct {
     EnvListener lis;
     RoomCache rooms[ROOM_CACHE];
     ScanCache scans[SCAN_CACHE];
+    EnvRoom lis_room_buf;        // a copy: the cache slot it came from may be reused
     const EnvRoom *lis_room;
     EnvRoom remote;
     float remote_score;
     bool remote_valid, remote_seen;
     float forest, urban, env_age;
+    vec3 lis_probe_pos;
     vec3 probe_origin, probe_end[ENV_PROBE_RAYS];
     bool probe_hit[ENV_PROBE_RAYS];
     vec3 scan_origin, scan_end[ENV_ECHO_RAYS];
@@ -178,8 +180,11 @@ void env_world_begin_frame(float dt) {
     if (W.have_q) {
         static float since;
         since += dt;
-        if (!W.lis_room || since > 0.25f) {
-            W.lis_room = probe_room(W.lis.pos, true, true);
+        // Re-probed a few times a second, and at once after a jump (a teleport, a door).
+        if (!W.lis_room || since > 0.25f || v3_dist(W.lis.pos, W.lis_probe_pos) > 1.0f) {
+            W.lis_probe_pos = W.lis.pos;
+            W.lis_room_buf = *probe_room(W.lis.pos, true, true);
+            W.lis_room = &W.lis_room_buf;
             since = 0.0f;
         }
         if (W.env_age > 0.5f) {
@@ -212,12 +217,16 @@ static void occlusion(EnvVoiceState *v) {
     EnvWall walls[ENV_MAX_WALLS];
     int n = 0;
     vec3 from = L, entry0 = L;
+    // Geometry right at the source is what it sits on (a footstep's floor, an impact's panel, a car's
+    // own body): not a wall between.
+    float tol = fmaxf(0.25f, v->src.self_radius);
     // Walk through up to three walls; each wall's thickness from a back-cast out of it.
     for (; n < ENV_MAX_WALLS;) {
         float remaining = v3_dist(from, S);
-        if (remaining < 0.05f) break;
+        if (remaining < tol) break;
         EnvRayHit h;
         if (!cast(from, v3_scale(dir, remaining), &h)) break;
+        if (h.dist > remaining - tol) break;
         if (n == 0) entry0 = h.point;
         float after = remaining - h.dist;
         float probe = after < 1.2f ? after : 1.2f;

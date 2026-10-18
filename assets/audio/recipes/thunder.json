@@ -1,0 +1,16 @@
+{
+  "_doc": "Thunder from a strike `distance` away (game_weather.c): it arrives d / c later (the environment chain), crackles only near, rolls longer and darker far.",
+  "name": "thunder",
+  "bus": "ambience", "priority": 0.8, "echo": true, "max_instances": 4, "reverb": 0.5,
+  "distance": { "min": 300, "max": 8000, "rolloff": 0.3 },
+  "inputs": { "strike": 1500 },
+  "layers": [
+    { "patch": "thunder", "bind": {
+        "crackle": "lerp(strike, 300, 1, 1500, 0)",
+        "lp": "lerp(strike, 300, 5000, 4000, 300)",
+        "time": "lerp(strike, 300, 0.7, 4000, 1.8)",
+        "roll_hz": "lerp(strike, 300, 4, 4000, 1.2)"
+      }, "random": { "time": ["mul", 0.85, 1.2], "roll_hz": ["mul", 0.7, 1.4] } },
+    { "sample": "thunder", "gain_db": -6, "optional": true, "pitch": [0.9, 1.05] }
+  ]
+}

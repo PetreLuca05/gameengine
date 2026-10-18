@@ -1,0 +1,6 @@
+{
+  "name": "leaves",
+  "bus": "ambience", "loop": true, "spatial": false, "env": false, "priority": 0.3, "max_instances": 1,
+  "inputs": { "density": 0, "wind": 0 },
+  "layers": [ { "patch": "leaves", "bind": { "amp": "density * clamp(wind / 10, 0, 1.2) * 0.5", "rate": "200 + 1500 * density * clamp(wind / 10, 0, 1)", "sway": "0.2 + wind * 0.04" } } ]
+}

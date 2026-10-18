@@ -1,0 +1,7 @@
+{
+  "name": "vehicle_thump",
+  "bus": "sfx", "priority": 0.4, "max_instances": 8, "stack_s": 0.08,
+  "distance": { "min": 2, "max": 60, "rolloff": 1 },
+  "inputs": { "force": 1, "flat": 0 },
+  "layers": [ { "patch": "thump", "bind": { "amp": "clamp(force, 0.1, 2)", "width_ms": "flat > 0.5 ? 12 : 6", "pitch": "flat > 0.5 ? 0.8 : 1" }, "random": { "pitch": ["mul", 0.9, 1.1] } } ]
+}

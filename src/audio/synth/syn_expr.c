@@ -88,7 +88,7 @@ static void primary(Parser *p) {
                 if (!eat(p, ")")) { fail(p, "expected )"); return; }
             }
             if (k_fn[f].arity >= 0 && argc != k_fn[f].arity) { fail(p, "wrong argument count"); return; }
-            if (f == FN_SEL && (argc < 2 || argc > 16)) { fail(p, "sel takes 2..16 arguments"); return; }
+            if (f == FN_SEL && (argc < 2 || argc > 24)) { fail(p, "sel takes 2..24 arguments"); return; }
             emit(p, OP_FN, f);
             if (f == FN_SEL) emit(p, OP_CONST, argc);   // arity marker (not a constant: skipped by eval)
             return;

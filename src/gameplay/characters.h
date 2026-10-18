@@ -131,6 +131,10 @@ typedef struct CharacterInst {
     bool is_player, local;
     int slot;
     u32 events_received[AEV_COUNT];
+    // Footsteps (docs/AUDIO_PROCEDURAL.md "Footsteps"): plants counted where the controller ticks
+    // (any thread: this character only), taken on the main thread by chars_take_steps.
+    u8 steps_pending, step_foot;
+    double last_step_time;
     // Modular parts (docs/CHARACTERS.md): one SkeletonInstance (pose + shared palette) whatever the
     // part count; each selected part is a SkeletalMesh skinned from it.
     u8 parts[CSLOT_COUNT];            // part selection (host: authoritative; clients: replicated)
@@ -215,6 +219,13 @@ void chars_client_receive(World *w, EntityId e, const AnimNetState *s, u32 tick)
 void chars_client_tick(World *w, double render_tick, float dt);
 // Local predicted player (client): controller follows the predicted PlayerSim.
 void chars_local_predict(World *w, int slot, bool first);
+// Footsteps since the last call within radius of near (main thread; farther ones are dropped).
+// Horde zombies step by their speed (their animation is evaluated every few ticks only).
+typedef struct CharStep { EntityId ent; vec3 pos; float speed; bool crouch, player, zombie, left; } CharStep;
+int chars_take_steps(World *w, vec3 near, float radius, float dt, CharStep *out, int max);
+// Zombies near a point for their voices: head position, speed, attacking, dead, health 0..1.
+typedef struct CharVoiceInfo { EntityId ent; vec3 head; float speed, health; bool attacking, dead; } CharVoiceInfo;
+int chars_zombies_near(World *w, vec3 p, float radius, CharVoiceInfo *out, int max);
 // Render side, once per sim tick: LOD, post-pass, ragdolls.
 void chars_present_tick(World *w, vec3 cam_pos, float fov_deg, float screen_h, float dt, int local_slot);
 void chars_render(World *w, float alpha, vec3 cam_pos, int local_slot);

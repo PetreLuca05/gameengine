@@ -1,0 +1,16 @@
+{
+  "_doc": "Wind at the ear (game_weather.c): bands from the local wind speed and sky exposure, gusts from the wind field; the recorded wind loop under it.",
+  "name": "wind",
+  "bus": "ambience", "loop": true, "spatial": false, "env": false, "priority": 0.5, "max_instances": 1,
+  "inputs": { "wind": 0, "gust": 0, "exposure": 1, "rustle": 0, "snow": 0 },
+  "layers": [
+    { "patch": "wind", "bind": {
+        "low": "clamp((wind - 2) / 14, 0, 1) * (0.4 + 0.6 * exposure)",
+        "mid": "clamp((wind - 3) / 16, 0, 1) * (0.3 + 0.7 * exposure) * 0.7",
+        "high": "clamp((wind - 7) / 16, 0, 1) * 0.6 * exposure + snow * 0.1",
+        "gust": "0.15 + 0.6 * gust",
+        "gust_hz": "0.12 + 0.2 * gust"
+      } },
+    { "sample": "wind_loop", "optional": true, "gain_db": -4, "bind": { "amp": "clamp((wind - 2) / 14, 0, 1) * (0.4 + 0.6 * exposure) * (0.75 + 0.5 * rustle) + snow * 0.2" } }
+  ]
+}

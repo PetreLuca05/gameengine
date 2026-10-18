@@ -1,0 +1,13 @@
+{
+  "_doc": "Air rushing past a moving vehicle (and the cabin buffeting): low-passed pink noise opening with speed, a slow uneven AM.",
+  "name": "wind_buffet",
+  "loop": true,
+  "params": { "amp": [0, 0, 3], "hz": [400, 60, 8000], "gust": [1.3, 0.1, 10] },
+  "nodes": [
+    { "id": "n", "type": "noise", "color": "pink" },
+    { "id": "lp", "type": "svf", "mode": "lp", "hz": "$hz", "q": 0.6, "in": "n" },
+    { "id": "am", "type": "am", "hz": "$gust", "depth": 0.45, "in": "lp" },
+    { "id": "out", "type": "gain", "amp": "$amp", "in": "am" }
+  ],
+  "out": "out"
+}

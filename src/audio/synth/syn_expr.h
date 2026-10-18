@@ -4,7 +4,7 @@
 //   operators  + - * / % ^, comparisons < > <= >= == !=, && || !, c ? a : b, parentheses
 //   functions  lerp(x, x0, y0, x1, y1) (clamped linear map), clamp(x, lo, hi), min, max, abs, sqrt,
 //              cbrt, pow, exp, log, log10, db(x) (dB -> gain), todb(g), step(edge, x), floor,
-//              sel(i, a, b, ...) (pick by index), mat_contact(m) / mat_noise(m) / mat_noise_hz(m) /
+//              sel(i, a, b, ...) (pick by index, up to 23 choices), mat_contact(m) / mat_noise(m) / mat_noise_hz(m) /
 //              mat_modes(m) / mat_hard(m) (assets/audio/materials.json)
 #ifndef DG_SYN_EXPR_H
 #define DG_SYN_EXPR_H

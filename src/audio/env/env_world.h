@@ -39,6 +39,7 @@ typedef struct EnvSource {
     float reverb;                // send scale
     bool spatial, doppler, ambience, echo_child;
     int max_taps;
+    float self_radius;           // m: geometry this close to the source is its own (the surface it lies on, a car's body)
 } EnvSource;
 
 #define ENV_MAX_WALLS 3

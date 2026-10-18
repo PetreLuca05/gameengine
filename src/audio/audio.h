@@ -69,6 +69,7 @@ typedef struct AudioEmit {
     float lp_cap;         // Hz, 0 off: an extra top cut (legacy AudioFx.lowpass_hz)
     float pitch;          // 0 = 1: multiplies sample layers' pitch
     float min_dist, max_dist, rolloff;   // 0: the recipe's distance law
+    float self_radius;    // m: the emitter's own geometry around it (a vehicle's body), not occluding
     bool flat;            // force 2D (UI)
     bool no_echo;
     u8 bus;               // 0: the recipe's; else SynBus + 1

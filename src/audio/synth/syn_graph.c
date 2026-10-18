@@ -334,7 +334,8 @@ static bool proc_node(const SynNodeDef *d, void *st, const float *const *in, flo
             if (w < 1.0f) {
                 if (within == 0) out[i] = b[0];
             } else if ((float)within < w) {
-                out[i] = b[0] * 0.5f * (1.0f - cosf(SYN_TWO_PI * (float)within / w));
+                // Unit area (amp = the area of a one-sample impulse): a wider contact is darker, not louder.
+                out[i] = b[0] * (1.0f / w) * (1.0f - cosf(SYN_TWO_PI * (float)within / w));
             }
             if (!rep && (float)within >= (w < 1.0f ? 1.0f : w)) s->done = true;
         }

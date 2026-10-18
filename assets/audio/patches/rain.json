@@ -1,0 +1,19 @@
+{
+  "_doc": "Rain: broadband hiss by intensity, drop clicks on the ground around (resonant noise grains), drops drumming on a roof above (its modal bank).",
+  "name": "rain",
+  "loop": true,
+  "params": { "hiss": [0, 0, 2], "rate": [0, 0, 4000], "drop": [0, 0, 2], "drop_hz": [3500, 500, 9000], "roof": [0, 0, 2], "roof_mat": [20, -1, 23], "amp": [1, 0, 3] },
+  "nodes": [
+    { "id": "n", "type": "noise", "color": "pink" },
+    { "id": "hp", "type": "biquad", "mode": "hp", "hz": 2500, "in": "n" },
+    { "id": "hg", "type": "gain", "amp": "$hiss", "in": "hp" },
+    { "id": "d", "type": "grains", "src": "noise", "rate": "$rate", "hz": "$drop_hz", "spread": 0.6, "dur_ms": 3, "q": 6 },
+    { "id": "dg", "type": "gain", "amp": "$drop", "in": "d" },
+    { "id": "rc", "type": "grains", "src": "click", "rate": "$rate*0.4", "hz": 3000, "spread": 0.3, "dur_ms": 1 },
+    { "id": "rm", "type": "modal", "in": "rc", "material": "$roof_mat", "amp": 0.3, "spread": 1 },
+    { "id": "rg", "type": "gain", "amp": "$roof", "in": "rm" },
+    { "id": "m", "type": "mix", "in": ["hg", "dg", "rg"] },
+    { "id": "out", "type": "gain", "amp": "$amp", "in": "m" }
+  ],
+  "out": "out"
+}

@@ -414,6 +414,7 @@ static void build_source(const SynRecipe *r, const AudioEmit *e, bool spatial, E
     s->doppler = r->doppler;
     s->ambience = r->bus == SYN_BUS_AMBIENCE;
     s->max_taps = r->priority >= 0.8f ? 6 : 4;
+    s->self_radius = e->self_radius;
 }
 
 static void apply_caps(const AudioEmit *e, EnvParams *ep) {
@@ -527,6 +528,8 @@ static AudioVoice emit(const AudioEmit *e, const AudioParams *p, u32 loop_key) {
     AudioEmit ee = *e;
     ee.volume = vol;
     bool spatial = r->spatial && !e->flat;
+    // A one-shot far beyond its distance law is not worth a voice.
+    if (spatial && !loop_key && !r->loop && v3_dist(e->pos, s_listener) > r->max_dist * 1.2f) return 0;
     // Stacking guard: the same recipe again within stack_s near the same place folds into the louder
     // (a burst of pellets / gore particles in one frame otherwise piles up into one distorted sound).
     double now = platform_time();
@@ -986,7 +989,7 @@ static void cmd_voices(int argc, const char **argv) {
 }
 
 static void cmd_synth_play(int argc, const char **argv) {
-    if (argc < 2 || !A) { log_info("usage: audio_synth_play <recipe> [key=value ...] [@sample] [2d] [at=x,y,z]"); return; }
+    if (argc < 2 || !A) { log_info("usage: audio_synth_play <recipe> [key=value ...] [@sample] [2d] [at=x,y,z] [seed=n] [volume=v] [self=m]"); return; }
     AudioParams p = { 0 };
     static char keys[AUDIO_MAX_PARAMS][24];
     AudioEmit e;
@@ -999,6 +1002,7 @@ static void cmd_synth_play(int argc, const char **argv) {
         else if (eq && !strncmp(argv[i], "at", 2)) sscanf(eq + 1, "%f,%f,%f", &e.pos.x, &e.pos.y, &e.pos.z);
         else if (eq && !strncmp(argv[i], "seed", 4)) e.seed = (u32)atoi(eq + 1);
         else if (eq && !strncmp(argv[i], "volume", 6)) e.volume = (float)atof(eq + 1);
+        else if (eq && !strncmp(argv[i], "self", 4)) e.self_radius = (float)atof(eq + 1);
         else if (eq && p.n < AUDIO_MAX_PARAMS) {
             size_t n = (size_t)(eq - argv[i]);
             if (n >= sizeof(keys[0])) n = sizeof(keys[0]) - 1;

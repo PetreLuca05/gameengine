@@ -165,7 +165,7 @@ void syn_noise_run(SynNoise *s, SynNoiseColor c, float *out, int n, float amp, f
     case SYN_BROWN:
         for (int i = 0; i < n; i++) {
             s->brown = 0.996f * s->brown + 0.06f * syn_rngbi(&s->rng);
-            out[i] = amp * 3.0f * s->brown;
+            out[i] = amp * 1.5f * s->brown;   // ~0.6 RMS, like the other colours
         }
         break;
     case SYN_VELVET: {

@@ -2,6 +2,7 @@
 #include "throwables.h"
 #include "health.h"
 #include "effects.h"
+#include "audio/audio.h"
 #include "weapons.h"
 #include "aim.h"
 #include "characters.h"
@@ -222,6 +223,13 @@ void throwables_render(World *w, int i) {
         l.radius = 8.0f;
         l.color = v3(1.0f, 0.5f, 0.15f);
         l.intensity = 12.0f * flicker;
+        // The fire's crackle and roar (assets/audio/recipes/fire.json), a loop while it burns.
+        AudioEmit e;
+        audio_emit_init(&e, "fire", w->xf[i].pos);
+        e.seed = (u32)i * 2654435761u;
+        AudioParams p = { 0 };
+        audio_param(&p, "size", 1.0f);
+        audio_loop_recipe(((u32)i * 2654435761u) ^ 0xF17Eu, &e, &p);
     }
     l.flags = LIGHT_NO_SHADOW;
     render_add_light(&l);
