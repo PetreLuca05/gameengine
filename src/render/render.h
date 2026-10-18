@@ -639,6 +639,19 @@ void render_poll_shader_hot_reload(void);
 bool render_world_to_screen(vec3 world, vec2 *out_px); // false if behind camera
 vec3 render_viewmodel_to_world(vec3 viewmodel_point);   // same pixel under the world FOV (muzzle flash / tracers)
 float render_vm_fov(void);   // the viewmodel (arms + held item) projection FOV this frame
+// First-person arms layer (docs/CAMERA_HOLDPOINT.md "Rule 3", src/render/arms_layer.c): every
+// MAT_VIEWMODEL draw (the arms from the shoulders down, the held item) is seen through this camera
+// and FOV instead of the world camera's; arm vertices near the shoulders blend back to the world
+// camera (the seam). Set after render_set_camera each frame (which clears it).
+typedef struct RenderArmsLayer {
+    bool valid;
+    mat4 view;              // world -> arms camera (rigid layer and scale included)
+    float fov_deg;          // vertical
+    float znear;
+    vec3 shoulder[2];       // the upper-arm joints (world): the seam centres
+    float seam_r0, seam_r1; // m: world camera within r0, arms camera past r1
+} RenderArmsLayer;
+void render_set_arms_layer(const RenderArmsLayer *a);
 mat4 render_view_proj(void);
 int render_width(void);
 int render_height(void);

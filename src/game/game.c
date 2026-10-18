@@ -1716,6 +1716,7 @@ void game_init(void) {
     bal_world_register();
     weapons_add_shot_hook(on_shot, NULL);
     game_fire_init();
+    game_arms_init();
     crosshair_init();
     recoil_debug_init();
     camera_register_cvars();

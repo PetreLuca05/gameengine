@@ -2533,6 +2533,7 @@ static struct {
     Xform item_model;            // the held item this frame (model space): the drawn item
     Xform cam_model;             // the pose eye: head bone x eye socket, the view's rotation (model space)
     Xform view_item_cam;         // the presentation hold point's item (ADS included), pose-eye space
+    Xform hold_item_cam;         // the pose's hold point item (before the reach pull), pose-eye space
     bool view_valid;
     float ikw;                   // the hold's hand IK weight this frame (the presentation follows clips below 1)
     Xform clav[2];               // the clip's clavicles the IK pass started from
@@ -2619,6 +2620,7 @@ static void fp_prepare(World *w, CharacterInst *c, float alpha, float yaw, float
             FP.st.hp_out.item = lerp_about(CG->fpd.hp[0].item, CG->fpd.hp[1].item, ht, sight_hold);
             FP.st.hp_out.offset = v3_lerp(CG->fpd.hp[0].offset, CG->fpd.hp[1].offset, ht);
             FP.view_item_cam = lerp_about(CG->fpd.view_cam[0], CG->fpd.view_cam[1], ht, sight_item);
+            FP.hold_item_cam = xf_mul(FP.st.hp_out.item, gr);
             FP.view_valid = CG->fpd.view_valid;
         }
         in.root = xf_make(FP.root.t, FP.root.r);   // model space is the skeleton's (the scale is the root's)
@@ -2930,28 +2932,49 @@ void chars_render_local_fp(World *w, float alpha, int local_slot) {
         }
 }
 
-// The arms layer's inputs (render.c, docs/CAMERA_HOLDPOINT.md "Rule 3"): this frame's pose eye (world)
-// and the rigid move from the drawn item onto the presented one (pose-eye space; identity without a
-// hold or while a clip owns the hands).
-bool chars_fp_arms_inputs(Xform *pose_eye_world, Xform *present, int *hp_state, float *hp_blend) {
+// The arms layer's inputs (docs/CAMERA_HOLDPOINT.md "Rule 3"): this frame's pose eye (world), the
+// rigid move from the drawn item onto the presented one (pose-eye space; identity without a hold, or
+// faded out while a clip owns the hands), the item and the shoulders.
+bool chars_fp_arms(CharsFpArms *o) {
     ensure_globals();
-    if (!LIB || FP.frame + 1 < g_engine.frame_index || !FP.solved) return false;
+    memset(o, 0, sizeof(*o));
+    o->present = o->present_hold = o->item_cam = o->pose_eye = xf_identity();
+    if (!LIB || FP.frame + 1 < g_engine.frame_index || !FP.solved || !FP.w) return false;
+    CharacterInst *c = char_get(FP.w, FP.ent);
+    if (!c) return false;
+    const Skeleton *s = &LIB->skel;
     Xform cam_m = FP.cam_model;
     cam_m.s = v3(1, 1, 1);
     Xform r = FP.root;
     r.s = v3(1, 1, 1);
-    *pose_eye_world = xf_mul(r, xf_make(v3_scale(cam_m.t, FP.root.s.x), cam_m.r));
-    Xform mv = xf_identity();
-    if (FP.has_item && FP.view_valid) {
-        Xform icam = xf_mul(xf_inverse(cam_m), FP.item_model);
-        mv = xf_mul(FP.view_item_cam, xf_inverse(icam));
-        mv.s = v3(1, 1, 1);
-        // A clip owning the hands (reload, equip, sprint) carries the item: the presentation follows it.
-        if (FP.ikw < 1.0f) mv = xf_lerp(xf_identity(), mv, FP.ikw);
+    o->pose_eye = xf_mul(r, xf_make(v3_scale(cam_m.t, FP.root.s.x), cam_m.r));
+    o->hp_state = CG->fp_hp_state;
+    for (int h = 0; h < 2; h++) {
+        int b = s->role[h ? BR_R_ARM : BR_L_ARM];
+        o->shoulder[h] = b >= 0 ? FP.world[b].t : o->pose_eye.t;
     }
-    *present = mv;
-    if (hp_state) *hp_state = CG->fp_hp_state;
-    if (hp_blend) *hp_blend = CG->fp_hp_blend;
+    if (!FP.has_item || !(c->item_weapon || c->item_def)) return true;
+    const ItemSockets *k = held_sockets(c);
+    o->has_item = true;
+    o->item_cam = xf_mul(xf_inverse(cam_m), FP.item_model);
+    o->item_cam.s = v3(1, 1, 1);
+    o->pivot = k->pivot;
+    o->sight = k->sight;
+    o->length = k->length;
+    o->item_id = c->item_weapon ? c->item_weapon->id : c->item_def->id;
+    o->kick_pos = CG->fpd.in.item_kick_pos;
+    o->kick_rot = CG->fpd.in.item_kick_rot;
+    if (FP.view_valid) {
+        Xform mv = xf_mul(FP.view_item_cam, xf_inverse(o->item_cam)), mh = xf_mul(FP.view_item_cam, xf_inverse(FP.hold_item_cam));
+        mv.s = mh.s = v3(1, 1, 1);
+        // A clip owning the hands (reload, equip, sprint) carries the item: the presentation follows it.
+        if (FP.ikw < 1.0f) {
+            mv = xf_lerp(xf_identity(), mv, saturate(FP.ikw));
+            mh = xf_lerp(xf_identity(), mh, saturate(FP.ikw));
+        }
+        o->present = mv;
+        o->present_hold = mh;
+    }
     return true;
 }
 

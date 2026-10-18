@@ -23,6 +23,21 @@ layout(location = 10) flat out uint v_normal_scale;   // float bits (PBR maps, s
 
 invariant gl_Position;
 
+// The arms layer's shoulder seam (docs/CAMERA_HOLDPOINT.md "Rule 3"): 0 at an upper-arm joint (drawn
+// where the world camera sees it, so the arm meets the body) .. 1 past r1 (the arms camera).
+float arms_seam_w(vec3 p, vec4 s0, vec4 s1) {
+    if (frame.arms_seam.z < 0.5) return 1.0;
+    float d = min(distance(p, s0.xyz), distance(p, s1.xyz));
+    return smoothstep(frame.arms_seam.x, frame.arms_seam.y, d);
+}
+// The screen position blended from the world camera's clip `a` to the arms camera's `b`; the depth
+// stays the arms layer's (its own depth buffer). Behind the world camera: the arms camera alone.
+vec4 arms_seam_mix(vec4 a, vec4 b, float w) {
+    if (w >= 1.0 || a.w < 0.02 || b.w < 0.002) return b;
+    vec2 n = mix(a.xy / a.w, b.xy / b.w, w);
+    return vec4(n * b.w, b.z, b.w);
+}
+
 void main() {
     SkinInstance si = skin_inst.inst[gl_InstanceIndex];
     // Palettes are bone_world * inverse_bind: the skinned vertex is already in world space.
@@ -51,6 +66,13 @@ void main() {
         gl_Position = frame.vm_proj * frame.view * world;
         v_cur_clip = frame.vm_view_proj_nj * world;
         v_prev_clip = frame.prev_vm_view_proj_nj * prev_world;
+        float w = arms_seam_w(world.xyz, frame.arms_shoulder[0], frame.arms_shoulder[1]);
+        if (w < 1.0) {
+            gl_Position = arms_seam_mix(frame.view_proj * world, gl_Position, w);
+            v_cur_clip = arms_seam_mix(frame.view_proj_nj * world, v_cur_clip, w);
+            v_prev_clip = arms_seam_mix(frame.prev_view_proj_nj * prev_world, v_prev_clip,
+                                        arms_seam_w(prev_world.xyz, frame.arms_shoulder_prev[0], frame.arms_shoulder_prev[1]));
+        }
     } else {
         gl_Position = frame.view_proj * world;
         v_cur_clip = frame.view_proj_nj * world;

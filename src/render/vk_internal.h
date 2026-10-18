@@ -234,6 +234,13 @@ typedef struct FrameData {
     // level, 1..2 flicker (the off share).
     vec4 city;
     vec4 city_power[2];
+    // First-person arms layer (docs/CAMERA_HOLDPOINT.md "Rule 3"): an arms-layer point (its real world
+    // position) -> where it appears in the world (the world camera, same pixel and view depth); the
+    // shoulder seam: the upper-arm joints (world) this and the previous frame, x r0 / y r1 (m) / z on.
+    mat4 vm_apparent;
+    vec4 arms_shoulder[2];
+    vec4 arms_shoulder_prev[2];
+    vec4 arms_seam;
 } FrameData;
 
 typedef struct PushLit {
@@ -465,6 +472,12 @@ typedef struct Renderer {
     float shadow_dbg_bias_m;                    // cascade 0 constant bias (m), readout
     u32 shadow_drawn;                           // tiles rendered this frame: bits 0..3 atlas, 4 viewmodel, 5 moon
     u32 shadow_unrendered;                      // frames that sampled an unrendered tile (must stay 0)
+    // First-person arms layer this frame (render_set_arms_layer; invalid: the arms follow the world
+    // camera) and the view the arms were drawn with (world -> arms camera), the shoulders last frame.
+    RenderArmsLayer arms;
+    mat4 arms_view;
+    vec3 arms_shoulder_prev[2];
+    bool arms_had_prev;
     // temporal state (TAA / motion blur / velocity)
     mat4 proj_j, vm_proj_j;                     // jittered projections (this frame)
     mat4 view_proj_nj, prev_view_proj_nj, vm_view_proj_nj, prev_vm_view_proj_nj;

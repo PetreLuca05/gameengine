@@ -278,12 +278,8 @@ float shadow_vm_tile(vec3 p, vec3 n) {
                      frame.shadow_cfg4.y, frame.shadow_vm2.w, sh_rotation());
 }
 
-// Where a viewmodel point appears in the world (the viewmodel is drawn with its own FOV).
-vec3 sh_vm_apparent(vec3 p) {
-    vec3 v = (frame.view * vec4(p, 1.0)).xyz;
-    v.xy *= frame.shadow_cfg2.w;
-    return frame.camera_pos.xyz + transpose(mat3(frame.view)) * v;
-}
+// Where an arms-layer point appears in the world (its own camera and FOV, docs/CAMERA_HOLDPOINT.md).
+vec3 sh_vm_apparent(vec3 p) { return (frame.vm_apparent * vec4(p, 1.0)).xyz; }
 
 float shadow_factor_vm(vec3 p, vec3 n) {
     if (frame.sun_color.w < 0.5 || frame.ssky0.y <= 0.0) return 1.0;

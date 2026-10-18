@@ -3,7 +3,7 @@
 #include "core/cvar.h"
 #include <math.h>
 
-typedef struct CameraCvars { Cvar *fov, *sv_fov, *sv_fov_max, *max_aspect, *ads_world_zoom, *headbob, *sprint_fov, *bob_amount; } CameraCvars;
+typedef struct CameraCvars { Cvar *fov, *sv_fov, *sv_fov_max, *max_aspect, *ads_world_zoom, *headbob, *sprint_fov, *bob_amount, *hands_fov; } CameraCvars;
 
 static CameraCvars *cc(void) { return g_engine.camera_cvars; }
 
@@ -23,6 +23,16 @@ void camera_register_cvars(void) {
     c->headbob = cvar_reg_bool("cl_headbob", true, CVAR_ARCHIVE | CVAR_EDITABLE, "camera head bob");
     c->bob_amount = cvar_reg_float("cl_headbob_amount", 1.0f, 0.0f, 1.0f, CVAR_ARCHIVE | CVAR_EDITABLE, "head bob strength");
     c->sprint_fov = cvar_reg_float("cl_sprint_fov", 7.0f, 0.0f, 7.0f, CVAR_ARCHIVE | CVAR_EDITABLE, "extra FOV while sprinting (deg)");
+    // The arms layer's FOV (docs/CAMERA_HOLDPOINT.md "Rule 3"): your arms and the held item, never the
+    // world. Vertical like cl_fov, Hor+ to the same widest aspect; aimed, the sight's own FOV.
+    c->hands_fov = cvar_reg_float("cl_hands_fov", 65.0f, 50.0f, 90.0f, CVAR_ARCHIVE | CVAR_EDITABLE,
+                                  "Hands FOV: vertical FOV of your arms and held item (deg; the world keeps cl_fov)");
+}
+
+float camera_hands_fov(void) {
+    int w = render_width(), h = render_height();
+    float aspect = (w > 0 && h > 0) ? (float)w / (float)h / render_stretch_factor() : 16.0f / 9.0f;
+    return camera_fov_for_aspect(cc()->hands_fov->f, cc()->max_aspect->f, aspect);
 }
 
 float camera_fov_for_aspect(float fov_v, float max_aspect, float aspect) {

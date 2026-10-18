@@ -1,0 +1,278 @@
+// First-person arms layer: the arms camera and its rigid placement (docs/CAMERA_HOLDPOINT.md
+// "Rule 3"). Pure (no engine state): unit tested in tests/test_arms_layer.c.
+#include "arms_layer.h"
+#include "cJSON.h"
+#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+static ArmsPose pose_identity(void) {
+    ArmsPose p;
+    memset(&p, 0, sizeof(p));
+    p.scale = 1.0f;
+    return p;
+}
+
+void arms_layer_defaults(ArmsLayerDef *d) {
+    memset(d, 0, sizeof(*d));
+    for (int s = 0; s < HP_STATE_COUNT; s++) {
+        d->state[s] = pose_identity();
+        d->blend[s] = 0.2f;
+    }
+    d->equip_time = 0.3f;
+    d->equip_pitch = 35.0f;
+    d->equip_margin = 0.05f;
+    d->seam_r0 = 0.06f;
+    d->seam_r1 = 0.16f;
+    d->znear = 0.01f;
+}
+
+static const cJSON *jget(const cJSON *o, const char *k) { return o ? cJSON_GetObjectItemCaseSensitive(o, k) : NULL; }
+static float jf(const cJSON *o, const char *k, float def) {
+    const cJSON *v = jget(o, k);
+    return cJSON_IsNumber(v) ? (float)v->valuedouble : def;
+}
+static vec3 jv3(const cJSON *o, const char *k, vec3 def) {
+    const cJSON *v = jget(o, k);
+    if (!cJSON_IsArray(v) || cJSON_GetArraySize(v) < 3) return def;
+    return v3((float)cJSON_GetArrayItem(v, 0)->valuedouble, (float)cJSON_GetArrayItem(v, 1)->valuedouble, (float)cJSON_GetArrayItem(v, 2)->valuedouble);
+}
+
+static ArmsPose parse_pose(const cJSON *o, ArmsPose p) {
+    p.offset = jv3(o, "offset", p.offset);
+    p.rotation = jv3(o, "rotation", p.rotation);
+    p.scale = clampf(jf(o, "scale", p.scale), 0.9f, 1.1f);
+    p.fov_add = clampf(jf(o, "fov_add", p.fov_add), -20.0f, 20.0f);
+    return p;
+}
+
+void arms_layer_parse(ArmsLayerDef *d, const cJSON *root) {
+    arms_layer_defaults(d);
+    if (!root) return;
+    float blend = jf(root, "blend", 0.2f);
+    const cJSON *st = jget(root, "states");
+    for (int s = 0; s < HP_STATE_COUNT; s++) {
+        const cJSON *e = jget(st, holdpoint_state_name(s));
+        d->state[s] = parse_pose(e, d->state[s]);
+        d->blend[s] = fmaxf(0.0f, jf(e, "blend", blend));
+    }
+    const cJSON *items = jget(root, "items"), *it;
+    cJSON_ArrayForEach(it, items) {
+        if (d->item_count >= ARMS_MAX_ITEMS || !it->string) break;
+        ArmsItem *a = &d->items[d->item_count++];
+        memset(a, 0, sizeof(*a));
+        snprintf(a->id, sizeof(a->id), "%s", it->string);
+        for (int s = 0; s < HP_STATE_COUNT; s++) {
+            const cJSON *e = jget(it, holdpoint_state_name(s));
+            if (!e) continue;
+            a->set[s] = true;
+            a->state[s] = parse_pose(e, d->state[s]);
+        }
+    }
+    const cJSON *eq = jget(root, "equip");
+    d->equip_time = fmaxf(0.0f, jf(eq, "time", d->equip_time));
+    d->equip_pitch = jf(eq, "pitch", d->equip_pitch);
+    d->equip_margin = fmaxf(0.0f, jf(eq, "margin", d->equip_margin));
+    const cJSON *seam = jget(root, "seam");
+    d->seam_r0 = fmaxf(0.0f, jf(seam, "r0", d->seam_r0));
+    d->seam_r1 = fmaxf(d->seam_r0 + 0.01f, jf(seam, "r1", d->seam_r1));
+    d->znear = clampf(jf(root, "znear", d->znear), 0.002f, 0.05f);
+}
+
+static float r4(float v) { return roundf(v * 10000.0f) / 10000.0f; }
+static void put_v3(cJSON *o, const char *k, vec3 v) {
+    cJSON *a = cJSON_CreateArray();
+    cJSON_AddItemToArray(a, cJSON_CreateNumber(r4(v.x)));
+    cJSON_AddItemToArray(a, cJSON_CreateNumber(r4(v.y)));
+    cJSON_AddItemToArray(a, cJSON_CreateNumber(r4(v.z)));
+    cJSON_AddItemToObject(o, k, a);
+}
+static void put_pose(cJSON *o, ArmsPose p) {
+    put_v3(o, "offset", p.offset);
+    put_v3(o, "rotation", p.rotation);
+    cJSON_AddNumberToObject(o, "scale", r4(p.scale));
+    cJSON_AddNumberToObject(o, "fov_add", r4(p.fov_add));
+}
+
+char *arms_layer_to_json(const ArmsLayerDef *d) {
+    cJSON *o = cJSON_CreateObject();
+    cJSON_AddStringToObject(o, "_comment",
+                            "First-person arms layer (docs/CAMERA_HOLDPOINT.md \"Rule 3\"): the arms + held item drawn with their own camera. Per hold point state "
+                            "(and per item under \"items\"): offset (right, up, forward m), rotation (pitch, yaw, roll deg) and scale (0.9 .. 1.1) about the hold "
+                            "point, fov_add (deg on the Hands FOV); in ADS only offset[2] (push), rotation[2] (roll) and scale (about the sight) apply. equip: the "
+                            "raise from below the view. seam: arm vertices near the shoulder blend from the world camera (r0) to the arms camera (r1). Edit live "
+                            "with arms_tuner.");
+    cJSON *st = cJSON_AddObjectToObject(o, "states");
+    for (int s = 0; s < HP_STATE_COUNT; s++) {
+        cJSON *e = cJSON_AddObjectToObject(st, holdpoint_state_name(s));
+        put_pose(e, d->state[s]);
+        cJSON_AddNumberToObject(e, "blend", r4(d->blend[s]));
+    }
+    cJSON *items = cJSON_AddObjectToObject(o, "items");
+    for (int i = 0; i < d->item_count; i++) {
+        cJSON *it = cJSON_AddObjectToObject(items, d->items[i].id);
+        for (int s = 0; s < HP_STATE_COUNT; s++)
+            if (d->items[i].set[s]) put_pose(cJSON_AddObjectToObject(it, holdpoint_state_name(s)), d->items[i].state[s]);
+    }
+    cJSON *eq = cJSON_AddObjectToObject(o, "equip");
+    cJSON_AddNumberToObject(eq, "time", r4(d->equip_time));
+    cJSON_AddNumberToObject(eq, "pitch", r4(d->equip_pitch));
+    cJSON_AddNumberToObject(eq, "margin", r4(d->equip_margin));
+    cJSON *seam = cJSON_AddObjectToObject(o, "seam");
+    cJSON_AddNumberToObject(seam, "r0", r4(d->seam_r0));
+    cJSON_AddNumberToObject(seam, "r1", r4(d->seam_r1));
+    cJSON_AddNumberToObject(o, "znear", r4(d->znear));
+    char *s = cJSON_Print(o);
+    cJSON_Delete(o);
+    return s;
+}
+
+static const ArmsItem *find_item(const ArmsLayerDef *d, const char *id) {
+    if (!id || !id[0]) return NULL;
+    for (int i = 0; i < d->item_count; i++)
+        if (!strcmp(d->items[i].id, id)) return &d->items[i];
+    return NULL;
+}
+
+ArmsPose arms_layer_target(const ArmsLayerDef *d, int state, const char *item_id) {
+    state = DG_CLAMP(state, 0, HP_STATE_COUNT - 1);
+    const ArmsItem *it = find_item(d, item_id);
+    return it && it->set[state] ? it->state[state] : d->state[state];
+}
+
+ArmsPose *arms_layer_edit(ArmsLayerDef *d, int state, const char *item_id) {
+    state = DG_CLAMP(state, 0, HP_STATE_COUNT - 1);
+    if (!item_id || !item_id[0]) return &d->state[state];
+    ArmsItem *it = (ArmsItem *)find_item(d, item_id);
+    if (!it) {
+        if (d->item_count >= ARMS_MAX_ITEMS) return &d->state[state];
+        it = &d->items[d->item_count++];
+        memset(it, 0, sizeof(*it));
+        snprintf(it->id, sizeof(it->id), "%s", item_id);
+    }
+    if (!it->set[state]) {
+        it->set[state] = true;
+        it->state[state] = d->state[state];
+    }
+    return &it->state[state];
+}
+
+void arms_layer_reset(ArmsLayerState *st) { memset(st, 0, sizeof(*st)); }
+
+static ArmsPose pose_lerp(ArmsPose a, ArmsPose b, float t) {
+    ArmsPose r;
+    r.offset = v3_lerp(a.offset, b.offset, t);
+    r.rotation = v3_lerp(a.rotation, b.rotation, t);
+    r.scale = lerpf(a.scale, b.scale, t);
+    r.fov_add = lerpf(a.fov_add, b.fov_add, t);
+    return r;
+}
+
+static u32 str_hash(const char *s) {
+    u32 h = 2166136261u;
+    while (s && *s) { h ^= (u8)*s++; h *= 16777619u; }
+    return h;
+}
+
+// Rotation r and uniform scale s about the point p, then translation t: x -> t + p + s R (x - p).
+static mat4 about(vec3 p, quat r, float s, vec3 t) {
+    mat4 m = mat4_mul(mat4_translate(v3_add(t, p)), mat4_mul(mat4_trs(v3(0, 0, 0), r, v3(s, s, s)), mat4_translate(v3_neg(p))));
+    return m;
+}
+
+quat arms_layer_aim_rot(vec2 aim_deg, float view_pitch, float fov_world, float fov_hands) {
+    // The shot is dir(yaw - a, pitch + b) = R(yaw, pitch) * q * forward with
+    // q = X(-pitch) * Y(-a) * X(pitch + b) in camera space (exact, not small-angle).
+    float a = aim_deg.x * DG_DEG2RAD, b = aim_deg.y * DG_DEG2RAD;
+    if (fabsf(a) < 1e-7f && fabsf(b) < 1e-7f) return quat_identity();
+    quat q = quat_mul(quat_axis_angle(v3(1, 0, 0), -view_pitch), quat_mul(quat_axis_angle(v3(0, 1, 0), -a), quat_axis_angle(v3(1, 0, 0), view_pitch + b)));
+    vec3 d = quat_rotate(quat_norm(q), v3(0, 0, -1));
+    // The arms layer is drawn with its own FOV: aim at the arms-space direction that lands on the
+    // same pixel as the shot does with the world FOV (x / y scaled by the tan ratio).
+    float s = (fov_world > 1.0f && fov_hands > 1.0f) ? tanf(fov_hands * 0.5f * DG_DEG2RAD) / tanf(fov_world * 0.5f * DG_DEG2RAD) : 1.0f;
+    vec3 dv = v3_norm(v3(d.x * s, d.y * s, d.z));
+    return quat_norm(quat_from_to(v3(0, 0, -1), dv));
+}
+
+static float smoother(float x) {
+    x = saturate(x);
+    return x * x * x * (x * (x * 6.0f - 15.0f) + 10.0f);
+}
+
+void arms_layer_eval(const ArmsLayerDef *d, ArmsLayerState *st, const ArmsLayerIn *in, ArmsLayerOut *out) {
+    int state = DG_CLAMP(in->hp_state, 0, HP_STATE_COUNT - 1);
+    u32 ih = str_hash(in->item_id);
+    ArmsPose target = arms_layer_target(d, state, in->item_id);
+    // State / item changes ease from wherever the layer is (smootherstep over the state's blend).
+    if (!st->init) {
+        st->init = true;
+        st->state = state;
+        st->item_hash = ih;
+        st->cur = target;
+        st->t = st->dur = 0;
+    } else if (state != st->state || ih != st->item_hash) {
+        st->from = st->cur;
+        st->state = state;
+        st->item_hash = ih;
+        st->t = 0;
+        st->dur = d->blend[state];
+    }
+    st->t += fmaxf(in->dt, 0.0f);
+    st->cur = st->dur > 1e-4f && st->t < st->dur ? pose_lerp(st->from, target, smoother(st->t / st->dur)) : target;
+
+    float ads = saturate(in->ads_w);
+    ArmsPose p = st->cur;
+    // ADS: the sight stays on the view axis - no lateral offset, no pitch / yaw; push, roll and scale
+    // act about the sight (the pivot slides there with the ADS progress).
+    p.offset.x *= 1.0f - ads;
+    p.offset.y *= 1.0f - ads;
+    p.rotation.x *= 1.0f - ads;
+    p.rotation.y *= 1.0f - ads;
+    p.fov_add *= 1.0f - ads;
+
+    // Present: the drawn arms + item rigidly onto the presented item - at the hip only by the move
+    // between the two hold points (identity: the arms stay where the body has them, reach pull and
+    // all), aimed exactly onto it (the sight on the view axis).
+    Xform pr = xf_lerp(in->present_hold, in->present, ads);
+    pr.s = v3(1, 1, 1);
+    mat4 P = mat4_trs(pr.t, pr.r, v3(1, 1, 1));
+    Xform item = xf_mul(pr, in->item_cam);
+    vec3 pivot = in->has_item ? v3_lerp(xf_point(item, in->pivot), xf_point(item, in->sight), ads) : v3(0.12f, -0.18f, -0.35f);
+    // Tuned placement about the hold point.
+    mat4 T = about(pivot, hp_euler_deg(p.rotation), p.scale, hp_cam_pos(p.offset));
+    pivot = mat4_mul_point(T, pivot);
+    // Cosmetic kick: the pose's kick shown smaller (Weapon kick < 1), plus the screen kick towards the eye.
+    mat4 K = mat4_identity();
+    {
+        float k = 1.0f - clampf(in->kick_scale, 0.0f, 1.0f);
+        vec3 kp = in->kick_pos;
+        kp.x *= 1.0f - ads;
+        kp.y *= 1.0f - ads;
+        vec3 kd = v3(in->kick_rot.x, -in->kick_rot.y, in->kick_rot.z);
+        quat r = quat_conj(hp_euler_deg(v3_scale(kd, k)));
+        vec3 t = v3_add(v3_scale(kp, -k), v3(0, 0, in->screen_kick * clampf(in->kick_scale, 0.0f, 1.0f)));
+        K = about(pivot, r, 1.0f, t);
+    }
+    // Equip: a newly selected item comes up from below the arms frustum (muzzle down) to its hold.
+    mat4 E = mat4_identity();
+    float raise = 0.0f;
+    if (in->equip_t >= 0.0f && d->equip_time > 1e-3f && in->equip_t < d->equip_time) {
+        raise = 1.0f - smoother(in->equip_t / d->equip_time);
+        float depth = fmaxf(-pivot.z, 0.05f);
+        float th = tanf(fmaxf(in->fov_hands, 10.0f) * 0.5f * DG_DEG2RAD);
+        float reach = fmaxf(in->length, 0.35f) + d->equip_margin;   // the item and the forearms around the hold point
+        float drop = pivot.y + depth * th + reach;
+        E = about(pivot, quat_axis_angle(v3(1, 0, 0), -d->equip_pitch * DG_DEG2RAD * raise), 1.0f, v3(0, -drop * raise, 0));
+    }
+    // Aim: where the world camera shows the shot (sway, the ADS counter of the camera kick, the FOVs).
+    quat a = arms_layer_aim_rot(in->aim_deg, in->aim_pitch, in->fov_world, in->fov_hands);
+    mat4 A = mat4_from_quat(a);
+    out->layer = mat4_mul(A, mat4_mul(E, mat4_mul(K, mat4_mul(T, P))));
+    Xform eye = in->pose_eye;
+    eye.s = v3(1, 1, 1);
+    mat4 inv_eye = mat4_inverse_rigid(mat4_trs(eye.t, eye.r, v3(1, 1, 1)));
+    out->view = mat4_mul(out->layer, inv_eye);
+    out->fov_add = p.fov_add;
+    out->raise = raise;
+}

@@ -209,10 +209,22 @@ bool chars_palm_world(World *w, EntityId e, int hand, vec3 *out);   // latest po
 void chars_set_fp_camera(vec3 pos, quat rot, bool valid);
 // Aim offset of the held item (degrees right / up of the view, the view pitch in radians): the
 // first-person item turns about the eye so its sight points where the shots go.
-// The arms layer's inputs (docs/CAMERA_HOLDPOINT.md "Rule 3"): this frame's pose eye (world: head bone
-// x eye socket, the view's rotation) and the rigid move of the drawn arms + item onto the presented
-// item (the presentation hold point, ADS included; pose-eye space). False: no first-person pose.
-bool chars_fp_arms_inputs(Xform *pose_eye_world, Xform *present, int *hp_state, float *hp_blend);
+// The arms layer's inputs (docs/CAMERA_HOLDPOINT.md "Rule 3", src/render/arms_layer.c) from this
+// frame's first-person pose. False: no first-person pose this frame.
+typedef struct CharsFpArms {
+    Xform pose_eye;             // world: head bone x eye socket, the view's rotation
+    Xform present;              // pose-eye space: the drawn item -> the presented one (identity: no hold, or a clip owns the hands)
+    Xform present_hold;         // ... the pose's hold point item -> the presented one (identity at the hip: the reach pull stays)
+    bool has_item;
+    Xform item_cam;             // the drawn item, pose-eye space
+    vec3 pivot, sight;          // item space
+    float length;
+    const char *item_id;
+    int hp_state;               // the presentation hold point's state
+    vec3 kick_pos, kick_rot;    // the pose's gun kick this tick (camera space m / deg)
+    vec3 shoulder[2];           // the upper-arm joints (world): the seam
+} CharsFpArms;
+bool chars_fp_arms(CharsFpArms *o);
 // Fire animation of the first-person weapon (docs/FIRE_ANIM.md): tick = this tick's output (the
 // gun kick on the hold point, evaluated per tick), frame = this frame's interpolated output (hand
 // lag, trigger, slide, attachment wobble at render). NULL keeps the previous one; both NULL clears.

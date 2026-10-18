@@ -55,9 +55,10 @@ typedef struct GameRender {
     u32 pen_frames, pen_behind, pen_near;
     float pen_min_dist;
     // The arms layer's aim correction this frame (deg right / up of the shot against the view: sway,
-    // ADS bob, the ADS counter of the visual camera kick) and the view pitch it is measured at.
+    // ADS bob, the ADS counter of the visual camera kick), the view pitch it is measured at, and the
+    // first-person screen kick (m towards the eye).
     vec2 arms_aim;
-    float arms_aim_pitch;
+    float arms_aim_pitch, arms_screen_kick;
 } GameRender;
 #define GR (g_engine.game_render)
 
@@ -732,6 +733,9 @@ void game_render(void) {
     sights_camera(p, wd, &cads);
     RenderCamera cam = camera_update(&G->view, &interp, (float)g_engine.frame_dt, &cads, dead);
     // Weapon feel: camera kick spring (visual only, aim unaffected) + aim sway (bullets use it too).
+    GR->arms_aim = v2(0, 0);
+    GR->arms_aim_pitch = cam.pitch;
+    GR->arms_screen_kick = 0.0f;
     if (p && !dead) {
         // Fire animation layer 5 (docs/FIRE_ANIM.md): the camera follows the body's reaction 2-3 ticks
         // after the gun (its own overshoot), plus the roll twitch and the FOV punch.
@@ -749,6 +753,7 @@ void game_render(void) {
         float ads_a = wd ? game_ads_vis() : 0.0f;
         GR->arms_aim = v2(sway.x - kr.y * ads_a, sway.y - kr.x * ads_a);
         GR->arms_aim_pitch = cam.pitch + kr.x * DG_DEG2RAD;
+        GR->arms_screen_kick = fo->screen_kick;
         cam.pitch += kr.x * DG_DEG2RAD;
         cam.yaw -= kr.y * DG_DEG2RAD;
         cam.roll += kr.z * DG_DEG2RAD;
@@ -971,6 +976,7 @@ void game_render(void) {
         bool tpv = cvar_find("cl_thirdperson")->i || GR->cam_mode == 3;   // incl. the third-person vehicle camera
         if (!tpv) {
             chars_render_local_fp(w, G->alpha, vs);
+            game_arms_frame(&cam, GR->arms_aim, GR->arms_aim_pitch, GR->arms_screen_kick);   // the arms layer's camera (before the flash / sights map through it)
             game_fire_flush_flash();   // the muzzle flash on this frame's (kicked) gun
             fp_cam_test_hands();
             ads_sweep_frame();
