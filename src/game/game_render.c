@@ -4,6 +4,7 @@
 #include "gameplay/zombies/horde.h"
 #include "vfx/vfx.h"
 #include "game_internal.h"
+#include "game_vista.h"
 #include "game_water.h"
 #include "scene.h"
 #include "ui/recoil_debug.h"
@@ -919,6 +920,7 @@ void game_render(void) {
     vehicles_frame(w, cam.pos);
     foliage_frame(w);
     game_render_world(w, G->mode == GM_HOST ? G->alpha : 1.0f, cam.pos, fwd);
+    vista_render(cam.pos, env.atmosphere ? DG_CLAMP((0.12f - env.sun_true_dir.y) / 0.24f, 0.0f, 1.0f) : 0.0f);   // story levels: the city outside
 
     if (p && !dead) {
         HandsInput hi;

@@ -83,6 +83,8 @@ void story_stop(void);
 // Saves (<pref>/saves/story/<chapter>_<slot>.json): the Continue entry reads the newest.
 bool story_save_path(const char *chapter, const char *slot, char *out, int size);
 bool story_continue_available(char *chapter, int size);
+// A story point of the current level (the level's "story" block), every machine.
+bool story_point_pos(const char *name, vec3 *out);
 // The debug overlay text (story_debug), "" when inactive.
 void story_debug_text(char *out, int size);
 

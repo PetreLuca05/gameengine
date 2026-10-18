@@ -447,6 +447,7 @@ point("corridor_mid", 2.0, 13.2, 0)
 point("stair_up", -10.2, 7.0, 0, y=FLOOR + 3.0)
 point("tv_living", 11.0, 5.8, 0, y=FLOOR + 0.9)
 point("door_10a", 5.25, 12.0, 0, y=FLOOR + 1.6)
+point("lift_smoke", 2.2, 17.2, 0, y=FLOOR + 0.3)
 
 volume("vol_glass_rooms", 4.5, 12.0, 0.0, 6.0)
 volume("vol_glass_rooms", 0.0, 4.5, 0.0, 4.5)

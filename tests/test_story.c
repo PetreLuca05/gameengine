@@ -9,6 +9,8 @@
 #include "story/story_bot.h"
 #include "story/story_save.h"
 #include "story/story_script.h"
+#include "story/vista_seq.h"
+#include "cJSON.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -523,6 +525,132 @@ static void test_chapter_file(const char *path) {
     free(d);
 }
 
+// ------------------------------------------------------------------ vista sequences (src/story/vista_seq.c)
+
+typedef struct VistaPts { cJSON *points; } VistaPts;
+
+static bool vista_point(void *user, const char *name, float out[3]) {
+    const cJSON *p = cJSON_GetObjectItemCaseSensitive(((VistaPts *)user)->points, name);
+    const cJSON *pos = cJSON_GetObjectItemCaseSensitive(p, "pos");
+    if (cJSON_GetArraySize(pos) < 3) return false;
+    for (int i = 0; i < 3; i++) out[i] = (float)cJSON_GetArrayItem(pos, i)->valuedouble;
+    return true;
+}
+
+static bool vista_at(VistaPts *pts, const char *name) {
+    float p[3];
+    return !name[0] || vista_point(pts, name, p);
+}
+
+static void test_vista(const char *chapter, const char *level) {
+    char *json = read_file("assets/story/vista/sequences.json");
+    CHECK(json != NULL, "sequences.json readable");
+    if (!json) return;
+    static VistaSeqLib lib;
+    char err[256];
+    CHECK(vista_seq_parse(&lib, json, err, sizeof(err)) && lib.n >= 10, "sequences parse (%d): %s", lib.n, err);
+    free(json);
+    // Every sequence the chapter starts exists; every point a sequence names is one of the level's.
+    StoryDef *d = malloc(sizeof(StoryDef));
+    char *cj = read_file(chapter), *lj = read_file(level);
+    cJSON *lroot = lj ? cJSON_Parse(lj) : NULL;
+    VistaPts pts = { cJSON_GetObjectItemCaseSensitive(cJSON_GetObjectItemCaseSensitive(lroot, "story"), "points") };
+    CHECK(cj && story_def_parse(d, cj, err, sizeof(err)) && pts.points, "chapter + level for the vista");
+    int used = 0;
+    for (int i = 0; i < d->act_n; i++) {
+        if (d->act[i].type != SA_SEQUENCE) continue;
+        used++;
+        CHECK(vista_seq_find(&lib, d->act[i].name) != NULL, "sequence '%s' (chapter) defined in sequences.json", d->act[i].name);
+    }
+    CHECK(used >= 10, "chapter starts %d sequences", used);
+    for (int i = 0; i < lib.n; i++) {
+        const VistaSeqDef *q = &lib.seq[i];
+        CHECK(vista_at(&pts, q->heli_from) && vista_at(&pts, q->heli_to), "%s: heli points in the level", q->name);
+        for (int k = 0; k < q->smoke_n; k++) CHECK(vista_at(&pts, q->smoke[k].at), "%s: smoke point '%s' in the level", q->name, q->smoke[k].at);
+        for (int k = 0; k < q->fire_n; k++) CHECK(vista_at(&pts, q->fire[k].at), "%s: fire point '%s'", q->name, q->fire[k].at);
+        for (int k = 0; k < q->flash_n; k++) CHECK(vista_at(&pts, q->flash[k].at), "%s: flash point '%s'", q->name, q->flash[k].at);
+    }
+    free(cj);
+    free(lj);
+    free(d);
+
+    VistaFrame f;
+    VistaActive a[4];
+    memset(a, 0, sizeof(a));
+    vista_eval(&lib, a, 0, vista_point, &pts, &f);
+    CHECK(f.power[0] == 1 && f.power[7] == 1 && f.heli_n == 0 && f.smoke_n == 0 && f.birds_scatter_age < 0, "idle city");
+    // Halden flickers; the blackout (started later) wins, fading.
+    snprintf(a[0].name, VISTA_NAME, "halden_flicker");
+    a[0].age = 100;
+    snprintf(a[1].name, VISTA_NAME, "district_blackout");
+    a[1].age = 1.0f;
+    vista_eval(&lib, a, 2, vista_point, &pts, &f);
+    CHECK(fabsf(f.power[1] - 1.6f) < 1e-4f && fabsf(f.power[2] - 0.5f) < 1e-4f && f.power[0] == 1, "flicker + blackout half way (%.2f %.2f)", f.power[1], f.power[2]);
+    a[1].age = 4.5f;
+    vista_eval(&lib, a, 2, vista_point, &pts, &f);
+    CHECK(fabsf(f.power[1] - 0.5f) < 1e-4f, "flickering district fades from on (%.2f)", f.power[1]);
+    a[1].age = 60;
+    vista_eval(&lib, a, 2, vista_point, &pts, &f);
+    CHECK(f.power[1] == 0 && f.power[2] == 0 && fabsf(f.power[0] - 0.15f) < 1e-4f && fabsf(f.power[6] - 0.1f) < 1e-4f, "blackout done");
+    // The helicopter pass: from a to b, then gone.
+    float pa[3], pb[3];
+    vista_point(&pts, "heli1_a", pa);
+    vista_point(&pts, "heli1_b", pb);
+    snprintf(a[0].name, VISTA_NAME, "heli_north_pass");
+    a[0].age = 22.5f;
+    vista_eval(&lib, a, 1, vista_point, &pts, &f);
+    CHECK(f.heli_n == 1 && fabsf(f.heli[0].pos[0] - (pa[0] + pb[0]) * 0.5f) < 0.5f && fabsf(f.heli[0].pos[2] - (pa[2] + pb[2]) * 0.5f) < 0.5f, "heli half way");
+    float fwd[2] = { -sinf(f.heli[0].yaw), -cosf(f.heli[0].yaw) }, dir[2] = { pb[0] - pa[0], pb[2] - pa[2] };
+    CHECK(fwd[0] * dir[0] + fwd[1] * dir[1] > 0.99f * sqrtf(dir[0] * dir[0] + dir[1] * dir[1]), "heli faces its way");
+    a[0].age = 45.1f;
+    vista_eval(&lib, a, 1, vista_point, &pts, &f);
+    CHECK(f.heli_n == 0, "heli gone after the pass");
+    // The crash: spirals onto the hospital roof at 5.2 s; then the flash, a fire, smoke.
+    float ph[3];
+    vista_point(&pts, "vista_hospital", ph);
+    snprintf(a[0].name, VISTA_NAME, "heli_crash");
+    a[0].age = 0;
+    vista_eval(&lib, a, 1, vista_point, &pts, &f);
+    CHECK(f.heli_n == 1 && f.heli[0].crashing && fabsf(hypotf(f.heli[0].pos[0] - ph[0], f.heli[0].pos[2] - ph[2]) - 260.0f) < 1.0f && f.flash_n == 0, "crash starts 260 m out");
+    a[0].age = 5.19f;
+    vista_eval(&lib, a, 1, vista_point, &pts, &f);
+    CHECK(f.heli_n == 1 && hypotf(f.heli[0].pos[0] - ph[0], f.heli[0].pos[2] - ph[2]) < 2.0f && f.heli[0].pos[1] - ph[1] < 1.0f, "crash ends on the roof");
+    a[0].age = 6.0f;
+    vista_eval(&lib, a, 1, vista_point, &pts, &f);
+    CHECK(f.heli_n == 0 && f.flash_n == 1 && f.fire_n == 1 && f.smoke_n == 1 && fabsf(f.smoke[0].age - 0.8f) < 1e-4f, "after the crash: flash, fire, smoke");
+    a[0].age = 9.0f;
+    vista_eval(&lib, a, 1, vista_point, &pts, &f);
+    CHECK(f.flash_n == 0 && f.fire_n == 1, "the flash is over, the fire burns on");
+    // Smoke: deterministic particles that rise; none outside the live window.
+    snprintf(a[0].name, VISTA_NAME, "smoke_aldric");
+    a[0].age = 200;
+    vista_eval(&lib, a, 1, vista_point, &pts, &f);
+    CHECK(f.smoke_n == 1, "aldric column");
+    int alive = 0, n = vista_smoke_count(&f.smoke[0]);
+    float top = 0, p[3], p2[3], sz, sz2, sh, al, al2;
+    for (int k = 0; k < n + 10; k++) {
+        if (!vista_smoke_particle(&f.smoke[0], k, p, &sz, &sh, &al)) continue;
+        alive++;
+        top = fmaxf(top, p[1]);
+        bool again = vista_smoke_particle(&f.smoke[0], k, p2, &sz2, &sh, &al2);
+        CHECK(again && p2[1] == p[1] && sz2 == sz && al2 == al && al >= 0 && al <= 1 && sz > 0, "smoke particle %d deterministic", k);
+        if (g_fail > 20) break;
+    }
+    CHECK(alive > 60 && alive < 120 && top > ph[1] + 150, "column: %d particles, top %.0f m", alive, top);
+    // Traffic: build then stall.
+    snprintf(a[0].name, VISTA_NAME, "traffic_build");
+    a[0].age = 1000;
+    snprintf(a[1].name, VISTA_NAME, "traffic_stall");
+    a[1].age = 45;
+    vista_eval(&lib, a, 2, vista_point, &pts, &f);
+    CHECK(fabsf(f.traffic_density - 0.8f) < 1e-4f && fabsf(f.traffic_stall - 0.425f) < 1e-4f && f.stall_age == 45, "traffic (%.2f %.3f)", f.traffic_density, f.traffic_stall);
+    snprintf(a[0].name, VISTA_NAME, "birds_scatter");
+    a[0].age = 3;
+    vista_eval(&lib, a, 1, vista_point, &pts, &f);
+    CHECK(f.birds_scatter_age == 3, "birds scatter");
+    cJSON_Delete(lroot);
+}
+
 int main(int argc, char **argv) {
     test_clock_parse();
     test_parse_errors();
@@ -533,6 +661,7 @@ int main(int argc, char **argv) {
     test_script();
     test_save_roundtrip();
     test_chapter_file("assets/story/chapters/01_tenth_floor.json");
+    test_vista("assets/story/chapters/01_tenth_floor.json", "data/levels/story_01.json");
     if (argc > 1) { // test_story <chapter.json> --trace <choice>: print the bot's path
         StoryDef *d = malloc(sizeof(StoryDef));
         char *json = read_file(argv[1]);

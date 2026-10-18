@@ -4,6 +4,7 @@
 // out as EV_STORY events with script ids; every machine (the host's own player included) builds its
 // StoryUi from them. Saves are JSON by entity name (src/story/story_save.c + the world blob below).
 #include "game_story.h"
+#include "game_vista.h"
 #include "game_internal.h"
 #include "story/story_save.h"
 #include "story/story_bot.h"
@@ -89,6 +90,8 @@ static struct {
     u8 light_saved[MAX_ENTITIES];        // EF_ON before a power cut (bit 1 = valid)
     StorySpawned spawned[STORY_MAX_SPAWNED];
     int spawned_n;
+    struct { char name[STORY_ID]; float t0; } vseq[24];   // started vista sequences (story seconds; game_vista.c)
+    int vseq_n;
     float end_left;
     bool reload_pending;                 // the host died: back to the last checkpoint (outside the sim tick)
     bool menu_pending;                   // the chapter ended: back to the menu (outside the sim tick)
@@ -155,6 +158,12 @@ static const StoryPoint *find_point(const char *name) {
     for (int i = 0; i < SR.point_n; i++)
         if (!strcmp(SR.points[i].name, name)) return &SR.points[i];
     return NULL;
+}
+
+bool story_point_pos(const char *name, vec3 *out) {
+    const StoryPoint *p = find_point(name);
+    if (p) *out = p->pos;
+    return p != NULL;
 }
 
 static StoryInteract *find_inter(const char *name) {
@@ -279,6 +288,27 @@ static void send(World *w, int target, StoryEvKind kind, const char *text, u32 e
     ev.pos = pos;
     if (text) dg_strcpy(ev.text, sizeof(ev.text), text);
     ev_push(w, &ev);
+}
+
+// Vista sequences (docs/STORY.md "Vista"): the host remembers when each started; clients get the name and
+// its age (pos.x: the story clock it was sent at), so a late joiner, a load or a story_time run-ahead
+// sees the same city (vista_resync).
+static void vseq_start(World *w, const char *name) {
+    int k = 0;
+    while (k < SR.vseq_n && strcmp(SR.vseq[k].name, name)) k++;
+    if (k < SR.vseq_n) {   // restarted: moves to the end (later sequences win)
+        memmove(&SR.vseq[k], &SR.vseq[k + 1], sizeof(SR.vseq[0]) * (size_t)(SR.vseq_n - k - 1));
+        SR.vseq_n--;
+    }
+    if (SR.vseq_n >= ARRAY_COUNT(SR.vseq)) return;
+    dg_strcpy(SR.vseq[SR.vseq_n].name, STORY_ID, name);
+    SR.vseq[SR.vseq_n++].t0 = SR.st->now;
+    send(w, -1, SEVT_SEQUENCE, name, 0, 0, 0.0f, v3(SR.st->now, 0, 0));
+}
+
+static void vista_resync(World *w, int target) {
+    send(w, target, SEVT_SEQUENCE, "", 0, 0, 0, v3(SR.st->now, 0, 0));   // "": forget every sequence
+    for (int k = 0; k < SR.vseq_n; k++) send(w, target, SEVT_SEQUENCE, SR.vseq[k].name, 0, 0, SR.st->now - SR.vseq[k].t0, v3(SR.st->now, 0, 0));
 }
 
 static void send_sync(World *w, int target) {
@@ -475,7 +505,7 @@ static void apply_action(World *w, const StoryAction *a) {
         break;
     }
     case SA_DOOR: door_set(w, a->name, a->ival); break;
-    case SA_SEQUENCE: send(w, -1, SEVT_SEQUENCE, a->name, 0, 0, 0, pos); break;
+    case SA_SEQUENCE: vseq_start(w, a->name); break;
     case SA_PHONE: send(w, -1, SEVT_PHONE, a->arg, 0, 0, 0, pos); break;
     default: break;
     }
@@ -712,6 +742,8 @@ static cJSON *world_blob(World *w) {
         cJSON_AddItemToArray(sp, o);
     }
     cJSON_AddStringToObject(root, "weather", weather_name(w));
+    cJSON *vs = cJSON_AddObjectToObject(root, "sequences");
+    for (int k = 0; k < SR.vseq_n; k++) cJSON_AddNumberToObject(vs, SR.vseq[k].name, SR.vseq[k].t0);
     return root;
 }
 
@@ -762,6 +794,12 @@ static void apply_world_blob(World *w, const cJSON *root) {
     cJSON_ArrayForEach(e, cJSON_GetObjectItemCaseSensitive(root, "spawned")) spawn_named(w, jstr(e, "name"), jstr(e, "what"), 1);
     const char *wx = jstr(root, "weather");
     if (wx[0] && strcmp(wx, "custom")) weather_set_preset(w, wx, 0);
+    SR.vseq_n = 0;
+    cJSON_ArrayForEach(e, cJSON_GetObjectItemCaseSensitive(root, "sequences")) {
+        if (SR.vseq_n >= ARRAY_COUNT(SR.vseq) || !cJSON_IsNumber(e)) continue;
+        dg_strcpy(SR.vseq[SR.vseq_n].name, STORY_ID, e->string);
+        SR.vseq[SR.vseq_n++].t0 = (float)e->valuedouble;
+    }
 }
 
 static cJSON *players_blob(World *w) {
@@ -890,6 +928,7 @@ static void activate(World *w) {
     SR.active = true;
     SR.pending[0] = 0;
     SR.spawned_n = 0;
+    SR.vseq_n = 0;
     SR.end_left = 0;
     SR.dead_time = 0;
     memset(SR.light_saved, 0, sizeof(SR.light_saved));
@@ -946,12 +985,14 @@ static void activate(World *w) {
     track_named(w);
     send(w, -1, SEVT_CHAPTER, SR.def->id, 0, 0, 0, v3(0, 0, 0));
     send_sync(w, -1);
+    vista_resync(w, -1);
     log_info("story: chapter %s '%s' %s (map %s)", SR.def->id, SR.def->title, ok ? "restored" : "started", SR.def->map);
 }
 
 void story_level_loaded(World *w, const char *map) {
     ui_set_chapter("");   // a new level: the HUD waits for the chapter's EV_STORY again
     parse_level_block(map);
+    vista_level_loaded(map);
     if (!w->authority) return;
     if (SR.active) free_chapter();   // a (re)load: a chapter restarts through story_start
     if (SR.pending[0]) activate(w);
@@ -962,6 +1003,7 @@ void story_sv_player_joined(World *w, int slot) {
     if (!SR.active) return;
     send(w, slot, SEVT_CHAPTER, SR.def->id, 0, 0, 0, v3(0, 0, 0));
     send_sync(w, slot);
+    vista_resync(w, slot);
     for (int r = 0; r < SR.def->role_n; r++) {
         if (SR.def->role[r].slot != slot) continue;
         story_set_role(SR.st, r, true);
@@ -1156,7 +1198,7 @@ void story_handle_event(const GameEvent *ev) {
     case SEVT_PEEK:
         if (w) peek_start((EntityId)ev->ent);
         break;
-    case SEVT_SEQUENCE: log_info("story: sequence '%s' (vista / VFX sequences: milestone 7)", ev->text); break;
+    case SEVT_SEQUENCE: vista_sequence(ev->text, ev->value, ev->pos.x); break;
     case SEVT_PHONE: log_info("story: phone content '%s'", ev->text); break;
     case SEVT_END:
         SR.ui.ended = true;
@@ -1210,6 +1252,7 @@ void story_frame(World *w, float dt) {
         return;
     }
     if (w && SR.inter_n) bind_interactables(w);   // replicas appear over time on clients
+    vista_frame(dt, SR.active && SR.st ? &SR.st->now : NULL);
     if (!SR.ui.active) return;
     SR.ui.time += dt;
     // Subtitles: drop finished cues.
@@ -1306,6 +1349,7 @@ static void cmd_story_time(int argc, const char **argv) {
     // Run the story ahead (timers, waits, the clock); world events still need the world.
     float secs = (float)atof(argv[1]);
     for (float t = 0; t < secs && !SR.st->ended; t += SIM_DT) story_host_tick(w);
+    if (SR.active) vista_resync(w, -1);   // the sequences started on the way are older than their events say
 }
 
 static void cmd_story_save(int argc, const char **argv) {
