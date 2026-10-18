@@ -40,9 +40,6 @@ typedef struct LanServer {
 #define MAX_LAN_SERVERS 16
 
 bool net_init(void);
-// Join handshake (docs/SETTINGS_AUDIT.md): a client whose consistency hash differs from the host's
-// (or sends none) is rejected; why gets the MSG_REJECT reason. Pure.
-bool net_consistency_ok(u32 host_hash, u32 client_hash, bool missing, char *why, int why_size);
 void net_shutdown(void);
 bool net_host(TransportKind kind, u16 port);
 bool net_connect(TransportKind kind, const char *address);

@@ -134,6 +134,14 @@ int consistency_check(char *report, int size) {
     return bad;
 }
 
+bool consistency_join_ok(u32 host_hash, u32 client_hash, bool missing, char *why, int why_size) {
+    if (!missing && host_hash == client_hash) return true;
+    if (why && why_size > 0)
+        snprintf(why, (size_t)why_size, "consistency set mismatch (host %08x, you %08x): locked graphics / fair-play values differ (assets/render/consistency.json)", host_hash,
+                 missing ? 0u : client_hash);
+    return false;
+}
+
 void consistency_init(void) {
     if (!consistency_load(CONSISTENCY_PATH)) return;
     char err[200];

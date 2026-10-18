@@ -957,7 +957,7 @@ void vkc_frame(const VgScene *s, const VgDisplace *disp, float density, float lo
     memset(&v, 0, sizeof(v));
     planes_of(R->view_proj_nj, v.planes);
     v.eye = v.lod_eye = R->cam.pos;
-    v.px_scale = (float)R->hdr.h / (2.0f * tanf(R->cam.fov_deg * DG_DEG2RAD * 0.5f));
+    v.px_scale = RENDER_LOD_REF_HEIGHT / (2.0f * tanf(R->cam.fov_deg * DG_DEG2RAD * 0.5f));   // not the render height (docs/SETTINGS_AUDIT.md)
     v.lod_px = lod_px;
     v.impostor_px = C.impostor_px->f;
     v.small_impostor_px = small_impostor_px;
@@ -1310,6 +1310,13 @@ u32 vkc_draw_local_shadow(VkCommandBuffer cmd, vec4 sphere, const vec4 planes[6]
     u32 before = C.draws;
     draw_view(cmd, &lv, 2, view);
     return C.draws - before;
+}
+
+bool vkc_visibility_counts(u32 *instances, u32 *impostors) {
+    if (!C.ok) return false;
+    *instances = C.view[0].instances;
+    *impostors = C.lod_n[4];
+    return true;
 }
 
 void vkc_stats(void) {

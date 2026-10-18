@@ -659,6 +659,7 @@ if(Python3_Interpreter_FOUND)
   add_test(NAME lint_commands COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/tests/lint_commands.py)
   add_test(NAME aim_sockets COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/tests/aim_sockets.py)
   add_test(NAME lint_looks COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/tests/lint_looks.py)
+  add_test(NAME lint_settings COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/tests/lint_settings.py)
   # Ground textures (docs/GROUND_REFERENCE.md): the recipes validate, the generated / placeholder sets
   # meet their colour, coverage, gradient, silhouette and seam checks (needs numpy + Pillow).
   add_test(NAME ground_recipes COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tools/vfxgen/groundgen.py --validate)
@@ -691,6 +692,16 @@ if(MSVC)
   target_compile_options(test_fidelity PRIVATE /W3 /wd4100 /wd4201 /utf-8)
 endif()
 add_test(NAME fidelity COMMAND test_fidelity WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
+
+# Settings audit (docs/SETTINGS_AUDIT.md): release locks per class, config.cfg filter, the consistency
+# set (apply / hash / join check), the locked set identical at every fidelity level x era.
+add_executable(test_settings tests/test_settings.c src/core/cvar.c src/core/consistency.c src/render/fidelity/fidelity.c)
+set_target_properties(test_settings PROPERTIES C_STANDARD 11)
+target_link_libraries(test_settings PRIVATE dg_animcore)
+if(MSVC)
+  target_compile_options(test_settings PRIVATE /W3 /wd4100 /wd4201 /utf-8)
+endif()
+add_test(NAME settings COMMAND test_settings WORKING_DIRECTORY $<TARGET_FILE_DIR:deadground>)
 
 # LOD ranges and cross-fades (docs/LOD.md): lod.json x tier, character px -> LOD, fades in a slow dolly,
 # camera reversal, complementary masks, streaming holds, terrain geomorph without cracks / pops.

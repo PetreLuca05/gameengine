@@ -41,6 +41,7 @@ Windows, no admin; tools are portable, in `.toolchain/` (git-ignored).
 | Render post / sky / time | RENDERING_POST.md, DAYNIGHT.md | src/render/{post,sky,graph}, game_post.c, game_daynight.c |
 | glTF PBR maps (metal-rough, normal, AO, emissive, MASK, doubleSided) | PBR.md | src/assets/assets.c gltf_material, shaders/pbr_maps.glsl, render.c draw_items (set 3), vg_resolve.glsl; test: tools/gen_pbr_test.py, tools/tests/pbr_shelf.cfg |
 | Looks (five fixed grading presets Realism / PUBG-style / Cinematic / Vibrant / Gritty; `look <name>`, dev `look_tune` / `look_dump`) | LOOKS.md | src/render/post/{look,looks,post_look}.c, shaders/post/{look.glsl,look_preview.comp}, src/game/game_look.c, scr_settings.c look_section; tests: test_looks(_release), tools/tests/lint_looks.py, run_looks_tests.py, looks.cfg |
+| Settings audit: every cvar CVAR_EDITABLE / CVAR_TIER / CVAR_LOCKED (+ CVAR_RULE host rules); release locks (`DG_DEV_BUILD=OFF`, `--release-locks`); consistency set + join hash; Graphics tab = Fidelity / Era / Look / Display / Comfort; `settings_audit`, `sv_rule` | SETTINGS_AUDIT.md | src/core/{cvar,consistency}.c, assets/render/consistency.json, assets/ui/settings_audit.json, src/game/game_settings_audit.c, scr_settings.c; tests: test_settings, tools/tests/lint_settings.py (`--write` regenerates the doc table), run_settings_tests.py |
 | Engine Fidelity (Off .. Modern, bounds every graphics setting) | ENGINE_FIDELITY.md | assets/render/fidelity, src/render/fidelity, src/game/game_fidelity.c, scr_settings.c; tests: test_fidelity, tools/tests/run_fidelity_tests.py |
 | VFX / flesh | VFX*.md | src/vfx, src/gameplay/flesh_fx.c, assets/vfx |
 | UI | UI.md | src/ui/gui, src/ui/screens, assets/ui |
@@ -77,4 +78,4 @@ Hall at the origin. Other areas:
 - Shadow reference corner: (−50, 0, −11), switches jump to `shadow_preset`s.
 - Aim stand (corners and frames): x 104..128, z 40 (wall edge, window, car, low wall, thin wall).
 
-Console: `help [filter]` lists commands, `cvarlist [filter]` lists cvars. New commands / cvars need a description and a category (assets/ui/command_categories.json; tools/tests/lint_commands.py).
+Console: `help [filter]` lists commands, `cvarlist [filter]` lists cvars. New commands / cvars need a description and a category (assets/ui/command_categories.json; tools/tests/lint_commands.py). New cvars also need exactly one class flag (CVAR_EDITABLE / CVAR_TIER / CVAR_LOCKED) and an entry in assets/ui/settings_audit.json; then `python tools/tests/lint_settings.py --write` (docs/SETTINGS_AUDIT.md).

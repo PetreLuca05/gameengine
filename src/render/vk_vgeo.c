@@ -558,7 +558,7 @@ static void exec_cull(VkCommandBuffer cmd, void *u) {
     u32 flags = 0;
     if (G.occlusion->i == 0) flags |= VGV_NO_OCCLUSION;
     if (G.occlusion->i >= 2) flags |= VGV_TWO_PASS;
-    vgeo_view_setup(&v, R->view_proj_nj.m, R->prev_view_proj_nj.m, eye, (float)R->hdr.h / (2.0f * tanf(fov * 0.5f)), R->cam.znear, R->hdr.w, R->hdr.h,
+    vgeo_view_setup(&v, R->view_proj_nj.m, R->prev_view_proj_nj.m, eye, RENDER_LOD_REF_HEIGHT / (2.0f * tanf(fov * 0.5f)), R->cam.znear, R->hdr.w, R->hdr.h,
                     G.error_px->f, G.sw_px->f, flags);
     if (G.freeze->i && G.have_frozen) v = G.frozen;
     else { G.frozen = v; G.have_frozen = true; }
@@ -1090,14 +1090,17 @@ static bool era_eq(int f, float v, float era_v) {
     return false;
 }
 
+static bool era_matches(int e) {
+    const EraDef *d = &k_eras[e];
+    return era_eq(FF_VGEO, (float)G.r_vgeo->i, (float)d->vgeo) && era_eq(FF_VGEO_SHADOW_ERROR_PX, G.shadow_error_px->f, d->shadow_px);
+}
+
+// The current era first: eras share values (modern / 2015 differ in r_vgeo only, which a classic
+// era's bounds force to 0; 2015 / 2010 share every cvar), so the one the player picked wins a tie.
 static int era_detect(void) {
-    for (int e = 0; e < 4; e++) {
-        const EraDef *d = &k_eras[e];
-        if (era_eq(FF_VGEO, (float)G.r_vgeo->i, (float)d->vgeo) && era_eq(FF_VGEO_SHADOW_ERROR_PX, G.shadow_error_px->f, d->shadow_px)) {
-            if (e == 2 && G.era && G.era->i == 3) return 3;   // the classic eras share their cvars
-            return e;
-        }
-    }
+    if (G.era && G.era->i >= 0 && G.era->i <= 3 && era_matches(G.era->i)) return G.era->i;
+    for (int e = 0; e < 4; e++)
+        if (era_matches(e)) return e;
     return 4;
 }
 
@@ -1123,7 +1126,7 @@ static void on_era_value(Cvar *c) {
     int e = era_detect();
     if (G.era->i != e) {
         G.applying_era = true;
-        if (G.era->i != 3 || e != 2) cvar_set_int(G.era, e);   // 2010 reads back as 2015 by its cvars
+        cvar_set_int(G.era, e);
         G.applying_era = false;
     }
 }
@@ -2224,6 +2227,18 @@ static void cmd_foliage_stats(int argc, const char **argv) {
     if (vg_cull_counters(&G.cull, 0, &c))
         log_info("foliage: last frame: %u + %u visible instances, %u faded (density / fade), %u impostors, %u HW + %u SW clusters, %u triangles; vgeo shadows %.3f + %.3f ms",
                  c.n[VGN_INST_VIS], c.n[VGN_INST_P2], c.n[VGN_INST_FADED], c.n[VGN_IMPOSTORS], c.n[VGN_HW], c.n[VGN_SW], c.n[VGN_TRIS], G.shadow_ms[0], G.shadow_ms[1]);
+}
+
+bool render_visibility_counts(u32 *visible, u32 *faded, u32 *impostors) {
+    *visible = *faded = *impostors = 0;
+    if (!G.ok) return false;
+    if (!G.r_vgeo->i) return vkc_visibility_counts(visible, impostors);
+    VgCounters c;
+    if (!vg_cull_counters(&G.cull, 0, &c)) return false;
+    *visible = c.n[VGN_INST_VIS] + c.n[VGN_INST_P2];
+    *faded = c.n[VGN_INST_FADED];
+    *impostors = c.n[VGN_IMPOSTORS];
+    return true;
 }
 
 static void cmd_foliage_query(int argc, const char **argv) {

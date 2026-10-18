@@ -331,6 +331,10 @@ void render_foliage_chunk_unload(int handle);
 int render_foliage_chunk_capsules(int handle, RenderCapsule *out, int max);
 // Placement instances within radius (horizontal) of pos, nearest first (footsteps, crushing, burning).
 int render_foliage_query(vec3 pos, float radius, RenderFoliageHit *out, int max);
+// Last frame's foliage / instance counts of the main view (settings_visibility, docs/SETTINGS_AUDIT.md):
+// vgeo: visible instances (both passes), faded (density / fade), impostors; classic: its main-view
+// instances in visible, impostors. false = nothing drawn yet.
+bool render_visibility_counts(u32 *visible, u32 *faded, u32 *impostors);
 // Flattens grass: a push into the displacement buffer this frame (strength: m/s of displacement).
 void render_foliage_push(vec3 pos, float radius, float strength);
 void render_foliage_clear(void);                // unloads every chunk
@@ -574,6 +578,10 @@ float render_vm_fov(void);   // the viewmodel (arms + held item) projection FOV 
 mat4 render_view_proj(void);
 int render_width(void);
 int render_height(void);
+// Projected sizes for LOD, impostor, foliage-fade and culling decisions are measured against this
+// height, not the render target's: render scale, the upscaler and the monitor's resolution never
+// change what is drawn at range (docs/SETTINGS_AUDIT.md V14). The scope picture likewise.
+#define RENDER_LOD_REF_HEIGHT 1080.0f
 RenderStats render_stats(void);
 // Sun shadow state of the last built frame (docs/SHADOWS.md: shadow_info, r_shadow_debug 1 / 8,
 // shadow_switch_stress).

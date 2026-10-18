@@ -29,6 +29,9 @@ u32 consistency_hash_effective(void);
 // Self-check: non-rule entries whose cvar no longer holds the locked value (a dev build's console
 // edits). Writes "name=value (locked v)" pairs into report. 0 = consistent.
 int consistency_check(char *report, int size);
+// Join handshake (MSG_HELLO): a client whose effective hash differs from the host's (or that sent
+// none: missing) is rejected; why gets the MSG_REJECT reason.
+bool consistency_join_ok(u32 host_hash, u32 client_hash, bool missing, char *why, int why_size);
 // Startup: load + apply + self-check + log (game init).
 void consistency_init(void);
 

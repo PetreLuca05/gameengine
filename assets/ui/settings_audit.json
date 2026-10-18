@@ -641,6 +641,11 @@
    "ui": "HUD",
    "reason": "HUD layout / visibility: scale, opacity, compass, coordinates, kill counter / feed, pings, phone panel, timed ring, clock."
   },
+  "hud_compass_arc": {
+   "class": "EDITABLE",
+   "ui": "HUD",
+   "reason": "HUD layout / visibility: scale, opacity, compass, coordinates, kill counter / feed, pings, phone panel, timed ring, clock."
+  },
   "hud_coords": {
    "class": "EDITABLE",
    "ui": "HUD",
@@ -1263,7 +1268,7 @@
   },
   "r_foliage_density": {
    "class": "LOCKED+RULE",
-   "ui": "—",
+   "ui": "Lobby rules",
    "reason": "Visibility: changes what you can see relative to other players. Foliage density is one value for everyone (consistency.json); a lobby rule may change it for the whole session. Today tiers cap it at 0.1 / 0.25 / 0.5 / 0.8 / 1.0 and eras at 1.0 / 0.7 / 0.4 / 0.2 (V1)."
   },
   "r_foliage_wind": {
@@ -1824,17 +1829,17 @@
   "snd_master": {
    "class": "EDITABLE",
    "ui": "Audio",
-   "reason": "Volumes."
+   "reason": "Volumes: personal; every sound plays the same for everyone."
   },
   "snd_music": {
    "class": "EDITABLE",
    "ui": "Audio",
-   "reason": "Volumes."
+   "reason": "Volumes: personal; every sound plays the same for everyone."
   },
   "snd_sfx": {
    "class": "EDITABLE",
    "ui": "Audio",
-   "reason": "Volumes."
+   "reason": "Volumes: personal; every sound plays the same for everyone."
   },
   "snd_trace": {
    "class": "LOCKED",
@@ -1844,17 +1849,17 @@
   "snd_ui": {
    "class": "EDITABLE",
    "ui": "Audio",
-   "reason": "Volumes."
+   "reason": "Volumes: personal; every sound plays the same for everyone."
   },
   "snd_voice": {
    "class": "EDITABLE",
    "ui": "Audio",
-   "reason": "Volumes."
+   "reason": "Volumes: personal; every sound plays the same for everyone."
   },
   "snd_weather": {
    "class": "EDITABLE",
    "ui": "Audio",
-   "reason": "Volumes."
+   "reason": "Volumes: personal; every sound plays the same for everyone."
   },
   "spec_blend_time": {
    "class": "EDITABLE",

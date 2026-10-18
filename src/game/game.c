@@ -612,7 +612,7 @@ static void tick(void) {
     game_fire_tick();
     dolly_tick(SIM_DT);   // lod_dolly (docs/LOD.md)
     // Render-side character work at tick rate (LOD-scaled post-pass, ragdolls).
-    chars_present_tick(w, G->view.eye, G->view.fov > 1 ? G->view.fov : 75.0f, (float)render_height(), SIM_DT, game_view_slot());
+    chars_present_tick(w, G->view.eye, G->view.fov > 1 ? G->view.fov : 75.0f, RENDER_LOD_REF_HEIGHT, SIM_DT, game_view_slot());   // LOD by projected size at 1080 (docs/SETTINGS_AUDIT.md)
     weapon_feel_tick();
     spectator_dump_tick(w, cmd.seq);
 }
@@ -1615,6 +1615,7 @@ void game_init(void) {
     game_death_register();
     game_pings_register();
     hud_register();
+    settings_audit_register();
     openworld_register_commands();
     cmd_register("give", cmd_give, "give <item> [count]");
     cmd_register("give_list", cmd_give_list, "give_list [filter]: the item ids give takes");

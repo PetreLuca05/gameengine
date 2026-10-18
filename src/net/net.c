@@ -105,13 +105,6 @@ static u32 server_cvar_revision(void) {
 
 // ------------------------------------------------------------------ helpers
 
-bool net_consistency_ok(u32 host_hash, u32 client_hash, bool missing, char *why, int why_size) {
-    if (!missing && host_hash == client_hash) return true;
-    snprintf(why, (size_t)why_size, "consistency set mismatch (host %08x, you %08x): locked graphics / fair-play values differ (assets/render/consistency.json)", host_hash,
-             missing ? 0u : client_hash);
-    return false;
-}
-
 // Server rules (CVAR_LOCKED | CVAR_RULE): a client takes the host's values (MSG_CVARS) and gets its
 // own back when it leaves; only a machine that is not someone else's client sets them.
 #define MAX_RULE_SAVE 128
@@ -267,7 +260,7 @@ static void host_handle_hello(PeerId peer, Reader *r) {
     // The consistency set (docs/SETTINGS_AUDIT.md): the locked values (foliage, fog, distances ...)
     // must match the host's, whatever the build.
     u32 theirs = r_u32(r), mine = consistency_hash_effective();
-    int join = net_consistency_ok(mine, theirs, r->overflow, why, sizeof(why)) ? lobby_on_hello(peer, &lh, why, sizeof(why)) : LJ_REJECT;
+    int join = consistency_join_ok(mine, theirs, r->overflow, why, sizeof(why)) ? lobby_on_hello(peer, &lh, why, sizeof(why)) : LJ_REJECT;
     if (join == LJ_REJECT) {
         log_warn("net: rejecting '%s': %s", name, why);
         Writer w = writer_make(N->buf, NET_BUF);

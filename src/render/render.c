@@ -2013,7 +2013,7 @@ static bool setup_scope_pip(FrameData *fd) {
     g_scope_lod.eye = s->objective_pos;
     g_scope_lod.fwd = fwd;
     g_scope_lod.tan_half = tan_half;
-    g_scope_lod.size = (float)n;
+    g_scope_lod.size = RENDER_LOD_REF_HEIGHT;   // LOD by the lens, not by the picture's resolution (r_scope_pip_scale is a tier)
     // The scope sees the world exactly like the main view (docs/ATTACHMENTS.md "The PiP pass"): the
     // same lighting, weather, shadows and fog settings (frame.fog, post_fog: the froxels when the main
     // view has them), and the main view's screen-space inputs (AO, contact shadows, SSR, SSGI) and

@@ -108,6 +108,7 @@ void hud_register(void) {
     HC.cv.ping_compass = cvar_reg_bool("hud_ping_compass", true, CVAR_ARCHIVE | CVAR_EDITABLE, "HUD: ping and teammate markers on the compass");
     HC.cv.opacity = cvar_reg_float("hud_opacity", 1.0f, 0.2f, 1.0f, CVAR_ARCHIVE | CVAR_EDITABLE, "HUD: opacity of the compass, kill counter, feed and markers");
     HC.cv.scale = cvar_reg_float("hud_scale", 1.0f, 0.75f, 1.5f, CVAR_ARCHIVE | CVAR_EDITABLE, "HUD: size of the compass and ping markers");
+    HC.cv.arc = cvar_reg_float("hud_compass_arc", 150.0f, 90.0f, 180.0f, CVAR_ARCHIVE | CVAR_EDITABLE, "HUD: degrees of bearing the compass strip spans (90 .. 180; the strip keeps its width)");
     cmd_register("hud_reload", cmd_hud_reload, "reload assets/ui/hud_compass.json");
     cmd_register("copypos", cmd_copypos, "copy your position to the clipboard (as a setpos command)");
 }
@@ -141,7 +142,7 @@ float hud_compass_draw(Game *g, GuiRect safe) {
     float w = fminf(gui_s(gui_tok("compass_w")) * k, safe.w * 0.6f), h = gui_s(gui_tok("compass_h")) * k;
     float cx = gui_w() * 0.5f, x0 = cx - w * 0.5f, y = safe.y;
     float heading = compass_heading_deg(g->view.yaw);
-    float half_fov = c->fov_deg * 0.5f, half_w = w * 0.5f;
+    float half_fov = (cv->arc ? cv->arc->f : c->fov_deg) * 0.5f, half_w = w * 0.5f;
     float bottom = y;
     gd_alpha_push(cv->opacity->f);
     if (cv->compass->i) {

@@ -19,6 +19,10 @@
         { "id": "revive", "label": "Revive & Death", "prefixes": ["revive", "death_", "fab_", "reconstruction_"] }
     ],
     "names": {
+        "settings_audit": "system",
+        "settings_lock_test": "system",
+        "settings_visibility": "system",
+        "sv_rule": "network",
         "down": "revive",
         "die": "revive",
         "spawn_corpse": "revive",

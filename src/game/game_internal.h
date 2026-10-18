@@ -219,6 +219,7 @@ void game_post_frame(const PostFrameInfo *fi);
 // This frame's fog density (1/m) after the time of day, the weather and the post volumes: the froxel
 // volumetrics and the analytic fog of every level without them share it (docs/SETTINGS_AUDIT.md V6).
 float game_post_fog_density(void);
+void settings_audit_register(void);   // settings_audit, settings_lock_test (game_settings_audit.c)
 void game_post_draw_overlay(void);
 void game_post_draw_photo_ui(void);
 void game_post_flash(float strength);
