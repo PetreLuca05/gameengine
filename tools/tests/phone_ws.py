@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
-"""Phone flow with a simulated device (docs/PHONE.md "Tests"): Python stdlib only (ssl + socket).
+"""Phone pairing in the menus with a simulated device (docs/PHONE.md "Phone flow", "Tests"): Python
+stdlib only (ssl + socket).
 
-Runs the game with tools/tests/phone_ws.cfg, waits for the pairing URL in its log, then acts as
-the companion page: fetches the page (asset injection), pairs over a WebSocket with the one-time
-token, streams orientation samples, opens Camera (live frames arrive), takes a photo (media
-message + JPEG blob), opens Gallery (the photo is listed and downloads with the session), and
-disconnects. The game's phone_status lines must show: portal + panel on equip, paired + panel
-gone + driven while connected, camera / gallery mirrored, lost + portal + panel back at the end.
+Run 1 (tools/tests/phone_ws.cfg, --menu): the server is up with the main menu (auto-pair); the
+Player tab's Phone card opens the Connect portal (a modal), the simulated page pairs with the
+one-time token from the log: card Connected, the page's status says ctx "menu". A LAN lobby shows
+the phone flag; in the match, equipping goes straight to the device (no portal, no HUD panel), the
+page opens Camera (live frames), takes a photo, opens Gallery. The socket drops: the game falls
+back to the in-game phone with a toast; the page resumes with its session key: real-phone mode
+again. The pause menu's card opens the portal too.
+Run 2 (tools/tests/phone_ws_relaunch.cfg): the stored device's session is restored with the
+server; the page reconnects without a new code (resumed); Forget device deletes it.
 
     cd build/bin && python ../../tools/tests/phone_ws.py [--exe deadground.exe] [--port 27392] [--phone-port 47392]
 """
@@ -168,6 +172,62 @@ def statuses(path):
     return [dict(re.findall(r"(\w+)=(\"[^\"]*\"|\S+)", l)) for l in log_text(path).splitlines() if "phone_status:" in l]
 
 
+def cards(path):
+    return [dict(re.findall(r"(\w+)=(\"[^\"]*\"|\S+)", l)) for l in log_text(path).splitlines() if "phone_card:" in l]
+
+
+def run_game(a, cfg, log):
+    if os.path.exists(log):
+        os.remove(log)
+    return subprocess.Popen([a.exe, "--test", "--menu", "--nosound", "--log", log, "+set", "net_port", str(a.port), "+set", "phone_port", str(a.phone_port),
+                             "--script", os.path.join(HERE, cfg)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+class Page:
+    """The companion page's protocol side: messages, frames, orientation samples."""
+
+    def __init__(self, ws):
+        self.ws, self.session, self.status, self.frames, self.media, self.photo_blob, self.gallery, self.close_code = ws, None, None, 0, None, 0, None, None
+
+    def pump(self, dt, orient=True):
+        t0 = time.time()
+        while time.time() - t0 < dt:
+            for op, p in self.ws.poll():
+                if op == 1:
+                    j = json.loads(p.decode())
+                    t = j.get("t")
+                    if t == "session":
+                        self.session = j.get("s")
+                    elif t == "status":
+                        self.status = j
+                    elif t == "media":
+                        self.media = j["item"]
+                    elif t == "gallery":
+                        self.gallery = j.get("items", [])
+                elif op == 2 and p:
+                    if p[0] == 16:
+                        self.frames += 1
+                        self.ws.text({"c": "ack", "f": struct.unpack("<I", p[8:12])[0]})
+                    elif p[0] == 17:
+                        self.photo_blob = len(p) - 8
+                elif op == 8:
+                    self.close_code = struct.unpack(">H", p[:2])[0] if len(p) >= 2 else 0
+            if orient:
+                try:
+                    self.ws.send(2, orient_msg(int(time.time() * 60), upright(10)))
+                except OSError:
+                    pass
+            time.sleep(1 / 60)
+
+    def wait_status(self, cond, timeout):
+        t0 = time.time()
+        while time.time() - t0 < timeout:
+            self.pump(0.25)
+            if self.status and cond(self.status):
+                return True
+        return False
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--exe", default=os.path.abspath("deadground.exe" if os.name == "nt" else "deadground"))
@@ -175,86 +235,121 @@ def main():
     ap.add_argument("--phone-port", type=int, default=47392)
     ap.add_argument("--log", default="phone_ws.log")
     a = ap.parse_args()
-    if os.path.exists(a.log):
-        os.remove(a.log)
-    game = subprocess.Popen([a.exe, "--test", "--nosound", "--log", a.log, "+set", "net_port", str(a.port), "+set", "phone_port", str(a.phone_port),
-                             "--script", os.path.join(HERE, "phone_ws.cfg")], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    log2 = a.log.replace(".log", "_relaunch.log")
+    game = run_game(a, "phone_ws.cfg", a.log)
+    session = None
     try:
-        m = wait_log(a.log, r"phone_pair: open (https?://\S+)", 240)
-        check(bool(m), "the game issued a pairing code on equip")
+        # ---- the main menu: card, portal, pairing
+        m = wait_log(a.log, r"phone_pair: open (https?://\S+)", 600)
+        check(bool(m), "the Connect portal issued a pairing code (from the main menu)")
         if not m:
             return
+        cd = cards(a.log)
+        check(bool(cd) and cd[0].get("card") == "not_connected" and cd[0].get("server") == "1" and cd[0].get("ctx") == "menu",
+              "main menu: the server is up (auto-pair), card Not connected (%s)" % (cd[0] if cd else None))
+        # (the script logs the portal's state a few frames later: pair only after that)
+        m2 = wait_log(a.log, r"phone_status: flow=pairing[^\n]*", 600)
+        check(bool(m2) and "token=1" in m2.group(0) and "portal=1" in m2.group(0) and "screen=phone" in m2.group(0), "the portal is a modal (screen phone) with a code")
+        check(bool(wait_log(a.log, r"phone_card: card=waiting", 120)), "card: Waiting...")
         url = urllib.parse.urlparse(m.group(1))
         host, port, token = url.hostname, url.port, urllib.parse.parse_qs(url.query)["t"][0]
-        st = statuses(a.log)
-        check(any(s.get("flow") == "pairing" and s.get("app") == "portal" and s.get("server") == "1" and s.get("token") == "1" for s in st),
-              "one frame after equip: server up, pairing, portal")
         code, hdrs, page = http_get(host, port, "/")
         check(code == 200 and b"window.DG_THEME={" in page and b"window.DG_APPS={" in page and b'DG_ICONS="data:image/png;base64,' in page
               and b"/*DG_PHONE_DATA*/" not in page, "the page carries the phone OS assets (theme, apps, icon atlas)")
         ws = Ws(host, port, "/ws?t=" + token)
         check(ws.ok, "WebSocket upgrade with the pairing token")
-        session, got_status, frames, media, photo_blob, gallery = None, None, 0, None, 0, None
-
-        def pump(dt):
-            nonlocal session, got_status, frames, media, photo_blob, gallery
-            t0 = time.time()
-            while time.time() - t0 < dt:
-                for op, p in ws.poll():
-                    if op == 1:
-                        j = json.loads(p.decode())
-                        if j.get("t") == "session":
-                            session = j.get("s")
-                        elif j.get("t") == "status":
-                            got_status = j
-                        elif j.get("t") == "media":
-                            media = j["item"]
-                        elif j.get("t") == "gallery":
-                            gallery = j.get("items", [])
-                    elif op == 2 and p:
-                        if p[0] == 16:
-                            frames += 1
-                            ws.text({"c": "ack", "f": struct.unpack("<I", p[8:12])[0]})
-                        elif p[0] == 17:
-                            photo_blob = len(p) - 8
-                ws.send(2, orient_msg(int(time.time() * 60), upright(10)))
-                time.sleep(1 / 60)
-
-        ws.text({"c": "hello", "v": 1, "ua": "phone_ws.py"})
-        pump(3.0)
+        pg = Page(ws)
+        ws.text({"c": "hello", "v": 1, "ua": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 Version/17.4 Mobile/15E148 Safari/604.1"})
+        check(pg.wait_status(lambda s: s.get("ctx") == "menu", 120), "status in the menu: ctx menu (the companion screen), pc '%s'" % ((pg.status or {}).get("pc")))
+        session = pg.session
         check(bool(session), "session key issued")
-        check(bool(got_status) and got_status.get("flow") == "paired" and got_status.get("app") == "home",
-              "status: paired, home screen (%s / %s)" % ((got_status or {}).get("flow"), (got_status or {}).get("app")))
+        check(code == 200 and http_get(host, port, "/ping?s=" + urllib.parse.quote(session or ""))[0] == 200, "/ping with the session: 200")
+        m = wait_log(a.log, r"phone_card: card=connected[^\n]*", 600)
+        check(bool(m) and 'device="iPhone \xc2\xb7 Safari"'.encode("latin-1").decode("utf-8") in m.group(0) and "ctx=menu" in m.group(0), "card: Connected (iPhone \u00b7 Safari) in the menu")
+        check(bool(wait_log(a.log, r"mm_dump: [^\n]*phone 'Connected \(iPhone", 300)), "the main menu footer shows the phone status")
+        check(bool(wait_log(a.log, r"phone_status: flow=paired[^\n]*portal=0 screen=mainmenu", 300)), "the portal closed by itself after Connected")
+        # ---- the match
+        check(pg.wait_status(lambda s: s.get("ctx") == "match", 900), "entering the match: the page's ctx becomes match")
+        m = wait_log(a.log, r"lobby: [^\n]*\n\s*#\d+ [^\n]* phone", 600)
+        check(bool(m), "the lobby member list carries the phone flag")
+        check(pg.wait_status(lambda s: s.get("holding") is True, 900), "the phone comes out in the match")
+        check(pg.status.get("flow") == "paired" and pg.status.get("app") == "home", "equip with the device: paired, home (%s / %s)" % (pg.status.get("flow"), pg.status.get("app")))
         ws.text({"c": "app", "v": "camera"})
-        pump(6.0)
-        check(frames > 0, "camera app: live frames streamed to the page (%d)" % frames)
-        check(bool(got_status) and got_status.get("driven") is True, "orientation samples drive the in-game phone")
+        pg.pump(8.0)
+        check(pg.frames > 0, "camera app: live frames streamed to the page (%d)" % pg.frames)
+        check(bool(pg.status) and pg.status.get("driven") is True, "orientation samples drive the in-game phone")
         ws.text({"c": "shutter"})
         t0 = time.time()
-        while time.time() - t0 < 30 and not media:
-            pump(0.5)
-        check(bool(media) and media.get("kind") == "photo", "photo taken from the page (media message)")
-        check(photo_blob > 10000, "photo JPEG pushed for save-to-phone (%d bytes)" % photo_blob)
+        while time.time() - t0 < 120 and not pg.media:
+            pg.pump(0.5)
+        check(bool(pg.media) and pg.media.get("kind") == "photo", "photo taken from the page (media message)")
+        check(pg.photo_blob > 10000, "photo JPEG pushed for save-to-phone (%d bytes)" % pg.photo_blob)
         ws.text({"c": "app", "v": "gallery"})
         ws.text({"c": "gallery"})
-        pump(3.0)
-        listed = bool(gallery) and media and gallery[0].get("id") == media.get("id")
+        pg.pump(4.0)
+        listed = bool(pg.gallery) and pg.media and pg.gallery[0].get("id") == pg.media.get("id")
         check(listed, "gallery lists the new photo first")
         if listed:
-            code, hdrs, body = http_get(host, port, gallery[0]["url"] + "?s=" + urllib.parse.quote(session))
+            code, hdrs, body = http_get(host, port, pg.gallery[0]["url"] + "?s=" + urllib.parse.quote(session))
             check(code == 200 and hdrs.get("content-type") == "image/jpeg" and body[:2] == b"\xff\xd8", "photo downloads with the session")
-        pump(1.0)
-        ws.close()
-        m = wait_log(a.log, r"phone_wait: lost (reached|TIMEOUT)", 120)
-        check(bool(m) and m.group(1) == "reached", "device disconnect -> lost")
-        game.wait(180)
+        # ---- the device drops mid-match, then the page resumes
+        ws.s.close()
+        m = wait_log(a.log, r"phone_wait: local (reached|TIMEOUT)", 600)
+        check(bool(m) and m.group(1) == "reached", "device dropped: the in-game phone")
+        check(bool(wait_log(a.log, r"Phone disconnected \S+ using in-game phone", 30)), "toast: Phone disconnected - using in-game phone")
+        time.sleep(3)
+        check(http_get(host, port, "/ping?s=" + urllib.parse.quote(session))[0] == 200, "/ping after the drop: the session is still good")
+        ws = Ws(host, port, "/ws?s=" + urllib.parse.quote(session))
+        check(ws.ok, "the page resumes with its session key")
+        pg = Page(ws)
+        ws.text({"c": "hello", "v": 1, "ua": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 Version/17.4 Mobile/15E148 Safari/604.1"})
+        check(pg.wait_status(lambda s: s.get("flow") == "paired", 300), "resumed: real-phone mode again")
+        while game.poll() is None:
+            pg.pump(0.5)
         st = statuses(a.log)
+        match = [s for s in st if s.get("raised") == "1" or s.get("app") in ("camera", "gallery")]
+        check(bool(match) and all(s.get("screen") != "phone" for s in match[:2]), "the in-match equip never opened the portal")
         paired = [s for s in st if s.get("flow") == "paired"]
-        check(bool(paired) and all(s.get("panel") == "0" for s in paired), "paired: the HUD panel is removed")
+        check(bool(paired) and all(s.get("panel") == "0" for s in paired), "paired: no HUD panel")
         check(any(s.get("driven") == "1" for s in paired), "paired: driven by the device orientation")
         check(any(s.get("app") == "camera" for s in paired) and any(s.get("app") == "gallery" for s in paired), "the in-game screen mirrors the page's app")
-        last = st[-1] if st else {}
-        check(last.get("flow") == "lost" and last.get("app") == "portal" and last.get("panel") == "1", "after the disconnect: panel back on the portal (Reconnect)")
+        local = [s for s in st if s.get("flow") == "local"]
+        check(bool(local) and local[0].get("panel") == "1" and local[0].get("reason") == '"Phone disconnected"', "after the drop: the HUD panel is back")
+        check(any(s.get("screen") == "phone" and s.get("portal") == "1" for s in st[-3:]), "the pause menu's card opens the portal")
+        check(st and st[-1].get("portal") == "0" and st[-1].get("flow") == "paired", "portal closed, still paired")
+        check(os.path.exists("phone_ws_pause.png"), "screenshot of the pause menu card")
+    finally:
+        if game.poll() is None:
+            game.kill()
+    if not session:
+        print("phone_ws: " + ("PASS" if not fails else "%d FAILED" % fails))
+        return
+    # ---- the next launch: the stored device resumes (the page left open), then Forget device
+    game = run_game(a, "phone_ws_relaunch.cfg", log2)
+    try:
+        m = wait_log(log2, r"phone: waiting for the stored device \(([^)]*)\)", 600)
+        check(bool(m) and m.group(1).startswith("iPhone"), "relaunch: the stored device is restored (%s)" % (m.group(1) if m else None))
+        ws = None
+        t0 = time.time()
+        while time.time() - t0 < 120:
+            try:
+                ws = Ws("127.0.0.1" if host == "localhost" else host, port, "/ws?s=" + urllib.parse.quote(session))
+                if ws.ok:
+                    break
+            except OSError:
+                pass
+            time.sleep(1)
+        check(bool(ws) and ws.ok, "relaunch: the page reconnects with its stored key (no new code)")
+        if ws and ws.ok:
+            pg = Page(ws)
+            ws.text({"c": "hello", "v": 1, "ua": "phone_ws.py"})
+            while game.poll() is None and pg.close_code is None:
+                pg.pump(0.5, orient=False)
+            check(pg.close_code == 4001, "Forget device closes the page with 4001 (%s)" % pg.close_code)
+        game.wait(600)
+        cd = cards(log2)
+        check(any(c.get("card") == "connected" and c.get("stored") == "1" for c in cd), "relaunch: card Connected, stored")
+        check(bool(cd) and cd[-1].get("card") == "not_connected" and cd[-1].get("stored") == "0", "Forget device: not connected, nothing stored")
     finally:
         if game.poll() is None:
             game.kill()

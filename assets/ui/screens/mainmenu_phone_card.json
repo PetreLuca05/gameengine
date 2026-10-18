@@ -1,0 +1,14 @@
+{
+  "_doc": "Phone card (docs/PHONE.md 'Phone flow'): main menu Player tab and the pause menu. Solved inside the card's padded rect: head (glyph + title), status, detail text, two actions.",
+  "nodes": [
+    { "id": "root", "dir": "column", "align": "stretch", "gap": "@mm_gap" },
+    { "id": "head", "parent": "root", "h": "@ph_head_h", "dir": "row", "align": "stretch", "gap": "@mm_gap" },
+    { "id": "glyph", "parent": "head", "w": "@ph_glyph" },
+    { "id": "title", "parent": "head", "flex": 1 },
+    { "id": "status", "parent": "root", "h": "@mm_row_h" },
+    { "id": "detail", "parent": "root", "flex": 1 },
+    { "id": "actions", "parent": "root", "h": "@mm_button_h", "dir": "row", "align": "stretch", "gap": "@mm_gap" },
+    { "id": "primary", "parent": "actions", "flex": 1 },
+    { "id": "secondary", "parent": "actions", "flex": 1 }
+  ]
+}

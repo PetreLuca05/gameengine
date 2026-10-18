@@ -17,6 +17,7 @@
     { "id": "spacer", "parent": "stack", "h": 14 },
     { "id": "quit", "parent": "stack", "h": 34, "label": "Quit to desktop", "action": "quit" },
     { "id": "brand", "parent": "root", "anchor": "bottom_right", "w": 460, "h": 110 },
+    { "id": "phone", "parent": "root", "anchor": "top_right", "w": 380, "h": 200 },
     { "id": "modal", "parent": "root", "anchor": "center", "w_pct": 0.6, "h_pct": 0.8, "min_w": 640, "max_w": 1160, "max_h": 860, "avoid": "stack" },
     { "id": "dialog", "parent": "root", "anchor": "center", "w": 480, "h": 210 }
   ]

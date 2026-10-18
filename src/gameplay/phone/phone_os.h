@@ -1,7 +1,8 @@
 // Phone OS (docs/PHONE.md "Phone flow"): pure, unit tested (tests/test_phone.c).
-//   * the pairing flow: equip -> Connect portal -> paired device / in-game phone (decline,
-//     timeout, no server) -> lost device (portal + Reconnect);
-//   * the apps (portal, home, camera, gallery) and the gallery viewer;
+//   * the session's pairing: the Connect portal (a menu modal: main menu, pause menu), the mode
+//     (unset / in-game phone / device), the Phone card's state, the device's name;
+//   * the held phone: the in-game phone (HUD panel) or the paired device; equipping never pairs;
+//   * the apps (home, camera, gallery) and the gallery viewer;
 //   * the screen layout in design px (640 x 1136 portrait), shared by the CPU canvas (phone_ui.c)
 //     and the hit tests of the HUD panel;
 //   * assets/phone/apps.json + theme.json, the HUD panel rectangle;
@@ -14,20 +15,34 @@
 #define PHONE_DESIGN_W 640.0f
 #define PHONE_DESIGN_H 1136.0f
 
-// Replicated (UserCmd.phone_app, the character state): keep the values stable.
+// Replicated (UserCmd.phone_app, the character state): keep the values stable. PAPP_PORTAL is no
+// longer on the phone's screen (the portal is a menu modal) but keeps its value.
 typedef enum PhoneApp { PAPP_OFF, PAPP_PORTAL, PAPP_HOME, PAPP_CAMERA, PAPP_GALLERY, PAPP_COUNT } PhoneApp;
+// What drives the phone: IDLE (put away, no device), PAIRING (the portal waits for a device),
+// LOCAL (the in-game phone, HUD panel), PAIRED (a device is connected). LOST is kept for its name.
 typedef enum PhoneFlow { PFLOW_IDLE, PFLOW_PAIRING, PFLOW_LOCAL, PFLOW_PAIRED, PFLOW_LOST } PhoneFlow;
+// The session's choice (per run, per client): unset until the portal is answered.
+typedef enum PhoneMode { PMODE_UNSET, PMODE_INGAME, PMODE_DEVICE } PhoneMode;
+// The Phone card (main menu Player tab, pause menu, the footer glyph).
+typedef enum PhoneCard { PCARD_NOT_CONNECTED, PCARD_WAITING, PCARD_CONNECTED, PCARD_INGAME } PhoneCard;
 const char *phone_app_name(int app);
 int phone_app_from_name(const char *s);   // -1 unknown
 const char *phone_flow_name(int flow);
+const char *phone_mode_name(int mode);
+int phone_mode_from_name(const char *s);  // -1 unknown
+const char *phone_card_name(int card);
 
 typedef struct PhoneOs {
-    PhoneFlow flow;
-    PhoneApp app;              // the app on the screen (PORTAL while pairing / lost, OFF unequipped)
-    PhoneApp last_app;         // where the phone returns after the portal / re-equip (HOME)
+    PhoneFlow flow;            // derived (phone_os.c refresh): device > portal > equipped
+    PhoneApp app;              // the app on the screen (OFF unequipped)
+    PhoneApp last_app;         // where the phone opens (HOME at first)
     bool equipped;
-    float pair_t;              // seconds on the portal while pairing (timeout)
-    char reason[64];           // why the phone fell back to the in-game phone ("" = declined)
+    PhoneMode mode;
+    bool device;               // a companion page is connected
+    bool portal;               // the Connect portal is open
+    float portal_t;            // seconds the portal has been open
+    float portal_connected_t;  // portal_t when a device connected while it was open (-1 none)
+    char reason[64];           // the last change ("Phone disconnected", a server error ...)
     int viewer;                // gallery: -1 the grid, else the open item
     float viewer_zoom;         // 1..4
     int scroll;                // gallery: first visible row
@@ -35,24 +50,41 @@ typedef struct PhoneOs {
 } PhoneOs;
 
 void phone_os_init(PhoneOs *os);
-// Equipped (hotbar, wheel, X). Returns true when the caller must start the server and issue a
-// pairing token (the portal is up). A paired / declined phone skips the portal (per session).
-bool phone_os_equip(PhoneOs *os, bool auto_pair, bool device_connected);
+// Equipped (hotbar, wheel, X): the last app; a connected device drives it, else the in-game phone.
+// Never opens the portal.
+void phone_os_equip(PhoneOs *os);
 void phone_os_unequip(PhoneOs *os);
-void phone_os_server_failed(PhoneOs *os, const char *why);   // pairing -> the in-game phone
-void phone_os_tick(PhoneOs *os, float dt, float pair_timeout, float drain_per_s);
-void phone_os_connected(PhoneOs *os);
-void phone_os_disconnected(PhoneOs *os);    // paired -> lost: the portal with Reconnect
-void phone_os_decline(PhoneOs *os);         // "Use in-game phone instead"
-void phone_os_cancel(PhoneOs *os);          // "Cancel": pairing stops (the caller lowers the phone)
-bool phone_os_reconnect(PhoneOs *os);       // portal again; true: issue a new token
-void phone_os_open(PhoneOs *os, PhoneApp app);   // home / camera / gallery (not while on the portal)
+// The Connect portal. open: true when the caller must issue a pairing code (no device yet).
+bool phone_os_portal_open(PhoneOs *os);
+void phone_os_portal_close(PhoneOs *os);
+void phone_os_server_failed(PhoneOs *os, const char *why);   // the portal shows why
+void phone_os_decline(PhoneOs *os);         // "Use in-game phone": mode INGAME, the portal closes
+void phone_os_connected(PhoneOs *os);       // a device connected (or resumed): mode DEVICE
+// The device's socket closed (network, page closed). True when the held phone falls back to the
+// in-game phone (HUD panel back: the caller shows the toast). The mode stays DEVICE: a page that
+// comes back restores real-phone mode silently.
+bool phone_os_disconnected(PhoneOs *os);
+void phone_os_disconnect(PhoneOs *os);      // the card's Disconnect: mode INGAME
+void phone_os_forget(PhoneOs *os);          // Forget device: mode UNSET
+void phone_os_tick(PhoneOs *os, float dt, float drain_per_s);
+void phone_os_open(PhoneOs *os, PhoneApp app);   // home / camera / gallery
 bool phone_os_back(PhoneOs *os);            // viewer -> grid -> home; false: nothing to go back to
-bool phone_os_panel(const PhoneOs *os);     // the HUD panel shows: equipped, no device paired
+bool phone_os_panel(const PhoneOs *os);     // the HUD panel shows: equipped, no device
 bool phone_os_ui_only(PhoneApp app);        // the screen is UI only (no lens view)
+PhoneCard phone_os_card(const PhoneOs *os);
+// A short device name from the page's user agent (and the model, when the browser tells it):
+// "iPhone", "iPad", "Pixel 7", "Android phone", ... + " · Safari" / " · Chrome" ...
+void phone_device_name(const char *ua, const char *model, char *out, size_t n);
+
+// The remembered device (<pref dir>/phone/device.json): its session key, so the same page
+// reconnects on the next launch. Times are Unix seconds; expires 0 = never.
+typedef struct PhoneDeviceStore { char session[32]; char name[64]; i64 paired, expires; } PhoneDeviceStore;
+char *phone_device_store_write(const PhoneDeviceStore *d);                    // JSON (malloc'd)
+bool phone_device_store_read(const char *json, PhoneDeviceStore *out, i64 now);   // false: malformed, no key or expired
 
 // ------------------------------------------------------------------ layout (design px)
 typedef struct PhoneRect { float x, y, w, h; } PhoneRect;
+// PB_DECLINE / CANCEL / RECONNECT: the old in-panel portal (no longer laid out, ids kept for phone_button).
 typedef enum PhoneButton {
     PB_NONE, PB_DECLINE, PB_CANCEL, PB_RECONNECT, PB_CONNECT, PB_APP, PB_HOME, PB_BACK,
     PB_SHUTTER, PB_RECORD, PB_THUMB, PB_FLIP, PB_ZOOM_CHIP, PB_ZOOM_SLIDER, PB_CELL, PB_PREV, PB_NEXT, PB_DELETE, PB_COUNT

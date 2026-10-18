@@ -69,6 +69,11 @@
   .app i { width: 64px; height: 64px; border-radius: 16px; background-repeat: no-repeat; display: block; }
   .app:active i { transform: scale(.93); filter: brightness(.9); }
   #banner { margin-top: auto; margin-bottom: 26px; color: var(--text-dim); text-align: center; font-size: 14px; display: none; }
+  /* menu companion screen: the game is in its menus (apps unlock in a match) */
+  #pcbar { margin-top: 10px; padding: 6px 14px; border-radius: 999px; background: var(--surface); color: var(--text-dim); font-size: 13px; display: none; }
+  #pcbar b { color: var(--ok); font-weight: 600; }
+  .app.off { opacity: .38; }
+  .app.off:active i { transform: none; filter: none; }
   /* camera */
   #feed { position: fixed; inset: 0; width: 100vw; height: 100vh; height: 100dvh; display: block; background: #000; }
   .bar { position: fixed; left: 0; right: 0; display: flex; align-items: center; padding: 0 14px; pointer-events: none; z-index: 2; }
@@ -145,6 +150,7 @@
   <div id="hclock">--:--</div>
   <div id="hday">Day 1</div>
   <div id="hwx"><i class="glyph" id="hglyph"></i><span id="hwxl">Clear</span></div>
+  <div id="pcbar"><b>●</b> <span id="pcname">Connected</span></div>
   <div id="apps"></div>
   <div id="banner">Take the phone out in the game (X) to use the camera.</div>
 </section>
@@ -189,7 +195,7 @@
   <p id="info"></p>
   <button id="calib" class="btn">Calibrate (hold upright, facing forward)</button>
   <div class="row" style="margin-top:10px"><button id="filter" class="btn ghost">Filter: none</button><button id="close" class="btn ghost">Back</button></div>
-  <button id="unpair" class="btn danger">Unpair this phone</button>
+  <button id="unpair" class="btn danger">Forget this phone</button>
   <p style="margin-top:18px">Motion sensors need this page over HTTPS. If you skipped the certificate warning, the connection is still encrypted, with a certificate made by your game (see docs/PHONE.md).</p>
 </div>
 <div id="toast"></div>
@@ -200,7 +206,11 @@ const PROTO = 1, MSG_ORIENT = 1, MSG_FRAME = 16, MSG_PHOTO = 17;
 const $ = (id) => document.getElementById(id);
 const qs = new URLSearchParams(location.search);
 let token = qs.get('t') || '';
-let session = sessionStorage.getItem('dg_session') || '';
+// The session key survives the page and the game: localStorage, so a page left open (or opened
+// again) reconnects on the next launch (the game remembers the device: docs/PHONE.md).
+function store(k, v) { try { if (v) { localStorage.setItem(k, v); sessionStorage.setItem(k, v); } else { localStorage.removeItem(k); sessionStorage.removeItem(k); } } catch {} }
+function stored(k) { try { return localStorage.getItem(k) || sessionStorage.getItem(k) || ''; } catch { return ''; } }
+let session = stored('dg_session');
 let ws = null, wsOpen = false, retry = 0, closedForGood = false;
 let status = {}, zoom = 1, maxZoom = 8, gallery = [], lastPhoto = null;
 let pingRtt = 0, framesShown = 0, fpsShown = 0, lastFpsT = performance.now();
@@ -231,7 +241,10 @@ const appList = (APPS && APPS.apps) || [{ id: 'camera', label: 'Camera', icon: '
     const b = document.createElement('button'); b.className = 'app'; b.dataset.app = a.app || ''; b.id = 'app-' + a.id;
     const i = document.createElement('i'); tileStyle(i, a.icon, false); if (!ICONS) i.style.background = 'var(--surface-hi)';
     b.appendChild(i); b.appendChild(document.createTextNode(a.label));
-    b.addEventListener('click', () => { if (a.app === 'camera' || a.app === 'gallery') showApp(a.app); else toast(a.label + ': coming soon'); });
+    b.addEventListener('click', () => {
+      if (inMenu() && (a.app === 'camera' || a.app === 'gallery')) { toast(a.label + ': available in a match'); return; }
+      if (a.app === 'camera' || a.app === 'gallery') showApp(a.app); else toast(a.label + ': coming soon');
+    });
     g.appendChild(b);
   }
 })();
@@ -266,9 +279,12 @@ function qaxis(x, y, z, deg) { const h = deg * Math.PI / 360, s = Math.sin(h); r
 function deviceQuat(a, b, g) { return qmul(qmul(qaxis(0, 0, 1, a), qaxis(1, 0, 0, b)), qaxis(0, 1, 0, g)); }
 
 // ------------------------------------------------------------------ apps (mirrors the in-game screen)
+// The game's context: its menus (the companion screen: Camera / Gallery greyed out) or a match.
+function inMenu() { return status.ctx === 'menu'; }
 function showApp(name, fromGame) {
   if (!started && name !== 'portal') return;
   if (name === 'off') name = 'home';
+  if (inMenu() && (name === 'camera' || name === 'gallery')) name = 'home';
   if (!['portal', 'home', 'camera', 'gallery'].includes(name)) return;
   const prev = app;
   app = name;
@@ -316,21 +332,45 @@ function portal(state) {
 function connect() {
   if (closedForGood) return;
   const q = session ? 's=' + encodeURIComponent(session) : 't=' + encodeURIComponent(token);
-  if (!session && !token) { showFatal('No pairing code', 'Scan the QR code on the Connect portal in the game (take the phone out).'); return; }
+  if (!session && !token) { showFatal('No pairing code', 'Scan the QR code on the Connect portal in the game (main menu › Player › Phone, or the pause menu).'); return; }
   ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws?' + q);
   ws.binaryType = 'arraybuffer';
-  ws.onopen = () => { wsOpen = true; retry = 0; setLink(true); portal('connected'); send({ c: 'hello', v: PROTO, ua: navigator.userAgent.slice(0, 90) }); };
+  ws.onopen = () => {
+    wsOpen = true; retry = 0; setLink(true); portal('connected');
+    const hello = { c: 'hello', v: PROTO, ua: navigator.userAgent.slice(0, 200) };
+    // The device's model (Android Chrome tells it; the user agent hides it), for "Connected (Pixel 7)".
+    const uad = navigator.userAgentData;
+    if (uad && uad.getHighEntropyValues) uad.getHighEntropyValues(['model']).then((v) => { if (v && v.model) hello.model = String(v.model).slice(0, 40); send(hello); }).catch(() => send(hello));
+    else send(hello);
+  };
   ws.onmessage = (e) => (typeof e.data === 'string' ? onText(e.data) : onBinary(e.data));
   ws.onclose = (e) => {
     wsOpen = false; setLink(false);
-    if (e.code === 4001) { forget(); showFatal('Unpaired', 'This phone was unpaired. Scan a new QR code in the game to pair again.'); return; }
+    if (e.code === 4001) { forget(); showFatal('Forgotten', 'The game forgot this phone. Scan a new QR code in the game to pair again.'); return; }
     if (e.code === 4000) { closedForGood = true; showFatal('Paired elsewhere', 'Another phone (or tab) took over. Reload to take it back.'); return; }
+    if (e.code === 4002) { showDisconnected(); return; }
     // A pairing code works once: after a failed first attempt only the session can resume.
-    if (!session && token) { showFatal('Pairing failed', 'The code expired or was already used. Press Reconnect on the Connect portal in the game for a new QR code.'); return; }
-    setTimeout(connect, Math.min(5000, 400 * Math.pow(1.6, retry++)));
+    if (!session && token) { showFatal('Pairing failed', 'The code expired or was already used. Open the Connect portal in the game again for a new QR code.'); return; }
+    probe();
   };
 }
-function forget() { session = ''; token = ''; sessionStorage.removeItem('dg_session'); }
+// After a lost connection: is the game up, and does it still know this phone? /ping answers 200
+// (reconnect), 403 (the session ended: scan again) or nothing (the game is not running: keep trying).
+function probe() {
+  const again = () => setTimeout(probe, Math.min(5000, 400 * Math.pow(1.6, retry++)));
+  if (!session) { again(); return; }
+  fetch('/ping?s=' + encodeURIComponent(session), { cache: 'no-store' }).then((r) => {
+    if (r.status === 403) { forget(); showFatal('Pairing ended', 'The game no longer knows this phone. Scan the QR code on the Connect portal in the game.'); return; }
+    if (r.ok) { connect(); return; }
+    again();
+  }).catch(() => { if (!started) $('ptitle').textContent = 'Waiting for the game…'; again(); });
+}
+// The game's Disconnect (Phone card): no automatic retry, one tap reconnects.
+function showDisconnected() {
+  showFatal('Disconnected', 'The game switched to its in-game phone. Tap Reconnect to use this phone again.');
+  const g = $('go'); g.textContent = 'Reconnect'; g.style.display = 'block'; g.dataset.reconnect = '1';
+}
+function forget() { session = ''; token = ''; store('dg_session', ''); }
 function setLink(on) {
   const l = $('link');
   l.textContent = on ? (status.driven ? 'Linked · gyro' : 'Linked') : 'Reconnecting…';
@@ -350,7 +390,7 @@ function onText(s) {
   let m; try { m = JSON.parse(s); } catch { return; }
   switch (m.t) {
     case 'session':
-      session = m.s; sessionStorage.setItem('dg_session', session);
+      session = m.s; store('dg_session', session);
       token = '';
       history.replaceState(null, '', location.pathname);   // the one-time code leaves the address bar
       break;
@@ -377,7 +417,14 @@ function onStatus(m) {
   $('hwxl').textContent = WX[m.weather] || m.weather || '';
   tileStyle($('hglyph'), weatherTile(m.weather, !!m.night), true);
   const bat = Math.round((m.battery || 0) * 100); $('spct').textContent = bat + '%'; $('sbat').style.width = bat + '%';
-  $('banner').style.display = m.holding ? 'none' : 'block';
+  // Menu companion screen: "Connected to <PC>", Camera / Gallery greyed until a match.
+  const menu = inMenu();
+  $('pcbar').style.display = 'block';
+  $('pcname').textContent = 'Connected to ' + (m.pc || 'your PC') + (menu ? ' · in the menus' : '');
+  for (const b of document.querySelectorAll('.app')) b.classList.toggle('off', menu && (b.dataset.app === 'camera' || b.dataset.app === 'gallery'));
+  $('banner').textContent = menu ? 'Camera and Gallery unlock in a match.' : 'Take the phone out in the game (X) to use the camera.';
+  $('banner').style.display = menu || !m.holding ? 'block' : 'none';
+  if (menu && started && (app === 'camera' || app === 'gallery')) showApp('home', true);
   // The in-game phone's app (keys / mouse in the game): follow it unless this page just changed it.
   if (started && m.app && m.app !== app && performance.now() - appSetT > 900) showApp(m.app, true);
   $('info').innerHTML = (m.holding ? 'Phone out · ' + (m.app || '') : 'Take the phone out in the game (X)') +
@@ -492,7 +539,7 @@ $('flip').addEventListener('click', () => send({ c: 'camera', v: status.front ? 
 $('menu').addEventListener('click', () => $('sheet').classList.add('show'));
 $('close').addEventListener('click', () => $('sheet').classList.remove('show'));
 $('calib').addEventListener('click', () => { send({ c: 'calibrate' }); toast('Calibrated'); $('sheet').classList.remove('show'); });
-$('unpair').addEventListener('click', () => { if (confirm('Unpair this phone?')) { send({ c: 'unpair' }); forget(); closedForGood = true; $('sheet').classList.remove('show'); showFatal('Unpaired', 'Scan a new QR code in the game to pair again.'); } });
+$('unpair').addEventListener('click', () => { if (confirm('Forget this phone? The game will not reconnect it any more.')) { send({ c: 'unpair' }); forget(); closedForGood = true; $('sheet').classList.remove('show'); showFatal('Forgotten', 'Scan a new QR code in the game to pair again.'); } });
 const FILTERS = ['none', 'vivid', 'warm', 'cool', 'mono', 'noir'];
 $('filter').addEventListener('click', () => { const i = (FILTERS.indexOf(status.filter || 'none') + 1) % FILTERS.length; send({ c: 'filter', v: FILTERS[i] }); $('filter').textContent = 'Filter: ' + FILTERS[i]; });
 $('thumb').addEventListener('click', () => { showApp('gallery'); if (gallery.length) openViewer(0); });
@@ -575,6 +622,10 @@ if (!window.isSecureContext) { const s = $('secure'); s.style.display = 'block';
 if (!token && session) $('pmsg').textContent = 'Reconnecting to your game…';
 $('homebar').style.display = 'none';
 $('go').addEventListener('click', async () => {
+  if ($('go').dataset.reconnect) {   // after the game's Disconnect
+    delete $('go').dataset.reconnect; $('go').textContent = 'Allow motion & continue'; $('go').style.display = 'none';
+    portal('connecting'); retry = 0; connect(); return;
+  }
   started = true;
   $('go').style.display = 'none';
   showApp(status.app && status.app !== 'portal' && status.app !== 'off' ? status.app : 'home', true);

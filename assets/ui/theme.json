@@ -67,6 +67,7 @@
     "mm_info_w": 380, "mm_cat_w": 190, "mm_grid_w": 400, "mm_preview_bar_h": 44, "mm_list_w": 440, "mm_map_row_h": 72,
     "mm_settings_min_w": 640, "mm_settings_max_w": 1160, "mm_credits_w": 820,
     "mm_avatar": 40, "mm_avatar_sm": 26, "mm_splash_logo": 64, "mm_splash_time": 1.6,
+    "ph_card_h": 200, "ph_head_h": 30, "ph_glyph": 24, "ph_dialog_w": 780, "ph_dialog_h": 450, "ph_qr": 300, "ph_url_h": 44, "ph_button_w": 190,
     "lb_side_w": 340, "lb_chat_w": 400, "lb_bar_h": 46, "lb_button_w": 170, "lb_player_h": 46, "lb_input_h": 36, "lb_icon": 14,
     "ld_w": 900, "ld_bar_h": 4, "ld_tip_h": 40,
     "chat_y": -150, "chat_w": 520, "chat_h": 260, "chat_fade": 8,

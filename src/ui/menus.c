@@ -58,7 +58,7 @@ typedef struct Menus {
 #define M (g_engine.menus)
 #define TH (gui_theme())
 
-static const char *k_names[SCR_COUNT] = { "none", "pause", "settings", "multiplayer", "inventory", "bench", "confirm", "mainmenu", "chat", "lobby", "commands" };
+static const char *k_names[SCR_COUNT] = { "none", "pause", "settings", "multiplayer", "inventory", "bench", "confirm", "mainmenu", "chat", "lobby", "commands", "phone" };
 const char *screen_name(int id) { return id >= 0 && id < SCR_COUNT ? k_names[id] : "?"; }
 
 static bool load_layout(void) {
@@ -97,6 +97,7 @@ static void on_close(int id) {
     }
     if (id == SCR_BENCH && g) g->bench_open = false;
     if (id == SCR_SETTINGS) config_save(video_config_path());
+    if (id == SCR_PHONE) phone_portal_hide();
 }
 
 void screens_push(int id) {
@@ -300,6 +301,14 @@ static void draw_pause(bool top) {
     }
     gui_pop_input();
     draw_brand();
+    // The Phone card (docs/PHONE.md "Phone flow"): pair, fix or drop the phone mid-game.
+    if (sub == SCR_NONE && screens_top() == SCR_PAUSE) {
+        gd_alpha_push(gui_ease_out(saturate(t / fmaxf(0.01f, TH->menu_in * 2))));
+        gui_push_input(top);
+        mainmenu_phone_card(node_rect("phone"));
+        gui_pop_input();
+        gd_alpha_pop();
+    }
 }
 
 static void draw_confirm(bool top) {
@@ -406,6 +415,11 @@ bool menus_wants_mouse(void) {
 }
 
 bool menus_open(void) { return M && M->depth > 0; }
+
+void menus_open_phone_portal(void) {
+    if (screens_top() != SCR_PHONE) screens_push(SCR_PHONE);
+    phone_portal_show();
+}
 bool menus_dev_tools_open(void) {
     return vfx_editor_open() || holdpoint_editor_open() || fire_tuner_open() || audio_editor_open() || daynight_editor_open() || flesh_range_open() || wind_game_panel_open() || scene_has_panels();   // the main menu scene draws no panels: the game UI keeps its input
 }
@@ -474,6 +488,9 @@ void menus_draw(void) {
             break;
         }
         case SCR_CONFIRM: draw_confirm(is_top); break;
+        case SCR_PHONE:
+            if (mainmenu_phone_portal_draw(is_top) && is_top) screens_pop();
+            break;
         case SCR_MAINMENU: mainmenu_draw(is_top); break;
         case SCR_CHAT:
             if (mainmenu_chat_draw(is_top) && is_top) screens_pop();

@@ -306,6 +306,13 @@ LobbyOutcome lobby_host_intent(Lobby *L, u8 from, const LobbyIntent *in, double 
         if (L->state == LS_COUNTDOWN && lobby_all_ready(L)) o.start = true;
         break;
     }
+    case LI_PHONE: {
+        bool v = in->a != 0;
+        if (m->phone == v) { o.result = LR_IGNORED; break; }
+        m->phone = v;
+        o.changed = true;
+        break;
+    }
     case LI_CHAT: {
         char text[LOBBY_CHAT_MAX + 1];
         dg_strcpy(text, sizeof(text), in->text);
@@ -544,7 +551,7 @@ void lobby_write_snapshot(Writer *w, const Lobby *L, u8 to_id) {
         const LobbyMember *m = &L->members[i];
         if (!m->active) continue;
         w_u8(w, m->id);
-        w_u8(w, (u8)((m->ready ? 1 : 0) | (m->host ? 2 : 0) | (m->talking ? 4 : 0)));
+        w_u8(w, (u8)((m->ready ? 1 : 0) | (m->host ? 2 : 0) | (m->talking ? 4 : 0) | (m->phone ? 8 : 0)));
         w_u32(w, m->join_order);
         w_str(w, m->name);
         w_u32(w, (u32)(m->steam_id & 0xFFFFFFFFu));
@@ -574,6 +581,7 @@ bool lobby_read_snapshot(Reader *r, Lobby *L) {
         m->ready = (f & 1) != 0;
         m->host = (f & 2) != 0;
         m->talking = (f & 4) != 0;
+        m->phone = (f & 8) != 0;
         m->join_order = r_u32(r);
         r_str(r, m->name, sizeof(m->name));
         u32 lo = r_u32(r), hi = r_u32(r);

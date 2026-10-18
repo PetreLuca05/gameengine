@@ -334,7 +334,7 @@ static void serve_media(HwsServer *s, Conn *c, const HwsRequest *rq) {
     char sess[64] = { 0 }, dl[8] = { 0 };
     hws_query_param(rq->query, rq->query_len, "s", sess, sizeof(sess));
     hws_query_param(rq->query, rq->query_len, "dl", dl, sizeof(dl));
-    int owner = hws_auth_session(&s->auth, sess);
+    int owner = hws_auth_session(&s->auth, sess, now_ms(), false);
     if (owner < 0) {
         hws_rate_fail(&s->auth, c->ip, now_ms());
         s->stats.auth_failures++;
@@ -371,7 +371,7 @@ static void ws_accept(HwsServer *s, Conn *c, const HwsRequest *rq) {
     bool resumed = false;
     char session[HWS_KEY_CHARS + 1] = { 0 };
     const char *why = "missing token";
-    if (has_s && (owner = hws_auth_session(&s->auth, sess)) >= 0) {
+    if (has_s && (owner = hws_auth_session(&s->auth, sess, now, true)) >= 0) {
         resumed = true;
         memcpy(session, s->auth.owner[owner].session, sizeof(session));
     } else if (has_t) {
@@ -460,6 +460,20 @@ static void handle_request(HwsServer *s, Conn *c, const HwsRequest *rq) {
         return;
     }
     if (rq->path_len > 7 && memcmp(rq->path, "/media/", 7) == 0) { serve_media(s, c, rq); return; }
+    if (hws_path_is(rq, "/ping")) {
+        // The page after a lost connection: 200 = the game is up and the session is still good
+        // (reconnect), 403 = the session ended (scan a new code), no answer = the game is not running.
+        char sess[64] = { 0 };
+        hws_query_param(rq->query, rq->query_len, "s", sess, sizeof(sess));
+        if (hws_auth_session(&s->auth, sess, now_ms(), false) < 0) {
+            hws_rate_fail(&s->auth, c->ip, now_ms());
+            s->stats.auth_failures++;
+            respond_text(s, c, 403, "Forbidden", "session ended");
+            return;
+        }
+        respond_text(s, c, 200, "OK", "ok");
+        return;
+    }
     if (hws_path_is(rq, "/favicon.ico")) { respond(s, c, 204, "No Content", "text/plain", NULL, 0, NULL); return; }
     respond_text(s, c, 404, "Not Found", "not found");
 }
@@ -677,6 +691,7 @@ HwsServer *hws_start(const HwsConfig *cfg, char *err, size_t err_size) {
     s->listen_fd = s->helper_fd = SOCK_BAD;
     for (int i = 0; i < MAX_CONNS; i++) s->conns[i].fd = SOCK_BAD;
     hws_auth_init(&s->auth, cfg->token_ttl_ms);
+    s->auth.session_ttl_ms = cfg->session_ttl_ms;
     s->page = (u8 *)malloc(cfg->page_len + 1);
     if (cfg->page_len) memcpy(s->page, cfg->page, cfg->page_len);
     s->media_next = 1;
@@ -777,6 +792,40 @@ void hws_unpair(HwsServer *s, int owner) {
         }
     }
     SDL_UnlockMutex(s->mu);
+}
+
+void hws_disconnect(HwsServer *s, int owner) {
+    if (!s) return;
+    SDL_LockMutex(s->mu);
+    for (int i = 0; i < MAX_CONNS; i++) {
+        Conn *c = &s->conns[i];
+        if (c->state == CS_WS && c->owner == owner) {
+            static const u8 bye[] = { 0x0f, 0xa2 };   // 4002: disconnected by the game (the session stays)
+            queue_ws(s, c, HWS_OP_CLOSE, bye, 2, false);
+            c->state = CS_DRAIN;
+            c->close_after = true;
+            s->stats.ws_open--;
+            push_event(s, HWS_EV_DISCONNECT, c, NULL, -1);
+        }
+    }
+    SDL_UnlockMutex(s->mu);
+}
+
+bool hws_restore_session(HwsServer *s, int owner, const char *session, u64 ttl_ms) {
+    if (!s) return false;
+    SDL_LockMutex(s->mu);
+    bool ok = hws_auth_restore(&s->auth, owner, session, now_ms(), ttl_ms);
+    SDL_UnlockMutex(s->mu);
+    return ok;
+}
+
+bool hws_session_key(HwsServer *s, int owner, char out[HWS_KEY_CHARS + 1]) {
+    if (!s || owner < 0 || owner >= HWS_MAX_OWNERS) return false;
+    SDL_LockMutex(s->mu);
+    bool ok = s->auth.owner[owner].paired;
+    if (ok) memcpy(out, s->auth.owner[owner].session, HWS_KEY_CHARS + 1);
+    SDL_UnlockMutex(s->mu);
+    return ok;
 }
 
 float hws_token_remaining(HwsServer *s, int owner) {

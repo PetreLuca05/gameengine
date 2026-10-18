@@ -1,8 +1,9 @@
 // End-to-end test of the phone companion page against a running game (docs/PHONE.md):
-//   pair (URL from the game log, printed when the phone is equipped) -> Connect portal "Connected"
-//   -> home screen (theme + icons injected by the game) -> Camera (live feed frames, the in-game
-//   screen follows) -> orientation drives the in-game phone -> shutter (photo + blob) -> 2 s
-//   video -> Gallery (grid, viewer, download, delete) -> unpair.
+//   pair (URL from the game log, printed when the Connect portal opens) -> the page's portal
+//   "Connected" -> home screen (theme + icons injected by the game, "Connected to <PC>") -> Camera
+//   (live feed frames, the in-game screen follows) -> orientation drives the in-game phone ->
+//   shutter (photo + blob) -> 2 s video -> Gallery (grid, viewer, download, delete) -> the game's
+//   Disconnect (the page offers Reconnect, no retry loop) -> Reconnect -> Forget this phone.
 // Uses Playwright's Chromium with synthetic DeviceOrientation events (the game's certificate is
 // self-signed: certificate errors are ignored, exactly what "visit this website" does on a phone).
 //
@@ -37,7 +38,7 @@ const lastStatus = () => {
 };
 
 const m = await waitLog(/phone_pair: open (https?:\/\/\S+)/, 240);
-check(!!m, 'equipping the phone printed a pairing URL (no key press)');
+check(!!m, 'the Connect portal printed a pairing URL');
 if (!m) process.exit(1);
 const url = m[1];
 console.log('url', url);
@@ -51,7 +52,8 @@ await page.goto(url);
 check(await page.evaluate(() => window.isSecureContext), 'secure context (HTTPS: motion sensors allowed)');
 check(await page.evaluate(() => !!window.DG_THEME && !!window.DG_APPS && String(window.DG_ICONS).startsWith('data:image/png')), 'the game injected theme, apps and icon atlas');
 // Session established: the one-time token left the address bar; the portal says Connected.
-await page.waitForFunction(() => !!sessionStorage.getItem('dg_session'), null, { timeout: 30000 });
+await page.waitForFunction(() => !!localStorage.getItem('dg_session'), null, { timeout: 30000 });
+check(true, 'session key kept in localStorage (survives the page and the game: the stored device)');
 check(!page.url().includes('t='), 'pairing token removed from the URL after pairing');
 await page.waitForFunction(() => document.getElementById('ptitle').textContent === 'Connected', null, { timeout: 10000 }).catch(() => {});
 check((await page.textContent('#ptitle')) === 'Connected', 'Connect portal: Connected');
@@ -62,6 +64,9 @@ check(await page.isVisible('#s-home'), 'home screen after the permission step');
 const bg = await page.evaluate(() => getComputedStyle(document.body).backgroundColor);
 check(bg === 'rgb(255, 255, 255)', 'light theme from assets/phone/theme.json (' + bg + ')');
 check((await page.$$('#apps .app')).length === 2, 'home grid: Camera and Gallery');
+await page.waitForFunction(() => /Connected to /.test(document.getElementById('pcname').textContent), null, { timeout: 10000 }).catch(() => {});
+check(/Connected to /.test(await page.textContent('#pcname')), 'banner: ' + (await page.textContent('#pcname')));
+check((await page.$$('#apps .app.off')).length === 0, 'in a match: the apps are enabled');
 await page.waitForFunction(() => /\d\d:\d\d/.test(document.getElementById('hclock').textContent), null, { timeout: 10000 }).catch(() => {});
 await page.screenshot({ path: shots + '/phone_page_home.png' });
 
@@ -135,19 +140,30 @@ await page.click('#vdel');
 await page.waitForFunction((n) => gallery.length === n - 1, before, { timeout: 15000 }).catch(() => {});
 check((await page.evaluate(() => gallery.length)) === before - 1 && !(await page.evaluate((id) => gallery.some((g) => g.id === id), delId)), 'delete removes the item in the game');
 
-// Unpair: the page is told, the session stops working; the game's panel comes back on the portal.
+// The game's Disconnect (Phone card): close 4002, the page offers Reconnect (no retry loop).
 await page.click('#homebar');
+await page.waitForFunction(() => document.getElementById('ptitle').textContent === 'Disconnected', null, { timeout: 180000 }).catch(() => {});
+check((await page.textContent('#ptitle')) === 'Disconnected' && (await page.isVisible('#go')) && (await page.textContent('#go')) === 'Reconnect', 'game Disconnect: the page shows Reconnect');
+await page.screenshot({ path: shots + '/phone_page_disconnected.png' });
+await page.click('#go');
+await page.waitForFunction(() => document.getElementById('ptitle').textContent === 'Connected', null, { timeout: 30000 }).catch(() => {});
+check((await page.textContent('#ptitle')) === 'Connected', 'Reconnect: connected again with the stored session');
+await page.click('#go');
+await sleep(800);
+// Forget this phone: the page is told, the session stops working; the game falls back to the in-game phone.
 await page.click('#app-camera');
 await sleep(300);
 await page.click('#menu');
 await page.click('#unpair');
 await sleep(1500);
-const sess = await page.evaluate(() => sessionStorage.getItem('dg_session'));
-check(!sess, 'unpaired: session forgotten on the page');
+const sess = await page.evaluate(() => localStorage.getItem('dg_session') || sessionStorage.getItem('dg_session'));
+check(!sess, 'forgotten: session removed on the page');
 await page.screenshot({ path: shots + '/phone_page_unpaired.png' });
 await browser.close();
-const lost = await waitLog(/phone_status: flow=lost app=portal panel=1/, 60);
-check(!!lost, 'the game: device gone -> HUD panel back on the portal');
+const lost = await waitLog(/phone_status: flow=local app=\w+ panel=1/, 120);
+check(!!lost, 'the game: device gone -> the in-game phone (HUD panel)');
+const card = await waitLog(/phone_card: card=not_connected mode=unset[^\n]*stored=0/, 60);
+check(!!card, 'the game: card Not connected, nothing stored');
 console.log('last status:', lastStatus());
 console.log(failed ? 'phone_e2e: ' + failed + ' FAILED' : 'phone_e2e: PASS');
 process.exit(failed ? 1 : 0);

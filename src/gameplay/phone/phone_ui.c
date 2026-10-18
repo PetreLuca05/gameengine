@@ -331,65 +331,6 @@ static void home_bar(PhoneState *s, Canvas *c, float W, float H, bool light) {
 
 static void hover_mark(Canvas *c, const PhoneHit *h, u32 col) { c_round(c, h->r.x, h->r.y, h->r.w, h->r.h, fminf(28.0f, h->r.h * 0.5f), col, 0); }
 
-static void button(PhoneState *s, Canvas *c, const PhoneHit *h, const char *label, int style, bool hover) {
-    // style 0 primary (accent), 1 secondary (surface), 2 plain text
-    const PhoneTheme *T = &s->theme;
-    float r = h->r.h * 0.5f;
-    u32 bg = style == 0 ? T->accent : (style == 1 ? T->surface_hi : 0), fg = style == 0 ? T->accent_text : (style == 2 ? T->accent : T->text);
-    if (bg) c_round(c, h->r.x, h->r.y, h->r.w, h->r.h, r, bg, 0);
-    if (hover) c_round(c, h->r.x, h->r.y, h->r.w, h->r.h, r, style == 0 ? RGBA(255, 255, 255, 50) : RGBA(0, 0, 0, 22), 0);
-    c_text(c, 1, h->r.x + h->r.w * 0.5f, h->r.y + h->r.h * 0.5f + 11, 1, fg, label);
-}
-
-static void portal_ui(PhoneState *s, const PhoneScreenView *v, Canvas *c, const PhoneHit *hits, int nh, float W) {
-    const PhoneTheme *T = &s->theme;
-    bool lost = v->flow == PFLOW_LOST;
-    c_text(c, 2, W * 0.5f, 140, 1, T->text, lost ? "Phone disconnected" : "Connect your phone");
-    c_text(c, 0, W * 0.5f, 182, 1, T->text_dim, lost ? "Reconnect, or keep playing with the in-game phone" : "Scan with your phone's camera (same Wi-Fi)");
-    float side = 380, x0 = (W - side) * 0.5f, y0 = 210;
-    c_round(c, x0 - 14, y0 - 14, side + 28, side + 28, 26, T->surface, 0);
-    bool code = s->token[0] && s->token_left > 0 && s->qr.size > 0;
-    if (code) {
-        int n = s->qr.size;
-        float cell = side / (float)(n + 4);
-        c_round(c, x0, y0, side, side, 12, RGBA(255, 255, 255, 255), 0);
-        for (int y = 0; y < n; y++)
-            for (int x = 0; x < n; x++)
-                if (s->qr.mod[y * n + x]) c_rect(c, x0 + (float)(x + 2) * cell, y0 + (float)(y + 2) * cell, cell + 0.6f, cell + 0.6f, RGBA(0, 0, 0, 255));
-    } else {
-        c_text(c, 1, W * 0.5f, y0 + side * 0.5f, 1, T->text_dim, s->server_err[0] ? "Server unavailable" : (lost ? "Press Reconnect" : "Code expired"));
-        if (s->server_err[0]) c_text(c, 0, W * 0.5f, y0 + side * 0.5f + 40, 1, T->text_faint, s->server_err);
-    }
-    float ty = y0 + side + 62;
-    if (code) {
-        // The URL as text (two lines: it does not fit in one at a readable size).
-        char a[96], b[64];
-        snprintf(a, sizeof(a), "%s://%s/", s->cv.tls->i ? "https" : "http", s->ip_text);
-        snprintf(b, sizeof(b), "?t=%s", s->token);
-        c_text(c, 1, W * 0.5f, ty, 1, T->accent, a);
-        c_text(c, 0, W * 0.5f, ty + 34, 1, T->text_dim, b);
-    }
-    // Status: waiting (animated dots), or the device is gone.
-    char st[64];
-    int dots = (int)(g_engine.real_time * 2.0) % 4;
-    if (lost) snprintf(st, sizeof(st), "Waiting for the phone to come back%.*s", dots, "...");
-    else snprintf(st, sizeof(st), "Waiting for device%.*s", dots, "...");
-    c_circle(c, W * 0.5f - c_text_w(1, "Waiting for device...") * 0.5f - 22, ty + 82, 8, lost ? T->warning : T->accent, 0);
-    c_text(c, 1, W * 0.5f - c_text_w(1, "Waiting for device...") * 0.5f, ty + 93, 0, T->text, st);
-    if (code) {
-        char t[48], tm[16];
-        snprintf(t, sizeof(t), "Code expires in %s", mmss(s->token_left, tm, sizeof(tm)));
-        c_text(c, 0, W * 0.5f, ty + 132, 1, s->token_left < 20 ? T->warning : T->text_faint, t);
-    }
-    for (int i = 0; i < nh; i++) {
-        const PhoneHit *h = &hits[i];
-        bool hv = v->hover == i;
-        if (h->id == PB_RECONNECT) button(s, c, h, "Reconnect", 0, hv);
-        else if (h->id == PB_DECLINE) button(s, c, h, "Use in-game phone instead", lost ? 1 : 0, hv);
-        else if (h->id == PB_CANCEL) button(s, c, h, "Cancel", 2, hv);
-    }
-}
-
 static const char *weather_label(const char *n) {
     static const struct { const char *id, *label; } k[] = {
         { "clear", "Clear" }, { "little_cloudy", "Partly cloudy" }, { "cloudy", "Cloudy" }, { "overcast", "Overcast" }, { "fog", "Fog" },
@@ -585,7 +526,7 @@ u32 phone_ui_hash(const PhoneState *s, const PhoneScreenView *v) {
                      v->rec ? (u32)(g_engine.real_time - s->rec_start) + 1 : 0, (u32)v->front | (u32)v->landscape << 1 | (u32)v->landscape_neg << 2 | (u32)v->driven << 3 | (u32)v->fake << 4,
                      (u32)s->token_left, (u32)s->gallery.count, w ? (u32)(world_time_hours(w) * 60.0f) : 0, (u32)s->have_last_thumb,
                      (u32)(s->server_err[0] != 0), (u32)(s->token[0] != 0), (u32)(s->os.battery * 100.0f), (u32)lrintf(s->os.viewer_zoom * 20.0f),
-                     v->app == PAPP_PORTAL ? (u32)(g_engine.real_time * 2.0) : 0, 0, 0, 0, 0, 0, 0, 0 };
+                     0, 0, 0, 0, 0, 0, 0, 0 };
     for (int i = 0; i < 24; i++) { h ^= vals[i]; h *= 16777619u; }
     return h;
 }
@@ -609,14 +550,13 @@ void phone_ui_build_screen(PhoneState *s, const PhoneScreenView *v, u8 *rgba, in
     bool light = v->app == PAPP_CAMERA;
     if (!light) c_fill(&c, s->theme.bg);
     switch (v->app) {
-    case PAPP_PORTAL: portal_ui(s, v, &c, hits, nh, W); break;
     case PAPP_HOME: home_ui(s, v, &c, hits, nh, W); break;
     case PAPP_GALLERY: gallery_ui(s, v, &c, hits, nh, W, H); break;
     case PAPP_CAMERA: camera_ui(s, v, &c, hits, nh, W, H); break;
     default: break;
     }
     status_bar(s, v, &c, W, light);
-    if (v->app != PAPP_PORTAL) home_bar(s, &c, W, H, light);
+    home_bar(s, &c, W, H, light);
     // Gamepad focus ring (the HUD panel's navigation).
     if (s->nav_hold && s->nav >= 0 && s->nav < nh) {
         const PhoneHit *f = &hits[s->nav];
@@ -693,10 +633,24 @@ static void draw_panel(PhoneState *s) {
     gd_alpha_pop();
 }
 
-void phone_ui_hud(PhoneState *s) {
-    if (!s->holding) return;
+// Toast (2.5 s): also without the phone out ("Phone disconnected - using in-game phone").
+static void draw_toast(PhoneState *s) {
+    if (!s->toast[0] || g_engine.real_time - s->toast_t >= 2.5) return;
     const GuiTheme *th = gui_theme();
     float W = ui_width(), H = ui_height();
+    float a = saturate((float)((2.5 - (g_engine.real_time - s->toast_t)) / 0.4));
+    GuiText tt = { gui_s(th->t_small), GW_SEMIBOLD, gui_rgba_mul(th->text, a), GUI_CENTER, 0, false, true, 0 };
+    float tw = gd_text_width(&tt, s->toast);
+    GuiRect r = { W * 0.5f - tw * 0.5f - gui_s(16), H * 0.18f, tw + gui_s(32), gui_s(34) };
+    gd_round(r, gui_s(17), gui_rgba_mul(th->hud_panel, a));
+    gd_text(&tt, W * 0.5f, r.y + gui_s(7), s->toast);
+}
+
+void phone_ui_hud(PhoneState *s) {
+    draw_toast(s);
+    if (!s->holding) return;
+    const GuiTheme *th = gui_theme();
+    float W = ui_width();
     draw_panel(s);
     // Key hints (the camera app with the mouse in the game), above the panel or bottom right.
     PhoneApp app = s->os.app;
@@ -716,15 +670,6 @@ void phone_ui_hud(PhoneState *s) {
         } else if (s->panel_t <= 0.5f) {
             x = key_hint(x, y, ACT_PHONE, "X", "Put away");
         }
-    }
-    // Toast (2.5 s).
-    if (s->toast[0] && g_engine.real_time - s->toast_t < 2.5) {
-        float a = saturate((float)((2.5 - (g_engine.real_time - s->toast_t)) / 0.4));
-        GuiText tt = { gui_s(th->t_small), GW_SEMIBOLD, gui_rgba_mul(th->text, a), GUI_CENTER, 0, false, true, 0 };
-        float tw = gd_text_width(&tt, s->toast);
-        GuiRect r = { W * 0.5f - tw * 0.5f - gui_s(16), H * 0.18f, tw + gui_s(32), gui_s(34) };
-        gd_round(r, gui_s(17), gui_rgba_mul(th->hud_panel, a));
-        gd_text(&tt, W * 0.5f, r.y + gui_s(7), s->toast);
     }
     // Recording.
     if (s->rec) {

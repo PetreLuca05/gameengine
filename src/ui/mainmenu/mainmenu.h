@@ -32,5 +32,9 @@ void mainmenu_chat_open(void);
 bool mainmenu_lobby_page_draw(GuiRect r);   // pause > Lobby (players, chat, invite, kick): true = close
 void mainmenu_chat_feed_draw(void);     // in game: recent chat lines fade in / out above the vitals
 void mainmenu_reload_layouts(void);     // ui_reload
+// Phone pairing (mm_phone.c, docs/PHONE.md "Phone flow"): the Phone card (Player tab, pause menu)
+// and the Connect portal modal (SCR_PHONE). The portal: true = close.
+void mainmenu_phone_card(GuiRect r);
+bool mainmenu_phone_portal_draw(bool top);
 
 #endif
