@@ -7,6 +7,7 @@
 // headlights, exhaust / dust / skids / sparks, engine audio), the vehicle camera, the HUD panel,
 // console commands and the in-game tests.
 #include "game_internal.h"
+#include "player/camera_fp.h"
 #include "game_water.h"
 #include "physics/buoyancy.h"
 #include "gameplay/vehicle_def.h"
@@ -1659,12 +1660,18 @@ int vehicles_camera(World *w, RenderCamera *cam) {
         return 3;
     }
     chars_set_thirdperson(false);
-    // First person: the head eye, as on foot (the hold point and the held gun are solved relative to
-    // it). A seated body animates standing still (no run cycle, no bob), so it is steady; the seat's
-    // eye point is the fallback.
+    // First person (docs/CAMERA_HOLDPOINT.md "Rule 2"): the seat's eye point + the view pitch's eye
+    // shift (the nominal eye table), never the animated head; the body's frame re-solve still runs
+    // (chars_fp_camera: the hold point and the held gun live on its pose eye).
     Xform sock;
-    if (cvar_find("cl_camera_socket")->i && chars_fp_camera(w, G->alpha, game_view_slot(), G->view.yaw, G->view.pitch, &sock)) cam->pos = sock.t;
-    else cam->pos = to_world(p, r, v3_add(d->seats[seat].pos, d->seats[seat].eye));
+    if (cvar_find("cl_camera_socket")->i) chars_fp_camera(w, G->alpha, game_view_slot(), G->view.yaw, G->view.pitch, &sock);
+    cam->pos = to_world(p, r, v3_add(d->seats[seat].pos, d->seats[seat].eye));
+    const EyeNominalTable *et = camera_fp_eye_table();
+    if (et->valid) {
+        vec3 dd = v3_sub(eye_table_sample(et, EYE_STAND, 0, 0, G->view.pitch), eye_table_sample(et, EYE_STAND, 0, 0, 0));
+        vec3 fwd = v3(-sinf(G->view.yaw), 0, -cosf(G->view.yaw));
+        cam->pos = v3_add(cam->pos, v3_add(v3_add(v3_scale(right_from_yaw(G->view.yaw), dd.x), v3(0, dd.y, 0)), v3_scale(fwd, dd.z)));
+    }
     cam->roll = 0.0f;
     return 1;
 }

@@ -4,6 +4,8 @@
 // rewind and LOD hysteresis.
 #include "gameplay/phone/phone_orient.h"
 #include "player/camera_fp.h"
+#include "anim/eye_nominal.h"
+#include "cJSON.h"
 #include "anim/anim.h"
 #include "anim/anim_library.h"
 #include "anim/character_rt.h"
@@ -16,6 +18,7 @@
 #include "net/bitbuf.h"
 #include "core/engine.h"
 #include "core/log.h"
+#include "core/platform.h"
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -893,30 +896,158 @@ static void test_holdpoint(const ItemDB *db) {
     }
     free(a);
     free(b);
-    // 4) Head stabilizer: landing dip, hit jerk, mantle push and stagger never move the camera
-    //    more than the clamp away from the ideal eye, and never jump between frames.
-    {
-        CamHeadStab st;
-        memset(&st, 0, sizeof(st));
-        CamStabParams prm = cam_stab_params_default();
-        float worst = 0, worst_step = 0;
-        vec3 prev_eye = v3(0, 1.6f, 0);
-        for (int f = 0; f < 600; f++) {
-            float t = (float)f / 144.0f;
-            vec3 ideal = v3(0, 1.6f, 0);
-            vec3 off = v3(0, 0, 0);
-            if (t > 0.5f && t < 0.8f) off.y = -0.25f * sinf((t - 0.5f) / 0.3f * DG_PI);           // landing
-            if (t > 1.2f && t < 1.35f) off.x = 0.15f;                                              // hit jerk
-            if (t > 2.0f && t < 2.8f) off = v3(0, 0.2f * sinf((t - 2.0f) / 0.8f * DG_PI), -0.4f);  // mantle
-            if (t > 3.2f) off = v3(0.06f * sinf(t * 21.0f), 0.04f * sinf(t * 13.0f), 0);          // stagger
-            vec3 eye = camera_fp_stabilize_ex(&st, ideal, v3_add(ideal, off), 0.0f, 1.0f / 144.0f, &prm);
-            worst = fmaxf(worst, v3_dist(eye, ideal));
-            if (f > 0) worst_step = fmaxf(worst_step, v3_dist(eye, prev_eye));
-            prev_eye = eye;
+}
+
+// Rule 2 (docs/CAMERA_HOLDPOINT.md): the gliding camera.
+//  1) The shipped nominal eye table (assets/player/eye_nominal.json) is the animation's: a fresh
+//     calibration moves no entry by more than 5 mm (else: cam_calibrate in the game).
+//  2) Animation-only motion never moves the camera (idle, walk / run in place, crouch, hits: the
+//     camera delta is exactly 0 while the head eye moves), and the head eye stays within the anchor
+//     radius of it (hits reported).
+//  3) Stance changes glide (critically damped: no overshoot, no jump); a step-up snap glides out; a
+//     slope or a jump follows the capsule at once.
+static void test_camera_glide(const ItemDB *db) {
+    const CharacterDef *def = anim_lib_char_by_id(L, "player");
+    if (!def) return;
+    static EyeNominalTable fresh, shipped;
+    // The game bakes the clips at its simulation rate (anim_sample_rate = SIM_HZ): measure that library.
+    AnimLibrary *gl = (AnimLibrary *)calloc(1, sizeof(AnimLibrary));
+    CHECK(anim_lib_load(gl, (float)SIM_HZ), "60 Hz library load failed");
+    const CharacterDef *gdef = anim_lib_char_by_id(gl, "player");
+    CHECK(gdef && eye_nominal_calibrate(gl, gdef, db, &fresh, 0, 0), "nominal eye calibration failed");
+    anim_lib_free(gl);
+    free(gl);
+    size_t size = 0;
+    char *txt = platform_read_file("assets/player/eye_nominal.json", &size);
+    cJSON *root = txt ? cJSON_Parse(txt) : NULL;
+    eye_table_parse(&shipped, root);
+    cJSON_Delete(root);
+    free(txt);
+    CHECK(shipped.valid, "assets/player/eye_nominal.json missing (run cam_calibrate)");
+    CHECK(shipped.anim_hash == fresh.anim_hash, "eye table measured from another animation library (%08x, now %08x): run cam_calibrate", shipped.anim_hash, fresh.anim_hash);
+    float worst = 0;
+    int wp = 0, ws = 0;
+    for (int pp = 0; pp < EYE_POSTURES; pp++)
+        for (int st = 0; st < EYE_STYLES; st++) {
+            if (!fresh.style_valid[st]) continue;
+            CHECK(shipped.style_valid[st], "eye table: hold style %d missing (run cam_calibrate)", st);
+            for (int i = 0; i < fresh.speed_n[pp]; i++)
+                for (int k = 0; k < EYE_PITCH_N; k++) {
+                    float d = v3_dist(fresh.off[pp][st][i][k], shipped.off[pp][st][i][k]);
+                    if (d > worst) { worst = d; wp = pp; ws = st; }
+                }
         }
-        CHECK(worst <= prm.clamp + 1e-4f, "stabilizer displacement %.1f mm exceeds the clamp %.1f mm", worst * 1000, prm.clamp * 1000);
-        CHECK(worst_step < 0.01f, "stabilizer jumped %.1f mm in one 144 Hz frame", worst_step * 1000);
-        printf("  head stabilizer: max %.1f mm from the ideal eye (clamp %.0f), max step %.2f mm / frame\n", worst * 1000, prm.clamp * 1000, worst_step * 1000);
+    CHECK(worst < 0.005f, "eye table is stale: %s / style %d moved %.1f mm (run cam_calibrate)", eye_posture_name(wp), ws, worst * 1000);
+    printf("  eye table: fresh calibration within %.2f mm of the shipped one; residuals (mm):", worst * 1000);
+    for (int pp = 0; pp < EYE_POSTURES; pp++) printf(" %s %.0f", eye_posture_name(pp), fresh.residual[pp] * 1000);
+    printf("\n");
+
+    // 2) A character animating while its camera inputs stay the same.
+    {
+        const float dt = 1.0f / 60.0f;
+        CharRuntime *rt = (CharRuntime *)malloc(sizeof(CharRuntime));
+        const WeaponDef *rifle = NULL;
+        for (int i = 0; i < db->weapon_count; i++) if (!strcmp(db->weapons[i].id, "rifle")) rifle = &db->weapons[i];
+        static const char *names[5] = { "idle", "walk in place", "run in place", "crouch", "hits" };
+        for (int mode = 0; mode < 5; mode++) {
+            charrt_init(rt, L, def);
+            CharInputs in;
+            memset(&in, 0, sizeof(in));
+            in.grounded = true;
+            in.weapon_type = rifle ? proc_hold_style_index(&L->proc, rifle->hold_style) : 0;
+            in.weapon_id = rifle ? (int)(rifle - db->weapons) + 1 : 0;
+            in.move_local = v2(0, 1);
+            in.health = 100;
+            in.speed = mode == 1 ? 1.6f : mode == 2 ? 4.2f : 0.0f;
+            in.crouch = mode == 3;
+            CamGlide g;
+            cam_glide_reset(&g);
+            CamGlideParams gp = cam_glide_params_default();
+            CamNominalIn ni;
+            memset(&ni, 0, sizeof(ni));
+            ni.posture = -1;
+            ni.crouch = in.crouch ? 1.0f : 0.0f;
+            ni.speed = in.speed;   // "in place": the clip plays, the capsule doesn't move
+            ni.style = in.weapon_type;
+            vec3 cam0 = v3(0, 0, 0), head_min = v3(1e9f, 1e9f, 1e9f), head_max = v3(-1e9f, -1e9f, -1e9f);
+            float cam_moved = 0, anchor = 0;
+            for (int t = 0; t < 240; t++) {
+                if (mode == 4 && t % 40 == 20) proc_damage_hit(&rt->proc, &L->proc, &L->skel, t / 40 % 3, L->skel.role[t / 40 % 2 ? BR_SPINE1 : BR_HEAD], v3(0.4f, 0, -1), 2.5f);
+                charrt_set_inputs(rt, &in);
+                charrt_tick(rt, dt);
+                charrt_eval_base(rt);
+                ProcInput pi;
+                charrt_proc_input(rt, &pi, root_at(v3(0, 0, 0), 0.0f), dt);
+                pi.item = rifle ? &rifle->sockets : NULL;
+                if (in.crouch) pi.crouch_drop = 0.38f;
+                charrt_post(rt, &pi);
+                vec3 off = cam_glide_offset(&g, &shipped, &ni, dt, &gp);
+                float step = cam_glide_step(&g, 0.0f, 0.0f, true, dt, &gp);
+                vec3 cam = v3(off.x, off.y + step, -off.z);   // model space: forward is -Z
+                Xform eye;
+                if (!character_socket_world(def, "camera", rt->final_model, &eye)) continue;
+                if (t < 60) { cam0 = cam; continue; }
+                cam_moved = fmaxf(cam_moved, v3_dist(cam, cam0));
+                anchor = fmaxf(anchor, v3_dist(cam, eye.t));
+                head_min = v3_min(head_min, eye.t);
+                head_max = v3_max(head_max, eye.t);
+            }
+            vec3 range = v3_sub(head_max, head_min);
+            printf("  camera %-14s: camera moved %.3f mm while the head eye moved %.0f x %.0f x %.0f mm; head eye within %.0f mm of it\n", names[mode], cam_moved * 1000,
+                   range.x * 1000, range.y * 1000, range.z * 1000, anchor * 1000);
+            CHECK(cam_moved == 0.0f, "%s: the camera moved %.3f mm with animation-only motion", names[mode], cam_moved * 1000);
+            if (mode < 4) CHECK(anchor < 0.08f, "%s: the head eye strays %.0f mm from the nominal eye (anchor 80 mm)", names[mode], anchor * 1000);
+        }
+        free(rt);
+    }
+    // 3) The glide: stand -> crouch and back, a 30 cm step-up, a slope, a jump.
+    {
+        CamGlide g;
+        cam_glide_reset(&g);
+        CamGlideParams gp = cam_glide_params_default();
+        CamNominalIn ni;
+        memset(&ni, 0, sizeof(ni));
+        ni.posture = -1;
+        const float dt = 1.0f / 144.0f;
+        vec3 a = eye_table_sample(&shipped, EYE_STAND, 0, 0, 0), b = eye_table_sample(&shipped, EYE_CROUCH, 0, 0, 0);
+        float overshoot = 0, jump = 0, settle_t = -1;
+        vec3 prev = cam_glide_offset(&g, &shipped, &ni, dt, &gp);
+        for (int f = 1; f < 288; f++) {
+            ni.crouch = 1.0f;
+            vec3 o = cam_glide_offset(&g, &shipped, &ni, dt, &gp);
+            jump = fmaxf(jump, v3_dist(o, prev));
+            overshoot = fmaxf(overshoot, b.y - o.y);   // below the crouch target
+            if (settle_t < 0 && v3_dist(o, b) < 0.001f) settle_t = (float)f * dt;
+            prev = o;
+        }
+        printf("  glide stand -> crouch (%.0f mm): settles within 1 mm at %.2f s, overshoot %.2f mm, largest 144 Hz step %.1f mm\n", (a.y - b.y) * 1000, settle_t,
+               overshoot * 1000, jump * 1000);
+        CHECK(overshoot < 0.001f, "glide overshoots the crouch eye by %.1f mm", overshoot * 1000);
+        CHECK(settle_t > 0 && settle_t < 0.8f, "glide settles in %.2f s", settle_t);
+        CHECK(jump < 0.02f, "glide jumps %.1f mm in one 144 Hz frame", jump * 1000);
+        // Step: the capsule snaps up 30 cm while grounded; the camera glides up instead.
+        cam_glide_reset(&g);
+        float y = 0, worst_step = 0, cam_prev = 0, s_end = 0;
+        for (int f = 0; f < 288; f++) {
+            if (f == 20) y += 0.3f;
+            float s = cam_glide_step(&g, y, 1.5f, true, dt, &gp);
+            float cy = y + s;
+            if (f > 0) worst_step = fmaxf(worst_step, fabsf(cy - cam_prev));
+            cam_prev = cy;
+            s_end = s;
+        }
+        printf("  glide step-up 30 cm: largest 144 Hz camera step %.1f mm, left %.2f mm after 2 s\n", worst_step * 1000, fabsf(s_end) * 1000);
+        CHECK(worst_step < 0.02f && fabsf(s_end) < 0.001f, "step-up: camera step %.1f mm, left %.1f mm", worst_step * 1000, fabsf(s_end) * 1000);
+        // Slope: 0.5 m/s up at 4 m/s, and a jump: the camera follows the capsule exactly.
+        cam_glide_reset(&g);
+        float lag = 0;
+        y = 0;
+        for (int f = 0; f < 288; f++) {
+            y += (f < 144 ? 0.5f : 3.0f) * dt;
+            float s = cam_glide_step(&g, y, 4.0f, f < 144, dt, &gp);
+            lag = fmaxf(lag, fabsf(s));
+        }
+        CHECK(lag < 1e-6f, "slope / jump: the camera lags the capsule by %.1f mm", lag * 1000);
     }
 }
 
@@ -1199,6 +1330,7 @@ int main(int argc, char **argv) {
     test_phone_hold(db);
     test_holdpoint(db);
     test_frame_solve(db);
+    test_camera_glide(db);
     test_clavicles_keep_clip(db);
     test_body_parts(db);
     test_damage_reaction();

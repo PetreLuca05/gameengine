@@ -18,6 +18,7 @@ typedef struct ViewState {
     vec3 eye;
     float bob_roll;
     float fov_hip;             // smoothed hip FOV (sprint widening), the ADS blend starts from it
+    vec3 shake;                // the movement shake's eye offset this frame (cl_move_shake: bob + landing dip; world)
 } ViewState;
 
 // ADS input (game_sights.c). The world FOV narrows by world_zoom and the arms / weapon projection by

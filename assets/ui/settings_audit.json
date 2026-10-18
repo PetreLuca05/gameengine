@@ -91,6 +91,12 @@
    "reason": "Character animation features (foot IK, spine, turn, hold, lean, damage reactions, ragdolls): remote players look the same to everyone; lean off would hide a peeking head.",
    "category": "animation"
   },
+  "anim_fp_parity": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Dev check of first-person rule 1 (the drawn body is the pose everyone computes): logging only.",
+   "category": "animation"
+  },
   "anim_hold": {
    "class": "LOCKED",
    "ui": "—",
@@ -181,6 +187,18 @@
    "reason": "Character animation features (foot IK, spine, turn, hold, lean, damage reactions, ragdolls): remote players look the same to everyone; lean off would hide a peeking head.",
    "category": "animation"
   },
+  "arms_layer": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "The first-person arms layer (own camera / FOV, ADS presented there): one presentation for all; 0 is a dev comparison.",
+   "category": "camera"
+  },
+  "arms_layer_debug": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Debug view / log: dev builds only (debug views can show geometry and entities through walls).",
+   "category": "camera"
+  },
   "audio_debug": {
    "class": "LOCKED",
    "ui": "—",
@@ -259,10 +277,16 @@
    "reason": "Host gameplay / world rule (CVAR_SERVER, replicated with MSG_CVARS): never a client setting.",
    "category": "weapons"
   },
-  "cam_bob_scale": {
+  "cam_anchor_radius": {
    "class": "LOCKED",
    "ui": "—",
-   "reason": "First-person camera rig tuning (head follow / spring / clamp / socket bob): aim stability and what peeks over cover. One rig for all.",
+   "reason": "First-person camera check: how far the nominal eye may stray from the animated head eye before it is logged (never corrects anything).",
+   "category": "camera"
+  },
+  "cam_anim_influence": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Dev comparison: the camera on the raw head bone moves with every animation (motion sickness, peeking differences). 0 for everyone.",
    "category": "camera"
   },
   "cam_collision_radius": {
@@ -289,34 +313,16 @@
    "reason": "Debug view / log: dev builds only (debug views can show geometry and entities through walls).",
    "category": "camera"
   },
-  "cam_head_clamp": {
+  "cam_glide_damping": {
    "class": "LOCKED",
    "ui": "—",
-   "reason": "First-person camera rig tuning (head follow / spring / clamp / socket bob): aim stability and what peeks over cover. One rig for all.",
+   "reason": "First-person camera rig (the gliding nominal eye, docs/CAMERA_HOLDPOINT.md): where the eye sits decides what peeks over cover. One rig for all.",
    "category": "camera"
   },
-  "cam_head_damping": {
+  "cam_glide_stiffness": {
    "class": "LOCKED",
    "ui": "—",
-   "reason": "First-person camera rig tuning (head follow / spring / clamp / socket bob): aim stability and what peeks over cover. One rig for all.",
-   "category": "camera"
-  },
-  "cam_head_follow": {
-   "class": "LOCKED",
-   "ui": "—",
-   "reason": "First-person camera rig tuning (head follow / spring / clamp / socket bob): aim stability and what peeks over cover. One rig for all.",
-   "category": "camera"
-  },
-  "cam_head_follow_lateral": {
-   "class": "LOCKED",
-   "ui": "—",
-   "reason": "First-person camera rig tuning (head follow / spring / clamp / socket bob): aim stability and what peeks over cover. One rig for all.",
-   "category": "camera"
-  },
-  "cam_head_stiffness": {
-   "class": "LOCKED",
-   "ui": "—",
-   "reason": "First-person camera rig tuning (head follow / spring / clamp / socket bob): aim stability and what peeks over cover. One rig for all.",
+   "reason": "First-person camera rig (the gliding nominal eye, docs/CAMERA_HOLDPOINT.md): where the eye sits decides what peeks over cover. One rig for all.",
    "category": "camera"
   },
   "cam_kick_scale": {
@@ -335,12 +341,6 @@
    "class": "LOCKED",
    "ui": "—",
    "reason": "Visibility: changes what you can see relative to other players. Wireframe / hitboxes / collision / CPU skinning / third person: wallhack-class views, dev only.",
-   "category": "camera"
-  },
-  "cam_weapon_fov": {
-   "class": "LOCKED",
-   "ui": "—",
-   "reason": "Viewmodel FOV: the hands follow the camera FOV; the sight's ADS zoom still applies.",
    "category": "camera"
   },
   "cfg_migration": {
@@ -370,19 +370,7 @@
   "cl_camera_socket": {
    "class": "LOCKED",
    "ui": "—",
-   "reason": "First-person camera rig tuning (head follow / spring / clamp / socket bob): aim stability and what peeks over cover. One rig for all.",
-   "category": "camera"
-  },
-  "cl_camera_socket_follow": {
-   "class": "LOCKED",
-   "ui": "—",
-   "reason": "First-person camera rig tuning (head follow / spring / clamp / socket bob): aim stability and what peeks over cover. One rig for all.",
-   "category": "camera"
-  },
-  "cl_camera_socket_roll": {
-   "class": "LOCKED",
-   "ui": "—",
-   "reason": "First-person camera rig tuning (head follow / spring / clamp / socket bob): aim stability and what peeks over cover. One rig for all.",
+   "reason": "First-person camera rig (the gliding nominal eye, docs/CAMERA_HOLDPOINT.md): where the eye sits decides what peeks over cover. One rig for all.",
    "category": "camera"
   },
   "cl_clock": {
@@ -421,17 +409,17 @@
    "reason": "Debug view / log: dev builds only (debug views can show geometry and entities through walls).",
    "category": "player"
   },
-  "cl_headbob": {
-   "class": "EDITABLE",
-   "ui": "Graphics > Comfort",
-   "reason": "Head bob 0 .. 1 (was 0 .. 3; above 1 only made it worse). cl_headbob stays as its on / off switch.",
-   "category": "camera"
+  "cl_fp_layers": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Debug view / log: dev builds only (debug views can show geometry and entities through walls).",
+   "category": "player"
   },
-  "cl_headbob_amount": {
+  "cl_hands_fov": {
    "class": "EDITABLE",
    "ui": "Graphics > Comfort",
-   "reason": "Head bob 0 .. 1 (was 0 .. 3; above 1 only made it worse). cl_headbob stays as its on / off switch.",
-   "category": "camera"
+   "reason": "Hands FOV 50 .. 90 deg vertical: only the arms layer (your arms + the held item); the world, aiming and the sight picture are unchanged (comfort / cosmetic).",
+   "category": "player"
   },
   "cl_healthbars": {
    "class": "LOCKED+RULE",
@@ -456,6 +444,12 @@
    "ui": "Controls",
    "reason": "Input: sensitivities, inversion, ADS scaling, deadzone, toggles.",
    "category": "input"
+  },
+  "cl_move_shake": {
+   "class": "EDITABLE",
+   "ui": "Graphics > Comfort",
+   "reason": "Movement shake 0 .. 1: head bob, landing dip, ledge / mantle tilt (comfort; replaces Head bob). Off by default: the camera glides.",
+   "category": "player"
   },
   "cl_name": {
    "class": "EDITABLE",
@@ -1483,6 +1477,12 @@
    "reason": "GTAO tuning (radius, falloff, foliage clamp, sampling, blur, temporal): engine values, not a player setting; the quality is r_ao (tier).",
    "category": "rendering"
   },
+  "r_arms_wireframe": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Debug view / log: dev builds only (debug views can show geometry and entities through walls).",
+   "category": "rendering"
+  },
   "r_async_compute": {
    "class": "LOCKED",
    "ui": "—",
@@ -2195,12 +2195,6 @@
    "class": "TIER",
    "ui": "Graphics (dev)",
    "reason": "Classic renderer shadow cost (shadow-view geometry error, scene content in the shadow maps): shading cost only, the locked LOD / impostor outcome is the same.",
-   "category": "rendering"
-  },
-  "r_viewmodel_fov": {
-   "class": "LOCKED",
-   "ui": "—",
-   "reason": "Viewmodel FOV: the hands follow the camera FOV; the sight's ADS zoom still applies.",
    "category": "rendering"
   },
   "r_vignette": {

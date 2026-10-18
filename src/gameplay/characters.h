@@ -225,6 +225,7 @@ typedef struct CharsFpArms {
     vec3 shoulder[2];           // the upper-arm joints (world): the seam
 } CharsFpArms;
 bool chars_fp_arms(CharsFpArms *o);
+int chars_hold_style(World *w, EntityId e);   // the held item's hold style (the weapon type; 0 = none): the camera's nominal eye
 // Fire animation of the first-person weapon (docs/FIRE_ANIM.md): tick = this tick's output (the
 // gun kick on the hold point, evaluated per tick), frame = this frame's interpolated output (hand
 // lag, trigger, slide, attachment wobble at render). NULL keeps the previous one; both NULL clears.

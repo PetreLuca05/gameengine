@@ -41,6 +41,7 @@ static void cmd_parts(int argc, const char **argv);
 // reaction and the arms layer only - every body's kick is its own character instance (tp_fire).
 static FireAnimOut g_fp_fire, g_fp_fire_frame;
 static bool g_fp_fire_snap;                        // a shot landed this tick: the item shows it at once (no interpolation)
+static bool g_fp_view_only;   // draw_part: the first-person view's own draw (phone cameras see the FPD_FULL copy instead)
 
 // docs/perf/FINDINGS.md PF-0034: the shared pose cache (see "shared poses" below).
 #define POSE_SETS 128                  // the cache: POSE_SETS x POSE_WAYS bucket poses (a horde uses ~100 - 300)
@@ -103,7 +104,7 @@ typedef struct CharGlobals {
     // and the head bones (masked out of the owner's view by mesh, never by bone).
     bool arm_bone[ANIM_MAX_BONES], head_bone[ANIM_MAX_BONES];
     u8 arm_side[ANIM_MAX_BONES];
-    Cvar *fp_body, *fp_debug, *fp_parity;
+    Cvar *fp_body, *fp_debug, *fp_parity, *fp_layers;
     // First-person frame re-solve inputs (the viewed player, docs/CAMERA_HOLDPOINT.md "Rule 1"): the
     // last two ticks' stage-A poses and roots, hold point outputs (pose / presentation), the tick's
     // inputs with a copy of its item sockets; the parity check's counters.
@@ -194,6 +195,7 @@ void characters_register_cvars(void) {
     cmd_register("character_parts", cmd_parts, "list the part slots / options of the character you look at (or an entity id)");
     g->fp_body = cvar_reg_bool("cl_fp_body", true, CVAR_ARCHIVE | CVAR_EDITABLE, "first person: draw your own body; the player model's arms replace the placeholder hands");
     g->fp_debug = cvar_reg_int("cl_fp_debug", 0, 0, 2, CVAR_LOCKED, "first person: 1 = log / draw hand targets and weapon pull-back, 2 = the head shown (no mesh mask)");
+    g->fp_layers = cvar_reg_int("cl_fp_layers", 3, 0, 3, CVAR_LOCKED, "first person, dev: draw the body (1) and / or the arms layer (2: arms + held item); arms_tuner");
     g->fp_parity = cvar_reg_int("anim_fp_parity", 30, 0, 600, CVAR_LOCKED,
                                 "first-person rule 1 check every N ticks: the frame re-solve with the tick's inputs must equal the tick pose bit for bit (0 = off; fp_rules_report)");
     g->eval_budget = cvar_reg_int("anim_eval_budget", 64, 0, 4096, CVAR_TIER, "max full character post-passes per tick (0 = unlimited); the rest wait a tick, biggest on screen first");
@@ -587,6 +589,11 @@ void chars_system_destroy(World *w) {
 }
 
 int chars_count(const World *w) { return w->chars ? w->chars->count : 0; }
+
+int chars_hold_style(World *w, EntityId e) {
+    CharacterInst *c = w->chars ? char_get(w, e) : NULL;
+    return c && c->item_valid ? c->rt.in.weapon_type : 0;
+}
 void chars_budget_stats(int *evals, int *deferred) {
     *evals = CG ? CG->last_evals : 0;
     *deferred = CG ? CG->last_deferred : 0;
@@ -2372,6 +2379,7 @@ static void draw_part(const CharacterInst *c, const SkeletonInstance *si, const 
     SkinnedDraw d;
     memset(&d, 0, sizeof(d));
     d.mesh = mesh;
+    d.view_only = g_fp_view_only;
     const SkeletalMesh *sm = &LIB->meshes[gp->mesh];
     PoseEntry *pe = c->shared && si == c->shared->si ? c->shared : NULL;   // PF-0034: a shared model-space pose
     if (pe) {
@@ -2485,7 +2493,9 @@ static bool draw_char_fp(CharacterInst *c, const SkeletonInstance *si, FpDraw wh
         }
         if (!mesh) continue;
         any = true;
+        g_fp_view_only = what != FPD_FULL;
         draw_part(c, si, gp, mesh, sl, 0, flags, shadow, what == FPD_FULL ? (u32)lod : ((flags & MAT_VIEWMODEL) ? 9u : 8u));
+        g_fp_view_only = false;
     }
     return any;
 }
@@ -2911,7 +2921,8 @@ void chars_render_local_fp(World *w, float alpha, int local_slot) {
     }
     // The body without the arms and the head / neck (world camera); the arms with the item go to the
     // arms layer (MAT_VIEWMODEL: own camera, FOV and depth, never in walls).
-    draw_char_fp(c, &fp_si, raw ? FPD_BODY_HEAD : FPD_BODY, 0, 0, false);
+    int layers = CG->fp_layers ? CG->fp_layers->i : 3;
+    if (layers & 1) draw_char_fp(c, &fp_si, raw ? FPD_BODY_HEAD : FPD_BODY, 0, 0, false);
     bool arm = false;
     for (int sl = 0; sl < CSLOT_COUNT; sl++) if (c->part_gpu[sl] && CG->parts[c->part_gpu[sl] - 1].arm) arm = true;
     // Driving (docs/VEHICLES.md): the hands on the controls are world geometry (the wheel is drawn
@@ -2920,7 +2931,8 @@ void chars_render_local_fp(World *w, float alpha, int local_slot) {
     quat sr[2];
     bool use[2];
     bool driving = arm && g_vehicle_pose.seat_hands && g_vehicle_pose.seat_hands(w, c->slot, sp, sr, use);
-    if (driving) {
+    if (!(layers & 2)) {
+    } else if (driving) {
         draw_char_fp(c, &fp_si, FPD_ARM_L, 0, 0, false);
         draw_char_fp(c, &fp_si, FPD_ARM_R, 0, use[1] ? 0 : MAT_VIEWMODEL, false);
     } else draw_char_fp(c, &fp_si, FPD_ARMS, 0, MAT_VIEWMODEL, false);

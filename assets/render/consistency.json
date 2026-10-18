@@ -40,8 +40,6 @@
     "bal_tracer_ignition": { "value": 1, "why": "Tracer ignition delay (realistic dim start)." },
     "world_chunk_radius": { "value": 4, "why": "Draw distance (chunks around the player). Lobby rule only." },
     "world_lod_distance": { "value": 70, "why": "First terrain LOD switch (m). Lobby rule only." },
-    "r_viewmodel_fov": { "value": 0, "why": "Hands / weapon FOV follows the camera (a narrow viewmodel FOV hid less of the screen)." },
-    "cam_weapon_fov": { "value": 0, "why": "Hands / weapon FOV follows the camera (the sight's ADS zoom still applies)." },
     "cl_ads_world_zoom": { "value": 1.5, "why": "ADS world zoom comes from the sight data, not a setting." },
     "crosshair_obstruct": { "value": 1, "why": "The crosshair shows where the bullet lands when the muzzle is blocked (docs/AIM.md)." },
     "crosshair_follow_kick": { "value": 0, "why": "The crosshair shows the true aim point." },

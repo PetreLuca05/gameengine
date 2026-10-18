@@ -505,9 +505,9 @@ typedef struct Renderer {
     i64 shader_src_mtime;
 
     // cvars
-    Cvar *r_vsync, *r_wireframe, *r_render_scale, *r_aniso, *r_texture_quality;
+    Cvar *r_vsync, *r_wireframe, *r_arms_wireframe, *r_render_scale, *r_aniso, *r_texture_quality;
     Cvar *r_aa, *r_brightness, *r_gamma, *r_grid, *r_vignette, *r_shader_hotreload, *r_culling;
-    Cvar *r_vm_fov, *r_cpu_skinning, *r_bloom, *r_bloom_intensity, *r_hdr_output;
+    Cvar *r_cpu_skinning, *r_bloom, *r_bloom_intensity, *r_hdr_output;
     // Unity-style shadow quality (docs/SHADOWS_UNITY_MODEL.md)
     Cvar *r_shadows, *r_shadow_resolution, *r_shadow_projection, *r_shadow_cascades, *r_shadow_max_distance, *r_soft_shadow_quality;
     Cvar *r_shadow_split2, *r_shadow_split4[3], *r_shadow_border, *r_shadow_near_offset, *r_shadowmask_mode, *r_shadowmask_distance;

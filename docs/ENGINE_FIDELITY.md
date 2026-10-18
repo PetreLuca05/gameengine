@@ -158,7 +158,7 @@ Budgets (1080p, mid-range GPU): Off 3 ms, Low 5 ms, Medium 8 ms, High 12 ms, Mod
 | vignette, film_grain | `r_vignette`, `r_film_grain` | | auto_exposure, tonemapper, hdr_output | `r_auto_exposure`, `r_tonemapper`, `r_hdr_output` |
 
 Not bounded (accessibility / display calibration / taste, at every level including Off):
-brightness, gamma, colour-blind filter, field of view, exposure compensation, bloom intensity,
+brightness, gamma, colour-blind filter, field of view, Hands FOV, exposure compensation, bloom intensity,
 motion blur strength, fog density scale, gore, frame rate limit.
 
 ## How the bounds work

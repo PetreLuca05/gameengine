@@ -297,6 +297,7 @@ typedef struct SkinnedDraw {
     u32 flags;              // MaterialFlags (MAT_SHADOW_ONLY, MAT_HIGHLIGHT, ...)
     float fade;             // LOD cross-fade: 0 = visible, (0, 1] fading in, [-1, 0) fading out
     bool cast_shadow;
+    bool view_only;         // the first-person view's own draws (the masked body, the arms layer): never in phone cameras
     vec3 center;            // bounding sphere (world) for culling
     float radius;
     u32 object_id;          // stable id (0 = none): previous palette -> per-bone velocity

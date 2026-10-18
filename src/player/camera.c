@@ -3,7 +3,7 @@
 #include "core/cvar.h"
 #include <math.h>
 
-typedef struct CameraCvars { Cvar *fov, *sv_fov, *sv_fov_max, *max_aspect, *ads_world_zoom, *headbob, *sprint_fov, *bob_amount, *hands_fov; } CameraCvars;
+typedef struct CameraCvars { Cvar *fov, *sv_fov, *sv_fov_max, *max_aspect, *ads_world_zoom, *sprint_fov, *hands_fov; } CameraCvars;
 
 static CameraCvars *cc(void) { return g_engine.camera_cvars; }
 
@@ -12,7 +12,7 @@ void camera_register_cvars(void) {
     g_engine.camera_cvars = c;
     // The world camera FOV is the player's (Settings -> Graphics -> View): vertical degrees, Hor+ up
     // to sv_fov_max_aspect, wider screens keep that aspect's horizontal FOV. A host may force one FOV
-    // for everyone (sv_fov) or cap it (sv_fov_max). Hands / weapon FOV: cam_weapon_fov.
+    // for everyone (sv_fov) or cap it (sv_fov_max). Hands FOV (the arms layer): cl_hands_fov.
     c->fov = cvar_reg_float("cl_fov", 75.0f, 60.0f, 120.0f, CVAR_ARCHIVE | CVAR_EDITABLE, "world camera vertical FOV (deg; 75 = 107 deg horizontal at 16:9)");
     c->sv_fov = cvar_reg_float("sv_fov", 0.0f, 0.0f, 120.0f, CVAR_SERVER | CVAR_LOCKED | CVAR_RULE, "host override of every player's world FOV (vertical deg, replicated; 0 = each player's cl_fov)");
     c->sv_fov_max = cvar_reg_float("sv_fov_max", 0.0f, 0.0f, 120.0f, CVAR_SERVER | CVAR_LOCKED | CVAR_RULE, "host cap of the players' cl_fov (vertical deg, replicated; 0 = no cap)");
@@ -20,8 +20,6 @@ void camera_register_cvars(void) {
                                    "widest aspect that sees more to the sides; wider screens keep its horizontal FOV (0 = unlimited Hor+)");
     c->ads_world_zoom = cvar_reg_float("cl_ads_world_zoom", 1.5f, 1.0f, 1.5f, CVAR_LOCKED,
                                        "ADS: the world camera narrows by this (tangent ratio) when fully aimed, on top of the hands / weapon zoom (1 = off; a sight's \"world_zoom\" overrides it)");
-    c->headbob = cvar_reg_bool("cl_headbob", true, CVAR_ARCHIVE | CVAR_EDITABLE, "camera head bob");
-    c->bob_amount = cvar_reg_float("cl_headbob_amount", 1.0f, 0.0f, 1.0f, CVAR_ARCHIVE | CVAR_EDITABLE, "head bob strength");
     c->sprint_fov = cvar_reg_float("cl_sprint_fov", 7.0f, 0.0f, 7.0f, CVAR_ARCHIVE | CVAR_EDITABLE, "extra FOV while sprinting (deg)");
     // The arms layer's FOV (docs/CAMERA_HOLDPOINT.md "Rule 3"): your arms and the held item, never the
     // world. Vertical like cl_fov, Hor+ to the same widest aspect; aimed, the sight's own FOV.
@@ -94,10 +92,12 @@ RenderCamera camera_update(ViewState *v, const PlayerMove *m, float dt, const Ca
         v->land_offset += v->land_vel * h;
     }
 
-    // Head bob.
+    // Head bob: part of the optional movement shake (cl_move_shake, Comfort; never the animation's
+    // motion, docs/CAMERA_HOLDPOINT.md "Rule 2"); off by default, the camera glides.
     float speed = v3_len(v3_flat(m->vel));
-    Cvar *bs = cvar_find("cam_bob_scale");
-    float bob_target = (c->headbob->i && grounded) ? saturate(speed / 6.5f) * c->bob_amount->f * (bs ? bs->f : 0.0f) : 0.0f;
+    Cvar *ms = cvar_find("cl_move_shake");
+    float shake = ms ? ms->f : 0.0f;
+    float bob_target = grounded ? saturate(speed / 6.5f) * shake : 0.0f;
     if (ads) bob_target *= 0.2f;
     v->bob_amount = lerpf(v->bob_amount, bob_target, exp_decay(8.0f, dt));
     v->bob_phase = m->stride * (5.0f / 4.5f);   // from the replicated walk cycle (spectators see the same bob)
@@ -106,8 +106,8 @@ RenderCamera camera_update(ViewState *v, const PlayerMove *m, float dt, const Ca
     v->bob_roll = cosf(v->bob_phase) * 0.006f * v->bob_amount;
 
     vec3 right = right_from_yaw(v->yaw);
-    vec3 eye = v3(m->pos.x, v->smooth_eye_y + bob_y + v->land_offset, m->pos.z);
-    eye = v3_madd(eye, right, bob_x);
+    v->shake = v3_madd(v3(0, bob_y + v->land_offset * shake, 0), right, bob_x);
+    vec3 eye = v3_add(v3(m->pos.x, v->smooth_eye_y, m->pos.z), v->shake);
     v->eye = eye;
 
     // FOV: the player's base (cl_fov / the host's sv_fov), sprint widens it (smoothed). ADS narrows
@@ -120,15 +120,15 @@ RenderCamera camera_update(ViewState *v, const PlayerMove *m, float dt, const Ca
     v->fov_hip = lerpf(v->fov_hip, hip, exp_decay(8.0f, dt));
     v->fov = (ca && ca->world_zoom > 1.0f && ads_t > 0.0f) ? camera_ads_fov(v->fov_hip, ca->world_zoom, ads_t) : v->fov_hip;
 
-    // Slight roll while hanging, pitch nudge during mantle.
-    float roll_target = m->mode == MOVE_HANG ? 0.03f : 0.0f;
+    // Slight roll while hanging, pitch nudge during mantle (movement shake); the death tilt.
+    float roll_target = m->mode == MOVE_HANG ? 0.03f * shake : 0.0f;
     if (dead) roll_target = 0.4f;
     v->roll = lerpf(v->roll, roll_target, exp_decay(6.0f, dt));
 
     RenderCamera cam;
     cam.pos = eye;
     cam.yaw = v->yaw;
-    cam.pitch = v->pitch + (m->mode == MOVE_MANTLE ? -0.08f * sinf(saturate(m->m_t) * DG_PI) : 0.0f);
+    cam.pitch = v->pitch + (m->mode == MOVE_MANTLE ? -0.08f * shake * sinf(saturate(m->m_t) * DG_PI) : 0.0f);
     cam.roll = v->roll + v->bob_roll;
     cam.fov_deg = v->fov;
     cam.vm_fov_deg = v->fov_hip;

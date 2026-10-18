@@ -583,11 +583,11 @@ static void align_frame(void) {
 // them (the user's DoF mode is back).
 static void fov_frame(const RenderCamera *cam) {
     SightTest *t = &S.t;
-    Cvar *rvm = cvar_find("r_viewmodel_fov");
-    float vm = render_vm_fov_for(cam, rvm ? rvm->f : 0.0f);
+    float vm = render_vm_fov();
     RenderCamera hip_cam = *cam;
     hip_cam.ads_t = 0;
-    float vm_hip = render_vm_fov_for(&hip_cam, rvm ? rvm->f : 0.0f);
+    hip_cam.vm_fov_deg = camera_hands_fov();
+    float vm_hip = render_vm_fov_for(&hip_cam, 0.0f);
     float vm_target = S.vm_zoom > 1.0f ? 2.0f * atanf(tanf(RENDER_ADS_REF_FOV * 0.5f * DG_DEG2RAD) / S.vm_zoom) * DG_RAD2DEG : vm_hip;   // absolute (render_vm_fov_for)
     bool complete = S.complete;
     bool was = t->prev_t >= 1.0f;

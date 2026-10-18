@@ -202,9 +202,8 @@ per-frame re-solve. The barrel pull is used only if the slide isn't enough.
   `smoothstep(ads_t)`, exactly the aimed value the moment `ads_t` reaches 1. Iron sights use the weapon's `ads_fov`, a red dot its own `ads_fov` / `zoom` on top,
   a scope `main_zoom`; each as a FOV against a 75° view, so the gun and sight look as they did
   when this zoomed the whole view. The default irons are `75 · 0.8` = 60° against 75°, the
-  1.25x ADS hands zoom. The hip value is `RenderCamera.vm_fov_deg` (the hip FOV) or
-  `cam_weapon_fov`: the Settings → Graphics → View "Hands / weapon FOV" slider (40..120; the
-  "Hands FOV follows camera" toggle sets 0 = the camera FOV, and moving the slider turns it off).
+  1.25x ADS hands zoom. The hip value is `cl_hands_fov`: the Settings → Graphics → Comfort "Hands
+  FOV" slider (50..90, default 65; the arms layer's own FOV, docs/CAMERA_HOLDPOINT.md "Rule 3").
   The slider sets only the hip value; aiming narrows it by the same `attach_ads_vm_zoom` as before
   (`render_vm_fov_for`), so the sights look the same at any hands FOV. The sight is on the view
   axis, so it projects to the exact screen centre under either projection.

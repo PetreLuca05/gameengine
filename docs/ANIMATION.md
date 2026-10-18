@@ -76,9 +76,9 @@ version 5), and foot locking eases in and out. `test_anim` drives a full acceler
 strafe / back / stop sequence through the runtime and fails on any acceleration spike, and checks
 every loop seam.
 
-**First-person camera.** The camera is the capsule eye plus the view's spine bend. It takes only a
-filtered, clamped share of the head socket's vertical bob (`cl_camera_socket_follow`, 0.35;
-0 = rock steady), so turning and direction changes never move it sideways.
+**First-person camera.** The camera glides on the nominal eye: the capsule plus the stance's mean head
+eye, measured from these clips (`cam_calibrate`, docs/CAMERA_HOLDPOINT.md "Rule 2"). No clip motion
+moves it; after an animation change the game measures the table again at startup.
 
 **Sample rate.** Clips are baked at the simulation rate (60 Hz, `anim_sample_rate`), so the
 animation advances one baked frame per game tick. `cl_thirdperson 1` shows your own body from
@@ -315,14 +315,14 @@ animation follows the movement (`speed_match`).
 The local player sees their own, undistorted body, Unreal "true first person" style:
 
 * **Camera socket.** Characters have named sockets (bone + offset / rotation, like Unreal skeletal
-  mesh sockets) in `assets/characters/*.json` → `"sockets"`. The camera position follows the
-  `camera` socket on the `Head` bone; its rotation is the view (pawn control rotation). Each frame
-  the spine is bent to that frame's view first, so the head and camera never lag the mouse.
-  Stair smoothing and the landing dip are kept. `cl_camera_socket 0` uses the old eye camera, and
-  `cl_camera_socket_roll` blends in the head's roll.
+  mesh sockets) in `assets/characters/*.json` → `"sockets"`. The `camera` socket on the `Head` bone
+  is the pose eye (where the hold point lives); the camera itself glides on the nominal eye and the
+  socket only validates it (docs/CAMERA_HOLDPOINT.md "Rule 2"). Each frame the spine look and the IK
+  are re-run on the tick's stage A with that frame's view, so the head and arms never lag the mouse.
+  `cl_camera_socket 0` uses the old capsule eye camera.
 * **Same pose everyone sees.** The weapon is the body's procedural hold, with both hands glued, as
-  other players see it. The owner gets a raised hip pose (`fp_hip` per hold style, eye space) so
-  the weapon sits in view. Only the head is hidden.
+  other players see it, with no first-person edit (docs/CAMERA_HOLDPOINT.md "Rule 1"); the head is
+  hidden by mesh. ADS and on-screen placement are the arms layer's, never the model's.
 * **Static arms.** While an item is held, the arms (upper arms down) don't play the locomotion clip.
   They take a fixed relaxed pose under the hold IK, in third person and on other players too.
 * **Clavicles keep the clip.** `LeftShoulder` / `RightShoulder` keep the playing clip's local
@@ -336,14 +336,14 @@ The local player sees their own, undistorted body, Unreal "true first person" st
   body pose, blended by weight. While holding an item, the free (left) hand does them and the item
   stays in the right. The target is captured at the use press, so pickups that vanish in the same
   tick still get a reach.
-* **Passes.** The world pass draws the body without its arm triangles. The arms are drawn once,
-  in the viewmodel pass, with the weapon and its own FOV.
-* **FOV.** The camera FOV is the player's `cl_fov` (Settings → Graphics → View; a host may force
-  `sv_fov` or cap `sv_fov_max`); the hands / weapon FOV (`cam_weapon_fov` / `r_viewmodel_fov`, 0 =
-  follow the camera) is a slider. ADS narrows the world a little (`cl_ads_world_zoom`) and the hands /
-  weapon projection more (docs/ATTACHMENTS.md "FOV and sensitivity").
-* **Debug.** `cl_fp_debug 1` draws targets; `2` shows the raw body pose. `cl_fp_body 0` brings back
-  the cube hands.
+* **Passes.** The world pass draws the body without its arm and head / neck triangles. The arms are
+  drawn once, in the arms layer (the viewmodel pass), with the weapon, their own camera and FOV.
+* **FOV.** The camera FOV is the player's `cl_fov` (Settings → Graphics → Comfort; a host may force
+  `sv_fov` or cap `sv_fov_max`); the arms layer's is `cl_hands_fov` (Hands FOV, 50 .. 90). ADS narrows
+  the world a little (`cl_ads_world_zoom`) and the arms layer to the sight's own FOV
+  (docs/ATTACHMENTS.md "FOV and sensitivity").
+* **Debug.** `cl_fp_debug 1` draws targets; `2` shows the head. `cl_fp_layers` toggles the body / the
+  arms layer. `cl_fp_body 0` brings back the cube hands.
 
 ## LOD
 

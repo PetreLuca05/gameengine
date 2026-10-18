@@ -12,6 +12,7 @@
 #include "player/camera.h"
 #include "render/arms_layer.h"
 #include "render/render.h"
+#include "ui/arms_tuner.h"
 #include "cJSON.h"
 #include <math.h>
 #include <stdio.h>
@@ -118,6 +119,7 @@ void game_arms_init(void) {
     cmd_register("arms_layer_save", cmd_save, "write the arms layer definition [path] (the source tree's assets/player/arms_layer.json)");
     cmd_register("arms_layer_set", cmd_set, "arms_layer_set <state> <offset|rotation|scale|fov_add|blend> <x> [y z] [item]: edit the arms layer live");
     cmd_register("arms_layer_info", cmd_info, "print this frame's arms layer (state, raise, FOVs, the layer move)");
+    arms_tuner_init();
     game_arms_load();
 }
 
