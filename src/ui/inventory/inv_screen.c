@@ -818,7 +818,7 @@ static void draw_windows(void) {
         gd_set_layer(GL_OVERLAY);
         draw_grid(gui_rect(c.x, c.y, 0, 0), gui_rect(c.x - 1, c.y - 1, c.w + 2, c.h + 2), w->side, w->uid, cd, 0, 4 + i);
         gd_set_layer(layer);
-        if (close || (gui_nav(NAV_BACK) && V.dd.state == IDD_IDLE && !V.ctx.open && i == 0)) { w->open = false; if (!close) gui_nav_consume(NAV_BACK); }
+        if (close) w->open = false;
     }
 }
 
@@ -900,9 +900,8 @@ static void draw_inspect(void) {
     char title[80];
     snprintf(title, sizeof(title), "Inspect: %s", revive_item_name(db, it->s.item, it->s.ammo));
     GuiRect c = window_frame(&V.insp.pos, &V.insp.dragging, &V.insp.grab, ww, wh, title, gui_id("inv_insp"), &close);
-    if (close || (gui_nav(NAV_BACK) && V.dd.state == IDD_IDLE && !V.ctx.open)) {
+    if (close) {
         V.insp.open = false;
-        if (!close) gui_nav_consume(NAV_BACK);
         return;
     }
     int layer = gd_layer();
@@ -1408,11 +1407,9 @@ void inventory_close(void) {
     for (int i = 0; i < MAX_WINS; i++) V.win[i].open = false;
 }
 
-bool inventory_wants_back(void) {
-    bool win = V.insp.open;
-    for (int i = 0; i < MAX_WINS; i++) win |= V.win[i].open;
-    return V.dd.state == IDD_IDLE && !V.dd.carry && !V.ctx.open && !V.split.open && !win;
-}
+// Floating windows don't hold the screen open: Esc closes them first (inventory_draw consumes
+// it), Tab / I closes everything.
+bool inventory_wants_back(void) { return V.dd.state == IDD_IDLE && !V.dd.carry && !V.ctx.open && !V.split.open; }
 
 bool inventory_showcase(void) { return V.showcase && V.showcase->i; }
 
@@ -1466,6 +1463,13 @@ bool inventory_draw(GuiRect area, bool as_modal) {
     if (g->container_open) draw_loot();
     draw_windows();
     draw_inspect();
+    // Esc / B closes the floating windows first (the inspect window, then the newest container window).
+    if (gui_nav(NAV_BACK) && V.dd.state == IDD_IDLE && !V.dd.carry && !V.ctx.open && !V.split.open) {
+        int top = -1;
+        for (int i = 0; i < MAX_WINS; i++) if (V.win[i].open) top = i;
+        if (V.insp.open) { V.insp.open = false; gui_nav_consume(NAV_BACK); }
+        else if (top >= 0) { V.win[top].open = false; gui_nav_consume(NAV_BACK); }
+    }
     // Input: the hover target from this frame's rects (drawn above).
     InvDDIn in;
     memset(&in, 0, sizeof(in));
