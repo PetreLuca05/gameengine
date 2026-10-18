@@ -63,7 +63,7 @@ static void cmd_ref_cam(int argc, const char **argv) {
     char cmd[512];
     float fov_h = (float)cJSON_GetObjectItemCaseSensitive(v, "fov")->valuedouble;
     float fov_v = 2.0f * atanf(tanf(fov_h * 0.5f * DG_DEG2RAD) * 9.0f / 16.0f) * DG_RAD2DEG;   // cl_fov is vertical
-    snprintf(cmd, sizeof(cmd), "%s%s%sset cl_fov %.1f\ntime_set %s\ntime_pause\nweather_set %s 0\nweather_lock 1\nsetpos %g %g %g %g %g\n",
+    snprintf(cmd, sizeof(cmd), "%s%s%sset cl_fov %.1f\ntime_set %s instant\ntime_pause\nweather_set %s 0\nweather_lock 1\nsetpos %g %g %g %g %g\n",
              (cJSON_IsString(map)) ? "map " : "", (cJSON_IsString(map)) ? map->valuestring : "", (cJSON_IsString(map)) ? "\n" : "", fov_v,
              cJSON_GetObjectItemCaseSensitive(v, "time")->valuestring, cJSON_GetObjectItemCaseSensitive(v, "weather")->valuestring,
              cJSON_GetArrayItem(pos, 0)->valuedouble, cJSON_GetArrayItem(pos, 1)->valuedouble, cJSON_GetArrayItem(pos, 2)->valuedouble,
