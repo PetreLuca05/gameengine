@@ -14,7 +14,7 @@ static void exec_inject(VkCommandBuffer cmd, void *u) {
     pb_ubo(&b);
     pb_tex_fg(&b, 0, V.hist_in, P.linear);
     pb_tex(&b, 1, P.noise, P.point);
-    pb_tex(&b, 7, R->shadow.view, P.shadow_cmp);
+    pb_tex(&b, 16, R->shadow.view, P.shadow_cmp);   // immutable compare sampler (post_init)
     pb_img_fg(&b, 8, V.hist_out);
     pb_push(cmd, &b, VK_PIPELINE_BIND_POINT_COMPUTE);
     struct { float p[16]; u32 u[16]; } pc;

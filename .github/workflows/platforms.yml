@@ -112,14 +112,17 @@ jobs:
         run: |
           export VK_ICD_FILENAMES="$(brew --prefix molten-vk)/etc/vulkan/icd.d/MoltenVK_icd.json"
           export DYLD_FALLBACK_LIBRARY_PATH="$(brew --prefix)/lib"
-          printf 'set r_maxfps 60\nwait 120\nscreenshot %s/mvk_devroom.png\nwait 3\nquit\n' "$PWD" > mvk.cfg
+          # Engine Fidelity Medium for the gated run (Modern frames overran the paravirtual GPU's command
+          # buffer timeout: a device loss), Modern under the validation layer (reported, not gated)
+          printf 'set r_fidelity 2\nset r_maxfps 60\nwait 120\nscreenshot %s/mvk_devroom.png\nwait 3\nquit\n' "$PWD" > mvk.cfg
+          printf 'set r_maxfps 60\nwait 120\nscreenshot %s/mvk_devroom_modern.png\nwait 3\nquit\n' "$PWD" > mvk_val.cfg
           # macOS has no timeout(1): a background watchdog. Results go out as annotations too (readable from
           # the check-run API without the full log): run 1 as is, run 2 under the validation layer.
           W="$GITHUB_WORKSPACE"
           enc() { sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}'; }
           run() {   # run <tag> [args]: the game for the script, sets rc
             tag=$1; shift
-            (cd build-mac-arm64/bin && exec ./deadground --test --nosound --log "$W/mvk$tag.log" --script "$W/mvk.cfg" "$@") > "$W/mvk$tag.out" 2>&1 &
+            (cd build-mac-arm64/bin && exec ./deadground --test --nosound --log "$W/mvk$tag.log" --script "$W/mvk$tag.cfg" "$@") > "$W/mvk$tag.out" 2>&1 &
             pid=$!
             (sleep 600; kill -9 $pid) > /dev/null 2>&1 &
             wd=$!
@@ -141,7 +144,7 @@ jobs:
           export VK_LAYER_PATH="$(brew --prefix vulkan-validationlayers)/share/vulkan/explicit_layer.d"
           run "_val" --validation
           val=$(grep -E "\[vk\]|validation" "$W/mvk_val.log" 2>/dev/null | sed -E 's/^\[ *[0-9.]+\] //' | cut -c1-220 | sort | uniq -c | sort -rn | head -20 | enc || true)
-          echo "::warning title=MoltenVK game under validation (exit $rc)::${val:-no validation messages}"
+          echo "::warning title=MoltenVK game at Modern under validation (exit $rc)::${val:-no validation messages}"
           [ "$rc" = 0 ] || echo "::error title=MoltenVK validation run log tail (exit $rc)::$(grep -v "assets/human/" "$W/mvk_val.log" 2>/dev/null | tail -20 | enc || true)"
           test "$shot1" = yes && test "$rc1" = 0
       - uses: actions/upload-artifact@v4
@@ -149,7 +152,7 @@ jobs:
         with:
           name: moltenvk-devroom
           path: |
-            mvk_devroom.png
+            mvk_devroom*.png
             mvk*.log
             mvk*.out
           retention-days: 14

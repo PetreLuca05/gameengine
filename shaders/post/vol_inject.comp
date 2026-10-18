@@ -8,7 +8,7 @@
 layout(local_size_x = 4, local_size_y = 4, local_size_z = 4) in;
 layout(set = 0, binding = 0) uniform sampler3D history;
 layout(set = 0, binding = 1) uniform sampler2D noise_tex;
-layout(set = 0, binding = 7) uniform sampler2DShadow shadow_map;
+layout(set = 0, binding = 16) uniform sampler2DShadow shadow_map;   // immutable compare sampler (post_core.c)
 layout(set = 0, binding = 8, rgba16f) uniform writeonly image3D dst;
 
 float slice_z(float s, float D) {

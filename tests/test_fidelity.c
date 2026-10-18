@@ -410,6 +410,7 @@ static void test_gpu_families(void) {
     CHECK(fid_gpu_family(0x106B, "Apple M4 Pro", true) == FID_GPU_APPLE_PRO, "M4 Pro");
     CHECK(fid_gpu_family(0x8086, "Intel(R) UHD Graphics 630", true) == FID_GPU_MAC_INTEL, "Intel Mac");
     CHECK(fid_gpu_family(0x1002, "AMD Radeon Pro 5500M", true) == FID_GPU_MAC_AMD, "AMD Mac");
+    CHECK(fid_gpu_family(0x106B, "Apple Paravirtual device", true) == FID_GPU_APPLE_VM && fid_gpu_level_cap(FID_GPU_APPLE_VM) == FID_LOW, "macOS VM");
     CHECK(fid_gpu_family(0x8086, "Intel(R) Arc(TM) A770", false) == FID_GPU_OTHER, "Intel on Windows / Linux");
     CHECK(fid_gpu_family(0x10DE, "NVIDIA GeForce RTX 3060 Ti", false) == FID_GPU_OTHER, "NVIDIA");
     CHECK(fid_gpu_level_cap(FID_GPU_MAC_INTEL) == FID_MEDIUM && fid_gpu_level_cap(FID_GPU_APPLE) == FID_HIGH, "caps");

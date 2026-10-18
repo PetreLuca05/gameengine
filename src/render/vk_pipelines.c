@@ -84,6 +84,11 @@ bool vkp_create_layouts(void) {
         fb[i].descriptorCount = 1;
         fb[i].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
     }
+    // The compare-sampler bindings (sun 1, light atlas 11, viewmodel 16, moon 18) take the shadow sampler
+    // as an immutable sampler: MoltenVK has no mutableComparisonSamplers (VK_KHR_portability_subset), so a
+    // compare sampler written with vkUpdateDescriptorSets is invalid there. The writes' sampler is ignored.
+    const u32 compare_bindings[4] = { 1, 11, 16, 18 };
+    for (int i = 0; i < 4; i++) fb[compare_bindings[i]].pImmutableSamplers = &R->sampler_shadow;
     VkDescriptorSetLayoutCreateInfo li = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
     li.bindingCount = 29;
     li.pBindings = fb;

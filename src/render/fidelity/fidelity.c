@@ -81,7 +81,9 @@ const char *fid_level_id(int l) { return l >= 0 && l < FID_LEVELS ? k_level_ids[
 const char *fid_level_name(int l) { return l >= 0 && l < FID_LEVELS ? k_level_names[l] : "?"; }
 FidGpuFamily fid_gpu_family(u32 vendor_id, const char *name, bool portability) {
     if (vendor_id == 0x106B) {
-        // Apple GPUs: base M-series chips (7-10 GPU cores) vs the Pro / Max / Ultra parts
+        // Apple GPUs: base M-series chips (7-10 GPU cores) vs the Pro / Max / Ultra parts; a macOS VM
+        // (CI runners, UTM / Parallels guests) sees a "Paravirtual" device with a share of the host GPU
+        if (name && strstr(name, "Paravirtual")) return FID_GPU_APPLE_VM;
         if (name && (strstr(name, " Pro") || strstr(name, " Max") || strstr(name, " Ultra"))) return FID_GPU_APPLE_PRO;
         return FID_GPU_APPLE;
     }
@@ -96,12 +98,13 @@ int fid_gpu_level_cap(FidGpuFamily f) {
     case FID_GPU_APPLE: return FID_HIGH;        // M1 / M2 / M3 / M4: vgeo through the 32-bit writes
     case FID_GPU_MAC_INTEL: return FID_MEDIUM;  // UHD 630 / Iris: tier-1 argument buffers, classic renderer
     case FID_GPU_MAC_AMD: return FID_HIGH;      // Radeon Pro 5xxx / Vega: no 64-bit atomics either
+    case FID_GPU_APPLE_VM: return FID_LOW;      // paravirtual Metal: Modern frames overran the GPU timeout in CI
     default: return FID_MODERN;
     }
 }
 
 const char *fid_gpu_family_name(FidGpuFamily f) {
-    static const char *names[FID_GPU_FAMILIES] = { "other", "Apple", "Apple Pro / Max / Ultra", "Intel (Mac)", "AMD (Mac)" };
+    static const char *names[FID_GPU_FAMILIES] = { "other", "Apple", "Apple Pro / Max / Ultra", "Intel (Mac)", "AMD (Mac)", "Apple paravirtual (VM)" };
     return f >= 0 && f < FID_GPU_FAMILIES ? names[f] : "?";
 }
 

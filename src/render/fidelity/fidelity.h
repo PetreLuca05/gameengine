@@ -71,7 +71,7 @@ const char *fid_level_name(int level);        // "Off" .. "Modern"
 // GPU families for the auto-detect (docs/PLATFORM_MACOS.md "Fidelity on Macs"): the measured
 // recommendation is capped per family, so a short benchmark on a thermally fresh Mac (or with the
 // coarse MoltenVK timestamps) cannot recommend more than the family sustains.
-typedef enum FidGpuFamily { FID_GPU_OTHER, FID_GPU_APPLE, FID_GPU_APPLE_PRO, FID_GPU_MAC_INTEL, FID_GPU_MAC_AMD, FID_GPU_FAMILIES } FidGpuFamily;
+typedef enum FidGpuFamily { FID_GPU_OTHER, FID_GPU_APPLE, FID_GPU_APPLE_PRO, FID_GPU_MAC_INTEL, FID_GPU_MAC_AMD, FID_GPU_APPLE_VM, FID_GPU_FAMILIES } FidGpuFamily;
 // From VkPhysicalDeviceProperties (vendorID, deviceName) and whether the device is a portability
 // implementation (MoltenVK): Apple 0x106B (M1..M4, Pro / Max / Ultra), Intel / AMD behind MoltenVK.
 FidGpuFamily fid_gpu_family(u32 vendor_id, const char *device_name, bool portability);

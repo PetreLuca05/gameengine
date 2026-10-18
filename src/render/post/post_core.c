@@ -374,19 +374,32 @@ bool post_create_pipelines(void) {
 bool post_init(void) {
     memset(&P, 0, sizeof(P));
     if (!R->has_push_descriptor) { log_error("post: push descriptors unavailable, post stack disabled"); return false; }
-    // 0-7 and 15 samplers, 8-11 storage images, 12 UBO, 13-14 storage buffers.
-    VkDescriptorSetLayoutBinding b[16];
+    // The sun shadow compare sampler first: binding 16 holds it as an immutable sampler (MoltenVK has no
+    // mutableComparisonSamplers, VK_KHR_portability_subset).
+    VkSamplerCreateInfo sc = { VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO };
+    sc.magFilter = sc.minFilter = VK_FILTER_LINEAR;
+    sc.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+    sc.compareEnable = VK_TRUE;
+    sc.compareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
+    sc.addressModeU = sc.addressModeV = sc.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
+    sc.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
+    VK_CHECK(vkCreateSampler(R->device, &sc, NULL, &P.shadow_cmp));
+    // 0-7 and 15 samplers, 8-11 storage images, 12 UBO, 13-14 storage buffers, 16 the sun shadow map (compare).
+    VkDescriptorSetLayoutBinding b[17];
     memset(b, 0, sizeof(b));
-    for (u32 i = 0; i < 16; i++) {
+    for (u32 i = 0; i < 17; i++) {
         b[i].binding = i;
         b[i].descriptorCount = 1;
         b[i].stageFlags = VK_SHADER_STAGE_ALL;
         b[i].descriptorType = i < 8 || i == 15 ? VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER
                                     : (i < 12 ? VK_DESCRIPTOR_TYPE_STORAGE_IMAGE : (i == 12 ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER : VK_DESCRIPTOR_TYPE_STORAGE_BUFFER));
     }
+    b[16].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    b[16].stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    b[16].pImmutableSamplers = &P.shadow_cmp;
     VkDescriptorSetLayoutCreateInfo li = { VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO };
     li.flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR;
-    li.bindingCount = 16;
+    li.bindingCount = 17;
     li.pBindings = b;
     VK_CHECK(vkCreateDescriptorSetLayout(R->device, &li, NULL, &P.layout));
     VkPushConstantRange pr = { VK_SHADER_STAGE_ALL, 0, 128 };
@@ -408,12 +421,6 @@ bool post_init(void) {
     s.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
     s.addressModeU = s.addressModeV = s.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
     VK_CHECK(vkCreateSampler(R->device, &s, NULL, &P.point));
-    s.magFilter = s.minFilter = VK_FILTER_LINEAR;
-    s.compareEnable = VK_TRUE;
-    s.compareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
-    s.addressModeU = s.addressModeV = s.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
-    s.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
-    VK_CHECK(vkCreateSampler(R->device, &s, NULL, &P.shadow_cmp));
     for (int i = 0; i < FRAMES_IN_FLIGHT; i++) {
         P.ubo[i] = vkr_buffer_create(sizeof(PostUBO), VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, true);
         P.exposure_rb[i] = vkr_buffer_create_readback(64);
