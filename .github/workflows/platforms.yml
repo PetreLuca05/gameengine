@@ -123,9 +123,13 @@ jobs:
           rc=0; wait $pid || rc=$?
           kill $wd 2>/dev/null || true
           tail -40 "$W/mvk.out" || true
-          lines=$(cat "$W/mvk.log" "$W/mvk.out" 2>/dev/null | grep -E "vulkan:|portability|swapchain|fidelity|error|crash|screenshot" | head -12 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}' || true)
+          enc() { sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}'; }
+          lines=$(cat "$W/mvk.log" 2>/dev/null | grep -E "vulkan:|swapchain|fidelity|screenshot" | head -8 | enc || true)
           if [ -f "$W/mvk_devroom.png" ]; then shot=yes; else shot=no; fi
           echo "::notice title=MoltenVK game (exit $rc, screenshot $shot)::${lines:-no log lines}"
+          # the end of the log (+ stderr) without the git-ignored character textures: a crash's backtrace
+          tail=$(cat "$W/mvk.log" "$W/mvk.out" 2>/dev/null | grep -v "assets/human/" | tail -45 | enc || true)
+          [ "$rc" = 0 ] || echo "::error title=MoltenVK game log tail (exit $rc)::${tail:-empty}"
           test "$shot" = yes
       - uses: actions/upload-artifact@v4
         if: always()
