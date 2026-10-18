@@ -16,6 +16,10 @@
 #define VG_TEX_BINDING 23
 
 typedef struct VgTexEntry { VkImageView view; VkSampler sampler; VkImageLayout layout; } VgTexEntry;
+// Optional block compression of the module's own textures (set by the engine: render/tex_compress.c,
+// docs/TEXTURE_MIPS.md "Block compression"): the given RGBA8 chain's levels encoded in *vk_format
+// (malloc'd, level_sizes per level), or NULL to keep RGBA8.
+typedef u8 *(*VgTexCompressFn)(const u8 *rgba, u32 w, u32 h, u32 levels, bool srgb, u32 *vk_format, size_t *level_sizes);
 typedef struct VgOwnTex { VkImage image; VmaAllocation alloc; VkImageView view; u32 w, h, mips; bool used; } VgOwnTex;
 
 typedef struct VgTextures {
@@ -29,6 +33,7 @@ typedef struct VgTextures {
     VkImageView white_view;
     VkSampler clamp, repeat;     // trilinear (+ anisotropic: vg_tex_set_anisotropy), clamp to edge / repeat
     float anisotropy;            // 0 = off
+    VgTexCompressFn compress;    // NULL: RGBA8
 } VgTextures;
 
 bool vg_tex_init(VgTextures *t, const VgContext *ctx);
@@ -41,6 +46,7 @@ void vg_tex_set_anisotropy(VgTextures *t, float anisotropy);
 void vg_tex_set(VgTextures *t, u32 index, VkImageView view, VkSampler sampler, VkImageLayout layout);
 // An RGBA8 texture of the module (index >= VG_TEX_GAME, 0 when full): `levels` mips packed one after
 // the other (w x h, then w/2 x h/2, ...), uploaded now (load time: waits). srgb: albedo; repeat: wrap.
+// With t->compress the chain is stored block-compressed (each level encoded as given).
 u32 vg_tex_create(VgTextures *t, u32 w, u32 h, u32 levels, const u8 *rgba, bool srgb, bool repeat);
 // A module entry for an image created elsewhere (vg_tex_set it); vg_tex_release frees an entry and
 // the image vg_tex_create made for it.

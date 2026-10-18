@@ -5,6 +5,9 @@
 // (shaders/surfaces.glsl) samples them for MAT_TERRAIN / MAT_LAYERED draws.
 // Until the layers load (first open-world map) the bindings hold 1-texel placeholders.
 #include "vk_internal.h"
+#include "tex_compress.h"
+#include "core/jobs.h"
+#include "core/profiler.h"
 #include "core/platform.h"
 #include "core/cvar.h"
 #include "stb_image.h"
@@ -77,7 +80,8 @@ static u32 mip_levels(u32 s) {
 }
 
 // Square RGBA8 layers with a box-filtered mip chain: data laid out mip by mip, the layers of a mip
-// contiguous (vkr_upload_image).
+// contiguous (vkr_upload_image); block-compressed level by level (BC7, docs/TEXTURE_MIPS.md) while
+// r_texture_compress is on.
 static SurfImage upload_layers(u8 *const *layers, u32 count, u32 size, VkFormat fmt) {
     u32 mips = mip_levels(size);
     size_t offs[16], total = 0;
@@ -102,8 +106,13 @@ static SurfImage upload_layers(u8 *const *layers, u32 count, u32 size, VkFormat 
                     }
         }
     }
-    SurfImage im = image_create(size, size, mips, count, fmt, true);
-    vkr_upload_image(im.image, size, size, mips, count, data, offs, total);
+    size_t bc_offs[16], bc_total = 0;
+    TexcKind k = fmt == VK_FORMAT_R8G8B8A8_SRGB ? TEXC_COLOR : TEXC_DATA;
+    u8 *bc = texc_encode_array(data, offs, mips, count, size, k, bc_offs, &bc_total);
+    SurfImage im = image_create(size, size, mips, count, bc ? (VkFormat)texc_vk_format(k) : fmt, true);
+    if (bc) vkr_upload_image(im.image, size, size, mips, count, bc, bc_offs, bc_total);
+    else vkr_upload_image(im.image, size, size, mips, count, data, offs, total);
+    free(bc);
     free(data);
     return im;
 }
@@ -151,26 +160,45 @@ static bool load_ao_into_alpha(const char *name, u8 *alb) {
     return true;
 }
 
+// One layer's files (albedo + baked AO, nrh; the metal slots' masks after the layers): independent of
+// every other, decoded on the jobs (PF-0024; the same pixels as the serial loop).
+typedef struct SurfLoad { u8 *alb[STEX_LAYER_COUNT], *nrh[STEX_LAYER_COUNT + STEX_METAL_SLOTS]; bool ok[STEX_LAYER_COUNT + STEX_METAL_SLOTS], ao[STEX_LAYER_COUNT]; } SurfLoad;
+static void surf_load_job(void *ctx, int begin, int end) {
+    static const u8 grey[4] = { 188, 188, 188, 255 }, flat[4] = { 128, 128, 217, 128 }, no_metal[4] = { 0, 0, 0, 0 };
+    SurfLoad *j = (SurfLoad *)ctx;
+    for (int l = begin; l < end; l++) {
+        if (l >= STEX_LAYER_COUNT) {
+            int k = l - STEX_LAYER_COUNT;
+            bool ok = true;
+            j->nrh[l] = load_layer(STEX_LAYER_NAMES[STEX_METAL_LAYERS[k]], "metal.png", NRH_SIZE, no_metal, &ok);
+            j->ok[l] = ok;
+            continue;
+        }
+        bool ok1 = true, ok2 = true;
+        j->alb[l] = load_layer(STEX_LAYER_NAMES[l], "albedo.jpg", ALBEDO_SIZE, grey, &ok1);
+        j->nrh[l] = load_layer(STEX_LAYER_NAMES[l], "nrh.png", NRH_SIZE, flat, &ok2);
+        j->ok[l] = ok1 && ok2;
+        j->ao[l] = load_ao_into_alpha(STEX_LAYER_NAMES[l], j->alb[l]);
+    }
+}
+
 bool render_surfaces_load(void) {
     if (!R || !R->device) return false;
     if (S.tried) return S.loaded;
     S.tried = true;
     u64 t0 = SDL_GetTicksNS();
-    static const u8 grey[4] = { 188, 188, 188, 255 }, flat[4] = { 128, 128, 217, 128 }, no_metal[4] = { 0, 0, 0, 0 };
-    u8 *alb[STEX_LAYER_COUNT], *nrh[STEX_LAYER_COUNT + STEX_METAL_SLOTS];
+    SurfLoad *j = (SurfLoad *)calloc(1, sizeof(SurfLoad));
+    int n = STEX_LAYER_COUNT + STEX_METAL_SLOTS;
+    if (prof_fix_enabled(PFX_TEX_DECODE_JOBS)) jobs_parallel_for(n, 1, surf_load_job, j);
+    else surf_load_job(j, 0, n);
+    u8 **alb = j->alb, **nrh = j->nrh;
     int missing = 0, no_ao = 0;
     for (int l = 0; l < STEX_LAYER_COUNT; l++) {
-        bool ok1 = true, ok2 = true;
-        alb[l] = load_layer(STEX_LAYER_NAMES[l], "albedo.jpg", ALBEDO_SIZE, grey, &ok1);
-        nrh[l] = load_layer(STEX_LAYER_NAMES[l], "nrh.png", NRH_SIZE, flat, &ok2);
-        if (!ok1 || !ok2) { missing++; log_warn("surfaces: %s textures missing (flat placeholder)", STEX_LAYER_NAMES[l]); }
-        if (!load_ao_into_alpha(STEX_LAYER_NAMES[l], alb[l])) no_ao++;
+        if (!j->ok[l]) { missing++; log_warn("surfaces: %s textures missing (flat placeholder)", STEX_LAYER_NAMES[l]); }
+        if (!j->ao[l]) no_ao++;
     }
-    for (int k = 0; k < STEX_METAL_SLOTS; k++) {
-        bool ok = true;
-        nrh[STEX_LAYER_COUNT + k] = load_layer(STEX_LAYER_NAMES[STEX_METAL_LAYERS[k]], "metal.png", NRH_SIZE, no_metal, &ok);
-        if (!ok) log_warn("surfaces: %s metal mask missing (the material metallic stays)", STEX_LAYER_NAMES[STEX_METAL_LAYERS[k]]);
-    }
+    for (int k = 0; k < STEX_METAL_SLOTS; k++)
+        if (!j->ok[STEX_LAYER_COUNT + k]) log_warn("surfaces: %s metal mask missing (the material metallic stays)", STEX_LAYER_NAMES[STEX_METAL_LAYERS[k]]);
     if (no_ao) log_warn("surfaces: %d layers without baked AO (tools/vfxgen/surface_pbr.py)", no_ao);
     vkDeviceWaitIdle(R->device);   // once: the placeholders leave the frame sets
     image_destroy(&S.albedo);
@@ -179,6 +207,7 @@ bool render_surfaces_load(void) {
     S.nrh = upload_layers(nrh, STEX_LAYER_COUNT + STEX_METAL_SLOTS, NRH_SIZE, VK_FORMAT_R8G8B8A8_UNORM);
     for (int l = 0; l < STEX_LAYER_COUNT; l++) free(alb[l]);
     for (int l = 0; l < STEX_LAYER_COUNT + STEX_METAL_SLOTS; l++) free(nrh[l]);
+    free(j);
     S.loaded = missing < STEX_LAYER_COUNT;
     S.dirty = true;
     log_info("surfaces: %d layers (%d missing) in %.0f ms", STEX_LAYER_COUNT, missing, (double)(SDL_GetTicksNS() - t0) / 1e6);

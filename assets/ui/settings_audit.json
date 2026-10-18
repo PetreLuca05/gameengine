@@ -2071,6 +2071,12 @@
    "reason": "Debug view / log: dev builds only (debug views can show geometry and entities through walls).",
    "category": "rendering"
   },
+  "r_texture_compress": {
+   "class": "LOCKED",
+   "ui": "—",
+   "reason": "Block-compressed textures (BC7, PF-0035): one texture format for everyone; 0 (RGBA8) is the dev A / B reference.",
+   "category": "rendering"
+  },
   "r_texture_quality": {
    "class": "TIER",
    "ui": "Graphics (dev)",

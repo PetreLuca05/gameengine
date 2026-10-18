@@ -12,6 +12,7 @@ typedef struct JobCounter { volatile int pending; } JobCounter;
 void jobs_init(int worker_count); // <=0 picks cores-1
 void jobs_shutdown(void);
 int jobs_worker_count(void);
+bool jobs_on_worker(void);             // the calling thread is a worker (a job: no nested parallel_for)
 
 // Runs fn(user) on a worker. If done is non-NULL it runs on the main thread later.
 // counter (optional) is incremented now and decremented when fn finishes.

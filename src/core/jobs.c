@@ -61,7 +61,11 @@ static void run_job(Job *j) {
     if (j->counter) SDL_AtomicDecRef((SDL_AtomicInt *)&j->counter->pending);
 }
 
+static DG_THREAD_LOCAL bool tl_worker;
+bool jobs_on_worker(void) { return tl_worker; }
+
 static int worker_main(void *arg) {
+    tl_worker = true;
 #ifdef __APPLE__
     // macOS has no affinity API: the QoS class keeps the workers on the performance cores of Apple
     // Silicon (the default class may land them on the efficiency cores; docs/PLATFORM_MACOS.md).

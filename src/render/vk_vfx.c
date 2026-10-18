@@ -8,6 +8,9 @@
 #include "graph/fg.h"
 #include "post/post.h"
 #include "core/platform.h"
+#include "core/jobs.h"
+#include "core/profiler.h"
+#include <SDL3/SDL.h>
 #include "vfx/vfx_sim.h"
 #include "vfx/vfx_atlas.h"
 #include "vfx/vfx_curve.h"
@@ -469,6 +472,14 @@ static Img load_png(const char *dir, const char *file) {
 
 static void free_img(Img *im) { if (im->px) free(im->px); im->px = NULL; }   // stb uses malloc/free
 
+// PF-0024 (docs/perf/FINDINGS.md): the atlas files decoded (and halved to fit a page) on the jobs; the
+// packing loop then takes them in its order. The same load_png per file: the same pixels.
+typedef struct VfxDecode { const char *dir; char file[160]; int owner; Img im; } VfxDecode;   // owner: texture * 4 + map
+static void vfx_decode_job(void *ctx, int begin, int end) {
+    VfxDecode *d = (VfxDecode *)ctx;
+    for (int i = begin; i < end; i++) d[i].im = load_png(d[i].dir, d[i].file);
+}
+
 static void destroy_atlas(void) {
     if (X.atlas_view) vkDestroyImageView(R->device, X.atlas_view, NULL);
     if (X.atlas) vmaDestroyImage(R->vma, X.atlas, X.atlas_alloc);
@@ -639,12 +650,17 @@ void render_vfx_update_emitters(VfxLibrary *lib) {
 bool render_vfx_set_library(VfxLibrary *lib) {
     if (!R || !X.layout) return false;
     vkDeviceWaitIdle(R->device);
+    u64 t0 = SDL_GetTicksNS();
     // Collect rects: main texture, + motion vectors, + 6-way maps (2) per texture.
     int n = lib->texture_count;
     Img *imgs = (Img *)calloc((size_t)n * 4, sizeof(Img));
     VfxAtlasRect *rects = (VfxAtlasRect *)calloc((size_t)n * 4, sizeof(VfxAtlasRect));
     int *map = (int *)malloc(sizeof(int) * (size_t)n * 4);
     int rc = 0, loaded = 0;
+    // The files in packing order, decoded on the jobs (PF-0024: the same load_png per file; with
+    // perf_fix_disable PF-0024 one after the other), then placed in that order.
+    VfxDecode *dec = (VfxDecode *)calloc((size_t)n * 4, sizeof(VfxDecode));
+    int nd = 0;
     for (int i = 0; i < n; i++) {
         VfxTextureMeta *m = &lib->textures[i];
         m->uv = m->mv_uv = m->lm0_uv = m->lm1_uv = v4(0, 0, 0, 0);
@@ -656,19 +672,27 @@ bool render_vfx_set_library(VfxLibrary *lib) {
         for (int k = 0; k < 4; k++) {
             if (k == 1 && !m->motion_vectors) continue;
             if (k >= 2 && m->lighting != VFX_LIGHT_SIXWAY) continue;
-            char file[160];
-            if (k == 0) dg_strcpy(file, sizeof(file), m->file);
-            else snprintf(file, sizeof(file), "%s%s.png", stem, suffix[k]);
-            Img im = load_png(lib->dir, file);
-            if (!im.px) { if (k == 0) log_warn("vfx: texture %s missing (%s)", m->name, file); continue; }
-            imgs[rc] = im;
-            rects[rc].w = im.w;
-            rects[rc].h = im.h;
-            map[rc] = i * 4 + k;
-            rc++;
-            if (k == 0) loaded++;
+            VfxDecode *d = &dec[nd++];
+            d->dir = lib->dir;
+            d->owner = i * 4 + k;
+            if (k == 0) dg_strcpy(d->file, sizeof(d->file), m->file);
+            else snprintf(d->file, sizeof(d->file), "%s%s.png", stem, suffix[k]);
         }
     }
+    if (prof_fix_enabled(PFX_TEX_DECODE_JOBS)) jobs_parallel_for(nd, 1, vfx_decode_job, dec);
+    else vfx_decode_job(dec, 0, nd);
+    for (int d = 0; d < nd; d++) {
+        int i = dec[d].owner / 4, k = dec[d].owner % 4;
+        Img im = dec[d].im;
+        if (!im.px) { if (k == 0) log_warn("vfx: texture %s missing (%s)", lib->textures[i].name, dec[d].file); continue; }
+        imgs[rc] = im;
+        rects[rc].w = im.w;
+        rects[rc].h = im.h;
+        map[rc] = dec[d].owner;
+        rc++;
+        if (k == 0) loaded++;
+    }
+    free(dec);
     int pages = vfx_atlas_pack(rects, rc, VFX_PAGE, 2);
     if (pages <= 0) pages = 1;
     u8 **page_px = (u8 **)calloc((size_t)pages, sizeof(u8 *));
@@ -699,7 +723,7 @@ bool render_vfx_set_library(VfxLibrary *lib) {
     upload_emitters(lib);
     X.atlas_textures = loaded;
     X.need_reset = true;
-    log_info("vfx: atlas %d page(s) of %d^2, %d/%d textures, %d emitters", pages, VFX_PAGE, loaded, n, lib->emitter_count);
+    log_info("vfx: atlas %d page(s) of %d^2, %d/%d textures, %d emitters, in %.0f ms", pages, VFX_PAGE, loaded, n, lib->emitter_count, (double)(SDL_GetTicksNS() - t0) / 1e6);
     return true;
 }
 

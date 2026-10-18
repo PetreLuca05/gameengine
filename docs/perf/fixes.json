@@ -1143,5 +1143,92 @@
    "summary": "CLOSED: scope:shadow_sun 3.009 -> 2.546 (-15.39%, p=0); images differ (visual trade-off, by design); state identical",
    "machine": "DESKTOP-SN4N74U"
   }
+ },
+ "PF-0024": {
+  "title": "Texture files decoded on the job system at load",
+  "rule": "R27",
+  "finding": "R27 startup critical path (F-0714da): main thread blocked 682 ms on file reads during startup (4864 ms to the first frame); the loads also decoded every texture file one after the other on the main thread: the manifest textures (assets_init), the ~100 VFX atlas files (game_init), and at the first open-world map the 20 surface layers (albedo + AO + nrh + metal masks) and the 8 grass atlases + nta maps",
+  "effort": "S",
+  "status": "implemented, measured A / B (a load-time fix: perf_verify captures frames only)",
+  "code": [
+   "src/assets/assets.c assets_init (texture_predecode: predecode_job / texture_decode)",
+   "src/render/vk_vfx.c render_vfx_set_library (vfx_decode_job)",
+   "src/render/surface_tex.c render_surfaces_load (surf_load_job)",
+   "src/render/vk_vgeo.c foliage_build_grass (grass_tex_job)",
+   "src/core/profiler.c prof_register (+set perf_fix_disable taken before the startup loads)"
+  ],
+  "description": "Each loader first lists its files, decodes them with jobs_parallel_for (stbi_load plus the loader's own resampling: the VFX fit-to-page halving, the surface layer resample and AO-into-alpha, the grass box downsample), then runs its old serial loop in the old order taking the decoded pixels. The manifest's decode happens before the loop that creates the textures (a path decoded but not consumed, e.g. listed twice, is freed and decoded again in the loop). perf_fix_disable PF-0024 runs every decode inside the loop again; a +set perf_fix_disable on the command line is applied before the startup loads, so the A side of a startup measurement loads the old way. docs/TEXTURE_MIPS.md \"Decoding on the jobs\".",
+  "neutral": "The same decode and resampling functions per file with the same arguments, each writing only its own output: the pixels are identical whatever the thread count, and the consumers (texture creation, atlas packing, layer arrays, materials) run in the old order, so texture ids, atlas rects and the uploaded data are identical. Screenshots of 7 views (tools/tests/tex_bc.cfg): A vs B of one repetition never differ more than two repetitions of the same side (identical in 5 views; the wheat and ground views carry run-to-run noise).",
+  "metrics": [
+   "log:assets manifest textures ms",
+   "log:vfx atlas ms",
+   "log:surfaces ms",
+   "log:grass ms",
+   "startup (prof: startup)"
+  ],
+  "scenes": [
+   "startup",
+   "map vegetation (first load)"
+  ],
+  "verification": {
+   "runs": [
+    {
+     "date": "2026-10-18",
+     "machine": "DESKTOP-SN4N74U",
+     "summary": "A / B by tools/tests/tex_bc_compare.py --a \"+set perf_fix_disable PF-0024\" --b \"\" (two sets of 3 alternating runs, medians): manifest textures 259 -> 134 ms (-39 .. -48%), VFX atlas 483 -> 162 ms (-48 .. -66%), grass 1899 -> 1017 ms (-46%), surfaces 1370 -> 351 ms (-69 .. -74%); startup -9% (within the noise); images identical (within run-to-run noise)",
+     "closed": false
+    }
+   ],
+   "summary": "A / B (2 x 3 alternating runs): manifest -39 .. -48%, VFX atlas -48 .. -66%, grass atlases -46%, surfaces -69 .. -74%; images identical",
+   "machine": "DESKTOP-SN4N74U"
+  }
+ },
+ "PF-0035": {
+  "title": "World, terrain and foliage textures block-compressed (BC7, encoded on the jobs, cached on disk)",
+  "rule": "R14",
+  "finding": "R14 textures stored uncompressed (F-1a9828 .. F-a94519, static): every content texture was RGBA8 (only assets/textures/hazard.ktx2 pre-encoded). The 4096^2 Ch*_1001 maps the rule names are source art (the game loads their 1024 / 2048 skin atlases); the textures actually resident are the terrain (216 MB) and surface arrays, the tree / grass / foliage / impostor module textures and the skins: 581 MB of RGBA8 levels in a vegetation session",
+  "effort": "L",
+  "status": "implemented, measured A / B (VRAM, GPU, images; a load-time format change: perf_verify does not reload textures)",
+  "tradeoff": "Lossy: every compressed texture is BC7 (8 bits per texel), so texels differ slightly from the RGBA8 source: full frames of the vegetation map 35.5 - 37.1 dB PSNR against RGBA8 (two identical runs: 82 - 100 dB; mean 1.7 - 2.2 levels of 255; grass / leaf card silhouettes where alpha crosses the cut-off, fine grain on terrain, bark and grass), dev room views unchanged (49.3 dB, the same as two identical runs); at 2 x zoom the textures look the same (docs/TEXTURE_MIPS.md \"Block compression\"). Gains (RTX 3060 Ti): texture level data 581 -> 145 MB, VMA allocated on the vegetation map 1614 -> 1179 MB (-27%), vram_usage 1823 -> 1280 MB (-30%), dev room -31 MB; GPU frame (uncapped, 240 frames x 3 alternating runs) meadow -4.0%, view down at the ground -8.2% (its opaque pass -19%), pine forest -2.6%. Cost: the first load of a texture encodes it (vegetation map ~26 s on 12 threads, once per content change), later loads hash the levels and read the cache (warm loads: manifest +48 ms, trees +13%, grass +10%, surfaces +36%, terrain +6%).",
+  "screenshots": [
+   "docs/tex_bc_screenshots/bc_ground_zoom.jpg",
+   "docs/tex_bc_screenshots/bc_pine_bark.jpg",
+   "docs/tex_bc_screenshots/bc_meadow.jpg",
+   "docs/tex_bc_screenshots/bc_wheat.jpg",
+   "docs/tex_bc_screenshots/bc_dev_character.jpg"
+  ],
+  "code": [
+   "src/render/bc_codec.c (BC7 modes 1/3/4/5/6/7, BC1/BC3/BC4/BC5; decoders)",
+   "src/render/tex_compress.c texc_encode / texc_encode_array / texc_mip_chain (jobs, disk cache, r_texture_compress, tex_compress_stats, tex_cache_clear)",
+   "src/assets/assets.c upload_rgba / assets_reload_textures (world textures, the format switch)",
+   "src/render/vk_resources.c render_texture_replace(_raw)",
+   "src/render/terrain_tex.c tt_upload_layers / tt_upload_2d_content, src/render/surface_tex.c upload_layers",
+   "src/render/vgeo/vgeo_tex.c vg_tex_create (VgTextures.compress), src/render/vk_vgeo.c module_tex_compress"
+  ],
+  "description": "Each loader keeps building its RGBA8 mip chain as before (the GPU blit chain's filter on the CPU for world textures, the alpha-weighted / coverage-preserving chains of the vgeo module, the box chains of the terrain and surface arrays); texc_encode encodes every level to BC7 (sRGB for colour, UNORM with the rotated modes for data maps) with jobs_parallel_for over block rows, and the image is created in BC7 with those levels. Results are cached in assets/cache/tex/<key>.bct, key = a 64-bit hash of the levels' texels and sizes, the kind and the codec version. r_texture_compress 0 (dev builds; world textures switch at once, the rest at their next load), perf_fix_disable PF-0035 and a device without BC7 sampling keep RGBA8. r_texture_quality works on BC7 chains as on RGBA8 (dropped levels skipped, lowering copies blocks, raising re-reads the cache).",
+  "neutral": "The game state (no rendering decision feeds the simulation), the mip chains' filters, the texture sizes and sampling, the r_texture_quality levels; textures that are not compressed (VFX atlas, classic impostors, UI, KTX2 files, runtime data maps). The image differs by design: the BC7 approximation of each texel (codec error bounds in tests/test_bc_codec.c; bitstreams checked bit-exact against Pillow's BC7 decoder by tools/tests/bc_crosscheck.py).",
+  "metrics": [
+   "vram_usage_mb",
+   "vram_allocated_mb",
+   "gpu_frame",
+   "scope:opaque",
+   "log:texc sets / encode ms / cache read ms"
+  ],
+  "scenes": [
+   "devroom",
+   "foliage (vegetation map: meadow, ground, pine views)"
+  ],
+  "verification": {
+   "runs": [
+    {
+     "date": "2026-10-18",
+     "machine": "DESKTOP-SN4N74U",
+     "summary": "A / B by tools/tests/tex_bc_compare.py (r_texture_compress 0 vs 1, alternating) and uncapped GPU captures (240 frames x 3 alternating runs): vegetation VMA allocated 1614 -> 1179 MB (-27%), usage 1823 -> 1280 MB (-30%); GPU frame -2.6 .. -8.2%; images differ (visual trade-off, by design: 35.5 - 37.1 dB on vegetation views)",
+     "closed": false
+    }
+   ],
+   "summary": "VRAM -435 MB allocated / -543 MB usage on the vegetation map (-27 / -30%), GPU frame -2.6 .. -8.2%; images differ (visual trade-off, by design)",
+   "machine": "DESKTOP-SN4N74U"
+  }
  }
 }
