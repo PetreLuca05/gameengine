@@ -14,6 +14,7 @@
 #include "render/debug_draw.h"
 #include "player/hands.h"
 #include "player/sway.h"
+#include "player/camera_fp.h"
 #include "editor/handpose/hp_system.h"
 #include "anim/procedural_internal.h"
 #include "cJSON.h"
@@ -115,7 +116,11 @@ typedef struct CharGlobals {
         Xform root[2];
         HoldPointOutput hp[2];
         Xform view_cam[2];
+        float view_ads[2];
+        vec3 kick_pos[2], kick_rot[2], view_sway_ads[2];
         bool view_valid;
+        u32 tick;
+        int item_key;
         ProcInput in;
         ItemSockets item;
         u32 parity_checks, parity_fails;
@@ -577,7 +582,10 @@ static void free_inst(World *w, CharacterInst *c) {
     free(c);
 }
 
+static void fp_forget(World *w);
+
 void chars_system_destroy(World *w) {
+    fp_forget(w);
     if (w->chars) {
         for (int i = 0; i < MAX_CHARACTERS; i++)
             if (w->chars->c[i]) free_inst(w, w->chars->c[i]);
@@ -589,6 +597,11 @@ void chars_system_destroy(World *w) {
 }
 
 int chars_count(const World *w) { return w->chars ? w->chars->count : 0; }
+
+bool chars_reacting(World *w, EntityId e) {
+    CharacterInst *c = w->chars ? char_get(w, e) : NULL;
+    return c && proc_damage_active(&c->rt.proc);
+}
 
 int chars_hold_style(World *w, EntityId e) {
     CharacterInst *c = w->chars ? char_get(w, e) : NULL;
@@ -1622,18 +1635,29 @@ static void fp_parity_check(CharacterInst *c) {
 
 // The viewed player's tick: keep its stage A, root, hold point outputs and inputs for the frame re-solve.
 static void fpd_push(World *w, CharacterInst *c, const ProcInput *pi, Xform root) {
-    if (CG->fpd.ent != c->ent) CG->fpd.n = 0;
+    // A broken history (another body, a respawn or a new world, a gap in the evaluations) restarts it:
+    // never interpolate from a stage A captured somewhere else.
+    if (CG->fpd.ent != c->ent || !c->have_pose || w->chars->tick - CG->fpd.tick > (u32)DG_MAX(1, c->interval)) CG->fpd.n = 0;
     CG->fpd.ent = c->ent;
+    CG->fpd.tick = w->chars->tick;
     CG->fpd.sa[0] = CG->fpd.sa[1];
     CG->fpd.root[0] = CG->fpd.root[1];
     CG->fpd.hp[0] = CG->fpd.hp[1];
     CG->fpd.view_cam[0] = CG->fpd.view_cam[1];
+    CG->fpd.view_ads[0] = CG->fpd.view_ads[1];
+    CG->fpd.kick_pos[0] = CG->fpd.kick_pos[1];
+    CG->fpd.kick_rot[0] = CG->fpd.kick_rot[1];
+    CG->fpd.view_sway_ads[0] = CG->fpd.view_sway_ads[1];
     CG->fpd.sa[1] = CG->fpd.cap;
     CG->fpd.cap.valid = false;
     root.s = v3s(c->def->scale);
     CG->fpd.root[1] = root;
     CG->fpd.hp[1] = c->rt.proc.hp_out;
     CG->fpd.view_cam[1] = c->rt.proc.view_item_cam;
+    CG->fpd.view_ads[1] = c->rt.proc.hp_view_valid ? c->rt.proc.hp_view_out.ads_w : 0.0f;
+    CG->fpd.kick_pos[1] = pi->item_kick_pos;
+    CG->fpd.kick_rot[1] = pi->item_kick_rot;
+    CG->fpd.view_sway_ads[1] = c->rt.proc.hp_view_valid ? c->rt.proc.hp_view_out.sway_ads_rot : v3(0, 0, 0);
     CG->fpd.view_valid = c->rt.proc.hp_view_valid;
     CG->fpd.in = *pi;
     CG->fpd.in.capture = NULL;
@@ -1644,9 +1668,17 @@ static void fpd_push(World *w, CharacterInst *c, const ProcInput *pi, Xform root
     if (CG->fpd.n == 0) {
         CG->fpd.sa[0] = CG->fpd.sa[1];
         CG->fpd.root[0] = CG->fpd.root[1];
+    }
+    if (CG->fpd.n == 0 || pi->item_key != CG->fpd.item_key) {
+        // A newly held item: its hold point isn't interpolated from the last item's (or from none).
         CG->fpd.hp[0] = CG->fpd.hp[1];
         CG->fpd.view_cam[0] = CG->fpd.view_cam[1];
+        CG->fpd.view_ads[0] = CG->fpd.view_ads[1];
+        CG->fpd.kick_pos[0] = CG->fpd.kick_pos[1];
+        CG->fpd.kick_rot[0] = CG->fpd.kick_rot[1];
+        CG->fpd.view_sway_ads[0] = CG->fpd.view_sway_ads[1];
     }
+    CG->fpd.item_key = pi->item ? pi->item_key : -1;
     CG->fpd.n = DG_MIN(CG->fpd.n + 1, 2);
     int every = CG->fp_parity ? CG->fp_parity->i : 0;
     if (every > 0 && (w->chars->tick % (u32)every) == 0) fp_parity_check(c);
@@ -1679,7 +1711,7 @@ static void post_one(World *w, CharacterInst *c, int i, float dt, vec3 cam_pos, 
     pi.turn = cv(CG->turn) && lod0;
     pi.lean = cv(CG->lean) && lod0;
     pi.damage = cv(CG->damage) && sys <= 1;
-    pi.hold = cv(CG->hold) && sys <= 1;
+    pi.hold = cv(CG->hold) && (sys <= 1 || (w->authority && c->is_player));   // the host checks every player's aim claims against its hold
     pi.ads_t = c->rt.in.ads ? 1.0f : 0.0f;
     ItemSockets sock;
     const ItemSockets *item = NULL;
@@ -1967,21 +1999,34 @@ static void post_one(World *w, CharacterInst *c, int i, float dt, vec3 cam_pos, 
         // The presented item (the presentation hold point: ADS included) - the gun the shooter sees and
         // aims; the host computes the same one (docs/CAMERA_HOLDPOINT.md "Rule 3").
         Xform iv = c->item_cur;
-        if (c->rt.proc.hp_view_valid && c->rt.proc.has_item)
-            iv = xf_mul(xf_make(root.t, root.r), xf_make(v3_scale(c->rt.proc.view_item_model.t, c->def->scale), c->rt.proc.view_item_model.r));
+        if (c->rt.proc.hp_view_valid && c->rt.proc.has_item) {
+            Xform cam = c->rt.proc.cam_model;
+            cam.s = v3(1, 1, 1);
+            Xform d = xf_mul(xf_inverse(cam), c->rt.proc.item_model);
+            Xform pm_ = xf_mul(cam, xf_mul(proc_presented_move(&c->rt.proc, d, c->rt.proc.hp_view_out.ads_w, saturate(pi.hand_ik_weight)), d));
+            iv = xf_mul(xf_make(root.t, root.r), xf_make(v3_scale(pm_.t, c->def->scale), pm_.r));
+        }
         c->muzzle_cam = aim_world_to_cam(player_eye_pos(pm), pm->yaw, pm->pitch, xf_point(iv, held_sockets(c)->muzzle));
         c->barrel_cam = quat_rotate(quat_conj(aim_view_rot(pm->yaw, pm->pitch)), quat_rotate(iv.r, v3(0, 0, -1)));
         c->muzzle_cam_valid = true;
         c->muzzle_cam_tick = w->chars->tick;
     }
-    // The camera ray's origin: the head's camera socket of the same pose (chars_fp_camera re-reads it
-    // per frame for the render camera), relative to the same simulated eye / view.
+    // The camera ray's origin: the nominal eye the first-person camera glides on (docs/CAMERA_HOLDPOINT.md
+    // "Rule 2"), computed from the simulated state alike on every machine (the head's camera socket
+    // without a table), relative to the simulated eye / view.
     c->eye_cam_valid = false;
     if (c->is_player && c->slot >= 0 && c->slot < MAX_PLAYERS && !c->dead) {
-        const PlayerMove *pm = &w->players[c->slot].sim.move;
+        const Player *pl = &w->players[c->slot];
+        const PlayerMove *pm = &pl->sim.move;
         Xform sock;
-        if (character_socket_world(c->def, "camera", c->pose_cur, &sock)) {
-            c->eye_cam = aim_world_to_cam(player_eye_pos(pm), pm->yaw, pm->pitch, sock.t);
+        vec3 eye;
+        bool have = camera_fp_nominal_eye(pm, pl->sim.down.downed, c->item_valid ? c->rt.in.weapon_type : 0, pm->yaw, pm->pitch, &eye);
+        if (!have && character_socket_world(c->def, "camera", c->pose_cur, &sock)) {
+            eye = sock.t;
+            have = true;
+        }
+        if (have) {
+            c->eye_cam = aim_world_to_cam(player_eye_pos(pm), pm->yaw, pm->pitch, eye);
             c->eye_cam_valid = true;
             c->eye_cam_tick = w->chars->tick;
         }
@@ -2037,7 +2082,8 @@ void chars_present_tick(World *w, vec3 cam_pos, float fov_deg, float screen_h, f
         if (c->is_player && c->slot >= 0) c->local = c->slot == local_slot;
         if (c->predicted_hit_t > 0) c->predicted_hit_t -= dt;
         // The character's fire animation (gun, hands, trigger, slide; no camera, no perceptual punches).
-        if (c->item_weapon && c->item_weapon->kind != WPN_MELEE && (c->tp_fire.string_shots || c->tp_fire.curve_kind || c->tp_fire.slide_active || fabsf(c->tp_fire.gun[FA_PITCH].x) > 1e-5f))
+        if (!c->item_weapon || c->item_weapon->kind == WPN_MELEE) memset(&c->tp_fire_out, 0, sizeof(c->tp_fire_out));   // a knife / medkit / phone never holds a gun's kick
+        else if ((c->tp_fire.string_shots || c->tp_fire.curve_kind || c->tp_fire.slide_active || fabsf(c->tp_fire.gun[FA_PITCH].x) > 1e-5f))
             fire_anim_step(&c->tp_fire, &c->item_weapon->fire, dt, false, 0.0f, &c->tp_fire_out);
         // LOD by projected height.
         float dist = fmaxf(0.1f, v3_dist(cam_pos, c->root.t));
@@ -2544,11 +2590,28 @@ static struct {
     Xform cam_model;             // the pose eye: head bone x eye socket, the view's rotation (model space)
     Xform view_item_cam;         // the presentation hold point's item (ADS included), pose-eye space
     Xform hold_item_cam;         // the pose's hold point item (before the reach pull), pose-eye space
+    float view_ads;              // the presentation hold point's ADS weight, interpolated
+    vec3 kick_pos, kick_rot;     // the pose's gun kick, interpolated like the hold point (the arms layer's Weapon kick)
+    vec3 sway_hip_rot, sway_hip_pos, sway_ads_rot;   // the hold points' sway, interpolated (the arms layer's Weapon sway)
     bool view_valid;
+    bool anchored[2];            // hand h is on a world anchor (ledge, vehicle control): drawn with the world camera
     float ikw;                   // the hold's hand IK weight this frame (the presentation follows clips below 1)
     Xform clav[2];               // the clip's clavicles the IK pass started from
     ProcState st;                // scratch copy of the tick's state
 } FP;
+
+// The world is going away (map change, shutdown): nothing may keep pointing into it.
+static void fp_forget(World *w) {
+    if (FP.w == w) {
+        FP.w = NULL;
+        FP.solved = false;
+        FP.frame = 0;
+    }
+    if (CG) {
+        CG->fpd.n = 0;
+        CG->fpd.ent = 0;
+    }
+}
 
 static u32 fp_pose_hash(const Xform *x, int n) { return anim_hash(x, sizeof(Xform) * (size_t)n, 2166136261u); }
 
@@ -2600,6 +2663,8 @@ static void fp_prepare(World *w, CharacterInst *c, float alpha, float yaw, float
     FP.passes = 0;
     FP.has_item = c->item_valid;
     FP.view_valid = false;
+    FP.view_ads = 0.0f;
+    FP.anchored[0] = FP.anchored[1] = false;
     FP.ikw = 0.0f;
     if (c->item_valid) FP.item_model = xf_mul(inv_root, xf_mul(sfix, xf_lerp(c->item_prev, c->item_cur, it)));
     if (CG->fpd.ent == c->ent && CG->fpd.n > 0 && CG->fpd.sa[1].valid && CG->fpd.sa[0].valid) {
@@ -2630,10 +2695,26 @@ static void fp_prepare(World *w, CharacterInst *c, float alpha, float yaw, float
             FP.st.hp_out.item = lerp_about(CG->fpd.hp[0].item, CG->fpd.hp[1].item, ht, sight_hold);
             FP.st.hp_out.offset = v3_lerp(CG->fpd.hp[0].offset, CG->fpd.hp[1].offset, ht);
             FP.view_item_cam = lerp_about(CG->fpd.view_cam[0], CG->fpd.view_cam[1], ht, sight_item);
-            FP.hold_item_cam = xf_mul(FP.st.hp_out.item, gr);
+            FP.view_ads = lerpf(CG->fpd.view_ads[0], CG->fpd.view_ads[1], ht);
+            FP.kick_pos = v3_lerp(CG->fpd.kick_pos[0], CG->fpd.kick_pos[1], ht);
+            FP.kick_rot = v3_lerp(CG->fpd.kick_rot[0], CG->fpd.kick_rot[1], ht);
+            FP.sway_hip_rot = v3_lerp(CG->fpd.hp[0].sway_hip_rot, CG->fpd.hp[1].sway_hip_rot, ht);
+            FP.sway_hip_pos = v3_lerp(CG->fpd.hp[0].sway_hip_pos, CG->fpd.hp[1].sway_hip_pos, ht);
+            FP.sway_ads_rot = v3_lerp(CG->fpd.view_sway_ads[0], CG->fpd.view_sway_ads[1], ht);
             FP.view_valid = CG->fpd.view_valid;
         }
-        in.root = xf_make(FP.root.t, FP.root.r);   // model space is the skeleton's (the scale is the root's)
+        // The interpolated pose is in the 'then' frame (before seat_fix re-attaches it to the vehicle
+        // as drawn now): so is the root, and so must the tick's world anchors be (steering wheel, seat).
+        in.root = xf_make(c->root.t, quat_yaw(body_yaw));
+        if (c->veh_valid) {
+            Xform then = xf_lerp(c->veh_prev, c->veh_cur, it), vc = c->veh_cur;
+            then.s = vc.s = v3(1, 1, 1);
+            Xform m = xf_mul(then, xf_inverse(vc));
+            for (int h = 0; h < 2; h++) {
+                in.hand_anchor[h] = xf_point(m, in.hand_anchor[h]);
+                in.hand_anchor_rot[h] = quat_norm(quat_mul(m.r, in.hand_anchor_rot[h]));
+            }
+        }
         in.aim_yaw = yaw;
         in.aim_pitch = pitch;
         in.hp_given = true;
@@ -2643,6 +2724,12 @@ static void fp_prepare(World *w, CharacterInst *c, float alpha, float yaw, float
         FP.has_item = FP.st.has_item;
         FP.item_model = FP.st.item_model;
         FP.cam_model = FP.st.cam_model;
+        FP.hold_item_cam = FP.st.hold_item_cam;
+        FP.anchored[0] = FP.anchored[1] = false;
+        for (int h = 0; h < 2; h++) FP.anchored[h] = in.hand_anchor_w > 0.5f && !(in.hand_anchor_skip & (1u << h));
+        // The presentation helper reads the interpolated presented item.
+        FP.st.view_item_cam = FP.view_item_cam;
+        FP.st.hp_view_valid = FP.view_valid;
     }
     for (int b = 0; b < s->count; b++) FP.world[b] = xf_mul(FP.root, FP.model[b]);
     FP.hash = fp_pose_hash(FP.world, s->count);
@@ -2800,7 +2887,8 @@ static CharacterInst *local_fp_char(World *w, int local_slot) {
     if (!w->chars || !LIB || !CG || !cv(CG->fp_body)) return NULL;
     for (int k = 0; k < MAX_CHARACTERS; k++) {
         CharacterInst *c = w->chars->c[k];
-        if (c && c->is_player && c->slot == local_slot && ent_valid(w, c->ent)) return (c->have_pose && !c->dead && !c->rag.active) ? c : NULL;
+        if (c && c->is_player && c->slot == local_slot && ent_valid(w, c->ent))
+            return (c->have_pose && !c->dead && !c->rag.active && w->players[local_slot].sim.move.mode != MOVE_DEAD) ? c : NULL;
     }
     return NULL;
 }
@@ -2931,10 +3019,17 @@ void chars_render_local_fp(World *w, float alpha, int local_slot) {
     quat sr[2];
     bool use[2];
     bool driving = arm && g_vehicle_pose.seat_hands && g_vehicle_pose.seat_hands(w, c->slot, sp, sr, use);
+    // A hand on world geometry (ledge, door, lever, the vehicle controls) is drawn with the world
+    // camera, so it meets what it grips; the arms layer keeps the other arm and the held item.
+    bool anch[2] = { FP.anchored[0] || t.ov_w[0] > 0.5f, FP.anchored[1] || t.ov_w[1] > 0.5f };
+    if (driving) {
+        anch[0] = anch[0] || use[0];
+        anch[1] = anch[1] || use[1];
+    }
     if (!(layers & 2)) {
-    } else if (driving) {
-        draw_char_fp(c, &fp_si, FPD_ARM_L, 0, 0, false);
-        draw_char_fp(c, &fp_si, FPD_ARM_R, 0, use[1] ? 0 : MAT_VIEWMODEL, false);
+    } else if (anch[0] || anch[1]) {
+        draw_char_fp(c, &fp_si, FPD_ARM_L, 0, anch[0] ? 0 : MAT_VIEWMODEL, false);
+        draw_char_fp(c, &fp_si, FPD_ARM_R, 0, anch[1] ? 0 : MAT_VIEWMODEL, false);
     } else draw_char_fp(c, &fp_si, FPD_ARMS, 0, MAT_VIEWMODEL, false);
     hands_set_body_arms(arm);
     if (cv(CG->fp_debug))
@@ -2951,7 +3046,7 @@ bool chars_fp_arms(CharsFpArms *o) {
     ensure_globals();
     memset(o, 0, sizeof(*o));
     o->present = o->present_hold = o->item_cam = o->pose_eye = xf_identity();
-    if (!LIB || FP.frame + 1 < g_engine.frame_index || !FP.solved || !FP.w) return false;
+    if (!LIB || FP.frame != g_engine.frame_index || !FP.solved || !FP.w) return false;   // this frame's pose (its world is alive)
     CharacterInst *c = char_get(FP.w, FP.ent);
     if (!c) return false;
     const Skeleton *s = &LIB->skel;
@@ -2960,7 +3055,8 @@ bool chars_fp_arms(CharsFpArms *o) {
     Xform r = FP.root;
     r.s = v3(1, 1, 1);
     o->pose_eye = xf_mul(r, xf_make(v3_scale(cam_m.t, FP.root.s.x), cam_m.r));
-    o->hp_state = CG->fp_hp_state;
+    o->hp_state = FP.has_item ? (FP.view_valid && c->rt.proc.hp_view_valid ? c->rt.proc.hp_view_out.state : FP.st.hp_out.state) : HP_EMPTY;
+    o->ads_w = FP.has_item && FP.view_valid ? FP.view_ads : 0.0f;
     for (int h = 0; h < 2; h++) {
         int b = s->role[h ? BR_R_ARM : BR_L_ARM];
         o->shoulder[h] = b >= 0 ? FP.world[b].t : o->pose_eye.t;
@@ -2974,19 +3070,13 @@ bool chars_fp_arms(CharsFpArms *o) {
     o->sight = k->sight;
     o->length = k->length;
     o->item_id = c->item_weapon ? c->item_weapon->id : c->item_def->id;
-    o->kick_pos = CG->fpd.in.item_kick_pos;
-    o->kick_rot = CG->fpd.in.item_kick_rot;
-    if (FP.view_valid) {
-        Xform mv = xf_mul(FP.view_item_cam, xf_inverse(o->item_cam)), mh = xf_mul(FP.view_item_cam, xf_inverse(FP.hold_item_cam));
-        mv.s = mh.s = v3(1, 1, 1);
-        // A clip owning the hands (reload, equip, sprint) carries the item: the presentation follows it.
-        if (FP.ikw < 1.0f) {
-            mv = xf_lerp(xf_identity(), mv, saturate(FP.ikw));
-            mh = xf_lerp(xf_identity(), mh, saturate(FP.ikw));
-        }
-        o->present = mv;
-        o->present_hold = mh;
-    }
+    o->kick_pos = FP.kick_pos;
+    o->kick_rot = FP.kick_rot;
+    o->sway_hip_rot = FP.sway_hip_rot;
+    o->sway_hip_pos = FP.sway_hip_pos;
+    o->sway_ads_rot = FP.sway_ads_rot;
+    // The same rigid move the aim claims use (proc_presented_move): presented = move x drawn.
+    o->present = o->present_hold = proc_presented_move(&FP.st, o->item_cam, o->ads_w, FP.ikw);
     return true;
 }
 

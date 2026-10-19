@@ -180,6 +180,7 @@ typedef struct ProcState {
     HoldPointOutput hp_view_out;
     bool hp_view_valid;
     Xform view_item_cam;       // presented item (hold point item x grip root), camera space
+    Xform hold_item_cam;       // the pose's hold point item (x grip root, before the reach pull), camera space
     Xform view_item_model;     // ... model space (camera x view_item_cam)
     Xform cam_model;           // camera (head bone + eye socket, view rotation), model space
     Xform item_cam;            // item target in camera space (pre-IK; the owner re-solves per frame)
@@ -302,6 +303,11 @@ void proc_run(ProcState *s, const ProcInput *in, Pose *pose, Xform *model);
 // come from legs_pose / legs_model (the tick's foot IK). With the tick's own inputs the result is
 // the tick's pose bit for bit. Returns the passes that wrote bones (PROC_PASS_*).
 u32 proc_frame_solve(ProcState *st, const ProcInput *in, const Xform clav_clip[2], const Pose *legs_pose, const Xform *legs_model, Pose *pose, Xform *model);
+// The presentation's rigid move (docs/CAMERA_HOLDPOINT.md "Rule 3"), camera space: presented = move x
+// drawn (drawn_cam: the pose's item in camera space). At the hip only the two hold points' difference
+// (the reach pull and the clip stay), aimed (ads_w) exactly onto the presentation hold point's item,
+// faded out while a clip owns the hands (ikw < 1). The aim claims and the arms layer use it alike.
+Xform proc_presented_move(const ProcState *st, Xform drawn_cam, float ads_w, float ikw);
 // The held item's grip root (its alignment in the hold frame, .s = calibration scale) and one
 // hand's universal grip target on it (the same code as the runtime hold: tests, editor).
 Xform proc_item_root(const ProcInput *in, const ItemSockets *it);

@@ -103,9 +103,9 @@ Hip accuracy is governed by the cone: the crosshair gap opens with the bloom on 
   pull in ADS runs along the view axis.
 - **Optics:** a red dot draws its dot on the eye→sight line, and a picture-in-picture scope looks
   along it, so neither drifts when the gun turns.
-- **Camera kick:** the visual camera kick turns the view but not the aim. While aimed, the first-
-  person weapon counters it (`chars_set_fp_aim_offset`), so the reticle shows exactly where the
-  shots go.
+- **Camera kick:** the visual camera kick turns the view but not the aim. While aimed, the arms layer
+  counters it (its aim rotation, `arms_layer_aim_rot` in src/render/arms_layer.c; never the body), so
+  the reticle shows exactly where the shots go.
 
 Measured: `tools/tests/recoil_ads.cfg` (mag-dumps at `wpn_kick_scale 3`) with `sight_test recoil`
 / `recoil_report`. The worst reticle-to-aim error was ≤ 0.81 px for irons, red dot, 4x, 8x and

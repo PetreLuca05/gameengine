@@ -154,7 +154,7 @@
   ],
 
   "procedural": {
-    "spine": { "weights": [0.18, 0.22, 0.25, 0.15, 0.20], "weights_up": [0.0, 0.02, 0.05, 0.38, 0.55], "weights_ads_up": [0.40, 0.35, 0.25, 0.0, 0.0], "yaw_limit": 100, "pitch_limit": 80, "pitch_limit_up": 89 },
+    "spine": { "weights": [0.18, 0.22, 0.25, 0.15, 0.20], "weights_up": [0.0, 0.02, 0.05, 0.38, 0.55], "yaw_limit": 100, "pitch_limit": 80, "pitch_limit_up": 89 },
     "turn": { "mode": "procedural", "threshold": 65, "speed": 260, "foot_lock_release": 0.22 },
     "foot_ik": { "ray_up": 0.5, "ray_down": 0.6, "pelvis_max_drop": 0.35, "align": 0.8, "smooth": 18, "foot_height": 0.08 },
     "lean": { "slope": 0.35 }

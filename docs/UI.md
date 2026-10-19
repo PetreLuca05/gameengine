@@ -77,7 +77,7 @@ internals, diagnostics and per-feature tuning are Debug.
 * Default button (as above).
 * Display: resolution, window mode, VSync (Apply / Revert, 15 s confirm), frame rate limit,
   stretched resolution.
-* View: field of view (or the server's), hands FOV follows camera, hands / weapon FOV, red dot
+* View: field of view (or the server's), Hands FOV (the arms layer, `cl_hands_fov`; Comfort), red dot
   brightness.
 * Quality card: **Overall graphics quality** = the Engine Fidelity level used as a preset (Off,
   Low, Medium, High, Modern, plus "Custom", greyed, shown when any feature differs from the level's

@@ -3,6 +3,7 @@
 #include "core/cvar.h"
 #include "core/log.h"
 #include "core/platform.h"
+#include "player/player.h"
 #include "cJSON.h"
 #include <math.h>
 #include <stdio.h>
@@ -83,6 +84,32 @@ bool camera_fp_eye_table_save(const char *path_override) {
     free(out);
     log_info("camera: %s %s", ok ? "wrote" : "cannot write", path);
     return ok;
+}
+
+void camera_fp_nominal_in(CamNominalIn *ni, const PlayerMove *m, bool downed, int style, float pitch) {
+    memset(ni, 0, sizeof(*ni));
+    if (m->mode == MOVE_SWIM) ni->posture = m->water == WATER_UNDER ? EYE_DIVE : EYE_SWIM;
+    else if (m->mode == MOVE_HANG) ni->posture = EYE_HANG;
+    else if (m->mode == MOVE_MANTLE || m->mode == MOVE_VAULT) ni->posture = EYE_MANTLE;
+    else ni->posture = downed ? EYE_DOWNED : -1;
+    ni->crouch = smoothstepf(0.0f, 1.0f, m->crouch_amount);
+    ni->speed = v3_len(v3_flat(m->vel));
+    ni->progress = saturate(m->m_t);
+    ni->style = style;
+    ni->pitch = pitch;
+}
+
+bool camera_fp_nominal_eye(const PlayerMove *m, bool downed, int style, float yaw, float pitch, vec3 *out) {
+    if (!g_eye.valid) return false;
+    CamNominalIn ni;
+    camera_fp_nominal_in(&ni, m, downed, style, pitch);
+    int p = ni.posture;
+    vec3 o;
+    if (p < 0) o = v3_lerp(eye_table_sample(&g_eye, EYE_STAND, style, ni.speed, pitch), eye_table_sample(&g_eye, EYE_CROUCH, style, ni.speed, pitch), ni.crouch);
+    else o = eye_table_sample(&g_eye, p, style, p == EYE_MANTLE ? ni.progress : ni.speed, pitch);
+    vec3 fwd = v3(-sinf(yaw), 0, -cosf(yaw)), right = v3(cosf(yaw), 0, -sinf(yaw));
+    *out = v3_add(m->pos, v3_add(v3_add(v3_scale(right, o.x), v3(0, o.y, 0)), v3_scale(fwd, o.z)));
+    return true;
 }
 
 bool camera_fp_eye_table_save_runtime(void) {

@@ -7,7 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-static const char *k_posture[EYE_POSTURES] = { "stand", "crouch", "swim", "hang", "downed", "mantle" };
+static const char *k_posture[EYE_POSTURES] = { "stand", "crouch", "swim", "hang", "downed", "mantle", "dive" };
 const char *eye_posture_name(int p) { return p >= 0 && p < EYE_POSTURES ? k_posture[p] : "stand"; }
 
 void eye_table_defaults(EyeNominalTable *t) {
@@ -15,8 +15,8 @@ void eye_table_defaults(EyeNominalTable *t) {
     static const float pitch[EYE_PITCH_N] = { -85, -60, -30, 0, 30, 60, 85 };
     memcpy(t->pitch, pitch, sizeof(pitch));
     // Speeds: the locomotion blend's samples (assets/human/controller.json: walk 1.6, run 4.2, sprint 6.8).
-    static const float sp[EYE_POSTURES][EYE_SPEED_N] = { { 0, 1.6f, 4.2f, 6.8f }, { 0, 1.2f }, { 0, 1.5f }, { 0 }, { 0, 0.8f }, { 0, 0.33f, 0.67f, 1.0f } };
-    static const int n[EYE_POSTURES] = { 4, 2, 2, 1, 2, 4 };
+    static const float sp[EYE_POSTURES][EYE_SPEED_N] = { { 0, 1.6f, 4.2f, 6.8f }, { 0, 1.2f }, { 0, 1.5f }, { 0 }, { 0, 0.8f }, { 0, 0.33f, 0.67f, 1.0f }, { 0, 1.9f } };
+    static const int n[EYE_POSTURES] = { 4, 2, 2, 1, 2, 4, 2 };
     memcpy(t->speed, sp, sizeof(sp));
     memcpy(t->speed_n, n, sizeof(n));
 }
@@ -134,6 +134,24 @@ vec3 eye_table_sample(const EyeNominalTable *t, int posture, int style, float sp
     return v3_lerp(a, b, su);
 }
 
+u32 eye_table_hash(const EyeNominalTable *t) {
+    u32 h = 2166136261u;
+    for (int p = 0; p < EYE_POSTURES; p++)
+        for (int s = 0; s < EYE_STYLES; s++) {
+            if (!t->style_valid[s]) continue;
+            for (int i = 0; i < t->speed_n[p]; i++)
+                for (int k = 0; k < EYE_PITCH_N; k++) {
+                    vec3 v = t->off[p][s][i][k];
+                    int q[3] = { (int)lroundf(v.x * 10000.0f), (int)lroundf(v.y * 10000.0f), (int)lroundf(v.z * 10000.0f) };
+                    for (int c = 0; c < 3; c++) {
+                        u32 x = (u32)q[c];
+                        for (int b = 0; b < 4; b++) { h ^= (x >> (b * 8)) & 0xffu; h *= 16777619u; }
+                    }
+                }
+        }
+    return h;
+}
+
 CamGlideParams cam_glide_params_default(void) {
     CamGlideParams p = { 150.0f, 24.5f };   // critically damped: damping = 2 sqrt(stiffness), ~0.4 s to settle
     return p;
@@ -169,52 +187,84 @@ vec3 cam_glide_offset(CamGlide *g, const EyeNominalTable *t, const CamNominalIn 
         memset(g->wv, 0, sizeof(g->wv));
         g->speed = in->speed;
         g->speed_v = 0;
-        g->style_from = g->style_to = style;
-        g->style_w = 1.0f;
-        g->style_wv = 0;
+        memset(g->sw, 0, sizeof(g->sw));
+        memset(g->swv, 0, sizeof(g->swv));
+        g->sw[style] = 1.0f;
         g->init = true;
-    }
-    if (style != g->style_to) {
-        g->style_from = g->style_w >= 0.5f ? g->style_to : g->style_from;
-        g->style_to = style;
-        g->style_w = 0.0f;
-        g->style_wv = 0.0f;
     }
     for (int k = 0; k < EYE_POSTURES; k++) spring(&g->w[k], &g->wv[k], tw[k], dt, p);
     spring(&g->speed, &g->speed_v, in->speed, dt, p);
-    spring(&g->style_w, &g->style_wv, 1.0f, dt, p);
+    for (int s = 0; s < EYE_STYLES; s++)
+        if (g->sw[s] != 0.0f || g->swv[s] != 0.0f || s == style) spring(&g->sw[s], &g->swv[s], s == style ? 1.0f : 0.0f, dt, p);
     vec3 o = v3(0, 0, 0);
-    float sum = 0.0f, sw = saturate(g->style_w);
+    float sum = 0.0f;
     for (int k = 0; k < EYE_POSTURES; k++) {
         float w = saturate(g->w[k]);
         if (w < 1e-4f) continue;
         float sv = k == EYE_MANTLE ? in->progress : g->speed;   // the traversal's own progress (continuous)
-        vec3 a = eye_table_sample(t, k, g->style_from, sv, in->pitch), b = eye_table_sample(t, k, g->style_to, sv, in->pitch);
-        o = v3_madd(o, v3_lerp(a, b, sw), w);
+        vec3 e = v3(0, 0, 0);
+        float ssum = 0.0f;
+        for (int s = 0; s < EYE_STYLES; s++) {
+            float ws = saturate(g->sw[s]);
+            if (ws < 1e-4f) continue;
+            e = v3_madd(e, eye_table_sample(t, k, s, sv, in->pitch), ws);
+            ssum += ws;
+        }
+        if (ssum < 1e-4f) e = eye_table_sample(t, k, style, sv, in->pitch);
+        else e = v3_scale(e, 1.0f / ssum);
+        o = v3_madd(o, e, w);
         sum += w;
     }
     return sum > 1e-4f ? v3_scale(o, 1.0f / sum) : eye_table_sample(t, EYE_STAND, style, in->speed, in->pitch);
 }
 
+#define CAM_STEP_MAX 0.3f    // the most a run of steps may leave the eye behind the capsule (m)
+
 float cam_glide_step(CamGlide *g, float y, float speed_h, bool grounded, float dt, const CamGlideParams *p) {
     dt = clampf(dt, 0.0f, 0.1f);
     float dy = y - g->last_y;
-    // A grounded snap - more than a slope can climb in this frame - is a step: absorbed here and
-    // glided out. Everything else (slopes, jumps, falls, lifts) follows the capsule.
-    if (g->step_init && g->last_grounded && grounded && fabsf(dy) > speed_h * dt + 0.02f && fabsf(dy) < 0.8f) g->step -= dy;
-    if (fabsf(g->step) > 0.8f || fabsf(dy) >= 0.8f) g->step = g->step_v = 0.0f;   // a teleport
-    spring(&g->step, &g->step_v, 0.0f, dt, p);
+    // A grounded snap - faster vertically than any slope at this speed (1.5 x the horizontal speed,
+    // at least 1.5 m/s: lifts and ramps stay continuous) - is a step: absorbed here and glided out,
+    // frame-rate independently (the interpolated position spreads a snap over a tick's frames).
+    if (g->step_init && g->last_grounded && grounded && dt > 0.0f && fabsf(dy) > fmaxf(1.5f * speed_h, 1.5f) * dt && fabsf(dy) < 0.8f) g->step -= dy;
+    if (fabsf(dy) >= 0.8f) g->step = g->step_v = 0.0f;   // a teleport
+    // Bounded with a soft knee: stairs taken fast never sink the eye into the body.
+    float a = fabsf(g->step), knee = CAM_STEP_MAX * 0.75f;
+    if (a > knee) {
+        float soft = knee + (CAM_STEP_MAX - knee) * (1.0f - expf(-(a - knee) / (CAM_STEP_MAX - knee)));
+        g->step *= soft / a;
+        if (g->step * g->step_v > 0.0f) g->step_v = 0.0f;
+    }
+    // Twice as fast as the stance glide (a single step settles in ~0.2 s).
+    CamGlideParams ps = { p->stiffness * 4.0f, p->damping * 2.0f };
+    spring(&g->step, &g->step_v, 0.0f, dt, &ps);
     g->last_y = y;
     g->last_grounded = grounded;
     g->step_init = true;
     return g->step;
 }
 
-void cam_anchor_add(CamAnchorStats *s, float d, float radius, int posture) {
+bool cam_glide_settled(const CamGlide *g, const CamNominalIn *in) {
+    if (!g->init) return false;
+    float c = saturate(in->crouch);
+    for (int k = 0; k < EYE_POSTURES; k++) {
+        float tw = in->posture < 0 ? (k == EYE_STAND ? 1.0f - c : (k == EYE_CROUCH ? c : 0.0f)) : (k == in->posture ? 1.0f : 0.0f);
+        if (fabsf(g->w[k] - tw) > 0.05f) return false;
+    }
+    int s = DG_CLAMP(in->style, 0, EYE_STYLES - 1);
+    return fabsf(g->sw[s] - 1.0f) < 0.05f && fabsf(g->speed - in->speed) < 0.3f && fabsf(g->step) < 0.01f;
+}
+
+void cam_anchor_add(CamAnchorStats *s, float d, float radius, int posture, bool eligible) {
     s->frames++;
     s->sum_d += d;
     s->max_d = fmaxf(s->max_d, d);
     if (d > radius) s->over++;
+    if (eligible) {
+        s->elig++;
+        s->elig_max = fmaxf(s->elig_max, d);
+        if (d > radius) s->elig_over++;
+    }
     posture = DG_CLAMP(posture, 0, EYE_POSTURES - 1);
     s->max_posture[posture] = fmaxf(s->max_posture[posture], d);
 }

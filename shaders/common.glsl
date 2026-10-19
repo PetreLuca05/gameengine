@@ -154,6 +154,7 @@ layout(set = 0, binding = 0) uniform FrameData {
     vec4 arms_shoulder[2];
     vec4 arms_shoulder_prev[2];
     vec4 arms_seam;
+    vec4 arms_eye;        // the arms camera's eye in pose space (view vectors of the arms layer)
 } frame;
 
 // Where a world point lies in the screen-space inputs (AO, contact, SSR, SSGI, froxels): this

@@ -10,27 +10,33 @@
 
 static Xform root_at0(void) { return xf_make(v3(0, 0, 0), quat_identity()); }
 
-// The weapon whose sockets stand for a hold style (the first of the item database).
-static const WeaponDef *style_weapon(const AnimLibrary *L, const ItemDB *db, int style, int *index) {
+// The item whose sockets stand for a hold style: the first weapon of the database with it, else the
+// first other item (medkit, phone ...).
+static const ItemSockets *style_item(const AnimLibrary *L, const ItemDB *db, int style, int *weapon_id) {
     for (int i = 0; db && i < db->weapon_count; i++)
         if (proc_hold_style_index(&L->proc, db->weapons[i].hold_style) == style) {
-            *index = i;
-            return &db->weapons[i];
+            *weapon_id = i + 1;
+            return &db->weapons[i].sockets;
+        }
+    for (int i = 0; db && i < db->item_count; i++)
+        if (db->items[i].hold_style[0] && proc_hold_style_index(&L->proc, db->items[i].hold_style) == style) {
+            *weapon_id = 1000 + i;
+            return &db->items[i].sockets;
         }
     return NULL;
 }
 
 bool eye_nominal_calibrate(const AnimLibrary *L, const CharacterDef *def, const ItemDB *db, EyeNominalTable *t, int warm, int sample) {
     if (!L || !def || !character_socket(def, "camera")) return false;
-    if (warm <= 0) warm = 45;
+    if (warm <= 0) warm = 90;   // the dive tilt settles in ~1.2 s
     if (sample <= 0) sample = 120;
     eye_table_defaults(t);
     const float dt = 1.0f / 60.0f;
     CharRuntime *rt = (CharRuntime *)malloc(sizeof(CharRuntime));
     vec3 *pts = (vec3 *)malloc(sizeof(vec3) * (size_t)sample);
     for (int s = 0; s < EYE_STYLES; s++) {
-        int wi = -1;
-        const WeaponDef *wd = s ? style_weapon(L, db, s, &wi) : NULL;
+        int wid = 0;
+        const ItemSockets *wd = s ? style_item(L, db, s, &wid) : NULL;
         if (s && !wd) continue;
         t->style_valid[s] = true;
         for (int p = 0; p < EYE_POSTURES; p++)
@@ -39,9 +45,9 @@ bool eye_nominal_calibrate(const AnimLibrary *L, const CharacterDef *def, const 
                     charrt_init(rt, L, def);
                     CharInputs in;
                     memset(&in, 0, sizeof(in));
-                    in.grounded = p != EYE_HANG && p != EYE_MANTLE && p != EYE_SWIM;
+                    in.grounded = p != EYE_HANG && p != EYE_MANTLE && p != EYE_SWIM && p != EYE_DIVE;
                     in.weapon_type = s;
-                    in.weapon_id = wd ? (u16)(wi + 1) : 0;
+                    in.weapon_id = wd ? wid : 0;
                     in.aim_pitch = t->pitch[k] * DG_DEG2RAD;
                     in.move_local = v2(0, 1);
                     float v = t->speed[p][i];
@@ -61,8 +67,16 @@ bool eye_nominal_calibrate(const AnimLibrary *L, const CharacterDef *def, const 
                         charrt_eval_base(rt);
                         ProcInput pi;
                         charrt_proc_input(rt, &pi, root_at0(), dt);
-                        pi.item = wd && p != EYE_HANG && p != EYE_MANTLE ? &wd->sockets : NULL;
+                        pi.item = wd && p != EYE_HANG && p != EYE_MANTLE && p != EYE_DIVE ? wd : NULL;   // stowed under water
                         if (in.crouch) pi.crouch_drop = 0.38f;
+                        if (p == EYE_DIVE) {
+                            // Under water: the dive pose (proc_swim tilts the body with the view), well below the surface.
+                            pi.swim = 2;
+                            pi.swim_speed = v;
+                            pi.water_y = 3.5f;
+                            pi.foot_ik = false;
+                            pi.lean = false;
+                        }
                         if (p == EYE_SWIM) {
                             // At the surface: the eye pl_swim_eye (0.16) above the water, the feet a standing eye below it.
                             pi.swim = 1;

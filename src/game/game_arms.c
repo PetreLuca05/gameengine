@@ -12,6 +12,7 @@
 #include "player/camera.h"
 #include "render/arms_layer.h"
 #include "render/render.h"
+#include "player/spectator.h"
 #include "ui/arms_tuner.h"
 #include "cJSON.h"
 #include <math.h>
@@ -81,18 +82,23 @@ static void cmd_reload(int argc, const char **argv) {
     (void)argv;
     log_info("arms_layer_reload: %s", game_arms_load() ? "ok" : "defaults");
 }
-static void cmd_save(int argc, const char **argv) { game_arms_save(argc > 1 ? argv[1] : NULL); }
+static void cmd_save(int argc, const char **argv) {
+    if (cvar_release_locks()) { log_info("arms_layer_save: dev builds only"); return; }
+    game_arms_save(argc > 1 ? argv[1] : NULL);
+}
 
 // arms_layer_set <state> <offset|rotation|scale|fov_add|blend> <x> [y z] [item]
 static void cmd_set(int argc, const char **argv) {
     if (argc < 4) { log_info("arms_layer_set <state> <offset|rotation|scale|fov_add|blend> <x> [y z] [item]"); return; }
+    if (cvar_release_locks()) { log_info("arms_layer_set: dev builds only"); return; }
     int s = holdpoint_state_from_name(argv[1]);
+    if (s < 0) { log_info("arms_layer_set: unknown state '%s'", argv[1]); return; }
     bool vec = !strcmp(argv[2], "offset") || !strcmp(argv[2], "rotation");
     if (vec && argc < 6) { log_info("arms_layer_set: %s takes x y z", argv[2]); return; }
     const char *item = argc > (vec ? 6 : 4) ? argv[vec ? 6 : 4] : NULL;
     if (!strcmp(argv[2], "blend")) { AL.def.blend[s] = fmaxf(0.0f, (float)atof(argv[3])); return; }
     ArmsPose *p = arms_layer_edit(&AL.def, s, item);
-    if (!strcmp(argv[2], "offset")) p->offset = v3((float)atof(argv[3]), (float)atof(argv[4]), (float)atof(argv[5]));
+    if (!strcmp(argv[2], "offset")) p->offset = v3(clampf((float)atof(argv[3]), -0.3f, 0.3f), clampf((float)atof(argv[4]), -0.3f, 0.3f), clampf((float)atof(argv[5]), -0.3f, 0.3f));
     else if (!strcmp(argv[2], "rotation")) p->rotation = v3((float)atof(argv[3]), (float)atof(argv[4]), (float)atof(argv[5]));
     else if (!strcmp(argv[2], "scale")) p->scale = clampf((float)atof(argv[3]), 0.9f, 1.1f);
     else if (!strcmp(argv[2], "fov_add")) p->fov_add = clampf((float)atof(argv[3]), -20.0f, 20.0f);
@@ -126,6 +132,10 @@ void game_arms_init(void) {
 // The Hands FOV (hip) of this frame: the player's setting (Hor+ like the world FOV) plus the state's
 // fov_add; aimed, the sight's own FOV (render_vm_fov_for).
 static float hands_fov(const RenderCamera *cam, float fov_add) {
+    // The tuning's FOV add never leaves the Hands FOV setting's own band (50 .. 90).
+    Cvar *hf = cvar_find("cl_hands_fov");
+    float set = hf ? hf->f : 65.0f;
+    fov_add = clampf(fov_add, 50.0f - set, 90.0f - set);
     RenderCamera hc = *cam;
     hc.vm_fov_deg = camera_hands_fov() + fov_add;
     return render_vm_fov_for(&hc, 0.0f);
@@ -134,7 +144,9 @@ static float hands_fov(const RenderCamera *cam, float fov_add) {
 void game_arms_frame(const RenderCamera *cam, vec2 aim_deg, float aim_pitch, float screen_kick) {
     AL.have = false;
     CharsFpArms fa;
-    if (!AL.enable || !AL.enable->i || !chars_fp_arms(&fa)) {
+    // No layer under a camera that isn't the player's eye (flythroughs, a spectator switching targets):
+    // the arms then stay where the world camera sees them.
+    if (!AL.enable || !AL.enable->i || render_camera_overridden() || spectator_blending() || !chars_fp_arms(&fa)) {
         render_set_arms_layer(NULL);
         return;
     }
@@ -151,8 +163,9 @@ void game_arms_frame(const RenderCamera *cam, vec2 aim_deg, float aim_pitch, flo
     in->length = fa.length;
     in->item_id = fa.item_id;
     in->hp_state = fa.hp_state;
-    in->ads_w = fa.has_item ? game_ads_vis() : 0.0f;
-    in->equip_t = p && fa.has_item ? p->sim.wpn.equip_t : -1.0f;
+    in->ads_w = fa.ads_w;   // the presentation hold point's own ADS weight (the aim claims use the same)
+    // The raise follows this frame, not the 60 Hz tick.
+    in->equip_t = p && fa.has_item ? fminf(p->sim.wpn.equip_t + G->alpha * SIM_DT, AL.def.equip_time + 1.0f) : -1.0f;
     in->aim_deg = aim_deg;
     in->aim_pitch = aim_pitch;
     in->fov_world = cam->fov_deg;
@@ -161,6 +174,10 @@ void game_arms_frame(const RenderCamera *cam, vec2 aim_deg, float aim_pitch, flo
     in->kick_rot = fa.kick_rot;
     const WeaponCvars *wc = weapons_cvars();
     in->kick_scale = wc && wc->visual_scale ? wc->visual_scale->f : 1.0f;
+    in->sway_hip_rot = fa.sway_hip_rot;
+    in->sway_hip_pos = fa.sway_hip_pos;
+    in->sway_ads_rot = fa.sway_ads_rot;
+    in->sway_scale = wc && wc->sway_cosmetic ? wc->sway_cosmetic->f : 1.0f;
     in->screen_kick = screen_kick;
     in->dt = (float)g_engine.frame_dt;
     arms_layer_eval(&AL.def, &AL.st, in, &AL.out);

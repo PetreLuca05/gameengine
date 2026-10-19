@@ -419,7 +419,7 @@
    "class": "EDITABLE",
    "ui": "Graphics > Comfort",
    "reason": "Hands FOV 50 .. 90 deg vertical: only the arms layer (your arms + the held item); the world, aiming and the sight picture are unchanged (comfort / cosmetic).",
-   "category": "player"
+   "category": "camera"
   },
   "cl_healthbars": {
    "class": "LOCKED+RULE",
@@ -449,7 +449,7 @@
    "class": "EDITABLE",
    "ui": "Graphics > Comfort",
    "reason": "Movement shake 0 .. 1: head bob, landing dip, ledge / mantle tilt (comfort; replaces Head bob). Off by default: the camera glides.",
-   "category": "player"
+   "category": "camera"
   },
   "cl_name": {
    "class": "EDITABLE",

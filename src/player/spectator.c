@@ -577,6 +577,7 @@ void spectator_blend_camera(RenderCamera *cam, float dt) {
 }
 
 float spectator_delay_ms(void) { return SP.delay_est_ms; }
+bool spectator_blending(void) { return SP.blend_on; }
 
 bool spectator_hud(SpectatorHud *o) {
     memset(o, 0, sizeof(*o));

@@ -515,12 +515,16 @@ bool render_begin_frame(void) {
     return true;
 }
 
+static bool g_cam_overridden;
+bool render_camera_overridden(void) { return g_cam_overridden; }
+
 void render_set_camera(const RenderCamera *cam) {
     R->cam = *cam;
     R->arms.valid = false;   // render_set_arms_layer follows (first person)
+    g_cam_overridden = false;
     vkg_frame_update();          // grass fades / shadows follow the fidelity level (outside the frame's recording)
     for (int k = 0; k < 4 && g_cam_override[k]; k++)
-        if (g_cam_override[k](&R->cam)) break;   // bench_fidelity / perf_audit flythroughs
+        if (g_cam_override[k](&R->cam)) { g_cam_overridden = true; break; }   // bench_fidelity / perf_audit flythroughs
     cam = &R->cam;
     float aspect = view_aspect();
     R->view = mat4_fps_view(cam->pos, cam->yaw, cam->pitch, cam->roll);
@@ -1723,7 +1727,12 @@ static void compute_matrices(FrameData *fd) {
             R->arms_shoulder_prev[i] = sh;
         }
         R->arms_had_prev = a->valid;
-        fd->arms_seam = v4(a->seam_r0, fmaxf(a->seam_r1, a->seam_r0 + 0.01f), a->valid && a->seam_r1 > 0.0f ? 1.0f : 0.0f, 0);
+        // The arms camera's eye (pose space): view vectors of the arms layer's lighting start there. The
+        // seam blends towards the world camera only while the two eyes are close (a few cm apart).
+        vec3 ae = a->valid ? mat4_mul_point(mat4_inverse(R->arms_view), v3(0, 0, 0)) : R->cam.pos;
+        fd->arms_eye = v4(ae.x, ae.y, ae.z, 0);
+        bool seam = a->valid && a->seam_r1 > 0.0f && v3_dist(ae, R->cam.pos) < 0.3f;
+        fd->arms_seam = v4(a->seam_r0, fmaxf(a->seam_r1, a->seam_r0 + 0.01f), seam ? 1.0f : 0.0f, 0);
     }
     fd->shadow_vp = R->shadow_vp;
     memcpy(fd->shadow_vps, R->shadow_vps, sizeof(fd->shadow_vps));
@@ -3189,7 +3198,7 @@ float render_vm_fov_for(const RenderCamera *c, float rvm) {
 float render_vm_fov(void) { return R->arms.valid ? R->arms.fov_deg : render_vm_fov_for(&R->cam, 0.0f); }
 
 void render_set_arms_layer(const RenderArmsLayer *a) {
-    if (a) R->arms = *a;
+    if (a && !g_cam_overridden) R->arms = *a;
     else R->arms.valid = false;
 }
 

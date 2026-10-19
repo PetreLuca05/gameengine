@@ -253,6 +253,7 @@ void proc_hold(ProcState *st, const ProcInput *in, Pose *pose, Xform *model) {
     }
     const Xform sock_r = st->hand[1].sock, sock_l0 = st->hand[0].sock;
     Xform desired = xf_mul(xf_mul(cam, st->hp_out.item), root);
+    st->hold_item_cam = xf_mul(st->hp_out.item, root);
     if (!in->hp_given) {
         st->view_item_cam = xf_mul(st->hp_view_valid ? st->hp_view_out.item : st->hp_out.item, root);
         st->view_item_model = xf_mul(cam, st->view_item_cam);

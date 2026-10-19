@@ -68,7 +68,6 @@ bool proc_params_load(ProcParams *p, const cJSON *root) {
     memcpy(p->spine_weights, sw, sizeof(sw));
     float swu[5] = { 0.0f, 0.02f, 0.05f, 0.38f, 0.55f };
     memcpy(p->spine_weights_up, swu, sizeof(swu));
-    float swa[5] = { 0.40f, 0.35f, 0.25f, 0.0f, 0.0f };
     p->yaw_limit = 100;
     p->pitch_limit = 80;
     p->pitch_limit_up = 89;
@@ -470,10 +469,21 @@ void proc_run(ProcState *st, const ProcInput *in0, Pose *pose, Xform *model) {
     // Before the hand solve: whatever moved above, the arm chains start from the clip's shoulders.
     keep_clavicles(in.skel, pose, model, clav, clav_clip);
     if (in.hold && in.item) proc_hold(st, &in, pose, model);
-    else st->has_item = false;
+    else st->has_item = st->hp_view_valid = false;   // no hold: no presentation (the aim claims don't use a stale one)
     if (in.hand_anchor_w > 0) proc_hand_anchors(st, &in, pose, model);
     if (in.foot_ik) proc_foot_legs(st, &in, pose, model, foot_off, anim_foot);
     st->prev_vel = in.velocity;
+}
+
+Xform proc_presented_move(const ProcState *st, Xform drawn_cam, float ads_w, float ikw) {
+    if (!st->hp_view_valid || !st->has_item) return xf_identity();
+    Xform v = st->view_item_cam, h = st->hold_item_cam;
+    v.s = h.s = drawn_cam.s = v3(1, 1, 1);
+    Xform at_hip = xf_mul(v, xf_inverse(h)), aimed = xf_mul(v, xf_inverse(drawn_cam));
+    Xform m = xf_lerp(at_hip, aimed, saturate(ads_w));
+    if (ikw < 1.0f) m = xf_lerp(xf_identity(), m, saturate(ikw));
+    m.s = v3(1, 1, 1);
+    return m;
 }
 
 static bool leg_bone(const Skeleton *s, int b) {
@@ -498,7 +508,7 @@ u32 proc_frame_solve(ProcState *st, const ProcInput *in0, const Xform clav_clip[
     // the anchors, the legs keep the tick's foot IK.
     keep_clavicles(s, pose, model, clav, clav_clip);
     if (in.hold && in.item) proc_hold(st, &in, pose, model);
-    else st->has_item = false;
+    else st->has_item = st->hp_view_valid = false;
     if (in.hand_anchor_w > 0) proc_hand_anchors(st, &in, pose, model);
     if (in.foot_ik && legs_pose && legs_model)
         for (int b = 0; b < s->count; b++)

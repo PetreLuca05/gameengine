@@ -242,14 +242,27 @@ void arms_layer_eval(const ArmsLayerDef *d, ArmsLayerState *st, const ArmsLayerI
     // Tuned placement about the hold point.
     mat4 T = about(pivot, hp_euler_deg(p.rotation), p.scale, hp_cam_pos(p.offset));
     pivot = mat4_mul_point(T, pivot);
+    // Cosmetic sway (Weapon sway < 1): the pose's sway shown smaller - about the pivot at the hip, about
+    // the sight aimed (the hold point turns it there).
+    mat4 Sw = mat4_identity();
+    {
+        float k = 1.0f - clampf(in->sway_scale, 0.0f, 1.0f);
+        if (k > 0.0f) {
+            quat rh = quat_conj(hp_euler_deg(v3_scale(in->sway_hip_rot, k * (1.0f - ads))));
+            quat ra = quat_conj(hp_euler_deg(v3_scale(in->sway_ads_rot, k * ads)));
+            Sw = about(pivot, quat_norm(quat_mul(ra, rh)), 1.0f, v3_scale(in->sway_hip_pos, -k * (1.0f - ads)));
+        }
+    }
     // Cosmetic kick: the pose's kick shown smaller (Weapon kick < 1), plus the screen kick towards the eye.
+    // Aimed, only the push: the hold point turns the gun about the sight there (and clamps irons), so
+    // countering the raw rotation would move the reticle.
     mat4 K = mat4_identity();
     {
         float k = 1.0f - clampf(in->kick_scale, 0.0f, 1.0f);
         vec3 kp = in->kick_pos;
         kp.x *= 1.0f - ads;
         kp.y *= 1.0f - ads;
-        vec3 kd = v3(in->kick_rot.x, -in->kick_rot.y, in->kick_rot.z);
+        vec3 kd = v3_scale(v3(in->kick_rot.x, -in->kick_rot.y, in->kick_rot.z), 1.0f - ads);
         quat r = quat_conj(hp_euler_deg(v3_scale(kd, k)));
         vec3 t = v3_add(v3_scale(kp, -k), v3(0, 0, in->screen_kick * clampf(in->kick_scale, 0.0f, 1.0f)));
         K = about(pivot, r, 1.0f, t);
@@ -268,7 +281,7 @@ void arms_layer_eval(const ArmsLayerDef *d, ArmsLayerState *st, const ArmsLayerI
     // Aim: where the world camera shows the shot (sway, the ADS counter of the camera kick, the FOVs).
     quat a = arms_layer_aim_rot(in->aim_deg, in->aim_pitch, in->fov_world, in->fov_hands);
     mat4 A = mat4_from_quat(a);
-    out->layer = mat4_mul(A, mat4_mul(E, mat4_mul(K, mat4_mul(T, P))));
+    out->layer = mat4_mul(A, mat4_mul(E, mat4_mul(K, mat4_mul(Sw, mat4_mul(T, P)))));
     Xform eye = in->pose_eye;
     eye.s = v3(1, 1, 1);
     mat4 inv_eye = mat4_inverse_rigid(mat4_trs(eye.t, eye.r, v3(1, 1, 1)));

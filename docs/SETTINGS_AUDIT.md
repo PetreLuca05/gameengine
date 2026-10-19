@@ -195,6 +195,8 @@ see; the host's lobby rules may set some of them for a whole game.
 | `snd_weather` | audio | EDITABLE | Audio | no | Volumes. |
 | `cam_kick_scale` | camera | EDITABLE | Graphics > Comfort | no | Camera shake: the visual camera kick on shots and the fire punches, 0.25 .. 1 (accessibility). Aim recoil is separate (wpn_recoil_scale, host). |
 | `cl_fov` | camera | EDITABLE | Graphics > Comfort | no | World FOV: personal comfort within the band 60 .. 120 deg vertical (was 50 .. 120). sv_fov / sv_fov_max still override. |
+| `cl_hands_fov` | camera | EDITABLE | Graphics > Comfort | no | Hands FOV 50 .. 90 deg vertical: only the arms layer (your arms + the held item); the world, aiming and the sight picture are unchanged (comfort / cosmetic). |
+| `cl_move_shake` | camera | EDITABLE | Graphics > Comfort | no | Movement shake 0 .. 1: head bob, landing dip, ledge / mantle tilt (comfort; replaces Head bob). Off by default: the camera glides. |
 | `cl_sprint_fov` | camera | EDITABLE | Graphics > Comfort | no | Sprint FOV kick: comfort (motion sickness), bounded 0 .. 7 deg: it can only narrow the change. |
 | `hud_compass` | hud | EDITABLE | HUD | no | HUD layout / visibility: scale, opacity, compass (+ its arc), coordinates, kill counter / feed, pings, phone panel, timed ring, clock. |
 | `hud_compass_arc` | hud | EDITABLE | HUD | no | HUD layout / visibility: scale, opacity, compass (+ its arc), coordinates, kill counter / feed, pings, phone panel, timed ring, clock. |
@@ -256,8 +258,6 @@ see; the host's lobby rules may set some of them for a whole game.
 | `phone_token_ttl` | phone | EDITABLE | Phone (dev) | no | Phone companion transport (PHONE.md): personal device setup. |
 | `phone_video_kbps` | phone | EDITABLE | Phone | no | Phone companion: personal device / stream preferences; the in-game item behaves the same for everyone. |
 | `cl_fp_body` | player | EDITABLE | — | no | Own body in first person: only your view of yourself. |
-| `cl_hands_fov` | player | EDITABLE | Graphics > Comfort | no | Hands FOV 50 .. 90 deg vertical: only the arms layer (your arms + the held item); the world, aiming and the sight picture are unchanged (comfort / cosmetic). |
-| `cl_move_shake` | player | EDITABLE | Graphics > Comfort | no | Movement shake 0 .. 1: head bob, landing dip, ledge / mantle tilt (comfort; replaces Head bob). Off by default: the camera glides. |
 | `cl_showfps` | player | EDITABLE | Graphics > Display | no | FPS overlay toggle. |
 | `cl_skin` | player | EDITABLE | Character | no | Skin: cosmetic, seen by everyone (same set for all). |
 | `developer` | player | EDITABLE | — | no | Identity / network preferences / console. |

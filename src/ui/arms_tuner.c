@@ -27,6 +27,8 @@ bool arms_tuner_open(void) { return T.open; }
 static void cmd_tuner(int argc, const char **argv) {
     (void)argc;
     (void)argv;
+    // A dev tool: it writes locked cvars and the shared arms layer data (never under the release locks).
+    if (cvar_release_locks()) { log_info("arms_tuner: dev builds only"); return; }
     T.open = !T.open;
 }
 void arms_tuner_init(void) {
@@ -53,7 +55,7 @@ static void toggle_cvar(struct nk_context *ctx, const char *label, const char *n
 }
 
 void arms_tuner_draw(void) {
-    if (!T.open) return;
+    if (!T.open || cvar_release_locks()) return;
     ArmsLayerDef *d = game_arms_def();
     ArmsLayerIn in;
     ArmsLayerOut out;
@@ -85,27 +87,35 @@ void arms_tuner_draw(void) {
         nk_bool pi = T.per_item;
         if (nk_checkbox_label(ctx, live && in.item_id ? "this item only" : "this item only (none held)", &pi)) T.per_item = pi;
         const char *item = T.per_item && live && in.item_id ? in.item_id : NULL;
-        ArmsPose *p = arms_layer_edit(d, T.state, item);
+        // Edit a copy: the item override is only created once a value actually changes.
+        ArmsPose cur = arms_layer_target(d, T.state, item), *p = &cur;
         bool ads = T.state == HP_ADS;
+        bool changed = false;
         if (nk_tree_push(ctx, NK_TREE_TAB, ads ? "Layer (ADS: push, roll, scale about the sight)" : "Layer (about the hold point)", NK_MAXIMIZED)) {
             if (!ads) {
-                frow(ctx, "offset right (m)", &p->offset.x, -0.3f, 0.3f, 0.001f);
-                frow(ctx, "offset up (m)", &p->offset.y, -0.3f, 0.3f, 0.001f);
+                changed |= frow(ctx, "offset right (m)", &p->offset.x, -0.3f, 0.3f, 0.001f);
+                changed |= frow(ctx, "offset up (m)", &p->offset.y, -0.3f, 0.3f, 0.001f);
             }
-            frow(ctx, ads ? "push forward (m)" : "offset forward (m)", &p->offset.z, -0.3f, 0.3f, 0.001f);
+            changed |= frow(ctx, ads ? "push forward (m)" : "offset forward (m)", &p->offset.z, -0.3f, 0.3f, 0.001f);
             if (!ads) {
-                frow(ctx, "pitch (deg)", &p->rotation.x, -45, 45, 0.1f);
-                frow(ctx, "yaw (deg)", &p->rotation.y, -45, 45, 0.1f);
+                changed |= frow(ctx, "pitch (deg)", &p->rotation.x, -45, 45, 0.1f);
+                changed |= frow(ctx, "yaw (deg)", &p->rotation.y, -45, 45, 0.1f);
             }
-            frow(ctx, "roll (deg)", &p->rotation.z, -45, 45, 0.1f);
-            frow(ctx, "scale", &p->scale, 0.9f, 1.1f, 0.001f);
-            if (!ads) frow(ctx, "FOV add (deg)", &p->fov_add, -20, 20, 0.1f);
+            changed |= frow(ctx, "roll (deg)", &p->rotation.z, -45, 45, 0.1f);
+            changed |= frow(ctx, "scale", &p->scale, 0.9f, 1.1f, 0.001f);
+            if (!ads) changed |= frow(ctx, "FOV add (deg)", &p->fov_add, -20, 20, 0.1f);
             frow(ctx, "blend into (s)", &d->blend[T.state], 0, 1, 0.01f);
             nk_layout_row_dynamic(ctx, S(24), 1);
             if (nk_button_label(ctx, "Reset this state")) {
                 p->offset = p->rotation = v3(0, 0, 0);
                 p->scale = 1.0f;
                 p->fov_add = 0.0f;
+                changed = true;
+            }
+            if (changed) {
+                ArmsPose *dst = arms_layer_edit(d, T.state, item);
+                if (item && dst == &d->state[T.state]) snprintf(T.status, sizeof(T.status), "item table full: edited the state default");
+                *dst = cur;
             }
             nk_tree_pop(ctx);
         }

@@ -1374,6 +1374,7 @@ static void warn_live_session(const char *what) {
 static void cmd_anim_reload(int argc, const char **argv) {
     if (!g_engine.anim) return;
     anim_lib_reload_meta(g_engine.anim);
+    game_camera_eye_check();   // the nominal eye follows the animation (and stays in the manifest)
     log_info("anim_reload: manifest %08x", anim_manifest_combined(&g_engine.anim->manifest));
     warn_live_session("anim_reload");
 }
@@ -1381,6 +1382,7 @@ static void cmd_anim_reload(int argc, const char **argv) {
 static void cmd_anim_rebake(int argc, const char **argv) {
     if (!g_engine.anim) return;
     anim_lib_rebake(g_engine.anim);
+    game_camera_eye_check();
     log_info("anim_rebake: %d clips, manifest %08x", g_engine.anim->clip_count, anim_manifest_combined(&g_engine.anim->manifest));
     warn_live_session("anim_rebake");
 }

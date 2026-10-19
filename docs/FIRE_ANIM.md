@@ -60,18 +60,21 @@ After hold point placement, global sway and ADS alignment, and before the hand I
 |---|---|---|---|
 | 1 | Fire pose curves (first / sustained / release, cropped at the next shot) | gun pos / rot | `holdpoint_eval` kick input |
 | 2 | Mass springs: pitch, yaw, roll, kickback, vertical | gun pos / rot | same; hip about the pivot, ADS about the sight (forward-only translation) |
-| 3 | Hands + body: hand error, trigger, grip, shoulder | `hand_pos/rot`, `trigger`, `shoulder` | `chars_render_local_fp` (hand IK targets, fingers) |
+| 3 | Hands + body: hand error, trigger, grip, shoulder | `hand_pos/rot`, `trigger`, `shoulder` | `proc_hold` (weapon_hold.c `fire_hand_lag`: the hands trail the kick; trigger / grip fingers) |
 | 4 | Mechanical: slide / bolt / pump, wobble, eject cue | `slide`, `wobble_rot` | `hands.c draw_weapon` (`"mech"` parts, attachment slots); casing in `game_fire_tick` |
 | 5 | Camera: delayed spring, FOV punch, roll twitch, screen kick, blur, chroma | `cam_*`, `fov_punch`, ... | `game_render.c` camera, `game_post.c` (`mb_viewmodel`, chromatic / vignette) |
 | 6 | Sync | flash on the kicked muzzle (`game_fire_flush_flash`), sound on the shot tick | weapons.c `weapons_set_local_flash` |
 
-`game_fire_tick` runs before `chars_present_tick`, so the hold point sees the kick of the shot's
-own tick. Shots carry their exact sub-tick time (`ShotEvent.sub_tick`) and the fire interval
-(`interval`), which auto fire uses to crop the curves.
-
-**Third person:** remote players run their own instance (`CharacterInst.tp_fire`). It uses
-layers 1, 2 and 4 at 0.55 scale, with no camera or punches. It is driven by the fire events with
-a deterministic seed.
+Two instances (docs/CAMERA_HOLDPOINT.md "Rule 1"):
+- **Every body's** (`CharacterInst.tp_fire`, the shooter's own included): layers 1 to 4 at
+  `wpn_fire_anim_scale`, with no camera or punches, the seed from the shot count. The viewed /
+  predicting player's shots trigger it in `chars_notify_attack`, everyone else's through
+  `AEV_FIRE`. Its gun kick, hand lag and trigger go into the hold point and `proc_hold` alike on
+  every machine, so the shooter's body is the pose everyone sees.
+- **The viewed player's first-person one** (`game_fire.c`, with the shot's exact sub-tick time
+  `ShotEvent.sub_tick` and fire `interval` for cropping auto fire): only the camera (layer 5), the
+  drawn weapon's mechanics (layer 4: slide, wobble), the screen kick and the arms layer's cosmetic
+  Weapon kick; never a bone.
 
 ## Parameters
 

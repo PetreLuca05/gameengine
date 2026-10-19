@@ -47,6 +47,7 @@ static ArmsLayerIn base_in(Xform eye) {
     in.fov_world = 75.0f;
     in.fov_hands = 65.0f;
     in.kick_scale = 1.0f;
+    in.sway_scale = 1.0f;
     in.dt = 1.0f / 60.0f;
     return in;
 }

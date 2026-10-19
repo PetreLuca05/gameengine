@@ -10,7 +10,7 @@
 
 struct ItemDB;
 
-// warm / sample: ticks at 60 Hz before and while averaging (0: 45 / 120). Returns false without the
+// warm / sample: ticks at 60 Hz before and while averaging (0: 90 / 120). Returns false without the
 // player character or its "camera" socket.
 bool eye_nominal_calibrate(const AnimLibrary *L, const CharacterDef *def, const struct ItemDB *db, EyeNominalTable *out, int warm, int sample);
 

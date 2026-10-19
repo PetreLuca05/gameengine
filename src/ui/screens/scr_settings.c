@@ -140,7 +140,7 @@ void settings_confirm_result(bool keep) {
 // cleared. Kept: the display (Apply / Revert, confirmed) and the fidelity benchmark results. Tier
 // and locked cvars are not the player's (docs/SETTINGS_AUDIT.md).
 static const char *const k_gfx_keep[] = { "r_width", "r_height", "r_mode", "r_vsync", "r_fidelity_bench", "r_fidelity_recommended", "r_fidelity_autodetect", "r_fidelity_custom" };
-static const char *const k_gfx_extra[] = { "cl_fov", "cl_sprint_fov", "cl_headbob", "cl_headbob_amount", "cam_kick_scale", "cl_weapon_sway", "wpn_visual_scale", "cl_showfps" };
+static const char *const k_gfx_extra[] = { "cl_fov", "cl_hands_fov", "cl_sprint_fov", "cl_move_shake", "cam_kick_scale", "cl_weapon_sway", "wpn_visual_scale", "cl_showfps" };
 
 static bool gfx_cvar(const Cvar *c) {
     if (!(c->flags & CVAR_EDITABLE)) return false;
@@ -448,20 +448,19 @@ static void graphics_comfort(GuiCursor *c) {
             gw_label(r, buf, gui_s(TH->t_body), GW_REGULAR, TH->text_faint, GUI_LEFT);
         } else {
             row_slider_cvar(c, "Field of view", "cl_fov", 60, 120, 1, "%.0f\xC2\xB0",
-                            svm && svm->f >= 1.0f ? "Vertical camera FOV (this server caps it). Your hands and weapon follow it; aiming zooms by the sight's own amount."
-                                                  : "Vertical camera FOV (75 = 107\xC2\xB0 horizontal at 16:9). Your hands and weapon follow it; aiming zooms by the sight's own amount.");
+                            svm && svm->f >= 1.0f ? "Vertical camera FOV of the world (this server caps it). Aiming zooms by the sight's own amount."
+                                                  : "Vertical camera FOV of the world (75 = 107\xC2\xB0 horizontal at 16:9). Aiming zooms by the sight's own amount.");
         }
     }
+    row_slider_cvar(c, "Hands FOV", "cl_hands_fov", 50, 90, 1, "%.0f\xC2\xB0",
+                    "Vertical FOV of your arms and the held item only (the world keeps Field of view). Aiming uses the sight's own FOV.");
     row_slider_cvar(c, "Sprint FOV effect", "cl_sprint_fov", 0, 7, 0.5f, "%.1f\xC2\xB0", "The view widens a little while sprinting (0 = off).");
     {
-        Cvar *amt = cv("cl_headbob_amount"), *on = cv("cl_headbob");
-        if (amt) {
-            float v = on && !on->i ? 0.0f : amt->f;
-            GuiRect r = gw_setting_row(c, "Head bob", "Camera bob while walking (0 = off).", rid("cl_headbob_amount"));
-            if (gw_slider(rid("cl_headbob_amount"), r, &v, 0, 1, 0.05f, v < 0.01f ? "Off" : "%.2f")) {
-                if (on) cvar_set_int(on, v > 0.001f);
-                if (v > 0.001f) cvar_set_float(amt, v);
-            }
+        Cvar *ms = cv("cl_move_shake");
+        if (ms) {
+            float v = ms->f;
+            GuiRect r = gw_setting_row(c, "Movement shake", "Head bob, landing dip and ledge tilt of the camera (Off = the camera glides).", rid("cl_move_shake"));
+            if (gw_slider(rid("cl_move_shake"), r, &v, 0, 1, 0.05f, v < 0.01f ? "Off" : "%.2f")) cvar_set_float(ms, v < 0.01f ? 0.0f : v);
         }
     }
     row_slider_cvar(c, "Camera shake", "cam_kick_scale", 0.25f, 1, 0.05f, "%.2f", "Camera kick and punches when you fire (your aim recoils the same).");

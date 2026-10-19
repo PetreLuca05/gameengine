@@ -9,6 +9,7 @@
 //   tuned    offset / rotation / scale per hold point state and per item (assets/player/arms_layer.json),
 //            about the hold point; in ADS only the push along the view axis, the roll and the scale
 //            about the sight (the sight stays on the view axis)
+//   sway     the player's cosmetic "Weapon sway" (the pose's own sway shown smaller)
 //   kick     the player's cosmetic "Weapon kick" (the pose's own kick shown smaller) + the first-person
 //            screen kick towards the eye
 //   equip    a newly selected item comes up from below the view (out of the arms frustum) to its hold
@@ -72,6 +73,9 @@ typedef struct ArmsLayerIn {
     float fov_world, fov_hands;       // vertical deg (fov_hands: the arms projection, ADS zoom included)
     vec3 kick_pos, kick_rot;          // the pose's gun kick: camera space m (+z back) / deg (pitch up, yaw right, roll)
     float kick_scale;                 // the player's cosmetic Weapon kick (1 = the pose's kick as it is)
+    vec3 sway_hip_rot, sway_hip_pos;  // the hold point's sway this frame (deg about the pivot / camera space m) ...
+    vec3 sway_ads_rot;                // ... and aimed (deg about the sight)
+    float sway_scale;                 // the player's cosmetic Weapon sway (1 = the pose's sway as it is)
     float screen_kick;                // first-person screen kick (m towards the eye)
     float dt;
 } ArmsLayerIn;

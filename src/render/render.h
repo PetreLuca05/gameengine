@@ -140,17 +140,17 @@ typedef struct RenderCamera {
     float yaw, pitch, roll;
     float fov_deg;      // vertical FOV
     float znear, zfar;
-    float vm_fov_deg;   // arms / held item FOV when r_viewmodel_fov is 0 (the hip FOV); 0 = fov_deg
+    float vm_fov_deg;   // the arms layer's hip FOV (game_arms.c: cl_hands_fov); 0 = fov_deg
     float ads_t;        // 0..1 aim progress: the weapon's FOV narrows by vm_ads_zoom (fov_deg already has
                         // the mild ADS world zoom; the sight stays on the view axis = screen centre)
     float vm_ads_zoom;  // arms / weapon magnification once aimed against RENDER_ADS_REF_FOV (tan ratio; <= 1 = none)
 } RenderCamera;
 // The authored ADS FOVs ("ads_fov" of weapons and optics) are degrees against this reference view.
 #define RENDER_ADS_REF_FOV 75.0f
-// The weapon (viewmodel) FOV for a camera: hip value (r_viewmodel_fov / vm_fov_deg / fov_deg) blended
-// into the aimed FOV with the aim progress. The aimed FOV is absolute: RENDER_ADS_REF_FOV narrowed by
-// vm_ads_zoom (the weapon's / sight's ads_fov), the same whatever cl_fov or the hands FOV is.
-float render_vm_fov_for(const RenderCamera *c, float r_viewmodel_fov);
+// The arms layer's FOV for a camera: the hip value (an override > 1 / vm_fov_deg / fov_deg) blended into
+// the aimed FOV with the aim progress. The aimed FOV is absolute: RENDER_ADS_REF_FOV narrowed by
+// vm_ads_zoom (the weapon's / sight's ads_fov), the same whatever cl_fov or cl_hands_fov is.
+float render_vm_fov_for(const RenderCamera *c, float hip_override);
 
 // Interior volumes (docs/STORY.md "Rendering"): inside a box the sky ambient and the environment
 // reflections fall to `sky` (0..1), rising to 1 towards its glass faces (open_faces bits: -x +x -y +y -z +z)
@@ -653,6 +653,7 @@ typedef struct RenderArmsLayer {
     float seam_r0, seam_r1; // m: world camera within r0, arms camera past r1
 } RenderArmsLayer;
 void render_set_arms_layer(const RenderArmsLayer *a);
+bool render_camera_overridden(void);   // this frame's camera was replaced by a flythrough (perf_audit, bench_fidelity)
 mat4 render_view_proj(void);
 int render_width(void);
 int render_height(void);

@@ -1025,19 +1025,40 @@ static void test_camera_glide(const ItemDB *db) {
         CHECK(overshoot < 0.001f, "glide overshoots the crouch eye by %.1f mm", overshoot * 1000);
         CHECK(settle_t > 0 && settle_t < 0.8f, "glide settles in %.2f s", settle_t);
         CHECK(jump < 0.02f, "glide jumps %.1f mm in one 144 Hz frame", jump * 1000);
-        // Step: the capsule snaps up 30 cm while grounded; the camera glides up instead.
+        // Step: the capsule snaps up 25 cm while grounded; the camera glides up instead.
         cam_glide_reset(&g);
         float y = 0, worst_step = 0, cam_prev = 0, s_end = 0;
         for (int f = 0; f < 288; f++) {
-            if (f == 20) y += 0.3f;
+            if (f == 20) y += 0.25f;
             float s = cam_glide_step(&g, y, 1.5f, true, dt, &gp);
             float cy = y + s;
             if (f > 0) worst_step = fmaxf(worst_step, fabsf(cy - cam_prev));
             cam_prev = cy;
             s_end = s;
         }
-        printf("  glide step-up 30 cm: largest 144 Hz camera step %.1f mm, left %.2f mm after 2 s\n", worst_step * 1000, fabsf(s_end) * 1000);
+        printf("  glide step-up 25 cm: largest 144 Hz camera step %.1f mm, left %.2f mm after 2 s\n", worst_step * 1000, fabsf(s_end) * 1000);
         CHECK(worst_step < 0.02f && fabsf(s_end) < 0.001f, "step-up: camera step %.1f mm, left %.1f mm", worst_step * 1000, fabsf(s_end) * 1000);
+        // Stairs (18 cm risers, 28 cm treads) at walk / run / sprint, each snap spread over a 60 Hz
+        // tick's frames like the interpolated position: the eye never sinks more than 30 cm behind the
+        // capsule, and the absorber works at 60 and 240 Hz alike.
+        for (int fr = 0; fr < 2; fr++) {
+            const float fdt = fr ? 1.0f / 240.0f : 1.0f / 60.0f;
+            for (int sp = 0; sp < 3; sp++) {
+                const float speed = sp == 0 ? 1.6f : (sp == 1 ? 4.2f : 6.8f);
+                cam_glide_reset(&g);
+                float x = 0, worst = 0;
+                for (int f = 0; f < (int)(3.0f / fdt); f++) {
+                    x += speed * fdt;
+                    float n = floorf(x / 0.28f);   // treads passed: the capsule steps up at each edge ...
+                    float frac = saturate((x - n * 0.28f) / (speed / 60.0f));   // ... spread over one tick
+                    float s = cam_glide_step(&g, 0.18f * (n - 1.0f + frac), speed, true, fdt, &gp);
+                    worst = fmaxf(worst, fabsf(s));
+                }
+                CHECK(worst <= 0.3f + 1e-4f, "stairs at %.1f m/s, %.0f Hz: the eye sinks %.0f mm", speed, 1.0f / fdt, worst * 1000);
+                CHECK(worst > 0.02f, "stairs at %.1f m/s, %.0f Hz: no step absorbed", speed, 1.0f / fdt);
+                if (fr) printf("  stairs %.1f m/s: the eye at most %.0f mm behind the capsule\n", speed, worst * 1000);
+            }
+        }
         // Slope: 0.5 m/s up at 4 m/s, and a jump: the camera follows the capsule exactly.
         cam_glide_reset(&g);
         float lag = 0;

@@ -53,8 +53,13 @@ typedef struct GameRender {
     vec3 head_eye, ideal_eye;  // cam_debug: the animated head eye, the nominal eye
     float cam_step;            // cam_debug: the glide's step offset (m)
     int cam_posture;
+    bool cam_eligible;         // this frame counts for the anchor check
     CamAnchorStats anchor;     // cam_anchor_report
     u64 anchor_logged;
+    u64 glide_frame;           // the last frame the glide ran (a gap restarts it)
+    vec3 glide_pos;            // the capsule then (a jump of metres is a teleport: restart)
+    u32 land_seen;             // the last landing seen, and the frame it was seen (the anchor's eligibility)
+    u64 land_frame;
     char cam_text[256];
     // camera penetration stats (cam_debug / cam_stats): frames where the eye is behind geometry
     // as seen from the capsule, or geometry is closer than the near plane margin
@@ -109,7 +114,7 @@ static void cmd_fp_cam_test(int argc, const char **argv) {
              FT.frames, FT.max_head * 1000, FT.bad_head, rad * 1000, FT.min_front * 1000, FT.bad_behind, FT.hand_frames, FT.max_hand_mm, FT.max_hand_deg, FT.bad_hands,
              ok ? "PASS" : "FAIL");
 }
-static void fp_cam_test_frame(vec3 cam_pos, vec3 fwd, vec3 nominal, vec3 head_eye) {
+static void fp_cam_test_frame(vec3 cam_pos, vec3 fwd, vec3 nominal, vec3 head_eye, bool eligible) {
     if (!FT.active) return;
     Xform head, pelvis;
     if (!chars_fp_bone_world(BR_HEAD, &head) || !chars_fp_bone_world(BR_HIPS, &pelvis)) return;
@@ -122,11 +127,15 @@ static void fp_cam_test_frame(vec3 cam_pos, vec3 fwd, vec3 nominal, vec3 head_ey
     float dhead = v3_dot(fh, v3_sub(cam_pos, head.t));
     float dpel = v3_dot(fh, v3_sub(cam_pos, pelvis.t));
     float df = fwd.y > 0.0f ? dhead : fminf(dhead, dpel);   // the pelvis rule applies looking level or down
-    FT.max_head = fmaxf(FT.max_head, dh);
-    FT.min_front = fminf(FT.min_front, df);
-    if (dh > rad) FT.bad_head++;
-    if (df < 0.0f) FT.bad_behind++;
-    if ((dh > rad || df < 0.0f) && FT.bad_head + FT.bad_behind < 40) {
+    // The anchor holds on eligible frames (settled on-foot motion); "behind" only matters there too:
+    // a jump or a traversal pose moves the head ahead of the gliding eye by design.
+    if (eligible) {
+        FT.max_head = fmaxf(FT.max_head, dh);
+        FT.min_front = fminf(FT.min_front, df);
+        if (dh > rad) FT.bad_head++;
+        if (df < 0.0f) FT.bad_behind++;
+    }
+    if (eligible && (dh > rad || df < 0.0f) && FT.bad_head + FT.bad_behind < 40) {
         Player *p = game_local_player();
         log_info("fp_cam_test: frame %d nominal-head eye %.0f mm fwd.(cam-pelvis) %.0f mm mode %d crouch %.2f pitch %.0f cam (%.2f %.2f %.2f) head (%.2f %.2f %.2f) pelvis (%.2f %.2f %.2f)",
                  FT.frames, dh * 1000, df * 1000, p ? p->sim.move.mode : -1, p ? p->sim.move.crouch_amount : 0, asinf(clampf(fwd.y, -1, 1)) * DG_RAD2DEG,
@@ -286,25 +295,50 @@ static void cmd_cam_anchor_report(int argc, const char **argv) {
     per[0] = 0;
     for (int p = 0; p < EYE_POSTURES; p++)
         if (a->max_posture[p] > 0.0f) len += snprintf(per + len, sizeof(per) - (size_t)len, " %s %.0f", eye_posture_name(p), a->max_posture[p] * 1000.0f);
-    log_info("cam_anchor_report: %u frames, mean %.1f mm, max %.1f mm, %u past the anchor (%.0f mm) | max per posture (mm):%s -> %s", a->frames,
-             a->frames ? a->sum_d / (float)a->frames * 1000.0f : 0.0f, a->max_d * 1000.0f, a->over, rad * 1000.0f, per, a->over == 0 ? "PASS" : "FAIL");
+    log_info("cam_anchor_report: %u frames (%u eligible), mean %.1f mm, max %.1f mm (eligible %.1f mm), past the anchor (%.0f mm): %u eligible, %u in all | max per posture (mm):%s -> %s",
+             a->frames, a->elig, a->frames ? a->sum_d / (float)a->frames * 1000.0f : 0.0f, a->max_d * 1000.0f, a->elig_max * 1000.0f, rad * 1000.0f, a->elig_over, a->over, per,
+             a->elig_over == 0 ? "PASS" : "FAIL");
     if (argc > 1 && !strcmp(argv[1], "reset")) memset(&GR->anchor, 0, sizeof(GR->anchor));
 }
 
 // The nominal eye table must be the loaded animation's (docs/CAMERA_HOLDPOINT.md "Rule 2"): measured
 // again at startup when the animation library changed (a few seconds), into the build's copy.
+// The join manifest's characters entry with and without the eye table folded in: the table's own
+// anim_hash is always measured against the manifest without it.
+static u32 g_chars_plain, g_chars_folded;
+static void eye_manifest_unfold(AnimLibrary *lib) {
+    if (g_chars_folded && lib->manifest.hash[AC_CHARACTERS] == g_chars_folded) lib->manifest.hash[AC_CHARACTERS] = g_chars_plain;
+    g_chars_folded = 0;
+}
+
 void game_camera_eye_check(void) {
     AnimLibrary *lib = g_engine.anim;
     const CharacterDef *def = lib ? anim_lib_char_by_id(lib, "player") : NULL;
     EyeNominalTable *t = camera_fp_eye_table_mut();
     if (!def) return;
+    eye_manifest_unfold(lib);
     u32 h = anim_manifest_combined(&lib->manifest);
-    if (t->valid && t->anim_hash == h) return;
+    if (t->valid && t->anim_hash == h) {
+        game_camera_eye_manifest();
+        return;
+    }
     double t0 = platform_time();
     log_warn("camera: the nominal eye table is %s (animation %08x, table %08x): measuring it again (cam_calibrate writes the source copy)",
              t->valid ? "stale" : "missing", h, t->anim_hash);
     if (eye_nominal_calibrate(lib, def, &G->items, t, 0, 0)) camera_fp_eye_table_save_runtime();
     log_info("camera: nominal eye table measured in %.1f s", platform_time() - t0);
+    game_camera_eye_manifest();
+}
+
+// The table decides where every player's eye is: part of the join manifest (docs/CAMERA_HOLDPOINT.md).
+void game_camera_eye_manifest(void) {
+    AnimLibrary *lib = g_engine.anim;
+    const EyeNominalTable *t = camera_fp_eye_table();
+    if (!lib || !t->valid) return;
+    eye_manifest_unfold(lib);
+    u32 h = eye_table_hash(t);
+    g_chars_plain = lib->manifest.hash[AC_CHARACTERS];
+    g_chars_folded = lib->manifest.hash[AC_CHARACTERS] = anim_hash(&h, sizeof(h), g_chars_plain);
 }
 
 // cam_calibrate [warm sample]: measures the nominal eye table from the shared animation and writes
@@ -315,7 +349,10 @@ static void cmd_cam_calibrate(int argc, const char **argv) {
     if (!def) { log_info("cam_calibrate: no player character"); return; }
     double t0 = platform_time();
     EyeNominalTable *t = camera_fp_eye_table_mut();
-    if (!eye_nominal_calibrate(lib, def, &G->items, t, argc > 1 ? atoi(argv[1]) : 0, argc > 2 ? atoi(argv[2]) : 0)) { log_info("cam_calibrate: failed"); return; }
+    eye_manifest_unfold(lib);   // the table records the animation's own manifest
+    bool ok = eye_nominal_calibrate(lib, def, &G->items, t, argc > 1 ? atoi(argv[1]) : 0, argc > 2 ? atoi(argv[2]) : 0);
+    game_camera_eye_manifest();
+    if (!ok) { log_info("cam_calibrate: failed"); return; }
     char res[256];
     int len = 0;
     res[0] = 0;
@@ -324,6 +361,7 @@ static void cmd_cam_calibrate(int argc, const char **argv) {
     log_info("cam_calibrate: %.1f s; stand idle eye (%.3f %.3f %.3f) m; residual (head motion around the mean, mm):%s", platform_time() - t0, st.x, st.y, st.z, res);
     camera_fp_eye_table_save(NULL);
     cam_glide_reset(&G->cam_glide);
+    log_info("cam_calibrate: the join manifest now includes this table: restart (or anim_reload) before joining others");
 }
 
 static bool cam_sphere_cast(void *ctx, vec3 from, vec3 delta, float radius, float *fraction) {
@@ -836,6 +874,11 @@ void game_render(void) {
         float fdt = (float)g_engine.frame_dt;
         chars_set_thirdperson(tp);
         GR->cam_mode = 0;
+        if (!dead) {
+            // Alive: the next death starts on its own head (not where the last one ended).
+            G->cam_stab.dead = false;
+            G->cam_stab.death_t = 0.0f;
+        }
         // Spectator free camera (noclip): no body, no hands.
         bool fcam = spectator_free_camera(&cam);
         bool pcam = !fcam && lp && peek_camera(w, &cam);   // door peek through the visor (game_peek.c)
@@ -876,19 +919,16 @@ void game_render(void) {
             // it (cam_anchor_radius); cam_anim_influence blends towards it for comparison (dev).
             const EyeNominalTable *et = camera_fp_eye_table();
             CamGlideParams gp = camera_fp_glide_params();
-            if (G->cam_glide_slot != vs) {
+            // A new view slot, a frame without the glide (vehicle, peek, lean, third person) or a teleport
+            // (respawn, setpos, story warp) restarts it: never glide in from a stale state.
+            if (G->cam_glide_slot != vs || GR->glide_frame + 1 != g_engine.frame_index || v3_dist(v3_flat(interp.pos), v3_flat(GR->glide_pos)) > 2.0f) {
                 cam_glide_reset(&G->cam_glide);
                 G->cam_glide_slot = vs;
             }
+            GR->glide_frame = g_engine.frame_index;
+            GR->glide_pos = interp.pos;
             CamNominalIn ni;
-            memset(&ni, 0, sizeof(ni));
-            ni.posture = interp.mode == MOVE_SWIM ? EYE_SWIM : interp.mode == MOVE_HANG ? EYE_HANG : (interp.mode == MOVE_MANTLE || interp.mode == MOVE_VAULT) ? EYE_MANTLE
-                       : lp->sim.down.downed ? EYE_DOWNED : -1;
-            ni.crouch = smoothstepf(0.0f, 1.0f, interp.crouch_amount);
-            ni.speed = v3_len(v3_flat(interp.vel));
-            ni.progress = saturate(interp.m_t);
-            ni.style = chars_hold_style(w, lp->ent);
-            ni.pitch = G->view.pitch;
+            camera_fp_nominal_in(&ni, &interp, lp->sim.down.downed, chars_hold_style(w, lp->ent), G->view.pitch);
             bool grounded = interp.on_ground && interp.mode == MOVE_WALK;
             vec3 nominal = sock.t;
             if (et->valid) {
@@ -901,10 +941,19 @@ void game_render(void) {
             GR->cam_posture = ni.posture < 0 ? (ni.crouch > 0.5f ? EYE_CROUCH : EYE_STAND) : ni.posture;
             vec3 eye = v3_lerp(nominal, sock.t, cc->anim_influence ? saturate(cc->anim_influence->f) : 0.0f);
             // Anchor: the nominal eye within cam_anchor_radius of the real head eye (logged, never corrected).
+            // It holds for settled on-foot motion; sprints, hit reactions, landings, jumps and traversals
+            // move the head away by design (the camera ignores them) and are only reported.
             {
                 float ad = v3_dist(nominal, sock.t), rad = cc->anchor_radius ? cc->anchor_radius->f : 0.08f;
-                cam_anchor_add(&GR->anchor, ad, rad, GR->cam_posture);
-                if (ad > rad && et->valid && g_engine.frame_index - GR->anchor_logged > 300) {
+                if (interp.land_tick != GR->land_seen) {
+                    GR->land_seen = interp.land_tick;
+                    GR->land_frame = g_engine.frame_index;
+                }
+                bool eligible = ni.posture < 0 && grounded && !interp.sprinting && !chars_reacting(w, lp->ent) && cam_glide_settled(&G->cam_glide, &ni) &&
+                                (double)(g_engine.frame_index - GR->land_frame) * g_engine.frame_dt > 0.4;
+                GR->cam_eligible = eligible;
+                cam_anchor_add(&GR->anchor, ad, rad, GR->cam_posture, eligible);
+                if (ad > rad && eligible && et->valid && g_engine.frame_index - GR->anchor_logged > 300) {
                     GR->anchor_logged = g_engine.frame_index;
                     log_warn("camera: the nominal eye is %.0f mm from the head eye (%s, anchor %.0f mm; cam_anchor_report)", ad * 1000.0f, eye_posture_name(GR->cam_posture), rad * 1000.0f);
                 }
@@ -928,7 +977,7 @@ void game_render(void) {
         spectator_blend_camera(&cam, fdt);
         if (GR->cam_mode != 0) G->view.eye = cam.pos;
         chars_set_fp_camera(cam.pos, quat_euler(cam.yaw, cam.pitch, cam.roll), GR->cam_mode == 1);
-        if (GR->cam_mode == 1) fp_cam_test_frame(cam.pos, dir_from_angles(cam.yaw, cam.pitch), GR->ideal_eye, GR->head_eye);
+        if (GR->cam_mode == 1) fp_cam_test_frame(cam.pos, dir_from_angles(cam.yaw, cam.pitch), GR->ideal_eye, GR->head_eye, GR->cam_eligible);
         // cam_debug: eye / head / ideal markers + the stats line (HUD).
         GR->cam_text[0] = 0;
         if (cc->debug && cc->debug->i && lp) {

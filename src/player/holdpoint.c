@@ -427,6 +427,7 @@ void holdpoint_eval(HoldPointState *st, const HoldPointInput *in, HoldPointOutpu
     vec3 pivot = xf_point(item, pivot_item);
     // ADS anchor blend: how far the item is into ADS (eased with the state blend, both ways).
     float ads_a = state == HP_ADS ? 1.0f - k : (st->ads_from == HP_ADS ? k : 0.0f);
+    out->ads_w = ads_a;
     vec3 sight_c = xf_point(item, in->sight);   // the reticle centre (on the view axis once aimed)
 
     // ---- procedural layer: weapon sway (docs/RECOIL.md "Weapon sway") + kick

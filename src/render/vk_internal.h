@@ -241,6 +241,7 @@ typedef struct FrameData {
     vec4 arms_shoulder[2];
     vec4 arms_shoulder_prev[2];
     vec4 arms_seam;
+    vec4 arms_eye;        // xyz the arms camera's eye in pose space (the arms layer's view vectors)
 } FrameData;
 
 typedef struct PushLit {

@@ -252,13 +252,12 @@ float shadow_factor(vec3 p, vec3 n) {
     return mix(1.0, shadow_world(p, n), frame.ssky0.y * frame.shadow_cfg3.w);
 }
 
-// The first-person rig (docs/SHADOWS.md "The viewmodel tile"). Its own tile (bindings 16 / 17,
-// shadow_vp_vm): arms, held item and attachments as casters at their drawn transforms, around
-// 1 mm texels, with the directional light's filter (Hard / tent / PCSS) and Strength. The world
-// cascades are sampled where the rig appears in the world (r_viewmodel_fov scales view x / y by
-// shadow_cfg2.w), ignoring casters within shadow_vm2.z of the receiver along the light: the owner's
-// body copy (MAT_SHADOW_ONLY, a third-person pose that does not match the first-person arms)
-// never shadows the hands.
+// The first-person rig: the arms layer (docs/SHADOWS.md "The viewmodel tile", docs/CAMERA_HOLDPOINT.md
+// "Rule 3"). Its own tile (bindings 16 / 17, shadow_vp_vm): arms, held item and attachments as casters
+// at their real transforms, around 1 mm texels, with the directional light's filter (Hard / tent /
+// PCSS) and Strength. The world cascades are sampled where the rig appears in the world (vm_apparent:
+// the arms camera and FOV), ignoring casters within shadow_vm2.z of the receiver along the light: the
+// owner's whole-body shadow copy never shadows the hands.
 int g_sh_vm = -1;   // r_shadow_debug 7: -1 not the viewmodel, 0 outside its tile, 1 inside
 float shadow_vm_tile(vec3 p, vec3 n) {
     g_sh_vm = 0;
@@ -284,7 +283,7 @@ vec3 sh_vm_apparent(vec3 p) { return (frame.vm_apparent * vec4(p, 1.0)).xyz; }
 float shadow_factor_vm(vec3 p, vec3 n) {
     if (frame.sun_color.w < 0.5 || frame.ssky0.y <= 0.0) return 1.0;
     vec3 pw = sh_vm_apparent(p) + normalize(frame.sun_dir.xyz) * frame.shadow_vm2.z;
-    float s = shadow_world(pw, n) * shadow_vm_tile(p, n);
+    float s = shadow_world(pw, normalize(mat3(frame.vm_apparent) * n)) * shadow_vm_tile(p, n);   // the normal turned with the layer
     return mix(1.0, s, frame.ssky0.y * frame.shadow_cfg3.w);
 }
 
