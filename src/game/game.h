@@ -135,6 +135,8 @@ void game_disconnect_to_local(const char *reason);
 Game *game(void);
 World *game_world(void);
 Player *game_local_player(void);
+// A light to switch on (F): the drawn gun's underbarrel weapon light or the flashlight in the hands.
+bool game_player_has_light(World *w, int slot);
 // Performance audit runs (game_perf.c, docs/PERF_AUDIT.md): perf_audit / perf_verify.
 void game_perf_init(void);
 void game_perf_frame(void);   // main loop, after the command buffer

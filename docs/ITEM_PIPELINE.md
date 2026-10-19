@@ -106,7 +106,9 @@ an `emitter` socket (the flashlight item).
 - **Laser:** a faint beam runs to the first world hit, with a red dot and a little glow there
   (`laser_render`).
 
-Other players still see the eye-mounted flashlight (no protocol change).
+Without one F does nothing (2026-10-20: it lit an eye-mounted lamp): `game_player_has_light` (the drawn
+gun's underbarrel `"emitter": "light"`, or the flashlight item in the hands) gates the toggle, and the
+host only sets `EF_FLASHLIGHT` with it. Other players see an eye-mounted light (no protocol change).
 
 The flashlight item is `"kind": "misc"` with `"hands": true` (`items.json`). Misc items normally
 stay in the backpack's grid and can never be held, so the flag lets it be taken into the hands

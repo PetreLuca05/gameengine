@@ -343,7 +343,7 @@ void game_sim_player(World *w, int slot, const UserCmd *cmd, float dt, bool firs
     if (p->sim.wpn.reloading) f |= EF_RELOADING;
     if (c.buttons & BTN_AIM) f |= EF_ADS;
     if (p->sim.wpn.recoil_kick > 0.8f) f |= EF_FIRING;
-    if ((c.buttons & BTN_FLASHLIGHT) && m->mode != MOVE_DEAD) f |= EF_FLASHLIGHT;
+    if ((c.buttons & BTN_FLASHLIGHT) && m->mode != MOVE_DEAD && game_player_has_light(w, slot)) f |= EF_FLASHLIGHT;
     w->flags[i] = f;
     const InvSlot *eq = weapon_equipped(w, slot);
     w->item[i] = eq ? eq->item : 0;
@@ -763,6 +763,19 @@ static void cycle_weapon(const Player *p, int dir) {
     }
 }
 
+// A light to switch on (F): the drawn gun's underbarrel weapon light, or the flashlight in the hands.
+// Without one F does nothing (the host checks it too: EF_FLASHLIGHT).
+bool game_player_has_light(World *w, int slot) {
+    if (!w || slot < 0 || slot >= MAX_PLAYERS) return false;
+    const Player *p = &w->players[slot];
+    const InvSlot *eq = weapon_equipped(w, slot);
+    const AttachmentDef *a = eq ? attach_def(w->items, eq->att[ATT_UNDERBARREL]) : NULL;
+    if (a && a->emitter == 1) return true;
+    const InvSlot *hs = p->sim.wpn.slot == INV_SEL_HANDS ? inv_sel_c(&p->inv, INV_SEL_HANDS) : NULL;
+    const ItemDef *d = hs && hs->item ? item_def(w->items, hs->item) : NULL;
+    return d && !strcmp(d->id, "flashlight");
+}
+
 static void handle_selection(void) {
     Player *p = game_local_player();
     if (!p) return;
@@ -788,7 +801,7 @@ static void handle_selection(void) {
     if (input_consume_press(ACT_NEXT_ITEM) && !phone_wheel(-1)) cycle_weapon(p, 1);
     if (input_consume_press(ACT_PREV_ITEM) && !phone_wheel(1)) cycle_weapon(p, -1);
     // Drop (G) is a tap of the throwables wheel key (game_wheels.c).
-    if (input_consume_press(ACT_FLASHLIGHT)) {
+    if (input_consume_press(ACT_FLASHLIGHT) && (G->flashlight || game_player_has_light(G->world, G->local_slot))) {
         G->flashlight = !G->flashlight;
         audio_play_2d("click", 0.5f, SND_SFX);
     }

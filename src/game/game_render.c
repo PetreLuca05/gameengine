@@ -847,7 +847,9 @@ static void flashlights_render(World *w, const RenderCamera *cam, const Player *
         s.inner_deg = 7.0f;
         s.outer_deg = 24.0f;
         s.intensity = 140.0f;
-    } else if (own_on && lp && !dead) {
+    } else if (own_on && lp && !dead && view_slot != G->local_slot) {
+        // A spectated player's light (the host only sets EF_FLASHLIGHT with a light in the hands); your own
+        // shines only from a weapon light / the flashlight (F does nothing without one).
         vec3 f = dir_from_angles(cam->yaw, cam->pitch), r = right_from_yaw(cam->yaw), u = v3_cross(r, f);
         // Off-hand side, a little ahead of the eye: the held gun (to the right, mostly behind
         // the light) isn't flooded, the beam still starts at the view.
