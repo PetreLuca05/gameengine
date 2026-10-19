@@ -4,6 +4,7 @@
 #include "render/phone_view.h"
 #include "render/char_preview_view.h"
 #include "render/shadow_csm.h"
+#include "render/arms_layer.h"
 #include "vk_internal.h"
 #include "post/post.h"
 #include "sky/sky.h"
@@ -1500,6 +1501,16 @@ int render_shadow_cascade_lag(float lag_deg[4], float allow_deg[4], float texel_
     return s_casc_probe.n;
 }
 
+// The arms layer's screen size (docs/CAMERA_HOLDPOINT.md "Screen size"): 1 without a layer.
+static float arms_screen_scale(void) { return R->arms.valid && R->arms.screen_scale > 0.0f ? clampf(R->arms.screen_scale, 0.25f, 1.0f) : 1.0f; }
+
+// Arms camera space -> the world camera's view space at the same pixel and depth (the arms FOV and
+// the screen size against the world FOV).
+static mat4 arms_to_view(void) {
+    float tw = tanf(R->cam.fov_deg * 0.5f * DG_DEG2RAD), k = tw / tanf(fmaxf(render_vm_fov(), 1.0f) * 0.5f * DG_DEG2RAD);
+    return arms_layer_screen_view(arms_screen_scale(), R->arms.screen_anchor, k, tw, view_aspect());
+}
+
 static void compute_matrices(FrameData *fd) {
     float aspect = view_aspect();
     RenderCamera *c = &R->cam;
@@ -1507,7 +1518,8 @@ static void compute_matrices(FrameData *fd) {
     R->proj = mat4_perspective(c->fov_deg * DG_DEG2RAD, aspect, c->znear, c->zfar);
     R->view_proj = mat4_mul(R->proj, R->view);
     float vm_fov = render_vm_fov();
-    R->vm_proj = mat4_perspective(vm_fov * DG_DEG2RAD, aspect, R->arms.valid ? R->arms.znear : RENDER_VM_ZNEAR, 100.0f);
+    R->vm_proj = mat4_mul(arms_layer_screen_clip(arms_screen_scale(), R->arms.screen_anchor),
+                          mat4_perspective(vm_fov * DG_DEG2RAD, aspect, R->arms.valid ? R->arms.znear : RENDER_VM_ZNEAR, 100.0f));
     // The arms layer's own camera (docs/CAMERA_HOLDPOINT.md "Rule 3"); without one the arms see the world's.
     R->arms_view = R->arms.valid ? R->arms.view : R->view;
     extract_frustum(R->view_proj, R->frustum);
@@ -1803,8 +1815,7 @@ static void compute_matrices(FrameData *fd) {
     // The viewmodel draws compute vm_proj * view * world: the arms camera replaces the view in it.
     fd->vm_proj = mat4_mul(R->vm_proj_j, mat4_mul(R->arms_view, mat4_inverse_rigid(R->view)));
     {
-        float k = tanf(R->cam.fov_deg * 0.5f * DG_DEG2RAD) / tanf(fmaxf(render_vm_fov(), 1.0f) * 0.5f * DG_DEG2RAD);
-        fd->vm_apparent = mat4_mul(mat4_inverse_rigid(R->view), mat4_mul(mat4_scale(v3(k, k, 1.0f)), R->arms_view));
+        fd->vm_apparent = mat4_mul(mat4_inverse_rigid(R->view), mat4_mul(arms_to_view(), R->arms_view));
         const RenderArmsLayer *a = &R->arms;
         for (int i = 0; i < 2; i++) {
             vec3 sh = a->valid ? a->shoulder[i] : v3(0, 0, 0);
@@ -3401,16 +3412,13 @@ void render_set_arms_layer(const RenderArmsLayer *a) {
     else R->arms.valid = false;
 }
 
-// Where an arms-layer point (its real world position) appears: through the arms camera and FOV,
-// then back out of the world camera at the same pixel and view depth.
+// Where an arms-layer point (its real world position) appears: through the arms camera, FOV and
+// screen size, then back out of the world camera at the same pixel and view depth.
 vec3 render_viewmodel_to_world(vec3 p) {
     float vm_fov = render_vm_fov();
     mat4 view = mat4_fps_view(R->cam.pos, R->cam.yaw, R->cam.pitch, R->cam.roll);
     if (!R->arms.valid && fabsf(vm_fov - R->cam.fov_deg) < 0.01f) return p;
-    vec3 v = mat4_mul_point(R->arms.valid ? R->arms.view : view, p);
-    float k = tanf(R->cam.fov_deg * 0.5f * DG_DEG2RAD) / tanf(vm_fov * 0.5f * DG_DEG2RAD);
-    v.x *= k;
-    v.y *= k;
+    vec3 v = mat4_mul_point(arms_to_view(), mat4_mul_point(R->arms.valid ? R->arms.view : view, p));
     return mat4_mul_point(mat4_inverse_rigid(view), v);
 }
 

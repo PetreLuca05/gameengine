@@ -687,6 +687,8 @@ typedef struct RenderArmsLayer {
     float znear;
     vec3 shoulder[2];       // the upper-arm joints (world): the seam centres
     float seam_r0, seam_r1; // m: world camera within r0, arms camera past r1
+    float screen_scale;     // the picture's size on screen (0 / 1: as projected) about ...
+    vec2 screen_anchor;     // ... this screen point (fractions: x from the left, y from the top)
 } RenderArmsLayer;
 void render_set_arms_layer(const RenderArmsLayer *a);
 bool render_camera_overridden(void);   // this frame's camera was replaced by a flythrough (perf_audit, bench_fidelity)

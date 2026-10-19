@@ -21,6 +21,8 @@
 //   equip    a newly selected item comes up from below the view (out of the arms frustum) to its hold
 //   aim      a rotation about the eye that puts the barrel where the world camera shows the shot
 //            (sway, the ADS counter of the camera kick, the Hands FOV against the world FOV)
+//   screen   the layer's picture scaled about a point on the screen (the bottom edge): smaller on
+//            screen, the same place; back to 1 aimed (arms_layer_screen_clip / _view, the renderer)
 #ifndef DG_ARMS_LAYER_H
 #define DG_ARMS_LAYER_H
 
@@ -57,6 +59,8 @@ typedef struct ArmsLayerDef {
                                       // the arms + item only, the body is the world camera's
     float znear;                      // the arms projection's near plane (m)
     float weapon_fov[WEAPON_FOV_COUNT];   // Weapon Field of View presets: narrow, default, wide (hip, horizontal deg at 16:9)
+    float screen_scale;               // the layer's size on screen at the hip (0.25 .. 1; 1 aimed) ...
+    vec2 screen_anchor;               // ... about this screen point (fractions: x from the left, y from the top; 1 = the bottom edge)
 } ArmsLayerDef;
 
 typedef struct ArmsLayerState {
@@ -101,6 +105,7 @@ typedef struct ArmsLayerOut {
     float fov_add;                    // deg to add to the Hands FOV this frame
     float raise;                      // 0..1 how far the equip raise still has to go (1 = out of view)
     float cam_w;                      // the arms camera's weight this frame (1 at the hip, 0 aimed)
+    float screen_scale;               // the layer's size on screen this frame (screen_scale at the hip, 1 aimed: by cam_w)
     vec3 sight;                       // the presented sight (pose-eye space)
 } ArmsLayerOut;
 
@@ -114,5 +119,11 @@ void arms_layer_eval(const ArmsLayerDef *d, ArmsLayerState *st, const ArmsLayerI
 // The rotation about the eye that turns the arms camera's forward axis to where the world camera
 // shows a shot dir(yaw - right, pitch + up) (pitch: the view's), with the arms projection's FOV.
 quat arms_layer_aim_rot(vec2 aim_deg, float view_pitch, float fov_world, float fov_hands);
+// The screen size: the arms picture scaled by s about anchor (screen fractions, y from the top). As a
+// clip-space matrix after the arms projection (Vulkan NDC, y down; it leaves depth alone) ...
+mat4 arms_layer_screen_clip(float s, vec2 anchor);
+// ... and as the linear map from arms camera space to the world camera's view space that puts a point
+// at the same pixel and view depth (k = tan(world / 2) / tan(arms / 2), tw = tan(world / 2), aspect w / h).
+mat4 arms_layer_screen_view(float s, vec2 anchor, float k, float tw, float aspect);
 
 #endif

@@ -30,6 +30,8 @@ void arms_layer_defaults(ArmsLayerDef *d) {
     d->weapon_fov[WEAPON_FOV_NARROW] = 60.0f;
     d->weapon_fov[WEAPON_FOV_DEFAULT] = 70.0f;
     d->weapon_fov[WEAPON_FOV_WIDE] = 85.0f;
+    d->screen_scale = 0.75f;
+    d->screen_anchor = v2(0.75f, 1.0f);
 }
 
 static const char *const k_weapon_fov[WEAPON_FOV_COUNT] = { "narrow", "default", "wide" };
@@ -89,6 +91,11 @@ void arms_layer_parse(ArmsLayerDef *d, const cJSON *root) {
     d->znear = clampf(jf(root, "znear", d->znear), 0.002f, 0.05f);
     const cJSON *wf = jget(root, "weapon_fov");
     for (int i = 0; i < WEAPON_FOV_COUNT; i++) d->weapon_fov[i] = clampf(jf(wf, k_weapon_fov[i], d->weapon_fov[i]), 30.0f, 130.0f);
+    const cJSON *sc = jget(root, "screen");
+    d->screen_scale = clampf(jf(sc, "scale", d->screen_scale), 0.25f, 1.0f);
+    const cJSON *an = jget(sc, "anchor");
+    if (cJSON_GetArraySize(an) == 2)
+        d->screen_anchor = v2(clampf((float)cJSON_GetArrayItem(an, 0)->valuedouble, 0.0f, 1.0f), clampf((float)cJSON_GetArrayItem(an, 1)->valuedouble, 0.0f, 1.0f));
 }
 
 static float r4(float v) { return roundf(v * 10000.0f) / 10000.0f; }
@@ -119,7 +126,8 @@ char *arms_layer_to_json(const ArmsLayerDef *d) {
                             "arm vertices near the shoulder blend from the world camera (r0) to the arms camera (r1); off: the arms camera draws only the "
                             "arms + item). "
                             "weapon_fov: the Weapon Field of View presets (hip, horizontal deg at 16:9; the layer moves sideways with them so the sight keeps "
-                            "its place on screen). Edit live with arms_tuner.");
+                            "its place on screen). screen: the arms + item picture's size on screen at the hip (scale; 1 aimed) about anchor (screen fractions: "
+                            "x from the left, y from the top, 1 = the bottom edge): smaller, the same place. Edit live with arms_tuner.");
     cJSON *st = cJSON_AddObjectToObject(o, "states");
     for (int s = 0; s < HP_STATE_COUNT; s++) {
         cJSON *e = cJSON_AddObjectToObject(st, holdpoint_state_name(s));
@@ -143,6 +151,12 @@ char *arms_layer_to_json(const ArmsLayerDef *d) {
     cJSON_AddNumberToObject(o, "znear", r4(d->znear));
     cJSON *wf = cJSON_AddObjectToObject(o, "weapon_fov");
     for (int i = 0; i < WEAPON_FOV_COUNT; i++) cJSON_AddNumberToObject(wf, k_weapon_fov[i], r4(d->weapon_fov[i]));
+    cJSON *sc = cJSON_AddObjectToObject(o, "screen");
+    cJSON_AddNumberToObject(sc, "scale", r4(d->screen_scale));
+    cJSON *an = cJSON_CreateArray();
+    cJSON_AddItemToArray(an, cJSON_CreateNumber(r4(d->screen_anchor.x)));
+    cJSON_AddItemToArray(an, cJSON_CreateNumber(r4(d->screen_anchor.y)));
+    cJSON_AddItemToObject(sc, "anchor", an);
     char *s = cJSON_Print(o);
     cJSON_Delete(o);
     return s;
@@ -199,6 +213,25 @@ static u32 str_hash(const char *s) {
 // Rotation r and uniform scale s about the point p, then translation t: x -> t + p + s R (x - p).
 static mat4 about(vec3 p, quat r, float s, vec3 t) {
     mat4 m = mat4_mul(mat4_translate(v3_add(t, p)), mat4_mul(mat4_trs(v3(0, 0, 0), r, v3(s, s, s)), mat4_translate(v3_neg(p))));
+    return m;
+}
+
+// NDC' = s NDC + (1 - s) anchor: x' = s x + (1 - s) ax w (the anchor's NDC, Vulkan: y down).
+mat4 arms_layer_screen_clip(float s, vec2 anchor) {
+    mat4 m = mat4_identity();
+    m.m[0] = m.m[5] = s;
+    m.m[12] = (1.0f - s) * (2.0f * anchor.x - 1.0f);
+    m.m[13] = (1.0f - s) * (2.0f * anchor.y - 1.0f);
+    return m;
+}
+
+// The same pixel through the world projection at the same depth: x' = k s x - (1 - s) ax tw aspect z,
+// y' = k s y + (1 - s) ay tw z (view space looks down -z; NDC y down = view y up).
+mat4 arms_layer_screen_view(float s, vec2 anchor, float k, float tw, float aspect) {
+    mat4 m = mat4_identity();
+    m.m[0] = m.m[5] = k * s;
+    m.m[8] = -(1.0f - s) * (2.0f * anchor.x - 1.0f) * tw * aspect;
+    m.m[9] = (1.0f - s) * (2.0f * anchor.y - 1.0f) * tw;
     return m;
 }
 
@@ -296,6 +329,8 @@ void arms_layer_eval(const ArmsLayerDef *d, ArmsLayerState *st, const ArmsLayerI
     }
     mat4 C = mat4_translate(v3_scale(hp_cam_pos(p.cam_pos), -cw));
     out->cam_w = cw;
+    // The screen size follows the same weight: the picture is its own size aimed (the sight centred).
+    out->screen_scale = 1.0f + (clampf(d->screen_scale, 0.25f, 1.0f) - 1.0f) * cw;
     out->sight = in->has_item ? xf_point(item, in->sight) : v3(0, 0, 0);
     // Cosmetic sway (Weapon sway < 1): the pose's sway shown smaller - about the pivot at the hip, about
     // the sight aimed (the hold point turns it there).

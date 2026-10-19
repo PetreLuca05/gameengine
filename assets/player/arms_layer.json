@@ -423,5 +423,9 @@
 		"narrow":	60,
 		"default":	70,
 		"wide":	85
+	},
+	"screen":	{
+		"scale":	0.75,
+		"anchor":	[0.75, 1]
 	}
 }

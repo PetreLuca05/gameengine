@@ -202,6 +202,8 @@ void game_arms_frame(const RenderCamera *cam, vec2 aim_deg, float aim_pitch, flo
     rl.shoulder[1] = fa.shoulder[1];
     rl.seam_r0 = AL.def.seam_r0;   // (seam_r1 0: off, the arms camera draws only the arms + item)
     rl.seam_r1 = AL.def.seam ? AL.def.seam_r1 : 0.0f;
+    rl.screen_scale = AL.out.screen_scale;   // smaller on screen about the anchor at the hip, 1 aimed
+    rl.screen_anchor = AL.def.screen_anchor;
     in->fov_hands = rl.fov_deg;
     render_set_arms_layer(&rl);
     AL.have = true;

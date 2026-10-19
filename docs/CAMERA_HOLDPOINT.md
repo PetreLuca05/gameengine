@@ -152,9 +152,20 @@ in that camera's space places the drawn arms + item, in this order (`src/render/
 | kick | the player's cosmetic "Weapon kick" (`wpn_visual_scale`: the pose's kick shown smaller) + the first-person screen kick |
 | equip | a newly selected item comes up from below the arms frustum to its hold over `equip.time` (0.3 s: the gun is ready then). It starts `equip.pitch` muzzle down and its item length + `equip.margin` under the bottom edge |
 | aim | a rotation about the eye that puts the barrel where the world camera shows the shot: sway, the ADS counter of the camera kick, the arms FOV ≠ world FOV |
+| screen | the picture's size on screen ("Screen size" below): after the projection, never in 3D |
 
 **The arms FOV** is Weapon Field of View ("Field of view" below): a preset at the hip, the sight's own
 FOV aimed. It changes nothing but the arms projection, and the fidelity levels don't bound it.
+
+**Screen size** (`screen`, 2026-10-20): at the hip the arms + item picture is drawn at `screen.scale`
+(0.75) of its size about `screen.anchor` (screen fractions from the top left: 0.75, 1 = on the bottom
+edge where the guns leave the screen), so a gun keeps its place and is just smaller; what leaves the
+bottom edge still does. It goes back to 1 aimed with the camera weight (the sight's own ADS progress),
+so the sight lands on the screen centre at its own size. It is a 2D scale after the arms projection
+(`arms_layer_screen_clip`, in `vm_proj`); nothing in 3D moves, the depth is unchanged, and
+`render_viewmodel_to_world` / `vm_apparent` apply the same map (`arms_layer_screen_view`), so the
+muzzle flash, tracers and shadows stay on the drawn gun. The framing below (the fit, the reference
+points) is measured before it: the layout the screen size then shrinks.
 
 **The shoulder seam** (`seam.on`, off): the body is drawn by the world camera, the arms by the arms
 camera. When on, arm vertices within `seam.r0` of an upper-arm joint keep the world camera's screen
@@ -528,7 +539,9 @@ commands, "Field of view").
 - the equip raise starts below the view and ends on the hold;
 - the aim correction lands the barrel on the shot's pixel;
 - Weapon Field of View: the hip sight keeps its pixel across Narrow / Default / Wide, aimed it stays
-  centred.
+  centred;
+- screen size: the clip matrix and the view map agree on every pixel, the depth is unchanged, the
+  anchor and the bottom edge stay put, the scale is the data's at the hip and 1 aimed.
 
 `ctest -R fov`: the FOV model ("Field of view").
 

@@ -9,6 +9,8 @@
 //     counter with Hands FOV != world FOV).
 //  6) Weapon Field of View: the presets keep the hip sight on its pixel, aimed it stays centred.
 //  7) The arms camera moves (never turns) without touching the input; aimed it is back on the eye.
+//  8) Screen size: the clip matrix and the view map agree (the same pixel, depth unchanged), the
+//     anchor and the bottom edge stay put, the scale follows the camera weight (1 aimed).
 #include "render/arms_layer.h"
 #include "player/holdpoint.h"
 #include "player/fov.h"
@@ -235,6 +237,49 @@ int main(void) {
         CHECK(off < 1e-4f, "camera: aimed, the sight is %g NDC off the centre", off);
         printf("  camera: the view moves (%.2g off), never turns (%.2g), aimed the sight %.2g NDC off the centre\n", e, rot, off);
         arms_layer_defaults(&d);
+    }
+    // 8) Screen size.
+    {
+        float s = 0.75f, aspect = 16.0f / 9.0f, fa = 62.0f, fw = 70.0f;
+        vec2 an = v2(0.75f, 1.0f);
+        float tw = tanf(fw * 0.5f * DG_DEG2RAD), k = tw / tanf(fa * 0.5f * DG_DEG2RAD);
+        mat4 pa = mat4_perspective(fa * DG_DEG2RAD, aspect, 0.01f, 100.0f), pw = mat4_perspective(fw * DG_DEG2RAD, aspect, 0.01f, 100.0f);
+        mat4 clip = mat4_mul(arms_layer_screen_clip(s, an), pa), vmap = arms_layer_screen_view(s, an, k, tw, aspect);
+        float worst = 0, dz = 0, edge = 0;
+        vec3 pts[] = { v3(0.18f, -0.22f, -0.35f), v3(-0.25f, -0.3f, -0.4f), v3(0.0f, 0.0f, -1.0f), v3(0.4f, 0.1f, -0.6f) };
+        for (int i = 0; i < 4; i++) {
+            vec4 c = mul4(clip, v4(pts[i].x, pts[i].y, pts[i].z, 1));
+            vec3 q = mat4_mul_point(vmap, pts[i]);
+            vec4 cw4 = mul4(pw, v4(q.x, q.y, q.z, 1));
+            worst = fmaxf(worst, fmaxf(fabsf(c.x / c.w - cw4.x / cw4.w), fabsf(c.y / c.w - cw4.y / cw4.w)));
+            dz = fmaxf(dz, fabsf(q.z - pts[i].z));
+            // Scaled about the anchor: NDC' - anchor = s (NDC - anchor).
+            vec2 n0 = ndc(pa, mat4_identity(), pts[i]);
+            edge = fmaxf(edge, fmaxf(fabsf(c.x / c.w - ((1.0f - s) * (2.0f * an.x - 1.0f) + s * n0.x)), fabsf(c.y / c.w - ((1.0f - s) * (2.0f * an.y - 1.0f) + s * n0.y))));
+        }
+        CHECK(worst < 1e-5f, "screen: the clip matrix and the view map differ by %g NDC", worst);
+        CHECK(dz < 1e-6f, "screen: the view map moved the depth (%g)", dz);
+        CHECK(edge < 1e-5f, "screen: not scaled about the anchor (%g)", edge);
+        // A point on the bottom edge stays on it, the anchor stays put.
+        float tv = tanf(fa * 0.5f * DG_DEG2RAD);
+        vec3 bottom = v3(0.1f, -tv * 0.5f, -0.5f);
+        vec4 cb = mul4(clip, v4(bottom.x, bottom.y, bottom.z, 1));
+        vec3 anc = v3((2.0f * an.x - 1.0f) * tv * aspect * 0.5f, -tv * 0.5f, -0.5f);
+        vec4 ca = mul4(clip, v4(anc.x, anc.y, anc.z, 1));
+        CHECK(fabsf(cb.y / cb.w - 1.0f) < 1e-5f, "screen: the bottom edge moved to %g", cb.y / cb.w);
+        CHECK(fabsf(ca.x / ca.w - (2.0f * an.x - 1.0f)) < 1e-5f && fabsf(ca.y / ca.w - 1.0f) < 1e-5f, "screen: the anchor moved");
+        // The scale: the def's at the hip, 1 aimed.
+        arms_layer_defaults(&d);
+        arms_layer_reset(&st);
+        ArmsLayerIn in = base_in(eye);
+        arms_layer_eval(&d, &st, &in, &out);
+        float hip = out.screen_scale;
+        in.hp_state = HP_ADS;
+        in.ads_w = 1.0f;
+        arms_layer_eval(&d, &st, &in, &out);
+        CHECK(fabsf(hip - d.screen_scale) < 1e-6f && fabsf(out.screen_scale - 1.0f) < 1e-6f, "screen: scale %g at the hip, %g aimed", hip, out.screen_scale);
+        printf("  screen: x%.2f about (%.2f, %.2f): clip / view agree (%.2g NDC), depth kept, bottom edge kept; hip %.2f, aimed %.2f\n", s, an.x, an.y,
+               worst, hip, out.screen_scale);
     }
     printf("%d checks, %d failed\n", g_checks, g_fails);
     return g_fails ? 1 : 0;
