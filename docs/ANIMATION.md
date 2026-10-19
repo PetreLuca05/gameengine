@@ -70,14 +70,15 @@ names them; the anim sets bind them to slots:
 
 | File | Clip | Slots (player set) |
 |---|---|---|
-| `Idle` | `idle` | `idle`, the strafes (missing clips, below) |
+| `Idle` | `idle` | `idle` |
 | `Pistol Idle`, `Rifle Aiming Idle` | `pistol_idle`, `rifle_idle` | `idle_pistol`; `idle_rifle` / `_smg` / `_shotgun` / `_lmg` |
 | `Jog Forward`, `Jog Backward` | `jog_f`, `jog_b` (`root_speed` 2.5, 2.15) | `walk_f` / `run_f`, `walk_b` / `run_b` |
 | `Jog Forward Diagonal Left / Right` | `jog_fl`, `jog_fr` (2.8) | `walk_fl` / `run_fl`, `walk_fr` / `run_fr` |
 | `Jog Backward Diagonal Left / Right` | `jog_bl`, `jog_br` (their travel: 2.51) | `walk_bl` / `run_bl`, `walk_br` / `run_br` |
+| `Jog Strafe Left`, `Jog Strafe Right` | `jog_l`, `jog_r` (2.76, 2.12; the toes travel at +90.2° / -89.8°) | `walk_l` / `run_l`, `walk_r` / `run_r` |
 | `Sprint`, `Sprint Forward` | `sprint` (5.93), `sprint_forward` (6.4) | `sprint` (players), `sprint` (zombies) |
 | `Jump` | `jump` (`air_in_place`) | `jump_start` 0 .. 0.4 (take-off to just before touchdown), `jump_loop` 0.38 .. 0.4 (held), `jump_land` 0.42 .. 0.75, `jump_land_hard` 0.42 .. 1 |
-| `Jumping` (a running jump) | `jump_run` (`air_in_place`) | `jump_run` 0.26 .. 0.74 (take-off to touchdown), `jump_land_run` 0.75 .. 1 |
+| `Running Jump` | `jump_run` (`air_in_place`, 0.9 s) | `jump_run` 0.05 .. 0.68 (take-off to the first touchdown), `jump_land_run` 0.68 .. 1 |
 | `Jumping To Hanging` | `jump_to_hang` | `hang_grab` |
 | `Hanging Idle` | `hang_idle` | `hang_idle` |
 | `Braced Hang To Crouch` | `hang_climb` | `mantle_high` (the pull-up from a hang) |
@@ -86,8 +87,9 @@ names them; the anim sets bind them to slots:
 
 The jump sub-ranges come from the clips themselves (`anim_probe jump LeftToeBase`): the standing jump
 starts at its take-off and lands after 0.63 s, the game's flat-ground jump (`pl_jump_speed` 6,
-`pl_gravity` 18) after 0.67 s, so it plays at its own rate; the running jump's run-up (0 .. 0.26)
-is skipped because the jump press is the take-off. `jump_run` plays above 3 m/s.
+`pl_gravity` 18) after 0.67 s, so it plays at its own rate; the running jump's last step before the
+take-off (0 .. 0.05) is skipped because the jump press is the take-off (`Jumping.fbx`, the older
+running jump, is no longer named in `clips.json`: it loads under its file name and nothing plays it). `jump_run` plays above 3 m/s.
 
 **Locomotion.** `idle_{weapon}` at 0, the 8-way jog at the slow-walk (1.6) and run (4.2) bands, the
 sprint at 6.8; `speed_match` plays the jog at the move speed (0.7x slow-walking, 1.7x running). The
@@ -139,15 +141,13 @@ armature would be 90° or 180° off; `clips.json` `yaw` turns such a clip).
 
 ### Missing clips
 
-A slot without a clip plays **idle**: unbound base-layer states fall back to it, the strafe slots are
-bound to it (blending the two diagonals does not carry the feet sideways: `test_anim` measured 0.6 m/s
-at 55° for a 3 m/s strafe), upper-body states stay procedural. Bind a new clip by dropping its FBX in
+A slot without a clip plays **idle**: unbound base-layer states fall back to it, upper-body states
+stay procedural. Bind a new clip by dropping its FBX in
 `assets/human/`, naming it in `clips.json` (with `root_speed` from `bake_anim --survey` for an in-place
 loop) and setting the slot in `anim_sets/player.json` / `zombie.json`.
 
 | Needed for | Slots | Mixamo clip (search) | Now |
 |---|---|---|---|
-| Strafing (A / D) | `walk_l` / `walk_r`, `run_l` / `run_r` | Jog Strafe Left, Jog Strafe Right | idle, sliding |
 | Crouching (idle and walking, 8-way) | `crouch_idle`, `crouch_f` / `_b` / `_l` / `_r` / `_fl` / `_fr` / `_bl` / `_br` | Crouch Idle, Crouched Walking (forward / backward / left / right / diagonals) | idle (the procedural crouch drop) |
 | Zombie attacks | `attack_1` .. `attack_3` (full body), `attack_upper` (upper body) | Zombie Attack (two variants: swipe, two-handed smash), Zombie Punching (two variants: lunge, upper-body punch) | idle (the hits still land at `k_attack_hit`, characters.c: retune it to the new clips) |
 | Mantle / pull-up without a hang, vault | `mantle_low`, `vault` | Climbing (Freehang Climb), Jumping Over Obstacle / Vault | idle (the hands on the ledge by IK) |
